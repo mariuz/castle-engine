@@ -244,9 +244,29 @@ type
     vafUInt4
   );
 
-  { -------------------------------------------------------------------------- }
-  { Descriptors & Creation Records                                             }
-  { -------------------------------------------------------------------------- }
+  TRHICommandListLevel = (
+    cllPrimary,
+    cllSecondary
+  );
+
+  { Indirect draw command matching standard GPU layout (VkDrawIndirectCommand, OpenGL DrawArraysIndirect). }
+  TRHIDrawIndirectCommand = record
+    VertexCount: Cardinal;
+    InstanceCount: Cardinal;
+    FirstVertex: Cardinal;
+    FirstInstance: Cardinal;
+  end;
+  PRHIDrawIndirectCommand = ^TRHIDrawIndirectCommand;
+
+  { Indirect indexed draw command matching standard GPU layout (VkDrawIndexedIndirectCommand, OpenGL DrawElementsIndirect). }
+  TRHIDrawIndexedIndirectCommand = record
+    IndexCount: Cardinal;
+    InstanceCount: Cardinal;
+    FirstIndex: Cardinal;
+    VertexOffset: Integer;
+    FirstInstance: Cardinal;
+  end;
+  PRHIDrawIndexedIndirectCommand = ^TRHIDrawIndexedIndirectCommand;
 
   TRHIBufferDesc = record
     Size: PtrUInt;
@@ -530,7 +550,12 @@ type
   { Records rendering, compute, and transfer commands for execution on the GPU.
     In Vulkan, wraps VkCommandBuffer. In OpenGL, executes immediately or via a lightweight queue. }
   TRHICommandList = class abstract
+  protected
+    FLevel: TRHICommandListLevel;
   public
+    constructor Create(const ALevel: TRHICommandListLevel = cllPrimary);
+    property Level: TRHICommandListLevel read FLevel;
+
     procedure BeginRecording; virtual; abstract;
     procedure EndRecording; virtual; abstract;
 
@@ -568,8 +593,13 @@ type
     procedure Draw(const VertexCount, InstanceCount, FirstVertex, FirstInstance: Cardinal); virtual; abstract;
     procedure DrawIndexed(const IndexCount, InstanceCount, FirstIndex: Cardinal;
       const VertexOffset: Integer; const FirstInstance: Cardinal); virtual; abstract;
+    procedure DrawIndirect(const IndirectBuffer: TRHIBuffer;
+      const Offset: PtrUInt; const DrawCount, Stride: Cardinal); virtual; abstract;
     procedure DrawIndexedIndirect(const IndirectBuffer: TRHIBuffer;
       const Offset: PtrUInt; const DrawCount, Stride: Cardinal); virtual; abstract;
+
+    { Secondary Command List Execution (Multi-threaded recording) }
+    procedure ExecuteCommands(const SecondaryCommandLists: array of TRHICommandList); virtual; abstract;
 
     { Debug Markers (RenderDoc / NSight integration) }
     procedure PushDebugGroup(const LabelName: String; const Color: TCastleColor); virtual; abstract;
@@ -595,6 +625,9 @@ type
     procedure EndFrameAndPresent; virtual; abstract;
     procedure ResizeSwapchain(const NewWidth, NewHeight: Cardinal); virtual; abstract;
     procedure WaitIdle; virtual; abstract;
+
+    { Secondary Command List Allocation (for multi-threaded command recording) }
+    function CreateSecondaryCommandList: TRHICommandList; virtual; abstract;
 
     { Returns the backbuffer color and depth targets for the current frame in flight }
     function GetSwapchainColorTexture: TRHITexture; virtual; abstract;
@@ -880,6 +913,14 @@ constructor TRHIPipeline.Create(const ADevice: TRHIDevice; const ADesc: TRHIGrap
 begin
   inherited Create(ADevice, ADesc.DebugName);
   FDesc := ADesc;
+end;
+
+{ TRHICommandList }
+
+constructor TRHICommandList.Create(const ALevel: TRHICommandListLevel);
+begin
+  inherited Create;
+  FLevel := ALevel;
 end;
 
 { TRHIDevice }

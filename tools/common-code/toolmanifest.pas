@@ -23,7 +23,7 @@ interface
 
 uses DOM, Classes, Generics.Collections,
   CastleStringUtils, CastleImages, CastleUtils, CastleFindFiles, CastleColors,
-  CastleInternalTools, CastleUnicode,
+  CastleInternalTools, CastleUnicode, CastleApplicationProperties,
   ToolServices, ToolAssocDocTypes;
 
 type
@@ -148,6 +148,7 @@ type
       FProjectDependencies: TProjectDependencies;
       FWebCanvasWidth, FWebCanvasHeight: Integer;
       FWebHtmlContents: String;
+      FRenderBackend: TRenderBackend;
 
     function DefaultQualifiedName(const AName: String): String;
     procedure CheckMatches(const Name, Value: String; const AllowedChars: TSetOfChars);
@@ -203,6 +204,7 @@ type
     property EditorUnits: String read FEditorUnits;
     property QualifiedName: String read FQualifiedName;
     property ProposedUnitPrefix: String read FProposedUnitPrefix;
+    property RenderBackend: TRenderBackend read FRenderBackend;
     { Dependencies of this project.
       Read-only from the outside, do not call any methods that modify
       the contents of it. }
@@ -361,6 +363,9 @@ function StringToCompiler(const S: String): TCompiler;
 function ScreenOrientationToString(const O: TScreenOrientation): String;
 function StringToScreenOrientation(const S: String): TScreenOrientation;
 
+function RenderBackendToString(const B: TRenderBackend): String;
+function StringToRenderBackend(const S: String): TRenderBackend;
+
 const
   DefaultCompiler = coAutodetect;
 
@@ -485,6 +490,7 @@ begin
   FMacAppBundle := DefaultMacAppBundle;
   FWebCanvasWidth := DefaultWebCanvasWidth;
   FWebCanvasHeight := DefaultWebCanvasHeight;
+  FRenderBackend := backendAuto;
 
   FPath := InclPathDelim(APath);
   FPathUrl := FilenameToUriSafe(FPath);
@@ -602,6 +608,8 @@ begin
     FBuildUsingLazbuild := Doc.DocumentElement.AttributeBooleanDef('build_using_lazbuild', false);
     FMacAppBundle := Doc.DocumentElement.AttributeBooleanDef('mac_app_bundle',
       DefaultMacAppBundle);
+    FRenderBackend := StringToRenderBackend(
+      Doc.DocumentElement.AttributeStringDef('render_backend', 'auto'));
 
     FVersion := ReadVersion(Doc.DocumentElement.ChildElement('version', false));
     // create default FVersion value, if necessary
@@ -1229,6 +1237,27 @@ begin
     if AnsiSameText(ScreenOrientationNames[Result], S) then
       Exit;
   raise Exception.CreateFmt('Invalid orientation name "%s"', [S]);
+end;
+
+const
+  RenderBackendNames: array [TRenderBackend] of String = (
+    'auto',
+    'opengl',
+    'opengles',
+    'vulkan'
+  );
+
+function RenderBackendToString(const B: TRenderBackend): String;
+begin
+  Result := RenderBackendNames[B];
+end;
+
+function StringToRenderBackend(const S: String): TRenderBackend;
+begin
+  for Result in TRenderBackend do
+    if AnsiSameText(RenderBackendNames[Result], S) then
+      Exit;
+  raise Exception.CreateFmt('Invalid render backend name "%s"', [S]);
 end;
 
 end.

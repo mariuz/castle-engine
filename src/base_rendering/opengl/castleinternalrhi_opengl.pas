@@ -168,7 +168,7 @@ type
       const FirstBinding: Cardinal; const Buffers: array of TRHIBuffer;
       const Offsets: array of PtrUInt);
   public
-    constructor Create(const ADevice: TOpenGLRHIDevice);
+    constructor Create(const ADevice: TOpenGLRHIDevice; const ALevel: TRHICommandListLevel = cllPrimary);
     destructor Destroy; override;
 
     procedure BeginRecording; override;
@@ -202,8 +202,12 @@ type
     procedure Draw(const VertexCount, InstanceCount, FirstVertex, FirstInstance: Cardinal); override;
     procedure DrawIndexed(const IndexCount, InstanceCount, FirstIndex: Cardinal;
       const VertexOffset: Integer; const FirstInstance: Cardinal); override;
+    procedure DrawIndirect(const IndirectBuffer: TRHIBuffer;
+      const Offset: PtrUInt; const DrawCount, Stride: Cardinal); override;
     procedure DrawIndexedIndirect(const IndirectBuffer: TRHIBuffer;
       const Offset: PtrUInt; const DrawCount, Stride: Cardinal); override;
+
+    procedure ExecuteCommands(const SecondaryCommandLists: array of TRHICommandList); override;
 
     procedure PushDebugGroup(const LabelName: String; const Color: TCastleColor); override;
     procedure PopDebugGroup; override;
@@ -231,6 +235,7 @@ type
     procedure EndFrameAndPresent; override;
     procedure ResizeSwapchain(const NewWidth, NewHeight: Cardinal); override;
     procedure WaitIdle; override;
+    function CreateSecondaryCommandList: TRHICommandList; override;
 
     function GetSwapchainColorTexture: TRHITexture; override;
     function GetSwapchainDepthTexture: TRHITexture; override;
@@ -732,9 +737,10 @@ end;
 { TOpenGLRHICommandList                                                        }
 { ---------------------------------------------------------------------------- }
 
-constructor TOpenGLRHICommandList.Create(const ADevice: TOpenGLRHIDevice);
+constructor TOpenGLRHICommandList.Create(const ADevice: TOpenGLRHIDevice;
+  const ALevel: TRHICommandListLevel);
 begin
-  inherited Create;
+  inherited Create(ALevel);
   FDevice := ADevice;
   glGenFramebuffers(1, @FScratchFBO);
 end;
@@ -1103,10 +1109,21 @@ begin
     glDrawElementsInstanced(FCurrentPipeline.PrimitiveMode, IndexCount, FCurrentIndexType, IndexPtr, InstanceCount);
 end;
 
+procedure TOpenGLRHICommandList.DrawIndirect(const IndirectBuffer: TRHIBuffer;
+  const Offset: PtrUInt; const DrawCount, Stride: Cardinal);
+begin
+  { Bind GL_DRAW_INDIRECT_BUFFER and call glMultiDrawArraysIndirect when supported }
+end;
+
 procedure TOpenGLRHICommandList.DrawIndexedIndirect(const IndirectBuffer: TRHIBuffer;
   const Offset: PtrUInt; const DrawCount, Stride: Cardinal);
 begin
   { Bind GL_DRAW_INDIRECT_BUFFER and call glMultiDrawElementsIndirect when supported }
+end;
+
+procedure TOpenGLRHICommandList.ExecuteCommands(const SecondaryCommandLists: array of TRHICommandList);
+begin
+  { In OpenGL, commands are executed synchronously by the rendering thread }
 end;
 
 procedure TOpenGLRHICommandList.PushDebugGroup(const LabelName: String; const Color: TCastleColor);
@@ -1184,6 +1201,11 @@ end;
 procedure TOpenGLRHIDevice.WaitIdle;
 begin
   glFinish;
+end;
+
+function TOpenGLRHIDevice.CreateSecondaryCommandList: TRHICommandList;
+begin
+  Result := TOpenGLRHICommandList.Create(Self, cllSecondary);
 end;
 
 function TOpenGLRHIDevice.GetSwapchainColorTexture: TRHITexture;

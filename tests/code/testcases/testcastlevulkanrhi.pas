@@ -25,7 +25,8 @@ uses
   CastleTextureFont_Default3d_Sans,
   CastleInternalRHI, CastleInternalVulkan, CastleInternalVulkanMemory,
   CastleInternalShaderRHI, CastleInternalBatch2DRHI, CastleInternalRenderer,
-  CastleRendererInternalLights, X3DNodes;
+  CastleRendererInternalLights, X3DNodes,
+  CastleTransform, CastleRenderOptions, ToolManifest, CastleInternalRenderDoc;
 
 type
   TTestCastleVulkanRHI = class(TCastleTestCase)
@@ -51,6 +52,11 @@ type
     procedure TestCubeMapTextureDesc;
     procedure TestScreenEffectPreambleAndSSAO;
     procedure TestCustomEffectAutomaticUniformInjection;
+    procedure TestSecondaryCommandBuffersAndExecution;
+    procedure TestManifestRenderBackendParsing;
+    procedure TestRenderStatisticsDiagnostics;
+    procedure TestDrawIndirectCommandStructures;
+    procedure TestRenderDocIntegration;
   end;
 
 implementation
@@ -312,10 +318,11 @@ begin
 
     { Test alpha channel to blend mode translation }
     case DrawImg.Alpha of
-      acNone: BlendMode := bmNone;
-      else BlendMode := bmAlphaBlend;
+      acNone: BlendMode := CastleInternalBatch2DRHI.bmNone;
+      else BlendMode := CastleInternalBatch2DRHI.bmAlphaBlend;
     end;
-    AssertTrue('Opaque image translates to expected blend mode', BlendMode in [bmNone, bmAlphaBlend]);
+    AssertTrue('Opaque image translates to expected blend mode',
+      BlendMode in [CastleInternalBatch2DRHI.bmNone, CastleInternalBatch2DRHI.bmAlphaBlend]);
 
     DrawImg.SmoothScaling := false;
     AssertFalse('SmoothScaling toggle', DrawImg.SmoothScaling);
@@ -386,6 +393,7 @@ type
     LastIndexCount: Cardinal;
     LastIndexType: TRHIIndexType;
     LastVertexBuffersBound: Boolean;
+    ExecutedCommandsCount: Cardinal;
 
     procedure BeginRecording; override;
     procedure EndRecording; override;
@@ -403,7 +411,9 @@ type
     procedure BindIndexBuffer(const Buffer: TRHIBuffer; const Offset: PtrUInt; const IndexType: TRHIIndexType); override;
     procedure Draw(const VertexCount, InstanceCount, FirstVertex, FirstInstance: Cardinal); override;
     procedure DrawIndexed(const IndexCount, InstanceCount, FirstIndex: Cardinal; const VertexOffset: Integer; const FirstInstance: Cardinal); override;
+    procedure DrawIndirect(const IndirectBuffer: TRHIBuffer; const Offset: PtrUInt; const DrawCount, Stride: Cardinal); override;
     procedure DrawIndexedIndirect(const IndirectBuffer: TRHIBuffer; const Offset: PtrUInt; const DrawCount, Stride: Cardinal); override;
+    procedure ExecuteCommands(const SecondaryCommandLists: array of TRHICommandList); override;
     procedure PushDebugGroup(const LabelName: String; const Color: TCastleColor); override;
     procedure PopDebugGroup; override;
   end;
@@ -419,7 +429,12 @@ procedure TMockRHICommandList.SetScissor(const ScissorRect: TRectangle); begin e
 procedure TMockRHICommandList.SetDepthBias(const ConstantFactor, SlopeFactor: Single); begin end;
 procedure TMockRHICommandList.BindPipeline(const Pipeline: TRHIPipeline); begin end;
 procedure TMockRHICommandList.BindDescriptorSet(const SetIndex: Cardinal; const DescriptorSet: TRHIDescriptorSet; const DynamicOffsets: array of Cardinal); begin end;
+procedure TMockRHICommandList.DrawIndirect(const IndirectBuffer: TRHIBuffer; const Offset: PtrUInt; const DrawCount, Stride: Cardinal); begin end;
 procedure TMockRHICommandList.DrawIndexedIndirect(const IndirectBuffer: TRHIBuffer; const Offset: PtrUInt; const DrawCount, Stride: Cardinal); begin end;
+procedure TMockRHICommandList.ExecuteCommands(const SecondaryCommandLists: array of TRHICommandList);
+begin
+  Inc(ExecutedCommandsCount, Length(SecondaryCommandLists));
+end;
 procedure TMockRHICommandList.PushDebugGroup(const LabelName: String; const Color: TCastleColor); begin end;
 procedure TMockRHICommandList.PopDebugGroup; begin end;
 
@@ -817,6 +832,161 @@ begin
     AssertTrue('Texture lookup preserved', Pos('vec4 n = texture(u_noiseTexture, vec2(f, f))', UpgradedGLSL) > 0);
   finally
     FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSecondaryCommandBuffersAndExecution;
+var
+  PrimaryCmd, SecCmd1, SecCmd2: TMockRHICommandList;
+begin
+  PrimaryCmd := TMockRHICommandList.Create(cllPrimary);
+  SecCmd1 := TMockRHICommandList.Create(cllSecondary);
+  SecCmd2 := TMockRHICommandList.Create(cllSecondary);
+  try
+    AssertEquals('PrimaryCmd level is primary', Ord(cllPrimary), Ord(PrimaryCmd.Level));
+    AssertEquals('SecCmd1 level is secondary', Ord(cllSecondary), Ord(SecCmd1.Level));
+    AssertEquals('SecCmd2 level is secondary', Ord(cllSecondary), Ord(SecCmd2.Level));
+
+    SecCmd1.BeginRecording;
+    SecCmd1.Draw(100, 1, 0, 0);
+    SecCmd1.EndRecording;
+    AssertEquals('SecCmd1 recorded 1 draw call', 1, SecCmd1.DrawCallsCount);
+
+    SecCmd2.BeginRecording;
+    SecCmd2.DrawIndexed(250, 1, 0, 0, 0);
+    SecCmd2.EndRecording;
+    AssertEquals('SecCmd2 recorded 1 indexed draw call', 1, SecCmd2.DrawIndexedCallsCount);
+
+    PrimaryCmd.BeginRecording;
+    PrimaryCmd.ExecuteCommands([SecCmd1, SecCmd2]);
+    PrimaryCmd.EndRecording;
+    AssertEquals('PrimaryCmd executed 2 secondary command lists', 2, PrimaryCmd.ExecutedCommandsCount);
+  finally
+    FreeAndNil(SecCmd2);
+    FreeAndNil(SecCmd1);
+    FreeAndNil(PrimaryCmd);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestManifestRenderBackendParsing;
+var
+  ParsedException: Boolean;
+begin
+  AssertEquals('Parse auto', Ord(backendAuto), Ord(StringToRenderBackend('auto')));
+  AssertEquals('Parse opengl', Ord(backendOpenGL), Ord(StringToRenderBackend('opengl')));
+  AssertEquals('Parse opengles', Ord(backendOpenGLES), Ord(StringToRenderBackend('opengles')));
+  AssertEquals('Parse vulkan', Ord(backendVulkan), Ord(StringToRenderBackend('vulkan')));
+
+  AssertEquals('String auto', 'auto', RenderBackendToString(backendAuto));
+  AssertEquals('String opengl', 'opengl', RenderBackendToString(backendOpenGL));
+  AssertEquals('String opengles', 'opengles', RenderBackendToString(backendOpenGLES));
+  AssertEquals('String vulkan', 'vulkan', RenderBackendToString(backendVulkan));
+
+  ParsedException := False;
+  try
+    StringToRenderBackend('directx');
+  except
+    on E: Exception do
+      ParsedException := True;
+  end;
+  AssertTrue('Invalid backend name raises exception', ParsedException);
+end;
+
+procedure TTestCastleVulkanRHI.TestRenderStatisticsDiagnostics;
+var
+  Stats: TRenderStatistics;
+  S: String;
+  Options: TCastleRenderOptions;
+begin
+  FillChar(Stats, SizeOf(Stats), 0);
+  Stats.ShapesRendered := 450;
+  Stats.ShapesVisible := 1200;
+  Stats.DrawCalls := 85;
+  Stats.ActiveBackend := 'Vulkan 1.3';
+  Stats.PipelineCacheHits := 120;
+  Stats.PipelineCacheMisses := 4;
+  Stats.DescriptorSetAllocations := 350;
+  Stats.DeviceMemoryUsedMB := 128;
+  Stats.DeviceMemoryBudgetMB := 2048;
+
+  S := Stats.ToString;
+  AssertTrue('Stats contains shapes count', Pos('Shapes 450', S) > 0);
+  AssertTrue('Stats contains draw calls', Pos('Draw calls: 85', S) > 0);
+  AssertTrue('Stats contains active backend', Pos('Backend: Vulkan 1.3', S) > 0);
+  AssertTrue('Stats contains PSO cache hits/misses', Pos('PSO hits/misses: 120/4', S) > 0);
+  AssertTrue('Stats contains descriptor allocations', Pos('Descriptors: 350', S) > 0);
+  AssertTrue('Stats contains VRAM budget', Pos('VRAM: 128 / 2048 MB', S) > 0);
+
+  Options := TCastleRenderOptions.Create(nil);
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    AssertEquals('Options backend name is Vulkan', 'Vulkan', Options.ActiveRenderBackendName);
+    ApplicationProperties.RenderBackend := backendOpenGL;
+    AssertEquals('Options backend name is OpenGL', 'OpenGL', Options.ActiveRenderBackendName);
+    ApplicationProperties.RenderBackend := backendAuto;
+    AssertEquals('Options backend name is Auto', 'Auto', Options.ActiveRenderBackendName);
+  finally
+    FreeAndNil(Options);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestDrawIndirectCommandStructures;
+var
+  Cmd: TRHIDrawIndirectCommand;
+  IndexedCmd: TRHIDrawIndexedIndirectCommand;
+begin
+  { Verify standard sizes match hardware indirect dispatch specs }
+  AssertEquals('TRHIDrawIndirectCommand size must be 16 bytes', 16, SizeOf(TRHIDrawIndirectCommand));
+  AssertEquals('TRHIDrawIndexedIndirectCommand size must be 20 bytes', 20, SizeOf(TRHIDrawIndexedIndirectCommand));
+  AssertEquals('VkDrawIndirectCommand size must be 16 bytes', 16, SizeOf(VkDrawIndirectCommand));
+  AssertEquals('VkDrawIndexedIndirectCommand size must be 20 bytes', 20, SizeOf(VkDrawIndexedIndirectCommand));
+
+  { Verify field values and offsets }
+  FillChar(Cmd, SizeOf(Cmd), 0);
+  Cmd.VertexCount := 36;
+  Cmd.InstanceCount := 10;
+  Cmd.FirstVertex := 0;
+  Cmd.FirstInstance := 5;
+
+  AssertEquals('VertexCount', 36, Cmd.VertexCount);
+  AssertEquals('InstanceCount', 10, Cmd.InstanceCount);
+  AssertEquals('FirstVertex', 0, Cmd.FirstVertex);
+  AssertEquals('FirstInstance', 5, Cmd.FirstInstance);
+
+  FillChar(IndexedCmd, SizeOf(IndexedCmd), 0);
+  IndexedCmd.IndexCount := 72;
+  IndexedCmd.InstanceCount := 4;
+  IndexedCmd.FirstIndex := 120;
+  IndexedCmd.VertexOffset := -3;
+  IndexedCmd.FirstInstance := 1;
+
+  AssertEquals('IndexCount', 72, IndexedCmd.IndexCount);
+  AssertEquals('InstanceCount', 4, IndexedCmd.InstanceCount);
+  AssertEquals('FirstIndex', 120, IndexedCmd.FirstIndex);
+  AssertEquals('VertexOffset', -3, IndexedCmd.VertexOffset);
+  AssertEquals('FirstInstance', 1, IndexedCmd.FirstInstance);
+end;
+
+procedure TTestCastleVulkanRHI.TestRenderDocIntegration;
+var
+  Options: TCastleRenderOptions;
+  IsAvail: Boolean;
+begin
+  IsAvail := RenderDocAvailable;
+  { Calling TriggerCapture should never fail even if RenderDoc is not connected }
+  RenderDocTriggerCapture;
+  RenderDocStartFrameCapture(nil, nil);
+  AssertFalse('Should not be frame capturing when RenderDoc not loaded', RenderDocIsFrameCapturing);
+  AssertFalse('EndFrameCapture should return False when RenderDoc not loaded', RenderDocEndFrameCapture(nil, nil));
+  AssertFalse('LaunchReplayUI should return False when RenderDoc not loaded', RenderDocLaunchReplayUI(False));
+
+  Options := TCastleRenderOptions.Create(nil);
+  try
+    AssertEquals('Options RenderDocAvailable matches', IsAvail, Options.RenderDocAvailable);
+    Options.TriggerRenderDocCapture;
+    AssertFalse('Options LaunchRenderDocReplayUI returns False without RenderDoc', Options.LaunchRenderDocReplayUI);
+  finally
+    FreeAndNil(Options);
   end;
 end;
 

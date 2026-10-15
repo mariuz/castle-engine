@@ -174,6 +174,18 @@ type
       @exclude }
     function EqualForShapeCache(SecondValue: TCastleRenderOptions): boolean; virtual;
 
+    { Active rendering backend name (e.g. 'Vulkan', 'OpenGL', 'OpenGLES'). }
+    function ActiveRenderBackendName: String;
+
+    { Returns True if RenderDoc dynamic library is loaded and connected. }
+    function RenderDocAvailable: Boolean;
+
+    { Triggers a frame capture using the in-application RenderDoc API. }
+    procedure TriggerRenderDocCapture;
+
+    { Launches the RenderDoc Replay UI to inspect captures. }
+    function LaunchRenderDocReplayUI: Boolean;
+
     { Rendering mode, can be used to disable many rendering features at once. }
     property Mode: TRenderingMode read FMode write SetMode default rmFull;
 
@@ -1142,6 +1154,31 @@ end;
 function TCastleRenderOptions.IsStoredSolidWireframeScale: Boolean;
 begin
   Result := FSolidWireframeScale <> DefaultSolidWireframeScale;
+end;
+
+function TCastleRenderOptions.ActiveRenderBackendName: String;
+begin
+  case ApplicationProperties.RenderBackend of
+    backendAuto: Result := 'Auto';
+    backendOpenGL: Result := 'OpenGL';
+    backendOpenGLES: Result := 'OpenGLES';
+    backendVulkan: Result := 'Vulkan';
+  end;
+end;
+
+function TCastleRenderOptions.RenderDocAvailable: Boolean;
+begin
+  Result := CastleInternalRenderDoc.RenderDocAvailable;
+end;
+
+procedure TCastleRenderOptions.TriggerRenderDocCapture;
+begin
+  CastleInternalRenderDoc.RenderDocTriggerCapture;
+end;
+
+function TCastleRenderOptions.LaunchRenderDocReplayUI: Boolean;
+begin
+  Result := CastleInternalRenderDoc.RenderDocLaunchReplayUI;
 end;
 
 {$define read_implementation_methods}

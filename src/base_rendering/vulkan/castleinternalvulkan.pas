@@ -333,6 +333,8 @@ const
   VK_COMMAND_BUFFER_LEVEL_PRIMARY = 0;
   VK_COMMAND_BUFFER_LEVEL_SECONDARY = 1;
   VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT = $00000001;
+  VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT = $00000002;
+  VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT = $00000004;
   VK_COMMAND_POOL_CREATE_TRANSIENT_BIT = $00000001;
   VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT = $00000002;
 
@@ -1461,6 +1463,14 @@ type
   end;
   PVkImageBlit = ^VkImageBlit;
 
+  VkDrawIndirectCommand = record
+    vertexCount: Cardinal;
+    instanceCount: Cardinal;
+    firstVertex: Cardinal;
+    firstInstance: Cardinal;
+  end;
+  PVkDrawIndirectCommand = ^VkDrawIndirectCommand;
+
   VkDrawIndexedIndirectCommand = record
     indexCount: Cardinal;
     instanceCount: Cardinal;
@@ -1597,12 +1607,14 @@ type
   PFN_vkCmdBeginDebugUtilsLabelEXT = procedure(commandBuffer: VkCommandBuffer; const pLabelInfo: PVkDebugUtilsLabelEXT); VKAPI_CALL;
   PFN_vkCmdEndDebugUtilsLabelEXT = procedure(commandBuffer: VkCommandBuffer); VKAPI_CALL;
   PFN_vkCmdBlitImage = procedure(commandBuffer: VkCommandBuffer; srcImage: VkImage; srcImageLayout: VkImageLayout; dstImage: VkImage; dstImageLayout: VkImageLayout; regionCount: Cardinal; const pRegions: PVkImageBlit; filter: VkFilter); VKAPI_CALL;
+  PFN_vkCmdDrawIndirect = procedure(commandBuffer: VkCommandBuffer; buffer: VkBuffer; offset: VkDeviceSize; drawCount: Cardinal; stride: Cardinal); VKAPI_CALL;
   PFN_vkCmdDrawIndexedIndirect = procedure(commandBuffer: VkCommandBuffer; buffer: VkBuffer; offset: VkDeviceSize; drawCount: Cardinal; stride: Cardinal); VKAPI_CALL;
   PFN_vkCmdSetDepthBias = procedure(commandBuffer: VkCommandBuffer; depthBiasConstantFactor: Single; depthBiasClamp: Single; depthBiasSlopeFactor: Single); VKAPI_CALL;
   PFN_vkCreatePipelineCache = function(device: VkDevice; const pCreateInfo: PVkPipelineCacheCreateInfo; const pAllocator: PVkAllocationCallbacks; pPipelineCache: PVkPipelineCache): VkResult; VKAPI_CALL;
   PFN_vkDestroyPipelineCache = procedure(device: VkDevice; pipelineCache: VkPipelineCache; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
   PFN_vkGetPipelineCacheData = function(device: VkDevice; pipelineCache: VkPipelineCache; pDataSize: PPtrUInt; pData: Pointer): VkResult; VKAPI_CALL;
   PFN_vkResetCommandBuffer = function(commandBuffer: VkCommandBuffer; flags: VkFlags): VkResult; VKAPI_CALL;
+  PFN_vkCmdExecuteCommands = procedure(commandBuffer: VkCommandBuffer; commandBufferCount: Cardinal; const pCommandBuffers: PVkCommandBuffer); VKAPI_CALL;
 
 var
   { Global Function Pointers }
@@ -1703,12 +1715,14 @@ var
   vkCmdBeginDebugUtilsLabelEXT: PFN_vkCmdBeginDebugUtilsLabelEXT;
   vkCmdEndDebugUtilsLabelEXT: PFN_vkCmdEndDebugUtilsLabelEXT;
   vkCmdBlitImage: PFN_vkCmdBlitImage;
+  vkCmdDrawIndirect: PFN_vkCmdDrawIndirect;
   vkCmdDrawIndexedIndirect: PFN_vkCmdDrawIndexedIndirect;
   vkCmdSetDepthBias: PFN_vkCmdSetDepthBias;
   vkCreatePipelineCache: PFN_vkCreatePipelineCache;
   vkDestroyPipelineCache: PFN_vkDestroyPipelineCache;
   vkGetPipelineCacheData: PFN_vkGetPipelineCacheData;
   vkResetCommandBuffer: PFN_vkResetCommandBuffer;
+  vkCmdExecuteCommands: PFN_vkCmdExecuteCommands;
 
 { Loads the Vulkan shared library dynamically. Returns True if successfully loaded. }
 function LoadVulkan: Boolean;
@@ -1893,12 +1907,14 @@ begin
   Pointer(vkCmdBeginDebugUtilsLabelEXT) := vkGetInstanceProcAddr(nil, 'vkCmdBeginDebugUtilsLabelEXT');
   Pointer(vkCmdEndDebugUtilsLabelEXT) := vkGetInstanceProcAddr(nil, 'vkCmdEndDebugUtilsLabelEXT');
   Pointer(vkCmdBlitImage) := vkGetInstanceProcAddr(nil, 'vkCmdBlitImage');
+  Pointer(vkCmdDrawIndirect) := vkGetInstanceProcAddr(nil, 'vkCmdDrawIndirect');
   Pointer(vkCmdDrawIndexedIndirect) := vkGetInstanceProcAddr(nil, 'vkCmdDrawIndexedIndirect');
   Pointer(vkCmdSetDepthBias) := vkGetInstanceProcAddr(nil, 'vkCmdSetDepthBias');
   Pointer(vkCreatePipelineCache) := vkGetInstanceProcAddr(nil, 'vkCreatePipelineCache');
   Pointer(vkDestroyPipelineCache) := vkGetInstanceProcAddr(nil, 'vkDestroyPipelineCache');
   Pointer(vkGetPipelineCacheData) := vkGetInstanceProcAddr(nil, 'vkGetPipelineCacheData');
   Pointer(vkResetCommandBuffer) := vkGetInstanceProcAddr(nil, 'vkResetCommandBuffer');
+  Pointer(vkCmdExecuteCommands) := vkGetInstanceProcAddr(nil, 'vkCmdExecuteCommands');
 
 end;
 

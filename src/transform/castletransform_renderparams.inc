@@ -52,6 +52,14 @@
       to glDrawElements and glDrawArrays. }
     DrawCalls: Cardinal;
 
+    { Diagnostics for RHI / Vulkan backend }
+    ActiveBackend: String;
+    PipelineCacheHits: Cardinal;
+    PipelineCacheMisses: Cardinal;
+    DescriptorSetAllocations: Cardinal;
+    DeviceMemoryUsedMB: Cardinal;
+    DeviceMemoryBudgetMB: Cardinal;
+
     { Present the statistics information as a string (without any newlines).
       Display it e.g. by assigning to TCastleLabel.Caption. }
     function ToString: String;
@@ -414,6 +422,15 @@ begin
     ScenesVisible,
     DrawCalls
   ]);
+
+  if ActiveBackend <> '' then
+    Result := Result + ', Backend: ' + ActiveBackend;
+  if (PipelineCacheHits > 0) or (PipelineCacheMisses > 0) then
+    Result := Result + Format(', PSO hits/misses: %d/%d', [PipelineCacheHits, PipelineCacheMisses]);
+  if DescriptorSetAllocations > 0 then
+    Result := Result + Format(', Descriptors: %d', [DescriptorSetAllocations]);
+  if DeviceMemoryBudgetMB > 0 then
+    Result := Result + Format(', VRAM: %d / %d MB', [DeviceMemoryUsedMB, DeviceMemoryBudgetMB]);
 end;
 
 { TRenderingCamera --------------------------------------------------------------- }

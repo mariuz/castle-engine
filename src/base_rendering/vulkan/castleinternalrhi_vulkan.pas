@@ -157,7 +157,8 @@ type
     FHandle: VkCommandBuffer;
     FCurrentPipeline: TVulkanRHIPipeline;
   public
-    constructor Create(const ADevice: TVulkanRHIDevice; const AQueueFamilyIndex: Cardinal);
+    constructor Create(const ADevice: TVulkanRHIDevice; const AQueueFamilyIndex: Cardinal;
+      const ALevel: TRHICommandListLevel = cllPrimary);
     destructor Destroy; override;
 
     procedure BeginRecording; override;
@@ -191,8 +192,12 @@ type
     procedure Draw(const VertexCount, InstanceCount, FirstVertex, FirstInstance: Cardinal); override;
     procedure DrawIndexed(const IndexCount, InstanceCount, FirstIndex: Cardinal;
       const VertexOffset: Integer; const FirstInstance: Cardinal); override;
+    procedure DrawIndirect(const IndirectBuffer: TRHIBuffer;
+      const Offset: PtrUInt; const DrawCount, Stride: Cardinal); override;
     procedure DrawIndexedIndirect(const IndirectBuffer: TRHIBuffer;
       const Offset: PtrUInt; const DrawCount, Stride: Cardinal); override;
+
+    procedure ExecuteCommands(const SecondaryCommandLists: array of TRHICommandList); override;
 
     procedure PushDebugGroup(const LabelName: String; const Color: TCastleColor); override;
     procedure PopDebugGroup; override;
@@ -266,6 +271,7 @@ type
     procedure EndFrameAndPresent; override;
     procedure ResizeSwapchain(const NewWidth, NewHeight: Cardinal); override;
     procedure WaitIdle; override;
+    function CreateSecondaryCommandList: TRHICommandList; override;
 
     function GetSwapchainColorTexture: TRHITexture; override;
     function GetSwapchainDepthTexture: TRHITexture; override;
@@ -973,12 +979,12 @@ end;
 { ---------------------------------------------------------------------------- }
 
 constructor TVulkanRHICommandList.Create(const ADevice: TVulkanRHIDevice;
-  const AQueueFamilyIndex: Cardinal);
+  const AQueueFamilyIndex: Cardinal; const ALevel: TRHICommandListLevel);
 var
   PoolInfo: VkCommandPoolCreateInfo;
   AllocInfo: VkCommandBufferAllocateInfo;
 begin
-  inherited Create;
+  inherited Create(ALevel);
   FDevice := ADevice;
 
   FillChar(PoolInfo, SizeOf(PoolInfo), 0);
@@ -990,7 +996,10 @@ begin
   FillChar(AllocInfo, SizeOf(AllocInfo), 0);
   AllocInfo.sType := VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
   AllocInfo.commandPool := FCommandPool;
-  AllocInfo.level := VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  if ALevel = cllSecondary then
+    AllocInfo.level := VK_COMMAND_BUFFER_LEVEL_SECONDARY
+  else
+    AllocInfo.level := VK_COMMAND_BUFFER_LEVEL_PRIMARY;
   AllocInfo.commandBufferCount := 1;
   CheckVk(vkAllocateCommandBuffers(FDevice.Handle, @AllocInfo, @FHandle), 'vkAllocateCommandBuffers');
 end;
@@ -1005,11 +1014,19 @@ end;
 procedure TVulkanRHICommandList.BeginRecording;
 var
   BeginInfo: VkCommandBufferBeginInfo;
+  InheritanceInfo: VkCommandBufferInheritanceInfo;
 begin
   CheckVk(vkResetCommandBuffer(FHandle, 0), 'vkResetCommandBuffer');
   FillChar(BeginInfo, SizeOf(BeginInfo), 0);
   BeginInfo.sType := VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   BeginInfo.flags := VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  if FLevel = cllSecondary then
+  begin
+    BeginInfo.flags := BeginInfo.flags or VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
+    FillChar(InheritanceInfo, SizeOf(InheritanceInfo), 0);
+    InheritanceInfo.sType := VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
+    BeginInfo.pInheritanceInfo := @InheritanceInfo;
+  end;
   CheckVk(vkBeginCommandBuffer(FHandle, @BeginInfo), 'vkBeginCommandBuffer');
   FCurrentPipeline := nil;
 end;
@@ -1222,11 +1239,31 @@ begin
   vkCmdDrawIndexed(FHandle, IndexCount, InstanceCount, FirstIndex, VertexOffset, FirstInstance);
 end;
 
+procedure TVulkanRHICommandList.DrawIndirect(const IndirectBuffer: TRHIBuffer;
+  const Offset: PtrUInt; const DrawCount, Stride: Cardinal);
+begin
+  if Assigned(vkCmdDrawIndirect) and Assigned(IndirectBuffer) then
+    vkCmdDrawIndirect(FHandle, (IndirectBuffer as TVulkanRHIBuffer).Handle,
+      Offset, DrawCount, Stride);
+end;
+
 procedure TVulkanRHICommandList.DrawIndexedIndirect(const IndirectBuffer: TRHIBuffer;
   const Offset: PtrUInt; const DrawCount, Stride: Cardinal);
 begin
   vkCmdDrawIndexedIndirect(FHandle, (IndirectBuffer as TVulkanRHIBuffer).Handle,
     Offset, DrawCount, Stride);
+end;
+
+procedure TVulkanRHICommandList.ExecuteCommands(const SecondaryCommandLists: array of TRHICommandList);
+var
+  CmdBuffers: array of VkCommandBuffer;
+  I: Integer;
+begin
+  if Length(SecondaryCommandLists) = 0 then Exit;
+  SetLength(CmdBuffers, Length(SecondaryCommandLists));
+  for I := 0 to High(SecondaryCommandLists) do
+    CmdBuffers[I] := (SecondaryCommandLists[I] as TVulkanRHICommandList).Handle;
+  vkCmdExecuteCommands(FHandle, Length(CmdBuffers), @CmdBuffers[0]);
 end;
 
 procedure TVulkanRHICommandList.PushDebugGroup(const LabelName: String; const Color: TCastleColor);
@@ -1444,6 +1481,11 @@ procedure TVulkanRHIDevice.WaitIdle;
 begin
   if FDevice <> nil then
     vkDeviceWaitIdle(FDevice);
+end;
+
+function TVulkanRHIDevice.CreateSecondaryCommandList: TRHICommandList;
+begin
+  Result := TVulkanRHICommandList.Create(Self, FGraphicsQueueFamily, cllSecondary);
 end;
 
 function TVulkanRHIDevice.GetSwapchainColorTexture: TRHITexture;
