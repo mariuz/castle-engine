@@ -1063,7 +1063,10 @@ begin
       ColorAttachments[I].loadOp := VK_ATTACHMENT_LOAD_OP_CLEAR
     else
       ColorAttachments[I].loadOp := VK_ATTACHMENT_LOAD_OP_LOAD;
-    ColorAttachments[I].storeOp := VK_ATTACHMENT_STORE_OP_STORE;
+    if Info.ColorAttachments[I].StoreOp = soDontCare then
+      ColorAttachments[I].storeOp := VK_ATTACHMENT_STORE_OP_DONT_CARE
+    else
+      ColorAttachments[I].storeOp := VK_ATTACHMENT_STORE_OP_STORE;
     Move(Info.ColorAttachments[I].ClearColor.Data, ColorAttachments[I].clearValue.color.float32, SizeOf( Single) * 4);
   end;
 
@@ -1088,7 +1091,10 @@ begin
       DepthAttachment.loadOp := VK_ATTACHMENT_LOAD_OP_CLEAR
     else
       DepthAttachment.loadOp := VK_ATTACHMENT_LOAD_OP_LOAD;
-    DepthAttachment.storeOp := VK_ATTACHMENT_STORE_OP_STORE;
+    if Info.DepthAttachment.StoreOp = soDontCare then
+      DepthAttachment.storeOp := VK_ATTACHMENT_STORE_OP_DONT_CARE
+    else
+      DepthAttachment.storeOp := VK_ATTACHMENT_STORE_OP_STORE;
     DepthAttachment.clearValue.depthStencil.depth := Info.DepthAttachment.ClearDepth;
     DepthAttachment.clearValue.depthStencil.stencil := Info.DepthAttachment.ClearStencil;
     RenderInfo.pDepthAttachment := @DepthAttachment;

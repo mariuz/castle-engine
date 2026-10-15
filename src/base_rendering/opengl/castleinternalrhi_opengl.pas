@@ -790,6 +790,20 @@ begin
         DepthTex.Target, DepthTex.Handle, Info.DepthAttachment.MipLevel);
     end else
       glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+
+    if Length(Info.ColorAttachments) = 0 then
+    begin
+      {$ifndef OpenGLES}
+      glDrawBuffer(GL_NONE);
+      glReadBuffer(GL_NONE);
+      {$endif}
+    end else
+    begin
+      {$ifndef OpenGLES}
+      glDrawBuffer(GL_COLOR_ATTACHMENT0);
+      glReadBuffer(GL_COLOR_ATTACHMENT0);
+      {$endif}
+    end;
   end;
 
   { Temporarily disable scissor test so glClear affects the full render area }

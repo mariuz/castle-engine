@@ -362,6 +362,7 @@ type
     class function DefaultDepthTestWrite: TRHIDepthStencilStateDesc; static;
     class function DefaultDepthReadOnly: TRHIDepthStencilStateDesc; static;
     class function DefaultDisabled: TRHIDepthStencilStateDesc; static;
+    class function DefaultShadowMap: TRHIDepthStencilStateDesc; static;
   end;
 
   TRHIGraphicsPipelineDesc = record
@@ -402,6 +403,14 @@ type
     ColorAttachments: array of TRHIRenderingAttachment;
     HasDepthAttachment: Boolean;
     DepthAttachment: TRHIRenderingAttachment;
+    class function CreateColorDepth(const ARenderArea: TRectangle;
+      const AColorTexture: TRHITexture; const AColorLoadOp: TRHIAttachmentLoadOp;
+      const AClearColor: TCastleColor; const ADepthTexture: TRHITexture;
+      const ADepthLoadOp: TRHIAttachmentLoadOp; const AClearDepth: Single = 1.0): TRHIRenderingInfo; static;
+    class function CreateDepthOnly(const ARenderArea: TRectangle;
+      const ADepthTexture: TRHITexture; const ADepthLoadOp: TRHIAttachmentLoadOp;
+      const ADepthStoreOp: TRHIAttachmentStoreOp = soStore;
+      const AClearDepth: Single = 1.0): TRHIRenderingInfo; static;
   end;
 
   { Device Capabilities & Limits }
@@ -750,6 +759,57 @@ begin
   Result.DepthWriteEnable := False;
   Result.DepthCompareOp := coAlways;
   Result.StencilTestEnable := False;
+end;
+
+class function TRHIDepthStencilStateDesc.DefaultShadowMap: TRHIDepthStencilStateDesc;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  Result.DepthTestEnable := True;
+  Result.DepthWriteEnable := True;
+  Result.DepthCompareOp := coLessOrEqual;
+  Result.StencilTestEnable := False;
+end;
+
+{ TRHIRenderingInfo }
+
+class function TRHIRenderingInfo.CreateColorDepth(const ARenderArea: TRectangle;
+  const AColorTexture: TRHITexture; const AColorLoadOp: TRHIAttachmentLoadOp;
+  const AClearColor: TCastleColor; const ADepthTexture: TRHITexture;
+  const ADepthLoadOp: TRHIAttachmentLoadOp; const AClearDepth: Single): TRHIRenderingInfo;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  Result.RenderArea := ARenderArea;
+  if AColorTexture <> nil then
+  begin
+    SetLength(Result.ColorAttachments, 1);
+    Result.ColorAttachments[0].Texture := AColorTexture;
+    Result.ColorAttachments[0].LoadOp := AColorLoadOp;
+    Result.ColorAttachments[0].StoreOp := soStore;
+    Result.ColorAttachments[0].ClearColor := AClearColor;
+  end;
+  if ADepthTexture <> nil then
+  begin
+    Result.HasDepthAttachment := True;
+    Result.DepthAttachment.Texture := ADepthTexture;
+    Result.DepthAttachment.LoadOp := ADepthLoadOp;
+    Result.DepthAttachment.StoreOp := soStore;
+    Result.DepthAttachment.ClearDepth := AClearDepth;
+  end;
+end;
+
+class function TRHIRenderingInfo.CreateDepthOnly(const ARenderArea: TRectangle;
+  const ADepthTexture: TRHITexture; const ADepthLoadOp: TRHIAttachmentLoadOp;
+  const ADepthStoreOp: TRHIAttachmentStoreOp;
+  const AClearDepth: Single): TRHIRenderingInfo;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  Result.RenderArea := ARenderArea;
+  SetLength(Result.ColorAttachments, 0);
+  Result.HasDepthAttachment := True;
+  Result.DepthAttachment.Texture := ADepthTexture;
+  Result.DepthAttachment.LoadOp := ADepthLoadOp;
+  Result.DepthAttachment.StoreOp := ADepthStoreOp;
+  Result.DepthAttachment.ClearDepth := AClearDepth;
 end;
 
 { TRHIResource }

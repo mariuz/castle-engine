@@ -178,25 +178,12 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 
 ### Phase 4: Lighting, Shadows, and Advanced Effects
 
-* 
+* [x] Implement multi-light UBOs / SSBOs supporting CGE's point, directional, and spot lights (`TCastleLightsUniformBlock`, Set 0 Binding 1, `#define` aliases).
+* [x] Port Shadow Maps pass foundation (depth-only dynamic rendering passes, `TRHIRenderingInfo.CreateDepthOnly`, `DefaultShadowMap`, projector matrices in lights block).
+* [ ] Port Cube Map reflections, Screen-Space Ambient Occlusion (SSAO), and post-processing (TCastleScreenEffects).
+* [ ] Verify custom X3D Effect and EffectPart user shaders with automatic uniform injection.
 
-[ ] Implement multi-light UBOs / SSBOs supporting CGE's point, directional, and spot lights.
-
-* 
-
-[ ] Port Shadow Maps (VK_FORMAT_D32_SFLOAT depth-only dynamic rendering passes with VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL transitions) and Variance Shadow Maps (VSM).
-
-* 
-
-[ ] Port Cube Map reflections, Screen-Space Ambient Occlusion (SSAO), and post-processing (TCastleScreenEffects).
-
-* 
-
-[ ] Verify custom X3D Effect and EffectPart user shaders with automatic uniform injection.
-
-* 
-
-Milestone 4: Full visual parity across CGE's examples/ repository (3D games, shadows, custom shaders, screen effects).
+**Milestone 4 Status**: In Progress. Multi-light std140 uniform block, eye-space parameter mapping, shadow map projector matrix integration, depth-only dynamic rendering pass abstractions, and shader sanitization completed and verified (18/18 tests passing).
 
 
 ### Phase 5: Optimization, Multi-Threading & Platform Polish

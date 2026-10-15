@@ -29,6 +29,8 @@ uses
 const
   { Maximum bone matrices supported in Set 2 skinning UBO }
   CASTLE_MAX_BONE_MATRICES = 256;
+  { Maximum lights supported in Set 0 Binding 1 lights UBO }
+  CASTLE_MAX_LIGHTS = 32;
 
 type
   { Standard CGE Vertex Attribute Locations (strictly fixed across all shaders) }
@@ -55,6 +57,33 @@ type
     LightCount: Cardinal;
     Padding0, Padding1, Padding2: Cardinal;
   end;
+
+  { CPU-side mirror of a single light entry in CastleLightsBlock (std140) }
+  PCastleLightData = ^TCastleLightData;
+  TCastleLightData = packed record
+    Position: TVector4;         // xyz = eye-space position/direction, w = light type (0=dir, 1=point, 2=spot)
+    Color: TVector4;            // rgb = color * intensity, w = radius
+    SpotDirection: TVector4;    // xyz = eye-space direction, w = spotCosCutoff
+    SpotParams: TVector4;       // x = spotCutoff (rad), y = beamWidth (rad), z = spotExponent, w = reserved
+    Attenuation: TVector4;      // xyz = constant, linear, quadratic factors, w = reserved
+    AmbientColor: TVector4;     // rgb = ambient color * ambient intensity, w = shadow map index / enabled (1.0)
+    ProjectorMatrix: TMatrix4;  // 64 bytes: eye-to-light-clip-space projector matrix for shadow mapping
+  end; // 6 * 16 + 64 = 160 bytes (160 mod 16 = 0)
+
+  { CPU-side mirror of Set 0, Binding 1 (Multi-Light UBO - std140) }
+  PCastleLightsUniformBlock = ^TCastleLightsUniformBlock;
+  TCastleLightsUniformBlock = packed record
+    Count: Cardinal;                                                // 4 bytes
+    Padding0, Padding1, Padding2: Cardinal;                         // 12 bytes
+    Lights: array [0 .. CASTLE_MAX_LIGHTS - 1] of TCastleLightData; // 32 * 160 = 5120 bytes
+    procedure Clear;
+    function AddDirectionalLight(const Direction, Color, AmbientColor: TVector3): Integer;
+    function AddPointLight(const Position, Color, AmbientColor: TVector3;
+      const Attenuation: TVector3; const Radius: Single): Integer;
+    function AddSpotLight(const Position, Direction, Color, AmbientColor: TVector3;
+      const Attenuation: TVector3; const Radius, SpotCosCutoff, SpotCutoff, BeamWidth, SpotExponent: Single): Integer;
+    procedure SetProjectorMatrix(const Index: Integer; const Matrix: TMatrix4);
+  end; // Total = 5136 bytes (5136 mod 16 = 0)
 
   { CPU-side mirror of Set 1, Binding 0 (Per-Material UBO - std140) }
   PCastleMaterialUniformBlock = ^TCastleMaterialUniformBlock;
@@ -104,6 +133,9 @@ type
       at the end of the vertex shader main() }
     function FinalizeVertexShaderSource(const StitchedSource: String): String;
 
+    { Strips or comments out legacy bare uniform declarations replaced by Set 0..2 UBOs and Push Constants }
+    function SanitizeVulkanShaderSource(const Source: String): String;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -112,6 +144,66 @@ implementation
 
 const
   NL = LineEnding;
+
+{ TCastleLightsUniformBlock }
+
+procedure TCastleLightsUniformBlock.Clear;
+begin
+  FillChar(Self, SizeOf(Self), 0);
+end;
+
+function TCastleLightsUniformBlock.AddDirectionalLight(const Direction, Color,
+  AmbientColor: TVector3): Integer;
+begin
+  if Count >= CASTLE_MAX_LIGHTS then Exit(-1);
+  Result := Count;
+  Lights[Result].Position := Vector4(Direction, 0.0);
+  Lights[Result].Color := Vector4(Color, 0.0);
+  Lights[Result].SpotDirection := Vector4(0, 0, -1, -1.0);
+  Lights[Result].SpotParams := Vector4(0, 0, 0, 0);
+  Lights[Result].Attenuation := Vector4(1, 0, 0, 0);
+  Lights[Result].AmbientColor := Vector4(AmbientColor, 1.0);
+  Lights[Result].ProjectorMatrix := TMatrix4.Identity;
+  Inc(Count);
+end;
+
+function TCastleLightsUniformBlock.AddPointLight(const Position, Color,
+  AmbientColor: TVector3; const Attenuation: TVector3; const Radius: Single): Integer;
+begin
+  if Count >= CASTLE_MAX_LIGHTS then Exit(-1);
+  Result := Count;
+  Lights[Result].Position := Vector4(Position, 1.0);
+  Lights[Result].Color := Vector4(Color, Radius);
+  Lights[Result].SpotDirection := Vector4(0, 0, -1, -1.0);
+  Lights[Result].SpotParams := Vector4(0, 0, 0, 0);
+  Lights[Result].Attenuation := Vector4(Attenuation, 0);
+  Lights[Result].AmbientColor := Vector4(AmbientColor, 1.0);
+  Lights[Result].ProjectorMatrix := TMatrix4.Identity;
+  Inc(Count);
+end;
+
+function TCastleLightsUniformBlock.AddSpotLight(const Position, Direction, Color,
+  AmbientColor: TVector3; const Attenuation: TVector3; const Radius, SpotCosCutoff,
+  SpotCutoff, BeamWidth, SpotExponent: Single): Integer;
+begin
+  if Count >= CASTLE_MAX_LIGHTS then Exit(-1);
+  Result := Count;
+  Lights[Result].Position := Vector4(Position, 2.0);
+  Lights[Result].Color := Vector4(Color, Radius);
+  Lights[Result].SpotDirection := Vector4(Direction, SpotCosCutoff);
+  Lights[Result].SpotParams := Vector4(SpotCutoff, BeamWidth, SpotExponent, 0);
+  Lights[Result].Attenuation := Vector4(Attenuation, 0);
+  Lights[Result].AmbientColor := Vector4(AmbientColor, 1.0);
+  Lights[Result].ProjectorMatrix := TMatrix4.Identity;
+  Inc(Count);
+end;
+
+procedure TCastleLightsUniformBlock.SetProjectorMatrix(const Index: Integer;
+  const Matrix: TMatrix4);
+begin
+  if (Index >= 0) and (Index < Integer(Count)) then
+    Lights[Index].ProjectorMatrix := Matrix;
+end;
 
 { TCastleShaderGeneratorRHI }
 
@@ -168,9 +260,29 @@ end;
 
 function TCastleShaderGeneratorRHI.GenerateStandardUniformBlocks(
   const AStage: TRHIShaderStage): String;
+var
+  LightAliases: String;
+  I: Integer;
 begin
+  LightAliases := '';
+  for I := 0 to CASTLE_MAX_LIGHTS - 1 do
+  begin
+    LightAliases := LightAliases +
+      Format('#define castle_LightSource%dPosition CastleLights.u_Lights[%d].Position.xyz', [I, I]) + NL +
+      Format('#define castle_LightSource%dColor CastleLights.u_Lights[%d].Color.rgb', [I, I]) + NL +
+      Format('#define castle_LightSource%dRadius CastleLights.u_Lights[%d].Color.w', [I, I]) + NL +
+      Format('#define castle_LightSource%dSpotDirection CastleLights.u_Lights[%d].SpotDirection.xyz', [I, I]) + NL +
+      Format('#define castle_LightSource%dSpotCosCutoff CastleLights.u_Lights[%d].SpotDirection.w', [I, I]) + NL +
+      Format('#define castle_LightSource%dSpotCutoff CastleLights.u_Lights[%d].SpotParams.x', [I, I]) + NL +
+      Format('#define castle_LightSource%dBeamWidth CastleLights.u_Lights[%d].SpotParams.y', [I, I]) + NL +
+      Format('#define castle_LightSource%dSpotExponent CastleLights.u_Lights[%d].SpotParams.z', [I, I]) + NL +
+      Format('#define castle_LightSource%dAttenuation CastleLights.u_Lights[%d].Attenuation.xyz', [I, I]) + NL +
+      Format('#define castle_LightSource%dAmbientColor CastleLights.u_Lights[%d].AmbientColor.rgb', [I, I]) + NL +
+      Format('#define castle_projector_matrix_%d CastleLights.u_Lights[%d].ProjectorMatrix', [I, I]) + NL;
+  end;
+
   Result :=
-    '/* --- Set 0: Global / Per-Pass Uniforms --- */' + NL +
+    '/* --- Set 0, Binding 0: Global / Per-Pass Uniforms --- */' + NL +
     'CASTLE_UBO(0, 0) uniform CastleSceneBlock {' + NL +
     '  mat4 u_ProjectionMatrix;' + NL +
     '  mat4 u_ViewMatrix;' + NL +
@@ -187,6 +299,33 @@ begin
     '#define castle_ViewMatrixInverse CastleScene.u_ViewMatrixInverse' + NL +
     '#define castle_WorldEyePosition CastleScene.u_CameraPosition.xyz' + NL +
     '#define castle_SceneTime CastleScene.u_CameraPosition.w' + NL +
+    NL +
+    '/* --- Set 0, Binding 1: Multi-Light Uniform Block --- */' + NL +
+    'struct CastleLightData {' + NL +
+    '  vec4 Position;' + NL +
+    '  vec4 Color;' + NL +
+    '  vec4 SpotDirection;' + NL +
+    '  vec4 SpotParams;' + NL +
+    '  vec4 Attenuation;' + NL +
+    '  vec4 AmbientColor;' + NL +
+    '  mat4 ProjectorMatrix;' + NL +
+    '};' + NL +
+    NL +
+    'CASTLE_UBO(0, 1) uniform CastleLightsBlock {' + NL +
+    '  uint u_LightCount;' + NL +
+    '  uint u_Pad0;' + NL +
+    '  uint u_Pad1;' + NL +
+    '  uint u_Pad2;' + NL +
+    '  CastleLightData u_Lights[32];' + NL +
+    '} CastleLights;' + NL +
+    NL +
+    '#define castle_LightCount CastleLights.u_LightCount' + NL +
+    LightAliases + NL +
+    '/* --- Set 0, Bindings 2..5: Shadow Map Samplers --- */' + NL +
+    'CASTLE_SAMPLER(0, 2) uniform sampler2DShadow castle_shadow_map_0;' + NL +
+    'CASTLE_SAMPLER(0, 3) uniform sampler2DShadow castle_shadow_map_1;' + NL +
+    'CASTLE_SAMPLER(0, 4) uniform sampler2DShadow castle_shadow_map_2;' + NL +
+    'CASTLE_SAMPLER(0, 5) uniform sampler2DShadow castle_shadow_map_3;' + NL +
     NL +
     '/* --- Set 1: Per-Material Uniforms & Samplers --- */' + NL +
     'CASTLE_UBO(1, 0) uniform CastleMaterialBlock {' + NL +
@@ -367,6 +506,47 @@ begin
       '}' + NL
   else
     Result := StitchedSource;
+end;
+
+function TCastleShaderGeneratorRHI.SanitizeVulkanShaderSource(
+  const Source: String): String;
+var
+  Lines: TStringList;
+  ResultBuilder: TStringBuilder;
+  Line, Trimmed: String;
+begin
+  if FBackend <> rbVulkan then
+    Exit(Source);
+
+  Lines := TStringList.Create;
+  ResultBuilder := TStringBuilder.Create;
+  try
+    Lines.Text := Source;
+    for Line in Lines do
+    begin
+      Trimmed := Trim(Line);
+      if IsPrefix('uniform ', Trimmed, False) and
+         ( (Pos('castle_LightSource', Trimmed) > 0) or
+           (Pos('castle_projector_matrix', Trimmed) > 0) or
+           (Pos('castle_ModelViewMatrix', Trimmed) > 0) or
+           (Pos('castle_ProjectionMatrix', Trimmed) > 0) or
+           (Pos('castle_NormalMatrix', Trimmed) > 0) or
+           (Pos('castle_JointMatrix', Trimmed) > 0) or
+           (Pos('castle_Material', Trimmed) > 0) or
+           (Pos('castle_WorldEyePosition', Trimmed) > 0) or
+           (Pos('castle_SceneTime', Trimmed) > 0) or
+           (Pos('castle_Fog', Trimmed) > 0) ) and
+         (Pos('{', Trimmed) = 0) then
+      begin
+        ResultBuilder.AppendLine('// [Vulkan RHI UBO]: ' + Line);
+      end else
+        ResultBuilder.AppendLine(Line);
+    end;
+    Result := ResultBuilder.ToString;
+  finally
+    FreeAndNil(ResultBuilder);
+    FreeAndNil(Lines);
+  end;
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

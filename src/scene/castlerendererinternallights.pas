@@ -21,7 +21,7 @@ unit CastleRendererInternalLights;
 interface
 
 uses CastleVectors, CastleGLUtils, X3DNodes, CastleRendererInternalShader,
-  CastleTransform, CastleShapes;
+  CastleTransform, CastleShapes, CastleInternalRHI, CastleInternalShaderRHI;
 
 type
   { Callback type for @link(TLightsRenderer.LightRenderEvent).
@@ -38,6 +38,9 @@ type
     FLightRenderEvent: TLightRenderEvent;
     LightsDone: array of PLightInstance;
     FMaxLightsPerShape: Cardinal;
+    FRHILightsBuffer: TRHIBuffer;
+    FLightsUniformBlock: TCastleLightsUniformBlock;
+    function InsideLightRadius(const Light: TLightInstance; const Shader: TShader): Boolean;
     { This avoids configuring the same light many times in case of fixed-function.
 
       Remembers what X3D light is set on which OpenGL light,
@@ -59,6 +62,19 @@ type
     RenderingCamera: TRenderingCamera;
 
     constructor Create;
+    destructor Destroy; override;
+
+    { Build std140 uniform block describing active punctual lights for Vulkan Set 0 Binding 1 }
+    procedure BuildLightsUniformBlock(const Shape: TShape;
+      const GlobalLights, SceneLights: TLightInstancesList;
+      const Shader: TShader;
+      out UniformBlock: TCastleLightsUniformBlock);
+
+    { Uploads FLightsUniformBlock to FRHILightsBuffer }
+    procedure UploadLightsToRHI;
+
+    property RHILightsBuffer: TRHIBuffer read FRHILightsBuffer;
+    property LightsUniformBlock: TCastleLightsUniformBlock read FLightsUniformBlock;
 
     { Maximum lights per shape.
 
@@ -105,7 +121,7 @@ implementation
 
 uses SysUtils, Math,
   {$ifdef OpenGLES} CastleGLES, {$else} CastleGL, {$endif}
-  CastleUtils, CastleBoxes, CastleInternalGLUtils;
+  CastleUtils, CastleBoxes, CastleInternalGLUtils, CastleApplicationProperties;
 
 { Set and enable OpenGL light properties based on X3D light.
 
@@ -245,6 +261,183 @@ begin
   inherited Create;
 end;
 
+destructor TLightsRenderer.Destroy;
+begin
+  FreeAndNil(FRHILightsBuffer);
+  inherited Destroy;
+end;
+
+function TLightsRenderer.InsideLightRadius(const Light: TLightInstance;
+  const Shader: TShader): Boolean;
+var
+  LightPosNode: TAbstractPositionalLightNode;
+  ShapeBox: TBox3D;
+  RadiusInWorld: Single;
+  LocationInWorld: TVector3;
+begin
+  Result := true;
+
+  if (Shader <> nil) and Shader.ShapeBoundingBoxInWorldDynamic then
+    Exit;
+
+  if Light.Node is TAbstractPositionalLightNode then
+  begin
+    LightPosNode := TAbstractPositionalLightNode(Light.Node);
+    if LightPosNode.HasRadius then
+    begin
+      if Shader = nil then Exit;
+      ShapeBox := Shader.ShapeBoundingBoxInWorld;
+      if ShapeBox.IsEmpty then
+        Exit(false);
+
+      if Light.WorldCoordinates then
+      begin
+        RadiusInWorld := Light.Radius;
+        LocationInWorld := Light.Location;
+      end else
+      begin
+        RadiusInWorld := Approximate3DScale(Shader.SceneTransform) * Light.Radius;
+        LocationInWorld := Shader.SceneTransform.MultPoint(Light.Location);
+      end;
+
+      if ShapeBox.PointDistanceSqr(LocationInWorld) > Sqr(RadiusInWorld) then
+        Exit(false);
+    end;
+  end;
+end;
+
+procedure TLightsRenderer.BuildLightsUniformBlock(const Shape: TShape;
+  const GlobalLights, SceneLights: TLightInstancesList;
+  const Shader: TShader;
+  out UniformBlock: TCastleLightsUniformBlock);
+
+  procedure AddList(const Lights: TLightInstancesList; const IsGlobalLight: Boolean);
+  const
+    ProjectorScalingMatrixVulkan: TMatrix4 = (Data:
+    ( (0.5, 0.0, 0.0, 0.0),
+      (0.0, 0.5, 0.0, 0.0),
+      (0.0, 0.0, 1.0, 0.0),
+      (0.5, 0.5, 0.0, 1.0) ));
+  var
+    I, Idx: Integer;
+    LightOn: boolean;
+    Light: PLightInstance;
+    Node: TAbstractLightNode;
+    LightToEyeSpace: TMatrix4;
+    Color3, AmbientColor3: TVector3;
+    EyePos: TVector4;
+    Dir, Att: TVector3;
+    Rad: Single;
+    LiPos: TAbstractPositionalLightNode;
+    LiSpot1: TSpotLightNode_1;
+    LiSpot: TSpotLightNode;
+    ProjectorMatrix: TMatrix4;
+  begin
+    if Lights = nil then Exit;
+
+    for I := 0 to Lights.Count - 1 do
+    begin
+      Light := PLightInstance(Lights.Ptr(I));
+
+      LightOn := Light^.Node.FdOn.Value;
+      if Assigned(LightRenderEvent) then
+        LightRenderEvent(Shape, Light^, IsGlobalLight, LightOn);
+
+      if LightOn and InsideLightRadius(Light^, Shader) then
+      begin
+        Node := Light^.Node;
+        Color3 := Node.FdColor.Value * Node.FdIntensity.Value;
+        AmbientColor3 := Node.FdColor.Value * Node.FdAmbientIntensity.Value;
+
+        if Light^.WorldCoordinates then
+          LightToEyeSpace := RenderingCamera.Matrix
+        else
+        if Shader <> nil then
+          LightToEyeSpace := Shader.SceneModelView
+        else
+          LightToEyeSpace := RenderingCamera.Matrix;
+
+        Idx := -1;
+        if Node is TAbstractDirectionalLightNode then
+        begin
+          Dir := LightToEyeSpace.MultDirection(TAbstractDirectionalLightNode(Node).FdDirection.Value);
+          Idx := UniformBlock.AddDirectionalLight(Dir, Color3, AmbientColor3);
+        end else
+        if Node is TSpotLightNode_1 then
+        begin
+          LiSpot1 := TSpotLightNode_1(Node);
+          EyePos := LightToEyeSpace * Light^.Position;
+          Dir := LightToEyeSpace.MultDirection(Light^.Direction);
+          Att := LiSpot1.FdAttenuation.Value;
+          Rad := LiSpot1.Radius;
+          if not Light^.WorldCoordinates then
+            Rad := Approximate3DScale(LightToEyeSpace) * Rad;
+          Idx := UniformBlock.AddSpotLight(EyePos.XYZ, Dir, Color3, AmbientColor3,
+            Att, Rad, LiSpot1.SpotCosCutoff, LiSpot1.SpotCutoffDeg * Pi / 180.0,
+            LiSpot1.SpotCutoffDeg * Pi / 180.0, LiSpot1.SpotExponent);
+        end else
+        if Node is TSpotLightNode then
+        begin
+          LiSpot := TSpotLightNode(Node);
+          EyePos := LightToEyeSpace * Light^.Position;
+          Dir := LightToEyeSpace.MultDirection(Light^.Direction);
+          Att := LiSpot.FdAttenuation.Value;
+          Rad := LiSpot.Radius;
+          if not Light^.WorldCoordinates then
+            Rad := Approximate3DScale(LightToEyeSpace) * Rad;
+          Idx := UniformBlock.AddSpotLight(EyePos.XYZ, Dir, Color3, AmbientColor3,
+            Att, Rad, LiSpot.SpotCosCutoff, LiSpot.FdCutOffAngle.Value,
+            LiSpot.FdBeamWidth.Value, LiSpot.SpotExponentApproximate);
+        end else
+        if Node is TAbstractPointLightNode then
+        begin
+          LiPos := TAbstractPositionalLightNode(Node);
+          EyePos := LightToEyeSpace * Light^.Position;
+          Att := LiPos.FdAttenuation.Value;
+          Rad := LiPos.Radius;
+          if not Light^.WorldCoordinates then
+            Rad := Approximate3DScale(LightToEyeSpace) * Rad;
+          Idx := UniformBlock.AddPointLight(EyePos.XYZ, Color3, AmbientColor3, Att, Rad);
+        end;
+
+        if (Idx >= 0) and (Node is TAbstractPunctualLightNode) and
+           (TAbstractPunctualLightNode(Node).DefaultShadowMap <> nil) then
+        begin
+          RenderingCamera.InverseMatrixNeeded;
+          ProjectorMatrix := (ProjectorScalingMatrixVulkan *
+            TAbstractPunctualLightNode(Node).GetProjectorMatrix) *
+            RenderingCamera.InverseMatrix;
+          UniformBlock.SetProjectorMatrix(Idx, ProjectorMatrix);
+        end;
+
+        if UniformBlock.Count >= CASTLE_MAX_LIGHTS then
+          Exit;
+      end;
+    end;
+  end;
+
+begin
+  UniformBlock.Clear;
+  AddList(GlobalLights, True);
+  if UniformBlock.Count < CASTLE_MAX_LIGHTS then
+    AddList(SceneLights, False);
+end;
+
+procedure TLightsRenderer.UploadLightsToRHI;
+var
+  BufDesc: TRHIBufferDesc;
+begin
+  if (RHIDevice = nil) or (ActiveCommandList = nil) then
+    Exit;
+
+  if FRHILightsBuffer = nil then
+  begin
+    BufDesc := TRHIBufferDesc.Create(SizeOf(TCastleLightsUniformBlock), [buUniform], muCpuToGpu, 'CastleLightsUBO');
+    FRHILightsBuffer := RHIDevice.CreateBuffer(BufDesc, @FLightsUniformBlock);
+  end else
+    FRHILightsBuffer.UploadData(FLightsUniformBlock, SizeOf(TCastleLightsUniformBlock));
+end;
+
 procedure TLightsRenderer.SetMaxLightsPerShape(const Value: Cardinal);
 begin
   if FMaxLightsPerShape <> Value then
@@ -252,10 +445,6 @@ begin
     FMaxLightsPerShape := Value;
     if GLFeatures.EnableFixedFunction then
       MinVar(FMaxLightsPerShape, GLFeatures.MaxLights);
-    { Length(LightsDone) is always = FMaxLightsPerShape.
-      Note that enlarging / initializing this array initializes
-      new items with @nil, which is what we want, so that NeedsRenderLight
-      treats it OK. }
     SetLength(LightsDone, FMaxLightsPerShape);
   end;
 end;
@@ -278,7 +467,6 @@ begin
           LightsDone[Index]^.Transform, Light^.Transform)) )
     ));
   if Result then
-    { Update LightsDone[Index], if change required. }
     LightsDone[Index] := Light;
   Inc(Statistics[Result]);
 end;
@@ -288,53 +476,6 @@ procedure TLightsRenderer.Render(const Shape: TShape;
   const Shader: TShader);
 var
   LightsEnabled: Cardinal;
-
-  function InsideLightRadius(const Light: TLightInstance): Boolean;
-  var
-    LightPosNode: TAbstractPositionalLightNode;
-    ShapeBox: TBox3D;
-    RadiusInWorld: Single;
-    LocationInWorld: TVector3;
-  begin
-    Result := true;
-
-    { When ShapeBoundingBoxInWorldDynamic: Don't try to optimize shader
-      by not accounting for lights whose radius doesn't reach shape bounding box,
-      because lights for which this is true may change very often, causing
-      unnecessary shader regeneration.
-      See https://github.com/castle-engine/castle-engine/issues/664 }
-    if Shader.ShapeBoundingBoxInWorldDynamic then
-      Exit;
-
-    if Light.Node is TAbstractPositionalLightNode then
-    begin
-      LightPosNode := TAbstractPositionalLightNode(Light.Node);
-      if LightPosNode.HasRadius then
-      begin
-        ShapeBox := Shader.ShapeBoundingBoxInWorld;
-        if ShapeBox.IsEmpty then
-          Exit(false);
-
-        { calculate RadiusInWorld, LocationInWorld.
-          Note: we optimize WorldCoordinates = true case, as most often ---
-          once we'll design lights in editor,  then lights are usually in different
-          scene than original. }
-        if Light.WorldCoordinates then
-        begin
-          RadiusInWorld := Light.Radius;
-          LocationInWorld := Light.Location;
-        end else
-        begin
-          RadiusInWorld := Approximate3DScale(Shader.SceneTransform) * Light.Radius;
-          LocationInWorld := Shader.SceneTransform.MultPoint(Light.Location);
-        end;
-
-        { Light will never reach the shape. }
-        if ShapeBox.PointDistanceSqr(LocationInWorld) > Sqr(RadiusInWorld) then
-          Exit(false);
-      end;
-    end;
-  end;
 
   procedure AddList(const Lights: TLightInstancesList; const IsGlobalLight: Boolean);
   var
@@ -350,7 +491,7 @@ var
       if Assigned(LightRenderEvent) then
         LightRenderEvent(Shape, Light^, IsGlobalLight, LightOn);
 
-      if LightOn and InsideLightRadius(Light^) then
+      if LightOn and InsideLightRadius(Light^, Shader) then
       begin
         if NeedRenderLight(LightsEnabled, Light) then
           glLightFromX3DLight(LightsEnabled, Light^, RenderingCamera);
@@ -367,6 +508,12 @@ var
 {$endif}
 begin
   Assert(RenderingCamera <> nil);
+
+  if (ApplicationProperties <> nil) and (ApplicationProperties.RenderBackend = backendVulkan) then
+  begin
+    BuildLightsUniformBlock(Shape, GlobalLights, SceneLights, Shader, FLightsUniformBlock);
+    UploadLightsToRHI;
+  end;
 
   LightsEnabled := 0;
   if LightsEnabled >= FMaxLightsPerShape then Exit;

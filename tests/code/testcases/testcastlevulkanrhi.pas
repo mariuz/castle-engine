@@ -24,7 +24,8 @@ uses
   CastleApplicationProperties, CastleImages, CastleGLImages, CastleFonts,
   CastleTextureFont_Default3d_Sans,
   CastleInternalRHI, CastleInternalVulkan, CastleInternalVulkanMemory,
-  CastleInternalShaderRHI, CastleInternalBatch2DRHI, CastleInternalRenderer;
+  CastleInternalShaderRHI, CastleInternalBatch2DRHI, CastleInternalRenderer,
+  CastleRendererInternalLights, X3DNodes;
 
 type
   TTestCastleVulkanRHI = class(TCastleTestCase)
@@ -44,6 +45,9 @@ type
     procedure Test3DForwardPassDispatch;
     procedure TestGPUSkinningJointBuffer;
     procedure TestMorphTargetVboReload;
+    procedure TestMultiLightUBO;
+    procedure TestDepthOnlyDynamicRenderingPass;
+    procedure TestSanitizeVulkanShaderSource;
   end;
 
 implementation
@@ -566,6 +570,138 @@ begin
   finally
     FreeAndNil(JointList);
     FreeAndNil(Cache);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestMultiLightUBO;
+var
+  Block: TCastleLightsUniformBlock;
+  IdxDir, IdxPoint, IdxSpot: Integer;
+  ProjMat: TMatrix4;
+  Gen: TCastleShaderGeneratorRHI;
+  Preamble: String;
+begin
+  { 1. std140 Struct Alignment and Size Validation }
+  AssertEquals('Maximum lights count is 32', 32, CASTLE_MAX_LIGHTS);
+  AssertEquals('TCastleLightData record size must be 160 bytes', 160, SizeOf(TCastleLightData));
+  AssertEquals('TCastleLightsUniformBlock size must be 5136 bytes (16-byte aligned)', 5136, SizeOf(TCastleLightsUniformBlock));
+  AssertEquals('TCastleLightsUniformBlock must be std140 aligned', 0, SizeOf(TCastleLightsUniformBlock) mod 16);
+
+  { 2. Populate Directional Light }
+  Block.Clear;
+  AssertEquals('Cleared block light count', 0, Block.Count);
+
+  IdxDir := Block.AddDirectionalLight(Vector3(0, -1, 0), Vector3(1, 1, 0.8), Vector3(0.1, 0.1, 0.1));
+  AssertEquals('First light index', 0, IdxDir);
+  AssertEquals('Light count after directional light', 1, Block.Count);
+  AssertTrue('Directional light position W is 0.0', Abs(Block.Lights[0].Position.W - 0.0) < 0.001);
+  AssertTrue('Directional light direction Y is -1.0', Abs(Block.Lights[0].Position.Y - (-1.0)) < 0.001);
+  AssertTrue('Directional light color R is 1.0', Abs(Block.Lights[0].Color.X - 1.0) < 0.001);
+
+  { 3. Populate Point Light }
+  IdxPoint := Block.AddPointLight(Vector3(10, 5, 2), Vector3(1, 0, 0), Vector3(0.05, 0, 0),
+    Vector3(1, 0.1, 0.01), 50.0);
+  AssertEquals('Second light index', 1, IdxPoint);
+  AssertEquals('Light count after point light', 2, Block.Count);
+  AssertTrue('Point light position W is 1.0', Abs(Block.Lights[1].Position.W - 1.0) < 0.001);
+  AssertTrue('Point light position X is 10.0', Abs(Block.Lights[1].Position.X - 10.0) < 0.001);
+  AssertTrue('Point light radius is 50.0', Abs(Block.Lights[1].Color.W - 50.0) < 0.001);
+  AssertTrue('Point light attenuation constant', Abs(Block.Lights[1].Attenuation.X - 1.0) < 0.001);
+
+  { 4. Populate Spot Light and Shadow Projector Matrix }
+  IdxSpot := Block.AddSpotLight(Vector3(0, 10, 0), Vector3(0, -1, 0), Vector3(1, 1, 1),
+    Vector3(0.1, 0.1, 0.1), Vector3(1, 0.05, 0), 30.0,
+    Cos(Pi / 4), Pi / 4, Pi / 6, 2.0);
+  AssertEquals('Third light index', 2, IdxSpot);
+  AssertEquals('Light count after spot light', 3, Block.Count);
+  AssertTrue('Spot light position W is 2.0', Abs(Block.Lights[2].Position.W - 2.0) < 0.001);
+  AssertTrue('Spot light spot direction Y is -1.0', Abs(Block.Lights[2].SpotDirection.Y - (-1.0)) < 0.001);
+  AssertTrue('Spot light spot exponent is 2.0', Abs(Block.Lights[2].SpotParams.Z - 2.0) < 0.001);
+
+  ProjMat := TranslationMatrix(Vector3(0, 0, -5));
+  Block.SetProjectorMatrix(IdxSpot, ProjMat);
+  AssertTrue('Spot light projector matrix translation Z', Abs(Block.Lights[2].ProjectorMatrix.Columns[3].Z - (-5.0)) < 0.001);
+
+  { 5. Validate GLSL Set 0 Binding 1 lights block generation }
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    Preamble := Gen.GeneratePreamble(ssFragment);
+    AssertTrue('Preamble declares CastleLightsBlock', Pos('CastleLightsBlock', Preamble) > 0);
+    AssertTrue('Preamble binds CastleLights at Set 0 Binding 1', Pos('CASTLE_UBO(0, 1)', Preamble) > 0);
+    AssertTrue('Preamble aliases castle_LightSource0Position', Pos('#define castle_LightSource0Position', Preamble) > 0);
+    AssertTrue('Preamble aliases castle_projector_matrix_0', Pos('#define castle_projector_matrix_0', Preamble) > 0);
+    AssertTrue('Preamble binds shadow map samplers', Pos('CASTLE_SAMPLER(0, 2) uniform sampler2DShadow castle_shadow_map_0;', Preamble) > 0);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestDepthOnlyDynamicRenderingPass;
+var
+  Area: TRectangle;
+  Info: TRHIRenderingInfo;
+  DepthState: TRHIDepthStencilStateDesc;
+begin
+  Area := Rectangle(0, 0, 1024, 1024);
+  Info := TRHIRenderingInfo.CreateDepthOnly(Area, nil, loClear, soStore, 1.0);
+
+  AssertEquals('RenderArea width', 1024, Info.RenderArea.Width);
+  AssertEquals('RenderArea height', 1024, Info.RenderArea.Height);
+  AssertEquals('ColorAttachments length is 0 for depth-only pass', 0, Length(Info.ColorAttachments));
+  AssertTrue('HasDepthAttachment is True', Info.HasDepthAttachment);
+  AssertEquals('Depth attachment load op is loClear', Ord(loClear), Ord(Info.DepthAttachment.LoadOp));
+  AssertEquals('Depth attachment store op is soStore', Ord(soStore), Ord(Info.DepthAttachment.StoreOp));
+  AssertTrue('Depth clear value is 1.0', Abs(Info.DepthAttachment.ClearDepth - 1.0) < 0.001);
+
+  DepthState := TRHIDepthStencilStateDesc.DefaultShadowMap;
+  AssertTrue('Shadow map depth test must be enabled', DepthState.DepthTestEnable);
+  AssertTrue('Shadow map depth write must be enabled', DepthState.DepthWriteEnable);
+  AssertEquals('Shadow map depth compare op is coLessOrEqual', Ord(coLessOrEqual), Ord(DepthState.DepthCompareOp));
+  AssertFalse('Shadow map stencil test is disabled', DepthState.StencilTestEnable);
+end;
+
+procedure TTestCastleVulkanRHI.TestSanitizeVulkanShaderSource;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  LegacyGLSL, SanitizedGLSL: String;
+const
+  NL = LineEnding;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    LegacyGLSL :=
+      'uniform mat4 castle_ModelViewMatrix;' + NL +
+      'uniform mat4 castle_ProjectionMatrix;' + NL +
+      'uniform vec3 castle_LightSource0Position;' + NL +
+      'uniform vec3 castle_LightSource0Color;' + NL +
+      'uniform mat4 castle_projector_matrix_0;' + NL +
+      'uniform float u_MyCustomMultiplier;' + NL +
+      'void main() {' + NL +
+      '  vec3 l = castle_LightSource0Position;' + NL +
+      '  gl_Position = castle_ProjectionMatrix * (castle_ModelViewMatrix * vec4(l, 1.0)) * u_MyCustomMultiplier;' + NL +
+      '}' + NL;
+
+    SanitizedGLSL := Gen.SanitizeVulkanShaderSource(LegacyGLSL);
+
+    { Legacy uniforms replaced by UBOs/PushConstants must be commented out }
+    AssertTrue('castle_ModelViewMatrix must be commented out',
+      Pos('// [Vulkan RHI UBO]: uniform mat4 castle_ModelViewMatrix;', SanitizedGLSL) > 0);
+    AssertTrue('castle_ProjectionMatrix must be commented out',
+      Pos('// [Vulkan RHI UBO]: uniform mat4 castle_ProjectionMatrix;', SanitizedGLSL) > 0);
+    AssertTrue('castle_LightSource0Position must be commented out',
+      Pos('// [Vulkan RHI UBO]: uniform vec3 castle_LightSource0Position;', SanitizedGLSL) > 0);
+    AssertTrue('castle_projector_matrix_0 must be commented out',
+      Pos('// [Vulkan RHI UBO]: uniform mat4 castle_projector_matrix_0;', SanitizedGLSL) > 0);
+
+    { User custom uniforms must remain intact }
+    AssertTrue('u_MyCustomMultiplier must NOT be commented out',
+      Pos('uniform float u_MyCustomMultiplier;', SanitizedGLSL) > 0);
+
+    { Code usage inside main() must remain intact }
+    AssertTrue('Shader body must be preserved',
+      Pos('vec3 l = castle_LightSource0Position;', SanitizedGLSL) > 0);
+  finally
+    FreeAndNil(Gen);
   end;
 end;
 
