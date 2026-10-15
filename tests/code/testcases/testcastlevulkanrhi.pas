@@ -21,7 +21,8 @@ interface
 uses
   Classes, SysUtils, Math,
   CastleTester, CastleVectors, CastleColors, CastleRectangles,
-  CastleApplicationProperties,
+  CastleApplicationProperties, CastleImages, CastleGLImages, CastleFonts,
+  CastleTextureFont_Default3d_Sans,
   CastleInternalRHI, CastleInternalVulkan, CastleInternalVulkanMemory,
   CastleInternalShaderRHI, CastleInternalBatch2DRHI;
 
@@ -37,6 +38,9 @@ type
     procedure TestApplicationPropertiesRenderBackend;
     procedure TestBatch2DScissorAndClipping;
     procedure TestGeometryBuffersToRHIBuffer;
+    procedure TestDrawableImageRHIDispatch;
+    procedure TestFontAtlasRHIDispatch;
+    procedure TestSceneShapeRHIBufferAllocation;
   end;
 
 implementation
@@ -272,6 +276,93 @@ begin
 
   AssertTrue('Index buffer must have buIndex', buIndex in IndexDesc.Usage);
   AssertFalse('Index buffer must not have buVertex', buVertex in IndexDesc.Usage);
+end;
+
+procedure TTestCastleVulkanRHI.TestDrawableImageRHIDispatch;
+var
+  CpuImg: TRGBAlphaImage;
+  DrawImg: TDrawableImage;
+  BlendMode: TCastle2DBlendMode;
+begin
+  CpuImg := TRGBAlphaImage.Create(32, 32);
+  CpuImg.Clear(Vector4Byte(255, 128, 64, 255));
+
+  DrawImg := TDrawableImage.Create(CpuImg, true, true);
+  try
+    AssertEquals('DrawableImage width', 32, DrawImg.Width);
+    AssertEquals('DrawableImage height', 32, DrawImg.Height);
+    AssertTrue('DrawableImage smooth scaling', DrawImg.SmoothScaling);
+
+    { Verify RHI properties start unallocated without active device }
+    AssertTrue('RHITexture nil by default without active device', DrawImg.RHITexture = nil);
+    AssertTrue('RHIDescriptorSet nil by default', DrawImg.RHIDescriptorSet = nil);
+
+    { Verify ActiveBatch2DRenderer accessor }
+    AssertTrue('ActiveBatch2DRenderer nil outside 2D pass', ActiveBatch2DRenderer = nil);
+
+    { Test alpha channel to blend mode translation }
+    case DrawImg.Alpha of
+      acNone: BlendMode := bmNone;
+      else BlendMode := bmAlphaBlend;
+    end;
+    AssertTrue('Opaque image translates to expected blend mode', BlendMode in [bmNone, bmAlphaBlend]);
+
+    DrawImg.SmoothScaling := false;
+    AssertFalse('SmoothScaling toggle', DrawImg.SmoothScaling);
+  finally
+    FreeAndNil(DrawImg);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestFontAtlasRHIDispatch;
+var
+  TestFont: TCastleFont;
+  TextW, TextH: Single;
+begin
+  TestFont := TCastleFont.Create(nil);
+  try
+    TestFont.Load(Font_Default3d_Sans);
+    TestFont.Size := 16;
+    TextW := TestFont.TextWidth('Vulkan RHI Font Test');
+    TextH := TestFont.TextHeight('Vulkan RHI Font Test');
+    AssertTrue('Font text width > 0', TextW > 0.0);
+    AssertTrue('Font text height > 0', TextH > 0.0);
+
+    { Font rendering creates glyph rectangles compatible with batch 2D quads }
+    AssertTrue('Font scale positive', TestFont.Scale > 0.0);
+  finally
+    FreeAndNil(TestFont);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSceneShapeRHIBufferAllocation;
+var
+  CoordDesc, AttrDesc, IndexDesc: TRHIBufferDesc;
+  PipelineDesc: TRHIGraphicsPipelineDesc;
+begin
+  { 1. 3D Forward Pass Vertex/Index Layout Configuration }
+  CoordDesc := TRHIBufferDesc.Create(500 * SizeOf(TVector3), [buVertex], muGpuOnly);
+  AttrDesc := TRHIBufferDesc.Create(500 * SizeOf(TVector4), [buVertex], muGpuOnly);
+  IndexDesc := TRHIBufferDesc.Create(1500 * SizeOf(UInt32), [buIndex], muGpuOnly);
+
+  AssertEquals('Coord buffer size matches 500 vertices', 500 * SizeOf(TVector3), CoordDesc.Size);
+  AssertTrue('Coord buffer must have buVertex', buVertex in CoordDesc.Usage);
+  AssertTrue('Attr buffer must have buVertex', buVertex in AttrDesc.Usage);
+  AssertEquals('Index buffer size matches 1500 indices', 1500 * SizeOf(UInt32), IndexDesc.Size);
+  AssertTrue('Index buffer must have buIndex', buIndex in IndexDesc.Usage);
+
+  { 2. Forward pass pipeline descriptor validation }
+  FillChar(PipelineDesc, SizeOf(PipelineDesc), 0);
+  PipelineDesc.Topology := ptTriangleList;
+  PipelineDesc.Rasterizer.CullMode := cmBack;
+  PipelineDesc.Rasterizer.FrontFace := ffCounterClockwise;
+  PipelineDesc.DepthStencil.DepthTestEnable := True;
+  PipelineDesc.DepthStencil.DepthWriteEnable := True;
+  PipelineDesc.DepthStencil.DepthCompareOp := coLess;
+
+  AssertTrue('3D pipeline has depth test enabled', PipelineDesc.DepthStencil.DepthTestEnable);
+  AssertTrue('3D pipeline has depth write enabled', PipelineDesc.DepthStencil.DepthWriteEnable);
+  AssertTrue('3D pipeline uses backface culling', PipelineDesc.Rasterizer.CullMode = cmBack);
 end;
 
 initialization

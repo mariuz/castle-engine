@@ -621,11 +621,106 @@ end;
 
 procedure TVulkanRHITexture.UploadImage(const AImage: TEncodedImage;
   const AMipLevel: Cardinal; const AArrayLayer: Cardinal);
+var
+  RgbaImage: TRGBAlphaImage;
+  NeedsFreeRgba: Boolean;
+  StagingDesc: TRHIBufferDesc;
+  StagingBuf: TVulkanRHIBuffer;
+  Cmd: VkCommandBuffer;
+  Region: VkBufferImageCopy;
+  Barrier: VkImageMemoryBarrier;
+  DataSize: PtrUInt;
+  PixelsPtr: Pointer;
 begin
-  { 1. Allocate staging buffer of AImage.Size bytes and copy AImage.RawPixels
-    2. Transition FImage to VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-    3. vkCmdCopyBufferToImage(...)
-    4. Transition FImage to VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL }
+  if AImage = nil then Exit;
+  if FImage = VK_NULL_HANDLE then Exit;
+
+  NeedsFreeRgba := False;
+  if AImage is TRGBAlphaImage then
+  begin
+    RgbaImage := TRGBAlphaImage(AImage);
+  end else
+  if AImage is TCastleImage then
+  begin
+    RgbaImage := TRGBAlphaImage.Create(AImage.Width, AImage.Height);
+    RgbaImage.Assign(TCastleImage(AImage));
+    NeedsFreeRgba := True;
+  end else
+    Exit;
+
+  try
+    DataSize := PtrUInt(RgbaImage.Width) * PtrUInt(RgbaImage.Height) * 4;
+    PixelsPtr := RgbaImage.RawPixels;
+
+    FillChar(StagingDesc, SizeOf(StagingDesc), 0);
+    StagingDesc.Size := DataSize;
+    StagingDesc.Usage := [buTransferSrc];
+    StagingDesc.MemoryUsage := muCpuToGpu;
+
+    StagingBuf := TVulkanRHIBuffer.Create(VulkanDevice, StagingDesc, PixelsPtr);
+    try
+      Cmd := VulkanDevice.BeginSingleTimeCommands;
+
+      { Transition from current layout to TRANSFER_DST_OPTIMAL }
+      FillChar(Barrier, SizeOf(Barrier), 0);
+      Barrier.sType := VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      Barrier.oldLayout := VK_IMAGE_LAYOUT_UNDEFINED;
+      Barrier.newLayout := VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      Barrier.srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+      Barrier.dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+      Barrier.image := FImage;
+      Barrier.subresourceRange.aspectMask := FAspectMask;
+      Barrier.subresourceRange.baseMipLevel := AMipLevel;
+      Barrier.subresourceRange.levelCount := 1;
+      Barrier.subresourceRange.baseArrayLayer := AArrayLayer;
+      Barrier.subresourceRange.layerCount := 1;
+      Barrier.srcAccessMask := 0;
+      Barrier.dstAccessMask := VK_ACCESS_TRANSFER_WRITE_BIT;
+
+      vkCmdPipelineBarrier(Cmd,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nil, 0, nil, 1, @Barrier);
+
+      { Copy buffer to image }
+      FillChar(Region, SizeOf(Region), 0);
+      Region.bufferOffset := 0;
+      Region.bufferRowLength := 0;
+      Region.bufferImageHeight := 0;
+      Region.imageSubresource.aspectMask := FAspectMask;
+      Region.imageSubresource.mipLevel := AMipLevel;
+      Region.imageSubresource.baseArrayLayer := AArrayLayer;
+      Region.imageSubresource.layerCount := 1;
+      Region.imageOffset.x := 0;
+      Region.imageOffset.y := 0;
+      Region.imageOffset.z := 0;
+      Region.imageExtent.width := RgbaImage.Width;
+      Region.imageExtent.height := RgbaImage.Height;
+      Region.imageExtent.depth := 1;
+
+      vkCmdCopyBufferToImage(Cmd, StagingBuf.Handle, FImage,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, @Region);
+
+      { Transition from TRANSFER_DST_OPTIMAL to SHADER_READ_ONLY_OPTIMAL }
+      Barrier.oldLayout := VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      Barrier.newLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      Barrier.srcAccessMask := VK_ACCESS_TRANSFER_WRITE_BIT;
+      Barrier.dstAccessMask := VK_ACCESS_SHADER_READ_BIT;
+
+      vkCmdPipelineBarrier(Cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, nil, 0, nil, 1, @Barrier);
+
+      VulkanDevice.EndSingleTimeCommands(Cmd);
+      FCurrentState := rsShaderRead;
+    finally
+      FreeAndNil(StagingBuf);
+    end;
+  finally
+    if NeedsFreeRgba then
+      FreeAndNil(RgbaImage);
+  end;
 end;
 
 { ---------------------------------------------------------------------------- }
@@ -744,26 +839,100 @@ end;
 
 procedure TVulkanRHIDescriptorSet.BindUniformBuffer(const Binding: Cardinal;
   const Buffer: TRHIBuffer; const Offset, Range: PtrUInt);
+var
+  Idx: Integer;
 begin
-  { Append to FPendingWrites & FBufferInfos }
+  if Buffer = nil then Exit;
+  Idx := Length(FBufferInfos);
+  SetLength(FBufferInfos, Idx + 1);
+  FillChar(FBufferInfos[Idx], SizeOf(VkDescriptorBufferInfo), 0);
+  FBufferInfos[Idx].buffer := (Buffer as TVulkanRHIBuffer).Handle;
+  FBufferInfos[Idx].offset := Offset;
+  if Range > 0 then
+    FBufferInfos[Idx].range := Range
+  else
+    FBufferInfos[Idx].range := Buffer.Desc.Size - Offset;
+
+  SetLength(FPendingWrites, Length(FPendingWrites) + 1);
+  FillChar(FPendingWrites[High(FPendingWrites)], SizeOf(VkWriteDescriptorSet), 0);
+  FPendingWrites[High(FPendingWrites)].sType := VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  FPendingWrites[High(FPendingWrites)].dstSet := FHandle;
+  FPendingWrites[High(FPendingWrites)].dstBinding := Binding;
+  FPendingWrites[High(FPendingWrites)].dstArrayElement := Idx;
+  FPendingWrites[High(FPendingWrites)].descriptorCount := 1;
+  FPendingWrites[High(FPendingWrites)].descriptorType := VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 end;
 
 procedure TVulkanRHIDescriptorSet.BindStorageBuffer(const Binding: Cardinal;
   const Buffer: TRHIBuffer; const Offset, Range: PtrUInt);
+var
+  Idx: Integer;
 begin
-  { Append to FPendingWrites & FBufferInfos }
+  if Buffer = nil then Exit;
+  Idx := Length(FBufferInfos);
+  SetLength(FBufferInfos, Idx + 1);
+  FillChar(FBufferInfos[Idx], SizeOf(VkDescriptorBufferInfo), 0);
+  FBufferInfos[Idx].buffer := (Buffer as TVulkanRHIBuffer).Handle;
+  FBufferInfos[Idx].offset := Offset;
+  if Range > 0 then
+    FBufferInfos[Idx].range := Range
+  else
+    FBufferInfos[Idx].range := Buffer.Desc.Size - Offset;
+
+  SetLength(FPendingWrites, Length(FPendingWrites) + 1);
+  FillChar(FPendingWrites[High(FPendingWrites)], SizeOf(VkWriteDescriptorSet), 0);
+  FPendingWrites[High(FPendingWrites)].sType := VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  FPendingWrites[High(FPendingWrites)].dstSet := FHandle;
+  FPendingWrites[High(FPendingWrites)].dstBinding := Binding;
+  FPendingWrites[High(FPendingWrites)].dstArrayElement := Idx;
+  FPendingWrites[High(FPendingWrites)].descriptorCount := 1;
+  FPendingWrites[High(FPendingWrites)].descriptorType := VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 end;
 
 procedure TVulkanRHIDescriptorSet.BindTexture(const Binding: Cardinal;
   const Texture: TRHITexture; const Sampler: TRHISampler);
+var
+  Idx: Integer;
 begin
-  { Append to FPendingWrites & FImageInfos }
+  if Texture = nil then Exit;
+  Idx := Length(FImageInfos);
+  SetLength(FImageInfos, Idx + 1);
+  FillChar(FImageInfos[Idx], SizeOf(VkDescriptorImageInfo), 0);
+  if Sampler <> nil then
+    FImageInfos[Idx].sampler := (Sampler as TVulkanRHISampler).Handle
+  else
+    FImageInfos[Idx].sampler := VK_NULL_HANDLE;
+  FImageInfos[Idx].imageView := (Texture as TVulkanRHITexture).ImageView;
+  FImageInfos[Idx].imageLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+  SetLength(FPendingWrites, Length(FPendingWrites) + 1);
+  FillChar(FPendingWrites[High(FPendingWrites)], SizeOf(VkWriteDescriptorSet), 0);
+  FPendingWrites[High(FPendingWrites)].sType := VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  FPendingWrites[High(FPendingWrites)].dstSet := FHandle;
+  FPendingWrites[High(FPendingWrites)].dstBinding := Binding;
+  FPendingWrites[High(FPendingWrites)].dstArrayElement := Idx;
+  FPendingWrites[High(FPendingWrites)].descriptorCount := 1;
+  FPendingWrites[High(FPendingWrites)].descriptorType := VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 end;
 
 procedure TVulkanRHIDescriptorSet.Update;
+var
+  I: Integer;
 begin
   if Length(FPendingWrites) > 0 then
   begin
+    for I := 0 to High(FPendingWrites) do
+    begin
+      if FPendingWrites[I].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER then
+      begin
+        FPendingWrites[I].pImageInfo := @FImageInfos[FPendingWrites[I].dstArrayElement];
+        FPendingWrites[I].dstArrayElement := 0;
+      end else
+      begin
+        FPendingWrites[I].pBufferInfo := @FBufferInfos[FPendingWrites[I].dstArrayElement];
+        FPendingWrites[I].dstArrayElement := 0;
+      end;
+    end;
     vkUpdateDescriptorSets(VulkanDevice.Handle, Length(FPendingWrites), @FPendingWrites[0], 0, nil);
     SetLength(FPendingWrites, 0);
     SetLength(FBufferInfos, 0);

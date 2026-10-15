@@ -67,7 +67,8 @@ uses SysUtils, Generics.Collections, Classes,
   CastleImages, CastleVectors, CastleGLUtils, CastleTimeUtils,
   CastleTextureImages, CastleVideos, CastleInternalCompositeImage, CastleRectangles,
   CastleGLShaders, CastleColors, CastleUtils, CastleRenderOptions,
-  CastleInternalGLUtils, CastleInternalFileMonitor;
+  CastleInternalGLUtils, CastleInternalFileMonitor,
+  CastleInternalRHI, CastleInternalBatch2DRHI;
 
 {$define read_interface}
 

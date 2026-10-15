@@ -134,10 +134,27 @@ type
     property WhitePixelTexture: TRHITexture read FWhitePixelTexture;
   end;
 
+{ Currently active 2D batch renderer for TDrawableImage / UI rendering. }
+function ActiveBatch2DRenderer: TCastleBatch2DRenderer;
+procedure SetActiveBatch2DRenderer(const ARenderer: TCastleBatch2DRenderer);
+
 { Packs a floating-point TCastleColor into a 32-bit R8G8B8A8 normalized integer }
 function PackColorRgba8(const C: TCastleColor): Cardinal; inline;
 
 implementation
+
+var
+  FActiveBatch2DRenderer: TCastleBatch2DRenderer = nil;
+
+function ActiveBatch2DRenderer: TCastleBatch2DRenderer;
+begin
+  Result := FActiveBatch2DRenderer;
+end;
+
+procedure SetActiveBatch2DRenderer(const ARenderer: TCastleBatch2DRenderer);
+begin
+  FActiveBatch2DRenderer := ARenderer;
+end;
 
 const
   NL = LineEnding;
@@ -198,6 +215,8 @@ begin
   FreeAndNil(FWhitePixelTexture);
   FreeAndNil(FLinearSampler);
   FreeAndNil(FNearestSampler);
+  if FActiveBatch2DRenderer = Self then
+    FActiveBatch2DRenderer := nil;
   inherited;
 end;
 
@@ -377,6 +396,7 @@ end;
 procedure TCastleBatch2DRenderer.Begin2DPass(const ACmd: TRHICommandList;
   const AViewportWidth, AViewportHeight: Single);
 begin
+  SetActiveBatch2DRenderer(Self);
   FCurrentCmd := ACmd;
   FViewportWidth := Max(1.0, AViewportWidth);
   FViewportHeight := Max(1.0, AViewportHeight);
@@ -388,7 +408,8 @@ begin
   FCurrentScissor := Rectangle(0, 0, Round(FViewportWidth), Round(FViewportHeight));
 
   { Map the streaming VBO for the current frame-in-flight }
-  FMappedVertices := PCastle2DVertex(FFrameVBOs[FDevice.FrameIndex].Map);
+  if (FDevice <> nil) and (FFrameVBOs[FDevice.FrameIndex] <> nil) then
+    FMappedVertices := PCastle2DVertex(FFrameVBOs[FDevice.FrameIndex].Map);
 end;
 
 procedure TCastleBatch2DRenderer.Flush;
@@ -433,9 +454,12 @@ end;
 procedure TCastleBatch2DRenderer.End2DPass;
 begin
   Flush;
-  FFrameVBOs[FDevice.FrameIndex].Unmap;
+  if (FDevice <> nil) and (FFrameVBOs[FDevice.FrameIndex] <> nil) then
+    FFrameVBOs[FDevice.FrameIndex].Unmap;
   FMappedVertices := nil;
   FCurrentCmd := nil;
+  if FActiveBatch2DRenderer = Self then
+    SetActiveBatch2DRenderer(nil);
 end;
 
 procedure TCastleBatch2DRenderer.DrawQuads(

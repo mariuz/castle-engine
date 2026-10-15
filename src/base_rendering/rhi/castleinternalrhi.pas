@@ -253,6 +253,10 @@ type
     Usage: TRHIBufferUsageFlags;
     MemoryUsage: TRHIMemoryUsage;
     DebugName: String;
+    class function Create(const ASize: PtrUInt;
+      const AUsage: TRHIBufferUsageFlags;
+      const AMemoryUsage: TRHIMemoryUsage = muGpuOnly;
+      const ADebugName: String = ''): TRHIBufferDesc; static;
   end;
 
   TRHITextureDesc = record
@@ -638,6 +642,19 @@ end;
 procedure SetRHIDevice(const ADevice: TRHIDevice);
 begin
   FRHIDevice := ADevice;
+end;
+
+{ TRHIBufferDesc }
+
+class function TRHIBufferDesc.Create(const ASize: PtrUInt;
+  const AUsage: TRHIBufferUsageFlags;
+  const AMemoryUsage: TRHIMemoryUsage;
+  const ADebugName: String): TRHIBufferDesc;
+begin
+  Result.Size := ASize;
+  Result.Usage := AUsage;
+  Result.MemoryUsage := AMemoryUsage;
+  Result.DebugName := ADebugName;
 end;
 
 { TRHITextureDesc }
