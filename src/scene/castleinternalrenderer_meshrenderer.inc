@@ -369,6 +369,8 @@ var
   First: Cardinal;
   Mode: TGLenum;
   TexCoordAttrib: TGLSLAttribute;
+  PushConstants: TCastlePushConstantsBlock;
+  NormalMat: TMatrix3;
 begin
   Attribs := nil;
 
@@ -530,34 +532,91 @@ begin
 
       Mode := ToMode[Arrays.Primitive];
       First := 0;
-      if Arrays.HasIndexes then
+      if (ApplicationProperties <> nil) and
+         (ApplicationProperties.RenderBackend = backendVulkan) and
+         (ActiveCommandList <> nil) then
       begin
-        if Vbo[vtIndex] <> GLObjectNone then
+        { 1. Push constants for per-draw ModelView and Normal matrices }
+        PushConstants.ModelViewMatrix := ShapeModelView;
+        NormalMat := ModelViewToNormalMatrix(ShapeModelView);
+        PushConstants.NormalMatrixRow0 := Vector4(NormalMat.Rows[0], 0);
+        PushConstants.NormalMatrixRow1 := Vector4(NormalMat.Rows[1], 0);
+        PushConstants.NormalMatrixRow2 := Vector4(NormalMat.Rows[2], 0);
+        if (Shape.Cache <> nil) and (Shape.Cache.RHIJointBuffer <> nil) then
+          PushConstants.ObjectParams := Vector4(0, 1.0, 0, 0)
+        else
+          PushConstants.ObjectParams := Vector4(0, 0, 0, 0);
+        ActiveCommandList.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConstants), PushConstants);
+
+        { 2. Bind vertex buffers (Coordinate and Attribute) }
+        if (Shape.Cache <> nil) and (Shape.Cache.RHICoordinateBuffer <> nil) then
         begin
-          RenderContext.CurrentVao := Vao;
-          RenderContext.BindBuffer[btElementArray] := Vbo[vtIndex];
+          if Shape.Cache.RHIAttributeBuffer <> nil then
+            ActiveCommandList.BindVertexBuffers(0,
+              [Shape.Cache.RHICoordinateBuffer, Shape.Cache.RHIAttributeBuffer],
+              [0, 0])
+          else
+            ActiveCommandList.BindVertexBuffers(0,
+              [Shape.Cache.RHICoordinateBuffer],
+              [0]);
         end;
 
-        if Arrays.Counts = nil then
-          glDrawElements(Mode, Arrays.IndexesCount,
-            GLIndexConst, Pointer(Arrays.IndexesPtr(First)))
-        else
-          for I := 0 to Arrays.Counts.Count - 1 do
-          begin
-            glDrawElements(Mode, Arrays.Counts[I],
-              GLIndexConst, Pointer(Arrays.IndexesPtr(First)));
-            First := First + Arrays.Counts[I];
-          end;
+        { 3. DrawIndexed / Draw }
+        if Arrays.HasIndexes then
+        begin
+          if (Shape.Cache <> nil) and (Shape.Cache.RHIIndexBuffer <> nil) then
+            ActiveCommandList.BindIndexBuffer(Shape.Cache.RHIIndexBuffer, 0, itUInt32);
+
+          if Arrays.Counts = nil then
+            ActiveCommandList.DrawIndexed(Arrays.IndexesCount, 1, First, 0, 0)
+          else
+            for I := 0 to Arrays.Counts.Count - 1 do
+            begin
+              ActiveCommandList.DrawIndexed(Arrays.Counts[I], 1, First, 0, 0);
+              First := First + Arrays.Counts[I];
+            end;
+        end else
+        begin
+          if Arrays.Counts = nil then
+            ActiveCommandList.Draw(Arrays.Count, 1, First, 0)
+          else
+            for I := 0 to Arrays.Counts.Count - 1 do
+            begin
+              ActiveCommandList.Draw(Arrays.Counts[I], 1, First, 0);
+              First := First + Arrays.Counts[I];
+            end;
+        end;
       end else
       begin
-        if Arrays.Counts = nil then
-          glDrawArrays(Mode, First, Arrays.Count)
-        else
-          for I := 0 to Arrays.Counts.Count - 1 do
+        if Arrays.HasIndexes then
+        begin
+          if Vbo[vtIndex] <> GLObjectNone then
           begin
-            glDrawArrays(Mode, First, Arrays.Counts[I]);
-            First := First + Arrays.Counts[I];
+            RenderContext.CurrentVao := Vao;
+            RenderContext.BindBuffer[btElementArray] := Vbo[vtIndex];
           end;
+
+          if Arrays.Counts = nil then
+            glDrawElements(Mode, Arrays.IndexesCount,
+              GLIndexConst, Pointer(Arrays.IndexesPtr(First)))
+          else
+            for I := 0 to Arrays.Counts.Count - 1 do
+            begin
+              glDrawElements(Mode, Arrays.Counts[I],
+                GLIndexConst, Pointer(Arrays.IndexesPtr(First)));
+              First := First + Arrays.Counts[I];
+            end;
+        end else
+        begin
+          if Arrays.Counts = nil then
+            glDrawArrays(Mode, First, Arrays.Count)
+          else
+            for I := 0 to Arrays.Counts.Count - 1 do
+            begin
+              glDrawArrays(Mode, First, Arrays.Counts[I]);
+              First := First + Arrays.Counts[I];
+            end;
+        end;
       end;
 
       { update Renderer.Statistics.DrawCalls }
@@ -1019,7 +1078,19 @@ begin
      (State.Skin.InternalJointMatrix <> nil) and
      (State.Skin.InternalJointMatrix.Count = State.Skin.FdJoints.Count) and
      (Geometry.SkinWeightsJoints(Weights0, Joints0)) then
+  begin
     Shader.EnableSkinnedAnimation(State.Skin.InternalJointMatrix);
+
+    if (ApplicationProperties <> nil) and
+       (ApplicationProperties.RenderBackend = backendVulkan) and
+       (RHIDevice <> nil) and
+       (Shape.Cache <> nil) then
+    begin
+      Shape.Cache.UploadJointMatrices(
+        State.Skin.InternalJointMatrix.L,
+        State.Skin.InternalJointMatrix.Count);
+    end;
+  end;
 end;
 
 { TShaderCoordinateRenderer -------------------------------------------------- }

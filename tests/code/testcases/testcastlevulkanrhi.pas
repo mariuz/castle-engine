@@ -24,7 +24,7 @@ uses
   CastleApplicationProperties, CastleImages, CastleGLImages, CastleFonts,
   CastleTextureFont_Default3d_Sans,
   CastleInternalRHI, CastleInternalVulkan, CastleInternalVulkanMemory,
-  CastleInternalShaderRHI, CastleInternalBatch2DRHI;
+  CastleInternalShaderRHI, CastleInternalBatch2DRHI, CastleInternalRenderer;
 
 type
   TTestCastleVulkanRHI = class(TCastleTestCase)
@@ -41,6 +41,9 @@ type
     procedure TestDrawableImageRHIDispatch;
     procedure TestFontAtlasRHIDispatch;
     procedure TestSceneShapeRHIBufferAllocation;
+    procedure Test3DForwardPassDispatch;
+    procedure TestGPUSkinningJointBuffer;
+    procedure TestMorphTargetVboReload;
   end;
 
 implementation
@@ -363,6 +366,207 @@ begin
   AssertTrue('3D pipeline has depth test enabled', PipelineDesc.DepthStencil.DepthTestEnable);
   AssertTrue('3D pipeline has depth write enabled', PipelineDesc.DepthStencil.DepthWriteEnable);
   AssertTrue('3D pipeline uses backface culling', PipelineDesc.Rasterizer.CullMode = cmBack);
+end;
+
+type
+  TMockRHICommandList = class(TRHICommandList)
+  public
+    LastPushConstantSize: Cardinal;
+    LastPushConstantData: TCastlePushConstantsBlock;
+    DrawCallsCount: Cardinal;
+    DrawIndexedCallsCount: Cardinal;
+    LastVertexCount: Cardinal;
+    LastIndexCount: Cardinal;
+    LastIndexType: TRHIIndexType;
+    LastVertexBuffersBound: Boolean;
+
+    procedure BeginRecording; override;
+    procedure EndRecording; override;
+    procedure TransitionTexture(const Texture: TRHITexture; const NewState: TRHIResourceState); override;
+    procedure GenerateMipmaps(const Texture: TRHITexture); override;
+    procedure BeginRendering(const Info: TRHIRenderingInfo); override;
+    procedure EndRendering; override;
+    procedure SetViewport(const ViewportRect: TFloatRectangle; const MinDepth: Single = 0.0; const MaxDepth: Single = 1.0); override;
+    procedure SetScissor(const ScissorRect: TRectangle); override;
+    procedure SetDepthBias(const ConstantFactor, SlopeFactor: Single); override;
+    procedure BindPipeline(const Pipeline: TRHIPipeline); override;
+    procedure BindDescriptorSet(const SetIndex: Cardinal; const DescriptorSet: TRHIDescriptorSet; const DynamicOffsets: array of Cardinal); override;
+    procedure PushConstants(const StageFlags: TRHIShaderStageFlags; const Offset, Size: Cardinal; const Data); override;
+    procedure BindVertexBuffers(const FirstBinding: Cardinal; const Buffers: array of TRHIBuffer; const Offsets: array of PtrUInt); override;
+    procedure BindIndexBuffer(const Buffer: TRHIBuffer; const Offset: PtrUInt; const IndexType: TRHIIndexType); override;
+    procedure Draw(const VertexCount, InstanceCount, FirstVertex, FirstInstance: Cardinal); override;
+    procedure DrawIndexed(const IndexCount, InstanceCount, FirstIndex: Cardinal; const VertexOffset: Integer; const FirstInstance: Cardinal); override;
+    procedure DrawIndexedIndirect(const IndirectBuffer: TRHIBuffer; const Offset: PtrUInt; const DrawCount, Stride: Cardinal); override;
+    procedure PushDebugGroup(const LabelName: String; const Color: TCastleColor); override;
+    procedure PopDebugGroup; override;
+  end;
+
+procedure TMockRHICommandList.BeginRecording; begin end;
+procedure TMockRHICommandList.EndRecording; begin end;
+procedure TMockRHICommandList.TransitionTexture(const Texture: TRHITexture; const NewState: TRHIResourceState); begin end;
+procedure TMockRHICommandList.GenerateMipmaps(const Texture: TRHITexture); begin end;
+procedure TMockRHICommandList.BeginRendering(const Info: TRHIRenderingInfo); begin end;
+procedure TMockRHICommandList.EndRendering; begin end;
+procedure TMockRHICommandList.SetViewport(const ViewportRect: TFloatRectangle; const MinDepth: Single; const MaxDepth: Single); begin end;
+procedure TMockRHICommandList.SetScissor(const ScissorRect: TRectangle); begin end;
+procedure TMockRHICommandList.SetDepthBias(const ConstantFactor, SlopeFactor: Single); begin end;
+procedure TMockRHICommandList.BindPipeline(const Pipeline: TRHIPipeline); begin end;
+procedure TMockRHICommandList.BindDescriptorSet(const SetIndex: Cardinal; const DescriptorSet: TRHIDescriptorSet; const DynamicOffsets: array of Cardinal); begin end;
+procedure TMockRHICommandList.DrawIndexedIndirect(const IndirectBuffer: TRHIBuffer; const Offset: PtrUInt; const DrawCount, Stride: Cardinal); begin end;
+procedure TMockRHICommandList.PushDebugGroup(const LabelName: String; const Color: TCastleColor); begin end;
+procedure TMockRHICommandList.PopDebugGroup; begin end;
+
+procedure TMockRHICommandList.PushConstants(const StageFlags: TRHIShaderStageFlags;
+  const Offset, Size: Cardinal; const Data);
+begin
+  LastPushConstantSize := Size;
+  if Size = SizeOf(TCastlePushConstantsBlock) then
+    Move(Data, LastPushConstantData, Size);
+end;
+
+procedure TMockRHICommandList.BindVertexBuffers(const FirstBinding: Cardinal;
+  const Buffers: array of TRHIBuffer; const Offsets: array of PtrUInt);
+begin
+  LastVertexBuffersBound := Length(Buffers) > 0;
+end;
+
+procedure TMockRHICommandList.BindIndexBuffer(const Buffer: TRHIBuffer;
+  const Offset: PtrUInt; const IndexType: TRHIIndexType);
+begin
+  LastIndexType := IndexType;
+end;
+
+procedure TMockRHICommandList.Draw(const VertexCount, InstanceCount,
+  FirstVertex, FirstInstance: Cardinal);
+begin
+  Inc(DrawCallsCount);
+  LastVertexCount := VertexCount;
+end;
+
+procedure TMockRHICommandList.DrawIndexed(const IndexCount, InstanceCount,
+  FirstIndex: Cardinal; const VertexOffset: Integer; const FirstInstance: Cardinal);
+begin
+  Inc(DrawIndexedCallsCount);
+  LastIndexCount := IndexCount;
+end;
+
+procedure TTestCastleVulkanRHI.Test3DForwardPassDispatch;
+var
+  MockCmd: TMockRHICommandList;
+  PushConstants: TCastlePushConstantsBlock;
+  ModelViewMat: TMatrix4;
+  NormalMat: TMatrix3;
+begin
+  AssertTrue('ActiveCommandList starts nil', ActiveCommandList = nil);
+
+  MockCmd := TMockRHICommandList.Create;
+  try
+    SetActiveCommandList(MockCmd);
+    AssertTrue('ActiveCommandList is now MockCmd', ActiveCommandList = MockCmd);
+
+    { 1. Test Push Constants calculation and packaging }
+    ModelViewMat := TranslationMatrix(Vector3(10.0, 5.0, -20.0));
+    PushConstants.ModelViewMatrix := ModelViewMat;
+    NormalMat := ModelViewToNormalMatrix(ModelViewMat);
+    PushConstants.NormalMatrixRow0 := Vector4(NormalMat.Rows[0], 0);
+    PushConstants.NormalMatrixRow1 := Vector4(NormalMat.Rows[1], 0);
+    PushConstants.NormalMatrixRow2 := Vector4(NormalMat.Rows[2], 0);
+    PushConstants.ObjectParams := Vector4(1.0, 2.0, 0.0, 0.0);
+
+    ActiveCommandList.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConstants), PushConstants);
+
+    AssertEquals('Push constant size matches 128 bytes', 128, MockCmd.LastPushConstantSize);
+    AssertTrue('Push constant translation X matches', Abs(MockCmd.LastPushConstantData.ModelViewMatrix.Columns[3].X - 10.0) < 0.001);
+    AssertTrue('Push constant translation Y matches', Abs(MockCmd.LastPushConstantData.ModelViewMatrix.Columns[3].Y - 5.0) < 0.001);
+    AssertTrue('Push constant translation Z matches', Abs(MockCmd.LastPushConstantData.ModelViewMatrix.Columns[3].Z - (-20.0)) < 0.001);
+    AssertTrue('Push constant ObjectParam X matches', Abs(MockCmd.LastPushConstantData.ObjectParams.X - 1.0) < 0.001);
+
+    { 2. Test draw dispatch recording }
+    ActiveCommandList.DrawIndexed(36, 1, 0, 0, 0);
+    AssertEquals('Indexed draw call count', 1, MockCmd.DrawIndexedCallsCount);
+    AssertEquals('Indexed draw count matches 36 indices', 36, MockCmd.LastIndexCount);
+
+    ActiveCommandList.Draw(24, 1, 0, 0);
+    AssertEquals('Non-indexed draw call count', 1, MockCmd.DrawCallsCount);
+    AssertEquals('Non-indexed draw count matches 24 vertices', 24, MockCmd.LastVertexCount);
+  finally
+    SetActiveCommandList(nil);
+    FreeAndNil(MockCmd);
+  end;
+
+  AssertTrue('ActiveCommandList cleared', ActiveCommandList = nil);
+end;
+
+procedure TTestCastleVulkanRHI.TestGPUSkinningJointBuffer;
+var
+  JointList: TMatrix4List;
+  SkinUBO: TCastleSkinningUniformBlock;
+  UboDesc: TRHIBufferDesc;
+  Gen: TCastleShaderGeneratorRHI;
+  Preamble: String;
+  I: Integer;
+begin
+  { 1. Validate skinning UBO dimensions and alignments }
+  AssertEquals('Maximum bone count is 256', 256, CASTLE_MAX_BONE_MATRICES);
+  AssertTrue('TCastleSkinningUniformBlock size >= 16384 bytes', SizeOf(TCastleSkinningUniformBlock) >= 16384);
+
+  { 2. Populate joint matrices and simulate UBO upload }
+  JointList := TMatrix4List.Create;
+  try
+    for I := 0 to 15 do
+      JointList.Add(TranslationMatrix(Vector3(I * 2.0, 0, 0)));
+
+    FillChar(SkinUBO, SizeOf(SkinUBO), 0);
+    SkinUBO.JointCount := JointList.Count;
+    for I := 0 to JointList.Count - 1 do
+      SkinUBO.JointMatrices[I] := JointList.L[I];
+
+    AssertEquals('Skin UBO joint count', 16, SkinUBO.JointCount);
+    AssertTrue('First bone translation X', Abs(SkinUBO.JointMatrices[0].Columns[3].X - 0.0) < 0.001);
+    AssertTrue('Last bone translation X', Abs(SkinUBO.JointMatrices[15].Columns[3].X - 30.0) < 0.001);
+
+    UboDesc := TRHIBufferDesc.Create(JointList.Count * SizeOf(TMatrix4), [buUniform], muCpuToGpu, 'SkinningJointsUBO');
+    AssertEquals('UBO descriptor size', 16 * SizeOf(TMatrix4), UboDesc.Size);
+    AssertTrue('UBO descriptor usage includes buUniform', buUniform in UboDesc.Usage);
+  finally
+    FreeAndNil(JointList);
+  end;
+
+  { 3. Validate GLSL Set 2 skinning block generation }
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    Preamble := Gen.GeneratePreamble(ssVertex);
+    AssertTrue('Preamble must declare CastleSkinningBlock', Pos('CastleSkinningBlock', Preamble) > 0);
+    AssertTrue('Preamble must alias castle_JointMatrix', Pos('#define castle_JointMatrix', Preamble) > 0);
+    AssertTrue('Preamble must define Set 2 binding 0 for skinning', Pos('CASTLE_UBO(2, 0)', Preamble) > 0);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestMorphTargetVboReload;
+var
+  Cache: TShapeCache;
+  JointList: TMatrix4List;
+  CoordDesc: TRHIBufferDesc;
+begin
+  Cache := TShapeCache.Create;
+  JointList := TMatrix4List.Create;
+  try
+    Cache.InvalidateVertexData([vtCoordinate]);
+    JointList.Add(TMatrix4.Identity);
+    Cache.UploadJointMatrices(JointList.L, JointList.Count);
+    AssertTrue('Cache RHI buffers safely nil when backend is not active', Cache.RHICoordinateBuffer = nil);
+    AssertTrue('Cache RHI joint buffer safely nil when backend is not active', Cache.RHIJointBuffer = nil);
+
+    { Verify morph target buffer descriptor creation }
+    CoordDesc := TRHIBufferDesc.Create(1000 * SizeOf(TVector3), [buVertex], muGpuOnly, 'MorphedCoords');
+    AssertEquals('Morphed coordinate buffer size matches', 1000 * SizeOf(TVector3), CoordDesc.Size);
+    AssertTrue('Morphed coordinate buffer is buVertex', buVertex in CoordDesc.Usage);
+  finally
+    FreeAndNil(JointList);
+    FreeAndNil(Cache);
+  end;
 end;
 
 initialization

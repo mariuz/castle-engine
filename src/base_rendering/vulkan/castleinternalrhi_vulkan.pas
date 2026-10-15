@@ -1253,6 +1253,7 @@ destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
+  SetActiveCommandList(nil);
   WaitIdle;
   DestroySwapchain;
   FreeAndNil(FPipelineMap);
@@ -1371,6 +1372,7 @@ begin
   { 3. Begin command list recording }
   Frame.CommandList.BeginRecording;
   Result := Frame.CommandList;
+  SetActiveCommandList(Result);
 end;
 
 procedure TVulkanRHIDevice.EndFrameAndPresent;
@@ -1381,6 +1383,7 @@ var
   PresentInfo: VkPresentInfoKHR;
   CmdHandle: VkCommandBuffer;
 begin
+  SetActiveCommandList(nil);
   Frame := FFrames[FFrameIndex];
 
   { Ensure swapchain backbuffer is transitioned to VK_IMAGE_LAYOUT_PRESENT_SRC_KHR }

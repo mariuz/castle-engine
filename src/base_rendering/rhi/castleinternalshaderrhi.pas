@@ -26,6 +26,10 @@ uses
   CastleVectors, CastleColors, CastleStringUtils, CastleLog,
   CastleInternalRHI;
 
+const
+  { Maximum bone matrices supported in Set 2 skinning UBO }
+  CASTLE_MAX_BONE_MATRICES = 256;
+
 type
   { Standard CGE Vertex Attribute Locations (strictly fixed across all shaders) }
   TCastleVertexLocation = (
@@ -70,6 +74,14 @@ type
     NormalMatrixRow2: TVector4;     // 16 bytes
     ObjectParams: TVector4;         // 16 bytes (x = MaterialIndex, y = BoneOffset, zw = Custom)
   end; // Total = 128 bytes
+
+  { CPU-side mirror of Set 2, Binding 0 (Per-Object Skinning UBO - std140) }
+  PCastleSkinningUniformBlock = ^TCastleSkinningUniformBlock;
+  TCastleSkinningUniformBlock = packed record
+    JointMatrices: array [0 .. CASTLE_MAX_BONE_MATRICES - 1] of TMatrix4; // 256 * 64 = 16384 bytes
+    JointCount: Cardinal;
+    Padding0, Padding1, Padding2: Cardinal;
+  end;
 
   { Generates RHI-compliant GLSL headers, UBO blocks, and varying layouts }
   TCastleShaderGeneratorRHI = class
@@ -199,6 +211,14 @@ begin
     'CASTLE_SAMPLER(1, 3) uniform sampler2D castle_metallic_roughness_texture;' + NL +
     'CASTLE_SAMPLER(1, 4) uniform sampler2D castle_emissive_texture;' + NL +
     NL +
+    '/* --- Set 2: Per-Object / Skinning Uniforms --- */' + NL +
+    'CASTLE_UBO(2, 0) uniform CastleSkinningBlock {' + NL +
+    '  mat4 u_JointMatrices[256];' + NL +
+    '  uint u_JointCount;' + NL +
+    '} CastleSkinning;' + NL +
+    NL +
+    '#define castle_JointMatrix CastleSkinning.u_JointMatrices' + NL +
+    NL +
     '/* --- Push Constants: Per-Draw Matrices --- */' + NL +
     'CASTLE_PUSH_CONSTANT uniform CastlePushConstants {' + NL +
     '  mat4 u_ModelViewMatrix;' + NL +
@@ -277,7 +297,7 @@ begin
   StrippedBody := TStringBuilder.Create;
   try
     Lines.Text := UserEffectSource;
-    CustomSamplerSlot := 1;
+    CustomSamplerSlot := 2;
 
     for Line in Lines do
     begin
@@ -314,7 +334,7 @@ begin
     if UBOMembers.Length > 0 then
       Result :=
         '/* --- Auto-Generated Set 2 UBO for User X3D Effect Node --- */' + NL +
-        'CASTLE_UBO(2, 0) uniform CastleUserEffectBlock {' + NL +
+        'CASTLE_UBO(2, 1) uniform CastleUserEffectBlock {' + NL +
         UBOMembers.ToString +
         '} CastleUserEffect;' + NL +
         AliasDefines.ToString + NL +

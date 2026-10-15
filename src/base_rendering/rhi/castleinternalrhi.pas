@@ -629,10 +629,15 @@ const
 function RHIDevice: TRHIDevice;
 procedure SetRHIDevice(const ADevice: TRHIDevice);
 
+{ Global active RHI command list being recorded for current frame/pass. }
+function ActiveCommandList: TRHICommandList;
+procedure SetActiveCommandList(const ACmdList: TRHICommandList);
+
 implementation
 
 var
   FRHIDevice: TRHIDevice = nil;
+  FActiveCommandList: TRHICommandList = nil;
 
 function RHIDevice: TRHIDevice;
 begin
@@ -642,6 +647,16 @@ end;
 procedure SetRHIDevice(const ADevice: TRHIDevice);
 begin
   FRHIDevice := ADevice;
+end;
+
+function ActiveCommandList: TRHICommandList;
+begin
+  Result := FActiveCommandList;
+end;
+
+procedure SetActiveCommandList(const ACmdList: TRHICommandList);
+begin
+  FActiveCommandList := ACmdList;
 end;
 
 { TRHIBufferDesc }
