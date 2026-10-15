@@ -440,7 +440,7 @@ constructor TOpenGLRHITexture.Create(const ADevice: TOpenGLRHIDevice;
 var
   InternalFormat: TGLint;
   PixelFormat, PixelType: TGLenum;
-  Mip, W, H: Cardinal;
+  Mip, W, H, Face: Cardinal;
 begin
   inherited Create(ADevice, ADesc);
   FIsDefaultBackbuffer := False;
@@ -457,13 +457,29 @@ begin
   glGenTextures(1, @FHandle);
   glBindTexture(FTarget, FHandle);
 
-  W := ADesc.Width;
-  H := ADesc.Height;
-  for Mip := 0 to ADesc.MipLevels - 1 do
+  if ADesc.Dimension = tdCube then
   begin
-    glTexImage2D(FTarget, Mip, InternalFormat, W, H, 0, PixelFormat, PixelType, nil);
-    W := Max(1, W div 2);
-    H := Max(1, H div 2);
+    for Face := 0 to 5 do
+    begin
+      W := ADesc.Width;
+      H := ADesc.Height;
+      for Mip := 0 to ADesc.MipLevels - 1 do
+      begin
+        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + Face, Mip, InternalFormat, W, H, 0, PixelFormat, PixelType, nil);
+        W := Max(1, W div 2);
+        H := Max(1, H div 2);
+      end;
+    end;
+  end else
+  begin
+    W := ADesc.Width;
+    H := ADesc.Height;
+    for Mip := 0 to ADesc.MipLevels - 1 do
+    begin
+      glTexImage2D(FTarget, Mip, InternalFormat, W, H, 0, PixelFormat, PixelType, nil);
+      W := Max(1, W div 2);
+      H := Max(1, H div 2);
+    end;
   end;
 
   glTexParameteri(FTarget, GL_TEXTURE_MIN_FILTER, GL_LINEAR);

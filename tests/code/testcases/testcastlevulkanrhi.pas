@@ -48,6 +48,9 @@ type
     procedure TestMultiLightUBO;
     procedure TestDepthOnlyDynamicRenderingPass;
     procedure TestSanitizeVulkanShaderSource;
+    procedure TestCubeMapTextureDesc;
+    procedure TestScreenEffectPreambleAndSSAO;
+    procedure TestCustomEffectAutomaticUniformInjection;
   end;
 
 implementation
@@ -700,6 +703,118 @@ begin
     { Code usage inside main() must remain intact }
     AssertTrue('Shader body must be preserved',
       Pos('vec3 l = castle_LightSource0Position;', SanitizedGLSL) > 0);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCubeMapTextureDesc;
+var
+  Desc: TRHITextureDesc;
+begin
+  Desc := TRHITextureDesc.CreateCube(512, pfRGBA8_UNorm, [tuSampled, tuTransferDst], 4);
+  AssertEquals('Cube map dimension', Ord(tdCube), Ord(Desc.Dimension));
+  AssertEquals('Cube map width', 512, Desc.Width);
+  AssertEquals('Cube map height', 512, Desc.Height);
+  AssertEquals('Cube map depth/array layers must be 6', 6, Desc.DepthOrArrayLayers);
+  AssertEquals('Cube map mip levels', 4, Desc.MipLevels);
+  AssertEquals('Cube map sample count', 1, Desc.SampleCount);
+  AssertEquals('Cube map pixel format', Ord(pfRGBA8_UNorm), Ord(Desc.Format));
+  AssertTrue('Cube map usage tuSampled', tuSampled in Desc.Usage);
+  AssertTrue('Cube map usage tuTransferDst', tuTransferDst in Desc.Usage);
+end;
+
+procedure TTestCastleVulkanRHI.TestScreenEffectPreambleAndSSAO;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  VertPreamble, FragPreambleDepth, FragPreambleNoDepth: String;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { Fragment shader with depth (used by SSAO and depth-aware screen effects) }
+    FragPreambleDepth := Gen.GenerateScreenEffectPreamble(ssFragment, True);
+    AssertTrue('Screen effect preamble contains #version 450', Pos('#version 450', FragPreambleDepth) > 0);
+    AssertTrue('Screen effect contains screen push constants', Pos('CastleScreenPushConstants', FragPreambleDepth) > 0);
+    AssertTrue('Screen effect aliases screen_width', Pos('#define screen_width (castle_Screen.screen_size.x)', FragPreambleDepth) > 0);
+    AssertTrue('Screen effect aliases near plane', Pos('#define near (castle_Screen.screen_planes.x)', FragPreambleDepth) > 0);
+    AssertTrue('Screen effect aliases far plane', Pos('#define far (castle_Screen.screen_planes.y)', FragPreambleDepth) > 0);
+    AssertTrue('Screen effect binds screen sampler at Set 0 Binding 0',
+      Pos('layout(set = 0, binding = 0) uniform sampler2D screen;', FragPreambleDepth) > 0);
+    AssertTrue('Screen effect binds screen_depth sampler at Set 0 Binding 1',
+      Pos('layout(set = 0, binding = 1) uniform sampler2D screen_depth;', FragPreambleDepth) > 0);
+    AssertTrue('Screen effect defines texture2D compatibility macro', Pos('#define texture2D texture', FragPreambleDepth) > 0);
+    AssertTrue('Screen effect defines gl_FragColor alias', Pos('#define gl_FragColor castle_FragColor', FragPreambleDepth) > 0);
+    AssertTrue('Screen effect outputs castle_FragColor at location 0',
+      Pos('layout(location = 0) out vec4 castle_FragColor;', FragPreambleDepth) > 0);
+    AssertTrue('Screen effect inputs tex_coord at location 0',
+      Pos('layout(location = 0) in vec2 tex_coord;', FragPreambleDepth) > 0);
+
+    { Fragment shader without depth (simple color grading, vignette, blur) }
+    FragPreambleNoDepth := Gen.GenerateScreenEffectPreamble(ssFragment, False);
+    AssertTrue('No-depth preamble has screen sampler', Pos('uniform sampler2D screen;', FragPreambleNoDepth) > 0);
+    AssertFalse('No-depth preamble must NOT have screen_depth sampler', Pos('screen_depth', FragPreambleNoDepth) > 0);
+
+    { Vertex shader for screen effect quad }
+    VertPreamble := Gen.GenerateScreenEffectPreamble(ssVertex, False);
+    AssertTrue('Vertex preamble inputs vertex attribute at location 0',
+      Pos('layout(location = 0) in vec2 vertex;', VertPreamble) > 0);
+    AssertTrue('Vertex preamble inputs tex_coord attribute at location 1',
+      Pos('layout(location = 1) in vec2 tex_coord;', VertPreamble) > 0);
+    AssertTrue('Vertex preamble outputs v_tex_coord at location 0',
+      Pos('layout(location = 0) out vec2 v_tex_coord;', VertPreamble) > 0);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCustomEffectAutomaticUniformInjection;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  UserGLSL, UpgradedGLSL: String;
+const
+  NL = LineEnding;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    UserGLSL :=
+      'uniform float u_intensity;' + NL +
+      'uniform vec3 u_tint;' + NL +
+      'uniform mediump float u_roughness;' + NL +
+      'uniform sampler2D u_noiseTexture;' + NL +
+      'uniform float u_weights[4];' + NL +
+      'void PLUG_custom_surface() {' + NL +
+      '  float f = u_intensity * u_roughness * u_weights[0];' + NL +
+      '  vec4 n = texture(u_noiseTexture, vec2(f, f)) * vec4(u_tint, 1.0);' + NL +
+      '}' + NL;
+
+    UpgradedGLSL := Gen.UpgradeUserEffectUniforms(UserGLSL);
+
+    { Value uniforms must be gathered into CastleUserEffectBlock at Set 2 Binding 1 }
+    AssertTrue('Upgraded shader contains CastleUserEffectBlock UBO at Set 2 Binding 1',
+      Pos('CASTLE_UBO(2, 1) uniform CastleUserEffectBlock', UpgradedGLSL) > 0);
+    AssertTrue('UBO contains u_user_u_intensity', Pos('float u_user_u_intensity;', UpgradedGLSL) > 0);
+    AssertTrue('UBO contains u_user_u_tint', Pos('vec3 u_user_u_tint;', UpgradedGLSL) > 0);
+    AssertTrue('UBO contains u_user_u_roughness with stripped precision qualifier',
+      Pos('float u_user_u_roughness;', UpgradedGLSL) > 0);
+    AssertTrue('UBO contains array u_user_u_weights[4]', Pos('float u_user_u_weights[4];', UpgradedGLSL) > 0);
+
+    { Aliases must redirect bare variable names to CastleUserEffect.u_user_* }
+    AssertTrue('Alias define for u_intensity',
+      Pos('#define u_intensity CastleUserEffect.u_user_u_intensity', UpgradedGLSL) > 0);
+    AssertTrue('Alias define for u_tint',
+      Pos('#define u_tint CastleUserEffect.u_user_u_tint', UpgradedGLSL) > 0);
+    AssertTrue('Alias define for u_roughness',
+      Pos('#define u_roughness CastleUserEffect.u_user_u_roughness', UpgradedGLSL) > 0);
+    AssertTrue('Alias define for u_weights',
+      Pos('#define u_weights CastleUserEffect.u_user_u_weights', UpgradedGLSL) > 0);
+
+    { Samplers must be assigned to Set 2 Binding 2+ }
+    AssertTrue('Sampler assigned to Set 2 Binding 2',
+      Pos('CASTLE_SAMPLER(2, 2) uniform sampler2D u_noiseTexture;', UpgradedGLSL) > 0);
+
+    { User function body must remain intact }
+    AssertTrue('Shader body preserved', Pos('void PLUG_custom_surface()', UpgradedGLSL) > 0);
+    AssertTrue('Texture lookup preserved', Pos('vec4 n = texture(u_noiseTexture, vec2(f, f))', UpgradedGLSL) > 0);
   finally
     FreeAndNil(Gen);
   end;

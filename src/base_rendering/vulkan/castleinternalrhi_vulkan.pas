@@ -554,6 +554,8 @@ begin
   FillChar(ImgInfo, SizeOf(ImgInfo), 0);
   ImgInfo.sType := VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   ImgInfo.imageType := VK_IMAGE_TYPE_2D;
+  if ADesc.Dimension in [tdCube, tdCubeArray] then
+    ImgInfo.flags := VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
   ImgInfo.format := RHIToVkFormat(ADesc.Format);
   ImgInfo.extent.width := ADesc.Width;
   ImgInfo.extent.height := ADesc.Height;
@@ -584,7 +586,13 @@ begin
   FillChar(ViewInfo, SizeOf(ViewInfo), 0);
   ViewInfo.sType := VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
   ViewInfo.image := FImage;
-  ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_2D;
+  case ADesc.Dimension of
+    td2D: ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_2D;
+    td2DArray: ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+    td3D: ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_3D;
+    tdCube: ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_CUBE;
+    tdCubeArray: ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
+  end;
   ViewInfo.format := ImgInfo.format;
   ViewInfo.subresourceRange.aspectMask := FAspectMask;
   ViewInfo.subresourceRange.baseMipLevel := 0;

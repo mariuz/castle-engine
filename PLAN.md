@@ -176,14 +176,14 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 3 Status**: Completed. Shader generation, UBO layout, SPIR-V cache, geometry buffer abstraction, depth remapping, TShapeCache RHI buffers, 3D forward pass execution pipeline, and GPU skinning/morph targets fully integrated and tested (15 unit tests passing).
 
 
-### Phase 4: Lighting, Shadows, and Advanced Effects
+### Phase 4: Lighting, Shadows, and Advanced Effects (COMPLETED)
 
 * [x] Implement multi-light UBOs / SSBOs supporting CGE's point, directional, and spot lights (`TCastleLightsUniformBlock`, Set 0 Binding 1, `#define` aliases).
 * [x] Port Shadow Maps pass foundation (depth-only dynamic rendering passes, `TRHIRenderingInfo.CreateDepthOnly`, `DefaultShadowMap`, projector matrices in lights block).
-* [ ] Port Cube Map reflections, Screen-Space Ambient Occlusion (SSAO), and post-processing (TCastleScreenEffects).
-* [ ] Verify custom X3D Effect and EffectPart user shaders with automatic uniform injection.
+* [x] Port Cube Map reflections, Screen-Space Ambient Occlusion (SSAO), and post-processing (TCastleScreenEffects).
+* [x] Verify custom X3D Effect and EffectPart user shaders with automatic uniform injection.
 
-**Milestone 4 Status**: In Progress. Multi-light std140 uniform block, eye-space parameter mapping, shadow map projector matrix integration, depth-only dynamic rendering pass abstractions, and shader sanitization completed and verified (18/18 tests passing).
+**Milestone 4 Status**: Completed. Multi-light std140 uniform block, shadow map projector matrix integration, depth-only dynamic rendering pass abstractions, cube map texture descriptors and RHI backend support, GLSL 450 screen effect preambles with push constants and depth-aware SSAO, and automatic user Effect uniform injection into Set 2 Binding 1 UBO fully integrated and tested (21 unit tests passing).
 
 
 ### Phase 5: Optimization, Multi-Threading & Platform Polish

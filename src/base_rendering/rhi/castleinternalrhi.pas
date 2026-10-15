@@ -273,6 +273,10 @@ type
       const AFormat: TRHIPixelFormat;
       const AUsage: TRHITextureUsageFlags = [tuSampled, tuTransferDst];
       const AMipLevels: Cardinal = 1): TRHITextureDesc; static;
+    class function CreateCube(const ASize: Cardinal;
+      const AFormat: TRHIPixelFormat;
+      const AUsage: TRHITextureUsageFlags = [tuSampled, tuTransferDst];
+      const AMipLevels: Cardinal = 1): TRHITextureDesc; static;
   end;
 
   TRHISamplerDesc = record
@@ -692,6 +696,21 @@ begin
   Result.Width := AWidth;
   Result.Height := AHeight;
   Result.DepthOrArrayLayers := 1;
+  Result.MipLevels := AMipLevels;
+  Result.SampleCount := 1;
+  Result.Format := AFormat;
+  Result.Usage := AUsage;
+end;
+
+class function TRHITextureDesc.CreateCube(const ASize: Cardinal;
+  const AFormat: TRHIPixelFormat; const AUsage: TRHITextureUsageFlags;
+  const AMipLevels: Cardinal): TRHITextureDesc;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  Result.Dimension := tdCube;
+  Result.Width := ASize;
+  Result.Height := ASize;
+  Result.DepthOrArrayLayers := 6;
   Result.MipLevels := AMipLevels;
   Result.SampleCount := 1;
   Result.Format := AFormat;

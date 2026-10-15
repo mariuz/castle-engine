@@ -136,6 +136,9 @@ type
     { Strips or comments out legacy bare uniform declarations replaced by Set 0..2 UBOs and Push Constants }
     function SanitizeVulkanShaderSource(const Source: String): String;
 
+    { Builds GLSL 450 preamble for post-processing screen effects (TCastleScreenEffects) }
+    function GenerateScreenEffectPreamble(const AStage: TRHIShaderStage; const HasDepth: Boolean): String;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -424,12 +427,15 @@ function TCastleShaderGeneratorRHI.UpgradeUserEffectUniforms(
 var
   Lines: TStringList;
   UBOMembers, AliasDefines, StrippedBody: TStringBuilder;
-  Line, Trimmed, DeclBody, VarType, VarName: String;
-  SpacePos, SemiPos, CustomSamplerSlot: Integer;
+  Line, Trimmed, DeclBody, VarType, VarName, BaseName, ArraySuffix: String;
+  SpacePos, SemiPos, BracketPos, CustomSamplerSlot: Integer;
 begin
+  if FBackend <> rbVulkan then
+    Exit(UserEffectSource);
+
   { Parses custom user EffectPart code looking for bare "uniform float my_var;"
-    declarations. Sampler uniforms are assigned to Set 2 bindings 1+, and value
-    uniforms are packed into a generated Set 2, Binding 0 UBO with #define aliases. }
+    declarations. Sampler uniforms are assigned to Set 2 bindings 2+, and value
+    uniforms are packed into a generated Set 2, Binding 1 UBO with #define aliases. }
   Lines := TStringList.Create;
   UBOMembers := TStringBuilder.Create;
   AliasDefines := TStringBuilder.Create;
@@ -448,6 +454,14 @@ begin
         if SemiPos > 0 then
           DeclBody := Copy(DeclBody, 1, SemiPos - 1);
 
+        { Strip precision qualifiers if present }
+        if IsPrefix('lowp ', DeclBody, False) then
+          DeclBody := Trim(Copy(DeclBody, Length('lowp ') + 1, MaxInt))
+        else if IsPrefix('mediump ', DeclBody, False) then
+          DeclBody := Trim(Copy(DeclBody, Length('mediump ') + 1, MaxInt))
+        else if IsPrefix('highp ', DeclBody, False) then
+          DeclBody := Trim(Copy(DeclBody, Length('highp ') + 1, MaxInt));
+
         SpacePos := Pos(' ', DeclBody);
         if SpacePos > 0 then
         begin
@@ -461,9 +475,20 @@ begin
             Inc(CustomSamplerSlot);
           end else
           begin
-            UBOMembers.AppendLine(Format('  %s u_user_%s;', [VarType, VarName]));
-            AliasDefines.AppendLine(Format('#define %s CastleUserEffect.u_user_%s',
-              [VarName, VarName]));
+            BracketPos := Pos('[', VarName);
+            if BracketPos > 0 then
+            begin
+              BaseName := Trim(Copy(VarName, 1, BracketPos - 1));
+              ArraySuffix := Trim(Copy(VarName, BracketPos, MaxInt));
+              UBOMembers.AppendLine(Format('  %s u_user_%s%s;', [VarType, BaseName, ArraySuffix]));
+              AliasDefines.AppendLine(Format('#define %s CastleUserEffect.u_user_%s',
+                [BaseName, BaseName]));
+            end else
+            begin
+              UBOMembers.AppendLine(Format('  %s u_user_%s;', [VarType, VarName]));
+              AliasDefines.AppendLine(Format('#define %s CastleUserEffect.u_user_%s',
+                [VarName, VarName]));
+            end;
           end;
         end;
       end else
@@ -546,6 +571,58 @@ begin
   finally
     FreeAndNil(ResultBuilder);
     FreeAndNil(Lines);
+  end;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateScreenEffectPreamble(
+  const AStage: TRHIShaderStage; const HasDepth: Boolean): String;
+begin
+  if FBackend <> rbVulkan then
+    Exit('');
+
+  Result :=
+    '#version 450' + NL +
+    '#extension GL_ARB_separate_shader_objects : enable' + NL +
+    NL +
+    '/* --- Screen Effect Push Constants --- */' + NL +
+    'layout(push_constant) uniform CastleScreenPushConstants {' + NL +
+    '  vec2 screen_size;' + NL +
+    '  vec2 screen_planes;' + NL +
+    '  vec4 screen_custom;' + NL +
+    '} castle_Screen;' + NL +
+    NL +
+    '#define screen_width (castle_Screen.screen_size.x)' + NL +
+    '#define screen_height (castle_Screen.screen_size.y)' + NL +
+    '#define near (castle_Screen.screen_planes.x)' + NL +
+    '#define far (castle_Screen.screen_planes.y)' + NL +
+    NL +
+    '/* --- Screen Effect Textures (Set 0) --- */' + NL +
+    'layout(set = 0, binding = 0) uniform sampler2D screen;' + NL;
+
+  if HasDepth then
+    Result := Result +
+      'layout(set = 0, binding = 1) uniform sampler2D screen_depth;' + NL;
+
+  Result := Result +
+    NL +
+    '/* --- Compatibility Aliases --- */' + NL +
+    '#define texture2D texture' + NL +
+    '#define textureCube texture' + NL +
+    NL;
+
+  case AStage of
+    ssVertex:
+      Result := Result +
+        '/* --- Vertex Shader Stage IO --- */' + NL +
+        'layout(location = 0) in vec2 vertex;' + NL +
+        'layout(location = 1) in vec2 tex_coord;' + NL +
+        'layout(location = 0) out vec2 v_tex_coord;' + NL;
+    ssFragment:
+      Result := Result +
+        '/* --- Fragment Shader Stage IO --- */' + NL +
+        'layout(location = 0) in vec2 tex_coord;' + NL +
+        'layout(location = 0) out vec4 castle_FragColor;' + NL +
+        '#define gl_FragColor castle_FragColor' + NL;
   end;
 end;
 
