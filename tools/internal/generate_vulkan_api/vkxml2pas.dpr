@@ -1244,7 +1244,8 @@ const
     'vkCmdDrawIndirect'
   );
 
-  OrderedCommands2: array[0..6] of String = (
+  OrderedCommands2: array[0..7] of String = (
+    'vkEnumerateInstanceVersion',
     'vkCmdDrawIndexedIndirect',
     'vkCmdSetDepthBias',
     'vkCreatePipelineCache',
@@ -1334,9 +1335,13 @@ begin
     L.Add('  { Extension and Layer Names }');
     L.Add('  VK_EXT_debug_utils = ''VK_EXT_debug_utils'';');
     L.Add('  VK_EXT_memory_budget = ''VK_EXT_memory_budget'';');
+    L.Add('  VK_KHR_create_renderpass2 = ''VK_KHR_create_renderpass2'';');
+    L.Add('  VK_KHR_depth_stencil_resolve = ''VK_KHR_depth_stencil_resolve'';');
     L.Add('  VK_KHR_dynamic_rendering = ''VK_KHR_dynamic_rendering'';');
     L.Add('  VK_KHR_get_physical_device_properties2 = ''VK_KHR_get_physical_device_properties2'';');
     L.Add('  VK_KHR_maintenance1 = ''VK_KHR_maintenance1'';');
+    L.Add('  VK_KHR_maintenance2 = ''VK_KHR_maintenance2'';');
+    L.Add('  VK_KHR_multiview = ''VK_KHR_multiview'';');
     L.Add('  VK_KHR_swapchain = ''VK_KHR_swapchain'';');
     L.Add('  VK_LAYER_KHRONOS_validation = ''VK_LAYER_KHRONOS_validation'';');
     L.Add('');
@@ -1486,6 +1491,11 @@ begin
     for I := Low(OrderedCommands2) to High(OrderedCommands2) do
       L.Add(Format('  %s: PFN_%s;', [OrderedCommands2[I], OrderedCommands2[I]]));
     L.Add('');
+    L.Add('function VK_MAKE_VERSION(const Major, Minor, Patch: Cardinal): Cardinal; inline;');
+    L.Add('function VK_VERSION_MAJOR(const Version: Cardinal): Cardinal; inline;');
+    L.Add('function VK_VERSION_MINOR(const Version: Cardinal): Cardinal; inline;');
+    L.Add('function VK_VERSION_PATCH(const Version: Cardinal): Cardinal; inline;');
+    L.Add('');
     L.Add('{ Loads the Vulkan shared library dynamically. Returns True if successfully loaded. }');
     L.Add('function LoadVulkan: Boolean;');
     L.Add('{ Populates instance-level function pointers using vkGetInstanceProcAddr. }');
@@ -1501,6 +1511,26 @@ begin
     L.Add('');
     L.Add('var');
     L.Add('  VulkanLibrary: TDynLib = nil;');
+    L.Add('');
+    L.Add('function VK_MAKE_VERSION(const Major, Minor, Patch: Cardinal): Cardinal;');
+    L.Add('begin');
+    L.Add('  Result := (Major shl 22) or (Minor shl 12) or (Patch and $FFF);');
+    L.Add('end;');
+    L.Add('');
+    L.Add('function VK_VERSION_MAJOR(const Version: Cardinal): Cardinal;');
+    L.Add('begin');
+    L.Add('  Result := (Version shr 22) and $7F;');
+    L.Add('end;');
+    L.Add('');
+    L.Add('function VK_VERSION_MINOR(const Version: Cardinal): Cardinal;');
+    L.Add('begin');
+    L.Add('  Result := (Version shr 12) and $3FF;');
+    L.Add('end;');
+    L.Add('');
+    L.Add('function VK_VERSION_PATCH(const Version: Cardinal): Cardinal;');
+    L.Add('begin');
+    L.Add('  Result := Version and $FFF;');
+    L.Add('end;');
     L.Add('');
     L.Add('function IsVulkanLoaded: Boolean;');
     L.Add('begin');
@@ -1557,6 +1587,7 @@ begin
     L.Add('');
     L.Add('  Pointer(vkCreateInstance) := vkGetInstanceProcAddr(nil, ''vkCreateInstance'');');
     L.Add('  Pointer(vkEnumerateInstanceExtensionProperties) := vkGetInstanceProcAddr(nil, ''vkEnumerateInstanceExtensionProperties'');');
+    L.Add('  Pointer(vkEnumerateInstanceVersion) := vkGetInstanceProcAddr(nil, ''vkEnumerateInstanceVersion'');');
     L.Add('');
     L.Add('  Result := True;');
     L.Add('end;');
@@ -1611,6 +1642,8 @@ begin
     for I := Low(OrderedCommands2) to High(OrderedCommands2) do
     begin
       CmdName := OrderedCommands2[I];
+      if CmdName = 'vkEnumerateInstanceVersion' then
+        Continue;
       L.Add(Format('  Pointer(%s) := vkGetInstanceProcAddr(nil, ''%s'');', [CmdName, CmdName]));
     end;
     L.Add('end;');

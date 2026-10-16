@@ -359,9 +359,13 @@ const
   { Extension and Layer Names }
   VK_EXT_debug_utils = 'VK_EXT_debug_utils';
   VK_EXT_memory_budget = 'VK_EXT_memory_budget';
+  VK_KHR_create_renderpass2 = 'VK_KHR_create_renderpass2';
+  VK_KHR_depth_stencil_resolve = 'VK_KHR_depth_stencil_resolve';
   VK_KHR_dynamic_rendering = 'VK_KHR_dynamic_rendering';
   VK_KHR_get_physical_device_properties2 = 'VK_KHR_get_physical_device_properties2';
   VK_KHR_maintenance1 = 'VK_KHR_maintenance1';
+  VK_KHR_maintenance2 = 'VK_KHR_maintenance2';
+  VK_KHR_multiview = 'VK_KHR_multiview';
   VK_KHR_swapchain = 'VK_KHR_swapchain';
   VK_LAYER_KHRONOS_validation = 'VK_LAYER_KHRONOS_validation';
 
@@ -1657,6 +1661,7 @@ type
   PFN_vkCmdEndDebugUtilsLabelEXT = procedure(commandBuffer: VkCommandBuffer); VKAPI_CALL;
   PFN_vkCmdBlitImage = procedure(commandBuffer: VkCommandBuffer; srcImage: VkImage; srcImageLayout: VkImageLayout; dstImage: VkImage; dstImageLayout: VkImageLayout; regionCount: Cardinal; const pRegions: PVkImageBlit; filter: VkFilter); VKAPI_CALL;
   PFN_vkCmdDrawIndirect = procedure(commandBuffer: VkCommandBuffer; buffer: VkBuffer; offset: VkDeviceSize; drawCount: Cardinal; stride: Cardinal); VKAPI_CALL;
+  PFN_vkEnumerateInstanceVersion = function(pApiVersion: PCardinal): VkResult; VKAPI_CALL;
   PFN_vkCmdDrawIndexedIndirect = procedure(commandBuffer: VkCommandBuffer; buffer: VkBuffer; offset: VkDeviceSize; drawCount: Cardinal; stride: Cardinal); VKAPI_CALL;
   PFN_vkCmdSetDepthBias = procedure(commandBuffer: VkCommandBuffer; depthBiasConstantFactor: Single; depthBiasClamp: Single; depthBiasSlopeFactor: Single); VKAPI_CALL;
   PFN_vkCreatePipelineCache = function(device: VkDevice; const pCreateInfo: PVkPipelineCacheCreateInfo; const pAllocator: PVkAllocationCallbacks; pPipelineCache: PVkPipelineCache): VkResult; VKAPI_CALL;
@@ -1762,6 +1767,7 @@ var
   vkCmdEndDebugUtilsLabelEXT: PFN_vkCmdEndDebugUtilsLabelEXT;
   vkCmdBlitImage: PFN_vkCmdBlitImage;
   vkCmdDrawIndirect: PFN_vkCmdDrawIndirect;
+  vkEnumerateInstanceVersion: PFN_vkEnumerateInstanceVersion;
   vkCmdDrawIndexedIndirect: PFN_vkCmdDrawIndexedIndirect;
   vkCmdSetDepthBias: PFN_vkCmdSetDepthBias;
   vkCreatePipelineCache: PFN_vkCreatePipelineCache;
@@ -1769,6 +1775,11 @@ var
   vkGetPipelineCacheData: PFN_vkGetPipelineCacheData;
   vkResetCommandBuffer: PFN_vkResetCommandBuffer;
   vkCmdExecuteCommands: PFN_vkCmdExecuteCommands;
+
+function VK_MAKE_VERSION(const Major, Minor, Patch: Cardinal): Cardinal; inline;
+function VK_VERSION_MAJOR(const Version: Cardinal): Cardinal; inline;
+function VK_VERSION_MINOR(const Version: Cardinal): Cardinal; inline;
+function VK_VERSION_PATCH(const Version: Cardinal): Cardinal; inline;
 
 { Loads the Vulkan shared library dynamically. Returns True if successfully loaded. }
 function LoadVulkan: Boolean;
@@ -1785,6 +1796,26 @@ implementation
 
 var
   VulkanLibrary: TDynLib = nil;
+
+function VK_MAKE_VERSION(const Major, Minor, Patch: Cardinal): Cardinal;
+begin
+  Result := (Major shl 22) or (Minor shl 12) or (Patch and $FFF);
+end;
+
+function VK_VERSION_MAJOR(const Version: Cardinal): Cardinal;
+begin
+  Result := (Version shr 22) and $7F;
+end;
+
+function VK_VERSION_MINOR(const Version: Cardinal): Cardinal;
+begin
+  Result := (Version shr 12) and $3FF;
+end;
+
+function VK_VERSION_PATCH(const Version: Cardinal): Cardinal;
+begin
+  Result := Version and $FFF;
+end;
 
 function IsVulkanLoaded: Boolean;
 begin
@@ -1841,6 +1872,7 @@ begin
 
   Pointer(vkCreateInstance) := vkGetInstanceProcAddr(nil, 'vkCreateInstance');
   Pointer(vkEnumerateInstanceExtensionProperties) := vkGetInstanceProcAddr(nil, 'vkEnumerateInstanceExtensionProperties');
+  Pointer(vkEnumerateInstanceVersion) := vkGetInstanceProcAddr(nil, 'vkEnumerateInstanceVersion');
 
   Result := True;
 end;

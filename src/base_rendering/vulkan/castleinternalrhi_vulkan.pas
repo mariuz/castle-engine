@@ -25,7 +25,7 @@ interface
 uses
   SysUtils, Classes, Math, Generics.Collections, Generics.Defaults,
   CastleVectors, CastleColors, CastleRectangles, CastleImages, CastleLog,
-  CastleInternalRHI, CastleInternalVulkan;
+  CastleInternalRHI, CastleInternalVulkan, CastleInternalVulkanWSI;
 
 type
   TVulkanRHIDevice = class;
@@ -262,7 +262,9 @@ type
     FPrewarm2DVertexShader: TRHIShaderModule;
     FPrewarm2DFragmentShader: TRHIShaderModule;
 
-    { Diagnostics, VK_EXT_memory_budget & Vulkan 1.1 Fallback tracking }
+    { Diagnostics, VK_EXT_memory_budget & Vulkan 1.1/1.2 Fallback tracking }
+    FInstanceApiVersion: Cardinal;
+    FDeviceApiVersion: Cardinal;
     FSupportsMemoryBudgetExt: Boolean;
     FSupportsDynamicRendering: Boolean;
     FPipelineCacheHits: Cardinal;
@@ -292,7 +294,8 @@ type
     { Creates a headless Vulkan RHI device instance (for offscreen/unit testing). }
     constructor CreateHeadless(const APhysicalDevice: VkPhysicalDevice;
       const ASupportsMemoryBudgetExt: Boolean = True;
-      const ASupportsDynamicRendering: Boolean = True); overload;
+      const ASupportsDynamicRendering: Boolean = True;
+      const ADeviceApiVersion: Cardinal = VK_API_VERSION_1_3); overload;
     destructor Destroy; override;
 
     { Helper for one-shot transfer commands (texture/buffer uploads) }
@@ -318,11 +321,16 @@ type
       const ACacheFileUrl: String = ''): Cardinal;
 
     { Acquires or creates a cached VkRenderPass for Vulkan 1.1/1.2 devices that lack
-      VK_KHR_dynamic_rendering. }
+      VK_KHR_dynamic_rendering. Supports explicit LoadOp/StoreOp for multi-pass rendering
+      (e.g. preserving 3D scene contents during 2D UI overlay passes). }
     function GetOrCreateFallbackRenderPass(
       const AColorFormats: array of TRHIPixelFormat;
       const ADepthFormat: TRHIPixelFormat;
-      const ASampleCount: Cardinal = 1): VkRenderPass;
+      const ASampleCount: Cardinal = 1;
+      const AColorLoadOp: TRHIAttachmentLoadOp = loClear;
+      const ADepthLoadOp: TRHIAttachmentLoadOp = loClear;
+      const AColorStoreOp: TRHIAttachmentStoreOp = soStore;
+      const ADepthStoreOp: TRHIAttachmentStoreOp = soStore): VkRenderPass;
 
     { Acquires or creates a cached VkFramebuffer for Vulkan 1.1/1.2 devices that lack
       VK_KHR_dynamic_rendering. }
@@ -366,6 +374,8 @@ type
 
     property Handle: VkDevice read FDevice;
     property PhysicalDevice: VkPhysicalDevice read FPhysicalDevice;
+    property InstanceApiVersion: Cardinal read FInstanceApiVersion;
+    property DeviceApiVersion: Cardinal read FDeviceApiVersion write FDeviceApiVersion;
     property DescriptorPool: VkDescriptorPool read FDescriptorPool;
     property PipelineCache: VkPipelineCache read FPipelineCache;
     property PipelineCount: Cardinal read GetPipelineCount;
@@ -381,12 +391,27 @@ type
     property AllocatedMemoryBytes: Int64 read FAllocatedMemoryBytes;
   end;
 
+{ Negotiates the highest supported VkApplicationInfo.apiVersion (1.3, 1.2, 1.1, or 1.0)
+  for a given loader version reported by vkEnumerateInstanceVersion. }
+function NegotiateInstanceApiVersion(const ALoaderVersion: Cardinal): Cardinal;
+
+{ Resolves whether a Vulkan 1.1, 1.2, or 1.3+ physical device can use dynamic rendering
+  (and which KHR prerequisite extensions must be enabled on VkDeviceCreateInfo) or should
+  fall back to standard Vulkan 1.1 VkRenderPass + VkFramebuffer passes. }
+procedure ResolveVulkan11_12DeviceConfig(const ADeviceApiVersion: Cardinal;
+  const AHasDynamicRenderingExt, AHasDepthStencilResolveExt, AHasCreateRenderPass2Ext: Boolean;
+  out AUseDynamicRendering: Boolean; out ARequiredExtensions: TAnsiStringArray);
+
 { Computes a deterministic 64-bit FNV-1a hash for a graphics pipeline state descriptor. }
 function ComputePipelineKeyHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
 
 { Computes a deterministic 64-bit FNV-1a hash for a fallback VkRenderPass signature. }
 function ComputeRenderPassKeyHash(const AColorFormats: array of TRHIPixelFormat;
-  const ADepthFormat: TRHIPixelFormat; const ASampleCount: Cardinal = 1): UInt64;
+  const ADepthFormat: TRHIPixelFormat; const ASampleCount: Cardinal = 1;
+  const AColorLoadOp: TRHIAttachmentLoadOp = loClear;
+  const ADepthLoadOp: TRHIAttachmentLoadOp = loClear;
+  const AColorStoreOp: TRHIAttachmentStoreOp = soStore;
+  const ADepthStoreOp: TRHIAttachmentStoreOp = soStore): UInt64;
 
 { Computes a deterministic 64-bit FNV-1a hash for a fallback VkFramebuffer signature. }
 function ComputeFramebufferKeyHash(const ARenderPass: VkRenderPass;
@@ -420,12 +445,68 @@ function LoadPipelineCacheBlobFromStream(const AStream: TStream;
 implementation
 
 uses
-  CastleDownload, CastleInternalShaderCompiler, CastleInternalVulkanWSI,
+  CastleDownload, CastleInternalShaderCompiler,
   CastleInternalVulkanMemory;
 
 const
   FNV1aOffsetBasis64 = UInt64($CBF29CE484222325);
   FNV1aPrime64 = UInt64($00000100000001B3);
+
+function NegotiateInstanceApiVersion(const ALoaderVersion: Cardinal): Cardinal;
+begin
+  if ALoaderVersion >= VK_API_VERSION_1_3 then
+    Result := VK_API_VERSION_1_3
+  else
+  if ALoaderVersion >= VK_API_VERSION_1_2 then
+    Result := VK_API_VERSION_1_2
+  else
+  if ALoaderVersion >= VK_API_VERSION_1_1 then
+    Result := VK_API_VERSION_1_1
+  else
+    Result := VK_API_VERSION_1_0;
+end;
+
+procedure ResolveVulkan11_12DeviceConfig(const ADeviceApiVersion: Cardinal;
+  const AHasDynamicRenderingExt, AHasDepthStencilResolveExt, AHasCreateRenderPass2Ext: Boolean;
+  out AUseDynamicRendering: Boolean; out ARequiredExtensions: TAnsiStringArray);
+begin
+  SetLength(ARequiredExtensions, 0);
+  if ADeviceApiVersion >= VK_API_VERSION_1_3 then
+  begin
+    { Vulkan 1.3+: Dynamic Rendering is core }
+    AUseDynamicRendering := True;
+  end else
+  if ADeviceApiVersion >= VK_API_VERSION_1_2 then
+  begin
+    { Vulkan 1.2: VK_KHR_depth_stencil_resolve and VK_KHR_create_renderpass2 are core 1.2;
+      only VK_KHR_dynamic_rendering extension is required if supported }
+    if AHasDynamicRenderingExt then
+    begin
+      AUseDynamicRendering := True;
+      SetLength(ARequiredExtensions, 1);
+      ARequiredExtensions[0] := VK_KHR_dynamic_rendering;
+    end else
+      AUseDynamicRendering := False;
+  end else
+  if ADeviceApiVersion >= VK_API_VERSION_1_1 then
+  begin
+    { Vulkan 1.1: VK_KHR_multiview and VK_KHR_maintenance2 are core 1.1,
+      while VK_KHR_dynamic_rendering requires VK_KHR_create_renderpass2 and VK_KHR_depth_stencil_resolve }
+    if AHasDynamicRenderingExt and AHasDepthStencilResolveExt and AHasCreateRenderPass2Ext then
+    begin
+      AUseDynamicRendering := True;
+      SetLength(ARequiredExtensions, 3);
+      ARequiredExtensions[0] := VK_KHR_create_renderpass2;
+      ARequiredExtensions[1] := VK_KHR_depth_stencil_resolve;
+      ARequiredExtensions[2] := VK_KHR_dynamic_rendering;
+    end else
+      AUseDynamicRendering := False;
+  end else
+  begin
+    { Pre-Vulkan 1.1 device: use standard VkRenderPass / VkFramebuffer fallback }
+    AUseDynamicRendering := False;
+  end;
+end;
 
 {$push}{$Q-}{$R-}
 procedure HashBytesFNV1a(var AHash: UInt64; const AData; const ASize: PtrUInt);
@@ -480,7 +561,9 @@ begin
 end;
 
 function ComputeRenderPassKeyHash(const AColorFormats: array of TRHIPixelFormat;
-  const ADepthFormat: TRHIPixelFormat; const ASampleCount: Cardinal): UInt64;
+  const ADepthFormat: TRHIPixelFormat; const ASampleCount: Cardinal;
+  const AColorLoadOp: TRHIAttachmentLoadOp; const ADepthLoadOp: TRHIAttachmentLoadOp;
+  const AColorStoreOp: TRHIAttachmentStoreOp; const ADepthStoreOp: TRHIAttachmentStoreOp): UInt64;
 var
   I, ColorCount: Integer;
 begin
@@ -491,6 +574,10 @@ begin
     HashBytesFNV1a(Result, AColorFormats[I], SizeOf(TRHIPixelFormat));
   HashBytesFNV1a(Result, ADepthFormat, SizeOf(ADepthFormat));
   HashBytesFNV1a(Result, ASampleCount, SizeOf(ASampleCount));
+  HashBytesFNV1a(Result, AColorLoadOp, SizeOf(AColorLoadOp));
+  HashBytesFNV1a(Result, ADepthLoadOp, SizeOf(ADepthLoadOp));
+  HashBytesFNV1a(Result, AColorStoreOp, SizeOf(AColorStoreOp));
+  HashBytesFNV1a(Result, ADepthStoreOp, SizeOf(ADepthStoreOp));
 end;
 
 function ComputeFramebufferKeyHash(const ARenderPass: VkRenderPass;
@@ -1764,6 +1851,8 @@ var
   FallbackFB: VkFramebuffer;
   RpBeginInfo: VkRenderPassBeginInfo;
   FbWidth, FbHeight: Cardinal;
+  ColorLoadOp, DepthLoadOp: TRHIAttachmentLoadOp;
+  ColorStoreOp, DepthStoreOp: TRHIAttachmentStoreOp;
   AttCount, I: Integer;
 begin
   if (FDevice <> nil) and (not FDevice.SupportsDynamicRendering) then
@@ -1808,8 +1897,29 @@ begin
     end else
       FallbackDepthFormat := pfUndefined;
 
+    if Length(Info.ColorAttachments) > 0 then
+    begin
+      ColorLoadOp := Info.ColorAttachments[0].LoadOp;
+      ColorStoreOp := Info.ColorAttachments[0].StoreOp;
+    end else
+    begin
+      ColorLoadOp := loClear;
+      ColorStoreOp := soStore;
+    end;
+
+    if Info.HasDepthAttachment then
+    begin
+      DepthLoadOp := Info.DepthAttachment.LoadOp;
+      DepthStoreOp := Info.DepthAttachment.StoreOp;
+    end else
+    begin
+      DepthLoadOp := loClear;
+      DepthStoreOp := soStore;
+    end;
+
     FallbackRP := FDevice.GetOrCreateFallbackRenderPass(
-      FallbackColorFormats, FallbackDepthFormat, 1);
+      FallbackColorFormats, FallbackDepthFormat, 1,
+      ColorLoadOp, DepthLoadOp, ColorStoreOp, DepthStoreOp);
     FallbackFB := FDevice.GetOrCreateFallbackFramebuffer(
       FallbackRP, FallbackViews, FbWidth, FbHeight);
 
@@ -2081,7 +2191,8 @@ end;
 
 constructor TVulkanRHIDevice.CreateHeadless(const APhysicalDevice: VkPhysicalDevice;
   const ASupportsMemoryBudgetExt: Boolean;
-  const ASupportsDynamicRendering: Boolean);
+  const ASupportsDynamicRendering: Boolean;
+  const ADeviceApiVersion: Cardinal);
 begin
   inherited Create;
   FPipelineMap := TVulkanPipelineMap.Create([doOwnsValues]);
@@ -2089,6 +2200,8 @@ begin
   FFramebufferMap := TVulkanFramebufferMap.Create;
   FCapabilities.Backend := rbVulkan;
   FPhysicalDevice := APhysicalDevice;
+  FInstanceApiVersion := ADeviceApiVersion;
+  FDeviceApiVersion := ADeviceApiVersion;
   FSupportsMemoryBudgetExt := ASupportsMemoryBudgetExt;
   FSupportsDynamicRendering := ASupportsDynamicRendering;
 end;
@@ -2180,22 +2293,40 @@ begin
 end;
 
 procedure TVulkanRHIDevice.CreateInstance(const EnableValidation: Boolean);
+const
+  FallbackVersions: array[0..3] of Cardinal = (
+    VK_API_VERSION_1_3,
+    VK_API_VERSION_1_2,
+    VK_API_VERSION_1_1,
+    VK_API_VERSION_1_0
+  );
 var
   AppInfo: VkApplicationInfo;
   CreateInfo: VkInstanceCreateInfo;
   ExtNames: TAnsiStringArray;
   ExtPtrs: array of PAnsiChar;
   LayerName: PAnsiChar;
+  LoaderVer: Cardinal;
   I: Integer;
   Res: VkResult;
 begin
+  LoaderVer := VK_API_VERSION_1_3;
+  if Assigned(vkEnumerateInstanceVersion) then
+  begin
+    if vkEnumerateInstanceVersion(@LoaderVer) <> VK_SUCCESS then
+      LoaderVer := VK_API_VERSION_1_0;
+  end else
+    LoaderVer := VK_API_VERSION_1_0;
+
+  FInstanceApiVersion := NegotiateInstanceApiVersion(LoaderVer);
+
   FillChar(AppInfo, SizeOf(AppInfo), 0);
   AppInfo.sType := VK_STRUCTURE_TYPE_APPLICATION_INFO;
   AppInfo.pApplicationName := 'Castle Game Engine Application';
   AppInfo.applicationVersion := VK_API_VERSION_1_0;
   AppInfo.pEngineName := 'Castle Game Engine';
-  AppInfo.engineVersion := VK_API_VERSION_1_3;
-  AppInfo.apiVersion := VK_API_VERSION_1_3;
+  AppInfo.engineVersion := FInstanceApiVersion;
+  AppInfo.apiVersion := FInstanceApiVersion;
 
   ExtNames := GetRequiredVulkanInstanceExtensions;
   SetLength(ExtPtrs, Length(ExtNames));
@@ -2223,6 +2354,21 @@ begin
     CreateInfo.ppEnabledLayerNames := nil;
     Res := vkCreateInstance(@CreateInfo, nil, @FInstance);
   end;
+
+  { Step down apiVersion if older Vulkan 1.1/1.2 loader rejects higher version }
+  if Res = VK_ERROR_INCOMPATIBLE_DRIVER then
+  begin
+    for I := Low(FallbackVersions) to High(FallbackVersions) do
+      if FallbackVersions[I] < AppInfo.apiVersion then
+      begin
+        AppInfo.apiVersion := FallbackVersions[I];
+        FInstanceApiVersion := AppInfo.apiVersion;
+        Res := vkCreateInstance(@CreateInfo, nil, @FInstance);
+        if Res = VK_SUCCESS then
+          Break;
+      end;
+  end;
+
   CheckVk(Res, 'vkCreateInstance');
   LoadVulkanInstance(FInstance);
 end;
@@ -2233,6 +2379,7 @@ var
   Devices: array of VkPhysicalDevice;
   Props, ChosenProps: VkPhysicalDeviceProperties;
   Features: VkPhysicalDeviceFeatures;
+  ReqDynRenderExts: TAnsiStringArray;
 begin
   DeviceCount := 0;
   CheckVk(vkEnumeratePhysicalDevices(FInstance, @DeviceCount, nil), 'vkEnumeratePhysicalDevices(count)');
@@ -2242,23 +2389,43 @@ begin
   SetLength(Devices, DeviceCount);
   CheckVk(vkEnumeratePhysicalDevices(FInstance, @DeviceCount, @Devices[0]), 'vkEnumeratePhysicalDevices');
 
+  { Prefer discrete GPU meeting Vulkan 1.1+ baseline, otherwise any Vulkan 1.1+ GPU }
   FPhysicalDevice := Devices[0];
   for I := 0 to DeviceCount - 1 do
   begin
     vkGetPhysicalDeviceProperties(Devices[I], @Props);
-    if Props.deviceType = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU then
+    if (Props.deviceType = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) and
+       (Props.apiVersion >= VK_API_VERSION_1_1) then
     begin
       FPhysicalDevice := Devices[I];
       Break;
     end;
+    if Props.apiVersion >= VK_API_VERSION_1_1 then
+      FPhysicalDevice := Devices[I];
   end;
 
   vkGetPhysicalDeviceProperties(FPhysicalDevice, @ChosenProps);
   vkGetPhysicalDeviceFeatures(FPhysicalDevice, @Features);
 
   FDeviceId := ChosenProps.deviceID;
-  FSupportsDynamicRendering := (ChosenProps.apiVersion >= VK_API_VERSION_1_3) or
-    IsDeviceExtensionSupported(VK_KHR_dynamic_rendering);
+  FDeviceApiVersion := ChosenProps.apiVersion;
+
+  ResolveVulkan11_12DeviceConfig(
+    FDeviceApiVersion,
+    IsDeviceExtensionSupported(VK_KHR_dynamic_rendering),
+    IsDeviceExtensionSupported(VK_KHR_depth_stencil_resolve),
+    IsDeviceExtensionSupported(VK_KHR_create_renderpass2),
+    FSupportsDynamicRendering,
+    ReqDynRenderExts);
+
+  WritelnLog('Vulkan', Format('Selected GPU "%s" (Vulkan %d.%d.%d, DynamicRendering=%s)', [
+    String(PAnsiChar(@ChosenProps.deviceName[0])),
+    VK_VERSION_MAJOR(FDeviceApiVersion),
+    VK_VERSION_MINOR(FDeviceApiVersion),
+    VK_VERSION_PATCH(FDeviceApiVersion),
+    BoolToStr(FSupportsDynamicRendering, True)
+  ]));
+
   FCapabilities.Backend := rbVulkan;
   FCapabilities.DeviceName := String(PAnsiChar(@ChosenProps.deviceName[0]));
   FCapabilities.VendorId := ChosenProps.vendorID;
@@ -2307,7 +2474,8 @@ var
   QueueInfos: array[0..1] of VkDeviceQueueCreateInfo;
   QueuePriority: Single;
   DynRenderFeatures: VkPhysicalDeviceDynamicRenderingFeatures;
-  DeviceExts: array[0..2] of PAnsiChar;
+  ReqDynRenderExts: TAnsiStringArray;
+  DeviceExts: array[0..7] of PAnsiChar;
   CreateInfo: VkDeviceCreateInfo;
   CacheInfo: VkPipelineCacheCreateInfo;
 begin
@@ -2348,12 +2516,27 @@ begin
   FSupportsMemoryBudgetExt := IsDeviceExtensionSupported(VK_EXT_memory_budget);
   if FSupportsMemoryBudgetExt then
   begin
+    if (FDeviceApiVersion < VK_API_VERSION_1_1) and
+       IsDeviceExtensionSupported(VK_KHR_get_physical_device_properties2) then
+    begin
+      DeviceExts[ExtCount] := VK_KHR_get_physical_device_properties2;
+      Inc(ExtCount);
+    end;
     DeviceExts[ExtCount] := VK_EXT_memory_budget;
     Inc(ExtCount);
   end;
-  if FSupportsDynamicRendering and IsDeviceExtensionSupported(VK_KHR_dynamic_rendering) then
+
+  ResolveVulkan11_12DeviceConfig(
+    FDeviceApiVersion,
+    IsDeviceExtensionSupported(VK_KHR_dynamic_rendering),
+    IsDeviceExtensionSupported(VK_KHR_depth_stencil_resolve),
+    IsDeviceExtensionSupported(VK_KHR_create_renderpass2),
+    FSupportsDynamicRendering,
+    ReqDynRenderExts);
+
+  for I := 0 to High(ReqDynRenderExts) do
   begin
-    DeviceExts[ExtCount] := VK_KHR_dynamic_rendering;
+    DeviceExts[ExtCount] := PAnsiChar(ReqDynRenderExts[I]);
     Inc(ExtCount);
   end;
 
@@ -2364,7 +2547,10 @@ begin
   else
   begin
     CreateInfo.pNext := nil;
-    WritelnLog('Vulkan', 'Device does not support VK_KHR_dynamic_rendering; using Vulkan 1.1 VkRenderPass / VkFramebuffer fallback.');
+    WritelnLog('Vulkan', Format('Device (Vulkan %d.%d) does not support VK_KHR_dynamic_rendering; using Vulkan 1.1/1.2 VkRenderPass / VkFramebuffer fallback.', [
+      VK_VERSION_MAJOR(FDeviceApiVersion),
+      VK_VERSION_MINOR(FDeviceApiVersion)
+    ]));
   end;
   if FPresentQueueFamily <> FGraphicsQueueFamily then
   begin
@@ -2396,7 +2582,31 @@ end;
 function TVulkanRHIDevice.GetOrCreateFallbackRenderPass(
   const AColorFormats: array of TRHIPixelFormat;
   const ADepthFormat: TRHIPixelFormat;
-  const ASampleCount: Cardinal): VkRenderPass;
+  const ASampleCount: Cardinal;
+  const AColorLoadOp: TRHIAttachmentLoadOp;
+  const ADepthLoadOp: TRHIAttachmentLoadOp;
+  const AColorStoreOp: TRHIAttachmentStoreOp;
+  const ADepthStoreOp: TRHIAttachmentStoreOp): VkRenderPass;
+
+  function MapLoadOp(const AOp: TRHIAttachmentLoadOp): VkAttachmentLoadOp;
+  begin
+    case AOp of
+      loLoad:     Result := VK_ATTACHMENT_LOAD_OP_LOAD;
+      loClear:    Result := VK_ATTACHMENT_LOAD_OP_CLEAR;
+      loDontCare: Result := VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+      else        Result := VK_ATTACHMENT_LOAD_OP_CLEAR;
+    end;
+  end;
+
+  function MapStoreOp(const AOp: TRHIAttachmentStoreOp): VkAttachmentStoreOp;
+  begin
+    case AOp of
+      soStore:    Result := VK_ATTACHMENT_STORE_OP_STORE;
+      soDontCare: Result := VK_ATTACHMENT_STORE_OP_DONT_CARE;
+      else        Result := VK_ATTACHMENT_STORE_OP_STORE;
+    end;
+  end;
+
 var
   KeyHash: UInt64;
   Attachments: array of VkAttachmentDescription;
@@ -2408,7 +2618,8 @@ var
   SampleBits: VkSampleCountFlags;
   AttCount, DepthIdx, I: Integer;
 begin
-  KeyHash := ComputeRenderPassKeyHash(AColorFormats, ADepthFormat, ASampleCount);
+  KeyHash := ComputeRenderPassKeyHash(AColorFormats, ADepthFormat, ASampleCount,
+    AColorLoadOp, ADepthLoadOp, AColorStoreOp, ADepthStoreOp);
   if (FRenderPassMap <> nil) and FRenderPassMap.TryGetValue(KeyHash, Result) then
     Exit;
 
@@ -2428,8 +2639,8 @@ begin
     FillChar(Attachments[I], SizeOf(VkAttachmentDescription), 0);
     Attachments[I].format := RHIToVkFormat(AColorFormats[I]);
     Attachments[I].samples := SampleBits;
-    Attachments[I].loadOp := VK_ATTACHMENT_LOAD_OP_CLEAR;
-    Attachments[I].storeOp := VK_ATTACHMENT_STORE_OP_STORE;
+    Attachments[I].loadOp := MapLoadOp(AColorLoadOp);
+    Attachments[I].storeOp := MapStoreOp(AColorStoreOp);
     Attachments[I].stencilLoadOp := VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     Attachments[I].stencilStoreOp := VK_ATTACHMENT_STORE_OP_DONT_CARE;
     Attachments[I].initialLayout := VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -2451,8 +2662,8 @@ begin
     FillChar(Attachments[DepthIdx], SizeOf(VkAttachmentDescription), 0);
     Attachments[DepthIdx].format := RHIToVkFormat(ADepthFormat);
     Attachments[DepthIdx].samples := SampleBits;
-    Attachments[DepthIdx].loadOp := VK_ATTACHMENT_LOAD_OP_CLEAR;
-    Attachments[DepthIdx].storeOp := VK_ATTACHMENT_STORE_OP_STORE;
+    Attachments[DepthIdx].loadOp := MapLoadOp(ADepthLoadOp);
+    Attachments[DepthIdx].storeOp := MapStoreOp(ADepthStoreOp);
     Attachments[DepthIdx].stencilLoadOp := VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     Attachments[DepthIdx].stencilStoreOp := VK_ATTACHMENT_STORE_OP_DONT_CARE;
     Attachments[DepthIdx].initialLayout := VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;

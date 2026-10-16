@@ -68,6 +68,7 @@ type
     procedure TestLegacyGLSLUniformWarningDiagnostics;
     procedure TestVulkan11RenderPassFramebufferFallback;
     procedure TestVkXmlHeaderGenerator;
+    procedure TestVulkan11_12DeviceNegotiationAndFallback;
   private
     FCapturedWarnings: TStringList;
     procedure CaptureWarning(const Category, S: String);
@@ -1526,6 +1527,120 @@ begin
     1000314007, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR);
   AssertEquals('VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT (ext 238, offset 0) must be 1000237000',
     1000237000, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT);
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkan11_12DeviceNegotiationAndFallback;
+var
+  UseDynRender: Boolean;
+  ReqExts: TAnsiStringArray;
+  VkDev: TVulkanRHIDevice;
+  ColorTex, DepthTex: TRHITexture;
+  CmdList: TVulkanRHICommandList;
+  ScenePassInfo, UIOverlayPassInfo: TRHIRenderingInfo;
+  ClearHash, LoadHash: UInt64;
+begin
+  { 1. Instance API Version Negotiation (vkEnumerateInstanceVersion fallback) }
+  AssertEquals('Vulkan 1.3+ loader negotiates 1.3',
+    VK_API_VERSION_1_3, NegotiateInstanceApiVersion(VK_API_VERSION_1_4));
+  AssertEquals('Vulkan 1.3 loader negotiates 1.3',
+    VK_API_VERSION_1_3, NegotiateInstanceApiVersion(VK_API_VERSION_1_3));
+  AssertEquals('Vulkan 1.2 loader negotiates 1.2',
+    VK_API_VERSION_1_2, NegotiateInstanceApiVersion(VK_API_VERSION_1_2));
+  AssertEquals('Vulkan 1.1 loader negotiates 1.1',
+    VK_API_VERSION_1_1, NegotiateInstanceApiVersion(VK_API_VERSION_1_1));
+  AssertEquals('Vulkan 1.0 loader negotiates 1.0',
+    VK_API_VERSION_1_0, NegotiateInstanceApiVersion(VK_API_VERSION_1_0));
+
+  { 2. Vulkan 1.3 Device Config: Dynamic rendering is core (0 extra extensions needed) }
+  ResolveVulkan11_12DeviceConfig(VK_API_VERSION_1_3, False, False, False, UseDynRender, ReqExts);
+  AssertTrue('Vulkan 1.3 device uses core dynamic rendering', UseDynRender);
+  AssertEquals('Vulkan 1.3 device needs 0 extra dynamic rendering extensions', 0, Length(ReqExts));
+
+  { 3. Vulkan 1.2 Device Config:
+    - With VK_KHR_dynamic_rendering: enabled (VK_KHR_depth_stencil_resolve & VK_KHR_create_renderpass2 are core 1.2)
+    - Without VK_KHR_dynamic_rendering: falls back to VkRenderPass + VkFramebuffer }
+  ResolveVulkan11_12DeviceConfig(VK_API_VERSION_1_2, True, False, False, UseDynRender, ReqExts);
+  AssertTrue('Vulkan 1.2 device with VK_KHR_dynamic_rendering enables dynamic rendering', UseDynRender);
+  AssertEquals('Vulkan 1.2 device enables 1 extension (VK_KHR_dynamic_rendering)', 1, Length(ReqExts));
+  AssertEquals('Extension name must be VK_KHR_dynamic_rendering',
+    VK_KHR_dynamic_rendering, String(ReqExts[0]));
+
+  ResolveVulkan11_12DeviceConfig(VK_API_VERSION_1_2, False, True, True, UseDynRender, ReqExts);
+  AssertFalse('Vulkan 1.2 device without VK_KHR_dynamic_rendering falls back to VkRenderPass', UseDynRender);
+  AssertEquals('Fallback needs 0 dynamic rendering extensions', 0, Length(ReqExts));
+
+  { 4. Vulkan 1.1 Device Config:
+    - Requires VK_KHR_create_renderpass2 + VK_KHR_depth_stencil_resolve + VK_KHR_dynamic_rendering
+    - Missing any prerequisite falls back to VkRenderPass + VkFramebuffer }
+  ResolveVulkan11_12DeviceConfig(VK_API_VERSION_1_1, True, True, True, UseDynRender, ReqExts);
+  AssertTrue('Vulkan 1.1 device with all 3 extensions enables dynamic rendering', UseDynRender);
+  AssertEquals('Vulkan 1.1 device enables all 3 prerequisite extensions', 3, Length(ReqExts));
+  AssertEquals('First prerequisite on 1.1 is VK_KHR_create_renderpass2',
+    VK_KHR_create_renderpass2, String(ReqExts[0]));
+  AssertEquals('Second prerequisite on 1.1 is VK_KHR_depth_stencil_resolve',
+    VK_KHR_depth_stencil_resolve, String(ReqExts[1]));
+  AssertEquals('Third extension on 1.1 is VK_KHR_dynamic_rendering',
+    VK_KHR_dynamic_rendering, String(ReqExts[2]));
+
+  ResolveVulkan11_12DeviceConfig(VK_API_VERSION_1_1, True, False, True, UseDynRender, ReqExts);
+  AssertFalse('Vulkan 1.1 device missing VK_KHR_depth_stencil_resolve falls back to VkRenderPass', UseDynRender);
+
+  { 5. Multi-Pass LoadOp (loClear vs loLoad) on a Vulkan 1.1/1.2 Fallback Device }
+  ClearHash := ComputeRenderPassKeyHash([pfBGRA8_UNorm], pfD24_UNorm_S8_UInt, 1, loClear, loClear);
+  LoadHash := ComputeRenderPassKeyHash([pfBGRA8_UNorm], pfD24_UNorm_S8_UInt, 1, loLoad, loLoad);
+  AssertTrue('loClear and loLoad render passes must produce distinct cache keys', ClearHash <> LoadHash);
+
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, False, VK_API_VERSION_1_1);
+  try
+    AssertEquals('Headless Vulkan 1.1 device reports apiVersion 1.1',
+      VK_API_VERSION_1_1, VkDev.DeviceApiVersion);
+    AssertFalse('Headless Vulkan 1.1 fallback device disables dynamic rendering',
+      VkDev.SupportsDynamicRendering);
+
+    ColorTex := VkDev.CreateTexture(TRHITextureDesc.Create2D(1280, 720, pfBGRA8_UNorm, [tuColorAttachment]));
+    DepthTex := VkDev.CreateTexture(TRHITextureDesc.Create2D(1280, 720, pfD24_UNorm_S8_UInt, [tuDepthStencil]));
+
+    CmdList := TVulkanRHICommandList.Create(VkDev, 0);
+    try
+      { Pass 1: 3D Scene Pass (LoadOp = loClear) }
+      FillChar(ScenePassInfo, SizeOf(ScenePassInfo), 0);
+      ScenePassInfo.RenderArea := Rectangle(0, 0, 1280, 720);
+      SetLength(ScenePassInfo.ColorAttachments, 1);
+      ScenePassInfo.ColorAttachments[0].Texture := ColorTex;
+      ScenePassInfo.ColorAttachments[0].LoadOp := loClear;
+      ScenePassInfo.ColorAttachments[0].StoreOp := soStore;
+      ScenePassInfo.HasDepthAttachment := True;
+      ScenePassInfo.DepthAttachment.Texture := DepthTex;
+      ScenePassInfo.DepthAttachment.LoadOp := loClear;
+      ScenePassInfo.DepthAttachment.StoreOp := soStore;
+
+      { Pass 2: 2D UI Overlay Pass (LoadOp = loLoad to preserve 3D scene!) }
+      FillChar(UIOverlayPassInfo, SizeOf(UIOverlayPassInfo), 0);
+      UIOverlayPassInfo.RenderArea := Rectangle(0, 0, 1280, 720);
+      SetLength(UIOverlayPassInfo.ColorAttachments, 1);
+      UIOverlayPassInfo.ColorAttachments[0].Texture := ColorTex;
+      UIOverlayPassInfo.ColorAttachments[0].LoadOp := loLoad;
+      UIOverlayPassInfo.ColorAttachments[0].StoreOp := soStore;
+      UIOverlayPassInfo.HasDepthAttachment := False;
+
+      CmdList.BeginRendering(ScenePassInfo);
+      CmdList.EndRendering;
+
+      CmdList.BeginRendering(UIOverlayPassInfo);
+      CmdList.EndRendering;
+
+      AssertEquals('2 distinct fallback VkRenderPasses (loClear 3D + loLoad 2D UI) must be cached',
+        2, VkDev.FallbackRenderPassCount);
+      AssertEquals('2 fallback VkFramebuffers must be cached',
+        2, VkDev.FallbackFramebufferCount);
+    finally
+      FreeAndNil(CmdList);
+      FreeAndNil(DepthTex);
+      FreeAndNil(ColorTex);
+    end;
+  finally
+    FreeAndNil(VkDev);
+  end;
 end;
 
 initialization
