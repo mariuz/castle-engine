@@ -141,6 +141,9 @@
     { Returns BlendMode for this state, or @nil if not present. }
     function BlendMode: TBlendModeNode;
 
+    { Returns DepthMode for this state, or @nil if not present. }
+    function DepthMode: TDepthModeNode;
+
   public
     { Information if you're within any inline node or expanded prototype.
       InsideInline = 0 means you're not inside any inline node,
@@ -501,6 +504,14 @@ function TX3DGraphTraverseState.BlendMode: TBlendModeNode;
 begin
   if Appearance <> nil then
     Result := Appearance.BlendMode
+  else
+    Result := nil;
+end;
+
+function TX3DGraphTraverseState.DepthMode: TDepthModeNode;
+begin
+  if Appearance <> nil then
+    Result := Appearance.DepthMode
   else
     Result := nil;
 end;

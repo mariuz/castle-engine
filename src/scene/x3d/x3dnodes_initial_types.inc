@@ -34,6 +34,7 @@
   TAbstractShapeNode = class;
   TAbstractTexture2DNode = class;
   TBlendModeNode = class;
+  TDepthModeNode = class;
   TAbstractTextureNode = class;
   TX3DEventsEngine = class;
   TClipPlaneNode = class;

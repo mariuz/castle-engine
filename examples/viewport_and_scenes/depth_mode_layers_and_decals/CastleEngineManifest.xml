@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<!--
+Specify basic information about the project, including how this project is build.
+See https://castle-engine.io/project_manifest for documentation of this file.
+-->
+
+<project name="depth_mode_layers_and_decals"
+  standalone_source="depth_mode_layers_and_decals_standalone.dpr"
+  game_units="GameInitialize"
+  qualified_name="io.castleengine.depth.mode.layers.and.decals"
+  caption="Depth Mode: Layers and Decals"
+>
+  <compiler_options>
+    <search_paths>
+      <path value="code/" />
+    </search_paths>
+  </compiler_options>
+</project>

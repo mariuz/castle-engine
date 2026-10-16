@@ -31,6 +31,11 @@ type
     procedure TestImageTransformImageWidthHeight;
     { Testcase from https://github.com/castle-engine/castle-engine/issues/664 }
     procedure TestRenderReferencesAndLightRadius;
+    { Appearance.depthMode (TDepthModeNode) read from X3D. }
+    procedure TestDepthModeParse;
+    { TDepthModeNode depth function and polygon offset when rendering
+      two coplanar shapes. }
+    procedure TestDepthModeRender;
     { Texture used by a light's Effect, when the light is in another scene
       (CastGlobalLights) than the lit shapes. }
     procedure TestGlobalLightEffectTexture;
@@ -626,6 +631,142 @@ begin
       AssertEquals(2, EdgesCalculatedCount(Scene));
     finally FreeAndNil(Scene) end;
   finally FreeAndNil(Params) end;
+end;
+
+procedure TTestScene.TestDepthModeParse;
+var
+  Root: TX3DRootNode;
+  Shape: TShapeNode;
+  DepthMode: TDepthModeNode;
+begin
+  Root := LoadX3DClassicFromString(
+    '#X3D V4.0 utf8' + LineEnding +
+    'PROFILE Interchange' + LineEnding +
+    'DEF S Shape {' + LineEnding +
+    '  appearance Appearance {' + LineEnding +
+    '    depthMode DepthMode { depthFunc "lequal" polygonOffset -1 -2 }' + LineEnding +
+    '  }' + LineEnding +
+    '  geometry Box { }' + LineEnding +
+    '}', '');
+  try
+    Shape := Root.FindNode(TShapeNode, 'S') as TShapeNode;
+    DepthMode := Shape.Appearance.DepthMode;
+    AssertTrue(DepthMode <> nil);
+    AssertTrue(DepthMode.DepthFunc = dmfLessEqual);
+    AssertVectorEquals(Vector2(-1, -2), DepthMode.PolygonOffset);
+  finally FreeAndNil(Root) end;
+
+  DepthMode := TDepthModeNode.Create;
+  try
+    AssertTrue(DepthMode.DepthFunc = dmfDefault);
+    AssertVectorEquals(Vector2(0, 0), DepthMode.PolygonOffset);
+    DepthMode.FdDepthFunc.Value := 'always';
+    AssertTrue(DepthMode.DepthFunc = dmfAlways);
+  finally FreeAndNil(DepthMode) end;
+end;
+
+procedure TTestScene.TestDepthModeRender;
+var
+  Window: TCastleWindow;
+  Viewport: TCastleViewport;
+  DepthMode: TDepthModeNode;
+
+  { A square at z = 0, facing the camera, in a new scene. }
+  function AddSquare(const Color: TCastleColorRGB; const WithDepthMode: Boolean): TCastleScene;
+  var
+    Root: TX3DRootNode;
+    Shape: TShapeNode;
+    Rectangle: TRectangle2DNode;
+    Material: TUnlitMaterialNode;
+  begin
+    Rectangle := TRectangle2DNode.CreateWithShape(Shape);
+    Rectangle.Size := Vector2(4, 4);
+    Material := TUnlitMaterialNode.Create;
+    Material.EmissiveColor := Color;
+    Shape.Material := Material;
+    if WithDepthMode then
+      Shape.Appearance.DepthMode := DepthMode;
+    Root := TX3DRootNode.Create;
+    Root.AddChildren(Shape);
+
+    Result := TCastleScene.Create(Window);
+    Result.Load(Root, true);
+    Viewport.Items.Add(Result);
+  end;
+
+  function CenterColor: TCastleColorRGB;
+  var
+    Image: TCastleImage;
+  begin
+    Image := Window.SaveScreen;
+    try
+      Result := Image.Colors[Image.Width div 2, Image.Height div 2, 0].XYZ;
+    finally FreeAndNil(Image) end;
+  end;
+
+  procedure AssertCenter(const Expected: TCastleColorRGB; const Description: String);
+  var
+    C: TCastleColorRGB;
+  begin
+    C := CenterColor;
+    if not TVector3.Equals(C, Expected, 0.1) then
+      Fail(Format('%s: center color %s, expected %s',
+        [Description, C.ToString, Expected.ToString]));
+  end;
+
+begin
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  Window := CreateWindowForTest;
+  try
+    Window.Width := 200;
+    Window.Height := 200;
+    Window.Open;
+
+    Viewport := TCastleViewport.Create(Window);
+    Viewport.FullSize := true;
+    Viewport.BackgroundColor := Black;
+    Viewport.Camera.SetView(Vector3(0, 0, 5), Vector3(0, 0, -1), Vector3(0, 1, 0));
+    Window.Controls.InsertFront(Viewport);
+
+    DepthMode := TDepthModeNode.Create;
+    // the red square is rendered first, the green one at the same depth after it
+    AddSquare(RedRGB, false);
+    AddSquare(GreenRGB, true);
+
+    AssertCenter(RedRGB, 'default (less)');
+
+    DepthMode.DepthFunc := dmfLessEqual;
+    AssertCenter(GreenRGB, 'lequal');
+
+    DepthMode.DepthFunc := dmfAlways;
+    AssertCenter(GreenRGB, 'always');
+
+    DepthMode.DepthFunc := dmfNever;
+    AssertCenter(RedRGB, 'never');
+
+    DepthMode.DepthFunc := dmfLess;
+    AssertCenter(RedRGB, 'less');
+
+    // negative polygon offset moves the green square towards the camera
+    DepthMode.PolygonOffset := Vector2(-1, -1);
+    AssertCenter(GreenRGB, 'less with polygon offset -1 -1');
+
+    DepthMode.PolygonOffset := Vector2(1, 1);
+    AssertCenter(RedRGB, 'less with polygon offset 1 1');
+
+    // the polygon offset and depth function are restored after the shape
+    DepthMode.DepthFunc := dmfDefault;
+    DepthMode.PolygonOffset := Vector2(0, 0);
+    AssertCenter(RedRGB, 'default again');
+
+    CheckGLErrors('TestDepthModeRender');
+    Window.Close;
+  finally DestroyWindowForTest(Window) end;
 end;
 
 initialization
