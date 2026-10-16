@@ -321,6 +321,34 @@
       const ShapeForViewpointMirror: TX3DRendererShape);
   end;
 
+  { Renderer resource for TScreenTextureNode: a texture updated
+    by copying the colors of the current viewport (UpdateScreenTextures). }
+  TScreenTextureResource = class(T2DTextureResource)
+  strict private
+    FGLName: TGLTexture;
+    FWidth, FHeight: Integer;
+  protected
+    class function IsClassForTextureNode(ANode: TAbstractTextureNode): boolean; override;
+    procedure PrepareCore(
+      const RenderOptions: TCastleRenderOptions); override;
+    procedure UnprepareCore; override;
+  public
+    const
+      MyTextureType = tt2D;
+
+    function TextureNode: TScreenTextureNode;
+
+    function Bind(const TextureUnit: Cardinal): boolean; override;
+    function Enable(const TextureUnit: Cardinal;
+      Shader: TShader; const Env: TTextureEnv): boolean; override;
+    function ShaderTextureType(out TextureType: TTextureType): Boolean; override;
+    function GLName: TGLTextureId; override;
+
+    { Copy the colors of the given rectangle of the current framebuffer
+      (in pixels) to the texture, resizing it to the rectangle size. }
+    procedure UpdateFromScreen(const Rect: TRectangle);
+  end;
+
   { Abstract renderer resource for TAbstractEnvironmentTextureNode. }
   TCubeMapTextureResource = class(TSingleTextureResource)
   protected
@@ -658,7 +686,8 @@ begin
           TryResult(TGeneratedCubeMapTextureResource) or
           TryResult(T3DTextureResource) or
           TryResult(TGeneratedShadowMapResource) or
-          TryResult(TShaderTextureResource) ) then
+          TryResult(TShaderTextureResource) or
+          TryResult(TScreenTextureResource) ) then
     Result := nil;
 end;
 
@@ -2384,6 +2413,129 @@ end;
 function TShaderTextureResource.TextureNode: TShaderTextureNode;
 begin
   Result := TShaderTextureNode(inherited TextureNode);
+end;
+
+{ TScreenTextureResource ------------------------------------------------------ }
+
+var
+  { Prepared TScreenTextureResource instances, to update in UpdateScreenTextures.
+    Created with the first one, freed with the last one. }
+  ScreenTextureResources: TList;
+  WarningScreenTextureMultisampleDone: Boolean;
+
+class function TScreenTextureResource.IsClassForTextureNode(
+  ANode: TAbstractTextureNode): boolean;
+begin
+  Result := ANode is TScreenTextureNode;
+end;
+
+function TScreenTextureResource.TextureNode: TScreenTextureNode;
+begin
+  Result := TScreenTextureNode(inherited TextureNode);
+end;
+
+procedure TScreenTextureResource.PrepareCore(
+  const RenderOptions: TCastleRenderOptions);
+begin
+  FGLName := glCreateTexture;
+  FWidth := 0;
+  FHeight := 0;
+  glBindTexture(GL_TEXTURE_2D, FGLName);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+  if ScreenTextureResources = nil then
+    ScreenTextureResources := TList.Create;
+  ScreenTextureResources.Add(Self);
+end;
+
+procedure TScreenTextureResource.UnprepareCore;
+begin
+  ScreenTextureResources.Remove(Self);
+  { Free the list with the last resource, so it doesn't outlive them. }
+  if ScreenTextureResources.Count = 0 then
+    FreeAndNil(ScreenTextureResources);
+  if FGLName <> GLObjectNone then
+  begin
+    glDeleteTexture(FGLName);
+    FGLName := GLObjectNone;
+  end;
+end;
+
+function TScreenTextureResource.Bind(const TextureUnit: Cardinal): boolean;
+begin
+  Result := FGLName <> GLObjectNone;
+  if not Result then Exit;
+
+  TRenderer.ActiveTexture(TextureUnit);
+  glBindTexture(GL_TEXTURE_2D, FGLName);
+end;
+
+function TScreenTextureResource.Enable(const TextureUnit: Cardinal;
+  Shader: TShader; const Env: TTextureEnv): boolean;
+begin
+  Result := Bind(TextureUnit);
+  if not Result then Exit;
+
+  Shader.EnableTexture(TextureUnit, MyTextureType, TextureNode, Env);
+end;
+
+function TScreenTextureResource.ShaderTextureType(out TextureType: TTextureType): Boolean;
+begin
+  TextureType := MyTextureType;
+  Result := true;
+end;
+
+function TScreenTextureResource.GLName: TGLTextureId;
+begin
+  Result := FGLName;
+end;
+
+procedure TScreenTextureResource.UpdateFromScreen(const Rect: TRectangle);
+begin
+  if (Rect.Width <= 0) or (Rect.Height <= 0) then
+    Exit;
+
+  TRenderer.ActiveTexture(0);
+  glBindTexture(GL_TEXTURE_2D, FGLName);
+  if (FWidth <> Rect.Width) or (FHeight <> Rect.Height) then
+  begin
+    FWidth := Rect.Width;
+    FHeight := Rect.Height;
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, FWidth, FHeight, 0,
+      GL_RGB, GL_UNSIGNED_BYTE, nil);
+  end;
+  glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, Rect.Left, Rect.Bottom,
+    FWidth, FHeight);
+end;
+
+procedure UpdateScreenTextures;
+var
+  Rect: TRectangle;
+  SampleBuffers: TGLint;
+  I: Integer;
+begin
+  if (ScreenTextureResources = nil) or (ScreenTextureResources.Count = 0) then
+    Exit;
+
+  { glCopyTexSubImage2D cannot read from a multisampled framebuffer. }
+  SampleBuffers := 0;
+  glGetIntegerv(GL_SAMPLE_BUFFERS, @SampleBuffers);
+  if SampleBuffers > 0 then
+  begin
+    if not WarningScreenTextureMultisampleDone then
+    begin
+      WarningScreenTextureMultisampleDone := true;
+      WritelnWarning('ScreenTexture is not updated when rendering to a multisampled framebuffer (anti-aliasing) yet');
+    end;
+    Exit;
+  end;
+
+  Rect := RenderContext.Viewport.Translate(RenderContext.ViewportDelta);
+  for I := 0 to ScreenTextureResources.Count - 1 do
+    TScreenTextureResource(ScreenTextureResources[I]).UpdateFromScreen(Rect);
 end;
 
 {$endif read_implementation}

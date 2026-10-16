@@ -31,13 +31,16 @@ type
     procedure TestImageTransformImageWidthHeight;
     { Testcase from https://github.com/castle-engine/castle-engine/issues/664 }
     procedure TestRenderReferencesAndLightRadius;
+    { TScreenTextureNode used by an effect of a shape with blending. }
+    procedure TestScreenTexture;
   end;
 
 implementation
 
 uses X3DNodes, CastleSceneCore, CastleScene, CastleBoxes, CastleVectors,
   CastleInternalRays, CastleProjection, CastleComponentSerialize,
-  CastleUIControls, CastleWindow, CastleViewport, CastleInternalGLUtils;
+  CastleUIControls, CastleWindow, CastleViewport, CastleInternalGLUtils,
+  CastleImages, CastleColors, CastleRenderOptions, X3DFields;
 
 procedure TTestScene.TestScene;
 
@@ -214,6 +217,113 @@ begin
       // while not Window.Closed do
       //   Application.ProcessAllMessages;
     finally FreeAndNil(View) end;
+  finally DestroyWindowForTest(Window) end;
+end;
+
+procedure TTestScene.TestScreenTexture;
+const
+  WindowSize = 200;
+  { Show the screen texture mirrored horizontally. }
+  EffectCode =
+    'uniform sampler2D screen_texture;' + LineEnding +
+    'uniform vec2 screen_size;' + LineEnding +
+    'void PLUG_fragment_modify(inout vec4 fragment_color)' + LineEnding +
+    '{' + LineEnding +
+    '  vec2 uv = gl_FragCoord.xy / screen_size;' + LineEnding +
+    '  fragment_color = vec4(texture2D(screen_texture, vec2(1.0 - uv.x, uv.y)).rgb, 1.0);' + LineEnding +
+    '}';
+var
+  Window: TCastleWindow;
+  Viewport: TCastleViewport;
+
+  { Unlit square of given color and size at given position. }
+  function Square(const Color: TCastleColorRGB; const Size: Single;
+    const Translation: TVector3; out Shape: TShapeNode): TTransformNode;
+  var
+    Rectangle: TRectangle2DNode;
+    Material: TUnlitMaterialNode;
+  begin
+    Rectangle := TRectangle2DNode.CreateWithShape(Shape);
+    Rectangle.Size := Vector2(Size, Size);
+    Material := TUnlitMaterialNode.Create;
+    Material.EmissiveColor := Color;
+    Shape.Material := Material;
+    Result := TTransformNode.Create;
+    Result.Translation := Translation;
+    Result.AddChildren(Shape);
+  end;
+
+  function BuildScene: TX3DRootNode;
+  var
+    Shape: TShapeNode;
+    Effect: TEffectNode;
+    Part: TEffectPartNode;
+  begin
+    Result := TX3DRootNode.Create;
+    // opaque background: red on the left, green on the right
+    Result.AddChildren(Square(RedRGB, 20, Vector3(-10, 0, 0), Shape));
+    Result.AddChildren(Square(GreenRGB, 20, Vector3(10, 0, 0), Shape));
+
+    // shape with blending in front, showing the screen texture
+    Result.AddChildren(Square(WhiteRGB, 20, Vector3(0, 0, 1), Shape));
+    Shape.Appearance.AlphaMode := amBlend;
+    Effect := TEffectNode.Create;
+    Effect.Language := slGLSL;
+    Effect.AddCustomField(TSFNode.Create(Effect, true, 'screen_texture',
+      [TAbstractTextureNode], TScreenTextureNode.Create));
+    Effect.AddCustomField(TSFVec2f.Create(Effect, true, 'screen_size',
+      Vector2(WindowSize, WindowSize)));
+    Part := TEffectPartNode.Create;
+    Part.ShaderType := stFragment;
+    Part.Contents := EffectCode;
+    Effect.SetParts([Part]);
+    Shape.Appearance.SetEffects([Effect]);
+  end;
+
+var
+  Scene: TCastleScene;
+  Image: TCastleImage;
+  Left, Right: TCastleColorRGB;
+begin
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  Window := CreateWindowForTest;
+  try
+    Window.Width := WindowSize;
+    Window.Height := WindowSize;
+    Window.AntiAliasing := aaNone;
+    Window.Open;
+
+    Viewport := TCastleViewport.Create(Window);
+    Viewport.FullSize := true;
+    Viewport.BackgroundColor := Black;
+    Viewport.Camera.SetView(Vector3(0, 0, 5), Vector3(0, 0, -1), Vector3(0, 1, 0));
+    Window.Controls.InsertFront(Viewport);
+
+    Scene := TCastleScene.Create(Window);
+    Scene.Load(BuildScene, true);
+    Viewport.Items.Add(Scene);
+
+    { Render twice: the first frame prepares the screen texture. }
+    Image := Window.SaveScreen;
+    FreeAndNil(Image);
+    Image := Window.SaveScreen;
+    try
+      Left := Image.Colors[WindowSize div 4, WindowSize div 2, 0].XYZ;
+      Right := Image.Colors[WindowSize * 3 div 4, WindowSize div 2, 0].XYZ;
+    finally FreeAndNil(Image) end;
+
+    // mirrored: the left side shows the green right side, and the other way around
+    if not (TVector3.Equals(Left, GreenRGB, 0.1) and TVector3.Equals(Right, RedRGB, 0.1)) then
+      Fail(Format('Screen texture mirrored: left %s (expected green), right %s (expected red)',
+        [Left.ToString, Right.ToString]));
+    CheckGLErrors('TestScreenTexture');
+
+    Window.Close;
   finally DestroyWindowForTest(Window) end;
 end;
 
