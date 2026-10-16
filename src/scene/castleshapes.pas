@@ -386,6 +386,12 @@ type
     of items in @link(TCastleSceneCore.Shapes).
     All you have to do is to call appropriate @code(Changed*)
     methods of @link(TCastleSceneCore). }
+  { Triangle position with the indexes of its vertexes,
+    see TShape.InternalLocalTriangulateIndexes.
+    @exclude }
+  TTriangleIndexesEvent = procedure (const Position: TTriangle3;
+    const Index1, Index2, Index3: Integer) of object;
+
   TShape = class(TShapeTree)
   strict private
   type
@@ -490,6 +496,9 @@ type
       const OnlyCollidable: boolean = false); override;
     procedure FastTransformUpdateCore(var VisibleChange: Boolean;
       const ParentTransformation: TTransformation); override;
+  private
+    procedure LocalTriangulateCore(const TriangleEvent: TTriangleEvent;
+      const IndexesEvent: TTriangleIndexesEvent; const FrontFaceAlwaysCcw: Boolean);
   public
     { List of TGeneratedShadowMap instances that should affect this shape.
 
@@ -790,6 +799,13 @@ type
     procedure LocalTriangulate(const TriangleEvent: TTriangleEvent;
       const FrontFaceAlwaysCcw: Boolean = false);
     { @groupEnd }
+
+    { Triangulate like LocalTriangulate (with FrontFaceAlwaysCcw = @false),
+      giving only the positions, and the indexes of the triangle's vertexes
+      in the geometry arrays (which are often, but not always,
+      the indexes to the geometry's coordinates).
+      @exclude }
+    procedure InternalLocalTriangulateIndexes(const TriangleEvent: TTriangleIndexesEvent);
 
     function DebugInfoWithoutChildren: String; override;
     function NiceName: string;
@@ -2123,8 +2139,13 @@ procedure TShape.Changed(const InactiveOnly: boolean;
       svBoundingSphere,
       svNormals];
 
-    { Clear variables after removing fvTrianglesList* }
-    FShadowVolumes.InvalidateTrianglesListShadowCasters;
+    { Clear variables after removing fvTrianglesList*.
+      When ChangedOnlyCoord, the shadow casters triangles may be only
+      moved (cheaper than triangulating again, for mesh deformation). }
+    if ChangedOnlyCoord then
+      FShadowVolumes.InvalidateTrianglesPositions
+    else
+      FShadowVolumes.InvalidateTrianglesListShadowCasters;
 
     { Edges topology possibly changed. }
     if not ChangedOnlyCoord then
@@ -3114,6 +3135,17 @@ end;
 
 procedure TShape.LocalTriangulate(const TriangleEvent: TTriangleEvent;
   const FrontFaceAlwaysCcw: Boolean);
+begin
+  LocalTriangulateCore(TriangleEvent, nil, FrontFaceAlwaysCcw);
+end;
+
+procedure TShape.InternalLocalTriangulateIndexes(const TriangleEvent: TTriangleIndexesEvent);
+begin
+  LocalTriangulateCore(nil, TriangleEvent, false);
+end;
+
+procedure TShape.LocalTriangulateCore(const TriangleEvent: TTriangleEvent;
+  const IndexesEvent: TTriangleIndexesEvent; const FrontFaceAlwaysCcw: Boolean);
 var
   Arrays: TGeometryArrays;
   RangeBeginIndex: Integer;
@@ -3141,6 +3173,11 @@ var
     Position.Data[0] := Arrays.Position(VI1)^;
     Position.Data[1] := Arrays.Position(VI2)^;
     Position.Data[2] := Arrays.Position(VI3)^;
+    if Assigned(IndexesEvent) then
+    begin
+      IndexesEvent(Position, VI1, VI2, VI3);
+      Exit;
+    end;
     Normal.Data[0] := Arrays.Normal(VI1)^;
     Normal.Data[1] := Arrays.Normal(VI2)^;
     Normal.Data[2] := Arrays.Normal(VI3)^;
