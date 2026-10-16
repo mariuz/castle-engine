@@ -61,7 +61,7 @@ uses SysUtils, Classes,
   Vcl.Menus, Vcl.Dialogs, Vcl.FileCtrl, Vcl.ActnList, Vcl.Controls,
   CastleInternalDelphiUtils, CastleConfig, CastleApplicationProperties,
   CastleUtils, CastleInternalTools, CastleStringUtils, CastleOpenDocument,
-  Dom, CastleXmlUtils, CastleUriUtils, CastleFilesUtils;
+  Dom, CastleXmlUtils, CastleUriUtils, CastleFilesUtils, CastleInternalArchitectures;
 
 { Utilities ------------------------------------------------------------------ }
 
@@ -992,9 +992,9 @@ begin
       Files := TStringList.Create;
       try
         if Project.CurrentPlatform = cWin32Platform then
-          ProjectDependencies.DeployFiles(dpWin32, Files);
+          ProjectDependencies.DeployFiles(win32, i386, Files);
         if Project.CurrentPlatform = cWin64Platform then
-          ProjectDependencies.DeployFiles(dpWin64, Files);
+          ProjectDependencies.DeployFiles(win64, x86_64, Files);
 
         if Files.Count <> 0 then
         begin
