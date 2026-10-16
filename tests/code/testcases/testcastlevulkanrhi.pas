@@ -24,6 +24,7 @@ uses
   CastleApplicationProperties, CastleImages, CastleGLImages, CastleFonts,
   CastleTextureFont_Default3d_Sans,
   CastleInternalRHI, CastleInternalVulkan, CastleInternalVulkanMemory,
+  CastleInternalVulkanWSI, CastleInternalShaderCompiler,
   CastleInternalShaderRHI, CastleInternalBatch2DRHI, CastleInternalRenderer,
   CastleRendererInternalLights, X3DNodes,
   CastleTransform, CastleRenderOptions, ToolManifest, CastleInternalRenderDoc;
@@ -57,6 +58,9 @@ type
     procedure TestRenderStatisticsDiagnostics;
     procedure TestDrawIndirectCommandStructures;
     procedure TestRenderDocIntegration;
+    procedure TestPlatformWSIAndBackendFallback;
+    procedure TestShaderPrewarming;
+    procedure TestVisualRegressionImageComparison;
   end;
 
 implementation
@@ -987,6 +991,85 @@ begin
     AssertFalse('Options LaunchRenderDocReplayUI returns False without RenderDoc', Options.LaunchRenderDocReplayUI);
   finally
     FreeAndNil(Options);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestPlatformWSIAndBackendFallback;
+var
+  Exts: TAnsiStringArray;
+begin
+  Exts := GetRequiredVulkanInstanceExtensions;
+  AssertTrue('At least VK_KHR_surface is required', Length(Exts) >= 1);
+  AssertEquals('First extension is VK_KHR_surface', VK_KHR_SURFACE_EXTENSION_NAME, String(Exts[0]));
+
+  { Vulkan 1.3 available -> selects backendVulkan }
+  AssertEquals('Auto with Vulkan 1.3 -> Vulkan',
+    Ord(backendVulkan), Ord(SelectOptimalRenderBackend(backendAuto, True, 1, 3, False)));
+
+  { Vulkan 1.1 baseline on Android -> selects backendVulkan }
+  AssertEquals('Auto with Vulkan 1.1 on mobile -> Vulkan',
+    Ord(backendVulkan), Ord(SelectOptimalRenderBackend(backendAuto, True, 1, 1, True)));
+
+  { Vulkan 1.0 (below 1.1 baseline) on Android -> falls back to OpenGLES 3.0 }
+  AssertEquals('Vulkan 1.0 on mobile -> falls back to OpenGLES',
+    Ord(backendOpenGLES), Ord(SelectOptimalRenderBackend(backendAuto, True, 1, 0, True)));
+
+  { Vulkan unavailable on desktop -> falls back to OpenGL }
+  AssertEquals('No Vulkan on desktop -> falls back to OpenGL',
+    Ord(backendOpenGL), Ord(SelectOptimalRenderBackend(backendVulkan, False, 0, 0, False)));
+
+  { Explicit OpenGL request is preserved even if Vulkan 1.3 is present }
+  AssertEquals('Explicit OpenGL -> OpenGL',
+    Ord(backendOpenGL), Ord(SelectOptimalRenderBackend(backendOpenGL, True, 1, 3, False)));
+end;
+
+procedure TTestCastleVulkanRHI.TestShaderPrewarming;
+var
+  Hashes: TUInt64Array;
+  I, J: Integer;
+begin
+  Hashes := TCastleShaderCompiler.Instance.PrewarmCoreEngineShaders;
+  AssertEquals('PrewarmCoreEngineShaders returns 5 core shader stage hashes', 5, Length(Hashes));
+  for I := 0 to High(Hashes) do
+  begin
+    AssertTrue('Core shader hash must be non-zero', Hashes[I] <> 0);
+    for J := I + 1 to High(Hashes) do
+      AssertTrue('Distinct core shaders must produce distinct hashes', Hashes[I] <> Hashes[J]);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVisualRegressionImageComparison;
+var
+  ImgA, ImgB: TRGBAlphaImage;
+  RMSE: Single;
+  Px: PVector4Byte;
+begin
+  ImgA := TRGBAlphaImage.Create(16, 16);
+  ImgB := TRGBAlphaImage.Create(16, 16);
+  try
+    ImgA.Clear(Vector4Byte(64, 128, 192, 255));
+    ImgB.Clear(Vector4Byte(64, 128, 192, 255));
+
+    { 1. Identical images must have 0.0 RMSE }
+    AssertTrue('Identical framebuffers pass diff threshold',
+      CompareImagesPerceptualDiff(ImgA, ImgB, 0.001, RMSE));
+    AssertSameValue(0.0, RMSE, 0.00001);
+
+    { 2. Minor 1-LSB rounding difference across 1 pixel stays well within perceptual threshold (0.01) }
+    Px := ImgB.PixelPtr(8, 8);
+    Px^.X := 65;
+    AssertTrue('1-LSB sub-threshold difference passes',
+      CompareImagesPerceptualDiff(ImgA, ImgB, 0.01, RMSE));
+    AssertTrue('RMSE > 0 for modified image', RMSE > 0.0);
+
+    { 3. Completely different image exceeds threshold and fails }
+    ImgB.Clear(Vector4Byte(255, 0, 0, 255));
+    AssertFalse('Divergent framebuffers fail diff threshold',
+      CompareImagesPerceptualDiff(ImgA, ImgB, 0.05, RMSE));
+    AssertTrue('Divergent RMSE > 0.3', RMSE > 0.3);
+  finally
+    FreeAndNil(ImgB);
+    FreeAndNil(ImgA);
   end;
 end;
 

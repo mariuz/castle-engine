@@ -30,6 +30,7 @@ uses
 type
   { Raw byte array holding 32-bit aligned SPIR-V words }
   TSPIRVBytecode = TBytes;
+  TUInt64Array = array of UInt64;
 
   { Thread-safe GLSL-to-SPIR-V compiler with memory and disk caching. }
   TCastleShaderCompiler = class
@@ -61,6 +62,16 @@ type
       it immediately from memory/disk cache if the FNV-1a hash matches. }
     function GetOrCompileSPIRV(const AStage: TRHIShaderStage;
       const AGLSLSource: String; const ADebugName: String = 'castle_shader'): TSPIRVBytecode;
+
+    { Pre-warms a single GLSL 450 shader stage (compiles and caches to disk if
+      libshaderc is available) and returns its deterministic 64-bit FNV-1a hash. }
+    function PrewarmShaderSource(const AStage: TRHIShaderStage;
+      const AGLSLSource: String; const ADebugName: String = 'prewarmed_shader'): UInt64;
+
+    { Pre-warms known core engine shaders (3D forward pass vertex/fragment,
+      depth-only shadow pass, and post-processing screen effect shaders)
+      and returns the array of their deterministic source hashes. }
+    function PrewarmCoreEngineShaders: TUInt64Array;
 
     { Clears all cached SPIR-V binaries from memory (and optionally disk). }
     procedure ClearCache(const AlsoClearDisk: Boolean = False);
@@ -170,7 +181,7 @@ begin
   FLock := TCriticalSection.Create;
   FMemoryCache := {$ifdef FPC}specialize{$endif} TDictionary<UInt64, TSPIRVBytecode>.Create;
   FDiskCacheEnabled := True;
-  FDiskCacheBaseUrl := ApplicationConfig('shader_cache/');
+  FDiskCacheBaseUrl := 'castle-config:/shader_cache/';
 
   LoadShadercLibrary;
 end;
@@ -438,32 +449,78 @@ begin
 
   FLock.Acquire;
   try
-    { 1. Fast Path: In-Memory Cache Hit }
     if FMemoryCache.TryGetValue(SourceHash, Result) then
       Exit;
 
-    { 2. Medium Path: On-Disk ApplicationConfig Cache Hit }
     if TryLoadFromDiskCache(SourceHash, AStage, Result) then
     begin
       FMemoryCache.Add(SourceHash, Result);
       Exit;
     end;
-  finally
-    FLock.Release;
-  end;
-
-  { 3. Slow Path: Compile via libshaderc (outside lock or serialized per instance) }
-  FLock.Acquire;
-  try
-    { Double-check memory cache in case another thread just compiled it }
-    if FMemoryCache.TryGetValue(SourceHash, Result) then
-      Exit;
 
     Result := CompileGLSLToSPIRVInternal(AStage, AGLSLSource, ADebugName);
     FMemoryCache.Add(SourceHash, Result);
     SaveToDiskCache(SourceHash, AStage, Result);
   finally
     FLock.Release;
+  end;
+end;
+
+function TCastleShaderCompiler.PrewarmShaderSource(const AStage: TRHIShaderStage;
+  const AGLSLSource: String; const ADebugName: String): UInt64;
+var
+  DummySPIRV: TSPIRVBytecode;
+begin
+  Result := TCastleShaderGeneratorRHI.ComputeSourceHash(AGLSLSource);
+  if IsRuntimeCompilationAvailable then
+    DummySPIRV := GetOrCompileSPIRV(AStage, AGLSLSource, ADebugName)
+  else
+    TryLoadFromDiskCache(Result, AStage, DummySPIRV);
+end;
+
+function TCastleShaderCompiler.PrewarmCoreEngineShaders: TUInt64Array;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  ForwardVS, ForwardFS, DepthOnlyVS, ScreenVS, ScreenFS: String;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    ForwardVS := Gen.FinalizeVertexShaderSource(
+      Gen.GeneratePreamble(ssVertex) +
+      'void main() {' + LineEnding +
+      '  castle_vertex_eye = castle_ModelViewMatrix * castle_Vertex;' + LineEnding +
+      '  castle_normal_eye = normalize(castle_NormalMatrix * castle_Normal);' + LineEnding +
+      '  castle_tex_coord0 = castle_MultiTexCoord0;' + LineEnding +
+      '  gl_Position = castle_ProjectionMatrix * castle_vertex_eye;' + LineEnding +
+      '}');
+    ForwardFS := Gen.GeneratePreamble(ssFragment) +
+      'void main() {' + LineEnding +
+      '  castle_FragColor = castle_MaterialBaseColor;' + LineEnding +
+      '}';
+    DepthOnlyVS := Gen.FinalizeVertexShaderSource(
+      Gen.GeneratePreamble(ssVertex) +
+      'void main() {' + LineEnding +
+      '  gl_Position = castle_ProjectionMatrix * (castle_ModelViewMatrix * castle_Vertex);' + LineEnding +
+      '}');
+    ScreenVS := Gen.FinalizeVertexShaderSource(
+      Gen.GenerateScreenEffectPreamble(ssVertex, True) +
+      'void main() {' + LineEnding +
+      '  v_tex_coord = tex_coord;' + LineEnding +
+      '  gl_Position = vec4(vertex * 2.0 - 1.0, 0.0, 1.0);' + LineEnding +
+      '}');
+    ScreenFS := Gen.GenerateScreenEffectPreamble(ssFragment, True) +
+      'void main() {' + LineEnding +
+      '  castle_FragColor = texture(screen, tex_coord);' + LineEnding +
+      '}';
+
+    SetLength(Result, 5);
+    Result[0] := PrewarmShaderSource(ssVertex, ForwardVS, 'core_forward_vs');
+    Result[1] := PrewarmShaderSource(ssFragment, ForwardFS, 'core_forward_fs');
+    Result[2] := PrewarmShaderSource(ssVertex, DepthOnlyVS, 'core_shadow_depth_vs');
+    Result[3] := PrewarmShaderSource(ssVertex, ScreenVS, 'core_screen_effect_vs');
+    Result[4] := PrewarmShaderSource(ssFragment, ScreenFS, 'core_screen_effect_fs');
+  finally
+    FreeAndNil(Gen);
   end;
 end;
 

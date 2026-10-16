@@ -679,6 +679,12 @@ procedure SetRHIDevice(const ADevice: TRHIDevice);
 function ActiveCommandList: TRHICommandList;
 procedure SetActiveCommandList(const ACmdList: TRHICommandList);
 
+{ Compares two framebuffer readback images (e.g. OpenGL vs Vulkan GrabTextureImage)
+  by computing the normalized Root Mean Square Error (RMSE in [0..1]) across all channels.
+  Returns True if dimensions/formats match and OutNormalizedRMSE <= MaxNormalizedRMSE. }
+function CompareImagesPerceptualDiff(const ImageA, ImageB: TCastleImage;
+  const MaxNormalizedRMSE: Single; out OutNormalizedRMSE: Single): Boolean;
+
 implementation
 
 var
@@ -703,6 +709,42 @@ end;
 procedure SetActiveCommandList(const ACmdList: TRHICommandList);
 begin
   FActiveCommandList := ACmdList;
+end;
+
+function CompareImagesPerceptualDiff(const ImageA, ImageB: TCastleImage;
+  const MaxNormalizedRMSE: Single; out OutNormalizedRMSE: Single): Boolean;
+var
+  TotalSamples, I: PtrUInt;
+  PA, PB: PByte;
+  Diff, SumSq: Double;
+begin
+  OutNormalizedRMSE := 1.0;
+  if (ImageA = nil) or (ImageB = nil) or
+     (ImageA.Width <> ImageB.Width) or
+     (ImageA.Height <> ImageB.Height) or
+     (ImageA.Depth <> ImageB.Depth) or
+     (ImageA.PixelSize <> ImageB.PixelSize) then
+    Exit(False);
+
+  TotalSamples := PtrUInt(ImageA.Width) * PtrUInt(ImageA.Height) *
+                  PtrUInt(ImageA.Depth) * PtrUInt(ImageA.PixelSize);
+  if TotalSamples = 0 then
+  begin
+    OutNormalizedRMSE := 0.0;
+    Exit(True);
+  end;
+
+  PA := PByte(ImageA.RawPixels);
+  PB := PByte(ImageB.RawPixels);
+  SumSq := 0.0;
+  for I := 0 to TotalSamples - 1 do
+  begin
+    Diff := (Integer(PA[I]) - Integer(PB[I])) / 255.0;
+    SumSq := SumSq + Diff * Diff;
+  end;
+
+  OutNormalizedRMSE := Sqrt(SumSq / TotalSamples);
+  Result := OutNormalizedRMSE <= MaxNormalizedRMSE;
 end;
 
 { TRHIBufferDesc }
@@ -739,15 +781,9 @@ class function TRHITextureDesc.CreateCube(const ASize: Cardinal;
   const AFormat: TRHIPixelFormat; const AUsage: TRHITextureUsageFlags;
   const AMipLevels: Cardinal): TRHITextureDesc;
 begin
-  FillChar(Result, SizeOf(Result), 0);
+  Result := Create2D(ASize, ASize, AFormat, AUsage, AMipLevels);
   Result.Dimension := tdCube;
-  Result.Width := ASize;
-  Result.Height := ASize;
   Result.DepthOrArrayLayers := 6;
-  Result.MipLevels := AMipLevels;
-  Result.SampleCount := 1;
-  Result.Format := AFormat;
-  Result.Usage := AUsage;
 end;
 
 { TRHIBlendStateDesc }
@@ -815,11 +851,7 @@ end;
 
 class function TRHIDepthStencilStateDesc.DefaultShadowMap: TRHIDepthStencilStateDesc;
 begin
-  FillChar(Result, SizeOf(Result), 0);
-  Result.DepthTestEnable := True;
-  Result.DepthWriteEnable := True;
-  Result.DepthCompareOp := coLessOrEqual;
-  Result.StencilTestEnable := False;
+  Result := DefaultDepthTestWrite;
 end;
 
 { TRHIRenderingInfo }

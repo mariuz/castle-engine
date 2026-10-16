@@ -73,6 +73,9 @@ type
   { CPU-side mirror of Set 0, Binding 1 (Multi-Light UBO - std140) }
   PCastleLightsUniformBlock = ^TCastleLightsUniformBlock;
   TCastleLightsUniformBlock = packed record
+  private
+    function AddLightInternal(const APos, AColor, ASpotDir, ASpotParams, AAtten, AAmbient: TVector4): Integer;
+  public
     Count: Cardinal;                                                // 4 bytes
     Padding0, Padding1, Padding2: Cardinal;                         // 12 bytes
     Lights: array [0 .. CASTLE_MAX_LIGHTS - 1] of TCastleLightData; // 32 * 160 = 5120 bytes
@@ -155,50 +158,42 @@ begin
   FillChar(Self, SizeOf(Self), 0);
 end;
 
-function TCastleLightsUniformBlock.AddDirectionalLight(const Direction, Color,
-  AmbientColor: TVector3): Integer;
+function TCastleLightsUniformBlock.AddLightInternal(const APos, AColor, ASpotDir,
+  ASpotParams, AAtten, AAmbient: TVector4): Integer;
 begin
   if Count >= CASTLE_MAX_LIGHTS then Exit(-1);
   Result := Count;
-  Lights[Result].Position := Vector4(Direction, 0.0);
-  Lights[Result].Color := Vector4(Color, 0.0);
-  Lights[Result].SpotDirection := Vector4(0, 0, -1, -1.0);
-  Lights[Result].SpotParams := Vector4(0, 0, 0, 0);
-  Lights[Result].Attenuation := Vector4(1, 0, 0, 0);
-  Lights[Result].AmbientColor := Vector4(AmbientColor, 1.0);
+  Lights[Result].Position := APos;
+  Lights[Result].Color := AColor;
+  Lights[Result].SpotDirection := ASpotDir;
+  Lights[Result].SpotParams := ASpotParams;
+  Lights[Result].Attenuation := AAtten;
+  Lights[Result].AmbientColor := AAmbient;
   Lights[Result].ProjectorMatrix := TMatrix4.Identity;
   Inc(Count);
+end;
+
+function TCastleLightsUniformBlock.AddDirectionalLight(const Direction, Color,
+  AmbientColor: TVector3): Integer;
+begin
+  Result := AddLightInternal(Vector4(Direction, 0.0), Vector4(Color, 0.0),
+    Vector4(0, 0, -1, -1.0), Vector4(0, 0, 0, 0), Vector4(1, 0, 0, 0), Vector4(AmbientColor, 1.0));
 end;
 
 function TCastleLightsUniformBlock.AddPointLight(const Position, Color,
   AmbientColor: TVector3; const Attenuation: TVector3; const Radius: Single): Integer;
 begin
-  if Count >= CASTLE_MAX_LIGHTS then Exit(-1);
-  Result := Count;
-  Lights[Result].Position := Vector4(Position, 1.0);
-  Lights[Result].Color := Vector4(Color, Radius);
-  Lights[Result].SpotDirection := Vector4(0, 0, -1, -1.0);
-  Lights[Result].SpotParams := Vector4(0, 0, 0, 0);
-  Lights[Result].Attenuation := Vector4(Attenuation, 0);
-  Lights[Result].AmbientColor := Vector4(AmbientColor, 1.0);
-  Lights[Result].ProjectorMatrix := TMatrix4.Identity;
-  Inc(Count);
+  Result := AddLightInternal(Vector4(Position, 1.0), Vector4(Color, Radius),
+    Vector4(0, 0, -1, -1.0), Vector4(0, 0, 0, 0), Vector4(Attenuation, 0.0), Vector4(AmbientColor, 1.0));
 end;
 
 function TCastleLightsUniformBlock.AddSpotLight(const Position, Direction, Color,
   AmbientColor: TVector3; const Attenuation: TVector3; const Radius, SpotCosCutoff,
   SpotCutoff, BeamWidth, SpotExponent: Single): Integer;
 begin
-  if Count >= CASTLE_MAX_LIGHTS then Exit(-1);
-  Result := Count;
-  Lights[Result].Position := Vector4(Position, 2.0);
-  Lights[Result].Color := Vector4(Color, Radius);
-  Lights[Result].SpotDirection := Vector4(Direction, SpotCosCutoff);
-  Lights[Result].SpotParams := Vector4(SpotCutoff, BeamWidth, SpotExponent, 0);
-  Lights[Result].Attenuation := Vector4(Attenuation, 0);
-  Lights[Result].AmbientColor := Vector4(AmbientColor, 1.0);
-  Lights[Result].ProjectorMatrix := TMatrix4.Identity;
-  Inc(Count);
+  Result := AddLightInternal(Vector4(Position, 2.0), Vector4(Color, Radius),
+    Vector4(Direction, SpotCosCutoff), Vector4(SpotCutoff, BeamWidth, SpotExponent, 0.0),
+    Vector4(Attenuation, 0.0), Vector4(AmbientColor, 1.0));
 end;
 
 procedure TCastleLightsUniformBlock.SetProjectorMatrix(const Index: Integer;
@@ -424,18 +419,17 @@ end;
 
 function TCastleShaderGeneratorRHI.UpgradeUserEffectUniforms(
   const UserEffectSource: String): String;
+const
+  PrecisionQualifiers: array[0..2] of String = ('lowp ', 'mediump ', 'highp ');
 var
   Lines: TStringList;
   UBOMembers, AliasDefines, StrippedBody: TStringBuilder;
-  Line, Trimmed, DeclBody, VarType, VarName, BaseName, ArraySuffix: String;
+  Line, Trimmed, DeclBody, VarType, VarName, BaseName, Qual: String;
   SpacePos, SemiPos, BracketPos, CustomSamplerSlot: Integer;
 begin
   if FBackend <> rbVulkan then
     Exit(UserEffectSource);
 
-  { Parses custom user EffectPart code looking for bare "uniform float my_var;"
-    declarations. Sampler uniforms are assigned to Set 2 bindings 2+, and value
-    uniforms are packed into a generated Set 2, Binding 1 UBO with #define aliases. }
   Lines := TStringList.Create;
   UBOMembers := TStringBuilder.Create;
   AliasDefines := TStringBuilder.Create;
@@ -454,13 +448,12 @@ begin
         if SemiPos > 0 then
           DeclBody := Copy(DeclBody, 1, SemiPos - 1);
 
-        { Strip precision qualifiers if present }
-        if IsPrefix('lowp ', DeclBody, False) then
-          DeclBody := Trim(Copy(DeclBody, Length('lowp ') + 1, MaxInt))
-        else if IsPrefix('mediump ', DeclBody, False) then
-          DeclBody := Trim(Copy(DeclBody, Length('mediump ') + 1, MaxInt))
-        else if IsPrefix('highp ', DeclBody, False) then
-          DeclBody := Trim(Copy(DeclBody, Length('highp ') + 1, MaxInt));
+        for Qual in PrecisionQualifiers do
+          if IsPrefix(Qual, DeclBody, False) then
+          begin
+            DeclBody := Trim(SEnding(DeclBody, Length(Qual) + 1));
+            Break;
+          end;
 
         SpacePos := Pos(' ', DeclBody);
         if SpacePos > 0 then
@@ -477,18 +470,12 @@ begin
           begin
             BracketPos := Pos('[', VarName);
             if BracketPos > 0 then
-            begin
-              BaseName := Trim(Copy(VarName, 1, BracketPos - 1));
-              ArraySuffix := Trim(Copy(VarName, BracketPos, MaxInt));
-              UBOMembers.AppendLine(Format('  %s u_user_%s%s;', [VarType, BaseName, ArraySuffix]));
-              AliasDefines.AppendLine(Format('#define %s CastleUserEffect.u_user_%s',
-                [BaseName, BaseName]));
-            end else
-            begin
-              UBOMembers.AppendLine(Format('  %s u_user_%s;', [VarType, VarName]));
-              AliasDefines.AppendLine(Format('#define %s CastleUserEffect.u_user_%s',
-                [VarName, VarName]));
-            end;
+              BaseName := Trim(Copy(VarName, 1, BracketPos - 1))
+            else
+              BaseName := VarName;
+            UBOMembers.AppendLine(Format('  %s u_user_%s;', [VarType, VarName]));
+            AliasDefines.AppendLine(Format('#define %s CastleUserEffect.u_user_%s',
+              [BaseName, BaseName]));
           end;
         end;
       end else
@@ -535,10 +522,17 @@ end;
 
 function TCastleShaderGeneratorRHI.SanitizeVulkanShaderSource(
   const Source: String): String;
+const
+  BuiltInUniformTokens: array[0..9] of String = (
+    'castle_LightSource', 'castle_projector_matrix', 'castle_ModelViewMatrix',
+    'castle_ProjectionMatrix', 'castle_NormalMatrix', 'castle_JointMatrix',
+    'castle_Material', 'castle_WorldEyePosition', 'castle_SceneTime', 'castle_Fog'
+  );
 var
   Lines: TStringList;
   ResultBuilder: TStringBuilder;
-  Line, Trimmed: String;
+  Line, Trimmed, Token: String;
+  IsBuiltIn: Boolean;
 begin
   if FBackend <> rbVulkan then
     Exit(Source);
@@ -550,21 +544,18 @@ begin
     for Line in Lines do
     begin
       Trimmed := Trim(Line);
-      if IsPrefix('uniform ', Trimmed, False) and
-         ( (Pos('castle_LightSource', Trimmed) > 0) or
-           (Pos('castle_projector_matrix', Trimmed) > 0) or
-           (Pos('castle_ModelViewMatrix', Trimmed) > 0) or
-           (Pos('castle_ProjectionMatrix', Trimmed) > 0) or
-           (Pos('castle_NormalMatrix', Trimmed) > 0) or
-           (Pos('castle_JointMatrix', Trimmed) > 0) or
-           (Pos('castle_Material', Trimmed) > 0) or
-           (Pos('castle_WorldEyePosition', Trimmed) > 0) or
-           (Pos('castle_SceneTime', Trimmed) > 0) or
-           (Pos('castle_Fog', Trimmed) > 0) ) and
-         (Pos('{', Trimmed) = 0) then
-      begin
-        ResultBuilder.AppendLine('// [Vulkan RHI UBO]: ' + Line);
-      end else
+      IsBuiltIn := False;
+      if IsPrefix('uniform ', Trimmed, False) and (Pos('{', Trimmed) = 0) then
+        for Token in BuiltInUniformTokens do
+          if Pos(Token, Trimmed) > 0 then
+          begin
+            IsBuiltIn := True;
+            Break;
+          end;
+
+      if IsBuiltIn then
+        ResultBuilder.AppendLine('// [Vulkan RHI UBO]: ' + Line)
+      else
         ResultBuilder.AppendLine(Line);
     end;
     Result := ResultBuilder.ToString;

@@ -13,8 +13,9 @@
   ----------------------------------------------------------------------------
 }
 
-{ Platform-specific Vulkan Window System Integration (WSI) bindings
-  for Windows (Win32) and Linux (Xlib / Wayland). }
+{ Platform-specific Vulkan Window System Integration (WSI) bindings and
+  backend fallback selection for Windows (Win32), Linux (Xlib / Wayland),
+  Android (ANativeWindow), and macOS / iOS (Metal / MoltenVK). }
 unit CastleInternalVulkanWSI;
 
 {$I castleconf.inc}
@@ -25,17 +26,59 @@ uses
   SysUtils,
   {$if defined(MSWINDOWS)} Windows, {$endif}
   {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)} X, Xlib, {$endif}
-  CastleInternalRHI, CastleInternalVulkan;
+  CastleApplicationProperties, CastleInternalRHI, CastleInternalVulkan;
 
 const
-  VK_KHR_SURFACE_EXTENSION_NAME         = 'VK_KHR_surface';
-  VK_KHR_WIN32_SURFACE_EXTENSION_NAME   = 'VK_KHR_win32_surface';
-  VK_KHR_XLIB_SURFACE_EXTENSION_NAME    = 'VK_KHR_xlib_surface';
-  VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME = 'VK_KHR_wayland_surface';
+  VK_KHR_SURFACE_EXTENSION_NAME                 = 'VK_KHR_surface';
+  VK_KHR_WIN32_SURFACE_EXTENSION_NAME           = 'VK_KHR_win32_surface';
+  VK_KHR_XLIB_SURFACE_EXTENSION_NAME            = 'VK_KHR_xlib_surface';
+  VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME         = 'VK_KHR_wayland_surface';
+  VK_KHR_ANDROID_SURFACE_EXTENSION_NAME         = 'VK_KHR_android_surface';
+  VK_EXT_METAL_SURFACE_EXTENSION_NAME           = 'VK_EXT_metal_surface';
+  VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME = 'VK_KHR_portability_enumeration';
 
   VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR   = 1000009000;
   VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR    = 1000004000;
   VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR = 1000006000;
+  VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR = 1000008000;
+  VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT   = 1000217000;
+
+type
+  TAnsiStringArray = array of AnsiString;
+
+  { Android WSI (ANativeWindow) }
+  PANativeWindow = Pointer;
+  VkAndroidSurfaceCreateFlagsKHR = VkFlags;
+  PVkAndroidSurfaceCreateInfoKHR = ^VkAndroidSurfaceCreateInfoKHR;
+  VkAndroidSurfaceCreateInfoKHR = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    flags: VkAndroidSurfaceCreateFlagsKHR;
+    window: PANativeWindow;
+  end;
+
+  PFN_vkCreateAndroidSurfaceKHR = function(
+    instance: VkInstance;
+    const pCreateInfo: PVkAndroidSurfaceCreateInfoKHR;
+    const pAllocator: PVkAllocationCallbacks;
+    pSurface: PVkSurfaceKHR): VkResult; {$ifdef MSWINDOWS}stdcall{$else}cdecl{$endif};
+
+  { macOS / iOS Metal WSI (CAMetalLayer via MoltenVK) }
+  PCAMetalLayer = Pointer;
+  VkMetalSurfaceCreateFlagsEXT = VkFlags;
+  PVkMetalSurfaceCreateInfoEXT = ^VkMetalSurfaceCreateInfoEXT;
+  VkMetalSurfaceCreateInfoEXT = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    flags: VkMetalSurfaceCreateFlagsEXT;
+    pLayer: PCAMetalLayer;
+  end;
+
+  PFN_vkCreateMetalSurfaceEXT = function(
+    instance: VkInstance;
+    const pCreateInfo: PVkMetalSurfaceCreateInfoEXT;
+    const pAllocator: PVkAllocationCallbacks;
+    pSurface: PVkSurfaceKHR): VkResult; {$ifdef MSWINDOWS}stdcall{$else}cdecl{$endif};
 
 {$if defined(MSWINDOWS)}
 type
@@ -104,23 +147,80 @@ function CreateVulkanWaylandSurface(const AInstance: VkInstance;
   const AWlDisplay: Pwl_display; const AWlSurface: Pwl_surface): VkSurfaceKHR;
 {$endif}
 
-type
-  TAnsiStringArray = array of AnsiString;
+function CreateVulkanAndroidSurface(const AInstance: VkInstance;
+  const ANativeWindow: PANativeWindow): VkSurfaceKHR;
+
+function CreateVulkanMetalSurface(const AInstance: VkInstance;
+  const AMetalLayer: PCAMetalLayer): VkSurfaceKHR;
 
 { Returns the required VkInstance surface extensions for the current OS }
 function GetRequiredVulkanInstanceExtensions: TAnsiStringArray;
 
+{ Resolves the active render backend given hardware capabilities.
+  Enforces the Vulkan 1.1+ minimum baseline and falls back to OpenGLES 3.0 on
+  mobile/Android or OpenGL on desktop when Vulkan 1.1+ is unavailable. }
+function SelectOptimalRenderBackend(const Requested: TRenderBackend;
+  const VulkanAvailable: Boolean; const VulkanMajor: Cardinal = 1;
+  const VulkanMinor: Cardinal = 3;
+  const MobileGLESFallback: Boolean = {$if defined(ANDROID) or defined(CASTLE_IOS)}True{$else}False{$endif}): TRenderBackend;
+
 implementation
+
+function ResolveSurfaceProc(const AInstance: VkInstance; const AProcName: PAnsiChar): Pointer;
+begin
+  Result := nil;
+  if Assigned(vkGetInstanceProcAddr) then
+    Result := vkGetInstanceProcAddr(AInstance, AProcName);
+  if Result = nil then
+    raise ERHIError.CreateFmt('%s not found in Vulkan instance', [String(AProcName)]);
+end;
+
+procedure CheckSurfaceResult(const ARes: VkResult; const AProcName: String);
+begin
+  if ARes <> VK_SUCCESS then
+    raise ERHIError.CreateFmt('%s failed (VkResult: %d)', [AProcName, Ord(ARes)]);
+end;
 
 function GetRequiredVulkanInstanceExtensions: TAnsiStringArray;
 begin
   {$if defined(MSWINDOWS)}
   Result := [VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME];
-  {$elseif defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  {$elseif defined(ANDROID)}
+  Result := [VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME];
+  {$elseif defined(DARWIN)}
+  Result := [VK_KHR_SURFACE_EXTENSION_NAME, VK_EXT_METAL_SURFACE_EXTENSION_NAME,
+             VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME];
+  {$elseif defined(UNIX)}
   Result := [VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_XLIB_SURFACE_EXTENSION_NAME];
   {$else}
   Result := [VK_KHR_SURFACE_EXTENSION_NAME];
   {$endif}
+end;
+
+function SelectOptimalRenderBackend(const Requested: TRenderBackend;
+  const VulkanAvailable: Boolean; const VulkanMajor: Cardinal;
+  const VulkanMinor: Cardinal; const MobileGLESFallback: Boolean): TRenderBackend;
+var
+  SupportsVulkanBaseline: Boolean;
+  FallbackBackend: TRenderBackend;
+begin
+  SupportsVulkanBaseline := VulkanAvailable and
+    ((VulkanMajor > 1) or ((VulkanMajor = 1) and (VulkanMinor >= 1)));
+
+  if MobileGLESFallback then
+    FallbackBackend := backendOpenGLES
+  else
+    FallbackBackend := backendOpenGL;
+
+  case Requested of
+    backendAuto, backendVulkan:
+      if SupportsVulkanBaseline then
+        Result := backendVulkan
+      else
+        Result := FallbackBackend;
+  else
+    Result := Requested;
+  end;
 end;
 
 {$if defined(MSWINDOWS)}
@@ -129,21 +229,14 @@ function CreateVulkanWin32Surface(const AInstance: VkInstance;
 var
   CreateFn: PFN_vkCreateWin32SurfaceKHR;
   CreateInfo: VkWin32SurfaceCreateInfoKHR;
-  Res: VkResult;
 begin
   Result := VK_NULL_HANDLE;
-  Pointer(CreateFn) := vkGetInstanceProcAddr(AInstance, 'vkCreateWin32SurfaceKHR');
-  if not Assigned(CreateFn) then
-    raise ERHIError.Create('vkCreateWin32SurfaceKHR not found in Vulkan instance');
-
+  Pointer(CreateFn) := ResolveSurfaceProc(AInstance, 'vkCreateWin32SurfaceKHR');
   FillChar(CreateInfo, SizeOf(CreateInfo), 0);
   CreateInfo.sType := VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
   CreateInfo.hinstance := AHInstance;
   CreateInfo.hwnd := AWindowHandle;
-
-  Res := CreateFn(AInstance, @CreateInfo, nil, @Result);
-  if Res <> VK_SUCCESS then
-    raise ERHIError.CreateFmt('vkCreateWin32SurfaceKHR failed (VkResult: %d)', [Ord(Res)]);
+  CheckSurfaceResult(CreateFn(AInstance, @CreateInfo, nil, @Result), 'vkCreateWin32SurfaceKHR');
 end;
 {$endif}
 
@@ -153,21 +246,14 @@ function CreateVulkanXlibSurface(const AInstance: VkInstance;
 var
   CreateFn: PFN_vkCreateXlibSurfaceKHR;
   CreateInfo: VkXlibSurfaceCreateInfoKHR;
-  Res: VkResult;
 begin
   Result := VK_NULL_HANDLE;
-  Pointer(CreateFn) := vkGetInstanceProcAddr(AInstance, 'vkCreateXlibSurfaceKHR');
-  if not Assigned(CreateFn) then
-    raise ERHIError.Create('vkCreateXlibSurfaceKHR not found in Vulkan instance');
-
+  Pointer(CreateFn) := ResolveSurfaceProc(AInstance, 'vkCreateXlibSurfaceKHR');
   FillChar(CreateInfo, SizeOf(CreateInfo), 0);
   CreateInfo.sType := VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR;
   CreateInfo.dpy := ADisplay;
   CreateInfo.window := AXWindow;
-
-  Res := CreateFn(AInstance, @CreateInfo, nil, @Result);
-  if Res <> VK_SUCCESS then
-    raise ERHIError.CreateFmt('vkCreateXlibSurfaceKHR failed (VkResult: %d)', [Ord(Res)]);
+  CheckSurfaceResult(CreateFn(AInstance, @CreateInfo, nil, @Result), 'vkCreateXlibSurfaceKHR');
 end;
 
 function CreateVulkanWaylandSurface(const AInstance: VkInstance;
@@ -175,22 +261,43 @@ function CreateVulkanWaylandSurface(const AInstance: VkInstance;
 var
   CreateFn: PFN_vkCreateWaylandSurfaceKHR;
   CreateInfo: VkWaylandSurfaceCreateInfoKHR;
-  Res: VkResult;
 begin
   Result := VK_NULL_HANDLE;
-  Pointer(CreateFn) := vkGetInstanceProcAddr(AInstance, 'vkCreateWaylandSurfaceKHR');
-  if not Assigned(CreateFn) then
-    raise ERHIError.Create('vkCreateWaylandSurfaceKHR not found in Vulkan instance');
-
+  Pointer(CreateFn) := ResolveSurfaceProc(AInstance, 'vkCreateWaylandSurfaceKHR');
   FillChar(CreateInfo, SizeOf(CreateInfo), 0);
   CreateInfo.sType := VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
   CreateInfo.display := AWlDisplay;
   CreateInfo.surface := AWlSurface;
-
-  Res := CreateFn(AInstance, @CreateInfo, nil, @Result);
-  if Res <> VK_SUCCESS then
-    raise ERHIError.CreateFmt('vkCreateWaylandSurfaceKHR failed (VkResult: %d)', [Ord(Res)]);
+  CheckSurfaceResult(CreateFn(AInstance, @CreateInfo, nil, @Result), 'vkCreateWaylandSurfaceKHR');
 end;
 {$endif}
+
+function CreateVulkanAndroidSurface(const AInstance: VkInstance;
+  const ANativeWindow: PANativeWindow): VkSurfaceKHR;
+var
+  CreateFn: PFN_vkCreateAndroidSurfaceKHR;
+  CreateInfo: VkAndroidSurfaceCreateInfoKHR;
+begin
+  Result := VK_NULL_HANDLE;
+  Pointer(CreateFn) := ResolveSurfaceProc(AInstance, 'vkCreateAndroidSurfaceKHR');
+  FillChar(CreateInfo, SizeOf(CreateInfo), 0);
+  CreateInfo.sType := VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR;
+  CreateInfo.window := ANativeWindow;
+  CheckSurfaceResult(CreateFn(AInstance, @CreateInfo, nil, @Result), 'vkCreateAndroidSurfaceKHR');
+end;
+
+function CreateVulkanMetalSurface(const AInstance: VkInstance;
+  const AMetalLayer: PCAMetalLayer): VkSurfaceKHR;
+var
+  CreateFn: PFN_vkCreateMetalSurfaceEXT;
+  CreateInfo: VkMetalSurfaceCreateInfoEXT;
+begin
+  Result := VK_NULL_HANDLE;
+  Pointer(CreateFn) := ResolveSurfaceProc(AInstance, 'vkCreateMetalSurfaceEXT');
+  FillChar(CreateInfo, SizeOf(CreateInfo), 0);
+  CreateInfo.sType := VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT;
+  CreateInfo.pLayer := AMetalLayer;
+  CheckSurfaceResult(CreateFn(AInstance, @CreateInfo, nil, @Result), 'vkCreateMetalSurfaceEXT');
+end;
 
 end.

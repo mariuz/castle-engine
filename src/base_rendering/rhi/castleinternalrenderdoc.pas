@@ -199,66 +199,41 @@ const
 var
   I: Integer;
   GetAPI: pRENDERDOC_GetAPI;
-  Ret: Integer;
   EnvPath: String;
 begin
   if FInitialized then
     Exit(FAPI <> nil);
-
   FInitialized := True;
 
-  { Check optional environment variable first }
   EnvPath := GetEnvironmentVariable('RENDERDOC_PATH');
   if EnvPath <> '' then
+    FLibrary := TDynLib.Load(EnvPath, False);
+
+  for I := Low(RenderDocLibNames) to High(RenderDocLibNames) do
   begin
-    try
-      FLibrary := TDynLib.Load(EnvPath, false);
-    except
-      FLibrary := nil;
-    end;
+    if FLibrary <> nil then Break;
+    FLibrary := TDynLib.Load(RenderDocLibNames[I], False);
   end;
 
-  if FLibrary = nil then
-  begin
-    for I := Low(RenderDocLibNames) to High(RenderDocLibNames) do
-    begin
-      try
-        FLibrary := TDynLib.Load(RenderDocLibNames[I], false);
-        if FLibrary <> nil then
-          Break;
-      except
-        FLibrary := nil;
-      end;
-    end;
-  end;
-
-  if FLibrary = nil then
-    Exit(False);
+  if FLibrary = nil then Exit(False);
 
   Pointer(GetAPI) := FLibrary.Symbol('RENDERDOC_GetAPI');
   if not Assigned(GetAPI) then
   begin
-    WritelnLog('RenderDoc', 'RENDERDOC_GetAPI symbol not found');
     FreeAndNil(FLibrary);
     Exit(False);
   end;
 
-  Ret := GetAPI(RENDERDOC_API_Version_1_1_2, @FAPI);
-  if (Ret <> 1) or (FAPI = nil) then
+  if (GetAPI(RENDERDOC_API_Version_1_1_2, @FAPI) <> 1) and
+     (GetAPI(RENDERDOC_API_Version_1_0_0, @FAPI) <> 1) then
   begin
-    { Fallback to version 1.0.0 }
-    Ret := GetAPI(RENDERDOC_API_Version_1_0_0, @FAPI);
-    if (Ret <> 1) or (FAPI = nil) then
-    begin
-      WritelnLog('RenderDoc', 'Failed to retrieve RenderDoc API interface');
-      FreeAndNil(FLibrary);
-      FAPI := nil;
-      Exit(False);
-    end;
+    FreeAndNil(FLibrary);
+    FAPI := nil;
+    Exit(False);
   end;
 
   WritelnLog('RenderDoc', 'RenderDoc In-Application API successfully initialized');
-  Result := True;
+  Result := FAPI <> nil;
 end;
 
 function TRenderDocAPI.Available: Boolean;
@@ -280,18 +255,14 @@ end;
 
 function TRenderDocAPI.EndFrameCapture(const Device: Pointer; const WindowHandle: Pointer): Boolean;
 begin
-  if Available and Assigned(FAPI^.EndFrameCapture) then
-    Result := FAPI^.EndFrameCapture(Device, WindowHandle) = 1
-  else
-    Result := False;
+  Result := Available and Assigned(FAPI^.EndFrameCapture) and
+    (FAPI^.EndFrameCapture(Device, WindowHandle) = 1);
 end;
 
 function TRenderDocAPI.IsFrameCapturing: Boolean;
 begin
-  if Available and Assigned(FAPI^.IsFrameCapturing) then
-    Result := FAPI^.IsFrameCapturing() = 1
-  else
-    Result := False;
+  Result := Available and Assigned(FAPI^.IsFrameCapturing) and
+    (FAPI^.IsFrameCapturing() = 1);
 end;
 
 procedure TRenderDocAPI.SetCaptureFilePathTemplate(const PathTemplate: String);
@@ -309,16 +280,12 @@ function TRenderDocAPI.GetCaptureFilePathTemplate: String;
 var
   P: PAnsiChar;
 begin
+  Result := '';
   if Available and Assigned(FAPI^.GetCaptureFilePathTemplate) then
   begin
     P := FAPI^.GetCaptureFilePathTemplate();
-    if P <> nil then
-      Result := String(P)
-    else
-      Result := '';
-  end
-  else
-    Result := '';
+    if P <> nil then Result := String(P);
+  end;
 end;
 
 function TRenderDocAPI.GetNumCaptures: Cardinal;
@@ -332,19 +299,10 @@ end;
 function TRenderDocAPI.LaunchReplayUI(const ConnectTargetControl: Boolean; const CommandLine: String): Boolean;
 var
   CmdAnsi: AnsiString;
-  ConnectFlag: Cardinal;
 begin
-  if Available and Assigned(FAPI^.LaunchReplayUI) then
-  begin
-    if ConnectTargetControl then
-      ConnectFlag := 1
-    else
-      ConnectFlag := 0;
-    CmdAnsi := AnsiString(CommandLine);
-    Result := FAPI^.LaunchReplayUI(ConnectFlag, PAnsiChar(CmdAnsi)) = 1;
-  end
-  else
-    Result := False;
+  CmdAnsi := AnsiString(CommandLine);
+  Result := Available and Assigned(FAPI^.LaunchReplayUI) and
+    (FAPI^.LaunchReplayUI(Ord(ConnectTargetControl), PAnsiChar(CmdAnsi)) = 1);
 end;
 
 finalization
