@@ -42,6 +42,7 @@ type
     FHandle: VkBuffer;
     FDeviceMemory: VkDeviceMemory;
     FMemoryOffset: VkDeviceSize;
+    FAllocatedSize: VkDeviceSize;
     FMappedPtr: Pointer;
     function VulkanDevice: TVulkanRHIDevice;
   public
@@ -61,6 +62,7 @@ type
     FImage: VkImage;
     FImageView: VkImageView;
     FDeviceMemory: VkDeviceMemory;
+    FAllocatedSize: VkDeviceSize;
     FOwnsImage: Boolean;
     FAspectMask: VkImageAspectFlags;
     function VulkanDevice: TVulkanRHIDevice;
@@ -247,6 +249,13 @@ type
     FPipelineCache: VkPipelineCache;
     FPipelineMap: TVulkanPipelineMap;
 
+    { Diagnostics & VK_EXT_memory_budget tracking }
+    FSupportsMemoryBudgetExt: Boolean;
+    FPipelineCacheHits: Cardinal;
+    FPipelineCacheMisses: Cardinal;
+    FDescriptorSetAllocations: Cardinal;
+    FAllocatedMemoryBytes: Int64;
+
     procedure CreateInstance(const EnableValidation: Boolean);
     procedure PickPhysicalDevice;
     procedure CreateLogicalDevice;
@@ -254,11 +263,15 @@ type
     procedure DestroySwapchain;
     procedure CreateFrameContexts;
     procedure CreateDescriptorPool;
+    function IsDeviceExtensionSupported(const AExtensionName: AnsiString): Boolean;
     function ComputePipelineHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
-      const EnableValidation: Boolean = True); reintroduce;
+      const EnableValidation: Boolean = True); reintroduce; overload;
+    { Creates a headless Vulkan RHI device instance (for offscreen/unit testing). }
+    constructor CreateHeadless(const APhysicalDevice: VkPhysicalDevice;
+      const ASupportsMemoryBudgetExt: Boolean = True); overload;
     destructor Destroy; override;
 
     { Helper for one-shot transfer commands (texture/buffer uploads) }
@@ -266,6 +279,15 @@ type
     procedure EndSingleTimeCommands(const CmdBuf: VkCommandBuffer);
     function FindMemoryType(const TypeFilter: Cardinal;
       const Properties: VkMemoryPropertyFlags): Cardinal;
+
+    { Queries live GPU VRAM usage and budget via VK_EXT_memory_budget (or heap fallback).
+      Returns True if VK_EXT_memory_budget was used. }
+    function QueryMemoryBudget(out AUsedBytes, ABudgetBytes: UInt64;
+      out AUsedMB, ABudgetMB: Cardinal): Boolean;
+
+    { Records diagnostic counters for testing or custom pass tracking. }
+    procedure RecordDiagnostics(const APipelineHits, APipelineMisses,
+      ADescriptorAllocs: Cardinal; const AAllocatedBytes: UInt64 = 0);
 
     { TRHIDevice overrides }
     function BeginFrame: TRHICommandList; override;
@@ -305,6 +327,11 @@ type
     property PhysicalDevice: VkPhysicalDevice read FPhysicalDevice;
     property DescriptorPool: VkDescriptorPool read FDescriptorPool;
     property PipelineCache: VkPipelineCache read FPipelineCache;
+    property SupportsMemoryBudgetExt: Boolean read FSupportsMemoryBudgetExt;
+    property PipelineCacheHits: Cardinal read FPipelineCacheHits;
+    property PipelineCacheMisses: Cardinal read FPipelineCacheMisses;
+    property DescriptorSetAllocations: Cardinal read FDescriptorSetAllocations;
+    property AllocatedMemoryBytes: Int64 read FAllocatedMemoryBytes;
   end;
 
 { Computes a deterministic 64-bit FNV-1a hash for a graphics pipeline state descriptor. }
@@ -337,7 +364,8 @@ function LoadPipelineCacheBlobFromStream(const AStream: TStream;
 implementation
 
 uses
-  CastleDownload, CastleInternalShaderCompiler, CastleInternalVulkanWSI;
+  CastleDownload, CastleInternalShaderCompiler, CastleInternalVulkanWSI,
+  CastleInternalVulkanMemory;
 
 const
   FNV1aOffsetBasis64 = UInt64($CBF29CE484222325);
@@ -705,6 +733,8 @@ begin
 
   CheckVk(vkAllocateMemory(ADevice.Handle, @AllocInfo, nil, @FDeviceMemory), 'vkAllocateMemory(Buffer)');
   CheckVk(vkBindBufferMemory(ADevice.Handle, FHandle, FDeviceMemory, 0), 'vkBindBufferMemory');
+  FAllocatedSize := MemReq.size;
+  Inc(ADevice.FAllocatedMemoryBytes, FAllocatedSize);
 
   if InitialData <> nil then
     UploadData(InitialData^, ADesc.Size, 0);
@@ -717,7 +747,11 @@ begin
   if FHandle <> VK_NULL_HANDLE then
     vkDestroyBuffer(VulkanDevice.Handle, FHandle, nil);
   if FDeviceMemory <> VK_NULL_HANDLE then
+  begin
     vkFreeMemory(VulkanDevice.Handle, FDeviceMemory, nil);
+    if VulkanDevice <> nil then
+      Dec(VulkanDevice.FAllocatedMemoryBytes, FAllocatedSize);
+  end;
   inherited;
 end;
 
@@ -828,6 +862,8 @@ begin
 
   CheckVk(vkAllocateMemory(ADevice.Handle, @AllocInfo, nil, @FDeviceMemory), 'vkAllocateMemory(Image)');
   CheckVk(vkBindImageMemory(ADevice.Handle, FImage, FDeviceMemory, 0), 'vkBindImageMemory');
+  FAllocatedSize := MemReq.size;
+  Inc(ADevice.FAllocatedMemoryBytes, FAllocatedSize);
 
   FillChar(ViewInfo, SizeOf(ViewInfo), 0);
   ViewInfo.sType := VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -868,7 +904,11 @@ begin
     if FImage <> VK_NULL_HANDLE then
       vkDestroyImage(VulkanDevice.Handle, FImage, nil);
     if FDeviceMemory <> VK_NULL_HANDLE then
+    begin
       vkFreeMemory(VulkanDevice.Handle, FDeviceMemory, nil);
+      if VulkanDevice <> nil then
+        Dec(VulkanDevice.FAllocatedMemoryBytes, FAllocatedSize);
+    end;
   end;
   inherited;
 end;
@@ -1839,6 +1879,16 @@ begin
   CreateSwapchain(InitialWidth, InitialHeight);
 end;
 
+constructor TVulkanRHIDevice.CreateHeadless(const APhysicalDevice: VkPhysicalDevice;
+  const ASupportsMemoryBudgetExt: Boolean);
+begin
+  inherited Create;
+  FPipelineMap := TVulkanPipelineMap.Create([doOwnsValues]);
+  FCapabilities.Backend := rbVulkan;
+  FPhysicalDevice := APhysicalDevice;
+  FSupportsMemoryBudgetExt := ASupportsMemoryBudgetExt;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
@@ -1851,18 +1901,21 @@ begin
   for I := 0 to MaxFramesInFlight - 1 do
   begin
     FreeAndNil(FFrames[I].CommandList);
-    vkDestroySemaphore(FDevice, FFrames[I].ImageAvailableSemaphore, nil);
-    vkDestroySemaphore(FDevice, FFrames[I].RenderFinishedSemaphore, nil);
-    vkDestroyFence(FDevice, FFrames[I].InFlightFence, nil);
+    if (FDevice <> nil) and (FFrames[I].ImageAvailableSemaphore <> VK_NULL_HANDLE) then
+      vkDestroySemaphore(FDevice, FFrames[I].ImageAvailableSemaphore, nil);
+    if (FDevice <> nil) and (FFrames[I].RenderFinishedSemaphore <> VK_NULL_HANDLE) then
+      vkDestroySemaphore(FDevice, FFrames[I].RenderFinishedSemaphore, nil);
+    if (FDevice <> nil) and (FFrames[I].InFlightFence <> VK_NULL_HANDLE) then
+      vkDestroyFence(FDevice, FFrames[I].InFlightFence, nil);
   end;
 
-  if FDescriptorPool <> VK_NULL_HANDLE then
+  if (FDevice <> nil) and (FDescriptorPool <> VK_NULL_HANDLE) then
     vkDestroyDescriptorPool(FDevice, FDescriptorPool, nil);
-  if FPipelineCache <> VK_NULL_HANDLE then
+  if (FDevice <> nil) and (FPipelineCache <> VK_NULL_HANDLE) then
     vkDestroyPipelineCache(FDevice, FPipelineCache, nil);
   if FDevice <> nil then
     vkDestroyDevice(FDevice, nil);
-  if FSurface <> VK_NULL_HANDLE then
+  if (FInstance <> nil) and (FSurface <> VK_NULL_HANDLE) then
     vkDestroySurfaceKHR(FInstance, FSurface, nil);
   if FInstance <> nil then
     vkDestroyInstance(FInstance, nil);
@@ -1963,15 +2016,40 @@ begin
   FCapabilities.SupportsMultiDrawIndirect := Features.multiDrawIndirect = VK_TRUE;
 end;
 
+function TVulkanRHIDevice.IsDeviceExtensionSupported(const AExtensionName: AnsiString): Boolean;
+var
+  ExtCount, I: Cardinal;
+  Exts: array of VkExtensionProperties;
+  ExtStr: AnsiString;
+begin
+  Result := False;
+  if (FPhysicalDevice = nil) or not Assigned(vkEnumerateDeviceExtensionProperties) then
+    Exit;
+  ExtCount := 0;
+  if vkEnumerateDeviceExtensionProperties(FPhysicalDevice, nil, @ExtCount, nil) <> VK_SUCCESS then
+    Exit;
+  if ExtCount = 0 then
+    Exit;
+  SetLength(Exts, ExtCount);
+  if vkEnumerateDeviceExtensionProperties(FPhysicalDevice, nil, @ExtCount, @Exts[0]) <> VK_SUCCESS then
+    Exit;
+  for I := 0 to ExtCount - 1 do
+  begin
+    ExtStr := PAnsiChar(@Exts[I].extensionName[0]);
+    if ExtStr = AExtensionName then
+      Exit(True);
+  end;
+end;
+
 procedure TVulkanRHIDevice.CreateLogicalDevice;
 var
-  QueueCount, I: Cardinal;
+  QueueCount, I, ExtCount: Cardinal;
   QueueProps: array of VkQueueFamilyProperties;
   PresentSupport: VkBool32;
   QueueInfos: array[0..1] of VkDeviceQueueCreateInfo;
   QueuePriority: Single;
   DynRenderFeatures: VkPhysicalDeviceDynamicRenderingFeatures;
-  DeviceExts: array[0..0] of PAnsiChar;
+  DeviceExts: array[0..1] of PAnsiChar;
   CreateInfo: VkDeviceCreateInfo;
   CacheInfo: VkPipelineCacheCreateInfo;
 begin
@@ -2008,6 +2086,13 @@ begin
   DynRenderFeatures.dynamicRendering := VK_TRUE;
 
   DeviceExts[0] := VK_KHR_swapchain;
+  ExtCount := 1;
+  FSupportsMemoryBudgetExt := IsDeviceExtensionSupported(VK_EXT_memory_budget);
+  if FSupportsMemoryBudgetExt then
+  begin
+    DeviceExts[1] := VK_EXT_memory_budget;
+    ExtCount := 2;
+  end;
 
   FillChar(CreateInfo, SizeOf(CreateInfo), 0);
   CreateInfo.sType := VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -2022,7 +2107,7 @@ begin
   end else
     CreateInfo.queueCreateInfoCount := 1;
   CreateInfo.pQueueCreateInfos := @QueueInfos[0];
-  CreateInfo.enabledExtensionCount := 1;
+  CreateInfo.enabledExtensionCount := ExtCount;
   CreateInfo.ppEnabledExtensionNames := @DeviceExts[0];
 
   CheckVk(vkCreateDevice(FPhysicalDevice, @CreateInfo, nil, @FDevice), 'vkCreateDevice');
@@ -2037,6 +2122,24 @@ begin
     CacheInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
     CheckVk(vkCreatePipelineCache(FDevice, @CacheInfo, nil, @FPipelineCache), 'vkCreatePipelineCache');
   end;
+end;
+
+function TVulkanRHIDevice.QueryMemoryBudget(out AUsedBytes, ABudgetBytes: UInt64;
+  out AUsedMB, ABudgetMB: Cardinal): Boolean;
+begin
+  Result := QueryPhysicalDeviceMemoryBudget(
+    FPhysicalDevice, FSupportsMemoryBudgetExt,
+    UInt64(Max(Int64(0), FAllocatedMemoryBytes)),
+    AUsedBytes, ABudgetBytes, AUsedMB, ABudgetMB);
+end;
+
+procedure TVulkanRHIDevice.RecordDiagnostics(const APipelineHits, APipelineMisses,
+  ADescriptorAllocs: Cardinal; const AAllocatedBytes: UInt64);
+begin
+  Inc(FPipelineCacheHits, APipelineHits);
+  Inc(FPipelineCacheMisses, APipelineMisses);
+  Inc(FDescriptorSetAllocations, ADescriptorAllocs);
+  Inc(FAllocatedMemoryBytes, AAllocatedBytes);
 end;
 
 procedure TVulkanRHIDevice.CreateSwapchain(const Width, Height: Cardinal);
@@ -2317,6 +2420,7 @@ end;
 function TVulkanRHIDevice.CreateDescriptorSet(
   const Layout: TRHIDescriptorSetLayout): TRHIDescriptorSet;
 begin
+  Inc(FDescriptorSetAllocations);
   Result := TVulkanRHIDescriptorSet.Create(Self, Layout as TVulkanRHIDescriptorSetLayout);
 end;
 
@@ -2331,8 +2435,12 @@ var
   FoundPipeline: TVulkanRHIPipeline;
 begin
   HashKey := ComputePipelineHash(ADesc);
-  if not FPipelineMap.TryGetValue(HashKey, FoundPipeline) then
+  if FPipelineMap.TryGetValue(HashKey, FoundPipeline) then
   begin
+    Inc(FPipelineCacheHits);
+  end else
+  begin
+    Inc(FPipelineCacheMisses);
     FoundPipeline := TVulkanRHIPipeline.Create(Self, ADesc);
     FPipelineMap.Add(HashKey, FoundPipeline);
   end;

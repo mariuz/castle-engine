@@ -401,13 +401,19 @@ const
   VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR = 1000044002;
   VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO = 29;
   VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT = 1000128002;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2 = 1000059006;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2_KHR = 1000059006;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT = 1000237000;
 
+  VK_MEMORY_HEAP_DEVICE_LOCAL_BIT = $00000001;
   VK_QUEUE_GRAPHICS_BIT = $00000001;
   VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR = $00000001;
   VK_VERTEX_INPUT_RATE_VERTEX = 0;
   VK_VERTEX_INPUT_RATE_INSTANCE = 1;
 
   VK_EXT_debug_utils = 'VK_EXT_debug_utils';
+  VK_EXT_memory_budget = 'VK_EXT_memory_budget';
+  VK_KHR_get_physical_device_properties2 = 'VK_KHR_get_physical_device_properties2';
   VK_KHR_maintenance1 = 'VK_KHR_maintenance1';
   VK_KHR_swapchain = 'VK_KHR_swapchain';
   VK_LAYER_KHRONOS_validation = 'VK_LAYER_KHRONOS_validation';
@@ -574,6 +580,21 @@ type
     memoryHeaps: array[0..VK_MAX_MEMORY_HEAPS - 1] of VkMemoryHeap;
   end;
   PVkPhysicalDeviceMemoryProperties = ^VkPhysicalDeviceMemoryProperties;
+
+  VkPhysicalDeviceMemoryBudgetPropertiesEXT = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    heapBudget: array[0..VK_MAX_MEMORY_HEAPS - 1] of VkDeviceSize;
+    heapUsage: array[0..VK_MAX_MEMORY_HEAPS - 1] of VkDeviceSize;
+  end;
+  PVkPhysicalDeviceMemoryBudgetPropertiesEXT = ^VkPhysicalDeviceMemoryBudgetPropertiesEXT;
+
+  VkPhysicalDeviceMemoryProperties2 = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    memoryProperties: VkPhysicalDeviceMemoryProperties;
+  end;
+  PVkPhysicalDeviceMemoryProperties2 = ^VkPhysicalDeviceMemoryProperties2;
 
   VkMemoryRequirements = record
     size: VkDeviceSize;
@@ -1520,6 +1541,7 @@ type
   PFN_vkGetPhysicalDeviceProperties = procedure(physicalDevice: VkPhysicalDevice; pProperties: PVkPhysicalDeviceProperties); VKAPI_CALL;
   PFN_vkGetPhysicalDeviceQueueFamilyProperties = procedure(physicalDevice: VkPhysicalDevice; pQueueFamilyPropertyCount: PCardinal; pQueueFamilyProperties: PVkQueueFamilyProperties); VKAPI_CALL;
   PFN_vkGetPhysicalDeviceMemoryProperties = procedure(physicalDevice: VkPhysicalDevice; pMemoryProperties: PVkPhysicalDeviceMemoryProperties); VKAPI_CALL;
+  PFN_vkGetPhysicalDeviceMemoryProperties2 = procedure(physicalDevice: VkPhysicalDevice; pMemoryProperties: PVkPhysicalDeviceMemoryProperties2); VKAPI_CALL;
   PFN_vkCreateDevice = function(physicalDevice: VkPhysicalDevice; const pCreateInfo: PVkDeviceCreateInfo; const pAllocator: PVkAllocationCallbacks; pDevice: PVkDevice): VkResult; VKAPI_CALL;
   PFN_vkDestroyDevice = procedure(device: VkDevice; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
   PFN_vkEnumerateInstanceExtensionProperties = function(pLayerName: PAnsiChar; pPropertyCount: PCardinal; pProperties: PVkExtensionProperties): VkResult; VKAPI_CALL;
@@ -1638,6 +1660,7 @@ var
   vkGetPhysicalDeviceProperties: PFN_vkGetPhysicalDeviceProperties;
   vkGetPhysicalDeviceQueueFamilyProperties: PFN_vkGetPhysicalDeviceQueueFamilyProperties;
   vkGetPhysicalDeviceMemoryProperties: PFN_vkGetPhysicalDeviceMemoryProperties;
+  vkGetPhysicalDeviceMemoryProperties2: PFN_vkGetPhysicalDeviceMemoryProperties2;
   vkCreateDevice: PFN_vkCreateDevice;
   vkDestroyDevice: PFN_vkDestroyDevice;
   vkEnumerateInstanceExtensionProperties: PFN_vkEnumerateInstanceExtensionProperties;
@@ -1820,6 +1843,9 @@ begin
   Pointer(vkGetPhysicalDeviceProperties) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceProperties');
   Pointer(vkGetPhysicalDeviceQueueFamilyProperties) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceQueueFamilyProperties');
   Pointer(vkGetPhysicalDeviceMemoryProperties) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceMemoryProperties');
+  Pointer(vkGetPhysicalDeviceMemoryProperties2) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceMemoryProperties2');
+  if not Assigned(vkGetPhysicalDeviceMemoryProperties2) then
+    Pointer(vkGetPhysicalDeviceMemoryProperties2) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceMemoryProperties2KHR');
   Pointer(vkCreateDevice) := vkGetInstanceProcAddr(Instance, 'vkCreateDevice');
   Pointer(vkDestroyDevice) := vkGetInstanceProcAddr(Instance, 'vkDestroyDevice');
   Pointer(vkEnumerateDeviceExtensionProperties) := vkGetInstanceProcAddr(Instance, 'vkEnumerateDeviceExtensionProperties');

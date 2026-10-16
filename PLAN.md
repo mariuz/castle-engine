@@ -196,7 +196,7 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
   * [x] macOS / iOS via MoltenVK (`VK_EXT_metal_surface` & `VK_KHR_portability_enumeration` WSI bindings).
   * [x] Nintendo Switch (`VK_NN_vi_surface` WSI bindings and `CreateVulkanViSurface` aligned with `CASTLE_NINTENDO_SWITCH`).
 
-**Milestone 5 Status**: Completed. Multi-threaded secondary command buffer execution, indirect draw commands, cross-platform RenderDoc in-application capture API, Android, Metal/MoltenVK & Nintendo Switch WSI rollout with Vulkan 1.1+ fallback logic, core engine shader pre-warming, hardware-validated `VkPipelineCache` disk persistence, visual regression RMSE comparison, manifest `render_backend` configuration, and runtime rendering statistics diagnostics fully integrated and tested (31 unit tests passing).
+**Milestone 5 Status**: Completed. Multi-threaded secondary command buffer execution, indirect draw commands, cross-platform RenderDoc in-application capture API, Android, Metal/MoltenVK & Nintendo Switch WSI rollout with Vulkan 1.1+ fallback logic, core engine shader pre-warming, hardware-validated `VkPipelineCache` disk persistence, visual regression RMSE comparison, manifest `render_backend` configuration, and live `VK_EXT_memory_budget` rendering statistics diagnostics fully integrated and tested (32 unit tests passing).
 
 
 ## 5. Build Tool (castle-engine) & Editor Integration
@@ -206,7 +206,7 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 <project name="my_game" render_backend="auto"> <!-- auto | opengl | opengles | vulkan -->
 ```
 * [x] Shader Pre-warming (Build Step): `TCastleManifest.ShouldPrewarmVulkanShaders`, `TPackageDirectory.AddDataInformation` (`ToolPackage`), and `TCastleShaderCompiler.PrewarmCoreEngineShaders` pre-compile and cache known core engine shaders (3D forward pass, shadow depth pass, screen effects) to SPIR-V to avoid first-run shader compilation stutter.
-* [x] Editor Diagnostics: Update CastleRenderOptions and Viewport.Statistics to report active RHI backend, PSO cache hits/misses, Descriptor Set allocations, and Vulkan device memory budget (VK_EXT_memory_budget).
+* [x] Editor Diagnostics: Update CastleRenderOptions and `TCastleViewport.Statistics` to report active RHI backend, PSO cache hits/misses, Descriptor Set allocations, and live Vulkan device memory usage/budget (`VK_EXT_memory_budget` via `vkGetPhysicalDeviceMemoryProperties2`).
 
 
 ## 6. Risk Management & Mitigations
@@ -215,5 +215,5 @@ RiskImpactMitigation StrategyCustom User Shaders (Effect node) using legacy GLSL
 ## 7. Testing & Verification Criteria
 
 * [x] Automated Visual Regression Tests: `CompareImagesPerceptualDiff` in `CastleInternalRHI` compares framebuffer readbacks (`GrabTextureImage`) between `rbOpenGL` and `rbVulkan` using normalized RMSE perceptual diff thresholds.
-* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 31 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
+* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 32 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
 * [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, and `vkCmdDrawIndexedIndirect` minimize CPU driver overhead.

@@ -1413,7 +1413,8 @@ uses DOM, Math, TypInfo,
   CastleGLUtils, CastleLog, CastleStringUtils,
   CastleSoundEngine, CastleGLVersion, CastleTextureImages, X3DFields,
   CastleInternalSettings, CastleXmlUtils, CastleUriUtils, CastleInternalRenderer,
-  CastleRenderContext, CastleApplicationProperties, X3DLoad, CastleInternalGLUtils;
+  CastleRenderContext, CastleApplicationProperties, X3DLoad, CastleInternalGLUtils,
+  CastleInternalRHI, CastleInternalRHI_Vulkan;
 
 {$define read_implementation}
 {$I castleviewport_autonavigation.inc}
@@ -2989,6 +2990,13 @@ begin
   FRenderParams.DepthRange := DefaultDepthRange;
 
   RenderFromView3D(FRenderParams);
+  if RHIDevice is TVulkanRHIDevice then
+  begin
+    FRenderParams.Statistics.ActiveBackend := 'Vulkan 1.3';
+    FRenderParams.Statistics.PipelineCacheHits := TVulkanRHIDevice(RHIDevice).PipelineCacheHits;
+    FRenderParams.Statistics.PipelineCacheMisses := TVulkanRHIDevice(RHIDevice).PipelineCacheMisses;
+    FRenderParams.Statistics.DescriptorSetAllocations := TVulkanRHIDevice(RHIDevice).DescriptorSetAllocations;
+  end;
 end;
 
 procedure TCastleViewport.RenderWithoutScreenEffects;
@@ -3301,8 +3309,36 @@ begin
   AssignDefaultCameraDone := true;
 end;
 
+procedure UpdateVulkanRHIRenderStatistics(var AStats: TRenderStatistics);
+var
+  VkDev: TVulkanRHIDevice;
+  UsedBytes, BudgetBytes: UInt64;
+  UsedMB, BudgetMB: Cardinal;
+begin
+  if RHIDevice is TVulkanRHIDevice then
+  begin
+    VkDev := TVulkanRHIDevice(RHIDevice);
+    AStats.ActiveBackend := 'Vulkan 1.3';
+    AStats.PipelineCacheHits := VkDev.PipelineCacheHits;
+    AStats.PipelineCacheMisses := VkDev.PipelineCacheMisses;
+    AStats.DescriptorSetAllocations := VkDev.DescriptorSetAllocations;
+    VkDev.QueryMemoryBudget(UsedBytes, BudgetBytes, UsedMB, BudgetMB);
+    AStats.DeviceMemoryUsedMB := UsedMB;
+    AStats.DeviceMemoryBudgetMB := BudgetMB;
+  end else
+  if RHIDevice <> nil then
+  begin
+    case RHIDevice.Capabilities.Backend of
+      rbVulkan: AStats.ActiveBackend := 'Vulkan 1.3';
+      rbOpenGL: AStats.ActiveBackend := 'OpenGL';
+      rbOpenGLES: AStats.ActiveBackend := 'OpenGLES';
+    end;
+  end;
+end;
+
 function TCastleViewport.Statistics: TRenderStatistics;
 begin
+  UpdateVulkanRHIRenderStatistics(FRenderParams.Statistics);
   Result := FRenderParams.Statistics;
 end;
 

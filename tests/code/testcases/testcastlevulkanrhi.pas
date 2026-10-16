@@ -27,7 +27,7 @@ uses
   CastleInternalVulkanWSI, CastleInternalShaderCompiler, CastleInternalRHI_Vulkan,
   CastleInternalShaderRHI, CastleInternalBatch2DRHI, CastleInternalRenderer,
   CastleRendererInternalLights, X3DNodes,
-  CastleTransform, CastleRenderOptions, ToolManifest, CastleInternalRenderDoc;
+  CastleTransform, CastleViewport, CastleRenderOptions, ToolManifest, CastleInternalRenderDoc;
 
 type
   TTestCastleVulkanRHI = class(TCastleTestCase)
@@ -63,6 +63,7 @@ type
     procedure TestVisualRegressionImageComparison;
     procedure TestNintendoSwitchViSurfaceAndManifestPrewarm;
     procedure TestPipelineCacheDiskPersistence;
+    procedure TestVulkanMemoryBudgetAndViewportStatistics;
   end;
 
 implementation
@@ -1172,6 +1173,99 @@ begin
       LoadPipelineCacheBlobFromStream(Stream, $10DE, $2684, OutputBlob));
   finally
     FreeAndNil(Stream);
+  end;
+end;
+
+procedure MockGetPhysicalDeviceMemoryProperties2(
+  physicalDevice: VkPhysicalDevice;
+  pMemoryProperties: PVkPhysicalDeviceMemoryProperties2); {$ifdef MSWINDOWS}stdcall;{$else}cdecl;{$endif}
+var
+  BudgetExt: PVkPhysicalDeviceMemoryBudgetPropertiesEXT;
+begin
+  if pMemoryProperties = nil then Exit;
+  pMemoryProperties^.memoryProperties.memoryHeapCount := 2;
+  { Heap 0: 8 GB Device-Local VRAM }
+  pMemoryProperties^.memoryProperties.memoryHeaps[0].size := UInt64(8192) * 1024 * 1024;
+  pMemoryProperties^.memoryProperties.memoryHeaps[0].flags := VK_MEMORY_HEAP_DEVICE_LOCAL_BIT;
+  { Heap 1: 16 GB System Shared RAM (not device-local) }
+  pMemoryProperties^.memoryProperties.memoryHeaps[1].size := UInt64(16384) * 1024 * 1024;
+  pMemoryProperties^.memoryProperties.memoryHeaps[1].flags := 0;
+
+  if pMemoryProperties^.pNext <> nil then
+  begin
+    BudgetExt := PVkPhysicalDeviceMemoryBudgetPropertiesEXT(pMemoryProperties^.pNext);
+    if BudgetExt^.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT then
+    begin
+      BudgetExt^.heapUsage[0] := UInt64(512) * 1024 * 1024;
+      BudgetExt^.heapBudget[0] := UInt64(4096) * 1024 * 1024;
+      BudgetExt^.heapUsage[1] := UInt64(1024) * 1024 * 1024;
+      BudgetExt^.heapBudget[1] := UInt64(12288) * 1024 * 1024;
+    end;
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanMemoryBudgetAndViewportStatistics;
+var
+  MemProps: VkPhysicalDeviceMemoryProperties;
+  BudgetProps: VkPhysicalDeviceMemoryBudgetPropertiesEXT;
+  UsedBytes, BudgetBytes: UInt64;
+  UsedMB, BudgetMB: Cardinal;
+  SavedProc: PFN_vkGetPhysicalDeviceMemoryProperties2;
+  SavedDevice: TRHIDevice;
+  VkDev: TVulkanRHIDevice;
+  Viewport: TCastleViewport;
+  Stats: TRenderStatistics;
+begin
+  { 1. Test AggregateDeviceLocalMemoryBudget with multi-heap DEVICE_LOCAL filtering }
+  FillChar(MemProps, SizeOf(MemProps), 0);
+  FillChar(BudgetProps, SizeOf(BudgetProps), 0);
+  MemProps.memoryHeapCount := 2;
+  MemProps.memoryHeaps[0].size := UInt64(8192) * 1024 * 1024;
+  MemProps.memoryHeaps[0].flags := VK_MEMORY_HEAP_DEVICE_LOCAL_BIT;
+  MemProps.memoryHeaps[1].size := UInt64(16384) * 1024 * 1024;
+  MemProps.memoryHeaps[1].flags := 0;
+
+  BudgetProps.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
+  BudgetProps.heapUsage[0] := UInt64(640) * 1024 * 1024;
+  BudgetProps.heapBudget[0] := UInt64(7680) * 1024 * 1024;
+  BudgetProps.heapUsage[1] := UInt64(2048) * 1024 * 1024;
+  BudgetProps.heapBudget[1] := UInt64(14336) * 1024 * 1024;
+
+  AggregateDeviceLocalMemoryBudget(MemProps, BudgetProps, True,
+    UInt64(128) * 1024 * 1024, UsedBytes, BudgetBytes, UsedMB, BudgetMB);
+  AssertEquals('VK_EXT_memory_budget used MB from DEVICE_LOCAL heap', 640, UsedMB);
+  AssertEquals('VK_EXT_memory_budget budget MB from DEVICE_LOCAL heap', 7680, BudgetMB);
+
+  { 2. Test fallback when VK_EXT_memory_budget is not supported }
+  AggregateDeviceLocalMemoryBudget(MemProps, BudgetProps, False,
+    UInt64(256) * 1024 * 1024, UsedBytes, BudgetBytes, UsedMB, BudgetMB);
+  AssertEquals('Fallback used MB from tracked allocations', 256, UsedMB);
+  AssertEquals('Fallback budget MB from full DEVICE_LOCAL heap size', 8192, BudgetMB);
+
+  { 3. Test end-to-end live Viewport.Statistics query via vkGetPhysicalDeviceMemoryProperties2 }
+  SavedProc := vkGetPhysicalDeviceMemoryProperties2;
+  SavedDevice := RHIDevice;
+  vkGetPhysicalDeviceMemoryProperties2 := @MockGetPhysicalDeviceMemoryProperties2;
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt(1)), True);
+  Viewport := TCastleViewport.Create(nil);
+  try
+    VkDev.RecordDiagnostics(42, 3, 128);
+    SetRHIDevice(VkDev);
+
+    Stats := Viewport.Statistics;
+    AssertEquals('Viewport.Statistics ActiveBackend', 'Vulkan 1.3', Stats.ActiveBackend);
+    AssertEquals('Viewport.Statistics PipelineCacheHits', 42, Stats.PipelineCacheHits);
+    AssertEquals('Viewport.Statistics PipelineCacheMisses', 3, Stats.PipelineCacheMisses);
+    AssertEquals('Viewport.Statistics DescriptorSetAllocations', 128, Stats.DescriptorSetAllocations);
+    AssertEquals('Viewport.Statistics DeviceMemoryUsedMB from VK_EXT_memory_budget', 512, Stats.DeviceMemoryUsedMB);
+    AssertEquals('Viewport.Statistics DeviceMemoryBudgetMB from VK_EXT_memory_budget', 4096, Stats.DeviceMemoryBudgetMB);
+    AssertTrue('Viewport.Statistics.ToString includes live VRAM usage/budget',
+      Pos('VRAM: 512 / 4096 MB', Stats.ToString) > 0);
+  finally
+    SetRHIDevice(SavedDevice);
+    vkGetPhysicalDeviceMemoryProperties2 := SavedProc;
+    FreeAndNil(Viewport);
+    FreeAndNil(VkDev);
   end;
 end;
 

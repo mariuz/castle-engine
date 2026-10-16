@@ -63,6 +63,11 @@ type
     DedicatedAllocationCount: Cardinal;
     TotalAllocatedBytes: UInt64;
     TotalUsedBytes: UInt64;
+    DeviceMemoryUsedBytes: UInt64;
+    DeviceMemoryBudgetBytes: UInt64;
+    DeviceMemoryUsedMB: Cardinal;
+    DeviceMemoryBudgetMB: Cardinal;
+    SupportsMemoryBudgetExtension: Boolean;
   end;
 
   { Internal linked-list node tracking used and free sub-ranges inside a block }
@@ -155,6 +160,7 @@ type
 
     FDedicatedCount: Cardinal;
     FDedicatedBytes: UInt64;
+    FSupportsMemoryBudgetExt: Boolean;
 
     function SelectMemoryType(const ATypeBits: UInt32;
       const AUsage: TRHIMemoryUsage; out AIsHostVisible: Boolean): Cardinal;
@@ -182,7 +188,30 @@ type
 
     property Device: VkDevice read FDevice;
     property MinUniformBufferAlignment: VkDeviceSize read FMinUniformBufferAlignment;
+    property SupportsMemoryBudgetExt: Boolean read FSupportsMemoryBudgetExt write FSupportsMemoryBudgetExt;
   end;
+
+{ Aggregates GPU VRAM usage and budget across DEVICE_LOCAL memory heaps.
+  When AHasBudgetExt is True, sums heapUsage and heapBudget from VK_EXT_memory_budget;
+  otherwise falls back to AFallbackUsedBytes and total heap sizes from AMemProps. }
+procedure AggregateDeviceLocalMemoryBudget(
+  const AMemProps: VkPhysicalDeviceMemoryProperties;
+  const ABudgetProps: VkPhysicalDeviceMemoryBudgetPropertiesEXT;
+  const AHasBudgetExt: Boolean;
+  const AFallbackUsedBytes: UInt64;
+  out AUsedBytes, ABudgetBytes: UInt64;
+  out AUsedMB, ABudgetMB: Cardinal);
+
+{ Queries live GPU VRAM usage and budget from APhysicalDevice using
+  vkGetPhysicalDeviceMemoryProperties2 + VK_EXT_memory_budget when available,
+  or falls back to vkGetPhysicalDeviceMemoryProperties heap sizes.
+  Returns True if VK_EXT_memory_budget was used for the query. }
+function QueryPhysicalDeviceMemoryBudget(
+  const APhysicalDevice: VkPhysicalDevice;
+  const ASupportsMemoryBudgetExt: Boolean;
+  const AFallbackUsedBytes: UInt64;
+  out AUsedBytes, ABudgetBytes: UInt64;
+  out AUsedMB, ABudgetMB: Cardinal): Boolean;
 
 implementation
 
@@ -727,6 +756,101 @@ begin
   end;
 end;
 
+procedure AggregateDeviceLocalMemoryBudget(
+  const AMemProps: VkPhysicalDeviceMemoryProperties;
+  const ABudgetProps: VkPhysicalDeviceMemoryBudgetPropertiesEXT;
+  const AHasBudgetExt: Boolean;
+  const AFallbackUsedBytes: UInt64;
+  out AUsedBytes, ABudgetBytes: UInt64;
+  out AUsedMB, ABudgetMB: Cardinal);
+const
+  BytesPerMB = UInt64(1024 * 1024);
+var
+  HeapCount, I: Cardinal;
+  FoundDeviceLocal: Boolean;
+begin
+  AUsedBytes := 0;
+  ABudgetBytes := 0;
+  AUsedMB := 0;
+  ABudgetMB := 0;
+
+  HeapCount := AMemProps.memoryHeapCount;
+  if HeapCount > VK_MAX_MEMORY_HEAPS then
+    HeapCount := VK_MAX_MEMORY_HEAPS;
+
+  FoundDeviceLocal := False;
+  if HeapCount > 0 then
+  begin
+    for I := 0 to HeapCount - 1 do
+      if (AMemProps.memoryHeaps[I].flags and VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) <> 0 then
+      begin
+        FoundDeviceLocal := True;
+        if AHasBudgetExt and (ABudgetProps.heapBudget[I] > 0) then
+        begin
+          Inc(ABudgetBytes, ABudgetProps.heapBudget[I]);
+          Inc(AUsedBytes, ABudgetProps.heapUsage[I]);
+        end else
+          Inc(ABudgetBytes, AMemProps.memoryHeaps[I].size);
+      end;
+
+    { Fallback if no heap explicitly set VK_MEMORY_HEAP_DEVICE_LOCAL_BIT }
+    if not FoundDeviceLocal then
+      for I := 0 to HeapCount - 1 do
+      begin
+        if AHasBudgetExt and (ABudgetProps.heapBudget[I] > 0) then
+        begin
+          Inc(ABudgetBytes, ABudgetProps.heapBudget[I]);
+          Inc(AUsedBytes, ABudgetProps.heapUsage[I]);
+        end else
+          Inc(ABudgetBytes, AMemProps.memoryHeaps[I].size);
+      end;
+  end;
+
+  if (not AHasBudgetExt) or ((AUsedBytes = 0) and (AFallbackUsedBytes > 0)) then
+    AUsedBytes := AFallbackUsedBytes;
+
+  AUsedMB := Cardinal(AUsedBytes div BytesPerMB);
+  if (AUsedBytes > 0) and (AUsedMB = 0) then
+    AUsedMB := 1;
+  ABudgetMB := Cardinal(ABudgetBytes div BytesPerMB);
+end;
+
+function QueryPhysicalDeviceMemoryBudget(
+  const APhysicalDevice: VkPhysicalDevice;
+  const ASupportsMemoryBudgetExt: Boolean;
+  const AFallbackUsedBytes: UInt64;
+  out AUsedBytes, ABudgetBytes: UInt64;
+  out AUsedMB, ABudgetMB: Cardinal): Boolean;
+var
+  MemProps2: VkPhysicalDeviceMemoryProperties2;
+  BudgetProps: VkPhysicalDeviceMemoryBudgetPropertiesEXT;
+  MemProps: VkPhysicalDeviceMemoryProperties;
+begin
+  Result := False;
+  FillChar(BudgetProps, SizeOf(BudgetProps), 0);
+
+  if (APhysicalDevice <> nil) and ASupportsMemoryBudgetExt and
+     Assigned(vkGetPhysicalDeviceMemoryProperties2) then
+  begin
+    FillChar(MemProps2, SizeOf(MemProps2), 0);
+    BudgetProps.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
+    MemProps2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
+    MemProps2.pNext := @BudgetProps;
+    vkGetPhysicalDeviceMemoryProperties2(APhysicalDevice, @MemProps2);
+
+    AggregateDeviceLocalMemoryBudget(MemProps2.memoryProperties, BudgetProps,
+      True, AFallbackUsedBytes, AUsedBytes, ABudgetBytes, AUsedMB, ABudgetMB);
+    Exit(True);
+  end;
+
+  FillChar(MemProps, SizeOf(MemProps), 0);
+  if (APhysicalDevice <> nil) and Assigned(vkGetPhysicalDeviceMemoryProperties) then
+    vkGetPhysicalDeviceMemoryProperties(APhysicalDevice, @MemProps);
+
+  AggregateDeviceLocalMemoryBudget(MemProps, BudgetProps,
+    False, AFallbackUsedBytes, AUsedBytes, ABudgetBytes, AUsedMB, ABudgetMB);
+end;
+
 function TCastleVulkanMemoryAllocator.GetStats: TVulkanMemoryStats;
 var
   I, J: Integer;
@@ -749,6 +873,11 @@ begin
         Inc(Result.TotalUsedBytes, Pool[J].UsedBytes);
       end;
     end;
+
+    Result.SupportsMemoryBudgetExtension := QueryPhysicalDeviceMemoryBudget(
+      FPhysicalDevice, FSupportsMemoryBudgetExt, Result.TotalUsedBytes,
+      Result.DeviceMemoryUsedBytes, Result.DeviceMemoryBudgetBytes,
+      Result.DeviceMemoryUsedMB, Result.DeviceMemoryBudgetMB);
   finally
     FLock.Release;
   end;
