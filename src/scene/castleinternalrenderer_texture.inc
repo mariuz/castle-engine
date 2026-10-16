@@ -327,6 +327,9 @@
   strict private
     FGLName: TGLTexture;
     FWidth, FHeight: Integer;
+    { Framebuffer with FGLName as the color attachment,
+      to resolve multisampled framebuffers into it. Created on demand. }
+    FResolveFramebuffer: TGLFramebuffer;
   protected
     class function IsClassForTextureNode(ANode: TAbstractTextureNode): boolean; override;
     procedure PrepareCore(
@@ -345,8 +348,9 @@
     function GLName: TGLTextureId; override;
 
     { Copy the colors of the given rectangle of the current framebuffer
-      (in pixels) to the texture, resizing it to the rectangle size. }
-    procedure UpdateFromScreen(const Rect: TRectangle);
+      (in pixels) to the texture, resizing it to the rectangle size.
+      Multisampled says if the current framebuffer is multisampled. }
+    procedure UpdateFromScreen(const Rect: TRectangle; const Multisampled: Boolean);
   end;
 
   { Abstract renderer resource for TAbstractEnvironmentTextureNode. }
@@ -2457,6 +2461,11 @@ begin
   { Free the list with the last resource, so it doesn't outlive them. }
   if ScreenTextureResources.Count = 0 then
     FreeAndNil(ScreenTextureResources);
+  if FResolveFramebuffer <> GLObjectNone then
+  begin
+    glDeleteFramebuffer(FResolveFramebuffer);
+    FResolveFramebuffer := GLObjectNone;
+  end;
   if FGLName <> GLObjectNone then
   begin
     glDeleteTexture(FGLName);
@@ -2493,7 +2502,12 @@ begin
   Result := FGLName;
 end;
 
-procedure TScreenTextureResource.UpdateFromScreen(const Rect: TRectangle);
+procedure TScreenTextureResource.UpdateFromScreen(const Rect: TRectangle;
+  const Multisampled: Boolean);
+{$ifndef CASTLE_WEBGL}
+var
+  PreviousDrawFramebuffer: TGLint;
+{$endif}
 begin
   if (Rect.Width <= 0) or (Rect.Height <= 0) then
     Exit;
@@ -2507,35 +2521,58 @@ begin
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, FWidth, FHeight, 0,
       GL_RGB, GL_UNSIGNED_BYTE, nil);
   end;
-  glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, Rect.Left, Rect.Bottom,
-    FWidth, FHeight);
+
+  if Multisampled then
+  begin
+    { glCopyTexSubImage2D cannot read from a multisampled framebuffer:
+      resolve it into our texture with glBlitFramebuffer.
+      The current framebuffer stays bound for reading (GL_READ_FRAMEBUFFER),
+      only the drawing framebuffer is changed for the blit. }
+    {$ifndef CASTLE_WEBGL}
+    PreviousDrawFramebuffer := glGetInteger(GL_DRAW_FRAMEBUFFER_BINDING);
+    if FResolveFramebuffer = GLObjectNone then
+    begin
+      FResolveFramebuffer := glCreateFramebuffer;
+      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, FResolveFramebuffer);
+      glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+        GL_TEXTURE_2D, FGLName, 0);
+    end else
+      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, FResolveFramebuffer);
+    glBlitFramebuffer(
+      Rect.Left, Rect.Bottom, Rect.Left + FWidth, Rect.Bottom + FHeight,
+      0, 0, FWidth, FHeight,
+      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, PreviousDrawFramebuffer);
+    {$endif}
+  end else
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, Rect.Left, Rect.Bottom,
+      FWidth, FHeight);
 end;
 
 procedure UpdateScreenTextures;
 var
   Rect: TRectangle;
-  SampleBuffers: TGLint;
+  Multisampled: Boolean;
   I: Integer;
 begin
   if (ScreenTextureResources = nil) or (ScreenTextureResources.Count = 0) then
     Exit;
 
-  { glCopyTexSubImage2D cannot read from a multisampled framebuffer. }
-  SampleBuffers := 0;
-  glGetIntegerv(GL_SAMPLE_BUFFERS, @SampleBuffers);
-  if SampleBuffers > 0 then
+  Multisampled := glGetInteger(GL_SAMPLE_BUFFERS) > 0;
+  if Multisampled and
+     ({$ifdef CASTLE_WEBGL} true {$else} not GLFeatures.FramebufferBlit {$endif}) then
   begin
     if not WarningScreenTextureMultisampleDone then
     begin
       WarningScreenTextureMultisampleDone := true;
-      WritelnWarning('ScreenTexture is not updated when rendering to a multisampled framebuffer (anti-aliasing) yet');
+      WritelnWarning('ScreenTexture cannot be updated from a multisampled framebuffer (anti-aliasing) without glBlitFramebuffer');
     end;
     Exit;
   end;
 
   Rect := RenderContext.Viewport.Translate(RenderContext.ViewportDelta);
   for I := 0 to ScreenTextureResources.Count - 1 do
-    TScreenTextureResource(ScreenTextureResources[I]).UpdateFromScreen(Rect);
+    TScreenTextureResource(ScreenTextureResources[I]).UpdateFromScreen(Rect, Multisampled);
 end;
 
 {$endif read_implementation}

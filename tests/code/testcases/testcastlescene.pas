@@ -280,51 +280,58 @@ var
     Shape.Appearance.SetEffects([Effect]);
   end;
 
-var
-  Scene: TCastleScene;
-  Image: TCastleImage;
-  Left, Right: TCastleColorRGB;
+  { Render with given anti-aliasing (a multisampled framebuffer
+    is resolved by glBlitFramebuffer). }
+  procedure TestWithAntiAliasing(const AntiAliasing: TAntiAliasing);
+  var
+    Scene: TCastleScene;
+    Image: TCastleImage;
+    Left, Right: TCastleColorRGB;
+  begin
+    Window := CreateWindowForTest;
+    try
+      Window.Width := WindowSize;
+      Window.Height := WindowSize;
+      Window.AntiAliasing := AntiAliasing;
+      Window.Open;
+
+      Viewport := TCastleViewport.Create(Window);
+      Viewport.FullSize := true;
+      Viewport.BackgroundColor := Black;
+      Viewport.Camera.SetView(Vector3(0, 0, 5), Vector3(0, 0, -1), Vector3(0, 1, 0));
+      Window.Controls.InsertFront(Viewport);
+
+      Scene := TCastleScene.Create(Window);
+      Scene.Load(BuildScene, true);
+      Viewport.Items.Add(Scene);
+
+      { Render twice: the first frame prepares the screen texture. }
+      Image := Window.SaveScreen;
+      FreeAndNil(Image);
+      Image := Window.SaveScreen;
+      try
+        Left := Image.Colors[WindowSize div 4, WindowSize div 2, 0].XYZ;
+        Right := Image.Colors[WindowSize * 3 div 4, WindowSize div 2, 0].XYZ;
+      finally FreeAndNil(Image) end;
+
+      // mirrored: the left side shows the green right side, and the other way around
+      if not (TVector3.Equals(Left, GreenRGB, 0.1) and TVector3.Equals(Right, RedRGB, 0.1)) then
+        Fail(Format('Screen texture mirrored, %s: left %s (expected green), right %s (expected red)',
+          [AntiAliasingNames[AntiAliasing], Left.ToString, Right.ToString]));
+      CheckGLErrors('TestScreenTexture');
+
+      Window.Close;
+    finally DestroyWindowForTest(Window) end;
+  end;
+
 begin
   if not CanCreateWindowForTest then
   begin
     AbortTest;
     Exit;
   end;
-
-  Window := CreateWindowForTest;
-  try
-    Window.Width := WindowSize;
-    Window.Height := WindowSize;
-    Window.AntiAliasing := aaNone;
-    Window.Open;
-
-    Viewport := TCastleViewport.Create(Window);
-    Viewport.FullSize := true;
-    Viewport.BackgroundColor := Black;
-    Viewport.Camera.SetView(Vector3(0, 0, 5), Vector3(0, 0, -1), Vector3(0, 1, 0));
-    Window.Controls.InsertFront(Viewport);
-
-    Scene := TCastleScene.Create(Window);
-    Scene.Load(BuildScene, true);
-    Viewport.Items.Add(Scene);
-
-    { Render twice: the first frame prepares the screen texture. }
-    Image := Window.SaveScreen;
-    FreeAndNil(Image);
-    Image := Window.SaveScreen;
-    try
-      Left := Image.Colors[WindowSize div 4, WindowSize div 2, 0].XYZ;
-      Right := Image.Colors[WindowSize * 3 div 4, WindowSize div 2, 0].XYZ;
-    finally FreeAndNil(Image) end;
-
-    // mirrored: the left side shows the green right side, and the other way around
-    if not (TVector3.Equals(Left, GreenRGB, 0.1) and TVector3.Equals(Right, RedRGB, 0.1)) then
-      Fail(Format('Screen texture mirrored: left %s (expected green), right %s (expected red)',
-        [Left.ToString, Right.ToString]));
-    CheckGLErrors('TestScreenTexture');
-
-    Window.Close;
-  finally DestroyWindowForTest(Window) end;
+  TestWithAntiAliasing(aaNone);
+  TestWithAntiAliasing(aa4SamplesNicer);
 end;
 
 initialization
