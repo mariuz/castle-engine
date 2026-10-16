@@ -70,6 +70,7 @@ type
     procedure TestVkXmlHeaderGenerator;
     procedure TestVulkan11_12DeviceNegotiationAndFallback;
     procedure TestGraphicsPipelineLibraryFastLinking;
+    procedure TestSPIRVBinaryReflectionAndValidation;
   private
     FCapturedWarnings: TStringList;
     procedure CaptureWarning(const Category, S: String);
@@ -1752,6 +1753,304 @@ begin
       PsoOpaque.FragmentOutputLibrary = PsoTwoSided.FragmentOutputLibrary);
   finally
     FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSPIRVBinaryReflectionAndValidation;
+var
+  Words, SwappedWords: array of UInt32;
+  Info, SwappedInfo: TSPIRVReflectionInfo;
+  FoundBind: TSPIRVReflectedBinding;
+  FoundIO: TSPIRVReflectedStageIO;
+  ShaderMod, WrongStageMod: TVulkanRHIShaderModule;
+  ValidSet0Layout: array[0..1] of TRHIDescriptorBindingDesc;
+  ValidSet1Layout: array[0..1] of TRHIDescriptorBindingDesc;
+  BadTypeLayout: array[0..1] of TRHIDescriptorBindingDesc;
+  MissingBindLayout: array[0..0] of TRHIDescriptorBindingDesc;
+  BadStageLayout: array[0..1] of TRHIDescriptorBindingDesc;
+  BadCountLayout: array[0..1] of TRHIDescriptorBindingDesc;
+  DiagMsg: String;
+  I: Integer;
+
+  procedure EmitWord(const W: UInt32);
+  begin
+    SetLength(Words, Length(Words) + 1);
+    Words[High(Words)] := W;
+  end;
+
+  procedure EmitInst(const Opcode: UInt16; const Operands: array of UInt32);
+  var
+    Idx: Integer;
+  begin
+    EmitWord((UInt32(Length(Operands) + 1) shl 16) or Opcode);
+    for Idx := 0 to High(Operands) do
+      EmitWord(Operands[Idx]);
+  end;
+
+  procedure EmitName(const TargetId: UInt32; const S: AnsiString);
+  var
+    WordLen, WIdx, BIdx, CharPos: Integer;
+    WVal: UInt32;
+  begin
+    WordLen := (Length(S) div 4) + 1;
+    EmitWord((UInt32(WordLen + 2) shl 16) or 5 { OpName });
+    EmitWord(TargetId);
+    for WIdx := 0 to WordLen - 1 do
+    begin
+      WVal := 0;
+      for BIdx := 0 to 3 do
+      begin
+        CharPos := WIdx * 4 + BIdx + 1;
+        if CharPos <= Length(S) then
+          WVal := WVal or (UInt32(Ord(S[CharPos])) shl (BIdx * 8));
+      end;
+      EmitWord(WVal);
+    end;
+  end;
+
+begin
+  { Build a synthetic pre-compiled SPIR-V 1.6 Fragment Shader binary word stream
+    (verifying pure Pascal reflection with zero libshaderc dependency) }
+  SetLength(Words, 0);
+  EmitWord($07230203); // Magic
+  EmitWord($00010600); // Version 1.6
+  EmitWord($000D000B); // Generator
+  EmitWord(40);        // Bound
+  EmitWord(0);         // Schema
+
+  { OpEntryPoint Fragment(4), %1, "main" ($6E69616D, $00000000) }
+  EmitInst(15, [4, 1, $6E69616D, 0]);
+
+  { Debug names (OpName) }
+  EmitName(10, 'CastleFrameUBO');
+  EmitName(13, 'CastleJointSSBO');
+  EmitName(18, 'castle_MaterialTextures');
+  EmitName(20, 'castle_OutputStorageImg');
+  EmitName(23, 'CastleDrawPushConstants');
+  EmitName(25, 'v_TexCoord0');
+  EmitName(27, 'out_FragColor');
+
+  { Decorations (OpDecorate = 71, OpMemberDecorate = 72) }
+  { UBO struct %9: Block(2), member 0 Offset 0 (mat4=64B), member 1 Offset 64 (vec4=16B) => 80B }
+  EmitInst(71, [9, 2]);
+  EmitInst(72, [9, 0, 35, 0]);
+  EmitInst(72, [9, 1, 35, 64]);
+  EmitInst(71, [10, 34, 0]); // DescriptorSet 0
+  EmitInst(71, [10, 33, 0]); // Binding 0
+
+  { SSBO struct %12: Block(2), member 0 Offset 0 (mat4=64B) => 64B }
+  EmitInst(71, [12, 2]);
+  EmitInst(72, [12, 0, 35, 0]);
+  EmitInst(71, [13, 34, 0]); // DescriptorSet 0
+  EmitInst(71, [13, 33, 1]); // Binding 1
+
+  { CombinedImageSampler array[4] %18: DescriptorSet 1, Binding 0 }
+  EmitInst(71, [18, 34, 1]);
+  EmitInst(71, [18, 33, 0]);
+
+  { StorageImage %20: DescriptorSet 1, Binding 1 }
+  EmitInst(71, [20, 34, 1]);
+  EmitInst(71, [20, 33, 1]);
+
+  { PushConstant struct %22: Block(2), member 0 Offset 0 (mat4=64B), member 1 Offset 64 (mat4=64B) => 128B }
+  EmitInst(71, [22, 2]);
+  EmitInst(72, [22, 0, 35, 0]);
+  EmitInst(72, [22, 1, 35, 64]);
+
+  { Stage Input %25 (location = 0) and Stage Output %27 (location = 0) }
+  EmitInst(71, [25, 30, 0]);
+  EmitInst(71, [27, 30, 0]);
+
+  { Fundamental types }
+  EmitInst(22, [2, 32]);       // %2 = OpTypeFloat 32
+  EmitInst(23, [3, 2, 4]);     // %3 = OpTypeVector %2 4 (vec4)
+  EmitInst(24, [4, 3, 4]);     // %4 = OpTypeMatrix %3 4 (mat4, 64 bytes)
+  EmitInst(23, [5, 2, 2]);     // %5 = OpTypeVector %2 2 (vec2)
+  EmitInst(21, [6, 32, 0]);    // %6 = OpTypeInt 32 0 (uint)
+  EmitInst(43, [6, 7, 4]);     // %7 = OpConstant %6 4
+
+  { UBO type & variable: %9 = struct(mat4, vec4), %8 = ptr(Uniform=2, %9), %10 = var }
+  EmitInst(30, [9, 4, 3]);
+  EmitInst(32, [8, 2, 9]);
+  EmitInst(59, [8, 10, 2]);
+
+  { SSBO type & variable: %12 = struct(mat4), %11 = ptr(StorageBuffer=12, %12), %13 = var }
+  EmitInst(30, [12, 4]);
+  EmitInst(32, [11, 12, 12]);
+  EmitInst(59, [11, 13, 12]);
+
+  { CombinedImageSampler[4]: %14 = Image(Sampled=1), %15 = SampledImage, %16 = Array[4], %17 = ptr(UniformConstant=0), %18 = var }
+  EmitInst(25, [14, 2, 1, 0, 0, 0, 1, 0]);
+  EmitInst(27, [15, 14]);
+  EmitInst(28, [16, 15, 7]);
+  EmitInst(32, [17, 0, 16]);
+  EmitInst(59, [17, 18, 0]);
+
+  { StorageImage: %19 = Image(Sampled=2), %21 = ptr(UniformConstant=0, %19), %20 = var }
+  EmitInst(25, [19, 2, 1, 0, 0, 0, 2, 1]);
+  EmitInst(32, [21, 0, 19]);
+  EmitInst(59, [21, 20, 0]);
+
+  { PushConstant: %22 = struct(mat4, mat4), %24 = ptr(PushConstant=9, %22), %23 = var }
+  EmitInst(30, [22, 4, 4]);
+  EmitInst(32, [24, 9, 22]);
+  EmitInst(59, [24, 23, 9]);
+
+  { Stage Input & Output variables }
+  EmitInst(32, [26, 1, 5]);    // %26 = ptr(Input=1, vec2)
+  EmitInst(59, [26, 25, 1]);   // %25 = var Input
+  EmitInst(32, [28, 3, 3]);    // %28 = ptr(Output=3, vec4)
+  EmitInst(59, [28, 27, 3]);   // %27 = var Output
+
+  { 1. Inspect native-endian SPIR-V binary }
+  AssertTrue('InspectSPIRVBytecode must succeed on valid SPIR-V stream',
+    InspectSPIRVBytecode(@Words[0], Length(Words) * SizeOf(UInt32), Info));
+  AssertTrue('Info.IsValid must be True', Info.IsValid);
+  AssertFalse('Native SPIR-V must not be flagged ByteSwapped', Info.ByteSwapped);
+  AssertEquals('SPIR-V VersionMajor', 1, Info.VersionMajor);
+  AssertEquals('SPIR-V VersionMinor', 6, Info.VersionMinor);
+  AssertEquals('Reflected stage must be ssFragment', Ord(ssFragment), Ord(Info.Stage));
+  AssertEquals('Reflected entry point name', 'main', Info.EntryPointName);
+
+  { Verify 4 reflected descriptor bindings }
+  AssertEquals('Reflected binding count must be 4', 4, Length(Info.Bindings));
+
+  AssertTrue('Must find Set 0 Binding 0 (UBO)', Info.FindBinding(0, 0, FoundBind));
+  AssertEquals('Set 0 Binding 0 type', Ord(dtUniformBuffer), Ord(FoundBind.DescriptorType));
+  AssertEquals('Set 0 Binding 0 count', 1, FoundBind.Count);
+  AssertEquals('Set 0 Binding 0 block size (mat4 + vec4 = 80)', 80, FoundBind.BlockSize);
+  AssertEquals('Set 0 Binding 0 name', 'CastleFrameUBO', FoundBind.Name);
+
+  AssertTrue('Must find Set 0 Binding 1 (SSBO)', Info.FindBinding(0, 1, FoundBind));
+  AssertEquals('Set 0 Binding 1 type', Ord(dtStorageBuffer), Ord(FoundBind.DescriptorType));
+  AssertEquals('Set 0 Binding 1 count', 1, FoundBind.Count);
+  AssertEquals('Set 0 Binding 1 block size (mat4 = 64)', 64, FoundBind.BlockSize);
+  AssertEquals('Set 0 Binding 1 name', 'CastleJointSSBO', FoundBind.Name);
+
+  AssertTrue('Must find Set 1 Binding 0 (CombinedImageSampler[4])', Info.FindBinding(1, 0, FoundBind));
+  AssertEquals('Set 1 Binding 0 type', Ord(dtCombinedImageSampler), Ord(FoundBind.DescriptorType));
+  AssertEquals('Set 1 Binding 0 array count', 4, FoundBind.Count);
+  AssertEquals('Set 1 Binding 0 name', 'castle_MaterialTextures', FoundBind.Name);
+
+  AssertTrue('Must find Set 1 Binding 1 (StorageImage)', Info.FindBinding(1, 1, FoundBind));
+  AssertEquals('Set 1 Binding 1 type', Ord(dtStorageImage), Ord(FoundBind.DescriptorType));
+  AssertEquals('Set 1 Binding 1 count', 1, FoundBind.Count);
+  AssertEquals('Set 1 Binding 1 name', 'castle_OutputStorageImg', FoundBind.Name);
+
+  { Verify Push Constants }
+  AssertTrue('Must detect PushConstant block', Info.HasPushConstants);
+  AssertEquals('PushConstant size (2 x mat4 = 128)', 128, Info.PushConstantSize);
+  AssertEquals('PushConstant name', 'CastleDrawPushConstants', Info.PushConstantName);
+
+  { Verify Stage IO }
+  AssertEquals('StageIO count must be 2', 2, Length(Info.StageIO));
+  AssertTrue('Must find Stage Input at location 0', Info.FindStageInput(0, FoundIO));
+  AssertEquals('Stage Input 0 component count (vec2)', 2, FoundIO.ComponentCount);
+  AssertEquals('Stage Input 0 name', 'v_TexCoord0', FoundIO.Name);
+
+  AssertTrue('Must find Stage Output at location 0', Info.FindStageOutput(0, FoundIO));
+  AssertEquals('Stage Output 0 component count (vec4)', 4, FoundIO.ComponentCount);
+  AssertEquals('Stage Output 0 name', 'out_FragColor', FoundIO.Name);
+
+  { 2. Verify byte-swapped SPIR-V header/stream support }
+  SetLength(SwappedWords, Length(Words));
+  for I := 0 to High(Words) do
+    SwappedWords[I] := SwapEndian(Words[I]);
+  AssertTrue('InspectSPIRVBytecode must support byte-swapped SPIR-V streams',
+    InspectSPIRVBytecode(@SwappedWords[0], Length(SwappedWords) * SizeOf(UInt32), SwappedInfo));
+  AssertTrue('SwappedInfo.ByteSwapped must be True', SwappedInfo.ByteSwapped);
+  AssertEquals('SwappedInfo binding count', 4, Length(SwappedInfo.Bindings));
+  AssertEquals('SwappedInfo PushConstantSize', 128, SwappedInfo.PushConstantSize);
+
+  { 3. Verify TVulkanRHIShaderModule automatic reflection & descriptor layout validation }
+  ShaderMod := TVulkanRHIShaderModule.Create(nil, ssFragment,
+    @Words[0], Length(Words) * SizeOf(UInt32), 'ReflectedFragShader');
+  try
+    AssertTrue('ShaderMod.Reflection.IsValid must be True', ShaderMod.Reflection.IsValid);
+    AssertEquals('ShaderMod.Reflection binding count', 4, Length(ShaderMod.Reflection.Bindings));
+
+    { Valid Set 0 layout (note: dtUniformBufferDynamic is compatible with SPIR-V UBO) }
+    ValidSet0Layout[0].Binding := 0;
+    ValidSet0Layout[0].DescriptorType := dtUniformBufferDynamic;
+    ValidSet0Layout[0].Count := 1;
+    ValidSet0Layout[0].StageFlags := [ssVertex, ssFragment];
+    ValidSet0Layout[1].Binding := 1;
+    ValidSet0Layout[1].DescriptorType := dtStorageBuffer;
+    ValidSet0Layout[1].Count := 1;
+    ValidSet0Layout[1].StageFlags := [ssVertex, ssFragment];
+    AssertTrue('Valid Set 0 layout must pass validation',
+      ShaderMod.ValidateDescriptorSetLayout(0, ValidSet0Layout, DiagMsg));
+    AssertEquals('Diagnostic message must be empty on success', '', DiagMsg);
+
+    { Valid Set 1 layout }
+    ValidSet1Layout[0].Binding := 0;
+    ValidSet1Layout[0].DescriptorType := dtCombinedImageSampler;
+    ValidSet1Layout[0].Count := 4;
+    ValidSet1Layout[0].StageFlags := [ssFragment];
+    ValidSet1Layout[1].Binding := 1;
+    ValidSet1Layout[1].DescriptorType := dtStorageImage;
+    ValidSet1Layout[1].Count := 1;
+    ValidSet1Layout[1].StageFlags := [ssFragment];
+    AssertTrue('Valid Set 1 layout must pass validation',
+      ShaderMod.ValidateDescriptorSetLayout(1, ValidSet1Layout, DiagMsg));
+
+    { Mismatched descriptor type }
+    BadTypeLayout[0] := ValidSet0Layout[0];
+    BadTypeLayout[0].DescriptorType := dtCombinedImageSampler;
+    BadTypeLayout[1] := ValidSet0Layout[1];
+    AssertFalse('Mismatched descriptor type must fail validation',
+      ShaderMod.ValidateDescriptorSetLayout(0, BadTypeLayout, DiagMsg));
+    AssertTrue('Diagnostic must report type mismatch',
+      Pos('descriptor type mismatch', DiagMsg) > 0);
+
+    { Missing binding }
+    MissingBindLayout[0] := ValidSet0Layout[0];
+    AssertFalse('Missing binding 1 in Set 0 must fail validation',
+      ShaderMod.ValidateDescriptorSetLayout(0, MissingBindLayout, DiagMsg));
+    AssertTrue('Diagnostic must report undeclared descriptor',
+      Pos('undeclared descriptor', DiagMsg) > 0);
+
+    { Mismatched stage visibility }
+    BadStageLayout[0] := ValidSet0Layout[0];
+    BadStageLayout[0].StageFlags := [ssVertex];
+    BadStageLayout[1] := ValidSet0Layout[1];
+    AssertFalse('Missing ssFragment in StageFlags must fail validation',
+      ShaderMod.ValidateDescriptorSetLayout(0, BadStageLayout, DiagMsg));
+    AssertTrue('Diagnostic must report stage visibility mismatch',
+      Pos('stage visibility mismatch', DiagMsg) > 0);
+
+    { Insufficient array count }
+    BadCountLayout[0] := ValidSet1Layout[0];
+    BadCountLayout[0].Count := 2; // Shader requires 4
+    BadCountLayout[1] := ValidSet1Layout[1];
+    AssertFalse('Array count smaller than shader array must fail validation',
+      ShaderMod.ValidateDescriptorSetLayout(1, BadCountLayout, DiagMsg));
+    AssertTrue('Diagnostic must report count mismatch',
+      Pos('descriptor count mismatch', DiagMsg) > 0);
+  finally
+    FreeAndNil(ShaderMod);
+  end;
+
+  { 4. Verify stage mismatch warning when creating a vertex module from fragment SPIR-V }
+  FCapturedWarnings := TStringList.Create;
+  try
+    ApplicationProperties.OnWarning.Add({$ifdef FPC}@{$endif}CaptureWarning);
+    try
+      WrongStageMod := TVulkanRHIShaderModule.Create(nil, ssVertex,
+        @Words[0], Length(Words) * SizeOf(UInt32), 'WrongStageShader');
+      try
+        AssertTrue('Creating ssVertex module with Fragment SPIR-V must emit warning',
+          FCapturedWarnings.Count > 0);
+        AssertTrue('Warning must mention execution model stage mismatch',
+          Pos('SPIR-V execution model stage', FCapturedWarnings.Text) > 0);
+      finally
+        FreeAndNil(WrongStageMod);
+      end;
+    finally
+      ApplicationProperties.OnWarning.Remove({$ifdef FPC}@{$endif}CaptureWarning);
+    end;
+  finally
+    FreeAndNil(FCapturedWarnings);
   end;
 end;
 

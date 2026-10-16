@@ -25,7 +25,8 @@ interface
 uses
   SysUtils, Classes, Math, Generics.Collections, Generics.Defaults,
   CastleVectors, CastleColors, CastleRectangles, CastleImages, CastleLog,
-  CastleInternalRHI, CastleInternalVulkan, CastleInternalVulkanWSI;
+  CastleInternalRHI, CastleInternalVulkan, CastleInternalVulkanWSI,
+  CastleInternalShaderCompiler;
 
 type
   TVulkanRHIDevice = class;
@@ -95,11 +96,16 @@ type
   TVulkanRHIShaderModule = class(TRHIShaderModule)
   private
     FHandle: VkShaderModule;
+    FReflection: TSPIRVReflectionInfo;
   public
     constructor Create(const ADevice: TVulkanRHIDevice; const AStage: TRHIShaderStage;
       const ASPIRVBinary: Pointer; const ASizeInBytes: PtrUInt; const ADebugName: String);
     destructor Destroy; override;
+    function ValidateDescriptorSetLayout(const ASetIndex: Cardinal;
+      const AExpectedBindings: array of TRHIDescriptorBindingDesc;
+      out ADiagnosticMessage: String): Boolean;
     property Handle: VkShaderModule read FHandle;
+    property Reflection: TSPIRVReflectionInfo read FReflection;
   end;
 
   TVulkanRHIDescriptorSetLayout = class(TRHIDescriptorSetLayout)
@@ -516,8 +522,7 @@ function LoadPipelineCacheBlobFromStream(const AStream: TStream;
 implementation
 
 uses
-  CastleDownload, CastleInternalShaderCompiler,
-  CastleInternalVulkanMemory;
+  CastleDownload, CastleInternalVulkanMemory;
 
 const
   FNV1aOffsetBasis64 = UInt64($CBF29CE484222325);
@@ -1393,6 +1398,13 @@ var
   CreateInfo: VkShaderModuleCreateInfo;
 begin
   inherited Create(ADevice, AStage, ADebugName);
+  if InspectSPIRVBytecode(ASPIRVBinary, ASizeInBytes, FReflection) then
+  begin
+    if FReflection.Stage <> AStage then
+      WritelnWarning('Vulkan', Format(
+        'Shader module "%s" SPIR-V execution model stage (Ord=%d) does not match requested TRHIShaderStage (Ord=%d).',
+        [ADebugName, Ord(FReflection.Stage), Ord(AStage)]));
+  end;
   if (ADevice = nil) or (ADevice.Handle = nil) or not Assigned(vkCreateShaderModule) then
     Exit;
   FillChar(CreateInfo, SizeOf(CreateInfo), 0);
@@ -1407,6 +1419,15 @@ begin
   if FHandle <> VK_NULL_HANDLE then
     vkDestroyShaderModule(TVulkanRHIDevice(Device).Handle, FHandle, nil);
   inherited;
+end;
+
+function TVulkanRHIShaderModule.ValidateDescriptorSetLayout(
+  const ASetIndex: Cardinal;
+  const AExpectedBindings: array of TRHIDescriptorBindingDesc;
+  out ADiagnosticMessage: String): Boolean;
+begin
+  Result := ValidateSPIRVDescriptorBindings(
+    FReflection, ASetIndex, AExpectedBindings, ADiagnosticMessage);
 end;
 
 constructor TVulkanRHIDescriptorSetLayout.Create(const ADevice: TVulkanRHIDevice;
@@ -1429,6 +1450,9 @@ begin
       dtUniformBufferDynamic: VkBindings[I].descriptorType := VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
       dtStorageBuffer:        VkBindings[I].descriptorType := VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
       dtCombinedImageSampler: VkBindings[I].descriptorType := VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      dtSampledImage:         VkBindings[I].descriptorType := VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+      dtSampler:              VkBindings[I].descriptorType := VK_DESCRIPTOR_TYPE_SAMPLER;
+      dtStorageImage:         VkBindings[I].descriptorType := VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     end;
   end;
 
