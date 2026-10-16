@@ -15,7 +15,8 @@
 
 { Platform-specific Vulkan Window System Integration (WSI) bindings and
   backend fallback selection for Windows (Win32), Linux (Xlib / Wayland),
-  Android (ANativeWindow), and macOS / iOS (Metal / MoltenVK). }
+  Android (ANativeWindow), macOS / iOS (Metal / MoltenVK), and
+  Nintendo Switch (VK_NN_vi_surface). }
 unit CastleInternalVulkanWSI;
 
 {$I castleconf.inc}
@@ -35,12 +36,14 @@ const
   VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME         = 'VK_KHR_wayland_surface';
   VK_KHR_ANDROID_SURFACE_EXTENSION_NAME         = 'VK_KHR_android_surface';
   VK_EXT_METAL_SURFACE_EXTENSION_NAME           = 'VK_EXT_metal_surface';
+  VK_NN_VI_SURFACE_EXTENSION_NAME               = 'VK_NN_vi_surface';
   VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME = 'VK_KHR_portability_enumeration';
 
   VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR   = 1000009000;
   VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR    = 1000004000;
   VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR = 1000006000;
   VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR = 1000008000;
+  VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN       = 1000062000;
   VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT   = 1000217000;
 
 type
@@ -77,6 +80,23 @@ type
   PFN_vkCreateMetalSurfaceEXT = function(
     instance: VkInstance;
     const pCreateInfo: PVkMetalSurfaceCreateInfoEXT;
+    const pAllocator: PVkAllocationCallbacks;
+    pSurface: PVkSurfaceKHR): VkResult; {$ifdef MSWINDOWS}stdcall{$else}cdecl{$endif};
+
+  { Nintendo Switch WSI (nn::vi::Layer* / VK_NN_vi_surface) }
+  PViWindowHandleNN = Pointer;
+  VkViSurfaceCreateFlagsNN = VkFlags;
+  PVkViSurfaceCreateInfoNN = ^VkViSurfaceCreateInfoNN;
+  VkViSurfaceCreateInfoNN = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    flags: VkViSurfaceCreateFlagsNN;
+    window: PViWindowHandleNN;
+  end;
+
+  PFN_vkCreateViSurfaceNN = function(
+    instance: VkInstance;
+    const pCreateInfo: PVkViSurfaceCreateInfoNN;
     const pAllocator: PVkAllocationCallbacks;
     pSurface: PVkSurfaceKHR): VkResult; {$ifdef MSWINDOWS}stdcall{$else}cdecl{$endif};
 
@@ -153,6 +173,9 @@ function CreateVulkanAndroidSurface(const AInstance: VkInstance;
 function CreateVulkanMetalSurface(const AInstance: VkInstance;
   const AMetalLayer: PCAMetalLayer): VkSurfaceKHR;
 
+function CreateVulkanViSurface(const AInstance: VkInstance;
+  const AViWindow: PViWindowHandleNN): VkSurfaceKHR;
+
 { Returns the required VkInstance surface extensions for the current OS }
 function GetRequiredVulkanInstanceExtensions: TAnsiStringArray;
 
@@ -187,6 +210,8 @@ begin
   Result := [VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME];
   {$elseif defined(ANDROID)}
   Result := [VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME];
+  {$elseif defined(CASTLE_NINTENDO_SWITCH)}
+  Result := [VK_KHR_SURFACE_EXTENSION_NAME, VK_NN_VI_SURFACE_EXTENSION_NAME];
   {$elseif defined(DARWIN)}
   Result := [VK_KHR_SURFACE_EXTENSION_NAME, VK_EXT_METAL_SURFACE_EXTENSION_NAME,
              VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME];
@@ -298,6 +323,20 @@ begin
   CreateInfo.sType := VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT;
   CreateInfo.pLayer := AMetalLayer;
   CheckSurfaceResult(CreateFn(AInstance, @CreateInfo, nil, @Result), 'vkCreateMetalSurfaceEXT');
+end;
+
+function CreateVulkanViSurface(const AInstance: VkInstance;
+  const AViWindow: PViWindowHandleNN): VkSurfaceKHR;
+var
+  CreateFn: PFN_vkCreateViSurfaceNN;
+  CreateInfo: VkViSurfaceCreateInfoNN;
+begin
+  Result := VK_NULL_HANDLE;
+  Pointer(CreateFn) := ResolveSurfaceProc(AInstance, 'vkCreateViSurfaceNN');
+  FillChar(CreateInfo, SizeOf(CreateInfo), 0);
+  CreateInfo.sType := VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN;
+  CreateInfo.window := AViWindow;
+  CheckSurfaceResult(CreateFn(AInstance, @CreateInfo, nil, @Result), 'vkCreateViSurfaceNN');
 end;
 
 end.

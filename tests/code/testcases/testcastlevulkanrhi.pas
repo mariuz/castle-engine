@@ -61,6 +61,7 @@ type
     procedure TestPlatformWSIAndBackendFallback;
     procedure TestShaderPrewarming;
     procedure TestVisualRegressionImageComparison;
+    procedure TestNintendoSwitchViSurfaceAndManifestPrewarm;
   end;
 
 implementation
@@ -1070,6 +1071,42 @@ begin
   finally
     FreeAndNil(ImgB);
     FreeAndNil(ImgA);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestNintendoSwitchViSurfaceAndManifestPrewarm;
+var
+  ViCreateInfo: VkViSurfaceCreateInfoNN;
+  Manifest: TCastleManifest;
+  RaisedError: Boolean;
+begin
+  { 1. Verify Nintendo Switch VK_NN_vi_surface ABI layout and constants }
+  AssertEquals('VK_NN_vi_surface extension name', 'VK_NN_vi_surface', VK_NN_VI_SURFACE_EXTENSION_NAME);
+  AssertEquals('VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN', 1000062000, VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN);
+
+  FillChar(ViCreateInfo, SizeOf(ViCreateInfo), 0);
+  ViCreateInfo.sType := VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN;
+  ViCreateInfo.window := Pointer($1234);
+  AssertEquals('ViCreateInfo.sType', 1000062000, ViCreateInfo.sType);
+  AssertTrue('ViCreateInfo.window pointer matches', ViCreateInfo.window = Pointer($1234));
+
+  RaisedError := False;
+  try
+    CreateVulkanViSurface(nil, Pointer($1234));
+  except
+    on E: ERHIError do
+      RaisedError := True;
+  end;
+  AssertTrue('CreateVulkanViSurface raises ERHIError when vkCreateViSurfaceNN is not loaded', RaisedError);
+
+  { 2. Verify TCastleManifest loading of vulkan_3d_scene and ShouldPrewarmVulkanShaders }
+  Manifest := TCastleManifest.CreateFromUrl('examples/vulkan/vulkan_3d_scene/CastleEngineManifest.xml');
+  try
+    AssertEquals('Manifest name', 'vulkan_3d_scene', Manifest.Name);
+    AssertEquals('Manifest RenderBackend is backendVulkan', Ord(backendVulkan), Ord(Manifest.RenderBackend));
+    AssertTrue('ShouldPrewarmVulkanShaders is True for backendVulkan', Manifest.ShouldPrewarmVulkanShaders);
+  finally
+    FreeAndNil(Manifest);
   end;
 end;
 

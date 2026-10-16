@@ -205,6 +205,9 @@ type
     property QualifiedName: String read FQualifiedName;
     property ProposedUnitPrefix: String read FProposedUnitPrefix;
     property RenderBackend: TRenderBackend read FRenderBackend;
+    { Returns True when the build tool should pre-warm and package SPIR-V shader caches
+      (i.e. when RenderBackend is backendAuto or backendVulkan). }
+    function ShouldPrewarmVulkanShaders: Boolean;
     { Dependencies of this project.
       Read-only from the outside, do not call any methods that modify
       the contents of it. }
@@ -1080,6 +1083,11 @@ begin
   FProjectDependencies.CloseDependencies;
 
   CheckManifestCorrect; // must be at end, to validate all
+end;
+
+function TCastleManifest.ShouldPrewarmVulkanShaders: Boolean;
+begin
+  Result := FRenderBackend in [backendAuto, backendVulkan];
 end;
 
 function TCastleManifest.Dependencies: TDependencies;
