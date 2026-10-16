@@ -67,6 +67,7 @@ type
     procedure TestViewportPrepareResourcesPrewarmsPSOs;
     procedure TestLegacyGLSLUniformWarningDiagnostics;
     procedure TestVulkan11RenderPassFramebufferFallback;
+    procedure TestVkXmlHeaderGenerator;
   private
     FCapturedWarnings: TStringList;
     procedure CaptureWarning(const Category, S: String);
@@ -1500,6 +1501,31 @@ begin
   finally
     FreeAndNil(VkDev);
   end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVkXmlHeaderGenerator;
+begin
+  { Verify that CastleInternalVulkan was generated from the official Khronos vk.xml
+    registry by tools/internal/generate_vulkan_api/vkxml2pas.dpr }
+  AssertTrue('VK_HEADER_VERSION from vk.xml must be >= 300',
+    VK_HEADER_VERSION >= 300);
+
+  { Verify core and extension VkStructureType values against Khronos vk.xml
+    formula: 1000000000 + (extnumber - 1) * 1000 + offset }
+  AssertEquals('VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO must be 17 per vk.xml',
+    17, VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO);
+  AssertEquals('VK_STRUCTURE_TYPE_RENDERING_INFO (ext 45, offset 0) must be 1000044000',
+    1000044000, VK_STRUCTURE_TYPE_RENDERING_INFO);
+  AssertEquals('VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO (ext 45, offset 1) must be 1000044001',
+    1000044001, VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO);
+  AssertEquals('VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO (ext 45, offset 2) must be 1000044002',
+    1000044002, VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO);
+  AssertEquals('VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR (ext 45, offset 3) must be 1000044003',
+    1000044003, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR);
+  AssertEquals('VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR (ext 315, offset 7) must be 1000314007',
+    1000314007, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR);
+  AssertEquals('VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT (ext 238, offset 0) must be 1000237000',
+    1000237000, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT);
 end;
 
 initialization

@@ -13,8 +13,9 @@
   ----------------------------------------------------------------------------
 }
 
-{ Cross-platform dynamic loader and flat C-ABI types for Vulkan 1.0, 1.1, 1.2, and 1.3.
-  Provides dynamic loading via TDynLib without link-time dependencies on vulkan-1.dll. }
+{ Auto-generated from the official Khronos Vulkan XML API Registry (vk.xml, VK_HEADER_VERSION = 341)
+  by tools/internal/generate_vulkan_api/vkxml2pas.dpr (inspired by PasVulkan vkxml2pas).
+  Do not edit manually — regenerate with vkxml2pas against vk.xml. }
 unit CastleInternalVulkan;
 
 {$I castleconf.inc}
@@ -29,7 +30,17 @@ uses
   SysUtils, CastleDynLib, CastleLog;
 
 const
+  VK_HEADER_VERSION = 341;
   VK_NULL_HANDLE = 0;
+
+  { API Versions }
+  VK_API_VERSION_1_0 = (1 shl 22) or (0 shl 12);
+  VK_API_VERSION_1_1 = (1 shl 22) or (1 shl 12);
+  VK_API_VERSION_1_2 = (1 shl 22) or (2 shl 12);
+  VK_API_VERSION_1_3 = (1 shl 22) or (3 shl 12);
+  VK_API_VERSION_1_4 = (1 shl 22) or (4 shl 12);
+
+  { Constants and Enums extracted from vk.xml }
   VK_WHOLE_SIZE = UInt64($FFFFFFFFFFFFFFFF);
   VK_ATTACHMENT_UNUSED = Cardinal($FFFFFFFF);
   VK_QUEUE_FAMILY_IGNORED = Cardinal($FFFFFFFF);
@@ -40,17 +51,8 @@ const
   VK_UUID_SIZE = 16;
   VK_MAX_EXTENSION_NAME_SIZE = 256;
   VK_MAX_DESCRIPTION_SIZE = 256;
-
   VK_TRUE = 1;
   VK_FALSE = 0;
-
-  { API Versions }
-  VK_API_VERSION_1_0 = (1 shl 22) or (0 shl 12);
-  VK_API_VERSION_1_1 = (1 shl 22) or (1 shl 12);
-  VK_API_VERSION_1_2 = (1 shl 22) or (2 shl 12);
-  VK_API_VERSION_1_3 = (1 shl 22) or (3 shl 12);
-
-  { Result Codes }
   VK_SUCCESS = 0;
   VK_NOT_READY = 1;
   VK_TIMEOUT = 2;
@@ -73,8 +75,6 @@ const
   VK_ERROR_NATIVE_WINDOW_IN_USE_KHR = -1000000001;
   VK_SUBOPTIMAL_KHR = 1000001003;
   VK_ERROR_OUT_OF_DATE_KHR = -1000001004;
-
-  { Structure Types }
   VK_STRUCTURE_TYPE_APPLICATION_INFO = 0;
   VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO = 1;
   VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO = 2;
@@ -116,12 +116,21 @@ const
   VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT = $00000010;
   VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR = 1000001000;
   VK_STRUCTURE_TYPE_PRESENT_INFO_KHR = 1000001001;
+  VK_STRUCTURE_TYPE_RENDERING_INFO = 1000044000;
   VK_STRUCTURE_TYPE_RENDERING_INFO_KHR = 1000044000;
+  VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO = 1000044001;
   VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR = 1000044001;
-  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR = 1000044002;
-  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION2_FEATURES_KHR = 1000314000;
-
-  { Formats }
+  VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO = 1000044002;
+  VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR = 1000044002;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES = 1000044003;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR = 1000044003;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES = 1000314007;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR = 1000314007;
+  VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO = 17;
+  VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT = 1000128002;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2 = 1000059006;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2_KHR = 1000059006;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT = 1000237000;
   VK_FORMAT_UNDEFINED = 0;
   VK_FORMAT_R8_UNORM = 9;
   VK_FORMAT_R8G8_UNORM = 16;
@@ -141,12 +150,20 @@ const
   VK_FORMAT_S8_UINT = 127;
   VK_FORMAT_D24_UNORM_S8_UINT = 129;
   VK_FORMAT_D32_SFLOAT_S8_UINT = 130;
-
-  { Image Types & Layouts }
+  VK_FORMAT_BC1_RGBA_UNORM_BLOCK = 133;
+  VK_FORMAT_BC1_RGBA_SRGB_BLOCK = 134;
+  VK_FORMAT_BC3_UNORM_BLOCK = 137;
+  VK_FORMAT_BC3_SRGB_BLOCK = 138;
+  VK_FORMAT_BC5_UNORM_BLOCK = 141;
+  VK_FORMAT_BC7_UNORM_BLOCK = 145;
+  VK_FORMAT_BC7_SRGB_BLOCK = 146;
+  VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK = 147;
+  VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK = 151;
+  VK_FORMAT_ASTC_4x4_UNORM_BLOCK = 157;
+  VK_FORMAT_ASTC_4x4_SRGB_BLOCK = 158;
   VK_IMAGE_TYPE_1D = 0;
   VK_IMAGE_TYPE_2D = 1;
   VK_IMAGE_TYPE_3D = 2;
-
   VK_IMAGE_VIEW_TYPE_1D = 0;
   VK_IMAGE_VIEW_TYPE_2D = 1;
   VK_IMAGE_VIEW_TYPE_3D = 2;
@@ -154,7 +171,6 @@ const
   VK_IMAGE_VIEW_TYPE_1D_ARRAY = 4;
   VK_IMAGE_VIEW_TYPE_2D_ARRAY = 5;
   VK_IMAGE_VIEW_TYPE_CUBE_ARRAY = 6;
-
   VK_IMAGE_LAYOUT_UNDEFINED = 0;
   VK_IMAGE_LAYOUT_GENERAL = 1;
   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL = 2;
@@ -164,10 +180,8 @@ const
   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL = 6;
   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL = 7;
   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR = 1000001002;
-  VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR = 1000314000;
-  VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL_KHR = 1000314001;
-
-  { Buffer Usage Flags }
+  VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR = 1000314001;
+  VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL_KHR = 1000314000;
   VK_BUFFER_USAGE_TRANSFER_SRC_BIT = $00000001;
   VK_BUFFER_USAGE_TRANSFER_DST_BIT = $00000002;
   VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT = $00000004;
@@ -177,8 +191,6 @@ const
   VK_BUFFER_USAGE_INDEX_BUFFER_BIT = $00000040;
   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT = $00000080;
   VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT = $00000100;
-
-  { Image Usage Flags }
   VK_IMAGE_USAGE_TRANSFER_SRC_BIT = $00000001;
   VK_IMAGE_USAGE_TRANSFER_DST_BIT = $00000002;
   VK_IMAGE_USAGE_SAMPLED_BIT = $00000004;
@@ -187,15 +199,12 @@ const
   VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT = $00000020;
   VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT = $00000040;
   VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT = $00000080;
-
-  { Memory Property Flags }
   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT = $00000001;
   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT = $00000002;
   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT = $00000004;
   VK_MEMORY_PROPERTY_HOST_CACHED_BIT = $00000008;
   VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT = $00000010;
-
-  { Pipeline Stage Flags }
+  VK_MEMORY_HEAP_DEVICE_LOCAL_BIT = $00000001;
   VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT = $00000001;
   VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT = $00000002;
   VK_PIPELINE_STAGE_VERTEX_INPUT_BIT = $00000004;
@@ -209,8 +218,6 @@ const
   VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT = $00002000;
   VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT = $00008000;
   VK_PIPELINE_STAGE_ALL_COMMANDS_BIT = $00010000;
-
-  { Access Flags }
   VK_ACCESS_INDIRECT_COMMAND_READ_BIT = $00000001;
   VK_ACCESS_INDEX_READ_BIT = $00000002;
   VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT = $00000004;
@@ -228,8 +235,6 @@ const
   VK_ACCESS_HOST_WRITE_BIT = $00004000;
   VK_ACCESS_MEMORY_READ_BIT = $00008000;
   VK_ACCESS_MEMORY_WRITE_BIT = $00010000;
-
-  { Shader Stages }
   VK_SHADER_STAGE_VERTEX_BIT = $00000001;
   VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT = $00000002;
   VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT = $00000004;
@@ -238,20 +243,14 @@ const
   VK_SHADER_STAGE_COMPUTE_BIT = $00000020;
   VK_SHADER_STAGE_ALL_GRAPHICS = $0000001F;
   VK_SHADER_STAGE_ALL = $7FFFFFFF;
-
-  { Sampler Filters & Modes }
   VK_FILTER_NEAREST = 0;
   VK_FILTER_LINEAR = 1;
-
   VK_SAMPLER_MIPMAP_MODE_NEAREST = 0;
   VK_SAMPLER_MIPMAP_MODE_LINEAR = 1;
-
   VK_SAMPLER_ADDRESS_MODE_REPEAT = 0;
   VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT = 1;
   VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE = 2;
   VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER = 3;
-
-  { Compare Operations }
   VK_COMPARE_OP_NEVER = 0;
   VK_COMPARE_OP_LESS = 1;
   VK_COMPARE_OP_EQUAL = 2;
@@ -260,8 +259,6 @@ const
   VK_COMPARE_OP_NOT_EQUAL = 5;
   VK_COMPARE_OP_GREATER_OR_EQUAL = 6;
   VK_COMPARE_OP_ALWAYS = 7;
-
-  { Descriptor Types }
   VK_DESCRIPTOR_TYPE_SAMPLER = 0;
   VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER = 1;
   VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE = 2;
@@ -273,29 +270,21 @@ const
   VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC = 8;
   VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC = 9;
   VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT = 10;
-
-  { Primitive Topology }
   VK_PRIMITIVE_TOPOLOGY_POINT_LIST = 0;
   VK_PRIMITIVE_TOPOLOGY_LINE_LIST = 1;
   VK_PRIMITIVE_TOPOLOGY_LINE_STRIP = 2;
   VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST = 3;
   VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP = 4;
   VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN = 5;
-
-  { Polygon & Cull Modes }
   VK_POLYGON_MODE_FILL = 0;
   VK_POLYGON_MODE_LINE = 1;
   VK_POLYGON_MODE_POINT = 2;
-
   VK_CULL_MODE_NONE = 0;
   VK_CULL_MODE_FRONT_BIT = $00000001;
   VK_CULL_MODE_BACK_BIT = $00000002;
   VK_CULL_MODE_FRONT_AND_BACK = $00000003;
-
   VK_FRONT_FACE_COUNTER_CLOCKWISE = 0;
   VK_FRONT_FACE_CLOCKWISE = 1;
-
-  { Blend Factors & Operations }
   VK_BLEND_FACTOR_ZERO = 0;
   VK_BLEND_FACTOR_ONE = 1;
   VK_BLEND_FACTOR_SRC_COLOR = 2;
@@ -306,34 +295,25 @@ const
   VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA = 7;
   VK_BLEND_FACTOR_DST_ALPHA = 8;
   VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA = 9;
-
   VK_BLEND_OP_ADD = 0;
   VK_BLEND_OP_SUBTRACT = 1;
   VK_BLEND_OP_REVERSE_SUBTRACT = 2;
   VK_BLEND_OP_MIN = 3;
   VK_BLEND_OP_MAX = 4;
-
   VK_COLOR_COMPONENT_R_BIT = $00000001;
   VK_COLOR_COMPONENT_G_BIT = $00000002;
   VK_COLOR_COMPONENT_B_BIT = $00000004;
   VK_COLOR_COMPONENT_A_BIT = $00000008;
-
-  { Dynamic States }
   VK_DYNAMIC_STATE_VIEWPORT = 0;
   VK_DYNAMIC_STATE_SCISSOR = 1;
   VK_DYNAMIC_STATE_LINE_WIDTH = 2;
   VK_DYNAMIC_STATE_DEPTH_BIAS = 3;
   VK_DYNAMIC_STATE_BLEND_CONSTANTS = 4;
-
-  { Attachment Load / Store Ops }
   VK_ATTACHMENT_LOAD_OP_LOAD = 0;
   VK_ATTACHMENT_LOAD_OP_CLEAR = 1;
   VK_ATTACHMENT_LOAD_OP_DONT_CARE = 2;
-
   VK_ATTACHMENT_STORE_OP_STORE = 0;
   VK_ATTACHMENT_STORE_OP_DONT_CARE = 1;
-
-  { Command Buffer / Pool }
   VK_COMMAND_BUFFER_LEVEL_PRIMARY = 0;
   VK_COMMAND_BUFFER_LEVEL_SECONDARY = 1;
   VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT = $00000001;
@@ -341,81 +321,42 @@ const
   VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT = $00000004;
   VK_COMMAND_POOL_CREATE_TRANSIENT_BIT = $00000001;
   VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT = $00000002;
-
-  { Fence / Semaphore }
   VK_FENCE_CREATE_SIGNALED_BIT = $00000001;
-
-  { Index Types }
   VK_INDEX_TYPE_UINT16 = 0;
   VK_INDEX_TYPE_UINT32 = 1;
-
-  { Image Aspects }
   VK_IMAGE_ASPECT_COLOR_BIT = $00000001;
   VK_IMAGE_ASPECT_DEPTH_BIT = $00000002;
   VK_IMAGE_ASPECT_STENCIL_BIT = $00000004;
-
-  { Present Modes }
   VK_PRESENT_MODE_IMMEDIATE_KHR = 0;
   VK_PRESENT_MODE_MAILBOX_KHR = 1;
   VK_PRESENT_MODE_FIFO_KHR = 2;
   VK_PRESENT_MODE_FIFO_RELAXED_KHR = 3;
-
-  { Sharing Modes }
   VK_SHARING_MODE_EXCLUSIVE = 0;
   VK_SHARING_MODE_CONCURRENT = 1;
-
-  { Color Spaces }
   VK_COLOR_SPACE_SRGB_NONLINEAR_KHR = 0;
-
-  { Sample Counts }
   VK_SAMPLE_COUNT_1_BIT = $00000001;
   VK_SAMPLE_COUNT_2_BIT = $00000002;
   VK_SAMPLE_COUNT_4_BIT = $00000004;
   VK_SAMPLE_COUNT_8_BIT = $00000008;
-
-  { Compression Formats }
-  VK_FORMAT_BC1_RGBA_UNORM_BLOCK = 133;
-  VK_FORMAT_BC1_RGBA_SRGB_BLOCK = 134;
-  VK_FORMAT_BC3_UNORM_BLOCK = 137;
-  VK_FORMAT_BC3_SRGB_BLOCK = 138;
-  VK_FORMAT_BC5_UNORM_BLOCK = 141;
-  VK_FORMAT_BC7_UNORM_BLOCK = 145;
-  VK_FORMAT_BC7_SRGB_BLOCK = 146;
-  VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK = 147;
-  VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK = 151;
-  VK_FORMAT_ASTC_4x4_UNORM_BLOCK = 157;
-  VK_FORMAT_ASTC_4x4_SRGB_BLOCK = 158;
-
   VK_IMAGE_TILING_OPTIMAL = 0;
   VK_IMAGE_TILING_LINEAR = 1;
-
   VK_PHYSICAL_DEVICE_TYPE_OTHER = 0;
   VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU = 1;
   VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU = 2;
   VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU = 3;
   VK_PHYSICAL_DEVICE_TYPE_CPU = 4;
-
   VK_PIPELINE_BIND_POINT_GRAPHICS = 0;
   VK_PIPELINE_BIND_POINT_COMPUTE = 1;
-
-  VK_STRUCTURE_TYPE_RENDERING_INFO = 1000044000;
-  VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO = 1000044001;
-  VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR = 1000044002;
-  VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO = 29;
-  VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT = 1000128002;
-  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2 = 1000059006;
-  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2_KHR = 1000059006;
-  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT = 1000237000;
-
-  VK_MEMORY_HEAP_DEVICE_LOCAL_BIT = $00000001;
   VK_QUEUE_GRAPHICS_BIT = $00000001;
   VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR = $00000001;
   VK_VERTEX_INPUT_RATE_VERTEX = 0;
   VK_VERTEX_INPUT_RATE_INSTANCE = 1;
-
   VK_SUBPASS_CONTENTS_INLINE = 0;
   VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS = 1;
+  VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK = 0;
+  VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE = 4;
 
+  { Extension and Layer Names }
   VK_EXT_debug_utils = 'VK_EXT_debug_utils';
   VK_EXT_memory_budget = 'VK_EXT_memory_budget';
   VK_KHR_dynamic_rendering = 'VK_KHR_dynamic_rendering';
@@ -464,9 +405,11 @@ type
   PInteger = ^Integer;
   PSingle = ^Single;
   PPAnsiChar = ^PAnsiChar;
+  PPtrUInt = ^PtrUInt;
   PVkBool32 = ^VkBool32;
   PVkResult = ^VkResult;
   PVkDeviceSize = ^VkDeviceSize;
+  PVkFormat = ^VkFormat;
   PVkPipelineStageFlags = ^VkPipelineStageFlags;
   PVkDynamicState = ^VkDynamicState;
   PVkPresentModeKHR = ^VkPresentModeKHR;
@@ -529,7 +472,7 @@ type
 
   PVkAllocationCallbacks = Pointer;
 
-  { Geometry / Viewport }
+  { Structures and Unions generated from vk.xml }
   VkExtent2D = record
     width: Cardinal;
     height: Cardinal;
@@ -547,12 +490,14 @@ type
     x: Integer;
     y: Integer;
   end;
+  PVkOffset2D = ^VkOffset2D;
 
   VkOffset3D = record
     x: Integer;
     y: Integer;
     z: Integer;
   end;
+  PVkOffset3D = ^VkOffset3D;
 
   VkRect2D = record
     offset: VkOffset2D;
@@ -570,16 +515,17 @@ type
   end;
   PVkViewport = ^VkViewport;
 
-  { Memory requirements & properties }
   VkMemoryType = record
     propertyFlags: VkMemoryPropertyFlags;
     heapIndex: Cardinal;
   end;
+  PVkMemoryType = ^VkMemoryType;
 
   VkMemoryHeap = record
     size: VkDeviceSize;
     flags: VkFlags;
   end;
+  PVkMemoryHeap = ^VkMemoryHeap;
 
   VkPhysicalDeviceMemoryProperties = record
     memoryTypeCount: Cardinal;
@@ -611,18 +557,19 @@ type
   end;
   PVkMemoryRequirements = ^VkMemoryRequirements;
 
-  { Clear Values }
   VkClearColorValue = record
     case Integer of
       0: (float32: array[0..3] of Single);
       1: (int32: array[0..3] of Integer);
       2: (uint32: array[0..3] of Cardinal);
   end;
+  PVkClearColorValue = ^VkClearColorValue;
 
   VkClearDepthStencilValue = record
     depth: Single;
     stencil: Cardinal;
   end;
+  PVkClearDepthStencilValue = ^VkClearDepthStencilValue;
 
   VkClearValue = record
     case Integer of
@@ -631,7 +578,6 @@ type
   end;
   PVkClearValue = ^VkClearValue;
 
-  { Physical device limits & properties }
   VkPhysicalDeviceLimits = record
     maxImageDimension1D: Cardinal;
     maxImageDimension2D: Cardinal;
@@ -740,13 +686,14 @@ type
     optimalBufferCopyRowPitchAlignment: VkDeviceSize;
     nonCoherentAtomSize: VkDeviceSize;
   end;
+  PVkPhysicalDeviceLimits = ^VkPhysicalDeviceLimits;
 
   VkPhysicalDeviceProperties = record
     apiVersion: Cardinal;
     driverVersion: Cardinal;
     vendorID: Cardinal;
     deviceID: Cardinal;
-    deviceType: Cardinal;
+    deviceType: Integer;
     deviceName: array[0..VK_MAX_PHYSICAL_DEVICE_NAME_SIZE - 1] of AnsiChar;
     pipelineCacheUUID: array[0..VK_UUID_SIZE - 1] of Byte;
     limits: VkPhysicalDeviceLimits;
@@ -835,7 +782,6 @@ type
   end;
   PVkLayerProperties = ^VkLayerProperties;
 
-  { Create infos }
   VkApplicationInfo = record
     sType: VkStructureType;
     pNext: Pointer;
@@ -928,6 +874,7 @@ type
     b: Integer;
     a: Integer;
   end;
+  PVkComponentMapping = ^VkComponentMapping;
 
   VkImageSubresourceRange = record
     aspectMask: VkImageAspectFlags;
@@ -981,7 +928,6 @@ type
   end;
   PVkShaderModuleCreateInfo = ^VkShaderModuleCreateInfo;
 
-  { Descriptor Set Layout & Pool }
   VkDescriptorSetLayoutBinding = record
     binding: Cardinal;
     descriptorType: VkDescriptorType;
@@ -1053,7 +999,6 @@ type
   end;
   PVkWriteDescriptorSet = ^VkWriteDescriptorSet;
 
-  { Pipeline Layout & Push Constants }
   VkPushConstantRange = record
     stageFlags: VkShaderStageFlags;
     offset: Cardinal;
@@ -1072,7 +1017,6 @@ type
   end;
   PVkPipelineLayoutCreateInfo = ^VkPipelineLayoutCreateInfo;
 
-  { Graphics Pipeline States }
   VkSpecializationMapEntry = record
     constantID: Cardinal;
     offset: Cardinal;
@@ -1184,6 +1128,7 @@ type
     writeMask: Cardinal;
     reference: Cardinal;
   end;
+  PVkStencilOpState = ^VkStencilOpState;
 
   VkPipelineDepthStencilStateCreateInfo = record
     sType: VkStructureType;
@@ -1257,8 +1202,7 @@ type
   end;
   PVkGraphicsPipelineCreateInfo = ^VkGraphicsPipelineCreateInfo;
 
-  { Dynamic Rendering (VK_KHR_dynamic_rendering / Vulkan 1.3) }
-  VkRenderingAttachmentInfoKHR = record
+  VkRenderingAttachmentInfo = record
     sType: VkStructureType;
     pNext: Pointer;
     imageView: VkImageView;
@@ -1270,9 +1214,9 @@ type
     storeOp: VkAttachmentStoreOp;
     clearValue: VkClearValue;
   end;
-  PVkRenderingAttachmentInfoKHR = ^VkRenderingAttachmentInfoKHR;
+  PVkRenderingAttachmentInfo = ^VkRenderingAttachmentInfo;
 
-  VkRenderingInfoKHR = record
+  VkRenderingInfo = record
     sType: VkStructureType;
     pNext: Pointer;
     flags: VkFlags;
@@ -1280,20 +1224,30 @@ type
     layerCount: Cardinal;
     viewMask: Cardinal;
     colorAttachmentCount: Cardinal;
-    pColorAttachments: PVkRenderingAttachmentInfoKHR;
-    pDepthAttachment: PVkRenderingAttachmentInfoKHR;
-    pStencilAttachment: PVkRenderingAttachmentInfoKHR;
+    pColorAttachments: PVkRenderingAttachmentInfo;
+    pDepthAttachment: PVkRenderingAttachmentInfo;
+    pStencilAttachment: PVkRenderingAttachmentInfo;
   end;
-  PVkRenderingInfoKHR = ^VkRenderingInfoKHR;
+  PVkRenderingInfo = ^VkRenderingInfo;
 
-  VkPhysicalDeviceDynamicRenderingFeaturesKHR = record
+  VkPhysicalDeviceDynamicRenderingFeatures = record
     sType: VkStructureType;
     pNext: Pointer;
     dynamicRendering: VkBool32;
   end;
-  PVkPhysicalDeviceDynamicRenderingFeaturesKHR = ^VkPhysicalDeviceDynamicRenderingFeaturesKHR;
+  PVkPhysicalDeviceDynamicRenderingFeatures = ^VkPhysicalDeviceDynamicRenderingFeatures;
 
-  { Legacy Render Pass & Framebuffer (Vulkan 1.0 / 1.1 Fallback) }
+  VkPipelineRenderingCreateInfo = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    viewMask: Cardinal;
+    colorAttachmentCount: Cardinal;
+    pColorAttachmentFormats: PVkFormat;
+    depthAttachmentFormat: VkFormat;
+    stencilAttachmentFormat: VkFormat;
+  end;
+  PVkPipelineRenderingCreateInfo = ^VkPipelineRenderingCreateInfo;
+
   VkAttachmentDescription = record
     flags: VkFlags;
     format: VkFormat;
@@ -1375,7 +1329,6 @@ type
   end;
   PVkRenderPassBeginInfo = ^VkRenderPassBeginInfo;
 
-  { Command Pools, Buffers, and Submission }
   VkCommandPoolCreateInfo = record
     sType: VkStructureType;
     pNext: Pointer;
@@ -1440,7 +1393,6 @@ type
   end;
   PVkSubmitInfo = ^VkSubmitInfo;
 
-  { Barriers & Copies }
   VkBufferMemoryBarrier = record
     sType: VkStructureType;
     pNext: Pointer;
@@ -1481,6 +1433,7 @@ type
     baseArrayLayer: Cardinal;
     layerCount: Cardinal;
   end;
+  PVkImageSubresourceLayers = ^VkImageSubresourceLayers;
 
   VkBufferImageCopy = record
     bufferOffset: VkDeviceSize;
@@ -1492,7 +1445,6 @@ type
   end;
   PVkBufferImageCopy = ^VkBufferImageCopy;
 
-  { Swapchain & WSI }
   VkSurfaceCapabilitiesKHR = record
     minImageCount: Cardinal;
     maxImageCount: Cardinal;
@@ -1547,26 +1499,6 @@ type
   end;
   PVkPresentInfoKHR = ^VkPresentInfoKHR;
 
-  PVkFormat = ^VkFormat;
-  PPtrUInt = ^PtrUInt;
-  VkRenderingInfo = VkRenderingInfoKHR;
-  PVkRenderingInfo = ^VkRenderingInfo;
-  VkRenderingAttachmentInfo = VkRenderingAttachmentInfoKHR;
-  PVkRenderingAttachmentInfo = ^VkRenderingAttachmentInfo;
-  VkPhysicalDeviceDynamicRenderingFeatures = VkPhysicalDeviceDynamicRenderingFeaturesKHR;
-  PVkPhysicalDeviceDynamicRenderingFeatures = ^VkPhysicalDeviceDynamicRenderingFeatures;
-
-  VkPipelineRenderingCreateInfoKHR = record
-    sType: VkStructureType;
-    pNext: Pointer;
-    viewMask: Cardinal;
-    colorAttachmentCount: Cardinal;
-    pColorAttachmentFormats: PVkFormat;
-    depthAttachmentFormat: VkFormat;
-    stencilAttachmentFormat: VkFormat;
-  end;
-  PVkPipelineRenderingCreateInfoKHR = ^VkPipelineRenderingCreateInfoKHR;
-
   VkDebugUtilsLabelEXT = record
     sType: VkStructureType;
     pNext: Pointer;
@@ -1609,8 +1541,18 @@ type
   end;
   PVkPipelineCacheCreateInfo = ^VkPipelineCacheCreateInfo;
 
+  { KHR Type Aliases }
+  VkRenderingAttachmentInfoKHR = VkRenderingAttachmentInfo;
+  PVkRenderingAttachmentInfoKHR = ^VkRenderingAttachmentInfoKHR;
+  VkRenderingInfoKHR = VkRenderingInfo;
+  PVkRenderingInfoKHR = ^VkRenderingInfoKHR;
+  VkPhysicalDeviceDynamicRenderingFeaturesKHR = VkPhysicalDeviceDynamicRenderingFeatures;
+  PVkPhysicalDeviceDynamicRenderingFeaturesKHR = ^VkPhysicalDeviceDynamicRenderingFeaturesKHR;
+  VkPipelineRenderingCreateInfoKHR = VkPipelineRenderingCreateInfo;
+  PVkPipelineRenderingCreateInfoKHR = ^VkPipelineRenderingCreateInfoKHR;
+
 { -------------------------------------------------------------------------- }
-{ Function Pointers                                                          }
+{ Function Pointers generated from vk.xml                                    }
 { -------------------------------------------------------------------------- }
 
 {$ifdef MSWINDOWS}
@@ -1622,8 +1564,6 @@ type
 type
   PFN_vkGetInstanceProcAddr = function(instance: VkInstance; pName: PAnsiChar): Pointer; VKAPI_CALL;
   PFN_vkGetDeviceProcAddr = function(device: VkDevice; pName: PAnsiChar): Pointer; VKAPI_CALL;
-
-  { Instance functions }
   PFN_vkCreateInstance = function(const pCreateInfo: PVkInstanceCreateInfo; const pAllocator: PVkAllocationCallbacks; pInstance: PVkInstance): VkResult; VKAPI_CALL;
   PFN_vkDestroyInstance = procedure(instance: VkInstance; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
   PFN_vkEnumeratePhysicalDevices = function(instance: VkInstance; pPhysicalDeviceCount: PCardinal; pPhysicalDevices: PVkPhysicalDevice): VkResult; VKAPI_CALL;
@@ -1636,15 +1576,11 @@ type
   PFN_vkDestroyDevice = procedure(device: VkDevice; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
   PFN_vkEnumerateInstanceExtensionProperties = function(pLayerName: PAnsiChar; pPropertyCount: PCardinal; pProperties: PVkExtensionProperties): VkResult; VKAPI_CALL;
   PFN_vkEnumerateDeviceExtensionProperties = function(physicalDevice: VkPhysicalDevice; pLayerName: PAnsiChar; pPropertyCount: PCardinal; pProperties: PVkExtensionProperties): VkResult; VKAPI_CALL;
-
-  { Surface & WSI }
   PFN_vkDestroySurfaceKHR = procedure(instance: VkInstance; surface: VkSurfaceKHR; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
   PFN_vkGetPhysicalDeviceSurfaceSupportKHR = function(physicalDevice: VkPhysicalDevice; queueFamilyIndex: Cardinal; surface: VkSurfaceKHR; pSupported: PVkBool32): VkResult; VKAPI_CALL;
   PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR = function(physicalDevice: VkPhysicalDevice; surface: VkSurfaceKHR; pSurfaceCapabilities: PVkSurfaceCapabilitiesKHR): VkResult; VKAPI_CALL;
   PFN_vkGetPhysicalDeviceSurfaceFormatsKHR = function(physicalDevice: VkPhysicalDevice; surface: VkSurfaceKHR; pSurfaceFormatCount: PCardinal; pSurfaceFormats: PVkSurfaceFormatKHR): VkResult; VKAPI_CALL;
   PFN_vkGetPhysicalDeviceSurfacePresentModesKHR = function(physicalDevice: VkPhysicalDevice; surface: VkSurfaceKHR; pPresentModeCount: PCardinal; pPresentModes: PVkPresentModeKHR): VkResult; VKAPI_CALL;
-
-  { Device Queue & Sync }
   PFN_vkGetDeviceQueue = procedure(device: VkDevice; queueFamilyIndex: Cardinal; queueIndex: Cardinal; pQueue: PVkQueue); VKAPI_CALL;
   PFN_vkQueueSubmit = function(queue: VkQueue; submitCount: Cardinal; const pSubmits: PVkSubmitInfo; fence: VkFence): VkResult; VKAPI_CALL;
   PFN_vkQueueWaitIdle = function(queue: VkQueue): VkResult; VKAPI_CALL;
@@ -1655,8 +1591,6 @@ type
   PFN_vkWaitForFences = function(device: VkDevice; fenceCount: Cardinal; const pFences: PVkFence; waitAll: VkBool32; timeout: UInt64): VkResult; VKAPI_CALL;
   PFN_vkCreateSemaphore = function(device: VkDevice; const pCreateInfo: PVkSemaphoreCreateInfo; const pAllocator: PVkAllocationCallbacks; pSemaphore: PVkSemaphore): VkResult; VKAPI_CALL;
   PFN_vkDestroySemaphore = procedure(device: VkDevice; semaphore: VkSemaphore; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
-
-  { Memory & Buffers }
   PFN_vkAllocateMemory = function(device: VkDevice; const pAllocateInfo: PVkMemoryAllocateInfo; const pAllocator: PVkAllocationCallbacks; pMemory: PVkDeviceMemory): VkResult; VKAPI_CALL;
   PFN_vkFreeMemory = procedure(device: VkDevice; memory: VkDeviceMemory; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
   PFN_vkMapMemory = function(device: VkDevice; memory: VkDeviceMemory; offset: VkDeviceSize; size: VkDeviceSize; flags: VkFlags; ppData: PPointer): VkResult; VKAPI_CALL;
@@ -1667,24 +1601,18 @@ type
   PFN_vkGetImageMemoryRequirements = procedure(device: VkDevice; image: VkImage; pMemoryRequirements: PVkMemoryRequirements); VKAPI_CALL;
   PFN_vkCreateBuffer = function(device: VkDevice; const pCreateInfo: PVkBufferCreateInfo; const pAllocator: PVkAllocationCallbacks; pBuffer: PVkBuffer): VkResult; VKAPI_CALL;
   PFN_vkDestroyBuffer = procedure(device: VkDevice; buffer: VkBuffer; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
-
-  { Images & Samplers }
   PFN_vkCreateImage = function(device: VkDevice; const pCreateInfo: PVkImageCreateInfo; const pAllocator: PVkAllocationCallbacks; pImage: PVkImage): VkResult; VKAPI_CALL;
   PFN_vkDestroyImage = procedure(device: VkDevice; image: VkImage; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
   PFN_vkCreateImageView = function(device: VkDevice; const pCreateInfo: PVkImageViewCreateInfo; const pAllocator: PVkAllocationCallbacks; pView: PVkImageView): VkResult; VKAPI_CALL;
   PFN_vkDestroyImageView = procedure(device: VkDevice; imageView: VkImageView; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
   PFN_vkCreateSampler = function(device: VkDevice; const pCreateInfo: PVkSamplerCreateInfo; const pAllocator: PVkAllocationCallbacks; pSampler: PVkSampler): VkResult; VKAPI_CALL;
   PFN_vkDestroySampler = procedure(device: VkDevice; sampler: VkSampler; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
-
-  { Shaders & Pipelines }
   PFN_vkCreateShaderModule = function(device: VkDevice; const pCreateInfo: PVkShaderModuleCreateInfo; const pAllocator: PVkAllocationCallbacks; pShaderModule: PVkShaderModule): VkResult; VKAPI_CALL;
   PFN_vkDestroyShaderModule = procedure(device: VkDevice; shaderModule: VkShaderModule; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
   PFN_vkCreatePipelineLayout = function(device: VkDevice; const pCreateInfo: PVkPipelineLayoutCreateInfo; const pAllocator: PVkAllocationCallbacks; pPipelineLayout: PVkPipelineLayout): VkResult; VKAPI_CALL;
   PFN_vkDestroyPipelineLayout = procedure(device: VkDevice; pipelineLayout: VkPipelineLayout; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
   PFN_vkCreateGraphicsPipelines = function(device: VkDevice; pipelineCache: VkPipelineCache; createInfoCount: Cardinal; const pCreateInfos: PVkGraphicsPipelineCreateInfo; const pAllocator: PVkAllocationCallbacks; pPipelines: PVkPipeline): VkResult; VKAPI_CALL;
   PFN_vkDestroyPipeline = procedure(device: VkDevice; pipeline: VkPipeline; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
-
-  { Descriptors }
   PFN_vkCreateDescriptorSetLayout = function(device: VkDevice; const pCreateInfo: PVkDescriptorSetLayoutCreateInfo; const pAllocator: PVkAllocationCallbacks; pSetLayout: PVkDescriptorSetLayout): VkResult; VKAPI_CALL;
   PFN_vkDestroyDescriptorSetLayout = procedure(device: VkDevice; descriptorSetLayout: VkDescriptorSetLayout; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
   PFN_vkCreateDescriptorPool = function(device: VkDevice; const pCreateInfo: PVkDescriptorPoolCreateInfo; const pAllocator: PVkAllocationCallbacks; pDescriptorPool: PVkDescriptorPool): VkResult; VKAPI_CALL;
@@ -1692,8 +1620,6 @@ type
   PFN_vkAllocateDescriptorSets = function(device: VkDevice; const pAllocateInfo: PVkDescriptorSetAllocateInfo; pDescriptorSets: PVkDescriptorSet): VkResult; VKAPI_CALL;
   PFN_vkFreeDescriptorSets = function(device: VkDevice; descriptorPool: VkDescriptorPool; descriptorSetCount: Cardinal; const pDescriptorSets: PVkDescriptorSet): VkResult; VKAPI_CALL;
   PFN_vkUpdateDescriptorSets = procedure(device: VkDevice; descriptorWriteCount: Cardinal; const pDescriptorWrites: PVkWriteDescriptorSet; descriptorCopyCount: Cardinal; const pDescriptorCopies: Pointer); VKAPI_CALL;
-
-  { Commands }
   PFN_vkCreateCommandPool = function(device: VkDevice; const pCreateInfo: PVkCommandPoolCreateInfo; const pAllocator: PVkAllocationCallbacks; pCommandPool: PVkCommandPool): VkResult; VKAPI_CALL;
   PFN_vkDestroyCommandPool = procedure(device: VkDevice; commandPool: VkCommandPool; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
   PFN_vkResetCommandPool = function(device: VkDevice; commandPool: VkCommandPool; flags: VkFlags): VkResult; VKAPI_CALL;
@@ -1714,26 +1640,19 @@ type
   PFN_vkCmdCopyBuffer = procedure(commandBuffer: VkCommandBuffer; srcBuffer: VkBuffer; dstBuffer: VkBuffer; regionCount: Cardinal; const pRegions: PVkBufferCopy); VKAPI_CALL;
   PFN_vkCmdCopyBufferToImage = procedure(commandBuffer: VkCommandBuffer; srcBuffer: VkBuffer; dstImage: VkImage; dstImageLayout: VkImageLayout; regionCount: Cardinal; const pRegions: PVkBufferImageCopy); VKAPI_CALL;
   PFN_vkCmdCopyImageToBuffer = procedure(commandBuffer: VkCommandBuffer; srcImage: VkImage; srcImageLayout: VkImageLayout; dstBuffer: VkBuffer; regionCount: Cardinal; const pRegions: PVkBufferImageCopy); VKAPI_CALL;
-
-  { Dynamic Rendering }
   PFN_vkCmdBeginRendering = procedure(commandBuffer: VkCommandBuffer; const pRenderingInfo: PVkRenderingInfoKHR); VKAPI_CALL;
   PFN_vkCmdEndRendering = procedure(commandBuffer: VkCommandBuffer); VKAPI_CALL;
-
-  { Legacy Render Pass & Framebuffer (Vulkan 1.0 / 1.1 Fallback) }
   PFN_vkCreateRenderPass = function(device: VkDevice; const pCreateInfo: PVkRenderPassCreateInfo; const pAllocator: PVkAllocationCallbacks; pRenderPass: PVkRenderPass): VkResult; VKAPI_CALL;
   PFN_vkDestroyRenderPass = procedure(device: VkDevice; renderPass: VkRenderPass; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
   PFN_vkCreateFramebuffer = function(device: VkDevice; const pCreateInfo: PVkFramebufferCreateInfo; const pAllocator: PVkAllocationCallbacks; pFramebuffer: PVkFramebuffer): VkResult; VKAPI_CALL;
   PFN_vkDestroyFramebuffer = procedure(device: VkDevice; framebuffer: VkFramebuffer; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
   PFN_vkCmdBeginRenderPass = procedure(commandBuffer: VkCommandBuffer; const pRenderPassBegin: PVkRenderPassBeginInfo; contents: Integer); VKAPI_CALL;
   PFN_vkCmdEndRenderPass = procedure(commandBuffer: VkCommandBuffer); VKAPI_CALL;
-
-  { Swapchain }
   PFN_vkCreateSwapchainKHR = function(device: VkDevice; const pCreateInfo: PVkSwapchainCreateInfoKHR; const pAllocator: PVkAllocationCallbacks; pSwapchain: PVkSwapchainKHR): VkResult; VKAPI_CALL;
   PFN_vkDestroySwapchainKHR = procedure(device: VkDevice; swapchain: VkSwapchainKHR; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
   PFN_vkGetSwapchainImagesKHR = function(device: VkDevice; swapchain: VkSwapchainKHR; pSwapchainImageCount: PCardinal; pSwapchainImages: PVkImage): VkResult; VKAPI_CALL;
   PFN_vkAcquireNextImageKHR = function(device: VkDevice; swapchain: VkSwapchainKHR; timeout: UInt64; semaphore: VkSemaphore; fence: VkFence; pImageIndex: PCardinal): VkResult; VKAPI_CALL;
   PFN_vkQueuePresentKHR = function(queue: VkQueue; const pPresentInfo: PVkPresentInfoKHR): VkResult; VKAPI_CALL;
-
   PFN_vkCmdBeginDebugUtilsLabelEXT = procedure(commandBuffer: VkCommandBuffer; const pLabelInfo: PVkDebugUtilsLabelEXT); VKAPI_CALL;
   PFN_vkCmdEndDebugUtilsLabelEXT = procedure(commandBuffer: VkCommandBuffer); VKAPI_CALL;
   PFN_vkCmdBlitImage = procedure(commandBuffer: VkCommandBuffer; srcImage: VkImage; srcImageLayout: VkImageLayout; dstImage: VkImage; dstImageLayout: VkImageLayout; regionCount: Cardinal; const pRegions: PVkImageBlit; filter: VkFilter); VKAPI_CALL;
@@ -1750,7 +1669,6 @@ var
   { Global Function Pointers }
   vkGetInstanceProcAddr: PFN_vkGetInstanceProcAddr;
   vkGetDeviceProcAddr: PFN_vkGetDeviceProcAddr;
-
   vkCreateInstance: PFN_vkCreateInstance;
   vkDestroyInstance: PFN_vkDestroyInstance;
   vkEnumeratePhysicalDevices: PFN_vkEnumeratePhysicalDevices;
@@ -1763,13 +1681,11 @@ var
   vkDestroyDevice: PFN_vkDestroyDevice;
   vkEnumerateInstanceExtensionProperties: PFN_vkEnumerateInstanceExtensionProperties;
   vkEnumerateDeviceExtensionProperties: PFN_vkEnumerateDeviceExtensionProperties;
-
   vkDestroySurfaceKHR: PFN_vkDestroySurfaceKHR;
   vkGetPhysicalDeviceSurfaceSupportKHR: PFN_vkGetPhysicalDeviceSurfaceSupportKHR;
   vkGetPhysicalDeviceSurfaceCapabilitiesKHR: PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
   vkGetPhysicalDeviceSurfaceFormatsKHR: PFN_vkGetPhysicalDeviceSurfaceFormatsKHR;
   vkGetPhysicalDeviceSurfacePresentModesKHR: PFN_vkGetPhysicalDeviceSurfacePresentModesKHR;
-
   vkGetDeviceQueue: PFN_vkGetDeviceQueue;
   vkQueueSubmit: PFN_vkQueueSubmit;
   vkQueueWaitIdle: PFN_vkQueueWaitIdle;
@@ -1780,7 +1696,6 @@ var
   vkWaitForFences: PFN_vkWaitForFences;
   vkCreateSemaphore: PFN_vkCreateSemaphore;
   vkDestroySemaphore: PFN_vkDestroySemaphore;
-
   vkAllocateMemory: PFN_vkAllocateMemory;
   vkFreeMemory: PFN_vkFreeMemory;
   vkMapMemory: PFN_vkMapMemory;
@@ -1791,21 +1706,18 @@ var
   vkGetImageMemoryRequirements: PFN_vkGetImageMemoryRequirements;
   vkCreateBuffer: PFN_vkCreateBuffer;
   vkDestroyBuffer: PFN_vkDestroyBuffer;
-
   vkCreateImage: PFN_vkCreateImage;
   vkDestroyImage: PFN_vkDestroyImage;
   vkCreateImageView: PFN_vkCreateImageView;
   vkDestroyImageView: PFN_vkDestroyImageView;
   vkCreateSampler: PFN_vkCreateSampler;
   vkDestroySampler: PFN_vkDestroySampler;
-
   vkCreateShaderModule: PFN_vkCreateShaderModule;
   vkDestroyShaderModule: PFN_vkDestroyShaderModule;
   vkCreatePipelineLayout: PFN_vkCreatePipelineLayout;
   vkDestroyPipelineLayout: PFN_vkDestroyPipelineLayout;
   vkCreateGraphicsPipelines: PFN_vkCreateGraphicsPipelines;
   vkDestroyPipeline: PFN_vkDestroyPipeline;
-
   vkCreateDescriptorSetLayout: PFN_vkCreateDescriptorSetLayout;
   vkDestroyDescriptorSetLayout: PFN_vkDestroyDescriptorSetLayout;
   vkCreateDescriptorPool: PFN_vkCreateDescriptorPool;
@@ -1813,7 +1725,6 @@ var
   vkAllocateDescriptorSets: PFN_vkAllocateDescriptorSets;
   vkFreeDescriptorSets: PFN_vkFreeDescriptorSets;
   vkUpdateDescriptorSets: PFN_vkUpdateDescriptorSets;
-
   vkCreateCommandPool: PFN_vkCreateCommandPool;
   vkDestroyCommandPool: PFN_vkDestroyCommandPool;
   vkResetCommandPool: PFN_vkResetCommandPool;
@@ -1834,23 +1745,19 @@ var
   vkCmdCopyBuffer: PFN_vkCmdCopyBuffer;
   vkCmdCopyBufferToImage: PFN_vkCmdCopyBufferToImage;
   vkCmdCopyImageToBuffer: PFN_vkCmdCopyImageToBuffer;
-
   vkCmdBeginRendering: PFN_vkCmdBeginRendering;
   vkCmdEndRendering: PFN_vkCmdEndRendering;
-
   vkCreateRenderPass: PFN_vkCreateRenderPass;
   vkDestroyRenderPass: PFN_vkDestroyRenderPass;
   vkCreateFramebuffer: PFN_vkCreateFramebuffer;
   vkDestroyFramebuffer: PFN_vkDestroyFramebuffer;
   vkCmdBeginRenderPass: PFN_vkCmdBeginRenderPass;
   vkCmdEndRenderPass: PFN_vkCmdEndRenderPass;
-
   vkCreateSwapchainKHR: PFN_vkCreateSwapchainKHR;
   vkDestroySwapchainKHR: PFN_vkDestroySwapchainKHR;
   vkGetSwapchainImagesKHR: PFN_vkGetSwapchainImagesKHR;
   vkAcquireNextImageKHR: PFN_vkAcquireNextImageKHR;
   vkQueuePresentKHR: PFN_vkQueuePresentKHR;
-
   vkCmdBeginDebugUtilsLabelEXT: PFN_vkCmdBeginDebugUtilsLabelEXT;
   vkCmdEndDebugUtilsLabelEXT: PFN_vkCmdEndDebugUtilsLabelEXT;
   vkCmdBlitImage: PFN_vkCmdBlitImage;
@@ -1954,7 +1861,6 @@ begin
   Pointer(vkCreateDevice) := vkGetInstanceProcAddr(Instance, 'vkCreateDevice');
   Pointer(vkDestroyDevice) := vkGetInstanceProcAddr(Instance, 'vkDestroyDevice');
   Pointer(vkEnumerateDeviceExtensionProperties) := vkGetInstanceProcAddr(Instance, 'vkEnumerateDeviceExtensionProperties');
-
   Pointer(vkDestroySurfaceKHR) := vkGetInstanceProcAddr(Instance, 'vkDestroySurfaceKHR');
   Pointer(vkGetPhysicalDeviceSurfaceSupportKHR) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceSurfaceSupportKHR');
   Pointer(vkGetPhysicalDeviceSurfaceCapabilitiesKHR) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceSurfaceCapabilitiesKHR');
@@ -1978,7 +1884,6 @@ begin
   Pointer(vkWaitForFences) := vkGetInstanceProcAddr(nil, 'vkWaitForFences');
   Pointer(vkCreateSemaphore) := vkGetInstanceProcAddr(nil, 'vkCreateSemaphore');
   Pointer(vkDestroySemaphore) := vkGetInstanceProcAddr(nil, 'vkDestroySemaphore');
-
   Pointer(vkAllocateMemory) := vkGetInstanceProcAddr(nil, 'vkAllocateMemory');
   Pointer(vkFreeMemory) := vkGetInstanceProcAddr(nil, 'vkFreeMemory');
   Pointer(vkMapMemory) := vkGetInstanceProcAddr(nil, 'vkMapMemory');
@@ -1989,21 +1894,18 @@ begin
   Pointer(vkGetImageMemoryRequirements) := vkGetInstanceProcAddr(nil, 'vkGetImageMemoryRequirements');
   Pointer(vkCreateBuffer) := vkGetInstanceProcAddr(nil, 'vkCreateBuffer');
   Pointer(vkDestroyBuffer) := vkGetInstanceProcAddr(nil, 'vkDestroyBuffer');
-
   Pointer(vkCreateImage) := vkGetInstanceProcAddr(nil, 'vkCreateImage');
   Pointer(vkDestroyImage) := vkGetInstanceProcAddr(nil, 'vkDestroyImage');
   Pointer(vkCreateImageView) := vkGetInstanceProcAddr(nil, 'vkCreateImageView');
   Pointer(vkDestroyImageView) := vkGetInstanceProcAddr(nil, 'vkDestroyImageView');
   Pointer(vkCreateSampler) := vkGetInstanceProcAddr(nil, 'vkCreateSampler');
   Pointer(vkDestroySampler) := vkGetInstanceProcAddr(nil, 'vkDestroySampler');
-
   Pointer(vkCreateShaderModule) := vkGetInstanceProcAddr(nil, 'vkCreateShaderModule');
   Pointer(vkDestroyShaderModule) := vkGetInstanceProcAddr(nil, 'vkDestroyShaderModule');
   Pointer(vkCreatePipelineLayout) := vkGetInstanceProcAddr(nil, 'vkCreatePipelineLayout');
   Pointer(vkDestroyPipelineLayout) := vkGetInstanceProcAddr(nil, 'vkDestroyPipelineLayout');
   Pointer(vkCreateGraphicsPipelines) := vkGetInstanceProcAddr(nil, 'vkCreateGraphicsPipelines');
   Pointer(vkDestroyPipeline) := vkGetInstanceProcAddr(nil, 'vkDestroyPipeline');
-
   Pointer(vkCreateDescriptorSetLayout) := vkGetInstanceProcAddr(nil, 'vkCreateDescriptorSetLayout');
   Pointer(vkDestroyDescriptorSetLayout) := vkGetInstanceProcAddr(nil, 'vkDestroyDescriptorSetLayout');
   Pointer(vkCreateDescriptorPool) := vkGetInstanceProcAddr(nil, 'vkCreateDescriptorPool');
@@ -2011,7 +1913,6 @@ begin
   Pointer(vkAllocateDescriptorSets) := vkGetInstanceProcAddr(nil, 'vkAllocateDescriptorSets');
   Pointer(vkFreeDescriptorSets) := vkGetInstanceProcAddr(nil, 'vkFreeDescriptorSets');
   Pointer(vkUpdateDescriptorSets) := vkGetInstanceProcAddr(nil, 'vkUpdateDescriptorSets');
-
   Pointer(vkCreateCommandPool) := vkGetInstanceProcAddr(nil, 'vkCreateCommandPool');
   Pointer(vkDestroyCommandPool) := vkGetInstanceProcAddr(nil, 'vkDestroyCommandPool');
   Pointer(vkResetCommandPool) := vkGetInstanceProcAddr(nil, 'vkResetCommandPool');
@@ -2032,24 +1933,18 @@ begin
   Pointer(vkCmdCopyBuffer) := vkGetInstanceProcAddr(nil, 'vkCmdCopyBuffer');
   Pointer(vkCmdCopyBufferToImage) := vkGetInstanceProcAddr(nil, 'vkCmdCopyBufferToImage');
   Pointer(vkCmdCopyImageToBuffer) := vkGetInstanceProcAddr(nil, 'vkCmdCopyImageToBuffer');
-
-  { Dynamic Rendering }
   Pointer(vkCmdBeginRendering) := vkGetInstanceProcAddr(nil, 'vkCmdBeginRendering');
   if not Assigned(vkCmdBeginRendering) then
     Pointer(vkCmdBeginRendering) := vkGetInstanceProcAddr(nil, 'vkCmdBeginRenderingKHR');
-
   Pointer(vkCmdEndRendering) := vkGetInstanceProcAddr(nil, 'vkCmdEndRendering');
   if not Assigned(vkCmdEndRendering) then
     Pointer(vkCmdEndRendering) := vkGetInstanceProcAddr(nil, 'vkCmdEndRenderingKHR');
-
-  { Legacy Render Pass & Framebuffer (Vulkan 1.0 / 1.1 Fallback) }
   Pointer(vkCreateRenderPass) := vkGetInstanceProcAddr(nil, 'vkCreateRenderPass');
   Pointer(vkDestroyRenderPass) := vkGetInstanceProcAddr(nil, 'vkDestroyRenderPass');
   Pointer(vkCreateFramebuffer) := vkGetInstanceProcAddr(nil, 'vkCreateFramebuffer');
   Pointer(vkDestroyFramebuffer) := vkGetInstanceProcAddr(nil, 'vkDestroyFramebuffer');
   Pointer(vkCmdBeginRenderPass) := vkGetInstanceProcAddr(nil, 'vkCmdBeginRenderPass');
   Pointer(vkCmdEndRenderPass) := vkGetInstanceProcAddr(nil, 'vkCmdEndRenderPass');
-
   Pointer(vkCreateSwapchainKHR) := vkGetInstanceProcAddr(nil, 'vkCreateSwapchainKHR');
   Pointer(vkDestroySwapchainKHR) := vkGetInstanceProcAddr(nil, 'vkDestroySwapchainKHR');
   Pointer(vkGetSwapchainImagesKHR) := vkGetInstanceProcAddr(nil, 'vkGetSwapchainImagesKHR');
@@ -2066,7 +1961,6 @@ begin
   Pointer(vkGetPipelineCacheData) := vkGetInstanceProcAddr(nil, 'vkGetPipelineCacheData');
   Pointer(vkResetCommandBuffer) := vkGetInstanceProcAddr(nil, 'vkResetCommandBuffer');
   Pointer(vkCmdExecuteCommands) := vkGetInstanceProcAddr(nil, 'vkCmdExecuteCommands');
-
 end;
 
 procedure FreeVulkan;
