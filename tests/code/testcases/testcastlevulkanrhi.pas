@@ -69,6 +69,7 @@ type
     procedure TestVulkan11RenderPassFramebufferFallback;
     procedure TestVkXmlHeaderGenerator;
     procedure TestVulkan11_12DeviceNegotiationAndFallback;
+    procedure TestGraphicsPipelineLibraryFastLinking;
   private
     FCapturedWarnings: TStringList;
     procedure CaptureWarning(const Category, S: String);
@@ -1638,6 +1639,117 @@ begin
       FreeAndNil(DepthTex);
       FreeAndNil(ColorTex);
     end;
+  finally
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGraphicsPipelineLibraryFastLinking;
+var
+  UseGPL: Boolean;
+  ReqExts: TAnsiStringArray;
+  DescA, DescB: TRHIGraphicsPipelineDesc;
+  VkDev: TVulkanRHIDevice;
+  PrewarmedCount: Cardinal;
+  PsoOpaque, PsoTwoSided: TVulkanRHIPipeline;
+begin
+  { 1. Verify Khronos vk.xml generated constants for VK_EXT_graphics_pipeline_library }
+  AssertEquals('VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR must match vk.xml',
+    1000290000, VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR);
+  AssertEquals('VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT must match vk.xml',
+    1000320000, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT);
+  AssertEquals('VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_PROPERTIES_EXT must match vk.xml',
+    1000320001, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_PROPERTIES_EXT);
+  AssertEquals('VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT must match vk.xml',
+    1000320002, VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT);
+  AssertEquals('All 4 GPL subset flags combined must equal $0F',
+    $0000000F,
+    VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT or
+    VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT or
+    VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT or
+    VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT);
+
+  { 2. Verify ResolveGraphicsPipelineLibraryConfig device extension negotiation }
+  ResolveGraphicsPipelineLibraryConfig(VK_API_VERSION_1_3, True, True, True, UseGPL, ReqExts);
+  AssertTrue('Device advertising both extensions and feature enables GPL', UseGPL);
+  AssertEquals('GPL requires 2 extensions (VK_KHR_pipeline_library + VK_EXT_graphics_pipeline_library)',
+    2, Length(ReqExts));
+  AssertEquals('First GPL extension is VK_KHR_pipeline_library',
+    VK_KHR_pipeline_library, String(ReqExts[0]));
+  AssertEquals('Second GPL extension is VK_EXT_graphics_pipeline_library',
+    VK_EXT_graphics_pipeline_library, String(ReqExts[1]));
+
+  ResolveGraphicsPipelineLibraryConfig(VK_API_VERSION_1_3, True, True, False, UseGPL, ReqExts);
+  AssertFalse('Device without graphicsPipelineLibrary feature bit disables GPL', UseGPL);
+  AssertEquals('Disabled GPL requires 0 extensions', 0, Length(ReqExts));
+
+  { 3. Verify independent hashing of the 4 pipeline library subsets }
+  FillChar(DescA, SizeOf(DescA), 0);
+  DescA.Topology := ptTriangleList;
+  DescA.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+  DescA.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+  DescA.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+  SetLength(DescA.ColorAttachmentFormats, 1);
+  DescA.ColorAttachmentFormats[0] := pfBGRA8_UNorm;
+  DescA.DepthAttachmentFormat := pfD32_Float;
+  DescA.SampleCount := 1;
+
+  DescB := DescA;
+  DescB.BlendState := TRHIBlendStateDesc.DefaultAlphaBlend;
+
+  AssertTrue('Changing BlendState must NOT change VertexInputLibrary hash',
+    ComputeVertexInputLibraryKeyHash(DescA) = ComputeVertexInputLibraryKeyHash(DescB));
+  AssertTrue('Changing BlendState must NOT change PreRasterizationLibrary hash',
+    ComputePreRasterizationLibraryKeyHash(DescA) = ComputePreRasterizationLibraryKeyHash(DescB));
+  AssertTrue('Changing BlendState must NOT change FragmentShaderLibrary hash',
+    ComputeFragmentShaderLibraryKeyHash(DescA) = ComputeFragmentShaderLibraryKeyHash(DescB));
+  AssertTrue('Changing BlendState MUST change FragmentOutputLibrary hash',
+    ComputeFragmentOutputLibraryKeyHash(DescA) <> ComputeFragmentOutputLibraryKeyHash(DescB));
+
+  { 4. Verify fast-linking & sub-library cache reuse across permutations }
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3, True);
+  try
+    AssertTrue('Headless GPL device reports SupportsGraphicsPipelineLibrary',
+      VkDev.SupportsGraphicsPipelineLibrary);
+    AssertTrue('Headless GPL device reports SupportsGPLFastLinking',
+      VkDev.SupportsGPLFastLinking);
+
+    { PrewarmStandardPipelines bakes 5 PSOs (20 subset lookups total) }
+    PrewarmedCount := VkDev.PrewarmStandardPipelines(True, True);
+    AssertEquals('5 standard PSOs should be fast-linked', 5, PrewarmedCount);
+    AssertEquals('GPLFastLinkedPipelineCount should equal 5', 5, VkDev.GPLFastLinkedPipelineCount);
+
+    { Out of 20 subset lookups (5 PSOs x 4 subsets), only 13 unique sub-libraries are created
+      and 7 are served directly from the partial library caches! }
+    AssertEquals('VertexInputLibraryCount should be 2 (3D mesh shared by 4 PSOs + 2D sprite)',
+      2, VkDev.VertexInputLibraryCount);
+    AssertEquals('PreRasterizationLibraryCount should be 4 (3D CullNone shared by TwoSided + AlphaBlend)',
+      4, VkDev.PreRasterizationLibraryCount);
+    AssertEquals('FragmentShaderLibraryCount should be 4 (3D DepthTestWrite shared by Opaque + TwoSided)',
+      4, VkDev.FragmentShaderLibraryCount);
+    AssertEquals('FragmentOutputLibraryCount should be 3 (Opaque, AlphaBlend, DepthOnly)',
+      3, VkDev.FragmentOutputLibraryCount);
+    AssertEquals('Total unique pipeline libraries should be 13 (down from 20)',
+      13, VkDev.TotalPipelineLibraryCount);
+    AssertEquals('GPL library cache hits should be 7', 7, VkDev.GPLLibraryCacheHits);
+    AssertEquals('GPL library cache misses should be 13', 13, VkDev.GPLLibraryCacheMisses);
+
+    { Verify two PSOs that differ only in CullMode share 3 out of 4 pipeline libraries }
+    DescB := DescA;
+    DescB.Rasterizer.CullMode := cmNone;
+    PsoOpaque := VkDev.GetOrCreatePipeline(DescA) as TVulkanRHIPipeline;
+    PsoTwoSided := VkDev.GetOrCreatePipeline(DescB) as TVulkanRHIPipeline;
+
+    AssertTrue('Opaque PSO must be linked from libraries', PsoOpaque.LinkedFromLibraries);
+    AssertTrue('TwoSided PSO must be linked from libraries', PsoTwoSided.LinkedFromLibraries);
+    AssertTrue('Opaque and TwoSided PSOs share VertexInputLibrary',
+      PsoOpaque.VertexInputLibrary = PsoTwoSided.VertexInputLibrary);
+    AssertTrue('Opaque and TwoSided PSOs have distinct PreRasterizationLibrary (CullBack vs CullNone)',
+      PsoOpaque.PreRasterizationLibrary <> PsoTwoSided.PreRasterizationLibrary);
+    AssertTrue('Opaque and TwoSided PSOs share FragmentShaderLibrary',
+      PsoOpaque.FragmentShaderLibrary = PsoTwoSided.FragmentShaderLibrary);
+    AssertTrue('Opaque and TwoSided PSOs share FragmentOutputLibrary',
+      PsoOpaque.FragmentOutputLibrary = PsoTwoSided.FragmentOutputLibrary);
   finally
     FreeAndNil(VkDev);
   end;

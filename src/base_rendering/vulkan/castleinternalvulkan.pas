@@ -355,9 +355,24 @@ const
   VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS = 1;
   VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK = 0;
   VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE = 4;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 = 1000059000;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 = 1000059001;
+  VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR = 1000290000;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT = 1000320000;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_PROPERTIES_EXT = 1000320001;
+  VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT = 1000320002;
+  VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT = $00000400;
+  VK_PIPELINE_CREATE_LIBRARY_BIT_KHR = $00000800;
+  VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT = $00800000;
+  VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT = $00000002;
+  VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT = $00000001;
+  VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT = $00000002;
+  VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT = $00000004;
+  VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT = $00000008;
 
   { Extension and Layer Names }
   VK_EXT_debug_utils = 'VK_EXT_debug_utils';
+  VK_EXT_graphics_pipeline_library = 'VK_EXT_graphics_pipeline_library';
   VK_EXT_memory_budget = 'VK_EXT_memory_budget';
   VK_KHR_create_renderpass2 = 'VK_KHR_create_renderpass2';
   VK_KHR_depth_stencil_resolve = 'VK_KHR_depth_stencil_resolve';
@@ -366,6 +381,7 @@ const
   VK_KHR_maintenance1 = 'VK_KHR_maintenance1';
   VK_KHR_maintenance2 = 'VK_KHR_maintenance2';
   VK_KHR_multiview = 'VK_KHR_multiview';
+  VK_KHR_pipeline_library = 'VK_KHR_pipeline_library';
   VK_KHR_swapchain = 'VK_KHR_swapchain';
   VK_LAYER_KHRONOS_validation = 'VK_LAYER_KHRONOS_validation';
 
@@ -403,6 +419,7 @@ type
   VkFilter = Integer;
   VkSamplerMipmapMode = Integer;
   VkSamplerAddressMode = Integer;
+  VkGraphicsPipelineLibraryFlagsEXT = VkFlags;
 
   { Pointers to primitive types }
   PCardinal = ^Cardinal;
@@ -1545,6 +1562,50 @@ type
   end;
   PVkPipelineCacheCreateInfo = ^VkPipelineCacheCreateInfo;
 
+  VkPhysicalDeviceFeatures2 = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    features: VkPhysicalDeviceFeatures;
+  end;
+  PVkPhysicalDeviceFeatures2 = ^VkPhysicalDeviceFeatures2;
+
+  VkPhysicalDeviceProperties2 = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    properties: VkPhysicalDeviceProperties;
+  end;
+  PVkPhysicalDeviceProperties2 = ^VkPhysicalDeviceProperties2;
+
+  VkPipelineLibraryCreateInfoKHR = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    libraryCount: Cardinal;
+    pLibraries: PVkPipeline;
+  end;
+  PVkPipelineLibraryCreateInfoKHR = ^VkPipelineLibraryCreateInfoKHR;
+
+  VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    graphicsPipelineLibrary: VkBool32;
+  end;
+  PVkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT = ^VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT;
+
+  VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    graphicsPipelineLibraryFastLinking: VkBool32;
+    graphicsPipelineLibraryIndependentInterpolationDecoration: VkBool32;
+  end;
+  PVkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT = ^VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT;
+
+  VkGraphicsPipelineLibraryCreateInfoEXT = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    flags: VkGraphicsPipelineLibraryFlagsEXT;
+  end;
+  PVkGraphicsPipelineLibraryCreateInfoEXT = ^VkGraphicsPipelineLibraryCreateInfoEXT;
+
   { KHR Type Aliases }
   VkRenderingAttachmentInfoKHR = VkRenderingAttachmentInfo;
   PVkRenderingAttachmentInfoKHR = ^VkRenderingAttachmentInfoKHR;
@@ -1662,6 +1723,8 @@ type
   PFN_vkCmdBlitImage = procedure(commandBuffer: VkCommandBuffer; srcImage: VkImage; srcImageLayout: VkImageLayout; dstImage: VkImage; dstImageLayout: VkImageLayout; regionCount: Cardinal; const pRegions: PVkImageBlit; filter: VkFilter); VKAPI_CALL;
   PFN_vkCmdDrawIndirect = procedure(commandBuffer: VkCommandBuffer; buffer: VkBuffer; offset: VkDeviceSize; drawCount: Cardinal; stride: Cardinal); VKAPI_CALL;
   PFN_vkEnumerateInstanceVersion = function(pApiVersion: PCardinal): VkResult; VKAPI_CALL;
+  PFN_vkGetPhysicalDeviceFeatures2 = procedure(physicalDevice: VkPhysicalDevice; pFeatures: PVkPhysicalDeviceFeatures2); VKAPI_CALL;
+  PFN_vkGetPhysicalDeviceProperties2 = procedure(physicalDevice: VkPhysicalDevice; pProperties: PVkPhysicalDeviceProperties2); VKAPI_CALL;
   PFN_vkCmdDrawIndexedIndirect = procedure(commandBuffer: VkCommandBuffer; buffer: VkBuffer; offset: VkDeviceSize; drawCount: Cardinal; stride: Cardinal); VKAPI_CALL;
   PFN_vkCmdSetDepthBias = procedure(commandBuffer: VkCommandBuffer; depthBiasConstantFactor: Single; depthBiasClamp: Single; depthBiasSlopeFactor: Single); VKAPI_CALL;
   PFN_vkCreatePipelineCache = function(device: VkDevice; const pCreateInfo: PVkPipelineCacheCreateInfo; const pAllocator: PVkAllocationCallbacks; pPipelineCache: PVkPipelineCache): VkResult; VKAPI_CALL;
@@ -1768,6 +1831,8 @@ var
   vkCmdBlitImage: PFN_vkCmdBlitImage;
   vkCmdDrawIndirect: PFN_vkCmdDrawIndirect;
   vkEnumerateInstanceVersion: PFN_vkEnumerateInstanceVersion;
+  vkGetPhysicalDeviceFeatures2: PFN_vkGetPhysicalDeviceFeatures2;
+  vkGetPhysicalDeviceProperties2: PFN_vkGetPhysicalDeviceProperties2;
   vkCmdDrawIndexedIndirect: PFN_vkCmdDrawIndexedIndirect;
   vkCmdSetDepthBias: PFN_vkCmdSetDepthBias;
   vkCreatePipelineCache: PFN_vkCreatePipelineCache;
@@ -1884,7 +1949,13 @@ begin
   Pointer(vkDestroyInstance) := vkGetInstanceProcAddr(Instance, 'vkDestroyInstance');
   Pointer(vkEnumeratePhysicalDevices) := vkGetInstanceProcAddr(Instance, 'vkEnumeratePhysicalDevices');
   Pointer(vkGetPhysicalDeviceFeatures) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceFeatures');
+  Pointer(vkGetPhysicalDeviceFeatures2) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceFeatures2');
+  if not Assigned(vkGetPhysicalDeviceFeatures2) then
+    Pointer(vkGetPhysicalDeviceFeatures2) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceFeatures2KHR');
   Pointer(vkGetPhysicalDeviceProperties) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceProperties');
+  Pointer(vkGetPhysicalDeviceProperties2) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceProperties2');
+  if not Assigned(vkGetPhysicalDeviceProperties2) then
+    Pointer(vkGetPhysicalDeviceProperties2) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceProperties2KHR');
   Pointer(vkGetPhysicalDeviceQueueFamilyProperties) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceQueueFamilyProperties');
   Pointer(vkGetPhysicalDeviceMemoryProperties) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceMemoryProperties');
   Pointer(vkGetPhysicalDeviceMemoryProperties2) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceMemoryProperties2');
@@ -1986,6 +2057,8 @@ begin
   Pointer(vkCmdEndDebugUtilsLabelEXT) := vkGetInstanceProcAddr(nil, 'vkCmdEndDebugUtilsLabelEXT');
   Pointer(vkCmdBlitImage) := vkGetInstanceProcAddr(nil, 'vkCmdBlitImage');
   Pointer(vkCmdDrawIndirect) := vkGetInstanceProcAddr(nil, 'vkCmdDrawIndirect');
+  Pointer(vkGetPhysicalDeviceFeatures2) := vkGetInstanceProcAddr(nil, 'vkGetPhysicalDeviceFeatures2');
+  Pointer(vkGetPhysicalDeviceProperties2) := vkGetInstanceProcAddr(nil, 'vkGetPhysicalDeviceProperties2');
   Pointer(vkCmdDrawIndexedIndirect) := vkGetInstanceProcAddr(nil, 'vkCmdDrawIndexedIndirect');
   Pointer(vkCmdSetDepthBias) := vkGetInstanceProcAddr(nil, 'vkCmdSetDepthBias');
   Pointer(vkCreatePipelineCache) := vkGetInstanceProcAddr(nil, 'vkCreatePipelineCache');

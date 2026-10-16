@@ -141,6 +141,11 @@ type
     FHandle: VkPipeline;
     FPipelineLayout: VkPipelineLayout;
     FRenderPass: VkRenderPass;
+    FLinkedFromLibraries: Boolean;
+    FVertexInputLibrary: VkPipeline;
+    FPreRasterizationLibrary: VkPipeline;
+    FFragmentShaderLibrary: VkPipeline;
+    FFragmentOutputLibrary: VkPipeline;
   public
     constructor Create(const ADevice: TVulkanRHIDevice;
       const ADesc: TRHIGraphicsPipelineDesc);
@@ -148,6 +153,11 @@ type
     property Handle: VkPipeline read FHandle;
     property PipelineLayout: VkPipelineLayout read FPipelineLayout;
     property RenderPass: VkRenderPass read FRenderPass;
+    property LinkedFromLibraries: Boolean read FLinkedFromLibraries;
+    property VertexInputLibrary: VkPipeline read FVertexInputLibrary;
+    property PreRasterizationLibrary: VkPipeline read FPreRasterizationLibrary;
+    property FragmentShaderLibrary: VkPipeline read FFragmentShaderLibrary;
+    property FragmentOutputLibrary: VkPipeline read FFragmentOutputLibrary;
   end;
 
   { -------------------------------------------------------------------------- }
@@ -223,6 +233,7 @@ type
   end;
 
   TVulkanPipelineMap = {$ifdef FPC}specialize{$endif} TObjectDictionary<UInt64, TVulkanRHIPipeline>;
+  TVulkanPipelineLibraryMap = {$ifdef FPC}specialize{$endif} TDictionary<UInt64, VkPipeline>;
   TVulkanRenderPassMap = {$ifdef FPC}specialize{$endif} TDictionary<UInt64, VkRenderPass>;
   TVulkanFramebufferMap = {$ifdef FPC}specialize{$endif} TDictionary<UInt64, VkFramebuffer>;
 
@@ -250,10 +261,14 @@ type
     { Frame synchronization & command recording }
     FFrames: array[0 .. MaxFramesInFlight - 1] of TVulkanFrameContext;
 
-    { Descriptor, Pipeline & Vulkan 1.1 RenderPass/Framebuffer Caches }
+    { Descriptor, Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FDescriptorPool: VkDescriptorPool;
     FPipelineCache: VkPipelineCache;
     FPipelineMap: TVulkanPipelineMap;
+    FVertexInputLibMap: TVulkanPipelineLibraryMap;
+    FPreRasterLibMap: TVulkanPipelineLibraryMap;
+    FFragmentShaderLibMap: TVulkanPipelineLibraryMap;
+    FFragmentOutputLibMap: TVulkanPipelineLibraryMap;
     FRenderPassMap: TVulkanRenderPassMap;
     FFramebufferMap: TVulkanFramebufferMap;
     FPipelineCacheLoaded: Boolean;
@@ -262,13 +277,18 @@ type
     FPrewarm2DVertexShader: TRHIShaderModule;
     FPrewarm2DFragmentShader: TRHIShaderModule;
 
-    { Diagnostics, VK_EXT_memory_budget & Vulkan 1.1/1.2 Fallback tracking }
+    { Diagnostics, VK_EXT_memory_budget, VK_EXT_graphics_pipeline_library & Vulkan 1.1/1.2 Fallback tracking }
     FInstanceApiVersion: Cardinal;
     FDeviceApiVersion: Cardinal;
     FSupportsMemoryBudgetExt: Boolean;
     FSupportsDynamicRendering: Boolean;
+    FSupportsGraphicsPipelineLibrary: Boolean;
+    FSupportsGPLFastLinking: Boolean;
     FPipelineCacheHits: Cardinal;
     FPipelineCacheMisses: Cardinal;
+    FGPLFastLinkedPipelineCount: Cardinal;
+    FGPLLibraryCacheHits: Cardinal;
+    FGPLLibraryCacheMisses: Cardinal;
     FDescriptorSetAllocations: Cardinal;
     FFallbackRenderPassBeginCount: Cardinal;
     FAllocatedMemoryBytes: Int64;
@@ -280,11 +300,17 @@ type
     procedure DestroySwapchain;
     procedure CreateFrameContexts;
     procedure CreateDescriptorPool;
+    procedure ClearPipelineLibraries;
     procedure ClearFallbackFramebuffers;
     procedure ClearFallbackRenderPasses;
     function IsDeviceExtensionSupported(const AExtensionName: AnsiString): Boolean;
     function ComputePipelineHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
     function GetPipelineCount: Cardinal;
+    function GetVertexInputLibraryCount: Cardinal;
+    function GetPreRasterizationLibraryCount: Cardinal;
+    function GetFragmentShaderLibraryCount: Cardinal;
+    function GetFragmentOutputLibraryCount: Cardinal;
+    function GetTotalPipelineLibraryCount: Cardinal;
     function GetFallbackRenderPassCount: Cardinal;
     function GetFallbackFramebufferCount: Cardinal;
   public
@@ -295,7 +321,8 @@ type
     constructor CreateHeadless(const APhysicalDevice: VkPhysicalDevice;
       const ASupportsMemoryBudgetExt: Boolean = True;
       const ASupportsDynamicRendering: Boolean = True;
-      const ADeviceApiVersion: Cardinal = VK_API_VERSION_1_3); overload;
+      const ADeviceApiVersion: Cardinal = VK_API_VERSION_1_3;
+      const ASupportsGraphicsPipelineLibrary: Boolean = False); overload;
     destructor Destroy; override;
 
     { Helper for one-shot transfer commands (texture/buffer uploads) }
@@ -319,6 +346,27 @@ type
     function PrewarmStandardPipelines(const AIncludeBlending: Boolean = True;
       const AIncludeShadowDepth: Boolean = True;
       const ACacheFileUrl: String = ''): Cardinal;
+
+    { Acquires or creates a cached VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT library. }
+    function GetOrCreateVertexInputLibrary(
+      const ADesc: TRHIGraphicsPipelineDesc): VkPipeline;
+
+    { Acquires or creates a cached VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT library. }
+    function GetOrCreatePreRasterizationLibrary(
+      const ADesc: TRHIGraphicsPipelineDesc;
+      const ALayout: VkPipelineLayout;
+      const ARenderPass: VkRenderPass): VkPipeline;
+
+    { Acquires or creates a cached VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT library. }
+    function GetOrCreateFragmentShaderLibrary(
+      const ADesc: TRHIGraphicsPipelineDesc;
+      const ALayout: VkPipelineLayout;
+      const ARenderPass: VkRenderPass): VkPipeline;
+
+    { Acquires or creates a cached VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT library. }
+    function GetOrCreateFragmentOutputLibrary(
+      const ADesc: TRHIGraphicsPipelineDesc;
+      const ARenderPass: VkRenderPass): VkPipeline;
 
     { Acquires or creates a cached VkRenderPass for Vulkan 1.1/1.2 devices that lack
       VK_KHR_dynamic_rendering. Supports explicit LoadOp/StoreOp for multi-pass rendering
@@ -382,6 +430,16 @@ type
     property PipelineCacheLoaded: Boolean read FPipelineCacheLoaded;
     property SupportsMemoryBudgetExt: Boolean read FSupportsMemoryBudgetExt;
     property SupportsDynamicRendering: Boolean read FSupportsDynamicRendering write FSupportsDynamicRendering;
+    property SupportsGraphicsPipelineLibrary: Boolean read FSupportsGraphicsPipelineLibrary write FSupportsGraphicsPipelineLibrary;
+    property SupportsGPLFastLinking: Boolean read FSupportsGPLFastLinking write FSupportsGPLFastLinking;
+    property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
+    property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
+    property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
+    property FragmentOutputLibraryCount: Cardinal read GetFragmentOutputLibraryCount;
+    property TotalPipelineLibraryCount: Cardinal read GetTotalPipelineLibraryCount;
+    property GPLFastLinkedPipelineCount: Cardinal read FGPLFastLinkedPipelineCount;
+    property GPLLibraryCacheHits: Cardinal read FGPLLibraryCacheHits;
+    property GPLLibraryCacheMisses: Cardinal read FGPLLibraryCacheMisses;
     property FallbackRenderPassCount: Cardinal read GetFallbackRenderPassCount;
     property FallbackFramebufferCount: Cardinal read GetFallbackFramebufferCount;
     property FallbackRenderPassBeginCount: Cardinal read FFallbackRenderPassBeginCount;
@@ -402,8 +460,21 @@ procedure ResolveVulkan11_12DeviceConfig(const ADeviceApiVersion: Cardinal;
   const AHasDynamicRenderingExt, AHasDepthStencilResolveExt, AHasCreateRenderPass2Ext: Boolean;
   out AUseDynamicRendering: Boolean; out ARequiredExtensions: TAnsiStringArray);
 
+{ Resolves whether a Vulkan physical device can use VK_EXT_graphics_pipeline_library
+  (requiring VK_KHR_pipeline_library, VK_EXT_graphics_pipeline_library, and the
+  graphicsPipelineLibrary feature) and returns the required device extensions. }
+procedure ResolveGraphicsPipelineLibraryConfig(const ADeviceApiVersion: Cardinal;
+  const AHasPipelineLibraryExt, AHasGraphicsPipelineLibraryExt, AHasGPLFeature: Boolean;
+  out AUseGPL: Boolean; out ARequiredExtensions: TAnsiStringArray);
+
 { Computes a deterministic 64-bit FNV-1a hash for a graphics pipeline state descriptor. }
 function ComputePipelineKeyHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
+
+{ Computes deterministic 64-bit FNV-1a hashes for the 4 VK_EXT_graphics_pipeline_library subsets. }
+function ComputeVertexInputLibraryKeyHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
+function ComputePreRasterizationLibraryKeyHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
+function ComputeFragmentShaderLibraryKeyHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
+function ComputeFragmentOutputLibraryKeyHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
 
 { Computes a deterministic 64-bit FNV-1a hash for a fallback VkRenderPass signature. }
 function ComputeRenderPassKeyHash(const AColorFormats: array of TRHIPixelFormat;
@@ -508,6 +579,24 @@ begin
   end;
 end;
 
+procedure ResolveGraphicsPipelineLibraryConfig(const ADeviceApiVersion: Cardinal;
+  const AHasPipelineLibraryExt, AHasGraphicsPipelineLibraryExt, AHasGPLFeature: Boolean;
+  out AUseGPL: Boolean; out ARequiredExtensions: TAnsiStringArray);
+begin
+  SetLength(ARequiredExtensions, 0);
+  if (ADeviceApiVersion >= VK_API_VERSION_1_1) and
+     AHasPipelineLibraryExt and
+     AHasGraphicsPipelineLibraryExt and
+     AHasGPLFeature then
+  begin
+    AUseGPL := True;
+    SetLength(ARequiredExtensions, 2);
+    ARequiredExtensions[0] := VK_KHR_pipeline_library;
+    ARequiredExtensions[1] := VK_EXT_graphics_pipeline_library;
+  end else
+    AUseGPL := False;
+end;
+
 {$push}{$Q-}{$R-}
 procedure HashBytesFNV1a(var AHash: UInt64; const AData; const ASize: PtrUInt);
 var
@@ -527,6 +616,78 @@ begin
   HashBytesFNV1a(AHash, AValue, SizeOf(AValue));
 end;
 {$pop}
+
+function ComputeVertexInputLibraryKeyHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
+var
+  I, Count: Integer;
+begin
+  Result := FNV1aOffsetBasis64;
+  HashBytesFNV1a(Result, ADesc.Topology, SizeOf(ADesc.Topology));
+
+  Count := Length(ADesc.VertexInput.Bindings);
+  HashBytesFNV1a(Result, Count, SizeOf(Count));
+  for I := 0 to High(ADesc.VertexInput.Bindings) do
+    HashBytesFNV1a(Result, ADesc.VertexInput.Bindings[I], SizeOf(TRHIVertexBindingDesc));
+
+  Count := Length(ADesc.VertexInput.Attributes);
+  HashBytesFNV1a(Result, Count, SizeOf(Count));
+  for I := 0 to High(ADesc.VertexInput.Attributes) do
+  begin
+    HashBytesFNV1a(Result, ADesc.VertexInput.Attributes[I].Location, SizeOf(Cardinal));
+    HashBytesFNV1a(Result, ADesc.VertexInput.Attributes[I].Binding, SizeOf(Cardinal));
+    HashBytesFNV1a(Result, ADesc.VertexInput.Attributes[I].Format, SizeOf(TRHIVertexAttributeFormat));
+    HashBytesFNV1a(Result, ADesc.VertexInput.Attributes[I].Offset, SizeOf(Cardinal));
+  end;
+end;
+
+function ComputePreRasterizationLibraryKeyHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
+var
+  I, Count: Integer;
+begin
+  Result := FNV1aOffsetBasis64;
+  HashUInt64FNV1a(Result, PtrUInt(ADesc.VertexShader));
+  HashUInt64FNV1a(Result, PtrUInt(ADesc.GeometryShader));
+  HashBytesFNV1a(Result, ADesc.Rasterizer, SizeOf(ADesc.Rasterizer));
+  HashBytesFNV1a(Result, ADesc.PushConstantSize, SizeOf(ADesc.PushConstantSize));
+  HashBytesFNV1a(Result, ADesc.PushConstantStages, SizeOf(ADesc.PushConstantStages));
+
+  Count := Length(ADesc.DescriptorSetLayouts);
+  HashBytesFNV1a(Result, Count, SizeOf(Count));
+  for I := 0 to High(ADesc.DescriptorSetLayouts) do
+    HashUInt64FNV1a(Result, PtrUInt(ADesc.DescriptorSetLayouts[I]));
+end;
+
+function ComputeFragmentShaderLibraryKeyHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
+var
+  I, Count: Integer;
+begin
+  Result := FNV1aOffsetBasis64;
+  HashUInt64FNV1a(Result, PtrUInt(ADesc.FragmentShader));
+  HashBytesFNV1a(Result, ADesc.DepthStencil, SizeOf(ADesc.DepthStencil));
+  HashBytesFNV1a(Result, ADesc.SampleCount, SizeOf(ADesc.SampleCount));
+  HashBytesFNV1a(Result, ADesc.PushConstantSize, SizeOf(ADesc.PushConstantSize));
+  HashBytesFNV1a(Result, ADesc.PushConstantStages, SizeOf(ADesc.PushConstantStages));
+
+  Count := Length(ADesc.DescriptorSetLayouts);
+  HashBytesFNV1a(Result, Count, SizeOf(Count));
+  for I := 0 to High(ADesc.DescriptorSetLayouts) do
+    HashUInt64FNV1a(Result, PtrUInt(ADesc.DescriptorSetLayouts[I]));
+end;
+
+function ComputeFragmentOutputLibraryKeyHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
+var
+  I, Count: Integer;
+begin
+  Result := FNV1aOffsetBasis64;
+  HashBytesFNV1a(Result, ADesc.BlendState, SizeOf(ADesc.BlendState));
+  HashBytesFNV1a(Result, ADesc.DepthAttachmentFormat, SizeOf(ADesc.DepthAttachmentFormat));
+  HashBytesFNV1a(Result, ADesc.SampleCount, SizeOf(ADesc.SampleCount));
+
+  Count := Length(ADesc.ColorAttachmentFormats);
+  HashBytesFNV1a(Result, Count, SizeOf(Count));
+  for I := 0 to High(ADesc.ColorAttachmentFormats) do
+    HashBytesFNV1a(Result, ADesc.ColorAttachmentFormats[I], SizeOf(TRHIPixelFormat));
+end;
 
 function ComputePipelineKeyHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
 var
@@ -1442,41 +1603,91 @@ var
   ColorFormats: array of VkFormat;
   RenderingInfo: VkPipelineRenderingCreateInfoKHR;
   PipelineInfo: VkGraphicsPipelineCreateInfo;
+  LibHandles: array[0..3] of VkPipeline;
+  LinkInfo: VkPipelineLibraryCreateInfoKHR;
   I: Integer;
 begin
   inherited Create(ADevice, ADesc);
   if (ADevice <> nil) and (not ADevice.SupportsDynamicRendering) then
     FRenderPass := ADevice.GetOrCreateFallbackRenderPass(
       ADesc.ColorAttachmentFormats, ADesc.DepthAttachmentFormat, ADesc.SampleCount);
-  if (ADevice = nil) or (ADevice.Handle = nil) then Exit;
+  if ADevice = nil then Exit;
 
   { 1. Construct VkPipelineLayout from ADesc.DescriptorSetLayouts and PushConstants }
-  SetLength(SetLayouts, Length(ADesc.DescriptorSetLayouts));
-  for I := 0 to High(ADesc.DescriptorSetLayouts) do
-    if ADesc.DescriptorSetLayouts[I] <> nil then
-      SetLayouts[I] := (ADesc.DescriptorSetLayouts[I] as TVulkanRHIDescriptorSetLayout).Handle
-    else
-      SetLayouts[I] := VK_NULL_HANDLE;
-
-  FillChar(LayoutInfo, SizeOf(LayoutInfo), 0);
-  LayoutInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-  LayoutInfo.setLayoutCount := Length(SetLayouts);
-  if Length(SetLayouts) > 0 then
-    LayoutInfo.pSetLayouts := @SetLayouts[0];
-
-  if ADesc.PushConstantSize > 0 then
+  if ADevice.Handle <> nil then
   begin
-    FillChar(PushRange, SizeOf(PushRange), 0);
-    PushRange.stageFlags := RHIToVkShaderStageFlags(ADesc.PushConstantStages);
-    if PushRange.stageFlags = 0 then
-      PushRange.stageFlags := VK_SHADER_STAGE_ALL_GRAPHICS;
-    PushRange.offset := 0;
-    PushRange.size := ADesc.PushConstantSize;
-    LayoutInfo.pushConstantRangeCount := 1;
-    LayoutInfo.pPushConstantRanges := @PushRange;
+    SetLength(SetLayouts, Length(ADesc.DescriptorSetLayouts));
+    for I := 0 to High(ADesc.DescriptorSetLayouts) do
+      if ADesc.DescriptorSetLayouts[I] <> nil then
+        SetLayouts[I] := (ADesc.DescriptorSetLayouts[I] as TVulkanRHIDescriptorSetLayout).Handle
+      else
+        SetLayouts[I] := VK_NULL_HANDLE;
+
+    FillChar(LayoutInfo, SizeOf(LayoutInfo), 0);
+    LayoutInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    if ADevice.SupportsGraphicsPipelineLibrary then
+      LayoutInfo.flags := VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT;
+    LayoutInfo.setLayoutCount := Length(SetLayouts);
+    if Length(SetLayouts) > 0 then
+      LayoutInfo.pSetLayouts := @SetLayouts[0];
+
+    if ADesc.PushConstantSize > 0 then
+    begin
+      FillChar(PushRange, SizeOf(PushRange), 0);
+      PushRange.stageFlags := RHIToVkShaderStageFlags(ADesc.PushConstantStages);
+      if PushRange.stageFlags = 0 then
+        PushRange.stageFlags := VK_SHADER_STAGE_ALL_GRAPHICS;
+      PushRange.offset := 0;
+      PushRange.size := ADesc.PushConstantSize;
+      LayoutInfo.pushConstantRangeCount := 1;
+      LayoutInfo.pPushConstantRanges := @PushRange;
+    end;
+
+    CheckVk(vkCreatePipelineLayout(ADevice.Handle, @LayoutInfo, nil, @FPipelineLayout), 'vkCreatePipelineLayout');
   end;
 
-  CheckVk(vkCreatePipelineLayout(ADevice.Handle, @LayoutInfo, nil, @FPipelineLayout), 'vkCreatePipelineLayout');
+  { Fast-Link Path via VK_EXT_graphics_pipeline_library }
+  if ADevice.SupportsGraphicsPipelineLibrary then
+  begin
+    FVertexInputLibrary := ADevice.GetOrCreateVertexInputLibrary(ADesc);
+    FPreRasterizationLibrary := ADevice.GetOrCreatePreRasterizationLibrary(ADesc, FPipelineLayout, FRenderPass);
+    FFragmentShaderLibrary := ADevice.GetOrCreateFragmentShaderLibrary(ADesc, FPipelineLayout, FRenderPass);
+    FFragmentOutputLibrary := ADevice.GetOrCreateFragmentOutputLibrary(ADesc, FRenderPass);
+    FLinkedFromLibraries := True;
+    Inc(ADevice.FGPLFastLinkedPipelineCount);
+
+    if ADevice.Handle = nil then
+    begin
+      FHandle := VkPipeline($50000000 + ADevice.FGPLFastLinkedPipelineCount);
+      Exit;
+    end;
+
+    LibHandles[0] := FVertexInputLibrary;
+    LibHandles[1] := FPreRasterizationLibrary;
+    LibHandles[2] := FFragmentShaderLibrary;
+    LibHandles[3] := FFragmentOutputLibrary;
+
+    FillChar(LinkInfo, SizeOf(LinkInfo), 0);
+    LinkInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR;
+    LinkInfo.libraryCount := 4;
+    LinkInfo.pLibraries := @LibHandles[0];
+
+    FillChar(PipelineInfo, SizeOf(PipelineInfo), 0);
+    PipelineInfo.sType := VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    PipelineInfo.pNext := @LinkInfo;
+    if not ADevice.SupportsGPLFastLinking then
+      PipelineInfo.flags := VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT;
+    PipelineInfo.layout := FPipelineLayout;
+    if not ADevice.SupportsDynamicRendering then
+      PipelineInfo.renderPass := FRenderPass;
+
+    if (FPreRasterizationLibrary <> VK_NULL_HANDLE) and
+       (FFragmentShaderLibrary <> VK_NULL_HANDLE) then
+      CheckVk(vkCreateGraphicsPipelines(ADevice.Handle, ADevice.PipelineCache, 1, @PipelineInfo, nil, @FHandle), 'vkCreateGraphicsPipelines(GPL-Link)');
+    Exit;
+  end;
+
+  if ADevice.Handle = nil then Exit;
 
   { 2. Shader Stages }
   StageCount := 0;
@@ -1650,10 +1861,13 @@ end;
 
 destructor TVulkanRHIPipeline.Destroy;
 begin
-  if FHandle <> VK_NULL_HANDLE then
-    vkDestroyPipeline(TVulkanRHIDevice(Device).Handle, FHandle, nil);
-  if FPipelineLayout <> VK_NULL_HANDLE then
-    vkDestroyPipelineLayout(TVulkanRHIDevice(Device).Handle, FPipelineLayout, nil);
+  if (Device <> nil) and (TVulkanRHIDevice(Device).Handle <> nil) then
+  begin
+    if (FHandle <> VK_NULL_HANDLE) and Assigned(vkDestroyPipeline) then
+      vkDestroyPipeline(TVulkanRHIDevice(Device).Handle, FHandle, nil);
+    if (FPipelineLayout <> VK_NULL_HANDLE) and Assigned(vkDestroyPipelineLayout) then
+      vkDestroyPipelineLayout(TVulkanRHIDevice(Device).Handle, FPipelineLayout, nil);
+  end;
   inherited;
 end;
 
@@ -2171,6 +2385,10 @@ constructor TVulkanRHIDevice.Create(const ACreateSurfaceCallback: TVulkanCreateS
 begin
   inherited Create;
   FPipelineMap := TVulkanPipelineMap.Create([doOwnsValues]);
+  FVertexInputLibMap := TVulkanPipelineLibraryMap.Create;
+  FPreRasterLibMap := TVulkanPipelineLibraryMap.Create;
+  FFragmentShaderLibMap := TVulkanPipelineLibraryMap.Create;
+  FFragmentOutputLibMap := TVulkanPipelineLibraryMap.Create;
   FRenderPassMap := TVulkanRenderPassMap.Create;
   FFramebufferMap := TVulkanFramebufferMap.Create;
   FSupportsDynamicRendering := True;
@@ -2192,10 +2410,15 @@ end;
 constructor TVulkanRHIDevice.CreateHeadless(const APhysicalDevice: VkPhysicalDevice;
   const ASupportsMemoryBudgetExt: Boolean;
   const ASupportsDynamicRendering: Boolean;
-  const ADeviceApiVersion: Cardinal);
+  const ADeviceApiVersion: Cardinal;
+  const ASupportsGraphicsPipelineLibrary: Boolean);
 begin
   inherited Create;
   FPipelineMap := TVulkanPipelineMap.Create([doOwnsValues]);
+  FVertexInputLibMap := TVulkanPipelineLibraryMap.Create;
+  FPreRasterLibMap := TVulkanPipelineLibraryMap.Create;
+  FFragmentShaderLibMap := TVulkanPipelineLibraryMap.Create;
+  FFragmentOutputLibMap := TVulkanPipelineLibraryMap.Create;
   FRenderPassMap := TVulkanRenderPassMap.Create;
   FFramebufferMap := TVulkanFramebufferMap.Create;
   FCapabilities.Backend := rbVulkan;
@@ -2204,6 +2427,69 @@ begin
   FDeviceApiVersion := ADeviceApiVersion;
   FSupportsMemoryBudgetExt := ASupportsMemoryBudgetExt;
   FSupportsDynamicRendering := ASupportsDynamicRendering;
+  FSupportsGraphicsPipelineLibrary := ASupportsGraphicsPipelineLibrary;
+  FSupportsGPLFastLinking := ASupportsGraphicsPipelineLibrary;
+end;
+
+procedure TVulkanRHIDevice.ClearPipelineLibraries;
+
+  procedure DestroyMapPipelines(const AMap: TVulkanPipelineLibraryMap);
+  var
+    LibHandle: VkPipeline;
+  begin
+    if AMap = nil then Exit;
+    if (FDevice <> nil) and Assigned(vkDestroyPipeline) then
+    begin
+      for LibHandle in AMap.Values do
+        if LibHandle <> VK_NULL_HANDLE then
+          vkDestroyPipeline(FDevice, LibHandle, nil);
+    end;
+    AMap.Clear;
+  end;
+
+begin
+  DestroyMapPipelines(FVertexInputLibMap);
+  DestroyMapPipelines(FPreRasterLibMap);
+  DestroyMapPipelines(FFragmentShaderLibMap);
+  DestroyMapPipelines(FFragmentOutputLibMap);
+end;
+
+function TVulkanRHIDevice.GetVertexInputLibraryCount: Cardinal;
+begin
+  if FVertexInputLibMap <> nil then
+    Result := Cardinal(FVertexInputLibMap.Count)
+  else
+    Result := 0;
+end;
+
+function TVulkanRHIDevice.GetPreRasterizationLibraryCount: Cardinal;
+begin
+  if FPreRasterLibMap <> nil then
+    Result := Cardinal(FPreRasterLibMap.Count)
+  else
+    Result := 0;
+end;
+
+function TVulkanRHIDevice.GetFragmentShaderLibraryCount: Cardinal;
+begin
+  if FFragmentShaderLibMap <> nil then
+    Result := Cardinal(FFragmentShaderLibMap.Count)
+  else
+    Result := 0;
+end;
+
+function TVulkanRHIDevice.GetFragmentOutputLibraryCount: Cardinal;
+begin
+  if FFragmentOutputLibMap <> nil then
+    Result := Cardinal(FFragmentOutputLibMap.Count)
+  else
+    Result := 0;
+end;
+
+function TVulkanRHIDevice.GetTotalPipelineLibraryCount: Cardinal;
+begin
+  Result := GetVertexInputLibraryCount + GetPreRasterizationLibraryCount +
+    GetFragmentShaderLibraryCount + GetFragmentOutputLibraryCount;
 end;
 
 procedure TVulkanRHIDevice.ClearFallbackFramebuffers;
@@ -2258,6 +2544,11 @@ begin
   WaitIdle;
   DestroySwapchain;
   FreeAndNil(FPipelineMap);
+  ClearPipelineLibraries;
+  FreeAndNil(FVertexInputLibMap);
+  FreeAndNil(FPreRasterLibMap);
+  FreeAndNil(FFragmentShaderLibMap);
+  FreeAndNil(FFragmentOutputLibMap);
   ClearFallbackFramebuffers;
   ClearFallbackRenderPasses;
   FreeAndNil(FFramebufferMap);
@@ -2379,7 +2670,12 @@ var
   Devices: array of VkPhysicalDevice;
   Props, ChosenProps: VkPhysicalDeviceProperties;
   Features: VkPhysicalDeviceFeatures;
-  ReqDynRenderExts: TAnsiStringArray;
+  Features2: VkPhysicalDeviceFeatures2;
+  GplFeatures: VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT;
+  Props2: VkPhysicalDeviceProperties2;
+  GplProps: VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT;
+  HasGplFeature: Boolean;
+  ReqDynRenderExts, ReqGplExts: TAnsiStringArray;
 begin
   DeviceCount := 0;
   CheckVk(vkEnumeratePhysicalDevices(FInstance, @DeviceCount, nil), 'vkEnumeratePhysicalDevices(count)');
@@ -2418,12 +2714,47 @@ begin
     FSupportsDynamicRendering,
     ReqDynRenderExts);
 
-  WritelnLog('Vulkan', Format('Selected GPU "%s" (Vulkan %d.%d.%d, DynamicRendering=%s)', [
+  HasGplFeature := False;
+  FSupportsGPLFastLinking := False;
+  if IsDeviceExtensionSupported(VK_KHR_pipeline_library) and
+     IsDeviceExtensionSupported(VK_EXT_graphics_pipeline_library) and
+     Assigned(vkGetPhysicalDeviceFeatures2) then
+  begin
+    FillChar(GplFeatures, SizeOf(GplFeatures), 0);
+    GplFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT;
+    FillChar(Features2, SizeOf(Features2), 0);
+    Features2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    Features2.pNext := @GplFeatures;
+    vkGetPhysicalDeviceFeatures2(FPhysicalDevice, @Features2);
+    HasGplFeature := GplFeatures.graphicsPipelineLibrary = VK_TRUE;
+
+    if HasGplFeature and Assigned(vkGetPhysicalDeviceProperties2) then
+    begin
+      FillChar(GplProps, SizeOf(GplProps), 0);
+      GplProps.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_PROPERTIES_EXT;
+      FillChar(Props2, SizeOf(Props2), 0);
+      Props2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+      Props2.pNext := @GplProps;
+      vkGetPhysicalDeviceProperties2(FPhysicalDevice, @Props2);
+      FSupportsGPLFastLinking := GplProps.graphicsPipelineLibraryFastLinking = VK_TRUE;
+    end;
+  end;
+
+  ResolveGraphicsPipelineLibraryConfig(
+    FDeviceApiVersion,
+    IsDeviceExtensionSupported(VK_KHR_pipeline_library),
+    IsDeviceExtensionSupported(VK_EXT_graphics_pipeline_library),
+    HasGplFeature,
+    FSupportsGraphicsPipelineLibrary,
+    ReqGplExts);
+
+  WritelnLog('Vulkan', Format('Selected GPU "%s" (Vulkan %d.%d.%d, DynamicRendering=%s, GPL=%s)', [
     String(PAnsiChar(@ChosenProps.deviceName[0])),
     VK_VERSION_MAJOR(FDeviceApiVersion),
     VK_VERSION_MINOR(FDeviceApiVersion),
     VK_VERSION_PATCH(FDeviceApiVersion),
-    BoolToStr(FSupportsDynamicRendering, True)
+    BoolToStr(FSupportsDynamicRendering, True),
+    BoolToStr(FSupportsGraphicsPipelineLibrary, True)
   ]));
 
   FCapabilities.Backend := rbVulkan;
@@ -2474,8 +2805,9 @@ var
   QueueInfos: array[0..1] of VkDeviceQueueCreateInfo;
   QueuePriority: Single;
   DynRenderFeatures: VkPhysicalDeviceDynamicRenderingFeatures;
-  ReqDynRenderExts: TAnsiStringArray;
-  DeviceExts: array[0..7] of PAnsiChar;
+  GplFeatures: VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT;
+  ReqDynRenderExts, ReqGplExts: TAnsiStringArray;
+  DeviceExts: array[0..11] of PAnsiChar;
   CreateInfo: VkDeviceCreateInfo;
   CacheInfo: VkPipelineCacheCreateInfo;
 begin
@@ -2511,6 +2843,10 @@ begin
   DynRenderFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR;
   DynRenderFeatures.dynamicRendering := VK_TRUE;
 
+  FillChar(GplFeatures, SizeOf(GplFeatures), 0);
+  GplFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT;
+  GplFeatures.graphicsPipelineLibrary := VK_TRUE;
+
   DeviceExts[0] := VK_KHR_swapchain;
   ExtCount := 1;
   FSupportsMemoryBudgetExt := IsDeviceExtensionSupported(VK_EXT_memory_budget);
@@ -2540,13 +2876,33 @@ begin
     Inc(ExtCount);
   end;
 
+  ResolveGraphicsPipelineLibraryConfig(
+    FDeviceApiVersion,
+    IsDeviceExtensionSupported(VK_KHR_pipeline_library),
+    IsDeviceExtensionSupported(VK_EXT_graphics_pipeline_library),
+    FSupportsGraphicsPipelineLibrary,
+    FSupportsGraphicsPipelineLibrary,
+    ReqGplExts);
+
+  for I := 0 to High(ReqGplExts) do
+  begin
+    DeviceExts[ExtCount] := PAnsiChar(ReqGplExts[I]);
+    Inc(ExtCount);
+  end;
+
   FillChar(CreateInfo, SizeOf(CreateInfo), 0);
   CreateInfo.sType := VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
   if FSupportsDynamicRendering then
-    CreateInfo.pNext := @DynRenderFeatures
-  else
   begin
-    CreateInfo.pNext := nil;
+    CreateInfo.pNext := @DynRenderFeatures;
+    if FSupportsGraphicsPipelineLibrary then
+      DynRenderFeatures.pNext := @GplFeatures;
+  end else
+  begin
+    if FSupportsGraphicsPipelineLibrary then
+      CreateInfo.pNext := @GplFeatures
+    else
+      CreateInfo.pNext := nil;
     WritelnLog('Vulkan', Format('Device (Vulkan %d.%d) does not support VK_KHR_dynamic_rendering; using Vulkan 1.1/1.2 VkRenderPass / VkFramebuffer fallback.', [
       VK_VERSION_MAJOR(FDeviceApiVersion),
       VK_VERSION_MINOR(FDeviceApiVersion)
@@ -2577,6 +2933,364 @@ begin
     CacheInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
     CheckVk(vkCreatePipelineCache(FDevice, @CacheInfo, nil, @FPipelineCache), 'vkCreatePipelineCache');
   end;
+end;
+
+function TVulkanRHIDevice.GetOrCreateVertexInputLibrary(
+  const ADesc: TRHIGraphicsPipelineDesc): VkPipeline;
+var
+  KeyHash: UInt64;
+  VertexBindings: array of VkVertexInputBindingDescription;
+  VertexAttrs: array of VkVertexInputAttributeDescription;
+  VertexInputInfo: VkPipelineVertexInputStateCreateInfo;
+  InputAssembly: VkPipelineInputAssemblyStateCreateInfo;
+  GplInfo: VkGraphicsPipelineLibraryCreateInfoEXT;
+  PipelineInfo: VkGraphicsPipelineCreateInfo;
+  I: Integer;
+begin
+  KeyHash := ComputeVertexInputLibraryKeyHash(ADesc);
+  if (FVertexInputLibMap <> nil) and FVertexInputLibMap.TryGetValue(KeyHash, Result) then
+  begin
+    Inc(FGPLLibraryCacheHits);
+    Exit;
+  end;
+  Inc(FGPLLibraryCacheMisses);
+
+  SetLength(VertexBindings, Length(ADesc.VertexInput.Bindings));
+  for I := 0 to High(ADesc.VertexInput.Bindings) do
+  begin
+    VertexBindings[I].binding := ADesc.VertexInput.Bindings[I].Binding;
+    VertexBindings[I].stride := ADesc.VertexInput.Bindings[I].Stride;
+    if ADesc.VertexInput.Bindings[I].PerInstance then
+      VertexBindings[I].inputRate := VK_VERTEX_INPUT_RATE_INSTANCE
+    else
+      VertexBindings[I].inputRate := VK_VERTEX_INPUT_RATE_VERTEX;
+  end;
+
+  SetLength(VertexAttrs, Length(ADesc.VertexInput.Attributes));
+  for I := 0 to High(ADesc.VertexInput.Attributes) do
+  begin
+    VertexAttrs[I].location := ADesc.VertexInput.Attributes[I].Location;
+    VertexAttrs[I].binding := ADesc.VertexInput.Attributes[I].Binding;
+    VertexAttrs[I].format := RHIToVkVertexFormat(ADesc.VertexInput.Attributes[I].Format);
+    VertexAttrs[I].offset := ADesc.VertexInput.Attributes[I].Offset;
+  end;
+
+  FillChar(VertexInputInfo, SizeOf(VertexInputInfo), 0);
+  VertexInputInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+  VertexInputInfo.vertexBindingDescriptionCount := Length(VertexBindings);
+  if Length(VertexBindings) > 0 then
+    VertexInputInfo.pVertexBindingDescriptions := @VertexBindings[0];
+  VertexInputInfo.vertexAttributeDescriptionCount := Length(VertexAttrs);
+  if Length(VertexAttrs) > 0 then
+    VertexInputInfo.pVertexAttributeDescriptions := @VertexAttrs[0];
+
+  FillChar(InputAssembly, SizeOf(InputAssembly), 0);
+  InputAssembly.sType := VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+  InputAssembly.topology := RHIToVkTopology(ADesc.Topology);
+  InputAssembly.primitiveRestartEnable := VK_FALSE;
+
+  FillChar(GplInfo, SizeOf(GplInfo), 0);
+  GplInfo.sType := VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT;
+  GplInfo.flags := VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT;
+
+  FillChar(PipelineInfo, SizeOf(PipelineInfo), 0);
+  PipelineInfo.sType := VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  PipelineInfo.pNext := @GplInfo;
+  PipelineInfo.flags := VK_PIPELINE_CREATE_LIBRARY_BIT_KHR or
+    VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT;
+  PipelineInfo.pVertexInputState := @VertexInputInfo;
+  PipelineInfo.pInputAssemblyState := @InputAssembly;
+
+  Result := VK_NULL_HANDLE;
+  if (FDevice <> nil) and Assigned(vkCreateGraphicsPipelines) then
+    CheckVk(vkCreateGraphicsPipelines(FDevice, FPipelineCache, 1, @PipelineInfo, nil, @Result),
+      'vkCreateGraphicsPipelines(VertexInputLibrary)')
+  else
+  if FVertexInputLibMap <> nil then
+    Result := VkPipeline($10000000 + Cardinal(FVertexInputLibMap.Count) + 1);
+
+  if FVertexInputLibMap <> nil then
+    FVertexInputLibMap.AddOrSetValue(KeyHash, Result);
+end;
+
+function TVulkanRHIDevice.GetOrCreatePreRasterizationLibrary(
+  const ADesc: TRHIGraphicsPipelineDesc;
+  const ALayout: VkPipelineLayout;
+  const ARenderPass: VkRenderPass): VkPipeline;
+var
+  KeyHash: UInt64;
+  Stages: array[0..1] of VkPipelineShaderStageCreateInfo;
+  StageCount: Cardinal;
+  ViewportState: VkPipelineViewportStateCreateInfo;
+  Rasterizer: VkPipelineRasterizationStateCreateInfo;
+  DynamicStates: array[0..2] of VkDynamicState;
+  DynamicStateInfo: VkPipelineDynamicStateCreateInfo;
+  RenderingInfo: VkPipelineRenderingCreateInfoKHR;
+  GplInfo: VkGraphicsPipelineLibraryCreateInfoEXT;
+  PipelineInfo: VkGraphicsPipelineCreateInfo;
+begin
+  KeyHash := ComputePreRasterizationLibraryKeyHash(ADesc);
+  if (FPreRasterLibMap <> nil) and FPreRasterLibMap.TryGetValue(KeyHash, Result) then
+  begin
+    Inc(FGPLLibraryCacheHits);
+    Exit;
+  end;
+  Inc(FGPLLibraryCacheMisses);
+
+  StageCount := 0;
+  FillChar(Stages, SizeOf(Stages), 0);
+  if (ADesc.VertexShader <> nil) and ((ADesc.VertexShader as TVulkanRHIShaderModule).Handle <> VK_NULL_HANDLE) then
+  begin
+    Stages[StageCount].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    Stages[StageCount].stage := VK_SHADER_STAGE_VERTEX_BIT;
+    Stages[StageCount].module := (ADesc.VertexShader as TVulkanRHIShaderModule).Handle;
+    Stages[StageCount].pName := 'main';
+    Inc(StageCount);
+  end;
+  if (ADesc.GeometryShader <> nil) and ((ADesc.GeometryShader as TVulkanRHIShaderModule).Handle <> VK_NULL_HANDLE) then
+  begin
+    Stages[StageCount].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    Stages[StageCount].stage := VK_SHADER_STAGE_GEOMETRY_BIT;
+    Stages[StageCount].module := (ADesc.GeometryShader as TVulkanRHIShaderModule).Handle;
+    Stages[StageCount].pName := 'main';
+    Inc(StageCount);
+  end;
+
+  FillChar(ViewportState, SizeOf(ViewportState), 0);
+  ViewportState.sType := VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+  ViewportState.viewportCount := 1;
+  ViewportState.scissorCount := 1;
+
+  FillChar(Rasterizer, SizeOf(Rasterizer), 0);
+  Rasterizer.sType := VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+  Rasterizer.depthClampEnable := Ord(ADesc.Rasterizer.DepthClampEnable);
+  Rasterizer.rasterizerDiscardEnable := VK_FALSE;
+  Rasterizer.polygonMode := RHIToVkPolygonMode(ADesc.Rasterizer.PolygonMode);
+  Rasterizer.cullMode := RHIToVkCullMode(ADesc.Rasterizer.CullMode);
+  Rasterizer.frontFace := RHIToVkFrontFace(ADesc.Rasterizer.FrontFace);
+  Rasterizer.depthBiasEnable := Ord(ADesc.Rasterizer.DepthBiasEnable);
+  Rasterizer.lineWidth := 1.0;
+
+  DynamicStates[0] := VK_DYNAMIC_STATE_VIEWPORT;
+  DynamicStates[1] := VK_DYNAMIC_STATE_SCISSOR;
+  DynamicStates[2] := VK_DYNAMIC_STATE_DEPTH_BIAS;
+  FillChar(DynamicStateInfo, SizeOf(DynamicStateInfo), 0);
+  DynamicStateInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+  if ADesc.Rasterizer.DepthBiasEnable then
+    DynamicStateInfo.dynamicStateCount := 3
+  else
+    DynamicStateInfo.dynamicStateCount := 2;
+  DynamicStateInfo.pDynamicStates := @DynamicStates[0];
+
+  FillChar(RenderingInfo, SizeOf(RenderingInfo), 0);
+  RenderingInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
+
+  FillChar(GplInfo, SizeOf(GplInfo), 0);
+  GplInfo.sType := VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT;
+  GplInfo.flags := VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT;
+  if FSupportsDynamicRendering then
+    GplInfo.pNext := @RenderingInfo;
+
+  FillChar(PipelineInfo, SizeOf(PipelineInfo), 0);
+  PipelineInfo.sType := VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  PipelineInfo.pNext := @GplInfo;
+  PipelineInfo.flags := VK_PIPELINE_CREATE_LIBRARY_BIT_KHR or
+    VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT;
+  PipelineInfo.stageCount := StageCount;
+  if StageCount > 0 then
+    PipelineInfo.pStages := @Stages[0];
+  PipelineInfo.pViewportState := @ViewportState;
+  PipelineInfo.pRasterizationState := @Rasterizer;
+  PipelineInfo.pDynamicState := @DynamicStateInfo;
+  PipelineInfo.layout := ALayout;
+  if not FSupportsDynamicRendering then
+    PipelineInfo.renderPass := ARenderPass;
+
+  Result := VK_NULL_HANDLE;
+  if (FDevice <> nil) and Assigned(vkCreateGraphicsPipelines) and (StageCount > 0) then
+    CheckVk(vkCreateGraphicsPipelines(FDevice, FPipelineCache, 1, @PipelineInfo, nil, @Result),
+      'vkCreateGraphicsPipelines(PreRasterizationLibrary)')
+  else
+  if (FDevice = nil) and (FPreRasterLibMap <> nil) then
+    Result := VkPipeline($20000000 + Cardinal(FPreRasterLibMap.Count) + 1);
+
+  if FPreRasterLibMap <> nil then
+    FPreRasterLibMap.AddOrSetValue(KeyHash, Result);
+end;
+
+function TVulkanRHIDevice.GetOrCreateFragmentShaderLibrary(
+  const ADesc: TRHIGraphicsPipelineDesc;
+  const ALayout: VkPipelineLayout;
+  const ARenderPass: VkRenderPass): VkPipeline;
+var
+  KeyHash: UInt64;
+  Stage: VkPipelineShaderStageCreateInfo;
+  StageCount: Cardinal;
+  DepthStencil: VkPipelineDepthStencilStateCreateInfo;
+  Multisampling: VkPipelineMultisampleStateCreateInfo;
+  RenderingInfo: VkPipelineRenderingCreateInfoKHR;
+  GplInfo: VkGraphicsPipelineLibraryCreateInfoEXT;
+  PipelineInfo: VkGraphicsPipelineCreateInfo;
+begin
+  KeyHash := ComputeFragmentShaderLibraryKeyHash(ADesc);
+  if (FFragmentShaderLibMap <> nil) and FFragmentShaderLibMap.TryGetValue(KeyHash, Result) then
+  begin
+    Inc(FGPLLibraryCacheHits);
+    Exit;
+  end;
+  Inc(FGPLLibraryCacheMisses);
+
+  StageCount := 0;
+  FillChar(Stage, SizeOf(Stage), 0);
+  if (ADesc.FragmentShader <> nil) and ((ADesc.FragmentShader as TVulkanRHIShaderModule).Handle <> VK_NULL_HANDLE) then
+  begin
+    Stage.sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    Stage.stage := VK_SHADER_STAGE_FRAGMENT_BIT;
+    Stage.module := (ADesc.FragmentShader as TVulkanRHIShaderModule).Handle;
+    Stage.pName := 'main';
+    StageCount := 1;
+  end;
+
+  FillChar(DepthStencil, SizeOf(DepthStencil), 0);
+  DepthStencil.sType := VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+  DepthStencil.depthTestEnable := Ord(ADesc.DepthStencil.DepthTestEnable);
+  DepthStencil.depthWriteEnable := Ord(ADesc.DepthStencil.DepthWriteEnable);
+  DepthStencil.depthCompareOp := RHIToVkCompareOp(ADesc.DepthStencil.DepthCompareOp);
+  DepthStencil.stencilTestEnable := Ord(ADesc.DepthStencil.StencilTestEnable);
+
+  FillChar(Multisampling, SizeOf(Multisampling), 0);
+  Multisampling.sType := VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+  if ADesc.SampleCount > 1 then
+    Multisampling.rasterizationSamples := ADesc.SampleCount
+  else
+    Multisampling.rasterizationSamples := VK_SAMPLE_COUNT_1_BIT;
+
+  FillChar(RenderingInfo, SizeOf(RenderingInfo), 0);
+  RenderingInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
+  RenderingInfo.depthAttachmentFormat := RHIToVkFormat(ADesc.DepthAttachmentFormat);
+
+  FillChar(GplInfo, SizeOf(GplInfo), 0);
+  GplInfo.sType := VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT;
+  GplInfo.flags := VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT;
+  if FSupportsDynamicRendering then
+    GplInfo.pNext := @RenderingInfo;
+
+  FillChar(PipelineInfo, SizeOf(PipelineInfo), 0);
+  PipelineInfo.sType := VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  PipelineInfo.pNext := @GplInfo;
+  PipelineInfo.flags := VK_PIPELINE_CREATE_LIBRARY_BIT_KHR or
+    VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT;
+  PipelineInfo.stageCount := StageCount;
+  if StageCount > 0 then
+    PipelineInfo.pStages := @Stage;
+  PipelineInfo.pDepthStencilState := @DepthStencil;
+  PipelineInfo.pMultisampleState := @Multisampling;
+  PipelineInfo.layout := ALayout;
+  if not FSupportsDynamicRendering then
+    PipelineInfo.renderPass := ARenderPass;
+
+  Result := VK_NULL_HANDLE;
+  if (FDevice <> nil) and Assigned(vkCreateGraphicsPipelines) and
+     ((StageCount > 0) or (ADesc.FragmentShader = nil)) then
+    CheckVk(vkCreateGraphicsPipelines(FDevice, FPipelineCache, 1, @PipelineInfo, nil, @Result),
+      'vkCreateGraphicsPipelines(FragmentShaderLibrary)')
+  else
+  if (FDevice = nil) and (FFragmentShaderLibMap <> nil) then
+    Result := VkPipeline($30000000 + Cardinal(FFragmentShaderLibMap.Count) + 1);
+
+  if FFragmentShaderLibMap <> nil then
+    FFragmentShaderLibMap.AddOrSetValue(KeyHash, Result);
+end;
+
+function TVulkanRHIDevice.GetOrCreateFragmentOutputLibrary(
+  const ADesc: TRHIGraphicsPipelineDesc;
+  const ARenderPass: VkRenderPass): VkPipeline;
+var
+  KeyHash: UInt64;
+  BlendAttachments: array of VkPipelineColorBlendAttachmentState;
+  ColorBlending: VkPipelineColorBlendStateCreateInfo;
+  Multisampling: VkPipelineMultisampleStateCreateInfo;
+  ColorFormats: array of VkFormat;
+  RenderingInfo: VkPipelineRenderingCreateInfoKHR;
+  GplInfo: VkGraphicsPipelineLibraryCreateInfoEXT;
+  PipelineInfo: VkGraphicsPipelineCreateInfo;
+  I: Integer;
+begin
+  KeyHash := ComputeFragmentOutputLibraryKeyHash(ADesc);
+  if (FFragmentOutputLibMap <> nil) and FFragmentOutputLibMap.TryGetValue(KeyHash, Result) then
+  begin
+    Inc(FGPLLibraryCacheHits);
+    Exit;
+  end;
+  Inc(FGPLLibraryCacheMisses);
+
+  SetLength(BlendAttachments, Max(1, Length(ADesc.ColorAttachmentFormats)));
+  for I := 0 to High(BlendAttachments) do
+  begin
+    FillChar(BlendAttachments[I], SizeOf(VkPipelineColorBlendAttachmentState), 0);
+    BlendAttachments[I].blendEnable := Ord(ADesc.BlendState.BlendEnable);
+    BlendAttachments[I].srcColorBlendFactor := RHIToVkBlendFactor(ADesc.BlendState.SrcColorBlendFactor);
+    BlendAttachments[I].dstColorBlendFactor := RHIToVkBlendFactor(ADesc.BlendState.DstColorBlendFactor);
+    BlendAttachments[I].colorBlendOp := RHIToVkBlendOp(ADesc.BlendState.ColorBlendOp);
+    BlendAttachments[I].srcAlphaBlendFactor := RHIToVkBlendFactor(ADesc.BlendState.SrcAlphaBlendFactor);
+    BlendAttachments[I].dstAlphaBlendFactor := RHIToVkBlendFactor(ADesc.BlendState.DstAlphaBlendFactor);
+    BlendAttachments[I].alphaBlendOp := RHIToVkBlendOp(ADesc.BlendState.AlphaBlendOp);
+    if ADesc.BlendState.ColorWriteMask <> 0 then
+      BlendAttachments[I].colorWriteMask := ADesc.BlendState.ColorWriteMask
+    else
+      BlendAttachments[I].colorWriteMask := $0F;
+  end;
+
+  FillChar(ColorBlending, SizeOf(ColorBlending), 0);
+  ColorBlending.sType := VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+  ColorBlending.attachmentCount := Length(BlendAttachments);
+  if Length(BlendAttachments) > 0 then
+    ColorBlending.pAttachments := @BlendAttachments[0];
+
+  FillChar(Multisampling, SizeOf(Multisampling), 0);
+  Multisampling.sType := VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+  if ADesc.SampleCount > 1 then
+    Multisampling.rasterizationSamples := ADesc.SampleCount
+  else
+    Multisampling.rasterizationSamples := VK_SAMPLE_COUNT_1_BIT;
+
+  SetLength(ColorFormats, Length(ADesc.ColorAttachmentFormats));
+  for I := 0 to High(ADesc.ColorAttachmentFormats) do
+    ColorFormats[I] := RHIToVkFormat(ADesc.ColorAttachmentFormats[I]);
+
+  FillChar(RenderingInfo, SizeOf(RenderingInfo), 0);
+  RenderingInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
+  RenderingInfo.colorAttachmentCount := Length(ColorFormats);
+  if Length(ColorFormats) > 0 then
+    RenderingInfo.pColorAttachmentFormats := @ColorFormats[0];
+  RenderingInfo.depthAttachmentFormat := RHIToVkFormat(ADesc.DepthAttachmentFormat);
+
+  FillChar(GplInfo, SizeOf(GplInfo), 0);
+  GplInfo.sType := VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT;
+  GplInfo.flags := VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT;
+  if FSupportsDynamicRendering then
+    GplInfo.pNext := @RenderingInfo;
+
+  FillChar(PipelineInfo, SizeOf(PipelineInfo), 0);
+  PipelineInfo.sType := VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  PipelineInfo.pNext := @GplInfo;
+  PipelineInfo.flags := VK_PIPELINE_CREATE_LIBRARY_BIT_KHR or
+    VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT;
+  PipelineInfo.pColorBlendState := @ColorBlending;
+  PipelineInfo.pMultisampleState := @Multisampling;
+  if not FSupportsDynamicRendering then
+    PipelineInfo.renderPass := ARenderPass;
+
+  Result := VK_NULL_HANDLE;
+  if (FDevice <> nil) and Assigned(vkCreateGraphicsPipelines) then
+    CheckVk(vkCreateGraphicsPipelines(FDevice, FPipelineCache, 1, @PipelineInfo, nil, @Result),
+      'vkCreateGraphicsPipelines(FragmentOutputLibrary)')
+  else
+  if FFragmentOutputLibMap <> nil then
+    Result := VkPipeline($40000000 + Cardinal(FFragmentOutputLibMap.Count) + 1);
+
+  if FFragmentOutputLibMap <> nil then
+    FFragmentOutputLibMap.AddOrSetValue(KeyHash, Result);
 end;
 
 function TVulkanRHIDevice.GetOrCreateFallbackRenderPass(

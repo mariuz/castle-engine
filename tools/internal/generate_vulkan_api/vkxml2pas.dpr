@@ -549,6 +549,7 @@ begin
      (CType = 'VkFilter') or
      (CType = 'VkSamplerMipmapMode') or
      (CType = 'VkSamplerAddressMode') or
+     (CType = 'VkGraphicsPipelineLibraryFlagsEXT') or
      (CType = 'VkInstance') or
      (CType = 'VkPhysicalDevice') or
      (CType = 'VkDevice') or
@@ -1013,7 +1014,7 @@ const
     'VK_FENCE_CREATE_SIGNALED_BIT'
   );
 
-  OrderedEnums3: array[0..32] of String = (
+  OrderedEnums3: array[0..46] of String = (
     'VK_INDEX_TYPE_UINT16',
     'VK_INDEX_TYPE_UINT32',
     'VK_IMAGE_ASPECT_COLOR_BIT',
@@ -1046,7 +1047,22 @@ const
     'VK_SUBPASS_CONTENTS_INLINE',
     'VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS',
     'VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK',
-    'VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE'
+    'VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE',
+    // VK_EXT_graphics_pipeline_library & VK_KHR_pipeline_library
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2',
+    'VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_PROPERTIES_EXT',
+    'VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT',
+    'VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT',
+    'VK_PIPELINE_CREATE_LIBRARY_BIT_KHR',
+    'VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT',
+    'VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT',
+    'VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT',
+    'VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT',
+    'VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT',
+    'VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT'
   );
 
   OrderedStructs: array[0..77] of String = (
@@ -1130,7 +1146,7 @@ const
     'VkBufferMemoryBarrier'
   );
 
-  OrderedStructs2: array[0..12] of String = (
+  OrderedStructs2: array[0..18] of String = (
     'VkImageMemoryBarrier',
     'VkBufferCopy',
     'VkImageSubresourceLayers',
@@ -1143,7 +1159,13 @@ const
     'VkImageBlit',
     'VkDrawIndirectCommand',
     'VkDrawIndexedIndirectCommand',
-    'VkPipelineCacheCreateInfo'
+    'VkPipelineCacheCreateInfo',
+    'VkPhysicalDeviceFeatures2',
+    'VkPhysicalDeviceProperties2',
+    'VkPipelineLibraryCreateInfoKHR',
+    'VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT',
+    'VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT',
+    'VkGraphicsPipelineLibraryCreateInfoEXT'
   );
 
   OrderedCommands: array[0..94] of String = (
@@ -1244,8 +1266,10 @@ const
     'vkCmdDrawIndirect'
   );
 
-  OrderedCommands2: array[0..7] of String = (
+  OrderedCommands2: array[0..9] of String = (
     'vkEnumerateInstanceVersion',
+    'vkGetPhysicalDeviceFeatures2',
+    'vkGetPhysicalDeviceProperties2',
     'vkCmdDrawIndexedIndirect',
     'vkCmdSetDepthBias',
     'vkCreatePipelineCache',
@@ -1255,11 +1279,13 @@ const
     'vkCmdExecuteCommands'
   );
 
-  InstanceCommands: array[0..14] of String = (
+  InstanceCommands: array[0..16] of String = (
     'vkDestroyInstance',
     'vkEnumeratePhysicalDevices',
     'vkGetPhysicalDeviceFeatures',
+    'vkGetPhysicalDeviceFeatures2',
     'vkGetPhysicalDeviceProperties',
+    'vkGetPhysicalDeviceProperties2',
     'vkGetPhysicalDeviceQueueFamilyProperties',
     'vkGetPhysicalDeviceMemoryProperties',
     'vkGetPhysicalDeviceMemoryProperties2',
@@ -1334,6 +1360,7 @@ begin
     L.Add('');
     L.Add('  { Extension and Layer Names }');
     L.Add('  VK_EXT_debug_utils = ''VK_EXT_debug_utils'';');
+    L.Add('  VK_EXT_graphics_pipeline_library = ''VK_EXT_graphics_pipeline_library'';');
     L.Add('  VK_EXT_memory_budget = ''VK_EXT_memory_budget'';');
     L.Add('  VK_KHR_create_renderpass2 = ''VK_KHR_create_renderpass2'';');
     L.Add('  VK_KHR_depth_stencil_resolve = ''VK_KHR_depth_stencil_resolve'';');
@@ -1342,6 +1369,7 @@ begin
     L.Add('  VK_KHR_maintenance1 = ''VK_KHR_maintenance1'';');
     L.Add('  VK_KHR_maintenance2 = ''VK_KHR_maintenance2'';');
     L.Add('  VK_KHR_multiview = ''VK_KHR_multiview'';');
+    L.Add('  VK_KHR_pipeline_library = ''VK_KHR_pipeline_library'';');
     L.Add('  VK_KHR_swapchain = ''VK_KHR_swapchain'';');
     L.Add('  VK_LAYER_KHRONOS_validation = ''VK_LAYER_KHRONOS_validation'';');
     L.Add('');
@@ -1379,6 +1407,7 @@ begin
     L.Add('  VkFilter = Integer;');
     L.Add('  VkSamplerMipmapMode = Integer;');
     L.Add('  VkSamplerAddressMode = Integer;');
+    L.Add('  VkGraphicsPipelineLibraryFlagsEXT = VkFlags;');
     L.Add('');
     L.Add('  { Pointers to primitive types }');
     L.Add('  PCardinal = ^Cardinal;');
@@ -1600,10 +1629,12 @@ begin
     begin
       CmdName := InstanceCommands[I];
       L.Add(Format('  Pointer(%s) := vkGetInstanceProcAddr(Instance, ''%s'');', [CmdName, CmdName]));
-      if CmdName = 'vkGetPhysicalDeviceMemoryProperties2' then
+      if (CmdName = 'vkGetPhysicalDeviceFeatures2') or
+         (CmdName = 'vkGetPhysicalDeviceProperties2') or
+         (CmdName = 'vkGetPhysicalDeviceMemoryProperties2') then
       begin
-        L.Add('  if not Assigned(vkGetPhysicalDeviceMemoryProperties2) then');
-        L.Add('    Pointer(vkGetPhysicalDeviceMemoryProperties2) := vkGetInstanceProcAddr(Instance, ''vkGetPhysicalDeviceMemoryProperties2KHR'');');
+        L.Add(Format('  if not Assigned(%s) then', [CmdName]));
+        L.Add(Format('    Pointer(%s) := vkGetInstanceProcAddr(Instance, ''%sKHR'');', [CmdName, CmdName]));
       end;
     end;
     L.Add('end;');
