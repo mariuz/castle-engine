@@ -396,6 +396,7 @@ uses Math, StrUtils, URIParser, TypInfo,
 {$I auto_generated_node_helpers/x3dnodes_cylinder.inc}
 {$I auto_generated_node_helpers/x3dnodes_cylinder_1.inc}
 {$I auto_generated_node_helpers/x3dnodes_cylindersensor.inc}
+{$I auto_generated_node_helpers/x3dnodes_depthmode.inc}
 {$I auto_generated_node_helpers/x3dnodes_directionallight.inc}
 {$I auto_generated_node_helpers/x3dnodes_directionallight_1.inc}
 {$I auto_generated_node_helpers/x3dnodes_disk2d.inc}

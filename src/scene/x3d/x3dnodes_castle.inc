@@ -30,6 +30,34 @@
   {$I auto_generated_node_helpers/x3dnodes_blendmode.inc}
   end;
 
+  { Possible values of @link(TDepthModeNode.DepthFunc). }
+  TDepthModeFunction = (
+    { The renderer chooses the depth function, usually "less"
+      (passes when the shape is closer than the depth buffer). }
+    dmfDefault,
+    dmfNever,
+    dmfLess,
+    dmfEqual,
+    dmfLessEqual,
+    dmfGreater,
+    dmfNotEqual,
+    dmfGreaterEqual,
+    dmfAlways
+  );
+
+  { Customize the depth test of a shape: the depth function and polygon offset.
+    Place it in @link(TAppearanceNode.DepthMode).
+
+    Useful to render several coplanar shapes (layers) over each other,
+    for example multi-pass materials (the next layers with "lequal" or "equal")
+    and decals (with a negative polygon offset).
+    Note that the shapes using "lequal" or "equal" need the shape under them
+    to be rendered first: this is natural for shapes with blending,
+    rendered after all opaque shapes. }
+  TDepthModeNode = class(TAbstractAppearanceChildNode)
+  {$I auto_generated_node_helpers/x3dnodes_depthmode.inc}
+  end;
+
   { Appearance node with a special name @code(KambiAppearance).
     Useful if you want to use EXTERNPROTO to declare Castle Game Engine
     extensions the Appearance in a clean way. }
@@ -426,6 +454,18 @@ end;
    to override it's transform with transformation of a GeneratedShadowMap. }
 
 const
+  DepthModeFunctionNames: array [TDepthModeFunction] of string = (
+    'default',
+    'never',
+    'less',
+    'equal',
+    'lequal',
+    'greater',
+    'notequal',
+    'gequal',
+    'always'
+  );
+
   CompareModeNames: array [TShadowMapCompareMode] of string = (
     'COMPARE_R_LEQUAL',
     'COMPARE_R_GEQUAL',
@@ -1340,6 +1380,7 @@ begin
   NodesManager.RegisterNodeClasses([
     TText3DNode,
     TBlendModeNode,
+    TDepthModeNode,
     TKambiAppearanceNode,
     TKambiInlineNode,
     TKambiNavigationInfoNode,

@@ -166,6 +166,12 @@ Appearance : X3DAppearanceNode {
     is-extension: true
     doc: Determines the exact blending equation used, in case @link(AlphaMode) indicates blending. See https://castle-engine.io/x3d_extensions.php#section_ext_blending .
 
+  SFNode     [in,out]      depthMode        NULL
+    range: DepthMode
+    change: chRedisplay
+    is-extension: true
+    doc: Depth test function and polygon offset of this shape, e.g. to render coplanar layers and decals. See @link(TDepthModeNode).
+
   MFNode     []            effects          []
     range: Effect
     change: chEverything

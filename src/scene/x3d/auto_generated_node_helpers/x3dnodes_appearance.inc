@@ -58,6 +58,8 @@
     procedure SetHeightMapScale(const Value: Single);
     function GetBlendMode: TBlendModeNode;
     procedure SetBlendMode(const Value: TBlendModeNode);
+    function GetDepthMode: TDepthModeNode;
+    procedure SetDepthMode(const Value: TDepthModeNode);
     function GetAlphaChannel: TAutoAlphaChannel;
     procedure SetAlphaChannel(const Value: TAutoAlphaChannel);
   public
@@ -174,6 +176,12 @@
     public property FdBlendMode: TSFNode read FFdBlendMode;
     { Determines the exact blending equation used, in case @link(AlphaMode) indicates blending. See https://castle-engine.io/x3d_extensions.php }
     property BlendMode: TBlendModeNode read GetBlendMode write SetBlendMode;
+
+    strict private FFdDepthMode: TSFNode;
+    { Internal wrapper for property @code(DepthMode). This wrapper API may change, we advise to access simpler @code(DepthMode) instead, if it is defined (TODO: for now, some field types do not have a simpler counterpart). }
+    public property FdDepthMode: TSFNode read FFdDepthMode;
+    { Depth test function and polygon offset of this shape, e.g. to render coplanar layers and decals. See @link(TDepthModeNode). }
+    property DepthMode: TDepthModeNode read GetDepthMode write SetDepthMode;
 
     strict private FFdEffects: TMFNode;
     { Internal wrapper for property @code(Effects). This wrapper API may change, we advise to access simpler @code(Effects) instead, if it is defined (TODO: for now, some field types do not have a simpler counterpart). }
@@ -405,6 +413,19 @@ begin
   FdBlendMode.Send(Value);
 end;
 
+function TAppearanceNode.GetDepthMode: TDepthModeNode;
+begin
+  if FdDepthMode.Value is TDepthModeNode then
+    Result := TDepthModeNode(FdDepthMode.Value)
+  else
+    Result := nil;
+end;
+
+procedure TAppearanceNode.SetDepthMode(const Value: TDepthModeNode);
+begin
+  FdDepthMode.Send(Value);
+end;
+
 procedure TAppearanceNode.SetEffects(const Value: array of TEffectNode);
 var
   L: Integer;
@@ -510,6 +531,10 @@ begin
    FdBlendMode.ChangeAlways := chEverything;
   AddField(FFdBlendMode);
 
+  FFdDepthMode := TSFNode.Create(Self, True, 'depthMode', [TDepthModeNode]);
+   FdDepthMode.ChangeAlways := chRedisplay;
+  AddField(FFdDepthMode);
+
   FFdEffects := TMFNode.Create(Self, False, 'effects', [TEffectNode]);
    FdEffects.ChangeAlways := chEverything;
   AddField(FFdEffects);
@@ -538,6 +563,8 @@ begin
     ExtensionNames.Add(X3DType + '.' + FdHeightMapScale.X3DName);
   if not FdBlendMode.EqualsDefaultValue then
     ExtensionNames.Add(X3DType + '.' + FdBlendMode.X3DName);
+  if not FdDepthMode.EqualsDefaultValue then
+    ExtensionNames.Add(X3DType + '.' + FdDepthMode.X3DName);
   if not FdEffects.EqualsDefaultValue then
     ExtensionNames.Add(X3DType + '.' + FdEffects.X3DName);
   if not FdAlphaChannel.EqualsDefaultValue then
