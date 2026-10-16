@@ -177,7 +177,15 @@ begin
     in case waiting on "ValidArea(Event.Position, Middle, 1 / 8)" is not reliable.
   }
   if FWaitingForMiddle and ValidArea(Event.Position, Middle, 1 / 8) then
+  begin
+    if Container.SettingMousePositionCausesMotion and
+       (PointsDistanceSqr(Result, FMotionToSubtract) < Result.LengthSqr) then
+    begin
+      Result := Result - FMotionToSubtract;
+    end;
     FWaitingForMiddle := false;
+    FMotionToSubtract := TVector2.Zero;
+  end;
 
   if (not FWaitingForMiddle) and Container.SettingMousePositionCausesMotion then
   begin

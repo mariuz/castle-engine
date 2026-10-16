@@ -138,6 +138,8 @@ type
       FOnBoundNavigationInfoChanged: TNotifyEvent;
       FMouseRayHit: TRayCollision;
       FMouseRayHitValid: Boolean;
+      FInMotion: Boolean;
+      FMotionPosition: TVector2;
       MouseRayOrigin, MouseRayDirection: TVector3;
       FAvoidNavigationCollisions: TCastleTransform;
       PrepareResourcesDone: Boolean;
@@ -2097,37 +2099,45 @@ begin
   Result := inherited;
   if (not Result) and (not Items.Paused) then
   begin
-    {$warnings off} // TODO: using deprecated Navigation for now
-    if Navigation <> nil then
-    begin
-      TopMostTransform := TransformUnderMouse;
+    FInMotion := true;
+    FMotionPosition := Event.Position;
+    try
+      ClearMouseRayHit;
 
-      { Test if dragging TTouchSensorNode. In that case cancel its dragging
-        and let navigation move instead. }
-      if (TopMostTransform <> nil) and
-         IsTouchSensorActiveInScene(TopMostTransform) and
-         (PointsDistance(LastPressEvent.Position, Event.Position) >
-          DistanceToHijackDragging / Container.Dpi) then
+      {$warnings off} // TODO: using deprecated Navigation for now
+      if Navigation <> nil then
       begin
-        PointingDeviceCancel(TopMostTransform);
+        TopMostTransform := TransformUnderMouse;
 
-        if EnableParentDragging then
+        { Test if dragging TTouchSensorNode. In that case cancel its dragging
+          and let navigation move instead. }
+        if (TopMostTransform <> nil) and
+           IsTouchSensorActiveInScene(TopMostTransform) and
+           (PointsDistance(LastPressEvent.Position, Event.Position) >
+            DistanceToHijackDragging / Container.Dpi) then
         begin
-          { Without ReleaseCapture, the parent (like TCastleScrollView) would still
-            not receive the following motion events. }
-          Container.ReleaseCapture(Navigation);
+          PointingDeviceCancel(TopMostTransform);
+
+          if EnableParentDragging then
+          begin
+            { Without ReleaseCapture, the parent (like TCastleScrollView) would still
+              not receive the following motion events. }
+            Container.ReleaseCapture(Navigation);
+          end;
+
+          Navigation.Press(LastPressEvent);
         end;
-
-        Navigation.Press(LastPressEvent);
       end;
-    end;
-    {$warnings on}
+      {$warnings on}
 
-    { Note: we ignore PointingDeviceMove result.
-      Maybe we should use PointingDeviceMove result as our Motion result?
-      Answer unknown. Historically we do not do this, and I found no practical
-      use-case when it would be useful to do this. }
-    PointingDeviceMove;
+      { Note: we ignore PointingDeviceMove result.
+        Maybe we should use PointingDeviceMove result as our Motion result?
+        Answer unknown. Historically we do not do this, and I found no practical
+        use-case when it would be useful to do this. }
+      PointingDeviceMove;
+    finally
+      FInMotion := false;
+    end;
   end;
 end;
 
@@ -3735,6 +3745,9 @@ begin
        TCastleMouseLookNavigation(Navigation).InternalUsingMouseLook then
     {$warnings on}
       MousePosition := RenderRect.Center
+    else
+    if FInMotion then
+      MousePosition := FMotionPosition
     else
       MousePosition := C.MousePosition;
   end;

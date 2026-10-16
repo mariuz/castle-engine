@@ -197,6 +197,7 @@ type
   published
     property RotationAccelerate default false;
     property CheckCollisions default false;
+    property Turntable default true;
   end;
 
 constructor TCastleExamineNavigationDesign.Create(AOwner: TComponent);
@@ -204,17 +205,24 @@ begin
   inherited;
   RotationAccelerate := false;
   CheckCollisions := false;
+  Turntable := true;
 
-  { rotate with right mouse button, no modifiers }
+  { rotate with right mouse button (no modifiers) or Alt + left mouse button }
   Input_Rotate.MouseButton := buttonRight;
-  Input_Rotate.MouseButtonCheckModifiers := [mkShift, mkCtrl];
+  Input_Rotate.MouseButtonCheckModifiers := [mkShift, mkCtrl, mkAlt];
   Input_Rotate.MouseButtonModifiers := [];
-  Input_Rotate.MouseButton2Use := false;
-  { move with right mouse button, Shift }
+  Input_Rotate.MouseButton2Use := true;
+  Input_Rotate.MouseButton2 := buttonLeft;
+  Input_Rotate.MouseButton2CheckModifiers := [mkShift, mkCtrl, mkAlt];
+  Input_Rotate.MouseButton2Modifiers := [mkAlt];
+  { move with Shift + right mouse button or middle mouse button }
   Input_Move.MouseButton := buttonRight;
-  Input_Move.MouseButtonCheckModifiers := [mkShift, mkCtrl];
+  Input_Move.MouseButtonCheckModifiers := [mkShift, mkCtrl, mkAlt];
   Input_Move.MouseButtonModifiers := [mkShift];
-  Input_Move.MouseButton2Use := false;
+  Input_Move.MouseButton2Use := true;
+  Input_Move.MouseButton2 := buttonMiddle;
+  Input_Move.MouseButton2CheckModifiers := [mkShift, mkCtrl, mkAlt];
+  Input_Move.MouseButton2Modifiers := [];
   { no mouse dragging for zoom (but still you can do zoom with mouse wheel) }
   Input_Zoom.MakeClear;
 end;

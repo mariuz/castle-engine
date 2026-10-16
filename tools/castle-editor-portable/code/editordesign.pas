@@ -23,7 +23,7 @@ interface
 uses Classes,
   CastleVectors, CastleComponentSerialize, CastleInternalInspector,
   CastleUIControls, CastleControls, CastleKeysMouse, CastleFindFiles,
-  CastleTransformManipulate, CastleClassUtils;
+  CastleTransformManipulate, CastleClassUtils, CastleViewport;
 
 type
   { Toolbar subset that is handled by TDesign, because it is only
@@ -73,6 +73,16 @@ type
     procedure ClickTranslate(Sender: TObject);
     procedure ClickRotate(Sender: TObject);
     procedure ClickScale(Sender: TObject);
+    procedure TransformModified(Sender: TObject);
+
+    { Return the active TCastleViewport in the design, or @nil if none. }
+    function CurrentViewport: TCastleViewport;
+
+    { Configure the design viewport navigation for orbiting around the selected object. }
+    procedure UpdateDesignNavigation;
+
+    { Focus camera on the currently selected TCastleTransform. }
+    procedure ViewportViewSelected;
 
     { Is Child selectable and visible in hierarchy. }
     class function Selectable(const Child: TComponent): Boolean; static;
@@ -135,10 +145,10 @@ type
 
 implementation
 
-uses SysUtils,
+uses SysUtils, Math,
   CastleStringUtils, CastleUriUtils, CastleUtils, CastleFilesUtils,
-  CastleInternalPhysicsVisualization, CastleViewport,
-  CastleTransform, CastleLog;
+  CastleInternalPhysicsVisualization,
+  CastleTransform, CastleCameras, CastleBoxes, CastleProjection, CastleLog;
 
 constructor TDesign.Create(
   const AOwner: TComponent;
@@ -195,8 +205,10 @@ begin
   TransformHover := TCastleTransformHover.Create(Self);
   TransformManipulate := TCastleTransformManipulate.Create(Self);
   TransformManipulate.Mode := mmTranslate;
+  TransformManipulate.OnTransformModified := {$ifdef FPC}@{$endif} TransformModified;
 
   UpdateTransformButtons;
+  UpdateDesignNavigation;
 end;
 
 destructor TDesign.Destroy;
@@ -360,6 +372,125 @@ begin
   WritelnLog('Saved design to %s', [CurrentDesignUrl]);
 end;
 
+function TDesign.CurrentViewport: TCastleViewport;
+
+  function FindFirstViewport(const C: TCastleUserInterface): TCastleViewport;
+  var
+    I: Integer;
+  begin
+    if C is TCastleViewport then
+      Exit(TCastleViewport(C));
+    for I := 0 to C.ControlsCount - 1 do
+    begin
+      Result := FindFirstViewport(C.Controls[I]);
+      if Result <> nil then
+        Exit;
+    end;
+    Result := nil;
+  end;
+
+var
+  Sel: TComponent;
+begin
+  Result := nil;
+  Sel := Hierarchy.SelectedComponent;
+  if Sel is TCastleViewport then
+    Result := TCastleViewport(Sel)
+  else
+  if (Sel is TCastleTransform) and (TCastleTransform(Sel).World <> nil) and
+     (TCastleTransform(Sel).World.Owner is TCastleViewport) then
+    Result := TCastleViewport(TCastleTransform(Sel).World.Owner)
+  else
+  if DesignRoot is TCastleUserInterface then
+    Result := FindFirstViewport(DesignRoot);
+end;
+
+procedure TDesign.UpdateDesignNavigation;
+var
+  V: TCastleViewport;
+  ExamineNav: TCastleExamineNavigation;
+  SelTransform: TCastleTransform;
+  Box: TBox3D;
+begin
+  V := CurrentViewport;
+  if (V = nil) or (not V.InternalDesignManipulation) then
+    Exit;
+
+  if (V.InternalCamera <> nil) and
+     (V.InternalCamera.ProjectionType <> ptOrthographic) then
+  begin
+    V.InternalDesignNavigationType := dnExamine;
+    if V.InternalDesignNavigation is TCastleExamineNavigation then
+    begin
+      ExamineNav := TCastleExamineNavigation(V.InternalDesignNavigation);
+      ExamineNav.Turntable := true;
+      ExamineNav.RotationAccelerate := false;
+      ExamineNav.CheckCollisions := false;
+
+      if (TransformManipulate.SelectedCount > 0) and
+         (TransformManipulate.Selected[0] <> V.Items) then
+      begin
+        SelTransform := TransformManipulate.Selected[0];
+        ExamineNav.AutoCenterOfRotation := false;
+        Box := SelTransform.WorldBoundingBox;
+        if not Box.IsEmpty then
+          ExamineNav.CenterOfRotation := Box.Center
+        else
+        if SelTransform.HasWorldTransform then
+          ExamineNav.CenterOfRotation := SelTransform.WorldTranslation
+        else
+          ExamineNav.AutoCenterOfRotation := true;
+      end else
+      begin
+        ExamineNav.AutoCenterOfRotation := true;
+      end;
+    end;
+  end;
+end;
+
+procedure TDesign.ViewportViewSelected;
+const
+  CameraTransitionTime = 0.25;
+var
+  V: TCastleViewport;
+  SelTransform: TCastleTransform;
+  Box: TBox3D;
+  APos, ADir, AUp: TVector3;
+  IntersectionDistance: Single;
+begin
+  V := CurrentViewport;
+  if (V = nil) or (V.InternalCamera = nil) then
+    Exit;
+
+  Box := TBox3D.Empty;
+  if (TransformManipulate.SelectedCount > 0) and
+     (TransformManipulate.Selected[0] <> V.Items) then
+  begin
+    SelTransform := TransformManipulate.Selected[0];
+    Box := SelTransform.WorldBoundingBox;
+    if Box.IsEmpty and SelTransform.HasWorldTransform then
+      Box := Box3DAroundPoint(SelTransform.WorldTranslation, 2.0);
+  end else
+  if V.Items <> nil then
+    Box := V.Items.BoundingBox;
+
+  if not Box.IsEmpty then
+  begin
+    V.InternalCamera.GetWorldView(APos, ADir, AUp);
+    Box := Box3DAroundPoint(Box.Center, Max(1.0, Box.Size.Max));
+    if not Box.TryRayClosestIntersection(IntersectionDistance, Box.Center, -ADir) then
+      IntersectionDistance := 1.0;
+    APos := Box.Center - ADir * IntersectionDistance * 2.0;
+    V.InternalCamera.AnimateTo(APos, ADir, AUp, CameraTransitionTime);
+    UpdateDesignNavigation;
+  end;
+end;
+
+procedure TDesign.TransformModified(Sender: TObject);
+begin
+  UpdateDesignNavigation;
+end;
+
 function TDesign.Press(const Event: TInputPressRelease): Boolean;
 begin
   Result := inherited;
@@ -389,12 +520,44 @@ begin
     Exit(true);
   end;
 
-  if Event.IsMouseButton(buttonLeft) and (TransformHover.Current <> nil) then
+  if (Container = nil) or (not (buttonRight in Container.MousePressed)) then
+  begin
+    if Event.IsKey(keyF) and (Event.ModifiersDown = []) then
+    begin
+      ViewportViewSelected;
+      Exit(true);
+    end;
+    if Event.IsKey(keyQ) and (Event.ModifiersDown = []) then
+    begin
+      ClickSelect(nil);
+      Exit(true);
+    end;
+    if Event.IsKey(keyW) and (Event.ModifiersDown = []) then
+    begin
+      ClickTranslate(nil);
+      Exit(true);
+    end;
+    if Event.IsKey(keyE) and (Event.ModifiersDown = []) then
+    begin
+      ClickRotate(nil);
+      Exit(true);
+    end;
+    if Event.IsKey(keyR) and (Event.ModifiersDown = []) then
+    begin
+      ClickScale(nil);
+      Exit(true);
+    end;
+  end;
+
+  if Event.IsMouseButton(buttonLeft) and
+     (not (mkAlt in Event.ModifiersDown)) and
+     (TransformHover.Current <> nil) then
   begin
     Properties.SelectedComponent := TransformHover.Current;
     Hierarchy.SelectedComponent := TransformHover.Current;
     TransformManipulate.SetSelected([TransformHover.Current]);
     UpdateTransformButtons;
+    UpdateDesignNavigation;
     Exit(true);
   end;
 end;
@@ -407,6 +570,7 @@ begin
   else
     TransformManipulate.SetSelected([]);
   UpdateTransformButtons;
+  UpdateDesignNavigation;
 end;
 
 procedure TDesign.Update(const SecondsPassed: Single; var HandleInput: Boolean);
@@ -416,6 +580,8 @@ procedure TDesign.Update(const SecondsPassed: Single; var HandleInput: Boolean);
   var
     HoverC: TComponent;
   begin
+    if (Container <> nil) and (Container.MousePressed <> []) then
+      Exit;
     HoverC := HoverComponent(Container.MousePosition);
     if HoverC is TCastleTransform then
       TransformHover.Current := TCastleTransform(HoverC)
@@ -534,6 +700,8 @@ function TDesign.HoverUserInterface(
 
 begin
   Result := nil;
+  if not ContainerLoadedDesign.RenderRectWithBorder.Contains(AMousePosition) then
+    Exit;
   if DesignRoot is TCastleUserInterface then
     Result := ControlUnder(DesignRoot as TCastleUserInterface, AMousePosition, true)
   { TODO: prepare for DesignRoot being TCastleTransform.

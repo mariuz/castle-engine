@@ -2250,8 +2250,14 @@ var
           RotationAccelerationSpeed * SecondsPassed * Direction,
           -MaxRotationSpeed, MaxRotationSpeed)
     else
-      V.Rotations := QuatFromAxisAngle(TVector3.One[Coord],
-        RotationSpeed * SecondsPassed * Direction) * V.Rotations;
+    begin
+      if Turntable and (Coord = 1) then
+        V.Rotations := V.Rotations * QuatFromAxisAngle(TVector3.One[Coord],
+          RotationSpeed * SecondsPassed * Direction)
+      else
+        V.Rotations := QuatFromAxisAngle(TVector3.One[Coord],
+          RotationSpeed * SecondsPassed * Direction) * V.Rotations;
+    end;
   end;
 
 var

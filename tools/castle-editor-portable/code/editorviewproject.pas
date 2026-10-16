@@ -258,6 +258,7 @@ begin
   end;
 
   if (Design <> nil) and
+     (Event.EventType = itKey) and
      (not Container.Focus.Contains(Design)) then
   begin
     WritelnLog('Passing input to design even though it is not focused: %s', [
