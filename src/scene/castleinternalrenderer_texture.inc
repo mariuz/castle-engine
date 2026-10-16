@@ -321,15 +321,11 @@
       const ShapeForViewpointMirror: TX3DRendererShape);
   end;
 
-  { Renderer resource for TScreenTextureNode: a texture updated
-    by copying the colors of the current viewport (UpdateScreenTextures). }
+  { Renderer resource for TScreenTextureNode.
+    All ScreenTexture nodes show the same colors (the current viewport),
+    so they all bind the same OpenGL texture,
+    updated once by UpdateScreenTextures. }
   TScreenTextureResource = class(T2DTextureResource)
-  strict private
-    FGLName: TGLTexture;
-    FWidth, FHeight: Integer;
-    { Framebuffer with FGLName as the color attachment,
-      to resolve multisampled framebuffers into it. Created on demand. }
-    FResolveFramebuffer: TGLFramebuffer;
   protected
     class function IsClassForTextureNode(ANode: TAbstractTextureNode): boolean; override;
     procedure PrepareCore(
@@ -346,11 +342,6 @@
       Shader: TShader; const Env: TTextureEnv): boolean; override;
     function ShaderTextureType(out TextureType: TTextureType): Boolean; override;
     function GLName: TGLTextureId; override;
-
-    { Copy the colors of the given rectangle of the current framebuffer
-      (in pixels) to the texture, resizing it to the rectangle size.
-      UseBlit says to use glBlitFramebuffer, otherwise glCopyTexSubImage2D. }
-    procedure UpdateFromScreen(const Rect: TRectangle; const UseBlit: Boolean);
   end;
 
   { Abstract renderer resource for TAbstractEnvironmentTextureNode. }
@@ -2422,9 +2413,18 @@ end;
 { TScreenTextureResource ------------------------------------------------------ }
 
 var
-  { Prepared TScreenTextureResource instances, to update in UpdateScreenTextures.
-    Created with the first one, freed with the last one. }
-  ScreenTextureResources: TList;
+  { The OpenGL texture shared by all ScreenTexture nodes,
+    existing while ScreenTextureUsers > 0. }
+  ScreenTextureGLName: TGLTexture;
+  ScreenTextureWidth, ScreenTextureHeight: Integer;
+  { Framebuffer with ScreenTextureGLName as the color attachment,
+    for glBlitFramebuffer. Created on demand. }
+  ScreenTextureFramebuffer: TGLFramebuffer;
+  { Number of prepared TScreenTextureResource. }
+  ScreenTextureUsers: Integer;
+  { TFramesPerSecond.RenderFrameId when ScreenTextureGLName was last bound,
+    to not update it when nothing visible uses it. }
+  ScreenTextureBoundFrame: TFrameId;
   WarningScreenTextureMultisampleDone: Boolean;
 
 class function TScreenTextureResource.IsClassForTextureNode(
@@ -2441,45 +2441,45 @@ end;
 procedure TScreenTextureResource.PrepareCore(
   const RenderOptions: TCastleRenderOptions);
 begin
-  FGLName := glCreateTexture;
-  FWidth := 0;
-  FHeight := 0;
-  glBindTexture(GL_TEXTURE_2D, FGLName);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-  if ScreenTextureResources = nil then
-    ScreenTextureResources := TList.Create;
-  ScreenTextureResources.Add(Self);
+  if ScreenTextureUsers = 0 then
+  begin
+    ScreenTextureGLName := glCreateTexture;
+    ScreenTextureWidth := 0;
+    ScreenTextureHeight := 0;
+    glBindTexture(GL_TEXTURE_2D, ScreenTextureGLName);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    { update it in the first frame }
+    ScreenTextureBoundFrame := TFramesPerSecond.RenderFrameId;
+  end;
+  Inc(ScreenTextureUsers);
 end;
 
 procedure TScreenTextureResource.UnprepareCore;
 begin
-  ScreenTextureResources.Remove(Self);
-  { Free the list with the last resource, so it doesn't outlive them. }
-  if ScreenTextureResources.Count = 0 then
-    FreeAndNil(ScreenTextureResources);
-  if FResolveFramebuffer <> GLObjectNone then
+  Dec(ScreenTextureUsers);
+  if ScreenTextureUsers = 0 then
   begin
-    glDeleteFramebuffer(FResolveFramebuffer);
-    FResolveFramebuffer := GLObjectNone;
-  end;
-  if FGLName <> GLObjectNone then
-  begin
-    glDeleteTexture(FGLName);
-    FGLName := GLObjectNone;
+    if ScreenTextureFramebuffer <> GLObjectNone then
+    begin
+      glDeleteFramebuffer(ScreenTextureFramebuffer);
+      ScreenTextureFramebuffer := GLObjectNone;
+    end;
+    glDeleteTexture(ScreenTextureGLName);
+    ScreenTextureGLName := GLObjectNone;
   end;
 end;
 
 function TScreenTextureResource.Bind(const TextureUnit: Cardinal): boolean;
 begin
-  Result := FGLName <> GLObjectNone;
+  Result := ScreenTextureGLName <> GLObjectNone;
   if not Result then Exit;
 
   TRenderer.ActiveTexture(TextureUnit);
-  glBindTexture(GL_TEXTURE_2D, FGLName);
+  glBindTexture(GL_TEXTURE_2D, ScreenTextureGLName);
+  ScreenTextureBoundFrame := TFramesPerSecond.RenderFrameId;
 end;
 
 function TScreenTextureResource.Enable(const TextureUnit: Cardinal;
@@ -2499,10 +2499,13 @@ end;
 
 function TScreenTextureResource.GLName: TGLTextureId;
 begin
-  Result := FGLName;
+  Result := ScreenTextureGLName;
 end;
 
-procedure TScreenTextureResource.UpdateFromScreen(const Rect: TRectangle;
+{ Copy the colors of the given rectangle of the current framebuffer
+  (in pixels) to ScreenTextureGLName, resizing it to the rectangle size.
+  UseBlit says to use glBlitFramebuffer, otherwise glCopyTexSubImage2D. }
+procedure UpdateScreenTextureFromScreen(const Rect: TRectangle;
   const UseBlit: Boolean);
 {$ifndef CASTLE_WEBGL}
 var
@@ -2513,12 +2516,12 @@ begin
     Exit;
 
   TRenderer.ActiveTexture(0);
-  glBindTexture(GL_TEXTURE_2D, FGLName);
-  if (FWidth <> Rect.Width) or (FHeight <> Rect.Height) then
+  glBindTexture(GL_TEXTURE_2D, ScreenTextureGLName);
+  if (ScreenTextureWidth <> Rect.Width) or (ScreenTextureHeight <> Rect.Height) then
   begin
-    FWidth := Rect.Width;
-    FHeight := Rect.Height;
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, FWidth, FHeight, 0,
+    ScreenTextureWidth := Rect.Width;
+    ScreenTextureHeight := Rect.Height;
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ScreenTextureWidth, ScreenTextureHeight, 0,
       GL_RGBA, GL_UNSIGNED_BYTE, nil);
   end;
 
@@ -2529,32 +2532,36 @@ begin
       only the drawing framebuffer is changed for the blit. }
     {$ifndef CASTLE_WEBGL}
     PreviousDrawFramebuffer := glGetInteger(GL_DRAW_FRAMEBUFFER_BINDING);
-    if FResolveFramebuffer = GLObjectNone then
+    if ScreenTextureFramebuffer = GLObjectNone then
     begin
-      FResolveFramebuffer := glCreateFramebuffer;
-      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, FResolveFramebuffer);
+      ScreenTextureFramebuffer := glCreateFramebuffer;
+      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, ScreenTextureFramebuffer);
       glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-        GL_TEXTURE_2D, FGLName, 0);
+        GL_TEXTURE_2D, ScreenTextureGLName, 0);
     end else
-      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, FResolveFramebuffer);
+      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, ScreenTextureFramebuffer);
     glBlitFramebuffer(
-      Rect.Left, Rect.Bottom, Rect.Left + FWidth, Rect.Bottom + FHeight,
-      0, 0, FWidth, FHeight,
+      Rect.Left, Rect.Bottom, Rect.Left + ScreenTextureWidth, Rect.Bottom + ScreenTextureHeight,
+      0, 0, ScreenTextureWidth, ScreenTextureHeight,
       GL_COLOR_BUFFER_BIT, GL_NEAREST);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, PreviousDrawFramebuffer);
     {$endif}
   end else
     glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, Rect.Left, Rect.Bottom,
-      FWidth, FHeight);
+      ScreenTextureWidth, ScreenTextureHeight);
 end;
 
 procedure UpdateScreenTextures;
 var
   Rect: TRectangle;
   Multisampled, UseBlit: Boolean;
-  I: Integer;
 begin
-  if (ScreenTextureResources = nil) or (ScreenTextureResources.Count = 0) then
+  if ScreenTextureUsers = 0 then
+    Exit;
+  { Nothing rendered with it in this or the previous frame: probably not
+    visible, don't copy. When it becomes visible, it shows old colors
+    for one frame. }
+  if ScreenTextureBoundFrame + 1 < TFramesPerSecond.RenderFrameId then
     Exit;
 
   { Use glBlitFramebuffer when possible:
@@ -2585,8 +2592,7 @@ begin
   end;
 
   Rect := RenderContext.Viewport.Translate(RenderContext.ViewportDelta);
-  for I := 0 to ScreenTextureResources.Count - 1 do
-    TScreenTextureResource(ScreenTextureResources[I]).UpdateFromScreen(Rect, UseBlit);
+  UpdateScreenTextureFromScreen(Rect, UseBlit);
 end;
 
 {$endif read_implementation}
