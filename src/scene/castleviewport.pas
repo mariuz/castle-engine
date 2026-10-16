@@ -2692,6 +2692,10 @@ procedure TCastleViewport.RenderOnePass(const Params: TRenderParams;
   end;
 
 begin
+  { Shapes with blending may use the colors rendered so far (TScreenTextureNode). }
+  if PassParams.UsingBlending and (Params.RenderingCamera.Target = rtScreen) then
+    CastleInternalRenderer.UpdateScreenTextures;
+
   FilteredShapesCollector.Clear;
   FilteredShapesCollector.AddFiltered(AllShapesCollector,
     [PassParams.UsingBlending], PassParams.FilterShadowVolumesReceivers);

@@ -511,6 +511,7 @@ uses Math, StrUtils, URIParser, TypInfo,
 {$I auto_generated_node_helpers/x3dnodes_scalarinterpolator.inc}
 {$I auto_generated_node_helpers/x3dnodes_scale_1.inc}
 {$I auto_generated_node_helpers/x3dnodes_screeneffect.inc}
+{$I auto_generated_node_helpers/x3dnodes_screentexture.inc}
 {$I auto_generated_node_helpers/x3dnodes_script.inc}
 {$I auto_generated_node_helpers/x3dnodes_separator_1.inc}
 {$I auto_generated_node_helpers/x3dnodes_shaderpart.inc}

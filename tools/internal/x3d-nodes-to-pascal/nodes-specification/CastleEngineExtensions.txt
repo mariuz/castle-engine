@@ -259,6 +259,12 @@ ShaderTexture : X3DSingleTextureNode {
     # TODO: use enumerated-type:....
 }
 
+# Colors of the shapes rendered so far (opaque shapes),
+# for effects of transparent shapes (glass, heat haze).
+ScreenTexture : X3DSingleTextureNode {
+  node-is-extension: true
+}
+
 # See https://castle-engine.io/x3d_extensions.php#section_ext_blending
 BlendMode {
   default-container-field: blendMode

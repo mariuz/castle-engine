@@ -321,6 +321,38 @@
       const ShapeForViewpointMirror: TX3DRendererShape);
   end;
 
+  { Renderer resource for TScreenTextureNode: a texture updated
+    by copying the colors of the current viewport (UpdateScreenTextures). }
+  TScreenTextureResource = class(T2DTextureResource)
+  strict private
+    FGLName: TGLTexture;
+    FWidth, FHeight: Integer;
+    { Framebuffer with FGLName as the color attachment,
+      to resolve multisampled framebuffers into it. Created on demand. }
+    FResolveFramebuffer: TGLFramebuffer;
+  protected
+    class function IsClassForTextureNode(ANode: TAbstractTextureNode): boolean; override;
+    procedure PrepareCore(
+      const RenderOptions: TCastleRenderOptions); override;
+    procedure UnprepareCore; override;
+  public
+    const
+      MyTextureType = tt2D;
+
+    function TextureNode: TScreenTextureNode;
+
+    function Bind(const TextureUnit: Cardinal): boolean; override;
+    function Enable(const TextureUnit: Cardinal;
+      Shader: TShader; const Env: TTextureEnv): boolean; override;
+    function ShaderTextureType(out TextureType: TTextureType): Boolean; override;
+    function GLName: TGLTextureId; override;
+
+    { Copy the colors of the given rectangle of the current framebuffer
+      (in pixels) to the texture, resizing it to the rectangle size.
+      UseBlit says to use glBlitFramebuffer, otherwise glCopyTexSubImage2D. }
+    procedure UpdateFromScreen(const Rect: TRectangle; const UseBlit: Boolean);
+  end;
+
   { Abstract renderer resource for TAbstractEnvironmentTextureNode. }
   TCubeMapTextureResource = class(TSingleTextureResource)
   protected
@@ -658,7 +690,8 @@ begin
           TryResult(TGeneratedCubeMapTextureResource) or
           TryResult(T3DTextureResource) or
           TryResult(TGeneratedShadowMapResource) or
-          TryResult(TShaderTextureResource) ) then
+          TryResult(TShaderTextureResource) or
+          TryResult(TScreenTextureResource) ) then
     Result := nil;
 end;
 
@@ -2384,6 +2417,176 @@ end;
 function TShaderTextureResource.TextureNode: TShaderTextureNode;
 begin
   Result := TShaderTextureNode(inherited TextureNode);
+end;
+
+{ TScreenTextureResource ------------------------------------------------------ }
+
+var
+  { Prepared TScreenTextureResource instances, to update in UpdateScreenTextures.
+    Created with the first one, freed with the last one. }
+  ScreenTextureResources: TList;
+  WarningScreenTextureMultisampleDone: Boolean;
+
+class function TScreenTextureResource.IsClassForTextureNode(
+  ANode: TAbstractTextureNode): boolean;
+begin
+  Result := ANode is TScreenTextureNode;
+end;
+
+function TScreenTextureResource.TextureNode: TScreenTextureNode;
+begin
+  Result := TScreenTextureNode(inherited TextureNode);
+end;
+
+procedure TScreenTextureResource.PrepareCore(
+  const RenderOptions: TCastleRenderOptions);
+begin
+  FGLName := glCreateTexture;
+  FWidth := 0;
+  FHeight := 0;
+  glBindTexture(GL_TEXTURE_2D, FGLName);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+  if ScreenTextureResources = nil then
+    ScreenTextureResources := TList.Create;
+  ScreenTextureResources.Add(Self);
+end;
+
+procedure TScreenTextureResource.UnprepareCore;
+begin
+  ScreenTextureResources.Remove(Self);
+  { Free the list with the last resource, so it doesn't outlive them. }
+  if ScreenTextureResources.Count = 0 then
+    FreeAndNil(ScreenTextureResources);
+  if FResolveFramebuffer <> GLObjectNone then
+  begin
+    glDeleteFramebuffer(FResolveFramebuffer);
+    FResolveFramebuffer := GLObjectNone;
+  end;
+  if FGLName <> GLObjectNone then
+  begin
+    glDeleteTexture(FGLName);
+    FGLName := GLObjectNone;
+  end;
+end;
+
+function TScreenTextureResource.Bind(const TextureUnit: Cardinal): boolean;
+begin
+  Result := FGLName <> GLObjectNone;
+  if not Result then Exit;
+
+  TRenderer.ActiveTexture(TextureUnit);
+  glBindTexture(GL_TEXTURE_2D, FGLName);
+end;
+
+function TScreenTextureResource.Enable(const TextureUnit: Cardinal;
+  Shader: TShader; const Env: TTextureEnv): boolean;
+begin
+  Result := Bind(TextureUnit);
+  if not Result then Exit;
+
+  Shader.EnableTexture(TextureUnit, MyTextureType, TextureNode, Env);
+end;
+
+function TScreenTextureResource.ShaderTextureType(out TextureType: TTextureType): Boolean;
+begin
+  TextureType := MyTextureType;
+  Result := true;
+end;
+
+function TScreenTextureResource.GLName: TGLTextureId;
+begin
+  Result := FGLName;
+end;
+
+procedure TScreenTextureResource.UpdateFromScreen(const Rect: TRectangle;
+  const UseBlit: Boolean);
+{$ifndef CASTLE_WEBGL}
+var
+  PreviousDrawFramebuffer: TGLint;
+{$endif}
+begin
+  if (Rect.Width <= 0) or (Rect.Height <= 0) then
+    Exit;
+
+  TRenderer.ActiveTexture(0);
+  glBindTexture(GL_TEXTURE_2D, FGLName);
+  if (FWidth <> Rect.Width) or (FHeight <> Rect.Height) then
+  begin
+    FWidth := Rect.Width;
+    FHeight := Rect.Height;
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, FWidth, FHeight, 0,
+      GL_RGBA, GL_UNSIGNED_BYTE, nil);
+  end;
+
+  if UseBlit then
+  begin
+    { Blit into a framebuffer with our texture.
+      The current framebuffer stays bound for reading (GL_READ_FRAMEBUFFER),
+      only the drawing framebuffer is changed for the blit. }
+    {$ifndef CASTLE_WEBGL}
+    PreviousDrawFramebuffer := glGetInteger(GL_DRAW_FRAMEBUFFER_BINDING);
+    if FResolveFramebuffer = GLObjectNone then
+    begin
+      FResolveFramebuffer := glCreateFramebuffer;
+      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, FResolveFramebuffer);
+      glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+        GL_TEXTURE_2D, FGLName, 0);
+    end else
+      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, FResolveFramebuffer);
+    glBlitFramebuffer(
+      Rect.Left, Rect.Bottom, Rect.Left + FWidth, Rect.Bottom + FHeight,
+      0, 0, FWidth, FHeight,
+      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, PreviousDrawFramebuffer);
+    {$endif}
+  end else
+    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, Rect.Left, Rect.Bottom,
+      FWidth, FHeight);
+end;
+
+procedure UpdateScreenTextures;
+var
+  Rect: TRectangle;
+  Multisampled, UseBlit: Boolean;
+  I: Integer;
+begin
+  if (ScreenTextureResources = nil) or (ScreenTextureResources.Count = 0) then
+    Exit;
+
+  { Use glBlitFramebuffer when possible:
+    - glCopyTexSubImage2D cannot read from a multisampled framebuffer
+      (anti-aliasing), the blit resolves it.
+    - glCopyTexSubImage2D needs the texture format to match the framebuffer
+      format in OpenGLES: it fails (GL_INVALID_OPERATION) with ANGLE (OpenGLES 3),
+      likely because its window framebuffer is BGRA. The blit converts.
+    TODO: WebGL 2 has the blit too, but we don't query
+    the framebuffer binding there yet. WebGL always copies:
+    the browser resolves the default (antialiased) drawing buffer
+    when copying from it. }
+  {$ifdef CASTLE_WEBGL}
+  UseBlit := false;
+  Multisampled := false;
+  {$else}
+  UseBlit := GLFeatures.FramebufferBlit;
+  Multisampled := glGetInteger(GL_SAMPLE_BUFFERS) > 0;
+  {$endif}
+  if Multisampled and not UseBlit then
+  begin
+    if not WarningScreenTextureMultisampleDone then
+    begin
+      WarningScreenTextureMultisampleDone := true;
+      WritelnWarning('ScreenTexture cannot be updated from a multisampled framebuffer (anti-aliasing) without glBlitFramebuffer');
+    end;
+    Exit;
+  end;
+
+  Rect := RenderContext.Viewport.Translate(RenderContext.ViewportDelta);
+  for I := 0 to ScreenTextureResources.Count - 1 do
+    TScreenTextureResource(ScreenTextureResources[I]).UpdateFromScreen(Rect, UseBlit);
 end;
 
 {$endif read_implementation}

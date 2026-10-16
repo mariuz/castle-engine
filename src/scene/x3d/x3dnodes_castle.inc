@@ -216,6 +216,29 @@
   {$I auto_generated_node_helpers/x3dnodes_shadertexture.inc}
   end;
 
+  { Texture with the colors of everything rendered so far in the current
+    viewport: the opaque shapes, without the shapes using blending.
+    It is updated every frame, after the opaque shapes are rendered
+    and before the shapes with blending,
+    so that the shapes with blending can use it, e.g. to render
+    glass or heat haze that distorts what is behind it.
+
+    Use it in a field of an @link(TEffectNode) (a @code(sampler2D) uniform)
+    on a shape with blending. The texture covers the viewport:
+    sample it at the screen position of the fragment,
+    for example @code(gl_FragCoord.xy / viewport size),
+    or the position in clip space mapped to 0..1:
+
+    @longCode(#
+      vec4 clip = castle_ProjectionMatrix * castle_vertex_eye;
+      vec2 screen_uv = clip.xy / clip.w * 0.5 + 0.5;
+    #)
+
+    (castle_vertex_eye needs Phong shading). }
+  TScreenTextureNode = class(TAbstractSingleTextureNode)
+  {$I auto_generated_node_helpers/x3dnodes_screentexture.inc}
+  end;
+
   { Viewpoint for making reflections on flat objects.
     See https://castle-engine.io/x3d_extensions_mirror_plane.php . }
   TViewpointMirrorNode = class(TAbstractNode)
@@ -1381,6 +1404,7 @@ begin
     TText3DNode,
     TBlendModeNode,
     TDepthModeNode,
+    TScreenTextureNode,
     TKambiAppearanceNode,
     TKambiInlineNode,
     TKambiNavigationInfoNode,
