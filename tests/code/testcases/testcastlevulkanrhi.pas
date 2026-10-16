@@ -72,6 +72,7 @@ type
     procedure TestGraphicsPipelineLibraryFastLinking;
     procedure TestSPIRVBinaryReflectionAndValidation;
     procedure TestWindows4096MaxMemoryAllocationLimitAndPooledSubAllocation;
+    procedure TestMultiVendorFormatAlignmentAndDeferredResourceDestruction;
   private
     FCapturedWarnings: TStringList;
     procedure CaptureWarning(const Category, S: String);
@@ -2199,6 +2200,217 @@ begin
     VkDev.MemoryAllocator.TrimEmptyBlocks;
   finally
     FreeAndNil(VkDev);
+  end;
+end;
+
+procedure MockGetPhysicalDeviceFormatProperties(
+  physicalDevice: VkPhysicalDevice; format: VkFormat;
+  pFormatProperties: PVkFormatProperties); {$IFDEF WINDOWS}stdcall{$ELSE}cdecl{$ENDIF};
+begin
+  if pFormatProperties = nil then Exit;
+  FillChar(pFormatProperties^, SizeOf(VkFormatProperties), 0);
+  case format of
+    { Simulate AMD RDNA / Apple MoltenVK where D24_UNORM_S8_UINT and ASTC_4x4 are unsupported,
+      while D32_SFLOAT_S8_UINT, D32_SFLOAT, RGBA8_SRGB, and RGBA8_UNORM are supported }
+    VK_FORMAT_D24_UNORM_S8_UINT,
+    VK_FORMAT_ASTC_4x4_SRGB_BLOCK,
+    VK_FORMAT_ASTC_4x4_UNORM_BLOCK,
+    VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK:
+      pFormatProperties^.optimalTilingFeatures := 0;
+    VK_FORMAT_D32_SFLOAT_S8_UINT,
+    VK_FORMAT_D32_SFLOAT,
+    VK_FORMAT_D16_UNORM:
+      pFormatProperties^.optimalTilingFeatures :=
+        VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT or
+        VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT or
+        VK_FORMAT_FEATURE_TRANSFER_SRC_BIT or
+        VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+    else
+      pFormatProperties^.optimalTilingFeatures :=
+        VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT or
+        VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT or
+        VK_FORMAT_FEATURE_TRANSFER_SRC_BIT or
+        VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestMultiVendorFormatAlignmentAndDeferredResourceDestruction;
+var
+  VkDev: TVulkanRHIDevice;
+  SavedFormatPropsProc: Pointer;
+  NegotiatedFmt: TRHIPixelFormat;
+  TexDesc: TRHITextureDesc;
+  DepthTex, ColorTex: TVulkanRHITexture;
+  UboDesc, SsboDesc, StageDesc: TRHIBufferDesc;
+  Ubo0, Ubo1, Ssbo0, Ssbo1, StageBuf: TVulkanRHIBuffer;
+  AlignedOffset, AlignedSize: VkDeviceSize;
+  SubAllocsBefore, SubAllocsDuring, SubAllocsAfterFlush: Cardinal;
+  CmdList: TVulkanRHICommandList;
+begin
+  { 1. Cross-Vendor Format Negotiation (AMD/MoltenVK D24S8 -> D32S8 fallback,
+       mobile ASTC/ETC2 -> desktop RGBA8 fallback) }
+  SavedFormatPropsProc := Pointer(vkGetPhysicalDeviceFormatProperties);
+  vkGetPhysicalDeviceFormatProperties := @MockGetPhysicalDeviceFormatProperties;
+  try
+    VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($ABCD)), False, True, VK_API_VERSION_1_3);
+    try
+      NegotiatedFmt := NegotiateOptimalPixelFormat(
+        pfD24_UNorm_S8_UInt, [tuDepthStencil, tuSampled], VkDev.PhysicalDevice);
+      AssertEquals('Unsupported D24_UNorm_S8_UInt must negotiate fallback to D32_Float_S8_UInt',
+        Ord(pfD32_Float_S8_UInt), Ord(NegotiatedFmt));
+
+      NegotiatedFmt := NegotiateOptimalPixelFormat(
+        pfASTC_4x4_sRGB, [tuSampled, tuTransferDst], VkDev.PhysicalDevice);
+      AssertEquals('Unsupported ASTC_4x4_sRGB must negotiate fallback to RGBA8_sRGB',
+        Ord(pfRGBA8_sRGB), Ord(NegotiatedFmt));
+
+      NegotiatedFmt := NegotiateOptimalPixelFormat(
+        pfETC2_RGBA8_UNorm, [tuSampled, tuTransferDst], VkDev.PhysicalDevice);
+      AssertEquals('Unsupported ETC2_RGBA8_UNorm must negotiate fallback to RGBA8_UNorm',
+        Ord(pfRGBA8_UNorm), Ord(NegotiatedFmt));
+
+      { 2. Combined Depth+Stencil Barrier vs. ImageView Aspect Mask Separation
+           (VUID-VkImageMemoryBarrier-subresourceRange-09601 vs VUID-VkDescriptorImageInfo-imageView-01976) }
+      FillChar(TexDesc, SizeOf(TexDesc), 0);
+      TexDesc.Dimension := td2D;
+      TexDesc.Width := 512;
+      TexDesc.Height := 512;
+      TexDesc.DepthOrArrayLayers := 1;
+      TexDesc.MipLevels := 1;
+      TexDesc.SampleCount := 1;
+      TexDesc.Format := pfD24_UNorm_S8_UInt;
+      TexDesc.Usage := [tuDepthStencil, tuSampled];
+
+      DepthTex := TVulkanRHITexture.Create(VkDev, TexDesc);
+      try
+        AssertEquals('TVulkanRHITexture must automatically negotiate supported D32_Float_S8_UInt',
+          Ord(pfD32_Float_S8_UInt), Ord(DepthTex.Desc.Format));
+        AssertEquals('Combined depth+stencil barrier AspectMask must include both DEPTH and STENCIL bits',
+          Cardinal(VK_IMAGE_ASPECT_DEPTH_BIT or VK_IMAGE_ASPECT_STENCIL_BIT),
+          DepthTex.AspectMask);
+        AssertEquals('Combined depth+stencil sampled ViewAspectMask must include ONLY DEPTH_BIT',
+          Cardinal(VK_IMAGE_ASPECT_DEPTH_BIT),
+          DepthTex.ViewAspectMask);
+      finally
+        FreeAndNil(DepthTex);
+      end;
+
+      { 3. Cross-Vendor Hardware Buffer Offset Alignment
+           (NVIDIA 256B UBO alignment, Mali/Adreno 128B SSBO alignment, 64B transfer copy alignment) }
+      VkDev.MemoryAllocator.MinUniformBufferAlignment := 256;
+      VkDev.MemoryAllocator.MinStorageBufferAlignment := 128;
+      VkDev.MemoryAllocator.OptimalBufferCopyOffsetAlignment := 64;
+      VkDev.MemoryAllocator.NonCoherentAtomSize := 64;
+
+      FillChar(UboDesc, SizeOf(UboDesc), 0);
+      UboDesc.Size := 72; // unaligned size
+      UboDesc.Usage := [buUniform];
+      UboDesc.MemoryUsage := muCpuToGpu;
+
+      FillChar(SsboDesc, SizeOf(SsboDesc), 0);
+      SsboDesc.Size := 50; // unaligned size
+      SsboDesc.Usage := [buStorage];
+      SsboDesc.MemoryUsage := muGpuOnly;
+
+      FillChar(StageDesc, SizeOf(StageDesc), 0);
+      StageDesc.Size := 36; // unaligned size
+      StageDesc.Usage := [buTransferSrc];
+      StageDesc.MemoryUsage := muCpuToGpu;
+
+      Ubo0 := TVulkanRHIBuffer.Create(VkDev, UboDesc, nil);
+      Ubo1 := TVulkanRHIBuffer.Create(VkDev, UboDesc, nil);
+      Ssbo0 := TVulkanRHIBuffer.Create(VkDev, SsboDesc, nil);
+      Ssbo1 := TVulkanRHIBuffer.Create(VkDev, SsboDesc, nil);
+      StageBuf := TVulkanRHIBuffer.Create(VkDev, StageDesc, nil);
+      try
+        AssertEquals('UBO[0] sub-allocation offset must be aligned to MinUniformBufferAlignment (256)',
+          0, Ubo0.MemoryOffset mod 256);
+        AssertEquals('UBO[1] sub-allocation offset must be aligned to MinUniformBufferAlignment (256)',
+          0, Ubo1.MemoryOffset mod 256);
+        AssertEquals('SSBO[0] sub-allocation offset must be aligned to MinStorageBufferAlignment (128)',
+          0, Ssbo0.MemoryOffset mod 128);
+        AssertEquals('SSBO[1] sub-allocation offset must be aligned to MinStorageBufferAlignment (128)',
+          0, Ssbo1.MemoryOffset mod 128);
+        AssertEquals('Transfer staging buffer offset must be aligned to OptimalBufferCopyOffsetAlignment (64)',
+          0, StageBuf.MemoryOffset mod 64);
+      finally
+        FreeAndNil(StageBuf);
+        FreeAndNil(Ssbo1);
+        FreeAndNil(Ssbo0);
+        FreeAndNil(Ubo1);
+        FreeAndNil(Ubo0);
+      end;
+
+      { 4. Non-Coherent Atom Size Range Alignment (VUID-VkMappedMemoryRange-offset-00687) }
+      AlignNonCoherentMemoryRange(
+        256, 100, 17, 50, 4096, VkDev.MemoryAllocator.NonCoherentAtomSize,
+        AlignedOffset, AlignedSize);
+      AssertEquals('Non-coherent flush offset must round down to 64B atom boundary',
+        256, AlignedOffset);
+      AssertEquals('Non-coherent flush size must round up to 64B atom multiple covering [273..323)',
+        128, AlignedSize);
+
+      { 5. Synchronization & Frame-In-Flight Deferred Resource Destruction Queue
+           (VUID-vkDestroyBuffer-buffer-00922: resources freed while a frame is in flight
+            must remain alive until that frame slot's VkFence completes) }
+      SubAllocsBefore := VkDev.MemoryAllocator.GetStats.SubAllocationCount;
+      VkDev.FrameIndex := 1;
+      VkDev.DeferResourceDestruction := True;
+
+      Ubo0 := TVulkanRHIBuffer.Create(VkDev, UboDesc, nil);
+      TexDesc.Format := pfRGBA8_UNorm;
+      TexDesc.Usage := [tuSampled, tuColorAttachment];
+      ColorTex := TVulkanRHITexture.Create(VkDev, TexDesc);
+      SubAllocsDuring := VkDev.MemoryAllocator.GetStats.SubAllocationCount;
+      AssertEquals('Creating 1 buffer + 1 texture must add 2 sub-allocations',
+        SubAllocsBefore + 2, SubAllocsDuring);
+
+      { Destroy both while Frame 1 is still in flight on the GPU }
+      FreeAndNil(Ubo0);
+      FreeAndNil(ColorTex);
+
+      AssertEquals('Destroyed buffer + texture must be queued in PendingDeferredDeletionCount',
+        2, VkDev.PendingDeferredDeletionCount);
+      AssertEquals('Sub-allocations must NOT be recycled while Frame 1 is still in flight',
+        SubAllocsDuring, VkDev.MemoryAllocator.GetStats.SubAllocationCount);
+
+      { Flushing Frame 0 must not retire Frame 1's resources }
+      VkDev.FlushDeferredDeletions(0);
+      AssertEquals('Flushing Frame 0 must leave Frame 1 deferred resources intact',
+        2, VkDev.PendingDeferredDeletionCount);
+
+      { Flushing Frame 1 (simulating Frame 1 VkFence completion) retires both resources }
+      VkDev.FlushDeferredDeletions(1);
+      SubAllocsAfterFlush := VkDev.MemoryAllocator.GetStats.SubAllocationCount;
+      AssertEquals('After Frame 1 fence flush, PendingDeferredDeletionCount must be 0',
+        0, VkDev.PendingDeferredDeletionCount);
+      AssertEquals('After Frame 1 fence flush, sub-allocations must be returned to the pool',
+        SubAllocsBefore, SubAllocsAfterFlush);
+      VkDev.DeferResourceDestruction := False;
+
+      { 6. Explicit Buffer & Texture Pipeline Barrier Tracking on TVulkanRHICommandList }
+      Ubo0 := TVulkanRHIBuffer.Create(VkDev, UboDesc, nil);
+      ColorTex := TVulkanRHITexture.Create(VkDev, TexDesc);
+      CmdList := TVulkanRHICommandList.Create(VkDev, 0);
+      try
+        AssertEquals('Initial BarrierCount must be 0', 0, CmdList.BarrierCount);
+        CmdList.TransitionBuffer(Ubo0, rsTransferDst, rsShaderRead);
+        AssertEquals('TransitionBuffer must emit a VkBufferMemoryBarrier', 1, CmdList.BarrierCount);
+        CmdList.TransitionTexture(ColorTex, rsColorAttachment);
+        AssertEquals('TransitionTexture must emit a VkImageMemoryBarrier', 2, CmdList.BarrierCount);
+        { Redundant transition to same state must be a no-op }
+        CmdList.TransitionTexture(ColorTex, rsColorAttachment);
+        AssertEquals('Redundant TransitionTexture to identical state must be skipped', 2, CmdList.BarrierCount);
+      finally
+        FreeAndNil(CmdList);
+        FreeAndNil(ColorTex);
+        FreeAndNil(Ubo0);
+      end;
+    finally
+      FreeAndNil(VkDev);
+    end;
+  finally
+    Pointer(vkGetPhysicalDeviceFormatProperties) := SavedFormatPropsProc;
   end;
 end;
 

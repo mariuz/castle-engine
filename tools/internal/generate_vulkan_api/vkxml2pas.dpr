@@ -1014,7 +1014,7 @@ const
     'VK_FENCE_CREATE_SIGNALED_BIT'
   );
 
-  OrderedEnums3: array[0..51] of String = (
+  OrderedEnums3: array[0..62] of String = (
     'VK_INDEX_TYPE_UINT16',
     'VK_INDEX_TYPE_UINT32',
     'VK_IMAGE_ASPECT_COLOR_BIT',
@@ -1068,7 +1068,19 @@ const
     'VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2',
     'VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2',
     'VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS',
-    'VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO'
+    'VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO',
+    // Format Feature Flags & Non-Coherent Memory Range (Multi-Vendor Compatibility)
+    'VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE',
+    'VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT',
+    'VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT',
+    'VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT',
+    'VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT',
+    'VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT',
+    'VK_FORMAT_FEATURE_BLIT_SRC_BIT',
+    'VK_FORMAT_FEATURE_BLIT_DST_BIT',
+    'VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT',
+    'VK_FORMAT_FEATURE_TRANSFER_SRC_BIT',
+    'VK_FORMAT_FEATURE_TRANSFER_DST_BIT'
   );
 
   OrderedStructs: array[0..77] of String = (
@@ -1152,7 +1164,7 @@ const
     'VkBufferMemoryBarrier'
   );
 
-  OrderedStructs2: array[0..23] of String = (
+  OrderedStructs2: array[0..25] of String = (
     'VkImageMemoryBarrier',
     'VkBufferCopy',
     'VkImageSubresourceLayers',
@@ -1176,7 +1188,9 @@ const
     'VkImageMemoryRequirementsInfo2',
     'VkMemoryRequirements2',
     'VkMemoryDedicatedRequirements',
-    'VkMemoryDedicatedAllocateInfo'
+    'VkMemoryDedicatedAllocateInfo',
+    'VkFormatProperties',
+    'VkMappedMemoryRange'
   );
 
   OrderedCommands: array[0..94] of String = (
@@ -1277,7 +1291,7 @@ const
     'vkCmdDrawIndirect'
   );
 
-  OrderedCommands2: array[0..11] of String = (
+  OrderedCommands2: array[0..14] of String = (
     'vkEnumerateInstanceVersion',
     'vkGetPhysicalDeviceFeatures2',
     'vkGetPhysicalDeviceProperties2',
@@ -1289,16 +1303,20 @@ const
     'vkResetCommandBuffer',
     'vkCmdExecuteCommands',
     'vkGetBufferMemoryRequirements2',
-    'vkGetImageMemoryRequirements2'
+    'vkGetImageMemoryRequirements2',
+    'vkGetPhysicalDeviceFormatProperties',
+    'vkFlushMappedMemoryRanges',
+    'vkInvalidateMappedMemoryRanges'
   );
 
-  InstanceCommands: array[0..16] of String = (
+  InstanceCommands: array[0..17] of String = (
     'vkDestroyInstance',
     'vkEnumeratePhysicalDevices',
     'vkGetPhysicalDeviceFeatures',
     'vkGetPhysicalDeviceFeatures2',
     'vkGetPhysicalDeviceProperties',
     'vkGetPhysicalDeviceProperties2',
+    'vkGetPhysicalDeviceFormatProperties',
     'vkGetPhysicalDeviceQueueFamilyProperties',
     'vkGetPhysicalDeviceMemoryProperties',
     'vkGetPhysicalDeviceMemoryProperties2',

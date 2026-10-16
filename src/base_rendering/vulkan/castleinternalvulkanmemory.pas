@@ -60,6 +60,8 @@ type
     ChunkId: Cardinal;
     { True if this allocation bypassed the pool and owns its own VkDeviceMemory }
     IsDedicated: Boolean;
+    { True if the underlying memory type has VK_MEMORY_PROPERTY_HOST_COHERENT_BIT }
+    IsHostCoherent: Boolean;
     { True if MappedPtr was allocated on the CPU heap in headless simulation mode }
     IsSimulatedHostMemory: Boolean;
     function IsValid: Boolean;
@@ -97,6 +99,7 @@ type
     FDevice: VkDevice;
     FMemoryTypeIndex: Cardinal;
     FIsLinearPool: Boolean;
+    FIsHostCoherent: Boolean;
     FSimulatedMemory: Boolean;
     FDeviceMemory: VkDeviceMemory;
     FSize: VkDeviceSize;
@@ -108,7 +111,8 @@ type
   public
     constructor Create(const ADevice: VkDevice; const AMemoryTypeIndex: Cardinal;
       const ABlockSize: VkDeviceSize; const AHostVisible: Boolean;
-      const AIsLinearPool: Boolean = True);
+      const AIsLinearPool: Boolean = True;
+      const AIsHostCoherent: Boolean = True);
     destructor Destroy; override;
 
     { Attempts to sub-allocate Size bytes aligned to Alignment (and respecting
@@ -124,6 +128,7 @@ type
     property DeviceMemory: VkDeviceMemory read FDeviceMemory;
     property MemoryTypeIndex: Cardinal read FMemoryTypeIndex;
     property IsLinearPool: Boolean read FIsLinearPool;
+    property IsHostCoherent: Boolean read FIsHostCoherent;
     property Size: VkDeviceSize read FSize;
     property UsedBytes: VkDeviceSize read FUsedBytes;
     property ActiveSubAllocations: Cardinal read FActiveSubAllocations;
@@ -173,6 +178,10 @@ type
     FMemProperties: VkPhysicalDeviceMemoryProperties;
     FBufferImageGranularity: VkDeviceSize;
     FMinUniformBufferAlignment: VkDeviceSize;
+    FMinStorageBufferAlignment: VkDeviceSize;
+    FNonCoherentAtomSize: VkDeviceSize;
+    FOptimalBufferCopyOffsetAlignment: VkDeviceSize;
+    FOptimalBufferCopyRowPitchAlignment: VkDeviceSize;
     FMaxMemoryAllocationCount: Cardinal;
     FLock: TCriticalSection;
 
@@ -189,7 +198,7 @@ type
     FSupportsMemoryBudgetExt: Boolean;
 
     function SelectMemoryType(const ATypeBits: UInt32;
-      const AUsage: TRHIMemoryUsage; out AIsHostVisible: Boolean): Cardinal;
+      const AUsage: TRHIMemoryUsage; out AIsHostVisible, AIsHostCoherent: Boolean): Cardinal;
     function GetPreferredBlockSize(const AUsage: TRHIMemoryUsage): VkDeviceSize;
     function CanAllocateDedicated(const ARequiresDedicated: Boolean): Boolean;
     function AllocateInternal(const AMemReq: VkMemoryRequirements;
@@ -209,10 +218,12 @@ type
       const ARequiresDedicated: Boolean = False): TVulkanMemoryAllocation;
 
     { Queries vkGetBufferMemoryRequirements2 (with VkMemoryDedicatedRequirements)
-      and sub-allocates (or dedicated-allocates) memory for ABuffer. }
+      and sub-allocates (or dedicated-allocates) memory for ABuffer, enforcing
+      at least AMinAlignment (e.g. minUniformBufferOffsetAlignment / minStorageBufferOffsetAlignment). }
     function AllocateBufferMemory(const ABuffer: VkBuffer;
       const ASize: VkDeviceSize; const AUsage: TRHIMemoryUsage;
-      const AForceDedicated: Boolean = False): TVulkanMemoryAllocation;
+      const AForceDedicated: Boolean = False;
+      const AMinAlignment: VkDeviceSize = 0): TVulkanMemoryAllocation;
 
     { Queries vkGetImageMemoryRequirements2 (with VkMemoryDedicatedRequirements)
       and sub-allocates (or dedicated-allocates) memory for AImage. }
@@ -224,6 +235,16 @@ type
     { Frees a sub-allocation or dedicated allocation. }
     procedure Free(var AAlloc: TVulkanMemoryAllocation);
 
+    { Flushes CPU writes for non-coherent host-visible allocations aligned to
+      VkPhysicalDeviceLimits.nonCoherentAtomSize (no-op if IsHostCoherent = True). }
+    procedure FlushAllocation(const AAlloc: TVulkanMemoryAllocation;
+      const AOffset: VkDeviceSize = 0; const ASize: VkDeviceSize = VK_WHOLE_SIZE);
+
+    { Invalidates CPU cache lines for non-coherent host-visible readback allocations
+      aligned to VkPhysicalDeviceLimits.nonCoherentAtomSize (no-op if IsHostCoherent = True). }
+    procedure InvalidateAllocation(const AAlloc: TVulkanMemoryAllocation;
+      const AOffset: VkDeviceSize = 0; const ASize: VkDeviceSize = VK_WHOLE_SIZE);
+
     { Returns the transient ring buffer for the given frame-in-flight index. }
     function GetFrameRingBuffer(const AFrameIndex: Cardinal): TCastleVulkanFrameRingBuffer;
 
@@ -234,12 +255,25 @@ type
     function GetStats: TVulkanMemoryStats;
 
     property Device: VkDevice read FDevice;
-    property MinUniformBufferAlignment: VkDeviceSize read FMinUniformBufferAlignment;
+    property BufferImageGranularity: VkDeviceSize read FBufferImageGranularity write FBufferImageGranularity;
+    property MinUniformBufferAlignment: VkDeviceSize read FMinUniformBufferAlignment write FMinUniformBufferAlignment;
+    property MinStorageBufferAlignment: VkDeviceSize read FMinStorageBufferAlignment write FMinStorageBufferAlignment;
+    property NonCoherentAtomSize: VkDeviceSize read FNonCoherentAtomSize write FNonCoherentAtomSize;
+    property OptimalBufferCopyOffsetAlignment: VkDeviceSize read FOptimalBufferCopyOffsetAlignment write FOptimalBufferCopyOffsetAlignment;
+    property OptimalBufferCopyRowPitchAlignment: VkDeviceSize read FOptimalBufferCopyRowPitchAlignment write FOptimalBufferCopyRowPitchAlignment;
     property MaxMemoryAllocationCount: Cardinal read FMaxMemoryAllocationCount write FMaxMemoryAllocationCount;
     property TotalVkAllocationCount: Cardinal read FTotalVkAllocationCount;
     property SubAllocationCount: Cardinal read FSubAllocationCount;
     property SupportsMemoryBudgetExt: Boolean read FSupportsMemoryBudgetExt write FSupportsMemoryBudgetExt;
   end;
+
+{ Rounds AOffset down and ASize up to multiples of ANonCoherentAtomSize within
+  [0 .. ABlockSize], satisfying VUID-VkMappedMemoryRange-offset-00687 and
+  VUID-VkMappedMemoryRange-size-01390 across all GPU vendors. }
+procedure AlignNonCoherentMemoryRange(
+  const ASubAllocOffset, ASubAllocSize, ARangeOffset, ARangeSize,
+  ABlockSize, ANonCoherentAtomSize: VkDeviceSize;
+  out AAlignedOffset, AAlignedSize: VkDeviceSize);
 
 { Aggregates GPU VRAM usage and budget across DEVICE_LOCAL memory heaps.
   When AHasBudgetExt is True, sums heapUsage and heapBudget from VK_EXT_memory_budget;
@@ -302,7 +336,8 @@ end;
 
 constructor TCastleVulkanMemoryBlock.Create(const ADevice: VkDevice;
   const AMemoryTypeIndex: Cardinal; const ABlockSize: VkDeviceSize;
-  const AHostVisible: Boolean; const AIsLinearPool: Boolean);
+  const AHostVisible: Boolean; const AIsLinearPool: Boolean;
+  const AIsHostCoherent: Boolean);
 var
   AllocInfo: VkMemoryAllocateInfo;
   Res: VkResult;
@@ -311,6 +346,7 @@ begin
   FDevice := ADevice;
   FMemoryTypeIndex := AMemoryTypeIndex;
   FIsLinearPool := AIsLinearPool;
+  FIsHostCoherent := AIsHostCoherent;
   FSize := ABlockSize;
   FUsedBytes := 0;
   FNextChunkId := 1;
@@ -486,6 +522,7 @@ begin
         AAlloc.Node := Curr;
         AAlloc.ChunkId := Curr^.ChunkId;
         AAlloc.IsDedicated := False;
+        AAlloc.IsHostCoherent := FIsHostCoherent;
         if FBaseMappedPtr <> nil then
           AAlloc.MappedPtr := FBaseMappedPtr + Curr^.Offset;
 
@@ -669,6 +706,10 @@ begin
 
     FBufferImageGranularity := DevProps.limits.bufferImageGranularity;
     FMinUniformBufferAlignment := DevProps.limits.minUniformBufferOffsetAlignment;
+    FMinStorageBufferAlignment := DevProps.limits.minStorageBufferOffsetAlignment;
+    FNonCoherentAtomSize := DevProps.limits.nonCoherentAtomSize;
+    FOptimalBufferCopyOffsetAlignment := DevProps.limits.optimalBufferCopyOffsetAlignment;
+    FOptimalBufferCopyRowPitchAlignment := DevProps.limits.optimalBufferCopyRowPitchAlignment;
     if DevProps.limits.maxMemoryAllocationCount > 0 then
       FMaxMemoryAllocationCount := DevProps.limits.maxMemoryAllocationCount;
   end else
@@ -689,14 +730,24 @@ begin
     FMemProperties.memoryTypes[1].heapIndex := 1;
     FMemProperties.memoryTypes[1].propertyFlags :=
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    { Type 2: HOST_VISIBLE | HOST_CACHED (Readback) }
+    { Type 2: HOST_VISIBLE | HOST_CACHED (Readback, non-coherent) }
     FMemProperties.memoryTypes[2].heapIndex := 1;
     FMemProperties.memoryTypes[2].propertyFlags :=
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
 
     FBufferImageGranularity := 1024;
     FMinUniformBufferAlignment := 256;
+    FMinStorageBufferAlignment := 256;
+    FNonCoherentAtomSize := 64;
+    FOptimalBufferCopyOffsetAlignment := 16;
+    FOptimalBufferCopyRowPitchAlignment := 64;
   end;
+
+  if FMinUniformBufferAlignment = 0 then FMinUniformBufferAlignment := 256;
+  if FMinStorageBufferAlignment = 0 then FMinStorageBufferAlignment := 256;
+  if FNonCoherentAtomSize = 0 then FNonCoherentAtomSize := 64;
+  if FOptimalBufferCopyOffsetAlignment = 0 then FOptimalBufferCopyOffsetAlignment := 16;
+  if FOptimalBufferCopyRowPitchAlignment = 0 then FOptimalBufferCopyRowPitchAlignment := 64;
 
   for I := 0 to VK_MAX_MEMORY_TYPES - 1 do
     for IsLinear := Low(Boolean) to High(Boolean) do
@@ -724,7 +775,7 @@ begin
 end;
 
 function TCastleVulkanMemoryAllocator.SelectMemoryType(const ATypeBits: UInt32;
-  const AUsage: TRHIMemoryUsage; out AIsHostVisible: Boolean): Cardinal;
+  const AUsage: TRHIMemoryUsage; out AIsHostVisible, AIsHostCoherent: Boolean): Cardinal;
 
   function TryFindWithFlags(const Required, Preferred: VkMemoryPropertyFlags;
     out FoundIdx: Cardinal): Boolean;
@@ -757,7 +808,7 @@ function TCastleVulkanMemoryAllocator.SelectMemoryType(const ATypeBits: UInt32;
   end;
 
 var
-  RequiredFlags, PreferredFlags: VkMemoryPropertyFlags;
+  RequiredFlags, PreferredFlags, SelectedFlags: VkMemoryPropertyFlags;
 begin
   case AUsage of
     muGpuOnly:
@@ -784,6 +835,10 @@ begin
   if not TryFindWithFlags(RequiredFlags, PreferredFlags, Result) then
     if not TryFindWithFlags(0, 0, Result) then
       raise ERHIOutOfMemory.Create('Could not find compatible Vulkan memory type');
+
+  SelectedFlags := FMemProperties.memoryTypes[Result].propertyFlags;
+  AIsHostVisible := (SelectedFlags and VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) <> 0;
+  AIsHostCoherent := (SelectedFlags and VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) <> 0;
 end;
 
 function TCastleVulkanMemoryAllocator.GetPreferredBlockSize(
@@ -811,7 +866,7 @@ function TCastleVulkanMemoryAllocator.AllocateInternal(
   const ADedicatedBuffer: VkBuffer; const ADedicatedImage: VkImage): TVulkanMemoryAllocation;
 var
   MemTypeIdx: Cardinal;
-  IsHostVisible, WantDedicated: Boolean;
+  IsHostVisible, IsHostCoherent, WantDedicated: Boolean;
   PrefBlockSize, NewBlockSize: VkDeviceSize;
   Pool: TCastleVulkanBlockList;
   Block, NewBlock: TCastleVulkanMemoryBlock;
@@ -820,7 +875,7 @@ var
   I: Integer;
 begin
   FillChar(Result, SizeOf(Result), 0);
-  MemTypeIdx := SelectMemoryType(AMemReq.memoryTypeBits, AUsage, IsHostVisible);
+  MemTypeIdx := SelectMemoryType(AMemReq.memoryTypeBits, AUsage, IsHostVisible, IsHostCoherent);
   PrefBlockSize := GetPreferredBlockSize(AUsage);
 
   FLock.Acquire;
@@ -866,6 +921,7 @@ begin
       Result.Offset := 0;
       Result.Size := AMemReq.size;
       Result.IsDedicated := True;
+      Result.IsHostCoherent := IsHostCoherent;
 
       Inc(FDedicatedCount);
       Inc(FDedicatedBytes, AMemReq.size);
@@ -902,7 +958,7 @@ begin
     begin
       try
         NewBlock := TCastleVulkanMemoryBlock.Create(
-          FDevice, MemTypeIdx, NewBlockSize, IsHostVisible, AIsLinearResource);
+          FDevice, MemTypeIdx, NewBlockSize, IsHostVisible, AIsLinearResource, IsHostCoherent);
       except
         on E: ERHIOutOfMemory do
         begin
@@ -937,7 +993,7 @@ end;
 
 function TCastleVulkanMemoryAllocator.AllocateBufferMemory(const ABuffer: VkBuffer;
   const ASize: VkDeviceSize; const AUsage: TRHIMemoryUsage;
-  const AForceDedicated: Boolean): TVulkanMemoryAllocation;
+  const AForceDedicated: Boolean; const AMinAlignment: VkDeviceSize): TVulkanMemoryAllocation;
 var
   Info2: VkBufferMemoryRequirementsInfo2;
   Req2: VkMemoryRequirements2;
@@ -982,6 +1038,13 @@ begin
     MemReq.alignment := 256;
     MemReq.memoryTypeBits := $FFFFFFFF;
   end;
+
+  { Enforce hardware offset alignment (e.g. minUniformBufferOffsetAlignment,
+    minStorageBufferOffsetAlignment, optimalBufferCopyOffsetAlignment) }
+  if AMinAlignment > MemReq.alignment then
+    MemReq.alignment := AMinAlignment;
+  if (AUsage = muGpuToCpu) and (FNonCoherentAtomSize > MemReq.alignment) then
+    MemReq.alignment := FNonCoherentAtomSize;
 
   Result := AllocateInternal(MemReq, AUsage, True { Linear },
     PrefersDed, RequiresDed, ABuffer, VK_NULL_HANDLE);
@@ -1076,6 +1139,93 @@ begin
   finally
     FLock.Release;
   end;
+end;
+
+procedure AlignNonCoherentMemoryRange(
+  const ASubAllocOffset, ASubAllocSize, ARangeOffset, ARangeSize,
+  ABlockSize, ANonCoherentAtomSize: VkDeviceSize;
+  out AAlignedOffset, AAlignedSize: VkDeviceSize);
+var
+  Atom, RawStart, RawEnd, AlignedEnd, EffectiveSize: VkDeviceSize;
+begin
+  Atom := ANonCoherentAtomSize;
+  if Atom <= 1 then
+  begin
+    AAlignedOffset := ASubAllocOffset + ARangeOffset;
+    if (ARangeSize = VK_WHOLE_SIZE) or (ARangeOffset + ARangeSize > ASubAllocSize) then
+      AAlignedSize := ASubAllocSize - ARangeOffset
+    else
+      AAlignedSize := ARangeSize;
+    Exit;
+  end;
+
+  RawStart := ASubAllocOffset + ARangeOffset;
+  if (ARangeSize = VK_WHOLE_SIZE) or (ARangeOffset + ARangeSize > ASubAllocSize) then
+    EffectiveSize := ASubAllocSize - ARangeOffset
+  else
+    EffectiveSize := ARangeSize;
+  RawEnd := RawStart + EffectiveSize;
+
+  { VUID-VkMappedMemoryRange-offset-00687: offset must be a multiple of nonCoherentAtomSize }
+  AAlignedOffset := (RawStart div Atom) * Atom;
+
+  { VUID-VkMappedMemoryRange-size-01390: size must either be a multiple of
+    nonCoherentAtomSize, or offset + size must equal the underlying VkDeviceMemory size }
+  AlignedEnd := ((RawEnd + Atom - 1) div Atom) * Atom;
+  if (ABlockSize > 0) and (AlignedEnd > ABlockSize) then
+    AlignedEnd := ABlockSize;
+
+  AAlignedSize := AlignedEnd - AAlignedOffset;
+end;
+
+procedure TCastleVulkanMemoryAllocator.FlushAllocation(
+  const AAlloc: TVulkanMemoryAllocation; const AOffset, ASize: VkDeviceSize);
+var
+  Range: VkMappedMemoryRange;
+  BlockSize, AlignedOffset, AlignedSize: VkDeviceSize;
+begin
+  if (not AAlloc.IsValid) or AAlloc.IsHostCoherent then Exit;
+  if (FDevice = nil) or (not Assigned(vkFlushMappedMemoryRanges)) then Exit;
+
+  if AAlloc.Block <> nil then
+    BlockSize := AAlloc.Block.Size
+  else
+    BlockSize := AAlloc.Size;
+
+  AlignNonCoherentMemoryRange(AAlloc.Offset, AAlloc.Size, AOffset, ASize,
+    BlockSize, FNonCoherentAtomSize, AlignedOffset, AlignedSize);
+
+  FillChar(Range, SizeOf(Range), 0);
+  Range.sType := VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+  Range.memory := AAlloc.DeviceMemory;
+  Range.offset := AlignedOffset;
+  Range.size := AlignedSize;
+  vkFlushMappedMemoryRanges(FDevice, 1, @Range);
+end;
+
+procedure TCastleVulkanMemoryAllocator.InvalidateAllocation(
+  const AAlloc: TVulkanMemoryAllocation; const AOffset, ASize: VkDeviceSize);
+var
+  Range: VkMappedMemoryRange;
+  BlockSize, AlignedOffset, AlignedSize: VkDeviceSize;
+begin
+  if (not AAlloc.IsValid) or AAlloc.IsHostCoherent then Exit;
+  if (FDevice = nil) or (not Assigned(vkInvalidateMappedMemoryRanges)) then Exit;
+
+  if AAlloc.Block <> nil then
+    BlockSize := AAlloc.Block.Size
+  else
+    BlockSize := AAlloc.Size;
+
+  AlignNonCoherentMemoryRange(AAlloc.Offset, AAlloc.Size, AOffset, ASize,
+    BlockSize, FNonCoherentAtomSize, AlignedOffset, AlignedSize);
+
+  FillChar(Range, SizeOf(Range), 0);
+  Range.sType := VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+  Range.memory := AAlloc.DeviceMemory;
+  Range.offset := AlignedOffset;
+  Range.size := AlignedSize;
+  vkInvalidateMappedMemoryRanges(FDevice, 1, @Range);
 end;
 
 function TCastleVulkanMemoryAllocator.GetFrameRingBuffer(

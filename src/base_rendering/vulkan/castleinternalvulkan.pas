@@ -374,6 +374,17 @@ const
   VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2 = 1000146003;
   VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS = 1000127000;
   VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO = 1000127001;
+  VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE = 6;
+  VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT = $00000001;
+  VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT = $00000002;
+  VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT = $00000080;
+  VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT = $00000100;
+  VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT = $00000200;
+  VK_FORMAT_FEATURE_BLIT_SRC_BIT = $00000400;
+  VK_FORMAT_FEATURE_BLIT_DST_BIT = $00000800;
+  VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT = $00001000;
+  VK_FORMAT_FEATURE_TRANSFER_SRC_BIT = $00004000;
+  VK_FORMAT_FEATURE_TRANSFER_DST_BIT = $00008000;
 
   { Extension and Layer Names }
   VK_EXT_debug_utils = 'VK_EXT_debug_utils';
@@ -1648,6 +1659,22 @@ type
   end;
   PVkMemoryDedicatedAllocateInfo = ^VkMemoryDedicatedAllocateInfo;
 
+  VkFormatProperties = record
+    linearTilingFeatures: VkFlags;
+    optimalTilingFeatures: VkFlags;
+    bufferFeatures: VkFlags;
+  end;
+  PVkFormatProperties = ^VkFormatProperties;
+
+  VkMappedMemoryRange = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    memory: VkDeviceMemory;
+    offset: VkDeviceSize;
+    size: VkDeviceSize;
+  end;
+  PVkMappedMemoryRange = ^VkMappedMemoryRange;
+
   { KHR Type Aliases }
   VkRenderingAttachmentInfoKHR = VkRenderingAttachmentInfo;
   PVkRenderingAttachmentInfoKHR = ^VkRenderingAttachmentInfoKHR;
@@ -1776,6 +1803,9 @@ type
   PFN_vkCmdExecuteCommands = procedure(commandBuffer: VkCommandBuffer; commandBufferCount: Cardinal; const pCommandBuffers: PVkCommandBuffer); VKAPI_CALL;
   PFN_vkGetBufferMemoryRequirements2 = procedure(device: VkDevice; const pInfo: PVkBufferMemoryRequirementsInfo2; pMemoryRequirements: PVkMemoryRequirements2); VKAPI_CALL;
   PFN_vkGetImageMemoryRequirements2 = procedure(device: VkDevice; const pInfo: PVkImageMemoryRequirementsInfo2; pMemoryRequirements: PVkMemoryRequirements2); VKAPI_CALL;
+  PFN_vkGetPhysicalDeviceFormatProperties = procedure(physicalDevice: VkPhysicalDevice; format: VkFormat; pFormatProperties: PVkFormatProperties); VKAPI_CALL;
+  PFN_vkFlushMappedMemoryRanges = function(device: VkDevice; memoryRangeCount: Cardinal; const pMemoryRanges: PVkMappedMemoryRange): VkResult; VKAPI_CALL;
+  PFN_vkInvalidateMappedMemoryRanges = function(device: VkDevice; memoryRangeCount: Cardinal; const pMemoryRanges: PVkMappedMemoryRange): VkResult; VKAPI_CALL;
 
 var
   { Global Function Pointers }
@@ -1886,6 +1916,9 @@ var
   vkCmdExecuteCommands: PFN_vkCmdExecuteCommands;
   vkGetBufferMemoryRequirements2: PFN_vkGetBufferMemoryRequirements2;
   vkGetImageMemoryRequirements2: PFN_vkGetImageMemoryRequirements2;
+  vkGetPhysicalDeviceFormatProperties: PFN_vkGetPhysicalDeviceFormatProperties;
+  vkFlushMappedMemoryRanges: PFN_vkFlushMappedMemoryRanges;
+  vkInvalidateMappedMemoryRanges: PFN_vkInvalidateMappedMemoryRanges;
 
 function VK_MAKE_VERSION(const Major, Minor, Patch: Cardinal): Cardinal; inline;
 function VK_VERSION_MAJOR(const Version: Cardinal): Cardinal; inline;
@@ -2002,6 +2035,7 @@ begin
   Pointer(vkGetPhysicalDeviceProperties2) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceProperties2');
   if not Assigned(vkGetPhysicalDeviceProperties2) then
     Pointer(vkGetPhysicalDeviceProperties2) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceProperties2KHR');
+  Pointer(vkGetPhysicalDeviceFormatProperties) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceFormatProperties');
   Pointer(vkGetPhysicalDeviceQueueFamilyProperties) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceQueueFamilyProperties');
   Pointer(vkGetPhysicalDeviceMemoryProperties) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceMemoryProperties');
   Pointer(vkGetPhysicalDeviceMemoryProperties2) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceMemoryProperties2');
@@ -2114,6 +2148,9 @@ begin
   Pointer(vkCmdExecuteCommands) := vkGetInstanceProcAddr(nil, 'vkCmdExecuteCommands');
   Pointer(vkGetBufferMemoryRequirements2) := vkGetInstanceProcAddr(nil, 'vkGetBufferMemoryRequirements2');
   Pointer(vkGetImageMemoryRequirements2) := vkGetInstanceProcAddr(nil, 'vkGetImageMemoryRequirements2');
+  Pointer(vkGetPhysicalDeviceFormatProperties) := vkGetInstanceProcAddr(nil, 'vkGetPhysicalDeviceFormatProperties');
+  Pointer(vkFlushMappedMemoryRanges) := vkGetInstanceProcAddr(nil, 'vkFlushMappedMemoryRanges');
+  Pointer(vkInvalidateMappedMemoryRanges) := vkGetInstanceProcAddr(nil, 'vkInvalidateMappedMemoryRanges');
 end;
 
 procedure FreeVulkan;

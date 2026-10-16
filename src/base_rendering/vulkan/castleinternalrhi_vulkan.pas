@@ -71,6 +71,7 @@ type
     FAllocatedSize: VkDeviceSize;
     FOwnsImage: Boolean;
     FAspectMask: VkImageAspectFlags;
+    FViewAspectMask: VkImageAspectFlags;
     function VulkanDevice: TVulkanRHIDevice;
   public
     { Standard constructor that allocates a new VkImage and VkImageView }
@@ -87,7 +88,10 @@ type
     property Image: VkImage read FImage;
     property ImageView: VkImageView read FImageView;
     property Allocation: TVulkanMemoryAllocation read FAllocation;
+    { Full aspect mask used for VkImageMemoryBarrier transitions (DEPTH | STENCIL for combined formats) }
     property AspectMask: VkImageAspectFlags read FAspectMask;
+    { Aspect mask used for VkImageView creation (DEPTH-only when sampled in shaders) }
+    property ViewAspectMask: VkImageAspectFlags read FViewAspectMask;
   end;
 
   TVulkanRHISampler = class(TRHISampler)
@@ -183,6 +187,7 @@ type
     FHandle: VkCommandBuffer;
     FCurrentPipeline: TVulkanRHIPipeline;
     FInFallbackRenderPass: Boolean;
+    FBarrierCount: Cardinal;
   public
     constructor Create(const ADevice: TVulkanRHIDevice; const AQueueFamilyIndex: Cardinal;
       const ALevel: TRHICommandListLevel = cllPrimary);
@@ -193,6 +198,8 @@ type
 
     procedure TransitionTexture(const Texture: TRHITexture;
       const NewState: TRHIResourceState); override;
+    procedure TransitionBuffer(const Buffer: TRHIBuffer;
+      const OldState, NewState: TRHIResourceState);
     procedure GenerateMipmaps(const Texture: TRHITexture); override;
 
     procedure BeginRendering(const Info: TRHIRenderingInfo); override;
@@ -231,6 +238,7 @@ type
 
     property Handle: VkCommandBuffer read FHandle;
     property InFallbackRenderPass: Boolean read FInFallbackRenderPass;
+    property BarrierCount: Cardinal read FBarrierCount;
   end;
 
   { -------------------------------------------------------------------------- }
@@ -242,6 +250,17 @@ type
     RenderFinishedSemaphore: VkSemaphore;
     InFlightFence: VkFence;
     CommandList: TVulkanRHICommandList;
+  end;
+
+  { Retired GPU resource queued for safe destruction after the in-flight frame fence signals. }
+  TVulkanDeferredDeletionItem = record
+    IsTexture: Boolean;
+    Buffer: VkBuffer;
+    Image: VkImage;
+    ImageView: VkImageView;
+    Allocation: TVulkanMemoryAllocation;
+    DeviceMemory: VkDeviceMemory;
+    AllocatedSize: VkDeviceSize;
   end;
 
   TVulkanPipelineMap = {$ifdef FPC}specialize{$endif} TObjectDictionary<UInt64, TVulkanRHIPipeline>;
@@ -270,8 +289,10 @@ type
     FSwapchainDepthTexture: TVulkanRHITexture;
     FCurrentSwapchainImageIndex: Cardinal;
 
-    { Frame synchronization & command recording }
+    { Frame synchronization, deferred resource retirement & command recording }
     FFrames: array[0 .. MaxFramesInFlight - 1] of TVulkanFrameContext;
+    FDeferredDeletions: array[0 .. MaxFramesInFlight - 1] of array of TVulkanDeferredDeletionItem;
+    FDeferResourceDestruction: Boolean;
 
     { GPU memory sub-allocator (pooled blocks + per-frame ring buffers) }
     FMemoryAllocator: TCastleVulkanMemoryAllocator;
@@ -328,6 +349,7 @@ type
     function GetTotalPipelineLibraryCount: Cardinal;
     function GetFallbackRenderPassCount: Cardinal;
     function GetFallbackFramebufferCount: Cardinal;
+    function GetPendingDeferredDeletionCount: Cardinal;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -345,6 +367,19 @@ type
     procedure EndSingleTimeCommands(const CmdBuf: VkCommandBuffer);
     function FindMemoryType(const TypeFilter: Cardinal;
       const Properties: VkMemoryPropertyFlags): Cardinal;
+
+    { Enqueues or immediately destroys a buffer/image and its pooled memory sub-allocation.
+      When DeferResourceDestruction is True (during in-flight frame rendering), resources
+      are retired into FDeferredDeletions[FrameIndex] and freed only after that frame's
+      VkFence signals completion. }
+    procedure DeferOrDestroyBuffer(const ABuffer: VkBuffer;
+      var AAllocation: TVulkanMemoryAllocation; const ADeviceMemory: VkDeviceMemory;
+      const AAllocatedSize: VkDeviceSize);
+    procedure DeferOrDestroyTexture(const AImage: VkImage; const AImageView: VkImageView;
+      var AAllocation: TVulkanMemoryAllocation; const ADeviceMemory: VkDeviceMemory;
+      const AAllocatedSize: VkDeviceSize);
+    procedure FlushDeferredDeletions(const AFrameSlot: Integer);
+    procedure FlushAllDeferredDeletions;
 
     { Queries live GPU VRAM usage and budget via VK_EXT_memory_budget (or heap fallback).
       Returns True if VK_EXT_memory_budget was used. }
@@ -463,7 +498,32 @@ type
     property DescriptorSetAllocations: Cardinal read FDescriptorSetAllocations;
     property AllocatedMemoryBytes: Int64 read FAllocatedMemoryBytes;
     property MemoryAllocator: TCastleVulkanMemoryAllocator read FMemoryAllocator;
+    property DeferResourceDestruction: Boolean read FDeferResourceDestruction write FDeferResourceDestruction;
+    property PendingDeferredDeletionCount: Cardinal read GetPendingDeferredDeletionCount;
+    property FrameIndex: Cardinal read FFrameIndex write FFrameIndex;
   end;
+
+{ Returns the required VkFormatFeatureFlagBits for a given TRHIPixelFormat and TRHITextureUsageFlags set. }
+function GetRequiredVkFormatFeatures(const AFormat: TRHIPixelFormat;
+  const AUsage: TRHITextureUsageFlags): VkFlags;
+
+{ Returns the VkImageAspectFlags required for VkImageMemoryBarrier layout transitions
+  (includes both DEPTH and STENCIL bits for combined depth-stencil formats per
+  VUID-VkImageMemoryBarrier-subresourceRange-09601). }
+function GetFormatTransitionAspectMask(const AFormat: TRHIPixelFormat): VkImageAspectFlags;
+
+{ Returns the VkImageAspectFlags required for VkImageView creation
+  (restricts combined depth-stencil formats to VK_IMAGE_ASPECT_DEPTH_BIT when
+  tuSampled is in AUsage per VUID-VkDescriptorImageInfo-imageView-01976). }
+function GetFormatViewAspectMask(const AFormat: TRHIPixelFormat;
+  const AUsage: TRHITextureUsageFlags): VkImageAspectFlags;
+
+{ Negotiates a supported TRHIPixelFormat on APhysicalDevice via vkGetPhysicalDeviceFormatProperties,
+  automatically falling back across vendor differences (e.g. D24_UNorm_S8_UInt -> D32_Float_S8_UInt
+  -> D32_Float -> D16_UNorm on AMD/MoltenVK, or unsupported BC/ASTC/ETC2 -> RGBA8). }
+function NegotiateOptimalPixelFormat(const ARequestedFormat: TRHIPixelFormat;
+  const AUsage: TRHITextureUsageFlags;
+  const APhysicalDevice: VkPhysicalDevice = nil): TRHIPixelFormat;
 
 { Negotiates the highest supported VkApplicationInfo.apiVersion (1.3, 1.2, 1.1, or 1.0)
   for a given loader version reported by vkEnumerateInstanceVersion. }
@@ -975,6 +1035,147 @@ begin
   if ssCompute in Stages then Result := Result or VK_SHADER_STAGE_COMPUTE_BIT;
 end;
 
+function GetRequiredVkFormatFeatures(const AFormat: TRHIPixelFormat;
+  const AUsage: TRHITextureUsageFlags): VkFlags;
+begin
+  Result := 0;
+  if tuSampled in AUsage then
+    Result := Result or VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+  if tuColorAttachment in AUsage then
+    Result := Result or VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+  if (tuDepthStencil in AUsage) or
+     (AFormat in [pfD16_UNorm, pfD24_UNorm_S8_UInt, pfD32_Float, pfD32_Float_S8_UInt]) then
+    Result := Result or VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+  if tuTransferSrc in AUsage then
+    Result := Result or VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
+  if tuTransferDst in AUsage then
+    Result := Result or VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+end;
+
+function GetFormatTransitionAspectMask(const AFormat: TRHIPixelFormat): VkImageAspectFlags;
+begin
+  case AFormat of
+    pfD16_UNorm,
+    pfD32_Float:
+      Result := VK_IMAGE_ASPECT_DEPTH_BIT;
+    pfD24_UNorm_S8_UInt,
+    pfD32_Float_S8_UInt:
+      { Per VUID-VkImageMemoryBarrier-subresourceRange-09601, layout transitions on
+        combined depth+stencil images must specify BOTH DEPTH_BIT and STENCIL_BIT }
+      Result := VK_IMAGE_ASPECT_DEPTH_BIT or VK_IMAGE_ASPECT_STENCIL_BIT;
+    else
+      Result := VK_IMAGE_ASPECT_COLOR_BIT;
+  end;
+end;
+
+function GetFormatViewAspectMask(const AFormat: TRHIPixelFormat;
+  const AUsage: TRHITextureUsageFlags): VkImageAspectFlags;
+begin
+  case AFormat of
+    pfD16_UNorm,
+    pfD32_Float:
+      Result := VK_IMAGE_ASPECT_DEPTH_BIT;
+    pfD24_UNorm_S8_UInt,
+    pfD32_Float_S8_UInt:
+      begin
+        { Per VUID-VkDescriptorImageInfo-imageView-01976, a VkImageView used for
+          shader sampling (tuSampled) of a depth/stencil image must specify ONLY
+          VK_IMAGE_ASPECT_DEPTH_BIT (or STENCIL_BIT), never both }
+        if tuSampled in AUsage then
+          Result := VK_IMAGE_ASPECT_DEPTH_BIT
+        else
+          Result := VK_IMAGE_ASPECT_DEPTH_BIT or VK_IMAGE_ASPECT_STENCIL_BIT;
+      end;
+    else
+      Result := VK_IMAGE_ASPECT_COLOR_BIT;
+  end;
+end;
+
+function NegotiateOptimalPixelFormat(const ARequestedFormat: TRHIPixelFormat;
+  const AUsage: TRHITextureUsageFlags;
+  const APhysicalDevice: VkPhysicalDevice): TRHIPixelFormat;
+var
+  ReqFeatures: VkFlags;
+
+  function IsFormatSupported(const Candidate: TRHIPixelFormat): Boolean;
+  var
+    VkFmt: VkFormat;
+    FmtProps: VkFormatProperties;
+  begin
+    VkFmt := RHIToVkFormat(Candidate);
+    if VkFmt = VK_FORMAT_UNDEFINED then
+      Exit(False);
+    if (APhysicalDevice = nil) or not Assigned(vkGetPhysicalDeviceFormatProperties) then
+      Exit(True);
+    FillChar(FmtProps, SizeOf(FmtProps), 0);
+    vkGetPhysicalDeviceFormatProperties(APhysicalDevice, VkFmt, @FmtProps);
+    Result := (FmtProps.optimalTilingFeatures and ReqFeatures) = ReqFeatures;
+  end;
+
+const
+  DepthStencilFallbacksD24S8: array[0..3] of TRHIPixelFormat = (
+    pfD24_UNorm_S8_UInt, pfD32_Float_S8_UInt, pfD32_Float, pfD16_UNorm
+  );
+  DepthStencilFallbacksD32S8: array[0..3] of TRHIPixelFormat = (
+    pfD32_Float_S8_UInt, pfD24_UNorm_S8_UInt, pfD32_Float, pfD16_UNorm
+  );
+  DepthFallbacksD32: array[0..2] of TRHIPixelFormat = (
+    pfD32_Float, pfD24_UNorm_S8_UInt, pfD16_UNorm
+  );
+  DepthFallbacksD16: array[0..2] of TRHIPixelFormat = (
+    pfD16_UNorm, pfD24_UNorm_S8_UInt, pfD32_Float
+  );
+var
+  I: Integer;
+begin
+  Result := ARequestedFormat;
+  if (APhysicalDevice = nil) or not Assigned(vkGetPhysicalDeviceFormatProperties) then
+    Exit;
+
+  ReqFeatures := GetRequiredVkFormatFeatures(ARequestedFormat, AUsage);
+  if ReqFeatures = 0 then
+    ReqFeatures := VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+
+  if IsFormatSupported(ARequestedFormat) then
+    Exit;
+
+  case ARequestedFormat of
+    pfD24_UNorm_S8_UInt:
+      for I := Low(DepthStencilFallbacksD24S8) to High(DepthStencilFallbacksD24S8) do
+        if IsFormatSupported(DepthStencilFallbacksD24S8[I]) then
+          Exit(DepthStencilFallbacksD24S8[I]);
+    pfD32_Float_S8_UInt:
+      for I := Low(DepthStencilFallbacksD32S8) to High(DepthStencilFallbacksD32S8) do
+        if IsFormatSupported(DepthStencilFallbacksD32S8[I]) then
+          Exit(DepthStencilFallbacksD32S8[I]);
+    pfD32_Float:
+      for I := Low(DepthFallbacksD32) to High(DepthFallbacksD32) do
+        if IsFormatSupported(DepthFallbacksD32[I]) then
+          Exit(DepthFallbacksD32[I]);
+    pfD16_UNorm:
+      for I := Low(DepthFallbacksD16) to High(DepthFallbacksD16) do
+        if IsFormatSupported(DepthFallbacksD16[I]) then
+          Exit(DepthFallbacksD16[I]);
+    pfBC1_RGBA_sRGB, pfBC3_RGBA_sRGB, pfBC7_RGBA_sRGB, pfASTC_4x4_sRGB:
+      if IsFormatSupported(pfRGBA8_sRGB) then
+        Exit(pfRGBA8_sRGB)
+      else if IsFormatSupported(pfBGRA8_sRGB) then
+        Exit(pfBGRA8_sRGB);
+    pfBC1_RGBA_UNorm, pfBC3_RGBA_UNorm, pfBC5_RG_UNorm, pfBC7_RGBA_UNorm,
+    pfASTC_4x4_UNorm, pfETC2_RGB8_UNorm, pfETC2_RGBA8_UNorm:
+      if IsFormatSupported(pfRGBA8_UNorm) then
+        Exit(pfRGBA8_UNorm)
+      else if IsFormatSupported(pfBGRA8_UNorm) then
+        Exit(pfBGRA8_UNorm);
+    pfBGRA8_UNorm:
+      if IsFormatSupported(pfRGBA8_UNorm) then
+        Exit(pfRGBA8_UNorm);
+    pfBGRA8_sRGB:
+      if IsFormatSupported(pfRGBA8_sRGB) then
+        Exit(pfRGBA8_sRGB);
+  end;
+end;
+
 procedure RHIStateToVkLayoutAndAccess(const State: TRHIResourceState;
   out Layout: VkImageLayout; out Access: VkAccessFlags; out Stage: VkPipelineStageFlags);
 begin
@@ -1001,31 +1202,66 @@ begin
       begin
         Layout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         Access := VK_ACCESS_SHADER_READ_BIT;
-        Stage  := VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        Stage  := VK_PIPELINE_STAGE_VERTEX_SHADER_BIT or VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
       end;
     rsColorAttachment:
       begin
         Layout := VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        Access := VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        Access := VK_ACCESS_COLOR_ATTACHMENT_READ_BIT or VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
         Stage  := VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
       end;
     rsDepthStencilWrite:
       begin
         Layout := VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        Access := VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        Access := VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT or VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
         Stage  := VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT or VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
       end;
     rsDepthStencilRead:
       begin
         Layout := VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
         Access := VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT or VK_ACCESS_SHADER_READ_BIT;
-        Stage  := VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        Stage  := VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT or VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
       end;
     rsPresent:
       begin
         Layout := VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         Access := 0;
         Stage  := VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+      end;
+  end;
+end;
+
+procedure RHIStateToVkBufferAccessAndStage(const State: TRHIResourceState;
+  out Access: VkAccessFlags; out Stage: VkPipelineStageFlags);
+begin
+  case State of
+    rsUndefined:
+      begin
+        Access := 0;
+        Stage  := VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+      end;
+    rsTransferDst:
+      begin
+        Access := VK_ACCESS_TRANSFER_WRITE_BIT;
+        Stage  := VK_PIPELINE_STAGE_TRANSFER_BIT;
+      end;
+    rsTransferSrc:
+      begin
+        Access := VK_ACCESS_TRANSFER_READ_BIT;
+        Stage  := VK_PIPELINE_STAGE_TRANSFER_BIT;
+      end;
+    rsShaderRead:
+      begin
+        Access := VK_ACCESS_UNIFORM_READ_BIT or VK_ACCESS_SHADER_READ_BIT or
+                  VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT or VK_ACCESS_INDEX_READ_BIT;
+        Stage  := VK_PIPELINE_STAGE_VERTEX_INPUT_BIT or
+                  VK_PIPELINE_STAGE_VERTEX_SHADER_BIT or
+                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+      end;
+    else
+      begin
+        Access := VK_ACCESS_MEMORY_READ_BIT or VK_ACCESS_MEMORY_WRITE_BIT;
+        Stage  := VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
       end;
   end;
 end;
@@ -1046,6 +1282,7 @@ var
   MemReq: VkMemoryRequirements;
   AllocInfo: VkMemoryAllocateInfo;
   MemProps: VkMemoryPropertyFlags;
+  RequiredAlign: VkDeviceSize;
 begin
   inherited Create(ADevice, ADesc);
 
@@ -1071,10 +1308,20 @@ begin
 
   if (ADevice <> nil) and (ADevice.MemoryAllocator <> nil) then
   begin
+    { Enforce cross-vendor hardware offset alignment limits (e.g., 256B UBO alignment on NVIDIA,
+      64B/128B SSBO alignment on Mali/Adreno, optimalBufferCopyOffsetAlignment for staging) }
+    RequiredAlign := 16;
+    if buUniform in ADesc.Usage then
+      RequiredAlign := Max(RequiredAlign, ADevice.MemoryAllocator.MinUniformBufferAlignment);
+    if buStorage in ADesc.Usage then
+      RequiredAlign := Max(RequiredAlign, ADevice.MemoryAllocator.MinStorageBufferAlignment);
+    if (buTransferSrc in ADesc.Usage) or (buTransferDst in ADesc.Usage) then
+      RequiredAlign := Max(RequiredAlign, ADevice.MemoryAllocator.OptimalBufferCopyOffsetAlignment);
+
     { Sub-allocate from pooled VkDeviceMemory blocks via TCastleVulkanMemoryAllocator
       to stay well below Windows WDDM's 4096 maxMemoryAllocationCount limit }
     FAllocation := ADevice.MemoryAllocator.AllocateBufferMemory(
-      FHandle, ADesc.Size, ADesc.MemoryUsage);
+      FHandle, ADesc.Size, ADesc.MemoryUsage, False, RequiredAlign);
     FDeviceMemory := FAllocation.DeviceMemory;
     FMemoryOffset := FAllocation.Offset;
     FAllocatedSize := FAllocation.Size;
@@ -1111,20 +1358,12 @@ destructor TVulkanRHIBuffer.Destroy;
 begin
   if FMappedPtr <> nil then
     Unmap;
-  if (FHandle <> VK_NULL_HANDLE) and (VulkanDevice <> nil) and
-     (VulkanDevice.Handle <> nil) and Assigned(vkDestroyBuffer) then
-    vkDestroyBuffer(VulkanDevice.Handle, FHandle, nil);
-  if FAllocation.IsValid and (VulkanDevice <> nil) and (VulkanDevice.MemoryAllocator <> nil) then
+  if VulkanDevice <> nil then
   begin
-    VulkanDevice.MemoryAllocator.Free(FAllocation);
-    Dec(VulkanDevice.FAllocatedMemoryBytes, FAllocatedSize);
+    VulkanDevice.DeferOrDestroyBuffer(FHandle, FAllocation, FDeviceMemory, FAllocatedSize);
+    FHandle := VK_NULL_HANDLE;
+    FillChar(FAllocation, SizeOf(FAllocation), 0);
     FDeviceMemory := VK_NULL_HANDLE;
-  end else
-  if (FDeviceMemory <> VK_NULL_HANDLE) and (VulkanDevice <> nil) and
-     (VulkanDevice.Handle <> nil) and Assigned(vkFreeMemory) then
-  begin
-    vkFreeMemory(VulkanDevice.Handle, FDeviceMemory, nil);
-    Dec(VulkanDevice.FAllocatedMemoryBytes, FAllocatedSize);
   end;
   inherited;
 end;
@@ -1173,6 +1412,9 @@ begin
       Inc(DestPtr, Offset);
       Move(Data, DestPtr^, Size);
     end;
+    { Explicitly flush if sub-allocated from a non-coherent host-visible heap }
+    if FAllocation.IsValid and (VulkanDevice <> nil) and (VulkanDevice.MemoryAllocator <> nil) then
+      VulkanDevice.MemoryAllocator.FlushAllocation(FAllocation, Offset, Size);
     Unmap;
   end else
   if (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and Assigned(vkCmdCopyBuffer) then
@@ -1208,23 +1450,27 @@ end;
 
 constructor TVulkanRHITexture.Create(const ADevice: TVulkanRHIDevice; const ADesc: TRHITextureDesc);
 var
+  NegotiatedDesc: TRHITextureDesc;
   ImgInfo: VkImageCreateInfo;
   ViewInfo: VkImageViewCreateInfo;
   MemReq: VkMemoryRequirements;
   AllocInfo: VkMemoryAllocateInfo;
   ApproxBytes: VkDeviceSize;
 begin
-  inherited Create(ADevice, ADesc);
+  NegotiatedDesc := ADesc;
+  if ADevice <> nil then
+    NegotiatedDesc.Format := NegotiateOptimalPixelFormat(
+      ADesc.Format, ADesc.Usage, ADevice.PhysicalDevice);
+
+  inherited Create(ADevice, NegotiatedDesc);
   FOwnsImage := True;
 
-  if tuDepthStencil in ADesc.Usage then
-    FAspectMask := VK_IMAGE_ASPECT_DEPTH_BIT
-  else
-    FAspectMask := VK_IMAGE_ASPECT_COLOR_BIT;
+  FAspectMask := GetFormatTransitionAspectMask(FDesc.Format);
+  FViewAspectMask := GetFormatViewAspectMask(FDesc.Format, FDesc.Usage);
 
-  ApproxBytes := VkDeviceSize(Max(1, ADesc.Width)) *
-    VkDeviceSize(Max(1, ADesc.Height)) *
-    VkDeviceSize(Max(1, ADesc.DepthOrArrayLayers)) * 4;
+  ApproxBytes := VkDeviceSize(Max(1, FDesc.Width)) *
+    VkDeviceSize(Max(1, FDesc.Height)) *
+    VkDeviceSize(Max(1, FDesc.DepthOrArrayLayers)) * 4;
 
   if (ADevice = nil) or (ADevice.Handle = nil) then
   begin
@@ -1244,23 +1490,23 @@ begin
   FillChar(ImgInfo, SizeOf(ImgInfo), 0);
   ImgInfo.sType := VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   ImgInfo.imageType := VK_IMAGE_TYPE_2D;
-  if ADesc.Dimension in [tdCube, tdCubeArray] then
+  if FDesc.Dimension in [tdCube, tdCubeArray] then
     ImgInfo.flags := VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
-  ImgInfo.format := RHIToVkFormat(ADesc.Format);
-  ImgInfo.extent.width := ADesc.Width;
-  ImgInfo.extent.height := ADesc.Height;
+  ImgInfo.format := RHIToVkFormat(FDesc.Format);
+  ImgInfo.extent.width := FDesc.Width;
+  ImgInfo.extent.height := FDesc.Height;
   ImgInfo.extent.depth := 1;
-  ImgInfo.mipLevels := ADesc.MipLevels;
-  ImgInfo.arrayLayers := ADesc.DepthOrArrayLayers;
+  ImgInfo.mipLevels := FDesc.MipLevels;
+  ImgInfo.arrayLayers := FDesc.DepthOrArrayLayers;
   ImgInfo.samples := VK_SAMPLE_COUNT_1_BIT;
   ImgInfo.tiling := VK_IMAGE_TILING_OPTIMAL;
   ImgInfo.initialLayout := VK_IMAGE_LAYOUT_UNDEFINED;
 
-  if tuSampled in ADesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_SAMPLED_BIT;
-  if tuColorAttachment in ADesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-  if tuDepthStencil in ADesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-  if tuTransferSrc in ADesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-  if tuTransferDst in ADesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  if tuSampled in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_SAMPLED_BIT;
+  if tuColorAttachment in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+  if tuDepthStencil in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+  if tuTransferSrc in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  if tuTransferDst in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
   CheckVk(vkCreateImage(ADevice.Handle, @ImgInfo, nil, @FImage), 'vkCreateImage');
 
@@ -1292,7 +1538,7 @@ begin
   FillChar(ViewInfo, SizeOf(ViewInfo), 0);
   ViewInfo.sType := VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
   ViewInfo.image := FImage;
-  case ADesc.Dimension of
+  case FDesc.Dimension of
     td2D: ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_2D;
     td2DArray: ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_2D_ARRAY;
     td3D: ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_3D;
@@ -1300,11 +1546,11 @@ begin
     tdCubeArray: ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
   end;
   ViewInfo.format := ImgInfo.format;
-  ViewInfo.subresourceRange.aspectMask := FAspectMask;
+  ViewInfo.subresourceRange.aspectMask := FViewAspectMask;
   ViewInfo.subresourceRange.baseMipLevel := 0;
-  ViewInfo.subresourceRange.levelCount := ADesc.MipLevels;
+  ViewInfo.subresourceRange.levelCount := FDesc.MipLevels;
   ViewInfo.subresourceRange.baseArrayLayer := 0;
-  ViewInfo.subresourceRange.layerCount := ADesc.DepthOrArrayLayers;
+  ViewInfo.subresourceRange.layerCount := FDesc.DepthOrArrayLayers;
 
   CheckVk(vkCreateImageView(ADevice.Handle, @ViewInfo, nil, @FImageView), 'vkCreateImageView');
 end;
@@ -1317,40 +1563,21 @@ begin
   FImage := AExistingImage;
   FImageView := AExistingView;
   FAspectMask := VK_IMAGE_ASPECT_COLOR_BIT;
+  FViewAspectMask := VK_IMAGE_ASPECT_COLOR_BIT;
 end;
 
 destructor TVulkanRHITexture.Destroy;
 begin
-  if (VulkanDevice = nil) or (VulkanDevice.Handle = nil) then
+  if VulkanDevice <> nil then
   begin
-    if FOwnsImage and FAllocation.IsValid and (VulkanDevice <> nil) and
-       (VulkanDevice.MemoryAllocator <> nil) then
-    begin
-      VulkanDevice.MemoryAllocator.Free(FAllocation);
-      Dec(VulkanDevice.FAllocatedMemoryBytes, FAllocatedSize);
-      FDeviceMemory := VK_NULL_HANDLE;
-    end;
-    inherited;
-    Exit;
-  end;
-  if FImageView <> VK_NULL_HANDLE then
-    vkDestroyImageView(VulkanDevice.Handle, FImageView, nil);
-  if FOwnsImage then
-  begin
-    if FImage <> VK_NULL_HANDLE then
-      vkDestroyImage(VulkanDevice.Handle, FImage, nil);
-    if FAllocation.IsValid and (VulkanDevice.MemoryAllocator <> nil) then
-    begin
-      VulkanDevice.MemoryAllocator.Free(FAllocation);
-      Dec(VulkanDevice.FAllocatedMemoryBytes, FAllocatedSize);
-      FDeviceMemory := VK_NULL_HANDLE;
-    end else
-    if FDeviceMemory <> VK_NULL_HANDLE then
-    begin
-      vkFreeMemory(VulkanDevice.Handle, FDeviceMemory, nil);
-      if VulkanDevice <> nil then
-        Dec(VulkanDevice.FAllocatedMemoryBytes, FAllocatedSize);
-    end;
+    if FOwnsImage then
+      VulkanDevice.DeferOrDestroyTexture(FImage, FImageView, FAllocation, FDeviceMemory, FAllocatedSize)
+    else if (VulkanDevice.Handle <> nil) and (FImageView <> VK_NULL_HANDLE) then
+      vkDestroyImageView(VulkanDevice.Handle, FImageView, nil);
+    FImage := VK_NULL_HANDLE;
+    FImageView := VK_NULL_HANDLE;
+    FillChar(FAllocation, SizeOf(FAllocation), 0);
+    FDeviceMemory := VK_NULL_HANDLE;
   end;
   inherited;
 end;
@@ -2045,6 +2272,7 @@ begin
   end;
   CheckVk(vkBeginCommandBuffer(FHandle, @BeginInfo), 'vkBeginCommandBuffer');
   FCurrentPipeline := nil;
+  FBarrierCount := 0;
 end;
 
 procedure TVulkanRHICommandList.EndRecording;
@@ -2059,7 +2287,7 @@ var
   Barrier: VkImageMemoryBarrier;
   SrcStage, DstStage: VkPipelineStageFlags;
 begin
-  if Texture.CurrentState = NewState then
+  if (Texture = nil) or (Texture.CurrentState = NewState) then
     Exit;
 
   VkTex := Texture as TVulkanRHITexture;
@@ -2077,8 +2305,36 @@ begin
   Barrier.subresourceRange.baseArrayLayer := 0;
   Barrier.subresourceRange.layerCount := VkTex.Desc.DepthOrArrayLayers;
 
-  vkCmdPipelineBarrier(FHandle, SrcStage, DstStage, 0, 0, nil, 0, nil, 1, @Barrier);
+  if (FHandle <> nil) and Assigned(vkCmdPipelineBarrier) then
+    vkCmdPipelineBarrier(FHandle, SrcStage, DstStage, 0, 0, nil, 0, nil, 1, @Barrier);
+  Inc(FBarrierCount);
   Texture.CurrentState := NewState;
+end;
+
+procedure TVulkanRHICommandList.TransitionBuffer(const Buffer: TRHIBuffer;
+  const OldState, NewState: TRHIResourceState);
+var
+  VkBuf: TVulkanRHIBuffer;
+  BufBarrier: VkBufferMemoryBarrier;
+  SrcStage, DstStage: VkPipelineStageFlags;
+begin
+  if (Buffer = nil) or (OldState = NewState) then
+    Exit;
+
+  VkBuf := Buffer as TVulkanRHIBuffer;
+  FillChar(BufBarrier, SizeOf(BufBarrier), 0);
+  BufBarrier.sType := VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+  RHIStateToVkBufferAccessAndStage(OldState, BufBarrier.srcAccessMask, SrcStage);
+  RHIStateToVkBufferAccessAndStage(NewState, BufBarrier.dstAccessMask, DstStage);
+  BufBarrier.srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+  BufBarrier.dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+  BufBarrier.buffer := VkBuf.Handle;
+  BufBarrier.offset := 0;
+  BufBarrier.size := VK_WHOLE_SIZE;
+
+  if (FHandle <> nil) and Assigned(vkCmdPipelineBarrier) then
+    vkCmdPipelineBarrier(FHandle, SrcStage, DstStage, 0, 0, nil, 1, @BufBarrier, 0, nil);
+  Inc(FBarrierCount);
 end;
 
 procedure TVulkanRHICommandList.GenerateMipmaps(const Texture: TRHITexture);
@@ -2657,12 +2913,136 @@ begin
     Result := 0;
 end;
 
+procedure TVulkanRHIDevice.DeferOrDestroyBuffer(const ABuffer: VkBuffer;
+  var AAllocation: TVulkanMemoryAllocation; const ADeviceMemory: VkDeviceMemory;
+  const AAllocatedSize: VkDeviceSize);
+var
+  Slot, Idx: Integer;
+begin
+  if FDeferResourceDestruction then
+  begin
+    Slot := FFrameIndex mod MaxFramesInFlight;
+    Idx := Length(FDeferredDeletions[Slot]);
+    SetLength(FDeferredDeletions[Slot], Idx + 1);
+    FillChar(FDeferredDeletions[Slot][Idx], SizeOf(TVulkanDeferredDeletionItem), 0);
+    FDeferredDeletions[Slot][Idx].IsTexture := False;
+    FDeferredDeletions[Slot][Idx].Buffer := ABuffer;
+    FDeferredDeletions[Slot][Idx].Allocation := AAllocation;
+    FDeferredDeletions[Slot][Idx].DeviceMemory := ADeviceMemory;
+    FDeferredDeletions[Slot][Idx].AllocatedSize := AAllocatedSize;
+    Exit;
+  end;
+
+  if (ABuffer <> VK_NULL_HANDLE) and (FDevice <> nil) and Assigned(vkDestroyBuffer) then
+    vkDestroyBuffer(FDevice, ABuffer, nil);
+  if AAllocation.IsValid and (FMemoryAllocator <> nil) then
+  begin
+    FMemoryAllocator.Free(AAllocation);
+    Dec(FAllocatedMemoryBytes, AAllocatedSize);
+  end else
+  if (ADeviceMemory <> VK_NULL_HANDLE) and (FDevice <> nil) and Assigned(vkFreeMemory) then
+  begin
+    vkFreeMemory(FDevice, ADeviceMemory, nil);
+    Dec(FAllocatedMemoryBytes, AAllocatedSize);
+  end;
+end;
+
+procedure TVulkanRHIDevice.DeferOrDestroyTexture(const AImage: VkImage;
+  const AImageView: VkImageView; var AAllocation: TVulkanMemoryAllocation;
+  const ADeviceMemory: VkDeviceMemory; const AAllocatedSize: VkDeviceSize);
+var
+  Slot, Idx: Integer;
+begin
+  if FDeferResourceDestruction then
+  begin
+    Slot := FFrameIndex mod MaxFramesInFlight;
+    Idx := Length(FDeferredDeletions[Slot]);
+    SetLength(FDeferredDeletions[Slot], Idx + 1);
+    FillChar(FDeferredDeletions[Slot][Idx], SizeOf(TVulkanDeferredDeletionItem), 0);
+    FDeferredDeletions[Slot][Idx].IsTexture := True;
+    FDeferredDeletions[Slot][Idx].Image := AImage;
+    FDeferredDeletions[Slot][Idx].ImageView := AImageView;
+    FDeferredDeletions[Slot][Idx].Allocation := AAllocation;
+    FDeferredDeletions[Slot][Idx].DeviceMemory := ADeviceMemory;
+    FDeferredDeletions[Slot][Idx].AllocatedSize := AAllocatedSize;
+    Exit;
+  end;
+
+  if (AImageView <> VK_NULL_HANDLE) and (FDevice <> nil) and Assigned(vkDestroyImageView) then
+    vkDestroyImageView(FDevice, AImageView, nil);
+  if (AImage <> VK_NULL_HANDLE) and (FDevice <> nil) and Assigned(vkDestroyImage) then
+    vkDestroyImage(FDevice, AImage, nil);
+  if AAllocation.IsValid and (FMemoryAllocator <> nil) then
+  begin
+    FMemoryAllocator.Free(AAllocation);
+    Dec(FAllocatedMemoryBytes, AAllocatedSize);
+  end else
+  if (ADeviceMemory <> VK_NULL_HANDLE) and (FDevice <> nil) and Assigned(vkFreeMemory) then
+  begin
+    vkFreeMemory(FDevice, ADeviceMemory, nil);
+    Dec(FAllocatedMemoryBytes, AAllocatedSize);
+  end;
+end;
+
+procedure TVulkanRHIDevice.FlushDeferredDeletions(const AFrameSlot: Integer);
+var
+  I: Integer;
+  Item: TVulkanDeferredDeletionItem;
+begin
+  if (AFrameSlot < 0) or (AFrameSlot >= MaxFramesInFlight) then
+    Exit;
+  for I := 0 to High(FDeferredDeletions[AFrameSlot]) do
+  begin
+    Item := FDeferredDeletions[AFrameSlot][I];
+    if Item.IsTexture then
+    begin
+      if (Item.ImageView <> VK_NULL_HANDLE) and (FDevice <> nil) and Assigned(vkDestroyImageView) then
+        vkDestroyImageView(FDevice, Item.ImageView, nil);
+      if (Item.Image <> VK_NULL_HANDLE) and (FDevice <> nil) and Assigned(vkDestroyImage) then
+        vkDestroyImage(FDevice, Item.Image, nil);
+    end else
+    begin
+      if (Item.Buffer <> VK_NULL_HANDLE) and (FDevice <> nil) and Assigned(vkDestroyBuffer) then
+        vkDestroyBuffer(FDevice, Item.Buffer, nil);
+    end;
+    if Item.Allocation.IsValid and (FMemoryAllocator <> nil) then
+    begin
+      FMemoryAllocator.Free(Item.Allocation);
+      Dec(FAllocatedMemoryBytes, Item.AllocatedSize);
+    end else
+    if (Item.DeviceMemory <> VK_NULL_HANDLE) and (FDevice <> nil) and Assigned(vkFreeMemory) then
+    begin
+      vkFreeMemory(FDevice, Item.DeviceMemory, nil);
+      Dec(FAllocatedMemoryBytes, Item.AllocatedSize);
+    end;
+  end;
+  SetLength(FDeferredDeletions[AFrameSlot], 0);
+end;
+
+procedure TVulkanRHIDevice.FlushAllDeferredDeletions;
+var
+  Slot: Integer;
+begin
+  for Slot := 0 to MaxFramesInFlight - 1 do
+    FlushDeferredDeletions(Slot);
+end;
+
+function TVulkanRHIDevice.GetPendingDeferredDeletionCount: Cardinal;
+var
+  Slot: Integer;
+begin
+  Result := 0;
+  for Slot := 0 to MaxFramesInFlight - 1 do
+    Inc(Result, Cardinal(Length(FDeferredDeletions[Slot])));
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FlushAllDeferredDeletions;
   DestroySwapchain;
   FreeAndNil(FPipelineMap);
   ClearPipelineLibraries;
@@ -3738,8 +4118,11 @@ begin
 
   { 1. Wait for the GPU to finish executing the previous frame occupying this slot }
   CheckVk(vkWaitForFences(FDevice, 1, @Frame.InFlightFence, VK_TRUE, High(UInt64)), 'vkWaitForFences');
+  { Retire any VkBuffers/VkImages/TVulkanMemoryAllocations destroyed while this slot was in flight }
+  FlushDeferredDeletions(FFrameIndex);
   if FMemoryAllocator <> nil then
     FMemoryAllocator.GetFrameRingBuffer(FFrameIndex).Reset;
+  FDeferResourceDestruction := True;
 
   { 2. Acquire next swapchain image }
   AcquireRes := vkAcquireNextImageKHR(FDevice, FSwapchain, High(UInt64),
@@ -3812,8 +4195,10 @@ end;
 
 procedure TVulkanRHIDevice.WaitIdle;
 begin
-  if FDevice <> nil then
+  if (FDevice <> nil) and Assigned(vkDeviceWaitIdle) then
     vkDeviceWaitIdle(FDevice);
+  FlushAllDeferredDeletions;
+  FDeferResourceDestruction := False;
 end;
 
 function TVulkanRHIDevice.CreateSecondaryCommandList: TRHICommandList;
