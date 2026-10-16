@@ -60,27 +60,15 @@ Implement Frames in Flight (default: 2) using per-frame command pools, command b
 Support clean swapchain recreation on window resize (VK_ERROR_OUT_OF_DATE_KHR / SUBOPTIMAL_KHR).
 
 
-### 3.2. GPU Memory Management
+### 3.2. GPU Memory Management (PasVulkan / VMA Architecture & Windows 4096 Allocation Limit)
 
-* 
-
-Raw vkAllocateMemory calls are limited by maxMemoryAllocationCount.
-
-* 
-
-Implement TCastleVulkanMemoryAllocator: a native Object Pascal sub-allocator (inspired by VMA) using slab/TLSF pools for:
-
-* 
-
-gpu_only (VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT): Static meshes, textures, render targets.
-
-* 
-
-cpu_to_gpu (HOST_VISIBLE | HOST_COHERENT): Per-frame ring buffers for dynamic uniforms, UI sprites, and streaming vertices.
-
-* 
-
-staging: Reusable ring-buffer for asynchronous texture and glTF buffer uploads.
+* **Windows Kernel Limit (`maxMemoryAllocationCount = 4096`):** Under Windows WDDM, the kernel restricts processes to at most 4096 total `VkDeviceMemory` allocations. Calling `vkAllocateMemory` per `TVulkanRHIBuffer` or `TVulkanRHITexture` exhausts this limit quickly in real scenes (`VK_ERROR_TOO_MANY_OBJECTS`).
+* **`TCastleVulkanMemoryAllocator` (inspired by PasVulkan's `TpvVulkanMemoryManager` & AMD VMA):**
+  * **Separate Linear vs Non-Linear Pools per `memoryTypeIndex`:** Buffers (`IsLinear = True`) and optimal-tiled images (`IsLinear = False`) are sub-allocated from separate `TCastleVulkanMemoryBlock` pools (`FPools[0 .. VK_MAX_MEMORY_TYPES - 1, Boolean]`), avoiding `bufferImageGranularity` page-aliasing waste.
+  * **$O(1)$ Node Freeing & Coalescing:** Each `TVulkanMemoryAllocation` stores a direct pointer (`Node: PVulkanSubAllocationNode`) to its doubly-linked chunk node, enabling immediate $O(1)$ `FreeSubAllocation` and adjacent free-chunk merging without linear block scans.
+  * **`VK_KHR_get_memory_requirements2` & `VK_KHR_dedicated_allocation`:** Queries `VkMemoryDedicatedRequirements` via `vkGetBufferMemoryRequirements2` / `vkGetImageMemoryRequirements2` and binds `VkMemoryDedicatedAllocateInfo` when the driver requests or requires dedicated memory (subject to the `MaxMemoryAllocationCount` safety margin).
+  * **Persistent Host Mapping:** Host-visible blocks are mapped once via `vkMapMemory` for the lifetime of the block; sub-allocated buffers receive slice pointers (`MappedPtr := BlockMap + Offset`), so unmapping one buffer never invalidates sibling buffers in the same block.
+  * **Per-Frame Ring Buffers:** Pre-allocated `cpu_to_gpu` (`HOST_VISIBLE | HOST_COHERENT`) ring buffers for dynamic uniforms, UI sprites, and streaming vertices.
 
 
 ### 3.3. Shader Pipeline & CGE Composable Effects (CastleRendererInternalShader)
@@ -144,8 +132,8 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 * [x] Implement VkSurfaceKHR integration in CastleInternalVulkanWSI for Win32, X11, and Wayland.
 * [x] Select VkPhysicalDevice, create VkDevice, setup Graphics/Present queues, and initialize VkSwapchainKHR.
 * [x] Implement the frame loop (Acquire image -> Record command buffer -> Clear color via Dynamic Rendering -> Submit -> Present).
-* [x] Pure Object Pascal GPU sub-allocator (TVulkanMemoryManager) managing 64 MB / 16 MB blocks and dedicated allocation fallback.
-* [x] Comprehensive unit test suite in `tests/code/testcases/testcastlevulkanrhi.pas` registered in `tests/testcases.pas` (6/6 tests passing).
+* [x] Pure Object Pascal GPU sub-allocator (`TCastleVulkanMemoryAllocator`) managing 64 MB / 16 MB blocks, separate Linear/Non-Linear pools, $O(1)$ coalescing, `VK_KHR_dedicated_allocation`, and Windows 4096 `maxMemoryAllocationCount` protection.
+* [x] Comprehensive unit test suite in `tests/code/testcases/testcastlevulkanrhi.pas` registered in `tests/testcases.pas`.
 
 **Milestone 1 Status**: Completed. Foundation, Dynamic Rendering, sub-allocator, loader, and WSI surface abstractions fully implemented and tested.
 
@@ -197,8 +185,9 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
   * [x] Nintendo Switch (`VK_NN_vi_surface` WSI bindings and `CreateVulkanViSurface` aligned with `CASTLE_NINTENDO_SWITCH`).
 * [x] Fast-Link Graphics Pipeline Libraries (`VK_EXT_graphics_pipeline_library` + `VK_KHR_pipeline_library`): Decompose PSOs into 4 independently cached sub-libraries (`VertexInputInterface`, `PreRasterizationShaders`, `FragmentShader`, `FragmentOutputInterface`) and fast-link permutations via `VkPipelineLibraryCreateInfoKHR`.
 * [x] Pure Pascal SPIR-V Reflection & Descriptor Validation (`InspectSPIRVBytecode`, `ValidateSPIRVDescriptorBindings`, `TVulkanRHIShaderModule.Reflection`): Inspect pre-compiled `.spv` binaries (native and byte-swapped) without `libshaderc` to extract shader stage, entry point, descriptor set bindings (`UBO`, `SSBO`, `CombinedImageSampler`, `SampledImage`, `Sampler`, `StorageImage`, array counts, struct block sizes), push constant block sizes, and stage input/output locations, and validate them against `TRHIDescriptorBindingDesc` layouts.
+* [x] Pooled Memory Sub-Allocation for `TVulkanRHIBuffer` & `TVulkanRHITexture` (`TCastleVulkanMemoryAllocator`): Eliminate per-resource `vkAllocateMemory` calls, separate Linear (`VkBuffer`) vs Non-Linear (`VkImage`) block pools per `memoryTypeIndex`, implement $O(1)$ node coalescing, support `VK_KHR_dedicated_allocation`, and enforce the Windows 4096 `maxMemoryAllocationCount` ceiling.
 
-**Milestone 5 Status**: Completed. Multi-threaded secondary command buffer execution, indirect draw commands, cross-platform RenderDoc in-application capture API, Android, Metal/MoltenVK & Nintendo Switch WSI rollout with Vulkan 1.1/1.2 API version negotiation (`NegotiateInstanceApiVersion`), extension prerequisite resolution (`ResolveVulkan11_12DeviceConfig`), and `LoadOp`/`StoreOp`-aware `VkRenderPass` / `VkFramebuffer` fallback logic, `VK_EXT_graphics_pipeline_library` 4-part fast-link PSO creation (`ResolveGraphicsPipelineLibraryConfig`), pure Pascal SPIR-V bytecode reflection & descriptor layout validation (`InspectSPIRVBytecode`, `ValidateSPIRVDescriptorBindings`), core engine shader pre-warming, hardware-validated `VkPipelineCache` disk persistence, `TCastleViewport.PrepareResources` PSO pre-warming, visual regression RMSE comparison, manifest `render_backend` configuration, automated Khronos `vk.xml` Pascal header generation (`tools/internal/generate_vulkan_api/vkxml2pas.dpr`), and live `VK_EXT_memory_budget` rendering statistics diagnostics fully integrated and tested (39 unit tests passing).
+**Milestone 5 Status**: Completed. Multi-threaded secondary command buffer execution, indirect draw commands, cross-platform RenderDoc in-application capture API, Android, Metal/MoltenVK & Nintendo Switch WSI rollout with Vulkan 1.1/1.2 API version negotiation (`NegotiateInstanceApiVersion`), extension prerequisite resolution (`ResolveVulkan11_12DeviceConfig`), and `LoadOp`/`StoreOp`-aware `VkRenderPass` / `VkFramebuffer` fallback logic, `VK_EXT_graphics_pipeline_library` 4-part fast-link PSO creation (`ResolveGraphicsPipelineLibraryConfig`), pure Pascal SPIR-V bytecode reflection & descriptor layout validation (`InspectSPIRVBytecode`, `ValidateSPIRVDescriptorBindings`), PasVulkan/VMA-style pooled `VkDeviceMemory` sub-allocation (`TCastleVulkanMemoryAllocator`) safeguarding Windows' 4096 allocation limit, core engine shader pre-warming, hardware-validated `VkPipelineCache` disk persistence, `TCastleViewport.PrepareResources` PSO pre-warming, visual regression RMSE comparison, manifest `render_backend` configuration, automated Khronos `vk.xml` Pascal header generation (`tools/internal/generate_vulkan_api/vkxml2pas.dpr`), and live `VK_EXT_memory_budget` rendering statistics diagnostics fully integrated and tested (40 unit tests passing).
 
 
 ## 5. Build Tool (castle-engine) & Editor Integration
@@ -212,10 +201,10 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 
 
 ## 6. Risk Management & Mitigations
-RiskImpactMitigation StrategyCustom User Shaders (Effect node) using legacy GLSL syntaxMediumKeep CastleRendererInternalShader string preprocessor capable of wrapping user PLUG_ functions into #version 450 templates; emit clear `WritelnWarning` diagnostics (`TCastleShaderGeneratorRHI.UpgradeLegacyGLSLBuiltIns`) if user shaders use deprecated raw GL uniforms/built-ins while auto-upgrading them, and reflect/validate pre-compiled `.spv` binaries via pure Pascal `InspectSPIRVBytecode` & `ValidateSPIRVDescriptorBindings` without requiring `libshaderc` (Implemented).PSO Stutter during gameplay when new material permutations appearHighUse VkPipelineCache saved to disk (`castle-config:/vulkan_pipeline_cache.bin`), utilize `VK_EXT_graphics_pipeline_library` (`GetOrCreateVertexInputLibrary`, `GetOrCreatePreRasterizationLibrary`, `GetOrCreateFragmentShaderLibrary`, `GetOrCreateFragmentOutputLibrary` + `VkPipelineLibraryCreateInfoKHR` fast-linking) where available, and pre-warm pipelines during `TCastleViewport.PrepareResources` via `TVulkanRHIDevice.PrewarmStandardPipelines` (Implemented).FPC & Delphi Compatibility & Header Maintenance across 32/64-bit targetsMediumAuto-generate `CastleInternalVulkan` directly from the official Khronos `vk.xml` registry via `tools/internal/generate_vulkan_api/vkxml2pas.dpr` (inspired by BeRo's PasVulkan `vkxml2pas`) with strict flat C-ABI bindings and zero external C++ wrapper dependencies (Implemented).Older Mobile / Integrated GPUs lacking Vulkan 1.3 (Vulkan 1.1 / 1.2)MediumNegotiate instance API version via `vkEnumerateInstanceVersion` (`NegotiateInstanceApiVersion`), resolve Vulkan 1.1/1.2 extension prerequisite chains (`ResolveVulkan11_12DeviceConfig`), and fall back to cached `LoadOp`/`StoreOp`-aware `VkRenderPass` + `VkFramebuffer` (`GetOrCreateFallbackRenderPass` / `GetOrCreateFallbackFramebuffer`) if `VK_KHR_dynamic_rendering` or its 1.1 prerequisites (`VK_KHR_create_renderpass2`, `VK_KHR_depth_stencil_resolve`) are absent, or automatically fall back to OpenGLES 3.0 / OpenGL (Implemented).
+RiskImpactMitigation StrategyCustom User Shaders (Effect node) using legacy GLSL syntaxMediumKeep CastleRendererInternalShader string preprocessor capable of wrapping user PLUG_ functions into #version 450 templates; emit clear `WritelnWarning` diagnostics (`TCastleShaderGeneratorRHI.UpgradeLegacyGLSLBuiltIns`) if user shaders use deprecated raw GL uniforms/built-ins while auto-upgrading them, and reflect/validate pre-compiled `.spv` binaries via pure Pascal `InspectSPIRVBytecode` & `ValidateSPIRVDescriptorBindings` without requiring `libshaderc` (Implemented).PSO Stutter during gameplay when new material permutations appearHighUse VkPipelineCache saved to disk (`castle-config:/vulkan_pipeline_cache.bin`), utilize `VK_EXT_graphics_pipeline_library` (`GetOrCreateVertexInputLibrary`, `GetOrCreatePreRasterizationLibrary`, `GetOrCreateFragmentShaderLibrary`, `GetOrCreateFragmentOutputLibrary` + `VkPipelineLibraryCreateInfoKHR` fast-linking) where available, and pre-warm pipelines during `TCastleViewport.PrepareResources` via `TVulkanRHIDevice.PrewarmStandardPipelines` (Implemented).Windows 4096 `maxMemoryAllocationCount` Kernel LimitHighRoute all `TVulkanRHIBuffer` and `TVulkanRHITexture` allocations through `TCastleVulkanMemoryAllocator` (inspired by PasVulkan's `TpvVulkanMemoryManager` and AMD VMA) with separate Linear/Non-Linear pools per `memoryTypeIndex`, $O(1)$ doubly-linked node coalescing, persistent host mapping, `VK_KHR_dedicated_allocation`, and a 4096 `MaxMemoryAllocationCount` safety guard (Implemented).FPC & Delphi Compatibility & Header Maintenance across 32/64-bit targetsMediumAuto-generate `CastleInternalVulkan` directly from the official Khronos `vk.xml` registry via `tools/internal/generate_vulkan_api/vkxml2pas.dpr` (inspired by BeRo's PasVulkan `vkxml2pas`) with strict flat C-ABI bindings and zero external C++ wrapper dependencies (Implemented).Older Mobile / Integrated GPUs lacking Vulkan 1.3 (Vulkan 1.1 / 1.2)MediumNegotiate instance API version via `vkEnumerateInstanceVersion` (`NegotiateInstanceApiVersion`), resolve Vulkan 1.1/1.2 extension prerequisite chains (`ResolveVulkan11_12DeviceConfig`), and fall back to cached `LoadOp`/`StoreOp`-aware `VkRenderPass` + `VkFramebuffer` (`GetOrCreateFallbackRenderPass` / `GetOrCreateFallbackFramebuffer`) if `VK_KHR_dynamic_rendering` or its 1.1 prerequisites (`VK_KHR_create_renderpass2`, `VK_KHR_depth_stencil_resolve`) are absent, or automatically fall back to OpenGLES 3.0 / OpenGL (Implemented).
 
 ## 7. Testing & Verification Criteria
 
 * [x] Automated Visual Regression Tests: `CompareImagesPerceptualDiff` in `CastleInternalRHI` compares framebuffer readbacks (`GrabTextureImage`) between `rbOpenGL` and `rbVulkan` using normalized RMSE perceptual diff thresholds.
-* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 39 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
+* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 40 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
 * [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, and `vkCmdDrawIndexedIndirect` minimize CPU driver overhead.

@@ -26,7 +26,7 @@ uses
   SysUtils, Classes, Math, Generics.Collections, Generics.Defaults,
   CastleVectors, CastleColors, CastleRectangles, CastleImages, CastleLog,
   CastleInternalRHI, CastleInternalVulkan, CastleInternalVulkanWSI,
-  CastleInternalShaderCompiler;
+  CastleInternalShaderCompiler, CastleInternalVulkanMemory;
 
 type
   TVulkanRHIDevice = class;
@@ -41,6 +41,7 @@ type
   TVulkanRHIBuffer = class(TRHIBuffer)
   private
     FHandle: VkBuffer;
+    FAllocation: TVulkanMemoryAllocation;
     FDeviceMemory: VkDeviceMemory;
     FMemoryOffset: VkDeviceSize;
     FAllocatedSize: VkDeviceSize;
@@ -56,12 +57,16 @@ type
     procedure UploadData(const Data; const Size: PtrUInt; const Offset: PtrUInt = 0); override;
 
     property Handle: VkBuffer read FHandle;
+    property Allocation: TVulkanMemoryAllocation read FAllocation;
+    property DeviceMemory: VkDeviceMemory read FDeviceMemory;
+    property MemoryOffset: VkDeviceSize read FMemoryOffset;
   end;
 
   TVulkanRHITexture = class(TRHITexture)
   private
     FImage: VkImage;
     FImageView: VkImageView;
+    FAllocation: TVulkanMemoryAllocation;
     FDeviceMemory: VkDeviceMemory;
     FAllocatedSize: VkDeviceSize;
     FOwnsImage: Boolean;
@@ -81,6 +86,7 @@ type
 
     property Image: VkImage read FImage;
     property ImageView: VkImageView read FImageView;
+    property Allocation: TVulkanMemoryAllocation read FAllocation;
     property AspectMask: VkImageAspectFlags read FAspectMask;
   end;
 
@@ -266,6 +272,9 @@ type
 
     { Frame synchronization & command recording }
     FFrames: array[0 .. MaxFramesInFlight - 1] of TVulkanFrameContext;
+
+    { GPU memory sub-allocator (pooled blocks + per-frame ring buffers) }
+    FMemoryAllocator: TCastleVulkanMemoryAllocator;
 
     { Descriptor, Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FDescriptorPool: VkDescriptorPool;
@@ -453,6 +462,7 @@ type
     property PipelineCacheMisses: Cardinal read FPipelineCacheMisses;
     property DescriptorSetAllocations: Cardinal read FDescriptorSetAllocations;
     property AllocatedMemoryBytes: Int64 read FAllocatedMemoryBytes;
+    property MemoryAllocator: TCastleVulkanMemoryAllocator read FMemoryAllocator;
   end;
 
 { Negotiates the highest supported VkApplicationInfo.apiVersion (1.3, 1.2, 1.1, or 1.0)
@@ -522,7 +532,7 @@ function LoadPipelineCacheBlobFromStream(const AStream: TStream;
 implementation
 
 uses
-  CastleDownload, CastleInternalVulkanMemory;
+  CastleDownload;
 
 const
   FNV1aOffsetBasis64 = UInt64($CBF29CE484222325);
@@ -1039,40 +1049,59 @@ var
 begin
   inherited Create(ADevice, ADesc);
 
-  FillChar(BufInfo, SizeOf(BufInfo), 0);
-  BufInfo.sType := VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  BufInfo.size := ADesc.Size;
-  BufInfo.sharingMode := VK_SHARING_MODE_EXCLUSIVE;
+  if (ADevice <> nil) and (ADevice.Handle <> nil) and Assigned(vkCreateBuffer) then
+  begin
+    FillChar(BufInfo, SizeOf(BufInfo), 0);
+    BufInfo.sType := VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    BufInfo.size := ADesc.Size;
+    BufInfo.sharingMode := VK_SHARING_MODE_EXCLUSIVE;
 
-  if buVertex in ADesc.Usage then BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-  if buIndex in ADesc.Usage then BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-  if buUniform in ADesc.Usage then BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-  if buStorage in ADesc.Usage then BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-  if buIndirect in ADesc.Usage then BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-  if (buTransferSrc in ADesc.Usage) then BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-  if (buTransferDst in ADesc.Usage) or (ADesc.MemoryUsage = muGpuOnly) then
-    BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    if buVertex in ADesc.Usage then BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    if buIndex in ADesc.Usage then BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+    if buUniform in ADesc.Usage then BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+    if buStorage in ADesc.Usage then BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    if buIndirect in ADesc.Usage then BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+    if (buTransferSrc in ADesc.Usage) then BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    if (buTransferDst in ADesc.Usage) or (ADesc.MemoryUsage = muGpuOnly) then
+      BufInfo.usage := BufInfo.usage or VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
-  CheckVk(vkCreateBuffer(ADevice.Handle, @BufInfo, nil, @FHandle), 'vkCreateBuffer');
+    CheckVk(vkCreateBuffer(ADevice.Handle, @BufInfo, nil, @FHandle), 'vkCreateBuffer');
+  end else
+    FHandle := VkBuffer(PtrUInt(Self));
 
-  vkGetBufferMemoryRequirements(ADevice.Handle, FHandle, @MemReq);
+  if (ADevice <> nil) and (ADevice.MemoryAllocator <> nil) then
+  begin
+    { Sub-allocate from pooled VkDeviceMemory blocks via TCastleVulkanMemoryAllocator
+      to stay well below Windows WDDM's 4096 maxMemoryAllocationCount limit }
+    FAllocation := ADevice.MemoryAllocator.AllocateBufferMemory(
+      FHandle, ADesc.Size, ADesc.MemoryUsage);
+    FDeviceMemory := FAllocation.DeviceMemory;
+    FMemoryOffset := FAllocation.Offset;
+    FAllocatedSize := FAllocation.Size;
+    FMappedPtr := FAllocation.MappedPtr;
+    if (ADevice.Handle <> nil) and Assigned(vkBindBufferMemory) then
+      CheckVk(vkBindBufferMemory(ADevice.Handle, FHandle, FDeviceMemory, FMemoryOffset),
+        'vkBindBufferMemory');
+    Inc(ADevice.FAllocatedMemoryBytes, FAllocatedSize);
+  end else
+  if (ADevice <> nil) and (ADevice.Handle <> nil) and Assigned(vkAllocateMemory) then
+  begin
+    vkGetBufferMemoryRequirements(ADevice.Handle, FHandle, @MemReq);
+    case ADesc.MemoryUsage of
+      muGpuOnly:  MemProps := VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+      muCpuToGpu: MemProps := VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+      muGpuToCpu: MemProps := VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+    end;
+    FillChar(AllocInfo, SizeOf(AllocInfo), 0);
+    AllocInfo.sType := VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    AllocInfo.allocationSize := MemReq.size;
+    AllocInfo.memoryTypeIndex := ADevice.FindMemoryType(MemReq.memoryTypeBits, MemProps);
 
-  case ADesc.MemoryUsage of
-    muGpuOnly:  MemProps := VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-    muCpuToGpu: MemProps := VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    muGpuToCpu: MemProps := VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT or VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+    CheckVk(vkAllocateMemory(ADevice.Handle, @AllocInfo, nil, @FDeviceMemory), 'vkAllocateMemory(Buffer)');
+    CheckVk(vkBindBufferMemory(ADevice.Handle, FHandle, FDeviceMemory, 0), 'vkBindBufferMemory');
+    FAllocatedSize := MemReq.size;
+    Inc(ADevice.FAllocatedMemoryBytes, FAllocatedSize);
   end;
-
-  { Note: Production code replaces raw vkAllocateMemory with TCastleVulkanMemoryAllocator }
-  FillChar(AllocInfo, SizeOf(AllocInfo), 0);
-  AllocInfo.sType := VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  AllocInfo.allocationSize := MemReq.size;
-  AllocInfo.memoryTypeIndex := ADevice.FindMemoryType(MemReq.memoryTypeBits, MemProps);
-
-  CheckVk(vkAllocateMemory(ADevice.Handle, @AllocInfo, nil, @FDeviceMemory), 'vkAllocateMemory(Buffer)');
-  CheckVk(vkBindBufferMemory(ADevice.Handle, FHandle, FDeviceMemory, 0), 'vkBindBufferMemory');
-  FAllocatedSize := MemReq.size;
-  Inc(ADevice.FAllocatedMemoryBytes, FAllocatedSize);
 
   if InitialData <> nil then
     UploadData(InitialData^, ADesc.Size, 0);
@@ -1082,29 +1111,48 @@ destructor TVulkanRHIBuffer.Destroy;
 begin
   if FMappedPtr <> nil then
     Unmap;
-  if FHandle <> VK_NULL_HANDLE then
+  if (FHandle <> VK_NULL_HANDLE) and (VulkanDevice <> nil) and
+     (VulkanDevice.Handle <> nil) and Assigned(vkDestroyBuffer) then
     vkDestroyBuffer(VulkanDevice.Handle, FHandle, nil);
-  if FDeviceMemory <> VK_NULL_HANDLE then
+  if FAllocation.IsValid and (VulkanDevice <> nil) and (VulkanDevice.MemoryAllocator <> nil) then
+  begin
+    VulkanDevice.MemoryAllocator.Free(FAllocation);
+    Dec(VulkanDevice.FAllocatedMemoryBytes, FAllocatedSize);
+    FDeviceMemory := VK_NULL_HANDLE;
+  end else
+  if (FDeviceMemory <> VK_NULL_HANDLE) and (VulkanDevice <> nil) and
+     (VulkanDevice.Handle <> nil) and Assigned(vkFreeMemory) then
   begin
     vkFreeMemory(VulkanDevice.Handle, FDeviceMemory, nil);
-    if VulkanDevice <> nil then
-      Dec(VulkanDevice.FAllocatedMemoryBytes, FAllocatedSize);
+    Dec(VulkanDevice.FAllocatedMemoryBytes, FAllocatedSize);
   end;
   inherited;
 end;
 
 function TVulkanRHIBuffer.Map: Pointer;
 begin
-  if FMappedPtr = nil then
+  { Pooled host-visible blocks in TCastleVulkanMemoryAllocator are persistently mapped;
+    return the sub-allocated slice pointer directly without calling vkMapMemory }
+  if FAllocation.MappedPtr <> nil then
+  begin
+    FMappedPtr := FAllocation.MappedPtr;
+    Exit(FMappedPtr);
+  end;
+  if (FMappedPtr = nil) and (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and
+     Assigned(vkMapMemory) then
     CheckVk(vkMapMemory(VulkanDevice.Handle, FDeviceMemory, FMemoryOffset, FDesc.Size, 0, @FMappedPtr), 'vkMapMemory');
   Result := FMappedPtr;
 end;
 
 procedure TVulkanRHIBuffer.Unmap;
 begin
+  { Never call vkUnmapMemory on a persistently mapped pooled block }
+  if FAllocation.MappedPtr <> nil then
+    Exit;
   if FMappedPtr <> nil then
   begin
-    vkUnmapMemory(VulkanDevice.Handle, FDeviceMemory);
+    if (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and Assigned(vkUnmapMemory) then
+      vkUnmapMemory(VulkanDevice.Handle, FDeviceMemory);
     FMappedPtr := nil;
   end;
 end;
@@ -1120,10 +1168,14 @@ begin
   if FDesc.MemoryUsage = muCpuToGpu then
   begin
     DestPtr := PByte(Map);
-    Inc(DestPtr, Offset);
-    Move(Data, DestPtr^, Size);
+    if DestPtr <> nil then
+    begin
+      Inc(DestPtr, Offset);
+      Move(Data, DestPtr^, Size);
+    end;
     Unmap;
   end else
+  if (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and Assigned(vkCmdCopyBuffer) then
   begin
     { Upload via host-visible staging buffer }
     FillChar(StagingDesc, SizeOf(StagingDesc), 0);
@@ -1160,6 +1212,7 @@ var
   ViewInfo: VkImageViewCreateInfo;
   MemReq: VkMemoryRequirements;
   AllocInfo: VkMemoryAllocateInfo;
+  ApproxBytes: VkDeviceSize;
 begin
   inherited Create(ADevice, ADesc);
   FOwnsImage := True;
@@ -1169,9 +1222,22 @@ begin
   else
     FAspectMask := VK_IMAGE_ASPECT_COLOR_BIT;
 
+  ApproxBytes := VkDeviceSize(Max(1, ADesc.Width)) *
+    VkDeviceSize(Max(1, ADesc.Height)) *
+    VkDeviceSize(Max(1, ADesc.DepthOrArrayLayers)) * 4;
+
   if (ADevice = nil) or (ADevice.Handle = nil) then
   begin
+    FImage := VkImage(PtrUInt(Self));
     FImageView := VkImageView(PtrUInt(Self));
+    if (ADevice <> nil) and (ADevice.MemoryAllocator <> nil) then
+    begin
+      FAllocation := ADevice.MemoryAllocator.AllocateImageMemory(
+        FImage, ApproxBytes, muGpuOnly, True, False);
+      FDeviceMemory := FAllocation.DeviceMemory;
+      FAllocatedSize := FAllocation.Size;
+      Inc(ADevice.FAllocatedMemoryBytes, FAllocatedSize);
+    end;
     Exit;
   end;
 
@@ -1198,16 +1264,30 @@ begin
 
   CheckVk(vkCreateImage(ADevice.Handle, @ImgInfo, nil, @FImage), 'vkCreateImage');
 
-  vkGetImageMemoryRequirements(ADevice.Handle, FImage, @MemReq);
-  FillChar(AllocInfo, SizeOf(AllocInfo), 0);
-  AllocInfo.sType := VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  AllocInfo.allocationSize := MemReq.size;
-  AllocInfo.memoryTypeIndex := ADevice.FindMemoryType(MemReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  if ADevice.MemoryAllocator <> nil then
+  begin
+    { Sub-allocate from Non-Linear optimal-image pool via TCastleVulkanMemoryAllocator
+      (or dedicated allocation if VK_KHR_dedicated_allocation recommends it for render targets) }
+    FAllocation := ADevice.MemoryAllocator.AllocateImageMemory(
+      FImage, ApproxBytes, muGpuOnly, True, False);
+    FDeviceMemory := FAllocation.DeviceMemory;
+    FAllocatedSize := FAllocation.Size;
+    CheckVk(vkBindImageMemory(ADevice.Handle, FImage, FDeviceMemory, FAllocation.Offset),
+      'vkBindImageMemory');
+    Inc(ADevice.FAllocatedMemoryBytes, FAllocatedSize);
+  end else
+  begin
+    vkGetImageMemoryRequirements(ADevice.Handle, FImage, @MemReq);
+    FillChar(AllocInfo, SizeOf(AllocInfo), 0);
+    AllocInfo.sType := VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    AllocInfo.allocationSize := MemReq.size;
+    AllocInfo.memoryTypeIndex := ADevice.FindMemoryType(MemReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-  CheckVk(vkAllocateMemory(ADevice.Handle, @AllocInfo, nil, @FDeviceMemory), 'vkAllocateMemory(Image)');
-  CheckVk(vkBindImageMemory(ADevice.Handle, FImage, FDeviceMemory, 0), 'vkBindImageMemory');
-  FAllocatedSize := MemReq.size;
-  Inc(ADevice.FAllocatedMemoryBytes, FAllocatedSize);
+    CheckVk(vkAllocateMemory(ADevice.Handle, @AllocInfo, nil, @FDeviceMemory), 'vkAllocateMemory(Image)');
+    CheckVk(vkBindImageMemory(ADevice.Handle, FImage, FDeviceMemory, 0), 'vkBindImageMemory');
+    FAllocatedSize := MemReq.size;
+    Inc(ADevice.FAllocatedMemoryBytes, FAllocatedSize);
+  end;
 
   FillChar(ViewInfo, SizeOf(ViewInfo), 0);
   ViewInfo.sType := VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -1243,6 +1323,13 @@ destructor TVulkanRHITexture.Destroy;
 begin
   if (VulkanDevice = nil) or (VulkanDevice.Handle = nil) then
   begin
+    if FOwnsImage and FAllocation.IsValid and (VulkanDevice <> nil) and
+       (VulkanDevice.MemoryAllocator <> nil) then
+    begin
+      VulkanDevice.MemoryAllocator.Free(FAllocation);
+      Dec(VulkanDevice.FAllocatedMemoryBytes, FAllocatedSize);
+      FDeviceMemory := VK_NULL_HANDLE;
+    end;
     inherited;
     Exit;
   end;
@@ -1252,6 +1339,12 @@ begin
   begin
     if FImage <> VK_NULL_HANDLE then
       vkDestroyImage(VulkanDevice.Handle, FImage, nil);
+    if FAllocation.IsValid and (VulkanDevice.MemoryAllocator <> nil) then
+    begin
+      VulkanDevice.MemoryAllocator.Free(FAllocation);
+      Dec(VulkanDevice.FAllocatedMemoryBytes, FAllocatedSize);
+      FDeviceMemory := VK_NULL_HANDLE;
+    end else
     if FDeviceMemory <> VK_NULL_HANDLE then
     begin
       vkFreeMemory(VulkanDevice.Handle, FDeviceMemory, nil);
@@ -2426,6 +2519,8 @@ begin
 
   PickPhysicalDevice;
   CreateLogicalDevice;
+  FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice);
+  FMemoryAllocator.SupportsMemoryBudgetExt := FSupportsMemoryBudgetExt;
   CreateDescriptorPool;
   CreateFrameContexts;
   CreateSwapchain(InitialWidth, InitialHeight);
@@ -2453,6 +2548,8 @@ begin
   FSupportsDynamicRendering := ASupportsDynamicRendering;
   FSupportsGraphicsPipelineLibrary := ASupportsGraphicsPipelineLibrary;
   FSupportsGPLFastLinking := ASupportsGraphicsPipelineLibrary;
+  FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice);
+  FMemoryAllocator.SupportsMemoryBudgetExt := FSupportsMemoryBudgetExt;
 end;
 
 procedure TVulkanRHIDevice.ClearPipelineLibraries;
@@ -2597,6 +2694,7 @@ begin
     vkDestroyDescriptorPool(FDevice, FDescriptorPool, nil);
   if (FDevice <> nil) and (FPipelineCache <> VK_NULL_HANDLE) then
     vkDestroyPipelineCache(FDevice, FPipelineCache, nil);
+  FreeAndNil(FMemoryAllocator);
   if FDevice <> nil then
     vkDestroyDevice(FDevice, nil);
   if (FInstance <> nil) and (FSurface <> VK_NULL_HANDLE) then
@@ -3640,6 +3738,8 @@ begin
 
   { 1. Wait for the GPU to finish executing the previous frame occupying this slot }
   CheckVk(vkWaitForFences(FDevice, 1, @Frame.InFlightFence, VK_TRUE, High(UInt64)), 'vkWaitForFences');
+  if FMemoryAllocator <> nil then
+    FMemoryAllocator.GetFrameRingBuffer(FFrameIndex).Reset;
 
   { 2. Acquire next swapchain image }
   AcquireRes := vkAcquireNextImageKHR(FDevice, FSwapchain, High(UInt64),

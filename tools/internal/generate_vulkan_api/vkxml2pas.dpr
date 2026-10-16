@@ -1014,7 +1014,7 @@ const
     'VK_FENCE_CREATE_SIGNALED_BIT'
   );
 
-  OrderedEnums3: array[0..46] of String = (
+  OrderedEnums3: array[0..51] of String = (
     'VK_INDEX_TYPE_UINT16',
     'VK_INDEX_TYPE_UINT32',
     'VK_IMAGE_ASPECT_COLOR_BIT',
@@ -1062,7 +1062,13 @@ const
     'VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT',
     'VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT',
     'VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT',
-    'VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT'
+    'VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT',
+    // VK_KHR_get_memory_requirements2 & VK_KHR_dedicated_allocation (Core 1.1)
+    'VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2',
+    'VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2',
+    'VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2',
+    'VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS',
+    'VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO'
   );
 
   OrderedStructs: array[0..77] of String = (
@@ -1146,7 +1152,7 @@ const
     'VkBufferMemoryBarrier'
   );
 
-  OrderedStructs2: array[0..18] of String = (
+  OrderedStructs2: array[0..23] of String = (
     'VkImageMemoryBarrier',
     'VkBufferCopy',
     'VkImageSubresourceLayers',
@@ -1165,7 +1171,12 @@ const
     'VkPipelineLibraryCreateInfoKHR',
     'VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT',
     'VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT',
-    'VkGraphicsPipelineLibraryCreateInfoEXT'
+    'VkGraphicsPipelineLibraryCreateInfoEXT',
+    'VkBufferMemoryRequirementsInfo2',
+    'VkImageMemoryRequirementsInfo2',
+    'VkMemoryRequirements2',
+    'VkMemoryDedicatedRequirements',
+    'VkMemoryDedicatedAllocateInfo'
   );
 
   OrderedCommands: array[0..94] of String = (
@@ -1266,7 +1277,7 @@ const
     'vkCmdDrawIndirect'
   );
 
-  OrderedCommands2: array[0..9] of String = (
+  OrderedCommands2: array[0..11] of String = (
     'vkEnumerateInstanceVersion',
     'vkGetPhysicalDeviceFeatures2',
     'vkGetPhysicalDeviceProperties2',
@@ -1276,7 +1287,9 @@ const
     'vkDestroyPipelineCache',
     'vkGetPipelineCacheData',
     'vkResetCommandBuffer',
-    'vkCmdExecuteCommands'
+    'vkCmdExecuteCommands',
+    'vkGetBufferMemoryRequirements2',
+    'vkGetImageMemoryRequirements2'
   );
 
   InstanceCommands: array[0..16] of String = (

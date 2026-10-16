@@ -369,6 +369,11 @@ const
   VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT = $00000002;
   VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT = $00000004;
   VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT = $00000008;
+  VK_STRUCTURE_TYPE_BUFFER_MEMORY_REQUIREMENTS_INFO_2 = 1000146000;
+  VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2 = 1000146001;
+  VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2 = 1000146003;
+  VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS = 1000127000;
+  VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO = 1000127001;
 
   { Extension and Layer Names }
   VK_EXT_debug_utils = 'VK_EXT_debug_utils';
@@ -1606,6 +1611,43 @@ type
   end;
   PVkGraphicsPipelineLibraryCreateInfoEXT = ^VkGraphicsPipelineLibraryCreateInfoEXT;
 
+  VkBufferMemoryRequirementsInfo2 = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    buffer: VkBuffer;
+  end;
+  PVkBufferMemoryRequirementsInfo2 = ^VkBufferMemoryRequirementsInfo2;
+
+  VkImageMemoryRequirementsInfo2 = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    image: VkImage;
+  end;
+  PVkImageMemoryRequirementsInfo2 = ^VkImageMemoryRequirementsInfo2;
+
+  VkMemoryRequirements2 = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    memoryRequirements: VkMemoryRequirements;
+  end;
+  PVkMemoryRequirements2 = ^VkMemoryRequirements2;
+
+  VkMemoryDedicatedRequirements = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    prefersDedicatedAllocation: VkBool32;
+    requiresDedicatedAllocation: VkBool32;
+  end;
+  PVkMemoryDedicatedRequirements = ^VkMemoryDedicatedRequirements;
+
+  VkMemoryDedicatedAllocateInfo = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    image: VkImage;
+    buffer: VkBuffer;
+  end;
+  PVkMemoryDedicatedAllocateInfo = ^VkMemoryDedicatedAllocateInfo;
+
   { KHR Type Aliases }
   VkRenderingAttachmentInfoKHR = VkRenderingAttachmentInfo;
   PVkRenderingAttachmentInfoKHR = ^VkRenderingAttachmentInfoKHR;
@@ -1732,6 +1774,8 @@ type
   PFN_vkGetPipelineCacheData = function(device: VkDevice; pipelineCache: VkPipelineCache; pDataSize: PPtrUInt; pData: Pointer): VkResult; VKAPI_CALL;
   PFN_vkResetCommandBuffer = function(commandBuffer: VkCommandBuffer; flags: VkFlags): VkResult; VKAPI_CALL;
   PFN_vkCmdExecuteCommands = procedure(commandBuffer: VkCommandBuffer; commandBufferCount: Cardinal; const pCommandBuffers: PVkCommandBuffer); VKAPI_CALL;
+  PFN_vkGetBufferMemoryRequirements2 = procedure(device: VkDevice; const pInfo: PVkBufferMemoryRequirementsInfo2; pMemoryRequirements: PVkMemoryRequirements2); VKAPI_CALL;
+  PFN_vkGetImageMemoryRequirements2 = procedure(device: VkDevice; const pInfo: PVkImageMemoryRequirementsInfo2; pMemoryRequirements: PVkMemoryRequirements2); VKAPI_CALL;
 
 var
   { Global Function Pointers }
@@ -1840,6 +1884,8 @@ var
   vkGetPipelineCacheData: PFN_vkGetPipelineCacheData;
   vkResetCommandBuffer: PFN_vkResetCommandBuffer;
   vkCmdExecuteCommands: PFN_vkCmdExecuteCommands;
+  vkGetBufferMemoryRequirements2: PFN_vkGetBufferMemoryRequirements2;
+  vkGetImageMemoryRequirements2: PFN_vkGetImageMemoryRequirements2;
 
 function VK_MAKE_VERSION(const Major, Minor, Patch: Cardinal): Cardinal; inline;
 function VK_VERSION_MAJOR(const Version: Cardinal): Cardinal; inline;
@@ -2066,6 +2112,8 @@ begin
   Pointer(vkGetPipelineCacheData) := vkGetInstanceProcAddr(nil, 'vkGetPipelineCacheData');
   Pointer(vkResetCommandBuffer) := vkGetInstanceProcAddr(nil, 'vkResetCommandBuffer');
   Pointer(vkCmdExecuteCommands) := vkGetInstanceProcAddr(nil, 'vkCmdExecuteCommands');
+  Pointer(vkGetBufferMemoryRequirements2) := vkGetInstanceProcAddr(nil, 'vkGetBufferMemoryRequirements2');
+  Pointer(vkGetImageMemoryRequirements2) := vkGetInstanceProcAddr(nil, 'vkGetImageMemoryRequirements2');
 end;
 
 procedure FreeVulkan;
