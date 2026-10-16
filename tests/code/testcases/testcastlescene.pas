@@ -33,6 +33,9 @@ type
     procedure TestRenderReferencesAndLightRadius;
     { TScreenTextureNode used by an effect of a shape with blending. }
     procedure TestScreenTexture;
+    { Cube map with reflection texture coordinates on an unlit material
+      (like Doom 3 "texgen reflect"). }
+    procedure TestCubeMapReflectionUnlit;
   end;
 
 implementation
@@ -332,6 +335,118 @@ begin
   end;
   TestWithAntiAliasing(aaNone);
   TestWithAntiAliasing(aa4SamplesNicer);
+end;
+
+procedure TTestScene.TestCubeMapReflectionUnlit;
+const
+  FaceColors: array [0..5] of TCastleColorRGB = (
+    (X: 1; Y: 0; Z: 0), // front (-Z)
+    (X: 0; Y: 1; Z: 0), // back (+Z)
+    (X: 0; Y: 0; Z: 1), // left
+    (X: 1; Y: 1; Z: 0), // right
+    (X: 0; Y: 1; Z: 1), // top
+    (X: 1; Y: 0; Z: 1)  // bottom
+  );
+
+  function Face(const I: Integer): TPixelTextureNode;
+  var
+    Image: TRGBImage;
+  begin
+    Image := TRGBImage.Create(1, 1);
+    Image.Colors[0, 0, 0] := Vector4(FaceColors[I], 1);
+    Result := TPixelTextureNode.Create;
+    Result.FdImage.Value := Image;
+  end;
+
+  { A quad at z = 0 facing +Z, with an unlit material
+    and a cube map with given texture coordinates generator mode. }
+  function BuildScene(const Mode: String): TX3DRootNode;
+  var
+    Shape: TShapeNode;
+    Faces: TIndexedFaceSetNode;
+    Coord: TCoordinateNode;
+    Cube: TComposedCubeMapTextureNode;
+    Generator: TTextureCoordinateGeneratorNode;
+  begin
+    Faces := TIndexedFaceSetNode.CreateWithShape(Shape);
+    Coord := TCoordinateNode.Create;
+    Coord.SetPoint([Vector3(-5, -5, 0), Vector3(5, -5, 0), Vector3(5, 5, 0), Vector3(-5, 5, 0)]);
+    Faces.Coord := Coord;
+    Faces.SetCoordIndex([0, 1, 2, 3]);
+    Shape.Material := TUnlitMaterialNode.Create;
+    Cube := TComposedCubeMapTextureNode.Create;
+    Cube.FdFront.Value := Face(0);
+    Cube.FdBack.Value := Face(1);
+    Cube.FdLeft.Value := Face(2);
+    Cube.FdRight.Value := Face(3);
+    Cube.FdTop.Value := Face(4);
+    Cube.FdBottom.Value := Face(5);
+    Shape.Texture := Cube;
+    Generator := TTextureCoordinateGeneratorNode.Create;
+    Generator.FdMode.Value := Mode;
+    Faces.TexCoord := Generator;
+    Result := TX3DRootNode.Create;
+    Result.AddChildren(Shape);
+  end;
+
+var
+  Window: TCastleWindow;
+  Viewport: TCastleViewport;
+
+  { Center color of the quad, seen from the given camera position
+    (looking at the quad center). }
+  function CenterColor(const Mode: String; const CameraPosition: TVector3): TCastleColorRGB;
+  var
+    Scene: TCastleScene;
+    Image: TCastleImage;
+  begin
+    Viewport.Camera.SetView(CameraPosition, -CameraPosition, Vector3(0, 1, 0));
+    Scene := TCastleScene.Create(nil);
+    try
+      Scene.Load(BuildScene(Mode), true);
+      Viewport.Items.Add(Scene);
+      Image := Window.SaveScreen;
+      try
+        Result := Image.Colors[Image.Width div 2, Image.Height div 2, 0].XYZ;
+      finally FreeAndNil(Image) end;
+    finally FreeAndNil(Scene) end;
+  end;
+
+  procedure AssertColor(const Expected, Actual: TCastleColorRGB; const Description: String);
+  begin
+    if not TVector3.Equals(Actual, Expected, 0.1) then
+      Fail(Format('%s: color %s, expected %s', [Description, Actual.ToString, Expected.ToString]));
+  end;
+
+begin
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  Window := CreateWindowForTest;
+  try
+    Window.Width := 100;
+    Window.Height := 100;
+    Window.Open;
+
+    Viewport := TCastleViewport.Create(Window);
+    Viewport.FullSize := true;
+    Window.Controls.InsertFront(Viewport);
+
+    // looking straight at the quad: the reflection points back, to +Z
+    AssertColor(FaceColors[1], CenterColor('WORLDSPACEREFLECTIONVECTOR', Vector3(0, 0, 5)),
+      'reflection seen from +Z');
+    // looking down from above: the reflection points down (-Y), the "bottom" face
+    AssertColor(FaceColors[5], CenterColor('WORLDSPACEREFLECTIONVECTOR', Vector3(0, 4, 0.5)),
+      'reflection seen from above');
+    AssertColor(FaceColors[1], CenterColor('WORLDSPACENORMAL', Vector3(0, 0, 5)),
+      'normal');
+    CheckGLErrors('TestCubeMapReflectionUnlit');
+
+    Window.Close;
+  finally DestroyWindowForTest(Window) end;
 end;
 
 initialization
