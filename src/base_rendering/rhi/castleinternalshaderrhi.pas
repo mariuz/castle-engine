@@ -129,8 +129,19 @@ type
     function GeneratePreamble(const AStage: TRHIShaderStage): String;
 
     { Transforms legacy user X3D EffectPart uniform declarations into a std140 UBO
-      at Set 2, Binding 0 so existing custom shaders compile in Vulkan }
+      at Set 2, Binding 1 and emits WritelnWarning diagnostics for deprecated raw
+      OpenGL built-in uniforms/variables while auto-upgrading them to #version 450 }
     function UpgradeUserEffectUniforms(const UserEffectSource: String): String;
+
+    { Scans user Effect / EffectPart GLSL code for deprecated OpenGL built-in
+      uniforms, attributes, outputs, and texture functions (e.g. gl_ModelViewProjectionMatrix,
+      gl_ModelViewMatrix, gl_ProjectionMatrix, gl_NormalMatrix, gl_Vertex, gl_Normal,
+      gl_MultiTexCoord0, gl_Color, gl_FragColor, texture2D, textureCube, attribute, varying),
+      emits clear WritelnWarning diagnostics, and injects #version 450 compatibility aliases. }
+    function UpgradeLegacyGLSLBuiltIns(const UserEffectSource: String;
+      const EffectDebugName: String = 'Effect'): String; overload;
+    function UpgradeLegacyGLSLBuiltIns(const UserEffectSource: String;
+      const EffectDebugName: String; out AWarningsCount: Cardinal): String; overload;
 
     { Appends Vulkan clip-space depth adjustment (Z from [-1..1] to [0..1])
       at the end of the vertex shader main() }
@@ -417,6 +428,161 @@ begin
     GenerateStageIO(AStage) + NL;
 end;
 
+function IsGLSLIdentChar(const C: Char): Boolean; inline;
+begin
+  Result := (C in ['a'..'z', 'A'..'Z', '0'..'9', '_']);
+end;
+
+function ContainsGLSLIdentifier(const Source, Ident: String): Boolean;
+var
+  StartPos, MatchPos, EndIdx, IdentLen, SrcLen: Integer;
+begin
+  Result := False;
+  IdentLen := Length(Ident);
+  SrcLen := Length(Source);
+  if (IdentLen = 0) or (SrcLen < IdentLen) then Exit;
+
+  StartPos := 1;
+  while StartPos <= SrcLen - IdentLen + 1 do
+  begin
+    MatchPos := PosEx(Ident, Source, StartPos);
+    if MatchPos = 0 then Exit(False);
+
+    EndIdx := MatchPos + IdentLen;
+    if ((MatchPos = 1) or not IsGLSLIdentChar(Source[MatchPos - 1])) and
+       ((EndIdx > SrcLen) or not IsGLSLIdentChar(Source[EndIdx])) then
+      Exit(True);
+
+    StartPos := MatchPos + 1;
+  end;
+end;
+
+function TCastleShaderGeneratorRHI.UpgradeLegacyGLSLBuiltIns(
+  const UserEffectSource: String; const EffectDebugName: String): String;
+var
+  UnusedWarningsCount: Cardinal;
+begin
+  Result := UpgradeLegacyGLSLBuiltIns(UserEffectSource, EffectDebugName, UnusedWarningsCount);
+end;
+
+function TCastleShaderGeneratorRHI.UpgradeLegacyGLSLBuiltIns(
+  const UserEffectSource: String; const EffectDebugName: String;
+  out AWarningsCount: Cardinal): String;
+type
+  TLegacyBuiltInMapping = record
+    LegacySymbol: String;
+    ReplacementExpr: String;
+    Description: String;
+  end;
+const
+  LegacyBuiltIns: array[0..11] of TLegacyBuiltInMapping = (
+    (LegacySymbol: 'gl_ModelViewProjectionMatrix';
+     ReplacementExpr: '(castle_ProjectionMatrix * castle_ModelViewMatrix)';
+     Description: 'deprecated OpenGL built-in matrix uniform'),
+    (LegacySymbol: 'gl_ModelViewMatrix';
+     ReplacementExpr: 'castle_ModelViewMatrix';
+     Description: 'deprecated OpenGL built-in matrix uniform'),
+    (LegacySymbol: 'gl_ProjectionMatrix';
+     ReplacementExpr: 'castle_ProjectionMatrix';
+     Description: 'deprecated OpenGL built-in matrix uniform'),
+    (LegacySymbol: 'gl_NormalMatrix';
+     ReplacementExpr: 'castle_NormalMatrix';
+     Description: 'deprecated OpenGL built-in normal matrix uniform'),
+    (LegacySymbol: 'gl_Vertex';
+     ReplacementExpr: 'castle_Vertex';
+     Description: 'deprecated OpenGL built-in vertex attribute'),
+    (LegacySymbol: 'gl_Normal';
+     ReplacementExpr: 'castle_Normal';
+     Description: 'deprecated OpenGL built-in normal attribute'),
+    (LegacySymbol: 'gl_MultiTexCoord0';
+     ReplacementExpr: 'vec4(castle_MultiTexCoord0, 0.0, 1.0)';
+     Description: 'deprecated OpenGL built-in texture coordinate attribute'),
+    (LegacySymbol: 'gl_MultiTexCoord1';
+     ReplacementExpr: 'vec4(castle_MultiTexCoord1, 0.0, 1.0)';
+     Description: 'deprecated OpenGL built-in texture coordinate attribute'),
+    (LegacySymbol: 'gl_Color';
+     ReplacementExpr: 'castle_ColorPerVertex';
+     Description: 'deprecated OpenGL built-in vertex color attribute'),
+    (LegacySymbol: 'gl_FragColor';
+     ReplacementExpr: 'castle_FragColor';
+     Description: 'deprecated OpenGL built-in fragment output variable'),
+    (LegacySymbol: 'texture2D';
+     ReplacementExpr: 'texture';
+     Description: 'deprecated GLSL 1.20 texture lookup function'),
+    (LegacySymbol: 'textureCube';
+     ReplacementExpr: 'texture';
+     Description: 'deprecated GLSL 1.20 cube texture lookup function')
+  );
+var
+  CompatDefines, UpgradedLines: TStringBuilder;
+  Lines: TStringList;
+  Line, Trimmed: String;
+  I: Integer;
+begin
+  AWarningsCount := 0;
+  if FBackend <> rbVulkan then
+    Exit(UserEffectSource);
+
+  CompatDefines := TStringBuilder.Create;
+  UpgradedLines := TStringBuilder.Create;
+  Lines := TStringList.Create;
+  try
+    for I := Low(LegacyBuiltIns) to High(LegacyBuiltIns) do
+    begin
+      if ContainsGLSLIdentifier(UserEffectSource, LegacyBuiltIns[I].LegacySymbol) then
+      begin
+        Inc(AWarningsCount);
+        WritelnWarning('Shader', Format(
+          'Custom shader "%s" uses %s "%s" which is removed in Vulkan GLSL #version 450. ' +
+          'Auto-upgrading to "%s"; please update your Effect shader to use Castle Game Engine equivalents.',
+          [EffectDebugName, LegacyBuiltIns[I].Description,
+           LegacyBuiltIns[I].LegacySymbol, LegacyBuiltIns[I].ReplacementExpr]));
+        CompatDefines.AppendLine(Format('#ifndef %s', [LegacyBuiltIns[I].LegacySymbol]));
+        CompatDefines.AppendLine(Format('#define %s %s',
+          [LegacyBuiltIns[I].LegacySymbol, LegacyBuiltIns[I].ReplacementExpr]));
+        CompatDefines.AppendLine('#endif');
+      end;
+    end;
+
+    Lines.Text := UserEffectSource;
+    for Line in Lines do
+    begin
+      Trimmed := Trim(Line);
+      if IsPrefix('attribute ', Trimmed, False) then
+      begin
+        Inc(AWarningsCount);
+        WritelnWarning('Shader', Format(
+          'Custom shader "%s" uses deprecated GLSL qualifier "attribute" ("%s") which is removed in #version 450. ' +
+          'Auto-upgrading to "in".',
+          [EffectDebugName, Trimmed]));
+        UpgradedLines.AppendLine('in ' + Trim(SEnding(Trimmed, Length('attribute ') + 1)));
+      end else
+      if IsPrefix('varying ', Trimmed, False) then
+      begin
+        Inc(AWarningsCount);
+        WritelnWarning('Shader', Format(
+          'Custom shader "%s" uses deprecated GLSL qualifier "varying" ("%s") which is removed in #version 450. ' +
+          'Auto-upgrading to "in".',
+          [EffectDebugName, Trimmed]));
+        UpgradedLines.AppendLine('in ' + Trim(SEnding(Trimmed, Length('varying ') + 1)));
+      end else
+        UpgradedLines.AppendLine(Line);
+    end;
+
+    if CompatDefines.Length > 0 then
+      Result :=
+        '/* --- Auto-Generated #version 450 Legacy OpenGL Compatibility Aliases --- */' + NL +
+        CompatDefines.ToString + NL +
+        UpgradedLines.ToString
+    else
+      Result := UpgradedLines.ToString;
+  finally
+    FreeAndNil(Lines);
+    FreeAndNil(UpgradedLines);
+    FreeAndNil(CompatDefines);
+  end;
+end;
+
 function TCastleShaderGeneratorRHI.UpgradeUserEffectUniforms(
   const UserEffectSource: String): String;
 const
@@ -424,18 +590,20 @@ const
 var
   Lines: TStringList;
   UBOMembers, AliasDefines, StrippedBody: TStringBuilder;
-  Line, Trimmed, DeclBody, VarType, VarName, BaseName, Qual: String;
+  UpgradedInput, Line, Trimmed, DeclBody, VarType, VarName, BaseName, Qual: String;
   SpacePos, SemiPos, BracketPos, CustomSamplerSlot: Integer;
 begin
   if FBackend <> rbVulkan then
     Exit(UserEffectSource);
+
+  UpgradedInput := UpgradeLegacyGLSLBuiltIns(UserEffectSource, 'Effect');
 
   Lines := TStringList.Create;
   UBOMembers := TStringBuilder.Create;
   AliasDefines := TStringBuilder.Create;
   StrippedBody := TStringBuilder.Create;
   try
-    Lines.Text := UserEffectSource;
+    Lines.Text := UpgradedInput;
     CustomSamplerSlot := 2;
 
     for Line in Lines do

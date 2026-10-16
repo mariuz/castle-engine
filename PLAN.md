@@ -181,9 +181,9 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 * [x] Implement multi-light UBOs / SSBOs supporting CGE's point, directional, and spot lights (`TCastleLightsUniformBlock`, Set 0 Binding 1, `#define` aliases).
 * [x] Port Shadow Maps pass foundation (depth-only dynamic rendering passes, `TRHIRenderingInfo.CreateDepthOnly`, `DefaultShadowMap`, projector matrices in lights block).
 * [x] Port Cube Map reflections, Screen-Space Ambient Occlusion (SSAO), and post-processing (TCastleScreenEffects).
-* [x] Verify custom X3D Effect and EffectPart user shaders with automatic uniform injection.
+* [x] Verify custom X3D Effect and EffectPart user shaders with automatic uniform injection and `WritelnWarning` diagnostics for deprecated OpenGL built-ins (`UpgradeLegacyGLSLBuiltIns`).
 
-**Milestone 4 Status**: Completed. Multi-light std140 uniform block, shadow map projector matrix integration, depth-only dynamic rendering pass abstractions, cube map texture descriptors and RHI backend support, GLSL 450 screen effect preambles with push constants and depth-aware SSAO, and automatic user Effect uniform injection into Set 2 Binding 1 UBO fully integrated and tested (21 unit tests passing).
+**Milestone 4 Status**: Completed. Multi-light std140 uniform block, shadow map projector matrix integration, depth-only dynamic rendering pass abstractions, cube map texture descriptors and RHI backend support, GLSL 450 screen effect preambles with push constants and depth-aware SSAO, and automatic user Effect uniform injection into Set 2 Binding 1 UBO with legacy GLSL warning diagnostics fully integrated and tested.
 
 
 ### Phase 5: Optimization, Multi-Threading & Platform Polish (COMPLETED)
@@ -196,7 +196,7 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
   * [x] macOS / iOS via MoltenVK (`VK_EXT_metal_surface` & `VK_KHR_portability_enumeration` WSI bindings).
   * [x] Nintendo Switch (`VK_NN_vi_surface` WSI bindings and `CreateVulkanViSurface` aligned with `CASTLE_NINTENDO_SWITCH`).
 
-**Milestone 5 Status**: Completed. Multi-threaded secondary command buffer execution, indirect draw commands, cross-platform RenderDoc in-application capture API, Android, Metal/MoltenVK & Nintendo Switch WSI rollout with Vulkan 1.1+ fallback logic, core engine shader pre-warming, hardware-validated `VkPipelineCache` disk persistence, `TCastleViewport.PrepareResources` PSO pre-warming, visual regression RMSE comparison, manifest `render_backend` configuration, and live `VK_EXT_memory_budget` rendering statistics diagnostics fully integrated and tested (33 unit tests passing).
+**Milestone 5 Status**: Completed. Multi-threaded secondary command buffer execution, indirect draw commands, cross-platform RenderDoc in-application capture API, Android, Metal/MoltenVK & Nintendo Switch WSI rollout with Vulkan 1.1+ fallback logic, core engine shader pre-warming, hardware-validated `VkPipelineCache` disk persistence, `TCastleViewport.PrepareResources` PSO pre-warming, visual regression RMSE comparison, manifest `render_backend` configuration, and live `VK_EXT_memory_budget` rendering statistics diagnostics fully integrated and tested (34 unit tests passing).
 
 
 ## 5. Build Tool (castle-engine) & Editor Integration
@@ -210,10 +210,10 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 
 
 ## 6. Risk Management & Mitigations
-RiskImpactMitigation StrategyCustom User Shaders (Effect node) using legacy GLSL syntaxMediumKeep CastleRendererInternalShader string preprocessor capable of wrapping user PLUG_ functions into #version 450 templates; emit clear warnings if user shaders use deprecated raw GL uniforms.PSO Stutter during gameplay when new material permutations appearHighUse VkPipelineCache saved to disk (`castle-config:/vulkan_pipeline_cache.bin`), utilize VK_EXT_graphics_pipeline_library where available, and pre-warm pipelines during `TCastleViewport.PrepareResources` via `TVulkanRHIDevice.PrewarmStandardPipelines` (Implemented).FPC & Delphi Compatibility across 32/64-bit targetsMediumMaintain strict flat C-ABI bindings in CastleInternalVulkan with zero external C++ wrapper dependencies; use standard dynamic libraries (shaderc_shared).Older Mobile / Integrated GPUs lacking Vulkan 1.3MediumTarget Vulkan 1.1 as the strict minimum hardware baseline; fall back to standard VkRenderPass if VK_KHR_dynamic_rendering is absent, or automatically fall back to the OpenGLES 3.0 renderer.
+RiskImpactMitigation StrategyCustom User Shaders (Effect node) using legacy GLSL syntaxMediumKeep CastleRendererInternalShader string preprocessor capable of wrapping user PLUG_ functions into #version 450 templates; emit clear `WritelnWarning` diagnostics (`TCastleShaderGeneratorRHI.UpgradeLegacyGLSLBuiltIns`) if user shaders use deprecated raw GL uniforms/built-ins while auto-upgrading them (Implemented).PSO Stutter during gameplay when new material permutations appearHighUse VkPipelineCache saved to disk (`castle-config:/vulkan_pipeline_cache.bin`), utilize VK_EXT_graphics_pipeline_library where available, and pre-warm pipelines during `TCastleViewport.PrepareResources` via `TVulkanRHIDevice.PrewarmStandardPipelines` (Implemented).FPC & Delphi Compatibility across 32/64-bit targetsMediumMaintain strict flat C-ABI bindings in CastleInternalVulkan with zero external C++ wrapper dependencies; use standard dynamic libraries (shaderc_shared).Older Mobile / Integrated GPUs lacking Vulkan 1.3MediumTarget Vulkan 1.1 as the strict minimum hardware baseline; fall back to standard VkRenderPass if VK_KHR_dynamic_rendering is absent, or automatically fall back to the OpenGLES 3.0 renderer.
 
 ## 7. Testing & Verification Criteria
 
 * [x] Automated Visual Regression Tests: `CompareImagesPerceptualDiff` in `CastleInternalRHI` compares framebuffer readbacks (`GrabTextureImage`) between `rbOpenGL` and `rbVulkan` using normalized RMSE perceptual diff thresholds.
-* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 33 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
+* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 34 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
 * [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, and `vkCmdDrawIndexedIndirect` minimize CPU driver overhead.

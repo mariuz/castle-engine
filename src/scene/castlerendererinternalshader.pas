@@ -655,7 +655,8 @@ implementation
 uses SysUtils, StrUtils,
   {$ifdef OpenGLES} CastleGLES, {$else} CastleGL, {$endif}
   CastleGLUtils, CastleLog, CastleGLVersion, CastleInternalScreenEffects,
-  CastleScreenEffects, CastleInternalX3DLexer, CastleInternalGLUtils;
+  CastleScreenEffects, CastleInternalX3DLexer, CastleInternalGLUtils,
+  CastleInternalRHI, CastleInternalShaderRHI;
 
 {$define read_implementation}
 {$I castlerendererinternalshader_hash.inc}
@@ -1549,10 +1550,20 @@ procedure TShader.EffectsGenerateCode(Effects: TX3DNodeList;
     procedure ProcessEffectPart(Part: TEffectPartNode);
     var
       Contents: String;
+      GenRHI: TCastleShaderGeneratorRHI;
     begin
       Contents := Part.Contents;
       if Contents <> '' then
       begin
+        if (RHIDevice <> nil) and (RHIDevice.Capabilities.Backend = rbVulkan) then
+        begin
+          GenRHI := TCastleShaderGeneratorRHI.Create(rbVulkan);
+          try
+            Contents := GenRHI.UpgradeUserEffectUniforms(Contents);
+          finally
+            FreeAndNil(GenRHI);
+          end;
+        end;
         Plug(Part.ShaderType, Contents, Code, ForwardDeclareInFinalShader);
         { EffectsGenerateCode or even Plug are only calld from LinkProgram,
           not earlier (so not when shader hash is possibly calculated

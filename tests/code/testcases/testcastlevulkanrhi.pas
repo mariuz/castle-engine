@@ -65,6 +65,10 @@ type
     procedure TestPipelineCacheDiskPersistence;
     procedure TestVulkanMemoryBudgetAndViewportStatistics;
     procedure TestViewportPrepareResourcesPrewarmsPSOs;
+    procedure TestLegacyGLSLUniformWarningDiagnostics;
+  private
+    FCapturedWarnings: TStringList;
+    procedure CaptureWarning(const Category, S: String);
   end;
 
 implementation
@@ -1305,6 +1309,85 @@ begin
     SetRHIDevice(SavedDevice);
     FreeAndNil(Viewport);
     FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.CaptureWarning(const Category, S: String);
+begin
+  if FCapturedWarnings <> nil then
+    FCapturedWarnings.Add(Category + ': ' + S);
+end;
+
+procedure TTestCastleVulkanRHI.TestLegacyGLSLUniformWarningDiagnostics;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  LegacyEffectSource, CleanEffectSource, Upgraded: String;
+  WarnCount: Cardinal;
+  AllWarnings: String;
+const
+  NL = LineEnding;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  FCapturedWarnings := TStringList.Create;
+  ApplicationProperties.OnWarning.Add({$ifdef FPC}@{$endif}CaptureWarning);
+  try
+    { 1. Legacy EffectPart using gl_ModelViewProjectionMatrix, gl_NormalMatrix,
+         gl_Vertex, gl_FragColor, texture2D, and varying }
+    LegacyEffectSource :=
+      'uniform sampler2D u_albedoMap;' + NL +
+      'uniform float u_exposure;' + NL +
+      'varying vec2 v_legacyUV;' + NL +
+      'void PLUG_fragment_modify(inout vec4 color) {' + NL +
+      '  vec4 clipPos = gl_ModelViewProjectionMatrix * gl_Vertex;' + NL +
+      '  vec3 n = gl_NormalMatrix * vec3(0.0, 0.0, 1.0);' + NL +
+      '  gl_FragColor = texture2D(u_albedoMap, v_legacyUV) * u_exposure + clipPos * 0.0 + vec4(n, 0.0) * 0.0;' + NL +
+      '}' + NL;
+
+    Upgraded := Gen.UpgradeLegacyGLSLBuiltIns(LegacyEffectSource, 'MyWaterEffect', WarnCount);
+    AllWarnings := FCapturedWarnings.Text;
+
+    AssertEquals('Should emit 6 warnings (gl_ModelViewProjectionMatrix, gl_NormalMatrix, gl_Vertex, gl_FragColor, texture2D, varying)',
+      6, WarnCount);
+    AssertEquals('OnWarning listener should capture 6 warnings', 6, FCapturedWarnings.Count);
+    AssertTrue('Warning mentions gl_ModelViewProjectionMatrix and replacement',
+      Pos('gl_ModelViewProjectionMatrix', AllWarnings) > 0);
+    AssertTrue('Warning mentions gl_NormalMatrix',
+      Pos('gl_NormalMatrix', AllWarnings) > 0);
+    AssertTrue('Warning mentions gl_Vertex',
+      Pos('gl_Vertex', AllWarnings) > 0);
+    AssertTrue('Warning mentions gl_FragColor',
+      Pos('gl_FragColor', AllWarnings) > 0);
+    AssertTrue('Warning mentions texture2D',
+      Pos('texture2D', AllWarnings) > 0);
+    AssertTrue('Warning mentions varying qualifier',
+      Pos('qualifier "varying"', AllWarnings) > 0);
+
+    { Verify #version 450 compatibility #define aliases and qualifier upgrade in output }
+    AssertTrue('Upgraded source defines gl_ModelViewProjectionMatrix alias',
+      Pos('#define gl_ModelViewProjectionMatrix (castle_ProjectionMatrix * castle_ModelViewMatrix)', Upgraded) > 0);
+    AssertTrue('Upgraded source defines gl_FragColor alias',
+      Pos('#define gl_FragColor castle_FragColor', Upgraded) > 0);
+    AssertTrue('Upgraded source defines texture2D alias',
+      Pos('#define texture2D texture', Upgraded) > 0);
+    AssertTrue('Upgraded source rewrites varying to in',
+      Pos('in vec2 v_legacyUV;', Upgraded) > 0);
+
+    { 2. Verify identifier boundary matching: gl_VertexIndex must NOT trigger gl_Vertex warning }
+    FCapturedWarnings.Clear;
+    CleanEffectSource :=
+      'uniform float u_scale;' + NL +
+      'void PLUG_vertex_object_space(inout vec4 vertex, inout vec3 normal) {' + NL +
+      '  int idx = gl_VertexIndex;' + NL +
+      '  vertex.xyz *= u_scale;' + NL +
+      '}' + NL;
+    Upgraded := Gen.UpgradeUserEffectUniforms(CleanEffectSource);
+    AssertEquals('Clean modern GLSL 450 effect should emit 0 warnings', 0, FCapturedWarnings.Count);
+    AssertTrue('UpgradeUserEffectUniforms still generates CastleUserEffectBlock',
+      Pos('CastleUserEffectBlock', Upgraded) > 0);
+  finally
+    ApplicationProperties.OnWarning.Remove({$ifdef FPC}@{$endif}CaptureWarning);
+    FreeAndNil(FCapturedWarnings);
+    FreeAndNil(Gen);
   end;
 end;
 
