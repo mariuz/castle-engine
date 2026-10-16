@@ -66,6 +66,7 @@ type
     procedure TestVulkanMemoryBudgetAndViewportStatistics;
     procedure TestViewportPrepareResourcesPrewarmsPSOs;
     procedure TestLegacyGLSLUniformWarningDiagnostics;
+    procedure TestVulkan11RenderPassFramebufferFallback;
   private
     FCapturedWarnings: TStringList;
     procedure CaptureWarning(const Category, S: String);
@@ -1388,6 +1389,116 @@ begin
     ApplicationProperties.OnWarning.Remove({$ifdef FPC}@{$endif}CaptureWarning);
     FreeAndNil(FCapturedWarnings);
     FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkan11RenderPassFramebufferFallback;
+var
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  ColorTex, DepthTex, ShadowDepthTex: TRHITexture;
+  ForwardInfo, ShadowInfo: TRHIRenderingInfo;
+  RpHash1, RpHash2, RpHashShadow, FbHash1, FbHash2: UInt64;
+  RpForward, RpShadow: VkRenderPass;
+  PrewarmedCount: Cardinal;
+begin
+  { 1. Verify deterministic FNV-1a key hashes for VkRenderPass and VkFramebuffer }
+  RpHash1 := ComputeRenderPassKeyHash([pfBGRA8_UNorm], pfD32_Float, 1);
+  RpHash2 := ComputeRenderPassKeyHash([pfBGRA8_UNorm], pfD32_Float, 1);
+  RpHashShadow := ComputeRenderPassKeyHash([], pfD32_Float, 1);
+  AssertTrue('Identical render pass signatures must produce identical hashes', RpHash1 = RpHash2);
+  AssertTrue('Forward pass and depth-only shadow pass must produce distinct hashes', RpHash1 <> RpHashShadow);
+
+  FbHash1 := ComputeFramebufferKeyHash(VkRenderPass(1), [VkImageView(100), VkImageView(200)], 1920, 1080);
+  FbHash2 := ComputeFramebufferKeyHash(VkRenderPass(1), [VkImageView(100), VkImageView(200)], 1280, 720);
+  AssertTrue('Different framebuffer dimensions must produce distinct hashes', FbHash1 <> FbHash2);
+
+  { 2. Create headless Vulkan 1.1 fallback device (SupportsDynamicRendering = False) }
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, False);
+  try
+    AssertFalse('Headless Vulkan 1.1 device must report SupportsDynamicRendering = False',
+      VkDev.SupportsDynamicRendering);
+    AssertEquals('Initial fallback render pass count should be 0', 0, VkDev.FallbackRenderPassCount);
+    AssertEquals('Initial fallback framebuffer count should be 0', 0, VkDev.FallbackFramebufferCount);
+
+    { 3. Pre-warming standard PSOs on a Vulkan 1.1 device should populate fallback VkRenderPasses }
+    PrewarmedCount := VkDev.PrewarmStandardPipelines(True, True);
+    AssertEquals('PrewarmStandardPipelines should bake 5 standard PSOs on Vulkan 1.1 fallback', 5, PrewarmedCount);
+    AssertEquals('Pre-warming forward + shadow PSOs should cache exactly 2 unique VkRenderPasses',
+      2, VkDev.FallbackRenderPassCount);
+
+    RpForward := VkDev.GetOrCreateFallbackRenderPass([pfBGRA8_UNorm], pfD32_Float, 1);
+    RpShadow := VkDev.GetOrCreateFallbackRenderPass([], pfD32_Float, 1);
+    AssertTrue('Cached forward VkRenderPass handle must be non-null', RpForward <> VK_NULL_HANDLE);
+    AssertTrue('Cached shadow VkRenderPass handle must be non-null', RpShadow <> VK_NULL_HANDLE);
+    AssertTrue('Forward and shadow VkRenderPass handles must be distinct', RpForward <> RpShadow);
+    AssertEquals('Re-querying existing render passes must not increase FallbackRenderPassCount',
+      2, VkDev.FallbackRenderPassCount);
+
+    { 4. Execute BeginRendering / EndRendering on TVulkanRHICommandList across 2 frames }
+    ColorTex := VkDev.CreateTexture(TRHITextureDesc.Create2D(1280, 720, pfBGRA8_UNorm, [tuColorAttachment]));
+    DepthTex := VkDev.CreateTexture(TRHITextureDesc.Create2D(1280, 720, pfD32_Float, [tuDepthStencil]));
+    ShadowDepthTex := VkDev.CreateTexture(TRHITextureDesc.Create2D(2048, 2048, pfD32_Float, [tuDepthStencil, tuSampled]));
+    CmdList := TVulkanRHICommandList.Create(VkDev, 0);
+    try
+      FillChar(ForwardInfo, SizeOf(ForwardInfo), 0);
+      ForwardInfo.RenderArea := Rectangle(0, 0, 1280, 720);
+      SetLength(ForwardInfo.ColorAttachments, 1);
+      ForwardInfo.ColorAttachments[0].Texture := ColorTex;
+      ForwardInfo.ColorAttachments[0].LoadOp := loClear;
+      ForwardInfo.ColorAttachments[0].StoreOp := soStore;
+      ForwardInfo.HasDepthAttachment := True;
+      ForwardInfo.DepthAttachment.Texture := DepthTex;
+      ForwardInfo.DepthAttachment.LoadOp := loClear;
+      ForwardInfo.DepthAttachment.StoreOp := soStore;
+      ForwardInfo.DepthAttachment.ClearDepth := 1.0;
+
+      FillChar(ShadowInfo, SizeOf(ShadowInfo), 0);
+      ShadowInfo.RenderArea := Rectangle(0, 0, 2048, 2048);
+      ShadowInfo.HasDepthAttachment := True;
+      ShadowInfo.DepthAttachment.Texture := ShadowDepthTex;
+      ShadowInfo.DepthAttachment.LoadOp := loClear;
+      ShadowInfo.DepthAttachment.StoreOp := soStore;
+      ShadowInfo.DepthAttachment.ClearDepth := 1.0;
+
+      { Frame 1: Shadow pass + Forward pass }
+      CmdList.BeginRendering(ShadowInfo);
+      AssertTrue('CommandList must be inside fallback render pass after BeginRendering',
+        CmdList.InFallbackRenderPass);
+      CmdList.EndRendering;
+      AssertFalse('CommandList must exit fallback render pass after EndRendering',
+        CmdList.InFallbackRenderPass);
+
+      CmdList.BeginRendering(ForwardInfo);
+      AssertTrue('CommandList must be inside fallback render pass during forward pass',
+        CmdList.InFallbackRenderPass);
+      CmdList.EndRendering;
+
+      AssertEquals('After Frame 1, 2 framebuffers (shadow + forward) should be cached',
+        2, VkDev.FallbackFramebufferCount);
+      AssertEquals('After Frame 1, FallbackRenderPassBeginCount should be 2',
+        2, VkDev.FallbackRenderPassBeginCount);
+
+      { Frame 2: Reuse cached VkRenderPass and VkFramebuffer instances }
+      CmdList.BeginRendering(ShadowInfo);
+      CmdList.EndRendering;
+      CmdList.BeginRendering(ForwardInfo);
+      CmdList.EndRendering;
+
+      AssertEquals('Frame 2 must reuse cached VkRenderPasses (count stays 2)',
+        2, VkDev.FallbackRenderPassCount);
+      AssertEquals('Frame 2 must reuse cached VkFramebuffers (count stays 2)',
+        2, VkDev.FallbackFramebufferCount);
+      AssertEquals('After Frame 2, FallbackRenderPassBeginCount should be 4',
+        4, VkDev.FallbackRenderPassBeginCount);
+    finally
+      FreeAndNil(CmdList);
+      FreeAndNil(ShadowDepthTex);
+      FreeAndNil(DepthTex);
+      FreeAndNil(ColorTex);
+    end;
+  finally
+    FreeAndNil(VkDev);
   end;
 end;
 

@@ -140,12 +140,14 @@ type
   private
     FHandle: VkPipeline;
     FPipelineLayout: VkPipelineLayout;
+    FRenderPass: VkRenderPass;
   public
     constructor Create(const ADevice: TVulkanRHIDevice;
       const ADesc: TRHIGraphicsPipelineDesc);
     destructor Destroy; override;
     property Handle: VkPipeline read FHandle;
     property PipelineLayout: VkPipelineLayout read FPipelineLayout;
+    property RenderPass: VkRenderPass read FRenderPass;
   end;
 
   { -------------------------------------------------------------------------- }
@@ -158,6 +160,7 @@ type
     FCommandPool: VkCommandPool;
     FHandle: VkCommandBuffer;
     FCurrentPipeline: TVulkanRHIPipeline;
+    FInFallbackRenderPass: Boolean;
   public
     constructor Create(const ADevice: TVulkanRHIDevice; const AQueueFamilyIndex: Cardinal;
       const ALevel: TRHICommandListLevel = cllPrimary);
@@ -205,6 +208,7 @@ type
     procedure PopDebugGroup; override;
 
     property Handle: VkCommandBuffer read FHandle;
+    property InFallbackRenderPass: Boolean read FInFallbackRenderPass;
   end;
 
   { -------------------------------------------------------------------------- }
@@ -219,6 +223,8 @@ type
   end;
 
   TVulkanPipelineMap = {$ifdef FPC}specialize{$endif} TObjectDictionary<UInt64, TVulkanRHIPipeline>;
+  TVulkanRenderPassMap = {$ifdef FPC}specialize{$endif} TDictionary<UInt64, VkRenderPass>;
+  TVulkanFramebufferMap = {$ifdef FPC}specialize{$endif} TDictionary<UInt64, VkFramebuffer>;
 
   TVulkanRHIDevice = class(TRHIDevice)
   private
@@ -244,21 +250,25 @@ type
     { Frame synchronization & command recording }
     FFrames: array[0 .. MaxFramesInFlight - 1] of TVulkanFrameContext;
 
-    { Descriptor & Pipeline Caches }
+    { Descriptor, Pipeline & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FDescriptorPool: VkDescriptorPool;
     FPipelineCache: VkPipelineCache;
     FPipelineMap: TVulkanPipelineMap;
+    FRenderPassMap: TVulkanRenderPassMap;
+    FFramebufferMap: TVulkanFramebufferMap;
     FPipelineCacheLoaded: Boolean;
     FPrewarm3DVertexShader: TRHIShaderModule;
     FPrewarm3DFragmentShader: TRHIShaderModule;
     FPrewarm2DVertexShader: TRHIShaderModule;
     FPrewarm2DFragmentShader: TRHIShaderModule;
 
-    { Diagnostics & VK_EXT_memory_budget tracking }
+    { Diagnostics, VK_EXT_memory_budget & Vulkan 1.1 Fallback tracking }
     FSupportsMemoryBudgetExt: Boolean;
+    FSupportsDynamicRendering: Boolean;
     FPipelineCacheHits: Cardinal;
     FPipelineCacheMisses: Cardinal;
     FDescriptorSetAllocations: Cardinal;
+    FFallbackRenderPassBeginCount: Cardinal;
     FAllocatedMemoryBytes: Int64;
 
     procedure CreateInstance(const EnableValidation: Boolean);
@@ -268,16 +278,21 @@ type
     procedure DestroySwapchain;
     procedure CreateFrameContexts;
     procedure CreateDescriptorPool;
+    procedure ClearFallbackFramebuffers;
+    procedure ClearFallbackRenderPasses;
     function IsDeviceExtensionSupported(const AExtensionName: AnsiString): Boolean;
     function ComputePipelineHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
     function GetPipelineCount: Cardinal;
+    function GetFallbackRenderPassCount: Cardinal;
+    function GetFallbackFramebufferCount: Cardinal;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
       const EnableValidation: Boolean = True); reintroduce; overload;
     { Creates a headless Vulkan RHI device instance (for offscreen/unit testing). }
     constructor CreateHeadless(const APhysicalDevice: VkPhysicalDevice;
-      const ASupportsMemoryBudgetExt: Boolean = True); overload;
+      const ASupportsMemoryBudgetExt: Boolean = True;
+      const ASupportsDynamicRendering: Boolean = True); overload;
     destructor Destroy; override;
 
     { Helper for one-shot transfer commands (texture/buffer uploads) }
@@ -301,6 +316,19 @@ type
     function PrewarmStandardPipelines(const AIncludeBlending: Boolean = True;
       const AIncludeShadowDepth: Boolean = True;
       const ACacheFileUrl: String = ''): Cardinal;
+
+    { Acquires or creates a cached VkRenderPass for Vulkan 1.1/1.2 devices that lack
+      VK_KHR_dynamic_rendering. }
+    function GetOrCreateFallbackRenderPass(
+      const AColorFormats: array of TRHIPixelFormat;
+      const ADepthFormat: TRHIPixelFormat;
+      const ASampleCount: Cardinal = 1): VkRenderPass;
+
+    { Acquires or creates a cached VkFramebuffer for Vulkan 1.1/1.2 devices that lack
+      VK_KHR_dynamic_rendering. }
+    function GetOrCreateFallbackFramebuffer(const ARenderPass: VkRenderPass;
+      const AAttachments: array of VkImageView;
+      const AWidth, AHeight: Cardinal): VkFramebuffer;
 
     { TRHIDevice overrides }
     function BeginFrame: TRHICommandList; override;
@@ -343,6 +371,10 @@ type
     property PipelineCount: Cardinal read GetPipelineCount;
     property PipelineCacheLoaded: Boolean read FPipelineCacheLoaded;
     property SupportsMemoryBudgetExt: Boolean read FSupportsMemoryBudgetExt;
+    property SupportsDynamicRendering: Boolean read FSupportsDynamicRendering write FSupportsDynamicRendering;
+    property FallbackRenderPassCount: Cardinal read GetFallbackRenderPassCount;
+    property FallbackFramebufferCount: Cardinal read GetFallbackFramebufferCount;
+    property FallbackRenderPassBeginCount: Cardinal read FFallbackRenderPassBeginCount;
     property PipelineCacheHits: Cardinal read FPipelineCacheHits;
     property PipelineCacheMisses: Cardinal read FPipelineCacheMisses;
     property DescriptorSetAllocations: Cardinal read FDescriptorSetAllocations;
@@ -351,6 +383,14 @@ type
 
 { Computes a deterministic 64-bit FNV-1a hash for a graphics pipeline state descriptor. }
 function ComputePipelineKeyHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
+
+{ Computes a deterministic 64-bit FNV-1a hash for a fallback VkRenderPass signature. }
+function ComputeRenderPassKeyHash(const AColorFormats: array of TRHIPixelFormat;
+  const ADepthFormat: TRHIPixelFormat; const ASampleCount: Cardinal = 1): UInt64;
+
+{ Computes a deterministic 64-bit FNV-1a hash for a fallback VkFramebuffer signature. }
+function ComputeFramebufferKeyHash(const ARenderPass: VkRenderPass;
+  const AAttachments: array of VkImageView; const AWidth, AHeight: Cardinal): UInt64;
 
 const
   DefaultVulkanPipelineCacheUrl = 'castle-config:/vulkan_pipeline_cache.bin';
@@ -437,6 +477,35 @@ begin
 
   for I := 0 to High(ADesc.ColorAttachmentFormats) do
     HashBytesFNV1a(Result, ADesc.ColorAttachmentFormats[I], SizeOf(TRHIPixelFormat));
+end;
+
+function ComputeRenderPassKeyHash(const AColorFormats: array of TRHIPixelFormat;
+  const ADepthFormat: TRHIPixelFormat; const ASampleCount: Cardinal): UInt64;
+var
+  I, ColorCount: Integer;
+begin
+  Result := FNV1aOffsetBasis64;
+  ColorCount := Length(AColorFormats);
+  HashBytesFNV1a(Result, ColorCount, SizeOf(ColorCount));
+  for I := 0 to High(AColorFormats) do
+    HashBytesFNV1a(Result, AColorFormats[I], SizeOf(TRHIPixelFormat));
+  HashBytesFNV1a(Result, ADepthFormat, SizeOf(ADepthFormat));
+  HashBytesFNV1a(Result, ASampleCount, SizeOf(ASampleCount));
+end;
+
+function ComputeFramebufferKeyHash(const ARenderPass: VkRenderPass;
+  const AAttachments: array of VkImageView; const AWidth, AHeight: Cardinal): UInt64;
+var
+  I, AttCount: Integer;
+begin
+  Result := FNV1aOffsetBasis64;
+  HashUInt64FNV1a(Result, UInt64(ARenderPass));
+  AttCount := Length(AAttachments);
+  HashBytesFNV1a(Result, AttCount, SizeOf(AttCount));
+  for I := 0 to High(AAttachments) do
+    HashUInt64FNV1a(Result, UInt64(AAttachments[I]));
+  HashBytesFNV1a(Result, AWidth, SizeOf(AWidth));
+  HashBytesFNV1a(Result, AHeight, SizeOf(AHeight));
 end;
 
 procedure SavePipelineCacheBlobToStream(const AStream: TStream;
@@ -847,6 +916,12 @@ begin
   else
     FAspectMask := VK_IMAGE_ASPECT_COLOR_BIT;
 
+  if (ADevice = nil) or (ADevice.Handle = nil) then
+  begin
+    FImageView := VkImageView(PtrUInt(Self));
+    Exit;
+  end;
+
   FillChar(ImgInfo, SizeOf(ImgInfo), 0);
   ImgInfo.sType := VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   ImgInfo.imageType := VK_IMAGE_TYPE_2D;
@@ -913,6 +988,11 @@ end;
 
 destructor TVulkanRHITexture.Destroy;
 begin
+  if (VulkanDevice = nil) or (VulkanDevice.Handle = nil) then
+  begin
+    inherited;
+    Exit;
+  end;
   if FImageView <> VK_NULL_HANDLE then
     vkDestroyImageView(VulkanDevice.Handle, FImageView, nil);
   if FOwnsImage then
@@ -1278,6 +1358,9 @@ var
   I: Integer;
 begin
   inherited Create(ADevice, ADesc);
+  if (ADevice <> nil) and (not ADevice.SupportsDynamicRendering) then
+    FRenderPass := ADevice.GetOrCreateFallbackRenderPass(
+      ADesc.ColorAttachmentFormats, ADesc.DepthAttachmentFormat, ADesc.SampleCount);
   if (ADevice = nil) or (ADevice.Handle = nil) then Exit;
 
   { 1. Construct VkPipelineLayout from ADesc.DescriptorSetLayouts and PushConstants }
@@ -1435,7 +1518,8 @@ begin
     DynamicStateInfo.dynamicStateCount := 2;
   DynamicStateInfo.pDynamicStates := @DynamicStates[0];
 
-  { 5. Set up VkPipelineRenderingCreateInfoKHR (Vulkan 1.3 Dynamic Rendering) }
+  { 5. Set up VkPipelineRenderingCreateInfoKHR (Vulkan 1.3 Dynamic Rendering)
+    or fallback VkRenderPass (Vulkan 1.1/1.2 without VK_KHR_dynamic_rendering) }
   SetLength(ColorFormats, Length(ADesc.ColorAttachmentFormats));
   for I := 0 to High(ADesc.ColorAttachmentFormats) do
     ColorFormats[I] := RHIToVkFormat(ADesc.ColorAttachmentFormats[I]);
@@ -1450,7 +1534,16 @@ begin
   { 6. Create Graphics Pipeline }
   FillChar(PipelineInfo, SizeOf(PipelineInfo), 0);
   PipelineInfo.sType := VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-  PipelineInfo.pNext := @RenderingInfo;
+  if ADevice.SupportsDynamicRendering then
+  begin
+    PipelineInfo.pNext := @RenderingInfo;
+    PipelineInfo.renderPass := VK_NULL_HANDLE;
+  end else
+  begin
+    PipelineInfo.pNext := nil;
+    PipelineInfo.renderPass := FRenderPass;
+    PipelineInfo.subpass := 0;
+  end;
   PipelineInfo.stageCount := StageCount;
   if StageCount > 0 then
     PipelineInfo.pStages := @Stages[0];
@@ -1489,6 +1582,8 @@ var
 begin
   inherited Create(ALevel);
   FDevice := ADevice;
+  if (FDevice = nil) or (FDevice.Handle = nil) then
+    Exit;
 
   FillChar(PoolInfo, SizeOf(PoolInfo), 0);
   PoolInfo.sType := VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -1509,7 +1604,7 @@ end;
 
 destructor TVulkanRHICommandList.Destroy;
 begin
-  if FCommandPool <> VK_NULL_HANDLE then
+  if (FDevice <> nil) and (FDevice.Handle <> nil) and (FCommandPool <> VK_NULL_HANDLE) then
     vkDestroyCommandPool(FDevice.Handle, FCommandPool, nil);
   inherited;
 end;
@@ -1661,8 +1756,82 @@ var
   RenderInfo: VkRenderingInfo;
   ColorAttachments: array of VkRenderingAttachmentInfo;
   DepthAttachment: VkRenderingAttachmentInfo;
-  I: Integer;
+  FallbackColorFormats: array of TRHIPixelFormat;
+  FallbackDepthFormat: TRHIPixelFormat;
+  FallbackViews: array of VkImageView;
+  FallbackClears: array of VkClearValue;
+  FallbackRP: VkRenderPass;
+  FallbackFB: VkFramebuffer;
+  RpBeginInfo: VkRenderPassBeginInfo;
+  FbWidth, FbHeight: Cardinal;
+  AttCount, I: Integer;
 begin
+  if (FDevice <> nil) and (not FDevice.SupportsDynamicRendering) then
+  begin
+    SetLength(FallbackColorFormats, Length(Info.ColorAttachments));
+    AttCount := Length(Info.ColorAttachments);
+    if Info.HasDepthAttachment and (Info.DepthAttachment.Texture <> nil) then
+      Inc(AttCount);
+    SetLength(FallbackViews, AttCount);
+    SetLength(FallbackClears, AttCount);
+
+    FbWidth := Max(1, Info.RenderArea.Width);
+    FbHeight := Max(1, Info.RenderArea.Height);
+
+    for I := 0 to High(Info.ColorAttachments) do
+    begin
+      if Info.ColorAttachments[I].Texture <> nil then
+      begin
+        FallbackColorFormats[I] := Info.ColorAttachments[I].Texture.Desc.Format;
+        FallbackViews[I] := (Info.ColorAttachments[I].Texture as TVulkanRHITexture).ImageView;
+        FbWidth := Max(FbWidth, Info.ColorAttachments[I].Texture.Desc.Width);
+        FbHeight := Max(FbHeight, Info.ColorAttachments[I].Texture.Desc.Height);
+      end else
+      begin
+        FallbackColorFormats[I] := pfBGRA8_UNorm;
+        FallbackViews[I] := VK_NULL_HANDLE;
+      end;
+      FillChar(FallbackClears[I], SizeOf(VkClearValue), 0);
+      Move(Info.ColorAttachments[I].ClearColor.Data,
+        FallbackClears[I].color.float32, SizeOf(Single) * 4);
+    end;
+
+    if Info.HasDepthAttachment and (Info.DepthAttachment.Texture <> nil) then
+    begin
+      FallbackDepthFormat := Info.DepthAttachment.Texture.Desc.Format;
+      FallbackViews[AttCount - 1] := (Info.DepthAttachment.Texture as TVulkanRHITexture).ImageView;
+      FbWidth := Max(FbWidth, Info.DepthAttachment.Texture.Desc.Width);
+      FbHeight := Max(FbHeight, Info.DepthAttachment.Texture.Desc.Height);
+      FillChar(FallbackClears[AttCount - 1], SizeOf(VkClearValue), 0);
+      FallbackClears[AttCount - 1].depthStencil.depth := Info.DepthAttachment.ClearDepth;
+      FallbackClears[AttCount - 1].depthStencil.stencil := Info.DepthAttachment.ClearStencil;
+    end else
+      FallbackDepthFormat := pfUndefined;
+
+    FallbackRP := FDevice.GetOrCreateFallbackRenderPass(
+      FallbackColorFormats, FallbackDepthFormat, 1);
+    FallbackFB := FDevice.GetOrCreateFallbackFramebuffer(
+      FallbackRP, FallbackViews, FbWidth, FbHeight);
+
+    FillChar(RpBeginInfo, SizeOf(RpBeginInfo), 0);
+    RpBeginInfo.sType := VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    RpBeginInfo.renderPass := FallbackRP;
+    RpBeginInfo.framebuffer := FallbackFB;
+    RpBeginInfo.renderArea.offset.x := Max(0, Info.RenderArea.Left);
+    RpBeginInfo.renderArea.offset.y := Max(0, Info.RenderArea.Bottom);
+    RpBeginInfo.renderArea.extent.width := Max(1, Info.RenderArea.Width);
+    RpBeginInfo.renderArea.extent.height := Max(1, Info.RenderArea.Height);
+    RpBeginInfo.clearValueCount := Length(FallbackClears);
+    if Length(FallbackClears) > 0 then
+      RpBeginInfo.pClearValues := @FallbackClears[0];
+
+    FInFallbackRenderPass := True;
+    Inc(FDevice.FFallbackRenderPassBeginCount);
+    if (FHandle <> nil) and Assigned(vkCmdBeginRenderPass) then
+      vkCmdBeginRenderPass(FHandle, @RpBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+    Exit;
+  end;
+
   SetLength(ColorAttachments, Length(Info.ColorAttachments));
   for I := 0 to High(Info.ColorAttachments) do
   begin
@@ -1711,12 +1880,21 @@ begin
     RenderInfo.pDepthAttachment := @DepthAttachment;
   end;
 
-  vkCmdBeginRendering(FHandle, @RenderInfo);
+  if (FHandle <> nil) and Assigned(vkCmdBeginRendering) then
+    vkCmdBeginRendering(FHandle, @RenderInfo);
 end;
 
 procedure TVulkanRHICommandList.EndRendering;
 begin
-  vkCmdEndRendering(FHandle);
+  if FInFallbackRenderPass then
+  begin
+    FInFallbackRenderPass := False;
+    if (FHandle <> nil) and Assigned(vkCmdEndRenderPass) then
+      vkCmdEndRenderPass(FHandle);
+    Exit;
+  end;
+  if (FHandle <> nil) and Assigned(vkCmdEndRendering) then
+    vkCmdEndRendering(FHandle);
 end;
 
 procedure TVulkanRHICommandList.SetViewport(const ViewportRect: TFloatRectangle;
@@ -1883,6 +2061,9 @@ constructor TVulkanRHIDevice.Create(const ACreateSurfaceCallback: TVulkanCreateS
 begin
   inherited Create;
   FPipelineMap := TVulkanPipelineMap.Create([doOwnsValues]);
+  FRenderPassMap := TVulkanRenderPassMap.Create;
+  FFramebufferMap := TVulkanFramebufferMap.Create;
+  FSupportsDynamicRendering := True;
 
   LoadVulkan;
   CreateInstance(EnableValidation);
@@ -1899,13 +2080,61 @@ begin
 end;
 
 constructor TVulkanRHIDevice.CreateHeadless(const APhysicalDevice: VkPhysicalDevice;
-  const ASupportsMemoryBudgetExt: Boolean);
+  const ASupportsMemoryBudgetExt: Boolean;
+  const ASupportsDynamicRendering: Boolean);
 begin
   inherited Create;
   FPipelineMap := TVulkanPipelineMap.Create([doOwnsValues]);
+  FRenderPassMap := TVulkanRenderPassMap.Create;
+  FFramebufferMap := TVulkanFramebufferMap.Create;
   FCapabilities.Backend := rbVulkan;
   FPhysicalDevice := APhysicalDevice;
   FSupportsMemoryBudgetExt := ASupportsMemoryBudgetExt;
+  FSupportsDynamicRendering := ASupportsDynamicRendering;
+end;
+
+procedure TVulkanRHIDevice.ClearFallbackFramebuffers;
+var
+  FbHandle: VkFramebuffer;
+begin
+  if FFramebufferMap = nil then Exit;
+  if (FDevice <> nil) and Assigned(vkDestroyFramebuffer) then
+  begin
+    for FbHandle in FFramebufferMap.Values do
+      if FbHandle <> VK_NULL_HANDLE then
+        vkDestroyFramebuffer(FDevice, FbHandle, nil);
+  end;
+  FFramebufferMap.Clear;
+end;
+
+procedure TVulkanRHIDevice.ClearFallbackRenderPasses;
+var
+  RpHandle: VkRenderPass;
+begin
+  if FRenderPassMap = nil then Exit;
+  if (FDevice <> nil) and Assigned(vkDestroyRenderPass) then
+  begin
+    for RpHandle in FRenderPassMap.Values do
+      if RpHandle <> VK_NULL_HANDLE then
+        vkDestroyRenderPass(FDevice, RpHandle, nil);
+  end;
+  FRenderPassMap.Clear;
+end;
+
+function TVulkanRHIDevice.GetFallbackRenderPassCount: Cardinal;
+begin
+  if FRenderPassMap <> nil then
+    Result := Cardinal(FRenderPassMap.Count)
+  else
+    Result := 0;
+end;
+
+function TVulkanRHIDevice.GetFallbackFramebufferCount: Cardinal;
+begin
+  if FFramebufferMap <> nil then
+    Result := Cardinal(FFramebufferMap.Count)
+  else
+    Result := 0;
 end;
 
 destructor TVulkanRHIDevice.Destroy;
@@ -1916,6 +2145,10 @@ begin
   WaitIdle;
   DestroySwapchain;
   FreeAndNil(FPipelineMap);
+  ClearFallbackFramebuffers;
+  ClearFallbackRenderPasses;
+  FreeAndNil(FFramebufferMap);
+  FreeAndNil(FRenderPassMap);
   FreeAndNil(FPrewarm3DVertexShader);
   FreeAndNil(FPrewarm3DFragmentShader);
   FreeAndNil(FPrewarm2DVertexShader);
@@ -2024,6 +2257,8 @@ begin
   vkGetPhysicalDeviceFeatures(FPhysicalDevice, @Features);
 
   FDeviceId := ChosenProps.deviceID;
+  FSupportsDynamicRendering := (ChosenProps.apiVersion >= VK_API_VERSION_1_3) or
+    IsDeviceExtensionSupported(VK_KHR_dynamic_rendering);
   FCapabilities.Backend := rbVulkan;
   FCapabilities.DeviceName := String(PAnsiChar(@ChosenProps.deviceName[0]));
   FCapabilities.VendorId := ChosenProps.vendorID;
@@ -2072,7 +2307,7 @@ var
   QueueInfos: array[0..1] of VkDeviceQueueCreateInfo;
   QueuePriority: Single;
   DynRenderFeatures: VkPhysicalDeviceDynamicRenderingFeatures;
-  DeviceExts: array[0..1] of PAnsiChar;
+  DeviceExts: array[0..2] of PAnsiChar;
   CreateInfo: VkDeviceCreateInfo;
   CacheInfo: VkPipelineCacheCreateInfo;
 begin
@@ -2113,13 +2348,24 @@ begin
   FSupportsMemoryBudgetExt := IsDeviceExtensionSupported(VK_EXT_memory_budget);
   if FSupportsMemoryBudgetExt then
   begin
-    DeviceExts[1] := VK_EXT_memory_budget;
-    ExtCount := 2;
+    DeviceExts[ExtCount] := VK_EXT_memory_budget;
+    Inc(ExtCount);
+  end;
+  if FSupportsDynamicRendering and IsDeviceExtensionSupported(VK_KHR_dynamic_rendering) then
+  begin
+    DeviceExts[ExtCount] := VK_KHR_dynamic_rendering;
+    Inc(ExtCount);
   end;
 
   FillChar(CreateInfo, SizeOf(CreateInfo), 0);
   CreateInfo.sType := VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-  CreateInfo.pNext := @DynRenderFeatures;
+  if FSupportsDynamicRendering then
+    CreateInfo.pNext := @DynRenderFeatures
+  else
+  begin
+    CreateInfo.pNext := nil;
+    WritelnLog('Vulkan', 'Device does not support VK_KHR_dynamic_rendering; using Vulkan 1.1 VkRenderPass / VkFramebuffer fallback.');
+  end;
   if FPresentQueueFamily <> FGraphicsQueueFamily then
   begin
     QueueInfos[1].sType := VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -2145,6 +2391,141 @@ begin
     CacheInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
     CheckVk(vkCreatePipelineCache(FDevice, @CacheInfo, nil, @FPipelineCache), 'vkCreatePipelineCache');
   end;
+end;
+
+function TVulkanRHIDevice.GetOrCreateFallbackRenderPass(
+  const AColorFormats: array of TRHIPixelFormat;
+  const ADepthFormat: TRHIPixelFormat;
+  const ASampleCount: Cardinal): VkRenderPass;
+var
+  KeyHash: UInt64;
+  Attachments: array of VkAttachmentDescription;
+  ColorRefs: array of VkAttachmentReference;
+  DepthRef: VkAttachmentReference;
+  Subpass: VkSubpassDescription;
+  Dependency: VkSubpassDependency;
+  RpInfo: VkRenderPassCreateInfo;
+  SampleBits: VkSampleCountFlags;
+  AttCount, DepthIdx, I: Integer;
+begin
+  KeyHash := ComputeRenderPassKeyHash(AColorFormats, ADepthFormat, ASampleCount);
+  if (FRenderPassMap <> nil) and FRenderPassMap.TryGetValue(KeyHash, Result) then
+    Exit;
+
+  if ASampleCount > 1 then
+    SampleBits := ASampleCount
+  else
+    SampleBits := VK_SAMPLE_COUNT_1_BIT;
+
+  AttCount := Length(AColorFormats);
+  if ADepthFormat <> pfUndefined then
+    Inc(AttCount);
+
+  SetLength(Attachments, AttCount);
+  SetLength(ColorRefs, Length(AColorFormats));
+  for I := 0 to High(AColorFormats) do
+  begin
+    FillChar(Attachments[I], SizeOf(VkAttachmentDescription), 0);
+    Attachments[I].format := RHIToVkFormat(AColorFormats[I]);
+    Attachments[I].samples := SampleBits;
+    Attachments[I].loadOp := VK_ATTACHMENT_LOAD_OP_CLEAR;
+    Attachments[I].storeOp := VK_ATTACHMENT_STORE_OP_STORE;
+    Attachments[I].stencilLoadOp := VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    Attachments[I].stencilStoreOp := VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    Attachments[I].initialLayout := VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    Attachments[I].finalLayout := VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    ColorRefs[I].attachment := Cardinal(I);
+    ColorRefs[I].layout := VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  end;
+
+  FillChar(Subpass, SizeOf(Subpass), 0);
+  Subpass.pipelineBindPoint := VK_PIPELINE_BIND_POINT_GRAPHICS;
+  Subpass.colorAttachmentCount := Length(ColorRefs);
+  if Length(ColorRefs) > 0 then
+    Subpass.pColorAttachments := @ColorRefs[0];
+
+  if ADepthFormat <> pfUndefined then
+  begin
+    DepthIdx := Length(AColorFormats);
+    FillChar(Attachments[DepthIdx], SizeOf(VkAttachmentDescription), 0);
+    Attachments[DepthIdx].format := RHIToVkFormat(ADepthFormat);
+    Attachments[DepthIdx].samples := SampleBits;
+    Attachments[DepthIdx].loadOp := VK_ATTACHMENT_LOAD_OP_CLEAR;
+    Attachments[DepthIdx].storeOp := VK_ATTACHMENT_STORE_OP_STORE;
+    Attachments[DepthIdx].stencilLoadOp := VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    Attachments[DepthIdx].stencilStoreOp := VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    Attachments[DepthIdx].initialLayout := VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    Attachments[DepthIdx].finalLayout := VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    DepthRef.attachment := Cardinal(DepthIdx);
+    DepthRef.layout := VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    Subpass.pDepthStencilAttachment := @DepthRef;
+  end;
+
+  FillChar(Dependency, SizeOf(Dependency), 0);
+  Dependency.srcSubpass := $FFFFFFFF; // VK_SUBPASS_EXTERNAL
+  Dependency.dstSubpass := 0;
+  Dependency.srcStageMask := VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT or
+    VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+  Dependency.dstStageMask := VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT or
+    VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+  Dependency.srcAccessMask := 0;
+  Dependency.dstAccessMask := VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT or
+    VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+  FillChar(RpInfo, SizeOf(RpInfo), 0);
+  RpInfo.sType := VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+  RpInfo.attachmentCount := Length(Attachments);
+  if Length(Attachments) > 0 then
+    RpInfo.pAttachments := @Attachments[0];
+  RpInfo.subpassCount := 1;
+  RpInfo.pSubpasses := @Subpass;
+  RpInfo.dependencyCount := 1;
+  RpInfo.pDependencies := @Dependency;
+
+  Result := VK_NULL_HANDLE;
+  if (FDevice <> nil) and Assigned(vkCreateRenderPass) then
+    CheckVk(vkCreateRenderPass(FDevice, @RpInfo, nil, @Result), 'vkCreateRenderPass')
+  else
+  if FRenderPassMap <> nil then
+    Result := VkRenderPass(FRenderPassMap.Count + 1);
+
+  if FRenderPassMap <> nil then
+    FRenderPassMap.AddOrSetValue(KeyHash, Result);
+end;
+
+function TVulkanRHIDevice.GetOrCreateFallbackFramebuffer(
+  const ARenderPass: VkRenderPass;
+  const AAttachments: array of VkImageView;
+  const AWidth, AHeight: Cardinal): VkFramebuffer;
+var
+  KeyHash: UInt64;
+  FbInfo: VkFramebufferCreateInfo;
+begin
+  KeyHash := ComputeFramebufferKeyHash(ARenderPass, AAttachments, AWidth, AHeight);
+  if (FFramebufferMap <> nil) and FFramebufferMap.TryGetValue(KeyHash, Result) then
+    Exit;
+
+  FillChar(FbInfo, SizeOf(FbInfo), 0);
+  FbInfo.sType := VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+  FbInfo.renderPass := ARenderPass;
+  FbInfo.attachmentCount := Length(AAttachments);
+  if Length(AAttachments) > 0 then
+    FbInfo.pAttachments := @AAttachments[0];
+  FbInfo.width := Max(1, AWidth);
+  FbInfo.height := Max(1, AHeight);
+  FbInfo.layers := 1;
+
+  Result := VK_NULL_HANDLE;
+  if (FDevice <> nil) and Assigned(vkCreateFramebuffer) then
+    CheckVk(vkCreateFramebuffer(FDevice, @FbInfo, nil, @Result), 'vkCreateFramebuffer')
+  else
+  if FFramebufferMap <> nil then
+    Result := VkFramebuffer(FFramebufferMap.Count + 1);
+
+  if FFramebufferMap <> nil then
+    FFramebufferMap.AddOrSetValue(KeyHash, Result);
 end;
 
 function TVulkanRHIDevice.QueryMemoryBudget(out AUsedBytes, ABudgetBytes: UInt64;
@@ -2241,6 +2622,7 @@ procedure TVulkanRHIDevice.DestroySwapchain;
 var
   I: Integer;
 begin
+  ClearFallbackFramebuffers;
   FreeAndNil(FSwapchainDepthTexture);
   for I := 0 to High(FSwapchainColorTextures) do
     FreeAndNil(FSwapchainColorTextures[I]);

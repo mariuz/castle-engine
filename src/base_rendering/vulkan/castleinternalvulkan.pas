@@ -103,6 +103,8 @@ const
   VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO = 33;
   VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO = 34;
   VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET = 35;
+  VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO = 37;
+  VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO = 38;
   VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO = 39;
   VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO = 40;
   VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO = 41;
@@ -411,8 +413,12 @@ const
   VK_VERTEX_INPUT_RATE_VERTEX = 0;
   VK_VERTEX_INPUT_RATE_INSTANCE = 1;
 
+  VK_SUBPASS_CONTENTS_INLINE = 0;
+  VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS = 1;
+
   VK_EXT_debug_utils = 'VK_EXT_debug_utils';
   VK_EXT_memory_budget = 'VK_EXT_memory_budget';
+  VK_KHR_dynamic_rendering = 'VK_KHR_dynamic_rendering';
   VK_KHR_get_physical_device_properties2 = 'VK_KHR_get_physical_device_properties2';
   VK_KHR_maintenance1 = 'VK_KHR_maintenance1';
   VK_KHR_swapchain = 'VK_KHR_swapchain';
@@ -513,6 +519,8 @@ type
   PVkDescriptorSetLayout = ^VkDescriptorSetLayout;
   PVkDescriptorPool = ^VkDescriptorPool;
   PVkDescriptorSet = ^VkDescriptorSet;
+  PVkFramebuffer = ^VkFramebuffer;
+  PVkRenderPass = ^VkRenderPass;
   PVkSemaphore = ^VkSemaphore;
   PVkFence = ^VkFence;
   PVkSurfaceKHR = ^VkSurfaceKHR;
@@ -1285,6 +1293,88 @@ type
   end;
   PVkPhysicalDeviceDynamicRenderingFeaturesKHR = ^VkPhysicalDeviceDynamicRenderingFeaturesKHR;
 
+  { Legacy Render Pass & Framebuffer (Vulkan 1.0 / 1.1 Fallback) }
+  VkAttachmentDescription = record
+    flags: VkFlags;
+    format: VkFormat;
+    samples: VkSampleCountFlags;
+    loadOp: VkAttachmentLoadOp;
+    storeOp: VkAttachmentStoreOp;
+    stencilLoadOp: VkAttachmentLoadOp;
+    stencilStoreOp: VkAttachmentStoreOp;
+    initialLayout: VkImageLayout;
+    finalLayout: VkImageLayout;
+  end;
+  PVkAttachmentDescription = ^VkAttachmentDescription;
+
+  VkAttachmentReference = record
+    attachment: Cardinal;
+    layout: VkImageLayout;
+  end;
+  PVkAttachmentReference = ^VkAttachmentReference;
+
+  VkSubpassDescription = record
+    flags: VkFlags;
+    pipelineBindPoint: Integer;
+    inputAttachmentCount: Cardinal;
+    pInputAttachments: PVkAttachmentReference;
+    colorAttachmentCount: Cardinal;
+    pColorAttachments: PVkAttachmentReference;
+    pResolveAttachments: PVkAttachmentReference;
+    pDepthStencilAttachment: PVkAttachmentReference;
+    preserveAttachmentCount: Cardinal;
+    pPreserveAttachments: PCardinal;
+  end;
+  PVkSubpassDescription = ^VkSubpassDescription;
+
+  VkSubpassDependency = record
+    srcSubpass: Cardinal;
+    dstSubpass: Cardinal;
+    srcStageMask: VkPipelineStageFlags;
+    dstStageMask: VkPipelineStageFlags;
+    srcAccessMask: VkAccessFlags;
+    dstAccessMask: VkAccessFlags;
+    dependencyFlags: VkFlags;
+  end;
+  PVkSubpassDependency = ^VkSubpassDependency;
+
+  VkRenderPassCreateInfo = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    flags: VkFlags;
+    attachmentCount: Cardinal;
+    pAttachments: PVkAttachmentDescription;
+    subpassCount: Cardinal;
+    pSubpasses: PVkSubpassDescription;
+    dependencyCount: Cardinal;
+    pDependencies: PVkSubpassDependency;
+  end;
+  PVkRenderPassCreateInfo = ^VkRenderPassCreateInfo;
+
+  VkFramebufferCreateInfo = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    flags: VkFlags;
+    renderPass: VkRenderPass;
+    attachmentCount: Cardinal;
+    pAttachments: PVkImageView;
+    width: Cardinal;
+    height: Cardinal;
+    layers: Cardinal;
+  end;
+  PVkFramebufferCreateInfo = ^VkFramebufferCreateInfo;
+
+  VkRenderPassBeginInfo = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    renderPass: VkRenderPass;
+    framebuffer: VkFramebuffer;
+    renderArea: VkRect2D;
+    clearValueCount: Cardinal;
+    pClearValues: PVkClearValue;
+  end;
+  PVkRenderPassBeginInfo = ^VkRenderPassBeginInfo;
+
   { Command Pools, Buffers, and Submission }
   VkCommandPoolCreateInfo = record
     sType: VkStructureType;
@@ -1629,6 +1719,14 @@ type
   PFN_vkCmdBeginRendering = procedure(commandBuffer: VkCommandBuffer; const pRenderingInfo: PVkRenderingInfoKHR); VKAPI_CALL;
   PFN_vkCmdEndRendering = procedure(commandBuffer: VkCommandBuffer); VKAPI_CALL;
 
+  { Legacy Render Pass & Framebuffer (Vulkan 1.0 / 1.1 Fallback) }
+  PFN_vkCreateRenderPass = function(device: VkDevice; const pCreateInfo: PVkRenderPassCreateInfo; const pAllocator: PVkAllocationCallbacks; pRenderPass: PVkRenderPass): VkResult; VKAPI_CALL;
+  PFN_vkDestroyRenderPass = procedure(device: VkDevice; renderPass: VkRenderPass; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
+  PFN_vkCreateFramebuffer = function(device: VkDevice; const pCreateInfo: PVkFramebufferCreateInfo; const pAllocator: PVkAllocationCallbacks; pFramebuffer: PVkFramebuffer): VkResult; VKAPI_CALL;
+  PFN_vkDestroyFramebuffer = procedure(device: VkDevice; framebuffer: VkFramebuffer; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
+  PFN_vkCmdBeginRenderPass = procedure(commandBuffer: VkCommandBuffer; const pRenderPassBegin: PVkRenderPassBeginInfo; contents: Integer); VKAPI_CALL;
+  PFN_vkCmdEndRenderPass = procedure(commandBuffer: VkCommandBuffer); VKAPI_CALL;
+
   { Swapchain }
   PFN_vkCreateSwapchainKHR = function(device: VkDevice; const pCreateInfo: PVkSwapchainCreateInfoKHR; const pAllocator: PVkAllocationCallbacks; pSwapchain: PVkSwapchainKHR): VkResult; VKAPI_CALL;
   PFN_vkDestroySwapchainKHR = procedure(device: VkDevice; swapchain: VkSwapchainKHR; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
@@ -1739,6 +1837,13 @@ var
 
   vkCmdBeginRendering: PFN_vkCmdBeginRendering;
   vkCmdEndRendering: PFN_vkCmdEndRendering;
+
+  vkCreateRenderPass: PFN_vkCreateRenderPass;
+  vkDestroyRenderPass: PFN_vkDestroyRenderPass;
+  vkCreateFramebuffer: PFN_vkCreateFramebuffer;
+  vkDestroyFramebuffer: PFN_vkDestroyFramebuffer;
+  vkCmdBeginRenderPass: PFN_vkCmdBeginRenderPass;
+  vkCmdEndRenderPass: PFN_vkCmdEndRenderPass;
 
   vkCreateSwapchainKHR: PFN_vkCreateSwapchainKHR;
   vkDestroySwapchainKHR: PFN_vkDestroySwapchainKHR;
@@ -1936,6 +2041,14 @@ begin
   Pointer(vkCmdEndRendering) := vkGetInstanceProcAddr(nil, 'vkCmdEndRendering');
   if not Assigned(vkCmdEndRendering) then
     Pointer(vkCmdEndRendering) := vkGetInstanceProcAddr(nil, 'vkCmdEndRenderingKHR');
+
+  { Legacy Render Pass & Framebuffer (Vulkan 1.0 / 1.1 Fallback) }
+  Pointer(vkCreateRenderPass) := vkGetInstanceProcAddr(nil, 'vkCreateRenderPass');
+  Pointer(vkDestroyRenderPass) := vkGetInstanceProcAddr(nil, 'vkDestroyRenderPass');
+  Pointer(vkCreateFramebuffer) := vkGetInstanceProcAddr(nil, 'vkCreateFramebuffer');
+  Pointer(vkDestroyFramebuffer) := vkGetInstanceProcAddr(nil, 'vkDestroyFramebuffer');
+  Pointer(vkCmdBeginRenderPass) := vkGetInstanceProcAddr(nil, 'vkCmdBeginRenderPass');
+  Pointer(vkCmdEndRenderPass) := vkGetInstanceProcAddr(nil, 'vkCmdEndRenderPass');
 
   Pointer(vkCreateSwapchainKHR) := vkGetInstanceProcAddr(nil, 'vkCreateSwapchainKHR');
   Pointer(vkDestroySwapchainKHR) := vkGetInstanceProcAddr(nil, 'vkDestroySwapchainKHR');
