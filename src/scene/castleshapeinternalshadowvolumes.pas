@@ -91,14 +91,28 @@ type
     type
       TValidities = set of (
         svTrianglesListShadowCasters,
+        { FTrianglesListShadowCasters positions are up-to-date
+          with the coordinates. }
+        svTrianglesPositions,
         svManifoldAndBorderEdges
       );
     var
       Validities: TValidities;
       FTrianglesListShadowCasters: TTrianglesShadowCastersList;
+      { For each triangle of FTrianglesListShadowCasters, the indexes
+        of its 3 vertexes in the geometry coordinates.
+        @nil if the triangles cannot be updated from the coordinates
+        (when geometry arrays are not ordered like the coordinates). }
+      FTriangleCoordIndexes: TInt32List;
+      { Count of the last FTrianglesListShadowCasters freed
+        by InvalidateTrianglesListShadowCasters, -1 if none. }
+      FPreviousTrianglesCount: Integer;
       FManifoldEdges: TEdgeList;
       FBorderEdges: TEdgeList;
       procedure CalculateIfNeededManifoldAndBorderEdges;
+      { Update FTrianglesListShadowCasters positions from the coordinates,
+        using FTriangleCoordIndexes. @false if not possible. }
+      function UpdateTrianglesPositions: Boolean;
   public
     FShape: TObject;
 
@@ -112,6 +126,13 @@ type
     { Removes svTrianglesListShadowCasters from Validities,
       and clears FTrianglesListShadowCasters variable. }
     procedure InvalidateTrianglesListShadowCasters;
+
+    { Call when only the coordinates changed (not the topology):
+      TrianglesListShadowCasters will update the triangles positions
+      from the coordinates (keeping the same triangles, in the same order,
+      so ManifoldEdges and BorderEdges stay valid),
+      or create them again when that's not possible. }
+    procedure InvalidateTrianglesPositions;
 
     { Returns an array of triangles that should be shadow casters
       for this scene.
@@ -185,7 +206,7 @@ implementation
 
 uses SysUtils,
   CastleShapes, X3DNodes, CastleLog, CastleTransform,
-  CastleRenderOptions;
+  CastleRenderOptions, X3DFields;
 
 { TEdge ---------------------------------------------------------------------- }
 
@@ -199,19 +220,19 @@ end;
 type
   TTriangleAdder = class
     TriangleList: TTriangle3List;
-    procedure AddTriangle(Shape: TObject;
-      const Triangle: TTriangle3;
-      const Normal: TTriangle3; const TexCoord: TTriangle4;
-      const Face: TFaceIndex);
+    Indexes: TInt32List;
+    procedure AddTriangle(const Triangle: TTriangle3;
+      const Index1, Index2, Index3: Integer);
   end;
 
-procedure TTriangleAdder.AddTriangle(Shape: TObject;
-  const Triangle: TTriangle3;
-  const Normal: TTriangle3; const TexCoord: TTriangle4;
-  const Face: TFaceIndex);
+procedure TTriangleAdder.AddTriangle(const Triangle: TTriangle3;
+  const Index1, Index2, Index3: Integer);
 begin
   if Triangle.IsValid then
+  begin
     TriangleList.Add(Triangle);
+    Indexes.AddRange([Index1, Index2, Index3]);
+  end;
 end;
 
 { TShapeShadowVolumes -------------------------------------------------------- }
@@ -220,11 +241,12 @@ constructor TShapeShadowVolumes.Create(const AShape: TObject);
 begin
   inherited Create;
   FShape := AShape;
+  FPreviousTrianglesCount := -1;
 end;
 
 destructor TShapeShadowVolumes.Destroy;
 begin
-  { free FTrianglesList* variables }
+  { free FTrianglesList* variables, FTriangleCoordIndexes }
   InvalidateTrianglesListShadowCasters;
   { frees FManifoldEdges, FBorderEdges if needed }
   InvalidateManifoldAndBorderEdges;
@@ -233,6 +255,7 @@ end;
 
 function TShapeShadowVolumes.TrianglesListShadowCasters: TTrianglesShadowCastersList;
 
+  { Creates the triangles, and sets FTriangleCoordIndexes. }
   function CreateTrianglesListShadowCasters: TTrianglesShadowCastersList;
 
     function ShadowCaster(AShape: TShape): boolean;
@@ -247,43 +270,123 @@ function TShapeShadowVolumes.TrianglesListShadowCasters: TTrianglesShadowCasters
         (not TAppearanceNode(Shape.FdAppearance.Value).FdShadowCaster.Value));
     end;
 
+    { Are the vertexes given by FTriangleCoordIndexes equal to the
+      coordinates at these indexes? Then the triangles can be updated
+      from the coordinates later. }
+    function IndexesMatchCoordinates(const Shape: TShape;
+      const Triangles: TTrianglesShadowCastersList): Boolean;
+    var
+      Coord: TMFVec3f;
+      I, J, Index: Integer;
+    begin
+      Result := Shape.Geometry.InternalCoord(Shape.State, Coord) and (Coord <> nil);
+      if not Result then
+        Exit;
+      for I := 0 to Triangles.Count - 1 do
+        for J := 0 to 2 do
+        begin
+          Index := FTriangleCoordIndexes.L[I * 3 + J];
+          if (Index >= Coord.Count) or
+             not TVector3.PerfectlyEquals(Coord.Items.L[Index], Triangles.L[I].Data[J]) then
+            Exit(false);
+        end;
+    end;
+
   var
     TriangleAdder: TTriangleAdder;
     Shape: TShape;
   begin
     Shape := TShape(FShape);
 
+    FreeAndNil(FTriangleCoordIndexes);
+    FTriangleCoordIndexes := TInt32List.Create;
     Result := TTrianglesShadowCastersList.Create;
     try
       Result.Capacity := Shape.TrianglesCount;
       TriangleAdder := TTriangleAdder.Create;
       try
         TriangleAdder.TriangleList := Result;
+        TriangleAdder.Indexes := FTriangleCoordIndexes;
         if ShadowCaster(Shape) then
-          Shape.LocalTriangulate({$ifdef FPC}@{$endif}TriangleAdder.AddTriangle,
-            { FrontFaceAlwaysCcw should not matter } false);
+          Shape.InternalLocalTriangulateIndexes({$ifdef FPC}@{$endif}TriangleAdder.AddTriangle);
         if LogShadowVolumes then
           WritelnLog('Shadow volumes', Format('Shadows casters triangles: %d',
             [Result.Count]));
       finally FreeAndNil(TriangleAdder) end;
     except Result.Free; raise end;
+
+    if not IndexesMatchCoordinates(Shape, Result) then
+      FreeAndNil(FTriangleCoordIndexes);
   end;
 
 begin
+  if (svTrianglesListShadowCasters in Validities) and
+     not (svTrianglesPositions in Validities) then
+  begin
+    { Only the coordinates changed: move the same triangles. }
+    if UpdateTrianglesPositions then
+      Include(Validities, svTrianglesPositions)
+    else
+      InvalidateTrianglesListShadowCasters;
+  end;
+
   if not (svTrianglesListShadowCasters in Validities) then
   begin
     FreeAndNil(FTrianglesListShadowCasters);
     FTrianglesListShadowCasters := CreateTrianglesListShadowCasters;
-    Include(Validities, svTrianglesListShadowCasters);
+    Validities := Validities + [svTrianglesListShadowCasters, svTrianglesPositions];
+    { The edges refer to the triangles by their indexes: when there are
+      other triangles now (e.g. a degenerate triangle left out after
+      only the coordinates changed), calculate the edges again. }
+    if (FPreviousTrianglesCount <> -1) and
+       (FPreviousTrianglesCount <> FTrianglesListShadowCasters.Count) then
+      InvalidateManifoldAndBorderEdges;
+    FPreviousTrianglesCount := -1;
   end;
 
   Result := FTrianglesListShadowCasters;
 end;
 
+function TShapeShadowVolumes.UpdateTrianglesPositions: Boolean;
+var
+  Shape: TShape;
+  Coord: TMFVec3f;
+  I, J, Index, PointsCount: Integer;
+begin
+  Result := false;
+  if FTriangleCoordIndexes = nil then
+    Exit;
+  Shape := TShape(FShape);
+  if not (Shape.Geometry.InternalCoord(Shape.State, Coord) and (Coord <> nil)) then
+    Exit;
+  Assert(FTriangleCoordIndexes.Count = FTrianglesListShadowCasters.Count * 3);
+  PointsCount := Coord.Count;
+  for I := 0 to FTrianglesListShadowCasters.Count - 1 do
+    for J := 0 to 2 do
+    begin
+      Index := FTriangleCoordIndexes.L[I * 3 + J];
+      if Index >= PointsCount then
+        Exit;
+      FTrianglesListShadowCasters.L[I].Data[J] := Coord.Items.L[Index];
+    end;
+  Result := true;
+end;
+
 procedure TShapeShadowVolumes.InvalidateTrianglesListShadowCasters;
 begin
-  Exclude(Validities, svTrianglesListShadowCasters);
+  if FTrianglesListShadowCasters <> nil then
+    FPreviousTrianglesCount := FTrianglesListShadowCasters.Count;
+  Validities := Validities - [svTrianglesListShadowCasters, svTrianglesPositions];
   FreeAndNil(FTrianglesListShadowCasters);
+  FreeAndNil(FTriangleCoordIndexes);
+end;
+
+procedure TShapeShadowVolumes.InvalidateTrianglesPositions;
+begin
+  if FTriangleCoordIndexes <> nil then
+    Exclude(Validities, svTrianglesPositions)
+  else
+    InvalidateTrianglesListShadowCasters;
 end;
 
 { Finding edge counterparts ---------------------------------------------------- }
@@ -459,6 +562,9 @@ procedure TShapeShadowVolumes.CalculateIfNeededManifoldAndBorderEdges;
   end;
 
 begin
+  { Update the triangles first: if they have to be created again
+    (not only moved), this may invalidate the edges. }
+  TrianglesListShadowCasters;
   if not (svManifoldAndBorderEdges in Validities) then
   begin
     CalculateManifoldAndBorderEdges;

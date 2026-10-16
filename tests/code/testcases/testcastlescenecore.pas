@@ -47,6 +47,9 @@ type
     { Manifold and border edges of meshes with known edges:
       open meshes, an edge with 3 neighbors, inconsistent ordering, -0. }
     procedure TestManifoldAndBorderEdgesPairs;
+    { Shadow volumes of a mesh whose coordinates change (like animation):
+      triangles moved, edges kept. }
+    procedure TestShadowVolumesCoordinatesChange;
     procedure TestMultipleScenesOneNodeIncorrect;
     procedure TestMultipleScenesOneNodeCorrect;
     procedure TestSpineUtf8Names;
@@ -1621,6 +1624,169 @@ begin
     AssertTrue((ShapesList[0].State.MainTexture as TImageTextureNode).FdUrl.Count = 1);
     AssertTrue((ShapesList[0].State.MainTexture as TImageTextureNode).FdUrl.Items[0] = 'test_texture_from_material.png');
   finally FreeAndNil(Scene) end;
+end;
+
+
+procedure TTestSceneCore.TestShadowVolumesCoordinatesChange;
+type
+  TPoints = array of TVector3;
+const
+  { a tetrahedron, its faces ordered consistently }
+  TetraIndexes: array [0..11] of Int32 = (0, 1, 2,  0, 3, 1,  0, 2, 3,  1, 3, 2);
+var
+  Coord: TCoordinateNode;
+
+  function TetraPoints(const Scale: Single): TPoints;
+  begin
+    SetLength(Result, 4);
+    Result[0] := Vector3(0, 0, 0) * Scale;
+    Result[1] := Vector3(1, 0, 0) * Scale;
+    Result[2] := Vector3(0, 1, 0) * Scale;
+    Result[3] := Vector3(0, 0, 1) * Scale;
+  end;
+
+  { Scene with a closed mesh (IndexedTriangleSet, or IndexedFaceSet
+    with a crease angle, whose geometry arrays are not indexed like
+    the coordinates), Coord is set to its coordinates. }
+  function MeshScene(const Points: array of TVector3; const FaceSet: Boolean): TCastleSceneCore;
+  var
+    TriangleSet: TIndexedTriangleSetNode;
+    FaceSetNode: TIndexedFaceSetNode;
+    Shape: TShapeNode;
+    Root: TX3DRootNode;
+    I: Integer;
+  begin
+    Coord := TCoordinateNode.Create;
+    Coord.SetPoint(Points);
+    Shape := TShapeNode.Create;
+    if FaceSet then
+    begin
+      FaceSetNode := TIndexedFaceSetNode.Create;
+      FaceSetNode.Coord := Coord;
+      FaceSetNode.CreaseAngle := 0.5;
+      for I := 0 to High(TetraIndexes) do
+      begin
+        FaceSetNode.FdCoordIndex.Items.Add(TetraIndexes[I]);
+        if I mod 3 = 2 then
+          FaceSetNode.FdCoordIndex.Items.Add(-1);
+      end;
+      FaceSetNode.Solid := true;
+      Shape.Geometry := FaceSetNode;
+    end else
+    begin
+      TriangleSet := TIndexedTriangleSetNode.Create;
+      TriangleSet.Coord := Coord;
+      TriangleSet.SetIndex(TetraIndexes);
+      TriangleSet.Solid := true;
+      Shape.Geometry := TriangleSet;
+    end;
+    Root := TX3DRootNode.Create;
+    Root.AddChildren(Shape);
+    Result := TCastleSceneCore.Create(nil);
+    Result.Load(Root, true);
+  end;
+
+  function OnlyShape(const Scene: TCastleSceneCore): TShape;
+  begin
+    AssertEquals(1, Scene.Shapes.TraverseList(false).Count);
+    Result := Scene.Shapes.TraverseList(false)[0];
+  end;
+
+  procedure SetCoordinates(const Points: array of TVector3);
+  var
+    I: Integer;
+  begin
+    for I := 0 to High(Points) do
+      Coord.FdPoint.Items.L[I] := Points[I];
+    Coord.FdPoint.Changed;
+  end;
+
+  { Shadow casters triangles must be the same as when triangulating
+    a new scene with these points. }
+  procedure AssertTrianglesLikeNew(const Shape: TShape;
+    const Points: array of TVector3; const FaceSet: Boolean);
+  var
+    NewScene: TCastleSceneCore;
+    Expected, Actual: TTriangle3List;
+    I, J: Integer;
+    SavedCoord: TCoordinateNode;
+  begin
+    SavedCoord := Coord;
+    NewScene := MeshScene(Points, FaceSet);
+    try
+      Expected := OnlyShape(NewScene).InternalShadowVolumes.TrianglesListShadowCasters;
+      Actual := Shape.InternalShadowVolumes.TrianglesListShadowCasters;
+      AssertEquals(Expected.Count, Actual.Count);
+      for I := 0 to Expected.Count - 1 do
+        for J := 0 to 2 do
+          AssertTrue(Format('triangle %d vertex %d: %s, expected %s', [I, J, Actual.L[I].Data[J].ToString, Expected.L[I].Data[J].ToString]), TVector3.PerfectlyEquals(Expected.L[I].Data[J], Actual.L[I].Data[J]));
+    finally FreeAndNil(NewScene) end;
+    Coord := SavedCoord;
+  end;
+
+  { Each edge's triangle indexes are valid, and the edge's vertexes
+    are (now) the triangle's vertexes at VertexIndex. }
+  procedure AssertEdgesValid(const Shape: TShape; const What: String);
+  var
+    SV: TShapeShadowVolumes;
+    I: Integer;
+  begin
+    SV := Shape.InternalShadowVolumes;
+    for I := 0 to SV.ManifoldEdges.Count - 1 do
+    begin
+      AssertTrue(Format('%s: edge %d triangles %d %d of %d', [What, I,
+        SV.ManifoldEdges.L[I].Triangles[0], SV.ManifoldEdges.L[I].Triangles[1],
+        SV.TrianglesListShadowCasters.Count]),
+        (SV.ManifoldEdges.L[I].Triangles[0] < Cardinal(SV.TrianglesListShadowCasters.Count)) and
+        (SV.ManifoldEdges.L[I].Triangles[1] < Cardinal(SV.TrianglesListShadowCasters.Count)));
+    end;
+  end;
+
+var
+  Scene: TCastleSceneCore;
+  Shape: TShape;
+  Triangles: TTriangle3List;
+  Edges: TEdgeList;
+  Points: TPoints;
+  FaceSet: Boolean;
+  I: Integer;
+begin
+  for I := 0 to 1 do
+  begin
+    FaceSet := I = 1;
+    Scene := MeshScene(TetraPoints(1), FaceSet);
+    try
+      Shape := OnlyShape(Scene);
+      Triangles := Shape.InternalShadowVolumes.TrianglesListShadowCasters;
+      AssertEquals(4, Triangles.Count);
+      Edges := Shape.InternalShadowVolumes.ManifoldEdges;
+      AssertEquals(6, Edges.Count);
+      AssertEquals(0, Shape.InternalShadowVolumes.BorderEdges.Count);
+
+      { move the vertexes }
+      Points := TetraPoints(2);
+      Points[3] := Vector3(0.5, 0.3, 3);
+      SetCoordinates(Points);
+      AssertTrianglesLikeNew(Shape, Points, FaceSet);
+      { the edges are kept: the topology didn't change }
+      AssertTrue('edges kept', Edges = Shape.InternalShadowVolumes.ManifoldEdges);
+      AssertEquals(6, Shape.InternalShadowVolumes.ManifoldEdges.Count);
+      AssertEdgesValid(Shape, 'moved');
+      if not FaceSet then
+        { the IndexedTriangleSet's triangles were moved, not created again }
+        AssertTrue('triangles moved', Triangles = Shape.InternalShadowVolumes.TrianglesListShadowCasters);
+
+      { a degenerate triangle (vertex 3 on the 0-1 edge): the moved
+        triangles stay the same (the edges refer to them by index);
+        triangles created again leave it out, and the edges are
+        calculated again }
+      Points[3] := Vector3(1, 0, 0);
+      SetCoordinates(Points);
+      if not FaceSet then
+        AssertEquals(4, Shape.InternalShadowVolumes.TrianglesListShadowCasters.Count);
+      AssertEdgesValid(Shape, 'degenerate');
+    finally FreeAndNil(Scene) end;
+  end;
 end;
 
 initialization
