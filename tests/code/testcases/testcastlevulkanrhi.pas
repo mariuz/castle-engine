@@ -24,7 +24,7 @@ uses
   CastleApplicationProperties, CastleImages, CastleGLImages, CastleFonts,
   CastleTextureFont_Default3d_Sans,
   CastleInternalRHI, CastleInternalVulkan, CastleInternalVulkanMemory,
-  CastleInternalVulkanWSI, CastleInternalShaderCompiler,
+  CastleInternalVulkanWSI, CastleInternalShaderCompiler, CastleInternalRHI_Vulkan,
   CastleInternalShaderRHI, CastleInternalBatch2DRHI, CastleInternalRenderer,
   CastleRendererInternalLights, X3DNodes,
   CastleTransform, CastleRenderOptions, ToolManifest, CastleInternalRenderDoc;
@@ -62,6 +62,7 @@ type
     procedure TestShaderPrewarming;
     procedure TestVisualRegressionImageComparison;
     procedure TestNintendoSwitchViSurfaceAndManifestPrewarm;
+    procedure TestPipelineCacheDiskPersistence;
   end;
 
 implementation
@@ -128,39 +129,59 @@ end;
 
 procedure TTestCastleVulkanRHI.TestVulkanPipelineKeyHashing;
 var
-  Desc1, Desc2, Desc3: TRHIGraphicsPipelineDesc;
-  Hash1, Hash2, Hash3: UInt64;
-
-  function SimplePipelineHash(const Desc: TRHIGraphicsPipelineDesc): UInt64;
-  begin
-    Result := PtrUInt(Desc.VertexShader) xor (PtrUInt(Desc.FragmentShader) shl 13) xor
-      (UInt64(Ord(Desc.BlendState.BlendEnable)) shl 32) xor
-      (UInt64(Ord(Desc.DepthStencil.DepthTestEnable)) shl 33) xor
-      (UInt64(Ord(Desc.Rasterizer.CullMode)) shl 35);
-  end;
-
+  Desc1, Desc2, Desc3, Desc4: TRHIGraphicsPipelineDesc;
+  Hash1, Hash2, Hash3, Hash4: UInt64;
 begin
   FillChar(Desc1, SizeOf(Desc1), 0);
-  Desc1.BlendState.BlendEnable := True;
-  Desc1.DepthStencil.DepthTestEnable := True;
-  Desc1.Rasterizer.CullMode := cmBack;
+  Desc1.BlendState := TRHIBlendStateDesc.DefaultAlphaBlend;
+  Desc1.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+  Desc1.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+  Desc1.DepthAttachmentFormat := pfD32_Float;
+  SetLength(Desc1.ColorAttachmentFormats, 1);
+  Desc1.ColorAttachmentFormats[0] := pfBGRA8_UNorm;
+  SetLength(Desc1.VertexInput.Attributes, 1);
+  Desc1.VertexInput.Attributes[0].Location := 0;
+  Desc1.VertexInput.Attributes[0].Binding := 0;
+  Desc1.VertexInput.Attributes[0].Format := vafVector3;
+  Desc1.VertexInput.Attributes[0].Offset := 0;
 
   FillChar(Desc2, SizeOf(Desc2), 0);
-  Desc2.BlendState.BlendEnable := True;
-  Desc2.DepthStencil.DepthTestEnable := True;
-  Desc2.Rasterizer.CullMode := cmBack;
+  Desc2.BlendState := TRHIBlendStateDesc.DefaultAlphaBlend;
+  Desc2.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+  Desc2.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+  Desc2.DepthAttachmentFormat := pfD32_Float;
+  SetLength(Desc2.ColorAttachmentFormats, 1);
+  Desc2.ColorAttachmentFormats[0] := pfBGRA8_UNorm;
+  SetLength(Desc2.VertexInput.Attributes, 1);
+  Desc2.VertexInput.Attributes[0].Location := 0;
+  Desc2.VertexInput.Attributes[0].Binding := 0;
+  Desc2.VertexInput.Attributes[0].Format := vafVector3;
+  Desc2.VertexInput.Attributes[0].Offset := 0;
 
   FillChar(Desc3, SizeOf(Desc3), 0);
-  Desc3.BlendState.BlendEnable := False; // Different blend state
-  Desc3.DepthStencil.DepthTestEnable := True;
-  Desc3.Rasterizer.CullMode := cmBack;
+  Desc3.BlendState := TRHIBlendStateDesc.DefaultOpaque; // Different blend state
+  Desc3.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+  Desc3.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+  Desc3.DepthAttachmentFormat := pfD32_Float;
+  SetLength(Desc3.ColorAttachmentFormats, 1);
+  Desc3.ColorAttachmentFormats[0] := pfBGRA8_UNorm;
 
-  Hash1 := SimplePipelineHash(Desc1);
-  Hash2 := SimplePipelineHash(Desc2);
-  Hash3 := SimplePipelineHash(Desc3);
+  FillChar(Desc4, SizeOf(Desc4), 0);
+  Desc4.BlendState := TRHIBlendStateDesc.DefaultAlphaBlend;
+  Desc4.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+  Desc4.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+  Desc4.DepthAttachmentFormat := pfD32_Float;
+  SetLength(Desc4.ColorAttachmentFormats, 1);
+  Desc4.ColorAttachmentFormats[0] := pfRGBA16_Float; // Different color attachment format
 
-  AssertTrue('Identical pipeline configurations must produce identical hashes', Hash1 = Hash2);
-  AssertTrue('Divergent pipeline states must produce different hashes', Hash1 <> Hash3);
+  Hash1 := ComputePipelineKeyHash(Desc1);
+  Hash2 := ComputePipelineKeyHash(Desc2);
+  Hash3 := ComputePipelineKeyHash(Desc3);
+  Hash4 := ComputePipelineKeyHash(Desc4);
+
+  AssertTrue('Identical pipeline configurations must produce identical FNV-1a hashes', Hash1 = Hash2);
+  AssertTrue('Divergent blend states must produce different hashes', Hash1 <> Hash3);
+  AssertTrue('Divergent attachment formats must produce different hashes', Hash1 <> Hash4);
 end;
 
 procedure TTestCastleVulkanRHI.TestVulkanMemorySubAllocator;
@@ -1107,6 +1128,50 @@ begin
     AssertTrue('ShouldPrewarmVulkanShaders is True for backendVulkan', Manifest.ShouldPrewarmVulkanShaders);
   finally
     FreeAndNil(Manifest);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestPipelineCacheDiskPersistence;
+var
+  Stream: TMemoryStream;
+  InputData, OutputBlob: TBytes;
+  I: Integer;
+begin
+  SetLength(InputData, 64);
+  for I := 0 to High(InputData) do
+    InputData[I] := Byte((I * 37 + 13) and $FF);
+
+  Stream := TMemoryStream.Create;
+  try
+    { 1. Save hardware-tagged pipeline cache blob }
+    SavePipelineCacheBlobToStream(Stream, $10DE, $2684, @InputData[0], Length(InputData));
+    AssertEquals('Stream size equals header + payload',
+      SizeOf(TPipelineCacheDiskHeader) + Length(InputData), Stream.Size);
+
+    { 2. Load with matching vendorId ($10DE) and deviceId ($2684) }
+    Stream.Position := 0;
+    AssertTrue('Valid pipeline cache blob loads for matching GPU',
+      LoadPipelineCacheBlobFromStream(Stream, $10DE, $2684, OutputBlob));
+    AssertEquals('Loaded blob length matches', Length(InputData), Length(OutputBlob));
+    for I := 0 to High(InputData) do
+      AssertEquals('Loaded payload byte matches', InputData[I], OutputBlob[I]);
+
+    { 3. Reject when GPU vendorId or deviceId differs }
+    Stream.Position := 0;
+    AssertFalse('Pipeline cache blob rejected for mismatched VendorId',
+      LoadPipelineCacheBlobFromStream(Stream, $1002, $2684, OutputBlob));
+    Stream.Position := 0;
+    AssertFalse('Pipeline cache blob rejected for mismatched DeviceId',
+      LoadPipelineCacheBlobFromStream(Stream, $10DE, $9999, OutputBlob));
+
+    { 4. Reject when payload byte is corrupted (FNV-1a checksum mismatch) }
+    PByte(Stream.Memory)[SizeOf(TPipelineCacheDiskHeader) + 5] :=
+      PByte(Stream.Memory)[SizeOf(TPipelineCacheDiskHeader) + 5] xor $FF;
+    Stream.Position := 0;
+    AssertFalse('Corrupted pipeline cache blob rejected by FNV-1a checksum',
+      LoadPipelineCacheBlobFromStream(Stream, $10DE, $2684, OutputBlob));
+  finally
+    FreeAndNil(Stream);
   end;
 end;
 

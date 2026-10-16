@@ -225,6 +225,7 @@ type
     FSurface: VkSurfaceKHR;
     FPhysicalDevice: VkPhysicalDevice;
     FDevice: VkDevice;
+    FDeviceId: Cardinal;
     FGraphicsQueue: VkQueue;
     FPresentQueue: VkQueue;
     FGraphicsQueueFamily: Cardinal;
@@ -306,7 +307,149 @@ type
     property PipelineCache: VkPipelineCache read FPipelineCache;
   end;
 
+{ Computes a deterministic 64-bit FNV-1a hash for a graphics pipeline state descriptor. }
+function ComputePipelineKeyHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
+
+const
+  PipelineCacheDiskMagic = $43474550; // 'CGEP'
+  PipelineCacheDiskVersion = 1;
+
+type
+  { Header stored on disk before raw VkPipelineCache data to validate hardware compatibility. }
+  TPipelineCacheDiskHeader = packed record
+    Magic: Cardinal;
+    Version: Cardinal;
+    VendorId: Cardinal;
+    DeviceId: Cardinal;
+    DataSize: Cardinal;
+    DataHash: UInt64;
+  end;
+
+{ Writes a hardware-tagged VkPipelineCache binary blob to a stream. }
+procedure SavePipelineCacheBlobToStream(const AStream: TStream;
+  const AVendorId, ADeviceId: Cardinal; const AData: Pointer; const ASize: PtrUInt);
+
+{ Reads and validates a hardware-tagged VkPipelineCache binary blob from a stream.
+  Returns False if the stream is corrupt, empty, or belongs to a different GPU vendor/device. }
+function LoadPipelineCacheBlobFromStream(const AStream: TStream;
+  const AExpectedVendorId, AExpectedDeviceId: Cardinal; out ABlob: TBytes): Boolean;
+
 implementation
+
+uses
+  CastleDownload, CastleInternalShaderCompiler, CastleInternalVulkanWSI;
+
+const
+  FNV1aOffsetBasis64 = UInt64($CBF29CE484222325);
+  FNV1aPrime64 = UInt64($00000100000001B3);
+
+{$push}{$Q-}{$R-}
+procedure HashBytesFNV1a(var AHash: UInt64; const AData; const ASize: PtrUInt);
+var
+  P: PByte;
+  I: PtrUInt;
+begin
+  if ASize = 0 then Exit;
+  P := @AData;
+  for I := 0 to ASize - 1 do
+  begin
+    AHash := (AHash xor UInt64(P[I])) * FNV1aPrime64;
+  end;
+end;
+
+procedure HashUInt64FNV1a(var AHash: UInt64; const AValue: UInt64);
+begin
+  HashBytesFNV1a(AHash, AValue, SizeOf(AValue));
+end;
+{$pop}
+
+function ComputePipelineKeyHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
+var
+  I: Integer;
+begin
+  Result := FNV1aOffsetBasis64;
+  HashUInt64FNV1a(Result, PtrUInt(ADesc.VertexShader));
+  HashUInt64FNV1a(Result, PtrUInt(ADesc.FragmentShader));
+  HashUInt64FNV1a(Result, PtrUInt(ADesc.GeometryShader));
+  HashBytesFNV1a(Result, ADesc.Topology, SizeOf(ADesc.Topology));
+  HashBytesFNV1a(Result, ADesc.Rasterizer, SizeOf(ADesc.Rasterizer));
+  HashBytesFNV1a(Result, ADesc.DepthStencil, SizeOf(ADesc.DepthStencil));
+  HashBytesFNV1a(Result, ADesc.BlendState, SizeOf(ADesc.BlendState));
+  HashBytesFNV1a(Result, ADesc.PushConstantSize, SizeOf(ADesc.PushConstantSize));
+  HashBytesFNV1a(Result, ADesc.PushConstantStages, SizeOf(ADesc.PushConstantStages));
+  HashBytesFNV1a(Result, ADesc.DepthAttachmentFormat, SizeOf(ADesc.DepthAttachmentFormat));
+  HashBytesFNV1a(Result, ADesc.SampleCount, SizeOf(ADesc.SampleCount));
+
+  for I := 0 to High(ADesc.VertexInput.Bindings) do
+    HashBytesFNV1a(Result, ADesc.VertexInput.Bindings[I], SizeOf(TRHIVertexBindingDesc));
+
+  for I := 0 to High(ADesc.VertexInput.Attributes) do
+  begin
+    HashBytesFNV1a(Result, ADesc.VertexInput.Attributes[I].Location, SizeOf(Cardinal));
+    HashBytesFNV1a(Result, ADesc.VertexInput.Attributes[I].Binding, SizeOf(Cardinal));
+    HashBytesFNV1a(Result, ADesc.VertexInput.Attributes[I].Format, SizeOf(TRHIVertexAttributeFormat));
+    HashBytesFNV1a(Result, ADesc.VertexInput.Attributes[I].Offset, SizeOf(Cardinal));
+  end;
+
+  for I := 0 to High(ADesc.ColorAttachmentFormats) do
+    HashBytesFNV1a(Result, ADesc.ColorAttachmentFormats[I], SizeOf(TRHIPixelFormat));
+end;
+
+procedure SavePipelineCacheBlobToStream(const AStream: TStream;
+  const AVendorId, ADeviceId: Cardinal; const AData: Pointer; const ASize: PtrUInt);
+var
+  Header: TPipelineCacheDiskHeader;
+  HashVal: UInt64;
+begin
+  if (AStream = nil) or (AData = nil) or (ASize = 0) then Exit;
+
+  HashVal := FNV1aOffsetBasis64;
+  HashBytesFNV1a(HashVal, AData^, ASize);
+
+  FillChar(Header, SizeOf(Header), 0);
+  Header.Magic := PipelineCacheDiskMagic;
+  Header.Version := PipelineCacheDiskVersion;
+  Header.VendorId := AVendorId;
+  Header.DeviceId := ADeviceId;
+  Header.DataSize := Cardinal(ASize);
+  Header.DataHash := HashVal;
+
+  AStream.WriteBuffer(Header, SizeOf(Header));
+  AStream.WriteBuffer(AData^, ASize);
+end;
+
+function LoadPipelineCacheBlobFromStream(const AStream: TStream;
+  const AExpectedVendorId, AExpectedDeviceId: Cardinal; out ABlob: TBytes): Boolean;
+var
+  Header: TPipelineCacheDiskHeader;
+  ComputedHash: UInt64;
+begin
+  SetLength(ABlob, 0);
+  if (AStream = nil) or (AStream.Size - AStream.Position < SizeOf(Header)) then
+    Exit(False);
+
+  AStream.ReadBuffer(Header, SizeOf(Header));
+  if (Header.Magic <> PipelineCacheDiskMagic) or
+     (Header.Version <> PipelineCacheDiskVersion) or
+     (Header.DataSize = 0) or
+     ((AExpectedVendorId <> 0) and (Header.VendorId <> AExpectedVendorId)) or
+     ((AExpectedDeviceId <> 0) and (Header.DeviceId <> AExpectedDeviceId)) or
+     (AStream.Size - AStream.Position < Header.DataSize) then
+    Exit(False);
+
+  SetLength(ABlob, Header.DataSize);
+  AStream.ReadBuffer(ABlob[0], Header.DataSize);
+
+  ComputedHash := FNV1aOffsetBasis64;
+  HashBytesFNV1a(ComputedHash, ABlob[0], Header.DataSize);
+  if ComputedHash <> Header.DataHash then
+  begin
+    SetLength(ABlob, 0);
+    Exit(False);
+  end;
+
+  Result := True;
+end;
 
 { ---------------------------------------------------------------------------- }
 { Type Conversion Helpers (RHI <-> Vulkan)                                     }
@@ -347,6 +490,103 @@ begin
     pfETC2_RGB8_UNorm:    Result := VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK;
     pfETC2_RGBA8_UNorm:   Result := VK_FORMAT_ETC2_R8G8B8A8_UNORM_BLOCK;
     else                  Result := VK_FORMAT_UNDEFINED;
+  end;
+end;
+
+function RHIToVkVertexFormat(const Format: TRHIVertexAttributeFormat): VkFormat;
+begin
+  case Format of
+    vafFloat:            Result := VK_FORMAT_R32_SFLOAT;
+    vafVector2:          Result := VK_FORMAT_R32G32_SFLOAT;
+    vafVector3:          Result := VK_FORMAT_R32G32B32_SFLOAT;
+    vafVector4:          Result := VK_FORMAT_R32G32B32A32_SFLOAT;
+    vafByte4Normalized,
+    vafUByte4Normalized: Result := VK_FORMAT_R8G8B8A8_UNORM;
+    else                 Result := VK_FORMAT_R32G32B32A32_SFLOAT;
+  end;
+end;
+
+function RHIToVkTopology(const Topology: TRHIPrimitiveTopology): VkPrimitiveTopology;
+begin
+  case Topology of
+    ptPointList:     Result := VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+    ptLineList:      Result := VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    ptLineStrip:     Result := VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+    ptTriangleList:  Result := VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    ptTriangleStrip: Result := VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+    else             Result := VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  end;
+end;
+
+function RHIToVkPolygonMode(const Mode: TRHIPolygonMode): VkPolygonMode;
+begin
+  case Mode of
+    pmFill:  Result := VK_POLYGON_MODE_FILL;
+    pmLine:  Result := VK_POLYGON_MODE_LINE;
+    pmPoint: Result := VK_POLYGON_MODE_POINT;
+    else     Result := VK_POLYGON_MODE_FILL;
+  end;
+end;
+
+function RHIToVkCullMode(const Mode: TRHICullMode): VkCullModeFlags;
+begin
+  case Mode of
+    cmNone:  Result := VK_CULL_MODE_NONE;
+    cmFront: Result := VK_CULL_MODE_FRONT_BIT;
+    cmBack:  Result := VK_CULL_MODE_BACK_BIT;
+    else     Result := VK_CULL_MODE_NONE;
+  end;
+end;
+
+function RHIToVkFrontFace(const Face: TRHIFrontFace): VkFrontFace;
+begin
+  if Face = ffClockwise then
+    Result := VK_FRONT_FACE_CLOCKWISE
+  else
+    Result := VK_FRONT_FACE_COUNTER_CLOCKWISE;
+end;
+
+function RHIToVkCompareOp(const Op: TRHICompareOp): VkCompareOp;
+begin
+  case Op of
+    coNever:          Result := VK_COMPARE_OP_NEVER;
+    coLess:           Result := VK_COMPARE_OP_LESS;
+    coEqual:          Result := VK_COMPARE_OP_EQUAL;
+    coLessOrEqual:    Result := VK_COMPARE_OP_LESS_OR_EQUAL;
+    coGreater:        Result := VK_COMPARE_OP_GREATER;
+    coNotEqual:       Result := VK_COMPARE_OP_NOT_EQUAL;
+    coGreaterOrEqual: Result := VK_COMPARE_OP_GREATER_OR_EQUAL;
+    coAlways:         Result := VK_COMPARE_OP_ALWAYS;
+    else              Result := VK_COMPARE_OP_LESS_OR_EQUAL;
+  end;
+end;
+
+function RHIToVkBlendFactor(const Factor: TRHIBlendFactor): Integer;
+begin
+  case Factor of
+    bfZero:             Result := VK_BLEND_FACTOR_ZERO;
+    bfOne:              Result := VK_BLEND_FACTOR_ONE;
+    bfSrcColor:         Result := VK_BLEND_FACTOR_SRC_COLOR;
+    bfOneMinusSrcColor: Result := VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+    bfDstColor:         Result := VK_BLEND_FACTOR_DST_COLOR;
+    bfOneMinusDstColor: Result := VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
+    bfSrcAlpha:         Result := VK_BLEND_FACTOR_SRC_ALPHA;
+    bfOneMinusSrcAlpha: Result := VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    bfDstAlpha:         Result := VK_BLEND_FACTOR_DST_ALPHA;
+    bfOneMinusDstAlpha: Result := VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+    else                Result := VK_BLEND_FACTOR_ONE;
+  end;
+end;
+
+function RHIToVkBlendOp(const Op: TRHIBlendOp): Integer;
+begin
+  case Op of
+    boAdd:             Result := VK_BLEND_OP_ADD;
+    boSubtract:        Result := VK_BLEND_OP_SUBTRACT;
+    boReverseSubtract: Result := VK_BLEND_OP_REVERSE_SUBTRACT;
+    boMin:             Result := VK_BLEND_OP_MIN;
+    boMax:             Result := VK_BLEND_OP_MAX;
+    else               Result := VK_BLEND_OP_ADD;
   end;
 end;
 
@@ -956,13 +1196,217 @@ end;
 
 constructor TVulkanRHIPipeline.Create(const ADevice: TVulkanRHIDevice;
   const ADesc: TRHIGraphicsPipelineDesc);
+var
+  SetLayouts: array of VkDescriptorSetLayout;
+  PushRange: VkPushConstantRange;
+  LayoutInfo: VkPipelineLayoutCreateInfo;
+  Stages: array[0..2] of VkPipelineShaderStageCreateInfo;
+  StageCount: Cardinal;
+  VertexBindings: array of VkVertexInputBindingDescription;
+  VertexAttrs: array of VkVertexInputAttributeDescription;
+  VertexInputInfo: VkPipelineVertexInputStateCreateInfo;
+  InputAssembly: VkPipelineInputAssemblyStateCreateInfo;
+  ViewportState: VkPipelineViewportStateCreateInfo;
+  Rasterizer: VkPipelineRasterizationStateCreateInfo;
+  Multisampling: VkPipelineMultisampleStateCreateInfo;
+  DepthStencil: VkPipelineDepthStencilStateCreateInfo;
+  BlendAttachments: array of VkPipelineColorBlendAttachmentState;
+  ColorBlending: VkPipelineColorBlendStateCreateInfo;
+  DynamicStates: array[0..2] of VkDynamicState;
+  DynamicStateInfo: VkPipelineDynamicStateCreateInfo;
+  ColorFormats: array of VkFormat;
+  RenderingInfo: VkPipelineRenderingCreateInfoKHR;
+  PipelineInfo: VkGraphicsPipelineCreateInfo;
+  I: Integer;
 begin
   inherited Create(ADevice, ADesc);
-  { 1. Construct VkPipelineLayout from ADesc.DescriptorSetLayouts and PushConstants
-    2. Set up VkPipelineRenderingCreateInfoKHR with ADesc.ColorAttachmentFormats
-       and ADesc.DepthAttachmentFormat (Vulkan 1.3 Dynamic Rendering - no VkRenderPass!)
-    3. Configure dynamic states: VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR
-    4. Call vkCreateGraphicsPipelines(ADevice.Handle, ADevice.PipelineCache, 1, @PipelineInfo, nil, @FHandle) }
+  if (ADevice = nil) or (ADevice.Handle = nil) then Exit;
+
+  { 1. Construct VkPipelineLayout from ADesc.DescriptorSetLayouts and PushConstants }
+  SetLength(SetLayouts, Length(ADesc.DescriptorSetLayouts));
+  for I := 0 to High(ADesc.DescriptorSetLayouts) do
+    if ADesc.DescriptorSetLayouts[I] <> nil then
+      SetLayouts[I] := (ADesc.DescriptorSetLayouts[I] as TVulkanRHIDescriptorSetLayout).Handle
+    else
+      SetLayouts[I] := VK_NULL_HANDLE;
+
+  FillChar(LayoutInfo, SizeOf(LayoutInfo), 0);
+  LayoutInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  LayoutInfo.setLayoutCount := Length(SetLayouts);
+  if Length(SetLayouts) > 0 then
+    LayoutInfo.pSetLayouts := @SetLayouts[0];
+
+  if ADesc.PushConstantSize > 0 then
+  begin
+    FillChar(PushRange, SizeOf(PushRange), 0);
+    PushRange.stageFlags := RHIToVkShaderStageFlags(ADesc.PushConstantStages);
+    if PushRange.stageFlags = 0 then
+      PushRange.stageFlags := VK_SHADER_STAGE_ALL_GRAPHICS;
+    PushRange.offset := 0;
+    PushRange.size := ADesc.PushConstantSize;
+    LayoutInfo.pushConstantRangeCount := 1;
+    LayoutInfo.pPushConstantRanges := @PushRange;
+  end;
+
+  CheckVk(vkCreatePipelineLayout(ADevice.Handle, @LayoutInfo, nil, @FPipelineLayout), 'vkCreatePipelineLayout');
+
+  { 2. Shader Stages }
+  StageCount := 0;
+  FillChar(Stages, SizeOf(Stages), 0);
+  if ADesc.VertexShader <> nil then
+  begin
+    Stages[StageCount].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    Stages[StageCount].stage := VK_SHADER_STAGE_VERTEX_BIT;
+    Stages[StageCount].module := (ADesc.VertexShader as TVulkanRHIShaderModule).Handle;
+    Stages[StageCount].pName := 'main';
+    Inc(StageCount);
+  end;
+  if ADesc.FragmentShader <> nil then
+  begin
+    Stages[StageCount].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    Stages[StageCount].stage := VK_SHADER_STAGE_FRAGMENT_BIT;
+    Stages[StageCount].module := (ADesc.FragmentShader as TVulkanRHIShaderModule).Handle;
+    Stages[StageCount].pName := 'main';
+    Inc(StageCount);
+  end;
+  if ADesc.GeometryShader <> nil then
+  begin
+    Stages[StageCount].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    Stages[StageCount].stage := VK_SHADER_STAGE_GEOMETRY_BIT;
+    Stages[StageCount].module := (ADesc.GeometryShader as TVulkanRHIShaderModule).Handle;
+    Stages[StageCount].pName := 'main';
+    Inc(StageCount);
+  end;
+
+  { 3. Vertex Input Layout }
+  SetLength(VertexBindings, Length(ADesc.VertexInput.Bindings));
+  for I := 0 to High(ADesc.VertexInput.Bindings) do
+  begin
+    VertexBindings[I].binding := ADesc.VertexInput.Bindings[I].Binding;
+    VertexBindings[I].stride := ADesc.VertexInput.Bindings[I].Stride;
+    if ADesc.VertexInput.Bindings[I].PerInstance then
+      VertexBindings[I].inputRate := VK_VERTEX_INPUT_RATE_INSTANCE
+    else
+      VertexBindings[I].inputRate := VK_VERTEX_INPUT_RATE_VERTEX;
+  end;
+
+  SetLength(VertexAttrs, Length(ADesc.VertexInput.Attributes));
+  for I := 0 to High(ADesc.VertexInput.Attributes) do
+  begin
+    VertexAttrs[I].location := ADesc.VertexInput.Attributes[I].Location;
+    VertexAttrs[I].binding := ADesc.VertexInput.Attributes[I].Binding;
+    VertexAttrs[I].format := RHIToVkVertexFormat(ADesc.VertexInput.Attributes[I].Format);
+    VertexAttrs[I].offset := ADesc.VertexInput.Attributes[I].Offset;
+  end;
+
+  FillChar(VertexInputInfo, SizeOf(VertexInputInfo), 0);
+  VertexInputInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+  VertexInputInfo.vertexBindingDescriptionCount := Length(VertexBindings);
+  if Length(VertexBindings) > 0 then
+    VertexInputInfo.pVertexBindingDescriptions := @VertexBindings[0];
+  VertexInputInfo.vertexAttributeDescriptionCount := Length(VertexAttrs);
+  if Length(VertexAttrs) > 0 then
+    VertexInputInfo.pVertexAttributeDescriptions := @VertexAttrs[0];
+
+  { 4. Fixed-function states }
+  FillChar(InputAssembly, SizeOf(InputAssembly), 0);
+  InputAssembly.sType := VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+  InputAssembly.topology := RHIToVkTopology(ADesc.Topology);
+  InputAssembly.primitiveRestartEnable := VK_FALSE;
+
+  FillChar(ViewportState, SizeOf(ViewportState), 0);
+  ViewportState.sType := VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+  ViewportState.viewportCount := 1;
+  ViewportState.scissorCount := 1;
+
+  FillChar(Rasterizer, SizeOf(Rasterizer), 0);
+  Rasterizer.sType := VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+  Rasterizer.depthClampEnable := Ord(ADesc.Rasterizer.DepthClampEnable);
+  Rasterizer.rasterizerDiscardEnable := VK_FALSE;
+  Rasterizer.polygonMode := RHIToVkPolygonMode(ADesc.Rasterizer.PolygonMode);
+  Rasterizer.cullMode := RHIToVkCullMode(ADesc.Rasterizer.CullMode);
+  Rasterizer.frontFace := RHIToVkFrontFace(ADesc.Rasterizer.FrontFace);
+  Rasterizer.depthBiasEnable := Ord(ADesc.Rasterizer.DepthBiasEnable);
+  Rasterizer.lineWidth := 1.0;
+
+  FillChar(Multisampling, SizeOf(Multisampling), 0);
+  Multisampling.sType := VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+  if ADesc.SampleCount > 1 then
+    Multisampling.rasterizationSamples := ADesc.SampleCount
+  else
+    Multisampling.rasterizationSamples := VK_SAMPLE_COUNT_1_BIT;
+
+  FillChar(DepthStencil, SizeOf(DepthStencil), 0);
+  DepthStencil.sType := VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+  DepthStencil.depthTestEnable := Ord(ADesc.DepthStencil.DepthTestEnable);
+  DepthStencil.depthWriteEnable := Ord(ADesc.DepthStencil.DepthWriteEnable);
+  DepthStencil.depthCompareOp := RHIToVkCompareOp(ADesc.DepthStencil.DepthCompareOp);
+  DepthStencil.stencilTestEnable := Ord(ADesc.DepthStencil.StencilTestEnable);
+
+  SetLength(BlendAttachments, Max(1, Length(ADesc.ColorAttachmentFormats)));
+  for I := 0 to High(BlendAttachments) do
+  begin
+    FillChar(BlendAttachments[I], SizeOf(VkPipelineColorBlendAttachmentState), 0);
+    BlendAttachments[I].blendEnable := Ord(ADesc.BlendState.BlendEnable);
+    BlendAttachments[I].srcColorBlendFactor := RHIToVkBlendFactor(ADesc.BlendState.SrcColorBlendFactor);
+    BlendAttachments[I].dstColorBlendFactor := RHIToVkBlendFactor(ADesc.BlendState.DstColorBlendFactor);
+    BlendAttachments[I].colorBlendOp := RHIToVkBlendOp(ADesc.BlendState.ColorBlendOp);
+    BlendAttachments[I].srcAlphaBlendFactor := RHIToVkBlendFactor(ADesc.BlendState.SrcAlphaBlendFactor);
+    BlendAttachments[I].dstAlphaBlendFactor := RHIToVkBlendFactor(ADesc.BlendState.DstAlphaBlendFactor);
+    BlendAttachments[I].alphaBlendOp := RHIToVkBlendOp(ADesc.BlendState.AlphaBlendOp);
+    if ADesc.BlendState.ColorWriteMask <> 0 then
+      BlendAttachments[I].colorWriteMask := ADesc.BlendState.ColorWriteMask
+    else
+      BlendAttachments[I].colorWriteMask := $0F;
+  end;
+
+  FillChar(ColorBlending, SizeOf(ColorBlending), 0);
+  ColorBlending.sType := VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+  ColorBlending.attachmentCount := Length(BlendAttachments);
+  if Length(BlendAttachments) > 0 then
+    ColorBlending.pAttachments := @BlendAttachments[0];
+
+  DynamicStates[0] := VK_DYNAMIC_STATE_VIEWPORT;
+  DynamicStates[1] := VK_DYNAMIC_STATE_SCISSOR;
+  DynamicStates[2] := VK_DYNAMIC_STATE_DEPTH_BIAS;
+  FillChar(DynamicStateInfo, SizeOf(DynamicStateInfo), 0);
+  DynamicStateInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+  if ADesc.Rasterizer.DepthBiasEnable then
+    DynamicStateInfo.dynamicStateCount := 3
+  else
+    DynamicStateInfo.dynamicStateCount := 2;
+  DynamicStateInfo.pDynamicStates := @DynamicStates[0];
+
+  { 5. Set up VkPipelineRenderingCreateInfoKHR (Vulkan 1.3 Dynamic Rendering) }
+  SetLength(ColorFormats, Length(ADesc.ColorAttachmentFormats));
+  for I := 0 to High(ADesc.ColorAttachmentFormats) do
+    ColorFormats[I] := RHIToVkFormat(ADesc.ColorAttachmentFormats[I]);
+
+  FillChar(RenderingInfo, SizeOf(RenderingInfo), 0);
+  RenderingInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
+  RenderingInfo.colorAttachmentCount := Length(ColorFormats);
+  if Length(ColorFormats) > 0 then
+    RenderingInfo.pColorAttachmentFormats := @ColorFormats[0];
+  RenderingInfo.depthAttachmentFormat := RHIToVkFormat(ADesc.DepthAttachmentFormat);
+
+  { 6. Create Graphics Pipeline }
+  FillChar(PipelineInfo, SizeOf(PipelineInfo), 0);
+  PipelineInfo.sType := VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  PipelineInfo.pNext := @RenderingInfo;
+  PipelineInfo.stageCount := StageCount;
+  if StageCount > 0 then
+    PipelineInfo.pStages := @Stages[0];
+  PipelineInfo.pVertexInputState := @VertexInputInfo;
+  PipelineInfo.pInputAssemblyState := @InputAssembly;
+  PipelineInfo.pViewportState := @ViewportState;
+  PipelineInfo.pRasterizationState := @Rasterizer;
+  PipelineInfo.pMultisampleState := @Multisampling;
+  PipelineInfo.pDepthStencilState := @DepthStencil;
+  PipelineInfo.pColorBlendState := @ColorBlending;
+  PipelineInfo.pDynamicState := @DynamicStateInfo;
+  PipelineInfo.layout := FPipelineLayout;
+
+  CheckVk(vkCreateGraphicsPipelines(ADevice.Handle, ADevice.PipelineCache, 1, @PipelineInfo, nil, @FHandle), 'vkCreateGraphicsPipelines');
 end;
 
 destructor TVulkanRHIPipeline.Destroy;
@@ -1066,8 +1510,91 @@ begin
 end;
 
 procedure TVulkanRHICommandList.GenerateMipmaps(const Texture: TRHITexture);
+var
+  VkTex: TVulkanRHITexture;
+  Barrier: VkImageMemoryBarrier;
+  Blit: VkImageBlit;
+  MipWidth, MipHeight, NextWidth, NextHeight: Integer;
+  I: Cardinal;
 begin
-  { Blit chain across mip levels 0 .. MipLevels - 1 via vkCmdBlitImage }
+  if (Texture = nil) or (Texture.Desc.MipLevels <= 1) or not Assigned(vkCmdBlitImage) then
+    Exit;
+
+  VkTex := Texture as TVulkanRHITexture;
+  MipWidth := Integer(VkTex.Desc.Width);
+  MipHeight := Integer(VkTex.Desc.Height);
+
+  FillChar(Barrier, SizeOf(Barrier), 0);
+  Barrier.sType := VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  Barrier.image := VkTex.Image;
+  Barrier.srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+  Barrier.dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+  Barrier.subresourceRange.aspectMask := VkTex.AspectMask;
+  Barrier.subresourceRange.baseArrayLayer := 0;
+  Barrier.subresourceRange.layerCount := VkTex.Desc.DepthOrArrayLayers;
+  Barrier.subresourceRange.levelCount := 1;
+
+  for I := 1 to VkTex.Desc.MipLevels - 1 do
+  begin
+    Barrier.subresourceRange.baseMipLevel := I - 1;
+    Barrier.oldLayout := VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    Barrier.newLayout := VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    Barrier.srcAccessMask := VK_ACCESS_TRANSFER_WRITE_BIT;
+    Barrier.dstAccessMask := VK_ACCESS_TRANSFER_READ_BIT;
+
+    vkCmdPipelineBarrier(FHandle,
+      VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+      0, 0, nil, 0, nil, 1, @Barrier);
+
+    NextWidth := Max(1, MipWidth div 2);
+    NextHeight := Max(1, MipHeight div 2);
+
+    FillChar(Blit, SizeOf(Blit), 0);
+    Blit.srcOffsets[1].x := MipWidth;
+    Blit.srcOffsets[1].y := MipHeight;
+    Blit.srcOffsets[1].z := 1;
+    Blit.srcSubresource.aspectMask := VkTex.AspectMask;
+    Blit.srcSubresource.mipLevel := I - 1;
+    Blit.srcSubresource.baseArrayLayer := 0;
+    Blit.srcSubresource.layerCount := VkTex.Desc.DepthOrArrayLayers;
+
+    Blit.dstOffsets[1].x := NextWidth;
+    Blit.dstOffsets[1].y := NextHeight;
+    Blit.dstOffsets[1].z := 1;
+    Blit.dstSubresource.aspectMask := VkTex.AspectMask;
+    Blit.dstSubresource.mipLevel := I;
+    Blit.dstSubresource.baseArrayLayer := 0;
+    Blit.dstSubresource.layerCount := VkTex.Desc.DepthOrArrayLayers;
+
+    vkCmdBlitImage(FHandle,
+      VkTex.Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+      VkTex.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+      1, @Blit, VK_FILTER_LINEAR);
+
+    Barrier.oldLayout := VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    Barrier.newLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    Barrier.srcAccessMask := VK_ACCESS_TRANSFER_READ_BIT;
+    Barrier.dstAccessMask := VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(FHandle,
+      VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+      0, 0, nil, 0, nil, 1, @Barrier);
+
+    MipWidth := NextWidth;
+    MipHeight := NextHeight;
+  end;
+
+  Barrier.subresourceRange.baseMipLevel := VkTex.Desc.MipLevels - 1;
+  Barrier.oldLayout := VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  Barrier.newLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  Barrier.srcAccessMask := VK_ACCESS_TRANSFER_WRITE_BIT;
+  Barrier.dstAccessMask := VK_ACCESS_SHADER_READ_BIT;
+
+  vkCmdPipelineBarrier(FHandle,
+    VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+    0, 0, nil, 0, nil, 1, @Barrier);
+
+  Texture.CurrentState := rsShaderRead;
 end;
 
 procedure TVulkanRHICommandList.BeginRendering(const Info: TRHIRenderingInfo);
@@ -1267,13 +1794,25 @@ begin
 end;
 
 procedure TVulkanRHICommandList.PushDebugGroup(const LabelName: String; const Color: TCastleColor);
+var
+  LabelInfo: VkDebugUtilsLabelEXT;
+  AnsiLabel: AnsiString;
 begin
-  { Optional VK_EXT_debug_utils vkCmdBeginDebugUtilsLabelEXT }
+  if Assigned(vkCmdBeginDebugUtilsLabelEXT) and (FHandle <> nil) then
+  begin
+    AnsiLabel := AnsiString(LabelName);
+    FillChar(LabelInfo, SizeOf(LabelInfo), 0);
+    LabelInfo.sType := VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    LabelInfo.pLabelName := PAnsiChar(AnsiLabel);
+    Move(Color.Data, LabelInfo.color, SizeOf(Single) * 4);
+    vkCmdBeginDebugUtilsLabelEXT(FHandle, @LabelInfo);
+  end;
 end;
 
 procedure TVulkanRHICommandList.PopDebugGroup;
 begin
-  { Optional VK_EXT_debug_utils vkCmdEndDebugUtilsLabelEXT }
+  if Assigned(vkCmdEndDebugUtilsLabelEXT) and (FHandle <> nil) then
+    vkCmdEndDebugUtilsLabelEXT(FHandle);
 end;
 
 { ---------------------------------------------------------------------------- }
@@ -1332,27 +1871,244 @@ begin
 end;
 
 procedure TVulkanRHIDevice.CreateInstance(const EnableValidation: Boolean);
+var
+  AppInfo: VkApplicationInfo;
+  CreateInfo: VkInstanceCreateInfo;
+  ExtNames: TAnsiStringArray;
+  ExtPtrs: array of PAnsiChar;
+  LayerName: PAnsiChar;
+  I: Integer;
+  Res: VkResult;
 begin
-  { Initialize VkApplicationInfo with apiVersion := VK_API_VERSION_1_3,
-    enable platform surface extensions + VK_LAYER_KHRONOS_validation if requested }
+  FillChar(AppInfo, SizeOf(AppInfo), 0);
+  AppInfo.sType := VK_STRUCTURE_TYPE_APPLICATION_INFO;
+  AppInfo.pApplicationName := 'Castle Game Engine Application';
+  AppInfo.applicationVersion := VK_API_VERSION_1_0;
+  AppInfo.pEngineName := 'Castle Game Engine';
+  AppInfo.engineVersion := VK_API_VERSION_1_3;
+  AppInfo.apiVersion := VK_API_VERSION_1_3;
+
+  ExtNames := GetRequiredVulkanInstanceExtensions;
+  SetLength(ExtPtrs, Length(ExtNames));
+  for I := 0 to High(ExtNames) do
+    ExtPtrs[I] := PAnsiChar(ExtNames[I]);
+
+  FillChar(CreateInfo, SizeOf(CreateInfo), 0);
+  CreateInfo.sType := VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+  CreateInfo.pApplicationInfo := @AppInfo;
+  CreateInfo.enabledExtensionCount := Length(ExtPtrs);
+  if Length(ExtPtrs) > 0 then
+    CreateInfo.ppEnabledExtensionNames := @ExtPtrs[0];
+
+  LayerName := VK_LAYER_KHRONOS_validation;
+  if EnableValidation then
+  begin
+    CreateInfo.enabledLayerCount := 1;
+    CreateInfo.ppEnabledLayerNames := @LayerName;
+  end;
+
+  Res := vkCreateInstance(@CreateInfo, nil, @FInstance);
+  if (Res = VK_ERROR_LAYER_NOT_PRESENT) and EnableValidation then
+  begin
+    CreateInfo.enabledLayerCount := 0;
+    CreateInfo.ppEnabledLayerNames := nil;
+    Res := vkCreateInstance(@CreateInfo, nil, @FInstance);
+  end;
+  CheckVk(Res, 'vkCreateInstance');
+  LoadVulkanInstance(FInstance);
 end;
 
 procedure TVulkanRHIDevice.PickPhysicalDevice;
+var
+  DeviceCount, I: Cardinal;
+  Devices: array of VkPhysicalDevice;
+  Props, ChosenProps: VkPhysicalDeviceProperties;
+  Features: VkPhysicalDeviceFeatures;
 begin
-  { Enumerate VkPhysicalDevice, prioritize VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU,
-    populate FCapabilities }
+  DeviceCount := 0;
+  CheckVk(vkEnumeratePhysicalDevices(FInstance, @DeviceCount, nil), 'vkEnumeratePhysicalDevices(count)');
+  if DeviceCount = 0 then
+    raise ERHIError.Create('No Vulkan physical devices found');
+
+  SetLength(Devices, DeviceCount);
+  CheckVk(vkEnumeratePhysicalDevices(FInstance, @DeviceCount, @Devices[0]), 'vkEnumeratePhysicalDevices');
+
+  FPhysicalDevice := Devices[0];
+  for I := 0 to DeviceCount - 1 do
+  begin
+    vkGetPhysicalDeviceProperties(Devices[I], @Props);
+    if Props.deviceType = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU then
+    begin
+      FPhysicalDevice := Devices[I];
+      Break;
+    end;
+  end;
+
+  vkGetPhysicalDeviceProperties(FPhysicalDevice, @ChosenProps);
+  vkGetPhysicalDeviceFeatures(FPhysicalDevice, @Features);
+
+  FDeviceId := ChosenProps.deviceID;
+  FCapabilities.Backend := rbVulkan;
+  FCapabilities.DeviceName := String(PAnsiChar(@ChosenProps.deviceName[0]));
+  FCapabilities.VendorId := ChosenProps.vendorID;
+  FCapabilities.MaxTextureSize := ChosenProps.limits.maxImageDimension2D;
+  FCapabilities.MaxAnisotropy := ChosenProps.limits.maxSamplerAnisotropy;
+  FCapabilities.MaxUniformBufferRange := ChosenProps.limits.maxUniformBufferRange;
+  FCapabilities.MinUniformBufferOffsetAlignment := Cardinal(ChosenProps.limits.minUniformBufferOffsetAlignment);
+  FCapabilities.MaxPushConstantsSize := ChosenProps.limits.maxPushConstantsSize;
+  FCapabilities.SupportsBCCompression := Features.textureCompressionBC = VK_TRUE;
+  FCapabilities.SupportsASTCCompression := Features.textureCompressionASTC_LDR = VK_TRUE;
+  FCapabilities.SupportsETC2Compression := Features.textureCompressionETC2 = VK_TRUE;
+  FCapabilities.SupportsComputeShaders := True;
+  FCapabilities.SupportsMultiDrawIndirect := Features.multiDrawIndirect = VK_TRUE;
 end;
 
 procedure TVulkanRHIDevice.CreateLogicalDevice;
+var
+  QueueCount, I: Cardinal;
+  QueueProps: array of VkQueueFamilyProperties;
+  PresentSupport: VkBool32;
+  QueueInfos: array[0..1] of VkDeviceQueueCreateInfo;
+  QueuePriority: Single;
+  DynRenderFeatures: VkPhysicalDeviceDynamicRenderingFeatures;
+  DeviceExts: array[0..0] of PAnsiChar;
+  CreateInfo: VkDeviceCreateInfo;
+  CacheInfo: VkPipelineCacheCreateInfo;
 begin
-  { Enable Vulkan 1.3 DynamicRendering feature (VkPhysicalDeviceDynamicRenderingFeatures),
-    create VkDevice and retrieve FGraphicsQueue and FPresentQueue }
+  QueueCount := 0;
+  vkGetPhysicalDeviceQueueFamilyProperties(FPhysicalDevice, @QueueCount, nil);
+  SetLength(QueueProps, QueueCount);
+  vkGetPhysicalDeviceQueueFamilyProperties(FPhysicalDevice, @QueueCount, @QueueProps[0]);
+
+  FGraphicsQueueFamily := 0;
+  FPresentQueueFamily := 0;
+  for I := 0 to QueueCount - 1 do
+  begin
+    if (QueueProps[I].queueFlags and VK_QUEUE_GRAPHICS_BIT) <> 0 then
+      FGraphicsQueueFamily := I;
+    if (FSurface <> VK_NULL_HANDLE) and Assigned(vkGetPhysicalDeviceSurfaceSupportKHR) then
+    begin
+      PresentSupport := VK_FALSE;
+      if vkGetPhysicalDeviceSurfaceSupportKHR(FPhysicalDevice, I, FSurface, @PresentSupport) = VK_SUCCESS then
+        if PresentSupport = VK_TRUE then
+          FPresentQueueFamily := I;
+    end else
+      FPresentQueueFamily := FGraphicsQueueFamily;
+  end;
+
+  QueuePriority := 1.0;
+  FillChar(QueueInfos, SizeOf(QueueInfos), 0);
+  QueueInfos[0].sType := VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+  QueueInfos[0].queueFamilyIndex := FGraphicsQueueFamily;
+  QueueInfos[0].queueCount := 1;
+  QueueInfos[0].pQueuePriorities := @QueuePriority;
+
+  FillChar(DynRenderFeatures, SizeOf(DynRenderFeatures), 0);
+  DynRenderFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR;
+  DynRenderFeatures.dynamicRendering := VK_TRUE;
+
+  DeviceExts[0] := VK_KHR_swapchain;
+
+  FillChar(CreateInfo, SizeOf(CreateInfo), 0);
+  CreateInfo.sType := VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+  CreateInfo.pNext := @DynRenderFeatures;
+  if FPresentQueueFamily <> FGraphicsQueueFamily then
+  begin
+    QueueInfos[1].sType := VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    QueueInfos[1].queueFamilyIndex := FPresentQueueFamily;
+    QueueInfos[1].queueCount := 1;
+    QueueInfos[1].pQueuePriorities := @QueuePriority;
+    CreateInfo.queueCreateInfoCount := 2;
+  end else
+    CreateInfo.queueCreateInfoCount := 1;
+  CreateInfo.pQueueCreateInfos := @QueueInfos[0];
+  CreateInfo.enabledExtensionCount := 1;
+  CreateInfo.ppEnabledExtensionNames := @DeviceExts[0];
+
+  CheckVk(vkCreateDevice(FPhysicalDevice, @CreateInfo, nil, @FDevice), 'vkCreateDevice');
+  LoadVulkanDevice(FDevice);
+
+  vkGetDeviceQueue(FDevice, FGraphicsQueueFamily, 0, @FGraphicsQueue);
+  vkGetDeviceQueue(FDevice, FPresentQueueFamily, 0, @FPresentQueue);
+
+  if Assigned(vkCreatePipelineCache) then
+  begin
+    FillChar(CacheInfo, SizeOf(CacheInfo), 0);
+    CacheInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+    CheckVk(vkCreatePipelineCache(FDevice, @CacheInfo, nil, @FPipelineCache), 'vkCreatePipelineCache');
+  end;
 end;
 
 procedure TVulkanRHIDevice.CreateSwapchain(const Width, Height: Cardinal);
+var
+  Caps: VkSurfaceCapabilitiesKHR;
+  ImageCount, I: Cardinal;
+  CreateInfo: VkSwapchainCreateInfoKHR;
+  Images: array of VkImage;
+  ViewInfo: VkImageViewCreateInfo;
+  ImgView: VkImageView;
+  ColorDesc, DepthDesc: TRHITextureDesc;
 begin
-  { Create VkSwapchainKHR, wrap each swapchain image in TVulkanRHITexture.CreateSwapchainWrapper,
-    and allocate FSwapchainDepthTexture (pfD32_Float) }
+  if (FSurface = VK_NULL_HANDLE) or (FDevice = nil) then Exit;
+
+  FillChar(Caps, SizeOf(Caps), 0);
+  CheckVk(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(FPhysicalDevice, FSurface, @Caps),
+    'vkGetPhysicalDeviceSurfaceCapabilitiesKHR');
+
+  FSwapchainFormat := pfBGRA8_UNorm;
+  FSwapchainExtent.width := Max(1, Width);
+  FSwapchainExtent.height := Max(1, Height);
+  if Caps.currentExtent.width <> High(Cardinal) then
+    FSwapchainExtent := Caps.currentExtent;
+
+  ImageCount := Max(2, Caps.minImageCount);
+  if (Caps.maxImageCount > 0) and (ImageCount > Caps.maxImageCount) then
+    ImageCount := Caps.maxImageCount;
+
+  FillChar(CreateInfo, SizeOf(CreateInfo), 0);
+  CreateInfo.sType := VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+  CreateInfo.surface := FSurface;
+  CreateInfo.minImageCount := ImageCount;
+  CreateInfo.imageFormat := RHIToVkFormat(FSwapchainFormat);
+  CreateInfo.imageColorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+  CreateInfo.imageExtent := FSwapchainExtent;
+  CreateInfo.imageArrayLayers := 1;
+  CreateInfo.imageUsage := VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT or VK_IMAGE_USAGE_TRANSFER_SRC_BIT or VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+  CreateInfo.imageSharingMode := VK_SHARING_MODE_EXCLUSIVE;
+  CreateInfo.preTransform := Caps.currentTransform;
+  CreateInfo.compositeAlpha := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  CreateInfo.presentMode := VK_PRESENT_MODE_FIFO_KHR;
+  CreateInfo.clipped := VK_TRUE;
+
+  CheckVk(vkCreateSwapchainKHR(FDevice, @CreateInfo, nil, @FSwapchain), 'vkCreateSwapchainKHR');
+
+  CheckVk(vkGetSwapchainImagesKHR(FDevice, FSwapchain, @ImageCount, nil), 'vkGetSwapchainImagesKHR(count)');
+  SetLength(Images, ImageCount);
+  CheckVk(vkGetSwapchainImagesKHR(FDevice, FSwapchain, @ImageCount, @Images[0]), 'vkGetSwapchainImagesKHR');
+
+  ColorDesc := TRHITextureDesc.Create2D(FSwapchainExtent.width, FSwapchainExtent.height,
+    FSwapchainFormat, [tuColorAttachment, tuTransferSrc, tuTransferDst], 1);
+
+  SetLength(FSwapchainColorTextures, ImageCount);
+  for I := 0 to ImageCount - 1 do
+  begin
+    FillChar(ViewInfo, SizeOf(ViewInfo), 0);
+    ViewInfo.sType := VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    ViewInfo.image := Images[I];
+    ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_2D;
+    ViewInfo.format := CreateInfo.imageFormat;
+    ViewInfo.subresourceRange.aspectMask := VK_IMAGE_ASPECT_COLOR_BIT;
+    ViewInfo.subresourceRange.baseMipLevel := 0;
+    ViewInfo.subresourceRange.levelCount := 1;
+    ViewInfo.subresourceRange.baseArrayLayer := 0;
+    ViewInfo.subresourceRange.layerCount := 1;
+    CheckVk(vkCreateImageView(FDevice, @ViewInfo, nil, @ImgView), 'vkCreateImageView(Swapchain)');
+    FSwapchainColorTextures[I] := TVulkanRHITexture.CreateSwapchainWrapper(Self, ColorDesc, Images[I], ImgView);
+  end;
+
+  DepthDesc := TRHITextureDesc.Create2D(FSwapchainExtent.width, FSwapchainExtent.height,
+    pfD32_Float, [tuDepthStencil], 1);
+  FSwapchainDepthTexture := TVulkanRHITexture.Create(Self, DepthDesc);
 end;
 
 procedure TVulkanRHIDevice.DestroySwapchain;
@@ -1394,8 +2150,28 @@ begin
 end;
 
 procedure TVulkanRHIDevice.CreateDescriptorPool;
+var
+  PoolSizes: array[0..3] of VkDescriptorPoolSize;
+  PoolInfo: VkDescriptorPoolCreateInfo;
 begin
-  { Create VkDescriptorPool sized for CGE's global, material, and per-object sets }
+  if FDevice = nil then Exit;
+
+  PoolSizes[0]._type := VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  PoolSizes[0].descriptorCount := 2048;
+  PoolSizes[1]._type := VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+  PoolSizes[1].descriptorCount := 512;
+  PoolSizes[2]._type := VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  PoolSizes[2].descriptorCount := 512;
+  PoolSizes[3]._type := VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  PoolSizes[3].descriptorCount := 4096;
+
+  FillChar(PoolInfo, SizeOf(PoolInfo), 0);
+  PoolInfo.sType := VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  PoolInfo.maxSets := 2048;
+  PoolInfo.poolSizeCount := Length(PoolSizes);
+  PoolInfo.pPoolSizes := @PoolSizes[0];
+
+  CheckVk(vkCreateDescriptorPool(FDevice, @PoolInfo, nil, @FDescriptorPool), 'vkCreateDescriptorPool');
 end;
 
 function TVulkanRHIDevice.BeginFrame: TRHICommandList;
@@ -1516,10 +2292,13 @@ end;
 
 function TVulkanRHIDevice.CreateShaderModuleFromGLSL(const AStage: TRHIShaderStage;
   const AGLSLSource: String; const ADebugName: String): TRHIShaderModule;
+var
+  SPIRV: TSPIRVBytecode;
 begin
-  { Compile AGLSLSource to SPIR-V via CastleInternalShaderCompiler (libshaderc),
-    then delegate to CreateShaderModuleFromSPIRV }
-  Result := nil;
+  SPIRV := TCastleShaderCompiler.Instance.GetOrCompileSPIRV(AStage, AGLSLSource, ADebugName);
+  if Length(SPIRV) = 0 then
+    Exit(nil);
+  Result := CreateShaderModuleFromSPIRV(AStage, @SPIRV[0], Length(SPIRV), ADebugName);
 end;
 
 function TVulkanRHIDevice.CreateShaderModuleFromSPIRV(const AStage: TRHIShaderStage;
@@ -1543,8 +2322,7 @@ end;
 
 function TVulkanRHIDevice.ComputePipelineHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
 begin
-  { FNV-1a 64-bit hash over shader handles, vertex input attributes, blend, raster, and depth state }
-  Result := PtrUInt(ADesc.VertexShader) xor (PtrUInt(ADesc.FragmentShader) shl 13);
+  Result := ComputePipelineKeyHash(ADesc);
 end;
 
 function TVulkanRHIDevice.GetOrCreatePipeline(const ADesc: TRHIGraphicsPipelineDesc): TRHIPipeline;
@@ -1563,28 +2341,155 @@ end;
 
 function TVulkanRHIDevice.GrabTextureImage(const SourceTexture: TRHITexture;
   const ReadArea: TRectangle): TRGBAlphaImage;
+var
+  VkTex: TVulkanRHITexture;
+  StagingDesc: TRHIBufferDesc;
+  StagingBuf: TVulkanRHIBuffer;
+  Cmd: VkCommandBuffer;
+  Region: VkBufferImageCopy;
+  ByteSize: PtrUInt;
+  MappedPixels: Pointer;
 begin
-  { Copy SourceTexture region to a muGpuToCpu staging buffer and read pixels into TRGBAlphaImage }
-  Result := nil;
+  if (SourceTexture = nil) or (ReadArea.Width <= 0) or (ReadArea.Height <= 0) then
+    Exit(nil);
+
+  Result := TRGBAlphaImage.Create(ReadArea.Width, ReadArea.Height);
+  if (FDevice = nil) or not Assigned(vkCmdCopyImageToBuffer) then
+    Exit;
+
+  VkTex := SourceTexture as TVulkanRHITexture;
+  ByteSize := PtrUInt(ReadArea.Width) * PtrUInt(ReadArea.Height) * 4;
+  StagingDesc := TRHIBufferDesc.Create(ByteSize, [buTransferDst], muGpuToCpu, 'GrabTextureStaging');
+  StagingBuf := TVulkanRHIBuffer.Create(Self, StagingDesc, nil);
+  try
+    Cmd := BeginSingleTimeCommands;
+    FillChar(Region, SizeOf(Region), 0);
+    Region.imageSubresource.aspectMask := VK_IMAGE_ASPECT_COLOR_BIT;
+    Region.imageSubresource.layerCount := 1;
+    Region.imageOffset.x := Max(0, ReadArea.Left);
+    Region.imageOffset.y := Max(0, ReadArea.Bottom);
+    Region.imageExtent.width := ReadArea.Width;
+    Region.imageExtent.height := ReadArea.Height;
+    Region.imageExtent.depth := 1;
+
+    vkCmdCopyImageToBuffer(Cmd, VkTex.Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+      StagingBuf.Handle, 1, @Region);
+    EndSingleTimeCommands(Cmd);
+
+    MappedPixels := StagingBuf.Map;
+    try
+      Move(MappedPixels^, Result.RawPixels^, ByteSize);
+    finally
+      StagingBuf.Unmap;
+    end;
+  finally
+    FreeAndNil(StagingBuf);
+  end;
 end;
 
 procedure TVulkanRHIDevice.LoadPipelineCache(const CacheFileUrl: String);
+var
+  Stream: TStream;
+  Blob: TBytes;
+  CacheInfo: VkPipelineCacheCreateInfo;
 begin
-  { Load binary blob from CastleDownload(CacheFileUrl) into vkCreatePipelineCache }
+  if (FDevice = nil) or not Assigned(vkCreatePipelineCache) then Exit;
+  try
+    Stream := Download(CacheFileUrl);
+    try
+      if LoadPipelineCacheBlobFromStream(Stream, FCapabilities.VendorId, FDeviceId, Blob) then
+      begin
+        if FPipelineCache <> VK_NULL_HANDLE then
+        begin
+          vkDestroyPipelineCache(FDevice, FPipelineCache, nil);
+          FPipelineCache := VK_NULL_HANDLE;
+        end;
+        FillChar(CacheInfo, SizeOf(CacheInfo), 0);
+        CacheInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+        CacheInfo.initialDataSize := Length(Blob);
+        CacheInfo.pInitialData := @Blob[0];
+        CheckVk(vkCreatePipelineCache(FDevice, @CacheInfo, nil, @FPipelineCache), 'vkCreatePipelineCache(Load)');
+      end;
+    finally
+      FreeAndNil(Stream);
+    end;
+  except
+    on E: Exception do
+      WritelnLog('Vulkan', 'Could not load pipeline cache from "%s": %s', [CacheFileUrl, E.Message]);
+  end;
 end;
 
 procedure TVulkanRHIDevice.SavePipelineCache(const CacheFileUrl: String);
+var
+  DataSize: PtrUInt;
+  Blob: TBytes;
+  Stream: TStream;
 begin
-  { Query vkGetPipelineCacheData and write stream via UrlSaveStream(CacheFileUrl) }
+  if (FDevice = nil) or (FPipelineCache = VK_NULL_HANDLE) or not Assigned(vkGetPipelineCacheData) then
+    Exit;
+
+  DataSize := 0;
+  if vkGetPipelineCacheData(FDevice, FPipelineCache, @DataSize, nil) <> VK_SUCCESS then
+    Exit;
+  if DataSize = 0 then
+    Exit;
+
+  SetLength(Blob, DataSize);
+  if vkGetPipelineCacheData(FDevice, FPipelineCache, @DataSize, @Blob[0]) <> VK_SUCCESS then
+    Exit;
+
+  try
+    Stream := UrlSaveStream(CacheFileUrl);
+    try
+      SavePipelineCacheBlobToStream(Stream, FCapabilities.VendorId, FDeviceId, @Blob[0], DataSize);
+    finally
+      FreeAndNil(Stream);
+    end;
+  except
+    on E: Exception do
+      WritelnLog('Vulkan', 'Could not save pipeline cache to "%s": %s', [CacheFileUrl, E.Message]);
+  end;
 end;
 
 function TVulkanRHIDevice.BeginSingleTimeCommands: VkCommandBuffer;
+var
+  AllocInfo: VkCommandBufferAllocateInfo;
+  BeginInfo: VkCommandBufferBeginInfo;
 begin
   Result := nil;
+  if (FDevice = nil) or (FFrames[0].CommandList = nil) then Exit;
+
+  FillChar(AllocInfo, SizeOf(AllocInfo), 0);
+  AllocInfo.sType := VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  AllocInfo.commandPool := FFrames[0].CommandList.FCommandPool;
+  AllocInfo.level := VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  AllocInfo.commandBufferCount := 1;
+  CheckVk(vkAllocateCommandBuffers(FDevice, @AllocInfo, @Result), 'vkAllocateCommandBuffers(SingleTime)');
+
+  FillChar(BeginInfo, SizeOf(BeginInfo), 0);
+  BeginInfo.sType := VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  BeginInfo.flags := VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  CheckVk(vkBeginCommandBuffer(Result, @BeginInfo), 'vkBeginCommandBuffer(SingleTime)');
 end;
 
 procedure TVulkanRHIDevice.EndSingleTimeCommands(const CmdBuf: VkCommandBuffer);
+var
+  SubmitInfo: VkSubmitInfo;
+  LocalCmd: VkCommandBuffer;
 begin
+  if (FDevice = nil) or (CmdBuf = nil) then Exit;
+  CheckVk(vkEndCommandBuffer(CmdBuf), 'vkEndCommandBuffer(SingleTime)');
+
+  LocalCmd := CmdBuf;
+  FillChar(SubmitInfo, SizeOf(SubmitInfo), 0);
+  SubmitInfo.sType := VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  SubmitInfo.commandBufferCount := 1;
+  SubmitInfo.pCommandBuffers := @LocalCmd;
+
+  CheckVk(vkQueueSubmit(FGraphicsQueue, 1, @SubmitInfo, VK_NULL_HANDLE), 'vkQueueSubmit(SingleTime)');
+  CheckVk(vkQueueWaitIdle(FGraphicsQueue), 'vkQueueWaitIdle(SingleTime)');
+
+  vkFreeCommandBuffers(FDevice, FFrames[0].CommandList.FCommandPool, 1, @LocalCmd);
 end;
 
 function TVulkanRHIDevice.FindMemoryType(const TypeFilter: Cardinal;

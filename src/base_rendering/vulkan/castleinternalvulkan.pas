@@ -105,11 +105,13 @@ const
   VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET = 35;
   VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO = 39;
   VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO = 40;
+  VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO = 41;
   VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO = 42;
   VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO = 43;
   VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER = 44;
   VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER = 45;
   VK_STRUCTURE_TYPE_MEMORY_BARRIER = 46;
+  VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT = $00000010;
   VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR = 1000001000;
   VK_STRUCTURE_TYPE_PRESENT_INFO_KHR = 1000001001;
   VK_STRUCTURE_TYPE_RENDERING_INFO_KHR = 1000044000;
@@ -398,9 +400,16 @@ const
   VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO = 1000044001;
   VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR = 1000044002;
   VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO = 29;
+  VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT = 1000128002;
+
+  VK_QUEUE_GRAPHICS_BIT = $00000001;
+  VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR = $00000001;
+  VK_VERTEX_INPUT_RATE_VERTEX = 0;
+  VK_VERTEX_INPUT_RATE_INSTANCE = 1;
 
   VK_EXT_debug_utils = 'VK_EXT_debug_utils';
   VK_KHR_maintenance1 = 'VK_KHR_maintenance1';
+  VK_KHR_swapchain = 'VK_KHR_swapchain';
   VK_LAYER_KHRONOS_validation = 'VK_LAYER_KHRONOS_validation';
 
 type
@@ -1592,6 +1601,7 @@ type
   PFN_vkCmdPipelineBarrier = procedure(commandBuffer: VkCommandBuffer; srcStageMask: VkPipelineStageFlags; dstStageMask: VkPipelineStageFlags; dependencyFlags: VkFlags; memoryBarrierCount: Cardinal; const pMemoryBarriers: Pointer; bufferMemoryBarrierCount: Cardinal; const pBufferMemoryBarriers: PVkBufferMemoryBarrier; imageMemoryBarrierCount: Cardinal; const pImageMemoryBarriers: PVkImageMemoryBarrier); VKAPI_CALL;
   PFN_vkCmdCopyBuffer = procedure(commandBuffer: VkCommandBuffer; srcBuffer: VkBuffer; dstBuffer: VkBuffer; regionCount: Cardinal; const pRegions: PVkBufferCopy); VKAPI_CALL;
   PFN_vkCmdCopyBufferToImage = procedure(commandBuffer: VkCommandBuffer; srcBuffer: VkBuffer; dstImage: VkImage; dstImageLayout: VkImageLayout; regionCount: Cardinal; const pRegions: PVkBufferImageCopy); VKAPI_CALL;
+  PFN_vkCmdCopyImageToBuffer = procedure(commandBuffer: VkCommandBuffer; srcImage: VkImage; srcImageLayout: VkImageLayout; dstBuffer: VkBuffer; regionCount: Cardinal; const pRegions: PVkBufferImageCopy); VKAPI_CALL;
 
   { Dynamic Rendering }
   PFN_vkCmdBeginRendering = procedure(commandBuffer: VkCommandBuffer; const pRenderingInfo: PVkRenderingInfoKHR); VKAPI_CALL;
@@ -1702,6 +1712,7 @@ var
   vkCmdPipelineBarrier: PFN_vkCmdPipelineBarrier;
   vkCmdCopyBuffer: PFN_vkCmdCopyBuffer;
   vkCmdCopyBufferToImage: PFN_vkCmdCopyBufferToImage;
+  vkCmdCopyImageToBuffer: PFN_vkCmdCopyImageToBuffer;
 
   vkCmdBeginRendering: PFN_vkCmdBeginRendering;
   vkCmdEndRendering: PFN_vkCmdEndRendering;
@@ -1889,6 +1900,7 @@ begin
   Pointer(vkCmdPipelineBarrier) := vkGetInstanceProcAddr(nil, 'vkCmdPipelineBarrier');
   Pointer(vkCmdCopyBuffer) := vkGetInstanceProcAddr(nil, 'vkCmdCopyBuffer');
   Pointer(vkCmdCopyBufferToImage) := vkGetInstanceProcAddr(nil, 'vkCmdCopyBufferToImage');
+  Pointer(vkCmdCopyImageToBuffer) := vkGetInstanceProcAddr(nil, 'vkCmdCopyImageToBuffer');
 
   { Dynamic Rendering }
   Pointer(vkCmdBeginRendering) := vkGetInstanceProcAddr(nil, 'vkCmdBeginRendering');

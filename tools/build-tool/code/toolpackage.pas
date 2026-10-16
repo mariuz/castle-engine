@@ -86,7 +86,7 @@ implementation
 uses SysUtils,
   CastleFilesUtils, CastleLog, CastleFindFiles, CastleUriUtils,
   CastleStringUtils, CastleInternalDirectoryInformation,
-  CastleInternalProcess,
+  CastleInternalProcess, CastleInternalShaderCompiler,
   ToolCommonUtils, ToolUtils, ToolDebian, ToolProcessRun;
 
 { TPackageDirectory ---------------------------------------------------------- }
@@ -199,7 +199,14 @@ begin
 end;
 
 procedure TPackageDirectory.AddDataInformation(const DataName: String);
+var
+  PrewarmedHashes: TUInt64Array;
 begin
+  if Assigned(Manifest) and Manifest.ShouldPrewarmVulkanShaders then
+  begin
+    PrewarmedHashes := TCastleShaderCompiler.Instance.PrewarmCoreEngineShaders;
+    Writeln(Format('Pre-warmed %d core Vulkan SPIR-V shader stages.', [Length(PrewarmedHashes)]));
+  end;
   GenerateDataInformation(Path + DataName);
 end;
 
