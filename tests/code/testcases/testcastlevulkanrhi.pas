@@ -64,6 +64,7 @@ type
     procedure TestNintendoSwitchViSurfaceAndManifestPrewarm;
     procedure TestPipelineCacheDiskPersistence;
     procedure TestVulkanMemoryBudgetAndViewportStatistics;
+    procedure TestViewportPrepareResourcesPrewarmsPSOs;
   end;
 
 implementation
@@ -1264,6 +1265,44 @@ begin
   finally
     SetRHIDevice(SavedDevice);
     vkGetPhysicalDeviceMemoryProperties2 := SavedProc;
+    FreeAndNil(Viewport);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportPrepareResourcesPrewarmsPSOs;
+var
+  SavedDevice: TRHIDevice;
+  VkDev: TVulkanRHIDevice;
+  Viewport: TCastleViewport;
+  Stats: TRenderStatistics;
+begin
+  SavedDevice := RHIDevice;
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, False);
+  Viewport := TCastleViewport.Create(nil);
+  try
+    SetRHIDevice(VkDev);
+    AssertEquals('Initial PipelineCount should be 0', 0, VkDev.PipelineCount);
+    AssertFalse('Initial PipelineCacheLoaded should be False', VkDev.PipelineCacheLoaded);
+
+    { First PrepareResources call should load the pipeline cache and bake all 5 standard PSOs }
+    Viewport.PrepareResources;
+    AssertTrue('PipelineCacheLoaded should be True after PrepareResources', VkDev.PipelineCacheLoaded);
+    AssertEquals('All 5 standard PSO permutations should be pre-warmed', 5, VkDev.PipelineCount);
+    AssertEquals('First PrepareResources should record 5 pipeline cache misses', 5, VkDev.PipelineCacheMisses);
+    AssertEquals('First PrepareResources should record 0 pipeline cache hits', 0, VkDev.PipelineCacheHits);
+
+    { Second PrepareResources call should hit all 5 cached PSOs with zero new misses }
+    Viewport.PrepareResources;
+    AssertEquals('PipelineCount remains 5 after second PrepareResources', 5, VkDev.PipelineCount);
+    AssertEquals('PipelineCacheMisses remains 5 after second PrepareResources', 5, VkDev.PipelineCacheMisses);
+    AssertEquals('Second PrepareResources should record 5 pipeline cache hits', 5, VkDev.PipelineCacheHits);
+
+    Stats := Viewport.Statistics;
+    AssertEquals('Viewport.Statistics reflects pre-warmed PSO hits', 5, Stats.PipelineCacheHits);
+    AssertEquals('Viewport.Statistics reflects pre-warmed PSO misses', 5, Stats.PipelineCacheMisses);
+  finally
+    SetRHIDevice(SavedDevice);
     FreeAndNil(Viewport);
     FreeAndNil(VkDev);
   end;

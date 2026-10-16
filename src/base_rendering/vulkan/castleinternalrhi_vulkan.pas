@@ -248,6 +248,11 @@ type
     FDescriptorPool: VkDescriptorPool;
     FPipelineCache: VkPipelineCache;
     FPipelineMap: TVulkanPipelineMap;
+    FPipelineCacheLoaded: Boolean;
+    FPrewarm3DVertexShader: TRHIShaderModule;
+    FPrewarm3DFragmentShader: TRHIShaderModule;
+    FPrewarm2DVertexShader: TRHIShaderModule;
+    FPrewarm2DFragmentShader: TRHIShaderModule;
 
     { Diagnostics & VK_EXT_memory_budget tracking }
     FSupportsMemoryBudgetExt: Boolean;
@@ -265,6 +270,7 @@ type
     procedure CreateDescriptorPool;
     function IsDeviceExtensionSupported(const AExtensionName: AnsiString): Boolean;
     function ComputePipelineHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
+    function GetPipelineCount: Cardinal;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -288,6 +294,13 @@ type
     { Records diagnostic counters for testing or custom pass tracking. }
     procedure RecordDiagnostics(const APipelineHits, APipelineMisses,
       ADescriptorAllocs: Cardinal; const AAllocatedBytes: UInt64 = 0);
+
+    { Pre-warms standard 3D/2D graphics pipeline state objects (PSOs) and loads/saves
+      the Vulkan pipeline cache (DefaultVulkanPipelineCacheUrl) so PSOs are baked
+      before the first rendered frame. Returns total cached pipeline count. }
+    function PrewarmStandardPipelines(const AIncludeBlending: Boolean = True;
+      const AIncludeShadowDepth: Boolean = True;
+      const ACacheFileUrl: String = ''): Cardinal;
 
     { TRHIDevice overrides }
     function BeginFrame: TRHICommandList; override;
@@ -327,6 +340,8 @@ type
     property PhysicalDevice: VkPhysicalDevice read FPhysicalDevice;
     property DescriptorPool: VkDescriptorPool read FDescriptorPool;
     property PipelineCache: VkPipelineCache read FPipelineCache;
+    property PipelineCount: Cardinal read GetPipelineCount;
+    property PipelineCacheLoaded: Boolean read FPipelineCacheLoaded;
     property SupportsMemoryBudgetExt: Boolean read FSupportsMemoryBudgetExt;
     property PipelineCacheHits: Cardinal read FPipelineCacheHits;
     property PipelineCacheMisses: Cardinal read FPipelineCacheMisses;
@@ -338,6 +353,7 @@ type
 function ComputePipelineKeyHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
 
 const
+  DefaultVulkanPipelineCacheUrl = 'castle-config:/vulkan_pipeline_cache.bin';
   PipelineCacheDiskMagic = $43474550; // 'CGEP'
   PipelineCacheDiskVersion = 1;
 
@@ -1049,6 +1065,8 @@ var
   CreateInfo: VkShaderModuleCreateInfo;
 begin
   inherited Create(ADevice, AStage, ADebugName);
+  if (ADevice = nil) or (ADevice.Handle = nil) or not Assigned(vkCreateShaderModule) then
+    Exit;
   FillChar(CreateInfo, SizeOf(CreateInfo), 0);
   CreateInfo.sType := VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
   CreateInfo.codeSize := ASizeInBytes;
@@ -1293,7 +1311,7 @@ begin
   { 2. Shader Stages }
   StageCount := 0;
   FillChar(Stages, SizeOf(Stages), 0);
-  if ADesc.VertexShader <> nil then
+  if (ADesc.VertexShader <> nil) and ((ADesc.VertexShader as TVulkanRHIShaderModule).Handle <> VK_NULL_HANDLE) then
   begin
     Stages[StageCount].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     Stages[StageCount].stage := VK_SHADER_STAGE_VERTEX_BIT;
@@ -1301,7 +1319,7 @@ begin
     Stages[StageCount].pName := 'main';
     Inc(StageCount);
   end;
-  if ADesc.FragmentShader <> nil then
+  if (ADesc.FragmentShader <> nil) and ((ADesc.FragmentShader as TVulkanRHIShaderModule).Handle <> VK_NULL_HANDLE) then
   begin
     Stages[StageCount].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     Stages[StageCount].stage := VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -1309,7 +1327,7 @@ begin
     Stages[StageCount].pName := 'main';
     Inc(StageCount);
   end;
-  if ADesc.GeometryShader <> nil then
+  if (ADesc.GeometryShader <> nil) and ((ADesc.GeometryShader as TVulkanRHIShaderModule).Handle <> VK_NULL_HANDLE) then
   begin
     Stages[StageCount].sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     Stages[StageCount].stage := VK_SHADER_STAGE_GEOMETRY_BIT;
@@ -1446,7 +1464,8 @@ begin
   PipelineInfo.pDynamicState := @DynamicStateInfo;
   PipelineInfo.layout := FPipelineLayout;
 
-  CheckVk(vkCreateGraphicsPipelines(ADevice.Handle, ADevice.PipelineCache, 1, @PipelineInfo, nil, @FHandle), 'vkCreateGraphicsPipelines');
+  if StageCount > 0 then
+    CheckVk(vkCreateGraphicsPipelines(ADevice.Handle, ADevice.PipelineCache, 1, @PipelineInfo, nil, @FHandle), 'vkCreateGraphicsPipelines');
 end;
 
 destructor TVulkanRHIPipeline.Destroy;
@@ -1897,6 +1916,10 @@ begin
   WaitIdle;
   DestroySwapchain;
   FreeAndNil(FPipelineMap);
+  FreeAndNil(FPrewarm3DVertexShader);
+  FreeAndNil(FPrewarm3DFragmentShader);
+  FreeAndNil(FPrewarm2DVertexShader);
+  FreeAndNil(FPrewarm2DFragmentShader);
 
   for I := 0 to MaxFramesInFlight - 1 do
   begin
@@ -2429,6 +2452,14 @@ begin
   Result := ComputePipelineKeyHash(ADesc);
 end;
 
+function TVulkanRHIDevice.GetPipelineCount: Cardinal;
+begin
+  if FPipelineMap <> nil then
+    Result := Cardinal(FPipelineMap.Count)
+  else
+    Result := 0;
+end;
+
 function TVulkanRHIDevice.GetOrCreatePipeline(const ADesc: TRHIGraphicsPipelineDesc): TRHIPipeline;
 var
   HashKey: UInt64;
@@ -2445,6 +2476,203 @@ begin
     FPipelineMap.Add(HashKey, FoundPipeline);
   end;
   Result := FoundPipeline;
+end;
+
+function TVulkanRHIDevice.PrewarmStandardPipelines(const AIncludeBlending: Boolean;
+  const AIncludeShadowDepth: Boolean; const ACacheFileUrl: String): Cardinal;
+const
+  Default3DVertSrc =
+    '#version 450' + LineEnding +
+    'layout(location = 0) in vec3 castle_Vertex;' + LineEnding +
+    'layout(location = 1) in vec3 castle_Normal;' + LineEnding +
+    'layout(location = 2) in vec2 castle_TexCoord0;' + LineEnding +
+    'layout(push_constant) uniform PushData { mat4 mvp; } pc;' + LineEnding +
+    'layout(location = 0) out vec3 vNormal;' + LineEnding +
+    'layout(location = 1) out vec2 vTexCoord;' + LineEnding +
+    'void main() {' + LineEnding +
+    '  vNormal = castle_Normal;' + LineEnding +
+    '  vTexCoord = castle_TexCoord0;' + LineEnding +
+    '  gl_Position = pc.mvp * vec4(castle_Vertex, 1.0);' + LineEnding +
+    '}';
+  Default3DFragSrc =
+    '#version 450' + LineEnding +
+    'layout(location = 0) in vec3 vNormal;' + LineEnding +
+    'layout(location = 1) in vec2 vTexCoord;' + LineEnding +
+    'layout(location = 0) out vec4 outColor;' + LineEnding +
+    'void main() {' + LineEnding +
+    '  outColor = vec4(normalize(vNormal) * 0.5 + 0.5, 1.0);' + LineEnding +
+    '}';
+  Default2DVertSrc =
+    '#version 450' + LineEnding +
+    'layout(location = 0) in vec2 aPosition;' + LineEnding +
+    'layout(location = 1) in vec2 aTexCoord;' + LineEnding +
+    'layout(location = 2) in vec4 aColor;' + LineEnding +
+    'layout(location = 0) out vec2 vTexCoord;' + LineEnding +
+    'layout(location = 1) out vec4 vColor;' + LineEnding +
+    'void main() {' + LineEnding +
+    '  vTexCoord = aTexCoord;' + LineEnding +
+    '  vColor = aColor;' + LineEnding +
+    '  gl_Position = vec4(aPosition, 0.0, 1.0);' + LineEnding +
+    '}';
+  Default2DFragSrc =
+    '#version 450' + LineEnding +
+    'layout(location = 0) in vec2 vTexCoord;' + LineEnding +
+    'layout(location = 1) in vec4 vColor;' + LineEnding +
+    'layout(location = 0) out vec4 outColor;' + LineEnding +
+    'void main() {' + LineEnding +
+    '  outColor = vColor;' + LineEnding +
+    '}';
+var
+  EffectiveCacheUrl: String;
+  MissesBefore: Cardinal;
+  ColorFormat: TRHIPixelFormat;
+  Desc3D, Desc2D, DescShadow: TRHIGraphicsPipelineDesc;
+begin
+  if ACacheFileUrl <> '' then
+    EffectiveCacheUrl := ACacheFileUrl
+  else
+    EffectiveCacheUrl := DefaultVulkanPipelineCacheUrl;
+
+  if not FPipelineCacheLoaded then
+  begin
+    FPipelineCacheLoaded := True;
+    if EffectiveCacheUrl <> '' then
+      LoadPipelineCache(EffectiveCacheUrl);
+  end;
+
+  { Pre-warm core GLSL -> SPIR-V shader blobs if shaderc is available }
+  TCastleShaderCompiler.Instance.PrewarmCoreEngineShaders;
+
+  if (FDevice <> nil) and TCastleShaderCompiler.Instance.IsRuntimeCompilationAvailable and
+     (FPrewarm3DVertexShader = nil) then
+  begin
+    FPrewarm3DVertexShader := CreateShaderModuleFromGLSL(ssVertex, Default3DVertSrc, 'Prewarm3DVert');
+    FPrewarm3DFragmentShader := CreateShaderModuleFromGLSL(ssFragment, Default3DFragSrc, 'Prewarm3DFrag');
+    FPrewarm2DVertexShader := CreateShaderModuleFromGLSL(ssVertex, Default2DVertSrc, 'Prewarm2DVert');
+    FPrewarm2DFragmentShader := CreateShaderModuleFromGLSL(ssFragment, Default2DFragSrc, 'Prewarm2DFrag');
+  end;
+
+  if FSwapchainFormat <> pfUndefined then
+    ColorFormat := FSwapchainFormat
+  else
+    ColorFormat := pfBGRA8_UNorm;
+
+  MissesBefore := FPipelineCacheMisses;
+
+  { 1. Standard 3D Forward Opaque PSO (CullBack, DepthTestWrite, Opaque) }
+  FillChar(Desc3D, SizeOf(Desc3D), 0);
+  Desc3D.VertexShader := FPrewarm3DVertexShader;
+  Desc3D.FragmentShader := FPrewarm3DFragmentShader;
+  Desc3D.Topology := ptTriangleList;
+  Desc3D.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+  Desc3D.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+  Desc3D.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+  Desc3D.PushConstantSize := 128;
+  Desc3D.PushConstantStages := [ssVertex, ssFragment];
+  SetLength(Desc3D.ColorAttachmentFormats, 1);
+  Desc3D.ColorAttachmentFormats[0] := ColorFormat;
+  Desc3D.DepthAttachmentFormat := pfD32_Float;
+  Desc3D.SampleCount := 1;
+  SetLength(Desc3D.VertexInput.Bindings, 1);
+  Desc3D.VertexInput.Bindings[0].Binding := 0;
+  Desc3D.VertexInput.Bindings[0].Stride := 32;
+  Desc3D.VertexInput.Bindings[0].PerInstance := False;
+  SetLength(Desc3D.VertexInput.Attributes, 3);
+  Desc3D.VertexInput.Attributes[0].Location := 0;
+  Desc3D.VertexInput.Attributes[0].Binding := 0;
+  Desc3D.VertexInput.Attributes[0].Format := vafVector3;
+  Desc3D.VertexInput.Attributes[0].Offset := 0;
+  Desc3D.VertexInput.Attributes[0].AttributeName := 'castle_Vertex';
+  Desc3D.VertexInput.Attributes[1].Location := 1;
+  Desc3D.VertexInput.Attributes[1].Binding := 0;
+  Desc3D.VertexInput.Attributes[1].Format := vafVector3;
+  Desc3D.VertexInput.Attributes[1].Offset := 12;
+  Desc3D.VertexInput.Attributes[1].AttributeName := 'castle_Normal';
+  Desc3D.VertexInput.Attributes[2].Location := 2;
+  Desc3D.VertexInput.Attributes[2].Binding := 0;
+  Desc3D.VertexInput.Attributes[2].Format := vafVector2;
+  Desc3D.VertexInput.Attributes[2].Offset := 24;
+  Desc3D.VertexInput.Attributes[2].AttributeName := 'castle_TexCoord0';
+  Desc3D.DebugName := 'Prewarm3DForwardOpaque';
+  GetOrCreatePipeline(Desc3D);
+
+  { 2. Two-Sided 3D Forward Opaque PSO (CullNone, DepthTestWrite, Opaque) }
+  Desc3D.Rasterizer.CullMode := cmNone;
+  Desc3D.DebugName := 'Prewarm3DForwardOpaqueTwoSided';
+  GetOrCreatePipeline(Desc3D);
+
+  { 3. Alpha-Blended 3D Forward PSO (CullNone, DepthReadOnly, AlphaBlend) }
+  if AIncludeBlending then
+  begin
+    Desc3D.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthReadOnly;
+    Desc3D.BlendState := TRHIBlendStateDesc.DefaultAlphaBlend;
+    Desc3D.DebugName := 'Prewarm3DForwardAlphaBlend';
+    GetOrCreatePipeline(Desc3D);
+  end;
+
+  { 4. Shadow Map Depth-Only 3D PSO }
+  if AIncludeShadowDepth then
+  begin
+    FillChar(DescShadow, SizeOf(DescShadow), 0);
+    DescShadow.VertexShader := FPrewarm3DVertexShader;
+    DescShadow.FragmentShader := nil;
+    DescShadow.Topology := ptTriangleList;
+    DescShadow.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+    DescShadow.Rasterizer.DepthBiasEnable := True;
+    DescShadow.DepthStencil := TRHIDepthStencilStateDesc.DefaultShadowMap;
+    DescShadow.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+    DescShadow.PushConstantSize := 128;
+    DescShadow.PushConstantStages := [ssVertex];
+    SetLength(DescShadow.ColorAttachmentFormats, 0);
+    DescShadow.DepthAttachmentFormat := pfD32_Float;
+    DescShadow.SampleCount := 1;
+    DescShadow.VertexInput := Desc3D.VertexInput;
+    DescShadow.DebugName := 'Prewarm3DShadowDepthOnly';
+    GetOrCreatePipeline(DescShadow);
+  end;
+
+  { 5. 2D UI / Sprite Batch PSO (CullNone, DepthDisabled, AlphaBlend) }
+  FillChar(Desc2D, SizeOf(Desc2D), 0);
+  Desc2D.VertexShader := FPrewarm2DVertexShader;
+  Desc2D.FragmentShader := FPrewarm2DFragmentShader;
+  Desc2D.Topology := ptTriangleList;
+  Desc2D.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+  Desc2D.Rasterizer.CullMode := cmNone;
+  Desc2D.DepthStencil := TRHIDepthStencilStateDesc.DefaultDisabled;
+  Desc2D.BlendState := TRHIBlendStateDesc.DefaultAlphaBlend;
+  Desc2D.PushConstantSize := 64;
+  Desc2D.PushConstantStages := [ssVertex, ssFragment];
+  SetLength(Desc2D.ColorAttachmentFormats, 1);
+  Desc2D.ColorAttachmentFormats[0] := ColorFormat;
+  Desc2D.DepthAttachmentFormat := pfD32_Float;
+  Desc2D.SampleCount := 1;
+  SetLength(Desc2D.VertexInput.Bindings, 1);
+  Desc2D.VertexInput.Bindings[0].Binding := 0;
+  Desc2D.VertexInput.Bindings[0].Stride := 20;
+  Desc2D.VertexInput.Bindings[0].PerInstance := False;
+  SetLength(Desc2D.VertexInput.Attributes, 3);
+  Desc2D.VertexInput.Attributes[0].Location := 0;
+  Desc2D.VertexInput.Attributes[0].Binding := 0;
+  Desc2D.VertexInput.Attributes[0].Format := vafVector2;
+  Desc2D.VertexInput.Attributes[0].Offset := 0;
+  Desc2D.VertexInput.Attributes[0].AttributeName := 'aPosition';
+  Desc2D.VertexInput.Attributes[1].Location := 1;
+  Desc2D.VertexInput.Attributes[1].Binding := 0;
+  Desc2D.VertexInput.Attributes[1].Format := vafVector2;
+  Desc2D.VertexInput.Attributes[1].Offset := 8;
+  Desc2D.VertexInput.Attributes[1].AttributeName := 'aTexCoord';
+  Desc2D.VertexInput.Attributes[2].Location := 2;
+  Desc2D.VertexInput.Attributes[2].Binding := 0;
+  Desc2D.VertexInput.Attributes[2].Format := vafUByte4Normalized;
+  Desc2D.VertexInput.Attributes[2].Offset := 16;
+  Desc2D.VertexInput.Attributes[2].AttributeName := 'aColor';
+  Desc2D.DebugName := 'Prewarm2DBatchAlphaBlend';
+  GetOrCreatePipeline(Desc2D);
+
+  if (FPipelineCacheMisses > MissesBefore) and (EffectiveCacheUrl <> '') then
+    SavePipelineCache(EffectiveCacheUrl);
+
+  Result := GetPipelineCount;
 end;
 
 function TVulkanRHIDevice.GrabTextureImage(const SourceTexture: TRHITexture;

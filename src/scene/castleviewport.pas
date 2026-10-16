@@ -3709,7 +3709,7 @@ procedure TCastleViewport.PrepareResources(const Item: TCastleTransform;
 var
   MainLightPosition: TVector4; // value of this is ignored
 begin
-  if not ApplicationProperties.IsGLContextOpen then
+  if (not ApplicationProperties.IsGLContextOpen) and (RHIDevice = nil) then
   begin
     WritelnWarning('It is best to call PrepareResources only once rendering context is initialized, to allow preparing all rendering resources.' + NL +
       'Various events and virtual methods can be used to wait for the context:' + NL +
@@ -3734,6 +3734,12 @@ begin
   {$warnings on}
 
   ShapesRenderer.PrepareResources;
+
+  { Pre-warm Vulkan graphics pipeline state objects (PSOs) and load/save
+    VkPipelineCache so standard 3D/2D pipelines are baked before the first frame. }
+  if ((prRenderSelf in Options) or (prRenderClones in Options)) and
+     (RHIDevice is TVulkanRHIDevice) then
+    TVulkanRHIDevice(RHIDevice).PrewarmStandardPipelines(True, True);
 end;
 
 procedure TCastleViewport.PrepareResources(
