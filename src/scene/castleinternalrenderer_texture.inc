@@ -349,8 +349,8 @@
 
     { Copy the colors of the given rectangle of the current framebuffer
       (in pixels) to the texture, resizing it to the rectangle size.
-      Multisampled says if the current framebuffer is multisampled. }
-    procedure UpdateFromScreen(const Rect: TRectangle; const Multisampled: Boolean);
+      UseBlit says to use glBlitFramebuffer, otherwise glCopyTexSubImage2D. }
+    procedure UpdateFromScreen(const Rect: TRectangle; const UseBlit: Boolean);
   end;
 
   { Abstract renderer resource for TAbstractEnvironmentTextureNode. }
@@ -2503,7 +2503,7 @@ begin
 end;
 
 procedure TScreenTextureResource.UpdateFromScreen(const Rect: TRectangle;
-  const Multisampled: Boolean);
+  const UseBlit: Boolean);
 {$ifndef CASTLE_WEBGL}
 var
   PreviousDrawFramebuffer: TGLint;
@@ -2518,14 +2518,13 @@ begin
   begin
     FWidth := Rect.Width;
     FHeight := Rect.Height;
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, FWidth, FHeight, 0,
-      GL_RGB, GL_UNSIGNED_BYTE, nil);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, FWidth, FHeight, 0,
+      GL_RGBA, GL_UNSIGNED_BYTE, nil);
   end;
 
-  if Multisampled then
+  if UseBlit then
   begin
-    { glCopyTexSubImage2D cannot read from a multisampled framebuffer:
-      resolve it into our texture with glBlitFramebuffer.
+    { Blit into a framebuffer with our texture.
       The current framebuffer stays bound for reading (GL_READ_FRAMEBUFFER),
       only the drawing framebuffer is changed for the blit. }
     {$ifndef CASTLE_WEBGL}
@@ -2552,15 +2551,30 @@ end;
 procedure UpdateScreenTextures;
 var
   Rect: TRectangle;
-  Multisampled: Boolean;
+  Multisampled, UseBlit: Boolean;
   I: Integer;
 begin
   if (ScreenTextureResources = nil) or (ScreenTextureResources.Count = 0) then
     Exit;
 
+  { Use glBlitFramebuffer when possible:
+    - glCopyTexSubImage2D cannot read from a multisampled framebuffer
+      (anti-aliasing), the blit resolves it.
+    - glCopyTexSubImage2D needs the texture format to match the framebuffer
+      format in OpenGLES: it fails (GL_INVALID_OPERATION) with ANGLE (OpenGLES 3),
+      likely because its window framebuffer is BGRA. The blit converts.
+    TODO: WebGL 2 has the blit too, but we don't query
+    the framebuffer binding there yet. WebGL always copies:
+    the browser resolves the default (antialiased) drawing buffer
+    when copying from it. }
+  {$ifdef CASTLE_WEBGL}
+  UseBlit := false;
+  Multisampled := false;
+  {$else}
+  UseBlit := GLFeatures.FramebufferBlit;
   Multisampled := glGetInteger(GL_SAMPLE_BUFFERS) > 0;
-  if Multisampled and
-     ({$ifdef CASTLE_WEBGL} true {$else} not GLFeatures.FramebufferBlit {$endif}) then
+  {$endif}
+  if Multisampled and not UseBlit then
   begin
     if not WarningScreenTextureMultisampleDone then
     begin
@@ -2572,7 +2586,7 @@ begin
 
   Rect := RenderContext.Viewport.Translate(RenderContext.ViewportDelta);
   for I := 0 to ScreenTextureResources.Count - 1 do
-    TScreenTextureResource(ScreenTextureResources[I]).UpdateFromScreen(Rect, Multisampled);
+    TScreenTextureResource(ScreenTextureResources[I]).UpdateFromScreen(Rect, UseBlit);
 end;
 
 {$endif read_implementation}
