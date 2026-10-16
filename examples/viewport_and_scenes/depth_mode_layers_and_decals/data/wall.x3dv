@@ -1,0 +1,40 @@
+#X3D V4.0 utf8
+PROFILE Interchange
+
+# A wall with two shapes on its surface (exactly coplanar with it):
+# - a layer of stripes, drawn with blending after the wall,
+#   with depthFunc "lequal": it passes the depth test on the wall's depth.
+# - a decal (alpha-tested, so opaque), with a negative polygon offset:
+#   moved towards the camera in the depth buffer, it's always over the wall.
+# Without the DepthMode nodes, the layer would be hidden ("less" rejects the
+# same depth) and the decal would flicker with the wall (z-fighting).
+
+DEF Wall Shape {
+  appearance Appearance {
+    material Material { diffuseColor 0.6 0.6 0.65 }
+  }
+  geometry Rectangle2D { size 8 5 }
+}
+
+DEF Layer Shape {
+  appearance Appearance {
+    material Material { diffuseColor 1 1 1 }
+    texture ImageTexture { url "stripes.png" }
+    alphaMode "BLEND"
+    depthMode DEF LayerDepthMode DepthMode { depthFunc "lequal" }
+  }
+  geometry Rectangle2D { size 8 1.2 }
+}
+
+Transform {
+  translation 2 1.2 0
+  children DEF Decal Shape {
+    appearance Appearance {
+      material Material { diffuseColor 1 1 1 }
+      texture ImageTexture { url "decal.png" }
+      alphaMode "MASK"
+      depthMode DEF DecalDepthMode DepthMode { polygonOffset -1 -1 }
+    }
+    geometry Rectangle2D { size 1.5 1.5 }
+  }
+}
