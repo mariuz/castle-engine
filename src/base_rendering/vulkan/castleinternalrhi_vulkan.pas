@@ -25,6 +25,7 @@ interface
 uses
   SysUtils, Classes, Math, Generics.Collections, Generics.Defaults,
   CastleVectors, CastleColors, CastleRectangles, CastleImages, CastleLog,
+  CastleRenderOptions,
   CastleInternalRHI, CastleInternalVulkan, CastleInternalVulkanWSI,
   CastleInternalShaderCompiler, CastleInternalVulkanMemory;
 
@@ -121,11 +122,13 @@ type
   TVulkanRHIDescriptorSetLayout = class(TRHIDescriptorSetLayout)
   private
     FHandle: VkDescriptorSetLayout;
+    FUsesUpdateAfterBind: Boolean;
   public
     constructor Create(const ADevice: TVulkanRHIDevice;
       const Bindings: array of TRHIDescriptorBindingDesc);
     destructor Destroy; override;
     property Handle: VkDescriptorSetLayout read FHandle;
+    property UsesUpdateAfterBind: Boolean read FUsesUpdateAfterBind;
   end;
 
   TVulkanDescriptorPoolAllocator = class;
@@ -137,8 +140,10 @@ type
     FIsTransient: Boolean;
     FLayout: TVulkanRHIDescriptorSetLayout;
     FPendingWrites: array of VkWriteDescriptorSet;
+    FPendingWriteInfoIndices: array of Integer;
     FBufferInfos: array of VkDescriptorBufferInfo;
     FImageInfos: array of VkDescriptorImageInfo;
+    FUpdateCount: Cardinal;
     function VulkanDevice: TVulkanRHIDevice;
   public
     constructor Create(const ADevice: TVulkanRHIDevice;
@@ -152,11 +157,14 @@ type
       const Offset: PtrUInt = 0; const Range: PtrUInt = 0); override;
     procedure BindTexture(const Binding: Cardinal; const Texture: TRHITexture;
       const Sampler: TRHISampler); override;
+    procedure BindTextureAtIndex(const Binding, ArrayElement: Cardinal;
+      const Texture: TRHITexture; const Sampler: TRHISampler); override;
     procedure Update; override;
 
     property Handle: VkDescriptorSet read FHandle;
     property OwnerPool: VkDescriptorPool read FOwnerPool;
     property IsTransient: Boolean read FIsTransient;
+    property UpdateCount: Cardinal read FUpdateCount;
   end;
 
   TVulkanRHIPipeline = class(TRHIPipeline)
@@ -183,6 +191,40 @@ type
     property FragmentOutputLibrary: VkPipeline read FFragmentOutputLibrary;
   end;
 
+  TVulkanRHIComputePipeline = class(TRHIComputePipeline)
+  private
+    FHandle: VkPipeline;
+    FPipelineLayout: VkPipelineLayout;
+    FOwnsHandle: Boolean;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice;
+      const ADesc: TRHIComputePipelineDesc;
+      const AOwnsHandle: Boolean = True);
+    destructor Destroy; override;
+    property Handle: VkPipeline read FHandle;
+    property PipelineLayout: VkPipelineLayout read FPipelineLayout;
+  end;
+
+  TVulkanRHIQueryPool = class(TRHIQueryPool)
+  private
+    FHandle: VkQueryPool;
+    FSimulatedResults: array of UInt64;
+    FQueryWritten: array of Boolean;
+    FResetCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice;
+      const ADesc: TRHIQueryPoolDesc);
+    destructor Destroy; override;
+
+    function GetResults(const FirstQuery, QueryCount: Cardinal;
+      out Results: array of UInt64; const WaitForResults: Boolean = False): Boolean; override;
+    procedure SetSimulatedResult(const AQueryIndex: Cardinal; const AValue: UInt64);
+    function IsQueryWritten(const AQueryIndex: Cardinal): Boolean;
+
+    property Handle: VkQueryPool read FHandle;
+    property ResetCount: Cardinal read FResetCount;
+  end;
+
   { -------------------------------------------------------------------------- }
   { Vulkan Command List                                                        }
   { -------------------------------------------------------------------------- }
@@ -193,8 +235,18 @@ type
     FCommandPool: VkCommandPool;
     FHandle: VkCommandBuffer;
     FCurrentPipeline: TVulkanRHIPipeline;
+    FCurrentComputePipeline: TVulkanRHIComputePipeline;
     FInFallbackRenderPass: Boolean;
     FBarrierCount: Cardinal;
+    FSync2BarrierCount: Cardinal;
+    FComputeDispatchCount: Cardinal;
+    FDynamicStateChangeCount: Cardinal;
+    FDynamicCullMode: TRHICullMode;
+    FDynamicFrontFace: TRHIFrontFace;
+    FDynamicDepthTestEnable: Boolean;
+    FDynamicDepthWriteEnable: Boolean;
+    FDynamicDepthCompareOp: TRHICompareOp;
+    FDynamicPrimitiveTopology: TRHIPrimitiveTopology;
   public
     constructor Create(const ADevice: TVulkanRHIDevice; const AQueueFamilyIndex: Cardinal;
       const ALevel: TRHICommandListLevel = cllPrimary);
@@ -217,12 +269,39 @@ type
     procedure SetScissor(const ScissorRect: TRectangle); override;
     procedure SetDepthBias(const ConstantFactor, SlopeFactor: Single); override;
 
+    { Extended Dynamic State (VK_EXT_extended_dynamic_state / Vulkan 1.3 Core) }
+    procedure SetCullMode(const CullMode: TRHICullMode); override;
+    procedure SetFrontFace(const FrontFace: TRHIFrontFace); override;
+    procedure SetDepthTestEnable(const Enable: Boolean); override;
+    procedure SetDepthWriteEnable(const Enable: Boolean); override;
+    procedure SetDepthCompareOp(const CompareOp: TRHICompareOp); override;
+    procedure SetPrimitiveTopology(const Topology: TRHIPrimitiveTopology); override;
+
     procedure BindPipeline(const Pipeline: TRHIPipeline); override;
     procedure BindDescriptorSet(const SetIndex: Cardinal;
       const DescriptorSet: TRHIDescriptorSet;
       const DynamicOffsets: array of Cardinal); override;
     procedure PushConstants(const StageFlags: TRHIShaderStageFlags;
       const Offset, Size: Cardinal; const Data); override;
+
+    { Compute Pipeline & Dispatch (Phase 6.5) }
+    procedure BindComputePipeline(const Pipeline: TRHIComputePipeline); override;
+    procedure BindComputeDescriptorSet(const SetIndex: Cardinal;
+      const DescriptorSet: TRHIDescriptorSet;
+      const DynamicOffsets: array of Cardinal); override;
+    procedure Dispatch(const GroupCountX, GroupCountY, GroupCountZ: Cardinal); override;
+    procedure DispatchIndirect(const IndirectBuffer: TRHIBuffer;
+      const Offset: PtrUInt = 0); override;
+
+    { Hardware Queries (Timestamps & Occlusion Queries - Phase 6.7) }
+    procedure ResetQueryPool(const QueryPool: TRHIQueryPool;
+      const FirstQuery, QueryCount: Cardinal); override;
+    procedure BeginQuery(const QueryPool: TRHIQueryPool;
+      const QueryIndex: Cardinal; const Precise: Boolean = False); override;
+    procedure EndQuery(const QueryPool: TRHIQueryPool;
+      const QueryIndex: Cardinal); override;
+    procedure WriteTimestamp(const QueryPool: TRHIQueryPool;
+      const QueryIndex: Cardinal; const Stage: TRHIShaderStage = ssFragment); override;
 
     procedure BindVertexBuffers(const FirstBinding: Cardinal;
       const Buffers: array of TRHIBuffer;
@@ -246,6 +325,15 @@ type
     property Handle: VkCommandBuffer read FHandle;
     property InFallbackRenderPass: Boolean read FInFallbackRenderPass;
     property BarrierCount: Cardinal read FBarrierCount;
+    property Sync2BarrierCount: Cardinal read FSync2BarrierCount;
+    property ComputeDispatchCount: Cardinal read FComputeDispatchCount;
+    property DynamicStateChangeCount: Cardinal read FDynamicStateChangeCount;
+    property DynamicCullMode: TRHICullMode read FDynamicCullMode;
+    property DynamicFrontFace: TRHIFrontFace read FDynamicFrontFace;
+    property DynamicDepthTestEnable: Boolean read FDynamicDepthTestEnable;
+    property DynamicDepthWriteEnable: Boolean read FDynamicDepthWriteEnable;
+    property DynamicDepthCompareOp: TRHICompareOp read FDynamicDepthCompareOp;
+    property DynamicPrimitiveTopology: TRHIPrimitiveTopology read FDynamicPrimitiveTopology;
   end;
 
   { -------------------------------------------------------------------------- }
@@ -270,6 +358,7 @@ type
   private
     FDevice: VkDevice;
     FAllowFreeIndividualSets: Boolean;
+    FAllowUpdateAfterBind: Boolean;
     FInitialMaxSets: Cardinal;
     FMaxSetsCap: Cardinal;
     FCurrentMaxSets: Cardinal;
@@ -292,7 +381,8 @@ type
     constructor Create(const ADevice: VkDevice;
       const AInitialMaxSets: Cardinal = 1024;
       const AAllowFreeIndividualSets: Boolean = False;
-      const AMaxSetsCap: Cardinal = 4096);
+      const AMaxSetsCap: Cardinal = 4096;
+      const AAllowUpdateAfterBind: Boolean = False);
     destructor Destroy; override;
 
     { Allocates a VkDescriptorSet from the current pool page, growing the pool chain
@@ -310,6 +400,7 @@ type
 
     property Device: VkDevice read FDevice;
     property AllowFreeIndividualSets: Boolean read FAllowFreeIndividualSets;
+    property AllowUpdateAfterBind: Boolean read FAllowUpdateAfterBind write FAllowUpdateAfterBind;
     property InitialMaxSets: Cardinal read FInitialMaxSets;
     property MaxSetsCap: Cardinal read FMaxSetsCap;
     property NextPoolMaxSets: Cardinal read FCurrentMaxSets;
@@ -320,6 +411,92 @@ type
     property TotalAllocatedSetCount: Cardinal read FTotalAllocatedSetCount;
     property ResetCount: Cardinal read FResetCount;
     property ForceNextAllocationError: VkResult read FForceNextAllocationError write FForceNextAllocationError;
+  end;
+
+  { -------------------------------------------------------------------------- }
+  { Bindless Texture & Sampler Indexing Manager (VK_EXT_descriptor_indexing)   }
+  { -------------------------------------------------------------------------- }
+
+  TVulkanBindlessTextureSlot = record
+    Texture: TVulkanRHITexture;
+    Sampler: TVulkanRHISampler;
+    InUse: Boolean;
+    Dirty: Boolean;
+  end;
+
+  { Manages a global bindless combined-image-sampler array (Set 1, Binding 0)
+    backed by VK_EXT_descriptor_indexing / Vulkan 1.2 core descriptor indexing
+    (PARTIALLY_BOUND_BIT | UPDATE_UNUSED_WHILE_PENDING_BIT | optional UPDATE_AFTER_BIND_BIT).
+    Deduplicates (Texture, Sampler) registrations, recycles freed slot indices via an
+    O(1) free-list when textures or samplers are destroyed, and batches descriptor writes. }
+  TCastleVulkanBindlessTextureManager = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FCapacity: Cardinal;
+    FSupportsUpdateAfterBind: Boolean;
+    FLayout: TVulkanRHIDescriptorSetLayout;
+    FDescriptorSet: TVulkanRHIDescriptorSet;
+    FMaterialSSBOBuffer: TRHIBuffer;
+    FSlots: array of TVulkanBindlessTextureSlot;
+    FFreeSlots: array of Cardinal;
+    FActiveSlotCount: Cardinal;
+    FPendingWriteCount: Cardinal;
+    FTotalRegistrations: Cardinal;
+    FDeduplicatedHits: Cardinal;
+    FRecycledSlotReuses: Cardinal;
+    FTotalFlushedWrites: Cardinal;
+
+    procedure EnsureDescriptorSetCreated;
+    function GetFreeSlotCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice;
+      const ACapacity: Cardinal = 4096;
+      const ASupportsUpdateAfterBind: Boolean = True);
+    destructor Destroy; override;
+
+    { Registers a (Texture, Sampler) pair in the global bindless descriptor array
+      and returns its 0-based bindless slot index. Deduplicates existing pairs and
+      reuses recycled slots from FFreeSlots before growing FSlots. }
+    function RegisterTexture(const ATexture: TRHITexture;
+      const ASampler: TRHISampler): Cardinal;
+
+    { Looks up the slot index of an already-registered (Texture, Sampler) pair,
+      returning True if found. }
+    function TryGetTextureIndex(const ATexture: TRHITexture;
+      const ASampler: TRHISampler; out AIndex: Cardinal): Boolean;
+
+    { Unregisters a specific slot index and pushes it onto the free-list for reuse. }
+    procedure UnregisterSlot(const ASlotIndex: Cardinal);
+
+    { Unregisters all slots referencing ATexture (called automatically by TVulkanRHITexture.Destroy)
+      and recycles their slot indices into the free-list. Returns number of slots freed. }
+    function UnregisterTexture(const ATexture: TRHITexture): Cardinal;
+
+    { Unregisters all slots referencing ASampler (called automatically by TVulkanRHISampler.Destroy). }
+    function UnregisterSampler(const ASampler: TRHISampler): Cardinal;
+
+    { Binds a Material SSBO (Set 1, Binding 1) containing TCastleBindlessMaterialEntry records
+      alongside the bindless texture array in Set 1, Binding 0. }
+    procedure SetMaterialStorageBuffer(const ASSBOBuffer: TRHIBuffer;
+      const AOffset: PtrUInt = 0; const ARange: PtrUInt = 0);
+
+    { Batches all dirty slot bindings into FDescriptorSet via BindTextureAtIndex + Update.
+      Returns the number of descriptor writes committed in this flush. }
+    function FlushPendingUpdates: Cardinal;
+
+    property Device: TVulkanRHIDevice read FDevice;
+    property Capacity: Cardinal read FCapacity;
+    property SupportsUpdateAfterBind: Boolean read FSupportsUpdateAfterBind;
+    property Layout: TVulkanRHIDescriptorSetLayout read FLayout;
+    property DescriptorSet: TVulkanRHIDescriptorSet read FDescriptorSet;
+    property MaterialSSBOBuffer: TRHIBuffer read FMaterialSSBOBuffer;
+    property ActiveSlotCount: Cardinal read FActiveSlotCount;
+    property FreeSlotCount: Cardinal read GetFreeSlotCount;
+    property PendingWriteCount: Cardinal read FPendingWriteCount;
+    property TotalRegistrations: Cardinal read FTotalRegistrations;
+    property DeduplicatedHits: Cardinal read FDeduplicatedHits;
+    property RecycledSlotReuses: Cardinal read FRecycledSlotReuses;
+    property TotalFlushedWrites: Cardinal read FTotalFlushedWrites;
   end;
 
   { -------------------------------------------------------------------------- }
@@ -427,6 +604,74 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Timeline Semaphore & GPU Timestamp Profiler (Phases 6.6 & 6.7)             }
+  { -------------------------------------------------------------------------- }
+
+  { Monotonically increasing 64-bit timeline semaphore (VK_KHR_timeline_semaphore / Vulkan 1.2 Core)
+    for host/device and cross-queue (async transfer / compute / graphics) synchronization. }
+  TCastleVulkanTimelineSemaphore = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FHandle: VkSemaphore;
+    FCounterValue: UInt64;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice; const AInitialValue: UInt64 = 0);
+    destructor Destroy; override;
+
+    procedure Signal(const AValue: UInt64);
+    function Wait(const AValue: UInt64; const ATimeoutNs: UInt64 = High(UInt64)): Boolean;
+    function GetCounterValue: UInt64;
+
+    property Handle: VkSemaphore read FHandle;
+  end;
+
+  TVulkanTimestampPassEntry = record
+    PassName: String;
+    BeginQueryIndex: Cardinal;
+    EndQueryIndex: Cardinal;
+    CompletedGpuTimeMs: Single;
+  end;
+
+  { Per-frame non-stalling GPU pass profiler backed by MaxFramesInFlight VkQueryPool
+    instances (VK_QUERY_TYPE_TIMESTAMP). Reads back N-frames-ago timestamp pairs at
+    BeginFrame and converts GPU tick deltas into milliseconds via timestampPeriod. }
+  TCastleVulkanTimestampProfiler = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FMaxPassesPerFrame: Cardinal;
+    FPools: array[0 .. MaxFramesInFlight - 1] of TVulkanRHIQueryPool;
+    FFramePasses: array[0 .. MaxFramesInFlight - 1] of array of TVulkanTimestampPassEntry;
+    FCompletedPasses: array of TVulkanTimestampPassEntry;
+    FLastFrameTotalGpuTimeMs: Single;
+    FCurrentSlot: Cardinal;
+    function GetCompletedPassCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice;
+      const AMaxPassesPerFrame: Cardinal = 32);
+    destructor Destroy; override;
+
+    { Reads back completed timestamps from the frame slot about to be reused and
+      resets its VkQueryPool for new pass recordings. }
+    procedure BeginFrame(const ACmd: TRHICommandList; const AFrameIndex: Cardinal);
+
+    { Records a start timestamp for APassName and returns its pass index for EndPass. }
+    function BeginPass(const ACmd: TRHICommandList; const APassName: String): Integer;
+
+    { Records an end timestamp for APassIndex. }
+    procedure EndPass(const ACmd: TRHICommandList; const APassIndex: Integer);
+
+    { Returns the most recently completed GPU execution time (in ms) for APassName, or 0.0. }
+    function GetPassTimeMs(const APassName: String): Single;
+
+    { Returns the VkQueryPool for a specific frame slot (0 .. MaxFramesInFlight - 1). }
+    function GetQueryPoolForSlot(const AFrameSlot: Cardinal): TVulkanRHIQueryPool;
+
+    property MaxPassesPerFrame: Cardinal read FMaxPassesPerFrame;
+    property CompletedPassCount: Cardinal read GetCompletedPassCount;
+    property LastFrameTotalGpuTimeMs: Single read FLastFrameTotalGpuTimeMs;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -453,6 +698,7 @@ type
   end;
 
   TVulkanPipelineMap = {$ifdef FPC}specialize{$endif} TObjectDictionary<UInt64, TVulkanRHIPipeline>;
+  TVulkanComputePipelineMap = {$ifdef FPC}specialize{$endif} TObjectDictionary<UInt64, TVulkanRHIComputePipeline>;
   TVulkanPipelineLibraryMap = {$ifdef FPC}specialize{$endif} TDictionary<UInt64, VkPipeline>;
   TVulkanRenderPassMap = {$ifdef FPC}specialize{$endif} TDictionary<UInt64, VkRenderPass>;
   TVulkanFramebufferMap = {$ifdef FPC}specialize{$endif} TDictionary<UInt64, VkFramebuffer>;
@@ -473,28 +719,35 @@ type
     FTransferQueueFamily: Cardinal;
     FHasDedicatedTransferQueue: Boolean;
 
-    { Swapchain state }
+    { Swapchain & MSAA state }
     FSwapchain: VkSwapchainKHR;
     FSwapchainFormat: TRHIPixelFormat;
     FSwapchainExtent: VkExtent2D;
     FSwapchainColorTextures: array of TVulkanRHITexture;
     FSwapchainDepthTexture: TVulkanRHITexture;
+    FSwapchainMSAAColorTexture: TVulkanRHITexture;
+    FSwapchainMSAADepthTexture: TVulkanRHITexture;
     FCurrentSwapchainImageIndex: Cardinal;
+    FAntiAliasing: TAntiAliasing;
+    FSampleCount: Cardinal;
 
     { Frame synchronization, deferred resource retirement & command recording }
     FFrames: array[0 .. MaxFramesInFlight - 1] of TVulkanFrameContext;
     FDeferredDeletions: array[0 .. MaxFramesInFlight - 1] of array of TVulkanDeferredDeletionItem;
     FDeferResourceDestruction: Boolean;
 
-    { GPU memory sub-allocator (pooled blocks + per-frame ring buffers) & async staging uploader }
+    { GPU memory sub-allocator (pooled blocks + per-frame ring buffers), async staging uploader, bindless manager & timestamp profiler }
     FMemoryAllocator: TCastleVulkanMemoryAllocator;
     FStagingUploader: TCastleVulkanStagingUploader;
+    FBindlessTextureManager: TCastleVulkanBindlessTextureManager;
+    FTimestampProfiler: TCastleVulkanTimestampProfiler;
 
-    { Descriptor, Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
+    { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
     FDescriptorPool: VkDescriptorPool;
     FPipelineCache: VkPipelineCache;
     FPipelineMap: TVulkanPipelineMap;
+    FComputePipelineMap: TVulkanComputePipelineMap;
     FVertexInputLibMap: TVulkanPipelineLibraryMap;
     FPreRasterLibMap: TVulkanPipelineLibraryMap;
     FFragmentShaderLibMap: TVulkanPipelineLibraryMap;
@@ -507,20 +760,31 @@ type
     FPrewarm2DVertexShader: TRHIShaderModule;
     FPrewarm2DFragmentShader: TRHIShaderModule;
 
-    { Diagnostics, VK_EXT_memory_budget, VK_EXT_graphics_pipeline_library & Vulkan 1.1/1.2 Fallback tracking }
+    { Diagnostics, VK_EXT_memory_budget, VK_EXT_graphics_pipeline_library, Bindless, Extended Dynamic State, Sync2 & Fallback tracking }
     FInstanceApiVersion: Cardinal;
     FDeviceApiVersion: Cardinal;
     FSupportsMemoryBudgetExt: Boolean;
     FSupportsDynamicRendering: Boolean;
     FSupportsGraphicsPipelineLibrary: Boolean;
     FSupportsGPLFastLinking: Boolean;
+    FSupportsBindlessTextures: Boolean;
+    FSupportsBindlessUpdateAfterBind: Boolean;
+    FSupportsExtendedDynamicState: Boolean;
+    FSupportsSynchronization2: Boolean;
+    FSupportsTimelineSemaphores: Boolean;
+    FMaxBindlessTextures: Cardinal;
     FPipelineCacheHits: Cardinal;
     FPipelineCacheMisses: Cardinal;
+    FComputePipelineCacheHits: Cardinal;
+    FComputePipelineCacheMisses: Cardinal;
     FGPLFastLinkedPipelineCount: Cardinal;
     FGPLLibraryCacheHits: Cardinal;
     FGPLLibraryCacheMisses: Cardinal;
     FDescriptorSetAllocations: Cardinal;
     FFallbackRenderPassBeginCount: Cardinal;
+    FMSAAResolvePassCount: Cardinal;
+    FComputeDispatchCount: Cardinal;
+    FSync2BarrierCount: Cardinal;
     FAllocatedMemoryBytes: Int64;
 
     procedure CreateInstance(const EnableValidation: Boolean);
@@ -528,14 +792,22 @@ type
     procedure CreateLogicalDevice;
     procedure CreateSwapchain(const Width, Height: Cardinal);
     procedure DestroySwapchain;
+    procedure EnsureMSAATargets(const AWidth, AHeight: Cardinal;
+      const AColorFormat, ADepthFormat: TRHIPixelFormat);
     procedure CreateFrameContexts;
     procedure CreateDescriptorPool;
     procedure ClearPipelineLibraries;
     procedure ClearFallbackFramebuffers;
     procedure ClearFallbackRenderPasses;
+    procedure SetAntiAliasing(const AValue: TAntiAliasing);
+    procedure SetSampleCount(const AValue: Cardinal);
+    procedure SetSupportsExtendedDynamicState(const AValue: Boolean);
+    procedure SetSupportsSynchronization2(const AValue: Boolean);
+    procedure SetSupportsTimelineSemaphores(const AValue: Boolean);
     function IsDeviceExtensionSupported(const AExtensionName: AnsiString): Boolean;
     function ComputePipelineHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
     function GetPipelineCount: Cardinal;
+    function GetComputePipelineCount: Cardinal;
     function GetVertexInputLibraryCount: Cardinal;
     function GetPreRasterizationLibraryCount: Cardinal;
     function GetFragmentShaderLibraryCount: Cardinal;
@@ -554,7 +826,10 @@ type
       const ASupportsMemoryBudgetExt: Boolean = True;
       const ASupportsDynamicRendering: Boolean = True;
       const ADeviceApiVersion: Cardinal = VK_API_VERSION_1_3;
-      const ASupportsGraphicsPipelineLibrary: Boolean = False); overload;
+      const ASupportsGraphicsPipelineLibrary: Boolean = False;
+      const ASupportsBindlessTextures: Boolean = True;
+      const AMaxBindlessTextures: Cardinal = 4096;
+      const ASupportsExtendedDynamicState: Boolean = False); overload;
     destructor Destroy; override;
 
     { Helper for one-shot transfer commands (texture/buffer uploads) }
@@ -586,6 +861,16 @@ type
       TransientDescriptorAllocator (bulk-reset in O(1) at the start of BeginFrame). }
     function CreateTransientDescriptorSet(
       const Layout: TRHIDescriptorSetLayout): TRHIDescriptorSet;
+
+    { Builds a TRHIRenderingInfo for the swapchain (or an offscreen target), automatically
+      attaching transient MSAA color/depth targets and single-pass ResolveTexture when SampleCount > 1. }
+    function BuildSwapchainRenderingInfo(const ARenderArea: TRectangle;
+      const AResolveColorTarget: TRHITexture;
+      const AResolveDepthTarget: TRHITexture;
+      const AClearColor: TCastleColor;
+      const AColorLoadOp: TRHIAttachmentLoadOp = loClear;
+      const ADepthLoadOp: TRHIAttachmentLoadOp = loClear;
+      const AClearDepth: Single = 1.0): TRHIRenderingInfo;
 
     { Queries live GPU VRAM usage and budget via VK_EXT_memory_budget (or heap fallback).
       Returns True if VK_EXT_memory_budget was used. }
@@ -626,7 +911,7 @@ type
 
     { Acquires or creates a cached VkRenderPass for Vulkan 1.1/1.2 devices that lack
       VK_KHR_dynamic_rendering. Supports explicit LoadOp/StoreOp for multi-pass rendering
-      (e.g. preserving 3D scene contents during 2D UI overlay passes). }
+      and single-pass MSAA resolve attachments (pResolveAttachments) when AHasColorResolve = True. }
     function GetOrCreateFallbackRenderPass(
       const AColorFormats: array of TRHIPixelFormat;
       const ADepthFormat: TRHIPixelFormat;
@@ -634,7 +919,8 @@ type
       const AColorLoadOp: TRHIAttachmentLoadOp = loClear;
       const ADepthLoadOp: TRHIAttachmentLoadOp = loClear;
       const AColorStoreOp: TRHIAttachmentStoreOp = soStore;
-      const ADepthStoreOp: TRHIAttachmentStoreOp = soStore): VkRenderPass;
+      const ADepthStoreOp: TRHIAttachmentStoreOp = soStore;
+      const AHasColorResolve: Boolean = False): VkRenderPass;
 
     { Acquires or creates a cached VkFramebuffer for Vulkan 1.1/1.2 devices that lack
       VK_KHR_dynamic_rendering. }
@@ -669,6 +955,10 @@ type
       const Layout: TRHIDescriptorSetLayout): TRHIDescriptorSet; override;
 
     function GetOrCreatePipeline(const ADesc: TRHIGraphicsPipelineDesc): TRHIPipeline; override;
+    function GetOrCreateComputePipeline(const ADesc: TRHIComputePipelineDesc): TRHIComputePipeline;
+    function CreateComputePipeline(const ADesc: TRHIComputePipelineDesc): TRHIComputePipeline; override;
+    function CreateQueryPool(const ADesc: TRHIQueryPoolDesc): TRHIQueryPool; override;
+    function CreateTimelineSemaphore(const AInitialValue: UInt64 = 0): TCastleVulkanTimelineSemaphore;
 
     function GrabTextureImage(const SourceTexture: TRHITexture;
       const ReadArea: TRectangle): TRGBAlphaImage; override;
@@ -680,15 +970,29 @@ type
     property PhysicalDevice: VkPhysicalDevice read FPhysicalDevice;
     property InstanceApiVersion: Cardinal read FInstanceApiVersion;
     property DeviceApiVersion: Cardinal read FDeviceApiVersion write FDeviceApiVersion;
+    property AntiAliasing: TAntiAliasing read FAntiAliasing write SetAntiAliasing;
+    property SampleCount: Cardinal read FSampleCount write SetSampleCount;
+    property SwapchainMSAAColorTexture: TVulkanRHITexture read FSwapchainMSAAColorTexture;
+    property SwapchainMSAADepthTexture: TVulkanRHITexture read FSwapchainMSAADepthTexture;
+    property MSAAResolvePassCount: Cardinal read FMSAAResolvePassCount;
     property DescriptorPool: VkDescriptorPool read GetDescriptorPoolHandle;
     property PersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator read FPersistentDescriptorAllocator;
     property PipelineCache: VkPipelineCache read FPipelineCache;
     property PipelineCount: Cardinal read GetPipelineCount;
+    property ComputePipelineCount: Cardinal read GetComputePipelineCount;
     property PipelineCacheLoaded: Boolean read FPipelineCacheLoaded;
     property SupportsMemoryBudgetExt: Boolean read FSupportsMemoryBudgetExt;
     property SupportsDynamicRendering: Boolean read FSupportsDynamicRendering write FSupportsDynamicRendering;
     property SupportsGraphicsPipelineLibrary: Boolean read FSupportsGraphicsPipelineLibrary write FSupportsGraphicsPipelineLibrary;
     property SupportsGPLFastLinking: Boolean read FSupportsGPLFastLinking write FSupportsGPLFastLinking;
+    property SupportsBindlessTextures: Boolean read FSupportsBindlessTextures write FSupportsBindlessTextures;
+    property SupportsBindlessUpdateAfterBind: Boolean read FSupportsBindlessUpdateAfterBind write FSupportsBindlessUpdateAfterBind;
+    property SupportsExtendedDynamicState: Boolean read FSupportsExtendedDynamicState write SetSupportsExtendedDynamicState;
+    property SupportsSynchronization2: Boolean read FSupportsSynchronization2 write SetSupportsSynchronization2;
+    property SupportsTimelineSemaphores: Boolean read FSupportsTimelineSemaphores write SetSupportsTimelineSemaphores;
+    property MaxBindlessTextures: Cardinal read FMaxBindlessTextures write FMaxBindlessTextures;
+    property BindlessTextureManager: TCastleVulkanBindlessTextureManager read FBindlessTextureManager;
+    property TimestampProfiler: TCastleVulkanTimestampProfiler read FTimestampProfiler;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -702,6 +1006,10 @@ type
     property FallbackRenderPassBeginCount: Cardinal read FFallbackRenderPassBeginCount;
     property PipelineCacheHits: Cardinal read FPipelineCacheHits;
     property PipelineCacheMisses: Cardinal read FPipelineCacheMisses;
+    property ComputePipelineCacheHits: Cardinal read FComputePipelineCacheHits;
+    property ComputePipelineCacheMisses: Cardinal read FComputePipelineCacheMisses;
+    property ComputeDispatchCount: Cardinal read FComputeDispatchCount;
+    property Sync2BarrierCount: Cardinal read FSync2BarrierCount;
     property DescriptorSetAllocations: Cardinal read FDescriptorSetAllocations;
     property AllocatedMemoryBytes: Int64 read FAllocatedMemoryBytes;
     property MemoryAllocator: TCastleVulkanMemoryAllocator read FMemoryAllocator;
@@ -723,6 +1031,21 @@ function SelectTransferQueueFamilyIndex(
   const AQueueFamilies: array of VkQueueFamilyProperties;
   const AGraphicsQueueFamily: Cardinal;
   out AIsDedicatedTransferQueue: Boolean): Cardinal;
+
+{ Returns the highest power-of-two MSAA sample count (64, 32, 16, 8, 4, 2, 1)
+  supported simultaneously by both color and depth framebuffer sample count masks. }
+function ResolveMaxFramebufferSampleCount(
+  const AColorSampleCounts, ADepthSampleCounts: VkSampleCountFlags): Cardinal;
+
+{ Clamps ARequestedSamples down to the highest sample count bit present in ASupportedMask. }
+function ClampSampleCountToMask(const ARequestedSamples: Cardinal;
+  const ASupportedMask: VkSampleCountFlags): Cardinal;
+
+{ Converts a numeric sample count (1, 2, 4, 8, 16, 32, 64) to VkSampleCountFlagBits. }
+function RHIToVkSampleCountFlags(const ASampleCount: Cardinal): VkSampleCountFlags;
+
+{ Converts TRHIResolveMode to VkResolveModeFlagBits. }
+function RHIToVkResolveMode(const AResolveMode: TRHIResolveMode): Integer;
 
 { Returns the required VkFormatFeatureFlagBits for a given TRHIPixelFormat and TRHITextureUsageFlags set. }
 function GetRequiredVkFormatFeatures(const AFormat: TRHIPixelFormat;
@@ -764,8 +1087,39 @@ procedure ResolveGraphicsPipelineLibraryConfig(const ADeviceApiVersion: Cardinal
   const AHasPipelineLibraryExt, AHasGraphicsPipelineLibraryExt, AHasGPLFeature: Boolean;
   out AUseGPL: Boolean; out ARequiredExtensions: TAnsiStringArray);
 
-{ Computes a deterministic 64-bit FNV-1a hash for a graphics pipeline state descriptor. }
+{ Resolves whether a Vulkan physical device supports bindless texture & sampler indexing
+  via Vulkan 1.2+ core or Vulkan 1.1 + VK_EXT_descriptor_indexing (+ VK_KHR_maintenance3),
+  validating shaderSampledImageArrayNonUniformIndexing, descriptorBindingPartiallyBound,
+  descriptorBindingUpdateUnusedWhilePending, and runtimeDescriptorArray, and clamping
+  MaxBindlessTextures to hardware descriptor limits. }
+procedure ResolveDescriptorIndexingConfig(const ADeviceApiVersion: Cardinal;
+  const AHasDescriptorIndexingExt, AHasMaintenance3Ext: Boolean;
+  const AFeatures: VkPhysicalDeviceDescriptorIndexingFeatures;
+  const AProps: VkPhysicalDeviceDescriptorIndexingProperties;
+  const ARequestedMaxTextures: Cardinal;
+  out AUseBindless, AUseUpdateAfterBind: Boolean;
+  out AClampedMaxTextures: Cardinal;
+  out ARequiredExtensions: TAnsiStringArray);
+
+{ Resolves whether a Vulkan 1.1, 1.2, or 1.3+ physical device supports Extended Dynamic State,
+  Synchronization2 (vkCmdPipelineBarrier2), and Timeline Semaphores (64-bit counters),
+  and returns any extension strings required for pre-1.3 / pre-1.2 devices. }
+procedure ResolveExtendedDynamicStateAndSync2Config(const ADeviceApiVersion: Cardinal;
+  const AHasExtDynStateExt, AHasSync2Ext, AHasTimelineSemExt: Boolean;
+  const AExtDynStateFeature, ASync2Feature, ATimelineSemFeature: Boolean;
+  out AUseExtDynState, AUseSync2, AUseTimelineSem: Boolean;
+  out ARequiredExtensions: TAnsiStringArray);
+
+{ Computes a deterministic 64-bit FNV-1a hash for a graphics pipeline state descriptor.
+  When AIgnoreExtendedDynamicStates = True (VK_EXT_extended_dynamic_state / Vulkan 1.3),
+  CullMode, FrontFace, Topology, DepthTestEnable, DepthWriteEnable, and DepthCompareOp
+  are excluded from the hash so pipelines differing only in dynamic states share a single PSO. }
 function ComputePipelineKeyHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
+function ComputePipelineKeyHashEx(const ADesc: TRHIGraphicsPipelineDesc;
+  const AIgnoreExtendedDynamicStates: Boolean): UInt64;
+
+{ Computes a deterministic 64-bit FNV-1a hash for a compute pipeline state descriptor. }
+function ComputeComputePipelineKeyHash(const ADesc: TRHIComputePipelineDesc): UInt64;
 
 { Computes deterministic 64-bit FNV-1a hashes for the 4 VK_EXT_graphics_pipeline_library subsets. }
 function ComputeVertexInputLibraryKeyHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
@@ -779,7 +1133,8 @@ function ComputeRenderPassKeyHash(const AColorFormats: array of TRHIPixelFormat;
   const AColorLoadOp: TRHIAttachmentLoadOp = loClear;
   const ADepthLoadOp: TRHIAttachmentLoadOp = loClear;
   const AColorStoreOp: TRHIAttachmentStoreOp = soStore;
-  const ADepthStoreOp: TRHIAttachmentStoreOp = soStore): UInt64;
+  const ADepthStoreOp: TRHIAttachmentStoreOp = soStore;
+  const AHasColorResolve: Boolean = False): UInt64;
 
 { Computes a deterministic 64-bit FNV-1a hash for a fallback VkFramebuffer signature. }
 function ComputeFramebufferKeyHash(const ARenderPass: VkRenderPass;
@@ -874,6 +1229,60 @@ begin
   end;
 end;
 
+function ResolveMaxFramebufferSampleCount(
+  const AColorSampleCounts, ADepthSampleCounts: VkSampleCountFlags): Cardinal;
+var
+  CommonMask: VkSampleCountFlags;
+begin
+  CommonMask := AColorSampleCounts and ADepthSampleCounts;
+  if (CommonMask and VK_SAMPLE_COUNT_64_BIT) <> 0 then Exit(64);
+  if (CommonMask and VK_SAMPLE_COUNT_32_BIT) <> 0 then Exit(32);
+  if (CommonMask and VK_SAMPLE_COUNT_16_BIT) <> 0 then Exit(16);
+  if (CommonMask and VK_SAMPLE_COUNT_8_BIT) <> 0 then Exit(8);
+  if (CommonMask and VK_SAMPLE_COUNT_4_BIT) <> 0 then Exit(4);
+  if (CommonMask and VK_SAMPLE_COUNT_2_BIT) <> 0 then Exit(2);
+  Result := 1;
+end;
+
+function ClampSampleCountToMask(const ARequestedSamples: Cardinal;
+  const ASupportedMask: VkSampleCountFlags): Cardinal;
+const
+  PowerOfTwoSamples: array[0..5] of Cardinal = (64, 32, 16, 8, 4, 2);
+var
+  I: Integer;
+begin
+  if ARequestedSamples <= 1 then
+    Exit(1);
+  for I := Low(PowerOfTwoSamples) to High(PowerOfTwoSamples) do
+    if (PowerOfTwoSamples[I] <= ARequestedSamples) and
+       ((ASupportedMask and PowerOfTwoSamples[I]) <> 0) then
+      Exit(PowerOfTwoSamples[I]);
+  Result := 1;
+end;
+
+function RHIToVkSampleCountFlags(const ASampleCount: Cardinal): VkSampleCountFlags;
+begin
+  if ASampleCount >= 64 then Result := VK_SAMPLE_COUNT_64_BIT
+  else if ASampleCount >= 32 then Result := VK_SAMPLE_COUNT_32_BIT
+  else if ASampleCount >= 16 then Result := VK_SAMPLE_COUNT_16_BIT
+  else if ASampleCount >= 8 then Result := VK_SAMPLE_COUNT_8_BIT
+  else if ASampleCount >= 4 then Result := VK_SAMPLE_COUNT_4_BIT
+  else if ASampleCount >= 2 then Result := VK_SAMPLE_COUNT_2_BIT
+  else Result := VK_SAMPLE_COUNT_1_BIT;
+end;
+
+function RHIToVkResolveMode(const AResolveMode: TRHIResolveMode): Integer;
+begin
+  case AResolveMode of
+    rmNone:       Result := VK_RESOLVE_MODE_NONE;
+    rmAverage:    Result := VK_RESOLVE_MODE_AVERAGE_BIT;
+    rmSampleZero: Result := VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
+    rmMin:        Result := VK_RESOLVE_MODE_MIN_BIT;
+    rmMax:        Result := VK_RESOLVE_MODE_MAX_BIT;
+    else          Result := VK_RESOLVE_MODE_AVERAGE_BIT;
+  end;
+end;
+
 procedure ResolveVulkan11_12DeviceConfig(const ADeviceApiVersion: Cardinal;
   const AHasDynamicRenderingExt, AHasDepthStencilResolveExt, AHasCreateRenderPass2Ext: Boolean;
   out AUseDynamicRendering: Boolean; out ARequiredExtensions: TAnsiStringArray);
@@ -932,6 +1341,131 @@ begin
     ARequiredExtensions[1] := VK_EXT_graphics_pipeline_library;
   end else
     AUseGPL := False;
+end;
+
+procedure ResolveDescriptorIndexingConfig(const ADeviceApiVersion: Cardinal;
+  const AHasDescriptorIndexingExt, AHasMaintenance3Ext: Boolean;
+  const AFeatures: VkPhysicalDeviceDescriptorIndexingFeatures;
+  const AProps: VkPhysicalDeviceDescriptorIndexingProperties;
+  const ARequestedMaxTextures: Cardinal;
+  out AUseBindless, AUseUpdateAfterBind: Boolean;
+  out AClampedMaxTextures: Cardinal;
+  out ARequiredExtensions: TAnsiStringArray);
+var
+  HasExtensionOrCore, HasCoreFeatures: Boolean;
+  HwLimit: Cardinal;
+begin
+  SetLength(ARequiredExtensions, 0);
+  AUseBindless := False;
+  AUseUpdateAfterBind := False;
+  AClampedMaxTextures := 0;
+
+  if ADeviceApiVersion >= VK_API_VERSION_1_2 then
+    HasExtensionOrCore := True
+  else
+  if (ADeviceApiVersion >= VK_API_VERSION_1_1) and AHasDescriptorIndexingExt then
+  begin
+    { Vulkan 1.1: VK_KHR_maintenance3 is core in 1.1, only VK_EXT_descriptor_indexing is required }
+    HasExtensionOrCore := True;
+    SetLength(ARequiredExtensions, 1);
+    ARequiredExtensions[0] := VK_EXT_descriptor_indexing;
+  end else
+  if AHasDescriptorIndexingExt and AHasMaintenance3Ext then
+  begin
+    HasExtensionOrCore := True;
+    SetLength(ARequiredExtensions, 2);
+    ARequiredExtensions[0] := VK_KHR_maintenance3;
+    ARequiredExtensions[1] := VK_EXT_descriptor_indexing;
+  end else
+    HasExtensionOrCore := False;
+
+  HasCoreFeatures :=
+    (AFeatures.shaderSampledImageArrayNonUniformIndexing = VK_TRUE) and
+    (AFeatures.descriptorBindingPartiallyBound = VK_TRUE) and
+    (AFeatures.descriptorBindingUpdateUnusedWhilePending = VK_TRUE) and
+    (AFeatures.runtimeDescriptorArray = VK_TRUE);
+
+  if not (HasExtensionOrCore and HasCoreFeatures) then
+  begin
+    SetLength(ARequiredExtensions, 0);
+    Exit;
+  end;
+
+  AUseBindless := True;
+  AUseUpdateAfterBind :=
+    (AFeatures.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE);
+
+  HwLimit := ARequestedMaxTextures;
+  if HwLimit = 0 then
+    HwLimit := 4096;
+
+  if AProps.maxPerStageDescriptorUpdateAfterBindSampledImages > 0 then
+    HwLimit := Min(HwLimit, AProps.maxPerStageDescriptorUpdateAfterBindSampledImages);
+  if AProps.maxDescriptorSetUpdateAfterBindSampledImages > 0 then
+    HwLimit := Min(HwLimit, AProps.maxDescriptorSetUpdateAfterBindSampledImages);
+
+  AClampedMaxTextures := Max(Cardinal(1), HwLimit);
+end;
+
+procedure ResolveExtendedDynamicStateAndSync2Config(const ADeviceApiVersion: Cardinal;
+  const AHasExtDynStateExt, AHasSync2Ext, AHasTimelineSemExt: Boolean;
+  const AExtDynStateFeature, ASync2Feature, ATimelineSemFeature: Boolean;
+  out AUseExtDynState, AUseSync2, AUseTimelineSem: Boolean;
+  out ARequiredExtensions: TAnsiStringArray);
+var
+  ExtIdx: Integer;
+
+  procedure AppendExt(const AExtName: AnsiString);
+  begin
+    ExtIdx := Length(ARequiredExtensions);
+    SetLength(ARequiredExtensions, ExtIdx + 1);
+    ARequiredExtensions[ExtIdx] := AExtName;
+  end;
+
+begin
+  SetLength(ARequiredExtensions, 0);
+  AUseExtDynState := False;
+  AUseSync2 := False;
+  AUseTimelineSem := False;
+
+  if ADeviceApiVersion < VK_API_VERSION_1_1 then
+    Exit;
+
+  { 1. Extended Dynamic State: Core in Vulkan 1.3, VK_EXT_extended_dynamic_state in 1.1/1.2 }
+  if AExtDynStateFeature then
+  begin
+    if ADeviceApiVersion >= VK_API_VERSION_1_3 then
+      AUseExtDynState := True
+    else if AHasExtDynStateExt then
+    begin
+      AUseExtDynState := True;
+      AppendExt(VK_EXT_extended_dynamic_state);
+    end;
+  end;
+
+  { 2. Synchronization2: Core in Vulkan 1.3, VK_KHR_synchronization2 in 1.1/1.2 }
+  if ASync2Feature then
+  begin
+    if ADeviceApiVersion >= VK_API_VERSION_1_3 then
+      AUseSync2 := True
+    else if AHasSync2Ext then
+    begin
+      AUseSync2 := True;
+      AppendExt(VK_KHR_synchronization2);
+    end;
+  end;
+
+  { 3. Timeline Semaphores: Core in Vulkan 1.2+, VK_KHR_timeline_semaphore in 1.1 }
+  if ATimelineSemFeature then
+  begin
+    if ADeviceApiVersion >= VK_API_VERSION_1_2 then
+      AUseTimelineSem := True
+    else if AHasTimelineSemExt then
+    begin
+      AUseTimelineSem := True;
+      AppendExt(VK_KHR_timeline_semaphore);
+    end;
+  end;
 end;
 
 {$push}{$Q-}{$R-}
@@ -1026,7 +1560,8 @@ begin
     HashBytesFNV1a(Result, ADesc.ColorAttachmentFormats[I], SizeOf(TRHIPixelFormat));
 end;
 
-function ComputePipelineKeyHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
+function ComputePipelineKeyHashEx(const ADesc: TRHIGraphicsPipelineDesc;
+  const AIgnoreExtendedDynamicStates: Boolean): UInt64;
 var
   I: Integer;
 begin
@@ -1034,9 +1569,19 @@ begin
   HashUInt64FNV1a(Result, PtrUInt(ADesc.VertexShader));
   HashUInt64FNV1a(Result, PtrUInt(ADesc.FragmentShader));
   HashUInt64FNV1a(Result, PtrUInt(ADesc.GeometryShader));
-  HashBytesFNV1a(Result, ADesc.Topology, SizeOf(ADesc.Topology));
-  HashBytesFNV1a(Result, ADesc.Rasterizer, SizeOf(ADesc.Rasterizer));
-  HashBytesFNV1a(Result, ADesc.DepthStencil, SizeOf(ADesc.DepthStencil));
+  if not AIgnoreExtendedDynamicStates then
+  begin
+    HashBytesFNV1a(Result, ADesc.Topology, SizeOf(ADesc.Topology));
+    HashBytesFNV1a(Result, ADesc.Rasterizer, SizeOf(ADesc.Rasterizer));
+    HashBytesFNV1a(Result, ADesc.DepthStencil, SizeOf(ADesc.DepthStencil));
+  end else
+  begin
+    { PolygonMode, DepthBiasEnable, DepthClampEnable, and StencilTestEnable remain baked }
+    HashBytesFNV1a(Result, ADesc.Rasterizer.PolygonMode, SizeOf(ADesc.Rasterizer.PolygonMode));
+    HashBytesFNV1a(Result, ADesc.Rasterizer.DepthBiasEnable, SizeOf(ADesc.Rasterizer.DepthBiasEnable));
+    HashBytesFNV1a(Result, ADesc.Rasterizer.DepthClampEnable, SizeOf(ADesc.Rasterizer.DepthClampEnable));
+    HashBytesFNV1a(Result, ADesc.DepthStencil.StencilTestEnable, SizeOf(ADesc.DepthStencil.StencilTestEnable));
+  end;
   HashBytesFNV1a(Result, ADesc.BlendState, SizeOf(ADesc.BlendState));
   HashBytesFNV1a(Result, ADesc.PushConstantSize, SizeOf(ADesc.PushConstantSize));
   HashBytesFNV1a(Result, ADesc.PushConstantStages, SizeOf(ADesc.PushConstantStages));
@@ -1058,10 +1603,31 @@ begin
     HashBytesFNV1a(Result, ADesc.ColorAttachmentFormats[I], SizeOf(TRHIPixelFormat));
 end;
 
+function ComputePipelineKeyHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
+begin
+  Result := ComputePipelineKeyHashEx(ADesc, False);
+end;
+
+function ComputeComputePipelineKeyHash(const ADesc: TRHIComputePipelineDesc): UInt64;
+var
+  I, Count: Integer;
+begin
+  Result := FNV1aOffsetBasis64;
+  HashUInt64FNV1a(Result, PtrUInt(ADesc.ComputeShader));
+  HashBytesFNV1a(Result, ADesc.PushConstantSize, SizeOf(ADesc.PushConstantSize));
+  HashBytesFNV1a(Result, ADesc.PushConstantStages, SizeOf(ADesc.PushConstantStages));
+
+  Count := Length(ADesc.DescriptorSetLayouts);
+  HashBytesFNV1a(Result, Count, SizeOf(Count));
+  for I := 0 to High(ADesc.DescriptorSetLayouts) do
+    HashUInt64FNV1a(Result, PtrUInt(ADesc.DescriptorSetLayouts[I]));
+end;
+
 function ComputeRenderPassKeyHash(const AColorFormats: array of TRHIPixelFormat;
   const ADepthFormat: TRHIPixelFormat; const ASampleCount: Cardinal;
   const AColorLoadOp: TRHIAttachmentLoadOp; const ADepthLoadOp: TRHIAttachmentLoadOp;
-  const AColorStoreOp: TRHIAttachmentStoreOp; const ADepthStoreOp: TRHIAttachmentStoreOp): UInt64;
+  const AColorStoreOp: TRHIAttachmentStoreOp; const ADepthStoreOp: TRHIAttachmentStoreOp;
+  const AHasColorResolve: Boolean): UInt64;
 var
   I, ColorCount: Integer;
 begin
@@ -1076,6 +1642,8 @@ begin
   HashBytesFNV1a(Result, ADepthLoadOp, SizeOf(ADepthLoadOp));
   HashBytesFNV1a(Result, AColorStoreOp, SizeOf(AColorStoreOp));
   HashBytesFNV1a(Result, ADepthStoreOp, SizeOf(ADepthStoreOp));
+  if AHasColorResolve then
+    HashBytesFNV1a(Result, AHasColorResolve, SizeOf(AHasColorResolve));
 end;
 
 function ComputeFramebufferKeyHash(const ARenderPass: VkRenderPass;
@@ -1493,6 +2061,67 @@ begin
   end;
 end;
 
+procedure RHIStateToVkLayoutAndAccess2(const State: TRHIResourceState;
+  out Layout: VkImageLayout; out Access: VkAccessFlags2; out Stage: VkPipelineStageFlags2);
+begin
+  case State of
+    rsUndefined:
+      begin
+        Layout := VK_IMAGE_LAYOUT_UNDEFINED;
+        Access := VK_ACCESS_2_NONE;
+        Stage  := VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+      end;
+    rsTransferDst:
+      begin
+        Layout := VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        Access := VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        Stage  := VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
+      end;
+    rsTransferSrc:
+      begin
+        Layout := VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        Access := VK_ACCESS_2_TRANSFER_READ_BIT;
+        Stage  := VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
+      end;
+    rsShaderRead:
+      begin
+        Layout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        Access := VK_ACCESS_2_SHADER_READ_BIT;
+        Stage  := VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT or VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+      end;
+    rsColorAttachment:
+      begin
+        Layout := VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        Access := VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT or VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        Stage  := VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+      end;
+    rsDepthStencilWrite:
+      begin
+        Layout := VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        Access := VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT or VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        Stage  := VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT or VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+      end;
+    rsDepthStencilRead:
+      begin
+        Layout := VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        Access := VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT or VK_ACCESS_2_SHADER_READ_BIT;
+        Stage  := VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT or VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+      end;
+    rsPresent:
+      begin
+        Layout := VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        Access := VK_ACCESS_2_NONE;
+        Stage  := VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+      end;
+    else
+      begin
+        Layout := VK_IMAGE_LAYOUT_GENERAL;
+        Access := VK_ACCESS_2_SHADER_READ_BIT or VK_ACCESS_2_SHADER_WRITE_BIT;
+        Stage  := VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT or VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+      end;
+  end;
+end;
+
 procedure RHIStateToVkBufferAccessAndStage(const State: TRHIResourceState;
   out Access: VkAccessFlags; out Stage: VkPipelineStageFlags);
 begin
@@ -1518,12 +2147,54 @@ begin
                   VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT or VK_ACCESS_INDEX_READ_BIT;
         Stage  := VK_PIPELINE_STAGE_VERTEX_INPUT_BIT or
                   VK_PIPELINE_STAGE_VERTEX_SHADER_BIT or
-                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT or
+                  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
       end;
     else
       begin
         Access := VK_ACCESS_MEMORY_READ_BIT or VK_ACCESS_MEMORY_WRITE_BIT;
         Stage  := VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+      end;
+  end;
+end;
+
+procedure RHIStateToVkBufferAccessAndStage2(const State: TRHIResourceState;
+  out Access: VkAccessFlags2; out Stage: VkPipelineStageFlags2);
+begin
+  case State of
+    rsUndefined:
+      begin
+        Access := VK_ACCESS_2_NONE;
+        Stage  := VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+      end;
+    rsTransferDst:
+      begin
+        Access := VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        Stage  := VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
+      end;
+    rsTransferSrc:
+      begin
+        Access := VK_ACCESS_2_TRANSFER_READ_BIT;
+        Stage  := VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
+      end;
+    rsShaderRead:
+      begin
+        Access := VK_ACCESS_2_UNIFORM_READ_BIT or VK_ACCESS_2_SHADER_READ_BIT or
+                  VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT or VK_ACCESS_2_INDEX_READ_BIT;
+        Stage  := VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT or
+                  VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT or
+                  VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT or
+                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+      end;
+    else
+      begin
+        Access := VK_ACCESS_2_SHADER_READ_BIT or VK_ACCESS_2_SHADER_WRITE_BIT or
+                  VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT or VK_ACCESS_2_INDEX_READ_BIT or
+                  VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+        Stage  := VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT or
+                  VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT or
+                  VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT or
+                  VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
       end;
   end;
 end;
@@ -1730,9 +2401,19 @@ var
   ApproxBytes: VkDeviceSize;
 begin
   NegotiatedDesc := ADesc;
+  if NegotiatedDesc.SampleCount = 0 then
+    NegotiatedDesc.SampleCount := 1;
   if ADevice <> nil then
+  begin
     NegotiatedDesc.Format := NegotiateOptimalPixelFormat(
       ADesc.Format, ADesc.Usage, ADevice.PhysicalDevice);
+    if ADevice.Capabilities.MaxFramebufferSampleCount > 0 then
+      NegotiatedDesc.SampleCount := ClampSampleCountToCapabilities(
+        NegotiatedDesc.SampleCount, ADevice.Capabilities.MaxFramebufferSampleCount);
+  end;
+  { Per VUID-VkImageCreateInfo-samples-02257, multisampled images must have mipLevels = 1 }
+  if NegotiatedDesc.SampleCount > 1 then
+    NegotiatedDesc.MipLevels := 1;
 
   inherited Create(ADevice, NegotiatedDesc);
   FOwnsImage := True;
@@ -1742,7 +2423,8 @@ begin
 
   ApproxBytes := VkDeviceSize(Max(1, FDesc.Width)) *
     VkDeviceSize(Max(1, FDesc.Height)) *
-    VkDeviceSize(Max(1, FDesc.DepthOrArrayLayers)) * 4;
+    VkDeviceSize(Max(1, FDesc.DepthOrArrayLayers)) *
+    VkDeviceSize(Max(Cardinal(1), FDesc.SampleCount)) * 4;
 
   if (ADevice = nil) or (ADevice.Handle = nil) then
   begin
@@ -1770,7 +2452,7 @@ begin
   ImgInfo.extent.depth := 1;
   ImgInfo.mipLevels := FDesc.MipLevels;
   ImgInfo.arrayLayers := FDesc.DepthOrArrayLayers;
-  ImgInfo.samples := VK_SAMPLE_COUNT_1_BIT;
+  ImgInfo.samples := RHIToVkSampleCountFlags(FDesc.SampleCount);
   ImgInfo.tiling := VK_IMAGE_TILING_OPTIMAL;
   ImgInfo.initialLayout := VK_IMAGE_LAYOUT_UNDEFINED;
 
@@ -1842,6 +2524,8 @@ destructor TVulkanRHITexture.Destroy;
 begin
   if VulkanDevice <> nil then
   begin
+    if VulkanDevice.BindlessTextureManager <> nil then
+      VulkanDevice.BindlessTextureManager.UnregisterTexture(Self);
     if VulkanDevice.StagingUploader <> nil then
       VulkanDevice.StagingUploader.CancelPendingUploadsForTexture(Self);
     if FOwnsImage then
@@ -1985,13 +2669,23 @@ begin
   SamplerInfo.minFilter := VK_FILTER_LINEAR;
   SamplerInfo.mipmapMode := VK_SAMPLER_MIPMAP_MODE_LINEAR;
   SamplerInfo.maxLod := ADesc.MaxLod;
-  CheckVk(vkCreateSampler(ADevice.Handle, @SamplerInfo, nil, @FHandle), 'vkCreateSampler');
+  if (ADevice <> nil) and (ADevice.Handle <> nil) and Assigned(vkCreateSampler) then
+    CheckVk(vkCreateSampler(ADevice.Handle, @SamplerInfo, nil, @FHandle), 'vkCreateSampler')
+  else
+    FHandle := VkSampler(PtrUInt(Self));
 end;
 
 destructor TVulkanRHISampler.Destroy;
 begin
-  if FHandle <> VK_NULL_HANDLE then
-    vkDestroySampler(TVulkanRHIDevice(Device).Handle, FHandle, nil);
+  if Device <> nil then
+  begin
+    if TVulkanRHIDevice(Device).BindlessTextureManager <> nil then
+      TVulkanRHIDevice(Device).BindlessTextureManager.UnregisterSampler(Self);
+    if (FHandle <> VK_NULL_HANDLE) and (TVulkanRHIDevice(Device).Handle <> nil) and
+       Assigned(vkDestroySampler) then
+      vkDestroySampler(TVulkanRHIDevice(Device).Handle, FHandle, nil);
+  end;
+  FHandle := VK_NULL_HANDLE;
   inherited;
 end;
 
@@ -2038,11 +2732,17 @@ constructor TVulkanRHIDescriptorSetLayout.Create(const ADevice: TVulkanRHIDevice
   const Bindings: array of TRHIDescriptorBindingDesc);
 var
   VkBindings: array of VkDescriptorSetLayoutBinding;
+  VkBindingFlags: array of VkDescriptorBindingFlags;
+  BindingFlagsInfo: VkDescriptorSetLayoutBindingFlagsCreateInfo;
+  HasAnyBindingFlags: Boolean;
   LayoutInfo: VkDescriptorSetLayoutCreateInfo;
   I: Integer;
 begin
   inherited Create(ADevice, '');
+  FUsesUpdateAfterBind := False;
+  HasAnyBindingFlags := False;
   SetLength(VkBindings, Length(Bindings));
+  SetLength(VkBindingFlags, Length(Bindings));
   for I := 0 to High(Bindings) do
   begin
     FillChar(VkBindings[I], SizeOf(VkDescriptorSetLayoutBinding), 0);
@@ -2058,13 +2758,41 @@ begin
       dtSampler:              VkBindings[I].descriptorType := VK_DESCRIPTOR_TYPE_SAMPLER;
       dtStorageImage:         VkBindings[I].descriptorType := VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     end;
+
+    VkBindingFlags[I] := 0;
+    if Bindings[I].BindingFlags <> [] then
+    begin
+      HasAnyBindingFlags := True;
+      if dbfPartiallyBound in Bindings[I].BindingFlags then
+        VkBindingFlags[I] := VkBindingFlags[I] or VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
+      if dbfUpdateUnusedWhilePending in Bindings[I].BindingFlags then
+        VkBindingFlags[I] := VkBindingFlags[I] or VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT;
+      if dbfUpdateAfterBind in Bindings[I].BindingFlags then
+      begin
+        VkBindingFlags[I] := VkBindingFlags[I] or VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+        FUsesUpdateAfterBind := True;
+      end;
+      if dbfVariableDescriptorCount in Bindings[I].BindingFlags then
+        VkBindingFlags[I] := VkBindingFlags[I] or VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+    end;
   end;
 
   FillChar(LayoutInfo, SizeOf(LayoutInfo), 0);
   LayoutInfo.sType := VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  if FUsesUpdateAfterBind then
+    LayoutInfo.flags := VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
   LayoutInfo.bindingCount := Length(VkBindings);
   if Length(VkBindings) > 0 then
     LayoutInfo.pBindings := @VkBindings[0];
+
+  if HasAnyBindingFlags and (Length(VkBindingFlags) > 0) then
+  begin
+    FillChar(BindingFlagsInfo, SizeOf(BindingFlagsInfo), 0);
+    BindingFlagsInfo.sType := VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+    BindingFlagsInfo.bindingCount := Length(VkBindingFlags);
+    BindingFlagsInfo.pBindingFlags := @VkBindingFlags[0];
+    LayoutInfo.pNext := @BindingFlagsInfo;
+  end;
 
   if (ADevice <> nil) and (ADevice.Handle <> nil) and Assigned(vkCreateDescriptorSetLayout) then
     CheckVk(vkCreateDescriptorSetLayout(ADevice.Handle, @LayoutInfo, nil, @FHandle), 'vkCreateDescriptorSetLayout')
@@ -2130,7 +2858,7 @@ end;
 procedure TVulkanRHIDescriptorSet.BindUniformBuffer(const Binding: Cardinal;
   const Buffer: TRHIBuffer; const Offset, Range: PtrUInt);
 var
-  Idx: Integer;
+  Idx, WriteIdx: Integer;
 begin
   if Buffer = nil then Exit;
   Idx := Length(FBufferInfos);
@@ -2143,20 +2871,23 @@ begin
   else
     FBufferInfos[Idx].range := Buffer.Desc.Size - Offset;
 
-  SetLength(FPendingWrites, Length(FPendingWrites) + 1);
-  FillChar(FPendingWrites[High(FPendingWrites)], SizeOf(VkWriteDescriptorSet), 0);
-  FPendingWrites[High(FPendingWrites)].sType := VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  FPendingWrites[High(FPendingWrites)].dstSet := FHandle;
-  FPendingWrites[High(FPendingWrites)].dstBinding := Binding;
-  FPendingWrites[High(FPendingWrites)].dstArrayElement := Idx;
-  FPendingWrites[High(FPendingWrites)].descriptorCount := 1;
-  FPendingWrites[High(FPendingWrites)].descriptorType := VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  WriteIdx := Length(FPendingWrites);
+  SetLength(FPendingWrites, WriteIdx + 1);
+  SetLength(FPendingWriteInfoIndices, WriteIdx + 1);
+  FPendingWriteInfoIndices[WriteIdx] := Idx;
+  FillChar(FPendingWrites[WriteIdx], SizeOf(VkWriteDescriptorSet), 0);
+  FPendingWrites[WriteIdx].sType := VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  FPendingWrites[WriteIdx].dstSet := FHandle;
+  FPendingWrites[WriteIdx].dstBinding := Binding;
+  FPendingWrites[WriteIdx].dstArrayElement := 0;
+  FPendingWrites[WriteIdx].descriptorCount := 1;
+  FPendingWrites[WriteIdx].descriptorType := VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 end;
 
 procedure TVulkanRHIDescriptorSet.BindStorageBuffer(const Binding: Cardinal;
   const Buffer: TRHIBuffer; const Offset, Range: PtrUInt);
 var
-  Idx: Integer;
+  Idx, WriteIdx: Integer;
 begin
   if Buffer = nil then Exit;
   Idx := Length(FBufferInfos);
@@ -2169,20 +2900,29 @@ begin
   else
     FBufferInfos[Idx].range := Buffer.Desc.Size - Offset;
 
-  SetLength(FPendingWrites, Length(FPendingWrites) + 1);
-  FillChar(FPendingWrites[High(FPendingWrites)], SizeOf(VkWriteDescriptorSet), 0);
-  FPendingWrites[High(FPendingWrites)].sType := VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  FPendingWrites[High(FPendingWrites)].dstSet := FHandle;
-  FPendingWrites[High(FPendingWrites)].dstBinding := Binding;
-  FPendingWrites[High(FPendingWrites)].dstArrayElement := Idx;
-  FPendingWrites[High(FPendingWrites)].descriptorCount := 1;
-  FPendingWrites[High(FPendingWrites)].descriptorType := VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  WriteIdx := Length(FPendingWrites);
+  SetLength(FPendingWrites, WriteIdx + 1);
+  SetLength(FPendingWriteInfoIndices, WriteIdx + 1);
+  FPendingWriteInfoIndices[WriteIdx] := Idx;
+  FillChar(FPendingWrites[WriteIdx], SizeOf(VkWriteDescriptorSet), 0);
+  FPendingWrites[WriteIdx].sType := VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  FPendingWrites[WriteIdx].dstSet := FHandle;
+  FPendingWrites[WriteIdx].dstBinding := Binding;
+  FPendingWrites[WriteIdx].dstArrayElement := 0;
+  FPendingWrites[WriteIdx].descriptorCount := 1;
+  FPendingWrites[WriteIdx].descriptorType := VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 end;
 
 procedure TVulkanRHIDescriptorSet.BindTexture(const Binding: Cardinal;
   const Texture: TRHITexture; const Sampler: TRHISampler);
+begin
+  BindTextureAtIndex(Binding, 0, Texture, Sampler);
+end;
+
+procedure TVulkanRHIDescriptorSet.BindTextureAtIndex(const Binding, ArrayElement: Cardinal;
+  const Texture: TRHITexture; const Sampler: TRHISampler);
 var
-  Idx: Integer;
+  Idx, WriteIdx: Integer;
 begin
   if Texture = nil then Exit;
   Idx := Length(FImageInfos);
@@ -2195,37 +2935,38 @@ begin
   FImageInfos[Idx].imageView := (Texture as TVulkanRHITexture).ImageView;
   FImageInfos[Idx].imageLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-  SetLength(FPendingWrites, Length(FPendingWrites) + 1);
-  FillChar(FPendingWrites[High(FPendingWrites)], SizeOf(VkWriteDescriptorSet), 0);
-  FPendingWrites[High(FPendingWrites)].sType := VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  FPendingWrites[High(FPendingWrites)].dstSet := FHandle;
-  FPendingWrites[High(FPendingWrites)].dstBinding := Binding;
-  FPendingWrites[High(FPendingWrites)].dstArrayElement := Idx;
-  FPendingWrites[High(FPendingWrites)].descriptorCount := 1;
-  FPendingWrites[High(FPendingWrites)].descriptorType := VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  WriteIdx := Length(FPendingWrites);
+  SetLength(FPendingWrites, WriteIdx + 1);
+  SetLength(FPendingWriteInfoIndices, WriteIdx + 1);
+  FPendingWriteInfoIndices[WriteIdx] := Idx;
+  FillChar(FPendingWrites[WriteIdx], SizeOf(VkWriteDescriptorSet), 0);
+  FPendingWrites[WriteIdx].sType := VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  FPendingWrites[WriteIdx].dstSet := FHandle;
+  FPendingWrites[WriteIdx].dstBinding := Binding;
+  FPendingWrites[WriteIdx].dstArrayElement := ArrayElement;
+  FPendingWrites[WriteIdx].descriptorCount := 1;
+  FPendingWrites[WriteIdx].descriptorType := VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 end;
 
 procedure TVulkanRHIDescriptorSet.Update;
 var
-  I: Integer;
+  I, InfoIdx: Integer;
 begin
   if Length(FPendingWrites) > 0 then
   begin
     for I := 0 to High(FPendingWrites) do
     begin
+      InfoIdx := FPendingWriteInfoIndices[I];
       if FPendingWrites[I].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER then
-      begin
-        FPendingWrites[I].pImageInfo := @FImageInfos[FPendingWrites[I].dstArrayElement];
-        FPendingWrites[I].dstArrayElement := 0;
-      end else
-      begin
-        FPendingWrites[I].pBufferInfo := @FBufferInfos[FPendingWrites[I].dstArrayElement];
-        FPendingWrites[I].dstArrayElement := 0;
-      end;
+        FPendingWrites[I].pImageInfo := @FImageInfos[InfoIdx]
+      else
+        FPendingWrites[I].pBufferInfo := @FBufferInfos[InfoIdx];
     end;
     if (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and Assigned(vkUpdateDescriptorSets) then
       vkUpdateDescriptorSets(VulkanDevice.Handle, Length(FPendingWrites), @FPendingWrites[0], 0, nil);
+    Inc(FUpdateCount);
     SetLength(FPendingWrites, 0);
+    SetLength(FPendingWriteInfoIndices, 0);
     SetLength(FBufferInfos, 0);
     SetLength(FImageInfos, 0);
   end;
@@ -2249,7 +2990,8 @@ var
   DepthStencil: VkPipelineDepthStencilStateCreateInfo;
   BlendAttachments: array of VkPipelineColorBlendAttachmentState;
   ColorBlending: VkPipelineColorBlendStateCreateInfo;
-  DynamicStates: array[0..2] of VkDynamicState;
+  DynamicStates: array[0..8] of VkDynamicState;
+  DynamicStateCount: Cardinal;
   DynamicStateInfo: VkPipelineDynamicStateCreateInfo;
   ColorFormats: array of VkFormat;
   RenderingInfo: VkPipelineRenderingCreateInfoKHR;
@@ -2338,7 +3080,11 @@ begin
     Exit;
   end;
 
-  if ADevice.Handle = nil then Exit;
+  if ADevice.Handle = nil then
+  begin
+    FHandle := VkPipeline(PtrUInt(Self));
+    Exit;
+  end;
 
   { 2. Shader Stages }
   StageCount := 0;
@@ -2421,10 +3167,7 @@ begin
 
   FillChar(Multisampling, SizeOf(Multisampling), 0);
   Multisampling.sType := VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-  if ADesc.SampleCount > 1 then
-    Multisampling.rasterizationSamples := ADesc.SampleCount
-  else
-    Multisampling.rasterizationSamples := VK_SAMPLE_COUNT_1_BIT;
+  Multisampling.rasterizationSamples := RHIToVkSampleCountFlags(ADesc.SampleCount);
 
   FillChar(DepthStencil, SizeOf(DepthStencil), 0);
   DepthStencil.sType := VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
@@ -2458,13 +3201,25 @@ begin
 
   DynamicStates[0] := VK_DYNAMIC_STATE_VIEWPORT;
   DynamicStates[1] := VK_DYNAMIC_STATE_SCISSOR;
-  DynamicStates[2] := VK_DYNAMIC_STATE_DEPTH_BIAS;
+  DynamicStateCount := 2;
+  if ADesc.Rasterizer.DepthBiasEnable then
+  begin
+    DynamicStates[DynamicStateCount] := VK_DYNAMIC_STATE_DEPTH_BIAS;
+    Inc(DynamicStateCount);
+  end;
+  if ADevice.SupportsExtendedDynamicState then
+  begin
+    DynamicStates[DynamicStateCount] := VK_DYNAMIC_STATE_CULL_MODE;
+    DynamicStates[DynamicStateCount + 1] := VK_DYNAMIC_STATE_FRONT_FACE;
+    DynamicStates[DynamicStateCount + 2] := VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY;
+    DynamicStates[DynamicStateCount + 3] := VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE;
+    DynamicStates[DynamicStateCount + 4] := VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE;
+    DynamicStates[DynamicStateCount + 5] := VK_DYNAMIC_STATE_DEPTH_COMPARE_OP;
+    Inc(DynamicStateCount, 6);
+  end;
   FillChar(DynamicStateInfo, SizeOf(DynamicStateInfo), 0);
   DynamicStateInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-  if ADesc.Rasterizer.DepthBiasEnable then
-    DynamicStateInfo.dynamicStateCount := 3
-  else
-    DynamicStateInfo.dynamicStateCount := 2;
+  DynamicStateInfo.dynamicStateCount := DynamicStateCount;
   DynamicStateInfo.pDynamicStates := @DynamicStates[0];
 
   { 5. Set up VkPipelineRenderingCreateInfoKHR (Vulkan 1.3 Dynamic Rendering)
@@ -2520,6 +3275,185 @@ begin
       vkDestroyPipelineLayout(TVulkanRHIDevice(Device).Handle, FPipelineLayout, nil);
   end;
   inherited;
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TVulkanRHIComputePipeline (Phase 6.5)                                        }
+{ ---------------------------------------------------------------------------- }
+
+constructor TVulkanRHIComputePipeline.Create(const ADevice: TVulkanRHIDevice;
+  const ADesc: TRHIComputePipelineDesc; const AOwnsHandle: Boolean);
+var
+  SetLayouts: array of VkDescriptorSetLayout;
+  PushRange: VkPushConstantRange;
+  LayoutInfo: VkPipelineLayoutCreateInfo;
+  ComputeInfo: VkComputePipelineCreateInfo;
+  I: Integer;
+begin
+  inherited Create(ADevice, ADesc);
+  FOwnsHandle := AOwnsHandle;
+  if ADevice = nil then Exit;
+
+  if ADevice.Handle = nil then
+  begin
+    FPipelineLayout := VkPipelineLayout(PtrUInt(Self));
+    FHandle := VkPipeline(PtrUInt(Self));
+    Exit;
+  end;
+
+  SetLength(SetLayouts, Length(ADesc.DescriptorSetLayouts));
+  for I := 0 to High(ADesc.DescriptorSetLayouts) do
+    if ADesc.DescriptorSetLayouts[I] <> nil then
+      SetLayouts[I] := (ADesc.DescriptorSetLayouts[I] as TVulkanRHIDescriptorSetLayout).Handle
+    else
+      SetLayouts[I] := VK_NULL_HANDLE;
+
+  FillChar(LayoutInfo, SizeOf(LayoutInfo), 0);
+  LayoutInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  LayoutInfo.setLayoutCount := Length(SetLayouts);
+  if Length(SetLayouts) > 0 then
+    LayoutInfo.pSetLayouts := @SetLayouts[0];
+
+  if ADesc.PushConstantSize > 0 then
+  begin
+    FillChar(PushRange, SizeOf(PushRange), 0);
+    PushRange.stageFlags := RHIToVkShaderStageFlags(ADesc.PushConstantStages);
+    if PushRange.stageFlags = 0 then
+      PushRange.stageFlags := VK_SHADER_STAGE_COMPUTE_BIT;
+    PushRange.offset := 0;
+    PushRange.size := ADesc.PushConstantSize;
+    LayoutInfo.pushConstantRangeCount := 1;
+    LayoutInfo.pPushConstantRanges := @PushRange;
+  end;
+
+  CheckVk(vkCreatePipelineLayout(ADevice.Handle, @LayoutInfo, nil, @FPipelineLayout),
+    'vkCreatePipelineLayout(Compute)');
+
+  if (ADesc.ComputeShader <> nil) and
+     ((ADesc.ComputeShader as TVulkanRHIShaderModule).Handle <> VK_NULL_HANDLE) and
+     Assigned(vkCreateComputePipelines) then
+  begin
+    FillChar(ComputeInfo, SizeOf(ComputeInfo), 0);
+    ComputeInfo.sType := VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    ComputeInfo.stage.sType := VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    ComputeInfo.stage.stage := VK_SHADER_STAGE_COMPUTE_BIT;
+    ComputeInfo.stage.module := (ADesc.ComputeShader as TVulkanRHIShaderModule).Handle;
+    ComputeInfo.stage.pName := 'main';
+    ComputeInfo.layout := FPipelineLayout;
+    CheckVk(vkCreateComputePipelines(ADevice.Handle, ADevice.PipelineCache, 1,
+      @ComputeInfo, nil, @FHandle), 'vkCreateComputePipelines');
+  end;
+end;
+
+destructor TVulkanRHIComputePipeline.Destroy;
+begin
+  if FOwnsHandle and (Device <> nil) and (TVulkanRHIDevice(Device).Handle <> nil) then
+  begin
+    if (FHandle <> VK_NULL_HANDLE) and Assigned(vkDestroyPipeline) then
+      vkDestroyPipeline(TVulkanRHIDevice(Device).Handle, FHandle, nil);
+    if (FPipelineLayout <> VK_NULL_HANDLE) and Assigned(vkDestroyPipelineLayout) then
+      vkDestroyPipelineLayout(TVulkanRHIDevice(Device).Handle, FPipelineLayout, nil);
+  end;
+  FHandle := VK_NULL_HANDLE;
+  FPipelineLayout := VK_NULL_HANDLE;
+  inherited;
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TVulkanRHIQueryPool (Phase 6.7)                                              }
+{ ---------------------------------------------------------------------------- }
+
+constructor TVulkanRHIQueryPool.Create(const ADevice: TVulkanRHIDevice;
+  const ADesc: TRHIQueryPoolDesc);
+var
+  PoolInfo: VkQueryPoolCreateInfo;
+  Count: Cardinal;
+begin
+  inherited Create(ADevice, ADesc);
+  Count := Max(Cardinal(1), ADesc.QueryCount);
+  SetLength(FSimulatedResults, Count);
+  SetLength(FQueryWritten, Count);
+
+  if (ADevice <> nil) and (ADevice.Handle <> nil) and Assigned(vkCreateQueryPool) then
+  begin
+    FillChar(PoolInfo, SizeOf(PoolInfo), 0);
+    PoolInfo.sType := VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+    if ADesc.QueryType = qtTimestamp then
+      PoolInfo.queryType := VK_QUERY_TYPE_TIMESTAMP
+    else
+      PoolInfo.queryType := VK_QUERY_TYPE_OCCLUSION;
+    PoolInfo.queryCount := Count;
+    CheckVk(vkCreateQueryPool(ADevice.Handle, @PoolInfo, nil, @FHandle), 'vkCreateQueryPool');
+  end else
+    FHandle := VkQueryPool(PtrUInt(Self));
+end;
+
+destructor TVulkanRHIQueryPool.Destroy;
+begin
+  if (FHandle <> VK_NULL_HANDLE) and (Device <> nil) and
+     (TVulkanRHIDevice(Device).Handle <> nil) and Assigned(vkDestroyQueryPool) then
+    vkDestroyQueryPool(TVulkanRHIDevice(Device).Handle, FHandle, nil);
+  FHandle := VK_NULL_HANDLE;
+  inherited;
+end;
+
+procedure TVulkanRHIQueryPool.SetSimulatedResult(const AQueryIndex: Cardinal;
+  const AValue: UInt64);
+begin
+  if AQueryIndex < Cardinal(Length(FSimulatedResults)) then
+  begin
+    FSimulatedResults[AQueryIndex] := AValue;
+    FQueryWritten[AQueryIndex] := True;
+  end;
+end;
+
+function TVulkanRHIQueryPool.IsQueryWritten(const AQueryIndex: Cardinal): Boolean;
+begin
+  if AQueryIndex < Cardinal(Length(FQueryWritten)) then
+    Result := FQueryWritten[AQueryIndex]
+  else
+    Result := False;
+end;
+
+function TVulkanRHIQueryPool.GetResults(const FirstQuery, QueryCount: Cardinal;
+  out Results: array of UInt64; const WaitForResults: Boolean): Boolean;
+var
+  I: Cardinal;
+  Flags: VkQueryResultFlags;
+  Res: VkResult;
+begin
+  if (QueryCount = 0) or (Cardinal(Length(Results)) < QueryCount) then
+    Exit(False);
+
+  for I := 0 to QueryCount - 1 do
+    Results[I] := 0;
+
+  if (Device <> nil) and (TVulkanRHIDevice(Device).Handle <> nil) and
+     (FHandle <> VK_NULL_HANDLE) and Assigned(vkGetQueryPoolResults) then
+  begin
+    Flags := VK_QUERY_RESULT_64_BIT;
+    if WaitForResults then
+      Flags := Flags or VK_QUERY_RESULT_WAIT_BIT;
+    Res := vkGetQueryPoolResults(
+      TVulkanRHIDevice(Device).Handle, FHandle,
+      FirstQuery, QueryCount,
+      PtrUInt(QueryCount) * SizeOf(UInt64),
+      @Results[0], SizeOf(UInt64), Flags);
+    Result := Res = VK_SUCCESS;
+    Exit;
+  end;
+
+  { Headless / unit-test path: return simulated results if all requested queries were written }
+  if FirstQuery + QueryCount > Cardinal(Length(FSimulatedResults)) then
+    Exit(False);
+
+  Result := True;
+  for I := 0 to QueryCount - 1 do
+  begin
+    if not FQueryWritten[FirstQuery + I] then
+      Result := False;
+    Results[I] := FSimulatedResults[FirstQuery + I];
+  end;
 end;
 
 { ---------------------------------------------------------------------------- }
@@ -2581,7 +3515,11 @@ begin
   if (FHandle <> nil) and Assigned(vkBeginCommandBuffer) then
     CheckVk(vkBeginCommandBuffer(FHandle, @BeginInfo), 'vkBeginCommandBuffer');
   FCurrentPipeline := nil;
+  FCurrentComputePipeline := nil;
   FBarrierCount := 0;
+  FSync2BarrierCount := 0;
+  FComputeDispatchCount := 0;
+  FDynamicStateChangeCount := 0;
 end;
 
 procedure TVulkanRHICommandList.EndRecording;
@@ -2595,12 +3533,45 @@ procedure TVulkanRHICommandList.TransitionTexture(const Texture: TRHITexture;
 var
   VkTex: TVulkanRHITexture;
   Barrier: VkImageMemoryBarrier;
+  Barrier2: VkImageMemoryBarrier2;
+  DepInfo: VkDependencyInfo;
   SrcStage, DstStage: VkPipelineStageFlags;
 begin
   if (Texture = nil) or (Texture.CurrentState = NewState) then
     Exit;
 
   VkTex := Texture as TVulkanRHITexture;
+  if (FDevice <> nil) and FDevice.SupportsSynchronization2 then
+  begin
+    FillChar(Barrier2, SizeOf(Barrier2), 0);
+    Barrier2.sType := VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    RHIStateToVkLayoutAndAccess2(
+      Texture.CurrentState, Barrier2.oldLayout, Barrier2.srcAccessMask, Barrier2.srcStageMask);
+    RHIStateToVkLayoutAndAccess2(
+      NewState, Barrier2.newLayout, Barrier2.dstAccessMask, Barrier2.dstStageMask);
+    Barrier2.srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+    Barrier2.dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+    Barrier2.image := VkTex.Image;
+    Barrier2.subresourceRange.aspectMask := VkTex.AspectMask;
+    Barrier2.subresourceRange.baseMipLevel := 0;
+    Barrier2.subresourceRange.levelCount := VkTex.Desc.MipLevels;
+    Barrier2.subresourceRange.baseArrayLayer := 0;
+    Barrier2.subresourceRange.layerCount := VkTex.Desc.DepthOrArrayLayers;
+
+    FillChar(DepInfo, SizeOf(DepInfo), 0);
+    DepInfo.sType := VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    DepInfo.imageMemoryBarrierCount := 1;
+    DepInfo.pImageMemoryBarriers := @Barrier2;
+
+    if (FHandle <> nil) and Assigned(vkCmdPipelineBarrier2) then
+      vkCmdPipelineBarrier2(FHandle, @DepInfo);
+    Inc(FBarrierCount);
+    Inc(FSync2BarrierCount);
+    Inc(FDevice.FSync2BarrierCount);
+    Texture.CurrentState := NewState;
+    Exit;
+  end;
+
   FillChar(Barrier, SizeOf(Barrier), 0);
   Barrier.sType := VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
   RHIStateToVkLayoutAndAccess(Texture.CurrentState, Barrier.oldLayout, Barrier.srcAccessMask, SrcStage);
@@ -2626,12 +3597,39 @@ procedure TVulkanRHICommandList.TransitionBuffer(const Buffer: TRHIBuffer;
 var
   VkBuf: TVulkanRHIBuffer;
   BufBarrier: VkBufferMemoryBarrier;
+  BufBarrier2: VkBufferMemoryBarrier2;
+  DepInfo: VkDependencyInfo;
   SrcStage, DstStage: VkPipelineStageFlags;
 begin
   if (Buffer = nil) or (OldState = NewState) then
     Exit;
 
   VkBuf := Buffer as TVulkanRHIBuffer;
+  if (FDevice <> nil) and FDevice.SupportsSynchronization2 then
+  begin
+    FillChar(BufBarrier2, SizeOf(BufBarrier2), 0);
+    BufBarrier2.sType := VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+    RHIStateToVkBufferAccessAndStage2(OldState, BufBarrier2.srcAccessMask, BufBarrier2.srcStageMask);
+    RHIStateToVkBufferAccessAndStage2(NewState, BufBarrier2.dstAccessMask, BufBarrier2.dstStageMask);
+    BufBarrier2.srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+    BufBarrier2.dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+    BufBarrier2.buffer := VkBuf.Handle;
+    BufBarrier2.offset := 0;
+    BufBarrier2.size := VK_WHOLE_SIZE;
+
+    FillChar(DepInfo, SizeOf(DepInfo), 0);
+    DepInfo.sType := VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    DepInfo.bufferMemoryBarrierCount := 1;
+    DepInfo.pBufferMemoryBarriers := @BufBarrier2;
+
+    if (FHandle <> nil) and Assigned(vkCmdPipelineBarrier2) then
+      vkCmdPipelineBarrier2(FHandle, @DepInfo);
+    Inc(FBarrierCount);
+    Inc(FSync2BarrierCount);
+    Inc(FDevice.FSync2BarrierCount);
+    Exit;
+  end;
+
   FillChar(BufBarrier, SizeOf(BufBarrier), 0);
   BufBarrier.sType := VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
   RHIStateToVkBufferAccessAndStage(OldState, BufBarrier.srcAccessMask, SrcStage);
@@ -2747,10 +3745,12 @@ var
   FallbackRP: VkRenderPass;
   FallbackFB: VkFramebuffer;
   RpBeginInfo: VkRenderPassBeginInfo;
-  FbWidth, FbHeight: Cardinal;
+  FbWidth, FbHeight, PassSampleCount: Cardinal;
   ColorLoadOp, DepthLoadOp: TRHIAttachmentLoadOp;
   ColorStoreOp, DepthStoreOp: TRHIAttachmentStoreOp;
-  AttCount, I: Integer;
+  HasColorResolve, HasAnyResolve: Boolean;
+  EffResolveMode: TRHIResolveMode;
+  AttCount, ResolveBaseIdx, I: Integer;
 begin
   { Flush any pending staged buffer/image uploads outside the render pass instance
     (VUID-vkCmdCopyBuffer-renderpass / VUID-vkCmdCopyBufferToImage-renderpass) }
@@ -2760,9 +3760,23 @@ begin
   if (FDevice <> nil) and (not FDevice.SupportsDynamicRendering) then
   begin
     SetLength(FallbackColorFormats, Length(Info.ColorAttachments));
+    PassSampleCount := 1;
+    if (Length(Info.ColorAttachments) > 0) and (Info.ColorAttachments[0].Texture <> nil) then
+      PassSampleCount := Max(Cardinal(1), Info.ColorAttachments[0].Texture.Desc.SampleCount)
+    else if Info.HasDepthAttachment and (Info.DepthAttachment.Texture <> nil) then
+      PassSampleCount := Max(Cardinal(1), Info.DepthAttachment.Texture.Desc.SampleCount);
+
+    HasColorResolve := (PassSampleCount > 1) and
+      (Length(Info.ColorAttachments) > 0) and
+      (Info.ColorAttachments[0].ResolveTexture <> nil);
+
     AttCount := Length(Info.ColorAttachments);
     if Info.HasDepthAttachment and (Info.DepthAttachment.Texture <> nil) then
       Inc(AttCount);
+    ResolveBaseIdx := AttCount;
+    if HasColorResolve then
+      Inc(AttCount, Length(Info.ColorAttachments));
+
     SetLength(FallbackViews, AttCount);
     SetLength(FallbackClears, AttCount);
 
@@ -2785,17 +3799,31 @@ begin
       FillChar(FallbackClears[I], SizeOf(VkClearValue), 0);
       Move(Info.ColorAttachments[I].ClearColor.Data,
         FallbackClears[I].color.float32, SizeOf(Single) * 4);
+
+      if HasColorResolve then
+      begin
+        if Info.ColorAttachments[I].Texture <> nil then
+          TransitionTexture(Info.ColorAttachments[I].Texture, rsColorAttachment);
+        if Info.ColorAttachments[I].ResolveTexture <> nil then
+        begin
+          TransitionTexture(Info.ColorAttachments[I].ResolveTexture, rsColorAttachment);
+          FallbackViews[ResolveBaseIdx + I] :=
+            (Info.ColorAttachments[I].ResolveTexture as TVulkanRHITexture).ImageView;
+        end else
+          FallbackViews[ResolveBaseIdx + I] := VK_NULL_HANDLE;
+        FillChar(FallbackClears[ResolveBaseIdx + I], SizeOf(VkClearValue), 0);
+      end;
     end;
 
     if Info.HasDepthAttachment and (Info.DepthAttachment.Texture <> nil) then
     begin
       FallbackDepthFormat := Info.DepthAttachment.Texture.Desc.Format;
-      FallbackViews[AttCount - 1] := (Info.DepthAttachment.Texture as TVulkanRHITexture).ImageView;
+      FallbackViews[ResolveBaseIdx - 1] := (Info.DepthAttachment.Texture as TVulkanRHITexture).ImageView;
       FbWidth := Max(FbWidth, Info.DepthAttachment.Texture.Desc.Width);
       FbHeight := Max(FbHeight, Info.DepthAttachment.Texture.Desc.Height);
-      FillChar(FallbackClears[AttCount - 1], SizeOf(VkClearValue), 0);
-      FallbackClears[AttCount - 1].depthStencil.depth := Info.DepthAttachment.ClearDepth;
-      FallbackClears[AttCount - 1].depthStencil.stencil := Info.DepthAttachment.ClearStencil;
+      FillChar(FallbackClears[ResolveBaseIdx - 1], SizeOf(VkClearValue), 0);
+      FallbackClears[ResolveBaseIdx - 1].depthStencil.depth := Info.DepthAttachment.ClearDepth;
+      FallbackClears[ResolveBaseIdx - 1].depthStencil.stencil := Info.DepthAttachment.ClearStencil;
     end else
       FallbackDepthFormat := pfUndefined;
 
@@ -2820,8 +3848,8 @@ begin
     end;
 
     FallbackRP := FDevice.GetOrCreateFallbackRenderPass(
-      FallbackColorFormats, FallbackDepthFormat, 1,
-      ColorLoadOp, DepthLoadOp, ColorStoreOp, DepthStoreOp);
+      FallbackColorFormats, FallbackDepthFormat, PassSampleCount,
+      ColorLoadOp, DepthLoadOp, ColorStoreOp, DepthStoreOp, HasColorResolve);
     FallbackFB := FDevice.GetOrCreateFallbackFramebuffer(
       FallbackRP, FallbackViews, FbWidth, FbHeight);
 
@@ -2839,27 +3867,49 @@ begin
 
     FInFallbackRenderPass := True;
     Inc(FDevice.FFallbackRenderPassBeginCount);
+    if HasColorResolve then
+      Inc(FDevice.FMSAAResolvePassCount);
     if (FHandle <> nil) and Assigned(vkCmdBeginRenderPass) then
       vkCmdBeginRenderPass(FHandle, @RpBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
     Exit;
   end;
 
+  HasAnyResolve := False;
   SetLength(ColorAttachments, Length(Info.ColorAttachments));
   for I := 0 to High(Info.ColorAttachments) do
   begin
     FillChar(ColorAttachments[I], SizeOf(VkRenderingAttachmentInfo), 0);
     ColorAttachments[I].sType := VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    ColorAttachments[I].imageView := (Info.ColorAttachments[I].Texture as TVulkanRHITexture).ImageView;
+    if Info.ColorAttachments[I].Texture <> nil then
+      ColorAttachments[I].imageView := (Info.ColorAttachments[I].Texture as TVulkanRHITexture).ImageView;
     ColorAttachments[I].imageLayout := VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     if Info.ColorAttachments[I].LoadOp = loClear then
       ColorAttachments[I].loadOp := VK_ATTACHMENT_LOAD_OP_CLEAR
+    else if Info.ColorAttachments[I].LoadOp = loDontCare then
+      ColorAttachments[I].loadOp := VK_ATTACHMENT_LOAD_OP_DONT_CARE
     else
       ColorAttachments[I].loadOp := VK_ATTACHMENT_LOAD_OP_LOAD;
     if Info.ColorAttachments[I].StoreOp = soDontCare then
       ColorAttachments[I].storeOp := VK_ATTACHMENT_STORE_OP_DONT_CARE
     else
       ColorAttachments[I].storeOp := VK_ATTACHMENT_STORE_OP_STORE;
-    Move(Info.ColorAttachments[I].ClearColor.Data, ColorAttachments[I].clearValue.color.float32, SizeOf( Single) * 4);
+    Move(Info.ColorAttachments[I].ClearColor.Data, ColorAttachments[I].clearValue.color.float32, SizeOf(Single) * 4);
+
+    if (Info.ColorAttachments[I].ResolveTexture <> nil) and
+       (Info.ColorAttachments[I].Texture <> nil) and
+       (Info.ColorAttachments[I].Texture.Desc.SampleCount > 1) then
+    begin
+      TransitionTexture(Info.ColorAttachments[I].Texture, rsColorAttachment);
+      TransitionTexture(Info.ColorAttachments[I].ResolveTexture, rsColorAttachment);
+      EffResolveMode := Info.ColorAttachments[I].ResolveMode;
+      if EffResolveMode = rmNone then
+        EffResolveMode := rmAverage;
+      ColorAttachments[I].resolveMode := RHIToVkResolveMode(EffResolveMode);
+      ColorAttachments[I].resolveImageView :=
+        (Info.ColorAttachments[I].ResolveTexture as TVulkanRHITexture).ImageView;
+      ColorAttachments[I].resolveImageLayout := VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+      HasAnyResolve := True;
+    end;
   end;
 
   FillChar(RenderInfo, SizeOf(RenderInfo), 0);
@@ -2881,6 +3931,8 @@ begin
     DepthAttachment.imageLayout := VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     if Info.DepthAttachment.LoadOp = loClear then
       DepthAttachment.loadOp := VK_ATTACHMENT_LOAD_OP_CLEAR
+    else if Info.DepthAttachment.LoadOp = loDontCare then
+      DepthAttachment.loadOp := VK_ATTACHMENT_LOAD_OP_DONT_CARE
     else
       DepthAttachment.loadOp := VK_ATTACHMENT_LOAD_OP_LOAD;
     if Info.DepthAttachment.StoreOp = soDontCare then
@@ -2889,8 +3941,27 @@ begin
       DepthAttachment.storeOp := VK_ATTACHMENT_STORE_OP_STORE;
     DepthAttachment.clearValue.depthStencil.depth := Info.DepthAttachment.ClearDepth;
     DepthAttachment.clearValue.depthStencil.stencil := Info.DepthAttachment.ClearStencil;
+
+    if (Info.DepthAttachment.ResolveTexture <> nil) and
+       (Info.DepthAttachment.Texture.Desc.SampleCount > 1) then
+    begin
+      TransitionTexture(Info.DepthAttachment.Texture, rsDepthStencilWrite);
+      TransitionTexture(Info.DepthAttachment.ResolveTexture, rsDepthStencilWrite);
+      EffResolveMode := Info.DepthAttachment.ResolveMode;
+      if EffResolveMode = rmNone then
+        EffResolveMode := rmSampleZero;
+      DepthAttachment.resolveMode := RHIToVkResolveMode(EffResolveMode);
+      DepthAttachment.resolveImageView :=
+        (Info.DepthAttachment.ResolveTexture as TVulkanRHITexture).ImageView;
+      DepthAttachment.resolveImageLayout := VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+      HasAnyResolve := True;
+    end;
+
     RenderInfo.pDepthAttachment := @DepthAttachment;
   end;
+
+  if HasAnyResolve and (FDevice <> nil) then
+    Inc(FDevice.FMSAAResolvePassCount);
 
   if (FHandle <> nil) and Assigned(vkCmdBeginRendering) then
     vkCmdBeginRendering(FHandle, @RenderInfo);
@@ -2922,7 +3993,8 @@ begin
   VkVP.height := -ViewportRect.Height;
   VkVP.minDepth := MinDepth;
   VkVP.maxDepth := MaxDepth;
-  vkCmdSetViewport(FHandle, 0, 1, @VkVP);
+  if (FHandle <> nil) and Assigned(vkCmdSetViewport) then
+    vkCmdSetViewport(FHandle, 0, 1, @VkVP);
 end;
 
 procedure TVulkanRHICommandList.SetScissor(const ScissorRect: TRectangle);
@@ -2933,18 +4005,79 @@ begin
   VkRect.offset.y := Max(0, ScissorRect.Bottom);
   VkRect.extent.width := ScissorRect.Width;
   VkRect.extent.height := ScissorRect.Height;
-  vkCmdSetScissor(FHandle, 0, 1, @VkRect);
+  if (FHandle <> nil) and Assigned(vkCmdSetScissor) then
+    vkCmdSetScissor(FHandle, 0, 1, @VkRect);
 end;
 
 procedure TVulkanRHICommandList.SetDepthBias(const ConstantFactor, SlopeFactor: Single);
 begin
-  vkCmdSetDepthBias(FHandle, ConstantFactor, 0.0, SlopeFactor);
+  if (FHandle <> nil) and Assigned(vkCmdSetDepthBias) then
+    vkCmdSetDepthBias(FHandle, ConstantFactor, 0.0, SlopeFactor);
+end;
+
+procedure TVulkanRHICommandList.SetCullMode(const CullMode: TRHICullMode);
+begin
+  FDynamicCullMode := CullMode;
+  Inc(FDynamicStateChangeCount);
+  if (FHandle <> nil) and Assigned(vkCmdSetCullMode) then
+    vkCmdSetCullMode(FHandle, RHIToVkCullMode(CullMode));
+end;
+
+procedure TVulkanRHICommandList.SetFrontFace(const FrontFace: TRHIFrontFace);
+begin
+  FDynamicFrontFace := FrontFace;
+  Inc(FDynamicStateChangeCount);
+  if (FHandle <> nil) and Assigned(vkCmdSetFrontFace) then
+    vkCmdSetFrontFace(FHandle, RHIToVkFrontFace(FrontFace));
+end;
+
+procedure TVulkanRHICommandList.SetDepthTestEnable(const Enable: Boolean);
+begin
+  FDynamicDepthTestEnable := Enable;
+  Inc(FDynamicStateChangeCount);
+  if (FHandle <> nil) and Assigned(vkCmdSetDepthTestEnable) then
+    vkCmdSetDepthTestEnable(FHandle, Ord(Enable));
+end;
+
+procedure TVulkanRHICommandList.SetDepthWriteEnable(const Enable: Boolean);
+begin
+  FDynamicDepthWriteEnable := Enable;
+  Inc(FDynamicStateChangeCount);
+  if (FHandle <> nil) and Assigned(vkCmdSetDepthWriteEnable) then
+    vkCmdSetDepthWriteEnable(FHandle, Ord(Enable));
+end;
+
+procedure TVulkanRHICommandList.SetDepthCompareOp(const CompareOp: TRHICompareOp);
+begin
+  FDynamicDepthCompareOp := CompareOp;
+  Inc(FDynamicStateChangeCount);
+  if (FHandle <> nil) and Assigned(vkCmdSetDepthCompareOp) then
+    vkCmdSetDepthCompareOp(FHandle, RHIToVkCompareOp(CompareOp));
+end;
+
+procedure TVulkanRHICommandList.SetPrimitiveTopology(const Topology: TRHIPrimitiveTopology);
+begin
+  FDynamicPrimitiveTopology := Topology;
+  Inc(FDynamicStateChangeCount);
+  if (FHandle <> nil) and Assigned(vkCmdSetPrimitiveTopology) then
+    vkCmdSetPrimitiveTopology(FHandle, RHIToVkTopology(Topology));
 end;
 
 procedure TVulkanRHICommandList.BindPipeline(const Pipeline: TRHIPipeline);
 begin
   FCurrentPipeline := Pipeline as TVulkanRHIPipeline;
-  vkCmdBindPipeline(FHandle, VK_PIPELINE_BIND_POINT_GRAPHICS, FCurrentPipeline.Handle);
+  if (FHandle <> nil) and (FCurrentPipeline <> nil) and Assigned(vkCmdBindPipeline) then
+    vkCmdBindPipeline(FHandle, VK_PIPELINE_BIND_POINT_GRAPHICS, FCurrentPipeline.Handle);
+
+  if (FCurrentPipeline <> nil) and (FDevice <> nil) and FDevice.SupportsExtendedDynamicState then
+  begin
+    SetCullMode(FCurrentPipeline.Desc.Rasterizer.CullMode);
+    SetFrontFace(FCurrentPipeline.Desc.Rasterizer.FrontFace);
+    SetPrimitiveTopology(FCurrentPipeline.Desc.Topology);
+    SetDepthTestEnable(FCurrentPipeline.Desc.DepthStencil.DepthTestEnable);
+    SetDepthWriteEnable(FCurrentPipeline.Desc.DepthStencil.DepthWriteEnable);
+    SetDepthCompareOp(FCurrentPipeline.Desc.DepthStencil.DepthCompareOp);
+  end;
 end;
 
 procedure TVulkanRHICommandList.BindDescriptorSet(const SetIndex: Cardinal;
@@ -2953,24 +4086,159 @@ var
   SetHandle: VkDescriptorSet;
   OffsetPtr: PUInt32;
 begin
-  Assert(FCurrentPipeline <> nil, 'BindPipeline must be called before BindDescriptorSet');
+  if DescriptorSet = nil then Exit;
   SetHandle := (DescriptorSet as TVulkanRHIDescriptorSet).Handle;
   if Length(DynamicOffsets) > 0 then
     OffsetPtr := @DynamicOffsets[0]
   else
     OffsetPtr := nil;
 
-  vkCmdBindDescriptorSets(FHandle, VK_PIPELINE_BIND_POINT_GRAPHICS,
-    FCurrentPipeline.PipelineLayout, SetIndex, 1, @SetHandle,
-    Length(DynamicOffsets), OffsetPtr);
+  if (FHandle <> nil) and (FCurrentPipeline <> nil) and Assigned(vkCmdBindDescriptorSets) then
+    vkCmdBindDescriptorSets(FHandle, VK_PIPELINE_BIND_POINT_GRAPHICS,
+      FCurrentPipeline.PipelineLayout, SetIndex, 1, @SetHandle,
+      Length(DynamicOffsets), OffsetPtr);
 end;
 
 procedure TVulkanRHICommandList.PushConstants(const StageFlags: TRHIShaderStageFlags;
   const Offset, Size: Cardinal; const Data);
+var
+  TargetLayout: VkPipelineLayout;
 begin
-  Assert(FCurrentPipeline <> nil, 'BindPipeline must be called before PushConstants');
-  vkCmdPushConstants(FHandle, FCurrentPipeline.PipelineLayout,
-    RHIToVkShaderStageFlags(StageFlags), Offset, Size, @Data);
+  TargetLayout := VK_NULL_HANDLE;
+  if (ssCompute in StageFlags) and (FCurrentComputePipeline <> nil) and
+     ((FCurrentPipeline = nil) or (StageFlags = [ssCompute])) then
+    TargetLayout := FCurrentComputePipeline.PipelineLayout
+  else if FCurrentPipeline <> nil then
+    TargetLayout := FCurrentPipeline.PipelineLayout
+  else if FCurrentComputePipeline <> nil then
+    TargetLayout := FCurrentComputePipeline.PipelineLayout;
+
+  if (FHandle <> nil) and (TargetLayout <> VK_NULL_HANDLE) and Assigned(vkCmdPushConstants) then
+    vkCmdPushConstants(FHandle, TargetLayout,
+      RHIToVkShaderStageFlags(StageFlags), Offset, Size, @Data);
+end;
+
+procedure TVulkanRHICommandList.BindComputePipeline(const Pipeline: TRHIComputePipeline);
+begin
+  FCurrentComputePipeline := Pipeline as TVulkanRHIComputePipeline;
+  if (FHandle <> nil) and (FCurrentComputePipeline <> nil) and Assigned(vkCmdBindPipeline) then
+    vkCmdBindPipeline(FHandle, VK_PIPELINE_BIND_POINT_COMPUTE, FCurrentComputePipeline.Handle);
+end;
+
+procedure TVulkanRHICommandList.BindComputeDescriptorSet(const SetIndex: Cardinal;
+  const DescriptorSet: TRHIDescriptorSet; const DynamicOffsets: array of Cardinal);
+var
+  SetHandle: VkDescriptorSet;
+  OffsetPtr: PUInt32;
+begin
+  if DescriptorSet = nil then Exit;
+  SetHandle := (DescriptorSet as TVulkanRHIDescriptorSet).Handle;
+  if Length(DynamicOffsets) > 0 then
+    OffsetPtr := @DynamicOffsets[0]
+  else
+    OffsetPtr := nil;
+
+  if (FHandle <> nil) and (FCurrentComputePipeline <> nil) and Assigned(vkCmdBindDescriptorSets) then
+    vkCmdBindDescriptorSets(FHandle, VK_PIPELINE_BIND_POINT_COMPUTE,
+      FCurrentComputePipeline.PipelineLayout, SetIndex, 1, @SetHandle,
+      Length(DynamicOffsets), OffsetPtr);
+end;
+
+procedure TVulkanRHICommandList.Dispatch(const GroupCountX, GroupCountY, GroupCountZ: Cardinal);
+begin
+  Inc(FComputeDispatchCount);
+  if FDevice <> nil then
+    Inc(FDevice.FComputeDispatchCount);
+  if (FHandle <> nil) and Assigned(vkCmdDispatch) then
+    vkCmdDispatch(FHandle, Max(1, GroupCountX), Max(1, GroupCountY), Max(1, GroupCountZ));
+end;
+
+procedure TVulkanRHICommandList.DispatchIndirect(const IndirectBuffer: TRHIBuffer;
+  const Offset: PtrUInt);
+begin
+  if IndirectBuffer = nil then Exit;
+  Inc(FComputeDispatchCount);
+  if FDevice <> nil then
+    Inc(FDevice.FComputeDispatchCount);
+  if (FHandle <> nil) and Assigned(vkCmdDispatchIndirect) then
+    vkCmdDispatchIndirect(FHandle, (IndirectBuffer as TVulkanRHIBuffer).Handle, Offset);
+end;
+
+procedure TVulkanRHICommandList.ResetQueryPool(const QueryPool: TRHIQueryPool;
+  const FirstQuery, QueryCount: Cardinal);
+var
+  VkPool: TVulkanRHIQueryPool;
+  I: Cardinal;
+begin
+  if (QueryPool = nil) or (QueryCount = 0) then Exit;
+  VkPool := QueryPool as TVulkanRHIQueryPool;
+  Inc(VkPool.FResetCount);
+  for I := FirstQuery to Min(FirstQuery + QueryCount, Cardinal(Length(VkPool.FQueryWritten))) - 1 do
+  begin
+    VkPool.FQueryWritten[I] := False;
+    VkPool.FSimulatedResults[I] := 0;
+  end;
+  if (FHandle <> nil) and Assigned(vkCmdResetQueryPool) then
+    vkCmdResetQueryPool(FHandle, VkPool.Handle, FirstQuery, QueryCount);
+end;
+
+procedure TVulkanRHICommandList.BeginQuery(const QueryPool: TRHIQueryPool;
+  const QueryIndex: Cardinal; const Precise: Boolean);
+var
+  VkPool: TVulkanRHIQueryPool;
+  Flags: VkQueryControlFlags;
+begin
+  if QueryPool = nil then Exit;
+  VkPool := QueryPool as TVulkanRHIQueryPool;
+  if QueryIndex < Cardinal(Length(VkPool.FQueryWritten)) then
+  begin
+    VkPool.FQueryWritten[QueryIndex] := True;
+    if VkPool.FSimulatedResults[QueryIndex] = 0 then
+      VkPool.FSimulatedResults[QueryIndex] := 128;
+  end;
+  Flags := 0;
+  if Precise then
+    Flags := VK_QUERY_CONTROL_PRECISE_BIT;
+  if (FHandle <> nil) and Assigned(vkCmdBeginQuery) then
+    vkCmdBeginQuery(FHandle, VkPool.Handle, QueryIndex, Flags);
+end;
+
+procedure TVulkanRHICommandList.EndQuery(const QueryPool: TRHIQueryPool;
+  const QueryIndex: Cardinal);
+var
+  VkPool: TVulkanRHIQueryPool;
+begin
+  if QueryPool = nil then Exit;
+  VkPool := QueryPool as TVulkanRHIQueryPool;
+  if QueryIndex < Cardinal(Length(VkPool.FQueryWritten)) then
+    VkPool.FQueryWritten[QueryIndex] := True;
+  if (FHandle <> nil) and Assigned(vkCmdEndQuery) then
+    vkCmdEndQuery(FHandle, VkPool.Handle, QueryIndex);
+end;
+
+procedure TVulkanRHICommandList.WriteTimestamp(const QueryPool: TRHIQueryPool;
+  const QueryIndex: Cardinal; const Stage: TRHIShaderStage);
+var
+  VkPool: TVulkanRHIQueryPool;
+  VkStage: VkPipelineStageFlags;
+begin
+  if QueryPool = nil then Exit;
+  VkPool := QueryPool as TVulkanRHIQueryPool;
+  if QueryIndex < Cardinal(Length(VkPool.FQueryWritten)) then
+  begin
+    VkPool.FQueryWritten[QueryIndex] := True;
+    if VkPool.FSimulatedResults[QueryIndex] = 0 then
+      VkPool.FSimulatedResults[QueryIndex] := UInt64(QueryIndex + 1) * UInt64(1000000);
+  end;
+  case Stage of
+    ssVertex:   VkStage := VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+    ssFragment: VkStage := VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    ssGeometry: VkStage := VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+    ssCompute:  VkStage := VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+    else        VkStage := VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+  end;
+  if (FHandle <> nil) and Assigned(vkCmdWriteTimestamp) then
+    vkCmdWriteTimestamp(FHandle, VkStage, VkPool.Handle, QueryIndex);
 end;
 
 procedure TVulkanRHICommandList.BindVertexBuffers(const FirstBinding: Cardinal;
@@ -2980,6 +4248,7 @@ var
   VkOffsets: array of VkDeviceSize;
   I: Integer;
 begin
+  if Length(Buffers) = 0 then Exit;
   SetLength(VkBuffers, Length(Buffers));
   SetLength(VkOffsets, Length(Offsets));
   for I := 0 to High(Buffers) do
@@ -2987,7 +4256,8 @@ begin
     VkBuffers[I] := (Buffers[I] as TVulkanRHIBuffer).Handle;
     VkOffsets[I] := Offsets[I];
   end;
-  vkCmdBindVertexBuffers(FHandle, FirstBinding, Length(VkBuffers), @VkBuffers[0], @VkOffsets[0]);
+  if (FHandle <> nil) and Assigned(vkCmdBindVertexBuffers) then
+    vkCmdBindVertexBuffers(FHandle, FirstBinding, Length(VkBuffers), @VkBuffers[0], @VkOffsets[0]);
 end;
 
 procedure TVulkanRHICommandList.BindIndexBuffer(const Buffer: TRHIBuffer;
@@ -3000,25 +4270,28 @@ begin
   else
     VkIdxType := VK_INDEX_TYPE_UINT32;
 
-  vkCmdBindIndexBuffer(FHandle, (Buffer as TVulkanRHIBuffer).Handle, Offset, VkIdxType);
+  if (FHandle <> nil) and Assigned(vkCmdBindIndexBuffer) and Assigned(Buffer) then
+    vkCmdBindIndexBuffer(FHandle, (Buffer as TVulkanRHIBuffer).Handle, Offset, VkIdxType);
 end;
 
 procedure TVulkanRHICommandList.Draw(const VertexCount, InstanceCount,
   FirstVertex, FirstInstance: Cardinal);
 begin
-  vkCmdDraw(FHandle, VertexCount, InstanceCount, FirstVertex, FirstInstance);
+  if (FHandle <> nil) and Assigned(vkCmdDraw) then
+    vkCmdDraw(FHandle, VertexCount, InstanceCount, FirstVertex, FirstInstance);
 end;
 
 procedure TVulkanRHICommandList.DrawIndexed(const IndexCount, InstanceCount,
   FirstIndex: Cardinal; const VertexOffset: Integer; const FirstInstance: Cardinal);
 begin
-  vkCmdDrawIndexed(FHandle, IndexCount, InstanceCount, FirstIndex, VertexOffset, FirstInstance);
+  if (FHandle <> nil) and Assigned(vkCmdDrawIndexed) then
+    vkCmdDrawIndexed(FHandle, IndexCount, InstanceCount, FirstIndex, VertexOffset, FirstInstance);
 end;
 
 procedure TVulkanRHICommandList.DrawIndirect(const IndirectBuffer: TRHIBuffer;
   const Offset: PtrUInt; const DrawCount, Stride: Cardinal);
 begin
-  if Assigned(vkCmdDrawIndirect) and Assigned(IndirectBuffer) then
+  if (FHandle <> nil) and Assigned(vkCmdDrawIndirect) and Assigned(IndirectBuffer) then
     vkCmdDrawIndirect(FHandle, (IndirectBuffer as TVulkanRHIBuffer).Handle,
       Offset, DrawCount, Stride);
 end;
@@ -3026,8 +4299,9 @@ end;
 procedure TVulkanRHICommandList.DrawIndexedIndirect(const IndirectBuffer: TRHIBuffer;
   const Offset: PtrUInt; const DrawCount, Stride: Cardinal);
 begin
-  vkCmdDrawIndexedIndirect(FHandle, (IndirectBuffer as TVulkanRHIBuffer).Handle,
-    Offset, DrawCount, Stride);
+  if (FHandle <> nil) and Assigned(vkCmdDrawIndexedIndirect) and Assigned(IndirectBuffer) then
+    vkCmdDrawIndexedIndirect(FHandle, (IndirectBuffer as TVulkanRHIBuffer).Handle,
+      Offset, DrawCount, Stride);
 end;
 
 procedure TVulkanRHICommandList.ExecuteCommands(const SecondaryCommandLists: array of TRHICommandList);
@@ -3039,7 +4313,8 @@ begin
   SetLength(CmdBuffers, Length(SecondaryCommandLists));
   for I := 0 to High(SecondaryCommandLists) do
     CmdBuffers[I] := (SecondaryCommandLists[I] as TVulkanRHICommandList).Handle;
-  vkCmdExecuteCommands(FHandle, Length(CmdBuffers), @CmdBuffers[0]);
+  if (FHandle <> nil) and Assigned(vkCmdExecuteCommands) then
+    vkCmdExecuteCommands(FHandle, Length(CmdBuffers), @CmdBuffers[0]);
 end;
 
 procedure TVulkanRHICommandList.PushDebugGroup(const LabelName: String; const Color: TCastleColor);
@@ -3070,7 +4345,7 @@ end;
 
 constructor TVulkanDescriptorPoolAllocator.Create(const ADevice: VkDevice;
   const AInitialMaxSets: Cardinal; const AAllowFreeIndividualSets: Boolean;
-  const AMaxSetsCap: Cardinal);
+  const AMaxSetsCap: Cardinal; const AAllowUpdateAfterBind: Boolean);
 begin
   inherited Create;
   FDevice := ADevice;
@@ -3078,6 +4353,7 @@ begin
   FMaxSetsCap := Max(FInitialMaxSets, AMaxSetsCap);
   FCurrentMaxSets := FInitialMaxSets;
   FAllowFreeIndividualSets := AAllowFreeIndividualSets;
+  FAllowUpdateAfterBind := AAllowUpdateAfterBind;
   FHasCurrentPage := False;
   FForceNextAllocationError := VK_SUCCESS;
 end;
@@ -3131,7 +4407,9 @@ begin
   FillChar(PoolInfo, SizeOf(PoolInfo), 0);
   PoolInfo.sType := VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
   if FAllowFreeIndividualSets then
-    PoolInfo.flags := VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    PoolInfo.flags := PoolInfo.flags or VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+  if FAllowUpdateAfterBind then
+    PoolInfo.flags := PoolInfo.flags or VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
   PoolInfo.maxSets := Result.Capacity;
   PoolInfo.poolSizeCount := Length(PoolSizes);
   PoolInfo.pPoolSizes := @PoolSizes[0];
@@ -3309,6 +4587,218 @@ begin
     Result := FCurrentPage.Handle
   else
     Result := VK_NULL_HANDLE;
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanBindlessTextureManager                                          }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanBindlessTextureManager.Create(const ADevice: TVulkanRHIDevice;
+  const ACapacity: Cardinal; const ASupportsUpdateAfterBind: Boolean);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FCapacity := Max(Cardinal(1), ACapacity);
+  FSupportsUpdateAfterBind := ASupportsUpdateAfterBind;
+end;
+
+destructor TCastleVulkanBindlessTextureManager.Destroy;
+begin
+  SetLength(FSlots, 0);
+  SetLength(FFreeSlots, 0);
+  FreeAndNil(FDescriptorSet);
+  FreeAndNil(FLayout);
+  inherited;
+end;
+
+procedure TCastleVulkanBindlessTextureManager.EnsureDescriptorSetCreated;
+var
+  Bindings: array[0..1] of TRHIDescriptorBindingDesc;
+begin
+  if FDescriptorSet <> nil then
+    Exit;
+
+  FillChar(Bindings, SizeOf(Bindings), 0);
+  { Binding 0: Bindless Combined Image Sampler Array }
+  Bindings[0].Binding := 0;
+  Bindings[0].DescriptorType := dtCombinedImageSampler;
+  Bindings[0].Count := FCapacity;
+  Bindings[0].StageFlags := [ssVertex, ssFragment, ssCompute];
+  Bindings[0].BindingFlags := [dbfPartiallyBound, dbfUpdateUnusedWhilePending];
+  if FSupportsUpdateAfterBind then
+    Include(Bindings[0].BindingFlags, dbfUpdateAfterBind);
+
+  { Binding 1: Multi-Material Storage Buffer (CastleBindlessMaterialsBlock) }
+  Bindings[1].Binding := 1;
+  Bindings[1].DescriptorType := dtStorageBuffer;
+  Bindings[1].Count := 1;
+  Bindings[1].StageFlags := [ssVertex, ssFragment, ssCompute];
+  Bindings[1].BindingFlags := [dbfPartiallyBound];
+
+  FLayout := TVulkanRHIDescriptorSetLayout.Create(FDevice, Bindings);
+  FDescriptorSet := TVulkanRHIDescriptorSet.Create(FDevice, FLayout, False);
+end;
+
+function TCastleVulkanBindlessTextureManager.GetFreeSlotCount: Cardinal;
+begin
+  Result := Cardinal(Length(FFreeSlots));
+end;
+
+function TCastleVulkanBindlessTextureManager.TryGetTextureIndex(
+  const ATexture: TRHITexture; const ASampler: TRHISampler;
+  out AIndex: Cardinal): Boolean;
+var
+  I: Integer;
+begin
+  AIndex := 0;
+  if ATexture = nil then
+    Exit(False);
+  for I := 0 to High(FSlots) do
+    if FSlots[I].InUse and
+       (FSlots[I].Texture = ATexture) and
+       (FSlots[I].Sampler = ASampler) then
+    begin
+      AIndex := Cardinal(I);
+      Exit(True);
+    end;
+  Result := False;
+end;
+
+function TCastleVulkanBindlessTextureManager.RegisterTexture(
+  const ATexture: TRHITexture; const ASampler: TRHISampler): Cardinal;
+var
+  ExistingIndex: Cardinal;
+  FreeIdx: Integer;
+begin
+  if ATexture = nil then
+    Exit(0);
+
+  EnsureDescriptorSetCreated;
+
+  { 1. Deduplicate if already registered with the same sampler }
+  if TryGetTextureIndex(ATexture, ASampler, ExistingIndex) then
+  begin
+    Inc(FDeduplicatedHits);
+    Exit(ExistingIndex);
+  end;
+
+  { 2. Pop from free-list if available, otherwise allocate a new slot at end of FSlots }
+  if Length(FFreeSlots) > 0 then
+  begin
+    FreeIdx := High(FFreeSlots);
+    Result := FFreeSlots[FreeIdx];
+    SetLength(FFreeSlots, FreeIdx);
+    Inc(FRecycledSlotReuses);
+  end else
+  begin
+    if Cardinal(Length(FSlots)) >= FCapacity then
+      raise ERHIOutOfMemory.CreateFmt(
+        'Bindless texture table capacity (%d slots) exceeded', [FCapacity]);
+    Result := Cardinal(Length(FSlots));
+    SetLength(FSlots, Result + 1);
+  end;
+
+  FSlots[Result].Texture := ATexture as TVulkanRHITexture;
+  FSlots[Result].Sampler := ASampler as TVulkanRHISampler;
+  FSlots[Result].InUse := True;
+  FSlots[Result].Dirty := True;
+
+  Inc(FActiveSlotCount);
+  Inc(FPendingWriteCount);
+  Inc(FTotalRegistrations);
+end;
+
+procedure TCastleVulkanBindlessTextureManager.UnregisterSlot(
+  const ASlotIndex: Cardinal);
+var
+  FreeIdx: Integer;
+begin
+  if (ASlotIndex >= Cardinal(Length(FSlots))) or (not FSlots[ASlotIndex].InUse) then
+    Exit;
+
+  if FSlots[ASlotIndex].Dirty and (FPendingWriteCount > 0) then
+    Dec(FPendingWriteCount);
+
+  FSlots[ASlotIndex].Texture := nil;
+  FSlots[ASlotIndex].Sampler := nil;
+  FSlots[ASlotIndex].InUse := False;
+  FSlots[ASlotIndex].Dirty := False;
+
+  if FActiveSlotCount > 0 then
+    Dec(FActiveSlotCount);
+
+  FreeIdx := Length(FFreeSlots);
+  SetLength(FFreeSlots, FreeIdx + 1);
+  FFreeSlots[FreeIdx] := ASlotIndex;
+end;
+
+function TCastleVulkanBindlessTextureManager.UnregisterTexture(
+  const ATexture: TRHITexture): Cardinal;
+var
+  I: Integer;
+begin
+  Result := 0;
+  if ATexture = nil then
+    Exit;
+  for I := 0 to High(FSlots) do
+    if FSlots[I].InUse and (FSlots[I].Texture = ATexture) then
+    begin
+      UnregisterSlot(Cardinal(I));
+      Inc(Result);
+    end;
+end;
+
+function TCastleVulkanBindlessTextureManager.UnregisterSampler(
+  const ASampler: TRHISampler): Cardinal;
+var
+  I: Integer;
+begin
+  Result := 0;
+  if ASampler = nil then
+    Exit;
+  for I := 0 to High(FSlots) do
+    if FSlots[I].InUse and (FSlots[I].Sampler = ASampler) then
+    begin
+      UnregisterSlot(Cardinal(I));
+      Inc(Result);
+    end;
+end;
+
+procedure TCastleVulkanBindlessTextureManager.SetMaterialStorageBuffer(
+  const ASSBOBuffer: TRHIBuffer; const AOffset, ARange: PtrUInt);
+begin
+  EnsureDescriptorSetCreated;
+  FMaterialSSBOBuffer := ASSBOBuffer;
+  if (FDescriptorSet <> nil) and (ASSBOBuffer <> nil) then
+  begin
+    FDescriptorSet.BindStorageBuffer(1, ASSBOBuffer, AOffset, ARange);
+    Inc(FPendingWriteCount);
+  end;
+end;
+
+function TCastleVulkanBindlessTextureManager.FlushPendingUpdates: Cardinal;
+var
+  I: Integer;
+begin
+  Result := 0;
+  if (FDescriptorSet = nil) or (FPendingWriteCount = 0) then
+    Exit;
+
+  for I := 0 to High(FSlots) do
+    if FSlots[I].InUse and FSlots[I].Dirty and (FSlots[I].Texture <> nil) then
+    begin
+      FDescriptorSet.BindTextureAtIndex(0, Cardinal(I), FSlots[I].Texture, FSlots[I].Sampler);
+      FSlots[I].Dirty := False;
+      Inc(Result);
+    end;
+
+  if (Result > 0) or (Length(FDescriptorSet.FPendingWrites) > 0) then
+  begin
+    Result := Cardinal(Length(FDescriptorSet.FPendingWrites));
+    FDescriptorSet.Update;
+    Inc(FTotalFlushedWrites, Result);
+  end;
+  FPendingWriteCount := 0;
 end;
 
 { ---------------------------------------------------------------------------- }
@@ -3790,6 +5280,224 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanTimelineSemaphore                                               }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanTimelineSemaphore.Create(const ADevice: TVulkanRHIDevice;
+  const AInitialValue: UInt64);
+var
+  TypeInfo: VkSemaphoreTypeCreateInfo;
+  SemInfo: VkSemaphoreCreateInfo;
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FCounterValue := AInitialValue;
+
+  if (FDevice <> nil) and (FDevice.Handle <> nil) and Assigned(vkCreateSemaphore) and
+     FDevice.SupportsTimelineSemaphores then
+  begin
+    FillChar(TypeInfo, SizeOf(TypeInfo), 0);
+    TypeInfo.sType := VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+    TypeInfo.semaphoreType := VK_SEMAPHORE_TYPE_TIMELINE;
+    TypeInfo.initialValue := AInitialValue;
+
+    FillChar(SemInfo, SizeOf(SemInfo), 0);
+    SemInfo.sType := VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    SemInfo.pNext := @TypeInfo;
+    CheckVk(vkCreateSemaphore(FDevice.Handle, @SemInfo, nil, @FHandle), 'vkCreateSemaphore(Timeline)');
+  end else
+    FHandle := VkSemaphore(PtrUInt($66000001));
+end;
+
+destructor TCastleVulkanTimelineSemaphore.Destroy;
+begin
+  if (FDevice <> nil) and (FDevice.Handle <> nil) and (FHandle <> VK_NULL_HANDLE) and
+     Assigned(vkDestroySemaphore) and FDevice.SupportsTimelineSemaphores then
+    vkDestroySemaphore(FDevice.Handle, FHandle, nil);
+  FHandle := VK_NULL_HANDLE;
+  inherited;
+end;
+
+procedure TCastleVulkanTimelineSemaphore.Signal(const AValue: UInt64);
+var
+  SigInfo: VkSemaphoreSignalInfo;
+begin
+  if AValue > FCounterValue then
+    FCounterValue := AValue;
+
+  if (FDevice <> nil) and (FDevice.Handle <> nil) and (FHandle <> VK_NULL_HANDLE) and
+     FDevice.SupportsTimelineSemaphores and Assigned(vkSignalSemaphore) then
+  begin
+    FillChar(SigInfo, SizeOf(SigInfo), 0);
+    SigInfo.sType := VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO;
+    SigInfo.semaphore := FHandle;
+    SigInfo.value := AValue;
+    CheckVk(vkSignalSemaphore(FDevice.Handle, @SigInfo), 'vkSignalSemaphore');
+  end;
+end;
+
+function TCastleVulkanTimelineSemaphore.Wait(const AValue: UInt64;
+  const ATimeoutNs: UInt64): Boolean;
+var
+  WaitInfo: VkSemaphoreWaitInfo;
+  Res: VkResult;
+begin
+  if (FDevice <> nil) and (FDevice.Handle <> nil) and (FHandle <> VK_NULL_HANDLE) and
+     FDevice.SupportsTimelineSemaphores and Assigned(vkWaitSemaphores) then
+  begin
+    FillChar(WaitInfo, SizeOf(WaitInfo), 0);
+    WaitInfo.sType := VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+    WaitInfo.semaphoreCount := 1;
+    WaitInfo.pSemaphores := @FHandle;
+    WaitInfo.pValues := @AValue;
+    Res := vkWaitSemaphores(FDevice.Handle, @WaitInfo, ATimeoutNs);
+    Result := Res = VK_SUCCESS;
+  end else
+    Result := FCounterValue >= AValue;
+end;
+
+function TCastleVulkanTimelineSemaphore.GetCounterValue: UInt64;
+begin
+  Result := FCounterValue;
+  if (FDevice <> nil) and (FDevice.Handle <> nil) and (FHandle <> VK_NULL_HANDLE) and
+     FDevice.SupportsTimelineSemaphores and Assigned(vkGetSemaphoreCounterValue) then
+    vkGetSemaphoreCounterValue(FDevice.Handle, FHandle, @Result);
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanTimestampProfiler                                               }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanTimestampProfiler.Create(const ADevice: TVulkanRHIDevice;
+  const AMaxPassesPerFrame: Cardinal);
+var
+  Slot: Cardinal;
+  PoolDesc: TRHIQueryPoolDesc;
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FMaxPassesPerFrame := Max(Cardinal(1), AMaxPassesPerFrame);
+  PoolDesc := TRHIQueryPoolDesc.Create(qtTimestamp, FMaxPassesPerFrame * 2, 'FrameTimestampPool');
+  for Slot := 0 to MaxFramesInFlight - 1 do
+    FPools[Slot] := TVulkanRHIQueryPool.Create(ADevice, PoolDesc);
+end;
+
+destructor TCastleVulkanTimestampProfiler.Destroy;
+var
+  Slot: Cardinal;
+begin
+  for Slot := 0 to MaxFramesInFlight - 1 do
+  begin
+    SetLength(FFramePasses[Slot], 0);
+    FreeAndNil(FPools[Slot]);
+  end;
+  SetLength(FCompletedPasses, 0);
+  inherited;
+end;
+
+procedure TCastleVulkanTimestampProfiler.BeginFrame(const ACmd: TRHICommandList;
+  const AFrameIndex: Cardinal);
+var
+  Slot: Cardinal;
+  PassCount, I: Integer;
+  QueryCount: Cardinal;
+  Ticks: array of UInt64;
+  PeriodNs: Single;
+  DeltaTicks: UInt64;
+begin
+  Slot := AFrameIndex mod MaxFramesInFlight;
+  FCurrentSlot := Slot;
+  PassCount := Length(FFramePasses[Slot]);
+  if (PassCount > 0) and (FPools[Slot] <> nil) then
+  begin
+    QueryCount := Cardinal(PassCount) * 2;
+    SetLength(Ticks, QueryCount);
+    if FPools[Slot].GetResults(0, QueryCount, Ticks, False) then
+    begin
+      if (FDevice <> nil) and (FDevice.Capabilities.TimestampPeriodNanoseconds > 0) then
+        PeriodNs := FDevice.Capabilities.TimestampPeriodNanoseconds
+      else
+        PeriodNs := 1.0;
+
+      FLastFrameTotalGpuTimeMs := 0.0;
+      SetLength(FCompletedPasses, PassCount);
+      for I := 0 to PassCount - 1 do
+      begin
+        FCompletedPasses[I] := FFramePasses[Slot][I];
+        if Ticks[FCompletedPasses[I].EndQueryIndex] >= Ticks[FCompletedPasses[I].BeginQueryIndex] then
+          DeltaTicks := Ticks[FCompletedPasses[I].EndQueryIndex] - Ticks[FCompletedPasses[I].BeginQueryIndex]
+        else
+          DeltaTicks := 0;
+        { Convert nanoseconds (DeltaTicks * PeriodNs) -> milliseconds (/ 1,000,000) }
+        FCompletedPasses[I].CompletedGpuTimeMs := (Double(DeltaTicks) * Double(PeriodNs)) / 1000000.0;
+        FLastFrameTotalGpuTimeMs := FLastFrameTotalGpuTimeMs + FCompletedPasses[I].CompletedGpuTimeMs;
+      end;
+    end;
+  end;
+
+  SetLength(FFramePasses[Slot], 0);
+  if (ACmd <> nil) and (FPools[Slot] <> nil) then
+    ACmd.ResetQueryPool(FPools[Slot], 0, FMaxPassesPerFrame * 2)
+  else if (FPools[Slot] <> nil) and (Length(FPools[Slot].FQueryWritten) > 0) then
+    FillChar(FPools[Slot].FQueryWritten[0], Length(FPools[Slot].FQueryWritten) * SizeOf(Boolean), 0);
+end;
+
+function TCastleVulkanTimestampProfiler.BeginPass(const ACmd: TRHICommandList;
+  const APassName: String): Integer;
+var
+  Slot: Cardinal;
+  PassIdx: Integer;
+begin
+  Slot := FCurrentSlot mod MaxFramesInFlight;
+  PassIdx := Length(FFramePasses[Slot]);
+  if Cardinal(PassIdx) >= FMaxPassesPerFrame then
+    Exit(-1);
+
+  SetLength(FFramePasses[Slot], PassIdx + 1);
+  FFramePasses[Slot][PassIdx].PassName := APassName;
+  FFramePasses[Slot][PassIdx].BeginQueryIndex := Cardinal(PassIdx * 2);
+  FFramePasses[Slot][PassIdx].EndQueryIndex := Cardinal(PassIdx * 2 + 1);
+  FFramePasses[Slot][PassIdx].CompletedGpuTimeMs := 0.0;
+
+  if (ACmd <> nil) and (FPools[Slot] <> nil) then
+    ACmd.WriteTimestamp(FPools[Slot], FFramePasses[Slot][PassIdx].BeginQueryIndex, ssVertex);
+  Result := PassIdx;
+end;
+
+procedure TCastleVulkanTimestampProfiler.EndPass(const ACmd: TRHICommandList;
+  const APassIndex: Integer);
+var
+  Slot: Cardinal;
+begin
+  Slot := FCurrentSlot mod MaxFramesInFlight;
+  if (APassIndex < 0) or (APassIndex >= Length(FFramePasses[Slot])) then
+    Exit;
+  if (ACmd <> nil) and (FPools[Slot] <> nil) then
+    ACmd.WriteTimestamp(FPools[Slot], FFramePasses[Slot][APassIndex].EndQueryIndex, ssFragment);
+end;
+
+function TCastleVulkanTimestampProfiler.GetPassTimeMs(const APassName: String): Single;
+var
+  I: Integer;
+begin
+  Result := 0.0;
+  for I := 0 to High(FCompletedPasses) do
+    if FCompletedPasses[I].PassName = APassName then
+      Exit(FCompletedPasses[I].CompletedGpuTimeMs);
+end;
+
+function TCastleVulkanTimestampProfiler.GetQueryPoolForSlot(
+  const AFrameSlot: Cardinal): TVulkanRHIQueryPool;
+begin
+  Result := FPools[AFrameSlot mod MaxFramesInFlight];
+end;
+
+function TCastleVulkanTimestampProfiler.GetCompletedPassCount: Cardinal;
+begin
+  Result := Cardinal(Length(FCompletedPasses));
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -3798,6 +5506,7 @@ constructor TVulkanRHIDevice.Create(const ACreateSurfaceCallback: TVulkanCreateS
 begin
   inherited Create;
   FPipelineMap := TVulkanPipelineMap.Create([doOwnsValues]);
+  FComputePipelineMap := TVulkanComputePipelineMap.Create([doOwnsValues]);
   FVertexInputLibMap := TVulkanPipelineLibraryMap.Create;
   FPreRasterLibMap := TVulkanPipelineLibraryMap.Create;
   FFragmentShaderLibMap := TVulkanPipelineLibraryMap.Create;
@@ -3805,6 +5514,8 @@ begin
   FRenderPassMap := TVulkanRenderPassMap.Create;
   FFramebufferMap := TVulkanFramebufferMap.Create;
   FSupportsDynamicRendering := True;
+  FAntiAliasing := aaNone;
+  FSampleCount := 1;
 
   LoadVulkan;
   CreateInstance(EnableValidation);
@@ -3819,6 +5530,10 @@ begin
   FMemoryAllocator.SupportsMemoryBudgetExt := FSupportsMemoryBudgetExt;
   FStagingUploader := TCastleVulkanStagingUploader.Create(Self);
   CreateDescriptorPool;
+  if FSupportsBindlessTextures and (FMaxBindlessTextures > 0) then
+    FBindlessTextureManager := TCastleVulkanBindlessTextureManager.Create(
+      Self, FMaxBindlessTextures, FSupportsBindlessUpdateAfterBind);
+  FTimestampProfiler := TCastleVulkanTimestampProfiler.Create(Self);
   CreateFrameContexts;
   CreateSwapchain(InitialWidth, InitialHeight);
 end;
@@ -3827,19 +5542,28 @@ constructor TVulkanRHIDevice.CreateHeadless(const APhysicalDevice: VkPhysicalDev
   const ASupportsMemoryBudgetExt: Boolean;
   const ASupportsDynamicRendering: Boolean;
   const ADeviceApiVersion: Cardinal;
-  const ASupportsGraphicsPipelineLibrary: Boolean);
+  const ASupportsGraphicsPipelineLibrary: Boolean;
+  const ASupportsBindlessTextures: Boolean;
+  const AMaxBindlessTextures: Cardinal;
+  const ASupportsExtendedDynamicState: Boolean);
 var
   I: Integer;
 begin
   inherited Create;
   FPipelineMap := TVulkanPipelineMap.Create([doOwnsValues]);
+  FComputePipelineMap := TVulkanComputePipelineMap.Create([doOwnsValues]);
   FVertexInputLibMap := TVulkanPipelineLibraryMap.Create;
   FPreRasterLibMap := TVulkanPipelineLibraryMap.Create;
   FFragmentShaderLibMap := TVulkanPipelineLibraryMap.Create;
   FFragmentOutputLibMap := TVulkanPipelineLibraryMap.Create;
   FRenderPassMap := TVulkanRenderPassMap.Create;
   FFramebufferMap := TVulkanFramebufferMap.Create;
+  FAntiAliasing := aaNone;
+  FSampleCount := 1;
   FCapabilities.Backend := rbVulkan;
+  FCapabilities.MaxFramebufferSampleCount := 8;
+  FCapabilities.SupportsComputeShaders := True;
+  FCapabilities.TimestampPeriodNanoseconds := 1.0;
   FPhysicalDevice := APhysicalDevice;
   FInstanceApiVersion := ADeviceApiVersion;
   FDeviceApiVersion := ADeviceApiVersion;
@@ -3847,10 +5571,29 @@ begin
   FSupportsDynamicRendering := ASupportsDynamicRendering;
   FSupportsGraphicsPipelineLibrary := ASupportsGraphicsPipelineLibrary;
   FSupportsGPLFastLinking := ASupportsGraphicsPipelineLibrary;
+  FSupportsBindlessTextures := ASupportsBindlessTextures;
+  FSupportsBindlessUpdateAfterBind := ASupportsBindlessTextures;
+  FSupportsExtendedDynamicState := ASupportsExtendedDynamicState;
+  FSupportsSynchronization2 := ADeviceApiVersion >= VK_API_VERSION_1_3;
+  FSupportsTimelineSemaphores := ADeviceApiVersion >= VK_API_VERSION_1_2;
+  FCapabilities.SupportsExtendedDynamicState := FSupportsExtendedDynamicState;
+  FCapabilities.SupportsSynchronization2 := FSupportsSynchronization2;
+  FCapabilities.SupportsTimelineSemaphores := FSupportsTimelineSemaphores;
+  if ASupportsBindlessTextures then
+    FMaxBindlessTextures := Max(Cardinal(1), AMaxBindlessTextures)
+  else
+    FMaxBindlessTextures := 0;
+  FCapabilities.SupportsBindlessTextures := FSupportsBindlessTextures;
+  FCapabilities.MaxBindlessTextures := FMaxBindlessTextures;
   FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice);
   FMemoryAllocator.SupportsMemoryBudgetExt := FSupportsMemoryBudgetExt;
   FStagingUploader := TCastleVulkanStagingUploader.Create(Self);
-  FPersistentDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 2048, True, 8192);
+  FPersistentDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(
+    FDevice, 2048, True, 8192, FSupportsBindlessUpdateAfterBind);
+  if FSupportsBindlessTextures and (FMaxBindlessTextures > 0) then
+    FBindlessTextureManager := TCastleVulkanBindlessTextureManager.Create(
+      Self, FMaxBindlessTextures, FSupportsBindlessUpdateAfterBind);
+  FTimestampProfiler := TCastleVulkanTimestampProfiler.Create(Self);
   for I := 0 to MaxFramesInFlight - 1 do
     FFrames[I].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096);
 end;
@@ -4151,10 +5894,13 @@ var
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FTimestampProfiler);
+  FreeAndNil(FBindlessTextureManager);
   FreeAndNil(FStagingUploader);
   FlushAllDeferredDeletions;
   DestroySwapchain;
   FreeAndNil(FPipelineMap);
+  FreeAndNil(FComputePipelineMap);
   ClearPipelineLibraries;
   FreeAndNil(FVertexInputLibMap);
   FreeAndNil(FPreRasterLibMap);
@@ -4286,10 +6032,15 @@ var
   Features: VkPhysicalDeviceFeatures;
   Features2: VkPhysicalDeviceFeatures2;
   GplFeatures: VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT;
+  DescIdxFeatures: VkPhysicalDeviceDescriptorIndexingFeatures;
+  ExtDynFeatures: VkPhysicalDeviceExtendedDynamicStateFeaturesEXT;
+  Sync2Features: VkPhysicalDeviceSynchronization2Features;
+  TimelineFeatures: VkPhysicalDeviceTimelineSemaphoreFeatures;
   Props2: VkPhysicalDeviceProperties2;
   GplProps: VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT;
-  HasGplFeature: Boolean;
-  ReqDynRenderExts, ReqGplExts: TAnsiStringArray;
+  DescIdxProps: VkPhysicalDeviceDescriptorIndexingProperties;
+  HasGplFeature, HasExtDynFeature, HasSync2Feature, HasTimelineFeature: Boolean;
+  ReqDynRenderExts, ReqGplExts, ReqBindlessExts, ReqExtDynSync2Exts: TAnsiStringArray;
 begin
   DeviceCount := 0;
   CheckVk(vkEnumeratePhysicalDevices(FInstance, @DeviceCount, nil), 'vkEnumeratePhysicalDevices(count)');
@@ -4362,13 +6113,102 @@ begin
     FSupportsGraphicsPipelineLibrary,
     ReqGplExts);
 
-  WritelnLog('Vulkan', Format('Selected GPU "%s" (Vulkan %d.%d.%d, DynamicRendering=%s, GPL=%s)', [
+  FillChar(DescIdxFeatures, SizeOf(DescIdxFeatures), 0);
+  DescIdxFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+  FillChar(DescIdxProps, SizeOf(DescIdxProps), 0);
+  DescIdxProps.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;
+
+  if ((FDeviceApiVersion >= VK_API_VERSION_1_2) or IsDeviceExtensionSupported(VK_EXT_descriptor_indexing)) and
+     Assigned(vkGetPhysicalDeviceFeatures2) then
+  begin
+    FillChar(Features2, SizeOf(Features2), 0);
+    Features2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    Features2.pNext := @DescIdxFeatures;
+    vkGetPhysicalDeviceFeatures2(FPhysicalDevice, @Features2);
+
+    if Assigned(vkGetPhysicalDeviceProperties2) then
+    begin
+      FillChar(Props2, SizeOf(Props2), 0);
+      Props2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+      Props2.pNext := @DescIdxProps;
+      vkGetPhysicalDeviceProperties2(FPhysicalDevice, @Props2);
+    end;
+  end;
+
+  ResolveDescriptorIndexingConfig(
+    FDeviceApiVersion,
+    IsDeviceExtensionSupported(VK_EXT_descriptor_indexing),
+    IsDeviceExtensionSupported(VK_KHR_maintenance3),
+    DescIdxFeatures,
+    DescIdxProps,
+    4096,
+    FSupportsBindlessTextures,
+    FSupportsBindlessUpdateAfterBind,
+    FMaxBindlessTextures,
+    ReqBindlessExts);
+
+  HasExtDynFeature := False;
+  HasSync2Feature := False;
+  HasTimelineFeature := False;
+  if Assigned(vkGetPhysicalDeviceFeatures2) then
+  begin
+    if (FDeviceApiVersion >= VK_API_VERSION_1_3) or IsDeviceExtensionSupported(VK_EXT_extended_dynamic_state) then
+    begin
+      FillChar(ExtDynFeatures, SizeOf(ExtDynFeatures), 0);
+      ExtDynFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
+      FillChar(Features2, SizeOf(Features2), 0);
+      Features2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      Features2.pNext := @ExtDynFeatures;
+      vkGetPhysicalDeviceFeatures2(FPhysicalDevice, @Features2);
+      HasExtDynFeature := ExtDynFeatures.extendedDynamicState = VK_TRUE;
+    end;
+    if (FDeviceApiVersion >= VK_API_VERSION_1_3) or IsDeviceExtensionSupported(VK_KHR_synchronization2) then
+    begin
+      FillChar(Sync2Features, SizeOf(Sync2Features), 0);
+      Sync2Features.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
+      FillChar(Features2, SizeOf(Features2), 0);
+      Features2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      Features2.pNext := @Sync2Features;
+      vkGetPhysicalDeviceFeatures2(FPhysicalDevice, @Features2);
+      HasSync2Feature := Sync2Features.synchronization2 = VK_TRUE;
+    end;
+    if (FDeviceApiVersion >= VK_API_VERSION_1_2) or IsDeviceExtensionSupported(VK_KHR_timeline_semaphore) then
+    begin
+      FillChar(TimelineFeatures, SizeOf(TimelineFeatures), 0);
+      TimelineFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+      FillChar(Features2, SizeOf(Features2), 0);
+      Features2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      Features2.pNext := @TimelineFeatures;
+      vkGetPhysicalDeviceFeatures2(FPhysicalDevice, @Features2);
+      HasTimelineFeature := TimelineFeatures.timelineSemaphore = VK_TRUE;
+    end;
+  end;
+
+  ResolveExtendedDynamicStateAndSync2Config(
+    FDeviceApiVersion,
+    IsDeviceExtensionSupported(VK_EXT_extended_dynamic_state),
+    IsDeviceExtensionSupported(VK_KHR_synchronization2),
+    IsDeviceExtensionSupported(VK_KHR_timeline_semaphore),
+    HasExtDynFeature,
+    HasSync2Feature,
+    HasTimelineFeature,
+    FSupportsExtendedDynamicState,
+    FSupportsSynchronization2,
+    FSupportsTimelineSemaphores,
+    ReqExtDynSync2Exts);
+
+  WritelnLog('Vulkan', Format('Selected GPU "%s" (Vulkan %d.%d.%d, DynamicRendering=%s, GPL=%s, Bindless=%s[max=%d], ExtDynState=%s, Sync2=%s, TimelineSem=%s)', [
     String(PAnsiChar(@ChosenProps.deviceName[0])),
     VK_VERSION_MAJOR(FDeviceApiVersion),
     VK_VERSION_MINOR(FDeviceApiVersion),
     VK_VERSION_PATCH(FDeviceApiVersion),
     BoolToStr(FSupportsDynamicRendering, True),
-    BoolToStr(FSupportsGraphicsPipelineLibrary, True)
+    BoolToStr(FSupportsGraphicsPipelineLibrary, True),
+    BoolToStr(FSupportsBindlessTextures, True),
+    FMaxBindlessTextures,
+    BoolToStr(FSupportsExtendedDynamicState, True),
+    BoolToStr(FSupportsSynchronization2, True),
+    BoolToStr(FSupportsTimelineSemaphores, True)
   ]));
 
   FCapabilities.Backend := rbVulkan;
@@ -4379,11 +6219,20 @@ begin
   FCapabilities.MaxUniformBufferRange := ChosenProps.limits.maxUniformBufferRange;
   FCapabilities.MinUniformBufferOffsetAlignment := Cardinal(ChosenProps.limits.minUniformBufferOffsetAlignment);
   FCapabilities.MaxPushConstantsSize := ChosenProps.limits.maxPushConstantsSize;
+  FCapabilities.MaxFramebufferSampleCount := ResolveMaxFramebufferSampleCount(
+    ChosenProps.limits.framebufferColorSampleCounts,
+    ChosenProps.limits.framebufferDepthSampleCounts);
+  FCapabilities.TimestampPeriodNanoseconds := ChosenProps.limits.timestampPeriod;
   FCapabilities.SupportsBCCompression := Features.textureCompressionBC = VK_TRUE;
   FCapabilities.SupportsASTCCompression := Features.textureCompressionASTC_LDR = VK_TRUE;
   FCapabilities.SupportsETC2Compression := Features.textureCompressionETC2 = VK_TRUE;
   FCapabilities.SupportsComputeShaders := True;
   FCapabilities.SupportsMultiDrawIndirect := Features.multiDrawIndirect = VK_TRUE;
+  FCapabilities.SupportsBindlessTextures := FSupportsBindlessTextures;
+  FCapabilities.MaxBindlessTextures := FMaxBindlessTextures;
+  FCapabilities.SupportsExtendedDynamicState := FSupportsExtendedDynamicState;
+  FCapabilities.SupportsSynchronization2 := FSupportsSynchronization2;
+  FCapabilities.SupportsTimelineSemaphores := FSupportsTimelineSemaphores;
 end;
 
 function TVulkanRHIDevice.IsDeviceExtensionSupported(const AExtensionName: AnsiString): Boolean;
@@ -4420,10 +6269,16 @@ var
   QueuePriority: Single;
   DynRenderFeatures: VkPhysicalDeviceDynamicRenderingFeatures;
   GplFeatures: VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT;
-  ReqDynRenderExts, ReqGplExts: TAnsiStringArray;
-  DeviceExts: array[0..11] of PAnsiChar;
+  DescIdxFeatures: VkPhysicalDeviceDescriptorIndexingFeatures;
+  DescIdxProps: VkPhysicalDeviceDescriptorIndexingProperties;
+  ExtDynFeatures: VkPhysicalDeviceExtendedDynamicStateFeaturesEXT;
+  Sync2Features: VkPhysicalDeviceSynchronization2Features;
+  TimelineFeatures: VkPhysicalDeviceTimelineSemaphoreFeatures;
+  ReqDynRenderExts, ReqGplExts, ReqBindlessExts, ReqExtDynSync2Exts: TAnsiStringArray;
+  DeviceExts: array[0..23] of PAnsiChar;
   CreateInfo: VkDeviceCreateInfo;
   CacheInfo: VkPipelineCacheCreateInfo;
+  NextChainHead: Pointer;
 begin
   QueueCount := 0;
   vkGetPhysicalDeviceQueueFamilyProperties(FPhysicalDevice, @QueueCount, nil);
@@ -4462,6 +6317,32 @@ begin
   FillChar(GplFeatures, SizeOf(GplFeatures), 0);
   GplFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT;
   GplFeatures.graphicsPipelineLibrary := VK_TRUE;
+
+  FillChar(DescIdxFeatures, SizeOf(DescIdxFeatures), 0);
+  DescIdxFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+  if FSupportsBindlessTextures then
+  begin
+    DescIdxFeatures.shaderSampledImageArrayNonUniformIndexing := VK_TRUE;
+    DescIdxFeatures.descriptorBindingPartiallyBound := VK_TRUE;
+    DescIdxFeatures.descriptorBindingUpdateUnusedWhilePending := VK_TRUE;
+    DescIdxFeatures.runtimeDescriptorArray := VK_TRUE;
+    if FSupportsBindlessUpdateAfterBind then
+      DescIdxFeatures.descriptorBindingSampledImageUpdateAfterBind := VK_TRUE;
+  end;
+  FillChar(DescIdxProps, SizeOf(DescIdxProps), 0);
+  DescIdxProps.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;
+
+  FillChar(ExtDynFeatures, SizeOf(ExtDynFeatures), 0);
+  ExtDynFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
+  ExtDynFeatures.extendedDynamicState := VK_TRUE;
+
+  FillChar(Sync2Features, SizeOf(Sync2Features), 0);
+  Sync2Features.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES;
+  Sync2Features.synchronization2 := VK_TRUE;
+
+  FillChar(TimelineFeatures, SizeOf(TimelineFeatures), 0);
+  TimelineFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+  TimelineFeatures.timelineSemaphore := VK_TRUE;
 
   DeviceExts[0] := VK_KHR_swapchain;
   ExtCount := 1;
@@ -4506,24 +6387,84 @@ begin
     Inc(ExtCount);
   end;
 
-  FillChar(CreateInfo, SizeOf(CreateInfo), 0);
-  CreateInfo.sType := VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+  ResolveDescriptorIndexingConfig(
+    FDeviceApiVersion,
+    IsDeviceExtensionSupported(VK_EXT_descriptor_indexing),
+    IsDeviceExtensionSupported(VK_KHR_maintenance3),
+    DescIdxFeatures,
+    DescIdxProps,
+    FMaxBindlessTextures,
+    FSupportsBindlessTextures,
+    FSupportsBindlessUpdateAfterBind,
+    FMaxBindlessTextures,
+    ReqBindlessExts);
+
+  for I := 0 to High(ReqBindlessExts) do
+  begin
+    DeviceExts[ExtCount] := PAnsiChar(ReqBindlessExts[I]);
+    Inc(ExtCount);
+  end;
+
+  ResolveExtendedDynamicStateAndSync2Config(
+    FDeviceApiVersion,
+    IsDeviceExtensionSupported(VK_EXT_extended_dynamic_state),
+    IsDeviceExtensionSupported(VK_KHR_synchronization2),
+    IsDeviceExtensionSupported(VK_KHR_timeline_semaphore),
+    FSupportsExtendedDynamicState,
+    FSupportsSynchronization2,
+    FSupportsTimelineSemaphores,
+    FSupportsExtendedDynamicState,
+    FSupportsSynchronization2,
+    FSupportsTimelineSemaphores,
+    ReqExtDynSync2Exts);
+
+  for I := 0 to High(ReqExtDynSync2Exts) do
+  begin
+    DeviceExts[ExtCount] := PAnsiChar(ReqExtDynSync2Exts[I]);
+    Inc(ExtCount);
+  end;
+
+  NextChainHead := nil;
+  if FSupportsTimelineSemaphores then
+  begin
+    TimelineFeatures.pNext := NextChainHead;
+    NextChainHead := @TimelineFeatures;
+  end;
+  if FSupportsSynchronization2 then
+  begin
+    Sync2Features.pNext := NextChainHead;
+    NextChainHead := @Sync2Features;
+  end;
+  if FSupportsExtendedDynamicState then
+  begin
+    ExtDynFeatures.pNext := NextChainHead;
+    NextChainHead := @ExtDynFeatures;
+  end;
+  if FSupportsBindlessTextures then
+  begin
+    DescIdxFeatures.pNext := NextChainHead;
+    NextChainHead := @DescIdxFeatures;
+  end;
+  if FSupportsGraphicsPipelineLibrary then
+  begin
+    GplFeatures.pNext := NextChainHead;
+    NextChainHead := @GplFeatures;
+  end;
   if FSupportsDynamicRendering then
   begin
-    CreateInfo.pNext := @DynRenderFeatures;
-    if FSupportsGraphicsPipelineLibrary then
-      DynRenderFeatures.pNext := @GplFeatures;
+    DynRenderFeatures.pNext := NextChainHead;
+    NextChainHead := @DynRenderFeatures;
   end else
   begin
-    if FSupportsGraphicsPipelineLibrary then
-      CreateInfo.pNext := @GplFeatures
-    else
-      CreateInfo.pNext := nil;
     WritelnLog('Vulkan', Format('Device (Vulkan %d.%d) does not support VK_KHR_dynamic_rendering; using Vulkan 1.1/1.2 VkRenderPass / VkFramebuffer fallback.', [
       VK_VERSION_MAJOR(FDeviceApiVersion),
       VK_VERSION_MINOR(FDeviceApiVersion)
     ]));
   end;
+
+  FillChar(CreateInfo, SizeOf(CreateInfo), 0);
+  CreateInfo.sType := VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+  CreateInfo.pNext := NextChainHead;
   if FPresentQueueFamily <> FGraphicsQueueFamily then
   begin
     QueueInfos[QueueInfoCount].sType := VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -4926,7 +6867,8 @@ function TVulkanRHIDevice.GetOrCreateFallbackRenderPass(
   const AColorLoadOp: TRHIAttachmentLoadOp;
   const ADepthLoadOp: TRHIAttachmentLoadOp;
   const AColorStoreOp: TRHIAttachmentStoreOp;
-  const ADepthStoreOp: TRHIAttachmentStoreOp): VkRenderPass;
+  const ADepthStoreOp: TRHIAttachmentStoreOp;
+  const AHasColorResolve: Boolean): VkRenderPass;
 
   function MapLoadOp(const AOp: TRHIAttachmentLoadOp): VkAttachmentLoadOp;
   begin
@@ -4950,27 +6892,26 @@ function TVulkanRHIDevice.GetOrCreateFallbackRenderPass(
 var
   KeyHash: UInt64;
   Attachments: array of VkAttachmentDescription;
-  ColorRefs: array of VkAttachmentReference;
+  ColorRefs, ResolveRefs: array of VkAttachmentReference;
   DepthRef: VkAttachmentReference;
   Subpass: VkSubpassDescription;
   Dependency: VkSubpassDependency;
   RpInfo: VkRenderPassCreateInfo;
   SampleBits: VkSampleCountFlags;
-  AttCount, DepthIdx, I: Integer;
+  AttCount, DepthIdx, ResolveBaseIdx, I: Integer;
 begin
   KeyHash := ComputeRenderPassKeyHash(AColorFormats, ADepthFormat, ASampleCount,
-    AColorLoadOp, ADepthLoadOp, AColorStoreOp, ADepthStoreOp);
+    AColorLoadOp, ADepthLoadOp, AColorStoreOp, ADepthStoreOp, AHasColorResolve);
   if (FRenderPassMap <> nil) and FRenderPassMap.TryGetValue(KeyHash, Result) then
     Exit;
 
-  if ASampleCount > 1 then
-    SampleBits := ASampleCount
-  else
-    SampleBits := VK_SAMPLE_COUNT_1_BIT;
+  SampleBits := RHIToVkSampleCountFlags(ASampleCount);
 
   AttCount := Length(AColorFormats);
   if ADepthFormat <> pfUndefined then
     Inc(AttCount);
+  if (ASampleCount > 1) and AHasColorResolve then
+    Inc(AttCount, Length(AColorFormats));
 
   SetLength(Attachments, AttCount);
   SetLength(ColorRefs, Length(AColorFormats));
@@ -4980,7 +6921,10 @@ begin
     Attachments[I].format := RHIToVkFormat(AColorFormats[I]);
     Attachments[I].samples := SampleBits;
     Attachments[I].loadOp := MapLoadOp(AColorLoadOp);
-    Attachments[I].storeOp := MapStoreOp(AColorStoreOp);
+    if (ASampleCount > 1) and AHasColorResolve then
+      Attachments[I].storeOp := VK_ATTACHMENT_STORE_OP_DONT_CARE
+    else
+      Attachments[I].storeOp := MapStoreOp(AColorStoreOp);
     Attachments[I].stencilLoadOp := VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     Attachments[I].stencilStoreOp := VK_ATTACHMENT_STORE_OP_DONT_CARE;
     Attachments[I].initialLayout := VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -5012,6 +6956,30 @@ begin
     DepthRef.attachment := Cardinal(DepthIdx);
     DepthRef.layout := VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     Subpass.pDepthStencilAttachment := @DepthRef;
+  end;
+
+  if (ASampleCount > 1) and AHasColorResolve and (Length(AColorFormats) > 0) then
+  begin
+    ResolveBaseIdx := Length(AColorFormats);
+    if ADepthFormat <> pfUndefined then
+      Inc(ResolveBaseIdx);
+    SetLength(ResolveRefs, Length(AColorFormats));
+    for I := 0 to High(AColorFormats) do
+    begin
+      FillChar(Attachments[ResolveBaseIdx + I], SizeOf(VkAttachmentDescription), 0);
+      Attachments[ResolveBaseIdx + I].format := RHIToVkFormat(AColorFormats[I]);
+      Attachments[ResolveBaseIdx + I].samples := VK_SAMPLE_COUNT_1_BIT;
+      Attachments[ResolveBaseIdx + I].loadOp := VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+      Attachments[ResolveBaseIdx + I].storeOp := VK_ATTACHMENT_STORE_OP_STORE;
+      Attachments[ResolveBaseIdx + I].stencilLoadOp := VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+      Attachments[ResolveBaseIdx + I].stencilStoreOp := VK_ATTACHMENT_STORE_OP_DONT_CARE;
+      Attachments[ResolveBaseIdx + I].initialLayout := VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+      Attachments[ResolveBaseIdx + I].finalLayout := VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+      ResolveRefs[I].attachment := Cardinal(ResolveBaseIdx + I);
+      ResolveRefs[I].layout := VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    end;
+    Subpass.pResolveAttachments := @ResolveRefs[0];
   end;
 
   FillChar(Dependency, SizeOf(Dependency), 0);
@@ -5097,6 +7065,163 @@ begin
   Inc(FAllocatedMemoryBytes, AAllocatedBytes);
 end;
 
+procedure TVulkanRHIDevice.EnsureMSAATargets(const AWidth, AHeight: Cardinal;
+  const AColorFormat, ADepthFormat: TRHIPixelFormat);
+var
+  EffSamples: Cardinal;
+  MSAAColorDesc, MSAADepthDesc: TRHITextureDesc;
+begin
+  EffSamples := Max(Cardinal(1), FSampleCount);
+  if FCapabilities.MaxFramebufferSampleCount > 0 then
+    EffSamples := Min(EffSamples, FCapabilities.MaxFramebufferSampleCount);
+
+  if (EffSamples <= 1) or (AWidth = 0) or (AHeight = 0) then
+  begin
+    FreeAndNil(FSwapchainMSAAColorTexture);
+    FreeAndNil(FSwapchainMSAADepthTexture);
+    Exit;
+  end;
+
+  if (FSwapchainMSAAColorTexture = nil) or
+     (FSwapchainMSAAColorTexture.Desc.Width <> AWidth) or
+     (FSwapchainMSAAColorTexture.Desc.Height <> AHeight) or
+     (FSwapchainMSAAColorTexture.Desc.Format <> AColorFormat) or
+     (FSwapchainMSAAColorTexture.Desc.SampleCount <> EffSamples) then
+  begin
+    FreeAndNil(FSwapchainMSAAColorTexture);
+    if AColorFormat <> pfUndefined then
+    begin
+      MSAAColorDesc := TRHITextureDesc.Create2D(AWidth, AHeight, AColorFormat,
+        [tuColorAttachment], 1, EffSamples);
+      MSAAColorDesc.DebugName := 'SwapchainMSAAColor';
+      FSwapchainMSAAColorTexture := TVulkanRHITexture.Create(Self, MSAAColorDesc);
+    end;
+  end;
+
+  if (FSwapchainMSAADepthTexture = nil) or
+     (FSwapchainMSAADepthTexture.Desc.Width <> AWidth) or
+     (FSwapchainMSAADepthTexture.Desc.Height <> AHeight) or
+     (FSwapchainMSAADepthTexture.Desc.Format <> ADepthFormat) or
+     (FSwapchainMSAADepthTexture.Desc.SampleCount <> EffSamples) then
+  begin
+    FreeAndNil(FSwapchainMSAADepthTexture);
+    if ADepthFormat <> pfUndefined then
+    begin
+      MSAADepthDesc := TRHITextureDesc.Create2D(AWidth, AHeight, ADepthFormat,
+        [tuDepthStencil], 1, EffSamples);
+      MSAADepthDesc.DebugName := 'SwapchainMSAADepth';
+      FSwapchainMSAADepthTexture := TVulkanRHITexture.Create(Self, MSAADepthDesc);
+    end;
+  end;
+end;
+
+procedure TVulkanRHIDevice.SetAntiAliasing(const AValue: TAntiAliasing);
+var
+  ReqSamples: Cardinal;
+begin
+  FAntiAliasing := AValue;
+  ReqSamples := Max(Cardinal(1), AntiAliasingToSampleCount(AValue));
+  SetSampleCount(ReqSamples);
+end;
+
+procedure TVulkanRHIDevice.SetSampleCount(const AValue: Cardinal);
+var
+  MaxSamples: Cardinal;
+begin
+  MaxSamples := FCapabilities.MaxFramebufferSampleCount;
+  if MaxSamples = 0 then
+    MaxSamples := 8;
+  FSampleCount := ClampSampleCountToMask(AValue, (MaxSamples shl 1) - 1);
+  if FSampleCount <= 1 then
+  begin
+    FreeAndNil(FSwapchainMSAAColorTexture);
+    FreeAndNil(FSwapchainMSAADepthTexture);
+  end else
+  if (FSwapchainExtent.width > 0) and (FSwapchainExtent.height > 0) then
+    EnsureMSAATargets(FSwapchainExtent.width, FSwapchainExtent.height, FSwapchainFormat, pfD32_Float);
+end;
+
+procedure TVulkanRHIDevice.SetSupportsExtendedDynamicState(const AValue: Boolean);
+begin
+  FSupportsExtendedDynamicState := AValue;
+  FCapabilities.SupportsExtendedDynamicState := AValue;
+end;
+
+procedure TVulkanRHIDevice.SetSupportsSynchronization2(const AValue: Boolean);
+begin
+  FSupportsSynchronization2 := AValue;
+  FCapabilities.SupportsSynchronization2 := AValue;
+end;
+
+procedure TVulkanRHIDevice.SetSupportsTimelineSemaphores(const AValue: Boolean);
+begin
+  FSupportsTimelineSemaphores := AValue;
+  FCapabilities.SupportsTimelineSemaphores := AValue;
+end;
+
+function TVulkanRHIDevice.BuildSwapchainRenderingInfo(const ARenderArea: TRectangle;
+  const AResolveColorTarget: TRHITexture;
+  const AResolveDepthTarget: TRHITexture;
+  const AClearColor: TCastleColor;
+  const AColorLoadOp: TRHIAttachmentLoadOp;
+  const ADepthLoadOp: TRHIAttachmentLoadOp;
+  const AClearDepth: Single): TRHIRenderingInfo;
+var
+  W, H: Cardinal;
+  ColorFmt, DepthFmt: TRHIPixelFormat;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  Result.RenderArea := ARenderArea;
+  W := Max(1, ARenderArea.Width);
+  H := Max(1, ARenderArea.Height);
+
+  if AResolveColorTarget <> nil then
+    ColorFmt := AResolveColorTarget.Desc.Format
+  else
+    ColorFmt := FSwapchainFormat;
+  if AResolveDepthTarget <> nil then
+    DepthFmt := AResolveDepthTarget.Desc.Format
+  else
+    DepthFmt := pfD32_Float;
+
+  if (FSampleCount > 1) and (AResolveColorTarget <> nil) then
+  begin
+    EnsureMSAATargets(W, H, ColorFmt, DepthFmt);
+    SetLength(Result.ColorAttachments, 1);
+    Result.ColorAttachments[0].Texture := FSwapchainMSAAColorTexture;
+    Result.ColorAttachments[0].ResolveTexture := AResolveColorTarget;
+    Result.ColorAttachments[0].ResolveMode := rmAverage;
+    Result.ColorAttachments[0].LoadOp := AColorLoadOp;
+    Result.ColorAttachments[0].StoreOp := soDontCare;
+    Result.ColorAttachments[0].ClearColor := AClearColor;
+
+    Result.DepthAttachment.Texture := FSwapchainMSAADepthTexture;
+    Result.DepthAttachment.ResolveTexture := nil;
+    Result.DepthAttachment.ResolveMode := rmNone;
+    Result.DepthAttachment.LoadOp := ADepthLoadOp;
+    Result.DepthAttachment.StoreOp := soDontCare;
+    Result.DepthAttachment.ClearDepth := AClearDepth;
+  end else
+  begin
+    if AResolveColorTarget <> nil then
+    begin
+      SetLength(Result.ColorAttachments, 1);
+      Result.ColorAttachments[0].Texture := AResolveColorTarget;
+      Result.ColorAttachments[0].ResolveTexture := nil;
+      Result.ColorAttachments[0].ResolveMode := rmNone;
+      Result.ColorAttachments[0].LoadOp := AColorLoadOp;
+      Result.ColorAttachments[0].StoreOp := soStore;
+      Result.ColorAttachments[0].ClearColor := AClearColor;
+    end;
+    Result.DepthAttachment.Texture := AResolveDepthTarget;
+    Result.DepthAttachment.ResolveTexture := nil;
+    Result.DepthAttachment.ResolveMode := rmNone;
+    Result.DepthAttachment.LoadOp := ADepthLoadOp;
+    Result.DepthAttachment.StoreOp := soStore;
+    Result.DepthAttachment.ClearDepth := AClearDepth;
+  end;
+end;
+
 procedure TVulkanRHIDevice.CreateSwapchain(const Width, Height: Cardinal);
 var
   Caps: VkSurfaceCapabilitiesKHR;
@@ -5167,6 +7292,9 @@ begin
   DepthDesc := TRHITextureDesc.Create2D(FSwapchainExtent.width, FSwapchainExtent.height,
     pfD32_Float, [tuDepthStencil], 1);
   FSwapchainDepthTexture := TVulkanRHITexture.Create(Self, DepthDesc);
+
+  if FSampleCount > 1 then
+    EnsureMSAATargets(FSwapchainExtent.width, FSwapchainExtent.height, FSwapchainFormat, pfD32_Float);
 end;
 
 procedure TVulkanRHIDevice.DestroySwapchain;
@@ -5174,6 +7302,8 @@ var
   I: Integer;
 begin
   ClearFallbackFramebuffers;
+  FreeAndNil(FSwapchainMSAAColorTexture);
+  FreeAndNil(FSwapchainMSAADepthTexture);
   FreeAndNil(FSwapchainDepthTexture);
   for I := 0 to High(FSwapchainColorTextures) do
     FreeAndNil(FSwapchainColorTextures[I]);
@@ -5213,7 +7343,8 @@ end;
 procedure TVulkanRHIDevice.CreateDescriptorPool;
 begin
   if FPersistentDescriptorAllocator = nil then
-    FPersistentDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 2048, True, 8192);
+    FPersistentDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(
+      FDevice, 2048, True, 8192, FSupportsBindlessUpdateAfterBind);
 end;
 
 function TVulkanRHIDevice.BeginFrame: TRHICommandList;
@@ -5249,8 +7380,12 @@ begin
 
   { 3. Begin command list recording }
   Frame.CommandList.BeginRecording;
+  if FTimestampProfiler <> nil then
+    FTimestampProfiler.BeginFrame(Frame.CommandList, FFrameIndex);
   if FStagingUploader <> nil then
     FStagingUploader.FlushPendingUploads(Frame.CommandList);
+  if FBindlessTextureManager <> nil then
+    FBindlessTextureManager.FlushPendingUpdates;
   Result := Frame.CommandList;
   SetActiveCommandList(Result);
 end;
@@ -5382,13 +7517,21 @@ end;
 
 function TVulkanRHIDevice.ComputePipelineHash(const ADesc: TRHIGraphicsPipelineDesc): UInt64;
 begin
-  Result := ComputePipelineKeyHash(ADesc);
+  Result := ComputePipelineKeyHashEx(ADesc, FSupportsExtendedDynamicState);
 end;
 
 function TVulkanRHIDevice.GetPipelineCount: Cardinal;
 begin
   if FPipelineMap <> nil then
     Result := Cardinal(FPipelineMap.Count)
+  else
+    Result := 0;
+end;
+
+function TVulkanRHIDevice.GetComputePipelineCount: Cardinal;
+begin
+  if FComputePipelineMap <> nil then
+    Result := Cardinal(FComputePipelineMap.Count)
   else
     Result := 0;
 end;
@@ -5409,6 +7552,43 @@ begin
     FPipelineMap.Add(HashKey, FoundPipeline);
   end;
   Result := FoundPipeline;
+end;
+
+function TVulkanRHIDevice.GetOrCreateComputePipeline(
+  const ADesc: TRHIComputePipelineDesc): TRHIComputePipeline;
+var
+  HashKey: UInt64;
+  FoundPipeline: TVulkanRHIComputePipeline;
+begin
+  HashKey := ComputeComputePipelineKeyHash(ADesc);
+  if (FComputePipelineMap <> nil) and FComputePipelineMap.TryGetValue(HashKey, FoundPipeline) then
+  begin
+    Inc(FComputePipelineCacheHits);
+  end else
+  begin
+    Inc(FComputePipelineCacheMisses);
+    FoundPipeline := TVulkanRHIComputePipeline.Create(Self, ADesc);
+    if FComputePipelineMap <> nil then
+      FComputePipelineMap.Add(HashKey, FoundPipeline);
+  end;
+  Result := FoundPipeline;
+end;
+
+function TVulkanRHIDevice.CreateComputePipeline(
+  const ADesc: TRHIComputePipelineDesc): TRHIComputePipeline;
+begin
+  Result := TVulkanRHIComputePipeline.Create(Self, ADesc);
+end;
+
+function TVulkanRHIDevice.CreateQueryPool(const ADesc: TRHIQueryPoolDesc): TRHIQueryPool;
+begin
+  Result := TVulkanRHIQueryPool.Create(Self, ADesc);
+end;
+
+function TVulkanRHIDevice.CreateTimelineSemaphore(
+  const AInitialValue: UInt64): TCastleVulkanTimelineSemaphore;
+begin
+  Result := TCastleVulkanTimelineSemaphore.Create(Self, AInitialValue);
 end;
 
 function TVulkanRHIDevice.PrewarmStandardPipelines(const AIncludeBlending: Boolean;

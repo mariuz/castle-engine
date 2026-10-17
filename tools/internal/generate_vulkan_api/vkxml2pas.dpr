@@ -321,6 +321,8 @@ begin
               // Strip any leading comments
               while (Pos(#10, HeaderVersion) > 0) do
                 HeaderVersion := Trim(Copy(HeaderVersion, Pos(#10, HeaderVersion) + 1, MaxInt));
+              if StrToIntDef(HeaderVersion, 0) < 341 then
+                HeaderVersion := '341';
             end else
             if (Cat = 'struct') or (Cat = 'union') then
             begin
@@ -490,6 +492,7 @@ begin
     if CType = 'void' then Exit('Pointer');
     if CType = 'char' then Exit('PAnsiChar');
     if (CType = 'uint32_t') or (CType = 'VkSampleMask') then Exit('PCardinal');
+    if CType = 'uint64_t' then Exit('PUInt64');
     if CType = 'int32_t' then Exit('PInteger');
     if CType = 'float' then Exit('PSingle');
     if CType = 'size_t' then Exit('PPtrUInt');
@@ -520,6 +523,7 @@ begin
   if (CType = 'VkResult') or
      (CType = 'VkStructureType') or
      (CType = 'VkFlags') or
+     (CType = 'VkFlags64') or
      (CType = 'VkDeviceSize') or
      (CType = 'VkBool32') or
      (CType = 'VkSampleCountFlags') or
@@ -529,7 +533,9 @@ begin
      (CType = 'VkImageUsageFlags') or
      (CType = 'VkMemoryPropertyFlags') or
      (CType = 'VkPipelineStageFlags') or
+     (CType = 'VkPipelineStageFlags2') or
      (CType = 'VkAccessFlags') or
+     (CType = 'VkAccessFlags2') or
      (CType = 'VkShaderStageFlags') or
      (CType = 'VkColorComponentFlags') or
      (CType = 'VkImageAspectFlags') or
@@ -550,6 +556,13 @@ begin
      (CType = 'VkSamplerMipmapMode') or
      (CType = 'VkSamplerAddressMode') or
      (CType = 'VkGraphicsPipelineLibraryFlagsEXT') or
+     (CType = 'VkDescriptorBindingFlags') or
+     (CType = 'VkQueueFlags') or
+     (CType = 'VkResolveModeFlags') or
+     (CType = 'VkQueryType') or
+     (CType = 'VkQueryControlFlags') or
+     (CType = 'VkQueryResultFlags') or
+     (CType = 'VkQueryPipelineStatisticFlags') or
      (CType = 'VkInstance') or
      (CType = 'VkPhysicalDevice') or
      (CType = 'VkDevice') or
@@ -571,6 +584,7 @@ begin
      (CType = 'VkRenderPass') or
      (CType = 'VkSemaphore') or
      (CType = 'VkFence') or
+     (CType = 'VkQueryPool') or
      (CType = 'VkSurfaceKHR') or
      (CType = 'VkSwapchainKHR') or
      (CType = 'VkCommandPool') or
@@ -1014,7 +1028,7 @@ const
     'VK_FENCE_CREATE_SIGNALED_BIT'
   );
 
-  OrderedEnums3: array[0..67] of String = (
+  OrderedEnums3: array[0..145] of String = (
     'VK_INDEX_TYPE_UINT16',
     'VK_INDEX_TYPE_UINT32',
     'VK_IMAGE_ASPECT_COLOR_BIT',
@@ -1031,6 +1045,9 @@ const
     'VK_SAMPLE_COUNT_2_BIT',
     'VK_SAMPLE_COUNT_4_BIT',
     'VK_SAMPLE_COUNT_8_BIT',
+    'VK_SAMPLE_COUNT_16_BIT',
+    'VK_SAMPLE_COUNT_32_BIT',
+    'VK_SAMPLE_COUNT_64_BIT',
     'VK_IMAGE_TILING_OPTIMAL',
     'VK_IMAGE_TILING_LINEAR',
     'VK_PHYSICAL_DEVICE_TYPE_OTHER',
@@ -1086,7 +1103,87 @@ const
     'VK_FORMAT_FEATURE_TRANSFER_DST_BIT',
     // Descriptor Pool Growth & Reset Flags
     'VK_ERROR_OUT_OF_POOL_MEMORY',
-    'VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT'
+    'VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT',
+    // VK_EXT_descriptor_indexing / Vulkan 1.2 Core Bindless Descriptors
+    'VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES',
+    'VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO',
+    'VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT',
+    'VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT',
+    'VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT',
+    'VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT',
+    'VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT',
+    'VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT',
+    // Phase 6.4: MSAA Resolve Modes (VK_KHR_depth_stencil_resolve / Vulkan 1.2+ / VK_KHR_dynamic_rendering)
+    'VK_RESOLVE_MODE_NONE',
+    'VK_RESOLVE_MODE_SAMPLE_ZERO_BIT',
+    'VK_RESOLVE_MODE_AVERAGE_BIT',
+    'VK_RESOLVE_MODE_MIN_BIT',
+    'VK_RESOLVE_MODE_MAX_BIT',
+    'VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE',
+    // Phase 6.5: Compute Pipelines
+    'VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO',
+    // Phase 6.6: Extended Dynamic State & VK_KHR_synchronization2 & VK_KHR_timeline_semaphore
+    'VK_DYNAMIC_STATE_CULL_MODE',
+    'VK_DYNAMIC_STATE_FRONT_FACE',
+    'VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY',
+    'VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE',
+    'VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE',
+    'VK_DYNAMIC_STATE_DEPTH_COMPARE_OP',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT',
+    'VK_STRUCTURE_TYPE_MEMORY_BARRIER_2',
+    'VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2',
+    'VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2',
+    'VK_STRUCTURE_TYPE_DEPENDENCY_INFO',
+    'VK_PIPELINE_STAGE_2_NONE',
+    'VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT',
+    'VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT',
+    'VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT',
+    'VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT',
+    'VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT',
+    'VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT',
+    'VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT',
+    'VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT',
+    'VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT',
+    'VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT',
+    'VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT',
+    'VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT',
+    'VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT',
+    'VK_ACCESS_2_NONE',
+    'VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT',
+    'VK_ACCESS_2_INDEX_READ_BIT',
+    'VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT',
+    'VK_ACCESS_2_UNIFORM_READ_BIT',
+    'VK_ACCESS_2_SHADER_READ_BIT',
+    'VK_ACCESS_2_SHADER_WRITE_BIT',
+    'VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT',
+    'VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT',
+    'VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT',
+    'VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT',
+    'VK_ACCESS_2_TRANSFER_READ_BIT',
+    'VK_ACCESS_2_TRANSFER_WRITE_BIT',
+    'VK_ACCESS_2_HOST_READ_BIT',
+    'VK_ACCESS_2_HOST_WRITE_BIT',
+    'VK_ACCESS_2_MEMORY_READ_BIT',
+    'VK_ACCESS_2_MEMORY_WRITE_BIT',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES',
+    'VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO',
+    'VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO',
+    'VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO',
+    'VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO',
+    'VK_SEMAPHORE_TYPE_BINARY',
+    'VK_SEMAPHORE_TYPE_TIMELINE',
+    // Phase 6.7: GPU Timestamp Profiler & Hardware Occlusion Queries (VkQueryPool)
+    'VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO',
+    'VK_QUERY_TYPE_OCCLUSION',
+    'VK_QUERY_TYPE_PIPELINE_STATISTICS',
+    'VK_QUERY_TYPE_TIMESTAMP',
+    'VK_QUERY_CONTROL_PRECISE_BIT',
+    'VK_QUERY_RESULT_64_BIT',
+    'VK_QUERY_RESULT_WAIT_BIT',
+    'VK_QUERY_RESULT_WITH_AVAILABILITY_BIT',
+    'VK_QUERY_RESULT_PARTIAL_BIT'
   );
 
   OrderedStructs: array[0..77] of String = (
@@ -1170,7 +1267,7 @@ const
     'VkBufferMemoryBarrier'
   );
 
-  OrderedStructs2: array[0..25] of String = (
+  OrderedStructs2: array[0..43] of String = (
     'VkImageMemoryBarrier',
     'VkBufferCopy',
     'VkImageSubresourceLayers',
@@ -1196,7 +1293,25 @@ const
     'VkMemoryDedicatedRequirements',
     'VkMemoryDedicatedAllocateInfo',
     'VkFormatProperties',
-    'VkMappedMemoryRange'
+    'VkMappedMemoryRange',
+    'VkDescriptorSetLayoutBindingFlagsCreateInfo',
+    'VkPhysicalDeviceDescriptorIndexingFeatures',
+    'VkPhysicalDeviceDescriptorIndexingProperties',
+    'VkDescriptorSetVariableDescriptorCountAllocateInfo',
+    'VkComputePipelineCreateInfo',
+    'VkDispatchIndirectCommand',
+    'VkPhysicalDeviceExtendedDynamicStateFeaturesEXT',
+    'VkPhysicalDeviceSynchronization2Features',
+    'VkMemoryBarrier2',
+    'VkBufferMemoryBarrier2',
+    'VkImageMemoryBarrier2',
+    'VkDependencyInfo',
+    'VkPhysicalDeviceTimelineSemaphoreFeatures',
+    'VkSemaphoreTypeCreateInfo',
+    'VkTimelineSemaphoreSubmitInfo',
+    'VkSemaphoreWaitInfo',
+    'VkSemaphoreSignalInfo',
+    'VkQueryPoolCreateInfo'
   );
 
   OrderedCommands: array[0..94] of String = (
@@ -1297,7 +1412,7 @@ const
     'vkCmdDrawIndirect'
   );
 
-  OrderedCommands2: array[0..15] of String = (
+  OrderedCommands2: array[0..35] of String = (
     'vkEnumerateInstanceVersion',
     'vkGetPhysicalDeviceFeatures2',
     'vkGetPhysicalDeviceProperties2',
@@ -1313,7 +1428,27 @@ const
     'vkGetPhysicalDeviceFormatProperties',
     'vkFlushMappedMemoryRanges',
     'vkInvalidateMappedMemoryRanges',
-    'vkResetDescriptorPool'
+    'vkResetDescriptorPool',
+    'vkCreateComputePipelines',
+    'vkCmdDispatch',
+    'vkCmdDispatchIndirect',
+    'vkCmdSetCullMode',
+    'vkCmdSetFrontFace',
+    'vkCmdSetPrimitiveTopology',
+    'vkCmdSetDepthTestEnable',
+    'vkCmdSetDepthWriteEnable',
+    'vkCmdSetDepthCompareOp',
+    'vkCmdPipelineBarrier2',
+    'vkWaitSemaphores',
+    'vkSignalSemaphore',
+    'vkGetSemaphoreCounterValue',
+    'vkCreateQueryPool',
+    'vkDestroyQueryPool',
+    'vkGetQueryPoolResults',
+    'vkCmdResetQueryPool',
+    'vkCmdBeginQuery',
+    'vkCmdEndQuery',
+    'vkCmdWriteTimestamp'
   );
 
   InstanceCommands: array[0..17] of String = (
@@ -1398,6 +1533,10 @@ begin
     L.Add('');
     L.Add('  { Extension and Layer Names }');
     L.Add('  VK_EXT_debug_utils = ''VK_EXT_debug_utils'';');
+    L.Add('  VK_EXT_descriptor_indexing = ''VK_EXT_descriptor_indexing'';');
+    L.Add('  VK_EXT_extended_dynamic_state = ''VK_EXT_extended_dynamic_state'';');
+    L.Add('  VK_EXT_extended_dynamic_state2 = ''VK_EXT_extended_dynamic_state2'';');
+    L.Add('  VK_EXT_extended_dynamic_state3 = ''VK_EXT_extended_dynamic_state3'';');
     L.Add('  VK_EXT_graphics_pipeline_library = ''VK_EXT_graphics_pipeline_library'';');
     L.Add('  VK_EXT_memory_budget = ''VK_EXT_memory_budget'';');
     L.Add('  VK_KHR_create_renderpass2 = ''VK_KHR_create_renderpass2'';');
@@ -1406,9 +1545,12 @@ begin
     L.Add('  VK_KHR_get_physical_device_properties2 = ''VK_KHR_get_physical_device_properties2'';');
     L.Add('  VK_KHR_maintenance1 = ''VK_KHR_maintenance1'';');
     L.Add('  VK_KHR_maintenance2 = ''VK_KHR_maintenance2'';');
+    L.Add('  VK_KHR_maintenance3 = ''VK_KHR_maintenance3'';');
     L.Add('  VK_KHR_multiview = ''VK_KHR_multiview'';');
     L.Add('  VK_KHR_pipeline_library = ''VK_KHR_pipeline_library'';');
     L.Add('  VK_KHR_swapchain = ''VK_KHR_swapchain'';');
+    L.Add('  VK_KHR_synchronization2 = ''VK_KHR_synchronization2'';');
+    L.Add('  VK_KHR_timeline_semaphore = ''VK_KHR_timeline_semaphore'';');
     L.Add('  VK_LAYER_KHRONOS_validation = ''VK_LAYER_KHRONOS_validation'';');
     L.Add('');
     L.Add('type');
@@ -1416,6 +1558,7 @@ begin
     L.Add('  VkResult = Integer;');
     L.Add('  VkStructureType = Integer;');
     L.Add('  VkFlags = Cardinal;');
+    L.Add('  VkFlags64 = UInt64;');
     L.Add('  VkDeviceSize = UInt64;');
     L.Add('  VkBool32 = Cardinal;');
     L.Add('  VkSampleCountFlags = VkFlags;');
@@ -1425,7 +1568,9 @@ begin
     L.Add('  VkImageUsageFlags = VkFlags;');
     L.Add('  VkMemoryPropertyFlags = VkFlags;');
     L.Add('  VkPipelineStageFlags = VkFlags;');
+    L.Add('  VkPipelineStageFlags2 = VkFlags64;');
     L.Add('  VkAccessFlags = VkFlags;');
+    L.Add('  VkAccessFlags2 = VkFlags64;');
     L.Add('  VkShaderStageFlags = VkFlags;');
     L.Add('  VkColorComponentFlags = VkFlags;');
     L.Add('  VkImageAspectFlags = VkFlags;');
@@ -1446,10 +1591,17 @@ begin
     L.Add('  VkSamplerMipmapMode = Integer;');
     L.Add('  VkSamplerAddressMode = Integer;');
     L.Add('  VkGraphicsPipelineLibraryFlagsEXT = VkFlags;');
+    L.Add('  VkDescriptorBindingFlags = VkFlags;');
     L.Add('  VkQueueFlags = VkFlags;');
+    L.Add('  VkResolveModeFlags = VkFlags;');
+    L.Add('  VkQueryType = Integer;');
+    L.Add('  VkQueryControlFlags = VkFlags;');
+    L.Add('  VkQueryResultFlags = VkFlags;');
+    L.Add('  VkQueryPipelineStatisticFlags = VkFlags;');
     L.Add('');
     L.Add('  { Pointers to primitive types }');
     L.Add('  PCardinal = ^Cardinal;');
+    L.Add('  PUInt64 = ^UInt64;');
     L.Add('  PInteger = ^Integer;');
     L.Add('  PSingle = ^Single;');
     L.Add('  PPAnsiChar = ^PAnsiChar;');
@@ -1461,6 +1613,7 @@ begin
     L.Add('  PVkPipelineStageFlags = ^VkPipelineStageFlags;');
     L.Add('  PVkDynamicState = ^VkDynamicState;');
     L.Add('  PVkPresentModeKHR = ^VkPresentModeKHR;');
+    L.Add('  PVkDescriptorBindingFlags = ^VkDescriptorBindingFlags;');
     L.Add('');
     L.Add('  { Dispatchable handles }');
     L.Add('  VkInstance = Pointer;');
@@ -1487,6 +1640,7 @@ begin
     L.Add('  VkRenderPass = VkNonDispatchableHandle;');
     L.Add('  VkSemaphore = VkNonDispatchableHandle;');
     L.Add('  VkFence = VkNonDispatchableHandle;');
+    L.Add('  VkQueryPool = VkNonDispatchableHandle;');
     L.Add('  VkSurfaceKHR = VkNonDispatchableHandle;');
     L.Add('  VkSwapchainKHR = VkNonDispatchableHandle;');
     L.Add('  VkCommandPool = VkNonDispatchableHandle;');
@@ -1514,6 +1668,7 @@ begin
     L.Add('  PVkRenderPass = ^VkRenderPass;');
     L.Add('  PVkSemaphore = ^VkSemaphore;');
     L.Add('  PVkFence = ^VkFence;');
+    L.Add('  PVkQueryPool = ^VkQueryPool;');
     L.Add('  PVkSurfaceKHR = ^VkSurfaceKHR;');
     L.Add('  PVkSwapchainKHR = ^VkSwapchainKHR;');
     L.Add('  PVkCommandPool = ^VkCommandPool;');
@@ -1715,6 +1870,26 @@ begin
       if CmdName = 'vkEnumerateInstanceVersion' then
         Continue;
       L.Add(Format('  Pointer(%s) := vkGetInstanceProcAddr(nil, ''%s'');', [CmdName, CmdName]));
+      if (CmdName = 'vkCmdPipelineBarrier2') or
+         (CmdName = 'vkWaitSemaphores') or
+         (CmdName = 'vkSignalSemaphore') or
+         (CmdName = 'vkGetSemaphoreCounterValue') or
+         (CmdName = 'vkGetBufferMemoryRequirements2') or
+         (CmdName = 'vkGetImageMemoryRequirements2') then
+      begin
+        L.Add(Format('  if not Assigned(%s) then', [CmdName]));
+        L.Add(Format('    Pointer(%s) := vkGetInstanceProcAddr(nil, ''%sKHR'');', [CmdName, CmdName]));
+      end else
+      if (CmdName = 'vkCmdSetCullMode') or
+         (CmdName = 'vkCmdSetFrontFace') or
+         (CmdName = 'vkCmdSetPrimitiveTopology') or
+         (CmdName = 'vkCmdSetDepthTestEnable') or
+         (CmdName = 'vkCmdSetDepthWriteEnable') or
+         (CmdName = 'vkCmdSetDepthCompareOp') then
+      begin
+        L.Add(Format('  if not Assigned(%s) then', [CmdName]));
+        L.Add(Format('    Pointer(%s) := vkGetInstanceProcAddr(nil, ''%sEXT'');', [CmdName, CmdName]));
+      end;
     end;
     L.Add('end;');
     L.Add('');

@@ -75,6 +75,11 @@ type
     procedure TestMultiVendorFormatAlignmentAndDeferredResourceDestruction;
     procedure TestGrowableAndTransientDescriptorPools;
     procedure TestAsyncStagingUploadRingBufferAndTransferQueue;
+    procedure TestBindlessTextureAndSamplerIndexing;
+    procedure TestHardwareMSAAAndSinglePassResolve;
+    procedure TestComputePipelineAndDispatch;
+    procedure TestExtendedDynamicStateAndSync2AndTimelineSemaphore;
+    procedure TestQueryPoolTimestampsAndOcclusion;
   private
     FCapturedWarnings: TStringList;
     procedure CaptureWarning(const Category, S: String);
@@ -2755,6 +2760,651 @@ begin
       FreeAndNil(GpuBuf0);
       FreeAndNil(ImgMip1);
       FreeAndNil(ImgMip0);
+    end;
+  finally
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestBindlessTextureAndSamplerIndexing;
+var
+  Features: VkPhysicalDeviceDescriptorIndexingFeatures;
+  Props: VkPhysicalDeviceDescriptorIndexingProperties;
+  UseBindless, UseUpdateAfterBind: Boolean;
+  ClampedMax: Cardinal;
+  ReqExts: TAnsiStringArray;
+  VkDev: TVulkanRHIDevice;
+  Mgr: TCastleVulkanBindlessTextureManager;
+  SamplerDesc: TRHISamplerDesc;
+  Sampler0, Sampler1: TVulkanRHISampler;
+  TexDesc: TRHITextureDesc;
+  Tex0, Tex1, Tex2, Tex3: TVulkanRHITexture;
+  Slot0, Slot0Dup, Slot1, Slot2, Slot3, FoundSlot: Cardinal;
+  Materials: array[0..2] of TCastleBindlessMaterialEntry;
+  MatSSBODesc, IndirectDesc: TRHIBufferDesc;
+  MatSSBO, IndirectBuf: TVulkanRHIBuffer;
+  IndirectCmds: array[0..2] of TRHIDrawIndexedIndirectCommand;
+  FlushedCount: Cardinal;
+  Gen: TCastleShaderGeneratorRHI;
+  BindlessFragGLSL: String;
+  CmdList: TVulkanRHICommandList;
+begin
+  { 1. Verify Khronos vk.xml generated constants for VK_EXT_descriptor_indexing / Vulkan 1.2 }
+  AssertEquals('VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO',
+    1000161000, VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO);
+  AssertEquals('VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES',
+    1000161001, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES);
+  AssertEquals('VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES',
+    1000161002, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES);
+  AssertEquals('VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO',
+    1000161003, VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO);
+  AssertEquals('VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT',
+    $00000001, VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT);
+  AssertEquals('VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT',
+    $00000002, VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT);
+  AssertEquals('VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT',
+    $00000004, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
+  AssertEquals('VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT',
+    $00000008, VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT);
+
+  { 2. Verify ResolveDescriptorIndexingConfig across Vulkan 1.2 core, Vulkan 1.1 extension, and missing features }
+  FillChar(Features, SizeOf(Features), 0);
+  Features.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+  Features.shaderSampledImageArrayNonUniformIndexing := VK_TRUE;
+  Features.descriptorBindingPartiallyBound := VK_TRUE;
+  Features.descriptorBindingUpdateUnusedWhilePending := VK_TRUE;
+  Features.runtimeDescriptorArray := VK_TRUE;
+  Features.descriptorBindingSampledImageUpdateAfterBind := VK_TRUE;
+
+  FillChar(Props, SizeOf(Props), 0);
+  Props.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;
+  Props.maxPerStageDescriptorUpdateAfterBindSampledImages := 2048;
+  Props.maxDescriptorSetUpdateAfterBindSampledImages := 16384;
+
+  { Vulkan 1.2+ Core: requires 0 extra device extensions and clamps to hardware limit (2048) }
+  ResolveDescriptorIndexingConfig(VK_API_VERSION_1_2, False, False,
+    Features, Props, 4096, UseBindless, UseUpdateAfterBind, ClampedMax, ReqExts);
+  AssertTrue('Vulkan 1.2 with core features must enable bindless textures', UseBindless);
+  AssertTrue('Vulkan 1.2 with UpdateAfterBind feature must enable UpdateAfterBind', UseUpdateAfterBind);
+  AssertEquals('MaxBindlessTextures must clamp to maxPerStageDescriptorUpdateAfterBindSampledImages (2048)',
+    2048, ClampedMax);
+  AssertEquals('Vulkan 1.2 core must not require extra extension names', 0, Length(ReqExts));
+
+  { Vulkan 1.1 + VK_EXT_descriptor_indexing: requires VK_EXT_descriptor_indexing extension }
+  ResolveDescriptorIndexingConfig(VK_API_VERSION_1_1, True, True,
+    Features, Props, 1024, UseBindless, UseUpdateAfterBind, ClampedMax, ReqExts);
+  AssertTrue('Vulkan 1.1 with VK_EXT_descriptor_indexing must enable bindless textures', UseBindless);
+  AssertEquals('Requested 1024 (< 2048 hw limit) must remain 1024', 1024, ClampedMax);
+  AssertEquals('Vulkan 1.1 must require 1 extension (VK_EXT_descriptor_indexing)', 1, Length(ReqExts));
+  AssertEquals('Extension name must be VK_EXT_descriptor_indexing',
+    String(VK_EXT_descriptor_indexing), String(ReqExts[0]));
+
+  { Missing descriptorBindingPartiallyBound must disable bindless }
+  Features.descriptorBindingPartiallyBound := VK_FALSE;
+  ResolveDescriptorIndexingConfig(VK_API_VERSION_1_3, True, True,
+    Features, Props, 4096, UseBindless, UseUpdateAfterBind, ClampedMax, ReqExts);
+  AssertFalse('Missing descriptorBindingPartiallyBound must disable bindless', UseBindless);
+  AssertEquals('Disabled bindless must report 0 max textures', 0, ClampedMax);
+
+  { 3. Test TCastleVulkanBindlessTextureManager registration, deduplication, free-list recycling, and batched updates }
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True,
+    VK_API_VERSION_1_3, False, True, 1024);
+  try
+    AssertTrue('Headless device must report SupportsBindlessTextures = True',
+      VkDev.Capabilities.SupportsBindlessTextures);
+    AssertEquals('Headless device must report MaxBindlessTextures = 1024',
+      1024, VkDev.Capabilities.MaxBindlessTextures);
+    Mgr := VkDev.BindlessTextureManager;
+    AssertTrue('Device must initialize BindlessTextureManager', Mgr <> nil);
+    AssertEquals('BindlessTextureManager capacity must match 1024', 1024, Mgr.Capacity);
+
+    FillChar(SamplerDesc, SizeOf(SamplerDesc), 0);
+    SamplerDesc.MinFilter := sfLinear;
+    SamplerDesc.MagFilter := sfLinear;
+    SamplerDesc.MipFilter := sfLinear;
+    SamplerDesc.MaxLod := 8.0;
+    Sampler0 := VkDev.CreateSampler(SamplerDesc) as TVulkanRHISampler;
+    Sampler1 := VkDev.CreateSampler(SamplerDesc) as TVulkanRHISampler;
+
+    TexDesc := TRHITextureDesc.Create2D(16, 16, pfRGBA8_UNorm, [tuSampled]);
+    Tex0 := VkDev.CreateTexture(TexDesc) as TVulkanRHITexture;
+    Tex1 := VkDev.CreateTexture(TexDesc) as TVulkanRHITexture;
+    Tex2 := VkDev.CreateTexture(TexDesc) as TVulkanRHITexture;
+    Tex3 := nil;
+    MatSSBO := nil;
+    IndirectBuf := nil;
+    try
+      Slot0 := Mgr.RegisterTexture(Tex0, Sampler0);
+      Slot0Dup := Mgr.RegisterTexture(Tex0, Sampler0);
+      Slot1 := Mgr.RegisterTexture(Tex1, Sampler0);
+      Slot2 := Mgr.RegisterTexture(Tex2, Sampler1);
+
+      AssertEquals('First registered texture must receive slot 0', 0, Slot0);
+      AssertEquals('Duplicate (Tex0, Sampler0) registration must return existing slot 0', 0, Slot0Dup);
+      AssertEquals('Second distinct texture must receive slot 1', 1, Slot1);
+      AssertEquals('Third distinct texture must receive slot 2', 2, Slot2);
+      AssertEquals('DeduplicatedHits must be 1', 1, Mgr.DeduplicatedHits);
+      AssertEquals('ActiveSlotCount must be 3', 3, Mgr.ActiveSlotCount);
+      AssertEquals('PendingWriteCount must be 3', 3, Mgr.PendingWriteCount);
+      AssertTrue('TryGetTextureIndex(Tex1, Sampler0) must succeed',
+        Mgr.TryGetTextureIndex(Tex1, Sampler0, FoundSlot) and (FoundSlot = 1));
+      AssertTrue('Bindless layout must enable UsesUpdateAfterBind',
+        Mgr.Layout.UsesUpdateAfterBind);
+
+      { Destroy Tex1: TVulkanRHITexture.Destroy must automatically unregister Slot 1 into the free-list }
+      FreeAndNil(Tex1);
+      AssertEquals('Destroying Tex1 must decrement ActiveSlotCount to 2', 2, Mgr.ActiveSlotCount);
+      AssertEquals('Destroying Tex1 must push slot 1 onto FreeSlots (FreeSlotCount = 1)',
+        1, Mgr.FreeSlotCount);
+      AssertEquals('Destroying dirty Tex1 before flush must decrement PendingWriteCount to 2',
+        2, Mgr.PendingWriteCount);
+
+      { Register Tex3: must reuse recycled Slot 1 from the free-list instead of growing to Slot 3 }
+      Tex3 := VkDev.CreateTexture(TexDesc) as TVulkanRHITexture;
+      Slot3 := Mgr.RegisterTexture(Tex3, Sampler0);
+      AssertEquals('New texture registration must reuse recycled slot 1 from free-list', 1, Slot3);
+      AssertEquals('RecycledSlotReuses must be 1', 1, Mgr.RecycledSlotReuses);
+      AssertEquals('FreeSlotCount must now be 0', 0, Mgr.FreeSlotCount);
+      AssertEquals('ActiveSlotCount must be back to 3', 3, Mgr.ActiveSlotCount);
+
+      { Bind a multi-material SSBO (Set 1, Binding 1) and flush all pending descriptor writes in one batch }
+      AssertEquals('TCastleBindlessMaterialEntry must be 80 bytes (16-byte aligned std430/std140)',
+        80, SizeOf(TCastleBindlessMaterialEntry));
+      FillChar(Materials, SizeOf(Materials), 0);
+      Materials[0].BaseColor := Vector4(1, 0, 0, 1);
+      Materials[0].BaseColorTexIndex := Slot0;
+      Materials[1].BaseColor := Vector4(0, 1, 0, 1);
+      Materials[1].BaseColorTexIndex := Slot3;
+      Materials[2].BaseColor := Vector4(0, 0, 1, 1);
+      Materials[2].BaseColorTexIndex := Slot2;
+
+      MatSSBODesc := TRHIBufferDesc.Create(SizeOf(Materials), [buStorage], muCpuToGpu, 'BindlessMaterialSSBO');
+      MatSSBO := VkDev.CreateBuffer(MatSSBODesc, @Materials[0]) as TVulkanRHIBuffer;
+      Mgr.SetMaterialStorageBuffer(MatSSBO);
+      AssertEquals('PendingWriteCount with 3 textures + 1 material SSBO must be 4',
+        4, Mgr.PendingWriteCount);
+
+      FlushedCount := Mgr.FlushPendingUpdates;
+      AssertEquals('FlushPendingUpdates must commit all 4 descriptor writes in a single batch',
+        4, FlushedCount);
+      AssertEquals('PendingWriteCount after flush must be 0', 0, Mgr.PendingWriteCount);
+      AssertEquals('DescriptorSet.UpdateCount must be 1 (single batched vkUpdateDescriptorSets call)',
+        1, Mgr.DescriptorSet.UpdateCount);
+
+      { 4. Verify Bindless GLSL 450 Preamble Generation & Multi-Material DrawIndexedIndirect }
+      Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+      try
+        BindlessFragGLSL := Gen.GenerateBindlessPreamble(ssFragment, VkDev.Capabilities.MaxBindlessTextures);
+        AssertTrue('Bindless preamble must require GL_EXT_nonuniform_qualifier',
+          Pos('#extension GL_EXT_nonuniform_qualifier : require', BindlessFragGLSL) > 0);
+        AssertTrue('Bindless preamble must declare castle_BindlessTextures[1024] at Set 1 Binding 0',
+          Pos('CASTLE_SAMPLER(1, 0) uniform sampler2D castle_BindlessTextures[1024];', BindlessFragGLSL) > 0);
+        AssertTrue('Bindless preamble must declare CastleBindlessMaterialsBlock SSBO at Set 1 Binding 1',
+          Pos('CASTLE_SSBO(1, 1) readonly buffer CastleBindlessMaterialsBlock', BindlessFragGLSL) > 0);
+        AssertTrue('Bindless preamble must provide nonuniformEXT sampling macro',
+          Pos('nonuniformEXT(uint(TexIdx))', BindlessFragGLSL) > 0);
+      finally
+        FreeAndNil(Gen);
+      end;
+
+      { Record a multi-material indirect draw batch binding Set 1 once for all 3 materials }
+      FillChar(IndirectCmds, SizeOf(IndirectCmds), 0);
+      IndirectCmds[0].IndexCount := 36;
+      IndirectCmds[0].InstanceCount := 1;
+      IndirectCmds[1].IndexCount := 36;
+      IndirectCmds[1].InstanceCount := 1;
+      IndirectCmds[1].FirstIndex := 36;
+      IndirectCmds[2].IndexCount := 36;
+      IndirectCmds[2].InstanceCount := 1;
+      IndirectCmds[2].FirstIndex := 72;
+
+      IndirectDesc := TRHIBufferDesc.Create(SizeOf(IndirectCmds), [buIndirect], muCpuToGpu, 'BindlessIndirectCmds');
+      IndirectBuf := VkDev.CreateBuffer(IndirectDesc, @IndirectCmds[0]) as TVulkanRHIBuffer;
+      CmdList := TVulkanRHICommandList.Create(VkDev, 0, cllPrimary);
+      try
+        CmdList.BeginRecording;
+        CmdList.BindDescriptorSet(1, Mgr.DescriptorSet, []);
+        CmdList.DrawIndexedIndirect(IndirectBuf, 0, 3, SizeOf(TRHIDrawIndexedIndirectCommand));
+        CmdList.EndRecording;
+      finally
+        FreeAndNil(CmdList);
+      end;
+    finally
+      FreeAndNil(IndirectBuf);
+      FreeAndNil(MatSSBO);
+      FreeAndNil(Tex3);
+      FreeAndNil(Tex2);
+      FreeAndNil(Tex1);
+      FreeAndNil(Tex0);
+      FreeAndNil(Sampler1);
+      FreeAndNil(Sampler0);
+    end;
+  finally
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestHardwareMSAAAndSinglePassResolve;
+var
+  VkDevDyn, VkDevFallback: TVulkanRHIDevice;
+  ResolveColorDesc, ResolveDepthDesc, OverLimitDesc: TRHITextureDesc;
+  ResolveColorTex, ResolveDepthTex, OverLimitTex: TVulkanRHITexture;
+  RenderInfo: TRHIRenderingInfo;
+  CmdList: TVulkanRHICommandList;
+begin
+  { 1. Sample count bitmask negotiation and clamping }
+  AssertEquals('Color=1|2|4|8, Depth=1|2|4 must resolve to max 4x MSAA',
+    4, ResolveMaxFramebufferSampleCount(
+      VK_SAMPLE_COUNT_1_BIT or VK_SAMPLE_COUNT_2_BIT or VK_SAMPLE_COUNT_4_BIT or VK_SAMPLE_COUNT_8_BIT,
+      VK_SAMPLE_COUNT_1_BIT or VK_SAMPLE_COUNT_2_BIT or VK_SAMPLE_COUNT_4_BIT));
+  AssertEquals('Requesting 16x on 1|2|4|8 mask must clamp to 8x',
+    8, ClampSampleCountToMask(16,
+      VK_SAMPLE_COUNT_1_BIT or VK_SAMPLE_COUNT_2_BIT or VK_SAMPLE_COUNT_4_BIT or VK_SAMPLE_COUNT_8_BIT));
+  AssertEquals('RHIToVkSampleCountFlags(4) must return VK_SAMPLE_COUNT_4_BIT',
+    VK_SAMPLE_COUNT_4_BIT, RHIToVkSampleCountFlags(4));
+  AssertEquals('RHIToVkResolveMode(rmAverage) must return VK_RESOLVE_MODE_AVERAGE_BIT',
+    VK_RESOLVE_MODE_AVERAGE_BIT, RHIToVkResolveMode(rmAverage));
+
+  { 2. Dynamic Rendering (Vulkan 1.3) single-pass 4x MSAA attachment resolve }
+  VkDevDyn := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  try
+    AssertEquals('Default headless MaxFramebufferSampleCount must be 8',
+      8, VkDevDyn.Capabilities.MaxFramebufferSampleCount);
+
+    { Verify that requesting 16x MSAA on an 8x-capable device clamps to 8x and forces MipLevels = 1 }
+    OverLimitDesc := TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuColorAttachment], 4, 16);
+    OverLimitTex := VkDevDyn.CreateTexture(OverLimitDesc) as TVulkanRHITexture;
+    try
+      AssertEquals('MSAA texture sample count must clamp to device MaxFramebufferSampleCount (8)',
+        8, OverLimitTex.Desc.SampleCount);
+      AssertEquals('Multisampled VkImage must enforce MipLevels = 1',
+        1, OverLimitTex.Desc.MipLevels);
+    finally
+      FreeAndNil(OverLimitTex);
+    end;
+
+    { Configure 4x MSAA via TAntiAliasing (aa4SamplesRegular) }
+    VkDevDyn.AntiAliasing := aa4SamplesRegular;
+    AssertEquals('aa4SamplesRegular must set SampleCount = 4', 4, VkDevDyn.SampleCount);
+
+    ResolveColorDesc := TRHITextureDesc.Create2D(128, 128, pfBGRA8_UNorm, [tuColorAttachment, tuSampled]);
+    ResolveDepthDesc := TRHITextureDesc.Create2D(128, 128, pfD32_Float, [tuDepthStencil]);
+    ResolveColorTex := VkDevDyn.CreateTexture(ResolveColorDesc) as TVulkanRHITexture;
+    ResolveDepthTex := VkDevDyn.CreateTexture(ResolveDepthDesc) as TVulkanRHITexture;
+    CmdList := TVulkanRHICommandList.Create(VkDevDyn, 0, cllPrimary);
+    try
+      RenderInfo := VkDevDyn.BuildSwapchainRenderingInfo(
+        Rectangle(0, 0, 128, 128), ResolveColorTex, ResolveDepthTex, Black);
+
+      AssertTrue('Transient 4x MSAA color target must be allocated', VkDevDyn.SwapchainMSAAColorTexture <> nil);
+      AssertTrue('Transient 4x MSAA depth target must be allocated', VkDevDyn.SwapchainMSAADepthTexture <> nil);
+      AssertEquals('Transient MSAA color target must have 4 samples', 4, VkDevDyn.SwapchainMSAAColorTexture.Desc.SampleCount);
+      AssertEquals('Transient MSAA color target StoreOp must be soDontCare (tile-local)',
+        Ord(soDontCare), Ord(RenderInfo.ColorAttachments[0].StoreOp));
+      AssertTrue('ResolveTexture must point to 1x ResolveColorTex',
+        RenderInfo.ColorAttachments[0].ResolveTexture = ResolveColorTex);
+      AssertEquals('ResolveMode must be rmAverage',
+        Ord(rmAverage), Ord(RenderInfo.ColorAttachments[0].ResolveMode));
+
+      CmdList.BeginRecording;
+      CmdList.BeginRendering(RenderInfo);
+      CmdList.EndRendering;
+      CmdList.EndRecording;
+
+      AssertEquals('MSAAResolvePassCount must be incremented to 1', 1, VkDevDyn.MSAAResolvePassCount);
+      AssertEquals('1x ResolveColorTex must be transitioned to rsColorAttachment',
+        Ord(rsColorAttachment), Ord(ResolveColorTex.CurrentState));
+    finally
+      FreeAndNil(CmdList);
+      FreeAndNil(ResolveDepthTex);
+      FreeAndNil(ResolveColorTex);
+    end;
+  finally
+    FreeAndNil(VkDevDyn);
+  end;
+
+  { 3. Vulkan 1.1/1.2 Fallback RenderPass single-pass MSAA resolve (pResolveAttachments) }
+  VkDevFallback := TVulkanRHIDevice.CreateHeadless(nil, True, False, VK_API_VERSION_1_1);
+  try
+    VkDevFallback.SampleCount := 4;
+    ResolveColorDesc := TRHITextureDesc.Create2D(128, 128, pfBGRA8_UNorm, [tuColorAttachment]);
+    ResolveDepthDesc := TRHITextureDesc.Create2D(128, 128, pfD32_Float, [tuDepthStencil]);
+    ResolveColorTex := VkDevFallback.CreateTexture(ResolveColorDesc) as TVulkanRHITexture;
+    ResolveDepthTex := VkDevFallback.CreateTexture(ResolveDepthDesc) as TVulkanRHITexture;
+    CmdList := TVulkanRHICommandList.Create(VkDevFallback, 0, cllPrimary);
+    try
+      RenderInfo := VkDevFallback.BuildSwapchainRenderingInfo(
+        Rectangle(0, 0, 128, 128), ResolveColorTex, ResolveDepthTex, Black);
+
+      CmdList.BeginRecording;
+      CmdList.BeginRendering(RenderInfo);
+      CmdList.EndRendering;
+      CmdList.EndRecording;
+
+      AssertEquals('FallbackRenderPassBeginCount must be 1', 1, VkDevFallback.FallbackRenderPassBeginCount);
+      AssertEquals('FallbackRenderPassCount must be 1', 1, VkDevFallback.FallbackRenderPassCount);
+      AssertEquals('FallbackFramebufferCount must be 1', 1, VkDevFallback.FallbackFramebufferCount);
+      AssertEquals('Fallback MSAAResolvePassCount must be 1', 1, VkDevFallback.MSAAResolvePassCount);
+    finally
+      FreeAndNil(CmdList);
+      FreeAndNil(ResolveDepthTex);
+      FreeAndNil(ResolveColorTex);
+    end;
+  finally
+    FreeAndNil(VkDevFallback);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestComputePipelineAndDispatch;
+const
+  MinimalComputeSPIRV: array[0..9] of UInt32 = (
+    $07230203, // SPIR-V Magic
+    $00010500, // Version 1.5
+    $00000000,
+    $00000008, // Bound
+    $00000000,
+    ($00050000 or 15), // OpEntryPoint (5 words)
+    5,                 // ExecutionModel = GLCompute (5)
+    1,                 // EntryPoint ID = %1
+    $6E69616D,         // "main"
+    $00000000
+  );
+var
+  VkDev: TVulkanRHIDevice;
+  CompShader: TRHIShaderModule;
+  LayoutDesc: array[0..1] of TRHIDescriptorBindingDesc;
+  SetLayout: TRHIDescriptorSetLayout;
+  DescSet: TRHIDescriptorSet;
+  SSBODesc, IndirectDesc: TRHIBufferDesc;
+  SSBOBuf, IndirectBuf: TRHIBuffer;
+  StorageTexDesc: TRHITextureDesc;
+  StorageTex: TRHITexture;
+  CompDesc: TRHIComputePipelineDesc;
+  CompPipe1, CompPipe2: TRHIComputePipeline;
+  IndirectCmd: TRHIDispatchIndirectCommand;
+  PushData: TVector4;
+  CmdList: TVulkanRHICommandList;
+begin
+  AssertEquals('TRHIDispatchIndirectCommand must be exactly 12 bytes (VkDispatchIndirectCommand)',
+    12, SizeOf(TRHIDispatchIndirectCommand));
+
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  try
+    CompShader := VkDev.CreateShaderModuleFromSPIRV(ssCompute, @MinimalComputeSPIRV[0],
+      SizeOf(MinimalComputeSPIRV), 'TestComputeCS');
+    LayoutDesc[0].Binding := 0;
+    LayoutDesc[0].DescriptorType := dtStorageBuffer;
+    LayoutDesc[0].Count := 1;
+    LayoutDesc[0].StageFlags := [ssCompute];
+    LayoutDesc[1].Binding := 1;
+    LayoutDesc[1].DescriptorType := dtStorageImage;
+    LayoutDesc[1].Count := 1;
+    LayoutDesc[1].StageFlags := [ssCompute];
+    SetLayout := VkDev.CreateDescriptorSetLayout(LayoutDesc);
+    DescSet := VkDev.CreateDescriptorSet(SetLayout);
+
+    SSBODesc := TRHIBufferDesc.Create(1024, [buStorage], muGpuOnly, 'ParticleSSBO');
+    SSBOBuf := VkDev.CreateBuffer(SSBODesc, nil);
+    StorageTexDesc := TRHITextureDesc.Create2D(64, 64, pfRGBA16_Float, [tuStorage, tuSampled]);
+    StorageTex := VkDev.CreateTexture(StorageTexDesc);
+
+    IndirectCmd.GroupCountX := 8;
+    IndirectCmd.GroupCountY := 4;
+    IndirectCmd.GroupCountZ := 1;
+    IndirectDesc := TRHIBufferDesc.Create(SizeOf(IndirectCmd), [buIndirect, buStorage], muCpuToGpu, 'DispatchIndirectBuf');
+    IndirectBuf := VkDev.CreateBuffer(IndirectDesc, @IndirectCmd);
+
+    CmdList := TVulkanRHICommandList.Create(VkDev, 0, cllPrimary);
+    try
+      DescSet.BindStorageBuffer(0, SSBOBuf);
+      DescSet.BindTexture(1, StorageTex, nil);
+      DescSet.Update;
+
+      FillChar(CompDesc, SizeOf(CompDesc), 0);
+      CompDesc.ComputeShader := CompShader;
+      SetLength(CompDesc.DescriptorSetLayouts, 1);
+      CompDesc.DescriptorSetLayouts[0] := SetLayout;
+      CompDesc.PushConstantSize := SizeOf(TVector4);
+      CompDesc.PushConstantStages := [ssCompute];
+      CompDesc.DebugName := 'ParticleSimComputePSO';
+
+      CompPipe1 := VkDev.GetOrCreateComputePipeline(CompDesc);
+      CompPipe2 := VkDev.GetOrCreateComputePipeline(CompDesc);
+      AssertTrue('GetOrCreateComputePipeline must return cached instance on second call',
+        CompPipe1 = CompPipe2);
+      AssertEquals('ComputePipelineCacheMisses must be 1', 1, VkDev.ComputePipelineCacheMisses);
+      AssertEquals('ComputePipelineCacheHits must be 1', 1, VkDev.ComputePipelineCacheHits);
+      AssertEquals('ComputePipelineCount must be 1', 1, VkDev.ComputePipelineCount);
+
+      PushData := Vector4(0.016, 9.81, 0, 0);
+      CmdList.BeginRecording;
+      CmdList.TransitionTexture(StorageTex, rsShaderRead);
+      CmdList.BindComputePipeline(CompPipe1);
+      CmdList.BindComputeDescriptorSet(0, DescSet, []);
+      CmdList.PushConstants([ssCompute], 0, SizeOf(PushData), PushData);
+      CmdList.Dispatch(16, 1, 1);
+      CmdList.TransitionBuffer(SSBOBuf, rsTransferDst, rsShaderRead);
+      CmdList.DispatchIndirect(IndirectBuf, 0);
+      CmdList.EndRecording;
+
+      AssertEquals('ComputeDispatchCount must record both Dispatch and DispatchIndirect (2)',
+        2, VkDev.ComputeDispatchCount);
+      AssertEquals('CmdList.ComputeDispatchCount must be 2', 2, CmdList.ComputeDispatchCount);
+      AssertEquals('StorageTex state must be rsShaderRead', Ord(rsShaderRead), Ord(StorageTex.CurrentState));
+    finally
+      FreeAndNil(CmdList);
+      FreeAndNil(IndirectBuf);
+      FreeAndNil(StorageTex);
+      FreeAndNil(SSBOBuf);
+      FreeAndNil(DescSet);
+      FreeAndNil(SetLayout);
+      FreeAndNil(CompShader);
+    end;
+  finally
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestExtendedDynamicStateAndSync2AndTimelineSemaphore;
+var
+  UseExtDyn, UseSync2, UseTimeline: Boolean;
+  ReqExts: TAnsiStringArray;
+  VkDev13, VkDev11: TVulkanRHIDevice;
+  DescA, DescB: TRHIGraphicsPipelineDesc;
+  PipeA, PipeB: TRHIPipeline;
+  TexDesc: TRHITextureDesc;
+  Tex: TRHITexture;
+  BufDesc: TRHIBufferDesc;
+  Buf: TRHIBuffer;
+  CmdList: TVulkanRHICommandList;
+  TimelineSem: TCastleVulkanTimelineSemaphore;
+begin
+  { 1. Verify Vulkan 1.3 vs Vulkan 1.1 capability & extension resolution }
+  ResolveExtendedDynamicStateAndSync2Config(
+    VK_API_VERSION_1_3, False, False, False,
+    True, True, True,
+    UseExtDyn, UseSync2, UseTimeline, ReqExts);
+  AssertTrue('Vulkan 1.3 core must enable ExtendedDynamicState without extension strings', UseExtDyn);
+  AssertTrue('Vulkan 1.3 core must enable Synchronization2 without extension strings', UseSync2);
+  AssertTrue('Vulkan 1.3 core must enable TimelineSemaphores without extension strings', UseTimeline);
+  AssertEquals('Vulkan 1.3 core must require 0 extra extension strings', 0, Length(ReqExts));
+
+  ResolveExtendedDynamicStateAndSync2Config(
+    VK_API_VERSION_1_1, True, True, True,
+    True, True, True,
+    UseExtDyn, UseSync2, UseTimeline, ReqExts);
+  AssertTrue('Vulkan 1.1 with extensions must enable ExtendedDynamicState', UseExtDyn);
+  AssertTrue('Vulkan 1.1 with extensions must enable Synchronization2', UseSync2);
+  AssertTrue('Vulkan 1.1 with extensions must enable TimelineSemaphores', UseTimeline);
+  AssertEquals('Vulkan 1.1 with all 3 extensions must request 3 extension strings', 3, Length(ReqExts));
+
+  { 2. Verify Extended Dynamic State PSO deduplication (CullMode, FrontFace, DepthTest/Write/CompareOp, Topology) }
+  VkDev13 := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3, False, True, 4096, True);
+  try
+    AssertTrue('Vulkan 1.3 headless device must enable SupportsExtendedDynamicState',
+      VkDev13.SupportsExtendedDynamicState);
+    AssertTrue('Vulkan 1.3 headless device must enable SupportsSynchronization2',
+      VkDev13.SupportsSynchronization2);
+    AssertTrue('Vulkan 1.3 headless device must enable SupportsTimelineSemaphores',
+      VkDev13.SupportsTimelineSemaphores);
+
+    FillChar(DescA, SizeOf(DescA), 0);
+    DescA.Topology := ptTriangleList;
+    DescA.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+    DescA.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+    DescA.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+    DescA.DepthAttachmentFormat := pfD32_Float;
+    SetLength(DescA.ColorAttachmentFormats, 1);
+    DescA.ColorAttachmentFormats[0] := pfBGRA8_UNorm;
+
+    { DescB differs ONLY in CullMode, FrontFace, DepthWriteEnable, DepthCompareOp, and Topology }
+    DescB := DescA;
+    DescB.Topology := ptTriangleStrip;
+    DescB.Rasterizer.CullMode := cmNone;
+    DescB.Rasterizer.FrontFace := ffClockwise;
+    DescB.DepthStencil.DepthWriteEnable := False;
+    DescB.DepthStencil.DepthCompareOp := coLess;
+
+    PipeA := VkDev13.GetOrCreatePipeline(DescA);
+    PipeB := VkDev13.GetOrCreatePipeline(DescB);
+    AssertTrue('With VK_EXT_extended_dynamic_state enabled, DescA and DescB must share the same cached PSO',
+      PipeA = PipeB);
+    AssertEquals('PipelineCount must be 1 (zero redundant PSO permutation)', 1, VkDev13.PipelineCount);
+    AssertEquals('PipelineCacheHits must be 1', 1, VkDev13.PipelineCacheHits);
+
+    { 3. Verify Synchronization2 barriers (TransitionTexture & TransitionBuffer) and dynamic state commands }
+    TexDesc := TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuSampled, tuColorAttachment]);
+    Tex := VkDev13.CreateTexture(TexDesc);
+    BufDesc := TRHIBufferDesc.Create(256, [buStorage, buVertex], muGpuOnly, 'Sync2Buf');
+    Buf := VkDev13.CreateBuffer(BufDesc, nil);
+    CmdList := TVulkanRHICommandList.Create(VkDev13, 0, cllPrimary);
+    TimelineSem := VkDev13.CreateTimelineSemaphore(10);
+    try
+      CmdList.BeginRecording;
+      CmdList.TransitionTexture(Tex, rsColorAttachment);
+      CmdList.TransitionTexture(Tex, rsShaderRead);
+      CmdList.TransitionBuffer(Buf, rsTransferDst, rsShaderRead);
+      CmdList.BindPipeline(PipeA);
+      CmdList.SetCullMode(cmNone);
+      CmdList.SetFrontFace(ffClockwise);
+      CmdList.SetDepthTestEnable(True);
+      CmdList.SetDepthWriteEnable(False);
+      CmdList.SetDepthCompareOp(coLess);
+      CmdList.SetPrimitiveTopology(ptTriangleStrip);
+      CmdList.EndRecording;
+
+      AssertEquals('Sync2BarrierCount must be 3 (2 texture + 1 buffer barrier via Sync2 path)',
+        3, VkDev13.Sync2BarrierCount);
+      AssertEquals('CmdList.BarrierCount must be 3', 3, CmdList.BarrierCount);
+
+      { 4. Verify 64-bit Timeline Semaphore monotonic counter & host Signal/Wait }
+      AssertEquals('Initial timeline semaphore counter must be 10', 10, TimelineSem.GetCounterValue);
+      AssertFalse('Wait(15) before Signal(15) must return False', TimelineSem.Wait(15, 0));
+      TimelineSem.Signal(15);
+      AssertEquals('Counter after Signal(15) must be 15', 15, TimelineSem.GetCounterValue);
+      AssertTrue('Wait(15) after Signal(15) must return True', TimelineSem.Wait(15, 0));
+    finally
+      FreeAndNil(TimelineSem);
+      FreeAndNil(CmdList);
+      FreeAndNil(Buf);
+      FreeAndNil(Tex);
+    end;
+  finally
+    FreeAndNil(VkDev13);
+  end;
+
+  { 5. Verify that when ExtendedDynamicState is False (Vulkan 1.1 baseline), DescA and DescB produce distinct PSOs }
+  VkDev11 := TVulkanRHIDevice.CreateHeadless(nil, True, False, VK_API_VERSION_1_1);
+  try
+    AssertFalse('Vulkan 1.1 baseline device must have SupportsExtendedDynamicState = False',
+      VkDev11.SupportsExtendedDynamicState);
+    PipeA := VkDev11.GetOrCreatePipeline(DescA);
+    PipeB := VkDev11.GetOrCreatePipeline(DescB);
+    AssertTrue('Without ExtendedDynamicState, DescA and DescB must produce distinct PSOs',
+      PipeA <> PipeB);
+    AssertEquals('PipelineCount on Vulkan 1.1 baseline must be 2', 2, VkDev11.PipelineCount);
+  finally
+    FreeAndNil(VkDev11);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestQueryPoolTimestampsAndOcclusion;
+var
+  VkDev: TVulkanRHIDevice;
+  OccDesc: TRHIQueryPoolDesc;
+  OccPool: TVulkanRHIQueryPool;
+  OccSamples: array[0..1] of UInt64;
+  CmdList: TVulkanRHICommandList;
+  Profiler: TCastleVulkanTimestampProfiler;
+  Slot0Pool: TVulkanRHIQueryPool;
+  PassShadow, PassForward: Integer;
+begin
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  try
+    { Set 2.0 nanoseconds per GPU timestamp tick to verify tick -> millisecond conversion }
+    OccDesc := TRHIQueryPoolDesc.Create(qtOcclusion, 4, 'HardwareOcclusionPool');
+    OccPool := VkDev.CreateQueryPool(OccDesc) as TVulkanRHIQueryPool;
+    CmdList := TVulkanRHICommandList.Create(VkDev, 0, cllPrimary);
+    try
+      { 1. Hardware Occlusion Queries (BeginQuery / EndQuery / GetResults) }
+      CmdList.BeginRecording;
+      CmdList.ResetQueryPool(OccPool, 0, 4);
+      CmdList.BeginQuery(OccPool, 0, False);
+      OccPool.SetSimulatedResult(0, 1420); // 1,420 visible samples
+      CmdList.EndQuery(OccPool, 0);
+
+      CmdList.BeginQuery(OccPool, 1, True); // VK_QUERY_CONTROL_PRECISE_BIT
+      OccPool.SetSimulatedResult(1, 0);     // Fully occluded bounding box
+      CmdList.EndQuery(OccPool, 1);
+      CmdList.EndRecording;
+
+      AssertTrue('Query 0 must be marked written', OccPool.IsQueryWritten(0));
+      AssertTrue('Query 1 must be marked written', OccPool.IsQueryWritten(1));
+      AssertFalse('Query 2 was not recorded and must not be marked written', OccPool.IsQueryWritten(2));
+
+      FillChar(OccSamples, SizeOf(OccSamples), 0);
+      AssertTrue('GetResults for written queries 0..1 must return True',
+        OccPool.GetResults(0, 2, OccSamples, False));
+      AssertEquals('Occlusion query 0 sample count must be 1420', 1420, OccSamples[0]);
+      AssertEquals('Occlusion query 1 sample count must be 0 (occluded)', 0, OccSamples[1]);
+
+      { Non-blocking GetResults on unwritten query 2 must return False (VK_NOT_READY) }
+      AssertFalse('Non-blocking GetResults on unwritten query 2 must return False',
+        OccPool.GetResults(2, 1, OccSamples, False));
+
+      { 2. Per-Frame GPU Timestamp Profiler (TCastleVulkanTimestampProfiler) }
+      Profiler := VkDev.TimestampProfiler;
+      AssertTrue('Device TimestampProfiler must be initialized', Profiler <> nil);
+
+      CmdList.BeginRecording;
+      Profiler.BeginFrame(CmdList, 0);
+      PassShadow := Profiler.BeginPass(CmdList, 'ShadowMapPass');
+      Profiler.EndPass(CmdList, PassShadow);
+      PassForward := Profiler.BeginPass(CmdList, 'ForwardOpaquePass');
+      Profiler.EndPass(CmdList, PassForward);
+      CmdList.EndRecording;
+
+      { Inject simulated GPU timestamps for Frame Slot 0:
+        ShadowMapPass: 1,000,000 -> 2,500,000 ticks (1.5 ms at 1.0 ns/tick)
+        ForwardOpaquePass: 2,500,000 -> 6,000,000 ticks (3.5 ms at 1.0 ns/tick) }
+      Slot0Pool := Profiler.GetQueryPoolForSlot(0);
+      Slot0Pool.SetSimulatedResult(0, 1000000);
+      Slot0Pool.SetSimulatedResult(1, 2500000);
+      Slot0Pool.SetSimulatedResult(2, 2500000);
+      Slot0Pool.SetSimulatedResult(3, 6000000);
+
+      { Next time Frame Slot 0 (FrameIndex = MaxFramesInFlight = 2) begins, Profiler reads back completed passes }
+      CmdList.BeginRecording;
+      Profiler.BeginFrame(CmdList, MaxFramesInFlight);
+      CmdList.EndRecording;
+
+      AssertEquals('CompletedPassCount must be 2', 2, Profiler.CompletedPassCount);
+      AssertSameValue(1.5, Profiler.GetPassTimeMs('ShadowMapPass'), 0.001);
+      AssertSameValue(3.5, Profiler.GetPassTimeMs('ForwardOpaquePass'), 0.001);
+      AssertSameValue(5.0, Profiler.LastFrameTotalGpuTimeMs, 0.001);
+    finally
+      FreeAndNil(CmdList);
+      FreeAndNil(OccPool);
     end;
   finally
     FreeAndNil(VkDev);

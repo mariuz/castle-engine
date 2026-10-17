@@ -383,24 +383,20 @@ const
     deprecated 'use TCastleApplicationProperties.DefaultLimitFPS';
 
 type
-  { Development notes:
-    When extending TAntiAliasing, remember to also
-    update ScreenEffectLibrary implementation to be able to handle them
-    (and screen_effect_library.glsl to handle them in GLSL). }
   { Anti-aliasing values for TCastleWindow.AntiAliasing. }
-  TAntiAliasing = (aaNone,
-    aa2SamplesFaster, //< 2 samples, "don't care" hint.
-    aa2SamplesNicer,  //< 2 samples, "nicest" hint (quincunx (5 taps) for NVidia).
-    aa4SamplesFaster, //< 4 samples, "don't care" hint.
-    aa4SamplesNicer,  //< 4 samples, "nicest" hint (9 taps for NVidia).
-    aa8SamplesFaster, //< 8 samples, "don't care" hint.
-    aa8SamplesNicer,  //< 8 samples, "nicest" hint.
-    aa16SamplesFaster, //< 16 samples, "don't care" hint.
-    aa16SamplesNicer   //< 16 samples, "nicest" hint.
-  );
+  TAntiAliasing = CastleRenderOptions.TAntiAliasing;
 
 const
-  DefaultAntiAliasing = aaNone;
+  DefaultAntiAliasing = CastleRenderOptions.DefaultAntiAliasing;
+  aaNone = CastleRenderOptions.aaNone;
+  aa2SamplesFaster = CastleRenderOptions.aa2SamplesFaster;
+  aa2SamplesNicer = CastleRenderOptions.aa2SamplesNicer;
+  aa4SamplesFaster = CastleRenderOptions.aa4SamplesFaster;
+  aa4SamplesNicer = CastleRenderOptions.aa4SamplesNicer;
+  aa8SamplesFaster = CastleRenderOptions.aa8SamplesFaster;
+  aa8SamplesNicer = CastleRenderOptions.aa8SamplesNicer;
+  aa16SamplesFaster = CastleRenderOptions.aa16SamplesFaster;
+  aa16SamplesNicer = CastleRenderOptions.aa16SamplesNicer;
 
   AntiAliasingNames: array [TAntiAliasing] of string =
   ( 'None',

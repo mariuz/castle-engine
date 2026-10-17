@@ -338,6 +338,9 @@ const
   VK_SAMPLE_COUNT_2_BIT = $00000002;
   VK_SAMPLE_COUNT_4_BIT = $00000004;
   VK_SAMPLE_COUNT_8_BIT = $00000008;
+  VK_SAMPLE_COUNT_16_BIT = $00000010;
+  VK_SAMPLE_COUNT_32_BIT = $00000020;
+  VK_SAMPLE_COUNT_64_BIT = $00000040;
   VK_IMAGE_TILING_OPTIMAL = 0;
   VK_IMAGE_TILING_LINEAR = 1;
   VK_PHYSICAL_DEVICE_TYPE_OTHER = 0;
@@ -390,9 +393,88 @@ const
   VK_FORMAT_FEATURE_TRANSFER_DST_BIT = $00008000;
   VK_ERROR_OUT_OF_POOL_MEMORY = -1000069000;
   VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT = $00000001;
+  VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO = 1000161000;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES = 1000161001;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES = 1000161002;
+  VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO = 1000161003;
+  VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT = $00000001;
+  VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT = $00000002;
+  VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT = $00000004;
+  VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT = $00000008;
+  VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT = $00000002;
+  VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT = $00000002;
+  VK_RESOLVE_MODE_NONE = 0;
+  VK_RESOLVE_MODE_SAMPLE_ZERO_BIT = $00000001;
+  VK_RESOLVE_MODE_AVERAGE_BIT = $00000002;
+  VK_RESOLVE_MODE_MIN_BIT = $00000004;
+  VK_RESOLVE_MODE_MAX_BIT = $00000008;
+  VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE = 1000199001;
+  VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO = 29;
+  VK_DYNAMIC_STATE_CULL_MODE = 1000267000;
+  VK_DYNAMIC_STATE_FRONT_FACE = 1000267001;
+  VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY = 1000267002;
+  VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE = 1000267006;
+  VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE = 1000267007;
+  VK_DYNAMIC_STATE_DEPTH_COMPARE_OP = 1000267008;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT = 1000267000;
+  VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 = 1000314000;
+  VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2 = 1000314001;
+  VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 = 1000314002;
+  VK_STRUCTURE_TYPE_DEPENDENCY_INFO = 1000314003;
+  VK_PIPELINE_STAGE_2_NONE = 0;
+  VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT = $00000001;
+  VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT = $00000002;
+  VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT = $00000004;
+  VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT = $00000008;
+  VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT = $00000080;
+  VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT = $00000100;
+  VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT = $00000200;
+  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT = $00000400;
+  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT = $00000800;
+  VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT = $00001000;
+  VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT = $00002000;
+  VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT = $00008000;
+  VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT = $00010000;
+  VK_ACCESS_2_NONE = 0;
+  VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT = $00000001;
+  VK_ACCESS_2_INDEX_READ_BIT = $00000002;
+  VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT = $00000004;
+  VK_ACCESS_2_UNIFORM_READ_BIT = $00000008;
+  VK_ACCESS_2_SHADER_READ_BIT = $00000020;
+  VK_ACCESS_2_SHADER_WRITE_BIT = $00000040;
+  VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT = $00000080;
+  VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT = $00000100;
+  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT = $00000200;
+  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT = $00000400;
+  VK_ACCESS_2_TRANSFER_READ_BIT = $00000800;
+  VK_ACCESS_2_TRANSFER_WRITE_BIT = $00001000;
+  VK_ACCESS_2_HOST_READ_BIT = $00002000;
+  VK_ACCESS_2_HOST_WRITE_BIT = $00004000;
+  VK_ACCESS_2_MEMORY_READ_BIT = $00008000;
+  VK_ACCESS_2_MEMORY_WRITE_BIT = $00010000;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES = 1000207000;
+  VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO = 1000207002;
+  VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO = 1000207003;
+  VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO = 1000207004;
+  VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO = 1000207005;
+  VK_SEMAPHORE_TYPE_BINARY = 0;
+  VK_SEMAPHORE_TYPE_TIMELINE = 1;
+  VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO = 11;
+  VK_QUERY_TYPE_OCCLUSION = 0;
+  VK_QUERY_TYPE_PIPELINE_STATISTICS = 1;
+  VK_QUERY_TYPE_TIMESTAMP = 2;
+  VK_QUERY_CONTROL_PRECISE_BIT = $00000001;
+  VK_QUERY_RESULT_64_BIT = $00000001;
+  VK_QUERY_RESULT_WAIT_BIT = $00000002;
+  VK_QUERY_RESULT_WITH_AVAILABILITY_BIT = $00000004;
+  VK_QUERY_RESULT_PARTIAL_BIT = $00000008;
 
   { Extension and Layer Names }
   VK_EXT_debug_utils = 'VK_EXT_debug_utils';
+  VK_EXT_descriptor_indexing = 'VK_EXT_descriptor_indexing';
+  VK_EXT_extended_dynamic_state = 'VK_EXT_extended_dynamic_state';
+  VK_EXT_extended_dynamic_state2 = 'VK_EXT_extended_dynamic_state2';
+  VK_EXT_extended_dynamic_state3 = 'VK_EXT_extended_dynamic_state3';
   VK_EXT_graphics_pipeline_library = 'VK_EXT_graphics_pipeline_library';
   VK_EXT_memory_budget = 'VK_EXT_memory_budget';
   VK_KHR_create_renderpass2 = 'VK_KHR_create_renderpass2';
@@ -401,9 +483,12 @@ const
   VK_KHR_get_physical_device_properties2 = 'VK_KHR_get_physical_device_properties2';
   VK_KHR_maintenance1 = 'VK_KHR_maintenance1';
   VK_KHR_maintenance2 = 'VK_KHR_maintenance2';
+  VK_KHR_maintenance3 = 'VK_KHR_maintenance3';
   VK_KHR_multiview = 'VK_KHR_multiview';
   VK_KHR_pipeline_library = 'VK_KHR_pipeline_library';
   VK_KHR_swapchain = 'VK_KHR_swapchain';
+  VK_KHR_synchronization2 = 'VK_KHR_synchronization2';
+  VK_KHR_timeline_semaphore = 'VK_KHR_timeline_semaphore';
   VK_LAYER_KHRONOS_validation = 'VK_LAYER_KHRONOS_validation';
 
 type
@@ -411,6 +496,7 @@ type
   VkResult = Integer;
   VkStructureType = Integer;
   VkFlags = Cardinal;
+  VkFlags64 = UInt64;
   VkDeviceSize = UInt64;
   VkBool32 = Cardinal;
   VkSampleCountFlags = VkFlags;
@@ -420,7 +506,9 @@ type
   VkImageUsageFlags = VkFlags;
   VkMemoryPropertyFlags = VkFlags;
   VkPipelineStageFlags = VkFlags;
+  VkPipelineStageFlags2 = VkFlags64;
   VkAccessFlags = VkFlags;
+  VkAccessFlags2 = VkFlags64;
   VkShaderStageFlags = VkFlags;
   VkColorComponentFlags = VkFlags;
   VkImageAspectFlags = VkFlags;
@@ -441,10 +529,17 @@ type
   VkSamplerMipmapMode = Integer;
   VkSamplerAddressMode = Integer;
   VkGraphicsPipelineLibraryFlagsEXT = VkFlags;
+  VkDescriptorBindingFlags = VkFlags;
   VkQueueFlags = VkFlags;
+  VkResolveModeFlags = VkFlags;
+  VkQueryType = Integer;
+  VkQueryControlFlags = VkFlags;
+  VkQueryResultFlags = VkFlags;
+  VkQueryPipelineStatisticFlags = VkFlags;
 
   { Pointers to primitive types }
   PCardinal = ^Cardinal;
+  PUInt64 = ^UInt64;
   PInteger = ^Integer;
   PSingle = ^Single;
   PPAnsiChar = ^PAnsiChar;
@@ -456,6 +551,7 @@ type
   PVkPipelineStageFlags = ^VkPipelineStageFlags;
   PVkDynamicState = ^VkDynamicState;
   PVkPresentModeKHR = ^VkPresentModeKHR;
+  PVkDescriptorBindingFlags = ^VkDescriptorBindingFlags;
 
   { Dispatchable handles }
   VkInstance = Pointer;
@@ -482,6 +578,7 @@ type
   VkRenderPass = VkNonDispatchableHandle;
   VkSemaphore = VkNonDispatchableHandle;
   VkFence = VkNonDispatchableHandle;
+  VkQueryPool = VkNonDispatchableHandle;
   VkSurfaceKHR = VkNonDispatchableHandle;
   VkSwapchainKHR = VkNonDispatchableHandle;
   VkCommandPool = VkNonDispatchableHandle;
@@ -509,6 +606,7 @@ type
   PVkRenderPass = ^VkRenderPass;
   PVkSemaphore = ^VkSemaphore;
   PVkFence = ^VkFence;
+  PVkQueryPool = ^VkQueryPool;
   PVkSurfaceKHR = ^VkSurfaceKHR;
   PVkSwapchainKHR = ^VkSwapchainKHR;
   PVkCommandPool = ^VkCommandPool;
@@ -804,7 +902,7 @@ type
   PVkPhysicalDeviceFeatures = ^VkPhysicalDeviceFeatures;
 
   VkQueueFamilyProperties = record
-    queueFlags: VkFlags;
+    queueFlags: VkQueueFlags;
     queueCount: Cardinal;
     timestampValidBits: Cardinal;
     minImageTransferGranularity: VkExtent3D;
@@ -1396,8 +1494,8 @@ type
     subpass: Cardinal;
     framebuffer: VkFramebuffer;
     occlusionQueryEnable: VkBool32;
-    queryFlags: VkFlags;
-    pipelineStatistics: VkFlags;
+    queryFlags: VkQueryControlFlags;
+    pipelineStatistics: VkQueryPipelineStatisticFlags;
   end;
   PVkCommandBufferInheritanceInfo = ^VkCommandBufferInheritanceInfo;
 
@@ -1681,6 +1779,216 @@ type
   end;
   PVkMappedMemoryRange = ^VkMappedMemoryRange;
 
+  VkDescriptorSetLayoutBindingFlagsCreateInfo = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    bindingCount: Cardinal;
+    pBindingFlags: PVkDescriptorBindingFlags;
+  end;
+  PVkDescriptorSetLayoutBindingFlagsCreateInfo = ^VkDescriptorSetLayoutBindingFlagsCreateInfo;
+
+  VkPhysicalDeviceDescriptorIndexingFeatures = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    shaderInputAttachmentArrayDynamicIndexing: VkBool32;
+    shaderUniformTexelBufferArrayDynamicIndexing: VkBool32;
+    shaderStorageTexelBufferArrayDynamicIndexing: VkBool32;
+    shaderUniformBufferArrayNonUniformIndexing: VkBool32;
+    shaderSampledImageArrayNonUniformIndexing: VkBool32;
+    shaderStorageBufferArrayNonUniformIndexing: VkBool32;
+    shaderStorageImageArrayNonUniformIndexing: VkBool32;
+    shaderInputAttachmentArrayNonUniformIndexing: VkBool32;
+    shaderUniformTexelBufferArrayNonUniformIndexing: VkBool32;
+    shaderStorageTexelBufferArrayNonUniformIndexing: VkBool32;
+    descriptorBindingUniformBufferUpdateAfterBind: VkBool32;
+    descriptorBindingSampledImageUpdateAfterBind: VkBool32;
+    descriptorBindingStorageImageUpdateAfterBind: VkBool32;
+    descriptorBindingStorageBufferUpdateAfterBind: VkBool32;
+    descriptorBindingUniformTexelBufferUpdateAfterBind: VkBool32;
+    descriptorBindingStorageTexelBufferUpdateAfterBind: VkBool32;
+    descriptorBindingUpdateUnusedWhilePending: VkBool32;
+    descriptorBindingPartiallyBound: VkBool32;
+    descriptorBindingVariableDescriptorCount: VkBool32;
+    runtimeDescriptorArray: VkBool32;
+  end;
+  PVkPhysicalDeviceDescriptorIndexingFeatures = ^VkPhysicalDeviceDescriptorIndexingFeatures;
+
+  VkPhysicalDeviceDescriptorIndexingProperties = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    maxUpdateAfterBindDescriptorsInAllPools: Cardinal;
+    shaderUniformBufferArrayNonUniformIndexingNative: VkBool32;
+    shaderSampledImageArrayNonUniformIndexingNative: VkBool32;
+    shaderStorageBufferArrayNonUniformIndexingNative: VkBool32;
+    shaderStorageImageArrayNonUniformIndexingNative: VkBool32;
+    shaderInputAttachmentArrayNonUniformIndexingNative: VkBool32;
+    robustBufferAccessUpdateAfterBind: VkBool32;
+    quadDivergentImplicitLod: VkBool32;
+    maxPerStageDescriptorUpdateAfterBindSamplers: Cardinal;
+    maxPerStageDescriptorUpdateAfterBindUniformBuffers: Cardinal;
+    maxPerStageDescriptorUpdateAfterBindStorageBuffers: Cardinal;
+    maxPerStageDescriptorUpdateAfterBindSampledImages: Cardinal;
+    maxPerStageDescriptorUpdateAfterBindStorageImages: Cardinal;
+    maxPerStageDescriptorUpdateAfterBindInputAttachments: Cardinal;
+    maxPerStageUpdateAfterBindResources: Cardinal;
+    maxDescriptorSetUpdateAfterBindSamplers: Cardinal;
+    maxDescriptorSetUpdateAfterBindUniformBuffers: Cardinal;
+    maxDescriptorSetUpdateAfterBindUniformBuffersDynamic: Cardinal;
+    maxDescriptorSetUpdateAfterBindStorageBuffers: Cardinal;
+    maxDescriptorSetUpdateAfterBindStorageBuffersDynamic: Cardinal;
+    maxDescriptorSetUpdateAfterBindSampledImages: Cardinal;
+    maxDescriptorSetUpdateAfterBindStorageImages: Cardinal;
+    maxDescriptorSetUpdateAfterBindInputAttachments: Cardinal;
+  end;
+  PVkPhysicalDeviceDescriptorIndexingProperties = ^VkPhysicalDeviceDescriptorIndexingProperties;
+
+  VkDescriptorSetVariableDescriptorCountAllocateInfo = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    descriptorSetCount: Cardinal;
+    pDescriptorCounts: PCardinal;
+  end;
+  PVkDescriptorSetVariableDescriptorCountAllocateInfo = ^VkDescriptorSetVariableDescriptorCountAllocateInfo;
+
+  VkComputePipelineCreateInfo = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    flags: VkFlags;
+    stage: VkPipelineShaderStageCreateInfo;
+    layout: VkPipelineLayout;
+    basePipelineHandle: VkPipeline;
+    basePipelineIndex: Integer;
+  end;
+  PVkComputePipelineCreateInfo = ^VkComputePipelineCreateInfo;
+
+  VkDispatchIndirectCommand = record
+    x: Cardinal;
+    y: Cardinal;
+    z: Cardinal;
+  end;
+  PVkDispatchIndirectCommand = ^VkDispatchIndirectCommand;
+
+  VkPhysicalDeviceExtendedDynamicStateFeaturesEXT = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    extendedDynamicState: VkBool32;
+  end;
+  PVkPhysicalDeviceExtendedDynamicStateFeaturesEXT = ^VkPhysicalDeviceExtendedDynamicStateFeaturesEXT;
+
+  VkPhysicalDeviceSynchronization2Features = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    synchronization2: VkBool32;
+  end;
+  PVkPhysicalDeviceSynchronization2Features = ^VkPhysicalDeviceSynchronization2Features;
+
+  VkMemoryBarrier2 = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    srcStageMask: VkPipelineStageFlags2;
+    srcAccessMask: VkAccessFlags2;
+    dstStageMask: VkPipelineStageFlags2;
+    dstAccessMask: VkAccessFlags2;
+  end;
+  PVkMemoryBarrier2 = ^VkMemoryBarrier2;
+
+  VkBufferMemoryBarrier2 = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    srcStageMask: VkPipelineStageFlags2;
+    srcAccessMask: VkAccessFlags2;
+    dstStageMask: VkPipelineStageFlags2;
+    dstAccessMask: VkAccessFlags2;
+    srcQueueFamilyIndex: Cardinal;
+    dstQueueFamilyIndex: Cardinal;
+    buffer: VkBuffer;
+    offset: VkDeviceSize;
+    size: VkDeviceSize;
+  end;
+  PVkBufferMemoryBarrier2 = ^VkBufferMemoryBarrier2;
+
+  VkImageMemoryBarrier2 = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    srcStageMask: VkPipelineStageFlags2;
+    srcAccessMask: VkAccessFlags2;
+    dstStageMask: VkPipelineStageFlags2;
+    dstAccessMask: VkAccessFlags2;
+    oldLayout: VkImageLayout;
+    newLayout: VkImageLayout;
+    srcQueueFamilyIndex: Cardinal;
+    dstQueueFamilyIndex: Cardinal;
+    image: VkImage;
+    subresourceRange: VkImageSubresourceRange;
+  end;
+  PVkImageMemoryBarrier2 = ^VkImageMemoryBarrier2;
+
+  VkDependencyInfo = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    dependencyFlags: VkFlags;
+    memoryBarrierCount: Cardinal;
+    pMemoryBarriers: PVkMemoryBarrier2;
+    bufferMemoryBarrierCount: Cardinal;
+    pBufferMemoryBarriers: PVkBufferMemoryBarrier2;
+    imageMemoryBarrierCount: Cardinal;
+    pImageMemoryBarriers: PVkImageMemoryBarrier2;
+  end;
+  PVkDependencyInfo = ^VkDependencyInfo;
+
+  VkPhysicalDeviceTimelineSemaphoreFeatures = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    timelineSemaphore: VkBool32;
+  end;
+  PVkPhysicalDeviceTimelineSemaphoreFeatures = ^VkPhysicalDeviceTimelineSemaphoreFeatures;
+
+  VkSemaphoreTypeCreateInfo = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    semaphoreType: Integer;
+    initialValue: UInt64;
+  end;
+  PVkSemaphoreTypeCreateInfo = ^VkSemaphoreTypeCreateInfo;
+
+  VkTimelineSemaphoreSubmitInfo = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    waitSemaphoreValueCount: Cardinal;
+    pWaitSemaphoreValues: PUInt64;
+    signalSemaphoreValueCount: Cardinal;
+    pSignalSemaphoreValues: PUInt64;
+  end;
+  PVkTimelineSemaphoreSubmitInfo = ^VkTimelineSemaphoreSubmitInfo;
+
+  VkSemaphoreWaitInfo = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    flags: VkFlags;
+    semaphoreCount: Cardinal;
+    pSemaphores: PVkSemaphore;
+    pValues: PUInt64;
+  end;
+  PVkSemaphoreWaitInfo = ^VkSemaphoreWaitInfo;
+
+  VkSemaphoreSignalInfo = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    semaphore: VkSemaphore;
+    value: UInt64;
+  end;
+  PVkSemaphoreSignalInfo = ^VkSemaphoreSignalInfo;
+
+  VkQueryPoolCreateInfo = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    flags: VkFlags;
+    queryType: VkQueryType;
+    queryCount: Cardinal;
+    pipelineStatistics: VkQueryPipelineStatisticFlags;
+  end;
+  PVkQueryPoolCreateInfo = ^VkQueryPoolCreateInfo;
+
   { KHR Type Aliases }
   VkRenderingAttachmentInfoKHR = VkRenderingAttachmentInfo;
   PVkRenderingAttachmentInfoKHR = ^VkRenderingAttachmentInfoKHR;
@@ -1813,6 +2121,26 @@ type
   PFN_vkFlushMappedMemoryRanges = function(device: VkDevice; memoryRangeCount: Cardinal; const pMemoryRanges: PVkMappedMemoryRange): VkResult; VKAPI_CALL;
   PFN_vkInvalidateMappedMemoryRanges = function(device: VkDevice; memoryRangeCount: Cardinal; const pMemoryRanges: PVkMappedMemoryRange): VkResult; VKAPI_CALL;
   PFN_vkResetDescriptorPool = function(device: VkDevice; descriptorPool: VkDescriptorPool; flags: VkFlags): VkResult; VKAPI_CALL;
+  PFN_vkCreateComputePipelines = function(device: VkDevice; pipelineCache: VkPipelineCache; createInfoCount: Cardinal; const pCreateInfos: PVkComputePipelineCreateInfo; const pAllocator: PVkAllocationCallbacks; pPipelines: PVkPipeline): VkResult; VKAPI_CALL;
+  PFN_vkCmdDispatch = procedure(commandBuffer: VkCommandBuffer; groupCountX: Cardinal; groupCountY: Cardinal; groupCountZ: Cardinal); VKAPI_CALL;
+  PFN_vkCmdDispatchIndirect = procedure(commandBuffer: VkCommandBuffer; buffer: VkBuffer; offset: VkDeviceSize); VKAPI_CALL;
+  PFN_vkCmdSetCullMode = procedure(commandBuffer: VkCommandBuffer; cullMode: VkCullModeFlags); VKAPI_CALL;
+  PFN_vkCmdSetFrontFace = procedure(commandBuffer: VkCommandBuffer; frontFace: VkFrontFace); VKAPI_CALL;
+  PFN_vkCmdSetPrimitiveTopology = procedure(commandBuffer: VkCommandBuffer; primitiveTopology: VkPrimitiveTopology); VKAPI_CALL;
+  PFN_vkCmdSetDepthTestEnable = procedure(commandBuffer: VkCommandBuffer; depthTestEnable: VkBool32); VKAPI_CALL;
+  PFN_vkCmdSetDepthWriteEnable = procedure(commandBuffer: VkCommandBuffer; depthWriteEnable: VkBool32); VKAPI_CALL;
+  PFN_vkCmdSetDepthCompareOp = procedure(commandBuffer: VkCommandBuffer; depthCompareOp: VkCompareOp); VKAPI_CALL;
+  PFN_vkCmdPipelineBarrier2 = procedure(commandBuffer: VkCommandBuffer; const pDependencyInfo: PVkDependencyInfo); VKAPI_CALL;
+  PFN_vkWaitSemaphores = function(device: VkDevice; const pWaitInfo: PVkSemaphoreWaitInfo; timeout: UInt64): VkResult; VKAPI_CALL;
+  PFN_vkSignalSemaphore = function(device: VkDevice; const pSignalInfo: PVkSemaphoreSignalInfo): VkResult; VKAPI_CALL;
+  PFN_vkGetSemaphoreCounterValue = function(device: VkDevice; semaphore: VkSemaphore; pValue: PUInt64): VkResult; VKAPI_CALL;
+  PFN_vkCreateQueryPool = function(device: VkDevice; const pCreateInfo: PVkQueryPoolCreateInfo; const pAllocator: PVkAllocationCallbacks; pQueryPool: PVkQueryPool): VkResult; VKAPI_CALL;
+  PFN_vkDestroyQueryPool = procedure(device: VkDevice; queryPool: VkQueryPool; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
+  PFN_vkGetQueryPoolResults = function(device: VkDevice; queryPool: VkQueryPool; firstQuery: Cardinal; queryCount: Cardinal; dataSize: PtrUInt; pData: Pointer; stride: VkDeviceSize; flags: VkQueryResultFlags): VkResult; VKAPI_CALL;
+  PFN_vkCmdResetQueryPool = procedure(commandBuffer: VkCommandBuffer; queryPool: VkQueryPool; firstQuery: Cardinal; queryCount: Cardinal); VKAPI_CALL;
+  PFN_vkCmdBeginQuery = procedure(commandBuffer: VkCommandBuffer; queryPool: VkQueryPool; query: Cardinal; flags: VkQueryControlFlags); VKAPI_CALL;
+  PFN_vkCmdEndQuery = procedure(commandBuffer: VkCommandBuffer; queryPool: VkQueryPool; query: Cardinal); VKAPI_CALL;
+  PFN_vkCmdWriteTimestamp = procedure(commandBuffer: VkCommandBuffer; pipelineStage: Integer; queryPool: VkQueryPool; query: Cardinal); VKAPI_CALL;
 
 var
   { Global Function Pointers }
@@ -1927,6 +2255,26 @@ var
   vkFlushMappedMemoryRanges: PFN_vkFlushMappedMemoryRanges;
   vkInvalidateMappedMemoryRanges: PFN_vkInvalidateMappedMemoryRanges;
   vkResetDescriptorPool: PFN_vkResetDescriptorPool;
+  vkCreateComputePipelines: PFN_vkCreateComputePipelines;
+  vkCmdDispatch: PFN_vkCmdDispatch;
+  vkCmdDispatchIndirect: PFN_vkCmdDispatchIndirect;
+  vkCmdSetCullMode: PFN_vkCmdSetCullMode;
+  vkCmdSetFrontFace: PFN_vkCmdSetFrontFace;
+  vkCmdSetPrimitiveTopology: PFN_vkCmdSetPrimitiveTopology;
+  vkCmdSetDepthTestEnable: PFN_vkCmdSetDepthTestEnable;
+  vkCmdSetDepthWriteEnable: PFN_vkCmdSetDepthWriteEnable;
+  vkCmdSetDepthCompareOp: PFN_vkCmdSetDepthCompareOp;
+  vkCmdPipelineBarrier2: PFN_vkCmdPipelineBarrier2;
+  vkWaitSemaphores: PFN_vkWaitSemaphores;
+  vkSignalSemaphore: PFN_vkSignalSemaphore;
+  vkGetSemaphoreCounterValue: PFN_vkGetSemaphoreCounterValue;
+  vkCreateQueryPool: PFN_vkCreateQueryPool;
+  vkDestroyQueryPool: PFN_vkDestroyQueryPool;
+  vkGetQueryPoolResults: PFN_vkGetQueryPoolResults;
+  vkCmdResetQueryPool: PFN_vkCmdResetQueryPool;
+  vkCmdBeginQuery: PFN_vkCmdBeginQuery;
+  vkCmdEndQuery: PFN_vkCmdEndQuery;
+  vkCmdWriteTimestamp: PFN_vkCmdWriteTimestamp;
 
 function VK_MAKE_VERSION(const Major, Minor, Patch: Cardinal): Cardinal; inline;
 function VK_VERSION_MAJOR(const Version: Cardinal): Cardinal; inline;
@@ -2155,11 +2503,55 @@ begin
   Pointer(vkResetCommandBuffer) := vkGetInstanceProcAddr(nil, 'vkResetCommandBuffer');
   Pointer(vkCmdExecuteCommands) := vkGetInstanceProcAddr(nil, 'vkCmdExecuteCommands');
   Pointer(vkGetBufferMemoryRequirements2) := vkGetInstanceProcAddr(nil, 'vkGetBufferMemoryRequirements2');
+  if not Assigned(vkGetBufferMemoryRequirements2) then
+    Pointer(vkGetBufferMemoryRequirements2) := vkGetInstanceProcAddr(nil, 'vkGetBufferMemoryRequirements2KHR');
   Pointer(vkGetImageMemoryRequirements2) := vkGetInstanceProcAddr(nil, 'vkGetImageMemoryRequirements2');
+  if not Assigned(vkGetImageMemoryRequirements2) then
+    Pointer(vkGetImageMemoryRequirements2) := vkGetInstanceProcAddr(nil, 'vkGetImageMemoryRequirements2KHR');
   Pointer(vkGetPhysicalDeviceFormatProperties) := vkGetInstanceProcAddr(nil, 'vkGetPhysicalDeviceFormatProperties');
   Pointer(vkFlushMappedMemoryRanges) := vkGetInstanceProcAddr(nil, 'vkFlushMappedMemoryRanges');
   Pointer(vkInvalidateMappedMemoryRanges) := vkGetInstanceProcAddr(nil, 'vkInvalidateMappedMemoryRanges');
   Pointer(vkResetDescriptorPool) := vkGetInstanceProcAddr(nil, 'vkResetDescriptorPool');
+  Pointer(vkCreateComputePipelines) := vkGetInstanceProcAddr(nil, 'vkCreateComputePipelines');
+  Pointer(vkCmdDispatch) := vkGetInstanceProcAddr(nil, 'vkCmdDispatch');
+  Pointer(vkCmdDispatchIndirect) := vkGetInstanceProcAddr(nil, 'vkCmdDispatchIndirect');
+  Pointer(vkCmdSetCullMode) := vkGetInstanceProcAddr(nil, 'vkCmdSetCullMode');
+  if not Assigned(vkCmdSetCullMode) then
+    Pointer(vkCmdSetCullMode) := vkGetInstanceProcAddr(nil, 'vkCmdSetCullModeEXT');
+  Pointer(vkCmdSetFrontFace) := vkGetInstanceProcAddr(nil, 'vkCmdSetFrontFace');
+  if not Assigned(vkCmdSetFrontFace) then
+    Pointer(vkCmdSetFrontFace) := vkGetInstanceProcAddr(nil, 'vkCmdSetFrontFaceEXT');
+  Pointer(vkCmdSetPrimitiveTopology) := vkGetInstanceProcAddr(nil, 'vkCmdSetPrimitiveTopology');
+  if not Assigned(vkCmdSetPrimitiveTopology) then
+    Pointer(vkCmdSetPrimitiveTopology) := vkGetInstanceProcAddr(nil, 'vkCmdSetPrimitiveTopologyEXT');
+  Pointer(vkCmdSetDepthTestEnable) := vkGetInstanceProcAddr(nil, 'vkCmdSetDepthTestEnable');
+  if not Assigned(vkCmdSetDepthTestEnable) then
+    Pointer(vkCmdSetDepthTestEnable) := vkGetInstanceProcAddr(nil, 'vkCmdSetDepthTestEnableEXT');
+  Pointer(vkCmdSetDepthWriteEnable) := vkGetInstanceProcAddr(nil, 'vkCmdSetDepthWriteEnable');
+  if not Assigned(vkCmdSetDepthWriteEnable) then
+    Pointer(vkCmdSetDepthWriteEnable) := vkGetInstanceProcAddr(nil, 'vkCmdSetDepthWriteEnableEXT');
+  Pointer(vkCmdSetDepthCompareOp) := vkGetInstanceProcAddr(nil, 'vkCmdSetDepthCompareOp');
+  if not Assigned(vkCmdSetDepthCompareOp) then
+    Pointer(vkCmdSetDepthCompareOp) := vkGetInstanceProcAddr(nil, 'vkCmdSetDepthCompareOpEXT');
+  Pointer(vkCmdPipelineBarrier2) := vkGetInstanceProcAddr(nil, 'vkCmdPipelineBarrier2');
+  if not Assigned(vkCmdPipelineBarrier2) then
+    Pointer(vkCmdPipelineBarrier2) := vkGetInstanceProcAddr(nil, 'vkCmdPipelineBarrier2KHR');
+  Pointer(vkWaitSemaphores) := vkGetInstanceProcAddr(nil, 'vkWaitSemaphores');
+  if not Assigned(vkWaitSemaphores) then
+    Pointer(vkWaitSemaphores) := vkGetInstanceProcAddr(nil, 'vkWaitSemaphoresKHR');
+  Pointer(vkSignalSemaphore) := vkGetInstanceProcAddr(nil, 'vkSignalSemaphore');
+  if not Assigned(vkSignalSemaphore) then
+    Pointer(vkSignalSemaphore) := vkGetInstanceProcAddr(nil, 'vkSignalSemaphoreKHR');
+  Pointer(vkGetSemaphoreCounterValue) := vkGetInstanceProcAddr(nil, 'vkGetSemaphoreCounterValue');
+  if not Assigned(vkGetSemaphoreCounterValue) then
+    Pointer(vkGetSemaphoreCounterValue) := vkGetInstanceProcAddr(nil, 'vkGetSemaphoreCounterValueKHR');
+  Pointer(vkCreateQueryPool) := vkGetInstanceProcAddr(nil, 'vkCreateQueryPool');
+  Pointer(vkDestroyQueryPool) := vkGetInstanceProcAddr(nil, 'vkDestroyQueryPool');
+  Pointer(vkGetQueryPoolResults) := vkGetInstanceProcAddr(nil, 'vkGetQueryPoolResults');
+  Pointer(vkCmdResetQueryPool) := vkGetInstanceProcAddr(nil, 'vkCmdResetQueryPool');
+  Pointer(vkCmdBeginQuery) := vkGetInstanceProcAddr(nil, 'vkCmdBeginQuery');
+  Pointer(vkCmdEndQuery) := vkGetInstanceProcAddr(nil, 'vkCmdEndQuery');
+  Pointer(vkCmdWriteTimestamp) := vkGetInstanceProcAddr(nil, 'vkCmdWriteTimestamp');
 end;
 
 procedure FreeVulkan;

@@ -97,6 +97,21 @@ type
     PBRParams: TVector4;            // x = Roughness, y = NormalScale, z = OcclusionStrength, w = AlphaCutoff
   end;
 
+  { CPU-side mirror of a Bindless Material Entry in Set 1, Binding 1 (std430 SSBO / std140 UBO).
+    Stores material factors alongside 32-bit bindless texture array indices into Set 1, Binding 0
+    (castle_BindlessTextures[]), enabling multi-material vkCmdDrawIndexedIndirect batches. }
+  PCastleBindlessMaterialEntry = ^TCastleBindlessMaterialEntry;
+  TCastleBindlessMaterialEntry = packed record
+    BaseColor: TVector4;            // 16 bytes
+    SpecularColor: TVector4;        // 16 bytes
+    EmissiveColor: TVector4;        // 16 bytes
+    PBRParams: TVector4;            // 16 bytes
+    BaseColorTexIndex: Cardinal;    // 4 bytes (index into castle_BindlessTextures[])
+    NormalTexIndex: Cardinal;       // 4 bytes
+    MetallicRoughnessTexIndex: Cardinal; // 4 bytes
+    EmissiveTexIndex: Cardinal;     // 4 bytes
+  end; // Total = 80 bytes (80 mod 16 = 0)
+
   { CPU-side mirror of Per-Draw Push Constants (128 bytes max, guaranteed by Vulkan spec) }
   PCastlePushConstantsBlock = ^TCastlePushConstantsBlock;
   TCastlePushConstantsBlock = packed record
@@ -127,6 +142,13 @@ type
 
     { Builds the complete preamble injected before CGE's internal GLSL templates }
     function GeneratePreamble(const AStage: TRHIShaderStage): String;
+
+    { Builds a bindless texture/material GLSL 450 preamble using GL_EXT_nonuniform_qualifier,
+      Set 1 Binding 0 unbounded/sized sampler2D array (castle_BindlessTextures[]), and
+      Set 1 Binding 1 Material SSBO (CastleBindlessMaterials[]) indexed by push-constant
+      or per-draw MaterialIndex for multi-material indirect rendering. }
+    function GenerateBindlessPreamble(const AStage: TRHIShaderStage;
+      const AMaxBindlessTextures: Cardinal = 4096): String;
 
     { Transforms legacy user X3D EffectPart uniform declarations into a std140 UBO
       at Set 2, Binding 1 and emits WritelnWarning diagnostics for deprecated raw
@@ -425,6 +447,50 @@ begin
   Result :=
     GenerateVersionAndLayoutMacros + NL +
     GenerateStandardUniformBlocks(AStage) + NL +
+    GenerateStageIO(AStage) + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateBindlessPreamble(const AStage: TRHIShaderStage;
+  const AMaxBindlessTextures: Cardinal): String;
+var
+  ArrayDecl: String;
+begin
+  if FBackend <> rbVulkan then
+    Exit(GeneratePreamble(AStage));
+
+  if AMaxBindlessTextures > 0 then
+    ArrayDecl := Format('CASTLE_SAMPLER(1, 0) uniform sampler2D castle_BindlessTextures[%d];', [AMaxBindlessTextures])
+  else
+    ArrayDecl := 'CASTLE_SAMPLER(1, 0) uniform sampler2D castle_BindlessTextures[];';
+
+  Result :=
+    GenerateVersionAndLayoutMacros +
+    '#extension GL_EXT_nonuniform_qualifier : require' + NL +
+    '#define CASTLE_BINDLESS_TEXTURES 1' + NL +
+    NL +
+    GenerateStandardUniformBlocks(AStage) + NL +
+    '/* --- Bindless Texture Table & Multi-Material SSBO (VK_EXT_descriptor_indexing) --- */' + NL +
+    ArrayDecl + NL +
+    NL +
+    'struct CastleBindlessMaterialEntry {' + NL +
+    '  vec4 BaseColor;' + NL +
+    '  vec4 SpecularColor;' + NL +
+    '  vec4 EmissiveColor;' + NL +
+    '  vec4 PBRParams;' + NL +
+    '  uint BaseColorTexIndex;' + NL +
+    '  uint NormalTexIndex;' + NL +
+    '  uint MetallicRoughnessTexIndex;' + NL +
+    '  uint EmissiveTexIndex;' + NL +
+    '};' + NL +
+    NL +
+    'CASTLE_SSBO(1, 1) readonly buffer CastleBindlessMaterialsBlock {' + NL +
+    '  CastleBindlessMaterialEntry u_Materials[];' + NL +
+    '} CastleBindlessMaterials;' + NL +
+    NL +
+    '#define castle_SampleBindless2D(TexIdx, UV) texture(castle_BindlessTextures[nonuniformEXT(uint(TexIdx))], (UV))' + NL +
+    '#define castle_GetMaterialEntry(MatIdx) CastleBindlessMaterials.u_Materials[uint(MatIdx)]' + NL +
+    '#define castle_DrawMaterialIndex uint(CastleDraw.u_ObjectParams.x)' + NL +
+    NL +
     GenerateStageIO(AStage) + NL;
 end;
 

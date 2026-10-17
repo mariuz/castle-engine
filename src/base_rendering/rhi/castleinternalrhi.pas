@@ -36,6 +36,8 @@ type
   TRHIDescriptorSetLayout = class;
   TRHIDescriptorSet = class;
   TRHIPipeline = class;
+  TRHIComputePipeline = class;
+  TRHIQueryPool = class;
   TRHICommandList = class;
 
   { Exceptions }
@@ -232,6 +234,21 @@ type
     soDontCare
   );
 
+  { Multisample attachment resolve mode (VK_RESOLVE_MODE_*_BIT) }
+  TRHIResolveMode = (
+    rmNone,
+    rmAverage,
+    rmSampleZero,
+    rmMin,
+    rmMax
+  );
+
+  { Hardware query pool type (VK_QUERY_TYPE_OCCLUSION / VK_QUERY_TYPE_TIMESTAMP) }
+  TRHIQueryType = (
+    qtOcclusion,
+    qtTimestamp
+  );
+
   TRHIVertexAttributeFormat = (
     vafFloat,
     vafVector2,
@@ -268,6 +285,14 @@ type
   end;
   PRHIDrawIndexedIndirectCommand = ^TRHIDrawIndexedIndirectCommand;
 
+  { Indirect compute dispatch command matching standard GPU layout (VkDispatchIndirectCommand). }
+  TRHIDispatchIndirectCommand = record
+    GroupCountX: Cardinal;
+    GroupCountY: Cardinal;
+    GroupCountZ: Cardinal;
+  end;
+  PRHIDispatchIndirectCommand = ^TRHIDispatchIndirectCommand;
+
   TRHIBufferDesc = record
     Size: PtrUInt;
     Usage: TRHIBufferUsageFlags;
@@ -292,7 +317,8 @@ type
     class function Create2D(const AWidth, AHeight: Cardinal;
       const AFormat: TRHIPixelFormat;
       const AUsage: TRHITextureUsageFlags = [tuSampled, tuTransferDst];
-      const AMipLevels: Cardinal = 1): TRHITextureDesc; static;
+      const AMipLevels: Cardinal = 1;
+      const ASampleCount: Cardinal = 1): TRHITextureDesc; static;
     class function CreateCube(const ASize: Cardinal;
       const AFormat: TRHIPixelFormat;
       const AUsage: TRHITextureUsageFlags = [tuSampled, tuTransferDst];
@@ -347,11 +373,21 @@ type
     dtStorageImage
   );
 
+  { Optional descriptor binding flags for Vulkan 1.2 / VK_EXT_descriptor_indexing bindless arrays }
+  TRHIDescriptorBindingFlag = (
+    dbfPartiallyBound,
+    dbfUpdateUnusedWhilePending,
+    dbfUpdateAfterBind,
+    dbfVariableDescriptorCount
+  );
+  TRHIDescriptorBindingFlags = set of TRHIDescriptorBindingFlag;
+
   TRHIDescriptorBindingDesc = record
     Binding: Cardinal;
     DescriptorType: TRHIDescriptorType;
     Count: Cardinal;
     StageFlags: TRHIShaderStageFlags;
+    BindingFlags: TRHIDescriptorBindingFlags;
   end;
 
   { Graphics Pipeline State Object (PSO) Description }
@@ -409,6 +445,25 @@ type
     DebugName: String;
   end;
 
+  { Compute Pipeline State Object (PSO) Description }
+  TRHIComputePipelineDesc = record
+    ComputeShader: TRHIShaderModule;
+    DescriptorSetLayouts: array of TRHIDescriptorSetLayout;
+    PushConstantSize: Cardinal;
+    PushConstantStages: TRHIShaderStageFlags;
+    DebugName: String;
+  end;
+
+  { Hardware Query Pool Description (Timestamp / Occlusion Queries) }
+  TRHIQueryPoolDesc = record
+    QueryType: TRHIQueryType;
+    QueryCount: Cardinal;
+    DebugName: String;
+    class function Create(const AQueryType: TRHIQueryType;
+      const AQueryCount: Cardinal;
+      const ADebugName: String = ''): TRHIQueryPoolDesc; static;
+  end;
+
   { Dynamic Rendering Pass Attachments (Vulkan VK_KHR_dynamic_rendering) }
 
   TRHIRenderingAttachment = record
@@ -420,6 +475,13 @@ type
     ClearColor: TCastleColor;
     ClearDepth: Single;
     ClearStencil: Byte;
+    { Single-pass MSAA resolve target (1x SampleCount texture) and mode.
+      When ResolveTexture <> nil and Texture.Desc.SampleCount > 1, the GPU resolves
+      the multisampled attachment into ResolveTexture at the end of the pass. }
+    ResolveTexture: TRHITexture;
+    ResolveMipLevel: Cardinal;
+    ResolveArrayLayer: Cardinal;
+    ResolveMode: TRHIResolveMode;
   end;
 
   TRHIRenderingInfo = record
@@ -431,6 +493,12 @@ type
       const AColorTexture: TRHITexture; const AColorLoadOp: TRHIAttachmentLoadOp;
       const AClearColor: TCastleColor; const ADepthTexture: TRHITexture;
       const ADepthLoadOp: TRHIAttachmentLoadOp; const AClearDepth: Single = 1.0): TRHIRenderingInfo; static;
+    class function CreateColorDepthMSAA(const ARenderArea: TRectangle;
+      const AMSAAColorTexture, AResolveColorTexture: TRHITexture;
+      const AColorLoadOp: TRHIAttachmentLoadOp; const AClearColor: TCastleColor;
+      const AMSAADepthTexture: TRHITexture; const ADepthLoadOp: TRHIAttachmentLoadOp;
+      const AClearDepth: Single = 1.0;
+      const AResolveDepthTexture: TRHITexture = nil): TRHIRenderingInfo; static;
     class function CreateDepthOnly(const ARenderArea: TRectangle;
       const ADepthTexture: TRHITexture; const ADepthLoadOp: TRHIAttachmentLoadOp;
       const ADepthStoreOp: TRHIAttachmentStoreOp = soStore;
@@ -448,11 +516,18 @@ type
     MaxUniformBufferRange: Cardinal;
     MinUniformBufferOffsetAlignment: Cardinal;
     MaxPushConstantsSize: Cardinal;
+    MaxFramebufferSampleCount: Cardinal;
     SupportsBCCompression: Boolean;
     SupportsASTCCompression: Boolean;
     SupportsETC2Compression: Boolean;
     SupportsComputeShaders: Boolean;
     SupportsMultiDrawIndirect: Boolean;
+    SupportsBindlessTextures: Boolean;
+    MaxBindlessTextures: Cardinal;
+    SupportsExtendedDynamicState: Boolean;
+    SupportsSynchronization2: Boolean;
+    SupportsTimelineSemaphores: Boolean;
+    TimestampPeriodNanoseconds: Single;
   end;
 
   { -------------------------------------------------------------------------- }
@@ -530,6 +605,10 @@ type
       const Offset: PtrUInt = 0; const Range: PtrUInt = 0); virtual; abstract;
     procedure BindTexture(const Binding: Cardinal; const Texture: TRHITexture;
       const Sampler: TRHISampler); virtual; abstract;
+    { Binds a combined image sampler into a specific descriptor array element
+      (e.g. for Vulkan 1.2 / VK_EXT_descriptor_indexing bindless texture arrays). }
+    procedure BindTextureAtIndex(const Binding, ArrayElement: Cardinal;
+      const Texture: TRHITexture; const Sampler: TRHISampler); virtual;
     { Commits pending binding updates to the underlying descriptor set. }
     procedure Update; virtual; abstract;
   end;
@@ -541,6 +620,28 @@ type
   public
     constructor Create(const ADevice: TRHIDevice; const ADesc: TRHIGraphicsPipelineDesc);
     property Desc: TRHIGraphicsPipelineDesc read FDesc;
+  end;
+
+  { Baked Compute Pipeline State Object (PSO). }
+  TRHIComputePipeline = class abstract(TRHIResource)
+  protected
+    FDesc: TRHIComputePipelineDesc;
+  public
+    constructor Create(const ADevice: TRHIDevice; const ADesc: TRHIComputePipelineDesc);
+    property Desc: TRHIComputePipelineDesc read FDesc;
+  end;
+
+  { Hardware Query Pool (GPU Timestamps and Occlusion Queries). }
+  TRHIQueryPool = class abstract(TRHIResource)
+  protected
+    FDesc: TRHIQueryPoolDesc;
+  public
+    constructor Create(const ADevice: TRHIDevice; const ADesc: TRHIQueryPoolDesc);
+    { Reads back 64-bit query results for [FirstQuery .. FirstQuery + QueryCount - 1].
+      Returns True if all requested queries have completed and Results is populated. }
+    function GetResults(const FirstQuery, QueryCount: Cardinal;
+      out Results: array of UInt64; const WaitForResults: Boolean = False): Boolean; virtual; abstract;
+    property Desc: TRHIQueryPoolDesc read FDesc;
   end;
 
   { -------------------------------------------------------------------------- }
@@ -574,6 +675,14 @@ type
     procedure SetScissor(const ScissorRect: TRectangle); virtual; abstract;
     procedure SetDepthBias(const ConstantFactor, SlopeFactor: Single); virtual; abstract;
 
+    { Extended Dynamic State (VK_EXT_extended_dynamic_state / Vulkan 1.3 Core) }
+    procedure SetCullMode(const CullMode: TRHICullMode); virtual;
+    procedure SetFrontFace(const FrontFace: TRHIFrontFace); virtual;
+    procedure SetDepthTestEnable(const Enable: Boolean); virtual;
+    procedure SetDepthWriteEnable(const Enable: Boolean); virtual;
+    procedure SetDepthCompareOp(const CompareOp: TRHICompareOp); virtual;
+    procedure SetPrimitiveTopology(const Topology: TRHIPrimitiveTopology); virtual;
+
     { Pipeline & Resource Binding }
     procedure BindPipeline(const Pipeline: TRHIPipeline); virtual; abstract;
     procedure BindDescriptorSet(const SetIndex: Cardinal;
@@ -581,6 +690,25 @@ type
       const DynamicOffsets: array of Cardinal); virtual; abstract;
     procedure PushConstants(const StageFlags: TRHIShaderStageFlags;
       const Offset, Size: Cardinal; const Data); virtual; abstract;
+
+    { Compute Pipeline & Dispatch (Phase 6.5) }
+    procedure BindComputePipeline(const Pipeline: TRHIComputePipeline); virtual;
+    procedure BindComputeDescriptorSet(const SetIndex: Cardinal;
+      const DescriptorSet: TRHIDescriptorSet;
+      const DynamicOffsets: array of Cardinal); virtual;
+    procedure Dispatch(const GroupCountX, GroupCountY, GroupCountZ: Cardinal); reintroduce; virtual;
+    procedure DispatchIndirect(const IndirectBuffer: TRHIBuffer;
+      const Offset: PtrUInt = 0); virtual;
+
+    { Hardware Queries (Timestamps & Occlusion Queries - Phase 6.7) }
+    procedure ResetQueryPool(const QueryPool: TRHIQueryPool;
+      const FirstQuery, QueryCount: Cardinal); virtual;
+    procedure BeginQuery(const QueryPool: TRHIQueryPool;
+      const QueryIndex: Cardinal; const Precise: Boolean = False); virtual;
+    procedure EndQuery(const QueryPool: TRHIQueryPool;
+      const QueryIndex: Cardinal); virtual;
+    procedure WriteTimestamp(const QueryPool: TRHIQueryPool;
+      const QueryIndex: Cardinal; const Stage: TRHIShaderStage = ssFragment); virtual;
 
     { Geometry Buffers }
     procedure BindVertexBuffers(const FirstBinding: Cardinal;
@@ -654,6 +782,12 @@ type
     { Creates or retrieves a cached Pipeline State Object matching ADesc. }
     function GetOrCreatePipeline(const ADesc: TRHIGraphicsPipelineDesc): TRHIPipeline; virtual; abstract;
 
+    { Creates or retrieves a cached Compute Pipeline State Object matching ADesc. }
+    function CreateComputePipeline(const ADesc: TRHIComputePipelineDesc): TRHIComputePipeline; virtual;
+
+    { Creates a hardware query pool for GPU timestamps or occlusion queries. }
+    function CreateQueryPool(const ADesc: TRHIQueryPoolDesc): TRHIQueryPool; virtual;
+
     { Readback current swapchain or texture into a CPU TCastleImage (for TCastleWindow.SaveScreen). }
     function GrabTextureImage(const SourceTexture: TRHITexture;
       const ReadArea: TRectangle): TRGBAlphaImage; virtual; abstract;
@@ -678,6 +812,13 @@ procedure SetRHIDevice(const ADevice: TRHIDevice);
 { Global active RHI command list being recorded for current frame/pass. }
 function ActiveCommandList: TRHICommandList;
 procedure SetActiveCommandList(const ACmdList: TRHICommandList);
+
+{ Converts TCastleWindow.AntiAliasing (TAntiAliasing) to an RHI MSAA sample count (1, 2, 4, 8, 16). }
+function AntiAliasingToSampleCount(const AAntiAliasing: TAntiAliasing): Cardinal;
+
+{ Clamps a requested MSAA sample count to the highest power-of-two sample count
+  (1, 2, 4, 8, 16, 32, 64) supported by the device's MaxSupportedSamples. }
+function ClampSampleCountToCapabilities(const ARequestedSamples, AMaxSupportedSamples: Cardinal): Cardinal;
 
 { Compares two framebuffer readback images (e.g. OpenGL vs Vulkan GrabTextureImage)
   by computing the normalized Root Mean Square Error (RMSE in [0..1]) across all channels.
@@ -709,6 +850,37 @@ end;
 procedure SetActiveCommandList(const ACmdList: TRHICommandList);
 begin
   FActiveCommandList := ACmdList;
+end;
+
+function AntiAliasingToSampleCount(const AAntiAliasing: TAntiAliasing): Cardinal;
+begin
+  case AAntiAliasing of
+    aaNone: Result := 1;
+    aa2SamplesFaster, aa2SamplesNicer: Result := 2;
+    aa4SamplesFaster, aa4SamplesNicer: Result := 4;
+    aa8SamplesFaster, aa8SamplesNicer: Result := 8;
+    aa16SamplesFaster, aa16SamplesNicer: Result := 16;
+  else
+    Result := 1;
+  end;
+end;
+
+function ClampSampleCountToCapabilities(const ARequestedSamples, AMaxSupportedSamples: Cardinal): Cardinal;
+var
+  MaxAllowed: Cardinal;
+begin
+  if (ARequestedSamples <= 1) or (AMaxSupportedSamples <= 1) then
+    Exit(1);
+  MaxAllowed := ARequestedSamples;
+  if MaxAllowed > AMaxSupportedSamples then
+    MaxAllowed := AMaxSupportedSamples;
+  if MaxAllowed >= 64 then Result := 64 else
+  if MaxAllowed >= 32 then Result := 32 else
+  if MaxAllowed >= 16 then Result := 16 else
+  if MaxAllowed >= 8 then Result := 8 else
+  if MaxAllowed >= 4 then Result := 4 else
+  if MaxAllowed >= 2 then Result := 2 else
+    Result := 1;
 end;
 
 function CompareImagesPerceptualDiff(const ImageA, ImageB: TCastleImage;
@@ -764,7 +936,7 @@ end;
 
 class function TRHITextureDesc.Create2D(const AWidth, AHeight: Cardinal;
   const AFormat: TRHIPixelFormat; const AUsage: TRHITextureUsageFlags;
-  const AMipLevels: Cardinal): TRHITextureDesc;
+  const AMipLevels: Cardinal; const ASampleCount: Cardinal): TRHITextureDesc;
 begin
   FillChar(Result, SizeOf(Result), 0);
   Result.Dimension := td2D;
@@ -772,7 +944,10 @@ begin
   Result.Height := AHeight;
   Result.DepthOrArrayLayers := 1;
   Result.MipLevels := AMipLevels;
-  Result.SampleCount := 1;
+  if ASampleCount > 1 then
+    Result.SampleCount := ASampleCount
+  else
+    Result.SampleCount := 1;
   Result.Format := AFormat;
   Result.Usage := AUsage;
 end;
@@ -781,9 +956,19 @@ class function TRHITextureDesc.CreateCube(const ASize: Cardinal;
   const AFormat: TRHIPixelFormat; const AUsage: TRHITextureUsageFlags;
   const AMipLevels: Cardinal): TRHITextureDesc;
 begin
-  Result := Create2D(ASize, ASize, AFormat, AUsage, AMipLevels);
+  Result := Create2D(ASize, ASize, AFormat, AUsage, AMipLevels, 1);
   Result.Dimension := tdCube;
   Result.DepthOrArrayLayers := 6;
+end;
+
+{ TRHIQueryPoolDesc }
+
+class function TRHIQueryPoolDesc.Create(const AQueryType: TRHIQueryType;
+  const AQueryCount: Cardinal; const ADebugName: String): TRHIQueryPoolDesc;
+begin
+  Result.QueryType := AQueryType;
+  Result.QueryCount := AQueryCount;
+  Result.DebugName := ADebugName;
 end;
 
 { TRHIBlendStateDesc }
@@ -881,6 +1066,47 @@ begin
   end;
 end;
 
+class function TRHIRenderingInfo.CreateColorDepthMSAA(const ARenderArea: TRectangle;
+  const AMSAAColorTexture, AResolveColorTexture: TRHITexture;
+  const AColorLoadOp: TRHIAttachmentLoadOp; const AClearColor: TCastleColor;
+  const AMSAADepthTexture: TRHITexture; const ADepthLoadOp: TRHIAttachmentLoadOp;
+  const AClearDepth: Single;
+  const AResolveDepthTexture: TRHITexture): TRHIRenderingInfo;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  Result.RenderArea := ARenderArea;
+  if AMSAAColorTexture <> nil then
+  begin
+    SetLength(Result.ColorAttachments, 1);
+    Result.ColorAttachments[0].Texture := AMSAAColorTexture;
+    Result.ColorAttachments[0].LoadOp := AColorLoadOp;
+    { When resolving in a single tile-local pass, transient MSAA samples do not need
+      to be written back to external memory after resolving into AResolveColorTexture. }
+    if AResolveColorTexture <> nil then
+    begin
+      Result.ColorAttachments[0].StoreOp := soDontCare;
+      Result.ColorAttachments[0].ResolveTexture := AResolveColorTexture;
+      Result.ColorAttachments[0].ResolveMode := rmAverage;
+    end else
+      Result.ColorAttachments[0].StoreOp := soStore;
+    Result.ColorAttachments[0].ClearColor := AClearColor;
+  end;
+  if AMSAADepthTexture <> nil then
+  begin
+    Result.HasDepthAttachment := True;
+    Result.DepthAttachment.Texture := AMSAADepthTexture;
+    Result.DepthAttachment.LoadOp := ADepthLoadOp;
+    if AResolveDepthTexture <> nil then
+    begin
+      Result.DepthAttachment.StoreOp := soDontCare;
+      Result.DepthAttachment.ResolveTexture := AResolveDepthTexture;
+      Result.DepthAttachment.ResolveMode := rmSampleZero;
+    end else
+      Result.DepthAttachment.StoreOp := soDontCare;
+    Result.DepthAttachment.ClearDepth := AClearDepth;
+  end;
+end;
+
 class function TRHIRenderingInfo.CreateDepthOnly(const ARenderArea: TRectangle;
   const ADepthTexture: TRHITexture; const ADepthLoadOp: TRHIAttachmentLoadOp;
   const ADepthStoreOp: TRHIAttachmentStoreOp;
@@ -939,9 +1165,33 @@ begin
   FStage := AStage;
 end;
 
+{ TRHIDescriptorSet }
+
+procedure TRHIDescriptorSet.BindTextureAtIndex(const Binding, ArrayElement: Cardinal;
+  const Texture: TRHITexture; const Sampler: TRHISampler);
+begin
+  BindTexture(Binding, Texture, Sampler);
+end;
+
 { TRHIPipeline }
 
 constructor TRHIPipeline.Create(const ADevice: TRHIDevice; const ADesc: TRHIGraphicsPipelineDesc);
+begin
+  inherited Create(ADevice, ADesc.DebugName);
+  FDesc := ADesc;
+end;
+
+{ TRHIComputePipeline }
+
+constructor TRHIComputePipeline.Create(const ADevice: TRHIDevice; const ADesc: TRHIComputePipelineDesc);
+begin
+  inherited Create(ADevice, ADesc.DebugName);
+  FDesc := ADesc;
+end;
+
+{ TRHIQueryPool }
+
+constructor TRHIQueryPool.Create(const ADevice: TRHIDevice; const ADesc: TRHIQueryPoolDesc);
 begin
   inherited Create(ADevice, ADesc.DebugName);
   FDesc := ADesc;
@@ -953,6 +1203,70 @@ constructor TRHICommandList.Create(const ALevel: TRHICommandListLevel);
 begin
   inherited Create;
   FLevel := ALevel;
+end;
+
+procedure TRHICommandList.SetCullMode(const CullMode: TRHICullMode);
+begin
+end;
+
+procedure TRHICommandList.SetFrontFace(const FrontFace: TRHIFrontFace);
+begin
+end;
+
+procedure TRHICommandList.SetDepthTestEnable(const Enable: Boolean);
+begin
+end;
+
+procedure TRHICommandList.SetDepthWriteEnable(const Enable: Boolean);
+begin
+end;
+
+procedure TRHICommandList.SetDepthCompareOp(const CompareOp: TRHICompareOp);
+begin
+end;
+
+procedure TRHICommandList.SetPrimitiveTopology(const Topology: TRHIPrimitiveTopology);
+begin
+end;
+
+procedure TRHICommandList.BindComputePipeline(const Pipeline: TRHIComputePipeline);
+begin
+end;
+
+procedure TRHICommandList.BindComputeDescriptorSet(const SetIndex: Cardinal;
+  const DescriptorSet: TRHIDescriptorSet;
+  const DynamicOffsets: array of Cardinal);
+begin
+  BindDescriptorSet(SetIndex, DescriptorSet, DynamicOffsets);
+end;
+
+procedure TRHICommandList.Dispatch(const GroupCountX, GroupCountY, GroupCountZ: Cardinal);
+begin
+end;
+
+procedure TRHICommandList.DispatchIndirect(const IndirectBuffer: TRHIBuffer;
+  const Offset: PtrUInt);
+begin
+end;
+
+procedure TRHICommandList.ResetQueryPool(const QueryPool: TRHIQueryPool;
+  const FirstQuery, QueryCount: Cardinal);
+begin
+end;
+
+procedure TRHICommandList.BeginQuery(const QueryPool: TRHIQueryPool;
+  const QueryIndex: Cardinal; const Precise: Boolean);
+begin
+end;
+
+procedure TRHICommandList.EndQuery(const QueryPool: TRHIQueryPool;
+  const QueryIndex: Cardinal);
+begin
+end;
+
+procedure TRHICommandList.WriteTimestamp(const QueryPool: TRHIQueryPool;
+  const QueryIndex: Cardinal; const Stage: TRHIShaderStage);
+begin
 end;
 
 { TRHIDevice }
@@ -968,6 +1282,16 @@ begin
   if FRHIDevice = Self then
     FRHIDevice := nil;
   inherited;
+end;
+
+function TRHIDevice.CreateComputePipeline(const ADesc: TRHIComputePipelineDesc): TRHIComputePipeline;
+begin
+  Result := nil;
+end;
+
+function TRHIDevice.CreateQueryPool(const ADesc: TRHIQueryPoolDesc): TRHIQueryPool;
+begin
+  Result := nil;
 end;
 
 end.
