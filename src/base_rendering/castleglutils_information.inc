@@ -222,6 +222,7 @@ begin
     '  Blend constant parameter: ' + BoolToStr(GLFeatures.BlendConstant, true) + NL +
     '  Float textures: ' + BoolToStr(GLFeatures.TextureFloat, true) + NL +
     '  Linear filtering of float textures: ' + BoolToStr(GLFeatures.TextureFloatLinear, true) + NL +
+    '  Rendering to float color buffers: ' + BoolToStr(GLFeatures.ColorBufferFloat, true) + NL +
     '  Depth textures: ' + BoolToStr(GLFeatures.TextureDepth, true) + NL +
     '  Shadow samplers (necessary for shadow maps): ' + BoolToStr(GLFeatures.TextureDepthCompare, true) + NL +
     '  Packed depth + stencil: ' + BoolToStr(GLFeatures.PackedDepthStencil, true) + NL +

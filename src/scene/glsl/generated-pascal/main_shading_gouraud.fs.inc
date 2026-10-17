@@ -36,6 +36,14 @@
 '' + LineEnding +
 '  /* PLUG: fog_apply (fragment_color, normal_eye_fragment) */' + LineEnding +
 '' + LineEnding +
+'  #ifdef CASTLE_HIGH_DYNAMIC_RANGE' + LineEnding +
+'  /* TCastleViewport.HighDynamicRange: output linear colors, converted to' + LineEnding +
+'     the screen once after rendering (so light passes add in linear space).' + LineEnding +
+'     Shapes with gamma correction undo it here (applied above, so that' + LineEnding +
+'     the fog is the same), shapes without gamma correction output its inverse. */' + LineEnding +
+'  fragment_color.rgb = pow(max(fragment_color.rgb, vec3(0.0)), vec3(2.2));' + LineEnding +
+'  #endif' + LineEnding +
+'' + LineEnding +
 '#undef normal_eye_fragment' + LineEnding +
 '' + LineEnding +
 '  gl_FragColor = fragment_color;' + LineEnding +

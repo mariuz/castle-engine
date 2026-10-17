@@ -27,13 +27,17 @@ type
   published
     procedure TestCasterShadowPossiblyVisible;
     procedure TestSeveralLights;
+    { Light passes of several lights on a physical (gamma corrected) material
+      add up like a single pass with TCastleViewport.HighDynamicRange. }
+    procedure TestSeveralLightsHighDynamicRange;
   end;
 
 implementation
 
 uses CastleTransform, CastleFrustum, CastleInternalGLShadowVolumes, CastleProjection,
   CastleVectors, CastleViewport, CastleBoxes, CastleWindow, CastleScene, CastleImages,
-  CastleColors, CastleGLUtils, CastleUIControls, CastleRenderOptions;
+  CastleColors, CastleGLUtils, CastleUIControls, CastleRenderOptions,
+  CastleInternalGLUtils;
 
 procedure TTestCastleInternalGLShadowVolumes.TestCasterShadowPossiblyVisible;
 var
@@ -233,6 +237,125 @@ begin
     AssertTrue((ColorLeft.X > Lit) and (ColorLeft.Y > Lit));
     AssertTrue((ColorRight.X > Lit) and (ColorRight.Y > Lit));
 
+    Window.Close;
+  finally
+    DestroyWindowForTest(Window);
+  end;
+end;
+
+
+procedure TTestCastleInternalGLShadowVolumes.TestSeveralLightsHighDynamicRange;
+{ Two white lights above a floor with a physical material, both casting
+  shadow volumes (nothing is in shadow). Where both lights reach the floor,
+  rendering them in separate passes (ShadowVolumesMaxLights = 2)
+  should look like rendering them at once (shadow volumes off),
+  which is only true with HighDynamicRange: without it, the light passes
+  are added after gamma correction, which is too bright. }
+var
+  Window: TCastleWindow;
+  Viewport: TCastleViewport;
+  Floor: TCastleBox;
+
+  function FloorBrightness: Single;
+  var
+    Image: TCastleImage;
+    P: TVector2;
+    C: TCastleColor;
+  begin
+    Image := Window.SaveScreen;
+    try
+      P := Viewport.PositionFromWorld(Vector3(0, 0, 0));
+      C := Image.Colors[Round(P.X), Round(P.Y), 0];
+      Result := (C.X + C.Y + C.Z) / 3;
+    finally FreeAndNil(Image) end;
+  end;
+
+  procedure AddLight(const X: Single);
+  var
+    Light: TCastlePointLight;
+  begin
+    Light := TCastlePointLight.Create(Window);
+    Light.Translation := Vector3(X, 3, 0);
+    Light.Intensity := 4;
+    Light.Shadows := true;
+    Viewport.Items.Add(Light);
+  end;
+
+var
+  OnePass, SeveralPasses, SeveralPassesHdr, OnePassHdr: Single;
+begin
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  Window := CreateWindowForTest;
+  try
+    Window.Width := 400;
+    Window.Height := 400;
+    Window.Open;
+
+    if not (GLFeatures.ShadowVolumesPossible and GLFeatures.ColorBufferFloat) then
+    begin
+      Window.Close;
+      AbortTest;
+      Exit;
+    end;
+
+    Viewport := TCastleViewport.Create(Window);
+    Viewport.FullSize := true;
+    Viewport.BackgroundColor := Black;
+    Viewport.Camera.SetView(
+      Vector3(0, 12, 0),
+      Vector3(0, -1, 0),
+      Vector3(0, 0, -1));
+    Window.Controls.InsertFront(Viewport);
+
+    Floor := TCastleBox.Create(Window);
+    Floor.Size := Vector3(10, 0.2, 10);
+    Floor.Translation := Vector3(0, -0.1, 0);
+    Floor.Material := pmPhysical;
+    Floor.CastShadows := false;
+    Viewport.Items.Add(Floor);
+
+    AddLight(-1);
+    AddLight(1);
+    Viewport.ShadowVolumesMaxLights := 2;
+
+    Viewport.ShadowVolumes := false;
+    OnePass := FloorBrightness;
+    { not black, not saturated, so the comparisons below mean something }
+    AssertTrue(OnePass > 0.2);
+    AssertTrue(OnePass < 0.85);
+
+    Viewport.ShadowVolumes := true;
+    SeveralPasses := FloorBrightness;
+    { too bright without high dynamic range }
+    AssertTrue(SeveralPasses > OnePass + 0.05);
+
+    Viewport.HighDynamicRange := true;
+    SeveralPassesHdr := FloorBrightness;
+    if Abs(SeveralPassesHdr - OnePass) > 0.03 then
+      Fail(Format('Light passes with HighDynamicRange: %f, one pass: %f (without HighDynamicRange: %f)',
+        [SeveralPassesHdr, OnePass, SeveralPasses]));
+
+    { one pass looks the same with high dynamic range }
+    Viewport.ShadowVolumes := false;
+    OnePassHdr := FloorBrightness;
+    if Abs(OnePassHdr - OnePass) > 0.02 then
+      Fail(Format('One pass with HighDynamicRange: %f, without: %f', [OnePassHdr, OnePass]));
+
+    { also for a Phong material (no gamma correction) }
+    Floor.Material := pmPhong;
+    Viewport.HighDynamicRange := false;
+    OnePass := FloorBrightness;
+    Viewport.HighDynamicRange := true;
+    OnePassHdr := FloorBrightness;
+    if Abs(OnePassHdr - OnePass) > 0.02 then
+      Fail(Format('Phong, one pass with HighDynamicRange: %f, without: %f', [OnePassHdr, OnePass]));
+
+    CheckGLErrors('TestSeveralLightsHighDynamicRange');
     Window.Close;
   finally
     DestroyWindowForTest(Window);

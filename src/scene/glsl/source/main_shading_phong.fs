@@ -89,6 +89,14 @@ void main(void)
 
   /* PLUG: fog_apply (fragment_color, normal_eye_fragment) */
 
+  #ifdef CASTLE_HIGH_DYNAMIC_RANGE
+  /* TCastleViewport.HighDynamicRange: output linear colors, converted to
+     the screen once after rendering (so light passes add in linear space).
+     Shapes with gamma correction undo it here (applied above, so that
+     the fog is the same), shapes without gamma correction output its inverse. */
+  fragment_color.rgb = pow(max(fragment_color.rgb, vec3(0.0)), vec3(2.2));
+  #endif
+
   /* NVidia GeForce 450 GTS (kocury) fails to compile a shader when
      we pass gl_FragColor as inout parameter to functions
      (testcase even fresnel_and_toon.x3dv).

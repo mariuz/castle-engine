@@ -1085,6 +1085,7 @@ begin
       FinalColorSpace := CastleRenderOptions.ColorSpace; // use global variable
     *)
     Shader.LightContributionOnly := Renderer.LightContributionOnly;
+    Shader.HighDynamicRange := Renderer.HighDynamicRange;
     Shader.ColorSpaceLinear :=
       (ColorSpace = csLinear) or
       ((ColorSpace = csLinearWhenPhysicalMaterial) and
