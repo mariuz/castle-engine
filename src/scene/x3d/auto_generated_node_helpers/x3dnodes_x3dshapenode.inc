@@ -78,6 +78,8 @@
     public property FdVisible: TSFBool read FFdVisible;
     { Is the shape visible. Shapes that are not visible are not rendered, but otherwise are still processed (for example, hidden shapes are still used for collision detection). Toggling this is guaranteed to be ultra-fast.
 
+    Shapes that are not visible still cast shadow volumes, unless @link(TAppearanceNode.ShadowCaster) is @false. This allows shadow-only geometry: e.g. a simpler closed mesh casting the shadow of a detailed model, or the closed solids of a level whose rendered surfaces are not closed.
+
     Note: An alternative method to hide (and more) things is to wrap them in a @link(TSwitchNode), and toggle @link(TSwitchNode.WhichChoice) between -1 and 0. When @link(TSwitchNode.WhichChoice) is -1, the children are not processed (not rendered, and do not collide). }
     property Visible: Boolean read GetVisible write SetVisible;
 

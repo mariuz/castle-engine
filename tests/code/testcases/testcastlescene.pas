@@ -31,6 +31,9 @@ type
     procedure TestImageTransformImageWidthHeight;
     { Testcase from https://github.com/castle-engine/castle-engine/issues/664 }
     procedure TestRenderReferencesAndLightRadius;
+    { Shape with visible = FALSE casts shadow volumes (shadow-only caster),
+      also seen through the place where it would be. }
+    procedure TestShadowVolumesInvisibleCaster;
     { TScreenTextureNode used by an effect of a shape with blending. }
     procedure TestScreenTexture;
     { Cube map with reflection texture coordinates on an unlit material
@@ -989,6 +992,128 @@ begin
       'normal');
     CheckGLErrors('TestCubeMapReflectionUnlit');
 
+    Window.Close;
+  finally DestroyWindowForTest(Window) end;
+end;
+
+procedure TTestScene.TestShadowVolumesInvisibleCaster;
+var
+  Window: TCastleWindow;
+  Viewport: TCastleViewport;
+  Light: TCastlePointLight;
+  CasterScene, FloorScene: TCastleScene;
+  Box: TBoxNode;
+  CasterShape: TShapeNode;
+  Lit: Single;
+
+  function BuildCaster: TX3DRootNode;
+  var
+    Transform: TTransformNode;
+  begin
+    Box := TBoxNode.CreateWithShape(CasterShape);
+    Box.Size := Vector3(2, 0.5, 2);
+    CasterShape.Material := TMaterialNode.Create;
+    Transform := TTransformNode.Create;
+    Transform.Translation := Vector3(0, 2, 0);
+    Transform.AddChildren(CasterShape);
+    Result := TX3DRootNode.Create;
+    Result.AddChildren(Transform);
+  end;
+
+  function BuildFloor: TX3DRootNode;
+  var
+    Shape: TShapeNode;
+    FloorBox: TBoxNode;
+    Transform: TTransformNode;
+  begin
+    FloorBox := TBoxNode.CreateWithShape(Shape);
+    FloorBox.Size := Vector3(20, 0.2, 20);
+    Shape.Material := TMaterialNode.Create;
+    Transform := TTransformNode.Create;
+    Transform.Translation := Vector3(0, -0.1, 0);
+    Transform.AddChildren(Shape);
+    Result := TX3DRootNode.Create;
+    Result.AddChildren(Transform);
+  end;
+
+  { Brightness of the floor at world (X, 0, Z) on the screen. }
+  function FloorBrightness(const X, Z: Single): Single;
+  var
+    Image: TCastleImage;
+    P: TVector2;
+    C: TCastleColor;
+  begin
+    Image := Window.SaveScreen;
+    try
+      P := Viewport.PositionFromWorld(Vector3(X, 0, Z));
+      C := Image.Colors[Round(P.X), Round(P.Y), 0];
+      Result := (C.X + C.Y + C.Z) / 3;
+    finally FreeAndNil(Image) end;
+  end;
+
+  procedure CheckShadow(const Description: String; const Lit: Single);
+  var
+    Under: Single;
+  begin
+    Under := FloorBrightness(0, 0);
+    if not (Under < Lit * 0.5) then
+      Fail(Format('%s: floor under the caster %f, aside %f (expected in shadow under)',
+        [Description, Under, Lit]));
+  end;
+
+begin
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  Window := CreateWindowForTest;
+  try
+    Window.Width := 300;
+    Window.Height := 300;
+    Window.Open;
+
+    Viewport := TCastleViewport.Create(Window);
+    Viewport.FullSize := true;
+    Viewport.BackgroundColor := Black;
+    Viewport.ShadowVolumes := true;
+    { looking down at the floor through the caster }
+    Viewport.Camera.SetView(Vector3(0, 6, 3), Vector3(0, -6, -3), Vector3(0, 1, 0));
+    Window.Controls.InsertFront(Viewport);
+
+    Light := TCastlePointLight.Create(Window);
+    Light.Translation := Vector3(0, 5, 0);
+    Light.Shadows := true;
+    Viewport.Items.Add(Light);
+
+    FloorScene := TCastleScene.Create(Window);
+    FloorScene.Load(BuildFloor, true);
+    FloorScene.CastShadows := false;
+    Viewport.Items.Add(FloorScene);
+
+    CasterScene := TCastleScene.Create(Window);
+    CasterScene.Load(BuildCaster, true);
+    Viewport.Items.Add(CasterScene);
+
+    { the floor away from the caster is lit }
+    Lit := FloorBrightness(2.5, 0);
+    AssertTrue(Lit > 0.2);
+
+    { invisible caster: its shadow is seen through it }
+    CasterShape.Visible := false;
+    CheckShadow('invisible caster, camera outside the shadow (z-pass)', Lit);
+
+    { looking straight down through the caster's top (the light cap of its
+      shadow volume): the view enters the shadow volume only there }
+    Viewport.Camera.SetView(Vector3(0, 8, 0), Vector3(0, -1, 0), Vector3(0, 0, -1));
+    CheckShadow('invisible caster, seen through its light cap (z-pass)', Lit);
+
+    { camera inside the shadow volume, under the caster (z-fail) }
+    Viewport.Camera.SetView(Vector3(0, 1.2, 0.2), Vector3(0, -1.2, -0.2), Vector3(0, 0, -1));
+    CheckShadow('invisible caster, camera in the shadow (z-fail)', Lit);
+
+    CheckGLErrors('TestShadowVolumesInvisibleCaster');
     Window.Close;
   finally DestroyWindowForTest(Window) end;
 end;
