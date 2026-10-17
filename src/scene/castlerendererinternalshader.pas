@@ -440,6 +440,12 @@ type
       See TRenderOnePassParams.LightContributionOnly. }
     LightContributionOnly: Boolean;
 
+    { Output linear colors: undo the gamma correction (or apply its inverse
+      when the shape has no gamma correction) at the end, and no tone mapping.
+      Defines CASTLE_HIGH_DYNAMIC_RANGE in the shaders.
+      See TRenderParams.InternalHighDynamicRange. }
+    HighDynamicRange: Boolean;
+
     { In case MultiTexture is used to render this, this is MultiTexture.color+alpha value. }
     MultiTextureColor: TCastleColor;
 
@@ -1340,6 +1346,7 @@ begin
   MainTextureMapping := -1;
   ColorSpaceLinear := false;
   LightContributionOnly := false;
+  HighDynamicRange := false;
   MultiTextureColor := White;
   SkinJointTextureUnit := -1;
   FAlphaTest := false;
@@ -2172,6 +2179,10 @@ begin
   end;
   if NeedsNormals then
     Define('CASTLE_HAS_NORMALS', stVertex, true);
+  if HighDynamicRange then
+    { tone mapping is applied once, after rendering }
+    Define('CASTLE_HIGH_DYNAMIC_RANGE', stFragment)
+  else
   case ToneMapping of
     tmNone: ;
     tmUncharted:
@@ -2259,6 +2270,7 @@ function TShader.CodeHash: TShaderCodeHash;
     FCodeHash.AddInteger(Ord(LightingModel) * 503);
     FCodeHash.AddInteger(Ord(ColorSpaceLinear) * 347);
     FCodeHash.AddInteger(Ord(LightContributionOnly) * 1453);
+    FCodeHash.AddInteger(Ord(HighDynamicRange) * 1459);
     FCodeHash.AddInteger(Ord(ToneMapping) * 331);
     FCodeHash.AddInteger(Ord(MainTextureMapping) * 839);
     FCodeHash.AddFloat(MultiTextureColor.X, 5821);

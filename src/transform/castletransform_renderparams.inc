@@ -324,6 +324,14 @@
       This merely says we @italic(are) going to have these passes. }
     UsingShadowVolumes: Boolean;
 
+    { Shaders output linear colors, without gamma correction and tone mapping
+      (shapes without gamma correction output the inverse of it),
+      to a color buffer with float components.
+      The colors are converted to the screen once, after rendering,
+      see TCastleViewport.HighDynamicRange.
+      @exclude }
+    InternalHighDynamicRange: Boolean;
+
     { Camera information for renderer. }
     RenderingCamera: TRenderingCamera;
 

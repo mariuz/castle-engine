@@ -56,6 +56,10 @@ type
       to avoid any artifacts. }
     class function NearFarToSkySphereRadius(const zNear, zFar: Single): Single;
   public
+    { Output linear colors, see TRenderParams.InternalHighDynamicRange.
+      Set before @link(Render). }
+    HighDynamicRange: Boolean;
+
     procedure Render(const RenderingCamera: TRenderingCamera;
       const Wireframe: boolean;
       const RenderRect: TFloatRectangle;
@@ -73,6 +77,11 @@ type
 { Create background renderer.
   Returns @nil if this Node class is not supported. }
 function CreateBackgroundRenderer(const Node: TAbstractBackgroundNode): TBackgroundRenderer;
+
+{ Color to clear the color buffer with, when rendering linear colors
+  (TRenderParams.InternalHighDynamicRange):
+  the inverse of the gamma correction applied after rendering. }
+function HighDynamicRangeClearColor(const Color: TCastleColor): TCastleColor;
 
 implementation
 
@@ -209,6 +218,7 @@ procedure TBackgroundScene.Render(const RenderingCamera: TRenderingCamera;
     Params.RenderingCamera := RenderingCamera;
     Params.Collector := AllShapesCollector;
     Params.RendererToPrepareShapes := ShapesRenderer.Renderer;
+    Params.InternalHighDynamicRange := HighDynamicRange;
 
     { We don't calculate correct Params.Frustum (accounting for the fact that camera
       is rotated but never shifted during 3D background rendering) now.
@@ -270,7 +280,12 @@ begin
     Scene.RenderOptions.WireframeEffect := weNormal;
 
   if UseClearColor then
-    RenderContext.Clear([cbColor], ClearColor);
+  begin
+    if HighDynamicRange then
+      RenderContext.Clear([cbColor], HighDynamicRangeClearColor(ClearColor))
+    else
+      RenderContext.Clear([cbColor], ClearColor);
+  end;
 
   ShapesCollect;
   ShapesRender;
@@ -871,6 +886,16 @@ begin
 end;
 
 { global routines ------------------------------------------------------------ }
+
+function HighDynamicRangeClearColor(const Color: TCastleColor): TCastleColor;
+begin
+  { like the end of main_shading_phong.fs with CASTLE_HIGH_DYNAMIC_RANGE }
+  Result := Vector4(
+    Power(Max(Color.X, 0), 2.2),
+    Power(Max(Color.Y, 0), 2.2),
+    Power(Max(Color.Z, 0), 2.2),
+    Color.W);
+end;
 
 function CreateBackgroundRenderer(const Node: TAbstractBackgroundNode): TBackgroundRenderer;
 begin

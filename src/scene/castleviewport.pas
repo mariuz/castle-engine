@@ -114,6 +114,7 @@ type
       FShadowVolumes: boolean;
       FShadowVolumesRender: boolean;
       FShadowVolumesMaxLights: Cardinal;
+      FHighDynamicRange: Boolean;
       { Lights casting shadow volumes this frame, when ShadowVolumesMaxLights > 1,
         and their positions in world space. Calculated by ShadowVolumesLights. }
       FShadowVolumesLights: Contnrs.TObjectList;
@@ -439,6 +440,7 @@ type
       const Index: Integer): TGLSLProgram; override;
     function InternalExtraScreenEffectsCount: Integer; override;
     function InternalExtraScreenEffectsNeedDepth: Boolean; override;
+    function InternalHighDynamicRange: Boolean; override;
 
     { Called when PointingDevicePress was not handled by any TCastleTransform object.
       You can override this to make a message / sound signal to notify user
@@ -1190,7 +1192,8 @@ type
           gamma correction (@link(ColorSpace) = csLinear, or the default
           csLinearWhenPhysicalMaterial with physical (PBR) materials)
           or tone mapping are too bright where several lights overlap.
-          The result is exact (except that colors are clamped to 1 per pass)
+          Set @link(HighDynamicRange) to add them in linear color space.
+          Without it, the result is exact (except that colors are clamped to 1 per pass)
           for Phong and unlit materials with the default @link(ColorSpace),
           and for all materials with @link(ColorSpace) = csSRGB.)
         @item(The "fake light" trick (main light with on = FALSE)
@@ -1202,6 +1205,40 @@ type
     property ShadowVolumesMaxLights: Cardinal
       read FShadowVolumesMaxLights write FShadowVolumesMaxLights
       default DefaultShadowVolumesMaxLights;
+
+    { Render the world in high dynamic range:
+      to a color buffer with float components, in linear color space.
+      Gamma correction (see @link(ColorSpace)) and tone mapping
+      (see @link(ToneMapping)) are applied once, to the whole world,
+      after it is rendered (before the children user interface
+      and the screen effects).
+
+      This makes the light contributions add up in linear color space
+      when they are rendered in separate passes:
+      with @link(ShadowVolumesMaxLights) > 1, shapes with gamma correction
+      (physical materials, or any material with @link(ColorSpace) = csLinear)
+      or tone mapping are lit as if all their lights were rendered at once.
+      Colors above 1 are kept until the tone mapping.
+
+      Notes:
+      @unorderedList(
+        @item(Shapes without gamma correction (Phong and unlit materials
+          with the default @link(ColorSpace)) output the inverse of the gamma
+          correction, so a single pass looks the same as without this.
+          But their light contributions in separate passes are also added
+          in linear color space then, unlike without this.)
+        @item(Tone mapping is applied to the whole world, also to shapes
+          without gamma correction, after the inverse of their gamma correction.)
+        @item(Needs rendering to float color buffers
+          (@link(TGLFeatures.ColorBufferFloat)): OpenGL 3.0,
+          or OpenGLES 3.0 with the EXT_color_buffer_half_float
+          or EXT_color_buffer_float extension.
+          It is ignored otherwise.)
+        @item(Uses the same rendering to a texture as screen effects
+          (see @link(TCastleScreenEffects)), and has a similar cost.)
+      ) }
+    property HighDynamicRange: Boolean
+      read FHighDynamicRange write FHighDynamicRange default false;
 
     { Background (like a skybox) to display behind the @link(Items).
       Displayed only when not @link(Transparent).
@@ -2970,7 +3007,10 @@ procedure TCastleViewport.RenderFromViewEverything(const RenderingCamera: TRende
           Or when BackgroundWireframe.
       }
       Include(ClearBuffers, cbColor);
-      ClearColor := BackgroundColor;
+      if FRenderParams.InternalHighDynamicRange then
+        ClearColor := HighDynamicRangeClearColor(BackgroundColor)
+      else
+        ClearColor := BackgroundColor;
     end;
 
     if GLFeatures.ShadowVolumesPossible and
@@ -2999,6 +3039,7 @@ procedure TCastleViewport.RenderFromViewEverything(const RenderingCamera: TRende
         {$endif}
       end;
       RenderingCamera.RotationOnly := true;
+      BackgroundRenderer.HighDynamicRange := FRenderParams.InternalHighDynamicRange;
       BackgroundRenderer.Render(RenderingCamera, BackgroundWireframe,
         RenderRect, FProjection,
         { TODO: BackgroundRenderer should have its own ShapesRenderer,
@@ -3031,6 +3072,11 @@ procedure TCastleViewport.RenderFromViewEverything(const RenderingCamera: TRende
 var
   SceneCastingLights: TCastleScene;
 begin
+  { Only the world rendered on the screen is in high dynamic range,
+    not e.g. generated cube map textures. }
+  FRenderParams.InternalHighDynamicRange :=
+    (RenderingCamera.Target = rtScreen) and InternalHighDynamicRangeActive;
+
   RenderClear;
   RenderBackground;
 
@@ -3172,6 +3218,9 @@ begin
 
   ApplyProjection;
   RenderOnScreen(InternalCamera);
+  { convert the world rendered in high dynamic range to the screen colors,
+    before the children are rendered }
+  InternalHighDynamicRangeResolve;
 end;
 
 function TCastleViewport.InternalExtraGetScreenEffects(const Index: Integer): TGLSLProgram;
@@ -3232,6 +3281,11 @@ begin
     Inc(Result);
   if ScreenSpaceReflections and (SSRShader <> nil) then
     Inc(Result);
+end;
+
+function TCastleViewport.InternalHighDynamicRange: Boolean;
+begin
+  Result := HighDynamicRange;
 end;
 
 function TCastleViewport.InternalExtraScreenEffectsNeedDepth: Boolean;

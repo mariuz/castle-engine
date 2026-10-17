@@ -766,6 +766,7 @@ begin
   FrameProfiler.Stop(fmRenderCollectedShapesSort);
 
   Renderer.LightContributionOnly := PassParams.LightContributionOnly <> nil;
+  Renderer.HighDynamicRange := Params.InternalHighDynamicRange;
   Renderer.RenderBegin(Params.GlobalLights as TLightInstancesList,
     Params.RenderingCamera,
     LightRenderEvent, Params.InternalPass, { wireframe pass } 0, Params.UserPass,
