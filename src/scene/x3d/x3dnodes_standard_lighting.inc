@@ -233,6 +233,10 @@
     { Should the "radius" field be taken into account. }
     function HasRadius: boolean; virtual;
 
+    { Does the light fade smoothly to zero at its radius:
+      @link(RadiusFalloff) with a radius > 0 (and @link(HasRadius)). }
+    function HasRadiusFalloff: Boolean;
+
     procedure UpdateLightInstance(var LightInstance: TLightInstance); override;
     function PositionAndDirection: TVector4; override;
   {$I auto_generated_node_helpers/x3dnodes_x3dpositionallightnode.inc}
@@ -668,7 +672,8 @@ end;
 function TAbstractPositionalLightNode.DistanceNeededForAttenuation: boolean;
 begin
   Result := (FdAttenuation.Value[1] <> 0) or
-            (FdAttenuation.Value[2] <> 0);
+            (FdAttenuation.Value[2] <> 0) or
+            HasRadiusFalloff;
 end;
 
 function TAbstractPositionalLightNode.HasAttenuation: boolean;
@@ -684,6 +689,11 @@ begin
   { When radius < 0, behave like radius is infinite.
     Useful for implementing glTF punctual lights. }
   Result := Radius >= 0;
+end;
+
+function TAbstractPositionalLightNode.HasRadiusFalloff: Boolean;
+begin
+  Result := FdRadiusFalloff.Value and HasRadius and (Radius > 0);
 end;
 
 procedure TAbstractPositionalLightNode.UpdateLightInstance(
@@ -709,6 +719,8 @@ begin
 end;
 
 function TAbstractPositionalLightNode.CalculateAttenuation(const DistanceToLight: Single): Single;
+var
+  Window: Single;
 begin
   { We don't really need to check DistanceNeededForAttenuation here.
     But it may be more optimal, since it's often false,
@@ -720,6 +732,15 @@ begin
       FdAttenuation.Value[2] * Sqr(DistanceToLight), 1.0) else
     Result := 1 / Max(
       FdAttenuation.Value[0], 1.0);
+  { Like the shaders: the glTF KHR_lights_punctual window function. }
+  if HasRadiusFalloff then
+  begin
+    Window := 1 - Sqr(Sqr(DistanceToLight / Radius));
+    if Window <= 0 then
+      Result := 0
+    else
+      Result := Result * Sqr(Window);
+  end;
 end;
 
 function TAbstractPositionalLightNode.PositionAndDirection: TVector4;

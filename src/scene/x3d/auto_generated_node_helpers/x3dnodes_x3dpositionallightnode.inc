@@ -30,6 +30,8 @@
     procedure SetLocation(const Value: TVector3);
     function GetRadius: Single;
     procedure SetRadius(const Value: Single);
+    function GetRadiusFalloff: Boolean;
+    procedure SetRadiusFalloff(const Value: Boolean);
   public
     { Create node fields and events. }
     procedure CreateNode; override;
@@ -52,6 +54,12 @@
     public property FdRadius: TSFFloat read FFdRadius;
     {  }
     property Radius: Single read GetRadius write SetRadius;
+
+    strict private FFdRadiusFalloff: TSFBool;
+    { Internal wrapper for property @code(RadiusFalloff). This wrapper API may change, we advise to access simpler @code(RadiusFalloff) instead, if it is defined (TODO: for now, some field types do not have a simpler counterpart). }
+    public property FdRadiusFalloff: TSFBool read FFdRadiusFalloff;
+    { Make the light fade smoothly to zero at its @link(Radius), instead of cutting it off there. The light's intensity (after @link(Attenuation)) is multiplied by @code(clamp(1 - (distance / radius)^4, 0, 1)^2), the window function recommended for the "range" of glTF @url(https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_lights_punctual/README.md KHR_lights_punctual) lights. Ignored when the radius is <= 0 (no radius). This is a Castle Game Engine extension. }
+    property RadiusFalloff: Boolean read GetRadiusFalloff write SetRadiusFalloff;
 
 {$endif read_interface}
 
@@ -89,6 +97,16 @@ begin
   FdRadius.Send(Value);
 end;
 
+function TAbstractPositionalLightNode.GetRadiusFalloff: Boolean;
+begin
+  Result := FdRadiusFalloff.Value;
+end;
+
+procedure TAbstractPositionalLightNode.SetRadiusFalloff(const Value: Boolean);
+begin
+  FdRadiusFalloff.Send(Value);
+end;
+
 class function TAbstractPositionalLightNode.ClassX3DType: String;
 begin
   Result := 'X3DPositionalLightNode';
@@ -109,6 +127,10 @@ begin
   FFdRadius := TSFFloat.Create(Self, True, 'radius', 100);
    FdRadius.ChangeAlways := chLightInstanceProperty;
   AddField(FFdRadius);
+
+  FFdRadiusFalloff := TSFBool.Create(Self, True, 'radiusFalloff', false);
+   FdRadiusFalloff.ChangeAlways := chVisibleNonGeometry;
+  AddField(FFdRadiusFalloff);
 end;
 
 {$endif read_implementation}

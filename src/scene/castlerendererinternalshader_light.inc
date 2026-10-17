@@ -66,6 +66,7 @@
     ldTypePunctual,
     ldHasAttenuation,
     ldHasRadius,
+    ldHasRadiusFalloff,
     ldHasAmbient,
     ldHasSpecular,
     ldHasBeamWidth,
@@ -157,6 +158,7 @@ const
     (Name: 'LIGHT%d_TYPE_PUNCTUAL'    ; Hash: 443; ),
     (Name: 'LIGHT%d_HAS_ATTENUATION'  ; Hash: 113; ),
     (Name: 'LIGHT%d_HAS_RADIUS'       ; Hash: 127; ),
+    (Name: 'LIGHT%d_HAS_RADIUS_FALLOFF'; Hash: 151; ),
     (Name: 'LIGHT%d_HAS_AMBIENT'      ; Hash: 131; ),
     (Name: 'LIGHT%d_HAS_SPECULAR'     ; Hash: 137; ),
     (Name: 'LIGHT%d_HAS_BEAM_WIDTH'   ; Hash: 139; ),
@@ -195,7 +197,11 @@ begin
       Define(ldHasAttenuation);
 
     if TAbstractPositionalLightNode(Node).HasRadius then
+    begin
       Define(ldHasRadius);
+      if TAbstractPositionalLightNode(Node).HasRadiusFalloff then
+        Define(ldHasRadiusFalloff);
+    end;
   end;
   if Node.FdAmbientIntensity.Value <> 0 then
     Define(ldHasAmbient);
