@@ -348,6 +348,9 @@ const
   VK_PIPELINE_BIND_POINT_GRAPHICS = 0;
   VK_PIPELINE_BIND_POINT_COMPUTE = 1;
   VK_QUEUE_GRAPHICS_BIT = $00000001;
+  VK_QUEUE_COMPUTE_BIT = $00000002;
+  VK_QUEUE_TRANSFER_BIT = $00000004;
+  VK_QUEUE_SPARSE_BINDING_BIT = $00000008;
   VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR = $00000001;
   VK_VERTEX_INPUT_RATE_VERTEX = 0;
   VK_VERTEX_INPUT_RATE_INSTANCE = 1;
@@ -385,6 +388,8 @@ const
   VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT = $00001000;
   VK_FORMAT_FEATURE_TRANSFER_SRC_BIT = $00004000;
   VK_FORMAT_FEATURE_TRANSFER_DST_BIT = $00008000;
+  VK_ERROR_OUT_OF_POOL_MEMORY = -1000069000;
+  VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT = $00000001;
 
   { Extension and Layer Names }
   VK_EXT_debug_utils = 'VK_EXT_debug_utils';
@@ -436,6 +441,7 @@ type
   VkSamplerMipmapMode = Integer;
   VkSamplerAddressMode = Integer;
   VkGraphicsPipelineLibraryFlagsEXT = VkFlags;
+  VkQueueFlags = VkFlags;
 
   { Pointers to primitive types }
   PCardinal = ^Cardinal;
@@ -1806,6 +1812,7 @@ type
   PFN_vkGetPhysicalDeviceFormatProperties = procedure(physicalDevice: VkPhysicalDevice; format: VkFormat; pFormatProperties: PVkFormatProperties); VKAPI_CALL;
   PFN_vkFlushMappedMemoryRanges = function(device: VkDevice; memoryRangeCount: Cardinal; const pMemoryRanges: PVkMappedMemoryRange): VkResult; VKAPI_CALL;
   PFN_vkInvalidateMappedMemoryRanges = function(device: VkDevice; memoryRangeCount: Cardinal; const pMemoryRanges: PVkMappedMemoryRange): VkResult; VKAPI_CALL;
+  PFN_vkResetDescriptorPool = function(device: VkDevice; descriptorPool: VkDescriptorPool; flags: VkFlags): VkResult; VKAPI_CALL;
 
 var
   { Global Function Pointers }
@@ -1919,6 +1926,7 @@ var
   vkGetPhysicalDeviceFormatProperties: PFN_vkGetPhysicalDeviceFormatProperties;
   vkFlushMappedMemoryRanges: PFN_vkFlushMappedMemoryRanges;
   vkInvalidateMappedMemoryRanges: PFN_vkInvalidateMappedMemoryRanges;
+  vkResetDescriptorPool: PFN_vkResetDescriptorPool;
 
 function VK_MAKE_VERSION(const Major, Minor, Patch: Cardinal): Cardinal; inline;
 function VK_VERSION_MAJOR(const Version: Cardinal): Cardinal; inline;
@@ -2151,6 +2159,7 @@ begin
   Pointer(vkGetPhysicalDeviceFormatProperties) := vkGetInstanceProcAddr(nil, 'vkGetPhysicalDeviceFormatProperties');
   Pointer(vkFlushMappedMemoryRanges) := vkGetInstanceProcAddr(nil, 'vkFlushMappedMemoryRanges');
   Pointer(vkInvalidateMappedMemoryRanges) := vkGetInstanceProcAddr(nil, 'vkInvalidateMappedMemoryRanges');
+  Pointer(vkResetDescriptorPool) := vkGetInstanceProcAddr(nil, 'vkResetDescriptorPool');
 end;
 
 procedure FreeVulkan;

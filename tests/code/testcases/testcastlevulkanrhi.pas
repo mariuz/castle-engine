@@ -73,6 +73,8 @@ type
     procedure TestSPIRVBinaryReflectionAndValidation;
     procedure TestWindows4096MaxMemoryAllocationLimitAndPooledSubAllocation;
     procedure TestMultiVendorFormatAlignmentAndDeferredResourceDestruction;
+    procedure TestGrowableAndTransientDescriptorPools;
+    procedure TestAsyncStagingUploadRingBufferAndTransferQueue;
   private
     FCapturedWarnings: TStringList;
     procedure CaptureWarning(const Category, S: String);
@@ -2154,14 +2156,14 @@ begin
       AssertTrue('Host-visible sub-allocated buffers must return non-nil persistent pointers',
         (P0 <> nil) and (P1 <> nil) and (P0 <> P1));
       AssertEquals('Buffer[0] mapped memory must retain uploaded value without corruption',
-        SampleVal0, PCardinal(P0)^);
+        Int64(SampleVal0), Int64(PCardinal(P0)^));
       AssertEquals('Buffer[2] mapped memory must retain uploaded value without corruption',
-        SampleVal1, PCardinal(P1)^);
+        Int64(SampleVal1), Int64(PCardinal(P1)^));
       Buffers[0].Unmap;
       Buffers[2].Unmap;
       { Unmapping one sub-allocated buffer must not invalidate persistent mapping of siblings }
       AssertEquals('Sibling buffer mapping must remain valid after Unmap',
-        SampleVal1, PCardinal(Buffers[2].Map)^);
+        Int64(SampleVal1), Int64(PCardinal(Buffers[2].Map)^));
       Buffers[2].Unmap;
 
       { 5. Verify Windows 4096 maxMemoryAllocationCount safety guard:
@@ -2411,6 +2413,351 @@ begin
     end;
   finally
     Pointer(vkGetPhysicalDeviceFormatProperties) := SavedFormatPropsProc;
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGrowableAndTransientDescriptorPools;
+var
+  PoolAlloc: TVulkanDescriptorPoolAllocator;
+  OwnerPool, FirstPool, SecondPool: VkDescriptorPool;
+  SetHandle: VkDescriptorSet;
+  I: Integer;
+  VkDev: TVulkanRHIDevice;
+  Bindings: array[0..1] of TRHIDescriptorBindingDesc;
+  Layout: TRHIDescriptorSetLayout;
+  PersistSet, TransSet0, TransSet1: TVulkanRHIDescriptorSet;
+begin
+  { 1. Growable Descriptor Pool Chain & Capacity Scaling }
+  PoolAlloc := TVulkanDescriptorPoolAllocator.Create(nil, 4, False, 16);
+  try
+    AssertEquals('Initial TotalPoolCount must be 0 (lazy creation)', 0, PoolAlloc.TotalPoolCount);
+    AssertEquals('Initial NextPoolMaxSets must be 4', 4, PoolAlloc.NextPoolMaxSets);
+
+    { Allocate 4 descriptor sets filling Page #1 (capacity 4) }
+    FirstPool := VK_NULL_HANDLE;
+    for I := 1 to 4 do
+    begin
+      SetHandle := PoolAlloc.AllocateDescriptorSet(VkDescriptorSetLayout(PtrUInt(1)), OwnerPool);
+      AssertTrue('Allocated descriptor set must be non-null', SetHandle <> VK_NULL_HANDLE);
+      if I = 1 then
+        FirstPool := OwnerPool
+      else
+        AssertTrue('First 4 sets must come from the same Pool Page #1', OwnerPool = FirstPool);
+    end;
+    AssertEquals('After 4 sets, TotalPoolCount must be 1', 1, PoolAlloc.TotalPoolCount);
+    AssertEquals('After 4 sets, FullPoolCount must be 0', 0, PoolAlloc.FullPoolCount);
+    AssertEquals('After Page #1 (cap 4), NextPoolMaxSets must scale by 1.5x to 6',
+      6, PoolAlloc.NextPoolMaxSets);
+
+    { 5th allocation exceeds Page #1 capacity (4) and automatically grows to Page #2 (cap 6) }
+    SetHandle := PoolAlloc.AllocateDescriptorSet(VkDescriptorSetLayout(PtrUInt(1)), SecondPool);
+    AssertTrue('5th descriptor set must succeed via pool growth', SetHandle <> VK_NULL_HANDLE);
+    AssertTrue('Page #2 handle must differ from Page #1 handle', SecondPool <> FirstPool);
+    AssertEquals('After growing to Page #2, TotalPoolCount must be 2', 2, PoolAlloc.TotalPoolCount);
+    AssertEquals('Page #1 must move to FullPools (FullPoolCount = 1)', 1, PoolAlloc.FullPoolCount);
+    AssertEquals('After Page #2 (cap 6), NextPoolMaxSets must scale by 1.5x to 9',
+      9, PoolAlloc.NextPoolMaxSets);
+
+    { Fill remaining 5 slots of Page #2 (total 10 sets), then allocate 11th set -> Page #3 (cap 9) }
+    for I := 6 to 10 do
+      PoolAlloc.AllocateDescriptorSet(VkDescriptorSetLayout(PtrUInt(1)), OwnerPool);
+    AssertEquals('After 10 sets, TotalPoolCount must still be 2', 2, PoolAlloc.TotalPoolCount);
+
+    PoolAlloc.AllocateDescriptorSet(VkDescriptorSetLayout(PtrUInt(1)), OwnerPool);
+    AssertEquals('11th set must grow to Page #3 (TotalPoolCount = 3)', 3, PoolAlloc.TotalPoolCount);
+    AssertEquals('Pages #1 and #2 must be in FullPools (FullPoolCount = 2)', 2, PoolAlloc.FullPoolCount);
+    AssertEquals('After Page #3 (cap 9), NextPoolMaxSets must scale to 13',
+      13, PoolAlloc.NextPoolMaxSets);
+
+    { 2. Driver Error Recovery: VK_ERROR_FRAGMENTED_POOL & VK_ERROR_OUT_OF_POOL_MEMORY }
+    PoolAlloc.ForceNextAllocationError := VK_ERROR_FRAGMENTED_POOL;
+    SetHandle := PoolAlloc.AllocateDescriptorSet(VkDescriptorSetLayout(PtrUInt(1)), OwnerPool);
+    AssertTrue('Allocation after VK_ERROR_FRAGMENTED_POOL must recover on new pool page',
+      SetHandle <> VK_NULL_HANDLE);
+    AssertEquals('VK_ERROR_FRAGMENTED_POOL must retire Page #3 and create Page #4 (cap 13)',
+      4, PoolAlloc.TotalPoolCount);
+    AssertEquals('After Page #4 (cap 13), NextPoolMaxSets must cap at MaxSetsCap (16)',
+      16, PoolAlloc.NextPoolMaxSets);
+
+    PoolAlloc.ForceNextAllocationError := VK_ERROR_OUT_OF_POOL_MEMORY;
+    SetHandle := PoolAlloc.AllocateDescriptorSet(VkDescriptorSetLayout(PtrUInt(1)), OwnerPool);
+    AssertTrue('Allocation after VK_ERROR_OUT_OF_POOL_MEMORY must recover on new pool page',
+      SetHandle <> VK_NULL_HANDLE);
+    AssertEquals('VK_ERROR_OUT_OF_POOL_MEMORY must retire Page #4 and create Page #5 (cap 16)',
+      5, PoolAlloc.TotalPoolCount);
+    AssertEquals('FullPoolCount must be 4', 4, PoolAlloc.FullPoolCount);
+    AssertEquals('TotalAllocatedSetCount must be 13', 13, PoolAlloc.TotalAllocatedSetCount);
+
+    { 3. O(1) Bulk Reset (ResetPools) & Zero-Allocation Frame Reuse }
+    PoolAlloc.ResetPools;
+    AssertEquals('ResetCount must be 1', 1, PoolAlloc.ResetCount);
+    AssertEquals('TotalAllocatedSetCount must reset to 0', 0, PoolAlloc.TotalAllocatedSetCount);
+    AssertEquals('FullPoolCount must reset to 0', 0, PoolAlloc.FullPoolCount);
+    AssertEquals('All 5 pool pages must move to ReadyPools (ReadyPoolCount = 5)',
+      5, PoolAlloc.ReadyPoolCount);
+    AssertEquals('TotalPoolCount must remain 5', 5, PoolAlloc.TotalPoolCount);
+
+    { Allocate 20 sets in the next frame: must reuse ReadyPools without creating any new pools }
+    for I := 1 to 20 do
+      PoolAlloc.AllocateDescriptorSet(VkDescriptorSetLayout(PtrUInt(1)), OwnerPool);
+    AssertEquals('Reusing ready pools across frames must not allocate new VkDescriptorPools',
+      5, PoolAlloc.TotalPoolCount);
+    AssertEquals('TotalAllocatedSetCount must be 20', 20, PoolAlloc.TotalAllocatedSetCount);
+  finally
+    FreeAndNil(PoolAlloc);
+  end;
+
+  { 4. TVulkanRHIDevice Persistent vs. Per-Frame Transient Descriptor Sets & Deferred Retirement }
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  try
+    FillChar(Bindings, SizeOf(Bindings), 0);
+    Bindings[0].Binding := 0;
+    Bindings[0].DescriptorType := dtUniformBuffer;
+    Bindings[0].Count := 1;
+    Bindings[0].StageFlags := [ssVertex, ssFragment];
+    Bindings[1].Binding := 1;
+    Bindings[1].DescriptorType := dtCombinedImageSampler;
+    Bindings[1].Count := 1;
+    Bindings[1].StageFlags := [ssFragment];
+
+    Layout := VkDev.CreateDescriptorSetLayout(Bindings);
+    try
+      VkDev.FrameIndex := 0;
+      PersistSet := VkDev.CreateDescriptorSet(Layout) as TVulkanRHIDescriptorSet;
+      TransSet0 := VkDev.CreateTransientDescriptorSet(Layout) as TVulkanRHIDescriptorSet;
+      TransSet1 := VkDev.CreateTransientDescriptorSet(Layout) as TVulkanRHIDescriptorSet;
+      try
+        AssertFalse('CreateDescriptorSet must create a persistent descriptor set',
+          PersistSet.IsTransient);
+        AssertTrue('CreateTransientDescriptorSet must create a transient descriptor set',
+          TransSet0.IsTransient);
+        AssertEquals('PersistentDescriptorAllocator must have 1 allocated set',
+          1, VkDev.PersistentDescriptorAllocator.TotalAllocatedSetCount);
+        AssertEquals('Frame 0 TransientDescriptorAllocator must have 2 allocated sets',
+          2, VkDev.GetTransientDescriptorAllocator(0).TotalAllocatedSetCount);
+        AssertEquals('Frame 1 TransientDescriptorAllocator must have 0 allocated sets',
+          0, VkDev.GetTransientDescriptorAllocator(1).TotalAllocatedSetCount);
+        AssertTrue('Device.DescriptorPool must reflect the active persistent pool handle',
+          VkDev.DescriptorPool = PersistSet.OwnerPool);
+
+        { Simulate in-flight Frame 1: destroying transient sets must NOT enqueue individual frees,
+          whereas destroying a persistent set MUST defer vkFreeDescriptorSets until Fence 1 }
+        VkDev.FrameIndex := 1;
+        VkDev.DeferResourceDestruction := True;
+
+        FreeAndNil(TransSet0);
+        FreeAndNil(TransSet1);
+        AssertEquals('Destroying transient sets must not add to PendingDeferredDeletionCount',
+          0, VkDev.PendingDeferredDeletionCount);
+
+        FreeAndNil(PersistSet);
+        AssertEquals('Destroying persistent set while frame is in flight must queue 1 deferred deletion',
+          1, VkDev.PendingDeferredDeletionCount);
+        AssertEquals('Persistent set must remain allocated until in-flight frame fence flushes',
+          1, VkDev.PersistentDescriptorAllocator.TotalAllocatedSetCount);
+
+        VkDev.FlushDeferredDeletions(1);
+        AssertEquals('After Frame 1 FlushDeferredDeletions, PendingDeferredDeletionCount must be 0',
+          0, VkDev.PendingDeferredDeletionCount);
+        AssertEquals('After Frame 1 FlushDeferredDeletions, persistent set must be freed back to pool',
+          0, VkDev.PersistentDescriptorAllocator.TotalAllocatedSetCount);
+
+        { Bulk reset Frame 0 transient pool }
+        VkDev.GetTransientDescriptorAllocator(0).ResetPools;
+        AssertEquals('After Frame 0 ResetPools, transient allocated count must be 0',
+          0, VkDev.GetTransientDescriptorAllocator(0).TotalAllocatedSetCount);
+        AssertEquals('Frame 0 transient pool page must be recycled into ReadyPools',
+          1, VkDev.GetTransientDescriptorAllocator(0).ReadyPoolCount);
+      finally
+        FreeAndNil(TransSet1);
+        FreeAndNil(TransSet0);
+        FreeAndNil(PersistSet);
+      end;
+    finally
+      FreeAndNil(Layout);
+    end;
+  finally
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestAsyncStagingUploadRingBufferAndTransferQueue;
+var
+  QueueProps: array of VkQueueFamilyProperties;
+  HasDedicatedDMA: Boolean;
+  SelectedQueueFamily: Cardinal;
+  VkDev: TVulkanRHIDevice;
+  Uploader: TCastleVulkanStagingUploader;
+  BufDesc0, BufDesc1, TempBufDesc: TRHIBufferDesc;
+  GpuBuf0, GpuBuf1, TempBuf: TVulkanRHIBuffer;
+  TexDesc, TempTexDesc, ColorTargetDesc: TRHITextureDesc;
+  GpuTex0, TempTex, ColorTarget: TVulkanRHITexture;
+  ImgMip0, ImgMip1: TRGBAlphaImage;
+  Payload: array of Byte;
+  CmdList: TVulkanRHICommandList;
+  RenderInfo: TRHIRenderingInfo;
+  I: Integer;
+begin
+  { 1. Dedicated DMA Transfer Queue Selection Across Hardware Topologies }
+  SetLength(QueueProps, 1);
+  FillChar(QueueProps[0], SizeOf(VkQueueFamilyProperties), 0);
+  QueueProps[0].queueCount := 1;
+  QueueProps[0].queueFlags := VK_QUEUE_GRAPHICS_BIT or VK_QUEUE_COMPUTE_BIT or VK_QUEUE_TRANSFER_BIT;
+  SelectedQueueFamily := SelectTransferQueueFamilyIndex(QueueProps, 0, HasDedicatedDMA);
+  AssertEquals('Single unified queue must select graphics queue family 0', 0, SelectedQueueFamily);
+  AssertFalse('Single unified queue must not report HasDedicatedTransferQueue', HasDedicatedDMA);
+
+  SetLength(QueueProps, 2);
+  FillChar(QueueProps[1], SizeOf(VkQueueFamilyProperties), 0);
+  QueueProps[1].queueCount := 2;
+  QueueProps[1].queueFlags := VK_QUEUE_COMPUTE_BIT or VK_QUEUE_TRANSFER_BIT;
+  SelectedQueueFamily := SelectTransferQueueFamilyIndex(QueueProps, 0, HasDedicatedDMA);
+  AssertEquals('Graphics + Async Compute topology must select non-graphics family 1 for transfers',
+    1, SelectedQueueFamily);
+  AssertTrue('Non-graphics transfer queue family (family 1 <> graphics family 0) must report HasDedicatedTransferQueue = True',
+    HasDedicatedDMA);
+
+  SetLength(QueueProps, 3);
+  FillChar(QueueProps[2], SizeOf(VkQueueFamilyProperties), 0);
+  QueueProps[2].queueCount := 1;
+  QueueProps[2].queueFlags := VK_QUEUE_TRANSFER_BIT or VK_QUEUE_SPARSE_BINDING_BIT;
+  SelectedQueueFamily := SelectTransferQueueFamilyIndex(QueueProps, 0, HasDedicatedDMA);
+  AssertEquals('Dedicated DMA queue family (TRANSFER without GRAPHICS/COMPUTE) must be prioritized (family 2)',
+    2, SelectedQueueFamily);
+  AssertTrue('Dedicated DMA queue family must report HasDedicatedTransferQueue = True', HasDedicatedDMA);
+
+  { 2. Asynchronous Staging Ring Buffer Sub-Allocation & Multi-Upload Batching }
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  try
+    Uploader := VkDev.StagingUploader;
+    AssertTrue('Device must initialize StagingUploader', Uploader <> nil);
+
+    Uploader.RingCapacityPerFrame := 4096;
+    VkDev.MemoryAllocator.OptimalBufferCopyOffsetAlignment := 64;
+    VkDev.FrameIndex := 0;
+
+    SetLength(Payload, 8192);
+    for I := 0 to High(Payload) do
+      Payload[I] := Byte(I and $FF);
+
+    BufDesc0 := TRHIBufferDesc.Create(300, [buVertex, buTransferDst], muGpuOnly, 'StagedVBO');
+    BufDesc1 := TRHIBufferDesc.Create(8192, [buIndex, buTransferDst], muGpuOnly, 'StagedIBO');
+
+    FillChar(TexDesc, SizeOf(TexDesc), 0);
+    TexDesc.Dimension := td2D;
+    TexDesc.Width := 8;
+    TexDesc.Height := 8;
+    TexDesc.DepthOrArrayLayers := 1;
+    TexDesc.MipLevels := 2;
+    TexDesc.SampleCount := 1;
+    TexDesc.Format := pfRGBA8_UNorm;
+    TexDesc.Usage := [tuSampled, tuTransferDst];
+    TexDesc.DebugName := 'StagedTex2D';
+
+    ImgMip0 := TRGBAlphaImage.Create(8, 8);
+    ImgMip1 := TRGBAlphaImage.Create(4, 4);
+    GpuBuf0 := TVulkanRHIBuffer.Create(VkDev, BufDesc0, @Payload[0]);
+    GpuBuf1 := TVulkanRHIBuffer.Create(VkDev, BufDesc1, nil);
+    GpuTex0 := TVulkanRHITexture.Create(VkDev, TexDesc);
+    try
+      { Upload 512 bytes to GpuBuf1 at offset 128, plus Mip 0 (256B) and Mip 1 (64B) to GpuTex0 }
+      GpuBuf1.UploadData(Payload[0], 512, 128);
+      GpuTex0.UploadImage(ImgMip0, 0, 0);
+      GpuTex0.UploadImage(ImgMip1, 1, 0);
+
+      AssertEquals('2 buffer uploads must be queued without synchronous flush',
+        2, Uploader.PendingBufferCopyCount);
+      AssertEquals('2 image mip uploads must be queued without synchronous flush',
+        2, Uploader.PendingImageCopyCount);
+      AssertEquals('TotalBufferUploads must be 2', 2, Uploader.TotalBufferUploads);
+      AssertEquals('TotalImageUploads must be 2', 2, Uploader.TotalImageUploads);
+      AssertEquals('TotalStagedBytes must equal 300 + 512 + 256 + 64 = 1132',
+        1132, Uploader.TotalStagedBytes);
+      { Slice 0: [0..300) -> next 300
+        Slice 1: aligned to 64 -> [320..832) -> next 832
+        Slice 2: aligned to 64 -> [832..1088) -> next 1088
+        Slice 3: aligned to 64 -> [1088..1152) -> next 1152 }
+      AssertEquals('CurrentFrameWriteOffset must reflect 64-byte OptimalBufferCopyOffsetAlignment',
+        1152, Uploader.CurrentFrameWriteOffset);
+      AssertEquals('Sub-allocations within 4096B ring capacity must not allocate overflow chunks',
+        0, Uploader.OverflowChunkCount);
+
+      { 3. Overflow Chunk Fallback When Single Upload Exceeds RingCapacityPerFrame }
+      GpuBuf1.UploadData(Payload[0], 8192, 0);
+      AssertEquals('Large upload (8192B > 4096B ring) must allocate 1 overflow staging chunk',
+        1, Uploader.OverflowChunkCount);
+      AssertEquals('PendingBufferCopyCount must now be 3', 3, Uploader.PendingBufferCopyCount);
+
+      { 4. Cancellation When Destination Buffer/Texture Is Destroyed Before Flush }
+      TempBufDesc := TRHIBufferDesc.Create(128, [buVertex], muGpuOnly, 'ShortLivedVBO');
+      TempBuf := TVulkanRHIBuffer.Create(VkDev, TempBufDesc, @Payload[0]);
+      TempTexDesc := TexDesc;
+      TempTexDesc.MipLevels := 1;
+      TempTex := TVulkanRHITexture.Create(VkDev, TempTexDesc);
+      TempTex.UploadImage(ImgMip0, 0, 0);
+
+      AssertEquals('PendingBufferCopyCount with TempBuf must be 4', 4, Uploader.PendingBufferCopyCount);
+      AssertEquals('PendingImageCopyCount with TempTex must be 3', 3, Uploader.PendingImageCopyCount);
+
+      FreeAndNil(TempBuf);
+      FreeAndNil(TempTex);
+      AssertEquals('Destroying TempBuf before flush must cancel its pending buffer copy',
+        3, Uploader.PendingBufferCopyCount);
+      AssertEquals('Destroying TempTex before flush must cancel its pending image copy',
+        2, Uploader.PendingImageCopyCount);
+
+      { 5. Automatic Pre-RenderPass Flush & Dedicated DMA Queue Ownership Transfer Barriers }
+      Uploader.ConfigureTransferQueue(0, 2, True);
+      AssertTrue('ConfigureTransferQueue(0, 2, True) must enable UseDedicatedTransferQueue',
+        Uploader.UseDedicatedTransferQueue);
+
+      ColorTargetDesc := TexDesc;
+      ColorTargetDesc.MipLevels := 1;
+      ColorTargetDesc.Usage := [tuColorAttachment];
+      ColorTarget := TVulkanRHITexture.Create(VkDev, ColorTargetDesc);
+      CmdList := TVulkanRHICommandList.Create(VkDev, 0, cllPrimary);
+      try
+        CmdList.BeginRecording;
+        FillChar(RenderInfo, SizeOf(RenderInfo), 0);
+        RenderInfo.RenderArea := Rectangle(0, 0, 8, 8);
+        SetLength(RenderInfo.ColorAttachments, 1);
+        RenderInfo.ColorAttachments[0].Texture := ColorTarget;
+        RenderInfo.ColorAttachments[0].LoadOp := loClear;
+        RenderInfo.ColorAttachments[0].StoreOp := soStore;
+
+        { BeginRendering must automatically flush all pending staged uploads BEFORE opening render pass }
+        CmdList.BeginRendering(RenderInfo);
+        AssertEquals('BeginRendering must flush all pending buffer copies prior to render pass',
+          0, Uploader.PendingBufferCopyCount);
+        AssertEquals('BeginRendering must flush all pending image copies prior to render pass',
+          0, Uploader.PendingImageCopyCount);
+        AssertEquals('TotalBatchedFlushes must increment to 1', 1, Uploader.TotalBatchedFlushes);
+        AssertEquals('Dedicated DMA queue flush must record ownership transfer for 3 buffer copies + 2 image mips',
+          5, Uploader.QueueOwnershipTransferCount);
+        AssertEquals('Uploaded texture must transition to rsShaderRead after staging flush',
+          Ord(rsShaderRead), Ord(GpuTex0.CurrentState));
+        CmdList.EndRendering;
+        CmdList.EndRecording;
+      finally
+        FreeAndNil(CmdList);
+        FreeAndNil(ColorTarget);
+      end;
+
+      { 6. Frame Slot Reclamation Resets Ring Write Offset and Frees Overflow Chunks }
+      Uploader.ReclaimFrameSlot(0);
+      AssertEquals('ReclaimFrameSlot(0) must reset CurrentFrameWriteOffset to 0',
+        0, Uploader.CurrentFrameWriteOffset);
+      AssertEquals('ReclaimFrameSlot(0) must release temporary overflow chunks for that frame slot',
+        0, Uploader.OverflowChunkCount);
+    finally
+      FreeAndNil(GpuTex0);
+      FreeAndNil(GpuBuf1);
+      FreeAndNil(GpuBuf0);
+      FreeAndNil(ImgMip1);
+      FreeAndNil(ImgMip0);
+    end;
+  finally
+    FreeAndNil(VkDev);
   end;
 end;
 

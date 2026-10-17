@@ -128,9 +128,13 @@ type
     property Handle: VkDescriptorSetLayout read FHandle;
   end;
 
+  TVulkanDescriptorPoolAllocator = class;
+
   TVulkanRHIDescriptorSet = class(TRHIDescriptorSet)
   private
     FHandle: VkDescriptorSet;
+    FOwnerPool: VkDescriptorPool;
+    FIsTransient: Boolean;
     FLayout: TVulkanRHIDescriptorSetLayout;
     FPendingWrites: array of VkWriteDescriptorSet;
     FBufferInfos: array of VkDescriptorBufferInfo;
@@ -138,7 +142,8 @@ type
     function VulkanDevice: TVulkanRHIDevice;
   public
     constructor Create(const ADevice: TVulkanRHIDevice;
-      const ALayout: TVulkanRHIDescriptorSetLayout);
+      const ALayout: TVulkanRHIDescriptorSetLayout;
+      const AIsTransient: Boolean = False);
     destructor Destroy; override;
 
     procedure BindUniformBuffer(const Binding: Cardinal; const Buffer: TRHIBuffer;
@@ -150,6 +155,8 @@ type
     procedure Update; override;
 
     property Handle: VkDescriptorSet read FHandle;
+    property OwnerPool: VkDescriptorPool read FOwnerPool;
+    property IsTransient: Boolean read FIsTransient;
   end;
 
   TVulkanRHIPipeline = class(TRHIPipeline)
@@ -242,6 +249,184 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Growable & Per-Frame Transient Descriptor Pool Allocator                   }
+  { -------------------------------------------------------------------------- }
+
+  TVulkanDescriptorPoolPage = record
+    Handle: VkDescriptorPool;
+    Capacity: Cardinal;
+    AllocatedSets: Cardinal;
+  end;
+
+  { Manages a growable chain of VkDescriptorPool pages:
+    - Automatically allocates a new scaled VkDescriptorPool page when the active
+      pool hits VK_ERROR_OUT_OF_POOL_MEMORY, VK_ERROR_FRAGMENTED_POOL, or capacity.
+    - Supports O(1) bulk reset via ResetPools (vkResetDescriptorPool) for per-frame
+      transient descriptor sets, recycling all full pool pages back into FReadyPools
+      so subsequent frames allocate with zero driver pool creation overhead.
+    - Supports individual set freeing (VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT)
+      for long-lived persistent material descriptor sets. }
+  TVulkanDescriptorPoolAllocator = class
+  private
+    FDevice: VkDevice;
+    FAllowFreeIndividualSets: Boolean;
+    FInitialMaxSets: Cardinal;
+    FMaxSetsCap: Cardinal;
+    FCurrentMaxSets: Cardinal;
+    FCurrentPage: TVulkanDescriptorPoolPage;
+    FHasCurrentPage: Boolean;
+    FReadyPools: array of TVulkanDescriptorPoolPage;
+    FFullPools: array of TVulkanDescriptorPoolPage;
+    FTotalPoolCount: Cardinal;
+    FTotalAllocatedSetCount: Cardinal;
+    FResetCount: Cardinal;
+    FNextSimulatedSetId: Cardinal;
+    FForceNextAllocationError: VkResult;
+
+    function CreateNewPoolPage(const AMaxSets: Cardinal): TVulkanDescriptorPoolPage;
+    procedure AcquireNextReadyOrNewPage;
+    function GetReadyPoolCount: Cardinal;
+    function GetFullPoolCount: Cardinal;
+    function GetCurrentPoolHandle: VkDescriptorPool;
+  public
+    constructor Create(const ADevice: VkDevice;
+      const AInitialMaxSets: Cardinal = 1024;
+      const AAllowFreeIndividualSets: Boolean = False;
+      const AMaxSetsCap: Cardinal = 4096);
+    destructor Destroy; override;
+
+    { Allocates a VkDescriptorSet from the current pool page, growing the pool chain
+      automatically on VK_ERROR_OUT_OF_POOL_MEMORY / VK_ERROR_FRAGMENTED_POOL. }
+    function AllocateDescriptorSet(const ASetLayout: VkDescriptorSetLayout;
+      out AOwnerPool: VkDescriptorPool): VkDescriptorSet;
+
+    { Frees an individual persistent descriptor set (when AllowFreeIndividualSets = True). }
+    procedure FreeDescriptorSet(const AOwnerPool: VkDescriptorPool;
+      const ASet: VkDescriptorSet);
+
+    { Resets all pool pages in O(1) per page via vkResetDescriptorPool and moves
+      all full pages back into the ready list for zero-allocation frame reuse. }
+    procedure ResetPools;
+
+    property Device: VkDevice read FDevice;
+    property AllowFreeIndividualSets: Boolean read FAllowFreeIndividualSets;
+    property InitialMaxSets: Cardinal read FInitialMaxSets;
+    property MaxSetsCap: Cardinal read FMaxSetsCap;
+    property NextPoolMaxSets: Cardinal read FCurrentMaxSets;
+    property CurrentPool: VkDescriptorPool read GetCurrentPoolHandle;
+    property TotalPoolCount: Cardinal read FTotalPoolCount;
+    property ReadyPoolCount: Cardinal read GetReadyPoolCount;
+    property FullPoolCount: Cardinal read GetFullPoolCount;
+    property TotalAllocatedSetCount: Cardinal read FTotalAllocatedSetCount;
+    property ResetCount: Cardinal read FResetCount;
+    property ForceNextAllocationError: VkResult read FForceNextAllocationError write FForceNextAllocationError;
+  end;
+
+  { -------------------------------------------------------------------------- }
+  { Asynchronous Staging Upload Ring Buffer & Dedicated DMA Transfer Queue     }
+  { -------------------------------------------------------------------------- }
+
+  TVulkanStagedBufferCopy = record
+    SrcBuffer: VkBuffer;
+    DstBuffer: TVulkanRHIBuffer;
+    Region: VkBufferCopy;
+  end;
+
+  TVulkanStagedImageCopy = record
+    SrcBuffer: VkBuffer;
+    DstTexture: TVulkanRHITexture;
+    Region: VkBufferImageCopy;
+    MipLevel: Cardinal;
+    ArrayLayer: Cardinal;
+    GenerateMipmaps: Boolean;
+  end;
+
+  TVulkanStagingOverflowChunk = record
+    Buffer: VkBuffer;
+    Allocation: TVulkanMemoryAllocation;
+  end;
+
+  { Batches host-to-device buffer and texture uploads into per-frame persistently
+    mapped staging ring buffers, eliminating synchronous per-upload vkQueueWaitIdle
+    stalls. Supports both unified graphics+transfer queues and dedicated DMA
+    transfer queues (VK_QUEUE_TRANSFER_BIT) with explicit queue-family ownership
+    release/acquire barriers. }
+  TCastleVulkanStagingUploader = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FRingCapacityPerFrame: VkDeviceSize;
+    FRingBuffers: array[0 .. MaxFramesInFlight - 1] of VkBuffer;
+    FRingAllocations: array[0 .. MaxFramesInFlight - 1] of TVulkanMemoryAllocation;
+    FRingWriteOffsets: array[0 .. MaxFramesInFlight - 1] of VkDeviceSize;
+    FOverflowChunks: array[0 .. MaxFramesInFlight - 1] of array of TVulkanStagingOverflowChunk;
+    FPendingBufferCopies: array of TVulkanStagedBufferCopy;
+    FPendingImageCopies: array of TVulkanStagedImageCopy;
+    FGraphicsQueueFamily: Cardinal;
+    FTransferQueueFamily: Cardinal;
+    FUseDedicatedTransferQueue: Boolean;
+    FTotalBufferUploads: Cardinal;
+    FTotalImageUploads: Cardinal;
+    FTotalBatchedFlushes: Cardinal;
+    FTotalStagedBytes: UInt64;
+    FQueueOwnershipTransferCount: Cardinal;
+    FOverflowChunkCount: Cardinal;
+
+    function EnsureRingBufferForSlot(const AFrameSlot: Cardinal): Boolean;
+    function AllocateStagingSlice(const ASize, AAlignment: VkDeviceSize;
+      out ASrcBuffer: VkBuffer; out ASrcOffset: VkDeviceSize;
+      out AAllocation: TVulkanMemoryAllocation): Pointer;
+    function GetPendingBufferCopyCount: Cardinal;
+    function GetPendingImageCopyCount: Cardinal;
+    function GetCurrentFrameWriteOffset: VkDeviceSize;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice;
+      const ARingCapacityPerFrame: VkDeviceSize = 8 * 1024 * 1024);
+    destructor Destroy; override;
+
+    { Configures queue families for unified vs. dedicated DMA transfer queue execution. }
+    procedure ConfigureTransferQueue(const AGraphicsQueueFamily, ATransferQueueFamily: Cardinal;
+      const AUseDedicatedTransferQueue: Boolean);
+
+    { Reclaims staging ring buffer space and frees any overflow chunks for AFrameSlot
+      once that frame slot's VkFence has signaled completion. }
+    procedure ReclaimFrameSlot(const AFrameSlot: Cardinal);
+
+    { Enqueues a buffer upload into the current frame's staging ring buffer without stalling. }
+    procedure EnqueueBufferUpload(const ADstBuffer: TVulkanRHIBuffer;
+      const AData; const ASize, ADstOffset: VkDeviceSize);
+
+    { Enqueues a texture mip/layer upload into the current frame's staging ring buffer without stalling. }
+    procedure EnqueueImageUpload(const ADstTexture: TVulkanRHITexture;
+      const AData: Pointer; const ADataSize: VkDeviceSize;
+      const AWidth, AHeight: Cardinal;
+      const AMipLevel, AArrayLayer: Cardinal;
+      const AGenerateMipmaps: Boolean = False);
+
+    { Removes any pending copy commands targeting a buffer or texture being destroyed. }
+    procedure CancelPendingUploadsForBuffer(const ABuffer: TVulkanRHIBuffer);
+    procedure CancelPendingUploadsForTexture(const ATexture: TVulkanRHITexture);
+
+    { Flushes all pending buffer-to-buffer and buffer-to-image copies + layout/queue-ownership
+      barriers in a single batch into ACommandList (or a one-shot submission if ACommandList = nil).
+      Returns total number of copy operations flushed. }
+    function FlushPendingUploads(const ACommandList: TVulkanRHICommandList = nil): Cardinal;
+
+    property RingCapacityPerFrame: VkDeviceSize read FRingCapacityPerFrame write FRingCapacityPerFrame;
+    property CurrentFrameWriteOffset: VkDeviceSize read GetCurrentFrameWriteOffset;
+    property PendingBufferCopyCount: Cardinal read GetPendingBufferCopyCount;
+    property PendingImageCopyCount: Cardinal read GetPendingImageCopyCount;
+    property GraphicsQueueFamily: Cardinal read FGraphicsQueueFamily;
+    property TransferQueueFamily: Cardinal read FTransferQueueFamily;
+    property UseDedicatedTransferQueue: Boolean read FUseDedicatedTransferQueue;
+    property TotalBufferUploads: Cardinal read FTotalBufferUploads;
+    property TotalImageUploads: Cardinal read FTotalImageUploads;
+    property TotalBatchedFlushes: Cardinal read FTotalBatchedFlushes;
+    property TotalStagedBytes: UInt64 read FTotalStagedBytes;
+    property QueueOwnershipTransferCount: Cardinal read FQueueOwnershipTransferCount;
+    property OverflowChunkCount: Cardinal read FOverflowChunkCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -250,14 +435,18 @@ type
     RenderFinishedSemaphore: VkSemaphore;
     InFlightFence: VkFence;
     CommandList: TVulkanRHICommandList;
+    TransientDescriptorAllocator: TVulkanDescriptorPoolAllocator;
   end;
 
   { Retired GPU resource queued for safe destruction after the in-flight frame fence signals. }
   TVulkanDeferredDeletionItem = record
     IsTexture: Boolean;
+    IsDescriptorSet: Boolean;
     Buffer: VkBuffer;
     Image: VkImage;
     ImageView: VkImageView;
+    DescriptorSet: VkDescriptorSet;
+    DescriptorPool: VkDescriptorPool;
     Allocation: TVulkanMemoryAllocation;
     DeviceMemory: VkDeviceMemory;
     AllocatedSize: VkDeviceSize;
@@ -278,8 +467,11 @@ type
     FDeviceId: Cardinal;
     FGraphicsQueue: VkQueue;
     FPresentQueue: VkQueue;
+    FTransferQueue: VkQueue;
     FGraphicsQueueFamily: Cardinal;
     FPresentQueueFamily: Cardinal;
+    FTransferQueueFamily: Cardinal;
+    FHasDedicatedTransferQueue: Boolean;
 
     { Swapchain state }
     FSwapchain: VkSwapchainKHR;
@@ -294,10 +486,12 @@ type
     FDeferredDeletions: array[0 .. MaxFramesInFlight - 1] of array of TVulkanDeferredDeletionItem;
     FDeferResourceDestruction: Boolean;
 
-    { GPU memory sub-allocator (pooled blocks + per-frame ring buffers) }
+    { GPU memory sub-allocator (pooled blocks + per-frame ring buffers) & async staging uploader }
     FMemoryAllocator: TCastleVulkanMemoryAllocator;
+    FStagingUploader: TCastleVulkanStagingUploader;
 
     { Descriptor, Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
+    FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
     FDescriptorPool: VkDescriptorPool;
     FPipelineCache: VkPipelineCache;
     FPipelineMap: TVulkanPipelineMap;
@@ -350,6 +544,7 @@ type
     function GetFallbackRenderPassCount: Cardinal;
     function GetFallbackFramebufferCount: Cardinal;
     function GetPendingDeferredDeletionCount: Cardinal;
+    function GetDescriptorPoolHandle: VkDescriptorPool;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -368,7 +563,7 @@ type
     function FindMemoryType(const TypeFilter: Cardinal;
       const Properties: VkMemoryPropertyFlags): Cardinal;
 
-    { Enqueues or immediately destroys a buffer/image and its pooled memory sub-allocation.
+    { Enqueues or immediately destroys a buffer/image/descriptor-set and its pooled memory sub-allocation.
       When DeferResourceDestruction is True (during in-flight frame rendering), resources
       are retired into FDeferredDeletions[FrameIndex] and freed only after that frame's
       VkFence signals completion. }
@@ -378,8 +573,19 @@ type
     procedure DeferOrDestroyTexture(const AImage: VkImage; const AImageView: VkImageView;
       var AAllocation: TVulkanMemoryAllocation; const ADeviceMemory: VkDeviceMemory;
       const AAllocatedSize: VkDeviceSize);
+    procedure DeferOrDestroyDescriptorSet(const AOwnerPool: VkDescriptorPool;
+      const ASet: VkDescriptorSet);
     procedure FlushDeferredDeletions(const AFrameSlot: Integer);
     procedure FlushAllDeferredDeletions;
+    function FlushStagingUploads(const ACommandList: TVulkanRHICommandList = nil): Cardinal;
+
+    { Returns the per-frame transient descriptor pool allocator for AFrameIndex. }
+    function GetTransientDescriptorAllocator(const AFrameIndex: Cardinal): TVulkanDescriptorPoolAllocator;
+
+    { Allocates a frame-local transient descriptor set from the current frame's
+      TransientDescriptorAllocator (bulk-reset in O(1) at the start of BeginFrame). }
+    function CreateTransientDescriptorSet(
+      const Layout: TRHIDescriptorSetLayout): TRHIDescriptorSet;
 
     { Queries live GPU VRAM usage and budget via VK_EXT_memory_budget (or heap fallback).
       Returns True if VK_EXT_memory_budget was used. }
@@ -474,7 +680,8 @@ type
     property PhysicalDevice: VkPhysicalDevice read FPhysicalDevice;
     property InstanceApiVersion: Cardinal read FInstanceApiVersion;
     property DeviceApiVersion: Cardinal read FDeviceApiVersion write FDeviceApiVersion;
-    property DescriptorPool: VkDescriptorPool read FDescriptorPool;
+    property DescriptorPool: VkDescriptorPool read GetDescriptorPoolHandle;
+    property PersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator read FPersistentDescriptorAllocator;
     property PipelineCache: VkPipelineCache read FPipelineCache;
     property PipelineCount: Cardinal read GetPipelineCount;
     property PipelineCacheLoaded: Boolean read FPipelineCacheLoaded;
@@ -498,10 +705,24 @@ type
     property DescriptorSetAllocations: Cardinal read FDescriptorSetAllocations;
     property AllocatedMemoryBytes: Int64 read FAllocatedMemoryBytes;
     property MemoryAllocator: TCastleVulkanMemoryAllocator read FMemoryAllocator;
+    property StagingUploader: TCastleVulkanStagingUploader read FStagingUploader;
+    property GraphicsQueueFamily: Cardinal read FGraphicsQueueFamily;
+    property TransferQueueFamily: Cardinal read FTransferQueueFamily;
+    property HasDedicatedTransferQueue: Boolean read FHasDedicatedTransferQueue;
     property DeferResourceDestruction: Boolean read FDeferResourceDestruction write FDeferResourceDestruction;
     property PendingDeferredDeletionCount: Cardinal read GetPendingDeferredDeletionCount;
     property FrameIndex: Cardinal read FFrameIndex write FFrameIndex;
   end;
+
+{ Selects the optimal transfer queue family index from AQueueFamilies:
+  1. Prefers a dedicated DMA transfer queue family (VK_QUEUE_TRANSFER_BIT without
+     VK_QUEUE_GRAPHICS_BIT or VK_QUEUE_COMPUTE_BIT, e.g. AMD SDMA / NVIDIA Copy Engine).
+  2. Falls back to an async compute+transfer queue family distinct from AGraphicsQueueFamily.
+  3. Falls back to AGraphicsQueueFamily (AIsDedicatedTransferQueue = False). }
+function SelectTransferQueueFamilyIndex(
+  const AQueueFamilies: array of VkQueueFamilyProperties;
+  const AGraphicsQueueFamily: Cardinal;
+  out AIsDedicatedTransferQueue: Boolean): Cardinal;
 
 { Returns the required VkFormatFeatureFlagBits for a given TRHIPixelFormat and TRHITextureUsageFlags set. }
 function GetRequiredVkFormatFeatures(const AFormat: TRHIPixelFormat;
@@ -610,6 +831,47 @@ begin
     Result := VK_API_VERSION_1_1
   else
     Result := VK_API_VERSION_1_0;
+end;
+
+function SelectTransferQueueFamilyIndex(
+  const AQueueFamilies: array of VkQueueFamilyProperties;
+  const AGraphicsQueueFamily: Cardinal;
+  out AIsDedicatedTransferQueue: Boolean): Cardinal;
+var
+  I: Integer;
+  Flags: VkQueueFlags;
+begin
+  Result := AGraphicsQueueFamily;
+  AIsDedicatedTransferQueue := False;
+
+  { 1. First pass: pure DMA transfer queue family (TRANSFER without GRAPHICS or COMPUTE) }
+  for I := 0 to High(AQueueFamilies) do
+  begin
+    Flags := AQueueFamilies[I].queueFlags;
+    if (AQueueFamilies[I].queueCount > 0) and
+       ((Flags and VK_QUEUE_TRANSFER_BIT) <> 0) and
+       ((Flags and VK_QUEUE_GRAPHICS_BIT) = 0) and
+       ((Flags and VK_QUEUE_COMPUTE_BIT) = 0) and
+       (Cardinal(I) <> AGraphicsQueueFamily) then
+    begin
+      AIsDedicatedTransferQueue := True;
+      Exit(Cardinal(I));
+    end;
+  end;
+
+  { 2. Second pass: async compute+transfer queue family (TRANSFER without GRAPHICS) }
+  for I := 0 to High(AQueueFamilies) do
+  begin
+    Flags := AQueueFamilies[I].queueFlags;
+    if (AQueueFamilies[I].queueCount > 0) and
+       ((Flags and VK_QUEUE_TRANSFER_BIT) <> 0) and
+       ((Flags and VK_QUEUE_GRAPHICS_BIT) = 0) and
+       (Cardinal(I) <> AGraphicsQueueFamily) then
+    begin
+      AIsDedicatedTransferQueue := True;
+      Exit(Cardinal(I));
+    end;
+  end;
 end;
 
 procedure ResolveVulkan11_12DeviceConfig(const ADeviceApiVersion: Cardinal;
@@ -1360,6 +1622,8 @@ begin
     Unmap;
   if VulkanDevice <> nil then
   begin
+    if VulkanDevice.StagingUploader <> nil then
+      VulkanDevice.StagingUploader.CancelPendingUploadsForBuffer(Self);
     VulkanDevice.DeferOrDestroyBuffer(FHandle, FAllocation, FDeviceMemory, FAllocatedSize);
     FHandle := VK_NULL_HANDLE;
     FillChar(FAllocation, SizeOf(FAllocation), 0);
@@ -1404,6 +1668,9 @@ var
   CopyRegion: VkBufferCopy;
   DestPtr: PByte;
 begin
+  if Size = 0 then
+    Exit;
+
   if FDesc.MemoryUsage = muCpuToGpu then
   begin
     DestPtr := PByte(Map);
@@ -1417,9 +1684,14 @@ begin
       VulkanDevice.MemoryAllocator.FlushAllocation(FAllocation, Offset, Size);
     Unmap;
   end else
+  if (VulkanDevice <> nil) and (VulkanDevice.StagingUploader <> nil) then
+  begin
+    { Stage into persistent per-frame staging ring buffer for non-blocking batched upload }
+    VulkanDevice.StagingUploader.EnqueueBufferUpload(Self, Data, Size, Offset);
+  end else
   if (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and Assigned(vkCmdCopyBuffer) then
   begin
-    { Upload via host-visible staging buffer }
+    { Fallback one-shot upload when StagingUploader is absent }
     FillChar(StagingDesc, SizeOf(StagingDesc), 0);
     StagingDesc.Size := Size;
     StagingDesc.Usage := [buTransferSrc];
@@ -1570,6 +1842,8 @@ destructor TVulkanRHITexture.Destroy;
 begin
   if VulkanDevice <> nil then
   begin
+    if VulkanDevice.StagingUploader <> nil then
+      VulkanDevice.StagingUploader.CancelPendingUploadsForTexture(Self);
     if FOwnsImage then
       VulkanDevice.DeferOrDestroyTexture(FImage, FImageView, FAllocation, FDeviceMemory, FAllocatedSize)
     else if (VulkanDevice.Handle <> nil) and (FImageView <> VK_NULL_HANDLE) then
@@ -1614,6 +1888,16 @@ begin
   try
     DataSize := PtrUInt(RgbaImage.Width) * PtrUInt(RgbaImage.Height) * 4;
     PixelsPtr := RgbaImage.RawPixels;
+
+    if (VulkanDevice <> nil) and (VulkanDevice.StagingUploader <> nil) then
+    begin
+      VulkanDevice.StagingUploader.EnqueueImageUpload(
+        Self, PixelsPtr, DataSize,
+        RgbaImage.Width, RgbaImage.Height,
+        AMipLevel, AArrayLayer, False);
+      FCurrentState := rsShaderRead;
+      Exit;
+    end;
 
     FillChar(StagingDesc, SizeOf(StagingDesc), 0);
     StagingDesc.Size := DataSize;
@@ -1782,13 +2066,18 @@ begin
   if Length(VkBindings) > 0 then
     LayoutInfo.pBindings := @VkBindings[0];
 
-  CheckVk(vkCreateDescriptorSetLayout(ADevice.Handle, @LayoutInfo, nil, @FHandle), 'vkCreateDescriptorSetLayout');
+  if (ADevice <> nil) and (ADevice.Handle <> nil) and Assigned(vkCreateDescriptorSetLayout) then
+    CheckVk(vkCreateDescriptorSetLayout(ADevice.Handle, @LayoutInfo, nil, @FHandle), 'vkCreateDescriptorSetLayout')
+  else
+    FHandle := VkDescriptorSetLayout(PtrUInt(Self));
 end;
 
 destructor TVulkanRHIDescriptorSetLayout.Destroy;
 begin
-  if FHandle <> VK_NULL_HANDLE then
+  if (FHandle <> VK_NULL_HANDLE) and (Device <> nil) and
+     (TVulkanRHIDevice(Device).Handle <> nil) and Assigned(vkDestroyDescriptorSetLayout) then
     vkDestroyDescriptorSetLayout(TVulkanRHIDevice(Device).Handle, FHandle, nil);
+  FHandle := VK_NULL_HANDLE;
   inherited;
 end;
 
@@ -1798,26 +2087,43 @@ begin
 end;
 
 constructor TVulkanRHIDescriptorSet.Create(const ADevice: TVulkanRHIDevice;
-  const ALayout: TVulkanRHIDescriptorSetLayout);
+  const ALayout: TVulkanRHIDescriptorSetLayout; const AIsTransient: Boolean);
 var
-  AllocInfo: VkDescriptorSetAllocateInfo;
   SetLayoutHandle: VkDescriptorSetLayout;
+  PoolAlloc: TVulkanDescriptorPoolAllocator;
 begin
   inherited Create(ADevice, '');
   FLayout := ALayout;
-  SetLayoutHandle := ALayout.Handle;
+  FIsTransient := AIsTransient;
+  if ALayout <> nil then
+    SetLayoutHandle := ALayout.Handle
+  else
+    SetLayoutHandle := VK_NULL_HANDLE;
 
-  FillChar(AllocInfo, SizeOf(AllocInfo), 0);
-  AllocInfo.sType := VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-  AllocInfo.descriptorPool := ADevice.DescriptorPool;
-  AllocInfo.descriptorSetCount := 1;
-  AllocInfo.pSetLayouts := @SetLayoutHandle;
+  PoolAlloc := nil;
+  if ADevice <> nil then
+  begin
+    if AIsTransient then
+      PoolAlloc := ADevice.GetTransientDescriptorAllocator(ADevice.FrameIndex)
+    else
+      PoolAlloc := ADevice.PersistentDescriptorAllocator;
+  end;
 
-  CheckVk(vkAllocateDescriptorSets(ADevice.Handle, @AllocInfo, @FHandle), 'vkAllocateDescriptorSets');
+  if PoolAlloc <> nil then
+    FHandle := PoolAlloc.AllocateDescriptorSet(SetLayoutHandle, FOwnerPool)
+  else
+  begin
+    FOwnerPool := VK_NULL_HANDLE;
+    FHandle := VkDescriptorSet(PtrUInt(Self));
+  end;
 end;
 
 destructor TVulkanRHIDescriptorSet.Destroy;
 begin
+  if (not FIsTransient) and (VulkanDevice <> nil) and (FHandle <> VK_NULL_HANDLE) then
+    VulkanDevice.DeferOrDestroyDescriptorSet(FOwnerPool, FHandle);
+  FHandle := VK_NULL_HANDLE;
+  FOwnerPool := VK_NULL_HANDLE;
   inherited;
 end;
 
@@ -1917,7 +2223,8 @@ begin
         FPendingWrites[I].dstArrayElement := 0;
       end;
     end;
-    vkUpdateDescriptorSets(VulkanDevice.Handle, Length(FPendingWrites), @FPendingWrites[0], 0, nil);
+    if (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and Assigned(vkUpdateDescriptorSets) then
+      vkUpdateDescriptorSets(VulkanDevice.Handle, Length(FPendingWrites), @FPendingWrites[0], 0, nil);
     SetLength(FPendingWrites, 0);
     SetLength(FBufferInfos, 0);
     SetLength(FImageInfos, 0);
@@ -2259,7 +2566,8 @@ var
   BeginInfo: VkCommandBufferBeginInfo;
   InheritanceInfo: VkCommandBufferInheritanceInfo;
 begin
-  CheckVk(vkResetCommandBuffer(FHandle, 0), 'vkResetCommandBuffer');
+  if (FHandle <> nil) and Assigned(vkResetCommandBuffer) then
+    CheckVk(vkResetCommandBuffer(FHandle, 0), 'vkResetCommandBuffer');
   FillChar(BeginInfo, SizeOf(BeginInfo), 0);
   BeginInfo.sType := VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   BeginInfo.flags := VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -2270,14 +2578,16 @@ begin
     InheritanceInfo.sType := VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
     BeginInfo.pInheritanceInfo := @InheritanceInfo;
   end;
-  CheckVk(vkBeginCommandBuffer(FHandle, @BeginInfo), 'vkBeginCommandBuffer');
+  if (FHandle <> nil) and Assigned(vkBeginCommandBuffer) then
+    CheckVk(vkBeginCommandBuffer(FHandle, @BeginInfo), 'vkBeginCommandBuffer');
   FCurrentPipeline := nil;
   FBarrierCount := 0;
 end;
 
 procedure TVulkanRHICommandList.EndRecording;
 begin
-  CheckVk(vkEndCommandBuffer(FHandle), 'vkEndCommandBuffer');
+  if (FHandle <> nil) and Assigned(vkEndCommandBuffer) then
+    CheckVk(vkEndCommandBuffer(FHandle), 'vkEndCommandBuffer');
 end;
 
 procedure TVulkanRHICommandList.TransitionTexture(const Texture: TRHITexture;
@@ -2442,6 +2752,11 @@ var
   ColorStoreOp, DepthStoreOp: TRHIAttachmentStoreOp;
   AttCount, I: Integer;
 begin
+  { Flush any pending staged buffer/image uploads outside the render pass instance
+    (VUID-vkCmdCopyBuffer-renderpass / VUID-vkCmdCopyBufferToImage-renderpass) }
+  if (FDevice <> nil) and (FDevice.StagingUploader <> nil) and (Level = cllPrimary) then
+    FDevice.StagingUploader.FlushPendingUploads(Self);
+
   if (FDevice <> nil) and (not FDevice.SupportsDynamicRendering) then
   begin
     SetLength(FallbackColorFormats, Length(Info.ColorAttachments));
@@ -2750,6 +3065,731 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TVulkanDescriptorPoolAllocator                                               }
+{ ---------------------------------------------------------------------------- }
+
+constructor TVulkanDescriptorPoolAllocator.Create(const ADevice: VkDevice;
+  const AInitialMaxSets: Cardinal; const AAllowFreeIndividualSets: Boolean;
+  const AMaxSetsCap: Cardinal);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FInitialMaxSets := Max(1, AInitialMaxSets);
+  FMaxSetsCap := Max(FInitialMaxSets, AMaxSetsCap);
+  FCurrentMaxSets := FInitialMaxSets;
+  FAllowFreeIndividualSets := AAllowFreeIndividualSets;
+  FHasCurrentPage := False;
+  FForceNextAllocationError := VK_SUCCESS;
+end;
+
+destructor TVulkanDescriptorPoolAllocator.Destroy;
+var
+  I: Integer;
+begin
+  if (FDevice <> nil) and Assigned(vkDestroyDescriptorPool) then
+  begin
+    if FHasCurrentPage and (FCurrentPage.Handle <> VK_NULL_HANDLE) then
+      vkDestroyDescriptorPool(FDevice, FCurrentPage.Handle, nil);
+    for I := 0 to High(FReadyPools) do
+      if FReadyPools[I].Handle <> VK_NULL_HANDLE then
+        vkDestroyDescriptorPool(FDevice, FReadyPools[I].Handle, nil);
+    for I := 0 to High(FFullPools) do
+      if FFullPools[I].Handle <> VK_NULL_HANDLE then
+        vkDestroyDescriptorPool(FDevice, FFullPools[I].Handle, nil);
+  end;
+  FHasCurrentPage := False;
+  SetLength(FReadyPools, 0);
+  SetLength(FFullPools, 0);
+  inherited;
+end;
+
+function TVulkanDescriptorPoolAllocator.CreateNewPoolPage(
+  const AMaxSets: Cardinal): TVulkanDescriptorPoolPage;
+var
+  PoolSizes: array[0..6] of VkDescriptorPoolSize;
+  PoolInfo: VkDescriptorPoolCreateInfo;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  Result.Capacity := Max(1, AMaxSets);
+  Result.AllocatedSets := 0;
+
+  PoolSizes[0]._type := VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  PoolSizes[0].descriptorCount := Result.Capacity * 2;
+  PoolSizes[1]._type := VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+  PoolSizes[1].descriptorCount := Max(1, Result.Capacity div 2);
+  PoolSizes[2]._type := VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  PoolSizes[2].descriptorCount := Max(1, Result.Capacity div 2);
+  PoolSizes[3]._type := VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  PoolSizes[3].descriptorCount := Result.Capacity * 4;
+  PoolSizes[4]._type := VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+  PoolSizes[4].descriptorCount := Result.Capacity;
+  PoolSizes[5]._type := VK_DESCRIPTOR_TYPE_SAMPLER;
+  PoolSizes[5].descriptorCount := Result.Capacity;
+  PoolSizes[6]._type := VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+  PoolSizes[6].descriptorCount := Max(1, Result.Capacity div 4);
+
+  FillChar(PoolInfo, SizeOf(PoolInfo), 0);
+  PoolInfo.sType := VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  if FAllowFreeIndividualSets then
+    PoolInfo.flags := VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+  PoolInfo.maxSets := Result.Capacity;
+  PoolInfo.poolSizeCount := Length(PoolSizes);
+  PoolInfo.pPoolSizes := @PoolSizes[0];
+
+  if (FDevice <> nil) and Assigned(vkCreateDescriptorPool) then
+    CheckVk(vkCreateDescriptorPool(FDevice, @PoolInfo, nil, @Result.Handle), 'vkCreateDescriptorPool')
+  else
+    Result.Handle := VkDescriptorPool(PtrUInt($50000000) + PtrUInt(FTotalPoolCount) + 1);
+
+  Inc(FTotalPoolCount);
+  FCurrentMaxSets := Min(FMaxSetsCap, Max(FCurrentMaxSets + (FCurrentMaxSets div 2), FCurrentMaxSets + 1));
+end;
+
+procedure TVulkanDescriptorPoolAllocator.AcquireNextReadyOrNewPage;
+var
+  Idx: Integer;
+begin
+  if FHasCurrentPage then
+  begin
+    Idx := Length(FFullPools);
+    SetLength(FFullPools, Idx + 1);
+    FFullPools[Idx] := FCurrentPage;
+    FHasCurrentPage := False;
+  end;
+
+  if Length(FReadyPools) > 0 then
+  begin
+    Idx := High(FReadyPools);
+    FCurrentPage := FReadyPools[Idx];
+    SetLength(FReadyPools, Idx);
+    FHasCurrentPage := True;
+  end else
+  begin
+    FCurrentPage := CreateNewPoolPage(FCurrentMaxSets);
+    FHasCurrentPage := True;
+  end;
+end;
+
+function TVulkanDescriptorPoolAllocator.AllocateDescriptorSet(
+  const ASetLayout: VkDescriptorSetLayout;
+  out AOwnerPool: VkDescriptorPool): VkDescriptorSet;
+var
+  AllocInfo: VkDescriptorSetAllocateInfo;
+  LocalLayout: VkDescriptorSetLayout;
+  Res: VkResult;
+begin
+  Result := VK_NULL_HANDLE;
+  if not FHasCurrentPage then
+    AcquireNextReadyOrNewPage;
+
+  LocalLayout := ASetLayout;
+  FillChar(AllocInfo, SizeOf(AllocInfo), 0);
+  AllocInfo.sType := VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  AllocInfo.descriptorPool := FCurrentPage.Handle;
+  AllocInfo.descriptorSetCount := 1;
+  AllocInfo.pSetLayouts := @LocalLayout;
+
+  if FForceNextAllocationError <> VK_SUCCESS then
+  begin
+    Res := FForceNextAllocationError;
+    FForceNextAllocationError := VK_SUCCESS;
+  end else
+  if FCurrentPage.AllocatedSets >= FCurrentPage.Capacity then
+    Res := VK_ERROR_OUT_OF_POOL_MEMORY
+  else
+  if (FDevice <> nil) and Assigned(vkAllocateDescriptorSets) then
+    Res := vkAllocateDescriptorSets(FDevice, @AllocInfo, @Result)
+  else
+  begin
+    Inc(FNextSimulatedSetId);
+    Result := VkDescriptorSet(PtrUInt($60000000) + PtrUInt(FNextSimulatedSetId));
+    Res := VK_SUCCESS;
+  end;
+
+  if (Res = VK_ERROR_OUT_OF_POOL_MEMORY) or (Res = VK_ERROR_FRAGMENTED_POOL) then
+  begin
+    AcquireNextReadyOrNewPage;
+    AllocInfo.descriptorPool := FCurrentPage.Handle;
+    if (FDevice <> nil) and Assigned(vkAllocateDescriptorSets) then
+      Res := vkAllocateDescriptorSets(FDevice, @AllocInfo, @Result)
+    else
+    begin
+      Inc(FNextSimulatedSetId);
+      Result := VkDescriptorSet(PtrUInt($60000000) + PtrUInt(FNextSimulatedSetId));
+      Res := VK_SUCCESS;
+    end;
+  end;
+
+  CheckVk(Res, 'vkAllocateDescriptorSets');
+  Inc(FCurrentPage.AllocatedSets);
+  Inc(FTotalAllocatedSetCount);
+  AOwnerPool := FCurrentPage.Handle;
+end;
+
+procedure TVulkanDescriptorPoolAllocator.FreeDescriptorSet(
+  const AOwnerPool: VkDescriptorPool; const ASet: VkDescriptorSet);
+var
+  LocalSet: VkDescriptorSet;
+  I: Integer;
+begin
+  if (not FAllowFreeIndividualSets) or (AOwnerPool = VK_NULL_HANDLE) or (ASet = VK_NULL_HANDLE) then
+    Exit;
+
+  LocalSet := ASet;
+  if (FDevice <> nil) and Assigned(vkFreeDescriptorSets) then
+    vkFreeDescriptorSets(FDevice, AOwnerPool, 1, @LocalSet);
+
+  if FHasCurrentPage and (FCurrentPage.Handle = AOwnerPool) then
+  begin
+    if FCurrentPage.AllocatedSets > 0 then
+      Dec(FCurrentPage.AllocatedSets);
+  end else
+  begin
+    for I := 0 to High(FFullPools) do
+      if FFullPools[I].Handle = AOwnerPool then
+      begin
+        if FFullPools[I].AllocatedSets > 0 then
+          Dec(FFullPools[I].AllocatedSets);
+        Break;
+      end;
+  end;
+
+  if FTotalAllocatedSetCount > 0 then
+    Dec(FTotalAllocatedSetCount);
+end;
+
+procedure TVulkanDescriptorPoolAllocator.ResetPools;
+var
+  I, Idx: Integer;
+begin
+  for I := 0 to High(FReadyPools) do
+    FReadyPools[I].AllocatedSets := 0;
+
+  if FHasCurrentPage then
+  begin
+    if (FDevice <> nil) and Assigned(vkResetDescriptorPool) and
+       (FCurrentPage.Handle <> VK_NULL_HANDLE) then
+      CheckVk(vkResetDescriptorPool(FDevice, FCurrentPage.Handle, 0), 'vkResetDescriptorPool');
+    FCurrentPage.AllocatedSets := 0;
+    Idx := Length(FReadyPools);
+    SetLength(FReadyPools, Idx + 1);
+    FReadyPools[Idx] := FCurrentPage;
+    FHasCurrentPage := False;
+  end;
+
+  for I := 0 to High(FFullPools) do
+  begin
+    if (FDevice <> nil) and Assigned(vkResetDescriptorPool) and
+       (FFullPools[I].Handle <> VK_NULL_HANDLE) then
+      CheckVk(vkResetDescriptorPool(FDevice, FFullPools[I].Handle, 0), 'vkResetDescriptorPool');
+    FFullPools[I].AllocatedSets := 0;
+    Idx := Length(FReadyPools);
+    SetLength(FReadyPools, Idx + 1);
+    FReadyPools[Idx] := FFullPools[I];
+  end;
+  SetLength(FFullPools, 0);
+
+  FTotalAllocatedSetCount := 0;
+  Inc(FResetCount);
+end;
+
+function TVulkanDescriptorPoolAllocator.GetReadyPoolCount: Cardinal;
+begin
+  Result := Cardinal(Length(FReadyPools));
+end;
+
+function TVulkanDescriptorPoolAllocator.GetFullPoolCount: Cardinal;
+begin
+  Result := Cardinal(Length(FFullPools));
+end;
+
+function TVulkanDescriptorPoolAllocator.GetCurrentPoolHandle: VkDescriptorPool;
+begin
+  if FHasCurrentPage then
+    Result := FCurrentPage.Handle
+  else
+    Result := VK_NULL_HANDLE;
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanStagingUploader                                                 }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanStagingUploader.Create(const ADevice: TVulkanRHIDevice;
+  const ARingCapacityPerFrame: VkDeviceSize);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FRingCapacityPerFrame := Max(VkDeviceSize(4096), ARingCapacityPerFrame);
+  if ADevice <> nil then
+    ConfigureTransferQueue(ADevice.GraphicsQueueFamily, ADevice.TransferQueueFamily,
+      ADevice.HasDedicatedTransferQueue);
+end;
+
+destructor TCastleVulkanStagingUploader.Destroy;
+var
+  Slot: Cardinal;
+begin
+  SetLength(FPendingBufferCopies, 0);
+  SetLength(FPendingImageCopies, 0);
+  for Slot := 0 to MaxFramesInFlight - 1 do
+  begin
+    ReclaimFrameSlot(Slot);
+    if (FDevice <> nil) and (FDevice.Handle <> nil) and
+       (FRingBuffers[Slot] <> VK_NULL_HANDLE) and Assigned(vkDestroyBuffer) then
+      vkDestroyBuffer(FDevice.Handle, FRingBuffers[Slot], nil);
+    FRingBuffers[Slot] := VK_NULL_HANDLE;
+    if FRingAllocations[Slot].IsValid and (FDevice <> nil) and (FDevice.MemoryAllocator <> nil) then
+    begin
+      Dec(FDevice.FAllocatedMemoryBytes, FRingAllocations[Slot].Size);
+      FDevice.MemoryAllocator.Free(FRingAllocations[Slot]);
+    end;
+    FillChar(FRingAllocations[Slot], SizeOf(TVulkanMemoryAllocation), 0);
+  end;
+  inherited;
+end;
+
+procedure TCastleVulkanStagingUploader.ConfigureTransferQueue(
+  const AGraphicsQueueFamily, ATransferQueueFamily: Cardinal;
+  const AUseDedicatedTransferQueue: Boolean);
+begin
+  FGraphicsQueueFamily := AGraphicsQueueFamily;
+  FTransferQueueFamily := ATransferQueueFamily;
+  FUseDedicatedTransferQueue := AUseDedicatedTransferQueue and
+    (ATransferQueueFamily <> AGraphicsQueueFamily);
+end;
+
+function TCastleVulkanStagingUploader.EnsureRingBufferForSlot(
+  const AFrameSlot: Cardinal): Boolean;
+var
+  Slot: Cardinal;
+  BufInfo: VkBufferCreateInfo;
+  Align: VkDeviceSize;
+begin
+  Slot := AFrameSlot mod MaxFramesInFlight;
+  if FRingAllocations[Slot].IsValid then
+    Exit(True);
+  if (FDevice = nil) or (FDevice.MemoryAllocator = nil) then
+    Exit(False);
+
+  if (FDevice.Handle <> nil) and Assigned(vkCreateBuffer) then
+  begin
+    FillChar(BufInfo, SizeOf(BufInfo), 0);
+    BufInfo.sType := VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    BufInfo.size := FRingCapacityPerFrame;
+    BufInfo.usage := VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    BufInfo.sharingMode := VK_SHARING_MODE_EXCLUSIVE;
+    CheckVk(vkCreateBuffer(FDevice.Handle, @BufInfo, nil, @FRingBuffers[Slot]),
+      'vkCreateBuffer(StagingRing)');
+  end else
+    FRingBuffers[Slot] := VkBuffer(PtrUInt($70000000) + PtrUInt(Slot) + 1);
+
+  Align := Max(VkDeviceSize(16), FDevice.MemoryAllocator.OptimalBufferCopyOffsetAlignment);
+  FRingAllocations[Slot] := FDevice.MemoryAllocator.AllocateBufferMemory(
+    FRingBuffers[Slot], FRingCapacityPerFrame, muCpuToGpu, False, Align);
+
+  if (FDevice.Handle <> nil) and Assigned(vkBindBufferMemory) then
+    CheckVk(vkBindBufferMemory(FDevice.Handle, FRingBuffers[Slot],
+      FRingAllocations[Slot].DeviceMemory, FRingAllocations[Slot].Offset),
+      'vkBindBufferMemory(StagingRing)');
+
+  Inc(FDevice.FAllocatedMemoryBytes, FRingAllocations[Slot].Size);
+  Result := FRingAllocations[Slot].IsValid;
+end;
+
+function TCastleVulkanStagingUploader.AllocateStagingSlice(
+  const ASize, AAlignment: VkDeviceSize;
+  out ASrcBuffer: VkBuffer; out ASrcOffset: VkDeviceSize;
+  out AAllocation: TVulkanMemoryAllocation): Pointer;
+var
+  Slot: Cardinal;
+  EffAlign, AlignedOffset: VkDeviceSize;
+  BufInfo: VkBufferCreateInfo;
+  ChunkIdx: Integer;
+begin
+  ASrcBuffer := VK_NULL_HANDLE;
+  ASrcOffset := 0;
+  FillChar(AAllocation, SizeOf(AAllocation), 0);
+  Result := nil;
+  if (FDevice = nil) or (ASize = 0) then
+    Exit;
+
+  Slot := FDevice.FrameIndex mod MaxFramesInFlight;
+  EffAlign := Max(VkDeviceSize(16), AAlignment);
+  if FDevice.MemoryAllocator <> nil then
+    EffAlign := Max(EffAlign, FDevice.MemoryAllocator.OptimalBufferCopyOffsetAlignment);
+
+  if EffAlign > 1 then
+    AlignedOffset := ((FRingWriteOffsets[Slot] + EffAlign - 1) div EffAlign) * EffAlign
+  else
+    AlignedOffset := FRingWriteOffsets[Slot];
+  if (AlignedOffset + ASize <= FRingCapacityPerFrame) and EnsureRingBufferForSlot(Slot) then
+  begin
+    ASrcBuffer := FRingBuffers[Slot];
+    ASrcOffset := AlignedOffset;
+    AAllocation := FRingAllocations[Slot];
+    FRingWriteOffsets[Slot] := AlignedOffset + ASize;
+    if FRingAllocations[Slot].MappedPtr <> nil then
+      Result := Pointer(PtrUInt(FRingAllocations[Slot].MappedPtr) + PtrUInt(AlignedOffset));
+    Exit;
+  end;
+
+  { Single upload exceeds remaining space in the current frame's ring buffer:
+    allocate a temporary overflow staging chunk retired on ReclaimFrameSlot(Slot) }
+  if FDevice.MemoryAllocator <> nil then
+  begin
+    ChunkIdx := Length(FOverflowChunks[Slot]);
+    SetLength(FOverflowChunks[Slot], ChunkIdx + 1);
+    FillChar(FOverflowChunks[Slot][ChunkIdx], SizeOf(TVulkanStagingOverflowChunk), 0);
+
+    if (FDevice.Handle <> nil) and Assigned(vkCreateBuffer) then
+    begin
+      FillChar(BufInfo, SizeOf(BufInfo), 0);
+      BufInfo.sType := VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+      BufInfo.size := ASize;
+      BufInfo.usage := VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+      BufInfo.sharingMode := VK_SHARING_MODE_EXCLUSIVE;
+      CheckVk(vkCreateBuffer(FDevice.Handle, @BufInfo, nil, @FOverflowChunks[Slot][ChunkIdx].Buffer),
+        'vkCreateBuffer(StagingOverflow)');
+    end else
+      FOverflowChunks[Slot][ChunkIdx].Buffer := VkBuffer(PtrUInt($71000000) + PtrUInt(FOverflowChunkCount) + 1);
+
+    FOverflowChunks[Slot][ChunkIdx].Allocation := FDevice.MemoryAllocator.AllocateBufferMemory(
+      FOverflowChunks[Slot][ChunkIdx].Buffer, ASize, muCpuToGpu, False, EffAlign);
+
+    if (FDevice.Handle <> nil) and Assigned(vkBindBufferMemory) then
+      CheckVk(vkBindBufferMemory(FDevice.Handle, FOverflowChunks[Slot][ChunkIdx].Buffer,
+        FOverflowChunks[Slot][ChunkIdx].Allocation.DeviceMemory,
+        FOverflowChunks[Slot][ChunkIdx].Allocation.Offset),
+        'vkBindBufferMemory(StagingOverflow)');
+
+    Inc(FDevice.FAllocatedMemoryBytes, FOverflowChunks[Slot][ChunkIdx].Allocation.Size);
+    Inc(FOverflowChunkCount);
+
+    ASrcBuffer := FOverflowChunks[Slot][ChunkIdx].Buffer;
+    ASrcOffset := 0;
+    AAllocation := FOverflowChunks[Slot][ChunkIdx].Allocation;
+    Result := AAllocation.MappedPtr;
+  end;
+end;
+
+procedure TCastleVulkanStagingUploader.ReclaimFrameSlot(const AFrameSlot: Cardinal);
+var
+  Slot: Cardinal;
+  I: Integer;
+begin
+  Slot := AFrameSlot mod MaxFramesInFlight;
+  FRingWriteOffsets[Slot] := 0;
+
+  for I := 0 to High(FOverflowChunks[Slot]) do
+  begin
+    if (FDevice <> nil) and (FDevice.Handle <> nil) and
+       (FOverflowChunks[Slot][I].Buffer <> VK_NULL_HANDLE) and Assigned(vkDestroyBuffer) then
+      vkDestroyBuffer(FDevice.Handle, FOverflowChunks[Slot][I].Buffer, nil);
+    if FOverflowChunks[Slot][I].Allocation.IsValid and
+       (FDevice <> nil) and (FDevice.MemoryAllocator <> nil) then
+    begin
+      Dec(FDevice.FAllocatedMemoryBytes, FOverflowChunks[Slot][I].Allocation.Size);
+      FDevice.MemoryAllocator.Free(FOverflowChunks[Slot][I].Allocation);
+    end;
+    if FOverflowChunkCount > 0 then
+      Dec(FOverflowChunkCount);
+  end;
+  SetLength(FOverflowChunks[Slot], 0);
+end;
+
+procedure TCastleVulkanStagingUploader.EnqueueBufferUpload(
+  const ADstBuffer: TVulkanRHIBuffer; const AData;
+  const ASize, ADstOffset: VkDeviceSize);
+var
+  SrcBuf: VkBuffer;
+  SrcOff: VkDeviceSize;
+  SliceAlloc: TVulkanMemoryAllocation;
+  SlicePtr: Pointer;
+  Idx: Integer;
+begin
+  if (ADstBuffer = nil) or (ASize = 0) then
+    Exit;
+
+  SlicePtr := AllocateStagingSlice(ASize, 16, SrcBuf, SrcOff, SliceAlloc);
+  if SlicePtr <> nil then
+    Move(AData, SlicePtr^, ASize);
+
+  if SliceAlloc.IsValid and (FDevice <> nil) and (FDevice.MemoryAllocator <> nil) then
+    FDevice.MemoryAllocator.FlushAllocation(SliceAlloc, SrcOff, ASize);
+
+  { In headless unit-test mode, mirror uploaded bytes into ADstBuffer's simulated memory }
+  if ((FDevice = nil) or (FDevice.Handle = nil)) and
+     (ADstBuffer.Allocation.MappedPtr <> nil) and
+     (ADstOffset + ASize <= ADstBuffer.Desc.Size) then
+    Move(AData, PByte(PtrUInt(ADstBuffer.Allocation.MappedPtr) + PtrUInt(ADstOffset))^, ASize);
+
+  Idx := Length(FPendingBufferCopies);
+  SetLength(FPendingBufferCopies, Idx + 1);
+  FPendingBufferCopies[Idx].SrcBuffer := SrcBuf;
+  FPendingBufferCopies[Idx].DstBuffer := ADstBuffer;
+  FPendingBufferCopies[Idx].Region.srcOffset := SrcOff;
+  FPendingBufferCopies[Idx].Region.dstOffset := ADstOffset;
+  FPendingBufferCopies[Idx].Region.size := ASize;
+
+  Inc(FTotalBufferUploads);
+  Inc(FTotalStagedBytes, ASize);
+end;
+
+procedure TCastleVulkanStagingUploader.EnqueueImageUpload(
+  const ADstTexture: TVulkanRHITexture; const AData: Pointer;
+  const ADataSize: VkDeviceSize; const AWidth, AHeight: Cardinal;
+  const AMipLevel, AArrayLayer: Cardinal; const AGenerateMipmaps: Boolean);
+var
+  SrcBuf: VkBuffer;
+  SrcOff: VkDeviceSize;
+  SliceAlloc: TVulkanMemoryAllocation;
+  SlicePtr: Pointer;
+  Idx: Integer;
+begin
+  if (ADstTexture = nil) or (ADataSize = 0) then
+    Exit;
+
+  SlicePtr := AllocateStagingSlice(ADataSize, 16, SrcBuf, SrcOff, SliceAlloc);
+  if (SlicePtr <> nil) and (AData <> nil) then
+    Move(AData^, SlicePtr^, ADataSize);
+
+  if SliceAlloc.IsValid and (FDevice <> nil) and (FDevice.MemoryAllocator <> nil) then
+    FDevice.MemoryAllocator.FlushAllocation(SliceAlloc, SrcOff, ADataSize);
+
+  Idx := Length(FPendingImageCopies);
+  SetLength(FPendingImageCopies, Idx + 1);
+  FillChar(FPendingImageCopies[Idx], SizeOf(TVulkanStagedImageCopy), 0);
+  FPendingImageCopies[Idx].SrcBuffer := SrcBuf;
+  FPendingImageCopies[Idx].DstTexture := ADstTexture;
+  FPendingImageCopies[Idx].MipLevel := AMipLevel;
+  FPendingImageCopies[Idx].ArrayLayer := AArrayLayer;
+  FPendingImageCopies[Idx].GenerateMipmaps := AGenerateMipmaps;
+  FPendingImageCopies[Idx].Region.bufferOffset := SrcOff;
+  FPendingImageCopies[Idx].Region.bufferRowLength := 0;
+  FPendingImageCopies[Idx].Region.bufferImageHeight := 0;
+  FPendingImageCopies[Idx].Region.imageSubresource.aspectMask := ADstTexture.AspectMask;
+  FPendingImageCopies[Idx].Region.imageSubresource.mipLevel := AMipLevel;
+  FPendingImageCopies[Idx].Region.imageSubresource.baseArrayLayer := AArrayLayer;
+  FPendingImageCopies[Idx].Region.imageSubresource.layerCount := 1;
+  FPendingImageCopies[Idx].Region.imageOffset.x := 0;
+  FPendingImageCopies[Idx].Region.imageOffset.y := 0;
+  FPendingImageCopies[Idx].Region.imageOffset.z := 0;
+  FPendingImageCopies[Idx].Region.imageExtent.width := Max(1, AWidth);
+  FPendingImageCopies[Idx].Region.imageExtent.height := Max(1, AHeight);
+  FPendingImageCopies[Idx].Region.imageExtent.depth := 1;
+
+  Inc(FTotalImageUploads);
+  Inc(FTotalStagedBytes, ADataSize);
+end;
+
+procedure TCastleVulkanStagingUploader.CancelPendingUploadsForBuffer(
+  const ABuffer: TVulkanRHIBuffer);
+var
+  I, WriteIdx: Integer;
+begin
+  if (ABuffer = nil) or (Length(FPendingBufferCopies) = 0) then
+    Exit;
+  WriteIdx := 0;
+  for I := 0 to High(FPendingBufferCopies) do
+    if FPendingBufferCopies[I].DstBuffer <> ABuffer then
+    begin
+      if WriteIdx <> I then
+        FPendingBufferCopies[WriteIdx] := FPendingBufferCopies[I];
+      Inc(WriteIdx);
+    end;
+  SetLength(FPendingBufferCopies, WriteIdx);
+end;
+
+procedure TCastleVulkanStagingUploader.CancelPendingUploadsForTexture(
+  const ATexture: TVulkanRHITexture);
+var
+  I, WriteIdx: Integer;
+begin
+  if (ATexture = nil) or (Length(FPendingImageCopies) = 0) then
+    Exit;
+  WriteIdx := 0;
+  for I := 0 to High(FPendingImageCopies) do
+    if FPendingImageCopies[I].DstTexture <> ATexture then
+    begin
+      if WriteIdx <> I then
+        FPendingImageCopies[WriteIdx] := FPendingImageCopies[I];
+      Inc(WriteIdx);
+    end;
+  SetLength(FPendingImageCopies, WriteIdx);
+end;
+
+function TCastleVulkanStagingUploader.FlushPendingUploads(
+  const ACommandList: TVulkanRHICommandList): Cardinal;
+var
+  BufCount, ImgCount, I: Integer;
+  Cmd: VkCommandBuffer;
+  OneShotCmd: Boolean;
+  BufBarriers: array of VkBufferMemoryBarrier;
+  ImgBarrier: VkImageMemoryBarrier;
+  BufItem: TVulkanStagedBufferCopy;
+  ImgItem: TVulkanStagedImageCopy;
+begin
+  BufCount := Length(FPendingBufferCopies);
+  ImgCount := Length(FPendingImageCopies);
+  Result := Cardinal(BufCount + ImgCount);
+  if Result = 0 then
+    Exit;
+
+  OneShotCmd := False;
+  Cmd := nil;
+  if ACommandList <> nil then
+    Cmd := ACommandList.Handle
+  else if (FDevice <> nil) and (FDevice.Handle <> nil) then
+  begin
+    Cmd := FDevice.BeginSingleTimeCommands;
+    OneShotCmd := Cmd <> nil;
+  end;
+
+  { 1. Batch all pending buffer-to-buffer copies and emit a single consolidated pipeline barrier }
+  if BufCount > 0 then
+  begin
+    SetLength(BufBarriers, BufCount);
+    for I := 0 to BufCount - 1 do
+    begin
+      BufItem := FPendingBufferCopies[I];
+      if (Cmd <> nil) and Assigned(vkCmdCopyBuffer) and (BufItem.DstBuffer <> nil) then
+        vkCmdCopyBuffer(Cmd, BufItem.SrcBuffer, BufItem.DstBuffer.Handle, 1, @BufItem.Region);
+
+      FillChar(BufBarriers[I], SizeOf(VkBufferMemoryBarrier), 0);
+      BufBarriers[I].sType := VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+      BufBarriers[I].srcAccessMask := VK_ACCESS_TRANSFER_WRITE_BIT;
+      BufBarriers[I].dstAccessMask :=
+        VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT or
+        VK_ACCESS_INDEX_READ_BIT or
+        VK_ACCESS_UNIFORM_READ_BIT or
+        VK_ACCESS_SHADER_READ_BIT;
+      if FUseDedicatedTransferQueue and (FTransferQueueFamily <> FGraphicsQueueFamily) then
+      begin
+        BufBarriers[I].srcQueueFamilyIndex := FTransferQueueFamily;
+        BufBarriers[I].dstQueueFamilyIndex := FGraphicsQueueFamily;
+        Inc(FQueueOwnershipTransferCount);
+      end else
+      begin
+        BufBarriers[I].srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+        BufBarriers[I].dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+      end;
+      if BufItem.DstBuffer <> nil then
+      begin
+        BufBarriers[I].buffer := BufItem.DstBuffer.Handle;
+        BufBarriers[I].offset := BufItem.Region.dstOffset;
+        BufBarriers[I].size := BufItem.Region.size;
+      end;
+    end;
+
+    if (Cmd <> nil) and Assigned(vkCmdPipelineBarrier) then
+      vkCmdPipelineBarrier(Cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT or
+        VK_PIPELINE_STAGE_VERTEX_SHADER_BIT or
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, nil, Length(BufBarriers), @BufBarriers[0], 0, nil);
+
+    if ACommandList <> nil then
+      Inc(ACommandList.FBarrierCount);
+  end;
+
+  { 2. Batch all pending buffer-to-image copies + layout transitions (+ optional mipmap blits) }
+  for I := 0 to ImgCount - 1 do
+  begin
+    ImgItem := FPendingImageCopies[I];
+    if ImgItem.DstTexture = nil then
+      Continue;
+
+    FillChar(ImgBarrier, SizeOf(ImgBarrier), 0);
+    ImgBarrier.sType := VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    ImgBarrier.oldLayout := VK_IMAGE_LAYOUT_UNDEFINED;
+    ImgBarrier.newLayout := VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    ImgBarrier.srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+    ImgBarrier.dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+    ImgBarrier.image := ImgItem.DstTexture.Image;
+    ImgBarrier.subresourceRange.aspectMask := ImgItem.DstTexture.AspectMask;
+    ImgBarrier.subresourceRange.baseMipLevel := ImgItem.MipLevel;
+    ImgBarrier.subresourceRange.levelCount := 1;
+    ImgBarrier.subresourceRange.baseArrayLayer := ImgItem.ArrayLayer;
+    ImgBarrier.subresourceRange.layerCount := 1;
+    ImgBarrier.srcAccessMask := 0;
+    ImgBarrier.dstAccessMask := VK_ACCESS_TRANSFER_WRITE_BIT;
+
+    if (Cmd <> nil) and Assigned(vkCmdPipelineBarrier) then
+      vkCmdPipelineBarrier(Cmd,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nil, 0, nil, 1, @ImgBarrier);
+
+    if (Cmd <> nil) and Assigned(vkCmdCopyBufferToImage) then
+      vkCmdCopyBufferToImage(Cmd, ImgItem.SrcBuffer, ImgItem.DstTexture.Image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, @ImgItem.Region);
+
+    if ImgItem.GenerateMipmaps and (ImgItem.DstTexture.Desc.MipLevels > 1) and
+       (ACommandList <> nil) then
+    begin
+      ImgItem.DstTexture.CurrentState := rsTransferDst;
+      ACommandList.GenerateMipmaps(ImgItem.DstTexture);
+    end else
+    begin
+      ImgBarrier.oldLayout := VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      ImgBarrier.newLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      ImgBarrier.srcAccessMask := VK_ACCESS_TRANSFER_WRITE_BIT;
+      ImgBarrier.dstAccessMask := VK_ACCESS_SHADER_READ_BIT;
+      if FUseDedicatedTransferQueue and (FTransferQueueFamily <> FGraphicsQueueFamily) then
+      begin
+        ImgBarrier.srcQueueFamilyIndex := FTransferQueueFamily;
+        ImgBarrier.dstQueueFamilyIndex := FGraphicsQueueFamily;
+        Inc(FQueueOwnershipTransferCount);
+      end else
+      begin
+        ImgBarrier.srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+        ImgBarrier.dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+      end;
+
+      if (Cmd <> nil) and Assigned(vkCmdPipelineBarrier) then
+        vkCmdPipelineBarrier(Cmd,
+          VK_PIPELINE_STAGE_TRANSFER_BIT,
+          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+          0, 0, nil, 0, nil, 1, @ImgBarrier);
+
+      ImgItem.DstTexture.CurrentState := rsShaderRead;
+      if ACommandList <> nil then
+        Inc(ACommandList.FBarrierCount, 2);
+    end;
+  end;
+
+  if OneShotCmd and (FDevice <> nil) then
+    FDevice.EndSingleTimeCommands(Cmd);
+
+  SetLength(FPendingBufferCopies, 0);
+  SetLength(FPendingImageCopies, 0);
+  Inc(FTotalBatchedFlushes);
+end;
+
+function TCastleVulkanStagingUploader.GetPendingBufferCopyCount: Cardinal;
+begin
+  Result := Cardinal(Length(FPendingBufferCopies));
+end;
+
+function TCastleVulkanStagingUploader.GetPendingImageCopyCount: Cardinal;
+begin
+  Result := Cardinal(Length(FPendingImageCopies));
+end;
+
+function TCastleVulkanStagingUploader.GetCurrentFrameWriteOffset: VkDeviceSize;
+var
+  Slot: Cardinal;
+begin
+  if FDevice <> nil then
+    Slot := FDevice.FrameIndex mod MaxFramesInFlight
+  else
+    Slot := 0;
+  Result := FRingWriteOffsets[Slot];
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -2777,6 +3817,7 @@ begin
   CreateLogicalDevice;
   FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice);
   FMemoryAllocator.SupportsMemoryBudgetExt := FSupportsMemoryBudgetExt;
+  FStagingUploader := TCastleVulkanStagingUploader.Create(Self);
   CreateDescriptorPool;
   CreateFrameContexts;
   CreateSwapchain(InitialWidth, InitialHeight);
@@ -2787,6 +3828,8 @@ constructor TVulkanRHIDevice.CreateHeadless(const APhysicalDevice: VkPhysicalDev
   const ASupportsDynamicRendering: Boolean;
   const ADeviceApiVersion: Cardinal;
   const ASupportsGraphicsPipelineLibrary: Boolean);
+var
+  I: Integer;
 begin
   inherited Create;
   FPipelineMap := TVulkanPipelineMap.Create([doOwnsValues]);
@@ -2806,6 +3849,10 @@ begin
   FSupportsGPLFastLinking := ASupportsGraphicsPipelineLibrary;
   FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice);
   FMemoryAllocator.SupportsMemoryBudgetExt := FSupportsMemoryBudgetExt;
+  FStagingUploader := TCastleVulkanStagingUploader.Create(Self);
+  FPersistentDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 2048, True, 8192);
+  for I := 0 to MaxFramesInFlight - 1 do
+    FFrames[I].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096);
 end;
 
 procedure TVulkanRHIDevice.ClearPipelineLibraries;
@@ -2984,6 +4031,30 @@ begin
   end;
 end;
 
+procedure TVulkanRHIDevice.DeferOrDestroyDescriptorSet(
+  const AOwnerPool: VkDescriptorPool; const ASet: VkDescriptorSet);
+var
+  Slot, Idx: Integer;
+begin
+  if (AOwnerPool = VK_NULL_HANDLE) or (ASet = VK_NULL_HANDLE) then
+    Exit;
+
+  if FDeferResourceDestruction then
+  begin
+    Slot := FFrameIndex mod MaxFramesInFlight;
+    Idx := Length(FDeferredDeletions[Slot]);
+    SetLength(FDeferredDeletions[Slot], Idx + 1);
+    FillChar(FDeferredDeletions[Slot][Idx], SizeOf(TVulkanDeferredDeletionItem), 0);
+    FDeferredDeletions[Slot][Idx].IsDescriptorSet := True;
+    FDeferredDeletions[Slot][Idx].DescriptorPool := AOwnerPool;
+    FDeferredDeletions[Slot][Idx].DescriptorSet := ASet;
+    Exit;
+  end;
+
+  if FPersistentDescriptorAllocator <> nil then
+    FPersistentDescriptorAllocator.FreeDescriptorSet(AOwnerPool, ASet);
+end;
+
 procedure TVulkanRHIDevice.FlushDeferredDeletions(const AFrameSlot: Integer);
 var
   I: Integer;
@@ -2994,6 +4065,13 @@ begin
   for I := 0 to High(FDeferredDeletions[AFrameSlot]) do
   begin
     Item := FDeferredDeletions[AFrameSlot][I];
+    if Item.IsDescriptorSet then
+    begin
+      if FPersistentDescriptorAllocator <> nil then
+        FPersistentDescriptorAllocator.FreeDescriptorSet(Item.DescriptorPool, Item.DescriptorSet);
+      Continue;
+    end;
+
     if Item.IsTexture then
     begin
       if (Item.ImageView <> VK_NULL_HANDLE) and (FDevice <> nil) and Assigned(vkDestroyImageView) then
@@ -3027,6 +4105,15 @@ begin
     FlushDeferredDeletions(Slot);
 end;
 
+function TVulkanRHIDevice.FlushStagingUploads(
+  const ACommandList: TVulkanRHICommandList): Cardinal;
+begin
+  if FStagingUploader <> nil then
+    Result := FStagingUploader.FlushPendingUploads(ACommandList)
+  else
+    Result := 0;
+end;
+
 function TVulkanRHIDevice.GetPendingDeferredDeletionCount: Cardinal;
 var
   Slot: Integer;
@@ -3036,12 +4123,35 @@ begin
     Inc(Result, Cardinal(Length(FDeferredDeletions[Slot])));
 end;
 
+function TVulkanRHIDevice.GetTransientDescriptorAllocator(
+  const AFrameIndex: Cardinal): TVulkanDescriptorPoolAllocator;
+begin
+  Result := FFrames[AFrameIndex mod MaxFramesInFlight].TransientDescriptorAllocator;
+end;
+
+function TVulkanRHIDevice.CreateTransientDescriptorSet(
+  const Layout: TRHIDescriptorSetLayout): TRHIDescriptorSet;
+begin
+  Inc(FDescriptorSetAllocations);
+  Result := TVulkanRHIDescriptorSet.Create(Self, Layout as TVulkanRHIDescriptorSetLayout, True);
+end;
+
+function TVulkanRHIDevice.GetDescriptorPoolHandle: VkDescriptorPool;
+begin
+  if (FPersistentDescriptorAllocator <> nil) and
+     (FPersistentDescriptorAllocator.CurrentPool <> VK_NULL_HANDLE) then
+    Result := FPersistentDescriptorAllocator.CurrentPool
+  else
+    Result := FDescriptorPool;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FStagingUploader);
   FlushAllDeferredDeletions;
   DestroySwapchain;
   FreeAndNil(FPipelineMap);
@@ -3062,6 +4172,7 @@ begin
   for I := 0 to MaxFramesInFlight - 1 do
   begin
     FreeAndNil(FFrames[I].CommandList);
+    FreeAndNil(FFrames[I].TransientDescriptorAllocator);
     if (FDevice <> nil) and (FFrames[I].ImageAvailableSemaphore <> VK_NULL_HANDLE) then
       vkDestroySemaphore(FDevice, FFrames[I].ImageAvailableSemaphore, nil);
     if (FDevice <> nil) and (FFrames[I].RenderFinishedSemaphore <> VK_NULL_HANDLE) then
@@ -3070,6 +4181,7 @@ begin
       vkDestroyFence(FDevice, FFrames[I].InFlightFence, nil);
   end;
 
+  FreeAndNil(FPersistentDescriptorAllocator);
   if (FDevice <> nil) and (FDescriptorPool <> VK_NULL_HANDLE) then
     vkDestroyDescriptorPool(FDevice, FDescriptorPool, nil);
   if (FDevice <> nil) and (FPipelineCache <> VK_NULL_HANDLE) then
@@ -3301,10 +4413,10 @@ end;
 
 procedure TVulkanRHIDevice.CreateLogicalDevice;
 var
-  QueueCount, I, ExtCount: Cardinal;
+  QueueCount, QueueInfoCount, I, ExtCount: Cardinal;
   QueueProps: array of VkQueueFamilyProperties;
   PresentSupport: VkBool32;
-  QueueInfos: array[0..1] of VkDeviceQueueCreateInfo;
+  QueueInfos: array[0..2] of VkDeviceQueueCreateInfo;
   QueuePriority: Single;
   DynRenderFeatures: VkPhysicalDeviceDynamicRenderingFeatures;
   GplFeatures: VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT;
@@ -3333,6 +4445,7 @@ begin
     end else
       FPresentQueueFamily := FGraphicsQueueFamily;
   end;
+  FTransferQueueFamily := SelectTransferQueueFamilyIndex(QueueProps, FGraphicsQueueFamily, FHasDedicatedTransferQueue);
 
   QueuePriority := 1.0;
   FillChar(QueueInfos, SizeOf(QueueInfos), 0);
@@ -3340,6 +4453,7 @@ begin
   QueueInfos[0].queueFamilyIndex := FGraphicsQueueFamily;
   QueueInfos[0].queueCount := 1;
   QueueInfos[0].pQueuePriorities := @QueuePriority;
+  QueueInfoCount := 1;
 
   FillChar(DynRenderFeatures, SizeOf(DynRenderFeatures), 0);
   DynRenderFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR;
@@ -3412,13 +4526,22 @@ begin
   end;
   if FPresentQueueFamily <> FGraphicsQueueFamily then
   begin
-    QueueInfos[1].sType := VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    QueueInfos[1].queueFamilyIndex := FPresentQueueFamily;
-    QueueInfos[1].queueCount := 1;
-    QueueInfos[1].pQueuePriorities := @QueuePriority;
-    CreateInfo.queueCreateInfoCount := 2;
-  end else
-    CreateInfo.queueCreateInfoCount := 1;
+    QueueInfos[QueueInfoCount].sType := VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    QueueInfos[QueueInfoCount].queueFamilyIndex := FPresentQueueFamily;
+    QueueInfos[QueueInfoCount].queueCount := 1;
+    QueueInfos[QueueInfoCount].pQueuePriorities := @QueuePriority;
+    Inc(QueueInfoCount);
+  end;
+  if (FTransferQueueFamily <> FGraphicsQueueFamily) and
+     (FTransferQueueFamily <> FPresentQueueFamily) then
+  begin
+    QueueInfos[QueueInfoCount].sType := VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    QueueInfos[QueueInfoCount].queueFamilyIndex := FTransferQueueFamily;
+    QueueInfos[QueueInfoCount].queueCount := 1;
+    QueueInfos[QueueInfoCount].pQueuePriorities := @QueuePriority;
+    Inc(QueueInfoCount);
+  end;
+  CreateInfo.queueCreateInfoCount := QueueInfoCount;
   CreateInfo.pQueueCreateInfos := @QueueInfos[0];
   CreateInfo.enabledExtensionCount := ExtCount;
   CreateInfo.ppEnabledExtensionNames := @DeviceExts[0];
@@ -3428,6 +4551,7 @@ begin
 
   vkGetDeviceQueue(FDevice, FGraphicsQueueFamily, 0, @FGraphicsQueue);
   vkGetDeviceQueue(FDevice, FPresentQueueFamily, 0, @FPresentQueue);
+  vkGetDeviceQueue(FDevice, FTransferQueueFamily, 0, @FTransferQueue);
 
   if Assigned(vkCreatePipelineCache) then
   begin
@@ -4081,32 +5205,15 @@ begin
     CheckVk(vkCreateSemaphore(FDevice, @SemInfo, nil, @FFrames[I].RenderFinishedSemaphore), 'vkCreateSemaphore');
     CheckVk(vkCreateFence(FDevice, @FenceInfo, nil, @FFrames[I].InFlightFence), 'vkCreateFence');
     FFrames[I].CommandList := TVulkanRHICommandList.Create(Self, FGraphicsQueueFamily);
+    if FFrames[I].TransientDescriptorAllocator = nil then
+      FFrames[I].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096);
   end;
 end;
 
 procedure TVulkanRHIDevice.CreateDescriptorPool;
-var
-  PoolSizes: array[0..3] of VkDescriptorPoolSize;
-  PoolInfo: VkDescriptorPoolCreateInfo;
 begin
-  if FDevice = nil then Exit;
-
-  PoolSizes[0]._type := VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-  PoolSizes[0].descriptorCount := 2048;
-  PoolSizes[1]._type := VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-  PoolSizes[1].descriptorCount := 512;
-  PoolSizes[2]._type := VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  PoolSizes[2].descriptorCount := 512;
-  PoolSizes[3]._type := VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  PoolSizes[3].descriptorCount := 4096;
-
-  FillChar(PoolInfo, SizeOf(PoolInfo), 0);
-  PoolInfo.sType := VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  PoolInfo.maxSets := 2048;
-  PoolInfo.poolSizeCount := Length(PoolSizes);
-  PoolInfo.pPoolSizes := @PoolSizes[0];
-
-  CheckVk(vkCreateDescriptorPool(FDevice, @PoolInfo, nil, @FDescriptorPool), 'vkCreateDescriptorPool');
+  if FPersistentDescriptorAllocator = nil then
+    FPersistentDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 2048, True, 8192);
 end;
 
 function TVulkanRHIDevice.BeginFrame: TRHICommandList;
@@ -4118,10 +5225,14 @@ begin
 
   { 1. Wait for the GPU to finish executing the previous frame occupying this slot }
   CheckVk(vkWaitForFences(FDevice, 1, @Frame.InFlightFence, VK_TRUE, High(UInt64)), 'vkWaitForFences');
-  { Retire any VkBuffers/VkImages/TVulkanMemoryAllocations destroyed while this slot was in flight }
+  { Retire any VkBuffers/VkImages/VkDescriptorSets/TVulkanMemoryAllocations destroyed while this slot was in flight }
   FlushDeferredDeletions(FFrameIndex);
   if FMemoryAllocator <> nil then
     FMemoryAllocator.GetFrameRingBuffer(FFrameIndex).Reset;
+  if FStagingUploader <> nil then
+    FStagingUploader.ReclaimFrameSlot(FFrameIndex);
+  if Frame.TransientDescriptorAllocator <> nil then
+    Frame.TransientDescriptorAllocator.ResetPools;
   FDeferResourceDestruction := True;
 
   { 2. Acquire next swapchain image }
@@ -4138,6 +5249,8 @@ begin
 
   { 3. Begin command list recording }
   Frame.CommandList.BeginRecording;
+  if FStagingUploader <> nil then
+    FStagingUploader.FlushPendingUploads(Frame.CommandList);
   Result := Frame.CommandList;
   SetActiveCommandList(Result);
 end;
@@ -4152,6 +5265,9 @@ var
 begin
   SetActiveCommandList(nil);
   Frame := FFrames[FFrameIndex];
+
+  if FStagingUploader <> nil then
+    FStagingUploader.FlushPendingUploads(Frame.CommandList);
 
   { Ensure swapchain backbuffer is transitioned to VK_IMAGE_LAYOUT_PRESENT_SRC_KHR }
   Frame.CommandList.TransitionTexture(GetSwapchainColorTexture, rsPresent);
@@ -4195,6 +5311,7 @@ end;
 
 procedure TVulkanRHIDevice.WaitIdle;
 begin
+  FlushStagingUploads;
   if (FDevice <> nil) and Assigned(vkDeviceWaitIdle) then
     vkDeviceWaitIdle(FDevice);
   FlushAllDeferredDeletions;
@@ -4509,6 +5626,7 @@ begin
   if (FDevice = nil) or not Assigned(vkCmdCopyImageToBuffer) then
     Exit;
 
+  FlushStagingUploads;
   VkTex := SourceTexture as TVulkanRHITexture;
   ByteSize := PtrUInt(ReadArea.Width) * PtrUInt(ReadArea.Height) * 4;
   StagingDesc := TRHIBufferDesc.Create(ByteSize, [buTransferDst], muGpuToCpu, 'GrabTextureStaging');

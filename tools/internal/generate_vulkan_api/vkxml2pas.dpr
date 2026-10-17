@@ -1014,7 +1014,7 @@ const
     'VK_FENCE_CREATE_SIGNALED_BIT'
   );
 
-  OrderedEnums3: array[0..62] of String = (
+  OrderedEnums3: array[0..67] of String = (
     'VK_INDEX_TYPE_UINT16',
     'VK_INDEX_TYPE_UINT32',
     'VK_IMAGE_ASPECT_COLOR_BIT',
@@ -1041,6 +1041,9 @@ const
     'VK_PIPELINE_BIND_POINT_GRAPHICS',
     'VK_PIPELINE_BIND_POINT_COMPUTE',
     'VK_QUEUE_GRAPHICS_BIT',
+    'VK_QUEUE_COMPUTE_BIT',
+    'VK_QUEUE_TRANSFER_BIT',
+    'VK_QUEUE_SPARSE_BINDING_BIT',
     'VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR',
     'VK_VERTEX_INPUT_RATE_VERTEX',
     'VK_VERTEX_INPUT_RATE_INSTANCE',
@@ -1080,7 +1083,10 @@ const
     'VK_FORMAT_FEATURE_BLIT_DST_BIT',
     'VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT',
     'VK_FORMAT_FEATURE_TRANSFER_SRC_BIT',
-    'VK_FORMAT_FEATURE_TRANSFER_DST_BIT'
+    'VK_FORMAT_FEATURE_TRANSFER_DST_BIT',
+    // Descriptor Pool Growth & Reset Flags
+    'VK_ERROR_OUT_OF_POOL_MEMORY',
+    'VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT'
   );
 
   OrderedStructs: array[0..77] of String = (
@@ -1291,7 +1297,7 @@ const
     'vkCmdDrawIndirect'
   );
 
-  OrderedCommands2: array[0..14] of String = (
+  OrderedCommands2: array[0..15] of String = (
     'vkEnumerateInstanceVersion',
     'vkGetPhysicalDeviceFeatures2',
     'vkGetPhysicalDeviceProperties2',
@@ -1306,7 +1312,8 @@ const
     'vkGetImageMemoryRequirements2',
     'vkGetPhysicalDeviceFormatProperties',
     'vkFlushMappedMemoryRanges',
-    'vkInvalidateMappedMemoryRanges'
+    'vkInvalidateMappedMemoryRanges',
+    'vkResetDescriptorPool'
   );
 
   InstanceCommands: array[0..17] of String = (
@@ -1439,6 +1446,7 @@ begin
     L.Add('  VkSamplerMipmapMode = Integer;');
     L.Add('  VkSamplerAddressMode = Integer;');
     L.Add('  VkGraphicsPipelineLibraryFlagsEXT = VkFlags;');
+    L.Add('  VkQueueFlags = VkFlags;');
     L.Add('');
     L.Add('  { Pointers to primitive types }');
     L.Add('  PCardinal = ^Cardinal;');
