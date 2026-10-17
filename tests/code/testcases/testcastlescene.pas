@@ -52,6 +52,8 @@ type
     { PrepareResources with prShadowVolume calculates shadow volume edges
       only for scenes that cast shadows. }
     procedure TestPrepareShadowVolumesOnlyCasters;
+    { Positional light with RadiusFalloff fades smoothly to zero at its radius. }
+    procedure TestLightRadiusFalloff;
   end;
 
 implementation
@@ -1114,6 +1116,124 @@ begin
     CheckShadow('invisible caster, camera in the shadow (z-fail)', Lit);
 
     CheckGLErrors('TestShadowVolumesInvisibleCaster');
+    Window.Close;
+  finally DestroyWindowForTest(Window) end;
+end;
+
+procedure TTestScene.TestLightRadiusFalloff;
+var
+  Window: TCastleWindow;
+  Viewport: TCastleViewport;
+  Light: TCastlePointLight;
+  FloorScene: TCastleScene;
+  LightNode: TPointLightNode;
+
+  function BuildFloor: TX3DRootNode;
+  var
+    Shape: TShapeNode;
+    FloorBox: TBoxNode;
+    Transform: TTransformNode;
+  begin
+    FloorBox := TBoxNode.CreateWithShape(Shape);
+    FloorBox.Size := Vector3(30, 0.2, 30);
+    Shape.Material := TMaterialNode.Create;
+    Transform := TTransformNode.Create;
+    Transform.Translation := Vector3(0, -0.1, 0);
+    Transform.AddChildren(Shape);
+    Result := TX3DRootNode.Create;
+    Result.AddChildren(Transform);
+  end;
+
+  { Brightness of the floor at world (X, 0, 0) on the screen. }
+  function FloorBrightness(const X: Single): Single;
+  var
+    Image: TCastleImage;
+    P: TVector2;
+    C: TCastleColor;
+  begin
+    Image := Window.SaveScreen;
+    try
+      P := Viewport.PositionFromWorld(Vector3(X, 0, 0));
+      C := Image.Colors[Round(P.X), Round(P.Y), 0];
+      Result := (C.X + C.Y + C.Z) / 3;
+    finally FreeAndNil(Image) end;
+  end;
+
+const
+  { The light is 5 above the floor, its radius is 10.
+    Floor points at these X are at distance 5, 9 and 11 from the light. }
+  XHalf = 0;
+  XNear = 7.4833; // Sqrt(9 * 9 - 5 * 5)
+  XOut = 9.798; // Sqrt(11 * 11 - 5 * 5)
+var
+  HardHalf, HardNear, SmoothHalf, SmoothNear: Single;
+begin
+  { attenuation computed on the CPU (ray-tracer) }
+  LightNode := TPointLightNode.Create;
+  try
+    LightNode.Radius := 10;
+    AssertSameValue(1, LightNode.CalculateAttenuation(9), 0.0001);
+    LightNode.RadiusFalloff := true;
+    AssertSameValue(1, LightNode.CalculateAttenuation(0), 0.0001);
+    AssertSameValue(Sqr(1 - Sqr(Sqr(0.5))), LightNode.CalculateAttenuation(5), 0.0001);
+    AssertSameValue(Sqr(1 - Sqr(Sqr(0.9))), LightNode.CalculateAttenuation(9), 0.0001);
+    AssertSameValue(0, LightNode.CalculateAttenuation(11), 0.0001);
+    { no radius: no falloff }
+    LightNode.Radius := -1;
+    AssertSameValue(1, LightNode.CalculateAttenuation(50), 0.0001);
+  finally FreeAndNil(LightNode) end;
+
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  Window := CreateWindowForTest;
+  try
+    Window.Width := 300;
+    Window.Height := 300;
+    Window.Open;
+
+    Viewport := TCastleViewport.Create(Window);
+    Viewport.FullSize := true;
+    Viewport.BackgroundColor := Black;
+    { looking down at the floor }
+    Viewport.Camera.SetView(Vector3(5, 25, 0), Vector3(0, -1, 0), Vector3(0, 0, -1));
+    Window.Controls.InsertFront(Viewport);
+
+    Light := TCastlePointLight.Create(Window);
+    Light.Translation := Vector3(0, 5, 0);
+    Light.Radius := 10;
+    Light.Intensity := 1;
+    Light.Attenuation := Vector3(1, 0, 0); // no attenuation, only the radius
+    Viewport.Items.Add(Light);
+
+    FloorScene := TCastleScene.Create(Window);
+    FloorScene.Load(BuildFloor, true);
+    Viewport.Items.Add(FloorScene);
+
+    { hard cut-off at the radius }
+    HardHalf := FloorBrightness(XHalf);
+    HardNear := FloorBrightness(XNear);
+    AssertTrue(HardHalf > 0.2);
+    AssertTrue(HardNear > 0.2);
+    AssertTrue(FloorBrightness(XOut) < 0.1);
+
+    { smooth falloff: (1 - ratio^4)^2 is 0.88 at half the radius,
+      0.12 at 0.9 of the radius }
+    Light.RadiusFalloff := true;
+    SmoothHalf := FloorBrightness(XHalf);
+    SmoothNear := FloorBrightness(XNear);
+    if not ((SmoothHalf > HardHalf * 0.8) and (SmoothHalf < HardHalf * 0.95)) then
+      Fail(Format('Floor at half the radius: %f with falloff, %f without (expected about 0.88 of it)',
+        [SmoothHalf, HardHalf]));
+    if not ((SmoothNear > HardNear * 0.05) and (SmoothNear < HardNear * 0.2)) then
+      Fail(Format('Floor at 0.9 of the radius: %f with falloff, %f without (expected about 0.12 of it)',
+        [SmoothNear, HardNear]));
+    AssertTrue(FloorBrightness(XOut) < 0.1);
+
+    CheckGLErrors('TestLightRadiusFalloff');
     Window.Close;
   finally DestroyWindowForTest(Window) end;
 end;

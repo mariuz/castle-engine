@@ -1,0 +1,18 @@
+{
+  "asset" : { "version" : "2.0" },
+  "extensionsUsed" : [ "KHR_lights_punctual" ],
+  "extensions" : {
+    "KHR_lights_punctual" : {
+      "lights" : [
+        { "name" : "PointWithRange", "type" : "point", "intensity" : 10, "range" : 5 },
+        { "name" : "SpotWithoutRange", "type" : "spot", "intensity" : 10, "spot" : { "outerConeAngle" : 0.5 } }
+      ]
+    }
+  },
+  "scene" : 0,
+  "scenes" : [ { "nodes" : [ 0, 1 ] } ],
+  "nodes" : [
+    { "name" : "PointLightNode", "translation" : [ 0, 2, 0 ], "extensions" : { "KHR_lights_punctual" : { "light" : 0 } } },
+    { "name" : "SpotLightNode", "translation" : [ 3, 2, 0 ], "extensions" : { "KHR_lights_punctual" : { "light" : 1 } } }
+  ]
+}

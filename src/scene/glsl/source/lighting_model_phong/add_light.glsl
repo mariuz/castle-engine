@@ -128,8 +128,16 @@ void PLUG_add_light(inout vec4 color,
 #endif
 
 #ifdef LIGHT<Light>_HAS_RADIUS
+  #ifdef LIGHT<Light>_HAS_RADIUS_FALLOFF
+  /* Smooth falloff to zero at the radius,
+     the window function recommended by glTF KHR_lights_punctual for "range". */
+  float radius_ratio = distance_to_light / castle_LightSource<Light>Radius;
+  float radius_window = clamp(1.0 - radius_ratio * radius_ratio * radius_ratio * radius_ratio, 0.0, 1.0);
+  scale *= radius_window * radius_window;
+  #else
   if (distance_to_light >= castle_LightSource<Light>Radius)
     scale = 0.0;
+  #endif
 #endif
 
   /* add ambient term */

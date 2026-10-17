@@ -32,6 +32,8 @@ type
     procedure TestRoundTripGltfFile;
     procedure TestDuplicateIdenticalSkins;
     procedure TestNonIdenticalSkins;
+    { KHR_lights_punctual "range" makes the light fade to zero at it (RadiusFalloff). }
+    procedure TestPunctualLightRange;
   end;
 
 implementation
@@ -474,6 +476,28 @@ begin
       AssertEquals('Both meshes must remain present in the scene',
         2, Counter.TotalShapes);
     finally FreeAndNil(Counter) end;
+  finally FreeAndNil(Loaded) end;
+end;
+
+
+procedure TTestX3DLoadGltf.TestPunctualLightRange;
+var
+  Loaded: TX3DRootNode;
+  Point: TPointLightNode;
+  Spot: TSpotLightNode;
+begin
+  Loaded := LoadNode('castle-data:/gltf/punctual_lights_range.gltf');
+  try
+    Point := Loaded.FindNode(TPointLightNode, false) as TPointLightNode;
+    AssertSameValue(5, Point.Radius);
+    AssertTrue(Point.RadiusFalloff);
+    AssertTrue(Point.HasRadiusFalloff);
+    AssertVectorEquals(Vector3(0, 0, 1), Point.Attenuation);
+
+    { no range: no radius, so the falloff is ignored }
+    Spot := Loaded.FindNode(TSpotLightNode, false) as TSpotLightNode;
+    AssertSameValue(-1, Spot.Radius);
+    AssertFalse(Spot.HasRadiusFalloff);
   finally FreeAndNil(Loaded) end;
 end;
 

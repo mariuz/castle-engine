@@ -118,6 +118,8 @@ X3DPositionalLightNode : X3DPunctualLightNode {
     # As an extension to X3D, CGE allows radius -1 to indicate "no radius"
     range: [0,Inf) or -1
     change: chLightInstanceProperty
+  SFBool [in,out] radiusFalloff     FALSE
+    doc: Make the light fade smoothly to zero at its @link(Radius), instead of cutting it off there. The light's intensity (after @link(Attenuation)) is multiplied by @code(clamp(1 - (distance / radius)^4, 0, 1)^2), the window function recommended for the "range" of glTF @url(https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_lights_punctual/README.md KHR_lights_punctual) lights. Ignored when the radius is <= 0 (no radius). This is a Castle Game Engine extension.
 }
 
 X3DPointLightNode : X3DPositionalLightNode {
