@@ -522,6 +522,7 @@ type
     SupportsETC2Compression: Boolean;
     SupportsComputeShaders: Boolean;
     SupportsMultiDrawIndirect: Boolean;
+    SupportsDrawIndirectCount: Boolean;
     SupportsBindlessTextures: Boolean;
     MaxBindlessTextures: Cardinal;
     SupportsExtendedDynamicState: Boolean;
@@ -725,6 +726,14 @@ type
       const Offset: PtrUInt; const DrawCount, Stride: Cardinal); virtual; abstract;
     procedure DrawIndexedIndirect(const IndirectBuffer: TRHIBuffer;
       const Offset: PtrUInt; const DrawCount, Stride: Cardinal); virtual; abstract;
+    { GPU-driven indirect draw with count read from a GPU buffer
+      (Vulkan 1.2 Core / VK_KHR_draw_indirect_count). }
+    procedure DrawIndirectCount(const IndirectBuffer: TRHIBuffer;
+      const Offset: PtrUInt; const CountBuffer: TRHIBuffer;
+      const CountBufferOffset: PtrUInt; const MaxDrawCount, Stride: Cardinal); virtual;
+    procedure DrawIndexedIndirectCount(const IndirectBuffer: TRHIBuffer;
+      const Offset: PtrUInt; const CountBuffer: TRHIBuffer;
+      const CountBufferOffset: PtrUInt; const MaxDrawCount, Stride: Cardinal); virtual;
 
     { Secondary Command List Execution (Multi-threaded recording) }
     procedure ExecuteCommands(const SecondaryCommandLists: array of TRHICommandList); virtual; abstract;
@@ -1267,6 +1276,20 @@ end;
 procedure TRHICommandList.WriteTimestamp(const QueryPool: TRHIQueryPool;
   const QueryIndex: Cardinal; const Stage: TRHIShaderStage);
 begin
+end;
+
+procedure TRHICommandList.DrawIndirectCount(const IndirectBuffer: TRHIBuffer;
+  const Offset: PtrUInt; const CountBuffer: TRHIBuffer;
+  const CountBufferOffset: PtrUInt; const MaxDrawCount, Stride: Cardinal);
+begin
+  DrawIndirect(IndirectBuffer, Offset, MaxDrawCount, Stride);
+end;
+
+procedure TRHICommandList.DrawIndexedIndirectCount(const IndirectBuffer: TRHIBuffer;
+  const Offset: PtrUInt; const CountBuffer: TRHIBuffer;
+  const CountBufferOffset: PtrUInt; const MaxDrawCount, Stride: Cardinal);
+begin
+  DrawIndexedIndirect(IndirectBuffer, Offset, MaxDrawCount, Stride);
 end;
 
 { TRHIDevice }

@@ -241,6 +241,9 @@ type
     FSync2BarrierCount: Cardinal;
     FComputeDispatchCount: Cardinal;
     FDynamicStateChangeCount: Cardinal;
+    FIndirectDrawCallCount: Cardinal;
+    FIndirectCountDrawCallCount: Cardinal;
+    FLastEffectiveIndirectDrawCount: Cardinal;
     FDynamicCullMode: TRHICullMode;
     FDynamicFrontFace: TRHIFrontFace;
     FDynamicDepthTestEnable: Boolean;
@@ -316,6 +319,12 @@ type
       const Offset: PtrUInt; const DrawCount, Stride: Cardinal); override;
     procedure DrawIndexedIndirect(const IndirectBuffer: TRHIBuffer;
       const Offset: PtrUInt; const DrawCount, Stride: Cardinal); override;
+    procedure DrawIndirectCount(const IndirectBuffer: TRHIBuffer;
+      const Offset: PtrUInt; const CountBuffer: TRHIBuffer;
+      const CountBufferOffset: PtrUInt; const MaxDrawCount, Stride: Cardinal); override;
+    procedure DrawIndexedIndirectCount(const IndirectBuffer: TRHIBuffer;
+      const Offset: PtrUInt; const CountBuffer: TRHIBuffer;
+      const CountBufferOffset: PtrUInt; const MaxDrawCount, Stride: Cardinal); override;
 
     procedure ExecuteCommands(const SecondaryCommandLists: array of TRHICommandList); override;
 
@@ -328,6 +337,9 @@ type
     property Sync2BarrierCount: Cardinal read FSync2BarrierCount;
     property ComputeDispatchCount: Cardinal read FComputeDispatchCount;
     property DynamicStateChangeCount: Cardinal read FDynamicStateChangeCount;
+    property IndirectDrawCallCount: Cardinal read FIndirectDrawCallCount;
+    property IndirectCountDrawCallCount: Cardinal read FIndirectCountDrawCallCount;
+    property LastEffectiveIndirectDrawCount: Cardinal read FLastEffectiveIndirectDrawCount;
     property DynamicCullMode: TRHICullMode read FDynamicCullMode;
     property DynamicFrontFace: TRHIFrontFace read FDynamicFrontFace;
     property DynamicDepthTestEnable: Boolean read FDynamicDepthTestEnable;
@@ -726,6 +738,13 @@ type
     function DispatchCulling(const ACmd: TRHICommandList;
       const AInstanceCount: Cardinal;
       const ACompactDraws: Boolean = False): Cardinal;
+
+    { Records a GPU-driven multi-draw indirect command (vkCmdDrawIndexedIndirectCount /
+      DrawIndexedIndirectCount) reading compacted commands from IndirectOutputBuffer and
+      the atomic visible draw count from offset 0 of VisibilityOutputBuffer without CPU readback.
+      Returns the effective draw count bounded by AMaxDrawCount (or LastUploadedInstanceCount if 0). }
+    function RecordIndirectDraw(const ACmd: TRHICommandList;
+      const AMaxDrawCount: Cardinal = 0): Cardinal;
 
     { Reads back the atomic visible instance count from VisibilityOutputBuffer. }
     function ReadBackVisibleCount: Cardinal;
@@ -3601,6 +3620,9 @@ begin
   FSync2BarrierCount := 0;
   FComputeDispatchCount := 0;
   FDynamicStateChangeCount := 0;
+  FIndirectDrawCallCount := 0;
+  FIndirectCountDrawCallCount := 0;
+  FLastEffectiveIndirectDrawCount := 0;
 end;
 
 procedure TVulkanRHICommandList.EndRecording;
@@ -4372,7 +4394,10 @@ end;
 procedure TVulkanRHICommandList.DrawIndirect(const IndirectBuffer: TRHIBuffer;
   const Offset: PtrUInt; const DrawCount, Stride: Cardinal);
 begin
-  if (FHandle <> nil) and Assigned(vkCmdDrawIndirect) and Assigned(IndirectBuffer) then
+  if IndirectBuffer = nil then Exit;
+  Inc(FIndirectDrawCallCount);
+  FLastEffectiveIndirectDrawCount := DrawCount;
+  if (FHandle <> nil) and Assigned(vkCmdDrawIndirect) then
     vkCmdDrawIndirect(FHandle, (IndirectBuffer as TVulkanRHIBuffer).Handle,
       Offset, DrawCount, Stride);
 end;
@@ -4380,9 +4405,90 @@ end;
 procedure TVulkanRHICommandList.DrawIndexedIndirect(const IndirectBuffer: TRHIBuffer;
   const Offset: PtrUInt; const DrawCount, Stride: Cardinal);
 begin
-  if (FHandle <> nil) and Assigned(vkCmdDrawIndexedIndirect) and Assigned(IndirectBuffer) then
+  if IndirectBuffer = nil then Exit;
+  Inc(FIndirectDrawCallCount);
+  FLastEffectiveIndirectDrawCount := DrawCount;
+  if (FHandle <> nil) and Assigned(vkCmdDrawIndexedIndirect) then
     vkCmdDrawIndexedIndirect(FHandle, (IndirectBuffer as TVulkanRHIBuffer).Handle,
       Offset, DrawCount, Stride);
+end;
+
+procedure TVulkanRHICommandList.DrawIndirectCount(const IndirectBuffer: TRHIBuffer;
+  const Offset: PtrUInt; const CountBuffer: TRHIBuffer;
+  const CountBufferOffset: PtrUInt; const MaxDrawCount, Stride: Cardinal);
+var
+  EffectiveCount: Cardinal;
+  MappedPtr: Pointer;
+begin
+  if (IndirectBuffer = nil) or (CountBuffer = nil) then Exit;
+
+  EffectiveCount := MaxDrawCount;
+  if (CountBuffer.Desc.MemoryUsage in [muCpuToGpu, muGpuToCpu]) and
+     (CountBufferOffset + SizeOf(Cardinal) <= CountBuffer.Desc.Size) then
+  begin
+    MappedPtr := CountBuffer.Map;
+    try
+      if MappedPtr <> nil then
+        EffectiveCount := Min(MaxDrawCount, PCardinal(PtrUInt(MappedPtr) + CountBufferOffset)^);
+    finally
+      CountBuffer.Unmap;
+    end;
+  end;
+
+  Inc(FIndirectDrawCallCount);
+  Inc(FIndirectCountDrawCallCount);
+  FLastEffectiveIndirectDrawCount := EffectiveCount;
+
+  if (FHandle <> nil) and (FDevice <> nil) and
+     FDevice.Capabilities.SupportsDrawIndirectCount and Assigned(vkCmdDrawIndirectCount) then
+    vkCmdDrawIndirectCount(FHandle,
+      (IndirectBuffer as TVulkanRHIBuffer).Handle, Offset,
+      (CountBuffer as TVulkanRHIBuffer).Handle, CountBufferOffset,
+      MaxDrawCount, Stride)
+  else
+  if (FHandle <> nil) and Assigned(vkCmdDrawIndirect) then
+    vkCmdDrawIndirect(FHandle,
+      (IndirectBuffer as TVulkanRHIBuffer).Handle, Offset,
+      EffectiveCount, Stride);
+end;
+
+procedure TVulkanRHICommandList.DrawIndexedIndirectCount(const IndirectBuffer: TRHIBuffer;
+  const Offset: PtrUInt; const CountBuffer: TRHIBuffer;
+  const CountBufferOffset: PtrUInt; const MaxDrawCount, Stride: Cardinal);
+var
+  EffectiveCount: Cardinal;
+  MappedPtr: Pointer;
+begin
+  if (IndirectBuffer = nil) or (CountBuffer = nil) then Exit;
+
+  EffectiveCount := MaxDrawCount;
+  if (CountBuffer.Desc.MemoryUsage in [muCpuToGpu, muGpuToCpu]) and
+     (CountBufferOffset + SizeOf(Cardinal) <= CountBuffer.Desc.Size) then
+  begin
+    MappedPtr := CountBuffer.Map;
+    try
+      if MappedPtr <> nil then
+        EffectiveCount := Min(MaxDrawCount, PCardinal(PtrUInt(MappedPtr) + CountBufferOffset)^);
+    finally
+      CountBuffer.Unmap;
+    end;
+  end;
+
+  Inc(FIndirectDrawCallCount);
+  Inc(FIndirectCountDrawCallCount);
+  FLastEffectiveIndirectDrawCount := EffectiveCount;
+
+  if (FHandle <> nil) and (FDevice <> nil) and
+     FDevice.Capabilities.SupportsDrawIndirectCount and Assigned(vkCmdDrawIndexedIndirectCount) then
+    vkCmdDrawIndexedIndirectCount(FHandle,
+      (IndirectBuffer as TVulkanRHIBuffer).Handle, Offset,
+      (CountBuffer as TVulkanRHIBuffer).Handle, CountBufferOffset,
+      MaxDrawCount, Stride)
+  else
+  if (FHandle <> nil) and Assigned(vkCmdDrawIndexedIndirect) then
+    vkCmdDrawIndexedIndirect(FHandle,
+      (IndirectBuffer as TVulkanRHIBuffer).Handle, Offset,
+      EffectiveCount, Stride);
 end;
 
 procedure TVulkanRHICommandList.ExecuteCommands(const SecondaryCommandLists: array of TRHICommandList);
@@ -5918,6 +6024,32 @@ begin
   Result := GroupCountX;
 end;
 
+function TCastleVulkanComputeCuller.RecordIndirectDraw(const ACmd: TRHICommandList;
+  const AMaxDrawCount: Cardinal): Cardinal;
+var
+  MaxDraws: Cardinal;
+begin
+  EnsureResourcesCreated;
+  if AMaxDrawCount > 0 then
+    MaxDraws := Min(FMaxInstances, AMaxDrawCount)
+  else
+    MaxDraws := Min(FMaxInstances, FLastUploadedInstanceCount);
+
+  if (ACmd = nil) or (MaxDraws = 0) or
+     (FIndirectOutputBuffer = nil) or (FVisibilityOutputBuffer = nil) then
+    Exit(0);
+
+  ACmd.DrawIndexedIndirectCount(
+    FIndirectOutputBuffer, 0,
+    FVisibilityOutputBuffer, 0,
+    MaxDraws, SizeOf(TRHIDrawIndexedIndirectCommand));
+
+  if ACmd is TVulkanRHICommandList then
+    Result := TVulkanRHICommandList(ACmd).LastEffectiveIndirectDrawCount
+  else
+    Result := Min(MaxDraws, FLastVisibleInstanceCount);
+end;
+
 function TCastleVulkanComputeCuller.ReadBackVisibleCount: Cardinal;
 var
   MappedVis: PCardinal;
@@ -6037,6 +6169,8 @@ begin
   FCapabilities.Backend := rbVulkan;
   FCapabilities.MaxFramebufferSampleCount := 8;
   FCapabilities.SupportsComputeShaders := True;
+  FCapabilities.SupportsMultiDrawIndirect := True;
+  FCapabilities.SupportsDrawIndirectCount := ADeviceApiVersion >= VK_API_VERSION_1_2;
   FCapabilities.TimestampPeriodNanoseconds := 1.0;
   FPhysicalDevice := APhysicalDevice;
   FInstanceApiVersion := ADeviceApiVersion;
@@ -6710,6 +6844,9 @@ begin
   FCapabilities.SupportsETC2Compression := Features.textureCompressionETC2 = VK_TRUE;
   FCapabilities.SupportsComputeShaders := True;
   FCapabilities.SupportsMultiDrawIndirect := Features.multiDrawIndirect = VK_TRUE;
+  FCapabilities.SupportsDrawIndirectCount :=
+    (FDeviceApiVersion >= VK_API_VERSION_1_2) or
+    IsDeviceExtensionSupported(VK_KHR_draw_indirect_count);
   FCapabilities.SupportsBindlessTextures := FSupportsBindlessTextures;
   FCapabilities.MaxBindlessTextures := FMaxBindlessTextures;
   FCapabilities.SupportsExtendedDynamicState := FSupportsExtendedDynamicState;

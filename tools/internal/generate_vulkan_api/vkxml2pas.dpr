@@ -1412,11 +1412,13 @@ const
     'vkCmdDrawIndirect'
   );
 
-  OrderedCommands2: array[0..35] of String = (
+  OrderedCommands2: array[0..37] of String = (
     'vkEnumerateInstanceVersion',
     'vkGetPhysicalDeviceFeatures2',
     'vkGetPhysicalDeviceProperties2',
     'vkCmdDrawIndexedIndirect',
+    'vkCmdDrawIndirectCount',
+    'vkCmdDrawIndexedIndirectCount',
     'vkCmdSetDepthBias',
     'vkCreatePipelineCache',
     'vkDestroyPipelineCache',
@@ -1541,6 +1543,7 @@ begin
     L.Add('  VK_EXT_memory_budget = ''VK_EXT_memory_budget'';');
     L.Add('  VK_KHR_create_renderpass2 = ''VK_KHR_create_renderpass2'';');
     L.Add('  VK_KHR_depth_stencil_resolve = ''VK_KHR_depth_stencil_resolve'';');
+    L.Add('  VK_KHR_draw_indirect_count = ''VK_KHR_draw_indirect_count'';');
     L.Add('  VK_KHR_dynamic_rendering = ''VK_KHR_dynamic_rendering'';');
     L.Add('  VK_KHR_get_physical_device_properties2 = ''VK_KHR_get_physical_device_properties2'';');
     L.Add('  VK_KHR_maintenance1 = ''VK_KHR_maintenance1'';');
@@ -1875,7 +1878,9 @@ begin
          (CmdName = 'vkSignalSemaphore') or
          (CmdName = 'vkGetSemaphoreCounterValue') or
          (CmdName = 'vkGetBufferMemoryRequirements2') or
-         (CmdName = 'vkGetImageMemoryRequirements2') then
+         (CmdName = 'vkGetImageMemoryRequirements2') or
+         (CmdName = 'vkCmdDrawIndirectCount') or
+         (CmdName = 'vkCmdDrawIndexedIndirectCount') then
       begin
         L.Add(Format('  if not Assigned(%s) then', [CmdName]));
         L.Add(Format('    Pointer(%s) := vkGetInstanceProcAddr(nil, ''%sKHR'');', [CmdName, CmdName]));

@@ -479,6 +479,7 @@ const
   VK_EXT_memory_budget = 'VK_EXT_memory_budget';
   VK_KHR_create_renderpass2 = 'VK_KHR_create_renderpass2';
   VK_KHR_depth_stencil_resolve = 'VK_KHR_depth_stencil_resolve';
+  VK_KHR_draw_indirect_count = 'VK_KHR_draw_indirect_count';
   VK_KHR_dynamic_rendering = 'VK_KHR_dynamic_rendering';
   VK_KHR_get_physical_device_properties2 = 'VK_KHR_get_physical_device_properties2';
   VK_KHR_maintenance1 = 'VK_KHR_maintenance1';
@@ -2109,6 +2110,8 @@ type
   PFN_vkGetPhysicalDeviceFeatures2 = procedure(physicalDevice: VkPhysicalDevice; pFeatures: PVkPhysicalDeviceFeatures2); VKAPI_CALL;
   PFN_vkGetPhysicalDeviceProperties2 = procedure(physicalDevice: VkPhysicalDevice; pProperties: PVkPhysicalDeviceProperties2); VKAPI_CALL;
   PFN_vkCmdDrawIndexedIndirect = procedure(commandBuffer: VkCommandBuffer; buffer: VkBuffer; offset: VkDeviceSize; drawCount: Cardinal; stride: Cardinal); VKAPI_CALL;
+  PFN_vkCmdDrawIndirectCount = procedure(commandBuffer: VkCommandBuffer; buffer: VkBuffer; offset: VkDeviceSize; countBuffer: VkBuffer; countBufferOffset: VkDeviceSize; maxDrawCount: Cardinal; stride: Cardinal); VKAPI_CALL;
+  PFN_vkCmdDrawIndexedIndirectCount = procedure(commandBuffer: VkCommandBuffer; buffer: VkBuffer; offset: VkDeviceSize; countBuffer: VkBuffer; countBufferOffset: VkDeviceSize; maxDrawCount: Cardinal; stride: Cardinal); VKAPI_CALL;
   PFN_vkCmdSetDepthBias = procedure(commandBuffer: VkCommandBuffer; depthBiasConstantFactor: Single; depthBiasClamp: Single; depthBiasSlopeFactor: Single); VKAPI_CALL;
   PFN_vkCreatePipelineCache = function(device: VkDevice; const pCreateInfo: PVkPipelineCacheCreateInfo; const pAllocator: PVkAllocationCallbacks; pPipelineCache: PVkPipelineCache): VkResult; VKAPI_CALL;
   PFN_vkDestroyPipelineCache = procedure(device: VkDevice; pipelineCache: VkPipelineCache; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
@@ -2243,6 +2246,8 @@ var
   vkGetPhysicalDeviceFeatures2: PFN_vkGetPhysicalDeviceFeatures2;
   vkGetPhysicalDeviceProperties2: PFN_vkGetPhysicalDeviceProperties2;
   vkCmdDrawIndexedIndirect: PFN_vkCmdDrawIndexedIndirect;
+  vkCmdDrawIndirectCount: PFN_vkCmdDrawIndirectCount;
+  vkCmdDrawIndexedIndirectCount: PFN_vkCmdDrawIndexedIndirectCount;
   vkCmdSetDepthBias: PFN_vkCmdSetDepthBias;
   vkCreatePipelineCache: PFN_vkCreatePipelineCache;
   vkDestroyPipelineCache: PFN_vkDestroyPipelineCache;
@@ -2496,6 +2501,12 @@ begin
   Pointer(vkGetPhysicalDeviceFeatures2) := vkGetInstanceProcAddr(nil, 'vkGetPhysicalDeviceFeatures2');
   Pointer(vkGetPhysicalDeviceProperties2) := vkGetInstanceProcAddr(nil, 'vkGetPhysicalDeviceProperties2');
   Pointer(vkCmdDrawIndexedIndirect) := vkGetInstanceProcAddr(nil, 'vkCmdDrawIndexedIndirect');
+  Pointer(vkCmdDrawIndirectCount) := vkGetInstanceProcAddr(nil, 'vkCmdDrawIndirectCount');
+  if not Assigned(vkCmdDrawIndirectCount) then
+    Pointer(vkCmdDrawIndirectCount) := vkGetInstanceProcAddr(nil, 'vkCmdDrawIndirectCountKHR');
+  Pointer(vkCmdDrawIndexedIndirectCount) := vkGetInstanceProcAddr(nil, 'vkCmdDrawIndexedIndirectCount');
+  if not Assigned(vkCmdDrawIndexedIndirectCount) then
+    Pointer(vkCmdDrawIndexedIndirectCount) := vkGetInstanceProcAddr(nil, 'vkCmdDrawIndexedIndirectCountKHR');
   Pointer(vkCmdSetDepthBias) := vkGetInstanceProcAddr(nil, 'vkCmdSetDepthBias');
   Pointer(vkCreatePipelineCache) := vkGetInstanceProcAddr(nil, 'vkCreatePipelineCache');
   Pointer(vkDestroyPipelineCache) := vkGetInstanceProcAddr(nil, 'vkDestroyPipelineCache');

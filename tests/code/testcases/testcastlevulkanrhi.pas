@@ -29,7 +29,7 @@ uses
   CastleInternalShaderRHI, CastleInternalBatch2DRHI, CastleInternalRenderer,
   CastleRendererInternalLights, X3DNodes,
   CastleSceneInternalShape, CastleInternalOcclusionCulling,
-  CastleTransform, CastleViewport, CastleRenderOptions, CastleWindow,
+  CastleTransform, CastleViewport, CastleScreenEffects, CastleRenderOptions, CastleWindow,
   ToolManifest, CastleInternalRenderDoc;
 
 type
@@ -86,6 +86,9 @@ type
     procedure TestRHIOcclusionCullingRendererIntegration;
     procedure TestGpuDrivenComputeFrustumAndDistanceCulling;
     procedure TestViewportLiveDiagnosticsAndWindowAntiAliasingSync;
+    procedure TestRenderToTextureRHIBackend;
+    procedure TestScreenEffectsRHIPingPongExecution;
+    procedure TestDrawIndirectCountAndComputeCullerPipeline;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -3771,6 +3774,278 @@ begin
     FreeAndNil(Viewport);
     FreeAndNil(CmdList);
     FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRenderToTextureRHIBackend;
+var
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  SavedDevice: TRHIDevice;
+  SavedCmdList: TRHICommandList;
+  RTTColor, RTTDepth, RTTColorDepth, RTTMSAA: TGLRenderToTexture;
+  ExtColorTex, ExtDepthTex: TRHITexture;
+  CapturedImg: TCastleImage;
+begin
+  SavedDevice := RHIDevice;
+  SavedCmdList := ActiveCommandList;
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0, cllPrimary);
+  RTTColor := nil;
+  RTTDepth := nil;
+  RTTColorDepth := nil;
+  RTTMSAA := nil;
+  ExtColorTex := nil;
+  ExtDepthTex := nil;
+  CapturedImg := nil;
+  try
+    SetRHIDevice(VkDev);
+    SetActiveCommandList(CmdList);
+    CmdList.BeginRecording;
+
+    { 1. tbColor with automatic RHI texture allocation, GenerateMipmap, and SaveScreen }
+    AssertFalse('OffscreenRendering must be False initially', OffscreenRendering);
+    RTTColor := TGLRenderToTexture.Create(128, 64);
+    RTTColor.Buffer := tbColor;
+    RTTColor.GLContextOpen;
+    AssertTrue('RTTColor.RHIInitialized must be True after GLContextOpen', RTTColor.RHIInitialized);
+    AssertTrue('RTTColor.RHIColorTexture must be allocated', RTTColor.RHIColorTexture <> nil);
+    AssertTrue('RTTColor.RHIDepthTexture must be allocated', RTTColor.RHIDepthTexture <> nil);
+    AssertEquals('RTTColor.ColorBuffer must be cbColorAttachment0', Ord(cbColorAttachment0), Ord(RTTColor.ColorBuffer));
+
+    RTTColor.RenderBegin;
+    AssertTrue('OffscreenRendering must be True inside RenderBegin..RenderEnd', OffscreenRendering);
+    AssertEquals('RTTColor.RHIRenderPassCount must be 1', 1, RTTColor.RHIRenderPassCount);
+    CapturedImg := RTTColor.SaveScreen(TRGBAlphaImage, Rectangle(0, 0, 128, 64));
+    AssertTrue('SaveScreen must return non-nil TRGBAlphaImage', CapturedImg is TRGBAlphaImage);
+    AssertEquals('CapturedImg.Width must be 128', 128, CapturedImg.Width);
+    AssertEquals('CapturedImg.Height must be 64', 64, CapturedImg.Height);
+    RTTColor.RenderEnd;
+    AssertFalse('OffscreenRendering must be False after RenderEnd', OffscreenRendering);
+    AssertEquals('RTTColor.RHIColorTexture must transition to rsShaderRead after RenderEnd',
+      Ord(rsShaderRead), Ord(RTTColor.RHIColorTexture.CurrentState));
+    RTTColor.GenerateMipmap;
+
+    { 2. tbDepth for shadow map rendering }
+    RTTDepth := TGLRenderToTexture.Create(256, 256);
+    RTTDepth.Buffer := tbDepth;
+    RTTDepth.Stencil := False;
+    RTTDepth.GLContextOpen;
+    AssertTrue('RTTDepth.RHIDepthTexture must be allocated', RTTDepth.RHIDepthTexture <> nil);
+    AssertEquals('RTTDepth depth format must be pfD32_Float when Stencil=False',
+      Ord(pfD32_Float), Ord(RTTDepth.RHIDepthTexture.Desc.Format));
+    RTTDepth.RenderBegin;
+    RTTDepth.RenderEnd;
+    AssertEquals('RTTDepth.RHIDepthTexture must transition to rsShaderRead after RenderEnd',
+      Ord(rsShaderRead), Ord(RTTDepth.RHIDepthTexture.CurrentState));
+
+    { 3. tbColorAndDepth with external RHI textures }
+    ExtColorTex := VkDev.CreateTexture(TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc]));
+    ExtDepthTex := VkDev.CreateTexture(TRHITextureDesc.Create2D(64, 64, pfD32_Float,
+      [tuDepthStencil, tuSampled, tuTransferSrc]));
+    RTTColorDepth := TGLRenderToTexture.Create(64, 64);
+    RTTColorDepth.Buffer := tbColorAndDepth;
+    RTTColorDepth.Stencil := False;
+    RTTColorDepth.SetRHITexture(ExtColorTex, ExtDepthTex);
+    RTTColorDepth.GLContextOpen;
+    RTTColorDepth.RenderBegin;
+    RTTColorDepth.RenderEnd;
+    AssertEquals('ExtColorTex must be rsShaderRead after RenderEnd',
+      Ord(rsShaderRead), Ord(ExtColorTex.CurrentState));
+    AssertEquals('ExtDepthTex must be rsShaderRead after RenderEnd',
+      Ord(rsShaderRead), Ord(ExtDepthTex.CurrentState));
+
+    { 4. 4x MSAA single-pass resolve in TGLRenderToTexture }
+    RTTMSAA := TGLRenderToTexture.Create(128, 128);
+    RTTMSAA.Buffer := tbColor;
+    RTTMSAA.MultiSampling := 4;
+    RTTMSAA.GLContextOpen;
+    RTTMSAA.RenderBegin;
+    RTTMSAA.RenderEnd;
+    AssertEquals('RTTMSAA.RHIRenderPassCount must be 1', 1, RTTMSAA.RHIRenderPassCount);
+    AssertEquals('RTTMSAA resolved color texture must be rsShaderRead',
+      Ord(rsShaderRead), Ord(RTTMSAA.RHIColorTexture.CurrentState));
+
+    CmdList.EndRecording;
+  finally
+    SetActiveCommandList(SavedCmdList);
+    SetRHIDevice(SavedDevice);
+    FreeAndNil(CapturedImg);
+    FreeAndNil(RTTMSAA);
+    FreeAndNil(RTTColorDepth);
+    FreeAndNil(ExtDepthTex);
+    FreeAndNil(ExtColorTex);
+    FreeAndNil(RTTDepth);
+    FreeAndNil(RTTColor);
+    FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestScreenEffectsRHIPingPongExecution;
+var
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  SavedDevice: TRHIDevice;
+  SavedCmdList: TRHICommandList;
+  ScreenFX: TCastleScreenEffects;
+  FinalTarget: TRHITexture;
+  Pipelines: array[0..2] of TRHIPipeline;
+  ExecutedPasses: Cardinal;
+  SrcBeforeSwap: TRHITexture;
+begin
+  SavedDevice := RHIDevice;
+  SavedCmdList := ActiveCommandList;
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0, cllPrimary);
+  ScreenFX := TCastleScreenEffects.Create(nil);
+  FinalTarget := VkDev.CreateTexture(TRHITextureDesc.Create2D(320, 180, pfRGBA8_UNorm,
+    [tuColorAttachment, tuSampled, tuTransferSrc]));
+  try
+    SetRHIDevice(VkDev);
+    SetActiveCommandList(CmdList);
+    CmdList.BeginRecording;
+
+    { 1. Verify TCastleScreenPushConstants layout (32 bytes) }
+    AssertEquals('TCastleScreenPushConstants must be 32 bytes',
+      32, SizeOf(TCastleScreenPushConstants));
+
+    { 2. Ensure RHI screen resources with depth enabled (SSAO / depth-of-field) }
+    ScreenFX.EnsureRHIScreenResources(320, 180, True);
+    AssertTrue('RHIScreenTextureSrc must be allocated', ScreenFX.RHIScreenTextureSrc <> nil);
+    AssertTrue('RHIScreenTextureDest must be allocated', ScreenFX.RHIScreenTextureDest <> nil);
+    AssertTrue('RHIScreenTextureDepth must be allocated when NeedDepth=True',
+      ScreenFX.RHIScreenTextureDepth <> nil);
+    AssertTrue('RHIScreenQuadVBO must be allocated', ScreenFX.RHIScreenQuadVBO <> nil);
+    AssertEquals('RHIScreenQuadVBO must be 64 bytes (4 vertices x 16 bytes)',
+      64, ScreenFX.RHIScreenQuadVBO.Desc.Size);
+    AssertTrue('RHIScreenQuadIBO must be allocated', ScreenFX.RHIScreenQuadIBO <> nil);
+    AssertEquals('RHIScreenQuadIBO must be 12 bytes (6 UInt16 indices)',
+      12, ScreenFX.RHIScreenQuadIBO.Desc.Size);
+    AssertTrue('RHIScreenLayoutColorOnly must be created', ScreenFX.RHIScreenLayoutColorOnly <> nil);
+    AssertTrue('RHIScreenLayoutColorAndDepth must be created', ScreenFX.RHIScreenLayoutColorAndDepth <> nil);
+
+    { 3. Execute 3-pass post-processing chain (2 intermediate ping-pong passes + 1 final pass) }
+    Pipelines[0] := nil;
+    Pipelines[1] := nil;
+    Pipelines[2] := nil;
+    SrcBeforeSwap := ScreenFX.RHIScreenTextureSrc;
+    ExecutedPasses := ScreenFX.ExecuteRHIScreenEffectPasses(
+      Pipelines, 320, 180, True, FinalTarget, 0.1, 500.0);
+
+    AssertEquals('ExecuteRHIScreenEffectPasses must execute all 3 passes', 3, ExecutedPasses);
+    AssertEquals('ScreenFX.RHIScreenPassCount must be 3', 3, ScreenFX.RHIScreenPassCount);
+    AssertEquals('ScreenFX.RHIScreenDrawCount must be 3', 3, ScreenFX.RHIScreenDrawCount);
+    { Note: 2 intermediate passes swap Src and Dest twice, returning Src to original;
+      let's also run a 2-pass chain (1 intermediate swap + 1 final pass) to verify ping-pong swap! }
+    ExecutedPasses := ScreenFX.ExecuteRHIScreenEffectPasses(
+      [Pipelines[0], Pipelines[1]], 320, 180, False, FinalTarget, 0.1, 500.0);
+    AssertEquals('2-pass chain must execute 2 passes', 2, ExecutedPasses);
+    AssertTrue('2-pass chain (1 intermediate pass) must swap RHIScreenTextureSrc and Dest',
+      ScreenFX.RHIScreenTextureSrc <> SrcBeforeSwap);
+    AssertEquals('Total RHIScreenPassCount must now be 5', 5, ScreenFX.RHIScreenPassCount);
+
+    { 4. Verify GLContextClose releases RHI post-processing resources cleanly }
+    ScreenFX.GLContextClose;
+    AssertTrue('RHIScreenTextureSrc must be nil after GLContextClose', ScreenFX.RHIScreenTextureSrc = nil);
+    AssertTrue('RHIScreenQuadVBO must be nil after GLContextClose', ScreenFX.RHIScreenQuadVBO = nil);
+
+    CmdList.EndRecording;
+  finally
+    SetActiveCommandList(SavedCmdList);
+    SetRHIDevice(SavedDevice);
+    FreeAndNil(FinalTarget);
+    FreeAndNil(ScreenFX);
+    FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestDrawIndirectCountAndComputeCullerPipeline;
+var
+  VkDev13, VkDev11: TVulkanRHIDevice;
+  CmdList13, CmdList11: TVulkanRHICommandList;
+  Culler: TCastleVulkanComputeCuller;
+  Planes: array[0..5] of TVector4;
+  Instances: array[0..3] of TCastleGpuCullingInstance;
+  DispatchedDraws: Cardinal;
+  CountBuf: TRHIBuffer;
+  GpuDrawCount: UInt32;
+begin
+  VkDev13 := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  VkDev11 := TVulkanRHIDevice.CreateHeadless(nil, True, False, VK_API_VERSION_1_1);
+  CmdList13 := TVulkanRHICommandList.Create(VkDev13, 0, cllPrimary);
+  CmdList11 := TVulkanRHICommandList.Create(VkDev11, 0, cllPrimary);
+  CountBuf := nil;
+  try
+    { 1. Verify SupportsDrawIndirectCount capability on Vulkan 1.2+ vs Vulkan 1.1 fallback }
+    AssertTrue('Vulkan 1.3 device must report SupportsDrawIndirectCount = True',
+      VkDev13.Capabilities.SupportsDrawIndirectCount);
+    AssertFalse('Vulkan 1.1 fallback device must report SupportsDrawIndirectCount = False',
+      VkDev11.Capabilities.SupportsDrawIndirectCount);
+
+    { 2. End-to-end GPU-driven compute culling -> RecordIndirectDraw (DrawIndexedIndirectCount) }
+    Culler := VkDev13.ComputeCuller;
+    Planes[0] := Vector4( 1,  0,  0, 50);
+    Planes[1] := Vector4(-1,  0,  0, 50);
+    Planes[2] := Vector4( 0,  1,  0, 50);
+    Planes[3] := Vector4( 0, -1,  0, 50);
+    Planes[4] := Vector4( 0,  0, -1, 0);
+    Planes[5] := Vector4( 0,  0,  1, 200);
+    Culler.SetFrustumPlanes(Planes, Vector3(0, 0, 0), 50.0);
+
+    FillChar(Instances, SizeOf(Instances), 0);
+    { 3 visible within 50m, 1 culled at 120m }
+    Instances[0].BoundingSphere := Vector4(0, 0, -10, 2.0);
+    Instances[0].IndexCount := 36;
+    Instances[0].InstanceCount := 1;
+    Instances[1].BoundingSphere := Vector4(0, 0, -25, 2.0);
+    Instances[1].IndexCount := 72;
+    Instances[1].InstanceCount := 1;
+    Instances[2].BoundingSphere := Vector4(0, 0, -120, 2.0); // culled!
+    Instances[2].IndexCount := 108;
+    Instances[2].InstanceCount := 1;
+    Instances[3].BoundingSphere := Vector4(0, 0, -40, 2.0);
+    Instances[3].IndexCount := 144;
+    Instances[3].InstanceCount := 1;
+
+    Culler.UploadInstances(Instances);
+
+    CmdList13.BeginRecording;
+    Culler.DispatchCulling(CmdList13, Length(Instances), True);
+    AssertEquals('Compute culler must compact 3 visible instances into VisibilityOutputBuffer[0]',
+      3, Culler.ReadBackVisibleCount);
+
+    DispatchedDraws := Culler.RecordIndirectDraw(CmdList13);
+    AssertEquals('RecordIndirectDraw must return effective GPU draw count (3)',
+      3, DispatchedDraws);
+    AssertEquals('CmdList13.IndirectDrawCallCount must be 1',
+      1, CmdList13.IndirectDrawCallCount);
+    AssertEquals('CmdList13.IndirectCountDrawCallCount must be 1',
+      1, CmdList13.IndirectCountDrawCallCount);
+    AssertEquals('CmdList13.LastEffectiveIndirectDrawCount must read GPU count = 3 from VisibilityOutputBuffer',
+      3, CmdList13.LastEffectiveIndirectDrawCount);
+    CmdList13.EndRecording;
+
+    { 3. Verify Vulkan 1.1 fallback clamps GPU count to MaxDrawCount via DrawIndirectCount }
+    GpuDrawCount := 7;
+    CountBuf := VkDev11.CreateBuffer(
+      TRHIBufferDesc.Create(SizeOf(UInt32), [buIndirect, buStorage], muCpuToGpu, 'TestCountBuf'),
+      @GpuDrawCount);
+    CmdList11.BeginRecording;
+    CmdList11.DrawIndirectCount(CountBuf, 0, CountBuf, 0, 5, SizeOf(TRHIDrawIndirectCommand));
+    AssertEquals('CmdList11.IndirectCountDrawCallCount must be 1',
+      1, CmdList11.IndirectCountDrawCallCount);
+    AssertEquals('CmdList11.LastEffectiveIndirectDrawCount must clamp GPU count (7) to MaxDrawCount (5)',
+      5, CmdList11.LastEffectiveIndirectDrawCount);
+    CmdList11.EndRecording;
+  finally
+    FreeAndNil(CountBuf);
+    FreeAndNil(CmdList11);
+    FreeAndNil(CmdList13);
+    FreeAndNil(VkDev11);
+    FreeAndNil(VkDev13);
   end;
 end;
 

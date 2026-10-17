@@ -130,6 +130,14 @@ type
     Padding0, Padding1, Padding2: Cardinal;
   end;
 
+  { CPU-side mirror of CastleScreenPushConstants (32 bytes) for post-processing screen effects }
+  PCastleScreenPushConstants = ^TCastleScreenPushConstants;
+  TCastleScreenPushConstants = packed record
+    ScreenSize: TVector2;    // x = screen_width, y = screen_height (8 bytes)
+    ScreenPlanes: TVector2;  // x = near plane, y = far plane (8 bytes)
+    ScreenCustom: TVector4;  // custom effect parameters (16 bytes)
+  end; // Total = 32 bytes
+
   { CPU-side mirror of Set 0, Binding 0 for GPU Compute Frustum/Distance/Hi-Z Culling (std140) }
   PCastleGpuCullingUniformBlock = ^TCastleGpuCullingUniformBlock;
   TCastleGpuCullingUniformBlock = packed record

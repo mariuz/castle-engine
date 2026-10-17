@@ -230,6 +230,21 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 7 Status**: Completed. RHI hardware occlusion culling in `CastleInternalOcclusionCulling`, GPU-driven compute frustum & distance culling (`TCastleVulkanComputeCuller`), `TCastleWindow.AntiAliasing` synchronization, and live `TCastleViewport.Statistics` GPU timing/compute/bindless/MSAA diagnostics fully integrated and tested (51 unit tests passing).
 
 
+### Phase 8: Offscreen Render-to-Texture RHI Backend, Post-Processing Screen Effects RHI Execution & Multi-Draw Indirect Count (COMPLETED)
+
+* [x] **8.1. Offscreen Render-to-Texture RHI Backend (`TGLRenderToTexture`, `CastleGLImages`)**:
+  * Extend `TGLRenderToTexture` (`castleglimages_rendertotexture.inc`) with `RHIColorTexture`, `RHIDepthTexture`, `SetRHITexture`, `RHIInitialized`, and `RHIRenderPassCount` so offscreen rendering works seamlessly when `RHIDevice <> nil` (including headless Vulkan without an OpenGL context).
+  * Automatically allocate internal color/depth RHI textures (`pfRGBA8_UNorm`, `pfD32_Float` / `pfD24_UNorm_S8_UInt`) and optional transient MSAA attachments (`MultiSampling > 1` with single-pass `TRHIRenderingInfo.CreateColorDepthMSAA` resolve), transition attachments between `rsColorAttachment` / `rsDepthStencilWrite` and `rsShaderRead`, and support `GenerateMipmap` (`ActiveCommandList.GenerateMipmaps`) and `SaveScreen` (`RHIDevice.GrabTextureImage`).
+* [x] **8.2. Post-Processing Screen Effects RHI Execution (`TCastleScreenEffects`, `CastleScreenEffects`)**:
+  * Add `TCastleScreenPushConstants` (32-byte push constant block: `ScreenSize`, `ScreenPlanes`, `ScreenCustom`) in `CastleInternalShaderRHI`.
+  * Extend `TCastleScreenEffects` with RHI ping-pong offscreen color textures (`RHIScreenTextureSrc`, `RHIScreenTextureDest`), optional depth texture (`RHIScreenTextureDepth`), fullscreen quad VBO/IBO (`RHIScreenQuadVBO`, `RHIScreenQuadIBO`), Set 0 descriptor layouts (`RHIScreenLayoutColorOnly`, `RHIScreenLayoutColorAndDepth`), and `ExecuteRHIScreenEffectPasses` hooked into `Render` / `RenderOverChildren` / `GLContextClose`.
+* [x] **8.3. GPU-Driven Multi-Draw Indirect Count (`VK_KHR_draw_indirect_count` / Vulkan 1.2 Core & `TCastleVulkanComputeCuller.RecordIndirectDraw`)**:
+  * Add `vkCmdDrawIndirectCount`, `vkCmdDrawIndexedIndirectCount` (with `*KHR` fallback loading in `LoadVulkanDevice`), and `VK_KHR_draw_indirect_count` to `vkxml2pas.dpr` and regenerate `CastleInternalVulkan`.
+  * Add `SupportsDrawIndirectCount: Boolean` to `TRHIDeviceCapabilities`, `DrawIndirectCount` / `DrawIndexedIndirectCount` to `TRHICommandList` and `TVulkanRHICommandList` (with automatic Vulkan 1.1 fallback clamping GPU count from `CountBuffer`), and `TCastleVulkanComputeCuller.RecordIndirectDraw` to dispatch compacted compute-culled draw streams directly from `VisibilityOutputBuffer` without CPU readback.
+
+**Milestone 8 Status**: Completed. Offscreen render-to-texture RHI backend (`TGLRenderToTexture`), post-processing screen effects RHI ping-pong execution (`TCastleScreenEffects`), and GPU-driven multi-draw indirect count (`vkCmdDrawIndexedIndirectCount` & `TCastleVulkanComputeCuller.RecordIndirectDraw`) fully integrated and tested (54 unit tests passing).
+
+
 ## 5. Build Tool (castle-engine) & Editor Integration
 
 * [x] CastleEngineManifest.xml Support:
@@ -254,5 +269,5 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 ## 7. Testing & Verification Criteria
 
 * [x] Automated Visual Regression Tests: `CompareImagesPerceptualDiff` in `CastleInternalRHI` compares framebuffer readbacks (`GrabTextureImage`) between `rbOpenGL` and `rbVulkan` using normalized RMSE perceptual diff thresholds.
-* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 51 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
-* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance culling (`TCastleVulkanComputeCuller`), and `vkCmdDrawIndexedIndirect` / `vkCmdDispatchIndirect` minimize CPU driver overhead.
+* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 54 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
+* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance culling (`TCastleVulkanComputeCuller`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.
