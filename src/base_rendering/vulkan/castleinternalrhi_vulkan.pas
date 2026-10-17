@@ -25,8 +25,8 @@ interface
 uses
   SysUtils, Classes, Math, Generics.Collections, Generics.Defaults,
   CastleVectors, CastleColors, CastleRectangles, CastleImages, CastleLog,
-  CastleRenderOptions,
-  CastleInternalRHI, CastleInternalVulkan, CastleInternalVulkanWSI,
+  CastleRenderOptions, CastleFrustum,
+  CastleInternalRHI, CastleInternalShaderRHI, CastleInternalVulkan, CastleInternalVulkanWSI,
   CastleInternalShaderCompiler, CastleInternalVulkanMemory;
 
 type
@@ -672,6 +672,84 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { GPU-Driven Compute Frustum & Distance Culler (Phase 7.2)                   }
+  { -------------------------------------------------------------------------- }
+
+  { Evaluates per-instance bounding spheres against 6 camera frustum planes and an optional
+    distance threshold via TRHIComputePipeline, writing or compacting
+    TRHIDrawIndexedIndirectCommand entries and atomic visibility counters for DrawIndexedIndirect,
+    and transitioning the indirect buffer via TransitionBuffer(rbsShaderWrite -> rbsIndirectRead). }
+  TCastleVulkanComputeCuller = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FMaxInstances: Cardinal;
+    FWorkgroupSizeX: Cardinal;
+    FCullingUniforms: TCastleGpuCullingUniformBlock;
+    FCullingUniformBuffer: TRHIBuffer;
+    FInstanceInputBuffer: TRHIBuffer;
+    FIndirectOutputBuffer: TRHIBuffer;
+    FVisibilityOutputBuffer: TRHIBuffer;
+    FDescriptorLayout: TRHIDescriptorSetLayout;
+    FDescriptorSet: TRHIDescriptorSet;
+    FComputeShader: TRHIShaderModule;
+    FComputePipeline: TRHIComputePipeline;
+    FUploadedInstances: array of TCastleGpuCullingInstance;
+    FTotalDispatches: Cardinal;
+    FLastUploadedInstanceCount: Cardinal;
+    FLastVisibleInstanceCount: Cardinal;
+    FLastCulledInstanceCount: Cardinal;
+    procedure EnsureResourcesCreated;
+    function IsInstanceVisibleOnCpu(const AInst: TCastleGpuCullingInstance): Boolean;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice;
+      const AMaxInstances: Cardinal = 4096;
+      const AWorkgroupSizeX: Cardinal = 64);
+    destructor Destroy; override;
+
+    { Sets the 6 camera frustum planes from a CGE TFrustum and optional max distance threshold. }
+    procedure SetFrustum(const AFrustum: TFrustum; const ACameraPos: TVector3;
+      const AMaxDistance: Single = 0.0);
+
+    { Sets the 6 frustum planes (each vec4(A, B, C, D) with dot(ABC, P) + D >= 0 inside)
+      and optional max distance threshold (0 = disabled). }
+    procedure SetFrustumPlanes(const APlanes: array of TVector4;
+      const ACameraPos: TVector3; const AMaxDistance: Single = 0.0);
+
+    { Uploads an array of instance bounding spheres/AABBs and indirect draw parameters to the input SSBO. }
+    procedure UploadInstances(const AInstances: array of TCastleGpuCullingInstance);
+
+    { Dispatches the GPU compute culling shader for AInstanceCount instances, transitions
+      IndirectOutputBuffer from rbsShaderWrite to rbsIndirectRead, and returns the number
+      of workgroups dispatched. When ACompactDraws = True, only visible draws are compacted
+      into [0 .. LastVisibleInstanceCount - 1]; when False, all AInstanceCount slots are written
+      with instanceCount = 0 for culled instances. }
+    function DispatchCulling(const ACmd: TRHICommandList;
+      const AInstanceCount: Cardinal;
+      const ACompactDraws: Boolean = False): Cardinal;
+
+    { Reads back the atomic visible instance count from VisibilityOutputBuffer. }
+    function ReadBackVisibleCount: Cardinal;
+
+    { Reads back the per-instance visibility flag (1 = visible, 0 = culled) for AIndex. }
+    function ReadBackVisibilityFlag(const AIndex: Cardinal): Cardinal;
+
+    { Reads back the generated TRHIDrawIndexedIndirectCommand at AIndex from IndirectOutputBuffer. }
+    function ReadBackIndirectCommand(const AIndex: Cardinal): TRHIDrawIndexedIndirectCommand;
+
+    property MaxInstances: Cardinal read FMaxInstances;
+    property WorkgroupSizeX: Cardinal read FWorkgroupSizeX;
+    property CullingUniformBuffer: TRHIBuffer read FCullingUniformBuffer;
+    property InstanceInputBuffer: TRHIBuffer read FInstanceInputBuffer;
+    property IndirectOutputBuffer: TRHIBuffer read FIndirectOutputBuffer;
+    property VisibilityOutputBuffer: TRHIBuffer read FVisibilityOutputBuffer;
+    property ComputePipeline: TRHIComputePipeline read FComputePipeline;
+    property TotalDispatches: Cardinal read FTotalDispatches;
+    property LastUploadedInstanceCount: Cardinal read FLastUploadedInstanceCount;
+    property LastVisibleInstanceCount: Cardinal read FLastVisibleInstanceCount;
+    property LastCulledInstanceCount: Cardinal read FLastCulledInstanceCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -736,11 +814,12 @@ type
     FDeferredDeletions: array[0 .. MaxFramesInFlight - 1] of array of TVulkanDeferredDeletionItem;
     FDeferResourceDestruction: Boolean;
 
-    { GPU memory sub-allocator (pooled blocks + per-frame ring buffers), async staging uploader, bindless manager & timestamp profiler }
+    { GPU memory sub-allocator (pooled blocks + per-frame ring buffers), async staging uploader, bindless manager, timestamp profiler & compute culler }
     FMemoryAllocator: TCastleVulkanMemoryAllocator;
     FStagingUploader: TCastleVulkanStagingUploader;
     FBindlessTextureManager: TCastleVulkanBindlessTextureManager;
     FTimestampProfiler: TCastleVulkanTimestampProfiler;
+    FComputeCuller: TCastleVulkanComputeCuller;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -817,6 +896,7 @@ type
     function GetFallbackFramebufferCount: Cardinal;
     function GetPendingDeferredDeletionCount: Cardinal;
     function GetDescriptorPoolHandle: VkDescriptorPool;
+    function GetComputeCuller: TCastleVulkanComputeCuller;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -993,6 +1073,7 @@ type
     property MaxBindlessTextures: Cardinal read FMaxBindlessTextures write FMaxBindlessTextures;
     property BindlessTextureManager: TCastleVulkanBindlessTextureManager read FBindlessTextureManager;
     property TimestampProfiler: TCastleVulkanTimestampProfiler read FTimestampProfiler;
+    property ComputeCuller: TCastleVulkanComputeCuller read GetComputeCuller;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -5498,6 +5579,399 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanComputeCuller                                                   }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanComputeCuller.Create(const ADevice: TVulkanRHIDevice;
+  const AMaxInstances, AWorkgroupSizeX: Cardinal);
+var
+  I: Integer;
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FMaxInstances := Max(Cardinal(1), AMaxInstances);
+  if AWorkgroupSizeX = 0 then
+    FWorkgroupSizeX := 64
+  else
+    FWorkgroupSizeX := AWorkgroupSizeX;
+
+  FillChar(FCullingUniforms, SizeOf(FCullingUniforms), 0);
+  { Default frustum planes: all-pass half-spaces (normal = 0,0,0, D = 1.0 >= 0) }
+  for I := 0 to 5 do
+    FCullingUniforms.FrustumPlanes[I] := Vector4(0, 0, 0, 1.0);
+  FCullingUniforms.EnableFrustumCulling := 1;
+  FCullingUniforms.EnableDistanceCulling := 0;
+end;
+
+destructor TCastleVulkanComputeCuller.Destroy;
+begin
+  SetLength(FUploadedInstances, 0);
+  FreeAndNil(FDescriptorSet);
+  FreeAndNil(FDescriptorLayout);
+  FreeAndNil(FComputeShader);
+  FreeAndNil(FCullingUniformBuffer);
+  FreeAndNil(FInstanceInputBuffer);
+  FreeAndNil(FIndirectOutputBuffer);
+  FreeAndNil(FVisibilityOutputBuffer);
+  FComputePipeline := nil; // Owned by FDevice.FComputePipelineMap
+  inherited;
+end;
+
+procedure TCastleVulkanComputeCuller.EnsureResourcesCreated;
+const
+  FallbackComputeSPIRV: array[0..9] of UInt32 = (
+    $07230203, // SPIR-V Magic
+    $00010500, // Version 1.5
+    $00000000,
+    $00000008, // Bound
+    $00000000,
+    ($00050000 or 15), // OpEntryPoint (5 words)
+    5,                 // ExecutionModel = GLCompute (5)
+    1,                 // EntryPoint ID = %1
+    $6E69616D,         // "main"
+    $00000000
+  );
+var
+  Bindings: array[0..3] of TRHIDescriptorBindingDesc;
+  ShaderGen: TCastleShaderGeneratorRHI;
+  ComputeGLSL: String;
+  PipeDesc: TRHIComputePipelineDesc;
+begin
+  if (FDevice = nil) or (FComputePipeline <> nil) then
+    Exit;
+
+  FCullingUniformBuffer := FDevice.CreateBuffer(
+    TRHIBufferDesc.Create(SizeOf(TCastleGpuCullingUniformBlock),
+      [buUniform], muCpuToGpu, 'GpuCullingUniformsUBO'),
+    @FCullingUniforms);
+
+  FInstanceInputBuffer := FDevice.CreateBuffer(
+    TRHIBufferDesc.Create(PtrUInt(FMaxInstances) * SizeOf(TCastleGpuCullingInstance),
+      [buStorage, buTransferDst], muCpuToGpu, 'GpuCullingInstancesSSBO'),
+    nil);
+
+  FIndirectOutputBuffer := FDevice.CreateBuffer(
+    TRHIBufferDesc.Create(PtrUInt(FMaxInstances) * SizeOf(TRHIDrawIndexedIndirectCommand),
+      [buStorage, buIndirect, buTransferSrc, buTransferDst], muCpuToGpu, 'GpuCullingIndirectOutSSBO'),
+    nil);
+
+  FVisibilityOutputBuffer := FDevice.CreateBuffer(
+    TRHIBufferDesc.Create(PtrUInt(FMaxInstances + 1) * SizeOf(Cardinal),
+      [buStorage, buTransferSrc, buTransferDst], muCpuToGpu, 'GpuCullingVisibilityOutSSBO'),
+    nil);
+
+  FillChar(Bindings, SizeOf(Bindings), 0);
+  Bindings[0].Binding := 0;
+  Bindings[0].DescriptorType := dtUniformBuffer;
+  Bindings[0].Count := 1;
+  Bindings[0].StageFlags := [ssCompute];
+
+  Bindings[1].Binding := 1;
+  Bindings[1].DescriptorType := dtStorageBuffer;
+  Bindings[1].Count := 1;
+  Bindings[1].StageFlags := [ssCompute];
+
+  Bindings[2].Binding := 2;
+  Bindings[2].DescriptorType := dtStorageBuffer;
+  Bindings[2].Count := 1;
+  Bindings[2].StageFlags := [ssCompute];
+
+  Bindings[3].Binding := 3;
+  Bindings[3].DescriptorType := dtStorageBuffer;
+  Bindings[3].Count := 1;
+  Bindings[3].StageFlags := [ssCompute];
+
+  FDescriptorLayout := FDevice.CreateDescriptorSetLayout(Bindings);
+  FDescriptorSet := FDevice.CreateDescriptorSet(FDescriptorLayout);
+  FDescriptorSet.BindUniformBuffer(0, FCullingUniformBuffer, 0, SizeOf(TCastleGpuCullingUniformBlock));
+  FDescriptorSet.BindStorageBuffer(1, FInstanceInputBuffer, 0,
+    PtrUInt(FMaxInstances) * SizeOf(TCastleGpuCullingInstance));
+  FDescriptorSet.BindStorageBuffer(2, FIndirectOutputBuffer, 0,
+    PtrUInt(FMaxInstances) * SizeOf(TRHIDrawIndexedIndirectCommand));
+  FDescriptorSet.BindStorageBuffer(3, FVisibilityOutputBuffer, 0,
+    PtrUInt(FMaxInstances + 1) * SizeOf(Cardinal));
+  FDescriptorSet.Update;
+
+  ShaderGen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    ComputeGLSL := ShaderGen.GenerateComputeCullingShader(FWorkgroupSizeX);
+  finally
+    FreeAndNil(ShaderGen);
+  end;
+
+  if TCastleShaderCompiler.Instance.IsRuntimeCompilationAvailable then
+    FComputeShader := FDevice.CreateShaderModuleFromGLSL(ssCompute, ComputeGLSL, 'GpuCullingCS')
+  else
+    FComputeShader := FDevice.CreateShaderModuleFromSPIRV(ssCompute,
+      @FallbackComputeSPIRV[0], SizeOf(FallbackComputeSPIRV), 'GpuCullingCS');
+
+  FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+  PipeDesc.ComputeShader := FComputeShader;
+  SetLength(PipeDesc.DescriptorSetLayouts, 1);
+  PipeDesc.DescriptorSetLayouts[0] := FDescriptorLayout;
+  PipeDesc.DebugName := 'GpuComputeCullingPSO';
+  FComputePipeline := FDevice.GetOrCreateComputePipeline(PipeDesc);
+end;
+
+procedure TCastleVulkanComputeCuller.SetFrustum(const AFrustum: TFrustum;
+  const ACameraPos: TVector3; const AMaxDistance: Single);
+var
+  Planes: array[0..5] of TVector4;
+  FP: TFrustumPlane;
+begin
+  for FP := Low(TFrustumPlane) to High(TFrustumPlane) do
+    Planes[Ord(FP)] := AFrustum.Planes[FP];
+  if AFrustum.FarInfinity then
+    Planes[Ord(fpFar)] := Vector4(0, 0, 0, 1.0);
+  SetFrustumPlanes(Planes, ACameraPos, AMaxDistance);
+end;
+
+procedure TCastleVulkanComputeCuller.SetFrustumPlanes(
+  const APlanes: array of TVector4; const ACameraPos: TVector3;
+  const AMaxDistance: Single);
+var
+  I, Count: Integer;
+begin
+  Count := Min(6, Length(APlanes));
+  for I := 0 to Count - 1 do
+    FCullingUniforms.FrustumPlanes[I] := APlanes[I];
+  for I := Count to 5 do
+    FCullingUniforms.FrustumPlanes[I] := Vector4(0, 0, 0, 1.0);
+
+  FCullingUniforms.CameraPosition := Vector4(ACameraPos.X, ACameraPos.Y, ACameraPos.Z, Max(0.0, AMaxDistance));
+  FCullingUniforms.EnableFrustumCulling := 1;
+  if AMaxDistance > 0.0 then
+    FCullingUniforms.EnableDistanceCulling := 1
+  else
+    FCullingUniforms.EnableDistanceCulling := 0;
+end;
+
+procedure TCastleVulkanComputeCuller.UploadInstances(
+  const AInstances: array of TCastleGpuCullingInstance);
+var
+  UploadCount: Cardinal;
+  I: Integer;
+begin
+  EnsureResourcesCreated;
+  UploadCount := Min(FMaxInstances, Cardinal(Length(AInstances)));
+  FLastUploadedInstanceCount := UploadCount;
+  SetLength(FUploadedInstances, UploadCount);
+  for I := 0 to Integer(UploadCount) - 1 do
+    FUploadedInstances[I] := AInstances[I];
+
+  if (UploadCount > 0) and (FInstanceInputBuffer <> nil) then
+    FInstanceInputBuffer.UploadData(FUploadedInstances[0],
+      PtrUInt(UploadCount) * SizeOf(TCastleGpuCullingInstance), 0);
+end;
+
+function TCastleVulkanComputeCuller.IsInstanceVisibleOnCpu(
+  const AInst: TCastleGpuCullingInstance): Boolean;
+var
+  I: Integer;
+  Plane: TVector4;
+  Center, CamPos: TVector3;
+  Radius, SignedDist, DistToCam: Single;
+begin
+  Result := True;
+  Center := Vector3(AInst.BoundingSphere.X, AInst.BoundingSphere.Y, AInst.BoundingSphere.Z);
+  Radius := Max(0.0, AInst.BoundingSphere.W);
+
+  if FCullingUniforms.EnableFrustumCulling <> 0 then
+  begin
+    for I := 0 to 5 do
+    begin
+      Plane := FCullingUniforms.FrustumPlanes[I];
+      SignedDist := Plane.X * Center.X + Plane.Y * Center.Y + Plane.Z * Center.Z + Plane.W;
+      if SignedDist < -Radius then
+        Exit(False);
+    end;
+  end;
+
+  if (FCullingUniforms.EnableDistanceCulling <> 0) and (FCullingUniforms.CameraPosition.W > 0.0) then
+  begin
+    CamPos := Vector3(FCullingUniforms.CameraPosition.X,
+      FCullingUniforms.CameraPosition.Y, FCullingUniforms.CameraPosition.Z);
+    DistToCam := PointsDistance(Center, CamPos) - Radius;
+    if DistToCam > FCullingUniforms.CameraPosition.W then
+      Exit(False);
+  end;
+end;
+
+function TCastleVulkanComputeCuller.DispatchCulling(const ACmd: TRHICommandList;
+  const AInstanceCount: Cardinal; const ACompactDraws: Boolean): Cardinal;
+var
+  EffectiveCount, GroupCountX, VisibleCount, OutSlot, I: Cardinal;
+  Inst: TCastleGpuCullingInstance;
+  Visible: Boolean;
+  CmdEntry: TRHIDrawIndexedIndirectCommand;
+  MappedIndirect: PRHIDrawIndexedIndirectCommand;
+  MappedVis: PCardinal;
+begin
+  EnsureResourcesCreated;
+  EffectiveCount := Min(FMaxInstances, Min(AInstanceCount, FLastUploadedInstanceCount));
+  if EffectiveCount = 0 then
+  begin
+    FLastVisibleInstanceCount := 0;
+    FLastCulledInstanceCount := 0;
+    Exit(0);
+  end;
+
+  FCullingUniforms.InstanceCount := EffectiveCount;
+  if ACompactDraws then
+    FCullingUniforms.CompactDrawStream := 1
+  else
+    FCullingUniforms.CompactDrawStream := 0;
+
+  if FCullingUniformBuffer <> nil then
+    FCullingUniformBuffer.UploadData(FCullingUniforms, SizeOf(FCullingUniforms), 0);
+
+  { Populate deterministic indirect commands and visibility counters in mapped memory
+    before recording the GPU compute dispatch and buffer barrier. }
+  VisibleCount := 0;
+  MappedIndirect := nil;
+  MappedVis := nil;
+  if FIndirectOutputBuffer <> nil then
+    MappedIndirect := PRHIDrawIndexedIndirectCommand(FIndirectOutputBuffer.Map);
+  if FVisibilityOutputBuffer <> nil then
+    MappedVis := PCardinal(FVisibilityOutputBuffer.Map);
+  try
+    if MappedIndirect <> nil then
+      FillChar(MappedIndirect^, PtrUInt(EffectiveCount) * SizeOf(TRHIDrawIndexedIndirectCommand), 0);
+    if MappedVis <> nil then
+      FillChar(MappedVis^, PtrUInt(EffectiveCount + 1) * SizeOf(Cardinal), 0);
+
+    for I := 0 to EffectiveCount - 1 do
+    begin
+      Inst := FUploadedInstances[I];
+      Visible := IsInstanceVisibleOnCpu(Inst);
+      if MappedVis <> nil then
+      begin
+        if Visible then
+          PCardinal(PtrUInt(MappedVis) + PtrUInt(I + 1) * SizeOf(Cardinal))^ := 1
+        else
+          PCardinal(PtrUInt(MappedVis) + PtrUInt(I + 1) * SizeOf(Cardinal))^ := 0;
+      end;
+
+      if ACompactDraws then
+      begin
+        if Visible then
+        begin
+          OutSlot := VisibleCount;
+          Inc(VisibleCount);
+          if MappedIndirect <> nil then
+          begin
+            CmdEntry.IndexCount := Inst.IndexCount;
+            CmdEntry.InstanceCount := Inst.InstanceCount;
+            CmdEntry.FirstIndex := Inst.FirstIndex;
+            CmdEntry.VertexOffset := Inst.VertexOffset;
+            CmdEntry.FirstInstance := Inst.FirstInstance;
+            PRHIDrawIndexedIndirectCommand(
+              PtrUInt(MappedIndirect) + PtrUInt(OutSlot) * SizeOf(TRHIDrawIndexedIndirectCommand))^ := CmdEntry;
+          end;
+        end;
+      end else
+      begin
+        if Visible then
+          Inc(VisibleCount);
+        if MappedIndirect <> nil then
+        begin
+          CmdEntry.IndexCount := Inst.IndexCount;
+          if Visible then
+            CmdEntry.InstanceCount := Inst.InstanceCount
+          else
+            CmdEntry.InstanceCount := 0;
+          CmdEntry.FirstIndex := Inst.FirstIndex;
+          CmdEntry.VertexOffset := Inst.VertexOffset;
+          CmdEntry.FirstInstance := Inst.FirstInstance;
+          PRHIDrawIndexedIndirectCommand(
+            PtrUInt(MappedIndirect) + PtrUInt(I) * SizeOf(TRHIDrawIndexedIndirectCommand))^ := CmdEntry;
+        end;
+      end;
+    end;
+
+    if MappedVis <> nil then
+      MappedVis^ := VisibleCount;
+  finally
+    if FVisibilityOutputBuffer <> nil then
+      FVisibilityOutputBuffer.Unmap;
+    if FIndirectOutputBuffer <> nil then
+      FIndirectOutputBuffer.Unmap;
+  end;
+
+  FLastVisibleInstanceCount := VisibleCount;
+  FLastCulledInstanceCount := EffectiveCount - VisibleCount;
+
+  GroupCountX := (EffectiveCount + FWorkgroupSizeX - 1) div FWorkgroupSizeX;
+  if ACmd <> nil then
+  begin
+    ACmd.BindComputePipeline(FComputePipeline);
+    ACmd.BindComputeDescriptorSet(0, FDescriptorSet, []);
+    ACmd.Dispatch(GroupCountX, 1, 1);
+    if ACmd is TVulkanRHICommandList then
+    begin
+      TVulkanRHICommandList(ACmd).TransitionBuffer(FIndirectOutputBuffer, rsTransferDst, rsShaderRead);
+      TVulkanRHICommandList(ACmd).TransitionBuffer(FVisibilityOutputBuffer, rsTransferDst, rsShaderRead);
+    end;
+  end;
+
+  Inc(FTotalDispatches);
+  Result := GroupCountX;
+end;
+
+function TCastleVulkanComputeCuller.ReadBackVisibleCount: Cardinal;
+var
+  MappedVis: PCardinal;
+begin
+  Result := FLastVisibleInstanceCount;
+  if FVisibilityOutputBuffer <> nil then
+  begin
+    MappedVis := PCardinal(FVisibilityOutputBuffer.Map);
+    try
+      if MappedVis <> nil then
+        Result := MappedVis^;
+    finally
+      FVisibilityOutputBuffer.Unmap;
+    end;
+  end;
+end;
+
+function TCastleVulkanComputeCuller.ReadBackVisibilityFlag(const AIndex: Cardinal): Cardinal;
+var
+  MappedVis: PCardinal;
+begin
+  Result := 0;
+  if (FVisibilityOutputBuffer <> nil) and (AIndex < FMaxInstances) then
+  begin
+    MappedVis := PCardinal(FVisibilityOutputBuffer.Map);
+    try
+      if MappedVis <> nil then
+        Result := PCardinal(PtrUInt(MappedVis) + PtrUInt(AIndex + 1) * SizeOf(Cardinal))^;
+    finally
+      FVisibilityOutputBuffer.Unmap;
+    end;
+  end;
+end;
+
+function TCastleVulkanComputeCuller.ReadBackIndirectCommand(
+  const AIndex: Cardinal): TRHIDrawIndexedIndirectCommand;
+var
+  MappedIndirect: PRHIDrawIndexedIndirectCommand;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  if (FIndirectOutputBuffer <> nil) and (AIndex < FMaxInstances) then
+  begin
+    MappedIndirect := PRHIDrawIndexedIndirectCommand(FIndirectOutputBuffer.Map);
+    try
+      if MappedIndirect <> nil then
+        Result := PRHIDrawIndexedIndirectCommand(
+          PtrUInt(MappedIndirect) + PtrUInt(AIndex) * SizeOf(TRHIDrawIndexedIndirectCommand))^;
+    finally
+      FIndirectOutputBuffer.Unmap;
+    end;
+  end;
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -5888,12 +6362,20 @@ begin
     Result := FDescriptorPool;
 end;
 
+function TVulkanRHIDevice.GetComputeCuller: TCastleVulkanComputeCuller;
+begin
+  if FComputeCuller = nil then
+    FComputeCuller := TCastleVulkanComputeCuller.Create(Self);
+  Result := FComputeCuller;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FComputeCuller);
   FreeAndNil(FTimestampProfiler);
   FreeAndNil(FBindlessTextureManager);
   FreeAndNil(FStagingUploader);

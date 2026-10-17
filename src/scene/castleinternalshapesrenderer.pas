@@ -190,6 +190,9 @@ type
       @seealso TCastleViewport.OnCustomShapeSort }
     property OnCustomShapeSort: TShapeSortEvent
       read FOnCustomShapeSort write FOnCustomShapeSort;
+
+    property OcclusionCullingRenderer: TOcclusionCullingRenderer
+      read FOcclusionCullingRenderer;
   end;
 
 implementation
@@ -197,7 +200,7 @@ implementation
 uses SysUtils,
   {$ifdef OpenGLES} CastleGLES, {$else} CastleGL, {$endif}
   CastleScene, CastleGLUtils, CastleRenderContext, CastleColors,
-  X3DCameraUtils, CastleTimeUtils;
+  X3DCameraUtils, CastleTimeUtils, CastleInternalRHI;
 
 { TRenderEventList ---------------------------------------------------------- }
 
@@ -381,7 +384,7 @@ end;
 procedure TShapesRenderer.GLContextClose;
 begin
   if FOcclusionCullingRenderer <> nil then
-    FOcclusionCullingRenderer.Utils.GLContextClose;
+    FOcclusionCullingRenderer.GLContextClose;
 
   if FBatching <> nil then
     FBatching.GLContextClose;
@@ -758,10 +761,15 @@ function TShapesRenderer.EffectiveOcclusionCulling: Boolean;
 begin
   Result :=
     OcclusionCulling and
-    (GLFeatures <> nil) and // paranoid check from old code, maybe not needed anymore
-    GLFeatures.OcclusionQuery and
-    GLFeatures.VertexBufferObject and
-    (GLFeatures.OcclusionQueryCounterBits > 0);
+    (
+      (RHIDevice <> nil) or
+      (
+        (GLFeatures <> nil) and // paranoid check from old code, maybe not needed anymore
+        GLFeatures.OcclusionQuery and
+        GLFeatures.VertexBufferObject and
+        (GLFeatures.OcclusionQueryCounterBits > 0)
+      )
+    );
 end;
 
 procedure TShapesRenderer.SetOcclusionCulling(const Value: Boolean);

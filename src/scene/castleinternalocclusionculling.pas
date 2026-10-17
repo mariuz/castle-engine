@@ -25,7 +25,8 @@ uses
   CastleVectors, CastleSceneCore, CastleSceneInternalShape,
   {$ifdef OpenGLES} CastleGLES, {$else} CastleGL, {$endif}
   CastleGLUtils, CastleRenderContext, CastleFrustum, CastleGLShaders,
-  CastleBoxes, CastleTransform, CastleRenderPrimitives, CastleRenderOptions;
+  CastleBoxes, CastleTransform, CastleRenderPrimitives, CastleRenderOptions,
+  CastleInternalRHI;
 
 type
   TShapeRenderEvent = procedure (const Shape: TCollectedShape;
@@ -34,6 +35,8 @@ type
   TOcclusionCullingUtilsRenderer = class
   strict private
     RenderBox: TCastleRenderUnlitMesh;
+    FRHIBoxVertexBuffer: TRHIBuffer;
+    FRHIBoxIndexBuffer: TRHIBuffer;
     OcclusionBoxState: boolean;
     SavedDepthBufferUpdate: Boolean;
     SavedColorChannels: TColorChannels;
@@ -46,17 +49,36 @@ type
     ProjectionMatrix: TMatrix4;
     CameraMatrix: TMatrix4;
     SceneMatrix: TMatrix4;
+    destructor Destroy; override;
     procedure GLContextClose;
     procedure OcclusionBoxStateEnd(const RestoreDefaults: Boolean);
+    property RHIBoxVertexBuffer: TRHIBuffer read FRHIBoxVertexBuffer;
+    property RHIBoxIndexBuffer: TRHIBuffer read FRHIBoxIndexBuffer;
   end;
 
   TOcclusionCullingRenderer = class
   strict private
     FUtils: TOcclusionCullingUtilsRenderer;
+    FRHIQueryPools: array of TRHIQueryPool;
+    FRHIQueryPageCapacity: Cardinal;
+    FNextRHIQuerySlot: Cardinal;
+    FRHIQueriesIssuedCount: Cardinal;
+    FRHIQueriesHitCount: Cardinal;
+    function GetRHIQueryPoolCount: Cardinal;
+    function AllocateRHIQuerySlot: Cardinal;
+    function GetRHIQueryPoolAndLocalIndex(const ASlot: Cardinal;
+      out ALocalIndex: Cardinal): TRHIQueryPool;
   public
     constructor Create;
     destructor Destroy; override;
+    procedure GLContextClose;
     property Utils: TOcclusionCullingUtilsRenderer read FUtils;
+    property RHIQueryPageCapacity: Cardinal read FRHIQueryPageCapacity write FRHIQueryPageCapacity;
+    property RHIQueryPoolCount: Cardinal read GetRHIQueryPoolCount;
+    property AllocatedRHIQuerySlots: Cardinal read FNextRHIQuerySlot;
+    property RHIQueriesIssuedCount: Cardinal read FRHIQueriesIssuedCount;
+    property RHIQueriesHitCount: Cardinal read FRHIQueriesHitCount;
+    function GetRHIQueryPool(const APageIndex: Cardinal): TRHIQueryPool;
     procedure Render(const CollectedShape: TCollectedShape;
       const Params: TRenderParams; const PassParams: TRenderOnePassParams;
       const RenderShape: TShapeRenderEvent);
@@ -64,11 +86,17 @@ type
 
 implementation
 
-uses SysUtils,
+uses SysUtils, Math,
   CastleClassUtils, CastleInternalShapeOctree, CastleInternalGLUtils,
-  CastleUtils, CastleTimeUtils, CastleLog;
+  CastleUtils, CastleTimeUtils, CastleLog, CastleApplicationProperties;
 
 { TOcclusionCullingUtilsRenderer ------------------------------------------------- }
+
+destructor TOcclusionCullingUtilsRenderer.Destroy;
+begin
+  GLContextClose;
+  inherited;
+end;
 
 procedure TOcclusionCullingUtilsRenderer.GLContextOpen;
 const
@@ -83,39 +111,72 @@ const
     0, 4, 5, 0, 5, 1      // 0, 4, 5, 1
   );
 begin
-  RenderBox := TCastleRenderUnlitMesh.Create(false);
-  RenderBox.SetIndexes(Indexes);
+  if RHIDevice <> nil then
+  begin
+    if FRHIBoxIndexBuffer = nil then
+      FRHIBoxIndexBuffer := RHIDevice.CreateBuffer(
+        TRHIBufferDesc.Create(SizeOf(Indexes), [buIndex], muCpuToGpu, 'OcclusionBoxIBO'),
+        @Indexes[0]);
+    if FRHIBoxVertexBuffer = nil then
+      FRHIBoxVertexBuffer := RHIDevice.CreateBuffer(
+        TRHIBufferDesc.Create(8 * SizeOf(TVector4), [buVertex], muCpuToGpu, 'OcclusionBoxVBO'),
+        nil);
+  end else
+  begin
+    RenderBox := TCastleRenderUnlitMesh.Create(false);
+    RenderBox.SetIndexes(Indexes);
+  end;
 end;
 
 procedure TOcclusionCullingUtilsRenderer.GLContextClose;
 begin
   FreeAndNil(RenderBox);
+  FreeAndNil(FRHIBoxVertexBuffer);
+  FreeAndNil(FRHIBoxIndexBuffer);
 end;
 
 procedure TOcclusionCullingUtilsRenderer.OcclusionBoxStateBegin;
 begin
   if not OcclusionBoxState then
   begin
-    if RenderBox = nil then
-      GLContextOpen;
+    if RHIDevice <> nil then
+    begin
+      if FRHIBoxIndexBuffer = nil then
+        GLContextOpen;
+    end else
+    begin
+      if RenderBox = nil then
+        GLContextOpen;
+    end;
 
-    SavedDepthBufferUpdate := RenderContext.DepthBufferUpdate;
-    RenderContext.DepthBufferUpdate := false;
+    if RenderContext <> nil then
+    begin
+      SavedDepthBufferUpdate := RenderContext.DepthBufferUpdate;
+      SavedColorChannels := RenderContext.ColorChannels;
+      SavedCullFace := RenderContext.CullFace;
 
-    SavedColorChannels := RenderContext.ColorChannels;
-    RenderContext.ColorChannels := [];
+      if ApplicationProperties.IsGLContextOpen then
+      begin
+        RenderContext.DepthBufferUpdate := false;
+        RenderContext.ColorChannels := [];
+        RenderContext.CullFace := false;
 
-    SavedCullFace := RenderContext.CullFace;
-    RenderContext.CullFace := false;
+        { Do not alpha test.
+          This also means that texture enabled for fixed-function will be meaningless,
+          it will not affect occlusion result, which is good.
 
-    { Do not alpha test.
-      This also means that texture enabled for fixed-function will be meaningless,
-      it will not affect occlusion result, which is good.
+          Note that we don't care to save/restore this state,
+          as each state will reenable alpha test by RenderContext.FixedFunctionAlphaTestEnable
+          if necessary. }
+        RenderContext.FixedFunctionAlphaTestDisable;
+      end;
+    end;
 
-      Note that we don't care to save/restore this state,
-      as each state will reenable alpha test by RenderContext.FixedFunctionAlphaTestEnable
-      if necessary. }
-    RenderContext.FixedFunctionAlphaTestDisable;
+    if ActiveCommandList <> nil then
+    begin
+      ActiveCommandList.SetDepthWriteEnable(False);
+      ActiveCommandList.SetCullMode(cmNone);
+    end;
 
     OcclusionBoxState := true;
   end;
@@ -125,16 +186,35 @@ procedure TOcclusionCullingUtilsRenderer.OcclusionBoxStateEnd(const RestoreDefau
 begin
   if OcclusionBoxState then
   begin
-    if RestoreDefaults then
+    if (RenderContext <> nil) and ApplicationProperties.IsGLContextOpen then
     begin
-      RenderContext.DepthBufferUpdate := true;
-      RenderContext.ColorChannels := [0..3];
-      RenderContext.CullFace := false;
-    end else
+      if RestoreDefaults then
+      begin
+        RenderContext.DepthBufferUpdate := true;
+        RenderContext.ColorChannels := [0..3];
+        RenderContext.CullFace := false;
+      end else
+      begin
+        RenderContext.DepthBufferUpdate := SavedDepthBufferUpdate;
+        RenderContext.ColorChannels := SavedColorChannels;
+        RenderContext.CullFace := SavedCullFace;
+      end;
+    end;
+
+    if ActiveCommandList <> nil then
     begin
-      RenderContext.DepthBufferUpdate := SavedDepthBufferUpdate;
-      RenderContext.ColorChannels := SavedColorChannels;
-      RenderContext.CullFace := SavedCullFace;
+      if RestoreDefaults then
+      begin
+        ActiveCommandList.SetDepthWriteEnable(True);
+        ActiveCommandList.SetCullMode(cmNone);
+      end else
+      begin
+        ActiveCommandList.SetDepthWriteEnable(SavedDepthBufferUpdate);
+        if SavedCullFace then
+          ActiveCommandList.SetCullMode(cmBack)
+        else
+          ActiveCommandList.SetCullMode(cmNone);
+      end;
     end;
 
     OcclusionBoxState := false;
@@ -144,6 +224,7 @@ end;
 procedure TOcclusionCullingUtilsRenderer.DrawBox(const Box: TBox3D);
 var
   Verts: array [0..7] of TVector4;
+  Mapped: Pointer;
 begin
   if Box.IsEmpty then Exit;
 
@@ -160,9 +241,29 @@ begin
   Verts[6] := Vector4(Box.Data[1], 1); Verts[6].Data[0] := Box.Data[0][0];
   Verts[7] := Vector4(Box.Data[1], 1);
 
-  RenderBox.ModelViewProjection := ProjectionMatrix * CameraMatrix * SceneMatrix;
-  RenderBox.SetVertexes(Verts, true);
-  RenderBox.Render(pmTriangles);
+  if RHIDevice <> nil then
+  begin
+    if FRHIBoxVertexBuffer <> nil then
+    begin
+      Mapped := FRHIBoxVertexBuffer.Map;
+      if Mapped <> nil then
+      begin
+        Move(Verts[0], Mapped^, SizeOf(Verts));
+        FRHIBoxVertexBuffer.Unmap;
+      end;
+    end;
+    if (ActiveCommandList <> nil) and (FRHIBoxVertexBuffer <> nil) and (FRHIBoxIndexBuffer <> nil) then
+    begin
+      ActiveCommandList.BindVertexBuffers(0, [FRHIBoxVertexBuffer], [0]);
+      ActiveCommandList.BindIndexBuffer(FRHIBoxIndexBuffer, 0, itUInt16);
+      ActiveCommandList.DrawIndexed(36, 1, 0, 0, 0);
+    end;
+  end else
+  begin
+    RenderBox.ModelViewProjection := ProjectionMatrix * CameraMatrix * SceneMatrix;
+    RenderBox.SetVertexes(Verts, true);
+    RenderBox.Render(pmTriangles);
+  end;
 end;
 
 { TOcclusionCullingRenderer ---------------------------------------------- }
@@ -180,12 +281,79 @@ constructor TOcclusionCullingRenderer.Create;
 begin
   inherited Create;
   FUtils := TOcclusionCullingUtilsRenderer.Create;
+  FRHIQueryPageCapacity := 256;
 end;
 
 destructor TOcclusionCullingRenderer.Destroy;
 begin
+  GLContextClose;
   FreeAndNil(FUtils);
   inherited;
+end;
+
+procedure TOcclusionCullingRenderer.GLContextClose;
+var
+  I: Integer;
+begin
+  if FUtils <> nil then
+    FUtils.GLContextClose;
+  for I := 0 to High(FRHIQueryPools) do
+    FreeAndNil(FRHIQueryPools[I]);
+  SetLength(FRHIQueryPools, 0);
+  FNextRHIQuerySlot := 0;
+end;
+
+function TOcclusionCullingRenderer.GetRHIQueryPoolCount: Cardinal;
+begin
+  Result := Cardinal(Length(FRHIQueryPools));
+end;
+
+function TOcclusionCullingRenderer.GetRHIQueryPool(const APageIndex: Cardinal): TRHIQueryPool;
+begin
+  if APageIndex < Cardinal(Length(FRHIQueryPools)) then
+    Result := FRHIQueryPools[APageIndex]
+  else
+    Result := nil;
+end;
+
+function TOcclusionCullingRenderer.AllocateRHIQuerySlot: Cardinal;
+var
+  Capacity: Cardinal;
+  RequiredPage, PageIdx: Cardinal;
+begin
+  Inc(FNextRHIQuerySlot);
+  Result := FNextRHIQuerySlot; // 1-based slot index
+
+  if RHIDevice = nil then
+    Exit;
+
+  Capacity := Max(Cardinal(1), FRHIQueryPageCapacity);
+  RequiredPage := (Result - 1) div Capacity;
+  while Cardinal(Length(FRHIQueryPools)) <= RequiredPage do
+  begin
+    PageIdx := Cardinal(Length(FRHIQueryPools));
+    SetLength(FRHIQueryPools, PageIdx + 1);
+    FRHIQueryPools[PageIdx] := RHIDevice.CreateQueryPool(
+      TRHIQueryPoolDesc.Create(qtOcclusion, Capacity,
+        Format('OcclusionCullingQueryPool_Page%d', [PageIdx])));
+  end;
+end;
+
+function TOcclusionCullingRenderer.GetRHIQueryPoolAndLocalIndex(
+  const ASlot: Cardinal; out ALocalIndex: Cardinal): TRHIQueryPool;
+var
+  Capacity, ZeroBased, PageIdx: Cardinal;
+begin
+  Result := nil;
+  ALocalIndex := 0;
+  if ASlot = 0 then
+    Exit;
+  Capacity := Max(Cardinal(1), FRHIQueryPageCapacity);
+  ZeroBased := ASlot - 1;
+  PageIdx := ZeroBased div Capacity;
+  ALocalIndex := ZeroBased mod Capacity;
+  if PageIdx < Cardinal(Length(FRHIQueryPools)) then
+    Result := FRHIQueryPools[PageIdx];
 end;
 
 procedure TOcclusionCullingRenderer.Render(const CollectedShape: TCollectedShape;
@@ -257,10 +425,47 @@ var
   WasVisible: Boolean;
   QueryResultAvailable, OcclusionQueryAsk: Boolean;
   QueryResultAge: Int64;
+  RHIQueryPool: TRHIQueryPool;
+  LocalQueryIdx: Cardinal;
+  RHISampleCounts: array[0..0] of UInt64;
 begin
   Shape := CollectedShape.Shape;
 
   { Get occlusion query result from previous render. }
+  if RHIDevice <> nil then
+  begin
+    if Shape.OcclusionQueryAsked and (Shape.RHIQuerySlot > 0) then
+    begin
+      RHIQueryPool := GetRHIQueryPoolAndLocalIndex(Shape.RHIQuerySlot, LocalQueryIdx);
+      if RHIQueryPool <> nil then
+      begin
+        RHISampleCounts[0] := 0;
+        QueryResultAvailable := RHIQueryPool.GetResults(LocalQueryIdx, 1, RHISampleCounts, False);
+        if not QueryResultAvailable then
+          WasVisible := true // assume is visible until GPU finishes query
+        else
+        begin
+          QueryResultAge := TFramesPerSecond.RenderFrameId - Shape.OcclusionQueryAskedFrameId;
+          if QueryResultAge > MaxOcclusionQueryResultAge then
+            WasVisible := true // assume is visible, query result is too old to trust it
+          else
+          begin
+            WasVisible := RHISampleCounts[0] > 0;
+            if WasVisible then
+              Inc(FRHIQueriesHitCount);
+          end;
+        end;
+      end else
+      begin
+        WasVisible := true;
+        QueryResultAvailable := true;
+      end;
+    end else
+    begin
+      WasVisible := true;
+      QueryResultAvailable := true;
+    end;
+  end else
   if Shape.OcclusionQueryAsked and
      (Shape.OcclusionQueryId <> GLObjectNone) then
   begin
@@ -297,30 +502,61 @@ begin
 
   if OcclusionQueryAsk then
   begin
-    if Shape.OcclusionQueryId = GLObjectNone then
-      Shape.OcclusionQueryId := glCreateQuery();
-
-    glBeginQuery(QueryTarget, Shape.OcclusionQueryId);
-
-    if WasVisible then
+    if RHIDevice <> nil then
     begin
-      RenderShape(CollectedShape, Params, PassParams);
+      if Shape.RHIQuerySlot = 0 then
+        Shape.RHIQuerySlot := AllocateRHIQuerySlot;
+
+      RHIQueryPool := GetRHIQueryPoolAndLocalIndex(Shape.RHIQuerySlot, LocalQueryIdx);
+      if (RHIQueryPool <> nil) and (ActiveCommandList <> nil) then
+      begin
+        ActiveCommandList.ResetQueryPool(RHIQueryPool, LocalQueryIdx, 1);
+        ActiveCommandList.BeginQuery(RHIQueryPool, LocalQueryIdx, False);
+      end;
+
+      if WasVisible then
+      begin
+        RenderShape(CollectedShape, Params, PassParams);
+      end else
+      begin
+        Utils.SceneMatrix := CollectedShape.SceneTransform;
+        Utils.DrawBox(Shape.BoundingBox);
+        if Params.InternalPass = 0 then
+          Inc(Params.Statistics.BoxesOcclusionQueriedCount);
+      end;
+
+      if (RHIQueryPool <> nil) and (ActiveCommandList <> nil) then
+        ActiveCommandList.EndQuery(RHIQueryPool, LocalQueryIdx);
+
+      Inc(FRHIQueriesIssuedCount);
+      Shape.OcclusionQueryAskedFrameId := TFramesPerSecond.RenderFrameId;
     end else
     begin
-      { Object was not visible in the last frame.
-        In this frame, only render it's bounding box, to test
-        occlusion query. This is the speedup of using occlusion query:
-        we render only bbox. }
+      if Shape.OcclusionQueryId = GLObjectNone then
+        Shape.OcclusionQueryId := glCreateQuery();
 
-      Utils.SceneMatrix := CollectedShape.SceneTransform;
-      Utils.DrawBox(Shape.BoundingBox);
-      if Params.InternalPass = 0 then
-        Inc(Params.Statistics.BoxesOcclusionQueriedCount);
+      glBeginQuery(QueryTarget, Shape.OcclusionQueryId);
+
+      if WasVisible then
+      begin
+        RenderShape(CollectedShape, Params, PassParams);
+      end else
+      begin
+        { Object was not visible in the last frame.
+          In this frame, only render it's bounding box, to test
+          occlusion query. This is the speedup of using occlusion query:
+          we render only bbox. }
+
+        Utils.SceneMatrix := CollectedShape.SceneTransform;
+        Utils.DrawBox(Shape.BoundingBox);
+        if Params.InternalPass = 0 then
+          Inc(Params.Statistics.BoxesOcclusionQueriedCount);
+      end;
+
+      glEndQuery(QueryTarget);
+
+      Shape.OcclusionQueryAskedFrameId := TFramesPerSecond.RenderFrameId;
     end;
-
-    glEndQuery(QueryTarget);
-
-    Shape.OcclusionQueryAskedFrameId := TFramesPerSecond.RenderFrameId;
   end else
   begin
     if WasVisible then

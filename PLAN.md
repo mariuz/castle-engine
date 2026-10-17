@@ -216,6 +216,20 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 6 Status**: Completed. Growable & per-frame transient descriptor pools (`TVulkanDescriptorPoolAllocator`), asynchronous staging ring buffer uploader & dedicated DMA transfer queue (`TCastleVulkanStagingUploader`), bindless texture & sampler indexing (`TCastleVulkanBindlessTextureManager`), hardware MSAA & single-pass attachment resolve (`BuildSwapchainRenderingInfo`), compute pipelines & indirect dispatch (`TVulkanRHIComputePipeline`), extended dynamic state PSO deduplication & `VK_KHR_synchronization2` + timeline semaphores (`TCastleVulkanTimelineSemaphore`), and GPU timestamp profiler & hardware occlusion queries (`TVulkanRHIQueryPool`, `TCastleVulkanTimestampProfiler`) fully integrated and tested (48 unit tests passing).
 
 
+### Phase 7: End-to-End Engine Integration, GPU-Driven Compute Culling & Live Diagnostics (COMPLETED)
+
+* [x] **7.1. RHI Hardware Occlusion Culling Integration (`CastleInternalOcclusionCulling`, `CastleInternalShapesRenderer`, `CastleSceneInternalShape`)**:
+  * Extend `TGLShape` (`RHIQuerySlot`), `TOcclusionCullingUtilsRenderer` (`RHIBoxVertexBuffer` / `RHIBoxIndexBuffer`), `TOcclusionCullingRenderer` (growable paged `TRHIQueryPool` array of `qtOcclusion`), and `TShapesRenderer.EffectiveOcclusionCulling` so `TCastleViewport.OcclusionCulling` seamlessly records `ResetQueryPool`, `BeginQuery`, bounding-box `DrawIndexed`, and `EndQuery` on `ActiveCommandList` and reads back non-blocking 64-bit sample counts via `TRHIQueryPool.GetResults(..., False)`.
+* [x] **7.2. GPU-Driven Compute Frustum & Distance Culling (`TCastleVulkanComputeCuller`, `CastleInternalShaderRHI`)**:
+  * Add `TCastleGpuCullingUniformBlock` (`std140`, 144 bytes), `TCastleGpuCullingInstance` (`std430`, 80 bytes), and `TCastleShaderGeneratorRHI.GenerateComputeCullingShader` (`#version 450` compute shader with `atomicAdd(u_VisibleCount, 1u)` and `CastleDrawIndexedIndirectCommand` generation).
+  * Implement `TCastleVulkanComputeCuller` (`TVulkanRHIDevice.ComputeCuller`) supporting both 1:1 indirect slot culling (`instanceCount = 0` when culled) and compacted indirect stream generation (`ACompactDraws = True`) with automatic `TransitionBuffer(rbsShaderWrite -> rbsIndirectRead)` barriers.
+* [x] **7.3. Live Viewport Diagnostics & Window Anti-Aliasing Synchronization (`TCastleViewport.Statistics`, `TCastleWindow.AntiAliasing`)**:
+  * Wire `TCastleWindow.SetAntiAliasing` in `CastleWindow` to synchronize `TVulkanRHIDevice(RHIDevice).AntiAliasing`.
+  * Extend `TRenderStatistics` and `TCastleViewport.Statistics` (`UpdateVulkanRHIRenderStatistics`) with `GpuFrameTimeMs` (from `TCastleVulkanTimestampProfiler.LastFrameTotalGpuTimeMs`), `ComputeDispatchCount`, `BindlessActiveTextures` (from `TCastleVulkanBindlessTextureManager.ActiveTextureCount`), and `MSAASampleCount` (from `TVulkanRHIDevice.SampleCount`), formatted in `TRenderStatistics.ToString`.
+
+**Milestone 7 Status**: Completed. RHI hardware occlusion culling in `CastleInternalOcclusionCulling`, GPU-driven compute frustum & distance culling (`TCastleVulkanComputeCuller`), `TCastleWindow.AntiAliasing` synchronization, and live `TCastleViewport.Statistics` GPU timing/compute/bindless/MSAA diagnostics fully integrated and tested (51 unit tests passing).
+
+
 ## 5. Build Tool (castle-engine) & Editor Integration
 
 * [x] CastleEngineManifest.xml Support:
@@ -223,7 +237,7 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 <project name="my_game" render_backend="auto"> <!-- auto | opengl | opengles | vulkan -->
 ```
 * [x] Shader & PSO Pre-warming (Build Step & Runtime `PrepareResources`): `TCastleManifest.ShouldPrewarmVulkanShaders`, `TPackageDirectory.AddDataInformation` (`ToolPackage`), and `TCastleShaderCompiler.PrewarmCoreEngineShaders` pre-compile and cache known core engine shaders (3D forward pass, shadow depth pass, screen effects) to SPIR-V, while `TVulkanRHIDevice.PrewarmStandardPipelines` hooked into `TCastleViewport.PrepareResources` loads/saves `VkPipelineCache` (`castle-config:/vulkan_pipeline_cache.bin`) and bakes standard 3D/2D PSOs (and `VK_EXT_graphics_pipeline_library` sub-libraries) before the first rendered frame.
-* [x] Editor Diagnostics: Update CastleRenderOptions and `TCastleViewport.Statistics` to report active RHI backend, PSO cache hits/misses, Descriptor Set allocations, and live Vulkan device memory usage/budget (`VK_EXT_memory_budget` via `vkGetPhysicalDeviceMemoryProperties2`).
+* [x] Editor Diagnostics: Update CastleRenderOptions and `TCastleViewport.Statistics` to report active RHI backend, MSAA sample count, PSO cache hits/misses, Descriptor Set allocations, active bindless textures, compute dispatches, GPU frame time (ms), and live Vulkan device memory usage/budget (`VK_EXT_memory_budget` via `vkGetPhysicalDeviceMemoryProperties2`).
 
 
 ## 6. Risk Management & Mitigations
@@ -240,5 +254,5 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 ## 7. Testing & Verification Criteria
 
 * [x] Automated Visual Regression Tests: `CompareImagesPerceptualDiff` in `CastleInternalRHI` compares framebuffer readbacks (`GrabTextureImage`) between `rbOpenGL` and `rbVulkan` using normalized RMSE perceptual diff thresholds.
-* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 48 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
-* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, and `vkCmdDrawIndexedIndirect` / `vkCmdDispatchIndirect` minimize CPU driver overhead.
+* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 51 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
+* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance culling (`TCastleVulkanComputeCuller`), and `vkCmdDrawIndexedIndirect` / `vkCmdDispatchIndirect` minimize CPU driver overhead.

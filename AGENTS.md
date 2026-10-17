@@ -77,12 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–5**: **COMPLETED** (100%).
-- **Phase 6 (Next-Generation Vulkan Enhancements & Production Hardening)**: **COMPLETED** (100%, 48 unit tests passing):
-  - [x] **6.1. Growable Descriptor Pool Chain & Per-Frame Transient Descriptor Pools (`TVulkanDescriptorPoolAllocator`)** — Completed & tested (`TestGrowableAndTransientDescriptorPools`).
-  - [x] **6.2. Asynchronous Staging Upload Ring Buffer & Dedicated DMA Transfer Queue (`TCastleVulkanStagingUploader`)** — Completed & tested (`TestAsyncStagingUploadRingBufferAndTransferQueue`).
-  - [x] **6.3. Bindless Texture & Sampler Indexing (`VK_EXT_descriptor_indexing` / Vulkan 1.2 Core)** — Completed & tested (`TestBindlessTextureAndSamplerIndexing`).
-  - [x] **6.4. Hardware Multisample Anti-Aliasing (MSAA) & Single-Pass Attachment Resolve** — Completed & tested (`TestHardwareMSAAAndSinglePassResolve`).
-  - [x] **6.5. Compute Pipeline Abstraction (`TRHIComputePipeline`, `vkCmdDispatch`, `vkCmdDispatchIndirect`)** — Completed & tested (`TestComputePipelineAndDispatch`).
-  - [x] **6.6. Extended Dynamic State (`VK_EXT_extended_dynamic_state` 1/2/3) & `VK_KHR_synchronization2`** — Completed & tested (`TestExtendedDynamicStateAndSync2AndTimelineSemaphore`).
-  - [x] **6.7. GPU Timestamp Profiler & Hardware Occlusion Queries (`VkQueryPool`)** — Completed & tested (`TestQueryPoolTimestampsAndOcclusion`).
+- **Phases 1–6**: **COMPLETED** (100%).
+- **Phase 7 (End-to-End Engine Integration, GPU-Driven Compute Culling & Live Diagnostics)**: **COMPLETED** (100%, 51 unit tests passing):
+  - [x] **7.1. RHI Hardware Occlusion Culling Integration (`CastleInternalOcclusionCulling`, `CastleInternalShapesRenderer`, `CastleSceneInternalShape`)** — Completed & tested (`TestRHIOcclusionCullingRendererIntegration`).
+  - [x] **7.2. GPU-Driven Compute Frustum & Distance Culling (`TCastleVulkanComputeCuller`, `CastleInternalShaderRHI`)** — Completed & tested (`TestGpuDrivenComputeFrustumAndDistanceCulling`).
+  - [x] **7.3. Live Viewport Diagnostics & Window Anti-Aliasing Synchronization (`TCastleViewport.Statistics`, `TCastleWindow.AntiAliasing`)** — Completed & tested (`TestViewportLiveDiagnosticsAndWindowAntiAliasingSync`).

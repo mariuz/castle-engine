@@ -3325,6 +3325,16 @@ begin
     VkDev.QueryMemoryBudget(UsedBytes, BudgetBytes, UsedMB, BudgetMB);
     AStats.DeviceMemoryUsedMB := UsedMB;
     AStats.DeviceMemoryBudgetMB := BudgetMB;
+    if VkDev.TimestampProfiler <> nil then
+      AStats.GpuFrameTimeMs := VkDev.TimestampProfiler.LastFrameTotalGpuTimeMs
+    else
+      AStats.GpuFrameTimeMs := 0.0;
+    AStats.ComputeDispatchCount := VkDev.ComputeDispatchCount;
+    if VkDev.BindlessTextureManager <> nil then
+      AStats.BindlessActiveTextures := VkDev.BindlessTextureManager.ActiveSlotCount
+    else
+      AStats.BindlessActiveTextures := 0;
+    AStats.MSAASampleCount := VkDev.SampleCount;
   end else
   if RHIDevice <> nil then
   begin

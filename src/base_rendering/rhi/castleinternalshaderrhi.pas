@@ -130,6 +130,34 @@ type
     Padding0, Padding1, Padding2: Cardinal;
   end;
 
+  { CPU-side mirror of Set 0, Binding 0 for GPU Compute Frustum/Distance/Hi-Z Culling (std140) }
+  PCastleGpuCullingUniformBlock = ^TCastleGpuCullingUniformBlock;
+  TCastleGpuCullingUniformBlock = packed record
+    FrustumPlanes: array[0..5] of TVector4; // 6 planes (A, B, C, D), 96 bytes
+    CameraPosition: TVector4;               // xyz = camera world pos, w = max distance (0 = disabled), 16 bytes
+    HiZParams: TVector4;                    // x = width, y = height, z = mipCount, w = enableHiZ, 16 bytes
+    InstanceCount: Cardinal;                // 4 bytes
+    EnableFrustumCulling: Cardinal;         // 4 bytes (1 = enabled, 0 = disabled)
+    EnableDistanceCulling: Cardinal;        // 4 bytes (1 = enabled, 0 = disabled)
+    CompactDrawStream: Cardinal;            // 4 bytes (1 = compact visible draws via atomicAdd, 0 = 1:1 slots)
+  end; // Total = 144 bytes (144 mod 16 = 0)
+
+  { CPU-side mirror of a single instance in Set 0, Binding 1 Input SSBO for GPU Compute Culling (std430) }
+  PCastleGpuCullingInstance = ^TCastleGpuCullingInstance;
+  TCastleGpuCullingInstance = packed record
+    BoundingSphere: TVector4; // xyz = world-space center, w = radius (16 bytes)
+    AABBMin: TVector4;        // xyz = world-space AABB min, w = reserved (16 bytes)
+    AABBMax: TVector4;        // xyz = world-space AABB max, w = reserved (16 bytes)
+    IndexCount: Cardinal;     // 4 bytes (for VkDrawIndexedIndirectCommand)
+    FirstIndex: Cardinal;     // 4 bytes
+    VertexOffset: Integer;    // 4 bytes
+    FirstInstance: Cardinal;  // 4 bytes
+    InstanceCount: Cardinal;  // 4 bytes (typically 1)
+    MaterialIndex: Cardinal;  // 4 bytes (bindless material index)
+    Padding0: Cardinal;       // 4 bytes
+    Padding1: Cardinal;       // 4 bytes
+  end; // Total = 80 bytes (80 mod 16 = 0)
+
   { Generates RHI-compliant GLSL headers, UBO blocks, and varying layouts }
   TCastleShaderGeneratorRHI = class
   private
@@ -174,6 +202,10 @@ type
 
     { Builds GLSL 450 preamble for post-processing screen effects (TCastleScreenEffects) }
     function GenerateScreenEffectPreamble(const AStage: TRHIShaderStage; const HasDepth: Boolean): String;
+
+    { Generates a complete GLSL 450 compute shader for GPU-driven frustum & distance culling
+      that populates VkDrawIndexedIndirectCommand entries and atomic visibility counters. }
+    function GenerateComputeCullingShader(const AWorkgroupSizeX: Cardinal = 64): String;
 
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
@@ -849,6 +881,112 @@ begin
         'layout(location = 0) out vec4 castle_FragColor;' + NL +
         '#define gl_FragColor castle_FragColor' + NL;
   end;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateComputeCullingShader(
+  const AWorkgroupSizeX: Cardinal): String;
+var
+  EffectiveLocalSizeX: Cardinal;
+begin
+  if AWorkgroupSizeX = 0 then
+    EffectiveLocalSizeX := 64
+  else
+    EffectiveLocalSizeX := AWorkgroupSizeX;
+
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = 1, local_size_z = 1) in;', [EffectiveLocalSizeX]) + NL +
+    NL +
+    'layout(std140, set = 0, binding = 0) uniform CastleGpuCullingUniforms {' + NL +
+    '  vec4 u_FrustumPlanes[6];' + NL +
+    '  vec4 u_CameraPosition;' + NL +
+    '  vec4 u_HiZParams;' + NL +
+    '  uint u_InstanceCount;' + NL +
+    '  uint u_EnableFrustumCulling;' + NL +
+    '  uint u_EnableDistanceCulling;' + NL +
+    '  uint u_CompactDrawStream;' + NL +
+    '} CastleCulling;' + NL +
+    NL +
+    'struct CastleGpuCullingInstance {' + NL +
+    '  vec4 BoundingSphere;' + NL +
+    '  vec4 AABBMin;' + NL +
+    '  vec4 AABBMax;' + NL +
+    '  uint IndexCount;' + NL +
+    '  uint FirstIndex;' + NL +
+    '  int  VertexOffset;' + NL +
+    '  uint FirstInstance;' + NL +
+    '  uint InstanceCount;' + NL +
+    '  uint MaterialIndex;' + NL +
+    '  uint Padding0;' + NL +
+    '  uint Padding1;' + NL +
+    '};' + NL +
+    NL +
+    'struct CastleDrawIndexedIndirectCommand {' + NL +
+    '  uint indexCount;' + NL +
+    '  uint instanceCount;' + NL +
+    '  uint firstIndex;' + NL +
+    '  int  vertexOffset;' + NL +
+    '  uint firstInstance;' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 1) readonly buffer CastleCullingInstancesBlock {' + NL +
+    '  CastleGpuCullingInstance u_Instances[];' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 2) writeonly buffer CastleIndirectCommandsBlock {' + NL +
+    '  CastleDrawIndexedIndirectCommand u_Commands[];' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 3) buffer CastleVisibilityOutputBlock {' + NL +
+    '  uint u_VisibleCount;' + NL +
+    '  uint u_VisibilityFlags[];' + NL +
+    '};' + NL +
+    NL +
+    'bool IsSphereInsideFrustum(vec3 center, float radius) {' + NL +
+    '  for (int i = 0; i < 6; ++i) {' + NL +
+    '    vec4 plane = CastleCulling.u_FrustumPlanes[i];' + NL +
+    '    if (dot(plane.xyz, center) + plane.w < -radius)' + NL +
+    '      return false;' + NL +
+    '  }' + NL +
+    '  return true;' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  uint idx = gl_GlobalInvocationID.x;' + NL +
+    '  if (idx >= CastleCulling.u_InstanceCount) return;' + NL +
+    '  CastleGpuCullingInstance inst = u_Instances[idx];' + NL +
+    '  bool visible = true;' + NL +
+    '  if (CastleCulling.u_EnableFrustumCulling != 0u) {' + NL +
+    '    visible = IsSphereInsideFrustum(inst.BoundingSphere.xyz, inst.BoundingSphere.w);' + NL +
+    '  }' + NL +
+    '  if (visible && (CastleCulling.u_EnableDistanceCulling != 0u) && (CastleCulling.u_CameraPosition.w > 0.0)) {' + NL +
+    '    float dist = distance(inst.BoundingSphere.xyz, CastleCulling.u_CameraPosition.xyz) - inst.BoundingSphere.w;' + NL +
+    '    if (dist > CastleCulling.u_CameraPosition.w)' + NL +
+    '      visible = false;' + NL +
+    '  }' + NL +
+    '  u_VisibilityFlags[idx] = visible ? 1u : 0u;' + NL +
+    '  if (CastleCulling.u_CompactDrawStream != 0u) {' + NL +
+    '    if (visible) {' + NL +
+    '      uint outSlot = atomicAdd(u_VisibleCount, 1u);' + NL +
+    '      CastleDrawIndexedIndirectCommand cmd;' + NL +
+    '      cmd.indexCount = inst.IndexCount;' + NL +
+    '      cmd.instanceCount = inst.InstanceCount;' + NL +
+    '      cmd.firstIndex = inst.FirstIndex;' + NL +
+    '      cmd.vertexOffset = inst.VertexOffset;' + NL +
+    '      cmd.firstInstance = inst.FirstInstance;' + NL +
+    '      u_Commands[outSlot] = cmd;' + NL +
+    '    }' + NL +
+    '  } else {' + NL +
+    '    if (visible) atomicAdd(u_VisibleCount, 1u);' + NL +
+    '    CastleDrawIndexedIndirectCommand cmd;' + NL +
+    '    cmd.indexCount = inst.IndexCount;' + NL +
+    '    cmd.instanceCount = visible ? inst.InstanceCount : 0u;' + NL +
+    '    cmd.firstIndex = inst.FirstIndex;' + NL +
+    '    cmd.vertexOffset = inst.VertexOffset;' + NL +
+    '    cmd.firstInstance = inst.FirstInstance;' + NL +
+    '    u_Commands[idx] = cmd;' + NL +
+    '  }' + NL +
+    '}' + NL;
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

@@ -2655,6 +2655,7 @@ implementation
 uses
   CastleLog, CastleGLVersion, CastleUriUtils, CastleControls, CastleMessaging,
   CastleRenderContext, CastleInternalGLUtils, CastleInternalFileMonitor,
+  CastleInternalRHI, CastleInternalRHI_Vulkan,
   {$define read_implementation_uses}
   {$I castlewindow_backend.inc}
   {$undef read_implementation_uses}
@@ -3121,6 +3122,8 @@ const
 begin
   FAntiAliasing := Value;
   MultiSampling := AntiAliasingToMultiSampling[Value];
+  if (RHIDevice <> nil) and (RHIDevice is TVulkanRHIDevice) then
+    TVulkanRHIDevice(RHIDevice).AntiAliasing := Value;
 end;
 
 { ----------------------------------------------------------------------------

@@ -47,8 +47,11 @@ type
       OcclusionQueryId is GLObjectNone if not initialized yet.
       When it's GLObjectNone, value of OcclusionQueryAsked doesn't matter,
       OcclusionQueryAsked is always reset to @false when initializing
-      OcclusionQueryId. }
+      OcclusionQueryId.
+      When rendering via RHI/Vulkan (RHIDevice <> nil), RHIQuerySlot stores the
+      1-based query slot index allocated from TOcclusionCullingRenderer (0 = unallocated). }
     OcclusionQueryId: TGLQuery;
+    RHIQuerySlot: Cardinal;
     OcclusionQueryAsked: boolean;
     OcclusionQueryAskedFrameId: TFrameId;
 
@@ -325,6 +328,8 @@ begin
   UnprepareAllTextures;
   FreeCaches;
   FreeQuery(OcclusionQueryId);
+  RHIQuerySlot := 0;
+  OcclusionQueryAsked := false;
 end;
 
 procedure TGLShape.SchedulePrepareResources;

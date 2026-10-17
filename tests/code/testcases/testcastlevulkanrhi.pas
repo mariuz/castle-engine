@@ -21,13 +21,16 @@ interface
 uses
   Classes, SysUtils, Math,
   CastleTester, CastleVectors, CastleColors, CastleRectangles,
+  CastleBoxes, CastleFrustum, CastleTimeUtils,
   CastleApplicationProperties, CastleImages, CastleGLImages, CastleFonts,
   CastleTextureFont_Default3d_Sans,
   CastleInternalRHI, CastleInternalVulkan, CastleInternalVulkanMemory,
   CastleInternalVulkanWSI, CastleInternalShaderCompiler, CastleInternalRHI_Vulkan,
   CastleInternalShaderRHI, CastleInternalBatch2DRHI, CastleInternalRenderer,
   CastleRendererInternalLights, X3DNodes,
-  CastleTransform, CastleViewport, CastleRenderOptions, ToolManifest, CastleInternalRenderDoc;
+  CastleSceneInternalShape, CastleInternalOcclusionCulling,
+  CastleTransform, CastleViewport, CastleRenderOptions, CastleWindow,
+  ToolManifest, CastleInternalRenderDoc;
 
 type
   TTestCastleVulkanRHI = class(TCastleTestCase)
@@ -80,9 +83,15 @@ type
     procedure TestComputePipelineAndDispatch;
     procedure TestExtendedDynamicStateAndSync2AndTimelineSemaphore;
     procedure TestQueryPoolTimestampsAndOcclusion;
+    procedure TestRHIOcclusionCullingRendererIntegration;
+    procedure TestGpuDrivenComputeFrustumAndDistanceCulling;
+    procedure TestViewportLiveDiagnosticsAndWindowAntiAliasingSync;
   private
     FCapturedWarnings: TStringList;
+    FRenderedShapeCount: Cardinal;
     procedure CaptureWarning(const Category, S: String);
+    procedure DummyRenderShapeCallback(const Shape: TCollectedShape;
+      const Params: TRenderParams; const PassParams: TRenderOnePassParams);
   end;
 
 implementation
@@ -3407,6 +3416,360 @@ begin
       FreeAndNil(OccPool);
     end;
   finally
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.DummyRenderShapeCallback(const Shape: TCollectedShape;
+  const Params: TRenderParams; const PassParams: TRenderOnePassParams);
+begin
+  Inc(FRenderedShapeCount);
+  if Params.InternalPass = 0 then
+    Inc(Params.Statistics.ShapesRendered);
+end;
+
+procedure TTestCastleVulkanRHI.TestRHIOcclusionCullingRendererIntegration;
+var
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  OccRenderer: TOcclusionCullingRenderer;
+  Shape1, Shape2, Shape3: TGLShape;
+  Col1, Col2, Col3: TCollectedShape;
+  ShapeNode1, ShapeNode2, ShapeNode3: TShapeNode;
+  BoxNode1, BoxNode2, BoxNode3: TBoxNode;
+  State1, State2, State3: TX3DGraphTraverseState;
+  Params: TRenderParams;
+  PassParams: TRenderOnePassParams;
+  Pool0, Pool1: TVulkanRHIQueryPool;
+  SavedDevice: TRHIDevice;
+  SavedCmd: TRHICommandList;
+begin
+  SavedDevice := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0, cllPrimary);
+  OccRenderer := TOcclusionCullingRenderer.Create;
+  ShapeNode1 := TShapeNode.Create;
+  BoxNode1 := TBoxNode.Create;
+  ShapeNode1.Geometry := BoxNode1;
+  State1 := TX3DGraphTraverseState.Create;
+  State1.ShapeNode := ShapeNode1;
+  ShapeNode2 := TShapeNode.Create;
+  BoxNode2 := TBoxNode.Create;
+  ShapeNode2.Geometry := BoxNode2;
+  State2 := TX3DGraphTraverseState.Create;
+  State2.ShapeNode := ShapeNode2;
+  ShapeNode3 := TShapeNode.Create;
+  BoxNode3 := TBoxNode.Create;
+  ShapeNode3.Geometry := BoxNode3;
+  State3 := TX3DGraphTraverseState.Create;
+  State3.ShapeNode := ShapeNode3;
+  Shape1 := TGLShape.Create(nil, BoxNode1, State1, nil);
+  Shape2 := TGLShape.Create(nil, BoxNode2, State2, nil);
+  Shape3 := TGLShape.Create(nil, BoxNode3, State3, nil);
+  Col1 := TCollectedShape.Create;
+  Col2 := TCollectedShape.Create;
+  Col3 := TCollectedShape.Create;
+  Params := TRenderParams.Create;
+  try
+    SetRHIDevice(VkDev);
+    SetActiveCommandList(CmdList);
+    Col1.Shape := Shape1;
+    Col1.SceneTransform := TMatrix4.Identity;
+    Col2.Shape := Shape2;
+    Col2.SceneTransform := TMatrix4.Identity;
+    Col3.Shape := Shape3;
+    Col3.SceneTransform := TMatrix4.Identity;
+    PassParams.Init;
+
+    { Force page capacity = 2 so 3 shapes allocate across 2 paged TRHIQueryPool instances }
+    OccRenderer.RHIQueryPageCapacity := 2;
+    FRenderedShapeCount := 0;
+
+    { Frame 1: Initial render allocates query slots 1..3 across 2 pools and renders all 3 shapes }
+    CmdList.BeginRecording;
+    OccRenderer.Render(Col1, Params, PassParams, @DummyRenderShapeCallback);
+    OccRenderer.Render(Col2, Params, PassParams, @DummyRenderShapeCallback);
+    OccRenderer.Render(Col3, Params, PassParams, @DummyRenderShapeCallback);
+    CmdList.EndRecording;
+
+    AssertEquals('All 3 shapes must be rendered on first frame', 3, FRenderedShapeCount);
+    AssertEquals('AllocatedRHIQuerySlots must be 3', 3, OccRenderer.AllocatedRHIQuerySlots);
+    AssertEquals('RHIQueryPoolCount must grow to 2 pages (capacity 2 per page)', 2, OccRenderer.RHIQueryPoolCount);
+    AssertEquals('RHIQueriesIssuedCount must be 3', 3, OccRenderer.RHIQueriesIssuedCount);
+    AssertEquals('Shape1.RHIQuerySlot must be 1', 1, Shape1.RHIQuerySlot);
+    AssertEquals('Shape2.RHIQuerySlot must be 2', 2, Shape2.RHIQuerySlot);
+    AssertEquals('Shape3.RHIQuerySlot must be 3', 3, Shape3.RHIQuerySlot);
+
+    { Simulate occlusion query results from Frame 1:
+      - Shape1 (Pool0, index 0): 500 samples (visible)
+      - Shape2 (Pool0, index 1): 0 samples (occluded!)
+      - Shape3 (Pool1, index 0): 120 samples (visible) }
+    Pool0 := OccRenderer.GetRHIQueryPool(0) as TVulkanRHIQueryPool;
+    Pool1 := OccRenderer.GetRHIQueryPool(1) as TVulkanRHIQueryPool;
+    AssertTrue('Pool0 must exist', Pool0 <> nil);
+    AssertTrue('Pool1 must exist', Pool1 <> nil);
+    Pool0.SetSimulatedResult(0, 500);
+    Pool0.SetSimulatedResult(1, 0);
+    Pool1.SetSimulatedResult(0, 120);
+
+    { Frame 2: Shape1 and Shape3 render normally; Shape2 is occluded so only its bounding box
+      is drawn via RHI (Utils.DrawBox) and BoxesOcclusionQueriedCount is incremented }
+    FRenderedShapeCount := 0;
+    CmdList.BeginRecording;
+    OccRenderer.Render(Col1, Params, PassParams, @DummyRenderShapeCallback);
+    OccRenderer.Render(Col2, Params, PassParams, @DummyRenderShapeCallback);
+    OccRenderer.Render(Col3, Params, PassParams, @DummyRenderShapeCallback);
+    OccRenderer.Utils.OcclusionBoxStateEnd(True);
+    CmdList.EndRecording;
+
+    AssertEquals('Only 2 visible shapes must be rendered on Frame 2', 2, FRenderedShapeCount);
+    AssertEquals('BoxesOcclusionQueriedCount must be 1 (Shape2 bounding box)',
+      1, Params.Statistics.BoxesOcclusionQueriedCount);
+    AssertTrue('RHI bounding box VBO must be allocated', OccRenderer.Utils.RHIBoxVertexBuffer <> nil);
+    AssertTrue('RHI bounding box IBO must be allocated', OccRenderer.Utils.RHIBoxIndexBuffer <> nil);
+    AssertEquals('RHIQueriesHitCount must be 2 (Shape1 + Shape3)', 2, OccRenderer.RHIQueriesHitCount);
+
+    { Frame 3: Suppose Shape2's bounding box query now passed 80 samples -> Shape2 becomes visible again }
+    Pool0.SetSimulatedResult(0, 500);
+    Pool0.SetSimulatedResult(1, 80);
+    Pool1.SetSimulatedResult(0, 120);
+
+    FRenderedShapeCount := 0;
+    CmdList.BeginRecording;
+    OccRenderer.Render(Col1, Params, PassParams, @DummyRenderShapeCallback);
+    OccRenderer.Render(Col2, Params, PassParams, @DummyRenderShapeCallback);
+    OccRenderer.Render(Col3, Params, PassParams, @DummyRenderShapeCallback);
+    CmdList.EndRecording;
+
+    AssertEquals('All 3 shapes must be rendered on Frame 3 after Shape2 bbox query hit',
+      3, FRenderedShapeCount);
+    AssertEquals('RHIQueriesHitCount must now be 5 (2 + 3)', 5, OccRenderer.RHIQueriesHitCount);
+  finally
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedDevice);
+    FreeAndNil(Params);
+    FreeAndNil(Col3);
+    FreeAndNil(Col2);
+    FreeAndNil(Col1);
+    FreeAndNil(Shape3);
+    FreeAndNil(Shape2);
+    FreeAndNil(Shape1);
+    FreeAndNil(ShapeNode3);
+    FreeAndNil(ShapeNode2);
+    FreeAndNil(ShapeNode1);
+    FreeAndNil(OccRenderer);
+    FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGpuDrivenComputeFrustumAndDistanceCulling;
+var
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Culler: TCastleVulkanComputeCuller;
+  ShaderGen: TCastleShaderGeneratorRHI;
+  CompGLSL: String;
+  Planes: array[0..5] of TVector4;
+  Instances: array[0..3] of TCastleGpuCullingInstance;
+  Groups: Cardinal;
+  Cmd0, Cmd1, Cmd2, Cmd3: TRHIDrawIndexedIndirectCommand;
+begin
+  AssertEquals('TCastleGpuCullingUniformBlock must be 144 bytes (16-byte aligned std140)',
+    144, SizeOf(TCastleGpuCullingUniformBlock));
+  AssertEquals('TCastleGpuCullingInstance must be 80 bytes (16-byte aligned std430)',
+    80, SizeOf(TCastleGpuCullingInstance));
+
+  ShaderGen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    CompGLSL := ShaderGen.GenerateComputeCullingShader(64);
+    AssertTrue('Compute culling shader must specify #version 450',
+      Pos('#version 450', CompGLSL) > 0);
+    AssertTrue('Compute culling shader must specify local_size_x = 64',
+      Pos('layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;', CompGLSL) > 0);
+    AssertTrue('Compute culling shader must declare CastleGpuCullingUniforms',
+      Pos('CastleGpuCullingUniforms', CompGLSL) > 0);
+    AssertTrue('Compute culling shader must declare CastleIndirectCommandsBlock',
+      Pos('CastleIndirectCommandsBlock', CompGLSL) > 0);
+    AssertTrue('Compute culling shader must use atomicAdd(u_VisibleCount, 1u)',
+      Pos('atomicAdd(u_VisibleCount, 1u)', CompGLSL) > 0);
+  finally
+    FreeAndNil(ShaderGen);
+  end;
+
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0, cllPrimary);
+  try
+    Culler := VkDev.ComputeCuller;
+    AssertTrue('Device ComputeCuller must be created on demand', Culler <> nil);
+
+    { Define a simple box frustum:
+      X in [-50..50], Y in [-50..50], Z in [-100..0] (camera at origin looking down -Z),
+      and max distance culling = 80.0 units }
+    Planes[0] := Vector4( 1,  0,  0, 50);  // x >= -50
+    Planes[1] := Vector4(-1,  0,  0, 50);  // x <= 50
+    Planes[2] := Vector4( 0,  1,  0, 50);  // y >= -50
+    Planes[3] := Vector4( 0, -1,  0, 50);  // y <= 50
+    Planes[4] := Vector4( 0,  0, -1, 0);   // z <= 0 (in front of camera)
+    Planes[5] := Vector4( 0,  0,  1, 100); // z >= -100
+    Culler.SetFrustumPlanes(Planes, Vector3(0, 0, 0), 80.0);
+
+    FillChar(Instances, SizeOf(Instances), 0);
+    { Instance 0: Inside frustum (0, 0, -20), radius 2 -> VISIBLE (IndexCount = 36) }
+    Instances[0].BoundingSphere := Vector4(0, 0, -20, 2.0);
+    Instances[0].IndexCount := 36;
+    Instances[0].InstanceCount := 1;
+    Instances[0].FirstIndex := 0;
+    Instances[0].MaterialIndex := 1;
+
+    { Instance 1: Outside frustum (+120, 0, -20), radius 2 -> CULLED by frustum (IndexCount = 72) }
+    Instances[1].BoundingSphere := Vector4(120, 0, -20, 2.0);
+    Instances[1].IndexCount := 72;
+    Instances[1].InstanceCount := 1;
+    Instances[1].FirstIndex := 36;
+    Instances[1].MaterialIndex := 2;
+
+    { Instance 2: Inside frustum (0, 0, -95), radius 1 -> CULLED by distance (94 > 80.0) (IndexCount = 108) }
+    Instances[2].BoundingSphere := Vector4(0, 0, -95, 1.0);
+    Instances[2].IndexCount := 108;
+    Instances[2].InstanceCount := 1;
+    Instances[2].FirstIndex := 108;
+    Instances[2].MaterialIndex := 3;
+
+    { Instance 3: Inside frustum & within distance (10, -5, -40), radius 3 -> VISIBLE (IndexCount = 144) }
+    Instances[3].BoundingSphere := Vector4(10, -5, -40, 3.0);
+    Instances[3].IndexCount := 144;
+    Instances[3].InstanceCount := 1;
+    Instances[3].FirstIndex := 216;
+    Instances[3].MaterialIndex := 4;
+
+    Culler.UploadInstances(Instances);
+    AssertEquals('LastUploadedInstanceCount must be 4', 4, Culler.LastUploadedInstanceCount);
+
+    { 1. Dispatch in non-compacted 1:1 mode (ACompactDraws = False) }
+    CmdList.BeginRecording;
+    Groups := Culler.DispatchCulling(CmdList, 4, False);
+    CmdList.EndRecording;
+
+    AssertEquals('4 instances with workgroup size 64 must dispatch 1 workgroup', 1, Groups);
+    AssertEquals('Visible instance count must be 2 (Instances 0 and 3)', 2, Culler.ReadBackVisibleCount);
+    AssertEquals('LastCulledInstanceCount must be 2 (Instances 1 and 2)', 2, Culler.LastCulledInstanceCount);
+    AssertEquals('Instance 0 visibility flag must be 1', 1, Culler.ReadBackVisibilityFlag(0));
+    AssertEquals('Instance 1 visibility flag must be 0 (frustum culled)', 0, Culler.ReadBackVisibilityFlag(1));
+    AssertEquals('Instance 2 visibility flag must be 0 (distance culled)', 0, Culler.ReadBackVisibilityFlag(2));
+    AssertEquals('Instance 3 visibility flag must be 1', 1, Culler.ReadBackVisibilityFlag(3));
+
+    Cmd0 := Culler.ReadBackIndirectCommand(0);
+    Cmd1 := Culler.ReadBackIndirectCommand(1);
+    Cmd2 := Culler.ReadBackIndirectCommand(2);
+    Cmd3 := Culler.ReadBackIndirectCommand(3);
+    AssertEquals('Slot 0 must have InstanceCount = 1', 1, Cmd0.InstanceCount);
+    AssertEquals('Slot 0 IndexCount must be 36', 36, Cmd0.IndexCount);
+    AssertEquals('Slot 1 (culled) must have InstanceCount = 0', 0, Cmd1.InstanceCount);
+    AssertEquals('Slot 2 (culled) must have InstanceCount = 0', 0, Cmd2.InstanceCount);
+    AssertEquals('Slot 3 must have InstanceCount = 1', 1, Cmd3.InstanceCount);
+    AssertEquals('Slot 3 IndexCount must be 144', 144, Cmd3.IndexCount);
+
+    { 2. Dispatch in compacted stream mode (ACompactDraws = True) }
+    CmdList.BeginRecording;
+    Culler.DispatchCulling(CmdList, 4, True);
+    CmdList.EndRecording;
+
+    AssertEquals('Compacted visible count must be 2', 2, Culler.ReadBackVisibleCount);
+    Cmd0 := Culler.ReadBackIndirectCommand(0);
+    Cmd1 := Culler.ReadBackIndirectCommand(1);
+    AssertEquals('Compacted slot 0 must be Instance 0 (IndexCount = 36)', 36, Cmd0.IndexCount);
+    AssertEquals('Compacted slot 0 InstanceCount must be 1', 1, Cmd0.InstanceCount);
+    AssertEquals('Compacted slot 1 must be Instance 3 (IndexCount = 144, FirstIndex = 216)',
+      144, Cmd1.IndexCount);
+    AssertEquals('Compacted slot 1 FirstIndex must be 216', 216, Cmd1.FirstIndex);
+    AssertEquals('Device ComputeDispatchCount must be 2', 2, VkDev.ComputeDispatchCount);
+    AssertTrue('CmdList BarrierCount must include indirect & visibility buffer barriers',
+      CmdList.BarrierCount >= 2);
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportLiveDiagnosticsAndWindowAntiAliasingSync;
+var
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Viewport: TCastleViewport;
+  Tex: TRHITexture;
+  SamplerDesc: TRHISamplerDesc;
+  Sampler: TRHISampler;
+  Profiler: TCastleVulkanTimestampProfiler;
+  Slot0Pool: TVulkanRHIQueryPool;
+  PassIdx: Integer;
+  Instances: array[0..0] of TCastleGpuCullingInstance;
+  Stats: TRenderStatistics;
+  StatsText: String;
+  SavedDevice: TRHIDevice;
+begin
+  SavedDevice := RHIDevice;
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0, cllPrimary);
+  Viewport := TCastleViewport.Create(nil);
+  Tex := VkDev.CreateTexture(TRHITextureDesc.Create2D(32, 32, pfRGBA8_UNorm, [tuSampled]));
+  FillChar(SamplerDesc, SizeOf(SamplerDesc), 0);
+  SamplerDesc.MinFilter := sfLinear;
+  SamplerDesc.MagFilter := sfLinear;
+  Sampler := VkDev.CreateSampler(SamplerDesc);
+  try
+    SetRHIDevice(VkDev);
+
+    { 1. Set 4x MSAA on VkDev and register a bindless texture }
+    VkDev.AntiAliasing := aa4SamplesNicer;
+    AssertEquals('VkDev.SampleCount must be 4', 4, VkDev.SampleCount);
+    VkDev.BindlessTextureManager.RegisterTexture(Tex, Sampler);
+    AssertEquals('BindlessTextureManager.ActiveSlotCount must be 1',
+      1, VkDev.BindlessTextureManager.ActiveSlotCount);
+
+    { 2. Record a GPU compute culling dispatch and a GPU timestamp pass (2.75 ms) }
+    FillChar(Instances, SizeOf(Instances), 0);
+    Instances[0].BoundingSphere := Vector4(0, 0, -10, 1.0);
+    Instances[0].IndexCount := 36;
+    Instances[0].InstanceCount := 1;
+    VkDev.ComputeCuller.UploadInstances(Instances);
+
+    Profiler := VkDev.TimestampProfiler;
+    CmdList.BeginRecording;
+    Profiler.BeginFrame(CmdList, 0);
+    PassIdx := Profiler.BeginPass(CmdList, 'MainViewportPass');
+    VkDev.ComputeCuller.DispatchCulling(CmdList, 1, True);
+    Profiler.EndPass(CmdList, PassIdx);
+    CmdList.EndRecording;
+
+    Slot0Pool := Profiler.GetQueryPoolForSlot(0);
+    Slot0Pool.SetSimulatedResult(0, 1000000);
+    Slot0Pool.SetSimulatedResult(1, 3750000); // 2,750,000 ns = 2.75 ms
+
+    CmdList.BeginRecording;
+    Profiler.BeginFrame(CmdList, MaxFramesInFlight);
+    CmdList.EndRecording;
+
+    { 3. Query Viewport.Statistics and verify live RHI diagnostics }
+    Stats := Viewport.Statistics;
+    AssertEquals('ActiveBackend must be Vulkan 1.3', 'Vulkan 1.3', Stats.ActiveBackend);
+    AssertEquals('MSAASampleCount must be 4', 4, Stats.MSAASampleCount);
+    AssertEquals('BindlessActiveTextures must be 1', 1, Stats.BindlessActiveTextures);
+    AssertEquals('ComputeDispatchCount must be 1', 1, Stats.ComputeDispatchCount);
+    AssertSameValue(2.75, Stats.GpuFrameTimeMs, 0.001);
+
+    StatsText := Stats.ToString;
+    AssertTrue('Stats.ToString must include MSAA: 4x', Pos('MSAA: 4x', StatsText) > 0);
+    AssertTrue('Stats.ToString must include Bindless tex: 1', Pos('Bindless tex: 1', StatsText) > 0);
+    AssertTrue('Stats.ToString must include Compute dispatches: 1', Pos('Compute dispatches: 1', StatsText) > 0);
+    AssertTrue('Stats.ToString must include GPU: 2.75 ms', Pos('GPU: 2.75 ms', StatsText) > 0);
+  finally
+    SetRHIDevice(SavedDevice);
+    FreeAndNil(Sampler);
+    FreeAndNil(Tex);
+    FreeAndNil(Viewport);
+    FreeAndNil(CmdList);
     FreeAndNil(VkDev);
   end;
 end;
