@@ -28,12 +28,29 @@
       This is used by VRML 1.0 (and Inventor) light sources. }
     lsLocalVRML1);
 
-  { Base class for all the light nodes. }
+  { Base class for all the light nodes.
+
+    Light nodes can have custom fields (interface declarations, like
+    the @link(TEffectNode)), added by @link(TX3DNode.AddCustomField)
+    or declared in X3D files. Their values are passed to the shader
+    effects of this light (see @link(TAbstractLightNode.Effects))
+    as uniforms named like the field with the light number appended,
+    and the effect code can refer to them using the @code(<Light>)
+    placeholder, which is replaced by the light number.
+    E.g. a custom field @code(my_matrix) is the uniform
+    @code(uniform mat4 my_matrix<Light>;) in the effect code.
+
+    This way many lights can share the same @link(TEffectNode)
+    (and so the same shader program, if they light the same shapes),
+    while each light provides its own values.
+    The values are set before rendering each shape,
+    like the standard light parameters (color, position etc.). }
   TAbstractLightNode = class(TAbstractChildNode)
   strict private
     WarningWorldTransformDone: Boolean;
     procedure DoWarningWorldTransform;
   protected
+    procedure PostAddInterfaceDeclaration(IDecl: TX3DInterfaceDeclaration); override;
     procedure BeforeTraverse(StateStack: TX3DGraphTraverseStateStack); override;
     procedure MiddleTraverse(StateStack: TX3DGraphTraverseStateStack); override;
     procedure GroupBeforeTraverse(const State: TX3DGraphTraverseState; var WasPointingDeviceSensor: Boolean); override;
@@ -334,6 +351,17 @@ constructor TAbstractLightNode.Create(const AX3DName, ABaseUrl: String);
 begin
   inherited;
   InternalTransformation.Init;
+  { Custom fields are per-light uniforms for the light's effects. }
+  HasInterfaceDeclarations := AllAccessTypes;
+end;
+
+procedure TAbstractLightNode.PostAddInterfaceDeclaration(IDecl: TX3DInterfaceDeclaration);
+begin
+  inherited;
+  { The custom field values are passed to shaders before rendering each shape,
+    so a change only needs to redisplay the scene. }
+  if IDecl.Field <> nil then
+    IDecl.Field.ChangeAlways := chVisibleNonGeometry;
 end;
 
 procedure TAbstractLightNode.BeforeTraverse(StateStack: TX3DGraphTraverseStateStack);

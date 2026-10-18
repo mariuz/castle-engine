@@ -37,6 +37,15 @@ type
       values). Optionally uses a function from the EyeWorldSpace shader library. }
     function CreateLightFactorEffect(const LightFactor: Single;
       const UseShaderLibrary: Boolean): TEffectNode;
+    { Effect on a light source, multiplying the light by the light's own
+      custom field test_light_factor (a per-light uniform),
+      so it can be shared by many lights. }
+    function CreateSharedLightFactorEffect: TEffectNode;
+    { Point light above (X, 0, 0) with the custom field test_light_factor. }
+    function CreateFactorLight(const X, LightFactor: Single;
+      const Color: TCastleColorRGB; const Effect: TEffectNode): TPointLightNode;
+    { Floor patch shape at (X, 0, 0). }
+    function CreatePatchShape(const X: Single): TTransformNode;
   published
     procedure TestFindPlugName;
     { Shapes lit by different lights, whose Effect nodes have the same code
@@ -47,6 +56,12 @@ type
     { Shapes for which the same light (with Effect) has a different
       light number must not share a shader program. }
     procedure TestLightEffectsDifferentLightNumber;
+    { Lights sharing one Effect node, each with its own value
+      of a custom field (a per-light uniform). }
+    procedure TestLightEffectsPerLightUniforms;
+    { One shape lit by 2 lights sharing an Effect node:
+      the <Light> placeholder makes each light read its own uniform. }
+    procedure TestLightEffectsPerLightUniformsSameShape;
   end;
 
 implementation
@@ -123,6 +138,56 @@ begin
   end else
     Part.Contents := EffectCode;
   Result.SetParts([Part]);
+end;
+
+function TTestCastleRendererInternalShader.CreateSharedLightFactorEffect: TEffectNode;
+const
+  EffectCode =
+    'uniform float test_light_factor<Light>;' + LineEnding +
+    'void PLUG_light_scale(inout float scale, const in vec3 normal_eye, const in vec3 light_dir)' + LineEnding +
+    '{' + LineEnding +
+    '  scale *= test_light_factor<Light>;' + LineEnding +
+    '}';
+var
+  Part: TEffectPartNode;
+begin
+  Result := TEffectNode.Create;
+  Result.Language := slGLSL;
+  Part := TEffectPartNode.Create;
+  Part.ShaderType := stFragment;
+  Part.Contents := EffectCode;
+  Result.SetParts([Part]);
+end;
+
+function TTestCastleRendererInternalShader.CreateFactorLight(const X, LightFactor: Single;
+  const Color: TCastleColorRGB; const Effect: TEffectNode): TPointLightNode;
+begin
+  Result := TPointLightNode.Create;
+  Result.Global := false;
+  Result.Location := Vector3(X, 3, 0);
+  Result.Attenuation := Vector3(1, 0, 0);
+  Result.Color := Color;
+  Result.AddCustomField(TSFFloat.Create(Result, true, 'test_light_factor', LightFactor));
+  Result.SetEffects([Effect]);
+end;
+
+function TTestCastleRendererInternalShader.CreatePatchShape(const X: Single): TTransformNode;
+var
+  Shape: TShapeNode;
+  Appearance: TAppearanceNode;
+  Material: TMaterialNode;
+  Box: TBoxNode;
+begin
+  Material := TMaterialNode.Create;
+  Material.DiffuseColor := WhiteRGB;
+  Appearance := TAppearanceNode.Create;
+  Appearance.Material := Material;
+  Box := TBoxNode.CreateWithShape(Shape);
+  Box.Size := PatchSize;
+  Shape.Appearance := Appearance;
+  Result := TTransformNode.Create;
+  Result.Translation := Vector3(X, -0.1, 0);
+  Result.AddChildren(Shape);
 end;
 
 procedure TTestCastleRendererInternalShader.TestFindPlugName;
@@ -330,6 +395,102 @@ begin
       AssertTrue(PatchColor.X > 0.2);
       AssertTrue(PatchColor.Y < 0.05);
     end;
+
+    Window.Close;
+  finally DestroyWindowForTest(Window) end;
+end;
+
+procedure TTestCastleRendererInternalShader.TestLightEffectsPerLightUniforms;
+var
+  Window: TCastleWindow;
+  Viewport: TCastleViewport;
+  Root: TX3DRootNode;
+  SharedEffect: TEffectNode;
+  LeftLight, RightLight: TPointLightNode;
+  Scene: TCastleScene;
+
+  { A group with a floor patch at (X, 0, 0) and its point light
+    (not global: it lights only this group), sharing SharedEffect. }
+  function CreateLitPatch(const X, LightFactor: Single; out Light: TPointLightNode): TGroupNode;
+  begin
+    Result := TGroupNode.Create;
+    Result.AddChildren(CreatePatchShape(X));
+    Light := CreateFactorLight(X, LightFactor, WhiteRGB, SharedEffect);
+    Result.AddChildren(Light);
+  end;
+
+begin
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  Window := CreateWindowForTest;
+  try
+    Viewport := OpenWindowWithViewport(Window);
+
+    { One Effect node used by both lights, the values differ:
+      the patches can share a shader program, the uniform is set per shape. }
+    SharedEffect := CreateSharedLightFactorEffect;
+    Root := TX3DRootNode.Create;
+    Root.AddChildren(CreateLitPatch(-PatchX, 0, LeftLight));
+    Root.AddChildren(CreateLitPatch(PatchX, 1, RightLight));
+    Scene := TCastleScene.Create(Window);
+    Scene.Load(Root, true);
+    Scene.RenderOptions.PhongShading := true;
+    Viewport.Items.Add(Scene);
+
+    AssertTrue(RenderedPatchColor(Window, Viewport, -PatchX).X < 0.05);
+    AssertTrue(RenderedPatchColor(Window, Viewport, PatchX).X > 0.3);
+
+    { Changing a light's custom field changes the rendering. }
+    (LeftLight.Field('test_light_factor') as TSFFloat).Send(1);
+    (RightLight.Field('test_light_factor') as TSFFloat).Send(0);
+    AssertTrue(RenderedPatchColor(Window, Viewport, -PatchX).X > 0.3);
+    AssertTrue(RenderedPatchColor(Window, Viewport, PatchX).X < 0.05);
+
+    Window.Close;
+  finally DestroyWindowForTest(Window) end;
+end;
+
+procedure TTestCastleRendererInternalShader.TestLightEffectsPerLightUniformsSameShape;
+var
+  Window: TCastleWindow;
+  Viewport: TCastleViewport;
+  Root: TX3DRootNode;
+  SharedEffect: TEffectNode;
+  Scene: TCastleScene;
+  PatchColor: TCastleColor;
+begin
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  Window := CreateWindowForTest;
+  try
+    Viewport := OpenWindowWithViewport(Window);
+
+    { A patch lit by a red light (factor 1) and a green light (factor 0),
+      both with the same Effect node: the effect is plugged once per light,
+      <Light> making each copy read the uniform of its light.
+      Without it both copies would read one uniform: the patch would be
+      black or yellow. }
+    SharedEffect := CreateSharedLightFactorEffect;
+    Root := TX3DRootNode.Create;
+    Root.AddChildren(CreatePatchShape(PatchX));
+    Root.AddChildren(CreateFactorLight(PatchX - 0.5, 1, RedRGB, SharedEffect));
+    Root.AddChildren(CreateFactorLight(PatchX + 0.5, 0, GreenRGB, SharedEffect));
+    Scene := TCastleScene.Create(Window);
+    Scene.Load(Root, true);
+    Scene.RenderOptions.PhongShading := true;
+    Viewport.Items.Add(Scene);
+
+    PatchColor := RenderedPatchColor(Window, Viewport, PatchX);
+    AssertTrue(PatchColor.X > 0.2);
+    AssertTrue(PatchColor.Y < 0.05);
 
     Window.Close;
   finally DestroyWindowForTest(Window) end;
