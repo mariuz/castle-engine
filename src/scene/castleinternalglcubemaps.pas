@@ -118,7 +118,7 @@ procedure GLCaptureCubeMapTexture(
 implementation
 
 uses SysUtils, CastleInternalSphericalHarmonics, CastleRectangles, CastleRenderContext,
-  CastleProjection, CastleScene, CastleInternalShapesRenderer;
+  CastleProjection, CastleScene, CastleInternalShapesRenderer, CastleInternalRHI;
 
 {$warnings off} // silence FPC 3.3.1 warnings, using experimental in experimental
 procedure SHVectorGLCapture(
@@ -222,11 +222,12 @@ end;
 
 procedure SetRenderingCamera(const RenderingCamera: TRenderingCamera;
   const CapturePoint: TVector3;
-  const Side: TCubeMapSide);
+  const Side: TCubeMapSide;
+  const AProjectionMatrix: TMatrix4);
 begin
   RenderingCamera.FromViewVectors(
     CapturePoint, CubeMapInfo[Side].Dir, CubeMapInfo[Side].Up,
-    RenderContext.ProjectionMatrix);
+    AProjectionMatrix);
 end;
 
 procedure GLCaptureCubeMapImages(
@@ -237,25 +238,39 @@ procedure GLCaptureCubeMapImages(
 var
   Width, Height: Cardinal;
   RenderToTexture: TGLRenderToTexture;
+  CubeProjectionMatrix: TMatrix4;
 
   procedure DrawMap(Side: TCubeMapSide);
   var
     RenderingCamera: TRenderingCamera;
+    Grabbed: TCastleImage;
   begin
     RenderToTexture.RenderBegin;
 
-      RenderContext.Viewport := Rectangle(0, 0, Width, Height);
+      if (RHIDevice = nil) and (RenderContext <> nil) then
+        RenderContext.Viewport := Rectangle(0, 0, Width, Height);
 
       RenderingCamera := TRenderingCamera.Create;
       try
         RenderingCamera.Target := rtCubeMapEnvironment;
-        SetRenderingCamera(RenderingCamera, CapturePoint, Side);
+        SetRenderingCamera(RenderingCamera, CapturePoint, Side, CubeProjectionMatrix);
         Render(RenderingCamera);
       finally FreeAndNil(RenderingCamera) end;
 
-      SaveScreen_NoFlush(Images[Side], 0, 0, RenderToTexture.ColorBuffer);
+      if RHIDevice <> nil then
+      begin
+        Grabbed := RenderToTexture.SaveScreen(
+          TCastleImageClass(Images[Side].ClassType),
+          Rectangle(0, 0, Width, Height));
+        try
+          Images[Side].Assign(Grabbed);
+        finally
+          FreeAndNil(Grabbed);
+        end;
+      end else
+        SaveScreen_NoFlush(Images[Side], 0, 0, RenderToTexture.ColorBuffer);
 
-    RenderToTexture.RenderEnd(Side < High(Side));
+    RenderToTexture.RenderEnd((RHIDevice = nil) and (Side < High(Side)));
   end;
 
 var
@@ -270,13 +285,18 @@ begin
     RenderToTexture.Buffer := tbNone;
     RenderToTexture.GLContextOpen;
 
-    SavedProjectionMatrix := RenderContext.ProjectionMatrix;
-    PerspectiveProjection(90, 1, ProjectionNear, ProjectionFar);
+    CubeProjectionMatrix := PerspectiveProjectionMatrixDeg(90, 1, ProjectionNear, ProjectionFar);
+    if (RHIDevice = nil) and (RenderContext <> nil) then
+    begin
+      SavedProjectionMatrix := RenderContext.ProjectionMatrix;
+      RenderContext.ProjectionMatrix := CubeProjectionMatrix;
+    end;
 
     for Side := Low(TCubeMapSide) to High(TCubeMapSide) do
       DrawMap(Side);
 
-    RenderContext.ProjectionMatrix := SavedProjectionMatrix;
+    if (RHIDevice = nil) and (RenderContext <> nil) then
+      RenderContext.ProjectionMatrix := SavedProjectionMatrix;
   finally FreeAndNil(RenderToTexture) end;
 end;
 
@@ -312,22 +332,25 @@ procedure GLCaptureCubeMapTexture(
   const Render: TRenderFromViewFunction;
   const ProjectionNear, ProjectionFar: Single;
   RenderToTexture: TGLRenderToTexture);
+var
+  CubeProjectionMatrix: TMatrix4;
 
   procedure DrawMap(Side: TCubeMapSide);
   var
     RenderingCamera: TRenderingCamera;
   begin
     RenderToTexture.RenderBegin;
-    RenderToTexture.SetTexture(Tex, GL_TEXTURE_CUBE_MAP_POSITIVE_X + Ord(Side));
+    if RHIDevice = nil then
+      RenderToTexture.SetTexture(Tex, GL_TEXTURE_CUBE_MAP_POSITIVE_X + Ord(Side));
 
       RenderingCamera := TRenderingCamera.Create;
       try
         RenderingCamera.Target := rtCubeMapEnvironment;
-        SetRenderingCamera(RenderingCamera, CapturePoint, Side);
+        SetRenderingCamera(RenderingCamera, CapturePoint, Side, CubeProjectionMatrix);
         Render(RenderingCamera);
       finally FreeAndNil(RenderingCamera) end;
 
-    RenderToTexture.RenderEnd(Side < High(Side));
+    RenderToTexture.RenderEnd((RHIDevice = nil) and (Side < High(Side)));
   end;
 
 var
@@ -337,17 +360,24 @@ var
 begin
   RenderToTexture.CompleteTextureTarget := GL_TEXTURE_CUBE_MAP;
 
-  SavedProjectionMatrix := RenderContext.ProjectionMatrix;
-  PerspectiveProjection(90, 1, ProjectionNear, ProjectionFar);
+  CubeProjectionMatrix := PerspectiveProjectionMatrixDeg(90, 1, ProjectionNear, ProjectionFar);
+  if (RHIDevice = nil) and (RenderContext <> nil) then
+  begin
+    SavedProjectionMatrix := RenderContext.ProjectionMatrix;
+    RenderContext.ProjectionMatrix := CubeProjectionMatrix;
 
-  SavedViewport := RenderContext.Viewport;
-  RenderContext.Viewport := Rectangle(0, 0, Size, Size);
+    SavedViewport := RenderContext.Viewport;
+    RenderContext.Viewport := Rectangle(0, 0, Size, Size);
+  end;
 
   for Side := Low(TCubeMapSide) to High(TCubeMapSide) do
     DrawMap(Side);
 
-  RenderContext.ProjectionMatrix := SavedProjectionMatrix;
-  RenderContext.Viewport := SavedViewport;
+  if (RHIDevice = nil) and (RenderContext <> nil) then
+  begin
+    RenderContext.ProjectionMatrix := SavedProjectionMatrix;
+    RenderContext.Viewport := SavedViewport;
+  end;
 end;
 
 end.

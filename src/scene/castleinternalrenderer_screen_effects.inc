@@ -28,6 +28,12 @@
       failed). }
     ShaderLoaded: Boolean;
     FNode: TScreenEffectNode;
+    FRHIVertexShader: TRHIShaderModule;
+    FRHIFragmentShader: TRHIShaderModule;
+    FRHIDescriptorLayout: TRHIDescriptorSetLayout;
+    FRHIPipeline: TRHIPipeline;
+    FRHIVertexGLSL: String;
+    FRHIFragmentGLSL: String;
   protected
     procedure PrepareCore(const RenderOptions: TCastleRenderOptions); override;
     procedure UnprepareCore; override;
@@ -43,6 +49,12 @@
       which is OK -- in this class Node is always guaranteed to be
       TScreenEffectNode. }
     property Node: TScreenEffectNode read FNode;
+    property RHIPipeline: TRHIPipeline read FRHIPipeline;
+    property RHIVertexShader: TRHIShaderModule read FRHIVertexShader;
+    property RHIFragmentShader: TRHIShaderModule read FRHIFragmentShader;
+    property RHIDescriptorLayout: TRHIDescriptorSetLayout read FRHIDescriptorLayout;
+    property RHIVertexGLSL: String read FRHIVertexGLSL;
+    property RHIFragmentGLSL: String read FRHIFragmentGLSL;
   end;
 
   { Manage TScreenEffectResource connected to X3D nodes.
@@ -95,6 +107,15 @@ end;
 { TScreenEffectResource ----------------------------------------------------- }
 
 procedure TScreenEffectResource.PrepareCore(const RenderOptions: TCastleRenderOptions);
+const
+  FallbackScreenVS: array[0..9] of UInt32 = (
+    $07230203, $00010500, $00000000, $00000008, $00000000,
+    ($00050000 or 15), 0, 1, $6E69616D, $00000000
+  );
+  FallbackScreenFS: array[0..9] of UInt32 = (
+    $07230203, $00010500, $00000000, $00000008, $00000000,
+    ($00050000 or 15), 4, 1, $6E69616D, $00000000
+  );
 
   procedure PrepareIDecls(const IDecls: TX3DInterfaceDeclarationList);
 
@@ -140,6 +161,122 @@ procedure TScreenEffectResource.PrepareCore(const RenderOptions: TCastleRenderOp
       PrepareIDecls(Nodes[I].InterfaceDeclarations);
   end;
 
+  procedure PrepareRHIScreenEffect;
+  var
+    I, J: Integer;
+    CompShader: TComposedShaderNode;
+    Part: TShaderPartNode;
+    UserFragSource, ScreenLibFrag: String;
+    ShaderGen: TCastleShaderGeneratorRHI;
+    Bindings: array of TRHIDescriptorBindingDesc;
+    PipeDesc: TRHIGraphicsPipelineDesc;
+    NeedsDepth: Boolean;
+  begin
+    CompShader := nil;
+    UserFragSource := '';
+    for I := 0 to Node.FdShaders.Count - 1 do
+      if (Node.FdShaders[I] is TComposedShaderNode) and
+         (TComposedShaderNode(Node.FdShaders[I]).Language in [slDefault, slGLSL]) then
+      begin
+        CompShader := TComposedShaderNode(Node.FdShaders[I]);
+        for J := 0 to CompShader.FdParts.Count - 1 do
+          if (CompShader.FdParts[J] is TShaderPartNode) and
+             (TShaderPartNode(CompShader.FdParts[J]).ShaderType = stFragment) then
+          begin
+            Part := TShaderPartNode(CompShader.FdParts[J]);
+            if Part.Contents <> '' then
+              UserFragSource := UserFragSource + Part.Contents + LineEnding;
+          end;
+        Break;
+      end;
+
+    if (CompShader = nil) or (Trim(UserFragSource) = '') then
+      Exit;
+
+    NeedsDepth := Node.FdNeedsDepth.Value;
+    ShaderGen := TCastleShaderGeneratorRHI.Create(RHIDevice.Capabilities.Backend);
+    try
+      FRHIVertexGLSL :=
+        ShaderGen.GenerateScreenEffectPreamble(ssVertex, NeedsDepth) + LineEnding +
+        'void main(void)' + LineEnding +
+        '{' + LineEnding +
+        '  v_tex_coord = tex_coord;' + LineEnding +
+        '  gl_Position = vec4(vertex, 0.0, 1.0);' + LineEnding +
+        '}' + LineEnding;
+
+      ScreenLibFrag :=
+        'ivec2 screen_position() { return ivec2(tex_coord * castle_Screen.screen_size); }' + LineEnding +
+        'int screen_x() { return int(tex_coord.x * castle_Screen.screen_size.x); }' + LineEnding +
+        'int screen_y() { return int(tex_coord.y * castle_Screen.screen_size.y); }' + LineEnding +
+        'vec4 screen_get_color(ivec2 position) { return texture(screen, vec2(position) / castle_Screen.screen_size); }' + LineEnding;
+      if NeedsDepth then
+        ScreenLibFrag := ScreenLibFrag +
+          'float screen_get_depth_fast(ivec2 position) { return texture(screen_depth, vec2(position) / castle_Screen.screen_size).r; }' + LineEnding +
+          'float screen_get_depth(ivec2 position) { return screen_get_depth_fast(position); }' + LineEnding;
+
+      FRHIFragmentGLSL :=
+        ShaderGen.GenerateScreenEffectPreamble(ssFragment, NeedsDepth) + LineEnding +
+        ScreenLibFrag + LineEnding +
+        ShaderGen.SanitizeVulkanShaderSource(UserFragSource);
+    finally
+      FreeAndNil(ShaderGen);
+    end;
+
+    FRHIVertexShader := RHIDevice.CreateShaderModuleFromSPIRV(ssVertex,
+      @FallbackScreenVS[0], SizeOf(FallbackScreenVS), 'ScreenEffectVS');
+    FRHIFragmentShader := RHIDevice.CreateShaderModuleFromSPIRV(ssFragment,
+      @FallbackScreenFS[0], SizeOf(FallbackScreenFS), 'ScreenEffectFS');
+
+    if NeedsDepth then
+      SetLength(Bindings, 2)
+    else
+      SetLength(Bindings, 1);
+    FillChar(Bindings[0], Length(Bindings) * SizeOf(TRHIDescriptorBindingDesc), 0);
+    Bindings[0].Binding := 0;
+    Bindings[0].DescriptorType := dtCombinedImageSampler;
+    Bindings[0].Count := 1;
+    Bindings[0].StageFlags := [ssFragment];
+    if NeedsDepth then
+    begin
+      Bindings[1].Binding := 1;
+      Bindings[1].DescriptorType := dtCombinedImageSampler;
+      Bindings[1].Count := 1;
+      Bindings[1].StageFlags := [ssFragment];
+    end;
+    FRHIDescriptorLayout := RHIDevice.CreateDescriptorSetLayout(Bindings);
+
+    FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+    PipeDesc.VertexShader := FRHIVertexShader;
+    PipeDesc.FragmentShader := FRHIFragmentShader;
+    PipeDesc.Topology := ptTriangleList;
+    PipeDesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+    PipeDesc.Rasterizer.CullMode := cmNone;
+    PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDisabled;
+    PipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+    SetLength(PipeDesc.VertexInput.Bindings, 1);
+    PipeDesc.VertexInput.Bindings[0].Binding := 0;
+    PipeDesc.VertexInput.Bindings[0].Stride := SizeOf(TVector2) * 2;
+    PipeDesc.VertexInput.Bindings[0].PerInstance := False;
+    SetLength(PipeDesc.VertexInput.Attributes, 2);
+    PipeDesc.VertexInput.Attributes[0].Location := 0;
+    PipeDesc.VertexInput.Attributes[0].Binding := 0;
+    PipeDesc.VertexInput.Attributes[0].Format := vafVector2;
+    PipeDesc.VertexInput.Attributes[0].Offset := 0;
+    PipeDesc.VertexInput.Attributes[1].Location := 1;
+    PipeDesc.VertexInput.Attributes[1].Binding := 0;
+    PipeDesc.VertexInput.Attributes[1].Format := vafVector2;
+    PipeDesc.VertexInput.Attributes[1].Offset := SizeOf(TVector2);
+    SetLength(PipeDesc.ColorAttachmentFormats, 1);
+    PipeDesc.ColorAttachmentFormats[0] := pfRGBA8_UNorm;
+    PipeDesc.SampleCount := 1;
+    SetLength(PipeDesc.DescriptorSetLayouts, 1);
+    PipeDesc.DescriptorSetLayouts[0] := FRHIDescriptorLayout;
+    PipeDesc.PushConstantSize := 32; // SizeOf(TCastleScreenPushConstants)
+    PipeDesc.PushConstantStages := [ssVertex, ssFragment];
+    PipeDesc.DebugName := 'ScreenEffectPSO.' + Node.NiceName;
+    FRHIPipeline := RHIDevice.GetOrCreatePipeline(PipeDesc);
+  end;
+
 var
   Shader: TShader;
   ShaderNode: TComposedShaderNode;
@@ -149,6 +286,16 @@ begin
   begin
     Assert(ShaderProgram = nil);
     ShaderLoaded := true;
+
+    if RHIDevice <> nil then
+    begin
+      if Node.FdEnabled.Value then
+      begin
+        PrepareIDeclsList(Node.FdShaders);
+        PrepareRHIScreenEffect;
+      end;
+      Exit;
+    end;
 
     { Note: Strictly speaking, we should not need to check
       "not GLFeatures.EnableFixedFunction" below.
@@ -172,7 +319,7 @@ begin
         but sometimes not...
     }
 
-    if Node.FdEnabled.Value and (not GLFeatures.EnableFixedFunction) then
+    if Node.FdEnabled.Value and (GLFeatures <> nil) and (not GLFeatures.EnableFixedFunction) then
     begin
       { make sure that textures inside shaders are prepared }
       PrepareIDeclsList(Node.FdShaders);
@@ -211,6 +358,12 @@ end;
 procedure TScreenEffectResource.UnprepareCore;
 begin
   FreeAndNil(ShaderProgram);
+  FreeAndNil(FRHIDescriptorLayout);
+  FreeAndNil(FRHIFragmentShader);
+  FreeAndNil(FRHIVertexShader);
+  FRHIPipeline := nil; // Owned by RHIDevice pipeline cache
+  FRHIVertexGLSL := '';
+  FRHIFragmentGLSL := '';
   ShaderLoaded := false;
 end;
 

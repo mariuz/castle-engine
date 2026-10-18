@@ -38,7 +38,7 @@ uses SysUtils, Classes, Generics.Collections,
   CastleSceneInternalShape, CastleInternalFileMonitor,
   CastleRenderOptions, CastleTimeUtils, CastleImages,
   CastleBehaviors, CastleInternalShapesRenderer, CastleSceneInternalBlending,
-  CastleInternalPrimitiveMaterial;
+  CastleInternalPrimitiveMaterial, CastleInternalRHI;
 
 {$define read_interface}
 
@@ -480,6 +480,7 @@ type
       @exclude
       @groupBegin }
     function InternalScreenEffects(Index: Integer): TGLSLProgram;
+    function InternalScreenEffectRHIPipeline(Index: Integer): TRHIPipeline; //< @exclude
     function InternalScreenEffectsCount: Integer; //< @exclude
     function InternalScreenEffectsNeedDepth: boolean; //< @exclude
     { @groupEnd }
@@ -1870,6 +1871,7 @@ function TCastleScene.InternalScreenEffectsCount: Integer;
 var
   I: Integer;
   SE: TScreenEffectNode;
+  SeNodeRes: TScreenEffectResource;
 begin
   Result := 0;
 
@@ -1885,7 +1887,9 @@ begin
     SE := TScreenEffectNode(ScreenEffectNodes[I]);
     // Note: TScreenEffectResources.Prepare exits fast if already was done on this shape
     TScreenEffectResources.Prepare(RenderOptions, SE);
-    if TScreenEffectResources.Get(SE).ShaderProgram <> nil then
+    SeNodeRes := TScreenEffectResources.Get(SE);
+    if (SeNodeRes <> nil) and
+       ((SeNodeRes.ShaderProgram <> nil) or (SeNodeRes.RHIPipeline <> nil)) then
       Inc(Result);
   end;
 end;
@@ -1904,7 +1908,7 @@ begin
   begin
     SeNode := TScreenEffectNode(ScreenEffectNodes[I]);
     SeNodeRes := TScreenEffectResources.Get(SeNode);
-    if SeNodeRes.ShaderProgram <> nil then
+    if (SeNodeRes <> nil) and (SeNodeRes.ShaderProgram <> nil) then
       if Index = 0 then
         Exit(TGLSLProgram(SeNodeRes.ShaderProgram))
       else
@@ -1912,6 +1916,29 @@ begin
   end;
 
   raise EInternalError.Create('TCastleScene.ScreenEffects: Invalid index');
+end;
+
+function TCastleScene.InternalScreenEffectRHIPipeline(Index: Integer): TRHIPipeline;
+var
+  I: Integer;
+  SeNode: TScreenEffectNode;
+  SeNodeRes: TScreenEffectResource;
+begin
+  for I := 0 to ScreenEffectNodes.Count - 1 do
+  begin
+    SeNode := TScreenEffectNode(ScreenEffectNodes[I]);
+    TScreenEffectResources.Prepare(RenderOptions, SeNode);
+    SeNodeRes := TScreenEffectResources.Get(SeNode);
+    if (SeNodeRes <> nil) and
+       ((SeNodeRes.RHIPipeline <> nil) or (SeNodeRes.ShaderProgram <> nil)) then
+    begin
+      if Index = 0 then
+        Exit(SeNodeRes.RHIPipeline)
+      else
+        Dec(Index);
+    end;
+  end;
+  Result := nil;
 end;
 
 function TCastleScene.InternalScreenEffectsNeedDepth: boolean;
@@ -1928,7 +1955,8 @@ begin
   begin
     SeNode := TScreenEffectNode(ScreenEffectNodes[I]);
     SeNodeRes := TScreenEffectResources.Get(SeNode);
-    if (SeNodeRes.ShaderProgram <> nil) and
+    if (SeNodeRes <> nil) and
+       ((SeNodeRes.ShaderProgram <> nil) or (SeNodeRes.RHIPipeline <> nil)) and
         SeNode.NeedsDepth then
       Exit(true);
   end;

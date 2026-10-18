@@ -291,6 +291,9 @@
   strict private
     FGLName: TGLTexture;
     RenderToTexture: TGLRenderToTexture;
+    FRHITexture: TRHITexture;
+    FRHIDepthTexture: TRHITexture;
+    FRHIUpdateCount: Cardinal;
   protected
     class function IsClassForTextureNode(ANode: TAbstractTextureNode): boolean; override;
     procedure PrepareCore(
@@ -319,6 +322,11 @@
       const CameraViewKnown: boolean;
       const CameraView: TViewVectors;
       const ShapeForViewpointMirror: TX3DRendererShape);
+
+    property RHITexture: TRHITexture read FRHITexture;
+    property RHIDepthTexture: TRHITexture read FRHIDepthTexture;
+    property RHIRenderToTexture: TGLRenderToTexture read RenderToTexture;
+    property RHIUpdateCount: Cardinal read FRHIUpdateCount;
   end;
 
   { Abstract renderer resource for TAbstractEnvironmentTextureNode. }
@@ -366,6 +374,9 @@
   TGeneratedCubeMapTextureResource = class(TCubeMapTextureResource)
   private
     RenderToTexture: TGLRenderToTexture;
+    FRHITexture: TRHITexture;
+    FRHIFacesRenderedCount: Cardinal;
+    FRHIUpdateCount: Cardinal;
   protected
     class function IsClassForTextureNode(ANode: TAbstractTextureNode): boolean; override;
     procedure PrepareCore(
@@ -386,6 +397,11 @@
       const Render: TRenderFromViewFunction;
       const ProjectionNear, ProjectionFar: Single;
       const CubeMiddle: TVector3);
+
+    property RHITexture: TRHITexture read FRHITexture;
+    property RHIRenderToTexture: TGLRenderToTexture read RenderToTexture;
+    property RHIFacesRenderedCount: Cardinal read FRHIFacesRenderedCount;
+    property RHIUpdateCount: Cardinal read FRHIUpdateCount;
   end;
 
   { Renderer resource for TAbstractTexture3DNode. }
@@ -418,6 +434,9 @@
     NeedsMipmaps: boolean;
     FGLName: TGLTexture;
     WarninigDoneCannotEnable: Boolean;
+    FRHITexture: TRHITexture;
+    FRHISampler: TRHISampler;
+    FRHIUpdateCount: Cardinal;
   protected
     class function IsClassForTextureNode(ANode: TAbstractTextureNode): boolean; override;
     procedure PrepareCore(
@@ -443,6 +462,11 @@
     { Check would we use Variance Shadow Maps with current ARenderer
       attributes and OpenGL version/extensions. }
     class function ClassVarianceShadowMaps(RenderOptions: TCastleRenderOptions): boolean;
+
+    property RHITexture: TRHITexture read FRHITexture;
+    property RHISampler: TRHISampler read FRHISampler;
+    property RHIRenderToTexture: TGLRenderToTexture read RenderToTexture;
+    property RHIUpdateCount: Cardinal read FRHIUpdateCount;
   end;
 
   { Renderer resource for TShaderTextureNode. }
@@ -480,7 +504,10 @@ begin
   if IsRepeat then
     Result := GL_REPEAT
   else
-    Result := GLFeatures.CLAMP_TO_EDGE;
+  if GLFeatures <> nil then
+    Result := GLFeatures.CLAMP_TO_EDGE
+  else
+    Result := GL_CLAMP_TO_EDGE;
 end;
 
 { TTextureResource ------------------------------------------------------------- }
@@ -514,7 +541,7 @@ procedure TTextureResource.HandleTextureProperties(
 
     { Use GLFeatures.CLAMP_TO_EDGE instead of GL_CLAMP_TO_EDGE, to support even
       ancient OpenGL versions that don't support GL_CLAMP_TO_EDGE. }
-    if Result = GL_CLAMP_TO_EDGE then
+    if (Result = GL_CLAMP_TO_EDGE) and (GLFeatures <> nil) then
       Result := GLFeatures.CLAMP_TO_EDGE;
   end;
 
@@ -1285,13 +1312,63 @@ var
   BoundaryModeS: TGLenum;
   BoundaryModeT: TGLenum;
   TextureWrap: TTextureWrap2D;
-  NodeWidth, NodeHeight: Cardinal;
+  NodeWidth, NodeHeight, MipLevels: Cardinal;
   GUITexture: boolean;
   Sizing: TTextureSizing;
+  TexDesc: TRHITextureDesc;
 begin
   HandleTextureProperties(TextureNode.TextureProperties, RenderOptions,
     TextureRepeatToGL(TextureNode.FdRepeatS.Value), TextureRepeatToGL(TextureNode.FdRepeatT.Value),
     Filter, BoundaryModeS, BoundaryModeT, Anisotropy, GUITexture);
+
+  if RHIDevice <> nil then
+  begin
+    NeedsMipmaps := Filter.NeedsMipmaps;
+    if TextureNode.FdDimensions.Items.Count - 1 >= 0 then
+      NodeWidth := Max(TextureNode.FdDimensions.Items[0], 1)
+    else
+      NodeWidth := DefaultRenderedTextureWidth;
+    if TextureNode.FdDimensions.Items.Count - 1 >= 1 then
+      NodeHeight := Max(TextureNode.FdDimensions.Items[1], 1)
+    else
+      NodeHeight := DefaultRenderedTextureHeight;
+    Width := NodeWidth;
+    Height := NodeHeight;
+    if RHIDevice.Capabilities.MaxTextureSize > 0 then
+    begin
+      Width := Min(Width, RHIDevice.Capabilities.MaxTextureSize);
+      Height := Min(Height, RHIDevice.Capabilities.MaxTextureSize);
+    end;
+
+    if (TextureNode.FdDepthMap.Count > 0) and
+       TextureNode.FdDepthMap.Items[0] then
+    begin
+      WritelnWarning('VRML/X3D', 'RenderedTexture with depthMap = TRUE is no longer supported. For shadow maps, use dedicated CGE nodes.');
+      Exit;
+    end;
+
+    if NeedsMipmaps then
+      MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(Max(Width, Height)))) + 1)
+    else
+      MipLevels := 1;
+
+    TexDesc := TRHITextureDesc.Create2D(Width, Height, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc, tuTransferDst], MipLevels, 1);
+    TexDesc.DebugName := 'RenderedTexture.Color';
+    FRHITexture := RHIDevice.CreateTexture(TexDesc);
+
+    TexDesc := TRHITextureDesc.Create2D(Width, Height, pfD24_UNorm_S8_UInt,
+      [tuDepthStencil, tuSampled, tuTransferSrc], 1, 1);
+    TexDesc.DebugName := 'RenderedTexture.DepthStencil';
+    FRHIDepthTexture := RHIDevice.CreateTexture(TexDesc);
+
+    RenderToTexture := TGLRenderToTexture.Create(Width, Height);
+    RenderToTexture.SetRHITexture(FRHITexture, FRHIDepthTexture);
+    RenderToTexture.Buffer := tbColor;
+    RenderToTexture.Stencil := true;
+    RenderToTexture.GLContextOpen;
+    Exit;
+  end;
 
   { calculate Filter, Anisotropy, NeedsMipmaps }
   NeedsMipmaps := Filter.NeedsMipmaps;
@@ -1377,6 +1454,8 @@ end;
 procedure TRenderedTextureResource.UnprepareCore;
 begin
   FreeAndNil(RenderToTexture);
+  FreeAndNil(FRHITexture);
+  FreeAndNil(FRHIDepthTexture);
 
   if FGLName <> GLObjectNone then
   begin
@@ -1387,6 +1466,9 @@ end;
 
 function TRenderedTextureResource.Bind(const TextureUnit: Cardinal): boolean;
 begin
+  if RHIDevice <> nil then
+    Exit(FRHITexture <> nil);
+
   Result := FGLName <> GLObjectNone;
   if not Result then Exit;
 
@@ -1708,7 +1790,7 @@ var
   Camera: TRenderingCamera;
   SavedViewport: TRectangle;
 begin
-  if FGLName = GLObjectNone then Exit;
+  if (FGLName = GLObjectNone) and (FRHITexture = nil) then Exit;
 
   { calculate matrices to use when rendering,
     using algorithm based on TextureNode.Viewpoint }
@@ -1737,22 +1819,31 @@ begin
 
     RenderToTexture.RenderBegin;
 
-      SavedViewport := RenderContext.Viewport;
-      RenderContext.Viewport := Rectangle(0, 0, Width, Height);
+      if (RHIDevice = nil) and (RenderContext <> nil) then
+      begin
+        SavedViewport := RenderContext.Viewport;
+        RenderContext.Viewport := Rectangle(0, 0, Width, Height);
 
-      SavedProjectionMatrix := RenderContext.ProjectionMatrix;
-      RenderContext.ProjectionMatrix := NewProjectionMatrix;
+        SavedProjectionMatrix := RenderContext.ProjectionMatrix;
+        RenderContext.ProjectionMatrix := NewProjectionMatrix;
+      end;
 
       Render(Camera);
 
-      RenderContext.ProjectionMatrix := SavedProjectionMatrix;
-      RenderContext.Viewport := SavedViewport;
+      if (RHIDevice = nil) and (RenderContext <> nil) then
+      begin
+        RenderContext.ProjectionMatrix := SavedProjectionMatrix;
+        RenderContext.Viewport := SavedViewport;
+      end;
 
     RenderToTexture.RenderEnd;
   finally FreeAndNil(Camera) end;
 
   if NeedsMipmaps then
     RenderToTexture.GenerateMipmap;
+
+  if RHIDevice <> nil then
+    Inc(FRHIUpdateCount);
 
   TextureNode.EventRendering.Send(false);
 end;
@@ -1780,6 +1871,13 @@ end;
 
 function TCubeMapTextureResource.Bind(const TextureUnit: Cardinal): boolean;
 begin
+  if RHIDevice <> nil then
+  begin
+    if Self is TGeneratedCubeMapTextureResource then
+      Exit(TGeneratedCubeMapTextureResource(Self).RHITexture <> nil);
+    Exit(GLName <> GLObjectNone);
+  end;
+
   Result := GLName <> GLObjectNone;
   if not Result then Exit;
 
@@ -1947,7 +2045,36 @@ var
   Anisotropy: TGLfloat;
   GUITexture: boolean;
   InitialImage: TCastleImage;
+  MipLevels: Cardinal;
+  TexDesc: TRHITextureDesc;
 begin
+  if RHIDevice <> nil then
+  begin
+    HandleTextureProperties(TextureNode.TextureProperties, RenderOptions,
+      Filter, Anisotropy, GUITexture);
+    NeedsMipmaps := Filter.NeedsMipmaps;
+    Size := Max(1, TextureNode.FdSize.Value);
+    if not IsPowerOf2(Size) then
+      Size := 1 shl Biggest2Exponent(Size);
+    if (RHIDevice.Capabilities.MaxTextureSize > 0) and (Size > RHIDevice.Capabilities.MaxTextureSize) then
+      Size := RHIDevice.Capabilities.MaxTextureSize;
+    if NeedsMipmaps then
+      MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(Size))) + 1)
+    else
+      MipLevels := 1;
+
+    TexDesc := TRHITextureDesc.CreateCube(Size, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc, tuTransferDst], MipLevels);
+    TexDesc.DebugName := 'GeneratedCubeMapTexture';
+    FRHITexture := RHIDevice.CreateTexture(TexDesc);
+
+    RenderToTexture := TGLRenderToTexture.Create(Size, Size);
+    RenderToTexture.SetRHITexture(FRHITexture, nil);
+    RenderToTexture.Buffer := tbColor;
+    RenderToTexture.GLContextOpen;
+    Exit;
+  end;
+
   if not GLFeatures.TextureCubeMap then
   begin
     WritelnWarning('VRML/X3D', 'Rendering context doesn''t support cube maps, cannot use GeneratedCubeMapTexture');
@@ -2036,6 +2163,7 @@ end;
 procedure TGeneratedCubeMapTextureResource.UnprepareCore;
 begin
   FreeAndNil(RenderToTexture);
+  FreeAndNil(FRHITexture);
   inherited;
 end;
 
@@ -2044,14 +2172,20 @@ procedure TGeneratedCubeMapTextureResource.Update(
   const ProjectionNear, ProjectionFar: Single;
   const CubeMiddle: TVector3);
 begin
-  if GLName = GLObjectNone then Exit;
+  if (GLName = GLObjectNone) and (FRHITexture = nil) then Exit;
 
-  if GLVersion.BuggyGenerateCubeMap then Exit;
+  if (RHIDevice = nil) and (GLVersion <> nil) and GLVersion.BuggyGenerateCubeMap then Exit;
 
   GLCaptureCubeMapTexture(GLName, Size,
     CubeMiddle,
     Render, ProjectionNear, ProjectionFar,
     RenderToTexture);
+
+  if RHIDevice <> nil then
+  begin
+    Inc(FRHIUpdateCount);
+    Inc(FRHIFacesRenderedCount, 6);
+  end;
 
   if NeedsMipmaps then
     RenderToTexture.GenerateMipmap;
@@ -2158,6 +2292,9 @@ end;
 class function TGeneratedShadowMapResource.ClassVarianceShadowMaps(
   RenderOptions: TCastleRenderOptions): boolean;
 begin
+  if RHIDevice <> nil then
+    Exit(RenderOptions.ShadowSampling = ssVarianceShadowMaps);
+
   Result :=
     (RenderOptions.ShadowSampling = ssVarianceShadowMaps) and
     GLFeatures.Shaders and
@@ -2169,9 +2306,73 @@ procedure TGeneratedShadowMapResource.PrepareCore(
 var
   TextureWrap: TTextureWrap2D;
   Filter: TTextureFilter;
+  MipLevels: Cardinal;
+  TexDesc: TRHITextureDesc;
+  SamplerDesc: TRHISamplerDesc;
 begin
   // in fixed-function, do not create shadow maps, do not render to shadow maps
-  if GLFeatures.EnableFixedFunction then Exit;
+  if (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then Exit;
+
+  if RHIDevice <> nil then
+  begin
+    VarianceShadowMaps := ClassVarianceShadowMaps(RenderOptions);
+    Size := Max(1, TextureNode.FdSize.Value);
+    if (RHIDevice.Capabilities.MaxTextureSize > 0) and (Size > RHIDevice.Capabilities.MaxTextureSize) then
+      Size := RHIDevice.Capabilities.MaxTextureSize;
+
+    NeedsMipmaps := VarianceShadowMaps;
+    if NeedsMipmaps then
+      MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(Size))) + 1)
+    else
+      MipLevels := 1;
+
+    if TextureNode.CompareMode <> smCompareRLEqual then
+      WritelnWarning('VRML/X3D', 'Only the standard GeneratedShadowMap.compareMode value, "COMPARE_R_LEQUAL" (in Pascal: smCompareRLEqual), is supported now. This is the only value sensible for shadow maps.');
+
+    if VarianceShadowMaps then
+    begin
+      TexDesc := TRHITextureDesc.Create2D(Size, Size, pfRGBA32_Float,
+        [tuColorAttachment, tuSampled, tuTransferSrc, tuTransferDst], MipLevels, 1);
+      TexDesc.DebugName := 'GeneratedShadowMap.VSM';
+    end else
+    begin
+      TexDesc := TRHITextureDesc.Create2D(Size, Size, pfD32_Float,
+        [tuDepthStencil, tuSampled, tuTransferSrc], 1, 1);
+      TexDesc.DebugName := 'GeneratedShadowMap.Depth';
+    end;
+    FRHITexture := RHIDevice.CreateTexture(TexDesc);
+
+    FillChar(SamplerDesc, SizeOf(SamplerDesc), 0);
+    SamplerDesc.MinFilter := sfLinear;
+    SamplerDesc.MagFilter := sfLinear;
+    if NeedsMipmaps then
+      SamplerDesc.MipFilter := sfLinear
+    else
+      SamplerDesc.MipFilter := sfNearest;
+    SamplerDesc.AddressModeU := amClampToEdge;
+    SamplerDesc.AddressModeV := amClampToEdge;
+    SamplerDesc.AddressModeW := amClampToEdge;
+    SamplerDesc.MaxAnisotropy := 1.0;
+    SamplerDesc.CompareEnable := not VarianceShadowMaps;
+    SamplerDesc.CompareOp := coLessOrEqual;
+    SamplerDesc.MinLod := 0.0;
+    SamplerDesc.MaxLod := 1000.0;
+    FRHISampler := RHIDevice.CreateSampler(SamplerDesc);
+
+    RenderToTexture := TGLRenderToTexture.Create(Size, Size);
+    if VarianceShadowMaps then
+    begin
+      RenderToTexture.Buffer := tbColor;
+      RenderToTexture.SetRHITexture(FRHITexture, nil);
+    end else
+    begin
+      RenderToTexture.Buffer := tbDepth;
+      RenderToTexture.SetRHITexture(nil, FRHITexture);
+    end;
+    RenderToTexture.Stencil := false;
+    RenderToTexture.GLContextOpen;
+    Exit;
+  end;
 
   { Float texture extensions: there is also NV_float_buffer,
     which is the only way for a float texture on old nvidia GPUs.
@@ -2242,6 +2443,8 @@ end;
 procedure TGeneratedShadowMapResource.UnprepareCore;
 begin
   FreeAndNil(RenderToTexture);
+  FreeAndNil(FRHISampler);
+  FreeAndNil(FRHITexture);
 
   if FGLName <> GLObjectNone then
   begin
@@ -2255,6 +2458,9 @@ end;
 
 function TGeneratedShadowMapResource.Bind(const TextureUnit: Cardinal): boolean;
 begin
+  if RHIDevice <> nil then
+    Exit(FRHITexture <> nil);
+
   Result := FGLName <> GLObjectNone;
   if not Result then Exit;
 
@@ -2286,10 +2492,13 @@ var
   SavedPolygonOffset: TPolygonOffset;
   CameraRender: TViewVectors;
 begin
-  if FGLName = GLObjectNone then Exit;
+  if (FGLName = GLObjectNone) and (FRHITexture = nil) then Exit;
 
   { Render view for shadow map }
-  NewProjectionMatrix := Light.ProjectionMatrix;
+  if Light <> nil then
+    NewProjectionMatrix := Light.ProjectionMatrix
+  else
+    NewProjectionMatrix := PerspectiveProjectionMatrixDeg(90, 1.0, ProjectionNear, ProjectionFar);
 
   Camera := TRenderingCamera.Create;
   try
@@ -2298,31 +2507,44 @@ begin
     else
       Camera.Target := rtShadowMap;
 
-    Light.GetView(CameraRender);
+    if Light <> nil then
+      Light.GetView(CameraRender)
+    else
+      CameraRender := DefaultX3DCameraView;
     Camera.FromViewVectors(CameraRender, NewProjectionMatrix);
 
     RenderToTexture.RenderBegin;
 
-      SavedViewport := RenderContext.Viewport;
-      RenderContext.Viewport := Rectangle(0, 0, Size, Size);
+      if (RHIDevice = nil) and (RenderContext <> nil) then
+      begin
+        SavedViewport := RenderContext.Viewport;
+        RenderContext.Viewport := Rectangle(0, 0, Size, Size);
 
-      SavedProjectionMatrix := RenderContext.ProjectionMatrix;
-      RenderContext.ProjectionMatrix := NewProjectionMatrix;
+        SavedProjectionMatrix := RenderContext.ProjectionMatrix;
+        RenderContext.ProjectionMatrix := NewProjectionMatrix;
 
-      { Enable polygon offset for everything (whole scene).
+        { Enable polygon offset for everything (whole scene).
 
-        VarianceShadowMaps notes: can offset be avoided in this case?
-        Practice (on "ATI Mobility Radeon HD 4300 Series") shows that
-        offset is still needed for VSM. Without offset, VSM has some noise,
-        and sunny_street demos have noise on walls. With offset, VSM is perfect. }
-      SavedPolygonOffset := RenderContext.PolygonOffset;
-      RenderContext.PolygonOffsetEnable(TextureNode.FdScale.Value, TextureNode.FdBias.Value);
+          VarianceShadowMaps notes: can offset be avoided in this case?
+          Practice (on "ATI Mobility Radeon HD 4300 Series") shows that
+          offset is still needed for VSM. Without offset, VSM has some noise,
+          and sunny_street demos have noise on walls. With offset, VSM is perfect. }
+        SavedPolygonOffset := RenderContext.PolygonOffset;
+        RenderContext.PolygonOffsetEnable(TextureNode.FdScale.Value, TextureNode.FdBias.Value);
+      end else
+      if (RHIDevice <> nil) and (ActiveCommandList <> nil) then
+        ActiveCommandList.SetDepthBias(TextureNode.FdBias.Value, TextureNode.FdScale.Value);
 
       Render(Camera);
 
-      RenderContext.PolygonOffset := SavedPolygonOffset;
-      RenderContext.ProjectionMatrix := SavedProjectionMatrix;
-      RenderContext.Viewport := SavedViewport;
+      if (RHIDevice = nil) and (RenderContext <> nil) then
+      begin
+        RenderContext.PolygonOffset := SavedPolygonOffset;
+        RenderContext.ProjectionMatrix := SavedProjectionMatrix;
+        RenderContext.Viewport := SavedViewport;
+      end else
+      if (RHIDevice <> nil) and (ActiveCommandList <> nil) then
+        ActiveCommandList.SetDepthBias(0, 0);
 
     RenderToTexture.RenderEnd;
 
@@ -2330,6 +2552,9 @@ begin
 
   if NeedsMipmaps then
     RenderToTexture.GenerateMipmap;
+
+  if RHIDevice <> nil then
+    Inc(FRHIUpdateCount);
 end;
 
 function TGeneratedShadowMapResource.GLName: TGLTextureId;

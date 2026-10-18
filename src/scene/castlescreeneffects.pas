@@ -101,6 +101,10 @@ type
       FRHIScreenQuadIBO: TRHIBuffer;
       FRHIScreenLayoutColorOnly: TRHIDescriptorSetLayout;
       FRHIScreenLayoutColorAndDepth: TRHIDescriptorSetLayout;
+      FRHIScreenDefaultVS: TRHIShaderModule;
+      FRHIScreenDefaultFS: TRHIShaderModule;
+      FRHIScreenDefaultPipelineColor: TRHIPipeline;
+      FRHIScreenDefaultPipelineDepth: TRHIPipeline;
       FRHIScreenDescriptorSets: array of TRHIDescriptorSet;
       FRHIScreenPassCount: Cardinal;
       FRHIScreenDrawCount: Cardinal;
@@ -227,6 +231,7 @@ type
       @groupBegin }
     procedure EnsureRHIScreenResources(const AWidth, AHeight: Cardinal;
       const ANeedDepth: Boolean);
+    function GetScreenEffectRHIPipeline(const Index: Integer): TRHIPipeline;
     function ExecuteRHIScreenEffectPasses(
       const APassPipelines: array of TRHIPipeline;
       const AWidth, AHeight: Cardinal;
@@ -399,6 +404,31 @@ begin
     Result := InternalExtraGetScreenEffects(Index - SceneEffects);
 end;
 
+function TCastleScreenEffects.GetScreenEffectRHIPipeline(const Index: Integer): TRHIPipeline;
+var
+  SceneEffects: Integer;
+begin
+  Result := nil;
+  if RHIDevice = nil then
+    Exit;
+
+  if ScreenEffectsScene <> nil then
+    SceneEffects := ScreenEffectsScene.InternalScreenEffectsCount
+  else
+    SceneEffects := 0;
+
+  if (Index >= 0) and (Index < SceneEffects) then
+    Result := ScreenEffectsScene.InternalScreenEffectRHIPipeline(Index);
+
+  if Result = nil then
+  begin
+    if CurrentScreenEffectsNeedDepth then
+      Result := FRHIScreenDefaultPipelineDepth
+    else
+      Result := FRHIScreenDefaultPipelineColor;
+  end;
+end;
+
 procedure TCastleScreenEffects.FreeRHIScreenDescriptorSets;
 var
   I: Integer;
@@ -412,12 +442,21 @@ procedure TCastleScreenEffects.EnsureRHIScreenResources(const AWidth, AHeight: C
   const ANeedDepth: Boolean);
 const
   QuadIndices: packed array[0..5] of UInt16 = (0, 1, 2, 0, 2, 3);
+  FallbackScreenVS: array[0..9] of UInt32 = (
+    $07230203, $00010500, $00000000, $00000008, $00000000,
+    ($00050000 or 15), 0, 1, $6E69616D, $00000000
+  );
+  FallbackScreenFS: array[0..9] of UInt32 = (
+    $07230203, $00010500, $00000000, $00000008, $00000000,
+    ($00050000 or 15), 4, 1, $6E69616D, $00000000
+  );
 var
   TexDesc: TRHITextureDesc;
   SampDesc: TRHISamplerDesc;
   BufDesc: TRHIBufferDesc;
   BindingsColorOnly: array[0..0] of TRHIDescriptorBindingDesc;
   BindingsColorDepth: array[0..1] of TRHIDescriptorBindingDesc;
+  PipeDesc: TRHIGraphicsPipelineDesc;
 begin
   if (RHIDevice = nil) or (AWidth = 0) or (AHeight = 0) then
     Exit;
@@ -522,6 +561,58 @@ begin
     BindingsColorDepth[1].Count := 1;
     BindingsColorDepth[1].StageFlags := [ssFragment];
     FRHIScreenLayoutColorAndDepth := RHIDevice.CreateDescriptorSetLayout(BindingsColorDepth);
+  end;
+
+  if FRHIScreenDefaultVS = nil then
+    FRHIScreenDefaultVS := RHIDevice.CreateShaderModuleFromSPIRV(ssVertex,
+      @FallbackScreenVS[0], SizeOf(FallbackScreenVS), 'ScreenDefaultVS');
+  if FRHIScreenDefaultFS = nil then
+    FRHIScreenDefaultFS := RHIDevice.CreateShaderModuleFromSPIRV(ssFragment,
+      @FallbackScreenFS[0], SizeOf(FallbackScreenFS), 'ScreenDefaultFS');
+
+  if (FRHIScreenDefaultPipelineColor = nil) or (FRHIScreenDefaultPipelineDepth = nil) then
+  begin
+    FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+    PipeDesc.VertexShader := FRHIScreenDefaultVS;
+    PipeDesc.FragmentShader := FRHIScreenDefaultFS;
+    PipeDesc.Topology := ptTriangleList;
+    PipeDesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+    PipeDesc.Rasterizer.CullMode := cmNone;
+    PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDisabled;
+    PipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+    SetLength(PipeDesc.VertexInput.Bindings, 1);
+    PipeDesc.VertexInput.Bindings[0].Binding := 0;
+    PipeDesc.VertexInput.Bindings[0].Stride := SizeOf(TScreenPoint);
+    PipeDesc.VertexInput.Bindings[0].PerInstance := False;
+    SetLength(PipeDesc.VertexInput.Attributes, 2);
+    PipeDesc.VertexInput.Attributes[0].Location := 0;
+    PipeDesc.VertexInput.Attributes[0].Binding := 0;
+    PipeDesc.VertexInput.Attributes[0].Format := vafVector2;
+    PipeDesc.VertexInput.Attributes[0].Offset := OffsetUInt(ScreenPoint[0].Position, ScreenPoint[0]);
+    PipeDesc.VertexInput.Attributes[1].Location := 1;
+    PipeDesc.VertexInput.Attributes[1].Binding := 0;
+    PipeDesc.VertexInput.Attributes[1].Format := vafVector2;
+    PipeDesc.VertexInput.Attributes[1].Offset := OffsetUInt(ScreenPoint[0].TexCoord, ScreenPoint[0]);
+    SetLength(PipeDesc.ColorAttachmentFormats, 1);
+    PipeDesc.ColorAttachmentFormats[0] := pfRGBA8_UNorm;
+    PipeDesc.SampleCount := 1;
+    SetLength(PipeDesc.DescriptorSetLayouts, 1);
+    PipeDesc.PushConstantSize := SizeOf(TCastleScreenPushConstants);
+    PipeDesc.PushConstantStages := [ssVertex, ssFragment];
+
+    if FRHIScreenDefaultPipelineColor = nil then
+    begin
+      PipeDesc.DescriptorSetLayouts[0] := FRHIScreenLayoutColorOnly;
+      PipeDesc.DebugName := 'TCastleScreenEffects.DefaultColorPSO';
+      FRHIScreenDefaultPipelineColor := RHIDevice.GetOrCreatePipeline(PipeDesc);
+    end;
+
+    if FRHIScreenDefaultPipelineDepth = nil then
+    begin
+      PipeDesc.DescriptorSetLayouts[0] := FRHIScreenLayoutColorAndDepth;
+      PipeDesc.DebugName := 'TCastleScreenEffects.DefaultDepthPSO';
+      FRHIScreenDefaultPipelineDepth := RHIDevice.GetOrCreatePipeline(PipeDesc);
+    end;
   end;
 end;
 
@@ -854,7 +945,8 @@ begin
 
   { Whether we have to render screen effects or not (regular TCastleViewport items),
     break TDrawableImage batching as we no longer draw only images. }
-  TDrawableImage.BatchingFlush;
+  if RHIDevice = nil then
+    TDrawableImage.BatchingFlush;
 
   CheckScreenEffects;
   if RenderScreenEffects then
@@ -975,7 +1067,8 @@ var
 
   procedure EndRenderingToTexture;
   var
-    DummyPipelines: array of TRHIPipeline;
+    PassPipelines: array of TRHIPipeline;
+    I: Integer;
   begin
     SR := RenderRect.Round;
 
@@ -984,8 +1077,10 @@ var
     if RHIDevice <> nil then
     begin
       SwapRHIValues(FRHIScreenTextureDest, FRHIScreenTextureSrc);
-      SetLength(DummyPipelines, CurrentScreenEffectsCount);
-      ExecuteRHIScreenEffectPasses(DummyPipelines, SR.Width, SR.Height,
+      SetLength(PassPipelines, CurrentScreenEffectsCount);
+      for I := 0 to CurrentScreenEffectsCount - 1 do
+        PassPipelines[I] := GetScreenEffectRHIPipeline(I);
+      ExecuteRHIScreenEffectPasses(PassPipelines, SR.Width, SR.Height,
         CurrentScreenEffectsNeedDepth);
       Exit;
     end;
@@ -1044,6 +1139,10 @@ begin
   FreeAndNil(FRHIScreenQuadIBO);
   FreeAndNil(FRHIScreenLayoutColorOnly);
   FreeAndNil(FRHIScreenLayoutColorAndDepth);
+  FreeAndNil(FRHIScreenDefaultVS);
+  FreeAndNil(FRHIScreenDefaultFS);
+  FRHIScreenDefaultPipelineColor := nil;
+  FRHIScreenDefaultPipelineDepth := nil;
 
   FreeTexture(ScreenEffectTextureDest);
   FreeTexture(ScreenEffectTextureSrc);

@@ -37,7 +37,7 @@ All roadmap milestones and design decisions are tracked in [`PLAN.md`](file:///e
 | [`src/base_rendering/vulkan/castleinternalrhi_vulkan.pas`](file:///e:/Work/castle-engine/src/base_rendering/vulkan/castleinternalrhi_vulkan.pas) | Full Vulkan RHI implementation: `TVulkanRHIDevice`, `TVulkanRHICommandList`, `TVulkanDescriptorPoolAllocator` (growable + per-frame transient descriptor pools), `TCastleVulkanStagingUploader` (async staging upload ring buffer + dedicated DMA transfer queue), `TCastleVulkanBindlessTextureManager` (bindless texture & sampler indexing), hardware MSAA & single-pass attachment resolve, `TVulkanRHIComputePipeline` (`vkCmdDispatch` / `vkCmdDispatchIndirect`), `VK_EXT_extended_dynamic_state` & `VK_KHR_synchronization2` + `TCastleVulkanTimelineSemaphore`, `TVulkanRHIQueryPool` & `TCastleVulkanTimestampProfiler`, `VK_KHR_dynamic_rendering` with Vulkan 1.1/1.2 `VkRenderPass`/`VkFramebuffer` fallback, `VK_EXT_graphics_pipeline_library` 4-part fast-link PSO caching, cross-vendor format negotiation (`NegotiateOptimalPixelFormat`), and fence-synchronized deferred resource deletion (`FlushDeferredDeletions`). |
 | [`src/base_rendering/rhi/castlerendercontext_rhi.pas`](file:///e:/Work/castle-engine/src/base_rendering/rhi/castlerendercontext_rhi.pas) | Bridges CGE's `TRenderContext`, `TCastleViewport`, `TDrawableImage`, and `TCastleScene` rendering to `TRHIDevice`. |
 | [`src/base_rendering/rhi/castleshader_rhi.pas`](file:///e:/Work/castle-engine/src/base_rendering/rhi/castleshader_rhi.pas) | Generates Vulkan GLSL `#version 450` shaders (`Set 0` frame/light/skinning UBOs, `Set 1` material textures & bindless texture array preamble `GenerateBindlessPreamble`, `Set 2` custom `Effect` uniforms, Push Constants) and auto-upgrades legacy OpenGL built-ins (`UpgradeLegacyGLSLBuiltIns`). |
-| [`tests/code/testcases/testcastlevulkanrhi.pas`](file:///e:/Work/castle-engine/tests/code/testcases/testcastlevulkanrhi.pas) | `TTestCastleVulkanRHI`: 54 unit tests covering all Vulkan RHI subsystems in both headless simulation and hardware modes. |
+| [`tests/code/testcases/testcastlevulkanrhi.pas`](file:///e:/Work/castle-engine/tests/code/testcases/testcastlevulkanrhi.pas) | `TTestCastleVulkanRHI`: 57 unit tests covering all Vulkan RHI subsystems in both headless simulation and hardware modes. |
 
 ---
 
@@ -77,8 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–7**: **COMPLETED** (100%).
-- **Phase 8 (Offscreen Render-to-Texture RHI Backend, Post-Processing Screen Effects RHI Execution & Multi-Draw Indirect Count)**: **COMPLETED** (100%, 54 unit tests passing):
-  - [x] **8.1. Offscreen Render-to-Texture RHI Backend (`TGLRenderToTexture`, `CastleGLImages`)** — Completed & tested (`TestRenderToTextureRHIBackend`).
-  - [x] **8.2. Post-Processing Screen Effects RHI Execution (`TCastleScreenEffects`, `CastleScreenEffects`)** — Completed & tested (`TestScreenEffectsRHIPingPongExecution`).
-  - [x] **8.3. GPU-Driven Multi-Draw Indirect Count (`VK_KHR_draw_indirect_count` / Vulkan 1.2 Core & `TCastleVulkanComputeCuller.RecordIndirectDraw`)** — Completed & tested (`TestDrawIndirectCountAndComputeCullerPipeline`).
+- **Phases 1–8**: **COMPLETED** (100%).
+- **Phase 9 (X3D Dynamic Texture Generators, Hierarchical Z Depth Pyramid Occlusion Culling & Screen Effects RHI Pipeline Auto-Hooking)**: **COMPLETED** (100%, 57 unit tests passing):
+  - [x] **9.1. X3D Dynamic Texture Generators (`TRenderedTextureResource`, `TGeneratedShadowMapResource`, `TGeneratedCubeMapTextureResource`)** — Completed & tested (`TestDynamicTextureResourcesRHI`).
+  - [x] **9.2. Hierarchical Z (Hi-Z) Depth Pyramid Compute Downsampler & Two-Phase GPU Occlusion Culling (`TCastleVulkanComputeCuller`, `CastleInternalShaderRHI`)** — Completed & tested (`TestHiZDepthPyramidAndOcclusionCulling`).
+  - [x] **9.3. Screen Effects RHI Pipeline Compilation (`TScreenEffectResource`) & Auto-Hooking (`TCastleScreenEffects`, `TCastleScene`)** — Completed & tested (`TestScreenEffectResourceAndAutoHookingRHI`).

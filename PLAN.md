@@ -245,6 +245,22 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 8 Status**: Completed. Offscreen render-to-texture RHI backend (`TGLRenderToTexture`), post-processing screen effects RHI ping-pong execution (`TCastleScreenEffects`), and GPU-driven multi-draw indirect count (`vkCmdDrawIndexedIndirectCount` & `TCastleVulkanComputeCuller.RecordIndirectDraw`) fully integrated and tested (54 unit tests passing).
 
 
+### Phase 9: X3D Dynamic Texture Generators, Hierarchical Z (Hi-Z) Depth Pyramid Occlusion Culling & Screen Effects RHI Pipeline Auto-Hooking (COMPLETED)
+
+* [x] **9.1. X3D Dynamic Texture Generators (`TRenderedTextureResource`, `TGeneratedShadowMapResource`, `TGeneratedCubeMapTextureResource`)**:
+  * Extend `TRenderedTextureResource` (`castleinternalrenderer_texture.inc`) with `RHITexture`, `RHIDepthTexture`, `RHIRenderToTexture`, and `RHIUpdateCount` to allocate color (`pfRGBA8_UNorm`, optional mipmap pyramid) and depth-stencil (`pfD24_UNorm_S8_UInt`) RHI textures, render scenes offscreen via `TGLRenderToTexture`, and generate mipmaps via `RenderToTexture.GenerateMipmap`.
+  * Extend `TGeneratedShadowMapResource` with `RHITexture`, `RHISampler` (hardware `CompareEnable = True`, `CompareOp = coLessOrEqual` for `pfD32_Float` shadow maps, or `pfRGBA32_Float` with mipmaps for Variance Shadow Maps), `RHIRenderToTexture`, and `ActiveCommandList.SetDepthBias(Node.Bias, Node.Scale)` during shadow map capture.
+  * Extend `TGeneratedCubeMapTextureResource` and `CastleInternalGLCubeMaps` (`GLCaptureCubeMapImages`, `GLCaptureCubeMapTexture`) with `tdCube` `RHITexture`, 6-face offscreen RHI rendering (`RenderBegin` / `RenderEnd` per face), and automatic cubemap mipmap generation.
+* [x] **9.2. Hierarchical Z (Hi-Z) Depth Pyramid Compute Downsampler & Two-Phase GPU Occlusion Culling (`TCastleVulkanComputeCuller`, `CastleInternalShaderRHI`)**:
+  * Add `TCastleHiZPushConstants` (16-byte push constant block: `DstMipWidth`, `DstMipHeight`, `SrcMipWidth`, `SrcMipHeight`) and `TCastleShaderGeneratorRHI.GenerateHiZDownsampleComputeShader` (`#version 450` compute shader performing conservative $2 \times 2$ max-depth reduction with odd-dimension extra texel clamping).
+  * Extend `TCastleVulkanComputeCuller` with `BuildHiZPyramid`, `SampleHiZMipMaxDepth`, `SetHiZProjection`, `HiZPyramidTexture`, `HiZDownsamplePipeline`, `HiZMipLevels`, `HiZCullingEnabled`, `HiZCulledInstanceCount`, and `HiZDownsampleDispatches` to construct a multi-mip `pfR32_Float` max-depth pyramid from the scene depth buffer and cull occluded instances via screen-space bounding-box/sphere projection against the appropriate Hi-Z mip level.
+* [x] **9.3. Screen Effects RHI Pipeline Compilation (`TScreenEffectResource`) & Auto-Hooking (`TCastleScreenEffects`, `TCastleScene`)**:
+  * Extend `TScreenEffectResource` (`castleinternalrenderer_screen_effects.inc`) to generate Vulkan `#version 450` vertex and fragment shaders (`GenerateScreenEffectPreamble` + `SanitizeVulkanShaderSource`) and compile `TRHIPipeline` (`RHIPipeline`, `RHIVertexShader`, `RHIFragmentShader`, `RHIDescriptorLayout`) when `RHIDevice <> nil`.
+  * Expose `TCastleScene.InternalScreenEffectRHIPipeline` and `TCastleScreenEffects.GetScreenEffectRHIPipeline`, add default color/depth fallback RHI pipelines (`FRHIScreenDefaultPipelineColor`, `FRHIScreenDefaultPipelineDepth`), and wire `TCastleScreenEffects.RenderOverChildren` (`EndRenderingToTexture`) to automatically collect and execute active screen effect RHI pipelines.
+
+**Milestone 9 Status**: Completed. X3D dynamic texture generators (`TRenderedTextureResource`, `TGeneratedShadowMapResource`, `TGeneratedCubeMapTextureResource`), Hierarchical Z (Hi-Z) depth pyramid compute downsampler and two-phase GPU occlusion culling (`TCastleVulkanComputeCuller.BuildHiZPyramid`), and `TScreenEffectResource` RHI pipeline compilation & `TCastleScreenEffects` auto-hooking fully integrated and tested (57 unit tests passing).
+
+
 ## 5. Build Tool (castle-engine) & Editor Integration
 
 * [x] CastleEngineManifest.xml Support:
@@ -269,5 +285,5 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 ## 7. Testing & Verification Criteria
 
 * [x] Automated Visual Regression Tests: `CompareImagesPerceptualDiff` in `CastleInternalRHI` compares framebuffer readbacks (`GrabTextureImage`) between `rbOpenGL` and `rbVulkan` using normalized RMSE perceptual diff thresholds.
-* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 54 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
-* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance culling (`TCastleVulkanComputeCuller`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.
+* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 57 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
+* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance/Hi-Z occlusion culling (`TCastleVulkanComputeCuller`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.

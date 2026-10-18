@@ -166,6 +166,15 @@ type
     Padding1: Cardinal;       // 4 bytes
   end; // Total = 80 bytes (80 mod 16 = 0)
 
+  { Push constants for Hi-Z depth pyramid mipmap reduction compute shader (16 bytes) }
+  PCastleHiZPushConstants = ^TCastleHiZPushConstants;
+  TCastleHiZPushConstants = packed record
+    DstMipWidth: Cardinal;
+    DstMipHeight: Cardinal;
+    SrcMipWidth: Cardinal;
+    SrcMipHeight: Cardinal;
+  end;
+
   { Generates RHI-compliant GLSL headers, UBO blocks, and varying layouts }
   TCastleShaderGeneratorRHI = class
   private
@@ -214,6 +223,12 @@ type
     { Generates a complete GLSL 450 compute shader for GPU-driven frustum & distance culling
       that populates VkDrawIndexedIndirectCommand entries and atomic visibility counters. }
     function GenerateComputeCullingShader(const AWorkgroupSizeX: Cardinal = 64): String;
+
+    { Generates a complete GLSL 450 compute shader for Hierarchical Z (Hi-Z) depth pyramid
+      mipmap reduction (conservative 2x2 max-depth reduction with odd-dimension edge handling). }
+    function GenerateHiZDownsampleComputeShader(
+      const AWorkgroupSizeX: Cardinal = 8;
+      const AWorkgroupSizeY: Cardinal = 8): String;
 
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
@@ -994,6 +1009,57 @@ begin
     '    cmd.firstInstance = inst.FirstInstance;' + NL +
     '    u_Commands[idx] = cmd;' + NL +
     '  }' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateHiZDownsampleComputeShader(
+  const AWorkgroupSizeX: Cardinal;
+  const AWorkgroupSizeY: Cardinal): String;
+var
+  LocalSizeX, LocalSizeY: Cardinal;
+begin
+  if AWorkgroupSizeX = 0 then
+    LocalSizeX := 8
+  else
+    LocalSizeX := AWorkgroupSizeX;
+  if AWorkgroupSizeY = 0 then
+    LocalSizeY := 8
+  else
+    LocalSizeY := AWorkgroupSizeY;
+
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;', [LocalSizeX, LocalSizeY]) + NL +
+    NL +
+    'layout(set = 0, binding = 0) uniform sampler2D u_SrcDepthMip;' + NL +
+    'layout(set = 0, binding = 1, r32f) uniform writeonly image2D u_DstDepthMip;' + NL +
+    NL +
+    'layout(push_constant) uniform CastleHiZPushConstants {' + NL +
+    '  uvec2 u_DstMipSize;' + NL +
+    '  uvec2 u_SrcMipSize;' + NL +
+    '} pc;' + NL +
+    NL +
+    'void main() {' + NL +
+    '  uvec2 dstCoord = gl_GlobalInvocationID.xy;' + NL +
+    '  if (dstCoord.x >= pc.u_DstMipSize.x || dstCoord.y >= pc.u_DstMipSize.y) return;' + NL +
+    '  ivec2 srcBase = ivec2(dstCoord * 2u);' + NL +
+    '  ivec2 maxSrc = ivec2(max(pc.u_SrcMipSize, uvec2(1u))) - ivec2(1);' + NL +
+    '  float d00 = texelFetch(u_SrcDepthMip, clamp(srcBase + ivec2(0, 0), ivec2(0), maxSrc), 0).r;' + NL +
+    '  float d10 = texelFetch(u_SrcDepthMip, clamp(srcBase + ivec2(1, 0), ivec2(0), maxSrc), 0).r;' + NL +
+    '  float d01 = texelFetch(u_SrcDepthMip, clamp(srcBase + ivec2(0, 1), ivec2(0), maxSrc), 0).r;' + NL +
+    '  float d11 = texelFetch(u_SrcDepthMip, clamp(srcBase + ivec2(1, 1), ivec2(0), maxSrc), 0).r;' + NL +
+    '  float maxDepth = max(max(d00, d10), max(d01, d11));' + NL +
+    '  if (((pc.u_SrcMipSize.x & 1u) != 0u) && (dstCoord.x + 1u == pc.u_DstMipSize.x)) {' + NL +
+    '    float d20 = texelFetch(u_SrcDepthMip, clamp(srcBase + ivec2(2, 0), ivec2(0), maxSrc), 0).r;' + NL +
+    '    float d21 = texelFetch(u_SrcDepthMip, clamp(srcBase + ivec2(2, 1), ivec2(0), maxSrc), 0).r;' + NL +
+    '    maxDepth = max(maxDepth, max(d20, d21));' + NL +
+    '  }' + NL +
+    '  if (((pc.u_SrcMipSize.y & 1u) != 0u) && (dstCoord.y + 1u == pc.u_DstMipSize.y)) {' + NL +
+    '    float d02 = texelFetch(u_SrcDepthMip, clamp(srcBase + ivec2(0, 2), ivec2(0), maxSrc), 0).r;' + NL +
+    '    float d12 = texelFetch(u_SrcDepthMip, clamp(srcBase + ivec2(1, 2), ivec2(0), maxSrc), 0).r;' + NL +
+    '    maxDepth = max(maxDepth, max(d02, d12));' + NL +
+    '  }' + NL +
+    '  imageStore(u_DstDepthMip, ivec2(dstCoord), vec4(maxDepth, 0.0, 0.0, 1.0));' + NL +
     '}' + NL;
 end;
 

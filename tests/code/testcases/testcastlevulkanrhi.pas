@@ -29,7 +29,7 @@ uses
   CastleInternalShaderRHI, CastleInternalBatch2DRHI, CastleInternalRenderer,
   CastleRendererInternalLights, X3DNodes,
   CastleSceneInternalShape, CastleInternalOcclusionCulling,
-  CastleTransform, CastleViewport, CastleScreenEffects, CastleRenderOptions, CastleWindow,
+  CastleTransform, CastleScene, CastleProjection, CastleViewport, CastleScreenEffects, CastleRenderOptions, CastleWindow,
   ToolManifest, CastleInternalRenderDoc;
 
 type
@@ -89,12 +89,17 @@ type
     procedure TestRenderToTextureRHIBackend;
     procedure TestScreenEffectsRHIPingPongExecution;
     procedure TestDrawIndirectCountAndComputeCullerPipeline;
+    procedure TestDynamicTextureResourcesRHI;
+    procedure TestHiZDepthPyramidAndOcclusionCulling;
+    procedure TestScreenEffectResourceAndAutoHookingRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
+    FRenderFromViewpointCalls: Cardinal;
     procedure CaptureWarning(const Category, S: String);
     procedure DummyRenderShapeCallback(const Shape: TCollectedShape;
       const Params: TRenderParams; const PassParams: TRenderOnePassParams);
+    procedure DummyRenderFromViewpointCallback(const RenderCamera: TRenderingCamera);
   end;
 
 implementation
@@ -4046,6 +4051,339 @@ begin
     FreeAndNil(CmdList13);
     FreeAndNil(VkDev11);
     FreeAndNil(VkDev13);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.DummyRenderFromViewpointCallback(const RenderCamera: TRenderingCamera);
+begin
+  Inc(FRenderFromViewpointCalls);
+end;
+
+procedure TTestCastleVulkanRHI.TestDynamicTextureResourcesRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  SavedDevice: TRHIDevice;
+  SavedCmdList: TRHICommandList;
+  RenderOptions: TCastleRenderOptions;
+  RenderedTexNode: TRenderedTextureNode;
+  TexProps1, TexProps2: TTexturePropertiesNode;
+  RenderedTexRes: TRenderedTextureResource;
+  ShadowMapNode: TGeneratedShadowMapNode;
+  ShadowMapRes: TGeneratedShadowMapResource;
+  CubeMapNode: TGeneratedCubeMapTextureNode;
+  CubeMapRes: TGeneratedCubeMapTextureResource;
+  CamView: TViewVectors;
+begin
+  SavedDevice := RHIDevice;
+  SavedCmdList := ActiveCommandList;
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0, cllPrimary);
+  RenderOptions := TCastleRenderOptions.Create(nil);
+  RenderedTexNode := TRenderedTextureNode.Create;
+  ShadowMapNode := TGeneratedShadowMapNode.Create;
+  CubeMapNode := TGeneratedCubeMapTextureNode.Create;
+  try
+    SetRHIDevice(VkDev);
+    SetActiveCommandList(CmdList);
+
+    { 1. Test TRenderedTextureResource over RHI }
+    RenderedTexNode.SetDimensions([128, 64, 4, 1, 1]);
+    RenderedTexNode.Update := upNextFrameOnly;
+    TexProps1 := TTexturePropertiesNode.Create;
+    TexProps1.GenerateMipMaps := True;
+    RenderedTexNode.TextureProperties := TexProps1;
+
+    TTextureResources.Prepare(RenderOptions, RenderedTexNode);
+    AssertTrue('InternalRendererResource must be TRenderedTextureResource',
+      RenderedTexNode.InternalRendererResource is TRenderedTextureResource);
+    RenderedTexRes := TRenderedTextureResource(RenderedTexNode.InternalRendererResource);
+    AssertTrue('RenderedTexRes.RHITexture must be created', RenderedTexRes.RHITexture <> nil);
+    AssertTrue('RenderedTexRes.RHIDepthTexture must be created', RenderedTexRes.RHIDepthTexture <> nil);
+    AssertTrue('RenderedTexRes.RHIRenderToTexture must be created', RenderedTexRes.RHIRenderToTexture <> nil);
+    AssertEquals('RenderedTexRes.RHITexture width must be 128', 128, RenderedTexRes.RHITexture.Desc.Width);
+    AssertEquals('RenderedTexRes.RHITexture height must be 64', 64, RenderedTexRes.RHITexture.Desc.Height);
+    AssertTrue('RenderedTexRes.RHITexture must allocate mipmap pyramid (> 1 mip)',
+      RenderedTexRes.RHITexture.Desc.MipLevels > 1);
+
+    FRenderFromViewpointCalls := 0;
+    FillChar(CamView, SizeOf(CamView), 0);
+    CamView.Direction := Vector3(0, 0, -1);
+    CamView.Up := Vector3(0, 1, 0);
+    CmdList.BeginRecording;
+    RenderedTexRes.Update(@DummyRenderFromViewpointCallback, 0.1, 100.0, nil, True, CamView, nil);
+    CmdList.EndRecording;
+
+    AssertEquals('RenderedTexRes.RHIUpdateCount must be 1', 1, RenderedTexRes.RHIUpdateCount);
+    AssertEquals('RenderedTexRes.RHIRenderToTexture.RHIRenderPassCount must be 1',
+      1, RenderedTexRes.RHIRenderToTexture.RHIRenderPassCount);
+    AssertEquals('RenderFromViewpoint callback must be invoked once for TRenderedTextureNode',
+      1, FRenderFromViewpointCalls);
+
+    { 2. Test TGeneratedShadowMapResource over RHI }
+    ShadowMapNode.Size := 256;
+    ShadowMapNode.Update := upAlways;
+    ShadowMapNode.Bias := 1.5;
+    ShadowMapNode.Scale := 2.5;
+
+    TTextureResources.Prepare(RenderOptions, ShadowMapNode);
+    AssertTrue('InternalRendererResource must be TGeneratedShadowMapResource',
+      ShadowMapNode.InternalRendererResource is TGeneratedShadowMapResource);
+    ShadowMapRes := TGeneratedShadowMapResource(ShadowMapNode.InternalRendererResource);
+    AssertTrue('ShadowMapRes.RHITexture must be created', ShadowMapRes.RHITexture <> nil);
+    AssertEquals('ShadowMapRes.RHITexture format must be pfD32_Float',
+      Ord(pfD32_Float), Ord(ShadowMapRes.RHITexture.Desc.Format));
+    AssertTrue('ShadowMapRes.RHISampler with hardware shadow comparison must be created',
+      ShadowMapRes.RHISampler <> nil);
+    AssertTrue('ShadowMapRes.RHIRenderToTexture must be created',
+      ShadowMapRes.RHIRenderToTexture <> nil);
+
+    FRenderFromViewpointCalls := 0;
+    CmdList.BeginRecording;
+    ShadowMapRes.Update(@DummyRenderFromViewpointCallback, 0.1, 100.0, nil);
+    CmdList.EndRecording;
+    AssertEquals('ShadowMapRes.RHIUpdateCount must be 1', 1, ShadowMapRes.RHIUpdateCount);
+    AssertEquals('ShadowMapRes.RHIRenderToTexture.RHIRenderPassCount must be 1',
+      1, ShadowMapRes.RHIRenderToTexture.RHIRenderPassCount);
+    AssertEquals('RenderFromViewpoint callback must be invoked once for TGeneratedShadowMapNode',
+      1, FRenderFromViewpointCalls);
+
+    { 3. Test TGeneratedCubeMapTextureResource over RHI }
+    CubeMapNode.Size := 64;
+    CubeMapNode.Update := upNextFrameOnly;
+    TexProps2 := TTexturePropertiesNode.Create;
+    TexProps2.GenerateMipMaps := True;
+    CubeMapNode.TextureProperties := TexProps2;
+
+    TTextureResources.Prepare(RenderOptions, CubeMapNode);
+    AssertTrue('InternalRendererResource must be TGeneratedCubeMapTextureResource',
+      CubeMapNode.InternalRendererResource is TGeneratedCubeMapTextureResource);
+    CubeMapRes := TGeneratedCubeMapTextureResource(CubeMapNode.InternalRendererResource);
+    AssertTrue('CubeMapRes.RHITexture must be created', CubeMapRes.RHITexture <> nil);
+    AssertEquals('CubeMapRes.RHITexture dimension must be tdCube',
+      Ord(tdCube), Ord(CubeMapRes.RHITexture.Desc.Dimension));
+    AssertEquals('CubeMapRes.RHITexture size must be 64', 64, CubeMapRes.RHITexture.Desc.Width);
+    AssertEquals('CubeMapRes.RHITexture DepthOrArrayLayers must be 6',
+      6, CubeMapRes.RHITexture.Desc.DepthOrArrayLayers);
+    AssertTrue('CubeMapRes.RHIRenderToTexture must be created',
+      CubeMapRes.RHIRenderToTexture <> nil);
+
+    FRenderFromViewpointCalls := 0;
+    CmdList.BeginRecording;
+    CubeMapRes.Update(@DummyRenderFromViewpointCallback, 0.1, 100.0, Vector3(0, 0, 0));
+    CmdList.EndRecording;
+
+    AssertEquals('CubeMapRes.RHIUpdateCount must be 1', 1, CubeMapRes.RHIUpdateCount);
+    AssertEquals('CubeMapRes.RHIFacesRenderedCount must be 6 (all 6 cubemap faces)',
+      6, CubeMapRes.RHIFacesRenderedCount);
+    AssertEquals('RenderFromViewpoint callback must be invoked 6 times (once per cubemap face)',
+      6, FRenderFromViewpointCalls);
+
+    { Clean unprepare }
+    TTextureResources.Unprepare(RenderedTexNode);
+    TTextureResources.Unprepare(ShadowMapNode);
+    TTextureResources.Unprepare(CubeMapNode);
+    AssertTrue('RenderedTexNode.InternalRendererResource must be nil after Unprepare',
+      RenderedTexNode.InternalRendererResource = nil);
+    AssertTrue('ShadowMapNode.InternalRendererResource must be nil after Unprepare',
+      ShadowMapNode.InternalRendererResource = nil);
+    AssertTrue('CubeMapNode.InternalRendererResource must be nil after Unprepare',
+      CubeMapNode.InternalRendererResource = nil);
+  finally
+    SetActiveCommandList(SavedCmdList);
+    SetRHIDevice(SavedDevice);
+    FreeAndNil(CubeMapNode);
+    FreeAndNil(ShadowMapNode);
+    FreeAndNil(RenderedTexNode);
+    FreeAndNil(RenderOptions);
+    FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestHiZDepthPyramidAndOcclusionCulling;
+var
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Culler: TCastleVulkanComputeCuller;
+  ShaderGen: TCastleShaderGeneratorRHI;
+  HiZShaderSrc: String;
+  DepthPixels: array[0..63] of Single;
+  X, Y: Integer;
+  ProjMat: TMatrix4;
+  Planes: array[0..5] of TVector4;
+  Instances: array[0..2] of TCastleGpuCullingInstance;
+begin
+  { 1. Verify GenerateHiZDownsampleComputeShader GLSL generation }
+  ShaderGen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    HiZShaderSrc := ShaderGen.GenerateHiZDownsampleComputeShader(8, 8);
+  finally
+    FreeAndNil(ShaderGen);
+  end;
+  AssertTrue('Hi-Z shader must contain #version 450', Pos('#version 450', HiZShaderSrc) > 0);
+  AssertTrue('Hi-Z shader must declare local_size_x = 8', Pos('local_size_x = 8', HiZShaderSrc) > 0);
+  AssertTrue('Hi-Z shader must declare u_SrcDepthMip sampler2D', Pos('u_SrcDepthMip', HiZShaderSrc) > 0);
+  AssertTrue('Hi-Z shader must declare u_DstDepthMip r32f image2D', Pos('u_DstDepthMip', HiZShaderSrc) > 0);
+
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0, cllPrimary);
+  try
+    { 2. Populate 8x8 depth buffer:
+      - Lower-left quadrant (x in [0..3], y in [0..3]): occluder wall at depth = 0.25
+      - Remainder of screen: clear sky depth = 0.95 }
+    for Y := 0 to 7 do
+      for X := 0 to 7 do
+      begin
+        if (X <= 3) and (Y <= 3) then
+          DepthPixels[Y * 8 + X] := 0.25
+        else
+          DepthPixels[Y * 8 + X] := 0.95;
+      end;
+
+    { 3. Build Hi-Z Pyramid via compute downsampler }
+    Culler := VkDev.ComputeCuller;
+    CmdList.BeginRecording;
+    AssertEquals('BuildHiZPyramid(8, 8) must return 4 mip levels',
+      4, Culler.BuildHiZPyramid(CmdList, 8, 8, @DepthPixels[0]));
+    CmdList.EndRecording;
+
+    AssertTrue('HiZPyramidTexture must be allocated', Culler.HiZPyramidTexture <> nil);
+    AssertTrue('HiZDownsamplePipeline must be compiled', Culler.HiZDownsamplePipeline <> nil);
+    AssertEquals('8x8 Hi-Z pyramid must have 4 mip levels (8x8, 4x4, 2x2, 1x1)',
+      4, Culler.HiZMipLevels);
+    AssertEquals('HiZDownsampleDispatches must equal 3 (mips 1, 2, 3)',
+      3, Culler.HiZDownsampleDispatches);
+
+    { Verify mip 1 (4x4) max-depth values }
+    AssertSameValue(0.25, Culler.SampleHiZMipMaxDepth(1, 0, 0), 1e-5);
+    AssertSameValue(0.95, Culler.SampleHiZMipMaxDepth(1, 3, 3), 1e-5);
+    { Verify mip 3 (1x1 coarsest mip) conservative max reduction }
+    AssertSameValue(0.95, Culler.SampleHiZMipMaxDepth(3, 0, 0), 1e-5);
+
+    { 4. Two-Phase GPU Occlusion Culling using the Hi-Z Pyramid }
+    ProjMat := OrthoProjectionMatrix(FloatRectangle(-10, -10, 20, 20), 1.0, 100.0);
+    Culler.SetHiZProjection(ProjMat, True);
+
+    Planes[0] := Vector4( 1,  0,  0, 50);
+    Planes[1] := Vector4(-1,  0,  0, 50);
+    Planes[2] := Vector4( 0,  1,  0, 50);
+    Planes[3] := Vector4( 0, -1,  0, 50);
+    Planes[4] := Vector4( 0,  0, -1, 0);
+    Planes[5] := Vector4( 0,  0,  1, 200);
+    Culler.SetFrustumPlanes(Planes, Vector3(0, 0, 0), 0.0);
+
+    FillChar(Instances, SizeOf(Instances), 0);
+    { Instance 0: Lower-left quadrant (x = -5, y = -5), in FRONT of occluder wall (z = -10 -> ZNear01 ~ 0.08 < 0.25) -> VISIBLE }
+    Instances[0].BoundingSphere := Vector4(-5, -5, -10, 1.0);
+    Instances[0].IndexCount := 36;
+    Instances[0].InstanceCount := 1;
+
+    { Instance 1: Lower-left quadrant (x = -5, y = -5), BEHIND the 0.25 occluder wall (z = -60 -> ZNear01 ~ 0.58 > 0.25) -> OCCLUDED! }
+    Instances[1].BoundingSphere := Vector4(-5, -5, -60, 1.0);
+    Instances[1].IndexCount := 36;
+    Instances[1].InstanceCount := 1;
+
+    { Instance 2: Upper-right quadrant (x = +5, y = +5), at z = -60 where depth is 0.95 (0.58 <= 0.95) -> VISIBLE }
+    Instances[2].BoundingSphere := Vector4(5, 5, -60, 1.0);
+    Instances[2].IndexCount := 36;
+    Instances[2].InstanceCount := 1;
+
+    Culler.UploadInstances(Instances);
+
+    CmdList.BeginRecording;
+    Culler.DispatchCulling(CmdList, Length(Instances), True);
+    CmdList.EndRecording;
+
+    AssertEquals('HiZCulledInstanceCount must be 1 (Instance 1 occluded behind 0.25 depth wall)',
+      1, Culler.HiZCulledInstanceCount);
+    AssertEquals('ReadBackVisibleCount must be 2 (Instances 0 and 2 visible)',
+      2, Culler.ReadBackVisibleCount);
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestScreenEffectResourceAndAutoHookingRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  SavedDevice: TRHIDevice;
+  SavedCmdList: TRHICommandList;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  SeNode: TScreenEffectNode;
+  ShaderNode: TComposedShaderNode;
+  FragPart: TShaderPartNode;
+  SeRes: TScreenEffectResource;
+  ScreenFX: TCastleScreenEffects;
+  FinalTarget: TRHITexture;
+begin
+  SavedDevice := RHIDevice;
+  SavedCmdList := ActiveCommandList;
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0, cllPrimary);
+  Scene := TCastleScene.Create(nil);
+  ScreenFX := TCastleScreenEffects.Create(nil);
+  FinalTarget := VkDev.CreateTexture(TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm,
+    [tuColorAttachment, tuSampled, tuTransferDst, tuTransferSrc]));
+  try
+    SetRHIDevice(VkDev);
+    SetActiveCommandList(CmdList);
+
+    { 1. Build X3D scene containing a TScreenEffectNode with custom fragment shader }
+    Root := TX3DRootNode.Create;
+    SeNode := TScreenEffectNode.Create;
+    ShaderNode := TComposedShaderNode.Create;
+    ShaderNode.Language := slGLSL;
+    FragPart := TShaderPartNode.Create;
+    FragPart.ShaderType := stFragment;
+    FragPart.Contents :=
+      'void main(void)' + LineEnding +
+      '{' + LineEnding +
+      '  gl_FragColor = screen_get_color(screen_position());' + LineEnding +
+      '}';
+    ShaderNode.SetParts([FragPart]);
+    SeNode.SetShaders([ShaderNode]);
+    Root.AddChildren(SeNode);
+    Scene.Load(Root, True);
+
+    { 2. Trigger TCastleScene.InternalScreenEffectsCount over RHI -> prepares TScreenEffectResource }
+    AssertEquals('Scene.InternalScreenEffectsCount must be 1 on RHI backend',
+      1, Scene.InternalScreenEffectsCount);
+    AssertTrue('SeNode.InternalRendererResource must be TScreenEffectResource',
+      SeNode.InternalRendererResource is TScreenEffectResource);
+    SeRes := TScreenEffectResource(SeNode.InternalRendererResource);
+    AssertTrue('SeRes.RHIPipeline must be compiled', SeRes.RHIPipeline <> nil);
+    AssertTrue('SeRes.RHIVertexShader must be compiled', SeRes.RHIVertexShader <> nil);
+    AssertTrue('SeRes.RHIFragmentShader must be compiled', SeRes.RHIFragmentShader <> nil);
+    AssertTrue('SeRes.RHIVertexGLSL must contain #version 450',
+      Pos('#version 450', SeRes.RHIVertexGLSL) > 0);
+    AssertTrue('SeRes.RHIFragmentGLSL must contain #version 450',
+      Pos('#version 450', SeRes.RHIFragmentGLSL) > 0);
+    AssertTrue('Scene.InternalScreenEffectRHIPipeline(0) must return SeRes.RHIPipeline',
+      Scene.InternalScreenEffectRHIPipeline(0) = SeRes.RHIPipeline);
+
+    { 3. Verify TCastleScreenEffects auto-hooking and pipeline execution }
+    ScreenFX.AddScreenEffect(SeNode.DeepCopy as TScreenEffectNode);
+    AssertTrue('ScreenFX.GetScreenEffectRHIPipeline(0) must return non-nil RHI pipeline',
+      ScreenFX.GetScreenEffectRHIPipeline(0) <> nil);
+
+    CmdList.BeginRecording;
+    ScreenFX.EnsureRHIScreenResources(64, 64, False);
+    AssertEquals('ScreenFX.ExecuteRHIScreenEffectPasses must execute 1 pass',
+      1, ScreenFX.ExecuteRHIScreenEffectPasses(
+        [ScreenFX.GetScreenEffectRHIPipeline(0)], 64, 64, False, FinalTarget, 0.1, 100.0));
+    CmdList.EndRecording;
+  finally
+    SetActiveCommandList(SavedCmdList);
+    SetRHIDevice(SavedDevice);
+    FreeAndNil(FinalTarget);
+    FreeAndNil(ScreenFX);
+    FreeAndNil(Scene);
+    FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
   end;
 end;
 

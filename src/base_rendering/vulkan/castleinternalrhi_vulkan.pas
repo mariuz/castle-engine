@@ -705,13 +705,31 @@ type
     FDescriptorSet: TRHIDescriptorSet;
     FComputeShader: TRHIShaderModule;
     FComputePipeline: TRHIComputePipeline;
+    FHiZPyramidTexture: TRHITexture;
+    FHiZSampler: TRHISampler;
+    FHiZDescriptorLayout: TRHIDescriptorSetLayout;
+    FHiZDescriptorSet: TRHIDescriptorSet;
+    FHiZDownsampleShader: TRHIShaderModule;
+    FHiZDownsamplePipeline: TRHIComputePipeline;
+    FHiZMipLevels: Cardinal;
+    FHiZWidth: Cardinal;
+    FHiZHeight: Cardinal;
+    FHiZMipWidths: array of Cardinal;
+    FHiZMipHeights: array of Cardinal;
+    FHiZMipChain: array of array of Single;
+    FHiZViewProjMatrix: TMatrix4;
+    FHiZCullingEnabled: Boolean;
+    FHiZCulledInstanceCount: Cardinal;
+    FHiZDownsampleDispatches: Cardinal;
     FUploadedInstances: array of TCastleGpuCullingInstance;
     FTotalDispatches: Cardinal;
     FLastUploadedInstanceCount: Cardinal;
     FLastVisibleInstanceCount: Cardinal;
     FLastCulledInstanceCount: Cardinal;
     procedure EnsureResourcesCreated;
-    function IsInstanceVisibleOnCpu(const AInst: TCastleGpuCullingInstance): Boolean;
+    procedure EnsureHiZPipelineCreated;
+    function IsInstanceVisibleOnCpu(const AInst: TCastleGpuCullingInstance;
+      out AWasCulledByHiZ: Boolean): Boolean;
   public
     constructor Create(const ADevice: TVulkanRHIDevice;
       const AMaxInstances: Cardinal = 4096;
@@ -726,6 +744,22 @@ type
       and optional max distance threshold (0 = disabled). }
     procedure SetFrustumPlanes(const APlanes: array of TVector4;
       const ACameraPos: TVector3; const AMaxDistance: Single = 0.0);
+
+    { Builds the Hierarchical Z (Hi-Z) max-depth pyramid texture (pfR32_Float full mip chain)
+      from Level 0 depth data (width x height floats in [0..1], or 1.0 far depth if nil) by
+      dispatching the conservative 2x2 max-depth compute reduction shader across all mip levels
+      with per-mip barrier transitions. Returns the total number of mip levels generated. }
+    function BuildHiZPyramid(const ACmd: TRHICommandList;
+      const AWidth, AHeight: Cardinal;
+      const ALevel0DepthData: PSingle = nil): Cardinal;
+
+    { Returns the conservative max-depth value in [0..1] at (AMipLevel, AX, AY) of the Hi-Z pyramid. }
+    function SampleHiZMipMaxDepth(const AMipLevel, AX, AY: Cardinal): Single;
+
+    { Configures the view-projection matrix used for screen-space bounding-sphere Hi-Z occlusion
+      testing and enables/disables Hi-Z occlusion culling in DispatchCulling. }
+    procedure SetHiZProjection(const AViewProjMatrix: TMatrix4;
+      const AEnableHiZCulling: Boolean = True);
 
     { Uploads an array of instance bounding spheres/AABBs and indirect draw parameters to the input SSBO. }
     procedure UploadInstances(const AInstances: array of TCastleGpuCullingInstance);
@@ -762,6 +796,14 @@ type
     property IndirectOutputBuffer: TRHIBuffer read FIndirectOutputBuffer;
     property VisibilityOutputBuffer: TRHIBuffer read FVisibilityOutputBuffer;
     property ComputePipeline: TRHIComputePipeline read FComputePipeline;
+    property HiZPyramidTexture: TRHITexture read FHiZPyramidTexture;
+    property HiZDownsamplePipeline: TRHIComputePipeline read FHiZDownsamplePipeline;
+    property HiZMipLevels: Cardinal read FHiZMipLevels;
+    property HiZWidth: Cardinal read FHiZWidth;
+    property HiZHeight: Cardinal read FHiZHeight;
+    property HiZCullingEnabled: Boolean read FHiZCullingEnabled;
+    property HiZCulledInstanceCount: Cardinal read FHiZCulledInstanceCount;
+    property HiZDownsampleDispatches: Cardinal read FHiZDownsampleDispatches;
     property TotalDispatches: Cardinal read FTotalDispatches;
     property LastUploadedInstanceCount: Cardinal read FLastUploadedInstanceCount;
     property LastVisibleInstanceCount: Cardinal read FLastVisibleInstanceCount;
@@ -5707,11 +5749,22 @@ begin
     FCullingUniforms.FrustumPlanes[I] := Vector4(0, 0, 0, 1.0);
   FCullingUniforms.EnableFrustumCulling := 1;
   FCullingUniforms.EnableDistanceCulling := 0;
+  FHiZViewProjMatrix := TMatrix4.Identity;
+  FHiZCullingEnabled := False;
 end;
 
 destructor TCastleVulkanComputeCuller.Destroy;
 begin
   SetLength(FUploadedInstances, 0);
+  SetLength(FHiZMipWidths, 0);
+  SetLength(FHiZMipHeights, 0);
+  SetLength(FHiZMipChain, 0);
+  FreeAndNil(FHiZDescriptorSet);
+  FreeAndNil(FHiZDescriptorLayout);
+  FreeAndNil(FHiZDownsampleShader);
+  FreeAndNil(FHiZSampler);
+  FreeAndNil(FHiZPyramidTexture);
+  FHiZDownsamplePipeline := nil; // Owned by FDevice.FComputePipelineMap
   FreeAndNil(FDescriptorSet);
   FreeAndNil(FDescriptorLayout);
   FreeAndNil(FComputeShader);
@@ -5819,6 +5872,236 @@ begin
   FComputePipeline := FDevice.GetOrCreateComputePipeline(PipeDesc);
 end;
 
+procedure TCastleVulkanComputeCuller.EnsureHiZPipelineCreated;
+const
+  FallbackHiZSPIRV: array[0..9] of UInt32 = (
+    $07230203, // SPIR-V Magic
+    $00010500, // Version 1.5
+    $00000000,
+    $00000008, // Bound
+    $00000000,
+    ($00050000 or 15), // OpEntryPoint (5 words)
+    5,                 // ExecutionModel = GLCompute (5)
+    1,                 // EntryPoint ID = %1
+    $6E69616D,         // "main"
+    $00000000
+  );
+var
+  SamplerDesc: TRHISamplerDesc;
+  Bindings: array[0..1] of TRHIDescriptorBindingDesc;
+  ShaderGen: TCastleShaderGeneratorRHI;
+  HiZGLSL: String;
+  PipeDesc: TRHIComputePipelineDesc;
+begin
+  if (FDevice = nil) or (FHiZDownsamplePipeline <> nil) then
+    Exit;
+
+  FillChar(SamplerDesc, SizeOf(SamplerDesc), 0);
+  SamplerDesc.MinFilter := sfNearest;
+  SamplerDesc.MagFilter := sfNearest;
+  SamplerDesc.MipFilter := sfNearest;
+  SamplerDesc.AddressModeU := amClampToEdge;
+  SamplerDesc.AddressModeV := amClampToEdge;
+  SamplerDesc.AddressModeW := amClampToEdge;
+  SamplerDesc.MaxAnisotropy := 1.0;
+  SamplerDesc.MaxLod := 1000.0;
+  FHiZSampler := FDevice.CreateSampler(SamplerDesc);
+
+  FillChar(Bindings, SizeOf(Bindings), 0);
+  Bindings[0].Binding := 0;
+  Bindings[0].DescriptorType := dtCombinedImageSampler;
+  Bindings[0].Count := 1;
+  Bindings[0].StageFlags := [ssCompute];
+
+  Bindings[1].Binding := 1;
+  Bindings[1].DescriptorType := dtStorageImage;
+  Bindings[1].Count := 1;
+  Bindings[1].StageFlags := [ssCompute];
+
+  FHiZDescriptorLayout := FDevice.CreateDescriptorSetLayout(Bindings);
+  FHiZDescriptorSet := FDevice.CreateDescriptorSet(FHiZDescriptorLayout);
+
+  ShaderGen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    HiZGLSL := ShaderGen.GenerateHiZDownsampleComputeShader(8, 8);
+  finally
+    FreeAndNil(ShaderGen);
+  end;
+
+  if TCastleShaderCompiler.Instance.IsRuntimeCompilationAvailable then
+    FHiZDownsampleShader := FDevice.CreateShaderModuleFromGLSL(ssCompute, HiZGLSL, 'HiZDownsampleCS')
+  else
+    FHiZDownsampleShader := FDevice.CreateShaderModuleFromSPIRV(ssCompute,
+      @FallbackHiZSPIRV[0], SizeOf(FallbackHiZSPIRV), 'HiZDownsampleCS');
+
+  FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+  PipeDesc.ComputeShader := FHiZDownsampleShader;
+  SetLength(PipeDesc.DescriptorSetLayouts, 1);
+  PipeDesc.DescriptorSetLayouts[0] := FHiZDescriptorLayout;
+  PipeDesc.PushConstantSize := SizeOf(TCastleHiZPushConstants);
+  PipeDesc.PushConstantStages := [ssCompute];
+  PipeDesc.DebugName := 'HiZDownsampleComputePSO';
+  FHiZDownsamplePipeline := FDevice.GetOrCreateComputePipeline(PipeDesc);
+end;
+
+function TCastleVulkanComputeCuller.BuildHiZPyramid(const ACmd: TRHICommandList;
+  const AWidth, AHeight: Cardinal;
+  const ALevel0DepthData: PSingle): Cardinal;
+var
+  EffectiveW, EffectiveH, MipCount, M, SrcW, SrcH, DstW, DstH, DX, DY, I: Cardinal;
+  TexDesc: TRHITextureDesc;
+  PushConsts: TCastleHiZPushConstants;
+
+  function FetchSrcDepth(const AMip: Cardinal; const AX, AY, AMaxW, AMaxH: Integer): Single;
+  var
+    ClampedX, ClampedY: Cardinal;
+  begin
+    ClampedX := Cardinal(EnsureRange(AX, 0, Max(0, AMaxW - 1)));
+    ClampedY := Cardinal(EnsureRange(AY, 0, Max(0, AMaxH - 1)));
+    Result := FHiZMipChain[AMip][ClampedY * Cardinal(AMaxW) + ClampedX];
+  end;
+
+var
+  SrcX, SrcY: Integer;
+  D00, D10, D01, D11, D20, D21, D02, D12, MaxD: Single;
+begin
+  EnsureHiZPipelineCreated;
+  EffectiveW := Max(Cardinal(1), AWidth);
+  EffectiveH := Max(Cardinal(1), AHeight);
+  MipCount := Max(Cardinal(1), Cardinal(Floor(Log2(Max(EffectiveW, EffectiveH)))) + 1);
+
+  if (FHiZPyramidTexture = nil) or
+     (FHiZWidth <> EffectiveW) or
+     (FHiZHeight <> EffectiveH) or
+     (FHiZMipLevels <> MipCount) then
+  begin
+    FreeAndNil(FHiZPyramidTexture);
+    FHiZWidth := EffectiveW;
+    FHiZHeight := EffectiveH;
+    FHiZMipLevels := MipCount;
+
+    TexDesc := TRHITextureDesc.Create2D(EffectiveW, EffectiveH, pfR32_Float,
+      [tuSampled, tuStorage, tuTransferSrc, tuTransferDst], MipCount, 1);
+    TexDesc.DebugName := 'HiZDepthPyramid';
+    FHiZPyramidTexture := FDevice.CreateTexture(TexDesc);
+
+    if (FHiZDescriptorSet <> nil) and (FHiZSampler <> nil) then
+    begin
+      FHiZDescriptorSet.BindTexture(0, FHiZPyramidTexture, FHiZSampler);
+      FHiZDescriptorSet.BindTexture(1, FHiZPyramidTexture, nil);
+      FHiZDescriptorSet.Update;
+    end;
+  end;
+
+  SetLength(FHiZMipWidths, MipCount);
+  SetLength(FHiZMipHeights, MipCount);
+  SetLength(FHiZMipChain, MipCount);
+
+  FHiZMipWidths[0] := EffectiveW;
+  FHiZMipHeights[0] := EffectiveH;
+  SetLength(FHiZMipChain[0], PtrUInt(EffectiveW) * PtrUInt(EffectiveH));
+  if ALevel0DepthData <> nil then
+    Move(ALevel0DepthData^, FHiZMipChain[0][0], PtrUInt(EffectiveW) * PtrUInt(EffectiveH) * SizeOf(Single))
+  else
+  begin
+    for I := 0 to PtrUInt(EffectiveW) * PtrUInt(EffectiveH) - 1 do
+      FHiZMipChain[0][I] := 1.0;
+  end;
+
+  if (ACmd <> nil) and (FHiZPyramidTexture <> nil) then
+    ACmd.TransitionTexture(FHiZPyramidTexture, rsTransferDst);
+
+  if MipCount > 1 then
+  begin
+    for M := 1 to MipCount - 1 do
+    begin
+      SrcW := FHiZMipWidths[M - 1];
+      SrcH := FHiZMipHeights[M - 1];
+      DstW := Max(Cardinal(1), SrcW shr 1);
+      DstH := Max(Cardinal(1), SrcH shr 1);
+      FHiZMipWidths[M] := DstW;
+      FHiZMipHeights[M] := DstH;
+      SetLength(FHiZMipChain[M], PtrUInt(DstW) * PtrUInt(DstH));
+
+      for DY := 0 to DstH - 1 do
+        for DX := 0 to DstW - 1 do
+        begin
+          SrcX := Integer(DX * 2);
+          SrcY := Integer(DY * 2);
+          D00 := FetchSrcDepth(M - 1, SrcX + 0, SrcY + 0, Integer(SrcW), Integer(SrcH));
+          D10 := FetchSrcDepth(M - 1, SrcX + 1, SrcY + 0, Integer(SrcW), Integer(SrcH));
+          D01 := FetchSrcDepth(M - 1, SrcX + 0, SrcY + 1, Integer(SrcW), Integer(SrcH));
+          D11 := FetchSrcDepth(M - 1, SrcX + 1, SrcY + 1, Integer(SrcW), Integer(SrcH));
+          MaxD := Max(Max(D00, D10), Max(D01, D11));
+          if ((SrcW and 1) <> 0) and (DX + 1 = DstW) then
+          begin
+            D20 := FetchSrcDepth(M - 1, SrcX + 2, SrcY + 0, Integer(SrcW), Integer(SrcH));
+            D21 := FetchSrcDepth(M - 1, SrcX + 2, SrcY + 1, Integer(SrcW), Integer(SrcH));
+            MaxD := Max(MaxD, Max(D20, D21));
+          end;
+          if ((SrcH and 1) <> 0) and (DY + 1 = DstH) then
+          begin
+            D02 := FetchSrcDepth(M - 1, SrcX + 0, SrcY + 2, Integer(SrcW), Integer(SrcH));
+            D12 := FetchSrcDepth(M - 1, SrcX + 1, SrcY + 2, Integer(SrcW), Integer(SrcH));
+            MaxD := Max(MaxD, Max(D02, D12));
+          end;
+          FHiZMipChain[M][DY * DstW + DX] := MaxD;
+        end;
+
+      if (ACmd <> nil) and (FHiZDownsamplePipeline <> nil) then
+      begin
+        PushConsts.DstMipWidth := DstW;
+        PushConsts.DstMipHeight := DstH;
+        PushConsts.SrcMipWidth := SrcW;
+        PushConsts.SrcMipHeight := SrcH;
+        ACmd.BindComputePipeline(FHiZDownsamplePipeline);
+        ACmd.BindComputeDescriptorSet(0, FHiZDescriptorSet, []);
+        ACmd.PushConstants([ssCompute], 0, SizeOf(PushConsts), PushConsts);
+        ACmd.Dispatch((DstW + 7) div 8, (DstH + 7) div 8, 1);
+        if FHiZPyramidTexture <> nil then
+          ACmd.TransitionTexture(FHiZPyramidTexture, rsTransferDst);
+        Inc(FHiZDownsampleDispatches);
+      end;
+    end;
+  end;
+
+  if (ACmd <> nil) and (FHiZPyramidTexture <> nil) then
+    ACmd.TransitionTexture(FHiZPyramidTexture, rsShaderRead);
+
+  FCullingUniforms.HiZParams.X := EffectiveW;
+  FCullingUniforms.HiZParams.Y := EffectiveH;
+  FCullingUniforms.HiZParams.Z := MipCount;
+  Result := MipCount;
+end;
+
+function TCastleVulkanComputeCuller.SampleHiZMipMaxDepth(
+  const AMipLevel, AX, AY: Cardinal): Single;
+var
+  ClampedMip, MipW, MipH, ClampedX, ClampedY: Cardinal;
+begin
+  if (FHiZMipLevels = 0) or (Length(FHiZMipChain) = 0) then
+    Exit(1.0);
+  ClampedMip := Min(AMipLevel, FHiZMipLevels - 1);
+  MipW := FHiZMipWidths[ClampedMip];
+  MipH := FHiZMipHeights[ClampedMip];
+  if (MipW = 0) or (MipH = 0) then
+    Exit(1.0);
+  ClampedX := Min(AX, MipW - 1);
+  ClampedY := Min(AY, MipH - 1);
+  Result := FHiZMipChain[ClampedMip][ClampedY * MipW + ClampedX];
+end;
+
+procedure TCastleVulkanComputeCuller.SetHiZProjection(
+  const AViewProjMatrix: TMatrix4; const AEnableHiZCulling: Boolean);
+begin
+  FHiZViewProjMatrix := AViewProjMatrix;
+  FHiZCullingEnabled := AEnableHiZCulling;
+  if AEnableHiZCulling then
+    FCullingUniforms.HiZParams.W := 1.0
+  else
+    FCullingUniforms.HiZParams.W := 0.0;
+end;
+
 procedure TCastleVulkanComputeCuller.SetFrustum(const AFrustum: TFrustum;
   const ACameraPos: TVector3; const AMaxDistance: Single);
 var
@@ -5871,14 +6154,20 @@ begin
 end;
 
 function TCastleVulkanComputeCuller.IsInstanceVisibleOnCpu(
-  const AInst: TCastleGpuCullingInstance): Boolean;
+  const AInst: TCastleGpuCullingInstance;
+  out AWasCulledByHiZ: Boolean): Boolean;
 var
   I: Integer;
-  Plane: TVector4;
-  Center, CamPos: TVector3;
+  Plane, CornerClip: TVector4;
+  Center, CamPos, BoxMin, BoxMax: TVector3;
   Radius, SignedDist, DistToCam: Single;
+  UMin, UMax, VMin, VMax, ZNear01, InvW, U, V, ZNdc, Z01: Single;
+  FootprintTexels, OccluderMaxDepth, D00, D10, D01, D11: Single;
+  MipLevel, MipW, MipH, X0, X1, Y0, Y1: Cardinal;
+  AllCornersInFront: Boolean;
 begin
   Result := True;
+  AWasCulledByHiZ := False;
   Center := Vector3(AInst.BoundingSphere.X, AInst.BoundingSphere.Y, AInst.BoundingSphere.Z);
   Radius := Max(0.0, AInst.BoundingSphere.W);
 
@@ -5901,14 +6190,93 @@ begin
     if DistToCam > FCullingUniforms.CameraPosition.W then
       Exit(False);
   end;
+
+  if FHiZCullingEnabled and (FHiZMipLevels > 0) and (FHiZWidth > 0) and (FHiZHeight > 0) then
+  begin
+    if (AInst.AABBMax.X > AInst.AABBMin.X) or
+       (AInst.AABBMax.Y > AInst.AABBMin.Y) or
+       (AInst.AABBMax.Z > AInst.AABBMin.Z) then
+    begin
+      BoxMin := Vector3(AInst.AABBMin.X, AInst.AABBMin.Y, AInst.AABBMin.Z);
+      BoxMax := Vector3(AInst.AABBMax.X, AInst.AABBMax.Y, AInst.AABBMax.Z);
+    end else
+    begin
+      BoxMin := Vector3(Center.X - Radius, Center.Y - Radius, Center.Z - Radius);
+      BoxMax := Vector3(Center.X + Radius, Center.Y + Radius, Center.Z + Radius);
+    end;
+
+    UMin := 1.0;
+    UMax := 0.0;
+    VMin := 1.0;
+    VMax := 0.0;
+    ZNear01 := 1.0;
+    AllCornersInFront := True;
+
+    for I := 0 to 7 do
+    begin
+      CornerClip := FHiZViewProjMatrix * Vector4(
+        IfThen((I and 1) <> 0, BoxMax.X, BoxMin.X),
+        IfThen((I and 2) <> 0, BoxMax.Y, BoxMin.Y),
+        IfThen((I and 4) <> 0, BoxMax.Z, BoxMin.Z),
+        1.0);
+      if CornerClip.W <= 0.0001 then
+      begin
+        AllCornersInFront := False;
+        Break;
+      end;
+      InvW := 1.0 / CornerClip.W;
+      U := (CornerClip.X * InvW) * 0.5 + 0.5;
+      V := (CornerClip.Y * InvW) * 0.5 + 0.5;
+      ZNdc := CornerClip.Z * InvW;
+      Z01 := EnsureRange(ZNdc * 0.5 + 0.5, 0.0, 1.0);
+      UMin := Min(UMin, U);
+      UMax := Max(UMax, U);
+      VMin := Min(VMin, V);
+      VMax := Max(VMax, V);
+      ZNear01 := Min(ZNear01, Z01);
+    end;
+
+    if AllCornersInFront and (UMax >= 0.0) and (UMin <= 1.0) and (VMax >= 0.0) and (VMin <= 1.0) then
+    begin
+      UMin := EnsureRange(UMin, 0.0, 1.0);
+      UMax := EnsureRange(UMax, 0.0, 1.0);
+      VMin := EnsureRange(VMin, 0.0, 1.0);
+      VMax := EnsureRange(VMax, 0.0, 1.0);
+
+      FootprintTexels := Max((UMax - UMin) * FHiZWidth, (VMax - VMin) * FHiZHeight);
+      if FootprintTexels <= 2.0 then
+        MipLevel := 0
+      else
+        MipLevel := Cardinal(EnsureRange(Ceil(Log2(FootprintTexels * 0.5)), 0, Integer(FHiZMipLevels) - 1));
+
+      MipW := FHiZMipWidths[MipLevel];
+      MipH := FHiZMipHeights[MipLevel];
+      X0 := Cardinal(EnsureRange(Trunc(UMin * MipW), 0, Integer(MipW) - 1));
+      X1 := Cardinal(EnsureRange(Trunc(UMax * MipW), 0, Integer(MipW) - 1));
+      Y0 := Cardinal(EnsureRange(Trunc(VMin * MipH), 0, Integer(MipH) - 1));
+      Y1 := Cardinal(EnsureRange(Trunc(VMax * MipH), 0, Integer(MipH) - 1));
+
+      D00 := SampleHiZMipMaxDepth(MipLevel, X0, Y0);
+      D10 := SampleHiZMipMaxDepth(MipLevel, X1, Y0);
+      D01 := SampleHiZMipMaxDepth(MipLevel, X0, Y1);
+      D11 := SampleHiZMipMaxDepth(MipLevel, X1, Y1);
+      OccluderMaxDepth := Max(Max(D00, D10), Max(D01, D11));
+
+      if ZNear01 > OccluderMaxDepth then
+      begin
+        AWasCulledByHiZ := True;
+        Exit(False);
+      end;
+    end;
+  end;
 end;
 
 function TCastleVulkanComputeCuller.DispatchCulling(const ACmd: TRHICommandList;
   const AInstanceCount: Cardinal; const ACompactDraws: Boolean): Cardinal;
 var
-  EffectiveCount, GroupCountX, VisibleCount, OutSlot, I: Cardinal;
+  EffectiveCount, GroupCountX, VisibleCount, HiZCulledCount, OutSlot, I: Cardinal;
   Inst: TCastleGpuCullingInstance;
-  Visible: Boolean;
+  Visible, WasHiZCulled: Boolean;
   CmdEntry: TRHIDrawIndexedIndirectCommand;
   MappedIndirect: PRHIDrawIndexedIndirectCommand;
   MappedVis: PCardinal;
@@ -5919,6 +6287,7 @@ begin
   begin
     FLastVisibleInstanceCount := 0;
     FLastCulledInstanceCount := 0;
+    FHiZCulledInstanceCount := 0;
     Exit(0);
   end;
 
@@ -5934,6 +6303,7 @@ begin
   { Populate deterministic indirect commands and visibility counters in mapped memory
     before recording the GPU compute dispatch and buffer barrier. }
   VisibleCount := 0;
+  HiZCulledCount := 0;
   MappedIndirect := nil;
   MappedVis := nil;
   if FIndirectOutputBuffer <> nil then
@@ -5949,7 +6319,9 @@ begin
     for I := 0 to EffectiveCount - 1 do
     begin
       Inst := FUploadedInstances[I];
-      Visible := IsInstanceVisibleOnCpu(Inst);
+      Visible := IsInstanceVisibleOnCpu(Inst, WasHiZCulled);
+      if WasHiZCulled then
+        Inc(HiZCulledCount);
       if MappedVis <> nil then
       begin
         if Visible then
@@ -6006,6 +6378,7 @@ begin
 
   FLastVisibleInstanceCount := VisibleCount;
   FLastCulledInstanceCount := EffectiveCount - VisibleCount;
+  FHiZCulledInstanceCount := HiZCulledCount;
 
   GroupCountX := (EffectiveCount + FWorkgroupSizeX - 1) div FWorkgroupSizeX;
   if ACmd <> nil then
