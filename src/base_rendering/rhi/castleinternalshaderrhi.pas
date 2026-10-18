@@ -88,13 +88,23 @@ type
     procedure SetProjectorMatrix(const Index: Integer; const Matrix: TMatrix4);
   end; // Total = 5136 bytes (5136 mod 16 = 0)
 
+  { Shading model selector for RHI forward/bindless material pipelines }
+  TCastleShadingModelRHI = (
+    smPBRMetallicRoughness = 0,
+    smPhong                = 1,
+    smUnlit                = 2
+  );
+
   { CPU-side mirror of Set 1, Binding 0 (Per-Material UBO - std140) }
   PCastleMaterialUniformBlock = ^TCastleMaterialUniformBlock;
   TCastleMaterialUniformBlock = packed record
     BaseColor: TVector4;            // PBR BaseColor / Phong DiffuseColor + Opacity
-    SpecularColor: TVector4;        // rgb = Specular, a = Shininess
+    SpecularColor: TVector4;        // rgb = Specular/F0, a = Shininess (or < 0 for Unlit)
     EmissiveColor: TVector4;        // rgb = Emissive, a = Metallic
     PBRParams: TVector4;            // x = Roughness, y = NormalScale, z = OcclusionStrength, w = AlphaCutoff
+    procedure InitDefaultPBR;
+    procedure InitDefaultPhong;
+    procedure InitDefaultUnlit;
   end;
 
   { CPU-side mirror of a Bindless Material Entry in Set 1, Binding 1 (std430 SSBO / std140 UBO).
@@ -230,6 +240,38 @@ type
       const AWorkgroupSizeX: Cardinal = 8;
       const AWorkgroupSizeY: Cardinal = 8): String;
 
+    { Generates glTF 2.0 / X3D PhysicalMaterial Cook-Torrance microfacet GGX BRDF functions:
+      DistributionGGX, GeometrySmithGGXCorrelated, FresnelSchlick, FresnelSchlickRoughness,
+      PerturbNormalCotangent (screen-space derivative TBN), PerturbNormalTBN,
+      EvaluateDirectCookTorranceGGX, and EvaluateIBLCookTorranceGGX. }
+    function GeneratePBRFunctions: String;
+
+    { Generates a complete GLSL 450 3D vertex shader supporting optional GPU linear-blend
+      skinning (Set 2 CastleSkinningBlock) and tangent-space basis (castle_tangent_to_eye_space). }
+    function GenerateDefault3DVertexShader(
+      const HasSkinning: Boolean = False;
+      const HasTangents: Boolean = False): String;
+
+    { Generates a complete GLSL 450 3D fragment shader supporting Cook-Torrance GGX PBR,
+      Phong, and Unlit shading models, multi-texture sampling (BaseColor, Normal,
+      MetallicRoughness, Emissive, Occlusion), normal mapping, alpha-cutoff discard,
+      multi-light evaluation, and Split-Sum IBL ambient lighting. }
+    function GenerateDefault3DFragmentShader(
+      const HasBaseColorTex: Boolean = False;
+      const HasNormalTex: Boolean = False;
+      const HasMetallicRoughnessTex: Boolean = False;
+      const HasEmissiveTex: Boolean = False;
+      const HasOcclusionTex: Boolean = False;
+      const HasIBL: Boolean = False;
+      const UseAlphaTest: Boolean = False): String;
+
+    { Generates a complete GLSL 450 compute shader that precomputes the 2D Split-Sum GGX
+      BRDF Integration LUT (NdotV x Roughness -> Scale, Bias) using Van der Corput
+      Hammersley quasi-Monte Carlo importance sampling. }
+    function GenerateIBLBrdfLutComputeShader(
+      const AWorkgroupSizeX: Cardinal = 8;
+      const AWorkgroupSizeY: Cardinal = 8): String;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -289,6 +331,32 @@ procedure TCastleLightsUniformBlock.SetProjectorMatrix(const Index: Integer;
 begin
   if (Index >= 0) and (Index < Integer(Count)) then
     Lights[Index].ProjectorMatrix := Matrix;
+end;
+
+{ TCastleMaterialUniformBlock }
+
+procedure TCastleMaterialUniformBlock.InitDefaultPBR;
+begin
+  BaseColor := Vector4(1.0, 1.0, 1.0, 1.0);
+  SpecularColor := Vector4(0.04, 0.04, 0.04, 0.0); // a = 0.0 -> PBR Metallic-Roughness
+  EmissiveColor := Vector4(0.0, 0.0, 0.0, 0.0);    // a = 0.0 -> Metallic = 0
+  PBRParams := Vector4(1.0, 1.0, 1.0, 0.0);        // Roughness=1, NormalScale=1, OcclusionStrength=1, AlphaCutoff=0
+end;
+
+procedure TCastleMaterialUniformBlock.InitDefaultPhong;
+begin
+  BaseColor := Vector4(0.8, 0.8, 0.8, 1.0);
+  SpecularColor := Vector4(0.0, 0.0, 0.0, 25.6);   // a > 0.0 -> Phong shininess (0.2 * 128)
+  EmissiveColor := Vector4(0.0, 0.0, 0.0, 0.0);
+  PBRParams := Vector4(0.5, 1.0, 1.0, 0.0);
+end;
+
+procedure TCastleMaterialUniformBlock.InitDefaultUnlit;
+begin
+  BaseColor := Vector4(1.0, 1.0, 1.0, 1.0);
+  SpecularColor := Vector4(0.0, 0.0, 0.0, -1.0);   // a < 0.0 -> Unlit shading model
+  EmissiveColor := Vector4(0.0, 0.0, 0.0, 0.0);
+  PBRParams := Vector4(1.0, 1.0, 1.0, 0.0);
 end;
 
 { TCastleShaderGeneratorRHI }
@@ -429,12 +497,17 @@ begin
     '#define castle_MaterialEmissive CastleMaterial.u_EmissiveColor.rgb' + NL +
     '#define castle_MaterialMetallic CastleMaterial.u_EmissiveColor.a' + NL +
     '#define castle_MaterialRoughness CastleMaterial.u_PBRParams.x' + NL +
+    '#define castle_MaterialNormalScale CastleMaterial.u_PBRParams.y' + NL +
+    '#define castle_MaterialOcclusionStrength CastleMaterial.u_PBRParams.z' + NL +
     '#define castle_AlphaCutoff CastleMaterial.u_PBRParams.w' + NL +
     NL +
     'CASTLE_SAMPLER(1, 1) uniform sampler2D castle_base_color_texture;' + NL +
     'CASTLE_SAMPLER(1, 2) uniform sampler2D castle_normal_texture;' + NL +
     'CASTLE_SAMPLER(1, 3) uniform sampler2D castle_metallic_roughness_texture;' + NL +
     'CASTLE_SAMPLER(1, 4) uniform sampler2D castle_emissive_texture;' + NL +
+    'CASTLE_SAMPLER(1, 5) uniform sampler2D castle_occlusion_texture;' + NL +
+    'CASTLE_SAMPLER(1, 6) uniform sampler2D castle_brdf_lut_texture;' + NL +
+    'CASTLE_SAMPLER(1, 7) uniform samplerCube castle_env_specular_texture;' + NL +
     NL +
     '/* --- Set 2: Per-Object / Skinning Uniforms --- */' + NL +
     'CASTLE_UBO(2, 0) uniform CastleSkinningBlock {' + NL +
@@ -1060,6 +1133,344 @@ begin
     '    maxDepth = max(maxDepth, max(d02, d12));' + NL +
     '  }' + NL +
     '  imageStore(u_DstDepthMip, ivec2(dstCoord), vec4(maxDepth, 0.0, 0.0, 1.0));' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GeneratePBRFunctions: String;
+begin
+  Result :=
+    '/* --- glTF 2.0 / X3D PhysicalMaterial Cook-Torrance Microfacet GGX BRDF --- */' + NL +
+    'const float CASTLE_PI = 3.14159265358979323846;' + NL +
+    NL +
+    'float DistributionGGX(float NdotH, float roughness) {' + NL +
+    '  float alpha = max(roughness * roughness, 0.002025);' + NL +
+    '  float alpha2 = alpha * alpha;' + NL +
+    '  float denom = (NdotH * NdotH) * (alpha2 - 1.0) + 1.0;' + NL +
+    '  return alpha2 / max(CASTLE_PI * denom * denom, 1e-7);' + NL +
+    '}' + NL +
+    NL +
+    'float GeometrySmithGGXCorrelated(float NdotV, float NdotL, float roughness) {' + NL +
+    '  float alpha = max(roughness * roughness, 0.002025);' + NL +
+    '  float alpha2 = alpha * alpha;' + NL +
+    '  float ggxV = NdotL * sqrt(max(NdotV * NdotV * (1.0 - alpha2) + alpha2, 1e-7));' + NL +
+    '  float ggxL = NdotV * sqrt(max(NdotL * NdotL * (1.0 - alpha2) + alpha2, 1e-7));' + NL +
+    '  return 0.5 / max(ggxV + ggxL, 1e-5);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 FresnelSchlick(float cosTheta, vec3 F0) {' + NL +
+    '  float clamped = clamp(1.0 - cosTheta, 0.0, 1.0);' + NL +
+    '  float c2 = clamped * clamped;' + NL +
+    '  return F0 + (1.0 - F0) * (c2 * c2 * clamped);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 FresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {' + NL +
+    '  float clamped = clamp(1.0 - cosTheta, 0.0, 1.0);' + NL +
+    '  float c2 = clamped * clamped;' + NL +
+    '  return F0 + (max(vec3(1.0 - roughness), F0) - F0) * (c2 * c2 * clamped);' + NL +
+    '}' + NL +
+    NL +
+    '/* Screen-space derivative cotangent-frame TBN normal mapping (Christian Schuler) */' + NL +
+    'vec3 PerturbNormalCotangent(vec3 N, vec3 V, vec2 texCoord, vec3 tangentNormal, float normalScale) {' + NL +
+    '  vec3 dp1 = dFdx(-V);' + NL +
+    '  vec3 dp2 = dFdy(-V);' + NL +
+    '  vec2 duv1 = dFdx(texCoord);' + NL +
+    '  vec2 duv2 = dFdy(texCoord);' + NL +
+    '  vec3 dp2perp = cross(dp2, N);' + NL +
+    '  vec3 dp1perp = cross(N, dp1);' + NL +
+    '  vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;' + NL +
+    '  vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;' + NL +
+    '  float invmax = inversesqrt(max(dot(T, T), dot(B, B)) + 1e-7);' + NL +
+    '  mat3 TBN = mat3(T * invmax, B * invmax, N);' + NL +
+    '  vec3 scaledNormal = normalize(tangentNormal * vec3(normalScale, normalScale, 1.0));' + NL +
+    '  return normalize(TBN * scaledNormal);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 PerturbNormalTBN(mat3 TBN, vec3 tangentNormal, float normalScale) {' + NL +
+    '  vec3 scaledNormal = normalize(tangentNormal * vec3(normalScale, normalScale, 1.0));' + NL +
+    '  return normalize(TBN * scaledNormal);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 EvaluateDirectCookTorranceGGX(vec3 N, vec3 V, vec3 L, vec3 lightRadiance,' + NL +
+    '  vec3 albedo, float metallic, float roughness) {' + NL +
+    '  vec3 H = normalize(V + L);' + NL +
+    '  float NdotL = max(dot(N, L), 0.0);' + NL +
+    '  float NdotV = max(dot(N, V), 1e-4);' + NL +
+    '  float NdotH = max(dot(N, H), 0.0);' + NL +
+    '  float HdotV = max(dot(H, V), 0.0);' + NL +
+    '  if (NdotL <= 0.0) return vec3(0.0);' + NL +
+    '  vec3 F0 = mix(vec3(0.04), albedo, metallic);' + NL +
+    '  float D = DistributionGGX(NdotH, roughness);' + NL +
+    '  float Vis = GeometrySmithGGXCorrelated(NdotV, NdotL, roughness);' + NL +
+    '  vec3 F = FresnelSchlick(HdotV, F0);' + NL +
+    '  vec3 specular = (D * Vis) * F;' + NL +
+    '  vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);' + NL +
+    '  vec3 diffuse = kD * albedo / CASTLE_PI;' + NL +
+    '  return (diffuse + specular) * lightRadiance * NdotL;' + NL +
+    '}' + NL +
+    NL +
+    'vec3 EvaluateIBLCookTorranceGGX(vec3 N, vec3 V, vec3 albedo, float metallic,' + NL +
+    '  float roughness, float ao, vec3 diffuseIrradiance, vec3 prefilteredEnvColor, vec2 brdfLut) {' + NL +
+    '  float NdotV = max(dot(N, V), 1e-4);' + NL +
+    '  vec3 F0 = mix(vec3(0.04), albedo, metallic);' + NL +
+    '  vec3 F = FresnelSchlickRoughness(NdotV, F0, roughness);' + NL +
+    '  vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);' + NL +
+    '  vec3 diffuse = diffuseIrradiance * albedo * kD;' + NL +
+    '  vec3 specular = prefilteredEnvColor * (F * brdfLut.x + brdfLut.y);' + NL +
+    '  return (diffuse + specular) * ao;' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateDefault3DVertexShader(
+  const HasSkinning: Boolean; const HasTangents: Boolean): String;
+var
+  Body: String;
+begin
+  Body :=
+    GeneratePreamble(ssVertex) +
+    'void main() {' + NL +
+    '  vec4 localPos = castle_Vertex;' + NL +
+    '  vec3 localNormal = castle_Normal;' + NL +
+    '  vec3 localTangent = castle_Tangent.xyz;' + NL;
+
+  if HasSkinning then
+    Body := Body +
+      '  if (CastleSkinning.u_JointCount > 0u) {' + NL +
+      '    mat4 skinMat =' + NL +
+      '      castle_Weights0.x * CastleSkinning.u_JointMatrices[castle_Joints0.x] +' + NL +
+      '      castle_Weights0.y * CastleSkinning.u_JointMatrices[castle_Joints0.y] +' + NL +
+      '      castle_Weights0.z * CastleSkinning.u_JointMatrices[castle_Joints0.z] +' + NL +
+      '      castle_Weights0.w * CastleSkinning.u_JointMatrices[castle_Joints0.w];' + NL +
+      '    localPos = skinMat * localPos;' + NL +
+      '    localNormal = mat3(skinMat) * localNormal;' + NL +
+      '    localTangent = mat3(skinMat) * localTangent;' + NL +
+      '  }' + NL;
+
+  Body := Body +
+    '  castle_vertex_eye = castle_ModelViewMatrix * localPos;' + NL +
+    '  castle_normal_eye = normalize(castle_NormalMatrix * localNormal);' + NL +
+    '  castle_tex_coord0 = castle_MultiTexCoord0;' + NL +
+    '  castle_tex_coord1 = castle_MultiTexCoord1;' + NL +
+    '  castle_color_per_vertex = castle_ColorPerVertex;' + NL;
+
+  if HasTangents then
+    Body := Body +
+      '  vec3 T = normalize(castle_NormalMatrix * localTangent);' + NL +
+      '  vec3 N = castle_normal_eye;' + NL +
+      '  T = normalize(T - dot(T, N) * N);' + NL +
+      '  vec3 B = cross(N, T) * castle_Tangent.w;' + NL +
+      '  castle_tangent_to_eye_space = mat3(T, B, N);' + NL
+  else
+    Body := Body +
+      '  castle_tangent_to_eye_space = mat3(1.0);' + NL;
+
+  Body := Body +
+    '  gl_Position = castle_ProjectionMatrix * castle_vertex_eye;' + NL +
+    '}' + NL;
+
+  Result := FinalizeVertexShaderSource(Body);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateDefault3DFragmentShader(
+  const HasBaseColorTex: Boolean;
+  const HasNormalTex: Boolean;
+  const HasMetallicRoughnessTex: Boolean;
+  const HasEmissiveTex: Boolean;
+  const HasOcclusionTex: Boolean;
+  const HasIBL: Boolean;
+  const UseAlphaTest: Boolean): String;
+begin
+  Result :=
+    GeneratePreamble(ssFragment) +
+    GeneratePBRFunctions + NL +
+    'void main() {' + NL +
+    '  vec4 baseColor = castle_MaterialBaseColor;' + NL;
+
+  if HasBaseColorTex then
+    Result := Result +
+      '  baseColor *= texture(castle_base_color_texture, castle_tex_coord0);' + NL;
+
+  if UseAlphaTest then
+    Result := Result +
+      '  if (baseColor.a < castle_AlphaCutoff) discard;' + NL;
+
+  Result := Result +
+    '  /* Unlit Material Early Out (SpecularColor.a < 0.0) */' + NL +
+    '  if (castle_MaterialShininess < 0.0) {' + NL +
+    '    vec3 unlitColor = baseColor.rgb + castle_MaterialEmissive;' + NL;
+  if HasEmissiveTex then
+    Result := Result +
+      '    unlitColor += texture(castle_emissive_texture, castle_tex_coord0).rgb;' + NL;
+  Result := Result +
+    '    castle_FragColor = vec4(unlitColor, baseColor.a);' + NL +
+    '    return;' + NL +
+    '  }' + NL +
+    NL +
+    '  float metallic = clamp(castle_MaterialMetallic, 0.0, 1.0);' + NL +
+    '  float roughness = clamp(castle_MaterialRoughness, 0.04, 1.0);' + NL;
+
+  if HasMetallicRoughnessTex then
+    Result := Result +
+      '  vec4 mrSample = texture(castle_metallic_roughness_texture, castle_tex_coord0);' + NL +
+      '  roughness = clamp(roughness * mrSample.g, 0.04, 1.0);' + NL +
+      '  metallic = clamp(metallic * mrSample.b, 0.0, 1.0);' + NL;
+
+  Result := Result +
+    '  float ao = 1.0;' + NL;
+  if HasOcclusionTex then
+    Result := Result +
+      '  float occSample = texture(castle_occlusion_texture, castle_tex_coord0).r;' + NL +
+      '  ao = mix(1.0, occSample, clamp(castle_MaterialOcclusionStrength, 0.0, 1.0));' + NL;
+
+  Result := Result +
+    '  vec3 N = normalize(castle_normal_eye);' + NL +
+    '  vec3 V = normalize(-castle_vertex_eye.xyz);' + NL;
+
+  if HasNormalTex then
+    Result := Result +
+      '  vec3 tangentNormal = texture(castle_normal_texture, castle_tex_coord0).xyz * 2.0 - 1.0;' + NL +
+      '  N = PerturbNormalCotangent(N, -castle_vertex_eye.xyz, castle_tex_coord0, tangentNormal, castle_MaterialNormalScale);' + NL;
+
+  Result := Result +
+    '  vec3 Lo = vec3(0.0);' + NL +
+    '  uint lightCount = min(castle_LightCount, 32u);' + NL +
+    '  for (uint i = 0u; i < lightCount; ++i) {' + NL +
+    '    CastleLightData light = CastleLights.u_Lights[i];' + NL +
+    '    vec3 L;' + NL +
+    '    float attenuation = 1.0;' + NL +
+    '    if (light.Position.w == 0.0) {' + NL +
+    '      L = normalize(light.Position.xyz);' + NL +
+    '    } else {' + NL +
+    '      vec3 toLight = light.Position.xyz - castle_vertex_eye.xyz;' + NL +
+    '      float dist = length(toLight);' + NL +
+    '      L = toLight / max(dist, 1e-5);' + NL +
+    '      float attenDenom = light.Attenuation.x + light.Attenuation.y * dist + light.Attenuation.z * dist * dist;' + NL +
+    '      if (attenDenom > 0.0) attenuation = 1.0 / attenDenom;' + NL +
+    '      if (light.Color.w > 0.0 && dist > light.Color.w) attenuation = 0.0;' + NL +
+    '      if (light.Position.w > 1.5 && light.SpotDirection.w >= 0.0) {' + NL +
+    '        float cosDir = dot(-L, normalize(light.SpotDirection.xyz));' + NL +
+    '        if (cosDir < light.SpotDirection.w) attenuation = 0.0;' + NL +
+    '      }' + NL +
+    '    }' + NL +
+    '    vec3 radiance = light.Color.rgb * attenuation;' + NL +
+    '    Lo += EvaluateDirectCookTorranceGGX(N, V, L, radiance, baseColor.rgb, metallic, roughness);' + NL +
+    '    Lo += light.AmbientColor.rgb * baseColor.rgb * ao;' + NL +
+    '  }' + NL;
+
+  if HasIBL then
+    Result := Result +
+      '  float NdotV = max(dot(N, V), 1e-4);' + NL +
+      '  vec3 R = reflect(-V, N);' + NL +
+      '  vec3 worldR = mat3(castle_ViewMatrixInverse) * R;' + NL +
+      '  vec3 prefilteredEnv = textureLod(castle_env_specular_texture, worldR, roughness * 4.0).rgb;' + NL +
+      '  vec2 brdfLut = texture(castle_brdf_lut_texture, vec2(NdotV, roughness)).rg;' + NL +
+      '  vec3 diffuseIrradiance = textureLod(castle_env_specular_texture, mat3(castle_ViewMatrixInverse) * N, 4.0).rgb;' + NL +
+      '  Lo += EvaluateIBLCookTorranceGGX(N, V, baseColor.rgb, metallic, roughness, ao, diffuseIrradiance, prefilteredEnv, brdfLut);' + NL;
+
+  Result := Result +
+    '  vec3 emissive = castle_MaterialEmissive;' + NL;
+  if HasEmissiveTex then
+    Result := Result +
+      '  emissive += texture(castle_emissive_texture, castle_tex_coord0).rgb;' + NL;
+
+  Result := Result +
+    '  castle_FragColor = vec4(Lo + emissive, baseColor.a);' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateIBLBrdfLutComputeShader(
+  const AWorkgroupSizeX: Cardinal;
+  const AWorkgroupSizeY: Cardinal): String;
+var
+  LocalSizeX, LocalSizeY: Cardinal;
+begin
+  if AWorkgroupSizeX = 0 then
+    LocalSizeX := 8
+  else
+    LocalSizeX := AWorkgroupSizeX;
+  if AWorkgroupSizeY = 0 then
+    LocalSizeY := 8
+  else
+    LocalSizeY := AWorkgroupSizeY;
+
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;', [LocalSizeX, LocalSizeY]) + NL +
+    NL +
+    'layout(set = 0, binding = 0, rgba16f) uniform writeonly image2D u_BrdfLutImage;' + NL +
+    NL +
+    'layout(push_constant) uniform CastleIBLBrdfLutPushConstants {' + NL +
+    '  uvec2 u_LutSize;' + NL +
+    '  uint  u_SampleCount;' + NL +
+    '  uint  u_Reserved;' + NL +
+    '} pc;' + NL +
+    NL +
+    'const float CASTLE_PI = 3.14159265358979323846;' + NL +
+    NL +
+    'float RadicalInverse_VdC(uint bits) {' + NL +
+    '  bits = (bits << 16u) | (bits >> 16u);' + NL +
+    '  bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);' + NL +
+    '  bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);' + NL +
+    '  bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);' + NL +
+    '  bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);' + NL +
+    '  return float(bits) * 2.3283064365386963e-10;' + NL +
+    '}' + NL +
+    NL +
+    'vec2 Hammersley(uint i, uint N) {' + NL +
+    '  return vec2(float(i) / float(max(N, 1u)), RadicalInverse_VdC(i));' + NL +
+    '}' + NL +
+    NL +
+    'vec3 ImportanceSampleGGX(vec2 Xi, vec3 N, float roughness) {' + NL +
+    '  float a = roughness * roughness;' + NL +
+    '  float phi = 2.0 * CASTLE_PI * Xi.x;' + NL +
+    '  float cosTheta = sqrt((1.0 - Xi.y) / (1.0 + (a * a - 1.0) * Xi.y));' + NL +
+    '  float sinTheta = sqrt(max(1.0 - cosTheta * cosTheta, 0.0));' + NL +
+    '  vec3 H = vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);' + NL +
+    '  vec3 up = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);' + NL +
+    '  vec3 tangent = normalize(cross(up, N));' + NL +
+    '  vec3 bitangent = cross(N, tangent);' + NL +
+    '  return normalize(tangent * H.x + bitangent * H.y + N * H.z);' + NL +
+    '}' + NL +
+    NL +
+    'float GeometrySchlickGGX_IBL(float NdotV, float roughness) {' + NL +
+    '  float a = roughness;' + NL +
+    '  float k = (a * a) * 0.5;' + NL +
+    '  return NdotV / max(NdotV * (1.0 - k) + k, 1e-5);' + NL +
+    '}' + NL +
+    NL +
+    'float GeometrySmith_IBL(float NdotV, float NdotL, float roughness) {' + NL +
+    '  return GeometrySchlickGGX_IBL(NdotV, roughness) * GeometrySchlickGGX_IBL(NdotL, roughness);' + NL +
+    '}' + NL +
+    NL +
+    'vec2 IntegrateBRDF(float NdotV, float roughness, uint sampleCount) {' + NL +
+    '  vec3 V = vec3(sqrt(max(1.0 - NdotV * NdotV, 0.0)), 0.0, NdotV);' + NL +
+    '  float A = 0.0;' + NL +
+    '  float B = 0.0;' + NL +
+    '  vec3 N = vec3(0.0, 0.0, 1.0);' + NL +
+    '  for (uint i = 0u; i < sampleCount; ++i) {' + NL +
+    '    vec2 Xi = Hammersley(i, sampleCount);' + NL +
+    '    vec3 H = ImportanceSampleGGX(Xi, N, roughness);' + NL +
+    '    vec3 L = normalize(2.0 * dot(V, H) * H - V);' + NL +
+    '    float NdotL = max(L.z, 0.0);' + NL +
+    '    float NdotH = max(H.z, 0.0);' + NL +
+    '    float VdotH = max(dot(V, H), 0.0);' + NL +
+    '    if (NdotL > 0.0) {' + NL +
+    '      float G = GeometrySmith_IBL(NdotV, NdotL, roughness);' + NL +
+    '      float G_Vis = (G * VdotH) / max(NdotH * NdotV, 1e-5);' + NL +
+    '      float Fc = pow(1.0 - VdotH, 5.0);' + NL +
+    '      A += (1.0 - Fc) * G_Vis;' + NL +
+    '      B += Fc * G_Vis;' + NL +
+    '    }' + NL +
+    '  }' + NL +
+    '  return vec2(A, B) / float(max(sampleCount, 1u));' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  uvec2 coord = gl_GlobalInvocationID.xy;' + NL +
+    '  if (coord.x >= pc.u_LutSize.x || coord.y >= pc.u_LutSize.y) return;' + NL +
+    '  float NdotV = (float(coord.x) + 0.5) / float(max(pc.u_LutSize.x, 1u));' + NL +
+    '  float roughness = max((float(coord.y) + 0.5) / float(max(pc.u_LutSize.y, 1u)), 0.04);' + NL +
+    '  vec2 res = IntegrateBRDF(NdotV, roughness, max(pc.u_SampleCount, 16u));' + NL +
+    '  imageStore(u_BrdfLutImage, ivec2(coord), vec4(res.x, res.y, 0.0, 1.0));' + NL +
     '}' + NL;
 end;
 

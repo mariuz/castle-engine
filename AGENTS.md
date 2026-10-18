@@ -37,7 +37,7 @@ All roadmap milestones and design decisions are tracked in [`PLAN.md`](file:///e
 | [`src/base_rendering/vulkan/castleinternalrhi_vulkan.pas`](file:///e:/Work/castle-engine/src/base_rendering/vulkan/castleinternalrhi_vulkan.pas) | Full Vulkan RHI implementation: `TVulkanRHIDevice`, `TVulkanRHICommandList`, `TVulkanDescriptorPoolAllocator` (growable + per-frame transient descriptor pools), `TCastleVulkanStagingUploader` (async staging upload ring buffer + dedicated DMA transfer queue), `TCastleVulkanBindlessTextureManager` (bindless texture & sampler indexing), hardware MSAA & single-pass attachment resolve, `TVulkanRHIComputePipeline` (`vkCmdDispatch` / `vkCmdDispatchIndirect`), `VK_EXT_extended_dynamic_state` & `VK_KHR_synchronization2` + `TCastleVulkanTimelineSemaphore`, `TVulkanRHIQueryPool` & `TCastleVulkanTimestampProfiler`, `VK_KHR_dynamic_rendering` with Vulkan 1.1/1.2 `VkRenderPass`/`VkFramebuffer` fallback, `VK_EXT_graphics_pipeline_library` 4-part fast-link PSO caching, cross-vendor format negotiation (`NegotiateOptimalPixelFormat`), and fence-synchronized deferred resource deletion (`FlushDeferredDeletions`). |
 | [`src/base_rendering/rhi/castlerendercontext_rhi.pas`](file:///e:/Work/castle-engine/src/base_rendering/rhi/castlerendercontext_rhi.pas) | Bridges CGE's `TRenderContext`, `TCastleViewport`, `TDrawableImage`, and `TCastleScene` rendering to `TRHIDevice`. |
 | [`src/base_rendering/rhi/castleshader_rhi.pas`](file:///e:/Work/castle-engine/src/base_rendering/rhi/castleshader_rhi.pas) | Generates Vulkan GLSL `#version 450` shaders (`Set 0` frame/light/skinning UBOs, `Set 1` material textures & bindless texture array preamble `GenerateBindlessPreamble`, `Set 2` custom `Effect` uniforms, Push Constants) and auto-upgrades legacy OpenGL built-ins (`UpgradeLegacyGLSLBuiltIns`). |
-| [`tests/code/testcases/testcastlevulkanrhi.pas`](file:///e:/Work/castle-engine/tests/code/testcases/testcastlevulkanrhi.pas) | `TTestCastleVulkanRHI`: 66 unit tests covering all Vulkan RHI subsystems in both headless simulation and hardware modes. |
+| [`tests/code/testcases/testcastlevulkanrhi.pas`](file:///e:/Work/castle-engine/tests/code/testcases/testcastlevulkanrhi.pas) | `TTestCastleVulkanRHI`: 69 unit tests covering all Vulkan RHI subsystems in both headless simulation and hardware modes. |
 
 ---
 
@@ -47,7 +47,7 @@ All roadmap milestones and design decisions are tracked in [`PLAN.md`](file:///e
 In WSL, GTK3 development headers are not installed, so `castle_tester_standalone` must be compiled with `-dCASTLE_WINDOW_XLIB` and linked against `/tmp/xlibs` (where unversioned `libXmu.so` and `libXxf86vm.so` symlinks are created):
 
 ```bash
-wsl bash -c "mkdir -p /tmp/xlibs && ln -sf /usr/lib/x86_64-linux-gnu/libXmu.so.6 /tmp/xlibs/libXmu.so && ln -sf /usr/lib/x86_64-linux-gnu/libXxf86vm.so.1 /tmp/xlibs/libXxf86vm.so && fpc -Mobjfpc -Sh -Ci -Co -Cr -gl -dCASTLE_WINDOW_XLIB -Fl/tmp/xlibs @castle-fpc.cfg -Futools/common-code -Fitools/common-code -Futests/code/tester-castle -Futests/code/testcases -Fitests/code/testcases tests/castle_tester_standalone.dpr && ./tests/castle_tester_standalone --console --filter=TTestCastleVulkanRHI*"
+wsl bash -c "mkdir -p /tmp/xlibs && ln -sf /usr/lib/x86_64-linux-gnu/libXmu.so.6 /tmp/xlibs/libXmu.so && ln -sf /usr/lib/x86_64-linux-gnu/libXxf86vm.so.1 /tmp/xlibs/libXxf86vm.so && fpc -Mobjfpc -Sh -Ci -Co -Cr -gl -dCASTLE_WINDOW_XLIB -Fl/tmp/xlibs @castle-fpc.cfg -Futools/common-code -Fitools/common-code -Futests/common-code -Fitests/common-code -Futests/code/tester-castle -Futests/code/testcases -Fitests/code/testcases tests/castle_tester_standalone.dpr && ./tests/castle_tester_standalone --console --filter=TTestCastleVulkanRHI*"
 ```
 
 ### 3.2 Regenerating `castleinternalvulkan.pas` from Khronos `vk.xml`
@@ -77,8 +77,9 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–11**: **COMPLETED** (100%).
-- **Phase 12 (RenderContext RHI State Sync, Screen/Depth Readback & Renderer Information Report)**: **COMPLETED** (100%, 66 unit tests passing):
-  - [x] **12.1. `TRenderContext` & `TScissor` Dynamic RHI State Synchronization (`CastleRenderContext`)** — Completed & tested (`TestRenderContextAndScissorRHI`).
-  - [x] **12.2. Screen & Depth Buffer Readback RHI Backend (`SaveScreen_NoFlush`, `SaveScreenToGL_NoFlush`, `SaveScreenDepth_NoFlush`)** — Completed & tested (`TestSaveScreenAndDepthReadbackRHI`).
-  - [x] **12.3. Renderer Capabilities & System Information Report (`GLInformationString`, `GLInformationStringSummary`, `TRHIDevice.GetInformationString`)** — Completed & tested (`TestGLInformationStringRHI`).
+- **Phases 1–12**: **COMPLETED** (100%).
+- **Phase 13 (Full Cook-Torrance GGX PBR Material Pipeline, Normal Mapping & Compute IBL Prefiltering)**: **COMPLETED** (100%, 69 unit tests passing):
+  - [x] **13.1. Full Cook-Torrance GGX PBR & Tangent-Space Normal Mapping in `TCastleShaderGeneratorRHI` (`CastleInternalShaderRHI`)** — Completed & tested (`TestCookTorranceGGXPBRShaderGenerationRHI`).
+  - [x] **13.2. Compute Split-Sum BRDF Integration LUT & Prefiltered IBL Environment Generator (`TCastleVulkanIBLGenerator` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestComputeIBLBrdfLutAndEnvironmentPrefilterRHI`).
+  - [x] **13.3. `TX3DRendererShape` PBR Material & Texture Extraction and RHI Draw Dispatch (`CastleInternalRenderer`)** — Completed & tested (`TestShapePBRMaterialExtractionAndDispatchRHI`).
+- **Phases 14–15**: Planned (Clustered Forward+ Compute Light Culling & Shadow Atlas; Declarative Render Graph & HDR Post-Processing Stack).

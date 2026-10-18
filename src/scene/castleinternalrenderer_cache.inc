@@ -916,7 +916,7 @@ begin
   TRenderer.GetFog(Shape.Fog, RenderOptions, FogEnabled, FogVolumetric,
     FogVolumetricDirection, FogVolumetricVisibilityStart);
 
-  DisableSharedCache := TGLShape(Shape).DisableSharedCache;
+  DisableSharedCache := (Shape is TGLShape) and TGLShape(Shape).DisableSharedCache;
   Caches := ShapeCaches[DisableSharedCache];
 
   if not DisableSharedCache then
@@ -964,7 +964,7 @@ var
   DisableSharedCache: Boolean;
   Caches: TShapeCacheList;
 begin
-  DisableSharedCache := TGLShape(Shape).DisableSharedCache;
+  DisableSharedCache := (Shape is TGLShape) and TGLShape(Shape).DisableSharedCache;
   Caches := ShapeCaches[DisableSharedCache];
   I := Caches.IndexOf(ShapeCache);
 

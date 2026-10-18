@@ -72,6 +72,35 @@
     procedure PrepareRHIBuffers(const ARenderOptions: TCastleRenderOptions;
       const ATexCoordsNeeded: Cardinal = 0);
 
+    { Extracts X3D/glTF material parameters (TPhysicalMaterialNode, TMaterialNode,
+      TUnlitMaterialNode, and Appearance.AlphaMode / AlphaCutoff) into a 64-byte std140
+      TCastleMaterialUniformBlock (Set 1, Binding 0) and identifies the shading model.
+      Returns True if an explicit material node was present on the shape. }
+    function ExtractRHIMaterialBlock(out AMatBlock: TCastleMaterialUniformBlock;
+      out AShadingModel: TCastleShadingModelRHI): Boolean;
+
+    { Resolves the shape's prepared PBR/Phong/Unlit texture nodes (BaseColor/Diffuse, Normal,
+      MetallicRoughness, Emissive, Occlusion) to their underlying TRHITexture handles.
+      Returns the number of non-nil TRHITexture handles extracted. }
+    function ExtractRHIMaterialTextures(
+      out ABaseColorTex, ANormalTex, AMetallicRoughnessTex,
+          AEmissiveTex, AOcclusionTex: TRHITexture): Cardinal;
+
+    { Builds an 80-byte std430 TCastleBindlessMaterialEntry combining extracted PBR/Phong/Unlit
+      material factors with 32-bit bindless texture array indices into castle_BindlessTextures[]. }
+    function BuildRHIBindlessMaterialEntry(
+      const ABaseColorTexIdx: Cardinal = 0;
+      const ANormalTexIdx: Cardinal = 0;
+      const AMetallicRoughnessTexIdx: Cardinal = 0;
+      const AEmissiveTexIdx: Cardinal = 0): TCastleBindlessMaterialEntry;
+
+    { Records per-draw push constants (ModelViewMatrix, NormalMatrix, MaterialIndex, Skinning flag),
+      binds the shape's RHI Coordinate/Attribute/Index buffers, and records DrawIndexed / Draw
+      commands into ACmd. Returns the number of draw calls recorded. }
+    function RecordRHIDraw(const ACmd: TRHICommandList;
+      const AModelView: TMatrix4;
+      const AMaterialIndex: Cardinal = 0): Cardinal;
+
     destructor Destroy; override;
   end;
 {$endif read_interface}
@@ -269,6 +298,273 @@ begin
         LoadArraysToVbo;
       end;
     end;
+  end;
+end;
+
+function TX3DRendererShape.ExtractRHIMaterialBlock(
+  out AMatBlock: TCastleMaterialUniformBlock;
+  out AShadingModel: TCastleShadingModelRHI): Boolean;
+var
+  ShapeState: TX3DGraphTraverseState;
+  App: TAppearanceNode;
+  MatNode: TAbstractMaterialNode;
+  PhysMat: TPhysicalMaterialNode;
+  PhongMat: TMaterialNode;
+  UnlitMat: TUnlitMaterialNode;
+  AlphaCutoff, Roughness: Single;
+begin
+  Result := False;
+  AShadingModel := smUnlit;
+  AMatBlock.InitDefaultUnlit;
+  AlphaCutoff := 0.0;
+
+  ShapeState := OriginalState;
+  if ShapeState = nil then
+    ShapeState := State;
+  if (ShapeState = nil) or (ShapeState.ShapeNode = nil) then
+    Exit;
+
+  App := ShapeState.ShapeNode.Appearance;
+  if App = nil then
+    Exit;
+
+  if App.AlphaMode = amMask then
+    AlphaCutoff := EnsureRange(App.AlphaCutoff, 0.0, 1.0)
+  else if (App.AlphaMode = amAuto) and (AlphaChannel = acTest) then
+    AlphaCutoff := EnsureRange(App.AlphaCutoff, 0.0, 1.0);
+
+  MatNode := App.Material;
+  if MatNode is TPhysicalMaterialNode then
+  begin
+    PhysMat := TPhysicalMaterialNode(MatNode);
+    Result := True;
+    AShadingModel := smPBRMetallicRoughness;
+    AMatBlock.BaseColor := Vector4(
+      PhysMat.BaseColor,
+      EnsureRange(1.0 - PhysMat.Transparency, 0.0, 1.0));
+    AMatBlock.SpecularColor := Vector4(0.04, 0.04, 0.04, 0.0); // a = 0.0 -> PBR Metallic-Roughness
+    AMatBlock.EmissiveColor := Vector4(
+      PhysMat.EmissiveColor,
+      EnsureRange(PhysMat.Metallic, 0.0, 1.0));
+    AMatBlock.PBRParams := Vector4(
+      EnsureRange(PhysMat.Roughness, 0.04, 1.0),
+      Max(0.0, PhysMat.NormalScale),
+      EnsureRange(PhysMat.OcclusionStrength, 0.0, 1.0),
+      AlphaCutoff);
+  end else
+  if MatNode is TMaterialNode then
+  begin
+    PhongMat := TMaterialNode(MatNode);
+    Result := True;
+    AShadingModel := smPhong;
+    Roughness := EnsureRange(1.0 - Sqrt(EnsureRange(PhongMat.Shininess, 0.0, 1.0)), 0.04, 1.0);
+    AMatBlock.BaseColor := Vector4(
+      PhongMat.DiffuseColor,
+      EnsureRange(1.0 - PhongMat.Transparency, 0.0, 1.0));
+    AMatBlock.SpecularColor := Vector4(
+      PhongMat.SpecularColor,
+      Max(1.0, PhongMat.ShininessExp)); // a > 0.0 -> Phong shininess
+    AMatBlock.EmissiveColor := Vector4(PhongMat.EmissiveColor, 0.0);
+    AMatBlock.PBRParams := Vector4(
+      Roughness,
+      Max(0.0, PhongMat.NormalScale),
+      1.0,
+      AlphaCutoff);
+  end else
+  if MatNode is TUnlitMaterialNode then
+  begin
+    UnlitMat := TUnlitMaterialNode(MatNode);
+    Result := True;
+    AShadingModel := smUnlit;
+    AMatBlock.BaseColor := Vector4(
+      UnlitMat.EmissiveColor,
+      EnsureRange(1.0 - UnlitMat.Transparency, 0.0, 1.0));
+    AMatBlock.SpecularColor := Vector4(0.0, 0.0, 0.0, -1.0); // a < 0.0 -> Unlit
+    AMatBlock.EmissiveColor := Vector4(0.0, 0.0, 0.0, 0.0);
+    AMatBlock.PBRParams := Vector4(
+      1.0,
+      Max(0.0, UnlitMat.NormalScale),
+      1.0,
+      AlphaCutoff);
+  end else
+    AMatBlock.PBRParams.W := AlphaCutoff;
+end;
+
+function TX3DRendererShape.ExtractRHIMaterialTextures(
+  out ABaseColorTex, ANormalTex, AMetallicRoughnessTex,
+      AEmissiveTex, AOcclusionTex: TRHITexture): Cardinal;
+
+  function ResolveNodeRHITexture(const ANode: TAbstractTextureNode): TRHITexture;
+  var
+    Res: TTextureResource;
+  begin
+    Result := nil;
+    if ANode = nil then Exit;
+    Res := TTextureResources.Get(ANode);
+    if Res is TImageTextureResource then
+      Result := TImageTextureResource(Res).RHITexture
+    else if Res is TMovieTextureResource then
+      Result := TMovieTextureResource(Res).RHITexture;
+  end;
+
+var
+  ShapeState: TX3DGraphTraverseState;
+  App: TAppearanceNode;
+  MatNode: TAbstractMaterialNode;
+  PhysMat: TPhysicalMaterialNode;
+  PhongMat: TMaterialNode;
+  UnlitMat: TUnlitMaterialNode;
+begin
+  Result := 0;
+  ABaseColorTex := nil;
+  ANormalTex := nil;
+  AMetallicRoughnessTex := nil;
+  AEmissiveTex := nil;
+  AOcclusionTex := nil;
+
+  ShapeState := OriginalState;
+  if ShapeState = nil then
+    ShapeState := State;
+  if (ShapeState = nil) or (ShapeState.ShapeNode = nil) then
+    Exit;
+
+  App := ShapeState.ShapeNode.Appearance;
+  if App = nil then
+    Exit;
+
+  MatNode := App.Material;
+  if MatNode is TPhysicalMaterialNode then
+  begin
+    PhysMat := TPhysicalMaterialNode(MatNode);
+    ABaseColorTex := ResolveNodeRHITexture(PhysMat.BaseTexture);
+    ANormalTex := ResolveNodeRHITexture(PhysMat.NormalTexture);
+    AMetallicRoughnessTex := ResolveNodeRHITexture(PhysMat.MetallicRoughnessTexture);
+    AEmissiveTex := ResolveNodeRHITexture(PhysMat.EmissiveTexture);
+    AOcclusionTex := ResolveNodeRHITexture(PhysMat.OcclusionTexture);
+  end else
+  if MatNode is TMaterialNode then
+  begin
+    PhongMat := TMaterialNode(MatNode);
+    ABaseColorTex := ResolveNodeRHITexture(PhongMat.DiffuseTexture);
+    ANormalTex := ResolveNodeRHITexture(PhongMat.NormalTexture);
+    AEmissiveTex := ResolveNodeRHITexture(PhongMat.EmissiveTexture);
+  end else
+  if MatNode is TUnlitMaterialNode then
+  begin
+    UnlitMat := TUnlitMaterialNode(MatNode);
+    ABaseColorTex := ResolveNodeRHITexture(UnlitMat.EmissiveTexture);
+  end;
+
+  if ABaseColorTex = nil then
+    ABaseColorTex := ResolveNodeRHITexture(App.Texture);
+  if ANormalTex = nil then
+    ANormalTex := ResolveNodeRHITexture(App.NormalMap);
+
+  if ABaseColorTex <> nil then Inc(Result);
+  if ANormalTex <> nil then Inc(Result);
+  if AMetallicRoughnessTex <> nil then Inc(Result);
+  if AEmissiveTex <> nil then Inc(Result);
+  if AOcclusionTex <> nil then Inc(Result);
+end;
+
+function TX3DRendererShape.BuildRHIBindlessMaterialEntry(
+  const ABaseColorTexIdx: Cardinal;
+  const ANormalTexIdx: Cardinal;
+  const AMetallicRoughnessTexIdx: Cardinal;
+  const AEmissiveTexIdx: Cardinal): TCastleBindlessMaterialEntry;
+var
+  MatBlock: TCastleMaterialUniformBlock;
+  ShadingModel: TCastleShadingModelRHI;
+begin
+  ExtractRHIMaterialBlock(MatBlock, ShadingModel);
+  Result.BaseColor := MatBlock.BaseColor;
+  Result.SpecularColor := MatBlock.SpecularColor;
+  Result.EmissiveColor := MatBlock.EmissiveColor;
+  Result.PBRParams := MatBlock.PBRParams;
+  Result.BaseColorTexIndex := ABaseColorTexIdx;
+  Result.NormalTexIndex := ANormalTexIdx;
+  Result.MetallicRoughnessTexIndex := AMetallicRoughnessTexIdx;
+  Result.EmissiveTexIndex := AEmissiveTexIdx;
+end;
+
+function TX3DRendererShape.RecordRHIDraw(const ACmd: TRHICommandList;
+  const AModelView: TMatrix4;
+  const AMaterialIndex: Cardinal): Cardinal;
+var
+  PushConstants: TCastlePushConstantsBlock;
+  NormalMat: TMatrix3;
+  Arrays: TGeometryArrays;
+  First, I: Integer;
+begin
+  Result := 0;
+  if (ACmd = nil) or (Cache = nil) then
+    Exit;
+
+  PushConstants.ModelViewMatrix := AModelView;
+  NormalMat := ModelViewToNormalMatrix(AModelView);
+  PushConstants.NormalMatrixRow0 := Vector4(NormalMat.Rows[0], 0);
+  PushConstants.NormalMatrixRow1 := Vector4(NormalMat.Rows[1], 0);
+  PushConstants.NormalMatrixRow2 := Vector4(NormalMat.Rows[2], 0);
+  if Cache.RHIJointBuffer <> nil then
+    PushConstants.ObjectParams := Vector4(Single(AMaterialIndex), 1.0, 0.0, 0.0)
+  else
+    PushConstants.ObjectParams := Vector4(Single(AMaterialIndex), 0.0, 0.0, 0.0);
+  ACmd.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConstants), PushConstants);
+
+  if Cache.RHICoordinateBuffer <> nil then
+  begin
+    if Cache.RHIAttributeBuffer <> nil then
+      ACmd.BindVertexBuffers(0, [Cache.RHICoordinateBuffer, Cache.RHIAttributeBuffer], [0, 0])
+    else
+      ACmd.BindVertexBuffers(0, [Cache.RHICoordinateBuffer], [0]);
+  end;
+
+  Arrays := Cache.Arrays;
+  First := 0;
+  if (Arrays <> nil) and Arrays.HasIndexes then
+  begin
+    if Cache.RHIIndexBuffer <> nil then
+      ACmd.BindIndexBuffer(Cache.RHIIndexBuffer, 0, itUInt32);
+    if Arrays.Counts = nil then
+    begin
+      ACmd.DrawIndexed(Arrays.IndexesCount, 1, First, 0, 0);
+      Result := 1;
+    end else
+    begin
+      for I := 0 to Arrays.Counts.Count - 1 do
+      begin
+        ACmd.DrawIndexed(Arrays.Counts[I], 1, First, 0, 0);
+        First := First + Arrays.Counts[I];
+        Inc(Result);
+      end;
+    end;
+  end else
+  if Arrays <> nil then
+  begin
+    if Arrays.Counts = nil then
+    begin
+      ACmd.Draw(Arrays.Count, 1, First, 0);
+      Result := 1;
+    end else
+    begin
+      for I := 0 to Arrays.Counts.Count - 1 do
+      begin
+        ACmd.Draw(Arrays.Counts[I], 1, First, 0);
+        First := First + Arrays.Counts[I];
+        Inc(Result);
+      end;
+    end;
+  end else
+  if Cache.RHIIndexBuffer <> nil then
+  begin
+    ACmd.BindIndexBuffer(Cache.RHIIndexBuffer, 0, itUInt32);
+    ACmd.DrawIndexed(Cache.RHIIndexBuffer.Desc.Size div SizeOf(UInt32), 1, 0, 0, 0);
+    Result := 1;
+  end else
+  if Cache.RHICoordinateBuffer <> nil then
+  begin
+    ACmd.Draw(Cache.RHICoordinateBuffer.Desc.Size div (SizeOf(TVector3) * 2), 1, 0, 0);
+    Result := 1;
   end;
 end;
 

@@ -105,6 +105,9 @@ type
     procedure TestRenderContextAndScissorRHI;
     procedure TestSaveScreenAndDepthReadbackRHI;
     procedure TestGLInformationStringRHI;
+    procedure TestCookTorranceGGXPBRShaderGenerationRHI;
+    procedure TestComputeIBLBrdfLutAndEnvironmentPrefilterRHI;
+    procedure TestShapePBRMaterialExtractionAndDispatchRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -5299,6 +5302,320 @@ begin
       (Pos('Vulkan 1.3', InfoSummary) > 0) and (Pos('modern rendering: True', InfoSummary) > 0));
   finally
     SetRHIDevice(SavedDevice);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCookTorranceGGXPBRShaderGenerationRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  Gen: TCastleShaderGeneratorRHI;
+  MatBlock: TCastleMaterialUniformBlock;
+  PBRFuncs, VS, FS,LutCS: String;
+  VSMod, FSMod, CSMod: TRHIShaderModule;
+begin
+  { 1. Verify TCastleMaterialUniformBlock default initializers }
+  MatBlock.InitDefaultPBR;
+  AssertSameValue(1.0, MatBlock.BaseColor.X, 1e-4);
+  AssertSameValue(1.0, MatBlock.BaseColor.W, 1e-4);
+  AssertSameValue(0.0, MatBlock.SpecularColor.W, 1e-4); // 0.0 -> PBR Metallic-Roughness
+  AssertSameValue(0.0, MatBlock.EmissiveColor.W, 1e-4); // Metallic = 0
+  AssertSameValue(1.0, MatBlock.PBRParams.X, 1e-4);     // Roughness = 1
+  AssertSameValue(1.0, MatBlock.PBRParams.Y, 1e-4);     // NormalScale = 1
+  AssertSameValue(1.0, MatBlock.PBRParams.Z, 1e-4);     // OcclusionStrength = 1
+
+  MatBlock.InitDefaultPhong;
+  AssertTrue('InitDefaultPhong SpecularColor.W (shininess) must be > 0', MatBlock.SpecularColor.W > 0.0);
+
+  MatBlock.InitDefaultUnlit;
+  AssertTrue('InitDefaultUnlit SpecularColor.W must be < 0 (unlit marker)', MatBlock.SpecularColor.W < 0.0);
+
+  { 2. Verify Cook-Torrance GGX PBR shader generation & SPIR-V module compilation }
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  VSMod := nil;
+  FSMod := nil;
+  CSMod := nil;
+  try
+    PBRFuncs := Gen.GeneratePBRFunctions;
+    AssertTrue('GeneratePBRFunctions must emit DistributionGGX', Pos('DistributionGGX(', PBRFuncs) > 0);
+    AssertTrue('GeneratePBRFunctions must emit GeometrySmithGGXCorrelated', Pos('GeometrySmithGGXCorrelated(', PBRFuncs) > 0);
+    AssertTrue('GeneratePBRFunctions must emit FresnelSchlick', Pos('FresnelSchlick(', PBRFuncs) > 0);
+    AssertTrue('GeneratePBRFunctions must emit FresnelSchlickRoughness', Pos('FresnelSchlickRoughness(', PBRFuncs) > 0);
+    AssertTrue('GeneratePBRFunctions must emit PerturbNormalCotangent', Pos('PerturbNormalCotangent(', PBRFuncs) > 0);
+    AssertTrue('GeneratePBRFunctions must emit EvaluateDirectCookTorranceGGX', Pos('EvaluateDirectCookTorranceGGX(', PBRFuncs) > 0);
+    AssertTrue('GeneratePBRFunctions must emit EvaluateIBLCookTorranceGGX', Pos('EvaluateIBLCookTorranceGGX(', PBRFuncs) > 0);
+
+    VS := Gen.GenerateDefault3DVertexShader(True, True);
+    AssertTrue('Default 3D VS must include #version 450', Pos('#version 450', VS) > 0);
+    AssertTrue('Default 3D VS with skinning must reference CastleSkinning.u_JointMatrices',
+      Pos('CastleSkinning.u_JointMatrices', VS) > 0);
+    AssertTrue('Default 3D VS with tangents must compute castle_tangent_to_eye_space',
+      Pos('castle_tangent_to_eye_space = mat3(T, B, N);', VS) > 0);
+    AssertTrue('Default 3D VS must include Vulkan NDC depth adjustment [0..1]',
+      Pos('gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5;', VS) > 0);
+
+    FS := Gen.GenerateDefault3DFragmentShader(True, True, True, True, True, True, True);
+    AssertTrue('Default 3D FS must sample castle_base_color_texture', Pos('castle_base_color_texture', FS) > 0);
+    AssertTrue('Default 3D FS must sample castle_normal_texture', Pos('castle_normal_texture', FS) > 0);
+    AssertTrue('Default 3D FS must sample castle_metallic_roughness_texture', Pos('castle_metallic_roughness_texture', FS) > 0);
+    AssertTrue('Default 3D FS must sample castle_emissive_texture', Pos('castle_emissive_texture', FS) > 0);
+    AssertTrue('Default 3D FS must sample castle_occlusion_texture', Pos('castle_occlusion_texture', FS) > 0);
+    AssertTrue('Default 3D FS must sample castle_brdf_lut_texture', Pos('castle_brdf_lut_texture', FS) > 0);
+    AssertTrue('Default 3D FS must sample castle_env_specular_texture', Pos('castle_env_specular_texture', FS) > 0);
+    AssertTrue('Default 3D FS with UseAlphaTest must discard against castle_AlphaCutoff',
+      Pos('if (baseColor.a < castle_AlphaCutoff) discard;', FS) > 0);
+
+    LutCS := Gen.GenerateIBLBrdfLutComputeShader(8, 8);
+    AssertTrue('BRDF LUT CS must include RadicalInverse_VdC', Pos('RadicalInverse_VdC(', LutCS) > 0);
+    AssertTrue('BRDF LUT CS must include ImportanceSampleGGX', Pos('ImportanceSampleGGX(', LutCS) > 0);
+    AssertTrue('BRDF LUT CS must include IntegrateBRDF', Pos('IntegrateBRDF(', LutCS) > 0);
+
+    VSMod := VkDev.CreateShaderModuleFromGLSL(ssVertex, VS, 'PBR3D_VS');
+    FSMod := VkDev.CreateShaderModuleFromGLSL(ssFragment, FS, 'PBR3D_FS');
+    CSMod := VkDev.CreateShaderModuleFromGLSL(ssCompute, LutCS, 'IBLBrdfLut_CS');
+    AssertTrue('VSMod must be created', VSMod <> nil);
+    AssertTrue('FSMod must be created', FSMod <> nil);
+    AssertTrue('CSMod must be created', CSMod <> nil);
+  finally
+    FreeAndNil(CSMod);
+    FreeAndNil(FSMod);
+    FreeAndNil(VSMod);
+    FreeAndNil(Gen);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestComputeIBLBrdfLutAndEnvironmentPrefilterRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  LutTex, CubeTex: TVulkanRHITexture;
+  LutNormalSmooth, LutGrazingSmooth, LutNormalRough: TVector2;
+  FaceColors: array[0..5] of TVector3;
+  Mip0Sky, Mip4Sky, Mip0Ground, Mip4Ground, IrrSky, IrrGround: TVector3;
+begin
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0);
+  try
+    { 1. Verify Van der Corput radical inverse }
+    AssertSameValue(0.0, TCastleVulkanIBLGenerator.RadicalInverseVdC(0), 1e-6);
+    AssertSameValue(0.5, TCastleVulkanIBLGenerator.RadicalInverseVdC(1), 1e-6);
+    AssertSameValue(0.25, TCastleVulkanIBLGenerator.RadicalInverseVdC(2), 1e-6);
+    AssertSameValue(0.75, TCastleVulkanIBLGenerator.RadicalInverseVdC(3), 1e-6);
+
+    { 2. Generate 16x16 Split-Sum BRDF Integration LUT via compute dispatch }
+    LutTex := VkDev.IBLGenerator.GenerateBRDFIntegrationLUT(CmdList, 16, 32);
+    AssertTrue('GenerateBRDFIntegrationLUT must return non-nil texture', LutTex <> nil);
+    AssertTrue('BrdfLutComputePipeline must be created', VkDev.IBLGenerator.BrdfLutComputePipeline <> nil);
+    AssertEquals('TotalBrdfLutDispatches must be 1', 1, VkDev.IBLGenerator.TotalBrdfLutDispatches);
+    AssertEquals('BrdfLutSize must be 16', 16, VkDev.IBLGenerator.BrdfLutSize);
+
+    LutNormalSmooth := VkDev.IBLGenerator.SampleBRDFLUT(0.95, 0.1);
+    LutGrazingSmooth := VkDev.IBLGenerator.SampleBRDFLUT(0.05, 0.1);
+    LutNormalRough := VkDev.IBLGenerator.SampleBRDFLUT(0.95, 0.9);
+
+    { At normal incidence and smooth roughness, Fresnel scale (X) dominates over bias (Y) }
+    AssertTrue('At normal incidence (NdotV=0.95, r=0.1), Scale (X) must be > 0.8', LutNormalSmooth.X > 0.8);
+    AssertTrue('At normal incidence (NdotV=0.95, r=0.1), Bias (Y) must be < 0.1', LutNormalSmooth.Y < 0.1);
+    { At grazing angle (NdotV=0.05), Schlick Fresnel (1 - VdotH)^5 increases Bias (Y) significantly }
+    AssertTrue('At grazing angle (NdotV=0.05), Bias (Y) must exceed normal-incidence Bias',
+      LutGrazingSmooth.Y > LutNormalSmooth.Y);
+    { Energy conservation: Scale + Bias <= 1.01 }
+    AssertTrue('BRDF LUT must conserve energy (Scale + Bias <= 1.01)',
+      (LutNormalSmooth.X + LutNormalSmooth.Y <= 1.01) and
+      (LutGrazingSmooth.X + LutGrazingSmooth.Y <= 1.01) and
+      (LutNormalRough.X + LutNormalRough.Y <= 1.01));
+
+    { 3. Prefilter 16x16 environment cubemap across 5 mip levels and compute L2 SH9 irradiance }
+    FaceColors[0] := Vector3(0.4, 0.4, 0.5); // +X
+    FaceColors[1] := Vector3(0.4, 0.4, 0.5); // -X
+    FaceColors[2] := Vector3(1.0, 0.9, 0.8); // +Y (Bright sky)
+    FaceColors[3] := Vector3(0.1, 0.1, 0.1); // -Y (Dark ground)
+    FaceColors[4] := Vector3(0.4, 0.4, 0.5); // +Z
+    FaceColors[5] := Vector3(0.4, 0.4, 0.5); // -Z
+
+    CubeTex := VkDev.IBLGenerator.PrefilterEnvironmentCubemap(CmdList, FaceColors, 16);
+    AssertTrue('PrefilterEnvironmentCubemap must return non-nil cubemap', CubeTex <> nil);
+    AssertEquals('Cubemap dimension must be tdCube', Ord(tdCube), Ord(CubeTex.Desc.Dimension));
+    AssertEquals('PrefilteredEnvMipLevels for 16x16 cubemap must be 5', 5, VkDev.IBLGenerator.PrefilteredEnvMipLevels);
+    AssertEquals('TotalEnvPrefilterPasses must be 5', 5, VkDev.IBLGenerator.TotalEnvPrefilterPasses);
+
+    Mip0Sky := VkDev.IBLGenerator.SamplePrefilteredEnvironment(2, 0); // +Y at mip 0 (roughness=0)
+    Mip4Sky := VkDev.IBLGenerator.SamplePrefilteredEnvironment(2, 4); // +Y at mip 4 (roughness=1)
+    Mip0Ground := VkDev.IBLGenerator.SamplePrefilteredEnvironment(3, 0); // -Y at mip 0
+    Mip4Ground := VkDev.IBLGenerator.SamplePrefilteredEnvironment(3, 4); // -Y at mip 4
+
+    AssertSameValue(1.0, Mip0Sky.X, 1e-4);
+    AssertSameValue(0.1, Mip0Ground.X, 1e-4);
+    AssertTrue('Roughness=1 Mip 4 sky must blur down toward average environment', Mip4Sky.X < Mip0Sky.X);
+    AssertTrue('Roughness=1 Mip 4 ground must blur up toward average environment', Mip4Ground.X > Mip0Ground.X);
+
+    { 4. Verify L2 Spherical Harmonics diffuse irradiance evaluation }
+    IrrSky := VkDev.IBLGenerator.EvaluateIrradianceSH(Vector3(0.0, 1.0, 0.0));
+    IrrGround := VkDev.IBLGenerator.EvaluateIrradianceSH(Vector3(0.0, -1.0, 0.0));
+    AssertTrue('SH9 diffuse irradiance along +Y (sky) must exceed -Y (ground)',
+      IrrSky.X > IrrGround.X);
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestShapePBRMaterialExtractionAndDispatchRHI;
+var
+  SavedDevice: TRHIDevice;
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  RenderOpts: TCastleRenderOptions;
+  ShapeNode: TShapeNode;
+  AppNode: TAppearanceNode;
+  PhysMat: TPhysicalMaterialNode;
+  PhongMat: TMaterialNode;
+  UnlitMat: TUnlitMaterialNode;
+  BaseTexNode, NormTexNode: TPixelTextureNode;
+  BaseImg, NormImg: TRGBImage;
+  BoxNode: TBoxNode;
+  TraverseState: TX3DGraphTraverseState;
+  Shape: TX3DRendererShape;
+  MatBlock: TCastleMaterialUniformBlock;
+  ShadingModel: TCastleShadingModelRHI;
+  BaseTexRHI, NormTexRHI, MRTexRHI, EmissiveTexRHI, OccTexRHI: TRHITexture;
+  TexCount, DrawCalls: Cardinal;
+  BindlessEntry: TCastleBindlessMaterialEntry;
+begin
+  SavedDevice := RHIDevice;
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0);
+  RenderOpts := TCastleRenderOptions.Create(nil);
+  ShapeNode := TShapeNode.Create;
+  AppNode := TAppearanceNode.Create;
+  AppNode.WaitForRelease;
+  PhysMat := TPhysicalMaterialNode.Create;
+  PhysMat.WaitForRelease;
+  PhongMat := TMaterialNode.Create;
+  PhongMat.WaitForRelease;
+  UnlitMat := TUnlitMaterialNode.Create;
+  UnlitMat.WaitForRelease;
+  BaseTexNode := TPixelTextureNode.Create;
+  BaseTexNode.WaitForRelease;
+  NormTexNode := TPixelTextureNode.Create;
+  NormTexNode.WaitForRelease;
+  BoxNode := TBoxNode.Create;
+  BoxNode.WaitForRelease;
+  TraverseState := TX3DGraphTraverseState.Create;
+  Shape := nil;
+  try
+    SetRHIDevice(VkDev);
+
+    BaseImg := TRGBImage.Create(4, 4);
+    BaseImg.Clear(Vector4Byte(200, 150, 100, 255));
+    BaseTexNode.FdImage.Value := BaseImg;
+    TTextureResources.Prepare(RenderOpts, BaseTexNode);
+
+    NormImg := TRGBImage.Create(4, 4);
+    NormImg.Clear(Vector4Byte(128, 128, 255, 255));
+    NormTexNode.FdImage.Value := NormImg;
+    TTextureResources.Prepare(RenderOpts, NormTexNode);
+
+    PhysMat.BaseColor := Vector3(0.8, 0.6, 0.4);
+    PhysMat.Transparency := 0.1;
+    PhysMat.Metallic := 0.85;
+    PhysMat.Roughness := 0.25;
+    PhysMat.EmissiveColor := Vector3(0.1, 0.2, 0.3);
+    PhysMat.NormalScale := 1.5;
+    PhysMat.OcclusionStrength := 0.75;
+    PhysMat.BaseTexture := BaseTexNode;
+    PhysMat.NormalTexture := NormTexNode;
+
+    AppNode.Material := PhysMat;
+    AppNode.AlphaMode := amMask;
+    AppNode.AlphaCutoff := 0.4;
+    ShapeNode.Appearance := AppNode;
+    ShapeNode.Geometry := BoxNode;
+    TraverseState.ShapeNode := ShapeNode;
+
+    Shape := TX3DRendererShape.Create(nil, BoxNode, TraverseState, nil);
+    TraverseState := nil; { owned and freed by TShape.Destroy (FOriginalState) }
+
+    { 1. Verify PhysicalMaterial extraction }
+    AssertTrue('ExtractRHIMaterialBlock must return True for TPhysicalMaterialNode',
+      Shape.ExtractRHIMaterialBlock(MatBlock, ShadingModel));
+    AssertEquals('ShadingModel must be smPBRMetallicRoughness',
+      Ord(smPBRMetallicRoughness), Ord(ShadingModel));
+    AssertSameValue(0.8, MatBlock.BaseColor.X, 1e-4);
+    AssertSameValue(0.6, MatBlock.BaseColor.Y, 1e-4);
+    AssertSameValue(0.4, MatBlock.BaseColor.Z, 1e-4);
+    AssertSameValue(0.9, MatBlock.BaseColor.W, 1e-4); // 1 - 0.1 transparency
+    AssertSameValue(0.85, MatBlock.EmissiveColor.W, 1e-4); // Metallic
+    AssertSameValue(0.25, MatBlock.PBRParams.X, 1e-4);     // Roughness
+    AssertSameValue(1.5, MatBlock.PBRParams.Y, 1e-4);      // NormalScale
+    AssertSameValue(0.75, MatBlock.PBRParams.Z, 1e-4);     // OcclusionStrength
+    AssertSameValue(0.4, MatBlock.PBRParams.W, 1e-4);      // AlphaCutoff (amMask)
+
+    { 2. Verify texture handle extraction }
+    TexCount := Shape.ExtractRHIMaterialTextures(
+      BaseTexRHI, NormTexRHI, MRTexRHI, EmissiveTexRHI, OccTexRHI);
+    AssertEquals('ExtractRHIMaterialTextures must find 2 prepared textures', 2, TexCount);
+    AssertTrue('BaseTexRHI must be non-nil', BaseTexRHI <> nil);
+    AssertTrue('NormTexRHI must be non-nil', NormTexRHI <> nil);
+    AssertTrue('MRTexRHI must be nil', MRTexRHI = nil);
+
+    { 3. Verify Bindless Material Entry construction }
+    BindlessEntry := Shape.BuildRHIBindlessMaterialEntry(11, 22, 33, 44);
+    AssertSameValue(0.85, BindlessEntry.EmissiveColor.W, 1e-4);
+    AssertEquals('BaseColorTexIndex must be 11', 11, BindlessEntry.BaseColorTexIndex);
+    AssertEquals('NormalTexIndex must be 22', 22, BindlessEntry.NormalTexIndex);
+    AssertEquals('MetallicRoughnessTexIndex must be 33', 33, BindlessEntry.MetallicRoughnessTexIndex);
+    AssertEquals('EmissiveTexIndex must be 44', 44, BindlessEntry.EmissiveTexIndex);
+
+    { 4. Verify Phong Material extraction }
+    PhongMat.DiffuseColor := Vector3(0.5, 0.5, 0.5);
+    PhongMat.SpecularColor := Vector3(0.9, 0.9, 0.9);
+    PhongMat.Shininess := 0.5;
+    AppNode.Material := PhongMat;
+    AssertTrue('ExtractRHIMaterialBlock must return True for TMaterialNode',
+      Shape.ExtractRHIMaterialBlock(MatBlock, ShadingModel));
+    AssertEquals('ShadingModel must be smPhong', Ord(smPhong), Ord(ShadingModel));
+    AssertSameValue(64.0, MatBlock.SpecularColor.W, 1e-3); // 0.5 * 128
+
+    { 5. Verify Unlit Material extraction }
+    UnlitMat.EmissiveColor := Vector3(0.2, 0.8, 0.4);
+    UnlitMat.Transparency := 0.25;
+    AppNode.Material := UnlitMat;
+    AssertTrue('ExtractRHIMaterialBlock must return True for TUnlitMaterialNode',
+      Shape.ExtractRHIMaterialBlock(MatBlock, ShadingModel));
+    AssertEquals('ShadingModel must be smUnlit', Ord(smUnlit), Ord(ShadingModel));
+    AssertTrue('Unlit SpecularColor.W must be < 0', MatBlock.SpecularColor.W < 0.0);
+    AssertSameValue(0.75, MatBlock.BaseColor.W, 1e-4);
+
+    { Restore PhysMat before PrepareRHIBuffers/RecordRHIDraw and Shape destruction }
+    AppNode.Material := PhysMat;
+
+    { 6. Verify PrepareRHIBuffers + RecordRHIDraw }
+    Shape.PrepareRHIBuffers(RenderOpts, 1);
+    DrawCalls := Shape.RecordRHIDraw(CmdList, TMatrix4.Identity, 7);
+    AssertTrue('RecordRHIDraw must record at least 1 draw call for TBoxNode', DrawCalls >= 1);
+  finally
+    if AppNode <> nil then
+      AppNode.Material := PhysMat;
+    if (Shape <> nil) and (Shape.Cache <> nil) then
+      RendererCache.Shape_DecReference(Shape, Shape.Cache);
+    FreeAndNil(Shape);
+    FreeAndNil(TraverseState);
+    TTextureResources.Unprepare(BaseTexNode);
+    TTextureResources.Unprepare(NormTexNode);
+    SetRHIDevice(SavedDevice);
+    FreeAndNil(ShapeNode);
+    FreeIfUnusedAndNil(AppNode);
+    FreeIfUnusedAndNil(PhysMat);
+    FreeIfUnusedAndNil(PhongMat);
+    FreeIfUnusedAndNil(UnlitMat);
+    FreeIfUnusedAndNil(BaseTexNode);
+    FreeIfUnusedAndNil(NormTexNode);
+    FreeIfUnusedAndNil(BoxNode);
+    FreeAndNil(RenderOpts);
+    FreeAndNil(CmdList);
     FreeAndNil(VkDev);
   end;
 end;
