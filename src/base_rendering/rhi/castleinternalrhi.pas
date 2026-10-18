@@ -190,6 +190,18 @@ type
     coAlways
   );
 
+  { Stencil buffer operation (VK_STENCIL_OP_* / GL_KEEP..GL_DECR_WRAP) }
+  TRHIStencilOp = (
+    soKeep,
+    soZero,
+    soReplace,
+    soIncrementAndClamp,
+    soDecrementAndClamp,
+    soInvert,
+    soIncrementAndWrap,
+    soDecrementAndWrap
+  );
+
   TRHIBlendFactor = (
     bfZero,
     bfOne,
@@ -319,6 +331,10 @@ type
       const AUsage: TRHITextureUsageFlags = [tuSampled, tuTransferDst];
       const AMipLevels: Cardinal = 1;
       const ASampleCount: Cardinal = 1): TRHITextureDesc; static;
+    class function Create3D(const AWidth, AHeight, ADepth: Cardinal;
+      const AFormat: TRHIPixelFormat;
+      const AUsage: TRHITextureUsageFlags = [tuSampled, tuTransferDst];
+      const AMipLevels: Cardinal = 1): TRHITextureDesc; static;
     class function CreateCube(const ASize: Cardinal;
       const AFormat: TRHIPixelFormat;
       const AUsage: TRHITextureUsageFlags = [tuSampled, tuTransferDst];
@@ -401,8 +417,10 @@ type
     DstAlphaBlendFactor: TRHIBlendFactor;
     AlphaBlendOp: TRHIBlendOp;
     ColorWriteMask: Byte; // Bitmask: R=1, G=2, B=4, A=8 ($0F = all)
+    DisableColorWrites: Boolean; // When True, forces colorWriteMask = 0 (e.g. stencil-only shadow volume pass)
     class function DefaultOpaque: TRHIBlendStateDesc; static;
     class function DefaultAlphaBlend: TRHIBlendStateDesc; static;
+    class function DefaultColorMaskNone: TRHIBlendStateDesc; static;
   end;
 
   TRHIRasterizerStateDesc = record
@@ -414,15 +432,38 @@ type
     class function DefaultCullBack: TRHIRasterizerStateDesc; static;
   end;
 
+  { Per-face stencil operation and comparison state (VkStencilOpState). }
+  TRHIStencilOpStateDesc = record
+    FailOp: TRHIStencilOp;
+    PassOp: TRHIStencilOp;
+    DepthFailOp: TRHIStencilOp;
+    CompareOp: TRHICompareOp;
+    CompareMask: Cardinal;
+    WriteMask: Cardinal;
+    Reference: Cardinal;
+    class function DefaultKeep: TRHIStencilOpStateDesc; static;
+  end;
+
   TRHIDepthStencilStateDesc = record
     DepthTestEnable: Boolean;
     DepthWriteEnable: Boolean;
     DepthCompareOp: TRHICompareOp;
     StencilTestEnable: Boolean;
+    FrontStencil: TRHIStencilOpStateDesc;
+    BackStencil: TRHIStencilOpStateDesc;
     class function DefaultDepthTestWrite: TRHIDepthStencilStateDesc; static;
     class function DefaultDepthReadOnly: TRHIDepthStencilStateDesc; static;
     class function DefaultDisabled: TRHIDepthStencilStateDesc; static;
     class function DefaultShadowMap: TRHIDepthStencilStateDesc; static;
+    { Two-sided stencil shadow volume Z-Pass state:
+      Front faces increment (wrap) on depth pass; back faces decrement (wrap) on depth pass. }
+    class function DefaultStencilShadowVolumeZPass: TRHIDepthStencilStateDesc; static;
+    { Two-sided stencil shadow volume Z-Fail (Carmack's Reverse) state:
+      Front faces decrement (wrap) on depth fail; back faces increment (wrap) on depth fail. }
+    class function DefaultStencilShadowVolumeZFail: TRHIDepthStencilStateDesc; static;
+    { Stencil-masked lit scene pass state (renders only where stencil == AStencilReference). }
+    class function DefaultStencilLitPass(const AStencilReference: Cardinal = 0;
+      const ACompareMask: Cardinal = $FF): TRHIDepthStencilStateDesc; static;
   end;
 
   TRHIGraphicsPipelineDesc = record
@@ -961,6 +1002,18 @@ begin
   Result.Usage := AUsage;
 end;
 
+class function TRHITextureDesc.Create3D(const AWidth, AHeight, ADepth: Cardinal;
+  const AFormat: TRHIPixelFormat; const AUsage: TRHITextureUsageFlags;
+  const AMipLevels: Cardinal): TRHITextureDesc;
+begin
+  Result := Create2D(AWidth, AHeight, AFormat, AUsage, AMipLevels, 1);
+  Result.Dimension := td3D;
+  if ADepth > 1 then
+    Result.DepthOrArrayLayers := ADepth
+  else
+    Result.DepthOrArrayLayers := 1;
+end;
+
 class function TRHITextureDesc.CreateCube(const ASize: Cardinal;
   const AFormat: TRHIPixelFormat; const AUsage: TRHITextureUsageFlags;
   const AMipLevels: Cardinal): TRHITextureDesc;
@@ -993,6 +1046,7 @@ begin
   Result.DstAlphaBlendFactor := bfZero;
   Result.AlphaBlendOp := boAdd;
   Result.ColorWriteMask := $0F;
+  Result.DisableColorWrites := False;
 end;
 
 class function TRHIBlendStateDesc.DefaultAlphaBlend: TRHIBlendStateDesc;
@@ -1003,6 +1057,13 @@ begin
   Result.DstColorBlendFactor := bfOneMinusSrcAlpha;
   Result.SrcAlphaBlendFactor := bfOne;
   Result.DstAlphaBlendFactor := bfOneMinusSrcAlpha;
+end;
+
+class function TRHIBlendStateDesc.DefaultColorMaskNone: TRHIBlendStateDesc;
+begin
+  Result := DefaultOpaque;
+  Result.ColorWriteMask := 0;
+  Result.DisableColorWrites := True;
 end;
 
 { TRHIRasterizerStateDesc }
@@ -1017,6 +1078,20 @@ begin
   Result.DepthClampEnable := False;
 end;
 
+{ TRHIStencilOpStateDesc }
+
+class function TRHIStencilOpStateDesc.DefaultKeep: TRHIStencilOpStateDesc;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  Result.FailOp := soKeep;
+  Result.PassOp := soKeep;
+  Result.DepthFailOp := soKeep;
+  Result.CompareOp := coAlways;
+  Result.CompareMask := $FF;
+  Result.WriteMask := $FF;
+  Result.Reference := 0;
+end;
+
 { TRHIDepthStencilStateDesc }
 
 class function TRHIDepthStencilStateDesc.DefaultDepthTestWrite: TRHIDepthStencilStateDesc;
@@ -1026,6 +1101,8 @@ begin
   Result.DepthWriteEnable := True;
   Result.DepthCompareOp := coLessOrEqual;
   Result.StencilTestEnable := False;
+  Result.FrontStencil := TRHIStencilOpStateDesc.DefaultKeep;
+  Result.BackStencil := TRHIStencilOpStateDesc.DefaultKeep;
 end;
 
 class function TRHIDepthStencilStateDesc.DefaultDepthReadOnly: TRHIDepthStencilStateDesc;
@@ -1041,11 +1118,50 @@ begin
   Result.DepthWriteEnable := False;
   Result.DepthCompareOp := coAlways;
   Result.StencilTestEnable := False;
+  Result.FrontStencil := TRHIStencilOpStateDesc.DefaultKeep;
+  Result.BackStencil := TRHIStencilOpStateDesc.DefaultKeep;
 end;
 
 class function TRHIDepthStencilStateDesc.DefaultShadowMap: TRHIDepthStencilStateDesc;
 begin
   Result := DefaultDepthTestWrite;
+end;
+
+class function TRHIDepthStencilStateDesc.DefaultStencilShadowVolumeZPass: TRHIDepthStencilStateDesc;
+begin
+  Result := DefaultDepthReadOnly;
+  Result.StencilTestEnable := True;
+  { Front faces: increment stencil (with wrap) when depth test passes }
+  Result.FrontStencil := TRHIStencilOpStateDesc.DefaultKeep;
+  Result.FrontStencil.PassOp := soIncrementAndWrap;
+  { Back faces: decrement stencil (with wrap) when depth test passes }
+  Result.BackStencil := TRHIStencilOpStateDesc.DefaultKeep;
+  Result.BackStencil.PassOp := soDecrementAndWrap;
+end;
+
+class function TRHIDepthStencilStateDesc.DefaultStencilShadowVolumeZFail: TRHIDepthStencilStateDesc;
+begin
+  Result := DefaultDepthReadOnly;
+  Result.StencilTestEnable := True;
+  { Front faces: decrement stencil (with wrap) when depth test fails }
+  Result.FrontStencil := TRHIStencilOpStateDesc.DefaultKeep;
+  Result.FrontStencil.DepthFailOp := soDecrementAndWrap;
+  { Back faces: increment stencil (with wrap) when depth test fails }
+  Result.BackStencil := TRHIStencilOpStateDesc.DefaultKeep;
+  Result.BackStencil.DepthFailOp := soIncrementAndWrap;
+end;
+
+class function TRHIDepthStencilStateDesc.DefaultStencilLitPass(
+  const AStencilReference: Cardinal; const ACompareMask: Cardinal): TRHIDepthStencilStateDesc;
+begin
+  Result := DefaultDepthReadOnly;
+  Result.StencilTestEnable := True;
+  Result.FrontStencil := TRHIStencilOpStateDesc.DefaultKeep;
+  Result.FrontStencil.CompareOp := coEqual;
+  Result.FrontStencil.CompareMask := ACompareMask;
+  Result.FrontStencil.WriteMask := 0;
+  Result.FrontStencil.Reference := AStencilReference;
+  Result.BackStencil := Result.FrontStencil;
 end;
 
 { TRHIRenderingInfo }

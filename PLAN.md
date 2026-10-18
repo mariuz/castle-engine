@@ -261,6 +261,20 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 9 Status**: Completed. X3D dynamic texture generators (`TRenderedTextureResource`, `TGeneratedShadowMapResource`, `TGeneratedCubeMapTextureResource`), Hierarchical Z (Hi-Z) depth pyramid compute downsampler and two-phase GPU occlusion culling (`TCastleVulkanComputeCuller.BuildHiZPyramid`), and `TScreenEffectResource` RHI pipeline compilation & `TCastleScreenEffects` auto-hooking fully integrated and tested (57 unit tests passing).
 
 
+### Phase 10: 3D, Static CubeMap & Movie Texture RHI Resources, Skybox/Background RHI Rendering & Stencil Shadow Volumes (COMPLETED)
+
+* [x] **10.1. 3D, Static CubeMap & Movie Texture RHI Resources (`T3DTextureResource`, `TComposedCubeMapTextureResource`, `TImageCubeMapTextureResource`, `TMovieTextureResource`, `TImageTextureResource`)**:
+  * Add `TRHITextureDesc.Create3D` in `CastleInternalRHI` and `VK_IMAGE_TYPE_3D` (`extent.depth = DepthOrArrayLayers`, `arrayLayers = 1`, `layerCount = 1`, 3D `TRGBAlphaImage` conversion, and `pfRGBA32_Float` `TRGBAlphaFloatImage` upload support) in `TVulkanRHITexture` and `TCastleVulkanStagingUploader`.
+  * Extend `T3DTextureResource`, `TCubeMapTextureResource`, `TComposedCubeMapTextureResource`, `TImageCubeMapTextureResource`, `TMovieTextureResource` (with `TVideo.LoadFromImageArray` and `TMovieTextureNode.LoadFromVideo`), and `TImageTextureResource` (including `UpdateTextureContentsRgbaFloat` for `pfRGBA32_Float` GPU skinning animation textures) to allocate, upload, and bind `TRHITexture` handles when `RHIDevice <> nil`.
+* [x] **10.2. Background Skybox & Panorama RHI Rendering (`TBackgroundRenderer`, `TBackgroundScene`, `TBackground3D`, `TBackground2D`)**:
+  * Update `CastleInternalBackgroundRenderer` (`TBackgroundRenderer`, `TBackgroundScene`, `TBackground3D`, `TBackground2D`) to execute cleanly when `RHIDevice <> nil` (including headless RHI contexts where `RenderContext = nil`), tracking `RHIRenderCount`, `RHIProjectionMatrix`, `RHIClearColor`, `RHIUseClearColor`, and `RHIScene`.
+* [x] **10.3. Stencil Shadow Volumes & Two-Sided Stencil RHI State (`TGLShadowVolumeRenderer`, `TRHIStencilOp`, `TRHIStencilOpStateDesc`)**:
+  * Add `TRHIStencilOp` (`soKeep..soDecrementAndWrap`), `TRHIStencilOpStateDesc` (`FailOp`, `PassOp`, `DepthFailOp`, `CompareOp`, `CompareMask`, `WriteMask`, `Reference`), `TRHIDepthStencilStateDesc` front/back stencil states (`FrontStencil`, `BackStencil`, `DefaultStencilShadowVolumeZPass`, `DefaultStencilShadowVolumeZFail`, `DefaultStencilLitPass`), and `TRHIBlendStateDesc.DisableColorWrites` (`DefaultColorMaskNone`).
+  * Wire `RHIToVkStencilOp` and `RHIToVkStencilOpState` into `TVulkanRHIPipeline.Create`, `GetOrCreateFragmentShaderLibrary`, `GetOrCreateFragmentOutputLibrary`, and `ComputePipelineKeyHashEx`, and update `TGLShadowVolumeRenderer.InitCaster` and `TGLShadowVolumeRenderer.Render` in `CastleInternalGLShadowVolumes` to execute the 5-pass stencil shadow volume pipeline (`RHIStencilDepthState`, `RHILitPassStencilDepthState`, `RHIBlendState`, `RHIRenderPassCount`) over RHI.
+
+**Milestone 10 Status**: Completed. 3D, static cubemap, movie, and `pfRGBA32_Float` skinning texture RHI resources (`T3DTextureResource`, `TComposedCubeMapTextureResource`, `TImageCubeMapTextureResource`, `TMovieTextureResource`, `TImageTextureResource.UpdateTextureContentsRgbaFloat`), 3D skybox and 2D background RHI rendering (`CastleInternalBackgroundRenderer`), and two-sided stencil RHI state + 5-pass stencil shadow volume rendering (`TGLShadowVolumeRenderer`) fully integrated and tested (60 unit tests passing).
+
+
 ## 5. Build Tool (castle-engine) & Editor Integration
 
 * [x] CastleEngineManifest.xml Support:

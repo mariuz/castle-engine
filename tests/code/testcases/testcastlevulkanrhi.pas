@@ -30,6 +30,7 @@ uses
   CastleRendererInternalLights, X3DNodes,
   CastleSceneInternalShape, CastleInternalOcclusionCulling,
   CastleTransform, CastleScene, CastleProjection, CastleViewport, CastleScreenEffects, CastleRenderOptions, CastleWindow,
+  CastleVideos, CastleInternalBackgroundRenderer, CastleInternalGLShadowVolumes,
   ToolManifest, CastleInternalRenderDoc;
 
 type
@@ -92,14 +93,22 @@ type
     procedure TestDynamicTextureResourcesRHI;
     procedure TestHiZDepthPyramidAndOcclusionCulling;
     procedure TestScreenEffectResourceAndAutoHookingRHI;
+    procedure Test3DAndCubeAndMovieTextureResourcesRHI;
+    procedure TestBackgroundRendererRHI;
+    procedure TestStencilShadowVolumesRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
     FRenderFromViewpointCalls: Cardinal;
+    FShadowVolumeOnePassCalls: Cardinal;
+    FShadowVolumeCasterCalls: Cardinal;
     procedure CaptureWarning(const Category, S: String);
     procedure DummyRenderShapeCallback(const Shape: TCollectedShape;
       const Params: TRenderParams; const PassParams: TRenderOnePassParams);
     procedure DummyRenderFromViewpointCallback(const RenderCamera: TRenderingCamera);
+    procedure DummyShadowVolumeOnePassCallback(const Params: TRenderParams;
+      const PassParams: TRenderOnePassParams);
+    procedure DummyShadowVolumeCasterCallback(const Params: TRenderParams);
   end;
 
 implementation
@@ -4383,6 +4392,319 @@ begin
     FreeAndNil(ScreenFX);
     FreeAndNil(Scene);
     FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.DummyShadowVolumeOnePassCallback(
+  const Params: TRenderParams; const PassParams: TRenderOnePassParams);
+begin
+  Inc(FShadowVolumeOnePassCalls);
+end;
+
+procedure TTestCastleVulkanRHI.DummyShadowVolumeCasterCallback(
+  const Params: TRenderParams);
+begin
+  Inc(FShadowVolumeCasterCalls);
+end;
+
+procedure TTestCastleVulkanRHI.Test3DAndCubeAndMovieTextureResourcesRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  SavedDevice: TRHIDevice;
+  RenderOpts: TCastleRenderOptions;
+  Desc3D: TRHITextureDesc;
+  Tex3DNode: TComposedTexture3DNode;
+  SliceNodes: array[0..3] of TPixelTextureNode;
+  SliceImg: TRGBAlphaImage;
+  CubeNode: TComposedCubeMapTextureNode;
+  SideNodes: array[0..5] of TPixelTextureNode;
+  SideImg: TRGBImage;
+  MovieNode: TMovieTextureNode;
+  Video: TVideo;
+  Frame0, Frame1: TRGBAlphaImage;
+  ImgTexNode: TPixelTextureNode;
+  BaseImg: TRGBImage;
+  FloatData: array[0..63] of TVector4;
+  I: Integer;
+begin
+  { 1. Verify TRHITextureDesc.Create3D }
+  Desc3D := TRHITextureDesc.Create3D(16, 8, 4, pfRGBA8_UNorm, [tuSampled, tuTransferDst], 2);
+  AssertEquals('Create3D Dimension must be td3D', Ord(td3D), Ord(Desc3D.Dimension));
+  AssertEquals('Create3D Width', 16, Desc3D.Width);
+  AssertEquals('Create3D Height', 8, Desc3D.Height);
+  AssertEquals('Create3D DepthOrArrayLayers', 4, Desc3D.DepthOrArrayLayers);
+  AssertEquals('Create3D MipLevels', 2, Desc3D.MipLevels);
+
+  SavedDevice := RHIDevice;
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  RenderOpts := TCastleRenderOptions.Create(nil);
+  Tex3DNode := TComposedTexture3DNode.Create;
+  CubeNode := TComposedCubeMapTextureNode.Create;
+  MovieNode := TMovieTextureNode.Create;
+  ImgTexNode := TPixelTextureNode.Create;
+  try
+    SetRHIDevice(VkDev);
+
+    { 2. Test T3DTextureResource with 4x4x4 3D image via TComposedTexture3DNode }
+    for I := 0 to 3 do
+    begin
+      SliceNodes[I] := TPixelTextureNode.Create;
+      SliceImg := TRGBAlphaImage.Create(4, 4);
+      SliceImg.Clear(Vector4Byte(64, 128, I * 60, 255));
+      SliceNodes[I].FdImage.Value := SliceImg;
+    end;
+    Tex3DNode.SetTexture([SliceNodes[0], SliceNodes[1], SliceNodes[2], SliceNodes[3]]);
+    TTextureResources.Prepare(RenderOpts, Tex3DNode);
+    AssertTrue('Tex3DNode.InternalRendererResource must be T3DTextureResource',
+      Tex3DNode.InternalRendererResource is T3DTextureResource);
+    AssertTrue('T3DTextureResource.RHITexture must be allocated',
+      T3DTextureResource(Tex3DNode.InternalRendererResource).RHITexture <> nil);
+    AssertEquals('T3DTextureResource.RHITexture dimension must be td3D',
+      Ord(td3D), Ord(T3DTextureResource(Tex3DNode.InternalRendererResource).RHITexture.Desc.Dimension));
+    AssertEquals('T3DTextureResource.RHITexture depth must be 4',
+      4, T3DTextureResource(Tex3DNode.InternalRendererResource).RHITexture.Desc.DepthOrArrayLayers);
+    AssertTrue('T3DTextureResource.Bind(0) must succeed over RHI',
+      T3DTextureResource(Tex3DNode.InternalRendererResource).Bind(0));
+
+    { 3. Test TComposedCubeMapTextureResource with 6 8x8 faces }
+    for I := 0 to 5 do
+    begin
+      SideNodes[I] := TPixelTextureNode.Create;
+      SideImg := TRGBImage.Create(8, 8);
+      SideImg.Clear(Vector4Byte(I * 40, 100, 200, 255));
+      SideNodes[I].FdImage.Value := SideImg;
+    end;
+    CubeNode.Back   := SideNodes[0];
+    CubeNode.Bottom := SideNodes[1];
+    CubeNode.Front  := SideNodes[2];
+    CubeNode.Left   := SideNodes[3];
+    CubeNode.Right  := SideNodes[4];
+    CubeNode.Top    := SideNodes[5];
+    TTextureResources.Prepare(RenderOpts, CubeNode);
+    AssertTrue('CubeNode.InternalRendererResource must be TComposedCubeMapTextureResource',
+      CubeNode.InternalRendererResource is TComposedCubeMapTextureResource);
+    AssertTrue('TComposedCubeMapTextureResource.RHITexture must be allocated',
+      TComposedCubeMapTextureResource(CubeNode.InternalRendererResource).RHITexture <> nil);
+    AssertEquals('TComposedCubeMapTextureResource.RHITexture dimension must be tdCube',
+      Ord(tdCube), Ord(TComposedCubeMapTextureResource(CubeNode.InternalRendererResource).RHITexture.Desc.Dimension));
+    AssertEquals('TComposedCubeMapTextureResource.RHITexture width must be 8',
+      8, TComposedCubeMapTextureResource(CubeNode.InternalRendererResource).RHITexture.Desc.Width);
+    AssertTrue('TComposedCubeMapTextureResource.Bind(0) must succeed over RHI',
+      TComposedCubeMapTextureResource(CubeNode.InternalRendererResource).Bind(0));
+
+    { 4. Test TMovieTextureResource with 2-frame TVideo }
+    Video := TVideo.Create;
+    Frame0 := TRGBAlphaImage.Create(8, 8);
+    Frame0.Clear(Vector4Byte(255, 0, 0, 255));
+    Frame1 := TRGBAlphaImage.Create(8, 8);
+    Frame1.Clear(Vector4Byte(0, 255, 0, 255));
+    Video.LoadFromImageArray([Frame0, Frame1], True, 2);
+    MovieNode.LoadFromVideo(Video, True);
+    TTextureResources.Prepare(RenderOpts, MovieNode);
+    AssertTrue('MovieNode.InternalRendererResource must be TMovieTextureResource',
+      MovieNode.InternalRendererResource is TMovieTextureResource);
+    AssertEquals('TMovieTextureResource.RHIFrameCount must be 2',
+      2, TMovieTextureResource(MovieNode.InternalRendererResource).RHIFrameCount);
+    AssertTrue('TMovieTextureResource.RHITexture must be non-nil',
+      TMovieTextureResource(MovieNode.InternalRendererResource).RHITexture <> nil);
+    AssertTrue('TMovieTextureResource.Bind(0) must succeed over RHI',
+      TMovieTextureResource(MovieNode.InternalRendererResource).Bind(0));
+
+    { 5. Test TImageTextureResource.UpdateTextureContentsRgbaFloat for GPU skinning texture }
+    BaseImg := TRGBImage.Create(4, 4);
+    BaseImg.Clear(Vector4Byte(128, 128, 128, 255));
+    ImgTexNode.FdImage.Value := BaseImg;
+    TTextureResources.Prepare(RenderOpts, ImgTexNode);
+    AssertTrue('ImgTexNode.InternalRendererResource must be TImageTextureResource',
+      ImgTexNode.InternalRendererResource is TImageTextureResource);
+    for I := 0 to High(FloatData) do
+      FloatData[I] := Vector4(1.0, 0.5, 0.25, 1.0);
+    ImgTexNode.InternalRendererResource.UpdateTextureContentsRgbaFloat(16, 4, @FloatData[0]);
+    AssertEquals('Updated TImageTextureResource format must be pfRGBA32_Float',
+      Ord(pfRGBA32_Float), Ord(TImageTextureResource(ImgTexNode.InternalRendererResource).RHITexture.Desc.Format));
+    AssertEquals('Updated TImageTextureResource width must be 16',
+      16, TImageTextureResource(ImgTexNode.InternalRendererResource).RHITexture.Desc.Width);
+    AssertEquals('Updated TImageTextureResource height must be 4',
+      4, TImageTextureResource(ImgTexNode.InternalRendererResource).RHITexture.Desc.Height);
+  finally
+    SetRHIDevice(SavedDevice);
+    FreeAndNil(ImgTexNode);
+    FreeAndNil(MovieNode);
+    FreeAndNil(CubeNode);
+    FreeAndNil(Tex3DNode);
+    FreeAndNil(RenderOpts);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestBackgroundRendererRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  SavedDevice: TRHIDevice;
+  Bg3DNode: TBackgroundNode;
+  Bg2DNode: TImageBackgroundNode;
+  TexNode: TPixelTextureNode;
+  Img: TRGBImage;
+  Bg3DRenderer, Bg2DRenderer: TBackgroundRenderer;
+  Proj: TProjection;
+  RenderCam: TRenderingCamera;
+begin
+  SavedDevice := RHIDevice;
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  Bg3DNode := TBackgroundNode.Create;
+  Bg2DNode := TImageBackgroundNode.Create;
+  TexNode := TPixelTextureNode.Create;
+  RenderCam := TRenderingCamera.Create;
+  Bg3DRenderer := nil;
+  Bg2DRenderer := nil;
+  try
+    SetRHIDevice(VkDev);
+
+    { 1. Setup 3D Background node with sky/ground rings }
+    Bg3DNode.SetSkyColor([Vector3(0.1, 0.2, 0.8), Vector3(0.5, 0.7, 1.0)]);
+    Bg3DNode.SetSkyAngle([1.2]);
+    Bg3DNode.SetGroundColor([Vector3(0.2, 0.3, 0.1), Vector3(0.4, 0.3, 0.2)]);
+    Bg3DNode.SetGroundAngle([1.0]);
+    Bg3DRenderer := CreateBackgroundRenderer(Bg3DNode);
+    AssertTrue('CreateBackgroundRenderer(TBackgroundNode) must be non-nil', Bg3DRenderer <> nil);
+    AssertTrue('Bg3DRenderer.RHIScene must be a TCastleScene', Bg3DRenderer.RHIScene is TCastleScene);
+
+    Proj.ProjectionType := ptPerspective;
+    Proj.PerspectiveAnglesRad := Vector2(DegToRad(60), DegToRad(60));
+    Proj.ProjectionNear := 0.1;
+    Proj.ProjectionFar := 1000.0;
+    RenderCam.RotationMatrix := TMatrix4.Identity;
+
+    Bg3DRenderer.UpdateRotation(Vector4(0, 1, 0, 0.5));
+    Bg3DRenderer.Update(0.016);
+    Bg3DRenderer.Render(RenderCam, False, FloatRectangle(0, 0, 800, 600), Proj, nil, nil, nil);
+    AssertEquals('Bg3DRenderer.RHIRenderCount must be 1 after first Render', 1, Bg3DRenderer.RHIRenderCount);
+    AssertFalse('Bg3DRenderer.RHIUseClearColor must be False when SkyColor has 2 colors',
+      Bg3DRenderer.RHIUseClearColor);
+
+    { 2. Setup 2D ImageBackground node with a texture }
+    Img := TRGBImage.Create(4, 4);
+    Img.Clear(Vector4Byte(200, 100, 50, 255));
+    TexNode.FdImage.Value := Img;
+    Bg2DNode.Texture := TexNode;
+    Bg2DNode.Color := Vector4(0.9, 0.8, 0.7, 1.0);
+    Bg2DRenderer := CreateBackgroundRenderer(Bg2DNode);
+    AssertTrue('CreateBackgroundRenderer(TImageBackgroundNode) must be non-nil', Bg2DRenderer <> nil);
+    AssertTrue('Bg2DRenderer.RHIScene must be a TCastleScene', Bg2DRenderer.RHIScene is TCastleScene);
+
+    Bg2DRenderer.Render(RenderCam, False, FloatRectangle(0, 0, 800, 600), Proj, nil, nil, nil);
+    AssertEquals('Bg2DRenderer.RHIRenderCount must be 1 after Render', 1, Bg2DRenderer.RHIRenderCount);
+  finally
+    SetRHIDevice(SavedDevice);
+    FreeAndNil(Bg2DRenderer);
+    FreeAndNil(Bg3DRenderer);
+    FreeAndNil(RenderCam);
+    FreeAndNil(Bg2DNode);
+    FreeAndNil(Bg3DNode);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestStencilShadowVolumesRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  SavedDevice: TRHIDevice;
+  ZPassDesc, ZFailDesc, LitDesc: TRHIDepthStencilStateDesc;
+  PipeDesc1, PipeDesc2: TRHIGraphicsPipelineDesc;
+  Hash1, Hash2: QWord;
+  SVRenderer: TGLShadowVolumeRenderer;
+  Frustum: TFrustum;
+  RenderParams: TBasicRenderParams;
+begin
+  { 1. Verify RHIToVkStencilOp mapping for all 8 stencil operations }
+  AssertEquals('soKeep -> VK_STENCIL_OP_KEEP (0)', 0, RHIToVkStencilOp(soKeep));
+  AssertEquals('soZero -> VK_STENCIL_OP_ZERO (1)', 1, RHIToVkStencilOp(soZero));
+  AssertEquals('soReplace -> VK_STENCIL_OP_REPLACE (2)', 2, RHIToVkStencilOp(soReplace));
+  AssertEquals('soIncrementAndClamp -> VK_STENCIL_OP_INCREMENT_AND_CLAMP (3)', 3, RHIToVkStencilOp(soIncrementAndClamp));
+  AssertEquals('soDecrementAndClamp -> VK_STENCIL_OP_DECREMENT_AND_CLAMP (4)', 4, RHIToVkStencilOp(soDecrementAndClamp));
+  AssertEquals('soInvert -> VK_STENCIL_OP_INVERT (5)', 5, RHIToVkStencilOp(soInvert));
+  AssertEquals('soIncrementAndWrap -> VK_STENCIL_OP_INCREMENT_AND_WRAP (6)', 6, RHIToVkStencilOp(soIncrementAndWrap));
+  AssertEquals('soDecrementAndWrap -> VK_STENCIL_OP_DECREMENT_AND_WRAP (7)', 7, RHIToVkStencilOp(soDecrementAndWrap));
+
+  { 2. Verify Z-Pass, Z-Fail, and Lit Pass stencil descriptors }
+  ZPassDesc := TRHIDepthStencilStateDesc.DefaultStencilShadowVolumeZPass;
+  AssertTrue('ZPass StencilTestEnable must be True', ZPassDesc.StencilTestEnable);
+  AssertFalse('ZPass DepthWriteEnable must be False', ZPassDesc.DepthWriteEnable);
+  AssertEquals('ZPass FrontStencil.PassOp must be soIncrementAndWrap',
+    Ord(soIncrementAndWrap), Ord(ZPassDesc.FrontStencil.PassOp));
+  AssertEquals('ZPass BackStencil.PassOp must be soDecrementAndWrap',
+    Ord(soDecrementAndWrap), Ord(ZPassDesc.BackStencil.PassOp));
+
+  ZFailDesc := TRHIDepthStencilStateDesc.DefaultStencilShadowVolumeZFail;
+  AssertTrue('ZFail StencilTestEnable must be True', ZFailDesc.StencilTestEnable);
+  AssertFalse('ZFail DepthWriteEnable must be False', ZFailDesc.DepthWriteEnable);
+  AssertEquals('ZFail FrontStencil.DepthFailOp must be soDecrementAndWrap',
+    Ord(soDecrementAndWrap), Ord(ZFailDesc.FrontStencil.DepthFailOp));
+  AssertEquals('ZFail BackStencil.DepthFailOp must be soIncrementAndWrap',
+    Ord(soIncrementAndWrap), Ord(ZFailDesc.BackStencil.DepthFailOp));
+
+  LitDesc := TRHIDepthStencilStateDesc.DefaultStencilLitPass(0, $FF);
+  AssertTrue('LitPass StencilTestEnable must be True', LitDesc.StencilTestEnable);
+  AssertEquals('LitPass DepthCompareOp must be coLessOrEqual',
+    Ord(coLessOrEqual), Ord(LitDesc.DepthCompareOp));
+  AssertEquals('LitPass FrontStencil.CompareOp must be coEqual',
+    Ord(coEqual), Ord(LitDesc.FrontStencil.CompareOp));
+  AssertEquals('LitPass FrontStencil.CompareMask must be $FF',
+    $FF, LitDesc.FrontStencil.CompareMask);
+
+  { 3. Verify Pipeline Key Hash distinguishes Z-Pass and Z-Fail stencil states }
+  FillChar(PipeDesc1, SizeOf(PipeDesc1), 0);
+  PipeDesc1.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+  PipeDesc1.Rasterizer.CullMode := cmNone;
+  PipeDesc1.DepthStencil := ZPassDesc;
+  PipeDesc1.BlendState := TRHIBlendStateDesc.DefaultColorMaskNone;
+
+  PipeDesc2 := PipeDesc1;
+  PipeDesc2.DepthStencil := ZFailDesc;
+  Hash1 := ComputePipelineKeyHash(PipeDesc1);
+  Hash2 := ComputePipelineKeyHash(PipeDesc2);
+  AssertTrue('Pipeline key hash must differ between Z-Pass and Z-Fail stencil ops', Hash1 <> Hash2);
+
+  { 4. Verify TGLShadowVolumeRenderer RHI execution (InitFrustumAndLight, InitCaster, Render) }
+  SavedDevice := RHIDevice;
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  SVRenderer := TGLShadowVolumeRenderer.Create;
+  RenderParams := TBasicRenderParams.Create;
+  try
+    SetRHIDevice(VkDev);
+
+    Frustum.Init(
+      PerspectiveProjectionMatrixDeg(60, 1.0, 1.0, 100.0),
+      TMatrix4.Identity);
+    SVRenderer.InitFrustumAndLight(Frustum, Vector4(0, 10, 0, 1));
+
+    { Caster inside frustum far from near plane -> Z-Pass }
+    SVRenderer.InitCaster(Box3D(Vector3(-1, -1, -10), Vector3(1, 1, -8)));
+    AssertTrue('CasterShadowPossiblyVisible must be True for visible box',
+      SVRenderer.CasterShadowPossiblyVisible);
+    AssertFalse('ZFail must be False for box far from near plane', SVRenderer.ZFail);
+    AssertEquals('RHIStencilDepthState FrontStencil.PassOp must be soIncrementAndWrap',
+      Ord(soIncrementAndWrap), Ord(SVRenderer.RHIStencilDepthState.FrontStencil.PassOp));
+    AssertTrue('RHIBlendState.DisableColorWrites must be True',
+      SVRenderer.RHIBlendState.DisableColorWrites);
+
+    { Execute 5-pass shadow volume Render over RHI }
+    FShadowVolumeOnePassCalls := 0;
+    FShadowVolumeCasterCalls := 0;
+    RenderParams.InternalPass := 0;
+    SVRenderer.Render(RenderParams,
+      {$ifdef FPC}@{$endif}DummyShadowVolumeOnePassCallback,
+      {$ifdef FPC}@{$endif}DummyShadowVolumeCasterCallback);
+    AssertEquals('SVRenderer.RHIRenderPassCount must be 5', 5, SVRenderer.RHIRenderPassCount);
+    AssertEquals('DummyShadowVolumeOnePassCallback must be called 4 times', 4, FShadowVolumeOnePassCalls);
+    AssertEquals('DummyShadowVolumeCasterCallback must be called 1 time', 1, FShadowVolumeCasterCalls);
+    AssertEquals('RHILitPassStencilDepthState FrontStencil.CompareOp must be coEqual',
+      Ord(coEqual), Ord(SVRenderer.RHILitPassStencilDepthState.FrontStencil.CompareOp));
+  finally
+    SetRHIDevice(SavedDevice);
+    FreeAndNil(RenderParams);
+    FreeAndNil(SVRenderer);
     FreeAndNil(VkDev);
   end;
 end;

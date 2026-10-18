@@ -1189,6 +1189,12 @@ function RHIToVkSampleCountFlags(const ASampleCount: Cardinal): VkSampleCountFla
 { Converts TRHIResolveMode to VkResolveModeFlagBits. }
 function RHIToVkResolveMode(const AResolveMode: TRHIResolveMode): Integer;
 
+{ Converts TRHIStencilOp to VkStencilOp. }
+function RHIToVkStencilOp(const AOp: TRHIStencilOp): Integer;
+
+{ Converts TRHIStencilOpStateDesc to VkStencilOpState. }
+function RHIToVkStencilOpState(const AState: TRHIStencilOpStateDesc): VkStencilOpState;
+
 { Returns the required VkFormatFeatureFlagBits for a given TRHIPixelFormat and TRHITextureUsageFlags set. }
 function GetRequiredVkFormatFeatures(const AFormat: TRHIPixelFormat;
   const AUsage: TRHITextureUsageFlags): VkFlags;
@@ -1718,11 +1724,13 @@ begin
     HashBytesFNV1a(Result, ADesc.DepthStencil, SizeOf(ADesc.DepthStencil));
   end else
   begin
-    { PolygonMode, DepthBiasEnable, DepthClampEnable, and StencilTestEnable remain baked }
+    { PolygonMode, DepthBiasEnable, DepthClampEnable, StencilTestEnable, FrontStencil, and BackStencil remain baked }
     HashBytesFNV1a(Result, ADesc.Rasterizer.PolygonMode, SizeOf(ADesc.Rasterizer.PolygonMode));
     HashBytesFNV1a(Result, ADesc.Rasterizer.DepthBiasEnable, SizeOf(ADesc.Rasterizer.DepthBiasEnable));
     HashBytesFNV1a(Result, ADesc.Rasterizer.DepthClampEnable, SizeOf(ADesc.Rasterizer.DepthClampEnable));
     HashBytesFNV1a(Result, ADesc.DepthStencil.StencilTestEnable, SizeOf(ADesc.DepthStencil.StencilTestEnable));
+    HashBytesFNV1a(Result, ADesc.DepthStencil.FrontStencil, SizeOf(ADesc.DepthStencil.FrontStencil));
+    HashBytesFNV1a(Result, ADesc.DepthStencil.BackStencil, SizeOf(ADesc.DepthStencil.BackStencil));
   end;
   HashBytesFNV1a(Result, ADesc.BlendState, SizeOf(ADesc.BlendState));
   HashBytesFNV1a(Result, ADesc.PushConstantSize, SizeOf(ADesc.PushConstantSize));
@@ -1967,6 +1975,42 @@ begin
     coAlways:         Result := VK_COMPARE_OP_ALWAYS;
     else              Result := VK_COMPARE_OP_LESS_OR_EQUAL;
   end;
+end;
+
+function RHIToVkStencilOp(const AOp: TRHIStencilOp): Integer;
+const
+  VK_STENCIL_OP_KEEP = 0;
+  VK_STENCIL_OP_ZERO = 1;
+  VK_STENCIL_OP_REPLACE = 2;
+  VK_STENCIL_OP_INCREMENT_AND_CLAMP = 3;
+  VK_STENCIL_OP_DECREMENT_AND_CLAMP = 4;
+  VK_STENCIL_OP_INVERT = 5;
+  VK_STENCIL_OP_INCREMENT_AND_WRAP = 6;
+  VK_STENCIL_OP_DECREMENT_AND_WRAP = 7;
+begin
+  case AOp of
+    soKeep:              Result := VK_STENCIL_OP_KEEP;
+    soZero:              Result := VK_STENCIL_OP_ZERO;
+    soReplace:           Result := VK_STENCIL_OP_REPLACE;
+    soIncrementAndClamp: Result := VK_STENCIL_OP_INCREMENT_AND_CLAMP;
+    soDecrementAndClamp: Result := VK_STENCIL_OP_DECREMENT_AND_CLAMP;
+    soInvert:            Result := VK_STENCIL_OP_INVERT;
+    soIncrementAndWrap:  Result := VK_STENCIL_OP_INCREMENT_AND_WRAP;
+    soDecrementAndWrap:  Result := VK_STENCIL_OP_DECREMENT_AND_WRAP;
+    else                 Result := VK_STENCIL_OP_KEEP;
+  end;
+end;
+
+function RHIToVkStencilOpState(const AState: TRHIStencilOpStateDesc): VkStencilOpState;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  Result.failOp := RHIToVkStencilOp(AState.FailOp);
+  Result.passOp := RHIToVkStencilOp(AState.PassOp);
+  Result.depthFailOp := RHIToVkStencilOp(AState.DepthFailOp);
+  Result.compareOp := RHIToVkCompareOp(AState.CompareOp);
+  Result.compareMask := AState.CompareMask;
+  Result.writeMask := AState.WriteMask;
+  Result.reference := AState.Reference;
 end;
 
 function RHIToVkBlendFactor(const Factor: TRHIBlendFactor): Integer;
@@ -2566,7 +2610,13 @@ begin
   ApproxBytes := VkDeviceSize(Max(1, FDesc.Width)) *
     VkDeviceSize(Max(1, FDesc.Height)) *
     VkDeviceSize(Max(1, FDesc.DepthOrArrayLayers)) *
-    VkDeviceSize(Max(Cardinal(1), FDesc.SampleCount)) * 4;
+    VkDeviceSize(Max(Cardinal(1), FDesc.SampleCount));
+  case FDesc.Format of
+    pfRGBA32_Float: ApproxBytes := ApproxBytes * 16;
+    pfRGBA16_Float, pfD32_Float_S8_UInt: ApproxBytes := ApproxBytes * 8;
+  else
+    ApproxBytes := ApproxBytes * 4;
+  end;
 
   if (ADevice = nil) or (ADevice.Handle = nil) then
   begin
@@ -2585,15 +2635,25 @@ begin
 
   FillChar(ImgInfo, SizeOf(ImgInfo), 0);
   ImgInfo.sType := VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-  ImgInfo.imageType := VK_IMAGE_TYPE_2D;
+  if FDesc.Dimension = td3D then
+    ImgInfo.imageType := VK_IMAGE_TYPE_3D
+  else
+    ImgInfo.imageType := VK_IMAGE_TYPE_2D;
   if FDesc.Dimension in [tdCube, tdCubeArray] then
     ImgInfo.flags := VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
   ImgInfo.format := RHIToVkFormat(FDesc.Format);
   ImgInfo.extent.width := FDesc.Width;
   ImgInfo.extent.height := FDesc.Height;
-  ImgInfo.extent.depth := 1;
+  if FDesc.Dimension = td3D then
+  begin
+    ImgInfo.extent.depth := Max(Cardinal(1), FDesc.DepthOrArrayLayers);
+    ImgInfo.arrayLayers := 1;
+  end else
+  begin
+    ImgInfo.extent.depth := 1;
+    ImgInfo.arrayLayers := Max(Cardinal(1), FDesc.DepthOrArrayLayers);
+  end;
   ImgInfo.mipLevels := FDesc.MipLevels;
-  ImgInfo.arrayLayers := FDesc.DepthOrArrayLayers;
   ImgInfo.samples := RHIToVkSampleCountFlags(FDesc.SampleCount);
   ImgInfo.tiling := VK_IMAGE_TILING_OPTIMAL;
   ImgInfo.initialLayout := VK_IMAGE_LAYOUT_UNDEFINED;
@@ -2646,7 +2706,10 @@ begin
   ViewInfo.subresourceRange.baseMipLevel := 0;
   ViewInfo.subresourceRange.levelCount := FDesc.MipLevels;
   ViewInfo.subresourceRange.baseArrayLayer := 0;
-  ViewInfo.subresourceRange.layerCount := FDesc.DepthOrArrayLayers;
+  if FDesc.Dimension = td3D then
+    ViewInfo.subresourceRange.layerCount := 1
+  else
+    ViewInfo.subresourceRange.layerCount := Max(Cardinal(1), FDesc.DepthOrArrayLayers);
 
   CheckVk(vkCreateImageView(ADevice.Handle, @ViewInfo, nil, @FImageView), 'vkCreateImageView');
 end;
@@ -2694,32 +2757,44 @@ var
   Barrier: VkImageMemoryBarrier;
   DataSize: PtrUInt;
   PixelsPtr: Pointer;
+  ImgWidth, ImgHeight, ImgDepth: Cardinal;
 begin
   if AImage = nil then Exit;
   if FImage = VK_NULL_HANDLE then Exit;
 
   NeedsFreeRgba := False;
+  RgbaImage := nil;
+  ImgWidth := Max(Cardinal(1), AImage.Width);
+  ImgHeight := Max(Cardinal(1), AImage.Height);
+  ImgDepth := Max(Cardinal(1), AImage.Depth);
+
+  if (FDesc.Format = pfRGBA32_Float) and (AImage is TRGBAlphaFloatImage) then
+  begin
+    DataSize := PtrUInt(ImgWidth) * PtrUInt(ImgHeight) * PtrUInt(ImgDepth) * 16;
+    PixelsPtr := TRGBAlphaFloatImage(AImage).RawPixels;
+  end else
   if AImage is TRGBAlphaImage then
   begin
     RgbaImage := TRGBAlphaImage(AImage);
+    DataSize := PtrUInt(ImgWidth) * PtrUInt(ImgHeight) * PtrUInt(ImgDepth) * 4;
+    PixelsPtr := RgbaImage.RawPixels;
   end else
   if AImage is TCastleImage then
   begin
-    RgbaImage := TRGBAlphaImage.Create(AImage.Width, AImage.Height);
+    RgbaImage := TRGBAlphaImage.Create(ImgWidth, ImgHeight, ImgDepth);
     RgbaImage.Assign(TCastleImage(AImage));
     NeedsFreeRgba := True;
+    DataSize := PtrUInt(ImgWidth) * PtrUInt(ImgHeight) * PtrUInt(ImgDepth) * 4;
+    PixelsPtr := RgbaImage.RawPixels;
   end else
     Exit;
 
   try
-    DataSize := PtrUInt(RgbaImage.Width) * PtrUInt(RgbaImage.Height) * 4;
-    PixelsPtr := RgbaImage.RawPixels;
-
     if (VulkanDevice <> nil) and (VulkanDevice.StagingUploader <> nil) then
     begin
       VulkanDevice.StagingUploader.EnqueueImageUpload(
         Self, PixelsPtr, DataSize,
-        RgbaImage.Width, RgbaImage.Height,
+        ImgWidth, ImgHeight,
         AMipLevel, AArrayLayer, False);
       FCurrentState := rsShaderRead;
       Exit;
@@ -2767,9 +2842,9 @@ begin
       Region.imageOffset.x := 0;
       Region.imageOffset.y := 0;
       Region.imageOffset.z := 0;
-      Region.imageExtent.width := RgbaImage.Width;
-      Region.imageExtent.height := RgbaImage.Height;
-      Region.imageExtent.depth := 1;
+      Region.imageExtent.width := ImgWidth;
+      Region.imageExtent.height := ImgHeight;
+      Region.imageExtent.depth := ImgDepth;
 
       vkCmdCopyBufferToImage(Cmd, StagingBuf.Handle, FImage,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, @Region);
@@ -3317,6 +3392,8 @@ begin
   DepthStencil.depthWriteEnable := Ord(ADesc.DepthStencil.DepthWriteEnable);
   DepthStencil.depthCompareOp := RHIToVkCompareOp(ADesc.DepthStencil.DepthCompareOp);
   DepthStencil.stencilTestEnable := Ord(ADesc.DepthStencil.StencilTestEnable);
+  DepthStencil.front := RHIToVkStencilOpState(ADesc.DepthStencil.FrontStencil);
+  DepthStencil.back := RHIToVkStencilOpState(ADesc.DepthStencil.BackStencil);
 
   SetLength(BlendAttachments, Max(1, Length(ADesc.ColorAttachmentFormats)));
   for I := 0 to High(BlendAttachments) do
@@ -3329,7 +3406,9 @@ begin
     BlendAttachments[I].srcAlphaBlendFactor := RHIToVkBlendFactor(ADesc.BlendState.SrcAlphaBlendFactor);
     BlendAttachments[I].dstAlphaBlendFactor := RHIToVkBlendFactor(ADesc.BlendState.DstAlphaBlendFactor);
     BlendAttachments[I].alphaBlendOp := RHIToVkBlendOp(ADesc.BlendState.AlphaBlendOp);
-    if ADesc.BlendState.ColorWriteMask <> 0 then
+    if ADesc.BlendState.DisableColorWrites then
+      BlendAttachments[I].colorWriteMask := 0
+    else if ADesc.BlendState.ColorWriteMask <> 0 then
       BlendAttachments[I].colorWriteMask := ADesc.BlendState.ColorWriteMask
     else
       BlendAttachments[I].colorWriteMask := $0F;
@@ -5296,7 +5375,10 @@ begin
   FPendingImageCopies[Idx].Region.imageOffset.z := 0;
   FPendingImageCopies[Idx].Region.imageExtent.width := Max(1, AWidth);
   FPendingImageCopies[Idx].Region.imageExtent.height := Max(1, AHeight);
-  FPendingImageCopies[Idx].Region.imageExtent.depth := 1;
+  if ADstTexture.Desc.Dimension = td3D then
+    FPendingImageCopies[Idx].Region.imageExtent.depth := Max(Cardinal(1), ADstTexture.Desc.DepthOrArrayLayers)
+  else
+    FPendingImageCopies[Idx].Region.imageExtent.depth := 1;
 
   Inc(FTotalImageUploads);
   Inc(FTotalStagedBytes, ADataSize);
@@ -7716,6 +7798,8 @@ begin
   DepthStencil.depthWriteEnable := Ord(ADesc.DepthStencil.DepthWriteEnable);
   DepthStencil.depthCompareOp := RHIToVkCompareOp(ADesc.DepthStencil.DepthCompareOp);
   DepthStencil.stencilTestEnable := Ord(ADesc.DepthStencil.StencilTestEnable);
+  DepthStencil.front := RHIToVkStencilOpState(ADesc.DepthStencil.FrontStencil);
+  DepthStencil.back := RHIToVkStencilOpState(ADesc.DepthStencil.BackStencil);
 
   FillChar(Multisampling, SizeOf(Multisampling), 0);
   Multisampling.sType := VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -7794,7 +7878,9 @@ begin
     BlendAttachments[I].srcAlphaBlendFactor := RHIToVkBlendFactor(ADesc.BlendState.SrcAlphaBlendFactor);
     BlendAttachments[I].dstAlphaBlendFactor := RHIToVkBlendFactor(ADesc.BlendState.DstAlphaBlendFactor);
     BlendAttachments[I].alphaBlendOp := RHIToVkBlendOp(ADesc.BlendState.AlphaBlendOp);
-    if ADesc.BlendState.ColorWriteMask <> 0 then
+    if ADesc.BlendState.DisableColorWrites then
+      BlendAttachments[I].colorWriteMask := 0
+    else if ADesc.BlendState.ColorWriteMask <> 0 then
       BlendAttachments[I].colorWriteMask := ADesc.BlendState.ColorWriteMask
     else
       BlendAttachments[I].colorWriteMask := $0F;

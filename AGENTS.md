@@ -77,8 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–8**: **COMPLETED** (100%).
-- **Phase 9 (X3D Dynamic Texture Generators, Hierarchical Z Depth Pyramid Occlusion Culling & Screen Effects RHI Pipeline Auto-Hooking)**: **COMPLETED** (100%, 57 unit tests passing):
-  - [x] **9.1. X3D Dynamic Texture Generators (`TRenderedTextureResource`, `TGeneratedShadowMapResource`, `TGeneratedCubeMapTextureResource`)** — Completed & tested (`TestDynamicTextureResourcesRHI`).
-  - [x] **9.2. Hierarchical Z (Hi-Z) Depth Pyramid Compute Downsampler & Two-Phase GPU Occlusion Culling (`TCastleVulkanComputeCuller`, `CastleInternalShaderRHI`)** — Completed & tested (`TestHiZDepthPyramidAndOcclusionCulling`).
-  - [x] **9.3. Screen Effects RHI Pipeline Compilation (`TScreenEffectResource`) & Auto-Hooking (`TCastleScreenEffects`, `TCastleScene`)** — Completed & tested (`TestScreenEffectResourceAndAutoHookingRHI`).
+- **Phases 1–9**: **COMPLETED** (100%).
+- **Phase 10 (3D, Static CubeMap & Movie Texture RHI Resources, Skybox/Background RHI Rendering & Stencil Shadow Volumes)**: **COMPLETED** (100%, 60 unit tests passing):
+  - [x] **10.1. 3D, Static CubeMap & Movie Texture RHI Resources (`T3DTextureResource`, `TComposedCubeMapTextureResource`, `TImageCubeMapTextureResource`, `TMovieTextureResource`, `TImageTextureResource.UpdateTextureContentsRgbaFloat`)** — Completed & tested (`Test3DAndCubeAndMovieTextureResourcesRHI`).
+  - [x] **10.2. Background Skybox & Panorama RHI Rendering (`TBackgroundRenderer`, `TBackgroundScene`, `TBackground3D`, `TBackground2D`)** — Completed & tested (`TestBackgroundRendererRHI`).
+  - [x] **10.3. Stencil Shadow Volumes & Two-Sided Stencil RHI State (`TGLShadowVolumeRenderer`, `TRHIStencilOp`, `TRHIStencilOpStateDesc`, `DefaultStencilShadowVolumeZPass`, `DefaultStencilShadowVolumeZFail`, `DefaultStencilLitPass`)** — Completed & tested (`TestStencilShadowVolumesRHI`).
