@@ -275,6 +275,21 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 10 Status**: Completed. 3D, static cubemap, movie, and `pfRGBA32_Float` skinning texture RHI resources (`T3DTextureResource`, `TComposedCubeMapTextureResource`, `TImageCubeMapTextureResource`, `TMovieTextureResource`, `TImageTextureResource.UpdateTextureContentsRgbaFloat`), 3D skybox and 2D background RHI rendering (`CastleInternalBackgroundRenderer`), and two-sided stencil RHI state + 5-pass stencil shadow volume rendering (`TGLShadowVolumeRenderer`) fully integrated and tested (60 unit tests passing).
 
 
+### Phase 11: Unlit Mesh & Shadow Volume Extrusion RHI Backend, 2D Primitive Drawing RHI Dispatch & Dynamic Shape Batching RHI Integration (COMPLETED)
+
+* [x] **11.1. `TCastleRenderUnlitMesh` & Shadow Volume Geometry Extrusion RHI Backend (`CastleRenderPrimitives`, `CastleShapeInternalRenderShadowVolumes`)**:
+  * Extend `TCastleRenderUnlitMesh` (`castlerenderprimitives_render_unlit_mesh.inc`) with `RHIVertexBuffer`, `RHIIndexBuffer`, `RHIPipeline`, `RHIDrawCallCount`, `RHILastVertexCount`, `RHILastIndexCount`, and `RHILastTopology` so `SetVertexes`, `SetIndexes`, and `Render` upload 4D vertexes and 16-bit indexes to `TRHIBuffer` and record draw calls (`DrawIndexed` / `Draw`) with 80-byte `TUnlitMeshPushConstants` (`ModelViewProjection` + `Color`) onto `ActiveCommandList` when `RHIDevice <> nil`.
+  * Update `TRenderShapeShadowVolumes.RenderSilhouetteShadowVolume` in `CastleShapeInternalRenderShadowVolumes` to safely operate in RHI / headless Vulkan mode (`RenderContext = nil`) and extrude 2-manifold silhouette quads and light/dark caps into `TCastleRenderUnlitMesh` RHI vertex buffers.
+* [x] **11.2. 2D Primitive Drawing RHI Dispatch (`DrawPrimitive2D`, `DrawRectangle`, `DrawRectangleOutline`, `DrawCircle`, `DrawCircleOutline`, `GLFadeRectangleDark` / `GLFadeRectangleLight`)**:
+  * Extend `TPrimitive2DResources` and `DrawPrimitive2D` in `castleglutils_draw_primitive_2d.inc` with `RHIVbo`, `RHIPipeline`, `RHIPrimitive2DDrawCallCount`, `RHIPrimitive2DLastVertexCount`, `RHIPrimitive2DLastMode`, `RHIPrimitive2DLastColor`, `RHIPrimitive2DBuffer`, and `RHIPrimitive2DResetStats`.
+  * Route all 2D primitives (`DrawRectangle`, `DrawRectangleOutline`, `DrawCircle`, `DrawCircleOutline`, `GLFadeRectangleDark`, `GLFadeRectangleLight`, `GLBlendRectangle`) through `TRHIBuffer` (`muCpuToGpu`) and `ActiveCommandList.Draw` with 32-byte `TPrimitive2DPushConstants` when `RHIDevice <> nil`.
+* [x] **11.3. Dynamic Shape Batching RHI Integration (`TBatchShapes`, `TShapeCache`, `TX3DRendererShape.PrepareRHIBuffers`)**:
+  * Extend `TShapeCache.LoadArraysToVbo` (`castleinternalrenderer_cache_types.inc`) and `FastUpdateArrays` (`castleinternalrenderer_shape.inc`) to allocate/update `RHICoordinateBuffer`, `RHIAttributeBuffer`, and `RHIIndexBuffer` using `muCpuToGpu` when `DynamicGeometry = True` (including headless RHI mode when `GLFeatures = nil`) and track `RHIUploadCount`.
+  * Add `TX3DRendererShape.PrepareRHIBuffers` and wire `TBatchShapes.Commit` (`CastleInternalBatchShapes`) to automatically regenerate and upload RHI buffers for merged pool shapes (`RHICommitBatchCount`, `RHILastMergedShape`).
+
+**Milestone 11 Status**: Completed. `TCastleRenderUnlitMesh` and `TRenderShapeShadowVolumes.RenderSilhouetteShadowVolume` RHI extrusion, 2D primitive drawing RHI dispatch (`DrawPrimitive2D`, `DrawRectangle*`, `DrawCircle*`, `GLFadeRectangle*`), and dynamic shape batching RHI integration (`TBatchShapes.Commit` & `TX3DRendererShape.PrepareRHIBuffers`) fully integrated and tested (63 unit tests passing).
+
+
 ## 5. Build Tool (castle-engine) & Editor Integration
 
 * [x] CastleEngineManifest.xml Support:
@@ -299,5 +314,5 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 ## 7. Testing & Verification Criteria
 
 * [x] Automated Visual Regression Tests: `CompareImagesPerceptualDiff` in `CastleInternalRHI` compares framebuffer readbacks (`GrabTextureImage`) between `rbOpenGL` and `rbVulkan` using normalized RMSE perceptual diff thresholds.
-* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 57 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
+* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 63 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
 * [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance/Hi-Z occlusion culling (`TCastleVulkanComputeCuller`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.

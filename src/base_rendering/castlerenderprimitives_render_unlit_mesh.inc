@@ -129,8 +129,16 @@ type
       FixedFunctionVertexes: TVector4List;
       FixedFunctionIndexes: TUInt16List;
       Vao: TVertexArrayObject;
+      FRHIVertexBuffer: TRHIBuffer;
+      FRHIIndexBuffer: TRHIBuffer;
+      FRHIPipeline: TRHIPipeline;
+      FRHIDrawCallCount: Cardinal;
+      FRHILastVertexCount: Cardinal;
+      FRHILastIndexCount: Cardinal;
+      FRHILastTopology: TRHIPrimitiveTopology;
 
     class procedure PrepareShader(const AUseColor: Boolean);
+    procedure PrepareRHIPipeline(const ATopology: TRHIPrimitiveTopology);
     procedure SetUseColor(const Value: Boolean);
   private
     class procedure StaticGLContextClose;
@@ -168,6 +176,16 @@ type
     property Color: TCastleColor read FColor write FColor;
 
     procedure Render(const Mode: TPrimitiveMode);
+
+    { RHI resources and diagnostic counters when rendering with an active @link(RHIDevice).
+      @exclude }
+    property RHIVertexBuffer: TRHIBuffer read FRHIVertexBuffer;
+    property RHIIndexBuffer: TRHIBuffer read FRHIIndexBuffer;
+    property RHIPipeline: TRHIPipeline read FRHIPipeline;
+    property RHIDrawCallCount: Cardinal read FRHIDrawCallCount;
+    property RHILastVertexCount: Cardinal read FRHILastVertexCount;
+    property RHILastIndexCount: Cardinal read FRHILastIndexCount;
+    property RHILastTopology: TRHIPrimitiveTopology read FRHILastTopology;
   end;
 
 {$endif read_interface}
@@ -194,8 +212,11 @@ begin
   inherited Create;
   FUseColor := AUseColor;
   FColor := White;
-  PrepareShader(AUseColor);
-  Vao := TVertexArrayObject.Create(nil);
+  if (RHIDevice = nil) and (GLFeatures <> nil) then
+  begin
+    PrepareShader(AUseColor);
+    Vao := TVertexArrayObject.Create(nil);
+  end;
 end;
 
 destructor TCastleRenderUnlitMesh.Destroy;
@@ -203,7 +224,48 @@ begin
   FreeAndNil(Vao);
   FreeBuffer(VboIndex);
   FreeBuffer(VboVertex);
+  FreeAndNil(FixedFunctionVertexes);
+  FreeAndNil(FixedFunctionIndexes);
+  FreeAndNil(FRHIVertexBuffer);
+  FreeAndNil(FRHIIndexBuffer);
+  FRHIPipeline := nil; // owned by RHIDevice pipeline cache
   inherited;
+end;
+
+procedure TCastleRenderUnlitMesh.PrepareRHIPipeline(const ATopology: TRHIPrimitiveTopology);
+var
+  PipeDesc: TRHIGraphicsPipelineDesc;
+begin
+  if RHIDevice = nil then
+    Exit;
+  if (FRHIPipeline <> nil) and (FRHILastTopology = ATopology) then
+    Exit;
+
+  FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+  PipeDesc.Topology := ATopology;
+  SetLength(PipeDesc.VertexInput.Bindings, 1);
+  PipeDesc.VertexInput.Bindings[0].Binding := 0;
+  PipeDesc.VertexInput.Bindings[0].Stride := SizeOf(TVector4);
+  PipeDesc.VertexInput.Bindings[0].PerInstance := False;
+  SetLength(PipeDesc.VertexInput.Attributes, 1);
+  PipeDesc.VertexInput.Attributes[0].Location := 0;
+  PipeDesc.VertexInput.Attributes[0].Binding := 0;
+  PipeDesc.VertexInput.Attributes[0].Format := vafVector4;
+  PipeDesc.VertexInput.Attributes[0].Offset := 0;
+  PipeDesc.Rasterizer.CullMode := cmNone;
+  PipeDesc.Rasterizer.FrontFace := ffCounterClockwise;
+  PipeDesc.Rasterizer.PolygonMode := pmFill;
+  PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+  PipeDesc.DepthStencil.DepthWriteEnable := FUseColor;
+  if FUseColor then
+    PipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque
+  else
+    PipeDesc.BlendState := TRHIBlendStateDesc.DefaultColorMaskNone;
+  SetLength(PipeDesc.ColorAttachmentFormats, 1);
+  PipeDesc.ColorAttachmentFormats[0] := pfBGRA8_UNorm;
+  PipeDesc.DepthAttachmentFormat := pfD24_UNorm_S8_UInt;
+  PipeDesc.SampleCount := 1;
+  FRHIPipeline := RHIDevice.GetOrCreatePipeline(PipeDesc);
 end;
 
 class procedure TCastleRenderUnlitMesh.PrepareShader(const AUseColor: Boolean);
@@ -214,7 +276,7 @@ const
 var
   Shader: TGLSLProgram;
 begin
-  if GLFeatures.EnableFixedFunction then
+  if (RHIDevice <> nil) or (GLFeatures = nil) or GLFeatures.EnableFixedFunction then
     Exit;
   Assert(GLFeatures.Shaders); // EnableFixedFunction and Shaders are now synchronized
 
@@ -257,6 +319,21 @@ begin
 end;
 
 procedure TCastleRenderUnlitMesh.Render(const Mode: TPrimitiveMode);
+type
+  TUnlitMeshPushConstants = packed record
+    ModelViewProjection: TMatrix4;
+    Color: TVector4;
+  end;
+const
+  PrimitiveModeToRHI: array [TPrimitiveMode] of TRHIPrimitiveTopology = (
+    ptPointList,
+    ptLineStrip,
+    ptLineStrip,
+    ptLineList,
+    ptTriangleStrip,
+    ptTriangleList,
+    ptTriangleList
+  );
 
   { Call glDrawElements or glDrawArrays.
     IndexPtr is used only when using indexes, and should be
@@ -343,7 +420,36 @@ procedure TCastleRenderUnlitMesh.Render(const Mode: TPrimitiveMode);
   end;
   {$endif}
 
+var
+  Topology: TRHIPrimitiveTopology;
+  PushConsts: TUnlitMeshPushConstants;
 begin
+  if RHIDevice <> nil then
+  begin
+    Topology := PrimitiveModeToRHI[Mode];
+    PrepareRHIPipeline(Topology);
+    FRHILastTopology := Topology;
+    FRHILastVertexCount := VertexAllocatedItems;
+    FRHILastIndexCount := IndexAllocatedItems;
+    Inc(FRHIDrawCallCount);
+
+    if (ActiveCommandList <> nil) and (FRHIVertexBuffer <> nil) and (VertexAllocatedItems > 0) then
+    begin
+      ActiveCommandList.BindPipeline(FRHIPipeline);
+      PushConsts.ModelViewProjection := ModelViewProjection;
+      PushConsts.Color := FColor;
+      ActiveCommandList.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConsts), PushConsts);
+      ActiveCommandList.BindVertexBuffers(0, [FRHIVertexBuffer], [0]);
+      if (IndexAllocatedItems <> 0) and (FRHIIndexBuffer <> nil) then
+      begin
+        ActiveCommandList.BindIndexBuffer(FRHIIndexBuffer, 0, itUInt16);
+        ActiveCommandList.DrawIndexed(IndexAllocatedItems, 1, 0, 0, 0);
+      end else
+        ActiveCommandList.Draw(VertexAllocatedItems, 1, 0, 0);
+    end;
+    Exit;
+  end;
+
   {$ifndef OpenGLES}
   if GLFeatures.EnableFixedFunction then
     RenderFixedFunction
@@ -364,7 +470,27 @@ procedure TCastleRenderUnlitMesh.SetIndexes(const Indexes: PUInt16; const Indexe
 var
   NewVbo: Boolean;
   NewSize: Cardinal;
+  BufDesc: TRHIBufferDesc;
 begin
+  if RHIDevice <> nil then
+  begin
+    NewSize := IndexesCount * SizeOf(UInt16);
+    if NewSize > 0 then
+    begin
+      if (FRHIIndexBuffer = nil) or (FRHIIndexBuffer.Desc.Size < NewSize) then
+      begin
+        FreeAndNil(FRHIIndexBuffer);
+        BufDesc := TRHIBufferDesc.Create(NewSize, [buIndex, buTransferDst], muGpuOnly);
+        FRHIIndexBuffer := RHIDevice.CreateBuffer(BufDesc, Indexes);
+      end else
+      if Indexes <> nil then
+        FRHIIndexBuffer.UploadData(Indexes^, NewSize, 0);
+    end;
+    IndexAllocatedItems := IndexesCount;
+    IndexAllocatedBytes := NewSize;
+    Exit;
+  end;
+
   if not GLFeatures.EnableFixedFunction then
   begin
     NewVbo := VboIndex = GLObjectNone;
@@ -399,7 +525,30 @@ var
   NewVbo: Boolean;
   NewSize: Cardinal;
   DataUsage: TGLEnum;
+  BufDesc: TRHIBufferDesc;
 begin
+  if RHIDevice <> nil then
+  begin
+    NewSize := VertexesCount * SizeOf(TVector4);
+    if NewSize > 0 then
+    begin
+      if (FRHIVertexBuffer = nil) or (FRHIVertexBuffer.Desc.Size < NewSize) then
+      begin
+        FreeAndNil(FRHIVertexBuffer);
+        if UsageDynamic then
+          BufDesc := TRHIBufferDesc.Create(NewSize, [buVertex, buTransferDst], muCpuToGpu)
+        else
+          BufDesc := TRHIBufferDesc.Create(NewSize, [buVertex, buTransferDst], muGpuOnly);
+        FRHIVertexBuffer := RHIDevice.CreateBuffer(BufDesc, Vertexes);
+      end else
+      if Vertexes <> nil then
+        FRHIVertexBuffer.UploadData(Vertexes^, NewSize, 0);
+    end;
+    VertexAllocatedItems := VertexesCount;
+    VertexAllocatedBytes := NewSize;
+    Exit;
+  end;
+
   if not GLFeatures.EnableFixedFunction then
   begin
     NewVbo := VboVertex = GLObjectNone;
@@ -456,7 +605,8 @@ begin
   if FUseColor <> Value then
   begin
     FUseColor := Value;
-    PrepareShader(Value);
+    if (RHIDevice = nil) and (GLFeatures <> nil) then
+      PrepareShader(Value);
   end;
 end;
 

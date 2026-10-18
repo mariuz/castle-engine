@@ -126,6 +126,7 @@
     FRHIAttribBuffer: TRHIBuffer;
     FRHIIndexBuffer: TRHIBuffer;
     FRHIJointBuffer: TRHIBuffer;
+    FRHIUploadCount: Cardinal;
 
     { Like TX3DRendererShape.LoadArraysToVbo,
       but takes explicit DynamicGeometry. }
@@ -143,6 +144,7 @@
     property RHIAttributeBuffer: TRHIBuffer read FRHIAttribBuffer;
     property RHIIndexBuffer: TRHIBuffer read FRHIIndexBuffer;
     property RHIJointBuffer: TRHIBuffer read FRHIJointBuffer;
+    property RHIUploadCount: Cardinal read FRHIUploadCount;
   end;
 
   TShapeCacheList = {$ifdef FPC}specialize{$endif} TObjectList<TShapeCache>;
@@ -215,7 +217,7 @@ var
   BufDesc: TRHIBufferDesc;
   DataSize: PtrUInt;
 begin
-  if (ApplicationProperties = nil) or (ApplicationProperties.RenderBackend <> backendVulkan) or (RHIDevice = nil) or (Count = 0) then
+  if (RHIDevice = nil) or (Count = 0) then
     Exit;
 
   DataSize := Count * SizeOf(TMatrix4);
@@ -234,6 +236,7 @@ var
   DataUsage: TGLenum;
   NewVbos: boolean;
   RHIBufDesc: TRHIBufferDesc;
+  RHIMemUsage: TRHIMemoryUsage;
 
   { Bind Vbo buffer and load data. Updates AllocatedSize.
 
@@ -317,7 +320,12 @@ var
   end;
 
 begin
-  if GLFeatures.VertexBufferObject then
+  if DynamicGeometry then
+    DataUsage := GL_STREAM_DRAW
+  else
+    DataUsage := GL_STATIC_DRAW;
+
+  if (GLFeatures <> nil) and GLFeatures.VertexBufferObject then
   begin
     { In case of VBO not supported (ancient GPUs), we do not free data in Arrays,
       it will be used to provide data at each draw call. }
@@ -338,16 +346,6 @@ begin
            VboTypesToStr(VboToReload)]));
     end;
 
-    if DynamicGeometry then
-      { GL_STREAM_DRAW is most suitable if we will modify this every frame,
-        according to
-        https://www.khronos.org/opengl/wiki/Buffer_Object
-        https://computergraphics.stackexchange.com/questions/5712/gl-static-draw-vs-gl-dynamic-draw-vs-gl-stream-draw-does-it-matter
-      }
-      DataUsage := GL_STREAM_DRAW
-    else
-      DataUsage := GL_STATIC_DRAW;
-
     VboCoordinatePreserveGeometryOrder := Arrays.CoordinatePreserveGeometryOrder;
 
     BufferData(vtCoordinate, btArray,
@@ -362,57 +360,75 @@ begin
 
     VboAllocatedUsage := DataUsage;
 
-    if (ApplicationProperties <> nil) and (ApplicationProperties.RenderBackend = backendVulkan) and (RHIDevice <> nil) then
-    begin
-      if Arrays.Count > 0 then
-      begin
-        if (FRHICoordBuffer <> nil) and (FRHICoordBuffer.Desc.Size = Arrays.Count * Arrays.CoordinateSize) then
-          FRHICoordBuffer.UploadData(Arrays.CoordinateArray^, Arrays.Count * Arrays.CoordinateSize)
-        else
-        begin
-          FreeAndNil(FRHICoordBuffer);
-          RHIBufDesc := TRHIBufferDesc.Create(Arrays.Count * Arrays.CoordinateSize, [buVertex], muGpuOnly);
-          FRHICoordBuffer := RHIDevice.CreateBuffer(RHIBufDesc, Arrays.CoordinateArray);
-        end;
-
-        if Arrays.AttributeSize > 0 then
-        begin
-          if (FRHIAttribBuffer <> nil) and (FRHIAttribBuffer.Desc.Size = Arrays.Count * Arrays.AttributeSize) then
-            FRHIAttribBuffer.UploadData(Arrays.AttributeArray^, Arrays.Count * Arrays.AttributeSize)
-          else
-          begin
-            FreeAndNil(FRHIAttribBuffer);
-            RHIBufDesc := TRHIBufferDesc.Create(Arrays.Count * Arrays.AttributeSize, [buVertex], muGpuOnly);
-            FRHIAttribBuffer := RHIDevice.CreateBuffer(RHIBufDesc, Arrays.AttributeArray);
-          end;
-        end else
-          FreeAndNil(FRHIAttribBuffer);
-
-        if Arrays.Indexes <> nil then
-        begin
-          if (FRHIIndexBuffer <> nil) and (FRHIIndexBuffer.Desc.Size = Arrays.Indexes.Count * SizeOf(TGeometryIndex)) then
-            FRHIIndexBuffer.UploadData(Arrays.Indexes.L^, Arrays.Indexes.Count * SizeOf(TGeometryIndex))
-          else
-          begin
-            FreeAndNil(FRHIIndexBuffer);
-            RHIBufDesc := TRHIBufferDesc.Create(Arrays.Indexes.Count * SizeOf(TGeometryIndex), [buIndex], muGpuOnly);
-            FRHIIndexBuffer := RHIDevice.CreateBuffer(RHIBufDesc, Arrays.Indexes.L);
-          end;
-        end else
-          FreeAndNil(FRHIIndexBuffer);
-      end else
-      begin
-        FreeAndNil(FRHICoordBuffer);
-        FreeAndNil(FRHIAttribBuffer);
-        FreeAndNil(FRHIIndexBuffer);
-      end;
-    end;
-
-    Arrays.FreeData;
-
     if GLFeatures.VertexArrayObject and (Vao = nil) then
       Vao := TVertexArrayObject.Create(nil);
   end;
+
+  if RHIDevice <> nil then
+  begin
+    Assert(not Arrays.DataFreed);
+    VboCoordinatePreserveGeometryOrder := Arrays.CoordinatePreserveGeometryOrder;
+    VboAllocatedUsage := DataUsage;
+    VboAllocatedSize[vtCoordinate] := Arrays.Count * Arrays.CoordinateSize;
+    VboAllocatedSize[vtAttribute] := Arrays.Count * Arrays.AttributeSize;
+    if Arrays.Indexes <> nil then
+      VboAllocatedSize[vtIndex] := Arrays.Indexes.Count * SizeOf(TGeometryIndex)
+    else
+      VboAllocatedSize[vtIndex] := 0;
+
+    if DynamicGeometry then
+      RHIMemUsage := muCpuToGpu
+    else
+      RHIMemUsage := muGpuOnly;
+
+    if Arrays.Count > 0 then
+    begin
+      if (FRHICoordBuffer <> nil) and (FRHICoordBuffer.Desc.Size = Arrays.Count * Arrays.CoordinateSize) then
+        FRHICoordBuffer.UploadData(Arrays.CoordinateArray^, Arrays.Count * Arrays.CoordinateSize)
+      else
+      begin
+        FreeAndNil(FRHICoordBuffer);
+        RHIBufDesc := TRHIBufferDesc.Create(Arrays.Count * Arrays.CoordinateSize, [buVertex, buTransferDst], RHIMemUsage);
+        FRHICoordBuffer := RHIDevice.CreateBuffer(RHIBufDesc, Arrays.CoordinateArray);
+      end;
+
+      if Arrays.AttributeSize > 0 then
+      begin
+        if (FRHIAttribBuffer <> nil) and (FRHIAttribBuffer.Desc.Size = Arrays.Count * Arrays.AttributeSize) then
+          FRHIAttribBuffer.UploadData(Arrays.AttributeArray^, Arrays.Count * Arrays.AttributeSize)
+        else
+        begin
+          FreeAndNil(FRHIAttribBuffer);
+          RHIBufDesc := TRHIBufferDesc.Create(Arrays.Count * Arrays.AttributeSize, [buVertex, buTransferDst], RHIMemUsage);
+          FRHIAttribBuffer := RHIDevice.CreateBuffer(RHIBufDesc, Arrays.AttributeArray);
+        end;
+      end else
+        FreeAndNil(FRHIAttribBuffer);
+
+      if Arrays.Indexes <> nil then
+      begin
+        if (FRHIIndexBuffer <> nil) and (FRHIIndexBuffer.Desc.Size = Arrays.Indexes.Count * SizeOf(TGeometryIndex)) then
+          FRHIIndexBuffer.UploadData(Arrays.Indexes.L^, Arrays.Indexes.Count * SizeOf(TGeometryIndex))
+        else
+        begin
+          FreeAndNil(FRHIIndexBuffer);
+          RHIBufDesc := TRHIBufferDesc.Create(Arrays.Indexes.Count * SizeOf(TGeometryIndex), [buIndex, buTransferDst], RHIMemUsage);
+          FRHIIndexBuffer := RHIDevice.CreateBuffer(RHIBufDesc, Arrays.Indexes.L);
+        end;
+      end else
+        FreeAndNil(FRHIIndexBuffer);
+
+      Inc(FRHIUploadCount);
+    end else
+    begin
+      FreeAndNil(FRHICoordBuffer);
+      FreeAndNil(FRHIAttribBuffer);
+      FreeAndNil(FRHIIndexBuffer);
+    end;
+  end;
+
+  if ((GLFeatures <> nil) and GLFeatures.VertexBufferObject) or (RHIDevice <> nil) then
+    Arrays.FreeData;
 
   VboToReload := [];
 end;

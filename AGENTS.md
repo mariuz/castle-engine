@@ -37,7 +37,7 @@ All roadmap milestones and design decisions are tracked in [`PLAN.md`](file:///e
 | [`src/base_rendering/vulkan/castleinternalrhi_vulkan.pas`](file:///e:/Work/castle-engine/src/base_rendering/vulkan/castleinternalrhi_vulkan.pas) | Full Vulkan RHI implementation: `TVulkanRHIDevice`, `TVulkanRHICommandList`, `TVulkanDescriptorPoolAllocator` (growable + per-frame transient descriptor pools), `TCastleVulkanStagingUploader` (async staging upload ring buffer + dedicated DMA transfer queue), `TCastleVulkanBindlessTextureManager` (bindless texture & sampler indexing), hardware MSAA & single-pass attachment resolve, `TVulkanRHIComputePipeline` (`vkCmdDispatch` / `vkCmdDispatchIndirect`), `VK_EXT_extended_dynamic_state` & `VK_KHR_synchronization2` + `TCastleVulkanTimelineSemaphore`, `TVulkanRHIQueryPool` & `TCastleVulkanTimestampProfiler`, `VK_KHR_dynamic_rendering` with Vulkan 1.1/1.2 `VkRenderPass`/`VkFramebuffer` fallback, `VK_EXT_graphics_pipeline_library` 4-part fast-link PSO caching, cross-vendor format negotiation (`NegotiateOptimalPixelFormat`), and fence-synchronized deferred resource deletion (`FlushDeferredDeletions`). |
 | [`src/base_rendering/rhi/castlerendercontext_rhi.pas`](file:///e:/Work/castle-engine/src/base_rendering/rhi/castlerendercontext_rhi.pas) | Bridges CGE's `TRenderContext`, `TCastleViewport`, `TDrawableImage`, and `TCastleScene` rendering to `TRHIDevice`. |
 | [`src/base_rendering/rhi/castleshader_rhi.pas`](file:///e:/Work/castle-engine/src/base_rendering/rhi/castleshader_rhi.pas) | Generates Vulkan GLSL `#version 450` shaders (`Set 0` frame/light/skinning UBOs, `Set 1` material textures & bindless texture array preamble `GenerateBindlessPreamble`, `Set 2` custom `Effect` uniforms, Push Constants) and auto-upgrades legacy OpenGL built-ins (`UpgradeLegacyGLSLBuiltIns`). |
-| [`tests/code/testcases/testcastlevulkanrhi.pas`](file:///e:/Work/castle-engine/tests/code/testcases/testcastlevulkanrhi.pas) | `TTestCastleVulkanRHI`: 57 unit tests covering all Vulkan RHI subsystems in both headless simulation and hardware modes. |
+| [`tests/code/testcases/testcastlevulkanrhi.pas`](file:///e:/Work/castle-engine/tests/code/testcases/testcastlevulkanrhi.pas) | `TTestCastleVulkanRHI`: 63 unit tests covering all Vulkan RHI subsystems in both headless simulation and hardware modes. |
 
 ---
 
@@ -77,8 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–9**: **COMPLETED** (100%).
-- **Phase 10 (3D, Static CubeMap & Movie Texture RHI Resources, Skybox/Background RHI Rendering & Stencil Shadow Volumes)**: **COMPLETED** (100%, 60 unit tests passing):
-  - [x] **10.1. 3D, Static CubeMap & Movie Texture RHI Resources (`T3DTextureResource`, `TComposedCubeMapTextureResource`, `TImageCubeMapTextureResource`, `TMovieTextureResource`, `TImageTextureResource.UpdateTextureContentsRgbaFloat`)** — Completed & tested (`Test3DAndCubeAndMovieTextureResourcesRHI`).
-  - [x] **10.2. Background Skybox & Panorama RHI Rendering (`TBackgroundRenderer`, `TBackgroundScene`, `TBackground3D`, `TBackground2D`)** — Completed & tested (`TestBackgroundRendererRHI`).
-  - [x] **10.3. Stencil Shadow Volumes & Two-Sided Stencil RHI State (`TGLShadowVolumeRenderer`, `TRHIStencilOp`, `TRHIStencilOpStateDesc`, `DefaultStencilShadowVolumeZPass`, `DefaultStencilShadowVolumeZFail`, `DefaultStencilLitPass`)** — Completed & tested (`TestStencilShadowVolumesRHI`).
+- **Phases 1–10**: **COMPLETED** (100%).
+- **Phase 11 (Unlit Mesh & Shadow Volume Extrusion RHI Backend, 2D Primitive Drawing RHI Dispatch & Dynamic Shape Batching RHI Integration)**: **COMPLETED** (100%, 63 unit tests passing):
+  - [x] **11.1. `TCastleRenderUnlitMesh` & Shadow Volume Geometry Extrusion RHI Backend (`CastleRenderPrimitives`, `CastleShapeInternalRenderShadowVolumes`)** — Completed & tested (`TestRenderUnlitMeshAndShadowVolumeExtrusionRHI`).
+  - [x] **11.2. 2D Primitive Drawing RHI Dispatch (`DrawPrimitive2D`, `DrawRectangle`, `DrawRectangleOutline`, `DrawCircle`, `DrawCircleOutline`, `GLFadeRectangleDark` / `GLFadeRectangleLight`)** — Completed & tested (`TestDrawPrimitive2DRHI`).
+  - [x] **11.3. Dynamic Shape Batching RHI Integration (`TBatchShapes`, `TShapeCache`, `TX3DRendererShape.PrepareRHIBuffers`)** — Completed & tested (`TestDynamicBatchShapesRHI`).

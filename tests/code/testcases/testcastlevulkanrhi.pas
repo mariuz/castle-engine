@@ -31,6 +31,9 @@ uses
   CastleSceneInternalShape, CastleInternalOcclusionCulling,
   CastleTransform, CastleScene, CastleProjection, CastleViewport, CastleScreenEffects, CastleRenderOptions, CastleWindow,
   CastleVideos, CastleInternalBackgroundRenderer, CastleInternalGLShadowVolumes,
+  CastleGLUtils, CastleRenderPrimitives, CastleShapes,
+  CastleShapeInternalShadowVolumes, CastleShapeInternalRenderShadowVolumes,
+  CastleInternalBatchShapes,
   ToolManifest, CastleInternalRenderDoc;
 
 type
@@ -96,6 +99,9 @@ type
     procedure Test3DAndCubeAndMovieTextureResourcesRHI;
     procedure TestBackgroundRendererRHI;
     procedure TestStencilShadowVolumesRHI;
+    procedure TestRenderUnlitMeshAndShadowVolumeExtrusionRHI;
+    procedure TestDrawPrimitive2DRHI;
+    procedure TestDynamicBatchShapesRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -4705,6 +4711,278 @@ begin
     SetRHIDevice(SavedDevice);
     FreeAndNil(RenderParams);
     FreeAndNil(SVRenderer);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRenderUnlitMeshAndShadowVolumeExtrusionRHI;
+var
+  SavedDevice: TRHIDevice;
+  SavedCmdList: TRHICommandList;
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  UnlitMesh, ShadowMesh: TCastleRenderUnlitMesh;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  BoxNode: TBoxNode;
+  RenderParams: TBasicRenderParams;
+  ShapeObj: TShape;
+begin
+  SavedDevice := RHIDevice;
+  SavedCmdList := ActiveCommandList;
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0, cllPrimary);
+  try
+    SetRHIDevice(VkDev);
+    CmdList.BeginRecording;
+    SetActiveCommandList(CmdList);
+
+    { 1. Test TCastleRenderUnlitMesh direct RHI vertex/index upload and draw recording }
+    UnlitMesh := TCastleRenderUnlitMesh.Create(True);
+    try
+      UnlitMesh.Color := Vector4(1, 0.5, 0, 1);
+      UnlitMesh.ModelViewProjection := TMatrix4.Identity;
+      UnlitMesh.SetVertexes([
+        Vector4(-1, -1, 0, 1),
+        Vector4( 1, -1, 0, 1),
+        Vector4( 1,  1, 0, 1),
+        Vector4(-1,  1, 0, 1)
+      ], False);
+      UnlitMesh.SetIndexes([0, 1, 2, 0, 2, 3]);
+
+      AssertTrue('UnlitMesh.RHIVertexBuffer must be allocated', UnlitMesh.RHIVertexBuffer <> nil);
+      AssertEquals('UnlitMesh.RHIVertexBuffer size must be 64 bytes (4 * TVector4)',
+        64, UnlitMesh.RHIVertexBuffer.Desc.Size);
+      AssertTrue('UnlitMesh.RHIIndexBuffer must be allocated', UnlitMesh.RHIIndexBuffer <> nil);
+      AssertEquals('UnlitMesh.RHIIndexBuffer size must be 12 bytes (6 * UInt16)',
+        12, UnlitMesh.RHIIndexBuffer.Desc.Size);
+
+      UnlitMesh.Render(pmTriangles);
+      AssertEquals('UnlitMesh.RHIDrawCallCount must be 1', 1, UnlitMesh.RHIDrawCallCount);
+      AssertEquals('UnlitMesh.RHILastVertexCount must be 4', 4, UnlitMesh.RHILastVertexCount);
+      AssertEquals('UnlitMesh.RHILastIndexCount must be 6', 6, UnlitMesh.RHILastIndexCount);
+      AssertEquals('UnlitMesh.RHILastTopology must be ptTriangleList',
+        Ord(ptTriangleList), Ord(UnlitMesh.RHILastTopology));
+      AssertTrue('UnlitMesh.RHIPipeline must be created', UnlitMesh.RHIPipeline <> nil);
+    finally
+      FreeAndNil(UnlitMesh);
+    end;
+
+    { 2. Test TRenderShapeShadowVolumes.RenderSilhouetteShadowVolume RHI extrusion }
+    Scene := TCastleScene.Create(nil);
+    ShadowMesh := TCastleRenderUnlitMesh.Create(False);
+    RenderParams := TBasicRenderParams.Create;
+    try
+      Root := TX3DRootNode.Create;
+      BoxNode := TBoxNode.CreateWithShape(ShapeNode);
+      BoxNode.Size := Vector3(2, 2, 2);
+      Root.AddChildren(ShapeNode);
+      Scene.Load(Root, True);
+
+      AssertTrue('Scene must have at least 1 shape', Scene.Shapes.TraverseList(False).Count >= 1);
+      ShapeObj := Scene.Shapes.TraverseList(False)[0];
+      ShapeObj.InternalShadowVolumes.PrepareResources;
+      ShapeObj.InternalShadowVolumes.RenderSilhouetteShadowVolume(
+        RenderParams, ShadowMesh, Vector4(0, 10, 0, 1), TMatrix4.Identity,
+        True, True, True, True);
+
+      AssertTrue('ShadowMesh.RHIDrawCallCount must be >= 1 after silhouette extrusion',
+        ShadowMesh.RHIDrawCallCount >= 1);
+      AssertTrue('ShadowMesh.RHIVertexBuffer must be allocated for extruded shadow quads',
+        ShadowMesh.RHIVertexBuffer <> nil);
+      AssertTrue('ShadowMesh.RHILastVertexCount must be > 0',
+        ShadowMesh.RHILastVertexCount > 0);
+      AssertEquals('ShadowMesh.RHILastTopology must be ptTriangleList',
+        Ord(ptTriangleList), Ord(ShadowMesh.RHILastTopology));
+    finally
+      FreeAndNil(RenderParams);
+      FreeAndNil(ShadowMesh);
+      FreeAndNil(Scene);
+    end;
+
+    CmdList.EndRecording;
+  finally
+    SetActiveCommandList(SavedCmdList);
+    SetRHIDevice(SavedDevice);
+    FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestDrawPrimitive2DRHI;
+var
+  SavedDevice: TRHIDevice;
+  SavedCmdList: TRHICommandList;
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+begin
+  SavedDevice := RHIDevice;
+  SavedCmdList := ActiveCommandList;
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0, cllPrimary);
+  try
+    SetRHIDevice(VkDev);
+    CmdList.BeginRecording;
+    SetActiveCommandList(CmdList);
+    RHIPrimitive2DResetStats;
+
+    { 1. DrawRectangle }
+    DrawRectangle(FloatRectangle(10, 20, 100, 50), Red);
+    AssertEquals('DrawRectangle must increment RHIPrimitive2DDrawCallCount to 1',
+      1, RHIPrimitive2DDrawCallCount);
+    AssertEquals('DrawRectangle must upload 4 vertices',
+      4, RHIPrimitive2DLastVertexCount);
+    AssertEquals('DrawRectangle mode must be pmTriangleFan',
+      Ord(pmTriangleFan), Ord(RHIPrimitive2DLastMode));
+    AssertVectorEquals(Red, RHIPrimitive2DLastColor);
+    AssertTrue('RHIPrimitive2DBuffer must be allocated', RHIPrimitive2DBuffer <> nil);
+
+    { 2. DrawRectangleOutline }
+    DrawRectangleOutline(FloatRectangle(10, 20, 100, 50), Green, 2.0);
+    AssertEquals('DrawRectangleOutline must increment RHIPrimitive2DDrawCallCount to 2',
+      2, RHIPrimitive2DDrawCallCount);
+    AssertEquals('DrawRectangleOutline must upload 4 vertices',
+      4, RHIPrimitive2DLastVertexCount);
+    AssertEquals('DrawRectangleOutline mode must be pmLineLoop',
+      Ord(pmLineLoop), Ord(RHIPrimitive2DLastMode));
+
+    { 3. DrawCircle }
+    DrawCircle(Vector2(50, 50), 25, 25, Blue, 12);
+    AssertEquals('DrawCircle must increment RHIPrimitive2DDrawCallCount to 3',
+      3, RHIPrimitive2DDrawCallCount);
+    AssertEquals('DrawCircle with 12 slices must upload 36 vertices',
+      36, RHIPrimitive2DLastVertexCount);
+    AssertEquals('DrawCircle mode must be pmTriangleFan',
+      Ord(pmTriangleFan), Ord(RHIPrimitive2DLastMode));
+
+    { 4. DrawCircleOutline }
+    DrawCircleOutline(Vector2(50, 50), 25, 25, Yellow, 1.5, 16);
+    AssertEquals('DrawCircleOutline must increment RHIPrimitive2DDrawCallCount to 4',
+      4, RHIPrimitive2DDrawCallCount);
+    AssertEquals('DrawCircleOutline with 16 slices must upload 16 vertices',
+      16, RHIPrimitive2DLastVertexCount);
+    AssertEquals('DrawCircleOutline mode must be pmLineLoop',
+      Ord(pmLineLoop), Ord(RHIPrimitive2DLastMode));
+
+    { 5. GLFadeRectangleDark and GLFadeRectangleLight }
+    GLFadeRectangleDark(Rectangle(0, 0, 800, 600), Red, 0.5);
+    GLFadeRectangleLight(Rectangle(0, 0, 800, 600), White, 0.5);
+    AssertEquals('GLFadeRectangleDark + GLFadeRectangleLight must increment RHIPrimitive2DDrawCallCount to 6',
+      6, RHIPrimitive2DDrawCallCount);
+
+    CmdList.EndRecording;
+  finally
+    SetActiveCommandList(SavedCmdList);
+    SetRHIDevice(SavedDevice);
+    FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestDynamicBatchShapesRHI;
+var
+  SavedDevice: TRHIDevice;
+  VkDev: TVulkanRHIDevice;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  SharedApp: TAppearanceNode;
+  Mat: TMaterialNode;
+  ShapeNode1, ShapeNode2: TShapeNode;
+  IFS1, IFS2: TIndexedFaceSetNode;
+  Coord1, Coord2: TCoordinateNode;
+  Collected1, Collected2: TCollectedShape;
+  Batcher: TBatchShapes;
+  ShapesList: TShapeList;
+begin
+  SavedDevice := RHIDevice;
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  Scene := TCastleScene.Create(nil);
+  Collected1 := TCollectedShape.Create;
+  Collected2 := TCollectedShape.Create;
+  Batcher := nil;
+  try
+    SetRHIDevice(VkDev);
+
+    Root := TX3DRootNode.Create;
+    SharedApp := TAppearanceNode.Create;
+    Mat := TMaterialNode.Create;
+    SharedApp.Material := Mat;
+
+    ShapeNode1 := TShapeNode.Create;
+    ShapeNode1.Appearance := SharedApp;
+    IFS1 := TIndexedFaceSetNode.Create;
+    Coord1 := TCoordinateNode.Create;
+    Coord1.SetPoint([Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(0, 1, 0)]);
+    IFS1.Coord := Coord1;
+    IFS1.SetCoordIndex([0, 1, 2, -1]);
+    ShapeNode1.Geometry := IFS1;
+
+    ShapeNode2 := TShapeNode.Create;
+    ShapeNode2.Appearance := SharedApp;
+    IFS2 := TIndexedFaceSetNode.Create;
+    Coord2 := TCoordinateNode.Create;
+    Coord2.SetPoint([Vector3(2, 0, 0), Vector3(3, 0, 0), Vector3(2, 1, 0)]);
+    IFS2.Coord := Coord2;
+    IFS2.SetCoordIndex([0, 1, 2, -1]);
+    ShapeNode2.Geometry := IFS2;
+
+    Root.AddChildren([ShapeNode1, ShapeNode2]);
+    Scene.Load(Root, True);
+
+    ShapesList := Scene.Shapes.TraverseList(False);
+    AssertEquals('Scene must have 2 shapes before batching', 2, ShapesList.Count);
+
+    Collected1.Shape := ShapesList[0] as TGLShape;
+    Collected1.RenderOptions := Scene.RenderOptions;
+    Collected1.SceneTransform := TMatrix4.Identity;
+
+    Collected2.Shape := ShapesList[1] as TGLShape;
+    Collected2.RenderOptions := Scene.RenderOptions;
+    Collected2.SceneTransform := TranslationMatrix(10, 0, 0);
+
+    Batcher := TBatchShapes.Create;
+
+    { Frame 1: Batch Collected1 and Collected2 into a single merged pool shape }
+    AssertTrue('Batch(Collected1) must return True', Batcher.Batch(Collected1));
+    AssertTrue('Batch(Collected2) must return True', Batcher.Batch(Collected2));
+    Batcher.Commit;
+
+    AssertEquals('Two compatible shapes must merge into 1 batched shape',
+      1, Batcher.Batched.Count);
+    AssertEquals('RHICommitBatchCount must be 1 after first Commit',
+      1, Batcher.RHICommitBatchCount);
+    AssertTrue('RHILastMergedShape must be assigned',
+      Batcher.RHILastMergedShape <> nil);
+    AssertTrue('Merged shape Cache must be initialized',
+      Batcher.RHILastMergedShape.Cache <> nil);
+    AssertTrue('Merged shape RHICoordinateBuffer must be uploaded',
+      Batcher.RHILastMergedShape.Cache.RHICoordinateBuffer <> nil);
+    AssertEquals('Merged shape RHICoordinateBuffer must use muCpuToGpu (DynamicGeometry)',
+      Ord(muCpuToGpu), Ord(Batcher.RHILastMergedShape.Cache.RHICoordinateBuffer.Desc.MemoryUsage));
+    AssertEquals('Merged shape Cache.RHIUploadCount must be 1',
+      1, Batcher.RHILastMergedShape.Cache.RHIUploadCount);
+
+    { Frame 2: Re-batch with updated transform and verify dynamic RHI buffer re-upload }
+    Batcher.FreeBatched;
+    Collected2.SceneTransform := TranslationMatrix(20, 5, 0);
+    AssertTrue('Frame 2 Batch(Collected1) must return True', Batcher.Batch(Collected1));
+    AssertTrue('Frame 2 Batch(Collected2) must return True', Batcher.Batch(Collected2));
+    Batcher.Commit;
+
+    AssertEquals('RHICommitBatchCount must be 2 after second Commit',
+      2, Batcher.RHICommitBatchCount);
+    AssertEquals('Merged shape Cache.RHIUploadCount must be 2 after dynamic re-upload',
+      2, Batcher.RHILastMergedShape.Cache.RHIUploadCount);
+
+    Batcher.FreeBatched;
+    Batcher.GLContextClose;
+  finally
+    SetRHIDevice(SavedDevice);
+    FreeAndNil(Batcher);
+    FreeAndNil(Collected2);
+    FreeAndNil(Collected1);
+    FreeAndNil(Scene);
     FreeAndNil(VkDev);
   end;
 end;

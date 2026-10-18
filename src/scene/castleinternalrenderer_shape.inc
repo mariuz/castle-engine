@@ -67,6 +67,11 @@
     { Along with Shape.BumpMappingUsed, this is calculated (use only if Shape.BumpMappingUsed). }
     BumpMappingTextureCoordinatesId: Cardinal;
 
+    { Prepare or update @link(Cache) and its GPU / RHI vertex, attribute, and index buffers.
+      Used by dynamic shape batching (@link(TBatchShapes)) and RHI scene rendering. }
+    procedure PrepareRHIBuffers(const ARenderOptions: TCastleRenderOptions;
+      const ATexCoordsNeeded: Cardinal = 0);
+
     destructor Destroy; override;
   end;
 {$endif read_interface}
@@ -157,8 +162,16 @@ function FastUpdateArrays(const Shape: TX3DRendererShape): Boolean;
             end;
 
             // load NewCoordinates to GPU
-            RenderContext.BindBuffer[btArray] := Cache.Vbo[vtCoordinate];
-            glBufferSubData(GL_ARRAY_BUFFER, 0, Size, NewCoordinates);
+            if (GLFeatures <> nil) and (Cache.Vbo[vtCoordinate] <> GLObjectNone) then
+            begin
+              RenderContext.BindBuffer[btArray] := Cache.Vbo[vtCoordinate];
+              glBufferSubData(GL_ARRAY_BUFFER, 0, Size, NewCoordinates);
+            end;
+            if Cache.FRHICoordBuffer <> nil then
+            begin
+              Cache.FRHICoordBuffer.UploadData(NewCoordinates^, Size);
+              Inc(Cache.FRHIUploadCount);
+            end;
           finally FreeMemNiling(NewCoordinates) end;
         end;
       end;
@@ -178,10 +191,10 @@ begin
   if Cache.VboToReload <> [vtCoordinate] then
     Exit;
 
-  { When VBO of coordinates is 0 then
+  { When VBO of coordinates is 0 and FRHICoordBuffer is nil then
     - VBOs not supported (ancient GPU) -> we need to really update Arrays contents each time
     - or VBO of coordinates was not initialized yet }
-  if Cache.Vbo[vtCoordinate] = GLObjectNone then
+  if (Cache.Vbo[vtCoordinate] = GLObjectNone) and (Cache.FRHICoordBuffer = nil) then
     Exit;
   if Cache.Arrays = nil then // not initialized yet
     Exit;
@@ -226,6 +239,37 @@ procedure TX3DRendererShape.LoadArraysToVbo;
 begin
   Assert(Cache <> nil);
   Cache.LoadArraysToVbo(DynamicGeometry);
+end;
+
+procedure TX3DRendererShape.PrepareRHIBuffers(
+  const ARenderOptions: TCastleRenderOptions;
+  const ATexCoordsNeeded: Cardinal);
+var
+  GeneratorClass: TArraysGeneratorClass;
+  Generator: TArraysGenerator;
+begin
+  if Cache = nil then
+    Cache := RendererCache.Shape_IncReference(Self, ARenderOptions);
+
+  if (Cache.Arrays = nil) or (Cache.VboToReload <> []) then
+  begin
+    if not FastUpdateArrays(Self) then
+    begin
+      FreeAndNil(Cache.Arrays);
+      GeneratorClass := GetArraysGenerator(Geometry);
+      if GeneratorClass <> nil then
+      begin
+        Generator := GeneratorClass.Create(Self);
+        try
+          Generator.TexCoordsNeeded := ATexCoordsNeeded;
+          Cache.Arrays := Generator.GenerateArrays;
+        finally
+          FreeAndNil(Generator);
+        end;
+        LoadArraysToVbo;
+      end;
+    end;
+  end;
 end;
 
 {$endif}
