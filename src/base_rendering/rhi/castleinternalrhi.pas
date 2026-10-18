@@ -710,6 +710,9 @@ type
     { Dynamic Rendering Pass Delimiters }
     procedure BeginRendering(const Info: TRHIRenderingInfo); virtual; abstract;
     procedure EndRendering; virtual; abstract;
+    procedure ClearAttachments(const ClearColorBuf: Boolean; const ClearColor: TCastleColor;
+      const ClearDepthBuf: Boolean = False; const ClearDepth: Single = 1.0;
+      const ClearStencilBuf: Boolean = False; const ClearStencil: Byte = 0); virtual;
 
     { Dynamic Viewport & Scissor State }
     procedure SetViewport(const ViewportRect: TFloatRectangle;
@@ -840,11 +843,17 @@ type
 
     { Readback current swapchain or texture into a CPU TCastleImage (for TCastleWindow.SaveScreen). }
     function GrabTextureImage(const SourceTexture: TRHITexture;
-      const ReadArea: TRectangle): TRGBAlphaImage; virtual; abstract;
+      const ReadArea: TRectangle): TRGBAlphaImage; overload; virtual; abstract;
+    function GrabTextureImage(const SourceTexture: TRHITexture;
+      const ReadArea: TRectangle; const DestImage: TCastleImage): Boolean; overload; virtual;
 
     { Pipeline Cache persistence (loads/saves VkPipelineCache to disk) }
     procedure LoadPipelineCache(const CacheFileUrl: String); virtual; abstract;
     procedure SavePipelineCache(const CacheFileUrl: String); virtual; abstract;
+
+    { Multiline and one-line summary strings describing the active RHI device and capabilities. }
+    function GetInformationString: String; virtual;
+    function GetInformationStringSummary: String; virtual;
 
     property Capabilities: TRHIDeviceCapabilities read FCapabilities;
     { Current frame-in-flight index (0 .. MaxFramesInFlight - 1) }
@@ -1330,6 +1339,12 @@ begin
   FLevel := ALevel;
 end;
 
+procedure TRHICommandList.ClearAttachments(const ClearColorBuf: Boolean; const ClearColor: TCastleColor;
+  const ClearDepthBuf: Boolean; const ClearDepth: Single;
+  const ClearStencilBuf: Boolean; const ClearStencil: Byte);
+begin
+end;
+
 procedure TRHICommandList.SetCullMode(const CullMode: TRHICullMode);
 begin
 end;
@@ -1431,6 +1446,58 @@ end;
 function TRHIDevice.CreateQueryPool(const ADesc: TRHIQueryPoolDesc): TRHIQueryPool;
 begin
   Result := nil;
+end;
+
+function TRHIDevice.GrabTextureImage(const SourceTexture: TRHITexture;
+  const ReadArea: TRectangle; const DestImage: TCastleImage): Boolean;
+var
+  Grabbed: TRGBAlphaImage;
+begin
+  Result := False;
+  if DestImage = nil then
+    Exit;
+  Grabbed := GrabTextureImage(SourceTexture, ReadArea);
+  if Grabbed <> nil then
+  try
+    DestImage.Assign(Grabbed);
+    Result := True;
+  finally
+    FreeAndNil(Grabbed);
+  end;
+end;
+
+function TRHIDevice.GetInformationString: String;
+const
+  BackendNames: array[TRHIBackendType] of String = ('OpenGL', 'OpenGLES', 'Vulkan');
+begin
+  Result :=
+    BackendNames[FCapabilities.Backend] + ' RHI information:' + LineEnding +
+    '  Device: ' + FCapabilities.DeviceName + LineEnding +
+    '  Vendor ID: ' + IntToStr(FCapabilities.VendorId) + LineEnding +
+    '  Max texture size: ' + IntToStr(FCapabilities.MaxTextureSize) + LineEnding +
+    '  Max framebuffer MSAA samples: ' + IntToStr(FCapabilities.MaxFramebufferSampleCount) + LineEnding +
+    '  Compute shaders: ' + BoolToStr(FCapabilities.SupportsComputeShaders, True) + LineEnding +
+    '  Multi-draw indirect: ' + BoolToStr(FCapabilities.SupportsMultiDrawIndirect, True) + LineEnding +
+    '  Draw indirect count: ' + BoolToStr(FCapabilities.SupportsDrawIndirectCount, True) + LineEnding +
+    '  Bindless textures: ' + BoolToStr(FCapabilities.SupportsBindlessTextures, True) + LineEnding +
+    '  Extended dynamic state: ' + BoolToStr(FCapabilities.SupportsExtendedDynamicState, True) + LineEnding +
+    '  Synchronization2: ' + BoolToStr(FCapabilities.SupportsSynchronization2, True) + LineEnding +
+    '  Timeline semaphores: ' + BoolToStr(FCapabilities.SupportsTimelineSemaphores, True);
+end;
+
+function TRHIDevice.GetInformationStringSummary: String;
+const
+  BackendNames: array[TRHIBackendType] of String = ('OpenGL', 'OpenGLES', 'Vulkan');
+begin
+  if FCapabilities.DeviceName <> '' then
+    Result := Format('%s (%s, modern rendering: True)', [
+      BackendNames[FCapabilities.Backend],
+      FCapabilities.DeviceName
+    ])
+  else
+    Result := Format('%s (modern rendering: True)', [
+      BackendNames[FCapabilities.Backend]
+    ]);
 end;
 
 end.

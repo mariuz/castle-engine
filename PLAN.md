@@ -290,6 +290,51 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 11 Status**: Completed. `TCastleRenderUnlitMesh` and `TRenderShapeShadowVolumes.RenderSilhouetteShadowVolume` RHI extrusion, 2D primitive drawing RHI dispatch (`DrawPrimitive2D`, `DrawRectangle*`, `DrawCircle*`, `GLFadeRectangle*`), and dynamic shape batching RHI integration (`TBatchShapes.Commit` & `TX3DRendererShape.PrepareRHIBuffers`) fully integrated and tested (63 unit tests passing).
 
 
+### Phase 12: RenderContext RHI State Sync, Screen/Depth Readback & Renderer Information Report (COMPLETED)
+
+* [x] **12.1. `TRenderContext` & `TScissor` Dynamic RHI State Synchronization (`CastleRenderContext`)**:
+  * Route `TRenderContext` dynamic state mutations (`Clear`, `UpdateViewport`, `TScissorList.Update`, `UpdateDepthRange`, `UpdateCullFace`, `UpdateFrontFace`, `UpdateDepthTest`, `UpdateDepthFunc`, `UpdateDepthBufferUpdate`, `UpdatePolygonOffset`, `SynchronizeState`) to `ActiveCommandList` (`ClearAttachments`, `SetViewport`, `SetScissor`, `SetDepthBias`, `SetCullMode`, `SetFrontFace`, `SetDepthTestEnable`, `SetDepthWriteEnable`, `SetDepthCompareOp`) when `RHIDevice <> nil`, and guard raw `gl*` calls when `RHIDevice <> nil` or `GLFeatures = nil`.
+  * Track RHI state synchronization diagnostics (`RHIClearCount`, `RHILastClearBuffers`, `RHILastClearColor`, `RHIViewportUpdateCount`, `RHILastViewport`, `RHILastMinDepth`, `RHILastMaxDepth`, `RHIScissorUpdateCount`, `RHILastScissor`, `RHIScissorActive`, `RHIDepthBiasUpdateCount`) on `TRenderContext` and dynamic viewport/scissor/depth-bias fields on `TVulkanRHICommandList`.
+* [x] **12.2. Screen & Depth Buffer Readback RHI Backend (`SaveScreen_NoFlush`, `SaveScreenToGL_NoFlush`, `SaveScreenDepth_NoFlush`)**:
+  * Route `SaveScreen_NoFlush`, `SaveScreenToGL_NoFlush`, and `SaveScreenDepth_NoFlush` in `castleglimages_savescreen.inc` (plus `TDrawableImage.GetContents` in `castleglimages_drawableimage.inc`) through `RHIDevice.GrabTextureImage` on the active color (`GetSwapchainColorTexture`) and depth (`GetSwapchainDepthTexture`) textures when `RHIDevice <> nil`, respecting `RenderContext.InternalControlRect` sub-region offsets and tracking `RHISaveScreenCount` / `RHISaveScreenDepthCount`.
+  * Enhance `TVulkanRHITexture` and `TVulkanRHIDevice.GrabTextureImage` to support both color and depth (`VK_IMAGE_ASPECT_DEPTH_BIT`) readbacks as well as headless host pixel readback (`SetHostClearColor`, `SetHostClearDepth`, `UploadImage` shadow buffer, and `BeginRendering` / `ClearAttachments` active color/depth target tracking).
+* [x] **12.3. Renderer Capabilities & System Information Report (`GLInformationString`, `GLInformationStringSummary`, `TRHIDevice.GetInformationString`)**:
+  * Add `GetInformationString` and `GetInformationStringSummary` to `TRHIDevice` and `TVulkanRHIDevice` reporting active backend, device name, Vulkan instance/device API versions, hardware capabilities (`DynamicRendering`, `GraphicsPipelineLibrary`, `ExtendedDynamicState`, `Synchronization2`, `TimelineSemaphore`, `DrawIndirectCount`, `BindlessTextures`, MSAA & texture limits), PSO/library cache counts, and GPU memory budget/usage.
+  * Route `GLInformationString` and `GLInformationStringSummary` in `castleglutils_information.inc` to `RHIDevice` when `RHIDevice <> nil` and safely guard uninitialized `GLVersion` / `GLFeatures`.
+
+**Milestone 12 Status**: Completed. `TRenderContext` and `TScissor` dynamic RHI state synchronization, `SaveScreen_NoFlush` / `SaveScreenToGL_NoFlush` / `SaveScreenDepth_NoFlush` RHI readback, and `GLInformationString` / `GLInformationStringSummary` RHI capability reporting fully integrated and tested (66 unit tests passing).
+
+
+### Phase 13: Full Cook-Torrance GGX PBR Material Pipeline, Normal Mapping & Compute IBL Prefiltering (IN PROGRESS)
+
+* [ ] **13.1. Full Cook-Torrance GGX PBR & Tangent-Space Normal Mapping in `TCastleShaderGeneratorRHI` (`CastleInternalShaderRHI`)**:
+  * Upgrade `TCastleShaderGeneratorRHI` (`GeneratePreamble`, `GenerateDefault3DVertexShader`, `GenerateDefault3DFragmentShader`, `GeneratePBRFunctions`) to implement full glTF 2.0 / X3D `PhysicalMaterial` Cook-Torrance microfacet BRDF: Trowbridge-Reitz GGX normal distribution ($D_{\text{GGX}}$), Smith height-correlated geometry visibility ($V_{\text{SmithGGXCorrelated}}$), Schlick Fresnel ($F_{\text{Schlick}}$ and roughness-compensated $F_{\text{SchlickRoughness}}$), screen-space derivative cotangent-frame TBN normal mapping (`perturbNormalCotangent`), multi-texture PBR sampling (`BaseColor`, `Normal`, `MetallicRoughness`, `Emissive`, `Occlusion`), and alpha-cutoff discard.
+* [ ] **13.2. Compute Split-Sum BRDF Integration LUT & Prefiltered IBL Environment Generator (`TCastleVulkanIBLGenerator` in `CastleInternalRHI_Vulkan`)**:
+  * Implement `TCastleVulkanIBLGenerator` on `TVulkanRHIDevice` to compute the 2D Split-Sum GGX BRDF Integration LUT texture ($N \cdot V \times \text{roughness} \to (\text{scale}, \text{bias})$) via compute shader dispatch (with exact Hammersley quasi-Monte Carlo integration on both GPU and headless CPU fallback), prefilter environment cubemap mip chains across roughness levels, and evaluate L2 Spherical Harmonics (9 coefficients) diffuse irradiance.
+* [ ] **13.3. `TX3DRendererShape` & `TCastleViewport` PBR Material & IBL Binding Integration (`CastleSceneInternalShape`, `CastleViewport`)**:
+  * Extract `TPhysicalMaterialNode`, `TMaterialNode`, and `TUnlitMaterialNode` PBR parameters (BaseColor, Metallic, Roughness, Emissive, NormalScale, OcclusionStrength, AlphaCutoff, ShadingModel) into RHI push constants / material descriptors and bind PBR texture slots + IBL BRDF LUT during `TCastleViewport` RHI rendering.
+
+
+### Phase 14: Clustered Forward+ Compute Light Culling (256+ Dynamic Lights) & Shadow Atlas (PLANNED)
+
+* [ ] **14.1. 3D Clustered Forward+ Frustum Grid & Compute Light Culler (`TCastleVulkanClusteredLightCuller`)**:
+  * Subdivide the camera view frustum into a 3D exponential-depth cluster grid ($16 \times 8 \times 24$ tiles) and dispatch a compute shader binning up to 256 dynamic point and spot lights into per-cluster light index lists (`SSBO`).
+* [ ] **14.2. Directional Cascaded Shadow Maps (CSM) & Shared Positional Shadow Atlas (`TCastleVulkanShadowAtlas`)**:
+  * Implement 4-cascade directional shadow split calculation and dynamic tile sub-allocation inside a shared depth shadow atlas (`pfD32_Float`) with 3x3 PCF shadow filtering.
+* [ ] **14.3. Forward+ Cluster & Shadow Atlas Shader Integration (`CastleInternalShaderRHI`, `CastleViewport`)**:
+  * Integrate cluster light-grid lookup and cascaded/atlas shadow evaluation into the RHI 3D forward pass.
+
+
+### Phase 15: Declarative Render Graph (`TRHIRenderGraph`) & HDR Post-Processing Stack (PLANNED)
+
+* [ ] **15.1. Declarative Render Dependency Graph (`TRHIRenderGraph` in `CastleInternalRHI`)**:
+  * Implement pass-level read/write resource registration, topological pass sorting, automatic `TransitionTexture` / `TransitionBuffer` barrier hoisting, and transient render-target memory aliasing.
+* [ ] **15.2. HDR Scene Target (`pfRGBA16_Float`), Compute Mip-Chain Bloom & Auto-Exposure**:
+  * Implement 13-tap Karis downsample + tent-filter upsample mip-pyramid bloom and luminance histogram auto-exposure.
+* [ ] **15.3. ACES Filmic / AgX Tonemapping & Post-Processing Composite Pass**:
+  * Integrate ACES / AgX tonemapping, exposure, and sRGB conversion into `TCastleViewport` and `TCastleScreenEffects`.
+
+
 ## 5. Build Tool (castle-engine) & Editor Integration
 
 * [x] CastleEngineManifest.xml Support:
@@ -314,5 +359,5 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 ## 7. Testing & Verification Criteria
 
 * [x] Automated Visual Regression Tests: `CompareImagesPerceptualDiff` in `CastleInternalRHI` compares framebuffer readbacks (`GrabTextureImage`) between `rbOpenGL` and `rbVulkan` using normalized RMSE perceptual diff thresholds.
-* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 63 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
+* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 66 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
 * [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance/Hi-Z occlusion culling (`TCastleVulkanComputeCuller`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.

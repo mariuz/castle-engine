@@ -1013,7 +1013,7 @@ begin
     (AImage is TGrayscaleImage) and
     (TGrayscaleImage(AImage).TreatAsAlpha);
 
-  if (ApplicationProperties <> nil) and (ApplicationProperties.RenderBackend = backendVulkan) and (RHIDevice <> nil) then
+  if RHIDevice <> nil then
   begin
     RHIContextOpen(AImage);
   end else
@@ -1852,7 +1852,7 @@ end;
 
 procedure TDrawableImage.PrepareResources;
 begin
-  if (ApplicationProperties <> nil) and (ApplicationProperties.RenderBackend = backendVulkan) and (RHIDevice <> nil) then
+  if RHIDevice <> nil then
   begin
     if (FRHITexture = nil) and (FImage <> nil) then
       RHIContextOpen(FImage);
@@ -1870,6 +1870,16 @@ end;
 function TDrawableImage.GetContents(const ImageClass: TCastleImageClass): TCastleImage;
 begin
   PrepareResources;
+  if RHIDevice <> nil then
+  begin
+    if FRHITexture = nil then
+      raise ECannotSaveTextureContents.Create('TDrawableImage RHI texture was not created for some reason');
+    Result := ImageClass.Create(Width, Height);
+    if not RHIDevice.GrabTextureImage(FRHITexture, Rectangle(0, 0, Width, Height), Result) then
+      if FImage is TCastleImage then
+        Result.Assign(TCastleImage(FImage));
+    Exit;
+  end;
   if FTexture = GLObjectNone then
     raise ECannotSaveTextureContents.Create('TDrawableImage texture was not created for some reason');
   Result := ImageClass.Create(Width, Height);

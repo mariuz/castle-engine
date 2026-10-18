@@ -31,7 +31,7 @@ uses
   CastleSceneInternalShape, CastleInternalOcclusionCulling,
   CastleTransform, CastleScene, CastleProjection, CastleViewport, CastleScreenEffects, CastleRenderOptions, CastleWindow,
   CastleVideos, CastleInternalBackgroundRenderer, CastleInternalGLShadowVolumes,
-  CastleGLUtils, CastleRenderPrimitives, CastleShapes,
+  CastleGLUtils, CastleRenderPrimitives, CastleShapes, CastleRenderContext,
   CastleShapeInternalShadowVolumes, CastleShapeInternalRenderShadowVolumes,
   CastleInternalBatchShapes,
   ToolManifest, CastleInternalRenderDoc;
@@ -102,6 +102,9 @@ type
     procedure TestRenderUnlitMeshAndShadowVolumeExtrusionRHI;
     procedure TestDrawPrimitive2DRHI;
     procedure TestDynamicBatchShapesRHI;
+    procedure TestRenderContextAndScissorRHI;
+    procedure TestSaveScreenAndDepthReadbackRHI;
+    procedure TestGLInformationStringRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -4983,6 +4986,319 @@ begin
     FreeAndNil(Collected2);
     FreeAndNil(Collected1);
     FreeAndNil(Scene);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRenderContextAndScissorRHI;
+var
+  SavedDevice: TRHIDevice;
+  SavedCmdList: TRHICommandList;
+  SavedContext: TRenderContext;
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Ctx: TRenderContext;
+  Scissor1, Scissor2: TScissor;
+  ColorTex, DepthTex: TVulkanRHITexture;
+  ColorDesc, DepthDesc: TRHITextureDesc;
+  PassInfo: TRHIRenderingInfo;
+  GrabbedColor: TRGBImage;
+begin
+  SavedDevice := RHIDevice;
+  SavedCmdList := ActiveCommandList;
+  SavedContext := RenderContext;
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0);
+  Ctx := TRenderContext.Create(nil);
+  Scissor1 := nil;
+  Scissor2 := nil;
+  ColorTex := nil;
+  DepthTex := nil;
+  GrabbedColor := nil;
+  try
+    SetRHIDevice(VkDev);
+    SetActiveCommandList(CmdList);
+    RenderContext := Ctx;
+
+    { 1. Viewport and DepthRange synchronization to ActiveCommandList }
+    Ctx.Viewport := Rectangle(10, 20, 640, 480);
+    AssertEquals('RHIViewportUpdateCount must be 1 after Viewport assignment',
+      1, Ctx.RHIViewportUpdateCount);
+    AssertEquals('CmdList.DynamicViewportRect.Left must be 10',
+      10, Round(CmdList.DynamicViewportRect.Left));
+    AssertEquals('CmdList.DynamicViewportRect.Bottom must be 20',
+      20, Round(CmdList.DynamicViewportRect.Bottom));
+    AssertEquals('CmdList.DynamicViewportRect.Width must be 640',
+      640, Round(CmdList.DynamicViewportRect.Width));
+    AssertEquals('CmdList.DynamicViewportRect.Height must be 480',
+      480, Round(CmdList.DynamicViewportRect.Height));
+    AssertTrue('Default MinDepth must be 0.0', SameValue(0.0, CmdList.DynamicMinDepth, 0.001));
+    AssertTrue('Default MaxDepth must be 1.0', SameValue(1.0, CmdList.DynamicMaxDepth, 0.001));
+
+    Ctx.DepthRange := drFar;
+    AssertTrue('drFar MinDepth must be 0.1', SameValue(0.1, CmdList.DynamicMinDepth, 0.001));
+    AssertTrue('drFar MaxDepth must be 1.0', SameValue(1.0, CmdList.DynamicMaxDepth, 0.001));
+
+    Ctx.DepthRange := drNear;
+    AssertTrue('drNear MinDepth must be 0.0', SameValue(0.0, CmdList.DynamicMinDepth, 0.001));
+    AssertTrue('drNear MaxDepth must be 0.1', SameValue(0.1, CmdList.DynamicMaxDepth, 0.001));
+
+    Ctx.DepthRange := drFull;
+    AssertTrue('drFull MinDepth must be 0.0', SameValue(0.0, CmdList.DynamicMinDepth, 0.001));
+    AssertTrue('drFull MaxDepth must be 1.0', SameValue(1.0, CmdList.DynamicMaxDepth, 0.001));
+
+    { 2. Nested TScissor stack intersection & restoration }
+    Scissor1 := TScissor.Create;
+    Scissor2 := TScissor.Create;
+    Scissor1.Rect := Rectangle(0, 0, 300, 200);
+    Scissor1.Enabled := True;
+    AssertTrue('RHIScissorActive must be True when Scissor1 is enabled', Ctx.RHIScissorActive);
+    AssertEquals('Scissor1 Left must be 0', 0, CmdList.DynamicScissorRect.Left);
+    AssertEquals('Scissor1 Bottom must be 0', 0, CmdList.DynamicScissorRect.Bottom);
+    AssertEquals('Scissor1 Width must be 300', 300, CmdList.DynamicScissorRect.Width);
+    AssertEquals('Scissor1 Height must be 200', 200, CmdList.DynamicScissorRect.Height);
+
+    Scissor2.Rect := Rectangle(100, 50, 400, 300);
+    Scissor2.Enabled := True;
+    AssertTrue('RHIScissorActive must remain True with nested Scissor2', Ctx.RHIScissorActive);
+    AssertEquals('Nested scissor intersection Left must be 100', 100, CmdList.DynamicScissorRect.Left);
+    AssertEquals('Nested scissor intersection Bottom must be 50', 50, CmdList.DynamicScissorRect.Bottom);
+    AssertEquals('Nested scissor intersection Width must be 200', 200, CmdList.DynamicScissorRect.Width);
+    AssertEquals('Nested scissor intersection Height must be 150', 150, CmdList.DynamicScissorRect.Height);
+
+    Scissor2.Enabled := False;
+    AssertTrue('RHIScissorActive must remain True when only Scissor1 is left', Ctx.RHIScissorActive);
+    AssertEquals('Restored Scissor1 Width must be 300', 300, CmdList.DynamicScissorRect.Width);
+    AssertEquals('Restored Scissor1 Height must be 200', 200, CmdList.DynamicScissorRect.Height);
+
+    Scissor1.Enabled := False;
+    AssertFalse('RHIScissorActive must be False when all scissors are disabled', Ctx.RHIScissorActive);
+    AssertEquals('Disabled scissor must restore full viewport Left (10)', 10, CmdList.DynamicScissorRect.Left);
+    AssertEquals('Disabled scissor must restore full viewport Bottom (20)', 20, CmdList.DynamicScissorRect.Bottom);
+    AssertEquals('Disabled scissor must restore full viewport Width (640)', 640, CmdList.DynamicScissorRect.Width);
+    AssertEquals('Disabled scissor must restore full viewport Height (480)', 480, CmdList.DynamicScissorRect.Height);
+
+    { 3. InternalControlRect offset propagation to Viewport & Scissor }
+    Ctx.InternalControlRect := Rectangle(5, 8, 800, 600);
+    Ctx.Viewport := Rectangle(10, 20, 320, 240);
+    AssertEquals('Viewport Left with InternalControlRect must be 15', 15, Round(CmdList.DynamicViewportRect.Left));
+    AssertEquals('Viewport Bottom with InternalControlRect must be 28', 28, Round(CmdList.DynamicViewportRect.Bottom));
+    Scissor1.Rect := Rectangle(4, 6, 100, 80);
+    Scissor1.Enabled := True;
+    AssertEquals('Scissor Left with InternalControlRect must be 9', 9, CmdList.DynamicScissorRect.Left);
+    AssertEquals('Scissor Bottom with InternalControlRect must be 14', 14, CmdList.DynamicScissorRect.Bottom);
+    Scissor1.Enabled := False;
+    Ctx.InternalControlRect := TRectangle.Empty;
+
+    { 4. PolygonOffset / SetDepthBias and Extended Dynamic State }
+    Ctx.PolygonOffsetEnable(2.5, 4.0);
+    AssertEquals('RHIDepthBiasUpdateCount must be 1', 1, Ctx.RHIDepthBiasUpdateCount);
+    AssertTrue('DynamicDepthBiasSlope must be 2.5', SameValue(2.5, CmdList.DynamicDepthBiasSlope, 0.001));
+    AssertTrue('DynamicDepthBiasConstant must be 4.0', SameValue(4.0, CmdList.DynamicDepthBiasConstant, 0.001));
+
+    Ctx.PolygonOffsetDisable;
+    AssertEquals('RHIDepthBiasUpdateCount must be 2', 2, Ctx.RHIDepthBiasUpdateCount);
+    AssertTrue('DynamicDepthBiasSlope must reset to 0', SameValue(0.0, CmdList.DynamicDepthBiasSlope, 0.001));
+    AssertTrue('DynamicDepthBiasConstant must reset to 0', SameValue(0.0, CmdList.DynamicDepthBiasConstant, 0.001));
+
+    Ctx.CullFace := True;
+    AssertEquals('CullFace=True must set DynamicCullMode to cmBack', Ord(cmBack), Ord(CmdList.DynamicCullMode));
+    Ctx.FrontFaceCcw := False;
+    AssertEquals('FrontFaceCcw=False must set DynamicFrontFace to ffClockwise', Ord(ffClockwise), Ord(CmdList.DynamicFrontFace));
+    Ctx.DepthTest := True;
+    AssertTrue('DepthTest=True must set DynamicDepthTestEnable', CmdList.DynamicDepthTestEnable);
+    Ctx.DepthFunc := dfLessEqual;
+    AssertEquals('DepthFunc=dfLessEqual must set DynamicDepthCompareOp to coLessOrEqual', Ord(coLessOrEqual), Ord(CmdList.DynamicDepthCompareOp));
+    Ctx.DepthFunc := dfLess;
+    AssertEquals('DepthFunc=dfLess must set DynamicDepthCompareOp to coLess', Ord(coLess), Ord(CmdList.DynamicDepthCompareOp));
+    Ctx.DepthBufferUpdate := False;
+    AssertFalse('DepthBufferUpdate=False must set DynamicDepthWriteEnable=False', CmdList.DynamicDepthWriteEnable);
+
+    { 5. TRenderContext.Clear routing & SynchronizeState }
+    ColorDesc := TRHITextureDesc.Create2D(16, 16, pfRGBA8_UNorm, [tuColorAttachment, tuTransferSrc]);
+    DepthDesc := TRHITextureDesc.Create2D(16, 16, pfD24_UNorm_S8_UInt, [tuDepthStencil, tuTransferSrc]);
+    ColorTex := TVulkanRHITexture.Create(VkDev, ColorDesc);
+    DepthTex := TVulkanRHITexture.Create(VkDev, DepthDesc);
+
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 16, 16),
+      ColorTex, loLoad, Vector4(0, 0, 0, 1),
+      DepthTex, loLoad, 1.0);
+    CmdList.BeginRendering(PassInfo);
+
+    Ctx.Clear([cbColor, cbDepth], Vector4(1.0, 0.0, 0.5, 1.0));
+    AssertEquals('RHIClearCount must be 1 after Ctx.Clear', 1, Ctx.RHIClearCount);
+    AssertTrue('cbColor must be in RHILastClearBuffers', cbColor in Ctx.RHILastClearBuffers);
+    AssertTrue('cbDepth must be in RHILastClearBuffers', cbDepth in Ctx.RHILastClearBuffers);
+    AssertTrue('RHILastClearColor.X must be 1.0', SameValue(1.0, Ctx.RHILastClearColor.X, 0.001));
+
+    CmdList.EndRendering;
+
+    GrabbedColor := TRGBImage.Create(4, 4);
+    AssertTrue('GrabTextureImage on cleared ColorTex must succeed',
+      VkDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 4, 4), GrabbedColor));
+    AssertEquals('Cleared pixel R must be 255', 255, GrabbedColor.PixelPtr(0, 0)^.X);
+    AssertEquals('Cleared pixel G must be 0', 0, GrabbedColor.PixelPtr(0, 0)^.Y);
+    AssertEquals('Cleared pixel B must be 128', 128, GrabbedColor.PixelPtr(0, 0)^.Z);
+
+    Ctx.SynchronizeState;
+    AssertTrue('SynchronizeState must increment RHIViewportUpdateCount',
+      Ctx.RHIViewportUpdateCount >= 3);
+  finally
+    RenderContext := SavedContext;
+    SetActiveCommandList(SavedCmdList);
+    SetRHIDevice(SavedDevice);
+    FreeAndNil(GrabbedColor);
+    FreeAndNil(DepthTex);
+    FreeAndNil(ColorTex);
+    FreeAndNil(Scissor2);
+    FreeAndNil(Scissor1);
+    FreeAndNil(Ctx);
+    FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSaveScreenAndDepthReadbackRHI;
+var
+  SavedDevice: TRHIDevice;
+  SavedCmdList: TRHICommandList;
+  SavedContext: TRenderContext;
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Ctx: TRenderContext;
+  ColorTex, DepthTex: TVulkanRHITexture;
+  ColorDesc, DepthDesc: TRHITextureDesc;
+  PassInfo: TRHIRenderingInfo;
+  ScreenColor, SubRegionColor, DrawableContents: TRGBImage;
+  ScreenDepth: TGrayscaleImage;
+  DrawableScreen: TDrawableImage;
+  UploadPattern: TRGBAlphaImage;
+  SavedSaveCount, SavedDepthCount: Integer;
+begin
+  SavedDevice := RHIDevice;
+  SavedCmdList := ActiveCommandList;
+  SavedContext := RenderContext;
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0);
+  Ctx := TRenderContext.Create(nil);
+  ColorTex := nil;
+  DepthTex := nil;
+  ScreenColor := nil;
+  SubRegionColor := nil;
+  DrawableContents := nil;
+  ScreenDepth := nil;
+  DrawableScreen := nil;
+  UploadPattern := nil;
+  try
+    SetRHIDevice(VkDev);
+    SetActiveCommandList(CmdList);
+    RenderContext := Ctx;
+
+    ColorDesc := TRHITextureDesc.Create2D(32, 32, pfRGBA8_UNorm, [tuColorAttachment, tuTransferSrc, tuTransferDst]);
+    DepthDesc := TRHITextureDesc.Create2D(32, 32, pfD24_UNorm_S8_UInt, [tuDepthStencil, tuTransferSrc]);
+    ColorTex := TVulkanRHITexture.Create(VkDev, ColorDesc);
+    DepthTex := TVulkanRHITexture.Create(VkDev, DepthDesc);
+
+    { 1. Render pass with loClear color (51, 102, 204) and depth (0.5 -> 128) }
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 32, 32),
+      ColorTex, loClear, Vector4(0.2, 0.4, 0.8, 1.0),
+      DepthTex, loClear, 0.5);
+    CmdList.BeginRendering(PassInfo);
+    CmdList.EndRendering;
+
+    SavedSaveCount := RHISaveScreenCount;
+    SavedDepthCount := RHISaveScreenDepthCount;
+
+    ScreenColor := SaveScreen_NoFlush(Rectangle(0, 0, 16, 16), cbBack);
+    AssertEquals('RHISaveScreenCount must increment by 1', SavedSaveCount + 1, RHISaveScreenCount);
+    AssertEquals('ScreenColor Width must be 16', 16, ScreenColor.Width);
+    AssertEquals('ScreenColor Height must be 16', 16, ScreenColor.Height);
+    AssertEquals('ScreenColor R must be 51', 51, ScreenColor.PixelPtr(0, 0)^.X);
+    AssertEquals('ScreenColor G must be 102', 102, ScreenColor.PixelPtr(0, 0)^.Y);
+    AssertEquals('ScreenColor B must be 204', 204, ScreenColor.PixelPtr(0, 0)^.Z);
+
+    ScreenDepth := SaveScreenDepth_NoFlush(Rectangle(0, 0, 16, 16));
+    AssertEquals('RHISaveScreenDepthCount must increment by 1', SavedDepthCount + 1, RHISaveScreenDepthCount);
+    AssertEquals('ScreenDepth Width must be 16', 16, ScreenDepth.Width);
+    AssertEquals('ScreenDepth Height must be 16', 16, ScreenDepth.Height);
+    AssertEquals('ScreenDepth pixel must be 128 (0.5 depth)', 128, ScreenDepth.PixelPtr(0, 0)^);
+
+    { 2. Upload custom pixel pattern and verify InternalControlRect sub-region cropping & SaveScreenToGL_NoFlush }
+    UploadPattern := TRGBAlphaImage.Create(32, 32);
+    UploadPattern.Clear(Vector4Byte(10, 20, 30, 255));
+    UploadPattern.PixelPtr(10, 12)^ := Vector4Byte(220, 110, 55, 255);
+    ColorTex.UploadImage(UploadPattern);
+
+    Ctx.InternalControlRect := Rectangle(10, 12, 32, 32);
+    SubRegionColor := SaveScreen_NoFlush(Rectangle(0, 0, 4, 4), cbBack);
+    AssertEquals('Cropped SubRegionColor (0,0) R must match pattern at (10,12)',
+      220, SubRegionColor.PixelPtr(0, 0)^.X);
+    AssertEquals('Cropped SubRegionColor (0,0) G must match pattern at (10,12)',
+      110, SubRegionColor.PixelPtr(0, 0)^.Y);
+    AssertEquals('Cropped SubRegionColor (0,0) B must match pattern at (10,12)',
+      55, SubRegionColor.PixelPtr(0, 0)^.Z);
+
+    DrawableScreen := SaveScreenToGL_NoFlush(Rectangle(0, 0, 4, 4), cbBack, False);
+    AssertTrue('SaveScreenToGL_NoFlush must create TDrawableImage with RHITexture',
+      DrawableScreen.RHITexture <> nil);
+    DrawableContents := DrawableScreen.GetContents(TRGBImage) as TRGBImage;
+    AssertEquals('DrawableScreen GetContents R must be 220',
+      220, DrawableContents.PixelPtr(0, 0)^.X);
+  finally
+    RenderContext := SavedContext;
+    SetActiveCommandList(SavedCmdList);
+    SetRHIDevice(SavedDevice);
+    FreeAndNil(UploadPattern);
+    FreeAndNil(DrawableContents);
+    FreeAndNil(DrawableScreen);
+    FreeAndNil(ScreenDepth);
+    FreeAndNil(SubRegionColor);
+    FreeAndNil(ScreenColor);
+    FreeAndNil(DepthTex);
+    FreeAndNil(ColorTex);
+    FreeAndNil(Ctx);
+    FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGLInformationStringRHI;
+var
+  SavedDevice: TRHIDevice;
+  VkDev: TVulkanRHIDevice;
+  InfoFull, InfoSummary: String;
+begin
+  SavedDevice := RHIDevice;
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  try
+    { 1. When RHIDevice = nil and GLVersion = nil, GLInformationString must not AV }
+    SetRHIDevice(nil);
+    InfoFull := GLInformationString;
+    InfoSummary := GLInformationStringSummary;
+    AssertTrue('Uninitialized GLInformationString must return non-empty fallback', InfoFull <> '');
+    AssertTrue('Uninitialized GLInformationStringSummary must return non-empty fallback', InfoSummary <> '');
+
+    { 2. When RHIDevice <> nil, GLInformationString and GLInformationStringSummary report Vulkan RHI }
+    SetRHIDevice(VkDev);
+    InfoFull := GLInformationString;
+    InfoSummary := GLInformationStringSummary;
+
+    AssertTrue('Vulkan GLInformationString must contain header "Vulkan RHI information:"',
+      Pos('Vulkan RHI information:', InfoFull) > 0);
+    AssertTrue('Vulkan GLInformationString must contain "Basic information:" section',
+      Pos('Basic information:', InfoFull) > 0);
+    AssertTrue('Vulkan GLInformationString must contain "Features:" section',
+      Pos('Features:', InfoFull) > 0);
+    AssertTrue('Vulkan GLInformationString must contain "Limits & Pipelines:" section',
+      Pos('Limits & Pipelines:', InfoFull) > 0);
+    AssertTrue('Vulkan GLInformationString must contain "Memory:" section',
+      Pos('Memory:', InfoFull) > 0);
+    AssertTrue('Vulkan GLInformationStringSummary must report Vulkan 1.3 and modern rendering',
+      (Pos('Vulkan 1.3', InfoSummary) > 0) and (Pos('modern rendering: True', InfoSummary) > 0));
+  finally
+    SetRHIDevice(SavedDevice);
     FreeAndNil(VkDev);
   end;
 end;

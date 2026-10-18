@@ -135,6 +135,17 @@ type
       FPolygonOffset: TPolygonOffset;
       FBoundBuffer: array [TBufferTarget] of TGLBuffer;
       FInternalControlRectIgnore: Cardinal;
+      FRHIClearCount: Cardinal;
+      FRHILastClearBuffers: TClearBuffers;
+      FRHILastClearColor: TCastleColor;
+      FRHIViewportUpdateCount: Cardinal;
+      FRHILastViewport: TFloatRectangle;
+      FRHILastMinDepth: Single;
+      FRHILastMaxDepth: Single;
+      FRHIScissorUpdateCount: Cardinal;
+      FRHILastScissor: TRectangle;
+      FRHIScissorActive: Boolean;
+      FRHIDepthBiasUpdateCount: Cardinal;
 
     procedure SetLineWidth(const Value: Single);
     procedure SetPointSize(const Value: Single);
@@ -162,6 +173,8 @@ type
     function GetBoundBuffer(const Target: TBufferTarget): TGLBuffer;
     procedure SetBoundBuffer(const Target: TBufferTarget; const Value: TGLBuffer);
     procedure SetInternalControlRectIgnore(const Value: Cardinal);
+    function EffectiveViewportRect: TRectangle;
+    procedure GetEffectiveDepthRange(out AMinDepth, AMaxDepth: Single);
 
     { Update OpenGL(ES) state to match the fields of this class.
       Used by SetXxx methods and by SynchronizeState. }
@@ -371,6 +384,9 @@ type
       const SourceFactor: TBlendingSourceFactor = bsSrcAlpha;
       const DestinationFactor: TBlendingDestinationFactor = bdOneMinusSrcAlpha);
     procedure BlendingDisable;
+    property BlendingEnabled: Boolean read FBlendingEnabled;
+    property BlendingSourceFactor: TBlendingSourceFactor read FBlendingSourceFactor;
+    property BlendingDestinationFactor: TBlendingDestinationFactor read FBlendingDestinationFactor;
 
     { Enable alpha test with old/buggy OpenGL implementations that use deprecated fixed-function pipeline.
       This is simply ignored on modern GPUs when "not GLFeatures.EnableFixedFunction". }
@@ -406,6 +422,19 @@ type
       calls that possibly changed the OpenGL(ES) state without going
       through this class. }
     procedure SynchronizeState;
+
+    { RHI state synchronization diagnostics (Phase 12.1). }
+    property RHIClearCount: Cardinal read FRHIClearCount;
+    property RHILastClearBuffers: TClearBuffers read FRHILastClearBuffers;
+    property RHILastClearColor: TCastleColor read FRHILastClearColor;
+    property RHIViewportUpdateCount: Cardinal read FRHIViewportUpdateCount;
+    property RHILastViewport: TFloatRectangle read FRHILastViewport;
+    property RHILastMinDepth: Single read FRHILastMinDepth;
+    property RHILastMaxDepth: Single read FRHILastMaxDepth;
+    property RHIScissorUpdateCount: Cardinal read FRHIScissorUpdateCount;
+    property RHILastScissor: TRectangle read FRHILastScissor;
+    property RHIScissorActive: Boolean read FRHIScissorActive;
+    property RHIDepthBiasUpdateCount: Cardinal read FRHIDepthBiasUpdateCount;
   end;
 
 var
@@ -441,7 +470,7 @@ const
 
 implementation
 
-uses CastleLog, CastleProjection, CastleInternalGLUtils, CastleGLImages;
+uses CastleLog, CastleProjection, CastleInternalGLUtils, CastleGLImages, CastleInternalRHI;
 
 constructor TRenderContext.Create(AOwner: TComponent);
 begin
@@ -453,6 +482,8 @@ begin
   FEnabledScissors.ParentContext := Self;
   FProjectionMatrix := TMatrix4.Identity;
   FDepthRange := drFull;
+  FRHILastMinDepth := 0.0;
+  FRHILastMaxDepth := 1.0;
   FCullFace := false;
   FFrontFaceCcw := true;
   FColorChannels := AllColorChannels;
@@ -497,6 +528,19 @@ begin
   if Self <> RenderContext then
     WarnContextNotCurrent;
 
+  if RHIDevice <> nil then
+  begin
+    Inc(FRHIClearCount);
+    FRHILastClearBuffers := Buffers;
+    if cbColor in Buffers then
+      FRHILastClearColor := ClearColor;
+    if ActiveCommandList <> nil then
+      ActiveCommandList.ClearAttachments(
+        cbColor in Buffers, ClearColor,
+        cbDepth in Buffers, 1.0,
+        cbStencil in Buffers, 0);
+  end;
+
   if InternalClearColorsByDraw and (cbColor in Buffers) then
   begin
     DrawRectangle(Viewport, ClearColor,
@@ -513,6 +557,10 @@ begin
     FClearColor := ClearColor;
     UpdateClearColor;
   end;
+
+  if RHIDevice <> nil then
+    Exit;
+
   Mask := 0;
   for B in Buffers do
     Mask := Mask or ClearBufferMask[B];
@@ -522,6 +570,8 @@ end;
 
 procedure TRenderContext.UpdateClearColor;
 begin
+  if RHIDevice <> nil then
+    Exit;
   glClearColor(FClearColor.X, FClearColor.Y, FClearColor.Z, FClearColor.W);
 end;
 
@@ -539,6 +589,8 @@ end;
 
 procedure TRenderContext.UpdateLineWidth;
 begin
+  if RHIDevice <> nil then
+    Exit;
   {$if (not defined(DARWIN)) or defined(OpenGLES)}
   // on desktop macOS, glLineWidth raise GL_INVALID_VALUE for parameters <> 1.0
   glLineWidth(FLineWidth);
@@ -559,6 +611,8 @@ end;
 
 procedure TRenderContext.UpdatePointSize;
 begin
+  if RHIDevice <> nil then
+    Exit;
   { Not possible with OpenGL ES.
     See http://stackoverflow.com/questions/9381562/using-gl-points-in-glkit-ios-5
     http://www.idevgames.com/forums/thread-3.html :
@@ -583,7 +637,7 @@ end;
 
 procedure TRenderContext.UpdateGlobalAmbient;
 begin
-  if GLFeatures.EnableFixedFunction then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
   begin
     {$ifndef OpenGLES}
     { We always set "1" as global ambient alpha.
@@ -627,7 +681,7 @@ end;
 
 procedure TRenderContext.UpdateProjectionMatrix;
 begin
-  if GLFeatures.EnableFixedFunction then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
   begin
     {$ifndef OpenGLES}
     glMatrixMode(GL_PROJECTION);
@@ -636,6 +690,15 @@ begin
     {$warnings on}
     glMatrixMode(GL_MODELVIEW);
     {$endif}
+  end;
+end;
+
+procedure TRenderContext.GetEffectiveDepthRange(out AMinDepth, AMaxDepth: Single);
+begin
+  case FDepthRange of
+    drFull: begin AMinDepth := 0.0; AMaxDepth := 1.0; end;
+    drNear: begin AMinDepth := 0.0; AMaxDepth := 0.1; end;
+    drFar : begin AMinDepth := 0.1; AMaxDepth := 1.0; end;
   end;
 end;
 
@@ -661,7 +724,21 @@ procedure TRenderContext.UpdateDepthRange;
   end;
   {$endif}
 
+var
+  MinD, MaxD: Single;
 begin
+  GetEffectiveDepthRange(MinD, MaxD);
+  if RHIDevice <> nil then
+  begin
+    FRHILastMinDepth := MinD;
+    FRHILastMaxDepth := MaxD;
+    FRHILastViewport := FloatRectangle(EffectiveViewportRect);
+    Inc(FRHIViewportUpdateCount);
+    if ActiveCommandList <> nil then
+      ActiveCommandList.SetViewport(FRHILastViewport, MinD, MaxD);
+    Exit;
+  end;
+
   case FDepthRange of
     drFull: glDepthRange(0  , 1);
     drNear: glDepthRange(0  , 0.1);
@@ -683,6 +760,17 @@ end;
 
 procedure TRenderContext.UpdateCullFace;
 begin
+  if RHIDevice <> nil then
+  begin
+    if ActiveCommandList <> nil then
+    begin
+      if FCullFace then
+        ActiveCommandList.SetCullMode(cmBack)
+      else
+        ActiveCommandList.SetCullMode(cmNone);
+    end;
+    Exit;
+  end;
   GLSetEnabled(GL_CULL_FACE, FCullFace);
 end;
 
@@ -700,6 +788,17 @@ end;
 
 procedure TRenderContext.UpdateFrontFace;
 begin
+  if RHIDevice <> nil then
+  begin
+    if ActiveCommandList <> nil then
+    begin
+      if FFrontFaceCcw then
+        ActiveCommandList.SetFrontFace(ffCounterClockwise)
+      else
+        ActiveCommandList.SetFrontFace(ffClockwise);
+    end;
+    Exit;
+  end;
   if FFrontFaceCcw then
     glFrontFace(GL_CCW)
   else
@@ -720,6 +819,12 @@ end;
 
 procedure TRenderContext.UpdateDepthTest;
 begin
+  if RHIDevice <> nil then
+  begin
+    if ActiveCommandList <> nil then
+      ActiveCommandList.SetDepthTestEnable(FDepthTest);
+    Exit;
+  end;
   GLSetEnabled(GL_DEPTH_TEST, FDepthTest);
 end;
 
@@ -737,6 +842,23 @@ end;
 
 procedure TRenderContext.UpdateDepthFunc;
 begin
+  if RHIDevice <> nil then
+  begin
+    if ActiveCommandList <> nil then
+    begin
+      case FDepthFunc of
+        dfNever:        ActiveCommandList.SetDepthCompareOp(coNever);
+        dfLess:         ActiveCommandList.SetDepthCompareOp(coLess);
+        dfEqual:        ActiveCommandList.SetDepthCompareOp(coEqual);
+        dfLessEqual:    ActiveCommandList.SetDepthCompareOp(coLessOrEqual);
+        dfGreater:      ActiveCommandList.SetDepthCompareOp(coGreater);
+        dfNotEqual:     ActiveCommandList.SetDepthCompareOp(coNotEqual);
+        dfGreaterEqual: ActiveCommandList.SetDepthCompareOp(coGreaterOrEqual);
+        dfAlways:       ActiveCommandList.SetDepthCompareOp(coAlways);
+      end;
+    end;
+    Exit;
+  end;
   glDepthFunc(Ord(FDepthFunc));
 end;
 
@@ -767,6 +889,8 @@ end;
 
 procedure TRenderContext.UpdateColorChannels;
 begin
+  if RHIDevice <> nil then
+    Exit;
   glColorMask(
     BoolToGL(0 in FColorChannels),
     BoolToGL(1 in FColorChannels),
@@ -789,10 +913,16 @@ end;
 
 procedure TRenderContext.UpdateDepthBufferUpdate;
 begin
+  if RHIDevice <> nil then
+  begin
+    if ActiveCommandList <> nil then
+      ActiveCommandList.SetDepthWriteEnable(FDepthBufferUpdate);
+    Exit;
+  end;
   glDepthMask(BoolToGL(FDepthBufferUpdate));
 end;
 
-procedure TRenderContext.UpdateViewport;
+function TRenderContext.EffectiveViewportRect: TRectangle;
 var
   Delta: TVector2Integer;
 begin
@@ -801,15 +931,49 @@ begin
      (not InternalControlRect.IsEmpty) then
     Delta := Delta + InternalControlRect.LeftBottom;
 
-  glViewport(
+  Result := Rectangle(
     FViewport.Left   + Delta.X,
     FViewport.Bottom + Delta.Y,
     FViewport.Width,
     FViewport.Height);
 end;
 
+procedure TRenderContext.UpdateViewport;
+var
+  EffRect: TRectangle;
+  MinD, MaxD: Single;
+begin
+  EffRect := EffectiveViewportRect;
+  if RHIDevice <> nil then
+  begin
+    GetEffectiveDepthRange(MinD, MaxD);
+    FRHILastViewport := FloatRectangle(EffRect);
+    FRHILastMinDepth := MinD;
+    FRHILastMaxDepth := MaxD;
+    Inc(FRHIViewportUpdateCount);
+    if ActiveCommandList <> nil then
+      ActiveCommandList.SetViewport(FRHILastViewport, MinD, MaxD);
+    { When no explicit scissor is active, keep the dynamic RHI scissor aligned with the viewport }
+    if not FRHIScissorActive then
+    begin
+      FRHILastScissor := EffRect;
+      if ActiveCommandList <> nil then
+        ActiveCommandList.SetScissor(EffRect);
+    end;
+    Exit;
+  end;
+
+  glViewport(
+    EffRect.Left,
+    EffRect.Bottom,
+    EffRect.Width,
+    EffRect.Height);
+end;
+
 procedure TRenderContext.WarningViewportTooLarge;
 begin
+  if GLFeatures = nil then
+    Exit;
   WritelnWarningOnce(WarningViewportTooLargeDone,
     'Setting viewport to %s, which has dimensions larger than maximum allowed %s. (Further warnings of the same type will not be shown.)', [
     FViewport.ToString,
@@ -867,6 +1031,8 @@ end;
 
 procedure TRenderContext.UpdateCurrentProgram;
 begin
+  if RHIDevice <> nil then
+    Exit;
   InternalSetCurrentProgram(FCurrentProgram);
 end;
 
@@ -881,7 +1047,7 @@ end;
 
 procedure TRenderContext.UpdateCurrentVao;
 begin
-  if GLFeatures.VertexArrayObject then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.VertexArrayObject then
   begin
     if FCurrentVao <> nil then
       glBindVertexArray(FCurrentVao.InternalHandle(Self))
@@ -892,7 +1058,7 @@ end;
 
 function TRenderContext.ColorBufferHasAlpha: Boolean;
 begin
-  Result := GLFeatures.AlphaBits > 0;
+  Result := (RHIDevice <> nil) or ((GLFeatures <> nil) and (GLFeatures.AlphaBits > 0));
 end;
 
 procedure TRenderContext.BlendingEnable(
@@ -925,11 +1091,15 @@ end;
 
 procedure TRenderContext.UpdateBlendingEnabled;
 begin
+  if RHIDevice <> nil then
+    Exit;
   GLSetEnabled(GL_BLEND, FBlendingEnabled);
 end;
 
 procedure TRenderContext.UpdateBlendingFunction;
 begin
+  if RHIDevice <> nil then
+    Exit;
   {$warnings off} // using deprecated routine that should be internal here
   GLBlendFunction(FBlendingSourceFactor, FBlendingDestinationFactor);
   {$warnings on}
@@ -937,7 +1107,7 @@ end;
 
 procedure TRenderContext.FixedFunctionAlphaTestEnable(const AlphaCutoff: Single = 0.5);
 begin
-  if GLFeatures.EnableFixedFunction then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
   begin
     if not FFixedFunctionAlphaTest then
     begin
@@ -955,7 +1125,7 @@ end;
 
 procedure TRenderContext.FixedFunctionAlphaTestDisable;
 begin
-  if GLFeatures.EnableFixedFunction then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
   begin
     if FFixedFunctionAlphaTest then
     begin
@@ -968,7 +1138,7 @@ end;
 procedure TRenderContext.UpdateFixedFunctionAlphaTest;
 begin
   {$ifndef OpenGLES}
-  if GLFeatures.EnableFixedFunction then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
     GLSetEnabled(GL_ALPHA_TEST, FFixedFunctionAlphaTest);
   {$endif}
 end;
@@ -976,7 +1146,7 @@ end;
 procedure TRenderContext.UpdateFixedFunctionAlphaCutoff;
 begin
   {$ifndef OpenGLES}
-  if GLFeatures.EnableFixedFunction then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
     glAlphaFunc(GL_GEQUAL, FFixedFunctionAlphaCutoff);
   {$endif}
 end;
@@ -993,7 +1163,7 @@ end;
 procedure TRenderContext.UpdateFixedFunctionLighting;
 begin
   {$ifndef OpenGLES}
-  if GLFeatures.EnableFixedFunction then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
     GLSetEnabled(GL_LIGHTING, FFixedFunctionLighting);
   {$endif}
 end;
@@ -1009,6 +1179,8 @@ end;
 
 procedure TRenderContext.UpdateLineType;
 begin
+  if RHIDevice <> nil then
+    Exit;
   {$ifndef OpenGLES}
   case FLineType of
     ltSolid: glDisable(GL_LINE_STIPPLE);
@@ -1036,6 +1208,19 @@ end;
 
 procedure TRenderContext.UpdatePolygonOffset;
 begin
+  if RHIDevice <> nil then
+  begin
+    Inc(FRHIDepthBiasUpdateCount);
+    if ActiveCommandList <> nil then
+    begin
+      if FPolygonOffset.Enabled then
+        ActiveCommandList.SetDepthBias(FPolygonOffset.Bias, FPolygonOffset.Scale)
+      else
+        ActiveCommandList.SetDepthBias(0, 0);
+    end;
+    Exit;
+  end;
+
   if FPolygonOffset.Enabled then
   begin
     glEnable(GL_POLYGON_OFFSET_FILL);
@@ -1082,6 +1267,12 @@ end;
 
 procedure TRenderContext.SetBoundBuffer(const Target: TBufferTarget; const Value: TGLBuffer);
 begin
+  if RHIDevice <> nil then
+  begin
+    FBoundBuffer[Target] := Value;
+    Exit;
+  end;
+
   { TODO: Optimization (avoiding glBindBuffer) disabled.
     Reason: castle-model-viewer (rock.gltf, triangulatio.x3dv) shows
     that we cannot optimize out glBindBuffer calls like this,
@@ -1180,10 +1371,30 @@ begin
 
   if (Count <> 0) or UseControlRect then
   begin
-    glScissor(R.Left, R.Bottom, R.Width, R.Height);
-    glEnable(GL_SCISSOR_TEST);
+    if RHIDevice <> nil then
+    begin
+      Inc(ParentContext.FRHIScissorUpdateCount);
+      ParentContext.FRHILastScissor := R;
+      ParentContext.FRHIScissorActive := True;
+      if ActiveCommandList <> nil then
+        ActiveCommandList.SetScissor(R);
+    end else
+    begin
+      glScissor(R.Left, R.Bottom, R.Width, R.Height);
+      glEnable(GL_SCISSOR_TEST);
+    end;
   end else
-    glDisable(GL_SCISSOR_TEST);
+  begin
+    if RHIDevice <> nil then
+    begin
+      Inc(ParentContext.FRHIScissorUpdateCount);
+      ParentContext.FRHILastScissor := ParentContext.EffectiveViewportRect;
+      ParentContext.FRHIScissorActive := False;
+      if ActiveCommandList <> nil then
+        ActiveCommandList.SetScissor(ParentContext.FRHILastScissor);
+    end else
+      glDisable(GL_SCISSOR_TEST);
+  end;
 end;
 
 { TScissor ------------------------------------------------------------------- }
@@ -1205,7 +1416,7 @@ begin
   if FEnabled <> Value then
   begin
     FEnabled := Value;
-    if RenderContext.FEnabledScissors <> nil then
+    if (RenderContext <> nil) and (RenderContext.FEnabledScissors <> nil) then
     begin
       if Value then
         RenderContext.FEnabledScissors.Add(Self) else
