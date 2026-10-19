@@ -248,12 +248,16 @@ const
     projected along the world X axis on the floor 10 units wide:
     the texture is black on the left (-X) half, white on the right (+X) half. }
   EffectCode =
-    'uniform mat4 castle_CameraInverseMatrix;' + LineEnding +
+    { On OpenGLES all fragment shader parts are glued into one source,
+      that already declares castle_vertex_eye. }
+    '#ifndef GL_ES' + LineEnding +
     'varying vec4 castle_vertex_eye;' + LineEnding +
+    '#endif' + LineEnding +
+    'vec4 position_eye_to_world_space(vec4 position_eye);' + LineEnding +
     'uniform sampler2D test_light_texture;' + LineEnding +
     'void PLUG_light_scale(inout float scale, const in vec3 normal_eye, const in vec3 light_dir)' + LineEnding +
     '{' + LineEnding +
-    '  vec4 world = castle_CameraInverseMatrix * castle_vertex_eye;' + LineEnding +
+    '  vec4 world = position_eye_to_world_space(castle_vertex_eye);' + LineEnding +
     '  scale *= texture2D(test_light_texture, vec2(world.x / 10.0 + 0.5, 0.5)).r;' + LineEnding +
     '}';
 var
@@ -271,7 +275,7 @@ var
   begin
     Result := TX3DRootNode.Create;
 
-    { Make castle_CameraInverseMatrix available to the light effect. }
+    { Make position_eye_to_world_space available to the light effect. }
     Library_ := TEffectNode.Create;
     Library_.Language := slGLSL;
     Library_.FdShaderLibraries.Items.Add('castle-shader:/EyeWorldSpace.glsl');
@@ -395,12 +399,16 @@ const
     on the floor 10 units wide:
     the texture is red on the left (-X) half, green on the right (+X) half. }
   EffectCode =
-    'uniform mat4 castle_CameraInverseMatrix;' + LineEnding +
+    { On OpenGLES all fragment shader parts are glued into one source,
+      that already declares castle_vertex_eye. }
+    '#ifndef GL_ES' + LineEnding +
     'varying vec4 castle_vertex_eye;' + LineEnding +
+    '#endif' + LineEnding +
+    'vec4 position_eye_to_world_space(vec4 position_eye);' + LineEnding +
     'uniform sampler2D test_light_texture;' + LineEnding +
     'void PLUG_light_color_scale(inout vec3 color_scale, const in vec3 normal_eye, const in vec3 light_dir)' + LineEnding +
     '{' + LineEnding +
-    '  vec4 world = castle_CameraInverseMatrix * castle_vertex_eye;' + LineEnding +
+    '  vec4 world = position_eye_to_world_space(castle_vertex_eye);' + LineEnding +
     '  color_scale *= texture2D(test_light_texture, vec2(world.x / 10.0 + 0.5, 0.5)).rgb;' + LineEnding +
     '}';
 var
@@ -421,7 +429,7 @@ var
   begin
     Result := TX3DRootNode.Create;
 
-    { Make castle_CameraInverseMatrix available to the light effect. }
+    { Make position_eye_to_world_space available to the light effect. }
     Library_ := TEffectNode.Create;
     Library_.Language := slGLSL;
     Library_.FdShaderLibraries.Items.Add('castle-shader:/EyeWorldSpace.glsl');

@@ -1,7 +1,23 @@
-uniform mat4 castle_CameraMatrix;
-uniform mat4 castle_CameraInverseMatrix;
-uniform mat3 castle_CameraRotationMatrix;
-uniform mat3 castle_CameraRotationInverseMatrix;
+/* This library is plugged into both vertex and fragment shaders,
+   and on OpenGLES a uniform used by both must have the same precision in both
+   (otherwise the program doesn't link).
+   The default float precision differs: highp in vertex shaders,
+   mediump in our fragment shaders (see TGLSLProgram.AttachShader).
+   So declare the precision explicitly. */
+#ifdef GL_ES
+  #ifdef GL_FRAGMENT_PRECISION_HIGH
+    #define CASTLE_EYE_WORLD_SPACE_PRECISION highp
+  #else
+    #define CASTLE_EYE_WORLD_SPACE_PRECISION mediump
+  #endif
+#else
+  #define CASTLE_EYE_WORLD_SPACE_PRECISION
+#endif
+
+uniform CASTLE_EYE_WORLD_SPACE_PRECISION mat4 castle_CameraMatrix;
+uniform CASTLE_EYE_WORLD_SPACE_PRECISION mat4 castle_CameraInverseMatrix;
+uniform CASTLE_EYE_WORLD_SPACE_PRECISION mat3 castle_CameraRotationMatrix;
+uniform CASTLE_EYE_WORLD_SPACE_PRECISION mat3 castle_CameraRotationInverseMatrix;
 
 vec4 position_world_to_eye_space(vec4 position_world)
 {
