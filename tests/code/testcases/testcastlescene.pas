@@ -54,6 +54,9 @@ type
     procedure TestPrepareShadowVolumesOnlyCasters;
     { Positional light with RadiusFalloff fades smoothly to zero at its radius. }
     procedure TestLightRadiusFalloff;
+    { A point light far from a lit point (in big world units)
+      lights it on OpenGLES too, with FragmentShaderHighPrecision. }
+    procedure TestFragmentShaderHighPrecision;
   end;
 
 implementation
@@ -62,7 +65,7 @@ uses X3DNodes, CastleSceneCore, CastleScene, CastleBoxes, CastleVectors,
   CastleInternalRays, CastleProjection, CastleComponentSerialize,
   CastleUIControls, CastleWindow, CastleViewport, CastleInternalGLUtils,
   CastleImages, CastleColors, CastleRenderOptions, X3DFields,
-  CastleShapes, CastleTransform, CastleUtils;
+  CastleShapes, CastleTransform, CastleUtils, CastleGLShaders;
 
 procedure TTestScene.TestScene;
 
@@ -1244,6 +1247,103 @@ begin
     CheckGLErrors('TestLightRadiusFalloff');
     Window.Close;
   finally DestroyWindowForTest(Window) end;
+end;
+
+procedure TTestScene.TestFragmentShaderHighPrecision;
+var
+  Window: TCastleWindow;
+  Viewport: TCastleViewport;
+  Light: TCastlePointLight;
+  FloorScene: TCastleScene;
+  SavedHighPrecision: Boolean;
+
+  function BuildFloor: TX3DRootNode;
+  var
+    Shape: TShapeNode;
+    FloorBox: TBoxNode;
+    Transform: TTransformNode;
+  begin
+    FloorBox := TBoxNode.CreateWithShape(Shape);
+    FloorBox.Size := Vector3(4000, 2, 4000);
+    Shape.Material := TMaterialNode.Create;
+    Transform := TTransformNode.Create;
+    Transform.Translation := Vector3(0, -1, 0);
+    Transform.AddChildren(Shape);
+    Result := TX3DRootNode.Create;
+    Result.AddChildren(Transform);
+  end;
+
+  { Brightness of the floor at world (X, 0, Z) on the screen. }
+  function FloorBrightness(const X, Z: Single): Single;
+  var
+    Image: TCastleImage;
+    P: TVector2;
+    C: TCastleColor;
+  begin
+    Image := Window.SaveScreen;
+    try
+      P := Viewport.PositionFromWorld(Vector3(X, 0, Z));
+      C := Image.Colors[Round(P.X), Round(P.Y), 0];
+      Result := (C.X + C.Y + C.Z) / 3;
+    finally FreeAndNil(Image) end;
+  end;
+
+var
+  B: Single;
+begin
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  SavedHighPrecision := FragmentShaderHighPrecision;
+  FragmentShaderHighPrecision := true;
+  try
+    Window := CreateWindowForTest;
+    try
+      Window.Width := 300;
+      Window.Height := 300;
+      Window.Open;
+
+      Viewport := TCastleViewport.Create(Window);
+      Viewport.FullSize := true;
+      Viewport.BackgroundColor := Black;
+      { looking down at the floor from far away }
+      Viewport.Camera.SetView(Vector3(0, 3500, 0), Vector3(0, -1, 0), Vector3(0, 0, -1));
+      Viewport.Camera.ProjectionFar := 10000;
+      Window.Controls.InsertFront(Viewport);
+
+      { The light is 400 above the floor: the squared distance (160 000)
+        overflows a 16-bit float (at most 65504), which some OpenGLES
+        implementations (like Mesa) use for mediump. }
+      Light := TCastlePointLight.Create(Window);
+      Light.Translation := Vector3(0, 400, 0);
+      Light.Radius := 1000;
+      Light.Intensity := 1;
+      Light.Attenuation := Vector3(1, 0, 0); // no attenuation, only the radius
+      Viewport.Items.Add(Light);
+
+      FloorScene := TCastleScene.Create(Window);
+      FloorScene.Load(BuildFloor, true);
+      Viewport.Items.Add(FloorScene);
+
+      { under the light, and 300 to the side (500 from the light) }
+      B := FloorBrightness(0, 0);
+      if not (B > 0.5) then
+        Fail(Format('Floor under the light at 400: brightness %f', [B]));
+      B := FloorBrightness(300, 0);
+      if not (B > 0.3) then
+        Fail(Format('Floor 500 from the light: brightness %f', [B]));
+      { outside the radius }
+      AssertTrue(FloorBrightness(0, 1050) < 0.1);
+
+      CheckGLErrors('TestFragmentShaderHighPrecision');
+      Window.Close;
+    finally DestroyWindowForTest(Window) end;
+  finally
+    FragmentShaderHighPrecision := SavedHighPrecision;
+  end;
 end;
 
 initialization

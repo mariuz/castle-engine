@@ -58,6 +58,8 @@
       if no declaration "precision mediump/lowp/highp float;" is found in the code.
       This is practically universally needed for OpenGLES fragment shader,
       that have no default precision.
+      Set @link(FragmentShaderHighPrecision) to use "highp" instead
+      (when the GPU supports it).
 
       See also WebGL recommendations:
       https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/WebGL_best_practices#be_precise_with_glsl_precision_annotations
@@ -658,6 +660,27 @@ var
 
     @exclude }
   InternalUpgradeGlslVersion: Boolean = true;
+
+  { On OpenGLES (and WebGL), make "highp" the default float precision
+    of fragment shaders, instead of "mediump",
+    when the GPU supports it (GL_FRAGMENT_PRECISION_HIGH is defined,
+    which OpenGLES 3.0 requires).
+    It only matters for fragment shaders that don't declare their default
+    precision themselves.
+
+    "mediump" is only guaranteed to have the range and precision
+    of a 16-bit float, and many GPUs (and Mesa) use 16-bit floats for it:
+    values up to 65504, about 3 decimal digits.
+    That isn't enough for eye-space positions and distances
+    in worlds with large units: e.g. the squared distance to a light
+    computed by "length" overflows past 256 units,
+    and the light then doesn't reach the fragment.
+    Desktop OpenGL always uses 32-bit floats, so "highp" makes OpenGLES
+    render like desktop OpenGL, at some speed cost on mobile GPUs.
+
+    Set this before rendering anything
+    (shaders already compiled are not changed). }
+  FragmentShaderHighPrecision: Boolean = false;
 
 implementation
 
@@ -1811,7 +1834,16 @@ begin
         if (not HasLine('precision mediump float;', S)) and
            (not HasLine('precision lowp float;', S)) and
            (not HasLine('precision highp float;', S)) then
-          S := 'precision mediump float;' + NL + S;
+        begin
+          if FragmentShaderHighPrecision then
+            S := '#ifdef GL_FRAGMENT_PRECISION_HIGH' + NL +
+                 'precision highp float;' + NL +
+                 '#else' + NL +
+                 'precision mediump float;' + NL +
+                 '#endif' + NL + S
+          else
+            S := 'precision mediump float;' + NL + S;
+        end;
         {$endif}
       end;
     {$ifndef COMPILER_CASE_ANALYSIS}
