@@ -314,6 +314,8 @@ type
       ButtonRandomizeTransform: TButton;
       ButtonArrayDuplicate: TButton;
       ButtonRadialDuplicate: TButton;
+      ButtonGridDuplicate: TButton;
+      ButtonProjectAlongView: TButton;
       ButtonViewTop: TButton;
       ButtonViewFront: TButton;
       ButtonViewRight: TButton;
@@ -329,7 +331,11 @@ type
       MenuTreeViewItemUngroupSelected: TMenuItem;
       MenuTreeViewItemArrayDuplicate: TMenuItem;
       MenuTreeViewItemRadialDuplicate: TMenuItem;
+      MenuTreeViewItemGridDuplicate: TMenuItem;
       MenuTreeViewItemReplaceSelected: TMenuItem;
+      MenuTreeViewItemInvertSelection: TMenuItem;
+      MenuTreeViewItemSelectChildren: TMenuItem;
+      MenuTreeViewItemSelectDescendants: TMenuItem;
       MenuTreeViewItemSelectSameClass: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
       MenuTreeViewItemCollapseAll: TMenuItem;
@@ -376,6 +382,8 @@ type
     procedure ButtonRandomizeTransformClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
+    procedure ButtonGridDuplicateClick(Sender: TObject);
+    procedure ButtonProjectAlongViewClick(Sender: TObject);
     procedure ButtonAxisViewClick(Sender: TObject);
     procedure EditPropertyFilterChange(Sender: TObject);
     procedure ButtonResetPropertyClick(Sender: TObject);
@@ -390,7 +398,11 @@ type
     procedure MenuTreeViewItemUngroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemArrayDuplicateClick(Sender: TObject);
     procedure MenuTreeViewItemRadialDuplicateClick(Sender: TObject);
+    procedure MenuTreeViewItemGridDuplicateClick(Sender: TObject);
     procedure MenuTreeViewItemReplaceSelectedClick(Sender: TObject);
+    procedure MenuTreeViewItemInvertSelectionClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectChildrenClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectDescendantsClick(Sender: TObject);
     procedure MenuTreeViewItemSelectSameClassClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
     procedure MenuTreeViewItemCollapseAllClick(Sender: TObject);
@@ -816,6 +828,7 @@ type
     procedure ViewportAlignCameraToView;
     procedure ViewportAlignTransformToView;
     procedure ViewportSnapToFloor(const AlignToNormal: Boolean = false);
+    procedure ViewportProjectAlongView(const AlignToNormal: Boolean = false);
     procedure ViewportSnapToGrid;
     procedure ViewportSnapToCursor(const SnapToVertex: Boolean = false;
       const AlignToNormal: Boolean = false);
@@ -823,6 +836,7 @@ type
     procedure TogglePivotMode;
     procedure AlignSelectionToAxis(const Axis: T3DAxis);
     procedure DistributeSelectionAlongAxis(const Axis: T3DAxis);
+    procedure DistributeSelectionGapsAlongAxis(const Axis: T3DAxis);
     procedure StackSelectionAlongAxis(const Axis: T3DAxis);
     procedure MirrorSelectionAlongAxis(const Axis: T3DAxis);
     procedure RotateSelection90Y;
@@ -833,9 +847,14 @@ type
     procedure RadialDuplicateSelected(const Count: Integer;
       const Radius, TotalAngleDeg: Single; const OrientToCenter: Boolean);
     procedure ShowRadialDuplicateDialog;
+    procedure GridDuplicateSelected(const CountX, CountY, CountZ: Integer;
+      const Spacing: TVector3);
+    procedure ShowGridDuplicateDialog;
     procedure ReplaceSelectedComponents(const NewClass: TComponentClass;
       const ComponentOnCreate: TNotifyEvent = nil);
     procedure ShowReplaceComponentPalette;
+    procedure InvertSelection;
+    procedure SelectChildren(const Recursive: Boolean = false);
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -1353,6 +1372,9 @@ begin
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyEnd) then
   begin
+    if (mkCtrl in Event.ModifiersDown) and (mkShift in Event.ModifiersDown) then
+      Frame.ViewportProjectAlongView(mkAlt in Event.ModifiersDown)
+    else
     if mkCtrl in Event.ModifiersDown then
       Frame.ViewportSnapToGrid
     else
@@ -1415,6 +1437,20 @@ begin
       Frame.ShowRadialDuplicateDialog;
       Exit(true);
     end;
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyG) and
+     (Event.ModifiersDown = [mkCtrl, mkAlt]) then
+  begin
+    Frame.ShowGridDuplicateDialog;
+    Exit(true);
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyI) and
+     (Event.ModifiersDown = [mkCtrl]) then
+  begin
+    Frame.InvertSelection;
+    Exit(true);
   end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyR) and
@@ -2580,6 +2616,26 @@ begin
   ButtonRadialDuplicate.OnClick := @ButtonRadialDuplicateClick;
   ButtonRadialDuplicate.Parent := PanelLayoutTransform;
 
+  ButtonGridDuplicate := TButton.Create(Self);
+  ButtonGridDuplicate.Align := alTop;
+  ButtonGridDuplicate.AutoSize := true;
+  ButtonGridDuplicate.Caption := 'Grid Dup...';
+  ButtonGridDuplicate.Hint := '2D / 3D grid array duplicate selected TCastleTransform component(s) into Nx * Ny * Nz lattice (Ctrl+Alt+G)';
+  ButtonGridDuplicate.ShowHint := true;
+  ButtonGridDuplicate.BorderSpacing.Around := 2;
+  ButtonGridDuplicate.OnClick := @ButtonGridDuplicateClick;
+  ButtonGridDuplicate.Parent := PanelLayoutTransform;
+
+  ButtonProjectAlongView := TButton.Create(Self);
+  ButtonProjectAlongView.Align := alTop;
+  ButtonProjectAlongView.AutoSize := true;
+  ButtonProjectAlongView.Caption := 'Project Along View';
+  ButtonProjectAlongView.Hint := 'Project selected TCastleTransform(s) along the viewport camera forward direction onto hit geometry (Ctrl+Shift+End; hold Shift/Alt to align +Y to surface normal)';
+  ButtonProjectAlongView.ShowHint := true;
+  ButtonProjectAlongView.BorderSpacing.Around := 2;
+  ButtonProjectAlongView.OnClick := @ButtonProjectAlongViewClick;
+  ButtonProjectAlongView.Parent := PanelLayoutTransform;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -2684,6 +2740,11 @@ begin
   MenuTreeViewItemRadialDuplicate.OnClick := @MenuTreeViewItemRadialDuplicateClick;
   MenuTreeView.Items.Add(MenuTreeViewItemRadialDuplicate);
 
+  MenuTreeViewItemGridDuplicate := TMenuItem.Create(Self);
+  MenuTreeViewItemGridDuplicate.Caption := '2D / 3D Grid Duplicate... (Ctrl+Alt+G)';
+  MenuTreeViewItemGridDuplicate.OnClick := @MenuTreeViewItemGridDuplicateClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemGridDuplicate);
+
   MenuTreeViewItemReplaceSelected := TMenuItem.Create(Self);
   MenuTreeViewItemReplaceSelected.Caption := 'Replace Selected With... (Ctrl+Shift+R)';
   MenuTreeViewItemReplaceSelected.OnClick := @MenuTreeViewItemReplaceSelectedClick;
@@ -2693,6 +2754,21 @@ begin
   MenuTreeViewItemSelectSameClass.Caption := 'Select All of Same Class';
   MenuTreeViewItemSelectSameClass.OnClick := @MenuTreeViewItemSelectSameClassClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectSameClass);
+
+  MenuTreeViewItemInvertSelection := TMenuItem.Create(Self);
+  MenuTreeViewItemInvertSelection.Caption := 'Invert Selection (Ctrl+I)';
+  MenuTreeViewItemInvertSelection.OnClick := @MenuTreeViewItemInvertSelectionClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemInvertSelection);
+
+  MenuTreeViewItemSelectChildren := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectChildren.Caption := 'Select Direct Children (Ctrl+])';
+  MenuTreeViewItemSelectChildren.OnClick := @MenuTreeViewItemSelectChildrenClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectChildren);
+
+  MenuTreeViewItemSelectDescendants := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectDescendants.Caption := 'Select All Descendants (Ctrl+Shift+])';
+  MenuTreeViewItemSelectDescendants.OnClick := @MenuTreeViewItemSelectDescendantsClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectDescendants);
 
   MenuTreeViewItemExpandAll := TMenuItem.Create(Self);
   MenuTreeViewItemExpandAll.Caption := 'Expand Subtree';
@@ -7531,6 +7607,11 @@ begin
       begin
         UngroupSelectedTransforms;
         Key := 0;
+      end else
+      if Shift = [ssCtrl, ssAlt] then
+      begin
+        ShowGridDuplicateDialog;
+        Key := 0;
       end;
     end else
     if Key = Ord('L') then
@@ -7555,6 +7636,24 @@ begin
     begin
       ShowRadialDuplicateDialog;
       Key := 0;
+    end else
+    if (Key = Ord('I')) and (Shift = [ssCtrl]) then
+    begin
+      InvertSelection;
+      Key := 0;
+    end else
+    if Key = VK_OEM_6 then
+    begin
+      if Shift = [ssCtrl] then
+      begin
+        SelectChildren(false);
+        Key := 0;
+      end else
+      if Shift = [ssCtrl, ssShift] then
+      begin
+        SelectChildren(true);
+        Key := 0;
+      end;
     end else
     if (Key = Ord('R')) and (Shift = [ssCtrl, ssShift]) then
     begin
@@ -7969,6 +8068,7 @@ begin
     TransformManipulate.TranslateSnap := 1.0;
   try
     TransformManipulate.SnapSelectedToGrid;
+    TransformManipulate.SnapSelectedRotationAndScaleToGrid;
   finally
     TransformManipulate.TranslateSnap := SavedSnap;
   end;
@@ -7977,6 +8077,23 @@ end;
 procedure TDesignFrame.ButtonSnapToGridClick(Sender: TObject);
 begin
   ViewportSnapToGrid;
+end;
+
+procedure TDesignFrame.ViewportProjectAlongView(const AlignToNormal: Boolean);
+var
+  V: TCastleViewport;
+  CamPos, CamDir, CamUp: TVector3;
+begin
+  V := CurrentViewport;
+  if (V = nil) or (V.InternalCamera = nil) or (TransformManipulate = nil) then Exit;
+  V.InternalCamera.GetWorldView(CamPos, CamDir, CamUp);
+  TransformManipulate.ProjectSelectedAlongDirection(CamDir, AlignToNormal);
+end;
+
+procedure TDesignFrame.ButtonProjectAlongViewClick(Sender: TObject);
+begin
+  ViewportProjectAlongView(
+    (ssShift in GetKeyShiftState) or (ssAlt in GetKeyShiftState));
 end;
 
 procedure TDesignFrame.ViewportAlignTransformToView;
@@ -8011,6 +8128,12 @@ begin
     TransformManipulate.DistributeSelected(Axis);
 end;
 
+procedure TDesignFrame.DistributeSelectionGapsAlongAxis(const Axis: T3DAxis);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.DistributeSelectedGaps(Axis);
+end;
+
 procedure TDesignFrame.ButtonAlignAxisClick(Sender: TObject);
 begin
   if Sender is TComponent then
@@ -8020,7 +8143,12 @@ end;
 procedure TDesignFrame.ButtonDistributeAxisClick(Sender: TObject);
 begin
   if Sender is TComponent then
-    DistributeSelectionAlongAxis(TComponent(Sender).Tag);
+  begin
+    if ssShift in GetKeyShiftState then
+      DistributeSelectionGapsAlongAxis(TComponent(Sender).Tag)
+    else
+      DistributeSelectionAlongAxis(TComponent(Sender).Tag);
+  end;
 end;
 
 procedure TDesignFrame.StackSelectionAlongAxis(const Axis: T3DAxis);
@@ -9301,6 +9429,371 @@ begin
   FMeasureActive := false;
 end;
 
+procedure TDesignFrame.GridDuplicateSelected(const CountX, CountY, CountZ: Integer;
+  const Spacing: TVector3);
+var
+  SelectedList, SourceTransforms, NewSelection: TComponentList;
+  SelectedCount, I, IX, IY, IZ, InsertIdx, TotalCopies: Integer;
+  Src, ParentT, NewComp: TCastleTransform;
+  CompStr: String;
+  CellOffset: TVector3;
+begin
+  if (CountX < 1) or (CountY < 1) or (CountZ < 1) or (DesignOwner = nil) then Exit;
+  if (CountX = 1) and (CountY = 1) and (CountZ = 1) then Exit;
+
+  SourceTransforms := TComponentList.Create(false);
+  NewSelection := TComponentList.Create(false);
+  try
+    GetSelected(SelectedList, SelectedCount, false);
+    try
+      if SelectedList <> nil then
+        for I := 0 to SelectedList.Count - 1 do
+          if (SelectedList[I] is TCastleTransform) and
+             Deletable(SelectedList[I]) and
+             (TCastleTransform(SelectedList[I]).Parent <> nil) and
+             (not IsComponentDescendantOfSelection(SelectedList[I], SelectedList)) then
+            SourceTransforms.Add(SelectedList[I]);
+    finally
+      FreeAndNil(SelectedList);
+    end;
+
+    if (SourceTransforms.Count = 0) and (CurrentTransform <> nil) and
+       Deletable(CurrentTransform) and (CurrentTransform.Parent <> nil) then
+      SourceTransforms.Add(CurrentTransform);
+
+    if SourceTransforms.Count = 0 then
+    begin
+      ErrorBox('Select at least one TCastleTransform (that is not the root or a subcomponent) to grid-duplicate.');
+      Exit;
+    end;
+
+    TotalCopies := 0;
+    for I := 0 to SourceTransforms.Count - 1 do
+    begin
+      Src := TCastleTransform(SourceTransforms[I]);
+      ParentT := Src.Parent;
+      CompStr := ComponentToString(Src);
+      InsertIdx := ParentT.List.IndexOf(Src);
+
+      for IX := 0 to CountX - 1 do
+        for IY := 0 to CountY - 1 do
+          for IZ := 0 to CountZ - 1 do
+          begin
+            if (IX = 0) and (IY = 0) and (IZ = 0) then
+              Continue; // original already occupies (0,0,0)
+
+            CellOffset := Vector3(
+              IX * Spacing.X,
+              IY * Spacing.Y,
+              IZ * Spacing.Z);
+
+            NewComp := StringToComponent(CompStr, DesignOwner) as TCastleTransform;
+            NewComp.Translation := Src.Translation + CellOffset;
+
+            if InsertIdx >= 0 then
+            begin
+              Inc(InsertIdx);
+              ParentT.Insert(InsertIdx, NewComp);
+            end else
+              ParentT.Add(NewComp);
+
+            NewSelection.Add(NewComp);
+            Inc(TotalCopies);
+          end;
+    end;
+
+    if NewSelection.Count > 0 then
+    begin
+      UpdateDesign;
+      SetSelected(NewSelection);
+      ModifiedOutsideObjectInspector(
+        Format('Grid duplicate (%dx%dx%d, %d new copies)',
+          [CountX, CountY, CountZ, TotalCopies]), ucHigh);
+    end;
+  finally
+    FreeAndNil(NewSelection);
+    FreeAndNil(SourceTransforms);
+  end;
+end;
+
+procedure TDesignFrame.ShowGridDuplicateDialog;
+var
+  Dialog: TForm;
+  LblCountX, LblCountY, LblCountZ, LblSpacingX, LblSpacingY, LblSpacingZ: TLabel;
+  SpinCountX, SpinCountY, SpinCountZ: TSpinEdit;
+  SpinSpacingX, SpinSpacingY, SpinSpacingZ: TFloatSpinEdit;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+  T: TCastleTransform;
+  BBox: TBox3D;
+  DefStepX, DefStepY, DefStepZ: Single;
+begin
+  T := CurrentTransform;
+  if (T = nil) and ((TransformManipulate = nil) or (TransformManipulate.SelectedCount = 0)) then
+  begin
+    ErrorBox('Select at least one TCastleTransform component before opening Grid Duplicate.');
+    Exit;
+  end;
+
+  DefStepX := 2.0;
+  DefStepY := 2.0;
+  DefStepZ := 2.0;
+  if T <> nil then
+  begin
+    BBox := T.WorldBoundingBox;
+    if not BBox.IsEmpty then
+    begin
+      if BBox.SizeX > 0.01 then DefStepX := BBox.SizeX;
+      if BBox.SizeY > 0.01 then DefStepY := BBox.SizeY;
+      if BBox.SizeZ > 0.01 then DefStepZ := BBox.SizeZ;
+    end;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := '2D / 3D Grid Duplicate (Ctrl+Alt+G)';
+    Dialog.Position := poMainFormCenter;
+    Dialog.Width := 360;
+    Dialog.Height := 300;
+    Dialog.BorderStyle := bsDialog;
+
+    LblCountX := TLabel.Create(Dialog);
+    LblCountX.Caption := 'Columns X (Count X):';
+    LblCountX.Left := 16;
+    LblCountX.Top := 18;
+    LblCountX.Parent := Dialog;
+
+    SpinCountX := TSpinEdit.Create(Dialog);
+    SpinCountX.MinValue := 1;
+    SpinCountX.MaxValue := 50;
+    SpinCountX.Value := 3;
+    SpinCountX.Left := 190;
+    SpinCountX.Top := 14;
+    SpinCountX.Width := 140;
+    SpinCountX.Parent := Dialog;
+
+    LblCountY := TLabel.Create(Dialog);
+    LblCountY.Caption := 'Layers Y (Count Y):';
+    LblCountY.Left := 16;
+    LblCountY.Top := 54;
+    LblCountY.Parent := Dialog;
+
+    SpinCountY := TSpinEdit.Create(Dialog);
+    SpinCountY.MinValue := 1;
+    SpinCountY.MaxValue := 50;
+    SpinCountY.Value := 1;
+    SpinCountY.Left := 190;
+    SpinCountY.Top := 50;
+    SpinCountY.Width := 140;
+    SpinCountY.Parent := Dialog;
+
+    LblCountZ := TLabel.Create(Dialog);
+    LblCountZ.Caption := 'Rows Z (Count Z):';
+    LblCountZ.Left := 16;
+    LblCountZ.Top := 90;
+    LblCountZ.Parent := Dialog;
+
+    SpinCountZ := TSpinEdit.Create(Dialog);
+    SpinCountZ.MinValue := 1;
+    SpinCountZ.MaxValue := 50;
+    SpinCountZ.Value := 3;
+    SpinCountZ.Left := 190;
+    SpinCountZ.Top := 86;
+    SpinCountZ.Width := 140;
+    SpinCountZ.Parent := Dialog;
+
+    LblSpacingX := TLabel.Create(Dialog);
+    LblSpacingX.Caption := 'Cell Spacing X:';
+    LblSpacingX.Left := 16;
+    LblSpacingX.Top := 126;
+    LblSpacingX.Parent := Dialog;
+
+    SpinSpacingX := TFloatSpinEdit.Create(Dialog);
+    SpinSpacingX.DecimalPlaces := 2;
+    SpinSpacingX.Increment := 0.5;
+    SpinSpacingX.MinValue := -10000;
+    SpinSpacingX.MaxValue := 10000;
+    SpinSpacingX.Value := DefStepX;
+    SpinSpacingX.Left := 190;
+    SpinSpacingX.Top := 122;
+    SpinSpacingX.Width := 140;
+    SpinSpacingX.Parent := Dialog;
+
+    LblSpacingY := TLabel.Create(Dialog);
+    LblSpacingY.Caption := 'Cell Spacing Y:';
+    LblSpacingY.Left := 16;
+    LblSpacingY.Top := 162;
+    LblSpacingY.Parent := Dialog;
+
+    SpinSpacingY := TFloatSpinEdit.Create(Dialog);
+    SpinSpacingY.DecimalPlaces := 2;
+    SpinSpacingY.Increment := 0.5;
+    SpinSpacingY.MinValue := -10000;
+    SpinSpacingY.MaxValue := 10000;
+    SpinSpacingY.Value := DefStepY;
+    SpinSpacingY.Left := 190;
+    SpinSpacingY.Top := 158;
+    SpinSpacingY.Width := 140;
+    SpinSpacingY.Parent := Dialog;
+
+    LblSpacingZ := TLabel.Create(Dialog);
+    LblSpacingZ.Caption := 'Cell Spacing Z:';
+    LblSpacingZ.Left := 16;
+    LblSpacingZ.Top := 198;
+    LblSpacingZ.Parent := Dialog;
+
+    SpinSpacingZ := TFloatSpinEdit.Create(Dialog);
+    SpinSpacingZ.DecimalPlaces := 2;
+    SpinSpacingZ.Increment := 0.5;
+    SpinSpacingZ.MinValue := -10000;
+    SpinSpacingZ.MaxValue := 10000;
+    SpinSpacingZ.Value := DefStepZ;
+    SpinSpacingZ.Left := 190;
+    SpinSpacingZ.Top := 194;
+    SpinSpacingZ.Width := 140;
+    SpinSpacingZ.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Grid Duplicate';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      GridDuplicateSelected(
+        SpinCountX.Value, SpinCountY.Value, SpinCountZ.Value,
+        Vector3(SpinSpacingX.Value, SpinSpacingY.Value, SpinSpacingZ.Value));
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.ButtonGridDuplicateClick(Sender: TObject);
+begin
+  ShowGridDuplicateDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemGridDuplicateClick(Sender: TObject);
+begin
+  ShowGridDuplicateDialog;
+end;
+
+procedure TDesignFrame.InvertSelection;
+var
+  SelectedList, NewSelection: TComponentList;
+  SelectedCount: Integer;
+  TreeNode, ScopeParent: TTreeNode;
+  C: TComponent;
+begin
+  GetSelected(SelectedList, SelectedCount, false);
+  NewSelection := TComponentList.Create(false);
+  try
+    ScopeParent := nil;
+    if ControlsTree.SelectionCount > 0 then
+      ScopeParent := ControlsTree.Selections[0].Parent;
+
+    if ScopeParent <> nil then
+    begin
+      TreeNode := ScopeParent.GetFirstChild;
+      while TreeNode <> nil do
+      begin
+        C := SelectedFromNode(TreeNode, false);
+        if (C <> nil) and (C <> DesignRoot) and
+           ((SelectedList = nil) or (SelectedList.IndexOf(C) = -1)) then
+          NewSelection.Add(C);
+        TreeNode := TreeNode.GetNextSibling;
+      end;
+    end else
+    begin
+      TreeNode := ControlsTree.Items.GetFirstNode;
+      while TreeNode <> nil do
+      begin
+        C := SelectedFromNode(TreeNode, false);
+        if (C <> nil) and (C <> DesignRoot) and
+           ((SelectedList = nil) or (SelectedList.IndexOf(C) = -1)) then
+          NewSelection.Add(C);
+        TreeNode := TreeNode.GetNext;
+      end;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+    FreeAndNil(SelectedList);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemInvertSelectionClick(Sender: TObject);
+begin
+  InvertSelection;
+end;
+
+procedure TDesignFrame.SelectChildren(const Recursive: Boolean);
+
+  procedure CollectChildNodes(const ParentNode: TTreeNode; const List: TComponentList);
+  var
+    ChildNode: TTreeNode;
+    C: TComponent;
+  begin
+    if ParentNode = nil then Exit;
+    ChildNode := ParentNode.GetFirstChild;
+    while ChildNode <> nil do
+    begin
+      C := SelectedFromNode(ChildNode, false);
+      if (C <> nil) and (List.IndexOf(C) = -1) then
+        List.Add(C);
+      if Recursive then
+        CollectChildNodes(ChildNode, List);
+      ChildNode := ChildNode.GetNextSibling;
+    end;
+  end;
+
+var
+  NewSelection: TComponentList;
+  I: Integer;
+begin
+  if ControlsTree.SelectionCount = 0 then Exit;
+
+  NewSelection := TComponentList.Create(false);
+  try
+    for I := 0 to ControlsTree.SelectionCount - 1 do
+      CollectChildNodes(ControlsTree.Selections[I], NewSelection);
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectChildrenClick(Sender: TObject);
+begin
+  SelectChildren(false);
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectDescendantsClick(Sender: TObject);
+begin
+  SelectChildren(true);
+end;
+
 procedure TDesignFrame.ButtonRotateModeClick(Sender: TObject);
 begin
   if InsideToggleModeClick then Exit;
@@ -9498,10 +9991,18 @@ begin
     MenuTreeViewItemArrayDuplicate.Enabled := (CurrentTransform <> nil) or ((TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0));
   if MenuTreeViewItemRadialDuplicate <> nil then
     MenuTreeViewItemRadialDuplicate.Enabled := (CurrentTransform <> nil) or ((TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0));
+  if MenuTreeViewItemGridDuplicate <> nil then
+    MenuTreeViewItemGridDuplicate.Enabled := (CurrentTransform <> nil) or ((TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0));
   if MenuTreeViewItemReplaceSelected <> nil then
     MenuTreeViewItemReplaceSelected.Enabled := ControlsTree.SelectionCount > 0;
   if MenuTreeViewItemSelectSameClass <> nil then
     MenuTreeViewItemSelectSameClass.Enabled := Sel <> nil;
+  if MenuTreeViewItemInvertSelection <> nil then
+    MenuTreeViewItemInvertSelection.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectChildren <> nil then
+    MenuTreeViewItemSelectChildren.Enabled := ControlsTree.SelectionCount > 0;
+  if MenuTreeViewItemSelectDescendants <> nil then
+    MenuTreeViewItemSelectDescendants.Enabled := ControlsTree.SelectionCount > 0;
   if MenuTreeViewItemExpandAll <> nil then
     MenuTreeViewItemExpandAll.Enabled := ControlsTree.Items.Count > 0;
   if MenuTreeViewItemCollapseAll <> nil then

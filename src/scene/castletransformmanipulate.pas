@@ -418,6 +418,30 @@ type
       Returns @code(-1) when no surface is hit or nothing is selected. }
     function MeasureRayDistanceFromSelected(const RayOrigin, RayDirection: TVector3;
       out HitWorldPoint, WorldDelta: TVector3): Single;
+
+    { Project each top-level selected transform individually from its current
+      world bounding-box center (or origin) along @code(WorldDirection) onto the
+      first unselected scene surface hit, placing each transform's leading
+      bounding-box face flush against the hit surface.
+      When @code(AlignToNormal) is @true, also rotates each transform's local +Y
+      up axis to match the hit surface's world normal.
+      Returns @true if at least one selected transform was modified. }
+    function ProjectSelectedAlongDirection(const WorldDirection: TVector3;
+      const AlignToNormal: Boolean = false): Boolean;
+
+    { Distribute all top-level selected transforms along @code(Axis) (0=X, 1=Y, 2=Z)
+      so that the world-space bounding-box gaps between consecutive transforms
+      between the first and last transform are equal.
+      Requires at least 3 top-level selected transforms.
+      Returns @true if at least one selected transform was modified. }
+    function DistributeSelectedGaps(const Axis: T3DAxis): Boolean;
+
+    { Snap the absolute rotation angle (@code(Rotation.W)) of all top-level
+      selected transforms to the nearest multiple of @link(RotateSnap) (when > 0)
+      and the absolute @code(Scale) components to the nearest positive multiple of
+      @link(ScaleSnap) (when > 0).
+      Returns @true if at least one selected transform was modified. }
+    function SnapSelectedRotationAndScaleToGrid: Boolean;
   end;
 
 var
@@ -2312,6 +2336,271 @@ begin
     for I := 0 to Integer(FMaxSelectedCount) - 1 do
       if Boxes[I].Parent <> nil then
         Boxes[I].Parent.Pickable := SavedPickable[I];
+  end;
+end;
+
+function TCastleTransformManipulate.ProjectSelectedAlongDirection(
+  const WorldDirection: TVector3; const AlignToNormal: Boolean): Boolean;
+var
+  I: Integer;
+  T: TCastleTransform;
+  SavedPickable: array of Boolean;
+  SavedGizmoPickable: Boolean;
+  NormDir, RayOrigin, WorldDelta, LocalDelta: TVector3;
+  WorldNormal, TargetUpInParent, CurrentUpInParent, RotAxis: TVector3;
+  BBox: TBox3D;
+  HalfExtent, HitDistance, RotAngle: Single;
+  RayHit: TRayCollision;
+begin
+  Result := false;
+  if (SelectedCount = 0) or WorldDirection.IsZero then Exit;
+
+  NormDir := WorldDirection.Normalize;
+  SavedGizmoPickable := Pickable;
+  SetLength(SavedPickable, FMaxSelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+    if Boxes[I].Parent <> nil then
+    begin
+      SavedPickable[I] := Boxes[I].Parent.Pickable;
+      Boxes[I].Parent.Pickable := false;
+    end;
+  Pickable := false;
+  try
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+    begin
+      T := Boxes[I].Parent;
+      if (T <> nil) and (not IsDescendantOfAnySelected(T)) and
+         (T.World <> nil) and T.HasWorldTransform then
+      begin
+        BBox := T.WorldBoundingBox;
+        if not BBox.IsEmpty then
+        begin
+          RayOrigin := BBox.Center;
+          HalfExtent := 0.5 * (
+            Abs(NormDir.X) * BBox.SizeX +
+            Abs(NormDir.Y) * BBox.SizeY +
+            Abs(NormDir.Z) * BBox.SizeZ);
+        end else
+        begin
+          RayOrigin := T.LocalToWorld(TVector3.Zero);
+          HalfExtent := 0;
+        end;
+
+        RayHit := T.World.WorldRay(RayOrigin, NormDir);
+        if RayHit <> nil then
+        try
+          if RayHit.Transform <> nil then
+          begin
+            HitDistance := RayHit.Distance;
+
+            if AlignToNormal then
+            begin
+              if (RayHit.Count > 0) and (RayHit.First.Triangle <> nil) and
+                 (RayHit.First.Item <> nil) and RayHit.First.Item.HasWorldTransform then
+                WorldNormal := RayHit.First.Item.LocalToWorldDirection(RayHit.First.Triangle^.SceneSpace.Normal)
+              else
+              if (RayHit.Count > 0) and (RayHit.First.Item <> nil) and
+                 RayHit.First.Item.HasWorldTransform then
+                WorldNormal := RayHit.First.Item.LocalToWorldDirection(Vector3(0, 1, 0))
+              else
+                WorldNormal := -NormDir;
+
+              if not WorldNormal.IsZero then
+              begin
+                WorldNormal := WorldNormal.Normalize;
+                if TVector3.DotProduct(WorldNormal, NormDir) > 0 then
+                  WorldNormal := -WorldNormal;
+
+                if (T.Parent <> nil) and T.Parent.HasWorldTransform then
+                  TargetUpInParent := T.Parent.WorldToLocalDirection(WorldNormal).Normalize
+                else
+                  TargetUpInParent := WorldNormal;
+
+                CurrentUpInParent := RotatePointAroundAxis(T.Rotation, Vector3(0, 1, 0)).Normalize;
+                RotAngle := RotationAngleRadBetweenVectors(CurrentUpInParent, TargetUpInParent);
+                if Abs(RotAngle) > 1e-4 then
+                begin
+                  RotAxis := TVector3.CrossProduct(CurrentUpInParent, TargetUpInParent);
+                  if RotAxis.IsZero then
+                    RotAxis := AnyOrthogonalVector(CurrentUpInParent);
+                  T.Rotation := (QuatFromAxisAngle(RotAxis, RotAngle, true) *
+                    QuatFromAxisAngle(T.Rotation, true)).ToAxisAngle;
+                  Result := true;
+                end;
+              end;
+            end;
+
+            WorldDelta := NormDir * (HitDistance - HalfExtent);
+            if not WorldDelta.IsZero then
+            begin
+              if (T.Parent <> nil) and T.Parent.HasWorldTransform then
+                LocalDelta := T.Parent.WorldToLocalDirection(WorldDelta)
+              else
+                LocalDelta := WorldDelta;
+
+              T.Translation := T.Translation + LocalDelta;
+              Result := true;
+            end;
+          end;
+        finally
+          FreeAndNil(RayHit);
+        end;
+      end;
+    end;
+  finally
+    Pickable := SavedGizmoPickable;
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if Boxes[I].Parent <> nil then
+        Boxes[I].Parent.Pickable := SavedPickable[I];
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.DistributeSelectedGaps(const Axis: T3DAxis): Boolean;
+var
+  Items: array of TCastleTransform;
+  ItemMin, ItemMax: array of Single;
+  Count, I, J: Integer;
+  T, TempT: TCastleTransform;
+  BBox: TBox3D;
+  Pos: TVector3;
+  TempVal, TotalExtent, OverallSpan, Gap, PrevMax, DeltaAxis: Single;
+begin
+  Result := false;
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 3 then Exit;
+
+  for I := 0 to Count - 2 do
+    for J := I + 1 to Count - 1 do
+      if GetTransformWorkingPos(Items[J])[Axis] < GetTransformWorkingPos(Items[I])[Axis] then
+      begin
+        TempT := Items[I];
+        Items[I] := Items[J];
+        Items[J] := TempT;
+      end;
+
+  SetLength(ItemMin, Count);
+  SetLength(ItemMax, Count);
+  TotalExtent := 0;
+  for I := 0 to Count - 1 do
+  begin
+    Pos := GetTransformWorkingPos(Items[I]);
+    if Items[I].HasWorldTransform then
+      BBox := Items[I].WorldBoundingBox
+    else
+      BBox := Items[I].BoundingBox;
+
+    if not BBox.IsEmpty then
+    begin
+      ItemMin[I] := BBox.Min[Axis];
+      ItemMax[I] := BBox.Max[Axis];
+    end else
+    begin
+      ItemMin[I] := Pos[Axis];
+      ItemMax[I] := Pos[Axis];
+    end;
+    TotalExtent := TotalExtent + (ItemMax[I] - ItemMin[I]);
+  end;
+
+  OverallSpan := ItemMax[Count - 1] - ItemMin[0];
+  Gap := (OverallSpan - TotalExtent) / (Count - 1);
+  PrevMax := ItemMax[0];
+
+  for I := 1 to Count - 2 do
+  begin
+    Pos := GetTransformWorkingPos(Items[I]);
+    DeltaAxis := (PrevMax + Gap) - ItemMin[I];
+    if not SameValue(DeltaAxis, 0, 1e-5) then
+    begin
+      Pos.Data[Axis] := Pos[Axis] + DeltaAxis;
+      SetTransformWorkingPos(Items[I], Pos);
+      Result := true;
+    end;
+    TempVal := ItemMax[I] - ItemMin[I];
+    PrevMax := (PrevMax + Gap) + TempVal;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.SnapSelectedRotationAndScaleToGrid: Boolean;
+var
+  I, C: Integer;
+  T: TCastleTransform;
+  Rot: TVector4;
+  Scl: TVector3;
+  SnappedAngle, SnappedScale: Single;
+begin
+  Result := false;
+  if (SelectedCount = 0) or ((FRotateSnap <= 0) and (FScaleSnap <= 0)) then
+    Exit;
+
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      if FRotateSnap > 0 then
+      begin
+        Rot := T.Rotation;
+        SnappedAngle := Round(Rot.W / FRotateSnap) * FRotateSnap;
+        if not SameValue(Rot.W, SnappedAngle, 1e-5) then
+        begin
+          Rot.W := SnappedAngle;
+          T.Rotation := Rot;
+          Result := true;
+        end;
+      end;
+
+      if FScaleSnap > 0 then
+      begin
+        Scl := T.Scale;
+        for C := 0 to 2 do
+        begin
+          SnappedScale := Round(Scl.Data[C] / FScaleSnap) * FScaleSnap;
+          if SameValue(SnappedScale, 0, 1e-5) then
+            SnappedScale := FScaleSnap;
+          Scl.Data[C] := SnappedScale;
+        end;
+        if not TVector3.Equals(Scl, T.Scale) then
+        begin
+          T.Scale := Scl;
+          Result := true;
+        end;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
   end;
 end;
 

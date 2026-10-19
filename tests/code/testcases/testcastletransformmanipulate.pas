@@ -42,6 +42,7 @@ type
     procedure TestStackSelected;
     procedure TestSnapSelectedToRaySurfaceAndVertex;
     procedure TestMeasureSelectedAndRayDistance;
+    procedure TestProjectAlongDirectionDistributeGapsAndSnapRotScale;
   end;
 
 implementation
@@ -661,6 +662,79 @@ begin
     AssertSameValue(9.0, Dist, 1e-4);
     AssertVectorEquals(Vector3(1, 11, 3), HitPoint, 1e-4);
     AssertVectorEquals(Vector3(0, 9, 0), WorldDelta, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestProjectAlongDirectionDistributeGapsAndSnapRotScale;
+var
+  Viewport: TCastleViewport;
+  WallBox, PropBox, B1, B2, B3: TCastleBox;
+  Manipulate: TCastleTransformManipulate;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    // 1. Test ProjectSelectedAlongDirection along +X onto a vertical wall at X = 20 (Size 2, 20, 20 -> MinX = 19)
+    WallBox := TCastleBox.Create(Viewport);
+    WallBox.Size := Vector3(2, 20, 20);
+    WallBox.Translation := Vector3(20, 0, 0);
+    Viewport.Items.Add(WallBox);
+
+    // PropBox has Size (4, 2, 2) -> HalfExtent along +X is 2.0.
+    // Starting at (0, 0, 0) and projecting along +X (1, 0, 0) should place PropBox flush against X = 19 -> Center X = 17.0.
+    PropBox := TCastleBox.Create(Viewport);
+    PropBox.Size := Vector3(4, 2, 2);
+    PropBox.Translation := Vector3(0, 0, 0);
+    Viewport.Items.Add(PropBox);
+
+    Manipulate.SetSelected([PropBox]);
+    AssertTrue(Manipulate.ProjectSelectedAlongDirection(Vector3(1, 0, 0), false));
+    AssertVectorEquals(Vector3(17.0, 0, 0), PropBox.Translation, 1e-3);
+
+    // 2. Test DistributeSelectedGaps along X (Axis = 0) with different-sized boxes:
+    // B1: width 2 (at X=0 -> [-1..1])
+    // B2: width 6 (at X=5 -> [2..8])
+    // B3: width 4 (at X=20 -> [18..22])
+    // Total span: [-1..22] = 23.0. Total box widths: 2 + 6 + 4 = 12.0.
+    // Remaining gap space = 23.0 - 12.0 = 11.0 -> Equal gap between 3 boxes = 11.0 / 2 = 5.5.
+    // B1 stays at [-1..1] (center 0).
+    // B2 moves so MinX = 1.0 + 5.5 = 6.5 -> [6.5..12.5] -> center = 9.5.
+    // B3 stays at [18..22] (center 20, gap from 12.5 to 18.0 is 5.5).
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(2, 2, 2);
+    B1.Translation := Vector3(0, 0, 0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(6, 2, 2);
+    B2.Translation := Vector3(5, 0, 0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(4, 2, 2);
+    B3.Translation := Vector3(20, 0, 0);
+    Viewport.Items.Add(B3);
+
+    Manipulate.SetSelected([B1, B2, B3]);
+    AssertTrue(Manipulate.DistributeSelectedGaps(0));
+    AssertSameValue(0.0, B1.Translation.X, 1e-4);
+    AssertSameValue(9.5, B2.Translation.X, 1e-4);
+    AssertSameValue(20.0, B3.Translation.X, 1e-4);
+
+    // 3. Test SnapSelectedRotationAndScaleToGrid:
+    // RotateSnap = 15 deg, ScaleSnap = 0.25.
+    // B1 has Rotation.W = 22 deg -> snaps to 15 deg, Scale = (1.14, 1.88, 0.49) -> snaps to (1.25, 2.00, 0.50).
+    B1.Rotation := Vector4(0, 1, 0, DegToRad(22.0));
+    B1.Scale := Vector3(1.14, 1.88, 0.49);
+    Manipulate.SetSelected([B1]);
+    Manipulate.RotateSnap := DegToRad(15.0);
+    Manipulate.ScaleSnap := 0.25;
+    AssertTrue(Manipulate.SnapSelectedRotationAndScaleToGrid);
+    AssertSameValue(DegToRad(15.0), B1.Rotation.W, 1e-4);
+    AssertVectorEquals(Vector3(1.25, 2.00, 0.50), B1.Scale, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);
