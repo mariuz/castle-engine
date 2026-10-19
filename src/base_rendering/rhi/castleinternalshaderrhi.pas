@@ -185,6 +185,66 @@ type
     SrcMipHeight: Cardinal;
   end;
 
+const
+  CASTLE_MAX_CLUSTERED_LIGHTS   = 256;
+  CASTLE_DEFAULT_CLUSTER_X      = 16;
+  CASTLE_DEFAULT_CLUSTER_Y      = 8;
+  CASTLE_DEFAULT_CLUSTER_Z      = 24;
+  CASTLE_MAX_LIGHTS_PER_CLUSTER = 64;
+  CASTLE_MAX_SHADOW_CASCADES    = 4;
+  CASTLE_MAX_SHADOW_ATLAS_TILES = 64;
+
+type
+  { Light type in Clustered Forward+ light buffer }
+  TCastleClusterLightType = (
+    cltDirectional = 0,
+    cltPoint       = 1,
+    cltSpot        = 2
+  );
+
+  { GPU std430 clustered light entry (64 bytes, 16-byte aligned) }
+  PCastleClusteredLight = ^TCastleClusteredLight;
+  TCastleClusteredLight = packed record
+    PositionAndRange: TVector4;    // xyz = view-space position, w = attenuation range/radius (16 bytes)
+    DirectionAndSpotCos: TVector4; // xyz = view-space direction, w = outer spot cos cutoff (16 bytes)
+    ColorAndIntensity: TVector4;   // rgb = linear light color, w = intensity multiplier (16 bytes)
+    ShadowAndTypeParams: TVector4; // x = Ord(LightType), y = inner spot cos, z = shadow tile index (-1 if none), w = shadow bias (16 bytes)
+  end; // Total = 64 bytes
+
+  { GPU std430 per-cluster light grid entry (8 bytes) }
+  PCastleClusterGridEntry = ^TCastleClusterGridEntry;
+  TCastleClusterGridEntry = packed record
+    Offset: Cardinal; // Start offset in flat LightIndexList SSBO
+    Count: Cardinal;  // Number of lights intersecting this cluster (0..CASTLE_MAX_LIGHTS_PER_CLUSTER)
+  end;
+
+  { GPU std140 uniform block for 3D Clustered Forward+ light culling compute shader (112 bytes) }
+  PCastleClusterCullingUniformBlock = ^TCastleClusterCullingUniformBlock;
+  TCastleClusterCullingUniformBlock = packed record
+    InverseProjectionMatrix: TMatrix4; // 64 bytes
+    ScreenAndDepthParams: TVector4;    // 16 bytes (x = ScreenWidth, y = ScreenHeight, z = ZNear, w = ZFar)
+    GridX: Cardinal;                   // 4 bytes
+    GridY: Cardinal;                   // 4 bytes
+    GridZ: Cardinal;                   // 4 bytes
+    ActiveLightCount: Cardinal;        // 4 bytes
+    LogDepthParams: TVector4;          // 16 bytes (x = GridZ / Ln(ZFar/ZNear), y = -GridZ*Ln(ZNear)/Ln(ZFar/ZNear), z = MaxLightsPerCluster, w = 0)
+  end; // Total = 112 bytes (112 mod 16 = 0)
+
+  { GPU std140 uniform block for 4-cascade Directional Cascaded Shadow Maps (336 bytes) }
+  PCastleDirectionalCascadeShadowBlock = ^TCastleDirectionalCascadeShadowBlock;
+  TCastleDirectionalCascadeShadowBlock = packed record
+    CascadeViewProjMatrix: array[0..CASTLE_MAX_SHADOW_CASCADES - 1] of TMatrix4; // 256 bytes
+    CascadeAtlasUVScaleOffset: array[0..CASTLE_MAX_SHADOW_CASCADES - 1] of TVector4; // 64 bytes (xy = scale, zw = offset)
+    CascadeSplitDepths: TVector4; // 16 bytes (far view-space depth split d0..d3)
+  end; // Total = 336 bytes (336 mod 16 = 0)
+
+  { GPU std430 entry for positional (spot / point face) shadow atlas tile (80 bytes) }
+  PCastlePositionalShadowTileEntry = ^TCastlePositionalShadowTileEntry;
+  TCastlePositionalShadowTileEntry = packed record
+    LightViewProjMatrix: TMatrix4; // 64 bytes
+    AtlasUVScaleOffset: TVector4;  // 16 bytes (xy = UV scale, zw = UV offset in shadow atlas)
+  end; // Total = 80 bytes
+
   { Generates RHI-compliant GLSL headers, UBO blocks, and varying layouts }
   TCastleShaderGeneratorRHI = class
   private
@@ -246,6 +306,13 @@ type
       EvaluateDirectCookTorranceGGX, and EvaluateIBLCookTorranceGGX. }
     function GeneratePBRFunctions: String;
 
+    { Generates GLSL 450 SSBO/UBO bindings and evaluation functions for 3D Clustered Forward+
+      (256+ dynamic lights) and 4-cascade Directional CSM + Positional Shadow Atlas 3x3 PCF:
+      ComputeClusterIndex3D, FlattenClusterIndex, SampleShadowAtlasPCF3x3,
+      EvaluateDirectionalCascadeShadow, EvaluatePositionalAtlasShadow, and
+      EvaluateClusteredForwardLights. }
+    function GenerateClusteredForwardAndShadowFunctions: String;
+
     { Generates a complete GLSL 450 3D vertex shader supporting optional GPU linear-blend
       skinning (Set 2 CastleSkinningBlock) and tangent-space basis (castle_tangent_to_eye_space). }
     function GenerateDefault3DVertexShader(
@@ -255,7 +322,8 @@ type
     { Generates a complete GLSL 450 3D fragment shader supporting Cook-Torrance GGX PBR,
       Phong, and Unlit shading models, multi-texture sampling (BaseColor, Normal,
       MetallicRoughness, Emissive, Occlusion), normal mapping, alpha-cutoff discard,
-      multi-light evaluation, and Split-Sum IBL ambient lighting. }
+      multi-light evaluation, Split-Sum IBL ambient lighting, optional Clustered Forward+
+      (256+ lights), and optional 4-cascade CSM + Shadow Atlas PCF. }
     function GenerateDefault3DFragmentShader(
       const HasBaseColorTex: Boolean = False;
       const HasNormalTex: Boolean = False;
@@ -263,7 +331,9 @@ type
       const HasEmissiveTex: Boolean = False;
       const HasOcclusionTex: Boolean = False;
       const HasIBL: Boolean = False;
-      const UseAlphaTest: Boolean = False): String;
+      const UseAlphaTest: Boolean = False;
+      const HasClusteredForward: Boolean = False;
+      const HasCascadedShadows: Boolean = False): String;
 
     { Generates a complete GLSL 450 compute shader that precomputes the 2D Split-Sum GGX
       BRDF Integration LUT (NdotV x Roughness -> Scale, Bias) using Van der Corput
@@ -271,6 +341,12 @@ type
     function GenerateIBLBrdfLutComputeShader(
       const AWorkgroupSizeX: Cardinal = 8;
       const AWorkgroupSizeY: Cardinal = 8): String;
+
+    { Generates a complete GLSL 450 compute shader that subdivides the view frustum into
+      a 3D exponential-depth cluster grid (e.g. 16x8x24) and bins up to 256 dynamic point,
+      spot, and directional lights into per-cluster light index lists. }
+    function GenerateClusteredLightCullingComputeShader(
+      const AWorkgroupSizeX: Cardinal = 64): String;
 
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
@@ -1270,6 +1346,164 @@ begin
   Result := FinalizeVertexShaderSource(Body);
 end;
 
+function TCastleShaderGeneratorRHI.GenerateClusteredForwardAndShadowFunctions: String;
+begin
+  Result :=
+    '/* Set 0 / Set 1 Clustered Forward+ & Shadow Atlas Bindings */' + NL +
+    'struct CastleClusteredLightData {' + NL +
+    '  vec4 PositionAndRange;' + NL +
+    '  vec4 DirectionAndSpotCos;' + NL +
+    '  vec4 ColorAndIntensity;' + NL +
+    '  vec4 ShadowAndTypeParams;' + NL +
+    '};' + NL +
+    NL +
+    'struct CastleClusterGridEntryData {' + NL +
+    '  uint Offset;' + NL +
+    '  uint Count;' + NL +
+    '};' + NL +
+    NL +
+    'struct CastlePositionalShadowTileData {' + NL +
+    '  mat4 LightViewProjMatrix;' + NL +
+    '  vec4 AtlasUVScaleOffset;' + NL +
+    '};' + NL +
+    NL +
+    'layout(std140, set = 0, binding = 2) uniform CastleClusterCullingBlock {' + NL +
+    '  mat4 u_InvProjectionMatrix;' + NL +
+    '  vec4 u_ScreenAndDepthParams;' + NL +
+    '  uvec4 u_ClusterGridDim;' + NL +
+    '  vec4 u_LogDepthParams;' + NL +
+    '} CastleClusterUniforms;' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 3) readonly buffer CastleClusteredLightsBuffer {' + NL +
+    '  CastleClusteredLightData u_ClusteredLights[];' + NL +
+    '} CastleClusteredLightsSSBO;' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 4) readonly buffer CastleClusterGridBuffer {' + NL +
+    '  CastleClusterGridEntryData u_ClusterGrid[];' + NL +
+    '} CastleClusterGridSSBO;' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 5) readonly buffer CastleClusterLightIndexBuffer {' + NL +
+    '  uint u_ClusterLightIndices[];' + NL +
+    '} CastleClusterLightIndexSSBO;' + NL +
+    NL +
+    'layout(std140, set = 0, binding = 6) uniform CastleCascadeShadowBlock {' + NL +
+    '  mat4 u_CascadeViewProjMatrix[4];' + NL +
+    '  vec4 u_CascadeAtlasUVScaleOffset[4];' + NL +
+    '  vec4 u_CascadeSplitDepths;' + NL +
+    '} CastleCascadeShadows;' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 7) readonly buffer CastlePositionalShadowTilesBuffer {' + NL +
+    '  CastlePositionalShadowTileData u_ShadowTiles[];' + NL +
+    '} CastlePositionalShadowTilesSSBO;' + NL +
+    NL +
+    'layout(set = 1, binding = 8) uniform sampler2D castle_shadow_atlas_texture;' + NL +
+    NL +
+    'uvec3 ComputeClusterIndex3D(vec2 fragCoord, float positiveViewDepth) {' + NL +
+    '  vec2 screenSize = max(CastleClusterUniforms.u_ScreenAndDepthParams.xy, vec2(1.0));' + NL +
+    '  float zNear = max(CastleClusterUniforms.u_ScreenAndDepthParams.z, 1e-3);' + NL +
+    '  float zFar = max(CastleClusterUniforms.u_ScreenAndDepthParams.w, zNear + 1e-2);' + NL +
+    '  float clampedZ = clamp(positiveViewDepth, zNear, zFar);' + NL +
+    '  uint cx = min(uint((fragCoord.x / screenSize.x) * float(CastleClusterUniforms.u_ClusterGridDim.x)), CastleClusterUniforms.u_ClusterGridDim.x - 1u);' + NL +
+    '  uint cy = min(uint((fragCoord.y / screenSize.y) * float(CastleClusterUniforms.u_ClusterGridDim.y)), CastleClusterUniforms.u_ClusterGridDim.y - 1u);' + NL +
+    '  float sliceF = log(clampedZ / zNear) / max(log(zFar / zNear), 1e-5) * float(CastleClusterUniforms.u_ClusterGridDim.z);' + NL +
+    '  uint cz = min(uint(max(sliceF, 0.0)), CastleClusterUniforms.u_ClusterGridDim.z - 1u);' + NL +
+    '  return uvec3(cx, cy, cz);' + NL +
+    '}' + NL +
+    NL +
+    'uint FlattenClusterIndex(uvec3 clusterCoord) {' + NL +
+    '  return (clusterCoord.z * CastleClusterUniforms.u_ClusterGridDim.y + clusterCoord.y) * CastleClusterUniforms.u_ClusterGridDim.x + clusterCoord.x;' + NL +
+    '}' + NL +
+    NL +
+    'float SampleShadowAtlasPCF3x3(vec2 atlasUV, float compareDepth, vec2 texelSize) {' + NL +
+    '  float shadow = 0.0;' + NL +
+    '  for (int y = -1; y <= 1; ++y) {' + NL +
+    '    for (int x = -1; x <= 1; ++x) {' + NL +
+    '      vec2 sampleUV = atlasUV + vec2(float(x), float(y)) * texelSize;' + NL +
+    '      float closestDepth = texture(castle_shadow_atlas_texture, sampleUV).r;' + NL +
+    '      shadow += (compareDepth <= closestDepth) ? 1.0 : 0.0;' + NL +
+    '    }' + NL +
+    '  }' + NL +
+    '  return shadow * (1.0 / 9.0);' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateDirectionalCascadeShadow(vec3 worldPos, float positiveViewDepth, float NdotL) {' + NL +
+    '  int cascadeIdx = 3;' + NL +
+    '  if (positiveViewDepth < CastleCascadeShadows.u_CascadeSplitDepths.x) cascadeIdx = 0;' + NL +
+    '  else if (positiveViewDepth < CastleCascadeShadows.u_CascadeSplitDepths.y) cascadeIdx = 1;' + NL +
+    '  else if (positiveViewDepth < CastleCascadeShadows.u_CascadeSplitDepths.z) cascadeIdx = 2;' + NL +
+    '  vec4 lightClip = CastleCascadeShadows.u_CascadeViewProjMatrix[cascadeIdx] * vec4(worldPos, 1.0);' + NL +
+    '  vec3 lightNDC = lightClip.xyz / max(lightClip.w, 1e-5);' + NL +
+    '  vec2 uv01 = lightNDC.xy * 0.5 + 0.5;' + NL +
+    '  if (uv01.x < 0.0 || uv01.x > 1.0 || uv01.y < 0.0 || uv01.y > 1.0 || lightNDC.z < 0.0 || lightNDC.z > 1.0) return 1.0;' + NL +
+    '  vec4 scaleOffset = CastleCascadeShadows.u_CascadeAtlasUVScaleOffset[cascadeIdx];' + NL +
+    '  vec2 atlasUV = uv01 * scaleOffset.xy + scaleOffset.zw;' + NL +
+    '  float slopeBias = max(0.0025 * (1.0 - max(NdotL, 0.0)), 0.0005);' + NL +
+    '  vec2 texelSize = vec2(1.0) / max(vec2(textureSize(castle_shadow_atlas_texture, 0)), vec2(1.0));' + NL +
+    '  return SampleShadowAtlasPCF3x3(atlasUV, lightNDC.z - slopeBias, texelSize);' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluatePositionalAtlasShadow(vec3 worldPos, int shadowTileIdx, float bias) {' + NL +
+    '  if (shadowTileIdx < 0) return 1.0;' + NL +
+    '  CastlePositionalShadowTileData tile = CastlePositionalShadowTilesSSBO.u_ShadowTiles[shadowTileIdx];' + NL +
+    '  vec4 lightClip = tile.LightViewProjMatrix * vec4(worldPos, 1.0);' + NL +
+    '  if (lightClip.w <= 1e-5) return 1.0;' + NL +
+    '  vec3 lightNDC = lightClip.xyz / lightClip.w;' + NL +
+    '  vec2 uv01 = lightNDC.xy * 0.5 + 0.5;' + NL +
+    '  if (uv01.x < 0.0 || uv01.x > 1.0 || uv01.y < 0.0 || uv01.y > 1.0 || lightNDC.z < 0.0 || lightNDC.z > 1.0) return 1.0;' + NL +
+    '  vec2 atlasUV = uv01 * tile.AtlasUVScaleOffset.xy + tile.AtlasUVScaleOffset.zw;' + NL +
+    '  vec2 texelSize = vec2(1.0) / max(vec2(textureSize(castle_shadow_atlas_texture, 0)), vec2(1.0));' + NL +
+    '  return SampleShadowAtlasPCF3x3(atlasUV, lightNDC.z - max(bias, 0.0005), texelSize);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 EvaluateClusteredForwardLights(vec2 fragCoord, vec3 eyePos, vec3 worldPos, vec3 N, vec3 V, vec3 baseColor, float metallic, float roughness, bool useShadows) {' + NL +
+    '  float positiveViewDepth = max(-eyePos.z, 1e-3);' + NL +
+    '  uvec3 clusterCoord = ComputeClusterIndex3D(fragCoord, positiveViewDepth);' + NL +
+    '  uint clusterIdx = FlattenClusterIndex(clusterCoord);' + NL +
+    '  CastleClusterGridEntryData entry = CastleClusterGridSSBO.u_ClusterGrid[clusterIdx];' + NL +
+    '  vec3 totalRadiance = vec3(0.0);' + NL +
+    '  uint count = min(entry.Count, 64u);' + NL +
+    '  for (uint i = 0u; i < count; ++i) {' + NL +
+    '    uint lightIdx = CastleClusterLightIndexSSBO.u_ClusterLightIndices[entry.Offset + i];' + NL +
+    '    CastleClusteredLightData cl = CastleClusteredLightsSSBO.u_ClusteredLights[lightIdx];' + NL +
+    '    int lightType = int(cl.ShadowAndTypeParams.x + 0.5);' + NL +
+    '    vec3 L;' + NL +
+    '    float attenuation = 1.0;' + NL +
+    '    if (lightType == 0) {' + NL +
+    '      L = normalize(-cl.DirectionAndSpotCos.xyz);' + NL +
+    '    } else {' + NL +
+    '      vec3 toLight = cl.PositionAndRange.xyz - eyePos;' + NL +
+    '      float dist = length(toLight);' + NL +
+    '      float range = max(cl.PositionAndRange.w, 1e-4);' + NL +
+    '      if (dist >= range) continue;' + NL +
+    '      L = toLight / max(dist, 1e-5);' + NL +
+    '      float distRatio = dist / range;' + NL +
+    '      float windowFactor = max(1.0 - pow(distRatio, 4.0), 0.0);' + NL +
+    '      attenuation = (windowFactor * windowFactor) / (dist * dist + 1.0);' + NL +
+    '      if (lightType == 2) {' + NL +
+    '        float cosDir = dot(-L, normalize(cl.DirectionAndSpotCos.xyz));' + NL +
+    '        float outerCos = cl.DirectionAndSpotCos.w;' + NL +
+    '        float innerCos = max(cl.ShadowAndTypeParams.y, outerCos + 1e-4);' + NL +
+    '        float spotFactor = clamp((cosDir - outerCos) / (innerCos - outerCos), 0.0, 1.0);' + NL +
+    '        attenuation *= spotFactor * spotFactor;' + NL +
+    '      }' + NL +
+    '    }' + NL +
+    '    if (attenuation <= 0.0) continue;' + NL +
+    '    float shadowVis = 1.0;' + NL +
+    '    if (useShadows) {' + NL +
+    '      if (lightType == 0) {' + NL +
+    '        shadowVis = EvaluateDirectionalCascadeShadow(worldPos, positiveViewDepth, max(dot(N, L), 0.0));' + NL +
+    '      } else {' + NL +
+    '        int tileIdx = int(floor(cl.ShadowAndTypeParams.z + 0.5));' + NL +
+    '        shadowVis = EvaluatePositionalAtlasShadow(worldPos, tileIdx, cl.ShadowAndTypeParams.w);' + NL +
+    '      }' + NL +
+    '    }' + NL +
+    '    vec3 radiance = cl.ColorAndIntensity.rgb * (cl.ColorAndIntensity.w * attenuation * shadowVis);' + NL +
+    '    totalRadiance += EvaluateDirectCookTorranceGGX(N, V, L, radiance, baseColor, metallic, roughness);' + NL +
+    '  }' + NL +
+    '  return totalRadiance;' + NL +
+    '}' + NL;
+end;
+
 function TCastleShaderGeneratorRHI.GenerateDefault3DFragmentShader(
   const HasBaseColorTex: Boolean;
   const HasNormalTex: Boolean;
@@ -1277,11 +1511,18 @@ function TCastleShaderGeneratorRHI.GenerateDefault3DFragmentShader(
   const HasEmissiveTex: Boolean;
   const HasOcclusionTex: Boolean;
   const HasIBL: Boolean;
-  const UseAlphaTest: Boolean): String;
+  const UseAlphaTest: Boolean;
+  const HasClusteredForward: Boolean;
+  const HasCascadedShadows: Boolean): String;
 begin
   Result :=
     GeneratePreamble(ssFragment) +
-    GeneratePBRFunctions + NL +
+    GeneratePBRFunctions + NL;
+
+  if HasClusteredForward or HasCascadedShadows then
+    Result := Result + GenerateClusteredForwardAndShadowFunctions + NL;
+
+  Result := Result +
     'void main() {' + NL +
     '  vec4 baseColor = castle_MaterialBaseColor;' + NL;
 
@@ -1331,30 +1572,49 @@ begin
       '  N = PerturbNormalCotangent(N, -castle_vertex_eye.xyz, castle_tex_coord0, tangentNormal, castle_MaterialNormalScale);' + NL;
 
   Result := Result +
-    '  vec3 Lo = vec3(0.0);' + NL +
-    '  uint lightCount = min(castle_LightCount, 32u);' + NL +
-    '  for (uint i = 0u; i < lightCount; ++i) {' + NL +
-    '    CastleLightData light = CastleLights.u_Lights[i];' + NL +
-    '    vec3 L;' + NL +
-    '    float attenuation = 1.0;' + NL +
-    '    if (light.Position.w == 0.0) {' + NL +
-    '      L = normalize(light.Position.xyz);' + NL +
-    '    } else {' + NL +
-    '      vec3 toLight = light.Position.xyz - castle_vertex_eye.xyz;' + NL +
-    '      float dist = length(toLight);' + NL +
-    '      L = toLight / max(dist, 1e-5);' + NL +
-    '      float attenDenom = light.Attenuation.x + light.Attenuation.y * dist + light.Attenuation.z * dist * dist;' + NL +
-    '      if (attenDenom > 0.0) attenuation = 1.0 / attenDenom;' + NL +
-    '      if (light.Color.w > 0.0 && dist > light.Color.w) attenuation = 0.0;' + NL +
-    '      if (light.Position.w > 1.5 && light.SpotDirection.w >= 0.0) {' + NL +
-    '        float cosDir = dot(-L, normalize(light.SpotDirection.xyz));' + NL +
-    '        if (cosDir < light.SpotDirection.w) attenuation = 0.0;' + NL +
-    '      }' + NL +
-    '    }' + NL +
-    '    vec3 radiance = light.Color.rgb * attenuation;' + NL +
-    '    Lo += EvaluateDirectCookTorranceGGX(N, V, L, radiance, baseColor.rgb, metallic, roughness);' + NL +
-    '    Lo += light.AmbientColor.rgb * baseColor.rgb * ao;' + NL +
-    '  }' + NL;
+    '  vec3 Lo = vec3(0.0);' + NL;
+
+  if HasClusteredForward then
+  begin
+    Result := Result +
+      '  vec3 worldPos = (castle_ViewMatrixInverse * castle_vertex_eye).xyz;' + NL +
+      Format('  Lo += EvaluateClusteredForwardLights(gl_FragCoord.xy, castle_vertex_eye.xyz, worldPos, N, V, baseColor.rgb, metallic, roughness, %s);',
+        [IfThen(HasCascadedShadows, 'true', 'false')]) + NL;
+  end else
+  begin
+    Result := Result +
+      '  uint lightCount = min(castle_LightCount, 32u);' + NL +
+      '  for (uint i = 0u; i < lightCount; ++i) {' + NL +
+      '    CastleLightData light = CastleLights.u_Lights[i];' + NL +
+      '    vec3 L;' + NL +
+      '    float attenuation = 1.0;' + NL +
+      '    if (light.Position.w == 0.0) {' + NL +
+      '      L = normalize(light.Position.xyz);' + NL +
+      '    } else {' + NL +
+      '      vec3 toLight = light.Position.xyz - castle_vertex_eye.xyz;' + NL +
+      '      float dist = length(toLight);' + NL +
+      '      L = toLight / max(dist, 1e-5);' + NL +
+      '      float attenDenom = light.Attenuation.x + light.Attenuation.y * dist + light.Attenuation.z * dist * dist;' + NL +
+      '      if (attenDenom > 0.0) attenuation = 1.0 / attenDenom;' + NL +
+      '      if (light.Color.w > 0.0 && dist > light.Color.w) attenuation = 0.0;' + NL +
+      '      if (light.Position.w > 1.5 && light.SpotDirection.w >= 0.0) {' + NL +
+      '        float cosDir = dot(-L, normalize(light.SpotDirection.xyz));' + NL +
+      '        if (cosDir < light.SpotDirection.w) attenuation = 0.0;' + NL +
+      '      }' + NL +
+      '    }' + NL +
+      '    float shadowVis = 1.0;' + NL;
+    if HasCascadedShadows then
+      Result := Result +
+        '    if (light.Position.w == 0.0) {' + NL +
+        '      vec3 worldPos = (castle_ViewMatrixInverse * castle_vertex_eye).xyz;' + NL +
+        '      shadowVis = EvaluateDirectionalCascadeShadow(worldPos, max(-castle_vertex_eye.z, 1e-3), max(dot(N, L), 0.0));' + NL +
+        '    }' + NL;
+    Result := Result +
+      '    vec3 radiance = light.Color.rgb * (attenuation * shadowVis);' + NL +
+      '    Lo += EvaluateDirectCookTorranceGGX(N, V, L, radiance, baseColor.rgb, metallic, roughness);' + NL +
+      '    Lo += light.AmbientColor.rgb * baseColor.rgb * ao;' + NL +
+      '  }' + NL;
+  end;
 
   if HasIBL then
     Result := Result +
@@ -1471,6 +1731,114 @@ begin
     '  float roughness = max((float(coord.y) + 0.5) / float(max(pc.u_LutSize.y, 1u)), 0.04);' + NL +
     '  vec2 res = IntegrateBRDF(NdotV, roughness, max(pc.u_SampleCount, 16u));' + NL +
     '  imageStore(u_BrdfLutImage, ivec2(coord), vec4(res.x, res.y, 0.0, 1.0));' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateClusteredLightCullingComputeShader(
+  const AWorkgroupSizeX: Cardinal): String;
+var
+  LocalSizeX: Cardinal;
+begin
+  if AWorkgroupSizeX = 0 then
+    LocalSizeX := 64
+  else
+    LocalSizeX := AWorkgroupSizeX;
+
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = 1, local_size_z = 1) in;', [LocalSizeX]) + NL +
+    NL +
+    'struct CastleClusteredLightData {' + NL +
+    '  vec4 PositionAndRange;' + NL +
+    '  vec4 DirectionAndSpotCos;' + NL +
+    '  vec4 ColorAndIntensity;' + NL +
+    '  vec4 ShadowAndTypeParams;' + NL +
+    '};' + NL +
+    NL +
+    'struct CastleClusterGridEntryData {' + NL +
+    '  uint Offset;' + NL +
+    '  uint Count;' + NL +
+    '};' + NL +
+    NL +
+    'layout(std140, set = 0, binding = 0) uniform CastleClusterCullingBlock {' + NL +
+    '  mat4 u_InvProjectionMatrix;' + NL +
+    '  vec4 u_ScreenAndDepthParams;' + NL +
+    '  uvec4 u_ClusterGridDim;' + NL +
+    '  vec4 u_LogDepthParams;' + NL +
+    '} u_ClusterInfo;' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 1) readonly buffer CastleClusteredLightsBuffer {' + NL +
+    '  CastleClusteredLightData u_Lights[];' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 2) writeonly buffer CastleClusterGridBuffer {' + NL +
+    '  CastleClusterGridEntryData u_ClusterGrid[];' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 3) writeonly buffer CastleClusterLightIndexBuffer {' + NL +
+    '  uint u_ClusterLightIndices[];' + NL +
+    '};' + NL +
+    NL +
+    'vec3 ScreenUVToViewAtZ(vec2 uv, float viewZ) {' + NL +
+    '  vec4 ndc = vec4(uv * 2.0 - 1.0, 1.0, 1.0);' + NL +
+    '  vec4 viewRay = u_ClusterInfo.u_InvProjectionMatrix * ndc;' + NL +
+    '  viewRay.xyz /= max(abs(viewRay.w), 1e-5);' + NL +
+    '  float rayScale = viewZ / min(viewRay.z, -1e-5);' + NL +
+    '  return viewRay.xyz * rayScale;' + NL +
+    '}' + NL +
+    NL +
+    'bool SphereIntersectsAABB(vec3 center, float radius, vec3 aabbMin, vec3 aabbMax) {' + NL +
+    '  vec3 closest = clamp(center, aabbMin, aabbMax);' + NL +
+    '  vec3 diff = center - closest;' + NL +
+    '  return dot(diff, diff) <= (radius * radius);' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  uint clusterIdx = gl_GlobalInvocationID.x;' + NL +
+    '  uint gridX = max(u_ClusterInfo.u_ClusterGridDim.x, 1u);' + NL +
+    '  uint gridY = max(u_ClusterInfo.u_ClusterGridDim.y, 1u);' + NL +
+    '  uint gridZ = max(u_ClusterInfo.u_ClusterGridDim.z, 1u);' + NL +
+    '  uint totalClusters = gridX * gridY * gridZ;' + NL +
+    '  if (clusterIdx >= totalClusters) return;' + NL +
+    NL +
+    '  uint cx = clusterIdx % gridX;' + NL +
+    '  uint cy = (clusterIdx / gridX) % gridY;' + NL +
+    '  uint cz = clusterIdx / (gridX * gridY);' + NL +
+    NL +
+    '  float zNear = max(u_ClusterInfo.u_ScreenAndDepthParams.z, 1e-3);' + NL +
+    '  float zFar = max(u_ClusterInfo.u_ScreenAndDepthParams.w, zNear + 1e-2);' + NL +
+    '  float sliceNear = -zNear * pow(zFar / zNear, float(cz) / float(gridZ));' + NL +
+    '  float sliceFar  = -zNear * pow(zFar / zNear, float(cz + 1u) / float(gridZ));' + NL +
+    NL +
+    '  vec2 uvMin = vec2(float(cx) / float(gridX), float(cy) / float(gridY));' + NL +
+    '  vec2 uvMax = vec2(float(cx + 1u) / float(gridX), float(cy + 1u) / float(gridY));' + NL +
+    '  vec3 p0 = ScreenUVToViewAtZ(uvMin, sliceNear);' + NL +
+    '  vec3 p1 = ScreenUVToViewAtZ(uvMax, sliceNear);' + NL +
+    '  vec3 p2 = ScreenUVToViewAtZ(uvMin, sliceFar);' + NL +
+    '  vec3 p3 = ScreenUVToViewAtZ(uvMax, sliceFar);' + NL +
+    '  vec3 aabbMin = min(min(p0, p1), min(p2, p3));' + NL +
+    '  vec3 aabbMax = max(max(p0, p1), max(p2, p3));' + NL +
+    NL +
+    '  uint maxPerCluster = max(uint(u_ClusterInfo.u_LogDepthParams.z), 64u);' + NL +
+    '  uint baseOffset = clusterIdx * maxPerCluster;' + NL +
+    '  uint visibleCount = 0u;' + NL +
+    '  uint lightCount = min(u_ClusterInfo.u_ClusterGridDim.w, 256u);' + NL +
+    NL +
+    '  for (uint i = 0u; i < lightCount; ++i) {' + NL +
+    '    if (visibleCount >= maxPerCluster) break;' + NL +
+    '    CastleClusteredLightData light = u_Lights[i];' + NL +
+    '    int lightType = int(light.ShadowAndTypeParams.x + 0.5);' + NL +
+    '    bool intersects = (lightType == 0) || SphereIntersectsAABB(light.PositionAndRange.xyz, light.PositionAndRange.w, aabbMin, aabbMax);' + NL +
+    '    if (intersects) {' + NL +
+    '      u_ClusterLightIndices[baseOffset + visibleCount] = i;' + NL +
+    '      visibleCount++;' + NL +
+    '    }' + NL +
+    '  }' + NL +
+    NL +
+    '  CastleClusterGridEntryData entry;' + NL +
+    '  entry.Offset = baseOffset;' + NL +
+    '  entry.Count = visibleCount;' + NL +
+    '  u_ClusterGrid[clusterIdx] = entry;' + NL +
     '}' + NL;
 end;
 

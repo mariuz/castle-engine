@@ -108,6 +108,9 @@ type
     procedure TestCookTorranceGGXPBRShaderGenerationRHI;
     procedure TestComputeIBLBrdfLutAndEnvironmentPrefilterRHI;
     procedure TestShapePBRMaterialExtractionAndDispatchRHI;
+    procedure TestClusteredForwardLightCullingComputeRHI;
+    procedure TestDirectionalCascadedShadowMapsAndShadowAtlasRHI;
+    procedure TestClusteredForwardAndShadowAtlasShaderIntegrationRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -5616,6 +5619,279 @@ begin
     FreeIfUnusedAndNil(BoxNode);
     FreeAndNil(RenderOpts);
     FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestClusteredForwardLightCullingComputeRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Culler: TCastleVulkanClusteredLightCuller;
+  ProjMat: TMatrix4;
+  SliceNear0, SliceFar0, SliceNearLast, SliceFarLast: Single;
+  AABBMin, AABBMax: TVector3;
+  CX, CY, CZ, FlatIdx: Cardinal;
+  Workgroups: Cardinal;
+  CenterEntry: TCastleClusterGridEntry;
+  I: Integer;
+  LightIdx: Cardinal;
+  FoundDirLight, FoundCenterPointLight: Boolean;
+begin
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0);
+  try
+    Culler := VkDev.ClusteredLightCuller;
+    AssertTrue('ClusteredLightCuller must be created on TVulkanRHIDevice', Culler <> nil);
+    AssertEquals('Default GridX must be 16', 16, Culler.GridX);
+    AssertEquals('Default GridY must be 8', 8, Culler.GridY);
+    AssertEquals('Default GridZ must be 24', 24, Culler.GridZ);
+    AssertEquals('Default TotalClusters must be 3072', 3072, Culler.TotalClusters);
+
+    { 1. Verify struct layout sizes for std140/std430 GPU compatibility }
+    AssertEquals('TCastleClusteredLight must be 64 bytes', 64, SizeOf(TCastleClusteredLight));
+    AssertEquals('TCastleClusterGridEntry must be 8 bytes', 8, SizeOf(TCastleClusterGridEntry));
+    AssertEquals('TCastleClusterCullingUniformBlock must be 112 bytes', 112, SizeOf(TCastleClusterCullingUniformBlock));
+
+    { 2. Configure camera projection (90 deg FOV, 1920x1080, ZNear=1.0, ZFar=1000.0) }
+    ProjMat := PerspectiveProjectionMatrixDeg(90.0, 1920.0 / 1080.0, 1.0, 1000.0);
+    Culler.SetCameraProjection(ProjMat, 1920, 1080, 1.0, 1000.0);
+
+    { 3. Verify exponential Z-slice bounds }
+    Culler.ComputeSliceDepthBounds(0, SliceNear0, SliceFar0);
+    Culler.ComputeSliceDepthBounds(Culler.GridZ - 1, SliceNearLast, SliceFarLast);
+    AssertSameValue(1.0, SliceNear0, 1e-4);
+    AssertTrue('First slice far bound must be > ZNear', SliceFar0 > SliceNear0);
+    AssertSameValue(1000.0, SliceFarLast, 1e-2);
+    AssertTrue('Last slice near bound must be < ZFar', SliceNearLast < SliceFarLast);
+
+    { 4. Verify screen pixel + depth to 3D cluster coordinate mapping }
+    FlatIdx := Culler.ComputeClusterCoordFromScreenAndDepth(960.0, 540.0, 10.0, CX, CY, CZ);
+    AssertEquals('Screen center X (960/1920) must map to cluster X = 8', 8, CX);
+    AssertEquals('Screen center Y (540/1080) must map to cluster Y = 4', 4, CY);
+    AssertTrue('Depth 10.0 in [1..1000] must map to valid Z slice', (CZ > 0) and (CZ < Culler.GridZ));
+    AssertEquals('Flat index must equal CX + CY*GridX + CZ*GridX*GridY',
+      CX + CY * Culler.GridX + CZ * Culler.GridX * Culler.GridY, FlatIdx);
+
+    { Verify reconstructed view-space AABB at center cluster (8, 4, CZ) contains view center (0, 0, -10) }
+    Culler.ComputeClusterViewAABB(CX, CY, CZ, AABBMin, AABBMax);
+    AssertTrue('Cluster AABBMin.X must be <= AABBMax.X', AABBMin.X <= AABBMax.X);
+    AssertTrue('Cluster AABBMin.Y must be <= AABBMax.Y', AABBMin.Y <= AABBMax.Y);
+    AssertTrue('Cluster AABBMin.Z must be <= -10.0', AABBMin.Z <= -10.0 + 1e-3);
+    AssertTrue('Cluster AABBMax.Z must be >= -10.0', AABBMax.Z >= -10.0 - 1e-3);
+
+    { 5. Populate 64 dynamic lights (1 directional, 1 point light at (0,0,-10), 1 spot light, + 61 distributed point lights) }
+    Culler.ClearLights;
+    AssertEquals('Light 0 (directional)', 0,
+      Culler.AddDirectionalLight(Vector3(0.0, -1.0, -1.0).Normalize, Vector3(1.0, 0.98, 0.9), 2.5));
+    AssertEquals('Light 1 (point light at view center -10)', 1,
+      Culler.AddPointLight(Vector3(0.0, 0.0, -10.0), 4.0, Vector3(1.0, 0.2, 0.1), 5.0, 0, 0.002));
+    AssertEquals('Light 2 (spot light at view center -10)', 2,
+      Culler.AddSpotLight(Vector3(0.0, 0.0, -8.0), Vector3(0.0, 0.0, -1.0),
+        12.0, Cos(DegToRad(15.0)), Cos(DegToRad(30.0)), Vector3(0.2, 0.8, 1.0), 4.0, 1, 0.001));
+    for I := 3 to 63 do
+      Culler.AddPointLight(
+        Vector3(((I mod 8) - 4) * 25.0, (((I div 8) mod 8) - 4) * 15.0, -20.0 - (I * 12.0)),
+        8.0, Vector3(0.5, 0.5, 0.5), 1.0);
+    AssertEquals('ActiveLightCount must be 64', 64, Culler.ActiveLightCount);
+
+    { 6. Dispatch light culling compute pass }
+    CmdList.BeginRecording;
+    Workgroups := Culler.DispatchLightCulling(CmdList);
+    CmdList.EndRecording;
+    AssertEquals('3072 clusters / 64 threads per workgroup = 48 workgroups', 48, Workgroups);
+    AssertEquals('TotalDispatches must be 1', 1, Culler.TotalDispatches);
+    AssertTrue('ActiveClusterCount must be > 0', Culler.ActiveClusterCount > 0);
+    AssertTrue('TotalAssignedLightRefs must be >= 3072 (directional light hits all clusters)',
+      Culler.TotalAssignedLightRefs >= 3072);
+    AssertTrue('ClusterUniformBuffer must be allocated', Culler.ClusterUniformBuffer <> nil);
+    AssertTrue('LightStorageBuffer must be allocated', Culler.LightStorageBuffer <> nil);
+    AssertTrue('ClusterGridBuffer must be allocated', Culler.ClusterGridBuffer <> nil);
+    AssertTrue('LightIndexBuffer must be allocated', Culler.LightIndexBuffer <> nil);
+
+    { 7. Verify center cluster at (CX, CY, CZ) received Light 0 (directional) and Light 1 (point light at -10) }
+    CenterEntry := Culler.GetClusterEntry(CX, CY, CZ);
+    AssertTrue('Center cluster must have at least 2 lights assigned', CenterEntry.Count >= 2);
+    FoundDirLight := False;
+    FoundCenterPointLight := False;
+    for I := 0 to Integer(CenterEntry.Count) - 1 do
+    begin
+      LightIdx := Culler.GetClusterLightIndex(CX, CY, CZ, I);
+      if LightIdx = 0 then FoundDirLight := True;
+      if LightIdx = 1 then FoundCenterPointLight := True;
+    end;
+    AssertTrue('Center cluster must contain directional light 0', FoundDirLight);
+    AssertTrue('Center cluster must contain point light 1 at (0,0,-10)', FoundCenterPointLight);
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestDirectionalCascadedShadowMapsAndShadowAtlasRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Atlas: TCastleVulkanShadowAtlas;
+  ProjMat, InvProjMat, LightVP: TMatrix4;
+  Block1, Block2: TCastleDirectionalCascadeShadowBlock;
+  CascRect0, CascRect3, TileRect0, TileRect1: TRectangle;
+  TileIdx0, TileIdx1: Integer;
+  UVScaleOffset0, UVScaleOffset1: TVector4;
+  ResNear, ResMid, ResFar: Cardinal;
+begin
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0);
+  try
+    Atlas := VkDev.ShadowAtlas;
+    AssertTrue('ShadowAtlas must be created on TVulkanRHIDevice', Atlas <> nil);
+    AssertEquals('Default AtlasSize must be 2048', 2048, Atlas.AtlasSize);
+    AssertEquals('Default CascadeResolution must be 512', 512, Atlas.CascadeResolution);
+    AssertEquals('TCastleDirectionalCascadeShadowBlock must be 336 bytes',
+      336, SizeOf(TCastleDirectionalCascadeShadowBlock));
+    AssertEquals('TCastlePositionalShadowTileEntry must be 80 bytes',
+      80, SizeOf(TCastlePositionalShadowTileEntry));
+
+    { 1. Compute 4 Directional Cascades using Practical Split Scheme (lambda = 0.75) + texel snapping }
+    ProjMat := PerspectiveProjectionMatrixDeg(60.0, 16.0 / 9.0, 0.5, 200.0);
+    if not ProjMat.TryInverse(InvProjMat) then
+      InvProjMat := TMatrix4.Identity;
+
+    Atlas.ComputeDirectionalCascades(InvProjMat, Vector3(-0.4, -1.0, -0.3).Normalize, 0.5, 200.0, 0.75, True);
+    Block1 := Atlas.CascadeBlock;
+    AssertEquals('TotalCascadeUpdates must be 1', 1, Atlas.TotalCascadeUpdates);
+
+    { Verify strictly increasing cascade split distances ending at ZFar = 200.0 }
+    AssertTrue('Cascade 0 split > ZNear', Block1.CascadeSplitDepths.X > 0.5);
+    AssertTrue('Cascade 1 split > Cascade 0 split', Block1.CascadeSplitDepths.Y > Block1.CascadeSplitDepths.X);
+    AssertTrue('Cascade 2 split > Cascade 1 split', Block1.CascadeSplitDepths.Z > Block1.CascadeSplitDepths.Y);
+    AssertSameValue(200.0, Block1.CascadeSplitDepths.W, 1e-3);
+
+    { Verify top-row cascade atlas UV scale/offsets (4 cascades of 512x512 in 2048x2048 -> scale = 0.25) }
+    AssertSameValue(0.25, Block1.CascadeAtlasUVScaleOffset[0].X, 1e-4);
+    AssertSameValue(0.25, Block1.CascadeAtlasUVScaleOffset[0].Y, 1e-4);
+    AssertSameValue(0.00, Block1.CascadeAtlasUVScaleOffset[0].Z, 1e-4);
+    AssertSameValue(0.75, Block1.CascadeAtlasUVScaleOffset[3].Z, 1e-4);
+
+    CascRect0 := Atlas.GetCascadeViewportRect(0);
+    CascRect3 := Atlas.GetCascadeViewportRect(3);
+    AssertEquals('Cascade 0 Left must be 0', 0, CascRect0.Left);
+    AssertEquals('Cascade 0 Width must be 512', 512, CascRect0.Width);
+    AssertEquals('Cascade 3 Left must be 1536', 1536, CascRect3.Left);
+
+    { Verify texel snapping determinism when re-evaluated }
+    Atlas.ComputeDirectionalCascades(InvProjMat, Vector3(-0.4, -1.0, -0.3).Normalize, 0.5, 200.0, 0.75, True);
+    Block2 := Atlas.CascadeBlock;
+    AssertSameValue(Block1.CascadeViewProjMatrix[0].Data[3, 0], Block2.CascadeViewProjMatrix[0].Data[3, 0], 1e-5);
+    AssertSameValue(Block1.CascadeViewProjMatrix[0].Data[3, 1], Block2.CascadeViewProjMatrix[0].Data[3, 1], 1e-5);
+
+    { 2. Verify Adaptive Positional Shadow Tile Resolution & Sub-Allocation }
+    ResNear := TCastleVulkanShadowAtlas.ChooseTileResolution(3.0, 10.0, 512);
+    ResMid  := TCastleVulkanShadowAtlas.ChooseTileResolution(20.0, 10.0, 512);
+    ResFar  := TCastleVulkanShadowAtlas.ChooseTileResolution(50.0, 10.0, 512);
+    AssertEquals('Near light must get full 512x512 tile', 512, ResNear);
+    AssertEquals('Mid-distance light must get 256x256 tile', 256, ResMid);
+    AssertEquals('Far light must get 128x128 tile', 128, ResFar);
+
+    Atlas.ResetPositionalTiles;
+    LightVP := PerspectiveProjectionMatrixDeg(90.0, 1.0, 0.1, 25.0);
+    AssertTrue('First positional shadow tile allocation must succeed',
+      Atlas.AllocatePositionalTile(ResNear, LightVP, TileIdx0, TileRect0, UVScaleOffset0));
+    AssertTrue('Second positional shadow tile allocation must succeed',
+      Atlas.AllocatePositionalTile(ResMid, LightVP, TileIdx1, TileRect1, UVScaleOffset1));
+    AssertEquals('TileIdx0 must be 0', 0, TileIdx0);
+    AssertEquals('TileIdx1 must be 1', 1, TileIdx1);
+    AssertEquals('AllocatedTileCount must be 2', 2, Atlas.AllocatedTileCount);
+    AssertTrue('Positional tiles must be placed below the reserved 512px directional cascade row',
+      TileRect0.Bottom >= 512);
+    AssertEquals('Tile 0 width must be 512', 512, TileRect0.Width);
+    AssertEquals('Tile 1 width must be 256', 256, TileRect1.Width);
+    AssertSameValue(512.0 / 2048.0, UVScaleOffset0.X, 1e-5);
+
+    { 3. Upload shadow buffers & record depth-only shadow tile passes with slope-scaled depth bias }
+    Atlas.UploadShadowBuffers;
+    AssertTrue('ShadowAtlasTexture must be created', Atlas.ShadowAtlasTexture <> nil);
+    AssertTrue('ShadowAtlasSampler must be created', Atlas.ShadowAtlasSampler <> nil);
+    AssertTrue('CascadeUniformBuffer must be created', Atlas.CascadeUniformBuffer <> nil);
+    AssertTrue('PositionalTileBuffer must be created', Atlas.PositionalTileBuffer <> nil);
+
+    CmdList.BeginRecording;
+    Atlas.RecordShadowTilePass(CmdList, CascRect0, 1.25, 1.75);
+    Atlas.RecordShadowTilePass(CmdList, TileRect0, 1.50, 2.00);
+    CmdList.EndRecording;
+    AssertEquals('TotalShadowTilePasses must be 2', 2, Atlas.TotalShadowTilePasses);
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestClusteredForwardAndShadowAtlasShaderIntegrationRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  Gen: TCastleShaderGeneratorRHI;
+  ComputeGLSL, HelperGLSL, FragShaderClusteredShadows, FragShaderCascadesOnly: String;
+  CSMod, FSMod1, FSMod2: TRHIShaderModule;
+begin
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  CSMod := nil;
+  FSMod1 := nil;
+  FSMod2 := nil;
+  try
+    { 1. Verify Clustered Light Culling Compute Shader GLSL 450 generation & compilation }
+    ComputeGLSL := Gen.GenerateClusteredLightCullingComputeShader(64);
+    AssertTrue('Compute shader must contain local_size_x = 64',
+      Pos('layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;', ComputeGLSL) > 0);
+    AssertTrue('Compute shader must bind CastleClusterCullingBlock at binding 0',
+      Pos('layout(std140, set = 0, binding = 0) uniform CastleClusterCullingBlock', ComputeGLSL) > 0);
+    AssertTrue('Compute shader must bind CastleClusteredLightsBuffer at binding 1',
+      Pos('layout(std430, set = 0, binding = 1) readonly buffer CastleClusteredLightsBuffer', ComputeGLSL) > 0);
+    AssertTrue('Compute shader must bind CastleClusterGridBuffer at binding 2',
+      Pos('layout(std430, set = 0, binding = 2) writeonly buffer CastleClusterGridBuffer', ComputeGLSL) > 0);
+    AssertTrue('Compute shader must bind CastleClusterLightIndexBuffer at binding 3',
+      Pos('layout(std430, set = 0, binding = 3) writeonly buffer CastleClusterLightIndexBuffer', ComputeGLSL) > 0);
+    AssertTrue('Compute shader must include SphereIntersectsAABB test',
+      Pos('bool SphereIntersectsAABB(', ComputeGLSL) > 0);
+
+    CSMod := VkDev.CreateShaderModuleFromGLSL(ssCompute, ComputeGLSL, 'ClusteredLightCulling_CS');
+    AssertTrue('ClusteredLightCulling_CS shader module must be created', CSMod <> nil);
+
+    { 2. Verify Forward+ Cluster & Shadow Atlas helper GLSL functions }
+    HelperGLSL := Gen.GenerateClusteredForwardAndShadowFunctions;
+    AssertTrue('Helper GLSL must include SampleShadowAtlasPCF3x3',
+      Pos('float SampleShadowAtlasPCF3x3(', HelperGLSL) > 0);
+    AssertTrue('Helper GLSL must include EvaluateDirectionalCascadeShadow',
+      Pos('float EvaluateDirectionalCascadeShadow(', HelperGLSL) > 0);
+    AssertTrue('Helper GLSL must include EvaluatePositionalAtlasShadow',
+      Pos('float EvaluatePositionalAtlasShadow(', HelperGLSL) > 0);
+    AssertTrue('Helper GLSL must include ComputeClusterIndex3D',
+      Pos('uvec3 ComputeClusterIndex3D(', HelperGLSL) > 0);
+    AssertTrue('Helper GLSL must include EvaluateClusteredForwardLights',
+      Pos('vec3 EvaluateClusteredForwardLights(', HelperGLSL) > 0);
+
+    { 3. Verify 3D Fragment Shader integration with Clustered Forward+ & Cascaded/Atlas Shadows }
+    FragShaderClusteredShadows := Gen.GenerateDefault3DFragmentShader(
+      True, True, True, True, True, True, False, True, True);
+    AssertTrue('Clustered+Shadows Fragment Shader must invoke EvaluateClusteredForwardLights with useShadows=true',
+      Pos('EvaluateClusteredForwardLights(gl_FragCoord.xy, castle_vertex_eye.xyz, worldPos, N, V, baseColor.rgb, metallic, roughness, true)',
+        FragShaderClusteredShadows) > 0);
+    FSMod1 := VkDev.CreateShaderModuleFromGLSL(ssFragment, FragShaderClusteredShadows, 'ForwardPlusCSM_FS');
+    AssertTrue('ForwardPlusCSM_FS shader module must be created', FSMod1 <> nil);
+
+    { 4. Verify 3D Fragment Shader integration with Cascaded Shadows on standard multi-light loop }
+    FragShaderCascadesOnly := Gen.GenerateDefault3DFragmentShader(
+      True, False, False, False, False, False, False, False, True);
+    AssertTrue('Cascades-only Fragment Shader must invoke EvaluateDirectionalCascadeShadow',
+      Pos('EvaluateDirectionalCascadeShadow(worldPos, max(-castle_vertex_eye.z, 1e-3), max(dot(N, L), 0.0))',
+        FragShaderCascadesOnly) > 0);
+    FSMod2 := VkDev.CreateShaderModuleFromGLSL(ssFragment, FragShaderCascadesOnly, 'CascadedShadowsOnly_FS');
+    AssertTrue('CascadedShadowsOnly_FS shader module must be created', FSMod2 <> nil);
+  finally
+    FreeAndNil(FSMod2);
+    FreeAndNil(FSMod1);
+    FreeAndNil(CSMod);
+    FreeAndNil(Gen);
     FreeAndNil(VkDev);
   end;
 end;

@@ -912,6 +912,190 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Phase 14.1: 3D Clustered Forward+ Compute Light Culler (256+ Lights)       }
+  { -------------------------------------------------------------------------- }
+
+  TCastleVulkanClusteredLightCuller = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FGridX: Cardinal;
+    FGridY: Cardinal;
+    FGridZ: Cardinal;
+    FWorkgroupSizeX: Cardinal;
+    FClusterUniforms: TCastleClusterCullingUniformBlock;
+    FLights: array[0..CASTLE_MAX_CLUSTERED_LIGHTS - 1] of TCastleClusteredLight;
+    FActiveLightCount: Cardinal;
+    FClusterGrid: array of TCastleClusterGridEntry;
+    FLightIndexList: array of Cardinal;
+    FClusterUniformBuffer: TRHIBuffer;
+    FLightStorageBuffer: TRHIBuffer;
+    FClusterGridBuffer: TRHIBuffer;
+    FLightIndexBuffer: TRHIBuffer;
+    FDescriptorLayout: TRHIDescriptorSetLayout;
+    FDescriptorSet: TRHIDescriptorSet;
+    FComputeShader: TRHIShaderModule;
+    FComputePipeline: TRHIComputePipeline;
+    FActiveClusterCount: Cardinal;
+    FTotalAssignedLightRefs: Cardinal;
+    FTotalDispatches: Cardinal;
+    procedure EnsureResourcesCreated;
+    function GetTotalClusters: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice;
+      const AGridX: Cardinal = CASTLE_DEFAULT_CLUSTER_X;
+      const AGridY: Cardinal = CASTLE_DEFAULT_CLUSTER_Y;
+      const AGridZ: Cardinal = CASTLE_DEFAULT_CLUSTER_Z);
+    destructor Destroy; override;
+
+    { Configures the 3D cluster grid resolution (default 16 x 8 x 24 = 3,072 clusters). }
+    procedure SetGridDimensions(const AGridX, AGridY, AGridZ: Cardinal);
+
+    { Configures the camera projection matrix, viewport dimensions, and near/far planes
+      used for exponential Z-slice subdivision and view-space cluster AABB reconstruction. }
+    procedure SetCameraProjection(const AProjectionMatrix: TMatrix4;
+      const AScreenWidth, AScreenHeight: Cardinal;
+      const AZNear, AZFar: Single);
+
+    { Resets the active clustered light list for the current frame. }
+    procedure ClearLights;
+
+    { Adds a directional, point, or spot light (up to CASTLE_MAX_CLUSTERED_LIGHTS = 256). }
+    function AddDirectionalLight(const AViewDirection, AColor: TVector3;
+      const AIntensity: Single = 1.0): Integer;
+    function AddPointLight(const AViewPosition: TVector3; const ARange: Single;
+      const AColor: TVector3; const AIntensity: Single = 1.0;
+      const AShadowTileIndex: Integer = -1;
+      const AShadowBias: Single = 0.001): Integer;
+    function AddSpotLight(const AViewPosition, AViewDirection: TVector3;
+      const ARange, AInnerSpotCos, AOuterSpotCos: Single;
+      const AColor: TVector3; const AIntensity: Single = 1.0;
+      const AShadowTileIndex: Integer = -1;
+      const AShadowBias: Single = 0.001): Integer;
+
+    { Computes the positive view-space depth bounds [ASliceNear, ASliceFar] for exponential Z-slice ASliceZ. }
+    procedure ComputeSliceDepthBounds(const ASliceZ: Cardinal;
+      out ASliceNear, ASliceFar: Single);
+
+    { Reconstructs the view-space AABB [AAABBMin, AAABBMax] of 3D cluster (ACX, ACY, ACZ). }
+    procedure ComputeClusterViewAABB(const ACX, ACY, ACZ: Cardinal;
+      out AAABBMin, AAABBMax: TVector3);
+
+    { Maps screen pixel coordinates (AScreenX, AScreenY) and positive view-space depth
+      to 3D cluster coordinates (ACX, ACY, ACZ) and returns the flat 1D cluster index. }
+    function ComputeClusterCoordFromScreenAndDepth(
+      const AScreenX, AScreenY, APositiveViewDepth: Single;
+      out ACX, ACY, ACZ: Cardinal): Cardinal;
+
+    { Uploads the active light array and cluster uniforms, evaluates exact view-space
+      sphere-vs-AABB cluster culling, and dispatches the GLSL 450 compute shader.
+      Returns the number of dispatched compute workgroups. }
+    function DispatchLightCulling(const ACmd: TRHICommandList): Cardinal;
+
+    { Reads back the (Offset, Count) light grid entry for cluster (ACX, ACY, ACZ). }
+    function GetClusterEntry(const ACX, ACY, ACZ: Cardinal): TCastleClusterGridEntry;
+
+    { Reads back the light index at ALocalSlot (0 .. Entry.Count - 1) for cluster (ACX, ACY, ACZ). }
+    function GetClusterLightIndex(const ACX, ACY, ACZ, ALocalSlot: Cardinal): Cardinal;
+
+    property GridX: Cardinal read FGridX;
+    property GridY: Cardinal read FGridY;
+    property GridZ: Cardinal read FGridZ;
+    property TotalClusters: Cardinal read GetTotalClusters;
+    property ActiveLightCount: Cardinal read FActiveLightCount;
+    property ActiveClusterCount: Cardinal read FActiveClusterCount;
+    property TotalAssignedLightRefs: Cardinal read FTotalAssignedLightRefs;
+    property TotalDispatches: Cardinal read FTotalDispatches;
+    property ClusterUniformBuffer: TRHIBuffer read FClusterUniformBuffer;
+    property LightStorageBuffer: TRHIBuffer read FLightStorageBuffer;
+    property ClusterGridBuffer: TRHIBuffer read FClusterGridBuffer;
+    property LightIndexBuffer: TRHIBuffer read FLightIndexBuffer;
+    property ComputePipeline: TRHIComputePipeline read FComputePipeline;
+  end;
+
+  { -------------------------------------------------------------------------- }
+  { Phase 14.2: Directional Cascaded Shadow Maps (CSM) & Positional Atlas      }
+  { -------------------------------------------------------------------------- }
+
+  TCastleVulkanShadowAtlas = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FAtlasSize: Cardinal;
+    FCascadeResolution: Cardinal;
+    FShadowAtlasTexture: TVulkanRHITexture;
+    FShadowAtlasSampler: TRHISampler;
+    FCascadeBlock: TCastleDirectionalCascadeShadowBlock;
+    FPositionalTiles: array[0..CASTLE_MAX_SHADOW_ATLAS_TILES - 1] of TCastlePositionalShadowTileEntry;
+    FPositionalTileRects: array[0..CASTLE_MAX_SHADOW_ATLAS_TILES - 1] of TRectangle;
+    FAllocatedTileCount: Cardinal;
+    FShelfCursorX: Cardinal;
+    FShelfCursorY: Cardinal;
+    FShelfRowHeight: Cardinal;
+    FCascadeUniformBuffer: TRHIBuffer;
+    FPositionalTileBuffer: TRHIBuffer;
+    FTotalCascadeUpdates: Cardinal;
+    FTotalShadowTilePasses: Cardinal;
+    procedure EnsureAtlasResourcesCreated;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice;
+      const AAtlasSize: Cardinal = 2048;
+      const ACascadeResolution: Cardinal = 512);
+    destructor Destroy; override;
+
+    { Computes 4 directional shadow cascade split distances using the Practical Split Scheme
+      (Nvidia PSSM / Godot 4 CSM, ALambda in [0..1], default 0.75), builds tight orthographic
+      light view-projection matrices with optional texel-snapping stabilization to eliminate
+      shimmering, and assigns the 4 cascade tiles in the top row of the shadow atlas. }
+    procedure ComputeDirectionalCascades(
+      const ACameraInverseViewProj: TMatrix4;
+      const AWorldLightDirection: TVector3;
+      const AZNear, AZFar: Single;
+      const ALambda: Single = 0.75;
+      const AStabilizeTexels: Boolean = True);
+
+    { Returns the viewport rectangle inside the shadow atlas for directional cascade ACascadeIndex (0..3). }
+    function GetCascadeViewportRect(const ACascadeIndex: Cardinal): TRectangle;
+
+    { Resets dynamic positional shadow tile allocations for a new frame while preserving
+      the reserved directional cascade region. }
+    procedure ResetPositionalTiles;
+
+    { Selects an adaptive shadow tile resolution (ABaseResolution, ABaseResolution/2,
+      ABaseResolution/4, min 64) based on distance to camera and light range. }
+    class function ChooseTileResolution(const ADistanceToCamera, ALightRange: Single;
+      const ABaseResolution: Cardinal = 512): Cardinal; static;
+
+    { Sub-allocates a square depth tile of ADesiredResolution inside the positional region
+      of the shadow atlas, stores ALightViewProj + normalized UV scale/offset, and outputs
+      ATileIndex, AViewportRect, and AUVScaleOffset. }
+    function AllocatePositionalTile(const ADesiredResolution: Cardinal;
+      const ALightViewProj: TMatrix4;
+      out ATileIndex: Integer;
+      out AViewportRect: TRectangle;
+      out AUVScaleOffset: TVector4): Boolean;
+
+    { Uploads the directional cascade UBO and positional shadow tile SSBO to the GPU. }
+    procedure UploadShadowBuffers;
+
+    { Records a depth-only shadow tile rendering pass into AViewportRect of ShadowAtlasTexture
+      with slope-scaled depth bias (SetDepthBias) to prevent shadow acne. }
+    procedure RecordShadowTilePass(const ACmd: TRHICommandList;
+      const AViewportRect: TRectangle;
+      const ADepthBiasConstant: Single = 1.25;
+      const ADepthBiasSlope: Single = 1.75);
+
+    property AtlasSize: Cardinal read FAtlasSize;
+    property CascadeResolution: Cardinal read FCascadeResolution;
+    property ShadowAtlasTexture: TVulkanRHITexture read FShadowAtlasTexture;
+    property ShadowAtlasSampler: TRHISampler read FShadowAtlasSampler;
+    property CascadeBlock: TCastleDirectionalCascadeShadowBlock read FCascadeBlock;
+    property AllocatedTileCount: Cardinal read FAllocatedTileCount;
+    property CascadeUniformBuffer: TRHIBuffer read FCascadeUniformBuffer;
+    property PositionalTileBuffer: TRHIBuffer read FPositionalTileBuffer;
+    property TotalCascadeUpdates: Cardinal read FTotalCascadeUpdates;
+    property TotalShadowTilePasses: Cardinal read FTotalShadowTilePasses;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -985,6 +1169,8 @@ type
     FTimestampProfiler: TCastleVulkanTimestampProfiler;
     FComputeCuller: TCastleVulkanComputeCuller;
     FIBLGenerator: TCastleVulkanIBLGenerator;
+    FClusteredLightCuller: TCastleVulkanClusteredLightCuller;
+    FShadowAtlas: TCastleVulkanShadowAtlas;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -1063,6 +1249,8 @@ type
     function GetDescriptorPoolHandle: VkDescriptorPool;
     function GetComputeCuller: TCastleVulkanComputeCuller;
     function GetIBLGenerator: TCastleVulkanIBLGenerator;
+    function GetClusteredLightCuller: TCastleVulkanClusteredLightCuller;
+    function GetShadowAtlas: TCastleVulkanShadowAtlas;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -1246,6 +1434,8 @@ type
     property TimestampProfiler: TCastleVulkanTimestampProfiler read FTimestampProfiler;
     property ComputeCuller: TCastleVulkanComputeCuller read GetComputeCuller;
     property IBLGenerator: TCastleVulkanIBLGenerator read GetIBLGenerator;
+    property ClusteredLightCuller: TCastleVulkanClusteredLightCuller read GetClusteredLightCuller;
+    property ShadowAtlas: TCastleVulkanShadowAtlas read GetShadowAtlas;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -7247,6 +7437,805 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanClusteredLightCuller                                            }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanClusteredLightCuller.Create(
+  const ADevice: TVulkanRHIDevice;
+  const AGridX, AGridY, AGridZ: Cardinal);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FWorkgroupSizeX := 64;
+  SetGridDimensions(AGridX, AGridY, AGridZ);
+  SetCameraProjection(TMatrix4.Identity, 1280, 720, 0.1, 1000.0);
+end;
+
+destructor TCastleVulkanClusteredLightCuller.Destroy;
+begin
+  SetLength(FClusterGrid, 0);
+  SetLength(FLightIndexList, 0);
+  FComputePipeline := nil; { owned by FDevice.FComputePipelineMap }
+  FreeAndNil(FComputeShader);
+  FreeAndNil(FDescriptorSet);
+  FreeAndNil(FDescriptorLayout);
+  FreeAndNil(FLightIndexBuffer);
+  FreeAndNil(FClusterGridBuffer);
+  FreeAndNil(FLightStorageBuffer);
+  FreeAndNil(FClusterUniformBuffer);
+  inherited;
+end;
+
+function TCastleVulkanClusteredLightCuller.GetTotalClusters: Cardinal;
+begin
+  Result := FGridX * FGridY * FGridZ;
+end;
+
+procedure TCastleVulkanClusteredLightCuller.SetGridDimensions(
+  const AGridX, AGridY, AGridZ: Cardinal);
+var
+  NewX, NewY, NewZ, Total: Cardinal;
+begin
+  NewX := Max(Cardinal(1), AGridX);
+  NewY := Max(Cardinal(1), AGridY);
+  NewZ := Max(Cardinal(1), AGridZ);
+  if (NewX = FGridX) and (NewY = FGridY) and (NewZ = FGridZ) and
+     (Length(FClusterGrid) > 0) then
+    Exit;
+
+  FGridX := NewX;
+  FGridY := NewY;
+  FGridZ := NewZ;
+  Total := GetTotalClusters;
+  SetLength(FClusterGrid, Total);
+  SetLength(FLightIndexList, Total * CASTLE_MAX_LIGHTS_PER_CLUSTER);
+
+  FreeAndNil(FClusterGridBuffer);
+  FreeAndNil(FLightIndexBuffer);
+end;
+
+procedure TCastleVulkanClusteredLightCuller.SetCameraProjection(
+  const AProjectionMatrix: TMatrix4;
+  const AScreenWidth, AScreenHeight: Cardinal;
+  const AZNear, AZFar: Single);
+var
+  InvProj: TMatrix4;
+  ClampedNear, ClampedFar, LogRatio: Single;
+begin
+  if not AProjectionMatrix.TryInverse(InvProj) then
+    InvProj := TMatrix4.Identity;
+
+  ClampedNear := Max(1e-3, AZNear);
+  ClampedFar := Max(ClampedNear + 1.0, AZFar);
+  LogRatio := Max(1e-5, Ln(ClampedFar / ClampedNear));
+
+  FClusterUniforms.InverseProjectionMatrix := InvProj;
+  FClusterUniforms.ScreenAndDepthParams := Vector4(
+    Max(1.0, Single(AScreenWidth)),
+    Max(1.0, Single(AScreenHeight)),
+    ClampedNear,
+    ClampedFar);
+  FClusterUniforms.GridX := FGridX;
+  FClusterUniforms.GridY := FGridY;
+  FClusterUniforms.GridZ := FGridZ;
+  FClusterUniforms.ActiveLightCount := FActiveLightCount;
+  FClusterUniforms.LogDepthParams := Vector4(
+    Single(FGridZ) / LogRatio,
+    -Single(FGridZ) * Ln(ClampedNear) / LogRatio,
+    Single(CASTLE_MAX_LIGHTS_PER_CLUSTER),
+    0.0);
+end;
+
+procedure TCastleVulkanClusteredLightCuller.ClearLights;
+begin
+  FActiveLightCount := 0;
+  FClusterUniforms.ActiveLightCount := 0;
+  FillChar(FLights[0], SizeOf(FLights), 0);
+end;
+
+function TCastleVulkanClusteredLightCuller.AddDirectionalLight(
+  const AViewDirection, AColor: TVector3;
+  const AIntensity: Single): Integer;
+var
+  DirNorm: TVector3;
+begin
+  if FActiveLightCount >= CASTLE_MAX_CLUSTERED_LIGHTS then
+    Exit(-1);
+  if AViewDirection.LengthSqr > 1e-8 then
+    DirNorm := AViewDirection.Normalize
+  else
+    DirNorm := Vector3(0.0, 0.0, -1.0);
+
+  Result := Integer(FActiveLightCount);
+  FLights[Result].PositionAndRange := Vector4(0.0, 0.0, 0.0, 1e9);
+  FLights[Result].DirectionAndSpotCos := Vector4(DirNorm.X, DirNorm.Y, DirNorm.Z, -1.0);
+  FLights[Result].ColorAndIntensity := Vector4(AColor.X, AColor.Y, AColor.Z, Max(0.0, AIntensity));
+  FLights[Result].ShadowAndTypeParams := Vector4(Single(Ord(cltDirectional)), -1.0, -1.0, 0.001);
+  Inc(FActiveLightCount);
+  FClusterUniforms.ActiveLightCount := FActiveLightCount;
+end;
+
+function TCastleVulkanClusteredLightCuller.AddPointLight(
+  const AViewPosition: TVector3; const ARange: Single;
+  const AColor: TVector3; const AIntensity: Single;
+  const AShadowTileIndex: Integer;
+  const AShadowBias: Single): Integer;
+begin
+  if FActiveLightCount >= CASTLE_MAX_CLUSTERED_LIGHTS then
+    Exit(-1);
+
+  Result := Integer(FActiveLightCount);
+  FLights[Result].PositionAndRange := Vector4(
+    AViewPosition.X, AViewPosition.Y, AViewPosition.Z, Max(0.01, ARange));
+  FLights[Result].DirectionAndSpotCos := Vector4(0.0, 0.0, -1.0, -1.0);
+  FLights[Result].ColorAndIntensity := Vector4(AColor.X, AColor.Y, AColor.Z, Max(0.0, AIntensity));
+  FLights[Result].ShadowAndTypeParams := Vector4(
+    Single(Ord(cltPoint)), -1.0, Single(AShadowTileIndex), Max(0.0, AShadowBias));
+  Inc(FActiveLightCount);
+  FClusterUniforms.ActiveLightCount := FActiveLightCount;
+end;
+
+function TCastleVulkanClusteredLightCuller.AddSpotLight(
+  const AViewPosition, AViewDirection: TVector3;
+  const ARange, AInnerSpotCos, AOuterSpotCos: Single;
+  const AColor: TVector3; const AIntensity: Single;
+  const AShadowTileIndex: Integer;
+  const AShadowBias: Single): Integer;
+var
+  DirNorm: TVector3;
+begin
+  if FActiveLightCount >= CASTLE_MAX_CLUSTERED_LIGHTS then
+    Exit(-1);
+  if AViewDirection.LengthSqr > 1e-8 then
+    DirNorm := AViewDirection.Normalize
+  else
+    DirNorm := Vector3(0.0, 0.0, -1.0);
+
+  Result := Integer(FActiveLightCount);
+  FLights[Result].PositionAndRange := Vector4(
+    AViewPosition.X, AViewPosition.Y, AViewPosition.Z, Max(0.01, ARange));
+  FLights[Result].DirectionAndSpotCos := Vector4(
+    DirNorm.X, DirNorm.Y, DirNorm.Z, AOuterSpotCos);
+  FLights[Result].ColorAndIntensity := Vector4(AColor.X, AColor.Y, AColor.Z, Max(0.0, AIntensity));
+  FLights[Result].ShadowAndTypeParams := Vector4(
+    Single(Ord(cltSpot)), AInnerSpotCos, Single(AShadowTileIndex), Max(0.0, AShadowBias));
+  Inc(FActiveLightCount);
+  FClusterUniforms.ActiveLightCount := FActiveLightCount;
+end;
+
+procedure TCastleVulkanClusteredLightCuller.ComputeSliceDepthBounds(
+  const ASliceZ: Cardinal; out ASliceNear, ASliceFar: Single);
+var
+  ZNear, ZFar, Ratio: Single;
+  ClampedZ: Cardinal;
+begin
+  ZNear := Max(1e-3, FClusterUniforms.ScreenAndDepthParams.Z);
+  ZFar := Max(ZNear + 1e-2, FClusterUniforms.ScreenAndDepthParams.W);
+  Ratio := ZFar / ZNear;
+  ClampedZ := Min(ASliceZ, Max(Cardinal(1), FGridZ) - 1);
+  ASliceNear := ZNear * Power(Ratio, Single(ClampedZ) / Single(Max(Cardinal(1), FGridZ)));
+  ASliceFar  := ZNear * Power(Ratio, Single(ClampedZ + 1) / Single(Max(Cardinal(1), FGridZ)));
+end;
+
+procedure TCastleVulkanClusteredLightCuller.ComputeClusterViewAABB(
+  const ACX, ACY, ACZ: Cardinal;
+  out AAABBMin, AAABBMax: TVector3);
+
+  function ScreenUVToViewAtPositiveDepth(const AUVX, AUVY, APositiveDepth: Single): TVector3;
+  var
+    Ndc, ViewRay: TVector4;
+    RayDir: TVector3;
+    RayScale: Single;
+  begin
+    Ndc := Vector4(AUVX * 2.0 - 1.0, AUVY * 2.0 - 1.0, 1.0, 1.0);
+    ViewRay := FClusterUniforms.InverseProjectionMatrix * Ndc;
+    if Abs(ViewRay.W) > 1e-5 then
+      RayDir := Vector3(ViewRay.X / ViewRay.W, ViewRay.Y / ViewRay.W, ViewRay.Z / ViewRay.W)
+    else
+      RayDir := Vector3(ViewRay.X, ViewRay.Y, ViewRay.Z);
+
+    if Abs(RayDir.Z) > 1e-5 then
+    begin
+      RayScale := (-APositiveDepth) / RayDir.Z;
+      if RayScale < 0.0 then
+        RayScale := -RayScale;
+      Result := Vector3(RayDir.X * RayScale, RayDir.Y * RayScale, -APositiveDepth);
+    end else
+      Result := Vector3(RayDir.X * APositiveDepth, RayDir.Y * APositiveDepth, -APositiveDepth);
+  end;
+
+var
+  SliceNear, SliceFar, UMin, UMax, VMin, VMax: Single;
+  P: array[0..3] of TVector3;
+  I: Integer;
+begin
+  ComputeSliceDepthBounds(ACZ, SliceNear, SliceFar);
+  UMin := Single(Min(ACX, FGridX - 1)) / Single(Max(Cardinal(1), FGridX));
+  UMax := Single(Min(ACX, FGridX - 1) + 1) / Single(Max(Cardinal(1), FGridX));
+  VMin := Single(Min(ACY, FGridY - 1)) / Single(Max(Cardinal(1), FGridY));
+  VMax := Single(Min(ACY, FGridY - 1) + 1) / Single(Max(Cardinal(1), FGridY));
+
+  P[0] := ScreenUVToViewAtPositiveDepth(UMin, VMin, SliceNear);
+  P[1] := ScreenUVToViewAtPositiveDepth(UMax, VMax, SliceNear);
+  P[2] := ScreenUVToViewAtPositiveDepth(UMin, VMin, SliceFar);
+  P[3] := ScreenUVToViewAtPositiveDepth(UMax, VMax, SliceFar);
+
+  AAABBMin := P[0];
+  AAABBMax := P[0];
+  for I := 1 to 3 do
+  begin
+    AAABBMin.X := Min(AAABBMin.X, P[I].X);
+    AAABBMin.Y := Min(AAABBMin.Y, P[I].Y);
+    AAABBMin.Z := Min(AAABBMin.Z, P[I].Z);
+    AAABBMax.X := Max(AAABBMax.X, P[I].X);
+    AAABBMax.Y := Max(AAABBMax.Y, P[I].Y);
+    AAABBMax.Z := Max(AAABBMax.Z, P[I].Z);
+  end;
+end;
+
+function TCastleVulkanClusteredLightCuller.ComputeClusterCoordFromScreenAndDepth(
+  const AScreenX, AScreenY, APositiveViewDepth: Single;
+  out ACX, ACY, ACZ: Cardinal): Cardinal;
+var
+  ScreenW, ScreenH, ZNear, ZFar, ClampedZ, SliceF: Single;
+begin
+  ScreenW := Max(1.0, FClusterUniforms.ScreenAndDepthParams.X);
+  ScreenH := Max(1.0, FClusterUniforms.ScreenAndDepthParams.Y);
+  ZNear := Max(1e-3, FClusterUniforms.ScreenAndDepthParams.Z);
+  ZFar := Max(ZNear + 1e-2, FClusterUniforms.ScreenAndDepthParams.W);
+  ClampedZ := EnsureRange(APositiveViewDepth, ZNear, ZFar);
+
+  ACX := Cardinal(EnsureRange(Trunc((AScreenX / ScreenW) * Single(FGridX)), 0, Integer(FGridX) - 1));
+  ACY := Cardinal(EnsureRange(Trunc((AScreenY / ScreenH) * Single(FGridY)), 0, Integer(FGridY) - 1));
+  SliceF := (Ln(ClampedZ / ZNear) / Max(1e-5, Ln(ZFar / ZNear))) * Single(FGridZ);
+  ACZ := Cardinal(EnsureRange(Trunc(SliceF), 0, Integer(FGridZ) - 1));
+
+  Result := (ACZ * FGridY + ACY) * FGridX + ACX;
+end;
+
+procedure TCastleVulkanClusteredLightCuller.EnsureResourcesCreated;
+var
+  BufDesc: TRHIBufferDesc;
+  Bindings: array[0..3] of TRHIDescriptorBindingDesc;
+  ShaderGen: TCastleShaderGeneratorRHI;
+  CompDesc: TRHIComputePipelineDesc;
+  Total: Cardinal;
+begin
+  if FDevice = nil then Exit;
+  Total := Max(Cardinal(1), GetTotalClusters);
+
+  if FClusterUniformBuffer = nil then
+  begin
+    FillChar(BufDesc, SizeOf(BufDesc), 0);
+    BufDesc.Size := SizeOf(TCastleClusterCullingUniformBlock);
+    BufDesc.Usage := [buUniform, buTransferDst];
+    BufDesc.MemoryUsage := muCpuToGpu;
+    BufDesc.DebugName := 'ClusterCullingUBO';
+    FClusterUniformBuffer := FDevice.CreateBuffer(BufDesc);
+  end;
+
+  if FLightStorageBuffer = nil then
+  begin
+    FillChar(BufDesc, SizeOf(BufDesc), 0);
+    BufDesc.Size := PtrUInt(CASTLE_MAX_CLUSTERED_LIGHTS) * SizeOf(TCastleClusteredLight);
+    BufDesc.Usage := [buStorage, buTransferDst];
+    BufDesc.MemoryUsage := muCpuToGpu;
+    BufDesc.DebugName := 'ClusteredLightsSSBO';
+    FLightStorageBuffer := FDevice.CreateBuffer(BufDesc);
+  end;
+
+  if FClusterGridBuffer = nil then
+  begin
+    FillChar(BufDesc, SizeOf(BufDesc), 0);
+    BufDesc.Size := PtrUInt(Total) * SizeOf(TCastleClusterGridEntry);
+    BufDesc.Usage := [buStorage, buTransferDst, buTransferSrc];
+    BufDesc.MemoryUsage := muCpuToGpu;
+    BufDesc.DebugName := 'ClusterGridSSBO';
+    FClusterGridBuffer := FDevice.CreateBuffer(BufDesc);
+  end;
+
+  if FLightIndexBuffer = nil then
+  begin
+    FillChar(BufDesc, SizeOf(BufDesc), 0);
+    BufDesc.Size := PtrUInt(Total) * CASTLE_MAX_LIGHTS_PER_CLUSTER * SizeOf(Cardinal);
+    BufDesc.Usage := [buStorage, buTransferDst, buTransferSrc];
+    BufDesc.MemoryUsage := muCpuToGpu;
+    BufDesc.DebugName := 'ClusterLightIndicesSSBO';
+    FLightIndexBuffer := FDevice.CreateBuffer(BufDesc);
+  end;
+
+  if FDescriptorLayout = nil then
+  begin
+    FillChar(Bindings, SizeOf(Bindings), 0);
+    Bindings[0].Binding := 0;
+    Bindings[0].DescriptorType := dtUniformBuffer;
+    Bindings[0].Count := 1;
+    Bindings[0].StageFlags := [ssCompute];
+    Bindings[1].Binding := 1;
+    Bindings[1].DescriptorType := dtStorageBuffer;
+    Bindings[1].Count := 1;
+    Bindings[1].StageFlags := [ssCompute];
+    Bindings[2].Binding := 2;
+    Bindings[2].DescriptorType := dtStorageBuffer;
+    Bindings[2].Count := 1;
+    Bindings[2].StageFlags := [ssCompute];
+    Bindings[3].Binding := 3;
+    Bindings[3].DescriptorType := dtStorageBuffer;
+    Bindings[3].Count := 1;
+    Bindings[3].StageFlags := [ssCompute];
+    FDescriptorLayout := FDevice.CreateDescriptorSetLayout(Bindings);
+  end;
+
+  if FDescriptorSet = nil then
+    FDescriptorSet := FDevice.CreateDescriptorSet(FDescriptorLayout);
+
+  FDescriptorSet.BindUniformBuffer(0, FClusterUniformBuffer, 0, SizeOf(TCastleClusterCullingUniformBlock));
+  FDescriptorSet.BindStorageBuffer(1, FLightStorageBuffer, 0, FLightStorageBuffer.Desc.Size);
+  FDescriptorSet.BindStorageBuffer(2, FClusterGridBuffer, 0, FClusterGridBuffer.Desc.Size);
+  FDescriptorSet.BindStorageBuffer(3, FLightIndexBuffer, 0, FLightIndexBuffer.Desc.Size);
+  FDescriptorSet.Update;
+
+  if FComputePipeline = nil then
+  begin
+    ShaderGen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+    try
+      FComputeShader := FDevice.CreateShaderModuleFromGLSL(
+        ssCompute,
+        ShaderGen.GenerateClusteredLightCullingComputeShader(FWorkgroupSizeX),
+        'ClusteredLightCullingCS');
+    finally
+      FreeAndNil(ShaderGen);
+    end;
+
+    FillChar(CompDesc, SizeOf(CompDesc), 0);
+    CompDesc.ComputeShader := FComputeShader;
+    SetLength(CompDesc.DescriptorSetLayouts, 1);
+    CompDesc.DescriptorSetLayouts[0] := FDescriptorLayout;
+    CompDesc.PushConstantSize := 0;
+    CompDesc.PushConstantStages := [];
+    CompDesc.DebugName := 'ClusteredLightCullingPSO';
+    FComputePipeline := FDevice.GetOrCreateComputePipeline(CompDesc);
+  end;
+end;
+
+function TCastleVulkanClusteredLightCuller.DispatchLightCulling(
+  const ACmd: TRHICommandList): Cardinal;
+
+  function SphereIntersectsBox(const ACenter: TVector3; const ARadius: Single;
+    const ABoxMin, ABoxMax: TVector3): Boolean;
+  var
+    ClosestX, ClosestY, ClosestZ, DX, DY, DZ: Single;
+  begin
+    ClosestX := EnsureRange(ACenter.X, ABoxMin.X, ABoxMax.X);
+    ClosestY := EnsureRange(ACenter.Y, ABoxMin.Y, ABoxMax.Y);
+    ClosestZ := EnsureRange(ACenter.Z, ABoxMin.Z, ABoxMax.Z);
+    DX := ACenter.X - ClosestX;
+    DY := ACenter.Y - ClosestY;
+    DZ := ACenter.Z - ClosestZ;
+    Result := (DX * DX + DY * DY + DZ * DZ) <= (ARadius * ARadius);
+  end;
+
+var
+  Total, CX, CY, CZ, ClusterIdx, BaseOffset, LocalCount, LightIdx, GroupCountX: Cardinal;
+  BoxMin, BoxMax, LightPos: TVector3;
+  LightRange: Single;
+  LightTypeInt: Integer;
+  Intersects: Boolean;
+begin
+  EnsureResourcesCreated;
+  Total := GetTotalClusters;
+  if Total = 0 then
+    Exit(0);
+
+  FClusterUniforms.GridX := FGridX;
+  FClusterUniforms.GridY := FGridY;
+  FClusterUniforms.GridZ := FGridZ;
+  FClusterUniforms.ActiveLightCount := FActiveLightCount;
+
+  if FClusterUniformBuffer <> nil then
+    FClusterUniformBuffer.UploadData(FClusterUniforms, SizeOf(FClusterUniforms), 0);
+  if (FLightStorageBuffer <> nil) and (FActiveLightCount > 0) then
+    FLightStorageBuffer.UploadData(FLights[0], PtrUInt(FActiveLightCount) * SizeOf(TCastleClusteredLight), 0);
+
+  FActiveClusterCount := 0;
+  FTotalAssignedLightRefs := 0;
+
+  for CZ := 0 to FGridZ - 1 do
+    for CY := 0 to FGridY - 1 do
+      for CX := 0 to FGridX - 1 do
+      begin
+        ClusterIdx := (CZ * FGridY + CY) * FGridX + CX;
+        BaseOffset := ClusterIdx * CASTLE_MAX_LIGHTS_PER_CLUSTER;
+        LocalCount := 0;
+
+        if FActiveLightCount > 0 then
+        begin
+          ComputeClusterViewAABB(CX, CY, CZ, BoxMin, BoxMax);
+          for LightIdx := 0 to FActiveLightCount - 1 do
+          begin
+            if LocalCount >= CASTLE_MAX_LIGHTS_PER_CLUSTER then
+              Break;
+            LightTypeInt := Round(FLights[LightIdx].ShadowAndTypeParams.X);
+            if LightTypeInt = Ord(cltDirectional) then
+              Intersects := True
+            else
+            begin
+              LightPos := Vector3(
+                FLights[LightIdx].PositionAndRange.X,
+                FLights[LightIdx].PositionAndRange.Y,
+                FLights[LightIdx].PositionAndRange.Z);
+              LightRange := FLights[LightIdx].PositionAndRange.W;
+              Intersects := SphereIntersectsBox(LightPos, LightRange, BoxMin, BoxMax);
+            end;
+
+            if Intersects then
+            begin
+              FLightIndexList[BaseOffset + LocalCount] := LightIdx;
+              Inc(LocalCount);
+            end;
+          end;
+        end;
+
+        FClusterGrid[ClusterIdx].Offset := BaseOffset;
+        FClusterGrid[ClusterIdx].Count := LocalCount;
+        if LocalCount > 0 then
+        begin
+          Inc(FActiveClusterCount);
+          Inc(FTotalAssignedLightRefs, LocalCount);
+        end;
+      end;
+
+  if (FClusterGridBuffer <> nil) and (Length(FClusterGrid) > 0) then
+    FClusterGridBuffer.UploadData(FClusterGrid[0], PtrUInt(Length(FClusterGrid)) * SizeOf(TCastleClusterGridEntry), 0);
+  if (FLightIndexBuffer <> nil) and (Length(FLightIndexList) > 0) then
+    FLightIndexBuffer.UploadData(FLightIndexList[0], PtrUInt(Length(FLightIndexList)) * SizeOf(Cardinal), 0);
+
+  GroupCountX := (Total + FWorkgroupSizeX - 1) div FWorkgroupSizeX;
+  if ACmd <> nil then
+  begin
+    ACmd.BindComputePipeline(FComputePipeline);
+    ACmd.BindComputeDescriptorSet(0, FDescriptorSet, []);
+    ACmd.Dispatch(GroupCountX, 1, 1);
+    if ACmd is TVulkanRHICommandList then
+    begin
+      TVulkanRHICommandList(ACmd).TransitionBuffer(FClusterGridBuffer, rsTransferDst, rsShaderRead);
+      TVulkanRHICommandList(ACmd).TransitionBuffer(FLightIndexBuffer, rsTransferDst, rsShaderRead);
+    end;
+  end;
+
+  Inc(FTotalDispatches);
+  Result := GroupCountX;
+end;
+
+function TCastleVulkanClusteredLightCuller.GetClusterEntry(
+  const ACX, ACY, ACZ: Cardinal): TCastleClusterGridEntry;
+var
+  Idx: Cardinal;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  if (ACX >= FGridX) or (ACY >= FGridY) or (ACZ >= FGridZ) then
+    Exit;
+  Idx := (ACZ * FGridY + ACY) * FGridX + ACX;
+  if Idx < Cardinal(Length(FClusterGrid)) then
+    Result := FClusterGrid[Idx];
+end;
+
+function TCastleVulkanClusteredLightCuller.GetClusterLightIndex(
+  const ACX, ACY, ACZ, ALocalSlot: Cardinal): Cardinal;
+var
+  Entry: TCastleClusterGridEntry;
+begin
+  Result := High(Cardinal);
+  Entry := GetClusterEntry(ACX, ACY, ACZ);
+  if (ALocalSlot < Entry.Count) and
+     (Entry.Offset + ALocalSlot < Cardinal(Length(FLightIndexList))) then
+    Result := FLightIndexList[Entry.Offset + ALocalSlot];
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanShadowAtlas                                                     }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanShadowAtlas.Create(const ADevice: TVulkanRHIDevice;
+  const AAtlasSize, ACascadeResolution: Cardinal);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FAtlasSize := Max(Cardinal(512), AAtlasSize);
+  FCascadeResolution := Min(Cardinal(FAtlasSize div CASTLE_MAX_SHADOW_CASCADES), Max(Cardinal(128), ACascadeResolution));
+  ResetPositionalTiles;
+end;
+
+destructor TCastleVulkanShadowAtlas.Destroy;
+begin
+  FreeAndNil(FPositionalTileBuffer);
+  FreeAndNil(FCascadeUniformBuffer);
+  FreeAndNil(FShadowAtlasSampler);
+  FreeAndNil(FShadowAtlasTexture);
+  inherited;
+end;
+
+procedure TCastleVulkanShadowAtlas.EnsureAtlasResourcesCreated;
+var
+  TexDesc: TRHITextureDesc;
+  SamplerDesc: TRHISamplerDesc;
+  BufDesc: TRHIBufferDesc;
+begin
+  if FDevice = nil then Exit;
+
+  if FShadowAtlasTexture = nil then
+  begin
+    TexDesc := TRHITextureDesc.Create2D(
+      FAtlasSize, FAtlasSize, pfD32_Float,
+      [tuDepthStencil, tuSampled, tuTransferSrc, tuTransferDst], 1, 1);
+    TexDesc.DebugName := 'SharedShadowAtlasDepth';
+    FShadowAtlasTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+    if FShadowAtlasTexture <> nil then
+      FShadowAtlasTexture.SetHostClearDepth(1.0);
+  end;
+
+  if FShadowAtlasSampler = nil then
+  begin
+    FillChar(SamplerDesc, SizeOf(SamplerDesc), 0);
+    SamplerDesc.MinFilter := sfLinear;
+    SamplerDesc.MagFilter := sfLinear;
+    SamplerDesc.MipFilter := sfNearest;
+    SamplerDesc.AddressModeU := amClampToEdge;
+    SamplerDesc.AddressModeV := amClampToEdge;
+    SamplerDesc.AddressModeW := amClampToEdge;
+    SamplerDesc.MaxAnisotropy := 1.0;
+    SamplerDesc.MaxLod := 0.0;
+    FShadowAtlasSampler := FDevice.CreateSampler(SamplerDesc);
+  end;
+
+  if FCascadeUniformBuffer = nil then
+  begin
+    FillChar(BufDesc, SizeOf(BufDesc), 0);
+    BufDesc.Size := SizeOf(TCastleDirectionalCascadeShadowBlock);
+    BufDesc.Usage := [buUniform, buTransferDst];
+    BufDesc.MemoryUsage := muCpuToGpu;
+    BufDesc.DebugName := 'DirectionalCascadeShadowUBO';
+    FCascadeUniformBuffer := FDevice.CreateBuffer(BufDesc);
+  end;
+
+  if FPositionalTileBuffer = nil then
+  begin
+    FillChar(BufDesc, SizeOf(BufDesc), 0);
+    BufDesc.Size := PtrUInt(CASTLE_MAX_SHADOW_ATLAS_TILES) * SizeOf(TCastlePositionalShadowTileEntry);
+    BufDesc.Usage := [buStorage, buTransferDst];
+    BufDesc.MemoryUsage := muCpuToGpu;
+    BufDesc.DebugName := 'PositionalShadowTilesSSBO';
+    FPositionalTileBuffer := FDevice.CreateBuffer(BufDesc);
+  end;
+end;
+
+function TCastleVulkanShadowAtlas.GetCascadeViewportRect(
+  const ACascadeIndex: Cardinal): TRectangle;
+var
+  ClampedIdx: Cardinal;
+begin
+  ClampedIdx := Min(Cardinal(CASTLE_MAX_SHADOW_CASCADES - 1), ACascadeIndex);
+  Result := Rectangle(
+    Integer(ClampedIdx * FCascadeResolution),
+    0,
+    FCascadeResolution,
+    FCascadeResolution);
+end;
+
+procedure TCastleVulkanShadowAtlas.ComputeDirectionalCascades(
+  const ACameraInverseViewProj: TMatrix4;
+  const AWorldLightDirection: TVector3;
+  const AZNear, AZFar: Single;
+  const ALambda: Single;
+  const AStabilizeTexels: Boolean);
+var
+  ClampedNear, ClampedFar, ClampedLambda, Ratio: Single;
+  Splits: array[0..CASTLE_MAX_SHADOW_CASCADES] of Single;
+  LightDir, UpVec, RightVec, TrueUp, SliceCenter, LightSpaceCenter: TVector3;
+  LightView, LightProj: TMatrix4;
+  Frac, LogSplit, UniformSplit, SliceRadius, TexelWorldSize: Single;
+  CascadeIdx: Integer;
+  TileScale, TileOffsetX, TileOffsetY: Single;
+begin
+  EnsureAtlasResourcesCreated;
+  ClampedNear := Max(1e-3, AZNear);
+  ClampedFar := Max(ClampedNear + 1.0, AZFar);
+  ClampedLambda := EnsureRange(ALambda, 0.0, 1.0);
+  Ratio := ClampedFar / ClampedNear;
+
+  Splits[0] := ClampedNear;
+  for CascadeIdx := 1 to CASTLE_MAX_SHADOW_CASCADES do
+  begin
+    Frac := Single(CascadeIdx) / Single(CASTLE_MAX_SHADOW_CASCADES);
+    LogSplit := ClampedNear * Power(Ratio, Frac);
+    UniformSplit := ClampedNear + (ClampedFar - ClampedNear) * Frac;
+    Splits[CascadeIdx] := ClampedLambda * LogSplit + (1.0 - ClampedLambda) * UniformSplit;
+  end;
+
+  FCascadeBlock.CascadeSplitDepths := Vector4(Splits[1], Splits[2], Splits[3], Splits[4]);
+
+  if AWorldLightDirection.LengthSqr > 1e-8 then
+    LightDir := AWorldLightDirection.Normalize
+  else
+    LightDir := Vector3(0.0, -1.0, 0.0);
+
+  if Abs(LightDir.Y) < 0.99 then
+    UpVec := Vector3(0.0, 1.0, 0.0)
+  else
+    UpVec := Vector3(0.0, 0.0, 1.0);
+
+  RightVec := TVector3.CrossProduct(LightDir, UpVec).Normalize;
+  TrueUp := TVector3.CrossProduct(RightVec, LightDir).Normalize;
+
+  for CascadeIdx := 0 to CASTLE_MAX_SHADOW_CASCADES - 1 do
+  begin
+    SliceCenter := (ACameraInverseViewProj * Vector4(0.0, 0.0, 0.0, 1.0)).XYZ;
+    SliceRadius := Max(1.0, (Splits[CascadeIdx + 1] - Splits[CascadeIdx]) * 0.75);
+    SliceRadius := Ceil(SliceRadius * 16.0) / 16.0;
+
+    FillChar(LightView, SizeOf(LightView), 0);
+    LightView.Data[0, 0] := RightVec.X;
+    LightView.Data[1, 0] := RightVec.Y;
+    LightView.Data[2, 0] := RightVec.Z;
+    LightView.Data[0, 1] := TrueUp.X;
+    LightView.Data[1, 1] := TrueUp.Y;
+    LightView.Data[2, 1] := TrueUp.Z;
+    LightView.Data[0, 2] := -LightDir.X;
+    LightView.Data[1, 2] := -LightDir.Y;
+    LightView.Data[2, 2] := -LightDir.Z;
+    LightView.Data[3, 3] := 1.0;
+
+    LightSpaceCenter := (LightView * Vector4(SliceCenter, 1.0)).XYZ;
+    if AStabilizeTexels and (FCascadeResolution > 0) then
+    begin
+      TexelWorldSize := (2.0 * SliceRadius) / Single(FCascadeResolution);
+      if TexelWorldSize > 1e-6 then
+      begin
+        LightSpaceCenter.X := Floor(LightSpaceCenter.X / TexelWorldSize) * TexelWorldSize;
+        LightSpaceCenter.Y := Floor(LightSpaceCenter.Y / TexelWorldSize) * TexelWorldSize;
+      end;
+    end;
+
+    LightView.Data[3, 0] := -LightSpaceCenter.X;
+    LightView.Data[3, 1] := -LightSpaceCenter.Y;
+    LightView.Data[3, 2] := -LightSpaceCenter.Z;
+
+    { Orthographic projection into Vulkan clip space [-1..1] x [-1..1] x [0..1] }
+    FillChar(LightProj, SizeOf(LightProj), 0);
+    LightProj.Data[0, 0] := 1.0 / SliceRadius;
+    LightProj.Data[1, 1] := 1.0 / SliceRadius;
+    LightProj.Data[2, 2] := -1.0 / (4.0 * SliceRadius);
+    LightProj.Data[3, 2] := 0.5;
+    LightProj.Data[3, 3] := 1.0;
+
+    FCascadeBlock.CascadeViewProjMatrix[CascadeIdx] := LightProj * LightView;
+
+    TileScale := Single(FCascadeResolution) / Single(Max(Cardinal(1), FAtlasSize));
+    TileOffsetX := Single(Cardinal(CascadeIdx) * FCascadeResolution) / Single(Max(Cardinal(1), FAtlasSize));
+    TileOffsetY := 0.0;
+    FCascadeBlock.CascadeAtlasUVScaleOffset[CascadeIdx] := Vector4(TileScale, TileScale, TileOffsetX, TileOffsetY);
+  end;
+
+  UploadShadowBuffers;
+  Inc(FTotalCascadeUpdates);
+end;
+
+procedure TCastleVulkanShadowAtlas.ResetPositionalTiles;
+begin
+  FAllocatedTileCount := 0;
+  FShelfCursorX := 0;
+  FShelfCursorY := FCascadeResolution;
+  FShelfRowHeight := 0;
+  FillChar(FPositionalTiles[0], SizeOf(FPositionalTiles), 0);
+  FillChar(FPositionalTileRects[0], SizeOf(FPositionalTileRects), 0);
+end;
+
+class function TCastleVulkanShadowAtlas.ChooseTileResolution(
+  const ADistanceToCamera, ALightRange: Single;
+  const ABaseResolution: Cardinal): Cardinal;
+var
+  BaseRes: Cardinal;
+  NormalizedDist: Single;
+begin
+  BaseRes := Max(Cardinal(64), ABaseResolution);
+  NormalizedDist := Max(0.0, ADistanceToCamera) / Max(1.0, ALightRange);
+  if NormalizedDist < 1.0 then
+    Result := BaseRes
+  else if NormalizedDist < 2.5 then
+    Result := Max(Cardinal(64), BaseRes shr 1)
+  else
+    Result := Max(Cardinal(64), BaseRes shr 2);
+end;
+
+function TCastleVulkanShadowAtlas.AllocatePositionalTile(
+  const ADesiredResolution: Cardinal;
+  const ALightViewProj: TMatrix4;
+  out ATileIndex: Integer;
+  out AViewportRect: TRectangle;
+  out AUVScaleOffset: TVector4): Boolean;
+var
+  TileRes: Cardinal;
+  InvAtlas: Single;
+begin
+  EnsureAtlasResourcesCreated;
+  ATileIndex := -1;
+  AViewportRect := TRectangle.Empty;
+  AUVScaleOffset := TVector4.Zero;
+
+  if FAllocatedTileCount >= CASTLE_MAX_SHADOW_ATLAS_TILES then
+    Exit(False);
+
+  TileRes := EnsureRange(ADesiredResolution, 64, FAtlasSize);
+  if FShelfCursorX + TileRes > FAtlasSize then
+  begin
+    FShelfCursorX := 0;
+    Inc(FShelfCursorY, FShelfRowHeight);
+    FShelfRowHeight := 0;
+  end;
+
+  if FShelfCursorY + TileRes > FAtlasSize then
+    Exit(False);
+
+  ATileIndex := Integer(FAllocatedTileCount);
+  AViewportRect := Rectangle(Integer(FShelfCursorX), Integer(FShelfCursorY), TileRes, TileRes);
+  InvAtlas := 1.0 / Single(Max(Cardinal(1), FAtlasSize));
+  AUVScaleOffset := Vector4(
+    Single(TileRes) * InvAtlas,
+    Single(TileRes) * InvAtlas,
+    Single(FShelfCursorX) * InvAtlas,
+    Single(FShelfCursorY) * InvAtlas);
+
+  FPositionalTileRects[ATileIndex] := AViewportRect;
+  FPositionalTiles[ATileIndex].LightViewProjMatrix := ALightViewProj;
+  FPositionalTiles[ATileIndex].AtlasUVScaleOffset := AUVScaleOffset;
+
+  Inc(FShelfCursorX, TileRes);
+  FShelfRowHeight := Max(FShelfRowHeight, TileRes);
+  Inc(FAllocatedTileCount);
+  Result := True;
+end;
+
+procedure TCastleVulkanShadowAtlas.UploadShadowBuffers;
+begin
+  EnsureAtlasResourcesCreated;
+  if FCascadeUniformBuffer <> nil then
+    FCascadeUniformBuffer.UploadData(FCascadeBlock, SizeOf(FCascadeBlock), 0);
+  if (FPositionalTileBuffer <> nil) and (FAllocatedTileCount > 0) then
+    FPositionalTileBuffer.UploadData(
+      FPositionalTiles[0],
+      PtrUInt(FAllocatedTileCount) * SizeOf(TCastlePositionalShadowTileEntry),
+      0);
+end;
+
+procedure TCastleVulkanShadowAtlas.RecordShadowTilePass(
+  const ACmd: TRHICommandList;
+  const AViewportRect: TRectangle;
+  const ADepthBiasConstant, ADepthBiasSlope: Single);
+var
+  RenderInfo: TRHIRenderingInfo;
+begin
+  EnsureAtlasResourcesCreated;
+  if (ACmd = nil) or (FShadowAtlasTexture = nil) then
+    Exit;
+
+  FillChar(RenderInfo, SizeOf(RenderInfo), 0);
+  RenderInfo.RenderArea := AViewportRect;
+  SetLength(RenderInfo.ColorAttachments, 0);
+  RenderInfo.DepthAttachment.Texture := FShadowAtlasTexture;
+  RenderInfo.DepthAttachment.LoadOp := loClear;
+  RenderInfo.DepthAttachment.StoreOp := soStore;
+  RenderInfo.DepthAttachment.ClearDepth := 1.0;
+
+  ACmd.BeginRendering(RenderInfo);
+  ACmd.SetViewport(FloatRectangle(AViewportRect), 0.0, 1.0);
+  ACmd.SetScissor(AViewportRect);
+  ACmd.SetDepthBias(ADepthBiasConstant, ADepthBiasSlope);
+  ACmd.EndRendering;
+
+  Inc(FTotalShadowTilePasses);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -7656,12 +8645,28 @@ begin
   Result := FIBLGenerator;
 end;
 
+function TVulkanRHIDevice.GetClusteredLightCuller: TCastleVulkanClusteredLightCuller;
+begin
+  if FClusteredLightCuller = nil then
+    FClusteredLightCuller := TCastleVulkanClusteredLightCuller.Create(Self);
+  Result := FClusteredLightCuller;
+end;
+
+function TVulkanRHIDevice.GetShadowAtlas: TCastleVulkanShadowAtlas;
+begin
+  if FShadowAtlas = nil then
+    FShadowAtlas := TCastleVulkanShadowAtlas.Create(Self);
+  Result := FShadowAtlas;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FShadowAtlas);
+  FreeAndNil(FClusteredLightCuller);
   FreeAndNil(FIBLGenerator);
   FreeAndNil(FComputeCuller);
   FreeAndNil(FTimestampProfiler);

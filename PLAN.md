@@ -317,14 +317,16 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 13 Status**: Completed. Full Cook-Torrance microfacet GGX PBR GLSL 450 shader generation & cotangent-frame normal mapping (`TCastleShaderGeneratorRHI`), compute Split-Sum BRDF Integration LUT + environment cubemap prefiltering + L2 Spherical Harmonics irradiance (`TCastleVulkanIBLGenerator`), and `TX3DRendererShape` PBR/Phong/Unlit material extraction & RHI draw dispatch (`ExtractRHIMaterialBlock`, `ExtractRHIMaterialTextures`, `BuildRHIBindlessMaterialEntry`, `RecordRHIDraw`) fully integrated and tested (69 unit tests passing).
 
 
-### Phase 14: Clustered Forward+ Compute Light Culling (256+ Dynamic Lights) & Shadow Atlas (PLANNED)
+### Phase 14: Clustered Forward+ Compute Light Culling (256+ Dynamic Lights) & Shadow Atlas (COMPLETED)
 
-* [ ] **14.1. 3D Clustered Forward+ Frustum Grid & Compute Light Culler (`TCastleVulkanClusteredLightCuller`)**:
-  * Subdivide the camera view frustum into a 3D exponential-depth cluster grid ($16 \times 8 \times 24$ tiles) and dispatch a compute shader binning up to 256 dynamic point and spot lights into per-cluster light index lists (`SSBO`).
-* [ ] **14.2. Directional Cascaded Shadow Maps (CSM) & Shared Positional Shadow Atlas (`TCastleVulkanShadowAtlas`)**:
-  * Implement 4-cascade directional shadow split calculation and dynamic tile sub-allocation inside a shared depth shadow atlas (`pfD32_Float`) with 3x3 PCF shadow filtering.
-* [ ] **14.3. Forward+ Cluster & Shadow Atlas Shader Integration (`CastleInternalShaderRHI`, `CastleViewport`)**:
-  * Integrate cluster light-grid lookup and cascaded/atlas shadow evaluation into the RHI 3D forward pass.
+* [x] **14.1. 3D Clustered Forward+ Frustum Grid & Compute Light Culler (`TCastleVulkanClusteredLightCuller` in `CastleInternalRHI_Vulkan`)**:
+  * Subdivide the camera view frustum into a 3D exponential-depth cluster grid ($16 \times 8 \times 24 = 3,072$ tiles, $z_{\text{slice}} = z_{\text{near}} \cdot (z_{\text{far}} / z_{\text{near}})^{k / N_z}$), reconstruct view-space cluster AABBs (`ComputeSliceDepthBounds`, `ComputeClusterViewAABB`, `ComputeClusterCoordFromScreenAndDepth`), and dispatch the GLSL `#version 450` compute shader (`GenerateClusteredLightCullingComputeShader`, `DispatchLightCulling`) binning up to 256 dynamic directional, point, and spot lights (`TCastleClusteredLight`, 64B) into per-cluster light grids (`TCastleClusterGridEntry`, 8B) and compact light index lists (`SSBO`).
+* [x] **14.2. Directional Cascaded Shadow Maps (CSM) & Shared Positional Shadow Atlas (`TCastleVulkanShadowAtlas` in `CastleInternalRHI_Vulkan`)**:
+  * Implement 4-cascade directional shadow split calculation (`ComputeDirectionalCascades`) using the Practical Split Scheme ($\lambda = 0.75$ logarithmic + uniform blend) with world-space texel-snapping stabilization (`TCastleDirectionalCascadeShadowBlock`, 336B), adaptive distance/range positional shadow tile sizing (`ChooseTileResolution`), shelf-packed dynamic tile sub-allocation (`AllocatePositionalTile`, `TCastlePositionalShadowTileEntry`, 80B) inside a shared $2048 \times 2048$ `pfD32_Float` shadow atlas (`ShadowAtlasTexture`), and slope-scaled depth-bias tile rendering (`RecordShadowTilePass`).
+* [x] **14.3. Forward+ Cluster & Shadow Atlas Shader Integration (`CastleInternalShaderRHI`)**:
+  * Implement `GenerateClusteredForwardAndShadowFunctions` (`ComputeClusterIndex3D`, `FlattenClusterIndex`, `SampleShadowAtlasPCF3x3`, `EvaluateDirectionalCascadeShadow`, `EvaluatePositionalAtlasShadow`, `EvaluateClusteredForwardLights`) and integrate `HasClusteredForward` and `HasCascadedShadows` into `GenerateDefault3DFragmentShader`.
+
+**Milestone 14 Status**: Completed. 3D Clustered Forward+ compute light culling (`TCastleVulkanClusteredLightCuller` supporting 256+ dynamic lights across $16 \times 8 \times 24$ exponential depth clusters), 4-cascade Directional CSM with texel-snapping stabilization + shelf-packed positional shadow atlas (`TCastleVulkanShadowAtlas`), and Forward+ cluster & $3 \times 3$ PCF shadow atlas shader integration (`GenerateClusteredForwardAndShadowFunctions`, `GenerateClusteredLightCullingComputeShader`) fully integrated and tested (72 unit tests passing).
 
 
 ### Phase 15: Declarative Render Graph (`TRHIRenderGraph`) & HDR Post-Processing Stack (PLANNED)
@@ -361,5 +363,5 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 ## 7. Testing & Verification Criteria
 
 * [x] Automated Visual Regression Tests: `CompareImagesPerceptualDiff` in `CastleInternalRHI` compares framebuffer readbacks (`GrabTextureImage`) between `rbOpenGL` and `rbVulkan` using normalized RMSE perceptual diff thresholds.
-* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 69 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
-* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance/Hi-Z occlusion culling (`TCastleVulkanComputeCuller`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.
+* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 72 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
+* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance/Hi-Z occlusion culling (`TCastleVulkanComputeCuller`), Clustered Forward+ compute light culling (`TCastleVulkanClusteredLightCuller`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.
