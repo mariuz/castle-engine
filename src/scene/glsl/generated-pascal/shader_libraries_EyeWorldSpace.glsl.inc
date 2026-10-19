@@ -17,7 +17,11 @@
 '#endif' + LineEnding +
 '' + LineEnding +
 'uniform CASTLE_EYE_WORLD_SPACE_PRECISION mat4 castle_CameraMatrix;' + LineEnding +
+'/* On OpenGLES the shader code is glued, and the vertex shader may already' + LineEnding +
+'   declare castle_CameraInverseMatrix (for texture coordinate generation). */' + LineEnding +
+'#ifndef CASTLE_CAMERA_INVERSE_MATRIX_DECLARED' + LineEnding +
 'uniform CASTLE_EYE_WORLD_SPACE_PRECISION mat4 castle_CameraInverseMatrix;' + LineEnding +
+'#endif' + LineEnding +
 'uniform CASTLE_EYE_WORLD_SPACE_PRECISION mat3 castle_CameraRotationMatrix;' + LineEnding +
 'uniform CASTLE_EYE_WORLD_SPACE_PRECISION mat3 castle_CameraRotationInverseMatrix;' + LineEnding +
 '' + LineEnding +
