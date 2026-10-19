@@ -313,6 +313,10 @@ type
       ButtonRotate90Y: TButton;
       ButtonRandomizeTransform: TButton;
       ButtonArrayDuplicate: TButton;
+      ButtonRadialDuplicate: TButton;
+      ButtonViewTop: TButton;
+      ButtonViewFront: TButton;
+      ButtonViewRight: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -324,11 +328,19 @@ type
       MenuTreeViewItemGroupSelected: TMenuItem;
       MenuTreeViewItemUngroupSelected: TMenuItem;
       MenuTreeViewItemArrayDuplicate: TMenuItem;
+      MenuTreeViewItemRadialDuplicate: TMenuItem;
+      MenuTreeViewItemReplaceSelected: TMenuItem;
       MenuTreeViewItemSelectSameClass: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
       MenuTreeViewItemCollapseAll: TMenuItem;
       FLockedComponents: TComponentList;
       FAltDragDuplicated: Boolean;
+      FMeasureActive: Boolean;
+      FMeasureStartWorld: TVector3;
+      FMeasureEndWorld: TVector3;
+      FMeasureDistance: Single;
+      FMeasureDelta: TVector3;
+      FQuickAddReplaceMode: Boolean;
       FCameraBookmarks: array [0..9] of record
         Valid: Boolean;
         Pos, Dir, Up: TVector3;
@@ -363,6 +375,8 @@ type
     procedure ButtonRotate90YClick(Sender: TObject);
     procedure ButtonRandomizeTransformClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
+    procedure ButtonRadialDuplicateClick(Sender: TObject);
+    procedure ButtonAxisViewClick(Sender: TObject);
     procedure EditPropertyFilterChange(Sender: TObject);
     procedure ButtonResetPropertyClick(Sender: TObject);
     procedure ControlsTreeDblClick(Sender: TObject);
@@ -375,6 +389,8 @@ type
     procedure MenuTreeViewItemGroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemUngroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemArrayDuplicateClick(Sender: TObject);
+    procedure MenuTreeViewItemRadialDuplicateClick(Sender: TObject);
+    procedure MenuTreeViewItemReplaceSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemSelectSameClassClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
     procedure MenuTreeViewItemCollapseAllClick(Sender: TObject);
@@ -814,6 +830,14 @@ type
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
+    procedure RadialDuplicateSelected(const Count: Integer;
+      const Radius, TotalAngleDeg: Single; const OrientToCenter: Boolean);
+    procedure ShowRadialDuplicateDialog;
+    procedure ReplaceSelectedComponents(const NewClass: TComponentClass;
+      const ComponentOnCreate: TNotifyEvent = nil);
+    procedure ShowReplaceComponentPalette;
+    procedure ViewportMeasureToCursor;
+    procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
     procedure ToggleSelectedLock;
     procedure UnlockAll;
@@ -1379,11 +1403,74 @@ begin
     end;
   end;
 
-  if (Frame.Mode <> moInteract) and Event.IsKey(keyD) and
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyD) then
+  begin
+    if Event.ModifiersDown = [mkCtrl, mkShift] then
+    begin
+      Frame.ShowArrayDuplicateDialog;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt] then
+    begin
+      Frame.ShowRadialDuplicateDialog;
+      Exit(true);
+    end;
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyR) and
      (Event.ModifiersDown = [mkCtrl, mkShift]) then
   begin
-    Frame.ShowArrayDuplicateDialog;
+    Frame.ShowReplaceComponentPalette;
     Exit(true);
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyM) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    if Event.ModifiersDown = [] then
+    begin
+      Frame.ViewportMeasureToCursor;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkAlt] then
+    begin
+      Frame.ClearViewportMeasurement;
+      Exit(true);
+    end;
+  end;
+
+  if (Frame.Mode <> moInteract) and (Event.EventType = itKey) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    if (Event.Key = keyNumpad7) or ((Event.Key = key7) and (mkAlt in Event.ModifiersDown)) then
+    begin
+      if mkCtrl in Event.ModifiersDown then
+        Frame.ViewportViewAxis(Vector3(0, 1, 0), Vector3(0, 0, 1))
+      else
+        Frame.ViewportViewAxis(Vector3(0, -1, 0), Vector3(0, 0, -1));
+      Exit(true);
+    end else
+    if (Event.Key = keyNumpad1) or ((Event.Key = key1) and (mkAlt in Event.ModifiersDown)) then
+    begin
+      if mkCtrl in Event.ModifiersDown then
+        Frame.ViewportViewAxis(Vector3(0, 0, 1), Vector3(0, 1, 0))
+      else
+        Frame.ViewportViewAxis(Vector3(0, 0, -1), Vector3(0, 1, 0));
+      Exit(true);
+    end else
+    if (Event.Key = keyNumpad3) or ((Event.Key = key3) and (mkAlt in Event.ModifiersDown)) then
+    begin
+      if mkCtrl in Event.ModifiersDown then
+        Frame.ViewportViewAxis(Vector3(1, 0, 0), Vector3(0, 1, 0))
+      else
+        Frame.ViewportViewAxis(Vector3(-1, 0, 0), Vector3(0, 1, 0));
+      Exit(true);
+    end else
+    if (Event.Key = keyNumpad5) or ((Event.Key = key5) and (Event.ModifiersDown = [mkAlt])) then
+    begin
+      Frame.ViewportToggleProjection;
+      Exit(true);
+    end;
   end;
 
   if (Frame.Mode <> moInteract) and (Event.EventType = itKey) and
@@ -1944,6 +2031,8 @@ procedure TDesignFrame.TDesignerLayer.Render;
     ViewModeStr, SpaceStr, SpeedStr: String;
     T: TCastleTransform;
     BBox: TBox3D;
+    SelDelta: TVector3;
+    SelDist: Single;
   begin
     if InternalForceWireframe = weWireframeOnly then
       ViewModeStr := 'Wireframe'
@@ -1986,11 +2075,28 @@ procedure TDesignFrame.TDesignerLayer.Render;
         Result := Result + NL +
           Format('  World BBox Size: %s', [BBox.Size.ToString]);
     end;
+
+    if (Frame.TransformManipulate <> nil) and (Frame.TransformManipulate.SelectedCount >= 2) then
+    begin
+      SelDist := Frame.TransformManipulate.MeasureSelectedDistance(SelDelta);
+      Result := Result + NL +
+        Format('Ruler (Sel[0]->Sel[1]): %.3f (dX=%.2f, dY=%.2f, dZ=%.2f)', [
+          SelDist, SelDelta.X, SelDelta.Y, SelDelta.Z]);
+    end;
+
+    if Frame.FMeasureActive then
+      Result := Result + NL +
+        Format('Measured Ray (M): %.3f (dX=%.2f, dY=%.2f, dZ=%.2f)', [
+          Frame.FMeasureDistance,
+          Frame.FMeasureDelta.X, Frame.FMeasureDelta.Y, Frame.FMeasureDelta.Z]);
   end;
 
 var
   SelectedUI, HoverUI: TCastleUserInterface;
   SelectedUIRect, HoverUIRect, MarqueeRect: TFloatRectangle;
+  V: TCastleViewport;
+  CamPos, CamDir, CamUp: TVector3;
+  ScreenStart, ScreenEnd: TVector2;
 begin
   inherited;
 
@@ -2043,6 +2149,27 @@ begin
       Abs(MarqueeCurrentPos.Y - MarqueeStartPos.Y));
     DrawRectangle(MarqueeRect, Vector4(0.2, 0.6, 1.0, 0.2));
     DrawRectangleOutline(MarqueeRect, Vector4(0.4, 0.8, 1.0, 0.9));
+  end;
+
+  if Frame.FMeasureActive and (Frame.CurrentViewport <> nil) and
+     (Frame.CurrentViewport.InternalCamera <> nil) then
+  begin
+    V := Frame.CurrentViewport;
+    V.InternalCamera.GetWorldView(CamPos, CamDir, CamUp);
+    if (V.InternalCamera.ProjectionType = ptOrthographic) or
+       (TVector3.DotProduct(Frame.FMeasureStartWorld - CamPos, CamDir) > 0) then
+    begin
+      ScreenStart := V.LocalToContainerPosition(V.PositionFromWorld(Frame.FMeasureStartWorld));
+      DrawRectangle(FloatRectangle(ScreenStart.X - 4, ScreenStart.Y - 4, 8, 8),
+        Vector4(0.1, 1.0, 0.9, 0.95));
+    end;
+    if (V.InternalCamera.ProjectionType = ptOrthographic) or
+       (TVector3.DotProduct(Frame.FMeasureEndWorld - CamPos, CamDir) > 0) then
+    begin
+      ScreenEnd := V.LocalToContainerPosition(V.PositionFromWorld(Frame.FMeasureEndWorld));
+      DrawRectangle(FloatRectangle(ScreenEnd.X - 4, ScreenEnd.Y - 4, 8, 8),
+        Vector4(1.0, 0.85, 0.1, 0.95));
+    end;
   end;
 
   RectStatistics.Exists := Frame.EffectiveShowStatistics;
@@ -2443,6 +2570,49 @@ begin
   ButtonArrayDuplicate.OnClick := @ButtonArrayDuplicateClick;
   ButtonArrayDuplicate.Parent := PanelLayoutTransform;
 
+  ButtonRadialDuplicate := TButton.Create(Self);
+  ButtonRadialDuplicate.Align := alTop;
+  ButtonRadialDuplicate.AutoSize := true;
+  ButtonRadialDuplicate.Caption := 'Radial Dup...';
+  ButtonRadialDuplicate.Hint := 'Radial / circular array duplicate selected TCastleTransform component(s) around a circle or arc (Ctrl+Alt+D)';
+  ButtonRadialDuplicate.ShowHint := true;
+  ButtonRadialDuplicate.BorderSpacing.Around := 2;
+  ButtonRadialDuplicate.OnClick := @ButtonRadialDuplicateClick;
+  ButtonRadialDuplicate.Parent := PanelLayoutTransform;
+
+  ButtonViewTop := TButton.Create(Self);
+  ButtonViewTop.Align := alTop;
+  ButtonViewTop.AutoSize := true;
+  ButtonViewTop.Caption := 'View: Top (-Y)';
+  ButtonViewTop.Hint := 'Align viewport camera to Top view (-Y) centered on selection or scene (Numpad 7 / Alt+7, Ctrl for Bottom +Y)';
+  ButtonViewTop.ShowHint := true;
+  ButtonViewTop.BorderSpacing.Around := 2;
+  ButtonViewTop.Tag := 0;
+  ButtonViewTop.OnClick := @ButtonAxisViewClick;
+  ButtonViewTop.Parent := PanelLayoutTransform;
+
+  ButtonViewFront := TButton.Create(Self);
+  ButtonViewFront.Align := alTop;
+  ButtonViewFront.AutoSize := true;
+  ButtonViewFront.Caption := 'View: Front (-Z)';
+  ButtonViewFront.Hint := 'Align viewport camera to Front view (-Z) centered on selection or scene (Numpad 1 / Alt+1, Ctrl for Back +Z)';
+  ButtonViewFront.ShowHint := true;
+  ButtonViewFront.BorderSpacing.Around := 2;
+  ButtonViewFront.Tag := 1;
+  ButtonViewFront.OnClick := @ButtonAxisViewClick;
+  ButtonViewFront.Parent := PanelLayoutTransform;
+
+  ButtonViewRight := TButton.Create(Self);
+  ButtonViewRight.Align := alTop;
+  ButtonViewRight.AutoSize := true;
+  ButtonViewRight.Caption := 'View: Right (-X)';
+  ButtonViewRight.Hint := 'Align viewport camera to Right view (-X) centered on selection or scene (Numpad 3 / Alt+3, Ctrl for Left +X)';
+  ButtonViewRight.ShowHint := true;
+  ButtonViewRight.BorderSpacing.Around := 2;
+  ButtonViewRight.Tag := 2;
+  ButtonViewRight.OnClick := @ButtonAxisViewClick;
+  ButtonViewRight.Parent := PanelLayoutTransform;
+
   PanelPropertyFilter := TPanel.Create(Self);
   PanelPropertyFilter.Align := alTop;
   PanelPropertyFilter.AutoSize := true;
@@ -2508,6 +2678,16 @@ begin
   MenuTreeViewItemArrayDuplicate.Caption := 'Array Duplicate... (Ctrl+Shift+D)';
   MenuTreeViewItemArrayDuplicate.OnClick := @MenuTreeViewItemArrayDuplicateClick;
   MenuTreeView.Items.Add(MenuTreeViewItemArrayDuplicate);
+
+  MenuTreeViewItemRadialDuplicate := TMenuItem.Create(Self);
+  MenuTreeViewItemRadialDuplicate.Caption := 'Radial / Circular Duplicate... (Ctrl+Alt+D)';
+  MenuTreeViewItemRadialDuplicate.OnClick := @MenuTreeViewItemRadialDuplicateClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemRadialDuplicate);
+
+  MenuTreeViewItemReplaceSelected := TMenuItem.Create(Self);
+  MenuTreeViewItemReplaceSelected.Caption := 'Replace Selected With... (Ctrl+Shift+R)';
+  MenuTreeViewItemReplaceSelected.OnClick := @MenuTreeViewItemReplaceSelectedClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemReplaceSelected);
 
   MenuTreeViewItemSelectSameClass := TMenuItem.Create(Self);
   MenuTreeViewItemSelectSameClass.Caption := 'Select All of Same Class';
@@ -3925,18 +4105,32 @@ procedure TDesignFrame.ViewportViewAxis(const Dir, Up: TVector3);
 var
   V: TCastleViewport;
   Box: TBox3D;
+  CenterPoint, NewPos: TVector3;
   Distance: Single;
-  NewPos: TVector3;
 begin
   V := CurrentViewport;
   if V = nil then Exit;
   if V.Items = nil then Exit;
 
-  Box := V.Items.BoundingBox;
-  if Box.IsEmpty then Exit;
+  if (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0) then
+  begin
+    CenterPoint := TransformManipulate.SelectionWorkingCenter;
+    Distance := Max(1.0, PointsDistance(V.InternalCamera.WorldTranslation, CenterPoint));
+  end else
+  begin
+    Box := V.Items.BoundingBox;
+    if not Box.IsEmpty then
+    begin
+      CenterPoint := Box.Center;
+      Distance := Max(1.0, PointsDistance(V.InternalCamera.WorldTranslation, CenterPoint));
+    end else
+    begin
+      CenterPoint := TVector3.Zero;
+      Distance := 10.0;
+    end;
+  end;
 
-  Distance := PointsDistance(V.InternalCamera.WorldTranslation, Box.Center);
-  NewPos := Box.Center - Dir * Distance;
+  NewPos := CenterPoint - Dir * Distance;
   FixCamera2D(V, NewPos, Dir, Up);
   V.InternalCamera.AnimateTo(NewPos, Dir, Up, CameraTransitionTime);
 end;
@@ -7356,6 +7550,16 @@ begin
     begin
       ShowArrayDuplicateDialog;
       Key := 0;
+    end else
+    if (Key = Ord('D')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowRadialDuplicateDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('R')) and (Shift = [ssCtrl, ssShift]) then
+    begin
+      ShowReplaceComponentPalette;
+      Key := 0;
     end;
   end;
 end;
@@ -7448,7 +7652,7 @@ var
   R: TRegisteredComponent;
   Category, CaptionStr, Part, ItemText, LowerFilter: String;
   Sel: TComponent;
-  CanAddUI, CanAddTransform, CanAddBehavior: Boolean;
+  CanAddUI, CanAddTransform, CanAddBehavior, CanAddNonVisual: Boolean;
 begin
   if FQuickAddList = nil then Exit;
   FQuickAddList.Items.BeginUpdate;
@@ -7457,11 +7661,22 @@ begin
     LowerFilter := Trim(LowerCase(FilterText));
 
     Sel := SelectedComponent;
-    CanAddUI := (Sel is TCastleUserInterface) or ((Sel = nil) and (DesignRoot is TCastleUserInterface));
-    CanAddTransform := (Sel is TCastleTransform) or ((Sel = nil) and (DesignRoot is TCastleTransform)) or
-                       (CurrentViewport <> nil);
-    CanAddBehavior := (Sel is TCastleTransform) or (Sel is TCastleBehavior) or
-                      ((Sel = nil) and (DesignRoot is TCastleTransform));
+    if FQuickAddReplaceMode then
+    begin
+      CanAddTransform := (Sel is TCastleTransform) or
+                         ((TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0));
+      CanAddUI := (not CanAddTransform) and (Sel is TCastleUserInterface);
+      CanAddBehavior := (not CanAddTransform) and (not CanAddUI) and (Sel is TCastleBehavior);
+      CanAddNonVisual := (not CanAddTransform) and (not CanAddUI) and (not CanAddBehavior) and (Sel <> nil);
+    end else
+    begin
+      CanAddUI := (Sel is TCastleUserInterface) or ((Sel = nil) and (DesignRoot is TCastleUserInterface));
+      CanAddTransform := (Sel is TCastleTransform) or ((Sel = nil) and (DesignRoot is TCastleTransform)) or
+                         (CurrentViewport <> nil);
+      CanAddBehavior := (Sel is TCastleTransform) or (Sel is TCastleBehavior) or
+                        ((Sel = nil) and (DesignRoot is TCastleTransform));
+      CanAddNonVisual := true;
+    end;
 
     for R in RegisteredComponents do
       if not R.IsDeprecated then
@@ -7481,7 +7696,10 @@ begin
           if not CanAddBehavior then Continue;
           Category := 'Behavior';
         end else
+        begin
+          if not CanAddNonVisual then Continue;
           Category := 'NonVisual';
+        end;
 
         CaptionStr := '';
         for Part in R.Caption do
@@ -8627,6 +8845,462 @@ begin
   ShowArrayDuplicateDialog;
 end;
 
+procedure TDesignFrame.RadialDuplicateSelected(const Count: Integer;
+  const Radius, TotalAngleDeg: Single; const OrientToCenter: Boolean);
+var
+  SelectedList, SourceTransforms, NewSelection: TComponentList;
+  SelectedCount, I, CopyIdx, InsertIdx: Integer;
+  Src, ParentT, NewComp: TCastleTransform;
+  CompStr: String;
+  AngleStepDeg, AngleRad: Single;
+  CircleCenter: TVector3;
+begin
+  if (Count <= 0) or (DesignOwner = nil) then Exit;
+
+  SourceTransforms := TComponentList.Create(false);
+  NewSelection := TComponentList.Create(false);
+  try
+    GetSelected(SelectedList, SelectedCount, false);
+    try
+      if SelectedList <> nil then
+        for I := 0 to SelectedList.Count - 1 do
+          if (SelectedList[I] is TCastleTransform) and
+             Deletable(SelectedList[I]) and
+             (TCastleTransform(SelectedList[I]).Parent <> nil) and
+             (not IsComponentDescendantOfSelection(SelectedList[I], SelectedList)) then
+            SourceTransforms.Add(SelectedList[I]);
+    finally
+      FreeAndNil(SelectedList);
+    end;
+
+    if (SourceTransforms.Count = 0) and (CurrentTransform <> nil) and
+       Deletable(CurrentTransform) and (CurrentTransform.Parent <> nil) then
+      SourceTransforms.Add(CurrentTransform);
+
+    if SourceTransforms.Count = 0 then
+    begin
+      ErrorBox('Select at least one TCastleTransform (that is not the root or a subcomponent) to radial-duplicate.');
+      Exit;
+    end;
+
+    if SameValue(Abs(TotalAngleDeg), 360.0, 0.01) then
+      AngleStepDeg := TotalAngleDeg / (Count + 1)
+    else
+      AngleStepDeg := TotalAngleDeg / Count;
+
+    for I := 0 to SourceTransforms.Count - 1 do
+    begin
+      Src := TCastleTransform(SourceTransforms[I]);
+      ParentT := Src.Parent;
+      CompStr := ComponentToString(Src);
+      InsertIdx := ParentT.List.IndexOf(Src);
+      CircleCenter := Src.Translation - Vector3(0, 0, Radius);
+
+      for CopyIdx := 1 to Count do
+      begin
+        AngleRad := DegToRad(AngleStepDeg * CopyIdx);
+        NewComp := StringToComponent(CompStr, DesignOwner) as TCastleTransform;
+        if not SameValue(Radius, 0.0, SingleEpsilon) then
+          NewComp.Translation := CircleCenter + Vector3(Sin(AngleRad) * Radius, 0, Cos(AngleRad) * Radius)
+        else
+          NewComp.Translation := RotatePointAroundAxisRad(AngleRad, Src.Translation, Vector3(0, 1, 0));
+
+        if OrientToCenter then
+          NewComp.Rotation := (QuatFromAxisAngle(Src.Rotation) *
+            QuatFromAxisAngle(Vector4(0, 1, 0, AngleRad))).ToAxisAngle;
+
+        if InsertIdx >= 0 then
+        begin
+          Inc(InsertIdx);
+          ParentT.Insert(InsertIdx, NewComp);
+        end else
+          ParentT.Add(NewComp);
+
+        NewSelection.Add(NewComp);
+      end;
+    end;
+
+    if NewSelection.Count > 0 then
+    begin
+      UpdateDesign;
+      SetSelected(NewSelection);
+      ModifiedOutsideObjectInspector(
+        Format('Radial duplicate (%d copies, R=%.2f, %.1f deg)',
+          [Count, Radius, TotalAngleDeg]), ucHigh);
+    end;
+  finally
+    FreeAndNil(NewSelection);
+    FreeAndNil(SourceTransforms);
+  end;
+end;
+
+procedure TDesignFrame.ShowRadialDuplicateDialog;
+var
+  Dialog: TForm;
+  LblCount, LblRadius, LblAngle: TLabel;
+  SpinCount: TSpinEdit;
+  SpinRadius, SpinAngle: TFloatSpinEdit;
+  CheckOrient: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if (CurrentTransform = nil) and
+     ((TransformManipulate = nil) or (TransformManipulate.SelectedCount = 0)) then
+  begin
+    ErrorBox('Select at least one TCastleTransform component before opening Radial Duplicate.');
+    Exit;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Radial / Circular Duplicate (Ctrl+Alt+D)';
+    Dialog.Position := poMainFormCenter;
+    Dialog.Width := 360;
+    Dialog.Height := 215;
+    Dialog.BorderStyle := bsDialog;
+
+    LblCount := TLabel.Create(Dialog);
+    LblCount.Caption := 'Number of Copies:';
+    LblCount.Left := 16;
+    LblCount.Top := 18;
+    LblCount.Parent := Dialog;
+
+    SpinCount := TSpinEdit.Create(Dialog);
+    SpinCount.MinValue := 1;
+    SpinCount.MaxValue := 360;
+    SpinCount.Value := 7;
+    SpinCount.Left := 190;
+    SpinCount.Top := 14;
+    SpinCount.Width := 140;
+    SpinCount.Parent := Dialog;
+
+    LblRadius := TLabel.Create(Dialog);
+    LblRadius.Caption := 'Circle Radius (XZ):';
+    LblRadius.Left := 16;
+    LblRadius.Top := 54;
+    LblRadius.Parent := Dialog;
+
+    SpinRadius := TFloatSpinEdit.Create(Dialog);
+    SpinRadius.DecimalPlaces := 2;
+    SpinRadius.Increment := 1.0;
+    SpinRadius.MinValue := -10000;
+    SpinRadius.MaxValue := 10000;
+    SpinRadius.Value := 5.0;
+    SpinRadius.Left := 190;
+    SpinRadius.Top := 50;
+    SpinRadius.Width := 140;
+    SpinRadius.Parent := Dialog;
+
+    LblAngle := TLabel.Create(Dialog);
+    LblAngle.Caption := 'Total Arc Angle (deg):';
+    LblAngle.Left := 16;
+    LblAngle.Top := 90;
+    LblAngle.Parent := Dialog;
+
+    SpinAngle := TFloatSpinEdit.Create(Dialog);
+    SpinAngle.DecimalPlaces := 1;
+    SpinAngle.Increment := 15.0;
+    SpinAngle.MinValue := -360;
+    SpinAngle.MaxValue := 360;
+    SpinAngle.Value := 360.0;
+    SpinAngle.Left := 190;
+    SpinAngle.Top := 86;
+    SpinAngle.Width := 140;
+    SpinAngle.Parent := Dialog;
+
+    CheckOrient := TCheckBox.Create(Dialog);
+    CheckOrient.Caption := 'Rotate copies along circle arc (+Y yaw)';
+    CheckOrient.Checked := true;
+    CheckOrient.Left := 16;
+    CheckOrient.Top := 126;
+    CheckOrient.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Radial Duplicate';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      RadialDuplicateSelected(
+        SpinCount.Value,
+        SpinRadius.Value,
+        SpinAngle.Value,
+        CheckOrient.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.ButtonRadialDuplicateClick(Sender: TObject);
+begin
+  ShowRadialDuplicateDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemRadialDuplicateClick(Sender: TObject);
+begin
+  ShowRadialDuplicateDialog;
+end;
+
+procedure TDesignFrame.ReplaceSelectedComponents(const NewClass: TComponentClass;
+  const ComponentOnCreate: TNotifyEvent);
+var
+  SelectedList, RestoredSelection: TComponentList;
+  SelectedCount, I: Integer;
+  C, NewDesignOwner, NewDesignRoot, TempOwner, TempRoot, ReplacedComp: TComponent;
+  NamesToReplace: TStringList;
+  Serialized: String;
+  LoadInfo: TInternalComponentLoadInfo;
+begin
+  if (NewClass = nil) or (DesignRoot = nil) or (DesignOwner = nil) then Exit;
+
+  NamesToReplace := TStringList.Create;
+  try
+    GetSelected(SelectedList, SelectedCount, false);
+    try
+      if SelectedList <> nil then
+        for I := 0 to SelectedList.Count - 1 do
+        begin
+          C := SelectedList[I];
+          if (C = nil) or (csSubComponent in C.ComponentStyle) or (C.Name = '') or
+             (C.ClassType = NewClass) then
+            Continue;
+          if (NewClass.InheritsFrom(TCastleTransform) and (C is TCastleTransform)) or
+             (NewClass.InheritsFrom(TCastleUserInterface) and (C is TCastleUserInterface)) or
+             (NewClass.InheritsFrom(TCastleBehavior) and (C is TCastleBehavior)) or
+             ((not NewClass.InheritsFrom(TCastleTransform)) and
+              (not NewClass.InheritsFrom(TCastleUserInterface)) and
+              (not NewClass.InheritsFrom(TCastleBehavior)) and
+              (not (C is TCastleTransform)) and
+              (not (C is TCastleUserInterface)) and
+              (not (C is TCastleBehavior))) then
+            NamesToReplace.Add(C.Name);
+        end;
+    finally
+      FreeAndNil(SelectedList);
+    end;
+
+    if NamesToReplace.Count = 0 then
+    begin
+      ErrorBox(Format('No selected components can be replaced with %s (either none selected, or already of class %s).',
+        [NewClass.ClassName, NewClass.ClassName]));
+      Exit;
+    end;
+
+    Serialized := ComponentToString(DesignRoot);
+    for I := 0 to NamesToReplace.Count - 1 do
+    begin
+      LoadInfo := TInternalComponentLoadInfo.Create;
+      try
+        LoadInfo.ChangeClassName := NamesToReplace[I];
+        LoadInfo.ChangeClassClass := NewClass;
+        if I < NamesToReplace.Count - 1 then
+        begin
+          TempOwner := TComponent.Create(nil);
+          try
+            TempRoot := InternalStringToComponent(Serialized, TempOwner, LoadInfo);
+            if Assigned(ComponentOnCreate) then
+            begin
+              ReplacedComp := TempOwner.FindComponent(NamesToReplace[I]);
+              if ReplacedComp <> nil then
+                ComponentOnCreate(ReplacedComp);
+            end;
+            Serialized := ComponentToString(TempRoot);
+          finally
+            FreeAndNil(TempOwner);
+          end;
+        end else
+        begin
+          LoadInfo.PreserveDataAcrossUndo := DesignOwner;
+          NewDesignOwner := TComponent.Create(Self);
+          NewDesignRoot := InternalStringToComponent(Serialized, NewDesignOwner, LoadInfo);
+          if Assigned(ComponentOnCreate) then
+          begin
+            ReplacedComp := NewDesignOwner.FindComponent(NamesToReplace[I]);
+            if ReplacedComp <> nil then
+              ComponentOnCreate(ReplacedComp);
+          end;
+          OpenDesign(NewDesignRoot, NewDesignOwner, FDesignUrl);
+        end;
+      finally
+        FreeAndNil(LoadInfo);
+      end;
+    end;
+
+    RestoredSelection := TComponentList.Create(false);
+    try
+      for I := 0 to NamesToReplace.Count - 1 do
+      begin
+        ReplacedComp := DesignOwner.FindComponent(NamesToReplace[I]);
+        if ReplacedComp <> nil then
+          RestoredSelection.Add(ReplacedComp);
+      end;
+      if RestoredSelection.Count > 0 then
+        SetSelected(RestoredSelection);
+    finally
+      FreeAndNil(RestoredSelection);
+    end;
+
+    ModifiedOutsideObjectInspector(
+      Format('Replace %d component(s) with %s', [NamesToReplace.Count, NewClass.ClassName]), ucHigh);
+  finally
+    FreeAndNil(NamesToReplace);
+  end;
+end;
+
+procedure TDesignFrame.ShowReplaceComponentPalette;
+var
+  Dialog: TForm;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+  R: TRegisteredComponent;
+begin
+  if ControlsTree.SelectionCount = 0 then
+  begin
+    ErrorBox('Select one or more components first before using Replace Selected With (Ctrl+Shift+R).');
+    Exit;
+  end;
+
+  FQuickAddReplaceMode := true;
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Replace Selected Component(s) With... (Ctrl+Shift+R)';
+    Dialog.Position := poMainFormCenter;
+    Dialog.Width := 520;
+    Dialog.Height := 420;
+    Dialog.BorderStyle := bsSizeToolWin;
+
+    FQuickAddEdit := TEdit.Create(Dialog);
+    FQuickAddEdit.Align := alTop;
+    FQuickAddEdit.BorderSpacing.Around := 8;
+    FQuickAddEdit.TextHint := 'Search replacement component class (preserves transform, children & common properties)...';
+    FQuickAddEdit.OnChange := @QuickAddEditChange;
+    FQuickAddEdit.OnKeyDown := @QuickAddEditKeyDown;
+    FQuickAddEdit.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Replace Selected';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    FQuickAddList := TListBox.Create(Dialog);
+    FQuickAddList.Align := alClient;
+    FQuickAddList.BorderSpacing.Left := 8;
+    FQuickAddList.BorderSpacing.Right := 8;
+    FQuickAddList.OnDblClick := @QuickAddListDblClick;
+    FQuickAddList.Parent := Dialog;
+
+    PopulateQuickAddList('');
+
+    if (Dialog.ShowModal = mrOk) and
+       (FQuickAddList.ItemIndex >= 0) and
+       (FQuickAddList.Items.Objects[FQuickAddList.ItemIndex] is TRegisteredComponent) then
+    begin
+      R := TRegisteredComponent(FQuickAddList.Items.Objects[FQuickAddList.ItemIndex]);
+      ReplaceSelectedComponents(R.ComponentClass, R.OnCreate);
+    end;
+  finally
+    FQuickAddReplaceMode := false;
+    FQuickAddEdit := nil;
+    FQuickAddList := nil;
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemReplaceSelectedClick(Sender: TObject);
+begin
+  ShowReplaceComponentPalette;
+end;
+
+procedure TDesignFrame.ButtonAxisViewClick(Sender: TObject);
+var
+  Opposite: Boolean;
+begin
+  if not (Sender is TComponent) then Exit;
+  Opposite := ssCtrl in GetKeyShiftState;
+  case TComponent(Sender).Tag of
+    0: if Opposite then
+         ViewportViewAxis(Vector3(0, 1, 0), Vector3(0, 0, 1))
+       else
+         ViewportViewAxis(Vector3(0, -1, 0), Vector3(0, 0, -1));
+    1: if Opposite then
+         ViewportViewAxis(Vector3(0, 0, 1), Vector3(0, 1, 0))
+       else
+         ViewportViewAxis(Vector3(0, 0, -1), Vector3(0, 1, 0));
+    2: if Opposite then
+         ViewportViewAxis(Vector3(1, 0, 0), Vector3(0, 1, 0))
+       else
+         ViewportViewAxis(Vector3(-1, 0, 0), Vector3(0, 1, 0));
+  end;
+end;
+
+procedure TDesignFrame.ViewportMeasureToCursor;
+var
+  V: TCastleViewport;
+  RayOrigin, RayDirection, HitPoint, WorldDelta: TVector3;
+  Dist: Single;
+begin
+  V := CurrentViewport;
+  if (V = nil) or (CastleControl = nil) or (CastleControl.Container = nil) or
+     (TransformManipulate = nil) or (TransformManipulate.SelectedCount = 0) then
+    Exit;
+
+  V.PositionToRay(CastleControl.Container.MousePosition, true, RayOrigin, RayDirection);
+  Dist := TransformManipulate.MeasureRayDistanceFromSelected(
+    RayOrigin, RayDirection, HitPoint, WorldDelta);
+  if Dist >= 0 then
+  begin
+    FMeasureActive := true;
+    FMeasureStartWorld := TransformManipulate.SelectionWorkingCenter;
+    FMeasureEndWorld := HitPoint;
+    FMeasureDistance := Dist;
+    FMeasureDelta := WorldDelta;
+    FShowStatisticsToolbar := true;
+    if ButtonShowStats <> nil then
+      ButtonShowStats.Down := true;
+  end;
+end;
+
+procedure TDesignFrame.ClearViewportMeasurement;
+begin
+  FMeasureActive := false;
+end;
+
 procedure TDesignFrame.ButtonRotateModeClick(Sender: TObject);
 begin
   if InsideToggleModeClick then Exit;
@@ -8822,6 +9496,10 @@ begin
     MenuTreeViewItemUngroupSelected.Enabled := (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0);
   if MenuTreeViewItemArrayDuplicate <> nil then
     MenuTreeViewItemArrayDuplicate.Enabled := (CurrentTransform <> nil) or ((TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0));
+  if MenuTreeViewItemRadialDuplicate <> nil then
+    MenuTreeViewItemRadialDuplicate.Enabled := (CurrentTransform <> nil) or ((TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0));
+  if MenuTreeViewItemReplaceSelected <> nil then
+    MenuTreeViewItemReplaceSelected.Enabled := ControlsTree.SelectionCount > 0;
   if MenuTreeViewItemSelectSameClass <> nil then
     MenuTreeViewItemSelectSameClass.Enabled := Sel <> nil;
   if MenuTreeViewItemExpandAll <> nil then

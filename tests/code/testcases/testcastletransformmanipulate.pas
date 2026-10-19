@@ -41,6 +41,7 @@ type
     procedure TestMirrorRotate90AndRandomizeSelected;
     procedure TestStackSelected;
     procedure TestSnapSelectedToRaySurfaceAndVertex;
+    procedure TestMeasureSelectedAndRayDistance;
   end;
 
 implementation
@@ -609,6 +610,57 @@ begin
       Vector3(11.8, 10, 1.8), Vector3(0, -1, 0), true, false));
     AssertVectorEquals(Vector3(12.0, 1.0, 2.0), Prop1.Translation, 1e-4);
     AssertVectorEquals(Vector3(13.0, 1.0, 2.0), Prop2.Translation, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestMeasureSelectedAndRayDistance;
+var
+  Viewport: TCastleViewport;
+  TargetBox: TCastleBox;
+  T1, T2: TCastleTransform;
+  Manipulate: TCastleTransformManipulate;
+  Dist: Single;
+  HitPoint, WorldDelta: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    T1 := TCastleTransform.Create(Viewport);
+    T1.Translation := Vector3(1, 2, 3);
+    Viewport.Items.Add(T1);
+
+    T2 := TCastleTransform.Create(Viewport);
+    T2.Translation := Vector3(4, 6, 3); // delta (3, 4, 0) -> distance 5.0
+    Viewport.Items.Add(T2);
+
+    // With only 1 selected object, MeasureSelectedDistance returns -1
+    Manipulate.SetSelected([T1]);
+    AssertSameValue(-1.0, Manipulate.MeasureSelectedDistance(WorldDelta), 1e-4);
+
+    // With 2 selected objects, MeasureSelectedDistance returns 5.0 and delta (3, 4, 0)
+    Manipulate.SetSelected([T1, T2]);
+    Dist := Manipulate.MeasureSelectedDistance(WorldDelta);
+    AssertSameValue(5.0, Dist, 1e-4);
+    AssertVectorEquals(Vector3(3, 4, 0), WorldDelta, 1e-4);
+
+    // TargetBox centered at (1, 10, 3) with Size (4, 2, 4) -> bottom face at Y = 9, top face at Y = 11
+    TargetBox := TCastleBox.Create(Viewport);
+    TargetBox.Size := Vector3(4, 2, 4);
+    TargetBox.Translation := Vector3(1, 10, 3);
+    Viewport.Items.Add(TargetBox);
+
+    // MeasureRayDistanceFromSelected from T1 at (1, 2, 3) to ray hitting TargetBox top face at (1, 11, 3):
+    // Delta = (0, 9, 0), Distance = 9.0
+    Manipulate.SetSelected([T1]);
+    Manipulate.PivotMode := pmPrimarySelected;
+    Dist := Manipulate.MeasureRayDistanceFromSelected(
+      Vector3(1, 20, 3), Vector3(0, -1, 0), HitPoint, WorldDelta);
+    AssertSameValue(9.0, Dist, 1e-4);
+    AssertVectorEquals(Vector3(1, 11, 3), HitPoint, 1e-4);
+    AssertVectorEquals(Vector3(0, 9, 0), WorldDelta, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

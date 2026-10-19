@@ -403,6 +403,21 @@ type
     function SnapSelectedToRay(const RayOrigin, RayDirection: TVector3;
       const SnapToNearestVertex: Boolean = false;
       const AlignToNormal: Boolean = false): Boolean;
+
+    { Measure the world-space vector (@code(WorldDelta = Pos1 - Pos0)) and
+      Euclidean distance between the first two selected transforms
+      (@code(Selected[0]) and @code(Selected[1])).
+      Returns @code(0) (and sets @code(WorldDelta := TVector3.Zero)) when fewer
+      than 2 transforms are selected. }
+    function MeasureSelectedDistance(out WorldDelta: TVector3): Single;
+
+    { Cast a world-space ray (@code(RayOrigin), @code(RayDirection)) against the
+      scene (ignoring gizmos and currently selected transforms) and measure the
+      world-space distance and delta vector (@code(WorldDelta = HitWorldPoint - PivotWorldPos))
+      from the active selection pivot to the hit surface point (@code(HitWorldPoint)).
+      Returns @code(-1) when no surface is hit or nothing is selected. }
+    function MeasureRayDistanceFromSelected(const RayOrigin, RayDirection: TVector3;
+      out HitWorldPoint, WorldDelta: TVector3): Single;
   end;
 
 var
@@ -2214,6 +2229,89 @@ begin
       Gizmo[Mode].UpdateSize;
     GizmoHasTransformModified(Self);
     GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.MeasureSelectedDistance(
+  out WorldDelta: TVector3): Single;
+var
+  T0, T1: TCastleTransform;
+  Pos0, Pos1: TVector3;
+begin
+  WorldDelta := TVector3.Zero;
+  Result := -1;
+  if SelectedCount < 2 then
+    Exit;
+
+  T0 := Selected[0];
+  T1 := Selected[1];
+  if T0.HasWorldTransform then
+    Pos0 := T0.LocalToWorld(TVector3.Zero)
+  else
+    Pos0 := GetTransformWorkingPos(T0);
+
+  if T1.HasWorldTransform then
+    Pos1 := T1.LocalToWorld(TVector3.Zero)
+  else
+    Pos1 := GetTransformWorkingPos(T1);
+
+  WorldDelta := Pos1 - Pos0;
+  Result := WorldDelta.Length;
+end;
+
+function TCastleTransformManipulate.MeasureRayDistanceFromSelected(
+  const RayOrigin, RayDirection: TVector3;
+  out HitWorldPoint, WorldDelta: TVector3): Single;
+var
+  I: Integer;
+  SavedPickable: array of Boolean;
+  SavedGizmoPickable: Boolean;
+  NormDir, PivotWorldPos: TVector3;
+  RayHit: TRayCollision;
+begin
+  HitWorldPoint := TVector3.Zero;
+  WorldDelta := TVector3.Zero;
+  Result := -1;
+  if (SelectedCount = 0) or (FMainSelected = nil) or
+     (FMainSelected.World = nil) or RayDirection.IsZero then
+    Exit;
+
+  NormDir := RayDirection.Normalize;
+  SavedGizmoPickable := Pickable;
+  SetLength(SavedPickable, FMaxSelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+    if Boxes[I].Parent <> nil then
+    begin
+      SavedPickable[I] := Boxes[I].Parent.Pickable;
+      Boxes[I].Parent.Pickable := false;
+    end;
+  Pickable := false;
+  try
+    RayHit := FMainSelected.World.WorldRay(RayOrigin, NormDir);
+    if RayHit <> nil then
+    try
+      if RayHit.Transform <> nil then
+      begin
+        HitWorldPoint := RayOrigin + NormDir * RayHit.Distance;
+        if (SelectedCount > 1) and (FPivotMode = pmSelectionCenter) then
+          PivotWorldPos := SelectionWorkingCenter
+        else
+        if FMainSelected.HasWorldTransform then
+          PivotWorldPos := FMainSelected.LocalToWorld(TVector3.Zero)
+        else
+          PivotWorldPos := GetTransformWorkingPos(FMainSelected);
+
+        WorldDelta := HitWorldPoint - PivotWorldPos;
+        Result := WorldDelta.Length;
+      end;
+    finally
+      FreeAndNil(RayHit);
+    end;
+  finally
+    Pickable := SavedGizmoPickable;
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if Boxes[I].Parent <> nil then
+        Boxes[I].Parent.Pickable := SavedPickable[I];
   end;
 end;
 

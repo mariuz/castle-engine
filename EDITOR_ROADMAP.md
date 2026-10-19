@@ -178,3 +178,27 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Added `FLockedComponents: TComponentList` (`FreeObjects = false`), `IsComponentLocked(C)` (with automatic ancestor lock propagation), `ToggleSelectedLock` (**`L`** key), and `UnlockAll` (**`Alt+L`**).
   - Locked components remain visible in the viewport but are skipped by viewport hover/click picking (`HoverUserInterface`, `HoverComponent`), marquee box selection (`SelectComponentsInMarquee`), and gizmo drags (`UpdateSelectedControl` detaches gizmos when a locked component is selected in the Hierarchy tree).
   - Added `' [Locked]'` indicator badge in `ControlsTreeAdvancedCustomDrawItem` and `Toggle Selection Lock (L)` / `Unlock All (Alt+L)` in `MenuTreeView`.
+
+### Phase 20: Radial / Circular Array Duplication (`RadialDuplicateSelected` / `Ctrl+Alt+D`)
+- [x] **20.1. Circular & Arc Array Duplication with Optional Inward/Outward Orientation**
+  - Implemented `TDesignFrame.RadialDuplicateSelected(Count, Radius, TotalAngleDeg, OrientToCenter)` and `ShowRadialDuplicateDialog`.
+  - Places `Count` copies ($1\dots 360$) of all selected `TCastleTransform` objects around a circle of radius `Radius` in the XZ plane across `TotalAngleDeg` (using $\Delta\theta = 360^\circ / (\text{Count} + 1)$ for full $360^\circ$ circles so the last copy does not overlap the original, or $\Delta\theta = \text{TotalAngleDeg} / \text{Count}$ for partial arcs), optionally rotating each copy's yaw around $+Y$ by $\theta_i$ (`OrientToCenter = true`).
+  - Bound to **`Ctrl+Alt+D`** in both the Viewport and Hierarchy Tree, **`Radial Dup...`** (`ButtonRadialDuplicate`) in `PanelLayoutTransform`, and **`Radial / Circular Duplicate... (Ctrl+Alt+D)`** in `MenuTreeView`.
+
+### Phase 21: Multi-Component Replace With Another Class (`ReplaceSelectedComponents` / `Ctrl+Shift+R`)
+- [x] **21.1. Searchable Multi-Selection Component Class Replacement**
+  - Implemented `TDesignFrame.ReplaceSelectedComponents(NewClass, ComponentOnCreate)` and `ShowReplaceComponentPalette` (reusing the searchable Quick-Add filter UI with `FQuickAddReplaceMode = true`).
+  - Replaces one or multiple selected components (`TCastleTransform`, `TCastleUserInterface`, `TCastleBehavior`, or non-visual) with `NewClass` via `TInternalComponentLoadInfo` (`ChangeClassName` / `ChangeClassClass`), preserving component names, child hierarchies, behaviors, `Translation`/`Rotation`/`Scale`/anchors, and cross-component references in a single Undo step.
+  - Bound to **`Ctrl+Shift+R`** in both the Viewport and Hierarchy Tree and **`Replace Selected With... (Ctrl+Shift+R)`** in `MenuTreeView`.
+
+### Phase 22: Selection-Aware Standard Axis Viewport Camera Views (`Numpad 1/3/7/5` & `Alt+1/3/7/5`)
+- [x] **22.1. Selection-Aware `ViewportViewAxis` & Blender/Unreal Axis View Shortcuts**
+  - Upgraded `TDesignFrame.ViewportViewAxis(Dir, Up)` to orbit around `TransformManipulate.SelectionWorkingCenter` when objects are selected (falling back to `V.Items.BoundingBox.Center` or `TVector3.Zero` when the scene is empty).
+  - Bound **`Numpad 7`** / **`Alt+7`** (Top `-Y`, `Ctrl` for Bottom `+Y`), **`Numpad 1`** / **`Alt+1`** (Front `-Z`, `Ctrl` for Back `+Z`), **`Numpad 3`** / **`Alt+3`** (Right `-X`, `Ctrl` for Left `+X`), and **`Numpad 5`** / **`Alt+5`** (`ViewportToggleProjection` Perspective / Orthographic toggle) in `TDesignerLayer.Press`.
+  - Added **`View: Top (-Y)`**, **`View: Front (-Z)`**, and **`View: Right (-X)`** buttons (`Ctrl`-click for opposite axis) in `PanelLayoutTransform`.
+
+### Phase 23: 3D Viewport Ruler & Distance Measurement Tool (`M` Key / Multi-Select Ruler HUD)
+- [x] **23.1. Selection-to-Selection & Selection-to-Cursor Ray Distance Measurement**
+  - Implemented `TCastleTransformManipulate.MeasureSelectedDistance(out WorldDelta): Single` (world distance and $\Delta X, \Delta Y, \Delta Z$ between `Selected[0]` and `Selected[1]`) and `MeasureRayDistanceFromSelected(RayOrigin, RayDirection, out HitWorldPoint, WorldDelta): Single` (raycast distance from `SelectionWorkingCenter` to the surface point under the cursor, ignoring gizmos and selected objects).
+  - Bound **`M`** (`ViewportMeasureToCursor`) and **`Alt+M`** (`ClearViewportMeasurement`) in the 3D Viewport, rendering 2D screen-space start/end crosshairs and displaying live `Ruler (Sel[0]->Sel[1])` and `Measured Ray (M)` readouts in the Viewport Statistics HUD.
+  - Added automated unit test `TestMeasureSelectedAndRayDistance` in `tests/code/testcases/testcastletransformmanipulate.pas`.
