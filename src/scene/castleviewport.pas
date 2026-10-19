@@ -1226,7 +1226,20 @@ type
           with the default @link(ColorSpace)) output the inverse of the gamma
           correction, so a single pass looks the same as without this.
           But their light contributions in separate passes are also added
-          in linear color space then, unlike without this.)
+          in linear color space then, unlike without this:
+          with @link(ShadowVolumesMaxLights) > 1, where several lights
+          overlap they are darker than without this
+          (like physical materials, they look as if all their lights
+          were rendered at once with gamma correction).
+          Keep HighDynamicRange off to add them in screen colors.)
+        @item(Blending (transparent shapes, and the debug rendering of
+          @link(ShadowVolumesRender)) also happens in linear color space,
+          for all shapes. Partially transparent shapes in front of others
+          may look a bit different.)
+        @item(Custom rendering in a TCastleTransform.LocalRender override
+          with its own shaders (e.g. using TCastleRenderUnlitMesh)
+          outputs screen colors, which get gamma corrected (made brighter)
+          once more, except for black, white and pure primary colors.)
         @item(Tone mapping is applied to the whole world, also to shapes
           without gamma correction, after the inverse of their gamma correction.)
         @item(Needs rendering to float color buffers
@@ -1236,6 +1249,8 @@ type
           It is ignored otherwise.)
         @item(Uses the same rendering to a texture as screen effects
           (see @link(TCastleScreenEffects)), and has a similar cost.)
+        @item(Ignored when @link(Transparent): the world is then rendered
+          over what is behind the viewport, it has to be in screen colors.)
       ) }
     property HighDynamicRange: Boolean
       read FHighDynamicRange write FHighDynamicRange default false;
@@ -3289,7 +3304,9 @@ end;
 
 function TCastleViewport.InternalHighDynamicRange: Boolean;
 begin
-  Result := HighDynamicRange;
+  { A transparent viewport doesn't fill the texture of screen effects,
+    what is behind it would be lost. }
+  Result := HighDynamicRange and not Transparent;
 end;
 
 function TCastleViewport.InternalExtraScreenEffectsNeedDepth: Boolean;

@@ -37,7 +37,7 @@ implementation
 uses CastleTransform, CastleFrustum, CastleInternalGLShadowVolumes, CastleProjection,
   CastleVectors, CastleViewport, CastleBoxes, CastleWindow, CastleScene, CastleImages,
   CastleColors, CastleGLUtils, CastleUIControls, CastleRenderOptions,
-  CastleInternalGLUtils;
+  CastleInternalGLUtils, Math, CastleLog;
 
 procedure TTestCastleInternalGLShadowVolumes.TestCasterShadowPossiblyVisible;
 var
@@ -270,19 +270,19 @@ var
     finally FreeAndNil(Image) end;
   end;
 
-  procedure AddLight(const X: Single);
-  var
-    Light: TCastlePointLight;
+  function AddLight(const X: Single): TCastlePointLight;
   begin
-    Light := TCastlePointLight.Create(Window);
-    Light.Translation := Vector3(X, 3, 0);
-    Light.Intensity := 4;
-    Light.Shadows := true;
-    Viewport.Items.Add(Light);
+    Result := TCastlePointLight.Create(Window);
+    Result.Translation := Vector3(X, 3, 0);
+    Result.Intensity := 4;
+    Result.Shadows := true;
+    Viewport.Items.Add(Result);
   end;
 
 var
   OnePass, SeveralPasses, SeveralPassesHdr, OnePassHdr: Single;
+  LightLeft, LightRight: TCastlePointLight;
+  Ambient, OnlyLeft, OnlyRight, Expected: Single;
 begin
   if not CanCreateWindowForTest then
   begin
@@ -319,8 +319,8 @@ begin
     Floor.CastShadows := false;
     Viewport.Items.Add(Floor);
 
-    AddLight(-1);
-    AddLight(1);
+    LightLeft := AddLight(-1);
+    LightRight := AddLight(1);
     Viewport.ShadowVolumesMaxLights := 2;
 
     Viewport.ShadowVolumes := false;
@@ -354,6 +354,40 @@ begin
     OnePassHdr := FloorBrightness;
     if Abs(OnePassHdr - OnePass) > 0.02 then
       Fail(Format('Phong, one pass with HighDynamicRange: %f, without: %f', [OnePassHdr, OnePass]));
+
+    { Phong (no gamma correction) light passes: without HighDynamicRange
+      they add up in screen colors, with it in linear colors
+      (documented at TCastleViewport.HighDynamicRange).
+      Measure the ambient part (no lights) and each light alone
+      (rendered in one pass, as the same color with and without
+      HighDynamicRange) without HighDynamicRange. }
+    Viewport.ShadowVolumes := true;
+    Viewport.HighDynamicRange := false;
+    Floor.Color := Vector4(0.5, 0.5, 0.5, 1); // keep the sums below 1
+    LightLeft.Exists := false;
+    LightRight.Exists := false;
+    Ambient := FloorBrightness;
+    LightLeft.Exists := true;
+    OnlyLeft := FloorBrightness - Ambient;
+    LightLeft.Exists := false;
+    LightRight.Exists := true;
+    OnlyRight := FloorBrightness - Ambient;
+    LightLeft.Exists := true;
+
+    SeveralPasses := FloorBrightness;
+    Expected := Ambient + OnlyLeft + OnlyRight;
+    if Abs(SeveralPasses - Expected) > 0.02 then
+      Fail(Format('Phong light passes without HighDynamicRange: %f, expected the sum %f', [SeveralPasses, Expected]));
+
+    Viewport.HighDynamicRange := true;
+    SeveralPassesHdr := FloorBrightness;
+    Expected := Power(
+      Power(Ambient, 2.2) + Power(OnlyLeft, 2.2) + Power(OnlyRight, 2.2), 1 / 2.2);
+    WritelnLog('Phong light passes: ambient %f, lights %f and %f, both %f, both with HighDynamicRange %f (expected %f)',
+      [Ambient, OnlyLeft, OnlyRight, SeveralPasses, SeveralPassesHdr, Expected]);
+    if Abs(SeveralPassesHdr - Expected) > 0.02 then
+      Fail(Format('Phong light passes with HighDynamicRange: %f, expected the sum in linear colors %f (screen colors sum %f)',
+        [SeveralPassesHdr, Expected, SeveralPasses]));
 
     CheckGLErrors('TestSeveralLightsHighDynamicRange');
     Window.Close;
