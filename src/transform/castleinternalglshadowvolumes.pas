@@ -24,7 +24,7 @@ uses
   Contnrs,
   {$ifdef OpenGLES} CastleGLES, {$else} CastleGL, {$endif}
   CastleTransform, CastleVectors, CastleBoxes, CastleGLUtils, CastleFrustum,
-  CastleRenderPrimitives, CastleUtils;
+  CastleRenderPrimitives, CastleUtils, CastleRectangles, CastleRenderContext;
 
 type
   TGLShadowVolumeRenderer = class;
@@ -66,6 +66,11 @@ type
 
     FMesh: TCastleRenderUnlitMesh;
     FDebugRender: Boolean;
+
+    { Limits each light's passes to its LightScissors rectangle
+      in RenderSeveralLights. Created on demand. }
+    FLightScissor: TScissor;
+    FCountLightsOutside: Cardinal;
 
     procedure UpdateCount;
     procedure SetDebugRender(const Value: Boolean);
@@ -179,6 +184,14 @@ type
         @item(Render transparent shapes, with all lights, never in shadow.)
       )
 
+      LightScissors (if not empty, it must have the same length as Lights)
+      limits each light's passes (the stencil clear, its shadow volumes
+      and its contribution) to a rectangle, in the same coordinates
+      as TRenderContext.Viewport, like Doom 3's renderer does.
+      Calculate them with @link(ShadowVolumeLightScissor).
+      A light with an empty rectangle is skipped
+      (it doesn't light anything visible), see @link(CountLightsOutside).
+
       Before calling this, call InitFrustumAndLight (with any light position,
       it will be replaced by each light in turn).
       After this, CountCasters and other counters sum all lights. }
@@ -187,7 +200,12 @@ type
       const RenderOnePass: TSVRenderOnePassProc;
       const RenderShadowVolumes: TSVRenderProc;
       const Lights: Contnrs.TObjectList;
-      const LightPositions: array of TVector4);
+      const LightPositions: array of TVector4;
+      const LightScissors: array of TRectangle);
+
+    { How many lights were skipped by the last RenderSeveralLights call,
+      because their LightScissors rectangle was empty. }
+    property CountLightsOutside: Cardinal read FCountLightsOutside;
 
     { Use this to render shadow quads. }
     property Mesh: TCastleRenderUnlitMesh read FMesh;
@@ -197,11 +215,86 @@ type
     property DebugRender: Boolean read FDebugRender write SetDebugRender default false;
   end;
 
+{ Screen rectangle where a light can contribute,
+  to limit its passes in TGLShadowVolumeRenderer.RenderSeveralLights.
+
+  The light at LightPosition (in world space, W = 0 for a directional light)
+  lights nothing further than LightRadius (in world space;
+  LightRadius < 0 means it's infinite).
+  ProjectionViewMatrix is the projection matrix multiplied by the camera
+  (view) matrix, Viewport is the rectangle of the rendered view
+  (in the same coordinates as TRenderContext.Viewport).
+
+  Returns the rectangle (within Viewport) where the bounding box of the light's
+  sphere is projected. Returns Viewport when the light may reach
+  the whole view (a directional light, an infinite radius,
+  or a sphere crossing the camera plane), and an empty rectangle when the
+  sphere is outside of the Frustum, or the radius is 0. }
+function ShadowVolumeLightScissor(const ProjectionViewMatrix: TMatrix4;
+  const Frustum: TFrustum; const Viewport: TRectangle;
+  const LightPosition: TVector4; const LightRadius: Single): TRectangle;
+
 implementation
 
-uses SysUtils,
+uses SysUtils, Math,
   CastleStringUtils, CastleLog, CastleGLVersion,
-  CastleTriangles, CastleRenderOptions, CastleRenderContext;
+  CastleTriangles, CastleRenderOptions;
+
+function ShadowVolumeLightScissor(const ProjectionViewMatrix: TMatrix4;
+  const Frustum: TFrustum; const Viewport: TRectangle;
+  const LightPosition: TVector4; const LightRadius: Single): TRectangle;
+var
+  Center, Corner: TVector3;
+  Clip: TVector4;
+  MinX, MinY, MaxX, MaxY, X, Y: Single;
+  I, Left, Bottom, Right, Top: Integer;
+begin
+  if (LightPosition.W = 0) or (LightRadius < 0) then
+    Exit(Viewport);
+  if LightRadius = 0 then
+    Exit(TRectangle.Empty);
+
+  Center := LightPosition.XYZ / LightPosition.W;
+  if not Frustum.SphereCollisionPossibleSimple(Center, Sqr(LightRadius)) then
+    Exit(TRectangle.Empty);
+
+  MinX := 1;
+  MinY := 1;
+  MaxX := -1;
+  MaxY := -1;
+  for I := 0 to 7 do
+  begin
+    Corner := Vector3(
+      Center.X + IfThen(I and 1 <> 0, LightRadius, -LightRadius),
+      Center.Y + IfThen(I and 2 <> 0, LightRadius, -LightRadius),
+      Center.Z + IfThen(I and 4 <> 0, LightRadius, -LightRadius));
+    Clip := ProjectionViewMatrix * Vector4(Corner, 1);
+    { a corner at or behind the camera plane: projecting it is meaningless,
+      the light may reach the whole view }
+    if Clip.W <= 0.001 then
+      Exit(Viewport);
+    X := Clip.X / Clip.W;
+    Y := Clip.Y / Clip.W;
+    MinX := Min(MinX, X);
+    MinY := Min(MinY, Y);
+    MaxX := Max(MaxX, X);
+    MaxY := Max(MaxY, Y);
+  end;
+
+  { normalized device coordinates (-1..1) to the viewport's pixels }
+  MinX := Max(MinX, -1);
+  MinY := Max(MinY, -1);
+  MaxX := Min(MaxX, 1);
+  MaxY := Min(MaxY, 1);
+  if (MinX >= MaxX) or (MinY >= MaxY) then
+    Exit(TRectangle.Empty);
+  Left   := Viewport.Left   + Floor((MinX + 1) / 2 * Viewport.Width);
+  Bottom := Viewport.Bottom + Floor((MinY + 1) / 2 * Viewport.Height);
+  Right  := Viewport.Left   + Ceil ((MaxX + 1) / 2 * Viewport.Width);
+  Top    := Viewport.Bottom + Ceil ((MaxY + 1) / 2 * Viewport.Height);
+  Result := Rectangle(Left, Bottom, Right - Left, Top - Bottom);
+  Result := Result * Viewport;
+end;
 
 constructor TGLShadowVolumeRenderer.Create;
 begin
@@ -218,6 +311,7 @@ end;
 destructor TGLShadowVolumeRenderer.Destroy;
 begin
   FreeAndNil(FMesh);
+  FreeAndNil(FLightScissor);
   inherited;
 end;
 
@@ -715,7 +809,8 @@ procedure TGLShadowVolumeRenderer.RenderSeveralLights(
   const RenderOnePass: TSVRenderOnePassProc;
   const RenderShadowVolumes: TSVRenderProc;
   const Lights: Contnrs.TObjectList;
-  const LightPositions: array of TVector4);
+  const LightPositions: array of TVector4;
+  const LightScissors: array of TRectangle);
 const
   { See TGLShadowVolumeRenderer.Render. }
   StencilShadowBits = $FF;
@@ -730,6 +825,8 @@ var
 begin
   Assert(GLFeatures.ShadowVolumesPossible);
   Assert(Lights.Count = Length(LightPositions));
+  Assert((Length(LightScissors) = 0) or (Lights.Count = Length(LightScissors)));
+  FCountLightsOutside := 0;
 
   // render opaque stuff that is never in shadow, because it does not receive shadows
   PassParams.Init;
@@ -760,6 +857,22 @@ begin
 
   for I := 0 to Lights.Count - 1 do
   begin
+    if Length(LightScissors) <> 0 then
+    begin
+      if LightScissors[I].IsEmpty then
+      begin
+        { the light doesn't reach anything visible }
+        Inc(FCountLightsOutside);
+        Continue;
+      end;
+      { Limit the stencil clear, the shadow volumes and the light's
+        contribution to where the light can contribute. }
+      if FLightScissor = nil then
+        FLightScissor := TScissor.Create;
+      FLightScissor.Rect := LightScissors[I];
+      FLightScissor.Enabled := true;
+    end;
+
     { InitFrustumAndLight resets counters, so sum them ourselves }
     InitFrustumAndLight(FFrustum, LightPositions[I]);
 
@@ -816,6 +929,9 @@ begin
     RenderContext.BlendingDisable;
     RenderContext.DepthBufferUpdate := SavedDepthBufferUpdate;
     RenderContext.DepthFunc := SavedDepthFunc;
+
+    if FLightScissor <> nil then
+      FLightScissor.Enabled := false;
   end;
 
   FCountCasters := SumCasters;

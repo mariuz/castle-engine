@@ -119,6 +119,8 @@ type
         and their positions in world space. Calculated by ShadowVolumesLights. }
       FShadowVolumesLights: Contnrs.TObjectList;
       FShadowVolumesLightPositions: array of TVector4;
+      { Radius of FShadowVolumesLights in world space, < 0 when infinite. }
+      FShadowVolumesLightRadii: array of Single;
 
       FScreenSpaceAmbientOcclusion: boolean;
       SSAOShader: TSSAOScreenEffect;
@@ -1178,6 +1180,14 @@ type
       and the contribution of only this light is added (blending "one, one")
       where the stencil is 0.
 
+      Each light's passes are limited (by a scissor rectangle) to the part
+      of the screen that its @link(TCastlePointLight.Radius) or
+      @link(TCastleSpotLight.Radius) can reach, like in Doom 3,
+      and lights that can't reach anything visible are skipped.
+      So set the radius of these lights as small as possible.
+      Lights without a radius (directional lights, or a radius < 0)
+      cover the whole view.
+
       Notes:
       @unorderedList(
         @item(Only lights in @link(TCastleScene.CastGlobalLights) scenes
@@ -1521,6 +1531,13 @@ var
     Simply change properties like TInputShortcut.Key1
     or TInputShortcut.MouseButtonUse. }
   Input_Interact: TInputShortcut;
+
+  { Limit the passes of each light casting shadow volumes
+    (with TCastleViewport.ShadowVolumesMaxLights > 1) to the screen rectangle
+    where the light can contribute, see ShadowVolumeLightScissor.
+    Only to compare and test, the result looks the same.
+    @exclude }
+  InternalShadowVolumesLightScissor: Boolean = true;
 
 implementation
 
@@ -2693,6 +2710,7 @@ var
 begin
   FShadowVolumesLights.Clear;
   SetLength(FShadowVolumesLightPositions, 0);
+  SetLength(FShadowVolumesLightRadii, 0);
   Lights := GlobalLights as TLightInstancesList;
   for I := 0 to Lights.Count - 1 do
   begin
@@ -2708,6 +2726,14 @@ begin
       SetLength(FShadowVolumesLightPositions, Length(FShadowVolumesLightPositions) + 1);
       { GlobalLights are in world space, see TCastleViewport.AddGlobalLightsFromScene. }
       FShadowVolumesLightPositions[High(FShadowVolumesLightPositions)] := L^.Position;
+      { The light shader cuts the light off at the radius, if the light has one
+        (see LIGHT<Light>_HAS_RADIUS), so it adds nothing further. }
+      SetLength(FShadowVolumesLightRadii, Length(FShadowVolumesLightRadii) + 1);
+      if (L^.Node is TAbstractPositionalLightNode) and
+         TAbstractPositionalLightNode(L^.Node).HasRadius then
+        FShadowVolumesLightRadii[High(FShadowVolumesLightRadii)] := L^.Radius
+      else
+        FShadowVolumesLightRadii[High(FShadowVolumesLightRadii)] := -1;
     end;
   end;
   Result := FShadowVolumesLights.Count;
@@ -2912,6 +2938,10 @@ procedure TCastleViewport.RenderFromView3D(const Params: TRenderParams);
   end;
 
   procedure RenderWithShadowVolumes(const MainLightPosition: TVector4);
+  var
+    LightScissors: array of TRectangle;
+    ProjectionViewMatrix: TMatrix4;
+    I: Integer;
   begin
     if (FProjection.ProjectionFar <> ZFarInfinity) and (not FWarningZFarInfinityDone) then
     begin
@@ -2929,11 +2959,22 @@ procedure TCastleViewport.RenderFromView3D(const Params: TRenderParams);
     FShadowVolumeRenderer.DebugRender := ShadowVolumesRender;
     FShadowVolumeRenderer.InitFrustumAndLight(Params.RenderingCamera.Frustum, MainLightPosition);
     if FShadowVolumesLights.Count > 1 then
+    begin
+      if InternalShadowVolumesLightScissor then
+      begin
+        ProjectionViewMatrix := RenderContext.ProjectionMatrix * Params.RenderingCamera.Matrix;
+        SetLength(LightScissors, FShadowVolumesLights.Count);
+        for I := 0 to FShadowVolumesLights.Count - 1 do
+          LightScissors[I] := ShadowVolumeLightScissor(ProjectionViewMatrix,
+            Params.RenderingCamera.Frustum, RenderContext.Viewport,
+            FShadowVolumesLightPositions[I], FShadowVolumesLightRadii[I]);
+      end else
+        SetLength(LightScissors, 0);
       FShadowVolumeRenderer.RenderSeveralLights(Params,
         {$ifdef FPC}@{$endif}RenderOnePass,
         {$ifdef FPC}@{$endif}RenderShadowVolume,
-        FShadowVolumesLights, FShadowVolumesLightPositions)
-    else
+        FShadowVolumesLights, FShadowVolumesLightPositions, LightScissors);
+    end else
       FShadowVolumeRenderer.Render(Params,
         {$ifdef FPC}@{$endif}RenderOnePass,
         {$ifdef FPC}@{$endif}RenderShadowVolume);
