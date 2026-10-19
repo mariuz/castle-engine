@@ -254,6 +254,10 @@ const
   CASTLE_FROXEL_GRID_Y = 90;
   CASTLE_FROXEL_GRID_Z = 64;
 
+  { Phase 17.2 & 17.3: Maximum localized reflection probes and projected box decals }
+  CASTLE_MAX_REFLECTION_PROBES = 16;
+  CASTLE_MAX_PROJECTED_DECALS  = 64;
+
 type
   { HDR Tonemapping Operators (Phase 15.3) }
   TCastleTonemapOperator = (
@@ -343,6 +347,37 @@ type
     ZNear: Single;                     // 4 bytes (Camera near plane)
     ZFar: Single;                      // 4 bytes (Camera far plane)
   end; // Total = 64 bytes
+
+  { Phase 17.1: Push constants for Temporal Anti-Aliasing (TAA) resolve compute pass (32 bytes) }
+  PCastleTAAPushConstants = ^TCastleTAAPushConstants;
+  TCastleTAAPushConstants = packed record
+    InvResolution: TVector2;      // 8 bytes (1.0 / Width, 1.0 / Height)
+    JitterOffset: TVector2;       // 8 bytes (Current sub-pixel Halton camera jitter in UV/NDC)
+    BlendFactor: Single;          // 4 bytes (Current frame weight, e.g. 0.08 -> 92% history)
+    VarianceClipGamma: Single;    // 4 bytes (YCoCg 3x3 neighborhood variance clip gamma, e.g. 1.25)
+    VelocityWeightScale: Single;  // 4 bytes (Disocclusion velocity boost scale, e.g. 40.0)
+    FrameIndex: Cardinal;         // 4 bytes (Monotonic frame counter)
+  end; // Total = 32 bytes
+
+  { Phase 17.2: GPU std140/std430 entry for a localized Box-Projected Parallax Reflection Probe (64 bytes) }
+  PCastleReflectionProbeEntry = ^TCastleReflectionProbeEntry;
+  TCastleReflectionProbeEntry = packed record
+    PositionAndRadius: TVector4;     // 16 bytes (xyz = world capture center, w = influence radius)
+    BoxMinAndIntensity: TVector4;    // 16 bytes (xyz = world AABB min, w = intensity multiplier)
+    BoxMaxAndCubemapIndex: TVector4; // 16 bytes (xyz = world AABB max, w = cubemap array / bindless index)
+    BlendDistanceAndFlags: TVector4; // 16 bytes (x = inner transition falloff distance, y = box projection 1/0, z = mip count, w = priority)
+  end; // Total = 64 bytes
+
+  { Phase 17.3: GPU std140/std430 entry for an Oriented Bounding Box (OBB) Projected Decal (96 bytes) }
+  PCastleProjectedDecalEntry = ^TCastleProjectedDecalEntry;
+  TCastleProjectedDecalEntry = packed record
+    WorldToDecalRow0: TVector4;        // 16 bytes (Row 0 of 4x3 World -> OBB unit box [-0.5..0.5]^3 transform)
+    WorldToDecalRow1: TVector4;        // 16 bytes (Row 1 of 4x3 World -> OBB unit box [-0.5..0.5]^3 transform)
+    WorldToDecalRow2: TVector4;        // 16 bytes (Row 2 of 4x3 World -> OBB unit box [-0.5..0.5]^3 transform)
+    AlbedoTintAndOpacity: TVector4;    // 16 bytes (rgb = decal base color tint, a = opacity)
+    DecalNormalAndRoughness: TVector4; // 16 bytes (xyz = world projection normal axis, w = roughness modulation)
+    UVScaleOffset: TVector4;           // 16 bytes (xy = UV scale, zw = UV offset in decal atlas)
+  end; // Total = 96 bytes
 
   { Generates RHI-compliant GLSL headers, UBO blocks, and varying layouts }
   TCastleShaderGeneratorRHI = class
@@ -507,6 +542,22 @@ type
     function GenerateVolumetricFogRaymarchComputeShader(
       const AWorkgroupSizeX: Cardinal = 8;
       const AWorkgroupSizeY: Cardinal = 8): String;
+
+    { Phase 17.1: Generates a GLSL 450 compute shader for Temporal Anti-Aliasing (TAA) resolve
+      with 3x3 neighborhood YCoCg variance clipping, 5-tap Catmull-Rom bicubic history resampling,
+      and velocity-based disocclusion weighting. }
+    function GenerateTAAResolveComputeShader(
+      const AWorkgroupSizeX: Cardinal = 8;
+      const AWorkgroupSizeY: Cardinal = 8): String;
+
+    { Phase 17.2: Generates GLSL 450 functions and UBO/SSBO bindings for localized Reflection Probes
+      with Box-Projected Parallax ray-AABB intersection (EvaluateBoxProjectedDirection) and
+      distance-based trilinear probe blending (EvaluateProbeInfluenceWeight). }
+    function GenerateBoxProjectedReflectionProbeFunctions: String;
+
+    { Phase 17.3: Generates GLSL 450 functions and UBO/SSBO bindings for Oriented Bounding Box (OBB)
+      Decal Projection (ProjectWorldPointToDecalUV, EvaluateDecalAngleAndBoxFade). }
+    function GenerateClusteredDecalProjectionFunctions: String;
 
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
@@ -2708,6 +2759,188 @@ begin
     '    IntegrateFroxelSliceStep(sampleVal.rgb, sampleVal.a, stepLength, accumLight, accumTransmittance);' + NL +
     '    imageStore(u_IntegratedFroxelLUT, ivec3(xy, z), vec4(accumLight, accumTransmittance));' + NL +
     '  }' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateTAAResolveComputeShader(
+  const AWorkgroupSizeX, AWorkgroupSizeY: Cardinal): String;
+var
+  LocalX, LocalY: Cardinal;
+begin
+  if AWorkgroupSizeX = 0 then LocalX := 8 else LocalX := AWorkgroupSizeX;
+  if AWorkgroupSizeY = 0 then LocalY := 8 else LocalY := AWorkgroupSizeY;
+
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;', [LocalX, LocalY]) + NL +
+    NL +
+    'layout(set = 0, binding = 0) uniform sampler2D u_CurrentHDRTexture;' + NL +
+    'layout(set = 0, binding = 1) uniform sampler2D u_HistoryHDRTexture;' + NL +
+    'layout(set = 0, binding = 2) uniform sampler2D u_VelocityTexture;' + NL +
+    'layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D u_ResolvedHDRTexture;' + NL +
+    NL +
+    'layout(push_constant) uniform CastleTAAPushConstants {' + NL +
+    '  vec2  u_InvResolution;' + NL +
+    '  vec2  u_JitterOffset;' + NL +
+    '  float u_BlendFactor;' + NL +
+    '  float u_VarianceClipGamma;' + NL +
+    '  float u_VelocityWeightScale;' + NL +
+    '  uint  u_FrameIndex;' + NL +
+    '} pc;' + NL +
+    NL +
+    'vec3 RGBToYCoCg(vec3 rgb) {' + NL +
+    '  float Y  = dot(rgb, vec3(0.25, 0.50, 0.25));' + NL +
+    '  float Co = dot(rgb, vec3(0.50, 0.00, -0.50));' + NL +
+    '  float Cg = dot(rgb, vec3(-0.25, 0.50, -0.25));' + NL +
+    '  return vec3(Y, Co, Cg);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 YCoCgToRGB(vec3 ycocg) {' + NL +
+    '  float tmp = ycocg.x - ycocg.z;' + NL +
+    '  float r   = tmp + ycocg.y;' + NL +
+    '  float g   = ycocg.x + ycocg.z;' + NL +
+    '  float b   = tmp - ycocg.y;' + NL +
+    '  return max(vec3(r, g, b), vec3(0.0));' + NL +
+    '}' + NL +
+    NL +
+    'vec3 ClipHistoryYCoCg(vec3 historyYCoCg, vec3 meanYCoCg, vec3 stdDevYCoCg, float gamma) {' + NL +
+    '  vec3 boxMin = meanYCoCg - stdDevYCoCg * max(gamma, 0.1);' + NL +
+    '  vec3 boxMax = meanYCoCg + stdDevYCoCg * max(gamma, 0.1);' + NL +
+    '  return clamp(historyYCoCg, boxMin, boxMax);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 SampleHistoryCatmullRom5Tap(sampler2D tex, vec2 uv, vec2 invRes) {' + NL +
+    '  vec2 samplePos = uv / max(invRes, vec2(1e-6));' + NL +
+    '  vec2 texPos1 = floor(samplePos - 0.5) + 0.5;' + NL +
+    '  vec2 f = samplePos - texPos1;' + NL +
+    '  vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));' + NL +
+    '  vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);' + NL +
+    '  vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));' + NL +
+    '  vec2 w3 = f * f * (-0.5 + 0.5 * f);' + NL +
+    '  vec2 w12 = w1 + w2;' + NL +
+    '  vec2 offset12 = w2 / max(w12, vec2(1e-5));' + NL +
+    '  vec2 texPos0 = (texPos1 - 1.0) * invRes;' + NL +
+    '  vec2 texPos3 = (texPos1 + 2.0) * invRes;' + NL +
+    '  vec2 texPos12 = (texPos1 + offset12) * invRes;' + NL +
+    '  vec3 result = vec3(0.0);' + NL +
+    '  result += textureLod(tex, vec2(texPos12.x, texPos0.y), 0.0).rgb * (w12.x * w0.y);' + NL +
+    '  result += textureLod(tex, vec2(texPos0.x,  texPos12.y), 0.0).rgb * (w0.x  * w12.y);' + NL +
+    '  result += textureLod(tex, vec2(texPos12.x, texPos12.y), 0.0).rgb * (w12.x * w12.y);' + NL +
+    '  result += textureLod(tex, vec2(texPos3.x,  texPos12.y), 0.0).rgb * (w3.x  * w12.y);' + NL +
+    '  result += textureLod(tex, vec2(texPos12.x, texPos3.y), 0.0).rgb * (w12.x * w3.y);' + NL +
+    '  float totalWeight = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;' + NL +
+    '  return max(result / max(totalWeight, 1e-5), vec3(0.0));' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);' + NL +
+    '  ivec2 outSize = imageSize(u_ResolvedHDRTexture);' + NL +
+    '  if (pixelCoord.x >= outSize.x || pixelCoord.y >= outSize.y) return;' + NL +
+    NL +
+    '  vec2 uv = (vec2(pixelCoord) + 0.5) * pc.u_InvResolution;' + NL +
+    '  vec2 velocity = textureLod(u_VelocityTexture, uv, 0.0).rg;' + NL +
+    '  vec2 historyUV = uv - velocity;' + NL +
+    NL +
+    '  vec3 m1 = vec3(0.0);' + NL +
+    '  vec3 m2 = vec3(0.0);' + NL +
+    '  vec3 centerYCoCg = vec3(0.0);' + NL +
+    '  for (int dy = -1; dy <= 1; ++dy) {' + NL +
+    '    for (int dx = -1; dx <= 1; ++dx) {' + NL +
+    '      vec2 sampleUV = clamp(uv + vec2(float(dx), float(dy)) * pc.u_InvResolution, vec2(0.0), vec2(1.0));' + NL +
+    '      vec3 sampleYCoCg = RGBToYCoCg(textureLod(u_CurrentHDRTexture, sampleUV, 0.0).rgb);' + NL +
+    '      if (dx == 0 && dy == 0) centerYCoCg = sampleYCoCg;' + NL +
+    '      m1 += sampleYCoCg;' + NL +
+    '      m2 += sampleYCoCg * sampleYCoCg;' + NL +
+    '    }' + NL +
+    '  }' + NL +
+    '  vec3 meanYCoCg = m1 / 9.0;' + NL +
+    '  vec3 stdDevYCoCg = sqrt(max(m2 / 9.0 - meanYCoCg * meanYCoCg, vec3(0.0)));' + NL +
+    NL +
+    '  if (any(lessThan(historyUV, vec2(0.0))) || any(greaterThan(historyUV, vec2(1.0)))) {' + NL +
+    '    imageStore(u_ResolvedHDRTexture, pixelCoord, vec4(YCoCgToRGB(centerYCoCg), 1.0));' + NL +
+    '    return;' + NL +
+    '  }' + NL +
+    NL +
+    '  vec3 historyRGB = SampleHistoryCatmullRom5Tap(u_HistoryHDRTexture, historyUV, pc.u_InvResolution);' + NL +
+    '  vec3 clippedHistoryYCoCg = ClipHistoryYCoCg(RGBToYCoCg(historyRGB), meanYCoCg, stdDevYCoCg, pc.u_VarianceClipGamma);' + NL +
+    '  float velMag = length(velocity / max(pc.u_InvResolution, vec2(1e-6)));' + NL +
+    '  float blendWeight = clamp(pc.u_BlendFactor + velMag * pc.u_VelocityWeightScale * 0.001, 0.04, 0.50);' + NL +
+    '  vec3 resolvedRGB = YCoCgToRGB(mix(clippedHistoryYCoCg, centerYCoCg, blendWeight));' + NL +
+    '  imageStore(u_ResolvedHDRTexture, pixelCoord, vec4(resolvedRGB, 1.0));' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateBoxProjectedReflectionProbeFunctions: String;
+begin
+  Result :=
+    '// --- Localized Reflection Probes with Box-Projected Parallax Correction (Phase 17.2) ---' + NL +
+    'struct CastleReflectionProbeEntry {' + NL +
+    '  vec4 PositionAndRadius;' + NL +
+    '  vec4 BoxMinAndIntensity;' + NL +
+    '  vec4 BoxMaxAndCubemapIndex;' + NL +
+    '  vec4 BlendDistanceAndFlags;' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 8) readonly buffer CastleReflectionProbesBuffer {' + NL +
+    '  uvec4 u_ProbeHeader;' + NL +
+    '  CastleReflectionProbeEntry u_Probes[];' + NL +
+    '} CastleReflectionProbes;' + NL +
+    NL +
+    'vec3 EvaluateBoxProjectedDirection(vec3 worldPos, vec3 worldReflectDir, vec3 probePos, vec3 boxMin, vec3 boxMax) {' + NL +
+    '  vec3 safeDir = sign(worldReflectDir) * max(abs(worldReflectDir), vec3(1e-5));' + NL +
+    '  vec3 tMax = (boxMax - worldPos) / safeDir;' + NL +
+    '  vec3 tMin = (boxMin - worldPos) / safeDir;' + NL +
+    '  vec3 tLargest = max(tMax, tMin);' + NL +
+    '  float hitDist = min(min(tLargest.x, tLargest.y), tLargest.z);' + NL +
+    '  if (hitDist <= 0.0) return normalize(worldReflectDir);' + NL +
+    '  vec3 hitPoint = worldPos + worldReflectDir * hitDist;' + NL +
+    '  return normalize(hitPoint - probePos);' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateProbeInfluenceWeight(vec3 worldPos, vec3 boxMin, vec3 boxMax, float blendDistance) {' + NL +
+    '  if (any(lessThan(worldPos, boxMin)) || any(greaterThan(worldPos, boxMax))) return 0.0;' + NL +
+    '  vec3 distToMin = worldPos - boxMin;' + NL +
+    '  vec3 distToMax = boxMax - worldPos;' + NL +
+    '  vec3 minEdgeDist = min(distToMin, distToMax);' + NL +
+    '  float closestWall = min(min(minEdgeDist.x, minEdgeDist.y), minEdgeDist.z);' + NL +
+    '  return clamp(closestWall / max(blendDistance, 1e-4), 0.0, 1.0);' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateClusteredDecalProjectionFunctions: String;
+begin
+  Result :=
+    '// --- Oriented Bounding Box (OBB) Decal Projection Functions (Phase 17.3) ---' + NL +
+    'struct CastleProjectedDecalEntry {' + NL +
+    '  vec4 WorldToDecalRow0;' + NL +
+    '  vec4 WorldToDecalRow1;' + NL +
+    '  vec4 WorldToDecalRow2;' + NL +
+    '  vec4 AlbedoTintAndOpacity;' + NL +
+    '  vec4 DecalNormalAndRoughness;' + NL +
+    '  vec4 UVScaleOffset;' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 9) readonly buffer CastleProjectedDecalsBuffer {' + NL +
+    '  uvec4 u_DecalHeader;' + NL +
+    '  CastleProjectedDecalEntry u_Decals[];' + NL +
+    '} CastleProjectedDecals;' + NL +
+    NL +
+    'bool ProjectWorldPointToDecalUV(vec3 worldPos, CastleProjectedDecalEntry decal, out vec2 decalUV, out vec3 localPos) {' + NL +
+    '  vec4 wp = vec4(worldPos, 1.0);' + NL +
+    '  localPos = vec3(dot(decal.WorldToDecalRow0, wp), dot(decal.WorldToDecalRow1, wp), dot(decal.WorldToDecalRow2, wp));' + NL +
+    '  if (any(greaterThan(abs(localPos), vec3(0.5)))) {' + NL +
+    '    decalUV = vec2(0.0);' + NL +
+    '    return false;' + NL +
+    '  }' + NL +
+    '  decalUV = (localPos.xy + 0.5) * decal.UVScaleOffset.xy + decal.UVScaleOffset.zw;' + NL +
+    '  return true;' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateDecalAngleAndBoxFade(vec3 localPos, vec3 surfaceNormal, vec3 decalForward, float angleFadeCos) {' + NL +
+    '  float cosAngle = dot(normalize(surfaceNormal), normalize(decalForward));' + NL +
+    '  float normalWeight = smoothstep(angleFadeCos, min(angleFadeCos + 0.25, 0.99), cosAngle);' + NL +
+    '  float zFade = 1.0 - smoothstep(0.35, 0.50, abs(localPos.z));' + NL +
+    '  return clamp(normalWeight * zFade, 0.0, 1.0);' + NL +
     '}' + NL;
 end;
 

@@ -1433,6 +1433,158 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Phase 17.1: Sub-Pixel Halton Jitter, Velocity & Temporal Anti-Aliasing     }
+  { -------------------------------------------------------------------------- }
+
+  { Manages 8/16-sample Halton (2, 3) sub-pixel projection jitter, 2D screen-space
+    motion vectors (pfRG16_Float), ping-pong temporal HDR history targets (pfRGBA16_Float),
+    YCoCg 3x3 neighborhood variance clipping, and 5-tap Catmull-Rom bicubic TAA resolve. }
+  TCastleVulkanTAA = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FLinearClampSampler: TRHISampler;
+    FVelocityTexture: TVulkanRHITexture;
+    FHistoryTextures: array[0..1] of TVulkanRHITexture;
+    FTAADescriptorLayout: TRHIDescriptorSetLayout;
+    FTAADescriptorSet: TRHIDescriptorSet;
+    FTAAShader: TRHIShaderModule;
+    FTAAPipeline: TRHIComputePipeline;
+    FWidth: Cardinal;
+    FHeight: Cardinal;
+    FCurrentHistoryIndex: Integer;
+    FSampleCount: Cardinal;
+    FBlendFactor: Single;
+    FVarianceClipGamma: Single;
+    FVelocityWeightScale: Single;
+    FTotalTAADispatches: Cardinal;
+    procedure EnsurePipelineCreated;
+    function GetResolvedHistoryTexture: TVulkanRHITexture;
+    function GetPreviousHistoryTexture: TVulkanRHITexture;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Allocates or resizes the pfRG16_Float velocity texture and ping-pong pfRGBA16_Float history targets. }
+    procedure EnsureTAATargets(const AWidth, AHeight: Cardinal);
+
+    { Dispatches the compute TAA resolve pass, reading ACurrentHDRTexture, PreviousHistoryTexture,
+      and VelocityTexture, and writing to ResolvedHistoryTexture. Returns 1 when dispatched. }
+    function DispatchTAAResolve(const ACmd: TRHICommandList;
+      const ACurrentHDRTexture: TRHITexture;
+      const AFrameIndex: Cardinal = 0): Cardinal;
+
+    { Evaluates the 1D radical inverse Halton sequence in base ABase for 1-based sample AIndex. }
+    class function EvaluateHaltonSequence(const AIndex, ABase: Cardinal): Single; static;
+
+    { Computes the sub-pixel Halton (2, 3) camera jitter offset in NDC [-1/W .. +1/W] for AFrameIndex. }
+    class function ComputeHaltonJitterOffset(const AFrameIndex, ASampleCount,
+      AWidth, AHeight: Cardinal): TVector2; static;
+
+    { Converts linear RGB to YCoCg luminance-chrominance space. }
+    class function RGBToYCoCg(const ARGB: TVector3): TVector3; static;
+
+    { Converts YCoCg luminance-chrominance back to linear RGB. }
+    class function YCoCgToRGB(const AYCoCg: TVector3): TVector3; static;
+
+    { Clips history YCoCg color against the 3x3 neighborhood AABB [Mean - Gamma*StdDev, Mean + Gamma*StdDev]. }
+    class function ClipHistoryYCoCg(const AHistoryYCoCg, AMeanYCoCg, AStdDevYCoCg: TVector3;
+      const AGamma: Single = 1.25): TVector3; static;
+
+    property VelocityTexture: TVulkanRHITexture read FVelocityTexture;
+    property ResolvedHistoryTexture: TVulkanRHITexture read GetResolvedHistoryTexture;
+    property PreviousHistoryTexture: TVulkanRHITexture read GetPreviousHistoryTexture;
+    property TAAPipeline: TRHIComputePipeline read FTAAPipeline;
+    property Width: Cardinal read FWidth;
+    property Height: Cardinal read FHeight;
+    property SampleCount: Cardinal read FSampleCount write FSampleCount;
+    property BlendFactor: Single read FBlendFactor write FBlendFactor;
+    property VarianceClipGamma: Single read FVarianceClipGamma write FVarianceClipGamma;
+    property VelocityWeightScale: Single read FVelocityWeightScale write FVelocityWeightScale;
+    property TotalTAADispatches: Cardinal read FTotalTAADispatches;
+  end;
+
+  { -------------------------------------------------------------------------- }
+  { Phase 17.2: Localized Box-Projected Parallax Reflection Probes             }
+  { -------------------------------------------------------------------------- }
+
+  { Manages up to CASTLE_MAX_REFLECTION_PROBES (16) localized reflection probes with
+    OBB/AABB box-projected parallax ray-box intersection and trilinear distance blending. }
+  TCastleVulkanReflectionProbeManager = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FProbes: array[0 .. CASTLE_MAX_REFLECTION_PROBES - 1] of TCastleReflectionProbeEntry;
+    FProbeCount: Cardinal;
+    FProbeBuffer: TVulkanRHIBuffer;
+    FTotalUploads: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    procedure ClearProbes;
+    function AddProbe(const AWorldPos, ABoxMin, ABoxMax: TVector3;
+      const ARadius: Single; const AIntensity: Single = 1.0;
+      const ABlendDistance: Single = 1.0; const ACubemapIndex: Cardinal = 0;
+      const ABoxProjection: Boolean = True): Integer;
+    function GetProbe(const AIndex: Integer): TCastleReflectionProbeEntry;
+    procedure UploadProbes;
+
+    { Evaluates the box-projected parallax reflection lookup direction from AWorldPos
+      along AWorldReflectDir against the AABB [ABoxMin, ABoxMax] centered at AProbePos. }
+    class function EvaluateBoxProjectedDirection(
+      const AWorldPos, AWorldReflectDir, AProbePos, ABoxMin, ABoxMax: TVector3): TVector3; static;
+
+    { Evaluates the smooth trilinear probe influence weight in [0..1] inside [ABoxMin, ABoxMax]
+      with inner edge falloff ABlendDistance. }
+    class function EvaluateProbeInfluenceWeight(
+      const AWorldPos, ABoxMin, ABoxMax: TVector3;
+      const ABlendDistance: Single): Single; static;
+
+    property ProbeCount: Cardinal read FProbeCount;
+    property ProbeBuffer: TVulkanRHIBuffer read FProbeBuffer;
+    property TotalUploads: Cardinal read FTotalUploads;
+  end;
+
+  { -------------------------------------------------------------------------- }
+  { Phase 17.3: Oriented Bounding Box (OBB) Decal Projection                   }
+  { -------------------------------------------------------------------------- }
+
+  { Manages up to CASTLE_MAX_PROJECTED_DECALS (64) world-space OBB projected decals
+    with depth-reconstructed local box UVs, normal angle rejection fade, and GPU buffer upload. }
+  TCastleVulkanDecalManager = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FDecals: array[0 .. CASTLE_MAX_PROJECTED_DECALS - 1] of TCastleProjectedDecalEntry;
+    FDecalCount: Cardinal;
+    FDecalBuffer: TVulkanRHIBuffer;
+    FTotalUploads: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    procedure ClearDecals;
+    function AddBoxDecal(const ACenter, AHalfExtents, AForwardNormal: TVector3;
+      const AAlbedoTint: TVector3; const AOpacity, ARoughness: Single;
+      const AUVScaleOffset: TVector4): Integer;
+    function GetDecal(const AIndex: Integer): TCastleProjectedDecalEntry;
+    procedure UploadDecals;
+
+    { Projects AWorldPos into ADecal's local unit box [-0.5 .. +0.5]^3.
+      Returns True if AWorldPos is inside the OBB and outputs ADecalUV in [0..1]^2. }
+    class function ProjectWorldPointToDecalUV(const AWorldPos: TVector3;
+      const ADecal: TCastleProjectedDecalEntry;
+      out ADecalUV: TVector2; out ALocalPos: TVector3): Boolean; static;
+
+    { Evaluates the combined surface-normal grazing-angle rejection and Z-box edge fade in [0..1]. }
+    class function EvaluateDecalAngleAndBoxFade(
+      const ALocalPos, ASurfaceNormal, ADecalForward: TVector3;
+      const AAngleFadeCos: Single = 0.25): Single; static;
+
+    property DecalCount: Cardinal read FDecalCount;
+    property DecalBuffer: TVulkanRHIBuffer read FDecalBuffer;
+    property TotalUploads: Cardinal read FTotalUploads;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -1499,7 +1651,7 @@ type
     FDeferredDeletions: array[0 .. MaxFramesInFlight - 1] of array of TVulkanDeferredDeletionItem;
     FDeferResourceDestruction: Boolean;
 
-    { GPU memory sub-allocator (pooled blocks + per-frame ring buffers), async staging uploader, bindless manager, timestamp profiler, compute culler, IBL generator, clustered culler, shadow atlas, HDR post-processor, GTAO, SSR & volumetric fog }
+    { GPU memory sub-allocator (pooled blocks + per-frame ring buffers), async staging uploader, bindless manager, timestamp profiler, compute culler, IBL generator, clustered culler, shadow atlas, HDR post-processor, GTAO, SSR, volumetric fog, TAA, reflection probes & decals }
     FMemoryAllocator: TCastleVulkanMemoryAllocator;
     FStagingUploader: TCastleVulkanStagingUploader;
     FBindlessTextureManager: TCastleVulkanBindlessTextureManager;
@@ -1512,6 +1664,9 @@ type
     FGTAO: TCastleVulkanGTAO;
     FSSR: TCastleVulkanSSR;
     FVolumetricFog: TCastleVulkanVolumetricFog;
+    FTAA: TCastleVulkanTAA;
+    FReflectionProbeManager: TCastleVulkanReflectionProbeManager;
+    FDecalManager: TCastleVulkanDecalManager;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -1596,6 +1751,9 @@ type
     function GetGTAO: TCastleVulkanGTAO;
     function GetSSR: TCastleVulkanSSR;
     function GetVolumetricFog: TCastleVulkanVolumetricFog;
+    function GetTAA: TCastleVulkanTAA;
+    function GetReflectionProbeManager: TCastleVulkanReflectionProbeManager;
+    function GetDecalManager: TCastleVulkanDecalManager;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -1785,6 +1943,9 @@ type
     property GTAO: TCastleVulkanGTAO read GetGTAO;
     property SSR: TCastleVulkanSSR read GetSSR;
     property VolumetricFog: TCastleVulkanVolumetricFog read GetVolumetricFog;
+    property TAA: TCastleVulkanTAA read GetTAA;
+    property ReflectionProbeManager: TCastleVulkanReflectionProbeManager read GetReflectionProbeManager;
+    property DecalManager: TCastleVulkanDecalManager read GetDecalManager;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -10049,6 +10210,568 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanTAA                                                             }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanTAA.Create(const ADevice: TVulkanRHIDevice);
+var
+  SamplerDesc: TRHISamplerDesc;
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FSampleCount := 8;
+  FBlendFactor := 0.08;
+  FVarianceClipGamma := 1.25;
+  FVelocityWeightScale := 40.0;
+  FCurrentHistoryIndex := 0;
+
+  if FDevice <> nil then
+  begin
+    FillChar(SamplerDesc, SizeOf(SamplerDesc), 0);
+    SamplerDesc.MinFilter := sfLinear;
+    SamplerDesc.MagFilter := sfLinear;
+    SamplerDesc.MipFilter := sfLinear;
+    SamplerDesc.AddressModeU := amClampToEdge;
+    SamplerDesc.AddressModeV := amClampToEdge;
+    SamplerDesc.AddressModeW := amClampToEdge;
+    SamplerDesc.MaxAnisotropy := 1.0;
+    FLinearClampSampler := FDevice.CreateSampler(SamplerDesc);
+  end;
+end;
+
+destructor TCastleVulkanTAA.Destroy;
+begin
+  FTAAPipeline := nil;
+  FreeAndNil(FTAAShader);
+  FreeAndNil(FTAADescriptorSet);
+  FreeAndNil(FTAADescriptorLayout);
+  FreeAndNil(FHistoryTextures[0]);
+  FreeAndNil(FHistoryTextures[1]);
+  FreeAndNil(FVelocityTexture);
+  FreeAndNil(FLinearClampSampler);
+  inherited;
+end;
+
+procedure TCastleVulkanTAA.EnsurePipelineCreated;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  Bindings: array[0..3] of TRHIDescriptorBindingDesc;
+  CompDesc: TRHIComputePipelineDesc;
+begin
+  if (FDevice = nil) or (FTAAPipeline <> nil) then
+    Exit;
+
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    FTAAShader := FDevice.CreateShaderModuleFromGLSL(
+      ssCompute, Gen.GenerateTAAResolveComputeShader(8, 8), 'TAAResolve_CS');
+
+    FillChar(Bindings, SizeOf(Bindings), 0);
+    Bindings[0].Binding := 0;
+    Bindings[0].DescriptorType := dtCombinedImageSampler;
+    Bindings[0].Count := 1;
+    Bindings[0].StageFlags := [ssCompute];
+
+    Bindings[1].Binding := 1;
+    Bindings[1].DescriptorType := dtCombinedImageSampler;
+    Bindings[1].Count := 1;
+    Bindings[1].StageFlags := [ssCompute];
+
+    Bindings[2].Binding := 2;
+    Bindings[2].DescriptorType := dtCombinedImageSampler;
+    Bindings[2].Count := 1;
+    Bindings[2].StageFlags := [ssCompute];
+
+    Bindings[3].Binding := 3;
+    Bindings[3].DescriptorType := dtStorageImage;
+    Bindings[3].Count := 1;
+    Bindings[3].StageFlags := [ssCompute];
+
+    FTAADescriptorLayout := FDevice.CreateDescriptorSetLayout(Bindings);
+    FTAADescriptorSet := FDevice.CreateDescriptorSet(FTAADescriptorLayout);
+
+    FillChar(CompDesc, SizeOf(CompDesc), 0);
+    CompDesc.ComputeShader := FTAAShader;
+    SetLength(CompDesc.DescriptorSetLayouts, 1);
+    CompDesc.DescriptorSetLayouts[0] := FTAADescriptorLayout;
+    CompDesc.PushConstantSize := SizeOf(TCastleTAAPushConstants);
+    CompDesc.PushConstantStages := [ssCompute];
+    CompDesc.DebugName := 'TAAResolveComputePSO';
+    FTAAPipeline := FDevice.GetOrCreateComputePipeline(CompDesc);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TCastleVulkanTAA.EnsureTAATargets(const AWidth, AHeight: Cardinal);
+var
+  TargetW, TargetH: Cardinal;
+  VelDesc, HistDesc: TRHITextureDesc;
+begin
+  TargetW := Max(Cardinal(1), AWidth);
+  TargetH := Max(Cardinal(1), AHeight);
+
+  if (FVelocityTexture <> nil) and (FWidth = TargetW) and (FHeight = TargetH) then
+    Exit;
+
+  FWidth := TargetW;
+  FHeight := TargetH;
+
+  FreeAndNil(FVelocityTexture);
+  FreeAndNil(FHistoryTextures[0]);
+  FreeAndNil(FHistoryTextures[1]);
+
+  if FDevice = nil then
+    Exit;
+
+  VelDesc := TRHITextureDesc.Create2D(
+    FWidth, FHeight, pfRG16_Float,
+    [tuSampled, tuStorage, tuColorAttachment], 1, 1);
+  VelDesc.DebugName := 'TAAVelocityTexture';
+  FVelocityTexture := FDevice.CreateTexture(VelDesc) as TVulkanRHITexture;
+
+  HistDesc := TRHITextureDesc.Create2D(
+    FWidth, FHeight, pfRGBA16_Float,
+    [tuSampled, tuStorage, tuColorAttachment], 1, 1);
+  HistDesc.DebugName := 'TAAHistoryTexture0';
+  FHistoryTextures[0] := FDevice.CreateTexture(HistDesc) as TVulkanRHITexture;
+
+  HistDesc.DebugName := 'TAAHistoryTexture1';
+  FHistoryTextures[1] := FDevice.CreateTexture(HistDesc) as TVulkanRHITexture;
+end;
+
+function TCastleVulkanTAA.GetResolvedHistoryTexture: TVulkanRHITexture;
+begin
+  Result := FHistoryTextures[FCurrentHistoryIndex and 1];
+end;
+
+function TCastleVulkanTAA.GetPreviousHistoryTexture: TVulkanRHITexture;
+begin
+  Result := FHistoryTextures[(FCurrentHistoryIndex xor 1) and 1];
+end;
+
+function TCastleVulkanTAA.DispatchTAAResolve(const ACmd: TRHICommandList;
+  const ACurrentHDRTexture: TRHITexture;
+  const AFrameIndex: Cardinal): Cardinal;
+var
+  PC: TCastleTAAPushConstants;
+  PrevHist, ResolvedHist: TVulkanRHITexture;
+  GroupsX, GroupsY: Cardinal;
+begin
+  Result := 0;
+  if (ACmd = nil) or (FDevice = nil) then
+    Exit;
+
+  if FVelocityTexture = nil then
+  begin
+    if ACurrentHDRTexture <> nil then
+      EnsureTAATargets(ACurrentHDRTexture.Desc.Width, ACurrentHDRTexture.Desc.Height)
+    else
+      EnsureTAATargets(1280, 720);
+  end;
+
+  EnsurePipelineCreated;
+
+  FCurrentHistoryIndex := (FCurrentHistoryIndex xor 1) and 1;
+  PrevHist := GetPreviousHistoryTexture;
+  ResolvedHist := GetResolvedHistoryTexture;
+
+  FillChar(PC, SizeOf(PC), 0);
+  PC.InvResolution := Vector2(1.0 / Max(Cardinal(1), FWidth), 1.0 / Max(Cardinal(1), FHeight));
+  PC.JitterOffset := ComputeHaltonJitterOffset(AFrameIndex, FSampleCount, FWidth, FHeight);
+  PC.BlendFactor := FBlendFactor;
+  PC.VarianceClipGamma := FVarianceClipGamma;
+  PC.VelocityWeightScale := FVelocityWeightScale;
+  PC.FrameIndex := AFrameIndex;
+
+  ACmd.TransitionTexture(PrevHist, rsShaderRead);
+  ACmd.TransitionTexture(FVelocityTexture, rsShaderRead);
+  ACmd.TransitionTexture(ResolvedHist, rsTransferDst);
+
+  if ACurrentHDRTexture <> nil then
+    FTAADescriptorSet.BindTexture(0, ACurrentHDRTexture, FLinearClampSampler);
+  FTAADescriptorSet.BindTexture(1, PrevHist, FLinearClampSampler);
+  FTAADescriptorSet.BindTexture(2, FVelocityTexture, FLinearClampSampler);
+  FTAADescriptorSet.BindTexture(3, ResolvedHist, FLinearClampSampler);
+  FTAADescriptorSet.Update;
+
+  GroupsX := (FWidth + 7) div 8;
+  GroupsY := (FHeight + 7) div 8;
+
+  ACmd.BindComputePipeline(FTAAPipeline);
+  ACmd.BindComputeDescriptorSet(0, FTAADescriptorSet, []);
+  ACmd.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+  ACmd.Dispatch(GroupsX, GroupsY, 1);
+  ACmd.TransitionTexture(ResolvedHist, rsShaderRead);
+
+  Inc(FTotalTAADispatches);
+  Result := 1;
+end;
+
+class function TCastleVulkanTAA.EvaluateHaltonSequence(
+  const AIndex, ABase: Cardinal): Single;
+var
+  Idx, BaseVal: Cardinal;
+  F, InvBase: Single;
+begin
+  Result := 0.0;
+  BaseVal := Max(Cardinal(2), ABase);
+  Idx := AIndex;
+  InvBase := 1.0 / Single(BaseVal);
+  F := InvBase;
+  while Idx > 0 do
+  begin
+    Result := Result + Single(Idx mod BaseVal) * F;
+    Idx := Idx div BaseVal;
+    F := F * InvBase;
+  end;
+end;
+
+class function TCastleVulkanTAA.ComputeHaltonJitterOffset(
+  const AFrameIndex, ASampleCount, AWidth, AHeight: Cardinal): TVector2;
+var
+  CycleIndex: Cardinal;
+  HX, HY: Single;
+begin
+  CycleIndex := (AFrameIndex mod Max(Cardinal(1), ASampleCount)) + 1;
+  HX := EvaluateHaltonSequence(CycleIndex, 2) - 0.5;
+  HY := EvaluateHaltonSequence(CycleIndex, 3) - 0.5;
+  Result := Vector2(
+    (2.0 * HX) / Single(Max(Cardinal(1), AWidth)),
+    (2.0 * HY) / Single(Max(Cardinal(1), AHeight)));
+end;
+
+class function TCastleVulkanTAA.RGBToYCoCg(const ARGB: TVector3): TVector3;
+begin
+  Result.X := 0.25 * ARGB.X + 0.50 * ARGB.Y + 0.25 * ARGB.Z;
+  Result.Y := 0.50 * ARGB.X - 0.50 * ARGB.Z;
+  Result.Z := -0.25 * ARGB.X + 0.50 * ARGB.Y - 0.25 * ARGB.Z;
+end;
+
+class function TCastleVulkanTAA.YCoCgToRGB(const AYCoCg: TVector3): TVector3;
+var
+  Tmp: Single;
+begin
+  Tmp := AYCoCg.X - AYCoCg.Z;
+  Result.X := Max(0.0, Tmp + AYCoCg.Y);
+  Result.Y := Max(0.0, AYCoCg.X + AYCoCg.Z);
+  Result.Z := Max(0.0, Tmp - AYCoCg.Y);
+end;
+
+class function TCastleVulkanTAA.ClipHistoryYCoCg(
+  const AHistoryYCoCg, AMeanYCoCg, AStdDevYCoCg: TVector3;
+  const AGamma: Single): TVector3;
+var
+  G: Single;
+  BoxMin, BoxMax: TVector3;
+begin
+  G := Max(0.1, AGamma);
+  BoxMin := AMeanYCoCg - (AStdDevYCoCg * G);
+  BoxMax := AMeanYCoCg + (AStdDevYCoCg * G);
+  Result.X := EnsureRange(AHistoryYCoCg.X, BoxMin.X, BoxMax.X);
+  Result.Y := EnsureRange(AHistoryYCoCg.Y, BoxMin.Y, BoxMax.Y);
+  Result.Z := EnsureRange(AHistoryYCoCg.Z, BoxMin.Z, BoxMax.Z);
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanReflectionProbeManager                                          }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanReflectionProbeManager.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  ClearProbes;
+end;
+
+destructor TCastleVulkanReflectionProbeManager.Destroy;
+begin
+  FreeAndNil(FProbeBuffer);
+  inherited;
+end;
+
+procedure TCastleVulkanReflectionProbeManager.ClearProbes;
+begin
+  FillChar(FProbes, SizeOf(FProbes), 0);
+  FProbeCount := 0;
+end;
+
+function TCastleVulkanReflectionProbeManager.AddProbe(
+  const AWorldPos, ABoxMin, ABoxMax: TVector3;
+  const ARadius: Single; const AIntensity: Single;
+  const ABlendDistance: Single; const ACubemapIndex: Cardinal;
+  const ABoxProjection: Boolean): Integer;
+begin
+  if FProbeCount >= CASTLE_MAX_REFLECTION_PROBES then
+    Exit(-1);
+  Result := Integer(FProbeCount);
+  FProbes[Result].PositionAndRadius := Vector4(AWorldPos.X, AWorldPos.Y, AWorldPos.Z, Max(0.01, ARadius));
+  FProbes[Result].BoxMinAndIntensity := Vector4(ABoxMin.X, ABoxMin.Y, ABoxMin.Z, Max(0.0, AIntensity));
+  FProbes[Result].BoxMaxAndCubemapIndex := Vector4(ABoxMax.X, ABoxMax.Y, ABoxMax.Z, Single(ACubemapIndex));
+  if ABoxProjection then
+    FProbes[Result].BlendDistanceAndFlags := Vector4(Max(0.001, ABlendDistance), 1.0, 6.0, 0.0)
+  else
+    FProbes[Result].BlendDistanceAndFlags := Vector4(Max(0.001, ABlendDistance), 0.0, 6.0, 0.0);
+  Inc(FProbeCount);
+end;
+
+function TCastleVulkanReflectionProbeManager.GetProbe(
+  const AIndex: Integer): TCastleReflectionProbeEntry;
+begin
+  if (AIndex >= 0) and (AIndex < Integer(FProbeCount)) then
+    Result := FProbes[AIndex]
+  else
+    FillChar(Result, SizeOf(Result), 0);
+end;
+
+procedure TCastleVulkanReflectionProbeManager.UploadProbes;
+type
+  TProbeUploadBlock = packed record
+    Header: array[0..3] of Cardinal;
+    Entries: array[0 .. CASTLE_MAX_REFLECTION_PROBES - 1] of TCastleReflectionProbeEntry;
+  end;
+var
+  BufDesc: TRHIBufferDesc;
+  UploadData: TProbeUploadBlock;
+  MappedPtr: Pointer;
+begin
+  if FDevice = nil then
+    Exit;
+
+  if FProbeBuffer = nil then
+  begin
+    BufDesc := TRHIBufferDesc.Create(
+      SizeOf(TProbeUploadBlock),
+      [buStorage, buUniform, buTransferDst],
+      muCpuToGpu,
+      'ReflectionProbesBuffer');
+    FProbeBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+
+  FillChar(UploadData, SizeOf(UploadData), 0);
+  UploadData.Header[0] := FProbeCount;
+  if FProbeCount > 0 then
+    Move(FProbes[0], UploadData.Entries[0], FProbeCount * SizeOf(TCastleReflectionProbeEntry));
+
+  MappedPtr := FProbeBuffer.Map;
+  if MappedPtr <> nil then
+  begin
+    Move(UploadData, MappedPtr^, SizeOf(UploadData));
+    FProbeBuffer.Unmap;
+  end;
+  Inc(FTotalUploads);
+end;
+
+class function TCastleVulkanReflectionProbeManager.EvaluateBoxProjectedDirection(
+  const AWorldPos, AWorldReflectDir, AProbePos, ABoxMin, ABoxMax: TVector3): TVector3;
+  function SafeComponent(const V: Single): Single;
+  begin
+    if Abs(V) < 1e-5 then
+    begin
+      if V < 0.0 then Result := -1e-5 else Result := 1e-5;
+    end else
+      Result := V;
+  end;
+var
+  Dir, SafeDir, TMax, TMin, TLargest, HitPoint: TVector3;
+  HitDist: Single;
+begin
+  Dir := AWorldReflectDir.Normalize;
+  SafeDir := Vector3(SafeComponent(Dir.X), SafeComponent(Dir.Y), SafeComponent(Dir.Z));
+  TMax := Vector3(
+    (ABoxMax.X - AWorldPos.X) / SafeDir.X,
+    (ABoxMax.Y - AWorldPos.Y) / SafeDir.Y,
+    (ABoxMax.Z - AWorldPos.Z) / SafeDir.Z);
+  TMin := Vector3(
+    (ABoxMin.X - AWorldPos.X) / SafeDir.X,
+    (ABoxMin.Y - AWorldPos.Y) / SafeDir.Y,
+    (ABoxMin.Z - AWorldPos.Z) / SafeDir.Z);
+  TLargest := Vector3(Max(TMax.X, TMin.X), Max(TMax.Y, TMin.Y), Max(TMax.Z, TMin.Z));
+  HitDist := Min(Min(TLargest.X, TLargest.Y), TLargest.Z);
+  if HitDist <= 0.0 then
+    Exit(Dir);
+  HitPoint := AWorldPos + (Dir * HitDist);
+  Result := (HitPoint - AProbePos).Normalize;
+end;
+
+class function TCastleVulkanReflectionProbeManager.EvaluateProbeInfluenceWeight(
+  const AWorldPos, ABoxMin, ABoxMax: TVector3;
+  const ABlendDistance: Single): Single;
+var
+  DistMin, DistMax, EdgeDist: TVector3;
+  ClosestWall: Single;
+begin
+  if (AWorldPos.X < ABoxMin.X) or (AWorldPos.Y < ABoxMin.Y) or (AWorldPos.Z < ABoxMin.Z) or
+     (AWorldPos.X > ABoxMax.X) or (AWorldPos.Y > ABoxMax.Y) or (AWorldPos.Z > ABoxMax.Z) then
+    Exit(0.0);
+
+  DistMin := AWorldPos - ABoxMin;
+  DistMax := ABoxMax - AWorldPos;
+  EdgeDist := Vector3(Min(DistMin.X, DistMax.X), Min(DistMin.Y, DistMax.Y), Min(DistMin.Z, DistMax.Z));
+  ClosestWall := Min(Min(EdgeDist.X, EdgeDist.Y), EdgeDist.Z);
+  Result := EnsureRange(ClosestWall / Max(1e-4, ABlendDistance), 0.0, 1.0);
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanDecalManager                                                    }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanDecalManager.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  ClearDecals;
+end;
+
+destructor TCastleVulkanDecalManager.Destroy;
+begin
+  FreeAndNil(FDecalBuffer);
+  inherited;
+end;
+
+procedure TCastleVulkanDecalManager.ClearDecals;
+begin
+  FillChar(FDecals, SizeOf(FDecals), 0);
+  FDecalCount := 0;
+end;
+
+function TCastleVulkanDecalManager.AddBoxDecal(
+  const ACenter, AHalfExtents, AForwardNormal: TVector3;
+  const AAlbedoTint: TVector3; const AOpacity: Single;
+  const ARoughness: Single; const AUVScaleOffset: TVector4): Integer;
+var
+  InvSizeX, InvSizeY, InvSizeZ: Single;
+  FwdNorm, UVSO: TVector4;
+begin
+  if FDecalCount >= CASTLE_MAX_PROJECTED_DECALS then
+    Exit(-1);
+  Result := Integer(FDecalCount);
+
+  { Full box dimensions = 2 * HalfExtents, mapping [-HalfExtents..+HalfExtents] -> [-0.5..+0.5] }
+  InvSizeX := 1.0 / Max(1e-4, AHalfExtents.X * 2.0);
+  InvSizeY := 1.0 / Max(1e-4, AHalfExtents.Y * 2.0);
+  InvSizeZ := 1.0 / Max(1e-4, AHalfExtents.Z * 2.0);
+
+  FDecals[Result].WorldToDecalRow0 := Vector4(InvSizeX, 0.0, 0.0, -ACenter.X * InvSizeX);
+  FDecals[Result].WorldToDecalRow1 := Vector4(0.0, InvSizeY, 0.0, -ACenter.Y * InvSizeY);
+  FDecals[Result].WorldToDecalRow2 := Vector4(0.0, 0.0, InvSizeZ, -ACenter.Z * InvSizeZ);
+  FDecals[Result].AlbedoTintAndOpacity := Vector4(
+    AAlbedoTint.X, AAlbedoTint.Y, AAlbedoTint.Z, EnsureRange(AOpacity, 0.0, 1.0));
+
+  if AForwardNormal.LengthSqr > 1e-6 then
+  begin
+    FwdNorm := Vector4(AForwardNormal.Normalize, EnsureRange(ARoughness, 0.0, 1.0));
+  end else
+    FwdNorm := Vector4(0.0, 0.0, 1.0, EnsureRange(ARoughness, 0.0, 1.0));
+  FDecals[Result].DecalNormalAndRoughness := FwdNorm;
+
+  if (AUVScaleOffset.X = 0.0) and (AUVScaleOffset.Y = 0.0) then
+    UVSO := Vector4(1.0, 1.0, 0.0, 0.0)
+  else
+    UVSO := AUVScaleOffset;
+  FDecals[Result].UVScaleOffset := UVSO;
+
+  Inc(FDecalCount);
+end;
+
+function TCastleVulkanDecalManager.GetDecal(
+  const AIndex: Integer): TCastleProjectedDecalEntry;
+begin
+  if (AIndex >= 0) and (AIndex < Integer(FDecalCount)) then
+    Result := FDecals[AIndex]
+  else
+    FillChar(Result, SizeOf(Result), 0);
+end;
+
+procedure TCastleVulkanDecalManager.UploadDecals;
+type
+  TDecalUploadBlock = packed record
+    Header: array[0..3] of Cardinal;
+    Entries: array[0 .. CASTLE_MAX_PROJECTED_DECALS - 1] of TCastleProjectedDecalEntry;
+  end;
+var
+  BufDesc: TRHIBufferDesc;
+  UploadData: TDecalUploadBlock;
+  MappedPtr: Pointer;
+begin
+  if FDevice = nil then
+    Exit;
+
+  if FDecalBuffer = nil then
+  begin
+    BufDesc := TRHIBufferDesc.Create(
+      SizeOf(TDecalUploadBlock),
+      [buStorage, buUniform, buTransferDst],
+      muCpuToGpu,
+      'ProjectedDecalsBuffer');
+    FDecalBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+
+  FillChar(UploadData, SizeOf(UploadData), 0);
+  UploadData.Header[0] := FDecalCount;
+  if FDecalCount > 0 then
+    Move(FDecals[0], UploadData.Entries[0], FDecalCount * SizeOf(TCastleProjectedDecalEntry));
+
+  MappedPtr := FDecalBuffer.Map;
+  if MappedPtr <> nil then
+  begin
+    Move(UploadData, MappedPtr^, SizeOf(UploadData));
+    FDecalBuffer.Unmap;
+  end;
+  Inc(FTotalUploads);
+end;
+
+class function TCastleVulkanDecalManager.ProjectWorldPointToDecalUV(
+  const AWorldPos: TVector3; const ADecal: TCastleProjectedDecalEntry;
+  out ADecalUV: TVector2; out ALocalPos: TVector3): Boolean;
+begin
+  ALocalPos.X :=
+    ADecal.WorldToDecalRow0.X * AWorldPos.X +
+    ADecal.WorldToDecalRow0.Y * AWorldPos.Y +
+    ADecal.WorldToDecalRow0.Z * AWorldPos.Z +
+    ADecal.WorldToDecalRow0.W;
+  ALocalPos.Y :=
+    ADecal.WorldToDecalRow1.X * AWorldPos.X +
+    ADecal.WorldToDecalRow1.Y * AWorldPos.Y +
+    ADecal.WorldToDecalRow1.Z * AWorldPos.Z +
+    ADecal.WorldToDecalRow1.W;
+  ALocalPos.Z :=
+    ADecal.WorldToDecalRow2.X * AWorldPos.X +
+    ADecal.WorldToDecalRow2.Y * AWorldPos.Y +
+    ADecal.WorldToDecalRow2.Z * AWorldPos.Z +
+    ADecal.WorldToDecalRow2.W;
+
+  if (Abs(ALocalPos.X) > 0.5) or (Abs(ALocalPos.Y) > 0.5) or (Abs(ALocalPos.Z) > 0.5) then
+  begin
+    ADecalUV := Vector2(0.0, 0.0);
+    Exit(False);
+  end;
+
+  ADecalUV.X := (ALocalPos.X + 0.5) * ADecal.UVScaleOffset.X + ADecal.UVScaleOffset.Z;
+  ADecalUV.Y := (ALocalPos.Y + 0.5) * ADecal.UVScaleOffset.Y + ADecal.UVScaleOffset.W;
+  Result := True;
+end;
+
+class function TCastleVulkanDecalManager.EvaluateDecalAngleAndBoxFade(
+  const ALocalPos, ASurfaceNormal, ADecalForward: TVector3;
+  const AAngleFadeCos: Single): Single;
+  function SmoothStep01(const Edge0, Edge1, X: Single): Single;
+  var
+    T: Single;
+  begin
+    T := EnsureRange((X - Edge0) / Max(1e-5, Edge1 - Edge0), 0.0, 1.0);
+    Result := T * T * (3.0 - 2.0 * T);
+  end;
+var
+  CosAngle, NormalWeight, ZFade: Single;
+begin
+  CosAngle := TVector3.DotProduct(ASurfaceNormal.Normalize, ADecalForward.Normalize);
+  NormalWeight := SmoothStep01(AAngleFadeCos, Min(AAngleFadeCos + 0.25, 0.99), CosAngle);
+  ZFade := 1.0 - SmoothStep01(0.35, 0.50, Abs(ALocalPos.Z));
+  Result := EnsureRange(NormalWeight * ZFade, 0.0, 1.0);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -10500,12 +11223,36 @@ begin
   Result := FVolumetricFog;
 end;
 
+function TVulkanRHIDevice.GetTAA: TCastleVulkanTAA;
+begin
+  if FTAA = nil then
+    FTAA := TCastleVulkanTAA.Create(Self);
+  Result := FTAA;
+end;
+
+function TVulkanRHIDevice.GetReflectionProbeManager: TCastleVulkanReflectionProbeManager;
+begin
+  if FReflectionProbeManager = nil then
+    FReflectionProbeManager := TCastleVulkanReflectionProbeManager.Create(Self);
+  Result := FReflectionProbeManager;
+end;
+
+function TVulkanRHIDevice.GetDecalManager: TCastleVulkanDecalManager;
+begin
+  if FDecalManager = nil then
+    FDecalManager := TCastleVulkanDecalManager.Create(Self);
+  Result := FDecalManager;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FDecalManager);
+  FreeAndNil(FReflectionProbeManager);
+  FreeAndNil(FTAA);
   FreeAndNil(FVolumetricFog);
   FreeAndNil(FSSR);
   FreeAndNil(FGTAO);

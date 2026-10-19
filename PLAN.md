@@ -353,14 +353,26 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 16 Status**: Completed. Compute Ground-Truth Ambient Occlusion (`TCastleVulkanGTAO` with view-space reconstruction, Jiménez analytical horizon integral, and $5 \times 5$ cross-bilateral spatial denoiser), Hierarchical-Z Screen-Space Reflections (`TCastleVulkanSSR` with min-depth Hi-Z mip-skipping raymarching, roughness/Fresnel weighting, and screen-edge vignette fade), and 3D Froxel Volumetric Fog & Exponential Height Fog (`TCastleVulkanVolumetricFog` with $160 \times 90 \times 64$ `td3D` froxel volumes, Henyey-Greenstein phase scattering, and Beer-Lambert front-to-back slice integration) fully integrated and tested (78 unit tests passing).
 
 
-### Phase 17: Temporal Anti-Aliasing (TAA) & Motion Vectors, Reflection Probes (Box-Projected Parallax Cubemaps) & Decal Projection (PLANNED)
+### Phase 17: Temporal Anti-Aliasing (TAA) & Motion Vectors, Reflection Probes (Box-Projected Parallax Cubemaps) & Decal Projection (COMPLETED)
 
-* [ ] **17.1. Sub-Pixel Halton Camera Jitter, Velocity Buffer & Temporal Anti-Aliasing (`TCastleVulkanTAA` in `CastleInternalRHI_Vulkan`)**:
-  * Generate 8/16-sample Halton $(2,3)$ sub-pixel projection jitter, render per-pixel 2D screen-space motion vectors (`pfRG16_Float`), and resolve temporal history in a compute pass (`GenerateTAAResolveComputeShader`) with variance clipping in YCoCg color space and Mitchell-Netravali / Catmull-Rom bicubic history resampling.
-* [ ] **17.2. Localized Reflection Probes with Box-Projected Parallax Correction (`TCastleVulkanReflectionProbeManager` in `CastleInternalRHI_Vulkan`)**:
-  * Support localized environment cubemap probes with OBB/AABB parallax ray-box intersection (`EvaluateBoxProjectedDirection`), distance-based trilinear probe blending, and GPU uniform/SSBO probe array evaluation in the PBR fragment shader.
-* [ ] **17.3. Deferred / Forward+ Clustered Box Decal Projection (`TCastleVulkanDecalManager` in `CastleInternalRHI_Vulkan`)**:
-  * Project world-space oriented bounding box (OBB) decals onto scene depth (`ReconstructDecalLocalUV`), with angle fade against surface normals, albedo/normal/roughness modulation, and instanced/clustered GPU decal evaluation.
+* [x] **17.1. Sub-Pixel Halton Camera Jitter, Velocity Buffer & Temporal Anti-Aliasing (`TCastleVulkanTAA` in `CastleInternalRHI_Vulkan`)**:
+  * Generate 8/16-sample Halton $(2,3)$ sub-pixel projection jitter (`EvaluateHaltonSequence`, `ComputeHaltonJitterOffset`), allocate per-pixel 2D screen-space motion vectors (`pfRG16_Float`) and ping-pong temporal HDR history targets (`pfRGBA16_Float`, `EnsureTAATargets`), and resolve temporal history in a compute pass (`GenerateTAAResolveComputeShader`, `DispatchTAAResolve`) with $3 \times 3$ neighborhood variance clipping in YCoCg color space (`RGBToYCoCg`, `YCoCgToRGB`, `ClipHistoryYCoCg`), 5-tap Catmull-Rom bicubic history resampling (`SampleHistoryCatmullRom5Tap`), and velocity-based disocclusion weighting.
+* [x] **17.2. Localized Reflection Probes with Box-Projected Parallax Correction (`TCastleVulkanReflectionProbeManager` in `CastleInternalRHI_Vulkan`)**:
+  * Support up to 16 localized environment cubemap probes (`TCastleReflectionProbeEntry`, 64B) with AABB parallax ray-box slab intersection (`EvaluateBoxProjectedDirection`), distance-based trilinear wall-boundary blending (`EvaluateProbeInfluenceWeight`), and GPU SSBO/UBO probe array evaluation (`UploadProbes`, `GenerateBoxProjectedReflectionProbeFunctions`).
+* [x] **17.3. Deferred / Forward+ Clustered Box Decal Projection (`TCastleVulkanDecalManager` in `CastleInternalRHI_Vulkan`)**:
+  * Project up to 64 world-space oriented bounding box (OBB) decals (`TCastleProjectedDecalEntry`, 96B) onto scene geometry (`ProjectWorldPointToDecalUV`), with grazing-angle surface normal rejection and Z-box boundary fade (`EvaluateDecalAngleAndBoxFade`), albedo/normal/roughness modulation, and GPU decal buffer upload (`UploadDecals`, `GenerateClusteredDecalProjectionFunctions`).
+
+**Milestone 17 Status**: Completed. Sub-pixel Halton $(2, 3)$ camera jitter, `pfRG16_Float` velocity buffer, YCoCg $3 \times 3$ variance clipping, and 5-tap Catmull-Rom bicubic Temporal Anti-Aliasing (`TCastleVulkanTAA`, `GenerateTAAResolveComputeShader`), localized reflection probes with box-projected parallax ray-AABB intersection and trilinear blending (`TCastleVulkanReflectionProbeManager`, `GenerateBoxProjectedReflectionProbeFunctions`), and OBB decal projection with normal grazing-angle rejection (`TCastleVulkanDecalManager`, `GenerateClusteredDecalProjectionFunctions`) fully integrated and tested (81 unit tests passing).
+
+
+### Phase 18: GPU Compute Particle System, Order-Independent Transparency (Weighted Blended OIT) & Screen-Space Contact Shadows (PLANNED)
+
+* [ ] **18.1. GPU Compute Particle Simulation & Indirect Billboard Rendering (`TCastleVulkanComputeParticles` in `CastleInternalRHI_Vulkan`)**:
+  * Simulate 65,536+ particles on the GPU in a compute shader (`GenerateParticleSimulationComputeShader`) with gravity, curl/turbulence drag, ground-plane bounce collision, and atomic alive-list compaction driving `vkCmdDrawIndirect`.
+* [ ] **18.2. Weighted Blended Order-Independent Transparency (`TCastleVulkanWeightedBlendedOIT` in `CastleInternalRHI_Vulkan`)**:
+  * Render order-independent transparent surfaces into a `pfRGBA16_Float` premultiplied accumulation target ($\sum C_i w(z_i, \alpha_i), \sum \alpha_i w(z_i, \alpha_i)$) and a `pfR16_Float` revealage target ($\prod (1 - \alpha_i)$) using McGuire & Bavoil depth-weighted OIT (`EvaluateOITDepthWeight`, `GenerateOITCompositeFragmentShader`).
+* [ ] **18.3. Screen-Space Raymarched Contact Shadows (`TCastleVulkanContactShadows` in `CastleInternalRHI_Vulkan`)**:
+  * Raymarch short-range high-frequency contact shadows in screen space along the primary directional light vector (`GenerateContactShadowsComputeShader`, `DispatchContactShadows`) to resolve sub-texel shadow-map peter-panning on small geometric details.
 
 
 ## 5. Build Tool (castle-engine) & Editor Integration
@@ -387,5 +399,5 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 ## 7. Testing & Verification Criteria
 
 * [x] Automated Visual Regression Tests: `CompareImagesPerceptualDiff` in `CastleInternalRHI` compares framebuffer readbacks (`GrabTextureImage`) between `rbOpenGL` and `rbVulkan` using normalized RMSE perceptual diff thresholds.
-* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 78 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
-* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance/Hi-Z occlusion culling (`TCastleVulkanComputeCuller`), Clustered Forward+ compute light culling (`TCastleVulkanClusteredLightCuller`), Declarative Render Graph (`TRHIRenderGraph`), Compute GTAO (`TCastleVulkanGTAO`), Hi-Z SSR (`TCastleVulkanSSR`), Froxel Volumetric Fog (`TCastleVulkanVolumetricFog`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.
+* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 81 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
+* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance/Hi-Z occlusion culling (`TCastleVulkanComputeCuller`), Clustered Forward+ compute light culling (`TCastleVulkanClusteredLightCuller`), Declarative Render Graph (`TRHIRenderGraph`), Compute GTAO (`TCastleVulkanGTAO`), Hi-Z SSR (`TCastleVulkanSSR`), Froxel Volumetric Fog (`TCastleVulkanVolumetricFog`), Temporal Anti-Aliasing (`TCastleVulkanTAA`), Box-Projected Reflection Probes (`TCastleVulkanReflectionProbeManager`), OBB Decal Projection (`TCastleVulkanDecalManager`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.

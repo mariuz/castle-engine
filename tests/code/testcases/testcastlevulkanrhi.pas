@@ -117,6 +117,9 @@ type
     procedure TestComputeGTAOAndBilateralDenoiserRHI;
     procedure TestHierarchicalZScreenSpaceReflectionsRHI;
     procedure TestFroxelVolumetricFogAndHeightFogRHI;
+    procedure TestTemporalAntiAliasingAndHaltonJitterRHI;
+    procedure TestBoxProjectedParallaxReflectionProbesRHI;
+    procedure TestOrientedBoxDecalProjectionRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -6586,6 +6589,235 @@ begin
     FreeAndNil(CSRaymarch);
     FreeAndNil(CSInject);
     FreeAndNil(CmdList);
+    FreeAndNil(Gen);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestTemporalAntiAliasingAndHaltonJitterRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  TAA: TCastleVulkanTAA;
+  Gen: TCastleShaderGeneratorRHI;
+  CmdList: TVulkanRHICommandList;
+  HDRTex, FirstResolved, SecondResolved: TRHITexture;
+  HDRDesc: TRHITextureDesc;
+  TAAGLSL: String;
+  CSTAA: TRHIShaderModule;
+  Jitter0, Jitter1, Jitter8: TVector2;
+  OrigRGB, YCoCgVal, RoundTripRGB, ClippedYCoCg, ClippedRGB: TVector3;
+  Dispatches: Cardinal;
+begin
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  CmdList := nil;
+  HDRTex := nil;
+  CSTAA := nil;
+  try
+    { 1. Verify struct size and GLSL 450 TAA Resolve compute shader generation }
+    AssertEquals('TCastleTAAPushConstants size must be 32 bytes',
+      32, SizeOf(TCastleTAAPushConstants));
+
+    TAAGLSL := Gen.GenerateTAAResolveComputeShader;
+    AssertTrue('TAA GLSL must include RGBToYCoCg',
+      Pos('vec3 RGBToYCoCg(vec3 rgb)', TAAGLSL) > 0);
+    AssertTrue('TAA GLSL must include YCoCgToRGB',
+      Pos('vec3 YCoCgToRGB(vec3 ycocg)', TAAGLSL) > 0);
+    AssertTrue('TAA GLSL must include ClipHistoryYCoCg',
+      Pos('vec3 ClipHistoryYCoCg(vec3 historyYCoCg, vec3 meanYCoCg, vec3 stdDevYCoCg, float gamma)', TAAGLSL) > 0);
+    AssertTrue('TAA GLSL must include SampleHistoryCatmullRom5Tap',
+      Pos('vec3 SampleHistoryCatmullRom5Tap(sampler2D tex, vec2 uv, vec2 invRes)', TAAGLSL) > 0);
+
+    CSTAA := VkDev.CreateShaderModuleFromGLSL(ssCompute, TAAGLSL, 'TAAResolve_CS');
+    AssertTrue('TAAResolve_CS module must compile', CSTAA <> nil);
+
+    { 2. Verify Halton (2, 3) low-discrepancy jitter sequence & YCoCg variance clipping }
+    TAA := VkDev.TAA;
+    AssertTrue('TAA must be lazily created by TVulkanRHIDevice', TAA <> nil);
+
+    AssertSameValue(0.5, TAA.EvaluateHaltonSequence(1, 2), 1e-5);
+    AssertSameValue(0.25, TAA.EvaluateHaltonSequence(2, 2), 1e-5);
+    AssertSameValue(0.75, TAA.EvaluateHaltonSequence(3, 2), 1e-5);
+    AssertSameValue(1.0 / 3.0, TAA.EvaluateHaltonSequence(1, 3), 1e-5);
+    AssertSameValue(2.0 / 3.0, TAA.EvaluateHaltonSequence(2, 3), 1e-5);
+
+    Jitter0 := TAA.ComputeHaltonJitterOffset(0, 8, 1920, 1080);
+    Jitter1 := TAA.ComputeHaltonJitterOffset(1, 8, 1920, 1080);
+    Jitter8 := TAA.ComputeHaltonJitterOffset(8, 8, 1920, 1080);
+    AssertTrue('Adjacent frames must have distinct Halton sub-pixel jitter offsets',
+      (Abs(Jitter0.X - Jitter1.X) > 1e-6) or (Abs(Jitter0.Y - Jitter1.Y) > 1e-6));
+    AssertSameValue(Jitter0.X, Jitter8.X, 1e-6);
+    AssertSameValue(Jitter0.Y, Jitter8.Y, 1e-6);
+
+    OrigRGB := Vector3(0.8, 0.4, 0.2);
+    YCoCgVal := TAA.RGBToYCoCg(OrigRGB);
+    RoundTripRGB := TAA.YCoCgToRGB(YCoCgVal);
+    AssertSameValue(OrigRGB.X, RoundTripRGB.X, 1e-5);
+    AssertSameValue(OrigRGB.Y, RoundTripRGB.Y, 1e-5);
+    AssertSameValue(OrigRGB.Z, RoundTripRGB.Z, 1e-5);
+
+    { Ghosting history outlier (RGB = 10, 10, 10) must be clipped to neighborhood [Mean + Gamma*StdDev] }
+    ClippedYCoCg := TAA.ClipHistoryYCoCg(
+      TAA.RGBToYCoCg(Vector3(10.0, 10.0, 10.0)),
+      TAA.RGBToYCoCg(Vector3(0.5, 0.5, 0.5)),
+      Vector3(0.1, 0.05, 0.05), 1.25);
+    ClippedRGB := TAA.YCoCgToRGB(ClippedYCoCg);
+    AssertTrue('Variance clipping must clamp bright ghosting history outlier below 0.7',
+      ClippedRGB.X < 0.7);
+
+    { 3. Verify Velocity (pfRG16_Float) + Ping-Pong History (pfRGBA16_Float) allocation and compute dispatch }
+    TAA.EnsureTAATargets(1920, 1080);
+    AssertTrue('VelocityTexture must be allocated', TAA.VelocityTexture <> nil);
+    AssertEquals('VelocityTexture format must be pfRG16_Float',
+      Ord(pfRG16_Float), Ord(TAA.VelocityTexture.Desc.Format));
+    AssertEquals('ResolvedHistoryTexture format must be pfRGBA16_Float',
+      Ord(pfRGBA16_Float), Ord(TAA.ResolvedHistoryTexture.Desc.Format));
+
+    HDRDesc := TRHITextureDesc.Create2D(1920, 1080, pfRGBA16_Float, [tuColorAttachment, tuSampled], 1, 1);
+    HDRTex := VkDev.CreateTexture(HDRDesc);
+
+    CmdList := TVulkanRHICommandList.Create(VkDev, 0);
+    CmdList.BeginRecording;
+    Dispatches := TAA.DispatchTAAResolve(CmdList, HDRTex, 0);
+    FirstResolved := TAA.ResolvedHistoryTexture;
+    Dispatches := Dispatches + TAA.DispatchTAAResolve(CmdList, HDRTex, 1);
+    SecondResolved := TAA.ResolvedHistoryTexture;
+    CmdList.EndRecording;
+
+    AssertEquals('Two TAA frames must record 2 compute dispatches', 2, Dispatches);
+    AssertTrue('TAA history textures must ping-pong between frames', FirstResolved <> SecondResolved);
+    AssertEquals('TotalTAADispatches must be 2', 2, TAA.TotalTAADispatches);
+  finally
+    FreeAndNil(CSTAA);
+    FreeAndNil(CmdList);
+    FreeAndNil(HDRTex);
+    FreeAndNil(Gen);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestBoxProjectedParallaxReflectionProbesRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  Probes: TCastleVulkanReflectionProbeManager;
+  Gen: TCastleShaderGeneratorRHI;
+  ProbeGLSL: String;
+  BoxMin, BoxMax, ProbePos, SurfacePos, ReflectDir, CorrectedDir: TVector3;
+  WCenter, WNearWall, WOutside: Single;
+  ProbeIdx: Integer;
+begin
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify struct size and GLSL 450 Box-Projected Reflection Probe functions }
+    AssertEquals('TCastleReflectionProbeEntry size must be 64 bytes',
+      64, SizeOf(TCastleReflectionProbeEntry));
+
+    ProbeGLSL := Gen.GenerateBoxProjectedReflectionProbeFunctions;
+    AssertTrue('Probe GLSL must include EvaluateBoxProjectedDirection',
+      Pos('vec3 EvaluateBoxProjectedDirection(vec3 worldPos, vec3 worldReflectDir, vec3 probePos, vec3 boxMin, vec3 boxMax)', ProbeGLSL) > 0);
+    AssertTrue('Probe GLSL must include EvaluateProbeInfluenceWeight',
+      Pos('float EvaluateProbeInfluenceWeight(vec3 worldPos, vec3 boxMin, vec3 boxMax, float blendDistance)', ProbeGLSL) > 0);
+
+    { 2. Verify Box-Projected Parallax ray-AABB intersection & trilinear influence weights }
+    Probes := VkDev.ReflectionProbeManager;
+    AssertTrue('ReflectionProbeManager must be lazily created by TVulkanRHIDevice', Probes <> nil);
+
+    BoxMin := Vector3(-10.0, 0.0, -10.0);
+    BoxMax := Vector3( 10.0, 6.0,  10.0);
+    ProbePos := Vector3(0.0, 3.0, 0.0);
+
+    { Surface at (5, 0, 0) reflecting straight up (0, 1, 0) hits ceiling at (5, 6, 0).
+      Vector from ProbePos (0, 3, 0) to hit point (5, 6, 0) is normalize(5, 3, 0) -> X > 0, Y > 0!
+      Without parallax correction, unprojected lookup would be (0, 1, 0) with X = 0. }
+    SurfacePos := Vector3(5.0, 0.0, 0.0);
+    ReflectDir := Vector3(0.0, 1.0, 0.0);
+    CorrectedDir := Probes.EvaluateBoxProjectedDirection(SurfacePos, ReflectDir, ProbePos, BoxMin, BoxMax);
+    AssertTrue('Box-projected parallax reflection must shift X lookup toward +X wall (> 0.8)',
+      CorrectedDir.X > 0.8);
+    AssertTrue('Box-projected parallax reflection must point upward in +Y (> 0.4)',
+      CorrectedDir.Y > 0.4);
+
+    WCenter := Probes.EvaluateProbeInfluenceWeight(Vector3(0.0, 3.0, 0.0), BoxMin, BoxMax, 2.0);
+    WNearWall := Probes.EvaluateProbeInfluenceWeight(Vector3(9.0, 3.0, 0.0), BoxMin, BoxMax, 2.0);
+    WOutside := Probes.EvaluateProbeInfluenceWeight(Vector3(12.0, 3.0, 0.0), BoxMin, BoxMax, 2.0);
+    AssertSameValue(1.0, WCenter, 1e-4);
+    AssertSameValue(0.5, WNearWall, 1e-4);
+    AssertSameValue(0.0, WOutside, 1e-5);
+
+    { 3. Verify probe registration and GPU SSBO/UBO upload }
+    ProbeIdx := Probes.AddProbe(ProbePos, BoxMin, BoxMax, 15.0, 1.2, 2.0, 0, True);
+    AssertEquals('First reflection probe index must be 0', 0, ProbeIdx);
+    AssertEquals('ProbeCount must be 1', 1, Probes.ProbeCount);
+
+    Probes.UploadProbes;
+    AssertTrue('ProbeBuffer must be allocated after UploadProbes', Probes.ProbeBuffer <> nil);
+    AssertEquals('TotalUploads must be 1', 1, Probes.TotalUploads);
+  finally
+    FreeAndNil(Gen);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestOrientedBoxDecalProjectionRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  Decals: TCastleVulkanDecalManager;
+  Gen: TCastleShaderGeneratorRHI;
+  DecalGLSL: String;
+  DecalIdx: Integer;
+  Entry: TCastleProjectedDecalEntry;
+  DecalUV: TVector2;
+  LocalPos: TVector3;
+  FadeAligned, FadePerpendicular: Single;
+begin
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify struct size and GLSL 450 Clustered Box Decal Projection functions }
+    AssertEquals('TCastleProjectedDecalEntry size must be 96 bytes',
+      96, SizeOf(TCastleProjectedDecalEntry));
+
+    DecalGLSL := Gen.GenerateClusteredDecalProjectionFunctions;
+    AssertTrue('Decal GLSL must include ProjectWorldPointToDecalUV',
+      Pos('bool ProjectWorldPointToDecalUV(vec3 worldPos, CastleProjectedDecalEntry decal, out vec2 decalUV, out vec3 localPos)', DecalGLSL) > 0);
+    AssertTrue('Decal GLSL must include EvaluateDecalAngleAndBoxFade',
+      Pos('float EvaluateDecalAngleAndBoxFade(vec3 localPos, vec3 surfaceNormal, vec3 decalForward, float angleFadeCos)', DecalGLSL) > 0);
+
+    { 2. Verify OBB decal UV projection, outside-box rejection & normal grazing-angle fade }
+    Decals := VkDev.DecalManager;
+    AssertTrue('DecalManager must be lazily created by TVulkanRHIDevice', Decals <> nil);
+
+    DecalIdx := Decals.AddBoxDecal(
+      Vector3(10.0, 2.0, -5.0),
+      Vector3(2.0, 2.0, 1.0),
+      Vector3(0.0, 1.0, 0.0),
+      Vector3(0.9, 0.2, 0.1),
+      0.85, 0.4, Vector4(1.0, 1.0, 0.0, 0.0));
+    AssertEquals('First decal index must be 0', 0, DecalIdx);
+    AssertEquals('DecalCount must be 1', 1, Decals.DecalCount);
+
+    Entry := Decals.GetDecal(0);
+    AssertTrue('Center world point (10, 2, -5) must project inside decal box',
+      Decals.ProjectWorldPointToDecalUV(Vector3(10.0, 2.0, -5.0), Entry, DecalUV, LocalPos));
+    AssertSameValue(0.5, DecalUV.X, 1e-4);
+    AssertSameValue(0.5, DecalUV.Y, 1e-4);
+
+    AssertFalse('Exterior world point (20, 2, -5) must be rejected outside decal box',
+      Decals.ProjectWorldPointToDecalUV(Vector3(20.0, 2.0, -5.0), Entry, DecalUV, LocalPos));
+
+    FadeAligned := Decals.EvaluateDecalAngleAndBoxFade(
+      Vector3(0.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0), Vector3(0.0, 1.0, 0.0), 0.25);
+    FadePerpendicular := Decals.EvaluateDecalAngleAndBoxFade(
+      Vector3(0.0, 0.0, 0.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0), 0.25);
+    AssertSameValue(1.0, FadeAligned, 1e-4);
+    AssertSameValue(0.0, FadePerpendicular, 1e-4);
+
+    { 3. Verify GPU buffer upload }
+    Decals.UploadDecals;
+    AssertTrue('DecalBuffer must be allocated after UploadDecals', Decals.DecalBuffer <> nil);
+    AssertEquals('TotalUploads must be 1', 1, Decals.TotalUploads);
+  finally
     FreeAndNil(Gen);
     FreeAndNil(VkDev);
   end;
