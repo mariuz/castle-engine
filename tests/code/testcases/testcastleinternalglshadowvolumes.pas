@@ -30,6 +30,11 @@ type
     { Light passes of several lights on a physical (gamma corrected) material
       add up like a single pass with TCastleViewport.HighDynamicRange. }
     procedure TestSeveralLightsHighDynamicRange;
+    { ShadowVolumeLightScissor results. }
+    procedure TestShadowVolumeLightScissor;
+    { Several lights with a radius look the same with and without
+      limiting their passes to their screen rectangles. }
+    procedure TestSeveralLightsScissor;
   end;
 
 implementation
@@ -37,7 +42,7 @@ implementation
 uses CastleTransform, CastleFrustum, CastleInternalGLShadowVolumes, CastleProjection,
   CastleVectors, CastleViewport, CastleBoxes, CastleWindow, CastleScene, CastleImages,
   CastleColors, CastleGLUtils, CastleUIControls, CastleRenderOptions,
-  CastleInternalGLUtils, Math, CastleLog;
+  CastleInternalGLUtils, Math, CastleLog, CastleRectangles;
 
 procedure TTestCastleInternalGLShadowVolumes.TestCasterShadowPossiblyVisible;
 var
@@ -390,6 +395,206 @@ begin
         [SeveralPassesHdr, Expected, SeveralPasses]));
 
     CheckGLErrors('TestSeveralLightsHighDynamicRange');
+    Window.Close;
+  finally
+    DestroyWindowForTest(Window);
+  end;
+end;
+
+procedure TTestCastleInternalGLShadowVolumes.TestShadowVolumeLightScissor;
+const
+  ViewportRect: TRectangle = (Left: 100; Bottom: 50; Width: 400; Height: 300);
+var
+  Viewport: TCastleViewport;
+  Projection: TProjection;
+  Frustum: TFrustum;
+  ProjectionViewMatrix: TMatrix4;
+
+  function Scissor(const Position: TVector4; const Radius: Single): TRectangle;
+  begin
+    Result := ShadowVolumeLightScissor(ProjectionViewMatrix, Frustum,
+      ViewportRect, Position, Radius);
+  end;
+
+  procedure AssertRectEquals(const Expected, Actual: TRectangle);
+  begin
+    if not ((Expected.Left = Actual.Left) and
+            (Expected.Bottom = Actual.Bottom) and
+            (Expected.Width = Actual.Width) and
+            (Expected.Height = Actual.Height)) then
+      Fail('Expected rectangle ' + Expected.ToString + ', got ' + Actual.ToString);
+  end;
+
+var
+  R: TRectangle;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  try
+    { camera at the origin, looking in -Z, up in +Y }
+    Viewport.Camera.SetView(
+      Vector3(0, 0, 0),
+      Vector3(0, 0, -1),
+      Vector3(0, 1, 0));
+
+    FillChar(Projection, SizeOf(Projection), #0);
+    Projection.ProjectionType := ptPerspective;
+    Projection.PerspectiveAnglesRad := Vector2(Pi / 2, Pi / 2);
+    Projection.ProjectionNear := 0.1;
+    Projection.ProjectionFar := ZFarInfinity;
+    { the perspective angles are 90 degrees both ways,
+      so use aspect ratio 1 regardless of ViewportRect }
+    ProjectionViewMatrix := Projection.Matrix(1) * Viewport.Camera.Matrix;
+    Frustum.Init(Projection.Matrix(1), Viewport.Camera.Matrix);
+
+    { directional light, infinite radius: the whole view }
+    AssertRectEquals(ViewportRect, Scissor(Vector4(0, 0, -1, 0), 10));
+    AssertRectEquals(ViewportRect, Scissor(Vector4(0, 0, -10, 1), -1));
+    { zero radius: nothing }
+    AssertTrue(Scissor(Vector4(0, 0, -10, 1), 0).IsEmpty);
+
+    { a small light in front: a small rectangle around the center.
+      Its box (-1..1 around (0, 0, -10)) projects nearest at z = -9,
+      to 1/9 of the half width (90 degrees). }
+    R := Scissor(Vector4(0, 0, -10, 1), 1);
+    AssertFalse(R.IsEmpty);
+    AssertTrue(R.Contains(Vector2(300, 200)));
+    AssertTrue(Abs(R.Width - 2 * 200 / 9) <= 2);
+    AssertTrue(Abs(R.Height - 2 * 150 / 9) <= 2);
+    AssertTrue(Abs(R.Left - (300 - 200 / 9)) <= 1);
+    AssertTrue(Abs(R.Bottom - (200 - 150 / 9)) <= 1);
+
+    { a light to the right, half visible: touches the right edge }
+    R := Scissor(Vector4(10, 0, -10, 1), 1);
+    AssertFalse(R.IsEmpty);
+    AssertEquals(ViewportRect.Left + ViewportRect.Width, R.Left + R.Width);
+    AssertTrue(R.Width < 100);
+
+    { behind the camera, or far to the side: nothing }
+    AssertTrue(Scissor(Vector4(0, 0, 10, 1), 1).IsEmpty);
+    AssertTrue(Scissor(Vector4(100, 0, -10, 1), 1).IsEmpty);
+
+    { around the camera (crossing the camera plane): the whole view }
+    AssertRectEquals(ViewportRect, Scissor(Vector4(0, 0, -0.5, 1), 2));
+  finally FreeAndNil(Viewport) end;
+end;
+
+procedure TTestCastleInternalGLShadowVolumes.TestSeveralLightsScissor;
+{ Four point lights with a radius casting shadow volumes
+  (one of them off-screen, one around the camera),
+  rendered with and without InternalShadowVolumesLightScissor:
+  the same image. }
+var
+  Window: TCastleWindow;
+  Viewport: TCastleViewport;
+
+  procedure AddLight(const Position: TVector3; const Color: TVector3; const Radius: Single);
+  var
+    Light: TCastlePointLight;
+  begin
+    Light := TCastlePointLight.Create(Window);
+    Light.Translation := Position;
+    Light.Color := Color;
+    Light.Intensity := 10;
+    Light.Radius := Radius;
+    Light.Shadows := true;
+    Viewport.Items.Add(Light);
+  end;
+
+  procedure AddBox(const Translation, Size: TVector3);
+  var
+    Box: TCastleBox;
+  begin
+    Box := TCastleBox.Create(Window);
+    Box.Translation := Translation;
+    Box.Size := Size;
+    Box.Material := pmPhong;
+    Viewport.Items.Add(Box);
+  end;
+
+var
+  Floor: TCastleBox;
+  WithScissor, WithoutScissor: TCastleImage;
+  X, Y, I, Lit: Integer;
+  CA, CB: TCastleColor;
+  MaxDifference: Single;
+begin
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  Window := CreateWindowForTest;
+  try
+    Window.Width := 300;
+    Window.Height := 200;
+    Window.Open;
+
+    if not GLFeatures.ShadowVolumesPossible then
+    begin
+      Window.Close;
+      AbortTest;
+      Exit;
+    end;
+
+    Viewport := TCastleViewport.Create(Window);
+    Viewport.FullSize := true;
+    Viewport.BackgroundColor := Black;
+    Viewport.Camera.SetView(
+      Vector3(0, 6, 9),
+      Vector3(0, -6, -9),
+      Vector3(0, 9, -6));
+    Window.Controls.InsertFront(Viewport);
+
+    Floor := TCastleBox.Create(Window);
+    Floor.Size := Vector3(30, 0.2, 30);
+    Floor.Translation := Vector3(0, -0.1, 0);
+    Floor.Material := pmPhong;
+    Floor.CastShadows := false;
+    Viewport.Items.Add(Floor);
+
+    AddBox(Vector3(-2, 0.5, 0), Vector3(1, 1, 1));
+    AddBox(Vector3(2, 0.5, -1), Vector3(1, 1, 1));
+
+    AddLight(Vector3(-3, 1.5, 0.5), Vector3(1, 0, 0), 3);
+    AddLight(Vector3(3, 1.5, -1), Vector3(0, 1, 0), 3);
+    { off-screen (behind the camera) }
+    AddLight(Vector3(0, 1.5, 20), Vector3(1, 1, 1), 3);
+    { around the camera }
+    AddLight(Vector3(0, 6, 8), Vector3(0, 0, 1), 9);
+    Viewport.ShadowVolumesMaxLights := 4;
+
+    InternalShadowVolumesLightScissor := false;
+    try
+      WithoutScissor := Window.SaveScreen;
+    finally
+      InternalShadowVolumesLightScissor := true;
+    end;
+    try
+      WithScissor := Window.SaveScreen;
+      try
+        MaxDifference := 0;
+        Lit := 0;
+        for Y := 0 to WithScissor.Height - 1 do
+          for X := 0 to WithScissor.Width - 1 do
+          begin
+            CA := WithScissor.Colors[X, Y, 0];
+            CB := WithoutScissor.Colors[X, Y, 0];
+            for I := 0 to 2 do
+              MaxDifference := Max(MaxDifference, Abs(CA.Data[I] - CB.Data[I]));
+            if CA.XYZ.Max > 0.2 then
+              Inc(Lit);
+          end;
+        WritelnLog('Shadow volume light scissor: max difference %f, %d lit pixels',
+          [MaxDifference, Lit]);
+        { something is lit, so the comparison means something }
+        AssertTrue(Lit > 1000);
+        if MaxDifference > 1 / 255 + 0.001 then
+          Fail(Format('Light passes with scissor differ, max difference %f', [MaxDifference]));
+      finally FreeAndNil(WithScissor) end;
+    finally FreeAndNil(WithoutScissor) end;
+
+    CheckGLErrors('TestSeveralLightsScissor');
     Window.Close;
   finally
     DestroyWindowForTest(Window);
