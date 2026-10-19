@@ -731,7 +731,8 @@ begin
 
   if Light is TAbstractPositionalLightNode then
   begin
-    // TODO: falloff to this range will not be as specified by glTF
+    // falloff to zero at this range, as specified by glTF
+    TAbstractPositionalLightNode(Light).RadiusFalloff := true;
     TAbstractPositionalLightNode(Light).Radius := TPasJSON.GetNumber(LightObject.Properties['range'], 0);
     // glTF expresses "no range" as 0, we express it as -1 in X3D
     if TAbstractPositionalLightNode(Light).Radius = 0 then
@@ -746,8 +747,8 @@ begin
       Note that without this, X3D by default makes no attenuation,
       which would be bad with large intensity of lights (the scene would be incredibly bright).
 
-      TODO: When range is defined, we should make a different falloff according to
-      KHR_lights_punctual. }
+      When range is defined, RadiusFalloff multiplies this by the window function
+      recommended by KHR_lights_punctual. }
     TAbstractPositionalLightNode(Light).Attenuation := Vector3(0, 0, 1);
   end;
 

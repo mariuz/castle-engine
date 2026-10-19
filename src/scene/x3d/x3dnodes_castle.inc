@@ -30,6 +30,34 @@
   {$I auto_generated_node_helpers/x3dnodes_blendmode.inc}
   end;
 
+  { Possible values of @link(TDepthModeNode.DepthFunc). }
+  TDepthModeFunction = (
+    { The renderer chooses the depth function, usually "less"
+      (passes when the shape is closer than the depth buffer). }
+    dmfDefault,
+    dmfNever,
+    dmfLess,
+    dmfEqual,
+    dmfLessEqual,
+    dmfGreater,
+    dmfNotEqual,
+    dmfGreaterEqual,
+    dmfAlways
+  );
+
+  { Customize the depth test of a shape: the depth function and polygon offset.
+    Place it in @link(TAppearanceNode.DepthMode).
+
+    Useful to render several coplanar shapes (layers) over each other,
+    for example multi-pass materials (the next layers with "lequal" or "equal")
+    and decals (with a negative polygon offset).
+    Note that the shapes using "lequal" or "equal" need the shape under them
+    to be rendered first: this is natural for shapes with blending,
+    rendered after all opaque shapes. }
+  TDepthModeNode = class(TAbstractAppearanceChildNode)
+  {$I auto_generated_node_helpers/x3dnodes_depthmode.inc}
+  end;
+
   { Appearance node with a special name @code(KambiAppearance).
     Useful if you want to use EXTERNPROTO to declare Castle Game Engine
     extensions the Appearance in a clean way. }
@@ -186,6 +214,29 @@
     See https://castle-engine.io/shaders . }
   TShaderTextureNode = class(TAbstractSingleTextureNode)
   {$I auto_generated_node_helpers/x3dnodes_shadertexture.inc}
+  end;
+
+  { Texture with the colors of everything rendered so far in the current
+    viewport: the opaque shapes, without the shapes using blending.
+    It is updated every frame, after the opaque shapes are rendered
+    and before the shapes with blending,
+    so that the shapes with blending can use it, e.g. to render
+    glass or heat haze that distorts what is behind it.
+
+    Use it in a field of an @link(TEffectNode) (a @code(sampler2D) uniform)
+    on a shape with blending. The texture covers the viewport:
+    sample it at the screen position of the fragment,
+    for example @code(gl_FragCoord.xy / viewport size),
+    or the position in clip space mapped to 0..1:
+
+    @longCode(#
+      vec4 clip = castle_ProjectionMatrix * castle_vertex_eye;
+      vec2 screen_uv = clip.xy / clip.w * 0.5 + 0.5;
+    #)
+
+    (castle_vertex_eye needs Phong shading). }
+  TScreenTextureNode = class(TAbstractSingleTextureNode)
+  {$I auto_generated_node_helpers/x3dnodes_screentexture.inc}
   end;
 
   { Viewpoint for making reflections on flat objects.
@@ -426,6 +477,18 @@ end;
    to override it's transform with transformation of a GeneratedShadowMap. }
 
 const
+  DepthModeFunctionNames: array [TDepthModeFunction] of string = (
+    'default',
+    'never',
+    'less',
+    'equal',
+    'lequal',
+    'greater',
+    'notequal',
+    'gequal',
+    'always'
+  );
+
   CompareModeNames: array [TShadowMapCompareMode] of string = (
     'COMPARE_R_LEQUAL',
     'COMPARE_R_GEQUAL',
@@ -1340,6 +1403,8 @@ begin
   NodesManager.RegisterNodeClasses([
     TText3DNode,
     TBlendModeNode,
+    TDepthModeNode,
+    TScreenTextureNode,
     TKambiAppearanceNode,
     TKambiInlineNode,
     TKambiNavigationInfoNode,

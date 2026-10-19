@@ -349,13 +349,20 @@ type
 
       So it cannot usefully modify CodeHash or set variables that
       are accessed by SetDynamicUniforms (executed in each frame the shader
-      is used). }
+      is used).
+
+      LightNumber >= 0 means these are the effects of this light:
+      the @code(<Light>) placeholder in their code is replaced
+      by the light number (to use per-light uniforms,
+      see TAbstractLightNode custom fields). }
     procedure EffectsGenerateCode(Effects: TMFNode;
       const Code: TShaderSource = nil;
-      const ForwardDeclareInFinalShader: boolean = false); overload;
+      const ForwardDeclareInFinalShader: boolean = false;
+      const LightNumber: Integer = -1); overload;
     procedure EffectsGenerateCode(Effects: TX3DNodeList;
       const Code: TShaderSource = nil;
-      const ForwardDeclareInFinalShader: boolean = false); overload;
+      const ForwardDeclareInFinalShader: boolean = false;
+      const LightNumber: Integer = -1); overload;
 
     { Enable TEffectNode.FdShaderLibraries in all given Effect nodes.
 
@@ -1549,14 +1556,16 @@ end;
 
 procedure TShader.EffectsGenerateCode(Effects: TMFNode;
   const Code: TShaderSource;
-  const ForwardDeclareInFinalShader: boolean);
+  const ForwardDeclareInFinalShader: boolean;
+  const LightNumber: Integer);
 begin
-  EffectsGenerateCode(Effects.InternalItems, Code, ForwardDeclareInFinalShader);
+  EffectsGenerateCode(Effects.InternalItems, Code, ForwardDeclareInFinalShader, LightNumber);
 end;
 
 procedure TShader.EffectsGenerateCode(Effects: TX3DNodeList;
   const Code: TShaderSource;
-  const ForwardDeclareInFinalShader: boolean);
+  const ForwardDeclareInFinalShader: boolean;
+  const LightNumber: Integer);
 
   procedure ProcessEffect(Effect: TEffectNode);
 
@@ -1565,6 +1574,8 @@ procedure TShader.EffectsGenerateCode(Effects: TX3DNodeList;
       Contents: String;
     begin
       Contents := Part.Contents;
+      if LightNumber >= 0 then
+        Contents := StringReplace(Contents, '<Light>', IntToStr(LightNumber), [rfReplaceAll]);
       if Contents <> '' then
       begin
         Plug(Part.ShaderType, Contents, Code, ForwardDeclareInFinalShader);
@@ -2346,8 +2357,13 @@ begin
 
   TextureShaders.Add(TextureShader);
 
+  if Node.FdEffects.Count <> 0 then
+  begin
+    ShapeRequiresShaders := true;
+    EnableShaderLibraries(Node.FdEffects.InternalItems);
+  end;
+
   if (TextureType = ttShader) or
-     (Node.FdEffects.Count <> 0) or
      { MultiTexture.function requires shaders }
      (Env.TextureFunction <> tfNone) then
     ShapeRequiresShaders := true;
@@ -2669,7 +2685,10 @@ begin
   LightShaders.Add(LightShader);
 
   if Light^.Node.FdEffects.Count <> 0 then
+  begin
     ShapeRequiresShaders := true;
+    EnableShaderLibraries(Light^.Node.FdEffects.InternalItems);
+  end;
 
   LightShader.Prepare(FCodeHash, LightShaders.Count - 1);
 end;

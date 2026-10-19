@@ -33,11 +33,13 @@ type
     FAttenuation: TVector3;
     FIntensity: Single;
     FRadius: Single;
+    FRadiusFalloff: Boolean;
 
     procedure SetColor(const Value: TCastleColorRGB);
     procedure SetAttenuation(const Value: TVector3);
     procedure SetIntensity(const Value: Single);
     procedure SetRadius(const Value: Single);
+    procedure SetRadiusFalloff(const Value: Boolean);
   public
     const
       DefaultRadius = 100.0;
@@ -71,6 +73,10 @@ type
       this light at further shapes.
       Set to -1 to have no limit. }
     property Radius: Single read FRadius write SetRadius {$ifdef FPC}default DefaultRadius{$endif};
+
+    { Fade the light smoothly to zero at its @link(Radius), instead of cutting it off there.
+      Like the "range" of glTF lights. See @link(TAbstractPositionalLightNode.RadiusFalloff). }
+    property RadiusFalloff: Boolean read FRadiusFalloff write SetRadiusFalloff default false;
 
   {$define read_interface_class}
   {$I auto_generated_persistent_vectors/tcastlepointlight_persistent_vectors.inc}
@@ -123,7 +129,7 @@ end;
 function TCastlePointLight.PropertySections(const PropertyName: String): TPropertySections;
 begin
   if ArrayContainsString(PropertyName, ['ColorPersistent',
-      'AttenuationPersistent', 'Intensity', 'Radius']) then
+      'AttenuationPersistent', 'Intensity', 'Radius', 'RadiusFalloff']) then
     Result := [psBasic]
   else
     Result := inherited PropertySections(PropertyName);
@@ -153,6 +159,15 @@ begin
   begin
     FIntensity := Value;
     FPointLight.Intensity := Value;
+  end;
+end;
+
+procedure TCastlePointLight.SetRadiusFalloff(const Value: Boolean);
+begin
+  if FRadiusFalloff <> Value then
+  begin
+    FRadiusFalloff := Value;
+    FPointLight.RadiusFalloff := Value;
   end;
 end;
 

@@ -396,6 +396,7 @@ uses Math, StrUtils, URIParser, TypInfo,
 {$I auto_generated_node_helpers/x3dnodes_cylinder.inc}
 {$I auto_generated_node_helpers/x3dnodes_cylinder_1.inc}
 {$I auto_generated_node_helpers/x3dnodes_cylindersensor.inc}
+{$I auto_generated_node_helpers/x3dnodes_depthmode.inc}
 {$I auto_generated_node_helpers/x3dnodes_directionallight.inc}
 {$I auto_generated_node_helpers/x3dnodes_directionallight_1.inc}
 {$I auto_generated_node_helpers/x3dnodes_disk2d.inc}
@@ -510,6 +511,7 @@ uses Math, StrUtils, URIParser, TypInfo,
 {$I auto_generated_node_helpers/x3dnodes_scalarinterpolator.inc}
 {$I auto_generated_node_helpers/x3dnodes_scale_1.inc}
 {$I auto_generated_node_helpers/x3dnodes_screeneffect.inc}
+{$I auto_generated_node_helpers/x3dnodes_screentexture.inc}
 {$I auto_generated_node_helpers/x3dnodes_script.inc}
 {$I auto_generated_node_helpers/x3dnodes_separator_1.inc}
 {$I auto_generated_node_helpers/x3dnodes_shaderpart.inc}

@@ -368,6 +368,7 @@ var
   var
     TrianglePtr: PTriangle3;
     I: Integer;
+    InDepthBuffer: Boolean;
   begin
     TrianglesPlaneSide.Count := Triangles.Count;
     TrianglePtr := PTriangle3(Triangles.L);
@@ -375,7 +376,16 @@ var
     { If light is directional, no need to render dark cap }
     DarkCap := DarkCap and (LightPos.W <> 0);
 
-    if ForceOpaque or not (TShape(FShape).AlphaChannel = acBlending) then
+    { Is the caster rendered to the depth buffer? Transparent shapes
+      (with blending) are not, and invisible shapes
+      (TAbstractShapeNode.Visible = false, shadow-only casters) are not
+      rendered at all. Such casters need the caps and the regular depth test
+      (see above, like transparent casters). }
+    InDepthBuffer :=
+      (ForceOpaque or not (TShape(FShape).AlphaChannel = acBlending)) and
+      ((TShape(FShape).Node = nil) or TShape(FShape).Node.Visible);
+
+    if InDepthBuffer then
       OpaqueTrianglesBegin
     else
       TransparentTrianglesBegin;
@@ -386,7 +396,7 @@ var
       Inc(TrianglePtr);
     end;
 
-    if ForceOpaque or not (TShape(FShape).AlphaChannel = acBlending) then
+    if InDepthBuffer then
       OpaqueTrianglesEnd
     else
       TransparentTrianglesEnd;

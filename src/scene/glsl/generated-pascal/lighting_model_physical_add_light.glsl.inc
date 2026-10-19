@@ -104,6 +104,11 @@
 '  float scale = 1.0;' + LineEnding +
 '  /* PLUG: light_scale (scale, normal_eye, light_dir) */' + LineEnding +
 '' + LineEnding +
+'  /* Like scale, but per color component: multiplies the light''s color,' + LineEnding +
+'     for example by a colored image projected from the light. */' + LineEnding +
+'  vec3 color_scale = vec3(1.0);' + LineEnding +
+'  /* PLUG: light_color_scale (color_scale, normal_eye, light_dir) */' + LineEnding +
+'' + LineEnding +
 '#ifdef LIGHT<Light>_TYPE_SPOT' + LineEnding +
 '#ifdef LIGHT<Light>_HAS_BEAM_WIDTH' + LineEnding +
 '  /* calculate spot following VRML 2.0/X3D idea of beamWidth */' + LineEnding +
@@ -130,8 +135,16 @@
 '#endif' + LineEnding +
 '' + LineEnding +
 '#ifdef LIGHT<Light>_HAS_RADIUS' + LineEnding +
+'  #ifdef LIGHT<Light>_HAS_RADIUS_FALLOFF' + LineEnding +
+'  /* Smooth falloff to zero at the radius,' + LineEnding +
+'     the window function recommended by glTF KHR_lights_punctual for "range". */' + LineEnding +
+'  float radius_ratio = distance_to_light / castle_LightSource<Light>Radius;' + LineEnding +
+'  float radius_window = clamp(1.0 - radius_ratio * radius_ratio * radius_ratio * radius_ratio, 0.0, 1.0);' + LineEnding +
+'  scale *= radius_window * radius_window;' + LineEnding +
+'  #else' + LineEnding +
 '  if (distance_to_light >= castle_LightSource<Light>Radius)' + LineEnding +
 '    scale = 0.0;' + LineEnding +
+'  #endif' + LineEnding +
 '#endif' + LineEnding +
 '' + LineEnding +
 '  /* Main code that calculates per-light-source contribution to the final color.' + LineEnding +
@@ -167,7 +180,7 @@
 '' + LineEnding +
 '    color.rgb += castle_LightSource<Light>Color *' + LineEnding +
 '      light_contribution *' + LineEnding +
-'      scale;' + LineEnding +
+'      scale * color_scale;' + LineEnding +
 '  }' + LineEnding +
 '}' + LineEnding +
 ''

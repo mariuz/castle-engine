@@ -72,6 +72,8 @@ X3DShapeNode : X3DChildNode, X3DBoundedObject {
     doc: """
     Is the shape visible. Shapes that are not visible are not rendered, but otherwise are still processed (for example, hidden shapes are still used for collision detection). Toggling this is guaranteed to be ultra-fast.
 
+    Shapes that are not visible still cast shadow volumes, unless @link(TAppearanceNode.ShadowCaster) is @false. This allows shadow-only geometry: e.g. a simpler closed mesh casting the shadow of a detailed model, or the closed solids of a level whose rendered surfaces are not closed.
+
     Note: An alternative method to hide (and more) things is to wrap them in a @link(TSwitchNode), and toggle @link(TSwitchNode.WhichChoice) between -1 and 0. When @link(TSwitchNode.WhichChoice) is -1, the children are not processed (not rendered, and do not collide).
     """
 
@@ -165,6 +167,12 @@ Appearance : X3DAppearanceNode {
     change: chEverything
     is-extension: true
     doc: Determines the exact blending equation used, in case @link(AlphaMode) indicates blending. See https://castle-engine.io/x3d_extensions.php#section_ext_blending .
+
+  SFNode     [in,out]      depthMode        NULL
+    range: DepthMode
+    change: chRedisplay
+    is-extension: true
+    doc: Depth test function and polygon offset of this shape, e.g. to render coplanar layers and decals. See @link(TDepthModeNode).
 
   MFNode     []            effects          []
     range: Effect

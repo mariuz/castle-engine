@@ -696,12 +696,95 @@ procedure TRenderer.RenderShape(const Shape: TX3DRendererShape;
     {$endif}
   end;
 
+  { Apply Appearance.DepthMode, if any, saving the previous state.
+    Returns @true if something was changed and has to be restored
+    by DepthModeEnd. }
+  function DepthModeBegin(const DepthMode: TDepthModeNode;
+    out SavedDepthFunc: TDepthFunction;
+    out SavedPolygonOffset: TPolygonOffset): Boolean;
+  const
+    DepthFunctions: array [TDepthModeFunction] of TDepthFunction = (
+      dfLess, // dmfDefault, not used
+      dfNever,
+      dfLess,
+      dfEqual,
+      dfLessEqual,
+      dfGreater,
+      dfNotEqual,
+      dfGreaterEqual,
+      dfAlways
+    );
+  var
+    Func: TDepthFunction;
+    Offset: TVector2;
+    NewPolygonOffset: TPolygonOffset;
+  begin
+    Result := false;
+    if DepthMode = nil then
+      Exit;
+    { Shadow maps need the regular depth test, they are not the "layers"
+      that DepthMode is about. }
+    if RenderingCamera.Target in [rtShadowMap, rtVarianceShadowMap] then
+      Exit;
+
+    SavedDepthFunc := RenderContext.DepthFunc;
+    SavedPolygonOffset := RenderContext.PolygonOffset;
+    Result := true;
+
+    if DepthMode.DepthFunc <> dmfDefault then
+    begin
+      Func := DepthFunctions[DepthMode.DepthFunc];
+      { When the renderer draws the same surfaces again with "less or equal"
+        (like the lit pass of shadow volumes), "less" and "greater" would
+        reject them: relax them the same way. }
+      if SavedDepthFunc = dfLessEqual then
+      begin
+        if Func = dfLess then
+          Func := dfLessEqual
+        else
+        if Func = dfGreater then
+          Func := dfGreaterEqual;
+      end;
+      RenderContext.DepthFunc := Func;
+    end;
+
+    Offset := DepthMode.PolygonOffset;
+    if not Offset.IsPerfectlyZero then
+    begin
+      { Add to the current polygon offset (like for solid wireframe). }
+      NewPolygonOffset := SavedPolygonOffset;
+      if NewPolygonOffset.Enabled then
+      begin
+        NewPolygonOffset.Scale := NewPolygonOffset.Scale + Offset.X;
+        NewPolygonOffset.Bias := NewPolygonOffset.Bias + Offset.Y;
+      end else
+      begin
+        NewPolygonOffset.Enabled := true;
+        NewPolygonOffset.Scale := Offset.X;
+        NewPolygonOffset.Bias := Offset.Y;
+      end;
+      RenderContext.PolygonOffset := NewPolygonOffset;
+    end;
+  end;
+
+  procedure DepthModeEnd(const SavedDepthFunc: TDepthFunction;
+    const SavedPolygonOffset: TPolygonOffset);
+  begin
+    RenderContext.DepthFunc := SavedDepthFunc;
+    RenderContext.PolygonOffset := SavedPolygonOffset;
+  end;
+
 var
   Shader: TShader;
+  DepthModeChanged: Boolean;
+  SavedDepthFunc: TDepthFunction;
+  SavedPolygonOffset: TPolygonOffset;
 begin
   InitializeFromRenderOptions;
 
   RenderContext.DepthRange := DepthRange;
+  DepthModeChanged := DepthModeBegin(Shape.State.DepthMode,
+    SavedDepthFunc, SavedPolygonOffset);
 
   Shader := InitializeShader;
   FixedFunctionBegin(Shader.SceneModelView);
@@ -709,6 +792,9 @@ begin
   RenderShapeLineProperties(Shape, RenderOptions, Shader);
 
   FixedFunctionEnd;
+
+  if DepthModeChanged then
+    DepthModeEnd(SavedDepthFunc, SavedPolygonOffset);
 end;
 
 procedure TRenderer.RenderShapeLineProperties(const Shape: TX3DRendererShape;

@@ -35,6 +35,7 @@ type
     FAttenuation: TVector3;
     FIntensity: Single;
     FRadius: Single;
+    FRadiusFalloff: Boolean;
     FBeamWidth: Single;
     FCutOffAngle: Single;
 
@@ -42,6 +43,7 @@ type
     procedure SetAttenuation(const Value: TVector3);
     procedure SetIntensity(const Value: Single);
     procedure SetRadius(const Value: Single);
+    procedure SetRadiusFalloff(const Value: Boolean);
     procedure SetBeamWidth(const Value: Single);
     procedure SetCutOffAngle(const Value: Single);
     procedure UpdateGizmoCoord;
@@ -80,6 +82,10 @@ type
       this light at further shapes.
       Set to -1 to have no limit. }
     property Radius: Single read FRadius write SetRadius {$ifdef FPC}default DefaultRadius{$endif};
+
+    { Fade the light smoothly to zero at its @link(Radius), instead of cutting it off there.
+      Like the "range" of glTF lights. See @link(TAbstractPositionalLightNode.RadiusFalloff). }
+    property RadiusFalloff: Boolean read FRadiusFalloff write SetRadiusFalloff default false;
 
     { Angle within which the spot light has maximum intensity.
 
@@ -166,7 +172,7 @@ end;
 function TCastleSpotLight.PropertySections(const PropertyName: String): TPropertySections;
 begin
   if ArrayContainsString(PropertyName, [
-       'ColorPersistent', 'AttenuationPersistent', 'Intensity', 'Radius',
+       'ColorPersistent', 'AttenuationPersistent', 'Intensity', 'Radius', 'RadiusFalloff',
        'BeamWidth', 'CutOffAngle'
      ]) then
     Result := [psBasic]
@@ -198,6 +204,15 @@ begin
   begin
     FIntensity := Value;
     FSpotLight.Intensity := Value;
+  end;
+end;
+
+procedure TCastleSpotLight.SetRadiusFalloff(const Value: Boolean);
+begin
+  if FRadiusFalloff <> Value then
+  begin
+    FRadiusFalloff := Value;
+    FSpotLight.RadiusFalloff := Value;
   end;
 end;
 

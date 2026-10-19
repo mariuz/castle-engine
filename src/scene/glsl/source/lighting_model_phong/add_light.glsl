@@ -97,6 +97,11 @@ void PLUG_add_light(inout vec4 color,
   float scale = 1.0;
   /* PLUG: light_scale (scale, normal_eye, light_dir) */
 
+  /* Like scale, but per color component: multiplies the light's color,
+     for example by a colored image projected from the light. */
+  vec3 color_scale = vec3(1.0);
+  /* PLUG: light_color_scale (color_scale, normal_eye, light_dir) */
+
 #ifdef LIGHT<Light>_TYPE_SPOT
 #ifdef LIGHT<Light>_HAS_BEAM_WIDTH
   /* calculate spot following VRML 2.0/X3D idea of beamWidth */
@@ -123,8 +128,16 @@ void PLUG_add_light(inout vec4 color,
 #endif
 
 #ifdef LIGHT<Light>_HAS_RADIUS
+  #ifdef LIGHT<Light>_HAS_RADIUS_FALLOFF
+  /* Smooth falloff to zero at the radius,
+     the window function recommended by glTF KHR_lights_punctual for "range". */
+  float radius_ratio = distance_to_light / castle_LightSource<Light>Radius;
+  float radius_window = clamp(1.0 - radius_ratio * radius_ratio * radius_ratio * radius_ratio, 0.0, 1.0);
+  scale *= radius_window * radius_window;
+  #else
   if (distance_to_light >= castle_LightSource<Light>Radius)
     scale = 0.0;
+  #endif
 #endif
 
   /* add ambient term */
@@ -164,5 +177,5 @@ void PLUG_add_light(inout vec4 color,
   }
 #endif
 
-  color.rgb += light_color * scale;
+  color.rgb += light_color * scale * color_scale;
 }

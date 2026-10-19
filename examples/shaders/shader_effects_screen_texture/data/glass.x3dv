@@ -1,0 +1,57 @@
+#X3D V4.0 utf8
+PROFILE Interchange
+
+# Two panes that show what is behind them, distorted:
+# they sample a ScreenTexture (the colors of the opaque shapes rendered
+# before them) at their screen position, moved by waves
+# (see shaders/screen_distortion.fs).
+# They need blending (alphaMode "BLEND"), so they are rendered after
+# the opaque shapes, and Phong shading for castle_vertex_eye.
+
+DEF Timer TimeSensor { loop TRUE }
+
+# Glass: still ripples, tinted blue.
+Transform {
+  translation -1.6 1.2 1.5
+  children Shape {
+    shading "PHONG"
+    appearance Appearance {
+      material UnlitMaterial { }
+      alphaMode "BLEND"
+      effects DEF GlassEffect Effect {
+        language "GLSL"
+        inputOutput SFNode screen_texture ScreenTexture { }
+        inputOutput SFFloat strength 0.015
+        inputOutput SFFloat speed 0
+        inputOutput SFTime time 0
+        inputOutput SFVec3f tint 0.75 0.85 1.0
+        parts EffectPart { type "FRAGMENT" url "shaders/screen_distortion.fs" }
+      }
+    }
+    geometry Rectangle2D { size 2.6 2.4 }
+  }
+}
+
+# Heat haze: moving waves, not tinted.
+Transform {
+  translation 1.6 1.2 1.5
+  children Shape {
+    shading "PHONG"
+    appearance Appearance {
+      material UnlitMaterial { }
+      alphaMode "BLEND"
+      effects DEF HazeEffect Effect {
+        language "GLSL"
+        inputOutput SFNode screen_texture ScreenTexture { }
+        inputOutput SFFloat strength 0.008
+        inputOutput SFFloat speed 3
+        inputOutput SFTime time 0
+        inputOutput SFVec3f tint 1 1 1
+        parts EffectPart { type "FRAGMENT" url "shaders/screen_distortion.fs" }
+      }
+    }
+    geometry Rectangle2D { size 2.6 2.4 }
+  }
+}
+
+ROUTE Timer.elapsedTime TO HazeEffect.time

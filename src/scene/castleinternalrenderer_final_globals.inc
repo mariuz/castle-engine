@@ -68,6 +68,12 @@ var
     and everything automatically uses this cache. }
   RendererCache: TRendererCache;
 
+{ Update the TScreenTextureNode textures from the current viewport
+  (RenderContext.Viewport) of the current framebuffer.
+  Called by the viewport after rendering the opaque shapes,
+  before the shapes with blending. }
+procedure UpdateScreenTextures;
+
 {$endif read_interface}
 
 {$ifdef read_implementation}

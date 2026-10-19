@@ -48,6 +48,19 @@
     Attenuation: TVector3;
     AmbientColor, Color: TVector3;
 
+    { Current values provided for the light node's custom fields
+      (per-light uniforms of light effects), by field name.
+      Owned copies of the fields, to compare with new values. }
+    CustomFields: {$ifdef FPC}specialize{$endif} TObjectDictionary<String, TX3DField>;
+
+    constructor Create;
+    destructor Destroy; override;
+
+    { Set uniform Field.X3DName + Number from the Field value,
+      unless it already has this value. }
+    procedure SetCustomFieldUniform(const AProgram: TX3DShaderProgram;
+      const Field: TX3DField);
+
     procedure SetUniform(const NamePattern: String;
       var CurrentValue: Single; const NewValue: Single); overload;
     procedure SetUniform(const NamePattern: String;
@@ -66,6 +79,7 @@
     ldTypePunctual,
     ldHasAttenuation,
     ldHasRadius,
+    ldHasRadiusFalloff,
     ldHasAmbient,
     ldHasSpecular,
     ldHasBeamWidth,
@@ -107,6 +121,42 @@
 {$ifdef read_implementation}
 
 { TLightUniforms ------------------------------------------------------- }
+
+constructor TLightUniforms.Create;
+begin
+  inherited;
+  CustomFields := {$ifdef FPC}specialize{$endif} TObjectDictionary<String, TX3DField>.Create([doOwnsValues]);
+end;
+
+destructor TLightUniforms.Destroy;
+begin
+  FreeAndNil(CustomFields);
+  inherited;
+end;
+
+procedure TLightUniforms.SetCustomFieldUniform(const AProgram: TX3DShaderProgram;
+  const Field: TX3DField);
+var
+  Current: TX3DField;
+begin
+  if not CustomFields.TryGetValue(Field.X3DName, Current) then
+    Current := nil;
+  if (Current <> nil) and
+     (Current.ClassType = Field.ClassType) and
+     Current.FastEqualsValue(Field) then
+    Exit;
+
+  { The uniform is missing when the light's effects don't use it,
+    or the shader doesn't use the light's effects (like unlit shapes). }
+  AProgram.SetUniformFromField(Field.X3DName + IntToStr(Number), Field, umIgnore, false);
+
+  if (Current = nil) or (Current.ClassType <> Field.ClassType) then
+  begin
+    Current := TX3DFieldClass(Field.ClassType).CreateUndefined(nil, false, Field.X3DName);
+    CustomFields.AddOrSetValue(Field.X3DName, Current);
+  end;
+  Current.AssignValue(Field);
+end;
 
 procedure TLightUniforms.SetUniform(const NamePattern: String;
   var CurrentValue: Single; const NewValue: Single);
@@ -157,6 +207,7 @@ const
     (Name: 'LIGHT%d_TYPE_PUNCTUAL'    ; Hash: 443; ),
     (Name: 'LIGHT%d_HAS_ATTENUATION'  ; Hash: 113; ),
     (Name: 'LIGHT%d_HAS_RADIUS'       ; Hash: 127; ),
+    (Name: 'LIGHT%d_HAS_RADIUS_FALLOFF'; Hash: 151; ),
     (Name: 'LIGHT%d_HAS_AMBIENT'      ; Hash: 131; ),
     (Name: 'LIGHT%d_HAS_SPECULAR'     ; Hash: 137; ),
     (Name: 'LIGHT%d_HAS_BEAM_WIDTH'   ; Hash: 139; ),
@@ -195,7 +246,11 @@ begin
       Define(ldHasAttenuation);
 
     if TAbstractPositionalLightNode(Node).HasRadius then
+    begin
       Define(ldHasRadius);
+      if TAbstractPositionalLightNode(Node).HasRadiusFalloff then
+        Define(ldHasRadiusFalloff);
+    end;
   end;
   if Node.FdAmbientIntensity.Value <> 0 then
     Define(ldHasAmbient);
@@ -206,6 +261,21 @@ begin
     Define(ldTypePunctual);
   if Node is TEnvironmentLightNode then
     Define(ldTypeEnvironment);
+
+  { The light's effects are part of the shader program.
+    Their uniform values are set when the program is linked
+    and when the Effect fields change, not before rendering each shape.
+    So shapes lit by lights with different Effect nodes cannot share
+    a shader program, even if the effects have the same code
+    (but different uniform values). Hash.AddEffects accounts for this,
+    by adding the Effect node references to the hash.
+
+    We also pass the light number, because the effect code is plugged
+    into the code of this specific light. Lights are numbered for each shape
+    (after filtering e.g. by radius), so the same light (with the same Effect)
+    may be 1st light for one shape, and 2nd light for another shape.
+    These shapes cannot share a shader program. }
+  Hash.AddEffects(Node.FdEffects, LightNumber + 1);
 end;
 
 function TLightShader.Code: TShaderSource;
@@ -245,7 +315,7 @@ begin
     FCode[LightingStage].Add(DefinesStr + LightShader);
 
     if Node <> nil then
-      Shader.EffectsGenerateCode(Node.FdEffects, FCode);
+      Shader.EffectsGenerateCode(Node.FdEffects, FCode, false, Number);
   end;
 
   Result := FCode;
@@ -267,6 +337,28 @@ begin
 end;
 
 procedure TLightShader.SetDynamicUniforms(AProgram: TX3DShaderProgram);
+
+  { Pass the light node's custom fields as uniforms with the light number.
+    They are per-light values of the light's effects, which may be shared
+    by many lights (then one shader program serves them all). }
+  procedure SetCustomFieldUniforms(const Uniforms: TLightUniforms);
+  var
+    I: Integer;
+    Field: TX3DField;
+  begin
+    for I := 0 to Node.InterfaceDeclarations.Count - 1 do
+    begin
+      Field := Node.InterfaceDeclarations[I].Field;
+      { Events have no value. Node (texture) fields are not supported
+        as per-light uniforms (a texture unit would have to be reserved
+        in every shader program using the effect). }
+      if (Field <> nil) and
+         (not (Field is TSFNode)) and
+         (not (Field is TMFNode)) then
+        Uniforms.SetCustomFieldUniform(AProgram, Field);
+    end;
+  end;
+
 var
   Uniforms: TLightUniforms;
   Color3, AmbientColor3: TVector3;
@@ -357,6 +449,10 @@ begin
     Uniforms.SetUniform('castle_LightSource%dAmbientColor', Uniforms.AmbientColor, AmbientColor3);
 
   Uniforms.SetUniform('castle_LightSource%dColor', Uniforms.Color, Color3);
+
+  if (Node.InterfaceDeclarations <> nil) and
+     (Node.InterfaceDeclarations.Count <> 0) then
+    SetCustomFieldUniforms(Uniforms);
 end;
 
 { TLightShaders -------------------------------------------------------------- }
