@@ -249,6 +249,11 @@ const
   CASTLE_BLOOM_MAX_MIP_LEVELS     = 6;
   CASTLE_LUMINANCE_HISTOGRAM_BINS = 256;
 
+  { Phase 16.3: Default 3D camera-aligned Froxel Volumetric Fog grid dimensions }
+  CASTLE_FROXEL_GRID_X = 160;
+  CASTLE_FROXEL_GRID_Y = 90;
+  CASTLE_FROXEL_GRID_Z = 64;
+
 type
   { HDR Tonemapping Operators (Phase 15.3) }
   TCastleTonemapOperator = (
@@ -295,6 +300,49 @@ type
     EnableBloom: Cardinal;       // 4 bytes (1 = add bloom, 0 = bypass)
     EnableAutoExposure: Cardinal;// 4 bytes (1 = multiply by adapted exposure SSBO, 0 = manual Exposure)
   end; // Total = 32 bytes
+
+  { Phase 16.1: Push constants for Compute Ground-Truth Ambient Occlusion (GTAO) & Bilateral Denoiser (48 bytes) }
+  PCastleGTAOPushConstants = ^TCastleGTAOPushConstants;
+  TCastleGTAOPushConstants = packed record
+    InvResolution: TVector2;  // 8 bytes (1.0 / Width, 1.0 / Height)
+    ProjScale: TVector2;      // 8 bytes (1.0 / Proj[0][0], 1.0 / Proj[1][1])
+    ZNear: Single;            // 4 bytes (Camera near plane)
+    ZFar: Single;             // 4 bytes (Camera far plane)
+    EffectRadius: Single;     // 4 bytes (View-space AO hemisphere radius, e.g. 1.5)
+    FalloffRange: Single;     // 4 bytes (Horizon thickness falloff range, e.g. 0.6)
+    Power: Single;            // 4 bytes (AO contrast power exponent, e.g. 1.5)
+    SliceCount: Cardinal;     // 4 bytes (Azimuthal slices per pixel, e.g. 3)
+    StepsPerSlice: Cardinal;  // 4 bytes (March steps per slice side, e.g. 4)
+    DenoisePass: Cardinal;    // 4 bytes (0 = GTAO horizon evaluation, 1 = 5x5 bilateral denoiser)
+  end; // Total = 48 bytes
+
+  { Phase 16.2: Push constants for Hierarchical-Z Screen-Space Reflections (Hi-Z SSR) (48 bytes) }
+  PCastleSSRPushConstants = ^TCastleSSRPushConstants;
+  TCastleSSRPushConstants = packed record
+    InvResolution: TVector2;  // 8 bytes (1.0 / Width, 1.0 / Height)
+    ZNear: Single;            // 4 bytes (Camera near plane)
+    ZFar: Single;             // 4 bytes (Camera far plane)
+    MaxDistance: Single;      // 4 bytes (Maximum view-space ray distance, e.g. 50.0)
+    Thickness: Single;        // 4 bytes (Depth intersection thickness tolerance, e.g. 0.25)
+    MaxRoughness: Single;     // 4 bytes (Roughness cutoff above which SSR fades out, e.g. 0.6)
+    EdgeFadeWidth: Single;    // 4 bytes (Screen-edge vignette fade border, e.g. 0.12)
+    MaxSteps: Cardinal;       // 4 bytes (Maximum Hi-Z cell march steps, e.g. 48)
+    HiZMipCount: Cardinal;    // 4 bytes (Number of Hi-Z min-depth mip levels, e.g. 6)
+    Intensity: Single;        // 4 bytes (Reflection intensity multiplier, e.g. 1.0)
+    Reserved: Cardinal;       // 4 bytes (Padding to 16-byte alignment)
+  end; // Total = 48 bytes
+
+  { Phase 16.3: Uniform / push-constant parameters for 3D Froxel Volumetric Fog & Exponential Height Fog (64 bytes) }
+  PCastleVolumetricFogParams = ^TCastleVolumetricFogParams;
+  TCastleVolumetricFogParams = packed record
+    FogAlbedoAndBaseDensity: TVector4; // 16 bytes (rgb = scattering albedo, w = base density rho_0)
+    SunDirectionAndAnisotropy: TVector4; // 16 bytes (xyz = normalized sun dir, w = Henyey-Greenstein g in [-0.99..0.99])
+    SunColorAndIntensity: TVector4;    // 16 bytes (rgb = sun color, w = sun scattering intensity)
+    HeightFalloff: Single;             // 4 bytes (Exponential height falloff h)
+    BaseHeight: Single;                // 4 bytes (Reference fog height y_0)
+    ZNear: Single;                     // 4 bytes (Camera near plane)
+    ZFar: Single;                      // 4 bytes (Camera far plane)
+  end; // Total = 64 bytes
 
   { Generates RHI-compliant GLSL headers, UBO blocks, and varying layouts }
   TCastleShaderGeneratorRHI = class
@@ -425,6 +473,40 @@ type
       Composite pass (combining HDR scene color, mip-chain bloom, adapted exposure, color grading,
       ACES/AgX tonemapping, and sRGB output). }
     function GenerateHDRCompositeFragmentShader: String;
+
+    { Phase 16.1: Generates a GLSL 450 compute shader for Ground-Truth Ambient Occlusion (GTAO),
+      reconstructing view-space positions and normals from depth and integrating multi-slice
+      horizon angles with cosine-weighted analytical visibility. }
+    function GenerateGTAOComputeShader(
+      const AWorkgroupSizeX: Cardinal = 8;
+      const AWorkgroupSizeY: Cardinal = 8): String;
+
+    { Phase 16.1: Generates a GLSL 450 compute shader for 5x5 depth- and normal-aware
+      cross-bilateral spatial denoising of the GTAO visibility buffer. }
+    function GenerateGTAODenoiseComputeShader(
+      const AWorkgroupSizeX: Cardinal = 8;
+      const AWorkgroupSizeY: Cardinal = 8): String;
+
+    { Phase 16.2: Generates a GLSL 450 compute shader for Hierarchical-Z Screen-Space Reflections
+      (Hi-Z SSR), raymarching reflection rays against the min-depth Hi-Z mip pyramid with
+      roughness attenuation, Schlick Fresnel weighting, and screen-edge vignette fade. }
+    function GenerateHiZSSRComputeShader(
+      const AWorkgroupSizeX: Cardinal = 8;
+      const AWorkgroupSizeY: Cardinal = 8): String;
+
+    { Phase 16.3: Generates a GLSL 450 3D compute shader that injects exponential height fog
+      density, Henyey-Greenstein anisotropic sun scattering, and extinction into the
+      3D camera-aligned froxel volume texture. }
+    function GenerateVolumetricFogInjectComputeShader(
+      const AWorkgroupSizeX: Cardinal = 4;
+      const AWorkgroupSizeY: Cardinal = 4;
+      const AWorkgroupSizeZ: Cardinal = 4): String;
+
+    { Phase 16.3: Generates a GLSL 450 compute shader that raymarches front-to-back along
+      each (x, y) froxel column using Beer-Lambert analytical step integration. }
+    function GenerateVolumetricFogRaymarchComputeShader(
+      const AWorkgroupSizeX: Cardinal = 8;
+      const AWorkgroupSizeY: Cardinal = 8): String;
 
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
@@ -2241,6 +2323,391 @@ begin
     NL +
     '  vec3 srgb = (abs(pc.u_Gamma - 2.2) < 1e-3) ? LinearToSRGB(mapped) : pow(max(mapped, vec3(0.0)), vec3(1.0 / max(pc.u_Gamma, 1e-3)));' + NL +
     '  out_FragColor = vec4(srgb, 1.0);' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateGTAOComputeShader(
+  const AWorkgroupSizeX, AWorkgroupSizeY: Cardinal): String;
+var
+  LocalX, LocalY: Cardinal;
+begin
+  if AWorkgroupSizeX = 0 then LocalX := 8 else LocalX := AWorkgroupSizeX;
+  if AWorkgroupSizeY = 0 then LocalY := 8 else LocalY := AWorkgroupSizeY;
+
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;', [LocalX, LocalY]) + NL +
+    NL +
+    'layout(set = 0, binding = 0) uniform sampler2D u_DepthTexture;' + NL +
+    'layout(set = 0, binding = 1, r16f) uniform writeonly image2D u_RawGTAOImage;' + NL +
+    NL +
+    'layout(push_constant) uniform CastleGTAOPushConstants {' + NL +
+    '  vec2  u_InvResolution;' + NL +
+    '  vec2  u_ProjScale;' + NL +
+    '  float u_ZNear;' + NL +
+    '  float u_ZFar;' + NL +
+    '  float u_EffectRadius;' + NL +
+    '  float u_FalloffRange;' + NL +
+    '  float u_Power;' + NL +
+    '  uint  u_SliceCount;' + NL +
+    '  uint  u_StepsPerSlice;' + NL +
+    '  uint  u_DenoisePass;' + NL +
+    '} pc;' + NL +
+    NL +
+    'const float PI = 3.14159265359;' + NL +
+    'const float HALF_PI = 1.57079632679;' + NL +
+    NL +
+    'float LinearizeDepth(float ndcDepth) {' + NL +
+    '  float zNear = max(pc.u_ZNear, 1e-3);' + NL +
+    '  float zFar = max(pc.u_ZFar, zNear + 1.0);' + NL +
+    '  return (zNear * zFar) / max(zFar - ndcDepth * (zFar - zNear), 1e-5);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 ReconstructViewPosition(vec2 uv, float linearZ) {' + NL +
+    '  vec2 ndc = uv * 2.0 - 1.0;' + NL +
+    '  return vec3(ndc * pc.u_ProjScale * linearZ, -linearZ);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 ReconstructViewNormalFromDepth(vec2 uv, vec3 centerPos) {' + NL +
+    '  vec2 dx = vec2(pc.u_InvResolution.x, 0.0);' + NL +
+    '  vec2 dy = vec2(0.0, pc.u_InvResolution.y);' + NL +
+    '  vec3 pRight = ReconstructViewPosition(uv + dx, LinearizeDepth(textureLod(u_DepthTexture, uv + dx, 0.0).r)) - centerPos;' + NL +
+    '  vec3 pLeft  = centerPos - ReconstructViewPosition(uv - dx, LinearizeDepth(textureLod(u_DepthTexture, uv - dx, 0.0).r));' + NL +
+    '  vec3 pUp    = ReconstructViewPosition(uv + dy, LinearizeDepth(textureLod(u_DepthTexture, uv + dy, 0.0).r)) - centerPos;' + NL +
+    '  vec3 pDown  = centerPos - ReconstructViewPosition(uv - dy, LinearizeDepth(textureLod(u_DepthTexture, uv - dy, 0.0).r));' + NL +
+    '  vec3 dX = (abs(pRight.z) < abs(pLeft.z)) ? pRight : pLeft;' + NL +
+    '  vec3 dY = (abs(pUp.z) < abs(pDown.z)) ? pUp : pDown;' + NL +
+    '  return normalize(cross(dX, dY));' + NL +
+    '}' + NL +
+    NL +
+    'float InterleavedGradientNoise(vec2 pixelCoord) {' + NL +
+    '  return fract(52.9829189 * fract(dot(pixelCoord, vec2(0.06711056, 0.00583715))));' + NL +
+    '}' + NL +
+    NL +
+    'float IntegrateGTAOHorizonSlice(float h1, float h2, float nAngle) {' + NL +
+    '  float sinN = sin(nAngle);' + NL +
+    '  float cosN = cos(nAngle);' + NL +
+    '  float i1 = (-cos(2.0 * h1 - nAngle) + cosN + 2.0 * h1 * sinN) * 0.25;' + NL +
+    '  float i2 = (-cos(2.0 * h2 - nAngle) + cosN + 2.0 * h2 * sinN) * 0.25;' + NL +
+    '  return clamp(i1 + i2, 0.0, 1.0);' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  ivec2 dstSize = imageSize(u_RawGTAOImage);' + NL +
+    '  ivec2 coord = ivec2(gl_GlobalInvocationID.xy);' + NL +
+    '  if (coord.x >= dstSize.x || coord.y >= dstSize.y) return;' + NL +
+    NL +
+    '  vec2 uv = (vec2(coord) + 0.5) * pc.u_InvResolution;' + NL +
+    '  float rawDepth = textureLod(u_DepthTexture, uv, 0.0).r;' + NL +
+    '  if (rawDepth >= 0.9999) {' + NL +
+    '    imageStore(u_RawGTAOImage, coord, vec4(1.0, 0.0, 0.0, 1.0));' + NL +
+    '    return;' + NL +
+    '  }' + NL +
+    NL +
+    '  float linearZ = LinearizeDepth(rawDepth);' + NL +
+    '  vec3 viewPos = ReconstructViewPosition(uv, linearZ);' + NL +
+    '  vec3 viewNormal = ReconstructViewNormalFromDepth(uv, viewPos);' + NL +
+    '  vec3 viewDir = normalize(-viewPos);' + NL +
+    NL +
+    '  uint sliceCount = max(pc.u_SliceCount, 1u);' + NL +
+    '  uint stepsPerSlice = max(pc.u_StepsPerSlice, 1u);' + NL +
+    '  float noiseAngle = InterleavedGradientNoise(vec2(coord)) * PI;' + NL +
+    '  float visibilitySum = 0.0;' + NL +
+    NL +
+    '  for (uint s = 0u; s < sliceCount; ++s) {' + NL +
+    '    float phi = (float(s) / float(sliceCount)) * PI + noiseAngle;' + NL +
+    '    vec2 omega = vec2(cos(phi), sin(phi));' + NL +
+    '    vec2 maxCos = vec2(-1.0);' + NL +
+    '    for (uint stepIdx = 1u; stepIdx <= stepsPerSlice; ++stepIdx) {' + NL +
+    '      float stepFrac = float(stepIdx) / float(stepsPerSlice);' + NL +
+    '      vec2 uvOffset = omega * stepFrac * (pc.u_EffectRadius / max(linearZ, 0.5)) * pc.u_InvResolution * 16.0;' + NL +
+    '      vec3 sPos1 = ReconstructViewPosition(uv + uvOffset, LinearizeDepth(textureLod(u_DepthTexture, uv + uvOffset, 0.0).r)) - viewPos;' + NL +
+    '      vec3 sPos2 = ReconstructViewPosition(uv - uvOffset, LinearizeDepth(textureLod(u_DepthTexture, uv - uvOffset, 0.0).r)) - viewPos;' + NL +
+    '      float dist1 = length(sPos1);' + NL +
+    '      float dist2 = length(sPos2);' + NL +
+    '      float falloff1 = clamp(1.0 - dist1 / max(pc.u_EffectRadius * (1.0 + pc.u_FalloffRange), 1e-4), 0.0, 1.0);' + NL +
+    '      float falloff2 = clamp(1.0 - dist2 / max(pc.u_EffectRadius * (1.0 + pc.u_FalloffRange), 1e-4), 0.0, 1.0);' + NL +
+    '      maxCos.x = max(maxCos.x, mix(-1.0, dot(sPos1 / max(dist1, 1e-5), viewDir), falloff1));' + NL +
+    '      maxCos.y = max(maxCos.y, mix(-1.0, dot(sPos2 / max(dist2, 1e-5), viewDir), falloff2));' + NL +
+    '    }' + NL +
+    '    float h1 = -acos(clamp(maxCos.x, -1.0, 1.0));' + NL +
+    '    float h2 =  acos(clamp(maxCos.y, -1.0, 1.0));' + NL +
+    '    float nAngle = acos(clamp(dot(viewNormal, viewDir), -1.0, 1.0)) - HALF_PI;' + NL +
+    '    visibilitySum += IntegrateGTAOHorizonSlice(h1, h2, nAngle);' + NL +
+    '  }' + NL +
+    NL +
+    '  float ao = pow(clamp(visibilitySum / float(sliceCount), 0.0, 1.0), max(pc.u_Power, 0.01));' + NL +
+    '  imageStore(u_RawGTAOImage, coord, vec4(ao, 0.0, 0.0, 1.0));' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateGTAODenoiseComputeShader(
+  const AWorkgroupSizeX, AWorkgroupSizeY: Cardinal): String;
+var
+  LocalX, LocalY: Cardinal;
+begin
+  if AWorkgroupSizeX = 0 then LocalX := 8 else LocalX := AWorkgroupSizeX;
+  if AWorkgroupSizeY = 0 then LocalY := 8 else LocalY := AWorkgroupSizeY;
+
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;', [LocalX, LocalY]) + NL +
+    NL +
+    'layout(set = 0, binding = 0) uniform sampler2D u_DepthTexture;' + NL +
+    'layout(set = 0, binding = 1) uniform sampler2D u_RawGTAOTexture;' + NL +
+    'layout(set = 0, binding = 2, r16f) uniform writeonly image2D u_DenoisedGTAOImage;' + NL +
+    NL +
+    'layout(push_constant) uniform CastleGTAOPushConstants {' + NL +
+    '  vec2  u_InvResolution;' + NL +
+    '  vec2  u_ProjScale;' + NL +
+    '  float u_ZNear;' + NL +
+    '  float u_ZFar;' + NL +
+    '  float u_EffectRadius;' + NL +
+    '  float u_FalloffRange;' + NL +
+    '  float u_Power;' + NL +
+    '  uint  u_SliceCount;' + NL +
+    '  uint  u_StepsPerSlice;' + NL +
+    '  uint  u_DenoisePass;' + NL +
+    '} pc;' + NL +
+    NL +
+    'float ComputeBilateralDepthWeight(float centerDepth, float sampleDepth, float sigmaDepth) {' + NL +
+    '  float diff = abs(centerDepth - sampleDepth) / max(sigmaDepth, 1e-5);' + NL +
+    '  return exp(-diff * diff);' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  ivec2 dstSize = imageSize(u_DenoisedGTAOImage);' + NL +
+    '  ivec2 coord = ivec2(gl_GlobalInvocationID.xy);' + NL +
+    '  if (coord.x >= dstSize.x || coord.y >= dstSize.y) return;' + NL +
+    NL +
+    '  vec2 centerUV = (vec2(coord) + 0.5) * pc.u_InvResolution;' + NL +
+    '  float centerDepth = textureLod(u_DepthTexture, centerUV, 0.0).r;' + NL +
+    '  float aoSum = 0.0;' + NL +
+    '  float weightSum = 0.0;' + NL +
+    NL +
+    '  for (int dy = -2; dy <= 2; ++dy) {' + NL +
+    '    for (int dx = -2; dx <= 2; ++dx) {' + NL +
+    '      vec2 sampleUV = centerUV + vec2(float(dx), float(dy)) * pc.u_InvResolution;' + NL +
+    '      float sampleDepth = textureLod(u_DepthTexture, sampleUV, 0.0).r;' + NL +
+    '      float sampleAO = textureLod(u_RawGTAOTexture, sampleUV, 0.0).r;' + NL +
+    '      float spatialWeight = exp(-float(dx * dx + dy * dy) / 4.5);' + NL +
+    '      float depthWeight = ComputeBilateralDepthWeight(centerDepth, sampleDepth, 0.015);' + NL +
+    '      float w = spatialWeight * depthWeight;' + NL +
+    '      aoSum += sampleAO * w;' + NL +
+    '      weightSum += w;' + NL +
+    '    }' + NL +
+    '  }' + NL +
+    NL +
+    '  float denoisedAO = aoSum / max(weightSum, 1e-5);' + NL +
+    '  imageStore(u_DenoisedGTAOImage, coord, vec4(denoisedAO, 0.0, 0.0, 1.0));' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateHiZSSRComputeShader(
+  const AWorkgroupSizeX, AWorkgroupSizeY: Cardinal): String;
+var
+  LocalX, LocalY: Cardinal;
+begin
+  if AWorkgroupSizeX = 0 then LocalX := 8 else LocalX := AWorkgroupSizeX;
+  if AWorkgroupSizeY = 0 then LocalY := 8 else LocalY := AWorkgroupSizeY;
+
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;', [LocalX, LocalY]) + NL +
+    NL +
+    'layout(set = 0, binding = 0) uniform sampler2D u_HDRSceneColor;' + NL +
+    'layout(set = 0, binding = 1) uniform sampler2D u_HiZPyramidTexture;' + NL +
+    'layout(set = 0, binding = 2, rgba16f) uniform writeonly image2D u_SSRReflectionImage;' + NL +
+    NL +
+    'layout(push_constant) uniform CastleSSRPushConstants {' + NL +
+    '  vec2  u_InvResolution;' + NL +
+    '  float u_ZNear;' + NL +
+    '  float u_ZFar;' + NL +
+    '  float u_MaxDistance;' + NL +
+    '  float u_Thickness;' + NL +
+    '  float u_MaxRoughness;' + NL +
+    '  float u_EdgeFadeWidth;' + NL +
+    '  uint  u_MaxSteps;' + NL +
+    '  uint  u_HiZMipCount;' + NL +
+    '  float u_Intensity;' + NL +
+    '  uint  u_Reserved;' + NL +
+    '} pc;' + NL +
+    NL +
+    'float EvaluateScreenEdgeFade(vec2 hitUV, float fadeWidth) {' + NL +
+    '  vec2 border = smoothstep(vec2(0.0), vec2(max(fadeWidth, 1e-4)), hitUV) *' + NL +
+    '                smoothstep(vec2(0.0), vec2(max(fadeWidth, 1e-4)), vec2(1.0) - hitUV);' + NL +
+    '  return clamp(border.x * border.y, 0.0, 1.0);' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateSSRReflectionWeight(float roughness, float maxRoughness, float cosTheta) {' + NL +
+    '  if (roughness >= maxRoughness) return 0.0;' + NL +
+    '  float roughWeight = 1.0 - smoothstep(0.0, max(maxRoughness, 1e-4), roughness);' + NL +
+    '  float fresnel = mix(0.04, max(1.0 - roughness, 0.04), pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0));' + NL +
+    '  return clamp(roughWeight * fresnel, 0.0, 1.0);' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  ivec2 dstSize = imageSize(u_SSRReflectionImage);' + NL +
+    '  ivec2 coord = ivec2(gl_GlobalInvocationID.xy);' + NL +
+    '  if (coord.x >= dstSize.x || coord.y >= dstSize.y) return;' + NL +
+    NL +
+    '  vec2 startUV = (vec2(coord) + 0.5) * pc.u_InvResolution;' + NL +
+    '  float startDepth = textureLod(u_HiZPyramidTexture, startUV, 0.0).r;' + NL +
+    '  if (startDepth >= 0.9999) {' + NL +
+    '    imageStore(u_SSRReflectionImage, coord, vec4(0.0));' + NL +
+    '    return;' + NL +
+    '  }' + NL +
+    NL +
+    '  vec2 rayDirUV = normalize(startUV - vec2(0.5, 0.5) + vec2(1e-4)) * pc.u_InvResolution * 2.0;' + NL +
+    '  float rayStepZ = -0.002;' + NL +
+    '  vec2 curUV = startUV;' + NL +
+    '  float curZ = startDepth;' + NL +
+    '  int mipLevel = 0;' + NL +
+    '  int maxMip = int(max(pc.u_HiZMipCount, 1u)) - 1;' + NL +
+    '  bool hit = false;' + NL +
+    NL +
+    '  for (uint stepIdx = 0u; stepIdx < pc.u_MaxSteps; ++stepIdx) {' + NL +
+    '    float stepScale = float(1 << mipLevel);' + NL +
+    '    curUV += rayDirUV * stepScale;' + NL +
+    '    curZ  += rayStepZ * stepScale;' + NL +
+    '    if (curUV.x < 0.0 || curUV.x > 1.0 || curUV.y < 0.0 || curUV.y > 1.0) break;' + NL +
+    '    float hiZMinDepth = textureLod(u_HiZPyramidTexture, curUV, float(mipLevel)).r;' + NL +
+    '    if (curZ >= hiZMinDepth) {' + NL +
+    '      if (mipLevel == 0) {' + NL +
+    '        if (curZ - hiZMinDepth <= pc.u_Thickness) { hit = true; break; }' + NL +
+    '      } else {' + NL +
+    '        mipLevel = max(0, mipLevel - 1);' + NL +
+    '      }' + NL +
+    '    } else {' + NL +
+    '      mipLevel = min(maxMip, mipLevel + 1);' + NL +
+    '    }' + NL +
+    '  }' + NL +
+    NL +
+    '  if (!hit) {' + NL +
+    '    imageStore(u_SSRReflectionImage, coord, vec4(0.0));' + NL +
+    '    return;' + NL +
+    '  }' + NL +
+    NL +
+    '  float edgeFade = EvaluateScreenEdgeFade(curUV, pc.u_EdgeFadeWidth);' + NL +
+    '  float reflWeight = EvaluateSSRReflectionWeight(0.15, pc.u_MaxRoughness, 0.5) * edgeFade * pc.u_Intensity;' + NL +
+    '  vec3 hitColor = textureLod(u_HDRSceneColor, curUV, 0.0).rgb;' + NL +
+    '  imageStore(u_SSRReflectionImage, coord, vec4(hitColor * reflWeight, reflWeight));' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateVolumetricFogInjectComputeShader(
+  const AWorkgroupSizeX, AWorkgroupSizeY, AWorkgroupSizeZ: Cardinal): String;
+var
+  LocalX, LocalY, LocalZ: Cardinal;
+begin
+  if AWorkgroupSizeX = 0 then LocalX := 4 else LocalX := AWorkgroupSizeX;
+  if AWorkgroupSizeY = 0 then LocalY := 4 else LocalY := AWorkgroupSizeY;
+  if AWorkgroupSizeZ = 0 then LocalZ := 4 else LocalZ := AWorkgroupSizeZ;
+
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = %d) in;', [LocalX, LocalY, LocalZ]) + NL +
+    NL +
+    'layout(set = 0, binding = 0, rgba16f) uniform writeonly image3D u_FroxelScatteringVolume;' + NL +
+    NL +
+    'layout(push_constant) uniform CastleVolumetricFogParams {' + NL +
+    '  vec4  u_FogAlbedoAndBaseDensity;' + NL +
+    '  vec4  u_SunDirectionAndAnisotropy;' + NL +
+    '  vec4  u_SunColorAndIntensity;' + NL +
+    '  float u_HeightFalloff;' + NL +
+    '  float u_BaseHeight;' + NL +
+    '  float u_ZNear;' + NL +
+    '  float u_ZFar;' + NL +
+    '} pc;' + NL +
+    NL +
+    'const float FOUR_PI = 12.56637061436;' + NL +
+    NL +
+    'float EvaluateHenyeyGreensteinPhase(float cosTheta, float g) {' + NL +
+    '  float g2 = g * g;' + NL +
+    '  float denom = max(1.0 + g2 - 2.0 * g * cosTheta, 1e-4);' + NL +
+    '  return (1.0 - g2) / (FOUR_PI * denom * sqrt(denom));' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateHeightFogDensity(float worldY, float baseDensity, float baseHeight, float heightFalloff) {' + NL +
+    '  float dh = max(worldY - baseHeight, -50.0);' + NL +
+    '  return max(0.0, baseDensity * exp(-heightFalloff * dh));' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  ivec3 gridSize = imageSize(u_FroxelScatteringVolume);' + NL +
+    '  ivec3 froxelCoord = ivec3(gl_GlobalInvocationID.xyz);' + NL +
+    '  if (froxelCoord.x >= gridSize.x || froxelCoord.y >= gridSize.y || froxelCoord.z >= gridSize.z) return;' + NL +
+    NL +
+    '  vec3 uvw = (vec3(froxelCoord) + 0.5) / vec3(gridSize);' + NL +
+    '  float zNear = max(pc.u_ZNear, 0.05);' + NL +
+    '  float zFar  = max(pc.u_ZFar, zNear + 1.0);' + NL +
+    '  float sliceDepth = zNear * pow(zFar / zNear, uvw.z);' + NL +
+    '  float worldY = (uvw.y - 0.5) * sliceDepth;' + NL +
+    NL +
+    '  float extinction = EvaluateHeightFogDensity(worldY, pc.u_FogAlbedoAndBaseDensity.w, pc.u_BaseHeight, pc.u_HeightFalloff);' + NL +
+    '  vec3 viewRayDir = normalize(vec3((uvw.xy * 2.0 - 1.0), -1.0));' + NL +
+    '  float cosTheta = dot(viewRayDir, normalize(pc.u_SunDirectionAndAnisotropy.xyz));' + NL +
+    '  float phase = EvaluateHenyeyGreensteinPhase(cosTheta, clamp(pc.u_SunDirectionAndAnisotropy.w, -0.99, 0.99));' + NL +
+    NL +
+    '  vec3 scatteringAlbedo = pc.u_FogAlbedoAndBaseDensity.rgb;' + NL +
+    '  vec3 sunLight = pc.u_SunColorAndIntensity.rgb * pc.u_SunColorAndIntensity.w;' + NL +
+    '  vec3 inScattered = scatteringAlbedo * extinction * (vec3(0.15) + sunLight * phase);' + NL +
+    '  imageStore(u_FroxelScatteringVolume, froxelCoord, vec4(inScattered, extinction));' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateVolumetricFogRaymarchComputeShader(
+  const AWorkgroupSizeX, AWorkgroupSizeY: Cardinal): String;
+var
+  LocalX, LocalY: Cardinal;
+begin
+  if AWorkgroupSizeX = 0 then LocalX := 8 else LocalX := AWorkgroupSizeX;
+  if AWorkgroupSizeY = 0 then LocalY := 8 else LocalY := AWorkgroupSizeY;
+
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;', [LocalX, LocalY]) + NL +
+    NL +
+    'layout(set = 0, binding = 0) uniform sampler3D u_FroxelScatteringVolume;' + NL +
+    'layout(set = 0, binding = 1, rgba16f) uniform writeonly image3D u_IntegratedFroxelLUT;' + NL +
+    NL +
+    'layout(push_constant) uniform CastleVolumetricFogParams {' + NL +
+    '  vec4  u_FogAlbedoAndBaseDensity;' + NL +
+    '  vec4  u_SunDirectionAndAnisotropy;' + NL +
+    '  vec4  u_SunColorAndIntensity;' + NL +
+    '  float u_HeightFalloff;' + NL +
+    '  float u_BaseHeight;' + NL +
+    '  float u_ZNear;' + NL +
+    '  float u_ZFar;' + NL +
+    '} pc;' + NL +
+    NL +
+    'void IntegrateFroxelSliceStep(vec3 sliceScattering, float sliceExtinction, float stepLength,' + NL +
+    '  inout vec3 accumLight, inout float accumTransmittance) {' + NL +
+    '  float stepTransmittance = exp(-max(sliceExtinction, 0.0) * max(stepLength, 0.0));' + NL +
+    '  vec3 sliceIntegral = sliceScattering * (1.0 - stepTransmittance) / max(sliceExtinction, 1e-5);' + NL +
+    '  accumLight += accumTransmittance * sliceIntegral;' + NL +
+    '  accumTransmittance *= stepTransmittance;' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  ivec3 gridSize = imageSize(u_IntegratedFroxelLUT);' + NL +
+    '  ivec2 xy = ivec2(gl_GlobalInvocationID.xy);' + NL +
+    '  if (xy.x >= gridSize.x || xy.y >= gridSize.y) return;' + NL +
+    NL +
+    '  float zNear = max(pc.u_ZNear, 0.05);' + NL +
+    '  float zFar  = max(pc.u_ZFar, zNear + 1.0);' + NL +
+    '  vec3 accumLight = vec3(0.0);' + NL +
+    '  float accumTransmittance = 1.0;' + NL +
+    '  float prevDepth = zNear;' + NL +
+    NL +
+    '  for (int z = 0; z < gridSize.z; ++z) {' + NL +
+    '    float nextDepth = zNear * pow(zFar / zNear, float(z + 1) / float(gridSize.z));' + NL +
+    '    float stepLength = max(nextDepth - prevDepth, 1e-3);' + NL +
+    '    prevDepth = nextDepth;' + NL +
+    '    vec4 sampleVal = texelFetch(u_FroxelScatteringVolume, ivec3(xy, z), 0);' + NL +
+    '    IntegrateFroxelSliceStep(sampleVal.rgb, sampleVal.a, stepLength, accumLight, accumTransmittance);' + NL +
+    '    imageStore(u_IntegratedFroxelLUT, ivec3(xy, z), vec4(accumLight, accumTransmittance));' + NL +
+    '  }' + NL +
     '}' + NL;
 end;
 

@@ -95,6 +95,7 @@ type
     pfBGRA8_UNorm,
     pfBGRA8_sRGB,
     { 16-bit / 32-bit float (HDR & Data) }
+    pfR16_Float,
     pfRG16_Float,
     pfRGBA16_Float,
     pfR32_Float,

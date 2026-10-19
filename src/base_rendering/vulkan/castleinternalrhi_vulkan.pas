@@ -1222,6 +1222,217 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Phase 16.1: Compute Ground-Truth Ambient Occlusion (GTAO) & Denoiser       }
+  { -------------------------------------------------------------------------- }
+
+  TCastleVulkanGTAO = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FWidth: Cardinal;
+    FHeight: Cardinal;
+    FHalfResolution: Boolean;
+    FRawGTAOTexture: TVulkanRHITexture;
+    FDenoisedGTAOTexture: TVulkanRHITexture;
+    FLinearClampSampler: TRHISampler;
+    FGTAODescriptorLayout: TRHIDescriptorSetLayout;
+    FGTAODescriptorSet: TRHIDescriptorSet;
+    FDenoiseDescriptorLayout: TRHIDescriptorSetLayout;
+    FDenoiseDescriptorSet: TRHIDescriptorSet;
+    FGTAOShader: TRHIShaderModule;
+    FDenoiseShader: TRHIShaderModule;
+    FGTAOPipeline: TRHIComputePipeline;
+    FDenoisePipeline: TRHIComputePipeline;
+    FEffectRadius: Single;
+    FFalloffRange: Single;
+    FPower: Single;
+    FZNear: Single;
+    FZFar: Single;
+    FSliceCount: Cardinal;
+    FStepsPerSlice: Cardinal;
+    FTotalGTAODispatches: Cardinal;
+    FTotalDenoiseDispatches: Cardinal;
+    procedure EnsurePipelinesCreated;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Allocates or resizes the Raw and Denoised pfR16_Float GTAO targets. }
+    procedure EnsureGTAOTargets(const AWidth, AHeight: Cardinal;
+      const AHalfResolution: Boolean = False);
+
+    { Dispatches the multi-slice GTAO horizon integral compute shader followed by the
+      5x5 depth-aware cross-bilateral spatial denoiser. Returns total dispatches (2). }
+    function DispatchGTAO(const ACmd: TRHICommandList;
+      const ADepthTexture: TRHITexture): Cardinal;
+
+    { Exact reference evaluators matching the GLSL 450 GTAO & bilateral filter shaders }
+    class function ReconstructViewPosition(const AUV, AProjScale: TVector2;
+      const ALinearZ: Single): TVector3; static;
+    class function IntegrateGTAOHorizonSlice(const AH1, AH2, ANormalAngle: Single): Single; static;
+    class function ComputeBilateralDepthWeight(const ACenterDepth, ASampleDepth,
+      ASigmaDepth: Single): Single; static;
+    function EvaluateGTAOFromHorizonCosines(const AMaxCos1, AMaxCos2,
+      ANormalAngle: Single): Single;
+
+    property Width: Cardinal read FWidth;
+    property Height: Cardinal read FHeight;
+    property HalfResolution: Boolean read FHalfResolution;
+    property RawGTAOTexture: TVulkanRHITexture read FRawGTAOTexture;
+    property DenoisedGTAOTexture: TVulkanRHITexture read FDenoisedGTAOTexture;
+    property GTAOPipeline: TRHIComputePipeline read FGTAOPipeline;
+    property DenoisePipeline: TRHIComputePipeline read FDenoisePipeline;
+    property EffectRadius: Single read FEffectRadius write FEffectRadius;
+    property FalloffRange: Single read FFalloffRange write FFalloffRange;
+    property Power: Single read FPower write FPower;
+    property ZNear: Single read FZNear write FZNear;
+    property ZFar: Single read FZFar write FZFar;
+    property SliceCount: Cardinal read FSliceCount write FSliceCount;
+    property StepsPerSlice: Cardinal read FStepsPerSlice write FStepsPerSlice;
+    property TotalGTAODispatches: Cardinal read FTotalGTAODispatches;
+    property TotalDenoiseDispatches: Cardinal read FTotalDenoiseDispatches;
+  end;
+
+  { -------------------------------------------------------------------------- }
+  { Phase 16.2: Hierarchical-Z Screen-Space Reflections (Hi-Z SSR)             }
+  { -------------------------------------------------------------------------- }
+
+  TCastleVulkanSSR = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FWidth: Cardinal;
+    FHeight: Cardinal;
+    FSSRReflectionTexture: TVulkanRHITexture;
+    FLinearClampSampler: TRHISampler;
+    FSSRDescriptorLayout: TRHIDescriptorSetLayout;
+    FSSRDescriptorSet: TRHIDescriptorSet;
+    FSSRShader: TRHIShaderModule;
+    FSSRPipeline: TRHIComputePipeline;
+    FZNear: Single;
+    FZFar: Single;
+    FMaxDistance: Single;
+    FThickness: Single;
+    FMaxRoughness: Single;
+    FEdgeFadeWidth: Single;
+    FIntensity: Single;
+    FMaxSteps: Cardinal;
+    FHiZMipCount: Cardinal;
+    FTotalSSRDispatches: Cardinal;
+    procedure EnsurePipelineCreated;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Allocates or resizes the pfRGBA16_Float SSR reflection output texture. }
+    procedure EnsureSSRTarget(const AWidth, AHeight: Cardinal);
+
+    { Dispatches the Hi-Z Screen-Space Reflections compute shader. }
+    function DispatchSSR(const ACmd: TRHICommandList;
+      const AHDRSceneColor, AHiZPyramid: TRHITexture): Cardinal;
+
+    { Exact reference evaluators matching the GLSL 450 Hi-Z SSR compute shader }
+    class function EvaluateScreenEdgeFade(const AHitUV: TVector2;
+      const AFadeWidth: Single): Single; static;
+    class function EvaluateSSRReflectionWeight(const ARoughness, AMaxRoughness,
+      ACosTheta: Single): Single; static;
+    function RaymarchHiZ1D(const AHiZMip0Depths: array of Single;
+      const AStartCell: Integer; const AStartDepth, ARayStepZ: Single;
+      out AHitCell: Integer; out AHitSteps: Cardinal): Boolean;
+
+    property Width: Cardinal read FWidth;
+    property Height: Cardinal read FHeight;
+    property SSRReflectionTexture: TVulkanRHITexture read FSSRReflectionTexture;
+    property SSRPipeline: TRHIComputePipeline read FSSRPipeline;
+    property ZNear: Single read FZNear write FZNear;
+    property ZFar: Single read FZFar write FZFar;
+    property MaxDistance: Single read FMaxDistance write FMaxDistance;
+    property Thickness: Single read FThickness write FThickness;
+    property MaxRoughness: Single read FMaxRoughness write FMaxRoughness;
+    property EdgeFadeWidth: Single read FEdgeFadeWidth write FEdgeFadeWidth;
+    property Intensity: Single read FIntensity write FIntensity;
+    property MaxSteps: Cardinal read FMaxSteps write FMaxSteps;
+    property HiZMipCount: Cardinal read FHiZMipCount write FHiZMipCount;
+    property TotalSSRDispatches: Cardinal read FTotalSSRDispatches;
+  end;
+
+  { -------------------------------------------------------------------------- }
+  { Phase 16.3: 3D Froxel Volumetric Fog & Exponential Height Fog              }
+  { -------------------------------------------------------------------------- }
+
+  TCastleVulkanVolumetricFog = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FGridX: Cardinal;
+    FGridY: Cardinal;
+    FGridZ: Cardinal;
+    FFroxelScatteringVolume: TVulkanRHITexture;
+    FIntegratedFroxelLUT: TVulkanRHITexture;
+    FLinearClampSampler: TRHISampler;
+    FInjectDescriptorLayout: TRHIDescriptorSetLayout;
+    FInjectDescriptorSet: TRHIDescriptorSet;
+    FRaymarchDescriptorLayout: TRHIDescriptorSetLayout;
+    FRaymarchDescriptorSet: TRHIDescriptorSet;
+    FInjectShader: TRHIShaderModule;
+    FRaymarchShader: TRHIShaderModule;
+    FInjectPipeline: TRHIComputePipeline;
+    FRaymarchPipeline: TRHIComputePipeline;
+    FFogAlbedo: TVector3;
+    FBaseDensity: Single;
+    FSunDirection: TVector3;
+    FAnisotropyG: Single;
+    FSunColor: TVector3;
+    FSunIntensity: Single;
+    FHeightFalloff: Single;
+    FBaseHeight: Single;
+    FZNear: Single;
+    FZFar: Single;
+    FTotalInjectDispatches: Cardinal;
+    FTotalRaymarchDispatches: Cardinal;
+    procedure EnsurePipelinesCreated;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Allocates or resizes the 3D Froxel Scattering Volume and Integrated Froxel LUT (td3D, pfRGBA16_Float). }
+    procedure EnsureFroxelVolumes(
+      const AGridX: Cardinal = CASTLE_FROXEL_GRID_X;
+      const AGridY: Cardinal = CASTLE_FROXEL_GRID_Y;
+      const AGridZ: Cardinal = CASTLE_FROXEL_GRID_Z);
+
+    { Dispatches the 3D Froxel Density/Scattering Injection pass followed by the
+      front-to-back Beer-Lambert Raymarching Integration pass. Returns total dispatches (2). }
+    function DispatchVolumetricFog(const ACmd: TRHICommandList): Cardinal;
+
+    { Exact reference evaluators matching the GLSL 450 Volumetric Fog compute shaders }
+    class function EvaluateHenyeyGreensteinPhase(const ACosTheta,
+      AAnisotropyG: Single): Single; static;
+    class function EvaluateHeightFogDensity(const AWorldY, ABaseDensity,
+      ABaseHeight, AHeightFalloff: Single): Single; static;
+    class procedure IntegrateFroxelSliceStep(const ASliceScattering: TVector3;
+      const ASliceExtinction, AStepLength: Single;
+      var AAccumLight: TVector3; var AAccumTransmittance: Single); static;
+
+    property GridX: Cardinal read FGridX;
+    property GridY: Cardinal read FGridY;
+    property GridZ: Cardinal read FGridZ;
+    property FroxelScatteringVolume: TVulkanRHITexture read FFroxelScatteringVolume;
+    property IntegratedFroxelLUT: TVulkanRHITexture read FIntegratedFroxelLUT;
+    property InjectPipeline: TRHIComputePipeline read FInjectPipeline;
+    property RaymarchPipeline: TRHIComputePipeline read FRaymarchPipeline;
+    property FogAlbedo: TVector3 read FFogAlbedo write FFogAlbedo;
+    property BaseDensity: Single read FBaseDensity write FBaseDensity;
+    property SunDirection: TVector3 read FSunDirection write FSunDirection;
+    property AnisotropyG: Single read FAnisotropyG write FAnisotropyG;
+    property SunColor: TVector3 read FSunColor write FSunColor;
+    property SunIntensity: Single read FSunIntensity write FSunIntensity;
+    property HeightFalloff: Single read FHeightFalloff write FHeightFalloff;
+    property BaseHeight: Single read FBaseHeight write FBaseHeight;
+    property ZNear: Single read FZNear write FZNear;
+    property ZFar: Single read FZFar write FZFar;
+    property TotalInjectDispatches: Cardinal read FTotalInjectDispatches;
+    property TotalRaymarchDispatches: Cardinal read FTotalRaymarchDispatches;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -1288,7 +1499,7 @@ type
     FDeferredDeletions: array[0 .. MaxFramesInFlight - 1] of array of TVulkanDeferredDeletionItem;
     FDeferResourceDestruction: Boolean;
 
-    { GPU memory sub-allocator (pooled blocks + per-frame ring buffers), async staging uploader, bindless manager, timestamp profiler, compute culler, IBL generator, clustered culler, shadow atlas & HDR post-processor }
+    { GPU memory sub-allocator (pooled blocks + per-frame ring buffers), async staging uploader, bindless manager, timestamp profiler, compute culler, IBL generator, clustered culler, shadow atlas, HDR post-processor, GTAO, SSR & volumetric fog }
     FMemoryAllocator: TCastleVulkanMemoryAllocator;
     FStagingUploader: TCastleVulkanStagingUploader;
     FBindlessTextureManager: TCastleVulkanBindlessTextureManager;
@@ -1298,6 +1509,9 @@ type
     FClusteredLightCuller: TCastleVulkanClusteredLightCuller;
     FShadowAtlas: TCastleVulkanShadowAtlas;
     FHDRPostProcessor: TCastleVulkanHDRPostProcessor;
+    FGTAO: TCastleVulkanGTAO;
+    FSSR: TCastleVulkanSSR;
+    FVolumetricFog: TCastleVulkanVolumetricFog;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -1379,6 +1593,9 @@ type
     function GetClusteredLightCuller: TCastleVulkanClusteredLightCuller;
     function GetShadowAtlas: TCastleVulkanShadowAtlas;
     function GetHDRPostProcessor: TCastleVulkanHDRPostProcessor;
+    function GetGTAO: TCastleVulkanGTAO;
+    function GetSSR: TCastleVulkanSSR;
+    function GetVolumetricFog: TCastleVulkanVolumetricFog;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -1565,6 +1782,9 @@ type
     property ClusteredLightCuller: TCastleVulkanClusteredLightCuller read GetClusteredLightCuller;
     property ShadowAtlas: TCastleVulkanShadowAtlas read GetShadowAtlas;
     property HDRPostProcessor: TCastleVulkanHDRPostProcessor read GetHDRPostProcessor;
+    property GTAO: TCastleVulkanGTAO read GetGTAO;
+    property SSR: TCastleVulkanSSR read GetSSR;
+    property VolumetricFog: TCastleVulkanVolumetricFog read GetVolumetricFog;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -2316,6 +2536,7 @@ begin
     pfRGBA8_sRGB:         Result := VK_FORMAT_R8G8B8A8_SRGB;
     pfBGRA8_UNorm:        Result := VK_FORMAT_B8G8R8A8_UNORM;
     pfBGRA8_sRGB:         Result := VK_FORMAT_B8G8R8A8_SRGB;
+    pfR16_Float:          Result := VK_FORMAT_R16_SFLOAT;
     pfRG16_Float:         Result := VK_FORMAT_R16G16_SFLOAT;
     pfRGBA16_Float:       Result := VK_FORMAT_R16G16B16A16_SFLOAT;
     pfR32_Float:          Result := VK_FORMAT_R32_SFLOAT;
@@ -9069,6 +9290,765 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanGTAO                                                            }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanGTAO.Create(const ADevice: TVulkanRHIDevice);
+var
+  SamplerDesc: TRHISamplerDesc;
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FEffectRadius := 1.5;
+  FFalloffRange := 0.6;
+  FPower := 1.5;
+  FZNear := 0.1;
+  FZFar := 500.0;
+  FSliceCount := 3;
+  FStepsPerSlice := 4;
+
+  if FDevice <> nil then
+  begin
+    FillChar(SamplerDesc, SizeOf(SamplerDesc), 0);
+    SamplerDesc.MinFilter := sfLinear;
+    SamplerDesc.MagFilter := sfLinear;
+    SamplerDesc.MipFilter := sfLinear;
+    SamplerDesc.AddressModeU := amClampToEdge;
+    SamplerDesc.AddressModeV := amClampToEdge;
+    SamplerDesc.AddressModeW := amClampToEdge;
+    SamplerDesc.MaxAnisotropy := 1.0;
+    FLinearClampSampler := FDevice.CreateSampler(SamplerDesc);
+  end;
+end;
+
+destructor TCastleVulkanGTAO.Destroy;
+begin
+  FGTAOPipeline := nil;
+  FDenoisePipeline := nil;
+  FreeAndNil(FDenoiseShader);
+  FreeAndNil(FGTAOShader);
+  FreeAndNil(FDenoiseDescriptorSet);
+  FreeAndNil(FDenoiseDescriptorLayout);
+  FreeAndNil(FGTAODescriptorSet);
+  FreeAndNil(FGTAODescriptorLayout);
+  FreeAndNil(FDenoisedGTAOTexture);
+  FreeAndNil(FRawGTAOTexture);
+  FreeAndNil(FLinearClampSampler);
+  inherited;
+end;
+
+procedure TCastleVulkanGTAO.EnsurePipelinesCreated;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  GTAOBindings: array[0..1] of TRHIDescriptorBindingDesc;
+  DenoiseBindings: array[0..2] of TRHIDescriptorBindingDesc;
+  CompDesc: TRHIComputePipelineDesc;
+begin
+  if (FDevice = nil) or (FGTAOPipeline <> nil) then
+    Exit;
+
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    FGTAOShader := FDevice.CreateShaderModuleFromGLSL(
+      ssCompute, Gen.GenerateGTAOComputeShader(8, 8), 'GTAOHorizon_CS');
+    FDenoiseShader := FDevice.CreateShaderModuleFromGLSL(
+      ssCompute, Gen.GenerateGTAODenoiseComputeShader(8, 8), 'GTAODenoise_CS');
+
+    FillChar(GTAOBindings, SizeOf(GTAOBindings), 0);
+    GTAOBindings[0].Binding := 0;
+    GTAOBindings[0].DescriptorType := dtCombinedImageSampler;
+    GTAOBindings[0].Count := 1;
+    GTAOBindings[0].StageFlags := [ssCompute];
+
+    GTAOBindings[1].Binding := 1;
+    GTAOBindings[1].DescriptorType := dtStorageImage;
+    GTAOBindings[1].Count := 1;
+    GTAOBindings[1].StageFlags := [ssCompute];
+
+    FGTAODescriptorLayout := FDevice.CreateDescriptorSetLayout(GTAOBindings);
+    FGTAODescriptorSet := FDevice.CreateDescriptorSet(FGTAODescriptorLayout);
+
+    FillChar(DenoiseBindings, SizeOf(DenoiseBindings), 0);
+    DenoiseBindings[0] := GTAOBindings[0];
+    DenoiseBindings[1].Binding := 1;
+    DenoiseBindings[1].DescriptorType := dtCombinedImageSampler;
+    DenoiseBindings[1].Count := 1;
+    DenoiseBindings[1].StageFlags := [ssCompute];
+
+    DenoiseBindings[2].Binding := 2;
+    DenoiseBindings[2].DescriptorType := dtStorageImage;
+    DenoiseBindings[2].Count := 1;
+    DenoiseBindings[2].StageFlags := [ssCompute];
+
+    FDenoiseDescriptorLayout := FDevice.CreateDescriptorSetLayout(DenoiseBindings);
+    FDenoiseDescriptorSet := FDevice.CreateDescriptorSet(FDenoiseDescriptorLayout);
+
+    FillChar(CompDesc, SizeOf(CompDesc), 0);
+    CompDesc.ComputeShader := FGTAOShader;
+    SetLength(CompDesc.DescriptorSetLayouts, 1);
+    CompDesc.DescriptorSetLayouts[0] := FGTAODescriptorLayout;
+    CompDesc.PushConstantSize := SizeOf(TCastleGTAOPushConstants);
+    CompDesc.PushConstantStages := [ssCompute];
+    CompDesc.DebugName := 'GTAOHorizonComputePSO';
+    FGTAOPipeline := FDevice.GetOrCreateComputePipeline(CompDesc);
+
+    CompDesc.ComputeShader := FDenoiseShader;
+    CompDesc.DescriptorSetLayouts[0] := FDenoiseDescriptorLayout;
+    CompDesc.DebugName := 'GTAODenoiseComputePSO';
+    FDenoisePipeline := FDevice.GetOrCreateComputePipeline(CompDesc);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TCastleVulkanGTAO.EnsureGTAOTargets(const AWidth, AHeight: Cardinal;
+  const AHalfResolution: Boolean);
+var
+  TargetW, TargetH: Cardinal;
+  TexDesc: TRHITextureDesc;
+begin
+  if AHalfResolution then
+  begin
+    TargetW := Max(Cardinal(1), AWidth div 2);
+    TargetH := Max(Cardinal(1), AHeight div 2);
+  end else
+  begin
+    TargetW := Max(Cardinal(1), AWidth);
+    TargetH := Max(Cardinal(1), AHeight);
+  end;
+
+  if (FRawGTAOTexture <> nil) and (FWidth = TargetW) and (FHeight = TargetH) and
+     (FHalfResolution = AHalfResolution) then
+    Exit;
+
+  FWidth := TargetW;
+  FHeight := TargetH;
+  FHalfResolution := AHalfResolution;
+
+  FreeAndNil(FRawGTAOTexture);
+  FreeAndNil(FDenoisedGTAOTexture);
+
+  if FDevice = nil then
+    Exit;
+
+  TexDesc := TRHITextureDesc.Create2D(
+    FWidth, FHeight, pfR16_Float,
+    [tuSampled, tuStorage, tuColorAttachment], 1, 1);
+  TexDesc.DebugName := 'GTAORawTexture';
+  FRawGTAOTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+
+  TexDesc.DebugName := 'GTAODenoisedTexture';
+  FDenoisedGTAOTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+end;
+
+function TCastleVulkanGTAO.DispatchGTAO(const ACmd: TRHICommandList;
+  const ADepthTexture: TRHITexture): Cardinal;
+var
+  PC: TCastleGTAOPushConstants;
+  GroupsX, GroupsY: Cardinal;
+begin
+  Result := 0;
+  if (ACmd = nil) or (FDevice = nil) then
+    Exit;
+
+  if FRawGTAOTexture = nil then
+  begin
+    if ADepthTexture <> nil then
+      EnsureGTAOTargets(ADepthTexture.Desc.Width, ADepthTexture.Desc.Height, FHalfResolution)
+    else
+      EnsureGTAOTargets(1280, 720, FHalfResolution);
+  end;
+
+  EnsurePipelinesCreated;
+
+  FillChar(PC, SizeOf(PC), 0);
+  PC.InvResolution := Vector2(1.0 / Max(Cardinal(1), FWidth), 1.0 / Max(Cardinal(1), FHeight));
+  PC.ProjScale := Vector2(1.0, 1.0);
+  PC.ZNear := FZNear;
+  PC.ZFar := FZFar;
+  PC.EffectRadius := FEffectRadius;
+  PC.FalloffRange := FFalloffRange;
+  PC.Power := FPower;
+  PC.SliceCount := Max(Cardinal(1), FSliceCount);
+  PC.StepsPerSlice := Max(Cardinal(1), FStepsPerSlice);
+
+  GroupsX := (FWidth + 7) div 8;
+  GroupsY := (FHeight + 7) div 8;
+
+  { 1. Raw GTAO Horizon Integral Pass }
+  PC.DenoisePass := 0;
+  ACmd.TransitionTexture(FRawGTAOTexture, rsTransferDst);
+  if ADepthTexture <> nil then
+    FGTAODescriptorSet.BindTexture(0, ADepthTexture, FLinearClampSampler);
+  FGTAODescriptorSet.BindTexture(1, FRawGTAOTexture, FLinearClampSampler);
+  FGTAODescriptorSet.Update;
+
+  ACmd.BindComputePipeline(FGTAOPipeline);
+  ACmd.BindComputeDescriptorSet(0, FGTAODescriptorSet, []);
+  ACmd.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+  ACmd.Dispatch(GroupsX, GroupsY, 1);
+  Inc(FTotalGTAODispatches);
+  Inc(Result);
+
+  { 2. 5x5 Depth-Aware Cross-Bilateral Spatial Denoiser Pass }
+  PC.DenoisePass := 1;
+  ACmd.TransitionTexture(FRawGTAOTexture, rsShaderRead);
+  ACmd.TransitionTexture(FDenoisedGTAOTexture, rsTransferDst);
+  if ADepthTexture <> nil then
+    FDenoiseDescriptorSet.BindTexture(0, ADepthTexture, FLinearClampSampler);
+  FDenoiseDescriptorSet.BindTexture(1, FRawGTAOTexture, FLinearClampSampler);
+  FDenoiseDescriptorSet.BindTexture(2, FDenoisedGTAOTexture, FLinearClampSampler);
+  FDenoiseDescriptorSet.Update;
+
+  ACmd.BindComputePipeline(FDenoisePipeline);
+  ACmd.BindComputeDescriptorSet(0, FDenoiseDescriptorSet, []);
+  ACmd.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+  ACmd.Dispatch(GroupsX, GroupsY, 1);
+  ACmd.TransitionTexture(FDenoisedGTAOTexture, rsShaderRead);
+  Inc(FTotalDenoiseDispatches);
+  Inc(Result);
+end;
+
+class function TCastleVulkanGTAO.ReconstructViewPosition(
+  const AUV, AProjScale: TVector2; const ALinearZ: Single): TVector3;
+var
+  NDC: TVector2;
+begin
+  NDC := Vector2(AUV.X * 2.0 - 1.0, AUV.Y * 2.0 - 1.0);
+  Result := Vector3(NDC.X * AProjScale.X * ALinearZ, NDC.Y * AProjScale.Y * ALinearZ, -ALinearZ);
+end;
+
+class function TCastleVulkanGTAO.IntegrateGTAOHorizonSlice(
+  const AH1, AH2, ANormalAngle: Single): Single;
+var
+  SinN, CosN, I1, I2: Single;
+begin
+  SinN := Sin(ANormalAngle);
+  CosN := Cos(ANormalAngle);
+  I1 := (-Cos(2.0 * AH1 - ANormalAngle) + CosN + 2.0 * AH1 * SinN) * 0.25;
+  I2 := (-Cos(2.0 * AH2 - ANormalAngle) + CosN + 2.0 * AH2 * SinN) * 0.25;
+  Result := EnsureRange(I1 + I2, 0.0, 1.0);
+end;
+
+class function TCastleVulkanGTAO.ComputeBilateralDepthWeight(
+  const ACenterDepth, ASampleDepth, ASigmaDepth: Single): Single;
+var
+  Diff: Single;
+begin
+  Diff := Abs(ACenterDepth - ASampleDepth) / Max(1e-5, ASigmaDepth);
+  Result := Exp(-Diff * Diff);
+end;
+
+function TCastleVulkanGTAO.EvaluateGTAOFromHorizonCosines(
+  const AMaxCos1, AMaxCos2, ANormalAngle: Single): Single;
+var
+  H1, H2, SliceVis: Single;
+begin
+  H1 := -ArcCos(EnsureRange(AMaxCos1, -1.0, 1.0));
+  H2 :=  ArcCos(EnsureRange(AMaxCos2, -1.0, 1.0));
+  SliceVis := IntegrateGTAOHorizonSlice(H1, H2, ANormalAngle);
+  Result := Math.Power(EnsureRange(SliceVis, 0.0, 1.0), Max(0.01, FPower));
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanSSR                                                             }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanSSR.Create(const ADevice: TVulkanRHIDevice);
+var
+  SamplerDesc: TRHISamplerDesc;
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FZNear := 0.1;
+  FZFar := 500.0;
+  FMaxDistance := 50.0;
+  FThickness := 0.25;
+  FMaxRoughness := 0.6;
+  FEdgeFadeWidth := 0.12;
+  FIntensity := 1.0;
+  FMaxSteps := 48;
+  FHiZMipCount := 6;
+
+  if FDevice <> nil then
+  begin
+    FillChar(SamplerDesc, SizeOf(SamplerDesc), 0);
+    SamplerDesc.MinFilter := sfLinear;
+    SamplerDesc.MagFilter := sfLinear;
+    SamplerDesc.MipFilter := sfLinear;
+    SamplerDesc.AddressModeU := amClampToEdge;
+    SamplerDesc.AddressModeV := amClampToEdge;
+    SamplerDesc.AddressModeW := amClampToEdge;
+    SamplerDesc.MaxAnisotropy := 1.0;
+    FLinearClampSampler := FDevice.CreateSampler(SamplerDesc);
+  end;
+end;
+
+destructor TCastleVulkanSSR.Destroy;
+begin
+  FSSRPipeline := nil;
+  FreeAndNil(FSSRShader);
+  FreeAndNil(FSSRDescriptorSet);
+  FreeAndNil(FSSRDescriptorLayout);
+  FreeAndNil(FSSRReflectionTexture);
+  FreeAndNil(FLinearClampSampler);
+  inherited;
+end;
+
+procedure TCastleVulkanSSR.EnsurePipelineCreated;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  Bindings: array[0..2] of TRHIDescriptorBindingDesc;
+  CompDesc: TRHIComputePipelineDesc;
+begin
+  if (FDevice = nil) or (FSSRPipeline <> nil) then
+    Exit;
+
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    FSSRShader := FDevice.CreateShaderModuleFromGLSL(
+      ssCompute, Gen.GenerateHiZSSRComputeShader(8, 8), 'HiZSSR_CS');
+
+    FillChar(Bindings, SizeOf(Bindings), 0);
+    Bindings[0].Binding := 0;
+    Bindings[0].DescriptorType := dtCombinedImageSampler;
+    Bindings[0].Count := 1;
+    Bindings[0].StageFlags := [ssCompute];
+
+    Bindings[1].Binding := 1;
+    Bindings[1].DescriptorType := dtCombinedImageSampler;
+    Bindings[1].Count := 1;
+    Bindings[1].StageFlags := [ssCompute];
+
+    Bindings[2].Binding := 2;
+    Bindings[2].DescriptorType := dtStorageImage;
+    Bindings[2].Count := 1;
+    Bindings[2].StageFlags := [ssCompute];
+
+    FSSRDescriptorLayout := FDevice.CreateDescriptorSetLayout(Bindings);
+    FSSRDescriptorSet := FDevice.CreateDescriptorSet(FSSRDescriptorLayout);
+
+    FillChar(CompDesc, SizeOf(CompDesc), 0);
+    CompDesc.ComputeShader := FSSRShader;
+    SetLength(CompDesc.DescriptorSetLayouts, 1);
+    CompDesc.DescriptorSetLayouts[0] := FSSRDescriptorLayout;
+    CompDesc.PushConstantSize := SizeOf(TCastleSSRPushConstants);
+    CompDesc.PushConstantStages := [ssCompute];
+    CompDesc.DebugName := 'HiZSSRComputePSO';
+    FSSRPipeline := FDevice.GetOrCreateComputePipeline(CompDesc);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TCastleVulkanSSR.EnsureSSRTarget(const AWidth, AHeight: Cardinal);
+var
+  TargetW, TargetH: Cardinal;
+  TexDesc: TRHITextureDesc;
+begin
+  TargetW := Max(Cardinal(1), AWidth);
+  TargetH := Max(Cardinal(1), AHeight);
+  if (FSSRReflectionTexture <> nil) and (FWidth = TargetW) and (FHeight = TargetH) then
+    Exit;
+
+  FWidth := TargetW;
+  FHeight := TargetH;
+  FreeAndNil(FSSRReflectionTexture);
+
+  if FDevice = nil then
+    Exit;
+
+  TexDesc := TRHITextureDesc.Create2D(
+    FWidth, FHeight, pfRGBA16_Float,
+    [tuSampled, tuStorage, tuColorAttachment], 1, 1);
+  TexDesc.DebugName := 'HiZSSRReflectionTexture';
+  FSSRReflectionTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+end;
+
+function TCastleVulkanSSR.DispatchSSR(const ACmd: TRHICommandList;
+  const AHDRSceneColor, AHiZPyramid: TRHITexture): Cardinal;
+var
+  PC: TCastleSSRPushConstants;
+  GroupsX, GroupsY: Cardinal;
+begin
+  Result := 0;
+  if (ACmd = nil) or (FDevice = nil) then
+    Exit;
+
+  if FSSRReflectionTexture = nil then
+  begin
+    if AHDRSceneColor <> nil then
+      EnsureSSRTarget(AHDRSceneColor.Desc.Width, AHDRSceneColor.Desc.Height)
+    else
+      EnsureSSRTarget(1280, 720);
+  end;
+
+  EnsurePipelineCreated;
+
+  FillChar(PC, SizeOf(PC), 0);
+  PC.InvResolution := Vector2(1.0 / Max(Cardinal(1), FWidth), 1.0 / Max(Cardinal(1), FHeight));
+  PC.ZNear := FZNear;
+  PC.ZFar := FZFar;
+  PC.MaxDistance := FMaxDistance;
+  PC.Thickness := FThickness;
+  PC.MaxRoughness := FMaxRoughness;
+  PC.EdgeFadeWidth := FEdgeFadeWidth;
+  PC.MaxSteps := Max(Cardinal(1), FMaxSteps);
+  PC.HiZMipCount := Max(Cardinal(1), FHiZMipCount);
+  PC.Intensity := FIntensity;
+
+  ACmd.TransitionTexture(FSSRReflectionTexture, rsTransferDst);
+  if AHDRSceneColor <> nil then
+    FSSRDescriptorSet.BindTexture(0, AHDRSceneColor, FLinearClampSampler);
+  if AHiZPyramid <> nil then
+    FSSRDescriptorSet.BindTexture(1, AHiZPyramid, FLinearClampSampler);
+  FSSRDescriptorSet.BindTexture(2, FSSRReflectionTexture, FLinearClampSampler);
+  FSSRDescriptorSet.Update;
+
+  GroupsX := (FWidth + 7) div 8;
+  GroupsY := (FHeight + 7) div 8;
+
+  ACmd.BindComputePipeline(FSSRPipeline);
+  ACmd.BindComputeDescriptorSet(0, FSSRDescriptorSet, []);
+  ACmd.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+  ACmd.Dispatch(GroupsX, GroupsY, 1);
+  ACmd.TransitionTexture(FSSRReflectionTexture, rsShaderRead);
+
+  Inc(FTotalSSRDispatches);
+  Result := 1;
+end;
+
+class function TCastleVulkanSSR.EvaluateScreenEdgeFade(
+  const AHitUV: TVector2; const AFadeWidth: Single): Single;
+  function SmoothStep01(const Edge0, Edge1, X: Single): Single;
+  var
+    T: Single;
+  begin
+    T := EnsureRange((X - Edge0) / Max(1e-5, Edge1 - Edge0), 0.0, 1.0);
+    Result := T * T * (3.0 - 2.0 * T);
+  end;
+var
+  FW, BX, BY: Single;
+begin
+  FW := Max(1e-4, AFadeWidth);
+  BX := SmoothStep01(0.0, FW, AHitUV.X) * SmoothStep01(0.0, FW, 1.0 - AHitUV.X);
+  BY := SmoothStep01(0.0, FW, AHitUV.Y) * SmoothStep01(0.0, FW, 1.0 - AHitUV.Y);
+  Result := EnsureRange(BX * BY, 0.0, 1.0);
+end;
+
+class function TCastleVulkanSSR.EvaluateSSRReflectionWeight(
+  const ARoughness, AMaxRoughness, ACosTheta: Single): Single;
+var
+  T, RoughWeight, Fresnel: Single;
+begin
+  if ARoughness >= AMaxRoughness then
+    Exit(0.0);
+  T := EnsureRange(ARoughness / Max(1e-4, AMaxRoughness), 0.0, 1.0);
+  RoughWeight := 1.0 - (T * T * (3.0 - 2.0 * T));
+  Fresnel := 0.04 + (Max(0.04, 1.0 - ARoughness) - 0.04) *
+    Math.Power(EnsureRange(1.0 - ACosTheta, 0.0, 1.0), 5.0);
+  Result := EnsureRange(RoughWeight * Fresnel, 0.0, 1.0);
+end;
+
+function TCastleVulkanSSR.RaymarchHiZ1D(
+  const AHiZMip0Depths: array of Single;
+  const AStartCell: Integer; const AStartDepth, ARayStepZ: Single;
+  out AHitCell: Integer; out AHitSteps: Cardinal): Boolean;
+  function SampleHiZMin(const CellIdx, MipLevel: Integer): Single;
+  var
+    Span, BaseIdx, I, EndIdx: Integer;
+  begin
+    Span := 1 shl MipLevel;
+    BaseIdx := (CellIdx div Span) * Span;
+    EndIdx := Min(High(AHiZMip0Depths), BaseIdx + Span - 1);
+    Result := AHiZMip0Depths[EnsureRange(BaseIdx, 0, High(AHiZMip0Depths))];
+    for I := BaseIdx + 1 to EndIdx do
+      if AHiZMip0Depths[I] < Result then
+        Result := AHiZMip0Depths[I];
+  end;
+var
+  CurCell, NextCell, CellEnd, MipLevel, MaxMip, StepScale: Integer;
+  CurZ, CellMaxRayZ, MinDepth: Single;
+begin
+  Result := False;
+  AHitCell := -1;
+  AHitSteps := 0;
+  if Length(AHiZMip0Depths) = 0 then
+    Exit;
+
+  CurCell := AStartCell;
+  CurZ := AStartDepth;
+  MipLevel := 0;
+  MaxMip := Min(Integer(FHiZMipCount) - 1, 4);
+
+  while (AHitSteps < FMaxSteps) and (CurCell <= High(AHiZMip0Depths)) do
+  begin
+    Inc(AHitSteps);
+    StepScale := 1 shl MipLevel;
+    NextCell := ((CurCell div StepScale) + 1) * StepScale;
+    CellEnd := Min(High(AHiZMip0Depths), NextCell - 1);
+    CurZ := AStartDepth + Single(CurCell - AStartCell) * ARayStepZ;
+    CellMaxRayZ := Max(CurZ, AStartDepth + Single(CellEnd - AStartCell) * ARayStepZ);
+    MinDepth := SampleHiZMin(CurCell, MipLevel);
+    if CellMaxRayZ >= MinDepth then
+    begin
+      if MipLevel = 0 then
+      begin
+        if (CurZ - MinDepth) <= FThickness then
+        begin
+          AHitCell := CurCell;
+          Exit(True);
+        end;
+        Inc(CurCell);
+      end else
+        Dec(MipLevel);
+    end else
+    begin
+      CurCell := NextCell;
+      MipLevel := Min(MaxMip, MipLevel + 1);
+    end;
+  end;
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanVolumetricFog                                                   }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanVolumetricFog.Create(const ADevice: TVulkanRHIDevice);
+var
+  SamplerDesc: TRHISamplerDesc;
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FFogAlbedo := Vector3(0.9, 0.92, 0.95);
+  FBaseDensity := 0.025;
+  FSunDirection := Vector3(-0.4, -0.8, -0.44).Normalize;
+  FAnisotropyG := 0.65;
+  FSunColor := Vector3(1.0, 0.95, 0.85);
+  FSunIntensity := 4.0;
+  FHeightFalloff := 0.08;
+  FBaseHeight := 0.0;
+  FZNear := 0.5;
+  FZFar := 200.0;
+
+  if FDevice <> nil then
+  begin
+    FillChar(SamplerDesc, SizeOf(SamplerDesc), 0);
+    SamplerDesc.MinFilter := sfLinear;
+    SamplerDesc.MagFilter := sfLinear;
+    SamplerDesc.MipFilter := sfLinear;
+    SamplerDesc.AddressModeU := amClampToEdge;
+    SamplerDesc.AddressModeV := amClampToEdge;
+    SamplerDesc.AddressModeW := amClampToEdge;
+    SamplerDesc.MaxAnisotropy := 1.0;
+    FLinearClampSampler := FDevice.CreateSampler(SamplerDesc);
+  end;
+end;
+
+destructor TCastleVulkanVolumetricFog.Destroy;
+begin
+  FInjectPipeline := nil;
+  FRaymarchPipeline := nil;
+  FreeAndNil(FRaymarchShader);
+  FreeAndNil(FInjectShader);
+  FreeAndNil(FRaymarchDescriptorSet);
+  FreeAndNil(FRaymarchDescriptorLayout);
+  FreeAndNil(FInjectDescriptorSet);
+  FreeAndNil(FInjectDescriptorLayout);
+  FreeAndNil(FIntegratedFroxelLUT);
+  FreeAndNil(FFroxelScatteringVolume);
+  FreeAndNil(FLinearClampSampler);
+  inherited;
+end;
+
+procedure TCastleVulkanVolumetricFog.EnsurePipelinesCreated;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  InjectBindings: array[0..0] of TRHIDescriptorBindingDesc;
+  RaymarchBindings: array[0..1] of TRHIDescriptorBindingDesc;
+  CompDesc: TRHIComputePipelineDesc;
+begin
+  if (FDevice = nil) or (FInjectPipeline <> nil) then
+    Exit;
+
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    FInjectShader := FDevice.CreateShaderModuleFromGLSL(
+      ssCompute, Gen.GenerateVolumetricFogInjectComputeShader(4, 4, 4), 'VolumetricFogInject_CS');
+    FRaymarchShader := FDevice.CreateShaderModuleFromGLSL(
+      ssCompute, Gen.GenerateVolumetricFogRaymarchComputeShader(8, 8), 'VolumetricFogRaymarch_CS');
+
+    FillChar(InjectBindings, SizeOf(InjectBindings), 0);
+    InjectBindings[0].Binding := 0;
+    InjectBindings[0].DescriptorType := dtStorageImage;
+    InjectBindings[0].Count := 1;
+    InjectBindings[0].StageFlags := [ssCompute];
+
+    FInjectDescriptorLayout := FDevice.CreateDescriptorSetLayout(InjectBindings);
+    FInjectDescriptorSet := FDevice.CreateDescriptorSet(FInjectDescriptorLayout);
+
+    FillChar(RaymarchBindings, SizeOf(RaymarchBindings), 0);
+    RaymarchBindings[0].Binding := 0;
+    RaymarchBindings[0].DescriptorType := dtCombinedImageSampler;
+    RaymarchBindings[0].Count := 1;
+    RaymarchBindings[0].StageFlags := [ssCompute];
+
+    RaymarchBindings[1].Binding := 1;
+    RaymarchBindings[1].DescriptorType := dtStorageImage;
+    RaymarchBindings[1].Count := 1;
+    RaymarchBindings[1].StageFlags := [ssCompute];
+
+    FRaymarchDescriptorLayout := FDevice.CreateDescriptorSetLayout(RaymarchBindings);
+    FRaymarchDescriptorSet := FDevice.CreateDescriptorSet(FRaymarchDescriptorLayout);
+
+    FillChar(CompDesc, SizeOf(CompDesc), 0);
+    CompDesc.ComputeShader := FInjectShader;
+    SetLength(CompDesc.DescriptorSetLayouts, 1);
+    CompDesc.DescriptorSetLayouts[0] := FInjectDescriptorLayout;
+    CompDesc.PushConstantSize := SizeOf(TCastleVolumetricFogParams);
+    CompDesc.PushConstantStages := [ssCompute];
+    CompDesc.DebugName := 'VolumetricFogInjectComputePSO';
+    FInjectPipeline := FDevice.GetOrCreateComputePipeline(CompDesc);
+
+    CompDesc.ComputeShader := FRaymarchShader;
+    CompDesc.DescriptorSetLayouts[0] := FRaymarchDescriptorLayout;
+    CompDesc.DebugName := 'VolumetricFogRaymarchComputePSO';
+    FRaymarchPipeline := FDevice.GetOrCreateComputePipeline(CompDesc);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TCastleVulkanVolumetricFog.EnsureFroxelVolumes(
+  const AGridX, AGridY, AGridZ: Cardinal);
+var
+  GX, GY, GZ: Cardinal;
+  TexDesc: TRHITextureDesc;
+begin
+  GX := Max(Cardinal(1), AGridX);
+  GY := Max(Cardinal(1), AGridY);
+  GZ := Max(Cardinal(1), AGridZ);
+
+  if (FFroxelScatteringVolume <> nil) and
+     (FGridX = GX) and (FGridY = GY) and (FGridZ = GZ) then
+    Exit;
+
+  FGridX := GX;
+  FGridY := GY;
+  FGridZ := GZ;
+
+  FreeAndNil(FFroxelScatteringVolume);
+  FreeAndNil(FIntegratedFroxelLUT);
+
+  if FDevice = nil then
+    Exit;
+
+  FillChar(TexDesc, SizeOf(TexDesc), 0);
+  TexDesc.Dimension := td3D;
+  TexDesc.Format := pfRGBA16_Float;
+  TexDesc.Width := FGridX;
+  TexDesc.Height := FGridY;
+  TexDesc.DepthOrArrayLayers := FGridZ;
+  TexDesc.MipLevels := 1;
+  TexDesc.SampleCount := 1;
+  TexDesc.Usage := [tuSampled, tuStorage];
+  TexDesc.DebugName := 'FroxelScatteringVolume3D';
+  FFroxelScatteringVolume := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+
+  TexDesc.DebugName := 'IntegratedFroxelLUT3D';
+  FIntegratedFroxelLUT := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+end;
+
+function TCastleVulkanVolumetricFog.DispatchVolumetricFog(
+  const ACmd: TRHICommandList): Cardinal;
+var
+  Params: TCastleVolumetricFogParams;
+begin
+  Result := 0;
+  if (ACmd = nil) or (FDevice = nil) then
+    Exit;
+
+  if FFroxelScatteringVolume = nil then
+    EnsureFroxelVolumes;
+
+  EnsurePipelinesCreated;
+
+  FillChar(Params, SizeOf(Params), 0);
+  Params.FogAlbedoAndBaseDensity := Vector4(FFogAlbedo.X, FFogAlbedo.Y, FFogAlbedo.Z, FBaseDensity);
+  Params.SunDirectionAndAnisotropy := Vector4(FSunDirection.X, FSunDirection.Y, FSunDirection.Z,
+    EnsureRange(FAnisotropyG, -0.99, 0.99));
+  Params.SunColorAndIntensity := Vector4(FSunColor.X, FSunColor.Y, FSunColor.Z, FSunIntensity);
+  Params.HeightFalloff := FHeightFalloff;
+  Params.BaseHeight := FBaseHeight;
+  Params.ZNear := FZNear;
+  Params.ZFar := FZFar;
+
+  { 1. 3D Froxel Density & Anisotropic Scattering Injection Pass }
+  ACmd.TransitionTexture(FFroxelScatteringVolume, rsTransferDst);
+  FInjectDescriptorSet.BindTexture(0, FFroxelScatteringVolume, FLinearClampSampler);
+  FInjectDescriptorSet.Update;
+
+  ACmd.BindComputePipeline(FInjectPipeline);
+  ACmd.BindComputeDescriptorSet(0, FInjectDescriptorSet, []);
+  ACmd.PushConstants([ssCompute], 0, SizeOf(Params), Params);
+  ACmd.Dispatch((FGridX + 3) div 4, (FGridY + 3) div 4, (FGridZ + 3) div 4);
+  Inc(FTotalInjectDispatches);
+  Inc(Result);
+
+  { 2. Front-to-Back Beer-Lambert Froxel Raymarching Integration Pass }
+  ACmd.TransitionTexture(FFroxelScatteringVolume, rsShaderRead);
+  ACmd.TransitionTexture(FIntegratedFroxelLUT, rsTransferDst);
+  FRaymarchDescriptorSet.BindTexture(0, FFroxelScatteringVolume, FLinearClampSampler);
+  FRaymarchDescriptorSet.BindTexture(1, FIntegratedFroxelLUT, FLinearClampSampler);
+  FRaymarchDescriptorSet.Update;
+
+  ACmd.BindComputePipeline(FRaymarchPipeline);
+  ACmd.BindComputeDescriptorSet(0, FRaymarchDescriptorSet, []);
+  ACmd.PushConstants([ssCompute], 0, SizeOf(Params), Params);
+  ACmd.Dispatch((FGridX + 7) div 8, (FGridY + 7) div 8, 1);
+  ACmd.TransitionTexture(FIntegratedFroxelLUT, rsShaderRead);
+  Inc(FTotalRaymarchDispatches);
+  Inc(Result);
+end;
+
+class function TCastleVulkanVolumetricFog.EvaluateHenyeyGreensteinPhase(
+  const ACosTheta, AAnisotropyG: Single): Single;
+const
+  FOUR_PI = 12.56637061436;
+var
+  G, G2, Denom: Single;
+begin
+  G := EnsureRange(AAnisotropyG, -0.99, 0.99);
+  G2 := G * G;
+  Denom := Max(1e-4, 1.0 + G2 - 2.0 * G * EnsureRange(ACosTheta, -1.0, 1.0));
+  Result := (1.0 - G2) / (FOUR_PI * Denom * Sqrt(Denom));
+end;
+
+class function TCastleVulkanVolumetricFog.EvaluateHeightFogDensity(
+  const AWorldY, ABaseDensity, ABaseHeight, AHeightFalloff: Single): Single;
+var
+  DH: Single;
+begin
+  DH := Max(-50.0, AWorldY - ABaseHeight);
+  Result := Max(0.0, ABaseDensity * Exp(-AHeightFalloff * DH));
+end;
+
+class procedure TCastleVulkanVolumetricFog.IntegrateFroxelSliceStep(
+  const ASliceScattering: TVector3;
+  const ASliceExtinction, AStepLength: Single;
+  var AAccumLight: TVector3; var AAccumTransmittance: Single);
+var
+  StepTransmittance, InvExt: Single;
+  SliceIntegral: TVector3;
+begin
+  StepTransmittance := Exp(-Max(0.0, ASliceExtinction) * Max(0.0, AStepLength));
+  InvExt := (1.0 - StepTransmittance) / Max(1e-5, ASliceExtinction);
+  SliceIntegral := ASliceScattering * InvExt;
+  AAccumLight := AAccumLight + (SliceIntegral * AAccumTransmittance);
+  AAccumTransmittance := AAccumTransmittance * StepTransmittance;
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -9499,12 +10479,36 @@ begin
   Result := FHDRPostProcessor;
 end;
 
+function TVulkanRHIDevice.GetGTAO: TCastleVulkanGTAO;
+begin
+  if FGTAO = nil then
+    FGTAO := TCastleVulkanGTAO.Create(Self);
+  Result := FGTAO;
+end;
+
+function TVulkanRHIDevice.GetSSR: TCastleVulkanSSR;
+begin
+  if FSSR = nil then
+    FSSR := TCastleVulkanSSR.Create(Self);
+  Result := FSSR;
+end;
+
+function TVulkanRHIDevice.GetVolumetricFog: TCastleVulkanVolumetricFog;
+begin
+  if FVolumetricFog = nil then
+    FVolumetricFog := TCastleVulkanVolumetricFog.Create(Self);
+  Result := FVolumetricFog;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FVolumetricFog);
+  FreeAndNil(FSSR);
+  FreeAndNil(FGTAO);
   FreeAndNil(FHDRPostProcessor);
   FreeAndNil(FShadowAtlas);
   FreeAndNil(FClusteredLightCuller);

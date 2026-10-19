@@ -114,6 +114,9 @@ type
     procedure TestDeclarativeRenderGraphAndTransientAliasingRHI;
     procedure TestHDRBloomPyramidAndAutoExposureComputeRHI;
     procedure TestACESFilmicAndAgXTonemappingCompositeRHI;
+    procedure TestComputeGTAOAndBilateralDenoiserRHI;
+    procedure TestHierarchicalZScreenSpaceReflectionsRHI;
+    procedure TestFroxelVolumetricFogAndHeightFogRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -6290,6 +6293,299 @@ begin
     FreeAndNil(CmdList);
     FreeAndNil(Graph);
     FreeAndNil(LDRTarget);
+    FreeAndNil(Gen);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestComputeGTAOAndBilateralDenoiserRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  GTAO: TCastleVulkanGTAO;
+  Gen: TCastleShaderGeneratorRHI;
+  CmdList: TVulkanRHICommandList;
+  DepthTex: TRHITexture;
+  DepthDesc: TRHITextureDesc;
+  GTAOGLSL, DenoiseGLSL: String;
+  CSGTAO, CSDenoise: TRHIShaderModule;
+  ViewPos: TVector3;
+  OpenVis, CornerVis, CavityVis, WCoplanar, WEdge: Single;
+  Dispatches: Cardinal;
+begin
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  CmdList := nil;
+  DepthTex := nil;
+  CSGTAO := nil;
+  CSDenoise := nil;
+  try
+    { 1. Verify struct size and GLSL 450 GTAO & Bilateral Denoiser compute shader generation }
+    AssertEquals('TCastleGTAOPushConstants size must be 48 bytes',
+      48, SizeOf(TCastleGTAOPushConstants));
+
+    GTAOGLSL := Gen.GenerateGTAOComputeShader;
+    DenoiseGLSL := Gen.GenerateGTAODenoiseComputeShader;
+
+    AssertTrue('GTAO GLSL must include ReconstructViewPosition',
+      Pos('vec3 ReconstructViewPosition(vec2 uv, float linearZ)', GTAOGLSL) > 0);
+    AssertTrue('GTAO GLSL must include ReconstructViewNormalFromDepth',
+      Pos('vec3 ReconstructViewNormalFromDepth(vec2 uv, vec3 centerPos)', GTAOGLSL) > 0);
+    AssertTrue('GTAO GLSL must include IntegrateGTAOHorizonSlice',
+      Pos('float IntegrateGTAOHorizonSlice(float h1, float h2, float nAngle)', GTAOGLSL) > 0);
+    AssertTrue('Denoise GLSL must include ComputeBilateralDepthWeight',
+      Pos('float ComputeBilateralDepthWeight(float centerDepth, float sampleDepth, float sigmaDepth)', DenoiseGLSL) > 0);
+
+    CSGTAO := VkDev.CreateShaderModuleFromGLSL(ssCompute, GTAOGLSL, 'GTAO_CS');
+    CSDenoise := VkDev.CreateShaderModuleFromGLSL(ssCompute, DenoiseGLSL, 'GTAODenoise_CS');
+    AssertTrue('GTAO_CS module must compile', CSGTAO <> nil);
+    AssertTrue('GTAODenoise_CS module must compile', CSDenoise <> nil);
+
+    { 2. Verify view-space reconstruction, Jiménez GTAO analytical horizon integral & bilateral depth weight }
+    GTAO := VkDev.GTAO;
+    AssertTrue('GTAO must be lazily created by TVulkanRHIDevice', GTAO <> nil);
+
+    ViewPos := GTAO.ReconstructViewPosition(Vector2(0.5, 0.5), Vector2(1.0, 1.0), 10.0);
+    AssertSameValue(0.0, ViewPos.X, 1e-5);
+    AssertSameValue(0.0, ViewPos.Y, 1e-5);
+    AssertSameValue(-10.0, ViewPos.Z, 1e-5);
+
+    { Flat unoccluded hemisphere: h1 = -PI/2, h2 = +PI/2, nAngle = 0 -> visibility = 1.0 }
+    OpenVis := GTAO.IntegrateGTAOHorizonSlice(-Pi * 0.5, Pi * 0.5, 0.0);
+    AssertSameValue(1.0, OpenVis, 1e-4);
+
+    { 90-degree orthogonal wall corner: h1 = 0, h2 = +PI/2, nAngle = 0 -> visibility = 0.5 }
+    CornerVis := GTAO.IntegrateGTAOHorizonSlice(0.0, Pi * 0.5, 0.0);
+    AssertSameValue(0.5, CornerVis, 1e-4);
+
+    { Deep narrow crease: cos(h) near 0.9 -> strong occlusion (< 0.15) }
+    GTAO.Power := 1.5;
+    CavityVis := GTAO.EvaluateGTAOFromHorizonCosines(0.9, 0.9, 0.0);
+    AssertTrue('Deep narrow crease must produce strong ambient occlusion (< 0.15)',
+      CavityVis < 0.15);
+
+    { Cross-bilateral depth weight: coplanar neighbor vs silhouette edge discontinuity }
+    WCoplanar := GTAO.ComputeBilateralDepthWeight(0.500, 0.501, 0.015);
+    WEdge := GTAO.ComputeBilateralDepthWeight(0.500, 0.850, 0.015);
+    AssertTrue('Coplanar depth neighbor must have high bilateral weight (> 0.99)', WCoplanar > 0.99);
+    AssertTrue('Silhouette depth discontinuity must have near-zero bilateral weight (< 1e-4)', WEdge < 1e-4);
+
+    { 3. Verify GTAO full-res & half-res pfR16_Float target allocation and 2-pass compute dispatch }
+    GTAO.EnsureGTAOTargets(1920, 1080, True);
+    AssertEquals('Half-res GTAO width must be 960', 960, GTAO.Width);
+    AssertEquals('Half-res GTAO height must be 540', 540, GTAO.Height);
+    AssertEquals('RawGTAOTexture format must be pfR16_Float',
+      Ord(pfR16_Float), Ord(GTAO.RawGTAOTexture.Desc.Format));
+    AssertEquals('DenoisedGTAOTexture format must be pfR16_Float',
+      Ord(pfR16_Float), Ord(GTAO.DenoisedGTAOTexture.Desc.Format));
+
+    DepthDesc := TRHITextureDesc.Create2D(1920, 1080, pfD32_Float, [tuDepthStencil, tuSampled], 1, 1);
+    DepthTex := VkDev.CreateTexture(DepthDesc);
+
+    CmdList := TVulkanRHICommandList.Create(VkDev, 0);
+    CmdList.BeginRecording;
+    Dispatches := GTAO.DispatchGTAO(CmdList, DepthTex);
+    CmdList.EndRecording;
+
+    AssertEquals('DispatchGTAO must record 2 compute dispatches (1 horizon + 1 bilateral denoise)', 2, Dispatches);
+    AssertEquals('TotalGTAODispatches must be 1', 1, GTAO.TotalGTAODispatches);
+    AssertEquals('TotalDenoiseDispatches must be 1', 1, GTAO.TotalDenoiseDispatches);
+  finally
+    FreeAndNil(CSDenoise);
+    FreeAndNil(CSGTAO);
+    FreeAndNil(CmdList);
+    FreeAndNil(DepthTex);
+    FreeAndNil(Gen);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestHierarchicalZScreenSpaceReflectionsRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  SSR: TCastleVulkanSSR;
+  Gen: TCastleShaderGeneratorRHI;
+  CmdList: TVulkanRHICommandList;
+  HDRTex, HiZTex: TRHITexture;
+  HDRDesc, HiZDesc: TRHITextureDesc;
+  SSRGLSL: String;
+  CSSSR: TRHIShaderModule;
+  FadeCenter, FadeEdge, WeightMirrorGrazing, WeightRough: Single;
+  HiZDepths: array[0..31] of Single;
+  I, HitCell: Integer;
+  HitSteps, Dispatches: Cardinal;
+begin
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  CmdList := nil;
+  HDRTex := nil;
+  HiZTex := nil;
+  CSSSR := nil;
+  try
+    { 1. Verify struct size and GLSL 450 Hi-Z SSR compute shader generation }
+    AssertEquals('TCastleSSRPushConstants size must be 48 bytes',
+      48, SizeOf(TCastleSSRPushConstants));
+
+    SSRGLSL := Gen.GenerateHiZSSRComputeShader;
+    AssertTrue('SSR GLSL must include EvaluateScreenEdgeFade',
+      Pos('float EvaluateScreenEdgeFade(vec2 hitUV, float fadeWidth)', SSRGLSL) > 0);
+    AssertTrue('SSR GLSL must include EvaluateSSRReflectionWeight',
+      Pos('float EvaluateSSRReflectionWeight(float roughness, float maxRoughness, float cosTheta)', SSRGLSL) > 0);
+    AssertTrue('SSR GLSL must sample u_HiZPyramidTexture across mip levels',
+      Pos('textureLod(u_HiZPyramidTexture, curUV, float(mipLevel))', SSRGLSL) > 0);
+
+    CSSSR := VkDev.CreateShaderModuleFromGLSL(ssCompute, SSRGLSL, 'HiZSSR_CS');
+    AssertTrue('HiZSSR_CS module must compile', CSSSR <> nil);
+
+    { 2. Verify Screen-Edge Vignette Fade, Roughness/Fresnel Weighting & Hierarchical-Z Raymarching }
+    SSR := VkDev.SSR;
+    AssertTrue('SSR must be lazily created by TVulkanRHIDevice', SSR <> nil);
+
+    FadeCenter := SSR.EvaluateScreenEdgeFade(Vector2(0.5, 0.5), 0.12);
+    FadeEdge := SSR.EvaluateScreenEdgeFade(Vector2(0.0, 0.5), 0.12);
+    AssertSameValue(1.0, FadeCenter, 1e-4);
+    AssertSameValue(0.0, FadeEdge, 1e-4);
+
+    WeightMirrorGrazing := SSR.EvaluateSSRReflectionWeight(0.02, 0.6, 0.05);
+    WeightRough := SSR.EvaluateSSRReflectionWeight(0.75, 0.6, 0.05);
+    AssertTrue('Smooth grazing surface must have strong Fresnel SSR weight (> 0.7)',
+      WeightMirrorGrazing > 0.7);
+    AssertSameValue(0.0, WeightRough, 1e-5);
+
+    { Populate a 32-cell depth buffer where cells 0..27 are far background (0.95)
+      and cell 28 contains a foreground reflection occluder at depth 0.55.
+      Hierarchical-Z mip skipping must find cell 28 in far fewer than 28 linear steps! }
+    for I := 0 to High(HiZDepths) do
+      HiZDepths[I] := 0.95;
+    HiZDepths[28] := 0.55;
+
+    SSR.Thickness := 0.15;
+    SSR.HiZMipCount := 5;
+    SSR.MaxSteps := 48;
+    AssertTrue('RaymarchHiZ1D must find the foreground occluder at cell 28',
+      SSR.RaymarchHiZ1D(HiZDepths, 0, 0.44, 0.005, HitCell, HitSteps));
+    AssertEquals('RaymarchHiZ1D must hit exact cell 28', 28, HitCell);
+    AssertTrue('Hierarchical-Z mip skipping must find cell 28 in < 16 steps (vs 29 linear steps)',
+      HitSteps < 16);
+
+    { 3. Verify SSR target allocation and compute dispatch }
+    SSR.EnsureSSRTarget(1280, 720);
+    AssertTrue('SSRReflectionTexture must be allocated', SSR.SSRReflectionTexture <> nil);
+    AssertEquals('SSRReflectionTexture format must be pfRGBA16_Float',
+      Ord(pfRGBA16_Float), Ord(SSR.SSRReflectionTexture.Desc.Format));
+
+    HDRDesc := TRHITextureDesc.Create2D(1280, 720, pfRGBA16_Float, [tuColorAttachment, tuSampled], 1, 1);
+    HiZDesc := TRHITextureDesc.Create2D(1280, 720, pfR32_Float, [tuSampled, tuStorage], 6, 1);
+    HDRTex := VkDev.CreateTexture(HDRDesc);
+    HiZTex := VkDev.CreateTexture(HiZDesc);
+
+    CmdList := TVulkanRHICommandList.Create(VkDev, 0);
+    CmdList.BeginRecording;
+    Dispatches := SSR.DispatchSSR(CmdList, HDRTex, HiZTex);
+    CmdList.EndRecording;
+
+    AssertEquals('DispatchSSR must record 1 compute dispatch', 1, Dispatches);
+    AssertEquals('TotalSSRDispatches must be 1', 1, SSR.TotalSSRDispatches);
+  finally
+    FreeAndNil(CSSSR);
+    FreeAndNil(CmdList);
+    FreeAndNil(HiZTex);
+    FreeAndNil(HDRTex);
+    FreeAndNil(Gen);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestFroxelVolumetricFogAndHeightFogRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  VolFog: TCastleVulkanVolumetricFog;
+  Gen: TCastleShaderGeneratorRHI;
+  CmdList: TVulkanRHICommandList;
+  InjectGLSL, RaymarchGLSL: String;
+  CSInject, CSRaymarch: TRHIShaderModule;
+  PhaseIso, PhaseForward, PhaseBack, DensityLow, DensityHigh: Single;
+  AccumLight: TVector3;
+  AccumTransmittance: Single;
+  SliceIdx: Integer;
+  Dispatches: Cardinal;
+begin
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  CmdList := nil;
+  CSInject := nil;
+  CSRaymarch := nil;
+  try
+    { 1. Verify struct size and GLSL 450 Volumetric Fog Inject & Raymarch compute shader generation }
+    AssertEquals('TCastleVolumetricFogParams size must be 64 bytes',
+      64, SizeOf(TCastleVolumetricFogParams));
+
+    InjectGLSL := Gen.GenerateVolumetricFogInjectComputeShader;
+    RaymarchGLSL := Gen.GenerateVolumetricFogRaymarchComputeShader;
+
+    AssertTrue('Volumetric Fog Inject GLSL must include EvaluateHenyeyGreensteinPhase',
+      Pos('float EvaluateHenyeyGreensteinPhase(float cosTheta, float g)', InjectGLSL) > 0);
+    AssertTrue('Volumetric Fog Inject GLSL must include EvaluateHeightFogDensity',
+      Pos('float EvaluateHeightFogDensity(float worldY, float baseDensity, float baseHeight, float heightFalloff)', InjectGLSL) > 0);
+    AssertTrue('Volumetric Fog Inject GLSL must write to image3D u_FroxelScatteringVolume',
+      Pos('uniform writeonly image3D u_FroxelScatteringVolume;', InjectGLSL) > 0);
+    AssertTrue('Volumetric Fog Raymarch GLSL must include IntegrateFroxelSliceStep',
+      Pos('void IntegrateFroxelSliceStep(', RaymarchGLSL) > 0);
+    AssertTrue('Volumetric Fog Raymarch GLSL must write to image3D u_IntegratedFroxelLUT',
+      Pos('uniform writeonly image3D u_IntegratedFroxelLUT;', RaymarchGLSL) > 0);
+
+    CSInject := VkDev.CreateShaderModuleFromGLSL(ssCompute, InjectGLSL, 'VolFogInject_CS');
+    CSRaymarch := VkDev.CreateShaderModuleFromGLSL(ssCompute, RaymarchGLSL, 'VolFogRaymarch_CS');
+    AssertTrue('VolFogInject_CS module must compile', CSInject <> nil);
+    AssertTrue('VolFogRaymarch_CS module must compile', CSRaymarch <> nil);
+
+    { 2. Verify Henyey-Greenstein phase function, Exponential Height Fog & Beer-Lambert step integration }
+    VolFog := VkDev.VolumetricFog;
+    AssertTrue('VolumetricFog must be lazily created by TVulkanRHIDevice', VolFog <> nil);
+
+    PhaseIso := VolFog.EvaluateHenyeyGreensteinPhase(0.3, 0.0);
+    AssertSameValue(1.0 / (4.0 * Pi), PhaseIso, 1e-4);
+
+    PhaseForward := VolFog.EvaluateHenyeyGreensteinPhase(1.0, 0.7);
+    PhaseBack := VolFog.EvaluateHenyeyGreensteinPhase(-1.0, 0.7);
+    AssertTrue('Forward-scattering HG phase (g=0.7, cosTheta=1) must be >> back-scattering (> 50x)',
+      PhaseForward > PhaseBack * 50.0);
+
+    DensityLow := VolFog.EvaluateHeightFogDensity(0.0, 0.05, 0.0, 0.1);
+    DensityHigh := VolFog.EvaluateHeightFogDensity(30.0, 0.05, 0.0, 0.1);
+    AssertSameValue(0.05, DensityLow, 1e-5);
+    AssertTrue('Exponential height fog density must decay with altitude', DensityHigh < DensityLow * 0.1);
+
+    AccumLight := Vector3(0.0, 0.0, 0.0);
+    AccumTransmittance := 1.0;
+    for SliceIdx := 1 to 16 do
+      VolFog.IntegrateFroxelSliceStep(Vector3(0.04, 0.04, 0.05), 0.05, 2.0, AccumLight, AccumTransmittance);
+    AssertTrue('Beer-Lambert transmittance must decay below 0.25 across 16 fog slices',
+      (AccumTransmittance > 0.0) and (AccumTransmittance < 0.25));
+    AssertTrue('Accumulated in-scattered light must be positive', AccumLight.Z > 0.5);
+
+    { 3. Verify 3D Froxel volume allocation (160x90x64 td3D pfRGBA16_Float) and 2-pass compute dispatch }
+    VolFog.EnsureFroxelVolumes;
+    AssertTrue('FroxelScatteringVolume 3D texture must be created', VolFog.FroxelScatteringVolume <> nil);
+    AssertTrue('IntegratedFroxelLUT 3D texture must be created', VolFog.IntegratedFroxelLUT <> nil);
+    AssertEquals('FroxelScatteringVolume dimension must be td3D',
+      Ord(td3D), Ord(VolFog.FroxelScatteringVolume.Desc.Dimension));
+    AssertEquals('Froxel grid X must be 160', CASTLE_FROXEL_GRID_X, VolFog.GridX);
+    AssertEquals('Froxel grid Y must be 90', CASTLE_FROXEL_GRID_Y, VolFog.GridY);
+    AssertEquals('Froxel grid Z must be 64', CASTLE_FROXEL_GRID_Z, VolFog.GridZ);
+
+    CmdList := TVulkanRHICommandList.Create(VkDev, 0);
+    CmdList.BeginRecording;
+    Dispatches := VolFog.DispatchVolumetricFog(CmdList);
+    CmdList.EndRecording;
+
+    AssertEquals('DispatchVolumetricFog must record 2 compute dispatches (1 3D inject + 1 front-to-back raymarch)',
+      2, Dispatches);
+    AssertEquals('TotalInjectDispatches must be 1', 1, VolFog.TotalInjectDispatches);
+    AssertEquals('TotalRaymarchDispatches must be 1', 1, VolFog.TotalRaymarchDispatches);
+  finally
+    FreeAndNil(CSRaymarch);
+    FreeAndNil(CSInject);
+    FreeAndNil(CmdList);
     FreeAndNil(Gen);
     FreeAndNil(VkDev);
   end;

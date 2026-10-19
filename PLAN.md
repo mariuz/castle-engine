@@ -341,14 +341,26 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 15 Status**: Completed. Declarative Render Graph (`TRHIRenderGraph` & `TRHIRenderGraphPass` with Kahn's DAG topological sorting, backward liveness dead-pass culling, transient render-target memory aliasing, and automatic `TransitionTexture` barrier hoisting), `pfRGBA16_Float` HDR scene target with 13-tap Jiménez Karis downsample + 9-tap tent-filter upsample compute bloom & 256-bin log-luminance histogram temporal auto-exposure (`TCastleVulkanHDRPostProcessor`), and Reinhard / ACES Filmic / AgX tonemapping + color grading + sRGB composite pipeline fully integrated and tested (75 unit tests passing).
 
 
-### Phase 16: Screen-Space Ambient Occlusion (Compute GTAO), Screen-Space Reflections (Hi-Z SSR) & Volumetric Fog (PLANNED)
+### Phase 16: Screen-Space Ambient Occlusion (Compute GTAO), Screen-Space Reflections (Hi-Z SSR) & Volumetric Fog (COMPLETED)
 
-* [ ] **16.1. Compute Horizon-Based / Ground-Truth Ambient Occlusion (`TCastleVulkanGTAO` in `CastleInternalRHI_Vulkan`)**:
-  * Reconstruct view-space positions and normals from the depth buffer, evaluate multi-direction horizon integral occlusion in a half/full-resolution compute shader, and apply a depth/normal-aware bilateral spatial denoiser.
-* [ ] **16.2. Hierarchical-Z Screen-Space Reflections (`TCastleVulkanSSR` in `CastleInternalRHI_Vulkan`)**:
-  * Raymarch glossy reflections in screen space against the Phase 9.2 `HiZPyramidTexture` min-depth mip chain (`GenerateSSRComputeShader`), modulated by surface roughness and Fresnel (`F_SchlickRoughness`), with smooth screen-edge fade.
-* [ ] **16.3. Froxel Volumetric Fog & Exponential Height Fog (`TCastleVulkanVolumetricFog` in `CastleInternalRHI_Vulkan`)**:
-  * Integrate participating media density, directional cascaded shadow map visibility, and Henyey-Greenstein phase function scattering across camera-aligned frustum volume slices.
+* [x] **16.1. Compute Horizon-Based / Ground-Truth Ambient Occlusion (`TCastleVulkanGTAO` in `CastleInternalRHI_Vulkan`)**:
+  * Reconstruct view-space positions and normals from the depth buffer (`ReconstructViewPosition`, `ReconstructViewNormalFromDepth`), evaluate multi-direction Jiménez cosine-weighted analytical horizon integral occlusion (`IntegrateGTAOHorizonSlice`, `EvaluateGTAOFromHorizonCosines`, `GenerateGTAOComputeShader`) in a half/full-resolution `pfR16_Float` compute pass, and apply a $5 \times 5$ depth-aware cross-bilateral spatial denoiser (`ComputeBilateralDepthWeight`, `GenerateGTAODenoiseComputeShader`, `DispatchGTAO`).
+* [x] **16.2. Hierarchical-Z Screen-Space Reflections (`TCastleVulkanSSR` in `CastleInternalRHI_Vulkan`)**:
+  * Raymarch glossy reflections in screen space against the Phase 9.2 `HiZPyramidTexture` min-depth mip chain (`RaymarchHiZ1D`, `GenerateHiZSSRComputeShader`, `DispatchSSR`), modulated by surface roughness and Schlick Fresnel (`EvaluateSSRReflectionWeight`), with smooth screen-edge vignette fade (`EvaluateScreenEdgeFade`).
+* [x] **16.3. Froxel Volumetric Fog & Exponential Height Fog (`TCastleVulkanVolumetricFog` in `CastleInternalRHI_Vulkan`)**:
+  * Allocate 3D camera-aligned frustum volume textures ($160 \times 90 \times 64$ `td3D` `pfRGBA16_Float`, `EnsureFroxelVolumes`), inject participating media exponential height fog density (`EvaluateHeightFogDensity`) and anisotropic Henyey-Greenstein phase function scattering (`EvaluateHenyeyGreensteinPhase`, `GenerateVolumetricFogInjectComputeShader`), and integrate front-to-back Beer-Lambert transmittance and in-scattered radiance across depth slices (`IntegrateFroxelSliceStep`, `GenerateVolumetricFogRaymarchComputeShader`, `DispatchVolumetricFog`).
+
+**Milestone 16 Status**: Completed. Compute Ground-Truth Ambient Occlusion (`TCastleVulkanGTAO` with view-space reconstruction, Jiménez analytical horizon integral, and $5 \times 5$ cross-bilateral spatial denoiser), Hierarchical-Z Screen-Space Reflections (`TCastleVulkanSSR` with min-depth Hi-Z mip-skipping raymarching, roughness/Fresnel weighting, and screen-edge vignette fade), and 3D Froxel Volumetric Fog & Exponential Height Fog (`TCastleVulkanVolumetricFog` with $160 \times 90 \times 64$ `td3D` froxel volumes, Henyey-Greenstein phase scattering, and Beer-Lambert front-to-back slice integration) fully integrated and tested (78 unit tests passing).
+
+
+### Phase 17: Temporal Anti-Aliasing (TAA) & Motion Vectors, Reflection Probes (Box-Projected Parallax Cubemaps) & Decal Projection (PLANNED)
+
+* [ ] **17.1. Sub-Pixel Halton Camera Jitter, Velocity Buffer & Temporal Anti-Aliasing (`TCastleVulkanTAA` in `CastleInternalRHI_Vulkan`)**:
+  * Generate 8/16-sample Halton $(2,3)$ sub-pixel projection jitter, render per-pixel 2D screen-space motion vectors (`pfRG16_Float`), and resolve temporal history in a compute pass (`GenerateTAAResolveComputeShader`) with variance clipping in YCoCg color space and Mitchell-Netravali / Catmull-Rom bicubic history resampling.
+* [ ] **17.2. Localized Reflection Probes with Box-Projected Parallax Correction (`TCastleVulkanReflectionProbeManager` in `CastleInternalRHI_Vulkan`)**:
+  * Support localized environment cubemap probes with OBB/AABB parallax ray-box intersection (`EvaluateBoxProjectedDirection`), distance-based trilinear probe blending, and GPU uniform/SSBO probe array evaluation in the PBR fragment shader.
+* [ ] **17.3. Deferred / Forward+ Clustered Box Decal Projection (`TCastleVulkanDecalManager` in `CastleInternalRHI_Vulkan`)**:
+  * Project world-space oriented bounding box (OBB) decals onto scene depth (`ReconstructDecalLocalUV`), with angle fade against surface normals, albedo/normal/roughness modulation, and instanced/clustered GPU decal evaluation.
 
 
 ## 5. Build Tool (castle-engine) & Editor Integration
@@ -375,5 +387,5 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 ## 7. Testing & Verification Criteria
 
 * [x] Automated Visual Regression Tests: `CompareImagesPerceptualDiff` in `CastleInternalRHI` compares framebuffer readbacks (`GrabTextureImage`) between `rbOpenGL` and `rbVulkan` using normalized RMSE perceptual diff thresholds.
-* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 75 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
-* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance/Hi-Z occlusion culling (`TCastleVulkanComputeCuller`), Clustered Forward+ compute light culling (`TCastleVulkanClusteredLightCuller`), Declarative Render Graph (`TRHIRenderGraph`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.
+* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 78 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
+* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance/Hi-Z occlusion culling (`TCastleVulkanComputeCuller`), Clustered Forward+ compute light culling (`TCastleVulkanClusteredLightCuller`), Declarative Render Graph (`TRHIRenderGraph`), Compute GTAO (`TCastleVulkanGTAO`), Hi-Z SSR (`TCastleVulkanSSR`), Froxel Volumetric Fog (`TCastleVulkanVolumetricFog`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.
