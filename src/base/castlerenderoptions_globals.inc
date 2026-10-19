@@ -667,6 +667,10 @@ var
   { Force given rendering for all scenes, if not weNormal. }
   InternalForceWireframe: TWireframeEffect;
 
+  { Force unlit (base/main color without lighting or shadows) rendering for all
+    scenes when @true. Used by the editor's Unlit viewport rendering mode. }
+  InternalForceUnlit: Boolean;
+
 {$endif read_interface}
 
 {$ifdef read_implementation}

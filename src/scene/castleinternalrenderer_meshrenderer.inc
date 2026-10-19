@@ -330,7 +330,7 @@ var
         in case of rmSolidColor, so we know it is rendered with LIT undefined. }
       MaterialUnlitExplicit(Vector4(RenderOptions.SolidColor, 1))
     else
-    if (not RenderOptions.Lighting) and (Shader.Material <> nil) then
+    if ((not RenderOptions.Lighting) or InternalForceUnlit) and (Shader.Material <> nil) then
       { In case we have a material, but user requested RenderOptions.Lighting = false,
         use MainColor. Otherwise we would e.g. use EmissiveColor in case of Phong,
         which would usually be black.
@@ -1109,7 +1109,7 @@ procedure TShaderCoordinateRenderer.RenderCoordinateBegin;
     if RenderOptions.Mode = rmSolidColor then
       Shader.LightingModel := lmUnlit
     else
-    if (not RenderOptions.Lighting) and (Shader.Material <> nil) then
+    if ((not RenderOptions.Lighting) or InternalForceUnlit) and (Shader.Material <> nil) then
       Shader.LightingModel := lmUnlit
     else
     if Arrays.ForceUnlit then

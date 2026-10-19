@@ -553,6 +553,19 @@ type
       DesignFilesForm: TForm;
       DesignOutputForm: TForm;
       DesignWarningsForm: TForm;
+      PanelFilesContainer: TPanel;
+      PanelFilesTop: TPanel;
+      EditFileFilter: TEdit;
+      BtnFilterAll: TSpeedButton;
+      BtnFilter3D: TSpeedButton;
+      BtnFilterDesigns: TSpeedButton;
+      BtnFilterImages: TSpeedButton;
+      BtnFilterAudio: TSpeedButton;
+      BtnFilterCode: TSpeedButton;
+      FCurrentAssetCategoryMask: String;
+    procedure EditFileFilterChange(Sender: TObject);
+    procedure BtnAssetFilterClick(Sender: TObject);
+    procedure UpdateShellListMask;
     procedure BuildToolCall(const Commands: array of String;
       const RestartOnSuccess: Boolean = false);
     procedure BuildToolCallFinished(Sender: TObject);
@@ -957,34 +970,47 @@ end;
 
 procedure TProjectForm.ActionViewportRenderNextExecute(Sender: TObject);
 begin
-  case InternalForceWireframe of
-    weNormal        : ActionViewportRenderWireframeOnlyExecute(nil);
-    weWireframeOnly : ActionViewportRenderSolidWireframeExecute(nil);
-    weSolidWireframe: ActionViewportRenderNormalExecute(nil);
-    else
-      begin
-        WritelnWarning('Unexpected InternalForceWireframe value');
-        ActionViewportRenderWireframeOnlyExecute(nil);
-      end;
-  end;
+  if (InternalForceWireframe = weNormal) and (not InternalForceUnlit) then
+  begin
+    InternalForceUnlit := true;
+    InternalForceWireframe := weNormal;
+    if Design <> nil then
+      Design.UpdateViewModeButtonCaption;
+  end else
+  if (InternalForceWireframe = weNormal) and InternalForceUnlit then
+    ActionViewportRenderWireframeOnlyExecute(nil)
+  else
+  if InternalForceWireframe = weWireframeOnly then
+    ActionViewportRenderSolidWireframeExecute(nil)
+  else
+    ActionViewportRenderNormalExecute(nil);
 end;
 
 procedure TProjectForm.ActionViewportRenderNormalExecute(Sender: TObject);
 begin
+  InternalForceUnlit := false;
   InternalForceWireframe := weNormal;
   ActionViewportRenderNormal.Checked := true;
+  if Design <> nil then
+    Design.UpdateViewModeButtonCaption;
 end;
 
 procedure TProjectForm.ActionViewportRenderSolidWireframeExecute(Sender: TObject);
 begin
+  InternalForceUnlit := false;
   InternalForceWireframe := weSolidWireframe;
   ActionViewportRenderSolidWireframe.Checked := true;
+  if Design <> nil then
+    Design.UpdateViewModeButtonCaption;
 end;
 
 procedure TProjectForm.ActionViewportRenderWireframeOnlyExecute(Sender: TObject);
 begin
+  InternalForceUnlit := false;
   InternalForceWireframe := weWireframeOnly;
   ActionViewportRenderWireframeOnly.Checked := true;
+  if Design <> nil then
+    Design.UpdateViewModeButtonCaption;
 end;
 
 procedure TProjectForm.ActionViewportAlignCameraToViewExecute(Sender: TObject);
@@ -1773,6 +1799,27 @@ procedure TProjectForm.FormCreate(Sender: TObject);
     { Similar to paths removed by build-tool "clean", or excluded by default by
       build-tool "package". This should be configurable some day. }
     ExcludeMask = 'castle-engine-output;*~;*.bak;*.exe;*.dll';
+
+    function CreateFilterButton(const ACaption, AHint: String; const ATag: Integer): TSpeedButton;
+    begin
+      Result := TSpeedButton.Create(Self);
+      Result.Caption := ACaption;
+      Result.Hint := AHint;
+      Result.ShowHint := true;
+      Result.Tag := ATag;
+      Result.GroupIndex := 701;
+      Result.AllowAllUp := false;
+      Result.AutoSize := true;
+      Result.Constraints.MinHeight := 26;
+      Result.Constraints.MinWidth := 42;
+      Result.Align := alLeft;
+      Result.BorderSpacing.Left := 2;
+      Result.BorderSpacing.Top := 2;
+      Result.BorderSpacing.Bottom := 2;
+      Result.OnClick := @BtnAssetFilterClick;
+      Result.Parent := PanelFilesTop;
+    end;
+
   begin
     ShellTreeView1 := TCastleShellTreeView.Create(Self);
     ShellTreeView1.Parent := TabFiles;
@@ -1788,8 +1835,36 @@ procedure TProjectForm.FormCreate(Sender: TObject);
     ShellTreeView1.ExcludeMask := ExcludeMask;
     ShellTreeView1.PopupMenu := ShellTreePopupMenu;
 
+    PanelFilesContainer := TPanel.Create(Self);
+    PanelFilesContainer.Parent := TabFiles;
+    PanelFilesContainer.Align := alClient;
+    PanelFilesContainer.BevelOuter := bvNone;
+
+    PanelFilesTop := TPanel.Create(Self);
+    PanelFilesTop.Parent := PanelFilesContainer;
+    PanelFilesTop.Align := alTop;
+    PanelFilesTop.AutoSize := true;
+    PanelFilesTop.BevelOuter := bvNone;
+
+    BtnFilterCode := CreateFilterButton('Code', 'Show Pascal source and shader files (*.pas, *.inc, *.glsl...)', 5);
+    BtnFilterAudio := CreateFilterButton('Audio', 'Show audio files (*.wav, *.ogg)', 4);
+    BtnFilterImages := CreateFilterButton('Images', 'Show texture and image files (*.png, *.jpg, *.dds, *.ktx...)', 3);
+    BtnFilterDesigns := CreateFilterButton('Designs', 'Show CGE design files (*.castle-user-interface, *.castle-transform...)', 2);
+    BtnFilter3D := CreateFilterButton('3D/Scenes', 'Show 3D/2D scene and sprite sheet files (*.gltf, *.glb, *.x3d, *.obj...)', 1);
+    BtnFilterAll := CreateFilterButton('All', 'Show all files in folder', 0);
+    BtnFilterAll.Down := true;
+
+    EditFileFilter := TEdit.Create(Self);
+    EditFileFilter.Parent := PanelFilesTop;
+    EditFileFilter.Align := alClient;
+    EditFileFilter.BorderSpacing.Around := 2;
+    EditFileFilter.TextHint := 'Search files in folder (name or *.ext)...';
+    EditFileFilter.Hint := 'Filter files displayed in the Content Browser by name substring or wildcard mask';
+    EditFileFilter.ShowHint := true;
+    EditFileFilter.OnChange := @EditFileFilterChange;
+
     ShellListView1 := TCastleShellListView.Create(Self);
-    ShellListView1.Parent := TabFiles;
+    ShellListView1.Parent := PanelFilesContainer;
     ShellListView1.Align := alClient;
     ShellListView1.ReadOnly := True;
     ShellListView1.SortColumn := 0;
@@ -2008,9 +2083,9 @@ begin
 
     PageControlBottom.Parent := DesignExplorerForm;
     PageControlBottom.Align := alClient;
-    ShellListView1.Parent := DesignFilesForm;
+    PanelFilesContainer.Parent := DesignFilesForm;
     ShellTreeView1.Align := alClient;
-    ShellListView1.Align := alClient;
+    PanelFilesContainer.Align := alClient;
     ListOutput.Parent := DesignOutputForm;
     ListWarnings.Parent := DesignWarningsForm;
     PanelWarnings.Parent := DesignWarningsForm;
@@ -3825,6 +3900,64 @@ begin
         UriDisplay(AddUrl)
       ]));
   end;
+end;
+
+procedure TProjectForm.UpdateShellListMask;
+var
+  Query, CombinedMask: String;
+begin
+  if ShellListView1 = nil then Exit;
+  if EditFileFilter <> nil then
+    Query := Trim(EditFileFilter.Text)
+  else
+    Query := '';
+
+  if Query = '' then
+    CombinedMask := FCurrentAssetCategoryMask
+  else
+  begin
+    if (Pos('*', Query) <> 0) or (Pos('?', Query) <> 0) then
+    begin
+      if FCurrentAssetCategoryMask = '' then
+        CombinedMask := Query
+      else
+        CombinedMask := Query + ';' + FCurrentAssetCategoryMask;
+    end else
+    begin
+      if FCurrentAssetCategoryMask = '' then
+        CombinedMask := '*' + Query + '*'
+      else
+        CombinedMask := StringReplace(FCurrentAssetCategoryMask, '*.', '*' + Query + '*.', [rfReplaceAll]);
+    end;
+  end;
+
+  ShellListView1.Mask := CombinedMask;
+end;
+
+procedure TProjectForm.EditFileFilterChange(Sender: TObject);
+begin
+  UpdateShellListMask;
+end;
+
+procedure TProjectForm.BtnAssetFilterClick(Sender: TObject);
+var
+  TagIndex: Integer;
+begin
+  if Sender is TComponent then
+    TagIndex := TComponent(Sender).Tag
+  else
+    TagIndex := 0;
+
+  case TagIndex of
+    1: FCurrentAssetCategoryMask := '*.gltf;*.glb;*.x3d;*.x3dv;*.wrl;*.obj;*.dae;*.stl;*.md3;*.ifc;*.plist;*.castle-sprite-sheet;*.starling-xml;*.cocos2d-plist';
+    2: FCurrentAssetCategoryMask := '*.castle-user-interface;*.castle-transform;*.castle-component';
+    3: FCurrentAssetCategoryMask := '*.png;*.jpg;*.jpeg;*.dds;*.ktx;*.tga;*.bmp;*.ppm;*.rgbe;*.webp';
+    4: FCurrentAssetCategoryMask := '*.wav;*.ogg';
+    5: FCurrentAssetCategoryMask := '*.pas;*.inc;*.pp;*.lpr;*.dpr;*.glsl;*.vs;*.fs';
+    else FCurrentAssetCategoryMask := '';
+  end;
+
+  UpdateShellListMask;
 end;
 
 initialization

@@ -35,6 +35,7 @@ uses
   CastleViewport, CastleClassUtils, CastleControls, CastleTiledMap,
   CastleCameras, CastleBoxes, CastleTransform, CastleDebugTransform,
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
+  CastleUtils,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
@@ -184,12 +185,14 @@ type
       TDesignerLayer = class(TCastleUserInterface)
       strict private
         type
-          TUiDraggingMode = (dmNone, dmTranslate, dmResize);
+          TUiDraggingMode = (dmNone, dmTranslate, dmResize, dmMarquee);
         var
           UiPendingMove: TVector2;
           UiDraggingMode: TUiDraggingMode;
           ResizingHorizontal: THorizontalPosition; //< Defined only when UiDraggingMode=dmResize
           ResizingVertical: TVerticalPosition; //< Defined only when UiDraggingMode=dmResize
+          MarqueeStartPos, MarqueeCurrentPos: TVector2;
+          MarqueeActive: Boolean;
           LabelHover, LabelSelected, LabelStatistics: TCastleLabel;
           RectHover, RectSelected, RectStatistics: TCastleRectangleControl;
         { Should clicking inside UI rectangle start resizing (not only moving?). }
@@ -199,6 +202,8 @@ type
         function IsResizing(const UI: TCastleUserInterface; const Position: TVector2;
           out Horizontal: THorizontalPosition;
           out Vertical: TVerticalPosition): Boolean;
+        procedure SelectComponentsInMarquee(const MarqueeRect: TFloatRectangle;
+          const Additive: Boolean);
       public
         Frame: TDesignFrame;
         LayerPhysicsSimulation: TCastleUserInterface;
@@ -282,6 +287,109 @@ type
       FShowColliders: Boolean;
       FindActive: Boolean;
       FMaximizePreview: Boolean;
+      ButtonCoordSpace: TSpeedButton;
+      ButtonPivotMode: TSpeedButton;
+      LabelHeader3DSnap: TLabel;
+      PanelSpinEditSnap3D: TPanel;
+      SpinEditSnap3D: TFloatSpinEdit;
+      ButtonSnapToFloor: TButton;
+      ButtonSnapToFloorNormal: TButton;
+      ButtonSnapToGrid: TButton;
+      ButtonMoveTransformToView: TButton;
+      ButtonCopyTransform: TButton;
+      ButtonPasteTransform: TButton;
+      ButtonAlignX: TButton;
+      ButtonAlignY: TButton;
+      ButtonAlignZ: TButton;
+      ButtonDistributeX: TButton;
+      ButtonDistributeY: TButton;
+      ButtonDistributeZ: TButton;
+      ButtonStackX: TButton;
+      ButtonStackY: TButton;
+      ButtonStackZ: TButton;
+      ButtonMirrorX: TButton;
+      ButtonMirrorY: TButton;
+      ButtonMirrorZ: TButton;
+      ButtonRotate90Y: TButton;
+      ButtonRandomizeTransform: TButton;
+      ButtonArrayDuplicate: TButton;
+      PanelPropertyFilter: TPanel;
+      EditPropertyFilter: TEdit;
+      ButtonResetProperty: TSpeedButton;
+      MenuTreeViewItemToggleVisibility: TMenuItem;
+      MenuTreeViewItemIsolateSelected: TMenuItem;
+      MenuTreeViewItemShowAllHidden: TMenuItem;
+      MenuTreeViewItemToggleLock: TMenuItem;
+      MenuTreeViewItemUnlockAll: TMenuItem;
+      MenuTreeViewItemGroupSelected: TMenuItem;
+      MenuTreeViewItemUngroupSelected: TMenuItem;
+      MenuTreeViewItemArrayDuplicate: TMenuItem;
+      MenuTreeViewItemSelectSameClass: TMenuItem;
+      MenuTreeViewItemExpandAll: TMenuItem;
+      MenuTreeViewItemCollapseAll: TMenuItem;
+      FLockedComponents: TComponentList;
+      FAltDragDuplicated: Boolean;
+      FCameraBookmarks: array [0..9] of record
+        Valid: Boolean;
+        Pos, Dir, Up: TVector3;
+      end;
+      FCopiedTransformValid: Boolean;
+      FCopiedTranslation: TVector3;
+      FCopiedRotation: TVector4;
+      FCopiedScale: TVector3;
+      FShowStatisticsToolbar: Boolean;
+      ButtonViewMode: TSpeedButton;
+      ButtonShowStats: TSpeedButton;
+      ButtonShowColliders: TSpeedButton;
+      ButtonQuickAdd: TSpeedButton;
+      ButtonSimulationStep: TSpeedButton;
+      ButtonKeepSimulation: TSpeedButton;
+      FQuickAddEdit: TEdit;
+      FQuickAddList: TListBox;
+
+    procedure ButtonCoordSpaceClick(Sender: TObject);
+    procedure ButtonPivotModeClick(Sender: TObject);
+    procedure SpinEditSnap3DChange(Sender: TObject);
+    procedure ButtonSnapToFloorClick(Sender: TObject);
+    procedure ButtonSnapToFloorNormalClick(Sender: TObject);
+    procedure ButtonSnapToGridClick(Sender: TObject);
+    procedure ButtonMoveTransformToViewClick(Sender: TObject);
+    procedure ButtonCopyTransformClick(Sender: TObject);
+    procedure ButtonPasteTransformClick(Sender: TObject);
+    procedure ButtonAlignAxisClick(Sender: TObject);
+    procedure ButtonDistributeAxisClick(Sender: TObject);
+    procedure ButtonStackAxisClick(Sender: TObject);
+    procedure ButtonMirrorAxisClick(Sender: TObject);
+    procedure ButtonRotate90YClick(Sender: TObject);
+    procedure ButtonRandomizeTransformClick(Sender: TObject);
+    procedure ButtonArrayDuplicateClick(Sender: TObject);
+    procedure EditPropertyFilterChange(Sender: TObject);
+    procedure ButtonResetPropertyClick(Sender: TObject);
+    procedure ControlsTreeDblClick(Sender: TObject);
+    procedure ControlsTreeKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+    procedure MenuTreeViewItemToggleVisibilityClick(Sender: TObject);
+    procedure MenuTreeViewItemIsolateSelectedClick(Sender: TObject);
+    procedure MenuTreeViewItemShowAllHiddenClick(Sender: TObject);
+    procedure MenuTreeViewItemToggleLockClick(Sender: TObject);
+    procedure MenuTreeViewItemUnlockAllClick(Sender: TObject);
+    procedure MenuTreeViewItemGroupSelectedClick(Sender: TObject);
+    procedure MenuTreeViewItemUngroupSelectedClick(Sender: TObject);
+    procedure MenuTreeViewItemArrayDuplicateClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectSameClassClick(Sender: TObject);
+    procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
+    procedure MenuTreeViewItemCollapseAllClick(Sender: TObject);
+    function NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
+    function IsComponentDescendantOfSelection(const C: TComponent; const List: TComponentList): Boolean;
+    procedure ButtonViewModeClick(Sender: TObject);
+    procedure ButtonShowStatsClick(Sender: TObject);
+    procedure ButtonShowCollidersClick(Sender: TObject);
+    procedure ButtonQuickAddClick(Sender: TObject);
+    procedure ButtonSimulationStepClick(Sender: TObject);
+    procedure ButtonKeepSimulationClick(Sender: TObject);
+    procedure QuickAddEditChange(Sender: TObject);
+    procedure QuickAddEditKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+    procedure QuickAddListDblClick(Sender: TObject);
+    procedure PopulateQuickAddList(const FilterText: String);
 
     { Create and add to the designed parent a new component,
       whose type best matches currently selected file in SourceShellList.
@@ -464,6 +572,7 @@ type
     procedure InspectorFilter(const Sender: TObject; const AEditor: TPropertyEditor;
       var AShow: Boolean;
       const FilterBySection: Boolean; const Section: TPropertySection);
+    procedure GizmoTransformModifyBegin(Sender: TObject);
     procedure GizmoTransformModified(Sender: TObject);
     procedure GizmoTransformModifyEnd(Sender: TObject);
     { Fix camera position, to look at Pos.XY in case of 2D games.
@@ -478,7 +587,7 @@ type
       - Fix Pos.XY, to account that Camera.Orthographic.Origin may <> (0.5,0.5).
 
       Done when operating in 2D (*not* detected by navigation type, but by projection type and axis,
-      to keep this also working in Fly mode for 2D games).
+        to keep this also working in Fly mode for 2D games).
     }
     procedure FixCamera2D(const V: TCastleViewport; var Pos: TVector3; const Dir, Up: TVector3);
     procedure ViewportViewBox(const V: TCastleViewport; Box: TBox3D);
@@ -689,10 +798,49 @@ type
     procedure ViewportToggleProjection;
     procedure ViewportAlignViewToCamera;
     procedure ViewportAlignCameraToView;
+    procedure ViewportAlignTransformToView;
+    procedure ViewportSnapToFloor(const AlignToNormal: Boolean = false);
+    procedure ViewportSnapToGrid;
+    procedure ViewportSnapToCursor(const SnapToVertex: Boolean = false;
+      const AlignToNormal: Boolean = false);
+    procedure ToggleCoordSpace;
+    procedure TogglePivotMode;
+    procedure AlignSelectionToAxis(const Axis: T3DAxis);
+    procedure DistributeSelectionAlongAxis(const Axis: T3DAxis);
+    procedure StackSelectionAlongAxis(const Axis: T3DAxis);
+    procedure MirrorSelectionAlongAxis(const Axis: T3DAxis);
+    procedure RotateSelection90Y;
+    procedure RandomizeSelectionTransform;
+    procedure ArrayDuplicateSelected(const Count: Integer;
+      const StepOffset: TVector3; const StepYawDeg: Single);
+    procedure ShowArrayDuplicateDialog;
+    function IsComponentLocked(const C: TComponent): Boolean;
+    procedure ToggleSelectedLock;
+    procedure UnlockAll;
+    procedure SaveCameraBookmark(const Slot: Integer);
+    procedure RecallCameraBookmark(const Slot: Integer);
+    procedure AdjustCameraSpeed(const Factor: Single);
+    procedure ToggleSelectedVisibility;
+    procedure IsolateSelected;
+    procedure ShowAllHidden;
+    procedure GroupSelectedTransforms;
+    procedure UngroupSelectedTransforms;
+    procedure SelectAllOfSameClass;
+    procedure ExpandSelectedSubtree;
+    procedure CollapseSelectedSubtree;
+    procedure ResetSelectedPropertyToDefault;
+    procedure CopyTransform;
+    procedure PasteTransform;
+    procedure CycleViewportRenderMode;
+    procedure UpdateViewModeButtonCaption;
+    function EffectiveShowStatistics: Boolean;
+    procedure ShowQuickAddPalette;
 
     { Physics stuff. } { }
     procedure SimulationPlayStop;
     procedure SimulationPauseUnpause;
+    procedure SimulationSingleStep;
+    procedure KeepSimulationChanges;
     property ShowColliders: Boolean read FShowColliders write SetShowColliders;
 
     procedure ReleaseAllKeysAndMouse;
@@ -725,8 +873,8 @@ uses
   {$ifdef VER3_0} {$ifdef MSWINDOWS} Windows, {$endif} {$endif}
   TypInfo, StrUtils, Math, Graphics, Types, Dialogs, LCLType, ObjInspStrConsts,
   { CGE units }
-  CastleUtils, CastleComponentSerialize, CastleFileFilters, CastleGLUtils, CastleImages,
-  CastleLog, CastleProjection, CastleStringUtils, CastleTimeUtils,
+  CastleComponentSerialize, CastleFileFilters, CastleGLUtils, CastleImages,
+  CastleLog, CastleProjection, CastleQuaternions, CastleStringUtils, CastleTimeUtils,
   CastleUriUtils, X3DLoad, CastleFilesUtils, CastleInternalPhysicsVisualization,
   CastleInternalUrlUtils, CastleInternalFileMonitor, X3DNodes, CastleSoundEngine,
   CastleBehaviors,
@@ -896,7 +1044,8 @@ function TDesignFrame.TDesignerLayer.HoverUserInterface(
       { Eventually return yourself, C. }
       //if C.CapturesEventsAtPosition(MousePos) then
       if SimpleCapturesEventsAtPosition(C, MousePos, TestWithBorder) and
-         C.EditorSelectOnHover then
+         C.EditorSelectOnHover and
+         ((C is TCastleViewport) or (not Frame.IsComponentLocked(C))) then
         Result := C;
     end;
   end;
@@ -985,6 +1134,81 @@ begin
       if RayHit <> nil then
         Result := SelectionFromRayHit(RayHit);
     finally FreeAndNil(RayHit) end;
+  end;
+  if (Result <> nil) and Frame.IsComponentLocked(Result) then
+    Result := nil;
+end;
+
+procedure TDesignFrame.TDesignerLayer.SelectComponentsInMarquee(
+  const MarqueeRect: TFloatRectangle; const Additive: Boolean);
+var
+  SelectedNodes: TList;
+  TreeNode: TTreeNode;
+  C: TComponent;
+  T: TCastleTransform;
+  UI: TCastleUserInterface;
+  V: TCastleViewport;
+  CamPos, CamDir, CamUp, WorldPos: TVector3;
+  ScreenPos: TVector2;
+  BBox: TBox3D;
+  I: Integer;
+  InViewportMarquee: Boolean;
+begin
+  SelectedNodes := TList.Create;
+  try
+    if Additive then
+      for I := 0 to Frame.ControlsTree.SelectionCount - 1 do
+        SelectedNodes.Add(Frame.ControlsTree.Selections[I]);
+
+    V := Frame.CurrentViewport;
+    InViewportMarquee := (V <> nil) and (V.InternalCamera <> nil) and
+      MarqueeRect.Collides(V.RenderRectWithBorder);
+
+    if InViewportMarquee then
+      V.InternalCamera.GetWorldView(CamPos, CamDir, CamUp);
+
+    TreeNode := Frame.ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := Frame.SelectedFromNode(TreeNode, false);
+      if (C <> nil) and (C <> Frame.DesignRoot) and
+         Selectable(C) and (not Frame.IsComponentLocked(C)) then
+      begin
+        if InViewportMarquee and (C is TCastleTransform) and
+           (not (C is TCastleAbstractRootTransform)) then
+        begin
+          T := TCastleTransform(C);
+          if T.Exists and (T.World = V.Items) and T.HasWorldTransform then
+          begin
+            BBox := T.WorldBoundingBox;
+            if not BBox.IsEmpty then
+              WorldPos := BBox.Center
+            else
+              WorldPos := T.LocalToWorld(TVector3.Zero);
+
+            if (V.InternalCamera.ProjectionType = ptOrthographic) or
+               (TVector3.DotProduct(WorldPos - CamPos, CamDir) > 0) then
+            begin
+              ScreenPos := V.LocalToContainerPosition(V.PositionFromWorld(WorldPos));
+              if MarqueeRect.Contains(ScreenPos) and (SelectedNodes.IndexOf(TreeNode) = -1) then
+                SelectedNodes.Add(TreeNode);
+            end;
+          end;
+        end else
+        if (not InViewportMarquee) and (C is TCastleUserInterface) then
+        begin
+          UI := TCastleUserInterface(C);
+          if UI.Exists and MarqueeRect.Contains(UI.RenderRectWithBorder.Center) and
+             (SelectedNodes.IndexOf(TreeNode) = -1) then
+            SelectedNodes.Add(TreeNode);
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    Frame.ControlsTree.Select(SelectedNodes);
+  finally
+    FreeAndNil(SelectedNodes);
   end;
 end;
 
@@ -1083,14 +1307,162 @@ function TDesignFrame.TDesignerLayer.Press(
         ]);
     end
     else
+    begin
+      { If NewComponent is already part of an active multi-selection (for example
+        when clicking on the 3D gizmo attached to the primary selected transform),
+        keep the multi-selection intact so the gizmo drags all selected objects. }
+      if (NewComponent <> nil) and
+         (Frame.ControlsTree.SelectionCount > 1) and
+         Frame.TreeNodeMap.TryGetValue(NewComponent, NewComponentNode) and
+         NewComponentNode.Selected then
+        Exit;
       Frame.SelectedComponent := NewComponent;
+    end;
   end;
 
 var
   UI: TCastleUserInterface;
+  BookmarkSlot: Integer;
 begin
   Result := inherited Press(Event);
   if Result then Exit;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyEnd) then
+  begin
+    if mkCtrl in Event.ModifiersDown then
+      Frame.ViewportSnapToGrid
+    else
+    if (mkAlt in Event.ModifiersDown) or (mkShift in Event.ModifiersDown) then
+      Frame.ViewportSnapToFloor(true)
+    else
+      Frame.ViewportSnapToFloor(false);
+    Exit(true);
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyV) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    if Event.ModifiersDown = [] then
+    begin
+      Frame.ViewportSnapToCursor(false, false);
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkShift] then
+    begin
+      Frame.ViewportSnapToCursor(true, false);
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkAlt] then
+    begin
+      Frame.ViewportSnapToCursor(false, true);
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkShift, mkAlt] then
+    begin
+      Frame.ViewportSnapToCursor(true, true);
+      Exit(true);
+    end;
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyL) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    if Event.ModifiersDown = [] then
+    begin
+      Frame.ToggleSelectedLock;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkAlt] then
+    begin
+      Frame.UnlockAll;
+      Exit(true);
+    end;
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyD) and
+     (Event.ModifiersDown = [mkCtrl, mkShift]) then
+  begin
+    Frame.ShowArrayDuplicateDialog;
+    Exit(true);
+  end;
+
+  if (Frame.Mode <> moInteract) and (Event.EventType = itKey) and
+     (Event.Key in [key0..key9]) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    BookmarkSlot := Ord(Event.Key) - Ord(key0);
+    if Event.ModifiersDown = [mkCtrl] then
+    begin
+      Frame.SaveCameraBookmark(BookmarkSlot);
+      Exit(true);
+    end else
+    if (Event.ModifiersDown = []) and Frame.FCameraBookmarks[BookmarkSlot].Valid then
+    begin
+      Frame.RecallCameraBookmark(BookmarkSlot);
+      Exit(true);
+    end;
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyH) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    if Event.ModifiersDown = [] then
+    begin
+      Frame.ToggleSelectedVisibility;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkShift] then
+    begin
+      Frame.IsolateSelected;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkAlt] then
+    begin
+      Frame.ShowAllHidden;
+      Exit(true);
+    end;
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyG) then
+  begin
+    if Event.ModifiersDown = [mkCtrl] then
+    begin
+      Frame.GroupSelectedTransforms;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkShift] then
+    begin
+      Frame.UngroupSelectedTransforms;
+      Exit(true);
+    end;
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyBackQuote) and
+     (Event.ModifiersDown = [mkCtrl]) then
+  begin
+    Frame.ToggleCoordSpace;
+    Exit(true);
+  end;
+
+  if (Frame.Mode <> moInteract) and (Event.ModifiersDown = []) then
+  begin
+    if Event.IsKey(keyLeftBracket) then
+    begin
+      Frame.AdjustCameraSpeed(1.0 / 1.5);
+      Exit(true);
+    end else
+    if Event.IsKey(keyRightBracket) then
+    begin
+      Frame.AdjustCameraSpeed(1.5);
+      Exit(true);
+    end;
+  end;
+
+  if Event.IsKey(keyP) and (Event.ModifiersDown = [mkCtrl]) then
+  begin
+    Frame.ShowQuickAddPalette;
+    Exit(true);
+  end;
 
   { Avoid handling mouse events over CameraPreview, to avoid messing with clicking
     on CameraPreview buttons, and using gizmos in CameraPreview viewport. }
@@ -1102,9 +1474,18 @@ begin
   begin
     { Below we will always calculate correct UiDraggingMode }
     UiDraggingMode := dmNone;
+    MarqueeActive := false;
 
     if Frame.Mode <> moInteract then
     begin
+      if [mkCtrl, mkAlt] <= Event.ModifiersDown then
+      begin
+        UiDraggingMode := dmMarquee;
+        MarqueeStartPos := Event.Position;
+        MarqueeCurrentPos := Event.Position;
+        Exit(true);
+      end;
+
       { Calculate Frame.SelectedComponent.
         Without shift pressed, we select before moving/resizing.
         With shift pressed we don't change selection.
@@ -1114,10 +1495,16 @@ begin
         SetSelection(HoverComponent(Event.Position), mkCtrl in Event.ModifiersDown);
       end;
 
-      if Frame.Mode <> moSelect then
+      if Frame.Mode = moSelect then
+      begin
+        UiDraggingMode := dmMarquee;
+        MarqueeStartPos := Event.Position;
+        MarqueeCurrentPos := Event.Position;
+        Exit(true);
+      end else
       begin
         UI := Frame.SelectedUserInterface;
-        if UI <> nil then
+        if (UI <> nil) and (not Frame.IsComponentLocked(UI)) then
         begin
           if IsResizing(UI, Event.Position, ResizingHorizontal, ResizingVertical) then
             UiDraggingMode := dmResize
@@ -1139,6 +1526,7 @@ end;
 function TDesignFrame.TDesignerLayer.Release(const Event: TInputPressRelease): Boolean;
 var
   Sel: TComponent;
+  MarqueeRect: TFloatRectangle;
 begin
   Result := inherited Press(Event);
   if Result then Exit;
@@ -1151,7 +1539,21 @@ begin
 
   if Event.IsMouseButton(buttonLeft) then
   begin
+    if (UiDraggingMode = dmMarquee) and MarqueeActive then
+    begin
+      MarqueeRect := FloatRectangle(
+        Min(MarqueeStartPos.X, MarqueeCurrentPos.X),
+        Min(MarqueeStartPos.Y, MarqueeCurrentPos.Y),
+        Abs(MarqueeCurrentPos.X - MarqueeStartPos.X),
+        Abs(MarqueeCurrentPos.Y - MarqueeStartPos.Y));
+      SelectComponentsInMarquee(MarqueeRect, mkShift in Event.ModifiersDown);
+      UiDraggingMode := dmNone;
+      MarqueeActive := false;
+      Exit(true);
+    end;
+
     UiDraggingMode := dmNone;
+    MarqueeActive := false;
 
     { Note, that we may want to have better comment message here }
     if Frame.UndoSystem.ScheduleRecordUndoOnRelease then
@@ -1346,6 +1748,8 @@ function TDesignFrame.TDesignerLayer.Motion(const Event: TInputMotion): Boolean;
         NewCursor := mcHand;
       dmResize:
         NewCursor := ResizingCursor(ResizingHorizontal, ResizingVertical);
+      dmMarquee:
+        NewCursor := mcDefault;
     end;
     Frame.CastleControl.Container.OverrideCursor := NewCursor;
     Frame.CastleControl.Hint := Hint;
@@ -1435,13 +1839,25 @@ begin
     reset UiDraggingMode. }
   if (UiDraggingMode <> dmNone) and
      (not (buttonLeft in Event.Pressed)) then
+  begin
     UiDraggingMode := dmNone;
+    MarqueeActive := false;
+  end;
+
+  if (Frame.Mode <> moInteract) and
+     (UiDraggingMode = dmMarquee) then
+  begin
+    MarqueeCurrentPos := Event.Position;
+    if PointsDistance(MarqueeStartPos, MarqueeCurrentPos) >= 4 then
+      MarqueeActive := true;
+    Exit(true);
+  end;
 
   if (Frame.Mode <> moInteract) and
      (UiDraggingMode <> dmNone) then
   begin
     UI := Frame.SelectedUserInterface;
-    if UI <> nil then
+    if (UI <> nil) and (not Frame.IsComponentLocked(UI)) then
     begin
       ChangeDraggedUI(UI);
 
@@ -1524,17 +1940,57 @@ procedure TDesignFrame.TDesignerLayer.Render;
   end;
 
   function StatisticsToString: String;
+  var
+    ViewModeStr, SpaceStr, SpeedStr: String;
+    T: TCastleTransform;
+    BBox: TBox3D;
   begin
-    Result := 'FPS: ' + Container.Fps.ToString;
+    if InternalForceWireframe = weWireframeOnly then
+      ViewModeStr := 'Wireframe'
+    else if InternalForceWireframe = weSolidWireframe then
+      ViewModeStr := 'Solid Wireframe'
+    else if InternalForceUnlit then
+      ViewModeStr := 'Unlit'
+    else
+      ViewModeStr := 'Lit';
+
+    if (Frame.TransformManipulate <> nil) and (Frame.TransformManipulate.CoordSpace = csWorld) then
+      SpaceStr := 'World'
+    else
+      SpaceStr := 'Local';
+
+    if (Frame.CurrentViewport <> nil) and
+       (Frame.CurrentViewport.InternalDesignNavigation is TCastleWalkNavigation) then
+      SpeedStr := Format(' | Cam Speed: %.2f', [
+        TCastleWalkNavigation(Frame.CurrentViewport.InternalDesignNavigation).MoveSpeed])
+    else
+      SpeedStr := '';
+
+    Result := 'FPS: ' + Container.Fps.ToString + NL +
+      Format('Render: %s | Space: %s | Selected: %d%s', [
+        ViewModeStr, SpaceStr, Frame.ControlsTree.SelectionCount, SpeedStr]);
+
     if Frame.CurrentViewport <> nil then
       Result := Result + NL +
         'Viewport "' + Frame.CurrentViewport.Name + '":' + NL +
         Frame.CurrentViewport.Statistics.ToString;
+
+    T := Frame.CurrentTransform;
+    if T <> nil then
+    begin
+      BBox := T.WorldBoundingBox;
+      Result := Result + NL +
+        Format('Active Transform "%s":', [T.Name]) + NL +
+        Format('  World Pos: %s', [T.WorldTranslation.ToString]);
+      if not BBox.IsEmpty then
+        Result := Result + NL +
+          Format('  World BBox Size: %s', [BBox.Size.ToString]);
+    end;
   end;
 
 var
   SelectedUI, HoverUI: TCastleUserInterface;
-  SelectedUIRect, HoverUIRect: TFloatRectangle;
+  SelectedUIRect, HoverUIRect, MarqueeRect: TFloatRectangle;
 begin
   inherited;
 
@@ -1551,23 +2007,8 @@ begin
   begin
     HoverUIRect := HoverUI.RenderRectWithBorder;
     DrawRectangleOutline(HoverUIRect, Vector4(1, 1, 0, 0.75));
-
-    // TODO: for now hide, too confusing in case of auto-sized label/button
-    {
-    if not UI.EffectiveFullSize then
-    begin
-      // show desired Width / Height, useful e.g. for TCastleImageControl
-      R.Width  := UI.Width  * UI.UIScale;
-      R.Height := UI.Height * UI.UIScale;
-      DrawRectangleOutline(R, Vector4(1, 1, 0, 0.25));
-    end;
-    }
   end;
 
-  { Note: HoverUI is in practice never visible now,
-    as UpdateAttachedLabel makes it visible only for components with size zero.
-    This code can be simplified, to remove HoverUI, LabelHover, RectHover
-    -- once we're sure that showing "hover" is a useless idea at some point. }
   if (HoverUI <> nil) and (HoverUI = SelectedUI) then
   begin
     UpdateAttachedLabel(SelectedUI, SelectedUIRect, LabelSelected, RectSelected,
@@ -1593,7 +2034,18 @@ begin
     end;
   end;
 
-  RectStatistics.Exists := Frame.OnShowStatistics();
+  if (UiDraggingMode = dmMarquee) and MarqueeActive then
+  begin
+    MarqueeRect := FloatRectangle(
+      Min(MarqueeStartPos.X, MarqueeCurrentPos.X),
+      Min(MarqueeStartPos.Y, MarqueeCurrentPos.Y),
+      Abs(MarqueeCurrentPos.X - MarqueeStartPos.X),
+      Abs(MarqueeCurrentPos.Y - MarqueeStartPos.Y));
+    DrawRectangle(MarqueeRect, Vector4(0.2, 0.6, 1.0, 0.2));
+    DrawRectangleOutline(MarqueeRect, Vector4(0.4, 0.8, 1.0, 0.9));
+  end;
+
+  RectStatistics.Exists := Frame.EffectiveShowStatistics;
   if RectStatistics.Exists then
   begin
     LabelStatistics.Caption := StatisticsToString;
@@ -1628,6 +2080,7 @@ begin
   inherited;
 
   LastSelected := TComponentList.Create(false);
+  FLockedComponents := TComponentList.Create(false);
 
   PropertyEditorHook := TCastlePropertyEditorHook.Create(Self);
 
@@ -1684,8 +2137,395 @@ begin
 
   TransformHover := TCastleTransformHover.Create(Self);
   TransformManipulate := TCastleTransformManipulate.Create(Self);
+  TransformManipulate.OnTransformModifyBegin := @GizmoTransformModifyBegin;
   TransformManipulate.OnTransformModified := @GizmoTransformModified;
   TransformManipulate.OnTransformModifyEnd := @GizmoTransformModifyEnd;
+
+  ButtonCoordSpace := TSpeedButton.Create(Self);
+  ButtonCoordSpace.Caption := 'Local';
+  ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
+  ButtonCoordSpace.ShowHint := true;
+  ButtonCoordSpace.AutoSize := true;
+  ButtonCoordSpace.Constraints.MinHeight := 33;
+  ButtonCoordSpace.Constraints.MinWidth := 54;
+  ButtonCoordSpace.BorderSpacing.Left := 8;
+  ButtonCoordSpace.OnClick := @ButtonCoordSpaceClick;
+  ButtonCoordSpace.Parent := PanelMiddleTop;
+
+  ButtonPivotMode := TSpeedButton.Create(Self);
+  ButtonPivotMode.Caption := 'Pivot: Primary';
+  ButtonPivotMode.Hint := 'Toggle multi-selection rotation pivot between Primary Selected object and Selection Center';
+  ButtonPivotMode.ShowHint := true;
+  ButtonPivotMode.AutoSize := true;
+  ButtonPivotMode.Constraints.MinHeight := 33;
+  ButtonPivotMode.Constraints.MinWidth := 82;
+  ButtonPivotMode.BorderSpacing.Left := 4;
+  ButtonPivotMode.OnClick := @ButtonPivotModeClick;
+  ButtonPivotMode.Parent := PanelMiddleTop;
+
+  LabelHeader3DSnap := TLabel.Create(Self);
+  LabelHeader3DSnap.Caption := '3D snap:';
+  LabelHeader3DSnap.Layout := tlCenter;
+  LabelHeader3DSnap.BorderSpacing.Left := 8;
+  LabelHeader3DSnap.BorderSpacing.Right := 4;
+  LabelHeader3DSnap.Parent := PanelMiddleTop;
+
+  PanelSpinEditSnap3D := TPanel.Create(Self);
+  PanelSpinEditSnap3D.AutoSize := true;
+  PanelSpinEditSnap3D.BevelOuter := bvNone;
+  PanelSpinEditSnap3D.BorderSpacing.CellAlignHorizontal := ccaCenter;
+  PanelSpinEditSnap3D.BorderSpacing.CellAlignVertical := ccaCenter;
+  PanelSpinEditSnap3D.Parent := PanelMiddleTop;
+
+  SpinEditSnap3D := TFloatSpinEdit.Create(Self);
+  SpinEditSnap3D.DecimalPlaces := 2;
+  SpinEditSnap3D.Increment := 0.5;
+  SpinEditSnap3D.MinValue := 0;
+  SpinEditSnap3D.MaxValue := 1000;
+  SpinEditSnap3D.Value := 0;
+  SpinEditSnap3D.Width := 68;
+  SpinEditSnap3D.Hint := '3D Gizmo Snap step (0 = disabled). Snaps 3D translation units, rotation degrees (or 15 deg when <= 1), and scale increments.';
+  SpinEditSnap3D.ShowHint := true;
+  SpinEditSnap3D.OnChange := @SpinEditSnap3DChange;
+  SpinEditSnap3D.Parent := PanelSpinEditSnap3D;
+
+  ButtonViewMode := TSpeedButton.Create(Self);
+  ButtonViewMode.Caption := 'View: Lit';
+  ButtonViewMode.Hint := 'Cycle viewport rendering mode: Lit -> Unlit -> Wireframe -> Solid Wireframe (Ctrl+T)';
+  ButtonViewMode.ShowHint := true;
+  ButtonViewMode.AutoSize := true;
+  ButtonViewMode.Constraints.MinHeight := 33;
+  ButtonViewMode.Constraints.MinWidth := 68;
+  ButtonViewMode.BorderSpacing.Left := 8;
+  ButtonViewMode.OnClick := @ButtonViewModeClick;
+  ButtonViewMode.Parent := PanelMiddleTop;
+  UpdateViewModeButtonCaption;
+
+  ButtonShowStats := TSpeedButton.Create(Self);
+  ButtonShowStats.Caption := 'Stats';
+  ButtonShowStats.Hint := 'Toggle real-time Viewport Statistics HUD overlay (FPS, Draw Calls, Shapes, Active Transform Info)';
+  ButtonShowStats.ShowHint := true;
+  ButtonShowStats.AllowAllUp := true;
+  ButtonShowStats.GroupIndex := 901;
+  ButtonShowStats.AutoSize := true;
+  ButtonShowStats.Constraints.MinHeight := 33;
+  ButtonShowStats.Constraints.MinWidth := 48;
+  ButtonShowStats.BorderSpacing.Left := 4;
+  ButtonShowStats.OnClick := @ButtonShowStatsClick;
+  ButtonShowStats.Parent := PanelMiddleTop;
+
+  ButtonShowColliders := TSpeedButton.Create(Self);
+  ButtonShowColliders.Caption := 'Colliders';
+  ButtonShowColliders.Hint := 'Toggle physics collider wireframe visualization in viewport';
+  ButtonShowColliders.ShowHint := true;
+  ButtonShowColliders.AllowAllUp := true;
+  ButtonShowColliders.GroupIndex := 902;
+  ButtonShowColliders.AutoSize := true;
+  ButtonShowColliders.Constraints.MinHeight := 33;
+  ButtonShowColliders.Constraints.MinWidth := 62;
+  ButtonShowColliders.BorderSpacing.Left := 4;
+  ButtonShowColliders.OnClick := @ButtonShowCollidersClick;
+  ButtonShowColliders.Parent := PanelMiddleTop;
+
+  ButtonQuickAdd := TSpeedButton.Create(Self);
+  ButtonQuickAdd.Caption := '+ Add';
+  ButtonQuickAdd.Hint := 'Open Quick-Add Component Palette (Shortcut: Ctrl+P in viewport)';
+  ButtonQuickAdd.ShowHint := true;
+  ButtonQuickAdd.AutoSize := true;
+  ButtonQuickAdd.Constraints.MinHeight := 33;
+  ButtonQuickAdd.Constraints.MinWidth := 52;
+  ButtonQuickAdd.BorderSpacing.Left := 8;
+  ButtonQuickAdd.OnClick := @ButtonQuickAddClick;
+  ButtonQuickAdd.Parent := PanelMiddleTop;
+
+  ButtonSimulationStep := TSpeedButton.Create(Self);
+  ButtonSimulationStep.Caption := 'Step';
+  ButtonSimulationStep.Hint := 'Advance physics simulation by a single frame (1/60s)';
+  ButtonSimulationStep.ShowHint := true;
+  ButtonSimulationStep.AutoSize := true;
+  ButtonSimulationStep.Constraints.MinHeight := 33;
+  ButtonSimulationStep.Constraints.MinWidth := 46;
+  ButtonSimulationStep.BorderSpacing.Left := 4;
+  ButtonSimulationStep.Visible := false;
+  ButtonSimulationStep.OnClick := @ButtonSimulationStepClick;
+  ButtonSimulationStep.Parent := PanelMiddleTop;
+
+  ButtonKeepSimulation := TSpeedButton.Create(Self);
+  ButtonKeepSimulation.Caption := 'Keep Sim';
+  ButtonKeepSimulation.Hint := 'Stop physics simulation and keep the simulated Transform positions/rotations in the design';
+  ButtonKeepSimulation.ShowHint := true;
+  ButtonKeepSimulation.AutoSize := true;
+  ButtonKeepSimulation.Constraints.MinHeight := 33;
+  ButtonKeepSimulation.Constraints.MinWidth := 68;
+  ButtonKeepSimulation.BorderSpacing.Left := 4;
+  ButtonKeepSimulation.Visible := false;
+  ButtonKeepSimulation.OnClick := @ButtonKeepSimulationClick;
+  ButtonKeepSimulation.Parent := PanelMiddleTop;
+
+  ButtonSnapToFloor := TButton.Create(Self);
+  ButtonSnapToFloor.AutoSize := true;
+  ButtonSnapToFloor.Caption := 'Snap to Floor (End)';
+  ButtonSnapToFloor.Hint := 'Snap selected 3D transform(s) downward onto the nearest floor surface (Shortcut: End)';
+  ButtonSnapToFloor.ShowHint := true;
+  ButtonSnapToFloor.OnClick := @ButtonSnapToFloorClick;
+  ButtonSnapToFloor.Parent := PanelLayoutTransform;
+
+  ButtonSnapToFloorNormal := TButton.Create(Self);
+  ButtonSnapToFloorNormal.AutoSize := true;
+  ButtonSnapToFloorNormal.Caption := 'Snap + Normal (Alt+End)';
+  ButtonSnapToFloorNormal.Hint := 'Snap selected 3D transform(s) onto the floor surface and align local +Y Up to the surface normal (Shortcut: Alt+End)';
+  ButtonSnapToFloorNormal.ShowHint := true;
+  ButtonSnapToFloorNormal.OnClick := @ButtonSnapToFloorNormalClick;
+  ButtonSnapToFloorNormal.Parent := PanelLayoutTransform;
+
+  ButtonSnapToGrid := TButton.Create(Self);
+  ButtonSnapToGrid.AutoSize := true;
+  ButtonSnapToGrid.Caption := 'Snap to Grid (Ctrl+End)';
+  ButtonSnapToGrid.Hint := 'Snap absolute Translation of selected 3D transform(s) to nearest 3D Snap grid multiple (Shortcut: Ctrl+End)';
+  ButtonSnapToGrid.ShowHint := true;
+  ButtonSnapToGrid.OnClick := @ButtonSnapToGridClick;
+  ButtonSnapToGrid.Parent := PanelLayoutTransform;
+
+  ButtonMoveTransformToView := TButton.Create(Self);
+  ButtonMoveTransformToView.AutoSize := true;
+  ButtonMoveTransformToView.Caption := 'Move to View';
+  ButtonMoveTransformToView.Hint := 'Snap selected 3D transform (light, scene, camera, spawn point) to the current viewport camera position and orientation';
+  ButtonMoveTransformToView.ShowHint := true;
+  ButtonMoveTransformToView.OnClick := @ButtonMoveTransformToViewClick;
+  ButtonMoveTransformToView.Parent := PanelLayoutTransform;
+
+  ButtonCopyTransform := TButton.Create(Self);
+  ButtonCopyTransform.AutoSize := true;
+  ButtonCopyTransform.Caption := 'Copy Transform';
+  ButtonCopyTransform.Hint := 'Copy Translation, Rotation, and Scale of the selected 3D transform';
+  ButtonCopyTransform.ShowHint := true;
+  ButtonCopyTransform.OnClick := @ButtonCopyTransformClick;
+  ButtonCopyTransform.Parent := PanelLayoutTransform;
+
+  ButtonPasteTransform := TButton.Create(Self);
+  ButtonPasteTransform.AutoSize := true;
+  ButtonPasteTransform.Caption := 'Paste Transform';
+  ButtonPasteTransform.Hint := 'Paste copied Translation, Rotation, and Scale onto all selected 3D transforms';
+  ButtonPasteTransform.ShowHint := true;
+  ButtonPasteTransform.Enabled := false;
+  ButtonPasteTransform.OnClick := @ButtonPasteTransformClick;
+  ButtonPasteTransform.Parent := PanelLayoutTransform;
+
+  ButtonAlignX := TButton.Create(Self);
+  ButtonAlignX.AutoSize := true;
+  ButtonAlignX.Caption := 'Align X';
+  ButtonAlignX.Hint := 'Align all selected 3D transforms along the X axis to the primary selected object';
+  ButtonAlignX.ShowHint := true;
+  ButtonAlignX.Tag := 0;
+  ButtonAlignX.OnClick := @ButtonAlignAxisClick;
+  ButtonAlignX.Parent := PanelLayoutTransform;
+
+  ButtonAlignY := TButton.Create(Self);
+  ButtonAlignY.AutoSize := true;
+  ButtonAlignY.Caption := 'Align Y';
+  ButtonAlignY.Hint := 'Align all selected 3D transforms along the Y axis to the primary selected object';
+  ButtonAlignY.ShowHint := true;
+  ButtonAlignY.Tag := 1;
+  ButtonAlignY.OnClick := @ButtonAlignAxisClick;
+  ButtonAlignY.Parent := PanelLayoutTransform;
+
+  ButtonAlignZ := TButton.Create(Self);
+  ButtonAlignZ.AutoSize := true;
+  ButtonAlignZ.Caption := 'Align Z';
+  ButtonAlignZ.Hint := 'Align all selected 3D transforms along the Z axis to the primary selected object';
+  ButtonAlignZ.ShowHint := true;
+  ButtonAlignZ.Tag := 2;
+  ButtonAlignZ.OnClick := @ButtonAlignAxisClick;
+  ButtonAlignZ.Parent := PanelLayoutTransform;
+
+  ButtonDistributeX := TButton.Create(Self);
+  ButtonDistributeX.AutoSize := true;
+  ButtonDistributeX.Caption := 'Dist X';
+  ButtonDistributeX.Hint := 'Evenly distribute 3 or more selected 3D transforms along the X axis';
+  ButtonDistributeX.ShowHint := true;
+  ButtonDistributeX.Tag := 0;
+  ButtonDistributeX.OnClick := @ButtonDistributeAxisClick;
+  ButtonDistributeX.Parent := PanelLayoutTransform;
+
+  ButtonDistributeY := TButton.Create(Self);
+  ButtonDistributeY.AutoSize := true;
+  ButtonDistributeY.Caption := 'Dist Y';
+  ButtonDistributeY.Hint := 'Evenly distribute 3 or more selected 3D transforms along the Y axis';
+  ButtonDistributeY.ShowHint := true;
+  ButtonDistributeY.Tag := 1;
+  ButtonDistributeY.OnClick := @ButtonDistributeAxisClick;
+  ButtonDistributeY.Parent := PanelLayoutTransform;
+
+  ButtonDistributeZ := TButton.Create(Self);
+  ButtonDistributeZ.AutoSize := true;
+  ButtonDistributeZ.Caption := 'Dist Z';
+  ButtonDistributeZ.Hint := 'Evenly distribute 3 or more selected 3D transforms along the Z axis';
+  ButtonDistributeZ.ShowHint := true;
+  ButtonDistributeZ.Tag := 2;
+  ButtonDistributeZ.OnClick := @ButtonDistributeAxisClick;
+  ButtonDistributeZ.Parent := PanelLayoutTransform;
+
+  ButtonStackX := TButton.Create(Self);
+  ButtonStackX.AutoSize := true;
+  ButtonStackX.Caption := 'Stack X';
+  ButtonStackX.Hint := 'Stack 2 or more selected 3D transforms flush edge-to-edge along the X axis using their bounding boxes';
+  ButtonStackX.ShowHint := true;
+  ButtonStackX.Tag := 0;
+  ButtonStackX.OnClick := @ButtonStackAxisClick;
+  ButtonStackX.Parent := PanelLayoutTransform;
+
+  ButtonStackY := TButton.Create(Self);
+  ButtonStackY.AutoSize := true;
+  ButtonStackY.Caption := 'Stack Y';
+  ButtonStackY.Hint := 'Stack 2 or more selected 3D transforms flush edge-to-edge along the Y axis using their bounding boxes';
+  ButtonStackY.ShowHint := true;
+  ButtonStackY.Tag := 1;
+  ButtonStackY.OnClick := @ButtonStackAxisClick;
+  ButtonStackY.Parent := PanelLayoutTransform;
+
+  ButtonStackZ := TButton.Create(Self);
+  ButtonStackZ.AutoSize := true;
+  ButtonStackZ.Caption := 'Stack Z';
+  ButtonStackZ.Hint := 'Stack 2 or more selected 3D transforms flush edge-to-edge along the Z axis using their bounding boxes';
+  ButtonStackZ.ShowHint := true;
+  ButtonStackZ.Tag := 2;
+  ButtonStackZ.OnClick := @ButtonStackAxisClick;
+  ButtonStackZ.Parent := PanelLayoutTransform;
+
+  ButtonMirrorX := TButton.Create(Self);
+  ButtonMirrorX.AutoSize := true;
+  ButtonMirrorX.Caption := 'Mirror X';
+  ButtonMirrorX.Hint := 'Mirror selected 3D transform(s) across the X axis (physics-safe orientation reflection)';
+  ButtonMirrorX.ShowHint := true;
+  ButtonMirrorX.Tag := 0;
+  ButtonMirrorX.OnClick := @ButtonMirrorAxisClick;
+  ButtonMirrorX.Parent := PanelLayoutTransform;
+
+  ButtonMirrorY := TButton.Create(Self);
+  ButtonMirrorY.AutoSize := true;
+  ButtonMirrorY.Caption := 'Mirror Y';
+  ButtonMirrorY.Hint := 'Mirror selected 3D transform(s) across the Y axis (physics-safe orientation reflection)';
+  ButtonMirrorY.ShowHint := true;
+  ButtonMirrorY.Tag := 1;
+  ButtonMirrorY.OnClick := @ButtonMirrorAxisClick;
+  ButtonMirrorY.Parent := PanelLayoutTransform;
+
+  ButtonMirrorZ := TButton.Create(Self);
+  ButtonMirrorZ.AutoSize := true;
+  ButtonMirrorZ.Caption := 'Mirror Z';
+  ButtonMirrorZ.Hint := 'Mirror selected 3D transform(s) across the Z axis (physics-safe orientation reflection)';
+  ButtonMirrorZ.ShowHint := true;
+  ButtonMirrorZ.Tag := 2;
+  ButtonMirrorZ.OnClick := @ButtonMirrorAxisClick;
+  ButtonMirrorZ.Parent := PanelLayoutTransform;
+
+  ButtonRotate90Y := TButton.Create(Self);
+  ButtonRotate90Y.AutoSize := true;
+  ButtonRotate90Y.Caption := 'Rot 90° Y';
+  ButtonRotate90Y.Hint := 'Rotate selected 3D transform(s) by an exact 90-degree step around the Y (Up) axis';
+  ButtonRotate90Y.ShowHint := true;
+  ButtonRotate90Y.OnClick := @ButtonRotate90YClick;
+  ButtonRotate90Y.Parent := PanelLayoutTransform;
+
+  ButtonRandomizeTransform := TButton.Create(Self);
+  ButtonRandomizeTransform.AutoSize := true;
+  ButtonRandomizeTransform.Caption := 'Randomize';
+  ButtonRandomizeTransform.Hint := 'Randomize Yaw rotation (0..360 deg) and uniform Scale (0.85..1.15) of selected 3D transform(s) for level set-dressing';
+  ButtonRandomizeTransform.ShowHint := true;
+  ButtonRandomizeTransform.OnClick := @ButtonRandomizeTransformClick;
+  ButtonRandomizeTransform.Parent := PanelLayoutTransform;
+
+  ButtonArrayDuplicate := TButton.Create(Self);
+  ButtonArrayDuplicate.AutoSize := true;
+  ButtonArrayDuplicate.Caption := 'Array Dup...';
+  ButtonArrayDuplicate.Hint := 'Duplicate selected 3D transform(s) N times with cumulative X/Y/Z offset and Yaw rotation step (Shortcut: Ctrl+Shift+D)';
+  ButtonArrayDuplicate.ShowHint := true;
+  ButtonArrayDuplicate.OnClick := @ButtonArrayDuplicateClick;
+  ButtonArrayDuplicate.Parent := PanelLayoutTransform;
+
+  PanelPropertyFilter := TPanel.Create(Self);
+  PanelPropertyFilter.Align := alTop;
+  PanelPropertyFilter.AutoSize := true;
+  PanelPropertyFilter.BevelOuter := bvNone;
+  PanelPropertyFilter.Parent := PanelRight;
+  PanelPropertyFilter.Top := LabelControlSelected.Top + LabelControlSelected.Height + 1;
+
+  ButtonResetProperty := TSpeedButton.Create(Self);
+  ButtonResetProperty.Align := alRight;
+  ButtonResetProperty.AutoSize := true;
+  ButtonResetProperty.Caption := 'Reset Prop';
+  ButtonResetProperty.Hint := 'Reset the currently selected Object Inspector property to its default value';
+  ButtonResetProperty.ShowHint := true;
+  ButtonResetProperty.BorderSpacing.Around := 4;
+  ButtonResetProperty.OnClick := @ButtonResetPropertyClick;
+  ButtonResetProperty.Parent := PanelPropertyFilter;
+
+  EditPropertyFilter := TEdit.Create(Self);
+  EditPropertyFilter.Align := alClient;
+  EditPropertyFilter.BorderSpacing.Around := 4;
+  EditPropertyFilter.TextHint := 'Search Properties...';
+  EditPropertyFilter.Hint := 'Filter Object Inspector properties by name (case-insensitive substring match)';
+  EditPropertyFilter.ShowHint := true;
+  EditPropertyFilter.OnChange := @EditPropertyFilterChange;
+  EditPropertyFilter.Parent := PanelPropertyFilter;
+
+  MenuTreeViewItemToggleVisibility := TMenuItem.Create(Self);
+  MenuTreeViewItemToggleVisibility.Caption := 'Toggle Visibility (Exists) (H)';
+  MenuTreeViewItemToggleVisibility.OnClick := @MenuTreeViewItemToggleVisibilityClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemToggleVisibility);
+
+  MenuTreeViewItemIsolateSelected := TMenuItem.Create(Self);
+  MenuTreeViewItemIsolateSelected.Caption := 'Isolate Selected (Shift+H)';
+  MenuTreeViewItemIsolateSelected.OnClick := @MenuTreeViewItemIsolateSelectedClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemIsolateSelected);
+
+  MenuTreeViewItemShowAllHidden := TMenuItem.Create(Self);
+  MenuTreeViewItemShowAllHidden.Caption := 'Show All Hidden (Alt+H)';
+  MenuTreeViewItemShowAllHidden.OnClick := @MenuTreeViewItemShowAllHiddenClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemShowAllHidden);
+
+  MenuTreeViewItemToggleLock := TMenuItem.Create(Self);
+  MenuTreeViewItemToggleLock.Caption := 'Toggle Viewport Selection Lock (L)';
+  MenuTreeViewItemToggleLock.OnClick := @MenuTreeViewItemToggleLockClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemToggleLock);
+
+  MenuTreeViewItemUnlockAll := TMenuItem.Create(Self);
+  MenuTreeViewItemUnlockAll.Caption := 'Unlock All Components (Alt+L)';
+  MenuTreeViewItemUnlockAll.OnClick := @MenuTreeViewItemUnlockAllClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemUnlockAll);
+
+  MenuTreeViewItemGroupSelected := TMenuItem.Create(Self);
+  MenuTreeViewItemGroupSelected.Caption := 'Group Selected Under New Transform (Ctrl+G)';
+  MenuTreeViewItemGroupSelected.OnClick := @MenuTreeViewItemGroupSelectedClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemGroupSelected);
+
+  MenuTreeViewItemUngroupSelected := TMenuItem.Create(Self);
+  MenuTreeViewItemUngroupSelected.Caption := 'Ungroup Selected Transform(s) (Ctrl+Shift+G)';
+  MenuTreeViewItemUngroupSelected.OnClick := @MenuTreeViewItemUngroupSelectedClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemUngroupSelected);
+
+  MenuTreeViewItemArrayDuplicate := TMenuItem.Create(Self);
+  MenuTreeViewItemArrayDuplicate.Caption := 'Array Duplicate... (Ctrl+Shift+D)';
+  MenuTreeViewItemArrayDuplicate.OnClick := @MenuTreeViewItemArrayDuplicateClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemArrayDuplicate);
+
+  MenuTreeViewItemSelectSameClass := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectSameClass.Caption := 'Select All of Same Class';
+  MenuTreeViewItemSelectSameClass.OnClick := @MenuTreeViewItemSelectSameClassClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectSameClass);
+
+  MenuTreeViewItemExpandAll := TMenuItem.Create(Self);
+  MenuTreeViewItemExpandAll.Caption := 'Expand Subtree';
+  MenuTreeViewItemExpandAll.OnClick := @MenuTreeViewItemExpandAllClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemExpandAll);
+
+  MenuTreeViewItemCollapseAll := TMenuItem.Create(Self);
+  MenuTreeViewItemCollapseAll.Caption := 'Collapse Subtree';
+  MenuTreeViewItemCollapseAll.OnClick := @MenuTreeViewItemCollapseAllClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemCollapseAll);
+
+  ControlsTree.OnDblClick := @ControlsTreeDblClick;
+  ControlsTree.OnKeyDown := @ControlsTreeKeyDown;
 
   SaveDesignDialog.InitialDir := UriToFilenameSafe(ApplicationDataOverride);
   ExportToModelDialog.InitialDir := UriToFilenameSafe(ApplicationDataOverride);
@@ -1721,7 +2561,10 @@ begin
   *)
   UpdateEditorDataForPropertyEditors;
 
-  FindActive := false;
+  FindActive := true;
+  EditFindInHierarchy.TextHint := 'Search Hierarchy (Name or +Class)...';
+  EditFindInHierarchy.Hint := 'Filter Hierarchy by component name or class (use +ClassName to filter by class). Press F3 for next match.';
+  EditFindInHierarchy.ShowHint := true;
   SetEnabledVisible(EditFindInHierarchy, FindActive);
 
   { TODO: This is unoptimal, we switch all actions buttons to "inactive".
@@ -1758,6 +2601,7 @@ begin
   FreeAndNil(CameraPreview);
   FreeAndNil(FComponentEditorDesigner);
   FreeAndNil(LastSelected);
+  FreeAndNil(FLockedComponents);
 
   if CollectionPropertyEditorForm <> nil then
   begin
@@ -1809,6 +2653,9 @@ end;
 procedure TDesignFrame.ClearDesign;
 begin
   // ControlsTree.Items.Clear; // do not clear, we will always rebuild ControlsTree to just apply differences
+
+  if FLockedComponents <> nil then
+    FLockedComponents.Clear;
 
   ControlsTree.ClearSelection; // TODO: for now we reset selection, though maybe we could preserve it in some cases
 
@@ -2640,95 +3487,136 @@ begin
   Result := ParentComp as TCastleComponent;
 end;
 
+function TDesignFrame.IsComponentDescendantOfSelection(const C: TComponent;
+  const List: TComponentList): Boolean;
+var
+  Node: TTreeNode;
+begin
+  Result := false;
+  if (C = nil) or (List = nil) then Exit;
+  if not TreeNodeMap.TryGetValue(C, Node) then Exit;
+
+  Node := Node.Parent;
+  while Node <> nil do
+  begin
+    if (Node.Data <> nil) and (List.IndexOf(TComponent(Node.Data)) <> -1) then
+      Exit(true);
+    Node := Node.Parent;
+  end;
+end;
+
 procedure TDesignFrame.DuplicateComponent;
 
-  procedure FinishAddingComponent(const NewComponent: TComponent);
-  var
-    OldComponentName: String;
-  begin
-    OldComponentName := SelectedComponent.Name;
-    UpdateDesign;
-    SelectedComponent := NewComponent; // select after adding, makes it natural to edit
-    ModifiedOutsideObjectInspector('Duplicate ' + OldComponentName + '->' + NewComponent.Name, ucHigh);
-  end;
-
-  procedure DuplicateUserInterface(const Selected: TCastleUserInterface);
+  function DuplicateSingleUserInterface(const Selected: TCastleUserInterface): TComponent;
   var
     ParentComp, NewComp: TCastleUserInterface;
     ComponentString: String;
     InsertIndex: Integer;
   begin
+    Result := nil;
     ParentComp := Selected.Parent;
-    if ParentComp = nil then
-    begin
-      ErrorBox('To duplicate, select component with exactly one parent');
-      Exit;
-    end;
+    if ParentComp = nil then Exit;
     ComponentString := ComponentToString(Selected);
     NewComp := StringToComponent(ComponentString, DesignOwner) as TCastleUserInterface;
     InsertIndex := ParentComp.IndexOfControl(Selected);
     ParentComp.InsertControl(InsertIndex + 1, NewComp);
-    FinishAddingComponent(NewComp);
+    Result := NewComp;
   end;
 
-  procedure DuplicateTransform(const Selected: TCastleTransform);
+  function DuplicateSingleTransform(const Selected: TCastleTransform): TComponent;
   var
     ParentComp, NewComp: TCastleTransform;
     ComponentString: String;
     InsertIndex: Integer;
   begin
+    Result := nil;
     ParentComp := Selected.Parent;
-    if ParentComp = nil then
-    begin
-      ErrorBox('To duplicate, select component with exactly one parent');
-      Exit;
-    end;
+    if ParentComp = nil then Exit;
     ComponentString := ComponentToString(Selected);
     NewComp := StringToComponent(ComponentString, DesignOwner) as TCastleTransform;
     InsertIndex := ParentComp.List.IndexOf(Selected);
     ParentComp.Insert(InsertIndex + 1, NewComp);
-    FinishAddingComponent(NewComp);
+    Result := NewComp;
   end;
 
-  procedure DuplicateNonVisualComponent(const Selected: TCastleComponent);
+  function DuplicateSingleNonVisualComponent(const Selected: TCastleComponent): TComponent;
   var
     ParentComp, NewComp: TCastleComponent;
     ComponentString: String;
     InsertIndex: Integer;
   begin
+    Result := nil;
     ParentComp := NonVisualComponentParent(Selected);
-    if ParentComp = nil then
-    begin
-      ErrorBox('To duplicate, select component with exactly one parent');
-      Exit;
-    end;
+    if ParentComp = nil then Exit;
     ComponentString := ComponentToString(Selected);
     NewComp := StringToComponent(ComponentString, DesignOwner) as TCastleComponent;
     InsertIndex := ParentComp.NonVisualComponentsIndexOf(Selected);
     ParentComp.InsertNonVisualComponent(InsertIndex + 1, NewComp);
-    FinishAddingComponent(NewComp);
+    Result := NewComp;
   end;
 
 var
-  Sel: TComponent;
+  SelectedList, NewComponents: TComponentList;
+  SelectedCount, I: Integer;
+  Sel, NewComp: TComponent;
+  FirstOldName: String;
 begin
-  Sel := SelectedComponent;
+  GetSelected(SelectedList, SelectedCount, false);
+  try
+    if SelectedCount = 0 then
+    begin
+      ErrorBox('Select at least one component (that is not the root or a subcomponent) to duplicate.');
+      Exit;
+    end;
 
-  if (Sel <> nil) and
-     (not (csSubComponent in Sel.ComponentStyle)) then
-  begin
-    if Sel is TCastleUserInterface then
-      DuplicateUserInterface(Sel as TCastleUserInterface)
-    else
-    if Sel is TCastleTransform then
-      DuplicateTransform(Sel as TCastleTransform)
-    else
-    if Sel is TCastleComponent then
-      DuplicateNonVisualComponent(Sel as TCastleComponent)
-    else
-      ErrorBox('To duplicate, select TCastleUserInterface, TCastleTransform or TCastleComponent component');
-  end else
-    ErrorBox('To duplicate, select exactly one component that is not a subcomponent');
+    NewComponents := TComponentList.Create(false);
+    try
+      FirstOldName := '';
+      for I := 0 to SelectedCount - 1 do
+      begin
+        Sel := SelectedList[I];
+        if (Sel = nil) or
+           (Sel = DesignRoot) or
+           (csSubComponent in Sel.ComponentStyle) or
+           IsComponentDescendantOfSelection(Sel, SelectedList) then
+          Continue;
+
+        NewComp := nil;
+        if Sel is TCastleUserInterface then
+          NewComp := DuplicateSingleUserInterface(Sel as TCastleUserInterface)
+        else
+        if Sel is TCastleTransform then
+          NewComp := DuplicateSingleTransform(Sel as TCastleTransform)
+        else
+        if Sel is TCastleComponent then
+          NewComp := DuplicateSingleNonVisualComponent(Sel as TCastleComponent);
+
+        if NewComp <> nil then
+        begin
+          if FirstOldName = '' then
+            FirstOldName := Sel.Name;
+          NewComponents.Add(NewComp);
+        end;
+      end;
+
+      if NewComponents.Count = 0 then
+      begin
+        ErrorBox('To duplicate, select one or more components with a parent (not the root or subcomponents).');
+        Exit;
+      end;
+
+      UpdateDesign;
+      SetSelected(NewComponents);
+      if NewComponents.Count = 1 then
+        ModifiedOutsideObjectInspector('Duplicate ' + FirstOldName + '->' + NewComponents[0].Name, ucHigh)
+      else
+        ModifiedOutsideObjectInspector(Format('Duplicate %d components', [NewComponents.Count]), ucHigh);
+    finally
+      FreeAndNil(NewComponents);
+    end;
+  finally
+    FreeAndNil(SelectedList);
+  end;
 end;
 
 procedure TDesignFrame.DuplicateLinkedComponent;
@@ -3547,6 +4435,11 @@ begin
         and TCastleTransform, because ShellListComponentClass
         returned non-nil TCastleTransform descendant. }
       Transform := ShellListAddComponent(SourceShellList, ParentComponent) as TCastleTransform;
+      if (TransformManipulate <> nil) and (TransformManipulate.TranslateSnap > 0) then
+      begin
+        DropPos.X := Round(DropPos.X / TransformManipulate.TranslateSnap) * TransformManipulate.TranslateSnap;
+        DropPos.Z := Round(DropPos.Z / TransformManipulate.TranslateSnap) * TransformManipulate.TranslateSnap;
+      end;
       Transform.Translation := DropPos;
       WritelnLog('Dropped transform %s:%s into viewport %s at translation %s', [
         Transform.Name,
@@ -3791,6 +4684,8 @@ begin
   if FShowColliders <> AValue then
   begin
     FShowColliders := AValue;
+    if ButtonShowColliders <> nil then
+      ButtonShowColliders.Down := FShowColliders;
     UpdateColliders;
   end;
 end;
@@ -3855,8 +4750,9 @@ procedure TDesignFrame.InspectorFilter(const Sender: TObject;
   const AEditor: TPropertyEditor; var AShow: Boolean;
   const FilterBySection: Boolean; const Section: TPropertySection);
 var
-  PropertyName: String;
+  PropertyName, PropQuery: String;
   Instance: TPersistent;
+  HasPropFilter: Boolean;
 begin
   AShow := false;
 
@@ -3864,6 +4760,14 @@ begin
     Exit;
 
   PropertyName := AEditor.GetPropInfo^.Name;
+  if EditPropertyFilter <> nil then
+    PropQuery := LowerCase(Trim(EditPropertyFilter.Text))
+  else
+    PropQuery := '';
+  HasPropFilter := PropQuery <> '';
+
+  if HasPropFilter and (Pos(PropQuery, LowerCase(PropertyName)) = 0) then
+    Exit;
 
   if (AEditor.GetInstProp <> nil) and
      (AEditor.GetInstProp^.Instance <> nil) then
@@ -3900,7 +4804,7 @@ begin
          ) then
         Exit;
 
-      if FilterBySection and (Instance is TCastleComponent) then
+      if FilterBySection and (not HasPropFilter) and (Instance is TCastleComponent) then
       begin
         AShow := Section in TCastleComponent(Instance).PropertySections(PropertyName);
       end else
@@ -3913,6 +4817,57 @@ begin
         like TBorder, TCastleImagePersistent... }
       AShow := true;
     end;
+  end;
+end;
+
+procedure TDesignFrame.EditPropertyFilterChange(Sender: TObject);
+var
+  InspectorType: TInspectorType;
+begin
+  for InspectorType in TInspectorType do
+    if Inspector[InspectorType] <> nil then
+      Inspector[InspectorType].BuildPropertyList;
+end;
+
+procedure TDesignFrame.GizmoTransformModifyBegin(Sender: TObject);
+var
+  I, InsertIdx: Integer;
+  T, ParentComp, StationaryClone: TCastleTransform;
+  CompStr: String;
+  SelectedList: TComponentList;
+  SelectedCount: Integer;
+begin
+  FAltDragDuplicated := false;
+  if (CastleControl = nil) or (CastleControl.Container = nil) then Exit;
+  if not (mkAlt in CastleControl.Container.Pressed.Modifiers) then Exit;
+  if CastleApplicationMode <> appDesign then Exit;
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount = 0) or
+     (DesignOwner = nil) then Exit;
+
+  GetSelected(SelectedList, SelectedCount, false);
+  try
+    for I := 0 to TransformManipulate.SelectedCount - 1 do
+    begin
+      T := TransformManipulate.Selected[I];
+      if (T = nil) or (not Deletable(T)) or (T.Parent = nil) then
+        Continue;
+      if (SelectedList <> nil) and IsComponentDescendantOfSelection(T, SelectedList) then
+        Continue;
+
+      ParentComp := T.Parent;
+      CompStr := ComponentToString(T);
+      StationaryClone := StringToComponent(CompStr, DesignOwner) as TCastleTransform;
+      InsertIdx := ParentComp.List.IndexOf(T);
+      if InsertIdx >= 0 then
+        ParentComp.Insert(InsertIdx, StationaryClone)
+      else
+        ParentComp.Add(StationaryClone);
+      FAltDragDuplicated := true;
+    end;
+    if FAltDragDuplicated then
+      UndoSystem.ScheduleRecordUndoOnRelease := true;
+  finally
+    FreeAndNil(SelectedList);
   end;
 end;
 
@@ -3938,6 +4893,14 @@ procedure TDesignFrame.GizmoTransformModifyEnd(Sender: TObject);
   end;
 
 begin
+  if FAltDragDuplicated then
+  begin
+    FAltDragDuplicated := false;
+    UpdateDesign;
+    UndoSystem.ScheduleRecordUndoOnRelease := false;
+    RecordUndo('Alt-Drag Duplicate ' +
+      SelectionCaption(Sender as TCastleTransformManipulate), ucHigh);
+  end else
   if UndoSystem.ScheduleRecordUndoOnRelease then
     RecordUndo('Transform ' +
       SelectionCaption(Sender as TCastleTransformManipulate) +
@@ -5042,7 +6005,7 @@ procedure TDesignFrame.UpdateSelectedControl;
   end;
 
 var
-  Selected: TComponentList;
+  Selected, UnlockedSelected: TComponentList;
   I, SelectedCount: Integer;
   SelectionForOI: TPersistentSelectionList;
   UI: TCastleUserInterface;
@@ -5061,6 +6024,8 @@ begin
     end;
 
     SetEnabledVisible(ControlProperties, SelectedCount <> 0);
+    if PanelPropertyFilter <> nil then
+      SetEnabledVisible(PanelPropertyFilter, SelectedCount <> 0);
 
     SelectionForOI := TPersistentSelectionList.Create;
     try
@@ -5081,20 +6046,36 @@ begin
 
     V := SelectedViewport;
     T := CurrentTransform;
-    SetEnabledVisible(PanelLayoutTransform, T <> nil);
 
-    (*
-    // The TransformDesigning mechanism works, but it's unused for now.
-
-    if SelectedComponent is TCastleToolTransform then
-      { Design parent of TCastleToolTransform,
-        otherwise TCastleToolTransform would disappear as soon as we select it. }
-      TransformDesigning := TCastleToolTransform(SelectedComponent).Parent
-    else
-      TransformDesigning := T;
-    *)
-
-    TransformManipulate.SetSelected(Selected);
+    UnlockedSelected := TComponentList.Create(false);
+    try
+      if Selected <> nil then
+        for I := 0 to Selected.Count - 1 do
+          if not IsComponentLocked(Selected[I]) then
+            UnlockedSelected.Add(Selected[I]);
+      TransformManipulate.SetSelected(UnlockedSelected);
+    finally
+      FreeAndNil(UnlockedSelected);
+    end;
+    SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
+    if ButtonAlignX <> nil then
+      ButtonAlignX.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonAlignY <> nil then
+      ButtonAlignY.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonAlignZ <> nil then
+      ButtonAlignZ.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonDistributeX <> nil then
+      ButtonDistributeX.Enabled := TransformManipulate.SelectedCount >= 3;
+    if ButtonDistributeY <> nil then
+      ButtonDistributeY.Enabled := TransformManipulate.SelectedCount >= 3;
+    if ButtonDistributeZ <> nil then
+      ButtonDistributeZ.Enabled := TransformManipulate.SelectedCount >= 3;
+    if ButtonStackX <> nil then
+      ButtonStackX.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonStackY <> nil then
+      ButtonStackY.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonStackZ <> nil then
+      ButtonStackZ.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -5884,9 +6865,11 @@ var
     end;
   end;
 
-  procedure DrawTreeNodeClassName(const NodeClassName: String);
+  procedure DrawTreeNodeClassName(const NodeObj: TObject);
   var
     TextRect: TRect;
+    Suffix: String;
+    IsHidden, IsLocked, IsFilterMatch: Boolean;
   begin
     {$ifdef LCLCocoa}
     { On Cocoa, this is fired even when editing given Node, but we should not
@@ -5896,10 +6879,28 @@ var
       Exit;
     {$endif LCLCocoa}
 
+    IsHidden := ((NodeObj is TCastleTransform) and (not TCastleTransform(NodeObj).Exists)) or
+                ((NodeObj is TCastleUserInterface) and (not TCastleUserInterface(NodeObj).Exists));
+    IsLocked := (NodeObj is TComponent) and (FLockedComponents <> nil) and
+                (FLockedComponents.IndexOf(TComponent(NodeObj)) <> -1);
+    IsFilterMatch := FindActive and (Trim(EditFindInHierarchy.Text) <> '') and
+                     (NodeObj is TComponent) and NodeMatchesHierarchyFilter(TComponent(NodeObj));
+
+    Suffix := ' (' + NodeObj.ClassName + ')';
+    if IsHidden then
+      Suffix := Suffix + ' [Hidden]';
+    if IsLocked then
+      Suffix := Suffix + ' [Locked]';
+
     TextRect := Node.DisplayRect(true);
     C.Brush.Style := bsClear;
-    C.Font.Color := clLtGray;
-    C.TextOut(TextRect.Right, TextRect.Top, ' (' + NodeClassName + ')');
+    if IsFilterMatch then
+      C.Font.Color := clYellow
+    else if IsHidden then
+      C.Font.Color := clGray
+    else
+      C.Font.Color := clLtGray;
+    C.TextOut(TextRect.Right, TextRect.Top, Suffix);
   end;
 
 begin
@@ -5923,7 +6924,7 @@ begin
 
         if (not InternalCastleDesignInvalidate) and
            (Node.Data <> nil) then
-          DrawTreeNodeClassName(TObject(Node.Data).ClassName);
+          DrawTreeNodeClassName(TObject(Node.Data));
       end;
     else ; // nothing to do otherwise
   end;
@@ -6049,9 +7050,16 @@ begin
 end;
 
 procedure TDesignFrame.ActionSimulationPauseUnpauseUpdate(Sender: TObject);
+var
+  InSim: Boolean;
 begin
+  InSim := CastleApplicationMode in [appSimulation, appSimulationPaused];
   ActionSimulationPauseUnpause.Checked := CastleApplicationMode = appSimulationPaused;
-  ActionSimulationPauseUnpause.Visible := CastleApplicationMode in [appSimulation, appSimulationPaused];
+  ActionSimulationPauseUnpause.Visible := InSim;
+  if ButtonSimulationStep <> nil then
+    ButtonSimulationStep.Visible := InSim;
+  if ButtonKeepSimulation <> nil then
+    ButtonKeepSimulation.Visible := InSim;
 end;
 
 procedure TDesignFrame.ActionSimulationPauseUnpauseExecute(Sender: TObject);
@@ -6100,13 +7108,1523 @@ end;
 procedure TDesignFrame.ButtonResetTransformationClick(Sender: TObject);
 var
   T: TCastleTransform;
+  I: Integer;
+begin
+  if TransformManipulate.SelectedCount > 1 then
+  begin
+    for I := 0 to TransformManipulate.SelectedCount - 1 do
+      TransformManipulate.Selected[I].Identity;
+    ModifiedOutsideObjectInspector(
+      Format('Reset transformations for %d objects', [TransformManipulate.SelectedCount]), ucHigh);
+  end else
+  begin
+    T := CurrentTransform;
+    if T <> nil then
+    begin
+      T.Identity;
+      ModifiedOutsideObjectInspector('Reset transformations for ' + T.Name, ucHigh);
+    end;
+  end;
+end;
+
+procedure TDesignFrame.ToggleCoordSpace;
+begin
+  if TransformManipulate.CoordSpace = csLocal then
+  begin
+    TransformManipulate.CoordSpace := csWorld;
+    if ButtonCoordSpace <> nil then
+      ButtonCoordSpace.Caption := 'World';
+  end else
+  begin
+    TransformManipulate.CoordSpace := csLocal;
+    if ButtonCoordSpace <> nil then
+      ButtonCoordSpace.Caption := 'Local';
+  end;
+end;
+
+procedure TDesignFrame.ButtonCoordSpaceClick(Sender: TObject);
+begin
+  ToggleCoordSpace;
+end;
+
+procedure TDesignFrame.SpinEditSnap3DChange(Sender: TObject);
+var
+  SnapVal: Single;
+begin
+  if (SpinEditSnap3D = nil) or (TransformManipulate = nil) then Exit;
+  SnapVal := SpinEditSnap3D.Value;
+  if SnapVal > 0 then
+  begin
+    TransformManipulate.TranslateSnap := SnapVal;
+    if SnapVal <= 1.0 then
+      TransformManipulate.RotateSnap := DegToRad(15.0)
+    else
+      TransformManipulate.RotateSnap := DegToRad(SnapVal);
+    TransformManipulate.ScaleSnap := SnapVal;
+  end else
+  begin
+    TransformManipulate.TranslateSnap := 0;
+    TransformManipulate.RotateSnap := 0;
+    TransformManipulate.ScaleSnap := 0;
+  end;
+end;
+
+procedure TDesignFrame.ViewportSnapToFloor(const AlignToNormal: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.SnapToFloor(AlignToNormal);
+end;
+
+procedure TDesignFrame.ButtonSnapToFloorClick(Sender: TObject);
+begin
+  ViewportSnapToFloor(false);
+end;
+
+procedure TDesignFrame.ButtonSnapToFloorNormalClick(Sender: TObject);
+begin
+  ViewportSnapToFloor(true);
+end;
+
+procedure TDesignFrame.CopyTransform;
+var
+  T: TCastleTransform;
 begin
   T := CurrentTransform;
+  if (T = nil) and (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0) then
+    T := TransformManipulate.Selected[0];
   if T <> nil then
   begin
-    T.Identity;
-    ModifiedOutsideObjectInspector('Reset transformations for ' + T.Name, ucHigh);
+    FCopiedTranslation := T.Translation;
+    FCopiedRotation := T.Rotation;
+    FCopiedScale := T.Scale;
+    FCopiedTransformValid := true;
+    if ButtonPasteTransform <> nil then
+      ButtonPasteTransform.Enabled := true;
   end;
+end;
+
+procedure TDesignFrame.PasteTransform;
+var
+  T: TCastleTransform;
+  I: Integer;
+begin
+  if not FCopiedTransformValid then Exit;
+
+  if (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 1) then
+  begin
+    for I := 0 to TransformManipulate.SelectedCount - 1 do
+    begin
+      T := TransformManipulate.Selected[I];
+      T.Translation := FCopiedTranslation;
+      T.Rotation := FCopiedRotation;
+      T.Scale := FCopiedScale;
+    end;
+    ModifiedOutsideObjectInspector(
+      Format('Paste transform to %d objects', [TransformManipulate.SelectedCount]), ucHigh);
+  end else
+  begin
+    T := CurrentTransform;
+    if T <> nil then
+    begin
+      T.Translation := FCopiedTranslation;
+      T.Rotation := FCopiedRotation;
+      T.Scale := FCopiedScale;
+      ModifiedOutsideObjectInspector('Paste transform to ' + T.Name, ucHigh);
+    end;
+  end;
+end;
+
+procedure TDesignFrame.ButtonCopyTransformClick(Sender: TObject);
+begin
+  CopyTransform;
+end;
+
+procedure TDesignFrame.ButtonPasteTransformClick(Sender: TObject);
+begin
+  PasteTransform;
+end;
+
+procedure TDesignFrame.ToggleSelectedVisibility;
+var
+  I: Integer;
+  C: TComponent;
+  ToggledCount: Integer;
+  NewExists: Boolean;
+  FirstFound: Boolean;
+begin
+  if ControlsTree.SelectionCount = 0 then Exit;
+
+  FirstFound := false;
+  NewExists := false;
+  ToggledCount := 0;
+
+  for I := 0 to ControlsTree.SelectionCount - 1 do
+  begin
+    C := SelectedFromNode(ControlsTree.Selections[I]);
+    if C is TCastleTransform then
+    begin
+      if not FirstFound then
+      begin
+        NewExists := not TCastleTransform(C).Exists;
+        FirstFound := true;
+      end;
+      TCastleTransform(C).Exists := NewExists;
+      Inc(ToggledCount);
+    end else
+    if C is TCastleUserInterface then
+    begin
+      if not FirstFound then
+      begin
+        NewExists := not TCastleUserInterface(C).Exists;
+        FirstFound := true;
+      end;
+      TCastleUserInterface(C).Exists := NewExists;
+      Inc(ToggledCount);
+    end;
+  end;
+
+  if ToggledCount > 0 then
+  begin
+    ControlsTree.Invalidate;
+    ModifiedOutsideObjectInspector(
+      Format('Toggle visibility (Exists=%s) for %d component(s)',
+        [BoolToStr(NewExists, true), ToggledCount]), ucHigh);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemToggleVisibilityClick(Sender: TObject);
+begin
+  ToggleSelectedVisibility;
+end;
+
+procedure TDesignFrame.ControlsTreeDblClick(Sender: TObject);
+begin
+  if CurrentTransform <> nil then
+    ViewportViewSelected;
+end;
+
+procedure TDesignFrame.ControlsTreeKeyDown(Sender: TObject; var Key: Word;
+  Shift: TShiftState);
+begin
+  if not ControlsTree.IsEditing then
+  begin
+    if Key = Ord('H') then
+    begin
+      if Shift = [] then
+      begin
+        ToggleSelectedVisibility;
+        Key := 0;
+      end else
+      if Shift = [ssShift] then
+      begin
+        IsolateSelected;
+        Key := 0;
+      end else
+      if Shift = [ssAlt] then
+      begin
+        ShowAllHidden;
+        Key := 0;
+      end;
+    end else
+    if Key = Ord('G') then
+    begin
+      if Shift = [ssCtrl] then
+      begin
+        GroupSelectedTransforms;
+        Key := 0;
+      end else
+      if Shift = [ssCtrl, ssShift] then
+      begin
+        UngroupSelectedTransforms;
+        Key := 0;
+      end;
+    end else
+    if Key = Ord('L') then
+    begin
+      if Shift = [] then
+      begin
+        ToggleSelectedLock;
+        Key := 0;
+      end else
+      if Shift = [ssAlt] then
+      begin
+        UnlockAll;
+        Key := 0;
+      end;
+    end else
+    if (Key = Ord('D')) and (Shift = [ssCtrl, ssShift]) then
+    begin
+      ShowArrayDuplicateDialog;
+      Key := 0;
+    end;
+  end;
+end;
+
+function TDesignFrame.NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
+var
+  Query, LowerName, LowerClass: String;
+begin
+  if C = nil then Exit(false);
+  Query := Trim(LowerCase(EditFindInHierarchy.Text));
+  if Query = '' then Exit(true);
+
+  LowerName := LowerCase(C.Name);
+  LowerClass := LowerCase(C.ClassName);
+
+  if (Length(Query) > 1) and (Query[1] = '+') then
+  begin
+    Delete(Query, 1, 1);
+    Result := Pos(Query, LowerClass) <> 0;
+  end else
+    Result := (Pos(Query, LowerName) <> 0) or (Pos(Query, LowerClass) <> 0);
+end;
+
+procedure TDesignFrame.UpdateViewModeButtonCaption;
+begin
+  if ButtonViewMode = nil then Exit;
+  if InternalForceWireframe = weWireframeOnly then
+    ButtonViewMode.Caption := 'View: Wire'
+  else if InternalForceWireframe = weSolidWireframe then
+    ButtonViewMode.Caption := 'View: SolidWire'
+  else if InternalForceUnlit then
+    ButtonViewMode.Caption := 'View: Unlit'
+  else
+    ButtonViewMode.Caption := 'View: Lit';
+end;
+
+procedure TDesignFrame.CycleViewportRenderMode;
+begin
+  if (InternalForceWireframe = weNormal) and (not InternalForceUnlit) then
+  begin
+    InternalForceUnlit := true;
+    InternalForceWireframe := weNormal;
+  end else
+  if (InternalForceWireframe = weNormal) and InternalForceUnlit then
+  begin
+    InternalForceUnlit := false;
+    InternalForceWireframe := weWireframeOnly;
+  end else
+  if InternalForceWireframe = weWireframeOnly then
+  begin
+    InternalForceUnlit := false;
+    InternalForceWireframe := weSolidWireframe;
+  end else
+  begin
+    InternalForceUnlit := false;
+    InternalForceWireframe := weNormal;
+  end;
+  UpdateViewModeButtonCaption;
+end;
+
+procedure TDesignFrame.ButtonViewModeClick(Sender: TObject);
+begin
+  CycleViewportRenderMode;
+end;
+
+function TDesignFrame.EffectiveShowStatistics: Boolean;
+begin
+  Result := FShowStatisticsToolbar or
+    (Assigned(OnShowStatistics) and OnShowStatistics());
+end;
+
+procedure TDesignFrame.ButtonShowStatsClick(Sender: TObject);
+begin
+  if ButtonShowStats <> nil then
+    FShowStatisticsToolbar := ButtonShowStats.Down
+  else
+    FShowStatisticsToolbar := not FShowStatisticsToolbar;
+end;
+
+procedure TDesignFrame.ButtonShowCollidersClick(Sender: TObject);
+begin
+  if ButtonShowColliders <> nil then
+    ShowColliders := ButtonShowColliders.Down
+  else
+    ShowColliders := not ShowColliders;
+end;
+
+procedure TDesignFrame.PopulateQuickAddList(const FilterText: String);
+var
+  R: TRegisteredComponent;
+  Category, CaptionStr, Part, ItemText, LowerFilter: String;
+  Sel: TComponent;
+  CanAddUI, CanAddTransform, CanAddBehavior: Boolean;
+begin
+  if FQuickAddList = nil then Exit;
+  FQuickAddList.Items.BeginUpdate;
+  try
+    FQuickAddList.Items.Clear;
+    LowerFilter := Trim(LowerCase(FilterText));
+
+    Sel := SelectedComponent;
+    CanAddUI := (Sel is TCastleUserInterface) or ((Sel = nil) and (DesignRoot is TCastleUserInterface));
+    CanAddTransform := (Sel is TCastleTransform) or ((Sel = nil) and (DesignRoot is TCastleTransform)) or
+                       (CurrentViewport <> nil);
+    CanAddBehavior := (Sel is TCastleTransform) or (Sel is TCastleBehavior) or
+                      ((Sel = nil) and (DesignRoot is TCastleTransform));
+
+    for R in RegisteredComponents do
+      if not R.IsDeprecated then
+      begin
+        if R.ComponentClass.InheritsFrom(TCastleUserInterface) then
+        begin
+          if not CanAddUI then Continue;
+          Category := 'UI';
+        end else
+        if R.ComponentClass.InheritsFrom(TCastleTransform) then
+        begin
+          if not CanAddTransform then Continue;
+          Category := 'Transform';
+        end else
+        if R.ComponentClass.InheritsFrom(TCastleBehavior) then
+        begin
+          if not CanAddBehavior then Continue;
+          Category := 'Behavior';
+        end else
+          Category := 'NonVisual';
+
+        CaptionStr := '';
+        for Part in R.Caption do
+        begin
+          if CaptionStr <> '' then
+            CaptionStr := CaptionStr + ' -> ';
+          CaptionStr := CaptionStr + Part;
+        end;
+
+        ItemText := Format('[%s] %s (%s)', [
+          Category, CaptionStr, R.ComponentClass.ClassName]);
+
+        if (LowerFilter = '') or (Pos(LowerFilter, LowerCase(ItemText)) <> 0) then
+          FQuickAddList.Items.AddObject(ItemText, R);
+      end;
+
+    if FQuickAddList.Items.Count > 0 then
+      FQuickAddList.ItemIndex := 0;
+  finally
+    FQuickAddList.Items.EndUpdate;
+  end;
+end;
+
+procedure TDesignFrame.QuickAddEditChange(Sender: TObject);
+begin
+  if FQuickAddEdit <> nil then
+    PopulateQuickAddList(FQuickAddEdit.Text);
+end;
+
+procedure TDesignFrame.QuickAddEditKeyDown(Sender: TObject; var Key: Word;
+  Shift: TShiftState);
+begin
+  if FQuickAddList = nil then Exit;
+  if Key = VK_DOWN then
+  begin
+    if FQuickAddList.ItemIndex < FQuickAddList.Items.Count - 1 then
+      FQuickAddList.ItemIndex := FQuickAddList.ItemIndex + 1;
+    Key := 0;
+  end else
+  if Key = VK_UP then
+  begin
+    if FQuickAddList.ItemIndex > 0 then
+      FQuickAddList.ItemIndex := FQuickAddList.ItemIndex - 1;
+    Key := 0;
+  end;
+end;
+
+procedure TDesignFrame.QuickAddListDblClick(Sender: TObject);
+var
+  ParentForm: TCustomForm;
+begin
+  if (FQuickAddList <> nil) and (FQuickAddList.ItemIndex >= 0) then
+  begin
+    ParentForm := GetParentForm(FQuickAddList);
+    if ParentForm <> nil then
+      ParentForm.ModalResult := mrOk;
+  end;
+end;
+
+procedure TDesignFrame.ShowQuickAddPalette;
+var
+  Dialog: TForm;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+  R: TRegisteredComponent;
+  Sel: TComponent;
+begin
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick-Add Component Palette (Ctrl+P)';
+    Dialog.Position := poMainFormCenter;
+    Dialog.Width := 520;
+    Dialog.Height := 420;
+    Dialog.BorderStyle := bsSizeToolWin;
+
+    FQuickAddEdit := TEdit.Create(Dialog);
+    FQuickAddEdit.Align := alTop;
+    FQuickAddEdit.BorderSpacing.Around := 8;
+    FQuickAddEdit.TextHint := 'Search component by name, category, or class (e.g. Scene, Light, Button, RigidBody)...';
+    FQuickAddEdit.OnChange := @QuickAddEditChange;
+    FQuickAddEdit.OnKeyDown := @QuickAddEditKeyDown;
+    FQuickAddEdit.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Add Component';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    FQuickAddList := TListBox.Create(Dialog);
+    FQuickAddList.Align := alClient;
+    FQuickAddList.BorderSpacing.Left := 8;
+    FQuickAddList.BorderSpacing.Right := 8;
+    FQuickAddList.OnDblClick := @QuickAddListDblClick;
+    FQuickAddList.Parent := Dialog;
+
+    PopulateQuickAddList('');
+
+    if (Dialog.ShowModal = mrOk) and
+       (FQuickAddList.ItemIndex >= 0) and
+       (FQuickAddList.Items.Objects[FQuickAddList.ItemIndex] is TRegisteredComponent) then
+    begin
+      R := TRegisteredComponent(FQuickAddList.Items.Objects[FQuickAddList.ItemIndex]);
+      Sel := SelectedComponent;
+      if R.ComponentClass.InheritsFrom(TCastleTransform) and
+         (not (Sel is TCastleTransform)) and
+         (not ((Sel = nil) and (DesignRoot is TCastleTransform))) and
+         (CurrentViewport <> nil) then
+        SelectedComponent := CurrentViewport;
+      AddComponent(R.ComponentClass, R.OnCreate);
+    end;
+  finally
+    FQuickAddEdit := nil;
+    FQuickAddList := nil;
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.ButtonQuickAddClick(Sender: TObject);
+begin
+  ShowQuickAddPalette;
+end;
+
+procedure TDesignFrame.SimulationSingleStep;
+var
+  HandleInput: Boolean;
+begin
+  if CastleApplicationMode = appDesign then Exit;
+
+  if CastleApplicationMode = appSimulation then
+  begin
+    SimulationPauseUnpause;
+    Exit;
+  end;
+
+  InternalCastleApplicationMode := appSimulation;
+  try
+    HandleInput := true;
+    if CurrentViewport <> nil then
+      CurrentViewport.Update(1.0 / 60.0, HandleInput);
+  finally
+    InternalCastleApplicationMode := appSimulationPaused;
+  end;
+  ActionSimulationPlayStopUpdate(ActionSimulationPlayStop);
+  ActionSimulationPauseUnpauseUpdate(ActionSimulationPauseUnpause);
+end;
+
+procedure TDesignFrame.ButtonSimulationStepClick(Sender: TObject);
+begin
+  SimulationSingleStep;
+end;
+
+procedure TDesignFrame.KeepSimulationChanges;
+type
+  TSimTransformState = record
+    Name: String;
+    Translation: TVector3;
+    Rotation: TVector4;
+    Scale: TVector3;
+  end;
+var
+  States: array of TSimTransformState;
+  StateCount, I, AppliedCount: Integer;
+  C: TComponent;
+  T: TCastleTransform;
+begin
+  if not (CastleApplicationMode in [appSimulation, appSimulationPaused]) then
+    Exit;
+  if DesignOwner = nil then
+    Exit;
+
+  SetLength(States, DesignOwner.ComponentCount);
+  StateCount := 0;
+  for I := 0 to DesignOwner.ComponentCount - 1 do
+  begin
+    C := DesignOwner.Components[I];
+    if (C is TCastleTransform) and (C.Name <> '') and Selectable(C) then
+    begin
+      T := TCastleTransform(C);
+      States[StateCount].Name := T.Name;
+      States[StateCount].Translation := T.Translation;
+      States[StateCount].Rotation := T.Rotation;
+      States[StateCount].Scale := T.Scale;
+      Inc(StateCount);
+    end;
+  end;
+
+  // Stop simulation (restores DesignStateBeforePhysicsRun)
+  SimulationPlayStop;
+
+  AppliedCount := 0;
+  if DesignOwner <> nil then
+  begin
+    for I := 0 to StateCount - 1 do
+    begin
+      C := DesignOwner.FindComponent(States[I].Name);
+      if C is TCastleTransform then
+      begin
+        T := TCastleTransform(C);
+        if (not TVector3.PerfectlyEquals(T.Translation, States[I].Translation)) or
+           (not TVector4.PerfectlyEquals(T.Rotation, States[I].Rotation)) or
+           (not TVector3.PerfectlyEquals(T.Scale, States[I].Scale)) then
+        begin
+          T.Translation := States[I].Translation;
+          T.Rotation := States[I].Rotation;
+          T.Scale := States[I].Scale;
+          Inc(AppliedCount);
+        end;
+      end;
+    end;
+  end;
+
+  if AppliedCount > 0 then
+    ModifiedOutsideObjectInspector(
+      Format('Keep physics simulation changes (%d transforms)', [AppliedCount]), ucHigh);
+end;
+
+procedure TDesignFrame.ButtonKeepSimulationClick(Sender: TObject);
+begin
+  KeepSimulationChanges;
+end;
+
+procedure TDesignFrame.TogglePivotMode;
+begin
+  if TransformManipulate.PivotMode = pmPrimarySelected then
+  begin
+    TransformManipulate.PivotMode := pmSelectionCenter;
+    if ButtonPivotMode <> nil then
+      ButtonPivotMode.Caption := 'Pivot: Center';
+  end else
+  begin
+    TransformManipulate.PivotMode := pmPrimarySelected;
+    if ButtonPivotMode <> nil then
+      ButtonPivotMode.Caption := 'Pivot: Primary';
+  end;
+end;
+
+procedure TDesignFrame.ButtonPivotModeClick(Sender: TObject);
+begin
+  TogglePivotMode;
+end;
+
+procedure TDesignFrame.ViewportSnapToGrid;
+var
+  SavedSnap: Single;
+begin
+  if TransformManipulate = nil then Exit;
+  SavedSnap := TransformManipulate.TranslateSnap;
+  if SavedSnap <= 0 then
+    TransformManipulate.TranslateSnap := 1.0;
+  try
+    TransformManipulate.SnapSelectedToGrid;
+  finally
+    TransformManipulate.TranslateSnap := SavedSnap;
+  end;
+end;
+
+procedure TDesignFrame.ButtonSnapToGridClick(Sender: TObject);
+begin
+  ViewportSnapToGrid;
+end;
+
+procedure TDesignFrame.ViewportAlignTransformToView;
+var
+  V: TCastleViewport;
+  T: TCastleTransform;
+  CamPos, CamDir, CamUp: TVector3;
+begin
+  V := CurrentViewport;
+  T := CurrentTransform;
+  if (V = nil) or (V.InternalCamera = nil) or (T = nil) then Exit;
+
+  V.InternalCamera.GetWorldView(CamPos, CamDir, CamUp);
+  T.SetWorldView(CamPos, CamDir, CamUp);
+  ModifiedOutsideObjectInspector('Move Transform To View: ' + T.Name, ucHigh);
+end;
+
+procedure TDesignFrame.ButtonMoveTransformToViewClick(Sender: TObject);
+begin
+  ViewportAlignTransformToView;
+end;
+
+procedure TDesignFrame.AlignSelectionToAxis(const Axis: T3DAxis);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.AlignSelected(Axis, atPrimary);
+end;
+
+procedure TDesignFrame.DistributeSelectionAlongAxis(const Axis: T3DAxis);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.DistributeSelected(Axis);
+end;
+
+procedure TDesignFrame.ButtonAlignAxisClick(Sender: TObject);
+begin
+  if Sender is TComponent then
+    AlignSelectionToAxis(TComponent(Sender).Tag);
+end;
+
+procedure TDesignFrame.ButtonDistributeAxisClick(Sender: TObject);
+begin
+  if Sender is TComponent then
+    DistributeSelectionAlongAxis(TComponent(Sender).Tag);
+end;
+
+procedure TDesignFrame.StackSelectionAlongAxis(const Axis: T3DAxis);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.StackSelected(Axis, 0);
+end;
+
+procedure TDesignFrame.ButtonStackAxisClick(Sender: TObject);
+begin
+  if Sender is TComponent then
+    StackSelectionAlongAxis(TComponent(Sender).Tag);
+end;
+
+procedure TDesignFrame.MirrorSelectionAlongAxis(const Axis: T3DAxis);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.MirrorSelected(Axis);
+end;
+
+procedure TDesignFrame.ButtonMirrorAxisClick(Sender: TObject);
+begin
+  if Sender is TComponent then
+    MirrorSelectionAlongAxis(TComponent(Sender).Tag);
+end;
+
+procedure TDesignFrame.RotateSelection90Y;
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.RotateSelected90(1, true);
+end;
+
+procedure TDesignFrame.ButtonRotate90YClick(Sender: TObject);
+begin
+  RotateSelection90Y;
+end;
+
+procedure TDesignFrame.RandomizeSelectionTransform;
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.RandomizeSelected(Pi, 0.85, 1.15, 0);
+end;
+
+procedure TDesignFrame.ButtonRandomizeTransformClick(Sender: TObject);
+begin
+  RandomizeSelectionTransform;
+end;
+
+procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
+var
+  V: TCastleViewport;
+  WalkNav: TCastleWalkNavigation;
+begin
+  V := CurrentViewport;
+  if (V <> nil) and (V.InternalDesignNavigation is TCastleWalkNavigation) then
+  begin
+    WalkNav := TCastleWalkNavigation(V.InternalDesignNavigation);
+    WalkNav.MoveSpeed := Clamped(WalkNav.MoveSpeed * Factor, 0.05, 5000.0);
+  end;
+end;
+
+procedure TDesignFrame.IsolateSelected;
+
+  function IsAncestorOfAnySelectedNode(const CandidateNode: TTreeNode): Boolean;
+  var
+    I: Integer;
+    P: TTreeNode;
+  begin
+    Result := false;
+    if CandidateNode = nil then Exit;
+    for I := 0 to ControlsTree.SelectionCount - 1 do
+    begin
+      P := ControlsTree.Selections[I].Parent;
+      while P <> nil do
+      begin
+        if P = CandidateNode then
+          Exit(true);
+        P := P.Parent;
+      end;
+    end;
+  end;
+
+var
+  Selected: TComponentList;
+  SelectedCount, ChangedCount: Integer;
+  TreeNode: TTreeNode;
+  C: TComponent;
+  ShouldBeVisible: Boolean;
+begin
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if (Selected = nil) or (SelectedCount = 0) then Exit;
+
+    ChangedCount := 0;
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C <> nil) and (C <> DesignRoot) and
+         (not (C is TCastleAbstractRootTransform)) and
+         (not (C is TCastleViewport)) then
+      begin
+        ShouldBeVisible :=
+          (Selected.IndexOf(C) <> -1) or
+          IsAncestorOfAnySelectedNode(TreeNode) or
+          IsComponentDescendantOfSelection(C, Selected);
+
+        if C is TCastleTransform then
+        begin
+          if TCastleTransform(C).Exists <> ShouldBeVisible then
+          begin
+            TCastleTransform(C).Exists := ShouldBeVisible;
+            Inc(ChangedCount);
+          end;
+        end else
+        if C is TCastleUserInterface then
+        begin
+          if TCastleUserInterface(C).Exists <> ShouldBeVisible then
+          begin
+            TCastleUserInterface(C).Exists := ShouldBeVisible;
+            Inc(ChangedCount);
+          end;
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if ChangedCount > 0 then
+    begin
+      ControlsTree.Invalidate;
+      ModifiedOutsideObjectInspector(
+        Format('Isolate %d selected component(s)', [SelectedCount]), ucHigh);
+    end;
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemIsolateSelectedClick(Sender: TObject);
+begin
+  IsolateSelected;
+end;
+
+procedure TDesignFrame.ShowAllHidden;
+var
+  TreeNode: TTreeNode;
+  C: TComponent;
+  RestoredCount: Integer;
+begin
+  RestoredCount := 0;
+  TreeNode := ControlsTree.Items.GetFirstNode;
+  while TreeNode <> nil do
+  begin
+    C := SelectedFromNode(TreeNode, false);
+    if (C is TCastleTransform) and (not TCastleTransform(C).Exists) then
+    begin
+      TCastleTransform(C).Exists := true;
+      Inc(RestoredCount);
+    end else
+    if (C is TCastleUserInterface) and (not TCastleUserInterface(C).Exists) then
+    begin
+      TCastleUserInterface(C).Exists := true;
+      Inc(RestoredCount);
+    end;
+    TreeNode := TreeNode.GetNext;
+  end;
+
+  if RestoredCount > 0 then
+  begin
+    ControlsTree.Invalidate;
+    ModifiedOutsideObjectInspector(
+      Format('Show all hidden (%d component(s))', [RestoredCount]), ucHigh);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemShowAllHiddenClick(Sender: TObject);
+begin
+  ShowAllHidden;
+end;
+
+procedure TDesignFrame.GroupSelectedTransforms;
+var
+  Selected: TComponentList;
+  SelectedCount, I, Count: Integer;
+  Items: array of TCastleTransform;
+  WorldPositions: array of TVector3;
+  C: TComponent;
+  T, TargetParent, NewGroup: TCastleTransform;
+  GroupWorldCenter: TVector3;
+begin
+  if DesignOwner = nil then Exit;
+
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if (Selected = nil) or (SelectedCount = 0) then Exit;
+
+    SetLength(Items, SelectedCount);
+    SetLength(WorldPositions, SelectedCount);
+    Count := 0;
+    for I := 0 to SelectedCount - 1 do
+    begin
+      C := Selected[I];
+      if (C is TCastleTransform) and Deletable(C) and
+         (TCastleTransform(C).Parent <> nil) and
+         (not IsComponentDescendantOfSelection(C, Selected)) then
+      begin
+        T := TCastleTransform(C);
+        Items[Count] := T;
+        if T.HasWorldTransform then
+          WorldPositions[Count] := T.LocalToWorld(TVector3.Zero)
+        else
+          WorldPositions[Count] := T.Translation;
+        Inc(Count);
+      end;
+    end;
+
+    if Count = 0 then Exit;
+
+    TargetParent := Items[0].Parent;
+    GroupWorldCenter := TransformManipulate.SelectionWorkingCenter;
+
+    NewGroup := TCastleTransform.Create(DesignOwner);
+    NewGroup.Name := ProposeComponentName(TCastleTransform, DesignOwner, 'Group');
+    TargetParent.Add(NewGroup);
+
+    if TargetParent.HasWorldTransform then
+      NewGroup.Translation := TargetParent.WorldToLocal(GroupWorldCenter)
+    else
+      NewGroup.Translation := GroupWorldCenter;
+
+    for I := 0 to Count - 1 do
+    begin
+      T := Items[I];
+      if T.Parent <> nil then
+        T.Parent.Remove(T);
+      NewGroup.Add(T);
+      if NewGroup.HasWorldTransform then
+        T.Translation := NewGroup.WorldToLocal(WorldPositions[I])
+      else
+        T.Translation := WorldPositions[I] - NewGroup.Translation;
+    end;
+
+    UpdateDesign;
+    SelectedComponent := NewGroup;
+    ModifiedOutsideObjectInspector(
+      Format('Group %d transform(s) into %s', [Count, NewGroup.Name]), ucHigh);
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemGroupSelectedClick(Sender: TObject);
+begin
+  GroupSelectedTransforms;
+end;
+
+procedure TDesignFrame.UngroupSelectedTransforms;
+var
+  Selected, UnpackedChildren: TComponentList;
+  SelectedCount, I, J, UnpackedGroupCount: Integer;
+  C: TComponent;
+  GroupT, ParentT, ChildT: TCastleTransform;
+  ChildrenToMove: array of TCastleTransform;
+  ChildWorldPos, ChildWorldDir, ChildWorldUp: array of TVector3;
+  ChildHasWorld: array of Boolean;
+  ChildCount, InsertIdx: Integer;
+begin
+  if DesignOwner = nil then Exit;
+
+  GetSelected(Selected, SelectedCount, false);
+  if (Selected = nil) or (SelectedCount = 0) then
+  begin
+    FreeAndNil(Selected);
+    Exit;
+  end;
+
+  UnpackedChildren := TComponentList.Create(false);
+  try
+    UnpackedGroupCount := 0;
+    for I := 0 to SelectedCount - 1 do
+    begin
+      C := Selected[I];
+      if (C is TCastleTransform) and Deletable(C) and
+         (TCastleTransform(C).Parent <> nil) then
+      begin
+        GroupT := TCastleTransform(C);
+        ParentT := GroupT.Parent;
+
+        ChildCount := 0;
+        SetLength(ChildrenToMove, GroupT.Count);
+        SetLength(ChildWorldPos, GroupT.Count);
+        SetLength(ChildWorldDir, GroupT.Count);
+        SetLength(ChildWorldUp, GroupT.Count);
+        SetLength(ChildHasWorld, GroupT.Count);
+
+        for J := 0 to GroupT.Count - 1 do
+          if Selectable(GroupT[J]) and (not (csSubComponent in GroupT[J].ComponentStyle)) and
+             (not (GroupT[J] is TCastleToolTransform)) then
+          begin
+            ChildT := GroupT[J];
+            ChildrenToMove[ChildCount] := ChildT;
+            ChildHasWorld[ChildCount] := ChildT.HasWorldTransform;
+            if ChildHasWorld[ChildCount] then
+              ChildT.GetWorldView(ChildWorldPos[ChildCount], ChildWorldDir[ChildCount], ChildWorldUp[ChildCount])
+            else
+              ChildWorldPos[ChildCount] := GroupT.Translation + ChildT.Translation;
+            Inc(ChildCount);
+          end;
+
+        if ChildCount = 0 then
+          Continue;
+
+        InsertIdx := ParentT.List.IndexOf(GroupT);
+        for J := 0 to ChildCount - 1 do
+        begin
+          ChildT := ChildrenToMove[J];
+          GroupT.Remove(ChildT);
+          if InsertIdx >= 0 then
+          begin
+            ParentT.Insert(InsertIdx, ChildT);
+            Inc(InsertIdx);
+          end else
+            ParentT.Add(ChildT);
+
+          if ChildHasWorld[J] and ChildT.HasWorldTransform then
+            ChildT.SetWorldView(ChildWorldPos[J], ChildWorldDir[J], ChildWorldUp[J])
+          else
+            ChildT.Translation := ChildWorldPos[J];
+
+          UnpackedChildren.Add(ChildT);
+        end;
+
+        // If GroupT is a plain TCastleTransform container with no remaining children/behaviors, remove it
+        if (GroupT.ClassType = TCastleTransform) and
+           (GroupT.Count = 0) and
+           (GroupT.BehaviorsCount = 0) and
+           (GroupT.NonVisualComponentsCount = 0) then
+          GroupT.Free;
+
+        Inc(UnpackedGroupCount);
+      end;
+    end;
+
+    if UnpackedGroupCount > 0 then
+    begin
+      UpdateDesign;
+      SetSelected(UnpackedChildren);
+      ModifiedOutsideObjectInspector(
+        Format('Ungroup %d transform group(s)', [UnpackedGroupCount]), ucHigh);
+    end;
+  finally
+    FreeAndNil(UnpackedChildren);
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemUngroupSelectedClick(Sender: TObject);
+begin
+  UngroupSelectedTransforms;
+end;
+
+procedure TDesignFrame.SaveCameraBookmark(const Slot: Integer);
+var
+  V: TCastleViewport;
+begin
+  if (Slot < 0) or (Slot > 9) then Exit;
+  V := CurrentViewport;
+  if (V = nil) or (V.InternalCamera = nil) then Exit;
+
+  V.InternalCamera.GetWorldView(
+    FCameraBookmarks[Slot].Pos,
+    FCameraBookmarks[Slot].Dir,
+    FCameraBookmarks[Slot].Up);
+  FCameraBookmarks[Slot].Valid := true;
+end;
+
+procedure TDesignFrame.RecallCameraBookmark(const Slot: Integer);
+var
+  V: TCastleViewport;
+begin
+  if (Slot < 0) or (Slot > 9) then Exit;
+  if not FCameraBookmarks[Slot].Valid then Exit;
+  V := CurrentViewport;
+  if (V = nil) or (V.InternalCamera = nil) then Exit;
+
+  V.InternalCamera.AnimateTo(
+    FCameraBookmarks[Slot].Pos,
+    FCameraBookmarks[Slot].Dir,
+    FCameraBookmarks[Slot].Up,
+    CameraTransitionTime);
+end;
+
+procedure TDesignFrame.SelectAllOfSameClass;
+var
+  Sel, C: TComponent;
+  TargetClass: TClass;
+  TreeNode: TTreeNode;
+  MatchingNodes: TList;
+begin
+  Sel := SelectedComponent;
+  if Sel = nil then Exit;
+  TargetClass := Sel.ClassType;
+
+  MatchingNodes := TList.Create;
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C <> nil) and (C.ClassType = TargetClass) then
+        MatchingNodes.Add(TreeNode);
+      TreeNode := TreeNode.GetNext;
+    end;
+    if MatchingNodes.Count > 0 then
+      ControlsTree.Select(MatchingNodes);
+  finally
+    FreeAndNil(MatchingNodes);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectSameClassClick(Sender: TObject);
+begin
+  SelectAllOfSameClass;
+end;
+
+procedure TDesignFrame.ExpandSelectedSubtree;
+var
+  I: Integer;
+begin
+  ControlsTree.Items.BeginUpdate;
+  try
+    if ControlsTree.SelectionCount > 0 then
+    begin
+      for I := 0 to ControlsTree.SelectionCount - 1 do
+        ControlsTree.Selections[I].Expand(true);
+    end else
+      ControlsTree.FullExpand;
+  finally
+    ControlsTree.Items.EndUpdate;
+  end;
+end;
+
+procedure TDesignFrame.CollapseSelectedSubtree;
+var
+  I: Integer;
+begin
+  ControlsTree.Items.BeginUpdate;
+  try
+    if ControlsTree.SelectionCount > 0 then
+    begin
+      for I := 0 to ControlsTree.SelectionCount - 1 do
+        ControlsTree.Selections[I].Collapse(true);
+    end else
+      ControlsTree.FullCollapse;
+  finally
+    ControlsTree.Items.EndUpdate;
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemExpandAllClick(Sender: TObject);
+begin
+  ExpandSelectedSubtree;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemCollapseAllClick(Sender: TObject);
+begin
+  CollapseSelectedSubtree;
+end;
+
+procedure TDesignFrame.ResetSelectedPropertyToDefault;
+var
+  ActiveInspector: TOIPropertyGrid;
+  Row: TOIPropertyGridRow;
+  DefaultVal: String;
+begin
+  ActiveInspector := GetInspectorForActiveTab;
+  if ActiveInspector = nil then Exit;
+  Row := ActiveInspector.GetActiveRow;
+  if (Row = nil) or (Row.Editor = nil) then Exit;
+
+  DefaultVal := Row.Editor.GetDefaultValue;
+  if (DefaultVal <> '') and (DefaultVal <> Row.Editor.GetVisualValue) then
+    Row.Editor.SetValue(DefaultVal)
+  else
+    Row.Editor.Revert;
+
+  ModifiedOutsideObjectInspector('Reset property ' + Row.Name + ' to default', ucHigh);
+end;
+
+procedure TDesignFrame.ButtonResetPropertyClick(Sender: TObject);
+begin
+  ResetSelectedPropertyToDefault;
+end;
+
+procedure TDesignFrame.ViewportSnapToCursor(const SnapToVertex: Boolean;
+  const AlignToNormal: Boolean);
+var
+  V: TCastleViewport;
+  RayOrigin, RayDirection: TVector3;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount = 0) then
+    Exit;
+  V := CurrentViewport;
+  if (V = nil) or (CastleControl = nil) or (CastleControl.Container = nil) then
+    Exit;
+
+  V.PositionToRay(CastleControl.Container.MousePosition, true, RayOrigin, RayDirection);
+  TransformManipulate.SnapSelectedToRay(RayOrigin, RayDirection, SnapToVertex, AlignToNormal);
+end;
+
+function TDesignFrame.IsComponentLocked(const C: TComponent): Boolean;
+var
+  Node: TTreeNode;
+begin
+  Result := false;
+  if (C = nil) or (FLockedComponents = nil) or (FLockedComponents.Count = 0) then
+    Exit;
+  if FLockedComponents.IndexOf(C) <> -1 then
+    Exit(true);
+  if (TreeNodeMap <> nil) and TreeNodeMap.TryGetValue(C, Node) then
+  begin
+    Node := Node.Parent;
+    while Node <> nil do
+    begin
+      if (Node.Data <> nil) and (FLockedComponents.IndexOf(TComponent(Node.Data)) <> -1) then
+        Exit(true);
+      Node := Node.Parent;
+    end;
+  end;
+end;
+
+procedure TDesignFrame.ToggleSelectedLock;
+var
+  I: Integer;
+  C: TComponent;
+  FirstFound, LockTarget: Boolean;
+  ToggledCount: Integer;
+begin
+  if (ControlsTree.SelectionCount = 0) or (FLockedComponents = nil) then
+    Exit;
+
+  FirstFound := false;
+  LockTarget := true;
+  ToggledCount := 0;
+
+  for I := 0 to ControlsTree.SelectionCount - 1 do
+  begin
+    C := SelectedFromNode(ControlsTree.Selections[I]);
+    if (C <> nil) and (C <> DesignRoot) then
+    begin
+      if not FirstFound then
+      begin
+        LockTarget := FLockedComponents.IndexOf(C) = -1;
+        FirstFound := true;
+      end;
+      if LockTarget then
+      begin
+        if FLockedComponents.IndexOf(C) = -1 then
+          FLockedComponents.Add(C);
+      end else
+        FLockedComponents.Remove(C);
+      Inc(ToggledCount);
+    end;
+  end;
+
+  if ToggledCount > 0 then
+  begin
+    ControlsTree.Invalidate;
+    UpdateSelectedControl;
+  end;
+end;
+
+procedure TDesignFrame.UnlockAll;
+begin
+  if (FLockedComponents <> nil) and (FLockedComponents.Count > 0) then
+  begin
+    FLockedComponents.Clear;
+    ControlsTree.Invalidate;
+    UpdateSelectedControl;
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemToggleLockClick(Sender: TObject);
+begin
+  ToggleSelectedLock;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemUnlockAllClick(Sender: TObject);
+begin
+  UnlockAll;
+end;
+
+procedure TDesignFrame.ArrayDuplicateSelected(const Count: Integer;
+  const StepOffset: TVector3; const StepYawDeg: Single);
+var
+  SelectedList, CreatedTransforms: TComponentList;
+  SelectedCount, I, StepIdx, SourceCount, InsertIdx: Integer;
+  SourceItems: array of TCastleTransform;
+  Sel: TComponent;
+  T, ParentComp, NewT: TCastleTransform;
+  CompStr: String;
+  YawRad: Single;
+begin
+  if (Count <= 0) or (DesignOwner = nil) then Exit;
+
+  GetSelected(SelectedList, SelectedCount, false);
+  try
+    if (SelectedList = nil) or (SelectedCount = 0) then Exit;
+
+    SetLength(SourceItems, SelectedCount);
+    SourceCount := 0;
+    for I := 0 to SelectedCount - 1 do
+    begin
+      Sel := SelectedList[I];
+      if (Sel is TCastleTransform) and Deletable(Sel) and
+         (TCastleTransform(Sel).Parent <> nil) and
+         (not IsComponentDescendantOfSelection(Sel, SelectedList)) then
+      begin
+        SourceItems[SourceCount] := TCastleTransform(Sel);
+        Inc(SourceCount);
+      end;
+    end;
+
+    if SourceCount = 0 then Exit;
+
+    CreatedTransforms := TComponentList.Create(false);
+    try
+      for StepIdx := 1 to Count do
+      begin
+        YawRad := DegToRad(StepYawDeg * StepIdx);
+        for I := 0 to SourceCount - 1 do
+        begin
+          T := SourceItems[I];
+          ParentComp := T.Parent;
+          CompStr := ComponentToString(T);
+          NewT := StringToComponent(CompStr, DesignOwner) as TCastleTransform;
+          InsertIdx := ParentComp.List.IndexOf(T);
+          if InsertIdx >= 0 then
+            ParentComp.Insert(InsertIdx + 1, NewT)
+          else
+            ParentComp.Add(NewT);
+
+          NewT.Translation := T.Translation + StepOffset * StepIdx;
+          if Abs(YawRad) > 1e-6 then
+            NewT.Rotation := (QuatFromAxisAngle(Vector3(0, 1, 0), YawRad, true) *
+              QuatFromAxisAngle(T.Rotation, true)).ToAxisAngle;
+
+          CreatedTransforms.Add(NewT);
+        end;
+      end;
+
+      if CreatedTransforms.Count > 0 then
+      begin
+        UpdateDesign;
+        SetSelected(CreatedTransforms);
+        ModifiedOutsideObjectInspector(
+          Format('Array duplicate (%d copies)', [Count]), ucHigh);
+      end;
+    finally
+      FreeAndNil(CreatedTransforms);
+    end;
+  finally
+    FreeAndNil(SelectedList);
+  end;
+end;
+
+procedure TDesignFrame.ShowArrayDuplicateDialog;
+var
+  Dialog: TForm;
+  LblCount, LblOffsetX, LblOffsetY, LblOffsetZ, LblYaw: TLabel;
+  SpinCount: TSpinEdit;
+  SpinOffsetX, SpinOffsetY, SpinOffsetZ, SpinYaw: TFloatSpinEdit;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+  T: TCastleTransform;
+  BBox: TBox3D;
+  DefaultStepX: Single;
+begin
+  T := CurrentTransform;
+  if (T = nil) and ((TransformManipulate = nil) or (TransformManipulate.SelectedCount = 0)) then
+    Exit;
+
+  DefaultStepX := 2.0;
+  if T <> nil then
+  begin
+    BBox := T.WorldBoundingBox;
+    if (not BBox.IsEmpty) and (BBox.SizeX > 0.01) then
+      DefaultStepX := BBox.SizeX;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Array Duplicate (Ctrl+Shift+D)';
+    Dialog.Position := poMainFormCenter;
+    Dialog.Width := 340;
+    Dialog.Height := 260;
+    Dialog.BorderStyle := bsDialog;
+
+    LblCount := TLabel.Create(Dialog);
+    LblCount.Caption := 'Number of Copies:';
+    LblCount.Left := 16;
+    LblCount.Top := 18;
+    LblCount.Parent := Dialog;
+
+    SpinCount := TSpinEdit.Create(Dialog);
+    SpinCount.MinValue := 1;
+    SpinCount.MaxValue := 500;
+    SpinCount.Value := 5;
+    SpinCount.Left := 180;
+    SpinCount.Top := 14;
+    SpinCount.Width := 130;
+    SpinCount.Parent := Dialog;
+
+    LblOffsetX := TLabel.Create(Dialog);
+    LblOffsetX.Caption := 'Step Offset X:';
+    LblOffsetX.Left := 16;
+    LblOffsetX.Top := 54;
+    LblOffsetX.Parent := Dialog;
+
+    SpinOffsetX := TFloatSpinEdit.Create(Dialog);
+    SpinOffsetX.DecimalPlaces := 2;
+    SpinOffsetX.Increment := 0.5;
+    SpinOffsetX.MinValue := -10000;
+    SpinOffsetX.MaxValue := 10000;
+    SpinOffsetX.Value := DefaultStepX;
+    SpinOffsetX.Left := 180;
+    SpinOffsetX.Top := 50;
+    SpinOffsetX.Width := 130;
+    SpinOffsetX.Parent := Dialog;
+
+    LblOffsetY := TLabel.Create(Dialog);
+    LblOffsetY.Caption := 'Step Offset Y:';
+    LblOffsetY.Left := 16;
+    LblOffsetY.Top := 90;
+    LblOffsetY.Parent := Dialog;
+
+    SpinOffsetY := TFloatSpinEdit.Create(Dialog);
+    SpinOffsetY.DecimalPlaces := 2;
+    SpinOffsetY.Increment := 0.5;
+    SpinOffsetY.MinValue := -10000;
+    SpinOffsetY.MaxValue := 10000;
+    SpinOffsetY.Value := 0;
+    SpinOffsetY.Left := 180;
+    SpinOffsetY.Top := 86;
+    SpinOffsetY.Width := 130;
+    SpinOffsetY.Parent := Dialog;
+
+    LblOffsetZ := TLabel.Create(Dialog);
+    LblOffsetZ.Caption := 'Step Offset Z:';
+    LblOffsetZ.Left := 16;
+    LblOffsetZ.Top := 126;
+    LblOffsetZ.Parent := Dialog;
+
+    SpinOffsetZ := TFloatSpinEdit.Create(Dialog);
+    SpinOffsetZ.DecimalPlaces := 2;
+    SpinOffsetZ.Increment := 0.5;
+    SpinOffsetZ.MinValue := -10000;
+    SpinOffsetZ.MaxValue := 10000;
+    SpinOffsetZ.Value := 0;
+    SpinOffsetZ.Left := 180;
+    SpinOffsetZ.Top := 122;
+    SpinOffsetZ.Width := 130;
+    SpinOffsetZ.Parent := Dialog;
+
+    LblYaw := TLabel.Create(Dialog);
+    LblYaw.Caption := 'Step Yaw Rotation (deg):';
+    LblYaw.Left := 16;
+    LblYaw.Top := 162;
+    LblYaw.Parent := Dialog;
+
+    SpinYaw := TFloatSpinEdit.Create(Dialog);
+    SpinYaw.DecimalPlaces := 1;
+    SpinYaw.Increment := 15.0;
+    SpinYaw.MinValue := -360;
+    SpinYaw.MaxValue := 360;
+    SpinYaw.Value := 0;
+    SpinYaw.Left := 180;
+    SpinYaw.Top := 158;
+    SpinYaw.Width := 130;
+    SpinYaw.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Duplicate Array';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ArrayDuplicateSelected(
+        SpinCount.Value,
+        Vector3(SpinOffsetX.Value, SpinOffsetY.Value, SpinOffsetZ.Value),
+        SpinYaw.Value);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrayDuplicateClick(Sender: TObject);
+begin
+  ShowArrayDuplicateDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemArrayDuplicateClick(Sender: TObject);
+begin
+  ShowArrayDuplicateDialog;
 end;
 
 procedure TDesignFrame.ButtonRotateModeClick(Sender: TObject);
@@ -6286,8 +8804,30 @@ begin
     AddComponentEditorVerbs(Sel);
 
   MenuTreeViewItemRename.Enabled := RenameSelectedPossible;
-  MenuTreeViewItemDuplicate.Enabled := Sel <> nil;
+  MenuTreeViewItemDuplicate.Enabled := ControlsTree.SelectionCount > 0;
   MenuTreeViewItemDuplicateLinked.Enabled := Sel <> nil;
+  if MenuTreeViewItemToggleVisibility <> nil then
+    MenuTreeViewItemToggleVisibility.Enabled := ControlsTree.SelectionCount > 0;
+  if MenuTreeViewItemIsolateSelected <> nil then
+    MenuTreeViewItemIsolateSelected.Enabled := ControlsTree.SelectionCount > 0;
+  if MenuTreeViewItemShowAllHidden <> nil then
+    MenuTreeViewItemShowAllHidden.Enabled := ControlsTree.Items.Count > 0;
+  if MenuTreeViewItemToggleLock <> nil then
+    MenuTreeViewItemToggleLock.Enabled := ControlsTree.SelectionCount > 0;
+  if MenuTreeViewItemUnlockAll <> nil then
+    MenuTreeViewItemUnlockAll.Enabled := (FLockedComponents <> nil) and (FLockedComponents.Count > 0);
+  if MenuTreeViewItemGroupSelected <> nil then
+    MenuTreeViewItemGroupSelected.Enabled := (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0);
+  if MenuTreeViewItemUngroupSelected <> nil then
+    MenuTreeViewItemUngroupSelected.Enabled := (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0);
+  if MenuTreeViewItemArrayDuplicate <> nil then
+    MenuTreeViewItemArrayDuplicate.Enabled := (CurrentTransform <> nil) or ((TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0));
+  if MenuTreeViewItemSelectSameClass <> nil then
+    MenuTreeViewItemSelectSameClass.Enabled := Sel <> nil;
+  if MenuTreeViewItemExpandAll <> nil then
+    MenuTreeViewItemExpandAll.Enabled := ControlsTree.Items.Count > 0;
+  if MenuTreeViewItemCollapseAll <> nil then
+    MenuTreeViewItemCollapseAll.Enabled := ControlsTree.Items.Count > 0;
   MenuTreeViewItemCut.Enabled := Sel <> nil;
   MenuTreeViewItemCopy.Enabled := Sel <> nil;
   MenuTreeViewItemSaveSelected.Enabled := Sel <> nil;
@@ -6641,6 +9181,12 @@ end;
 
 procedure TDesignFrame.FindToggle;
 begin
+  if FindActive and (not EditFindInHierarchy.Focused) then
+  begin
+    EditFindInHierarchy.SetFocus;
+    EditFindInHierarchy.SelectAll;
+    Exit;
+  end;
   FindActive := not FindActive;
   SetEnabledVisible(EditFindInHierarchy, FindActive);
   if FindActive then
@@ -6649,23 +9195,22 @@ begin
     // Note: SetFocus must be done after making it enabled, otherwise exception is raised
     EditFindInHierarchy.SetFocus;
   end;
+  ControlsTree.Invalidate;
 end;
 
 procedure TDesignFrame.EditFindInHierarchyChange(Sender: TObject);
 var
-  LowerFindText: String;
   TreeNode: TTreeNode;
   C: TComponent;
 begin
-  if FindActive and (EditFindInHierarchy.Text <> '') then
+  ControlsTree.Invalidate;
+  if FindActive and (Trim(EditFindInHierarchy.Text) <> '') then
   begin
-    LowerFindText := LowerCase(EditFindInHierarchy.Text);
-
     TreeNode := ControlsTree.Items.GetFirstNode;
     while TreeNode <> nil do
     begin
       C := SelectedFromNode(TreeNode, false);
-      if (C <> nil) and (Pos(LowerFindText, LowerCase(C.Name)) <> 0) then
+      if (C <> nil) and NodeMatchesHierarchyFilter(C) then
       begin
         SelectedComponent := C;
         Exit;
@@ -6679,12 +9224,11 @@ end;
 
 procedure TDesignFrame.FindNext;
 var
-  LowerFindText: String;
   TreeNode: TTreeNode;
   Sel, C: TComponent;
   SeenSelection: Boolean;
 begin
-  if FindActive and (EditFindInHierarchy.Text <> '') then
+  if FindActive and (Trim(EditFindInHierarchy.Text) <> '') then
   begin
     if SelectedComponent = nil then
     begin
@@ -6693,7 +9237,6 @@ begin
     end else
     begin
       Sel := GetSelectedComponent(false);
-      LowerFindText := LowerCase(EditFindInHierarchy.Text);
 
       // first pass: go to selected component, find first match after it
       SeenSelection := false;
@@ -6705,7 +9248,7 @@ begin
 
         if SeenSelection and
            (C <> nil) and
-           (Pos(LowerFindText, LowerCase(C.Name)) <> 0) then
+           NodeMatchesHierarchyFilter(C) then
         begin
           SelectedComponent := C;
           Exit;
@@ -6735,7 +9278,7 @@ begin
           Exit;
         end;
 
-        if (C <> nil) and (Pos(LowerFindText, LowerCase(C.Name)) <> 0) then
+        if (C <> nil) and NodeMatchesHierarchyFilter(C) then
         begin
           SelectedComponent := C;
           Exit;

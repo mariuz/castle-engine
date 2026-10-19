@@ -125,7 +125,7 @@ begin
   MaterialAndShapeLit := MaterialLit and Shape.Geometry.Lit(Shape.State);
 
   // calculate Lighting ("whether anything requires lighting calculation")
-  Lighting := RenderOptions.Lighting and MaterialAndShapeLit and
+  Lighting := RenderOptions.Lighting and (not InternalForceUnlit) and MaterialAndShapeLit and
     (RenderOptions.Mode = rmFull);
   RenderContext.FixedFunctionLighting := Lighting;
   if Lighting then

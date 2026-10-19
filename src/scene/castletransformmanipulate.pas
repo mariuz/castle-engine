@@ -50,6 +50,39 @@ type
   { Mode of operation for @link(TCastleTransformManipulate.Mode). }
   TManipulateMode = (mmSelect, mmTranslate, mmRotate, mmScale);
 
+  { Coordinate space used by @link(TCastleTransformManipulate) when translating
+    or rotating selected transformations. }
+  TManipulateCoordSpace = (
+    { Translate and rotate along the transformation's local axes. }
+    csLocal,
+    { Translate and rotate along the world (parent) axes, ignoring the
+      selected transformation's own rotation. }
+    csWorld
+  );
+
+  { Pivot mode used by @link(TCastleTransformManipulate) when rotating
+    multiple selected transformations. }
+  TManipulatePivotMode = (
+    { Each selected transformation rotates around its own local origin
+      (with the gizmo placed at the primary selected transformation). }
+    pmPrimarySelected,
+    { Selected transformations orbit and rotate around the combined center
+      (@link(SelectionWorkingCenter)) of all selected transformations. }
+    pmSelectionCenter
+  );
+
+  { Alignment reference target for @link(TCastleTransformManipulate.AlignSelected). }
+  TAlignTarget = (
+    { Align all selected transforms to the primary (first) selected transform's coordinate. }
+    atPrimary,
+    { Align all selected transforms to the minimum coordinate among the selection. }
+    atMin,
+    { Align all selected transforms to the midpoint between minimum and maximum coordinates. }
+    atCenter,
+    { Align all selected transforms to the maximum coordinate among the selection. }
+    atMax
+  );
+
   { Allow to select, move, rotate, scale a group of TCastleTransform instances.
 
     This component implements common 3D editing operations:
@@ -66,18 +99,21 @@ type
         This component merely visualizes the selected objects.
       )
 
-      @item(Move, rotate or scale a selected transformation.
-        To use this, call @link(SetSelected) with exactly one transform.
+      @item(Move, rotate or scale selected transformations.
+        To use this, call @link(SetSelected) with one or more transforms.
         And set @link(Mode) to the desired operation, like @link(mmTranslate).
 
-        This component fully implements moving, rotating and scaling.
+        This component fully implements moving, rotating and scaling,
+        including configurable snapping (@link(TranslateSnap), @link(RotateSnap),
+        @link(ScaleSnap)), coordinate space selection (@link(CoordSpace)),
+        pivot mode selection (@link(PivotMode)), multi-selection manipulation,
+        alignment (@link(AlignSelected)), even distribution (@link(DistributeSelected)),
+        absolute grid snapping (@link(SnapSelectedToGrid)), and downward surface
+        snapping (@link(SnapToFloor)).
         It displays a proper "gizmo" to perform this for user,
-        and it modifies the selected transformation when user drags the gizmo.
+        and it modifies the selected transformations when user drags the gizmo.
         Use events like @link(OnTransformModified) and @link(OnTransformModifyEnd)
         to get notified when the transformation is modified.
-
-        TODO: Right now we allow to move/rotate/scale only a single transformation.
-        In the future, we plan to allow to move/rotate/scale multiple transforms.
       )
     )
   }
@@ -96,8 +132,13 @@ type
         LastPickAngle: Single;
         GizmoScalingAssumeScale: Boolean;
         GizmoScalingAssumeScaleValue: TVector3;
-        InsideInternalCameraChanged: Boolean;
+        InsideUpdateSize: Boolean;
         LastIsProjectionOrthographic: Boolean;
+
+        function ManipulateOwner: TCastleTransformManipulate;
+        function UseWorldCoordSpace: Boolean;
+        procedure GetEffectiveRay(const Pick: TRayCollisionNode;
+          out RayOrigin, RayDirection: TVector3);
 
         { Point on axis closest to given pick.
           Axis may be -1 to indicate we drag on all axes with the same amount
@@ -116,18 +157,20 @@ type
         function AngleOnPlane(out Angle: Single;
           const Pick: TRayCollisionNode; const Coord: T3DAxis): Boolean;
 
+        procedure DoTransformModifyBegin;
         procedure DoTransformModified;
         procedure DoTransformModifyEnd;
-        procedure UpdateSize;
       protected
         procedure ChangeWorld(const Value: TCastleAbstractRootTransform); override;
         function LocalRayCollision(const RayOrigin, RayDirection: TVector3;
           const TrianglesToIgnoreFunc: TTriangleIgnoreFunc): TRayCollision; override;
       public
         Mode: TManipulateMode;
+        OnTransformModifyBegin: TNotifyEvent;
         OnTransformModified: TNotifyEvent;
         OnTransformModifyEnd: TNotifyEvent;
         constructor Create(AOwner: TComponent); override;
+        procedure UpdateSize;
         procedure InternalCameraChanged; override;
         function PointingDevicePress(const Pick: TRayCollisionNode;
           const Distance: Single): Boolean; override;
@@ -140,11 +183,17 @@ type
 
     var
       FMode: TManipulateMode;
+      FCoordSpace: TManipulateCoordSpace;
+      FPivotMode: TManipulatePivotMode;
+      FTranslateSnap: Single;
+      FRotateSnap: Single;
+      FScaleSnap: Single;
       FMainSelected: TCastleTransform;
       FMainSelectedObserver: TFreeNotificationObserver;
       FPickable: Boolean;
       Boxes: TDebugTransformBoxList;
       Gizmo: array [TManipulateMode] of TGizmoScene;
+      FOnTransformModifyBegin: TNotifyEvent;
       FOnTransformModified: TNotifyEvent;
       FOnTransformModifyEnd: TNotifyEvent;
       { Boxes from 0 to FMaxSelectedCount-1 *may* contain a selected
@@ -153,25 +202,36 @@ type
       FMaxSelectedCount: Cardinal;
 
     procedure SetMode(const AValue: TManipulateMode);
+    procedure SetCoordSpace(const AValue: TManipulateCoordSpace);
+    procedure SetPivotMode(const AValue: TManipulatePivotMode);
     procedure SetMainSelected(const AValue: TCastleTransform);
+    procedure UpdateMainSelected;
     procedure SetPickable(const Value: Boolean);
+    procedure GizmoHasTransformModifyBegin(Sender: TObject);
     procedure GizmoHasTransformModified(Sender: TObject);
     procedure GizmoHasTransformModifyEnd(Sender: TObject);
     procedure MainSelectedFreeNotification(const Sender: TFreeNotificationObserver);
     procedure CreateMoreBoxes;
     function GetSelected(Index: Integer): TCastleTransform;
+    function IsDescendantOfAnySelected(const T: TCastleTransform): Boolean;
+    function GetTransformWorkingPos(const T: TCastleTransform): TVector3;
+    procedure SetTransformWorkingPos(const T: TCastleTransform; const NewWorkingPos: TVector3);
+    procedure ApplyTranslateDelta(const DeltaInMainParent: TVector3);
+    procedure ApplyRotateDelta(const AxisCoord: Integer; const DiffAngle: Single);
+    procedure ApplyScaleMultiplier(const ScaleMultiplier: TVector3);
 
-    { Current TCastleTransform for potential move/rotate/scale
+    { Primary TCastleTransform where the interactive gizmo is attached
       (depending on @link(Mode)).
-      @nil to not visualize anything.
-
-      TODO: we'd like to remove this property at some point,
-      gizmos to transform should work on multi-selection too,
-      thus rely on SetSelected. }
+      @nil when nothing is selected. }
     property MainSelected: TCastleTransform read FMainSelected write SetMainSelected;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
+
+    { Called right when the user begins dragging an interactive gizmo handle
+      (to move/rotate/scale). Useful e.g. for Alt-drag in-place duplication. }
+    property OnTransformModifyBegin: TNotifyEvent
+      read FOnTransformModifyBegin write FOnTransformModifyBegin;
 
     { Called whenever we modify the transformation of selected transformations
       by moving/rotating/scaling.
@@ -195,12 +255,37 @@ type
     property Mode: TManipulateMode read FMode write SetMode
       default mmSelect;
 
+    { Coordinate space for translation and rotation operations
+      (@link(csLocal) or @link(csWorld)). }
+    property CoordSpace: TManipulateCoordSpace
+      read FCoordSpace write SetCoordSpace default csLocal;
+
+    { Pivot point used when rotating multiple selected transformations
+      (@link(pmPrimarySelected) or @link(pmSelectionCenter)). }
+    property PivotMode: TManipulatePivotMode
+      read FPivotMode write SetPivotMode default pmPrimarySelected;
+
+    { Grid snap step for 3D translation operations.
+      When > 0, translation movements are snapped to multiples of this value.
+      Set to 0 (default) to disable translation snapping. }
+    property TranslateSnap: Single
+      read FTranslateSnap write FTranslateSnap {$ifdef FPC}default 0{$endif};
+
+    { Angle snap step (in radians) for 3D rotation operations.
+      When > 0, rotation angle increments are snapped to multiples of this value.
+      Set to 0 (default) to disable rotation snapping. }
+    property RotateSnap: Single
+      read FRotateSnap write FRotateSnap {$ifdef FPC}default 0{$endif};
+
+    { Scale increment snap step for 3D scaling operations.
+      When > 0, scale changes are snapped to multiples of this value.
+      Set to 0 (default) to disable scale snapping. }
+    property ScaleSnap: Single
+      read FScaleSnap write FScaleSnap {$ifdef FPC}default 0{$endif};
+
     { Pass a list of TCastleTransform instances to visualize them as selected
       and to manipulate them (move/rotate/scale).
-
-      TODO: Right now, manipulating (move/rotate/scale) works only for a single
-      transform. You cannot pass more than one item on the NewSelected list
-      if you want to have move/rotate/scale working.
+      One or multiple transform instances can be selected and manipulated at once.
 
       The argument NewSelected may be @nil, which is treated just like passing an
       empty list.
@@ -224,6 +309,100 @@ type
     { Count of currently selected items.
       @seealso Selected }
     function SelectedCount: Integer;
+
+    { Arithmetic center of all top-level selected transformations in working
+      (world or root) coordinates. Returns @link(TVector3.Zero) when nothing is selected. }
+    function SelectionWorkingCenter: TVector3;
+
+    { Translate all currently selected transforms by RawDelta along the active
+      @link(CoordSpace), applying @link(TranslateSnap) if > 0 and skipping
+      selected transforms whose ancestor is also selected. }
+    procedure TranslateSelected(const RawDelta: TVector3);
+
+    { Rotate all currently selected transforms around Axis by RawAngleRad
+      (in radians) in the active @link(CoordSpace) and @link(PivotMode),
+      applying @link(RotateSnap) if > 0 and skipping selected transforms
+      whose ancestor is also selected. }
+    procedure RotateSelected(const Axis: T3DAxis; const RawAngleRad: Single);
+
+    { Scale all currently selected transforms by adding RawScaleDelta to their
+      scale, applying @link(ScaleSnap) if > 0 and skipping selected transforms
+      whose ancestor is also selected. }
+    procedure ScaleSelected(const RawScaleDelta: TVector3);
+
+    { Align all top-level selected transforms along @code(Axis) (0=X, 1=Y, 2=Z)
+      to the target coordinate specified by @code(Target) (@link(atPrimary),
+      @link(atMin), @link(atCenter), or @link(atMax)).
+      Requires at least 2 top-level selected transforms. }
+    procedure AlignSelected(const Axis: T3DAxis; const Target: TAlignTarget = atPrimary);
+
+    { Distribute all top-level selected transforms at equal intervals along
+      @code(Axis) (0=X, 1=Y, 2=Z) between the minimum and maximum coordinates
+      of the selection. Requires at least 3 top-level selected transforms. }
+    procedure DistributeSelected(const Axis: T3DAxis);
+
+    { Stack all top-level selected transforms flush edge-to-edge along
+      @code(Axis) (0=X, 1=Y, 2=Z) using their @code(WorldBoundingBox) extents
+      (plus optional @code(Spacing)), keeping the minimum-coordinate transform
+      anchored at its current position. Requires at least 2 top-level selected transforms.
+      Returns @true if at least one selected transform was modified. }
+    function StackSelected(const Axis: T3DAxis; const Spacing: Single = 0): Boolean;
+
+    { Snap the absolute @code(Translation) of all top-level selected transforms
+      to the nearest multiple of @link(TranslateSnap) on all 3 axes.
+      Returns @true if at least one selected transform was modified. }
+    function SnapSelectedToGrid: Boolean;
+
+    { Snap all currently selected transforms downward along the world gravity
+      vector (@code(-World.GravityUp)) onto the nearest surface below each
+      transform's bounding box bottom (or origin when its bounding box is empty).
+      When @code(AlignToNormal) is @true, also rotates each transform's local
+      +Y up axis to match the hit surface's world normal.
+      Returns @true if at least one selected transform was modified. }
+    function SnapToFloor(const AlignToNormal: Boolean = false): Boolean;
+
+    { Mirror all top-level selected transforms across the plane perpendicular to
+      @code(Axis) (0=X, 1=Y, 2=Z). When multiple transforms are selected (or
+      @link(PivotMode) = @link(pmSelectionCenter)), positions are reflected across
+      the active pivot coordinate; when a single transform is selected with
+      @link(pmPrimarySelected), its position is reflected across 0 along @code(Axis).
+      Orientation is reflected across the mirror plane while keeping @code(Scale)
+      positive (physics-safe).
+      Returns @true if at least one selected transform was modified. }
+    function MirrorSelected(const Axis: T3DAxis): Boolean;
+
+    { Rotate all currently selected transforms by an exact 90-degree step
+      (@code(+Pi/2) when @code(Clockwise = false), @code(-Pi/2) when @code(Clockwise = true))
+      around @code(Axis) in the active @link(CoordSpace) and @link(PivotMode),
+      temporarily bypassing @link(RotateSnap).
+      Returns @true if at least one selected transform was modified. }
+    function RotateSelected90(const Axis: T3DAxis; const Clockwise: Boolean = true): Boolean;
+
+    { Apply random variation to all top-level selected transforms for level
+      set-dressing:
+      - Random Yaw rotation in @code([-MaxYawRad, +MaxYawRad]) radians around +Y.
+      - Uniform random scale multiplier in @code([ScaleMin, ScaleMax]).
+      - Horizontal (X, Z) translation jitter in @code([-MaxPositionJitter, +MaxPositionJitter]).
+      Returns @true if at least one selected transform was modified. }
+    function RandomizeSelected(const MaxYawRad: Single;
+      const ScaleMin, ScaleMax: Single;
+      const MaxPositionJitter: Single = 0): Boolean;
+
+    { Cast a world-space ray (@code(RayOrigin), @code(RayDirection)) against the
+      scene (ignoring currently selected transforms and gizmos) and snap all
+      top-level selected transforms to the hit location, preserving relative
+      offsets between multiple selected transforms around the active pivot.
+      - When @code(SnapToNearestVertex) is @false, snaps to the exact surface
+        intersection point.
+      - When @code(SnapToNearestVertex) is @true, snaps to the closest vertex
+        of the hit mesh triangle in world space (falling back to the surface
+        hit point if the hit object has no triangle geometry).
+      - When @code(AlignToNormal) is @true, also aligns each selected transform's
+        local +Y up axis to the hit surface normal.
+      Returns @true if a surface was hit and at least one transform was modified. }
+    function SnapSelectedToRay(const RayOrigin, RayDirection: TVector3;
+      const SnapToNearestVertex: Boolean = false;
+      const AlignToNormal: Boolean = false): Boolean;
   end;
 
 var
@@ -234,7 +413,7 @@ var
 implementation
 
 uses Math,
-  CastleLog, CastleShapes, CastleViewport, CastleProjection,
+  CastleLog, CastleShapes, CastleViewport, CastleProjection, CastleBoxes,
   CastleQuaternions, X3DNodes, CastleGLUtils, CastleRenderContext,
   CastleKeysMouse, CastleRenderOptions,
   CastleInternalTransformData;
@@ -274,46 +453,50 @@ end;
 
 { TCastleTransformManipulate.TGizmoScene -------------------------------------------- }
 
+function TCastleTransformManipulate.TGizmoScene.ManipulateOwner: TCastleTransformManipulate;
+begin
+  if Owner is TCastleTransformManipulate then
+    Result := TCastleTransformManipulate(Owner)
+  else
+    Result := nil;
+end;
+
+function TCastleTransformManipulate.TGizmoScene.UseWorldCoordSpace: Boolean;
+var
+  Manip: TCastleTransformManipulate;
+begin
+  Manip := ManipulateOwner;
+  Result := (Manip <> nil) and (Manip.CoordSpace = csWorld) and
+    (Mode in [mmTranslate, mmRotate]) and (Parent <> nil);
+end;
+
+procedure TCastleTransformManipulate.TGizmoScene.GetEffectiveRay(
+  const Pick: TRayCollisionNode; out RayOrigin, RayDirection: TVector3);
+begin
+  if UseWorldCoordSpace then
+  begin
+    RayOrigin := RotatePointAroundAxis(Parent.Rotation, Pick.RayOrigin * Parent.Scale);
+    RayDirection := RotatePointAroundAxis(Parent.Rotation, Pick.RayDirection * Parent.Scale);
+  end else
+  begin
+    RayOrigin := Pick.RayOrigin;
+    RayDirection := Pick.RayDirection;
+  end;
+end;
+
 function TCastleTransformManipulate.TGizmoScene.PointOnAxis(
   out Intersection: TVector3; const Pick: TRayCollisionNode;
   const Axis: Integer): Boolean;
-
-(*
-var
-  Axis1, Axis2: Integer;
-begin
-  Result := Pick.Triangle <> nil; // otherwise Pick.Point undefined
-
-  Intersection := Pick.Point;
-
-  // leave only Intersection[Axis] non-zero
-  if Axis >= 0 then
-  begin
-    RestOf3DCoords(Axis, Axis1, Axis2);
-    Intersection[Axis1] := 0;
-    Intersection[Axis2] := 0;
-  end;
-end;
-*)
-
 var
   IntersectionScalar: Single;
-  IntersectionOneAxis: TVector3;
+  IntersectionOneAxis, RayOrigin, RayDirection: TVector3;
 begin
+  GetEffectiveRay(Pick, RayOrigin, RayDirection);
+
   if Axis = -1 then
   begin
-    (*
-    Result := Pick.Triangle <> nil; // otherwise Pick.Point undefined
-    if Result then
-    begin
-      Intersection := Pick.Point;
-      IntersectionScalar := Approximate3DScale(Intersection);
-      Intersection := Vector3(IntersectionScalar, IntersectionScalar, IntersectionScalar);
-    end;
-    *)
-
     Result := true;
-    IntersectionScalar := Sqrt(PointToLineDistanceSqr(TVector3.Zero, Pick.RayOrigin, Pick.RayDirection));
+    IntersectionScalar := Sqrt(PointToLineDistanceSqr(TVector3.Zero, RayOrigin, RayDirection));
     Intersection := Vector3(IntersectionScalar, IntersectionScalar, IntersectionScalar);
   end else
   if Axis = -2 then
@@ -322,7 +505,7 @@ begin
     Result := false;
     if PointOnLineClosestToLine(IntersectionOneAxis,
        TVector3.Zero, TVector3.One[0],
-       Pick.RayOrigin, Pick.RayDirection) then
+       RayOrigin, RayDirection) then
     begin
       Intersection := IntersectionOneAxis;
       Result := true;
@@ -330,7 +513,7 @@ begin
 
     if PointOnLineClosestToLine(IntersectionOneAxis,
        TVector3.Zero, TVector3.One[1],
-       Pick.RayOrigin, Pick.RayDirection) then
+       RayOrigin, RayDirection) then
     begin
       Intersection := Intersection + IntersectionOneAxis;
       Result := true;
@@ -339,7 +522,7 @@ begin
   begin
     Result := PointOnLineClosestToLine(Intersection,
       TVector3.Zero, TVector3.One[Axis],
-      Pick.RayOrigin, Pick.RayDirection);
+      RayOrigin, RayDirection);
 
     {$ifdef DEBUG_GIZMO_PICK}
     VisualizePick.Exists := Result;
@@ -351,8 +534,8 @@ begin
       WritelnLog('Line 1: %s %s, line 2 %s %s', [
         TVector3.Zero.ToString,
         TVector3.One[Axis].ToString,
-        Pick.RayOrigin.ToString,
-        Pick.RayDirection.ToString
+        RayOrigin.ToString,
+        RayDirection.ToString
       ]);
     end;
     {$endif DEBUG_GIZMO_PICK}
@@ -364,9 +547,10 @@ function TCastleTransformManipulate.TGizmoScene.AngleOnPlane(out Angle: Single;
 var
   C1, C2: T3DAxis;
   PointProjected: TVector2;
-  Intersection: TVector3;
+  Intersection, RayOrigin, RayDirection: TVector3;
 begin
-  if not TrySimplePlaneRayIntersection(Intersection, Coord, 0, Pick.RayOrigin, Pick.RayDirection) then
+  GetEffectiveRay(Pick, RayOrigin, RayDirection);
+  if not TrySimplePlaneRayIntersection(Intersection, Coord, 0, RayOrigin, RayDirection) then
     Exit(false);
   { Use RestOf3DCoordsCycle, in the lopping order X-Y-Z.
     This results in consistent ArcTan2 results, that makes rotating around
@@ -378,6 +562,12 @@ begin
   PointProjected.Y := Intersection[C2];
   Angle := ArcTan2(PointProjected.Y, PointProjected.X);
   Result := true;
+end;
+
+procedure TCastleTransformManipulate.TGizmoScene.DoTransformModifyBegin;
+begin
+  if Assigned(OnTransformModifyBegin) then
+    OnTransformModifyBegin(Self);
 end;
 
 procedure TCastleTransformManipulate.TGizmoScene.DoTransformModified;
@@ -442,13 +632,7 @@ end;
 procedure TCastleTransformManipulate.TGizmoScene.InternalCameraChanged;
 begin
   inherited;
-  { UpdateSize changes our transformation, and ChangedTransform in turn
-    calls InternalCameraChanged, which means we can get into infinite
-    recursion. Use InsideInternalCameraChanged to prevent it. }
-  if InsideInternalCameraChanged then Exit;
-  InsideInternalCameraChanged := true;
   UpdateSize;
-  InsideInternalCameraChanged := false;
 end;
 
 procedure TCastleTransformManipulate.TGizmoScene.UpdateSize;
@@ -483,7 +667,6 @@ var
   const
     AssumeNear = 1.0;
   var
-    // ViewProjectionMatrix: TMatrix4;
     ZeroProjected, OneProjected: TVector2;
     OneDistance: Single;
     CameraPos, CameraDir, CameraUp: TVector3; //< camera vectors in world-coordinates
@@ -517,12 +700,6 @@ var
     OneWorld := LocalToWorld(WorldToLocalDirection(CameraUp).AdjustToLength(SceneSizeMultiplier));
 
     EndWorldTransform;
-
-    (* TODO: why this fails:
-    ViewProjectionMatrix := Camera.ProjectionMatrix * Camera.Matrix;
-    ZeroProjected := (ViewProjectionMatrix * Vector4(ZeroWorld, 1)).XY;
-    OneProjected := (ViewProjectionMatrix * Vector4(OneWorld, 1)).XY;
-    *)
 
     CameraNearPlane := Vector4(
       CameraDir,
@@ -560,35 +737,42 @@ var
   Camera: TCastleCamera;
   GizmoScale, ScaleUniform: Single;
 begin
-  { Adjust scale to take the same space on screen. }
-  if HasWorldTransform and
-     (World <> nil) and
-     (World.MainCamera <> nil) then
-  begin
-    Camera := World.MainCamera;
+  { UpdateSize changes our transformation, and ChangedTransform in turn
+    calls InternalCameraChanged, which means we can get into infinite
+    recursion. Use InsideUpdateSize to prevent it. }
+  if InsideUpdateSize then Exit;
+  InsideUpdateSize := true;
+  try
+    { Orient gizmo in World or Local coordinate space. }
+    if UseWorldCoordSpace then
+      Rotation := Vector4(Parent.Rotation.XYZ, -Parent.Rotation.W)
+    else
+      Rotation := Vector4(0, 1, 0, 0);
 
-    if Camera.ProjectionType = ptOrthographic then
+    { Adjust scale to take the same space on screen. }
+    if HasWorldTransform and
+       (World <> nil) and
+       (World.MainCamera <> nil) then
     begin
-      { We just want gizmo is about 15% of effective height }
-      GizmoScale := BaseGizmoScaleOrtho * Camera.Orthographic.EffectiveRect.Height;
-      ScaleUniform := Parent.WorldToLocalDistance(GizmoScale);
-    end else
-    begin
-      GizmoScale := BaseGizmoScalePerspective {TODO:* Camera.Perspective.EffectiveFieldOfViewVertical};
-      ScaleUniform := GetPerspectiveGizmoScale(Camera, GizmoScale);
+      Camera := World.MainCamera;
+
+      if Camera.ProjectionType = ptOrthographic then
+      begin
+        { We just want gizmo is about 15% of effective height }
+        GizmoScale := BaseGizmoScaleOrtho * Camera.Orthographic.EffectiveRect.Height;
+        ScaleUniform := Parent.WorldToLocalDistance(GizmoScale);
+      end else
+      begin
+        GizmoScale := BaseGizmoScalePerspective {TODO:* Camera.Perspective.EffectiveFieldOfViewVertical};
+        ScaleUniform := GetPerspectiveGizmoScale(Camera, GizmoScale);
+      end;
+
+      Scale := Vector3(ScaleUniform, ScaleUniform, ScaleUniform);
     end;
-
-    Scale := Vector3(ScaleUniform, ScaleUniform, ScaleUniform);
+  finally
+    InsideUpdateSize := false;
   end;
 end;
-
-(*
-// Not needed now
-function TCastleTransformManipulate.TGizmoScene.Dragging: boolean;
-begin
-  Result := (inherited Dragging) or GizmoDragging;
-end;
-*)
 
 function TCastleTransformManipulate.TGizmoScene.PointingDevicePress(
   const Pick: TRayCollisionNode; const Distance: Single): Boolean;
@@ -653,6 +837,7 @@ begin
 
     if CanDrag then
     begin
+      DoTransformModifyBegin;
       if Mode = mmScale then
       begin
         { In CameraChanged, we adjust gizmo scale to make it fit within
@@ -678,9 +863,10 @@ function TCastleTransformManipulate.TGizmoScene.PointingDeviceMove(
   const Pick: TRayCollisionNode; const Distance: Single): Boolean;
 var
   NewPick, Diff: TVector3;
-  NewPickAngle, DiffAngle: Single;
+  NewPickAngle, DiffAngle, TargetScale, SnappedScale: Single;
   I: Integer;
-  DragSuccess: Boolean;
+  DragSuccess, WorldCoord: Boolean;
+  Manip: TCastleTransformManipulate;
 begin
   Result := inherited;
   if Result then Exit;
@@ -693,6 +879,9 @@ begin
       DragSuccess := PointOnAxis(NewPick, Pick, DraggingCoord);
     if DragSuccess then
     begin
+      Manip := ManipulateOwner;
+      WorldCoord := UseWorldCoordSpace;
+
       {$ifdef DEBUG_GIZMO_PICK}
       if TCastleControl.MainControl.Pressed[keyShift] then
       {$endif DEBUG_GIZMO_PICK}
@@ -700,26 +889,61 @@ begin
         mmTranslate:
           begin
             Diff := NewPick - LastPick;
-            { Our gizmo display and interaction is affected by existing
-              Parent.Rotation although the Parent.Translation
-              is applied before rotation technically.
-              So we need to manually multiply Diff by curent rotation. }
-            Diff := RotatePointAroundAxis(Parent.Rotation, Diff);
-            if DraggingCoord >= 0 then
-              { We need to apply only scale in 1 axis,
-                https://forum.castle-engine.io/t/creating-a-non-linear-strategic-adventure/403/22 }
-              Diff := Diff * Parent.Scale[DraggingCoord]
+            if not WorldCoord then
+            begin
+              if DraggingCoord >= 0 then
+                { We need to apply only scale in 1 axis,
+                  https://forum.castle-engine.io/t/creating-a-non-linear-strategic-adventure/403/22 }
+                Diff := Diff * Parent.Scale[DraggingCoord]
+              else
+                Diff := Diff * Parent.Scale;
+            end;
+
+            if (Manip <> nil) and (Manip.TranslateSnap > 0) then
+            begin
+              for I := 0 to 2 do
+                Diff.Data[I] := Round(Diff.Data[I] / Manip.TranslateSnap) * Manip.TranslateSnap;
+            end;
+
+            if Diff.IsPerfectlyZero then
+              Exit;
+
+            if not WorldCoord then
+            begin
+              { Our gizmo display and interaction is affected by existing
+                Parent.Rotation although the Parent.Translation
+                is applied before rotation technically.
+                So we need to manually multiply Diff by current rotation. }
+              Diff := RotatePointAroundAxis(Parent.Rotation, Diff);
+            end;
+
+            if Manip <> nil then
+              Manip.ApplyTranslateDelta(Diff)
             else
-              Diff := Diff * Parent.Scale;
-            Parent.Translation := Parent.Translation + Diff;
+              Parent.Translation := Parent.Translation + Diff;
           end;
         mmRotate:
           begin
             DiffAngle := NewPickAngle - LastPickAngle;
-            Parent.Rotation := (
-              QuatFromAxisAngle(Parent.Rotation) *
-              QuatFromAxisAngle(TVector3.One[DraggingCoord], DiffAngle)).
-              ToAxisAngle;
+            while DiffAngle > Pi do DiffAngle := DiffAngle - 2 * Pi;
+            while DiffAngle < -Pi do DiffAngle := DiffAngle + 2 * Pi;
+
+            if (Manip <> nil) and (Manip.RotateSnap > 0) then
+              DiffAngle := Round(DiffAngle / Manip.RotateSnap) * Manip.RotateSnap;
+
+            if IsZero(DiffAngle) then
+              Exit;
+
+            if WorldCoord then
+              LastPickAngle := LastPickAngle + DiffAngle;
+
+            if Manip <> nil then
+              Manip.ApplyRotateDelta(DraggingCoord, DiffAngle)
+            else
+              Parent.Rotation := (
+                QuatFromAxisAngle(Parent.Rotation) *
+                QuatFromAxisAngle(TVector3.One[DraggingCoord], DiffAngle)).
+                ToAxisAngle;
           end;
         mmScale:
           begin
@@ -727,19 +951,33 @@ begin
               if IsZero(LastPick[I]) then
                 Diff.Data[I] := 1
               else
-                Diff.Data[I] := NewPick[I] / LastPick[I];
-            Parent.Scale := Parent.Scale * Diff;
+              begin
+                if (Manip <> nil) and (Manip.ScaleSnap > 0) and (not IsZero(Parent.Scale[I])) then
+                begin
+                  TargetScale := Parent.Scale[I] * (NewPick[I] / LastPick[I]);
+                  SnappedScale := GizmoScalingAssumeScaleValue[I] +
+                    Round((TargetScale - GizmoScalingAssumeScaleValue[I]) / Manip.ScaleSnap) * Manip.ScaleSnap;
+                  if Abs(SnappedScale) < 1e-4 then
+                    Diff.Data[I] := 1
+                  else
+                    Diff.Data[I] := SnappedScale / Parent.Scale[I];
+                end else
+                  Diff.Data[I] := NewPick[I] / LastPick[I];
+              end;
+
+            if TVector3.Equals(Diff, Vector3(1, 1, 1)) then
+              Exit;
+
+            if Manip <> nil then
+              Manip.ApplyScaleMultiplier(Diff)
+            else
+              Parent.Scale := Parent.Scale * Diff;
           end;
         mmSelect:
           raise EInternalError.Create('TGizmoScene shall never be created with mmSelect, ');
       end;
 
-      { No point in updating LastPick or LastPickAngle:
-        it remains the same, as it is expressed
-        in local coordinate system, which we just changed by changing
-        Parent.Translation. }
-
-      // update our gizmo size, as we moved ourselves
+      // update our gizmo size and rotation, as we moved/rotated ourselves
       UpdateSize;
       DoTransformModified;
     end;
@@ -822,6 +1060,7 @@ constructor TCastleTransformManipulate.Create(AOwner: TComponent);
     Result.InternalExcludeFromParentBoundingVolume := true;
     Result.PreciseCollisions := true;
     Result.SetTransient;
+    Result.OnTransformModifyBegin := {$ifdef FPC}@{$endif} GizmoHasTransformModifyBegin;
     Result.OnTransformModified := {$ifdef FPC}@{$endif} GizmoHasTransformModified;
     Result.OnTransformModifyEnd := {$ifdef FPC}@{$endif} GizmoHasTransformModifyEnd;
   end;
@@ -829,6 +1068,7 @@ constructor TCastleTransformManipulate.Create(AOwner: TComponent);
 begin
   inherited;
   FPickable := true;
+  FCoordSpace := csLocal;
 
   FMainSelectedObserver := TFreeNotificationObserver.Create(Self);
   FMainSelectedObserver.OnFreeNotification := {$ifdef FPC}@{$endif} MainSelectedFreeNotification;
@@ -917,8 +1157,12 @@ begin
 
   FMaxSelectedCount := NewSelectedCount;
 
-  { Update MainSelected }
-  if SelectedCount = 1 then
+  UpdateMainSelected;
+end;
+
+procedure TCastleTransformManipulate.UpdateMainSelected;
+begin
+  if SelectedCount >= 1 then
     MainSelected := Selected[0]
   else
     MainSelected := nil;
@@ -940,13 +1184,21 @@ begin
   if FMainSelected <> nil then
   begin
     if Gizmo[Mode] <> nil then
+    begin
       FMainSelected.Add(Gizmo[Mode]);
+      Gizmo[Mode].UpdateSize;
+    end;
   end;
 end;
 
 procedure TCastleTransformManipulate.MainSelectedFreeNotification(const Sender: TFreeNotificationObserver);
+var
+  I: Integer;
 begin
-  MainSelected := nil;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+    if Boxes[I].Parent = FMainSelected then
+      Boxes[I].Parent := nil;
+  UpdateMainSelected;
 end;
 
 procedure TCastleTransformManipulate.SetPickable(const Value: Boolean);
@@ -960,6 +1212,12 @@ begin
       if Gizmo[M] <> nil then // Gizmo[mmSelect] is nil now, nothing to show
         Gizmo[M].Pickable := Value;
   end;
+end;
+
+procedure TCastleTransformManipulate.GizmoHasTransformModifyBegin(Sender: TObject);
+begin
+  if Assigned(OnTransformModifyBegin) then
+    OnTransformModifyBegin(Self);
 end;
 
 procedure TCastleTransformManipulate.GizmoHasTransformModified(Sender: TObject);
@@ -984,7 +1242,979 @@ begin
   FMode := AValue;
 
   if (FMainSelected <> nil) and (Gizmo[Mode] <> nil) then
+  begin
     FMainSelected.Add(Gizmo[Mode]);
+    Gizmo[Mode].UpdateSize;
+  end;
+end;
+
+procedure TCastleTransformManipulate.SetCoordSpace(const AValue: TManipulateCoordSpace);
+begin
+  if FCoordSpace = AValue then Exit;
+  FCoordSpace := AValue;
+  if (FMainSelected <> nil) and (Gizmo[Mode] <> nil) then
+    Gizmo[Mode].UpdateSize;
+end;
+
+procedure TCastleTransformManipulate.SetPivotMode(const AValue: TManipulatePivotMode);
+begin
+  if FPivotMode = AValue then Exit;
+  FPivotMode := AValue;
+  if (FMainSelected <> nil) and (Gizmo[Mode] <> nil) then
+    Gizmo[Mode].UpdateSize;
+end;
+
+function TCastleTransformManipulate.IsDescendantOfAnySelected(const T: TCastleTransform): Boolean;
+var
+  P: TCastleTransform;
+  I: Integer;
+begin
+  P := T.Parent;
+  while P <> nil do
+  begin
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if Boxes[I].Parent = P then
+        Exit(true);
+    P := P.Parent;
+  end;
+  Result := false;
+end;
+
+function TCastleTransformManipulate.GetTransformWorkingPos(const T: TCastleTransform): TVector3;
+begin
+  if (T <> nil) and T.HasWorldTransform then
+    Result := T.LocalToWorld(TVector3.Zero)
+  else
+  if T <> nil then
+    Result := T.Translation
+  else
+    Result := TVector3.Zero;
+end;
+
+procedure TCastleTransformManipulate.SetTransformWorkingPos(
+  const T: TCastleTransform; const NewWorkingPos: TVector3);
+var
+  WorldDelta, LocalDelta: TVector3;
+begin
+  if T = nil then Exit;
+  if T.HasWorldTransform then
+  begin
+    WorldDelta := NewWorkingPos - T.LocalToWorld(TVector3.Zero);
+    if not WorldDelta.IsZero then
+    begin
+      if (T.Parent <> nil) and T.Parent.HasWorldTransform then
+        LocalDelta := T.Parent.WorldToLocalDirection(WorldDelta)
+      else
+        LocalDelta := WorldDelta;
+      T.Translation := T.Translation + LocalDelta;
+    end;
+  end else
+    T.Translation := NewWorkingPos;
+end;
+
+function TCastleTransformManipulate.SelectionWorkingCenter: TVector3;
+var
+  I, Count: Integer;
+  T: TCastleTransform;
+  Sum: TVector3;
+begin
+  Sum := TVector3.Zero;
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Sum := Sum + GetTransformWorkingPos(T);
+      Inc(Count);
+    end;
+  end;
+  if Count > 0 then
+    Result := Sum / Single(Count)
+  else
+    Result := TVector3.Zero;
+end;
+
+procedure TCastleTransformManipulate.ApplyTranslateDelta(const DeltaInMainParent: TVector3);
+var
+  I: Integer;
+  T: TCastleTransform;
+  WorldDelta, ItemDelta: TVector3;
+  HasWorldDelta: Boolean;
+begin
+  HasWorldDelta := (FMainSelected <> nil) and (FMainSelected.Parent <> nil) and
+    FMainSelected.Parent.HasWorldTransform;
+  if HasWorldDelta then
+    WorldDelta := FMainSelected.Parent.LocalToWorldDirection(DeltaInMainParent)
+  else
+    WorldDelta := DeltaInMainParent;
+
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      if (FMainSelected = nil) or (T.Parent = FMainSelected.Parent) then
+        ItemDelta := DeltaInMainParent
+      else
+      if HasWorldDelta and (T.Parent <> nil) and T.Parent.HasWorldTransform then
+        ItemDelta := T.Parent.WorldToLocalDirection(WorldDelta)
+      else
+        ItemDelta := DeltaInMainParent;
+
+      T.Translation := T.Translation + ItemDelta;
+    end;
+  end;
+end;
+
+procedure TCastleTransformManipulate.ApplyRotateDelta(const AxisCoord: Integer; const DiffAngle: Single);
+var
+  I, TopLevelCount: Integer;
+  T: TCastleTransform;
+  AxisVec, OrbitAxisVec, PivotPos, RelPos: TVector3;
+begin
+  AxisVec := TVector3.One[AxisCoord];
+
+  TopLevelCount := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+      Inc(TopLevelCount);
+  end;
+
+  if (FPivotMode = pmSelectionCenter) and (TopLevelCount > 1) then
+  begin
+    PivotPos := SelectionWorkingCenter;
+    if (FCoordSpace = csLocal) and (FMainSelected <> nil) then
+      OrbitAxisVec := RotatePointAroundAxis(FMainSelected.Rotation, AxisVec)
+    else
+      OrbitAxisVec := AxisVec;
+  end else
+  begin
+    PivotPos := TVector3.Zero;
+    OrbitAxisVec := AxisVec;
+  end;
+
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      if (FPivotMode = pmSelectionCenter) and (TopLevelCount > 1) then
+      begin
+        RelPos := GetTransformWorkingPos(T) - PivotPos;
+        if not RelPos.IsZero then
+          SetTransformWorkingPos(T, PivotPos + RotatePointAroundAxisRad(DiffAngle, RelPos, OrbitAxisVec));
+      end;
+
+      if FCoordSpace = csWorld then
+        T.Rotation := (
+          QuatFromAxisAngle(AxisVec, DiffAngle) *
+          QuatFromAxisAngle(T.Rotation)).
+          ToAxisAngle
+      else
+        T.Rotation := (
+          QuatFromAxisAngle(T.Rotation) *
+          QuatFromAxisAngle(AxisVec, DiffAngle)).
+          ToAxisAngle;
+    end;
+  end;
+end;
+
+procedure TCastleTransformManipulate.ApplyScaleMultiplier(const ScaleMultiplier: TVector3);
+var
+  I: Integer;
+  T: TCastleTransform;
+begin
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+      T.Scale := T.Scale * ScaleMultiplier;
+  end;
+end;
+
+procedure TCastleTransformManipulate.TranslateSelected(const RawDelta: TVector3);
+var
+  Delta: TVector3;
+  I: Integer;
+begin
+  if FMainSelected = nil then Exit;
+
+  Delta := RawDelta;
+  if FTranslateSnap > 0 then
+    for I := 0 to 2 do
+      Delta.Data[I] := Round(Delta.Data[I] / FTranslateSnap) * FTranslateSnap;
+
+  if Delta.IsPerfectlyZero then Exit;
+
+  if FCoordSpace = csLocal then
+    Delta := RotatePointAroundAxis(FMainSelected.Rotation, Delta);
+
+  ApplyTranslateDelta(Delta);
+  if Gizmo[Mode] <> nil then
+    Gizmo[Mode].UpdateSize;
+  GizmoHasTransformModified(Self);
+end;
+
+procedure TCastleTransformManipulate.RotateSelected(const Axis: T3DAxis; const RawAngleRad: Single);
+var
+  Angle: Single;
+begin
+  if FMainSelected = nil then Exit;
+
+  Angle := RawAngleRad;
+  if FRotateSnap > 0 then
+    Angle := Round(Angle / FRotateSnap) * FRotateSnap;
+
+  if IsZero(Angle) then Exit;
+
+  ApplyRotateDelta(Axis, Angle);
+  if Gizmo[Mode] <> nil then
+    Gizmo[Mode].UpdateSize;
+  GizmoHasTransformModified(Self);
+end;
+
+procedure TCastleTransformManipulate.ScaleSelected(const RawScaleDelta: TVector3);
+var
+  Delta, NewScale: TVector3;
+  I: Integer;
+  T: TCastleTransform;
+  ModifiedAny: Boolean;
+begin
+  if FMainSelected = nil then Exit;
+
+  Delta := RawScaleDelta;
+  if FScaleSnap > 0 then
+    for I := 0 to 2 do
+      Delta.Data[I] := Round(Delta.Data[I] / FScaleSnap) * FScaleSnap;
+
+  if Delta.IsPerfectlyZero then Exit;
+
+  ModifiedAny := false;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      NewScale := T.Scale + Delta;
+      if (Abs(NewScale.X) >= 1e-4) and
+         (Abs(NewScale.Y) >= 1e-4) and
+         (Abs(NewScale.Z) >= 1e-4) then
+      begin
+        T.Scale := NewScale;
+        ModifiedAny := true;
+      end;
+    end;
+  end;
+
+  if ModifiedAny then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+  end;
+end;
+
+procedure TCastleTransformManipulate.AlignSelected(const Axis: T3DAxis; const Target: TAlignTarget);
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  Pos: TVector3;
+  MinCoord, MaxCoord, TargetCoord: Single;
+  ModifiedAny: Boolean;
+begin
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+  if Count < 2 then Exit;
+
+  MinCoord := GetTransformWorkingPos(Items[0])[Axis];
+  MaxCoord := MinCoord;
+  for I := 1 to Count - 1 do
+  begin
+    Pos := GetTransformWorkingPos(Items[I]);
+    if Pos[Axis] < MinCoord then MinCoord := Pos[Axis];
+    if Pos[Axis] > MaxCoord then MaxCoord := Pos[Axis];
+  end;
+
+  case Target of
+    atPrimary:
+      if FMainSelected <> nil then
+        TargetCoord := GetTransformWorkingPos(FMainSelected)[Axis]
+      else
+        TargetCoord := GetTransformWorkingPos(Items[0])[Axis];
+    atMin: TargetCoord := MinCoord;
+    atCenter: TargetCoord := 0.5 * (MinCoord + MaxCoord);
+    atMax: TargetCoord := MaxCoord;
+  end;
+
+  ModifiedAny := false;
+  for I := 0 to Count - 1 do
+  begin
+    Pos := GetTransformWorkingPos(Items[I]);
+    if not SameValue(Pos[Axis], TargetCoord) then
+    begin
+      Pos.Data[Axis] := TargetCoord;
+      SetTransformWorkingPos(Items[I], Pos);
+      ModifiedAny := true;
+    end;
+  end;
+
+  if ModifiedAny then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+procedure TCastleTransformManipulate.DistributeSelected(const Axis: T3DAxis);
+var
+  Items: array of TCastleTransform;
+  Coords: array of Single;
+  I, J, Count: Integer;
+  T, TempT: TCastleTransform;
+  TempCoord, MinCoord, MaxCoord, Step, TargetCoord: Single;
+  Pos: TVector3;
+  ModifiedAny: Boolean;
+begin
+  SetLength(Items, FMaxSelectedCount);
+  SetLength(Coords, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Coords[Count] := GetTransformWorkingPos(T)[Axis];
+      Inc(Count);
+    end;
+  end;
+  if Count < 3 then Exit;
+
+  { Sort transforms by ascending coordinate along Axis. }
+  for I := 0 to Count - 2 do
+    for J := I + 1 to Count - 1 do
+      if Coords[J] < Coords[I] then
+      begin
+        TempCoord := Coords[I];
+        Coords[I] := Coords[J];
+        Coords[J] := TempCoord;
+
+        TempT := Items[I];
+        Items[I] := Items[J];
+        Items[J] := TempT;
+      end;
+
+  MinCoord := Coords[0];
+  MaxCoord := Coords[Count - 1];
+  Step := (MaxCoord - MinCoord) / Single(Count - 1);
+
+  ModifiedAny := false;
+  for I := 1 to Count - 2 do
+  begin
+    TargetCoord := MinCoord + Step * Single(I);
+    Pos := GetTransformWorkingPos(Items[I]);
+    if not SameValue(Pos[Axis], TargetCoord) then
+    begin
+      Pos.Data[Axis] := TargetCoord;
+      SetTransformWorkingPos(Items[I], Pos);
+      ModifiedAny := true;
+    end;
+  end;
+
+  if ModifiedAny then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.StackSelected(
+  const Axis: T3DAxis; const Spacing: Single): Boolean;
+var
+  Items: array of TCastleTransform;
+  Coords: array of Single;
+  Count, I, J: Integer;
+  T, TempT: TCastleTransform;
+  TempCoord, PrevMax, CurMin, CurMax, DeltaAxis: Single;
+  BBox: TBox3D;
+  Pos: TVector3;
+begin
+  Result := false;
+  SetLength(Items, FMaxSelectedCount);
+  SetLength(Coords, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Coords[Count] := GetTransformWorkingPos(T)[Axis];
+      Inc(Count);
+    end;
+  end;
+  if Count < 2 then Exit;
+
+  { Sort transforms by ascending coordinate along Axis. }
+  for I := 0 to Count - 2 do
+    for J := I + 1 to Count - 1 do
+      if Coords[J] < Coords[I] then
+      begin
+        TempCoord := Coords[I];
+        Coords[I] := Coords[J];
+        Coords[J] := TempCoord;
+
+        TempT := Items[I];
+        Items[I] := Items[J];
+        Items[J] := TempT;
+      end;
+
+  if Items[0].HasWorldTransform then
+    BBox := Items[0].WorldBoundingBox
+  else
+    BBox := Items[0].BoundingBox;
+
+  if not BBox.IsEmpty then
+    PrevMax := BBox.Max[Axis]
+  else
+    PrevMax := GetTransformWorkingPos(Items[0])[Axis];
+
+  for I := 1 to Count - 1 do
+  begin
+    Pos := GetTransformWorkingPos(Items[I]);
+    if Items[I].HasWorldTransform then
+      BBox := Items[I].WorldBoundingBox
+    else
+      BBox := Items[I].BoundingBox;
+
+    if not BBox.IsEmpty then
+    begin
+      CurMin := BBox.Min[Axis];
+      CurMax := BBox.Max[Axis];
+    end else
+    begin
+      CurMin := Pos[Axis];
+      CurMax := Pos[Axis];
+    end;
+
+    DeltaAxis := (PrevMax + Spacing) - CurMin;
+    if not SameValue(DeltaAxis, 0) then
+    begin
+      Pos.Data[Axis] := Pos[Axis] + DeltaAxis;
+      SetTransformWorkingPos(Items[I], Pos);
+      Result := true;
+    end;
+
+    PrevMax := (PrevMax + Spacing) + (CurMax - CurMin);
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.SnapSelectedToGrid: Boolean;
+var
+  I, C: Integer;
+  T: TCastleTransform;
+  Snapped: TVector3;
+begin
+  Result := false;
+  if (SelectedCount = 0) or (FTranslateSnap <= 0) then Exit;
+
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Snapped := T.Translation;
+      for C := 0 to 2 do
+        Snapped.Data[C] := Round(Snapped.Data[C] / FTranslateSnap) * FTranslateSnap;
+      if not TVector3.Equals(Snapped, T.Translation) then
+      begin
+        T.Translation := Snapped;
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.SnapToFloor(const AlignToNormal: Boolean): Boolean;
+var
+  I: Integer;
+  T: TCastleTransform;
+  SavedPickable: array of Boolean;
+  SavedGizmoPickable: Boolean;
+  GravityUp, DownDir, RayOrigin, WorldDelta, LocalDelta: TVector3;
+  WorldNormal, TargetUpInParent, CurrentUpInParent, RotAxis: TVector3;
+  BBox: TBox3D;
+  HalfHeight, HitDistance, RotAngle: Single;
+  RayHit: TRayCollision;
+begin
+  Result := false;
+  if SelectedCount = 0 then Exit;
+
+  SavedGizmoPickable := Pickable;
+  SetLength(SavedPickable, FMaxSelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+    if Boxes[I].Parent <> nil then
+    begin
+      SavedPickable[I] := Boxes[I].Parent.Pickable;
+      Boxes[I].Parent.Pickable := false;
+    end;
+  Pickable := false;
+  try
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+    begin
+      T := Boxes[I].Parent;
+      if (T <> nil) and (not IsDescendantOfAnySelected(T)) and
+         (T.World <> nil) and T.HasWorldTransform then
+      begin
+        GravityUp := T.World.GravityUp;
+        if GravityUp.IsZero then
+          GravityUp := Vector3(0, 1, 0)
+        else
+          GravityUp := GravityUp.Normalize;
+        DownDir := -GravityUp;
+
+        BBox := T.WorldBoundingBox;
+        if not BBox.IsEmpty then
+        begin
+          RayOrigin := BBox.Center;
+          HalfHeight := 0.5 * (
+            Abs(GravityUp.X) * BBox.SizeX +
+            Abs(GravityUp.Y) * BBox.SizeY +
+            Abs(GravityUp.Z) * BBox.SizeZ);
+        end else
+        begin
+          RayOrigin := T.LocalToWorld(TVector3.Zero);
+          HalfHeight := 0;
+        end;
+
+        RayHit := T.World.WorldRay(RayOrigin, DownDir);
+        if RayHit <> nil then
+        try
+          if RayHit.Transform <> nil then
+          begin
+            HitDistance := RayHit.Distance;
+
+            if AlignToNormal then
+            begin
+              if (RayHit.Count > 0) and (RayHit.First.Triangle <> nil) and
+                 (RayHit.First.Item <> nil) and RayHit.First.Item.HasWorldTransform then
+                WorldNormal := RayHit.First.Item.LocalToWorldDirection(RayHit.First.Triangle^.SceneSpace.Normal)
+              else
+              if (RayHit.Count > 0) and (RayHit.First.Item <> nil) and
+                 RayHit.First.Item.HasWorldTransform then
+                WorldNormal := RayHit.First.Item.LocalToWorldDirection(Vector3(0, 1, 0))
+              else
+                WorldNormal := GravityUp;
+
+              if not WorldNormal.IsZero then
+              begin
+                WorldNormal := WorldNormal.Normalize;
+                if TVector3.DotProduct(WorldNormal, DownDir) > 0 then
+                  WorldNormal := -WorldNormal;
+
+                if (T.Parent <> nil) and T.Parent.HasWorldTransform then
+                  TargetUpInParent := T.Parent.WorldToLocalDirection(WorldNormal).Normalize
+                else
+                  TargetUpInParent := WorldNormal;
+
+                CurrentUpInParent := RotatePointAroundAxis(T.Rotation, Vector3(0, 1, 0)).Normalize;
+                RotAngle := RotationAngleRadBetweenVectors(CurrentUpInParent, TargetUpInParent);
+                if Abs(RotAngle) > 1e-4 then
+                begin
+                  RotAxis := TVector3.CrossProduct(CurrentUpInParent, TargetUpInParent);
+                  if RotAxis.IsZero then
+                    RotAxis := AnyOrthogonalVector(CurrentUpInParent);
+                  T.Rotation := (QuatFromAxisAngle(RotAxis, RotAngle, true) *
+                    QuatFromAxisAngle(T.Rotation, true)).ToAxisAngle;
+                  Result := true;
+                end;
+              end;
+            end;
+
+            WorldDelta := DownDir * (HitDistance - HalfHeight);
+            if not WorldDelta.IsZero then
+            begin
+              if (T.Parent <> nil) and T.Parent.HasWorldTransform then
+                LocalDelta := T.Parent.WorldToLocalDirection(WorldDelta)
+              else
+                LocalDelta := WorldDelta;
+
+              T.Translation := T.Translation + LocalDelta;
+              Result := true;
+            end;
+          end;
+        finally
+          FreeAndNil(RayHit);
+        end;
+      end;
+    end;
+  finally
+    Pickable := SavedGizmoPickable;
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if Boxes[I].Parent <> nil then
+        Boxes[I].Parent.Pickable := SavedPickable[I];
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.MirrorSelected(const Axis: T3DAxis): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, C, Count: Integer;
+  T: TCastleTransform;
+  PivotCoord, NewCoord: Single;
+  Pos: TVector3;
+  Rot: TVector4;
+begin
+  Result := false;
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+  if Count = 0 then Exit;
+
+  if (Count > 1) and (FPivotMode = pmSelectionCenter) then
+    PivotCoord := SelectionWorkingCenter[Axis]
+  else
+  if (Count > 1) and (FMainSelected <> nil) then
+    PivotCoord := GetTransformWorkingPos(FMainSelected)[Axis]
+  else
+    PivotCoord := 0;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    Pos := GetTransformWorkingPos(T);
+    NewCoord := 2 * PivotCoord - Pos[Axis];
+    if not SameValue(Pos[Axis], NewCoord) then
+    begin
+      Pos.Data[Axis] := NewCoord;
+      SetTransformWorkingPos(T, Pos);
+      Result := true;
+    end;
+
+    Rot := T.Rotation;
+    if not SameValue(Rot.W, 0) then
+    begin
+      for C := 0 to 2 do
+        if C <> Axis then
+          Rot.Data[C] := -Rot.Data[C];
+      if not TVector4.Equals(Rot, T.Rotation) then
+      begin
+        T.Rotation := Rot;
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.RotateSelected90(
+  const Axis: T3DAxis; const Clockwise: Boolean): Boolean;
+var
+  SavedSnap, StepAngle: Single;
+begin
+  Result := false;
+  if (SelectedCount = 0) or (FMainSelected = nil) then Exit;
+
+  SavedSnap := FRotateSnap;
+  FRotateSnap := 0;
+  try
+    if Clockwise then
+      StepAngle := -0.5 * Pi
+    else
+      StepAngle := 0.5 * Pi;
+    RotateSelected(Axis, StepAngle);
+    GizmoHasTransformModifyEnd(Self);
+    Result := true;
+  finally
+    FRotateSnap := SavedSnap;
+  end;
+end;
+
+function TCastleTransformManipulate.RandomizeSelected(
+  const MaxYawRad: Single; const ScaleMin, ScaleMax: Single;
+  const MaxPositionJitter: Single): Boolean;
+var
+  I: Integer;
+  T: TCastleTransform;
+  YawAngle, ScaleFactor: Single;
+  Jitter: TVector3;
+begin
+  Result := false;
+  if SelectedCount = 0 then Exit;
+
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      if MaxYawRad > 0 then
+      begin
+        YawAngle := (Random * 2.0 - 1.0) * MaxYawRad;
+        if Abs(YawAngle) > 1e-6 then
+        begin
+          T.Rotation := (QuatFromAxisAngle(Vector3(0, 1, 0), YawAngle, true) *
+            QuatFromAxisAngle(T.Rotation, true)).ToAxisAngle;
+          Result := true;
+        end;
+      end;
+
+      if (ScaleMin > 0) and (ScaleMax >= ScaleMin) and
+         ((not SameValue(ScaleMin, 1.0)) or (not SameValue(ScaleMax, 1.0))) then
+      begin
+        ScaleFactor := ScaleMin + Random * (ScaleMax - ScaleMin);
+        if Abs(ScaleFactor) >= 1e-4 then
+        begin
+          T.Scale := T.Scale * ScaleFactor;
+          Result := true;
+        end;
+      end;
+
+      if MaxPositionJitter > 0 then
+      begin
+        Jitter := Vector3(
+          (Random * 2.0 - 1.0) * MaxPositionJitter,
+          0,
+          (Random * 2.0 - 1.0) * MaxPositionJitter);
+        if not Jitter.IsZero then
+        begin
+          T.Translation := T.Translation + Jitter;
+          Result := true;
+        end;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.SnapSelectedToRay(
+  const RayOrigin, RayDirection: TVector3;
+  const SnapToNearestVertex: Boolean;
+  const AlignToNormal: Boolean): Boolean;
+var
+  I, K: Integer;
+  T: TCastleTransform;
+  SavedPickable: array of Boolean;
+  SavedGizmoPickable: Boolean;
+  NormDir, HitWorldPoint, TargetWorldPoint, VWorld, BestVertexWorld: TVector3;
+  PivotWorldPos, WorldDelta, LocalDelta: TVector3;
+  WorldNormal, TargetUpInParent, CurrentUpInParent, RotAxis: TVector3;
+  DistSqr, BestDistSqr, RotAngle: Single;
+  Corners: TBoxCorners;
+  RayHit: TRayCollision;
+begin
+  Result := false;
+  if (SelectedCount = 0) or (FMainSelected = nil) or
+     (FMainSelected.World = nil) or RayDirection.IsZero then
+    Exit;
+
+  NormDir := RayDirection.Normalize;
+  SavedGizmoPickable := Pickable;
+  SetLength(SavedPickable, FMaxSelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+    if Boxes[I].Parent <> nil then
+    begin
+      SavedPickable[I] := Boxes[I].Parent.Pickable;
+      Boxes[I].Parent.Pickable := false;
+    end;
+  Pickable := false;
+  try
+    RayHit := FMainSelected.World.WorldRay(RayOrigin, NormDir);
+    if RayHit <> nil then
+    try
+      if RayHit.Transform <> nil then
+      begin
+        HitWorldPoint := RayOrigin + NormDir * RayHit.Distance;
+        TargetWorldPoint := HitWorldPoint;
+
+        if SnapToNearestVertex and (RayHit.Count > 0) and
+           (RayHit.First.Item <> nil) and RayHit.First.Item.HasWorldTransform then
+        begin
+          if RayHit.First.Triangle <> nil then
+          begin
+            BestVertexWorld := RayHit.First.Item.LocalToWorld(
+              RayHit.First.Triangle^.SceneSpace.Triangle.Data[0]);
+            BestDistSqr := PointsDistanceSqr(BestVertexWorld, HitWorldPoint);
+            for K := 1 to 2 do
+            begin
+              VWorld := RayHit.First.Item.LocalToWorld(
+                RayHit.First.Triangle^.SceneSpace.Triangle.Data[K]);
+              DistSqr := PointsDistanceSqr(VWorld, HitWorldPoint);
+              if DistSqr < BestDistSqr then
+              begin
+                BestDistSqr := DistSqr;
+                BestVertexWorld := VWorld;
+              end;
+            end;
+            TargetWorldPoint := BestVertexWorld;
+          end else
+          if not RayHit.First.Item.BoundingBox.IsEmpty then
+          begin
+            RayHit.First.Item.BoundingBox.Corners(Corners);
+            BestVertexWorld := RayHit.First.Item.LocalToWorld(Corners[0]);
+            BestDistSqr := PointsDistanceSqr(BestVertexWorld, HitWorldPoint);
+            for K := 1 to 7 do
+            begin
+              VWorld := RayHit.First.Item.LocalToWorld(Corners[K]);
+              DistSqr := PointsDistanceSqr(VWorld, HitWorldPoint);
+              if DistSqr < BestDistSqr then
+              begin
+                BestDistSqr := DistSqr;
+                BestVertexWorld := VWorld;
+              end;
+            end;
+            TargetWorldPoint := BestVertexWorld;
+          end;
+        end;
+
+        if (SelectedCount > 1) and (FPivotMode = pmSelectionCenter) then
+          PivotWorldPos := SelectionWorkingCenter
+        else
+        if FMainSelected.HasWorldTransform then
+          PivotWorldPos := FMainSelected.LocalToWorld(TVector3.Zero)
+        else
+          PivotWorldPos := GetTransformWorkingPos(FMainSelected);
+
+        WorldDelta := TargetWorldPoint - PivotWorldPos;
+
+        WorldNormal := TVector3.Zero;
+        if AlignToNormal then
+        begin
+          if (RayHit.Count > 0) and (RayHit.First.Triangle <> nil) and
+             (RayHit.First.Item <> nil) and RayHit.First.Item.HasWorldTransform then
+            WorldNormal := RayHit.First.Item.LocalToWorldDirection(RayHit.First.Triangle^.SceneSpace.Normal)
+          else
+          if (RayHit.Count > 0) and (RayHit.First.Item <> nil) and
+             RayHit.First.Item.HasWorldTransform then
+            WorldNormal := RayHit.First.Item.LocalToWorldDirection(Vector3(0, 1, 0))
+          else
+            WorldNormal := FMainSelected.World.GravityUp;
+
+          if not WorldNormal.IsZero then
+          begin
+            WorldNormal := WorldNormal.Normalize;
+            if TVector3.DotProduct(WorldNormal, NormDir) > 0 then
+              WorldNormal := -WorldNormal;
+          end;
+        end;
+
+        for I := 0 to Integer(FMaxSelectedCount) - 1 do
+        begin
+          T := Boxes[I].Parent;
+          if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+          begin
+            if AlignToNormal and (not WorldNormal.IsZero) then
+            begin
+              if (T.Parent <> nil) and T.Parent.HasWorldTransform then
+                TargetUpInParent := T.Parent.WorldToLocalDirection(WorldNormal).Normalize
+              else
+                TargetUpInParent := WorldNormal;
+
+              CurrentUpInParent := RotatePointAroundAxis(T.Rotation, Vector3(0, 1, 0)).Normalize;
+              RotAngle := RotationAngleRadBetweenVectors(CurrentUpInParent, TargetUpInParent);
+              if Abs(RotAngle) > 1e-4 then
+              begin
+                RotAxis := TVector3.CrossProduct(CurrentUpInParent, TargetUpInParent);
+                if RotAxis.IsZero then
+                  RotAxis := AnyOrthogonalVector(CurrentUpInParent);
+                T.Rotation := (QuatFromAxisAngle(RotAxis, RotAngle, true) *
+                  QuatFromAxisAngle(T.Rotation, true)).ToAxisAngle;
+                Result := true;
+              end;
+            end;
+
+            if not WorldDelta.IsZero then
+            begin
+              if (T.Parent <> nil) and T.Parent.HasWorldTransform then
+                LocalDelta := T.Parent.WorldToLocalDirection(WorldDelta)
+              else
+                LocalDelta := WorldDelta;
+
+              T.Translation := T.Translation + LocalDelta;
+              Result := true;
+            end;
+          end;
+        end;
+      end;
+    finally
+      FreeAndNil(RayHit);
+    end;
+  finally
+    Pickable := SavedGizmoPickable;
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if Boxes[I].Parent <> nil then
+        Boxes[I].Parent.Pickable := SavedPickable[I];
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
 end;
 
 function TCastleTransformManipulate.SelectedCount: Integer;
