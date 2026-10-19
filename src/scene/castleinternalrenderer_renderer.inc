@@ -228,6 +228,11 @@
         Set before RenderBegin. }
       LightContributionOnly: Boolean;
 
+      { Output linear colors to a float color buffer,
+        see TRenderParams.InternalHighDynamicRange.
+        Set before RenderBegin. }
+      HighDynamicRange: Boolean;
+
     { Constructor. }
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;

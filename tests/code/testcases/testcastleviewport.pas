@@ -30,13 +30,18 @@ type
     procedure TestAutoCameraIgnoresGizmos;
     procedure TestAutoProjection;
     procedure TestEffectiveBlendingSort;
+    procedure TestHighDynamicRangeTransparent;
+    procedure TestHighDynamicRangeSameLook;
+    procedure TestHighDynamicRangeMultiSampling;
   end;
 
 implementation
 
 uses CastleComponentSerialize, CastleUIControls, CastleViewport, CastleCameras,
   Castle2DSceneManager, CastleProjection, CastleUtils, CastleTransform, CastleVectors,
-  CastleScene, CastleBoxes, CastleRenderOptions;
+  CastleScene, CastleBoxes, CastleRenderOptions, CastleWindow, CastleImages,
+  CastleColors, CastleGLUtils, CastleControls, X3DNodes, CastleStringUtils, CastleLog,
+  CastleInternalGLUtils;
 
 procedure TTestCastleViewport.TestReadingOldDesigns;
 
@@ -268,6 +273,314 @@ begin
     V.BlendingSort := sort3DGround;
     AssertTrue(sort3DGround = EffectiveBlendingSort(V));
   finally FreeAndNil(V) end;
+end;
+
+{ HighDynamicRange tests ------------------------------------------------------ }
+
+type
+  { Scene for the HighDynamicRange tests: a Phong floor and box lit by
+    one point light (rendered in one pass, so HighDynamicRange
+    should not change how it looks). }
+  THighDynamicRangeTestScene = class
+    Window: TCastleWindow;
+    Viewport: TCastleViewport;
+    Light: TCastlePointLight;
+    Box: TCastleBox;
+    constructor Create(const AWindow: TCastleWindow);
+    function Render: TCastleImage;
+  end;
+
+constructor THighDynamicRangeTestScene.Create(const AWindow: TCastleWindow);
+var
+  Floor: TCastleBox;
+begin
+  inherited Create;
+  Window := AWindow;
+  Viewport := TCastleViewport.Create(Window);
+  Viewport.FullSize := true;
+  Viewport.BackgroundColor := Vector4(0.3, 0.4, 0.5, 1);
+  Viewport.Camera.SetView(
+    Vector3(0, 6, 8),
+    Vector3(0, -6, -8),
+    Vector3(0, 8, -6));
+  Window.Controls.InsertFront(Viewport);
+
+  Floor := TCastleBox.Create(Window);
+  Floor.Size := Vector3(10, 0.2, 10);
+  Floor.Translation := Vector3(0, -0.1, 0);
+  Floor.Material := pmPhong;
+  Viewport.Items.Add(Floor);
+
+  Box := TCastleBox.Create(Window);
+  Box.Translation := Vector3(0, 1, 0);
+  Box.Material := pmPhong;
+  Box.Color := Vector4(1, 0.5, 0.2, 1);
+  Viewport.Items.Add(Box);
+
+  Light := TCastlePointLight.Create(Window);
+  Light.Translation := Vector3(2, 4, 2);
+  Light.Intensity := 3;
+  Viewport.Items.Add(Light);
+end;
+
+function THighDynamicRangeTestScene.Render: TCastleImage;
+begin
+  Result := Window.SaveScreen;
+end;
+
+{ Mean and maximum difference of the color components of 2 images
+  of the same size. }
+procedure ImageDifference(const A, B: TCastleImage; out Mean, Max: Single);
+var
+  X, Y, I: Integer;
+  CA, CB: TCastleColor;
+  D: Single;
+begin
+  Mean := 0;
+  Max := 0;
+  for Y := 0 to A.Height - 1 do
+    for X := 0 to A.Width - 1 do
+    begin
+      CA := A.Colors[X, Y, 0];
+      CB := B.Colors[X, Y, 0];
+      for I := 0 to 2 do
+      begin
+        D := Abs(CA.Data[I] - CB.Data[I]);
+        Mean := Mean + D;
+        if D > Max then
+          Max := D;
+      end;
+    end;
+  Mean := Mean / (A.Width * A.Height * 3);
+end;
+
+procedure TTestCastleViewport.TestHighDynamicRangeTransparent;
+{ A transparent viewport with HighDynamicRange must still show
+  what is behind it (HighDynamicRange is ignored then). }
+var
+  Window: TCastleWindow;
+  Viewport: TCastleViewport;
+  Background: TCastleRectangleControl;
+  Box: TCastleBox;
+  Image: TCastleImage;
+  Corner, Center: TCastleColor;
+begin
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  Window := CreateWindowForTest;
+  try
+    Window.Width := 200;
+    Window.Height := 200;
+    Window.Open;
+
+    Background := TCastleRectangleControl.Create(Window);
+    Background.FullSize := true;
+    Background.Color := Red;
+    Window.Controls.InsertFront(Background);
+
+    Viewport := TCastleViewport.Create(Window);
+    Viewport.FullSize := true;
+    Viewport.Transparent := true;
+    Viewport.HighDynamicRange := true;
+    Viewport.Camera.SetView(
+      Vector3(0, 0, 10),
+      Vector3(0, 0, -1),
+      Vector3(0, 1, 0));
+    Background.InsertFront(Viewport);
+
+    Box := TCastleBox.Create(Window);
+    Box.Material := pmUnlit;
+    Box.Color := Vector4(0, 0, 1, 1);
+    Viewport.Items.Add(Box);
+
+    Image := Window.SaveScreen;
+    try
+      Corner := Image.Colors[5, 5, 0];
+      Center := Image.Colors[Image.Width div 2, Image.Height div 2, 0];
+    finally FreeAndNil(Image) end;
+
+    if not TVector3.Equals(Corner.XYZ, Vector3(1, 0, 0), 0.02) then
+      Fail('Transparent viewport with HighDynamicRange: expected red behind it, got ' + Corner.ToString);
+    if not TVector3.Equals(Center.XYZ, Vector3(0, 0, 1), 0.02) then
+      Fail('Transparent viewport with HighDynamicRange: expected blue box, got ' + Center.ToString);
+
+    CheckGLErrors('TestHighDynamicRangeTransparent');
+    Window.Close;
+  finally
+    DestroyWindowForTest(Window);
+  end;
+end;
+
+procedure TTestCastleViewport.TestHighDynamicRangeSameLook;
+{ Rendering in one pass looks the same with and without HighDynamicRange,
+  also together with screen space effects and custom screen effects. }
+var
+  Window: TCastleWindow;
+  S: THighDynamicRangeTestScene;
+
+  { Rendering with and without HighDynamicRange looks the same:
+    the mean difference of color components is at most MaxMean,
+    every difference at most MaxDifference (which catches
+    a missing shadow too). }
+  procedure CheckSameLook(const What: String;
+    const MaxMean: Single = 0.01; const MaxDifference: Single = 0.03);
+  var
+    Ldr, Hdr: TCastleImage;
+    Mean, Max: Single;
+  begin
+    S.Viewport.HighDynamicRange := false;
+    Ldr := S.Render;
+    try
+      S.Viewport.HighDynamicRange := true;
+      Hdr := S.Render;
+      try
+        ImageDifference(Ldr, Hdr, Mean, Max);
+        WritelnLog('HighDynamicRange %s: mean difference %.4f, max %.4f', [What, Mean, Max]);
+        if (Mean > MaxMean) or (Max > MaxDifference) then
+          Fail(Format('%s: with HighDynamicRange the mean difference is %f, max %f',
+            [What, Mean, Max]));
+      finally FreeAndNil(Hdr) end;
+    finally FreeAndNil(Ldr) end;
+    CheckGLErrors(What);
+  end;
+
+var
+  ScreenEffect: TScreenEffectNode;
+  ComposedShader: TComposedShaderNode;
+  FragmentShader: TShaderPartNode;
+begin
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  Window := CreateWindowForTest;
+  try
+    Window.Width := 200;
+    Window.Height := 200;
+    Window.Open;
+
+    if not GLFeatures.ColorBufferFloat then
+    begin
+      Window.Close;
+      AbortTest;
+      Exit;
+    end;
+
+    S := THighDynamicRangeTestScene.Create(Window);
+    try
+      CheckSameLook('plain');
+
+      S.Viewport.ScreenSpaceAmbientOcclusion := true;
+      CheckSameLook('ScreenSpaceAmbientOcclusion');
+      S.Viewport.ScreenSpaceAmbientOcclusion := false;
+
+      S.Viewport.ScreenSpaceReflections := true;
+      CheckSameLook('ScreenSpaceReflections');
+      S.Viewport.ScreenSpaceReflections := false;
+
+      { shadow volumes with one light are rendered in one pass too
+        (the debug rendering of shadow volumes is blended
+        in linear color space, so allow more difference) }
+      if GLFeatures.ShadowVolumesPossible then
+      begin
+        S.Light.Shadows := true;
+        S.Viewport.ShadowVolumes := true;
+        CheckSameLook('ShadowVolumes');
+        S.Viewport.ShadowVolumesRender := true;
+        CheckSameLook('ShadowVolumesRender', 0.05, 0.3);
+        S.Viewport.ShadowVolumesRender := false;
+        S.Viewport.ShadowVolumes := false;
+      end;
+
+      { a custom screen effect (inverting colors) gets the screen colors
+        (last: the viewport keeps it) }
+      FragmentShader := TShaderPartNode.Create;
+      FragmentShader.ShaderType := stFragment;
+      FragmentShader.Contents :=
+        'void main (void)' + NL +
+        '{' + NL +
+        '  vec4 c = screen_get_color(screen_position());' + NL +
+        '  gl_FragColor = vec4(vec3(1.0) - c.rgb, 1.0);' + NL +
+        '}';
+      ComposedShader := TComposedShaderNode.Create;
+      ComposedShader.SetParts([FragmentShader]);
+      ScreenEffect := TScreenEffectNode.Create;
+      ScreenEffect.SetShaders([ComposedShader]);
+      S.Viewport.AddScreenEffect(ScreenEffect);
+      CheckSameLook('custom screen effect');
+    finally FreeAndNil(S) end;
+
+    Window.Close;
+  finally
+    DestroyWindowForTest(Window);
+  end;
+end;
+
+procedure TTestCastleViewport.TestHighDynamicRangeMultiSampling;
+{ HighDynamicRange works with multi-sampling, keeping the anti-aliased edges. }
+var
+  Window: TCastleWindow;
+  S: THighDynamicRangeTestScene;
+  Ldr, Hdr: TCastleImage;
+  Mean, Max: Single;
+begin
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  Window := CreateWindowForTest;
+  try
+    Window.Width := 200;
+    Window.Height := 200;
+    Window.MultiSampling := 4;
+    try
+      Window.Open;
+    except
+      on EGLContextNotPossible do
+      begin
+        { no multi-sampled window (e.g. Xvfb), cannot test }
+        AbortTest;
+        Exit;
+      end;
+    end;
+
+    if not (GLFeatures.ColorBufferFloat and (GLFeatures.CurrentMultiSampling > 1)) then
+    begin
+      Window.Close;
+      AbortTest;
+      Exit;
+    end;
+
+    S := THighDynamicRangeTestScene.Create(Window);
+    try
+      Ldr := S.Render;
+      try
+        S.Viewport.HighDynamicRange := true;
+        Hdr := S.Render;
+        try
+          ImageDifference(Ldr, Hdr, Mean, Max);
+          WritelnLog('HighDynamicRange with multi-sampling: mean difference %f, max %f', [Mean, Max]);
+          { edges are averaged in linear color space with HighDynamicRange,
+            so allow a larger max difference }
+          if Mean > 0.01 then
+            Fail(Format('Multi-sampling with HighDynamicRange: mean difference %f, max %f', [Mean, Max]));
+        finally FreeAndNil(Hdr) end;
+      finally FreeAndNil(Ldr) end;
+    finally FreeAndNil(S) end;
+
+    CheckGLErrors('TestHighDynamicRangeMultiSampling');
+    Window.Close;
+  finally
+    DestroyWindowForTest(Window);
+  end;
 end;
 
 initialization

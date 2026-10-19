@@ -85,9 +85,23 @@ type
       ScreenEffectRTT: TGLRenderToTexture;
       ScreenEffectTextureWidth: Cardinal;
       ScreenEffectTextureHeight: Cardinal;
+      { Whether ScreenEffectTextureDest/Src have float components
+        (for InternalHighDynamicRange). }
+      ScreenEffectTextureHighDynamicRange: Boolean;
       { Saved ScreenEffectsCount/NeedDepth result, during rendering. }
       CurrentScreenEffectsCount: Integer;
       CurrentScreenEffectsNeedDepth: boolean;
+      { Whether InternalHighDynamicRange is used in this frame.
+        Valid only between Render and RenderOverChildren calls. }
+      CurrentHighDynamicRange: Boolean;
+      { Shader converting linear colors to the screen (InternalHighDynamicRange),
+        built for HighDynamicRangeShaderToneMapping. }
+      HighDynamicRangeShader: TGLSLProgram;
+      HighDynamicRangeShaderToneMapping: TToneMapping;
+      HighDynamicRangeShaderFailed: Boolean;
+      { Shader copying the colors unchanged, the last screen effect
+        when InternalHighDynamicRange is used without other screen effects. }
+      CopyShader: TGLSLProgram;
       ScreenPointVbo: TGLBuffer;
       ScreenPointVao: TVertexArrayObject;
       ScreenPoint: packed array [0..3] of TScreenPoint;
@@ -97,6 +111,11 @@ type
     function GetScreenEffectsCount: Cardinal;
     function GetScreenEffectsNeedDepth: Boolean;
     function GetScreenEffect(const Index: Integer): TGLSLProgram;
+    { InternalHighDynamicRange shader, or @nil if it cannot be used. }
+    function GetHighDynamicRangeShader: TGLSLProgram;
+    { Render a full-screen quad with the Shader,
+      reading ScreenEffectTextureSrc (and ScreenEffectTextureDepth). }
+    procedure RenderOneEffect(const Shader: TGLSLProgram);
 
     procedure GLContextCloseEvent(Sender: TObject);
   protected
@@ -127,6 +146,28 @@ type
     function InternalExtraScreenEffectsCount: Integer; virtual;
     { @exclude }
     function InternalExtraScreenEffectsNeedDepth: Boolean; virtual;
+
+    { Render in a texture with float color components,
+      and expect @link(RenderWithoutScreenEffects) to output linear colors
+      (without gamma correction and tone mapping),
+      calling @link(InternalHighDynamicRangeResolve) after rendering them.
+      This is internal, only to be used by TCastleViewport.HighDynamicRange.
+      @exclude }
+    function InternalHighDynamicRange: Boolean; virtual;
+
+    { Whether @link(InternalHighDynamicRange) is used in this frame:
+      it was requested and it is supported.
+      Valid only between Render and RenderOverChildren calls.
+      @exclude }
+    function InternalHighDynamicRangeActive: Boolean;
+
+    { Convert the linear colors rendered so far (when @link(InternalHighDynamicRangeActive))
+      to the screen: apply gamma correction and tone mapping
+      (following @link(ToneMapping)) once.
+      Rendering after this (e.g. children user interface) uses the usual
+      screen colors.
+      @exclude }
+    procedure InternalHighDynamicRangeResolve;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -316,6 +357,71 @@ begin
   Result := false;
 end;
 
+function TCastleScreenEffects.InternalHighDynamicRange: Boolean;
+begin
+  Result := false;
+end;
+
+function TCastleScreenEffects.InternalHighDynamicRangeActive: Boolean;
+begin
+  Result := RenderScreenEffects and CurrentHighDynamicRange;
+end;
+
+function TCastleScreenEffects.GetHighDynamicRangeShader: TGLSLProgram;
+
+  function ToneMappingDefines: String;
+  begin
+    case ToneMapping of
+      tmUncharted  : Result := '#define CASTLE_TONE_MAPPING' + NL + '#define CASTLE_TONE_MAPPING_UNCHARTED' + NL;
+      tmHejlRichard: Result := '#define CASTLE_TONE_MAPPING' + NL + '#define CASTLE_TONE_MAPPING_HEJLRICHARD' + NL;
+      tmACES       : Result := '#define CASTLE_TONE_MAPPING' + NL + '#define CASTLE_TONE_MAPPING_ACES' + NL;
+      else           Result := '';
+    end;
+  end;
+
+var
+  Shader: TGLSLScreenEffect;
+begin
+  if (HighDynamicRangeShader <> nil) and
+     (HighDynamicRangeShaderToneMapping <> ToneMapping) then
+    FreeAndNil(HighDynamicRangeShader);
+
+  if (HighDynamicRangeShader = nil) and
+     (not HighDynamicRangeShaderFailed) and
+     GLFeatures.ColorBufferFloat then
+  begin
+    Shader := TGLSLScreenEffect.Create;
+    try
+      { Shapes always output linear colors in this mode
+        (shapes without gamma correction output the inverse of it),
+        so always apply gamma correction here. }
+      Shader.ScreenEffectShader :=
+        '#define CASTLE_GAMMA_CORRECTION' + NL +
+        ToneMappingDefines +
+        {$I tone_mapping.fs.inc} + NL +
+        'ivec2 screen_position();' + NL +
+        'vec4 screen_get_color(ivec2 position);' + NL +
+        'void main(void)' + NL +
+        '{' + NL +
+        '  vec4 color = screen_get_color(screen_position());' + NL +
+        '  gl_FragColor = vec4(castle_linear_to_screen(max(color.rgb, vec3(0.0))), color.a);' + NL +
+        '}' + NL;
+      Shader.Link;
+      HighDynamicRangeShader := Shader;
+      HighDynamicRangeShaderToneMapping := ToneMapping;
+    except
+      on E: EGLSLError do
+      begin
+        FreeAndNil(Shader);
+        WritelnWarning('Error when linking the shader for high dynamic range rendering, disabling it: ' + E.Message);
+        HighDynamicRangeShaderFailed := true;
+      end;
+    end;
+  end;
+
+  Result := HighDynamicRangeShader;
+end;
+
 function TCastleScreenEffects.GetScreenEffectsCount: Cardinal;
 begin
   Result := 0;
@@ -341,7 +447,28 @@ end;
 function TCastleScreenEffects.GetScreenEffect(const Index: Integer): TGLSLProgram;
 var
   SceneEffects: Integer;
+  Shader: TGLSLScreenEffect;
 begin
+  { Only the high dynamic range conversion (already done by
+    InternalHighDynamicRangeResolve): copy the result to the screen. }
+  if CurrentHighDynamicRange and (GetScreenEffectsCount = 0) then
+  begin
+    if CopyShader = nil then
+    begin
+      Shader := TGLSLScreenEffect.Create;
+      Shader.ScreenEffectShader :=
+        'ivec2 screen_position();' + NL +
+        'vec4 screen_get_color(ivec2 position);' + NL +
+        'void main(void)' + NL +
+        '{' + NL +
+        '  gl_FragColor = screen_get_color(screen_position());' + NL +
+        '}' + NL;
+      Shader.Link;
+      CopyShader := Shader;
+    end;
+    Exit(CopyShader);
+  end;
+
   if ScreenEffectsScene <> nil then
     SceneEffects := ScreenEffectsScene.InternalScreenEffectsCount
   else
@@ -372,6 +499,13 @@ var
       CurrentScreenEffectsCount and later CurrentScreenEffectsNeedDepth
       values are constant, even if user modifies FScreenEffects in the middle. }
     CurrentScreenEffectsCount := GetScreenEffectsCount;
+    CurrentHighDynamicRange := InternalHighDynamicRange and
+      (GetHighDynamicRangeShader <> nil);
+    { With high dynamic range, InternalHighDynamicRangeResolve
+      does the conversion, and the last effect (maybe just a copy, see GetScreenEffect)
+      renders to the screen. }
+    if CurrentHighDynamicRange and (CurrentScreenEffectsCount = 0) then
+      CurrentScreenEffectsCount := 1;
     RenderScreenEffects := CurrentScreenEffectsCount <> 0;
     if not RenderScreenEffects then Exit; // no need to do anything else
 
@@ -383,7 +517,11 @@ var
       { check IsTextureSized, to gracefully work (without screen effects)
         on old desktop OpenGL that does not support NPOT textures. }
       IsTextureSized(SR.Width, SR.Height, tsAny);
-    if not RenderScreenEffects then Exit; // no need to do anything else
+    if not RenderScreenEffects then
+    begin
+      CurrentHighDynamicRange := false;
+      Exit; // no need to do anything else
+    end;
 
     { check the need to render depth buffer to a texture. }
     CurrentScreenEffectsNeedDepth := GetScreenEffectsNeedDepth;
@@ -393,6 +531,7 @@ var
         TODO: It would be cleaner to still enable screen effects not using
         depth (and only them), instead of just disabling all screen effects. }
       RenderScreenEffects := false;
+      CurrentHighDynamicRange := false;
       Exit;
     end;
   end;
@@ -474,6 +613,9 @@ var
       //glTexParameteri(ScreenEffectTextureTarget, GL_TEXTURE_COMPARE_MODE_ARB, GL_NONE);
       //glTexParameteri(ScreenEffectTextureTarget, GL_DEPTH_TEXTURE_MODE_ARB, GL_LUMINANCE);
     end else
+    if CurrentHighDynamicRange then
+      TexImage2D(GL_RGBA16F, GL_RGBA, GL_FLOAT)
+    else
       TexImage2D({$ifdef OpenGLES} GL_RGB {$else} GL_RGB8 {$endif},
         GL_RGB, GL_UNSIGNED_BYTE);
 
@@ -487,6 +629,7 @@ var
     if (ScreenEffectTextureDest = GLObjectNone) or
        (ScreenEffectTextureSrc = GLObjectNone) or
        (CurrentScreenEffectsNeedDepth <> (ScreenEffectTextureDepth <> GLObjectNone)) or
+       (CurrentHighDynamicRange <> ScreenEffectTextureHighDynamicRange) or
        (ScreenEffectRTT = nil) or
        (ScreenEffectTextureWidth  <> SR.Width ) or
        (ScreenEffectTextureHeight <> SR.Height) then
@@ -504,6 +647,7 @@ var
 
       ScreenEffectTextureWidth  := SR.Width;
       ScreenEffectTextureHeight := SR.Height;
+      ScreenEffectTextureHighDynamicRange := CurrentHighDynamicRange;
       { We use two textures: ScreenEffectTextureDest is the destination
         of framebuffer, ScreenEffectTextureSrc is the source to render.
 
@@ -536,10 +680,11 @@ var
       ScreenEffectRTT.Stencil := GLFeatures.ShadowVolumesPossible;
       ScreenEffectRTT.GLContextOpen;
 
-      WritelnLog('Screen effects', Format('Created texture for screen effects, with size %d x %d, with depth texture: %s',
+      WritelnLog('Screen effects', Format('Created texture for screen effects, with size %d x %d, with depth texture: %s, float colors: %s',
         [ ScreenEffectTextureWidth,
           ScreenEffectTextureHeight,
-          BoolToStr(CurrentScreenEffectsNeedDepth, true) ]));
+          BoolToStr(CurrentScreenEffectsNeedDepth, true),
+          BoolToStr(CurrentHighDynamicRange, true) ]));
     end;
 
     RenderContext.Viewport := SR;
@@ -569,81 +714,107 @@ procedure TCastleScreenEffects.RenderWithoutScreenEffects;
 begin
 end;
 
+procedure TCastleScreenEffects.RenderOneEffect(const Shader: TGLSLProgram);
+var
+  BoundTextureUnits: Cardinal;
+  AttribVertex, AttribTexCoord: TGLSLAttribute;
+begin
+  if ScreenPointVbo = GLObjectNone then
+  begin
+    { generate and fill ScreenPointVbo. It's contents are constant. }
+    ScreenPointVbo := glCreateBuffer();
+    ScreenPoint[0].TexCoord := Vector2(0, 0);
+    ScreenPoint[0].Position := Vector2(-1, -1);
+    ScreenPoint[1].TexCoord := Vector2(1, 0);
+    ScreenPoint[1].Position := Vector2( 1, -1);
+    ScreenPoint[2].TexCoord := Vector2(1, 1);
+    ScreenPoint[2].Position := Vector2( 1,  1);
+    ScreenPoint[3].TexCoord := Vector2(0, 1);
+    ScreenPoint[3].Position := Vector2(-1,  1);
+    RenderContext.BindBuffer[btArray] := ScreenPointVbo;
+    glBufferData(GL_ARRAY_BUFFER, SizeOf(ScreenPoint), @(ScreenPoint[0]), GL_STATIC_DRAW);
+  end;
+
+  if ScreenPointVao = nil then
+    ScreenPointVao := TVertexArrayObject.Create(nil);
+
+  RenderContext.CurrentProgram := Shader;
+  RenderContext.CurrentVao := ScreenPointVao;
+
+  RenderContext.BindBuffer[btArray] := ScreenPointVbo;
+
+  glActiveTexture(GL_TEXTURE0); // GLFeatures.UseMultiTexturing is already checked
+  glBindTexture(ScreenEffectTextureTarget, ScreenEffectTextureSrc);
+  BoundTextureUnits := 1;
+
+  if CurrentScreenEffectsNeedDepth then
+  begin
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(ScreenEffectTextureTarget, ScreenEffectTextureDepth);
+    Inc(BoundTextureUnits);
+  end;
+
+  Shader.Uniform('screen').SetValue(0);
+  if CurrentScreenEffectsNeedDepth then
+    Shader.Uniform('screen_depth').SetValue(1);
+  Shader.Uniform('screen_width').SetValue(TGLint(ScreenEffectTextureWidth));
+  Shader.Uniform('screen_height').SetValue(TGLint(ScreenEffectTextureHeight));
+
+  { Note that we ignore SetupUniforms result --- if some texture
+    could not be bound, it will be undefined for shader.
+    I don't see anything much better to do now. }
+  Shader.SetupUniforms(BoundTextureUnits);
+
+  { Note that there's no need to worry about Rect.Left or Rect.Bottom,
+    here or inside RenderWithScreenEffectsCore, because we're already within
+    RenderContext.Viewport that takes care of this. }
+
+  AttribVertex := Shader.Attribute('vertex');
+  AttribVertex.EnableArrayVector2(ScreenPointVao, SizeOf(TScreenPoint),
+    OffsetUInt(ScreenPoint[0].Position, ScreenPoint[0]));
+  AttribTexCoord := Shader.Attribute('tex_coord');
+  AttribTexCoord.EnableArrayVector2(ScreenPointVao, SizeOf(TScreenPoint),
+    OffsetUInt(ScreenPoint[0].TexCoord, ScreenPoint[0]));
+
+  glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+
+  AttribVertex.DisableArray;
+  AttribTexCoord.DisableArray;
+  RenderContext.BindBuffer[btArray] := GLObjectNone;
+end;
+
+procedure TCastleScreenEffects.InternalHighDynamicRangeResolve;
+var
+  SavedDepthTest, SavedDepthBufferUpdate: Boolean;
+begin
+  if not InternalHighDynamicRangeActive then
+    Exit;
+
+  { Render the linear colors (now in ScreenEffectTextureSrc) converted
+    to the screen into ScreenEffectTextureDest, keeping the depth and stencil
+    attachments, so rendering can continue on top of it. }
+  ScreenEffectRTT.RenderEnd;
+  SwapValues(ScreenEffectTextureDest, ScreenEffectTextureSrc);
+  ScreenEffectRTT.RenderBegin;
+  ScreenEffectRTT.SetTexture(ScreenEffectTextureDest, ScreenEffectTextureTarget);
+
+  SavedDepthTest := RenderContext.DepthTest;
+  SavedDepthBufferUpdate := RenderContext.DepthBufferUpdate;
+  RenderContext.DepthTest := false;
+  RenderContext.DepthBufferUpdate := false;
+  RenderContext.BlendingDisable;
+
+  RenderOneEffect(HighDynamicRangeShader);
+
+  RenderContext.DepthTest := SavedDepthTest;
+  RenderContext.DepthBufferUpdate := SavedDepthBufferUpdate;
+end;
+
 procedure TCastleScreenEffects.RenderOverChildren;
 var
   SR: TRectangle;
 
   procedure RenderWithScreenEffectsCore;
-
-    procedure RenderOneEffect(Shader: TGLSLProgram);
-    var
-      BoundTextureUnits: Cardinal;
-      AttribVertex, AttribTexCoord: TGLSLAttribute;
-    begin
-      if ScreenPointVbo = GLObjectNone then
-      begin
-        { generate and fill ScreenPointVbo. It's contents are constant. }
-        ScreenPointVbo := glCreateBuffer();
-        ScreenPoint[0].TexCoord := Vector2(0, 0);
-        ScreenPoint[0].Position := Vector2(-1, -1);
-        ScreenPoint[1].TexCoord := Vector2(1, 0);
-        ScreenPoint[1].Position := Vector2( 1, -1);
-        ScreenPoint[2].TexCoord := Vector2(1, 1);
-        ScreenPoint[2].Position := Vector2( 1,  1);
-        ScreenPoint[3].TexCoord := Vector2(0, 1);
-        ScreenPoint[3].Position := Vector2(-1,  1);
-        RenderContext.BindBuffer[btArray] := ScreenPointVbo;
-        glBufferData(GL_ARRAY_BUFFER, SizeOf(ScreenPoint), @(ScreenPoint[0]), GL_STATIC_DRAW);
-      end;
-
-      if ScreenPointVao = nil then
-        ScreenPointVao := TVertexArrayObject.Create(nil);
-
-      RenderContext.CurrentProgram := Shader;
-      RenderContext.CurrentVao := ScreenPointVao;
-
-      RenderContext.BindBuffer[btArray] := ScreenPointVbo;
-
-      glActiveTexture(GL_TEXTURE0); // GLFeatures.UseMultiTexturing is already checked
-      glBindTexture(ScreenEffectTextureTarget, ScreenEffectTextureSrc);
-      BoundTextureUnits := 1;
-
-      if CurrentScreenEffectsNeedDepth then
-      begin
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(ScreenEffectTextureTarget, ScreenEffectTextureDepth);
-        Inc(BoundTextureUnits);
-      end;
-
-      Shader.Uniform('screen').SetValue(0);
-      if CurrentScreenEffectsNeedDepth then
-        Shader.Uniform('screen_depth').SetValue(1);
-      Shader.Uniform('screen_width').SetValue(TGLint(ScreenEffectTextureWidth));
-      Shader.Uniform('screen_height').SetValue(TGLint(ScreenEffectTextureHeight));
-
-      { Note that we ignore SetupUniforms result --- if some texture
-        could not be bound, it will be undefined for shader.
-        I don't see anything much better to do now. }
-      Shader.SetupUniforms(BoundTextureUnits);
-
-      { Note that there's no need to worry about Rect.Left or Rect.Bottom,
-        here or inside RenderWithScreenEffectsCore, because we're already within
-        RenderContext.Viewport that takes care of this. }
-
-      AttribVertex := Shader.Attribute('vertex');
-      AttribVertex.EnableArrayVector2(ScreenPointVao, SizeOf(TScreenPoint),
-        OffsetUInt(ScreenPoint[0].Position, ScreenPoint[0]));
-      AttribTexCoord := Shader.Attribute('tex_coord');
-      AttribTexCoord.EnableArrayVector2(ScreenPointVao, SizeOf(TScreenPoint),
-        OffsetUInt(ScreenPoint[0].TexCoord, ScreenPoint[0]));
-
-      glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
-
-      AttribVertex.DisableArray;
-      AttribTexCoord.DisableArray;
-      RenderContext.BindBuffer[btArray] := GLObjectNone;
-    end;
-
   var
     I: Integer;
   begin
@@ -733,6 +904,8 @@ begin
   FreeAndNil(ScreenEffectRTT);
   FreeBuffer(ScreenPointVbo);
   FreeAndNil(ScreenPointVao);
+  FreeAndNil(HighDynamicRangeShader);
+  FreeAndNil(CopyShader);
   inherited;
 end;
 

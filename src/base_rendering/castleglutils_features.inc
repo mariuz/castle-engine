@@ -213,6 +213,7 @@ type
     FBlendConstant: Boolean;
     FTextureFloat: Boolean;
     FTextureFloatLinear: Boolean;
+    FColorBufferFloat: Boolean;
     FTextureDepth, FTextureDepthCompare: Boolean;
     FShaders: Boolean;
     FEnableFixedFunction: Boolean;
@@ -443,6 +444,20 @@ type
         @item https://developer.mozilla.org/en-US/docs/Web/API/OES_texture_float_linear
       ) }
     property TextureFloatLinear: Boolean read FTextureFloatLinear;
+
+    { Support for rendering into a texture with half-float (16-bit) color
+      components (GL_RGBA16F), e.g. to keep colors above 1
+      and add light contributions in linear color space.
+      Can only be @true when @link(TextureFloat) is @true.
+
+      See:
+
+      @unorderedList(
+        @item https://registry.khronos.org/OpenGL/extensions/EXT/EXT_color_buffer_half_float.txt
+        @item https://registry.khronos.org/OpenGL/extensions/EXT/EXT_color_buffer_float.txt
+        @item https://developer.mozilla.org/en-US/docs/Web/API/EXT_color_buffer_float
+      ) }
+    property ColorBufferFloat: Boolean read FColorBufferFloat;
 
     { Support for depth texture formats for glTexImage2d. }
     property TextureDepth: Boolean read FTextureDepth;
@@ -1311,6 +1326,25 @@ begin
     {$if defined(CASTLE_WEBGL)} HasExtension('GL_OES_texture_float_linear')
     {$elseif defined(OpenGLES)} HasExtension('GL_OES_texture_float_linear')
     {$else} true
+    {$endif}
+  );
+
+  FColorBufferFloat := FTextureFloat and (
+    {$if defined(CASTLE_WEBGL)}
+      { WebGL 2 can render to float textures (including GL_RGBA16F)
+        with the EXT_color_buffer_float extension,
+        HasExtension also enables it.
+        See https://developer.mozilla.org/en-US/docs/Web/API/EXT_color_buffer_float .
+        (EXT_color_buffer_half_float is only for WebGL 1, where we don't
+        have GL_RGBA16F.) }
+      VersionWebGL_2 and HasExtension('GL_EXT_color_buffer_float')
+    {$elseif defined(OpenGLES)}
+      VersionES_3_0 and (
+        HasExtension('GL_EXT_color_buffer_half_float') or
+        HasExtension('GL_EXT_color_buffer_float'))
+    {$else}
+      { OpenGL 3.0 requires GL_RGBA16F to be color-renderable. }
+      Version_3_0 or HasExtension('GL_ARB_color_buffer_float')
     {$endif}
   );
 

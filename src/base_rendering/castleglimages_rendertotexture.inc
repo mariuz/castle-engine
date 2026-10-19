@@ -593,7 +593,20 @@ begin
       DepthAttachmentWithStencil := true;
       DepthAttachmentPacked := GL_DEPTH_STENCIL_ATTACHMENT;
     end else
-    // TODO: non-WebGL OpenGLES may also need packed depth+stencil (GL_DEPTH_STENCIL_OES).
+    {$else}
+    { OpenGLES: GL_DEPTH24_STENCIL8 is core in OpenGLES 3.0,
+      and the same as GL_DEPTH24_STENCIL8_OES of OES_packed_depth_stencil.
+      Without this, the FBO would have no stencil buffer at all
+      (the separate stencil buffer below is only used without PackedDepthStencil),
+      breaking shadow volumes rendered with screen effects. }
+    if Stencil and GLFeatures.PackedDepthStencil then
+    begin
+      DepthBufferFormatPacked := GL_DEPTH24_STENCIL8;
+      DepthAttachmentWithStencil := true;
+      { ignored when DepthAttachmentWithStencil,
+        we attach to GL_DEPTH_ATTACHMENT and GL_STENCIL_ATTACHMENT }
+      DepthAttachmentPacked := GL_DEPTH_ATTACHMENT;
+    end else
     {$endif}
     begin
       DepthBufferFormatPacked :=
