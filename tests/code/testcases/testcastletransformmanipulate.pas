@@ -43,6 +43,7 @@ type
     procedure TestSnapSelectedToRaySurfaceAndVertex;
     procedure TestMeasureSelectedAndRayDistance;
     procedure TestProjectAlongDirectionDistributeGapsAndSnapRotScale;
+    procedure TestSwapPositionsAndMatchSelectedSize;
   end;
 
 implementation
@@ -735,6 +736,66 @@ begin
     AssertTrue(Manipulate.SnapSelectedRotationAndScaleToGrid);
     AssertSameValue(DegToRad(15.0), B1.Rotation.W, 1e-4);
     AssertVectorEquals(Vector3(1.25, 2.00, 0.50), B1.Scale, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestSwapPositionsAndMatchSelectedSize;
+var
+  Viewport: TCastleViewport;
+  B1, B2, B3: TCastleBox;
+  Manipulate: TCastleTransformManipulate;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(4, 10, 6);
+    B1.Translation := Vector3(1, 2, 3);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(2, 5, 3);
+    B2.Translation := Vector3(10, 20, 30);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(8, 20, 12);
+    B3.Translation := Vector3(-5, -10, -15);
+    Viewport.Items.Add(B3);
+
+    // 1. Swap 2 selected objects: B1 <-> B2
+    Manipulate.SetSelected([B1, B2]);
+    AssertTrue(Manipulate.SwapSelectedPositions);
+    AssertVectorEquals(Vector3(10, 20, 30), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(1, 2, 3), B2.Translation, 1e-4);
+
+    // 2. Cycle 3 selected objects: B1 -> B2's pos, B2 -> B3's pos, B3 -> B1's old pos
+    Manipulate.SetSelected([B1, B2, B3]);
+    AssertTrue(Manipulate.SwapSelectedPositions);
+    AssertVectorEquals(Vector3(1, 2, 3), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-5, -10, -15), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10, 20, 30), B3.Translation, 1e-4);
+
+    // 3. MatchSelectedSize along Y only (Axis = 1):
+    // Primary B1 has world Y size = 10.
+    // B2 has Size.Y = 5 (Scale.Y = 1) -> Scale.Y becomes 2.0 (X and Z remain 1.0).
+    // B3 has Size.Y = 20 (Scale.Y = 1) -> Scale.Y becomes 0.5 (X and Z remain 1.0).
+    AssertTrue(Manipulate.MatchSelectedSize(1));
+    AssertVectorEquals(Vector3(1.0, 2.0, 1.0), B2.Scale, 1e-4);
+    AssertVectorEquals(Vector3(1.0, 0.5, 1.0), B3.Scale, 1e-4);
+
+    // 4. MatchSelectedSize on all axes (Axis = -1):
+    // Primary B1 has world size (4, 10, 6).
+    // B2 base Size is (2, 5, 3) -> Scale becomes (2, 2, 2).
+    // B3 base Size is (8, 20, 12) -> Scale becomes (0.5, 0.5, 0.5).
+    AssertTrue(Manipulate.MatchSelectedSize(-1));
+    AssertVectorEquals(Vector3(2.0, 2.0, 2.0), B2.Scale, 1e-4);
+    AssertVectorEquals(Vector3(0.5, 0.5, 0.5), B3.Scale, 1e-4);
+    AssertVectorEquals(B1.WorldBoundingBox.Size, B2.WorldBoundingBox.Size, 1e-4);
+    AssertVectorEquals(B1.WorldBoundingBox.Size, B3.WorldBoundingBox.Size, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

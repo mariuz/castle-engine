@@ -442,6 +442,22 @@ type
       @link(ScaleSnap) (when > 0).
       Returns @true if at least one selected transform was modified. }
     function SnapSelectedRotationAndScaleToGrid: Boolean;
+
+    { Swap the working (world or root) positions of two top-level selected
+      transforms (or reverse the sequence of positions when 3 or more transforms
+      are selected). Requires at least 2 top-level selected transforms.
+      Returns @true if at least one selected transform was modified. }
+    function SwapSelectedPositions: Boolean;
+
+    { Scale all secondary top-level selected transforms (@code(Selected[1..N-1]))
+      so that their bounding-box dimensions match the primary selected transform
+      (@code(Selected[0])).
+      - When @code(Axis) is @code(0), @code(1), or @code(2), matches only the X, Y,
+        or Z dimension respectively.
+      - When @code(Axis) is @code(-1) (default), matches all 3 dimensions (X, Y, Z).
+      Requires at least 2 top-level selected transforms with non-empty bounding boxes.
+      Returns @true if at least one selected transform was modified. }
+    function MatchSelectedSize(const Axis: Integer = -1): Boolean;
   end;
 
 var
@@ -2592,6 +2608,120 @@ begin
           Result := true;
         end;
       end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.SwapSelectedPositions: Boolean;
+var
+  Items: array of TCastleTransform;
+  OrigPos: array of TVector3;
+  I, Count: Integer;
+  T: TCastleTransform;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  SetLength(OrigPos, Count);
+  for I := 0 to Count - 1 do
+    OrigPos[I] := GetTransformWorkingPos(Items[I]);
+
+  for I := 0 to Count - 1 do
+    if not TVector3.Equals(OrigPos[I], OrigPos[(I + 1) mod Count]) then
+    begin
+      SetTransformWorkingPos(Items[I], OrigPos[(I + 1) mod Count]);
+      Result := true;
+    end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.MatchSelectedSize(const Axis: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, A, Count: Integer;
+  T: TCastleTransform;
+  RefBox, CurBox: TBox3D;
+  RefSizes, CurSizes, NewScale: TVector3;
+begin
+  Result := false;
+  if (Axis > 2) or (SelectedCount < 2) then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  if Items[0].HasWorldTransform then
+    RefBox := Items[0].WorldBoundingBox
+  else
+    RefBox := Items[0].BoundingBox;
+  if RefBox.IsEmpty then Exit;
+  RefSizes := RefBox.Size;
+
+  for I := 1 to Count - 1 do
+  begin
+    if Items[I].HasWorldTransform then
+      CurBox := Items[I].WorldBoundingBox
+    else
+      CurBox := Items[I].BoundingBox;
+    if CurBox.IsEmpty then Continue;
+
+    CurSizes := CurBox.Size;
+    NewScale := Items[I].Scale;
+
+    if Axis >= 0 then
+    begin
+      if (RefSizes[Axis] > 1e-5) and (CurSizes[Axis] > 1e-5) then
+        NewScale.Data[Axis] := NewScale.Data[Axis] * (RefSizes[Axis] / CurSizes[Axis]);
+    end else
+    begin
+      for A := 0 to 2 do
+        if (RefSizes[A] > 1e-5) and (CurSizes[A] > 1e-5) then
+          NewScale.Data[A] := NewScale.Data[A] * (RefSizes[A] / CurSizes[A]);
+    end;
+
+    if not TVector3.Equals(NewScale, Items[I].Scale) then
+    begin
+      Items[I].Scale := NewScale;
+      Result := true;
     end;
   end;
 

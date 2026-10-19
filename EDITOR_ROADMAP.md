@@ -227,3 +227,30 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Implemented `TCastleTransformManipulate.SnapSelectedRotationAndScaleToGrid: Boolean` to round existing `Rotation.W` angles to the nearest `RotateSnap` multiple and `Scale.X/Y/Z` components to the nearest `ScaleSnap` multiple, and integrated it into `ViewportSnapToGrid` (`Ctrl+End`).
   - Added automated unit test `TestProjectAlongDirectionDistributeGapsAndSnapRotScale` in `tests/code/testcases/testcastletransformmanipulate.pas`.
 
+### Phase 28: Match Size / Scale to Primary Selection (`MatchSelectedSize`) & Swap / Cycle Positions (`SwapSelectedPositions` / `Ctrl+Shift+S`)
+- [x] **28.1. World-Space Position Swap & Cycle (`TCastleTransformManipulate.SwapSelectedPositions` / `Ctrl+Shift+S`)**
+  - Implemented `TCastleTransformManipulate.SwapSelectedPositions: Boolean`: swaps the world-space positions of 2 selected transforms ($T_0 \leftrightarrow T_1$), or cyclically rotates the world-space positions of $N \ge 3$ selected transforms ($T_0 \to T_1 \to \dots \to T_{N-1} \to T_0$), converting each target world position back into each transform's parent local space via `Parent.WorldToLocal`.
+  - Bound to **`Ctrl+Shift+S`** in both the 3D Viewport and Hierarchy Tree, plus **`Swap Pos`** (`ButtonSwapPositions`) in `PanelLayoutTransform`.
+- [x] **28.2. Match World Bounding-Box Size to Primary Selection (`TCastleTransformManipulate.MatchSelectedSize` / `Match Size`)**
+  - Implemented `TCastleTransformManipulate.MatchSelectedSize(const Axis: Integer = -1): Boolean`: adjusts `Scale` on all secondary selected transforms so their world bounding-box dimensions (`WorldBoundingBox.Size`) match `Selected[0]` along all axes (`Axis = -1`, normal click on **`Match Size`**) or along a single axis (`Axis = 1` for Y height when `Shift`-clicking **`Match Size`**).
+  - Added automated unit test `TestSwapPositionsAndMatchSelectedSize` in `tests/code/testcases/testcastletransformmanipulate.pas`.
+
+### Phase 29: Camera Pilot / "Lock Actor to Viewport Camera" Mode (`TogglePilotTransform` / `Ctrl+Shift+P`)
+- [x] **29.1. Interactive Viewport Camera Pilot Mode (`TogglePilotTransform` / `StopPilotTransform`)**
+  - Implemented Unreal Engine 5.5-style **Pilot Actor** mode (`FPilotTransform`, `TogglePilotTransform`, `StopPilotTransform`) in `TDesignFrame`.
+  - Pressing **`Ctrl+Shift+P`** (or clicking **`Pilot Transform`** in `PanelLayoutTransform`) snaps the viewport camera to the active `TCastleTransform`'s world view (`GetWorldView` / `SetWorldView`) and continuously synchronizes the transform's world position and orientation with `CurrentViewport.InternalCamera` every frame in `CastleControlUpdate` as you fly/orbit in the viewport.
+  - Displays a live `[PILOT ACTIVE: "<Name>" - Ctrl+Shift+P to exit]` indicator in the Viewport Statistics HUD and records a single clean `'Pilot Transform: <Name>'` Undo entry upon exiting Pilot Mode or changing selection.
+
+### Phase 30: Select By Spatial Proximity (`SelectWithinRadius`) & Select All With Same Asset URL (`SelectAllWithSameUrl`)
+- [x] **30.1. Select All Components Sharing the Same Asset URL (`SelectAllWithSameUrl`)**
+  - Implemented `TDesignFrame.GetComponentAssetUrl(C)` (using `TypInfo` RTTI inspection of published `Url` string properties across `TCastleScene`, `TCastleDesign`, `TCastleTransformDesign`, `TCastleImageControl`, `TCastleImageTransform`, `TCastleTiledMap`, `TCastleSound`, etc.) and `SelectAllWithSameUrl` (`MenuTreeViewItemSelectSameUrl` in `MenuTreeView`).
+- [x] **30.2. Select Transforms Within Spatial Radius (`SelectWithinRadius` / `ShowSelectWithinRadiusDialog`)**
+  - Implemented `TDesignFrame.SelectWithinRadius(Radius)` and `ShowSelectWithinRadiusDialog` (`MenuTreeViewItemSelectWithinRadius` in `MenuTreeView`), selecting all visible, unlocked `TCastleTransform` instances in the same world whose world bounding-box center (or origin) lies within `Radius` world units of the active selection center.
+
+### Phase 31: Ground-Aware Scatter / Drop-to-Floor Duplication (`ScatterDuplicateSelected` / `Ctrl+Alt+S`)
+- [x] **31.1. Uniform-Disk Scatter Duplication with Automatic Floor Snapping (`ScatterDuplicateSelected`)**
+  - Implemented `TDesignFrame.ScatterDuplicateSelected(Count, Radius, MaxYawDeg, ScaleMin, ScaleMax, SnapToGround, AlignToNormal)` and `ShowScatterDuplicateDialog`.
+  - Scatters `Count` clones per selected `TCastleTransform` across a uniform-area disk of radius `Radius` in the XZ plane ($r = \sqrt{u} \cdot R$, $\theta = 2\pi v$), applies random Yaw rotation in $[-\text{MaxYawDeg}, +\text{MaxYawDeg}]$ and uniform scale in $[\text{ScaleMin}, \text{ScaleMax}]$, automatically drops all scattered clones onto the underlying floor geometry via `TransformManipulate.SnapToFloor(AlignToNormal)`, and records a single Undo step.
+  - Bound to **`Ctrl+Alt+S`** in both the Viewport and Hierarchy Tree, **`Scatter Dup...`** (`ButtonScatterDuplicate`) in `PanelLayoutTransform`, and **`Scatter Duplicate on Ground... (Ctrl+Alt+S)`** in `MenuTreeView`.
+
+

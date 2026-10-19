@@ -765,7 +765,53 @@ Managing complex component hierarchies is accelerated by three keyboard-driven s
 
 ---
 
-## 29. Complete Keyboard Shortcuts & Toolbar Reference
+## 29. Phase 28: Match Size / Scale to Primary Selection (`MatchSelectedSize`) & Swap / Cycle Positions (`SwapSelectedPositions` / `Ctrl+Shift+S`)
+
+- **Swap / Cycle World Positions (`TCastleTransformManipulate.SwapSelectedPositions` / `Ctrl+Shift+S`):**
+  - When 2 `TCastleTransform` objects are selected, swaps their world-space origins ($T_0 \leftrightarrow T_1$).
+  - When $N \ge 3$ `TCastleTransform` objects are selected, cyclically rotates their world-space positions ($T_0 \to T_1 \to \dots \to T_{N-1} \to T_0$), converting each target world position back into each transform's parent local space (`Parent.WorldToLocal`).
+  - Triggered via **`Ctrl+Shift+S`** in the Viewport or Hierarchy Tree, or **`Swap Pos`** (`ButtonSwapPositions`) in `PanelLayoutTransform`.
+- **Match World Bounding-Box Size to Primary Selection (`TCastleTransformManipulate.MatchSelectedSize` / `Match Size`):**
+  - Adjusts `Scale` on all secondary selected transforms (`Selected[1..N-1]`) so their world-space bounding-box dimensions (`WorldBoundingBox.Size`) match the primary selected transform (`Selected[0]`):
+    $$S'_i[A] = S_i[A] \cdot \frac{\text{PrimarySize}[A]}{\text{CurrentSize}_i[A]}$$
+  - Clicking **`Match Size`** (`ButtonMatchSize`) in `PanelLayoutTransform` matches all 3 axes (`Axis = -1`). Holding **`Shift`** while clicking **`Match Size`** matches only the Y height (`Axis = 1`).
+
+---
+
+## 30. Phase 29: Camera Pilot / "Lock Actor to Viewport Camera" Mode (`TogglePilotTransform` / `Ctrl+Shift+P`)
+
+Inspired by Unreal Engine 5.5's **Pilot Actor (`Ctrl+Shift+P`)**, **Camera Pilot Mode** lets you position lights, cameras, spawn points, or props by flying/orbiting through the viewport from the object's own perspective:
+- **Entering Pilot Mode (`TogglePilotTransform` / `Ctrl+Shift+P`):**
+  - Press **`Ctrl+Shift+P`** in the Viewport or Hierarchy Tree, or click **`Pilot Transform`** (`ButtonPilotTransform`) in `PanelLayoutTransform`.
+  - Immediately aligns the viewport camera (`CurrentViewport.InternalCamera`) to the selected `TCastleTransform`'s world view (`GetWorldView` / `SetWorldView`), updates the button caption to `Stop Pilot (<Name>)`, and enables the Viewport Statistics HUD showing `[PILOT ACTIVE: "<Name>" - Ctrl+Shift+P to exit]`.
+- **Live Per-Frame Synchronization (`CastleControlUpdate`):**
+  - While `FPilotTransform <> nil`, every frame `CastleControlUpdate` compares `CurrentViewport.InternalCamera.GetWorldView` with `FPilotTransform.GetWorldView` and updates `FPilotTransform.SetWorldView(CamPos, CamDir, CamUp)` in real time as you navigate (Fly WASD, Examine orbit, mouse wheel, axis views, or camera bookmarks).
+- **Exiting Pilot Mode (`StopPilotTransform`):**
+  - Press **`Ctrl+Shift+P`** again, click **`Stop Pilot (<Name>)`**, or select a different component. If the transform moved while piloted (`FPilotModified = true`), a single clean Undo step (`'Pilot Transform: <Name>'`) is recorded.
+
+---
+
+## 31. Phase 30: Select By Spatial Proximity (`SelectWithinRadius`) & Select All With Same Asset URL (`SelectAllWithSameUrl`)
+
+- **Select All With Same Asset URL (`SelectAllWithSameUrl`):**
+  - Uses FreePascal `TypInfo` RTTI (`GetPropInfo(C, 'Url')` / `GetStrProp`) to inspect the published `Url` property of the currently selected component (working across `TCastleScene`, `TCastleDesign`, `TCastleTransformDesign`, `TCastleImageControl`, `TCastleImageTransform`, `TCastleTiledMap`, `TCastleSound`, etc.).
+  - Selects every selectable, unlocked component in the design that references the exact same asset `Url`. Available in the Hierarchy context menu (`Select All With Same Asset URL`).
+- **Select Within Radius (`SelectWithinRadius` / `ShowSelectWithinRadiusDialog`):**
+  - Prompts for a search radius in world units (default `10.0`) and selects all visible, unlocked `TCastleTransform` instances in the same world whose world bounding-box center (or origin) lies within `Radius` units of `SelectionWorkingCenter`. Available in the Hierarchy context menu (`Select Within Radius...`).
+
+---
+
+## 32. Phase 31: Ground-Aware Scatter / Drop-to-Floor Duplication (`ScatterDuplicateSelected` / `Ctrl+Alt+S`)
+
+For foliage, rocks, debris, trees, and natural set-dressing, **Ground-Aware Scatter Duplication** combines uniform-disk sampling, randomized yaw/scale, and raycast floor snapping in a single modal tool:
+- **How It Works (`TDesignFrame.ScatterDuplicateSelected` & `ShowScatterDuplicateDialog`):**
+  - Press **`Ctrl+Alt+S`** in the Viewport or Hierarchy Tree, click **`Scatter Dup...`** (`ButtonScatterDuplicate`) in `PanelLayoutTransform`, or choose **`Scatter Duplicate on Ground... (Ctrl+Alt+S)`** in `MenuTreeView`.
+  - Configures **Copies per Selected Object** ($1\dots 500$, default `8`), **Scatter Radius (XZ disk)** (default `5.0`), **Max Random Yaw (deg)** (default `180.0`), **Min / Max Uniform Scale Multiplier** (default `0.85`..`1.15`), **Snap scattered copies onto floor below** (`true`), and **Align +Y Up to floor surface normal** (`false`).
+  - Samples each copy's XZ offset uniformly across the disk using polar square-root sampling ($r = \sqrt{u} \cdot R$, $\theta = 2\pi v$), applies random Yaw and uniform scale, selects all newly scattered clones, snaps them onto the terrain/floor below via `TransformManipulate.SnapToFloor(AlignToNormal)`, and records a single Undo entry (`'Scatter duplicate (N copies, radius R)'`).
+
+---
+
+## 33. Complete Keyboard Shortcuts & Toolbar Reference
 
 | Shortcut / Control | Context | Action |
 | :--- | :--- | :--- |
@@ -780,9 +826,15 @@ Managing complex component hierarchies is accelerated by three keyboard-driven s
 | **`Ctrl+Shift+D`** / **`Array Dup...`** | Viewport / Hierarchy / Layout Tab | Open the **Linear / Step Array Duplicate** dialog (`Count`, `StepOffset`, `StepYawDeg`). |
 | **`Ctrl+Alt+D`** / **`Radial Dup...`** | Viewport / Hierarchy / Layout Tab | Open the **Radial / Circular Array Duplicate** dialog (`Count`, `Radius`, `TotalAngleDeg`, `OrientToCenter`). |
 | **`Ctrl+Alt+G`** / **`Grid Dup...`** | Viewport / Hierarchy / Layout Tab | Open the **2D / 3D Grid Array Duplicate** dialog (`CountX`, `CountY`, `CountZ`, `Spacing`). |
+| **`Ctrl+Alt+S`** / **`Scatter Dup...`** | Viewport / Hierarchy / Layout Tab | Open the **Ground-Aware Scatter Duplicate** dialog (`Count`, `Radius`, `MaxYaw`, `ScaleMin..Max`, `SnapToFloor`, `AlignToNormal`). |
+| **`Ctrl+Shift+S`** / **`Swap Pos`** | Viewport / Hierarchy / Layout Tab | **Swap / Cycle World Positions** of 2+ selected `TCastleTransform` objects (`SwapSelectedPositions`). |
+| **`Match Size` Button** | Layout Tab (`PanelLayoutTransform`) | Scale secondary selected transforms so their world bounding-box size matches the primary selection (`Shift`-click for Y height only). |
+| **`Ctrl+Shift+P`** / **`Pilot Transform`** | Viewport / Hierarchy / Layout Tab | Toggle **Camera Pilot Mode** (`TogglePilotTransform`), locking the active `TCastleTransform` to the viewport camera while flying/orbiting. |
 | **`Ctrl+Shift+R`** | Viewport / Hierarchy Tree | Open the searchable **Replace Selected Component(s) With...** class palette (`ShowReplaceComponentPalette`). |
 | **`Ctrl+I`** | Viewport / Hierarchy Tree | **Invert Selection** among sibling components (or across the design if at root level). |
 | **`Ctrl+]`** / **`Ctrl+Shift+]`** | Hierarchy Tree / Context Menu | **Select Direct Children** (`Ctrl+]`) or **Select All Descendants** (`Ctrl+Shift+]`) of selected node(s). |
+| **`Select All With Same Asset URL`** | Hierarchy Context Menu | Select all components in the design referencing the same `Url` asset as the selected component. |
+| **`Select Within Radius...`** | Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects within a given world-space radius of the active selection. |
 | **`L`** | Viewport or Hierarchy Tree | Toggle **Selection Lock** (`[Locked]`) on selected components to prevent accidental viewport picking/dragging. |
 | **`Alt+L`** | Viewport or Hierarchy Tree | **Unlock All** locked components in the design (`UnlockAll`). |
 | **`Ctrl+~`** / **`Local` / `World` Button** | 3D Viewport / Top Toolbar | Toggle 3D gizmo coordinate space between `csLocal` and `csWorld`. |
@@ -825,9 +877,9 @@ Managing complex component hierarchies is accelerated by three keyboard-driven s
 
 ---
 
-## 30. Automated Unit Tests & Verification
+## 34. Automated Unit Tests & Verification
 
-All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 14 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
+All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 15 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
 
 1. **`TestSelectedCountAndFree`**: Verifies single/multi-selection filtering, freeing a selected transform while selected, and translating the remaining selection.
 2. **`TestTranslateSnapAndCoordSpace`**: Verifies grid snapping (`TranslateSnap := 2.0`) and `csLocal` vs. `csWorld` translation on a $90^\circ$-rotated transform.
@@ -843,6 +895,7 @@ All core 3D manipulation algorithms in `CastleTransformManipulate` are covered b
 12. **`TestSnapSelectedToRaySurfaceAndVertex`**: Casts rays onto a `TCastleBox` and verifies that `SnapSelectedToRay(..., false, false)` snaps a multi-selection (`Prop1`, `Prop2`) onto the exact ray-surface hit point $(10.5, 1.0, 0.5)$ while preserving relative offsets, and `SnapSelectedToRay(..., true, false)` snaps onto the nearest corner vertex $(12.0, 1.0, 2.0)$.
 13. **`TestMeasureSelectedAndRayDistance`**: Verifies `MeasureSelectedDistance` returns $-1$ for a single selected object and returns exact Euclidean distance $5.0$ and world delta $(3, 4, 0)$ between two selected transforms, and verifies `MeasureRayDistanceFromSelected` casts a ray onto a target `TCastleBox` and returns the exact distance $9.0$, hit point $(1, 11, 3)$, and world delta $(0, 9, 0)$.
 14. **`TestProjectAlongDirectionDistributeGapsAndSnapRotScale`**: Verifies `ProjectSelectedAlongDirection` projects a box along $+X$ flush against a vertical wall at $X = 19$ (landing at $X = 17.0$), `DistributeSelectedGaps(0)` spaces 3 boxes of different widths ($2$, $6$, $4$) with an identical $5.5$-unit gap between adjacent bounding boxes, and `SnapSelectedRotationAndScaleToGrid` quantizes existing rotation angles and scale vectors to `RotateSnap` and `ScaleSnap`.
+15. **`TestSwapPositionsAndMatchSelectedSize`**: Verifies `SwapSelectedPositions` swaps 2 selected transforms and cyclically rotates 3 selected transforms in world space, and verifies `MatchSelectedSize(1)` (Y-height match) and `MatchSelectedSize(-1)` (all-axis bounding-box size match) scale secondary selected `TCastleBox` objects so their world bounding-box dimensions match the primary selected object.
 
 To run this test suite from the command line:
 ```bash
@@ -851,6 +904,7 @@ fpc -Mobjfpc -Sh -Ci -Cr -Co -gl -gh -dTEXT_RUNNER @castle-fpc.cfg \
   -FE'tests' tests/castle_tester_standalone.dpr
 ./tests/castle_tester_standalone --console --filter=TTestCastleTransformManipulate*
 ```
+
 
 
 
