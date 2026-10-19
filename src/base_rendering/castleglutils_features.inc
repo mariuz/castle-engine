@@ -455,6 +455,7 @@ type
       @unorderedList(
         @item https://registry.khronos.org/OpenGL/extensions/EXT/EXT_color_buffer_half_float.txt
         @item https://registry.khronos.org/OpenGL/extensions/EXT/EXT_color_buffer_float.txt
+        @item https://developer.mozilla.org/en-US/docs/Web/API/EXT_color_buffer_float
       ) }
     property ColorBufferFloat: Boolean read FColorBufferFloat;
 
@@ -1330,9 +1331,13 @@ begin
 
   FColorBufferFloat := FTextureFloat and (
     {$if defined(CASTLE_WEBGL)}
-      { TODO: WebGL 2 needs the EXT_color_buffer_float extension enabled,
-        not tested yet. }
-      false
+      { WebGL 2 can render to float textures (including GL_RGBA16F)
+        with the EXT_color_buffer_float extension,
+        HasExtension also enables it.
+        See https://developer.mozilla.org/en-US/docs/Web/API/EXT_color_buffer_float .
+        (EXT_color_buffer_half_float is only for WebGL 1, where we don't
+        have GL_RGBA16F.) }
+      VersionWebGL_2 and HasExtension('GL_EXT_color_buffer_float')
     {$elseif defined(OpenGLES)}
       VersionES_3_0 and (
         HasExtension('GL_EXT_color_buffer_half_float') or

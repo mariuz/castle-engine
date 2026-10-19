@@ -1246,7 +1246,8 @@ type
         @item(Needs rendering to float color buffers
           (@link(TGLFeatures.ColorBufferFloat)): OpenGL 3.0,
           or OpenGLES 3.0 with the EXT_color_buffer_half_float
-          or EXT_color_buffer_float extension.
+          or EXT_color_buffer_float extension,
+          or WebGL 2 with the EXT_color_buffer_float extension.
           It is ignored otherwise.)
         @item(Uses the same rendering to a texture as screen effects
           (see @link(TCastleScreenEffects)), and has a similar cost.)
