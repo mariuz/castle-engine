@@ -329,14 +329,26 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 14 Status**: Completed. 3D Clustered Forward+ compute light culling (`TCastleVulkanClusteredLightCuller` supporting 256+ dynamic lights across $16 \times 8 \times 24$ exponential depth clusters), 4-cascade Directional CSM with texel-snapping stabilization + shelf-packed positional shadow atlas (`TCastleVulkanShadowAtlas`), and Forward+ cluster & $3 \times 3$ PCF shadow atlas shader integration (`GenerateClusteredForwardAndShadowFunctions`, `GenerateClusteredLightCullingComputeShader`) fully integrated and tested (72 unit tests passing).
 
 
-### Phase 15: Declarative Render Graph (`TRHIRenderGraph`) & HDR Post-Processing Stack (PLANNED)
+### Phase 15: Declarative Render Graph (`TRHIRenderGraph`) & HDR Post-Processing Stack (COMPLETED)
 
-* [ ] **15.1. Declarative Render Dependency Graph (`TRHIRenderGraph` in `CastleInternalRHI`)**:
-  * Implement pass-level read/write resource registration, topological pass sorting, automatic `TransitionTexture` / `TransitionBuffer` barrier hoisting, and transient render-target memory aliasing.
-* [ ] **15.2. HDR Scene Target (`pfRGBA16_Float`), Compute Mip-Chain Bloom & Auto-Exposure**:
-  * Implement 13-tap Karis downsample + tent-filter upsample mip-pyramid bloom and luminance histogram auto-exposure.
-* [ ] **15.3. ACES Filmic / AgX Tonemapping & Post-Processing Composite Pass**:
-  * Integrate ACES / AgX tonemapping, exposure, and sRGB conversion into `TCastleViewport` and `TCastleScreenEffects`.
+* [x] **15.1. Declarative Render Dependency Graph (`TRHIRenderGraph` & `TRHIRenderGraphPass` in `CastleInternalRHI`)**:
+  * Implement pass-level read/write resource registration (`ReadTexture`, `WriteColorAttachment`, `WriteDepthAttachment`, `WriteStorageTexture`, `ReadBuffer`, `WriteBuffer`), Kahn's DAG topological pass sorting (`Compile`), backward liveness dead-pass culling (`CulledPassCount`, `IsCulled`), transient render-target lifetime tracking & physical texture aliasing (`DeclareTransientTexture`, `TransientTextureCount`, `PhysicalTransientTextureCount`, `AliasedTextureSavingsCount`), and automatic `TransitionTexture` barrier hoisting & `BeginRendering`/`EndRendering` execution (`Execute`, `EmittedBarrierCount`).
+* [x] **15.2. HDR Scene Target (`pfRGBA16_Float`), Compute Mip-Chain Bloom & Auto-Exposure (`TCastleVulkanHDRPostProcessor` in `CastleInternalRHI_Vulkan`)**:
+  * Implement `pfRGBA16_Float` HDR scene color target and 6-mip bloom pyramid allocation (`EnsureHDRTargets`), 13-tap Jiménez Karis downsample + 9-tap $3 \times 3$ tent-filter upsample compute pipeline (`GenerateBloomDownsampleComputeShader`, `GenerateBloomUpsampleComputeShader`, `DispatchBloomPyramid`, `EvaluateKarisWeight`, `EvaluateKarisAverage4`, `EvaluateSoftThreshold`), and 256-bin shared-memory log2 luminance histogram + temporal eye adaptation auto-exposure (`GenerateLuminanceHistogramComputeShader`, `UpdateAutoExposure`, `TCastleAutoExposureParams`).
+* [x] **15.3. ACES Filmic / AgX Tonemapping, Color Grading & Post-Processing Composite Pass (`CastleInternalShaderRHI` & `CastleInternalRHI_Vulkan`)**:
+  * Implement Reinhard, ACES Filmic (Narkowicz RRT+ODT), and AgX (Troy Sobotka inset matrix + 6th-order sigmoid log2 contrast + outset desaturation) tonemapping operators, linear contrast/saturation color grading, and exact IEC 61966-2-1 sRGB OETF conversion (`GenerateTonemappingAndColorGradingFunctions`, `GenerateHDRCompositeFragmentShader`, `ExecuteCompositePass`, `EvaluateTonemapReinhard`, `EvaluateTonemapACESFilmic`, `EvaluateTonemapAgX`, `EvaluateLinearToSRGB`, `EvaluateCompositeColor`, and `BuildDefaultFrameRenderGraph`).
+
+**Milestone 15 Status**: Completed. Declarative Render Graph (`TRHIRenderGraph` & `TRHIRenderGraphPass` with Kahn's DAG topological sorting, backward liveness dead-pass culling, transient render-target memory aliasing, and automatic `TransitionTexture` barrier hoisting), `pfRGBA16_Float` HDR scene target with 13-tap Jiménez Karis downsample + 9-tap tent-filter upsample compute bloom & 256-bin log-luminance histogram temporal auto-exposure (`TCastleVulkanHDRPostProcessor`), and Reinhard / ACES Filmic / AgX tonemapping + color grading + sRGB composite pipeline fully integrated and tested (75 unit tests passing).
+
+
+### Phase 16: Screen-Space Ambient Occlusion (Compute GTAO), Screen-Space Reflections (Hi-Z SSR) & Volumetric Fog (PLANNED)
+
+* [ ] **16.1. Compute Horizon-Based / Ground-Truth Ambient Occlusion (`TCastleVulkanGTAO` in `CastleInternalRHI_Vulkan`)**:
+  * Reconstruct view-space positions and normals from the depth buffer, evaluate multi-direction horizon integral occlusion in a half/full-resolution compute shader, and apply a depth/normal-aware bilateral spatial denoiser.
+* [ ] **16.2. Hierarchical-Z Screen-Space Reflections (`TCastleVulkanSSR` in `CastleInternalRHI_Vulkan`)**:
+  * Raymarch glossy reflections in screen space against the Phase 9.2 `HiZPyramidTexture` min-depth mip chain (`GenerateSSRComputeShader`), modulated by surface roughness and Fresnel (`F_SchlickRoughness`), with smooth screen-edge fade.
+* [ ] **16.3. Froxel Volumetric Fog & Exponential Height Fog (`TCastleVulkanVolumetricFog` in `CastleInternalRHI_Vulkan`)**:
+  * Integrate participating media density, directional cascaded shadow map visibility, and Henyey-Greenstein phase function scattering across camera-aligned frustum volume slices.
 
 
 ## 5. Build Tool (castle-engine) & Editor Integration
@@ -363,5 +375,5 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 ## 7. Testing & Verification Criteria
 
 * [x] Automated Visual Regression Tests: `CompareImagesPerceptualDiff` in `CastleInternalRHI` compares framebuffer readbacks (`GrabTextureImage`) between `rbOpenGL` and `rbVulkan` using normalized RMSE perceptual diff thresholds.
-* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 72 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
-* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance/Hi-Z occlusion culling (`TCastleVulkanComputeCuller`), Clustered Forward+ compute light culling (`TCastleVulkanClusteredLightCuller`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.
+* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 75 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
+* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance/Hi-Z occlusion culling (`TCastleVulkanComputeCuller`), Clustered Forward+ compute light culling (`TCastleVulkanClusteredLightCuller`), Declarative Render Graph (`TRHIRenderGraph`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.

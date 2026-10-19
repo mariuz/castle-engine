@@ -1096,6 +1096,132 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Phase 15.2 & 15.3: HDR Scene Target, Compute Mip-Chain Bloom, Luminance    }
+  { Histogram Auto-Exposure & ACES Filmic / AgX Tonemapping Composite          }
+  { -------------------------------------------------------------------------- }
+
+  TCastleVulkanHDRPostProcessor = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FWidth: Cardinal;
+    FHeight: Cardinal;
+    FBloomMipCount: Cardinal;
+    FHDRSceneTexture: TVulkanRHITexture;
+    FBloomMipTextures: array[0..CASTLE_BLOOM_MAX_MIP_LEVELS - 1] of TVulkanRHITexture;
+    FLinearClampSampler: TRHISampler;
+    FHistogramBins: array[0..CASTLE_LUMINANCE_HISTOGRAM_BINS - 1] of Cardinal;
+    FHistogramBuffer: TRHIBuffer;
+    FExposureStateBuffer: TRHIBuffer;
+    FBloomDescriptorLayout: TRHIDescriptorSetLayout;
+    FBloomDescriptorSet: TRHIDescriptorSet;
+    FHistogramDescriptorLayout: TRHIDescriptorSetLayout;
+    FHistogramDescriptorSet: TRHIDescriptorSet;
+    FBloomDownsampleShader: TRHIShaderModule;
+    FBloomUpsampleShader: TRHIShaderModule;
+    FHistogramShader: TRHIShaderModule;
+    FCompositeFragShader: TRHIShaderModule;
+    FBloomDownsamplePipeline: TRHIComputePipeline;
+    FBloomUpsamplePipeline: TRHIComputePipeline;
+    FHistogramPipeline: TRHIComputePipeline;
+    FBloomThreshold: Single;
+    FBloomKnee: Single;
+    FBloomIntensity: Single;
+    FBloomFilterRadius: Single;
+    FExposure: Single;
+    FGamma: Single;
+    FSaturation: Single;
+    FContrast: Single;
+    FTonemapOperator: TCastleTonemapOperator;
+    FEnableBloom: Boolean;
+    FEnableAutoExposure: Boolean;
+    FAutoExposureParams: TCastleAutoExposureParams;
+    FAdaptedLuminance: Single;
+    FAdaptedExposure: Single;
+    FTargetLuminance: Single;
+    FTotalBloomDownsampleDispatches: Cardinal;
+    FTotalBloomUpsampleDispatches: Cardinal;
+    FTotalHistogramDispatches: Cardinal;
+    FTotalCompositePasses: Cardinal;
+    procedure EnsurePipelinesCreated;
+    function GetBloomMipTexture(const AMipIndex: Cardinal): TVulkanRHITexture;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Allocates or resizes the pfRGBA16_Float HDR scene color target and the
+      6-level pfRGBA16_Float bloom mip pyramid for (AWidth, AHeight). }
+    procedure EnsureHDRTargets(const AWidth, AHeight: Cardinal);
+
+    { Dispatches the 13-tap Jiménez Karis downsample chain (Mip 0 .. FBloomMipCount-1)
+      followed by the 9-tap 3x3 tent-filter upsample chain (FBloomMipCount-1 .. Mip 0).
+      Returns total compute dispatches recorded. }
+    function DispatchBloomPyramid(const ACmd: TRHICommandList): Cardinal;
+
+    { Builds the 256-bin log2 luminance histogram from ASceneLinearSamples (and dispatches
+      the GPU compute shader onto ACmd), computes the weighted average scene luminance,
+      and updates FAdaptedLuminance and FAdaptedExposure using exponential temporal smoothing
+      over ADeltaTime seconds. Returns the new AdaptedExposure. }
+    function UpdateAutoExposure(const ACmd: TRHICommandList;
+      const ASceneLinearSamples: array of TVector3;
+      const ADeltaTime: Single): Single;
+
+    { Records the HDR + Bloom + Auto-Exposure + ACES/AgX Tonemapping + sRGB composite pass
+      into ADstLDRTarget. }
+    procedure ExecuteCompositePass(const ACmd: TRHICommandList;
+      const ADstLDRTarget: TRHITexture);
+
+    { Populates a declarative TRHIRenderGraph with the complete 4-stage HDR frame pipeline:
+      1. Forward3DHDRPass (writes transient HDRColor + transient HDRDepth)
+      2. BloomPyramidComputePass (reads HDRColor, writes transient BloomMip0)
+      3. LuminanceHistogramComputePass (reads HDRColor, writes ExposureStateBuffer)
+      4. TonemapCompositePass (reads HDRColor + BloomMip0 + ExposureStateBuffer, writes imported ASwapchainColor) }
+    procedure BuildDefaultFrameRenderGraph(const AGraph: TRHIRenderGraph;
+      const AWidth, AHeight: Cardinal;
+      const ASwapchainColor: TRHITexture);
+
+    { Exact reference evaluators matching the GLSL 450 shaders for deterministic verification }
+    class function EvaluateKarisWeight(const ALinearRGB: TVector3): Single; static;
+    class function EvaluateKarisAverage4(const C0, C1, C2, C3: TVector3): TVector3; static;
+    class function EvaluateSoftThreshold(const ALinearRGB: TVector3;
+      const AThreshold, AKnee: Single): TVector3; static;
+    class function EvaluateTonemapReinhard(const AHDR: TVector3): TVector3; static;
+    class function EvaluateTonemapACESFilmic(const AHDR: TVector3): TVector3; static;
+    class function EvaluateTonemapAgX(const AHDR: TVector3): TVector3; static;
+    class function EvaluateLinearToSRGB(const ALinear: TVector3): TVector3; static;
+    function EvaluateCompositeColor(const AHDRSceneColor, ABloomColor: TVector3): TVector3;
+    function GetHistogramBinCount(const ABinIndex: Cardinal): Cardinal;
+
+    property Width: Cardinal read FWidth;
+    property Height: Cardinal read FHeight;
+    property BloomMipCount: Cardinal read FBloomMipCount;
+    property HDRSceneTexture: TVulkanRHITexture read FHDRSceneTexture;
+    property BloomMipTextures[const AMipIndex: Cardinal]: TVulkanRHITexture read GetBloomMipTexture;
+    property HistogramBuffer: TRHIBuffer read FHistogramBuffer;
+    property ExposureStateBuffer: TRHIBuffer read FExposureStateBuffer;
+    property BloomDownsamplePipeline: TRHIComputePipeline read FBloomDownsamplePipeline;
+    property BloomUpsamplePipeline: TRHIComputePipeline read FBloomUpsamplePipeline;
+    property HistogramPipeline: TRHIComputePipeline read FHistogramPipeline;
+    property BloomThreshold: Single read FBloomThreshold write FBloomThreshold;
+    property BloomKnee: Single read FBloomKnee write FBloomKnee;
+    property BloomIntensity: Single read FBloomIntensity write FBloomIntensity;
+    property BloomFilterRadius: Single read FBloomFilterRadius write FBloomFilterRadius;
+    property Exposure: Single read FExposure write FExposure;
+    property Gamma: Single read FGamma write FGamma;
+    property Saturation: Single read FSaturation write FSaturation;
+    property Contrast: Single read FContrast write FContrast;
+    property TonemapOperator: TCastleTonemapOperator read FTonemapOperator write FTonemapOperator;
+    property EnableBloom: Boolean read FEnableBloom write FEnableBloom;
+    property EnableAutoExposure: Boolean read FEnableAutoExposure write FEnableAutoExposure;
+    property AdaptedLuminance: Single read FAdaptedLuminance;
+    property AdaptedExposure: Single read FAdaptedExposure;
+    property TargetLuminance: Single read FTargetLuminance;
+    property TotalBloomDownsampleDispatches: Cardinal read FTotalBloomDownsampleDispatches;
+    property TotalBloomUpsampleDispatches: Cardinal read FTotalBloomUpsampleDispatches;
+    property TotalHistogramDispatches: Cardinal read FTotalHistogramDispatches;
+    property TotalCompositePasses: Cardinal read FTotalCompositePasses;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -1162,7 +1288,7 @@ type
     FDeferredDeletions: array[0 .. MaxFramesInFlight - 1] of array of TVulkanDeferredDeletionItem;
     FDeferResourceDestruction: Boolean;
 
-    { GPU memory sub-allocator (pooled blocks + per-frame ring buffers), async staging uploader, bindless manager, timestamp profiler, compute culler & IBL generator }
+    { GPU memory sub-allocator (pooled blocks + per-frame ring buffers), async staging uploader, bindless manager, timestamp profiler, compute culler, IBL generator, clustered culler, shadow atlas & HDR post-processor }
     FMemoryAllocator: TCastleVulkanMemoryAllocator;
     FStagingUploader: TCastleVulkanStagingUploader;
     FBindlessTextureManager: TCastleVulkanBindlessTextureManager;
@@ -1171,6 +1297,7 @@ type
     FIBLGenerator: TCastleVulkanIBLGenerator;
     FClusteredLightCuller: TCastleVulkanClusteredLightCuller;
     FShadowAtlas: TCastleVulkanShadowAtlas;
+    FHDRPostProcessor: TCastleVulkanHDRPostProcessor;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -1251,6 +1378,7 @@ type
     function GetIBLGenerator: TCastleVulkanIBLGenerator;
     function GetClusteredLightCuller: TCastleVulkanClusteredLightCuller;
     function GetShadowAtlas: TCastleVulkanShadowAtlas;
+    function GetHDRPostProcessor: TCastleVulkanHDRPostProcessor;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -1436,6 +1564,7 @@ type
     property IBLGenerator: TCastleVulkanIBLGenerator read GetIBLGenerator;
     property ClusteredLightCuller: TCastleVulkanClusteredLightCuller read GetClusteredLightCuller;
     property ShadowAtlas: TCastleVulkanShadowAtlas read GetShadowAtlas;
+    property HDRPostProcessor: TCastleVulkanHDRPostProcessor read GetHDRPostProcessor;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -8236,6 +8365,710 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanHDRPostProcessor                                                }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanHDRPostProcessor.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FBloomThreshold := 1.0;
+  FBloomKnee := 0.5;
+  FBloomIntensity := 0.08;
+  FBloomFilterRadius := 1.0;
+  FExposure := 1.0;
+  FGamma := 2.2;
+  FSaturation := 1.0;
+  FContrast := 1.0;
+  FTonemapOperator := tmoACESFilmic;
+  FEnableBloom := True;
+  FEnableAutoExposure := False;
+  FAdaptedLuminance := 0.18;
+  FAdaptedExposure := 1.0;
+  FTargetLuminance := 0.18;
+
+  FAutoExposureParams.MinLogLum := -8.0;
+  FAutoExposureParams.MaxLogLum := 4.0;
+  FAutoExposureParams.TimeDelta := 1.0 / 60.0;
+  FAutoExposureParams.AdaptationSpeed := 2.5;
+  FAutoExposureParams.TargetMiddleGrey := 0.18;
+  FAutoExposureParams.MinExposure := 0.1;
+  FAutoExposureParams.MaxExposure := 10.0;
+  FAutoExposureParams.TotalPixels := 1;
+end;
+
+destructor TCastleVulkanHDRPostProcessor.Destroy;
+var
+  I: Integer;
+begin
+  { Compute pipelines are owned by FDevice.FComputePipelineMap }
+  FBloomDownsamplePipeline := nil;
+  FBloomUpsamplePipeline := nil;
+  FHistogramPipeline := nil;
+  FreeAndNil(FCompositeFragShader);
+  FreeAndNil(FHistogramShader);
+  FreeAndNil(FBloomUpsampleShader);
+  FreeAndNil(FBloomDownsampleShader);
+  FreeAndNil(FHistogramDescriptorSet);
+  FreeAndNil(FHistogramDescriptorLayout);
+  FreeAndNil(FBloomDescriptorSet);
+  FreeAndNil(FBloomDescriptorLayout);
+  FreeAndNil(FExposureStateBuffer);
+  FreeAndNil(FHistogramBuffer);
+  FreeAndNil(FLinearClampSampler);
+  for I := 0 to CASTLE_BLOOM_MAX_MIP_LEVELS - 1 do
+    FreeAndNil(FBloomMipTextures[I]);
+  FreeAndNil(FHDRSceneTexture);
+  inherited;
+end;
+
+function TCastleVulkanHDRPostProcessor.GetBloomMipTexture(
+  const AMipIndex: Cardinal): TVulkanRHITexture;
+begin
+  if AMipIndex < CASTLE_BLOOM_MAX_MIP_LEVELS then
+    Result := FBloomMipTextures[AMipIndex]
+  else
+    Result := nil;
+end;
+
+function TCastleVulkanHDRPostProcessor.GetHistogramBinCount(
+  const ABinIndex: Cardinal): Cardinal;
+begin
+  if ABinIndex < CASTLE_LUMINANCE_HISTOGRAM_BINS then
+    Result := FHistogramBins[ABinIndex]
+  else
+    Result := 0;
+end;
+
+procedure TCastleVulkanHDRPostProcessor.EnsureHDRTargets(
+  const AWidth, AHeight: Cardinal);
+var
+  TargetW, TargetH, MipW, MipH, M: Cardinal;
+  TexDesc: TRHITextureDesc;
+  I: Integer;
+begin
+  if FDevice = nil then Exit;
+  TargetW := Max(Cardinal(2), AWidth);
+  TargetH := Max(Cardinal(2), AHeight);
+  if (FHDRSceneTexture <> nil) and (FWidth = TargetW) and (FHeight = TargetH) then
+    Exit;
+
+  FWidth := TargetW;
+  FHeight := TargetH;
+
+  for I := 0 to CASTLE_BLOOM_MAX_MIP_LEVELS - 1 do
+    FreeAndNil(FBloomMipTextures[I]);
+  FreeAndNil(FHDRSceneTexture);
+
+  TexDesc := TRHITextureDesc.Create2D(
+    FWidth, FHeight, pfRGBA16_Float,
+    [tuColorAttachment, tuSampled, tuStorage, tuTransferSrc, tuTransferDst], 1, 1);
+  TexDesc.DebugName := 'HDRSceneColorTarget';
+  FHDRSceneTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+
+  MipW := Max(Cardinal(1), FWidth div 2);
+  MipH := Max(Cardinal(1), FHeight div 2);
+  FBloomMipCount := 0;
+  for M := 0 to CASTLE_BLOOM_MAX_MIP_LEVELS - 1 do
+  begin
+    TexDesc := TRHITextureDesc.Create2D(
+      MipW, MipH, pfRGBA16_Float,
+      [tuColorAttachment, tuSampled, tuStorage, tuTransferSrc, tuTransferDst], 1, 1);
+    TexDesc.DebugName := Format('BloomPyramidMip_%d', [M]);
+    FBloomMipTextures[M] := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+    Inc(FBloomMipCount);
+    if (MipW <= 2) and (MipH <= 2) then
+      Break;
+    MipW := Max(Cardinal(1), MipW div 2);
+    MipH := Max(Cardinal(1), MipH div 2);
+  end;
+end;
+
+procedure TCastleVulkanHDRPostProcessor.EnsurePipelinesCreated;
+var
+  SamplerDesc: TRHISamplerDesc;
+  BufDesc: TRHIBufferDesc;
+  BloomBindings: array[0..1] of TRHIDescriptorBindingDesc;
+  HistBindings: array[0..2] of TRHIDescriptorBindingDesc;
+  ShaderGen: TCastleShaderGeneratorRHI;
+  CompDesc: TRHIComputePipelineDesc;
+  InitialExposureState: array[0..3] of Single;
+begin
+  if FDevice = nil then Exit;
+
+  if FLinearClampSampler = nil then
+  begin
+    FillChar(SamplerDesc, SizeOf(SamplerDesc), 0);
+    SamplerDesc.MinFilter := sfLinear;
+    SamplerDesc.MagFilter := sfLinear;
+    SamplerDesc.MipFilter := sfLinear;
+    SamplerDesc.AddressModeU := amClampToEdge;
+    SamplerDesc.AddressModeV := amClampToEdge;
+    SamplerDesc.AddressModeW := amClampToEdge;
+    SamplerDesc.MaxAnisotropy := 1.0;
+    FLinearClampSampler := FDevice.CreateSampler(SamplerDesc);
+  end;
+
+  if FHistogramBuffer = nil then
+  begin
+    BufDesc := TRHIBufferDesc.Create(
+      CASTLE_LUMINANCE_HISTOGRAM_BINS * SizeOf(Cardinal),
+      [buStorage, buTransferDst], muCpuToGpu, 'LuminanceHistogramSSBO');
+    FHistogramBuffer := FDevice.CreateBuffer(BufDesc, nil);
+  end;
+
+  if FExposureStateBuffer = nil then
+  begin
+    InitialExposureState[0] := FAdaptedLuminance;
+    InitialExposureState[1] := FAdaptedExposure;
+    InitialExposureState[2] := FTargetLuminance;
+    InitialExposureState[3] := 0.0;
+    BufDesc := TRHIBufferDesc.Create(
+      4 * SizeOf(Single),
+      [buStorage, buTransferDst], muCpuToGpu, 'AutoExposureStateSSBO');
+    FExposureStateBuffer := FDevice.CreateBuffer(BufDesc, @InitialExposureState[0]);
+  end;
+
+  if FBloomDescriptorLayout = nil then
+  begin
+    FillChar(BloomBindings, SizeOf(BloomBindings), 0);
+    BloomBindings[0].Binding := 0;
+    BloomBindings[0].DescriptorType := dtCombinedImageSampler;
+    BloomBindings[0].Count := 1;
+    BloomBindings[0].StageFlags := [ssCompute];
+    BloomBindings[1].Binding := 1;
+    BloomBindings[1].DescriptorType := dtStorageImage;
+    BloomBindings[1].Count := 1;
+    BloomBindings[1].StageFlags := [ssCompute];
+    FBloomDescriptorLayout := FDevice.CreateDescriptorSetLayout(BloomBindings);
+    FBloomDescriptorSet := FDevice.CreateDescriptorSet(FBloomDescriptorLayout);
+  end;
+
+  if FHistogramDescriptorLayout = nil then
+  begin
+    FillChar(HistBindings, SizeOf(HistBindings), 0);
+    HistBindings[0].Binding := 0;
+    HistBindings[0].DescriptorType := dtCombinedImageSampler;
+    HistBindings[0].Count := 1;
+    HistBindings[0].StageFlags := [ssCompute];
+    HistBindings[1].Binding := 1;
+    HistBindings[1].DescriptorType := dtStorageBuffer;
+    HistBindings[1].Count := 1;
+    HistBindings[1].StageFlags := [ssCompute];
+    HistBindings[2].Binding := 2;
+    HistBindings[2].DescriptorType := dtStorageBuffer;
+    HistBindings[2].Count := 1;
+    HistBindings[2].StageFlags := [ssCompute];
+    FHistogramDescriptorLayout := FDevice.CreateDescriptorSetLayout(HistBindings);
+    FHistogramDescriptorSet := FDevice.CreateDescriptorSet(FHistogramDescriptorLayout);
+  end;
+
+  if FBloomDownsamplePipeline = nil then
+  begin
+    ShaderGen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+    try
+      FBloomDownsampleShader := FDevice.CreateShaderModuleFromGLSL(
+        ssCompute, ShaderGen.GenerateBloomDownsampleComputeShader(8, 8), 'BloomDownsampleCS');
+      FBloomUpsampleShader := FDevice.CreateShaderModuleFromGLSL(
+        ssCompute, ShaderGen.GenerateBloomUpsampleComputeShader(8, 8), 'BloomUpsampleCS');
+      FHistogramShader := FDevice.CreateShaderModuleFromGLSL(
+        ssCompute, ShaderGen.GenerateLuminanceHistogramComputeShader(16, 16), 'LuminanceHistogramCS');
+      FCompositeFragShader := FDevice.CreateShaderModuleFromGLSL(
+        ssFragment, ShaderGen.GenerateHDRCompositeFragmentShader, 'HDRCompositeFS');
+    finally
+      FreeAndNil(ShaderGen);
+    end;
+
+    FillChar(CompDesc, SizeOf(CompDesc), 0);
+    CompDesc.ComputeShader := FBloomDownsampleShader;
+    SetLength(CompDesc.DescriptorSetLayouts, 1);
+    CompDesc.DescriptorSetLayouts[0] := FBloomDescriptorLayout;
+    CompDesc.PushConstantSize := SizeOf(TCastleBloomPushConstants);
+    CompDesc.PushConstantStages := [ssCompute];
+    CompDesc.DebugName := 'BloomDownsamplePSO';
+    FBloomDownsamplePipeline := FDevice.GetOrCreateComputePipeline(CompDesc);
+
+    CompDesc.ComputeShader := FBloomUpsampleShader;
+    CompDesc.DebugName := 'BloomUpsamplePSO';
+    FBloomUpsamplePipeline := FDevice.GetOrCreateComputePipeline(CompDesc);
+
+    FillChar(CompDesc, SizeOf(CompDesc), 0);
+    CompDesc.ComputeShader := FHistogramShader;
+    SetLength(CompDesc.DescriptorSetLayouts, 1);
+    CompDesc.DescriptorSetLayouts[0] := FHistogramDescriptorLayout;
+    CompDesc.PushConstantSize := SizeOf(TCastleAutoExposureParams);
+    CompDesc.PushConstantStages := [ssCompute];
+    CompDesc.DebugName := 'LuminanceHistogramPSO';
+    FHistogramPipeline := FDevice.GetOrCreateComputePipeline(CompDesc);
+  end;
+end;
+
+function TCastleVulkanHDRPostProcessor.DispatchBloomPyramid(
+  const ACmd: TRHICommandList): Cardinal;
+var
+  M: Integer;
+  SrcTex, DstTex: TVulkanRHITexture;
+  PC: TCastleBloomPushConstants;
+  GroupsX, GroupsY: Cardinal;
+begin
+  Result := 0;
+  if (FWidth = 0) or (FHeight = 0) then
+    EnsureHDRTargets(1280, 720);
+  EnsurePipelinesCreated;
+
+  if (FBloomMipCount = 0) or (FHDRSceneTexture = nil) then
+    Exit;
+
+  { 1. Progressive 13-tap Jiménez Downsample Chain (HDRScene -> Mip 0 -> Mip 1 -> ... -> Mip N-1) }
+  for M := 0 to Integer(FBloomMipCount) - 1 do
+  begin
+    if M = 0 then
+      SrcTex := FHDRSceneTexture
+    else
+      SrcTex := FBloomMipTextures[M - 1];
+    DstTex := FBloomMipTextures[M];
+    if (SrcTex = nil) or (DstTex = nil) then Continue;
+
+    FillChar(PC, SizeOf(PC), 0);
+    PC.SrcTexelSize := Vector2(1.0 / Max(Cardinal(1), SrcTex.Desc.Width),
+                               1.0 / Max(Cardinal(1), SrcTex.Desc.Height));
+    PC.Threshold := FBloomThreshold;
+    PC.Knee := FBloomKnee;
+    PC.FilterRadius := FBloomFilterRadius;
+    PC.MipLevel := Cardinal(M);
+    if M = 0 then PC.IsFirstDownsample := 1 else PC.IsFirstDownsample := 0;
+    PC.DstPackedSize := (DstTex.Desc.Height shl 16) or (DstTex.Desc.Width and $FFFF);
+
+    GroupsX := (DstTex.Desc.Width + 7) div 8;
+    GroupsY := (DstTex.Desc.Height + 7) div 8;
+
+    if ACmd <> nil then
+    begin
+      ACmd.TransitionTexture(SrcTex, rsShaderRead);
+      ACmd.TransitionTexture(DstTex, rsTransferDst);
+      FBloomDescriptorSet.BindTexture(0, SrcTex, FLinearClampSampler);
+      FBloomDescriptorSet.BindTexture(1, DstTex, FLinearClampSampler);
+      FBloomDescriptorSet.Update;
+      ACmd.BindComputePipeline(FBloomDownsamplePipeline);
+      ACmd.BindComputeDescriptorSet(0, FBloomDescriptorSet, []);
+      ACmd.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+      ACmd.Dispatch(GroupsX, GroupsY, 1);
+    end;
+
+    Inc(FTotalBloomDownsampleDispatches);
+    Inc(Result);
+  end;
+
+  { 2. Progressive 9-tap 3x3 Tent-Filter Upsample Chain (Mip N-1 -> Mip N-2 -> ... -> Mip 0) }
+  if FBloomMipCount > 1 then
+    for M := Integer(FBloomMipCount) - 1 downto 1 do
+    begin
+      SrcTex := FBloomMipTextures[M];
+      DstTex := FBloomMipTextures[M - 1];
+      if (SrcTex = nil) or (DstTex = nil) then Continue;
+
+      FillChar(PC, SizeOf(PC), 0);
+      PC.SrcTexelSize := Vector2(1.0 / Max(Cardinal(1), SrcTex.Desc.Width),
+                                 1.0 / Max(Cardinal(1), SrcTex.Desc.Height));
+      PC.Threshold := FBloomThreshold;
+      PC.Knee := FBloomKnee;
+      PC.FilterRadius := FBloomFilterRadius;
+      PC.MipLevel := Cardinal(M - 1);
+      PC.IsFirstDownsample := 0;
+      PC.DstPackedSize := (DstTex.Desc.Height shl 16) or (DstTex.Desc.Width and $FFFF);
+
+      GroupsX := (DstTex.Desc.Width + 7) div 8;
+      GroupsY := (DstTex.Desc.Height + 7) div 8;
+
+      if ACmd <> nil then
+      begin
+        ACmd.TransitionTexture(SrcTex, rsShaderRead);
+        ACmd.TransitionTexture(DstTex, rsTransferDst);
+        FBloomDescriptorSet.BindTexture(0, SrcTex, FLinearClampSampler);
+        FBloomDescriptorSet.BindTexture(1, DstTex, FLinearClampSampler);
+        FBloomDescriptorSet.Update;
+        ACmd.BindComputePipeline(FBloomUpsamplePipeline);
+        ACmd.BindComputeDescriptorSet(0, FBloomDescriptorSet, []);
+        ACmd.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+        ACmd.Dispatch(GroupsX, GroupsY, 1);
+      end;
+
+      Inc(FTotalBloomUpsampleDispatches);
+      Inc(Result);
+    end;
+
+  if (ACmd <> nil) and (FBloomMipTextures[0] <> nil) then
+    ACmd.TransitionTexture(FBloomMipTextures[0], rsShaderRead);
+end;
+
+function TCastleVulkanHDRPostProcessor.UpdateAutoExposure(
+  const ACmd: TRHICommandList;
+  const ASceneLinearSamples: array of TVector3;
+  const ADeltaTime: Single): Single;
+var
+  I, Bin: Integer;
+  Lum, LogLumNorm, BinLogLum, WeightedLogSum, TotalWeight, Alpha, RawExposure: Single;
+  ExposureState: array[0..3] of Single;
+begin
+  if (FWidth = 0) or (FHeight = 0) then
+    EnsureHDRTargets(1280, 720);
+  EnsurePipelinesCreated;
+
+  FillChar(FHistogramBins, SizeOf(FHistogramBins), 0);
+  for I := 0 to High(ASceneLinearSamples) do
+  begin
+    Lum := ASceneLinearSamples[I].X * 0.2126 +
+           ASceneLinearSamples[I].Y * 0.7152 +
+           ASceneLinearSamples[I].Z * 0.0722;
+    if Lum < 1e-4 then
+      Bin := 0
+    else
+    begin
+      LogLumNorm := EnsureRange(
+        (Log2(Lum) - FAutoExposureParams.MinLogLum) /
+        Max(1e-4, FAutoExposureParams.MaxLogLum - FAutoExposureParams.MinLogLum),
+        0.0, 1.0);
+      Bin := EnsureRange(Trunc(LogLumNorm * 254.0 + 1.0), 1, 255);
+    end;
+    Inc(FHistogramBins[Bin]);
+  end;
+
+  WeightedLogSum := 0.0;
+  TotalWeight := 0.0;
+  for Bin := 1 to CASTLE_LUMINANCE_HISTOGRAM_BINS - 1 do
+    if FHistogramBins[Bin] > 0 then
+    begin
+      BinLogLum := FAutoExposureParams.MinLogLum +
+        ((Bin - 1.0) / 254.0) * (FAutoExposureParams.MaxLogLum - FAutoExposureParams.MinLogLum);
+      WeightedLogSum := WeightedLogSum + BinLogLum * FHistogramBins[Bin];
+      TotalWeight := TotalWeight + FHistogramBins[Bin];
+    end;
+
+  if TotalWeight > 0.0 then
+    FTargetLuminance := Power(2.0, WeightedLogSum / TotalWeight)
+  else
+    FTargetLuminance := FAutoExposureParams.TargetMiddleGrey;
+
+  FAutoExposureParams.TimeDelta := Max(0.0, ADeltaTime);
+  FAutoExposureParams.TotalPixels := Max(Cardinal(1), Cardinal(Length(ASceneLinearSamples)));
+
+  Alpha := 1.0 - Exp(-FAutoExposureParams.TimeDelta * FAutoExposureParams.AdaptationSpeed);
+  FAdaptedLuminance := FAdaptedLuminance + (FTargetLuminance - FAdaptedLuminance) * EnsureRange(Alpha, 0.0, 1.0);
+  FAdaptedLuminance := Max(1e-4, FAdaptedLuminance);
+
+  RawExposure := FAutoExposureParams.TargetMiddleGrey / FAdaptedLuminance;
+  FAdaptedExposure := EnsureRange(RawExposure, FAutoExposureParams.MinExposure, FAutoExposureParams.MaxExposure);
+
+  if FHistogramBuffer <> nil then
+    FHistogramBuffer.UploadData(FHistogramBins[0], SizeOf(FHistogramBins), 0);
+
+  if FExposureStateBuffer <> nil then
+  begin
+    ExposureState[0] := FAdaptedLuminance;
+    ExposureState[1] := FAdaptedExposure;
+    ExposureState[2] := FTargetLuminance;
+    ExposureState[3] := 0.0;
+    FExposureStateBuffer.UploadData(ExposureState[0], SizeOf(ExposureState), 0);
+  end;
+
+  if (ACmd <> nil) and (FHDRSceneTexture <> nil) then
+  begin
+    FHistogramDescriptorSet.BindTexture(0, FHDRSceneTexture, FLinearClampSampler);
+    FHistogramDescriptorSet.BindStorageBuffer(1, FHistogramBuffer, 0, FHistogramBuffer.Desc.Size);
+    FHistogramDescriptorSet.BindStorageBuffer(2, FExposureStateBuffer, 0, FExposureStateBuffer.Desc.Size);
+    FHistogramDescriptorSet.Update;
+
+    ACmd.BindComputePipeline(FHistogramPipeline);
+    ACmd.BindComputeDescriptorSet(0, FHistogramDescriptorSet, []);
+    ACmd.PushConstants([ssCompute], 0, SizeOf(FAutoExposureParams), FAutoExposureParams);
+    ACmd.Dispatch((FWidth + 15) div 16, (FHeight + 15) div 16, 1);
+  end;
+
+  Inc(FTotalHistogramDispatches);
+  Result := FAdaptedExposure;
+end;
+
+procedure TCastleVulkanHDRPostProcessor.ExecuteCompositePass(
+  const ACmd: TRHICommandList; const ADstLDRTarget: TRHITexture);
+var
+  RenderInfo: TRHIRenderingInfo;
+  TargetW, TargetH: Cardinal;
+  PC: TCastleHDRCompositePushConstants;
+begin
+  EnsurePipelinesCreated;
+  if (ACmd <> nil) and (ADstLDRTarget <> nil) then
+  begin
+    TargetW := Max(Cardinal(1), ADstLDRTarget.Desc.Width);
+    TargetH := Max(Cardinal(1), ADstLDRTarget.Desc.Height);
+    if FHDRSceneTexture <> nil then
+      ACmd.TransitionTexture(FHDRSceneTexture, rsShaderRead);
+    if FBloomMipTextures[0] <> nil then
+      ACmd.TransitionTexture(FBloomMipTextures[0], rsShaderRead);
+    ACmd.TransitionTexture(ADstLDRTarget, rsColorAttachment);
+
+    RenderInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, TargetW, TargetH),
+      ADstLDRTarget, loClear, Vector4(0.0, 0.0, 0.0, 1.0),
+      nil, loDontCare, 1.0);
+    ACmd.BeginRendering(RenderInfo);
+    ACmd.SetViewport(FloatRectangle(0, 0, TargetW, TargetH));
+    ACmd.SetScissor(RenderInfo.RenderArea);
+
+    FillChar(PC, SizeOf(PC), 0);
+    PC.Exposure := FExposure;
+    PC.BloomIntensity := FBloomIntensity;
+    PC.Gamma := FGamma;
+    PC.Saturation := FSaturation;
+    PC.Contrast := FContrast;
+    PC.TonemapOperator := Ord(FTonemapOperator);
+    if FEnableBloom then PC.EnableBloom := 1 else PC.EnableBloom := 0;
+    if FEnableAutoExposure then PC.EnableAutoExposure := 1 else PC.EnableAutoExposure := 0;
+    ACmd.PushConstants([ssFragment], 0, SizeOf(PC), PC);
+
+    ACmd.EndRendering;
+  end;
+  Inc(FTotalCompositePasses);
+end;
+
+procedure TCastleVulkanHDRPostProcessor.BuildDefaultFrameRenderGraph(
+  const AGraph: TRHIRenderGraph;
+  const AWidth, AHeight: Cardinal;
+  const ASwapchainColor: TRHITexture);
+var
+  HDRColorDesc, HDRDepthDesc, BloomMip0Desc: TRHITextureDesc;
+  HSceneHDR, HSceneDepth, HBloomMip0, HSwapchain, HExposureBuf: TRHIRenderGraphResourceHandle;
+  PassForward, PassBloom, PassHistogram, PassComposite: TRHIRenderGraphPass;
+begin
+  if AGraph = nil then Exit;
+  EnsureHDRTargets(AWidth, AHeight);
+  EnsurePipelinesCreated;
+
+  AGraph.Reset;
+
+  HDRColorDesc := TRHITextureDesc.Create2D(
+    FWidth, FHeight, pfRGBA16_Float,
+    [tuColorAttachment, tuSampled, tuStorage], 1, 1);
+  HDRDepthDesc := TRHITextureDesc.Create2D(
+    FWidth, FHeight, pfD32_Float,
+    [tuDepthStencil, tuSampled], 1, 1);
+  BloomMip0Desc := TRHITextureDesc.Create2D(
+    Max(Cardinal(1), FWidth div 2), Max(Cardinal(1), FHeight div 2), pfRGBA16_Float,
+    [tuColorAttachment, tuSampled, tuStorage], 1, 1);
+
+  HSceneHDR := AGraph.DeclareTransientTexture('RG_HDRSceneColor', HDRColorDesc);
+  HSceneDepth := AGraph.DeclareTransientTexture('RG_HDRSceneDepth', HDRDepthDesc);
+  HBloomMip0 := AGraph.DeclareTransientTexture('RG_BloomMip0', BloomMip0Desc);
+  HSwapchain := AGraph.ImportExternalTexture('RG_SwapchainBackbuffer', ASwapchainColor,
+    rsUndefined, rsPresent);
+  HExposureBuf := AGraph.ImportExternalBuffer('RG_AutoExposureState', FExposureStateBuffer);
+
+  { 1. 3D Forward HDR Pass }
+  PassForward := AGraph.AddPass('Forward3DHDRPass', rgptGraphics);
+  PassForward.WriteColorAttachment(HSceneHDR, loClear, Vector4(0.0, 0.0, 0.0, 1.0), soStore);
+  PassForward.WriteDepthAttachment(HSceneDepth, loClear, 1.0, soStore);
+
+  { 2. Bloom Mip-Chain Compute Pass }
+  PassBloom := AGraph.AddPass('BloomPyramidComputePass', rgptCompute);
+  PassBloom.ReadTexture(HSceneHDR, rsShaderRead);
+  PassBloom.WriteStorageTexture(HBloomMip0, rsTransferDst);
+
+  { 3. Luminance Histogram & Auto-Exposure Compute Pass }
+  PassHistogram := AGraph.AddPass('LuminanceHistogramComputePass', rgptCompute);
+  PassHistogram.ReadTexture(HSceneHDR, rsShaderRead);
+  PassHistogram.WriteBuffer(HExposureBuf);
+
+  { 4. ACES/AgX Tonemap & sRGB Composite Pass }
+  PassComposite := AGraph.AddPass('TonemapCompositePass', rgptGraphics);
+  PassComposite.ReadTexture(HSceneHDR, rsShaderRead);
+  PassComposite.ReadTexture(HBloomMip0, rsShaderRead);
+  PassComposite.ReadBuffer(HExposureBuf);
+  PassComposite.WriteColorAttachment(HSwapchain, loClear, Vector4(0.0, 0.0, 0.0, 1.0), soStore);
+end;
+
+class function TCastleVulkanHDRPostProcessor.EvaluateKarisWeight(
+  const ALinearRGB: TVector3): Single;
+var
+  Luma: Single;
+begin
+  Luma := ALinearRGB.X * 0.2126 + ALinearRGB.Y * 0.7152 + ALinearRGB.Z * 0.0722;
+  Result := 1.0 / (1.0 + Max(0.0, Luma));
+end;
+
+class function TCastleVulkanHDRPostProcessor.EvaluateKarisAverage4(
+  const C0, C1, C2, C3: TVector3): TVector3;
+var
+  W0, W1, W2, W3, WSum: Single;
+begin
+  W0 := EvaluateKarisWeight(C0);
+  W1 := EvaluateKarisWeight(C1);
+  W2 := EvaluateKarisWeight(C2);
+  W3 := EvaluateKarisWeight(C3);
+  WSum := Max(1e-5, W0 + W1 + W2 + W3);
+  Result := (C0 * W0 + C1 * W1 + C2 * W2 + C3 * W3) / WSum;
+end;
+
+class function TCastleVulkanHDRPostProcessor.EvaluateSoftThreshold(
+  const ALinearRGB: TVector3; const AThreshold, AKnee: Single): TVector3;
+var
+  Brightness, Soft, Contribution: Single;
+begin
+  Brightness := Max(Max(ALinearRGB.X, ALinearRGB.Y), ALinearRGB.Z);
+  Soft := EnsureRange(Brightness - AThreshold + AKnee, 0.0, 2.0 * AKnee);
+  Soft := (Soft * Soft) / Max(1e-5, 4.0 * AKnee + 1e-5);
+  Contribution := Max(Soft, Brightness - AThreshold) / Max(1e-5, Brightness);
+  Result := ALinearRGB * Max(0.0, Contribution);
+end;
+
+class function TCastleVulkanHDRPostProcessor.EvaluateTonemapReinhard(
+  const AHDR: TVector3): TVector3;
+begin
+  Result := Vector3(
+    Max(0.0, AHDR.X) / (1.0 + Max(0.0, AHDR.X)),
+    Max(0.0, AHDR.Y) / (1.0 + Max(0.0, AHDR.Y)),
+    Max(0.0, AHDR.Z) / (1.0 + Max(0.0, AHDR.Z)));
+end;
+
+class function TCastleVulkanHDRPostProcessor.EvaluateTonemapACESFilmic(
+  const AHDR: TVector3): TVector3;
+
+  function ACESChannel(const XVal: Single): Single;
+  const
+    A = 2.51;
+    B = 0.03;
+    C = 2.43;
+    D = 0.59;
+    E = 0.14;
+  var
+    X: Single;
+  begin
+    X := Max(0.0, XVal);
+    Result := EnsureRange((X * (A * X + B)) / (X * (C * X + D) + E), 0.0, 1.0);
+  end;
+
+begin
+  Result := Vector3(ACESChannel(AHDR.X), ACESChannel(AHDR.Y), ACESChannel(AHDR.Z));
+end;
+
+class function TCastleVulkanHDRPostProcessor.EvaluateTonemapAgX(
+  const AHDR: TVector3): TVector3;
+
+  function AgXContrast(const X: Single): Single;
+  var
+    X2, X4: Single;
+  begin
+    X2 := X * X;
+    X4 := X2 * X2;
+    Result := 15.5 * X4 * X2 - 40.14 * X4 * X + 31.96 * X4 -
+              6.868 * X2 * X + 0.4298 * X2 + 0.1191 * X - 0.00232;
+  end;
+
+const
+  MinEv = -12.47393;
+  MaxEv = 4.026069;
+var
+  R, G, B, InR, InG, InB, OutR, OutG, OutB: Single;
+begin
+  R := Max(1e-6, AHDR.X);
+  G := Max(1e-6, AHDR.Y);
+  B := Max(1e-6, AHDR.Z);
+
+  { AgX Inset Matrix (column-major in GLSL) }
+  InR := 0.842479062253094 * R + 0.0784335999999992 * G + 0.0792237451477643 * B;
+  InG := 0.0423282422610123 * R + 0.878468636469772 * G + 0.0791661274605434 * B;
+  InB := 0.0423756549057051 * R + 0.0784336 * G + 0.879142973793104 * B;
+
+  InR := (EnsureRange(Log2(Max(1e-6, InR)), MinEv, MaxEv) - MinEv) / (MaxEv - MinEv);
+  InG := (EnsureRange(Log2(Max(1e-6, InG)), MinEv, MaxEv) - MinEv) / (MaxEv - MinEv);
+  InB := (EnsureRange(Log2(Max(1e-6, InB)), MinEv, MaxEv) - MinEv) / (MaxEv - MinEv);
+
+  InR := AgXContrast(InR);
+  InG := AgXContrast(InG);
+  InB := AgXContrast(InB);
+
+  { AgX Outset Matrix }
+  OutR :=  1.19687900512017  * InR - 0.0980208811401368 * InG - 0.0990297440797205 * InB;
+  OutG := -0.0528968517574562 * InR + 1.15190312990417  * InG - 0.0989611768448433 * InB;
+  OutB := -0.0529716355144438 * InR - 0.0980434501171241 * InG + 1.15107367264116  * InB;
+
+  Result := Vector3(
+    EnsureRange(Power(Max(0.0, OutR), 2.2), 0.0, 1.0),
+    EnsureRange(Power(Max(0.0, OutG), 2.2), 0.0, 1.0),
+    EnsureRange(Power(Max(0.0, OutB), 2.2), 0.0, 1.0));
+end;
+
+class function TCastleVulkanHDRPostProcessor.EvaluateLinearToSRGB(
+  const ALinear: TVector3): TVector3;
+
+  function ChannelToSRGB(const CVal: Single): Single;
+  var
+    C: Single;
+  begin
+    C := Max(0.0, CVal);
+    if C <= 0.0031308 then
+      Result := C * 12.92
+    else
+      Result := 1.055 * Power(C, 1.0 / 2.4) - 0.055;
+    Result := EnsureRange(Result, 0.0, 1.0);
+  end;
+
+begin
+  Result := Vector3(
+    ChannelToSRGB(ALinear.X),
+    ChannelToSRGB(ALinear.Y),
+    ChannelToSRGB(ALinear.Z));
+end;
+
+function TCastleVulkanHDRPostProcessor.EvaluateCompositeColor(
+  const AHDRSceneColor, ABloomColor: TVector3): TVector3;
+var
+  Combined, Graded, Mapped: TVector3;
+  EffExposure, Luma: Single;
+begin
+  Combined := AHDRSceneColor;
+  if FEnableBloom then
+    Combined := Combined + ABloomColor * FBloomIntensity;
+
+  EffExposure := FExposure;
+  if FEnableAutoExposure then
+    EffExposure := EffExposure * Max(1e-4, FAdaptedExposure);
+
+  Combined := Combined * EffExposure;
+
+  { Apply saturation & contrast color grading }
+  Luma := Combined.X * 0.2126 + Combined.Y * 0.7152 + Combined.Z * 0.0722;
+  Graded := Vector3(
+    Luma + (Combined.X - Luma) * FSaturation,
+    Luma + (Combined.Y - Luma) * FSaturation,
+    Luma + (Combined.Z - Luma) * FSaturation);
+  Graded := Vector3(
+    Max(0.0, (Graded.X - 0.18) * FContrast + 0.18),
+    Max(0.0, (Graded.Y - 0.18) * FContrast + 0.18),
+    Max(0.0, (Graded.Z - 0.18) * FContrast + 0.18));
+
+  case FTonemapOperator of
+    tmoLinear:
+      Mapped := Vector3(
+        EnsureRange(Graded.X, 0.0, 1.0),
+        EnsureRange(Graded.Y, 0.0, 1.0),
+        EnsureRange(Graded.Z, 0.0, 1.0));
+    tmoReinhard:
+      Mapped := EvaluateTonemapReinhard(Graded);
+    tmoACESFilmic:
+      Mapped := EvaluateTonemapACESFilmic(Graded);
+    tmoAgX:
+      Mapped := EvaluateTonemapAgX(Graded);
+  end;
+
+  if Abs(FGamma - 2.2) < 1e-3 then
+    Result := EvaluateLinearToSRGB(Mapped)
+  else
+    Result := Vector3(
+      Power(Max(0.0, Mapped.X), 1.0 / Max(1e-3, FGamma)),
+      Power(Max(0.0, Mapped.Y), 1.0 / Max(1e-3, FGamma)),
+      Power(Max(0.0, Mapped.Z), 1.0 / Max(1e-3, FGamma)));
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -8659,12 +9492,20 @@ begin
   Result := FShadowAtlas;
 end;
 
+function TVulkanRHIDevice.GetHDRPostProcessor: TCastleVulkanHDRPostProcessor;
+begin
+  if FHDRPostProcessor = nil then
+    FHDRPostProcessor := TCastleVulkanHDRPostProcessor.Create(Self);
+  Result := FHDRPostProcessor;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FHDRPostProcessor);
   FreeAndNil(FShadowAtlas);
   FreeAndNil(FClusteredLightCuller);
   FreeAndNil(FIBLGenerator);

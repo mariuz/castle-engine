@@ -111,12 +111,16 @@ type
     procedure TestClusteredForwardLightCullingComputeRHI;
     procedure TestDirectionalCascadedShadowMapsAndShadowAtlasRHI;
     procedure TestClusteredForwardAndShadowAtlasShaderIntegrationRHI;
+    procedure TestDeclarativeRenderGraphAndTransientAliasingRHI;
+    procedure TestHDRBloomPyramidAndAutoExposureComputeRHI;
+    procedure TestACESFilmicAndAgXTonemappingCompositeRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
     FRenderFromViewpointCalls: Cardinal;
     FShadowVolumeOnePassCalls: Cardinal;
     FShadowVolumeCasterCalls: Cardinal;
+    FRenderGraphPassExecCount: Cardinal;
     procedure CaptureWarning(const Category, S: String);
     procedure DummyRenderShapeCallback(const Shape: TCollectedShape;
       const Params: TRenderParams; const PassParams: TRenderOnePassParams);
@@ -124,6 +128,8 @@ type
     procedure DummyShadowVolumeOnePassCallback(const Params: TRenderParams;
       const PassParams: TRenderOnePassParams);
     procedure DummyShadowVolumeCasterCallback(const Params: TRenderParams);
+    procedure DummyRenderGraphPassCallback(const AGraph: TRHIRenderGraph;
+      const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
   end;
 
 implementation
@@ -5891,6 +5897,399 @@ begin
     FreeAndNil(FSMod2);
     FreeAndNil(FSMod1);
     FreeAndNil(CSMod);
+    FreeAndNil(Gen);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.DummyRenderGraphPassCallback(
+  const AGraph: TRHIRenderGraph; const APass: TRHIRenderGraphPass;
+  const ACmd: TRHICommandList);
+begin
+  Inc(FRenderGraphPassExecCount);
+end;
+
+procedure TTestCastleVulkanRHI.TestDeclarativeRenderGraphAndTransientAliasingRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  Graph: TRHIRenderGraph;
+  CmdList: TVulkanRHICommandList;
+  FinalTargetTex: TRHITexture;
+  FinalTargetDesc, TransientDescA, TransientDescB, DepthDesc, DeadDesc: TRHITextureDesc;
+  HShadow, HDepth, HHDRColor, HBloomA, HBloomB, HFinal, HDeadTex: TRHIRenderGraphResourceHandle;
+  PassShadow, PassForward, PassBloomDown, PassBloomUp, PassComposite, PassDead: TRHIRenderGraphPass;
+begin
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  Graph := nil;
+  CmdList := nil;
+  FinalTargetTex := nil;
+  try
+    FillChar(FinalTargetDesc, SizeOf(FinalTargetDesc), 0);
+    FinalTargetDesc.Dimension := td2D;
+    FinalTargetDesc.Format := pfRGBA8_UNorm;
+    FinalTargetDesc.Width := 1280;
+    FinalTargetDesc.Height := 720;
+    FinalTargetDesc.DepthOrArrayLayers := 1;
+    FinalTargetDesc.MipLevels := 1;
+    FinalTargetDesc.SampleCount := 1;
+    FinalTargetDesc.Usage := [tuColorAttachment, tuSampled, tuTransferSrc];
+    FinalTargetDesc.DebugName := 'FinalBackbufferTarget';
+    FinalTargetTex := VkDev.CreateTexture(FinalTargetDesc);
+
+    Graph := TRHIRenderGraph.Create(VkDev);
+
+    { 1. Declare transient resources with non-overlapping lifetimes to test physical texture aliasing }
+    TransientDescA := FinalTargetDesc;
+    TransientDescA.Format := pfRGBA16_Float;
+    TransientDescA.Width := 640;
+    TransientDescA.Height := 360;
+    TransientDescA.Usage := [tuColorAttachment, tuSampled, tuStorage];
+
+    TransientDescB := TransientDescA; { Identical descriptor -> eligible for memory aliasing }
+
+    DepthDesc := FinalTargetDesc;
+    DepthDesc.Format := pfD32_Float;
+    DepthDesc.Width := 640;
+    DepthDesc.Height := 360;
+    DepthDesc.Usage := [tuDepthStencil, tuSampled];
+
+    DeadDesc := TransientDescA;
+    DeadDesc.Width := 256;
+    DeadDesc.Height := 256;
+
+    HShadow := Graph.DeclareTransientTexture('TransientShadowScratch', TransientDescA);
+    HDepth := Graph.DeclareTransientTexture('TransientSceneDepth', DepthDesc);
+    HHDRColor := Graph.DeclareTransientTexture('TransientHDRColor', TransientDescA);
+    HBloomA := Graph.DeclareTransientTexture('TransientBloomScratchA', TransientDescB);
+    HBloomB := Graph.DeclareTransientTexture('TransientBloomScratchB', TransientDescB);
+    HDeadTex := Graph.DeclareTransientTexture('UnusedDeadTarget', DeadDesc);
+    HFinal := Graph.ImportExternalTexture('FinalSwapchainOut', FinalTargetTex, rsUndefined, rsPresent);
+
+    { 2. Add passes intentionally out-of-order to verify Kahn's DAG topological sorting:
+         Register Composite first, then BloomUp, BloomDown, Forward, Shadow, and an unreferenced Dead pass }
+    FRenderGraphPassExecCount := 0;
+
+    PassComposite := Graph.AddPass('TonemapCompositePass', rgptGraphics);
+    PassComposite.OnExecute := @DummyRenderGraphPassCallback;
+    PassComposite.ReadTexture(HHDRColor, rsShaderRead);
+    PassComposite.ReadTexture(HBloomB, rsShaderRead);
+    PassComposite.WriteColorAttachment(HFinal);
+
+    PassBloomUp := Graph.AddPass('BloomUpsamplePass', rgptCompute);
+    PassBloomUp.OnExecute := @DummyRenderGraphPassCallback;
+    PassBloomUp.ReadTexture(HBloomA, rsShaderRead);
+    PassBloomUp.WriteStorageTexture(HBloomB, rsTransferDst);
+
+    PassBloomDown := Graph.AddPass('BloomDownsamplePass', rgptCompute);
+    PassBloomDown.OnExecute := @DummyRenderGraphPassCallback;
+    PassBloomDown.ReadTexture(HHDRColor, rsShaderRead);
+    PassBloomDown.WriteStorageTexture(HBloomA, rsTransferDst);
+
+    PassForward := Graph.AddPass('HDRForwardOpaquePass', rgptGraphics);
+    PassForward.OnExecute := @DummyRenderGraphPassCallback;
+    PassForward.ReadTexture(HShadow, rsShaderRead);
+    PassForward.WriteDepthAttachment(HDepth);
+    PassForward.WriteColorAttachment(HHDRColor);
+
+    PassShadow := Graph.AddPass('ShadowCasterPass', rgptGraphics);
+    PassShadow.OnExecute := @DummyRenderGraphPassCallback;
+    PassShadow.WriteColorAttachment(HShadow);
+
+    { Unreferenced pass writing only to HDeadTex (which is never read by any output or side-effect pass) }
+    PassDead := Graph.AddPass('UnreferencedDebugPass', rgptGraphics);
+    PassDead.OnExecute := @DummyRenderGraphPassCallback;
+    PassDead.WriteColorAttachment(HDeadTex);
+
+    { 3. Compile the Render Graph }
+    Graph.Compile;
+    AssertTrue('Graph.IsCompiled must be true', Graph.IsCompiled);
+    AssertEquals('Total registered passes must be 6', 6, Graph.PassCount);
+    AssertEquals('Dead-pass culling must cull 1 unreferenced pass', 1, Graph.CulledPassCount);
+    AssertEquals('Compiled active pass count must be 5', 5, Graph.CompiledPassCount);
+    AssertTrue('PassDead must be marked IsCulled', PassDead.IsCulled);
+    AssertFalse('PassShadow must not be culled', PassShadow.IsCulled);
+    AssertFalse('PassComposite must not be culled', PassComposite.IsCulled);
+
+    { Verify topological order: Shadow -> Forward -> BloomDown -> BloomUp -> Composite }
+    AssertEquals('First compiled pass must be ShadowCasterPass',
+      'ShadowCasterPass', Graph.GetCompiledPass(0).Name);
+    AssertEquals('Last compiled pass must be TonemapCompositePass',
+      'TonemapCompositePass', Graph.GetCompiledPass(Graph.CompiledPassCount - 1).Name);
+    AssertTrue('Shadow pass must execute before Forward pass',
+      PassShadow.ExecutionOrder < PassForward.ExecutionOrder);
+    AssertTrue('Forward pass must execute before BloomDown pass',
+      PassForward.ExecutionOrder < PassBloomDown.ExecutionOrder);
+    AssertTrue('BloomDown pass must execute before BloomUp pass',
+      PassBloomDown.ExecutionOrder < PassBloomUp.ExecutionOrder);
+    AssertTrue('BloomUp pass must execute before Composite pass',
+      PassBloomUp.ExecutionOrder < PassComposite.ExecutionOrder);
+
+    { 4. Verify Transient Resource Lifetime Tracking & Physical Texture Aliasing:
+         HShadow (used in passes 0..1) and HBloomB (used in passes 3..4) have non-overlapping lifetimes
+         and identical descriptors, so they must alias the same physical texture! }
+    AssertTrue('Transient textures must alias physical RHI textures (AliasedTextureSavingsCount >= 1)',
+      Graph.AliasedTextureSavingsCount >= 1);
+    AssertTrue('PhysicalTransientTextureCount must be strictly less than active transient textures',
+      Graph.PhysicalTransientTextureCount < Graph.TransientTextureCount);
+    AssertTrue('Resolved HShadow texture must be non-nil', Graph.ResolvePhysicalTexture(HShadow) <> nil);
+    AssertTrue('Resolved HHDRColor texture must be non-nil', Graph.ResolvePhysicalTexture(HHDRColor) <> nil);
+    AssertTrue('Dead transient texture must not allocate a physical texture',
+      Graph.ResolvePhysicalTexture(HDeadTex) = nil);
+
+    { 5. Execute the compiled Render Graph and verify automatic barrier hoisting }
+    CmdList := TVulkanRHICommandList.Create(VkDev, 0);
+    CmdList.BeginRecording;
+    Graph.Execute(CmdList);
+    CmdList.EndRecording;
+
+    AssertEquals('All 5 active passes must have executed their callback', 5, FRenderGraphPassExecCount);
+    AssertTrue('RenderGraph must automatically hoist and emit TransitionTexture barriers (>= 6)',
+      Graph.EmittedBarrierCount >= 6);
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Graph);
+    FreeAndNil(FinalTargetTex);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestHDRBloomPyramidAndAutoExposureComputeRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  HDRPost: TCastleVulkanHDRPostProcessor;
+  Gen: TCastleShaderGeneratorRHI;
+  CmdList: TVulkanRHICommandList;
+  DownGLSL, UpGLSL, HistGLSL: String;
+  CSDown, CSUp, CSHist: TRHIShaderModule;
+  BrightSamples, DarkSamples: array[0..15] of TVector3;
+  WUniform, WFirefly: Single;
+  AvgUniform, AvgFirefly, SoftThresh: TVector3;
+  I, Step: Integer;
+  Dispatches: Cardinal;
+  BrightLum, DarkLum, BrightExp, DarkExp: Single;
+begin
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  CmdList := nil;
+  CSDown := nil;
+  CSUp := nil;
+  CSHist := nil;
+  try
+    { 1. Verify struct sizes and GLSL compute shader generation }
+    AssertEquals('TCastleBloomPushConstants size must be 32 bytes',
+      32, SizeOf(TCastleBloomPushConstants));
+    AssertEquals('TCastleAutoExposureParams size must be 32 bytes',
+      32, SizeOf(TCastleAutoExposureParams));
+    AssertEquals('TCastleHDRCompositePushConstants size must be 32 bytes',
+      32, SizeOf(TCastleHDRCompositePushConstants));
+
+    DownGLSL := Gen.GenerateBloomDownsampleComputeShader;
+    UpGLSL := Gen.GenerateBloomUpsampleComputeShader;
+    HistGLSL := Gen.GenerateLuminanceHistogramComputeShader;
+
+    AssertTrue('Bloom downsample GLSL must include KarisWeight',
+      Pos('float KarisWeight(vec3 c)', DownGLSL) > 0);
+    AssertTrue('Bloom downsample GLSL must include ApplySoftThreshold',
+      Pos('vec3 ApplySoftThreshold(vec3 c', DownGLSL) > 0);
+    AssertTrue('Bloom upsample GLSL must include 9-tap tent filter weights',
+      Pos('16.0', UpGLSL) > 0);
+    AssertTrue('Histogram GLSL must include s_LocalHistogram[256]',
+      Pos('shared uint s_LocalHistogram[256]', HistGLSL) > 0);
+
+    CSDown := VkDev.CreateShaderModuleFromGLSL(ssCompute, DownGLSL, 'BloomDown_CS');
+    CSUp := VkDev.CreateShaderModuleFromGLSL(ssCompute, UpGLSL, 'BloomUp_CS');
+    CSHist := VkDev.CreateShaderModuleFromGLSL(ssCompute, HistGLSL, 'LumHist_CS');
+    AssertTrue('BloomDown_CS module must compile', CSDown <> nil);
+    AssertTrue('BloomUp_CS module must compile', CSUp <> nil);
+    AssertTrue('LumHist_CS module must compile', CSHist <> nil);
+
+    { 2. Verify Karis average firefly suppression and soft-knee threshold math }
+    HDRPost := VkDev.HDRPostProcessor;
+    AssertTrue('HDRPostProcessor must be lazily created by TVulkanRHIDevice', HDRPost <> nil);
+
+    WUniform := HDRPost.EvaluateKarisWeight(Vector3(1.0, 1.0, 1.0));
+    WFirefly := HDRPost.EvaluateKarisWeight(Vector3(100.0, 100.0, 100.0));
+    AssertTrue('Karis weight must strongly attenuate extreme HDR fireflies', WFirefly < WUniform * 0.05);
+
+    AvgUniform := HDRPost.EvaluateKarisAverage4(
+      Vector3(1.0, 1.0, 1.0), Vector3(1.0, 1.0, 1.0),
+      Vector3(1.0, 1.0, 1.0), Vector3(1.0, 1.0, 1.0));
+    AvgFirefly := HDRPost.EvaluateKarisAverage4(
+      Vector3(1.0, 1.0, 1.0), Vector3(1.0, 1.0, 1.0),
+      Vector3(1.0, 1.0, 1.0), Vector3(1000.0, 1000.0, 1000.0));
+    AssertSameValue(1.0, AvgUniform.X, 1e-4);
+    { Without Karis weighting, arithmetic average of (1,1,1,1000) is 250.75; with Karis average it stays < 2.0! }
+    AssertTrue('Karis 4-tap average must suppress single-pixel 1000-nit firefly (< 2.0)',
+      AvgFirefly.X < 2.0);
+
+    SoftThresh := HDRPost.EvaluateSoftThreshold(Vector3(0.2, 0.2, 0.2), 1.0, 0.5);
+    AssertSameValue(0.0, SoftThresh.X, 1e-5);
+    SoftThresh := HDRPost.EvaluateSoftThreshold(Vector3(3.0, 3.0, 3.0), 1.0, 0.5);
+    AssertTrue('HDR color above threshold (3.0 > 1.0) must produce positive bloom contribution',
+      SoftThresh.X > 1.5);
+
+    { 3. Verify HDR target and 6-mip Bloom Pyramid creation + compute dispatch }
+    HDRPost.EnsureHDRTargets(1920, 1080);
+    AssertTrue('HDRSceneTexture must be allocated', HDRPost.HDRSceneTexture <> nil);
+    AssertEquals('HDRSceneTexture format must be pfRGBA16_Float',
+      Ord(pfRGBA16_Float), Ord(HDRPost.HDRSceneTexture.Desc.Format));
+    AssertEquals('BloomMipCount for 1920x1080 must be 6',
+      CASTLE_BLOOM_MAX_MIP_LEVELS, HDRPost.BloomMipCount);
+    AssertEquals('BloomMipTextures[0] width must be half-res (960)', 960, HDRPost.BloomMipTextures[0].Desc.Width);
+    AssertEquals('BloomMipTextures[0] height must be half-res (540)', 540, HDRPost.BloomMipTextures[0].Desc.Height);
+
+    CmdList := TVulkanRHICommandList.Create(VkDev, 0);
+    CmdList.BeginRecording;
+    Dispatches := HDRPost.DispatchBloomPyramid(CmdList);
+    CmdList.EndRecording;
+    { 6 downsample dispatches + 5 upsample dispatches = 11 total bloom compute dispatches }
+    AssertEquals('DispatchBloomPyramid must record 11 compute dispatches (6 down + 5 up)',
+      11, Dispatches);
+    AssertEquals('TotalBloomDownsampleDispatches must be 6', 6, HDRPost.TotalBloomDownsampleDispatches);
+    AssertEquals('TotalBloomUpsampleDispatches must be 5', 5, HDRPost.TotalBloomUpsampleDispatches);
+
+    { 4. Verify 256-bin Log-Luminance Histogram & Temporal Eye Adaptation }
+    for I := 0 to High(BrightSamples) do
+      BrightSamples[I] := Vector3(16.0, 16.0, 16.0); { Bright outdoor sunlit scene }
+    for I := 0 to High(DarkSamples) do
+      DarkSamples[I] := Vector3(0.08, 0.08, 0.08);   { Dim indoor scene }
+
+    CmdList.BeginRecording;
+    for Step := 1 to 10 do
+      HDRPost.UpdateAutoExposure(CmdList, BrightSamples, 0.5);
+    BrightLum := HDRPost.AdaptedLuminance;
+    BrightExp := HDRPost.AdaptedExposure;
+
+    for Step := 1 to 15 do
+      HDRPost.UpdateAutoExposure(CmdList, DarkSamples, 0.5);
+    DarkLum := HDRPost.AdaptedLuminance;
+    DarkExp := HDRPost.AdaptedExposure;
+    CmdList.EndRecording;
+
+    AssertTrue('TotalHistogramDispatches must increment', HDRPost.TotalHistogramDispatches >= 25);
+    AssertTrue('Bright scene adapted luminance must be much higher than dark scene',
+      BrightLum > DarkLum * 20.0);
+    AssertTrue('Auto-exposure must lower exposure multiplier in bright scenes and raise it in dark scenes',
+      DarkExp > BrightExp * 5.0);
+  finally
+    FreeAndNil(CSHist);
+    FreeAndNil(CSUp);
+    FreeAndNil(CSDown);
+    FreeAndNil(CmdList);
+    FreeAndNil(Gen);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestACESFilmicAndAgXTonemappingCompositeRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  HDRPost: TCastleVulkanHDRPostProcessor;
+  Gen: TCastleShaderGeneratorRHI;
+  Graph: TRHIRenderGraph;
+  CmdList: TVulkanRHICommandList;
+  LDRTarget: TRHITexture;
+  LDRDesc: TRHITextureDesc;
+  TonemapHelpersGLSL, CompositeFragGLSL: String;
+  FSComposite: TRHIShaderModule;
+  ReinhardOut, ACESOut, AgXOut, SRGBOut, CompositeGraded: TVector3;
+begin
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1234)), False, True, VK_API_VERSION_1_3);
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  Graph := nil;
+  CmdList := nil;
+  LDRTarget := nil;
+  FSComposite := nil;
+  try
+    { 1. Verify GLSL Tonemapping (Reinhard, ACES Filmic, AgX) & Color Grading shader generation }
+    TonemapHelpersGLSL := Gen.GenerateTonemappingAndColorGradingFunctions;
+    CompositeFragGLSL := Gen.GenerateHDRCompositeFragmentShader;
+
+    AssertTrue('Tonemap helpers must include TonemapReinhard',
+      Pos('vec3 TonemapReinhard(vec3 hdr)', TonemapHelpersGLSL) > 0);
+    AssertTrue('Tonemap helpers must include TonemapACESFilmic',
+      Pos('vec3 TonemapACESFilmic(vec3 x)', TonemapHelpersGLSL) > 0);
+    AssertTrue('Tonemap helpers must include TonemapAgX with inset matrix and sigmoid log2 encoding',
+      Pos('vec3 TonemapAgX(vec3 hdr)', TonemapHelpersGLSL) > 0);
+    AssertTrue('Tonemap helpers must include ApplyColorGrading',
+      Pos('vec3 ApplyColorGrading(', TonemapHelpersGLSL) > 0);
+    AssertTrue('Tonemap helpers must include LinearToSRGB',
+      Pos('vec3 LinearToSRGB(vec3 linearColor)', TonemapHelpersGLSL) > 0);
+
+    FSComposite := VkDev.CreateShaderModuleFromGLSL(ssFragment, CompositeFragGLSL, 'HDRComposite_FS');
+    AssertTrue('HDRComposite_FS shader module must compile', FSComposite <> nil);
+
+    { 2. Verify CPU reference curves for Reinhard, ACES Filmic (Narkowicz), and AgX (Sobotka) }
+    HDRPost := VkDev.HDRPostProcessor;
+
+    ReinhardOut := HDRPost.EvaluateTonemapReinhard(Vector3(1.0, 1.0, 1.0));
+    AssertSameValue(0.5, ReinhardOut.X, 1e-4);
+
+    ACESOut := HDRPost.EvaluateTonemapACESFilmic(Vector3(10.0, 10.0, 10.0));
+    AssertTrue('ACES Filmic must compress 10.0 HDR white into (0.9..1.0] display range',
+      (ACESOut.X > 0.9) and (ACESOut.X <= 1.0));
+
+    { AgX chroma-preserving highlight desaturation test:
+      A bright saturated red (25.0, 0.5, 0.5) under AgX inset matrix + sigmoid must desaturate
+      toward white (G and B channels rise significantly above 0.5) }
+    AgXOut := HDRPost.EvaluateTonemapAgX(Vector3(25.0, 0.5, 0.5));
+    AssertTrue('AgX must map HDR highlights into [0..1]',
+      (AgXOut.X > 0.8) and (AgXOut.X <= 1.0));
+    AssertTrue('AgX inset matrix must gracefully desaturate bright primary highlights (G/B > 0.45)',
+      (AgXOut.Y > 0.45) and (AgXOut.Z > 0.45));
+
+    SRGBOut := HDRPost.EvaluateLinearToSRGB(Vector3(0.5, 0.5, 0.5));
+    AssertSameValue(0.735357, SRGBOut.X, 1e-3);
+
+    { 3. Verify full composite evaluation (HDR + Bloom + Exposure + Grading + AgX + sRGB) }
+    HDRPost.TonemapOperator := tmoAgX;
+    HDRPost.BloomIntensity := 0.1;
+    HDRPost.Contrast := 1.1;
+    HDRPost.Saturation := 1.05;
+    HDRPost.Gamma := 2.2;
+    CompositeGraded := HDRPost.EvaluateCompositeColor(
+      Vector3(2.0, 1.5, 1.0), Vector3(0.5, 0.5, 0.5));
+    AssertTrue('Composite output must be clamped in [0..1] display range',
+      (CompositeGraded.X >= 0.0) and (CompositeGraded.X <= 1.0) and
+      (CompositeGraded.Y >= 0.0) and (CompositeGraded.Y <= 1.0) and
+      (CompositeGraded.Z >= 0.0) and (CompositeGraded.Z <= 1.0));
+
+    { 4. Verify end-to-end BuildDefaultFrameRenderGraph + ExecuteCompositePass }
+    FillChar(LDRDesc, SizeOf(LDRDesc), 0);
+    LDRDesc.Dimension := td2D;
+    LDRDesc.Format := pfRGBA8_UNorm;
+    LDRDesc.Width := 1280;
+    LDRDesc.Height := 720;
+    LDRDesc.DepthOrArrayLayers := 1;
+    LDRDesc.MipLevels := 1;
+    LDRDesc.SampleCount := 1;
+    LDRDesc.Usage := [tuColorAttachment, tuSampled, tuTransferSrc];
+    LDRDesc.DebugName := 'LDRDisplayTarget';
+    LDRTarget := VkDev.CreateTexture(LDRDesc);
+
+    Graph := TRHIRenderGraph.Create(VkDev);
+    HDRPost.BuildDefaultFrameRenderGraph(Graph, 1280, 720, LDRTarget);
+    Graph.Compile;
+
+    AssertTrue('Default frame RenderGraph must compile cleanly', Graph.IsCompiled);
+    AssertEquals('Default frame RenderGraph must contain 4 active passes (HDRScene, Bloom, AutoExposure, Composite)',
+      4, Graph.CompiledPassCount);
+    AssertEquals('Default frame RenderGraph must have 0 culled passes',
+      0, Graph.CulledPassCount);
+
+    CmdList := TVulkanRHICommandList.Create(VkDev, 0);
+    CmdList.BeginRecording;
+    Graph.Execute(CmdList);
+    HDRPost.ExecuteCompositePass(CmdList, LDRTarget);
+    CmdList.EndRecording;
+
+    AssertEquals('RenderGraph ExecutionCount must be 1', 1, Graph.ExecutionCount);
+    AssertTrue('TotalCompositePasses must be >= 1', HDRPost.TotalCompositePasses >= 1);
+  finally
+    FreeAndNil(FSComposite);
+    FreeAndNil(CmdList);
+    FreeAndNil(Graph);
+    FreeAndNil(LDRTarget);
     FreeAndNil(Gen);
     FreeAndNil(VkDev);
   end;

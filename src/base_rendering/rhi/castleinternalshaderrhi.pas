@@ -245,6 +245,57 @@ type
     AtlasUVScaleOffset: TVector4;  // 16 bytes (xy = UV scale, zw = UV offset in shadow atlas)
   end; // Total = 80 bytes
 
+const
+  CASTLE_BLOOM_MAX_MIP_LEVELS     = 6;
+  CASTLE_LUMINANCE_HISTOGRAM_BINS = 256;
+
+type
+  { HDR Tonemapping Operators (Phase 15.3) }
+  TCastleTonemapOperator = (
+    tmoLinear     = 0,
+    tmoReinhard   = 1,
+    tmoACESFilmic = 2,
+    tmoAgX        = 3
+  );
+
+  { Push constants for 13-tap Karis downsample & 9-tap tent upsample bloom compute passes (32 bytes) }
+  PCastleBloomPushConstants = ^TCastleBloomPushConstants;
+  TCastleBloomPushConstants = packed record
+    SrcTexelSize: TVector2;      // 8 bytes (1.0 / SrcWidth, 1.0 / SrcHeight)
+    Threshold: Single;           // 4 bytes (Bloom brightness threshold, e.g. 1.0)
+    Knee: Single;                // 4 bytes (Soft knee width, e.g. 0.5)
+    FilterRadius: Single;        // 4 bytes (Tent filter radius in UV or texel units, e.g. 1.0)
+    MipLevel: Cardinal;          // 4 bytes (Current bloom mip level 0..CASTLE_BLOOM_MAX_MIP_LEVELS-1)
+    IsFirstDownsample: Cardinal; // 4 bytes (1 on Mip 0 -> applies Karis average + soft threshold, 0 on Mip > 0)
+    DstPackedSize: Cardinal;     // 4 bytes ((DstHeight shl 16) or DstWidth)
+  end; // Total = 32 bytes
+
+  { Push constants / uniform parameters for 256-bin log-luminance histogram & eye adaptation (32 bytes) }
+  PCastleAutoExposureParams = ^TCastleAutoExposureParams;
+  TCastleAutoExposureParams = packed record
+    MinLogLum: Single;        // 4 bytes (Minimum log2 luminance, e.g. -8.0)
+    MaxLogLum: Single;        // 4 bytes (Maximum log2 luminance, e.g. +4.0)
+    TimeDelta: Single;        // 4 bytes (Frame delta time in seconds)
+    AdaptationSpeed: Single;  // 4 bytes (Temporal adaptation speed, e.g. 2.5)
+    TargetMiddleGrey: Single; // 4 bytes (Key value / middle grey, e.g. 0.18)
+    MinExposure: Single;      // 4 bytes (Clamp min exposure, e.g. 0.1)
+    MaxExposure: Single;      // 4 bytes (Clamp max exposure, e.g. 10.0)
+    TotalPixels: Cardinal;    // 4 bytes (Width * Height of HDR scene target)
+  end; // Total = 32 bytes
+
+  { Push constants for HDR + Bloom + Auto-Exposure + ACES/AgX Tonemapping composite pass (32 bytes) }
+  PCastleHDRCompositePushConstants = ^TCastleHDRCompositePushConstants;
+  TCastleHDRCompositePushConstants = packed record
+    Exposure: Single;            // 4 bytes (Manual or adapted exposure multiplier)
+    BloomIntensity: Single;      // 4 bytes (Bloom contribution weight, e.g. 0.08)
+    Gamma: Single;               // 4 bytes (Display gamma, default 2.2)
+    Saturation: Single;          // 4 bytes (Color grading saturation, default 1.0)
+    Contrast: Single;            // 4 bytes (Color grading contrast, default 1.0)
+    TonemapOperator: Cardinal;   // 4 bytes (Ord(TCastleTonemapOperator))
+    EnableBloom: Cardinal;       // 4 bytes (1 = add bloom, 0 = bypass)
+    EnableAutoExposure: Cardinal;// 4 bytes (1 = multiply by adapted exposure SSBO, 0 = manual Exposure)
+  end; // Total = 32 bytes
+
   { Generates RHI-compliant GLSL headers, UBO blocks, and varying layouts }
   TCastleShaderGeneratorRHI = class
   private
@@ -347,6 +398,33 @@ type
       spot, and directional lights into per-cluster light index lists. }
     function GenerateClusteredLightCullingComputeShader(
       const AWorkgroupSizeX: Cardinal = 64): String;
+
+    { Phase 15.2: Generates a GLSL 450 compute shader for 13-tap Jiménez dual-filtering
+      bloom downsample with Karis average firefly suppression and soft-knee thresholding on Mip 0. }
+    function GenerateBloomDownsampleComputeShader(
+      const AWorkgroupSizeX: Cardinal = 8;
+      const AWorkgroupSizeY: Cardinal = 8): String;
+
+    { Phase 15.2: Generates a GLSL 450 compute shader for 9-tap 3x3 tent-filter bloom upsample. }
+    function GenerateBloomUpsampleComputeShader(
+      const AWorkgroupSizeX: Cardinal = 8;
+      const AWorkgroupSizeY: Cardinal = 8): String;
+
+    { Phase 15.2: Generates a GLSL 450 compute shader that builds a 256-bin log2 luminance
+      histogram and updates temporal eye-adapted exposure. }
+    function GenerateLuminanceHistogramComputeShader(
+      const AWorkgroupSizeX: Cardinal = 16;
+      const AWorkgroupSizeY: Cardinal = 16): String;
+
+    { Phase 15.3: Generates GLSL 450 functions for Reinhard, ACES Filmic (Narkowicz RRT+ODT),
+      and AgX (Sobotka inset + log2 sigmoid + outset) tonemapping, saturation/contrast grading,
+      and IEC 61966-2-1 Linear-to-sRGB transfer. }
+    function GenerateTonemappingAndColorGradingFunctions: String;
+
+    { Phase 15.3: Generates a complete GLSL 450 fragment shader for the HDR Post-Processing
+      Composite pass (combining HDR scene color, mip-chain bloom, adapted exposure, color grading,
+      ACES/AgX tonemapping, and sRGB output). }
+    function GenerateHDRCompositeFragmentShader: String;
 
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
@@ -1839,6 +1917,330 @@ begin
     '  entry.Offset = baseOffset;' + NL +
     '  entry.Count = visibleCount;' + NL +
     '  u_ClusterGrid[clusterIdx] = entry;' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateBloomDownsampleComputeShader(
+  const AWorkgroupSizeX, AWorkgroupSizeY: Cardinal): String;
+var
+  LocalX, LocalY: Cardinal;
+begin
+  if AWorkgroupSizeX = 0 then LocalX := 8 else LocalX := AWorkgroupSizeX;
+  if AWorkgroupSizeY = 0 then LocalY := 8 else LocalY := AWorkgroupSizeY;
+
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;', [LocalX, LocalY]) + NL +
+    NL +
+    'layout(set = 0, binding = 0) uniform sampler2D u_SrcTexture;' + NL +
+    'layout(set = 0, binding = 1, rgba16f) uniform writeonly image2D u_DstImage;' + NL +
+    NL +
+    'layout(push_constant) uniform CastleBloomPushConstants {' + NL +
+    '  vec2  u_SrcTexelSize;' + NL +
+    '  float u_Threshold;' + NL +
+    '  float u_Knee;' + NL +
+    '  float u_FilterRadius;' + NL +
+    '  uint  u_MipLevel;' + NL +
+    '  uint  u_IsFirstDownsample;' + NL +
+    '  uint  u_DstPackedSize;' + NL +
+    '} pc;' + NL +
+    NL +
+    'float LuminanceRec709(vec3 c) {' + NL +
+    '  return dot(c, vec3(0.2126, 0.7152, 0.0722));' + NL +
+    '}' + NL +
+    NL +
+    'float KarisWeight(vec3 c) {' + NL +
+    '  return 1.0 / (1.0 + LuminanceRec709(c));' + NL +
+    '}' + NL +
+    NL +
+    'vec3 ApplySoftThreshold(vec3 c, float threshold, float knee) {' + NL +
+    '  float brightness = max(max(c.r, c.g), c.b);' + NL +
+    '  float soft = clamp(brightness - threshold + knee, 0.0, 2.0 * knee);' + NL +
+    '  soft = (soft * soft) / max(4.0 * knee + 1e-5, 1e-5);' + NL +
+    '  float contribution = max(soft, brightness - threshold) / max(brightness, 1e-5);' + NL +
+    '  return c * max(contribution, 0.0);' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  uvec2 dstSize = uvec2(pc.u_DstPackedSize & 0xFFFFu, pc.u_DstPackedSize >> 16u);' + NL +
+    '  uvec2 coord = gl_GlobalInvocationID.xy;' + NL +
+    '  if (coord.x >= dstSize.x || coord.y >= dstSize.y) return;' + NL +
+    NL +
+    '  vec2 uv = (vec2(coord) + vec2(0.5)) / vec2(max(dstSize, uvec2(1u)));' + NL +
+    '  vec2 d = pc.u_SrcTexelSize;' + NL +
+    NL +
+    '  /* 13-tap Jiménez Dual-Filtering Downsample Kernel:' + NL +
+    '     a - b - c' + NL +
+    '     - j - k -' + NL +
+    '     d - e - f' + NL +
+    '     - l - m -' + NL +
+    '     g - h - i */' + NL +
+    '  vec3 a = texture(u_SrcTexture, uv + vec2(-2.0, -2.0) * d).rgb;' + NL +
+    '  vec3 b = texture(u_SrcTexture, uv + vec2( 0.0, -2.0) * d).rgb;' + NL +
+    '  vec3 c = texture(u_SrcTexture, uv + vec2( 2.0, -2.0) * d).rgb;' + NL +
+    '  vec3 d0 = texture(u_SrcTexture, uv + vec2(-2.0,  0.0) * d).rgb;' + NL +
+    '  vec3 e = texture(u_SrcTexture, uv).rgb;' + NL +
+    '  vec3 f = texture(u_SrcTexture, uv + vec2( 2.0,  0.0) * d).rgb;' + NL +
+    '  vec3 g = texture(u_SrcTexture, uv + vec2(-2.0,  2.0) * d).rgb;' + NL +
+    '  vec3 h = texture(u_SrcTexture, uv + vec2( 0.0,  2.0) * d).rgb;' + NL +
+    '  vec3 i = texture(u_SrcTexture, uv + vec2( 2.0,  2.0) * d).rgb;' + NL +
+    '  vec3 j = texture(u_SrcTexture, uv + vec2(-1.0, -1.0) * d).rgb;' + NL +
+    '  vec3 k = texture(u_SrcTexture, uv + vec2( 1.0, -1.0) * d).rgb;' + NL +
+    '  vec3 l = texture(u_SrcTexture, uv + vec2(-1.0,  1.0) * d).rgb;' + NL +
+    '  vec3 m = texture(u_SrcTexture, uv + vec2( 1.0,  1.0) * d).rgb;' + NL +
+    NL +
+    '  vec3 downsample;' + NL +
+    '  if (pc.u_IsFirstDownsample != 0u) {' + NL +
+    '    vec3 g0 = (a + b + d0 + e) * 0.25;' + NL +
+    '    vec3 g1 = (b + c + e + f) * 0.25;' + NL +
+    '    vec3 g2 = (d0 + e + g + h) * 0.25;' + NL +
+    '    vec3 g3 = (e + f + h + i) * 0.25;' + NL +
+    '    vec3 g4 = (j + k + l + m) * 0.25;' + NL +
+    '    float w0 = KarisWeight(g0);' + NL +
+    '    float w1 = KarisWeight(g1);' + NL +
+    '    float w2 = KarisWeight(g2);' + NL +
+    '    float w3 = KarisWeight(g3);' + NL +
+    '    float w4 = KarisWeight(g4);' + NL +
+    '    downsample = (g0 * w0 + g1 * w1 + g2 * w2 + g3 * w3) * 0.125 / max(0.25 * (w0 + w1 + w2 + w3), 1e-5)' + NL +
+    '               + (g4 * 0.5);' + NL +
+    '    downsample = ApplySoftThreshold(downsample, pc.u_Threshold, pc.u_Knee);' + NL +
+    '  } else {' + NL +
+    '    downsample  = e * 0.125;' + NL +
+    '    downsample += (a + c + g + i) * 0.03125;' + NL +
+    '    downsample += (b + d0 + f + h) * 0.0625;' + NL +
+    '    downsample += (j + k + l + m) * 0.125;' + NL +
+    '  }' + NL +
+    NL +
+    '  imageStore(u_DstImage, ivec2(coord), vec4(max(downsample, vec3(0.0)), 1.0));' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateBloomUpsampleComputeShader(
+  const AWorkgroupSizeX, AWorkgroupSizeY: Cardinal): String;
+var
+  LocalX, LocalY: Cardinal;
+begin
+  if AWorkgroupSizeX = 0 then LocalX := 8 else LocalX := AWorkgroupSizeX;
+  if AWorkgroupSizeY = 0 then LocalY := 8 else LocalY := AWorkgroupSizeY;
+
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;', [LocalX, LocalY]) + NL +
+    NL +
+    'layout(set = 0, binding = 0) uniform sampler2D u_SrcLowMipTexture;' + NL +
+    'layout(set = 0, binding = 1, rgba16f) uniform image2D u_DstHighMipImage;' + NL +
+    NL +
+    'layout(push_constant) uniform CastleBloomPushConstants {' + NL +
+    '  vec2  u_SrcTexelSize;' + NL +
+    '  float u_Threshold;' + NL +
+    '  float u_Knee;' + NL +
+    '  float u_FilterRadius;' + NL +
+    '  uint  u_MipLevel;' + NL +
+    '  uint  u_IsFirstDownsample;' + NL +
+    '  uint  u_DstPackedSize;' + NL +
+    '} pc;' + NL +
+    NL +
+    'void main() {' + NL +
+    '  uvec2 dstSize = uvec2(pc.u_DstPackedSize & 0xFFFFu, pc.u_DstPackedSize >> 16u);' + NL +
+    '  uvec2 coord = gl_GlobalInvocationID.xy;' + NL +
+    '  if (coord.x >= dstSize.x || coord.y >= dstSize.y) return;' + NL +
+    NL +
+    '  vec2 uv = (vec2(coord) + vec2(0.5)) / vec2(max(dstSize, uvec2(1u)));' + NL +
+    '  vec2 d = pc.u_SrcTexelSize * max(pc.u_FilterRadius, 1e-4);' + NL +
+    NL +
+    '  /* 9-tap 3x3 Tent Filter Upsample Kernel ([1, 2, 1; 2, 4, 2; 1, 2, 1] / 16) */' + NL +
+    '  vec3 a = texture(u_SrcLowMipTexture, uv + vec2(-d.x, -d.y)).rgb;' + NL +
+    '  vec3 b = texture(u_SrcLowMipTexture, uv + vec2( 0.0, -d.y)).rgb;' + NL +
+    '  vec3 c = texture(u_SrcLowMipTexture, uv + vec2( d.x, -d.y)).rgb;' + NL +
+    '  vec3 d0 = texture(u_SrcLowMipTexture, uv + vec2(-d.x,  0.0)).rgb;' + NL +
+    '  vec3 e = texture(u_SrcLowMipTexture, uv).rgb;' + NL +
+    '  vec3 f = texture(u_SrcLowMipTexture, uv + vec2( d.x,  0.0)).rgb;' + NL +
+    '  vec3 g = texture(u_SrcLowMipTexture, uv + vec2(-d.x,  d.y)).rgb;' + NL +
+    '  vec3 h = texture(u_SrcLowMipTexture, uv + vec2( 0.0,  d.y)).rgb;' + NL +
+    '  vec3 i = texture(u_SrcLowMipTexture, uv + vec2( d.x,  d.y)).rgb;' + NL +
+    NL +
+    '  vec3 upsample = (e * 4.0 + (b + d0 + f + h) * 2.0 + (a + c + g + i)) * (1.0 / 16.0);' + NL +
+    '  vec3 prevMip = imageLoad(u_DstHighMipImage, ivec2(coord)).rgb;' + NL +
+    '  imageStore(u_DstHighMipImage, ivec2(coord), vec4(prevMip + upsample, 1.0));' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateLuminanceHistogramComputeShader(
+  const AWorkgroupSizeX, AWorkgroupSizeY: Cardinal): String;
+var
+  LocalX, LocalY: Cardinal;
+begin
+  if AWorkgroupSizeX = 0 then LocalX := 16 else LocalX := AWorkgroupSizeX;
+  if AWorkgroupSizeY = 0 then LocalY := 16 else LocalY := AWorkgroupSizeY;
+
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;', [LocalX, LocalY]) + NL +
+    NL +
+    'layout(set = 0, binding = 0) uniform sampler2D u_HDRSceneTexture;' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 1) buffer CastleLuminanceHistogramBuffer {' + NL +
+    '  uint u_HistogramBins[256];' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 2) buffer CastleAutoExposureStateBuffer {' + NL +
+    '  float u_AdaptedLuminance;' + NL +
+    '  float u_AdaptedExposure;' + NL +
+    '  float u_TargetLuminance;' + NL +
+    '  float u_Reserved;' + NL +
+    '};' + NL +
+    NL +
+    'layout(push_constant) uniform CastleAutoExposurePushConstants {' + NL +
+    '  float u_MinLogLum;' + NL +
+    '  float u_MaxLogLum;' + NL +
+    '  float u_TimeDelta;' + NL +
+    '  float u_AdaptationSpeed;' + NL +
+    '  float u_TargetMiddleGrey;' + NL +
+    '  float u_MinExposure;' + NL +
+    '  float u_MaxExposure;' + NL +
+    '  uint  u_TotalPixels;' + NL +
+    '} pc;' + NL +
+    NL +
+    'shared uint s_LocalHistogram[256];' + NL +
+    NL +
+    'uint ColorToHistogramBin(vec3 hdrColor) {' + NL +
+    '  float lum = dot(hdrColor, vec3(0.2126, 0.7152, 0.0722));' + NL +
+    '  if (lum < 1e-4) return 0u;' + NL +
+    '  float logLum = clamp((log2(lum) - pc.u_MinLogLum) / max(pc.u_MaxLogLum - pc.u_MinLogLum, 1e-4), 0.0, 1.0);' + NL +
+    '  return uint(logLum * 254.0 + 1.0);' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  uint localIdx = gl_LocalInvocationIndex;' + NL +
+    '  if (localIdx < 256u) s_LocalHistogram[localIdx] = 0u;' + NL +
+    '  barrier();' + NL +
+    NL +
+    '  ivec2 texSize = textureSize(u_HDRSceneTexture, 0);' + NL +
+    '  ivec2 coord = ivec2(gl_GlobalInvocationID.xy);' + NL +
+    '  if (coord.x < texSize.x && coord.y < texSize.y) {' + NL +
+    '    vec3 hdrColor = texelFetch(u_HDRSceneTexture, coord, 0).rgb;' + NL +
+    '    uint bin = ColorToHistogramBin(hdrColor);' + NL +
+    '    atomicAdd(s_LocalHistogram[bin], 1u);' + NL +
+    '  }' + NL +
+    '  barrier();' + NL +
+    NL +
+    '  if (localIdx < 256u && s_LocalHistogram[localIdx] > 0u) {' + NL +
+    '    atomicAdd(u_HistogramBins[localIdx], s_LocalHistogram[localIdx]);' + NL +
+    '  }' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateTonemappingAndColorGradingFunctions: String;
+begin
+  Result :=
+    '/* Phase 15.3: HDR Tonemapping (Reinhard, ACES Filmic, AgX) & Color Grading */' + NL +
+    'vec3 TonemapReinhard(vec3 hdr) {' + NL +
+    '  return hdr / (hdr + vec3(1.0));' + NL +
+    '}' + NL +
+    NL +
+    'vec3 TonemapACESFilmic(vec3 x) {' + NL +
+    '  const float a = 2.51;' + NL +
+    '  const float b = 0.03;' + NL +
+    '  const float c = 2.43;' + NL +
+    '  const float d = 0.59;' + NL +
+    '  const float e = 0.14;' + NL +
+    '  return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 AgXDefaultContrastApprox(vec3 x) {' + NL +
+    '  vec3 x2 = x * x;' + NL +
+    '  vec3 x4 = x2 * x2;' + NL +
+    '  return + 15.5     * x4 * x2' + NL +
+    '         - 40.14    * x4 * x' + NL +
+    '         + 31.96    * x4' + NL +
+    '         - 6.868    * x2 * x' + NL +
+    '         + 0.4298   * x2' + NL +
+    '         + 0.1191   * x' + NL +
+    '         - 0.00232;' + NL +
+    '}' + NL +
+    NL +
+    'vec3 TonemapAgX(vec3 hdr) {' + NL +
+    '  const mat3 agxInsetMatrix = mat3(' + NL +
+    '    0.842479062253094,  0.0423282422610123, 0.0423756549057051,' + NL +
+    '    0.0784335999999992, 0.878468636469772,  0.0784336,' + NL +
+    '    0.0792237451477643, 0.0791661274605434, 0.879142973793104);' + NL +
+    '  const mat3 agxOutsetMatrix = mat3(' + NL +
+    '     1.19687900512017,   -0.0528968517574562, -0.0529716355144438,' + NL +
+    '    -0.0980208811401368,  1.15190312990417,   -0.0980434501171241,' + NL +
+    '    -0.0990297440797205, -0.0989611768448433,  1.15107367264116);' + NL +
+    '  const float minEv = -12.47393;' + NL +
+    '  const float maxEv = 4.026069;' + NL +
+    '  vec3 val = agxInsetMatrix * max(hdr, vec3(1e-6));' + NL +
+    '  val = clamp(log2(val), minEv, maxEv);' + NL +
+    '  val = (val - minEv) / (maxEv - minEv);' + NL +
+    '  val = AgXDefaultContrastApprox(val);' + NL +
+    '  val = agxOutsetMatrix * val;' + NL +
+    '  return clamp(pow(max(val, vec3(0.0)), vec3(2.2)), 0.0, 1.0);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 ApplyColorGrading(vec3 color, float saturation, float contrast) {' + NL +
+    '  float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));' + NL +
+    '  vec3 satColor = mix(vec3(luma), color, saturation);' + NL +
+    '  return max((satColor - vec3(0.18)) * contrast + vec3(0.18), vec3(0.0));' + NL +
+    '}' + NL +
+    NL +
+    'vec3 LinearToSRGB(vec3 linearColor) {' + NL +
+    '  vec3 c = max(linearColor, vec3(0.0));' + NL +
+    '  vec3 lo = c * 12.92;' + NL +
+    '  vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;' + NL +
+    '  return mix(lo, hi, step(vec3(0.0031308), c));' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateHDRCompositeFragmentShader: String;
+begin
+  Result :=
+    '#version 450' + NL +
+    'layout(location = 0) in vec2 v_TexCoord;' + NL +
+    'layout(location = 0) out vec4 out_FragColor;' + NL +
+    NL +
+    'layout(set = 0, binding = 0) uniform sampler2D u_HDRSceneTexture;' + NL +
+    'layout(set = 0, binding = 1) uniform sampler2D u_BloomTexture;' + NL +
+    'layout(std430, set = 0, binding = 2) readonly buffer CastleAutoExposureStateBuffer {' + NL +
+    '  float u_AdaptedLuminance;' + NL +
+    '  float u_AdaptedExposure;' + NL +
+    '  float u_TargetLuminance;' + NL +
+    '  float u_Reserved;' + NL +
+    '};' + NL +
+    NL +
+    'layout(push_constant) uniform CastleHDRCompositePushConstants {' + NL +
+    '  float u_Exposure;' + NL +
+    '  float u_BloomIntensity;' + NL +
+    '  float u_Gamma;' + NL +
+    '  float u_Saturation;' + NL +
+    '  float u_Contrast;' + NL +
+    '  uint  u_TonemapOperator;' + NL +
+    '  uint  u_EnableBloom;' + NL +
+    '  uint  u_EnableAutoExposure;' + NL +
+    '} pc;' + NL +
+    NL +
+    GenerateTonemappingAndColorGradingFunctions + NL +
+    'void main() {' + NL +
+    '  vec3 hdrColor = texture(u_HDRSceneTexture, v_TexCoord).rgb;' + NL +
+    '  if (pc.u_EnableBloom != 0u) {' + NL +
+    '    vec3 bloomColor = texture(u_BloomTexture, v_TexCoord).rgb;' + NL +
+    '    hdrColor += bloomColor * pc.u_BloomIntensity;' + NL +
+    '  }' + NL +
+    NL +
+    '  float exposure = pc.u_Exposure;' + NL +
+    '  if (pc.u_EnableAutoExposure != 0u) {' + NL +
+    '    exposure *= max(u_AdaptedExposure, 1e-4);' + NL +
+    '  }' + NL +
+    '  vec3 exposed = ApplyColorGrading(hdrColor * exposure, pc.u_Saturation, pc.u_Contrast);' + NL +
+    NL +
+    '  vec3 mapped;' + NL +
+    '  if (pc.u_TonemapOperator == 1u) mapped = TonemapReinhard(exposed);' + NL +
+    '  else if (pc.u_TonemapOperator == 2u) mapped = TonemapACESFilmic(exposed);' + NL +
+    '  else if (pc.u_TonemapOperator == 3u) mapped = TonemapAgX(exposed);' + NL +
+    '  else mapped = clamp(exposed, 0.0, 1.0);' + NL +
+    NL +
+    '  vec3 srgb = (abs(pc.u_Gamma - 2.2) < 1e-3) ? LinearToSRGB(mapped) : pow(max(mapped, vec3(0.0)), vec3(1.0 / max(pc.u_Gamma, 1e-3)));' + NL +
+    '  out_FragColor = vec4(srgb, 1.0);' + NL +
     '}' + NL;
 end;
 

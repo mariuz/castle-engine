@@ -39,6 +39,8 @@ type
   TRHIComputePipeline = class;
   TRHIQueryPool = class;
   TRHICommandList = class;
+  TRHIRenderGraphPass = class;
+  TRHIRenderGraph = class;
 
   { Exceptions }
   ERHIError = class(Exception);
@@ -860,6 +862,210 @@ type
     property FrameIndex: Cardinal read FFrameIndex;
   end;
 
+  { -------------------------------------------------------------------------- }
+  { Phase 15.1: Declarative Render Dependency Graph (TRHIRenderGraph)          }
+  { -------------------------------------------------------------------------- }
+
+  TRHIRenderGraphPassType = (
+    rgptGraphics,
+    rgptCompute,
+    rgptTransfer
+  );
+
+  TRHIRenderGraphResourceHandle = Integer;
+
+  TRHIRenderGraphTextureBarrier = record
+    TextureHandle: TRHIRenderGraphResourceHandle;
+    BeforeState: TRHIResourceState;
+    AfterState: TRHIResourceState;
+  end;
+
+  TRHIRenderGraphTextureAccess = record
+    Handle: TRHIRenderGraphResourceHandle;
+    State: TRHIResourceState;
+    LoadOp: TRHIAttachmentLoadOp;
+    StoreOp: TRHIAttachmentStoreOp;
+    ClearColor: TCastleColor;
+    ClearDepth: Single;
+    IsDepthAttachment: Boolean;
+    IsColorAttachment: Boolean;
+  end;
+
+  TRHIRenderGraphPassExecuteEvent = procedure(const AGraph: TRHIRenderGraph;
+    const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList) of object;
+  TRHIRenderGraphPassExecuteProc = procedure(const AGraph: TRHIRenderGraph;
+    const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+
+  { Represents a single graphics, compute, or transfer pass registered in TRHIRenderGraph. }
+  TRHIRenderGraphPass = class
+  private
+    FName: String;
+    FPassIndex: Integer;
+    FPassType: TRHIRenderGraphPassType;
+    FHasSideEffects: Boolean;
+    FIsCulled: Boolean;
+    FExecutionOrder: Integer;
+    FTextureReads: array of TRHIRenderGraphTextureAccess;
+    FTextureWrites: array of TRHIRenderGraphTextureAccess;
+    FBufferReads: array of TRHIRenderGraphResourceHandle;
+    FBufferWrites: array of TRHIRenderGraphResourceHandle;
+    FPrePassBarriers: array of TRHIRenderGraphTextureBarrier;
+    FOnExecute: TRHIRenderGraphPassExecuteEvent;
+    FOnExecuteProc: TRHIRenderGraphPassExecuteProc;
+  public
+    constructor Create(const AName: String; const APassIndex: Integer;
+      const APassType: TRHIRenderGraphPassType; const AHasSideEffects: Boolean = False);
+
+    { Declares that this pass reads AHandle in AReadState (default rsShaderRead). }
+    procedure ReadTexture(const AHandle: TRHIRenderGraphResourceHandle;
+      const AReadState: TRHIResourceState = rsShaderRead);
+
+    { Declares that this pass renders into AHandle as a color attachment. }
+    procedure WriteColorAttachment(const AHandle: TRHIRenderGraphResourceHandle;
+      const ALoadOp: TRHIAttachmentLoadOp = loClear;
+      const AStoreOp: TRHIAttachmentStoreOp = soStore); overload;
+    procedure WriteColorAttachment(const AHandle: TRHIRenderGraphResourceHandle;
+      const ALoadOp: TRHIAttachmentLoadOp;
+      const AClearColor: TCastleColor;
+      const AStoreOp: TRHIAttachmentStoreOp = soStore); overload;
+
+    { Declares that this pass writes into AHandle as a depth/stencil attachment. }
+    procedure WriteDepthAttachment(const AHandle: TRHIRenderGraphResourceHandle;
+      const ALoadOp: TRHIAttachmentLoadOp = loClear;
+      const AClearDepth: Single = 1.0;
+      const AStoreOp: TRHIAttachmentStoreOp = soStore);
+
+    { Declares that this compute/transfer pass writes into AHandle in AWriteState. }
+    procedure WriteStorageTexture(const AHandle: TRHIRenderGraphResourceHandle;
+      const AWriteState: TRHIResourceState = rsTransferDst);
+
+    { Declares buffer read/write dependencies for topological ordering. }
+    procedure ReadBuffer(const AHandle: TRHIRenderGraphResourceHandle);
+    procedure WriteBuffer(const AHandle: TRHIRenderGraphResourceHandle);
+
+    function PrePassBarriersCount: Integer;
+    function GetPrePassBarrier(const AIndex: Integer): TRHIRenderGraphTextureBarrier;
+
+    property Name: String read FName;
+    property PassIndex: Integer read FPassIndex;
+    property PassType: TRHIRenderGraphPassType read FPassType;
+    property HasSideEffects: Boolean read FHasSideEffects write FHasSideEffects;
+    property IsCulled: Boolean read FIsCulled;
+    property ExecutionOrder: Integer read FExecutionOrder;
+    property OnExecute: TRHIRenderGraphPassExecuteEvent read FOnExecute write FOnExecute;
+    property OnExecuteProc: TRHIRenderGraphPassExecuteProc read FOnExecuteProc write FOnExecuteProc;
+  end;
+
+  { Declarative Frame Render Graph performing:
+    1. Pass-level read/write dependency analysis and topological sorting (Kahn's DAG algorithm).
+    2. Backward liveness analysis to automatically cull unused passes (dead-pass culling).
+    3. Transient render-target lifetime tracking and physical texture aliasing across non-overlapping passes.
+    4. Automatic pre-pass TransitionTexture barrier hoisting and Dynamic Rendering BeginRendering/EndRendering. }
+  TRHIRenderGraph = class
+  private
+    type
+      TVirtualTextureEntry = record
+        Name: String;
+        Desc: TRHITextureDesc;
+        IsImported: Boolean;
+        InitialState: TRHIResourceState;
+        FinalState: TRHIResourceState;
+        PhysicalTexture: TRHITexture;
+        PoolSlotIndex: Integer;
+        FirstUseOrder: Integer;
+        LastUseOrder: Integer;
+        LastProducerPass: Integer;
+      end;
+      TVirtualBufferEntry = record
+        Name: String;
+        PhysicalBuffer: TRHIBuffer;
+        LastProducerPass: Integer;
+      end;
+      TTransientPoolSlot = record
+        Desc: TRHITextureDesc;
+        Texture: TRHITexture;
+        LastAssignedOrder: Integer;
+      end;
+      TRHIRenderGraphPassList = {$ifdef FPC}specialize{$endif} TObjectList<TRHIRenderGraphPass>;
+  private
+    FDevice: TRHIDevice;
+    FPasses: TRHIRenderGraphPassList;
+    FCompiledPasses: array of TRHIRenderGraphPass;
+    FVirtualTextures: array of TVirtualTextureEntry;
+    FVirtualBuffers: array of TVirtualBufferEntry;
+    FTransientPool: array of TTransientPoolSlot;
+    FFinalExportBarriers: array of TRHIRenderGraphTextureBarrier;
+    FIsCompiled: Boolean;
+    FCulledPassCount: Integer;
+    FEmittedBarrierCount: Integer;
+    FTransientTextureCount: Integer;
+    FAliasedTextureSavingsCount: Integer;
+    FExecutionCount: Cardinal;
+    class function AreTextureDescsCompatibleForAliasing(
+      const A, B: TRHITextureDesc): Boolean; static;
+    function GetPassCount: Integer;
+    function GetCompiledPassCount: Integer;
+    function GetPhysicalTransientTextureCount: Integer;
+  public
+    constructor Create(const ADevice: TRHIDevice);
+    destructor Destroy; override;
+
+    { Clears declared passes and virtual resources for a new frame while keeping
+      the pooled physical transient textures alive for zero-allocation frame reuse. }
+    procedure Reset;
+
+    { Destroys all pooled physical transient textures. }
+    procedure ReleaseTransientPool;
+
+    { Declares a transient graph-managed texture that will be allocated (or aliased) during Compile. }
+    function DeclareTransientTexture(const AName: String;
+      const ADesc: TRHITextureDesc): TRHIRenderGraphResourceHandle;
+
+    { Imports an persistent external texture (e.g. Swapchain backbuffer or persistent history target). }
+    function ImportExternalTexture(const AName: String;
+      const ATexture: TRHITexture;
+      const AInitialState: TRHIResourceState = rsUndefined;
+      const AFinalState: TRHIResourceState = rsUndefined): TRHIRenderGraphResourceHandle;
+
+    { Imports an external buffer for pass dependency tracking. }
+    function ImportExternalBuffer(const AName: String;
+      const ABuffer: TRHIBuffer): TRHIRenderGraphResourceHandle;
+
+    { Adds a pass to the render graph. }
+    function AddPass(const AName: String;
+      const APassType: TRHIRenderGraphPassType = rgptGraphics;
+      const AHasSideEffects: Boolean = False): TRHIRenderGraphPass;
+
+    { Compiles the render graph: resolves producer-consumer edges, culls dead passes,
+      topologically sorts active passes, aliases non-overlapping transient textures,
+      and hoists pre-pass resource state transitions. }
+    procedure Compile;
+
+    { Executes the compiled render graph onto ACmd, automatically recording hoisted
+      TransitionTexture barriers and wrapping graphics passes in BeginRendering/EndRendering. }
+    procedure Execute(const ACmd: TRHICommandList);
+
+    { Returns the physical TRHITexture bound to AHandle (after Compile). }
+    function ResolvePhysicalTexture(const AHandle: TRHIRenderGraphResourceHandle): TRHITexture;
+
+    { Returns the physical TRHIBuffer bound to AHandle. }
+    function ResolvePhysicalBuffer(const AHandle: TRHIRenderGraphResourceHandle): TRHIBuffer;
+
+    { Returns the compiled pass at AOrderIndex (0 .. CompiledPassCount - 1). }
+    function GetCompiledPass(const AOrderIndex: Integer): TRHIRenderGraphPass;
+
+    property Device: TRHIDevice read FDevice;
+    property IsCompiled: Boolean read FIsCompiled;
+    property PassCount: Integer read GetPassCount;
+    property CompiledPassCount: Integer read GetCompiledPassCount;
+    property CulledPassCount: Integer read FCulledPassCount;
+    property EmittedBarrierCount: Integer read FEmittedBarrierCount;
+    property TransientTextureCount: Integer read FTransientTextureCount;
+    property PhysicalTransientTextureCount: Integer read GetPhysicalTransientTextureCount;
+    property AliasedTextureSavingsCount: Integer read FAliasedTextureSavingsCount;
+    property ExecutionCount: Cardinal read FExecutionCount;
+  end;
+
 const
   { Maximum number of frames simultaneously processed by CPU and GPU. }
   MaxFramesInFlight = 2;
@@ -1498,6 +1704,804 @@ begin
     Result := Format('%s (modern rendering: True)', [
       BackendNames[FCapabilities.Backend]
     ]);
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TRHIRenderGraphPass                                                          }
+{ ---------------------------------------------------------------------------- }
+
+constructor TRHIRenderGraphPass.Create(const AName: String;
+  const APassIndex: Integer; const APassType: TRHIRenderGraphPassType;
+  const AHasSideEffects: Boolean);
+begin
+  inherited Create;
+  FName := AName;
+  FPassIndex := APassIndex;
+  FPassType := APassType;
+  FHasSideEffects := AHasSideEffects;
+  FIsCulled := False;
+  FExecutionOrder := -1;
+end;
+
+procedure TRHIRenderGraphPass.ReadTexture(
+  const AHandle: TRHIRenderGraphResourceHandle;
+  const AReadState: TRHIResourceState);
+var
+  Idx: Integer;
+begin
+  if AHandle < 0 then Exit;
+  Idx := Length(FTextureReads);
+  SetLength(FTextureReads, Idx + 1);
+  FillChar(FTextureReads[Idx], SizeOf(TRHIRenderGraphTextureAccess), 0);
+  FTextureReads[Idx].Handle := AHandle;
+  FTextureReads[Idx].State := AReadState;
+end;
+
+procedure TRHIRenderGraphPass.WriteColorAttachment(
+  const AHandle: TRHIRenderGraphResourceHandle;
+  const ALoadOp: TRHIAttachmentLoadOp;
+  const AStoreOp: TRHIAttachmentStoreOp);
+begin
+  WriteColorAttachment(AHandle, ALoadOp, Vector4(0.0, 0.0, 0.0, 1.0), AStoreOp);
+end;
+
+procedure TRHIRenderGraphPass.WriteColorAttachment(
+  const AHandle: TRHIRenderGraphResourceHandle;
+  const ALoadOp: TRHIAttachmentLoadOp;
+  const AClearColor: TCastleColor;
+  const AStoreOp: TRHIAttachmentStoreOp);
+var
+  Idx: Integer;
+begin
+  if AHandle < 0 then Exit;
+  Idx := Length(FTextureWrites);
+  SetLength(FTextureWrites, Idx + 1);
+  FillChar(FTextureWrites[Idx], SizeOf(TRHIRenderGraphTextureAccess), 0);
+  FTextureWrites[Idx].Handle := AHandle;
+  FTextureWrites[Idx].State := rsColorAttachment;
+  FTextureWrites[Idx].LoadOp := ALoadOp;
+  FTextureWrites[Idx].StoreOp := AStoreOp;
+  FTextureWrites[Idx].ClearColor := AClearColor;
+  FTextureWrites[Idx].IsColorAttachment := True;
+end;
+
+procedure TRHIRenderGraphPass.WriteDepthAttachment(
+  const AHandle: TRHIRenderGraphResourceHandle;
+  const ALoadOp: TRHIAttachmentLoadOp;
+  const AClearDepth: Single;
+  const AStoreOp: TRHIAttachmentStoreOp);
+var
+  Idx: Integer;
+begin
+  if AHandle < 0 then Exit;
+  Idx := Length(FTextureWrites);
+  SetLength(FTextureWrites, Idx + 1);
+  FillChar(FTextureWrites[Idx], SizeOf(TRHIRenderGraphTextureAccess), 0);
+  FTextureWrites[Idx].Handle := AHandle;
+  FTextureWrites[Idx].State := rsDepthStencilWrite;
+  FTextureWrites[Idx].LoadOp := ALoadOp;
+  FTextureWrites[Idx].StoreOp := AStoreOp;
+  FTextureWrites[Idx].ClearDepth := AClearDepth;
+  FTextureWrites[Idx].IsDepthAttachment := True;
+end;
+
+procedure TRHIRenderGraphPass.WriteStorageTexture(
+  const AHandle: TRHIRenderGraphResourceHandle;
+  const AWriteState: TRHIResourceState);
+var
+  Idx: Integer;
+begin
+  if AHandle < 0 then Exit;
+  Idx := Length(FTextureWrites);
+  SetLength(FTextureWrites, Idx + 1);
+  FillChar(FTextureWrites[Idx], SizeOf(TRHIRenderGraphTextureAccess), 0);
+  FTextureWrites[Idx].Handle := AHandle;
+  FTextureWrites[Idx].State := AWriteState;
+  FTextureWrites[Idx].StoreOp := soStore;
+end;
+
+procedure TRHIRenderGraphPass.ReadBuffer(
+  const AHandle: TRHIRenderGraphResourceHandle);
+var
+  Idx: Integer;
+begin
+  if AHandle < 0 then Exit;
+  Idx := Length(FBufferReads);
+  SetLength(FBufferReads, Idx + 1);
+  FBufferReads[Idx] := AHandle;
+end;
+
+procedure TRHIRenderGraphPass.WriteBuffer(
+  const AHandle: TRHIRenderGraphResourceHandle);
+var
+  Idx: Integer;
+begin
+  if AHandle < 0 then Exit;
+  Idx := Length(FBufferWrites);
+  SetLength(FBufferWrites, Idx + 1);
+  FBufferWrites[Idx] := AHandle;
+end;
+
+function TRHIRenderGraphPass.PrePassBarriersCount: Integer;
+begin
+  Result := Length(FPrePassBarriers);
+end;
+
+function TRHIRenderGraphPass.GetPrePassBarrier(
+  const AIndex: Integer): TRHIRenderGraphTextureBarrier;
+begin
+  if (AIndex >= 0) and (AIndex < Length(FPrePassBarriers)) then
+    Result := FPrePassBarriers[AIndex]
+  else
+    FillChar(Result, SizeOf(Result), 0);
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TRHIRenderGraph                                                              }
+{ ---------------------------------------------------------------------------- }
+
+constructor TRHIRenderGraph.Create(const ADevice: TRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FPasses := TRHIRenderGraphPassList.Create(True);
+  Reset;
+end;
+
+destructor TRHIRenderGraph.Destroy;
+begin
+  ReleaseTransientPool;
+  FreeAndNil(FPasses);
+  inherited;
+end;
+
+procedure TRHIRenderGraph.Reset;
+begin
+  FPasses.Clear;
+  SetLength(FCompiledPasses, 0);
+  SetLength(FVirtualTextures, 0);
+  SetLength(FVirtualBuffers, 0);
+  SetLength(FFinalExportBarriers, 0);
+  FIsCompiled := False;
+  FCulledPassCount := 0;
+  FEmittedBarrierCount := 0;
+  FTransientTextureCount := 0;
+  FAliasedTextureSavingsCount := 0;
+end;
+
+procedure TRHIRenderGraph.ReleaseTransientPool;
+var
+  I: Integer;
+begin
+  for I := 0 to Length(FTransientPool) - 1 do
+    FreeAndNil(FTransientPool[I].Texture);
+  SetLength(FTransientPool, 0);
+end;
+
+class function TRHIRenderGraph.AreTextureDescsCompatibleForAliasing(
+  const A, B: TRHITextureDesc): Boolean;
+begin
+  Result :=
+    (A.Dimension = B.Dimension) and
+    (A.Width = B.Width) and
+    (A.Height = B.Height) and
+    (A.DepthOrArrayLayers = B.DepthOrArrayLayers) and
+    (A.MipLevels = B.MipLevels) and
+    (A.SampleCount = B.SampleCount) and
+    (A.Format = B.Format) and
+    (A.Usage = B.Usage);
+end;
+
+function TRHIRenderGraph.GetPassCount: Integer;
+begin
+  Result := FPasses.Count;
+end;
+
+function TRHIRenderGraph.GetCompiledPassCount: Integer;
+begin
+  Result := Length(FCompiledPasses);
+end;
+
+function TRHIRenderGraph.GetPhysicalTransientTextureCount: Integer;
+begin
+  Result := Length(FTransientPool);
+end;
+
+function TRHIRenderGraph.DeclareTransientTexture(const AName: String;
+  const ADesc: TRHITextureDesc): TRHIRenderGraphResourceHandle;
+var
+  Idx: Integer;
+begin
+  FIsCompiled := False;
+  Idx := Length(FVirtualTextures);
+  SetLength(FVirtualTextures, Idx + 1);
+  FillChar(FVirtualTextures[Idx], SizeOf(TVirtualTextureEntry), 0);
+  FVirtualTextures[Idx].Name := AName;
+  FVirtualTextures[Idx].Desc := ADesc;
+  FVirtualTextures[Idx].Desc.DebugName := AName;
+  FVirtualTextures[Idx].IsImported := False;
+  FVirtualTextures[Idx].InitialState := rsUndefined;
+  FVirtualTextures[Idx].FinalState := rsUndefined;
+  FVirtualTextures[Idx].PhysicalTexture := nil;
+  FVirtualTextures[Idx].PoolSlotIndex := -1;
+  FVirtualTextures[Idx].FirstUseOrder := High(Integer);
+  FVirtualTextures[Idx].LastUseOrder := -1;
+  FVirtualTextures[Idx].LastProducerPass := -1;
+  Inc(FTransientTextureCount);
+  Result := Idx;
+end;
+
+function TRHIRenderGraph.ImportExternalTexture(const AName: String;
+  const ATexture: TRHITexture;
+  const AInitialState, AFinalState: TRHIResourceState): TRHIRenderGraphResourceHandle;
+var
+  Idx: Integer;
+begin
+  FIsCompiled := False;
+  Idx := Length(FVirtualTextures);
+  SetLength(FVirtualTextures, Idx + 1);
+  FillChar(FVirtualTextures[Idx], SizeOf(TVirtualTextureEntry), 0);
+  FVirtualTextures[Idx].Name := AName;
+  if ATexture <> nil then
+    FVirtualTextures[Idx].Desc := ATexture.Desc;
+  FVirtualTextures[Idx].IsImported := True;
+  if (AInitialState = rsUndefined) and (ATexture <> nil) then
+    FVirtualTextures[Idx].InitialState := ATexture.CurrentState
+  else
+    FVirtualTextures[Idx].InitialState := AInitialState;
+  FVirtualTextures[Idx].FinalState := AFinalState;
+  FVirtualTextures[Idx].PhysicalTexture := ATexture;
+  FVirtualTextures[Idx].PoolSlotIndex := -1;
+  FVirtualTextures[Idx].FirstUseOrder := High(Integer);
+  FVirtualTextures[Idx].LastUseOrder := -1;
+  FVirtualTextures[Idx].LastProducerPass := -1;
+  Result := Idx;
+end;
+
+function TRHIRenderGraph.ImportExternalBuffer(const AName: String;
+  const ABuffer: TRHIBuffer): TRHIRenderGraphResourceHandle;
+var
+  Idx: Integer;
+begin
+  FIsCompiled := False;
+  Idx := Length(FVirtualBuffers);
+  SetLength(FVirtualBuffers, Idx + 1);
+  FVirtualBuffers[Idx].Name := AName;
+  FVirtualBuffers[Idx].PhysicalBuffer := ABuffer;
+  FVirtualBuffers[Idx].LastProducerPass := -1;
+  Result := Idx;
+end;
+
+function TRHIRenderGraph.AddPass(const AName: String;
+  const APassType: TRHIRenderGraphPassType;
+  const AHasSideEffects: Boolean): TRHIRenderGraphPass;
+begin
+  FIsCompiled := False;
+  Result := TRHIRenderGraphPass.Create(AName, FPasses.Count, APassType, AHasSideEffects);
+  FPasses.Add(Result);
+end;
+
+procedure TRHIRenderGraph.Compile;
+var
+  NPasses, P, Q, I, J, H, OrderIdx, SlotIdx, ChosenSlot, BarrierIdx: Integer;
+  Edges: array of array of Boolean;
+  InDegree: array of Integer;
+  IsLive: array of Boolean;
+  Queue: array of Integer;
+  QueueHead, QueueTail: Integer;
+  Pass, OtherPass: TRHIRenderGraphPass;
+  LastTexWriter: array of Integer;
+  LastBufWriter: array of Integer;
+  TrackedTexState: array of TRHIResourceState;
+  PoolTexState: array of TRHIResourceState;
+  CurState, NeededState: TRHIResourceState;
+  AlreadyHasBarrier: Boolean;
+begin
+  NPasses := FPasses.Count;
+  SetLength(FCompiledPasses, 0);
+  SetLength(FFinalExportBarriers, 0);
+  FCulledPassCount := 0;
+  FEmittedBarrierCount := 0;
+  FAliasedTextureSavingsCount := 0;
+
+  if NPasses = 0 then
+  begin
+    FIsCompiled := True;
+    Exit;
+  end;
+
+  { 1. Build DAG dependency edges between passes (Edges[Producer, Consumer] = True) }
+  SetLength(Edges, NPasses, NPasses);
+  for P := 0 to NPasses - 1 do
+    for Q := 0 to NPasses - 1 do
+      Edges[P][Q] := False;
+
+  SetLength(LastTexWriter, Length(FVirtualTextures));
+  for I := 0 to Length(LastTexWriter) - 1 do
+    LastTexWriter[I] := -1;
+
+  SetLength(LastBufWriter, Length(FVirtualBuffers));
+  for I := 0 to Length(LastBufWriter) - 1 do
+    LastBufWriter[I] := -1;
+
+  { First pass: resolve producer -> consumer edges regardless of declaration order
+    by matching any pass Q that reads resource R to any pass P that writes resource R }
+  for P := 0 to NPasses - 1 do
+  begin
+    Pass := FPasses[P];
+    for I := 0 to Length(Pass.FTextureWrites) - 1 do
+    begin
+      H := Pass.FTextureWrites[I].Handle;
+      if (H >= 0) and (H < Length(FVirtualTextures)) then
+      begin
+        { Any earlier writer of the same texture must precede this writer (WAW) }
+        if (LastTexWriter[H] >= 0) and (LastTexWriter[H] <> P) then
+          Edges[LastTexWriter[H]][P] := True;
+        LastTexWriter[H] := P;
+
+        { Any pass Q that reads H depends on writer P (unless Q also writes H before P) }
+        for Q := 0 to NPasses - 1 do
+          if Q <> P then
+          begin
+            OtherPass := FPasses[Q];
+            for J := 0 to Length(OtherPass.FTextureReads) - 1 do
+              if OtherPass.FTextureReads[J].Handle = H then
+              begin
+                { Avoid creating a 2-cycle if Q already precedes P }
+                if not Edges[Q][P] then
+                  Edges[P][Q] := True;
+              end;
+          end;
+      end;
+    end;
+
+    for I := 0 to Length(Pass.FBufferWrites) - 1 do
+    begin
+      H := Pass.FBufferWrites[I];
+      if (H >= 0) and (H < Length(FVirtualBuffers)) then
+      begin
+        if (LastBufWriter[H] >= 0) and (LastBufWriter[H] <> P) then
+          Edges[LastBufWriter[H]][P] := True;
+        LastBufWriter[H] := P;
+
+        for Q := 0 to NPasses - 1 do
+          if Q <> P then
+          begin
+            OtherPass := FPasses[Q];
+            for J := 0 to Length(OtherPass.FBufferReads) - 1 do
+              if OtherPass.FBufferReads[J] = H then
+                if not Edges[Q][P] then
+                  Edges[P][Q] := True;
+          end;
+      end;
+    end;
+  end;
+
+  { 2. Backward Liveness Analysis (Dead-Pass Culling) }
+  SetLength(IsLive, NPasses);
+  SetLength(Queue, NPasses);
+  QueueHead := 0;
+  QueueTail := 0;
+
+  for P := 0 to NPasses - 1 do
+  begin
+    Pass := FPasses[P];
+    IsLive[P] := Pass.FHasSideEffects;
+
+    if not IsLive[P] then
+    begin
+      for I := 0 to Length(Pass.FTextureWrites) - 1 do
+      begin
+        H := Pass.FTextureWrites[I].Handle;
+        if (H >= 0) and (H < Length(FVirtualTextures)) and FVirtualTextures[H].IsImported then
+        begin
+          IsLive[P] := True;
+          Break;
+        end;
+      end;
+    end;
+
+    if not IsLive[P] then
+    begin
+      for I := 0 to Length(Pass.FBufferWrites) - 1 do
+      begin
+        H := Pass.FBufferWrites[I];
+        if (H >= 0) and (H < Length(FVirtualBuffers)) then
+        begin
+          IsLive[P] := True;
+          Break;
+        end;
+      end;
+    end;
+
+    if IsLive[P] then
+    begin
+      Queue[QueueTail] := P;
+      Inc(QueueTail);
+    end;
+  end;
+
+  while QueueHead < QueueTail do
+  begin
+    Q := Queue[QueueHead];
+    Inc(QueueHead);
+    for P := 0 to NPasses - 1 do
+      if Edges[P][Q] and (not IsLive[P]) then
+      begin
+        IsLive[P] := True;
+        Queue[QueueTail] := P;
+        Inc(QueueTail);
+      end;
+  end;
+
+  for P := 0 to NPasses - 1 do
+  begin
+    FPasses[P].FIsCulled := not IsLive[P];
+    FPasses[P].FExecutionOrder := -1;
+    SetLength(FPasses[P].FPrePassBarriers, 0);
+    if not IsLive[P] then
+      Inc(FCulledPassCount);
+  end;
+
+  { 3. Topological Sort (Kahn's Algorithm) over live passes }
+  SetLength(InDegree, NPasses);
+  for P := 0 to NPasses - 1 do
+  begin
+    InDegree[P] := 0;
+    if IsLive[P] then
+      for Q := 0 to NPasses - 1 do
+        if IsLive[Q] and Edges[Q][P] then
+          Inc(InDegree[P]);
+  end;
+
+  QueueHead := 0;
+  QueueTail := 0;
+  for P := 0 to NPasses - 1 do
+    if IsLive[P] and (InDegree[P] = 0) then
+    begin
+      Queue[QueueTail] := P;
+      Inc(QueueTail);
+    end;
+
+  OrderIdx := 0;
+  SetLength(FCompiledPasses, NPasses - FCulledPassCount);
+  while QueueHead < QueueTail do
+  begin
+    P := Queue[QueueHead];
+    Inc(QueueHead);
+    FPasses[P].FExecutionOrder := OrderIdx;
+    FCompiledPasses[OrderIdx] := FPasses[P];
+    Inc(OrderIdx);
+
+    for Q := 0 to NPasses - 1 do
+      if IsLive[Q] and Edges[P][Q] then
+      begin
+        Dec(InDegree[Q]);
+        if InDegree[Q] = 0 then
+        begin
+          Queue[QueueTail] := Q;
+          Inc(QueueTail);
+        end;
+      end;
+  end;
+
+  if OrderIdx <> (NPasses - FCulledPassCount) then
+    raise ERHIError.Create('TRHIRenderGraph.Compile: Dependency cycle detected in render graph passes.');
+
+  { 4. Compute Transient Texture Lifetimes & Perform Physical Texture Aliasing }
+  for H := 0 to Length(FVirtualTextures) - 1 do
+  begin
+    FVirtualTextures[H].FirstUseOrder := High(Integer);
+    FVirtualTextures[H].LastUseOrder := -1;
+    FVirtualTextures[H].PoolSlotIndex := -1;
+    if not FVirtualTextures[H].IsImported then
+      FVirtualTextures[H].PhysicalTexture := nil;
+  end;
+
+  for OrderIdx := 0 to Length(FCompiledPasses) - 1 do
+  begin
+    Pass := FCompiledPasses[OrderIdx];
+    for I := 0 to Length(Pass.FTextureReads) - 1 do
+    begin
+      H := Pass.FTextureReads[I].Handle;
+      if (H >= 0) and (H < Length(FVirtualTextures)) then
+      begin
+        if OrderIdx < FVirtualTextures[H].FirstUseOrder then
+          FVirtualTextures[H].FirstUseOrder := OrderIdx;
+        if OrderIdx > FVirtualTextures[H].LastUseOrder then
+          FVirtualTextures[H].LastUseOrder := OrderIdx;
+      end;
+    end;
+    for I := 0 to Length(Pass.FTextureWrites) - 1 do
+    begin
+      H := Pass.FTextureWrites[I].Handle;
+      if (H >= 0) and (H < Length(FVirtualTextures)) then
+      begin
+        if OrderIdx < FVirtualTextures[H].FirstUseOrder then
+          FVirtualTextures[H].FirstUseOrder := OrderIdx;
+        if OrderIdx > FVirtualTextures[H].LastUseOrder then
+          FVirtualTextures[H].LastUseOrder := OrderIdx;
+      end;
+    end;
+  end;
+
+  { Reset pool slot usage for this compilation }
+  for SlotIdx := 0 to Length(FTransientPool) - 1 do
+    FTransientPool[SlotIdx].LastAssignedOrder := -1;
+
+  { Assign physical textures in increasing FirstUseOrder }
+  for OrderIdx := 0 to Length(FCompiledPasses) - 1 do
+    for H := 0 to Length(FVirtualTextures) - 1 do
+      if (not FVirtualTextures[H].IsImported) and
+         (FVirtualTextures[H].FirstUseOrder = OrderIdx) and
+         (FVirtualTextures[H].LastUseOrder >= OrderIdx) and
+         (FVirtualTextures[H].PhysicalTexture = nil) then
+      begin
+        ChosenSlot := -1;
+        for SlotIdx := 0 to Length(FTransientPool) - 1 do
+          if (FTransientPool[SlotIdx].LastAssignedOrder < FVirtualTextures[H].FirstUseOrder) and
+             AreTextureDescsCompatibleForAliasing(FTransientPool[SlotIdx].Desc, FVirtualTextures[H].Desc) then
+          begin
+            ChosenSlot := SlotIdx;
+            if FTransientPool[SlotIdx].LastAssignedOrder >= 0 then
+              Inc(FAliasedTextureSavingsCount);
+            Break;
+          end;
+
+        if ChosenSlot < 0 then
+        begin
+          ChosenSlot := Length(FTransientPool);
+          SetLength(FTransientPool, ChosenSlot + 1);
+          FTransientPool[ChosenSlot].Desc := FVirtualTextures[H].Desc;
+          if FDevice <> nil then
+            FTransientPool[ChosenSlot].Texture := FDevice.CreateTexture(FVirtualTextures[H].Desc)
+          else
+            FTransientPool[ChosenSlot].Texture := nil;
+        end;
+
+        FTransientPool[ChosenSlot].LastAssignedOrder := FVirtualTextures[H].LastUseOrder;
+        FVirtualTextures[H].PoolSlotIndex := ChosenSlot;
+        FVirtualTextures[H].PhysicalTexture := FTransientPool[ChosenSlot].Texture;
+      end;
+
+  { 5. Hoist Pre-Pass Resource State Transitions }
+  SetLength(TrackedTexState, Length(FVirtualTextures));
+  for H := 0 to Length(FVirtualTextures) - 1 do
+    TrackedTexState[H] := FVirtualTextures[H].InitialState;
+
+  SetLength(PoolTexState, Length(FTransientPool));
+  for SlotIdx := 0 to Length(FTransientPool) - 1 do
+    if FTransientPool[SlotIdx].Texture <> nil then
+      PoolTexState[SlotIdx] := FTransientPool[SlotIdx].Texture.CurrentState
+    else
+      PoolTexState[SlotIdx] := rsUndefined;
+
+  for OrderIdx := 0 to Length(FCompiledPasses) - 1 do
+  begin
+    Pass := FCompiledPasses[OrderIdx];
+    SetLength(Pass.FPrePassBarriers, 0);
+
+    { Check texture reads }
+    for I := 0 to Length(Pass.FTextureReads) - 1 do
+    begin
+      H := Pass.FTextureReads[I].Handle;
+      NeededState := Pass.FTextureReads[I].State;
+      if (H >= 0) and (H < Length(FVirtualTextures)) then
+      begin
+        SlotIdx := FVirtualTextures[H].PoolSlotIndex;
+        if (not FVirtualTextures[H].IsImported) and (SlotIdx >= 0) then
+          CurState := PoolTexState[SlotIdx]
+        else
+          CurState := TrackedTexState[H];
+
+        if CurState <> NeededState then
+        begin
+          AlreadyHasBarrier := False;
+          for J := 0 to Length(Pass.FPrePassBarriers) - 1 do
+            if Pass.FPrePassBarriers[J].TextureHandle = H then
+            begin
+              AlreadyHasBarrier := True;
+              Break;
+            end;
+          if not AlreadyHasBarrier then
+          begin
+            BarrierIdx := Length(Pass.FPrePassBarriers);
+            SetLength(Pass.FPrePassBarriers, BarrierIdx + 1);
+            Pass.FPrePassBarriers[BarrierIdx].TextureHandle := H;
+            Pass.FPrePassBarriers[BarrierIdx].BeforeState := CurState;
+            Pass.FPrePassBarriers[BarrierIdx].AfterState := NeededState;
+            Inc(FEmittedBarrierCount);
+          end;
+          TrackedTexState[H] := NeededState;
+          if (not FVirtualTextures[H].IsImported) and (SlotIdx >= 0) then
+            PoolTexState[SlotIdx] := NeededState;
+        end;
+      end;
+    end;
+
+    { Check texture writes }
+    for I := 0 to Length(Pass.FTextureWrites) - 1 do
+    begin
+      H := Pass.FTextureWrites[I].Handle;
+      NeededState := Pass.FTextureWrites[I].State;
+      if (H >= 0) and (H < Length(FVirtualTextures)) then
+      begin
+        SlotIdx := FVirtualTextures[H].PoolSlotIndex;
+        if (not FVirtualTextures[H].IsImported) and (SlotIdx >= 0) then
+          CurState := PoolTexState[SlotIdx]
+        else
+          CurState := TrackedTexState[H];
+
+        if CurState <> NeededState then
+        begin
+          AlreadyHasBarrier := False;
+          for J := 0 to Length(Pass.FPrePassBarriers) - 1 do
+            if Pass.FPrePassBarriers[J].TextureHandle = H then
+            begin
+              Pass.FPrePassBarriers[J].AfterState := NeededState;
+              AlreadyHasBarrier := True;
+              Break;
+            end;
+          if not AlreadyHasBarrier then
+          begin
+            BarrierIdx := Length(Pass.FPrePassBarriers);
+            SetLength(Pass.FPrePassBarriers, BarrierIdx + 1);
+            Pass.FPrePassBarriers[BarrierIdx].TextureHandle := H;
+            Pass.FPrePassBarriers[BarrierIdx].BeforeState := CurState;
+            Pass.FPrePassBarriers[BarrierIdx].AfterState := NeededState;
+            Inc(FEmittedBarrierCount);
+          end;
+          TrackedTexState[H] := NeededState;
+          if (not FVirtualTextures[H].IsImported) and (SlotIdx >= 0) then
+            PoolTexState[SlotIdx] := NeededState;
+        end;
+      end;
+    end;
+  end;
+
+  { Check FinalState transitions for imported textures }
+  for H := 0 to Length(FVirtualTextures) - 1 do
+    if FVirtualTextures[H].IsImported and
+       (FVirtualTextures[H].FinalState <> rsUndefined) and
+       (TrackedTexState[H] <> FVirtualTextures[H].FinalState) then
+    begin
+      BarrierIdx := Length(FFinalExportBarriers);
+      SetLength(FFinalExportBarriers, BarrierIdx + 1);
+      FFinalExportBarriers[BarrierIdx].TextureHandle := H;
+      FFinalExportBarriers[BarrierIdx].BeforeState := TrackedTexState[H];
+      FFinalExportBarriers[BarrierIdx].AfterState := FVirtualTextures[H].FinalState;
+      Inc(FEmittedBarrierCount);
+    end;
+
+  FIsCompiled := True;
+end;
+
+procedure TRHIRenderGraph.Execute(const ACmd: TRHICommandList);
+var
+  OrderIdx, I, ColorCount: Integer;
+  Pass: TRHIRenderGraphPass;
+  PhysTex: TRHITexture;
+  RenderInfo: TRHIRenderingInfo;
+  TargetW, TargetH: Cardinal;
+  HasAttachments: Boolean;
+begin
+  if not FIsCompiled then
+    Compile;
+
+  for OrderIdx := 0 to Length(FCompiledPasses) - 1 do
+  begin
+    Pass := FCompiledPasses[OrderIdx];
+
+    { 1. Emit hoisted pre-pass texture barriers }
+    if ACmd <> nil then
+      for I := 0 to Length(Pass.FPrePassBarriers) - 1 do
+      begin
+        PhysTex := ResolvePhysicalTexture(Pass.FPrePassBarriers[I].TextureHandle);
+        if PhysTex <> nil then
+          ACmd.TransitionTexture(PhysTex, Pass.FPrePassBarriers[I].AfterState);
+      end;
+
+    { 2. Automatically wrap graphics passes with attachments in BeginRendering/EndRendering }
+    HasAttachments := False;
+    if (ACmd <> nil) and (Pass.FPassType = rgptGraphics) and (Length(Pass.FTextureWrites) > 0) then
+    begin
+      FillChar(RenderInfo, SizeOf(RenderInfo), 0);
+      ColorCount := 0;
+      TargetW := 0;
+      TargetH := 0;
+
+      for I := 0 to Length(Pass.FTextureWrites) - 1 do
+      begin
+        PhysTex := ResolvePhysicalTexture(Pass.FTextureWrites[I].Handle);
+        if (PhysTex <> nil) and (TargetW = 0) then
+        begin
+          TargetW := PhysTex.Desc.Width;
+          TargetH := PhysTex.Desc.Height;
+        end;
+
+        if Pass.FTextureWrites[I].IsColorAttachment then
+        begin
+          SetLength(RenderInfo.ColorAttachments, ColorCount + 1);
+          FillChar(RenderInfo.ColorAttachments[ColorCount], SizeOf(TRHIRenderingAttachment), 0);
+          RenderInfo.ColorAttachments[ColorCount].Texture := PhysTex;
+          RenderInfo.ColorAttachments[ColorCount].LoadOp := Pass.FTextureWrites[I].LoadOp;
+          RenderInfo.ColorAttachments[ColorCount].StoreOp := Pass.FTextureWrites[I].StoreOp;
+          RenderInfo.ColorAttachments[ColorCount].ClearColor := Pass.FTextureWrites[I].ClearColor;
+          Inc(ColorCount);
+          HasAttachments := True;
+        end else
+        if Pass.FTextureWrites[I].IsDepthAttachment then
+        begin
+          RenderInfo.HasDepthAttachment := True;
+          FillChar(RenderInfo.DepthAttachment, SizeOf(TRHIRenderingAttachment), 0);
+          RenderInfo.DepthAttachment.Texture := PhysTex;
+          RenderInfo.DepthAttachment.LoadOp := Pass.FTextureWrites[I].LoadOp;
+          RenderInfo.DepthAttachment.StoreOp := Pass.FTextureWrites[I].StoreOp;
+          RenderInfo.DepthAttachment.ClearDepth := Pass.FTextureWrites[I].ClearDepth;
+          HasAttachments := True;
+        end;
+      end;
+
+      if HasAttachments then
+      begin
+        if (TargetW = 0) or (TargetH = 0) then
+        begin
+          TargetW := 1;
+          TargetH := 1;
+        end;
+        RenderInfo.RenderArea := Rectangle(0, 0, TargetW, TargetH);
+        ACmd.BeginRendering(RenderInfo);
+        ACmd.SetViewport(FloatRectangle(0, 0, TargetW, TargetH));
+        ACmd.SetScissor(RenderInfo.RenderArea);
+      end;
+    end;
+
+    { 3. Execute pass callback }
+    if Assigned(Pass.FOnExecute) then
+      Pass.FOnExecute(Self, Pass, ACmd);
+    if Assigned(Pass.FOnExecuteProc) then
+      Pass.FOnExecuteProc(Self, Pass, ACmd);
+
+    if (ACmd <> nil) and HasAttachments then
+      ACmd.EndRendering;
+  end;
+
+  { 4. Emit final export barriers }
+  if ACmd <> nil then
+    for I := 0 to Length(FFinalExportBarriers) - 1 do
+    begin
+      PhysTex := ResolvePhysicalTexture(FFinalExportBarriers[I].TextureHandle);
+      if PhysTex <> nil then
+        ACmd.TransitionTexture(PhysTex, FFinalExportBarriers[I].AfterState);
+    end;
+
+  Inc(FExecutionCount);
+end;
+
+function TRHIRenderGraph.ResolvePhysicalTexture(
+  const AHandle: TRHIRenderGraphResourceHandle): TRHITexture;
+begin
+  if (AHandle >= 0) and (AHandle < Length(FVirtualTextures)) then
+    Result := FVirtualTextures[AHandle].PhysicalTexture
+  else
+    Result := nil;
+end;
+
+function TRHIRenderGraph.ResolvePhysicalBuffer(
+  const AHandle: TRHIRenderGraphResourceHandle): TRHIBuffer;
+begin
+  if (AHandle >= 0) and (AHandle < Length(FVirtualBuffers)) then
+    Result := FVirtualBuffers[AHandle].PhysicalBuffer
+  else
+    Result := nil;
+end;
+
+function TRHIRenderGraph.GetCompiledPass(const AOrderIndex: Integer): TRHIRenderGraphPass;
+begin
+  if (AOrderIndex >= 0) and (AOrderIndex < Length(FCompiledPasses)) then
+    Result := FCompiledPasses[AOrderIndex]
+  else
+    Result := nil;
 end;
 
 end.
