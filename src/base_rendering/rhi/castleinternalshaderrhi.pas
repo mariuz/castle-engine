@@ -258,6 +258,9 @@ const
   CASTLE_MAX_REFLECTION_PROBES = 16;
   CASTLE_MAX_PROJECTED_DECALS  = 64;
 
+  { Phase 18.1: Default GPU compute particle pool capacity }
+  CASTLE_DEFAULT_MAX_PARTICLES = 65536;
+
 type
   { HDR Tonemapping Operators (Phase 15.3) }
   TCastleTonemapOperator = (
@@ -378,6 +381,39 @@ type
     DecalNormalAndRoughness: TVector4; // 16 bytes (xyz = world projection normal axis, w = roughness modulation)
     UVScaleOffset: TVector4;           // 16 bytes (xy = UV scale, zw = UV offset in decal atlas)
   end; // Total = 96 bytes
+
+  { Phase 18.1: GPU std430 entry for a single simulated particle (48 bytes) }
+  PCastleGPUParticle = ^TCastleGPUParticle;
+  TCastleGPUParticle = packed record
+    PositionAndAge: TVector4;     // 16 bytes (xyz = world position, w = current age in seconds)
+    VelocityAndMaxLife: TVector4; // 16 bytes (xyz = world velocity, w = maximum lifetime in seconds)
+    ColorAndSize: TVector4;       // 16 bytes (rgb = particle emissive/tint color, w = billboard radius)
+  end; // Total = 48 bytes
+
+  { Phase 18.1: Push constants for GPU Compute Particle Simulation & Alive-List Compaction (48 bytes) }
+  PCastleParticleSimPushConstants = ^TCastleParticleSimPushConstants;
+  TCastleParticleSimPushConstants = packed record
+    GravityAndDeltaTime: TVector4; // 16 bytes (xyz = gravity vector, w = deltaTime)
+    EmitterOriginAndDrag: TVector4;// 16 bytes (xyz = emitter world origin, w = linear air drag)
+    GroundPlaneY: Single;          // 4 bytes (Ground collision plane Y)
+    Restitution: Single;           // 4 bytes (Bounce restitution factor in [0..1])
+    MaxParticles: Cardinal;        // 4 bytes (Total particle capacity)
+    SpawnSeed: Cardinal;           // 4 bytes (Per-frame random hash seed)
+  end; // Total = 48 bytes
+
+  { Phase 18.3: Push constants for Screen-Space Raymarched Contact Shadows (48 bytes) }
+  PCastleContactShadowsPushConstants = ^TCastleContactShadowsPushConstants;
+  TCastleContactShadowsPushConstants = packed record
+    InvResolution: TVector2; // 8 bytes (1.0 / Width, 1.0 / Height)
+    LightDirView: TVector3;  // 12 bytes (Normalized view-space directional light vector towards light)
+    RayLength: Single;       // 4 bytes (View-space contact shadow ray march length, e.g. 0.35)
+    Thickness: Single;       // 4 bytes (Depth occluder thickness window, e.g. 0.05)
+    ZNear: Single;           // 4 bytes (Camera near plane)
+    ZFar: Single;            // 4 bytes (Camera far plane)
+    StepCount: Cardinal;     // 4 bytes (Raymarch step count, e.g. 16)
+    Contrast: Single;        // 4 bytes (Contact shadow contrast multiplier, e.g. 1.0)
+    Reserved: Cardinal;      // 4 bytes (Padding to 16-byte alignment)
+  end; // Total = 48 bytes
 
   { Generates RHI-compliant GLSL headers, UBO blocks, and varying layouts }
   TCastleShaderGeneratorRHI = class
@@ -558,6 +594,27 @@ type
     { Phase 17.3: Generates GLSL 450 functions and UBO/SSBO bindings for Oriented Bounding Box (OBB)
       Decal Projection (ProjectWorldPointToDecalUV, EvaluateDecalAngleAndBoxFade). }
     function GenerateClusteredDecalProjectionFunctions: String;
+
+    { Phase 18.1: Generates a GLSL 450 compute shader for GPU particle simulation (semi-implicit
+      Euler gravity/drag integration, ground-plane bounce collision, and atomic alive-list
+      compaction populating VkDrawIndirectCommand). }
+    function GenerateParticleSimulationComputeShader(
+      const AWorkgroupSizeX: Cardinal = 64): String;
+
+    { Phase 18.2: Generates GLSL 450 functions for McGuire & Bavoil Weighted Blended
+      Order-Independent Transparency (EvaluateOITDepthWeight, AccumulateWeightedBlendedOIT,
+      EvaluateOITComposite). }
+    function GenerateWeightedBlendedOITFunctions: String;
+
+    { Phase 18.2: Generates a complete GLSL 450 fragment shader for compositing Weighted Blended
+      OIT accumulation (pfRGBA16_Float) and revealage (pfR16_Float) targets over the opaque HDR scene. }
+    function GenerateWeightedBlendedOITCompositeFragmentShader: String;
+
+    { Phase 18.3: Generates a GLSL 450 compute shader for Screen-Space Raymarched Contact Shadows
+      along the primary directional light vector with depth-thickness validation and edge fade. }
+    function GenerateContactShadowsComputeShader(
+      const AWorkgroupSizeX: Cardinal = 8;
+      const AWorkgroupSizeY: Cardinal = 8): String;
 
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
@@ -2941,6 +2998,196 @@ begin
     '  float normalWeight = smoothstep(angleFadeCos, min(angleFadeCos + 0.25, 0.99), cosAngle);' + NL +
     '  float zFade = 1.0 - smoothstep(0.35, 0.50, abs(localPos.z));' + NL +
     '  return clamp(normalWeight * zFade, 0.0, 1.0);' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateParticleSimulationComputeShader(
+  const AWorkgroupSizeX: Cardinal): String;
+var
+  LocalX: Cardinal;
+begin
+  if AWorkgroupSizeX = 0 then LocalX := 64 else LocalX := AWorkgroupSizeX;
+
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = 1, local_size_z = 1) in;', [LocalX]) + NL +
+    NL +
+    'struct CastleGPUParticle {' + NL +
+    '  vec4 PositionAndAge;' + NL +
+    '  vec4 VelocityAndMaxLife;' + NL +
+    '  vec4 ColorAndSize;' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 0) buffer CastleParticlePoolBuffer {' + NL +
+    '  CastleGPUParticle u_Particles[];' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 1) writeonly buffer CastleAliveParticleIndexBuffer {' + NL +
+    '  uint u_AliveParticleIndices[];' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 2) buffer CastleParticleIndirectDrawBuffer {' + NL +
+    '  uint vertexCount;' + NL +
+    '  uint instanceCount;' + NL +
+    '  uint firstVertex;' + NL +
+    '  uint firstInstance;' + NL +
+    '} u_DrawCmd;' + NL +
+    NL +
+    'layout(push_constant) uniform CastleParticleSimPushConstants {' + NL +
+    '  vec4  u_GravityAndDeltaTime;' + NL +
+    '  vec4  u_EmitterOriginAndDrag;' + NL +
+    '  float u_GroundPlaneY;' + NL +
+    '  float u_Restitution;' + NL +
+    '  uint  u_MaxParticles;' + NL +
+    '  uint  u_SpawnSeed;' + NL +
+    '} pc;' + NL +
+    NL +
+    'bool SimulateParticleStep(inout CastleGPUParticle p, vec3 gravity, float drag, float groundY, float restitution, float dt) {' + NL +
+    '  float age = p.PositionAndAge.w + dt;' + NL +
+    '  float maxLife = p.VelocityAndMaxLife.w;' + NL +
+    '  if (maxLife <= 0.0 || age >= maxLife) {' + NL +
+    '    p.PositionAndAge.w = age;' + NL +
+    '    return false;' + NL +
+    '  }' + NL +
+    '  vec3 vel = (p.VelocityAndMaxLife.xyz + gravity * dt) * max(1.0 - drag * dt, 0.0);' + NL +
+    '  vec3 pos = p.PositionAndAge.xyz + vel * dt;' + NL +
+    '  if (pos.y < groundY && vel.y < 0.0) {' + NL +
+    '    pos.y = groundY;' + NL +
+    '    vel.y = -vel.y * clamp(restitution, 0.0, 1.0);' + NL +
+    '  }' + NL +
+    '  p.PositionAndAge = vec4(pos, age);' + NL +
+    '  p.VelocityAndMaxLife.xyz = vel;' + NL +
+    '  return true;' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  uint idx = gl_GlobalInvocationID.x;' + NL +
+    '  if (idx == 0u) {' + NL +
+    '    u_DrawCmd.vertexCount = 6u;' + NL +
+    '    u_DrawCmd.firstVertex = 0u;' + NL +
+    '    u_DrawCmd.firstInstance = 0u;' + NL +
+    '  }' + NL +
+    '  if (idx >= pc.u_MaxParticles) return;' + NL +
+    '  CastleGPUParticle p = u_Particles[idx];' + NL +
+    '  if (SimulateParticleStep(p, pc.u_GravityAndDeltaTime.xyz, pc.u_EmitterOriginAndDrag.w,' + NL +
+    '      pc.u_GroundPlaneY, pc.u_Restitution, pc.u_GravityAndDeltaTime.w)) {' + NL +
+    '    uint aliveSlot = atomicAdd(u_DrawCmd.instanceCount, 1u);' + NL +
+    '    u_AliveParticleIndices[aliveSlot] = idx;' + NL +
+    '  }' + NL +
+    '  u_Particles[idx] = p;' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateWeightedBlendedOITFunctions: String;
+begin
+  Result :=
+    '// --- McGuire & Bavoil Weighted Blended Order-Independent Transparency (Phase 18.2) ---' + NL +
+    'float EvaluateOITDepthWeight(float linearZ, float alpha, float weightScale) {' + NL +
+    '  float normZ = clamp(linearZ / max(weightScale, 1.0), 0.0, 0.99);' + NL +
+    '  float oneMinusZ = 1.0 - normZ;' + NL +
+    '  float depthFactor = max(1e-2, 3000.0 * oneMinusZ * oneMinusZ * oneMinusZ);' + NL +
+    '  return clamp(max(alpha, 1e-3) * depthFactor, 1e-2, 3000.0);' + NL +
+    '}' + NL +
+    NL +
+    'void AccumulateWeightedBlendedOIT(vec4 premulColorAndAlpha, float linearZ, float weightScale,' + NL +
+    '  out vec4 outAccum, out float outRevealage) {' + NL +
+    '  float a = clamp(premulColorAndAlpha.a, 0.0, 1.0);' + NL +
+    '  float w = EvaluateOITDepthWeight(linearZ, a, weightScale);' + NL +
+    '  outAccum = vec4(premulColorAndAlpha.rgb * w, a * w);' + NL +
+    '  outRevealage = a;' + NL +
+    '}' + NL +
+    NL +
+    'vec3 EvaluateOITComposite(vec4 accumRGBA, float revealage, vec3 opaqueRGB) {' + NL +
+    '  float transmittance = clamp(revealage, 0.0, 1.0);' + NL +
+    '  if (transmittance >= 0.9999) return opaqueRGB;' + NL +
+    '  vec3 avgTransparentColor = accumRGBA.rgb / max(accumRGBA.a, 1e-5);' + NL +
+    '  return avgTransparentColor * (1.0 - transmittance) + opaqueRGB * transmittance;' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateWeightedBlendedOITCompositeFragmentShader: String;
+begin
+  Result :=
+    '#version 450' + NL +
+    'layout(location = 0) in vec2 v_TexCoord;' + NL +
+    'layout(location = 0) out vec4 out_FragColor;' + NL +
+    NL +
+    'layout(set = 0, binding = 0) uniform sampler2D u_OpaqueHDRTexture;' + NL +
+    'layout(set = 0, binding = 1) uniform sampler2D u_OITAccumTexture;' + NL +
+    'layout(set = 0, binding = 2) uniform sampler2D u_OITRevealageTexture;' + NL +
+    NL +
+    GenerateWeightedBlendedOITFunctions + NL +
+    'void main() {' + NL +
+    '  vec3 opaqueRGB = texture(u_OpaqueHDRTexture, v_TexCoord).rgb;' + NL +
+    '  vec4 accumRGBA = texture(u_OITAccumTexture, v_TexCoord);' + NL +
+    '  float revealage = texture(u_OITRevealageTexture, v_TexCoord).r;' + NL +
+    '  vec3 composited = EvaluateOITComposite(accumRGBA, revealage, opaqueRGB);' + NL +
+    '  out_FragColor = vec4(composited, 1.0);' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateContactShadowsComputeShader(
+  const AWorkgroupSizeX, AWorkgroupSizeY: Cardinal): String;
+var
+  LocalX, LocalY: Cardinal;
+begin
+  if AWorkgroupSizeX = 0 then LocalX := 8 else LocalX := AWorkgroupSizeX;
+  if AWorkgroupSizeY = 0 then LocalY := 8 else LocalY := AWorkgroupSizeY;
+
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;', [LocalX, LocalY]) + NL +
+    NL +
+    'layout(set = 0, binding = 0) uniform sampler2D u_DepthTexture;' + NL +
+    'layout(set = 0, binding = 1, r16f) uniform writeonly image2D u_ContactShadowMask;' + NL +
+    NL +
+    'layout(push_constant) uniform CastleContactShadowsPushConstants {' + NL +
+    '  vec2  u_InvResolution;' + NL +
+    '  vec3  u_LightDirView;' + NL +
+    '  float u_RayLength;' + NL +
+    '  float u_Thickness;' + NL +
+    '  float u_ZNear;' + NL +
+    '  float u_ZFar;' + NL +
+    '  uint  u_StepCount;' + NL +
+    '  float u_Contrast;' + NL +
+    '  uint  u_Reserved;' + NL +
+    '} pc;' + NL +
+    NL +
+    'float LinearizeContactDepth(float d, float zNear, float zFar) {' + NL +
+    '  return (zNear * zFar) / max(zFar - d * (zFar - zNear), 1e-5);' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);' + NL +
+    '  ivec2 outSize = imageSize(u_ContactShadowMask);' + NL +
+    '  if (pixelCoord.x >= outSize.x || pixelCoord.y >= outSize.y) return;' + NL +
+    NL +
+    '  vec2 uv = (vec2(pixelCoord) + 0.5) * pc.u_InvResolution;' + NL +
+    '  float centerRawDepth = textureLod(u_DepthTexture, uv, 0.0).r;' + NL +
+    '  if (centerRawDepth >= 0.9999) {' + NL +
+    '    imageStore(u_ContactShadowMask, pixelCoord, vec4(1.0));' + NL +
+    '    return;' + NL +
+    '  }' + NL +
+    NL +
+    '  float startLinearZ = LinearizeContactDepth(centerRawDepth, pc.u_ZNear, pc.u_ZFar);' + NL +
+    '  uint steps = max(pc.u_StepCount, 4u);' + NL +
+    '  vec2 uvStep = (pc.u_LightDirView.xy * pc.u_RayLength * 0.25) / float(steps);' + NL +
+    '  float zStep = (-pc.u_LightDirView.z * pc.u_RayLength) / float(steps);' + NL +
+    '  float shadowOcclusion = 0.0;' + NL +
+    NL +
+    '  for (uint i = 1u; i <= steps; ++i) {' + NL +
+    '    float t = float(i) / float(steps);' + NL +
+    '    vec2 sampleUV = uv + uvStep * float(i);' + NL +
+    '    if (any(lessThan(sampleUV, vec2(0.0))) || any(greaterThan(sampleUV, vec2(1.0)))) break;' + NL +
+    '    float rayLinearZ = startLinearZ + zStep * float(i);' + NL +
+    '    float sceneLinearZ = LinearizeContactDepth(textureLod(u_DepthTexture, sampleUV, 0.0).r, pc.u_ZNear, pc.u_ZFar);' + NL +
+    '    float depthDelta = rayLinearZ - sceneLinearZ;' + NL +
+    '    if (depthDelta > 0.001 && depthDelta < pc.u_Thickness) {' + NL +
+    '      shadowOcclusion = max(shadowOcclusion, (1.0 - t * t) * clamp(pc.u_Contrast, 0.0, 1.0));' + NL +
+    '      break;' + NL +
+    '    }' + NL +
+    '  }' + NL +
+    '  imageStore(u_ContactShadowMask, pixelCoord, vec4(clamp(1.0 - shadowOcclusion, 0.0, 1.0)));' + NL +
     '}' + NL;
 end;
 

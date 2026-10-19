@@ -120,6 +120,9 @@ type
     procedure TestTemporalAntiAliasingAndHaltonJitterRHI;
     procedure TestBoxProjectedParallaxReflectionProbesRHI;
     procedure TestOrientedBoxDecalProjectionRHI;
+    procedure TestGPUComputeParticleSimulationAndIndirectDrawRHI;
+    procedure TestWeightedBlendedOrderIndependentTransparencyRHI;
+    procedure TestScreenSpaceRaymarchedContactShadowsRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -6819,6 +6822,212 @@ begin
     AssertEquals('TotalUploads must be 1', 1, Decals.TotalUploads);
   finally
     FreeAndNil(Gen);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGPUComputeParticleSimulationAndIndirectDrawRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Gen: TCastleShaderGeneratorRHI;
+  Particles: TCastleVulkanComputeParticles;
+  SimCS: String;
+  Particle: TCastleGPUParticle;
+  Alive: Boolean;
+  GroupsDispatched: Cardinal;
+begin
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0, cllPrimary);
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify TCastleGPUParticle (48B) & TCastleParticleSimPushConstants (48B) & Compute GLSL }
+    AssertEquals('TCastleGPUParticle must be 48 bytes (3 x vec4)',
+      48, SizeOf(TCastleGPUParticle));
+    AssertEquals('TCastleParticleSimPushConstants must be 48 bytes',
+      48, SizeOf(TCastleParticleSimPushConstants));
+
+    SimCS := Gen.GenerateParticleSimulationComputeShader(64);
+    AssertTrue('Particle simulation CS must use local_size_x = 64',
+      Pos('layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;', SimCS) > 0);
+    AssertTrue('Particle simulation CS must atomically compact alive particles via atomicAdd',
+      Pos('uint aliveSlot = atomicAdd(u_DrawCmd.instanceCount, 1u);', SimCS) > 0);
+
+    { 2. Verify Euler integration, drag, ground plane bounce, and lifetime expiration }
+    Particle.PositionAndAge := Vector4(0.0, 0.05, 0.0, 0.0);
+    Particle.VelocityAndMaxLife := Vector4(1.0, -4.0, 0.0, 1.0);
+    Particle.ColorAndSize := Vector4(1.0, 0.5, 0.1, 0.25);
+
+    Alive := TCastleVulkanComputeParticles.SimulateParticleStep(
+      Particle, Vector3(0.0, -9.81, 0.0), 0.1, 0.0, 0.6, 0.1);
+    AssertTrue('Particle must remain alive at Age=0.1 / MaxLife=1.0', Alive);
+    AssertSameValue(0.0, Particle.PositionAndAge.Y, 1e-4);
+    AssertTrue('Particle Y velocity must bounce upward (> 0) after hitting GroundY=0',
+      Particle.VelocityAndMaxLife.Y > 0.0);
+
+    Alive := TCastleVulkanComputeParticles.SimulateParticleStep(
+      Particle, Vector3(0.0, -9.81, 0.0), 0.1, 0.0, 0.6, 1.0);
+    AssertFalse('Particle must expire when Age >= MaxLife', Alive);
+
+    { 3. Verify GPU particle buffers and simulation dispatch }
+    Particles := VkDev.ComputeParticles;
+    AssertTrue('ComputeParticles must be lazily created by TVulkanRHIDevice', Particles <> nil);
+    Particles.EnsureParticleBuffers(4096);
+    AssertEquals('MaxParticles must be 4096', 4096, Particles.MaxParticles);
+    AssertTrue('ParticleBuffer must be allocated', Particles.ParticleBuffer <> nil);
+    AssertTrue('AliveIndexBuffer must be allocated', Particles.AliveIndexBuffer <> nil);
+    AssertTrue('IndirectDrawBuffer must be allocated', Particles.IndirectDrawBuffer <> nil);
+
+    CmdList.BeginRecording;
+    GroupsDispatched := Particles.DispatchParticleSimulation(CmdList, 1.0 / 60.0);
+    CmdList.EndRecording;
+
+    AssertEquals('4096 particles / 64 threads = 64 workgroups', 64, GroupsDispatched);
+    AssertEquals('TotalSimulationDispatches must be 1', 1, Particles.TotalSimulationDispatches);
+    AssertTrue('SimulationPipeline must be compiled and cached', Particles.SimulationPipeline <> nil);
+  finally
+    FreeAndNil(Gen);
+    FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestWeightedBlendedOrderIndependentTransparencyRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  Gen: TCastleShaderGeneratorRHI;
+  OIT: TCastleVulkanWeightedBlendedOIT;
+  OITFunctionsGLSL, OITCompositeFS: String;
+  NearWeight, FarWeight, RevealageAB, RevealageBA: Single;
+  AccumAB, AccumBA, RedSample, BlueSample: TVector4;
+  CompositeAB, CompositeBA, OpaqueBg: TVector3;
+begin
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Weighted Blended OIT GLSL helpers and composite fragment shader }
+    OITFunctionsGLSL := Gen.GenerateWeightedBlendedOITFunctions;
+    AssertTrue('OIT GLSL must include EvaluateOITDepthWeight',
+      Pos('float EvaluateOITDepthWeight(float linearZ, float alpha, float weightScale)', OITFunctionsGLSL) > 0);
+    AssertTrue('OIT GLSL must include AccumulateWeightedBlendedOIT',
+      Pos('void AccumulateWeightedBlendedOIT(', OITFunctionsGLSL) > 0);
+
+    OITCompositeFS := Gen.GenerateWeightedBlendedOITCompositeFragmentShader;
+    AssertTrue('OIT Composite FS must sample u_OITAccumTexture and u_OITRevealageTexture',
+      (Pos('u_OITAccumTexture', OITCompositeFS) > 0) and (Pos('u_OITRevealageTexture', OITCompositeFS) > 0));
+
+    { 2. Verify depth weight monotonically decreases with distance and order independence holds }
+    NearWeight := TCastleVulkanWeightedBlendedOIT.EvaluateOITDepthWeight(2.0, 0.5, 1.0);
+    FarWeight := TCastleVulkanWeightedBlendedOIT.EvaluateOITDepthWeight(50.0, 0.5, 1.0);
+    AssertTrue('Near transparent surface at Z=2m must have higher OIT weight than far surface at Z=50m',
+      NearWeight > FarWeight);
+
+    RedSample := Vector4(0.5, 0.0, 0.0, 0.5);   { premultiplied red at Z=3m }
+    BlueSample := Vector4(0.0, 0.0, 0.5, 0.5);  { premultiplied blue at Z=15m }
+    OpaqueBg := Vector3(0.2, 0.2, 0.2);
+
+    { Order A -> B (near red then far blue) }
+    AccumAB := Vector4(0.0, 0.0, 0.0, 0.0);
+    RevealageAB := 1.0;
+    TCastleVulkanWeightedBlendedOIT.AccumulateOITSample(RedSample, 3.0, 1.0, AccumAB, RevealageAB);
+    TCastleVulkanWeightedBlendedOIT.AccumulateOITSample(BlueSample, 15.0, 1.0, AccumAB, RevealageAB);
+    CompositeAB := TCastleVulkanWeightedBlendedOIT.EvaluateOITComposite(AccumAB, RevealageAB, OpaqueBg);
+
+    { Order B -> A (far blue then near red) }
+    AccumBA := Vector4(0.0, 0.0, 0.0, 0.0);
+    RevealageBA := 1.0;
+    TCastleVulkanWeightedBlendedOIT.AccumulateOITSample(BlueSample, 15.0, 1.0, AccumBA, RevealageBA);
+    TCastleVulkanWeightedBlendedOIT.AccumulateOITSample(RedSample, 3.0, 1.0, AccumBA, RevealageBA);
+    CompositeBA := TCastleVulkanWeightedBlendedOIT.EvaluateOITComposite(AccumBA, RevealageBA, OpaqueBg);
+
+    AssertSameValue(RevealageAB, RevealageBA, 1e-6);
+    AssertSameValue(0.25, RevealageAB, 1e-5);
+    AssertSameValue(CompositeAB.X, CompositeBA.X, 1e-5);
+    AssertSameValue(CompositeAB.Y, CompositeBA.Y, 1e-5);
+    AssertSameValue(CompositeAB.Z, CompositeBA.Z, 1e-5);
+    AssertTrue('Near red sample must dominate far blue sample in composite',
+      CompositeAB.X > CompositeAB.Z);
+
+    { 3. Verify OIT MRT target allocation }
+    OIT := VkDev.WeightedBlendedOIT;
+    AssertTrue('WeightedBlendedOIT must be lazily created by TVulkanRHIDevice', OIT <> nil);
+    OIT.EnsureOITTargets(640, 360);
+    AssertTrue('OITAccumTexture (pfRGBA16_Float) must be allocated', OIT.OITAccumTexture <> nil);
+    AssertTrue('OITRevealageTexture (pfR16_Float) must be allocated', OIT.OITRevealageTexture <> nil);
+    AssertEquals('OITAccumTexture format must be pfRGBA16_Float',
+      Ord(pfRGBA16_Float), Ord(OIT.OITAccumTexture.Desc.Format));
+    AssertEquals('OITRevealageTexture format must be pfR16_Float',
+      Ord(pfR16_Float), Ord(OIT.OITRevealageTexture.Desc.Format));
+  finally
+    FreeAndNil(Gen);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestScreenSpaceRaymarchedContactShadowsRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Gen: TCastleShaderGeneratorRHI;
+  ContactShadows: TCastleVulkanContactShadows;
+  DepthTex: TRHITexture;
+  ContactCS: String;
+  OccludedDepths, ThickGapDepths: array[0..3] of Single;
+  VisOccluded, VisGap: Single;
+  HitOccluded, HitGap: Boolean;
+  Groups: Cardinal;
+begin
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0, cllPrimary);
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  DepthTex := VkDev.CreateTexture(TRHITextureDesc.Create2D(320, 180, pfD32_Float,
+    [tuDepthStencil, tuSampled]));
+  try
+    { 1. Verify TCastleContactShadowsPushConstants (48 bytes) & Compute GLSL }
+    AssertEquals('TCastleContactShadowsPushConstants must be 48 bytes',
+      48, SizeOf(TCastleContactShadowsPushConstants));
+
+    ContactCS := Gen.GenerateContactShadowsComputeShader(8, 8);
+    AssertTrue('Contact shadows CS must use 8x8 workgroup',
+      Pos('layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;', ContactCS) > 0);
+    AssertTrue('Contact shadows CS must apply thickness window check',
+      Pos('if (depthDelta > 0.001 && depthDelta < pc.u_Thickness)', ContactCS) > 0);
+
+    { 2. Verify 1D contact shadow raymarch occlusion hit vs thickness-window rejection }
+    OccludedDepths[0] := 5.0;
+    OccludedDepths[1] := 4.91; { RayZ at step 2 = 5.0 - 0.03*2 = 4.94 -> DepthDelta = +0.03 within Thickness 0.05 }
+    OccludedDepths[2] := 5.0;
+    OccludedDepths[3] := 5.0;
+    HitOccluded := TCastleVulkanContactShadows.EvaluateContactShadowRay1D(
+      OccludedDepths, 5.0, -0.03, 0.05, VisOccluded);
+    AssertTrue('Thin occluder within thickness window must register contact shadow hit', HitOccluded);
+    AssertTrue('Contact shadow visibility must be darkened (< 1.0)', VisOccluded < 1.0);
+
+    ThickGapDepths[0] := 5.0;
+    ThickGapDepths[1] := 2.0; { Foreground object 2.94m closer than ray -> exceeds Thickness 0.05, must not cast false shadow }
+    ThickGapDepths[2] := 5.0;
+    ThickGapDepths[3] := 5.0;
+    HitGap := TCastleVulkanContactShadows.EvaluateContactShadowRay1D(
+      ThickGapDepths, 5.0, -0.03, 0.05, VisGap);
+    AssertFalse('Foreground object outside thickness window must be rejected', HitGap);
+    AssertSameValue(1.0, VisGap, 1e-5);
+
+    { 3. Verify contact shadows compute dispatch }
+    ContactShadows := VkDev.ContactShadows;
+    AssertTrue('ContactShadows must be lazily created by TVulkanRHIDevice', ContactShadows <> nil);
+
+    CmdList.BeginRecording;
+    Groups := ContactShadows.DispatchContactShadows(CmdList, DepthTex);
+    CmdList.EndRecording;
+
+    AssertEquals('320x180 / 8x8 = 40 * 23 = 920 workgroups', 40 * 23, Groups);
+    AssertEquals('TotalContactShadowDispatches must be 1', 1, ContactShadows.TotalContactShadowDispatches);
+    AssertTrue('ContactShadowTexture must be allocated', ContactShadows.ContactShadowTexture <> nil);
+    AssertTrue('ContactShadowPipeline must be compiled', ContactShadows.ContactShadowPipeline <> nil);
+  finally
+    FreeAndNil(DepthTex);
+    FreeAndNil(Gen);
+    FreeAndNil(CmdList);
     FreeAndNil(VkDev);
   end;
 end;

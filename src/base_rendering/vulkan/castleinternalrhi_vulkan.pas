@@ -1585,6 +1585,141 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Phase 18.1: GPU Compute Particle Simulation & Indirect Billboard Rendering }
+  { -------------------------------------------------------------------------- }
+
+  { GPU-driven particle simulation subsystem managing the persistent SSBO particle pool,
+    compacted alive index buffer, VkDrawIndirectCommand buffer, and compute pipeline. }
+  TCastleVulkanComputeParticles = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FParticleBuffer: TVulkanRHIBuffer;
+    FAliveIndexBuffer: TVulkanRHIBuffer;
+    FIndirectDrawBuffer: TVulkanRHIBuffer;
+    FSimulationPipeline: TRHIComputePipeline;
+    FMaxParticles: Cardinal;
+    FGravity: TVector3;
+    FDrag: Single;
+    FGroundPlaneY: Single;
+    FRestitution: Single;
+    FTotalSimulationDispatches: Cardinal;
+    procedure EnsureSimulationPipeline;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    procedure EnsureParticleBuffers(const AMaxParticles: Cardinal = CASTLE_DEFAULT_MAX_PARTICLES);
+    function DispatchParticleSimulation(const ACmd: TRHICommandList;
+      const ADeltaTime: Single): Cardinal;
+
+    { Simulates one Euler integration step with drag, ground-plane bounce, and age decay.
+      Returns True if the particle remains alive (Age < Lifetime). }
+    class function SimulateParticleStep(var AParticle: TCastleGPUParticle;
+      const AGravity: TVector3; const ADrag, AGroundY, ARestitution, ADeltaTime: Single): Boolean; static;
+
+    property ParticleBuffer: TVulkanRHIBuffer read FParticleBuffer;
+    property AliveIndexBuffer: TVulkanRHIBuffer read FAliveIndexBuffer;
+    property IndirectDrawBuffer: TVulkanRHIBuffer read FIndirectDrawBuffer;
+    property SimulationPipeline: TRHIComputePipeline read FSimulationPipeline;
+    property MaxParticles: Cardinal read FMaxParticles;
+    property Gravity: TVector3 read FGravity write FGravity;
+    property Drag: Single read FDrag write FDrag;
+    property GroundPlaneY: Single read FGroundPlaneY write FGroundPlaneY;
+    property Restitution: Single read FRestitution write FRestitution;
+    property TotalSimulationDispatches: Cardinal read FTotalSimulationDispatches;
+  end;
+
+  { -------------------------------------------------------------------------- }
+  { Phase 18.2: Weighted Blended Order-Independent Transparency (McGuire 2013) }
+  { -------------------------------------------------------------------------- }
+
+  { Manages the dual MRT targets (pfRGBA16_Float accumulation + pfR16_Float revealage)
+    and depth-weight/composite math for Weighted Blended Order-Independent Transparency. }
+  TCastleVulkanWeightedBlendedOIT = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FOITAccumTexture: TVulkanRHITexture;
+    FOITRevealageTexture: TVulkanRHITexture;
+    FWidth: Cardinal;
+    FHeight: Cardinal;
+    FWeightScale: Single;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    procedure EnsureOITTargets(const AWidth, AHeight: Cardinal);
+
+    { Evaluates the McGuire-Bavoil 2013 depth weight w(z, alpha) clamped to [1e-2 .. 3e3]. }
+    class function EvaluateOITDepthWeight(const ALinearZ, AAlpha, AWeightScale: Single): Single; static;
+
+    { Accumulates a transparent sample (PremulRGB, Alpha) at ALinearZ into AAccumRGBA and ARevealage. }
+    class procedure AccumulateOITSample(const APremulColorAndAlpha: TVector4;
+      const ALinearZ, AWeightScale: Single;
+      var AAccumRGBA: TVector4; var ARevealage: Single); static;
+
+    { Composites accumulated OIT buffers over AOpaqueRGB:
+      mix(Accum.rgb / max(Accum.a, 1e-5), OpaqueRGB, Revealage). }
+    class function EvaluateOITComposite(const AAccumRGBA: TVector4;
+      const ARevealage: Single; const AOpaqueRGB: TVector3): TVector3; static;
+
+    property OITAccumTexture: TVulkanRHITexture read FOITAccumTexture;
+    property OITRevealageTexture: TVulkanRHITexture read FOITRevealageTexture;
+    property Width: Cardinal read FWidth;
+    property Height: Cardinal read FHeight;
+    property WeightScale: Single read FWeightScale write FWeightScale;
+  end;
+
+  { -------------------------------------------------------------------------- }
+  { Phase 18.3: Screen-Space Raymarched Contact Shadows                        }
+  { -------------------------------------------------------------------------- }
+
+  { Screen-space depth raymarcher for fine contact shadows that complement CSM shadow maps. }
+  TCastleVulkanContactShadows = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FContactShadowTexture: TVulkanRHITexture;
+    FContactShadowPipeline: TRHIComputePipeline;
+    FWidth: Cardinal;
+    FHeight: Cardinal;
+    FLightDirView: TVector3;
+    FRayLength: Single;
+    FThickness: Single;
+    FStepCount: Cardinal;
+    FContrast: Single;
+    FZNear: Single;
+    FZFar: Single;
+    FTotalContactShadowDispatches: Cardinal;
+    procedure EnsureContactShadowPipeline;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    procedure EnsureContactShadowTarget(const AWidth, AHeight: Cardinal);
+    function DispatchContactShadows(const ACmd: TRHICommandList;
+      const ADepthTexture: TRHITexture): Cardinal;
+
+    { Traces a 1D depth ray across ASceneLinearDepths with thickness window AThickness.
+      Returns True if an occlusion hit was detected, and outputs AVisibility in [0..1]. }
+    class function EvaluateContactShadowRay1D(
+      const ASceneLinearDepths: array of Single;
+      const AStartLinearZ, ARayStepZ, AThickness: Single;
+      out AVisibility: Single): Boolean; static;
+
+    property ContactShadowTexture: TVulkanRHITexture read FContactShadowTexture;
+    property ContactShadowPipeline: TRHIComputePipeline read FContactShadowPipeline;
+    property Width: Cardinal read FWidth;
+    property Height: Cardinal read FHeight;
+    property LightDirView: TVector3 read FLightDirView write FLightDirView;
+    property RayLength: Single read FRayLength write FRayLength;
+    property Thickness: Single read FThickness write FThickness;
+    property StepCount: Cardinal read FStepCount write FStepCount;
+    property Contrast: Single read FContrast write FContrast;
+    property ZNear: Single read FZNear write FZNear;
+    property ZFar: Single read FZFar write FZFar;
+    property TotalContactShadowDispatches: Cardinal read FTotalContactShadowDispatches;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -1651,7 +1786,7 @@ type
     FDeferredDeletions: array[0 .. MaxFramesInFlight - 1] of array of TVulkanDeferredDeletionItem;
     FDeferResourceDestruction: Boolean;
 
-    { GPU memory sub-allocator (pooled blocks + per-frame ring buffers), async staging uploader, bindless manager, timestamp profiler, compute culler, IBL generator, clustered culler, shadow atlas, HDR post-processor, GTAO, SSR, volumetric fog, TAA, reflection probes & decals }
+    { GPU memory sub-allocator (pooled blocks + per-frame ring buffers), async staging uploader, bindless manager, timestamp profiler, compute culler, IBL generator, clustered culler, shadow atlas, HDR post-processor, GTAO, SSR, volumetric fog, TAA, reflection probes, decals, compute particles, OIT & contact shadows }
     FMemoryAllocator: TCastleVulkanMemoryAllocator;
     FStagingUploader: TCastleVulkanStagingUploader;
     FBindlessTextureManager: TCastleVulkanBindlessTextureManager;
@@ -1667,6 +1802,9 @@ type
     FTAA: TCastleVulkanTAA;
     FReflectionProbeManager: TCastleVulkanReflectionProbeManager;
     FDecalManager: TCastleVulkanDecalManager;
+    FComputeParticles: TCastleVulkanComputeParticles;
+    FWeightedBlendedOIT: TCastleVulkanWeightedBlendedOIT;
+    FContactShadows: TCastleVulkanContactShadows;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -1754,6 +1892,9 @@ type
     function GetTAA: TCastleVulkanTAA;
     function GetReflectionProbeManager: TCastleVulkanReflectionProbeManager;
     function GetDecalManager: TCastleVulkanDecalManager;
+    function GetComputeParticles: TCastleVulkanComputeParticles;
+    function GetWeightedBlendedOIT: TCastleVulkanWeightedBlendedOIT;
+    function GetContactShadows: TCastleVulkanContactShadows;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -1946,6 +2087,9 @@ type
     property TAA: TCastleVulkanTAA read GetTAA;
     property ReflectionProbeManager: TCastleVulkanReflectionProbeManager read GetReflectionProbeManager;
     property DecalManager: TCastleVulkanDecalManager read GetDecalManager;
+    property ComputeParticles: TCastleVulkanComputeParticles read GetComputeParticles;
+    property WeightedBlendedOIT: TCastleVulkanWeightedBlendedOIT read GetWeightedBlendedOIT;
+    property ContactShadows: TCastleVulkanContactShadows read GetContactShadows;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -10772,6 +10916,398 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanComputeParticles                                                }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanComputeParticles.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FMaxParticles := 0;
+  FGravity := Vector3(0.0, -9.81, 0.0);
+  FDrag := 0.25;
+  FGroundPlaneY := 0.0;
+  FRestitution := 0.5;
+  FTotalSimulationDispatches := 0;
+end;
+
+destructor TCastleVulkanComputeParticles.Destroy;
+begin
+  FreeAndNil(FParticleBuffer);
+  FreeAndNil(FAliveIndexBuffer);
+  FreeAndNil(FIndirectDrawBuffer);
+  inherited;
+end;
+
+procedure TCastleVulkanComputeParticles.EnsureParticleBuffers(const AMaxParticles: Cardinal);
+var
+  EffectiveMax: Cardinal;
+  BufDesc: TRHIBufferDesc;
+  IndirectCmd: TRHIDrawIndirectCommand;
+  MappedPtr: Pointer;
+begin
+  EffectiveMax := Max(Cardinal(64), AMaxParticles);
+  if (FMaxParticles = EffectiveMax) and (FParticleBuffer <> nil) and
+     (FAliveIndexBuffer <> nil) and (FIndirectDrawBuffer <> nil) then
+    Exit;
+
+  FreeAndNil(FParticleBuffer);
+  FreeAndNil(FAliveIndexBuffer);
+  FreeAndNil(FIndirectDrawBuffer);
+  FMaxParticles := EffectiveMax;
+
+  BufDesc := TRHIBufferDesc.Create(
+    PtrUInt(FMaxParticles) * SizeOf(TCastleGPUParticle),
+    [buStorage, buTransferDst, buTransferSrc],
+    muCpuToGpu,
+    'ComputeParticlesPoolBuffer');
+  FParticleBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+
+  BufDesc := TRHIBufferDesc.Create(
+    PtrUInt(FMaxParticles) * SizeOf(Cardinal),
+    [buStorage, buVertex, buTransferDst],
+    muGpuOnly,
+    'ComputeParticlesAliveIndicesBuffer');
+  FAliveIndexBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+
+  BufDesc := TRHIBufferDesc.Create(
+    SizeOf(TRHIDrawIndirectCommand),
+    [buStorage, buIndirect, buTransferDst],
+    muCpuToGpu,
+    'ComputeParticlesIndirectDrawBuffer');
+  FIndirectDrawBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+
+  IndirectCmd.VertexCount := 6;
+  IndirectCmd.InstanceCount := 0;
+  IndirectCmd.FirstVertex := 0;
+  IndirectCmd.FirstInstance := 0;
+  MappedPtr := FIndirectDrawBuffer.Map;
+  if MappedPtr <> nil then
+  begin
+    Move(IndirectCmd, MappedPtr^, SizeOf(IndirectCmd));
+    FIndirectDrawBuffer.Unmap;
+  end;
+end;
+
+procedure TCastleVulkanComputeParticles.EnsureSimulationPipeline;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  Shader: TRHIShaderModule;
+  PipeDesc: TRHIComputePipelineDesc;
+begin
+  if FSimulationPipeline <> nil then
+    Exit;
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    Shader := FDevice.CreateShaderModuleFromGLSL(
+      ssCompute,
+      Gen.GenerateParticleSimulationComputeShader(64),
+      'ParticleSimulationCS');
+    try
+      FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+      PipeDesc.ComputeShader := Shader;
+      PipeDesc.PushConstantSize := SizeOf(TCastleParticleSimPushConstants);
+      PipeDesc.PushConstantStages := [ssCompute];
+      PipeDesc.DebugName := 'ParticleSimulationPipeline';
+      FSimulationPipeline := FDevice.GetOrCreateComputePipeline(PipeDesc);
+    finally
+      FreeAndNil(Shader);
+    end;
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+function TCastleVulkanComputeParticles.DispatchParticleSimulation(
+  const ACmd: TRHICommandList; const ADeltaTime: Single): Cardinal;
+var
+  Push: TCastleParticleSimPushConstants;
+  GroupsX: Cardinal;
+begin
+  if FMaxParticles = 0 then
+    EnsureParticleBuffers(CASTLE_DEFAULT_MAX_PARTICLES);
+  if (ACmd = nil) or (FParticleBuffer = nil) then
+    Exit(0);
+
+  EnsureSimulationPipeline;
+  FillChar(Push, SizeOf(Push), 0);
+  Push.GravityAndDeltaTime := Vector4(FGravity.X, FGravity.Y, FGravity.Z, Max(0.0, ADeltaTime));
+  Push.EmitterOriginAndDrag := Vector4(0.0, 0.0, 0.0, Max(0.0, FDrag));
+  Push.GroundPlaneY := FGroundPlaneY;
+  Push.Restitution := EnsureRange(FRestitution, 0.0, 1.0);
+  Push.MaxParticles := FMaxParticles;
+  Push.SpawnSeed := 0;
+
+  GroupsX := (FMaxParticles + 63) div 64;
+  ACmd.BindComputePipeline(FSimulationPipeline);
+  ACmd.PushConstants([ssCompute], 0, SizeOf(Push), Push);
+  ACmd.Dispatch(GroupsX, 1, 1);
+  Inc(FTotalSimulationDispatches);
+  Result := GroupsX;
+end;
+
+class function TCastleVulkanComputeParticles.SimulateParticleStep(
+  var AParticle: TCastleGPUParticle;
+  const AGravity: TVector3; const ADrag, AGroundY, ARestitution, ADeltaTime: Single): Boolean;
+var
+  Pos, Vel: TVector3;
+  Age, MaxLife, Damp: Single;
+begin
+  Pos := Vector3(AParticle.PositionAndAge.X, AParticle.PositionAndAge.Y, AParticle.PositionAndAge.Z);
+  Age := AParticle.PositionAndAge.W + Max(0.0, ADeltaTime);
+  Vel := Vector3(AParticle.VelocityAndMaxLife.X, AParticle.VelocityAndMaxLife.Y, AParticle.VelocityAndMaxLife.Z);
+  MaxLife := AParticle.VelocityAndMaxLife.W;
+
+  if (MaxLife <= 0.0) or (Age >= MaxLife) then
+  begin
+    AParticle.PositionAndAge.W := Age;
+    Exit(False);
+  end;
+
+  Vel := Vel + AGravity * ADeltaTime;
+  Damp := Max(0.0, 1.0 - Max(0.0, ADrag) * ADeltaTime);
+  Vel := Vel * Damp;
+  Pos := Pos + Vel * ADeltaTime;
+
+  if Pos.Y < AGroundY then
+  begin
+    Pos.Y := AGroundY;
+    if Vel.Y < 0.0 then
+      Vel.Y := -Vel.Y * EnsureRange(ARestitution, 0.0, 1.0);
+  end;
+
+  AParticle.PositionAndAge := Vector4(Pos.X, Pos.Y, Pos.Z, Age);
+  AParticle.VelocityAndMaxLife := Vector4(Vel.X, Vel.Y, Vel.Z, MaxLife);
+  Result := True;
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanWeightedBlendedOIT                                              }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanWeightedBlendedOIT.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FWidth := 0;
+  FHeight := 0;
+  FWeightScale := 1.0;
+end;
+
+destructor TCastleVulkanWeightedBlendedOIT.Destroy;
+begin
+  FreeAndNil(FOITAccumTexture);
+  FreeAndNil(FOITRevealageTexture);
+  inherited;
+end;
+
+procedure TCastleVulkanWeightedBlendedOIT.EnsureOITTargets(const AWidth, AHeight: Cardinal);
+var
+  TexDesc: TRHITextureDesc;
+begin
+  if (AWidth = 0) or (AHeight = 0) then
+    Exit;
+  if (FWidth = AWidth) and (FHeight = AHeight) and
+     (FOITAccumTexture <> nil) and (FOITRevealageTexture <> nil) then
+    Exit;
+
+  FreeAndNil(FOITAccumTexture);
+  FreeAndNil(FOITRevealageTexture);
+  FWidth := AWidth;
+  FHeight := AHeight;
+
+  TexDesc := TRHITextureDesc.Create2D(FWidth, FHeight, pfRGBA16_Float,
+    [tuColorAttachment, tuSampled], 1);
+  TexDesc.DebugName := 'OITAccumulationTarget';
+  FOITAccumTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+
+  TexDesc := TRHITextureDesc.Create2D(FWidth, FHeight, pfR16_Float,
+    [tuColorAttachment, tuSampled], 1);
+  TexDesc.DebugName := 'OITRevealageTarget';
+  FOITRevealageTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+end;
+
+class function TCastleVulkanWeightedBlendedOIT.EvaluateOITDepthWeight(
+  const ALinearZ, AAlpha, AWeightScale: Single): Single;
+var
+  A, Z, ZTerm: Single;
+begin
+  A := EnsureRange(AAlpha, 0.0, 1.0);
+  Z := Abs(ALinearZ);
+  ZTerm := 1.0 / (1.0 + Sqr(Z * 0.1) + Power(Z * 0.01, 4.0));
+  Result := EnsureRange(3000.0 * Max(1e-3, A * Sqrt(A)) * ZTerm * Max(0.01, AWeightScale), 1e-2, 3000.0);
+end;
+
+class procedure TCastleVulkanWeightedBlendedOIT.AccumulateOITSample(
+  const APremulColorAndAlpha: TVector4; const ALinearZ, AWeightScale: Single;
+  var AAccumRGBA: TVector4; var ARevealage: Single);
+var
+  Alpha, W: Single;
+begin
+  Alpha := EnsureRange(APremulColorAndAlpha.W, 0.0, 1.0);
+  W := EvaluateOITDepthWeight(ALinearZ, Alpha, AWeightScale);
+  AAccumRGBA.X := AAccumRGBA.X + APremulColorAndAlpha.X * W;
+  AAccumRGBA.Y := AAccumRGBA.Y + APremulColorAndAlpha.Y * W;
+  AAccumRGBA.Z := AAccumRGBA.Z + APremulColorAndAlpha.Z * W;
+  AAccumRGBA.W := AAccumRGBA.W + Alpha * W;
+  ARevealage := ARevealage * (1.0 - Alpha);
+end;
+
+class function TCastleVulkanWeightedBlendedOIT.EvaluateOITComposite(
+  const AAccumRGBA: TVector4; const ARevealage: Single;
+  const AOpaqueRGB: TVector3): TVector3;
+var
+  Rev, Denom: Single;
+  AvgTransparent: TVector3;
+begin
+  Rev := EnsureRange(ARevealage, 0.0, 1.0);
+  if Rev >= 0.9999 then
+    Exit(AOpaqueRGB);
+  Denom := Max(AAccumRGBA.W, 1e-5);
+  AvgTransparent := Vector3(AAccumRGBA.X / Denom, AAccumRGBA.Y / Denom, AAccumRGBA.Z / Denom);
+  Result := AvgTransparent * (1.0 - Rev) + AOpaqueRGB * Rev;
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanContactShadows                                                  }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanContactShadows.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FWidth := 0;
+  FHeight := 0;
+  FLightDirView := Vector3(0.57735, 0.57735, -0.57735);
+  FRayLength := 0.25;
+  FThickness := 0.05;
+  FStepCount := 16;
+  FContrast := 1.0;
+  FZNear := 0.1;
+  FZFar := 500.0;
+  FTotalContactShadowDispatches := 0;
+end;
+
+destructor TCastleVulkanContactShadows.Destroy;
+begin
+  FreeAndNil(FContactShadowTexture);
+  inherited;
+end;
+
+procedure TCastleVulkanContactShadows.EnsureContactShadowTarget(const AWidth, AHeight: Cardinal);
+var
+  TexDesc: TRHITextureDesc;
+begin
+  if (AWidth = 0) or (AHeight = 0) then
+    Exit;
+  if (FWidth = AWidth) and (FHeight = AHeight) and (FContactShadowTexture <> nil) then
+    Exit;
+
+  FreeAndNil(FContactShadowTexture);
+  FWidth := AWidth;
+  FHeight := AHeight;
+
+  TexDesc := TRHITextureDesc.Create2D(FWidth, FHeight, pfR16_Float,
+    [tuStorage, tuSampled], 1);
+  TexDesc.DebugName := 'ContactShadowMaskTarget';
+  FContactShadowTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+end;
+
+procedure TCastleVulkanContactShadows.EnsureContactShadowPipeline;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  Shader: TRHIShaderModule;
+  PipeDesc: TRHIComputePipelineDesc;
+begin
+  if FContactShadowPipeline <> nil then
+    Exit;
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    Shader := FDevice.CreateShaderModuleFromGLSL(
+      ssCompute,
+      Gen.GenerateContactShadowsComputeShader(8, 8),
+      'ContactShadowsCS');
+    try
+      FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+      PipeDesc.ComputeShader := Shader;
+      PipeDesc.PushConstantSize := SizeOf(TCastleContactShadowsPushConstants);
+      PipeDesc.PushConstantStages := [ssCompute];
+      PipeDesc.DebugName := 'ContactShadowsPipeline';
+      FContactShadowPipeline := FDevice.GetOrCreateComputePipeline(PipeDesc);
+    finally
+      FreeAndNil(Shader);
+    end;
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+function TCastleVulkanContactShadows.DispatchContactShadows(
+  const ACmd: TRHICommandList; const ADepthTexture: TRHITexture): Cardinal;
+var
+  Push: TCastleContactShadowsPushConstants;
+  GroupsX, GroupsY: Cardinal;
+begin
+  if (ACmd = nil) or (ADepthTexture = nil) then
+    Exit(0);
+  EnsureContactShadowTarget(ADepthTexture.Desc.Width, ADepthTexture.Desc.Height);
+  if FContactShadowTexture = nil then
+    Exit(0);
+
+  EnsureContactShadowPipeline;
+  FillChar(Push, SizeOf(Push), 0);
+  Push.InvResolution := Vector2(1.0 / Max(Cardinal(1), FWidth), 1.0 / Max(Cardinal(1), FHeight));
+  Push.LightDirView := FLightDirView;
+  Push.RayLength := Max(0.001, FRayLength);
+  Push.Thickness := Max(0.0005, FThickness);
+  Push.ZNear := Max(1e-4, FZNear);
+  Push.ZFar := Max(Push.ZNear + 1.0, FZFar);
+  Push.StepCount := EnsureRange(FStepCount, 4, 64);
+  Push.Contrast := EnsureRange(FContrast, 0.0, 4.0);
+  Push.Reserved := 0;
+
+  GroupsX := (FWidth + 7) div 8;
+  GroupsY := (FHeight + 7) div 8;
+  ACmd.TransitionTexture(FContactShadowTexture, rsTransferDst);
+  ACmd.BindComputePipeline(FContactShadowPipeline);
+  ACmd.PushConstants([ssCompute], 0, SizeOf(Push), Push);
+  ACmd.Dispatch(GroupsX, GroupsY, 1);
+  ACmd.TransitionTexture(FContactShadowTexture, rsShaderRead);
+  Inc(FTotalContactShadowDispatches);
+  Result := GroupsX * GroupsY;
+end;
+
+class function TCastleVulkanContactShadows.EvaluateContactShadowRay1D(
+  const ASceneLinearDepths: array of Single;
+  const AStartLinearZ, ARayStepZ, AThickness: Single;
+  out AVisibility: Single): Boolean;
+var
+  I, N: Integer;
+  RayZ, SceneZ, DepthDelta, T, EdgeFade, ShadowFactor: Single;
+begin
+  AVisibility := 1.0;
+  Result := False;
+  N := Length(ASceneLinearDepths);
+  if (N <= 0) or (AThickness <= 0.0) then
+    Exit;
+
+  for I := 0 to N - 1 do
+  begin
+    T := Single(I + 1) / Single(N);
+    RayZ := AStartLinearZ + ARayStepZ * Single(I + 1);
+    SceneZ := ASceneLinearDepths[I];
+    DepthDelta := RayZ - SceneZ;
+    if (DepthDelta > 0.0005) and (DepthDelta < AThickness) then
+    begin
+      EdgeFade := 1.0 - EnsureRange((T - 0.75) / 0.25, 0.0, 1.0);
+      ShadowFactor := EnsureRange(1.0 - (DepthDelta / AThickness) * 0.5, 0.0, 1.0) * EdgeFade;
+      AVisibility := EnsureRange(1.0 - ShadowFactor, 0.0, 1.0);
+      Exit(True);
+    end;
+  end;
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -11244,12 +11780,36 @@ begin
   Result := FDecalManager;
 end;
 
+function TVulkanRHIDevice.GetComputeParticles: TCastleVulkanComputeParticles;
+begin
+  if FComputeParticles = nil then
+    FComputeParticles := TCastleVulkanComputeParticles.Create(Self);
+  Result := FComputeParticles;
+end;
+
+function TVulkanRHIDevice.GetWeightedBlendedOIT: TCastleVulkanWeightedBlendedOIT;
+begin
+  if FWeightedBlendedOIT = nil then
+    FWeightedBlendedOIT := TCastleVulkanWeightedBlendedOIT.Create(Self);
+  Result := FWeightedBlendedOIT;
+end;
+
+function TVulkanRHIDevice.GetContactShadows: TCastleVulkanContactShadows;
+begin
+  if FContactShadows = nil then
+    FContactShadows := TCastleVulkanContactShadows.Create(Self);
+  Result := FContactShadows;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FContactShadows);
+  FreeAndNil(FWeightedBlendedOIT);
+  FreeAndNil(FComputeParticles);
   FreeAndNil(FDecalManager);
   FreeAndNil(FReflectionProbeManager);
   FreeAndNil(FTAA);

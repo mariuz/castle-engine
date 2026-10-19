@@ -365,14 +365,26 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 17 Status**: Completed. Sub-pixel Halton $(2, 3)$ camera jitter, `pfRG16_Float` velocity buffer, YCoCg $3 \times 3$ variance clipping, and 5-tap Catmull-Rom bicubic Temporal Anti-Aliasing (`TCastleVulkanTAA`, `GenerateTAAResolveComputeShader`), localized reflection probes with box-projected parallax ray-AABB intersection and trilinear blending (`TCastleVulkanReflectionProbeManager`, `GenerateBoxProjectedReflectionProbeFunctions`), and OBB decal projection with normal grazing-angle rejection (`TCastleVulkanDecalManager`, `GenerateClusteredDecalProjectionFunctions`) fully integrated and tested (81 unit tests passing).
 
 
-### Phase 18: GPU Compute Particle System, Order-Independent Transparency (Weighted Blended OIT) & Screen-Space Contact Shadows (PLANNED)
+### Phase 18: GPU Compute Particle System, Order-Independent Transparency (Weighted Blended OIT) & Screen-Space Contact Shadows (COMPLETED)
 
-* [ ] **18.1. GPU Compute Particle Simulation & Indirect Billboard Rendering (`TCastleVulkanComputeParticles` in `CastleInternalRHI_Vulkan`)**:
-  * Simulate 65,536+ particles on the GPU in a compute shader (`GenerateParticleSimulationComputeShader`) with gravity, curl/turbulence drag, ground-plane bounce collision, and atomic alive-list compaction driving `vkCmdDrawIndirect`.
-* [ ] **18.2. Weighted Blended Order-Independent Transparency (`TCastleVulkanWeightedBlendedOIT` in `CastleInternalRHI_Vulkan`)**:
-  * Render order-independent transparent surfaces into a `pfRGBA16_Float` premultiplied accumulation target ($\sum C_i w(z_i, \alpha_i), \sum \alpha_i w(z_i, \alpha_i)$) and a `pfR16_Float` revealage target ($\prod (1 - \alpha_i)$) using McGuire & Bavoil depth-weighted OIT (`EvaluateOITDepthWeight`, `GenerateOITCompositeFragmentShader`).
-* [ ] **18.3. Screen-Space Raymarched Contact Shadows (`TCastleVulkanContactShadows` in `CastleInternalRHI_Vulkan`)**:
-  * Raymarch short-range high-frequency contact shadows in screen space along the primary directional light vector (`GenerateContactShadowsComputeShader`, `DispatchContactShadows`) to resolve sub-texel shadow-map peter-panning on small geometric details.
+* [x] **18.1. GPU Compute Particle Simulation & Indirect Billboard Rendering (`TCastleVulkanComputeParticles` in `CastleInternalRHI_Vulkan`)**:
+  * Simulate 65,536+ particles on the GPU in a compute shader (`GenerateParticleSimulationComputeShader`, `DispatchParticleSimulation`) with semi-implicit Euler gravity/drag integration (`SimulateParticleStep`), ground-plane bounce collision with restitution, and atomic alive-list compaction (`u_AliveParticleIndices`) driving `vkCmdDrawIndirect` (`IndirectDrawBuffer`).
+* [x] **18.2. Weighted Blended Order-Independent Transparency (`TCastleVulkanWeightedBlendedOIT` in `CastleInternalRHI_Vulkan`)**:
+  * Render order-independent transparent surfaces into a `pfRGBA16_Float` premultiplied accumulation target ($\sum C_i w(z_i, \alpha_i), \sum \alpha_i w(z_i, \alpha_i)$) and a `pfR16_Float` revealage target ($\prod (1 - \alpha_i)$, `EnsureOITTargets`) using McGuire & Bavoil depth-weighted OIT (`EvaluateOITDepthWeight`, `AccumulateOITSample`, `EvaluateOITComposite`, `GenerateWeightedBlendedOITFunctions`, `GenerateWeightedBlendedOITCompositeFragmentShader`).
+* [x] **18.3. Screen-Space Raymarched Contact Shadows (`TCastleVulkanContactShadows` in `CastleInternalRHI_Vulkan`)**:
+  * Raymarch short-range high-frequency contact shadows in screen space along the primary directional light vector (`EvaluateContactShadowRay1D`, `GenerateContactShadowsComputeShader`, `DispatchContactShadows`) with depth-thickness window validation and distance fade to resolve sub-texel shadow-map peter-panning on small geometric details.
+
+**Milestone 18 Status**: Completed. GPU Compute Particle Simulation & Indirect Billboard Rendering (`TCastleVulkanComputeParticles` with 48-byte `TCastleGPUParticle` SSBO pool, semi-implicit Euler gravity/drag/ground-bounce integration, and atomic alive-list compaction driving `VkDrawIndirectCommand`), McGuire & Bavoil Weighted Blended Order-Independent Transparency (`TCastleVulkanWeightedBlendedOIT` with `pfRGBA16_Float` accumulation + `pfR16_Float` revealage MRTs and order-independent composite pass), and Screen-Space Raymarched Contact Shadows (`TCastleVulkanContactShadows` with 16-step view-space depth raymarching and thickness window rejection) fully integrated and tested (84 unit tests passing).
+
+
+### Phase 19: Compute Skinning & Morph Targets, GPU-Driven Terrain CDLOD & Subsurface Scattering / Foliage Transmission (PLANNED)
+
+* [ ] **19.1. Compute Shader Skeletal Skinning & Morph Target Blending (`TCastleVulkanComputeSkinner` in `CastleInternalRHI_Vulkan`)**:
+  * Deform high-poly skeletal meshes and blend morph target deltas in a pre-pass compute shader (`GenerateComputeSkinningShader`, `DispatchComputeSkinning`) writing transformed positions, normals, and tangents + previous-frame skinned positions for accurate TAA motion vectors.
+* [ ] **19.2. GPU-Driven Continuous Distance-Dependent LOD (CDLOD) Terrain (`TCastleVulkanTerrainCDLOD` in `CastleInternalRHI_Vulkan`)**:
+  * Subdivide quadtree terrain nodes on the GPU with continuous morph factor $k \in [0, 1]$ (`EvaluateCDLODMorphFactor`, `GenerateTerrainCDLODVertexShader`) to eliminate LOD popping across clipmap rings.
+* [ ] **19.3. Pre-Integrated Subsurface Scattering & Thin-Foliage Transmission (`GenerateSubsurfaceAndTransmissionPBRFunctions` in `CastleInternalShaderRHI`)**:
+  * Extend the Cook-Torrance PBR lighting pipeline with wrap-diffuse skin subsurface scattering (`EvaluateSubsurfaceWrapDiffuse`) and thickness-attenuated back-lit foliage/cloth transmission (`EvaluateFoliageTransmission`).
 
 
 ## 5. Build Tool (castle-engine) & Editor Integration
@@ -399,5 +411,5 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 ## 7. Testing & Verification Criteria
 
 * [x] Automated Visual Regression Tests: `CompareImagesPerceptualDiff` in `CastleInternalRHI` compares framebuffer readbacks (`GrabTextureImage`) between `rbOpenGL` and `rbVulkan` using normalized RMSE perceptual diff thresholds.
-* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 81 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
-* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance/Hi-Z occlusion culling (`TCastleVulkanComputeCuller`), Clustered Forward+ compute light culling (`TCastleVulkanClusteredLightCuller`), Declarative Render Graph (`TRHIRenderGraph`), Compute GTAO (`TCastleVulkanGTAO`), Hi-Z SSR (`TCastleVulkanSSR`), Froxel Volumetric Fog (`TCastleVulkanVolumetricFog`), Temporal Anti-Aliasing (`TCastleVulkanTAA`), Box-Projected Reflection Probes (`TCastleVulkanReflectionProbeManager`), OBB Decal Projection (`TCastleVulkanDecalManager`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.
+* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 84 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
+* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance/Hi-Z occlusion culling (`TCastleVulkanComputeCuller`), Clustered Forward+ compute light culling (`TCastleVulkanClusteredLightCuller`), Declarative Render Graph (`TRHIRenderGraph`), Compute GTAO (`TCastleVulkanGTAO`), Hi-Z SSR (`TCastleVulkanSSR`), Froxel Volumetric Fog (`TCastleVulkanVolumetricFog`), Temporal Anti-Aliasing (`TCastleVulkanTAA`), Box-Projected Reflection Probes (`TCastleVulkanReflectionProbeManager`), OBB Decal Projection (`TCastleVulkanDecalManager`), GPU Compute Particles (`TCastleVulkanComputeParticles`), Weighted Blended OIT (`TCastleVulkanWeightedBlendedOIT`), Contact Shadows (`TCastleVulkanContactShadows`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.
