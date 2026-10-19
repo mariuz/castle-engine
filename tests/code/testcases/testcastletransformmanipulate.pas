@@ -44,6 +44,7 @@ type
     procedure TestMeasureSelectedAndRayDistance;
     procedure TestProjectAlongDirectionDistributeGapsAndSnapRotScale;
     procedure TestSwapPositionsAndMatchSelectedSize;
+    procedure TestLookAtAimAndAlignSelectedBounds;
   end;
 
 implementation
@@ -796,6 +797,78 @@ begin
     AssertVectorEquals(Vector3(0.5, 0.5, 0.5), B3.Scale, 1e-4);
     AssertVectorEquals(B1.WorldBoundingBox.Size, B2.WorldBoundingBox.Size, 1e-4);
     AssertVectorEquals(B1.WorldBoundingBox.Size, B3.WorldBoundingBox.Size, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestLookAtAimAndAlignSelectedBounds;
+var
+  Viewport: TCastleViewport;
+  TargetBox, Observer1, Observer2: TCastleBox;
+  Manipulate: TCastleTransformManipulate;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    // TargetBox: Size (4, 10, 6) centered at (0, 5, 0) -> Min = (-2, 0, -3), Max = (2, 10, 3)
+    TargetBox := TCastleBox.Create(Viewport);
+    TargetBox.Size := Vector3(4, 10, 6);
+    TargetBox.Translation := Vector3(0, 5, 0);
+    Viewport.Items.Add(TargetBox);
+
+    // Observer1: Size (2, 4, 2) centered at (10, 5, 0) -> MinY = 3, MaxY = 7
+    Observer1 := TCastleBox.Create(Viewport);
+    Observer1.Size := Vector3(2, 4, 2);
+    Observer1.Translation := Vector3(10, 5, 0);
+    Viewport.Items.Add(Observer1);
+
+    // Observer2: Size (6, 2, 6) centered at (0, 5, 20) -> MinY = 4, MaxY = 6
+    Observer2 := TCastleBox.Create(Viewport);
+    Observer2.Size := Vector3(6, 2, 6);
+    Observer2.Translation := Vector3(0, 5, 20);
+    Viewport.Items.Add(Observer2);
+
+    // 1. Test LookAtWorldPoint: Observer1 at (10, 5, 0) looks at (0, 5, 0) -> Direction (-1, 0, 0)
+    Manipulate.SetSelected([Observer1]);
+    AssertTrue(Manipulate.LookAtWorldPoint(Vector3(0, 5, 0)));
+    Observer1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(-1, 0, 0), WorldDir.Normalize, 1e-4);
+
+    // 2. Test AimSelectedAtPrimary: Primary = TargetBox at (0, 5, 0).
+    // Observer1 at (10, 5, 0) aims (-1, 0, 0), Observer2 at (0, 5, 20) aims (0, 0, -1).
+    Observer1.Rotation := TVector4.Zero;
+    Observer2.Rotation := TVector4.Zero;
+    Manipulate.SetSelected([TargetBox, Observer1, Observer2]);
+    AssertTrue(Manipulate.AimSelectedAtPrimary);
+    Observer1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(-1, 0, 0), WorldDir.Normalize, 1e-4);
+    Observer2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 0, -1), WorldDir.Normalize, 1e-4);
+
+    // 3. Test AlignSelectedBounds along Y (Axis = 1) with UseMaxFace = false (Min face / bottom alignment):
+    // TargetBox MinY = 0.0.
+    // Observer1 has height 4 (half-height 2) -> Translation.Y becomes 2.0 (MinY = 0.0).
+    // Observer2 has height 2 (half-height 1) -> Translation.Y becomes 1.0 (MinY = 0.0).
+    Observer1.Rotation := TVector4.Zero;
+    Observer2.Rotation := TVector4.Zero;
+    AssertTrue(Manipulate.AlignSelectedBounds(1, false));
+    AssertSameValue(0.0, Observer1.WorldBoundingBox.Data[0].Y, 1e-4);
+    AssertSameValue(0.0, Observer2.WorldBoundingBox.Data[0].Y, 1e-4);
+    AssertSameValue(2.0, Observer1.Translation.Y, 1e-4);
+    AssertSameValue(1.0, Observer2.Translation.Y, 1e-4);
+
+    // 4. Test AlignSelectedBounds along Y (Axis = 1) with UseMaxFace = true (Max face / top alignment):
+    // TargetBox MaxY = 10.0.
+    // Observer1 has height 4 (half-height 2) -> Translation.Y becomes 8.0 (MaxY = 10.0).
+    // Observer2 has height 2 (half-height 1) -> Translation.Y becomes 9.0 (MaxY = 10.0).
+    AssertTrue(Manipulate.AlignSelectedBounds(1, true));
+    AssertSameValue(10.0, Observer1.WorldBoundingBox.Data[1].Y, 1e-4);
+    AssertSameValue(10.0, Observer2.WorldBoundingBox.Data[1].Y, 1e-4);
+    AssertSameValue(8.0, Observer1.Translation.Y, 1e-4);
+    AssertSameValue(9.0, Observer2.Translation.Y, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

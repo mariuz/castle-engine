@@ -458,6 +458,28 @@ type
       Requires at least 2 top-level selected transforms with non-empty bounding boxes.
       Returns @true if at least one selected transform was modified. }
     function MatchSelectedSize(const Axis: Integer = -1): Boolean;
+
+    { Rotate all top-level selected transforms so their world forward direction
+      (@code(Direction)) points directly toward @code(TargetWorldPos), keeping their
+      up vector aligned with @code(World.GravityUp) (or +Y).
+      Returns @true if at least one selected transform was modified. }
+    function LookAtWorldPoint(const TargetWorldPos: TVector3): Boolean;
+
+    { Rotate all secondary top-level selected transforms (@code(Selected[1..N-1]))
+      so their world forward direction (@code(Direction)) aims directly at the
+      primary selected transform (@code(Selected[0])).
+      Requires at least 2 top-level selected transforms.
+      Returns @true if at least one selected transform was modified. }
+    function AimSelectedAtPrimary: Boolean;
+
+    { Align the world-space bounding-box minimum faces (@code(UseMaxFace = false))
+      or maximum faces (@code(UseMaxFace = true)) of all top-level selected
+      transforms along @code(Axis) (0=X, 1=Y, 2=Z) to the outer minimum or maximum
+      bounding-box face of the selection.
+      Requires at least 2 top-level selected transforms with non-empty bounding boxes.
+      Returns @true if at least one selected transform was modified. }
+    function AlignSelectedBounds(const Axis: T3DAxis;
+      const UseMaxFace: Boolean = false): Boolean;
   end;
 
 var
@@ -2721,6 +2743,230 @@ begin
     if not TVector3.Equals(NewScale, Items[I].Scale) then
     begin
       Items[I].Scale := NewScale;
+      Result := true;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.LookAtWorldPoint(
+  const TargetWorldPos: TVector3): Boolean;
+
+  function OrientTransformTowards(const T: TCastleTransform;
+    const TargetPos: TVector3): Boolean;
+  var
+    CurPos, CurDir, CurUp, NewDir, NewUp, GravityUp, Side: TVector3;
+  begin
+    Result := false;
+    if T.HasWorldTransform then
+      T.GetWorldView(CurPos, CurDir, CurUp)
+    else
+    begin
+      CurPos := T.Translation;
+      CurDir := T.Direction;
+      CurUp := T.Up;
+    end;
+
+    NewDir := TargetPos - CurPos;
+    if NewDir.IsZero(1e-5) then Exit;
+    NewDir := NewDir.Normalize;
+
+    if T.World <> nil then
+      GravityUp := T.World.GravityUp
+    else
+      GravityUp := Vector3(0, 1, 0);
+
+    Side := TVector3.CrossProduct(NewDir, GravityUp);
+    if Side.IsZero(1e-4) then
+      Side := TVector3.CrossProduct(NewDir, CurUp);
+    if Side.IsZero(1e-4) then
+      Side := TVector3.CrossProduct(NewDir, Vector3(0, 0, 1));
+    if Side.IsZero(1e-4) then
+      Side := Vector3(1, 0, 0);
+    NewUp := TVector3.CrossProduct(Side, NewDir).Normalize;
+
+    if (not TVector3.Equals(NewDir, CurDir)) or
+       (not TVector3.Equals(NewUp, CurUp)) then
+    begin
+      if T.HasWorldTransform then
+        T.SetWorldView(CurPos, NewDir, NewUp)
+      else
+        T.SetView(CurPos, NewDir, NewUp);
+      Result := true;
+    end;
+  end;
+
+var
+  I: Integer;
+  T: TCastleTransform;
+begin
+  Result := false;
+  if SelectedCount = 0 then Exit;
+
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+      if OrientTransformTowards(T, TargetWorldPos) then
+        Result := true;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.AimSelectedAtPrimary: Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  TargetPos, CurPos, CurDir, CurUp, NewDir, NewUp, GravityUp, Side: TVector3;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  TargetPos := GetTransformWorkingPos(Items[0]);
+
+  for I := 1 to Count - 1 do
+  begin
+    T := Items[I];
+    if T.HasWorldTransform then
+      T.GetWorldView(CurPos, CurDir, CurUp)
+    else
+    begin
+      CurPos := T.Translation;
+      CurDir := T.Direction;
+      CurUp := T.Up;
+    end;
+
+    NewDir := TargetPos - CurPos;
+    if NewDir.IsZero(1e-5) then Continue;
+    NewDir := NewDir.Normalize;
+
+    if T.World <> nil then
+      GravityUp := T.World.GravityUp
+    else
+      GravityUp := Vector3(0, 1, 0);
+
+    Side := TVector3.CrossProduct(NewDir, GravityUp);
+    if Side.IsZero(1e-4) then
+      Side := TVector3.CrossProduct(NewDir, CurUp);
+    if Side.IsZero(1e-4) then
+      Side := TVector3.CrossProduct(NewDir, Vector3(0, 0, 1));
+    if Side.IsZero(1e-4) then
+      Side := Vector3(1, 0, 0);
+    NewUp := TVector3.CrossProduct(Side, NewDir).Normalize;
+
+    if (not TVector3.Equals(NewDir, CurDir)) or
+       (not TVector3.Equals(NewUp, CurUp)) then
+    begin
+      if T.HasWorldTransform then
+        T.SetWorldView(CurPos, NewDir, NewUp)
+      else
+        T.SetView(CurPos, NewDir, NewUp);
+      Result := true;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.AlignSelectedBounds(
+  const Axis: T3DAxis; const UseMaxFace: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  ItemBoxes: array of TBox3D;
+  I, Count: Integer;
+  T: TCastleTransform;
+  BBox: TBox3D;
+  TargetEdge, CurFace, Delta: Single;
+  Pos: TVector3;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  SetLength(ItemBoxes, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      if T.HasWorldTransform then
+        BBox := T.WorldBoundingBox
+      else
+        BBox := T.BoundingBox;
+      if not BBox.IsEmpty then
+      begin
+        Items[Count] := T;
+        ItemBoxes[Count] := BBox;
+        Inc(Count);
+      end;
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  if UseMaxFace then
+  begin
+    TargetEdge := ItemBoxes[0].Data[1][Axis];
+    for I := 1 to Count - 1 do
+      if ItemBoxes[I].Data[1][Axis] > TargetEdge then
+        TargetEdge := ItemBoxes[I].Data[1][Axis];
+  end else
+  begin
+    TargetEdge := ItemBoxes[0].Data[0][Axis];
+    for I := 1 to Count - 1 do
+      if ItemBoxes[I].Data[0][Axis] < TargetEdge then
+        TargetEdge := ItemBoxes[I].Data[0][Axis];
+  end;
+
+  for I := 0 to Count - 1 do
+  begin
+    if UseMaxFace then
+      CurFace := ItemBoxes[I].Data[1][Axis]
+    else
+      CurFace := ItemBoxes[I].Data[0][Axis];
+
+    Delta := TargetEdge - CurFace;
+    if not SameValue(Delta, 0.0, 1e-5) then
+    begin
+      Pos := GetTransformWorkingPos(Items[I]);
+      Pos.Data[Axis] := Pos.Data[Axis] + Delta;
+      SetTransformWorkingPos(Items[I], Pos);
       Result := true;
     end;
   end;

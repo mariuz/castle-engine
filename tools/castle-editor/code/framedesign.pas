@@ -319,10 +319,21 @@ type
       ButtonProjectAlongView: TButton;
       ButtonSwapPositions: TButton;
       ButtonMatchSize: TButton;
+      ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
       ButtonViewFront: TButton;
       ButtonViewRight: TButton;
+      PanelLayoutUI: TPanel;
+      ButtonUIAlignLeft: TButton;
+      ButtonUIAlignCenterH: TButton;
+      ButtonUIAlignRight: TButton;
+      ButtonUIAlignBottom: TButton;
+      ButtonUIAlignMiddleV: TButton;
+      ButtonUIAlignTop: TButton;
+      ButtonUIDistributeH: TButton;
+      ButtonUIDistributeV: TButton;
+      ButtonUIMatchSize: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -344,9 +355,11 @@ type
       MenuTreeViewItemSelectSameClass: TMenuItem;
       MenuTreeViewItemSelectSameUrl: TMenuItem;
       MenuTreeViewItemSelectWithinRadius: TMenuItem;
+      MenuTreeViewItemSelectByPattern: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
       MenuTreeViewItemCollapseAll: TMenuItem;
       FLockedComponents: TComponentList;
+      FSelectionSets: array [0..9] of TStringList;
       FPilotTransform: TCastleTransform;
       FPilotModified: Boolean;
       FAltDragDuplicated: Boolean;
@@ -391,7 +404,11 @@ type
     procedure ButtonRandomizeTransformClick(Sender: TObject);
     procedure ButtonSwapPositionsClick(Sender: TObject);
     procedure ButtonMatchSizeClick(Sender: TObject);
+    procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
+    procedure ButtonUIAlignClick(Sender: TObject);
+    procedure ButtonUIDistributeClick(Sender: TObject);
+    procedure ButtonUIMatchSizeClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -420,6 +437,7 @@ type
     procedure MenuTreeViewItemSelectSameClassClick(Sender: TObject);
     procedure MenuTreeViewItemSelectSameUrlClick(Sender: TObject);
     procedure MenuTreeViewItemSelectWithinRadiusClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectByPatternClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
     procedure MenuTreeViewItemCollapseAllClick(Sender: TObject);
     function NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
@@ -859,8 +877,12 @@ type
     procedure RandomizeSelectionTransform;
     procedure SwapSelectedTransforms;
     procedure MatchSelectedTransformSize(const Axis: Integer = -1);
+    procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
+    procedure AlignSelectedUserInterfaces(const AlignMode: Integer);
+    procedure DistributeSelectedUserInterfaces(const Vertical: Boolean);
+    procedure MatchSelectedUserInterfaceSize(const MatchWidth, MatchHeight: Boolean);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -883,6 +905,10 @@ type
     procedure SelectAllWithSameUrl;
     procedure SelectWithinRadius(const Radius: Single);
     procedure ShowSelectWithinRadiusDialog;
+    procedure SaveSelectionSet(const Slot: Integer);
+    procedure RecallSelectionSet(const Slot: Integer; const Additive: Boolean = false);
+    procedure SelectByNamePattern(const Pattern: String);
+    procedure ShowSelectByNamePatternDialog;
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -1450,6 +1476,11 @@ begin
     begin
       Frame.UnlockAll;
       Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkShift] then
+    begin
+      Frame.AimSelectionAtPrimaryOrCursor;
+      Exit(true);
     end;
   end;
 
@@ -1572,6 +1603,21 @@ begin
     if (Event.ModifiersDown = []) and Frame.FCameraBookmarks[BookmarkSlot].Valid then
     begin
       Frame.RecallCameraBookmark(BookmarkSlot);
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkShift] then
+    begin
+      Frame.SaveSelectionSet(BookmarkSlot);
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkShift] then
+    begin
+      Frame.RecallSelectionSet(BookmarkSlot, false);
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkAlt, mkShift] then
+    begin
+      Frame.RecallSelectionSet(BookmarkSlot, true);
       Exit(true);
     end;
   end;
@@ -2294,11 +2340,15 @@ constructor TDesignFrame.Create(TheOwner: TComponent);
       Result.ReferencesColor := $9EFFFF;
     end;
   end;
+var
+  I: Integer;
 begin
   inherited;
 
   LastSelected := TComponentList.Create(false);
   FLockedComponents := TComponentList.Create(false);
+  for I := 0 to 9 do
+    FSelectionSets[I] := TStringList.Create;
 
   PropertyEditorHook := TCastlePropertyEditorHook.Create(Self);
 
@@ -2532,7 +2582,7 @@ begin
   ButtonAlignX := TButton.Create(Self);
   ButtonAlignX.AutoSize := true;
   ButtonAlignX.Caption := 'Align X';
-  ButtonAlignX.Hint := 'Align all selected 3D transforms along the X axis to the primary selected object';
+  ButtonAlignX.Hint := 'Align selected 3D transforms along X (Click: Primary | Shift: Center | Ctrl: Min Face | Alt: Max Face)';
   ButtonAlignX.ShowHint := true;
   ButtonAlignX.Tag := 0;
   ButtonAlignX.OnClick := @ButtonAlignAxisClick;
@@ -2541,7 +2591,7 @@ begin
   ButtonAlignY := TButton.Create(Self);
   ButtonAlignY.AutoSize := true;
   ButtonAlignY.Caption := 'Align Y';
-  ButtonAlignY.Hint := 'Align all selected 3D transforms along the Y axis to the primary selected object';
+  ButtonAlignY.Hint := 'Align selected 3D transforms along Y (Click: Primary | Shift: Center | Ctrl: Min Face | Alt: Max Face)';
   ButtonAlignY.ShowHint := true;
   ButtonAlignY.Tag := 1;
   ButtonAlignY.OnClick := @ButtonAlignAxisClick;
@@ -2550,7 +2600,7 @@ begin
   ButtonAlignZ := TButton.Create(Self);
   ButtonAlignZ.AutoSize := true;
   ButtonAlignZ.Caption := 'Align Z';
-  ButtonAlignZ.Hint := 'Align all selected 3D transforms along the Z axis to the primary selected object';
+  ButtonAlignZ.Hint := 'Align selected 3D transforms along Z (Click: Primary | Shift: Center | Ctrl: Min Face | Alt: Max Face)';
   ButtonAlignZ.ShowHint := true;
   ButtonAlignZ.Tag := 2;
   ButtonAlignZ.OnClick := @ButtonAlignAxisClick;
@@ -2731,6 +2781,108 @@ begin
   ButtonPilotTransform.OnClick := @ButtonPilotTransformClick;
   ButtonPilotTransform.Parent := PanelLayoutTransform;
 
+  ButtonAimAtTarget := TButton.Create(Self);
+  ButtonAimAtTarget.Align := alTop;
+  ButtonAimAtTarget.AutoSize := true;
+  ButtonAimAtTarget.Caption := 'Aim at Target';
+  ButtonAimAtTarget.Hint := 'Rotate selected 3D transform(s) to look at the primary selected object (2+ selected) or 3D surface under cursor (1 selected) (Ctrl+Shift+L)';
+  ButtonAimAtTarget.ShowHint := true;
+  ButtonAimAtTarget.BorderSpacing.Around := 2;
+  ButtonAimAtTarget.OnClick := @ButtonAimAtTargetClick;
+  ButtonAimAtTarget.Parent := PanelLayoutTransform;
+
+  PanelLayoutUI := TPanel.Create(Self);
+  PanelLayoutUI.AutoSize := true;
+  PanelLayoutUI.BevelOuter := bvNone;
+  PanelLayoutUI.ChildSizing.LeftRightSpacing := 8;
+  PanelLayoutUI.ChildSizing.TopBottomSpacing := 8;
+  PanelLayoutUI.ChildSizing.HorizontalSpacing := 6;
+  PanelLayoutUI.ChildSizing.VerticalSpacing := 6;
+  PanelLayoutUI.ChildSizing.Layout := cclLeftToRightThenTopToBottom;
+  PanelLayoutUI.ChildSizing.ControlsPerLine := 3;
+  PanelLayoutUI.Visible := false;
+  PanelLayoutUI.Parent := PanelLayoutTop;
+
+  ButtonUIAlignLeft := TButton.Create(Self);
+  ButtonUIAlignLeft.AutoSize := true;
+  ButtonUIAlignLeft.Caption := 'UI Align Left';
+  ButtonUIAlignLeft.Hint := 'Align left edges of selected 2D UI controls to the primary selected control';
+  ButtonUIAlignLeft.ShowHint := true;
+  ButtonUIAlignLeft.Tag := 0;
+  ButtonUIAlignLeft.OnClick := @ButtonUIAlignClick;
+  ButtonUIAlignLeft.Parent := PanelLayoutUI;
+
+  ButtonUIAlignCenterH := TButton.Create(Self);
+  ButtonUIAlignCenterH.AutoSize := true;
+  ButtonUIAlignCenterH.Caption := 'UI Center H';
+  ButtonUIAlignCenterH.Hint := 'Align horizontal centers of selected 2D UI controls to the primary selected control';
+  ButtonUIAlignCenterH.ShowHint := true;
+  ButtonUIAlignCenterH.Tag := 1;
+  ButtonUIAlignCenterH.OnClick := @ButtonUIAlignClick;
+  ButtonUIAlignCenterH.Parent := PanelLayoutUI;
+
+  ButtonUIAlignRight := TButton.Create(Self);
+  ButtonUIAlignRight.AutoSize := true;
+  ButtonUIAlignRight.Caption := 'UI Align Right';
+  ButtonUIAlignRight.Hint := 'Align right edges of selected 2D UI controls to the primary selected control';
+  ButtonUIAlignRight.ShowHint := true;
+  ButtonUIAlignRight.Tag := 2;
+  ButtonUIAlignRight.OnClick := @ButtonUIAlignClick;
+  ButtonUIAlignRight.Parent := PanelLayoutUI;
+
+  ButtonUIAlignBottom := TButton.Create(Self);
+  ButtonUIAlignBottom.AutoSize := true;
+  ButtonUIAlignBottom.Caption := 'UI Align Bottom';
+  ButtonUIAlignBottom.Hint := 'Align bottom edges of selected 2D UI controls to the primary selected control';
+  ButtonUIAlignBottom.ShowHint := true;
+  ButtonUIAlignBottom.Tag := 3;
+  ButtonUIAlignBottom.OnClick := @ButtonUIAlignClick;
+  ButtonUIAlignBottom.Parent := PanelLayoutUI;
+
+  ButtonUIAlignMiddleV := TButton.Create(Self);
+  ButtonUIAlignMiddleV.AutoSize := true;
+  ButtonUIAlignMiddleV.Caption := 'UI Middle V';
+  ButtonUIAlignMiddleV.Hint := 'Align vertical centers of selected 2D UI controls to the primary selected control';
+  ButtonUIAlignMiddleV.ShowHint := true;
+  ButtonUIAlignMiddleV.Tag := 4;
+  ButtonUIAlignMiddleV.OnClick := @ButtonUIAlignClick;
+  ButtonUIAlignMiddleV.Parent := PanelLayoutUI;
+
+  ButtonUIAlignTop := TButton.Create(Self);
+  ButtonUIAlignTop.AutoSize := true;
+  ButtonUIAlignTop.Caption := 'UI Align Top';
+  ButtonUIAlignTop.Hint := 'Align top edges of selected 2D UI controls to the primary selected control';
+  ButtonUIAlignTop.ShowHint := true;
+  ButtonUIAlignTop.Tag := 5;
+  ButtonUIAlignTop.OnClick := @ButtonUIAlignClick;
+  ButtonUIAlignTop.Parent := PanelLayoutUI;
+
+  ButtonUIDistributeH := TButton.Create(Self);
+  ButtonUIDistributeH.AutoSize := true;
+  ButtonUIDistributeH.Caption := 'UI Dist H';
+  ButtonUIDistributeH.Hint := 'Evenly distribute horizontal gaps between 3 or more selected 2D UI controls';
+  ButtonUIDistributeH.ShowHint := true;
+  ButtonUIDistributeH.Tag := 0;
+  ButtonUIDistributeH.OnClick := @ButtonUIDistributeClick;
+  ButtonUIDistributeH.Parent := PanelLayoutUI;
+
+  ButtonUIDistributeV := TButton.Create(Self);
+  ButtonUIDistributeV.AutoSize := true;
+  ButtonUIDistributeV.Caption := 'UI Dist V';
+  ButtonUIDistributeV.Hint := 'Evenly distribute vertical gaps between 3 or more selected 2D UI controls';
+  ButtonUIDistributeV.ShowHint := true;
+  ButtonUIDistributeV.Tag := 1;
+  ButtonUIDistributeV.OnClick := @ButtonUIDistributeClick;
+  ButtonUIDistributeV.Parent := PanelLayoutUI;
+
+  ButtonUIMatchSize := TButton.Create(Self);
+  ButtonUIMatchSize.AutoSize := true;
+  ButtonUIMatchSize.Caption := 'UI Match Size';
+  ButtonUIMatchSize.Hint := 'Match Width and Height of selected 2D UI controls to the primary selected control (Shift: Width only | Ctrl: Height only)';
+  ButtonUIMatchSize.ShowHint := true;
+  ButtonUIMatchSize.OnClick := @ButtonUIMatchSizeClick;
+  ButtonUIMatchSize.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -2865,6 +3017,11 @@ begin
   MenuTreeViewItemSelectWithinRadius.OnClick := @MenuTreeViewItemSelectWithinRadiusClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectWithinRadius);
 
+  MenuTreeViewItemSelectByPattern := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectByPattern.Caption := 'Select By Name Pattern...';
+  MenuTreeViewItemSelectByPattern.OnClick := @MenuTreeViewItemSelectByPatternClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectByPattern);
+
   MenuTreeViewItemInvertSelection := TMenuItem.Create(Self);
   MenuTreeViewItemInvertSelection.Caption := 'Invert Selection (Ctrl+I)';
   MenuTreeViewItemInvertSelection.OnClick := @MenuTreeViewItemInvertSelectionClick;
@@ -2962,7 +3119,10 @@ end;
 destructor TDesignFrame.Destroy;
 var
   F: TCollectionPropertyEditorForm;
+  I: Integer;
 begin
+  for I := 0 to 9 do
+    FreeAndNil(FSelectionSets[I]);
   FreeAndNil(TreeNodeMap);
   FreeAndNil(CameraPreview);
   FreeAndNil(FComponentEditorDesigner);
@@ -3017,6 +3177,8 @@ begin
 end;
 
 procedure TDesignFrame.ClearDesign;
+var
+  I: Integer;
 begin
   // ControlsTree.Items.Clear; // do not clear, we will always rebuild ControlsTree to just apply differences
 
@@ -3027,6 +3189,9 @@ begin
 
   if FLockedComponents <> nil then
     FLockedComponents.Clear;
+  for I := 0 to 9 do
+    if FSelectionSets[I] <> nil then
+      FSelectionSets[I].Clear;
 
   ControlsTree.ClearSelection; // TODO: for now we reset selection, though maybe we could preserve it in some cases
 
@@ -4653,6 +4818,7 @@ begin
   TabLayout.TabVisible :=
     (Inspector[itLayout].RowCount <> 0) or
     PanelLayoutTransform.Visible or
+    ((PanelLayoutUI <> nil) and PanelLayoutUI.Visible) or
     PanelAnchors.Visible;
   TabEvents.TabVisible :=
     (Inspector[itEvents].RowCount <> 0);
@@ -6411,7 +6577,7 @@ procedure TDesignFrame.UpdateSelectedControl;
 
 var
   Selected, UnlockedSelected: TComponentList;
-  I, SelectedCount: Integer;
+  I, SelectedCount, SelectedUICount: Integer;
   SelectionForOI: TPersistentSelectionList;
   UI: TCastleUserInterface;
   InspectorType: TInspectorType;
@@ -6455,15 +6621,29 @@ begin
     if (FPilotTransform <> nil) and (T <> FPilotTransform) then
       StopPilotTransform;
 
+    SelectedUICount := 0;
     UnlockedSelected := TComponentList.Create(false);
     try
       if Selected <> nil then
         for I := 0 to Selected.Count - 1 do
           if not IsComponentLocked(Selected[I]) then
+          begin
             UnlockedSelected.Add(Selected[I]);
+            if (Selected[I] is TCastleUserInterface) and
+               (Selected[I] <> DesignRoot) then
+              Inc(SelectedUICount);
+          end;
       TransformManipulate.SetSelected(UnlockedSelected);
     finally
       FreeAndNil(UnlockedSelected);
+    end;
+    if PanelLayoutUI <> nil then
+    begin
+      SetEnabledVisible(PanelLayoutUI, SelectedUICount >= 2);
+      if ButtonUIDistributeH <> nil then
+        ButtonUIDistributeH.Enabled := SelectedUICount >= 3;
+      if ButtonUIDistributeV <> nil then
+        ButtonUIDistributeV.Enabled := SelectedUICount >= 3;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -6490,6 +6670,8 @@ begin
       ButtonMatchSize.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonPilotTransform <> nil then
       ButtonPilotTransform.Enabled := T <> nil;
+    if ButtonAimAtTarget <> nil then
+      ButtonAimAtTarget.Enabled := (T <> nil) or (TransformManipulate.SelectedCount > 0);
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -7769,7 +7951,21 @@ begin
       begin
         UnlockAll;
         Key := 0;
+      end else
+      if Shift = [ssCtrl, ssShift] then
+      begin
+        AimSelectionAtPrimaryOrCursor;
+        Key := 0;
       end;
+    end else
+    if (Key in [Ord('0')..Ord('9')]) and
+       ((Shift = [ssCtrl, ssShift]) or (Shift = [ssShift]) or (Shift = [ssAlt, ssShift])) then
+    begin
+      if ssCtrl in Shift then
+        SaveSelectionSet(Key - Ord('0'))
+      else
+        RecallSelectionSet(Key - Ord('0'), ssAlt in Shift);
+      Key := 0;
     end else
     if (Key = Ord('D')) and (Shift = [ssCtrl, ssShift]) then
     begin
@@ -8294,9 +8490,23 @@ begin
 end;
 
 procedure TDesignFrame.ButtonAlignAxisClick(Sender: TObject);
+var
+  Axis: T3DAxis;
+  ShiftState: TShiftState;
 begin
-  if Sender is TComponent then
-    AlignSelectionToAxis(TComponent(Sender).Tag);
+  if (Sender is TComponent) and (TransformManipulate <> nil) then
+  begin
+    Axis := TComponent(Sender).Tag;
+    ShiftState := GetKeyShiftState;
+    if ssCtrl in ShiftState then
+      TransformManipulate.AlignSelectedBounds(Axis, false)
+    else if ssAlt in ShiftState then
+      TransformManipulate.AlignSelectedBounds(Axis, true)
+    else if ssShift in ShiftState then
+      TransformManipulate.AlignSelected(Axis, atCenter)
+    else
+      AlignSelectionToAxis(Axis);
+  end;
 end;
 
 procedure TDesignFrame.ButtonDistributeAxisClick(Sender: TObject);
@@ -8432,6 +8642,290 @@ end;
 procedure TDesignFrame.ButtonPilotTransformClick(Sender: TObject);
 begin
   TogglePilotTransform;
+end;
+
+procedure TDesignFrame.AimSelectionAtPrimaryOrCursor;
+var
+  V: TCastleViewport;
+  RayOrigin, RayDirection, HitPoint, WorldDelta: TVector3;
+begin
+  if TransformManipulate = nil then Exit;
+
+  if TransformManipulate.SelectedCount >= 2 then
+  begin
+    TransformManipulate.AimSelectedAtPrimary;
+    Exit;
+  end;
+
+  if TransformManipulate.SelectedCount = 1 then
+  begin
+    V := CurrentViewport;
+    if (V <> nil) and (CastleControl <> nil) and (CastleControl.Container <> nil) then
+    begin
+      V.PositionToRay(CastleControl.Container.MousePosition, true, RayOrigin, RayDirection);
+      if TransformManipulate.MeasureRayDistanceFromSelected(
+           RayOrigin, RayDirection, HitPoint, WorldDelta) >= 0 then
+        TransformManipulate.LookAtWorldPoint(HitPoint);
+    end;
+  end;
+end;
+
+procedure TDesignFrame.ButtonAimAtTargetClick(Sender: TObject);
+begin
+  AimSelectionAtPrimaryOrCursor;
+end;
+
+procedure TDesignFrame.AlignSelectedUserInterfaces(const AlignMode: Integer);
+var
+  Selected: TComponentList;
+  SelectedCount, I, MovedCount: Integer;
+  PrimaryUI, UI: TCastleUserInterface;
+  PrimaryRect, CurRect: TFloatRectangle;
+  DeltaX, DeltaY: Single;
+begin
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if (Selected = nil) or (SelectedCount < 2) then Exit;
+
+    PrimaryUI := nil;
+    for I := 0 to SelectedCount - 1 do
+      if (Selected[I] is TCastleUserInterface) and
+         (Selected[I] <> DesignRoot) and
+         (not IsComponentLocked(Selected[I])) then
+      begin
+        PrimaryUI := TCastleUserInterface(Selected[I]);
+        Break;
+      end;
+
+    if PrimaryUI = nil then Exit;
+    PrimaryRect := PrimaryUI.RenderRectWithBorder;
+    if PrimaryRect.IsEmpty then Exit;
+
+    MovedCount := 0;
+    for I := 0 to SelectedCount - 1 do
+      if (Selected[I] is TCastleUserInterface) and
+         (Selected[I] <> PrimaryUI) and
+         (Selected[I] <> DesignRoot) and
+         (not IsComponentLocked(Selected[I])) then
+      begin
+        UI := TCastleUserInterface(Selected[I]);
+        CurRect := UI.RenderRectWithBorder;
+        if CurRect.IsEmpty or (UI.UIScale <= 0) then Continue;
+
+        DeltaX := 0;
+        DeltaY := 0;
+        case AlignMode of
+          0: DeltaX := PrimaryRect.Left - CurRect.Left;
+          1: DeltaX := PrimaryRect.Center.X - CurRect.Center.X;
+          2: DeltaX := PrimaryRect.Right - CurRect.Right;
+          3: DeltaY := PrimaryRect.Bottom - CurRect.Bottom;
+          4: DeltaY := PrimaryRect.Center.Y - CurRect.Center.Y;
+          5: DeltaY := PrimaryRect.Top - CurRect.Top;
+        end;
+
+        if (Abs(DeltaX) > 1e-4) or (Abs(DeltaY) > 1e-4) then
+        begin
+          UI.Translation := UI.Translation + Vector2(DeltaX / UI.UIScale, DeltaY / UI.UIScale);
+          Inc(MovedCount);
+        end;
+      end;
+
+    if MovedCount > 0 then
+      ModifiedOutsideObjectInspector(
+        Format('Align %d UI control(s)', [MovedCount]), ucHigh);
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.DistributeSelectedUserInterfaces(const Vertical: Boolean);
+type
+  TUIEntry = record
+    Control: TCastleUserInterface;
+    Rect: TFloatRectangle;
+    SortKey: Single;
+  end;
+var
+  Selected: TComponentList;
+  SelectedCount, I, J, Count, MovedCount: Integer;
+  Entries: array of TUIEntry;
+  Temp: TUIEntry;
+  UI: TCastleUserInterface;
+  R: TFloatRectangle;
+  SpanMin, SpanMax, TotalSize, GapSize, RunningEdge, DeltaPx: Single;
+begin
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if (Selected = nil) or (SelectedCount < 3) then Exit;
+
+    SetLength(Entries, SelectedCount);
+    Count := 0;
+    for I := 0 to SelectedCount - 1 do
+      if (Selected[I] is TCastleUserInterface) and
+         (Selected[I] <> DesignRoot) and
+         (not IsComponentLocked(Selected[I])) then
+      begin
+        UI := TCastleUserInterface(Selected[I]);
+        R := UI.RenderRectWithBorder;
+        if R.IsEmpty or (UI.UIScale <= 0) then Continue;
+        Entries[Count].Control := UI;
+        Entries[Count].Rect := R;
+        if Vertical then
+          Entries[Count].SortKey := R.Center.Y
+        else
+          Entries[Count].SortKey := R.Center.X;
+        Inc(Count);
+      end;
+
+    if Count < 3 then Exit;
+
+    for I := 0 to Count - 2 do
+      for J := I + 1 to Count - 1 do
+        if Entries[J].SortKey < Entries[I].SortKey then
+        begin
+          Temp := Entries[I];
+          Entries[I] := Entries[J];
+          Entries[J] := Temp;
+        end;
+
+    if Vertical then
+    begin
+      SpanMin := Entries[0].Rect.Bottom;
+      SpanMax := Entries[Count - 1].Rect.Top;
+    end else
+    begin
+      SpanMin := Entries[0].Rect.Left;
+      SpanMax := Entries[Count - 1].Rect.Right;
+    end;
+
+    TotalSize := 0;
+    for I := 0 to Count - 1 do
+      if Vertical then
+        TotalSize := TotalSize + Entries[I].Rect.Height
+      else
+        TotalSize := TotalSize + Entries[I].Rect.Width;
+
+    GapSize := ((SpanMax - SpanMin) - TotalSize) / (Count - 1);
+    if Vertical then
+      RunningEdge := Entries[0].Rect.Top + GapSize
+    else
+      RunningEdge := Entries[0].Rect.Right + GapSize;
+
+    MovedCount := 0;
+    for I := 1 to Count - 2 do
+    begin
+      UI := Entries[I].Control;
+      if Vertical then
+      begin
+        DeltaPx := RunningEdge - Entries[I].Rect.Bottom;
+        if Abs(DeltaPx) > 1e-4 then
+        begin
+          UI.Translation := UI.Translation + Vector2(0, DeltaPx / UI.UIScale);
+          Inc(MovedCount);
+        end;
+        RunningEdge := RunningEdge + Entries[I].Rect.Height + GapSize;
+      end else
+      begin
+        DeltaPx := RunningEdge - Entries[I].Rect.Left;
+        if Abs(DeltaPx) > 1e-4 then
+        begin
+          UI.Translation := UI.Translation + Vector2(DeltaPx / UI.UIScale, 0);
+          Inc(MovedCount);
+        end;
+        RunningEdge := RunningEdge + Entries[I].Rect.Width + GapSize;
+      end;
+    end;
+
+    if MovedCount > 0 then
+      ModifiedOutsideObjectInspector(
+        Format('Distribute %d UI control(s)', [Count]), ucHigh);
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.MatchSelectedUserInterfaceSize(const MatchWidth, MatchHeight: Boolean);
+var
+  Selected: TComponentList;
+  SelectedCount, I, ChangedCount: Integer;
+  PrimaryUI, UI: TCastleUserInterface;
+  TargetW, TargetH: Single;
+  ControlChanged: Boolean;
+begin
+  if (not MatchWidth) and (not MatchHeight) then Exit;
+
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if (Selected = nil) or (SelectedCount < 2) then Exit;
+
+    PrimaryUI := nil;
+    for I := 0 to SelectedCount - 1 do
+      if (Selected[I] is TCastleUserInterface) and
+         (Selected[I] <> DesignRoot) and
+         (not IsComponentLocked(Selected[I])) then
+      begin
+        PrimaryUI := TCastleUserInterface(Selected[I]);
+        Break;
+      end;
+
+    if PrimaryUI = nil then Exit;
+    TargetW := PrimaryUI.EffectiveWidth;
+    TargetH := PrimaryUI.EffectiveHeight;
+
+    ChangedCount := 0;
+    for I := 0 to SelectedCount - 1 do
+      if (Selected[I] is TCastleUserInterface) and
+         (Selected[I] <> PrimaryUI) and
+         (Selected[I] <> DesignRoot) and
+         (not IsComponentLocked(Selected[I])) then
+      begin
+        UI := TCastleUserInterface(Selected[I]);
+        ControlChanged := false;
+        if MatchWidth and (TargetW > 0) and (not SameValue(UI.Width, TargetW)) then
+        begin
+          UI.Width := TargetW;
+          ControlChanged := true;
+        end;
+        if MatchHeight and (TargetH > 0) and (not SameValue(UI.Height, TargetH)) then
+        begin
+          UI.Height := TargetH;
+          ControlChanged := true;
+        end;
+        if ControlChanged then
+          Inc(ChangedCount);
+      end;
+
+    if ChangedCount > 0 then
+      ModifiedOutsideObjectInspector(
+        Format('Match size of %d UI control(s) to %s', [ChangedCount, PrimaryUI.Name]), ucHigh);
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUIAlignClick(Sender: TObject);
+begin
+  if Sender is TComponent then
+    AlignSelectedUserInterfaces(TComponent(Sender).Tag);
+end;
+
+procedure TDesignFrame.ButtonUIDistributeClick(Sender: TObject);
+begin
+  if Sender is TComponent then
+    DistributeSelectedUserInterfaces(TComponent(Sender).Tag <> 0);
+end;
+
+procedure TDesignFrame.ButtonUIMatchSizeClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    MatchSelectedUserInterfaceSize(true, false)
+  else if ssCtrl in ShiftState then
+    MatchSelectedUserInterfaceSize(false, true)
+  else
+    MatchSelectedUserInterfaceSize(true, true);
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -10216,6 +10710,186 @@ begin
   ShowSelectWithinRadiusDialog;
 end;
 
+procedure TDesignFrame.SaveSelectionSet(const Slot: Integer);
+var
+  Selected: TComponentList;
+  SelectedCount, I: Integer;
+  C: TComponent;
+begin
+  if (Slot < 0) or (Slot > 9) or (FSelectionSets[Slot] = nil) then Exit;
+  FSelectionSets[Slot].Clear;
+
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if Selected <> nil then
+      for I := 0 to SelectedCount - 1 do
+      begin
+        C := Selected[I];
+        if (C <> nil) and (C.Name <> '') then
+          FSelectionSets[Slot].Add(C.Name);
+      end;
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.RecallSelectionSet(const Slot: Integer; const Additive: Boolean);
+var
+  Existing, NewSelection: TComponentList;
+  ExistingCount, I: Integer;
+  TreeNode: TTreeNode;
+  C: TComponent;
+begin
+  if (Slot < 0) or (Slot > 9) or (FSelectionSets[Slot] = nil) or
+     (FSelectionSets[Slot].Count = 0) then
+    Exit;
+
+  NewSelection := TComponentList.Create(false);
+  try
+    if Additive then
+    begin
+      GetSelected(Existing, ExistingCount, false);
+      try
+        if Existing <> nil then
+          for I := 0 to ExistingCount - 1 do
+            NewSelection.Add(Existing[I]);
+      finally
+        FreeAndNil(Existing);
+      end;
+    end;
+
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C <> nil) and (C.Name <> '') and Selectable(C) and
+         (not IsComponentLocked(C)) and
+         (FSelectionSets[Slot].IndexOf(C.Name) <> -1) and
+         (NewSelection.IndexOf(C) = -1) then
+        NewSelection.Add(C);
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.SelectByNamePattern(const Pattern: String);
+var
+  TrimmedPattern, LowerPattern: String;
+  HasWildcard: Boolean;
+  TreeNode: TTreeNode;
+  C: TComponent;
+  NewSelection: TComponentList;
+begin
+  TrimmedPattern := Trim(Pattern);
+  if TrimmedPattern = '' then Exit;
+
+  HasWildcard := (Pos('*', TrimmedPattern) <> 0) or (Pos('?', TrimmedPattern) <> 0);
+  LowerPattern := LowerCase(TrimmedPattern);
+
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C <> nil) and (C <> DesignRoot) and (C.Name <> '') and
+         Selectable(C) and (not IsComponentLocked(C)) then
+      begin
+        if HasWildcard then
+        begin
+          if IsWild(C.Name, TrimmedPattern, true) then
+            NewSelection.Add(C);
+        end else
+        begin
+          if Pos(LowerPattern, LowerCase(C.Name)) <> 0 then
+            NewSelection.Add(C);
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.ShowSelectByNamePatternDialog;
+var
+  Dialog: TForm;
+  LblPattern: TLabel;
+  EditPattern: TEdit;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+  Sel: TComponent;
+begin
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Select Components By Name Pattern';
+    Dialog.Position := poMainFormCenter;
+    Dialog.Width := 360;
+    Dialog.Height := 150;
+    Dialog.BorderStyle := bsDialog;
+
+    LblPattern := TLabel.Create(Dialog);
+    LblPattern.Caption := 'Name Substring or Wildcard (*, ?):';
+    LblPattern.Left := 16;
+    LblPattern.Top := 16;
+    LblPattern.Parent := Dialog;
+
+    EditPattern := TEdit.Create(Dialog);
+    EditPattern.Left := 16;
+    EditPattern.Top := 42;
+    EditPattern.Width := 325;
+    EditPattern.TextHint := 'e.g. Tree*, *Light*, Enemy_??';
+    Sel := SelectedComponent;
+    if (Sel <> nil) and (Sel.Name <> '') then
+      EditPattern.Text := StripNumericSuffix(Sel.Name) + '*'
+    else
+      EditPattern.Text := '*';
+    EditPattern.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Select Matching';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      SelectByNamePattern(EditPattern.Text);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectByPatternClick(Sender: TObject);
+begin
+  ShowSelectByNamePatternDialog;
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -10700,6 +11374,8 @@ begin
     MenuTreeViewItemSelectSameUrl.Enabled := GetComponentAssetUrl(Sel) <> '';
   if MenuTreeViewItemSelectWithinRadius <> nil then
     MenuTreeViewItemSelectWithinRadius.Enabled := (CurrentTransform <> nil) or ((TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0));
+  if MenuTreeViewItemSelectByPattern <> nil then
+    MenuTreeViewItemSelectByPattern.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemInvertSelection <> nil then
     MenuTreeViewItemInvertSelection.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemSelectChildren <> nil then

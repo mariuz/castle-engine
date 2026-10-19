@@ -811,7 +811,54 @@ For foliage, rocks, debris, trees, and natural set-dressing, **Ground-Aware Scat
 
 ---
 
-## 33. Complete Keyboard Shortcuts & Toolbar Reference
+## 33. Phase 32: Look-At / Aim Selected Transforms at Primary or Cursor Target (`LookAtWorldPoint` / `AimSelectedAtPrimary` / `Ctrl+Shift+L`)
+
+Aiming lights, cameras, turrets, or props at a specific target object or 3D surface point is instantaneous with **Aim at Target**:
+- **Multi-Selection Aim at Primary (`TCastleTransformManipulate.AimSelectedAtPrimary`):**
+  - When 2 or more `TCastleTransform` objects are selected, rotates all secondary selected transforms (`Selected[1..N-1]`) so their world forward direction (`SetWorldView`) points directly at the primary selected transform (`Selected[0]`), keeping their Up vector orthogonalized around `World.GravityUp` and preserving their existing `Scale`.
+- **Single-Selection Aim at Cursor Ray Hit (`TCastleTransformManipulate.LookAtWorldPoint`):**
+  - When 1 `TCastleTransform` is selected and **`Ctrl+Shift+L`** (or **`Aim at Target`**) is triggered, raycasts from the mouse cursor into the 3D viewport (`MeasureRayDistanceFromSelected`) and rotates the selected transform to look at the hit 3D surface point.
+
+---
+
+## 34. Phase 33: Bounding-Box Min / Max Face Alignment (`AlignSelectedBounds` / `Ctrl`/`Alt` + `Align X/Y/Z`)
+
+While standard `AlignSelected` aligns transform origins, objects of different sizes often need their **outer bounding-box faces** (e.g., bottoms, tops, left/right walls) aligned flush:
+- **World AABB Face Alignment (`TCastleTransformManipulate.AlignSelectedBounds(Axis, UseMaxFace)`):**
+  - Translates each secondary selected transform (`Selected[1..N-1]`) along `Axis` so its minimum (`UseMaxFace = false`, `WorldBoundingBox.Data[0]`) or maximum (`UseMaxFace = true`, `WorldBoundingBox.Data[1]`) world bounding-box face matches the corresponding face of `Selected[0]`:
+    $$\Delta_A = B_{\text{primary}}[F, A] - B_i[F, A], \qquad F \in \{0\text{ (Min)}, 1\text{ (Max)}\}$$
+- **Modifier Clicks on `Align X`, `Align Y`, `Align Z` (`ButtonAlignAxisClick`):**
+  - **Click:** Align origins to Primary (`atPrimary`).
+  - **`Shift` + Click:** Align origins to Selection Center (`atCenter`).
+  - **`Ctrl` + Click:** Align **Minimum** world bounding-box faces (`AlignSelectedBounds(Axis, false)`).
+  - **`Alt` + Click:** Align **Maximum** world bounding-box faces (`AlignSelectedBounds(Axis, true)`).
+
+---
+
+## 35. Phase 34: Interactive 2D UI Layout Alignment, Equal-Gap Distribution & Size Matching (`PanelLayoutUI`)
+
+When 2 or more unlocked `TCastleUserInterface` controls are selected, `PanelLayoutUI` automatically appears in the **`Layout`** tab (`PanelLayoutTop`), providing 9 anchor-aware 2D UI layout tools:
+- **6-Way 2D UI Edge & Center Alignment (`AlignSelectedUserInterfaces`):**
+  - **`UI Align Left`**, **`UI Center H`**, **`UI Align Right`**, **`UI Align Bottom`**, **`UI Middle V`**, and **`UI Align Top`** align the screen-space `RenderRectWithBorder` edges or centers of all secondary selected UI controls to the primary selected UI control, converting screen pixel deltas via `UI.UIScale` so alignment works seamlessly across any anchor configuration.
+- **Equal-Gap 2D UI Distribution (`DistributeSelectedUserInterfaces`):**
+  - **`UI Dist H`** and **`UI Dist V`** (enabled when 3+ UI controls are selected) sort selected UI controls along X or Y and space them with identical screen-space gaps between adjacent `RenderRectWithBorder` rectangles.
+- **2D UI Size Matching (`MatchSelectedUserInterfaceSize`):**
+  - **`UI Match Size`** matches `Width` and `Height` of all secondary selected UI controls to `PrimaryUI.EffectiveWidth` and `EffectiveHeight` (**`Shift`-click** for Width only, **`Ctrl`-click** for Height only).
+
+---
+
+## 36. Phase 35: Hierarchy Selection Sets (`Ctrl+Shift+0..9` / `Shift+0..9`) & Select By Name / Wildcard Pattern (`SelectByNamePattern`)
+
+- **10 Named Selection Set Slots (`SaveSelectionSet` / `RecallSelectionSet`):**
+  - Press **`Ctrl+Shift+0..9`** in the Viewport or Hierarchy Tree to save the current multi-selection into Selection Set slot `0..9`.
+  - Press **`Shift+0..9`** to restore that saved selection set, or **`Alt+Shift+0..9`** to additively union the saved set with the current selection.
+- **Select By Name / Wildcard Pattern (`SelectByNamePattern` / `ShowSelectByNamePatternDialog`):**
+  - Right-click in the Hierarchy Tree and choose **`Select By Name Pattern...`** (`MenuTreeViewItemSelectByPattern`).
+  - Pre-populates a wildcard pattern from the active component's base name (e.g., `Tree*` for `Tree12`) and supports case-insensitive `*` and `?` wildcards (`StrUtils.IsWild`) or plain substring matching across all selectable, unlocked components.
+
+---
+
+## 37. Complete Keyboard Shortcuts & Toolbar Reference
 
 | Shortcut / Control | Context | Action |
 | :--- | :--- | :--- |
@@ -828,11 +875,15 @@ For foliage, rocks, debris, trees, and natural set-dressing, **Ground-Aware Scat
 | **`Ctrl+Alt+G`** / **`Grid Dup...`** | Viewport / Hierarchy / Layout Tab | Open the **2D / 3D Grid Array Duplicate** dialog (`CountX`, `CountY`, `CountZ`, `Spacing`). |
 | **`Ctrl+Alt+S`** / **`Scatter Dup...`** | Viewport / Hierarchy / Layout Tab | Open the **Ground-Aware Scatter Duplicate** dialog (`Count`, `Radius`, `MaxYaw`, `ScaleMin..Max`, `SnapToFloor`, `AlignToNormal`). |
 | **`Ctrl+Shift+S`** / **`Swap Pos`** | Viewport / Hierarchy / Layout Tab | **Swap / Cycle World Positions** of 2+ selected `TCastleTransform` objects (`SwapSelectedPositions`). |
+| **`Ctrl+Shift+L`** / **`Aim at Target`** | Viewport / Hierarchy / Layout Tab | **Look-At / Aim** secondary selected transforms at primary selection (2+ selected) or aim single selection at 3D cursor hit. |
 | **`Match Size` Button** | Layout Tab (`PanelLayoutTransform`) | Scale secondary selected transforms so their world bounding-box size matches the primary selection (`Shift`-click for Y height only). |
 | **`Ctrl+Shift+P`** / **`Pilot Transform`** | Viewport / Hierarchy / Layout Tab | Toggle **Camera Pilot Mode** (`TogglePilotTransform`), locking the active `TCastleTransform` to the viewport camera while flying/orbiting. |
 | **`Ctrl+Shift+R`** | Viewport / Hierarchy Tree | Open the searchable **Replace Selected Component(s) With...** class palette (`ShowReplaceComponentPalette`). |
 | **`Ctrl+I`** | Viewport / Hierarchy Tree | **Invert Selection** among sibling components (or across the design if at root level). |
 | **`Ctrl+]`** / **`Ctrl+Shift+]`** | Hierarchy Tree / Context Menu | **Select Direct Children** (`Ctrl+]`) or **Select All Descendants** (`Ctrl+Shift+]`) of selected node(s). |
+| **`Ctrl+Shift+0` .. `Ctrl+Shift+9`** | Viewport / Hierarchy Tree | Save current component selection into **Selection Set** slot `0..9`. |
+| **`Shift+0` .. `Shift+9`** / **`Alt+Shift+0..9`** | Viewport / Hierarchy Tree | Recall **Selection Set** slot `0..9` (`Alt+Shift+0..9` for additive union selection). |
+| **`Select By Name Pattern...`** | Hierarchy Context Menu | Select all components matching a substring or `*` / `?` wildcard pattern. |
 | **`Select All With Same Asset URL`** | Hierarchy Context Menu | Select all components in the design referencing the same `Url` asset as the selected component. |
 | **`Select Within Radius...`** | Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects within a given world-space radius of the active selection. |
 | **`L`** | Viewport or Hierarchy Tree | Toggle **Selection Lock** (`[Locked]`) on selected components to prevent accidental viewport picking/dragging. |
@@ -855,12 +906,15 @@ For foliage, rocks, debris, trees, and natural set-dressing, **Ground-Aware Scat
 | **`Keep Sim` Button** | Top Toolbar (in Simulation) | Stop physics simulation and apply simulated `Translation`, `Rotation`, and `Scale` to the design. |
 | **`Move to View` Button** | Layout Tab (`PanelLayoutTransform`) | Snap selected `TCastleTransform` to current viewport camera position and orientation. |
 | **`View: Top / Front / Right` Buttons** | Layout Tab (`PanelLayoutTransform`) | Align viewport camera to Top (`-Y`), Front (`-Z`), or Right (`-X`) view (`Ctrl`-click for opposite axis). |
-| **`Align X` / `Align Y` / `Align Z`** | Layout Tab (`PanelLayoutTransform`) | Align 2+ selected transforms along X, Y, or Z to the primary selected transform. |
+| **`Align X` / `Align Y` / `Align Z`** | Layout Tab (`PanelLayoutTransform`) | Align 2+ selected transforms along X, Y, or Z (**Click**: Primary, **`Shift`**: Center, **`Ctrl`**: Min BBox Face, **`Alt`**: Max BBox Face). |
 | **`Dist X` / `Dist Y` / `Dist Z`** | Layout Tab (`PanelLayoutTransform`) | Evenly distribute 3+ selected transforms by center (or **`Shift`-click** for equal bounding-box gaps) along X, Y, or Z. |
 | **`Stack X` / `Stack Y` / `Stack Z`** | Layout Tab (`PanelLayoutTransform`) | Stack 2+ selected transforms flush edge-to-edge along X, Y, or Z using their 3D bounding boxes. |
 | **`Mirror X` / `Mirror Y` / `Mirror Z`** | Layout Tab (`PanelLayoutTransform`) | Physics-safe mirror selected transform(s) across X, Y, or Z while preserving positive `Scale`. |
 | **`Rot 90° Y` Button** | Layout Tab (`PanelLayoutTransform`) | Rotate selected transform(s) by an exact $90^\circ$ step around the Y axis. |
 | **`Randomize` Button** | Layout Tab (`PanelLayoutTransform`) | Apply set-dressing random yaw ($\pm 180^\circ$) and uniform scale ($0.85\text{–}1.15\times$) to selected transform(s). |
+| **`UI Align Left/CenterH/Right/Bottom/MiddleV/Top`** | Layout Tab (`PanelLayoutUI`) | Align rendered edges or centers of 2+ selected `TCastleUserInterface` controls to the primary selected control. |
+| **`UI Dist H` / `UI Dist V`** | Layout Tab (`PanelLayoutUI`) | Space 3+ selected `TCastleUserInterface` controls with equal horizontal or vertical gaps. |
+| **`UI Match Size`** | Layout Tab (`PanelLayoutUI`) | Match `Width` and `Height` of 2+ selected `TCastleUserInterface` controls to the primary control (`Shift`: Width, `Ctrl`: Height). |
 | **`Reset Prop` Button** | Object Inspector Header | Reset the active Object Inspector property row to its default value. |
 | **`Select All of Same Class`** | Hierarchy Context Menu | Select all components in the design matching the selected component's class. |
 | **`Expand Subtree` / `Collapse Subtree`** | Hierarchy Context Menu | Recursively expand or collapse the selected hierarchy node(s). |
@@ -877,9 +931,9 @@ For foliage, rocks, debris, trees, and natural set-dressing, **Ground-Aware Scat
 
 ---
 
-## 34. Automated Unit Tests & Verification
+## 38. Automated Unit Tests & Verification
 
-All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 15 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
+All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 16 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
 
 1. **`TestSelectedCountAndFree`**: Verifies single/multi-selection filtering, freeing a selected transform while selected, and translating the remaining selection.
 2. **`TestTranslateSnapAndCoordSpace`**: Verifies grid snapping (`TranslateSnap := 2.0`) and `csLocal` vs. `csWorld` translation on a $90^\circ$-rotated transform.
@@ -896,6 +950,7 @@ All core 3D manipulation algorithms in `CastleTransformManipulate` are covered b
 13. **`TestMeasureSelectedAndRayDistance`**: Verifies `MeasureSelectedDistance` returns $-1$ for a single selected object and returns exact Euclidean distance $5.0$ and world delta $(3, 4, 0)$ between two selected transforms, and verifies `MeasureRayDistanceFromSelected` casts a ray onto a target `TCastleBox` and returns the exact distance $9.0$, hit point $(1, 11, 3)$, and world delta $(0, 9, 0)$.
 14. **`TestProjectAlongDirectionDistributeGapsAndSnapRotScale`**: Verifies `ProjectSelectedAlongDirection` projects a box along $+X$ flush against a vertical wall at $X = 19$ (landing at $X = 17.0$), `DistributeSelectedGaps(0)` spaces 3 boxes of different widths ($2$, $6$, $4$) with an identical $5.5$-unit gap between adjacent bounding boxes, and `SnapSelectedRotationAndScaleToGrid` quantizes existing rotation angles and scale vectors to `RotateSnap` and `ScaleSnap`.
 15. **`TestSwapPositionsAndMatchSelectedSize`**: Verifies `SwapSelectedPositions` swaps 2 selected transforms and cyclically rotates 3 selected transforms in world space, and verifies `MatchSelectedSize(1)` (Y-height match) and `MatchSelectedSize(-1)` (all-axis bounding-box size match) scale secondary selected `TCastleBox` objects so their world bounding-box dimensions match the primary selected object.
+16. **`TestLookAtAimAndAlignSelectedBounds`**: Verifies `LookAtWorldPoint` and `AimSelectedAtPrimary` orient selected transforms' world forward directions toward a target point or primary selected box, and verifies `AlignSelectedBounds(1, false)` (Min Y face alignment) and `AlignSelectedBounds(1, true)` (Max Y face alignment) align world bounding-box bottoms and tops across boxes of different heights.
 
 To run this test suite from the command line:
 ```bash
@@ -904,7 +959,4 @@ fpc -Mobjfpc -Sh -Ci -Cr -Co -gl -gh -dTEXT_RUNNER @castle-fpc.cfg \
   -FE'tests' tests/castle_tester_standalone.dpr
 ./tests/castle_tester_standalone --console --filter=TTestCastleTransformManipulate*
 ```
-
-
-
 

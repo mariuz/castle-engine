@@ -253,4 +253,28 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Scatters `Count` clones per selected `TCastleTransform` across a uniform-area disk of radius `Radius` in the XZ plane ($r = \sqrt{u} \cdot R$, $\theta = 2\pi v$), applies random Yaw rotation in $[-\text{MaxYawDeg}, +\text{MaxYawDeg}]$ and uniform scale in $[\text{ScaleMin}, \text{ScaleMax}]$, automatically drops all scattered clones onto the underlying floor geometry via `TransformManipulate.SnapToFloor(AlignToNormal)`, and records a single Undo step.
   - Bound to **`Ctrl+Alt+S`** in both the Viewport and Hierarchy Tree, **`Scatter Dup...`** (`ButtonScatterDuplicate`) in `PanelLayoutTransform`, and **`Scatter Duplicate on Ground... (Ctrl+Alt+S)`** in `MenuTreeView`.
 
+### Phase 32: Look-At / Aim Selected Transforms at Primary or Cursor Target (`LookAtWorldPoint` / `AimSelectedAtPrimary` / `Ctrl+Shift+L`)
+- [x] **32.1. World-Space Look-At & Multi-Transform Aiming (`LookAtWorldPoint`, `AimSelectedAtPrimary`)**
+  - Implemented `TCastleTransformManipulate.LookAtWorldPoint(TargetWorldPos): Boolean` and `TCastleTransformManipulate.AimSelectedAtPrimary: Boolean`: rotates each selected transform (or all secondary selected transforms `Selected[1..N-1]` when aiming at `Selected[0]`) so its world forward direction (`SetWorldView`) points directly at `TargetWorldPos` while keeping its world Up vector orthogonalized around `World.GravityUp` and preserving existing `Scale`.
+  - Implemented `TDesignFrame.AimSelectionAtPrimaryOrCursor`: when 2+ transforms are selected, aims `Selected[1..N-1]` at `Selected[0]`; when 1 transform is selected, raycasts from the mouse cursor into the 3D viewport (`MeasureRayDistanceFromSelected`) and aims the selected transform at the 3D surface point under the cursor.
+  - Bound to **`Ctrl+Shift+L`** in both the 3D Viewport and Hierarchy Tree, plus **`Aim at Target`** (`ButtonAimAtTarget`) in `PanelLayoutTransform`.
 
+### Phase 33: Bounding-Box Min / Max Face Alignment (`AlignSelectedBounds` / `Ctrl`/`Alt` + `Align X/Y/Z`)
+- [x] **33.1. World AABB Min-Face & Max-Face Alignment (`TCastleTransformManipulate.AlignSelectedBounds`)**
+  - Implemented `TCastleTransformManipulate.AlignSelectedBounds(Axis, UseMaxFace): Boolean`: translates secondary selected transforms (`Selected[1..N-1]`) along `Axis` so their minimum (`UseMaxFace = false`) or maximum (`UseMaxFace = true`) world bounding-box face (`WorldBoundingBox.Data[0]` or `Data[1]`) aligns flush with the corresponding face of `Selected[0]`.
+  - Upgraded `ButtonAlignAxisClick` (`Align X`, `Align Y`, `Align Z` in `PanelLayoutTransform`): normal click aligns origins to Primary (`atPrimary`), **`Shift`-click** aligns to selection Center (`atCenter`), **`Ctrl`-click** aligns minimum bounding-box faces (`AlignSelectedBounds(Axis, false)`), and **`Alt`-click** aligns maximum bounding-box faces (`AlignSelectedBounds(Axis, true)`).
+  - Added automated unit test `TestLookAtAimAndAlignSelectedBounds` in `tests/code/testcases/testcastletransformmanipulate.pas`.
+
+### Phase 34: Interactive 2D UI Layout Alignment, Equal-Gap Distribution & Size Matching (`PanelLayoutUI`)
+- [x] **34.1. Multi-Selection 2D `TCastleUserInterface` Alignment, Distribution & Size Matching**
+  - Added `PanelLayoutUI` inside `PanelLayoutTop` (automatically shown in the `Layout` tab whenever 2 or more unlocked `TCastleUserInterface` controls are selected) with 9 quick-action buttons:
+    - **`UI Align Left`**, **`UI Center H`**, **`UI Align Right`**, **`UI Align Bottom`**, **`UI Middle V`**, **`UI Align Top`** (`AlignSelectedUserInterfaces`): aligns the rendered screen-space edges or centers (`RenderRectWithBorder`) of all secondary selected UI controls to the primary selected UI control, converting screen pixel deltas cleanly via `UI.UIScale` regardless of anchor settings.
+    - **`UI Dist H`**, **`UI Dist V`** (`DistributeSelectedUserInterfaces`): sorts 3+ selected UI controls by horizontal or vertical center and spaces them with equal screen-space gaps between adjacent `RenderRectWithBorder` bounds.
+    - **`UI Match Size`** (`MatchSelectedUserInterfaceSize`): matches `Width` and `Height` of secondary selected UI controls to `PrimaryUI.EffectiveWidth` and `EffectiveHeight` (`Shift`-click for Width only, `Ctrl`-click for Height only).
+
+### Phase 35: Hierarchy Selection Sets (`Ctrl+Shift+0..9` / `Shift+0..9`) & Select By Name / Wildcard Pattern (`SelectByNamePattern`)
+- [x] **35.1. 10 Named Hierarchy Selection Set Slots (`SaveSelectionSet` / `RecallSelectionSet`)**
+  - Added `FSelectionSets: array [0..9] of TStringList` in `TDesignFrame`.
+  - Pressing **`Ctrl+Shift+0..9`** in the Viewport or Hierarchy Tree saves the names of all currently selected components into slot `0..9`; pressing **`Shift+0..9`** recalls that selection set (or **`Alt+Shift+0..9`** to additively union the saved set with the current selection).
+- [x] **35.2. Select Components By Substring or Wildcard Pattern (`SelectByNamePattern` / `ShowSelectByNamePatternDialog`)**
+  - Implemented `TDesignFrame.SelectByNamePattern(Pattern)` and `ShowSelectByNamePatternDialog` (`Select By Name Pattern...` in `MenuTreeView`), supporting case-insensitive wildcard patterns (`*`, `?` via `StrUtils.IsWild`, pre-populated from `StripNumericSuffix(SelectedComponent.Name) + '*'`) as well as plain substring matching across all selectable, unlocked components.
