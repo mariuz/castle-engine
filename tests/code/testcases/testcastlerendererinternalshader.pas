@@ -62,6 +62,10 @@ type
     { One shape lit by 2 lights sharing an Effect node:
       the <Light> placeholder makes each light read its own uniform. }
     procedure TestLightEffectsPerLightUniformsSameShape;
+    { A light effect using the EyeWorldSpace shader library on a shape whose
+      texture coordinate generation also needs castle_CameraInverseMatrix
+      (on OpenGLES both were declared in one vertex shader). }
+    procedure TestLightEffectLibraryWithWorldSpaceTexGen;
   end;
 
 implementation
@@ -491,6 +495,85 @@ begin
     PatchColor := RenderedPatchColor(Window, Viewport, PatchX);
     AssertTrue(PatchColor.X > 0.2);
     AssertTrue(PatchColor.Y < 0.05);
+
+    Window.Close;
+  finally DestroyWindowForTest(Window) end;
+end;
+
+procedure TTestCastleRendererInternalShader.TestLightEffectLibraryWithWorldSpaceTexGen;
+var
+  Window: TCastleWindow;
+  Viewport: TCastleViewport;
+
+  { A scene with a white textured floor patch at (X, 0, 0), its texture
+    coordinates generated in world space, lit by its own point light
+    whose Effect (using the EyeWorldSpace library) multiplies
+    the light by LightFactor. }
+  function CreateLitPatch(const X, LightFactor: Single): TCastleScene;
+  var
+    Root: TX3DRootNode;
+    Shape: TShapeNode;
+    Appearance: TAppearanceNode;
+    Material: TMaterialNode;
+    Texture: TPixelTextureNode;
+    Image: TRGBImage;
+    TexGen: TTextureCoordinateGeneratorNode;
+    Box: TBoxNode;
+    Transform: TTransformNode;
+    Light: TPointLightNode;
+  begin
+    Root := TX3DRootNode.Create;
+
+    Image := TRGBImage.Create(1, 1);
+    Image.Colors[0, 0, 0] := White;
+    Texture := TPixelTextureNode.Create;
+    Texture.FdImage.Value := Image;
+    TexGen := TTextureCoordinateGeneratorNode.Create;
+    TexGen.Mode := 'WORLDSPACEREFLECTIONVECTOR';
+
+    Material := TMaterialNode.Create;
+    Material.DiffuseColor := WhiteRGB;
+    Appearance := TAppearanceNode.Create;
+    Appearance.Material := Material;
+    Appearance.Texture := Texture;
+    Box := TBoxNode.CreateWithShape(Shape);
+    Box.Size := PatchSize;
+    Box.TexCoord := TexGen;
+    Shape.Appearance := Appearance;
+    Transform := TTransformNode.Create;
+    Transform.Translation := Vector3(X, -0.1, 0);
+    Transform.AddChildren(Shape);
+    Root.AddChildren(Transform);
+
+    Light := TPointLightNode.Create;
+    Light.Global := false;
+    Light.Location := Vector3(X, 3, 0);
+    Light.Attenuation := Vector3(1, 0, 0);
+    Light.SetEffects([CreateLightFactorEffect(LightFactor, true)]);
+    Root.AddChildren(Light);
+
+    Result := TCastleScene.Create(Window);
+    Result.Load(Root, true);
+    Result.RenderOptions.PhongShading := true;
+  end;
+
+begin
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  Window := CreateWindowForTest;
+  try
+    Viewport := OpenWindowWithViewport(Window);
+
+    Viewport.Items.Add(CreateLitPatch(-PatchX, 0));
+    Viewport.Items.Add(CreateLitPatch(PatchX, 1));
+
+    { Without the effect (when the shader doesn't compile) both are lit. }
+    AssertTrue(RenderedPatchColor(Window, Viewport, -PatchX).X < 0.05);
+    AssertTrue(RenderedPatchColor(Window, Viewport, PatchX).X > 0.3);
 
     Window.Close;
   finally DestroyWindowForTest(Window) end;

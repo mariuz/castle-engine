@@ -1901,8 +1901,12 @@ const
     UniformsDeclare := '';
     for I := 0 to DynamicUniforms.Count - 1 do
       UniformsDeclare := UniformsDeclare + DynamicUniforms[I].Declaration;
+    { The define makes EyeWorldSpace.glsl not declare it again
+      (on OpenGLES, where all vertex shader code is glued). }
     if NeedsCameraInverseMatrix then
-      UniformsDeclare := UniformsDeclare + 'uniform mat4 castle_CameraInverseMatrix;' + NL;
+      UniformsDeclare := UniformsDeclare +
+        '#define CASTLE_CAMERA_INVERSE_MATRIX_DECLARED' + NL +
+        'uniform mat4 castle_CameraInverseMatrix;' + NL;
 
     if not (
       PlugDirectly(Source[stFragment], 0, '/* PLUG-DECLARATIONS */',
