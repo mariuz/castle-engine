@@ -1219,6 +1219,7 @@ type
       (physical materials, or any material with @link(ColorSpace) = csLinear)
       or tone mapping are lit as if all their lights were rendered at once.
       Colors above 1 are kept until the tone mapping.
+      See the example examples/viewport_and_scenes/shadow_volumes_high_dynamic_range .
 
       Notes:
       @unorderedList(
