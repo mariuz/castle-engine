@@ -1,0 +1,13 @@
+#X3D V4.0 utf8
+PROFILE Interchange
+
+# Spot light casting shadows by shadow maps (one view).
+DEF Light SpotLight { location 0 8 0 direction 0 -1 0 cutOffAngle 0.9 beamWidth 0.8 shadows TRUE radius -1 }
+Shape {
+  appearance Appearance { material Material { diffuseColor 1 1 1 } }
+  geometry Box { size 30 0.1 30 }
+}
+Transform { translation 2 4 0 children Shape {
+  appearance Appearance { material Material { diffuseColor 1 0 0 } }
+  geometry Box { size 1 1 1 }
+} }

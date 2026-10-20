@@ -148,6 +148,10 @@ type
 
       FReceiveShadowVolumes: Boolean;
       FTempPrepareParams: TPrepareParams;
+      { Shadow maps of our global lights prepared by PrepareGlobalLightsTextures
+        (not used by the shapes of this scene), to release them when
+        the light stops casting shadows. Created when needed. }
+      GlobalShadowMaps, CurrentGlobalShadowMaps: TX3DNodeList;
 
       { Camera position, in local scene coordinates, known during
         the LocalRender or LocalRenderShadowVolume calls. }
@@ -225,8 +229,16 @@ type
       Preparing is a quick no-op for textures already prepared.
       Texture nodes release their resources themselves, when freed
       or when the last OpenGL context is closed
-      (TAbstractTextureNode.GLContextCloseEvent). }
+      (TAbstractTextureNode.GLContextCloseEvent).
+
+      Also prepares the shadow maps of the global lights with shadows
+      (received by the shapes of all scenes), see GlobalShadowMaps. }
     procedure PrepareGlobalLightsTextures;
+    { Release the shadow maps in GlobalShadowMaps. }
+    procedure UnprepareGlobalShadowMaps;
+    { Shadow map of this global light of this scene,
+      cast on the shapes of all scenes. @nil if none. }
+    function GlobalLightShadowMap(const Light: TAbstractLightNode): TGeneratedShadowMapNode;
 
     { Fog for this shape. @nil if none. }
     function ShapeFog(const Shape: TShape; const GlobalFog: TFogNode): TFogFunctionality;
@@ -798,6 +810,8 @@ begin
   { Make sure to free TCastleScene resources now, even though TCastleTransform.Destroy
     will also call it later -- but then we are in more "uninitialized" state. }
   GLContextClose;
+  FreeAndNil(GlobalShadowMaps);
+  FreeAndNil(CurrentGlobalShadowMaps);
 
   { Release now all connections between RootNode and Renderer.
 
@@ -885,6 +899,8 @@ begin
   ScreenEffectsGLContextClose;
 
   ShapesGLContextClose;
+
+  UnprepareGlobalShadowMaps;
 
   ScheduleUpdateGeneratedTextures;
 
@@ -1231,9 +1247,21 @@ procedure TCastleScene.PrepareGlobalLightsTextures;
     TTextureResources.Prepare(RenderOptions, TAbstractTextureNode(Tex));
   end;
 
+  function GeneratedTexturesContain(const Node: TAbstractTextureNode): Boolean;
+  var
+    J: Integer;
+  begin
+    if GeneratedTextures <> nil then
+      for J := 0 to GeneratedTextures.Count - 1 do
+        if GeneratedTextures.L[J].TextureNode = Node then
+          Exit(true);
+    Result := false;
+  end;
+
 var
   I: Integer;
   Light: TAbstractLightNode;
+  ShadowMap: TGeneratedShadowMapNode;
 begin
   for I := 0 to InternalGlobalLights.Count - 1 do
   begin
@@ -1244,7 +1272,68 @@ begin
       HandleTexture(TEnvironmentLightNode(Light).FdDiffuseTexture.Value);
       HandleTexture(TEnvironmentLightNode(Light).FdSpecularTexture.Value);
     end;
+    { Shadow maps of global lights, received by the shapes of all scenes
+      (updated by UpdateGeneratedTextures of this scene). }
+    ShadowMap := GlobalLightShadowMap(Light);
+    if (ShadowMap <> nil) and not GeneratedTexturesContain(ShadowMap) then
+    begin
+      if CurrentGlobalShadowMaps = nil then
+        CurrentGlobalShadowMaps := TX3DNodeList.Create(false);
+      CurrentGlobalShadowMaps.Add(ShadowMap);
+    end;
   end;
+
+  { release the shadow maps of the lights that stopped casting shadows }
+  if GlobalShadowMaps <> nil then
+    for I := GlobalShadowMaps.Count - 1 downto 0 do
+      if (CurrentGlobalShadowMaps = nil) or
+         (CurrentGlobalShadowMaps.IndexOf(GlobalShadowMaps[I]) = -1) then
+      begin
+        TTextureResources.Unprepare(TAbstractTextureNode(GlobalShadowMaps[I]));
+        GlobalShadowMaps.Delete(I);
+      end;
+
+  { prepare the new ones }
+  if CurrentGlobalShadowMaps <> nil then
+  begin
+    for I := 0 to CurrentGlobalShadowMaps.Count - 1 do
+    begin
+      ShadowMap := TGeneratedShadowMapNode(CurrentGlobalShadowMaps[I]);
+      if (GlobalShadowMaps = nil) or (GlobalShadowMaps.IndexOf(ShadowMap) = -1) then
+      begin
+        TTextureResources.Prepare(RenderOptions, ShadowMap);
+        ShadowMap.GenTexFunctionality.InternalUpdateNeeded := true;
+        if GlobalShadowMaps = nil then
+          GlobalShadowMaps := TX3DNodeList.Create(false);
+        GlobalShadowMaps.Add(ShadowMap);
+      end;
+    end;
+    CurrentGlobalShadowMaps.Clear;
+  end;
+end;
+
+procedure TCastleScene.UnprepareGlobalShadowMaps;
+var
+  I: Integer;
+begin
+  if GlobalShadowMaps <> nil then
+  begin
+    for I := 0 to GlobalShadowMaps.Count - 1 do
+      TTextureResources.Unprepare(TAbstractTextureNode(GlobalShadowMaps[I]));
+    GlobalShadowMaps.Clear;
+  end;
+end;
+
+function TCastleScene.GlobalLightShadowMap(const Light: TAbstractLightNode): TGeneratedShadowMapNode;
+begin
+  if ShadowMaps and
+     (Light is TAbstractPunctualLightNode) and
+     TAbstractPunctualLightNode(Light).Shadows and
+     (TAbstractPunctualLightNode(Light).FdDefaultShadowMap.Value is TGeneratedShadowMapNode) and
+     (TGeneratedShadowMapNode(TAbstractPunctualLightNode(Light).FdDefaultShadowMap.Value).FdLight.Value = Light) then
+    Result := TGeneratedShadowMapNode(TAbstractPunctualLightNode(Light).FdDefaultShadowMap.Value)
+  else
+    Result := nil;
 end;
 
 procedure TCastleScene.LocalRenderOutside(
@@ -1671,8 +1760,9 @@ procedure TCastleScene.Update(const SecondsPassed: Single; var RemoveMe: TRemove
           TextureRes := TGeneratedShadowMapResource(TTextureResources.Get(TexNode));
           if TextureRes <> nil then
           begin
-            TextureRes.Update(Render, ProjectionNear, ProjectionFar,
-              TAbstractPunctualLightNode(TexNode.FdLight.Value));
+            TextureRes.Update(Render,
+              TAbstractPunctualLightNode(TexNode.FdLight.Value),
+              World.MainCamera, World.BoundingBox);
 
             TexNode.GenTexFunctionality.PostUpdate;
 
@@ -1725,8 +1815,30 @@ procedure TCastleScene.Update(const SecondsPassed: Single; var RemoveMe: TRemove
     TextureNode: TAbstractTextureNode;
     GenTexFunctionality: TGeneratedTextureFunctionality;
     CamView: TViewVectors;
+    ShadowMap: TGeneratedShadowMapNode;
+
+    function GeneratedTexturesContain(const Node: TAbstractTextureNode): Boolean;
+    var
+      J: Integer;
+    begin
+      for J := 0 to GeneratedTextures.Count - 1 do
+        if GeneratedTextures.L[J].TextureNode = Node then
+          Exit(true);
+      Result := false;
+    end;
+
+    function GlobalLightsShadowMaps: Boolean;
+    var
+      J: Integer;
+    begin
+      for J := 0 to InternalGlobalLights.Count - 1 do
+        if GlobalLightShadowMap(InternalGlobalLights.L[J].Node) <> nil then
+          Exit(true);
+      Result := false;
+    end;
+
   begin
-    if GeneratedTextures.Count = 0 then
+    if (GeneratedTextures.Count = 0) and not GlobalLightsShadowMaps then
       Exit; // optimize away common case
 
     FrameProfiler.Start(fmUpdateGeneratedTextures);
@@ -1757,12 +1869,17 @@ procedure TCastleScene.Update(const SecondsPassed: Single; var RemoveMe: TRemove
       { update GenTexFunctionality.InternalUpdateNeeded }
       if TextureNode is TGeneratedShadowMapNode then
       begin
-        { For TGeneratedShadowMapNode, only geometry change requires to regenerate it. }
+        { For TGeneratedShadowMapNode, only geometry change requires to regenerate it.
+          Except the cascades of a directional light, that follow the camera:
+          regenerate them every frame. }
         if GenTexFunctionality.InternalLastStateId < World.InternalVisibleGeometryStateId then
         begin
           GenTexFunctionality.InternalLastStateId := World.InternalVisibleGeometryStateId;
           GenTexFunctionality.InternalUpdateNeeded := true;
         end;
+        if (TGeneratedShadowMapNode(TextureNode).FdLight.Value is TAbstractDirectionalLightNode) and
+           (TAbstractDirectionalLightNode(TGeneratedShadowMapNode(TextureNode).FdLight.Value).ShadowCascades > 1) then
+          GenTexFunctionality.InternalUpdateNeeded := true;
       end else
       begin
         { For TRenderedTextureNode, TGeneratedCubeMapTextureNode etc.
@@ -1785,6 +1902,29 @@ procedure TCastleScene.Update(const SecondsPassed: Single; var RemoveMe: TRemove
         World.MainCamera <> nil, CamView);
 
       AvoidShapeRendering := nil;
+      AvoidNonShadowCasterRendering := false;
+    end;
+
+    { Shadow maps of global lights, not used by the shapes of this scene. }
+    for I := 0 to InternalGlobalLights.Count - 1 do
+    begin
+      ShadowMap := GlobalLightShadowMap(InternalGlobalLights.L[I].Node);
+      if (ShadowMap = nil) or GeneratedTexturesContain(ShadowMap) then
+        Continue;
+      GenTexFunctionality := ShadowMap.GenTexFunctionality;
+      if GenTexFunctionality.InternalLastStateId < World.InternalVisibleGeometryStateId then
+      begin
+        GenTexFunctionality.InternalLastStateId := World.InternalVisibleGeometryStateId;
+        GenTexFunctionality.InternalUpdateNeeded := true;
+      end;
+      if (ShadowMap.FdLight.Value is TAbstractDirectionalLightNode) and
+         (TAbstractDirectionalLightNode(ShadowMap.FdLight.Value).ShadowCascades > 1) then
+        GenTexFunctionality.InternalUpdateNeeded := true;
+      AvoidNonShadowCasterRendering := true;
+      UpdateOneGeneratedTexture(nil, ShadowMap,
+        RenderFunc, ProjectionNear, ProjectionFar,
+        ViewpointStack.Top,
+        World.MainCamera <> nil, CamView);
       AvoidNonShadowCasterRendering := false;
     end;
 

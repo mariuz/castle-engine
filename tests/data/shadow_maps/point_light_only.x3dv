@@ -1,0 +1,6 @@
+#X3D V4.0 utf8
+PROFILE Interchange
+
+# Only a point light casting shadows by shadow maps,
+# on the shapes of other scenes (it is global, like positional lights by default).
+DEF Light PointLight { location 0 4 0 shadows TRUE radius -1 }

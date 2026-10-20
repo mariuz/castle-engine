@@ -291,6 +291,18 @@ procedure TLightList.HandleLightAutomaticProjection(const Light: TLight);
   end;
 
 begin
+  { Point lights calculate their range when rendering the shadow map
+    (to the farthest point of the world, within their radius):
+    the range along a direction makes no sense for them. }
+  if Light.Light is TAbstractPointLightNode then
+    Exit;
+
+  { Global lights cast shadows on all scenes, their projection is calculated
+    when rendering the shadow map from the whole world:
+    the casters and receivers of this scene are not enough. }
+  if Light.Light.Scope = lsGlobal then
+    Exit;
+
   { calculate projectionLocation/Rectangle first,
     since projectionLocation determines the right range for projectionNear/Far }
   if Light.Light is TDirectionalLightNode then
@@ -350,6 +362,16 @@ begin
         false);
 
       Shapes.Traverse({$ifdef FPC}@{$endif} Lights.ShapeAdd, false);
+
+      { Global lights cast shadows on the shapes of other scenes too
+        (see TCastleScene.PrepareGlobalLightsTextures), even when they have
+        no receivers in this scene: create their shadow maps. }
+      for I := 0 to Lights.LightsCastingOnEverything.Count - 1 do
+        if TAbstractPunctualLightNode(Lights.LightsCastingOnEverything[I]).Scope = lsGlobal then
+        begin
+          Lights.FindLight(TAbstractPunctualLightNode(Lights.LightsCastingOnEverything[I]));
+          Lights.UsesShadowMaps := true;
+        end;
 
       for I := 0 to Lights.Count - 1 do
       begin

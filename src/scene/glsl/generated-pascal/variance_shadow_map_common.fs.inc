@@ -29,4 +29,35 @@
 '    return variance / (variance + m_d * m_d);' + LineEnding +
 '  }' + LineEnding +
 '}' + LineEnding +
+'' + LineEnding +
+'/* Shadow from one view (tile) of a variance shadow map,' + LineEnding +
+'   see castle_shadow_tile in shadow_map_common.fs. */' + LineEnding +
+'float castle_shadow_tile(sampler2D shadowMap, const shadowsPrecision vec4 coord,' + LineEnding +
+'  const in vec4 rect, const in vec2 texel, const in bool always_inside)' + LineEnding +
+'{' + LineEnding +
+'  /* Avoid back-projecting shadows. */' + LineEnding +
+'  if (!always_inside && coord.z < 0.0) return 0.0;' + LineEnding +
+'' + LineEnding +
+'  shadowsPrecision vec3 c = coord.xyz / coord.w;' + LineEnding +
+'  /* Outside of the tile, it''s in the shadow, like outside of a whole' + LineEnding +
+'     variance shadow map. */' + LineEnding +
+'  if (!always_inside &&' + LineEnding +
+'      (c.x < rect.x || c.x > rect.z ||' + LineEnding +
+'       c.y < rect.y || c.y > rect.w))' + LineEnding +
+'    return 0.0;' + LineEnding +
+'  c.xy = clamp(c.xy, rect.xy + texel * 0.5, rect.zw - texel * 0.5);' + LineEnding +
+'' + LineEnding +
+'  vec4 moments = texture2D(shadowMap, c.xy);' + LineEnding +
+'  float distance_to_light = c.z;' + LineEnding +
+'' + LineEnding +
+'  if (distance_to_light <= moments[0])' + LineEnding +
+'    return 1.0; else' + LineEnding +
+'  {' + LineEnding +
+'    float E_x2 = moments[1];' + LineEnding +
+'    float Ex_2 = moments[0] * moments[0];' + LineEnding +
+'    float variance = E_x2 - Ex_2;' + LineEnding +
+'    float m_d = moments[0] - distance_to_light;' + LineEnding +
+'    return variance / (variance + m_d * m_d);' + LineEnding +
+'  }' + LineEnding +
+'}' + LineEnding +
 ''

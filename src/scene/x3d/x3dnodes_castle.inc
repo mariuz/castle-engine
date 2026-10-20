@@ -88,6 +88,20 @@
 
   { Generate texture by rendering a depth (shadow) map.
     See https://castle-engine.io/x3d_extensions_shadow_maps.php }
+  { One view (tile) of a shadow map, see TGeneratedShadowMapNode.InternalTiles.
+    @exclude }
+  TInternalShadowMapTile = record
+    { Projection * view matrix of the view, in world space. }
+    ViewProjection: TMatrix4;
+    { The tile in the texture: minimum X, Y and maximum X, Y, in 0..1. }
+    Rect: TVector4;
+    { How far to move the receiver along its normal before looking it up,
+      to avoid surfaces in their own shadow (shadow acne):
+      in world units (orthographic views), or per unit of distance
+      from the light (perspective views of point lights). }
+    NormalOffset: Single;
+  end;
+
   TGeneratedShadowMapNode = class(TAbstractSingleTextureNode)
   strict private
     type
@@ -109,6 +123,26 @@
       DefaultBias = 4.0;
 
     constructor Create(const AX3DName: String = ''; const ABaseUrl: String = ''); override;
+
+    var
+      { The views of this shadow map last rendered by the renderer:
+        1 for a spot light or a directional light,
+        6 for a point light (cube faces +X, -X, +Y, -Y, +Z, -Z),
+        the cascades for a directional light with shadowCascades > 1.
+        Only the first InternalTileCount are valid.
+        @exclude }
+      InternalTiles: array of TInternalShadowMapTile;
+      { @exclude }
+      InternalTileCount: Integer;
+      { Point light position in world space, when the tiles are cube faces.
+        @exclude }
+      InternalLightPosition: TVector3;
+      { Distances from the camera (in the eye space) where the cascades end.
+        @exclude }
+      InternalCascadeSplits: TVector4;
+      { 1 / size of the texture holding the tiles.
+        @exclude }
+      InternalTexelSize: TVector2;
 
   {$I auto_generated_node_helpers/x3dnodes_generatedshadowmap.inc}
   end;

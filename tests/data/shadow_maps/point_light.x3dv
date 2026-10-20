@@ -1,0 +1,17 @@
+#X3D V4.0 utf8
+PROFILE Interchange
+
+# Point light casting shadows by shadow maps (6 views, cube faces)
+# above a floor, with 4 boxes around it: each shadow is in another face.
+DEF Light PointLight { location 0 4 0 shadows TRUE radius -1 }
+DEF Floor Shape {
+  appearance Appearance { material Material { diffuseColor 1 1 1 } }
+  geometry Box { size 30 0.1 30 }
+}
+Transform { translation 3 2 0 children DEF Caster Shape {
+  appearance Appearance { material Material { diffuseColor 1 0 0 } }
+  geometry Box { size 1 1 1 }
+} }
+Transform { translation -3 2 0 children USE Caster }
+Transform { translation 0 2 3 children USE Caster }
+Transform { translation 0 2 -3 children USE Caster }

@@ -1,0 +1,16 @@
+#X3D V4.0 utf8
+PROFILE Interchange
+
+# Floor and boxes, lit by a light in another scene.
+
+DEF Floor Shape {
+  appearance Appearance { material Material { diffuseColor 1 1 1 } }
+  geometry Box { size 30 0.1 30 }
+}
+Transform { translation 3 2 0 children DEF Caster Shape {
+  appearance Appearance { material Material { diffuseColor 1 0 0 } }
+  geometry Box { size 1 1 1 }
+} }
+Transform { translation -3 2 0 children USE Caster }
+Transform { translation 0 2 3 children USE Caster }
+Transform { translation 0 2 -3 children USE Caster }

@@ -634,6 +634,21 @@ var
     ) }
   ToneMapping: TToneMapping = tmNone;
 
+  { Size of the texture holding the shadow maps (the shadow map atlas).
+    All shadow maps (see https://castle-engine.io/shadow_maps ),
+    except the variance shadow maps (TCastleRenderOptions.ShadowSampling = ssVarianceShadowMaps),
+    are parts of one depth texture of this size:
+    each view of a light (one for a spot light, 6 for a point light,
+    one per cascade of a directional light) gets a square of the size
+    of its shadow map (TGeneratedShadowMapNode.Size, rounded up to a power of 2).
+    So the shaders read all shadow maps through one texture unit.
+    When they don't fit, their size is halved.
+
+    It is limited by the maximum texture size of the GPU.
+    Set it before the shadow maps are prepared (before the first rendering).
+    0 means that every shadow map has its own texture. }
+  ShadowMapsAtlasSize: Cardinal = 4096;
+
   { Force given rendering for all scenes, if not weNormal. }
   InternalForceWireframe: TWireframeEffect;
 

@@ -432,23 +432,74 @@
     function ShaderTextureType(out TextureType: TTextureType): Boolean; override;
   end;
 
-  { Renderer resource for TGeneratedShadowMapNode. }
+  { Depth texture holding the views (tiles) of many shadow maps,
+    see ShadowMapsAtlasSize. Tiles are squares with power of 2 sizes,
+    allocated by splitting the texture into quarters (a quadtree). }
+  TShadowMapAtlas = class
+  strict private
+    type
+      TRectangleList = {$ifdef FPC}specialize{$endif} TStructList<TRectangle>;
+    var
+      { Free blocks by level: level 0 is the whole texture,
+        each next level has blocks 2x smaller. }
+      FreeBlocks: array of TRectangleList;
+    function BlockLevel(const BlockSize: Cardinal): Integer;
+    function FindFree(const Level: Integer; const R: TRectangle): Integer;
+  public
+    const
+      MinBlockSize = 16;
+    var
+      Size: Cardinal;
+      GLName: TGLTexture;
+      RenderToTexture: TGLRenderToTexture;
+      { Number of TGeneratedShadowMapResource using this. }
+      UserCount: Integer;
+    constructor Create(const ASize: Cardinal);
+    destructor Destroy; override;
+    { Allocate a square of BlockSize (power of 2, >= MinBlockSize). }
+    function Allocate(const BlockSize: Cardinal; out Rect: TRectangle): Boolean;
+    procedure Release(const Rect: TRectangle);
+  end;
+
+  { Renderer resource for TGeneratedShadowMapNode.
+
+    The shadow map has one or more views (tiles), see ShadowMapKind:
+    1 for a spot light or a directional light, 6 for a point light,
+    the cascades of a directional light with shadowCascades > 1.
+    They are squares in the shared TShadowMapAtlas,
+    or (for variance shadow maps, or when ShadowMapsAtlasSize = 0)
+    in a texture of this shadow map. }
   TGeneratedShadowMapResource = class(T2DTextureResource)
   strict private
     RenderToTexture: TGLRenderToTexture;
     { VarianceShadowMaps calculated at the PrepareCore time. }
     VarianceShadowMaps: boolean;
     NeedsMipmaps: boolean;
+    { Own texture, when not InAtlas. }
     FGLName: TGLTexture;
+    TextureWrap: TTextureWrap2D;
+    Filter: TTextureFilter;
     WarninigDoneCannotEnable: Boolean;
+    { Tiles are in the shared ShadowMapAtlas. }
+    InAtlas: Boolean;
+    { Allocated tiles: their count and size, and (InAtlas) rectangles. }
+    TileCount: Integer;
+    TileSize: Cardinal;
+    AtlasRects: array of TRectangle;
+    { Size of the texture with the tiles. }
+    TextureWidth, TextureHeight: Cardinal;
+    { Make sure that ATileCount tiles are allocated. }
+    procedure AllocateTiles(const ATileCount: Integer);
+    procedure FreeTiles;
+    { Tile in the texture pixels. }
+    function TileRect(const Index: Integer): TRectangle;
   protected
     class function IsClassForTextureNode(ANode: TAbstractTextureNode): boolean; override;
     procedure PrepareCore(
       const RenderOptions: TCastleRenderOptions); override;
     procedure UnprepareCore; override;
   public
-    { The right size of the texture,
-      that satisfies all OpenGL sizes requirements. }
+    { Size of the views, from TGeneratedShadowMapNode.Size. }
     Size: Cardinal;
 
     function TextureNode: TGeneratedShadowMapNode;
@@ -458,10 +509,16 @@
       Shader: TShader; const Env: TTextureEnv): boolean; override;
     function GLName: TGLTextureId; override;
 
+    { Render the views of the shadow map, and store them
+      in TextureNode.InternalTiles (and related fields) for the shaders.
+      Camera is the main camera of the world (for cascades, may be @nil),
+      WorldBox the bounding box of the world (for the automatic ranges
+      of point lights and cascades). }
     procedure Update(
       const Render: TRenderFromViewFunction;
-      const ProjectionNear, ProjectionFar: Single;
-      const Light: TAbstractPunctualLightNode);
+      const Light: TAbstractPunctualLightNode;
+      const Camera: TCastleCamera;
+      const WorldBox: TBox3D);
 
     { Check would we use Variance Shadow Maps with current ARenderer
       attributes and OpenGL version/extensions. }
@@ -2166,6 +2223,147 @@ begin
   Result := true;
 end;
 
+{ TShadowMapAtlas ------------------------------------------------------------ }
+
+var
+  { The shadow map atlas shared by all TGeneratedShadowMapResource
+    (with InAtlas), created when needed, freed when unused. }
+  ShadowMapAtlas: TShadowMapAtlas;
+
+constructor TShadowMapAtlas.Create(const ASize: Cardinal);
+var
+  Levels, I: Integer;
+  Wrap: TTextureWrap2D;
+begin
+  inherited Create;
+  Size := ASize;
+  Levels := Biggest2Exponent(Size div MinBlockSize) + 1;
+  SetLength(FreeBlocks, Levels);
+  for I := 0 to Levels - 1 do
+    FreeBlocks[I] := TRectangleList.Create;
+  FreeBlocks[0].Add(Rectangle(0, 0, Size, Size));
+
+  { Clamp to the edge: outside of the texture is never sampled anyway,
+    the tiles are clamped in the shaders. }
+  Wrap.Data[0] := GLFeatures.CLAMP_TO_EDGE;
+  Wrap.Data[1] := GLFeatures.CLAMP_TO_EDGE;
+  GLName := RendererCache.TextureDepth_IncReference('', Wrap, Size, Size);
+
+  RenderToTexture := TGLRenderToTexture.Create(Size, Size);
+  RenderToTexture.SetTexture(GLName, GL_TEXTURE_2D);
+  RenderToTexture.Buffer := tbDepth;
+  RenderToTexture.Stencil := false;
+  RenderToTexture.GLContextOpen;
+
+  WritelnLog('Shadow Maps', 'Created shadow map atlas %d x %d', [Size, Size]);
+end;
+
+destructor TShadowMapAtlas.Destroy;
+var
+  I: Integer;
+begin
+  FreeAndNil(RenderToTexture);
+  if GLName <> GLObjectNone then
+  begin
+    RendererCache.TextureDepth_DecReference(GLName);
+    GLName := GLObjectNone;
+  end;
+  for I := 0 to Length(FreeBlocks) - 1 do
+    FreeAndNil(FreeBlocks[I]);
+  inherited;
+end;
+
+function TShadowMapAtlas.BlockLevel(const BlockSize: Cardinal): Integer;
+begin
+  Result := Biggest2Exponent(Size div BlockSize);
+end;
+
+function TShadowMapAtlas.FindFree(const Level: Integer; const R: TRectangle): Integer;
+var
+  I: Integer;
+begin
+  for I := 0 to FreeBlocks[Level].Count - 1 do
+    if FreeBlocks[Level].L[I].Equals(R) then
+      Exit(I);
+  Result := -1;
+end;
+
+function TShadowMapAtlas.Allocate(const BlockSize: Cardinal; out Rect: TRectangle): Boolean;
+var
+  Level: Integer;
+  Parent: TRectangle;
+  Half: Integer;
+begin
+  if (BlockSize > Size) or (BlockSize < MinBlockSize) then
+    Exit(false);
+  Level := BlockLevel(BlockSize);
+  if FreeBlocks[Level].Count <> 0 then
+  begin
+    Rect := FreeBlocks[Level].L[FreeBlocks[Level].Count - 1];
+    FreeBlocks[Level].Delete(FreeBlocks[Level].Count - 1);
+    Exit(true);
+  end;
+  { split a 2x larger block into 4 }
+  Result := Allocate(BlockSize * 2, Parent);
+  if Result then
+  begin
+    Half := BlockSize;
+    Rect := Rectangle(Parent.Left, Parent.Bottom, Half, Half);
+    FreeBlocks[Level].Add(Rectangle(Parent.Left + Half, Parent.Bottom       , Half, Half));
+    FreeBlocks[Level].Add(Rectangle(Parent.Left       , Parent.Bottom + Half, Half, Half));
+    FreeBlocks[Level].Add(Rectangle(Parent.Left + Half, Parent.Bottom + Half, Half, Half));
+  end;
+end;
+
+procedure TShadowMapAtlas.Release(const Rect: TRectangle);
+var
+  Level, I, ParentSize, Found: Integer;
+  Parent, Sibling: TRectangle;
+  Siblings: array [0..2] of Integer;
+  SiblingCount: Integer;
+begin
+  Level := BlockLevel(Rect.Width);
+  if Level = 0 then
+  begin
+    FreeBlocks[0].Add(Rect);
+    Exit;
+  end;
+  { merge with the 3 other quarters of the parent block, when they are free }
+  ParentSize := Rect.Width * 2;
+  Parent := Rectangle(
+    (Rect.Left div ParentSize) * ParentSize,
+    (Rect.Bottom div ParentSize) * ParentSize,
+    ParentSize, ParentSize);
+  SiblingCount := 0;
+  for I := 0 to 3 do
+  begin
+    Sibling := Rectangle(
+      Parent.Left + (I mod 2) * Rect.Width,
+      Parent.Bottom + (I div 2) * Rect.Width,
+      Rect.Width, Rect.Width);
+    if Sibling.Equals(Rect) then
+      Continue;
+    Found := FindFree(Level, Sibling);
+    if Found = -1 then
+    begin
+      FreeBlocks[Level].Add(Rect);
+      Exit;
+    end;
+    Siblings[SiblingCount] := Found;
+    Inc(SiblingCount);
+  end;
+  { remove the siblings from the free list, highest index first }
+  for I := 0 to 2 do
+  begin
+    Found := MaxIntValue([Siblings[0], Siblings[1], Siblings[2]]);
+    FreeBlocks[Level].Delete(Found);
+    if Siblings[0] = Found then Siblings[0] := -1 else
+    if Siblings[1] = Found then Siblings[1] := -1 else
+      Siblings[2] := -1;
+  end;
+  Release(Parent);
+end;
+
 { TGeneratedShadowMapResource ------------------------------------------------------ }
 
 class function TGeneratedShadowMapResource.IsClassForTextureNode(
@@ -2191,8 +2389,8 @@ end;
 procedure TGeneratedShadowMapResource.PrepareCore(
   const RenderOptions: TCastleRenderOptions);
 var
-  TextureWrap: TTextureWrap2D;
-  Filter: TTextureFilter;
+  AtlasSize: Cardinal;
+  ATileCount: Integer;
 begin
   // in fixed-function, do not create shadow maps, do not render to shadow maps
   if GLFeatures.EnableFixedFunction then Exit;
@@ -2211,8 +2409,7 @@ begin
     BoolToStr(GLFeatures.TextureFloat, true)
   ]));
 
-  { TODO: fix TextureNode.FdSize.Value if needed }
-  Size := TextureNode.FdSize.Value;
+  Size := Max(TextureNode.FdSize.Value, 1);
 
   { At least in case of float textures for VSM, CLAMP_TO_EDGE is needed
     (instead of standard clamp to border). Didn't see any difference
@@ -2235,25 +2432,134 @@ begin
   if TextureNode.CompareMode <> smCompareRLEqual then
     WritelnWarning('VRML/X3D', 'Only the standard GeneratedShadowMap.compareMode value, "COMPARE_R_LEQUAL" (in Pascal: smCompareRLEqual), is supported now. This is the only value sensible for shadow maps.');
 
-  if VarianceShadowMaps then
+  if (not VarianceShadowMaps) and (not GLFeatures.TextureDepthCompare) then
   begin
-    FGLName := RendererCache.TextureFloat_IncReference(
-      '' { generated texture contents means empty URL },
-      Filter, TextureWrap, Size, Size, true);
-  end else
-  begin
-    if not GLFeatures.TextureDepthCompare then
-    begin
-      WritelnWarning('VRML/X3D', 'Shadow maps not supported. OpenGL(ES) doesn''t support shadow samplers with comparison (TextureDepthCompare), cannot use GeneratedShadowMap nodes.');
-      Exit;
-    end;
-
-    FGLName := RendererCache.TextureDepth_IncReference(
-      '' { generated texture contents means empty URL },
-      TextureWrap, Size, Size);
+    WritelnWarning('VRML/X3D', 'Shadow maps not supported. OpenGL(ES) doesn''t support shadow samplers with comparison (TextureDepthCompare), cannot use GeneratedShadowMap nodes.');
+    Exit;
   end;
 
-  RenderToTexture := TGLRenderToTexture.Create(Size, Size);
+  { The shared atlas, for depth shadow maps. }
+  AtlasSize := Min(ShadowMapsAtlasSize, GLFeatures.MaxTextureSize);
+  AtlasSize := Min(AtlasSize, GLFeatures.MaxViewportDimensions.X);
+  AtlasSize := Min(AtlasSize, GLFeatures.MaxViewportDimensions.Y);
+  AtlasSize := BiggestPowerOf2(AtlasSize);
+  InAtlas := (not VarianceShadowMaps) and (AtlasSize >= TShadowMapAtlas.MinBlockSize);
+  if InAtlas then
+  begin
+    if ShadowMapAtlas = nil then
+      ShadowMapAtlas := TShadowMapAtlas.Create(AtlasSize);
+    Inc(ShadowMapAtlas.UserCount);
+  end;
+
+  { Allocate the tiles now (so GLName is valid), the light is already known. }
+  ATileCount := 1;
+  if TextureNode.FdLight.Value is TAbstractPunctualLightNode then
+    TShadowMapShader.ShadowMapKind(TAbstractPunctualLightNode(TextureNode.FdLight.Value), ATileCount);
+  AllocateTiles(ATileCount);
+end;
+
+procedure TGeneratedShadowMapResource.FreeTiles;
+var
+  I: Integer;
+begin
+  if InAtlas then
+  begin
+    for I := 0 to Length(AtlasRects) - 1 do
+      ShadowMapAtlas.Release(AtlasRects[I]);
+    SetLength(AtlasRects, 0);
+  end else
+  begin
+    FreeAndNil(RenderToTexture);
+    if FGLName <> GLObjectNone then
+    begin
+      if VarianceShadowMaps then
+        RendererCache.TextureFloat_DecReference(FGLName)
+      else
+        RendererCache.TextureDepth_DecReference(FGLName);
+      FGLName := GLObjectNone;
+    end;
+  end;
+  TileCount := 0;
+end;
+
+procedure TGeneratedShadowMapResource.AllocateTiles(const ATileCount: Integer);
+
+  { Allocate ATileCount tiles of TileSize in the atlas,
+    halving TileSize when they don't fit. }
+  function AllocateInAtlas: Boolean;
+  var
+    I: Integer;
+  begin
+    TileSize := Smallest2Power(Size);
+    while TileSize >= TShadowMapAtlas.MinBlockSize do
+    begin
+      SetLength(AtlasRects, 0);
+      I := 0;
+      while I < ATileCount do
+      begin
+        SetLength(AtlasRects, I + 1);
+        if not ShadowMapAtlas.Allocate(TileSize, AtlasRects[I]) then
+          Break;
+        Inc(I);
+      end;
+      if I = ATileCount then
+      begin
+        if TileSize < Smallest2Power(Size) then
+          WritelnWarning('Shadow Maps', 'Shadow map "%s" does not fit in the shadow map atlas (ShadowMapsAtlasSize), using %d instead of %d', [
+            TextureNode.NiceName, TileSize, Size]);
+        Exit(true);
+      end;
+      { release what was allocated, try smaller }
+      SetLength(AtlasRects, I);
+      while I > 0 do
+      begin
+        Dec(I);
+        ShadowMapAtlas.Release(AtlasRects[I]);
+      end;
+      SetLength(AtlasRects, 0);
+      TileSize := TileSize div 2;
+    end;
+    Result := false;
+  end;
+
+var
+  Columns, Rows: Integer;
+begin
+  if (TileCount = ATileCount) and (TileCount <> 0) then
+    Exit;
+  FreeTiles;
+
+  if InAtlas then
+  begin
+    if AllocateInAtlas then
+    begin
+      TileCount := ATileCount;
+      TextureWidth := ShadowMapAtlas.Size;
+      TextureHeight := ShadowMapAtlas.Size;
+      Exit;
+    end;
+    WritelnWarning('Shadow Maps', 'Shadow map "%s" does not fit in the shadow map atlas (ShadowMapsAtlasSize), using its own texture', [
+      TextureNode.NiceName]);
+    Dec(ShadowMapAtlas.UserCount);
+    InAtlas := false;
+  end;
+
+  { Own texture, with the tiles in a grid. }
+  TileSize := Size;
+  Columns := Ceil(Sqrt(ATileCount));
+  Rows := DivRoundUp(ATileCount, Columns);
+  TextureWidth := TileSize * Columns;
+  TextureHeight := TileSize * Rows;
+  if VarianceShadowMaps then
+    FGLName := RendererCache.TextureFloat_IncReference(
+      '' { generated texture contents means empty URL },
+      Filter, TextureWrap, TextureWidth, TextureHeight, true)
+  else
+    FGLName := RendererCache.TextureDepth_IncReference(
+      '' { generated texture contents means empty URL },
+      TextureWrap, TextureWidth, TextureHeight);
+
+  RenderToTexture := TGLRenderToTexture.Create(TextureWidth, TextureHeight);
   RenderToTexture.SetTexture(FGLName, GL_TEXTURE_2D);
   if VarianceShadowMaps then
     RenderToTexture.Buffer := tbColor
@@ -2261,29 +2567,44 @@ begin
     RenderToTexture.Buffer := tbDepth;
   RenderToTexture.Stencil := false;
   RenderToTexture.GLContextOpen;
+  TileCount := ATileCount;
+end;
+
+function TGeneratedShadowMapResource.TileRect(const Index: Integer): TRectangle;
+var
+  Columns: Integer;
+begin
+  if InAtlas then
+    Result := AtlasRects[Index]
+  else
+  begin
+    Columns := TextureWidth div TileSize;
+    Result := Rectangle(
+      (Index mod Columns) * TileSize,
+      (Index div Columns) * TileSize,
+      TileSize, TileSize);
+  end;
 end;
 
 procedure TGeneratedShadowMapResource.UnprepareCore;
 begin
-  FreeAndNil(RenderToTexture);
-
-  if FGLName <> GLObjectNone then
+  FreeTiles;
+  if InAtlas then
   begin
-    if VarianceShadowMaps then
-      RendererCache.TextureFloat_DecReference(FGLName)
-    else
-      RendererCache.TextureDepth_DecReference(FGLName);
-    FGLName := GLObjectNone;
+    Dec(ShadowMapAtlas.UserCount);
+    if ShadowMapAtlas.UserCount = 0 then
+      FreeAndNil(ShadowMapAtlas);
+    InAtlas := false;
   end;
 end;
 
 function TGeneratedShadowMapResource.Bind(const TextureUnit: Cardinal): boolean;
 begin
-  Result := FGLName <> GLObjectNone;
+  Result := GLName <> GLObjectNone;
   if not Result then Exit;
 
   TRenderer.ActiveTexture(TextureUnit);
-  glBindTexture(GL_TEXTURE_2D, FGLName);
+  glBindTexture(GL_TEXTURE_2D, GLName);
 end;
 
 function TGeneratedShadowMapResource.Enable(const TextureUnit: Cardinal;
@@ -2301,37 +2622,330 @@ end;
 
 procedure TGeneratedShadowMapResource.Update(
   const Render: TRenderFromViewFunction;
-  const ProjectionNear, ProjectionFar: Single;
-  const Light: TAbstractPunctualLightNode);
+  const Light: TAbstractPunctualLightNode;
+  const Camera: TCastleCamera;
+  const WorldBox: TBox3D);
+type
+  TTileView = record
+    View: TViewVectors;
+    Projection: TMatrix4;
+    NormalOffset: Single;
+  end;
 var
-  NewProjectionMatrix, SavedProjectionMatrix: TMatrix4;
-  SavedViewport: TRectangle;
-  Camera: TRenderingCamera;
+  Views: array of TTileView;
+  Splits: TVector4;
+
+  { The 6 cube faces around a point light. }
+  procedure PointLightViews;
+  const
+    FaceDirections: array [0..5] of TVector3 = (
+      (X:  1; Y:  0; Z:  0), (X: -1; Y:  0; Z:  0),
+      (X:  0; Y:  1; Z:  0), (X:  0; Y: -1; Z:  0),
+      (X:  0; Y:  0; Z:  1), (X:  0; Y:  0; Z: -1)
+    );
+    FaceUps: array [0..5] of TVector3 = (
+      (X: 0; Y: 1; Z:  0), (X: 0; Y: 1; Z: 0),
+      (X: 0; Y: 0; Z: -1), (X: 0; Y: 0; Z: 1),
+      (X: 0; Y: 1; Z:  0), (X: 0; Y: 1; Z: 0)
+    );
+  var
+    Position: TVector3;
+    ProjectionNear, ProjectionFar, MinDistance, MaxDistance, TanHalf: Single;
+    I: Integer;
+    Projection: TMatrix4;
+  begin
+    Position := Light.ProjectionWorldLocation;
+    TextureNode.InternalLightPosition := Position;
+
+    { The range: projectionNear / Far when set,
+      otherwise to the farthest point of the world, within the light's radius. }
+    ProjectionFar := Light.FdProjectionFar.Value;
+    if ProjectionFar <= 0 then
+    begin
+      if not WorldBox.IsEmpty then
+      begin
+        Light.Box3DDistances(WorldBox, MinDistance, MaxDistance);
+        ProjectionFar := MaxDistance;
+      end;
+      if (Light is TAbstractPositionalLightNode) and
+         TAbstractPositionalLightNode(Light).HasRadius and
+         (TAbstractPositionalLightNode(Light).Radius > 0) then
+      begin
+        if ProjectionFar <= 0 then
+          ProjectionFar := TAbstractPositionalLightNode(Light).Radius
+        else
+          ProjectionFar := Min(ProjectionFar, TAbstractPositionalLightNode(Light).Radius);
+      end;
+      if ProjectionFar <= 0 then
+        ProjectionFar := 100;
+    end;
+    { A larger near gives more depth precision, without it the surfaces
+      facing the light are often in their own shadow (shadow acne). }
+    ProjectionNear := Light.FdProjectionNear.Value;
+    if (ProjectionNear <= 0) or (ProjectionNear >= ProjectionFar) then
+      ProjectionNear := ProjectionFar / 250;
+
+    { A bit wider than 90 degrees: the filtering (PCF) near the edges
+      of the faces stays inside them. }
+    TanHalf := 1 + 5 / TileSize;
+    Projection := PerspectiveProjectionMatrixRad(2 * ArcTan(TanHalf), 1,
+      ProjectionNear, ProjectionFar);
+
+    SetLength(Views, 6);
+    for I := 0 to 5 do
+    begin
+      Views[I].View.Translation := Position;
+      Views[I].View.Direction := FaceDirections[I];
+      Views[I].View.Up := FaceUps[I];
+      Views[I].Projection := Projection;
+      { 1.5 texels, per unit of distance from the light }
+      Views[I].NormalOffset := 1.5 * 2 * TanHalf / TileSize;
+    end;
+  end;
+
+  { One view, like a spot light or a directional light
+    with projectionXxx fields.
+    The projection fields left 0 (not calculated by CastleInternalShadowMaps,
+    for global lights) are calculated from the whole world here. }
+  procedure SingleView;
+  var
+    ProjectionNear, ProjectionFar, MinDistance, MaxDistance: Single;
+    Pos, Dir, Side, Up, MinCorner, MaxCorner, ProjectionLocation: TVector3;
+    ProjectionRectangle: TFloatRectangle;
+  begin
+    SetLength(Views, 1);
+    Light.GetView(Views[0].View);
+    Views[0].Projection := Light.ProjectionMatrix;
+    Views[0].NormalOffset := 0; // not used by smkSingle shaders
+
+    if WorldBox.IsEmpty then
+      Exit;
+
+    if (Light is TAbstractDirectionalLightNode) and
+       TAbstractDirectionalLightNode(Light).FdProjectionRectangle.Value.IsPerfectlyZero then
+    begin
+      { Like AutoCalculateProjectionForDirectionalLight in CastleInternalShadowMaps,
+        for the whole world. }
+      Light.GetView(Pos, Dir, Side, Up);
+      MinCorner := WorldBox.MinimumCorner(Dir);
+      MaxCorner := WorldBox.MaximumCorner(Dir);
+      ProjectionLocation := MinCorner * 2 - MaxCorner;
+      ProjectionRectangle := WorldBox.OrthoProject(ProjectionLocation, Dir, Side, Up);
+      WorldBox.DirectionDistances(ProjectionLocation, Dir, MinDistance, MaxDistance);
+      ProjectionFar := Max(MaxDistance, 0) * 2;
+      ProjectionNear := Max(Max(MinDistance, 0) / 2, ProjectionFar * 0.001);
+      if ProjectionFar <= 0 then
+        Exit;
+      Views[0].View.Translation := ProjectionLocation;
+      Views[0].Projection := OrthoProjectionMatrix(ProjectionRectangle,
+        ProjectionNear, ProjectionFar);
+    end else
+    if (Light is TSpotLightNode) and
+       ((Light.FdProjectionNear.Value = 0) or (Light.FdProjectionFar.Value = 0)) then
+    begin
+      { Like AutoCalculateProjectionNearFar in CastleInternalShadowMaps,
+        for the whole world. }
+      Light.Box3DDistances(WorldBox, MinDistance, MaxDistance);
+      ProjectionFar := Light.FdProjectionFar.Value;
+      if ProjectionFar = 0 then
+        ProjectionFar := Max(MaxDistance, 0) * 2;
+      if ProjectionFar <= 0 then
+        Exit;
+      ProjectionNear := Light.FdProjectionNear.Value;
+      if ProjectionNear = 0 then
+        ProjectionNear := Max(Max(MinDistance, 0) / 2, ProjectionFar * 0.001);
+      Views[0].Projection := PerspectiveProjectionMatrixRad(
+        TSpotLightNode(Light).EffectiveProjectionAngle, 1,
+        ProjectionNear, ProjectionFar);
+    end;
+  end;
+
+  { Cascades of a directional light, following the camera. }
+  procedure CascadeViews(const Count: Integer);
+  const
+    { Mix of logarithmic (1) and uniform (0) splits. }
+    SplitLambda = 0.75;
+  var
+    CameraView: TViewVectors;
+    CameraSide, Center, Corner, LightDir, LightSide, LightUp: TVector3;
+    CameraProjection: TMatrix4;
+    Orthographic: Boolean;
+    CameraNear, CameraFar, MinDistance, MaxDistance: Single;
+    SliceNear, SliceFar, D, Radius, Texel, CX, CY, CZ, ZMin, ZMax: Single;
+    HalfX, HalfY, OffsetX, OffsetY: Single;
+    Corners: array [0..7] of TVector3;
+    I, J: Integer;
+    BoxCorners: TBoxCorners;
+  begin
+    SetLength(Views, Count);
+    Splits := Vector4(MaxSingle, MaxSingle, MaxSingle, MaxSingle);
+    if Camera = nil then
+    begin
+      { no camera to follow: every cascade like a single view }
+      for I := 0 to Count - 1 do
+      begin
+        Light.GetView(Views[I].View);
+        Views[I].Projection := Light.ProjectionMatrix;
+        Views[I].NormalOffset := 0;
+      end;
+      Exit;
+    end;
+
+    Light.GetView(Views[0].View);
+    LightDir := Views[0].View.Direction.Normalize;
+    LightUp := Views[0].View.Up.Normalize;
+    LightSide := TVector3.CrossProduct(LightDir, LightUp).Normalize;
+
+    CameraView := Camera.WorldView;
+    CameraView.Direction := CameraView.Direction.Normalize;
+    CameraView.Up := CameraView.Up.Normalize;
+    CameraSide := TVector3.CrossProduct(CameraView.Direction, CameraView.Up).Normalize;
+    CameraProjection := Camera.ProjectionMatrix;
+    Orthographic := CameraProjection.Data[3, 3] = 1;
+    HalfX := 1 / CameraProjection.Data[0, 0];
+    HalfY := 1 / CameraProjection.Data[1, 1];
+    if Orthographic then
+    begin
+      OffsetX := -CameraProjection.Data[3, 0] * HalfX;
+      OffsetY := -CameraProjection.Data[3, 1] * HalfY;
+    end else
+    begin
+      OffsetX := 0;
+      OffsetY := 0;
+    end;
+
+    CameraNear := Max(Camera.EffectiveProjectionNear, 0.001);
+    CameraFar := TAbstractDirectionalLightNode(Light).ShadowCascadesDistance;
+    if CameraFar <= 0 then
+    begin
+      CameraFar := 0;
+      if not WorldBox.IsEmpty then
+      begin
+        WorldBox.PointDistances(CameraView.Translation, MinDistance, MaxDistance);
+        CameraFar := MaxDistance;
+      end;
+      if (Camera.EffectiveProjectionFar > 0) and
+         (Camera.EffectiveProjectionFar <> ZFarInfinity) then
+        CameraFar := Min(CameraFar, Camera.EffectiveProjectionFar);
+    end;
+    if CameraFar <= CameraNear then
+      CameraFar := CameraNear * 100;
+
+    if WorldBox.IsEmpty then
+      FillChar(BoxCorners, SizeOf(BoxCorners), 0)
+    else
+      WorldBox.Corners(BoxCorners);
+
+    SliceNear := CameraNear;
+    for I := 0 to Count - 1 do
+    begin
+      SliceFar :=
+        SplitLambda * CameraNear * Power(CameraFar / CameraNear, (I + 1) / Count) +
+        (1 - SplitLambda) * (CameraNear + (CameraFar - CameraNear) * (I + 1) / Count);
+      Splits.Data[I] := SliceFar;
+
+      { the corners of this slice of the camera frustum, in world space }
+      for J := 0 to 7 do
+      begin
+        if J < 4 then D := SliceNear else D := SliceFar;
+        if Orthographic then
+          Corner := Vector3(
+            OffsetX + HalfX * (2 * (J mod 2) - 1),
+            OffsetY + HalfY * (2 * ((J div 2) mod 2) - 1),
+            D)
+        else
+          Corner := Vector3(
+            D * HalfX * (2 * (J mod 2) - 1),
+            D * HalfY * (2 * ((J div 2) mod 2) - 1),
+            D);
+        Corners[J] := CameraView.Translation +
+          CameraSide * Corner.X + CameraView.Up * Corner.Y +
+          CameraView.Direction * Corner.Z;
+      end;
+
+      { a sphere around the slice: its size doesn't change
+        when the camera turns, so the shadows don't shimmer }
+      Center := TVector3.Zero;
+      for J := 0 to 7 do
+        Center := Center + Corners[J];
+      Center := Center / 8;
+      Radius := 0;
+      for J := 0 to 7 do
+        Radius := Max(Radius, PointsDistance(Center, Corners[J]));
+      Radius := Ceil(Radius * 16) / 16;
+
+      { snap the center to the texels of the shadow map:
+        the shadows don't shimmer when the camera moves }
+      Texel := 2 * Radius / TileSize;
+      CX := Floor(TVector3.DotProduct(Center, LightSide) / Texel) * Texel;
+      CY := Floor(TVector3.DotProduct(Center, LightUp) / Texel) * Texel;
+      CZ := TVector3.DotProduct(Center, LightDir);
+
+      { the depth range: all the world (the casters) along the light }
+      ZMin := CZ - Radius;
+      ZMax := CZ + Radius;
+      if not WorldBox.IsEmpty then
+        for J := 0 to 7 do
+        begin
+          D := TVector3.DotProduct(BoxCorners[J], LightDir);
+          ZMin := Min(ZMin, D);
+          ZMax := Max(ZMax, D);
+        end;
+
+      Views[I].View.Translation :=
+        LightSide * CX + LightUp * CY + LightDir * (ZMin - 1);
+      Views[I].View.Direction := LightDir;
+      Views[I].View.Up := LightUp;
+      Views[I].Projection := OrthoProjectionMatrix(
+        FloatRectangle(-Radius, -Radius, 2 * Radius, 2 * Radius),
+        0.5, ZMax - ZMin + 2);
+      Views[I].NormalOffset := 1.5 * Texel;
+
+      SliceNear := SliceFar;
+    end;
+  end;
+
+var
+  Kind: TShadowMapKind;
+  ATileCount, I: Integer;
+  SavedProjectionMatrix: TMatrix4;
+  SavedViewport, Tile: TRectangle;
+  SavedViewportDelta: TVector2Integer;
+  RenderingCamera: TRenderingCamera;
   SavedPolygonOffset: TPolygonOffset;
-  CameraRender: TViewVectors;
+  RTT: TGLRenderToTexture;
 begin
-  if FGLName = GLObjectNone then Exit;
+  Kind := TShadowMapShader.ShadowMapKind(Light, ATileCount);
+  AllocateTiles(ATileCount);
+  if GLName = GLObjectNone then Exit;
 
-  { Render view for shadow map }
-  NewProjectionMatrix := Light.ProjectionMatrix;
+  Splits := Vector4(MaxSingle, MaxSingle, MaxSingle, MaxSingle);
+  case Kind of
+    smkPoint: PointLightViews;
+    smkCascades: CascadeViews(ATileCount);
+    else SingleView;
+  end;
 
-  Camera := TRenderingCamera.Create;
+  if InAtlas then
+    RTT := ShadowMapAtlas.RenderToTexture
+  else
+    RTT := RenderToTexture;
+
+  RenderingCamera := TRenderingCamera.Create;
   try
     if VarianceShadowMaps then
-      Camera.Target := rtVarianceShadowMap
+      RenderingCamera.Target := rtVarianceShadowMap
     else
-      Camera.Target := rtShadowMap;
+      RenderingCamera.Target := rtShadowMap;
 
-    Light.GetView(CameraRender);
-    Camera.FromViewVectors(CameraRender, NewProjectionMatrix);
-
-    RenderToTexture.RenderBegin;
+    RTT.RenderBegin;
 
       SavedViewport := RenderContext.Viewport;
-      RenderContext.Viewport := Rectangle(0, 0, Size, Size);
-
+      SavedViewportDelta := RenderContext.ViewportDelta;
       SavedProjectionMatrix := RenderContext.ProjectionMatrix;
-      RenderContext.ProjectionMatrix := NewProjectionMatrix;
+      SavedPolygonOffset := RenderContext.PolygonOffset;
+      RenderContext.ViewportDelta := TVector2Integer.Zero;
+      RenderContext.InternalControlRectIgnore := RenderContext.InternalControlRectIgnore + 1;
 
       { Enable polygon offset for everything (whole scene).
 
@@ -2339,26 +2953,63 @@ begin
         Practice (on "ATI Mobility Radeon HD 4300 Series") shows that
         offset is still needed for VSM. Without offset, VSM has some noise,
         and sunny_street demos have noise on walls. With offset, VSM is perfect. }
-      SavedPolygonOffset := RenderContext.PolygonOffset;
       RenderContext.PolygonOffsetEnable(TextureNode.FdScale.Value, TextureNode.FdBias.Value);
 
-      Render(Camera);
+      for I := 0 to ATileCount - 1 do
+      begin
+        { The scissor limits what the rendering clears to this tile. }
+        Tile := TileRect(I);
+        RenderContext.Viewport := Tile;
+        RenderContext.ScissorEnable(Tile);
+        RenderContext.ProjectionMatrix := Views[I].Projection;
+        RenderingCamera.FromViewVectors(Views[I].View, Views[I].Projection);
+        Render(RenderingCamera);
+        RenderContext.ScissorDisable;
+      end;
 
       RenderContext.PolygonOffset := SavedPolygonOffset;
+      RenderContext.InternalControlRectIgnore := RenderContext.InternalControlRectIgnore - 1;
       RenderContext.ProjectionMatrix := SavedProjectionMatrix;
+      RenderContext.ViewportDelta := SavedViewportDelta;
       RenderContext.Viewport := SavedViewport;
 
-    RenderToTexture.RenderEnd;
+    RTT.RenderEnd;
 
-  finally FreeAndNil(Camera) end;
+  finally FreeAndNil(RenderingCamera) end;
 
   if NeedsMipmaps then
-    RenderToTexture.GenerateMipmap;
+    RTT.GenerateMipmap;
+
+  { remember the views for the shaders of the shadow receivers }
+  if Length(TextureNode.InternalTiles) < ATileCount then
+    SetLength(TextureNode.InternalTiles, ATileCount);
+  for I := 0 to ATileCount - 1 do
+  begin
+    Tile := TileRect(I);
+    TextureNode.InternalTiles[I].ViewProjection :=
+      Views[I].Projection * Views[I].View.Matrix;
+    TextureNode.InternalTiles[I].NormalOffset := Views[I].NormalOffset;
+    TextureNode.InternalTiles[I].Rect := Vector4(
+      Tile.Left / TextureWidth,
+      Tile.Bottom / TextureHeight,
+      (Tile.Left + Integer(Tile.Width)) / TextureWidth,
+      (Tile.Bottom + Integer(Tile.Height)) / TextureHeight);
+  end;
+  TextureNode.InternalTileCount := ATileCount;
+  TextureNode.InternalCascadeSplits := Splits;
+  TextureNode.InternalTexelSize := Vector2(1 / TextureWidth, 1 / TextureHeight);
 end;
 
 function TGeneratedShadowMapResource.GLName: TGLTextureId;
 begin
-  Result := FGLName;
+  if InAtlas then
+  begin
+    if ShadowMapAtlas <> nil then
+      Result := ShadowMapAtlas.GLName
+    else
+      Result := GLObjectNone;
+  end else
+    Result := FGLName;
 end;
 
 { TShaderTextureResource ------------------------------------------------------ }

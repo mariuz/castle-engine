@@ -92,6 +92,7 @@ uses
   TestCastleViewport,
   TestCastleInternalRttiUtils,
   TestCastleShapes,
+  TestCastleShadowMaps,
   TestCastleInternalDelphiUtils,
   TestCastleFileFilters,
   TestCastleWindow,
