@@ -914,7 +914,63 @@ While `Ctrl+C` / `Ctrl+V` duplicates an entire component subtree, designers freq
 
 ---
 
-## 41. Complete Keyboard Shortcuts & Toolbar Reference
+## 41. Phase 40: Arrange Existing Selection in 2D / 3D Grid (`ArrangeSelectedInGrid`, `ButtonArrangeGrid`, `Alt+Shift+G`)
+
+While **Grid Duplicate** (`Ctrl+Alt+G`) clones a template into a new grid, level designers frequently have $N$ **already-placed, distinct** transforms (different crates, statues, foliage variations, or furniture pieces) that they want to neatly organize into a structured 2D or 3D grid without creating duplicates:
+- **Core Engine API (`TCastleTransformManipulate.ArrangeSelectedInGrid`):**
+  - Accepts `AColumnsX` (`0` = auto $\lceil\sqrt{N}\rceil$), `ARowsZ` (`0` = all remaining items on a single Y layer; `> 0` = wraps into vertical $+Y$ layers every `ColumnsX * RowsZ` items), `ASpacing` (`TVector3`, where $\le 0$ auto-computes spacing from the average world bounding-box extent of the selected items $\times 1.5$), and `ACenterGrid: Boolean = true`.
+  - Places each item $i \in [0..N-1]$ at grid indices:
+    $$c_x = i \bmod \text{ColsX}, \quad r_z = (i \div \text{ColsX}) \bmod \text{RowsZ}, \quad l_y = i \div (\text{ColsX} \cdot \text{RowsZ})$$
+  - Supports both centered placement around the existing selection centroid (`ACenterGrid = true`) and anchored placement starting from the primary selected item (`Targets[0]`, `ACenterGrid = false`), with full single-step Undo/Redo support.
+- **Editor Controls (`ButtonArrangeGrid` & `ShowArrangeInGridDialog` / `Alt+Shift+G`):**
+  - **Click `Grid Arrange`** (`ButtonArrangeGrid`) in `PanelLayoutTransform`: Immediately arranges the 2+ selected transforms in an auto-sized square XZ grid (`ColumnsX = 0`, auto-spacing, centered).
+  - **`Shift` + Click `Grid Arrange`** or press **`Alt+Shift+G`**: Opens the **Arrange Selected Transforms in 2D / 3D Grid** dialog (`ShowArrangeInGridDialog`) to configure **Columns along X (`0` = auto $\sqrt{N}$)**, **Rows along Z (`0` = single Y layer)**, **Spacing X / Y / Z (`0` = auto from BBox)**, and **Center grid on current selection center**.
+
+---
+
+## 42. Phase 41: Push / Pull (Expand / Contract) Selected Positions From Pivot (`ScaleSelectedPositionsFromPivot`, `Alt+Shift+=` / `Alt+Shift+-`)
+
+When dressing a room, clearing a path, or adjusting the spacing of a cluster of lights, pillars, or props, designers often want to **push objects outward** or **pull objects inward** relative to their shared center (or the primary selected object) without changing the `Scale` or `Rotation` of the individual meshes:
+- **Core Engine API (`TCastleTransformManipulate.ScaleSelectedPositionsFromPivot`):**
+  - Respects `PivotMode`: uses `Targets[0]`'s world origin when `PivotMode = pmPrimarySelected`, or the arithmetic mean of all top-level selected origins when `PivotMode = pmSelectionCenter`.
+  - Scales every selected transform's world offset from the pivot $\mathbf{P}$ by `AFactor`:
+    $$\mathbf{W}'_i = \mathbf{P} + (\mathbf{W}_i - \mathbf{P}) \cdot \text{AFactor}$$
+  - Converts $\mathbf{W}'_i$ back into each transform's parent local space while leaving `Scale` and `Rotation` untouched, recording a single composite Undo/Redo step.
+- **Editor Controls (`ButtonExpandPositions`, `ButtonContractPositions`, `Alt+Shift+=` / `Alt+Shift+-`):**
+  - **`Expand +25%`** (`ButtonExpandPositions`) or **`Alt+Shift+=`** (`Alt+Shift+Plus`): Pushes selected transforms outward from the active pivot (`Factor = 1.25`; **`Shift`-click** for fine $+10\%$ `1.10`).
+  - **`Contract -20%`** (`ButtonContractPositions`) or **`Alt+Shift+-`** (`Alt+Shift+Minus`): Pulls selected transforms inward toward the active pivot (`Factor = 0.80`, the exact inverse of $1.25\times$; **`Shift`-click** for fine $-10\%$ `0.90`).
+
+---
+
+## 43. Phase 42: Granular Transform Attribute Reset (`ResetSelectedTransform`, `Alt+G` / `Alt+R` / `Alt+S` & `ButtonResetTransform`)
+
+Inspired by Blender's muscle-memory clear-transform shortcuts (`Alt+G`, `Alt+R`, `Alt+S`), designers can immediately zero out specific transform channels across all selected `TCastleTransform` objects (or reset 2D UI anchor deltas):
+- **Core Engine API (`TCastleTransformManipulate.ResetSelectedTransform`):**
+  - `ResetSelectedTransform(AResetTranslation, AResetRotation, AResetScale: Boolean)` resets `Translation := Vector3(0, 0, 0)`, `Rotation := Vector4(0, 1, 0, 0)`, and/or `Scale := Vector3(1, 1, 1)` across all selected top-level transforms in a single Undo/Redo transaction.
+- **Keyboard Shortcuts & Toolbar Button (`ButtonResetTransform`):**
+  - **`Alt+G`**: Reset **Translation** (`(0, 0, 0)`) on selected 3D transforms (or reset 2D UI `AnchorDelta` to `(0, 0)` when a `TCastleUserInterface` is selected).
+  - **`Alt+R`**: Reset **Rotation** (`(0, 0, 0, 0)`) on selected 3D transforms.
+  - **`Alt+S`**: Reset **Scale** (`(1, 1, 1)`) on selected 3D transforms.
+  - **`Reset Xform` Button** (`ButtonResetTransform`) in `PanelLayoutTransform`:
+    - **Normal Click**: Resets **Rotation + Scale** (preserving each object's placed position in the level).
+    - **`Shift` + Click**: Resets **Rotation only**.
+    - **`Ctrl` + Click**: Resets **All** (`Translation`, `Rotation`, and `Scale`).
+
+---
+
+## 44. Phase 43: Select Transforms At Same Elevation (`SelectAtSameElevation` / `Ctrl+Shift+E`) & 2D UI Position Swap / 2D UI Grid Arrange (`ButtonUISwapPos` & `ButtonUIGridArrange`)
+
+- **Select Transforms At Same Y Elevation (`SelectAtSameElevation` / `Ctrl+Shift+E`):**
+  - In multi-story buildings, dungeons, or platformer levels, pressing **`Ctrl+Shift+E`** (or choosing **`Select At Same Y Elevation... (Ctrl+Shift+E)`** in the Hierarchy context menu) opens a tolerance dialog (`ShowSelectAtSameElevationDialog`, default $\pm 0.25$ world units around the active transform's world Y elevation).
+  - Selects all visible, unlocked `TCastleTransform` instances in the same world whose world-space origin Y lies within $[Y_0 - \text{Tol},\; Y_0 + \text{Tol}]$, making it effortless to select an entire floor's props, tiles, or lights at once.
+- **2D UI Position Swap (`SwapSelectedUserInterfacePositions` / `ButtonUISwapPos`):**
+  - Clicking **`UI Swap Pos`** (`ButtonUISwapPos`) in `PanelLayoutUI` swaps (for 2 selected controls) or cyclically rotates (for 3+ selected controls) the rendered screen-space center positions of the selected `TCastleUserInterface` controls via `EffectiveRect` and parent `UIScale`, wrapped in a single Undo/Redo step.
+- **2D UI Grid Arrange (`ArrangeSelectedUserInterfacesInGrid` / `ButtonUIGridArrange`):**
+  - Clicking **`UI Grid`** (`ButtonUIGridArrange`) in `PanelLayoutUI` arranges 2+ selected `TCastleUserInterface` controls into a neat 2D grid (auto $\lceil\sqrt{N}\rceil$ columns, top-to-bottom rows, with $8\text{ px}$ unscaled gap — or $0\text{ px}$ flush edge-to-edge when **`Shift`-clicked**) starting from the top-left of their combined screen bounds.
+
+---
+
+## 45. Complete Keyboard Shortcuts & Toolbar Reference
 
 | Shortcut / Control | Context | Action |
 | :--- | :--- | :--- |
@@ -931,6 +987,11 @@ While `Ctrl+C` / `Ctrl+V` duplicates an entire component subtree, designers freq
 | **`Ctrl+Alt+G`** / **`Grid Dup...`** | Viewport / Hierarchy / Layout Tab | Open the **2D / 3D Grid Array Duplicate** dialog (`CountX`, `CountY`, `CountZ`, `Spacing`). |
 | **`Ctrl+Alt+S`** / **`Scatter Dup...`** | Viewport / Hierarchy / Layout Tab | Open the **Ground-Aware Scatter Duplicate** dialog (`Count`, `Radius`, `MaxYaw`, `ScaleMin..Max`, `SnapToFloor`, `AlignToNormal`). |
 | **`Alt+Shift+C`** / **`Circle Arrange`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms in a circle** (**Click**: auto-radius $360^\circ$ circle; **`Shift`-click** or **`Alt+Shift+C`**: dialog). |
+| **`Alt+Shift+G`** / **`Grid Arrange`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms in a 2D / 3D grid** (**Click**: auto $\lceil\sqrt{N}\rceil$ grid; **`Shift`-click** or **`Alt+Shift+G`**: dialog). |
+| **`Alt+Shift+=`** / **`Expand +25%`** | Viewport / Hierarchy / Layout Tab | **Push / Expand** selected transform positions outward from pivot by $+25\%$ (`Shift`-click button for $+10\%$). |
+| **`Alt+Shift+-`** / **`Contract -20%`** | Viewport / Hierarchy / Layout Tab | **Pull / Contract** selected transform positions inward toward pivot by $-20\%$ (`Shift`-click button for $-10\%$). |
+| **`Alt+G`** / **`Alt+R`** / **`Alt+S`** | Viewport / Hierarchy Tree | Reset selected **Translation** (`Alt+G`, or 2D UI `AnchorDelta`), **Rotation** (`Alt+R`), or **Scale** (`Alt+S`). |
+| **`Reset Xform` Button** | Layout Tab (`PanelLayoutTransform`) | Reset selected transform **Rot+Scale** (**Click**), **Rotation only** (**`Shift`-click**), or **Pos+Rot+Scale** (**`Ctrl`-click**). |
 | **`Ctrl+Shift+S`** / **`Swap Pos`** | Viewport / Hierarchy / Layout Tab | **Swap / Cycle World Positions** of 2+ selected `TCastleTransform` objects (`SwapSelectedPositions`). |
 | **`Ctrl+Shift+L`** / **`Aim at Target`** | Viewport / Hierarchy / Layout Tab | **Look-At / Aim** secondary selected transforms at primary selection (2+ selected) or aim single selection at 3D cursor hit. |
 | **`Ctrl+Shift+M`** / **`Match Rot`** | Viewport / Hierarchy / Layout Tab | **Match Rotation** to primary selection (**`Shift`-click**: Pos+Rot; **`Ctrl`-click**: Pos+Rot+Scale). |
@@ -944,6 +1005,7 @@ While `Ctrl+C` / `Ctrl+V` duplicates an entire component subtree, designers freq
 | **`Ctrl+Shift+0` .. `Ctrl+Shift+9`** | Viewport / Hierarchy Tree | Save current component selection into **Selection Set** slot `0..9`. |
 | **`Shift+0` .. `Shift+9`** / **`Alt+Shift+0..9`** | Viewport / Hierarchy Tree | Recall **Selection Set** slot `0..9` (`Alt+Shift+0..9` for additive union selection). |
 | **`Ctrl+Shift+O`** / **`Select Overlapping Transforms`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects whose `WorldBoundingBox` overlaps the selection (or any sibling transform). |
+| **`Ctrl+Shift+E`** / **`Select At Same Y Elevation...`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects at the same world Y elevation within a configurable tolerance. |
 | **`Select By Bounding-Box Size Range...`** | Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects whose world bounding-box diagonal length lies within `[MinSize, MaxSize]`. |
 | **`Select By Name Pattern...`** | Hierarchy Context Menu | Select all components matching a substring or `*` / `?` wildcard pattern. |
 | **`Select All With Same Asset URL`** | Hierarchy Context Menu | Select all components in the design referencing the same `Url` asset as the selected component. |
@@ -977,6 +1039,7 @@ While `Ctrl+C` / `Ctrl+V` duplicates an entire component subtree, designers freq
 | **`UI Align Left/CenterH/Right/Bottom/MiddleV/Top`** | Layout Tab (`PanelLayoutUI`) | Align rendered edges or centers of 2+ selected `TCastleUserInterface` controls to the primary selected control. |
 | **`UI Dist H` / `UI Dist V`** | Layout Tab (`PanelLayoutUI`) | Space 3+ selected `TCastleUserInterface` controls with equal horizontal or vertical gaps. |
 | **`UI Match Size`** | Layout Tab (`PanelLayoutUI`) | Match `Width` and `Height` of 2+ selected `TCastleUserInterface` controls to the primary control (`Shift`: Width, `Ctrl`: Height). |
+| **`UI Swap Pos` / `UI Grid`** | Layout Tab (`PanelLayoutUI`) | **Swap / cycle** rendered positions of 2+ selected `TCastleUserInterface` controls (`UI Swap Pos`), or **arrange in 2D grid** (`UI Grid`, `Shift` for $0\text{ px}$ gap). |
 | **`Reset Prop` Button** | Object Inspector Header | Reset the active Object Inspector property row to its default value. |
 | **`Select All of Same Class`** | Hierarchy Context Menu | Select all components in the design matching the selected component's class. |
 | **`Expand Subtree` / `Collapse Subtree`** | Hierarchy Context Menu | Recursively expand or collapse the selected hierarchy node(s). |
@@ -993,9 +1056,9 @@ While `Ctrl+C` / `Ctrl+V` duplicates an entire component subtree, designers freq
 
 ---
 
-## 42. Automated Unit Tests & Verification
+## 46. Automated Unit Tests & Verification
 
-All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 17 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
+All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 18 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
 
 1. **`TestSelectedCountAndFree`**: Verifies single/multi-selection filtering, freeing a selected transform while selected, and translating the remaining selection.
 2. **`TestTranslateSnapAndCoordSpace`**: Verifies grid snapping (`TranslateSnap := 2.0`) and `csLocal` vs. `csWorld` translation on a $90^\circ$-rotated transform.
@@ -1014,6 +1077,7 @@ All core 3D manipulation algorithms in `CastleTransformManipulate` are covered b
 15. **`TestSwapPositionsAndMatchSelectedSize`**: Verifies `SwapSelectedPositions` swaps 2 selected transforms and cyclically rotates 3 selected transforms in world space, and verifies `MatchSelectedSize(1)` (Y-height match) and `MatchSelectedSize(-1)` (all-axis bounding-box size match) scale secondary selected `TCastleBox` objects so their world bounding-box dimensions match the primary selected object.
 16. **`TestLookAtAimAndAlignSelectedBounds`**: Verifies `LookAtWorldPoint` and `AimSelectedAtPrimary` orient selected transforms' world forward directions toward a target point or primary selected box, and verifies `AlignSelectedBounds(1, false)` (Min Y face alignment) and `AlignSelectedBounds(1, true)` (Max Y face alignment) align world bounding-box bottoms and tops across boxes of different heights.
 17. **`TestMatchRotationTransformAndArrangeInCircle`**: Verifies `MatchSelectedRotation` matches world orientation while preserving position and scale, `MatchSelectedTransform(true, false, true)` matches world position and scale onto secondary transforms, and `ArrangeSelectedInCircle(10.0, 360.0, true)` places 4 transforms evenly around their center at $0^\circ, 90^\circ, 180^\circ, 270^\circ$ on a radius-$10$ XZ circle while orienting them toward the center.
+18. **`TestArrangeInGridScalePositionsAndResetTransform`**: Verifies `ArrangeSelectedInGrid(2, 0, Vector3(10, 0, 10), false)` places 4 transforms at exact $2 \times 2$ XZ grid coordinates $(0, 5, 0)$, $(10, 5, 0)$, $(0, 5, 10)$, $(10, 5, 10)$, verifies `ScaleSelectedPositionsFromPivot(2.0)` under both `pmPrimarySelected` and `pmSelectionCenter` doubles world offsets from the active pivot without altering `Scale`, and verifies `ResetSelectedTransform` granularly resets rotation + scale while preserving translation (and subsequently resets translation).
 
 To run this test suite from the command line:
 ```bash

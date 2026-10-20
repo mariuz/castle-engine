@@ -302,3 +302,26 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Upgraded `TDesignFrame.CopyTransform` and `TDesignFrame.PasteTransform(RotationAndScaleOnly)` to support both 3D `TCastleTransform` (recording both local `Translation`/`Rotation`/`Scale` and world `GetWorldView` state, pasting in World space when `CoordSpace = csWorld` or Local space when `csLocal`) and 2D `TCastleUserInterface` (`Translation`, `Width`, `Height`, `FullSize`, horizontal/vertical anchors, and `Border.AllSides`).
   - Holding **`Shift`** when pasting (**`Ctrl+Alt+Shift+V`** or `Shift`-clicking **`Paste Transform`**) pastes **Rotation & Scale only** (for 3D transforms) or **Size & Border only** (for 2D UI controls), preserving each target object's existing position.
   - Bound to **`Ctrl+Alt+C`**, **`Ctrl+Alt+V`**, and **`Ctrl+Alt+Shift+V`** in both the 3D Viewport and Hierarchy Tree, plus **`Copy Transform / UI Layout (Ctrl+Alt+C)`** and **`Paste Transform / UI Layout (Ctrl+Alt+V)`** in `MenuTreeView`.
+
+### Phase 40: Arrange Existing Selection in 2D / 3D Grid (`ArrangeSelectedInGrid` / `Alt+Shift+G`)
+- [x] **40.1. Non-Duplicating 2D / 3D Grid Arrangement for Existing Transforms (`TCastleTransformManipulate.ArrangeSelectedInGrid`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedInGrid(ColumnsX, RowsZ, Spacing, CenterGrid): Boolean`: arranges 2+ existing top-level selected transforms into a 2D (XZ) or 3D (XYZ) grid without duplicating them, automatically computing `ColumnsX = Ceil(Sqrt(Count))`, `RowsZ = Ceil(Count / ColumnsX)`, and `Spacing = 1.25 * MaxBoundingBoxExtent` when any parameter is `<= 0`.
+  - Added **`Grid Arrange`** (`ButtonArrangeGrid` in `PanelLayoutTransform`: normal click arranges immediately with auto columns/spacing centered on selection; `Shift`-click opens the customization dialog) and `ShowArrangeInGridDialog` bound to **`Alt+Shift+G`** in both the Viewport and Hierarchy Tree.
+
+### Phase 41: Push / Pull Selected Positions From Pivot (`ScaleSelectedPositionsFromPivot` / `Alt+Shift+=` / `Alt+Shift+-`)
+- [x] **41.1. Expand & Contract Multi-Selection Spacing Without Scaling Objects (`TCastleTransformManipulate.ScaleSelectedPositionsFromPivot`)**
+  - Implemented `TCastleTransformManipulate.ScaleSelectedPositionsFromPivot(Factor): Boolean`: scales the world-space offsets of 2+ top-level selected transforms away from or toward the active selection pivot (`SelectionWorkingCenter` or `Selected[0]`) by `Factor` without altering any transform's `Scale` or `Rotation`.
+  - Added **`Expand +25%`** (`ButtonExpandPositions`) and **`Contract -20%`** (`ButtonContractPositions`) in `PanelLayoutTransform` (`Shift`-click restricts push/pull to the horizontal XZ plane) and bound **`Alt+Shift+=`** / **`Alt+Shift+-`** in both the Viewport and Hierarchy Tree.
+
+### Phase 42: Granular Transform Attribute Reset (`ResetSelectedTransform` / `Alt+G`, `Alt+R`, `Alt+S`)
+- [x] **42.1. Blender-Style Clear Location (`Alt+G`), Clear Rotation (`Alt+R`), Clear Scale (`Alt+S`) & `Reset Xform`**
+  - Implemented `TCastleTransformManipulate.ResetSelectedTransform(ResetTrans, ResetRot, ResetScale): Boolean` and `TDesignFrame.ResetSelectionTransformAttributes` (which also resets `Translation` on selected 2D `TCastleUserInterface` controls when `Alt+G` is pressed).
+  - Bound **`Alt+G`** (Reset Translation), **`Alt+R`** (Reset Rotation), and **`Alt+S`** (Reset Scale) in both the 3D Viewport and Hierarchy Tree, and added **`Reset Xform`** (`ButtonResetTransform`) in `PanelLayoutTransform` (normal click: All; `Shift`-click: Rot+Scale only; `Ctrl`-click: Rot only).
+  - Added automated unit test `TestArrangeInGridScalePositionsAndResetTransform` in `tests/code/testcases/testcastletransformmanipulate.pas`.
+
+### Phase 43: Select Transforms At Same Elevation (`SelectAtSameElevation` / `Ctrl+Shift+E`) & 2D UI Swap / Grid Arrange (`PanelLayoutUI`)
+- [x] **43.1. Select Same Floor / World-Y Elevation (`SelectAtSameElevation` / `Ctrl+Shift+E`)**
+  - Implemented `TDesignFrame.SelectAtSameElevation(Tolerance)` and `ShowSelectAtSameElevationDialog`: selects all visible, unlocked `TCastleTransform` instances in the same world whose world origin Y or world bounding-box bottom Y matches any currently selected transform within `Tolerance` (default `0.25` units).
+  - Bound to **`Ctrl+Shift+E`** in both the Viewport and Hierarchy Tree, plus **`Select At Same Elevation (Y)... (Ctrl+Shift+E)`** (`MenuTreeViewItemSelectSameElevation`) in `MenuTreeView`.
+- [x] **43.2. 2D UI Position Swap & 2D UI Grid Arrange (`SwapSelectedUserInterfacePositions`, `ArrangeSelectedUserInterfacesInGrid`)**
+  - Added **`UI Swap Pos`** (`ButtonUISwapPos`) and **`UI Grid`** (`ButtonUIGridArrange`) to `PanelLayoutUI` to swap/cycle screen-space centers of 2+ selected `TCastleUserInterface` controls or arrange them into an even $\lceil\sqrt{N}\rceil$-column 2D screen grid (`16 px` gap, or `8 px` when `Shift`-clicked).

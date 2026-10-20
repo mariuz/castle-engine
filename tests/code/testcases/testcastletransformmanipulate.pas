@@ -46,6 +46,7 @@ type
     procedure TestSwapPositionsAndMatchSelectedSize;
     procedure TestLookAtAimAndAlignSelectedBounds;
     procedure TestMatchRotationTransformAndArrangeInCircle;
+    procedure TestArrangeInGridScalePositionsAndResetTransform;
   end;
 
 implementation
@@ -952,6 +953,77 @@ begin
     T4.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(-10, 4, 0), WorldPos, 1e-3);
     AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-3);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestArrangeInGridScalePositionsAndResetTransform;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  T1, T2, T3, T4: TCastleTransform;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.OnTransformModified := {$ifdef FPC}@{$endif} HandleTransformModified;
+    Manipulate.OnTransformModifyEnd := {$ifdef FPC}@{$endif} HandleTransformModifyEnd;
+
+    T1 := TCastleTransform.Create(Viewport);
+    T1.Translation := Vector3(-10, 5, -10);
+    T1.Rotation := Vector4(0, 1, 0, Pi / 4);
+    T1.Scale := Vector3(2, 3, 4);
+    Viewport.Items.Add(T1);
+
+    T2 := TCastleTransform.Create(Viewport);
+    T2.Translation := Vector3(10, -5, -10);
+    T2.Rotation := Vector4(1, 0, 0, Pi / 3);
+    T2.Scale := Vector3(1.5, 1.5, 1.5);
+    Viewport.Items.Add(T2);
+
+    T3 := TCastleTransform.Create(Viewport);
+    T3.Translation := Vector3(-10, 0, 10);
+    Viewport.Items.Add(T3);
+
+    T4 := TCastleTransform.Create(Viewport);
+    T4.Translation := Vector3(10, 0, 10);
+    Viewport.Items.Add(T4);
+
+    // 1. Test ArrangeSelectedInGrid (2x2 grid centered at (0, 0, 0), spacing (4, 2, 6))
+    Manipulate.SetSelected([T1, T2, T3, T4]);
+    AssertTrue(Manipulate.ArrangeSelectedInGrid(2, 2, Vector3(4, 2, 6), true));
+    // GridSpan = (4, 0, 6), Center = (0, 0, 0) -> OriginPos = (-2, 0, -3)
+    AssertVectorEquals(Vector3(-2, 0, -3), T1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(2, 0, -3), T2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-2, 0, 3), T3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(2, 0, 3), T4.Translation, 1e-4);
+
+    // 2. Test ScaleSelectedPositionsFromPivot around SelectionCenter (0, 0, 0) by (2, 1, 3)
+    Manipulate.PivotMode := pmSelectionCenter;
+    AssertTrue(Manipulate.ScaleSelectedPositionsFromPivot(Vector3(2, 1, 3)));
+    AssertVectorEquals(Vector3(-4, 0, -9), T1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(4, 0, -9), T2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-4, 0, 9), T3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(4, 0, 9), T4.Translation, 1e-4);
+    // Individual Scale and Rotation must remain untouched
+    AssertVectorEquals(Vector3(2, 3, 4), T1.Scale, 1e-4);
+    AssertSameValue(Pi / 4, T1.Rotation.W, 1e-4);
+
+    // 3. Test ResetSelectedTransform (Rotation & Scale only first, then Translation)
+    AssertTrue(Manipulate.ResetSelectedTransform(false, true, true));
+    AssertVectorEquals(Vector3(-4, 0, -9), T1.Translation, 1e-4);
+    AssertSameValue(0.0, T1.Rotation.W, 1e-4);
+    AssertVectorEquals(Vector3(1, 1, 1), T1.Scale, 1e-4);
+    AssertSameValue(0.0, T2.Rotation.W, 1e-4);
+    AssertVectorEquals(Vector3(1, 1, 1), T2.Scale, 1e-4);
+
+    AssertTrue(Manipulate.ResetSelectedTransform(true, false, false));
+    AssertVectorEquals(TVector3.Zero, T1.Translation, 1e-4);
+    AssertVectorEquals(TVector3.Zero, T2.Translation, 1e-4);
+    AssertVectorEquals(TVector3.Zero, T3.Translation, 1e-4);
+    AssertVectorEquals(TVector3.Zero, T4.Translation, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

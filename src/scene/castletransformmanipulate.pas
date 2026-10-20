@@ -509,6 +509,34 @@ type
     function ArrangeSelectedInCircle(const Radius: Single;
       const TotalAngleDeg: Single = 360.0;
       const OrientToCenter: Boolean = true): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) into
+      a 2D (XZ) or 3D (XYZ) grid without duplicating them.
+      - When @code(ColumnsX <= 0), automatically uses @code(Ceil(Sqrt(Count))).
+      - When @code(RowsZ <= 0), automatically uses @code(Ceil(Count / ColumnsX)).
+      - When any component of @code(Spacing) is @code(<= 0), automatically computes
+        that axis spacing as @code(1.25 * MaxBoundingBoxExtent) across the selection
+        (or @code(2.0) when bounding boxes are empty).
+      - When @code(CenterGrid) is @true, centers the grid around @link(SelectionWorkingCenter);
+        otherwise starts the grid at @code(Selected[0])'s world origin.
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInGrid(const ColumnsX, RowsZ: Integer;
+      const Spacing: TVector3; const CenterGrid: Boolean = true): Boolean;
+
+    { Push or pull the world-space positions of all top-level selected transforms
+      (@code(SelectedCount >= 2)) away from or toward the active selection pivot
+      (@link(SelectionWorkingCenter) when @link(PivotMode) is @link(pmSelectionCenter),
+      or @code(Selected[0]) when @link(pmPrimarySelected)) by @code(Factor), without
+      modifying any transform's @code(Scale) or @code(Rotation).
+      Returns @true if at least one selected transform was modified. }
+    function ScaleSelectedPositionsFromPivot(const Factor: TVector3): Boolean;
+
+    { Reset local @code(Translation) to @code((0, 0, 0)), @code(Rotation) to
+      @code((0, 1, 0, 0)), and/or @code(Scale) to @code((1, 1, 1)) on all selected
+      transforms.
+      Returns @true if at least one selected transform was modified. }
+    function ResetSelectedTransform(
+      const ResetTrans, ResetRot, ResetScale: Boolean): Boolean;
   end;
 
 var
@@ -3220,6 +3248,205 @@ begin
           Result := true;
         end;
       end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInGrid(
+  const ColumnsX, RowsZ: Integer; const Spacing: TVector3;
+  const CenterGrid: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, A, Count, ColsX, EffRowsZ, LayerSize, LayersY, UsedCols, UsedRows: Integer;
+  LayerIdx, Rem, RowZ, ColX: Integer;
+  T: TCastleTransform;
+  BBox: TBox3D;
+  MaxExtent, EffSpacing, GridSpan, OriginPos, CurPos, NewPos: TVector3;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  if ColumnsX > 0 then
+    ColsX := ColumnsX
+  else
+    ColsX := Max(1, Ceil(Sqrt(Count)));
+
+  if RowsZ > 0 then
+    EffRowsZ := RowsZ
+  else
+    EffRowsZ := Max(1, Ceil(Count / ColsX));
+
+  LayerSize := Max(1, ColsX * EffRowsZ);
+  LayersY := Max(1, Ceil(Count / LayerSize));
+
+  MaxExtent := TVector3.Zero;
+  for I := 0 to Count - 1 do
+  begin
+    if Items[I].HasWorldTransform then
+      BBox := Items[I].WorldBoundingBox
+    else
+      BBox := Items[I].BoundingBox;
+    if not BBox.IsEmpty then
+      for A := 0 to 2 do
+        if BBox.Size[A] > MaxExtent[A] then
+          MaxExtent.Data[A] := BBox.Size[A];
+  end;
+
+  for A := 0 to 2 do
+  begin
+    if Spacing[A] > 0 then
+      EffSpacing.Data[A] := Spacing[A]
+    else if MaxExtent[A] > 1e-4 then
+      EffSpacing.Data[A] := MaxExtent[A] * 1.25
+    else
+      EffSpacing.Data[A] := 2.0;
+  end;
+
+  UsedCols := Min(Count, ColsX);
+  UsedRows := Min(EffRowsZ, Max(1, Ceil(Count / ColsX)));
+  GridSpan := Vector3(
+    (UsedCols - 1) * EffSpacing.X,
+    (LayersY - 1) * EffSpacing.Y,
+    (UsedRows - 1) * EffSpacing.Z);
+
+  if CenterGrid then
+    OriginPos := SelectionWorkingCenter - GridSpan * 0.5
+  else
+    OriginPos := GetTransformWorkingPos(Items[0]);
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    LayerIdx := I div LayerSize;
+    Rem := I mod LayerSize;
+    RowZ := Rem div ColsX;
+    ColX := Rem mod ColsX;
+
+    NewPos := OriginPos + Vector3(
+      ColX * EffSpacing.X,
+      LayerIdx * EffSpacing.Y,
+      RowZ * EffSpacing.Z);
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(NewPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, NewPos);
+      Result := true;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ScaleSelectedPositionsFromPivot(
+  const Factor: TVector3): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  PivotPos, CurPos, NewPos: TVector3;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  if FPivotMode = pmPrimarySelected then
+    PivotPos := GetTransformWorkingPos(Items[0])
+  else
+    PivotPos := SelectionWorkingCenter;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+    NewPos := PivotPos + (CurPos - PivotPos) * Factor;
+    if not TVector3.Equals(NewPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, NewPos);
+      Result := true;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ResetSelectedTransform(
+  const ResetTrans, ResetRot, ResetScale: Boolean): Boolean;
+var
+  I: Integer;
+  T: TCastleTransform;
+begin
+  Result := false;
+  if (not ResetTrans) and (not ResetRot) and (not ResetScale) then Exit;
+  if SelectedCount = 0 then Exit;
+
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if T = nil then Continue;
+
+    if ResetTrans and (not TVector3.Equals(T.Translation, TVector3.Zero)) then
+    begin
+      T.Translation := TVector3.Zero;
+      Result := true;
+    end;
+
+    if ResetRot and (not SameValue(T.Rotation.W, 0.0, 1e-5)) then
+    begin
+      T.Rotation := Vector4(0, 1, 0, 0);
+      Result := true;
+    end;
+
+    if ResetScale and (not TVector3.Equals(T.Scale, Vector3(1, 1, 1))) then
+    begin
+      T.Scale := Vector3(1, 1, 1);
+      Result := true;
     end;
   end;
 
