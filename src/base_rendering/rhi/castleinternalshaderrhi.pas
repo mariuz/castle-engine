@@ -272,6 +272,13 @@ const
   { Phase 21.2: Default GPU Compute Gerstner Ocean simulation texture resolution }
   CASTLE_DEFAULT_OCEAN_GRID_SIZE      = 128;
 
+  { Phase 22.1 & 22.2: Default DDGI Octahedral Probe Grid dimensions and max GPU Meshlets }
+  CASTLE_DEFAULT_DDGI_GRID_X          = 8;
+  CASTLE_DEFAULT_DDGI_GRID_Y          = 4;
+  CASTLE_DEFAULT_DDGI_GRID_Z          = 8;
+  CASTLE_DEFAULT_DDGI_OCT_TEXELS      = 8;
+  CASTLE_MAX_MESHLETS                 = 4096;
+
 type
   { HDR Tonemapping Operators (Phase 15.3) }
   TCastleTonemapOperator = (
@@ -480,6 +487,28 @@ type
     OctaveCount: Cardinal;           // 4 bytes (Number of Gerstner wave octaves, default 4)
     FoamThreshold: Single;           // 4 bytes (Jacobian determinant threshold for whitecap crest foam, e.g. 0.65)
     Gravity: Single;                 // 4 bytes (Gravitational acceleration, default 9.81)
+  end; // Total = 48 bytes
+
+  { Phase 22.1: GPU std140/push-constant parameters for Dynamic Diffuse Global Illumination (DDGI) Octahedral Probe Grid (48 bytes) }
+  PCastleDDGIGridParams = ^TCastleDDGIGridParams;
+  TCastleDDGIGridParams = packed record
+    GridOriginAndNormalBias: TVector4;  // 16 bytes (xyz = world-space probe [0,0,0] origin, w = normal bias in meters)
+    GridSpacingAndViewBias: TVector4;   // 16 bytes (xyz = probe world spacing, w = view bias in meters)
+    GridCountX: Cardinal;               // 4 bytes (probe count along X, default 8)
+    GridCountY: Cardinal;               // 4 bytes (probe count along Y, default 4)
+    GridCountZ: Cardinal;               // 4 bytes (probe count along Z, default 8)
+    Hysteresis: Single;                 // 4 bytes (temporal irradiance hysteresis in [0..0.99], default 0.97)
+  end; // Total = 48 bytes
+
+  { Phase 22.2: GPU std430 descriptor for a 64-vertex / 124-triangle Meshlet cluster (48 bytes) }
+  PCastleMeshletDescriptor = ^TCastleMeshletDescriptor;
+  TCastleMeshletDescriptor = packed record
+    BoundingSphere: TVector4;    // 16 bytes (xyz = meshlet sphere center, w = radius)
+    ConeAxisAndCutoff: TVector4; // 16 bytes (xyz = normalized normal cone axis, w = sin(coneHalfAngle) backface cutoff)
+    VertexOffset: Cardinal;      // 4 bytes (base vertex offset)
+    VertexCount: Cardinal;       // 4 bytes (meshlet vertex count <= 64)
+    TriangleOffset: Cardinal;    // 4 bytes (base primitive offset)
+    TriangleCount: Cardinal;     // 4 bytes (meshlet triangle count <= 124)
   end; // Total = 48 bytes
 
   { Generates RHI-compliant GLSL headers, UBO blocks, and varying layouts }
@@ -777,6 +806,40 @@ type
     { Phase 21.3 CPU reference: Evaluates McGuire velocity-line motion blur sample weight with depth ordering. }
     class function EvaluateMotionBlurSampleWeight(
       const ASampleOffsetPixels, ASampleVelocityLengthPixels, ACenterDepth, ASampleDepth, ADepthSoftness: Single): Single; static;
+
+    { Phase 22.1: Generates GLSL 450 functions for Dynamic Diffuse Global Illumination (DDGI)
+      Octahedral Probe Encoding/Decoding and Chebyshev Visibility Trilinear Probe Weighting. }
+    function GenerateDDGIProbeSamplingFunctions: String;
+
+    { Phase 22.1 CPU reference: Encodes a normalized 3D direction into [-1, 1]^2 octahedral coordinates. }
+    class function OctahedralEncodeDir(const ADir: TVector3): TVector2; static;
+
+    { Phase 22.1 CPU reference: Decodes [-1, 1]^2 octahedral coordinates back to a normalized 3D direction. }
+    class function OctahedralDecodeUV(const AOctUV: TVector2): TVector3; static;
+
+    { Phase 22.1 CPU reference: Evaluates DDGI probe weight with wrap cosine and Chebyshev variance visibility. }
+    class function EvaluateDDGIProbeWeight(
+      const AWorldPos, ASurfaceNormal, AProbePos: TVector3;
+      const AProbeMeanDist, AProbeVariance: Single): Single; static;
+
+    { Phase 22.2: Generates a GLSL 450 compute shader for GPU Meshlet / Sub-Mesh Cluster
+      Bounding-Sphere & Normal-Cone Backface Culling. }
+    function GenerateMeshletCullingComputeShader(
+      const AWorkgroupSizeX: Cardinal = 64): String;
+
+    { Phase 22.2 CPU reference: Returns True if the meshlet normal cone is 100% backfacing to ACameraPosition. }
+    class function EvaluateMeshletConeBackfaceCull(
+      const AMeshletCenter, ACameraPosition, AConeAxis: TVector3;
+      const AConeCutoff: Single): Boolean; static;
+
+    { Phase 22.3: Generates GLSL 450 functions for AMD FidelityFX Contrast-Adaptive Sharpening
+      (EvaluateCASFilter5Tap) and Edge-Adaptive Spatial Upscaling. }
+    function GenerateCASSharpeningAndUpscaleFunctions: String;
+
+    { Phase 22.3 CPU reference: Evaluates 5-tap Contrast-Adaptive Sharpening (CAS) without halo ringing. }
+    class function EvaluateCASFilter5Tap(
+      const ACenter, ANorth, ASouth, AEast, AWest: TVector3;
+      const ASharpness: Single): TVector3; static;
 
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
@@ -3893,6 +3956,208 @@ begin
   VelCoverage := EnsureRange(1.0 - Abs(ASampleOffsetPixels) / Max(0.5, ASampleVelocityLengthPixels), 0.0, 1.0);
   DepthWeight := EnsureRange(1.0 - Max(0.0, ASampleDepth - ACenterDepth) * Max(0.0, ADepthSoftness), 0.0, 1.0);
   Result := VelCoverage * DepthWeight;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateDDGIProbeSamplingFunctions: String;
+begin
+  Result :=
+    '// --- Dynamic Diffuse Global Illumination (DDGI) Octahedral Probe Sampling (Phase 22.1) ---' + NL +
+    'vec2 OctahedralSignNotZero(vec2 v) {' + NL +
+    '  return vec2(v.x >= 0.0 ? 1.0 : -1.0, v.y >= 0.0 ? 1.0 : -1.0);' + NL +
+    '}' + NL +
+    NL +
+    'vec2 OctahedralEncodeDir(vec3 dir) {' + NL +
+    '  float l1Norm = max(1e-6, abs(dir.x) + abs(dir.y) + abs(dir.z));' + NL +
+    '  vec2 p = dir.xy / l1Norm;' + NL +
+    '  if (dir.z < 0.0) {' + NL +
+    '    p = (1.0 - abs(p.yx)) * OctahedralSignNotZero(p.xy);' + NL +
+    '  }' + NL +
+    '  return clamp(p, -1.0, 1.0);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 OctahedralDecodeUV(vec2 octUV) {' + NL +
+    '  vec2 p = clamp(octUV, -1.0, 1.0);' + NL +
+    '  vec3 v = vec3(p.xy, 1.0 - abs(p.x) - abs(p.y));' + NL +
+    '  if (v.z < 0.0) {' + NL +
+    '    v.xy = (1.0 - abs(v.yx)) * OctahedralSignNotZero(v.xy);' + NL +
+    '  }' + NL +
+    '  return normalize(v);' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateDDGIProbeWeight(vec3 worldPos, vec3 surfaceNormal, vec3 probePos, float probeMeanDist, float probeVariance) {' + NL +
+    '  vec3 toProbe = probePos - worldPos;' + NL +
+    '  float distToProbe = length(toProbe);' + NL +
+    '  vec3 dirToProbe = toProbe / max(1e-5, distToProbe);' + NL +
+    '  float wrapCos = max(0.0001, ( dot(surfaceNormal, dirToProbe) + 1.0 ) * 0.5);' + NL +
+    '  float weight = wrapCos * wrapCos + 0.02;' + NL +
+    '  if (distToProbe > probeMeanDist) {' + NL +
+    '    float v = max(1e-4, probeVariance);' + NL +
+    '    float diff = distToProbe - probeMeanDist;' + NL +
+    '    float chebyshev = v / (v + diff * diff);' + NL +
+    '    weight *= max(0.0, chebyshev * chebyshev * chebyshev);' + NL +
+    '  }' + NL +
+    '  return max(1e-5, weight);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.OctahedralEncodeDir(const ADir: TVector3): TVector2;
+var
+  D: TVector3;
+  L1, PX, PY, SignX, SignY: Single;
+begin
+  D := ADir.Normalize;
+  L1 := Max(1e-6, Abs(D.X) + Abs(D.Y) + Abs(D.Z));
+  PX := D.X / L1;
+  PY := D.Y / L1;
+  if D.Z < 0.0 then
+  begin
+    if PX >= 0.0 then SignX := 1.0 else SignX := -1.0;
+    if PY >= 0.0 then SignY := 1.0 else SignY := -1.0;
+    Result.X := (1.0 - Abs(PY)) * SignX;
+    Result.Y := (1.0 - Abs(PX)) * SignY;
+  end else
+  begin
+    Result.X := PX;
+    Result.Y := PY;
+  end;
+  Result.X := EnsureRange(Result.X, -1.0, 1.0);
+  Result.Y := EnsureRange(Result.Y, -1.0, 1.0);
+end;
+
+class function TCastleShaderGeneratorRHI.OctahedralDecodeUV(const AOctUV: TVector2): TVector3;
+var
+  PX, PY, VZ, SignX, SignY: Single;
+begin
+  PX := EnsureRange(AOctUV.X, -1.0, 1.0);
+  PY := EnsureRange(AOctUV.Y, -1.0, 1.0);
+  VZ := 1.0 - Abs(PX) - Abs(PY);
+  if VZ < 0.0 then
+  begin
+    if PX >= 0.0 then SignX := 1.0 else SignX := -1.0;
+    if PY >= 0.0 then SignY := 1.0 else SignY := -1.0;
+    Result.X := (1.0 - Abs(PY)) * SignX;
+    Result.Y := (1.0 - Abs(PX)) * SignY;
+    Result.Z := VZ;
+  end else
+    Result := Vector3(PX, PY, VZ);
+  Result := Result.Normalize;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateDDGIProbeWeight(
+  const AWorldPos, ASurfaceNormal, AProbePos: TVector3;
+  const AProbeMeanDist, AProbeVariance: Single): Single;
+var
+  ToProbe, DirToProbe: TVector3;
+  DistToProbe, WrapCos, V, Diff, Chebyshev: Single;
+begin
+  ToProbe := AProbePos - AWorldPos;
+  DistToProbe := ToProbe.Length;
+  DirToProbe := ToProbe / Max(1e-5, DistToProbe);
+  WrapCos := Max(0.0001, (TVector3.DotProduct(ASurfaceNormal.Normalize, DirToProbe) + 1.0) * 0.5);
+  Result := WrapCos * WrapCos + 0.02;
+  if DistToProbe > AProbeMeanDist then
+  begin
+    V := Max(1e-4, AProbeVariance);
+    Diff := DistToProbe - AProbeMeanDist;
+    Chebyshev := V / (V + Diff * Diff);
+    Result := Result * Max(0.0, Chebyshev * Chebyshev * Chebyshev);
+  end;
+  Result := Max(1e-5, Result);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateMeshletCullingComputeShader(
+  const AWorkgroupSizeX: Cardinal): String;
+begin
+  Result :=
+    GenerateVersionAndLayoutMacros +
+    Format('layout(local_size_x = %d, local_size_y = 1, local_size_z = 1) in;', [
+      Max(Cardinal(1), AWorkgroupSizeX)
+    ]) + NL +
+    NL +
+    'struct CastleMeshletDescriptor {' + NL +
+    '  vec4 BoundingSphere;' + NL +
+    '  vec4 ConeAxisAndCutoff;' + NL +
+    '  uint VertexOffset;' + NL +
+    '  uint VertexCount;' + NL +
+    '  uint TriangleOffset;' + NL +
+    '  uint TriangleCount;' + NL +
+    '};' + NL +
+    NL +
+    'CASTLE_SSBO(0, 0) readonly buffer CastleMeshletBuffer {' + NL +
+    '  CastleMeshletDescriptor u_Meshlets[];' + NL +
+    '};' + NL +
+    NL +
+    'CASTLE_SSBO(0, 1) writeonly buffer CastleVisibleMeshletIndices {' + NL +
+    '  uint u_VisibleMeshletIndices[];' + NL +
+    '};' + NL +
+    NL +
+    'CASTLE_SSBO(0, 2) buffer CastleVisibleMeshletCounter {' + NL +
+    '  uint u_VisibleMeshletCount;' + NL +
+    '};' + NL +
+    NL +
+    'CASTLE_PUSH_CONSTANT uniform CastleMeshletCullPushConstants {' + NL +
+    '  vec4 u_CameraPosAndMaxDist;' + NL +
+    '  uint u_MeshletCount;' + NL +
+    '} castle_MeshletPC;' + NL +
+    NL +
+    'bool EvaluateMeshletConeBackfaceCull(vec3 meshletCenter, vec3 cameraPos, vec3 coneAxis, float coneCutoff) {' + NL +
+    '  vec3 viewRay = normalize(meshletCenter - cameraPos);' + NL +
+    '  return dot(viewRay, normalize(coneAxis)) >= coneCutoff;' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  uint idx = gl_GlobalInvocationID.x;' + NL +
+    '  if (idx >= castle_MeshletPC.u_MeshletCount) return;' + NL +
+    '  CastleMeshletDescriptor m = u_Meshlets[idx];' + NL +
+    '  float dist = distance(m.BoundingSphere.xyz, castle_MeshletPC.u_CameraPosAndMaxDist.xyz);' + NL +
+    '  if (dist - m.BoundingSphere.w > castle_MeshletPC.u_CameraPosAndMaxDist.w) return;' + NL +
+    '  if (EvaluateMeshletConeBackfaceCull(m.BoundingSphere.xyz, castle_MeshletPC.u_CameraPosAndMaxDist.xyz,' + NL +
+    '      m.ConeAxisAndCutoff.xyz, m.ConeAxisAndCutoff.w)) return;' + NL +
+    '  uint outSlot = atomicAdd(u_VisibleMeshletCount, 1u);' + NL +
+    '  u_VisibleMeshletIndices[outSlot] = idx;' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateMeshletConeBackfaceCull(
+  const AMeshletCenter, ACameraPosition, AConeAxis: TVector3;
+  const AConeCutoff: Single): Boolean;
+var
+  ViewRay: TVector3;
+begin
+  ViewRay := (AMeshletCenter - ACameraPosition).Normalize;
+  Result := TVector3.DotProduct(ViewRay, AConeAxis.Normalize) >= AConeCutoff;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateCASSharpeningAndUpscaleFunctions: String;
+begin
+  Result :=
+    '// --- AMD FidelityFX Contrast-Adaptive Sharpening (CAS) & Edge-Adaptive Upscaling (Phase 22.3) ---' + NL +
+    'vec3 EvaluateCASFilter5Tap(vec3 center, vec3 north, vec3 south, vec3 east, vec3 west, float sharpness) {' + NL +
+    '  vec3 minRGB = min(center, min(min(north, south), min(east, west)));' + NL +
+    '  vec3 maxRGB = max(center, max(max(north, south), max(east, west)));' + NL +
+    '  float amp = sqrt(clamp(min(minRGB.g, 1.0 - maxRGB.g) / max(maxRGB.g, 1e-4), 0.0, 1.0));' + NL +
+    '  float peak = mix(-0.125, -0.2, clamp(sharpness, 0.0, 1.0));' + NL +
+    '  float w = amp * peak;' + NL +
+    '  return clamp((center + (north + south + east + west) * w) / max(1.0 + 4.0 * w, 1e-4), 0.0, 1.0);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateCASFilter5Tap(
+  const ACenter, ANorth, ASouth, AEast, AWest: TVector3;
+  const ASharpness: Single): TVector3;
+var
+  MinG, MaxG, Amp, Peak, W, InvDenom: Single;
+begin
+  MinG := Min(ACenter.Y, Min(Min(ANorth.Y, ASouth.Y), Min(AEast.Y, AWest.Y)));
+  MaxG := Max(ACenter.Y, Max(Max(ANorth.Y, ASouth.Y), Max(AEast.Y, AWest.Y)));
+  Amp := Sqrt(EnsureRange(Min(MinG, 1.0 - MaxG) / Max(MaxG, 1e-4), 0.0, 1.0));
+  Peak := -0.125 + (-0.2 - (-0.125)) * EnsureRange(ASharpness, 0.0, 1.0);
+  W := Amp * Peak;
+  InvDenom := 1.0 / Max(1.0 + 4.0 * W, 1e-4);
+  Result := Vector3(
+    EnsureRange((ACenter.X + (ANorth.X + ASouth.X + AEast.X + AWest.X) * W) * InvDenom, 0.0, 1.0),
+    EnsureRange((ACenter.Y + (ANorth.Y + ASouth.Y + AEast.Y + AWest.Y) * W) * InvDenom, 0.0, 1.0),
+    EnsureRange((ACenter.Z + (ANorth.Z + ASouth.Z + AEast.Z + AWest.Z) * W) * InvDenom, 0.0, 1.0));
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

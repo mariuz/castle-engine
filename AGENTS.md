@@ -77,9 +77,9 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–20**: **COMPLETED** (100%).
-- **Phase 21 (Cloth Sheen & Iridescence Thin-Film PBR, Compute FFT / Gerstner Ocean Water Simulation & Screen-Space Motion Blur / Bokeh Depth of Field)**: **COMPLETED** (100%, 93 unit tests passing):
-  - [x] **21.1. Velvet/Cloth Estevez-Kulla Sheen & Thin-Film Iridescence PBR (`GenerateClothSheenAndIridescencePBRFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestClothSheenAndIridescencePBRRHI`).
-  - [x] **21.2. GPU Compute Gerstner Wave Ocean Simulation & Foam (`TCastleVulkanOceanSimulator` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestComputeGerstnerOceanSimulationAndFoamRHI`).
-  - [x] **21.3. Per-Pixel Velocity Motion Blur & Circle-of-Confusion Bokeh Depth of Field (`GenerateMotionBlurAndBokehDoFFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestMotionBlurAndBokehDepthOfFieldPostProcessRHI`).
-- **Phase 22**: Planned (Diffuse Global Illumination Irradiance Probes (DDGI Octahedral Atlas), GPU Meshlet / Cluster Culling & CAS Spatial Upscaling + Sharpening).
+- **Phases 1–21**: **COMPLETED** (100%).
+- **Phase 22 (Diffuse Global Illumination Irradiance Probes (DDGI Octahedral Atlas), GPU Meshlet / Cluster Culling & CAS Spatial Upscaling + Sharpening)**: **COMPLETED** (100%, 96 unit tests passing):
+  - [x] **22.1. Dynamic Diffuse Global Illumination (DDGI) Octahedral Probe Grid (`TCastleVulkanDDGIGrid` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestDDGIOctahedralProbeGridRHI`).
+  - [x] **22.2. GPU Meshlet / Sub-Mesh Cluster Cone & Frustum Culling (`TCastleVulkanMeshletCuller` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestGPUMeshletConeAndSphereCullingRHI`).
+  - [x] **22.3. Contrast-Adaptive Sharpening (RCAS/CAS) & Edge-Adaptive Spatial Upscaling (`GenerateCASSharpeningAndUpscaleFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestContrastAdaptiveSharpeningCASRHI`).
+- **Phase 23**: Planned (Ray-Traced / Hardware Ray Query Shadows & Reflections (`VK_KHR_ray_query`), Virtual Shadow Maps (VSM Clipmap Pages) & Screen-Space Subsurface Scattering Diffusion).

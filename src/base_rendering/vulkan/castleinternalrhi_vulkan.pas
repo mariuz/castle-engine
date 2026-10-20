@@ -1920,6 +1920,99 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Dynamic Diffuse Global Illumination (DDGI) Octahedral Probe Grid (22.1)    }
+  { -------------------------------------------------------------------------- }
+
+  { Manages a 3D world-space irradiance probe grid encoded in 2D octahedral
+    irradiance (pfRGBA16_Float) and distance/variance (pfRG16_Float) atlases. }
+  TCastleVulkanDDGIGrid = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FIrradianceAtlasTexture: TVulkanRHITexture;
+    FVisibilityAtlasTexture: TVulkanRHITexture;
+    FGridOrigin: TVector3;
+    FGridSpacing: TVector3;
+    FGridCountX: Cardinal;
+    FGridCountY: Cardinal;
+    FGridCountZ: Cardinal;
+    FNormalBias: Single;
+    FViewBias: Single;
+    FHysteresis: Single;
+    FUpdateCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Allocates or resizes the 2D octahedral irradiance and visibility probe atlases. }
+    procedure EnsureProbeAtlases;
+
+    { Returns the world-space position of probe (AProbeX, AProbeY, AProbeZ). }
+    function GetProbeWorldPosition(const AProbeX, AProbeY, AProbeZ: Cardinal): TVector3;
+
+    { Dispatches the DDGI probe irradiance & visibility atlas update compute pass. }
+    procedure DispatchDDGIUpdate(
+      const ACommandList: TVulkanRHICommandList;
+      const APipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property IrradianceAtlasTexture: TVulkanRHITexture read FIrradianceAtlasTexture;
+    property VisibilityAtlasTexture: TVulkanRHITexture read FVisibilityAtlasTexture;
+    property GridOrigin: TVector3 read FGridOrigin write FGridOrigin;
+    property GridSpacing: TVector3 read FGridSpacing write FGridSpacing;
+    property GridCountX: Cardinal read FGridCountX write FGridCountX;
+    property GridCountY: Cardinal read FGridCountY write FGridCountY;
+    property GridCountZ: Cardinal read FGridCountZ write FGridCountZ;
+    property NormalBias: Single read FNormalBias write FNormalBias;
+    property ViewBias: Single read FViewBias write FViewBias;
+    property Hysteresis: Single read FHysteresis write FHysteresis;
+    property UpdateCount: Cardinal read FUpdateCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
+  { GPU Meshlet / Sub-Mesh Cluster Cone & Frustum Culling (Phase 22.2)         }
+  { -------------------------------------------------------------------------- }
+
+  { Manages 64-vertex / 124-triangle meshlet cluster descriptors, normal-cone
+    backface culling, and GPU visible meshlet compaction. }
+  TCastleVulkanMeshletCuller = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FMeshlets: array[0 .. CASTLE_MAX_MESHLETS - 1] of TCastleMeshletDescriptor;
+    FMeshletCount: Cardinal;
+    FMeshletBuffer: TVulkanRHIBuffer;
+    FVisibleMeshletIndicesBuffer: TVulkanRHIBuffer;
+    FVisibleMeshletCountBuffer: TVulkanRHIBuffer;
+    FDispatchCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    procedure ClearMeshlets;
+    function AddMeshlet(const ASphereCenter: TVector3; const ASphereRadius: Single;
+      const AConeAxis: TVector3; const AConeCutoff: Single;
+      const AVertexOffset, AVertexCount, ATriangleOffset, ATriangleCount: Cardinal): Integer;
+    procedure UploadMeshlets;
+
+    { Evaluates on CPU how many registered meshlets pass distance + normal-cone backface culling. }
+    function EvaluateVisibleMeshletsCPU(const ACameraPosition: TVector3;
+      const AMaxDrawDistance: Single): Cardinal;
+
+    { Dispatches the GPU compute meshlet culling pass. }
+    procedure DispatchMeshletCulling(
+      const ACommandList: TVulkanRHICommandList;
+      const ACameraPosition: TVector3;
+      const AMaxDrawDistance: Single;
+      const APipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property MeshletCount: Cardinal read FMeshletCount;
+    property MeshletBuffer: TVulkanRHIBuffer read FMeshletBuffer;
+    property VisibleMeshletIndicesBuffer: TVulkanRHIBuffer read FVisibleMeshletIndicesBuffer;
+    property VisibleMeshletCountBuffer: TVulkanRHIBuffer read FVisibleMeshletCountBuffer;
+    property DispatchCount: Cardinal read FDispatchCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -2009,6 +2102,8 @@ type
     FTerrainCDLOD: TCastleVulkanTerrainCDLOD;
     FAtmosphereRenderer: TCastleVulkanAtmosphereRenderer;
     FOceanSimulator: TCastleVulkanOceanSimulator;
+    FDDGIGrid: TCastleVulkanDDGIGrid;
+    FMeshletCuller: TCastleVulkanMeshletCuller;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -2103,6 +2198,8 @@ type
     function GetTerrainCDLOD: TCastleVulkanTerrainCDLOD;
     function GetAtmosphereRenderer: TCastleVulkanAtmosphereRenderer;
     function GetOceanSimulator: TCastleVulkanOceanSimulator;
+    function GetDDGIGrid: TCastleVulkanDDGIGrid;
+    function GetMeshletCuller: TCastleVulkanMeshletCuller;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -2302,6 +2399,8 @@ type
     property TerrainCDLOD: TCastleVulkanTerrainCDLOD read GetTerrainCDLOD;
     property AtmosphereRenderer: TCastleVulkanAtmosphereRenderer read GetAtmosphereRenderer;
     property OceanSimulator: TCastleVulkanOceanSimulator read GetOceanSimulator;
+    property DDGIGrid: TCastleVulkanDDGIGrid read GetDDGIGrid;
+    property MeshletCuller: TCastleVulkanMeshletCuller read GetMeshletCuller;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -12112,6 +12211,246 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanDDGIGrid (Phase 22.1)                                           }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanDDGIGrid.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FGridOrigin := Vector3(-16.0, 0.0, -16.0);
+  FGridSpacing := Vector3(4.0, 4.0, 4.0);
+  FGridCountX := CASTLE_DEFAULT_DDGI_GRID_X;
+  FGridCountY := CASTLE_DEFAULT_DDGI_GRID_Y;
+  FGridCountZ := CASTLE_DEFAULT_DDGI_GRID_Z;
+  FNormalBias := 0.25;
+  FViewBias := 0.15;
+  FHysteresis := 0.97;
+  FUpdateCount := 0;
+end;
+
+destructor TCastleVulkanDDGIGrid.Destroy;
+begin
+  FreeAndNil(FVisibilityAtlasTexture);
+  FreeAndNil(FIrradianceAtlasTexture);
+  inherited;
+end;
+
+procedure TCastleVulkanDDGIGrid.EnsureProbeAtlases;
+var
+  AtlasW, AtlasH: Cardinal;
+  TexDesc: TRHITextureDesc;
+begin
+  { Each probe occupies (CASTLE_DEFAULT_DDGI_OCT_TEXELS + 2)x(CASTLE_DEFAULT_DDGI_OCT_TEXELS + 2) texels with 1-texel gutter }
+  AtlasW := Max(Cardinal(1), FGridCountX * FGridCountY) * (CASTLE_DEFAULT_DDGI_OCT_TEXELS + 2);
+  AtlasH := Max(Cardinal(1), FGridCountZ) * (CASTLE_DEFAULT_DDGI_OCT_TEXELS + 2);
+  if (FIrradianceAtlasTexture <> nil) and
+     (FVisibilityAtlasTexture <> nil) and
+     (FIrradianceAtlasTexture.Desc.Width = AtlasW) and
+     (FIrradianceAtlasTexture.Desc.Height = AtlasH) then
+    Exit;
+
+  FreeAndNil(FVisibilityAtlasTexture);
+  FreeAndNil(FIrradianceAtlasTexture);
+
+  TexDesc := TRHITextureDesc.Create2D(AtlasW, AtlasH, pfRGBA16_Float, [tuSampled, tuStorage], 1);
+  TexDesc.DebugName := 'DDGIIrradianceOctahedralAtlas';
+  FIrradianceAtlasTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+
+  TexDesc := TRHITextureDesc.Create2D(AtlasW, AtlasH, pfRG16_Float, [tuSampled, tuStorage], 1);
+  TexDesc.DebugName := 'DDGIVisibilityOctahedralAtlas';
+  FVisibilityAtlasTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+end;
+
+function TCastleVulkanDDGIGrid.GetProbeWorldPosition(
+  const AProbeX, AProbeY, AProbeZ: Cardinal): TVector3;
+begin
+  Result := Vector3(
+    FGridOrigin.X + Single(AProbeX) * FGridSpacing.X,
+    FGridOrigin.Y + Single(AProbeY) * FGridSpacing.Y,
+    FGridOrigin.Z + Single(AProbeZ) * FGridSpacing.Z);
+end;
+
+procedure TCastleVulkanDDGIGrid.DispatchDDGIUpdate(
+  const ACommandList: TVulkanRHICommandList;
+  const APipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+var
+  Params: TCastleDDGIGridParams;
+  TotalProbes: Cardinal;
+begin
+  EnsureProbeAtlases;
+  if ACommandList = nil then
+    Exit;
+
+  FillChar(Params, SizeOf(Params), 0);
+  Params.GridOriginAndNormalBias := Vector4(FGridOrigin, FNormalBias);
+  Params.GridSpacingAndViewBias := Vector4(FGridSpacing, FViewBias);
+  Params.GridCountX := Max(Cardinal(1), FGridCountX);
+  Params.GridCountY := Max(Cardinal(1), FGridCountY);
+  Params.GridCountZ := Max(Cardinal(1), FGridCountZ);
+  Params.Hysteresis := EnsureRange(FHysteresis, 0.0, 0.99);
+
+  ACommandList.TransitionTexture(FIrradianceAtlasTexture, rsTransferDst);
+  ACommandList.TransitionTexture(FVisibilityAtlasTexture, rsTransferDst);
+  if APipeline <> nil then
+    ACommandList.BindComputePipeline(APipeline);
+  if ADescriptorSet <> nil then
+    ACommandList.BindDescriptorSet(0, ADescriptorSet, []);
+  ACommandList.PushConstants([ssCompute], 0, SizeOf(Params), Params);
+
+  TotalProbes := Max(Cardinal(1), FGridCountX * FGridCountY * FGridCountZ);
+  ACommandList.Dispatch(TotalProbes, 1, 1);
+  ACommandList.TransitionTexture(FIrradianceAtlasTexture, rsShaderRead);
+  ACommandList.TransitionTexture(FVisibilityAtlasTexture, rsShaderRead);
+  Inc(FUpdateCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanMeshletCuller (Phase 22.2)                                      }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanMeshletCuller.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FMeshletCount := 0;
+  FDispatchCount := 0;
+end;
+
+destructor TCastleVulkanMeshletCuller.Destroy;
+begin
+  FreeAndNil(FVisibleMeshletCountBuffer);
+  FreeAndNil(FVisibleMeshletIndicesBuffer);
+  FreeAndNil(FMeshletBuffer);
+  inherited;
+end;
+
+procedure TCastleVulkanMeshletCuller.ClearMeshlets;
+begin
+  FMeshletCount := 0;
+  FillChar(FMeshlets[0], SizeOf(FMeshlets), 0);
+end;
+
+function TCastleVulkanMeshletCuller.AddMeshlet(
+  const ASphereCenter: TVector3; const ASphereRadius: Single;
+  const AConeAxis: TVector3; const AConeCutoff: Single;
+  const AVertexOffset, AVertexCount, ATriangleOffset, ATriangleCount: Cardinal): Integer;
+begin
+  if FMeshletCount >= CASTLE_MAX_MESHLETS then
+    Exit(-1);
+  Result := Integer(FMeshletCount);
+  FMeshlets[Result].BoundingSphere := Vector4(ASphereCenter, Max(0.001, ASphereRadius));
+  FMeshlets[Result].ConeAxisAndCutoff := Vector4(AConeAxis.Normalize, AConeCutoff);
+  FMeshlets[Result].VertexOffset := AVertexOffset;
+  FMeshlets[Result].VertexCount := Min(Cardinal(64), AVertexCount);
+  FMeshlets[Result].TriangleOffset := ATriangleOffset;
+  FMeshlets[Result].TriangleCount := Min(Cardinal(124), ATriangleCount);
+  Inc(FMeshletCount);
+end;
+
+procedure TCastleVulkanMeshletCuller.UploadMeshlets;
+var
+  BufDesc: TRHIBufferDesc;
+  MappedPtr: Pointer;
+begin
+  if FMeshletBuffer = nil then
+  begin
+    BufDesc := TRHIBufferDesc.Create(
+      SizeOf(FMeshlets),
+      [buStorage, buTransferDst],
+      muCpuToGpu,
+      'MeshletDescriptorsBuffer');
+    FMeshletBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+  if FVisibleMeshletIndicesBuffer = nil then
+  begin
+    BufDesc := TRHIBufferDesc.Create(
+      CASTLE_MAX_MESHLETS * SizeOf(Cardinal),
+      [buStorage, buTransferDst],
+      muGpuOnly,
+      'VisibleMeshletIndicesBuffer');
+    FVisibleMeshletIndicesBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+  if FVisibleMeshletCountBuffer = nil then
+  begin
+    BufDesc := TRHIBufferDesc.Create(
+      SizeOf(Cardinal) * 4,
+      [buStorage, buIndirect, buTransferDst],
+      muCpuToGpu,
+      'VisibleMeshletCountBuffer');
+    FVisibleMeshletCountBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+
+  MappedPtr := FMeshletBuffer.Map;
+  if MappedPtr <> nil then
+  begin
+    Move(FMeshlets[0], MappedPtr^, SizeOf(FMeshlets));
+    FMeshletBuffer.Unmap;
+  end;
+end;
+
+function TCastleVulkanMeshletCuller.EvaluateVisibleMeshletsCPU(
+  const ACameraPosition: TVector3; const AMaxDrawDistance: Single): Cardinal;
+var
+  I: Cardinal;
+  Center, Axis: TVector3;
+  Radius, Cutoff, Dist: Single;
+begin
+  Result := 0;
+  if FMeshletCount = 0 then
+    Exit;
+  for I := 0 to FMeshletCount - 1 do
+  begin
+    Center := FMeshlets[I].BoundingSphere.XYZ;
+    Radius := FMeshlets[I].BoundingSphere.W;
+    Axis := FMeshlets[I].ConeAxisAndCutoff.XYZ;
+    Cutoff := FMeshlets[I].ConeAxisAndCutoff.W;
+    Dist := (Center - ACameraPosition).Length;
+    if Dist - Radius > AMaxDrawDistance then
+      Continue;
+    if TCastleShaderGeneratorRHI.EvaluateMeshletConeBackfaceCull(Center, ACameraPosition, Axis, Cutoff) then
+      Continue;
+    Inc(Result);
+  end;
+end;
+
+procedure TCastleVulkanMeshletCuller.DispatchMeshletCulling(
+  const ACommandList: TVulkanRHICommandList;
+  const ACameraPosition: TVector3;
+  const AMaxDrawDistance: Single;
+  const APipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+type
+  TMeshletCullPC = packed record
+    CameraPosAndMaxDist: TVector4;
+    MeshletCount: Cardinal;
+    Pad0, Pad1, Pad2: Cardinal;
+  end;
+var
+  PC: TMeshletCullPC;
+  GroupsX: Cardinal;
+begin
+  UploadMeshlets;
+  if ACommandList = nil then
+    Exit;
+
+  FillChar(PC, SizeOf(PC), 0);
+  PC.CameraPosAndMaxDist := Vector4(ACameraPosition, AMaxDrawDistance);
+  PC.MeshletCount := FMeshletCount;
+
+  if APipeline <> nil then
+    ACommandList.BindComputePipeline(APipeline);
+  if ADescriptorSet <> nil then
+    ACommandList.BindDescriptorSet(0, ADescriptorSet, []);
+  ACommandList.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+
+  GroupsX := (Max(Cardinal(1), FMeshletCount) + 63) div 64;
+  ACommandList.Dispatch(GroupsX, 1, 1);
+  Inc(FDispatchCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -12633,12 +12972,28 @@ begin
   Result := FOceanSimulator;
 end;
 
+function TVulkanRHIDevice.GetDDGIGrid: TCastleVulkanDDGIGrid;
+begin
+  if FDDGIGrid = nil then
+    FDDGIGrid := TCastleVulkanDDGIGrid.Create(Self);
+  Result := FDDGIGrid;
+end;
+
+function TVulkanRHIDevice.GetMeshletCuller: TCastleVulkanMeshletCuller;
+begin
+  if FMeshletCuller = nil then
+    FMeshletCuller := TCastleVulkanMeshletCuller.Create(Self);
+  Result := FMeshletCuller;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FMeshletCuller);
+  FreeAndNil(FDDGIGrid);
   FreeAndNil(FOceanSimulator);
   FreeAndNil(FAtmosphereRenderer);
   FreeAndNil(FTerrainCDLOD);

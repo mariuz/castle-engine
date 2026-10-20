@@ -132,6 +132,9 @@ type
     procedure TestClothSheenAndIridescencePBRRHI;
     procedure TestComputeGerstnerOceanSimulationAndFoamRHI;
     procedure TestMotionBlurAndBokehDepthOfFieldPostProcessRHI;
+    procedure TestDDGIOctahedralProbeGridRHI;
+    procedure TestGPUMeshletConeAndSphereCullingRHI;
+    procedure TestContrastAdaptiveSharpeningCASRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -7516,6 +7519,154 @@ begin
       WeightCovered > 0.5);
     AssertSameValue(0.0, WeightOutsideVelocity, 1e-5);
     AssertSameValue(0.0, WeightOccludedBg, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestDDGIOctahedralProbeGridRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Gen: TCastleShaderGeneratorRHI;
+  DDGIGLSL: String;
+  OrigDir, DecodedDir, ProbePos: TVector3;
+  OctUV: TVector2;
+  WeightUnoccluded, WeightOccluded: Single;
+begin
+  AssertEquals('TCastleDDGIGridParams must be 48 bytes',
+    48, SizeOf(TCastleDDGIGridParams));
+
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6666)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    { 1. Verify DDGI GLSL 450 functions }
+    DDGIGLSL := Gen.GenerateDDGIProbeSamplingFunctions;
+    AssertTrue('DDGI GLSL must include OctahedralEncodeDir and OctahedralDecodeUV',
+      (Pos('vec2 OctahedralEncodeDir(vec3 dir)', DDGIGLSL) > 0) and
+      (Pos('vec3 OctahedralDecodeUV(vec2 octUV)', DDGIGLSL) > 0));
+    AssertTrue('DDGI GLSL must include EvaluateDDGIProbeWeight',
+      Pos('float EvaluateDDGIProbeWeight(vec3 worldPos, vec3 surfaceNormal, vec3 probePos,', DDGIGLSL) > 0);
+
+    { 2. Verify Octahedral encode/decode bijective roundtrip in both +Z and -Z hemispheres }
+    OrigDir := Vector3(0.35, -0.62, -0.701).Normalize;
+    OctUV := TCastleShaderGeneratorRHI.OctahedralEncodeDir(OrigDir);
+    DecodedDir := TCastleShaderGeneratorRHI.OctahedralDecodeUV(OctUV);
+    AssertSameValue(OrigDir.X, DecodedDir.X, 1e-4);
+    AssertSameValue(OrigDir.Y, DecodedDir.Y, 1e-4);
+    AssertSameValue(OrigDir.Z, DecodedDir.Z, 1e-4);
+
+    { 3. Verify Chebyshev visibility probe weight suppresses occluded probes behind walls }
+    WeightUnoccluded := TCastleShaderGeneratorRHI.EvaluateDDGIProbeWeight(
+      Vector3(0.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0), Vector3(0.0, 3.0, 0.0), 5.0, 0.25);
+    WeightOccluded := TCastleShaderGeneratorRHI.EvaluateDDGIProbeWeight(
+      Vector3(0.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0), Vector3(0.0, 3.0, 0.0), 1.0, 0.05);
+    AssertTrue('Probe occluded by wall (meanDist=1.0 < dist=3.0) must have strongly reduced Chebyshev weight',
+      WeightUnoccluded > WeightOccluded * 20.0);
+
+    { 4. Verify DDGI probe world coordinate calculation & atlas dispatch }
+    ProbePos := Device.DDGIGrid.GetProbeWorldPosition(2, 1, 3);
+    AssertSameValue(-16.0 + 2 * 4.0, ProbePos.X, 1e-4);
+    AssertSameValue(0.0 + 1 * 4.0, ProbePos.Y, 1e-4);
+    AssertSameValue(-16.0 + 3 * 4.0, ProbePos.Z, 1e-4);
+
+    CmdList.BeginRecording;
+    Device.DDGIGrid.DispatchDDGIUpdate(CmdList, nil, nil);
+    CmdList.EndRecording;
+
+    AssertEquals(Cardinal(1), Device.DDGIGrid.UpdateCount);
+    AssertTrue('DDGI Irradiance (320x80 pfRGBA16_Float) and Visibility (pfRG16_Float) atlases must be allocated',
+      (Device.DDGIGrid.IrradianceAtlasTexture <> nil) and
+      (Device.DDGIGrid.VisibilityAtlasTexture <> nil) and
+      (Device.DDGIGrid.IrradianceAtlasTexture.Desc.Width = 320) and
+      (Device.DDGIGrid.IrradianceAtlasTexture.Desc.Height = 80) and
+      (Device.DDGIGrid.VisibilityAtlasTexture.Desc.Format = pfRG16_Float));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGPUMeshletConeAndSphereCullingRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Gen: TCastleShaderGeneratorRHI;
+  MeshletGLSL: String;
+  VisibleCount: Cardinal;
+begin
+  AssertEquals('TCastleMeshletDescriptor must be 48 bytes',
+    48, SizeOf(TCastleMeshletDescriptor));
+
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6666)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    { 1. Verify Meshlet Culling Compute Shader GLSL 450 }
+    MeshletGLSL := Gen.GenerateMeshletCullingComputeShader(64);
+    AssertTrue('Meshlet compute shader must include CastleMeshletDescriptor and EvaluateMeshletConeBackfaceCull',
+      (Pos('struct CastleMeshletDescriptor {', MeshletGLSL) > 0) and
+      (Pos('bool EvaluateMeshletConeBackfaceCull(vec3 meshletCenter, vec3 cameraPos, vec3 coneAxis, float coneCutoff)', MeshletGLSL) > 0));
+
+    { 2. Register 3 meshlets:
+         #0: Front-facing cone (axis = (0,0,1) toward camera at (0,0,10)), within draw distance -> VISIBLE
+         #1: Back-facing cone (axis = (0,0,-1) away from camera at (0,0,10), dot(viewRay=(0,0,-1), axis=(0,0,-1)) = 1.0 >= cutoff 0.5) -> CULLED
+         #2: Beyond max draw distance (z = -500) -> CULLED }
+    Device.MeshletCuller.ClearMeshlets;
+    Device.MeshletCuller.AddMeshlet(Vector3(0.0, 0.0, 0.0), 2.0, Vector3(0.0, 0.0, 1.0), 0.5, 0, 64, 0, 124);
+    Device.MeshletCuller.AddMeshlet(Vector3(0.0, 0.0, 0.0), 2.0, Vector3(0.0, 0.0, -1.0), 0.5, 64, 64, 124, 124);
+    Device.MeshletCuller.AddMeshlet(Vector3(0.0, 0.0, -500.0), 2.0, Vector3(0.0, 0.0, 1.0), 0.5, 128, 64, 248, 124);
+
+    AssertEquals(Cardinal(3), Device.MeshletCuller.MeshletCount);
+    VisibleCount := Device.MeshletCuller.EvaluateVisibleMeshletsCPU(Vector3(0.0, 0.0, 10.0), 100.0);
+    AssertEquals('Only front-facing in-range meshlet #0 must survive culling', Cardinal(1), VisibleCount);
+
+    { 3. Verify GPU meshlet SSBO upload and compute dispatch }
+    CmdList.BeginRecording;
+    Device.MeshletCuller.DispatchMeshletCulling(CmdList, Vector3(0.0, 0.0, 10.0), 100.0, nil, nil);
+    CmdList.EndRecording;
+
+    AssertEquals(Cardinal(1), Device.MeshletCuller.DispatchCount);
+    AssertTrue('Meshlet SSBOs must be allocated',
+      (Device.MeshletCuller.MeshletBuffer <> nil) and
+      (Device.MeshletCuller.VisibleMeshletIndicesBuffer <> nil) and
+      (Device.MeshletCuller.VisibleMeshletCountBuffer <> nil));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestContrastAdaptiveSharpeningCASRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  CASGLSL: String;
+  Center, Neighbor, SharpenedMid, SaturatedWhite, SaturatedNeighbour, SharpenedSaturated: TVector3;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify CAS GLSL 450 function }
+    CASGLSL := Gen.GenerateCASSharpeningAndUpscaleFunctions;
+    AssertTrue('CAS GLSL must include EvaluateCASFilter5Tap',
+      Pos('vec3 EvaluateCASFilter5Tap(vec3 center, vec3 north, vec3 south, vec3 east, vec3 west, float sharpness)', CASGLSL) > 0);
+
+    { 2. Verify moderate contrast peak is accentuated by 5-tap CAS filter }
+    Center := Vector3(0.6, 0.6, 0.6);
+    Neighbor := Vector3(0.4, 0.4, 0.4);
+    SharpenedMid := TCastleShaderGeneratorRHI.EvaluateCASFilter5Tap(
+      Center, Neighbor, Neighbor, Neighbor, Neighbor, 1.0);
+    AssertTrue('CAS 5-tap filter must boost brighter center pixel relative to darker 4-neighbors',
+      SharpenedMid.Y > Center.Y);
+
+    { 3. Verify extreme contrast [0..1] suppresses negative lobe to zero (no halo/ringing clamping artifact) }
+    SaturatedWhite := Vector3(1.0, 1.0, 1.0);
+    SaturatedNeighbour := Vector3(0.0, 0.0, 0.0);
+    SharpenedSaturated := TCastleShaderGeneratorRHI.EvaluateCASFilter5Tap(
+      SaturatedWhite, SaturatedNeighbour, SaturatedNeighbour, SaturatedNeighbour, SaturatedNeighbour, 1.0);
+    AssertSameValue(1.0, SharpenedSaturated.Y, 1e-5);
   finally
     FreeAndNil(Gen);
   end;
