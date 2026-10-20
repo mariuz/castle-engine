@@ -42,7 +42,7 @@ function TX3DGLSLProgram.SetupUniforms(var BoundTextureUnits: Cardinal): boolean
     Returns false if setting this texture node resulted in GLSL error
     (invalid name or type in shader code)
     and it should be removed from UniformsTextures. }
-  function BindTextureUniform(TextureField: TX3DField): boolean;
+  function BindTextureUniform(TextureField: TX3DField; UniformName: String): boolean;
 
     { If TextureNode <> @nil and is a texture node, prepare it.
       Returns bound texture number (or -1 if failed).
@@ -74,12 +74,14 @@ function TX3DGLSLProgram.SetupUniforms(var BoundTextureUnits: Cardinal): boolean
     AUniformMissing: TUniformMissing;
   begin
     AUniformMissing := UniformMissingFromNode(TextureField.ParentNode as TX3DNode);
+    if UniformName = '' then
+      UniformName := TextureField.X3DName;
 
     if TextureField is TSFNode then
     begin
       BoundValue := BindSingleTexture(TSFNode(TextureField).Value);
       if BoundValue <> -1 then
-        SetUniform(TextureField.X3DName, BoundValue, AUniformMissing);
+        SetUniform(UniformName, BoundValue, AUniformMissing);
     end else
     begin
       Assert(TextureField is TMFNode);
@@ -98,7 +100,7 @@ function TX3DGLSLProgram.SetupUniforms(var BoundTextureUnits: Cardinal): boolean
           if BoundValue = -1 then BoundValue := 0;
           UniformValue[J] := BoundValue;
         end;
-        SetUniform(TextureField.X3DName, UniformValue, AUniformMissing);
+        SetUniform(UniformName, UniformValue, AUniformMissing);
       finally FreeAndNil(UniformValue) end;
     end;
     Result := true;
@@ -111,10 +113,13 @@ begin
   I := 0;
   while I < UniformsTextures.Count do
   begin
-    if BindTextureUniform(UniformsTextures[I]) then
+    if BindTextureUniform(UniformsTextures[I], UniformsTexturesNames[I]) then
       Inc(I)
     else
+    begin
       UniformsTextures.Delete(I);
+      UniformsTexturesNames.Delete(I);
+    end;
   end;
 end;
 

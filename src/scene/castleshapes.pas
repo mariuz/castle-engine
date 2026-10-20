@@ -2855,6 +2855,8 @@ function TShape.EnumerateTextures(const Enumerate: TEnumerateShapeTexturesFuncti
     if Result <> nil then Exit;
     Result := HandleSingleTextureNode(EnvLight.FdSpecularTexture.Value);
     if Result <> nil then Exit;
+    Result := HandleSingleTextureNode(EnvLight.FdIrradianceVolume.Value);
+    if Result <> nil then Exit;
   end;
 
   { Scan IDecls for SFNode and MFNode fields, handling texture nodes inside. }

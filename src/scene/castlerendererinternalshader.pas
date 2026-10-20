@@ -20,7 +20,7 @@ unit CastleRendererInternalShader;
 
 interface
 
-uses Generics.Collections, Math,
+uses Classes, Generics.Collections, Math,
   CastleVectors, CastleGLShaders, CastleColors,
   X3DTime, X3DFields, X3DNodes, CastleUtils, CastleBoxes,
   CastleRendererInternalTextureEnv, CastleStringUtils, CastleRenderOptions,
@@ -143,7 +143,16 @@ type
   protected
     { Nodes that have interface declarations with textures for this shader. }
     UniformsTextures: TX3DFieldList;
+    { Uniform names of UniformsTextures (same count),
+      empty string means to use the field's X3DName. }
+    UniformsTexturesNames: TStringList;
   public
+    { Bind the texture node(s) of this field to a uniform (sampler) of this shader.
+      The uniform name is UniformName, or the field name when it's empty.
+      The textures are bound when the shader program is used
+      (by descendants, like TX3DGLSLProgram). }
+    procedure AddUniformTexture(const Field: TX3DField; const UniformName: String = '');
+
     constructor Create;
     destructor Destroy; override;
 
@@ -918,6 +927,7 @@ begin
   inherited;
   EventsObserved := TX3DEventList.Create(false);
   UniformsTextures := TX3DFieldList.Create(false);
+  UniformsTexturesNames := TStringList.Create;
   FLightUniformsList := TLightUniformsList.Create(true);
 end;
 
@@ -932,8 +942,16 @@ begin
     FreeAndNil(EventsObserved);
   end;
   FreeAndNil(UniformsTextures);
+  FreeAndNil(UniformsTexturesNames);
   FreeAndNil(FLightUniformsList);
   inherited;
+end;
+
+procedure TX3DShaderProgram.AddUniformTexture(const Field: TX3DField;
+  const UniformName: String);
+begin
+  UniformsTextures.Add(Field);
+  UniformsTexturesNames.Add(UniformName);
 end;
 
 procedure TX3DShaderProgram.BindNonTextureUniform(
@@ -1181,7 +1199,7 @@ begin
     if (IDecl.Field <> nil) and
        ((IDecl.Field is TSFNode) or
         (IDecl.Field is TMFNode)) then
-      UniformsTextures.Add(IDecl.Field)
+      AddUniformTexture(IDecl.Field)
     else
       BindNonTextureUniform(IDecl, UniformMissingFromNode(Node), EnableDisable);
   end;

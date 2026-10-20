@@ -336,6 +336,93 @@ var
     end;
   end;
 
+  var
+    { Environment light (probe) with an influence box chosen for this shape,
+      nil if the shape is not inside any such box. }
+    ChosenProbe: PLightInstance;
+
+  { Does the environment light have an influence box (in the light's local
+    space)? }
+  function ProbeHasBox(const EnvLight: TEnvironmentLightNode): Boolean;
+  var
+    S: TVector3;
+  begin
+    S := EnvLight.FdInfluenceSize.Value;
+    Result := (S.X >= 0) and (S.Y >= 0) and (S.Z >= 0);
+  end;
+
+  { The influence box of the environment light, in world space. }
+  function ProbeBoxInWorld(const Light: TLightInstance;
+    const EnvLight: TEnvironmentLightNode): TBox3D;
+  var
+    Box: TBox3D;
+  begin
+    Box := Box3DAroundPoint(EnvLight.FdInfluenceCenter.Value, EnvLight.FdInfluenceSize.Value);
+    if Light.WorldCoordinates then
+      Result := Box.Transform(Light.Transform)
+    else
+      Result := Box.Transform(Shader.SceneTransform * Light.Transform);
+  end;
+
+  { Choose the environment light (probe) for this shape:
+    the one with the smallest influence box containing the center
+    of the shape's bounding box. }
+  procedure ChooseProbe(const Lights: TLightInstancesList; const IsGlobalLight: Boolean;
+    var BestVolume: Single);
+
+    function BoxVolume(const B: TBox3D): Single;
+    var
+      S: TVector3;
+    begin
+      S := B.Size;
+      Result := S.X * S.Y * S.Z;
+    end;
+
+  var
+    I: Integer;
+    Light: PLightInstance;
+    LightOn: Boolean;
+    EnvLight: TEnvironmentLightNode;
+    ShapeBox, Box: TBox3D;
+  begin
+    for I := 0 to Lights.Count - 1 do
+    begin
+      Light := PLightInstance(Lights.Ptr(I));
+      if not (Light^.Node is TEnvironmentLightNode) then
+        Continue;
+      EnvLight := TEnvironmentLightNode(Light^.Node);
+      if not ProbeHasBox(EnvLight) then
+        Continue;
+      LightOn := Light^.Node.FdOn.Value;
+      if Assigned(LightRenderEvent) then
+        LightRenderEvent(Shape, Light^, IsGlobalLight, LightOn);
+      if not LightOn then
+        Continue;
+      ShapeBox := Shader.ShapeBoundingBoxInWorld;
+      if ShapeBox.IsEmpty then
+        Exit;
+      Box := ProbeBoxInWorld(Light^, EnvLight);
+      if Box.Contains(ShapeBox.Center) and
+         ((ChosenProbe = nil) or (BoxVolume(Box) < BestVolume)) then
+      begin
+        ChosenProbe := Light;
+        BestVolume := BoxVolume(Box);
+      end;
+    end;
+  end;
+
+  { Is this environment light used for the shape:
+    the chosen probe, or (when no probe was chosen) a light without a box. }
+  function ProbeUsed(const Light: PLightInstance): Boolean;
+  begin
+    if not (Light^.Node is TEnvironmentLightNode) then
+      Exit(true);
+    if ProbeHasBox(TEnvironmentLightNode(Light^.Node)) then
+      Result := Light = ChosenProbe
+    else
+      Result := ChosenProbe = nil;
+  end;
+
   procedure AddList(const Lights: TLightInstancesList; const IsGlobalLight: Boolean);
   var
     I: Integer;
@@ -350,7 +437,7 @@ var
       if Assigned(LightRenderEvent) then
         LightRenderEvent(Shape, Light^, IsGlobalLight, LightOn);
 
-      if LightOn and InsideLightRadius(Light^) then
+      if LightOn and InsideLightRadius(Light^) and ProbeUsed(Light) then
       begin
         if NeedRenderLight(LightsEnabled, Light) then
           glLightFromX3DLight(LightsEnabled, Light^, RenderingCamera);
@@ -361,8 +448,9 @@ var
     end;
   end;
 
-{$ifndef OpenGLES}
 var
+  BestProbeVolume: Single;
+{$ifndef OpenGLES}
   I: Integer;
 {$endif}
 begin
@@ -370,6 +458,13 @@ begin
 
   LightsEnabled := 0;
   if LightsEnabled >= FMaxLightsPerShape then Exit;
+
+  ChosenProbe := nil;
+  BestProbeVolume := 0;
+  if GlobalLights <> nil then
+    ChooseProbe(GlobalLights, true, BestProbeVolume);
+  if SceneLights <> nil then
+    ChooseProbe(SceneLights, false, BestProbeVolume);
 
   if GlobalLights <> nil then
   begin

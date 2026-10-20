@@ -47,6 +47,10 @@
     SpotCutoff: Single;
     Attenuation: TVector3;
     AmbientColor, Color: TVector3;
+    { Environment light: eye space to the light's local space,
+      the influence box (light's local space). }
+    EyeToLight: TMatrix4;
+    InfluenceMin, InfluenceSize: TVector3;
 
     { Current values provided for the light node's custom fields
       (per-light uniforms of light effects), by field name.
@@ -67,6 +71,8 @@
       var CurrentValue: TVector3; const NewValue: TVector3); overload;
     procedure SetUniform(const NamePattern: String;
       var CurrentValue: TVector4; const NewValue: TVector4); overload;
+    procedure SetUniform(const NamePattern: String;
+      var CurrentValue: TMatrix4; const NewValue: TMatrix4); overload;
   end;
 
   TLightUniformsList = {$ifdef FPC}specialize{$endif} TObjectList<TLightUniforms>;
@@ -83,7 +89,10 @@
     ldHasAmbient,
     ldHasSpecular,
     ldHasBeamWidth,
-    ldHasSpotExponent);
+    ldHasSpotExponent,
+    ldHasDiffuseTexture,
+    ldHasSpecularTexture,
+    ldHasIrradianceVolume);
 
   { Generating shader code to handle a single light.
     Follows castlerendererinternalshader_feature_api.md API conventions. }
@@ -98,7 +107,7 @@
     { Calculated by Prepare. Stored as TLightDefine array,
       since TLightShader.Prepare is executed very often and must be fast.
       Only TLightShader.Code actually changes it to a string. }
-    Defines: array [0..9] of TLightDefine;
+    Defines: array [0..12] of TLightDefine;
     DefinesCount: Cardinal;
   public
     RenderingCamera: TRenderingCamera; //< Set this after construction.
@@ -188,6 +197,16 @@ begin
   end;
 end;
 
+procedure TLightUniforms.SetUniform(const NamePattern: String;
+  var CurrentValue: TMatrix4; const NewValue: TMatrix4);
+begin
+  if not TMatrix4.PerfectlyEquals(CurrentValue, NewValue) then
+  begin
+    ShaderProgram.SetUniform(Format(NamePattern, [Number]), NewValue, umWarning);
+    CurrentValue := NewValue;
+  end;
+end;
+
 { TLightShader --------------------------------------------------------------- }
 
 destructor TLightShader.Destroy;
@@ -211,8 +230,22 @@ const
     (Name: 'LIGHT%d_HAS_AMBIENT'      ; Hash: 131; ),
     (Name: 'LIGHT%d_HAS_SPECULAR'     ; Hash: 137; ),
     (Name: 'LIGHT%d_HAS_BEAM_WIDTH'   ; Hash: 139; ),
-    (Name: 'LIGHT%d_HAS_SPOT_EXPONENT'; Hash: 149; )
+    (Name: 'LIGHT%d_HAS_SPOT_EXPONENT'; Hash: 149; ),
+    (Name: 'LIGHT%d_HAS_DIFFUSE_TEXTURE'; Hash: 157; ),
+    (Name: 'LIGHT%d_HAS_SPECULAR_TEXTURE'; Hash: 163; ),
+    (Name: 'LIGHT%d_HAS_IRRADIANCE_VOLUME'; Hash: 167; )
   );
+
+{ Does the environment light use its irradiance volume
+  (it needs a valid influence box). }
+function EnvironmentLightHasIrradianceVolume(const EnvLight: TEnvironmentLightNode): Boolean;
+var
+  S: TVector3;
+begin
+  S := EnvLight.FdInfluenceSize.Value;
+  Result := (EnvLight.FdIrradianceVolume.Value <> nil) and
+    (S.X > 0) and (S.Y > 0) and (S.Z > 0);
+end;
 
 procedure TLightShader.Prepare(var Hash: TShaderCodeHash; const LightNumber: Cardinal);
 
@@ -260,7 +293,20 @@ begin
   if Node is TAbstractPunctualLightNode then
     Define(ldTypePunctual);
   if Node is TEnvironmentLightNode then
+  begin
     Define(ldTypeEnvironment);
+    if EnvironmentLightHasIrradianceVolume(TEnvironmentLightNode(Node)) then
+      Define(ldHasIrradianceVolume)
+    else
+    if TEnvironmentLightNode(Node).FdDiffuseTexture.Value <> nil then
+      Define(ldHasDiffuseTexture);
+    if TEnvironmentLightNode(Node).FdSpecularTexture.Value <> nil then
+      Define(ldHasSpecularTexture);
+    { The light's textures are bound to the shader program when it is created
+      (SetUniformsOnce), so shapes lit by different environment lights
+      cannot share a shader program. }
+    Hash.AddPointer(Node, LightNumber + 1);
+  end;
 
   { The light's effects are part of the shader program.
     Their uniform values are set when the program is linked
@@ -325,10 +371,17 @@ procedure TLightShader.SetUniformsOnce(AProgram: TX3DShaderProgram);
 
   procedure SetEnvironmentLightUniforms(const EnvLight: TEnvironmentLightNode);
   begin
+    { Same conditions as the defines in Prepare. }
+    if EnvironmentLightHasIrradianceVolume(EnvLight) then
+      AProgram.AddUniformTexture(EnvLight.FdIrradianceVolume,
+        Format('castle_LightSource%dIrradianceVolume', [Number]))
+    else
     if EnvLight.FdDiffuseTexture.Value <> nil then
-      AProgram.UniformsTextures.Add(EnvLight.FdDiffuseTexture);
+      AProgram.AddUniformTexture(EnvLight.FdDiffuseTexture,
+        Format('castle_LightSource%dDiffuseTexture', [Number]));
     if EnvLight.FdSpecularTexture.Value <> nil then
-      AProgram.UniformsTextures.Add(EnvLight.FdSpecularTexture);
+      AProgram.AddUniformTexture(EnvLight.FdSpecularTexture,
+        Format('castle_LightSource%dSpecularTexture', [Number]));
   end;
 
 begin
@@ -356,6 +409,30 @@ procedure TLightShader.SetDynamicUniforms(AProgram: TX3DShaderProgram);
          (not (Field is TSFNode)) and
          (not (Field is TMFNode)) then
         Uniforms.SetCustomFieldUniform(AProgram, Field);
+    end;
+  end;
+
+  { Environment light: the transformation from eye space to the light's
+    local space (where its cube maps and influence box are),
+    and the influence box for the irradiance volume. }
+  procedure SetEnvironmentLightDynamicUniforms(const EnvLight: TEnvironmentLightNode;
+    const Uniforms: TLightUniforms);
+  var
+    LightToEye, EyeToLight: TMatrix4;
+  begin
+    if Light^.WorldCoordinates then
+      LightToEye := RenderingCamera.Matrix * Light^.Transform
+    else
+      LightToEye := Shader.SceneModelView * Light^.Transform;
+    if not LightToEye.TryInverse(EyeToLight) then
+      EyeToLight := TMatrix4.Identity;
+    Uniforms.SetUniform('castle_LightSource%dEyeToLight', Uniforms.EyeToLight, EyeToLight);
+    if EnvironmentLightHasIrradianceVolume(EnvLight) then
+    begin
+      Uniforms.SetUniform('castle_LightSource%dInfluenceMin', Uniforms.InfluenceMin,
+        EnvLight.FdInfluenceCenter.Value - EnvLight.FdInfluenceSize.Value / 2);
+      Uniforms.SetUniform('castle_LightSource%dInfluenceSize', Uniforms.InfluenceSize,
+        EnvLight.FdInfluenceSize.Value);
     end;
   end;
 
@@ -444,6 +521,9 @@ begin
           LiPos.FdAttenuation.Value);
     end;
   end;
+
+  if Node is TEnvironmentLightNode then
+    SetEnvironmentLightDynamicUniforms(TEnvironmentLightNode(Node), Uniforms);
 
   if Node.FdAmbientIntensity.Value <> 0 then
     Uniforms.SetUniform('castle_LightSource%dAmbientColor', Uniforms.AmbientColor, AmbientColor3);

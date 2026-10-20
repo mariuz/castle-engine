@@ -53,8 +53,62 @@ uniform float castle_LightSource<Light>Radius;
 
 /* EnvironmentLight parameters */
 #ifdef LIGHT<Light>_TYPE_ENVIRONMENT
-uniform samplerCube diffuseTexture;
-uniform samplerCube specularTexture;
+/* Eye space to the light's local space (of its textures and influence box). */
+uniform mat4 castle_LightSource<Light>EyeToLight;
+#ifdef LIGHT<Light>_HAS_DIFFUSE_TEXTURE
+/* Irradiance cube map: the diffuse light for each normal direction. */
+uniform samplerCube castle_LightSource<Light>DiffuseTexture;
+#endif
+#ifdef LIGHT<Light>_HAS_SPECULAR_TEXTURE
+/* Prefiltered radiance cube map: mipmap levels for increasing roughness. */
+uniform samplerCube castle_LightSource<Light>SpecularTexture;
+#endif
+#ifdef LIGHT<Light>_HAS_IRRADIANCE_VOLUME
+/* Spherical harmonics (L0, L1x, L1y, L1z) of the irradiance in a grid
+   over the influence box, 4 slabs along Z, see EnvironmentLight.irradianceVolume. */
+#ifdef GL_ES
+uniform highp sampler3D castle_LightSource<Light>IrradianceVolume;
+#else
+uniform sampler3D castle_LightSource<Light>IrradianceVolume;
+#endif
+uniform vec3 castle_LightSource<Light>InfluenceMin;
+uniform vec3 castle_LightSource<Light>InfluenceSize;
+#endif
+
+/* Analytic approximation of the split-sum environment BRDF
+   (Brian Karis, "Physically Based Shading on Mobile", 2014). */
+vec3 castle_env_brdf_approx<Light>(const in vec3 specular_color,
+  const in float roughness, const in float n_dot_v)
+{
+  const vec4 c0 = vec4(-1.0, -0.0275, -0.572, 0.022);
+  const vec4 c1 = vec4(1.0, 0.0425, 1.04, -0.04);
+  vec4 r = roughness * c0 + c1;
+  float a004 = min(r.x * r.x, exp2(-9.28 * n_dot_v)) * r.x + r.y;
+  vec2 ab = vec2(-1.04, 1.04) * a004 + r.zw;
+  return specular_color * ab.x + ab.y;
+}
+
+#ifdef LIGHT<Light>_HAS_IRRADIANCE_VOLUME
+/* Irradiance for the normal n (light's local space) at the point p
+   (light's local space) from the irradiance volume. */
+vec3 castle_irradiance_volume<Light>(const in vec3 p, const in vec3 n)
+{
+  vec3 uvw = clamp((p - castle_LightSource<Light>InfluenceMin) /
+    castle_LightSource<Light>InfluenceSize, 0.0, 1.0);
+#ifdef CASTLE_GLSL_VERSION_UPGRADE
+  /* Keep the Z coordinate within the half texels of each slab,
+     so that linear filtering doesn't mix the slabs. */
+  float slab_texels = float(textureSize(castle_LightSource<Light>IrradianceVolume, 0).z) / 4.0;
+  uvw.z = clamp(uvw.z, 0.5 / slab_texels, 1.0 - 0.5 / slab_texels);
+#endif
+  uvw.z /= 4.0;
+  vec3 l0  = texture3D(castle_LightSource<Light>IrradianceVolume, uvw).rgb;
+  vec3 l1x = texture3D(castle_LightSource<Light>IrradianceVolume, uvw + vec3(0.0, 0.0, 0.25)).rgb;
+  vec3 l1y = texture3D(castle_LightSource<Light>IrradianceVolume, uvw + vec3(0.0, 0.0, 0.5)).rgb;
+  vec3 l1z = texture3D(castle_LightSource<Light>IrradianceVolume, uvw + vec3(0.0, 0.0, 0.75)).rgb;
+  return max(l0 + l1x * n.x + l1y * n.y + l1z * n.z, vec3(0.0));
+}
+#endif
 #endif
 
 // In case of OpenGLES, all shader code is glued, so this is already declared
@@ -75,6 +129,42 @@ void PLUG_add_light(inout vec4 color,
   const in MaterialInfo material_info,
   const in vec3 view)
 {
+#ifdef LIGHT<Light>_TYPE_ENVIRONMENT
+  /* Image-based lighting: the light's textures (in its local space)
+     are looked up by the world normal and reflection direction. */
+  {
+    vec3 env_normal = normalize((castle_LightSource<Light>EyeToLight * vec4(normal_eye, 0.0)).xyz);
+    vec3 env_light = vec3(0.0);
+
+#if defined(LIGHT<Light>_HAS_IRRADIANCE_VOLUME)
+    vec3 env_position = (castle_LightSource<Light>EyeToLight * vertex_eye).xyz;
+    env_light += material_info.diffuseColor *
+      castle_irradiance_volume<Light>(env_position, env_normal);
+#elif defined(LIGHT<Light>_HAS_DIFFUSE_TEXTURE)
+    env_light += material_info.diffuseColor *
+      textureCube(castle_LightSource<Light>DiffuseTexture, env_normal).rgb;
+#endif
+
+#ifdef LIGHT<Light>_HAS_SPECULAR_TEXTURE
+    vec3 env_reflect = normalize((castle_LightSource<Light>EyeToLight *
+      vec4(reflect(-view, normal_eye), 0.0)).xyz);
+    float n_dot_v = clamp(dot(normal_eye, view), 0.0, 1.0);
+    /* rougher surfaces read blurrier mipmap levels of the prefiltered map */
+    float env_lod = 0.0;
+#ifdef CASTLE_GLSL_VERSION_UPGRADE
+    env_lod = material_info.perceptualRoughness *
+      log2(float(textureSize(castle_LightSource<Light>SpecularTexture, 0).x));
+#endif
+    env_light +=
+      castle_env_brdf_approx<Light>(material_info.specularColor,
+        material_info.perceptualRoughness, n_dot_v) *
+      textureCube(castle_LightSource<Light>SpecularTexture, env_reflect, env_lod).rgb;
+#endif
+
+    color.rgb += castle_LightSource<Light>Color * env_light;
+    return;
+  }
+#else
   vec3 light_dir;
 
 /* Calculate light_dir */
@@ -168,11 +258,6 @@ void PLUG_add_light(inout vec4 color,
     vec3 diffuseContrib = (1.0 - F) * diffuse(material_info);
     vec3 specContrib = F * Vis * D;
 
-#ifdef LIGHT<Light>_TYPE_ENVIRONMENT
-  diffuseContrib *= textureCube(diffuseTexture, light_dir).rgb;
-  specContrib *= textureCube(specularTexture, light_dir).rgb;
-#endif
-
     // Obtain final intensity as reflectance (BRDF) scaled by the energy of the light (cosine law)
     vec3 light_contribution = angularInfo.NdotL * (diffuseContrib + specContrib);
 
@@ -180,4 +265,5 @@ void PLUG_add_light(inout vec4 color,
       light_contribution *
       scale * color_scale;
   }
+#endif
 }
