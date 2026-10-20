@@ -348,3 +348,26 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Bound to **`Ctrl+Shift+F`** in both the Viewport and Hierarchy Tree, plus **`Select Visible In Camera View (Ctrl+Shift+F)`** (`MenuTreeViewItemSelectInCameraFrustum`) in `MenuTreeView`.
 - [x] **47.2. 2D UI Edge-to-Edge Horizontal & Vertical Stacking (`StackSelectedUserInterfaces` / `ButtonUIStackH` & `ButtonUIStackV`)**
   - Implemented `TDesignFrame.StackSelectedUserInterfaces(Vertical, GapPx)` and added **`UI Stack H`** (`ButtonUIStackH`) and **`UI Stack V`** (`ButtonUIStackV`) to `PanelLayoutUI`, sorting 2+ selected `TCastleUserInterface` controls left-to-right or top-to-bottom and stacking them flush (`0 px` gap on normal click, or `8 px` gap on `Shift`-click).
+
+### Phase 48: 3D Polyline / Multi-Waypoint Path Arrangement (`ArrangeSelectedAlongWaypoints` / `Alt+Shift+P`)
+- [x] **48.1. Equal Arc-Length 3D Polyline Arrangement & Tangent Orientation (`TCastleTransformManipulate.ArrangeSelectedAlongWaypoints`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedAlongWaypoints(Waypoints: array of TVector3; OrientAlongPath: Boolean): Boolean`: computes cumulative arc lengths along a multi-point 3D polyline (`Length(Waypoints) >= 2`), places 2+ top-level selected transforms at equal arc-length intervals ($d_i = \frac{i}{N - 1} L_{\text{total}}$), and optionally rotates each transform so its world forward direction faces along the active segment tangent while keeping its up vector aligned with `World.GravityUp`.
+  - Added **`Path Arrange`** (`ButtonArrangePath` in `PanelLayoutTransform`: normal click arranges along the 3-waypoint polyline formed by the first, middle, and last selected transforms; `Ctrl`-click also orients forward along the path; `Shift`-click opens the 3-waypoint dialog) and `ShowArrangeAlongPathDialog` bound to **`Alt+Shift+P`** in both the Viewport and Hierarchy Tree.
+
+### Phase 49: 3D Spiral / Helix Arrangement for Existing Selection (`ArrangeSelectedInHelix` / `Alt+Shift+H`)
+- [x] **49.1. Cylindrical & Conical 3D Spiral Staircase / Helix Arrangement (`TCastleTransformManipulate.ArrangeSelectedInHelix`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedInHelix(StartRadius, EndRadius, HeightSpan, Turns, OrientToCenter): Boolean`: arranges 2+ top-level selected transforms along a 3D cylindrical (`StartRadius = EndRadius`) or conical (`StartRadius <> EndRadius`) helix around the active selection pivot across `Turns` full revolutions and `HeightSpan` vertical rise, optionally orienting each transform toward the central helix axis.
+  - Added **`Helix Arrange...`** (`ButtonArrangeHelix`) in `PanelLayoutTransform` and `ShowArrangeInHelixDialog` bound to **`Alt+Shift+H`** in both the Viewport and Hierarchy Tree.
+
+### Phase 50: Center / Snap Parent Transform Origin to Children Bounds (`CenterSelectedOriginOnChildren` / `Alt+Shift+O`)
+- [x] **50.1. Non-Destructive Parent Pivot Centering on Direct Children (`TCastleTransformManipulate.CenterSelectedOriginOnChildren`)**
+  - Implemented `TCastleTransformManipulate.CenterSelectedOriginOnChildren(UseBottomCenter: Boolean = false): Boolean`: shifts each selected parent `TCastleTransform` that has direct `TCastleTransform` children to the combined `WorldBoundingBox.Center` (or bottom-center `MinY` when `UseBottomCenter = true`) of its direct children while restoring all children's world-space positions so the visual scene does not move.
+  - Added **`Center Parent Origin`** (`ButtonCenterPivotOnChildren` in `PanelLayoutTransform`: normal click snaps to children center; `Shift`-click snaps to children bottom-center) and bound **`Alt+Shift+O`** in both the Viewport and Hierarchy Tree.
+  - Added automated unit test `TestArrangeWaypointsHelixAndCenterOriginOnChildren` in `tests/code/testcases/testcastletransformmanipulate.pas`.
+
+### Phase 51: Select Transforms By World-Space Axis Coordinate Slice (`SelectByAxisRange` / `Ctrl+Shift+B`) & 2D UI Center In Parent (`CenterSelectedUserInterfacesInParent` / `ButtonUICenterInParent`)
+- [x] **51.1. World-Space Axis Coordinate Slice Selection (`SelectByAxisRange` / `Ctrl+Shift+B`)**
+  - Implemented `TDesignFrame.SelectByAxisRange(Axis, MinCoord, MaxCoord)` and `ShowSelectByAxisRangeDialog`: selects all visible, unlocked `TCastleTransform` instances whose world coordinate along `Axis` (`X`, `Y`, or `Z`) falls within `[MinCoord, MaxCoord]`.
+  - Bound to **`Ctrl+Shift+B`** in both the Viewport and Hierarchy Tree, plus **`Select By Axis Coordinate Slice... (Ctrl+Shift+B)`** (`MenuTreeViewItemSelectByAxisRange`) in `MenuTreeView`.
+- [x] **51.2. 2D UI Center In Parent Container (`CenterSelectedUserInterfacesInParent` / `ButtonUICenterInParent`)**
+  - Implemented `TDesignFrame.CenterSelectedUserInterfacesInParent(Horizontally, Vertically)` and added **`UI Center Parent`** (`ButtonUICenterInParent`) to `PanelLayoutUI` (enabled whenever 1 or more unlocked `TCastleUserInterface` controls are selected: normal click centers both horizontally and vertically in `ParentRenderRect`; `Shift`-click centers horizontally only; `Ctrl`-click centers vertically only).

@@ -1015,7 +1015,50 @@ Creating spiral staircases, tapering foliage rows, perspective colonnades, or pr
 
 ---
 
-## 49. Complete Keyboard Shortcuts & Toolbar Reference
+## 49. Phase 48: 3D Polyline / Multi-Waypoint Path Arrangement (`ArrangeSelectedAlongWaypoints`, `ButtonArrangePath`, `Alt+Shift+P`)
+
+When placing fence posts around a corner, torches along an L-shaped corridor, or props along a multi-segment 3D path, designers can arrange 2+ selected transforms at equal arc-length intervals along a 3D polyline:
+- **Core Engine API (`TCastleTransformManipulate.ArrangeSelectedAlongWaypoints`):**
+  - Computes cumulative segment distances along `Waypoints: array of TVector3` (`Length(Waypoints) >= 2`) and places each top-level selected transform $i \in [0..N-1]$ at arc-length distance $d_i = \frac{i}{N - 1} L_{\text{total}}$.
+  - When `OrientAlongPath = true`, rotates each transform so its world forward direction faces along the active polyline segment tangent while keeping its up vector aligned with `World.GravityUp`.
+- **Editor Controls (`ButtonArrangePath` & `ShowArrangeAlongPathDialog` / `Alt+Shift+P`):**
+  - **Click `Path Arrange`** (`ButtonArrangePath`) in `PanelLayoutTransform`: Immediately arranges selected transforms along the 3-waypoint polyline formed by the first (`Selected[0]`), middle (`Selected[Count div 2]`), and last (`Selected[Count - 1]`) selected transforms (**`Ctrl`-click** also orients each transform along the path).
+  - **`Shift` + Click `Path Arrange`** or press **`Alt+Shift+P`**: Opens the **Arrange Selection Along 3-Waypoint Path** dialog (`ShowArrangeAlongPathDialog`) to specify custom Start, Corner, and End 3D waypoints and tangent orientation.
+
+---
+
+## 50. Phase 49: 3D Spiral / Helix Arrangement for Existing Selection (`ArrangeSelectedInHelix`, `ButtonArrangeHelix`, `Alt+Shift+H`)
+
+Building spiral staircases, helical pillars, tornado/vortex prop formations, or ascending/descending ramps from an existing selection of transforms is handled by `ArrangeSelectedInHelix`:
+- **Core Engine API (`TCastleTransformManipulate.ArrangeSelectedInHelix`):**
+  - `ArrangeSelectedInHelix(StartRadius, EndRadius, HeightSpan, Turns, OrientToCenter)` distributes 2+ top-level selected transforms at $t = i / (N - 1)$ around the active selection pivot with radius $R(t) = \operatorname{Lerp}(t, R_{\text{start}}, R_{\text{end}})$, angle $\theta(t) = 2\pi \cdot \text{Turns} \cdot t$, and vertical elevation $Y(t) = Y_{\text{base}} + t \cdot \text{HeightSpan}$.
+  - When `OrientToCenter = true`, rotates each transform horizontally so its world forward vector faces the central vertical axis of the helix.
+- **Editor Controls (`ButtonArrangeHelix` & `ShowArrangeInHelixDialog` / `Alt+Shift+H`):**
+  - Clicking **`Helix Arrange...`** (`ButtonArrangeHelix`) in `PanelLayoutTransform` or pressing **`Alt+Shift+H`** opens the **Arrange Selection in 3D Helix / Spiral** dialog (`ShowArrangeInHelixDialog`) to configure **Start Radius XZ**, **End Radius XZ**, **Total Height Span (Y)**, **Revolutions / Turns**, and **Orient transforms toward central helix axis**.
+
+---
+
+## 51. Phase 50: Center / Snap Parent Transform Origin to Children Bounds (`CenterSelectedOriginOnChildren`, `ButtonCenterPivotOnChildren`, `Alt+Shift+O`)
+
+After moving child meshes or props inside a parent `TCastleTransform` group, the parent's origin (`Translation`) often ends up far away from its children, making rotation gizmos and snapping awkward:
+- **Core Engine API (`TCastleTransformManipulate.CenterSelectedOriginOnChildren`):**
+  - `CenterSelectedOriginOnChildren(UseBottomCenter)` computes the combined `WorldBoundingBox` of all direct `TCastleTransform` children of each selected parent transform, moves the parent's world origin to the children's bounding-box center (or bottom-center `MinY` when `UseBottomCenter = true`), and restores every direct child's world position so no child visually moves in the viewport.
+- **Editor Controls (`ButtonCenterPivotOnChildren` / `Alt+Shift+O`):**
+  - **Click `Center Parent Origin`** (`ButtonCenterPivotOnChildren`) or press **`Alt+Shift+O`**: Snaps the selected parent transform's origin to the center of its children's world bounding box.
+  - **`Shift` + Click `Center Parent Origin`**: Snaps the selected parent transform's origin to the **bottom-center (`MinY`)** of its children's world bounding box (ideal for floor-snapping a grouped prefab).
+
+---
+
+## 52. Phase 51: Select Transforms By World Axis Coordinate Slice (`SelectByAxisRange` / `Ctrl+Shift+B`) & 2D UI Center In Parent (`ButtonUICenterInParent`)
+
+- **Select Transforms By World Axis Coordinate Slice (`SelectByAxisRange` / `Ctrl+Shift+B`):**
+  - Pressing **`Ctrl+Shift+B`** in the Viewport or Hierarchy Tree (or choosing **`Select By Axis Coordinate Slice... (Ctrl+Shift+B)`** in the Hierarchy context menu) opens `ShowSelectByAxisRangeDialog`, allowing designers to choose an axis (`X Axis`, `Y Axis (Elevation)`, or `Z Axis`) and a `[MinCoord, MaxCoord]` world-coordinate interval to select an entire vertical floor slice or horizontal corridor section at once.
+- **2D UI Center In Parent Container (`CenterSelectedUserInterfacesInParent` / `ButtonUICenterInParent`):**
+  - Clicking **`UI Center Parent`** (`ButtonUICenterInParent`) in `PanelLayoutUI` (available whenever **1 or more** unlocked `TCastleUserInterface` controls are selected) centers each selected UI control inside its parent container's `ParentRenderRect` (**Click**: center both Horizontally & Vertically; **`Shift`-click**: Horizontal only; **`Ctrl`-click**: Vertical only), adjusting `UI.Translation` cleanly via `UI.UIScale`.
+
+---
+
+## 53. Complete Keyboard Shortcuts & Toolbar Reference
 
 | Shortcut / Control | Context | Action |
 | :--- | :--- | :--- |
@@ -1034,6 +1077,9 @@ Creating spiral staircases, tapering foliage rows, perspective colonnades, or pr
 | **`Alt+Shift+C`** / **`Circle Arrange`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms in a circle** (**Click**: auto-radius $360^\circ$ circle; **`Shift`-click** or **`Alt+Shift+C`**: dialog). |
 | **`Alt+Shift+G`** / **`Grid Arrange`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms in a 2D / 3D grid** (**Click**: auto $\lceil\sqrt{N}\rceil$ grid; **`Shift`-click** or **`Alt+Shift+G`**: dialog). |
 | **`Alt+Shift+L`** / **`Line Arrange`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms along a 3D line** (**Click**: between first & last; **`Ctrl`-click**: orient along line; **`Shift`-click** / **`Alt+Shift+L`**: dialog). |
+| **`Alt+Shift+P`** / **`Path Arrange`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms along a 3-waypoint polyline** (**Click**: first/mid/last; **`Ctrl`-click**: orient along path; **`Shift`-click** / **`Alt+Shift+P`**: dialog). |
+| **`Alt+Shift+H`** / **`Helix Arrange...`** | Viewport / Hierarchy / Layout Tab | Open the **Arrange Selection in 3D Helix / Spiral** dialog (`StartRadius`, `EndRadius`, `HeightSpan`, `Turns`, `OrientToCenter`). |
+| **`Alt+Shift+O`** / **`Center Parent Origin`** | Viewport / Hierarchy / Layout Tab | **Snap selected parent transform origin** to the center (`Click` / `Alt+Shift+O`) or bottom-center (`Shift`-click) of its direct children without moving children. |
 | **`Alt+Shift+X`** / **`Depenetrate`** | Viewport / Hierarchy / Layout Tab | **Separate overlapping selected transforms** by pushing intersecting bounding boxes apart (**`Shift`-click**: clearance padding & 3D dialog). |
 | **`Alt+Shift+T`** / **`Taper / Spiral...`** | Viewport / Hierarchy / Layout Tab | Open the **Progressive Scale Taper & Cumulative Rotation Step** dialog (`StartScale`, `EndScale`, `StepYawDeg`). |
 | **`Alt+Shift+=`** / **`Expand +25%`** | Viewport / Hierarchy / Layout Tab | **Push / Expand** selected transform positions outward from pivot by $+25\%$ (`Shift`-click button for XZ only). |
@@ -1055,6 +1101,7 @@ Creating spiral staircases, tapering foliage rows, perspective colonnades, or pr
 | **`Ctrl+Shift+O`** / **`Select Overlapping Transforms`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects whose `WorldBoundingBox` overlaps the selection (or any sibling transform). |
 | **`Ctrl+Shift+E`** / **`Select At Same Y Elevation...`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects at the same world Y elevation within a configurable tolerance. |
 | **`Ctrl+Shift+F`** / **`Select Visible In Camera View`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects inside the active viewport camera's view frustum. |
+| **`Ctrl+Shift+B`** / **`Select By Axis Coordinate Slice...`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects whose world X, Y, or Z coordinate lies within `[MinCoord, MaxCoord]`. |
 | **`Select By Bounding-Box Size Range...`** | Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects whose world bounding-box diagonal length lies within `[MinSize, MaxSize]`. |
 | **`Select By Name Pattern...`** | Hierarchy Context Menu | Select all components matching a substring or `*` / `?` wildcard pattern. |
 | **`Select All With Same Asset URL`** | Hierarchy Context Menu | Select all components in the design referencing the same `Url` asset as the selected component. |
@@ -1090,6 +1137,7 @@ Creating spiral staircases, tapering foliage rows, perspective colonnades, or pr
 | **`UI Match Size`** | Layout Tab (`PanelLayoutUI`) | Match `Width` and `Height` of 2+ selected `TCastleUserInterface` controls to the primary control (`Shift`: Width, `Ctrl`: Height). |
 | **`UI Swap Pos` / `UI Grid`** | Layout Tab (`PanelLayoutUI`) | **Swap / cycle** rendered positions of 2+ selected `TCastleUserInterface` controls (`UI Swap Pos`), or **arrange in 2D grid** (`UI Grid`, `Shift` for $8\text{ px}$ gap). |
 | **`UI Stack H` / `UI Stack V`** | Layout Tab (`PanelLayoutUI`) | **Stack** 2+ selected `TCastleUserInterface` controls flush edge-to-edge horizontally or vertically (`Shift`-click for $8\text{ px}$ gap). |
+| **`UI Center Parent`** | Layout Tab (`PanelLayoutUI`) | **Center** 1+ selected `TCastleUserInterface` controls inside their parent container (**Click**: H+V; **`Shift`**: H only; **`Ctrl`**: V only). |
 | **`Reset Prop` Button** | Object Inspector Header | Reset the active Object Inspector property row to its default value. |
 | **`Select All of Same Class`** | Hierarchy Context Menu | Select all components in the design matching the selected component's class. |
 | **`Expand Subtree` / `Collapse Subtree`** | Hierarchy Context Menu | Recursively expand or collapse the selected hierarchy node(s). |
@@ -1106,9 +1154,9 @@ Creating spiral staircases, tapering foliage rows, perspective colonnades, or pr
 
 ---
 
-## 50. Automated Unit Tests & Verification
+## 54. Automated Unit Tests & Verification
 
-All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 19 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
+All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 20 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
 
 1. **`TestSelectedCountAndFree`**: Verifies single/multi-selection filtering, freeing a selected transform while selected, and translating the remaining selection.
 2. **`TestTranslateSnapAndCoordSpace`**: Verifies grid snapping (`TranslateSnap := 2.0`) and `csLocal` vs. `csWorld` translation on a $90^\circ$-rotated transform.
@@ -1129,6 +1177,7 @@ All core 3D manipulation algorithms in `CastleTransformManipulate` are covered b
 17. **`TestMatchRotationTransformAndArrangeInCircle`**: Verifies `MatchSelectedRotation` matches world orientation while preserving position and scale, `MatchSelectedTransform(true, false, true)` matches world position and scale onto secondary transforms, and `ArrangeSelectedInCircle(10.0, 360.0, true)` places 4 transforms evenly around their center at $0^\circ, 90^\circ, 180^\circ, 270^\circ$ on a radius-$10$ XZ circle while orienting them toward the center.
 18. **`TestArrangeInGridScalePositionsAndResetTransform`**: Verifies `ArrangeSelectedInGrid(2, 2, Vector3(4, 2, 6), true)` places 4 transforms at exact $2 \times 2$ XZ grid coordinates, verifies `ScaleSelectedPositionsFromPivot` scales world offsets from the active pivot without altering `Scale`, and verifies `ResetSelectedTransform` granularly resets rotation + scale while preserving translation (and subsequently resets translation).
 19. **`TestArrangeLineSeparateOverlappingAndProgressiveTransform`**: Verifies `ArrangeSelectedBetweenEndpoints(true)` places 4 boxes at evenly spaced 3D intervals along the line segment from `B1` to `B4` and orients them along the line, verifies `ApplyProgressiveTransformSelected` applies a linear scale gradient from $(1,1,1)$ to $(4,4,4)$ and a cumulative $30^\circ$ rotation step per item, and verifies `SeparateOverlappingSelected(1.0, true, 8)` pushes two overlapping $2\times 2\times 2$ boxes apart to a center-to-center distance $\ge 3.0$ while preserving Y elevation.
+20. **`TestArrangeWaypointsHelixAndCenterOriginOnChildren`**: Verifies `ArrangeSelectedAlongWaypoints` places 5 transforms at equal arc-length intervals along an L-shaped 3-waypoint polyline and orients them along each segment tangent, verifies `ArrangeSelectedInHelix(10.0, 20.0, 40.0, 1.0, true)` arranges 5 transforms along a conical 3D helix while orienting them toward the central axis, and verifies `CenterSelectedOriginOnChildren` snaps a parent `TCastleTransform` origin to both the center and bottom-center (`MinY`) of its direct children's world bounding box while keeping all children's world positions unchanged.
 
 To run this test suite from the command line:
 ```bash

@@ -48,6 +48,7 @@ type
     procedure TestMatchRotationTransformAndArrangeInCircle;
     procedure TestArrangeInGridScalePositionsAndResetTransform;
     procedure TestArrangeLineSeparateOverlappingAndProgressiveTransform;
+    procedure TestArrangeWaypointsHelixAndCenterOriginOnChildren;
   end;
 
 implementation
@@ -1103,6 +1104,105 @@ begin
     AssertSameValue(5.0, B1.Translation.Y, 1e-4);
     AssertSameValue(5.0, B2.Translation.Y, 1e-4);
     AssertTrue(Abs(B2.Translation.X - B1.Translation.X) >= 3.0 - 1e-3);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestArrangeWaypointsHelixAndCenterOriginOnChildren;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  T1, T2, T3, T4, T5, ParentGroup: TCastleTransform;
+  ChildBox1, ChildBox2: TCastleBox;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.OnTransformModified := {$ifdef FPC}@{$endif} HandleTransformModified;
+    Manipulate.OnTransformModifyEnd := {$ifdef FPC}@{$endif} HandleTransformModifyEnd;
+
+    T1 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T1);
+    T2 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T2);
+    T3 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T3);
+    T4 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T4);
+    T5 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T5);
+
+    // 1. Test ArrangeSelectedAlongWaypoints along an L-shaped 3-waypoint path:
+    // Waypoints: (0,0,0) -> (10,0,0) [len 10] -> (10,0,10) [len 10], total length = 20.
+    // 5 items placed at arc distances 0, 5, 10, 15, 20:
+    // T1=(0,0,0), T2=(5,0,0), T3=(10,0,0), T4=(10,0,5), T5=(10,0,10)
+    Manipulate.SetSelected([T1, T2, T3, T4, T5]);
+    AssertTrue(Manipulate.ArrangeSelectedAlongWaypoints(
+      [Vector3(0, 0, 0), Vector3(10, 0, 0), Vector3(10, 0, 10)], true));
+    AssertVectorEquals(Vector3(0, 0, 0), T1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(5, 0, 0), T2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10, 0, 0), T3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10, 0, 5), T4.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10, 0, 10), T5.Translation, 1e-4);
+    T2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+    T4.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 0, 1), WorldDir.Normalize, 1e-4);
+
+    // 2. Test ArrangeSelectedInHelix:
+    // 5 items around primary selected T1 at (0, 0, 0), StartRadius=10, EndRadius=20, HeightSpan=40, Turns=1.0, OrientToCenter=true
+    // Factor = 0, 0.25, 0.5, 0.75, 1.0 -> Angles = 0, 90, 180, 270, 360 deg
+    // Radii  = 10, 12.5, 15, 17.5, 20
+    // Heights= 0, 10, 20, 30, 40
+    T1.Translation := Vector3(0, 0, 0);
+    Manipulate.PivotMode := pmPrimarySelected;
+    Manipulate.SetSelected([T1, T2, T3, T4, T5]);
+    AssertTrue(Manipulate.ArrangeSelectedInHelix(10.0, 20.0, 40.0, 1.0, true));
+    AssertVectorEquals(Vector3(0, 0, 10), T1.Translation, 1e-3);
+    AssertVectorEquals(Vector3(12.5, 10, 0), T2.Translation, 1e-3);
+    AssertVectorEquals(Vector3(0, 20, -15), T3.Translation, 1e-3);
+    AssertVectorEquals(Vector3(-17.5, 30, 0), T4.Translation, 1e-3);
+    AssertVectorEquals(Vector3(0, 40, 20), T5.Translation, 1e-3);
+    T2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(-1, 0, 0), WorldDir.Normalize, 1e-3);
+
+    // 3. Test CenterSelectedOriginOnChildren:
+    // ParentGroup at (0, 0, 0) with two 2x4x2 boxes at local/world (10, 2, 4) and (20, 2, 8).
+    // Combined world bounding box of children:
+    // X in [9..21] (center 15), Y in [0..4] (center 2, min 0), Z in [3..9] (center 6).
+    ParentGroup := TCastleTransform.Create(Viewport);
+    ParentGroup.Translation := Vector3(0, 0, 0);
+    Viewport.Items.Add(ParentGroup);
+
+    ChildBox1 := TCastleBox.Create(Viewport);
+    ChildBox1.Size := Vector3(2, 4, 2);
+    ChildBox1.Translation := Vector3(10, 2, 4);
+    ParentGroup.Add(ChildBox1);
+
+    ChildBox2 := TCastleBox.Create(Viewport);
+    ChildBox2.Size := Vector3(2, 4, 2);
+    ChildBox2.Translation := Vector3(20, 2, 8);
+    ParentGroup.Add(ChildBox2);
+
+    Manipulate.SetSelected([ParentGroup]);
+    // 3a. Center on children bounding box center (UseBottomCenter = false) -> Parent moves to (15, 2, 6), children stay at world (10, 2, 4) & (20, 2, 8)
+    AssertTrue(Manipulate.CenterSelectedOriginOnChildren(false));
+    AssertVectorEquals(Vector3(15, 2, 6), ParentGroup.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10, 2, 4), ChildBox1.WorldTranslation, 1e-4);
+    AssertVectorEquals(Vector3(20, 2, 8), ChildBox2.WorldTranslation, 1e-4);
+    AssertVectorEquals(Vector3(-5, 0, -2), ChildBox1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(5, 0, 2), ChildBox2.Translation, 1e-4);
+
+    // 3b. Center on children bottom-center (UseBottomCenter = true) -> Parent moves to (15, 0, 6), children stay at world (10, 2, 4) & (20, 2, 8)
+    AssertTrue(Manipulate.CenterSelectedOriginOnChildren(true));
+    AssertVectorEquals(Vector3(15, 0, 6), ParentGroup.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10, 2, 4), ChildBox1.WorldTranslation, 1e-4);
+    AssertVectorEquals(Vector3(20, 2, 8), ChildBox2.WorldTranslation, 1e-4);
+    AssertVectorEquals(Vector3(-5, 2, -2), ChildBox1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(5, 2, 2), ChildBox2.Translation, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

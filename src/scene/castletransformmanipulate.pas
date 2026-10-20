@@ -577,6 +577,40 @@ type
     function ApplyProgressiveTransformSelected(
       const StartScale, EndScale: TVector3; const ApplyScaleGradient: Boolean;
       const Axis: T3DAxis = 1; const StepAngleRad: Single = 0): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) along a
+      multi-point 3D polyline defined by @code(Waypoints) (@code(Length(Waypoints) >= 2))
+      at equal arc-length intervals along the path.
+      When @code(OrientAlongPath) is @true, rotates each transform so its world
+      forward direction faces along the local segment tangent.
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedAlongWaypoints(const Waypoints: array of TVector3;
+      const OrientAlongPath: Boolean = false): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) along a
+      3D cylindrical or conical helix/spiral around the active selection pivot
+      (@link(SelectionWorkingCenter) when @link(PivotMode) is @link(pmSelectionCenter),
+      or @code(Selected[0]) when @link(pmPrimarySelected)).
+      - @code(StartRadius) and @code(EndRadius) define the horizontal XZ radius at the
+        first and last item (if @code(StartRadius <= 0), auto-detects the average XZ
+        distance from the center; if @code(EndRadius < 0), uses @code(StartRadius)).
+      - @code(HeightSpan) defines the total vertical Y change from the first item to
+        the last item.
+      - @code(Turns) defines the number of full 360-degree revolutions (default @code(1.0)).
+      - When @code(OrientToCenter) is @true, rotates each transform horizontally so its
+        world forward direction faces toward the central helix axis.
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInHelix(const StartRadius, EndRadius, HeightSpan: Single;
+      const Turns: Single = 1.0; const OrientToCenter: Boolean = false): Boolean;
+
+    { Shift the origin (@code(Translation)) of each selected parent transform that has
+      at least one direct @link(TCastleTransform) child to the combined world-space
+      bounding box center of its direct children (or bottom-center when
+      @code(UseBottomCenter) is @true), while inversely offsetting all direct
+      children so their world-space positions remain completely unchanged.
+      Returns @true if at least one parent transform was modified. }
+    function CenterSelectedOriginOnChildren(
+      const UseBottomCenter: Boolean = false): Boolean;
   end;
 
 var
@@ -3803,6 +3837,328 @@ begin
         T.Rotation := (
           QuatFromAxisAngle(T.Rotation, true) *
           QuatFromAxisAngle(AxisVec, AngleRad, true)).ToAxisAngle;
+      Result := true;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedAlongWaypoints(
+  const Waypoints: array of TVector3; const OrientAlongPath: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  CumDist: array of Single;
+  I, SegIdx, Count, WCount: Integer;
+  T: TCastleTransform;
+  TotalLen, TargetDist, SegLen, SegT: Single;
+  CurPos, NewPos, SegDir, CurWorldPos, CurDir, CurUp, GravityUp, Side, NewUp: TVector3;
+  HasSegDir: Boolean;
+begin
+  Result := false;
+  WCount := Length(Waypoints);
+  if (SelectedCount < 2) or (WCount < 2) then Exit;
+
+  if WCount = 2 then
+    Exit(ArrangeSelectedAlongLine(Waypoints[0], Waypoints[1], OrientAlongPath));
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  SetLength(CumDist, WCount);
+  CumDist[0] := 0.0;
+  for I := 1 to WCount - 1 do
+    CumDist[I] := CumDist[I - 1] + PointsDistance(Waypoints[I - 1], Waypoints[I]);
+  TotalLen := CumDist[WCount - 1];
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    if TotalLen <= 1e-6 then
+    begin
+      NewPos := Waypoints[0];
+      HasSegDir := false;
+      SegDir := Vector3(0, 0, -1);
+    end else
+    begin
+      TargetDist := (Single(I) / Single(Count - 1)) * TotalLen;
+      SegIdx := 0;
+      while (SegIdx < WCount - 2) and (CumDist[SegIdx + 1] < TargetDist) do
+        Inc(SegIdx);
+
+      SegLen := CumDist[SegIdx + 1] - CumDist[SegIdx];
+      if SegLen > 1e-6 then
+        SegT := Clamped((TargetDist - CumDist[SegIdx]) / SegLen, 0.0, 1.0)
+      else
+        SegT := 0.0;
+
+      NewPos := Lerp(SegT, Waypoints[SegIdx], Waypoints[SegIdx + 1]);
+      SegDir := Waypoints[SegIdx + 1] - Waypoints[SegIdx];
+      HasSegDir := not SegDir.IsZero(1e-5);
+      if HasSegDir then
+        SegDir := SegDir.Normalize;
+    end;
+
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(NewPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, NewPos);
+      Result := true;
+    end;
+
+    if OrientAlongPath and HasSegDir then
+    begin
+      if T.HasWorldTransform then
+        T.GetWorldView(CurWorldPos, CurDir, CurUp)
+      else
+      begin
+        CurWorldPos := T.Translation;
+        CurDir := T.Direction;
+        CurUp := T.Up;
+      end;
+
+      if T.World <> nil then
+        GravityUp := T.World.GravityUp
+      else
+        GravityUp := Vector3(0, 1, 0);
+
+      Side := TVector3.CrossProduct(SegDir, GravityUp);
+      if Side.IsZero(1e-4) then
+        Side := TVector3.CrossProduct(SegDir, CurUp);
+      if Side.IsZero(1e-4) then
+        Side := TVector3.CrossProduct(SegDir, Vector3(0, 0, 1));
+      if Side.IsZero(1e-4) then
+        Side := Vector3(1, 0, 0);
+      NewUp := TVector3.CrossProduct(Side, SegDir).Normalize;
+
+      if (not TVector3.Equals(SegDir, CurDir)) or
+         (not TVector3.Equals(NewUp, CurUp)) then
+      begin
+        if T.HasWorldTransform then
+          T.SetWorldView(CurWorldPos, SegDir, NewUp)
+        else
+          T.SetView(CurWorldPos, SegDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInHelix(
+  const StartRadius, EndRadius, HeightSpan: Single; const Turns: Single;
+  const OrientToCenter: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, NewPos, CurDir, CurUp, NewDir, NewUp, GravityUp, Side: TVector3;
+  EffStartR, EffEndR, EffTurns, Factor, CurRadius, BaseY, Angle, SinA, CosA, SumDist: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  if FPivotMode = pmPrimarySelected then
+    CenterPos := GetTransformWorkingPos(Items[0])
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  if StartRadius > 0 then
+    EffStartR := StartRadius
+  else
+  begin
+    SumDist := 0;
+    for I := 0 to Count - 1 do
+    begin
+      CurPos := GetTransformWorkingPos(Items[I]);
+      SumDist := SumDist + Hypot(CurPos.X - CenterPos.X, CurPos.Z - CenterPos.Z);
+    end;
+    EffStartR := SumDist / Count;
+    if EffStartR < 1e-4 then
+      EffStartR := 5.0;
+  end;
+
+  if EndRadius >= 0 then
+    EffEndR := EndRadius
+  else
+    EffEndR := EffStartR;
+
+  if SameValue(Turns, 0.0, 1e-5) then
+    EffTurns := 1.0
+  else
+    EffTurns := Turns;
+
+  if FPivotMode = pmPrimarySelected then
+    BaseY := CenterPos.Y
+  else
+    BaseY := CenterPos.Y - 0.5 * HeightSpan;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    Factor := Single(I) / Single(Count - 1);
+    CurRadius := Lerp(Factor, EffStartR, EffEndR);
+    Angle := Factor * EffTurns * 2.0 * Pi;
+    SinCos(Angle, SinA, CosA);
+
+    CurPos := GetTransformWorkingPos(T);
+    NewPos := Vector3(
+      CenterPos.X + SinA * CurRadius,
+      BaseY + Factor * HeightSpan,
+      CenterPos.Z + CosA * CurRadius);
+
+    if not TVector3.Equals(NewPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, NewPos);
+      Result := true;
+    end;
+
+    if OrientToCenter then
+    begin
+      if T.HasWorldTransform then
+        T.GetWorldView(CurPos, CurDir, CurUp)
+      else
+      begin
+        CurPos := T.Translation;
+        CurDir := T.Direction;
+        CurUp := T.Up;
+      end;
+
+      NewDir := Vector3(CenterPos.X - CurPos.X, 0, CenterPos.Z - CurPos.Z);
+      if not NewDir.IsZero(1e-5) then
+      begin
+        NewDir := NewDir.Normalize;
+        if T.World <> nil then
+          GravityUp := T.World.GravityUp
+        else
+          GravityUp := Vector3(0, 1, 0);
+
+        Side := TVector3.CrossProduct(NewDir, GravityUp);
+        if Side.IsZero(1e-4) then
+          Side := TVector3.CrossProduct(NewDir, CurUp);
+        if Side.IsZero(1e-4) then
+          Side := Vector3(1, 0, 0);
+        NewUp := TVector3.CrossProduct(Side, NewDir).Normalize;
+
+        if (not TVector3.Equals(NewDir, CurDir)) or
+           (not TVector3.Equals(NewUp, CurUp)) then
+        begin
+          if T.HasWorldTransform then
+            T.SetWorldView(CurPos, NewDir, NewUp)
+          else
+            T.SetView(CurPos, NewDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.CenterSelectedOriginOnChildren(
+  const UseBottomCenter: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  DirectChildren: array of TCastleTransform;
+  ChildOrigWorldPos: array of TVector3;
+  I, J, Count, DirectChildCount: Integer;
+  ParentT, ChildT: TCastleTransform;
+  ChildrenWorldBox, ChildBox: TBox3D;
+  TargetWorldOrigin, CurParentWorldPos: TVector3;
+begin
+  Result := false;
+  if SelectedCount = 0 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    ParentT := Boxes[I].Parent;
+    if (ParentT <> nil) and (not IsDescendantOfAnySelected(ParentT)) then
+    begin
+      Items[Count] := ParentT;
+      Inc(Count);
+    end;
+  end;
+
+  for I := 0 to Count - 1 do
+  begin
+    ParentT := Items[I];
+    SetLength(DirectChildren, ParentT.Count);
+    SetLength(ChildOrigWorldPos, ParentT.Count);
+    DirectChildCount := 0;
+    ChildrenWorldBox := TBox3D.Empty;
+    for J := 0 to ParentT.Count - 1 do
+    begin
+      ChildT := ParentT[J];
+      if (ChildT = nil) or (csTransient in ChildT.ComponentStyle) then Continue;
+      DirectChildren[DirectChildCount] := ChildT;
+      ChildOrigWorldPos[DirectChildCount] := GetTransformWorkingPos(ChildT);
+      ChildBox := ChildT.WorldBoundingBox;
+      if not ChildBox.IsEmpty then
+        ChildrenWorldBox.Include(ChildBox)
+      else
+        ChildrenWorldBox.Include(ChildOrigWorldPos[DirectChildCount]);
+      Inc(DirectChildCount);
+    end;
+
+    if (DirectChildCount = 0) or ChildrenWorldBox.IsEmpty then Continue;
+
+    TargetWorldOrigin := ChildrenWorldBox.Center;
+    if UseBottomCenter then
+      TargetWorldOrigin.Y := ChildrenWorldBox.Data[0].Y;
+
+    CurParentWorldPos := GetTransformWorkingPos(ParentT);
+    if not TVector3.Equals(TargetWorldOrigin, CurParentWorldPos, 1e-5) then
+    begin
+      SetTransformWorkingPos(ParentT, TargetWorldOrigin);
+      for J := 0 to DirectChildCount - 1 do
+        SetTransformWorkingPos(DirectChildren[J], ChildOrigWorldPos[J]);
       Result := true;
     end;
   end;
