@@ -2227,8 +2227,15 @@ end;
 
 var
   { The shadow map atlas shared by all TGeneratedShadowMapResource
-    (with InAtlas), created when needed, freed when unused. }
+    (with InAtlas), created when needed, freed when the OpenGL context
+    is closed: it is kept when unused, as lights often start and stop
+    casting shadows (e.g. switching to the strongest light near the player). }
   ShadowMapAtlas: TShadowMapAtlas;
+
+procedure ShadowMapAtlasContextClose;
+begin
+  FreeAndNil(ShadowMapAtlas);
+end;
 
 constructor TShadowMapAtlas.Create(const ASize: Cardinal);
 var
@@ -2592,8 +2599,6 @@ begin
   if InAtlas then
   begin
     Dec(ShadowMapAtlas.UserCount);
-    if ShadowMapAtlas.UserCount = 0 then
-      FreeAndNil(ShadowMapAtlas);
     InAtlas := false;
   end;
 end;
