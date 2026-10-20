@@ -449,14 +449,112 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 24 Status**: Completed. GPU-Driven Continuous Instance LOD Selection (`TCastleVulkanLODSelector` with 48-byte `TCastleLODInstanceDescriptor`, projected vertical screen-height coverage metric `EvaluateProjectedScreenCoverage`, 4-level discrete LOD selection + crossfade transition band `SelectDiscreteLODLevel`, and `GenerateLODSelectionComputeShader`), Screen-Space Bent Normals & Lagarde/Jimenez Specular Occlusion (`EvaluateSpecularOcclusion`, `BendNormalTowardsUnoccludedDir`, `GenerateBentNormalsAndSpecularOcclusionFunctions`), and Trilinear 3D Color Grading LUT + Natural $\cos^4(\theta)$ Vignette + Luminance-Preserving Film Grain (`Compute3DLUTSampleCoord`, `EvaluateNaturalCos4Vignette`, `EvaluateFilmGrainNoise`, `GenerateColorGradingLUTAndFilmGrainFunctions`) fully integrated and tested (102 unit tests passing).
 
 
-### Phase 25: Volumetric Cloud Raymarching (Henyey-Greenstein Dual-Lobe Phase & Beer-Powder Law), GPU Texture Streaming Residency Feedback & Equirectangular-to-Cubemap Compute Panorama Converter (PLANNED)
+### Phase 25: Volumetric Cloud Raymarching (Henyey-Greenstein Dual-Lobe Phase & Beer-Powder Law), GPU Texture Streaming Residency Feedback & Equirectangular-to-Cubemap Compute Panorama Converter (COMPLETED)
 
-* [ ] **25.1. Horizon-Aligned Volumetric Cloud Layer Raymarcher (`GenerateVolumetricCloudFunctions` in `CastleInternalShaderRHI`)**:
-  * Implement spherical shell altitude fraction remapping, dual-lobe Henyey-Greenstein forward/backward scattering phase (`EvaluateDualLobeHGPhase`), and Schneider's Beer-Powder multiple-scattering dark-edge sugar-powder approximation (`EvaluateBeerPowderTransmittance`).
-* [ ] **25.2. GPU Texture Streaming Mipmap Residency & Feedback Analyzer (`TCastleVulkanTextureStreamer` in `CastleInternalRHI_Vulkan`)**:
-  * Track per-material minimum requested mip levels from GPU UV derivative feedback (`ComputeDesiredMipLevel`, `RecordMipFeedback`, `ResolveEvictionAndPromotionQueue`) within a configurable VRAM streaming budget.
-* [ ] **25.3. Equirectangular HDR Panorama to Cubemap Compute Converter (`GenerateEquirectToCubemapComputeShader` in `CastleInternalShaderRHI`)**:
-  * Convert $2:1$ equirectangular `.hdr`/`.exr` panoramas into 6-face `tdCube` environment textures (`DirectionToEquirectangularUV`, `CubeFaceUVToDirection`) in a single compute pass.
+* [x] **25.1. Horizon-Aligned Volumetric Cloud Layer Raymarcher (`GenerateVolumetricCloudFunctions` in `CastleInternalShaderRHI`)**:
+  * Implement dual-lobe Henyey-Greenstein forward/backward scattering phase (`EvaluateDualLobeHGPhase`) and Schneider's Beer-Powder multiple-scattering dark-edge sugar-powder approximation (`EvaluateBeerPowderTransmittance`).
+* [x] **25.2. GPU Texture Streaming Mipmap Residency & Feedback Analyzer (`TCastleVulkanTextureStreamer` in `CastleInternalRHI_Vulkan`)**:
+  * Track per-texture minimum requested mip levels from GPU UV derivative feedback (`ComputeDesiredMipLevel`, `GenerateTextureMipFeedbackFunctions`, `RegisterStreamableTexture`, `RecordMipFeedback`, `ResolveStreamingRequests`, `UploadFeedbackBuffer`).
+* [x] **25.3. Equirectangular HDR Panorama to Cubemap Compute Converter (`GenerateEquirectToCubemapComputeShader` in `CastleInternalShaderRHI`)**:
+  * Convert $2:1$ equirectangular `.hdr`/`.exr` panoramas into 6-face `tdCube` environment textures (`DirectionToEquirectangularUV`, `EquirectangularUVToDirection`, `CubeFaceUVToDirection`) in a single compute pass.
+
+**Milestone 25 Status**: Completed. Volumetric Cloud Raymarching (`EvaluateDualLobeHGPhase`, `EvaluateBeerPowderTransmittance`, `GenerateVolumetricCloudFunctions`), GPU Texture Streaming Mipmap Residency & Feedback Analyzer (`TCastleVulkanTextureStreamer` with `ComputeDesiredMipLevel`, `RecordMipFeedback`, `ResolveStreamingRequests`, and `FeedbackBuffer`), and Equirectangular-to-Cubemap Compute Panorama Converter (`DirectionToEquirectangularUV`, `EquirectangularUVToDirection`, `GenerateEquirectToCubemapComputeShader`) fully integrated and tested (105 unit tests passing).
+
+
+### Phase 26: Analytic Area Light LTC Shading, Seamless World-Space Triplanar & Height-Blended Texturing, and GPU Shadow Caster Light-Ray Extrusion Culling (PLANNED)
+
+* [ ] **26.1. Analytic Polygonal / Rectangular Area Lights via Linearly Transformed Cosines (`GenerateAreaLightLTCFunctions` in `CastleInternalShaderRHI`)**:
+  * Evaluate analytical rectangular area light solid angle & horizon-clipped irradiance (`EvaluateRectAreaLightSolidAngle`, `EvaluateLTCFilteredRoughness`) for physically based area lights.
+* [ ] **26.2. Seamless World-Space Triplanar & Height-Blended Texture Mapping (`GenerateTriplanarAndHeightBlendFunctions` in `CastleInternalShaderRHI`)**:
+  * Compute power-sharpened triplanar projection weights (`EvaluateTriplanarBlendWeights`) and height-modulated multi-layer splat blending (`EvaluateHeightModulatedBlendWeights`) for steep cliffs, caves, and procedural geometry without UV seams.
+* [ ] **26.3. GPU Shadow Caster Frustum + Light-Ray Extrusion Culling (`TCastleVulkanShadowCasterCuller` in `CastleInternalRHI_Vulkan`)**:
+  * Cull shadow-casting instances whose extruded light-direction bounding volume does not intersect the camera view frustum (`EvaluateShadowCasterExtrudedSphereIntersectsAABB`).
+
+
+### Phase 27: Nanite-Style Visibility Buffer, Hierarchical Cluster DAG & Software Micro-Polygon Compute Rasterizer (PLANNED)
+
+* [ ] **27.1. 64-Bit Visibility Buffer (`Depth32 | InstanceID20 | PrimitiveID12`) & Analytic Partial-Derivative Barycentric Reconstruction (`GenerateVisibilityBufferFunctions` in `CastleInternalShaderRHI`)**:
+  * Pack visible instance/cluster/triangle IDs into a compact visibility payload (`PackVisibilityBufferPayload`, `UnpackVisibilityBufferPayload`) and reconstruct perspective-correct barycentric coordinates $(\lambda_0, \lambda_1, \lambda_2)$ and analytical screen-space UV gradients ($\partial \text{uv}/\partial x$, $\partial \text{uv}/\partial y$, `EvaluatePerspectiveBarycentrics2D`) in a deferred material shading pass without $2 \times 2$ quad overshading.
+* [ ] **27.2. Hierarchical Cluster DAG Cut Selection & Monotonic Parent-Child Screen-Space Error (`TCastleVulkanClusterDAG` in `CastleInternalRHI_Vulkan`)**:
+  * Evaluate Nanite-style monotonic cluster group error bounds (`EvaluateClusterProjectedError`, `IsClusterDAGCutNode`) where a cluster is rendered iff `ParentProjectedError > PixelErrorThreshold >= SelfProjectedError`, guaranteeing crack-free seamless LOD transitions across adjacent meshlets without index stitching.
+* [ ] **27.3. Sub-Pixel Software Compute Micro-Triangle Rasterizer (`GenerateSoftwareMicroRasterComputeShader` in `CastleInternalShaderRHI`)**:
+  * Rasterize sub-pixel / micro-polygon clusters ($< 4 \times 4$ pixels) directly in a compute shader via 2D edge-function bounding boxes (`EvaluateEdgeFunction2D`) and `imageAtomicMax` 64-bit depth+payload writes, bypassing fixed-function hardware rasterizer quad-occupancy bottlenecks.
+
+
+### Phase 28: Lumen-Style Signed Distance Field (SDF) Global Illumination, Surface Cache Cards & Screen-Space Radiance Cache (PLANNED)
+
+* [ ] **28.1. Mesh SDF & 3D Clipmap Global Signed Distance Field Sphere Tracing (`TCastleVulkanGlobalSDF` in `CastleInternalRHI_Vulkan`, `GenerateGlobalSDFTraceFunctions` in `CastleInternalShaderRHI`)**:
+  * Maintain a multi-cascade 3D `td3D` Global SDF clipmap (`EvaluateSDFBoxDistance`, `EvaluateSDFSmoothUnion`, `TraceGlobalSDFSphereMarch`, `EvaluateSDFSoftShadowCone`) for fast hardware-ray-tracing-free software ray queries, sky occlusion, and off-screen GI.
+* [ ] **28.2. Lumen-Style 6-Axis Surface Cache Card Atlas (`TCastleVulkanSurfaceCache` in `CastleInternalRHI_Vulkan`)**:
+  * Project mesh surface direct lighting, albedo, and normals into an axis-aligned card atlas (`SelectDominantSurfaceCardAxis`, `ComputeSurfaceCacheAtlasUV`) so SDF sphere hits can evaluate multi-bounce indirect radiance at any world hit point.
+* [ ] **28.3. Screen-Space Radiance Cache Probe Interpolation & Importance Sampling (`GenerateScreenRadianceCacheFunctions` in `CastleInternalShaderRHI`)**:
+  * Place sparse screen-space radiance probes (`EvaluateScreenProbeBilateralWeight`, `CosineWeightedHemisphereSample`) to decouple full-resolution shading from expensive GI raymarching.
+
+
+### Phase 29: ReSTIR DI / GI Spatio-Temporal Reservoir Resampling (UE5 MegaLights Architecture) (PLANNED)
+
+* [ ] **29.1. Weighted Reservoir Sampling (WRS) & Streaming RIS (`GenerateReSTIRReservoirFunctions` in `CastleInternalShaderRHI`)**:
+  * Implement constant-memory streaming reservoirs (`TCastleReSTIRReservoir`, 32B: `SelectedLightID`, `WeightSum`, `TargetPDF`, `SampleCountM`, `ContributionWeightW`) and unbiased contribution weight computation $W = \frac{1}{\hat{p}(y)} \cdot \frac{1}{M} \sum w_i$ (`EvaluateLuminanceTargetPDF`, `UpdateReservoirSample`, `FinalizeReservoirWeight`).
+* [ ] **29.2. Temporal & Spatial Neighbor Reservoir Combination (`TCastleVulkanReSTIR` in `CastleInternalRHI_Vulkan`)**:
+  * Reproject previous-frame reservoirs with history M-capping (`MaxHistoryM = 20`) and combine spatial neighbor reservoirs with depth/normal similarity rejection (`CombineReservoirs`, `EvaluateReSTIRNeighborSimilarity`) to shade thousands of shadow-casting dynamic lights ("MegaLights") with 1–2 shadow rays per pixel.
+
+
+### Phase 30: Temporal Super Resolution (TSR) Sub-Pixel History Upscaling & Disocclusion Anti-Ghosting (PLANNED)
+
+* [ ] **30.1. Lanczos-2 / Blackman-Harris Sub-Pixel Reconstruction Kernel & History Upsampling (`TCastleVulkanTSRUpscaler` in `CastleInternalRHI_Vulkan`, `GenerateTSRUpscaleComputeShader` in `CastleInternalShaderRHI`)**:
+  * Upscale lower-resolution input frames ($50\%\text{–}75\%$ render scale, e.g. 1080p $\to$ 4K) into full-resolution history buffers using windowed Lanczos-2 and Blackman-Harris kernel weights (`EvaluateLanczos2Weight`, `EvaluateBlackmanHarrisWeight`).
+* [ ] **30.2. Parallax Disocclusion Detection, Thin-Feature Responsiveness & Flicker Suppression (`EvaluateTSRDisocclusionConfidence`, `EvaluateTSRThinGeometryBlend` in `CastleInternalShaderRHI`)**:
+  * Detect depth-buffer parallax disocclusions and sub-pixel thin geometry (wires, foliage, hair) to dynamically boost current-frame responsiveness without ghosting or moiré shimmering.
+
+
+### Phase 31: Substrate / Strata Multi-Lobe Layered Material Slabs, Glint Microfacet Sparkles & Dual-Specular Marschner Hair/Fur BSDF (PLANNED)
+
+* [ ] **31.1. Energy-Conserving Layered Material Slabs & Vertical Coating Transmittance (`GenerateSubstrateLayeredMaterialFunctions` in `CastleInternalShaderRHI`)**:
+  * Model arbitrary vertical/horizontal material slab hierarchies (UE5 Substrate/Strata architecture) with directional albedo energy conservation $T_{\text{bottom}} = (1 - E_{\text{top}}(\theta_o)) \cdot (1 - E_{\text{top}}(\theta_i))$ and Beer-Lambert medium absorption (`EvaluateLayeredSlabComposition`).
+* [ ] **31.2. Marschner / Chiang Dual-Specular Hair & Fur Fiber BSDF (`GenerateHairMarschnerBSDF` in `CastleInternalShaderRHI`)**:
+  * Implement longitudinal $M_R, M_{TT}, M_{TRT}$ Gaussian/cuticle-tilt lobes and azimuthal $N_R, N_{TT}, N_{TRT}$ scattering (`EvaluateMarschnerLongitudinalM`, `EvaluateHairAzimuthalTRT`) for realistic strand and card hair/fur rendering.
+* [ ] **31.3. Stochastic Discrete Microfacet Glints & Sparkles (`EvaluateStochasticGlintNDF` in `CastleInternalShaderRHI`)**:
+  * Evaluate discrete microfacet normal distributions within the pixel footprint for metallic car paint, snow, sand, and rough mineral sparkles.
+
+
+### Phase 32: Hardware Mesh Shaders (`VK_EXT_mesh_shader`), Variable Rate Shading (`VK_KHR_fragment_shading_rate`) & Runtime Virtual Texturing (RVT) (PLANNED)
+
+* [ ] **32.1. Task & Mesh Shader Pipeline (`VK_EXT_mesh_shader`, `GenerateMeshShaderStageFunctions` in `CastleInternalShaderRHI`)**:
+  * Support hardware Task and Mesh shader stages emitting `gl_MeshVerticesEXT` and `gl_PrimitiveTriangleIndicesEXT` directly from meshlet clusters (`TCastleMeshletDescriptor`, `ComputeMeshletTaskGroupCount`).
+* [ ] **32.2. Per-Draw & Tile-Based Variable Rate Shading (`VK_KHR_fragment_shading_rate`, `TCastleVulkanVRSManager` in `CastleInternalRHI_Vulkan`)**:
+  * Generate screen-space $16 \times 16$ tile shading rate images (`1x1`, `1x2`, `2x1`, `2x2`, `4x4`) driven by luminance contrast and velocity (`SelectOptimalShadingRateTile`, `GenerateVRSContrastComputeShader`).
+* [ ] **32.3. Runtime Virtual Texturing (RVT) Page Table & Physical Material Tile Cache (`TCastleVulkanRuntimeVirtualTexture` in `CastleInternalRHI_Vulkan`)**:
+  * Composite multi-layer terrain splats, road splines, and world decals into on-demand virtual texture pages (`RequestRVTPage`, `TranslateRVTPageToPhysicalUV`) to replace expensive per-pixel multi-layer terrain blending with a single cache lookup.
+
+
+### Phase 33: Single-Layer Water Refraction, Absorption & Photon Caustics, Sparse Heterogeneous Volume Bricks & GPU Breadcrumb Crash Tracker (PLANNED)
+
+* [ ] **33.1. Physically Based Single-Layer Water Volume Beer-Lambert Absorption, Refraction & Caustics (`GenerateSingleLayerWaterFunctions` in `CastleInternalShaderRHI`)**:
+  * Evaluate depth-dependent water phase scattering, RGB optical absorption coefficients, Snell's law screen-space refraction offset (`EvaluateWaterBeerLambertAbsorption`, `ComputeWaterRefractionUVOffset`), and underwater caustics (`EvaluateWaterCausticsPattern`).
+* [ ] **33.2. Sparse Brick-Atlas Heterogeneous Volumes (`TCastleVulkanSparseVolumeAtlas` in `CastleInternalRHI_Vulkan`)**:
+  * Pack active $8 \times 8 \times 8$ smoke/fire/explosion voxel bricks into a sparse 3D indirection table + physical brick pool (`AllocateVolumeBrick`, `EvaluateBlackbodyEmissionRGB`) with physically based temperature-to-RGB Planckian blackbody emission.
+* [ ] **33.3. GPU Breadcrumb Marker Buffer & `VK_ERROR_device_lost` Diagnostics (`TCastleVulkanBreadcrumbTracker` in `CastleInternalRHI_Vulkan`)**:
+  * Record fine-grained command-buffer pass/draw markers into a host-coherent breadcrumb buffer (`BeginBreadcrumbScope`, `EndBreadcrumbScope`, `FormatBreadcrumbCrashReport`) to pinpoint exact GPU hangs and TDR faults.
+
+
+## 4.1. Unreal Engine 5 vs. Castle Game Engine Vulkan RHI Feature Parity Matrix
+
+| Unreal Engine 5 Subsystem | Castle Game Engine Vulkan RHI Equivalent | Phase & Status |
+| :--- | :--- | :--- |
+| **RDG (Render Dependency Graph)** | `TRHIRenderGraph` & `TRHIRenderGraphPass` (DAG topological sort, dead-pass culling, transient texture aliasing, automatic barrier hoisting) | Phase 15 (COMPLETED) |
+| **Virtual Shadow Maps (VSM)** | `TCastleVulkanVirtualShadowMap` ($64 \times 64$ virtual page table, $16 \times 16$ physical $128 \times 128$ tile pool, `GenerateVSMPageLookupFunctions`) | Phase 23 (COMPLETED) |
+| **Nanite Cluster Culling** | `TCastleVulkanMeshletCuller` (64v/124t meshlets, cone backface + sphere culling) & `TCastleVulkanComputeCuller` (Hi-Z + frustum + `vkCmdDrawIndexedIndirectCount`) | Phases 7–9, 22 (COMPLETED) |
+| **Nanite Visibility Buffer, Cluster DAG & Software Micro-Rasterizer** | `GenerateVisibilityBufferFunctions` (64-bit payload + analytic UV derivatives), `TCastleVulkanClusterDAG` (monotonic parent/child error cut), `GenerateSoftwareMicroRasterComputeShader` | Phase 27 (PLANNED) |
+| **Lumen GI & Reflections (Hardware + Software)** | `TCastleVulkanDDGIGrid` (Octahedral irradiance + Chebyshev visibility probes), `TCastleVulkanSSR` (Hi-Z raymarch), `VK_KHR_ray_query` (`GenerateInlineRayQueryFunctions`), plus Global SDF Clipmap (`TCastleVulkanGlobalSDF`), 6-Axis Surface Cache (`TCastleVulkanSurfaceCache`) & Screen Radiance Cache | Phases 16, 22, 23 (COMPLETED) & Phase 28 (PLANNED) |
+| **MegaLights / ReSTIR Direct & Indirect Lighting** | `TCastleVulkanClusteredLightCuller` (3D Forward+ 256+ lights) + `TCastleVulkanReSTIR` (Spatio-temporal reservoir resampling WRS/RIS) | Phase 14 (COMPLETED) & Phase 29 (PLANNED) |
+| **Temporal Super Resolution (TSR) & TAA** | `TCastleVulkanTAA` (Halton jitter + YCoCg variance clipping) + `TCastleVulkanTSRUpscaler` (Lanczos-2 sub-pixel history upscaling & disocclusion anti-ghosting) + CAS (`EvaluateCASFilter5Tap`) | Phases 16, 22 (COMPLETED) & Phase 30 (PLANNED) |
+| **Substrate / Strata Material System** | Full Cook-Torrance GGX PBR, Clear Coat, Anisotropy, Subsurface/Transmission, Cloth Sheen, Thin-Film Iridescence, Separable Burley SSSS, plus Energy-Conserving Layered Material Slabs, Marschner Hair/Fur BSDF & Stochastic Glints | Phases 13, 19–21, 23 (COMPLETED) & Phase 31 (PLANNED) |
+| **Sky Atmosphere, Volumetric Fog & Volumetric Clouds** | `TCastleVulkanAtmosphereRenderer` (Rayleigh/Mie Sky-View LUT), `TCastleVulkanVolumetricFog` ($160 \times 90 \times 64$ Froxel Fog), `GenerateVolumetricCloudFunctions` (Dual-Lobe HG + Beer-Powder) | Phases 16, 20, 25 (COMPLETED) |
+| **Niagara GPU Particles** | `TCastleVulkanComputeParticles` (Compute simulation + `vkCmdDrawIndirect`) | Phase 17 (COMPLETED) |
+| **Water System (Ocean + Single-Layer Water)** | `TCastleVulkanOceanSimulator` (Gerstner wave spectrum + Jacobian crest foam) + Single-Layer Water Beer-Lambert absorption, Snell refraction & photon caustics | Phase 21 (COMPLETED) & Phase 33 (PLANNED) |
+| **World Partition Landscape & Runtime Virtual Texturing (RVT)** | `TCastleVulkanTerrainCDLOD` (Quadtree morphing CDLOD), `TCastleVulkanTextureStreamer` (GPU mip feedback), Triplanar/Height blending & `TCastleVulkanRuntimeVirtualTexture` | Phases 19, 25 (COMPLETED) & Phases 26, 32 (PLANNED) |
+| **Hardware Mesh Shaders & Variable Rate Shading (VRS)** | `VK_EXT_mesh_shader` (`GenerateMeshShaderStageFunctions`) & `VK_KHR_fragment_shading_rate` (`TCastleVulkanVRSManager`) | Phase 32 (PLANNED) |
+| **Heterogeneous Volumes & GPU Crash Breadcrumbs** | `TCastleVulkanSparseVolumeAtlas` (Planckian blackbody emission) & `TCastleVulkanBreadcrumbTracker` | Phase 33 (PLANNED) |
 
 
 ## 5. Build Tool (castle-engine) & Editor Integration
@@ -483,5 +581,5 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 ## 7. Testing & Verification Criteria
 
 * [x] Automated Visual Regression Tests: `CompareImagesPerceptualDiff` in `CastleInternalRHI` compares framebuffer readbacks (`GrabTextureImage`) between `rbOpenGL` and `rbVulkan` using normalized RMSE perceptual diff thresholds.
-* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 102 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
-* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance/Hi-Z occlusion culling (`TCastleVulkanComputeCuller`), Clustered Forward+ compute light culling (`TCastleVulkanClusteredLightCuller`), Declarative Render Graph (`TRHIRenderGraph`), Compute GTAO (`TCastleVulkanGTAO`), Hi-Z SSR (`TCastleVulkanSSR`), Froxel Volumetric Fog (`TCastleVulkanVolumetricFog`), Temporal Anti-Aliasing (`TCastleVulkanTAA`), Box-Projected Reflection Probes (`TCastleVulkanReflectionProbeManager`), OBB Decal Projection (`TCastleVulkanDecalManager`), GPU Compute Particles (`TCastleVulkanComputeParticles`), Weighted Blended OIT (`TCastleVulkanWeightedBlendedOIT`), Contact Shadows (`TCastleVulkanContactShadows`), Compute Skinning & Morph Targets (`TCastleVulkanComputeSkinner`), GPU-Driven Terrain CDLOD (`TCastleVulkanTerrainCDLOD`), Atmosphere Sky-View LUT (`TCastleVulkanAtmosphereRenderer`), Gerstner Ocean Simulator (`TCastleVulkanOceanSimulator`), DDGI Octahedral Probe Grid (`TCastleVulkanDDGIGrid`), GPU Meshlet Culler (`TCastleVulkanMeshletCuller`), Virtual Shadow Maps (`TCastleVulkanVirtualShadowMap`), GPU-Driven LOD Selector (`TCastleVulkanLODSelector`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.
+* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 105 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
+* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance/Hi-Z occlusion culling (`TCastleVulkanComputeCuller`), Clustered Forward+ compute light culling (`TCastleVulkanClusteredLightCuller`), Declarative Render Graph (`TRHIRenderGraph`), Compute GTAO (`TCastleVulkanGTAO`), Hi-Z SSR (`TCastleVulkanSSR`), Froxel Volumetric Fog (`TCastleVulkanVolumetricFog`), Temporal Anti-Aliasing (`TCastleVulkanTAA`), Box-Projected Reflection Probes (`TCastleVulkanReflectionProbeManager`), OBB Decal Projection (`TCastleVulkanDecalManager`), GPU Compute Particles (`TCastleVulkanComputeParticles`), Weighted Blended OIT (`TCastleVulkanWeightedBlendedOIT`), Contact Shadows (`TCastleVulkanContactShadows`), Compute Skinning & Morph Targets (`TCastleVulkanComputeSkinner`), GPU-Driven Terrain CDLOD (`TCastleVulkanTerrainCDLOD`), Atmosphere Sky-View LUT (`TCastleVulkanAtmosphereRenderer`), Gerstner Ocean Simulator (`TCastleVulkanOceanSimulator`), DDGI Octahedral Probe Grid (`TCastleVulkanDDGIGrid`), GPU Meshlet Culler (`TCastleVulkanMeshletCuller`), Virtual Shadow Maps (`TCastleVulkanVirtualShadowMap`), GPU-Driven LOD Selector (`TCastleVulkanLODSelector`), GPU Texture Streamer (`TCastleVulkanTextureStreamer`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.

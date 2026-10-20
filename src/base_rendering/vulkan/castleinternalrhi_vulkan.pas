@@ -2109,6 +2109,60 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { GPU Texture Streaming Mipmap Residency & Feedback Analyzer (Phase 25.2)    }
+  { -------------------------------------------------------------------------- }
+
+  TCastleStreamedTextureEntry = record
+    Width: Cardinal;
+    Height: Cardinal;
+    MipLevels: Cardinal;
+    ResidentMip: Cardinal;
+    RequestedMip: Cardinal;
+  end;
+
+  { Tracks per-texture desired mip levels from GPU derivative feedback and resolves
+    high-resolution mip promotions and unreferenced mip evictions. }
+  TCastleVulkanTextureStreamer = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FEntries: array[0 .. CASTLE_MAX_STREAMED_TEXTURES - 1] of TCastleStreamedTextureEntry;
+    FTextureCount: Cardinal;
+    FFeedbackBuffer: TVulkanRHIBuffer;
+    FUpdateCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Clears all registered streamable textures. }
+    procedure ClearTextures;
+
+    { Registers a streamable texture and its current coarsest resident mip level. }
+    function RegisterStreamableTexture(
+      const AWidth, AHeight, AMipLevels, AInitialResidentMip: Cardinal): Integer;
+
+    { Resets per-frame requested mip feedback slots to $FF (unreferenced). }
+    procedure ResetFrameFeedback;
+
+    { Records a pixel's requested mip level for ATextureIndex (atomic min semantics). }
+    procedure RecordMipFeedback(const ATextureIndex, ARequestedMip: Cardinal);
+
+    { Returns the current resident mip level for ATextureIndex. }
+    function GetResidentMip(const ATextureIndex: Cardinal): Cardinal;
+
+    { Resolves pending mip promotions (RequestedMip < ResidentMip) and evictions
+      (unreferenced textures demoted by 1 mip toward MipLevels - 1), returning total transitions. }
+    function ResolveStreamingRequests(
+      out APromotedCount, AEvictedCount: Cardinal): Cardinal;
+
+    { Uploads the per-texture requested mip array into FeedbackBuffer. }
+    procedure UploadFeedbackBuffer;
+
+    property TextureCount: Cardinal read FTextureCount;
+    property FeedbackBuffer: TVulkanRHIBuffer read FFeedbackBuffer;
+    property UpdateCount: Cardinal read FUpdateCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -2202,6 +2256,7 @@ type
     FMeshletCuller: TCastleVulkanMeshletCuller;
     FVirtualShadowMap: TCastleVulkanVirtualShadowMap;
     FLODSelector: TCastleVulkanLODSelector;
+    FTextureStreamer: TCastleVulkanTextureStreamer;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -2300,6 +2355,7 @@ type
     function GetMeshletCuller: TCastleVulkanMeshletCuller;
     function GetVirtualShadowMap: TCastleVulkanVirtualShadowMap;
     function GetLODSelector: TCastleVulkanLODSelector;
+    function GetTextureStreamer: TCastleVulkanTextureStreamer;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -2503,6 +2559,7 @@ type
     property MeshletCuller: TCastleVulkanMeshletCuller read GetMeshletCuller;
     property VirtualShadowMap: TCastleVulkanVirtualShadowMap read GetVirtualShadowMap;
     property LODSelector: TCastleVulkanLODSelector read GetLODSelector;
+    property TextureStreamer: TCastleVulkanTextureStreamer read GetTextureStreamer;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -12846,6 +12903,144 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanTextureStreamer (Phase 25.2)                                    }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanTextureStreamer.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  ClearTextures;
+end;
+
+destructor TCastleVulkanTextureStreamer.Destroy;
+begin
+  FreeAndNil(FFeedbackBuffer);
+  inherited;
+end;
+
+procedure TCastleVulkanTextureStreamer.ClearTextures;
+begin
+  FillChar(FEntries[0], SizeOf(FEntries), 0);
+  FTextureCount := 0;
+end;
+
+function TCastleVulkanTextureStreamer.RegisterStreamableTexture(
+  const AWidth, AHeight, AMipLevels, AInitialResidentMip: Cardinal): Integer;
+var
+  Idx, MaxMip: Cardinal;
+begin
+  if FTextureCount >= CASTLE_MAX_STREAMED_TEXTURES then
+    Exit(-1);
+  Idx := FTextureCount;
+  Inc(FTextureCount);
+  MaxMip := Max(Cardinal(1), AMipLevels) - 1;
+  FEntries[Idx].Width := Max(Cardinal(1), AWidth);
+  FEntries[Idx].Height := Max(Cardinal(1), AHeight);
+  FEntries[Idx].MipLevels := Max(Cardinal(1), AMipLevels);
+  FEntries[Idx].ResidentMip := Min(AInitialResidentMip, MaxMip);
+  FEntries[Idx].RequestedMip := $FF;
+  Result := Integer(Idx);
+end;
+
+procedure TCastleVulkanTextureStreamer.ResetFrameFeedback;
+var
+  I: Cardinal;
+begin
+  if FTextureCount = 0 then
+    Exit;
+  for I := 0 to FTextureCount - 1 do
+    FEntries[I].RequestedMip := $FF;
+end;
+
+procedure TCastleVulkanTextureStreamer.RecordMipFeedback(
+  const ATextureIndex, ARequestedMip: Cardinal);
+var
+  ClampedMip: Cardinal;
+begin
+  if ATextureIndex >= FTextureCount then
+    Exit;
+  ClampedMip := Min(ARequestedMip, FEntries[ATextureIndex].MipLevels - 1);
+  if ClampedMip < FEntries[ATextureIndex].RequestedMip then
+    FEntries[ATextureIndex].RequestedMip := ClampedMip;
+end;
+
+function TCastleVulkanTextureStreamer.GetResidentMip(
+  const ATextureIndex: Cardinal): Cardinal;
+begin
+  if ATextureIndex < FTextureCount then
+    Result := FEntries[ATextureIndex].ResidentMip
+  else
+    Result := 0;
+end;
+
+function TCastleVulkanTextureStreamer.ResolveStreamingRequests(
+  out APromotedCount, AEvictedCount: Cardinal): Cardinal;
+var
+  I, CoarsestMip: Cardinal;
+begin
+  APromotedCount := 0;
+  AEvictedCount := 0;
+  Result := 0;
+  if FTextureCount = 0 then
+    Exit;
+
+  for I := 0 to FTextureCount - 1 do
+  begin
+    CoarsestMip := FEntries[I].MipLevels - 1;
+    if FEntries[I].RequestedMip = $FF then
+    begin
+      { Texture was not sampled this frame: evict 1 mip level toward coarsest tail }
+      if FEntries[I].ResidentMip < CoarsestMip then
+      begin
+        Inc(FEntries[I].ResidentMip);
+        Inc(AEvictedCount);
+        Inc(Result);
+      end;
+    end else
+    if FEntries[I].RequestedMip < FEntries[I].ResidentMip then
+    begin
+      { Texture requires finer mip resolution than currently resident: promote }
+      FEntries[I].ResidentMip := FEntries[I].RequestedMip;
+      Inc(APromotedCount);
+      Inc(Result);
+    end;
+  end;
+end;
+
+procedure TCastleVulkanTextureStreamer.UploadFeedbackBuffer;
+var
+  BufDesc: TRHIBufferDesc;
+  RawFeedback: array[0 .. CASTLE_MAX_STREAMED_TEXTURES - 1] of Cardinal;
+  I: Cardinal;
+  MappedPtr: Pointer;
+begin
+  if FFeedbackBuffer = nil then
+  begin
+    BufDesc := TRHIBufferDesc.Create(
+      SizeOf(RawFeedback),
+      [buStorage, buTransferDst],
+      muCpuToGpu,
+      'TextureStreamingFeedbackBuffer');
+    FFeedbackBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+
+  for I := 0 to CASTLE_MAX_STREAMED_TEXTURES - 1 do
+    if I < FTextureCount then
+      RawFeedback[I] := FEntries[I].RequestedMip
+    else
+      RawFeedback[I] := $FF;
+
+  MappedPtr := FFeedbackBuffer.Map;
+  if MappedPtr <> nil then
+  begin
+    Move(RawFeedback[0], MappedPtr^, SizeOf(RawFeedback));
+    FFeedbackBuffer.Unmap;
+  end;
+  Inc(FUpdateCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -13395,12 +13590,20 @@ begin
   Result := FLODSelector;
 end;
 
+function TVulkanRHIDevice.GetTextureStreamer: TCastleVulkanTextureStreamer;
+begin
+  if FTextureStreamer = nil then
+    FTextureStreamer := TCastleVulkanTextureStreamer.Create(Self);
+  Result := FTextureStreamer;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FTextureStreamer);
   FreeAndNil(FLODSelector);
   FreeAndNil(FVirtualShadowMap);
   FreeAndNil(FMeshletCuller);

@@ -141,6 +141,9 @@ type
     procedure TestGPUDrivenContinuousLODSelectionRHI;
     procedure TestBentNormalsAndSpecularOcclusionRHI;
     procedure TestColorGrading3DLUTAndFilmGrainVignetteRHI;
+    procedure TestVolumetricCloudDualLobeHGAndBeerPowderRHI;
+    procedure TestGPUTextureStreamingMipFeedbackRHI;
+    procedure TestEquirectangularToCubemapPanoramaConverterRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -7952,6 +7955,118 @@ begin
     AssertTrue('Midtone pixel must receive non-zero film grain modulation',
       Abs(GrainMid.X - 0.25) > 1e-4);
     AssertSameValue(1.0, GrainWhite.X, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVolumetricCloudDualLobeHGAndBeerPowderRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  CloudGLSL: String;
+  PhaseForward, PhaseSide, PhaseBack: Single;
+  BeerOnly, BeerPowderEdge, BeerPowderPeak: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Volumetric Cloud GLSL 450 functions }
+    CloudGLSL := Gen.GenerateVolumetricCloudFunctions;
+    AssertTrue('Volumetric Cloud GLSL must include EvaluateDualLobeHGPhase and EvaluateBeerPowderTransmittance',
+      (Pos('float EvaluateDualLobeHGPhase(float cosTheta, float forwardG, float backwardG, float forwardWeight)', CloudGLSL) > 0) and
+      (Pos('float EvaluateBeerPowderTransmittance(float opticalDepth, float powderStrength)', CloudGLSL) > 0));
+
+    { 2. Verify Dual-Lobe Henyey-Greenstein phase has both strong forward silver-lining and backward glory lobe }
+    PhaseForward := TCastleShaderGeneratorRHI.EvaluateDualLobeHGPhase(1.0, 0.8, -0.5, 0.7);
+    PhaseSide    := TCastleShaderGeneratorRHI.EvaluateDualLobeHGPhase(0.0, 0.8, -0.5, 0.7);
+    PhaseBack    := TCastleShaderGeneratorRHI.EvaluateDualLobeHGPhase(-1.0, 0.8, -0.5, 0.7);
+    AssertTrue('Forward silver-lining lobe must strongly exceed side-scattering and back-scattering',
+      (PhaseForward > PhaseBack * 5.0) and (PhaseBack > PhaseSide * 2.0));
+
+    { 3. Verify Schneider Beer-Powder dark-edge sugar-powder transmittance }
+    BeerOnly       := TCastleShaderGeneratorRHI.EvaluateBeerPowderTransmittance(0.1, 0.0);
+    BeerPowderEdge := TCastleShaderGeneratorRHI.EvaluateBeerPowderTransmittance(0.1, 1.0);
+    BeerPowderPeak := TCastleShaderGeneratorRHI.EvaluateBeerPowderTransmittance(0.5, 1.0);
+    AssertSameValue(Exp(-0.1), BeerOnly, 1e-5);
+    AssertTrue('Beer-Powder law darkens thin cloud fringes (tau=0.1) compared to mid-density crests (tau=0.5)',
+      BeerPowderPeak > BeerPowderEdge);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGPUTextureStreamingMipFeedbackRHI;
+var
+  Device: TVulkanRHIDevice;
+  Gen: TCastleShaderGeneratorRHI;
+  StreamGLSL: String;
+  Tex0, Tex1: Integer;
+  Promoted, Evicted, TotalChanges: Cardinal;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6666)) );
+  try
+    { 1. Verify Texture Mip Feedback GLSL 450 }
+    StreamGLSL := Gen.GenerateTextureMipFeedbackFunctions;
+    AssertTrue('Texture Mip Feedback GLSL must include ComputeDesiredMipLevel',
+      Pos('uint ComputeDesiredMipLevel(float texelFootprintMaxDeriv, uint maxMipLevel, float mipBias)', StreamGLSL) > 0);
+
+    { 2. Verify ComputeDesiredMipLevel derivative-to-mip calculation }
+    AssertEquals(Cardinal(0), TCastleShaderGeneratorRHI.ComputeDesiredMipLevel(1.0, 10));
+    AssertEquals(Cardinal(2), TCastleShaderGeneratorRHI.ComputeDesiredMipLevel(4.0, 10));
+    AssertEquals(Cardinal(4), TCastleShaderGeneratorRHI.ComputeDesiredMipLevel(16.0, 10));
+
+    { 3. Verify TCastleVulkanTextureStreamer residency promotion and eviction }
+    Device.TextureStreamer.ClearTextures;
+    Tex0 := Device.TextureStreamer.RegisterStreamableTexture(2048, 2048, 11, 6);
+    Tex1 := Device.TextureStreamer.RegisterStreamableTexture(1024, 1024, 10, 4);
+    AssertEquals(0, Tex0);
+    AssertEquals(1, Tex1);
+
+    Device.TextureStreamer.ResetFrameFeedback;
+    { Tex0 is sampled at multiple pixels requesting mips 4 and 1 -> atomicMin keeps mip 1 (finer than resident mip 6 -> promote!)
+      Tex1 is not sampled at all ($FF) -> evict 1 mip from 4 to 5! }
+    Device.TextureStreamer.RecordMipFeedback(Cardinal(Tex0), 4);
+    Device.TextureStreamer.RecordMipFeedback(Cardinal(Tex0), 1);
+
+    TotalChanges := Device.TextureStreamer.ResolveStreamingRequests(Promoted, Evicted);
+    AssertEquals(Cardinal(2), TotalChanges);
+    AssertEquals(Cardinal(1), Promoted);
+    AssertEquals(Cardinal(1), Evicted);
+    AssertEquals(Cardinal(1), Device.TextureStreamer.GetResidentMip(Cardinal(Tex0)));
+    AssertEquals(Cardinal(5), Device.TextureStreamer.GetResidentMip(Cardinal(Tex1)));
+
+    Device.TextureStreamer.UploadFeedbackBuffer;
+    AssertEquals(Cardinal(1), Device.TextureStreamer.UpdateCount);
+    AssertTrue('TextureStreamer FeedbackBuffer must be allocated',
+      Device.TextureStreamer.FeedbackBuffer <> nil);
+  finally
+    FreeAndNil(Device);
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestEquirectangularToCubemapPanoramaConverterRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  EquiGLSL: String;
+  OrigDir, DecodedDir: TVector3;
+  EqUV: TVector2;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Equirectangular-to-Cubemap Compute Shader GLSL 450 }
+    EquiGLSL := Gen.GenerateEquirectToCubemapComputeShader(8, 8);
+    AssertTrue('Equirect-to-Cubemap GLSL must include DirectionToEquirectangularUV and CubeFaceUVToDirection',
+      (Pos('vec2 DirectionToEquirectangularUV(vec3 dir)', EquiGLSL) > 0) and
+      (Pos('vec3 CubeFaceUVToDirection(uint faceIdx, vec2 uv)', EquiGLSL) > 0));
+
+    { 2. Verify bijective spherical roundtrip between 3D direction and 2:1 Equirectangular UV }
+    OrigDir := Vector3(-0.48, 0.55, 0.6834).Normalize;
+    EqUV := TCastleShaderGeneratorRHI.DirectionToEquirectangularUV(OrigDir);
+    DecodedDir := TCastleShaderGeneratorRHI.EquirectangularUVToDirection(EqUV);
+    AssertSameValue(OrigDir.X, DecodedDir.X, 1e-4);
+    AssertSameValue(OrigDir.Y, DecodedDir.Y, 1e-4);
+    AssertSameValue(OrigDir.Z, DecodedDir.Z, 1e-4);
   finally
     FreeAndNil(Gen);
   end;

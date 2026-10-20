@@ -77,9 +77,17 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–23**: **COMPLETED** (100%).
-- **Phase 24 (GPU-Driven Instance & Mesh LOD Selection, Screen-Space Bent Normals & Specular Occlusion, and Color Grading 3D LUT + Film Grain / Vignette Post-Processing)**: **COMPLETED** (100%, 102 unit tests passing):
-  - [x] **24.1. GPU-Driven Continuous Instance LOD Selection & Screen-Height Metric (`TCastleVulkanLODSelector` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestGPUDrivenContinuousLODSelectionRHI`).
-  - [x] **24.2. Screen-Space Bent Normals & Jimenez Specular Occlusion (`GenerateBentNormalsAndSpecularOcclusionFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestBentNormalsAndSpecularOcclusionRHI`).
-  - [x] **24.3. Trilinear 3D Color Grading LUT (`td3D`), Film Grain & Natural Vignette (`GenerateColorGradingLUTAndFilmGrainFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestColorGrading3DLUTAndFilmGrainVignetteRHI`).
-- **Phase 25**: Planned (Volumetric Cloud Raymarching, GPU Texture Streaming Residency Feedback & Equirectangular-to-Cubemap Compute Panorama Converter).
+- **Phases 1–24**: **COMPLETED** (100%).
+- **Phase 25 (Volumetric Cloud Raymarching, GPU Texture Streaming Residency Feedback & Equirectangular-to-Cubemap Compute Panorama Converter)**: **COMPLETED** (100%, 105 unit tests passing):
+  - [x] **25.1. Horizon-Aligned Volumetric Cloud Layer Raymarcher (`GenerateVolumetricCloudFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestVolumetricCloudDualLobeHGAndBeerPowderRHI`).
+  - [x] **25.2. GPU Texture Streaming Mipmap Residency & Feedback Analyzer (`TCastleVulkanTextureStreamer` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestGPUTextureStreamingMipFeedbackRHI`).
+  - [x] **25.3. Equirectangular HDR Panorama to Cubemap Compute Converter (`GenerateEquirectToCubemapComputeShader` in `CastleInternalShaderRHI`)** — Completed & tested (`TestEquirectangularToCubemapPanoramaConverterRHI`).
+- **Unreal Engine 5 Feature Parity Roadmap (Phases 26–33)**:
+  - **Phase 26**: Analytic Area Light LTC Shading, Seamless World-Space Triplanar & Height-Blended Texturing, and GPU Shadow Caster Light-Ray Extrusion Culling.
+  - **Phase 27 (UE5 Nanite Parity)**: 64-Bit Visibility Buffer (`Depth32 | InstanceID20 | PrimitiveID12`) & Analytic Barycentric UV Derivatives, Hierarchical Cluster DAG Cut Selection, and Sub-Pixel Software Compute Micro-Polygon Rasterizer.
+  - **Phase 28 (UE5 Lumen Parity)**: 3D Clipmap Global Signed Distance Field (SDF) Sphere Tracing (`TCastleVulkanGlobalSDF`), 6-Axis Surface Cache Card Atlas (`TCastleVulkanSurfaceCache`), and Screen-Space Radiance Cache Probes.
+  - **Phase 29 (UE5 MegaLights / ReSTIR Parity)**: Spatio-Temporal Reservoir Resampling (`TCastleVulkanReSTIR`, WRS/RIS streaming reservoirs + temporal/spatial neighbor combination for thousands of dynamic shadow-casting lights).
+  - **Phase 30 (UE5 TSR Parity)**: Temporal Super Resolution (`TCastleVulkanTSRUpscaler`, Lanczos-2 / Blackman-Harris sub-pixel history upscaling, parallax disocclusion confidence, and thin-feature anti-ghosting).
+  - **Phase 31 (UE5 Substrate / Strata & Hair Parity)**: Energy-Conserving Multi-Lobe Layered Material Slabs, Dual-Specular Marschner/Chiang Hair & Fur BSDF, and Stochastic Discrete Microfacet Glints.
+  - **Phase 32 (Next-Gen GPU Pipeline)**: Hardware Task/Mesh Shaders (`VK_EXT_mesh_shader`), Tile-Based Variable Rate Shading (`VK_KHR_fragment_shading_rate`, `TCastleVulkanVRSManager`), and Runtime Virtual Texturing (`TCastleVulkanRuntimeVirtualTexture`).
+  - **Phase 33 (Water, Sparse Volumes & Diagnostics)**: Single-Layer Water Beer-Lambert Absorption, Snell Refraction & Photon Caustics, Sparse Brick-Atlas Heterogeneous Volumes (`TCastleVulkanSparseVolumeAtlas` with Planckian blackbody emission), and GPU Crash Breadcrumb Tracker (`TCastleVulkanBreadcrumbTracker`).

@@ -528,6 +528,10 @@ type
     Flags: Cardinal;               // 4 bytes (reserved)
   end; // Total = 48 bytes
 
+const
+  CASTLE_MAX_STREAMED_TEXTURES = 512;
+
+type
   { Generates RHI-compliant GLSL headers, UBO blocks, and varying layouts }
   TCastleShaderGeneratorRHI = class
   private
@@ -942,6 +946,40 @@ type
       const AColor: TVector3;
       const AUV: TVector2;
       const ATimeSeconds, AIntensity: Single): TVector3; static;
+
+    { Phase 25.1: Generates GLSL 450 functions for Horizon-Aligned Volumetric Cloud
+      Raymarching (Dual-Lobe Henyey-Greenstein Phase & Schneider Beer-Powder Law). }
+    function GenerateVolumetricCloudFunctions: String;
+
+    { Phase 25.1 CPU reference: Evaluates Dual-Lobe Henyey-Greenstein scattering phase function. }
+    class function EvaluateDualLobeHGPhase(
+      const ACosTheta, AForwardG, ABackwardG, AForwardWeight: Single): Single; static;
+
+    { Phase 25.1 CPU reference: Evaluates Schneider's Beer-Powder cloud transmittance & dark-edge effect. }
+    class function EvaluateBeerPowderTransmittance(
+      const AOpticalDepth, APowderStrength: Single): Single; static;
+
+    { Phase 25.2: Generates GLSL 450 functions for GPU Texture Streaming Mipmap
+      Residency Feedback (atomicMin desired mip recording from screen-space UV derivatives). }
+    function GenerateTextureMipFeedbackFunctions: String;
+
+    { Phase 25.2 CPU reference: Computes desired mipmap level from max texel footprint derivative. }
+    class function ComputeDesiredMipLevel(
+      const ATexelFootprintMaxDerivative: Single;
+      const AMaxMipLevel: Cardinal;
+      const AMipBias: Single = 0.0): Cardinal; static;
+
+    { Phase 25.3: Generates a GLSL 450 compute shader that converts a 2:1 Equirectangular
+      HDR panorama texture into a 6-face Cubemap (tdCube) texture. }
+    function GenerateEquirectToCubemapComputeShader(
+      const AWorkgroupSizeX: Cardinal = 8;
+      const AWorkgroupSizeY: Cardinal = 8): String;
+
+    { Phase 25.3 CPU reference: Maps a normalized 3D direction vector to 2:1 equirectangular UV in [0..1]^2. }
+    class function DirectionToEquirectangularUV(const ADir: TVector3): TVector2; static;
+
+    { Phase 25.3 CPU reference: Inverse-maps 2:1 equirectangular UV in [0..1]^2 to a normalized 3D direction. }
+    class function EquirectangularUVToDirection(const AUV: TVector2): TVector3; static;
 
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
@@ -4654,6 +4692,153 @@ begin
     Max(0.0, AColor.X + Delta),
     Max(0.0, AColor.Y + Delta),
     Max(0.0, AColor.Z + Delta));
+end;
+
+function TCastleShaderGeneratorRHI.GenerateVolumetricCloudFunctions: String;
+begin
+  Result :=
+    '// --- Volumetric Cloud Raymarching: Dual-Lobe Henyey-Greenstein & Beer-Powder Law (Phase 25.1) ---' + NL +
+    'float EvaluateSingleHGPhase(float cosTheta, float g) {' + NL +
+    '  float g2 = g * g;' + NL +
+    '  float denom = max(1e-4, 1.0 + g2 - 2.0 * g * clamp(cosTheta, -1.0, 1.0));' + NL +
+    '  return (1.0 - g2) / (4.0 * 3.14159265359 * denom * sqrt(denom));' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateDualLobeHGPhase(float cosTheta, float forwardG, float backwardG, float forwardWeight) {' + NL +
+    '  float w = clamp(forwardWeight, 0.0, 1.0);' + NL +
+    '  return mix(EvaluateSingleHGPhase(cosTheta, backwardG), EvaluateSingleHGPhase(cosTheta, forwardG), w);' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateBeerPowderTransmittance(float opticalDepth, float powderStrength) {' + NL +
+    '  float tau = max(0.0, opticalDepth);' + NL +
+    '  float beer = exp(-tau);' + NL +
+    '  float powder = 1.0 - exp(-2.0 * tau);' + NL +
+    '  return beer * mix(1.0, 2.0 * powder, clamp(powderStrength, 0.0, 1.0));' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateDualLobeHGPhase(
+  const ACosTheta, AForwardG, ABackwardG, AForwardWeight: Single): Single;
+
+  function SingleHG(const CosT, G: Single): Single;
+  var
+    G2, Denom: Single;
+  begin
+    G2 := G * G;
+    Denom := Max(1e-4, 1.0 + G2 - 2.0 * G * EnsureRange(CosT, -1.0, 1.0));
+    Result := (1.0 - G2) / (4.0 * Single(Pi) * Denom * Sqrt(Denom));
+  end;
+
+var
+  W: Single;
+begin
+  W := EnsureRange(AForwardWeight, 0.0, 1.0);
+  Result := SingleHG(ACosTheta, ABackwardG) * (1.0 - W) + SingleHG(ACosTheta, AForwardG) * W;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateBeerPowderTransmittance(
+  const AOpticalDepth, APowderStrength: Single): Single;
+var
+  Tau, Beer, Powder, S: Single;
+begin
+  Tau := Max(0.0, AOpticalDepth);
+  Beer := Exp(-Tau);
+  Powder := 1.0 - Exp(-2.0 * Tau);
+  S := EnsureRange(APowderStrength, 0.0, 1.0);
+  Result := Beer * ((1.0 - S) + S * (2.0 * Powder));
+end;
+
+function TCastleShaderGeneratorRHI.GenerateTextureMipFeedbackFunctions: String;
+begin
+  Result :=
+    '// --- GPU Texture Streaming Mipmap Residency Feedback (Phase 25.2) ---' + NL +
+    'uint ComputeDesiredMipLevel(float texelFootprintMaxDeriv, uint maxMipLevel, float mipBias) {' + NL +
+    '  float rho = max(1.0, texelFootprintMaxDeriv);' + NL +
+    '  float lod = log2(rho) + mipBias;' + NL +
+    '  return uint(clamp(int(floor(lod + 0.5)), 0, int(maxMipLevel)));' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.ComputeDesiredMipLevel(
+  const ATexelFootprintMaxDerivative: Single;
+  const AMaxMipLevel: Cardinal;
+  const AMipBias: Single): Cardinal;
+var
+  Rho, Lod: Single;
+  ClampedInt: Integer;
+begin
+  Rho := Max(1.0, ATexelFootprintMaxDerivative);
+  Lod := Log2(Rho) + AMipBias;
+  ClampedInt := EnsureRange(Floor(Lod + 0.5), 0, Integer(AMaxMipLevel));
+  Result := Cardinal(ClampedInt);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateEquirectToCubemapComputeShader(
+  const AWorkgroupSizeX, AWorkgroupSizeY: Cardinal): String;
+begin
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;',
+      [Max(1, AWorkgroupSizeX), Max(1, AWorkgroupSizeY)]) + NL +
+    NL +
+    'layout(set = 0, binding = 0) uniform sampler2D u_EquirectPanorama;' + NL +
+    'layout(rgba16f, set = 0, binding = 1) writeonly uniform image2DArray u_OutCubemapFaces;' + NL +
+    NL +
+    'vec2 DirectionToEquirectangularUV(vec3 dir) {' + NL +
+    '  vec3 d = normalize(dir);' + NL +
+    '  float u = atan(d.z, d.x) / (2.0 * 3.14159265359) + 0.5;' + NL +
+    '  float v = asin(clamp(d.y, -1.0, 1.0)) / 3.14159265359 + 0.5;' + NL +
+    '  return vec2(u, v);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 CubeFaceUVToDirection(uint faceIdx, vec2 uv) {' + NL +
+    '  vec2 st = uv * 2.0 - 1.0;' + NL +
+    '  if (faceIdx == 0u) return normalize(vec3( 1.0, -st.y, -st.x));' + NL +
+    '  if (faceIdx == 1u) return normalize(vec3(-1.0, -st.y,  st.x));' + NL +
+    '  if (faceIdx == 2u) return normalize(vec3( st.x,  1.0,  st.y));' + NL +
+    '  if (faceIdx == 3u) return normalize(vec3( st.x, -1.0, -st.y));' + NL +
+    '  if (faceIdx == 4u) return normalize(vec3( st.x, -st.y,  1.0));' + NL +
+    '  return normalize(vec3(-st.x, -st.y, -1.0));' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  ivec2 faceSize = imageSize(u_OutCubemapFaces).xy;' + NL +
+    '  ivec3 gid = ivec3(gl_GlobalInvocationID);' + NL +
+    '  if (gid.x >= faceSize.x || gid.y >= faceSize.y || gid.z >= 6) return;' + NL +
+    '  vec2 uv = (vec2(gid.xy) + vec2(0.5)) / vec2(faceSize);' + NL +
+    '  vec3 dir = CubeFaceUVToDirection(uint(gid.z), uv);' + NL +
+    '  vec2 eqUV = DirectionToEquirectangularUV(dir);' + NL +
+    '  vec4 hdrColor = textureLod(u_EquirectPanorama, eqUV, 0.0);' + NL +
+    '  imageStore(u_OutCubemapFaces, gid, hdrColor);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.DirectionToEquirectangularUV(
+  const ADir: TVector3): TVector2;
+var
+  D: TVector3;
+begin
+  if ADir.LengthSqr > 1e-8 then
+    D := ADir.Normalize
+  else
+    D := Vector3(1.0, 0.0, 0.0);
+  Result := Vector2(
+    ArcTan2(D.Z, D.X) / (2.0 * Single(Pi)) + 0.5,
+    ArcSin(EnsureRange(D.Y, -1.0, 1.0)) / Single(Pi) + 0.5);
+end;
+
+class function TCastleShaderGeneratorRHI.EquirectangularUVToDirection(
+  const AUV: TVector2): TVector3;
+var
+  Phi, Theta, CosTheta: Single;
+begin
+  Phi := (AUV.X - 0.5) * (2.0 * Single(Pi));
+  Theta := (AUV.Y - 0.5) * Single(Pi);
+  CosTheta := Cos(Theta);
+  Result := Vector3(
+    CosTheta * Cos(Phi),
+    Sin(Theta),
+    CosTheta * Sin(Phi));
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;
