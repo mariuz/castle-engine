@@ -138,6 +138,9 @@ type
     procedure TestInlineRayQueryAndBVHIntersectionRHI;
     procedure TestVirtualShadowMapPageTableAndTilePoolRHI;
     procedure TestSeparableSubsurfaceScatteringBurleyDiffusionRHI;
+    procedure TestGPUDrivenContinuousLODSelectionRHI;
+    procedure TestBentNormalsAndSpecularOcclusionRHI;
+    procedure TestColorGrading3DLUTAndFilmGrainVignetteRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -7807,6 +7810,148 @@ begin
     WeightEdgeDiscontinuity := TCastleShaderGeneratorRHI.EvaluateBilateralSSSSWeight(1.0, 0.50, 1.5, 100.0);
     AssertTrue('Coplanar skin samples must retain strong bilateral weight while silhouette edges are rejected',
       (WeightCoplanar > WeightEdgeDiscontinuity * 1000.0) and (WeightEdgeDiscontinuity < 1e-5));
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGPUDrivenContinuousLODSelectionRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Gen: TCastleShaderGeneratorRHI;
+  LODGLSL: String;
+  Thresholds: TVector4;
+  Crossfade: Single;
+  LOD0, LOD1, LOD2, LOD3, Culled, TotalVisible: Cardinal;
+begin
+  AssertEquals('TCastleLODInstanceDescriptor must be 48 bytes',
+    48, SizeOf(TCastleLODInstanceDescriptor));
+
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6666)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    { 1. Verify LOD Selection Compute Shader GLSL 450 }
+    LODGLSL := Gen.GenerateLODSelectionComputeShader(64);
+    AssertTrue('LOD compute shader must include CastleLODInstanceDescriptor and SelectDiscreteLODLevel',
+      (Pos('struct CastleLODInstanceDescriptor {', LODGLSL) > 0) and
+      (Pos('int SelectDiscreteLODLevel(float coverage, vec4 thresholds, float band, out float outCrossfade)', LODGLSL) > 0));
+
+    { 2. Verify screen coverage & crossfade transition band }
+    Thresholds := Vector4(0.40, 0.20, 0.08, 0.02);
+    AssertEquals('Coverage 0.41 within [0.40..0.42] transition band must select LOD 0 with crossfade=0.5',
+      0, TCastleShaderGeneratorRHI.SelectDiscreteLODLevel(0.41, Thresholds, Crossfade, 0.02));
+    AssertSameValue(0.5, Crossfade, 1e-4);
+
+    { 3. Register 5 instances at increasing distances (R=1.0, CotHalfFovY=1.0 => coverage = 2.0 / dist):
+         dist=2.0   -> coverage=1.00  (>= 0.40 -> LOD 0)
+         dist=8.0   -> coverage=0.25  (>= 0.20 -> LOD 1)
+         dist=20.0  -> coverage=0.10  (>= 0.08 -> LOD 2)
+         dist=50.0  -> coverage=0.04  (>= 0.02 -> LOD 3)
+         dist=200.0 -> coverage=0.01  (<  0.02 -> Culled -1) }
+    Device.LODSelector.ClearInstances;
+    Device.LODSelector.AddInstance(Vector3(0.0, 0.0, -2.0),   1.0, Thresholds, 1);
+    Device.LODSelector.AddInstance(Vector3(0.0, 0.0, -8.0),   1.0, Thresholds, 1);
+    Device.LODSelector.AddInstance(Vector3(0.0, 0.0, -20.0),  1.0, Thresholds, 1);
+    Device.LODSelector.AddInstance(Vector3(0.0, 0.0, -50.0),  1.0, Thresholds, 1);
+    Device.LODSelector.AddInstance(Vector3(0.0, 0.0, -200.0), 1.0, Thresholds, 1);
+
+    TotalVisible := Device.LODSelector.EvaluateInstanceLODsCPU(
+      Vector3(0.0, 0.0, 0.0), 1.0, LOD0, LOD1, LOD2, LOD3, Culled);
+    AssertEquals(Cardinal(4), TotalVisible);
+    AssertEquals(Cardinal(1), LOD0);
+    AssertEquals(Cardinal(1), LOD1);
+    AssertEquals(Cardinal(1), LOD2);
+    AssertEquals(Cardinal(1), LOD3);
+    AssertEquals(Cardinal(1), Culled);
+
+    { 4. Verify GPU SSBO upload and compute dispatch }
+    CmdList.BeginRecording;
+    Device.LODSelector.DispatchLODSelection(CmdList, Vector3(0.0, 0.0, 0.0), 1.0, nil, nil);
+    CmdList.EndRecording;
+
+    AssertEquals(Cardinal(1), Device.LODSelector.DispatchCount);
+    AssertTrue('LODSelector SSBOs must be allocated',
+      (Device.LODSelector.InstanceBuffer <> nil) and
+      (Device.LODSelector.SelectedLODBuffer <> nil));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestBentNormalsAndSpecularOcclusionRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  BentGLSL: String;
+  SOUnoccluded, SOCavityMirror: Single;
+  SurfaceN, BentDir, ResultLowAO, ResultFullAO: TVector3;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Bent Normals & Specular Occlusion GLSL 450 }
+    BentGLSL := Gen.GenerateBentNormalsAndSpecularOcclusionFunctions;
+    AssertTrue('Bent Normals GLSL must include EvaluateSpecularOcclusion and BendNormalTowardsUnoccludedDir',
+      (Pos('float EvaluateSpecularOcclusion(float NdotV, float ambientOcclusion, float roughness)', BentGLSL) > 0) and
+      (Pos('vec3 BendNormalTowardsUnoccludedDir(vec3 surfaceNormal, vec3 unoccludedBentDir, float ambientOcclusion)', BentGLSL) > 0));
+
+    { 2. Verify Lagarde/Jimenez Specular Occlusion }
+    SOUnoccluded := TCastleShaderGeneratorRHI.EvaluateSpecularOcclusion(0.8, 1.0, 0.1);
+    SOCavityMirror := TCastleShaderGeneratorRHI.EvaluateSpecularOcclusion(0.2, 0.25, 0.1);
+    AssertSameValue(1.0, SOUnoccluded, 1e-5);
+    AssertTrue('Occluded grazing cavity on smooth surface must strongly attenuate specular occlusion',
+      SOCavityMirror < 0.25);
+
+    { 3. Verify Bent Normal interpolation }
+    SurfaceN := Vector3(0.0, 1.0, 0.0);
+    BentDir := Vector3(1.0, 1.0, 0.0).Normalize;
+    ResultLowAO := TCastleShaderGeneratorRHI.BendNormalTowardsUnoccludedDir(SurfaceN, BentDir, 0.0);
+    ResultFullAO := TCastleShaderGeneratorRHI.BendNormalTowardsUnoccludedDir(SurfaceN, BentDir, 1.0);
+    AssertSameValue(BentDir.X, ResultLowAO.X, 1e-4);
+    AssertSameValue(SurfaceN.Y, ResultFullAO.Y, 1e-4);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestColorGrading3DLUTAndFilmGrainVignetteRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  LUTGLSL: String;
+  CoordBlack, CoordWhite, GrainMid, GrainWhite: TVector3;
+  VigCenter, VigCorner: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify 3D Color Grading LUT, Vignette & Film Grain GLSL 450 }
+    LUTGLSL := Gen.GenerateColorGradingLUTAndFilmGrainFunctions;
+    AssertTrue('Color Grading GLSL must include Compute3DLUTSampleCoord, EvaluateNaturalCos4Vignette, and EvaluateFilmGrainNoise',
+      (Pos('vec3 Compute3DLUTSampleCoord(vec3 colorRGB, float lutDimension)', LUTGLSL) > 0) and
+      (Pos('float EvaluateNaturalCos4Vignette(vec2 uv, float intensity)', LUTGLSL) > 0) and
+      (Pos('vec3 EvaluateFilmGrainNoise(vec3 color, vec2 uv, float timeSeconds, float intensity)', LUTGLSL) > 0));
+
+    { 2. Verify half-texel-centered 3D LUT coordinate mapping for 32x32x32 LUT }
+    CoordBlack := TCastleShaderGeneratorRHI.Compute3DLUTSampleCoord(Vector3(0.0, 0.0, 0.0), 32.0);
+    CoordWhite := TCastleShaderGeneratorRHI.Compute3DLUTSampleCoord(Vector3(1.0, 1.0, 1.0), 32.0);
+    AssertSameValue(0.5 / 32.0, CoordBlack.X, 1e-5);
+    AssertSameValue(31.5 / 32.0, CoordWhite.X, 1e-5);
+
+    { 3. Verify natural cos^4(theta) optical vignette falloff }
+    VigCenter := TCastleShaderGeneratorRHI.EvaluateNaturalCos4Vignette(Vector2(0.5, 0.5), 1.0);
+    VigCorner := TCastleShaderGeneratorRHI.EvaluateNaturalCos4Vignette(Vector2(0.0, 0.0), 1.0);
+    AssertSameValue(1.0, VigCenter, 1e-5);
+    AssertSameValue(0.444444, VigCorner, 1e-4);
+
+    { 4. Verify luminance-preserving film grain suppresses noise at pure white (luma = 1.0 => response = 0.0) }
+    GrainMid := TCastleShaderGeneratorRHI.EvaluateFilmGrainNoise(
+      Vector3(0.25, 0.25, 0.25), Vector2(0.37, 0.61), 1.25, 0.1);
+    GrainWhite := TCastleShaderGeneratorRHI.EvaluateFilmGrainNoise(
+      Vector3(1.0, 1.0, 1.0), Vector2(0.37, 0.61), 1.25, 0.1);
+    AssertTrue('Midtone pixel must receive non-zero film grain modulation',
+      Abs(GrainMid.X - 0.25) > 1e-4);
+    AssertSameValue(1.0, GrainWhite.X, 1e-5);
   finally
     FreeAndNil(Gen);
   end;

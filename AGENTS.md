@@ -77,9 +77,9 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–22**: **COMPLETED** (100%).
-- **Phase 23 (Ray-Traced / Hardware Ray Query Shadows & Reflections (`VK_KHR_ray_query`), Virtual Shadow Maps (VSM Clipmap Pages) & Screen-Space Subsurface Scattering Diffusion)**: **COMPLETED** (100%, 99 unit tests passing):
-  - [x] **23.1. Hardware Ray Query (`VK_KHR_ray_query` / `VK_KHR_acceleration_structure`) Inline Shadow & Reflection Traversal (`GenerateInlineRayQueryFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestInlineRayQueryAndBVHIntersectionRHI`).
-  - [x] **23.2. Virtual Shadow Maps (VSM) Page Table & Physical Tile Pool (`TCastleVulkanVirtualShadowMap` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVirtualShadowMapPageTableAndTilePoolRHI`).
-  - [x] **23.3. Separable Screen-Space Subsurface Scattering (SSSSS) Burley Diffusion Kernel (`GenerateSeparableSSSSFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSeparableSubsurfaceScatteringBurleyDiffusionRHI`).
-- **Phase 24**: Planned (GPU-Driven Instance & Mesh LOD Selection, Screen-Space Bent Normals & Specular Occlusion, and Color Grading 3D LUT + Film Grain / Vignette Post-Processing).
+- **Phases 1–23**: **COMPLETED** (100%).
+- **Phase 24 (GPU-Driven Instance & Mesh LOD Selection, Screen-Space Bent Normals & Specular Occlusion, and Color Grading 3D LUT + Film Grain / Vignette Post-Processing)**: **COMPLETED** (100%, 102 unit tests passing):
+  - [x] **24.1. GPU-Driven Continuous Instance LOD Selection & Screen-Height Metric (`TCastleVulkanLODSelector` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestGPUDrivenContinuousLODSelectionRHI`).
+  - [x] **24.2. Screen-Space Bent Normals & Jimenez Specular Occlusion (`GenerateBentNormalsAndSpecularOcclusionFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestBentNormalsAndSpecularOcclusionRHI`).
+  - [x] **24.3. Trilinear 3D Color Grading LUT (`td3D`), Film Grain & Natural Vignette (`GenerateColorGradingLUTAndFilmGrainFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestColorGrading3DLUTAndFilmGrainVignetteRHI`).
+- **Phase 25**: Planned (Volumetric Cloud Raymarching, GPU Texture Streaming Residency Feedback & Equirectangular-to-Cubemap Compute Panorama Converter).

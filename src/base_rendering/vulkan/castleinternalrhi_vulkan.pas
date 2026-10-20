@@ -2057,6 +2057,58 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { GPU-Driven Continuous Instance LOD Selector (Phase 24.1)                   }
+  { -------------------------------------------------------------------------- }
+
+  { Evaluates projected vertical screen-height coverage and selects discrete LOD
+    levels (LOD0..LOD3 or -1 culled) + continuous crossfade weights per instance. }
+  TCastleVulkanLODSelector = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FInstances: array of TCastleLODInstanceDescriptor;
+    FInstanceCount: Cardinal;
+    FInstanceBuffer: TVulkanRHIBuffer;
+    FSelectedLODBuffer: TVulkanRHIBuffer;
+    FDispatchCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Clears all registered instances. }
+    procedure ClearInstances;
+
+    { Registers an instance bounding sphere and 4-level screen coverage thresholds. }
+    function AddInstance(
+      const ASphereCenter: TVector3;
+      const ARadius: Single;
+      const AThresholds: TVector4;
+      const AMeshID: Cardinal = 0;
+      const ATransitionBand: Single = 0.02): Integer;
+
+    { Uploads the registered instance array into GPU SSBOs. }
+    procedure UploadInstances;
+
+    { Evaluates on CPU how many instances select LOD0..LOD3 vs culled, returning total visible instances. }
+    function EvaluateInstanceLODsCPU(
+      const ACameraPosition: TVector3;
+      const ACotHalfFovY: Single;
+      out ALOD0Count, ALOD1Count, ALOD2Count, ALOD3Count, ACulledCount: Cardinal): Cardinal;
+
+    { Dispatches the GPU compute LOD selection pass. }
+    procedure DispatchLODSelection(
+      const ACommandList: TVulkanRHICommandList;
+      const ACameraPosition: TVector3;
+      const ACotHalfFovY: Single;
+      const APipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property InstanceCount: Cardinal read FInstanceCount;
+    property InstanceBuffer: TVulkanRHIBuffer read FInstanceBuffer;
+    property SelectedLODBuffer: TVulkanRHIBuffer read FSelectedLODBuffer;
+    property DispatchCount: Cardinal read FDispatchCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -2149,6 +2201,7 @@ type
     FDDGIGrid: TCastleVulkanDDGIGrid;
     FMeshletCuller: TCastleVulkanMeshletCuller;
     FVirtualShadowMap: TCastleVulkanVirtualShadowMap;
+    FLODSelector: TCastleVulkanLODSelector;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -2246,6 +2299,7 @@ type
     function GetDDGIGrid: TCastleVulkanDDGIGrid;
     function GetMeshletCuller: TCastleVulkanMeshletCuller;
     function GetVirtualShadowMap: TCastleVulkanVirtualShadowMap;
+    function GetLODSelector: TCastleVulkanLODSelector;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -2448,6 +2502,7 @@ type
     property DDGIGrid: TCastleVulkanDDGIGrid read GetDDGIGrid;
     property MeshletCuller: TCastleVulkanMeshletCuller read GetMeshletCuller;
     property VirtualShadowMap: TCastleVulkanVirtualShadowMap read GetVirtualShadowMap;
+    property LODSelector: TCastleVulkanLODSelector read GetLODSelector;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -12634,6 +12689,163 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanLODSelector (Phase 24.1)                                        }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanLODSelector.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+end;
+
+destructor TCastleVulkanLODSelector.Destroy;
+begin
+  FreeAndNil(FSelectedLODBuffer);
+  FreeAndNil(FInstanceBuffer);
+  inherited;
+end;
+
+procedure TCastleVulkanLODSelector.ClearInstances;
+begin
+  FInstanceCount := 0;
+  SetLength(FInstances, 0);
+end;
+
+function TCastleVulkanLODSelector.AddInstance(
+  const ASphereCenter: TVector3;
+  const ARadius: Single;
+  const AThresholds: TVector4;
+  const AMeshID: Cardinal;
+  const ATransitionBand: Single): Integer;
+var
+  Idx: Integer;
+begin
+  Idx := Integer(FInstanceCount);
+  Inc(FInstanceCount);
+  SetLength(FInstances, FInstanceCount);
+  FillChar(FInstances[Idx], SizeOf(TCastleLODInstanceDescriptor), 0);
+  FInstances[Idx].BoundingSphere := Vector4(ASphereCenter, Max(0.0, ARadius));
+  FInstances[Idx].LODScreenThresholds := AThresholds;
+  FInstances[Idx].MeshID := AMeshID;
+  FInstances[Idx].InstanceID := Cardinal(Idx);
+  FInstances[Idx].TransitionBand := Max(1e-4, ATransitionBand);
+  Result := Idx;
+end;
+
+procedure TCastleVulkanLODSelector.UploadInstances;
+var
+  CountAlloc: Cardinal;
+  BufDesc: TRHIBufferDesc;
+  MappedPtr: Pointer;
+begin
+  CountAlloc := Max(Cardinal(1), FInstanceCount);
+  if (FInstanceBuffer = nil) or
+     (FInstanceBuffer.Desc.Size < CountAlloc * SizeOf(TCastleLODInstanceDescriptor)) then
+  begin
+    FreeAndNil(FInstanceBuffer);
+    BufDesc := TRHIBufferDesc.Create(
+      CountAlloc * SizeOf(TCastleLODInstanceDescriptor),
+      [buStorage, buTransferDst],
+      muCpuToGpu,
+      'LODInstanceBuffer');
+    FInstanceBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+
+  if FInstanceCount > 0 then
+  begin
+    MappedPtr := FInstanceBuffer.Map;
+    if MappedPtr <> nil then
+    begin
+      Move(FInstances[0], MappedPtr^, FInstanceCount * SizeOf(TCastleLODInstanceDescriptor));
+      FInstanceBuffer.Unmap;
+    end;
+  end;
+
+  if (FSelectedLODBuffer = nil) or
+     (FSelectedLODBuffer.Desc.Size < CountAlloc * 16) then
+  begin
+    FreeAndNil(FSelectedLODBuffer);
+    BufDesc := TRHIBufferDesc.Create(
+      CountAlloc * 16,
+      [buStorage, buTransferSrc],
+      muGpuOnly,
+      'SelectedLODBuffer');
+    FSelectedLODBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+end;
+
+function TCastleVulkanLODSelector.EvaluateInstanceLODsCPU(
+  const ACameraPosition: TVector3;
+  const ACotHalfFovY: Single;
+  out ALOD0Count, ALOD1Count, ALOD2Count, ALOD3Count, ACulledCount: Cardinal): Cardinal;
+var
+  I: Cardinal;
+  Dist, Coverage, Crossfade: Single;
+  LOD: Integer;
+begin
+  ALOD0Count := 0;
+  ALOD1Count := 0;
+  ALOD2Count := 0;
+  ALOD3Count := 0;
+  ACulledCount := 0;
+  Result := 0;
+  if FInstanceCount = 0 then
+    Exit;
+
+  for I := 0 to FInstanceCount - 1 do
+  begin
+    Dist := (FInstances[I].BoundingSphere.XYZ - ACameraPosition).Length;
+    Coverage := TCastleShaderGeneratorRHI.EvaluateProjectedScreenCoverage(
+      Dist, FInstances[I].BoundingSphere.W, ACotHalfFovY);
+    LOD := TCastleShaderGeneratorRHI.SelectDiscreteLODLevel(
+      Coverage, FInstances[I].LODScreenThresholds, Crossfade, FInstances[I].TransitionBand);
+    case LOD of
+      0: begin Inc(ALOD0Count); Inc(Result); end;
+      1: begin Inc(ALOD1Count); Inc(Result); end;
+      2: begin Inc(ALOD2Count); Inc(Result); end;
+      3: begin Inc(ALOD3Count); Inc(Result); end;
+    else
+      Inc(ACulledCount);
+    end;
+  end;
+end;
+
+procedure TCastleVulkanLODSelector.DispatchLODSelection(
+  const ACommandList: TVulkanRHICommandList;
+  const ACameraPosition: TVector3;
+  const ACotHalfFovY: Single;
+  const APipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+type
+  TLODSelectionPC = packed record
+    CameraPosAndCotHalfFovY: TVector4;
+    InstanceCount: Cardinal;
+    Pad0, Pad1, Pad2: Cardinal;
+  end;
+var
+  PC: TLODSelectionPC;
+  GroupsX: Cardinal;
+begin
+  UploadInstances;
+  if ACommandList = nil then
+    Exit;
+
+  FillChar(PC, SizeOf(PC), 0);
+  PC.CameraPosAndCotHalfFovY := Vector4(ACameraPosition, ACotHalfFovY);
+  PC.InstanceCount := FInstanceCount;
+
+  if APipeline <> nil then
+    ACommandList.BindComputePipeline(APipeline);
+  if ADescriptorSet <> nil then
+    ACommandList.BindDescriptorSet(0, ADescriptorSet, []);
+  ACommandList.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+
+  GroupsX := (Max(Cardinal(1), FInstanceCount) + 63) div 64;
+  ACommandList.Dispatch(GroupsX, 1, 1);
+  Inc(FDispatchCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -13176,12 +13388,20 @@ begin
   Result := FVirtualShadowMap;
 end;
 
+function TVulkanRHIDevice.GetLODSelector: TCastleVulkanLODSelector;
+begin
+  if FLODSelector = nil then
+    FLODSelector := TCastleVulkanLODSelector.Create(Self);
+  Result := FLODSelector;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FLODSelector);
   FreeAndNil(FVirtualShadowMap);
   FreeAndNil(FMeshletCuller);
   FreeAndNil(FDDGIGrid);

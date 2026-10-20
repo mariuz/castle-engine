@@ -517,6 +517,17 @@ type
     TriangleCount: Cardinal;     // 4 bytes (meshlet triangle count <= 124)
   end; // Total = 48 bytes
 
+  { Phase 24.1: GPU std430 descriptor for Continuous Instance LOD Selection (48 bytes) }
+  PCastleLODInstanceDescriptor = ^TCastleLODInstanceDescriptor;
+  TCastleLODInstanceDescriptor = packed record
+    BoundingSphere: TVector4;      // 16 bytes (xyz = world sphere center, w = radius)
+    LODScreenThresholds: TVector4; // 16 bytes (x = LOD0->1 coverage, y = LOD1->2, z = LOD2->3, w = cull coverage)
+    MeshID: Cardinal;              // 4 bytes (base mesh asset ID)
+    InstanceID: Cardinal;          // 4 bytes (instance index)
+    TransitionBand: Single;        // 4 bytes (crossfade band width in screen coverage units, default 0.02)
+    Flags: Cardinal;               // 4 bytes (reserved)
+  end; // Total = 48 bytes
+
   { Generates RHI-compliant GLSL headers, UBO blocks, and varying layouts }
   TCastleShaderGeneratorRHI = class
   private
@@ -880,6 +891,57 @@ type
     { Phase 23.3 CPU reference: Evaluates depth-aware bilateral SSSSS weight. }
     class function EvaluateBilateralSSSSWeight(
       const ASampleOffsetMillimeters, ADepthDiffMeters, AScatterDist, ADepthFalloffScale: Single): Single; static;
+
+    { Phase 24.1: Generates a GLSL 450 compute shader for GPU-Driven Continuous Instance
+      LOD Selection using projected vertical screen-height coverage and dither crossfade. }
+    function GenerateLODSelectionComputeShader(
+      const AWorkgroupSizeX: Cardinal = 64): String;
+
+    { Phase 24.1 CPU reference: Evaluates normalized vertical screen-height coverage
+      in [0..1] for a bounding sphere of ARadius at distance ADistance. }
+    class function EvaluateProjectedScreenCoverage(
+      const ADistance, ARadius, ACotHalfFovY: Single): Single; static;
+
+    { Phase 24.1 CPU reference: Selects discrete LOD level (0..3, or -1 if culled)
+      and computes continuous crossfade transition weight in [0..1]. }
+    class function SelectDiscreteLODLevel(
+      const AScreenCoverage: Single;
+      const AThresholds: TVector4;
+      out ACrossfadeWeight: Single;
+      const ATransitionBand: Single = 0.02): Integer; static;
+
+    { Phase 24.2: Generates GLSL 450 functions for Screen-Space Bent Normals and
+      Lagarde/Jimenez Cone-Intersection Specular Occlusion. }
+    function GenerateBentNormalsAndSpecularOcclusionFunctions: String;
+
+    { Phase 24.2 CPU reference: Evaluates Lagarde/Jimenez Specular Occlusion from NdotV, AO, and Roughness. }
+    class function EvaluateSpecularOcclusion(
+      const ANdotV, AAmbientOcclusion, ARoughness: Single): Single; static;
+
+    { Phase 24.2 CPU reference: Bends surface shading normal toward unoccluded bent horizon normal based on AO. }
+    class function BendNormalTowardsUnoccludedDir(
+      const ASurfaceNormal, AUnoccludedBentDir: TVector3;
+      const AAmbientOcclusion: Single): TVector3; static;
+
+    { Phase 24.3: Generates GLSL 450 functions for Trilinear 3D Color Grading LUT (sampler3D)
+      half-texel coordinate mapping, Natural cos^4(theta) Vignette, and Luminance-Preserving Film Grain. }
+    function GenerateColorGradingLUTAndFilmGrainFunctions: String;
+
+    { Phase 24.3 CPU reference: Maps [0..1]^3 RGB color to half-texel-centered 3D LUT UVW coordinates. }
+    class function Compute3DLUTSampleCoord(
+      const AColorRGB: TVector3;
+      const ALutDimension: Single = 32.0): TVector3; static;
+
+    { Phase 24.3 CPU reference: Evaluates natural optical cos^4(theta) lens vignette falloff. }
+    class function EvaluateNaturalCos4Vignette(
+      const AUV: TVector2;
+      const AIntensity: Single): Single; static;
+
+    { Phase 24.3 CPU reference: Applies luminance-preserving spatio-temporal film grain. }
+    class function EvaluateFilmGrainNoise(
+      const AColor: TVector3;
+      const AUV: TVector2;
+      const ATimeSeconds, AIntensity: Single): TVector3; static;
 
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
@@ -4372,6 +4434,226 @@ begin
   DZ := ADepthDiffMeters * Max(0.0, ADepthFalloffScale);
   Bilateral := Exp(-(DZ * DZ));
   Result := Spatial * Bilateral;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateLODSelectionComputeShader(
+  const AWorkgroupSizeX: Cardinal): String;
+begin
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = 1, local_size_z = 1) in;', [Max(1, AWorkgroupSizeX)]) + NL +
+    NL +
+    'struct CastleLODInstanceDescriptor {' + NL +
+    '  vec4 BoundingSphere;' + NL +
+    '  vec4 LODScreenThresholds;' + NL +
+    '  uint MeshID;' + NL +
+    '  uint InstanceID;' + NL +
+    '  float TransitionBand;' + NL +
+    '  uint Flags;' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 0) readonly buffer CastleLODInstancesBlock {' + NL +
+    '  CastleLODInstanceDescriptor u_Instances[];' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 1) writeonly buffer CastleSelectedLODBlock {' + NL +
+    '  ivec4 u_SelectedLODAndWeight[];' + NL +
+    '};' + NL +
+    NL +
+    'layout(push_constant) uniform CastleLODSelectionPush {' + NL +
+    '  vec4 u_CameraPosAndCotHalfFovY;' + NL +
+    '  uint u_InstanceCount;' + NL +
+    '} PushConstants;' + NL +
+    NL +
+    'float EvaluateProjectedScreenCoverage(float dist, float radius, float cotHalfFovY) {' + NL +
+    '  return clamp((2.0 * max(0.0, radius) * max(0.01, cotHalfFovY)) / max(1e-4, dist), 0.0, 1.0);' + NL +
+    '}' + NL +
+    NL +
+    'int SelectDiscreteLODLevel(float coverage, vec4 thresholds, float band, out float outCrossfade) {' + NL +
+    '  outCrossfade = 0.0;' + NL +
+    '  if (coverage < thresholds.w) return -1;' + NL +
+    '  float b = max(1e-4, band);' + NL +
+    '  if (coverage >= thresholds.x) {' + NL +
+    '    outCrossfade = clamp((thresholds.x + b - coverage) / b, 0.0, 1.0);' + NL +
+    '    return 0;' + NL +
+    '  }' + NL +
+    '  if (coverage >= thresholds.y) {' + NL +
+    '    outCrossfade = clamp((thresholds.y + b - coverage) / b, 0.0, 1.0);' + NL +
+    '    return 1;' + NL +
+    '  }' + NL +
+    '  if (coverage >= thresholds.z) {' + NL +
+    '    outCrossfade = clamp((thresholds.z + b - coverage) / b, 0.0, 1.0);' + NL +
+    '    return 2;' + NL +
+    '  }' + NL +
+    '  return 3;' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  uint idx = gl_GlobalInvocationID.x;' + NL +
+    '  if (idx >= PushConstants.u_InstanceCount) return;' + NL +
+    '  CastleLODInstanceDescriptor inst = u_Instances[idx];' + NL +
+    '  float dist = length(inst.BoundingSphere.xyz - PushConstants.u_CameraPosAndCotHalfFovY.xyz);' + NL +
+    '  float coverage = EvaluateProjectedScreenCoverage(dist, inst.BoundingSphere.w, PushConstants.u_CameraPosAndCotHalfFovY.w);' + NL +
+    '  float crossfade;' + NL +
+    '  int lod = SelectDiscreteLODLevel(coverage, inst.LODScreenThresholds, inst.TransitionBand, crossfade);' + NL +
+    '  u_SelectedLODAndWeight[idx] = ivec4(lod, int(inst.MeshID), int(inst.InstanceID), int(crossfade * 255.0));' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateProjectedScreenCoverage(
+  const ADistance, ARadius, ACotHalfFovY: Single): Single;
+begin
+  Result := EnsureRange(
+    (2.0 * Max(0.0, ARadius) * Max(0.01, ACotHalfFovY)) / Max(1e-4, ADistance),
+    0.0, 1.0);
+end;
+
+class function TCastleShaderGeneratorRHI.SelectDiscreteLODLevel(
+  const AScreenCoverage: Single;
+  const AThresholds: TVector4;
+  out ACrossfadeWeight: Single;
+  const ATransitionBand: Single): Integer;
+var
+  Band: Single;
+begin
+  ACrossfadeWeight := 0.0;
+  if AScreenCoverage < AThresholds.W then
+    Exit(-1);
+  Band := Max(1e-4, ATransitionBand);
+  if AScreenCoverage >= AThresholds.X then
+  begin
+    ACrossfadeWeight := EnsureRange((AThresholds.X + Band - AScreenCoverage) / Band, 0.0, 1.0);
+    Exit(0);
+  end;
+  if AScreenCoverage >= AThresholds.Y then
+  begin
+    ACrossfadeWeight := EnsureRange((AThresholds.Y + Band - AScreenCoverage) / Band, 0.0, 1.0);
+    Exit(1);
+  end;
+  if AScreenCoverage >= AThresholds.Z then
+  begin
+    ACrossfadeWeight := EnsureRange((AThresholds.Z + Band - AScreenCoverage) / Band, 0.0, 1.0);
+    Exit(2);
+  end;
+  Result := 3;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateBentNormalsAndSpecularOcclusionFunctions: String;
+begin
+  Result :=
+    '// --- Screen-Space Bent Normals & Lagarde/Jimenez Specular Occlusion (Phase 24.2) ---' + NL +
+    'float EvaluateSpecularOcclusion(float NdotV, float ambientOcclusion, float roughness) {' + NL +
+    '  float nv = clamp(NdotV, 0.0, 1.0);' + NL +
+    '  float ao = clamp(ambientOcclusion, 0.0, 1.0);' + NL +
+    '  float r  = clamp(roughness, 0.04, 1.0);' + NL +
+    '  float exponent = exp2(-16.0 * r - 1.0);' + NL +
+    '  return clamp(pow(max(1e-5, nv + ao), exponent) - 1.0 + ao, 0.0, 1.0);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 BendNormalTowardsUnoccludedDir(vec3 surfaceNormal, vec3 unoccludedBentDir, float ambientOcclusion) {' + NL +
+    '  float ao = clamp(ambientOcclusion, 0.0, 1.0);' + NL +
+    '  float bendFactor = 1.0 - (1.0 - ao) * (1.0 - ao);' + NL +
+    '  return normalize(mix(unoccludedBentDir, surfaceNormal, bendFactor));' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateSpecularOcclusion(
+  const ANdotV, AAmbientOcclusion, ARoughness: Single): Single;
+var
+  NV, AO, R, Exponent: Single;
+begin
+  NV := EnsureRange(ANdotV, 0.0, 1.0);
+  AO := EnsureRange(AAmbientOcclusion, 0.0, 1.0);
+  R  := EnsureRange(ARoughness, 0.04, 1.0);
+  Exponent := Power(2.0, -16.0 * R - 1.0);
+  Result := EnsureRange(Power(Max(1e-5, NV + AO), Exponent) - 1.0 + AO, 0.0, 1.0);
+end;
+
+class function TCastleShaderGeneratorRHI.BendNormalTowardsUnoccludedDir(
+  const ASurfaceNormal, AUnoccludedBentDir: TVector3;
+  const AAmbientOcclusion: Single): TVector3;
+var
+  AO, BendFactor: Single;
+  Blended: TVector3;
+begin
+  AO := EnsureRange(AAmbientOcclusion, 0.0, 1.0);
+  BendFactor := 1.0 - Sqr(1.0 - AO);
+  Blended := TVector3.Lerp(BendFactor, AUnoccludedBentDir, ASurfaceNormal);
+  if Blended.LengthSqr > 1e-8 then
+    Result := Blended.Normalize
+  else
+    Result := ASurfaceNormal;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateColorGradingLUTAndFilmGrainFunctions: String;
+begin
+  Result :=
+    '// --- Trilinear 3D Color Grading LUT, Natural Cos^4 Vignette & Film Grain (Phase 24.3) ---' + NL +
+    'vec3 Compute3DLUTSampleCoord(vec3 colorRGB, float lutDimension) {' + NL +
+    '  float dim = max(2.0, lutDimension);' + NL +
+    '  vec3 scale = vec3((dim - 1.0) / dim);' + NL +
+    '  vec3 offset = vec3(0.5 / dim);' + NL +
+    '  return clamp(colorRGB, 0.0, 1.0) * scale + offset;' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateNaturalCos4Vignette(vec2 uv, float intensity) {' + NL +
+    '  vec2 d = (uv - vec2(0.5)) * max(0.0, intensity);' + NL +
+    '  float cos2Theta = 1.0 / (1.0 + dot(d, d));' + NL +
+    '  return cos2Theta * cos2Theta;' + NL +
+    '}' + NL +
+    NL +
+    'vec3 EvaluateFilmGrainNoise(vec3 color, vec2 uv, float timeSeconds, float intensity) {' + NL +
+    '  float seed = dot(uv, vec2(12.9898, 78.233)) + fract(timeSeconds) * 43.17;' + NL +
+    '  float noise = fract(sin(seed) * 43758.5453) * 2.0 - 1.0;' + NL +
+    '  float luma = dot(max(vec3(0.0), color), vec3(0.2126, 0.7152, 0.0722));' + NL +
+    '  float response = 1.0 - sqrt(clamp(luma, 0.0, 1.0));' + NL +
+    '  return max(vec3(0.0), color + vec3(noise * intensity * response));' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.Compute3DLUTSampleCoord(
+  const AColorRGB: TVector3;
+  const ALutDimension: Single): TVector3;
+var
+  Dim, Scale, Offset: Single;
+begin
+  Dim := Max(2.0, ALutDimension);
+  Scale := (Dim - 1.0) / Dim;
+  Offset := 0.5 / Dim;
+  Result := Vector3(
+    EnsureRange(AColorRGB.X, 0.0, 1.0) * Scale + Offset,
+    EnsureRange(AColorRGB.Y, 0.0, 1.0) * Scale + Offset,
+    EnsureRange(AColorRGB.Z, 0.0, 1.0) * Scale + Offset);
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateNaturalCos4Vignette(
+  const AUV: TVector2;
+  const AIntensity: Single): Single;
+var
+  DX, DY, Cos2Theta: Single;
+begin
+  DX := (AUV.X - 0.5) * Max(0.0, AIntensity);
+  DY := (AUV.Y - 0.5) * Max(0.0, AIntensity);
+  Cos2Theta := 1.0 / (1.0 + DX * DX + DY * DY);
+  Result := Cos2Theta * Cos2Theta;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateFilmGrainNoise(
+  const AColor: TVector3;
+  const AUV: TVector2;
+  const ATimeSeconds, AIntensity: Single): TVector3;
+var
+  Seed, Noise, Luma, Response, Delta: Single;
+begin
+  Seed := AUV.X * 12.9898 + AUV.Y * 78.233 + Frac(ATimeSeconds) * 43.17;
+  Noise := Frac(Sin(Seed) * 43758.5453) * 2.0 - 1.0;
+  Luma := Max(0.0, AColor.X) * 0.2126 + Max(0.0, AColor.Y) * 0.7152 + Max(0.0, AColor.Z) * 0.0722;
+  Response := 1.0 - Sqrt(EnsureRange(Luma, 0.0, 1.0));
+  Delta := Noise * AIntensity * Response;
+  Result := Vector3(
+    Max(0.0, AColor.X + Delta),
+    Max(0.0, AColor.Y + Delta),
+    Max(0.0, AColor.Z + Delta));
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;
