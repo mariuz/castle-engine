@@ -2163,6 +2163,54 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { GPU Shadow Caster Light-Ray Extrusion Culler (Phase 26.3)                  }
+  { -------------------------------------------------------------------------- }
+
+  { Culls shadow-casting instances whose bounding sphere swept along the light
+    ray direction does not intersect the camera receiver frustum AABB. }
+  TCastleVulkanShadowCasterCuller = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FCasters: array of TVector4;
+    FCasterCount: Cardinal;
+    FCasterBuffer: TVulkanRHIBuffer;
+    FVisibleCasterBuffer: TVulkanRHIBuffer;
+    FDispatchCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Clears all registered shadow-caster bounding spheres. }
+    procedure ClearCasters;
+
+    { Registers a shadow-caster bounding sphere (world center + radius). }
+    function AddCaster(const ASphereCenter: TVector3; const ASphereRadius: Single): Integer;
+
+    { Uploads the registered shadow-caster spheres into GPU SSBOs. }
+    procedure UploadCasters;
+
+    { Evaluates on CPU how many shadow casters can cast shadows into [AReceiverBoxMin, AReceiverBoxMax]. }
+    function EvaluateActiveShadowCastersCPU(
+      const ALightRayDir: TVector3;
+      const AMaxExtrusionDist: Single;
+      const AReceiverBoxMin, AReceiverBoxMax: TVector3): Cardinal;
+
+    { Dispatches the GPU compute shadow-caster extrusion culling pass. }
+    procedure DispatchShadowCasterCulling(
+      const ACommandList: TVulkanRHICommandList;
+      const ALightRayDir: TVector3;
+      const AMaxExtrusionDist: Single;
+      const AReceiverBoxMin, AReceiverBoxMax: TVector3;
+      const APipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property CasterCount: Cardinal read FCasterCount;
+    property CasterBuffer: TVulkanRHIBuffer read FCasterBuffer;
+    property VisibleCasterBuffer: TVulkanRHIBuffer read FVisibleCasterBuffer;
+    property DispatchCount: Cardinal read FDispatchCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -2257,6 +2305,7 @@ type
     FVirtualShadowMap: TCastleVulkanVirtualShadowMap;
     FLODSelector: TCastleVulkanLODSelector;
     FTextureStreamer: TCastleVulkanTextureStreamer;
+    FShadowCasterCuller: TCastleVulkanShadowCasterCuller;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -2356,6 +2405,7 @@ type
     function GetVirtualShadowMap: TCastleVulkanVirtualShadowMap;
     function GetLODSelector: TCastleVulkanLODSelector;
     function GetTextureStreamer: TCastleVulkanTextureStreamer;
+    function GetShadowCasterCuller: TCastleVulkanShadowCasterCuller;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -2560,6 +2610,7 @@ type
     property VirtualShadowMap: TCastleVulkanVirtualShadowMap read GetVirtualShadowMap;
     property LODSelector: TCastleVulkanLODSelector read GetLODSelector;
     property TextureStreamer: TCastleVulkanTextureStreamer read GetTextureStreamer;
+    property ShadowCasterCuller: TCastleVulkanShadowCasterCuller read GetShadowCasterCuller;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -13041,6 +13092,137 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanShadowCasterCuller (Phase 26.3)                                 }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanShadowCasterCuller.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+end;
+
+destructor TCastleVulkanShadowCasterCuller.Destroy;
+begin
+  FreeAndNil(FVisibleCasterBuffer);
+  FreeAndNil(FCasterBuffer);
+  inherited;
+end;
+
+procedure TCastleVulkanShadowCasterCuller.ClearCasters;
+begin
+  FCasterCount := 0;
+  SetLength(FCasters, 0);
+end;
+
+function TCastleVulkanShadowCasterCuller.AddCaster(
+  const ASphereCenter: TVector3; const ASphereRadius: Single): Integer;
+var
+  Idx: Integer;
+begin
+  Idx := Integer(FCasterCount);
+  Inc(FCasterCount);
+  SetLength(FCasters, FCasterCount);
+  FCasters[Idx] := Vector4(ASphereCenter, Max(0.0, ASphereRadius));
+  Result := Idx;
+end;
+
+procedure TCastleVulkanShadowCasterCuller.UploadCasters;
+var
+  CountAlloc: Cardinal;
+  BufDesc: TRHIBufferDesc;
+  MappedPtr: Pointer;
+begin
+  CountAlloc := Max(Cardinal(1), FCasterCount);
+  if (FCasterBuffer = nil) or
+     (FCasterBuffer.Desc.Size < CountAlloc * SizeOf(TVector4)) then
+  begin
+    FreeAndNil(FCasterBuffer);
+    BufDesc := TRHIBufferDesc.Create(
+      CountAlloc * SizeOf(TVector4),
+      [buStorage, buTransferDst],
+      muCpuToGpu,
+      'ShadowCasterSpheresBuffer');
+    FCasterBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+
+  if FCasterCount > 0 then
+  begin
+    MappedPtr := FCasterBuffer.Map;
+    if MappedPtr <> nil then
+    begin
+      Move(FCasters[0], MappedPtr^, FCasterCount * SizeOf(TVector4));
+      FCasterBuffer.Unmap;
+    end;
+  end;
+
+  if (FVisibleCasterBuffer = nil) or
+     (FVisibleCasterBuffer.Desc.Size < CountAlloc * SizeOf(Cardinal)) then
+  begin
+    FreeAndNil(FVisibleCasterBuffer);
+    BufDesc := TRHIBufferDesc.Create(
+      CountAlloc * SizeOf(Cardinal),
+      [buStorage, buTransferSrc],
+      muGpuOnly,
+      'VisibleShadowCastersBuffer');
+    FVisibleCasterBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+end;
+
+function TCastleVulkanShadowCasterCuller.EvaluateActiveShadowCastersCPU(
+  const ALightRayDir: TVector3;
+  const AMaxExtrusionDist: Single;
+  const AReceiverBoxMin, AReceiverBoxMax: TVector3): Cardinal;
+var
+  I: Cardinal;
+begin
+  Result := 0;
+  if FCasterCount = 0 then
+    Exit;
+  for I := 0 to FCasterCount - 1 do
+    if TCastleShaderGeneratorRHI.EvaluateShadowCasterExtrudedSphereIntersectsAABB(
+         FCasters[I].XYZ, FCasters[I].W, ALightRayDir, AMaxExtrusionDist,
+         AReceiverBoxMin, AReceiverBoxMax) then
+      Inc(Result);
+end;
+
+procedure TCastleVulkanShadowCasterCuller.DispatchShadowCasterCulling(
+  const ACommandList: TVulkanRHICommandList;
+  const ALightRayDir: TVector3;
+  const AMaxExtrusionDist: Single;
+  const AReceiverBoxMin, AReceiverBoxMax: TVector3;
+  const APipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+type
+  TShadowCasterCullPC = packed record
+    LightRayDirAndMaxDist: TVector4;
+    ReceiverBoxMinAndCount: TVector4;
+    ReceiverBoxMax: TVector4;
+  end;
+var
+  PC: TShadowCasterCullPC;
+  GroupsX: Cardinal;
+begin
+  UploadCasters;
+  if ACommandList = nil then
+    Exit;
+
+  FillChar(PC, SizeOf(PC), 0);
+  PC.LightRayDirAndMaxDist := Vector4(ALightRayDir, AMaxExtrusionDist);
+  PC.ReceiverBoxMinAndCount := Vector4(AReceiverBoxMin, Single(FCasterCount));
+  PC.ReceiverBoxMax := Vector4(AReceiverBoxMax, 0.0);
+
+  if APipeline <> nil then
+    ACommandList.BindComputePipeline(APipeline);
+  if ADescriptorSet <> nil then
+    ACommandList.BindDescriptorSet(0, ADescriptorSet, []);
+  ACommandList.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+
+  GroupsX := (Max(Cardinal(1), FCasterCount) + 63) div 64;
+  ACommandList.Dispatch(GroupsX, 1, 1);
+  Inc(FDispatchCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -13597,12 +13779,20 @@ begin
   Result := FTextureStreamer;
 end;
 
+function TVulkanRHIDevice.GetShadowCasterCuller: TCastleVulkanShadowCasterCuller;
+begin
+  if FShadowCasterCuller = nil then
+    FShadowCasterCuller := TCastleVulkanShadowCasterCuller.Create(Self);
+  Result := FShadowCasterCuller;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FShadowCasterCuller);
   FreeAndNil(FTextureStreamer);
   FreeAndNil(FLODSelector);
   FreeAndNil(FVirtualShadowMap);

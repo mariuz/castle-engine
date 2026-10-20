@@ -77,13 +77,12 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–24**: **COMPLETED** (100%).
-- **Phase 25 (Volumetric Cloud Raymarching, GPU Texture Streaming Residency Feedback & Equirectangular-to-Cubemap Compute Panorama Converter)**: **COMPLETED** (100%, 105 unit tests passing):
-  - [x] **25.1. Horizon-Aligned Volumetric Cloud Layer Raymarcher (`GenerateVolumetricCloudFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestVolumetricCloudDualLobeHGAndBeerPowderRHI`).
-  - [x] **25.2. GPU Texture Streaming Mipmap Residency & Feedback Analyzer (`TCastleVulkanTextureStreamer` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestGPUTextureStreamingMipFeedbackRHI`).
-  - [x] **25.3. Equirectangular HDR Panorama to Cubemap Compute Converter (`GenerateEquirectToCubemapComputeShader` in `CastleInternalShaderRHI`)** — Completed & tested (`TestEquirectangularToCubemapPanoramaConverterRHI`).
-- **Unreal Engine 5 Feature Parity Roadmap (Phases 26–33)**:
-  - **Phase 26**: Analytic Area Light LTC Shading, Seamless World-Space Triplanar & Height-Blended Texturing, and GPU Shadow Caster Light-Ray Extrusion Culling.
+- **Phases 1–25**: **COMPLETED** (100%).
+- **Phase 26 (Analytic Area Light LTC Shading, Seamless World-Space Triplanar & Height-Blended Texturing, and GPU Shadow Caster Light-Ray Extrusion Culling)**: **COMPLETED** (100%, 108 unit tests passing):
+  - [x] **26.1. Analytic Polygonal / Rectangular Area Lights via Linearly Transformed Cosines (`GenerateAreaLightLTCFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestAnalyticAreaLightLTCSolidAngleRHI`).
+  - [x] **26.2. Seamless World-Space Triplanar & Height-Blended Texture Mapping (`GenerateTriplanarAndHeightBlendFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestTriplanarAndHeightModulatedBlendingRHI`).
+  - [x] **26.3. GPU Shadow Caster Frustum + Light-Ray Extrusion Culling (`TCastleVulkanShadowCasterCuller` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestGPUShadowCasterLightRayExtrusionCullingRHI`).
+- **Unreal Engine 5 Feature Parity Roadmap (Phases 27–33)**:
   - **Phase 27 (UE5 Nanite Parity)**: 64-Bit Visibility Buffer (`Depth32 | InstanceID20 | PrimitiveID12`) & Analytic Barycentric UV Derivatives, Hierarchical Cluster DAG Cut Selection, and Sub-Pixel Software Compute Micro-Polygon Rasterizer.
   - **Phase 28 (UE5 Lumen Parity)**: 3D Clipmap Global Signed Distance Field (SDF) Sphere Tracing (`TCastleVulkanGlobalSDF`), 6-Axis Surface Cache Card Atlas (`TCastleVulkanSurfaceCache`), and Screen-Space Radiance Cache Probes.
   - **Phase 29 (UE5 MegaLights / ReSTIR Parity)**: Spatio-Temporal Reservoir Resampling (`TCastleVulkanReSTIR`, WRS/RIS streaming reservoirs + temporal/spatial neighbor combination for thousands of dynamic shadow-casting lights).

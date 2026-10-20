@@ -981,6 +981,47 @@ type
     { Phase 25.3 CPU reference: Inverse-maps 2:1 equirectangular UV in [0..1]^2 to a normalized 3D direction. }
     class function EquirectangularUVToDirection(const AUV: TVector2): TVector3; static;
 
+    { Phase 26.1: Generates GLSL 450 functions for Analytic Rectangular Area Lights
+      via Linearly Transformed Cosines (LTC) & Baum/Lambert Solid-Angle Integration. }
+    function GenerateAreaLightLTCFunctions: String;
+
+    { Phase 26.1 CPU reference: Evaluates subtended solid angle in [0..2*Pi] of a 3D rectangular area light. }
+    class function EvaluateRectAreaLightSolidAngle(
+      const ASurfacePos, ARectCenter, ARectRight, ARectUp: TVector3;
+      const AHalfWidth, AHalfHeight: Single): Single; static;
+
+    { Phase 26.1 CPU reference: Evaluates solid-angle-widened effective roughness for area lights. }
+    class function EvaluateLTCFilteredRoughness(
+      const ABaseRoughness, ADistanceToAreaLight, AAreaExtentRadius: Single): Single; static;
+
+    { Phase 26.2: Generates GLSL 450 functions for Seamless World-Space Triplanar
+      Projection and Height-Modulated Multi-Layer Splat Blending. }
+    function GenerateTriplanarAndHeightBlendFunctions: String;
+
+    { Phase 26.2 CPU reference: Evaluates power-sharpened normalized triplanar blend weights (w.x + w.y + w.z = 1). }
+    class function EvaluateTriplanarBlendWeights(
+      const AWorldNormal: TVector3;
+      const ASharpness: Single = 4.0): TVector3; static;
+
+    { Phase 26.2 CPU reference: Evaluates height-map-modulated 4-layer splat blend weights. }
+    class function EvaluateHeightModulatedBlendWeights(
+      const ALayerWeights, ALayerHeights: TVector4;
+      const AHeightContrast: Single = 0.2): TVector4; static;
+
+    { Phase 26.3: Generates a GLSL 450 compute shader for GPU Shadow Caster Light-Ray
+      Extrusion Culling against the receiver camera frustum AABB. }
+    function GenerateShadowCasterExtrusionCullingComputeShader(
+      const AWorkgroupSizeX: Cardinal = 64): String;
+
+    { Phase 26.3 CPU reference: Tests whether a shadow-caster sphere extruded along
+      ALightRayDir for [0..AMaxExtrusionDist] intersects [AReceiverBoxMin, AReceiverBoxMax]. }
+    class function EvaluateShadowCasterExtrudedSphereIntersectsAABB(
+      const ASphereCenter: TVector3;
+      const ASphereRadius: Single;
+      const ALightRayDir: TVector3;
+      const AMaxExtrusionDist: Single;
+      const AReceiverBoxMin, AReceiverBoxMax: TVector3): Boolean; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -4839,6 +4880,207 @@ begin
     CosTheta * Cos(Phi),
     Sin(Theta),
     CosTheta * Sin(Phi));
+end;
+
+function TCastleShaderGeneratorRHI.GenerateAreaLightLTCFunctions: String;
+begin
+  Result :=
+    '// --- Analytic Rectangular Area Lights: Solid-Angle & LTC Roughness (Phase 26.1) ---' + NL +
+    'vec3 IntegrateEdgeVector(vec3 v1, vec3 v2) {' + NL +
+    '  float x = dot(v1, v2);' + NL +
+    '  float y = abs(x);' + NL +
+    '  float a = 0.8543985 + (0.4965155 + 0.0145206 * y) * y;' + NL +
+    '  float b = 3.4175940 + (4.1616724 + y) * y;' + NL +
+    '  float v = a / b;' + NL +
+    '  float thetaSintheta = (x > 0.0) ? v : 0.5 * inversesqrt(max(1.0 - x * x, 1e-7)) - v;' + NL +
+    '  return cross(v1, v2) * thetaSintheta;' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateRectAreaLightSolidAngle(vec3 surfacePos, vec3 rectCenter, vec3 rectRight, vec3 rectUp, float halfWidth, float halfHeight) {' + NL +
+    '  vec3 ex = rectRight * halfWidth;' + NL +
+    '  vec3 ey = rectUp * halfHeight;' + NL +
+    '  vec3 p0 = normalize(rectCenter - ex - ey - surfacePos);' + NL +
+    '  vec3 p1 = normalize(rectCenter + ex - ey - surfacePos);' + NL +
+    '  vec3 p2 = normalize(rectCenter + ex + ey - surfacePos);' + NL +
+    '  vec3 p3 = normalize(rectCenter - ex + ey - surfacePos);' + NL +
+    '  vec3 sum = IntegrateEdgeVector(p0, p1) + IntegrateEdgeVector(p1, p2) + IntegrateEdgeVector(p2, p3) + IntegrateEdgeVector(p3, p0);' + NL +
+    '  return length(sum);' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateLTCFilteredRoughness(float baseRoughness, float distToLight, float areaExtentRadius) {' + NL +
+    '  float r = clamp(baseRoughness, 0.04, 1.0);' + NL +
+    '  float rad = max(0.0, areaExtentRadius);' + NL +
+    '  float d = max(1e-3, distToLight);' + NL +
+    '  return clamp(sqrt(r * r + rad / (rad + 2.0 * d)), 0.04, 1.0);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateRectAreaLightSolidAngle(
+  const ASurfacePos, ARectCenter, ARectRight, ARectUp: TVector3;
+  const AHalfWidth, AHalfHeight: Single): Single;
+
+  function EdgeVector(const V1, V2: TVector3): TVector3;
+  var
+    CosAngle, Theta: Single;
+    CrossVec: TVector3;
+  begin
+    CosAngle := EnsureRange(TVector3.DotProduct(V1, V2), -1.0, 1.0);
+    Theta := ArcCos(CosAngle);
+    CrossVec := TVector3.CrossProduct(V1, V2);
+    if CrossVec.LengthSqr > 1e-10 then
+      Result := CrossVec.Normalize * (0.5 * Theta)
+    else
+      Result := TVector3.Zero;
+  end;
+
+var
+  EX, EY, P0, P1, P2, P3, SumVec: TVector3;
+begin
+  EX := ARectRight * AHalfWidth;
+  EY := ARectUp * AHalfHeight;
+  P0 := (ARectCenter - EX - EY - ASurfacePos).Normalize;
+  P1 := (ARectCenter + EX - EY - ASurfacePos).Normalize;
+  P2 := (ARectCenter + EX + EY - ASurfacePos).Normalize;
+  P3 := (ARectCenter - EX + EY - ASurfacePos).Normalize;
+  SumVec := EdgeVector(P0, P1) + EdgeVector(P1, P2) + EdgeVector(P2, P3) + EdgeVector(P3, P0);
+  Result := SumVec.Length;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateLTCFilteredRoughness(
+  const ABaseRoughness, ADistanceToAreaLight, AAreaExtentRadius: Single): Single;
+var
+  R, Rad, D: Single;
+begin
+  R := EnsureRange(ABaseRoughness, 0.04, 1.0);
+  Rad := Max(0.0, AAreaExtentRadius);
+  D := Max(1e-3, ADistanceToAreaLight);
+  Result := EnsureRange(Sqrt(R * R + Rad / (Rad + 2.0 * D)), 0.04, 1.0);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateTriplanarAndHeightBlendFunctions: String;
+begin
+  Result :=
+    '// --- Seamless World-Space Triplanar & Height-Modulated Splat Blending (Phase 26.2) ---' + NL +
+    'vec3 EvaluateTriplanarBlendWeights(vec3 worldNormal, float sharpness) {' + NL +
+    '  vec3 n = abs(normalize(worldNormal));' + NL +
+    '  vec3 w = pow(max(n, vec3(1e-5)), vec3(max(1.0, sharpness)));' + NL +
+    '  return w / max(1e-6, w.x + w.y + w.z);' + NL +
+    '}' + NL +
+    NL +
+    'vec4 EvaluateHeightModulatedBlendWeights(vec4 layerWeights, vec4 layerHeights, float heightContrast) {' + NL +
+    '  float c = max(1e-3, heightContrast);' + NL +
+    '  vec4 h = layerWeights + layerHeights;' + NL +
+    '  float maxH = max(max(h.x, h.y), max(h.z, h.w)) - c;' + NL +
+    '  vec4 b = max(h - vec4(maxH), vec4(0.0));' + NL +
+    '  return b / max(1e-6, b.x + b.y + b.z + b.w);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateTriplanarBlendWeights(
+  const AWorldNormal: TVector3;
+  const ASharpness: Single): TVector3;
+var
+  N: TVector3;
+  P, WX, WY, WZ, SumW: Single;
+begin
+  if AWorldNormal.LengthSqr > 1e-8 then
+    N := AWorldNormal.Normalize
+  else
+    N := Vector3(0.0, 1.0, 0.0);
+  P := Max(1.0, ASharpness);
+  WX := Power(Max(1e-5, Abs(N.X)), P);
+  WY := Power(Max(1e-5, Abs(N.Y)), P);
+  WZ := Power(Max(1e-5, Abs(N.Z)), P);
+  SumW := Max(1e-6, WX + WY + WZ);
+  Result := Vector3(WX / SumW, WY / SumW, WZ / SumW);
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateHeightModulatedBlendWeights(
+  const ALayerWeights, ALayerHeights: TVector4;
+  const AHeightContrast: Single): TVector4;
+var
+  C, H0, H1, H2, H3, MaxH, B0, B1, B2, B3, SumB: Single;
+begin
+  C := Max(1e-3, AHeightContrast);
+  H0 := ALayerWeights.X + ALayerHeights.X;
+  H1 := ALayerWeights.Y + ALayerHeights.Y;
+  H2 := ALayerWeights.Z + ALayerHeights.Z;
+  H3 := ALayerWeights.W + ALayerHeights.W;
+  MaxH := Max(Max(H0, H1), Max(H2, H3)) - C;
+  B0 := Max(0.0, H0 - MaxH);
+  B1 := Max(0.0, H1 - MaxH);
+  B2 := Max(0.0, H2 - MaxH);
+  B3 := Max(0.0, H3 - MaxH);
+  SumB := Max(1e-6, B0 + B1 + B2 + B3);
+  Result := Vector4(B0 / SumB, B1 / SumB, B2 / SumB, B3 / SumB);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateShadowCasterExtrusionCullingComputeShader(
+  const AWorkgroupSizeX: Cardinal): String;
+begin
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = 1, local_size_z = 1) in;', [Max(1, AWorkgroupSizeX)]) + NL +
+    NL +
+    'layout(std430, set = 0, binding = 0) readonly buffer CastleShadowCastersBlock {' + NL +
+    '  vec4 u_CasterSpheres[];' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 1) writeonly buffer CastleVisibleShadowCastersBlock {' + NL +
+    '  uint u_VisibleCasterFlags[];' + NL +
+    '};' + NL +
+    NL +
+    'layout(push_constant) uniform CastleShadowCasterCullPush {' + NL +
+    '  vec4 u_LightRayDirAndMaxDist;' + NL +
+    '  vec4 u_ReceiverBoxMin;' + NL +
+    '  vec4 u_ReceiverBoxMax;' + NL +
+    '} PushConstants;' + NL +
+    NL +
+    'bool EvaluateShadowCasterExtrudedSphereIntersectsAABB(vec3 sphereCenter, float sphereRadius,' + NL +
+    '  vec3 lightRayDir, float maxExtrusionDist, vec3 receiverMin, vec3 receiverMax) {' + NL +
+    '  vec3 expMin = receiverMin - vec3(max(0.0, sphereRadius));' + NL +
+    '  vec3 expMax = receiverMax + vec3(max(0.0, sphereRadius));' + NL +
+    '  vec3 invDir = 1.0 / max(abs(lightRayDir), vec3(1e-7)) * sign(lightRayDir + vec3(1e-12));' + NL +
+    '  vec3 t0 = (expMin - sphereCenter) * invDir;' + NL +
+    '  vec3 t1 = (expMax - sphereCenter) * invDir;' + NL +
+    '  vec3 tSmaller = min(t0, t1);' + NL +
+    '  vec3 tBigger  = max(t0, t1);' + NL +
+    '  float tNear = max(0.0, max(tSmaller.x, max(tSmaller.y, tSmaller.z)));' + NL +
+    '  float tFar  = min(max(0.0, maxExtrusionDist), min(tBigger.x, min(tBigger.y, tBigger.z)));' + NL +
+    '  return tFar >= tNear;' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  uint idx = gl_GlobalInvocationID.x;' + NL +
+    '  uint casterCount = uint(PushConstants.u_ReceiverBoxMin.w);' + NL +
+    '  if (idx >= casterCount) return;' + NL +
+    '  vec4 sphere = u_CasterSpheres[idx];' + NL +
+    '  bool vis = EvaluateShadowCasterExtrudedSphereIntersectsAABB(sphere.xyz, sphere.w,' + NL +
+    '    PushConstants.u_LightRayDirAndMaxDist.xyz, PushConstants.u_LightRayDirAndMaxDist.w,' + NL +
+    '    PushConstants.u_ReceiverBoxMin.xyz, PushConstants.u_ReceiverBoxMax.xyz);' + NL +
+    '  u_VisibleCasterFlags[idx] = vis ? 1u : 0u;' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateShadowCasterExtrudedSphereIntersectsAABB(
+  const ASphereCenter: TVector3;
+  const ASphereRadius: Single;
+  const ALightRayDir: TVector3;
+  const AMaxExtrusionDist: Single;
+  const AReceiverBoxMin, AReceiverBoxMax: TVector3): Boolean;
+var
+  ExpMin, ExpMax, RayDir: TVector3;
+  R, TNear, TFar: Single;
+begin
+  R := Max(0.0, ASphereRadius);
+  ExpMin := AReceiverBoxMin - Vector3(R, R, R);
+  ExpMax := AReceiverBoxMax + Vector3(R, R, R);
+  if ALightRayDir.LengthSqr > 1e-8 then
+    RayDir := ALightRayDir.Normalize
+  else
+    RayDir := Vector3(0.0, -1.0, 0.0);
+  Result := EvaluateRayAABBIntersection(
+    ASphereCenter, RayDir, ExpMin, ExpMax, 0.0, Max(0.0, AMaxExtrusionDist), TNear, TFar);
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

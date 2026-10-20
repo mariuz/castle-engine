@@ -144,6 +144,9 @@ type
     procedure TestVolumetricCloudDualLobeHGAndBeerPowderRHI;
     procedure TestGPUTextureStreamingMipFeedbackRHI;
     procedure TestEquirectangularToCubemapPanoramaConverterRHI;
+    procedure TestAnalyticAreaLightLTCSolidAngleRHI;
+    procedure TestTriplanarAndHeightModulatedBlendingRHI;
+    procedure TestGPUShadowCasterLightRayExtrusionCullingRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -8068,6 +8071,119 @@ begin
     AssertSameValue(OrigDir.Y, DecodedDir.Y, 1e-4);
     AssertSameValue(OrigDir.Z, DecodedDir.Z, 1e-4);
   finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestAnalyticAreaLightLTCSolidAngleRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  AreaGLSL: String;
+  OmegaNear, OmegaFar, RoughNear, RoughFar: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Area Light LTC GLSL 450 functions }
+    AreaGLSL := Gen.GenerateAreaLightLTCFunctions;
+    AssertTrue('Area Light GLSL must include EvaluateRectAreaLightSolidAngle and EvaluateLTCFilteredRoughness',
+      (Pos('float EvaluateRectAreaLightSolidAngle(vec3 surfacePos, vec3 rectCenter,', AreaGLSL) > 0) and
+      (Pos('float EvaluateLTCFilteredRoughness(float baseRoughness, float distToLight, float areaExtentRadius)', AreaGLSL) > 0));
+
+    { 2. Verify exact Lambert/Baum vector irradiance of a 2x2 square (halfWidth=1, halfHeight=1) at distance d=1 vs d=5:
+         At d=1, exact contour integral of [-1..1]^2 on z=1 from origin is sqrt(2) * arccos(1/3) = 1.7408395 }
+    OmegaNear := TCastleShaderGeneratorRHI.EvaluateRectAreaLightSolidAngle(
+      Vector3(0.0, 0.0, 0.0), Vector3(0.0, 0.0, 1.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0), 1.0, 1.0);
+    OmegaFar := TCastleShaderGeneratorRHI.EvaluateRectAreaLightSolidAngle(
+      Vector3(0.0, 0.0, 0.0), Vector3(0.0, 0.0, 5.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0), 1.0, 1.0);
+    AssertSameValue(Sqrt(2.0) * ArcCos(1.0 / 3.0), OmegaNear, 1e-4);
+    AssertTrue('Area light solid angle must decay with distance', OmegaNear > OmegaFar * 10.0);
+
+    { 3. Verify LTC filtered roughness widens more when close to large area light }
+    RoughNear := TCastleShaderGeneratorRHI.EvaluateLTCFilteredRoughness(0.1, 1.0, 2.0);
+    RoughFar  := TCastleShaderGeneratorRHI.EvaluateLTCFilteredRoughness(0.1, 50.0, 2.0);
+    AssertTrue('Close area light must widen effective specular roughness compared to distant light',
+      RoughNear > RoughFar);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestTriplanarAndHeightModulatedBlendingRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  TriGLSL: String;
+  TriW: TVector3;
+  HeightW: TVector4;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Triplanar & Height Blend GLSL 450 functions }
+    TriGLSL := Gen.GenerateTriplanarAndHeightBlendFunctions;
+    AssertTrue('Triplanar GLSL must include EvaluateTriplanarBlendWeights and EvaluateHeightModulatedBlendWeights',
+      (Pos('vec3 EvaluateTriplanarBlendWeights(vec3 worldNormal, float sharpness)', TriGLSL) > 0) and
+      (Pos('vec4 EvaluateHeightModulatedBlendWeights(vec4 layerWeights, vec4 layerHeights, float heightContrast)', TriGLSL) > 0));
+
+    { 2. Verify normalized power-sharpened triplanar weights }
+    TriW := TCastleShaderGeneratorRHI.EvaluateTriplanarBlendWeights(Vector3(0.8, 0.5, 0.33166).Normalize, 4.0);
+    AssertSameValue(1.0, TriW.X + TriW.Y + TriW.Z, 1e-5);
+    AssertTrue('Dominant X normal component must receive largest sharpened triplanar weight',
+      (TriW.X > TriW.Y) and (TriW.Y > TriW.Z));
+
+    { 3. Verify height-modulated splat weights allow high-elevation cobble layer #1 to dominate equal vertex weights }
+    HeightW := TCastleShaderGeneratorRHI.EvaluateHeightModulatedBlendWeights(
+      Vector4(0.5, 0.5, 0.0, 0.0), Vector4(0.1, 0.9, 0.0, 0.0), 0.2);
+    AssertSameValue(1.0, HeightW.X + HeightW.Y + HeightW.Z + HeightW.W, 1e-5);
+    AssertSameValue(1.0, HeightW.Y, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGPUShadowCasterLightRayExtrusionCullingRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Gen: TCastleShaderGeneratorRHI;
+  CasterGLSL: String;
+  ActiveCasters: Cardinal;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6666)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    { 1. Verify Shadow Caster Extrusion Culling Compute Shader GLSL 450 }
+    CasterGLSL := Gen.GenerateShadowCasterExtrusionCullingComputeShader(64);
+    AssertTrue('Shadow Caster Culling GLSL must include EvaluateShadowCasterExtrudedSphereIntersectsAABB',
+      Pos('bool EvaluateShadowCasterExtrudedSphereIntersectsAABB(vec3 sphereCenter, float sphereRadius,', CasterGLSL) > 0);
+
+    { 2. Register 3 shadow casters with downward directional light ray (0, -1, 0) and receiver frustum [-10,-2,-10]..[10,2,10]:
+         #0: Upwind above receiver at (0, 30, 0), radius 2 -> extrudes through receiver -> VISIBLE
+         #1: Off to the side at (50, 30, 0), radius 2 -> misses receiver -> CULLED
+         #2: Downwind below receiver at (0, -20, 0), radius 2 -> extrudes away from receiver -> CULLED }
+    Device.ShadowCasterCuller.ClearCasters;
+    Device.ShadowCasterCuller.AddCaster(Vector3(0.0, 30.0, 0.0), 2.0);
+    Device.ShadowCasterCuller.AddCaster(Vector3(50.0, 30.0, 0.0), 2.0);
+    Device.ShadowCasterCuller.AddCaster(Vector3(0.0, -20.0, 0.0), 2.0);
+
+    ActiveCasters := Device.ShadowCasterCuller.EvaluateActiveShadowCastersCPU(
+      Vector3(0.0, -1.0, 0.0), 100.0, Vector3(-10.0, -2.0, -10.0), Vector3(10.0, 2.0, 10.0));
+    AssertEquals('Only upwind shadow caster #0 whose light-ray extrusion hits the receiver frustum must survive',
+      Cardinal(1), ActiveCasters);
+
+    { 3. Verify GPU SSBO upload and compute dispatch }
+    CmdList.BeginRecording;
+    Device.ShadowCasterCuller.DispatchShadowCasterCulling(
+      CmdList, Vector3(0.0, -1.0, 0.0), 100.0,
+      Vector3(-10.0, -2.0, -10.0), Vector3(10.0, 2.0, 10.0), nil, nil);
+    CmdList.EndRecording;
+
+    AssertEquals(Cardinal(1), Device.ShadowCasterCuller.DispatchCount);
+    AssertTrue('ShadowCasterCuller SSBOs must be allocated',
+      (Device.ShadowCasterCuller.CasterBuffer <> nil) and
+      (Device.ShadowCasterCuller.VisibleCasterBuffer <> nil));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
     FreeAndNil(Gen);
   end;
 end;
