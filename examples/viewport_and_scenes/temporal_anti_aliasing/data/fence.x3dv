@@ -1,0 +1,105 @@
+#X3D V4.0 utf8
+PROFILE Interchange
+
+# Thin poles and wires, and a fine grid on the floor: details smaller than
+# a pixel from afar, that flicker without anti-aliasing when the camera moves.
+# The spinning box moves by itself (not only with the camera).
+
+DirectionalLight { direction -0.4 -1 -0.6 intensity 0.9 }
+
+# Floor with a grid of thin dark lines.
+Shape {
+  appearance Appearance { material Material { diffuseColor 0.75 0.72 0.65 } }
+  geometry Box { size 40 0.1 40 }
+}
+Transform { translation 0 0.06 0 children [
+  Transform { translation -20 0 0 children DEF GridX Shape { appearance DEF Dark Appearance { material Material { diffuseColor 0.1 0.1 0.12 } } geometry Box { size 0.04 0.01 40 } } }
+  Transform { translation -18 0 0 children USE GridX }
+  Transform { translation -16 0 0 children USE GridX }
+  Transform { translation -14 0 0 children USE GridX }
+  Transform { translation -12 0 0 children USE GridX }
+  Transform { translation -10 0 0 children USE GridX }
+  Transform { translation -8 0 0 children USE GridX }
+  Transform { translation -6 0 0 children USE GridX }
+  Transform { translation -4 0 0 children USE GridX }
+  Transform { translation -2 0 0 children USE GridX }
+  Transform { translation 0 0 0 children USE GridX }
+  Transform { translation 2 0 0 children USE GridX }
+  Transform { translation 4 0 0 children USE GridX }
+  Transform { translation 6 0 0 children USE GridX }
+  Transform { translation 8 0 0 children USE GridX }
+  Transform { translation 10 0 0 children USE GridX }
+  Transform { translation 12 0 0 children USE GridX }
+  Transform { translation 14 0 0 children USE GridX }
+  Transform { translation 16 0 0 children USE GridX }
+  Transform { translation 18 0 0 children USE GridX }
+  Transform { translation 20 0 0 children USE GridX }
+  Transform { translation 0 0 -20 children DEF GridZ Shape { appearance USE Dark geometry Box { size 40 0.01 0.04 } } }
+  Transform { translation 0 0 -18 children USE GridZ }
+  Transform { translation 0 0 -16 children USE GridZ }
+  Transform { translation 0 0 -14 children USE GridZ }
+  Transform { translation 0 0 -12 children USE GridZ }
+  Transform { translation 0 0 -10 children USE GridZ }
+  Transform { translation 0 0 -8 children USE GridZ }
+  Transform { translation 0 0 -6 children USE GridZ }
+  Transform { translation 0 0 -4 children USE GridZ }
+  Transform { translation 0 0 -2 children USE GridZ }
+  Transform { translation 0 0 0 children USE GridZ }
+  Transform { translation 0 0 2 children USE GridZ }
+  Transform { translation 0 0 4 children USE GridZ }
+  Transform { translation 0 0 6 children USE GridZ }
+  Transform { translation 0 0 8 children USE GridZ }
+  Transform { translation 0 0 10 children USE GridZ }
+  Transform { translation 0 0 12 children USE GridZ }
+  Transform { translation 0 0 14 children USE GridZ }
+  Transform { translation 0 0 16 children USE GridZ }
+  Transform { translation 0 0 18 children USE GridZ }
+  Transform { translation 0 0 20 children USE GridZ }
+]}
+
+# A fence: poles and wires.
+Transform { translation -12 2 -16 children DEF Pole Shape {
+  appearance DEF Metal Appearance { material Material { diffuseColor 0.25 0.3 0.35 specularColor 0.6 0.6 0.6 shininess 0.4 } }
+  geometry Cylinder { radius 0.06 height 4 } } }
+Transform { translation -12 2 -12 children USE Pole }
+Transform { translation -12 2 -8 children USE Pole }
+Transform { translation -12 2 -4 children USE Pole }
+Transform { translation -12 2 0 children USE Pole }
+Transform { translation -12 2 4 children USE Pole }
+Transform { translation -12 2 8 children USE Pole }
+Transform { translation -12 2 12 children USE Pole }
+Transform { translation -12 2 16 children USE Pole }
+Transform { translation -12 0.8 0 children DEF Wire Shape { appearance USE Metal geometry Box { size 0.02 0.02 32 } } }
+Transform { translation -12 1.8 0 children USE Wire }
+Transform { translation -12 2.8 0 children USE Wire }
+Transform { translation -12 3.8 0 children USE Wire }
+
+# A row of thin bars, rotated, so their edges are diagonal on the screen.
+Transform { translation -8 1.5 -6 rotation 0 0 1 0.00 children DEF Bar Shape {
+  appearance Appearance { material Material { diffuseColor 0.9 0.5 0.15 } }
+  geometry Box { size 0.08 3 0.08 } } }
+Transform { translation -6 1.5 -6 rotation 0 0 1 0.15 children USE Bar }
+Transform { translation -4 1.5 -6 rotation 0 0 1 0.30 children USE Bar }
+Transform { translation -2 1.5 -6 rotation 0 0 1 0.45 children USE Bar }
+Transform { translation 0 1.5 -6 rotation 0 0 1 0.60 children USE Bar }
+Transform { translation 2 1.5 -6 rotation 0 0 1 0.75 children USE Bar }
+Transform { translation 4 1.5 -6 rotation 0 0 1 0.90 children USE Bar }
+Transform { translation 6 1.5 -6 rotation 0 0 1 1.05 children USE Bar }
+Transform { translation 8 1.5 -6 rotation 0 0 1 1.20 children USE Bar }
+
+# A spinning box: a moving object, not followed by the motion vectors
+# (computed from the camera), kept sharp by the neighborhood clamping.
+DEF Spinner Transform {
+  translation 4 1.2 2
+  children Shape {
+    appearance Appearance { material Material { diffuseColor 0.2 0.5 0.9 } }
+    geometry Box { size 1.6 1.6 1.6 }
+  }
+}
+DEF SpinTime TimeSensor { loop TRUE cycleInterval 6 }
+DEF SpinRotation OrientationInterpolator {
+  key [ 0 0.25 0.5 0.75 1 ]
+  keyValue [ 0 1 0 0, 0 1 0 1.5708, 0 1 0 3.14159, 0 1 0 4.71239, 0 1 0 6.28318 ]
+}
+ROUTE SpinTime.fraction_changed TO SpinRotation.set_fraction
+ROUTE SpinRotation.value_changed TO Spinner.set_rotation

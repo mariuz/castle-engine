@@ -200,6 +200,7 @@ castle-game-engine-*.fpm
 /examples/viewport_and_scenes/shadow_volumes_invisible_caster/shadow_volumes_invisible_caster
 /examples/viewport_and_scenes/shadows/shadows
 /examples/viewport_and_scenes/shadow_volumes_whole_scene_manifold/shadow_volumes_whole_scene_manifold
+/examples/viewport_and_scenes/temporal_anti_aliasing/temporal_anti_aliasing
 /examples/viewport_and_scenes/bump_mapping/bump_mapping
 /examples/network/ask_openai_assistant/castle-openai
 /examples/network/asynchronous_download/asynchronous_download

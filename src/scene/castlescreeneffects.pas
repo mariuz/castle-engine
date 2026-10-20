@@ -102,6 +102,23 @@ type
       { Shader copying the colors unchanged, the last screen effect
         when InternalHighDynamicRange is used without other screen effects. }
       CopyShader: TGLSLProgram;
+
+      { Whether InternalTemporalAntiAliasing is used in this frame.
+        Valid only between Render and RenderOverChildren calls. }
+      CurrentTemporalAntiAliasing: Boolean;
+      { Shader blending the world with the history (InternalTemporalAntiAliasingResolve). }
+      TemporalShader: TGLSLProgram;
+      TemporalShaderFailed: Boolean;
+      { The last 2 results of InternalTemporalAntiAliasingResolve:
+        TemporalHistory[TemporalHistoryRead] is the previous frame's,
+        the other one is written in this frame. }
+      TemporalHistory: array [0..1] of TGLTexture;
+      TemporalHistoryRead: Integer;
+      { Whether TemporalHistory[TemporalHistoryRead] holds the previous frame. }
+      TemporalHistoryValid: Boolean;
+      TemporalHistoryWidth, TemporalHistoryHeight: Cardinal;
+      TemporalRTT: TGLRenderToTexture;
+
       ScreenPointVbo: TGLBuffer;
       ScreenPointVao: TVertexArrayObject;
       ScreenPoint: packed array [0..3] of TScreenPoint;
@@ -113,6 +130,13 @@ type
     function GetScreenEffect(const Index: Integer): TGLSLProgram;
     { InternalHighDynamicRange shader, or @nil if it cannot be used. }
     function GetHighDynamicRangeShader: TGLSLProgram;
+    { Shader copying the colors unchanged. }
+    function GetCopyShader: TGLSLProgram;
+    { InternalTemporalAntiAliasing shader, or @nil if it cannot be used. }
+    function GetTemporalShader: TGLSLProgram;
+    { Create TemporalHistory and TemporalRTT for the current size. }
+    procedure PrepareTemporalHistory;
+    procedure FreeTemporalHistory;
     { Render a full-screen quad with the Shader,
       reading ScreenEffectTextureSrc (and ScreenEffectTextureDepth). }
     procedure RenderOneEffect(const Shader: TGLSLProgram);
@@ -168,6 +192,35 @@ type
       screen colors.
       @exclude }
     procedure InternalHighDynamicRangeResolve;
+
+    { Blend the world rendered in this frame with the previous frames
+      (temporal anti-aliasing), calling @link(InternalTemporalAntiAliasingResolve)
+      after rendering it (and after @link(InternalHighDynamicRangeResolve)).
+      The rendering should be jittered by a sub-pixel offset every frame.
+      This is internal, only to be used by TCastleViewport.TemporalAntiAliasing.
+      @exclude }
+    function InternalTemporalAntiAliasing: Boolean; virtual;
+
+    { Whether @link(InternalTemporalAntiAliasing) is used in this frame:
+      it was requested and it is supported.
+      Valid only between Render and RenderOverChildren calls.
+      @exclude }
+    function InternalTemporalAntiAliasingActive: Boolean;
+
+    { Blend the world rendered so far (when @link(InternalTemporalAntiAliasingActive))
+      with the result of the previous frame, and remember the result for the next frame.
+
+      Reprojection transforms a point in the normalized device coordinates
+      of this frame (without the jitter: x, y from the pixel center,
+      z from the depth buffer) to the clip coordinates
+      of the previous frame (without the jitter),
+      where the history is read: these are the motion vectors.
+      Feedback is the weight of the history (0..1).
+
+      Rendering after this (e.g. children user interface) is not blended.
+      @exclude }
+    procedure InternalTemporalAntiAliasingResolve(const Reprojection: TMatrix4;
+      const Feedback: Single);
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -367,6 +420,112 @@ begin
   Result := RenderScreenEffects and CurrentHighDynamicRange;
 end;
 
+function TCastleScreenEffects.InternalTemporalAntiAliasing: Boolean;
+begin
+  Result := false;
+end;
+
+function TCastleScreenEffects.InternalTemporalAntiAliasingActive: Boolean;
+begin
+  Result := RenderScreenEffects and CurrentTemporalAntiAliasing;
+end;
+
+function TCastleScreenEffects.GetCopyShader: TGLSLProgram;
+var
+  Shader: TGLSLScreenEffect;
+begin
+  if CopyShader = nil then
+  begin
+    Shader := TGLSLScreenEffect.Create;
+    Shader.ScreenEffectShader :=
+      'ivec2 screen_position();' + NL +
+      'vec4 screen_get_color(ivec2 position);' + NL +
+      'void main(void)' + NL +
+      '{' + NL +
+      '  gl_FragColor = screen_get_color(screen_position());' + NL +
+      '}' + NL;
+    Shader.Link;
+    CopyShader := Shader;
+  end;
+  Result := CopyShader;
+end;
+
+function TCastleScreenEffects.GetTemporalShader: TGLSLProgram;
+var
+  Shader: TGLSLScreenEffect;
+begin
+  if (TemporalShader = nil) and
+     (not TemporalShaderFailed) and
+     GLFeatures.TextureDepth then
+  begin
+    Shader := TGLSLScreenEffect.Create;
+    try
+      Shader.NeedsDepth := true;
+      Shader.ScreenEffectShader := {$I temporal_anti_aliasing.fs.inc};
+      Shader.Link;
+      TemporalShader := Shader;
+    except
+      on E: EGLSLError do
+      begin
+        FreeAndNil(Shader);
+        WritelnWarning('Error when linking the shader for temporal anti-aliasing, disabling it: ' + E.Message);
+        TemporalShaderFailed := true;
+      end;
+    end;
+  end;
+  Result := TemporalShader;
+end;
+
+procedure TCastleScreenEffects.FreeTemporalHistory;
+begin
+  FreeTexture(TemporalHistory[0]);
+  FreeTexture(TemporalHistory[1]);
+  FreeAndNil(TemporalRTT);
+  TemporalHistoryValid := false;
+end;
+
+procedure TCastleScreenEffects.PrepareTemporalHistory;
+
+  function CreateHistoryTexture: TGLTexture;
+  begin
+    Result := glCreateTexture();
+    glBindTexture(GL_TEXTURE_2D, Result);
+    { linear, as the history is read between pixels (by the motion vectors) }
+    SetTextureFilter(GL_TEXTURE_2D, TextureFilter(minLinear, magLinear));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GLFeatures.CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GLFeatures.CLAMP_TO_EDGE);
+    { Float components when possible: with 8 bits, blending a small part
+      of each frame (1 - feedback) gets stuck a few levels off. }
+    if GLFeatures.ColorBufferFloat then
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F,
+        ScreenEffectTextureWidth, ScreenEffectTextureHeight, 0, GL_RGBA, GL_FLOAT, nil)
+    else
+      glTexImage2D(GL_TEXTURE_2D, 0, {$ifdef OpenGLES} GL_RGBA {$else} GL_RGBA8 {$endif},
+        ScreenEffectTextureWidth, ScreenEffectTextureHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nil);
+    TextureMemoryProfiler.Allocate(Result, 'temporal-anti-aliasing-history', '', 0, false,
+      ScreenEffectTextureWidth, ScreenEffectTextureHeight, 1);
+  end;
+
+begin
+  if (TemporalRTT <> nil) and
+     (TemporalHistoryWidth = ScreenEffectTextureWidth) and
+     (TemporalHistoryHeight = ScreenEffectTextureHeight) then
+    Exit;
+
+  FreeTemporalHistory;
+  TemporalHistoryWidth := ScreenEffectTextureWidth;
+  TemporalHistoryHeight := ScreenEffectTextureHeight;
+  TemporalHistory[0] := CreateHistoryTexture;
+  TemporalHistory[1] := CreateHistoryTexture;
+  TemporalHistoryRead := 0;
+
+  TemporalRTT := TGLRenderToTexture.Create(TemporalHistoryWidth, TemporalHistoryHeight);
+  TemporalRTT.SetTexture(TemporalHistory[1], GL_TEXTURE_2D);
+  TemporalRTT.Buffer := tbColor;
+  TemporalRTT.Stencil := false;
+  TemporalRTT.GLContextOpen;
+end;
+
 function TCastleScreenEffects.GetHighDynamicRangeShader: TGLSLProgram;
 
   function ToneMappingDefines: String;
@@ -447,27 +606,12 @@ end;
 function TCastleScreenEffects.GetScreenEffect(const Index: Integer): TGLSLProgram;
 var
   SceneEffects: Integer;
-  Shader: TGLSLScreenEffect;
 begin
   { Only the high dynamic range conversion (already done by
     InternalHighDynamicRangeResolve): copy the result to the screen. }
-  if CurrentHighDynamicRange and (GetScreenEffectsCount = 0) then
-  begin
-    if CopyShader = nil then
-    begin
-      Shader := TGLSLScreenEffect.Create;
-      Shader.ScreenEffectShader :=
-        'ivec2 screen_position();' + NL +
-        'vec4 screen_get_color(ivec2 position);' + NL +
-        'void main(void)' + NL +
-        '{' + NL +
-        '  gl_FragColor = screen_get_color(screen_position());' + NL +
-        '}' + NL;
-      Shader.Link;
-      CopyShader := Shader;
-    end;
-    Exit(CopyShader);
-  end;
+  if (CurrentHighDynamicRange or CurrentTemporalAntiAliasing) and
+     (GetScreenEffectsCount = 0) then
+    Exit(GetCopyShader);
 
   if ScreenEffectsScene <> nil then
     SceneEffects := ScreenEffectsScene.InternalScreenEffectsCount
@@ -501,10 +645,19 @@ var
     CurrentScreenEffectsCount := GetScreenEffectsCount;
     CurrentHighDynamicRange := InternalHighDynamicRange and
       (GetHighDynamicRangeShader <> nil);
+    { Temporal anti-aliasing blends the history in GL_TEXTURE_2D textures,
+      it is not used with multi-sampling (that already anti-aliases). }
+    CurrentTemporalAntiAliasing := InternalTemporalAntiAliasing and
+      (GLFeatures.CurrentMultiSampling <= 1) and
+      (GetTemporalShader <> nil);
+    if not CurrentTemporalAntiAliasing then
+      TemporalHistoryValid := false;
     { With high dynamic range, InternalHighDynamicRangeResolve
-      does the conversion, and the last effect (maybe just a copy, see GetScreenEffect)
+      does the conversion (and InternalTemporalAntiAliasingResolve the blending),
+      and the last effect (maybe just a copy, see GetScreenEffect)
       renders to the screen. }
-    if CurrentHighDynamicRange and (CurrentScreenEffectsCount = 0) then
+    if (CurrentHighDynamicRange or CurrentTemporalAntiAliasing) and
+       (CurrentScreenEffectsCount = 0) then
       CurrentScreenEffectsCount := 1;
     RenderScreenEffects := CurrentScreenEffectsCount <> 0;
     if not RenderScreenEffects then Exit; // no need to do anything else
@@ -520,11 +673,15 @@ var
     if not RenderScreenEffects then
     begin
       CurrentHighDynamicRange := false;
+      CurrentTemporalAntiAliasing := false;
+      TemporalHistoryValid := false;
       Exit; // no need to do anything else
     end;
 
-    { check the need to render depth buffer to a texture. }
-    CurrentScreenEffectsNeedDepth := GetScreenEffectsNeedDepth;
+    { check the need to render depth buffer to a texture
+      (temporal anti-aliasing reprojects the depth). }
+    CurrentScreenEffectsNeedDepth := GetScreenEffectsNeedDepth or
+      CurrentTemporalAntiAliasing;
     if CurrentScreenEffectsNeedDepth and not GLFeatures.TextureDepth then
     begin
       { We support only screen effects that do not require depth.
@@ -532,6 +689,8 @@ var
         depth (and only them), instead of just disabling all screen effects. }
       RenderScreenEffects := false;
       CurrentHighDynamicRange := false;
+      CurrentTemporalAntiAliasing := false;
+      TemporalHistoryValid := false;
       Exit;
     end;
   end;
@@ -810,6 +969,60 @@ begin
   RenderContext.DepthBufferUpdate := SavedDepthBufferUpdate;
 end;
 
+procedure TCastleScreenEffects.InternalTemporalAntiAliasingResolve(
+  const Reprojection: TMatrix4; const Feedback: Single);
+var
+  SavedDepthTest, SavedDepthBufferUpdate: Boolean;
+  HistoryWrite: Integer;
+  SavedSrc: TGLTexture;
+begin
+  if not InternalTemporalAntiAliasingActive then
+    Exit;
+
+  PrepareTemporalHistory;
+  HistoryWrite := 1 - TemporalHistoryRead;
+
+  { The world (now in ScreenEffectTextureSrc) and its depth are blended
+    with the history into TemporalHistory[HistoryWrite].
+    The depth texture is not attached to TemporalRTT, so it can be read. }
+  ScreenEffectRTT.RenderEnd;
+  SwapValues(ScreenEffectTextureDest, ScreenEffectTextureSrc);
+
+  SavedDepthTest := RenderContext.DepthTest;
+  SavedDepthBufferUpdate := RenderContext.DepthBufferUpdate;
+  RenderContext.DepthTest := false;
+  RenderContext.DepthBufferUpdate := false;
+  RenderContext.BlendingDisable;
+
+  TemporalRTT.RenderBegin;
+  TemporalRTT.SetTexture(TemporalHistory[HistoryWrite], GL_TEXTURE_2D);
+  { texture units 0 and 1 are the screen and its depth, see RenderOneEffect }
+  glActiveTexture(GL_TEXTURE2);
+  glBindTexture(GL_TEXTURE_2D, TemporalHistory[TemporalHistoryRead]);
+  RenderContext.CurrentProgram := TemporalShader;
+  TemporalShader.Uniform('temporal_history').SetValue(2);
+  TemporalShader.Uniform('temporal_reprojection').SetValue(Reprojection);
+  TemporalShader.Uniform('temporal_feedback').SetValue(Feedback);
+  TemporalShader.Uniform('temporal_history_valid').SetValue(TGLint(Ord(TemporalHistoryValid)));
+  RenderOneEffect(TemporalShader);
+  TemporalRTT.RenderEnd;
+
+  { Copy the result to ScreenEffectTextureDest, keeping the depth and stencil
+    attachments, so rendering can continue on top of it. }
+  ScreenEffectRTT.RenderBegin;
+  ScreenEffectRTT.SetTexture(ScreenEffectTextureDest, ScreenEffectTextureTarget);
+  SavedSrc := ScreenEffectTextureSrc;
+  ScreenEffectTextureSrc := TemporalHistory[HistoryWrite];
+  RenderOneEffect(GetCopyShader);
+  ScreenEffectTextureSrc := SavedSrc;
+
+  RenderContext.DepthTest := SavedDepthTest;
+  RenderContext.DepthBufferUpdate := SavedDepthBufferUpdate;
+
+  TemporalHistoryRead := HistoryWrite;
+  TemporalHistoryValid := true;
+end;
+
 procedure TCastleScreenEffects.RenderOverChildren;
 var
   SR: TRectangle;
@@ -906,6 +1119,9 @@ begin
   FreeAndNil(ScreenPointVao);
   FreeAndNil(HighDynamicRangeShader);
   FreeAndNil(CopyShader);
+  FreeAndNil(TemporalShader);
+  TemporalShaderFailed := false;
+  FreeTemporalHistory;
   inherited;
 end;
 
