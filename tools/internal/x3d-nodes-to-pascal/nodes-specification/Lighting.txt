@@ -153,8 +153,17 @@ SpotLight : X3DPositionalLightNode {
 EnvironmentLight : X3DLightNode {
   SFNode  [in,out]  diffuseTexture   NULL
     range: X3DEnvironmentTextureNode
+    doc: """
+    Irradiance cube map: the diffuse light for each normal direction (in the light's local coordinates),
+    multiplied by the material's diffuse color. Not used when @link(IrradianceVolume) is used.
+    """
   SFNode  [in,out]  specularTexture  NULL
     range: X3DEnvironmentTextureNode
+    doc: """
+    Prefiltered radiance cube map: the light reflected in the direction of the reflected view
+    (in the light's local coordinates). With physical materials, rougher surfaces use blurrier mipmap levels
+    (the last level for roughness 1), so the mipmaps should contain the radiance convolved for increasing roughness.
+    """
 
   # CASTLE GAME ENGINE EXTENSIONS:
   SFVec3f [in,out]  influenceCenter  0 0 0

@@ -42,13 +42,16 @@
     strict private FFdDiffuseTexture: TSFNode;
     { Internal wrapper for property @code(DiffuseTexture). This wrapper API may change, we advise to access simpler @code(DiffuseTexture) instead, if it is defined (TODO: for now, some field types do not have a simpler counterpart). }
     public property FdDiffuseTexture: TSFNode read FFdDiffuseTexture;
-    {  }
+    { Irradiance cube map: the diffuse light for each normal direction (in the light's local coordinates),
+    multiplied by the material's diffuse color. Not used when @link(IrradianceVolume) is used. }
     property DiffuseTexture: TAbstractEnvironmentTextureNode read GetDiffuseTexture write SetDiffuseTexture;
 
     strict private FFdSpecularTexture: TSFNode;
     { Internal wrapper for property @code(SpecularTexture). This wrapper API may change, we advise to access simpler @code(SpecularTexture) instead, if it is defined (TODO: for now, some field types do not have a simpler counterpart). }
     public property FdSpecularTexture: TSFNode read FFdSpecularTexture;
-    {  }
+    { Prefiltered radiance cube map: the light reflected in the direction of the reflected view
+    (in the light's local coordinates). With physical materials, rougher surfaces use blurrier mipmap levels
+    (the last level for roughness 1), so the mipmaps should contain the radiance convolved for increasing roughness. }
     property SpecularTexture: TAbstractEnvironmentTextureNode read GetSpecularTexture write SetSpecularTexture;
 
     strict private FFdInfluenceCenter: TSFVec3f;
