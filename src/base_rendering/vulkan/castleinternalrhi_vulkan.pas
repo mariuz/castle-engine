@@ -2013,6 +2013,50 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Virtual Shadow Maps (VSM) Page Table & Physical Tile Pool (Phase 23.2)     }
+  { -------------------------------------------------------------------------- }
+
+  { Manages a 64x64 virtual shadow page table mapped on-demand into a 16x16
+    (256-tile, 2048x2048) physical shadow depth tile pool. }
+  TCastleVulkanVirtualShadowMap = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FPageTable: array[0 .. CASTLE_VSM_PAGE_TABLE_DIM * CASTLE_VSM_PAGE_TABLE_DIM - 1] of Cardinal;
+    FPageTableBuffer: TVulkanRHIBuffer;
+    FPhysicalTilePoolTexture: TVulkanRHITexture;
+    FAllocatedTileCount: Cardinal;
+    FTotalPageUploads: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Clears all virtual page table entries and resets the physical tile bump allocator. }
+    procedure ResetPageTable;
+
+    { Allocates the 2048x2048 physical shadow tile pool texture and page table SSBO. }
+    procedure EnsureResources;
+
+    { Requests virtual page (APageX, APageY), allocating a physical 128x128 tile if not yet resident. }
+    function RequestAndAllocateVirtualPage(const APageX, APageY: Cardinal;
+      out APhysicalTileX, APhysicalTileY: Cardinal): Boolean;
+
+    { Returns the packed 32-bit page table entry at (APageX, APageY). }
+    function GetPageEntry(const APageX, APageY: Cardinal): Cardinal;
+
+    { Translates a virtual shadow UV in [0..1]^2 into physical tile pool UV if the virtual page is resident. }
+    function ComputePhysicalAtlasUV(const AVirtualUV: TVector2;
+      out APageX, APageY: Cardinal; out APhysicalUV: TVector2): Boolean;
+
+    { Uploads the 64x64 page table into PageTableBuffer. }
+    procedure UploadPageTable;
+
+    property PageTableBuffer: TVulkanRHIBuffer read FPageTableBuffer;
+    property PhysicalTilePoolTexture: TVulkanRHITexture read FPhysicalTilePoolTexture;
+    property AllocatedTileCount: Cardinal read FAllocatedTileCount;
+    property TotalPageUploads: Cardinal read FTotalPageUploads;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -2104,6 +2148,7 @@ type
     FOceanSimulator: TCastleVulkanOceanSimulator;
     FDDGIGrid: TCastleVulkanDDGIGrid;
     FMeshletCuller: TCastleVulkanMeshletCuller;
+    FVirtualShadowMap: TCastleVulkanVirtualShadowMap;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -2200,6 +2245,7 @@ type
     function GetOceanSimulator: TCastleVulkanOceanSimulator;
     function GetDDGIGrid: TCastleVulkanDDGIGrid;
     function GetMeshletCuller: TCastleVulkanMeshletCuller;
+    function GetVirtualShadowMap: TCastleVulkanVirtualShadowMap;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -2401,6 +2447,7 @@ type
     property OceanSimulator: TCastleVulkanOceanSimulator read GetOceanSimulator;
     property DDGIGrid: TCastleVulkanDDGIGrid read GetDDGIGrid;
     property MeshletCuller: TCastleVulkanMeshletCuller read GetMeshletCuller;
+    property VirtualShadowMap: TCastleVulkanVirtualShadowMap read GetVirtualShadowMap;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -12451,6 +12498,142 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanVirtualShadowMap (Phase 23.2)                                   }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanVirtualShadowMap.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  ResetPageTable;
+end;
+
+destructor TCastleVulkanVirtualShadowMap.Destroy;
+begin
+  FreeAndNil(FPhysicalTilePoolTexture);
+  FreeAndNil(FPageTableBuffer);
+  inherited;
+end;
+
+procedure TCastleVulkanVirtualShadowMap.ResetPageTable;
+begin
+  FillChar(FPageTable[0], SizeOf(FPageTable), 0);
+  FAllocatedTileCount := 0;
+end;
+
+procedure TCastleVulkanVirtualShadowMap.EnsureResources;
+var
+  BufDesc: TRHIBufferDesc;
+  TexDesc: TRHITextureDesc;
+  PoolDim: Cardinal;
+begin
+  if FPageTableBuffer = nil then
+  begin
+    BufDesc := TRHIBufferDesc.Create(
+      SizeOf(FPageTable),
+      [buStorage, buTransferDst],
+      muCpuToGpu,
+      'VSMPageTableBuffer');
+    FPageTableBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+
+  if FPhysicalTilePoolTexture = nil then
+  begin
+    PoolDim := CASTLE_VSM_PHYSICAL_TILES_PER_ROW * CASTLE_VSM_PHYSICAL_TILE_SIZE;
+    TexDesc := TRHITextureDesc.Create2D(
+      PoolDim, PoolDim, pfR32_Float, [tuSampled, tuStorage, tuColorAttachment], 1);
+    TexDesc.DebugName := 'VSMPhysicalTilePool';
+    FPhysicalTilePoolTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+  end;
+end;
+
+function TCastleVulkanVirtualShadowMap.RequestAndAllocateVirtualPage(
+  const APageX, APageY: Cardinal;
+  out APhysicalTileX, APhysicalTileY: Cardinal): Boolean;
+var
+  Idx, Entry, TileIdx: Cardinal;
+begin
+  APhysicalTileX := 0;
+  APhysicalTileY := 0;
+  if (APageX >= CASTLE_VSM_PAGE_TABLE_DIM) or (APageY >= CASTLE_VSM_PAGE_TABLE_DIM) then
+    Exit(False);
+
+  Idx := APageY * CASTLE_VSM_PAGE_TABLE_DIM + APageX;
+  Entry := FPageTable[Idx];
+  if (Entry and 1) <> 0 then
+  begin
+    APhysicalTileX := (Entry shr 8) and $FF;
+    APhysicalTileY := (Entry shr 16) and $FF;
+    FPageTable[Idx] := Entry or 2; { mark Requested }
+    Exit(True);
+  end;
+
+  if FAllocatedTileCount >= CASTLE_VSM_MAX_PHYSICAL_TILES then
+    Exit(False);
+
+  TileIdx := FAllocatedTileCount;
+  Inc(FAllocatedTileCount);
+  APhysicalTileX := TileIdx mod CASTLE_VSM_PHYSICAL_TILES_PER_ROW;
+  APhysicalTileY := TileIdx div CASTLE_VSM_PHYSICAL_TILES_PER_ROW;
+  { Bit 0 = Resident, Bit 1 = Requested, Bits 8..15 = TileX, Bits 16..23 = TileY }
+  FPageTable[Idx] := 1 or 2 or ((APhysicalTileX and $FF) shl 8) or ((APhysicalTileY and $FF) shl 16);
+  Result := True;
+end;
+
+function TCastleVulkanVirtualShadowMap.GetPageEntry(const APageX, APageY: Cardinal): Cardinal;
+begin
+  if (APageX < CASTLE_VSM_PAGE_TABLE_DIM) and (APageY < CASTLE_VSM_PAGE_TABLE_DIM) then
+    Result := FPageTable[APageY * CASTLE_VSM_PAGE_TABLE_DIM + APageX]
+  else
+    Result := 0;
+end;
+
+function TCastleVulkanVirtualShadowMap.ComputePhysicalAtlasUV(
+  const AVirtualUV: TVector2;
+  out APageX, APageY: Cardinal; out APhysicalUV: TVector2): Boolean;
+var
+  ClampedU, ClampedV, ScaledU, ScaledV, InPageU, InPageV: Single;
+  Entry, TileX, TileY: Cardinal;
+begin
+  ClampedU := EnsureRange(AVirtualUV.X, 0.0, 0.999999);
+  ClampedV := EnsureRange(AVirtualUV.Y, 0.0, 0.999999);
+  ScaledU := ClampedU * Single(CASTLE_VSM_PAGE_TABLE_DIM);
+  ScaledV := ClampedV * Single(CASTLE_VSM_PAGE_TABLE_DIM);
+  APageX := Trunc(ScaledU);
+  APageY := Trunc(ScaledV);
+  InPageU := Frac(ScaledU);
+  InPageV := Frac(ScaledV);
+
+  Entry := GetPageEntry(APageX, APageY);
+  if (Entry and 1) = 0 then
+  begin
+    APhysicalUV := TVector2.Zero;
+    Exit(False);
+  end;
+
+  TileX := (Entry shr 8) and $FF;
+  TileY := (Entry shr 16) and $FF;
+  APhysicalUV := Vector2(
+    (Single(TileX) + InPageU) / Single(CASTLE_VSM_PHYSICAL_TILES_PER_ROW),
+    (Single(TileY) + InPageV) / Single(CASTLE_VSM_PHYSICAL_TILES_PER_ROW));
+  Result := True;
+end;
+
+procedure TCastleVulkanVirtualShadowMap.UploadPageTable;
+var
+  MappedPtr: Pointer;
+begin
+  EnsureResources;
+  MappedPtr := FPageTableBuffer.Map;
+  if MappedPtr <> nil then
+  begin
+    Move(FPageTable[0], MappedPtr^, SizeOf(FPageTable));
+    FPageTableBuffer.Unmap;
+  end;
+  Inc(FTotalPageUploads);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -12986,12 +13169,20 @@ begin
   Result := FMeshletCuller;
 end;
 
+function TVulkanRHIDevice.GetVirtualShadowMap: TCastleVulkanVirtualShadowMap;
+begin
+  if FVirtualShadowMap = nil then
+    FVirtualShadowMap := TCastleVulkanVirtualShadowMap.Create(Self);
+  Result := FVirtualShadowMap;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FVirtualShadowMap);
   FreeAndNil(FMeshletCuller);
   FreeAndNil(FDDGIGrid);
   FreeAndNil(FOceanSimulator);

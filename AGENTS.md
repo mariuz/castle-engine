@@ -77,9 +77,9 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–21**: **COMPLETED** (100%).
-- **Phase 22 (Diffuse Global Illumination Irradiance Probes (DDGI Octahedral Atlas), GPU Meshlet / Cluster Culling & CAS Spatial Upscaling + Sharpening)**: **COMPLETED** (100%, 96 unit tests passing):
-  - [x] **22.1. Dynamic Diffuse Global Illumination (DDGI) Octahedral Probe Grid (`TCastleVulkanDDGIGrid` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestDDGIOctahedralProbeGridRHI`).
-  - [x] **22.2. GPU Meshlet / Sub-Mesh Cluster Cone & Frustum Culling (`TCastleVulkanMeshletCuller` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestGPUMeshletConeAndSphereCullingRHI`).
-  - [x] **22.3. Contrast-Adaptive Sharpening (RCAS/CAS) & Edge-Adaptive Spatial Upscaling (`GenerateCASSharpeningAndUpscaleFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestContrastAdaptiveSharpeningCASRHI`).
-- **Phase 23**: Planned (Ray-Traced / Hardware Ray Query Shadows & Reflections (`VK_KHR_ray_query`), Virtual Shadow Maps (VSM Clipmap Pages) & Screen-Space Subsurface Scattering Diffusion).
+- **Phases 1–22**: **COMPLETED** (100%).
+- **Phase 23 (Ray-Traced / Hardware Ray Query Shadows & Reflections (`VK_KHR_ray_query`), Virtual Shadow Maps (VSM Clipmap Pages) & Screen-Space Subsurface Scattering Diffusion)**: **COMPLETED** (100%, 99 unit tests passing):
+  - [x] **23.1. Hardware Ray Query (`VK_KHR_ray_query` / `VK_KHR_acceleration_structure`) Inline Shadow & Reflection Traversal (`GenerateInlineRayQueryFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestInlineRayQueryAndBVHIntersectionRHI`).
+  - [x] **23.2. Virtual Shadow Maps (VSM) Page Table & Physical Tile Pool (`TCastleVulkanVirtualShadowMap` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVirtualShadowMapPageTableAndTilePoolRHI`).
+  - [x] **23.3. Separable Screen-Space Subsurface Scattering (SSSSS) Burley Diffusion Kernel (`GenerateSeparableSSSSFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSeparableSubsurfaceScatteringBurleyDiffusionRHI`).
+- **Phase 24**: Planned (GPU-Driven Instance & Mesh LOD Selection, Screen-Space Bent Normals & Specular Occlusion, and Color Grading 3D LUT + Film Grain / Vignette Post-Processing).

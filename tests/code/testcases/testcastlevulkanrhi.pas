@@ -135,6 +135,9 @@ type
     procedure TestDDGIOctahedralProbeGridRHI;
     procedure TestGPUMeshletConeAndSphereCullingRHI;
     procedure TestContrastAdaptiveSharpeningCASRHI;
+    procedure TestInlineRayQueryAndBVHIntersectionRHI;
+    procedure TestVirtualShadowMapPageTableAndTilePoolRHI;
+    procedure TestSeparableSubsurfaceScatteringBurleyDiffusionRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -7667,6 +7670,143 @@ begin
     SharpenedSaturated := TCastleShaderGeneratorRHI.EvaluateCASFilter5Tap(
       SaturatedWhite, SaturatedNeighbour, SaturatedNeighbour, SaturatedNeighbour, SaturatedNeighbour, 1.0);
     AssertSameValue(1.0, SharpenedSaturated.Y, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestInlineRayQueryAndBVHIntersectionRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  RayGLSL: String;
+  TNear, TFar, THit, BaryU, BaryV: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Hardware Ray Query (GL_EXT_ray_query) & BVH fallback GLSL 450 }
+    RayGLSL := Gen.GenerateInlineRayQueryFunctions(True);
+    AssertTrue('Ray Query GLSL must include GL_EXT_ray_query, EvaluateRayAABBIntersection, and Moller-Trumbore intersection',
+      (Pos('#extension GL_EXT_ray_query : enable', RayGLSL) > 0) and
+      (Pos('bool EvaluateRayAABBIntersection(vec3 rayOrigin, vec3 rayDir,', RayGLSL) > 0) and
+      (Pos('bool EvaluateRayTriangleIntersection(vec3 rayOrigin, vec3 rayDir,', RayGLSL) > 0));
+
+    { 2. Verify Slab Ray-AABB intersection (hit and miss) }
+    AssertTrue('Ray along -Z from (0,0,5) must intersect AABB [-1,-1,-1]..[1,1,1] at tNear=4, tFar=6',
+      TCastleShaderGeneratorRHI.EvaluateRayAABBIntersection(
+        Vector3(0.0, 0.0, 5.0), Vector3(0.0, 0.0, -1.0),
+        Vector3(-1.0, -1.0, -1.0), Vector3(1.0, 1.0, 1.0), 0.001, 100.0, TNear, TFar));
+    AssertSameValue(4.0, TNear, 1e-4);
+    AssertSameValue(6.0, TFar, 1e-4);
+
+    AssertFalse('Ray offset to X=5 must miss AABB [-1,-1,-1]..[1,1,1]',
+      TCastleShaderGeneratorRHI.EvaluateRayAABBIntersection(
+        Vector3(5.0, 0.0, 5.0), Vector3(0.0, 0.0, -1.0),
+        Vector3(-1.0, -1.0, -1.0), Vector3(1.0, 1.0, 1.0), 0.001, 100.0, TNear, TFar));
+
+    { 3. Verify Moller-Trumbore Ray-Triangle intersection & barycentric coordinates }
+    AssertTrue('Ray from (0.25, 0.25, 3.0) along -Z must hit triangle (0,0,0)-(1,0,0)-(0,1,0) at t=3.0, u=0.25, v=0.25',
+      TCastleShaderGeneratorRHI.EvaluateRayTriangleIntersection(
+        Vector3(0.25, 0.25, 3.0), Vector3(0.0, 0.0, -1.0),
+        Vector3(0.0, 0.0, 0.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0),
+        0.001, 100.0, THit, BaryU, BaryV));
+    AssertSameValue(3.0, THit, 1e-4);
+    AssertSameValue(0.25, BaryU, 1e-4);
+    AssertSameValue(0.25, BaryV, 1e-4);
+
+    AssertFalse('Ray outside triangle hypotenuse (0.8, 0.8, 3.0) must miss',
+      TCastleShaderGeneratorRHI.EvaluateRayTriangleIntersection(
+        Vector3(0.8, 0.8, 3.0), Vector3(0.0, 0.0, -1.0),
+        Vector3(0.0, 0.0, 0.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0),
+        0.001, 100.0, THit, BaryU, BaryV));
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVirtualShadowMapPageTableAndTilePoolRHI;
+var
+  Device: TVulkanRHIDevice;
+  Gen: TCastleShaderGeneratorRHI;
+  VSMGLSL: String;
+  Tile0X, Tile0Y, Tile0RepeatX, Tile0RepeatY, Tile1X, Tile1Y, OutPageX, OutPageY: Cardinal;
+  AtlasUV: TVector2;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6666)) );
+  try
+    { 1. Verify VSM Page Table GLSL 450 lookup functions }
+    VSMGLSL := Gen.GenerateVSMPageLookupFunctions;
+    AssertTrue('VSM GLSL must include DecodeVSMPageEntry and ComputeVSMPhysicalAtlasUV',
+      (Pos('void DecodeVSMPageEntry(uint pageEntry, out bool outIsResident, out ivec2 outPhysicalTileCoord)', VSMGLSL) > 0) and
+      (Pos('vec2 ComputeVSMPhysicalAtlasUV(vec2 virtualUV, ivec2 physicalTileCoord, float pageTableDim, float physicalTilesPerRow)', VSMGLSL) > 0));
+
+    { 2. Verify on-demand virtual page request and physical tile allocation }
+    Device.VirtualShadowMap.ResetPageTable;
+    AssertTrue(Device.VirtualShadowMap.RequestAndAllocateVirtualPage(10, 20, Tile0X, Tile0Y));
+    AssertTrue(Device.VirtualShadowMap.RequestAndAllocateVirtualPage(10, 20, Tile0RepeatX, Tile0RepeatY));
+    AssertTrue(Device.VirtualShadowMap.RequestAndAllocateVirtualPage(15, 25, Tile1X, Tile1Y));
+
+    AssertEquals('First allocated VSM page must receive physical tile (0, 0)', Cardinal(0), Tile0X);
+    AssertEquals('First allocated VSM page must receive physical tile (0, 0)', Cardinal(0), Tile0Y);
+    AssertEquals('Requesting already-resident VSM page must return same physical tile (0, 0)', Cardinal(0), Tile0RepeatX);
+    AssertEquals('Second distinct VSM page must receive physical tile (1, 0)', Cardinal(1), Tile1X);
+    AssertEquals('Second distinct VSM page must receive physical tile (1, 0)', Cardinal(0), Tile1Y);
+    AssertEquals(Cardinal(2), Device.VirtualShadowMap.AllocatedTileCount);
+
+    { 3. Verify virtual-to-physical atlas UV remapping for tile 1 (TileX=1, TileY=0 in 16x16 pool) }
+    AssertTrue(Device.VirtualShadowMap.ComputePhysicalAtlasUV(
+      Vector2(15.5 / 64.0, 25.5 / 64.0), OutPageX, OutPageY, AtlasUV));
+    AssertEquals(Cardinal(15), OutPageX);
+    AssertEquals(Cardinal(25), OutPageY);
+    AssertSameValue((1.0 + 0.5) / 16.0, AtlasUV.X, 1e-4);
+    AssertSameValue((0.0 + 0.5) / 16.0, AtlasUV.Y, 1e-4);
+
+    { 4. Verify GPU PageTableBuffer upload and 2048x2048 pfR32_Float PhysicalTilePoolTexture creation }
+    Device.VirtualShadowMap.UploadPageTable;
+
+    AssertEquals(Cardinal(1), Device.VirtualShadowMap.TotalPageUploads);
+    AssertTrue('VSM PageTableBuffer and 2048x2048 PhysicalTilePoolTexture must be allocated',
+      (Device.VirtualShadowMap.PageTableBuffer <> nil) and
+      (Device.VirtualShadowMap.PhysicalTilePoolTexture <> nil) and
+      (Device.VirtualShadowMap.PhysicalTilePoolTexture.Desc.Width = 2048) and
+      (Device.VirtualShadowMap.PhysicalTilePoolTexture.Desc.Height = 2048) and
+      (Device.VirtualShadowMap.PhysicalTilePoolTexture.Desc.Format = pfR32_Float));
+  finally
+    FreeAndNil(Device);
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSeparableSubsurfaceScatteringBurleyDiffusionRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  SSSSGLSL: String;
+  SkinMFP, ProfileNear, ProfileFar: TVector3;
+  WeightCoplanar, WeightEdgeDiscontinuity: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Separable SSSS Burley Diffusion GLSL 450 functions }
+    SSSSGLSL := Gen.GenerateSeparableSSSSFunctions;
+    AssertTrue('SSSS GLSL must include EvaluateBurleyDiffusionProfile and EvaluateBilateralSSSSWeight',
+      (Pos('vec3 EvaluateBurleyDiffusionProfile(float radiusMM, vec3 scatterDistanceRGB)', SSSSGLSL) > 0) and
+      (Pos('float EvaluateBilateralSSSSWeight(float sampleOffsetMM, float depthDiffMeters, float scatterDist, float depthFalloffScale)', SSSSGLSL) > 0));
+
+    { 2. Verify Burley normalized diffusion profile with human skin mean-free-path (Red > Green > Blue) }
+    SkinMFP := Vector3(3.67, 1.37, 0.68);
+    ProfileNear := TCastleShaderGeneratorRHI.EvaluateBurleyDiffusionProfile(0.5, SkinMFP);
+    ProfileFar := TCastleShaderGeneratorRHI.EvaluateBurleyDiffusionProfile(8.0, SkinMFP);
+
+    AssertTrue('Diffusion profile must decay monotonically with radial distance r',
+      (ProfileNear.X > ProfileFar.X) and (ProfileNear.Y > ProfileFar.Y) and (ProfileNear.Z > ProfileFar.Z));
+    AssertTrue('In the far scattering tail (r=8.0mm), red scattering must exceed green and blue due to longer red mean free path',
+      (ProfileFar.X > ProfileFar.Y) and (ProfileFar.Y > ProfileFar.Z));
+
+    { 3. Verify bilateral depth weight prevents bleeding across depth silhouettes }
+    WeightCoplanar := TCastleShaderGeneratorRHI.EvaluateBilateralSSSSWeight(1.0, 0.0005, 1.5, 100.0);
+    WeightEdgeDiscontinuity := TCastleShaderGeneratorRHI.EvaluateBilateralSSSSWeight(1.0, 0.50, 1.5, 100.0);
+    AssertTrue('Coplanar skin samples must retain strong bilateral weight while silhouette edges are rejected',
+      (WeightCoplanar > WeightEdgeDiscontinuity * 1000.0) and (WeightEdgeDiscontinuity < 1e-5));
   finally
     FreeAndNil(Gen);
   end;

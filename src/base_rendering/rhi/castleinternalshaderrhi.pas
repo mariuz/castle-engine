@@ -279,6 +279,12 @@ const
   CASTLE_DEFAULT_DDGI_OCT_TEXELS      = 8;
   CASTLE_MAX_MESHLETS                 = 4096;
 
+  { Phase 23.2: Virtual Shadow Map (VSM) Page Table & Physical Tile Pool dimensions }
+  CASTLE_VSM_PAGE_TABLE_DIM           = 64;
+  CASTLE_VSM_PHYSICAL_TILE_SIZE       = 128;
+  CASTLE_VSM_PHYSICAL_TILES_PER_ROW   = 16;
+  CASTLE_VSM_MAX_PHYSICAL_TILES       = 256;
+
 type
   { HDR Tonemapping Operators (Phase 15.3) }
   TCastleTonemapOperator = (
@@ -840,6 +846,40 @@ type
     class function EvaluateCASFilter5Tap(
       const ACenter, ANorth, ASouth, AEast, AWest: TVector3;
       const ASharpness: Single): TVector3; static;
+
+    { Phase 23.1: Generates GLSL 450 functions for Hardware Inline Ray Query (VK_KHR_ray_query)
+      and Software BVH Ray-AABB / Möller-Trumbore Ray-Triangle Intersection. }
+    function GenerateInlineRayQueryFunctions(
+      const AUseHardwareRayQueryExt: Boolean = True): String;
+
+    { Phase 23.1 CPU reference: Evaluates slab Ray-AABB intersection within [ATMin, ATMax]. }
+    class function EvaluateRayAABBIntersection(
+      const ARayOrigin, ARayDir, ABoxMin, ABoxMax: TVector3;
+      const ATMin, ATMax: Single;
+      out AHitTNear, AHitTFar: Single): Boolean; static;
+
+    { Phase 23.1 CPU reference: Evaluates Möller-Trumbore Ray-Triangle intersection within [ATMin, ATMax]. }
+    class function EvaluateRayTriangleIntersection(
+      const ARayOrigin, ARayDir, AV0, AV1, AV2: TVector3;
+      const ATMin, ATMax: Single;
+      out AHitT, ABaryU, ABaryV: Single): Boolean; static;
+
+    { Phase 23.2: Generates GLSL 450 functions for Virtual Shadow Map (VSM) Page Table
+      decoding and Virtual-to-Physical Tile Pool UV translation. }
+    function GenerateVSMPageLookupFunctions: String;
+
+    { Phase 23.3: Generates GLSL 450 functions for Separable Screen-Space Subsurface
+      Scattering (SSSSS) Christensen-Burley Diffusion Profile and Bilateral Depth Weighting. }
+    function GenerateSeparableSSSSFunctions: String;
+
+    { Phase 23.3 CPU reference: Evaluates Christensen-Burley normalized diffusion profile R(r, d). }
+    class function EvaluateBurleyDiffusionProfile(
+      const ARadiusMillimeters: Single;
+      const AScatterDistanceRGB: TVector3): TVector3; static;
+
+    { Phase 23.3 CPU reference: Evaluates depth-aware bilateral SSSSS weight. }
+    class function EvaluateBilateralSSSSWeight(
+      const ASampleOffsetMillimeters, ADepthDiffMeters, AScatterDist, ADepthFalloffScale: Single): Single; static;
 
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
@@ -4158,6 +4198,180 @@ begin
     EnsureRange((ACenter.X + (ANorth.X + ASouth.X + AEast.X + AWest.X) * W) * InvDenom, 0.0, 1.0),
     EnsureRange((ACenter.Y + (ANorth.Y + ASouth.Y + AEast.Y + AWest.Y) * W) * InvDenom, 0.0, 1.0),
     EnsureRange((ACenter.Z + (ANorth.Z + ASouth.Z + AEast.Z + AWest.Z) * W) * InvDenom, 0.0, 1.0));
+end;
+
+function TCastleShaderGeneratorRHI.GenerateInlineRayQueryFunctions(
+  const AUseHardwareRayQueryExt: Boolean): String;
+var
+  ExtHeader: String;
+begin
+  if AUseHardwareRayQueryExt then
+    ExtHeader := '#extension GL_EXT_ray_query : enable' + NL
+  else
+    ExtHeader := '';
+
+  Result :=
+    '// --- Hardware Ray Query (VK_KHR_ray_query) & BVH Intersection (Phase 23.1) ---' + NL +
+    ExtHeader +
+    'bool EvaluateRayAABBIntersection(vec3 rayOrigin, vec3 rayDir, vec3 boxMin, vec3 boxMax,' + NL +
+    '  float tMin, float tMax, out float outTNear, out float outTFar) {' + NL +
+    '  vec3 invDir = 1.0 / max(abs(rayDir), vec3(1e-7)) * sign(rayDir + vec3(1e-12));' + NL +
+    '  vec3 t0 = (boxMin - rayOrigin) * invDir;' + NL +
+    '  vec3 t1 = (boxMax - rayOrigin) * invDir;' + NL +
+    '  vec3 tSmaller = min(t0, t1);' + NL +
+    '  vec3 tBigger  = max(t0, t1);' + NL +
+    '  outTNear = max(tMin, max(tSmaller.x, max(tSmaller.y, tSmaller.z)));' + NL +
+    '  outTFar  = min(tMax, min(tBigger.x, min(tBigger.y, tBigger.z)));' + NL +
+    '  return outTFar >= outTNear;' + NL +
+    '}' + NL +
+    NL +
+    'bool EvaluateRayTriangleIntersection(vec3 rayOrigin, vec3 rayDir, vec3 v0, vec3 v1, vec3 v2,' + NL +
+    '  float tMin, float tMax, out float outT, out float outU, out float outV) {' + NL +
+    '  vec3 e1 = v1 - v0;' + NL +
+    '  vec3 e2 = v2 - v0;' + NL +
+    '  vec3 pvec = cross(rayDir, e2);' + NL +
+    '  float det = dot(e1, pvec);' + NL +
+    '  if (abs(det) < 1e-7) return false;' + NL +
+    '  float invDet = 1.0 / det;' + NL +
+    '  vec3 tvec = rayOrigin - v0;' + NL +
+    '  outU = dot(tvec, pvec) * invDet;' + NL +
+    '  if (outU < 0.0 || outU > 1.0) return false;' + NL +
+    '  vec3 qvec = cross(tvec, e1);' + NL +
+    '  outV = dot(rayDir, qvec) * invDet;' + NL +
+    '  if (outV < 0.0 || (outU + outV) > 1.0) return false;' + NL +
+    '  outT = dot(e2, qvec) * invDet;' + NL +
+    '  return (outT >= tMin && outT <= tMax);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateRayAABBIntersection(
+  const ARayOrigin, ARayDir, ABoxMin, ABoxMax: TVector3;
+  const ATMin, ATMax: Single;
+  out AHitTNear, AHitTFar: Single): Boolean;
+
+  function SafeInv(const V: Single): Single;
+  begin
+    if Abs(V) < 1e-7 then
+    begin
+      if V >= 0.0 then Result := 1e7 else Result := -1e7;
+    end else
+      Result := 1.0 / V;
+  end;
+
+var
+  InvX, InvY, InvZ: Single;
+  T0X, T1X, T0Y, T1Y, T0Z, T1Z: Single;
+begin
+  InvX := SafeInv(ARayDir.X);
+  InvY := SafeInv(ARayDir.Y);
+  InvZ := SafeInv(ARayDir.Z);
+
+  T0X := (ABoxMin.X - ARayOrigin.X) * InvX;
+  T1X := (ABoxMax.X - ARayOrigin.X) * InvX;
+  T0Y := (ABoxMin.Y - ARayOrigin.Y) * InvY;
+  T1Y := (ABoxMax.Y - ARayOrigin.Y) * InvY;
+  T0Z := (ABoxMin.Z - ARayOrigin.Z) * InvZ;
+  T1Z := (ABoxMax.Z - ARayOrigin.Z) * InvZ;
+
+  AHitTNear := Max(ATMin, Max(Min(T0X, T1X), Max(Min(T0Y, T1Y), Min(T0Z, T1Z))));
+  AHitTFar  := Min(ATMax, Min(Max(T0X, T1X), Min(Max(T0Y, T1Y), Max(T0Z, T1Z))));
+  Result := AHitTFar >= AHitTNear;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateRayTriangleIntersection(
+  const ARayOrigin, ARayDir, AV0, AV1, AV2: TVector3;
+  const ATMin, ATMax: Single;
+  out AHitT, ABaryU, ABaryV: Single): Boolean;
+var
+  E1, E2, PVec, TVec, QVec: TVector3;
+  Det, InvDet: Single;
+begin
+  AHitT := 0.0;
+  ABaryU := 0.0;
+  ABaryV := 0.0;
+  E1 := AV1 - AV0;
+  E2 := AV2 - AV0;
+  PVec := TVector3.CrossProduct(ARayDir, E2);
+  Det := TVector3.DotProduct(E1, PVec);
+  if Abs(Det) < 1e-7 then
+    Exit(False);
+  InvDet := 1.0 / Det;
+  TVec := ARayOrigin - AV0;
+  ABaryU := TVector3.DotProduct(TVec, PVec) * InvDet;
+  if (ABaryU < 0.0) or (ABaryU > 1.0) then
+    Exit(False);
+  QVec := TVector3.CrossProduct(TVec, E1);
+  ABaryV := TVector3.DotProduct(ARayDir, QVec) * InvDet;
+  if (ABaryV < 0.0) or (ABaryU + ABaryV > 1.0) then
+    Exit(False);
+  AHitT := TVector3.DotProduct(E2, QVec) * InvDet;
+  Result := (AHitT >= ATMin) and (AHitT <= ATMax);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateVSMPageLookupFunctions: String;
+begin
+  Result :=
+    '// --- Virtual Shadow Map (VSM) Page Table & Physical Tile Pool Lookup (Phase 23.2) ---' + NL +
+    'void DecodeVSMPageEntry(uint pageEntry, out bool outIsResident, out ivec2 outPhysicalTileCoord) {' + NL +
+    '  outIsResident = (pageEntry & 1u) != 0u;' + NL +
+    '  outPhysicalTileCoord = ivec2(int((pageEntry >> 8u) & 255u), int((pageEntry >> 16u) & 255u));' + NL +
+    '}' + NL +
+    NL +
+    'vec2 ComputeVSMPhysicalAtlasUV(vec2 virtualUV, ivec2 physicalTileCoord, float pageTableDim, float physicalTilesPerRow) {' + NL +
+    '  vec2 inPageUV = fract(clamp(virtualUV, 0.0, 0.999999) * max(1.0, pageTableDim));' + NL +
+    '  return (vec2(physicalTileCoord) + inPageUV) / max(1.0, physicalTilesPerRow);' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateSeparableSSSSFunctions: String;
+begin
+  Result :=
+    '// --- Separable Screen-Space Subsurface Scattering (SSSSS) Burley Diffusion (Phase 23.3) ---' + NL +
+    'vec3 EvaluateBurleyDiffusionProfile(float radiusMM, vec3 scatterDistanceRGB) {' + NL +
+    '  float r = max(1e-3, abs(radiusMM));' + NL +
+    '  vec3 d = max(vec3(1e-3), scatterDistanceRGB);' + NL +
+    '  vec3 num = exp(-r / d) + exp(-r / (3.0 * d));' + NL +
+    '  return num / (8.0 * 3.14159265359 * d * r);' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateBilateralSSSSWeight(float sampleOffsetMM, float depthDiffMeters, float scatterDist, float depthFalloffScale) {' + NL +
+    '  float r = max(1e-3, abs(sampleOffsetMM));' + NL +
+    '  float d = max(1e-3, scatterDist);' + NL +
+    '  float spatial = (exp(-r / d) + exp(-r / (3.0 * d))) / (8.0 * 3.14159265359 * d * r);' + NL +
+    '  float dz = depthDiffMeters * max(0.0, depthFalloffScale);' + NL +
+    '  float bilateral = exp(-(dz * dz));' + NL +
+    '  return spatial * bilateral;' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateBurleyDiffusionProfile(
+  const ARadiusMillimeters: Single;
+  const AScatterDistanceRGB: TVector3): TVector3;
+var
+  R, DX, DY, DZ, EightPiR: Single;
+begin
+  R := Max(1e-3, Abs(ARadiusMillimeters));
+  DX := Max(1e-3, AScatterDistanceRGB.X);
+  DY := Max(1e-3, AScatterDistanceRGB.Y);
+  DZ := Max(1e-3, AScatterDistanceRGB.Z);
+  EightPiR := 8.0 * Single(Pi) * R;
+  Result := Vector3(
+    (Exp(-R / DX) + Exp(-R / (3.0 * DX))) / (EightPiR * DX),
+    (Exp(-R / DY) + Exp(-R / (3.0 * DY))) / (EightPiR * DY),
+    (Exp(-R / DZ) + Exp(-R / (3.0 * DZ))) / (EightPiR * DZ));
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateBilateralSSSSWeight(
+  const ASampleOffsetMillimeters, ADepthDiffMeters, AScatterDist, ADepthFalloffScale: Single): Single;
+var
+  R, D, Spatial, DZ, Bilateral: Single;
+begin
+  R := Max(1e-3, Abs(ASampleOffsetMillimeters));
+  D := Max(1e-3, AScatterDist);
+  Spatial := (Exp(-R / D) + Exp(-R / (3.0 * D))) / (8.0 * Single(Pi) * D * R);
+  DZ := ADepthDiffMeters * Max(0.0, ADepthFalloffScale);
+  Bilateral := Exp(-(DZ * DZ));
+  Result := Spatial * Bilateral;
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;
