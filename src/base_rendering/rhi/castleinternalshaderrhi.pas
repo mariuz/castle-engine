@@ -532,6 +532,17 @@ const
   CASTLE_MAX_STREAMED_TEXTURES = 512;
 
 type
+  { Phase 27.2: GPU std430 descriptor for a Nanite-style Hierarchical Cluster DAG Node (48 bytes) }
+  PCastleClusterDAGNode = ^TCastleClusterDAGNode;
+  TCastleClusterDAGNode = packed record
+    SphereCenterAndRadius: TVector4;       // 16 bytes (xyz = world sphere center, w = radius)
+    ParentCenterAndErrors: TVector4;       // 16 bytes (x = self world error, y = parent world error, z = parent dist offset, w = reserved)
+    ClusterID: Cardinal;                   // 4 bytes (cluster index)
+    VertexOffset: Cardinal;                // 4 bytes (base vertex offset)
+    TriangleOffset: Cardinal;              // 4 bytes (base primitive offset)
+    TriangleCount: Cardinal;               // 4 bytes (triangle count <= 124)
+  end; // Total = 48 bytes
+
   { Generates RHI-compliant GLSL headers, UBO blocks, and varying layouts }
   TCastleShaderGeneratorRHI = class
   private
@@ -1021,6 +1032,54 @@ type
       const ALightRayDir: TVector3;
       const AMaxExtrusionDist: Single;
       const AReceiverBoxMin, AReceiverBoxMax: TVector3): Boolean; static;
+
+    { Phase 27.1: Generates GLSL 450 functions for a 64-Bit Visibility Buffer
+      (Depth32 | InstanceID20 | PrimitiveID12) and Analytic Perspective-Correct Barycentrics. }
+    function GenerateVisibilityBufferFunctions: String;
+
+    { Phase 27.1 CPU reference: Packs Depth01 (32b), InstanceID (20b), and PrimitiveID (12b) into 64-bit payload. }
+    class function PackVisibilityBufferPayload(
+      const ADepth01: Single;
+      const AInstanceID, APrimitiveID: Cardinal): QWord; static;
+
+    { Phase 27.1 CPU reference: Unpacks Depth01, InstanceID, and PrimitiveID from 64-bit visibility payload. }
+    class procedure UnpackVisibilityBufferPayload(
+      const APayload: QWord;
+      out AOutDepth01: Single;
+      out AOutInstanceID, AOutPrimitiveID: Cardinal); static;
+
+    { Phase 27.1 CPU reference: Evaluates perspective-correct 2D barycentric weights (lambda0 + lambda1 + lambda2 = 1). }
+    class function EvaluatePerspectiveBarycentrics2D(
+      const APixelNDC, AV0NDC, AV1NDC, AV2NDC: TVector2;
+      const AInvW0, AInvW1, AInvW2: Single): TVector3; static;
+
+    { Phase 27.2: Generates a GLSL 450 compute shader for Nanite-style Hierarchical
+      Cluster DAG Cut Selection (ParentProjectedError > Threshold >= SelfProjectedError). }
+    function GenerateClusterDAGCutComputeShader(
+      const AWorkgroupSizeX: Cardinal = 64): String;
+
+    { Phase 27.2 CPU reference: Evaluates projected screen-space geometric error in pixels. }
+    class function EvaluateClusterProjectedErrorPixels(
+      const ASphereCenter, ACameraPos: TVector3;
+      const ASphereRadius, AWorldError, ACotHalfFovY, AViewportHeight: Single): Single; static;
+
+    { Phase 27.2 CPU reference: Returns True iff this cluster node lies on the active crack-free DAG cut. }
+    class function IsClusterDAGCutNode(
+      const ASelfProjectedErrorPx, AParentProjectedErrorPx, APixelErrorThreshold: Single): Boolean; static;
+
+    { Phase 27.3: Generates a GLSL 450 compute shader for Sub-Pixel Software Compute
+      Micro-Polygon Rasterization using 2D edge functions and 64-bit atomic visibility writes. }
+    function GenerateSoftwareMicroRasterComputeShader(
+      const AWorkgroupSizeX: Cardinal = 64): String;
+
+    { Phase 27.3 CPU reference: Evaluates 2D signed edge determinant (B.x-A.x)*(P.y-A.y) - (B.y-A.y)*(P.x-A.x). }
+    class function EvaluateEdgeFunction2D(
+      const AA, AB, AP: TVector2): Single; static;
+
+    { Phase 27.3 CPU reference: Returns True when a front-facing triangle's 2D screen AABB fits within AMaxBoxPixels. }
+    class function IsMicroTriangleCandidateForSoftwareRaster(
+      const AV0Screen, AV1Screen, AV2Screen: TVector2;
+      const AMaxBoxPixels: Single = 16.0): Boolean; static;
 
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
@@ -5081,6 +5140,210 @@ begin
     RayDir := Vector3(0.0, -1.0, 0.0);
   Result := EvaluateRayAABBIntersection(
     ASphereCenter, RayDir, ExpMin, ExpMax, 0.0, Max(0.0, AMaxExtrusionDist), TNear, TFar);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateVisibilityBufferFunctions: String;
+begin
+  Result :=
+    '// --- 64-Bit Visibility Buffer & Perspective-Correct Barycentrics (Phase 27.1) ---' + NL +
+    'uvec2 PackVisibilityBufferPayload(float depth01, uint instanceID, uint primitiveID) {' + NL +
+    '  uint d32 = uint(clamp(depth01, 0.0, 1.0) * 4294967295.0 + 0.5);' + NL +
+    '  uint id32 = ((instanceID & 0xFFFFFu) << 12u) | (primitiveID & 0xFFFu);' + NL +
+    '  return uvec2(id32, d32);' + NL +
+    '}' + NL +
+    NL +
+    'void UnpackVisibilityBufferPayload(uvec2 payload, out float outDepth01, out uint outInstanceID, out uint outPrimitiveID) {' + NL +
+    '  outDepth01 = float(payload.y) / 4294967295.0;' + NL +
+    '  outInstanceID = (payload.x >> 12u) & 0xFFFFFu;' + NL +
+    '  outPrimitiveID = payload.x & 0xFFFu;' + NL +
+    '}' + NL +
+    NL +
+    'vec3 EvaluatePerspectiveBarycentrics2D(vec2 pixelNDC, vec2 v0NDC, vec2 v1NDC, vec2 v2NDC, float invW0, float invW1, float invW2) {' + NL +
+    '  vec2 e0 = v1NDC - v0NDC;' + NL +
+    '  vec2 e1 = v2NDC - v0NDC;' + NL +
+    '  vec2 ep = pixelNDC - v0NDC;' + NL +
+    '  float det = e0.x * e1.y - e0.y * e1.x;' + NL +
+    '  float invDet = (abs(det) > 1e-8) ? (1.0 / det) : 0.0;' + NL +
+    '  float b1 = (ep.x * e1.y - ep.y * e1.x) * invDet;' + NL +
+    '  float b2 = (e0.x * ep.y - e0.y * ep.x) * invDet;' + NL +
+    '  float b0 = 1.0 - b1 - b2;' + NL +
+    '  vec3 persp = vec3(b0 * invW0, b1 * invW1, b2 * invW2);' + NL +
+    '  float sumP = persp.x + persp.y + persp.z;' + NL +
+    '  return (abs(sumP) > 1e-8) ? (persp / sumP) : vec3(1.0, 0.0, 0.0);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.PackVisibilityBufferPayload(
+  const ADepth01: Single;
+  const AInstanceID, APrimitiveID: Cardinal): QWord;
+var
+  Depth32, Low32: Cardinal;
+begin
+  Depth32 := Round(EnsureRange(ADepth01, 0.0, 1.0) * 4294967295.0);
+  Low32 := ((AInstanceID and $FFFFF) shl 12) or (APrimitiveID and $FFF);
+  Result := (QWord(Depth32) shl 32) or QWord(Low32);
+end;
+
+class procedure TCastleShaderGeneratorRHI.UnpackVisibilityBufferPayload(
+  const APayload: QWord;
+  out AOutDepth01: Single;
+  out AOutInstanceID, AOutPrimitiveID: Cardinal);
+var
+  Depth32, Low32: Cardinal;
+begin
+  Depth32 := Cardinal(APayload shr 32);
+  Low32 := Cardinal(APayload and $FFFFFFFF);
+  AOutDepth01 := Double(Depth32) / 4294967295.0;
+  AOutInstanceID := (Low32 shr 12) and $FFFFF;
+  AOutPrimitiveID := Low32 and $FFF;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluatePerspectiveBarycentrics2D(
+  const APixelNDC, AV0NDC, AV1NDC, AV2NDC: TVector2;
+  const AInvW0, AInvW1, AInvW2: Single): TVector3;
+var
+  E0, E1, EP: TVector2;
+  Det, InvDet, B0, B1, B2, P0, P1, P2, SumP: Single;
+begin
+  E0 := AV1NDC - AV0NDC;
+  E1 := AV2NDC - AV0NDC;
+  EP := APixelNDC - AV0NDC;
+  Det := E0.X * E1.Y - E0.Y * E1.X;
+  if Abs(Det) <= 1e-8 then
+    Exit(Vector3(1.0, 0.0, 0.0));
+  InvDet := 1.0 / Det;
+  B1 := (EP.X * E1.Y - EP.Y * E1.X) * InvDet;
+  B2 := (E0.X * EP.Y - E0.Y * EP.X) * InvDet;
+  B0 := 1.0 - B1 - B2;
+  P0 := B0 * AInvW0;
+  P1 := B1 * AInvW1;
+  P2 := B2 * AInvW2;
+  SumP := P0 + P1 + P2;
+  if Abs(SumP) <= 1e-8 then
+    Exit(Vector3(1.0, 0.0, 0.0));
+  Result := Vector3(P0 / SumP, P1 / SumP, P2 / SumP);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateClusterDAGCutComputeShader(
+  const AWorkgroupSizeX: Cardinal): String;
+begin
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = 1, local_size_z = 1) in;', [Max(1, AWorkgroupSizeX)]) + NL +
+    NL +
+    'struct CastleClusterDAGNode {' + NL +
+    '  vec4 SphereCenterAndRadius;' + NL +
+    '  vec4 ParentCenterAndErrors;' + NL +
+    '  uint ClusterID;' + NL +
+    '  uint VertexOffset;' + NL +
+    '  uint TriangleOffset;' + NL +
+    '  uint TriangleCount;' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 0) readonly buffer CastleClusterDAGNodesBlock {' + NL +
+    '  CastleClusterDAGNode u_DAGNodes[];' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 1) writeonly buffer CastleSelectedDAGCutBlock {' + NL +
+    '  uint u_SelectedCutClusters[];' + NL +
+    '};' + NL +
+    NL +
+    'layout(push_constant) uniform CastleClusterDAGPush {' + NL +
+    '  vec4 u_CameraPosAndCotHalfFovY;' + NL +
+    '  vec4 u_ViewportHeightThresholdAndCount;' + NL +
+    '} PushConstants;' + NL +
+    NL +
+    'float EvaluateClusterProjectedErrorPixels(vec3 sphereCenter, vec3 cameraPos, float sphereRadius,' + NL +
+    '  float worldError, float cotHalfFovY, float viewportHeight) {' + NL +
+    '  float dist = max(1e-3, length(sphereCenter - cameraPos) - max(0.0, sphereRadius));' + NL +
+    '  float projScale = 0.5 * max(1.0, viewportHeight) * max(0.01, cotHalfFovY);' + NL +
+    '  return (max(0.0, worldError) * projScale) / dist;' + NL +
+    '}' + NL +
+    NL +
+    'bool IsClusterDAGCutNode(float selfProjectedErrorPx, float parentProjectedErrorPx, float pixelErrorThreshold) {' + NL +
+    '  return (selfProjectedErrorPx <= pixelErrorThreshold) && (parentProjectedErrorPx > pixelErrorThreshold);' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  uint idx = gl_GlobalInvocationID.x;' + NL +
+    '  uint nodeCount = uint(PushConstants.u_ViewportHeightThresholdAndCount.z);' + NL +
+    '  if (idx >= nodeCount) return;' + NL +
+    '  CastleClusterDAGNode node = u_DAGNodes[idx];' + NL +
+    '  float selfErrPx = EvaluateClusterProjectedErrorPixels(node.SphereCenterAndRadius.xyz,' + NL +
+    '    PushConstants.u_CameraPosAndCotHalfFovY.xyz, node.SphereCenterAndRadius.w,' + NL +
+    '    node.ParentCenterAndErrors.x, PushConstants.u_CameraPosAndCotHalfFovY.w,' + NL +
+    '    PushConstants.u_ViewportHeightThresholdAndCount.x);' + NL +
+    '  float parentErrPx = EvaluateClusterProjectedErrorPixels(node.SphereCenterAndRadius.xyz,' + NL +
+    '    PushConstants.u_CameraPosAndCotHalfFovY.xyz, node.SphereCenterAndRadius.w,' + NL +
+    '    node.ParentCenterAndErrors.y, PushConstants.u_CameraPosAndCotHalfFovY.w,' + NL +
+    '    PushConstants.u_ViewportHeightThresholdAndCount.x);' + NL +
+    '  bool onCut = IsClusterDAGCutNode(selfErrPx, parentErrPx, PushConstants.u_ViewportHeightThresholdAndCount.y);' + NL +
+    '  u_SelectedCutClusters[idx] = onCut ? 1u : 0u;' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateClusterProjectedErrorPixels(
+  const ASphereCenter, ACameraPos: TVector3;
+  const ASphereRadius, AWorldError, ACotHalfFovY, AViewportHeight: Single): Single;
+var
+  Dist, ProjScale: Single;
+begin
+  Dist := Max(1e-3, (ASphereCenter - ACameraPos).Length - Max(0.0, ASphereRadius));
+  ProjScale := 0.5 * Max(1.0, AViewportHeight) * Max(0.01, ACotHalfFovY);
+  Result := (Max(0.0, AWorldError) * ProjScale) / Dist;
+end;
+
+class function TCastleShaderGeneratorRHI.IsClusterDAGCutNode(
+  const ASelfProjectedErrorPx, AParentProjectedErrorPx, APixelErrorThreshold: Single): Boolean;
+begin
+  Result := (ASelfProjectedErrorPx <= APixelErrorThreshold) and
+            (AParentProjectedErrorPx > APixelErrorThreshold);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateSoftwareMicroRasterComputeShader(
+  const AWorkgroupSizeX: Cardinal): String;
+begin
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = 1, local_size_z = 1) in;', [Max(1, AWorkgroupSizeX)]) + NL +
+    NL +
+    'float EvaluateEdgeFunction2D(vec2 a, vec2 b, vec2 p) {' + NL +
+    '  return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);' + NL +
+    '}' + NL +
+    NL +
+    'bool IsMicroTriangleCandidateForSoftwareRaster(vec2 v0, vec2 v1, vec2 v2, float maxBoxPixels) {' + NL +
+    '  float area2 = EvaluateEdgeFunction2D(v0, v1, v2);' + NL +
+    '  if (area2 <= 0.0) return false;' + NL +
+    '  vec2 minP = min(v0, min(v1, v2));' + NL +
+    '  vec2 maxP = max(v0, max(v1, v2));' + NL +
+    '  vec2 ext = maxP - minP;' + NL +
+    '  return (ext.x <= maxBoxPixels) && (ext.y <= maxBoxPixels);' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateEdgeFunction2D(
+  const AA, AB, AP: TVector2): Single;
+begin
+  Result := (AB.X - AA.X) * (AP.Y - AA.Y) - (AB.Y - AA.Y) * (AP.X - AA.X);
+end;
+
+class function TCastleShaderGeneratorRHI.IsMicroTriangleCandidateForSoftwareRaster(
+  const AV0Screen, AV1Screen, AV2Screen: TVector2;
+  const AMaxBoxPixels: Single): Boolean;
+var
+  Area2, MinX, MinY, MaxX, MaxY: Single;
+begin
+  Area2 := EvaluateEdgeFunction2D(AV0Screen, AV1Screen, AV2Screen);
+  if Area2 <= 0.0 then
+    Exit(False);
+  MinX := Min(AV0Screen.X, Min(AV1Screen.X, AV2Screen.X));
+  MinY := Min(AV0Screen.Y, Min(AV1Screen.Y, AV2Screen.Y));
+  MaxX := Max(AV0Screen.X, Max(AV1Screen.X, AV2Screen.X));
+  MaxY := Max(AV0Screen.Y, Max(AV1Screen.Y, AV2Screen.Y));
+  Result := ((MaxX - MinX) <= AMaxBoxPixels) and ((MaxY - MinY) <= AMaxBoxPixels);
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

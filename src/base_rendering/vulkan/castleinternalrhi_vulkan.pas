@@ -2211,6 +2211,58 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Nanite-Style Hierarchical Cluster DAG Cut Selector (Phase 27.2)            }
+  { -------------------------------------------------------------------------- }
+
+  { Evaluates monotonic parent/child screen-space simplification errors across a
+    cluster DAG and selects the crack-free LOD cut where
+    ParentProjectedErrorPx > PixelErrorThreshold >= SelfProjectedErrorPx. }
+  TCastleVulkanClusterDAG = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FNodes: array of TCastleClusterDAGNode;
+    FNodeCount: Cardinal;
+    FDAGNodeBuffer: TVulkanRHIBuffer;
+    FSelectedCutBuffer: TVulkanRHIBuffer;
+    FDispatchCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Clears all registered cluster DAG nodes. }
+    procedure ClearNodes;
+
+    { Registers a cluster DAG node with its bounding sphere, self world error, and parent world error. }
+    function AddClusterNode(
+      const ASphereCenter: TVector3;
+      const ASphereRadius, ASelfWorldError, AParentWorldError: Single;
+      const AVertexOffset: Cardinal = 0;
+      const ATriangleOffset: Cardinal = 0;
+      const ATriangleCount: Cardinal = 124): Integer;
+
+    { Uploads the registered cluster DAG nodes into GPU SSBOs. }
+    procedure UploadNodes;
+
+    { Evaluates on CPU how many cluster DAG nodes lie on the active crack-free cut. }
+    function EvaluateDAGCutCPU(
+      const ACameraPosition: TVector3;
+      const ACotHalfFovY, AViewportHeight, APixelErrorThreshold: Single): Cardinal;
+
+    { Dispatches the GPU compute cluster DAG cut selection pass. }
+    procedure DispatchDAGCutSelection(
+      const ACommandList: TVulkanRHICommandList;
+      const ACameraPosition: TVector3;
+      const ACotHalfFovY, AViewportHeight, APixelErrorThreshold: Single;
+      const APipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property NodeCount: Cardinal read FNodeCount;
+    property DAGNodeBuffer: TVulkanRHIBuffer read FDAGNodeBuffer;
+    property SelectedCutBuffer: TVulkanRHIBuffer read FSelectedCutBuffer;
+    property DispatchCount: Cardinal read FDispatchCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -2306,6 +2358,7 @@ type
     FLODSelector: TCastleVulkanLODSelector;
     FTextureStreamer: TCastleVulkanTextureStreamer;
     FShadowCasterCuller: TCastleVulkanShadowCasterCuller;
+    FClusterDAG: TCastleVulkanClusterDAG;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -2406,6 +2459,7 @@ type
     function GetLODSelector: TCastleVulkanLODSelector;
     function GetTextureStreamer: TCastleVulkanTextureStreamer;
     function GetShadowCasterCuller: TCastleVulkanShadowCasterCuller;
+    function GetClusterDAG: TCastleVulkanClusterDAG;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -2611,6 +2665,7 @@ type
     property LODSelector: TCastleVulkanLODSelector read GetLODSelector;
     property TextureStreamer: TCastleVulkanTextureStreamer read GetTextureStreamer;
     property ShadowCasterCuller: TCastleVulkanShadowCasterCuller read GetShadowCasterCuller;
+    property ClusterDAG: TCastleVulkanClusterDAG read GetClusterDAG;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -13223,6 +13278,150 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanClusterDAG (Phase 27.2)                                         }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanClusterDAG.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+end;
+
+destructor TCastleVulkanClusterDAG.Destroy;
+begin
+  FreeAndNil(FSelectedCutBuffer);
+  FreeAndNil(FDAGNodeBuffer);
+  inherited;
+end;
+
+procedure TCastleVulkanClusterDAG.ClearNodes;
+begin
+  FNodeCount := 0;
+  SetLength(FNodes, 0);
+end;
+
+function TCastleVulkanClusterDAG.AddClusterNode(
+  const ASphereCenter: TVector3;
+  const ASphereRadius, ASelfWorldError, AParentWorldError: Single;
+  const AVertexOffset, ATriangleOffset, ATriangleCount: Cardinal): Integer;
+var
+  Idx: Integer;
+begin
+  Idx := Integer(FNodeCount);
+  Inc(FNodeCount);
+  SetLength(FNodes, FNodeCount);
+  FillChar(FNodes[Idx], SizeOf(TCastleClusterDAGNode), 0);
+  FNodes[Idx].SphereCenterAndRadius := Vector4(ASphereCenter, Max(0.0, ASphereRadius));
+  FNodes[Idx].ParentCenterAndErrors := Vector4(Max(0.0, ASelfWorldError), Max(0.0, AParentWorldError), 0.0, 0.0);
+  FNodes[Idx].ClusterID := Cardinal(Idx);
+  FNodes[Idx].VertexOffset := AVertexOffset;
+  FNodes[Idx].TriangleOffset := ATriangleOffset;
+  FNodes[Idx].TriangleCount := ATriangleCount;
+  Result := Idx;
+end;
+
+procedure TCastleVulkanClusterDAG.UploadNodes;
+var
+  CountAlloc: Cardinal;
+  BufDesc: TRHIBufferDesc;
+  MappedPtr: Pointer;
+begin
+  CountAlloc := Max(Cardinal(1), FNodeCount);
+  if (FDAGNodeBuffer = nil) or
+     (FDAGNodeBuffer.Desc.Size < CountAlloc * SizeOf(TCastleClusterDAGNode)) then
+  begin
+    FreeAndNil(FDAGNodeBuffer);
+    BufDesc := TRHIBufferDesc.Create(
+      CountAlloc * SizeOf(TCastleClusterDAGNode),
+      [buStorage, buTransferDst],
+      muCpuToGpu,
+      'ClusterDAGNodesBuffer');
+    FDAGNodeBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+
+  if FNodeCount > 0 then
+  begin
+    MappedPtr := FDAGNodeBuffer.Map;
+    if MappedPtr <> nil then
+    begin
+      Move(FNodes[0], MappedPtr^, FNodeCount * SizeOf(TCastleClusterDAGNode));
+      FDAGNodeBuffer.Unmap;
+    end;
+  end;
+
+  if (FSelectedCutBuffer = nil) or
+     (FSelectedCutBuffer.Desc.Size < CountAlloc * SizeOf(Cardinal)) then
+  begin
+    FreeAndNil(FSelectedCutBuffer);
+    BufDesc := TRHIBufferDesc.Create(
+      CountAlloc * SizeOf(Cardinal),
+      [buStorage, buTransferSrc],
+      muGpuOnly,
+      'SelectedDAGCutBuffer');
+    FSelectedCutBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+end;
+
+function TCastleVulkanClusterDAG.EvaluateDAGCutCPU(
+  const ACameraPosition: TVector3;
+  const ACotHalfFovY, AViewportHeight, APixelErrorThreshold: Single): Cardinal;
+var
+  I: Cardinal;
+  SelfErrPx, ParentErrPx: Single;
+begin
+  Result := 0;
+  if FNodeCount = 0 then
+    Exit;
+  for I := 0 to FNodeCount - 1 do
+  begin
+    SelfErrPx := TCastleShaderGeneratorRHI.EvaluateClusterProjectedErrorPixels(
+      FNodes[I].SphereCenterAndRadius.XYZ, ACameraPosition,
+      FNodes[I].SphereCenterAndRadius.W, FNodes[I].ParentCenterAndErrors.X,
+      ACotHalfFovY, AViewportHeight);
+    ParentErrPx := TCastleShaderGeneratorRHI.EvaluateClusterProjectedErrorPixels(
+      FNodes[I].SphereCenterAndRadius.XYZ, ACameraPosition,
+      FNodes[I].SphereCenterAndRadius.W, FNodes[I].ParentCenterAndErrors.Y,
+      ACotHalfFovY, AViewportHeight);
+    if TCastleShaderGeneratorRHI.IsClusterDAGCutNode(SelfErrPx, ParentErrPx, APixelErrorThreshold) then
+      Inc(Result);
+  end;
+end;
+
+procedure TCastleVulkanClusterDAG.DispatchDAGCutSelection(
+  const ACommandList: TVulkanRHICommandList;
+  const ACameraPosition: TVector3;
+  const ACotHalfFovY, AViewportHeight, APixelErrorThreshold: Single;
+  const APipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+type
+  TClusterDAGCutPC = packed record
+    CameraPosAndCotHalfFovY: TVector4;
+    ViewportHeightThresholdAndCount: TVector4;
+  end;
+var
+  PC: TClusterDAGCutPC;
+  GroupsX: Cardinal;
+begin
+  UploadNodes;
+  if ACommandList = nil then
+    Exit;
+
+  FillChar(PC, SizeOf(PC), 0);
+  PC.CameraPosAndCotHalfFovY := Vector4(ACameraPosition, ACotHalfFovY);
+  PC.ViewportHeightThresholdAndCount := Vector4(AViewportHeight, APixelErrorThreshold, Single(FNodeCount), 0.0);
+
+  if APipeline <> nil then
+    ACommandList.BindComputePipeline(APipeline);
+  if ADescriptorSet <> nil then
+    ACommandList.BindDescriptorSet(0, ADescriptorSet, []);
+  ACommandList.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+
+  GroupsX := (Max(Cardinal(1), FNodeCount) + 63) div 64;
+  ACommandList.Dispatch(GroupsX, 1, 1);
+  Inc(FDispatchCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -13786,12 +13985,20 @@ begin
   Result := FShadowCasterCuller;
 end;
 
+function TVulkanRHIDevice.GetClusterDAG: TCastleVulkanClusterDAG;
+begin
+  if FClusterDAG = nil then
+    FClusterDAG := TCastleVulkanClusterDAG.Create(Self);
+  Result := FClusterDAG;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FClusterDAG);
   FreeAndNil(FShadowCasterCuller);
   FreeAndNil(FTextureStreamer);
   FreeAndNil(FLODSelector);

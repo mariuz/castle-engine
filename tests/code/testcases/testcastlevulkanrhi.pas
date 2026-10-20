@@ -147,6 +147,9 @@ type
     procedure TestAnalyticAreaLightLTCSolidAngleRHI;
     procedure TestTriplanarAndHeightModulatedBlendingRHI;
     procedure TestGPUShadowCasterLightRayExtrusionCullingRHI;
+    procedure TestVisibilityBufferPayloadAndBarycentricsRHI;
+    procedure TestNaniteClusterDAGCutSelectionRHI;
+    procedure TestSoftwareMicroPolygonComputeRasterizerRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -8184,6 +8187,132 @@ begin
   finally
     FreeAndNil(CmdList);
     FreeAndNil(Device);
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVisibilityBufferPayloadAndBarycentricsRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  VisGLSL: String;
+  PayloadNear, PayloadFar: QWord;
+  OutDepth: Single;
+  OutCluster, OutPrim: Cardinal;
+  Bary: TVector3;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify 64-bit Visibility Buffer & Perspective-Correct Barycentrics GLSL 450 }
+    VisGLSL := Gen.GenerateVisibilityBufferFunctions;
+    AssertTrue('Visibility Buffer GLSL must include PackVisibilityBufferPayload and EvaluatePerspectiveBarycentrics2D',
+      (Pos('uvec2 PackVisibilityBufferPayload(float depth01, uint instanceID, uint primitiveID)', VisGLSL) > 0) and
+      (Pos('vec3 EvaluatePerspectiveBarycentrics2D(vec2 pixelNDC, vec2 v0NDC, vec2 v1NDC, vec2 v2NDC, float invW0, float invW1, float invW2)', VisGLSL) > 0));
+
+    { 2. Verify 64-bit Visibility Buffer packing/unpacking roundtrip and uint64 atomicMin depth ordering }
+    PayloadNear := TCastleShaderGeneratorRHI.PackVisibilityBufferPayload(0.25, 12345, 59);
+    PayloadFar  := TCastleShaderGeneratorRHI.PackVisibilityBufferPayload(0.75, 54321, 12);
+    AssertTrue('Nearer NDC depth (0.25) must produce strictly smaller uint64 payload for atomicMin than farther depth (0.75)',
+      PayloadNear < PayloadFar);
+
+    TCastleShaderGeneratorRHI.UnpackVisibilityBufferPayload(PayloadNear, OutDepth, OutCluster, OutPrim);
+    AssertSameValue(0.25, OutDepth, 1e-5);
+    AssertEquals(Cardinal(12345), OutCluster);
+    AssertEquals(Cardinal(59), OutPrim);
+
+    { 3. Verify perspective-correct barycentric coordinates sum to 1.0 and weight perspective W }
+    Bary := TCastleShaderGeneratorRHI.EvaluatePerspectiveBarycentrics2D(
+      Vector2(0.25, 0.25),
+      Vector2(0.0, 0.0),
+      Vector2(1.0, 0.0),
+      Vector2(0.0, 1.0),
+      1.0, 1.0, 1.0);
+    AssertSameValue(0.5, Bary.X, 1e-4);
+    AssertSameValue(0.25, Bary.Y, 1e-4);
+    AssertSameValue(0.25, Bary.Z, 1e-4);
+    AssertSameValue(1.0, Bary.X + Bary.Y + Bary.Z, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestNaniteClusterDAGCutSelectionRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Gen: TCastleShaderGeneratorRHI;
+  DAGGLSL: String;
+  CutCount: Cardinal;
+begin
+  AssertEquals('TCastleClusterDAGNode must be 48 bytes (3 x vec4)', 48, SizeOf(TCastleClusterDAGNode));
+
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6666)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    { 1. Verify Cluster DAG Cut Compute Shader GLSL 450 }
+    DAGGLSL := Gen.GenerateClusterDAGCutComputeShader(64);
+    AssertTrue('Cluster DAG Cut GLSL must include EvaluateClusterProjectedErrorPixels and IsClusterDAGCutNode',
+      (Pos('float EvaluateClusterProjectedErrorPixels(vec3 sphereCenter, vec3 cameraPos, float sphereRadius,', DAGGLSL) > 0) and
+      (Pos('bool IsClusterDAGCutNode(float selfProjectedErrorPx, float parentProjectedErrorPx, float pixelErrorThreshold)', DAGGLSL) > 0));
+
+    { 2. Register a 3-level Nanite cluster hierarchy at distance 10m (CotHalfFovY=1.0, ViewportHeight=1080, Threshold=1.0px):
+         - Root (Level 0): SelfLodError = 0.05 (projected = 3.0px > 1.0px), ParentError = 1000.0 -> TOO COARSE (not selected)
+         - Mid  (Level 1): SelfLodError = 0.01 (projected = 0.6px <= 1.0px), ParentError = 0.05 (3.0px > 1.0px) -> SELECTED CUT!
+         - Leaf (Level 2): SelfLodError = 0.001 (projected = 0.06px <= 1.0px), ParentError = 0.01 (0.6px <= 1.0px) -> TOO FINE (parent already sufficient) }
+    Device.ClusterDAG.ClearNodes;
+    Device.ClusterDAG.AddClusterNode(Vector3(0.0, 0.0, -10.0), 1.0, 0.05, 1000.0, 0, 0, 64);
+    Device.ClusterDAG.AddClusterNode(Vector3(0.0, 0.0, -10.0), 1.0, 0.01, 0.05, 64, 192, 64);
+    Device.ClusterDAG.AddClusterNode(Vector3(0.0, 0.0, -10.0), 1.0, 0.001, 0.01, 128, 384, 64);
+
+    CutCount := Device.ClusterDAG.EvaluateDAGCutCPU(
+      Vector3(0.0, 0.0, 0.0), 1.0, 1080.0, 1.0);
+    AssertEquals('Exactly 1 cluster node (Mid Level 1) must satisfy the seamless DAG cut criterion',
+      Cardinal(1), CutCount);
+
+    { 3. Verify GPU SSBO upload and compute dispatch }
+    CmdList.BeginRecording;
+    Device.ClusterDAG.DispatchDAGCutSelection(
+      CmdList, Vector3(0.0, 0.0, 0.0), 1.0, 1080.0, 1.0, nil, nil);
+    CmdList.EndRecording;
+
+    AssertEquals(Cardinal(1), Device.ClusterDAG.DispatchCount);
+    AssertTrue('ClusterDAG SSBOs must be allocated',
+      (Device.ClusterDAG.DAGNodeBuffer <> nil) and
+      (Device.ClusterDAG.SelectedCutBuffer <> nil));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSoftwareMicroPolygonComputeRasterizerRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  SwGLSL: String;
+  MicroValid, LargeTri, BackfaceTri: Boolean;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Software Micro-Polygon Compute Rasterizer GLSL 450 }
+    SwGLSL := Gen.GenerateSoftwareMicroRasterComputeShader(64);
+    AssertTrue('Software Micro-Rasterizer GLSL must include EvaluateEdgeFunction2D and IsMicroTriangleCandidateForSoftwareRaster',
+      (Pos('float EvaluateEdgeFunction2D(vec2 a, vec2 b, vec2 p)', SwGLSL) > 0) and
+      (Pos('bool IsMicroTriangleCandidateForSoftwareRaster(vec2 v0, vec2 v1, vec2 v2, float maxBoxPixels)', SwGLSL) > 0));
+
+    { 2. Verify small front-facing micro-triangle (< 8x8 pixels) is accepted for software compute rasterization,
+         while large triangles (> 8x8 pixels) and back-facing triangles are rejected }
+    MicroValid := TCastleShaderGeneratorRHI.IsMicroTriangleCandidateForSoftwareRaster(
+      Vector2(100.2, 100.2), Vector2(103.8, 100.2), Vector2(100.2, 104.5), 8.0);
+    LargeTri := TCastleShaderGeneratorRHI.IsMicroTriangleCandidateForSoftwareRaster(
+      Vector2(100.0, 100.0), Vector2(160.0, 100.0), Vector2(100.0, 160.0), 8.0);
+    BackfaceTri := TCastleShaderGeneratorRHI.IsMicroTriangleCandidateForSoftwareRaster(
+      Vector2(100.2, 100.2), Vector2(100.2, 104.5), Vector2(103.8, 100.2), 8.0);
+
+    AssertTrue('Front-facing 3.6x4.3px micro-triangle must be routed to software compute rasterizer', MicroValid);
+    AssertFalse('60x60px large triangle must be routed to hardware rasterizer instead of software compute', LargeTri);
+    AssertFalse('Back-facing micro-triangle must be culled', BackfaceTri);
+  finally
     FreeAndNil(Gen);
   end;
 end;
