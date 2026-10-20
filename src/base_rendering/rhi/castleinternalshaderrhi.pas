@@ -265,6 +265,10 @@ const
   CASTLE_DEFAULT_MAX_SKINNED_VERTICES = 16384;
   CASTLE_MAX_TERRAIN_CDLOD_NODES      = 256;
 
+  { Phase 20.2: Default Sky-View LUT resolution for Rayleigh/Mie Atmospheric Scattering }
+  CASTLE_DEFAULT_SKY_VIEW_LUT_WIDTH   = 192;
+  CASTLE_DEFAULT_SKY_VIEW_LUT_HEIGHT  = 108;
+
 type
   { HDR Tonemapping Operators (Phase 15.3) }
   TCastleTonemapOperator = (
@@ -451,6 +455,18 @@ type
     NodeXZAndScale: TVector4;              // 16 bytes (x = world X origin, y = world Z origin, z = patch world size, w = LOD level)
     MorphStartEndAndHeightRange: TVector4; // 16 bytes (x = morph start dist, y = morph end dist, z = minY, w = maxY)
   end; // Total = 32 bytes
+
+  { Phase 20.2: Push constants for Rayleigh / Mie Physical Sky & Aerial Perspective LUT compute pass (64 bytes) }
+  PCastleAtmospherePushConstants = ^TCastleAtmospherePushConstants;
+  TCastleAtmospherePushConstants = packed record
+    SunDirectionAndIntensity: TVector4;    // 16 bytes (xyz = normalized sun dir, w = solar irradiance intensity)
+    RayleighScatteringAndHeight: TVector4; // 16 bytes (rgb = Rayleigh sea-level scattering coeff, w = scale height H_R)
+    MieScatteringAndHeight: TVector4;      // 16 bytes (rgb = Mie sea-level scattering coeff, w = scale height H_M)
+    PlanetRadius: Single;                  // 4 bytes (Planet radius in meters, e.g. 6360000.0)
+    AtmosphereRadius: Single;              // 4 bytes (Top-of-atmosphere radius in meters, e.g. 6420000.0)
+    MieAnisotropyG: Single;                // 4 bytes (Cornette-Shanks Mie asymmetry g in [0..0.99], default 0.8)
+    RaymarchSteps: Cardinal;               // 4 bytes (Single-scattering raymarch steps, default 16)
+  end; // Total = 64 bytes
 
   { Generates RHI-compliant GLSL headers, UBO blocks, and varying layouts }
   TCastleShaderGeneratorRHI = class
@@ -676,6 +692,47 @@ type
     class function EvaluateFoliageTransmission(
       const AViewDir, ALightDir, ASurfaceNormal, ATransmissionTint: TVector3;
       const AThickness, ADistortion, APower, AScale: Single): TVector3; static;
+
+    { Phase 20.1: Generates GLSL 450 PBR functions for Multi-Layer Clear Coat
+      (EvaluateClearCoatBRDF) and Stretched Tangent/Bitangent Anisotropic GGX
+      Microfacet Distribution (EvaluateAnisotropicGGX_D). }
+    function GenerateClearCoatAndAnisotropicPBRFunctions: String;
+
+    { Phase 20.1 CPU reference: Evaluates secondary IOR=1.5 (F0=0.04) Clear Coat specular lobe
+      and energy-conserving base-layer attenuation (1.0 - F_cc). }
+    class procedure EvaluateClearCoatBRDF(
+      const ACNdotH, ACNdotL, ACNdotV, AVdotH, AClearCoatFactor, AClearCoatRoughness: Single;
+      out AClearCoatSpecular, ABaseLayerAttenuation: Single); static;
+
+    { Phase 20.1 CPU reference: Evaluates anisotropic Trowbridge-Reitz GGX normal distribution D_aniso. }
+    class function EvaluateAnisotropicGGX_D(
+      const ANdotH, ATdotH, ABdotH, ARoughness, AAnisotropy: Single): Single; static;
+
+    { Phase 20.2: Generates a GLSL 450 compute shader for baking the Rayleigh / Mie
+      single-scattering physical sky-view LUT (rgba16f). }
+    function GenerateAtmosphereSkyComputeShader(
+      const AWorkgroupSizeX: Cardinal = 8;
+      const AWorkgroupSizeY: Cardinal = 8): String;
+
+    { Phase 20.2 CPU reference: Evaluates Rayleigh molecular phase function Phi_R(cosTheta). }
+    class function EvaluateRayleighPhase(const ACosTheta: Single): Single; static;
+
+    { Phase 20.2 CPU reference: Evaluates Cornette-Shanks aerosol Mie phase function Phi_M(cosTheta, g). }
+    class function EvaluateCornetteShanksMiePhase(const ACosTheta, AG: Single): Single; static;
+
+    { Phase 20.3: Generates GLSL 450 post-processing functions for Screen-Space Multi-Ghost
+      Lens Flare and Radial Spectral Chromatic Aberration. }
+    function GenerateLensFlareAndChromaticAberrationFunctions: String;
+
+    { Phase 20.3 CPU reference: Computes R, G, B radial dispersion UV coordinates for chromatic aberration. }
+    class procedure EvaluateChromaticAberrationOffsets(
+      const AUV: TVector2; const AIntensity: Single;
+      out ARedUV, AGreenUV, ABlueUV: TVector2); static;
+
+    { Phase 20.3 CPU reference: Computes reflected ghost sample UV and radial window weight for lens flare ghosting. }
+    class procedure EvaluateLensFlareGhostUV(
+      const AUV: TVector2; const AGhostIndex: Integer; const AGhostSpacing: Single;
+      out AGhostUV: TVector2; out ARadialWeight: Single); static;
 
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
@@ -3416,6 +3473,214 @@ begin
   Attenuation := Exp(-Max(0.0, AThickness) * 2.0);
   Phase := Power(VdotBackL, Max(1.0, APower)) * Max(0.0, AScale) * Attenuation;
   Result := ATransmissionTint * Phase;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateClearCoatAndAnisotropicPBRFunctions: String;
+begin
+  Result :=
+    '// --- Multi-Layer Clear Coat & Anisotropic GGX Brushed-Metal PBR (Phase 20.1) ---' + NL +
+    'void EvaluateClearCoatBRDF(float cNdotH, float cNdotL, float cNdotV, float VdotH,' + NL +
+    '  float clearCoatFactor, float clearCoatRoughness,' + NL +
+    '  out float outClearCoatSpecular, out float outBaseLayerAttenuation) {' + NL +
+    '  float ccFactor = clamp(clearCoatFactor, 0.0, 1.0);' + NL +
+    '  float r = clamp(clearCoatRoughness, 0.04, 1.0);' + NL +
+    '  float alpha = max(0.002, r * r);' + NL +
+    '  float alpha2 = alpha * alpha;' + NL +
+    '  float nh = clamp(cNdotH, 0.0, 1.0);' + NL +
+    '  float denom = nh * nh * (alpha2 - 1.0) + 1.0;' + NL +
+    '  float D_cc = alpha2 / max(3.14159265359 * denom * denom, 1e-7);' + NL +
+    '  float vh = clamp(VdotH, 0.0, 1.0);' + NL +
+    '  float V_kelemen = 0.25 / max(vh * vh, 1e-4);' + NL +
+    '  float f0 = 0.04;' + NL +
+    '  float F_cc = (f0 + (1.0 - f0) * pow(1.0 - vh, 5.0)) * ccFactor;' + NL +
+    '  outClearCoatSpecular = D_cc * V_kelemen * F_cc * clamp(cNdotL, 0.0, 1.0);' + NL +
+    '  outBaseLayerAttenuation = 1.0 - F_cc;' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateAnisotropicGGX_D(float NdotH, float TdotH, float BdotH, float roughness, float anisotropy) {' + NL +
+    '  float r = clamp(roughness, 0.04, 1.0);' + NL +
+    '  float alpha = max(0.002, r * r);' + NL +
+    '  float aniso = clamp(anisotropy, -0.99, 0.99);' + NL +
+    '  float alphaT = max(0.002, alpha * (1.0 + aniso));' + NL +
+    '  float alphaB = max(0.002, alpha * (1.0 - aniso));' + NL +
+    '  float d = (TdotH * TdotH) / (alphaT * alphaT) + (BdotH * BdotH) / (alphaB * alphaB) + (NdotH * NdotH);' + NL +
+    '  return 1.0 / max(3.14159265359 * alphaT * alphaB * d * d, 1e-8);' + NL +
+    '}' + NL;
+end;
+
+class procedure TCastleShaderGeneratorRHI.EvaluateClearCoatBRDF(
+  const ACNdotH, ACNdotL, ACNdotV, AVdotH, AClearCoatFactor, AClearCoatRoughness: Single;
+  out AClearCoatSpecular, ABaseLayerAttenuation: Single);
+var
+  CCFactor, R, Alpha, Alpha2, NH, Denom, D_cc, VH, V_Kelemen, F_cc: Single;
+begin
+  CCFactor := EnsureRange(AClearCoatFactor, 0.0, 1.0);
+  R := EnsureRange(AClearCoatRoughness, 0.04, 1.0);
+  Alpha := Max(0.002, R * R);
+  Alpha2 := Alpha * Alpha;
+  NH := EnsureRange(ACNdotH, 0.0, 1.0);
+  Denom := NH * NH * (Alpha2 - 1.0) + 1.0;
+  D_cc := Alpha2 / Max(Single(Pi) * Denom * Denom, 1e-7);
+  VH := EnsureRange(AVdotH, 0.0, 1.0);
+  V_Kelemen := 0.25 / Max(VH * VH, 1e-4);
+  F_cc := (0.04 + 0.96 * Power(1.0 - VH, 5.0)) * CCFactor;
+  AClearCoatSpecular := D_cc * V_Kelemen * F_cc * EnsureRange(ACNdotL, 0.0, 1.0);
+  ABaseLayerAttenuation := 1.0 - F_cc;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateAnisotropicGGX_D(
+  const ANdotH, ATdotH, ABdotH, ARoughness, AAnisotropy: Single): Single;
+var
+  R, Alpha, Aniso, AlphaT, AlphaB, D: Single;
+begin
+  R := EnsureRange(ARoughness, 0.04, 1.0);
+  Alpha := Max(0.002, R * R);
+  Aniso := EnsureRange(AAnisotropy, -0.99, 0.99);
+  AlphaT := Max(0.002, Alpha * (1.0 + Aniso));
+  AlphaB := Max(0.002, Alpha * (1.0 - Aniso));
+  D := (ATdotH * ATdotH) / (AlphaT * AlphaT) +
+       (ABdotH * ABdotH) / (AlphaB * AlphaB) +
+       (ANdotH * ANdotH);
+  Result := 1.0 / Max(Single(Pi) * AlphaT * AlphaB * D * D, 1e-8);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateAtmosphereSkyComputeShader(
+  const AWorkgroupSizeX: Cardinal; const AWorkgroupSizeY: Cardinal): String;
+begin
+  Result :=
+    GenerateVersionAndLayoutMacros +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;', [
+      Max(Cardinal(1), AWorkgroupSizeX),
+      Max(Cardinal(1), AWorkgroupSizeY)
+    ]) + NL +
+    NL +
+    '// Set 0, Binding 0: Output Sky-View LUT (rgba16f)' + NL +
+    'layout(rgba16f, set = 0, binding = 0) uniform writeonly image2D u_SkyViewLUT;' + NL +
+    NL +
+    'CASTLE_PUSH_CONSTANT uniform CastleAtmospherePushConstants {' + NL +
+    '  vec4 u_SunDirectionAndIntensity;' + NL +
+    '  vec4 u_RayleighScatteringAndHeight;' + NL +
+    '  vec4 u_MieScatteringAndHeight;' + NL +
+    '  float u_PlanetRadius;' + NL +
+    '  float u_AtmosphereRadius;' + NL +
+    '  float u_MieAnisotropyG;' + NL +
+    '  uint u_RaymarchSteps;' + NL +
+    '} castle_AtmospherePC;' + NL +
+    NL +
+    'float EvaluateRayleighPhase(float cosTheta) {' + NL +
+    '  return (3.0 / (16.0 * 3.14159265359)) * (1.0 + cosTheta * cosTheta);' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateCornetteShanksMiePhase(float cosTheta, float g) {' + NL +
+    '  float g2 = g * g;' + NL +
+    '  float num = 3.0 * (1.0 - g2) * (1.0 + cosTheta * cosTheta);' + NL +
+    '  float denom = (8.0 * 3.14159265359) * (2.0 + g2) * pow(max(1.0 + g2 - 2.0 * g * cosTheta, 1e-4), 1.5);' + NL +
+    '  return num / max(denom, 1e-7);' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  ivec2 lutSize = imageSize(u_SkyViewLUT);' + NL +
+    '  ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);' + NL +
+    '  if (pixelCoord.x >= lutSize.x || pixelCoord.y >= lutSize.y) return;' + NL +
+    NL +
+    '  vec2 uv = (vec2(pixelCoord) + 0.5) / vec2(lutSize);' + NL +
+    '  float azimuth = uv.x * 2.0 * 3.14159265359;' + NL +
+    '  float elevation = (uv.y - 0.5) * 3.14159265359;' + NL +
+    '  vec3 viewDir = normalize(vec3(cos(elevation) * cos(azimuth), sin(elevation), cos(elevation) * sin(azimuth)));' + NL +
+    '  vec3 sunDir = normalize(castle_AtmospherePC.u_SunDirectionAndIntensity.xyz);' + NL +
+    '  float cosTheta = dot(viewDir, sunDir);' + NL +
+    NL +
+    '  float phaseR = EvaluateRayleighPhase(cosTheta);' + NL +
+    '  float phaseM = EvaluateCornetteShanksMiePhase(cosTheta, castle_AtmospherePC.u_MieAnisotropyG);' + NL +
+    '  float atmThickness = max(1000.0, castle_AtmospherePC.u_AtmosphereRadius - castle_AtmospherePC.u_PlanetRadius);' + NL +
+    '  uint steps = max(1u, castle_AtmospherePC.u_RaymarchSteps);' + NL +
+    '  float stepLen = atmThickness / float(steps);' + NL +
+    NL +
+    '  vec3 opticalDepthR = vec3(0.0);' + NL +
+    '  vec3 opticalDepthM = vec3(0.0);' + NL +
+    '  vec3 inScattered = vec3(0.0);' + NL +
+    '  for (uint i = 0u; i < steps; ++i) {' + NL +
+    '    float h = (float(i) + 0.5) * stepLen * max(0.05, viewDir.y * 0.5 + 0.5);' + NL +
+    '    float dR = exp(-h / max(1.0, castle_AtmospherePC.u_RayleighScatteringAndHeight.w)) * stepLen;' + NL +
+    '    float dM = exp(-h / max(1.0, castle_AtmospherePC.u_MieScatteringAndHeight.w)) * stepLen;' + NL +
+    '    opticalDepthR += castle_AtmospherePC.u_RayleighScatteringAndHeight.rgb * dR;' + NL +
+    '    opticalDepthM += castle_AtmospherePC.u_MieScatteringAndHeight.rgb * dM;' + NL +
+    '    vec3 transmittance = exp(-(opticalDepthR + opticalDepthM * 1.11));' + NL +
+    '    inScattered += transmittance * (castle_AtmospherePC.u_RayleighScatteringAndHeight.rgb * dR * phaseR +' + NL +
+    '      castle_AtmospherePC.u_MieScatteringAndHeight.rgb * dM * phaseM);' + NL +
+    '  }' + NL +
+    '  vec3 skyRadiance = inScattered * castle_AtmospherePC.u_SunDirectionAndIntensity.w;' + NL +
+    '  imageStore(u_SkyViewLUT, pixelCoord, vec4(skyRadiance, 1.0));' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateRayleighPhase(const ACosTheta: Single): Single;
+begin
+  Result := (3.0 / (16.0 * Single(Pi))) * (1.0 + ACosTheta * ACosTheta);
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateCornetteShanksMiePhase(
+  const ACosTheta, AG: Single): Single;
+var
+  G, G2, Num, Denom: Single;
+begin
+  G := EnsureRange(AG, -0.99, 0.99);
+  G2 := G * G;
+  Num := 3.0 * (1.0 - G2) * (1.0 + ACosTheta * ACosTheta);
+  Denom := (8.0 * Single(Pi)) * (2.0 + G2) * Power(Max(1.0 + G2 - 2.0 * G * ACosTheta, 1e-4), 1.5);
+  Result := Num / Max(Denom, 1e-7);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateLensFlareAndChromaticAberrationFunctions: String;
+begin
+  Result :=
+    '// --- Screen-Space Multi-Ghost Lens Flare & Radial Chromatic Aberration (Phase 20.3) ---' + NL +
+    'void EvaluateChromaticAberrationOffsets(vec2 uv, float intensity, out vec2 outRedUV, out vec2 outGreenUV, out vec2 outBlueUV) {' + NL +
+    '  vec2 d = uv - vec2(0.5);' + NL +
+    '  float r2 = dot(d, d);' + NL +
+    '  vec2 offset = d * (intensity * (1.0 + r2));' + NL +
+    '  outRedUV = uv - offset;' + NL +
+    '  outGreenUV = uv;' + NL +
+    '  outBlueUV = uv + offset;' + NL +
+    '}' + NL +
+    NL +
+    'void EvaluateLensFlareGhostUV(vec2 uv, int ghostIndex, float ghostSpacing, out vec2 outGhostUV, out float outRadialWeight) {' + NL +
+    '  vec2 flareAxis = vec2(0.5) - uv;' + NL +
+    '  outGhostUV = uv + flareAxis * (float(max(1, ghostIndex)) * ghostSpacing);' + NL +
+    '  float distFromCenter = length(outGhostUV - vec2(0.5)) / 0.70710678;' + NL +
+    '  float w = clamp(1.0 - distFromCenter, 0.0, 1.0);' + NL +
+    '  outRadialWeight = w * w * w * w;' + NL +
+    '}' + NL;
+end;
+
+class procedure TCastleShaderGeneratorRHI.EvaluateChromaticAberrationOffsets(
+  const AUV: TVector2; const AIntensity: Single;
+  out ARedUV, AGreenUV, ABlueUV: TVector2);
+var
+  D, Offset: TVector2;
+  R2: Single;
+begin
+  D := AUV - Vector2(0.5, 0.5);
+  R2 := D.X * D.X + D.Y * D.Y;
+  Offset := D * (AIntensity * (1.0 + R2));
+  ARedUV := AUV - Offset;
+  AGreenUV := AUV;
+  ABlueUV := AUV + Offset;
+end;
+
+class procedure TCastleShaderGeneratorRHI.EvaluateLensFlareGhostUV(
+  const AUV: TVector2; const AGhostIndex: Integer; const AGhostSpacing: Single;
+  out AGhostUV: TVector2; out ARadialWeight: Single);
+var
+  FlareAxis, Centered: TVector2;
+  DistNorm, W: Single;
+begin
+  FlareAxis := Vector2(0.5, 0.5) - AUV;
+  AGhostUV := AUV + FlareAxis * (Single(Max(1, AGhostIndex)) * AGhostSpacing);
+  Centered := AGhostUV - Vector2(0.5, 0.5);
+  DistNorm := Sqrt(Centered.X * Centered.X + Centered.Y * Centered.Y) / 0.70710678;
+  W := EnsureRange(1.0 - DistNorm, 0.0, 1.0);
+  ARadialWeight := W * W * W * W;
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

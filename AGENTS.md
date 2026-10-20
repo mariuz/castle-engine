@@ -77,9 +77,9 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–18**: **COMPLETED** (100%).
-- **Phase 19 (Compute Skinning & Morph Targets, GPU-Driven Terrain CDLOD & Subsurface Scattering / Foliage Transmission)**: **COMPLETED** (100%, 87 unit tests passing):
-  - [x] **19.1. Compute Shader Skeletal Skinning & Morph Target Blending (`TCastleVulkanComputeSkinner` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestComputeSkinningAndMorphTargetsRHI`).
-  - [x] **19.2. GPU-Driven Continuous Distance-Dependent LOD (CDLOD) Terrain (`TCastleVulkanTerrainCDLOD` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestGPUDrivenTerrainCDLODRHI`).
-  - [x] **19.3. Pre-Integrated Subsurface Scattering & Thin-Foliage Transmission (`GenerateSubsurfaceAndTransmissionPBRFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSubsurfaceScatteringAndFoliageTransmissionPBRRHI`).
-- **Phase 20**: Planned (Clear Coat & Anisotropic Brushed-Metal PBR, Procedural Sky & Atmospheric Scattering & Screen-Space Lens Flare / Chromatic Aberration).
+- **Phases 1–19**: **COMPLETED** (100%).
+- **Phase 20 (Clear Coat & Anisotropic Brushed-Metal PBR, Procedural Sky & Atmospheric Scattering & Screen-Space Lens Flare / Chromatic Aberration)**: **COMPLETED** (100%, 90 unit tests passing):
+  - [x] **20.1. Multi-Layer Clear Coat & Anisotropic GGX Brushed-Metal PBR (`GenerateClearCoatAndAnisotropicPBRFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestClearCoatAndAnisotropicPBRRHI`).
+  - [x] **20.2. Rayleigh / Mie Physical Sky & Aerial Perspective LUT (`TCastleVulkanAtmosphereRenderer` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestRayleighMieAtmosphereSkyLUTComputeRHI`).
+  - [x] **20.3. Post-Process Screen-Space Ghosting Lens Flare & Radial Chromatic Aberration (`GenerateLensFlareAndChromaticAberrationFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestLensFlareAndChromaticAberrationPostProcessRHI`).
+- **Phase 21**: Planned (Cloth Sheen & Iridescence Thin-Film PBR, Compute FFT / Gerstner Ocean Water Simulation & Screen-Space Motion Blur / Bokeh Depth of Field).

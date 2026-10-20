@@ -126,6 +126,9 @@ type
     procedure TestComputeSkinningAndMorphTargetsRHI;
     procedure TestGPUDrivenTerrainCDLODRHI;
     procedure TestSubsurfaceScatteringAndFoliageTransmissionPBRRHI;
+    procedure TestClearCoatAndAnisotropicPBRRHI;
+    procedure TestRayleighMieAtmosphereSkyLUTComputeRHI;
+    procedure TestLensFlareAndChromaticAberrationPostProcessRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -7223,6 +7226,158 @@ begin
       Vector3(0.4, 0.85, 0.2), 2.0, 0.0, 4.0, 1.0);
     AssertTrue('Thin leaf (thickness=0.1) must transmit more light than thick leaf (thickness=2.0)',
       ThinLeaf.Y > ThickLeaf.Y);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestClearCoatAndAnisotropicPBRRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  CCGLSL: String;
+  CCSpecNormal, CCAttenNormal, CCSpecGrazing, CCAttenGrazing, CCSpecDisabled, CCAttenDisabled: Single;
+  DAnisoAlongT, DAnisoAlongB, DIso: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Clear Coat & Anisotropic GGX GLSL generation }
+    CCGLSL := Gen.GenerateClearCoatAndAnisotropicPBRFunctions;
+    AssertTrue('ClearCoat GLSL must include EvaluateClearCoatBRDF',
+      Pos('void EvaluateClearCoatBRDF(float cNdotH, float cNdotL, float cNdotV, float VdotH,', CCGLSL) > 0);
+    AssertTrue('ClearCoat GLSL must include EvaluateAnisotropicGGX_D',
+      Pos('float EvaluateAnisotropicGGX_D(float NdotH, float TdotH, float BdotH, float roughness, float anisotropy)', CCGLSL) > 0);
+
+    { 2. Verify Clear Coat specular lobe and base-layer attenuation (1.0 - F_cc) }
+    TCastleShaderGeneratorRHI.EvaluateClearCoatBRDF(
+      1.0, 1.0, 1.0, 1.0, 0.0, 0.1, CCSpecDisabled, CCAttenDisabled);
+    AssertSameValue(0.0, CCSpecDisabled, 1e-6);
+    AssertSameValue(1.0, CCAttenDisabled, 1e-6);
+
+    TCastleShaderGeneratorRHI.EvaluateClearCoatBRDF(
+      1.0, 1.0, 1.0, 1.0, 1.0, 0.1, CCSpecNormal, CCAttenNormal);
+    AssertTrue('Active glossy clear coat at NdotH=1 must produce strong specular lobe',
+      CCSpecNormal > 1.0);
+    { At VdotH=1 (normal incidence), IOR=1.5 has F0 = 0.04 -> base layer attenuation = 0.96 }
+    AssertSameValue(0.96, CCAttenNormal, 1e-4);
+
+    TCastleShaderGeneratorRHI.EvaluateClearCoatBRDF(
+      0.8, 0.5, 0.2, 0.1, 1.0, 0.2, CCSpecGrazing, CCAttenGrazing);
+    AssertTrue('Grazing VdotH=0.1 must increase Schlick Fresnel reflection and attenuate base layer (< 0.5)',
+      CCAttenGrazing < 0.5);
+
+    { 3. Verify Anisotropic GGX microfacet distribution D_aniso stretching }
+    DIso := TCastleShaderGeneratorRHI.EvaluateAnisotropicGGX_D(0.9, 0.43589, 0.0, 0.3, 0.0);
+    DAnisoAlongT := TCastleShaderGeneratorRHI.EvaluateAnisotropicGGX_D(0.9, 0.43589, 0.0, 0.3, 0.7);
+    DAnisoAlongB := TCastleShaderGeneratorRHI.EvaluateAnisotropicGGX_D(0.9, 0.0, 0.43589, 0.3, 0.7);
+    AssertTrue('Positive anisotropy stretches roughness along T (alphaT > alphaB), broadening highlight along T vs B',
+      DAnisoAlongT > DAnisoAlongB);
+    AssertTrue('Isotropic GGX D must be positive', DIso > 0.0);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRayleighMieAtmosphereSkyLUTComputeRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Gen: TCastleShaderGeneratorRHI;
+  SkyGLSL: String;
+  PhaseRForward, PhaseRPerp, PhaseMForward, PhaseMBackward: Single;
+  ZenithSky, HorizonSunSky: TVector3;
+begin
+  AssertEquals('TCastleAtmospherePushConstants must be 64 bytes',
+    64, SizeOf(TCastleAtmospherePushConstants));
+
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6666)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    { 1. Verify Atmosphere Sky-View LUT compute shader GLSL 450 }
+    SkyGLSL := Gen.GenerateAtmosphereSkyComputeShader(8, 8);
+    AssertTrue('Atmosphere compute shader must bind writeonly rgba16f u_SkyViewLUT at binding 0',
+      Pos('layout(rgba16f, set = 0, binding = 0) uniform writeonly image2D u_SkyViewLUT;', SkyGLSL) > 0);
+    AssertTrue('Atmosphere compute shader must include EvaluateRayleighPhase and EvaluateCornetteShanksMiePhase',
+      (Pos('float EvaluateRayleighPhase(float cosTheta)', SkyGLSL) > 0) and
+      (Pos('float EvaluateCornetteShanksMiePhase(float cosTheta, float g)', SkyGLSL) > 0));
+
+    { 2. Verify Rayleigh and Cornette-Shanks Mie phase functions }
+    PhaseRForward := TCastleShaderGeneratorRHI.EvaluateRayleighPhase(1.0);
+    PhaseRPerp := TCastleShaderGeneratorRHI.EvaluateRayleighPhase(0.0);
+    AssertSameValue(PhaseRPerp * 2.0, PhaseRForward, 1e-5);
+
+    PhaseMForward := TCastleShaderGeneratorRHI.EvaluateCornetteShanksMiePhase(0.98, 0.8);
+    PhaseMBackward := TCastleShaderGeneratorRHI.EvaluateCornetteShanksMiePhase(-0.8, 0.8);
+    AssertTrue('Cornette-Shanks Mie phase (g=0.8) must strongly favor forward solar scattering',
+      PhaseMForward > PhaseMBackward * 20.0);
+
+    { 3. Verify CPU reference sky radiance (zenith blue Rayleigh sky vs bright solar aureole) }
+    ZenithSky := Device.AtmosphereRenderer.EvaluateSkyRayRadiance(
+      Vector3(0.0, 1.0, 0.0), Vector3(0.0, 0.2, 0.98));
+    AssertTrue('Zenith clear sky must scatter more short-wavelength blue light than red light (B > R)',
+      ZenithSky.Z > ZenithSky.X * 2.0);
+
+    HorizonSunSky := Device.AtmosphereRenderer.EvaluateSkyRayRadiance(
+      Vector3(0.0, 0.2, 0.98), Vector3(0.0, 0.2, 0.98));
+    AssertTrue('Looking toward the sun must produce brighter Mie aureole radiance than zenith',
+      HorizonSunSky.X > ZenithSky.X);
+
+    { 4. Verify Sky-View LUT allocation & compute dispatch }
+    CmdList.BeginRecording;
+    Device.AtmosphereRenderer.DispatchAtmosphereSky(CmdList, nil, nil, 192, 108);
+    CmdList.EndRecording;
+
+    AssertEquals(Cardinal(1), Device.AtmosphereRenderer.DispatchCount);
+    AssertTrue('SkyViewLUTTexture must be allocated as 192x108 pfRGBA16_Float',
+      (Device.AtmosphereRenderer.SkyViewLUTTexture <> nil) and
+      (Device.AtmosphereRenderer.SkyViewLUTTexture.Desc.Width = 192) and
+      (Device.AtmosphereRenderer.SkyViewLUTTexture.Desc.Height = 108) and
+      (Device.AtmosphereRenderer.SkyViewLUTTexture.Desc.Format = pfRGBA16_Float));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestLensFlareAndChromaticAberrationPostProcessRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  FlareGLSL: String;
+  RedUV, GreenUV, BlueUV, GhostUV1, GhostUV2: TVector2;
+  WeightCenter, WeightEdge: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Lens Flare & Chromatic Aberration GLSL 450 functions }
+    FlareGLSL := Gen.GenerateLensFlareAndChromaticAberrationFunctions;
+    AssertTrue('Post-process GLSL must include EvaluateChromaticAberrationOffsets',
+      Pos('void EvaluateChromaticAberrationOffsets(vec2 uv, float intensity, out vec2 outRedUV, out vec2 outGreenUV, out vec2 outBlueUV)', FlareGLSL) > 0);
+    AssertTrue('Post-process GLSL must include EvaluateLensFlareGhostUV',
+      Pos('void EvaluateLensFlareGhostUV(vec2 uv, int ghostIndex, float ghostSpacing, out vec2 outGhostUV, out float outRadialWeight)', FlareGLSL) > 0);
+
+    { 2. Verify Chromatic Aberration zero dispersion at screen center and radial R/B split at corners }
+    TCastleShaderGeneratorRHI.EvaluateChromaticAberrationOffsets(
+      Vector2(0.5, 0.5), 0.02, RedUV, GreenUV, BlueUV);
+    AssertSameValue(0.5, RedUV.X, 1e-6);
+    AssertSameValue(0.5, BlueUV.X, 1e-6);
+
+    TCastleShaderGeneratorRHI.EvaluateChromaticAberrationOffsets(
+      Vector2(0.9, 0.5), 0.02, RedUV, GreenUV, BlueUV);
+    AssertTrue('Red UV must shift inward and Blue UV outward at screen periphery',
+      (RedUV.X < GreenUV.X) and (BlueUV.X > GreenUV.X));
+
+    { 3. Verify Lens Flare Ghost reflection across screen center and radial window weight }
+    TCastleShaderGeneratorRHI.EvaluateLensFlareGhostUV(
+      Vector2(0.3, 0.5), 2, 0.5, GhostUV1, WeightCenter);
+    { flareAxis = (0.5 - 0.3, 0) = (0.2, 0); step = 2 * 0.5 = 1.0 -> GhostUV1 = (0.5, 0.5) }
+    AssertSameValue(0.5, GhostUV1.X, 1e-5);
+    AssertSameValue(1.0, WeightCenter, 1e-5);
+
+    TCastleShaderGeneratorRHI.EvaluateLensFlareGhostUV(
+      Vector2(0.1, 0.1), 4, 0.6, GhostUV2, WeightEdge);
+    AssertTrue('Ghost pushed near/past screen edge must have attenuated radial weight (< WeightCenter)',
+      WeightEdge < WeightCenter);
   finally
     FreeAndNil(Gen);
   end;

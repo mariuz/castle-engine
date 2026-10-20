@@ -1810,6 +1810,61 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Rayleigh / Mie Physical Sky & Aerial Perspective LUT (Phase 20.2)          }
+  { -------------------------------------------------------------------------- }
+
+  { Manages the rgba16f Sky-View LUT texture, planetary Rayleigh/Mie atmospheric
+    scattering parameters, and compute shader dispatch. }
+  TCastleVulkanAtmosphereRenderer = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FSkyViewLUTTexture: TVulkanRHITexture;
+    FSunDirection: TVector3;
+    FSunIntensity: Single;
+    FRayleighScattering: TVector3;
+    FRayleighScaleHeight: Single;
+    FMieScattering: TVector3;
+    FMieScaleHeight: Single;
+    FPlanetRadius: Single;
+    FAtmosphereRadius: Single;
+    FMieAnisotropyG: Single;
+    FRaymarchSteps: Cardinal;
+    FDispatchCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Allocates or resizes the pfRGBA16_Float Sky-View LUT texture (default 192x108). }
+    procedure EnsureSkyViewLUT(
+      const AWidth: Cardinal = CASTLE_DEFAULT_SKY_VIEW_LUT_WIDTH;
+      const AHeight: Cardinal = CASTLE_DEFAULT_SKY_VIEW_LUT_HEIGHT);
+
+    { Evaluates CPU reference single-scattering planetary sky radiance along AViewDir. }
+    function EvaluateSkyRayRadiance(const AViewDir, ASunDir: TVector3): TVector3;
+
+    { Dispatches the Rayleigh/Mie Sky-View LUT compute pass. }
+    procedure DispatchAtmosphereSky(
+      const ACommandList: TVulkanRHICommandList;
+      const APipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil;
+      const AWidth: Cardinal = CASTLE_DEFAULT_SKY_VIEW_LUT_WIDTH;
+      const AHeight: Cardinal = CASTLE_DEFAULT_SKY_VIEW_LUT_HEIGHT);
+
+    property SkyViewLUTTexture: TVulkanRHITexture read FSkyViewLUTTexture;
+    property SunDirection: TVector3 read FSunDirection write FSunDirection;
+    property SunIntensity: Single read FSunIntensity write FSunIntensity;
+    property RayleighScattering: TVector3 read FRayleighScattering write FRayleighScattering;
+    property RayleighScaleHeight: Single read FRayleighScaleHeight write FRayleighScaleHeight;
+    property MieScattering: TVector3 read FMieScattering write FMieScattering;
+    property MieScaleHeight: Single read FMieScaleHeight write FMieScaleHeight;
+    property PlanetRadius: Single read FPlanetRadius write FPlanetRadius;
+    property AtmosphereRadius: Single read FAtmosphereRadius write FAtmosphereRadius;
+    property MieAnisotropyG: Single read FMieAnisotropyG write FMieAnisotropyG;
+    property RaymarchSteps: Cardinal read FRaymarchSteps write FRaymarchSteps;
+    property DispatchCount: Cardinal read FDispatchCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -1897,6 +1952,7 @@ type
     FContactShadows: TCastleVulkanContactShadows;
     FComputeSkinner: TCastleVulkanComputeSkinner;
     FTerrainCDLOD: TCastleVulkanTerrainCDLOD;
+    FAtmosphereRenderer: TCastleVulkanAtmosphereRenderer;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -1989,6 +2045,7 @@ type
     function GetContactShadows: TCastleVulkanContactShadows;
     function GetComputeSkinner: TCastleVulkanComputeSkinner;
     function GetTerrainCDLOD: TCastleVulkanTerrainCDLOD;
+    function GetAtmosphereRenderer: TCastleVulkanAtmosphereRenderer;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -2186,6 +2243,7 @@ type
     property ContactShadows: TCastleVulkanContactShadows read GetContactShadows;
     property ComputeSkinner: TCastleVulkanComputeSkinner read GetComputeSkinner;
     property TerrainCDLOD: TCastleVulkanTerrainCDLOD read GetTerrainCDLOD;
+    property AtmosphereRenderer: TCastleVulkanAtmosphereRenderer read GetAtmosphereRenderer;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -11733,6 +11791,130 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanAtmosphereRenderer (Phase 20.2)                                 }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanAtmosphereRenderer.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FSunDirection := Vector3(0.0, 0.70710678, 0.70710678);
+  FSunIntensity := 20.0;
+  { Earth sea-level Rayleigh scattering coefficients (m^-1) }
+  FRayleighScattering := Vector3(5.802e-6, 13.558e-6, 33.100e-6);
+  FRayleighScaleHeight := 8000.0;
+  { Earth sea-level Mie aerosol scattering coefficients (m^-1) }
+  FMieScattering := Vector3(3.996e-6, 3.996e-6, 3.996e-6);
+  FMieScaleHeight := 1200.0;
+  FPlanetRadius := 6360000.0;
+  FAtmosphereRadius := 6420000.0;
+  FMieAnisotropyG := 0.8;
+  FRaymarchSteps := 16;
+  FDispatchCount := 0;
+end;
+
+destructor TCastleVulkanAtmosphereRenderer.Destroy;
+begin
+  FreeAndNil(FSkyViewLUTTexture);
+  inherited;
+end;
+
+procedure TCastleVulkanAtmosphereRenderer.EnsureSkyViewLUT(
+  const AWidth, AHeight: Cardinal);
+var
+  TexDesc: TRHITextureDesc;
+  W, H: Cardinal;
+begin
+  W := Max(Cardinal(1), AWidth);
+  H := Max(Cardinal(1), AHeight);
+  if (FSkyViewLUTTexture <> nil) and
+     (FSkyViewLUTTexture.Desc.Width = W) and
+     (FSkyViewLUTTexture.Desc.Height = H) then
+    Exit;
+
+  FreeAndNil(FSkyViewLUTTexture);
+  TexDesc := TRHITextureDesc.Create2D(W, H, pfRGBA16_Float, [tuSampled, tuStorage], 1);
+  TexDesc.DebugName := 'SkyViewAtmosphereLUT';
+  FSkyViewLUTTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+end;
+
+function TCastleVulkanAtmosphereRenderer.EvaluateSkyRayRadiance(
+  const AViewDir, ASunDir: TVector3): TVector3;
+var
+  VDir, SDir, OpticalDepthR, OpticalDepthM, Transmittance, InScattered: TVector3;
+  CosTheta, PhaseR, PhaseM, AtmThickness, StepLen, H, DR, DM, PathStretch: Single;
+  Steps, I: Cardinal;
+begin
+  VDir := AViewDir.Normalize;
+  SDir := ASunDir.Normalize;
+  CosTheta := TVector3.DotProduct(VDir, SDir);
+  PhaseR := TCastleShaderGeneratorRHI.EvaluateRayleighPhase(CosTheta);
+  PhaseM := TCastleShaderGeneratorRHI.EvaluateCornetteShanksMiePhase(CosTheta, FMieAnisotropyG);
+  AtmThickness := Max(1000.0, FAtmosphereRadius - FPlanetRadius);
+  Steps := Max(Cardinal(1), FRaymarchSteps);
+  StepLen := AtmThickness / Single(Steps);
+  { Horizon rays traverse a longer optical path than zenith rays }
+  PathStretch := 1.0 / Max(0.15, Max(0.0, VDir.Y) + 0.15);
+
+  OpticalDepthR := TVector3.Zero;
+  OpticalDepthM := TVector3.Zero;
+  InScattered := TVector3.Zero;
+  for I := 0 to Steps - 1 do
+  begin
+    H := (Single(I) + 0.5) * StepLen;
+    DR := Exp(-H / Max(1.0, FRayleighScaleHeight)) * StepLen * PathStretch;
+    DM := Exp(-H / Max(1.0, FMieScaleHeight)) * StepLen * PathStretch;
+    OpticalDepthR := OpticalDepthR + FRayleighScattering * DR;
+    OpticalDepthM := OpticalDepthM + FMieScattering * DM;
+    Transmittance := Vector3(
+      Exp(-(OpticalDepthR.X + OpticalDepthM.X * 1.11)),
+      Exp(-(OpticalDepthR.Y + OpticalDepthM.Y * 1.11)),
+      Exp(-(OpticalDepthR.Z + OpticalDepthM.Z * 1.11)));
+    InScattered := InScattered + Vector3(
+      Transmittance.X * (FRayleighScattering.X * DR * PhaseR + FMieScattering.X * DM * PhaseM),
+      Transmittance.Y * (FRayleighScattering.Y * DR * PhaseR + FMieScattering.Y * DM * PhaseM),
+      Transmittance.Z * (FRayleighScattering.Z * DR * PhaseR + FMieScattering.Z * DM * PhaseM));
+  end;
+  Result := InScattered * FSunIntensity;
+end;
+
+procedure TCastleVulkanAtmosphereRenderer.DispatchAtmosphereSky(
+  const ACommandList: TVulkanRHICommandList;
+  const APipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet;
+  const AWidth, AHeight: Cardinal);
+var
+  PushConsts: TCastleAtmospherePushConstants;
+  GroupsX, GroupsY: Cardinal;
+begin
+  EnsureSkyViewLUT(AWidth, AHeight);
+  if ACommandList = nil then
+    Exit;
+
+  FillChar(PushConsts, SizeOf(PushConsts), 0);
+  PushConsts.SunDirectionAndIntensity := Vector4(FSunDirection.Normalize, FSunIntensity);
+  PushConsts.RayleighScatteringAndHeight := Vector4(FRayleighScattering, FRayleighScaleHeight);
+  PushConsts.MieScatteringAndHeight := Vector4(FMieScattering, FMieScaleHeight);
+  PushConsts.PlanetRadius := FPlanetRadius;
+  PushConsts.AtmosphereRadius := FAtmosphereRadius;
+  PushConsts.MieAnisotropyG := FMieAnisotropyG;
+  PushConsts.RaymarchSteps := Max(Cardinal(1), FRaymarchSteps);
+
+  ACommandList.TransitionTexture(FSkyViewLUTTexture, rsTransferDst);
+  if APipeline <> nil then
+    ACommandList.BindComputePipeline(APipeline);
+  if ADescriptorSet <> nil then
+    ACommandList.BindDescriptorSet(0, ADescriptorSet, []);
+  ACommandList.PushConstants([ssCompute], 0, SizeOf(PushConsts), PushConsts);
+
+  GroupsX := (FSkyViewLUTTexture.Desc.Width + 7) div 8;
+  GroupsY := (FSkyViewLUTTexture.Desc.Height + 7) div 8;
+  ACommandList.Dispatch(Max(Cardinal(1), GroupsX), Max(Cardinal(1), GroupsY), 1);
+  ACommandList.TransitionTexture(FSkyViewLUTTexture, rsShaderRead);
+  Inc(FDispatchCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -12240,12 +12422,20 @@ begin
   Result := FTerrainCDLOD;
 end;
 
+function TVulkanRHIDevice.GetAtmosphereRenderer: TCastleVulkanAtmosphereRenderer;
+begin
+  if FAtmosphereRenderer = nil then
+    FAtmosphereRenderer := TCastleVulkanAtmosphereRenderer.Create(Self);
+  Result := FAtmosphereRenderer;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FAtmosphereRenderer);
   FreeAndNil(FTerrainCDLOD);
   FreeAndNil(FComputeSkinner);
   FreeAndNil(FContactShadows);
