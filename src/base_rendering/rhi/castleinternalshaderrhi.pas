@@ -269,6 +269,9 @@ const
   CASTLE_DEFAULT_SKY_VIEW_LUT_WIDTH   = 192;
   CASTLE_DEFAULT_SKY_VIEW_LUT_HEIGHT  = 108;
 
+  { Phase 21.2: Default GPU Compute Gerstner Ocean simulation texture resolution }
+  CASTLE_DEFAULT_OCEAN_GRID_SIZE      = 128;
+
 type
   { HDR Tonemapping Operators (Phase 15.3) }
   TCastleTonemapOperator = (
@@ -467,6 +470,17 @@ type
     MieAnisotropyG: Single;                // 4 bytes (Cornette-Shanks Mie asymmetry g in [0..0.99], default 0.8)
     RaymarchSteps: Cardinal;               // 4 bytes (Single-scattering raymarch steps, default 16)
   end; // Total = 64 bytes
+
+  { Phase 21.2: Push constants for GPU Compute Gerstner Wave Ocean Simulation & Foam (48 bytes) }
+  PCastleOceanWavePushConstants = ^TCastleOceanWavePushConstants;
+  TCastleOceanWavePushConstants = packed record
+    WindDirectionAndSpeed: TVector4; // 16 bytes (xy = normalized wind dir, z = wind speed m/s, w = time seconds)
+    WaveParams: TVector4;            // 16 bytes (x = base amplitude, y = base wavelength, z = choppiness Q, w = patch world size)
+    GridSize: Cardinal;              // 4 bytes (Ocean texture resolution, default 128)
+    OctaveCount: Cardinal;           // 4 bytes (Number of Gerstner wave octaves, default 4)
+    FoamThreshold: Single;           // 4 bytes (Jacobian determinant threshold for whitecap crest foam, e.g. 0.65)
+    Gravity: Single;                 // 4 bytes (Gravitational acceleration, default 9.81)
+  end; // Total = 48 bytes
 
   { Generates RHI-compliant GLSL headers, UBO blocks, and varying layouts }
   TCastleShaderGeneratorRHI = class
@@ -733,6 +747,36 @@ type
     class procedure EvaluateLensFlareGhostUV(
       const AUV: TVector2; const AGhostIndex: Integer; const AGhostSpacing: Single;
       out AGhostUV: TVector2; out ARadialWeight: Single); static;
+
+    { Phase 21.1: Generates GLSL 450 PBR functions for Velvet/Cloth Estevez-Kulla Charlie
+      Sheen (EvaluateCharlieSheen_D) and Thin-Film Spectral Iridescence (EvaluateThinFilmIridescence). }
+    function GenerateClothSheenAndIridescencePBRFunctions: String;
+
+    { Phase 21.1 CPU reference: Evaluates Estevez & Kulla (2017) "Charlie" microfiber sheen NDF. }
+    class function EvaluateCharlieSheen_D(const ANdotH, ASheenRoughness: Single): Single; static;
+
+    { Phase 21.1 CPU reference: Evaluates Airy thin-film optical path difference spectral interference. }
+    class function EvaluateThinFilmIridescence(
+      const ACosTheta1, AIridescenceIOR, AThicknessNanometers: Single): TVector3; static;
+
+    { Phase 21.2: Generates a GLSL 450 compute shader for Multi-Octave Trochoidal Gerstner
+      Ocean Wave Displacement, Analytical Normals & Jacobian Whitecap Foam. }
+    function GenerateOceanDisplacementComputeShader(
+      const AWorkgroupSizeX: Cardinal = 8;
+      const AWorkgroupSizeY: Cardinal = 8): String;
+
+    { Phase 21.3: Generates GLSL 450 post-processing functions for Thin-Lens Bokeh Depth of Field
+      Circle of Confusion (EvaluateThinLensCoC) and Per-Pixel Velocity Motion Blur
+      (EvaluateMotionBlurSampleWeight). }
+    function GenerateMotionBlurAndBokehDoFFunctions: String;
+
+    { Phase 21.3 CPU reference: Evaluates signed thin-lens Circle of Confusion (CoC) in pixels. }
+    class function EvaluateThinLensCoC(
+      const ALinearDepth, AFocusDistance, AFocalLength, AApertureFStop, AMaxCoCRadius: Single): Single; static;
+
+    { Phase 21.3 CPU reference: Evaluates McGuire velocity-line motion blur sample weight with depth ordering. }
+    class function EvaluateMotionBlurSampleWeight(
+      const ASampleOffsetPixels, ASampleVelocityLengthPixels, ACenterDepth, ASampleDepth, ADepthSoftness: Single): Single; static;
 
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
@@ -3681,6 +3725,174 @@ begin
   DistNorm := Sqrt(Centered.X * Centered.X + Centered.Y * Centered.Y) / 0.70710678;
   W := EnsureRange(1.0 - DistNorm, 0.0, 1.0);
   ARadialWeight := W * W * W * W;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateClothSheenAndIridescencePBRFunctions: String;
+begin
+  Result :=
+    '// --- Velvet/Cloth Estevez-Kulla Charlie Sheen & Thin-Film Iridescence PBR (Phase 21.1) ---' + NL +
+    'float EvaluateCharlieSheen_D(float NdotH, float sheenRoughness) {' + NL +
+    '  float r = clamp(sheenRoughness, 0.04, 1.0);' + NL +
+    '  float alpha = max(0.002, r * r);' + NL +
+    '  float invAlpha = 1.0 / alpha;' + NL +
+    '  float cos2h = clamp(NdotH * NdotH, 0.0, 1.0);' + NL +
+    '  float sin2h = max(1e-5, 1.0 - cos2h);' + NL +
+    '  return (2.0 + invAlpha) * pow(sin2h, invAlpha * 0.5) / (2.0 * 3.14159265359);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 EvaluateThinFilmIridescence(float cosTheta1, float iridescenceIOR, float thicknessNanometers) {' + NL +
+    '  float nFilm = max(1.0, iridescenceIOR);' + NL +
+    '  float sin2Theta1 = max(0.0, 1.0 - clamp(cosTheta1, 0.0, 1.0) * clamp(cosTheta1, 0.0, 1.0));' + NL +
+    '  float sin2Theta2 = sin2Theta1 / (nFilm * nFilm);' + NL +
+    '  float cosTheta2 = sqrt(max(0.0, 1.0 - sin2Theta2));' + NL +
+    '  float opd = 2.0 * nFilm * max(0.0, thicknessNanometers) * cosTheta2;' + NL +
+    '  vec3 wavelengths = vec3(650.0, 550.0, 450.0);' + NL +
+    '  vec3 phase = (2.0 * 3.14159265359 * opd) / wavelengths + 3.14159265359;' + NL +
+    '  return clamp(vec3(0.5) + 0.5 * cos(phase), 0.0, 1.0);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateCharlieSheen_D(
+  const ANdotH, ASheenRoughness: Single): Single;
+var
+  R, Alpha, InvAlpha, Cos2H, Sin2H: Single;
+begin
+  R := EnsureRange(ASheenRoughness, 0.04, 1.0);
+  Alpha := Max(0.002, R * R);
+  InvAlpha := 1.0 / Alpha;
+  Cos2H := EnsureRange(ANdotH * ANdotH, 0.0, 1.0);
+  Sin2H := Max(1e-5, 1.0 - Cos2H);
+  Result := (2.0 + InvAlpha) * Power(Sin2H, InvAlpha * 0.5) / (2.0 * Single(Pi));
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateThinFilmIridescence(
+  const ACosTheta1, AIridescenceIOR, AThicknessNanometers: Single): TVector3;
+var
+  NFilm, Cos1, Sin2Theta1, Sin2Theta2, CosTheta2, OPD, TwoPiOPD: Single;
+begin
+  NFilm := Max(1.0, AIridescenceIOR);
+  Cos1 := EnsureRange(ACosTheta1, 0.0, 1.0);
+  Sin2Theta1 := Max(0.0, 1.0 - Cos1 * Cos1);
+  Sin2Theta2 := Sin2Theta1 / (NFilm * NFilm);
+  CosTheta2 := Sqrt(Max(0.0, 1.0 - Sin2Theta2));
+  OPD := 2.0 * NFilm * Max(0.0, AThicknessNanometers) * CosTheta2;
+  TwoPiOPD := 2.0 * Single(Pi) * OPD;
+  Result := Vector3(
+    EnsureRange(0.5 + 0.5 * Cos(TwoPiOPD / 650.0 + Single(Pi)), 0.0, 1.0),
+    EnsureRange(0.5 + 0.5 * Cos(TwoPiOPD / 550.0 + Single(Pi)), 0.0, 1.0),
+    EnsureRange(0.5 + 0.5 * Cos(TwoPiOPD / 450.0 + Single(Pi)), 0.0, 1.0));
+end;
+
+function TCastleShaderGeneratorRHI.GenerateOceanDisplacementComputeShader(
+  const AWorkgroupSizeX: Cardinal; const AWorkgroupSizeY: Cardinal): String;
+begin
+  Result :=
+    GenerateVersionAndLayoutMacros +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;', [
+      Max(Cardinal(1), AWorkgroupSizeX),
+      Max(Cardinal(1), AWorkgroupSizeY)
+    ]) + NL +
+    NL +
+    '// Set 0, Binding 0: Ocean 3D Displacement (xyz) & Whitecap Crest Foam (w)' + NL +
+    'layout(rgba16f, set = 0, binding = 0) uniform writeonly image2D u_OceanDisplacementAndFoam;' + NL +
+    '// Set 0, Binding 1: Ocean Analytical Surface Normal (xyz) & Slope (w)' + NL +
+    'layout(rgba16f, set = 0, binding = 1) uniform writeonly image2D u_OceanNormalAndSlope;' + NL +
+    NL +
+    'CASTLE_PUSH_CONSTANT uniform CastleOceanWavePushConstants {' + NL +
+    '  vec4 u_WindDirectionAndSpeed;' + NL +
+    '  vec4 u_WaveParams;' + NL +
+    '  uint u_GridSize;' + NL +
+    '  uint u_OctaveCount;' + NL +
+    '  float u_FoamThreshold;' + NL +
+    '  float u_Gravity;' + NL +
+    '} castle_OceanPC;' + NL +
+    NL +
+    'void main() {' + NL +
+    '  ivec2 coord = ivec2(gl_GlobalInvocationID.xy);' + NL +
+    '  int gridN = int(max(1u, castle_OceanPC.u_GridSize));' + NL +
+    '  if (coord.x >= gridN || coord.y >= gridN) return;' + NL +
+    NL +
+    '  vec2 uv = (vec2(coord) + 0.5) / float(gridN);' + NL +
+    '  vec2 worldXZ = (uv - 0.5) * castle_OceanPC.u_WaveParams.w;' + NL +
+    '  vec2 baseDir = normalize(castle_OceanPC.u_WindDirectionAndSpeed.xy + vec2(1e-5, 0.0));' + NL +
+    '  float timeSec = castle_OceanPC.u_WindDirectionAndSpeed.w;' + NL +
+    '  float amp = castle_OceanPC.u_WaveParams.x;' + NL +
+    '  float wavelength = max(0.5, castle_OceanPC.u_WaveParams.y);' + NL +
+    '  float choppiness = clamp(castle_OceanPC.u_WaveParams.z, 0.0, 1.0);' + NL +
+    '  uint octaves = clamp(castle_OceanPC.u_OctaveCount, 1u, 8u);' + NL +
+    NL +
+    '  vec3 disp = vec3(0.0);' + NL +
+    '  vec3 tangent = vec3(1.0, 0.0, 0.0);' + NL +
+    '  vec3 bitangent = vec3(0.0, 0.0, 1.0);' + NL +
+    '  float jacobian = 1.0;' + NL +
+    '  for (uint i = 0u; i < octaves; ++i) {' + NL +
+    '    float angle = float(i) * 0.42;' + NL +
+    '    vec2 dir = normalize(vec2(baseDir.x * cos(angle) - baseDir.y * sin(angle),' + NL +
+    '                              baseDir.x * sin(angle) + baseDir.y * cos(angle)));' + NL +
+    '    float k = 6.28318530718 / wavelength;' + NL +
+    '    float omega = sqrt(max(0.1, castle_OceanPC.u_Gravity) * k);' + NL +
+    '    float phase = k * dot(dir, worldXZ) - omega * timeSec;' + NL +
+    '    float c = cos(phase);' + NL +
+    '    float s = sin(phase);' + NL +
+    '    float q = choppiness / max(k * amp * float(octaves), 1e-4);' + NL +
+    '    disp.x += q * amp * dir.x * c;' + NL +
+    '    disp.y += amp * s;' + NL +
+    '    disp.z += q * amp * dir.y * c;' + NL +
+    '    tangent.y += k * amp * dir.x * c;' + NL +
+    '    bitangent.y += k * amp * dir.y * c;' + NL +
+    '    jacobian -= q * k * amp * s;' + NL +
+    '    amp *= 0.5;' + NL +
+    '    wavelength *= 0.5;' + NL +
+    '  }' + NL +
+    '  vec3 nrm = normalize(cross(bitangent, tangent));' + NL +
+    '  float foam = clamp((castle_OceanPC.u_FoamThreshold - jacobian) / max(castle_OceanPC.u_FoamThreshold, 1e-4), 0.0, 1.0);' + NL +
+    '  imageStore(u_OceanDisplacementAndFoam, coord, vec4(disp, foam));' + NL +
+    '  imageStore(u_OceanNormalAndSlope, coord, vec4(nrm, 1.0 - nrm.y));' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateMotionBlurAndBokehDoFFunctions: String;
+begin
+  Result :=
+    '// --- Per-Pixel Velocity Motion Blur & Thin-Lens Bokeh Depth of Field (Phase 21.3) ---' + NL +
+    'float EvaluateThinLensCoC(float linearDepth, float focusDistance, float focalLength, float apertureFStop, float maxCoCRadius) {' + NL +
+    '  float z = max(1e-3, linearDepth);' + NL +
+    '  float zFocus = max(1e-3, focusDistance);' + NL +
+    '  float f = clamp(focalLength, 1e-3, zFocus * 0.95);' + NL +
+    '  float aperture = f / max(0.1, apertureFStop);' + NL +
+    '  float cocRaw = aperture * (f * (z - zFocus)) / max(1e-4, z * (zFocus - f));' + NL +
+    '  return clamp(cocRaw * maxCoCRadius * 1000.0, -maxCoCRadius, maxCoCRadius);' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateMotionBlurSampleWeight(float sampleOffsetPixels, float sampleVelLenPixels,' + NL +
+    '  float centerDepth, float sampleDepth, float depthSoftness) {' + NL +
+    '  float velCoverage = clamp(1.0 - abs(sampleOffsetPixels) / max(0.5, sampleVelLenPixels), 0.0, 1.0);' + NL +
+    '  float depthWeight = clamp(1.0 - max(0.0, sampleDepth - centerDepth) * max(0.0, depthSoftness), 0.0, 1.0);' + NL +
+    '  return velCoverage * depthWeight;' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateThinLensCoC(
+  const ALinearDepth, AFocusDistance, AFocalLength, AApertureFStop, AMaxCoCRadius: Single): Single;
+var
+  Z, ZFocus, F, Aperture, CoCRaw: Single;
+begin
+  Z := Max(1e-3, ALinearDepth);
+  ZFocus := Max(1e-3, AFocusDistance);
+  F := EnsureRange(AFocalLength, 1e-3, ZFocus * 0.95);
+  Aperture := F / Max(0.1, AApertureFStop);
+  CoCRaw := Aperture * (F * (Z - ZFocus)) / Max(1e-4, Z * (ZFocus - F));
+  Result := EnsureRange(CoCRaw * AMaxCoCRadius * 1000.0, -AMaxCoCRadius, AMaxCoCRadius);
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateMotionBlurSampleWeight(
+  const ASampleOffsetPixels, ASampleVelocityLengthPixels, ACenterDepth, ASampleDepth, ADepthSoftness: Single): Single;
+var
+  VelCoverage, DepthWeight: Single;
+begin
+  VelCoverage := EnsureRange(1.0 - Abs(ASampleOffsetPixels) / Max(0.5, ASampleVelocityLengthPixels), 0.0, 1.0);
+  DepthWeight := EnsureRange(1.0 - Max(0.0, ASampleDepth - ACenterDepth) * Max(0.0, ADepthSoftness), 0.0, 1.0);
+  Result := VelCoverage * DepthWeight;
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

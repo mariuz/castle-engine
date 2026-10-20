@@ -1865,6 +1865,61 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { GPU Compute Gerstner Wave Ocean Simulation & Foam (Phase 21.2)             }
+  { -------------------------------------------------------------------------- }
+
+  { Manages multi-octave directional Gerstner ocean wave displacement, analytical
+    surface normals, Jacobian crest whitecap foam, and compute shader dispatch. }
+  TCastleVulkanOceanSimulator = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FDisplacementAndFoamTexture: TVulkanRHITexture;
+    FNormalAndSlopeTexture: TVulkanRHITexture;
+    FWindDirection: TVector2;
+    FWindSpeed: Single;
+    FSimulationTime: Single;
+    FBaseAmplitude: Single;
+    FBaseWavelength: Single;
+    FChoppiness: Single;
+    FPatchWorldSize: Single;
+    FOctaveCount: Cardinal;
+    FFoamThreshold: Single;
+    FGravity: Single;
+    FDispatchCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Allocates or resizes the pfRGBA16_Float displacement+foam and normal+slope textures (default 128x128). }
+    procedure EnsureOceanTextures(const AGridSize: Cardinal = CASTLE_DEFAULT_OCEAN_GRID_SIZE);
+
+    { Evaluates CPU reference multi-octave Gerstner wave 3D displacement, analytical normal, and Jacobian crest foam. }
+    procedure EvaluateGerstnerWavePoint(const AWorldXZ: TVector2; const ATimeSeconds: Single;
+      out ADisplacement, ANormal: TVector3; out AFoamFactor: Single);
+
+    { Dispatches the GPU compute ocean displacement & normal/foam generation pass. }
+    procedure DispatchOceanSimulation(
+      const ACommandList: TVulkanRHICommandList;
+      const APipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil;
+      const AGridSize: Cardinal = CASTLE_DEFAULT_OCEAN_GRID_SIZE);
+
+    property DisplacementAndFoamTexture: TVulkanRHITexture read FDisplacementAndFoamTexture;
+    property NormalAndSlopeTexture: TVulkanRHITexture read FNormalAndSlopeTexture;
+    property WindDirection: TVector2 read FWindDirection write FWindDirection;
+    property WindSpeed: Single read FWindSpeed write FWindSpeed;
+    property SimulationTime: Single read FSimulationTime write FSimulationTime;
+    property BaseAmplitude: Single read FBaseAmplitude write FBaseAmplitude;
+    property BaseWavelength: Single read FBaseWavelength write FBaseWavelength;
+    property Choppiness: Single read FChoppiness write FChoppiness;
+    property PatchWorldSize: Single read FPatchWorldSize write FPatchWorldSize;
+    property OctaveCount: Cardinal read FOctaveCount write FOctaveCount;
+    property FoamThreshold: Single read FFoamThreshold write FFoamThreshold;
+    property Gravity: Single read FGravity write FGravity;
+    property DispatchCount: Cardinal read FDispatchCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -1953,6 +2008,7 @@ type
     FComputeSkinner: TCastleVulkanComputeSkinner;
     FTerrainCDLOD: TCastleVulkanTerrainCDLOD;
     FAtmosphereRenderer: TCastleVulkanAtmosphereRenderer;
+    FOceanSimulator: TCastleVulkanOceanSimulator;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -2046,6 +2102,7 @@ type
     function GetComputeSkinner: TCastleVulkanComputeSkinner;
     function GetTerrainCDLOD: TCastleVulkanTerrainCDLOD;
     function GetAtmosphereRenderer: TCastleVulkanAtmosphereRenderer;
+    function GetOceanSimulator: TCastleVulkanOceanSimulator;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -2244,6 +2301,7 @@ type
     property ComputeSkinner: TCastleVulkanComputeSkinner read GetComputeSkinner;
     property TerrainCDLOD: TCastleVulkanTerrainCDLOD read GetTerrainCDLOD;
     property AtmosphereRenderer: TCastleVulkanAtmosphereRenderer read GetAtmosphereRenderer;
+    property OceanSimulator: TCastleVulkanOceanSimulator read GetOceanSimulator;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -11915,6 +11973,145 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanOceanSimulator (Phase 21.2)                                     }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanOceanSimulator.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FWindDirection := Vector2(1.0, 0.0);
+  FWindSpeed := 12.0;
+  FSimulationTime := 0.0;
+  FBaseAmplitude := 1.2;
+  FBaseWavelength := 24.0;
+  FChoppiness := 0.75;
+  FPatchWorldSize := 128.0;
+  FOctaveCount := 4;
+  FFoamThreshold := 0.65;
+  FGravity := 9.81;
+  FDispatchCount := 0;
+end;
+
+destructor TCastleVulkanOceanSimulator.Destroy;
+begin
+  FreeAndNil(FNormalAndSlopeTexture);
+  FreeAndNil(FDisplacementAndFoamTexture);
+  inherited;
+end;
+
+procedure TCastleVulkanOceanSimulator.EnsureOceanTextures(const AGridSize: Cardinal);
+var
+  TexDesc: TRHITextureDesc;
+  N: Cardinal;
+begin
+  N := Max(Cardinal(1), AGridSize);
+  if (FDisplacementAndFoamTexture <> nil) and
+     (FNormalAndSlopeTexture <> nil) and
+     (FDisplacementAndFoamTexture.Desc.Width = N) and
+     (FDisplacementAndFoamTexture.Desc.Height = N) then
+    Exit;
+
+  FreeAndNil(FNormalAndSlopeTexture);
+  FreeAndNil(FDisplacementAndFoamTexture);
+
+  TexDesc := TRHITextureDesc.Create2D(N, N, pfRGBA16_Float, [tuSampled, tuStorage], 1);
+  TexDesc.DebugName := 'OceanDisplacementAndFoam';
+  FDisplacementAndFoamTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+
+  TexDesc := TRHITextureDesc.Create2D(N, N, pfRGBA16_Float, [tuSampled, tuStorage], 1);
+  TexDesc.DebugName := 'OceanNormalAndSlope';
+  FNormalAndSlopeTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+end;
+
+procedure TCastleVulkanOceanSimulator.EvaluateGerstnerWavePoint(
+  const AWorldXZ: TVector2; const ATimeSeconds: Single;
+  out ADisplacement, ANormal: TVector3; out AFoamFactor: Single);
+var
+  BaseDir, Dir: TVector2;
+  Amp, Wavelength, Chop, Angle, K, Omega, Phase, C, S, Q, Jacobian: Single;
+  Octaves, I: Cardinal;
+  Tangent, Bitangent: TVector3;
+begin
+  BaseDir := (FWindDirection + Vector2(1e-5, 0.0)).Normalize;
+  Amp := FBaseAmplitude;
+  Wavelength := Max(0.5, FBaseWavelength);
+  Chop := EnsureRange(FChoppiness, 0.0, 1.0);
+  Octaves := EnsureRange(FOctaveCount, 1, 8);
+
+  ADisplacement := TVector3.Zero;
+  Tangent := Vector3(1.0, 0.0, 0.0);
+  Bitangent := Vector3(0.0, 0.0, 1.0);
+  Jacobian := 1.0;
+
+  for I := 0 to Octaves - 1 do
+  begin
+    Angle := Single(I) * 0.42;
+    Dir := Vector2(
+      BaseDir.X * Cos(Angle) - BaseDir.Y * Sin(Angle),
+      BaseDir.X * Sin(Angle) + BaseDir.Y * Cos(Angle)).Normalize;
+    K := (2.0 * Single(Pi)) / Wavelength;
+    Omega := Sqrt(Max(0.1, FGravity) * K);
+    Phase := K * (Dir.X * AWorldXZ.X + Dir.Y * AWorldXZ.Y) - Omega * ATimeSeconds;
+    C := Cos(Phase);
+    S := Sin(Phase);
+    Q := Chop / Max(K * Amp * Single(Octaves), 1e-4);
+
+    ADisplacement.X := ADisplacement.X + Q * Amp * Dir.X * C;
+    ADisplacement.Y := ADisplacement.Y + Amp * S;
+    ADisplacement.Z := ADisplacement.Z + Q * Amp * Dir.Y * C;
+
+    Tangent.Y := Tangent.Y + K * Amp * Dir.X * C;
+    Bitangent.Y := Bitangent.Y + K * Amp * Dir.Y * C;
+    Jacobian := Jacobian - Q * K * Amp * S;
+
+    Amp := Amp * 0.5;
+    Wavelength := Wavelength * 0.5;
+  end;
+
+  ANormal := TVector3.CrossProduct(Bitangent, Tangent).Normalize;
+  AFoamFactor := EnsureRange((FFoamThreshold - Jacobian) / Max(FFoamThreshold, 1e-4), 0.0, 1.0);
+end;
+
+procedure TCastleVulkanOceanSimulator.DispatchOceanSimulation(
+  const ACommandList: TVulkanRHICommandList;
+  const APipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet;
+  const AGridSize: Cardinal);
+var
+  PushConsts: TCastleOceanWavePushConstants;
+  GroupsXY: Cardinal;
+begin
+  EnsureOceanTextures(AGridSize);
+  if ACommandList = nil then
+    Exit;
+
+  FillChar(PushConsts, SizeOf(PushConsts), 0);
+  PushConsts.WindDirectionAndSpeed := Vector4(
+    FWindDirection.X, FWindDirection.Y, FWindSpeed, FSimulationTime);
+  PushConsts.WaveParams := Vector4(
+    FBaseAmplitude, FBaseWavelength, FChoppiness, FPatchWorldSize);
+  PushConsts.GridSize := FDisplacementAndFoamTexture.Desc.Width;
+  PushConsts.OctaveCount := EnsureRange(FOctaveCount, 1, 8);
+  PushConsts.FoamThreshold := FFoamThreshold;
+  PushConsts.Gravity := FGravity;
+
+  ACommandList.TransitionTexture(FDisplacementAndFoamTexture, rsTransferDst);
+  ACommandList.TransitionTexture(FNormalAndSlopeTexture, rsTransferDst);
+  if APipeline <> nil then
+    ACommandList.BindComputePipeline(APipeline);
+  if ADescriptorSet <> nil then
+    ACommandList.BindDescriptorSet(0, ADescriptorSet, []);
+  ACommandList.PushConstants([ssCompute], 0, SizeOf(PushConsts), PushConsts);
+
+  GroupsXY := (FDisplacementAndFoamTexture.Desc.Width + 7) div 8;
+  ACommandList.Dispatch(Max(Cardinal(1), GroupsXY), Max(Cardinal(1), GroupsXY), 1);
+  ACommandList.TransitionTexture(FDisplacementAndFoamTexture, rsShaderRead);
+  ACommandList.TransitionTexture(FNormalAndSlopeTexture, rsShaderRead);
+  Inc(FDispatchCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -12429,12 +12626,20 @@ begin
   Result := FAtmosphereRenderer;
 end;
 
+function TVulkanRHIDevice.GetOceanSimulator: TCastleVulkanOceanSimulator;
+begin
+  if FOceanSimulator = nil then
+    FOceanSimulator := TCastleVulkanOceanSimulator.Create(Self);
+  Result := FOceanSimulator;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FOceanSimulator);
   FreeAndNil(FAtmosphereRenderer);
   FreeAndNil(FTerrainCDLOD);
   FreeAndNil(FComputeSkinner);

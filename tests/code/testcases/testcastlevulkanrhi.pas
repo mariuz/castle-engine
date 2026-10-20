@@ -129,6 +129,9 @@ type
     procedure TestClearCoatAndAnisotropicPBRRHI;
     procedure TestRayleighMieAtmosphereSkyLUTComputeRHI;
     procedure TestLensFlareAndChromaticAberrationPostProcessRHI;
+    procedure TestClothSheenAndIridescencePBRRHI;
+    procedure TestComputeGerstnerOceanSimulationAndFoamRHI;
+    procedure TestMotionBlurAndBokehDepthOfFieldPostProcessRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -7378,6 +7381,141 @@ begin
       Vector2(0.1, 0.1), 4, 0.6, GhostUV2, WeightEdge);
     AssertTrue('Ghost pushed near/past screen edge must have attenuated radial weight (< WeightCenter)',
       WeightEdge < WeightCenter);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestClothSheenAndIridescencePBRRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  SheenGLSL: String;
+  CharlieGrazing, CharlieNormal: Single;
+  IridNormal, IridGrazing, IridZeroThickness: TVector3;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Cloth Sheen & Iridescence GLSL 450 functions }
+    SheenGLSL := Gen.GenerateClothSheenAndIridescencePBRFunctions;
+    AssertTrue('Sheen GLSL must include EvaluateCharlieSheen_D',
+      Pos('float EvaluateCharlieSheen_D(float NdotH, float sheenRoughness)', SheenGLSL) > 0);
+    AssertTrue('Sheen GLSL must include EvaluateThinFilmIridescence',
+      Pos('vec3 EvaluateThinFilmIridescence(float cosTheta1, float iridescenceIOR, float thicknessNanometers)', SheenGLSL) > 0);
+
+    { 2. Verify Estevez-Kulla Charlie microfiber NDF peaks at grazing retroreflection (NdotH -> 0) }
+    CharlieGrazing := TCastleShaderGeneratorRHI.EvaluateCharlieSheen_D(0.05, 0.3);
+    CharlieNormal := TCastleShaderGeneratorRHI.EvaluateCharlieSheen_D(0.98, 0.3);
+    AssertTrue('Charlie cloth sheen NDF must peak at grazing retroreflection (NdotH=0.05 > NdotH=0.98)',
+      CharlieGrazing > CharlieNormal * 5.0);
+
+    { 3. Verify Thin-Film Iridescence spectral interference shifts across viewing angle & thickness }
+    IridZeroThickness := TCastleShaderGeneratorRHI.EvaluateThinFilmIridescence(1.0, 1.33, 0.0);
+    { At 0 nm thickness, phase = pi -> 0.5 + 0.5 * cos(pi) = 0.0 destructive interference }
+    AssertSameValue(0.0, IridZeroThickness.X, 1e-5);
+
+    IridNormal := TCastleShaderGeneratorRHI.EvaluateThinFilmIridescence(1.0, 1.5, 380.0);
+    IridGrazing := TCastleShaderGeneratorRHI.EvaluateThinFilmIridescence(0.2, 1.5, 380.0);
+    AssertTrue('Thin-film iridescence at 380nm must shift RGB spectral reflectance between normal and grazing angles',
+      Abs(IridNormal.X - IridGrazing.X) + Abs(IridNormal.Z - IridGrazing.Z) > 0.1);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestComputeGerstnerOceanSimulationAndFoamRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Gen: TCastleShaderGeneratorRHI;
+  OceanGLSL: String;
+  Disp0, Nrm0, Disp1, Nrm1: TVector3;
+  FoamCalm, FoamStorm: Single;
+begin
+  AssertEquals('TCastleOceanWavePushConstants must be 48 bytes',
+    48, SizeOf(TCastleOceanWavePushConstants));
+
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6666)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    { 1. Verify Ocean Compute Shader GLSL 450 }
+    OceanGLSL := Gen.GenerateOceanDisplacementComputeShader(8, 8);
+    AssertTrue('Ocean compute shader must bind writeonly rgba16f u_OceanDisplacementAndFoam at binding 0',
+      Pos('layout(rgba16f, set = 0, binding = 0) uniform writeonly image2D u_OceanDisplacementAndFoam;', OceanGLSL) > 0);
+    AssertTrue('Ocean compute shader must bind writeonly rgba16f u_OceanNormalAndSlope at binding 1',
+      Pos('layout(rgba16f, set = 0, binding = 1) uniform writeonly image2D u_OceanNormalAndSlope;', OceanGLSL) > 0);
+
+    { 2. Verify CPU reference Gerstner wave propagation & Jacobian whitecap crest foam }
+    Device.OceanSimulator.BaseAmplitude := 1.5;
+    Device.OceanSimulator.BaseWavelength := 20.0;
+    Device.OceanSimulator.Choppiness := 0.2;
+    Device.OceanSimulator.EvaluateGerstnerWavePoint(Vector2(3.0, 2.0), 0.0, Disp0, Nrm0, FoamCalm);
+    Device.OceanSimulator.EvaluateGerstnerWavePoint(Vector2(3.0, 2.0), 1.5, Disp1, Nrm1, FoamStorm);
+    AssertTrue('Gerstner ocean wave displacement must evolve over time',
+      not TVector3.Equals(Disp0, Disp1));
+    AssertTrue('Analytical ocean surface normal must point upward (Y > 0)',
+      (Nrm0.Y > 0.0) and (Nrm1.Y > 0.0));
+
+    { High choppiness at wave crest (sin(phase) = 1 -> phase = pi/2) triggers Jacobian folding whitecap foam }
+    Device.OceanSimulator.OctaveCount := 1;
+    Device.OceanSimulator.Choppiness := 1.0;
+    Device.OceanSimulator.FoamThreshold := 0.85;
+    Device.OceanSimulator.EvaluateGerstnerWavePoint(Vector2(5.0, 0.0), 0.0, Disp1, Nrm1, FoamStorm);
+    AssertTrue('Steep Gerstner crest (phase=pi/2 at x=wavelength/4=5.0) must generate whitecap foam (> 0)',
+      FoamStorm > 0.0);
+
+    { 3. Verify GPU ocean textures allocation & compute dispatch }
+    CmdList.BeginRecording;
+    Device.OceanSimulator.DispatchOceanSimulation(CmdList, nil, nil, 128);
+    CmdList.EndRecording;
+
+    AssertEquals(Cardinal(1), Device.OceanSimulator.DispatchCount);
+    AssertTrue('DisplacementAndFoamTexture and NormalAndSlopeTexture must be 128x128 pfRGBA16_Float',
+      (Device.OceanSimulator.DisplacementAndFoamTexture <> nil) and
+      (Device.OceanSimulator.NormalAndSlopeTexture <> nil) and
+      (Device.OceanSimulator.DisplacementAndFoamTexture.Desc.Width = 128) and
+      (Device.OceanSimulator.NormalAndSlopeTexture.Desc.Format = pfRGBA16_Float));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestMotionBlurAndBokehDepthOfFieldPostProcessRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  PostGLSL: String;
+  CoCFocus, CoCForeground, CoCBackground: Single;
+  WeightCovered, WeightOutsideVelocity, WeightOccludedBg: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Motion Blur & Bokeh DoF GLSL 450 functions }
+    PostGLSL := Gen.GenerateMotionBlurAndBokehDoFFunctions;
+    AssertTrue('Post GLSL must include EvaluateThinLensCoC',
+      Pos('float EvaluateThinLensCoC(float linearDepth, float focusDistance, float focalLength, float apertureFStop, float maxCoCRadius)', PostGLSL) > 0);
+    AssertTrue('Post GLSL must include EvaluateMotionBlurSampleWeight',
+      Pos('float EvaluateMotionBlurSampleWeight(float sampleOffsetPixels, float sampleVelLenPixels,', PostGLSL) > 0);
+
+    { 2. Verify Signed Thin-Lens Circle of Confusion (0 at focus plane, <0 foreground, >0 background) }
+    CoCFocus := TCastleShaderGeneratorRHI.EvaluateThinLensCoC(10.0, 10.0, 0.05, 2.8, 16.0);
+    CoCForeground := TCastleShaderGeneratorRHI.EvaluateThinLensCoC(3.0, 10.0, 0.05, 2.8, 16.0);
+    CoCBackground := TCastleShaderGeneratorRHI.EvaluateThinLensCoC(50.0, 10.0, 0.05, 2.8, 16.0);
+    AssertSameValue(0.0, CoCFocus, 1e-5);
+    AssertTrue('Foreground object (z < focusDistance) must produce negative signed CoC',
+      CoCForeground < -0.1);
+    AssertTrue('Background object (z > focusDistance) must produce positive signed CoC',
+      CoCBackground > 0.1);
+
+    { 3. Verify Velocity Motion Blur sample weight & depth occlusion }
+    WeightCovered := TCastleShaderGeneratorRHI.EvaluateMotionBlurSampleWeight(2.0, 8.0, 10.0, 10.0, 1.0);
+    WeightOutsideVelocity := TCastleShaderGeneratorRHI.EvaluateMotionBlurSampleWeight(10.0, 4.0, 10.0, 10.0, 1.0);
+    WeightOccludedBg := TCastleShaderGeneratorRHI.EvaluateMotionBlurSampleWeight(2.0, 8.0, 5.0, 20.0, 1.0);
+    AssertTrue('Sample within velocity streak at matching depth must have positive weight',
+      WeightCovered > 0.5);
+    AssertSameValue(0.0, WeightOutsideVelocity, 1e-5);
+    AssertSameValue(0.0, WeightOccludedBg, 1e-5);
   finally
     FreeAndNil(Gen);
   end;

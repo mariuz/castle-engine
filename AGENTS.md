@@ -77,9 +77,9 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–19**: **COMPLETED** (100%).
-- **Phase 20 (Clear Coat & Anisotropic Brushed-Metal PBR, Procedural Sky & Atmospheric Scattering & Screen-Space Lens Flare / Chromatic Aberration)**: **COMPLETED** (100%, 90 unit tests passing):
-  - [x] **20.1. Multi-Layer Clear Coat & Anisotropic GGX Brushed-Metal PBR (`GenerateClearCoatAndAnisotropicPBRFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestClearCoatAndAnisotropicPBRRHI`).
-  - [x] **20.2. Rayleigh / Mie Physical Sky & Aerial Perspective LUT (`TCastleVulkanAtmosphereRenderer` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestRayleighMieAtmosphereSkyLUTComputeRHI`).
-  - [x] **20.3. Post-Process Screen-Space Ghosting Lens Flare & Radial Chromatic Aberration (`GenerateLensFlareAndChromaticAberrationFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestLensFlareAndChromaticAberrationPostProcessRHI`).
-- **Phase 21**: Planned (Cloth Sheen & Iridescence Thin-Film PBR, Compute FFT / Gerstner Ocean Water Simulation & Screen-Space Motion Blur / Bokeh Depth of Field).
+- **Phases 1–20**: **COMPLETED** (100%).
+- **Phase 21 (Cloth Sheen & Iridescence Thin-Film PBR, Compute FFT / Gerstner Ocean Water Simulation & Screen-Space Motion Blur / Bokeh Depth of Field)**: **COMPLETED** (100%, 93 unit tests passing):
+  - [x] **21.1. Velvet/Cloth Estevez-Kulla Sheen & Thin-Film Iridescence PBR (`GenerateClothSheenAndIridescencePBRFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestClothSheenAndIridescencePBRRHI`).
+  - [x] **21.2. GPU Compute Gerstner Wave Ocean Simulation & Foam (`TCastleVulkanOceanSimulator` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestComputeGerstnerOceanSimulationAndFoamRHI`).
+  - [x] **21.3. Per-Pixel Velocity Motion Blur & Circle-of-Confusion Bokeh Depth of Field (`GenerateMotionBlurAndBokehDoFFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestMotionBlurAndBokehDepthOfFieldPostProcessRHI`).
+- **Phase 22**: Planned (Diffuse Global Illumination Irradiance Probes (DDGI Octahedral Atlas), GPU Meshlet / Cluster Culling & CAS Spatial Upscaling + Sharpening).
