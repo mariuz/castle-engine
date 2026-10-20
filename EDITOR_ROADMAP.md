@@ -440,3 +440,26 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Bound to **`Ctrl+Shift+T`** in both the Viewport and Hierarchy Tree, plus **`Select Rotated / Tilted Transforms (Ctrl+Shift+T)`** (`MenuTreeViewItemSelectRotatedTransforms`) in `MenuTreeView`.
 - [x] **63.2. 2D UI Uniform Margin Inset In Parent (`InsetSelectedUserInterfacesInParent` / `ButtonUIInsetParent`)**
   - Implemented `TDesignFrame.InsetSelectedUserInterfacesInParent(MarginPx)` and added **`UI Inset Parent`** (`ButtonUIInsetParent`) to `PanelLayoutUI`, resizing and centering 1+ selected `TCastleUserInterface` controls inside their parent container with a uniform screen-space margin (`16 px` on normal click, `8 px` on `Shift`-click, `32 px` on `Ctrl`-click).
+
+### Phase 64: 3D Torus / Helical Torus Coil Arrangement (`ArrangeSelectedOnTorus` / `Alt+Shift+U`)
+- [x] **64.1. 3D Torus Ring & Helical Tube Coil Arrangement (`TCastleTransformManipulate.ArrangeSelectedOnTorus`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedOnTorus(MajorRadius, MinorRadius, MinorTurns, OrientMode): Boolean`: distributes 2+ top-level selected transforms around a 3D torus or helical torus coil centered at the active selection pivot ($x = (R + r\cos\phi)\cos\theta, \; y = r\sin\phi, \; z = (R + r\cos\phi)\sin\theta$ where $\theta_i = 2\pi i / N$ and $\phi_i = 2\pi \cdot \text{MinorTurns} \cdot i / N$) with `OrientMode` (`0` = keep rotation, `1` = orient outward along torus tube normal, `2` = orient along helical torus tangent).
+  - Added **`Torus / Coil...`** (`ButtonArrangeTorus`) in `PanelLayoutTransform` and `ShowArrangeOnTorusDialog` bound to **`Alt+Shift+U`** in both the Viewport and Hierarchy Tree.
+
+### Phase 65: 3D Zigzag / Alternating Staggered Corridor Arrangement (`ArrangeSelectedInZigzag` / `ArrangeSelectedInZigzagBetweenEndpoints` / `Alt+Shift+Z`)
+- [x] **65.1. Alternating Lateral Corridor Offset & Inward/Forward Orientation (`TCastleTransformManipulate.ArrangeSelectedInZigzag`, `ArrangeSelectedInZigzagBetweenEndpoints`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedInZigzag(StartWorldPos, EndWorldPos, LateralOffset, OrientMode): Boolean` and `TCastleTransformManipulate.ArrangeSelectedInZigzagBetweenEndpoints(LateralOffset, OrientMode): Boolean`: arranges 2+ top-level selected transforms evenly between `StartWorldPos` and `EndWorldPos` with alternating lateral horizontal offset $(-1)^i \cdot \text{LateralOffset}$ perpendicular to the corridor line and `OrientMode` (`0` = keep rotation, `1` = orient forward along corridor line, `2` = orient inward toward central corridor walkway).
+  - Added **`Zigzag Arrange`** (`ButtonArrangeZigzag` in `PanelLayoutTransform`: normal click arranges in an alternating zigzag between first & last selected transforms; `Ctrl`-click also orients inward toward the central corridor; `Shift`-click opens the custom zigzag dialog) and `ShowArrangeInZigzagDialog` bound to **`Alt+Shift+Z`** in both the Viewport and Hierarchy Tree.
+
+### Phase 66: Equalize / Normalize World Bounding-Box Sizes (`NormalizeSelectedSizes` / `Alt+Shift+N`)
+- [x] **66.1. Uniform Diagonal & Per-Axis Bounding-Box Size Equalization (`TCastleTransformManipulate.NormalizeSelectedSizes`)**
+  - Implemented `TCastleTransformManipulate.NormalizeSelectedSizes(PreserveAspectRatio): Boolean`: computes the shared arithmetic mean of the world bounding-box diagonals (when `PreserveAspectRatio = true`) or per-axis bounding-box dimensions $(S_X, S_Y, S_Z)$ (when `PreserveAspectRatio = false`) across 2+ top-level selected transforms and scales each transform's `Scale` so all selected transforms match the average size.
+  - Added **`Equalize Size`** (`ButtonNormalizeSize` in `PanelLayoutTransform`: normal click or **`Alt+Shift+N`** equalizes diagonals uniformly; `Shift`-click equalizes X, Y, Z dimensions independently).
+  - Added automated unit test `TestArrangeTorusZigzagAndNormalizeSizes` in `tests/code/testcases/testcastletransformmanipulate.pas`.
+
+### Phase 67: Select Transforms With Behaviors / Physics (`SelectTransformsWithBehaviors` / `Ctrl+Shift+K`) & 2D UI Make Square (`MakeSelectedUserInterfacesSquare` / `ButtonUISquareSize`)
+- [x] **67.1. Behavior & Physics Audit: Select Transforms With Behaviors (`SelectTransformsWithBehaviors` / `Ctrl+Shift+K`)**
+  - Implemented `TDesignFrame.SelectTransformsWithBehaviors(PhysicsOnly)`: selects all visible, unlocked `TCastleTransform` instances that have attached `TCastleBehavior` components (`BehaviorsCount > 0`), or—when `Shift`-clicking the menu item (`PhysicsOnly = true`)—only transforms with `TCastleRigidBody` or `TCastleCollider` behaviors.
+  - Bound to **`Ctrl+Shift+K`** in both the Viewport and Hierarchy Tree, plus **`Select Transforms With Behaviors / Physics (Ctrl+Shift+K)`** (`MenuTreeViewItemSelectWithBehaviors`) in `MenuTreeView`.
+- [x] **67.2. 2D UI Equal-Aspect Square Sizing (`MakeSelectedUserInterfacesSquare` / `ButtonUISquareSize`)**
+  - Implemented `TDesignFrame.MakeSelectedUserInterfacesSquare(SizeMode)` and added **`UI Make Square`** (`ButtonUISquareSize`) to `PanelLayoutUI`, resizing 1+ selected `TCastleUserInterface` controls to a 1:1 square around their current screen center (`Max(W, H)` on normal click, `Min(W, H)` on `Shift`-click, `0.5 * (W + H)` on `Ctrl`-click).

@@ -743,6 +743,55 @@ type
       preserving each transform's exact Y elevation and local @code(Scale).
       Returns @true if at least one selected transform was modified. }
     function ScaleSelectedRadialDistanceXZ(const RadialFactor: Single): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) around a
+      3D torus or helical torus coil centered at the active selection pivot
+      (@link(SelectionWorkingCenter) when @link(PivotMode) is @link(pmSelectionCenter),
+      or @code(Selected[0]) when @link(pmPrimarySelected)) with major ring radius
+      @code(MajorRadius), minor tube radius @code(MinorRadius), and @code(MinorTurns)
+      revolutions around the tube cross-section per full major ring revolution:
+      $$x(\theta, \phi) = (R + r \cos\phi) \cos\theta, \quad y(\theta, \phi) = r \sin\phi, \quad z(\theta, \phi) = (R + r \cos\phi) \sin\theta$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient outward along the torus tube surface normal
+      - @code(2): orient forward along the helical torus tangent vector
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedOnTorus(const MajorRadius, MinorRadius: Single;
+      const MinorTurns: Single = 1.0; const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) in an
+      alternating 3D zigzag / staggered corridor pattern between @code(StartWorldPos)
+      and @code(EndWorldPos), offsetting each item $i$ perpendicular to the line
+      in the horizontal plane by $(-1)^i \cdot \text(LateralOffset)$.
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the main corridor line direction
+      - @code(2): orient inward toward the central corridor line
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInZigzag(const StartWorldPos, EndWorldPos: TVector3;
+      const LateralOffset: Single; const OrientMode: Integer = 0): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) in an
+      alternating 3D zigzag / staggered corridor pattern between the first selected
+      transform (@code(Selected[0])) and the last selected transform (@code(Selected[N-1])).
+      When @code(LateralOffset <= 0), auto-computes a lateral offset from the average
+      bounding-box extent (or @code(2.0) when bounding boxes are empty).
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInZigzagBetweenEndpoints(
+      const LateralOffset: Single = 0.0; const OrientMode: Integer = 0): Boolean;
+
+    { Equalize / normalize the world-space bounding-box dimensions of all top-level
+      selected transforms (@code(SelectedCount >= 2)) that have non-empty bounding
+      boxes to their shared arithmetic mean:
+      - When @code(PreserveAspectRatio) is @true (default), uniformly scales each
+        selected transform's @code(Scale) so its world bounding-box diagonal length
+        equals the average diagonal length across the selection.
+      - When @code(PreserveAspectRatio) is @false, scales each transform's X, Y, and Z
+        @code(Scale) components independently so every selected transform's world
+        bounding-box size matches the average $(S_X, S_Y, S_Z)$ across the selection.
+      Returns @true if at least one selected transform was modified. }
+    function NormalizeSelectedSizes(
+      const PreserveAspectRatio: Boolean = true): Boolean;
   end;
 
 var
@@ -5256,6 +5305,408 @@ begin
     if not TVector3.Equals(NewPos, CurPos) then
     begin
       SetTransformWorkingPos(T, NewPos);
+      Result := true;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedOnTorus(
+  const MajorRadius, MinorRadius: Single;
+  const MinorTurns: Single; const OrientMode: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, TubeCenter, TargetDir, GravityUp, Side, NewUp: TVector3;
+  CurWorldPos, CurDir, CurUp: TVector3;
+  ActualMajor, ActualMinor, SumDist, Theta, Phi, RingR: Single;
+  SinTheta, CosTheta, SinPhi, CosPhi, DTheta, DPhi: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  if FPivotMode = pmSelectionCenter then
+    CenterPos := SelectionWorkingCenter
+  else
+    CenterPos := GetTransformWorkingPos(Items[0]);
+
+  ActualMajor := MajorRadius;
+  if ActualMajor <= 0 then
+  begin
+    SumDist := 0;
+    for I := 0 to Count - 1 do
+    begin
+      CurPos := GetTransformWorkingPos(Items[I]);
+      SumDist := SumDist + Hypot(CurPos.X - CenterPos.X, CurPos.Z - CenterPos.Z);
+    end;
+    ActualMajor := SumDist / Count;
+    if ActualMajor < 1e-3 then
+      ActualMajor := 10.0;
+  end;
+
+  ActualMinor := MinorRadius;
+  if ActualMinor < 0 then
+    ActualMinor := 0.25 * ActualMajor;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    Theta := (2.0 * Pi * I) / Count;
+    Phi := (2.0 * Pi * MinorTurns * I) / Count;
+    SinCos(Theta, SinTheta, CosTheta);
+    SinCos(Phi, SinPhi, CosPhi);
+
+    RingR := ActualMajor + ActualMinor * CosPhi;
+    TargetPos := Vector3(
+      CenterPos.X + RingR * CosTheta,
+      CenterPos.Y + ActualMinor * SinPhi,
+      CenterPos.Z + RingR * SinTheta
+    );
+
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(TargetPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if OrientMode in [1, 2] then
+    begin
+      TargetDir := TVector3.Zero;
+      if OrientMode = 1 then
+      begin
+        TubeCenter := Vector3(
+          CenterPos.X + ActualMajor * CosTheta,
+          CenterPos.Y,
+          CenterPos.Z + ActualMajor * SinTheta
+        );
+        TargetDir := TargetPos - TubeCenter;
+        if TargetDir.IsZero(1e-5) then
+          TargetDir := Vector3(CosPhi * CosTheta, SinPhi, CosPhi * SinTheta);
+      end else
+      begin
+        DTheta := 2.0 * Pi;
+        DPhi := 2.0 * Pi * MinorTurns;
+        TargetDir := Vector3(
+          -ActualMinor * SinPhi * DPhi * CosTheta - RingR * SinTheta * DTheta,
+          ActualMinor * CosPhi * DPhi,
+          -ActualMinor * SinPhi * DPhi * SinTheta + RingR * CosTheta * DTheta
+        );
+      end;
+
+      if not TargetDir.IsZero(1e-5) then
+      begin
+        TargetDir := TargetDir.Normalize;
+        if T.HasWorldTransform then
+          T.GetWorldView(CurWorldPos, CurDir, CurUp)
+        else
+        begin
+          CurWorldPos := T.Translation;
+          CurDir := T.Direction;
+          CurUp := T.Up;
+        end;
+
+        if T.World <> nil then
+          GravityUp := T.World.GravityUp
+        else
+          GravityUp := Vector3(0, 1, 0);
+
+        Side := TVector3.CrossProduct(TargetDir, GravityUp);
+        if Side.IsZero(1e-5) then
+          Side := TVector3.CrossProduct(TargetDir, Vector3(0, 0, 1));
+        if Side.IsZero(1e-5) then
+          Side := TVector3.CrossProduct(TargetDir, Vector3(1, 0, 0));
+        Side := Side.Normalize;
+        NewUp := TVector3.CrossProduct(Side, TargetDir).Normalize;
+
+        if (not TVector3.Equals(CurDir, TargetDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          if T.HasWorldTransform then
+            T.SetWorldView(CurWorldPos, TargetDir, NewUp)
+          else
+            T.SetView(CurWorldPos, TargetDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInZigzag(
+  const StartWorldPos, EndWorldPos: TVector3;
+  const LateralOffset: Single; const OrientMode: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  LineDelta, LineDir, GravityUp, SideVec, BasePos, TargetPos, CurPos: TVector3;
+  TargetDir, Side, NewUp, CurWorldPos, CurDir, CurUp: TVector3;
+  Factor, SignVal: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  LineDelta := EndWorldPos - StartWorldPos;
+  if Items[0].World <> nil then
+    GravityUp := Items[0].World.GravityUp
+  else
+    GravityUp := Vector3(0, 1, 0);
+
+  if not LineDelta.IsZero(1e-5) then
+  begin
+    LineDir := LineDelta.Normalize;
+    SideVec := TVector3.CrossProduct(LineDir, GravityUp);
+    if SideVec.IsZero(1e-5) then
+      SideVec := TVector3.CrossProduct(LineDir, Vector3(0, 0, 1));
+    if SideVec.IsZero(1e-5) then
+      SideVec := Vector3(1, 0, 0)
+    else
+      SideVec := SideVec.Normalize;
+  end else
+  begin
+    LineDir := Vector3(0, 0, -1);
+    SideVec := Vector3(1, 0, 0);
+  end;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    Factor := Single(I) / Single(Count - 1);
+    if Odd(I) then
+      SignVal := -1.0
+    else
+      SignVal := 1.0;
+
+    BasePos := Lerp(Factor, StartWorldPos, EndWorldPos);
+    TargetPos := BasePos + (SideVec * (SignVal * LateralOffset));
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(TargetPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if OrientMode in [1, 2] then
+    begin
+      if OrientMode = 1 then
+        TargetDir := LineDir
+      else
+        TargetDir := -SideVec * SignVal;
+
+      if not TargetDir.IsZero(1e-5) then
+      begin
+        TargetDir := TargetDir.Normalize;
+        if T.HasWorldTransform then
+          T.GetWorldView(CurWorldPos, CurDir, CurUp)
+        else
+        begin
+          CurWorldPos := T.Translation;
+          CurDir := T.Direction;
+          CurUp := T.Up;
+        end;
+
+        Side := TVector3.CrossProduct(TargetDir, GravityUp);
+        if Side.IsZero(1e-5) then
+          Side := TVector3.CrossProduct(TargetDir, Vector3(0, 0, 1));
+        Side := Side.Normalize;
+        NewUp := TVector3.CrossProduct(Side, TargetDir).Normalize;
+
+        if (not TVector3.Equals(CurDir, TargetDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          if T.HasWorldTransform then
+            T.SetWorldView(CurWorldPos, TargetDir, NewUp)
+          else
+            T.SetView(CurWorldPos, TargetDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInZigzagBetweenEndpoints(
+  const LateralOffset: Single; const OrientMode: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count, NonEmptyCount: Integer;
+  T: TCastleTransform;
+  StartPos, EndPos: TVector3;
+  ActualOffset, SumDiag: Single;
+  Box: TBox3D;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  StartPos := GetTransformWorkingPos(Items[0]);
+  EndPos := GetTransformWorkingPos(Items[Count - 1]);
+  ActualOffset := LateralOffset;
+  if ActualOffset <= 0 then
+  begin
+    SumDiag := 0;
+    NonEmptyCount := 0;
+    for I := 0 to Count - 1 do
+    begin
+      if Items[I].HasWorldTransform then
+        Box := Items[I].WorldBoundingBox
+      else
+        Box := Items[I].BoundingBox;
+      if not Box.IsEmpty then
+      begin
+        SumDiag := SumDiag + Box.AverageSize(false, 0);
+        Inc(NonEmptyCount);
+      end;
+    end;
+    if NonEmptyCount > 0 then
+      ActualOffset := Max(0.5, SumDiag / NonEmptyCount)
+    else
+      ActualOffset := 2.0;
+  end;
+
+  Result := ArrangeSelectedInZigzag(StartPos, EndPos, ActualOffset, OrientMode);
+end;
+
+function TCastleTransformManipulate.NormalizeSelectedSizes(
+  const PreserveAspectRatio: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  Sizes: array of TVector3;
+  Diags: array of Single;
+  I, Count, ValidCount: Integer;
+  T: TCastleTransform;
+  Box: TBox3D;
+  BoxSize, AvgSize, NewScale, RatioVec: TVector3;
+  Diag, AvgDiag, Ratio: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  SetLength(Sizes, FMaxSelectedCount);
+  SetLength(Diags, FMaxSelectedCount);
+  Count := 0;
+  ValidCount := 0;
+  AvgSize := TVector3.Zero;
+  AvgDiag := 0;
+
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      if T.HasWorldTransform then
+        Box := T.WorldBoundingBox
+      else
+        Box := T.BoundingBox;
+      if not Box.IsEmpty then
+      begin
+        BoxSize := Box.Size;
+        Diag := BoxSize.Length;
+        if Diag > 1e-5 then
+        begin
+          Items[ValidCount] := T;
+          Sizes[ValidCount] := BoxSize;
+          Diags[ValidCount] := Diag;
+          AvgSize := AvgSize + BoxSize;
+          AvgDiag := AvgDiag + Diag;
+          Inc(ValidCount);
+        end;
+      end;
+      Inc(Count);
+    end;
+  end;
+
+  if (Count < 2) or (ValidCount < 2) then Exit;
+
+  AvgSize := AvgSize / Single(ValidCount);
+  AvgDiag := AvgDiag / Single(ValidCount);
+
+  for I := 0 to ValidCount - 1 do
+  begin
+    T := Items[I];
+    if PreserveAspectRatio then
+    begin
+      Ratio := AvgDiag / Diags[I];
+      NewScale := T.Scale * Ratio;
+    end else
+    begin
+      RatioVec := Vector3(1.0, 1.0, 1.0);
+      if Sizes[I].X > 1e-5 then RatioVec.X := AvgSize.X / Sizes[I].X;
+      if Sizes[I].Y > 1e-5 then RatioVec.Y := AvgSize.Y / Sizes[I].Y;
+      if Sizes[I].Z > 1e-5 then RatioVec.Z := AvgSize.Z / Sizes[I].Z;
+      NewScale := T.Scale * RatioVec;
+    end;
+
+    if not TVector3.Equals(NewScale, T.Scale) then
+    begin
+      T.Scale := NewScale;
       Result := true;
     end;
   end;

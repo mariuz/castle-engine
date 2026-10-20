@@ -52,6 +52,7 @@ type
     procedure TestArrangeBezierArchSphereAndScaleGroupAroundPivot;
     procedure TestArrangeSineWaveEllipseAndReversePositions;
     procedure TestArrangePhyllotaxisDiskStaircaseAndRadialScale;
+    procedure TestArrangeTorusZigzagAndNormalizeSizes;
   end;
 
 implementation
@@ -1468,6 +1469,89 @@ begin
     T3.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(0, 0, 1), WorldDir.Normalize, 1e-4);
     AssertVectorEquals(Vector3(0, 1, 0), WorldUp.Normalize, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestArrangeTorusZigzagAndNormalizeSizes;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  B1, B2, B3, B4: TCastleBox;
+  WorldPos, WorldDir, WorldUp: TVector3;
+  AvgDiag: Single;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.OnTransformModified := @HandleTransformModified;
+    Manipulate.OnTransformModifyEnd := @HandleTransformModifyEnd;
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(2, 2, 2);
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(2, 2, 2);
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(2, 2, 2);
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(2, 2, 2);
+
+    Viewport.Items.Add(B1);
+    Viewport.Items.Add(B2);
+    Viewport.Items.Add(B3);
+    Viewport.Items.Add(B4);
+
+    // 1. Test ArrangeSelectedOnTorus:
+    // MajorRadius = 10, MinorRadius = 2, MinorTurns = 1.0, OrientMode = 1 (tube outward normal), Center = (0,0,0).
+    // For 4 items (I = 0..3), Theta = Phi = 0, Pi/2, Pi, 3*Pi/2:
+    // I=0 (Theta=0, Phi=0): RingR = 12 -> Pos = (12, 0, 0), TubeCenter = (10, 0, 0) -> Normal = (1, 0, 0)
+    // I=1 (Theta=Pi/2, Phi=Pi/2): RingR = 10 -> Pos = (0, 2, 10), TubeCenter = (0, 0, 10) -> Normal = (0, 1, 0)
+    // I=2 (Theta=Pi, Phi=Pi): RingR = 8 -> Pos = (-8, 0, 0), TubeCenter = (-10, 0, 0) -> Normal = (1, 0, 0)
+    // I=3 (Theta=3*Pi/2, Phi=3*Pi/2): RingR = 10 -> Pos = (0, -2, -10), TubeCenter = (0, 0, -10) -> Normal = (0, -1, 0)
+    B1.Translation := Vector3(0, 0, 0);
+    Manipulate.PivotMode := pmPrimarySelected;
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.ArrangeSelectedOnTorus(10.0, 2.0, 1.0, 1));
+    AssertVectorEquals(Vector3(12, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 2, 10), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-8, 0, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, -2, -10), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+
+    // 2. Test ArrangeSelectedInZigzag:
+    // Start = (0, 0, 0), End = (0, 0, 30), LateralOffset = 4.0, OrientMode = 2 (orient inward toward corridor).
+    // LineDir = (0, 0, 1), GravityUp = (0, 1, 0) -> SideVec = Cross((0,0,1), (0,1,0)) = (-1, 0, 0).
+    // I=0 (Sign=+1): Pos = (0,0,0) + (-4,0,0) = (-4, 0, 0), Inward Dir = +1 * (1, 0, 0) = (1, 0, 0)
+    // I=1 (Sign=-1): Pos = (0,0,10) + (4,0,0) = (4, 0, 10), Inward Dir = (-1, 0, 0)
+    // I=2 (Sign=+1): Pos = (-4, 0, 20), Inward Dir = (1, 0, 0)
+    // I=3 (Sign=-1): Pos = (4, 0, 30), Inward Dir = (-1, 0, 0)
+    AssertTrue(Manipulate.ArrangeSelectedInZigzag(Vector3(0, 0, 0), Vector3(0, 0, 30), 4.0, 2));
+    AssertVectorEquals(Vector3(-4, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(4, 0, 10), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-4, 0, 20), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(4, 0, 30), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(-1, 0, 0), WorldDir.Normalize, 1e-4);
+
+    // 3. Test NormalizeSelectedSizes:
+    // Reset rotations and give B1..B4 non-uniform sizes via Scale: 1x, 2x, 3x, 6x (mean = 3.0x).
+    Manipulate.ResetSelectedTransform(false, true, false);
+    B1.Scale := Vector3(1, 1, 1);
+    B2.Scale := Vector3(2, 2, 2);
+    B3.Scale := Vector3(3, 3, 3);
+    B4.Scale := Vector3(6, 6, 6);
+    AssertTrue(Manipulate.NormalizeSelectedSizes(true));
+    AssertVectorEquals(Vector3(3, 3, 3), B1.Scale, 1e-4);
+    AssertVectorEquals(Vector3(3, 3, 3), B2.Scale, 1e-4);
+    AssertVectorEquals(Vector3(3, 3, 3), B3.Scale, 1e-4);
+    AssertVectorEquals(Vector3(3, 3, 3), B4.Scale, 1e-4);
+    AvgDiag := B1.WorldBoundingBox.Size.Length;
+    AssertSameValue(AvgDiag, B4.WorldBoundingBox.Size.Length, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

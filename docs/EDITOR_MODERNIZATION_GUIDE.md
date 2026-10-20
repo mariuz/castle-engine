@@ -1137,7 +1137,25 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 
 ---
 
-## 59. Complete Keyboard Shortcuts & Toolbar Reference
+## 59. Phases 64–67: 3D Torus / Coil Arrangement (`Alt+Shift+U`), 3D Zigzag Corridor Arrangement (`Alt+Shift+Z`), Equalize Bounding-Box Sizes (`Alt+Shift+N`), Select Transforms With Behaviors (`Ctrl+Shift+K`) & 2D UI Make Square (`UI Make Square`)
+
+- **3D Torus / Helical Torus Coil Arrangement (`ArrangeSelectedOnTorus` / `Alt+Shift+U`):**
+  - `TCastleTransformManipulate.ArrangeSelectedOnTorus(MajorRadius, MinorRadius, MinorTurns, OrientMode)` distributes 2+ top-level selected transforms around a 3D torus or helical torus coil centered at the active selection pivot ($x = (R + r\cos\phi)\cos\theta, \; y = r\sin\phi, \; z = (R + r\cos\phi)\sin\theta$ where $\theta_i = 2\pi i / N$ and $\phi_i = 2\pi \cdot \text{MinorTurns} \cdot i / N$) with `OrientMode` (`0` = keep rotation, `1` = orient outward along torus tube normal, `2` = orient along helical torus tangent).
+  - Accessible via **`Torus / Coil...`** (`ButtonArrangeTorus` in `PanelLayoutTransform`) or **`Alt+Shift+U`** (`ShowArrangeOnTorusDialog`).
+- **3D Zigzag / Alternating Staggered Corridor Arrangement (`ArrangeSelectedInZigzag` / `Alt+Shift+Z`):**
+  - `TCastleTransformManipulate.ArrangeSelectedInZigzag(StartWorldPos, EndWorldPos, LateralOffset, OrientMode)` and `ArrangeSelectedInZigzagBetweenEndpoints` arrange 2+ top-level selected transforms evenly between `StartWorldPos` and `EndWorldPos` with alternating lateral horizontal offset $(-1)^i \cdot \text{LateralOffset}$ perpendicular to the corridor line and `OrientMode` (`0` = keep rotation, `1` = orient forward along corridor line, `2` = orient inward toward central corridor walkway).
+  - Accessible via **`Zigzag Arrange`** (`ButtonArrangeZigzag` in `PanelLayoutTransform`: **Click** arranges immediately; **`Ctrl`-click** also orients inward toward the central corridor; **`Shift`-click** or **`Alt+Shift+Z`** opens `ShowArrangeInZigzagDialog`).
+- **Equalize / Normalize World Bounding-Box Sizes (`NormalizeSelectedSizes` / `Alt+Shift+N`):**
+  - `TCastleTransformManipulate.NormalizeSelectedSizes(PreserveAspectRatio)` computes the average world bounding-box diagonal (when `PreserveAspectRatio = true`) or per-axis bounding-box size $(S_X, S_Y, S_Z)$ (when `PreserveAspectRatio = false`) across 2+ top-level selected transforms and scales each transform's `Scale` so all selected transforms match the average size.
+  - Accessible via **`Equalize Size`** (`ButtonNormalizeSize` in `PanelLayoutTransform`: **Click** or **`Alt+Shift+N`** equalizes diagonals uniformly; **`Shift`-click** equalizes X, Y, Z dimensions independently).
+- **Select Transforms With Behaviors / Physics (`SelectTransformsWithBehaviors` / `Ctrl+Shift+K`):**
+  - Pressing **`Ctrl+Shift+K`** or choosing **`Select Transforms With Behaviors / Physics (Ctrl+Shift+K)`** (`MenuTreeViewItemSelectWithBehaviors`) in the Hierarchy context menu selects all visible, unlocked `TCastleTransform` instances with attached behaviors (`Shift`-click menu item for physics rigid-body/collider transforms only).
+- **2D UI Equal-Aspect Square Sizing (`MakeSelectedUserInterfacesSquare` / `ButtonUISquareSize`):**
+  - Clicking **`UI Make Square`** (`ButtonUISquareSize`) in `PanelLayoutUI` resizes 1+ selected `TCastleUserInterface` controls to a 1:1 square around their current screen center (**Click**: `Max(W, H)`; **`Shift`-click**: `Min(W, H)`; **`Ctrl`-click**: `0.5 * (W + H)`).
+
+---
+
+## 60. Complete Keyboard Shortcuts & Toolbar Reference
 
 | Shortcut / Control | Context | Action |
 | :--- | :--- | :--- |
@@ -1164,6 +1182,9 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 | **`Alt+Shift+E`** / **`Ellipse Arrange...`** | Viewport / Hierarchy / Layout Tab | Open the **Arrange Selection in 3D Ellipse** dialog (`RadiusX`, `RadiusZ`, `OrientMode`). |
 | **`Alt+Shift+D`** / **`Disk Arrange...`** | Viewport / Hierarchy / Layout Tab | Open the **Arrange Selection in Phyllotaxis Disk** dialog (`OuterRadius`, `OrientMode`). |
 | **`Alt+Shift+Y`** / **`Stair Arrange`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms in a 3D staircase** (**Click**: between first & last; **`Ctrl`-click**: orient yaw along run; **`Shift`-click** / **`Alt+Shift+Y`**: dialog). |
+| **`Alt+Shift+U`** / **`Torus / Coil...`** | Viewport / Hierarchy / Layout Tab | Open the **Arrange Selection on 3D Torus / Coil** dialog (`MajorRadius`, `MinorRadius`, `MinorTurns`, `OrientMode`). |
+| **`Alt+Shift+Z`** / **`Zigzag Arrange`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms in an alternating 3D zigzag** (**Click**: between first & last; **`Ctrl`-click**: orient inward to corridor; **`Shift`-click** / **`Alt+Shift+Z`**: dialog). |
+| **`Alt+Shift+N`** / **`Equalize Size`** | Viewport / Hierarchy / Layout Tab | **Equalize world bounding-box sizes** of 2+ selected transforms to their average diagonal (**`Shift`-click**: equalize X, Y, Z dimensions independently). |
 | **`Alt+Shift+.`** / **`Radial +25%`** | Viewport / Hierarchy / Layout Tab | **Push / Expand horizontal XZ radial distance** from active pivot by $+25\%$ while preserving Y elevation and `Scale`. |
 | **`Alt+Shift+,`** / **`Radial -20%`** | Viewport / Hierarchy / Layout Tab | **Pull / Contract horizontal XZ radial distance** toward active pivot by $-20\%$ while preserving Y elevation and `Scale`. |
 | **`Alt+Shift+R`** / **`Reverse Order`** | Viewport / Hierarchy / Layout Tab | **Reverse order of world positions** across 2+ selected transforms (**`Shift`-click**: Pos+Rot; **`Ctrl`-click**: Pos+Rot+Scale). |
@@ -1195,6 +1216,7 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 | **`Ctrl+Shift+U`** / **`Select Empty / Unreferenced Transforms`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked empty `TCastleTransform` groups and unreferenced `TCastleScene` / `TCastleTransformDesign` nodes with no children or `Url`. |
 | **`Ctrl+Shift+N`** / **`Select Non-Uniformly Scaled Transforms`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects with non-uniform (`S.X <> S.Y` or `S.Y <> S.Z`) or non-positive (`<= 0`) `Scale` for physics collider auditing. |
 | **`Ctrl+Shift+T`** / **`Select Rotated / Tilted Transforms`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects with non-zero rotation (`Abs(Rotation.W) > 1e-3`) or tilted world orientation. |
+| **`Ctrl+Shift+K`** / **`Select Transforms With Behaviors / Physics`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects with attached behaviors (`Shift`-click menu item for physics rigid bodies/colliders only). |
 | **`Select By Bounding-Box Size Range...`** | Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects whose world bounding-box diagonal length lies within `[MinSize, MaxSize]`. |
 | **`Select By Name Pattern...`** | Hierarchy Context Menu | Select all components matching a substring or `*` / `?` wildcard pattern. |
 | **`Select All With Same Asset URL`** | Hierarchy Context Menu | Select all components in the design referencing the same `Url` asset as the selected component. |
@@ -1234,6 +1256,7 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 | **`UI Fit Parent`** | Layout Tab (`PanelLayoutUI`) | **Fit** 1+ selected `TCastleUserInterface` controls to their parent container's size and center (**Click**: W+H; **`Shift`**: Width only; **`Ctrl`**: Height only). |
 | **`UI Split Row` / `UI Split Col`** | Layout Tab (`PanelLayoutUI`) | **Divide parent container width or height equally** across 2+ selected `TCastleUserInterface` controls (**Click**: $8\text{ px}$ gap; **`Shift`-click**: $0\text{ px}$ flush). |
 | **`UI Inset Parent`** | Layout Tab (`PanelLayoutUI`) | **Fit and center** 1+ selected `TCastleUserInterface` controls inside their parent container with uniform margin (**Click**: $16\text{ px}$; **`Shift`**: $8\text{ px}$; **`Ctrl`**: $32\text{ px}$). |
+| **`UI Make Square`** | Layout Tab (`PanelLayoutUI`) | **Make 1+ selected `TCastleUserInterface` controls square** around their current center (**Click**: `Max(W,H)`; **`Shift`**: `Min(W,H)`; **`Ctrl`**: `Average(W,H)`). |
 | **`Reset Prop` Button** | Object Inspector Header | Reset the active Object Inspector property row to its default value. |
 | **`Select All of Same Class`** | Hierarchy Context Menu | Select all components in the design matching the selected component's class. |
 | **`Expand Subtree` / `Collapse Subtree`** | Hierarchy Context Menu | Recursively expand or collapse the selected hierarchy node(s). |
@@ -1250,9 +1273,9 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 
 ---
 
-## 60. Automated Unit Tests & Verification
+## 61. Automated Unit Tests & Verification
 
-All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 23 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
+All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 24 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
 
 1. **`TestSelectedCountAndFree`**: Verifies single/multi-selection filtering, freeing a selected transform while selected, and translating the remaining selection.
 2. **`TestTranslateSnapAndCoordSpace`**: Verifies grid snapping (`TranslateSnap := 2.0`) and `csLocal` vs. `csWorld` translation on a $90^\circ$-rotated transform.
@@ -1277,6 +1300,7 @@ All core 3D manipulation algorithms in `CastleTransformManipulate` are covered b
 21. **`TestArrangeBezierArchSphereAndScaleGroupAroundPivot`**: Verifies `ArrangeSelectedInParabolicArchBetweenEndpoints(10.0, true)` places 5 transforms along a parabolic Bezier arch reaching apex $(10, 10, 0)$ with horizontal tangent $(1, 0, 0)$ at $t = 0.5$, verifies `ArrangeSelectedOnSphere(10.0, 0.0, 90.0, true)` distributes 5 transforms on a radius-$10$ upper hemisphere dome using the Fibonacci lattice and orients each transform radially outward, and verifies `ScaleSelectedGroupAroundPivot(Vector3(2.0, 0.5, 3.0))` scales both world offsets from the primary pivot and local `Scale` vectors simultaneously.
 22. **`TestArrangeSineWaveEllipseAndReversePositions`**: Verifies `ArrangeSelectedInSineWaveBetweenEndpoints(6.0, 1.0, 1, true)` places 5 transforms along a sinusoidal wave with crest $(5, 6, 0)$, zero-crossing $(10, 0, 0)$, and trough $(15, -6, 0)$ while orienting the crest tangent horizontally along $(1, 0, 0)$, verifies `ArrangeSelectedInEllipse(12.0, 6.0, 2)` arranges 4 transforms around a $12 \times 6$ XZ ellipse oriented along the ellipse tangent, and verifies `ReverseSelectedPositions(true, true)` reverses world positions, orientations, and scales across the 4 transforms.
 23. **`TestArrangePhyllotaxisDiskStaircaseAndRadialScale`**: Verifies `ArrangeSelectedInPhyllotaxisDisk(10.0, 2)` distributes 5 transforms on a Vogel golden-angle spiral disk of outer radius $10.0$ ($r_i = 10\sqrt{i/4}$) and orients outer items radially outward from the center, verifies `ArrangeSelectedInStaircaseBetweenEndpoints(2.0, true)` arranges 5 transforms between $(0, 0, 0)$ and $(20, 16, 0)$ with linear XZ steps ($X = 0, 5, 10, 15, 20$), quadratic Y elevation ($Y = 0, 1, 4, 9, 16$), and horizontal yaw orientation along $+X$ while keeping world Up at $(0, 1, 0)$, and verifies `ScaleSelectedRadialDistanceXZ(2.0)` doubles horizontal XZ radial offsets from the pivot while leaving Y elevation and `Scale` untouched.
+24. **`TestArrangeTorusZigzagAndNormalizeSizes`**: Verifies `ArrangeSelectedOnTorus(10.0, 2.0, 1.0, 1)` places 4 transforms around a $10 \times 2$ torus coil at $(12, 0, 0)$, $(0, 2, 10)$, $(-8, 0, 0)$, and $(0, -2, -10)$ with outward tube normal orientation, verifies `ArrangeSelectedInZigzag(Vector3(0, 0, 0), Vector3(0, 0, 30), 4.0, 2)` places 4 transforms in an alternating corridor zigzag at $(-4, 0, 0)$, $(4, 0, 10)$, $(-4, 0, 20)$, and $(4, 0, 30)$ oriented inward toward the central walkway, and verifies `NormalizeSelectedSizes(true)` equalizes 4 differently scaled boxes ($1\times, 2\times, 3\times, 6\times$) to their shared mean scale $(3, 3, 3)$.
 
 To run this test suite from the command line:
 ```bash
