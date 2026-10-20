@@ -47,6 +47,7 @@ type
     procedure TestLookAtAimAndAlignSelectedBounds;
     procedure TestMatchRotationTransformAndArrangeInCircle;
     procedure TestArrangeInGridScalePositionsAndResetTransform;
+    procedure TestArrangeLineSeparateOverlappingAndProgressiveTransform;
   end;
 
 implementation
@@ -1024,6 +1025,84 @@ begin
     AssertVectorEquals(TVector3.Zero, T2.Translation, 1e-4);
     AssertVectorEquals(TVector3.Zero, T3.Translation, 1e-4);
     AssertVectorEquals(TVector3.Zero, T4.Translation, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestArrangeLineSeparateOverlappingAndProgressiveTransform;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  B1, B2, B3, B4: TCastleBox;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.OnTransformModified := {$ifdef FPC}@{$endif} HandleTransformModified;
+    Manipulate.OnTransformModifyEnd := {$ifdef FPC}@{$endif} HandleTransformModifyEnd;
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(2, 2, 2);
+    B1.Translation := Vector3(0, 1, 0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(2, 2, 2);
+    B2.Translation := Vector3(50, 99, -20);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(2, 2, 2);
+    B3.Translation := Vector3(-40, -10, 15);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(2, 2, 2);
+    B4.Translation := Vector3(30, 7, 60);
+    Viewport.Items.Add(B4);
+
+    // 1. Test ArrangeSelectedBetweenEndpoints: places B2 and B3 at 1/3 and 2/3 along B1 -> B4 and orients along line
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.ArrangeSelectedBetweenEndpoints(true));
+    AssertVectorEquals(Vector3(0, 1, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10, 3, 20), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(20, 5, 40), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(30, 7, 60), B4.Translation, 1e-4);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(30, 6, 60).Normalize, WorldDir.Normalize, 1e-3);
+
+    // 2. Test ApplyProgressiveTransformSelected: linear scale gradient (1,1,1) -> (4,4,4) + 30 deg step around Y
+    B1.Rotation := Vector4(0, 1, 0, 0);
+    B2.Rotation := Vector4(0, 1, 0, 0);
+    B3.Rotation := Vector4(0, 1, 0, 0);
+    B4.Rotation := Vector4(0, 1, 0, 0);
+    AssertTrue(Manipulate.ApplyProgressiveTransformSelected(
+      Vector3(1, 1, 1), Vector3(4, 4, 4), true, 1, Pi / 6));
+    AssertVectorEquals(Vector3(1, 1, 1), B1.Scale, 1e-4);
+    AssertVectorEquals(Vector3(2, 2, 2), B2.Scale, 1e-4);
+    AssertVectorEquals(Vector3(3, 3, 3), B3.Scale, 1e-4);
+    AssertVectorEquals(Vector3(4, 4, 4), B4.Scale, 1e-4);
+    AssertSameValue(0.0, B1.Rotation.W, 1e-4);
+    AssertSameValue(Pi / 6, B2.Rotation.W, 1e-4);
+    AssertSameValue(2 * Pi / 6, B3.Rotation.W, 1e-4);
+    AssertSameValue(3 * Pi / 6, B4.Rotation.W, 1e-4);
+
+    // 3. Test SeparateOverlappingSelected: two 2x2x2 boxes overlapping at X=0 and X=0.5 pushed apart with 1.0 padding
+    B1.Scale := Vector3(1, 1, 1);
+    B2.Scale := Vector3(1, 1, 1);
+    B1.Rotation := Vector4(0, 1, 0, 0);
+    B2.Rotation := Vector4(0, 1, 0, 0);
+    B1.Translation := Vector3(0, 5, 0);
+    B2.Translation := Vector3(0.5, 5, 0);
+    Manipulate.SetSelected([B1, B2]);
+    AssertTrue(Manipulate.SeparateOverlappingSelected(1.0, true, 8));
+    // Box width is 2, plus 1.0 padding => required center-to-center distance along X is >= 3.0, Y stays 5
+    AssertSameValue(5.0, B1.Translation.Y, 1e-4);
+    AssertSameValue(5.0, B2.Translation.Y, 1e-4);
+    AssertTrue(Abs(B2.Translation.X - B1.Translation.X) >= 3.0 - 1e-3);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

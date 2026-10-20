@@ -966,11 +966,56 @@ Inspired by Blender's muscle-memory clear-transform shortcuts (`Alt+G`, `Alt+R`,
 - **2D UI Position Swap (`SwapSelectedUserInterfacePositions` / `ButtonUISwapPos`):**
   - Clicking **`UI Swap Pos`** (`ButtonUISwapPos`) in `PanelLayoutUI` swaps (for 2 selected controls) or cyclically rotates (for 3+ selected controls) the rendered screen-space center positions of the selected `TCastleUserInterface` controls via `EffectiveRect` and parent `UIScale`, wrapped in a single Undo/Redo step.
 - **2D UI Grid Arrange (`ArrangeSelectedUserInterfacesInGrid` / `ButtonUIGridArrange`):**
-  - Clicking **`UI Grid`** (`ButtonUIGridArrange`) in `PanelLayoutUI` arranges 2+ selected `TCastleUserInterface` controls into a neat 2D grid (auto $\lceil\sqrt{N}\rceil$ columns, top-to-bottom rows, with $8\text{ px}$ unscaled gap — or $0\text{ px}$ flush edge-to-edge when **`Shift`-clicked**) starting from the top-left of their combined screen bounds.
+  - Clicking **`UI Grid`** (`ButtonUIGridArrange`) in `PanelLayoutUI` arranges 2+ selected `TCastleUserInterface` controls into a neat 2D grid (auto $\lceil\sqrt{N}\rceil$ columns, top-to-bottom rows, with $16\text{ px}$ unscaled gap — or $8\text{ px}$ when **`Shift`-clicked**) starting from the top-left of their combined screen bounds.
 
 ---
 
-## 45. Complete Keyboard Shortcuts & Toolbar Reference
+## 45. Phase 44: Arrange Existing Selection Along 3D Line Segment (`ArrangeSelectedAlongLine`, `ArrangeSelectedBetweenEndpoints`, `Alt+Shift+L`)
+
+When placing fence posts, waypoints, bridge planks, streetlights, or columns between two endpoints in 3D space, designers can arrange $N$ already-selected transforms along a straight 3D line segment:
+- **Core Engine API (`TCastleTransformManipulate.ArrangeSelectedAlongLine` & `ArrangeSelectedBetweenEndpoints`):**
+  - `ArrangeSelectedAlongLine(StartWorldPos, EndWorldPos, OrientAlongLine)` linearly interpolates the world position of each top-level selected transform $i \in [0..N-1]$ at $t = i / (N - 1)$ between `StartWorldPos` and `EndWorldPos`.
+  - `ArrangeSelectedBetweenEndpoints(OrientAlongLine)` uses the first selected transform (`Selected[0]`) as `StartWorldPos` and the last selected transform (`Selected[N-1]`) as `EndWorldPos`, spacing all intermediate selected transforms evenly along the 3D segment connecting them.
+  - When `OrientAlongLine = true`, rotates each transform so its world forward direction faces along `EndWorldPos - StartWorldPos` while keeping its up vector aligned with `World.GravityUp`.
+- **Editor Controls (`ButtonArrangeLine` & `ShowArrangeAlongLineDialog` / `Alt+Shift+L`):**
+  - **Click `Line Arrange`** (`ButtonArrangeLine`) in `PanelLayoutTransform`: Immediately arranges 2+ selected transforms evenly along the 3D line between the first and last selected transform (**`Ctrl`-click** also orients each transform forward along the line).
+  - **`Shift` + Click `Line Arrange`** or press **`Alt+Shift+L`**: Opens the **Arrange Selection Along 3D Line** dialog (`ShowArrangeAlongLineDialog`), pre-populated with the first and last selected transforms' world coordinates and an **Orient transforms forward along line direction** checkbox.
+
+---
+
+## 46. Phase 45: Automatic Bounding-Box Overlap Separation / Depenetrate (`SeparateOverlappingSelected`, `ButtonSeparateOverlaps`, `Alt+Shift+X`)
+
+After scatter-duplicating foliage/rocks or kitbashing props, bounding boxes often accidentally intersect. Designers can automatically push apart overlapping objects without disturbing non-overlapping ones:
+- **Core Engine API (`TCastleTransformManipulate.SeparateOverlappingSelected`):**
+  - `SeparateOverlappingSelected(MinPadding, HorizontalOnly, MaxIterations)` iteratively inspects all pairs of top-level selected transforms and computes their `WorldBoundingBox` overlap along X, Y, and Z (including `MinPadding` clearance).
+  - Pushes intersecting pairs apart by half the penetration depth each along the minimum-penetration axis (restricted to the horizontal XZ plane when `HorizontalOnly = true` so objects remain on the floor, or across all 3 axes when `HorizontalOnly = false`).
+- **Editor Controls (`ButtonSeparateOverlaps` & `ShowSeparateOverlappingDialog` / `Alt+Shift+X`):**
+  - **Click `Depenetrate`** (`ButtonSeparateOverlaps`) or press **`Alt+Shift+X`**: Immediately resolves horizontal XZ bounding-box overlaps among selected transforms.
+  - **`Shift` + Click `Depenetrate`**: Opens the **Depenetrate / Separate Overlapping Transforms** dialog (`ShowSeparateOverlappingDialog`) to specify **Minimum Clearance Padding** and toggle **Separate horizontally only (preserve Y elevation)**.
+
+---
+
+## 47. Phase 46: Progressive Scale Taper & Cumulative Rotation Step (`ApplyProgressiveTransformSelected`, `ButtonProgressiveXform`, `Alt+Shift+T`)
+
+Creating spiral staircases, tapering foliage rows, perspective colonnades, or progressively scaled/rotated prop chains across an existing selection is handled by `ApplyProgressiveTransformSelected`:
+- **Core Engine API (`TCastleTransformManipulate.ApplyProgressiveTransformSelected`):**
+  - Interpolates `Scale` linearly from `StartScale` (`Selected[0]`) to `EndScale` (`Selected[N-1]`) at $t = i / (N - 1)$ when `ApplyScaleGradient = true`.
+  - Applies a cumulative rotation increment of $i \cdot \text{StepAngleRad}$ around `Axis` in the active `CoordSpace` (`csWorld` or `csLocal`) when `StepAngleRad <> 0`.
+- **Editor Controls (`ButtonProgressiveXform` & `ShowProgressiveTransformDialog` / `Alt+Shift+T`):**
+  - Clicking **`Taper / Spiral...`** (`ButtonProgressiveXform`) in `PanelLayoutTransform` or pressing **`Alt+Shift+T`** opens the **Progressive Scale Taper & Rotation Step** dialog (`ShowProgressiveTransformDialog`) to configure **Start Uniform Scale (First)**, **End Uniform Scale (Last)**, and **Cumulative Yaw Step (deg/item)**.
+
+---
+
+## 48. Phase 47: Select Transforms Visible In Camera Frustum (`SelectTransformsInCameraFrustum` / `Ctrl+Shift+F`) & 2D UI Edge-to-Edge Stack (`ButtonUIStackH` & `ButtonUIStackV`)
+
+- **Select Transforms Visible In Camera View (`SelectTransformsInCameraFrustum` / `Ctrl+Shift+F`):**
+  - Pressing **`Ctrl+Shift+F`** in the Viewport or Hierarchy Tree (or choosing **`Select Visible In Camera View (Ctrl+Shift+F)`** in the Hierarchy context menu) tests all visible, unlocked `TCastleTransform` instances in the active viewport against `CurrentViewport.Camera.Frustum` (`Box3DCollisionPossibleSimple` for non-empty bounding boxes, `SphereCollisionPossibleSimple` for point transforms) and selects every transform currently in the camera's view frustum.
+- **2D UI Edge-to-Edge Horizontal & Vertical Stack (`StackSelectedUserInterfaces` / `ButtonUIStackH` & `ButtonUIStackV`):**
+  - Clicking **`UI Stack H`** (`ButtonUIStackH`) or **`UI Stack V`** (`ButtonUIStackV`) in `PanelLayoutUI` sorts 2+ selected `TCastleUserInterface` controls left-to-right or top-to-bottom by their rendered screen rects and stacks them flush edge-to-edge ($0\text{ px}$ gap on normal click, or $8\text{ px}$ gap when **`Shift`-clicked**).
+
+---
+
+## 49. Complete Keyboard Shortcuts & Toolbar Reference
 
 | Shortcut / Control | Context | Action |
 | :--- | :--- | :--- |
@@ -988,10 +1033,13 @@ Inspired by Blender's muscle-memory clear-transform shortcuts (`Alt+G`, `Alt+R`,
 | **`Ctrl+Alt+S`** / **`Scatter Dup...`** | Viewport / Hierarchy / Layout Tab | Open the **Ground-Aware Scatter Duplicate** dialog (`Count`, `Radius`, `MaxYaw`, `ScaleMin..Max`, `SnapToFloor`, `AlignToNormal`). |
 | **`Alt+Shift+C`** / **`Circle Arrange`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms in a circle** (**Click**: auto-radius $360^\circ$ circle; **`Shift`-click** or **`Alt+Shift+C`**: dialog). |
 | **`Alt+Shift+G`** / **`Grid Arrange`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms in a 2D / 3D grid** (**Click**: auto $\lceil\sqrt{N}\rceil$ grid; **`Shift`-click** or **`Alt+Shift+G`**: dialog). |
-| **`Alt+Shift+=`** / **`Expand +25%`** | Viewport / Hierarchy / Layout Tab | **Push / Expand** selected transform positions outward from pivot by $+25\%$ (`Shift`-click button for $+10\%$). |
-| **`Alt+Shift+-`** / **`Contract -20%`** | Viewport / Hierarchy / Layout Tab | **Pull / Contract** selected transform positions inward toward pivot by $-20\%$ (`Shift`-click button for $-10\%$). |
+| **`Alt+Shift+L`** / **`Line Arrange`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms along a 3D line** (**Click**: between first & last; **`Ctrl`-click**: orient along line; **`Shift`-click** / **`Alt+Shift+L`**: dialog). |
+| **`Alt+Shift+X`** / **`Depenetrate`** | Viewport / Hierarchy / Layout Tab | **Separate overlapping selected transforms** by pushing intersecting bounding boxes apart (**`Shift`-click**: clearance padding & 3D dialog). |
+| **`Alt+Shift+T`** / **`Taper / Spiral...`** | Viewport / Hierarchy / Layout Tab | Open the **Progressive Scale Taper & Cumulative Rotation Step** dialog (`StartScale`, `EndScale`, `StepYawDeg`). |
+| **`Alt+Shift+=`** / **`Expand +25%`** | Viewport / Hierarchy / Layout Tab | **Push / Expand** selected transform positions outward from pivot by $+25\%$ (`Shift`-click button for XZ only). |
+| **`Alt+Shift+-`** / **`Contract -20%`** | Viewport / Hierarchy / Layout Tab | **Pull / Contract** selected transform positions inward toward pivot by $-20\%$ (`Shift`-click button for XZ only). |
 | **`Alt+G`** / **`Alt+R`** / **`Alt+S`** | Viewport / Hierarchy Tree | Reset selected **Translation** (`Alt+G`, or 2D UI `AnchorDelta`), **Rotation** (`Alt+R`), or **Scale** (`Alt+S`). |
-| **`Reset Xform` Button** | Layout Tab (`PanelLayoutTransform`) | Reset selected transform **Rot+Scale** (**Click**), **Rotation only** (**`Shift`-click**), or **Pos+Rot+Scale** (**`Ctrl`-click**). |
+| **`Reset Xform` Button** | Layout Tab (`PanelLayoutTransform`) | Reset selected transform **Pos+Rot+Scale** (**Click**), **Rot+Scale only** (**`Shift`-click**), or **Rotation only** (**`Ctrl`-click**). |
 | **`Ctrl+Shift+S`** / **`Swap Pos`** | Viewport / Hierarchy / Layout Tab | **Swap / Cycle World Positions** of 2+ selected `TCastleTransform` objects (`SwapSelectedPositions`). |
 | **`Ctrl+Shift+L`** / **`Aim at Target`** | Viewport / Hierarchy / Layout Tab | **Look-At / Aim** secondary selected transforms at primary selection (2+ selected) or aim single selection at 3D cursor hit. |
 | **`Ctrl+Shift+M`** / **`Match Rot`** | Viewport / Hierarchy / Layout Tab | **Match Rotation** to primary selection (**`Shift`-click**: Pos+Rot; **`Ctrl`-click**: Pos+Rot+Scale). |
@@ -1006,6 +1054,7 @@ Inspired by Blender's muscle-memory clear-transform shortcuts (`Alt+G`, `Alt+R`,
 | **`Shift+0` .. `Shift+9`** / **`Alt+Shift+0..9`** | Viewport / Hierarchy Tree | Recall **Selection Set** slot `0..9` (`Alt+Shift+0..9` for additive union selection). |
 | **`Ctrl+Shift+O`** / **`Select Overlapping Transforms`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects whose `WorldBoundingBox` overlaps the selection (or any sibling transform). |
 | **`Ctrl+Shift+E`** / **`Select At Same Y Elevation...`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects at the same world Y elevation within a configurable tolerance. |
+| **`Ctrl+Shift+F`** / **`Select Visible In Camera View`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects inside the active viewport camera's view frustum. |
 | **`Select By Bounding-Box Size Range...`** | Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects whose world bounding-box diagonal length lies within `[MinSize, MaxSize]`. |
 | **`Select By Name Pattern...`** | Hierarchy Context Menu | Select all components matching a substring or `*` / `?` wildcard pattern. |
 | **`Select All With Same Asset URL`** | Hierarchy Context Menu | Select all components in the design referencing the same `Url` asset as the selected component. |
@@ -1039,7 +1088,8 @@ Inspired by Blender's muscle-memory clear-transform shortcuts (`Alt+G`, `Alt+R`,
 | **`UI Align Left/CenterH/Right/Bottom/MiddleV/Top`** | Layout Tab (`PanelLayoutUI`) | Align rendered edges or centers of 2+ selected `TCastleUserInterface` controls to the primary selected control. |
 | **`UI Dist H` / `UI Dist V`** | Layout Tab (`PanelLayoutUI`) | Space 3+ selected `TCastleUserInterface` controls with equal horizontal or vertical gaps. |
 | **`UI Match Size`** | Layout Tab (`PanelLayoutUI`) | Match `Width` and `Height` of 2+ selected `TCastleUserInterface` controls to the primary control (`Shift`: Width, `Ctrl`: Height). |
-| **`UI Swap Pos` / `UI Grid`** | Layout Tab (`PanelLayoutUI`) | **Swap / cycle** rendered positions of 2+ selected `TCastleUserInterface` controls (`UI Swap Pos`), or **arrange in 2D grid** (`UI Grid`, `Shift` for $0\text{ px}$ gap). |
+| **`UI Swap Pos` / `UI Grid`** | Layout Tab (`PanelLayoutUI`) | **Swap / cycle** rendered positions of 2+ selected `TCastleUserInterface` controls (`UI Swap Pos`), or **arrange in 2D grid** (`UI Grid`, `Shift` for $8\text{ px}$ gap). |
+| **`UI Stack H` / `UI Stack V`** | Layout Tab (`PanelLayoutUI`) | **Stack** 2+ selected `TCastleUserInterface` controls flush edge-to-edge horizontally or vertically (`Shift`-click for $8\text{ px}$ gap). |
 | **`Reset Prop` Button** | Object Inspector Header | Reset the active Object Inspector property row to its default value. |
 | **`Select All of Same Class`** | Hierarchy Context Menu | Select all components in the design matching the selected component's class. |
 | **`Expand Subtree` / `Collapse Subtree`** | Hierarchy Context Menu | Recursively expand or collapse the selected hierarchy node(s). |
@@ -1056,9 +1106,9 @@ Inspired by Blender's muscle-memory clear-transform shortcuts (`Alt+G`, `Alt+R`,
 
 ---
 
-## 46. Automated Unit Tests & Verification
+## 50. Automated Unit Tests & Verification
 
-All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 18 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
+All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 19 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
 
 1. **`TestSelectedCountAndFree`**: Verifies single/multi-selection filtering, freeing a selected transform while selected, and translating the remaining selection.
 2. **`TestTranslateSnapAndCoordSpace`**: Verifies grid snapping (`TranslateSnap := 2.0`) and `csLocal` vs. `csWorld` translation on a $90^\circ$-rotated transform.
@@ -1077,7 +1127,8 @@ All core 3D manipulation algorithms in `CastleTransformManipulate` are covered b
 15. **`TestSwapPositionsAndMatchSelectedSize`**: Verifies `SwapSelectedPositions` swaps 2 selected transforms and cyclically rotates 3 selected transforms in world space, and verifies `MatchSelectedSize(1)` (Y-height match) and `MatchSelectedSize(-1)` (all-axis bounding-box size match) scale secondary selected `TCastleBox` objects so their world bounding-box dimensions match the primary selected object.
 16. **`TestLookAtAimAndAlignSelectedBounds`**: Verifies `LookAtWorldPoint` and `AimSelectedAtPrimary` orient selected transforms' world forward directions toward a target point or primary selected box, and verifies `AlignSelectedBounds(1, false)` (Min Y face alignment) and `AlignSelectedBounds(1, true)` (Max Y face alignment) align world bounding-box bottoms and tops across boxes of different heights.
 17. **`TestMatchRotationTransformAndArrangeInCircle`**: Verifies `MatchSelectedRotation` matches world orientation while preserving position and scale, `MatchSelectedTransform(true, false, true)` matches world position and scale onto secondary transforms, and `ArrangeSelectedInCircle(10.0, 360.0, true)` places 4 transforms evenly around their center at $0^\circ, 90^\circ, 180^\circ, 270^\circ$ on a radius-$10$ XZ circle while orienting them toward the center.
-18. **`TestArrangeInGridScalePositionsAndResetTransform`**: Verifies `ArrangeSelectedInGrid(2, 0, Vector3(10, 0, 10), false)` places 4 transforms at exact $2 \times 2$ XZ grid coordinates $(0, 5, 0)$, $(10, 5, 0)$, $(0, 5, 10)$, $(10, 5, 10)$, verifies `ScaleSelectedPositionsFromPivot(2.0)` under both `pmPrimarySelected` and `pmSelectionCenter` doubles world offsets from the active pivot without altering `Scale`, and verifies `ResetSelectedTransform` granularly resets rotation + scale while preserving translation (and subsequently resets translation).
+18. **`TestArrangeInGridScalePositionsAndResetTransform`**: Verifies `ArrangeSelectedInGrid(2, 2, Vector3(4, 2, 6), true)` places 4 transforms at exact $2 \times 2$ XZ grid coordinates, verifies `ScaleSelectedPositionsFromPivot` scales world offsets from the active pivot without altering `Scale`, and verifies `ResetSelectedTransform` granularly resets rotation + scale while preserving translation (and subsequently resets translation).
+19. **`TestArrangeLineSeparateOverlappingAndProgressiveTransform`**: Verifies `ArrangeSelectedBetweenEndpoints(true)` places 4 boxes at evenly spaced 3D intervals along the line segment from `B1` to `B4` and orients them along the line, verifies `ApplyProgressiveTransformSelected` applies a linear scale gradient from $(1,1,1)$ to $(4,4,4)$ and a cumulative $30^\circ$ rotation step per item, and verifies `SeparateOverlappingSelected(1.0, true, 8)` pushes two overlapping $2\times 2\times 2$ boxes apart to a center-to-center distance $\ge 3.0$ while preserving Y elevation.
 
 To run this test suite from the command line:
 ```bash

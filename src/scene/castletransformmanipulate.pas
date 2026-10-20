@@ -537,6 +537,46 @@ type
       Returns @true if at least one selected transform was modified. }
     function ResetSelectedTransform(
       const ResetTrans, ResetRot, ResetScale: Boolean): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) along a
+      straight 3D line segment between @code(StartWorldPos) and @code(EndWorldPos)
+      at evenly spaced intervals ($t = i / (N - 1)$).
+      When @code(OrientAlongLine) is @true, rotates each transform so its world
+      forward direction faces along the line segment direction.
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedAlongLine(const StartWorldPos, EndWorldPos: TVector3;
+      const OrientAlongLine: Boolean = false): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) along a
+      straight 3D line segment between the first selected transform
+      (@code(Selected[0])) and the last selected transform (@code(Selected[N-1]))
+      at evenly spaced intervals.
+      When @code(OrientAlongLine) is @true, rotates each transform so its world
+      forward direction faces from @code(Selected[0]) toward @code(Selected[N-1]).
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedBetweenEndpoints(
+      const OrientAlongLine: Boolean = false): Boolean;
+
+    { Iteratively separate overlapping top-level selected transforms
+      (@code(SelectedCount >= 2)) by pushing apart any pair whose world-space
+      axis-aligned bounding boxes intersect (including @code(MinPadding) clearance)
+      along their minimum penetration axis.
+      When @code(HorizontalOnly) is @true (default), resolves overlaps only on the
+      horizontal XZ plane so objects remain at their current Y elevation.
+      Returns @true if at least one selected transform was moved. }
+    function SeparateOverlappingSelected(const MinPadding: Single = 0.0;
+      const HorizontalOnly: Boolean = true;
+      const MaxIterations: Integer = 16): Boolean;
+
+    { Apply a linear gradient of @code(Scale) from @code(StartScale) (on the first
+      top-level selected transform) to @code(EndScale) (on the last top-level
+      selected transform), and/or a cumulative rotation step of @code(StepAngleRad)
+      around @code(Axis) (@code(I * StepAngleRad) for item @code(I)).
+      Requires at least 2 top-level selected transforms.
+      Returns @true if at least one selected transform was modified. }
+    function ApplyProgressiveTransformSelected(
+      const StartScale, EndScale: TVector3; const ApplyScaleGradient: Boolean;
+      const Axis: T3DAxis = 1; const StepAngleRad: Single = 0): Boolean;
   end;
 
 var
@@ -3446,6 +3486,323 @@ begin
     if ResetScale and (not TVector3.Equals(T.Scale, Vector3(1, 1, 1))) then
     begin
       T.Scale := Vector3(1, 1, 1);
+      Result := true;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedAlongLine(
+  const StartWorldPos, EndWorldPos: TVector3;
+  const OrientAlongLine: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  Factor: Single;
+  CurPos, NewPos, LineDir, CurWorldPos, CurDir, CurUp, GravityUp, Side, NewUp: TVector3;
+  HasLineDir: Boolean;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  LineDir := EndWorldPos - StartWorldPos;
+  HasLineDir := not LineDir.IsZero(1e-5);
+  if HasLineDir then
+    LineDir := LineDir.Normalize;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    Factor := Single(I) / Single(Count - 1);
+    NewPos := Lerp(Factor, StartWorldPos, EndWorldPos);
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(NewPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, NewPos);
+      Result := true;
+    end;
+
+    if OrientAlongLine and HasLineDir then
+    begin
+      if T.HasWorldTransform then
+        T.GetWorldView(CurWorldPos, CurDir, CurUp)
+      else
+      begin
+        CurWorldPos := T.Translation;
+        CurDir := T.Direction;
+        CurUp := T.Up;
+      end;
+
+      if T.World <> nil then
+        GravityUp := T.World.GravityUp
+      else
+        GravityUp := Vector3(0, 1, 0);
+
+      Side := TVector3.CrossProduct(LineDir, GravityUp);
+      if Side.IsZero(1e-4) then
+        Side := TVector3.CrossProduct(LineDir, CurUp);
+      if Side.IsZero(1e-4) then
+        Side := TVector3.CrossProduct(LineDir, Vector3(0, 0, 1));
+      if Side.IsZero(1e-4) then
+        Side := Vector3(1, 0, 0);
+      NewUp := TVector3.CrossProduct(Side, LineDir).Normalize;
+
+      if (not TVector3.Equals(LineDir, CurDir)) or
+         (not TVector3.Equals(NewUp, CurUp)) then
+      begin
+        if T.HasWorldTransform then
+          T.SetWorldView(CurWorldPos, LineDir, NewUp)
+        else
+          T.SetView(CurWorldPos, LineDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedBetweenEndpoints(
+  const OrientAlongLine: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  StartPos, EndPos: TVector3;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  StartPos := GetTransformWorkingPos(Items[0]);
+  EndPos := GetTransformWorkingPos(Items[Count - 1]);
+  Result := ArrangeSelectedAlongLine(StartPos, EndPos, OrientAlongLine);
+end;
+
+function TCastleTransformManipulate.SeparateOverlappingSelected(
+  const MinPadding: Single; const HorizontalOnly: Boolean;
+  const MaxIterations: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, J, Iter, Count, ActualMaxIter, BestAxis: Integer;
+  T: TCastleTransform;
+  BoxA, BoxB: TBox3D;
+  CenterA, CenterB, PushVec, PosA, PosB: TVector3;
+  OverlapX, OverlapY, OverlapZ, BestOverlap, SignDir, HalfPush, Pad: Single;
+  AnyMovedInPass: Boolean;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  Pad := Max(0.0, MinPadding);
+  ActualMaxIter := Max(1, MaxIterations);
+
+  for Iter := 1 to ActualMaxIter do
+  begin
+    AnyMovedInPass := false;
+    for I := 0 to Count - 2 do
+      for J := I + 1 to Count - 1 do
+      begin
+        if Items[I].HasWorldTransform then
+          BoxA := Items[I].WorldBoundingBox
+        else
+          BoxA := Items[I].BoundingBox;
+
+        if Items[J].HasWorldTransform then
+          BoxB := Items[J].WorldBoundingBox
+        else
+          BoxB := Items[J].BoundingBox;
+
+        if BoxA.IsEmpty or BoxB.IsEmpty then Continue;
+
+        OverlapX := Min(BoxA.Data[1].X, BoxB.Data[1].X) - Max(BoxA.Data[0].X, BoxB.Data[0].X) + Pad;
+        if OverlapX <= 1e-4 then Continue;
+
+        OverlapZ := Min(BoxA.Data[1].Z, BoxB.Data[1].Z) - Max(BoxA.Data[0].Z, BoxB.Data[0].Z) + Pad;
+        if OverlapZ <= 1e-4 then Continue;
+
+        OverlapY := Min(BoxA.Data[1].Y, BoxB.Data[1].Y) - Max(BoxA.Data[0].Y, BoxB.Data[0].Y) + Pad;
+        if OverlapY <= 1e-4 then Continue;
+
+        CenterA := BoxA.Center;
+        CenterB := BoxB.Center;
+
+        if HorizontalOnly then
+        begin
+          if OverlapX <= OverlapZ then
+          begin
+            BestAxis := 0;
+            BestOverlap := OverlapX;
+          end else
+          begin
+            BestAxis := 2;
+            BestOverlap := OverlapZ;
+          end;
+        end else
+        begin
+          BestAxis := 0;
+          BestOverlap := OverlapX;
+          if OverlapY < BestOverlap then
+          begin
+            BestAxis := 1;
+            BestOverlap := OverlapY;
+          end;
+          if OverlapZ < BestOverlap then
+          begin
+            BestAxis := 2;
+            BestOverlap := OverlapZ;
+          end;
+        end;
+
+        if CenterB[BestAxis] > CenterA[BestAxis] + 1e-4 then
+          SignDir := 1.0
+        else if CenterB[BestAxis] < CenterA[BestAxis] - 1e-4 then
+          SignDir := -1.0
+        else if J > I then
+          SignDir := 1.0
+        else
+          SignDir := -1.0;
+
+        HalfPush := 0.5 * BestOverlap * SignDir;
+        PushVec := TVector3.Zero;
+        PushVec.Data[BestAxis] := HalfPush;
+
+        PosA := GetTransformWorkingPos(Items[I]);
+        PosB := GetTransformWorkingPos(Items[J]);
+        SetTransformWorkingPos(Items[I], PosA - PushVec);
+        SetTransformWorkingPos(Items[J], PosB + PushVec);
+
+        AnyMovedInPass := true;
+        Result := true;
+      end;
+
+    if not AnyMovedInPass then
+      Break;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ApplyProgressiveTransformSelected(
+  const StartScale, EndScale: TVector3; const ApplyScaleGradient: Boolean;
+  const Axis: T3DAxis; const StepAngleRad: Single): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  Factor, AngleRad: Single;
+  NewScale, AxisVec: TVector3;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+  if (not ApplyScaleGradient) and SameValue(StepAngleRad, 0.0, 1e-6) then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  AxisVec := TVector3.One[Axis];
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    Factor := Single(I) / Single(Count - 1);
+
+    if ApplyScaleGradient then
+    begin
+      NewScale := Lerp(Factor, StartScale, EndScale);
+      if (Abs(NewScale.X) >= 1e-4) and
+         (Abs(NewScale.Y) >= 1e-4) and
+         (Abs(NewScale.Z) >= 1e-4) and
+         (not TVector3.Equals(NewScale, T.Scale)) then
+      begin
+        T.Scale := NewScale;
+        Result := true;
+      end;
+    end;
+
+    if (I > 0) and (not SameValue(StepAngleRad, 0.0, 1e-6)) then
+    begin
+      AngleRad := Single(I) * StepAngleRad;
+      if FCoordSpace = csWorld then
+        T.Rotation := (
+          QuatFromAxisAngle(AxisVec, AngleRad, true) *
+          QuatFromAxisAngle(T.Rotation, true)).ToAxisAngle
+      else
+        T.Rotation := (
+          QuatFromAxisAngle(T.Rotation, true) *
+          QuatFromAxisAngle(AxisVec, AngleRad, true)).ToAxisAngle;
       Result := true;
     end;
   end;

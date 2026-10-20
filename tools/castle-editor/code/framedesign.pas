@@ -325,6 +325,9 @@ type
       ButtonExpandPositions: TButton;
       ButtonContractPositions: TButton;
       ButtonResetTransform: TButton;
+      ButtonArrangeLine: TButton;
+      ButtonSeparateOverlaps: TButton;
+      ButtonProgressiveXform: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -342,6 +345,8 @@ type
       ButtonUIMatchSize: TButton;
       ButtonUISwapPos: TButton;
       ButtonUIGridArrange: TButton;
+      ButtonUIStackH: TButton;
+      ButtonUIStackV: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -367,6 +372,7 @@ type
       MenuTreeViewItemSelectOverlapping: TMenuItem;
       MenuTreeViewItemSelectBySize: TMenuItem;
       MenuTreeViewItemSelectSameElevation: TMenuItem;
+      MenuTreeViewItemSelectInCameraFrustum: TMenuItem;
       MenuTreeViewItemCopyTransform: TMenuItem;
       MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
@@ -437,6 +443,9 @@ type
     procedure ButtonExpandPositionsClick(Sender: TObject);
     procedure ButtonContractPositionsClick(Sender: TObject);
     procedure ButtonResetTransformClick(Sender: TObject);
+    procedure ButtonArrangeLineClick(Sender: TObject);
+    procedure ButtonSeparateOverlapsClick(Sender: TObject);
+    procedure ButtonProgressiveXformClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -444,6 +453,7 @@ type
     procedure ButtonUIMatchSizeClick(Sender: TObject);
     procedure ButtonUISwapPosClick(Sender: TObject);
     procedure ButtonUIGridArrangeClick(Sender: TObject);
+    procedure ButtonUIStackClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -476,6 +486,7 @@ type
     procedure MenuTreeViewItemSelectOverlappingClick(Sender: TObject);
     procedure MenuTreeViewItemSelectBySizeClick(Sender: TObject);
     procedure MenuTreeViewItemSelectSameElevationClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectInCameraFrustumClick(Sender: TObject);
     procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
@@ -928,6 +939,15 @@ type
     procedure ScaleSelectionPositionsFromPivot(const Factor: TVector3);
     procedure ResetSelectionTransformAttributes(
       const ResetTrans, ResetRot, ResetScale: Boolean);
+    procedure ArrangeSelectionBetweenEndpoints(const OrientAlongLine: Boolean = false);
+    procedure ShowArrangeAlongLineDialog;
+    procedure SeparateOverlappingSelection(const MinPadding: Single = 0.0;
+      const HorizontalOnly: Boolean = true);
+    procedure ShowSeparateOverlappingDialog;
+    procedure ApplyProgressiveTransformToSelection(
+      const StartScale, EndScale: TVector3; const ApplyScaleGradient: Boolean;
+      const Axis: T3DAxis = 1; const StepAngleDeg: Single = 0);
+    procedure ShowProgressiveTransformDialog;
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -936,6 +956,7 @@ type
     procedure MatchSelectedUserInterfaceSize(const MatchWidth, MatchHeight: Boolean);
     procedure SwapSelectedUserInterfacePositions;
     procedure ArrangeSelectedUserInterfacesInGrid(const GapPx: Single = 16.0);
+    procedure StackSelectedUserInterfaces(const Vertical: Boolean; const GapPx: Single = 0.0);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -967,6 +988,7 @@ type
     procedure ShowSelectBySizeRangeDialog;
     procedure SelectAtSameElevation(const Tolerance: Single = 0.25);
     procedure ShowSelectAtSameElevationDialog;
+    procedure SelectTransformsInCameraFrustum;
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -1028,7 +1050,7 @@ uses
   {$ifdef VER3_0} {$ifdef MSWINDOWS} Windows, {$endif} {$endif}
   TypInfo, StrUtils, Math, Graphics, Types, Dialogs, LCLType, ObjInspStrConsts,
   { CGE units }
-  CastleComponentSerialize, CastleFileFilters, CastleGLUtils, CastleImages,
+  CastleComponentSerialize, CastleFileFilters, CastleFrustum, CastleGLUtils, CastleImages,
   CastleLog, CastleProjection, CastleQuaternions, CastleStringUtils, CastleTimeUtils,
   CastleUriUtils, X3DLoad, CastleFilesUtils, CastleInternalPhysicsVisualization,
   CastleInternalUrlUtils, CastleInternalFileMonitor, X3DNodes, CastleSoundEngine,
@@ -1539,7 +1561,36 @@ begin
     begin
       Frame.AimSelectionAtPrimaryOrCursor;
       Exit(true);
+    end else
+    if Event.ModifiersDown = [mkAlt, mkShift] then
+    begin
+      Frame.ShowArrangeAlongLineDialog;
+      Exit(true);
     end;
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyX) and
+     (Event.ModifiersDown = [mkAlt, mkShift]) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    Frame.SeparateOverlappingSelection(0.0, true);
+    Exit(true);
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyT) and
+     (Event.ModifiersDown = [mkAlt, mkShift]) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    Frame.ShowProgressiveTransformDialog;
+    Exit(true);
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyF) and
+     (Event.ModifiersDown = [mkCtrl, mkShift]) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    Frame.SelectTransformsInCameraFrustum;
+    Exit(true);
   end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyD) then
@@ -2981,6 +3032,36 @@ begin
   ButtonResetTransform.OnClick := @ButtonResetTransformClick;
   ButtonResetTransform.Parent := PanelLayoutTransform;
 
+  ButtonArrangeLine := TButton.Create(Self);
+  ButtonArrangeLine.Align := alTop;
+  ButtonArrangeLine.AutoSize := true;
+  ButtonArrangeLine.Caption := 'Line Arrange';
+  ButtonArrangeLine.Hint := 'Arrange 2+ selected 3D transforms evenly along a straight line between first & last (Alt+Shift+L | Ctrl-click: orient along line | Shift-click: dialog)';
+  ButtonArrangeLine.ShowHint := true;
+  ButtonArrangeLine.BorderSpacing.Around := 2;
+  ButtonArrangeLine.OnClick := @ButtonArrangeLineClick;
+  ButtonArrangeLine.Parent := PanelLayoutTransform;
+
+  ButtonSeparateOverlaps := TButton.Create(Self);
+  ButtonSeparateOverlaps.Align := alTop;
+  ButtonSeparateOverlaps.AutoSize := true;
+  ButtonSeparateOverlaps.Caption := 'Depenetrate';
+  ButtonSeparateOverlaps.Hint := 'Push apart overlapping selected 3D transforms so their bounding boxes no longer intersect (Alt+Shift+X | Shift-click: Padding/3D dialog)';
+  ButtonSeparateOverlaps.ShowHint := true;
+  ButtonSeparateOverlaps.BorderSpacing.Around := 2;
+  ButtonSeparateOverlaps.OnClick := @ButtonSeparateOverlapsClick;
+  ButtonSeparateOverlaps.Parent := PanelLayoutTransform;
+
+  ButtonProgressiveXform := TButton.Create(Self);
+  ButtonProgressiveXform.Align := alTop;
+  ButtonProgressiveXform.AutoSize := true;
+  ButtonProgressiveXform.Caption := 'Taper / Spiral...';
+  ButtonProgressiveXform.Hint := 'Apply progressive scale gradient (taper) and/or cumulative rotation step (spiral) across 2+ selected transforms (Alt+Shift+T)';
+  ButtonProgressiveXform.ShowHint := true;
+  ButtonProgressiveXform.BorderSpacing.Around := 2;
+  ButtonProgressiveXform.OnClick := @ButtonProgressiveXformClick;
+  ButtonProgressiveXform.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -3108,6 +3189,24 @@ begin
   ButtonUIGridArrange.ShowHint := true;
   ButtonUIGridArrange.OnClick := @ButtonUIGridArrangeClick;
   ButtonUIGridArrange.Parent := PanelLayoutUI;
+
+  ButtonUIStackH := TButton.Create(Self);
+  ButtonUIStackH.AutoSize := true;
+  ButtonUIStackH.Caption := 'UI Stack H';
+  ButtonUIStackH.Hint := 'Stack 2+ selected 2D UI controls edge-to-edge horizontally from left to right (Shift-click for 8px gap)';
+  ButtonUIStackH.ShowHint := true;
+  ButtonUIStackH.Tag := 0;
+  ButtonUIStackH.OnClick := @ButtonUIStackClick;
+  ButtonUIStackH.Parent := PanelLayoutUI;
+
+  ButtonUIStackV := TButton.Create(Self);
+  ButtonUIStackV.AutoSize := true;
+  ButtonUIStackV.Caption := 'UI Stack V';
+  ButtonUIStackV.Hint := 'Stack 2+ selected 2D UI controls edge-to-edge vertically from top to bottom (Shift-click for 8px gap)';
+  ButtonUIStackV.ShowHint := true;
+  ButtonUIStackV.Tag := 1;
+  ButtonUIStackV.OnClick := @ButtonUIStackClick;
+  ButtonUIStackV.Parent := PanelLayoutUI;
 
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
@@ -3262,6 +3361,11 @@ begin
   MenuTreeViewItemSelectSameElevation.Caption := 'Select At Same Elevation (Y)... (Ctrl+Shift+E)';
   MenuTreeViewItemSelectSameElevation.OnClick := @MenuTreeViewItemSelectSameElevationClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectSameElevation);
+
+  MenuTreeViewItemSelectInCameraFrustum := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectInCameraFrustum.Caption := 'Select Visible In Camera View (Ctrl+Shift+F)';
+  MenuTreeViewItemSelectInCameraFrustum.OnClick := @MenuTreeViewItemSelectInCameraFrustumClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectInCameraFrustum);
 
   MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
   MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
@@ -6931,6 +7035,12 @@ begin
       ButtonContractPositions.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonResetTransform <> nil then
       ButtonResetTransform.Enabled := (T <> nil) or (TransformManipulate.SelectedCount > 0);
+    if ButtonArrangeLine <> nil then
+      ButtonArrangeLine.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonSeparateOverlaps <> nil then
+      ButtonSeparateOverlaps.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonProgressiveXform <> nil then
+      ButtonProgressiveXform.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonPilotTransform <> nil then
       ButtonPilotTransform.Enabled := T <> nil;
     if ButtonAimAtTarget <> nil then
@@ -8347,7 +8457,27 @@ begin
       begin
         AimSelectionAtPrimaryOrCursor;
         Key := 0;
+      end else
+      if Shift = [ssAlt, ssShift] then
+      begin
+        ShowArrangeAlongLineDialog;
+        Key := 0;
       end;
+    end else
+    if (Key = Ord('X')) and (Shift = [ssAlt, ssShift]) then
+    begin
+      SeparateOverlappingSelection(0.0, true);
+      Key := 0;
+    end else
+    if (Key = Ord('T')) and (Shift = [ssAlt, ssShift]) then
+    begin
+      ShowProgressiveTransformDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('F')) and (Shift = [ssCtrl, ssShift]) then
+    begin
+      SelectTransformsInCameraFrustum;
+      Key := 0;
     end else
     if (Key in [Ord('0')..Ord('9')]) and
        ((Shift = [ssCtrl, ssShift]) or (Shift = [ssShift]) or (Shift = [ssAlt, ssShift])) then
@@ -9440,6 +9570,400 @@ begin
     ResetSelectionTransformAttributes(true, true, true);
 end;
 
+procedure TDesignFrame.ArrangeSelectionBetweenEndpoints(const OrientAlongLine: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedBetweenEndpoints(OrientAlongLine);
+end;
+
+procedure TDesignFrame.ShowArrangeAlongLineDialog;
+var
+  Dialog: TForm;
+  LblStart, LblEnd: TLabel;
+  SpinStartX, SpinStartY, SpinStartZ, SpinEndX, SpinEndY, SpinEndZ: TFloatSpinEdit;
+  CheckOrient: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+  Count: Integer;
+  StartPos, EndPos: TVector3;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+  begin
+    ErrorBox('Select at least 2 TCastleTransform components to arrange along a line (Alt+Shift+L).');
+    Exit;
+  end;
+
+  Count := TransformManipulate.SelectedCount;
+  StartPos := TransformManipulate.Selected[0].WorldTranslation;
+  EndPos := TransformManipulate.Selected[Count - 1].WorldTranslation;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Arrange Selection Along 3D Line (Alt+Shift+L)';
+    Dialog.Position := poMainFormCenter;
+    Dialog.Width := 420;
+    Dialog.Height := 190;
+    Dialog.BorderStyle := bsDialog;
+
+    LblStart := TLabel.Create(Dialog);
+    LblStart.Caption := 'Start World Pos (X, Y, Z):';
+    LblStart.Left := 16;
+    LblStart.Top := 18;
+    LblStart.Parent := Dialog;
+
+    SpinStartX := TFloatSpinEdit.Create(Dialog);
+    SpinStartX.DecimalPlaces := 2;
+    SpinStartX.Increment := 1.0;
+    SpinStartX.MinValue := -100000;
+    SpinStartX.MaxValue := 100000;
+    SpinStartX.Value := StartPos.X;
+    SpinStartX.Left := 175;
+    SpinStartX.Top := 14;
+    SpinStartX.Width := 72;
+    SpinStartX.Parent := Dialog;
+
+    SpinStartY := TFloatSpinEdit.Create(Dialog);
+    SpinStartY.DecimalPlaces := 2;
+    SpinStartY.Increment := 1.0;
+    SpinStartY.MinValue := -100000;
+    SpinStartY.MaxValue := 100000;
+    SpinStartY.Value := StartPos.Y;
+    SpinStartY.Left := 252;
+    SpinStartY.Top := 14;
+    SpinStartY.Width := 72;
+    SpinStartY.Parent := Dialog;
+
+    SpinStartZ := TFloatSpinEdit.Create(Dialog);
+    SpinStartZ.DecimalPlaces := 2;
+    SpinStartZ.Increment := 1.0;
+    SpinStartZ.MinValue := -100000;
+    SpinStartZ.MaxValue := 100000;
+    SpinStartZ.Value := StartPos.Z;
+    SpinStartZ.Left := 329;
+    SpinStartZ.Top := 14;
+    SpinStartZ.Width := 72;
+    SpinStartZ.Parent := Dialog;
+
+    LblEnd := TLabel.Create(Dialog);
+    LblEnd.Caption := 'End World Pos (X, Y, Z):';
+    LblEnd.Left := 16;
+    LblEnd.Top := 54;
+    LblEnd.Parent := Dialog;
+
+    SpinEndX := TFloatSpinEdit.Create(Dialog);
+    SpinEndX.DecimalPlaces := 2;
+    SpinEndX.Increment := 1.0;
+    SpinEndX.MinValue := -100000;
+    SpinEndX.MaxValue := 100000;
+    SpinEndX.Value := EndPos.X;
+    SpinEndX.Left := 175;
+    SpinEndX.Top := 50;
+    SpinEndX.Width := 72;
+    SpinEndX.Parent := Dialog;
+
+    SpinEndY := TFloatSpinEdit.Create(Dialog);
+    SpinEndY.DecimalPlaces := 2;
+    SpinEndY.Increment := 1.0;
+    SpinEndY.MinValue := -100000;
+    SpinEndY.MaxValue := 100000;
+    SpinEndY.Value := EndPos.Y;
+    SpinEndY.Left := 252;
+    SpinEndY.Top := 50;
+    SpinEndY.Width := 72;
+    SpinEndY.Parent := Dialog;
+
+    SpinEndZ := TFloatSpinEdit.Create(Dialog);
+    SpinEndZ.DecimalPlaces := 2;
+    SpinEndZ.Increment := 1.0;
+    SpinEndZ.MinValue := -100000;
+    SpinEndZ.MaxValue := 100000;
+    SpinEndZ.Value := EndPos.Z;
+    SpinEndZ.Left := 329;
+    SpinEndZ.Top := 50;
+    SpinEndZ.Width := 72;
+    SpinEndZ.Parent := Dialog;
+
+    CheckOrient := TCheckBox.Create(Dialog);
+    CheckOrient.Caption := 'Orient transforms forward along line direction';
+    CheckOrient.Checked := false;
+    CheckOrient.Left := 16;
+    CheckOrient.Top := 90;
+    CheckOrient.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Arrange Line';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      TransformManipulate.ArrangeSelectedAlongLine(
+        Vector3(SpinStartX.Value, SpinStartY.Value, SpinStartZ.Value),
+        Vector3(SpinEndX.Value, SpinEndY.Value, SpinEndZ.Value),
+        CheckOrient.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeLineClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeAlongLineDialog
+  else
+    ArrangeSelectionBetweenEndpoints(ssCtrl in ShiftState);
+end;
+
+procedure TDesignFrame.SeparateOverlappingSelection(
+  const MinPadding: Single; const HorizontalOnly: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.SeparateOverlappingSelected(MinPadding, HorizontalOnly, 16);
+end;
+
+procedure TDesignFrame.ShowSeparateOverlappingDialog;
+var
+  Dialog: TForm;
+  LblPad: TLabel;
+  SpinPad: TFloatSpinEdit;
+  CheckHoriz: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+  begin
+    ErrorBox('Select at least 2 TCastleTransform components to separate overlaps (Alt+Shift+X).');
+    Exit;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Depenetrate / Separate Overlapping Transforms (Alt+Shift+X)';
+    Dialog.Position := poMainFormCenter;
+    Dialog.Width := 390;
+    Dialog.Height := 160;
+    Dialog.BorderStyle := bsDialog;
+
+    LblPad := TLabel.Create(Dialog);
+    LblPad.Caption := 'Minimum Clearance Padding:';
+    LblPad.Left := 16;
+    LblPad.Top := 20;
+    LblPad.Parent := Dialog;
+
+    SpinPad := TFloatSpinEdit.Create(Dialog);
+    SpinPad.DecimalPlaces := 2;
+    SpinPad.Increment := 0.25;
+    SpinPad.MinValue := 0.0;
+    SpinPad.MaxValue := 10000;
+    SpinPad.Value := 0.25;
+    SpinPad.Left := 215;
+    SpinPad.Top := 16;
+    SpinPad.Width := 140;
+    SpinPad.Parent := Dialog;
+
+    CheckHoriz := TCheckBox.Create(Dialog);
+    CheckHoriz.Caption := 'Separate horizontally only (preserve Y elevation)';
+    CheckHoriz.Checked := true;
+    CheckHoriz.Left := 16;
+    CheckHoriz.Top := 58;
+    CheckHoriz.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Separate Overlaps';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      SeparateOverlappingSelection(SpinPad.Value, CheckHoriz.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.ButtonSeparateOverlapsClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ShowSeparateOverlappingDialog
+  else
+    SeparateOverlappingSelection(0.0, true);
+end;
+
+procedure TDesignFrame.ApplyProgressiveTransformToSelection(
+  const StartScale, EndScale: TVector3; const ApplyScaleGradient: Boolean;
+  const Axis: T3DAxis; const StepAngleDeg: Single);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ApplyProgressiveTransformSelected(
+      StartScale, EndScale, ApplyScaleGradient, Axis, DegToRad(StepAngleDeg));
+end;
+
+procedure TDesignFrame.ShowProgressiveTransformDialog;
+var
+  Dialog: TForm;
+  CheckScale: TCheckBox;
+  LblStartScale, LblEndScale, LblStepYaw: TLabel;
+  SpinStartScale, SpinEndScale, SpinStepYaw: TFloatSpinEdit;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+  FirstScale, LastScale: Single;
+  Count: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+  begin
+    ErrorBox('Select at least 2 TCastleTransform components to apply Progressive Scale / Rotation (Alt+Shift+T).');
+    Exit;
+  end;
+
+  Count := TransformManipulate.SelectedCount;
+  FirstScale := TransformManipulate.Selected[0].Scale.X;
+  LastScale := TransformManipulate.Selected[Count - 1].Scale.X;
+  if SameValue(FirstScale, LastScale, 1e-3) then
+    LastScale := FirstScale * 2.0;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Progressive Scale Taper & Rotation Step (Alt+Shift+T)';
+    Dialog.Position := poMainFormCenter;
+    Dialog.Width := 390;
+    Dialog.Height := 220;
+    Dialog.BorderStyle := bsDialog;
+
+    CheckScale := TCheckBox.Create(Dialog);
+    CheckScale.Caption := 'Apply uniform Scale gradient from First to Last';
+    CheckScale.Checked := true;
+    CheckScale.Left := 16;
+    CheckScale.Top := 16;
+    CheckScale.Parent := Dialog;
+
+    LblStartScale := TLabel.Create(Dialog);
+    LblStartScale.Caption := 'Start Uniform Scale (First):';
+    LblStartScale.Left := 16;
+    LblStartScale.Top := 50;
+    LblStartScale.Parent := Dialog;
+
+    SpinStartScale := TFloatSpinEdit.Create(Dialog);
+    SpinStartScale.DecimalPlaces := 2;
+    SpinStartScale.Increment := 0.25;
+    SpinStartScale.MinValue := 0.01;
+    SpinStartScale.MaxValue := 10000;
+    SpinStartScale.Value := FirstScale;
+    SpinStartScale.Left := 220;
+    SpinStartScale.Top := 46;
+    SpinStartScale.Width := 140;
+    SpinStartScale.Parent := Dialog;
+
+    LblEndScale := TLabel.Create(Dialog);
+    LblEndScale.Caption := 'End Uniform Scale (Last):';
+    LblEndScale.Left := 16;
+    LblEndScale.Top := 86;
+    LblEndScale.Parent := Dialog;
+
+    SpinEndScale := TFloatSpinEdit.Create(Dialog);
+    SpinEndScale.DecimalPlaces := 2;
+    SpinEndScale.Increment := 0.25;
+    SpinEndScale.MinValue := 0.01;
+    SpinEndScale.MaxValue := 10000;
+    SpinEndScale.Value := LastScale;
+    SpinEndScale.Left := 220;
+    SpinEndScale.Top := 82;
+    SpinEndScale.Width := 140;
+    SpinEndScale.Parent := Dialog;
+
+    LblStepYaw := TLabel.Create(Dialog);
+    LblStepYaw.Caption := 'Cumulative Yaw Step (deg/item):';
+    LblStepYaw.Left := 16;
+    LblStepYaw.Top := 122;
+    LblStepYaw.Parent := Dialog;
+
+    SpinStepYaw := TFloatSpinEdit.Create(Dialog);
+    SpinStepYaw.DecimalPlaces := 1;
+    SpinStepYaw.Increment := 15.0;
+    SpinStepYaw.MinValue := -360.0;
+    SpinStepYaw.MaxValue := 360.0;
+    SpinStepYaw.Value := 0.0;
+    SpinStepYaw.Left := 220;
+    SpinStepYaw.Top := 118;
+    SpinStepYaw.Width := 140;
+    SpinStepYaw.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Apply Progressive';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyProgressiveTransformToSelection(
+        Vector3(SpinStartScale.Value, SpinStartScale.Value, SpinStartScale.Value),
+        Vector3(SpinEndScale.Value, SpinEndScale.Value, SpinEndScale.Value),
+        CheckScale.Checked,
+        1,
+        SpinStepYaw.Value);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.ButtonProgressiveXformClick(Sender: TObject);
+begin
+  ShowProgressiveTransformDialog;
+end;
+
 procedure TDesignFrame.StopPilotTransform;
 var
   SavedName: String;
@@ -9905,6 +10429,107 @@ begin
     ArrangeSelectedUserInterfacesInGrid(8.0)
   else
     ArrangeSelectedUserInterfacesInGrid(16.0);
+end;
+
+procedure TDesignFrame.StackSelectedUserInterfaces(
+  const Vertical: Boolean; const GapPx: Single);
+type
+  TUIStackEntry = record
+    Control: TCastleUserInterface;
+    Rect: TFloatRectangle;
+    SortKey: Single;
+  end;
+var
+  Selected: TComponentList;
+  SelectedCount, I, J, Count, MovedCount: Integer;
+  Entries: array of TUIStackEntry;
+  Temp: TUIStackEntry;
+  UI: TCastleUserInterface;
+  R: TFloatRectangle;
+  RunningEdge, DeltaPx: Single;
+begin
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if (Selected = nil) or (SelectedCount < 2) then Exit;
+
+    SetLength(Entries, SelectedCount);
+    Count := 0;
+    for I := 0 to SelectedCount - 1 do
+      if (Selected[I] is TCastleUserInterface) and
+         (Selected[I] <> DesignRoot) and
+         (not IsComponentLocked(Selected[I])) then
+      begin
+        UI := TCastleUserInterface(Selected[I]);
+        R := UI.RenderRectWithBorder;
+        if R.IsEmpty or (UI.UIScale <= 0) then Continue;
+        Entries[Count].Control := UI;
+        Entries[Count].Rect := R;
+        if Vertical then
+          Entries[Count].SortKey := -R.Top // top-to-bottom order
+        else
+          Entries[Count].SortKey := R.Left; // left-to-right order
+        Inc(Count);
+      end;
+
+    if Count < 2 then Exit;
+
+    for I := 0 to Count - 2 do
+      for J := I + 1 to Count - 1 do
+        if Entries[J].SortKey < Entries[I].SortKey then
+        begin
+          Temp := Entries[I];
+          Entries[I] := Entries[J];
+          Entries[J] := Temp;
+        end;
+
+    if Vertical then
+      RunningEdge := Entries[0].Rect.Bottom - GapPx * Entries[0].Control.UIScale
+    else
+      RunningEdge := Entries[0].Rect.Right + GapPx * Entries[0].Control.UIScale;
+
+    MovedCount := 0;
+    for I := 1 to Count - 1 do
+    begin
+      UI := Entries[I].Control;
+      if Vertical then
+      begin
+        DeltaPx := RunningEdge - Entries[I].Rect.Top;
+        if Abs(DeltaPx) > 1e-4 then
+        begin
+          UI.Translation := UI.Translation + Vector2(0, DeltaPx / UI.UIScale);
+          Inc(MovedCount);
+        end;
+        RunningEdge := RunningEdge - Entries[I].Rect.Height - GapPx * UI.UIScale;
+      end else
+      begin
+        DeltaPx := RunningEdge - Entries[I].Rect.Left;
+        if Abs(DeltaPx) > 1e-4 then
+        begin
+          UI.Translation := UI.Translation + Vector2(DeltaPx / UI.UIScale, 0);
+          Inc(MovedCount);
+        end;
+        RunningEdge := RunningEdge + Entries[I].Rect.Width + GapPx * UI.UIScale;
+      end;
+    end;
+
+    if MovedCount > 0 then
+      ModifiedOutsideObjectInspector(
+        Format('Stack %d UI control(s)', [Count]), ucHigh);
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUIStackClick(Sender: TObject);
+var
+  Gap: Single;
+begin
+  if not (Sender is TComponent) then Exit;
+  if ssShift in GetKeyShiftState then
+    Gap := 8.0
+  else
+    Gap := 0.0;
+  StackSelectedUserInterfaces(TComponent(Sender).Tag <> 0, Gap);
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -12310,6 +12935,63 @@ end;
 procedure TDesignFrame.MenuTreeViewItemSelectSameElevationClick(Sender: TObject);
 begin
   ShowSelectAtSameElevationDialog;
+end;
+
+procedure TDesignFrame.SelectTransformsInCameraFrustum;
+var
+  V: TCastleViewport;
+  Frustum: TFrustum;
+  TreeNode: TTreeNode;
+  C: TComponent;
+  CandT: TCastleTransform;
+  CandBox: TBox3D;
+  NewSelection: TComponentList;
+  InFrustum: Boolean;
+begin
+  V := CurrentViewport;
+  if (V = nil) or (V.Camera = nil) then
+  begin
+    ErrorBox('No active 3D/2D Viewport found for camera frustum selection (Ctrl+Shift+F).');
+    Exit;
+  end;
+
+  Frustum := V.Camera.Frustum;
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C is TCastleTransform) and (C <> DesignRoot) and
+         (not (C is TCastleAbstractRootTransform)) and
+         Selectable(C) and (not IsComponentLocked(C)) then
+      begin
+        CandT := TCastleTransform(C);
+        if CandT.Exists and CandT.HasWorldTransform and (CandT.World = V.Items) then
+        begin
+          CandBox := CandT.WorldBoundingBox;
+          if not CandBox.IsEmpty then
+            InFrustum := Frustum.Box3DCollisionPossibleSimple(CandBox)
+          else
+            InFrustum := Frustum.SphereCollisionPossibleSimple(CandT.WorldTranslation, 0.01);
+
+          if InFrustum and (NewSelection.IndexOf(CandT) = -1) then
+            NewSelection.Add(CandT);
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectInCameraFrustumClick(Sender: TObject);
+begin
+  SelectTransformsInCameraFrustum;
 end;
 
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;

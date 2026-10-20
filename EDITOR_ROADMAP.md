@@ -325,3 +325,26 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Bound to **`Ctrl+Shift+E`** in both the Viewport and Hierarchy Tree, plus **`Select At Same Elevation (Y)... (Ctrl+Shift+E)`** (`MenuTreeViewItemSelectSameElevation`) in `MenuTreeView`.
 - [x] **43.2. 2D UI Position Swap & 2D UI Grid Arrange (`SwapSelectedUserInterfacePositions`, `ArrangeSelectedUserInterfacesInGrid`)**
   - Added **`UI Swap Pos`** (`ButtonUISwapPos`) and **`UI Grid`** (`ButtonUIGridArrange`) to `PanelLayoutUI` to swap/cycle screen-space centers of 2+ selected `TCastleUserInterface` controls or arrange them into an even $\lceil\sqrt{N}\rceil$-column 2D screen grid (`16 px` gap, or `8 px` when `Shift`-clicked).
+
+### Phase 44: Arrange Existing Selection Along 3D Line Segment (`ArrangeSelectedAlongLine` / `ArrangeSelectedBetweenEndpoints` / `Alt+Shift+L`)
+- [x] **44.1. Even 3D Line-Segment Placement & Forward Orientation (`TCastleTransformManipulate.ArrangeSelectedAlongLine`, `ArrangeSelectedBetweenEndpoints`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedAlongLine(StartWorldPos, EndWorldPos, OrientAlongLine): Boolean` and `TCastleTransformManipulate.ArrangeSelectedBetweenEndpoints(OrientAlongLine): Boolean`: places 2+ top-level selected transforms at evenly spaced intervals ($t = i / (N - 1)$) along the 3D line segment between `StartWorldPos` and `EndWorldPos` (or between `Selected[0]` and `Selected[N-1]`), optionally orienting each transform's world forward vector along the line direction while keeping its up vector aligned with `World.GravityUp`.
+  - Added **`Line Arrange`** (`ButtonArrangeLine` in `PanelLayoutTransform`: normal click arranges between first and last selected endpoints; `Ctrl`-click also orients forward along the line; `Shift`-click opens the custom 3D endpoints dialog) and `ShowArrangeAlongLineDialog` bound to **`Alt+Shift+L`** in both the Viewport and Hierarchy Tree.
+
+### Phase 45: Automatic Bounding-Box Overlap Separation / Depenetrate (`SeparateOverlappingSelected` / `Alt+Shift+X`)
+- [x] **45.1. Iterative Minimum-Penetration-Vector Overlap Resolution (`TCastleTransformManipulate.SeparateOverlappingSelected`)**
+  - Implemented `TCastleTransformManipulate.SeparateOverlappingSelected(MinPadding, HorizontalOnly, MaxIterations): Boolean`: iteratively resolves intersecting `WorldBoundingBox` pairs among 2+ selected transforms (plus optional `MinPadding` clearance) along the minimum penetration axis (horizontal XZ plane when `HorizontalOnly = true` so Y elevation is preserved, or full 3D XYZ when `HorizontalOnly = false`).
+  - Added **`Depenetrate`** (`ButtonSeparateOverlaps` in `PanelLayoutTransform`: normal click separates horizontally with `0` padding; `Shift`-click opens `ShowSeparateOverlappingDialog`) and bound **`Alt+Shift+X`** in both the Viewport and Hierarchy Tree.
+
+### Phase 46: Progressive Scale Taper & Cumulative Rotation Step (`ApplyProgressiveTransformSelected` / `Alt+Shift+T`)
+- [x] **46.1. Selection-Ordered Scale Gradient & Spiral Yaw Step (`TCastleTransformManipulate.ApplyProgressiveTransformSelected`)**
+  - Implemented `TCastleTransformManipulate.ApplyProgressiveTransformSelected(StartScale, EndScale, ApplyScaleGradient, Axis, StepAngleRad): Boolean`: interpolates `Scale` linearly from `StartScale` (`Selected[0]`) to `EndScale` (`Selected[N-1]`) and/or applies a cumulative rotation increment $i \cdot \text{StepAngleRad}$ around `Axis` across 2+ top-level selected transforms.
+  - Added **`Taper / Spiral...`** (`ButtonProgressiveXform`) in `PanelLayoutTransform` and `ShowProgressiveTransformDialog` bound to **`Alt+Shift+T`** in both the Viewport and Hierarchy Tree.
+  - Added automated unit test `TestArrangeLineSeparateOverlappingAndProgressiveTransform` in `tests/code/testcases/testcastletransformmanipulate.pas`.
+
+### Phase 47: Select Transforms Visible In Camera Frustum (`SelectTransformsInCameraFrustum` / `Ctrl+Shift+F`) & 2D UI Horizontal / Vertical Edge-to-Edge Stack (`StackSelectedUserInterfaces`)
+- [x] **47.1. Camera Frustum Visibility Query (`SelectTransformsInCameraFrustum` / `Ctrl+Shift+F`)**
+  - Implemented `TDesignFrame.SelectTransformsInCameraFrustum`: tests all visible, unlocked `TCastleTransform` instances in the active viewport against `CurrentViewport.Camera.Frustum` (`Box3DCollisionPossibleSimple` / `SphereCollisionPossibleSimple`) and selects all transforms currently inside the camera's view frustum.
+  - Bound to **`Ctrl+Shift+F`** in both the Viewport and Hierarchy Tree, plus **`Select Visible In Camera View (Ctrl+Shift+F)`** (`MenuTreeViewItemSelectInCameraFrustum`) in `MenuTreeView`.
+- [x] **47.2. 2D UI Edge-to-Edge Horizontal & Vertical Stacking (`StackSelectedUserInterfaces` / `ButtonUIStackH` & `ButtonUIStackV`)**
+  - Implemented `TDesignFrame.StackSelectedUserInterfaces(Vertical, GapPx)` and added **`UI Stack H`** (`ButtonUIStackH`) and **`UI Stack V`** (`ButtonUIStackV`) to `PanelLayoutUI`, sorting 2+ selected `TCastleUserInterface` controls left-to-right or top-to-bottom and stacking them flush (`0 px` gap on normal click, or `8 px` gap on `Shift`-click).
