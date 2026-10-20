@@ -45,6 +45,7 @@ type
     procedure TestProjectAlongDirectionDistributeGapsAndSnapRotScale;
     procedure TestSwapPositionsAndMatchSelectedSize;
     procedure TestLookAtAimAndAlignSelectedBounds;
+    procedure TestMatchRotationTransformAndArrangeInCircle;
   end;
 
 implementation
@@ -869,6 +870,88 @@ begin
     AssertSameValue(10.0, Observer2.WorldBoundingBox.Data[1].Y, 1e-4);
     AssertSameValue(8.0, Observer1.Translation.Y, 1e-4);
     AssertSameValue(9.0, Observer2.Translation.Y, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestMatchRotationTransformAndArrangeInCircle;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  T1, T2, T3, T4: TCastleTransform;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := nil;
+  Manipulate := nil;
+  try
+    Viewport := TCastleViewport.Create(nil);
+    Manipulate := TCastleTransformManipulate.Create(nil);
+    Manipulate.CoordSpace := csWorld;
+
+    T1 := TCastleTransform.Create(Viewport);
+    T1.SetWorldView(Vector3(1, 2, 3), Vector3(1, 0, 0), Vector3(0, 1, 0));
+    T1.Scale := Vector3(2, 3, 4);
+    Viewport.Items.Add(T1);
+
+    T2 := TCastleTransform.Create(Viewport);
+    T2.Translation := Vector3(10, 5, 0);
+    Viewport.Items.Add(T2);
+
+    T3 := TCastleTransform.Create(Viewport);
+    T3.Translation := Vector3(20, 8, -5);
+    Viewport.Items.Add(T3);
+
+    T4 := TCastleTransform.Create(Viewport);
+    T4.Translation := Vector3(-30, 0, 5);
+    Viewport.Items.Add(T4);
+
+    // 1. Test MatchSelectedRotation: T2 and T3 match T1's world direction (1, 0, 0) while preserving position and scale
+    Manipulate.SetSelected([T1, T2, T3]);
+    AssertTrue(Manipulate.MatchSelectedRotation);
+    T2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(10, 5, 0), WorldPos, 1e-4);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+    AssertVectorEquals(Vector3(1, 1, 1), T2.Scale, 1e-4);
+    T3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(20, 8, -5), WorldPos, 1e-4);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+
+    // 2. Test MatchSelectedTransform(true, true, true): T2 matches T1's position, rotation, and scale
+    Manipulate.SetSelected([T1, T2]);
+    AssertTrue(Manipulate.MatchSelectedTransform(true, true, true));
+    AssertVectorEquals(Vector3(1, 2, 3), T2.WorldTranslation, 1e-4);
+    AssertVectorEquals(Vector3(2, 3, 4), T2.Scale, 1e-4);
+
+    // 3. Test ArrangeSelectedInCircle: arrange 4 transforms around center (0, Y, 0) with Radius = 10, OrientToCenter = true
+    T1.Translation := Vector3(-5, 1, 0);
+    T2.Translation := Vector3(5, 2, 0);
+    T3.Translation := Vector3(0, 3, -5);
+    T4.Translation := Vector3(0, 4, 5);
+    Manipulate.PivotMode := pmSelectionCenter;
+    Manipulate.SetSelected([T1, T2, T3, T4]);
+    AssertTrue(Manipulate.ArrangeSelectedInCircle(10.0, 360.0, true));
+
+    // I=0 (0 deg): (0, 1, 10), facing (0, 0, -1)
+    T1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 1, 10), WorldPos, 1e-3);
+    AssertVectorEquals(Vector3(0, 0, -1), WorldDir.Normalize, 1e-3);
+
+    // I=1 (90 deg): (10, 2, 0), facing (-1, 0, 0)
+    T2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(10, 2, 0), WorldPos, 1e-3);
+    AssertVectorEquals(Vector3(-1, 0, 0), WorldDir.Normalize, 1e-3);
+
+    // I=2 (180 deg): (0, 3, -10), facing (0, 0, 1)
+    T3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 3, -10), WorldPos, 1e-3);
+    AssertVectorEquals(Vector3(0, 0, 1), WorldDir.Normalize, 1e-3);
+
+    // I=3 (270 deg): (-10, 4, 0), facing (1, 0, 0)
+    T4.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(-10, 4, 0), WorldPos, 1e-3);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-3);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

@@ -278,3 +278,27 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Pressing **`Ctrl+Shift+0..9`** in the Viewport or Hierarchy Tree saves the names of all currently selected components into slot `0..9`; pressing **`Shift+0..9`** recalls that selection set (or **`Alt+Shift+0..9`** to additively union the saved set with the current selection).
 - [x] **35.2. Select Components By Substring or Wildcard Pattern (`SelectByNamePattern` / `ShowSelectByNamePatternDialog`)**
   - Implemented `TDesignFrame.SelectByNamePattern(Pattern)` and `ShowSelectByNamePatternDialog` (`Select By Name Pattern...` in `MenuTreeView`), supporting case-insensitive wildcard patterns (`*`, `?` via `StrUtils.IsWild`, pre-populated from `StripNumericSuffix(SelectedComponent.Name) + '*'`) as well as plain substring matching across all selectable, unlocked components.
+
+### Phase 36: Match Rotation (`MatchSelectedRotation`) & Match Transform (`MatchSelectedTransform`) to Primary Selection (`Ctrl+Shift+M`)
+- [x] **36.1. Copy World Orientation & Full Transform from Primary Selection (`MatchSelectedRotation`, `MatchSelectedTransform`)**
+  - Implemented `TCastleTransformManipulate.MatchSelectedRotation: Boolean` and `TCastleTransformManipulate.MatchSelectedTransform(MatchPos, MatchRot, MatchScale): Boolean`: copies the primary selected transform's (`Selected[0]`) world-space orientation (`GetWorldView` / `SetWorldView`), world position, and/or scale to all secondary top-level selected transforms (`Selected[1..N-1]`).
+  - Added **`Match Rot`** (`ButtonMatchRotation`) in `PanelLayoutTransform` and bound **`Ctrl+Shift+M`** in both the 3D Viewport and Hierarchy Tree: normal click (or `Ctrl+Shift+M`) matches world rotation only, **`Shift`-click** matches world position + rotation, and **`Ctrl`-click** matches full transform (position + rotation + scale).
+
+### Phase 37: Circular / Radial Arrange Existing Selection (`ArrangeSelectedInCircle` / `Alt+Shift+C`)
+- [x] **37.1. Horizontal Circle & Arc Arrangement for Existing Transforms (`TCastleTransformManipulate.ArrangeSelectedInCircle`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedInCircle(Radius, TotalAngleDeg, OrientToCenter): Boolean`: arranges 2+ existing top-level selected transforms around a horizontal (XZ) circle or arc centered at `SelectionWorkingCenter` (or `Selected[0]` when `PivotMode = pmPrimarySelected`), automatically computing the average horizontal radius when `Radius <= 0` and optionally orienting each transform to face the circle center (`OrientToCenter = true`).
+  - Added **`Circle Arrange`** (`ButtonArrangeCircle` in `PanelLayoutTransform`: normal click arranges immediately with auto-radius; `Shift`-click opens the customization dialog) and `ShowArrangeInCircleDialog` bound to **`Alt+Shift+C`** in both the Viewport and Hierarchy Tree.
+  - Added automated unit test `TestMatchRotationTransformAndArrangeInCircle` in `tests/code/testcases/testcastletransformmanipulate.pas`.
+
+### Phase 38: Select Overlapping / Intersecting Transforms (`SelectOverlappingTransforms` / `Ctrl+Shift+O`) & Select By Bounding-Box Diagonal Size Range (`SelectBySizeRange`)
+- [x] **38.1. Overlap / Duplicate Placement Detection (`SelectOverlappingTransforms` / `Ctrl+Shift+O`)**
+  - Implemented `TDesignFrame.SelectOverlappingTransforms`: checks `WorldBoundingBox` intersections (with a $10^{-3}$ interior margin so flush-stacked objects are not false-flagged, while excluding ancestor/descendant pairs) against the active selection, or scans all pairs across the entire scene when nothing (or a non-overlapping transform) is selected.
+  - Bound to **`Ctrl+Shift+O`** in both the 3D Viewport and Hierarchy Tree, plus **`Select Overlapping Transforms (Ctrl+Shift+O)`** in `MenuTreeView`.
+- [x] **38.2. Select Transforms By World Bounding-Box Diagonal Size (`SelectBySizeRange` / `ShowSelectBySizeRangeDialog`)**
+  - Implemented `TDesignFrame.SelectBySizeRange(MinDiagonal, MaxDiagonal)` and `ShowSelectBySizeRangeDialog` (**`Select By Bounding-Box Size...`** in `MenuTreeView`), pre-populated with $[0.8 \times D, 1.2 \times D]$ of the active transform's world bounding-box diagonal length $D$ to quickly find similarly sized props across the level.
+
+### Phase 39: World/Local-Aware 3D Transform & 2D UI Layout Attribute Copy/Paste (`CopyTransform` / `PasteTransform` / `Ctrl+Alt+C` / `Ctrl+Alt+V`)
+- [x] **39.1. Coordinate-Space-Aware Transform & 2D UI Layout Attribute Copy/Paste**
+  - Upgraded `TDesignFrame.CopyTransform` and `TDesignFrame.PasteTransform(RotationAndScaleOnly)` to support both 3D `TCastleTransform` (recording both local `Translation`/`Rotation`/`Scale` and world `GetWorldView` state, pasting in World space when `CoordSpace = csWorld` or Local space when `csLocal`) and 2D `TCastleUserInterface` (`Translation`, `Width`, `Height`, `FullSize`, horizontal/vertical anchors, and `Border.AllSides`).
+  - Holding **`Shift`** when pasting (**`Ctrl+Alt+Shift+V`** or `Shift`-clicking **`Paste Transform`**) pastes **Rotation & Scale only** (for 3D transforms) or **Size & Border only** (for 2D UI controls), preserving each target object's existing position.
+  - Bound to **`Ctrl+Alt+C`**, **`Ctrl+Alt+V`**, and **`Ctrl+Alt+Shift+V`** in both the 3D Viewport and Hierarchy Tree, plus **`Copy Transform / UI Layout (Ctrl+Alt+C)`** and **`Paste Transform / UI Layout (Ctrl+Alt+V)`** in `MenuTreeView`.

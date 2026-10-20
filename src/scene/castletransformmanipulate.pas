@@ -480,6 +480,35 @@ type
       Returns @true if at least one selected transform was modified. }
     function AlignSelectedBounds(const Axis: T3DAxis;
       const UseMaxFace: Boolean = false): Boolean;
+
+    { Copy the world-space orientation (@code(Direction) and @code(Up)) of the
+      primary selected transform (@code(Selected[0])) to all secondary top-level
+      selected transforms (@code(Selected[1..N-1])), preserving each transform's
+      existing world position and scale.
+      Requires at least 2 top-level selected transforms.
+      Returns @true if at least one selected transform was modified. }
+    function MatchSelectedRotation: Boolean;
+
+    { Copy the world-space position (@code(MatchPos)), world-space orientation
+      (@code(MatchRot)), and/or scale (@code(MatchScale)) of the primary selected
+      transform (@code(Selected[0])) to all secondary top-level selected transforms
+      (@code(Selected[1..N-1])).
+      Requires at least 2 top-level selected transforms.
+      Returns @true if at least one selected transform was modified. }
+    function MatchSelectedTransform(const MatchPos, MatchRot, MatchScale: Boolean): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) around
+      a horizontal (XZ) circle or arc of radius @code(Radius) centered at the active
+      selection pivot (@link(SelectionWorkingCenter) when @link(PivotMode) is
+      @link(pmSelectionCenter), or @code(Selected[0]) when @link(pmPrimarySelected)).
+      - When @code(Radius <= 0), automatically uses the average horizontal distance
+        of the selected transforms from the center (or @code(5.0) if all coincide).
+      - When @code(OrientToCenter) is @true, rotates each transform so its world
+        forward direction (@code(-Z)) faces the circle center.
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInCircle(const Radius: Single;
+      const TotalAngleDeg: Single = 360.0;
+      const OrientToCenter: Boolean = true): Boolean;
   end;
 
 var
@@ -2968,6 +2997,229 @@ begin
       Pos.Data[Axis] := Pos.Data[Axis] + Delta;
       SetTransformWorkingPos(Items[I], Pos);
       Result := true;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.MatchSelectedRotation: Boolean;
+begin
+  Result := MatchSelectedTransform(false, true, false);
+end;
+
+function TCastleTransformManipulate.MatchSelectedTransform(
+  const MatchPos, MatchRot, MatchScale: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T, Primary: TCastleTransform;
+  PrimaryPos, PrimaryDir, PrimaryUp, PrimaryScale: TVector3;
+  CurPos, CurDir, CurUp, NewPos, NewDir, NewUp: TVector3;
+begin
+  Result := false;
+  if (not MatchPos) and (not MatchRot) and (not MatchScale) then Exit;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  Primary := Items[0];
+  if Primary.HasWorldTransform then
+    Primary.GetWorldView(PrimaryPos, PrimaryDir, PrimaryUp)
+  else
+  begin
+    PrimaryPos := Primary.Translation;
+    PrimaryDir := Primary.Direction;
+    PrimaryUp := Primary.Up;
+  end;
+  PrimaryScale := Primary.Scale;
+
+  for I := 1 to Count - 1 do
+  begin
+    T := Items[I];
+    if MatchPos or MatchRot then
+    begin
+      if T.HasWorldTransform then
+        T.GetWorldView(CurPos, CurDir, CurUp)
+      else
+      begin
+        CurPos := T.Translation;
+        CurDir := T.Direction;
+        CurUp := T.Up;
+      end;
+
+      if MatchPos then
+        NewPos := PrimaryPos
+      else
+        NewPos := CurPos;
+
+      if MatchRot then
+      begin
+        NewDir := PrimaryDir;
+        NewUp := PrimaryUp;
+      end else
+      begin
+        NewDir := CurDir;
+        NewUp := CurUp;
+      end;
+
+      if (not TVector3.Equals(NewPos, CurPos)) or
+         (not TVector3.Equals(NewDir, CurDir)) or
+         (not TVector3.Equals(NewUp, CurUp)) then
+      begin
+        if MatchRot then
+        begin
+          if T.HasWorldTransform then
+            T.SetWorldView(NewPos, NewDir, NewUp)
+          else
+            T.SetView(NewPos, NewDir, NewUp);
+        end else
+          SetTransformWorkingPos(T, NewPos);
+        Result := true;
+      end;
+    end;
+
+    if MatchScale and (not TVector3.Equals(T.Scale, PrimaryScale)) then
+    begin
+      T.Scale := PrimaryScale;
+      Result := true;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInCircle(
+  const Radius: Single; const TotalAngleDeg: Single;
+  const OrientToCenter: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, NewPos, CurDir, CurUp, NewDir, NewUp, GravityUp, Side: TVector3;
+  EffRadius, SumDist, AngleStepRad, Angle, SinA, CosA: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  if FPivotMode = pmPrimarySelected then
+    CenterPos := GetTransformWorkingPos(Items[0])
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  if Radius > 0 then
+    EffRadius := Radius
+  else
+  begin
+    SumDist := 0;
+    for I := 0 to Count - 1 do
+    begin
+      CurPos := GetTransformWorkingPos(Items[I]);
+      SumDist := SumDist + Hypot(CurPos.X - CenterPos.X, CurPos.Z - CenterPos.Z);
+    end;
+    EffRadius := SumDist / Count;
+    if EffRadius < 1e-4 then
+      EffRadius := 5.0;
+  end;
+
+  if SameValue(Abs(TotalAngleDeg), 360.0, 1e-3) or (Abs(TotalAngleDeg) >= 360.0) then
+    AngleStepRad := DegToRad(TotalAngleDeg) / Count
+  else
+    AngleStepRad := DegToRad(TotalAngleDeg) / (Count - 1);
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    Angle := I * AngleStepRad;
+    SinCos(Angle, SinA, CosA);
+
+    CurPos := GetTransformWorkingPos(T);
+    NewPos := Vector3(
+      CenterPos.X + SinA * EffRadius,
+      CurPos.Y,
+      CenterPos.Z + CosA * EffRadius);
+
+    if not TVector3.Equals(NewPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, NewPos);
+      Result := true;
+    end;
+
+    if OrientToCenter then
+    begin
+      if T.HasWorldTransform then
+        T.GetWorldView(CurPos, CurDir, CurUp)
+      else
+      begin
+        CurPos := T.Translation;
+        CurDir := T.Direction;
+        CurUp := T.Up;
+      end;
+
+      NewDir := Vector3(CenterPos.X - CurPos.X, 0, CenterPos.Z - CurPos.Z);
+      if not NewDir.IsZero(1e-5) then
+      begin
+        NewDir := NewDir.Normalize;
+        if T.World <> nil then
+          GravityUp := T.World.GravityUp
+        else
+          GravityUp := Vector3(0, 1, 0);
+
+        Side := TVector3.CrossProduct(NewDir, GravityUp);
+        if Side.IsZero(1e-4) then
+          Side := TVector3.CrossProduct(NewDir, CurUp);
+        if Side.IsZero(1e-4) then
+          Side := Vector3(1, 0, 0);
+        NewUp := TVector3.CrossProduct(Side, NewDir).Normalize;
+
+        if (not TVector3.Equals(NewDir, CurDir)) or
+           (not TVector3.Equals(NewUp, CurUp)) then
+        begin
+          if T.HasWorldTransform then
+            T.SetWorldView(CurPos, NewDir, NewUp)
+          else
+            T.SetView(CurPos, NewDir, NewUp);
+          Result := true;
+        end;
+      end;
     end;
   end;
 

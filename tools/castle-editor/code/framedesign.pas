@@ -319,6 +319,8 @@ type
       ButtonProjectAlongView: TButton;
       ButtonSwapPositions: TButton;
       ButtonMatchSize: TButton;
+      ButtonMatchRotation: TButton;
+      ButtonArrangeCircle: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -356,6 +358,10 @@ type
       MenuTreeViewItemSelectSameUrl: TMenuItem;
       MenuTreeViewItemSelectWithinRadius: TMenuItem;
       MenuTreeViewItemSelectByPattern: TMenuItem;
+      MenuTreeViewItemSelectOverlapping: TMenuItem;
+      MenuTreeViewItemSelectBySize: TMenuItem;
+      MenuTreeViewItemCopyTransform: TMenuItem;
+      MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
       MenuTreeViewItemCollapseAll: TMenuItem;
       FLockedComponents: TComponentList;
@@ -377,6 +383,20 @@ type
       FCopiedTranslation: TVector3;
       FCopiedRotation: TVector4;
       FCopiedScale: TVector3;
+      FCopiedHasWorld: Boolean;
+      FCopiedWorldPos: TVector3;
+      FCopiedWorldDir: TVector3;
+      FCopiedWorldUp: TVector3;
+      FCopiedUIValid: Boolean;
+      FCopiedUITranslation: TVector2;
+      FCopiedUIWidth: Single;
+      FCopiedUIHeight: Single;
+      FCopiedUIFullSize: Boolean;
+      FCopiedUIHorzAnchorSelf: THorizontalPosition;
+      FCopiedUIHorzAnchorParent: THorizontalPosition;
+      FCopiedUIVertAnchorSelf: TVerticalPosition;
+      FCopiedUIVertAnchorParent: TVerticalPosition;
+      FCopiedUIBorderAllSides: Single;
       FShowStatisticsToolbar: Boolean;
       ButtonViewMode: TSpeedButton;
       ButtonShowStats: TSpeedButton;
@@ -404,6 +424,8 @@ type
     procedure ButtonRandomizeTransformClick(Sender: TObject);
     procedure ButtonSwapPositionsClick(Sender: TObject);
     procedure ButtonMatchSizeClick(Sender: TObject);
+    procedure ButtonMatchRotationClick(Sender: TObject);
+    procedure ButtonArrangeCircleClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -438,6 +460,10 @@ type
     procedure MenuTreeViewItemSelectSameUrlClick(Sender: TObject);
     procedure MenuTreeViewItemSelectWithinRadiusClick(Sender: TObject);
     procedure MenuTreeViewItemSelectByPatternClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectOverlappingClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectBySizeClick(Sender: TObject);
+    procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
+    procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
     procedure MenuTreeViewItemCollapseAllClick(Sender: TObject);
     function NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
@@ -877,6 +903,11 @@ type
     procedure RandomizeSelectionTransform;
     procedure SwapSelectedTransforms;
     procedure MatchSelectedTransformSize(const Axis: Integer = -1);
+    procedure MatchSelectedTransformRotation(const IncludePosition: Boolean = false;
+      const IncludeScale: Boolean = false);
+    procedure ArrangeSelectionInCircle(const Radius: Single;
+      const TotalAngleDeg: Single = 360.0; const OrientToCenter: Boolean = true);
+    procedure ShowArrangeInCircleDialog;
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -909,6 +940,9 @@ type
     procedure RecallSelectionSet(const Slot: Integer; const Additive: Boolean = false);
     procedure SelectByNamePattern(const Pattern: String);
     procedure ShowSelectByNamePatternDialog;
+    procedure SelectOverlappingTransforms;
+    procedure SelectBySizeRange(const MinDiagonal, MaxDiagonal: Single);
+    procedure ShowSelectBySizeRangeDialog;
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -927,7 +961,7 @@ type
     procedure CollapseSelectedSubtree;
     procedure ResetSelectedPropertyToDefault;
     procedure CopyTransform;
-    procedure PasteTransform;
+    procedure PasteTransform(const RotationAndScaleOnly: Boolean = false);
     procedure CycleViewportRenderMode;
     procedure UpdateViewModeButtonCaption;
     function EffectiveShowStatistics: Boolean;
@@ -1553,7 +1587,50 @@ begin
     begin
       Frame.ClearViewportMeasurement;
       Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkShift] then
+    begin
+      Frame.MatchSelectedTransformRotation(false, false);
+      Exit(true);
     end;
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyC) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    if Event.ModifiersDown = [mkAlt, mkShift] then
+    begin
+      Frame.ShowArrangeInCircleDialog;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt] then
+    begin
+      Frame.CopyTransform;
+      Exit(true);
+    end;
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyV) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    if Event.ModifiersDown = [mkCtrl, mkAlt] then
+    begin
+      Frame.PasteTransform(false);
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt, mkShift] then
+    begin
+      Frame.PasteTransform(true);
+      Exit(true);
+    end;
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyO) and
+     (Event.ModifiersDown = [mkCtrl, mkShift]) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    Frame.SelectOverlappingTransforms;
+    Exit(true);
   end;
 
   if (Frame.Mode <> moInteract) and (Event.EventType = itKey) and
@@ -2565,7 +2642,7 @@ begin
   ButtonCopyTransform := TButton.Create(Self);
   ButtonCopyTransform.AutoSize := true;
   ButtonCopyTransform.Caption := 'Copy Transform';
-  ButtonCopyTransform.Hint := 'Copy Translation, Rotation, and Scale of the selected 3D transform';
+  ButtonCopyTransform.Hint := 'Copy Transform / UI Layout attributes from selected component (Ctrl+Alt+C)';
   ButtonCopyTransform.ShowHint := true;
   ButtonCopyTransform.OnClick := @ButtonCopyTransformClick;
   ButtonCopyTransform.Parent := PanelLayoutTransform;
@@ -2573,7 +2650,7 @@ begin
   ButtonPasteTransform := TButton.Create(Self);
   ButtonPasteTransform.AutoSize := true;
   ButtonPasteTransform.Caption := 'Paste Transform';
-  ButtonPasteTransform.Hint := 'Paste copied Translation, Rotation, and Scale onto all selected 3D transforms';
+  ButtonPasteTransform.Hint := 'Paste copied Transform (World/Local aware) or UI Layout onto selected components (Ctrl+Alt+V | Shift-click or Ctrl+Alt+Shift+V: Rot+Scale / Size only)';
   ButtonPasteTransform.ShowHint := true;
   ButtonPasteTransform.Enabled := false;
   ButtonPasteTransform.OnClick := @ButtonPasteTransformClick;
@@ -2770,6 +2847,26 @@ begin
   ButtonMatchSize.BorderSpacing.Around := 2;
   ButtonMatchSize.OnClick := @ButtonMatchSizeClick;
   ButtonMatchSize.Parent := PanelLayoutTransform;
+
+  ButtonMatchRotation := TButton.Create(Self);
+  ButtonMatchRotation.Align := alTop;
+  ButtonMatchRotation.AutoSize := true;
+  ButtonMatchRotation.Caption := 'Match Rot';
+  ButtonMatchRotation.Hint := 'Match world orientation of selected 3D transforms to primary object (Ctrl+Shift+M | Shift-click: Match Pos+Rot | Ctrl-click: Match Pos+Rot+Scale)';
+  ButtonMatchRotation.ShowHint := true;
+  ButtonMatchRotation.BorderSpacing.Around := 2;
+  ButtonMatchRotation.OnClick := @ButtonMatchRotationClick;
+  ButtonMatchRotation.Parent := PanelLayoutTransform;
+
+  ButtonArrangeCircle := TButton.Create(Self);
+  ButtonArrangeCircle.Align := alTop;
+  ButtonArrangeCircle.AutoSize := true;
+  ButtonArrangeCircle.Caption := 'Circle Arrange';
+  ButtonArrangeCircle.Hint := 'Arrange 2+ selected 3D transforms around a horizontal circle or arc (Alt+Shift+C | Shift-click for Radius/Arc dialog)';
+  ButtonArrangeCircle.ShowHint := true;
+  ButtonArrangeCircle.BorderSpacing.Around := 2;
+  ButtonArrangeCircle.OnClick := @ButtonArrangeCircleClick;
+  ButtonArrangeCircle.Parent := PanelLayoutTransform;
 
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
@@ -3021,6 +3118,26 @@ begin
   MenuTreeViewItemSelectByPattern.Caption := 'Select By Name Pattern...';
   MenuTreeViewItemSelectByPattern.OnClick := @MenuTreeViewItemSelectByPatternClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectByPattern);
+
+  MenuTreeViewItemSelectOverlapping := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectOverlapping.Caption := 'Select Overlapping Transforms (Ctrl+Shift+O)';
+  MenuTreeViewItemSelectOverlapping.OnClick := @MenuTreeViewItemSelectOverlappingClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectOverlapping);
+
+  MenuTreeViewItemSelectBySize := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectBySize.Caption := 'Select By Bounding-Box Size...';
+  MenuTreeViewItemSelectBySize.OnClick := @MenuTreeViewItemSelectBySizeClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectBySize);
+
+  MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
+  MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
+  MenuTreeViewItemCopyTransform.OnClick := @MenuTreeViewItemCopyTransformClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemCopyTransform);
+
+  MenuTreeViewItemPasteTransform := TMenuItem.Create(Self);
+  MenuTreeViewItemPasteTransform.Caption := 'Paste Transform / UI Layout (Ctrl+Alt+V)';
+  MenuTreeViewItemPasteTransform.OnClick := @MenuTreeViewItemPasteTransformClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemPasteTransform);
 
   MenuTreeViewItemInvertSelection := TMenuItem.Create(Self);
   MenuTreeViewItemInvertSelection.Caption := 'Invert Selection (Ctrl+I)';
@@ -6668,6 +6785,10 @@ begin
       ButtonSwapPositions.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonMatchSize <> nil then
       ButtonMatchSize.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonMatchRotation <> nil then
+      ButtonMatchRotation.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeCircle <> nil then
+      ButtonArrangeCircle.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonPilotTransform <> nil then
       ButtonPilotTransform.Enabled := T <> nil;
     if ButtonAimAtTarget <> nil then
@@ -7784,6 +7905,9 @@ end;
 procedure TDesignFrame.CopyTransform;
 var
   T: TCastleTransform;
+  UI: TCastleUserInterface;
+  Selected: TComponentList;
+  SelectedCount, I: Integer;
 begin
   T := CurrentTransform;
   if (T = nil) and (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0) then
@@ -7793,39 +7917,144 @@ begin
     FCopiedTranslation := T.Translation;
     FCopiedRotation := T.Rotation;
     FCopiedScale := T.Scale;
+    FCopiedHasWorld := T.HasWorldTransform;
+    if FCopiedHasWorld then
+      T.GetWorldView(FCopiedWorldPos, FCopiedWorldDir, FCopiedWorldUp)
+    else
+    begin
+      FCopiedWorldPos := T.Translation;
+      FCopiedWorldDir := T.Direction;
+      FCopiedWorldUp := T.Up;
+    end;
     FCopiedTransformValid := true;
     if ButtonPasteTransform <> nil then
       ButtonPasteTransform.Enabled := true;
   end;
+
+  UI := SelectedUserInterface;
+  if UI = nil then
+  begin
+    GetSelected(Selected, SelectedCount, false);
+    try
+      if Selected <> nil then
+        for I := 0 to SelectedCount - 1 do
+          if Selected[I] is TCastleUserInterface then
+          begin
+            UI := TCastleUserInterface(Selected[I]);
+            Break;
+          end;
+    finally
+      FreeAndNil(Selected);
+    end;
+  end;
+
+  if UI <> nil then
+  begin
+    FCopiedUITranslation := UI.Translation;
+    FCopiedUIWidth := UI.Width;
+    FCopiedUIHeight := UI.Height;
+    FCopiedUIFullSize := UI.FullSize;
+    FCopiedUIHorzAnchorSelf := UI.HorizontalAnchorSelf;
+    FCopiedUIHorzAnchorParent := UI.HorizontalAnchorParent;
+    FCopiedUIVertAnchorSelf := UI.VerticalAnchorSelf;
+    FCopiedUIVertAnchorParent := UI.VerticalAnchorParent;
+    FCopiedUIBorderAllSides := UI.Border.AllSides;
+    FCopiedUIValid := true;
+  end;
 end;
 
-procedure TDesignFrame.PasteTransform;
+procedure TDesignFrame.PasteTransform(const RotationAndScaleOnly: Boolean);
+
+  procedure ApplyTransformTo(const T: TCastleTransform);
+  var
+    CurPos, CurDir, CurUp: TVector3;
+    UseWorld: Boolean;
+  begin
+    if (T = nil) or IsComponentLocked(T) then Exit;
+    UseWorld := (TransformManipulate <> nil) and
+                (TransformManipulate.CoordSpace = csWorld) and
+                FCopiedHasWorld and T.HasWorldTransform;
+    if RotationAndScaleOnly then
+    begin
+      if UseWorld then
+      begin
+        T.GetWorldView(CurPos, CurDir, CurUp);
+        T.SetWorldView(CurPos, FCopiedWorldDir, FCopiedWorldUp);
+      end else
+        T.Rotation := FCopiedRotation;
+    end else
+    begin
+      if UseWorld then
+        T.SetWorldView(FCopiedWorldPos, FCopiedWorldDir, FCopiedWorldUp)
+      else
+      begin
+        T.Translation := FCopiedTranslation;
+        T.Rotation := FCopiedRotation;
+      end;
+    end;
+    T.Scale := FCopiedScale;
+  end;
+
 var
   T: TCastleTransform;
-  I: Integer;
+  UI: TCastleUserInterface;
+  Selected: TComponentList;
+  SelectedCount, I, PastedUICount: Integer;
 begin
-  if not FCopiedTransformValid then Exit;
-
-  if (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 1) then
+  if FCopiedTransformValid and
+     ((CurrentTransform <> nil) or ((TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0))) then
   begin
-    for I := 0 to TransformManipulate.SelectedCount - 1 do
+    if (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 1) then
     begin
-      T := TransformManipulate.Selected[I];
-      T.Translation := FCopiedTranslation;
-      T.Rotation := FCopiedRotation;
-      T.Scale := FCopiedScale;
+      for I := 0 to TransformManipulate.SelectedCount - 1 do
+        ApplyTransformTo(TransformManipulate.Selected[I]);
+      ModifiedOutsideObjectInspector(
+        Format('Paste transform to %d objects', [TransformManipulate.SelectedCount]), ucHigh);
+    end else
+    begin
+      T := CurrentTransform;
+      if (T = nil) and (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0) then
+        T := TransformManipulate.Selected[0];
+      if T <> nil then
+      begin
+        ApplyTransformTo(T);
+        ModifiedOutsideObjectInspector('Paste transform to ' + T.Name, ucHigh);
+      end;
     end;
-    ModifiedOutsideObjectInspector(
-      Format('Paste transform to %d objects', [TransformManipulate.SelectedCount]), ucHigh);
-  end else
+    Exit;
+  end;
+
+  if FCopiedUIValid then
   begin
-    T := CurrentTransform;
-    if T <> nil then
-    begin
-      T.Translation := FCopiedTranslation;
-      T.Rotation := FCopiedRotation;
-      T.Scale := FCopiedScale;
-      ModifiedOutsideObjectInspector('Paste transform to ' + T.Name, ucHigh);
+    GetSelected(Selected, SelectedCount, false);
+    try
+      PastedUICount := 0;
+      if Selected <> nil then
+        for I := 0 to SelectedCount - 1 do
+          if (Selected[I] is TCastleUserInterface) and
+             (Selected[I] <> DesignRoot) and
+             (not IsComponentLocked(Selected[I])) then
+          begin
+            UI := TCastleUserInterface(Selected[I]);
+            if not RotationAndScaleOnly then
+            begin
+              UI.HorizontalAnchorSelf := FCopiedUIHorzAnchorSelf;
+              UI.HorizontalAnchorParent := FCopiedUIHorzAnchorParent;
+              UI.VerticalAnchorSelf := FCopiedUIVertAnchorSelf;
+              UI.VerticalAnchorParent := FCopiedUIVertAnchorParent;
+              UI.Translation := FCopiedUITranslation;
+            end;
+            UI.Width := FCopiedUIWidth;
+            UI.Height := FCopiedUIHeight;
+            UI.FullSize := FCopiedUIFullSize;
+            UI.Border.AllSides := FCopiedUIBorderAllSides;
+            Inc(PastedUICount);
+          end;
+      if PastedUICount > 0 then
+        ModifiedOutsideObjectInspector(
+          Format('Paste UI layout to %d control(s)', [PastedUICount]), ucHigh);
+    finally
+      FreeAndNil(Selected);
     end;
   end;
 end;
@@ -7837,7 +8066,17 @@ end;
 
 procedure TDesignFrame.ButtonPasteTransformClick(Sender: TObject);
 begin
-  PasteTransform;
+  PasteTransform(ssShift in GetKeyShiftState);
+end;
+
+procedure TDesignFrame.MenuTreeViewItemCopyTransformClick(Sender: TObject);
+begin
+  CopyTransform;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemPasteTransformClick(Sender: TObject);
+begin
+  PasteTransform(ssShift in GetKeyShiftState);
 end;
 
 procedure TDesignFrame.ToggleSelectedVisibility;
@@ -8013,6 +8252,36 @@ begin
     if (Key = Ord('P')) and (Shift = [ssCtrl, ssShift]) then
     begin
       TogglePilotTransform;
+      Key := 0;
+    end else
+    if (Key = Ord('M')) and (Shift = [ssCtrl, ssShift]) then
+    begin
+      MatchSelectedTransformRotation(false, false);
+      Key := 0;
+    end else
+    if (Key = Ord('C')) and (Shift = [ssAlt, ssShift]) then
+    begin
+      ShowArrangeInCircleDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('C')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      CopyTransform;
+      Key := 0;
+    end else
+    if (Key = Ord('V')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      PasteTransform(false);
+      Key := 0;
+    end else
+    if (Key = Ord('V')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      PasteTransform(true);
+      Key := 0;
+    end else
+    if (Key = Ord('O')) and (Shift = [ssCtrl, ssShift]) then
+    begin
+      SelectOverlappingTransforms;
       Key := 0;
     end;
   end;
@@ -8589,6 +8858,153 @@ begin
     MatchSelectedTransformSize(1) // Match Y height only when Shift-clicked
   else
     MatchSelectedTransformSize(-1); // Match all X, Y, Z dimensions
+end;
+
+procedure TDesignFrame.MatchSelectedTransformRotation(
+  const IncludePosition, IncludeScale: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.MatchSelectedTransform(IncludePosition, true, IncludeScale);
+end;
+
+procedure TDesignFrame.ButtonMatchRotationClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssCtrl in ShiftState then
+    MatchSelectedTransformRotation(true, true)
+  else if ssShift in ShiftState then
+    MatchSelectedTransformRotation(true, false)
+  else
+    MatchSelectedTransformRotation(false, false);
+end;
+
+procedure TDesignFrame.ArrangeSelectionInCircle(const Radius, TotalAngleDeg: Single;
+  const OrientToCenter: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInCircle(Radius, TotalAngleDeg, OrientToCenter);
+end;
+
+procedure TDesignFrame.ShowArrangeInCircleDialog;
+var
+  Dialog: TForm;
+  LblRadius, LblAngle: TLabel;
+  SpinRadius, SpinAngle: TFloatSpinEdit;
+  CheckOrient: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+  CenterPos, CurPos: TVector3;
+  DefaultRadius, SumDist: Single;
+  I, Count: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+  begin
+    ErrorBox('Select at least 2 TCastleTransform components to arrange in a circle (Alt+Shift+C).');
+    Exit;
+  end;
+
+  CenterPos := TransformManipulate.SelectionWorkingCenter;
+  SumDist := 0;
+  Count := TransformManipulate.SelectedCount;
+  for I := 0 to Count - 1 do
+  begin
+    CurPos := TransformManipulate.Selected[I].WorldTranslation;
+    SumDist := SumDist + Hypot(CurPos.X - CenterPos.X, CurPos.Z - CenterPos.Z);
+  end;
+  DefaultRadius := SumDist / Count;
+  if DefaultRadius < 0.05 then
+    DefaultRadius := 5.0;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Arrange Selection in Circle (Alt+Shift+C)';
+    Dialog.Position := poMainFormCenter;
+    Dialog.Width := 370;
+    Dialog.Height := 185;
+    Dialog.BorderStyle := bsDialog;
+
+    LblRadius := TLabel.Create(Dialog);
+    LblRadius.Caption := 'Circle Radius (0 = auto):';
+    LblRadius.Left := 16;
+    LblRadius.Top := 18;
+    LblRadius.Parent := Dialog;
+
+    SpinRadius := TFloatSpinEdit.Create(Dialog);
+    SpinRadius.DecimalPlaces := 2;
+    SpinRadius.Increment := 1.0;
+    SpinRadius.MinValue := 0.0;
+    SpinRadius.MaxValue := 100000;
+    SpinRadius.Value := DefaultRadius;
+    SpinRadius.Left := 200;
+    SpinRadius.Top := 14;
+    SpinRadius.Width := 140;
+    SpinRadius.Parent := Dialog;
+
+    LblAngle := TLabel.Create(Dialog);
+    LblAngle.Caption := 'Total Arc Angle (deg):';
+    LblAngle.Left := 16;
+    LblAngle.Top := 54;
+    LblAngle.Parent := Dialog;
+
+    SpinAngle := TFloatSpinEdit.Create(Dialog);
+    SpinAngle.DecimalPlaces := 1;
+    SpinAngle.Increment := 15.0;
+    SpinAngle.MinValue := -360.0;
+    SpinAngle.MaxValue := 360.0;
+    SpinAngle.Value := 360.0;
+    SpinAngle.Left := 200;
+    SpinAngle.Top := 50;
+    SpinAngle.Width := 140;
+    SpinAngle.Parent := Dialog;
+
+    CheckOrient := TCheckBox.Create(Dialog);
+    CheckOrient.Caption := 'Orient transforms toward circle center';
+    CheckOrient.Checked := true;
+    CheckOrient.Left := 16;
+    CheckOrient.Top := 90;
+    CheckOrient.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Arrange Circle';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ArrangeSelectionInCircle(
+        SpinRadius.Value,
+        SpinAngle.Value,
+        CheckOrient.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeCircleClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ShowArrangeInCircleDialog
+  else
+    ArrangeSelectionInCircle(0, 360.0, true);
 end;
 
 procedure TDesignFrame.StopPilotTransform;
@@ -10890,6 +11306,289 @@ begin
   ShowSelectByNamePatternDialog;
 end;
 
+procedure TDesignFrame.SelectOverlappingTransforms;
+
+  function IsAncestorOrDescendant(const A, B: TCastleTransform): Boolean;
+  var
+    P: TCastleTransform;
+  begin
+    Result := false;
+    if (A = nil) or (B = nil) then Exit;
+    P := A.Parent;
+    while P <> nil do
+    begin
+      if P = B then Exit(true);
+      P := P.Parent;
+    end;
+    P := B.Parent;
+    while P <> nil do
+    begin
+      if P = A then Exit(true);
+      P := P.Parent;
+    end;
+  end;
+
+  function TransformsOverlap(const A, B: TCastleTransform): Boolean;
+  const
+    Tol = 1e-3;
+  var
+    BoxA, BoxB: TBox3D;
+  begin
+    Result := false;
+    if (A = nil) or (B = nil) or (A = B) then Exit;
+    if IsAncestorOrDescendant(A, B) then Exit;
+    if (not A.HasWorldTransform) or (not B.HasWorldTransform) or (A.World <> B.World) then
+      Exit;
+
+    BoxA := A.WorldBoundingBox;
+    BoxB := B.WorldBoundingBox;
+    if BoxA.IsEmpty or BoxB.IsEmpty then
+    begin
+      Result := PointsDistanceSqr(A.WorldTranslation, B.WorldTranslation) < 1e-5;
+      Exit;
+    end;
+
+    Result :=
+      (BoxA.Data[0].X < BoxB.Data[1].X - Tol) and (BoxA.Data[1].X > BoxB.Data[0].X + Tol) and
+      (BoxA.Data[0].Y < BoxB.Data[1].Y - Tol) and (BoxA.Data[1].Y > BoxB.Data[0].Y + Tol) and
+      (BoxA.Data[0].Z < BoxB.Data[1].Z - Tol) and (BoxA.Data[1].Z > BoxB.Data[0].Z + Tol);
+  end;
+
+var
+  AllTransforms, RefTransforms, NewSelection: TComponentList;
+  TreeNode: TTreeNode;
+  C: TComponent;
+  T, RefT, CandT: TCastleTransform;
+  I, J: Integer;
+begin
+  AllTransforms := TComponentList.Create(false);
+  RefTransforms := TComponentList.Create(false);
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C is TCastleTransform) and (C <> DesignRoot) and
+         (not (C is TCastleAbstractRootTransform)) and
+         Selectable(C) and (not IsComponentLocked(C)) then
+      begin
+        T := TCastleTransform(C);
+        if T.Exists and T.HasWorldTransform and (AllTransforms.IndexOf(T) = -1) then
+          AllTransforms.Add(T);
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0) then
+      for I := 0 to TransformManipulate.SelectedCount - 1 do
+      begin
+        T := TransformManipulate.Selected[I];
+        if (T <> nil) and (T <> DesignRoot) and
+           (not (T is TCastleAbstractRootTransform)) and T.HasWorldTransform then
+          RefTransforms.Add(T);
+      end;
+
+    // First check overlaps against currently selected transform(s)
+    if RefTransforms.Count > 0 then
+      for I := 0 to RefTransforms.Count - 1 do
+      begin
+        RefT := TCastleTransform(RefTransforms[I]);
+        for J := 0 to AllTransforms.Count - 1 do
+        begin
+          CandT := TCastleTransform(AllTransforms[J]);
+          if TransformsOverlap(RefT, CandT) then
+          begin
+            if NewSelection.IndexOf(RefT) = -1 then
+              NewSelection.Add(RefT);
+            if NewSelection.IndexOf(CandT) = -1 then
+              NewSelection.Add(CandT);
+          end;
+        end;
+      end;
+
+    // Fallback / whole-scene audit: if nothing was selected (or single selected had no overlaps), scan all pairs
+    if NewSelection.Count = 0 then
+      for I := 0 to AllTransforms.Count - 2 do
+        for J := I + 1 to AllTransforms.Count - 1 do
+        begin
+          RefT := TCastleTransform(AllTransforms[I]);
+          CandT := TCastleTransform(AllTransforms[J]);
+          if TransformsOverlap(RefT, CandT) then
+          begin
+            if NewSelection.IndexOf(RefT) = -1 then
+              NewSelection.Add(RefT);
+            if NewSelection.IndexOf(CandT) = -1 then
+              NewSelection.Add(CandT);
+          end;
+        end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+    FreeAndNil(RefTransforms);
+    FreeAndNil(AllTransforms);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectOverlappingClick(Sender: TObject);
+begin
+  SelectOverlappingTransforms;
+end;
+
+procedure TDesignFrame.SelectBySizeRange(const MinDiagonal, MaxDiagonal: Single);
+var
+  ActualMin, ActualMax, Diag: Single;
+  TreeNode: TTreeNode;
+  C: TComponent;
+  T: TCastleTransform;
+  BBox: TBox3D;
+  NewSelection: TComponentList;
+begin
+  ActualMin := Min(MinDiagonal, MaxDiagonal);
+  ActualMax := Max(MinDiagonal, MaxDiagonal);
+
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C is TCastleTransform) and (C <> DesignRoot) and
+         (not (C is TCastleAbstractRootTransform)) and
+         Selectable(C) and (not IsComponentLocked(C)) then
+      begin
+        T := TCastleTransform(C);
+        if T.Exists then
+        begin
+          if T.HasWorldTransform then
+            BBox := T.WorldBoundingBox
+          else
+            BBox := T.BoundingBox;
+          if not BBox.IsEmpty then
+          begin
+            Diag := BBox.Size.Length;
+            if (Diag >= ActualMin - 1e-4) and (Diag <= ActualMax + 1e-4) and
+               (NewSelection.IndexOf(T) = -1) then
+              NewSelection.Add(T);
+          end;
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.ShowSelectBySizeRangeDialog;
+var
+  Dialog: TForm;
+  LblMin, LblMax: TLabel;
+  SpinMin, SpinMax: TFloatSpinEdit;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+  T: TCastleTransform;
+  BBox: TBox3D;
+  DefMin, DefMax, RefDiag: Single;
+begin
+  DefMin := 0.5;
+  DefMax := 5.0;
+  T := CurrentTransform;
+  if (T = nil) and (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0) then
+    T := TransformManipulate.Selected[0];
+  if T <> nil then
+  begin
+    BBox := T.WorldBoundingBox;
+    if (not BBox.IsEmpty) and (BBox.Size.Length > 0.01) then
+    begin
+      RefDiag := BBox.Size.Length;
+      DefMin := RefDiag * 0.8;
+      DefMax := RefDiag * 1.2;
+    end;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Select Transforms By Bounding-Box Diagonal Size';
+    Dialog.Position := poMainFormCenter;
+    Dialog.Width := 370;
+    Dialog.Height := 165;
+    Dialog.BorderStyle := bsDialog;
+
+    LblMin := TLabel.Create(Dialog);
+    LblMin.Caption := 'Min BBox Diagonal Size:';
+    LblMin.Left := 16;
+    LblMin.Top := 20;
+    LblMin.Parent := Dialog;
+
+    SpinMin := TFloatSpinEdit.Create(Dialog);
+    SpinMin.DecimalPlaces := 2;
+    SpinMin.Increment := 0.5;
+    SpinMin.MinValue := 0.0;
+    SpinMin.MaxValue := 1000000;
+    SpinMin.Value := DefMin;
+    SpinMin.Left := 200;
+    SpinMin.Top := 16;
+    SpinMin.Width := 140;
+    SpinMin.Parent := Dialog;
+
+    LblMax := TLabel.Create(Dialog);
+    LblMax.Caption := 'Max BBox Diagonal Size:';
+    LblMax.Left := 16;
+    LblMax.Top := 58;
+    LblMax.Parent := Dialog;
+
+    SpinMax := TFloatSpinEdit.Create(Dialog);
+    SpinMax.DecimalPlaces := 2;
+    SpinMax.Increment := 0.5;
+    SpinMax.MinValue := 0.0;
+    SpinMax.MaxValue := 1000000;
+    SpinMax.Value := DefMax;
+    SpinMax.Left := 200;
+    SpinMax.Top := 54;
+    SpinMax.Width := 140;
+    SpinMax.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Select Matching';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      SelectBySizeRange(SpinMin.Value, SpinMax.Value);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectBySizeClick(Sender: TObject);
+begin
+  ShowSelectBySizeRangeDialog;
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -11376,6 +12075,14 @@ begin
     MenuTreeViewItemSelectWithinRadius.Enabled := (CurrentTransform <> nil) or ((TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0));
   if MenuTreeViewItemSelectByPattern <> nil then
     MenuTreeViewItemSelectByPattern.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectOverlapping <> nil then
+    MenuTreeViewItemSelectOverlapping.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectBySize <> nil then
+    MenuTreeViewItemSelectBySize.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemCopyTransform <> nil then
+    MenuTreeViewItemCopyTransform.Enabled := (CurrentTransform <> nil) or (SelectedUserInterface <> nil) or (ControlsTree.SelectionCount > 0);
+  if MenuTreeViewItemPasteTransform <> nil then
+    MenuTreeViewItemPasteTransform.Enabled := (FCopiedTransformValid or FCopiedUIValid) and (ControlsTree.SelectionCount > 0);
   if MenuTreeViewItemInvertSelection <> nil then
     MenuTreeViewItemInvertSelection.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemSelectChildren <> nil then
