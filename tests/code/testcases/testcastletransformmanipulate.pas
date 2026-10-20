@@ -49,6 +49,7 @@ type
     procedure TestArrangeInGridScalePositionsAndResetTransform;
     procedure TestArrangeLineSeparateOverlappingAndProgressiveTransform;
     procedure TestArrangeWaypointsHelixAndCenterOriginOnChildren;
+    procedure TestArrangeBezierArchSphereAndScaleGroupAroundPivot;
   end;
 
 implementation
@@ -1203,6 +1204,91 @@ begin
     AssertVectorEquals(Vector3(20, 2, 8), ChildBox2.WorldTranslation, 1e-4);
     AssertVectorEquals(Vector3(-5, 2, -2), ChildBox1.Translation, 1e-4);
     AssertVectorEquals(Vector3(5, 2, 2), ChildBox2.Translation, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestArrangeBezierArchSphereAndScaleGroupAroundPivot;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  T1, T2, T3, T4, T5: TCastleTransform;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.OnTransformModified := {$ifdef FPC}@{$endif} HandleTransformModified;
+    Manipulate.OnTransformModifyEnd := {$ifdef FPC}@{$endif} HandleTransformModifyEnd;
+
+    T1 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T1);
+    T2 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T2);
+    T3 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T3);
+    T4 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T4);
+    T5 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T5);
+
+    // 1. Test ArrangeSelectedInParabolicArchBetweenEndpoints:
+    // Start T1 at (0, 0, 0), End T5 at (20, 0, 0), ApexHeight = 10 -> ControlPoint = (10, 20, 0).
+    // At t = 0.5 (T3), B(0.5) = 0.25*(0,0,0) + 0.5*(10,20,0) + 0.25*(20,0,0) = (10, 10, 0),
+    // and tangent is horizontal (1, 0, 0).
+    // At t = 0.25 (T2), B(0.25) = (5, 7.5, 0).
+    // At t = 0.75 (T4), B(0.75) = (15, 7.5, 0).
+    T1.Translation := Vector3(0, 0, 0);
+    T5.Translation := Vector3(20, 0, 0);
+    Manipulate.SetSelected([T1, T2, T3, T4, T5]);
+    AssertTrue(Manipulate.ArrangeSelectedInParabolicArchBetweenEndpoints(10.0, true));
+    AssertVectorEquals(Vector3(0, 0, 0), T1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(5, 7.5, 0), T2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10, 10, 0), T3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(15, 7.5, 0), T4.Translation, 1e-4);
+    AssertVectorEquals(Vector3(20, 0, 0), T5.Translation, 1e-4);
+    T3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+
+    // 2. Test ArrangeSelectedOnSphere:
+    // Primary selected T1 at (0, 0, 0), Radius = 10, MinElevation = 0 (hemisphere dome), MaxElevation = 90, OrientOutward = true.
+    // All 5 items must lie at distance 10 from (0,0,0), have Y >= 0, and look outward along their radial direction.
+    T1.Translation := Vector3(0, 0, 0);
+    Manipulate.PivotMode := pmPrimarySelected;
+    Manipulate.SetSelected([T1, T2, T3, T4, T5]);
+    AssertTrue(Manipulate.ArrangeSelectedOnSphere(10.0, 0.0, 90.0, true));
+    AssertSameValue(10.0, T1.Translation.Length, 1e-3);
+    AssertSameValue(10.0, T2.Translation.Length, 1e-3);
+    AssertSameValue(10.0, T3.Translation.Length, 1e-3);
+    AssertSameValue(10.0, T4.Translation.Length, 1e-3);
+    AssertSameValue(10.0, T5.Translation.Length, 1e-3);
+    AssertTrue(T1.Translation.Y >= -1e-4);
+    AssertTrue(T5.Translation.Y >= -1e-4);
+    // First item (I=0, Factor=0) is at MinElevation 0 deg -> equator (10, 0, 0)
+    AssertVectorEquals(Vector3(10, 0, 0), T1.Translation, 1e-3);
+    // Last item (I=4, Factor=1) is at MaxElevation 90 deg -> top pole (0, 10, 0)
+    AssertVectorEquals(Vector3(0, 10, 0), T5.Translation, 1e-3);
+    T3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(T3.Translation.Normalize, WorldDir.Normalize, 1e-3);
+
+    // 3. Test ScaleSelectedGroupAroundPivot:
+    // Primary selected T1 at (10, 5, 0) with Scale (1, 1, 1), T2 at (14, 9, -2) with Scale (2, 3, 4).
+    // Scaling around primary selected T1 by Factor (2, 0.5, 3):
+    // T1 stays at (10, 5, 0), Scale becomes (2, 0.5, 3).
+    // T2 offset from T1 was (4, 4, -2) -> new offset (8, 2, -6) -> T2 moves to (18, 7, -6), Scale becomes (4, 1.5, 12).
+    T1.Translation := Vector3(10, 5, 0);
+    T1.Scale := Vector3(1, 1, 1);
+    T2.Translation := Vector3(14, 9, -2);
+    T2.Scale := Vector3(2, 3, 4);
+    Manipulate.PivotMode := pmPrimarySelected;
+    Manipulate.SetSelected([T1, T2]);
+    AssertTrue(Manipulate.ScaleSelectedGroupAroundPivot(Vector3(2.0, 0.5, 3.0)));
+    AssertVectorEquals(Vector3(10, 5, 0), T1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(2, 0.5, 3), T1.Scale, 1e-4);
+    AssertVectorEquals(Vector3(18, 7, -6), T2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(4, 1.5, 12), T2.Scale, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

@@ -611,6 +611,55 @@ type
       Returns @true if at least one parent transform was modified. }
     function CenterSelectedOriginOnChildren(
       const UseBottomCenter: Boolean = false): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) along a
+      smooth 3D quadratic Bezier curve or parabolic arch between @code(StartWorldPos)
+      and @code(EndWorldPos) with middle control point @code(ControlWorldPos):
+      $$B(t) = (1 - t)^2 P_0 + 2(1 - t)t P_1 + t^2 P_2, \quad t = i / (N - 1)$$
+      When @code(OrientAlongCurve) is @true, rotates each transform so its world
+      forward direction faces along the instantaneous curve tangent
+      $B'(t) = 2(1 - t)(P_1 - P_0) + 2t(P_2 - P_1)$.
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInBezierArch(
+      const StartWorldPos, ControlWorldPos, EndWorldPos: TVector3;
+      const OrientAlongCurve: Boolean = false): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) along a
+      smooth 3D parabolic arch between the first selected transform (@code(Selected[0]))
+      and the last selected transform (@code(Selected[N-1])) whose apex at $t = 0.5$
+      rises by @code(ApexHeightOffset) along the world Y axis above the midpoint.
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInParabolicArchBetweenEndpoints(
+      const ApexHeightOffset: Single;
+      const OrientAlongCurve: Boolean = false): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) over a
+      3D sphere or dome of @code(Radius) around the active selection pivot
+      (@link(SelectionWorkingCenter) when @link(PivotMode) is @link(pmSelectionCenter),
+      or @code(Selected[0]) when @link(pmPrimarySelected)) using a Fibonacci golden-angle
+      spiral lattice so points are nearly equidistant across the spherical cap.
+      - When @code(Radius <= 0), auto-detects the average 3D distance from the pivot.
+      - @code(MinElevationDeg) ($-90^\circ$ for a full sphere, $0^\circ$ for an upper
+        hemisphere/dome) and @code(MaxElevationDeg) ($+90^\circ$ for the top pole)
+        define the latitude band.
+      - When @code(OrientOutward) is @true, rotates each transform so its world
+        forward direction points radially outward from the sphere center.
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedOnSphere(const Radius: Single;
+      const MinElevationDeg: Single = 0.0; const MaxElevationDeg: Single = 90.0;
+      const OrientOutward: Boolean = false): Boolean;
+
+    { Scale all top-level selected transforms (@code(SelectedCount >= 1)) as a cohesive
+      3D group around the active selection pivot (@link(SelectionWorkingCenter) when
+      @link(PivotMode) is @link(pmSelectionCenter), or @code(Selected[0]) when
+      @link(pmPrimarySelected)) by @code(Factor):
+      - Multiplies each transform's world-space offset from the pivot by @code(Factor)
+        (when @code(Count >= 2)).
+      - Multiplies each transform's local @code(Scale) by @code(Factor) (when
+        @code(ScaleSizes) is @true).
+      Returns @true if at least one selected transform was modified. }
+    function ScaleSelectedGroupAroundPivot(const Factor: TVector3;
+      const ScaleSizes: Boolean = true): Boolean;
   end;
 
 var
@@ -4160,6 +4209,323 @@ begin
       for J := 0 to DirectChildCount - 1 do
         SetTransformWorkingPos(DirectChildren[J], ChildOrigWorldPos[J]);
       Result := true;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInBezierArch(
+  const StartWorldPos, ControlWorldPos, EndWorldPos: TVector3;
+  const OrientAlongCurve: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  Factor, OneMinusT: Single;
+  CurPos, NewPos, Tangent, CurWorldPos, CurDir, CurUp, GravityUp, Side, NewUp: TVector3;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    Factor := Single(I) / Single(Count - 1);
+    OneMinusT := 1.0 - Factor;
+
+    NewPos :=
+      (StartWorldPos * (OneMinusT * OneMinusT)) +
+      (ControlWorldPos * (2.0 * OneMinusT * Factor)) +
+      (EndWorldPos * (Factor * Factor));
+
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(NewPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, NewPos);
+      Result := true;
+    end;
+
+    if OrientAlongCurve then
+    begin
+      Tangent :=
+        ((ControlWorldPos - StartWorldPos) * (2.0 * OneMinusT)) +
+        ((EndWorldPos - ControlWorldPos) * (2.0 * Factor));
+      if Tangent.IsZero(1e-5) then
+        Tangent := EndWorldPos - StartWorldPos;
+
+      if not Tangent.IsZero(1e-5) then
+      begin
+        Tangent := Tangent.Normalize;
+        if T.HasWorldTransform then
+          T.GetWorldView(CurWorldPos, CurDir, CurUp)
+        else
+        begin
+          CurWorldPos := T.Translation;
+          CurDir := T.Direction;
+          CurUp := T.Up;
+        end;
+
+        if T.World <> nil then
+          GravityUp := T.World.GravityUp
+        else
+          GravityUp := Vector3(0, 1, 0);
+
+        Side := TVector3.CrossProduct(Tangent, GravityUp);
+        if Side.IsZero(1e-4) then
+          Side := TVector3.CrossProduct(Tangent, CurUp);
+        if Side.IsZero(1e-4) then
+          Side := TVector3.CrossProduct(Tangent, Vector3(0, 0, 1));
+        if Side.IsZero(1e-4) then
+          Side := Vector3(1, 0, 0);
+        NewUp := TVector3.CrossProduct(Side, Tangent).Normalize;
+
+        if (not TVector3.Equals(Tangent, CurDir)) or
+           (not TVector3.Equals(NewUp, CurUp)) then
+        begin
+          if T.HasWorldTransform then
+            T.SetWorldView(CurWorldPos, Tangent, NewUp)
+          else
+            T.SetView(CurWorldPos, Tangent, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInParabolicArchBetweenEndpoints(
+  const ApexHeightOffset: Single; const OrientAlongCurve: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  StartPos, EndPos, MidPos, ControlPos: TVector3;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  StartPos := GetTransformWorkingPos(Items[0]);
+  EndPos := GetTransformWorkingPos(Items[Count - 1]);
+  MidPos := Lerp(0.5, StartPos, EndPos);
+  { For quadratic Bezier B(0.5) = 0.25*P0 + 0.5*P1 + 0.25*P2 = MidPos + 0.5*(P1 - MidPos),
+    so setting P1 = MidPos + (0, 2 * ApexHeightOffset, 0) makes the curve pass through
+    MidPos + (0, ApexHeightOffset, 0) at t = 0.5. }
+  ControlPos := MidPos + Vector3(0, 2.0 * ApexHeightOffset, 0);
+  Result := ArrangeSelectedInBezierArch(StartPos, ControlPos, EndPos, OrientAlongCurve);
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedOnSphere(
+  const Radius, MinElevationDeg, MaxElevationDeg: Single;
+  const OrientOutward: Boolean): Boolean;
+const
+  GoldenAngleRad = 2.39996322972865332; // Pi * (3 - Sqrt(5))
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, NewPos, DirVec, CurWorldPos, CurDir, CurUp, GravityUp, Side, NewUp: TVector3;
+  EffRadius, SumDist, MinSinY, MaxSinY, ActualMinSin, ActualMaxSin, Factor, SinY, CosY, Theta, SinT, CosT: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  if FPivotMode = pmPrimarySelected then
+    CenterPos := GetTransformWorkingPos(Items[0])
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  if Radius > 0 then
+    EffRadius := Radius
+  else
+  begin
+    SumDist := 0;
+    for I := 0 to Count - 1 do
+      SumDist := SumDist + PointsDistance(GetTransformWorkingPos(Items[I]), CenterPos);
+    EffRadius := SumDist / Count;
+    if EffRadius < 1e-4 then
+      EffRadius := 5.0;
+  end;
+
+  MinSinY := Sin(DegToRad(Clamped(MinElevationDeg, -90.0, 90.0)));
+  MaxSinY := Sin(DegToRad(Clamped(MaxElevationDeg, -90.0, 90.0)));
+  ActualMinSin := Min(MinSinY, MaxSinY);
+  ActualMaxSin := Max(MinSinY, MaxSinY);
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    Factor := Single(I) / Single(Count - 1);
+    SinY := Clamped(Lerp(Factor, ActualMinSin, ActualMaxSin), -1.0, 1.0);
+    CosY := Sqrt(Max(0.0, 1.0 - Sqr(SinY)));
+    Theta := Single(I) * GoldenAngleRad;
+    SinCos(Theta, SinT, CosT);
+
+    DirVec := Vector3(CosT * CosY, SinY, SinT * CosY);
+    NewPos := CenterPos + DirVec * EffRadius;
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(NewPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, NewPos);
+      Result := true;
+    end;
+
+    if OrientOutward and (not DirVec.IsZero(1e-5)) then
+    begin
+      DirVec := DirVec.Normalize;
+      if T.HasWorldTransform then
+        T.GetWorldView(CurWorldPos, CurDir, CurUp)
+      else
+      begin
+        CurWorldPos := T.Translation;
+        CurDir := T.Direction;
+        CurUp := T.Up;
+      end;
+
+      if T.World <> nil then
+        GravityUp := T.World.GravityUp
+      else
+        GravityUp := Vector3(0, 1, 0);
+
+      Side := TVector3.CrossProduct(DirVec, GravityUp);
+      if Side.IsZero(1e-4) then
+        Side := TVector3.CrossProduct(DirVec, CurUp);
+      if Side.IsZero(1e-4) then
+        Side := TVector3.CrossProduct(DirVec, Vector3(0, 0, 1));
+      if Side.IsZero(1e-4) then
+        Side := Vector3(1, 0, 0);
+      NewUp := TVector3.CrossProduct(Side, DirVec).Normalize;
+
+      if (not TVector3.Equals(DirVec, CurDir)) or
+         (not TVector3.Equals(NewUp, CurUp)) then
+      begin
+        if T.HasWorldTransform then
+          T.SetWorldView(CurWorldPos, DirVec, NewUp)
+        else
+          T.SetView(CurWorldPos, DirVec, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ScaleSelectedGroupAroundPivot(
+  const Factor: TVector3; const ScaleSizes: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  PivotPos, CurPos, NewPos, NewScale: TVector3;
+begin
+  Result := false;
+  if SelectedCount = 0 then Exit;
+  if (Abs(Factor.X) < 1e-4) or (Abs(Factor.Y) < 1e-4) or (Abs(Factor.Z) < 1e-4) then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count = 0 then Exit;
+
+  if (Count >= 2) and (FPivotMode = pmSelectionCenter) then
+    PivotPos := SelectionWorkingCenter
+  else
+    PivotPos := GetTransformWorkingPos(Items[0]);
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    if Count >= 2 then
+    begin
+      CurPos := GetTransformWorkingPos(T);
+      NewPos := PivotPos + (CurPos - PivotPos) * Factor;
+      if not TVector3.Equals(NewPos, CurPos) then
+      begin
+        SetTransformWorkingPos(T, NewPos);
+        Result := true;
+      end;
+    end;
+
+    if ScaleSizes then
+    begin
+      NewScale := T.Scale * Factor;
+      if not TVector3.Equals(NewScale, T.Scale) then
+      begin
+        T.Scale := NewScale;
+        Result := true;
+      end;
     end;
   end;
 

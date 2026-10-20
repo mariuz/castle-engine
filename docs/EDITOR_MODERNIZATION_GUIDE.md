@@ -1058,7 +1058,50 @@ After moving child meshes or props inside a parent `TCastleTransform` group, the
 
 ---
 
-## 53. Complete Keyboard Shortcuts & Toolbar Reference
+## 53. Phase 52: 3D Parabolic / Quadratic Bezier Arch Arrangement (`ArrangeSelectedInBezierArch`, `ButtonArrangeArch`, `Alt+Shift+A`)
+
+When constructing arched bridges, doorways, stone gateways, or hanging cable/lantern spans between two anchor points, designers can arrange 2+ selected transforms along a smooth 3D quadratic Bezier curve or parabolic arch:
+- **Core Engine API (`TCastleTransformManipulate.ArrangeSelectedInBezierArch` & `ArrangeSelectedInParabolicArchBetweenEndpoints`):**
+  - Evaluates the quadratic Bezier curve $B(t) = (1 - t)^2 P_0 + 2(1 - t)t P_1 + t^2 P_2$ at $t = i / (N - 1)$ for $i \in [0..N-1]$, where setting $P_1 = \operatorname{Lerp}(0.5, P_0, P_2) + (0, 2 \cdot H_{\text{apex}}, 0)$ guarantees the arch passes through $H_{\text{apex}}$ above the midpoint at $t = 0.5$.
+  - When `OrientAlongCurve = true`, rotates each transform so its world forward direction faces along the instantaneous curve tangent $B'(t) = 2(1 - t)(P_1 - P_0) + 2t(P_2 - P_1)$.
+- **Editor Controls (`ButtonArrangeArch` & `ShowArrangeInArchDialog` / `Alt+Shift+A`):**
+  - **Click `Arch Arrange`** (`ButtonArrangeArch`) in `PanelLayoutTransform`: Immediately arranges selected transforms in a parabolic arch between the first (`Selected[0]`) and last (`Selected[Count - 1]`) selected transforms (**`Ctrl`-click** also orients each transform along the arch tangent).
+  - **`Shift` + Click `Arch Arrange`** or press **`Alt+Shift+A`**: Opens the **Arrange Selection in 3D Parabolic / Bezier Arch** dialog (`ShowArrangeInArchDialog`) to customize Start/End positions, Apex Height Offset, and tangent orientation.
+
+---
+
+## 54. Phase 53: 3D Spherical / Dome Fibonacci Lattice Arrangement (`ArrangeSelectedOnSphere`, `ButtonArrangeSphere`, `Alt+Shift+S`)
+
+Distributing lights, emitters, shield nodes, or decorative props evenly over a 3D sphere, hemisphere dome, or latitude band without polar bunching is provided by `ArrangeSelectedOnSphere`:
+- **Core Engine API (`TCastleTransformManipulate.ArrangeSelectedOnSphere`):**
+  - `ArrangeSelectedOnSphere(Radius, MinElevationDeg, MaxElevationDeg, OrientOutward)` uses the Fibonacci golden-angle spiral lattice ($\Delta\theta = \pi(3 - \sqrt{5}) \approx 137.508^\circ$) with uniform $\sin(\text{elevation})$ interpolation between `MinElevationDeg` ($0^\circ$ for a dome, $-90^\circ$ for a full sphere) and `MaxElevationDeg` ($+90^\circ$ for the top pole) around the active selection pivot.
+  - When `OrientOutward = true`, rotates each transform so its world forward direction points radially outward from the sphere center.
+- **Editor Controls (`ButtonArrangeSphere` & `ShowArrangeOnSphereDialog` / `Alt+Shift+S`):**
+  - Clicking **`Sphere / Dome...`** (`ButtonArrangeSphere`) in `PanelLayoutTransform` or pressing **`Alt+Shift+S`** opens the **Arrange Selection on 3D Sphere / Dome** dialog (`ShowArrangeOnSphereDialog`) to configure **Radius**, **Min Elevation**, **Max Elevation**, and **Orient transforms radially outward**.
+
+---
+
+## 55. Phase 54: Cohesive Group Scaling Around Pivot (`ScaleSelectedGroupAroundPivot`, `ButtonScaleGroupUp`, `ButtonScaleGroupDown`, `Alt+Shift+]` & `Alt+Shift+[`)
+
+Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expands or contracts only the spacing between selected objects, `ScaleSelectedGroupAroundPivot` scales an entire multi-selection as a **cohesive 3D assembly** around the active pivot (`SelectionWorkingCenter` or `Selected[0]`):
+- **Core Engine API (`TCastleTransformManipulate.ScaleSelectedGroupAroundPivot`):**
+  - Simultaneously multiplies each selected transform's world-space offset from the active pivot by `Factor` **and** multiplies each transform's local `Scale` by `Factor`.
+- **Editor Controls (`ButtonScaleGroupUp`, `ButtonScaleGroupDown` / `Alt+Shift+]` & `Alt+Shift+[`):**
+  - **`Group Scale +25%`** (`ButtonScaleGroupUp`) or **`Alt+Shift+]`**: Scales both positions from pivot and local scales up by $1.25\times$ (`Shift`-click button for horizontal XZ plane only).
+  - **`Group Scale -20%`** (`ButtonScaleGroupDown`) or **`Alt+Shift+[`**: Scales both positions from pivot and local scales down by $0.80\times$ (`Shift`-click button for horizontal XZ plane only).
+
+---
+
+## 56. Phase 55: Select Empty / Unreferenced Transforms (`SelectEmptyTransforms` / `Ctrl+Shift+U`) & 2D UI Fit Parent Container (`ButtonUIFitParent`)
+
+- **Select Empty / Unreferenced Transforms (`SelectEmptyTransforms` / `Ctrl+Shift+U`):**
+  - Pressing **`Ctrl+Shift+U`** in the Viewport or Hierarchy Tree (or choosing **`Select Empty / Unreferenced Transforms (Ctrl+Shift+U)`** in the Hierarchy context menu) audits the scene and selects all visible, unlocked `TCastleTransform` nodes that have zero child transforms, zero behaviors, and zero non-visual components, and are either plain `TCastleTransform` group placeholders or `TCastleScene` / `TCastleTransformDesign` components with an empty `Url`.
+- **2D UI Fit To Parent Container (`FitSelectedUserInterfacesToParent` / `ButtonUIFitParent`):**
+  - Clicking **`UI Fit Parent`** (`ButtonUIFitParent`) in `PanelLayoutUI` (available whenever **1 or more** unlocked `TCastleUserInterface` controls are selected) resizes and centers each selected UI control to match its parent container's `ParentRenderRect` (**Click**: fit both Width & Height; **`Shift`-click**: fit Width & horizontal center only; **`Ctrl`-click**: fit Height & vertical center only).
+
+---
+
+## 57. Complete Keyboard Shortcuts & Toolbar Reference
 
 | Shortcut / Control | Context | Action |
 | :--- | :--- | :--- |
@@ -1079,11 +1122,15 @@ After moving child meshes or props inside a parent `TCastleTransform` group, the
 | **`Alt+Shift+L`** / **`Line Arrange`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms along a 3D line** (**Click**: between first & last; **`Ctrl`-click**: orient along line; **`Shift`-click** / **`Alt+Shift+L`**: dialog). |
 | **`Alt+Shift+P`** / **`Path Arrange`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms along a 3-waypoint polyline** (**Click**: first/mid/last; **`Ctrl`-click**: orient along path; **`Shift`-click** / **`Alt+Shift+P`**: dialog). |
 | **`Alt+Shift+H`** / **`Helix Arrange...`** | Viewport / Hierarchy / Layout Tab | Open the **Arrange Selection in 3D Helix / Spiral** dialog (`StartRadius`, `EndRadius`, `HeightSpan`, `Turns`, `OrientToCenter`). |
+| **`Alt+Shift+A`** / **`Arch Arrange`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms in a 3D parabolic / Bezier arch** (**Click**: between first & last; **`Ctrl`-click**: orient along curve; **`Shift`-click** / **`Alt+Shift+A`**: dialog). |
+| **`Alt+Shift+S`** / **`Sphere / Dome...`** | Viewport / Hierarchy / Layout Tab | Open the **Arrange Selection on 3D Sphere / Dome** Fibonacci lattice dialog (`Radius`, `MinElevation`, `MaxElevation`, `OrientOutward`). |
 | **`Alt+Shift+O`** / **`Center Parent Origin`** | Viewport / Hierarchy / Layout Tab | **Snap selected parent transform origin** to the center (`Click` / `Alt+Shift+O`) or bottom-center (`Shift`-click) of its direct children without moving children. |
 | **`Alt+Shift+X`** / **`Depenetrate`** | Viewport / Hierarchy / Layout Tab | **Separate overlapping selected transforms** by pushing intersecting bounding boxes apart (**`Shift`-click**: clearance padding & 3D dialog). |
 | **`Alt+Shift+T`** / **`Taper / Spiral...`** | Viewport / Hierarchy / Layout Tab | Open the **Progressive Scale Taper & Cumulative Rotation Step** dialog (`StartScale`, `EndScale`, `StepYawDeg`). |
 | **`Alt+Shift+=`** / **`Expand +25%`** | Viewport / Hierarchy / Layout Tab | **Push / Expand** selected transform positions outward from pivot by $+25\%$ (`Shift`-click button for XZ only). |
 | **`Alt+Shift+-`** / **`Contract -20%`** | Viewport / Hierarchy / Layout Tab | **Pull / Contract** selected transform positions inward toward pivot by $-20\%$ (`Shift`-click button for XZ only). |
+| **`Alt+Shift+]`** / **`Group Scale +25%`** | Viewport / Hierarchy / Layout Tab | **Cohesive Group Scale Up ($1.25\times$)** around active pivot, scaling both world offsets and local `Scale` (`Shift`-click button for XZ only). |
+| **`Alt+Shift+[`** / **`Group Scale -20%`** | Viewport / Hierarchy / Layout Tab | **Cohesive Group Scale Down ($0.80\times$)** around active pivot, scaling both world offsets and local `Scale` (`Shift`-click button for XZ only). |
 | **`Alt+G`** / **`Alt+R`** / **`Alt+S`** | Viewport / Hierarchy Tree | Reset selected **Translation** (`Alt+G`, or 2D UI `AnchorDelta`), **Rotation** (`Alt+R`), or **Scale** (`Alt+S`). |
 | **`Reset Xform` Button** | Layout Tab (`PanelLayoutTransform`) | Reset selected transform **Pos+Rot+Scale** (**Click**), **Rot+Scale only** (**`Shift`-click**), or **Rotation only** (**`Ctrl`-click**). |
 | **`Ctrl+Shift+S`** / **`Swap Pos`** | Viewport / Hierarchy / Layout Tab | **Swap / Cycle World Positions** of 2+ selected `TCastleTransform` objects (`SwapSelectedPositions`). |
@@ -1102,6 +1149,7 @@ After moving child meshes or props inside a parent `TCastleTransform` group, the
 | **`Ctrl+Shift+E`** / **`Select At Same Y Elevation...`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects at the same world Y elevation within a configurable tolerance. |
 | **`Ctrl+Shift+F`** / **`Select Visible In Camera View`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects inside the active viewport camera's view frustum. |
 | **`Ctrl+Shift+B`** / **`Select By Axis Coordinate Slice...`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects whose world X, Y, or Z coordinate lies within `[MinCoord, MaxCoord]`. |
+| **`Ctrl+Shift+U`** / **`Select Empty / Unreferenced Transforms`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked empty `TCastleTransform` groups and unreferenced `TCastleScene` / `TCastleTransformDesign` nodes with no children or `Url`. |
 | **`Select By Bounding-Box Size Range...`** | Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects whose world bounding-box diagonal length lies within `[MinSize, MaxSize]`. |
 | **`Select By Name Pattern...`** | Hierarchy Context Menu | Select all components matching a substring or `*` / `?` wildcard pattern. |
 | **`Select All With Same Asset URL`** | Hierarchy Context Menu | Select all components in the design referencing the same `Url` asset as the selected component. |
@@ -1138,6 +1186,7 @@ After moving child meshes or props inside a parent `TCastleTransform` group, the
 | **`UI Swap Pos` / `UI Grid`** | Layout Tab (`PanelLayoutUI`) | **Swap / cycle** rendered positions of 2+ selected `TCastleUserInterface` controls (`UI Swap Pos`), or **arrange in 2D grid** (`UI Grid`, `Shift` for $8\text{ px}$ gap). |
 | **`UI Stack H` / `UI Stack V`** | Layout Tab (`PanelLayoutUI`) | **Stack** 2+ selected `TCastleUserInterface` controls flush edge-to-edge horizontally or vertically (`Shift`-click for $8\text{ px}$ gap). |
 | **`UI Center Parent`** | Layout Tab (`PanelLayoutUI`) | **Center** 1+ selected `TCastleUserInterface` controls inside their parent container (**Click**: H+V; **`Shift`**: H only; **`Ctrl`**: V only). |
+| **`UI Fit Parent`** | Layout Tab (`PanelLayoutUI`) | **Fit** 1+ selected `TCastleUserInterface` controls to their parent container's size and center (**Click**: W+H; **`Shift`**: Width only; **`Ctrl`**: Height only). |
 | **`Reset Prop` Button** | Object Inspector Header | Reset the active Object Inspector property row to its default value. |
 | **`Select All of Same Class`** | Hierarchy Context Menu | Select all components in the design matching the selected component's class. |
 | **`Expand Subtree` / `Collapse Subtree`** | Hierarchy Context Menu | Recursively expand or collapse the selected hierarchy node(s). |
@@ -1154,9 +1203,9 @@ After moving child meshes or props inside a parent `TCastleTransform` group, the
 
 ---
 
-## 54. Automated Unit Tests & Verification
+## 58. Automated Unit Tests & Verification
 
-All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 20 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
+All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 21 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
 
 1. **`TestSelectedCountAndFree`**: Verifies single/multi-selection filtering, freeing a selected transform while selected, and translating the remaining selection.
 2. **`TestTranslateSnapAndCoordSpace`**: Verifies grid snapping (`TranslateSnap := 2.0`) and `csLocal` vs. `csWorld` translation on a $90^\circ$-rotated transform.
@@ -1178,6 +1227,7 @@ All core 3D manipulation algorithms in `CastleTransformManipulate` are covered b
 18. **`TestArrangeInGridScalePositionsAndResetTransform`**: Verifies `ArrangeSelectedInGrid(2, 2, Vector3(4, 2, 6), true)` places 4 transforms at exact $2 \times 2$ XZ grid coordinates, verifies `ScaleSelectedPositionsFromPivot` scales world offsets from the active pivot without altering `Scale`, and verifies `ResetSelectedTransform` granularly resets rotation + scale while preserving translation (and subsequently resets translation).
 19. **`TestArrangeLineSeparateOverlappingAndProgressiveTransform`**: Verifies `ArrangeSelectedBetweenEndpoints(true)` places 4 boxes at evenly spaced 3D intervals along the line segment from `B1` to `B4` and orients them along the line, verifies `ApplyProgressiveTransformSelected` applies a linear scale gradient from $(1,1,1)$ to $(4,4,4)$ and a cumulative $30^\circ$ rotation step per item, and verifies `SeparateOverlappingSelected(1.0, true, 8)` pushes two overlapping $2\times 2\times 2$ boxes apart to a center-to-center distance $\ge 3.0$ while preserving Y elevation.
 20. **`TestArrangeWaypointsHelixAndCenterOriginOnChildren`**: Verifies `ArrangeSelectedAlongWaypoints` places 5 transforms at equal arc-length intervals along an L-shaped 3-waypoint polyline and orients them along each segment tangent, verifies `ArrangeSelectedInHelix(10.0, 20.0, 40.0, 1.0, true)` arranges 5 transforms along a conical 3D helix while orienting them toward the central axis, and verifies `CenterSelectedOriginOnChildren` snaps a parent `TCastleTransform` origin to both the center and bottom-center (`MinY`) of its direct children's world bounding box while keeping all children's world positions unchanged.
+21. **`TestArrangeBezierArchSphereAndScaleGroupAroundPivot`**: Verifies `ArrangeSelectedInParabolicArchBetweenEndpoints(10.0, true)` places 5 transforms along a parabolic Bezier arch reaching apex $(10, 10, 0)$ with horizontal tangent $(1, 0, 0)$ at $t = 0.5$, verifies `ArrangeSelectedOnSphere(10.0, 0.0, 90.0, true)` distributes 5 transforms on a radius-$10$ upper hemisphere dome using the Fibonacci lattice and orients each transform radially outward, and verifies `ScaleSelectedGroupAroundPivot(Vector3(2.0, 0.5, 3.0))` scales both world offsets from the primary pivot and local `Scale` vectors simultaneously.
 
 To run this test suite from the command line:
 ```bash
