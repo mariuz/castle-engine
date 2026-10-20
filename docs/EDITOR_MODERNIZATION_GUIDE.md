@@ -1119,7 +1119,25 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 
 ---
 
-## 58. Complete Keyboard Shortcuts & Toolbar Reference
+## 58. Phases 60–63: 3D Phyllotaxis Disk Arrangement (`Alt+Shift+D`), 3D Staircase Arrangement (`Alt+Shift+Y`), Radial XZ Push-Pull (`Alt+Shift+.` / `Alt+Shift+,`), Select Rotated Transforms (`Ctrl+Shift+T`) & 2D UI Margin Inset In Parent (`UI Inset Parent`)
+
+- **3D Phyllotaxis / Golden-Angle Sunflower Disk Arrangement (`ArrangeSelectedInPhyllotaxisDisk` / `Alt+Shift+D`):**
+  - `TCastleTransformManipulate.ArrangeSelectedInPhyllotaxisDisk(OuterRadius, OrientMode)` distributes 2+ top-level selected transforms across a horizontal XZ disk of radius `OuterRadius` centered at the active selection pivot using Vogel's golden-angle spiral ($r_i = R \sqrt{i / (N - 1)}, \; \theta_i = i \cdot \pi(3 - \sqrt{5})$) with `OrientMode` (`0` = keep rotation, `1` = orient inward toward center, `2` = orient outward from center).
+  - Accessible via **`Disk Arrange...`** (`ButtonArrangeDisk` in `PanelLayoutTransform`) or **`Alt+Shift+D`** (`ShowArrangeInDiskDialog`).
+- **3D Staircase / Stepped Ramp Arrangement (`ArrangeSelectedInStaircase` / `Alt+Shift+Y`):**
+  - `TCastleTransformManipulate.ArrangeSelectedInStaircase(StartWorldPos, EndWorldPos, CurveExponent, OrientHorizontallyAlongRun)` and `ArrangeSelectedInStaircaseBetweenEndpoints` arrange 2+ top-level selected transforms between `StartWorldPos` and `EndWorldPos` with linear horizontal XZ progression and power-curve vertical Y elevation ($y(t) = y_0 + (y_1 - y_0)t^E$), optionally orienting each step's horizontal yaw along the XZ run while keeping steps level (`World.GravityUp`).
+  - Accessible via **`Stair Arrange`** (`ButtonArrangeStairs` in `PanelLayoutTransform`: **Click** arranges immediately; **`Ctrl`-click** also orients yaw along the horizontal run; **`Shift`-click** or **`Alt+Shift+Y`** opens `ShowArrangeInStairsDialog`).
+- **Radial / Cylindrical XZ Push-Pull From Pivot (`ScaleSelectedRadialDistanceXZ` / `Alt+Shift+.` & `Alt+Shift+,`):**
+  - `TCastleTransformManipulate.ScaleSelectedRadialDistanceXZ(RadialFactor)` scales only the horizontal XZ radial distance of 2+ top-level selected transforms away from or toward the active selection pivot by `RadialFactor` while preserving each transform's world Y elevation, `Rotation`, and `Scale`.
+  - Accessible via **`Radial +25%`** (`ButtonRadialExpand` / **`Alt+Shift+.`**) and **`Radial -20%`** (`ButtonRadialContract` / **`Alt+Shift+,`**) in `PanelLayoutTransform`.
+- **Select Rotated / Tilted Transforms (`SelectRotatedTransforms` / `Ctrl+Shift+T`):**
+  - Pressing **`Ctrl+Shift+T`** or choosing **`Select Rotated / Tilted Transforms (Ctrl+Shift+T)`** (`MenuTreeViewItemSelectRotatedTransforms`) in the Hierarchy context menu selects all visible, unlocked `TCastleTransform` instances with non-zero rotation (`Abs(T.Rotation.W) > 1e-3`) or tilted world orientation.
+- **2D UI Uniform Margin Inset In Parent (`InsetSelectedUserInterfacesInParent` / `ButtonUIInsetParent`):**
+  - Clicking **`UI Inset Parent`** (`ButtonUIInsetParent`) in `PanelLayoutUI` resizes and centers 1+ selected `TCastleUserInterface` controls inside their parent container with a uniform screen-space margin (`16 px` on normal click, `8 px` on `Shift`-click, `32 px` on `Ctrl`-click).
+
+---
+
+## 59. Complete Keyboard Shortcuts & Toolbar Reference
 
 | Shortcut / Control | Context | Action |
 | :--- | :--- | :--- |
@@ -1144,6 +1162,10 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 | **`Alt+Shift+S`** / **`Sphere / Dome...`** | Viewport / Hierarchy / Layout Tab | Open the **Arrange Selection on 3D Sphere / Dome** Fibonacci lattice dialog (`Radius`, `MinElevation`, `MaxElevation`, `OrientOutward`). |
 | **`Alt+Shift+W`** / **`Wave Arrange`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms in a 3D sine wave** (**Click**: between first & last; **`Ctrl`-click**: orient along wave; **`Shift`-click** / **`Alt+Shift+W`**: dialog). |
 | **`Alt+Shift+E`** / **`Ellipse Arrange...`** | Viewport / Hierarchy / Layout Tab | Open the **Arrange Selection in 3D Ellipse** dialog (`RadiusX`, `RadiusZ`, `OrientMode`). |
+| **`Alt+Shift+D`** / **`Disk Arrange...`** | Viewport / Hierarchy / Layout Tab | Open the **Arrange Selection in Phyllotaxis Disk** dialog (`OuterRadius`, `OrientMode`). |
+| **`Alt+Shift+Y`** / **`Stair Arrange`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms in a 3D staircase** (**Click**: between first & last; **`Ctrl`-click**: orient yaw along run; **`Shift`-click** / **`Alt+Shift+Y`**: dialog). |
+| **`Alt+Shift+.`** / **`Radial +25%`** | Viewport / Hierarchy / Layout Tab | **Push / Expand horizontal XZ radial distance** from active pivot by $+25\%$ while preserving Y elevation and `Scale`. |
+| **`Alt+Shift+,`** / **`Radial -20%`** | Viewport / Hierarchy / Layout Tab | **Pull / Contract horizontal XZ radial distance** toward active pivot by $-20\%$ while preserving Y elevation and `Scale`. |
 | **`Alt+Shift+R`** / **`Reverse Order`** | Viewport / Hierarchy / Layout Tab | **Reverse order of world positions** across 2+ selected transforms (**`Shift`-click**: Pos+Rot; **`Ctrl`-click**: Pos+Rot+Scale). |
 | **`Alt+Shift+O`** / **`Center Parent Origin`** | Viewport / Hierarchy / Layout Tab | **Snap selected parent transform origin** to the center (`Click` / `Alt+Shift+O`) or bottom-center (`Shift`-click) of its direct children without moving children. |
 | **`Alt+Shift+X`** / **`Depenetrate`** | Viewport / Hierarchy / Layout Tab | **Separate overlapping selected transforms** by pushing intersecting bounding boxes apart (**`Shift`-click**: clearance padding & 3D dialog). |
@@ -1172,6 +1194,7 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 | **`Ctrl+Shift+B`** / **`Select By Axis Coordinate Slice...`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects whose world X, Y, or Z coordinate lies within `[MinCoord, MaxCoord]`. |
 | **`Ctrl+Shift+U`** / **`Select Empty / Unreferenced Transforms`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked empty `TCastleTransform` groups and unreferenced `TCastleScene` / `TCastleTransformDesign` nodes with no children or `Url`. |
 | **`Ctrl+Shift+N`** / **`Select Non-Uniformly Scaled Transforms`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects with non-uniform (`S.X <> S.Y` or `S.Y <> S.Z`) or non-positive (`<= 0`) `Scale` for physics collider auditing. |
+| **`Ctrl+Shift+T`** / **`Select Rotated / Tilted Transforms`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects with non-zero rotation (`Abs(Rotation.W) > 1e-3`) or tilted world orientation. |
 | **`Select By Bounding-Box Size Range...`** | Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects whose world bounding-box diagonal length lies within `[MinSize, MaxSize]`. |
 | **`Select By Name Pattern...`** | Hierarchy Context Menu | Select all components matching a substring or `*` / `?` wildcard pattern. |
 | **`Select All With Same Asset URL`** | Hierarchy Context Menu | Select all components in the design referencing the same `Url` asset as the selected component. |
@@ -1210,6 +1233,7 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 | **`UI Center Parent`** | Layout Tab (`PanelLayoutUI`) | **Center** 1+ selected `TCastleUserInterface` controls inside their parent container (**Click**: H+V; **`Shift`**: H only; **`Ctrl`**: V only). |
 | **`UI Fit Parent`** | Layout Tab (`PanelLayoutUI`) | **Fit** 1+ selected `TCastleUserInterface` controls to their parent container's size and center (**Click**: W+H; **`Shift`**: Width only; **`Ctrl`**: Height only). |
 | **`UI Split Row` / `UI Split Col`** | Layout Tab (`PanelLayoutUI`) | **Divide parent container width or height equally** across 2+ selected `TCastleUserInterface` controls (**Click**: $8\text{ px}$ gap; **`Shift`-click**: $0\text{ px}$ flush). |
+| **`UI Inset Parent`** | Layout Tab (`PanelLayoutUI`) | **Fit and center** 1+ selected `TCastleUserInterface` controls inside their parent container with uniform margin (**Click**: $16\text{ px}$; **`Shift`**: $8\text{ px}$; **`Ctrl`**: $32\text{ px}$). |
 | **`Reset Prop` Button** | Object Inspector Header | Reset the active Object Inspector property row to its default value. |
 | **`Select All of Same Class`** | Hierarchy Context Menu | Select all components in the design matching the selected component's class. |
 | **`Expand Subtree` / `Collapse Subtree`** | Hierarchy Context Menu | Recursively expand or collapse the selected hierarchy node(s). |
@@ -1226,9 +1250,9 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 
 ---
 
-## 59. Automated Unit Tests & Verification
+## 60. Automated Unit Tests & Verification
 
-All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 22 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
+All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 23 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
 
 1. **`TestSelectedCountAndFree`**: Verifies single/multi-selection filtering, freeing a selected transform while selected, and translating the remaining selection.
 2. **`TestTranslateSnapAndCoordSpace`**: Verifies grid snapping (`TranslateSnap := 2.0`) and `csLocal` vs. `csWorld` translation on a $90^\circ$-rotated transform.
@@ -1252,6 +1276,7 @@ All core 3D manipulation algorithms in `CastleTransformManipulate` are covered b
 20. **`TestArrangeWaypointsHelixAndCenterOriginOnChildren`**: Verifies `ArrangeSelectedAlongWaypoints` places 5 transforms at equal arc-length intervals along an L-shaped 3-waypoint polyline and orients them along each segment tangent, verifies `ArrangeSelectedInHelix(10.0, 20.0, 40.0, 1.0, true)` arranges 5 transforms along a conical 3D helix while orienting them toward the central axis, and verifies `CenterSelectedOriginOnChildren` snaps a parent `TCastleTransform` origin to both the center and bottom-center (`MinY`) of its direct children's world bounding box while keeping all children's world positions unchanged.
 21. **`TestArrangeBezierArchSphereAndScaleGroupAroundPivot`**: Verifies `ArrangeSelectedInParabolicArchBetweenEndpoints(10.0, true)` places 5 transforms along a parabolic Bezier arch reaching apex $(10, 10, 0)$ with horizontal tangent $(1, 0, 0)$ at $t = 0.5$, verifies `ArrangeSelectedOnSphere(10.0, 0.0, 90.0, true)` distributes 5 transforms on a radius-$10$ upper hemisphere dome using the Fibonacci lattice and orients each transform radially outward, and verifies `ScaleSelectedGroupAroundPivot(Vector3(2.0, 0.5, 3.0))` scales both world offsets from the primary pivot and local `Scale` vectors simultaneously.
 22. **`TestArrangeSineWaveEllipseAndReversePositions`**: Verifies `ArrangeSelectedInSineWaveBetweenEndpoints(6.0, 1.0, 1, true)` places 5 transforms along a sinusoidal wave with crest $(5, 6, 0)$, zero-crossing $(10, 0, 0)$, and trough $(15, -6, 0)$ while orienting the crest tangent horizontally along $(1, 0, 0)$, verifies `ArrangeSelectedInEllipse(12.0, 6.0, 2)` arranges 4 transforms around a $12 \times 6$ XZ ellipse oriented along the ellipse tangent, and verifies `ReverseSelectedPositions(true, true)` reverses world positions, orientations, and scales across the 4 transforms.
+23. **`TestArrangePhyllotaxisDiskStaircaseAndRadialScale`**: Verifies `ArrangeSelectedInPhyllotaxisDisk(10.0, 2)` distributes 5 transforms on a Vogel golden-angle spiral disk of outer radius $10.0$ ($r_i = 10\sqrt{i/4}$) and orients outer items radially outward from the center, verifies `ArrangeSelectedInStaircaseBetweenEndpoints(2.0, true)` arranges 5 transforms between $(0, 0, 0)$ and $(20, 16, 0)$ with linear XZ steps ($X = 0, 5, 10, 15, 20$), quadratic Y elevation ($Y = 0, 1, 4, 9, 16$), and horizontal yaw orientation along $+X$ while keeping world Up at $(0, 1, 0)$, and verifies `ScaleSelectedRadialDistanceXZ(2.0)` doubles horizontal XZ radial offsets from the pivot while leaving Y elevation and `Scale` untouched.
 
 To run this test suite from the command line:
 ```bash

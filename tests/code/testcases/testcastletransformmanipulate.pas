@@ -51,6 +51,7 @@ type
     procedure TestArrangeWaypointsHelixAndCenterOriginOnChildren;
     procedure TestArrangeBezierArchSphereAndScaleGroupAroundPivot;
     procedure TestArrangeSineWaveEllipseAndReversePositions;
+    procedure TestArrangePhyllotaxisDiskStaircaseAndRadialScale;
   end;
 
 implementation
@@ -1386,6 +1387,87 @@ begin
     AssertVectorEquals(Vector3(1, 1, 1), T4.Scale, 1e-3);
     T4.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(0, 0, 1), WorldDir.Normalize, 1e-3);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestArrangePhyllotaxisDiskStaircaseAndRadialScale;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  T1, T2, T3, T4, T5: TCastleTransform;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.OnTransformModified := {$ifdef FPC}@{$endif} HandleTransformModified;
+    Manipulate.OnTransformModifyEnd := {$ifdef FPC}@{$endif} HandleTransformModifyEnd;
+
+    T1 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T1);
+    T2 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T2);
+    T3 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T3);
+    T4 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T4);
+    T5 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T5);
+
+    // 1. Test ArrangeSelectedInPhyllotaxisDisk:
+    // Primary selected T1 at (0, 2, 0), OuterRadius = 10, OrientMode = 2 (outward).
+    // For 5 items (I = 0..4), distances from (0, *, 0) in XZ are 10 * Sqrt(I / 4):
+    // I=0 -> 0.0, I=1 -> 5.0, I=2 -> 10*Sqrt(0.5), I=3 -> 10*Sqrt(0.75), I=4 -> 10.0.
+    // Y elevations must remain unchanged.
+    T1.Translation := Vector3(0, 2, 0);
+    T2.Translation := Vector3(1, 3, 1);
+    T3.Translation := Vector3(2, 4, 2);
+    T4.Translation := Vector3(3, 5, 3);
+    T5.Translation := Vector3(4, 6, 4);
+    Manipulate.PivotMode := pmPrimarySelected;
+    Manipulate.SetSelected([T1, T2, T3, T4, T5]);
+    AssertTrue(Manipulate.ArrangeSelectedInPhyllotaxisDisk(10.0, 2));
+    AssertSameValue(0.0, Hypot(T1.Translation.X, T1.Translation.Z), 1e-3);
+    AssertSameValue(5.0, Hypot(T2.Translation.X, T2.Translation.Z), 1e-3);
+    AssertSameValue(10.0 * Sqrt(0.5), Hypot(T3.Translation.X, T3.Translation.Z), 1e-3);
+    AssertSameValue(10.0 * Sqrt(0.75), Hypot(T4.Translation.X, T4.Translation.Z), 1e-3);
+    AssertSameValue(10.0, Hypot(T5.Translation.X, T5.Translation.Z), 1e-3);
+    AssertSameValue(2.0, T1.Translation.Y, 1e-4);
+    AssertSameValue(6.0, T5.Translation.Y, 1e-4);
+    // Outward orientation on T5 matches its XZ radial vector
+    T5.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(T5.Translation.X, 0, T5.Translation.Z).Normalize, WorldDir.Normalize, 1e-3);
+
+    // 2. Test ScaleSelectedRadialDistanceXZ:
+    // Scaling XZ radial distance from primary T1 (0, 2, 0) by 2.0 doubles all XZ radii while preserving Y:
+    AssertTrue(Manipulate.ScaleSelectedRadialDistanceXZ(2.0));
+    AssertSameValue(0.0, Hypot(T1.Translation.X, T1.Translation.Z), 1e-3);
+    AssertSameValue(10.0, Hypot(T2.Translation.X, T2.Translation.Z), 1e-3);
+    AssertSameValue(20.0, Hypot(T5.Translation.X, T5.Translation.Z), 1e-3);
+    AssertSameValue(3.0, T2.Translation.Y, 1e-4);
+    AssertSameValue(6.0, T5.Translation.Y, 1e-4);
+
+    // 3. Test ArrangeSelectedInStaircaseBetweenEndpoints:
+    // Start T1 at (0, 0, 0), End T5 at (0, 16, 20), CurveExponent = 2.0 (quadratic concave grand stairs), OrientHorizontallyAlongRun = true.
+    // Factors for 5 items: 0.0, 0.25, 0.5, 0.75, 1.0
+    // Z values (linear): 0, 5, 10, 15, 20
+    // Y values (16 * t^2): 0, 1, 4, 9, 16
+    // Orientation: horizontal along +Z (0, 0, 1) with Up = (0, 1, 0).
+    T1.Translation := Vector3(0, 0, 0);
+    T5.Translation := Vector3(0, 16, 20);
+    Manipulate.SetSelected([T1, T2, T3, T4, T5]);
+    AssertTrue(Manipulate.ArrangeSelectedInStaircaseBetweenEndpoints(2.0, true));
+    AssertVectorEquals(Vector3(0, 0, 0), T1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 1, 5), T2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 4, 10), T3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 9, 15), T4.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 16, 20), T5.Translation, 1e-4);
+    T3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 0, 1), WorldDir.Normalize, 1e-4);
+    AssertVectorEquals(Vector3(0, 1, 0), WorldUp.Normalize, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

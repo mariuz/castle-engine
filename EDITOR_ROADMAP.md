@@ -417,3 +417,26 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Bound to **`Ctrl+Shift+N`** in both the Viewport and Hierarchy Tree, plus **`Select Non-Uniformly Scaled Transforms (Ctrl+Shift+N)`** (`MenuTreeViewItemSelectNonUniformScale`) in `MenuTreeView`.
 - [x] **59.2. 2D UI Equal-Span Row & Column Split In Parent (`StretchSelectedUserInterfacesAcrossParent` / `ButtonUIStretchRow` & `ButtonUIStretchCol`)**
   - Implemented `TDesignFrame.StretchSelectedUserInterfacesAcrossParent(Vertical, GapPx)` and added **`UI Split Row`** (`ButtonUIStretchRow`) and **`UI Split Col`** (`ButtonUIStretchCol`) to `PanelLayoutUI`, dividing `ParentRenderRect` width (`Vertical = false`) or height (`Vertical = true`) equally across 2+ selected `TCastleUserInterface` controls with `8 px` spacing on normal click or `0 px` flush spacing on `Shift`-click.
+
+### Phase 60: 3D Phyllotaxis / Golden-Angle Sunflower Disk Arrangement (`ArrangeSelectedInPhyllotaxisDisk` / `Alt+Shift+D`)
+- [x] **60.1. Uniform-Density Golden-Angle Spiral Disk Arrangement (`TCastleTransformManipulate.ArrangeSelectedInPhyllotaxisDisk`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedInPhyllotaxisDisk(OuterRadius, OrientMode): Boolean`: distributes 2+ top-level selected transforms across a horizontal XZ disk of radius `OuterRadius` centered at the active selection pivot using Vogel's golden-angle phyllotaxis model ($r_i = R \sqrt{i / (N - 1)}, \; \theta_i = i \cdot \pi(3 - \sqrt{5})$) with `OrientMode` (`0` = keep rotation, `1` = orient inward toward center, `2` = orient outward from center).
+  - Added **`Disk Arrange...`** (`ButtonArrangeDisk`) in `PanelLayoutTransform` and `ShowArrangeInDiskDialog` bound to **`Alt+Shift+D`** in both the Viewport and Hierarchy Tree.
+
+### Phase 61: 3D Staircase / Stepped Ramp Arrangement (`ArrangeSelectedInStaircase` / `ArrangeSelectedInStaircaseBetweenEndpoints` / `Alt+Shift+Y`)
+- [x] **61.1. Linear-XZ & Power-Curve-Y Staircase Arrangement (`TCastleTransformManipulate.ArrangeSelectedInStaircase`, `ArrangeSelectedInStaircaseBetweenEndpoints`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedInStaircase(StartWorldPos, EndWorldPos, CurveExponent, OrientHorizontallyAlongRun): Boolean` and `TCastleTransformManipulate.ArrangeSelectedInStaircaseBetweenEndpoints(CurveExponent, OrientHorizontallyAlongRun): Boolean`: arranges 2+ top-level selected transforms between `StartWorldPos` and `EndWorldPos` with uniform horizontal XZ step progression and power-curve vertical Y elevation ($y(t) = y_0 + (y_1 - y_0)t^E$), optionally orienting each step's horizontal yaw along the XZ staircase run while keeping steps level (`World.GravityUp`).
+  - Added **`Stair Arrange`** (`ButtonArrangeStairs` in `PanelLayoutTransform`: normal click arranges in a linear staircase between first & last selected transforms; `Ctrl`-click also orients yaw along the horizontal run; `Shift`-click opens the custom staircase dialog) and `ShowArrangeInStairsDialog` bound to **`Alt+Shift+Y`** in both the Viewport and Hierarchy Tree.
+
+### Phase 62: Radial / Cylindrical XZ Push-Pull From Pivot (`ScaleSelectedRadialDistanceXZ` / `Alt+Shift+.` & `Alt+Shift+,`)
+- [x] **62.1. Horizontal Radial Distance Scaling Around Selection Pivot (`TCastleTransformManipulate.ScaleSelectedRadialDistanceXZ`)**
+  - Implemented `TCastleTransformManipulate.ScaleSelectedRadialDistanceXZ(RadialFactor): Boolean`: scales only the horizontal XZ radial distance of 2+ top-level selected transforms away from or toward the active selection pivot (`SelectionWorkingCenter` or `Selected[0]`) by `RadialFactor` while strictly preserving each transform's world Y elevation, `Rotation`, and `Scale`.
+  - Added **`Radial +25%`** (`ButtonRadialExpand` / **`Alt+Shift+.`**) and **`Radial -20%`** (`ButtonRadialContract` / **`Alt+Shift+,`**) in `PanelLayoutTransform`.
+  - Added automated unit test `TestArrangePhyllotaxisDiskStaircaseAndRadialScale` in `tests/code/testcases/testcastletransformmanipulate.pas`.
+
+### Phase 63: Select Rotated / Tilted Transforms (`SelectRotatedTransforms` / `Ctrl+Shift+T`) & 2D UI Equal Margin Inset In Parent (`InsetSelectedUserInterfacesInParent` / `ButtonUIInsetParent`)
+- [x] **63.1. Orientation Audit: Select Rotated or Tilted Transforms (`SelectRotatedTransforms` / `Ctrl+Shift+T`)**
+  - Implemented `TDesignFrame.SelectRotatedTransforms`: selects all visible, unlocked `TCastleTransform` instances that have non-zero local rotation (`Abs(T.Rotation.W) > 1e-3`) or tilted world orientation (`WorldUp` $\neq (0,1,0)$ or `WorldDir` $\neq (0,0,-1)$).
+  - Bound to **`Ctrl+Shift+T`** in both the Viewport and Hierarchy Tree, plus **`Select Rotated / Tilted Transforms (Ctrl+Shift+T)`** (`MenuTreeViewItemSelectRotatedTransforms`) in `MenuTreeView`.
+- [x] **63.2. 2D UI Uniform Margin Inset In Parent (`InsetSelectedUserInterfacesInParent` / `ButtonUIInsetParent`)**
+  - Implemented `TDesignFrame.InsetSelectedUserInterfacesInParent(MarginPx)` and added **`UI Inset Parent`** (`ButtonUIInsetParent`) to `PanelLayoutUI`, resizing and centering 1+ selected `TCastleUserInterface` controls inside their parent container with a uniform screen-space margin (`16 px` on normal click, `8 px` on `Shift`-click, `32 px` on `Ctrl`-click).

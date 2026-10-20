@@ -700,6 +700,49 @@ type
       Returns @true if at least one selected transform was modified. }
     function ReverseSelectedPositions(const ReverseRotations: Boolean = false;
       const ReverseScales: Boolean = false): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) across a
+      horizontal XZ disk of @code(OuterRadius) around the active selection pivot
+      (@link(SelectionWorkingCenter) when @link(PivotMode) is @link(pmSelectionCenter),
+      or @code(Selected[0]) when @link(pmPrimarySelected)) using Vogel's golden-angle
+      phyllotaxis spiral ($r_i = R \sqrt(i / (N - 1)), \; \theta_i = i \cdot \phi$)
+      for uniform areal density without concentric ring artifacts.
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient horizontally inward toward the disk center
+      - @code(2): orient horizontally outward away from the disk center
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInPhyllotaxisDisk(const OuterRadius: Single;
+      const OrientMode: Integer = 0): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) as a
+      3D staircase / stepped ramp between @code(StartWorldPos) and @code(EndWorldPos):
+      - Horizontal XZ coordinates interpolate linearly ($t = i / (N - 1)$).
+      - Vertical Y elevation follows $y(t) = y_0 + (y_1 - y_0) \cdot t^E$ where
+        @code(CurveExponent) $E > 0$ (@code(1.0) = uniform steps, @code(< 1.0) = steep
+        initial rise, @code(> 1.0) = gentle initial rise / grand concave stairs).
+      - When @code(OrientHorizontallyAlongRun) is @true, rotates each step horizontally
+        (yaw only, keeping steps level with @code(GravityUp)) to face along the XZ run.
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInStaircase(const StartWorldPos, EndWorldPos: TVector3;
+      const CurveExponent: Single = 1.0;
+      const OrientHorizontallyAlongRun: Boolean = false): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) as a
+      3D staircase / stepped ramp between the first selected transform (@code(Selected[0]))
+      and the last selected transform (@code(Selected[N-1])).
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInStaircaseBetweenEndpoints(
+      const CurveExponent: Single = 1.0;
+      const OrientHorizontallyAlongRun: Boolean = false): Boolean;
+
+    { Scale only the horizontal XZ radial distance of all top-level selected transforms
+      (@code(SelectedCount >= 2)) from the active selection pivot
+      (@link(SelectionWorkingCenter) when @link(PivotMode) is @link(pmSelectionCenter),
+      or @code(Selected[0]) when @link(pmPrimarySelected)) by @code(RadialFactor),
+      preserving each transform's exact Y elevation and local @code(Scale).
+      Returns @true if at least one selected transform was modified. }
+    function ScaleSelectedRadialDistanceXZ(const RadialFactor: Single): Boolean;
   end;
 
 var
@@ -4917,6 +4960,303 @@ begin
         T.Scale := OrigScale[MirrorIdx];
         Result := true;
       end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInPhyllotaxisDisk(
+  const OuterRadius: Single; const OrientMode: Integer): Boolean;
+const
+  GoldenAngleRad = 2.39996322972865332; // Pi * (3 - Sqrt(5))
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, NewPos, TargetDir, CurWorldPos, CurDir, CurUp, GravityUp, Side, NewUp: TVector3;
+  EffRadius, SumDist, Dist, Angle, SinA, CosA: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  if FPivotMode = pmSelectionCenter then
+    CenterPos := SelectionWorkingCenter
+  else
+    CenterPos := GetTransformWorkingPos(Items[0]);
+
+  if OuterRadius > 0 then
+    EffRadius := OuterRadius
+  else
+  begin
+    SumDist := 0;
+    for I := 0 to Count - 1 do
+    begin
+      CurPos := GetTransformWorkingPos(Items[I]);
+      SumDist := Max(SumDist, Hypot(CurPos.X - CenterPos.X, CurPos.Z - CenterPos.Z));
+    end;
+    EffRadius := SumDist;
+    if EffRadius < 1e-4 then
+      EffRadius := 6.0;
+  end;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+    Dist := EffRadius * Sqrt(Single(I) / Single(Count - 1));
+    Angle := Single(I) * GoldenAngleRad;
+    SinCos(Angle, SinA, CosA);
+    NewPos := Vector3(
+      CenterPos.X + CosA * Dist,
+      CurPos.Y,
+      CenterPos.Z + SinA * Dist
+    );
+
+    if not TVector3.Equals(NewPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, NewPos);
+      Result := true;
+    end;
+
+    if (OrientMode = 1) or (OrientMode = 2) then
+    begin
+      if I = 0 then
+        TargetDir := Vector3(Cos(GoldenAngleRad), 0, Sin(GoldenAngleRad))
+      else
+        TargetDir := Vector3(NewPos.X - CenterPos.X, 0, NewPos.Z - CenterPos.Z);
+      if OrientMode = 1 then
+        TargetDir := -TargetDir;
+
+      if not TargetDir.IsZero(1e-5) then
+      begin
+        TargetDir := TargetDir.Normalize;
+        if T.HasWorldTransform then
+          T.GetWorldView(CurWorldPos, CurDir, CurUp)
+        else
+        begin
+          CurWorldPos := T.Translation;
+          CurDir := T.Direction;
+          CurUp := T.Up;
+        end;
+        GravityUp := Vector3(0, 1, 0);
+        Side := TVector3.CrossProduct(TargetDir, GravityUp);
+        if not Side.IsZero(1e-5) then
+        begin
+          Side := Side.Normalize;
+          NewUp := TVector3.CrossProduct(Side, TargetDir).Normalize;
+          if (not TVector3.Equals(CurDir, TargetDir, 1e-4)) or
+             (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+          begin
+            if T.HasWorldTransform then
+              T.SetWorldView(CurWorldPos, TargetDir, NewUp)
+            else
+              T.SetView(CurWorldPos, TargetDir, NewUp);
+            Result := true;
+          end;
+        end;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInStaircase(
+  const StartWorldPos, EndWorldPos: TVector3;
+  const CurveExponent: Single;
+  const OrientHorizontallyAlongRun: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  EffExp, Factor, HeightFactor: Single;
+  CurPos, NewPos, HorizDir, CurWorldPos, CurDir, CurUp, GravityUp, Side, NewUp: TVector3;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  EffExp := Max(0.05, CurveExponent);
+  HorizDir := Vector3(EndWorldPos.X - StartWorldPos.X, 0, EndWorldPos.Z - StartWorldPos.Z);
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    Factor := Single(I) / Single(Count - 1);
+    if Factor <= 0.0 then
+      HeightFactor := 0.0
+    else if Factor >= 1.0 then
+      HeightFactor := 1.0
+    else
+      HeightFactor := Power(Factor, EffExp);
+
+    NewPos := Vector3(
+      Lerp(Factor, StartWorldPos.X, EndWorldPos.X),
+      Lerp(HeightFactor, StartWorldPos.Y, EndWorldPos.Y),
+      Lerp(Factor, StartWorldPos.Z, EndWorldPos.Z)
+    );
+
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(NewPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, NewPos);
+      Result := true;
+    end;
+
+    if OrientHorizontallyAlongRun and (not HorizDir.IsZero(1e-5)) then
+    begin
+      HorizDir := HorizDir.Normalize;
+      if T.HasWorldTransform then
+        T.GetWorldView(CurWorldPos, CurDir, CurUp)
+      else
+      begin
+        CurWorldPos := T.Translation;
+        CurDir := T.Direction;
+        CurUp := T.Up;
+      end;
+      GravityUp := Vector3(0, 1, 0);
+      Side := TVector3.CrossProduct(HorizDir, GravityUp);
+      if not Side.IsZero(1e-5) then
+      begin
+        Side := Side.Normalize;
+        NewUp := TVector3.CrossProduct(Side, HorizDir).Normalize;
+        if (not TVector3.Equals(CurDir, HorizDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          if T.HasWorldTransform then
+            T.SetWorldView(CurWorldPos, HorizDir, NewUp)
+          else
+            T.SetView(CurWorldPos, HorizDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInStaircaseBetweenEndpoints(
+  const CurveExponent: Single;
+  const OrientHorizontallyAlongRun: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  StartPos, EndPos: TVector3;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  StartPos := GetTransformWorkingPos(Items[0]);
+  EndPos := GetTransformWorkingPos(Items[Count - 1]);
+  Result := ArrangeSelectedInStaircase(StartPos, EndPos, CurveExponent,
+    OrientHorizontallyAlongRun);
+end;
+
+function TCastleTransformManipulate.ScaleSelectedRadialDistanceXZ(
+  const RadialFactor: Single): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  PivotPos, CurPos, NewPos: TVector3;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  if FPivotMode = pmSelectionCenter then
+    PivotPos := SelectionWorkingCenter
+  else
+    PivotPos := GetTransformWorkingPos(Items[0]);
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+    NewPos := Vector3(
+      PivotPos.X + (CurPos.X - PivotPos.X) * RadialFactor,
+      CurPos.Y,
+      PivotPos.Z + (CurPos.Z - PivotPos.Z) * RadialFactor
+    );
+    if not TVector3.Equals(NewPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, NewPos);
+      Result := true;
     end;
   end;
 
