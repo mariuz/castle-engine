@@ -1720,6 +1720,96 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Phase 19.1: Compute Shader Skeletal Skinning & Morph Target Blending       }
+  { -------------------------------------------------------------------------- }
+
+  { GPU compute skeletal skinning and morph target blending subsystem writing
+    deformed vertices and previous-frame positions for TAA motion vectors. }
+  TCastleVulkanComputeSkinner = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FSourceVertexBuffer: TVulkanRHIBuffer;
+    FMorphDeltaBuffer: TVulkanRHIBuffer;
+    FJointMatrixBuffer: TVulkanRHIBuffer;
+    FSkinnedVertexBuffer: TVulkanRHIBuffer;
+    FPreviousPositionBuffer: TVulkanRHIBuffer;
+    FSkinningPipeline: TRHIComputePipeline;
+    FMaxVertices: Cardinal;
+    FMorphTargetCount: Cardinal;
+    FMorphWeights: TVector4;
+    FTotalSkinningDispatches: Cardinal;
+    procedure EnsureSkinningPipeline;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    procedure EnsureSkinningBuffers(
+      const AMaxVertices: Cardinal = CASTLE_DEFAULT_MAX_SKINNED_VERTICES;
+      const AMorphTargetCount: Cardinal = 4);
+    function DispatchComputeSkinning(const ACmd: TRHICommandList;
+      const AVertexCount: Cardinal; const AJointCount: Cardinal = 64;
+      const AStorePreviousPos: Boolean = True): Cardinal;
+
+    { CPU reference evaluation of morph target displacement + 4-bone Linear Blend Skinning (LBS). }
+    class procedure EvaluateVertexSkinningAndMorph(
+      const ASourceVertex: TCastleSkinningVertex;
+      const AMorphDeltas: array of TCastleMorphTargetDelta;
+      const AMorphWeights: TVector4;
+      const AJointMatrices: array of TMatrix4;
+      out ASkinnedPos, ASkinnedNormal: TVector3); static;
+
+    property SourceVertexBuffer: TVulkanRHIBuffer read FSourceVertexBuffer;
+    property MorphDeltaBuffer: TVulkanRHIBuffer read FMorphDeltaBuffer;
+    property JointMatrixBuffer: TVulkanRHIBuffer read FJointMatrixBuffer;
+    property SkinnedVertexBuffer: TVulkanRHIBuffer read FSkinnedVertexBuffer;
+    property PreviousPositionBuffer: TVulkanRHIBuffer read FPreviousPositionBuffer;
+    property SkinningPipeline: TRHIComputePipeline read FSkinningPipeline;
+    property MaxVertices: Cardinal read FMaxVertices;
+    property MorphTargetCount: Cardinal read FMorphTargetCount;
+    property MorphWeights: TVector4 read FMorphWeights write FMorphWeights;
+    property TotalSkinningDispatches: Cardinal read FTotalSkinningDispatches;
+  end;
+
+  { -------------------------------------------------------------------------- }
+  { Phase 19.2: GPU-Driven Continuous Distance-Dependent LOD (CDLOD) Terrain   }
+  { -------------------------------------------------------------------------- }
+
+  { Manages quadtree terrain CDLOD patch nodes, morph distance ranges, and GPU SSBO upload. }
+  TCastleVulkanTerrainCDLOD = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FNodes: array[0 .. CASTLE_MAX_TERRAIN_CDLOD_NODES - 1] of TCastleTerrainCDLODNode;
+    FNodeCount: Cardinal;
+    FNodeBuffer: TVulkanRHIBuffer;
+    FBaseLODDistance: Single;
+    FMorphStartRatio: Single;
+    FTotalNodeUploads: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    procedure ClearNodes;
+    function AddTerrainNode(const AWorldX, AWorldZ, APatchSize: Single;
+      const ALODLevel: Cardinal; const AMinY, AMaxY: Single): Integer;
+    function GetTerrainNode(const AIndex: Integer): TCastleTerrainCDLODNode;
+    procedure UploadNodes;
+
+    { Evaluates the continuous CDLOD morph factor k in [0..1] for ACameraDistance inside [ALODNearDist, ALODFarDist]. }
+    class function EvaluateCDLODMorphFactor(
+      const ACameraDistance, ALODNearDist, ALODFarDist, AMorphStartRatio: Single): Single; static;
+
+    { Morphs a normalized patch grid UV [0..1]^2 smoothly toward the next coarser LOD grid when AMorphFactor -> 1. }
+    class function MorphCDLODGridVertex(const AGridUV: TVector2;
+      const APatchResolution, AMorphFactor: Single): TVector2; static;
+
+    property NodeCount: Cardinal read FNodeCount;
+    property NodeBuffer: TVulkanRHIBuffer read FNodeBuffer;
+    property BaseLODDistance: Single read FBaseLODDistance write FBaseLODDistance;
+    property MorphStartRatio: Single read FMorphStartRatio write FMorphStartRatio;
+    property TotalNodeUploads: Cardinal read FTotalNodeUploads;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -1786,7 +1876,7 @@ type
     FDeferredDeletions: array[0 .. MaxFramesInFlight - 1] of array of TVulkanDeferredDeletionItem;
     FDeferResourceDestruction: Boolean;
 
-    { GPU memory sub-allocator (pooled blocks + per-frame ring buffers), async staging uploader, bindless manager, timestamp profiler, compute culler, IBL generator, clustered culler, shadow atlas, HDR post-processor, GTAO, SSR, volumetric fog, TAA, reflection probes, decals, compute particles, OIT & contact shadows }
+    { GPU memory sub-allocator (pooled blocks + per-frame ring buffers), async staging uploader, bindless manager, timestamp profiler, compute culler, IBL generator, clustered culler, shadow atlas, HDR post-processor, GTAO, SSR, volumetric fog, TAA, reflection probes, decals, compute particles, OIT, contact shadows, compute skinner & CDLOD terrain }
     FMemoryAllocator: TCastleVulkanMemoryAllocator;
     FStagingUploader: TCastleVulkanStagingUploader;
     FBindlessTextureManager: TCastleVulkanBindlessTextureManager;
@@ -1805,6 +1895,8 @@ type
     FComputeParticles: TCastleVulkanComputeParticles;
     FWeightedBlendedOIT: TCastleVulkanWeightedBlendedOIT;
     FContactShadows: TCastleVulkanContactShadows;
+    FComputeSkinner: TCastleVulkanComputeSkinner;
+    FTerrainCDLOD: TCastleVulkanTerrainCDLOD;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -1895,6 +1987,8 @@ type
     function GetComputeParticles: TCastleVulkanComputeParticles;
     function GetWeightedBlendedOIT: TCastleVulkanWeightedBlendedOIT;
     function GetContactShadows: TCastleVulkanContactShadows;
+    function GetComputeSkinner: TCastleVulkanComputeSkinner;
+    function GetTerrainCDLOD: TCastleVulkanTerrainCDLOD;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -2090,6 +2184,8 @@ type
     property ComputeParticles: TCastleVulkanComputeParticles read GetComputeParticles;
     property WeightedBlendedOIT: TCastleVulkanWeightedBlendedOIT read GetWeightedBlendedOIT;
     property ContactShadows: TCastleVulkanContactShadows read GetContactShadows;
+    property ComputeSkinner: TCastleVulkanComputeSkinner read GetComputeSkinner;
+    property TerrainCDLOD: TCastleVulkanTerrainCDLOD read GetTerrainCDLOD;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -11308,6 +11404,335 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanComputeSkinner                                                  }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanComputeSkinner.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FMaxVertices := 0;
+  FMorphTargetCount := 0;
+  FMorphWeights := Vector4(0.0, 0.0, 0.0, 0.0);
+  FTotalSkinningDispatches := 0;
+end;
+
+destructor TCastleVulkanComputeSkinner.Destroy;
+begin
+  FreeAndNil(FSourceVertexBuffer);
+  FreeAndNil(FMorphDeltaBuffer);
+  FreeAndNil(FJointMatrixBuffer);
+  FreeAndNil(FSkinnedVertexBuffer);
+  FreeAndNil(FPreviousPositionBuffer);
+  inherited;
+end;
+
+procedure TCastleVulkanComputeSkinner.EnsureSkinningBuffers(
+  const AMaxVertices, AMorphTargetCount: Cardinal);
+var
+  EffectiveVerts, EffectiveMorphs: Cardinal;
+  BufDesc: TRHIBufferDesc;
+begin
+  EffectiveVerts := Max(Cardinal(64), AMaxVertices);
+  EffectiveMorphs := EnsureRange(AMorphTargetCount, 1, 4);
+  if (FMaxVertices = EffectiveVerts) and (FMorphTargetCount = EffectiveMorphs) and
+     (FSourceVertexBuffer <> nil) and (FMorphDeltaBuffer <> nil) and
+     (FJointMatrixBuffer <> nil) and (FSkinnedVertexBuffer <> nil) and
+     (FPreviousPositionBuffer <> nil) then
+    Exit;
+
+  FreeAndNil(FSourceVertexBuffer);
+  FreeAndNil(FMorphDeltaBuffer);
+  FreeAndNil(FJointMatrixBuffer);
+  FreeAndNil(FSkinnedVertexBuffer);
+  FreeAndNil(FPreviousPositionBuffer);
+  FMaxVertices := EffectiveVerts;
+  FMorphTargetCount := EffectiveMorphs;
+
+  BufDesc := TRHIBufferDesc.Create(
+    PtrUInt(FMaxVertices) * SizeOf(TCastleSkinningVertex),
+    [buStorage, buTransferDst],
+    muCpuToGpu,
+    'ComputeSkinnerSourceVertices');
+  FSourceVertexBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+
+  BufDesc := TRHIBufferDesc.Create(
+    PtrUInt(FMaxVertices) * PtrUInt(FMorphTargetCount) * SizeOf(TCastleMorphTargetDelta),
+    [buStorage, buTransferDst],
+    muCpuToGpu,
+    'ComputeSkinnerMorphDeltas');
+  FMorphDeltaBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+
+  BufDesc := TRHIBufferDesc.Create(
+    CASTLE_MAX_BONE_MATRICES * SizeOf(TMatrix4),
+    [buStorage, buUniform, buTransferDst],
+    muCpuToGpu,
+    'ComputeSkinnerJointMatrices');
+  FJointMatrixBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+
+  BufDesc := TRHIBufferDesc.Create(
+    PtrUInt(FMaxVertices) * SizeOf(TCastleSkinningVertex),
+    [buStorage, buVertex, buTransferSrc],
+    muGpuOnly,
+    'ComputeSkinnerSkinnedVertices');
+  FSkinnedVertexBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+
+  BufDesc := TRHIBufferDesc.Create(
+    PtrUInt(FMaxVertices) * SizeOf(TVector4),
+    [buStorage, buVertex],
+    muGpuOnly,
+    'ComputeSkinnerPreviousPositions');
+  FPreviousPositionBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+end;
+
+procedure TCastleVulkanComputeSkinner.EnsureSkinningPipeline;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  Shader: TRHIShaderModule;
+  PipeDesc: TRHIComputePipelineDesc;
+begin
+  if FSkinningPipeline <> nil then
+    Exit;
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    Shader := FDevice.CreateShaderModuleFromGLSL(
+      ssCompute,
+      Gen.GenerateComputeSkinningShader(64),
+      'ComputeSkinningCS');
+    try
+      FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+      PipeDesc.ComputeShader := Shader;
+      PipeDesc.PushConstantSize := SizeOf(TCastleComputeSkinningPushConstants);
+      PipeDesc.PushConstantStages := [ssCompute];
+      PipeDesc.DebugName := 'ComputeSkinningPipeline';
+      FSkinningPipeline := FDevice.GetOrCreateComputePipeline(PipeDesc);
+    finally
+      FreeAndNil(Shader);
+    end;
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+function TCastleVulkanComputeSkinner.DispatchComputeSkinning(
+  const ACmd: TRHICommandList; const AVertexCount, AJointCount: Cardinal;
+  const AStorePreviousPos: Boolean): Cardinal;
+var
+  Push: TCastleComputeSkinningPushConstants;
+  ActiveVerts, GroupsX: Cardinal;
+begin
+  if FMaxVertices = 0 then
+    EnsureSkinningBuffers(Max(CASTLE_DEFAULT_MAX_SKINNED_VERTICES, AVertexCount), 4);
+  if (ACmd = nil) or (AVertexCount = 0) then
+    Exit(0);
+
+  EnsureSkinningPipeline;
+  ActiveVerts := Min(AVertexCount, FMaxVertices);
+  FillChar(Push, SizeOf(Push), 0);
+  Push.MorphWeights := FMorphWeights;
+  Push.VertexCount := ActiveVerts;
+  Push.MorphTargetCount := FMorphTargetCount;
+  Push.JointCount := Min(AJointCount, Cardinal(CASTLE_MAX_BONE_MATRICES));
+  if AStorePreviousPos then
+    Push.StorePreviousPos := 1
+  else
+    Push.StorePreviousPos := 0;
+
+  GroupsX := (ActiveVerts + 63) div 64;
+  ACmd.BindComputePipeline(FSkinningPipeline);
+  ACmd.PushConstants([ssCompute], 0, SizeOf(Push), Push);
+  ACmd.Dispatch(GroupsX, 1, 1);
+  Inc(FTotalSkinningDispatches);
+  Result := GroupsX;
+end;
+
+class procedure TCastleVulkanComputeSkinner.EvaluateVertexSkinningAndMorph(
+  const ASourceVertex: TCastleSkinningVertex;
+  const AMorphDeltas: array of TCastleMorphTargetDelta;
+  const AMorphWeights: TVector4;
+  const AJointMatrices: array of TMatrix4;
+  out ASkinnedPos, ASkinnedNormal: TVector3);
+var
+  MorphedPos, MorphedNorm, AccumPos, AccumNorm: TVector3;
+  I, MorphCount, JointIdx, MaxJointIdx: Integer;
+  W, WeightSum: Single;
+  WeightsArr: array[0..3] of Single;
+  JointMat: TMatrix4;
+begin
+  MorphedPos := Vector3(
+    ASourceVertex.PositionAndUVX.X,
+    ASourceVertex.PositionAndUVX.Y,
+    ASourceVertex.PositionAndUVX.Z);
+  MorphedNorm := Vector3(
+    ASourceVertex.NormalAndUVY.X,
+    ASourceVertex.NormalAndUVY.Y,
+    ASourceVertex.NormalAndUVY.Z);
+
+  WeightsArr[0] := AMorphWeights.X;
+  WeightsArr[1] := AMorphWeights.Y;
+  WeightsArr[2] := AMorphWeights.Z;
+  WeightsArr[3] := AMorphWeights.W;
+  MorphCount := Min(4, Length(AMorphDeltas));
+  for I := 0 to MorphCount - 1 do
+  begin
+    W := WeightsArr[I];
+    if Abs(W) > 1e-5 then
+    begin
+      MorphedPos := MorphedPos + Vector3(
+        AMorphDeltas[I].DeltaPosition.X,
+        AMorphDeltas[I].DeltaPosition.Y,
+        AMorphDeltas[I].DeltaPosition.Z) * W;
+      MorphedNorm := MorphedNorm + Vector3(
+        AMorphDeltas[I].DeltaNormal.X,
+        AMorphDeltas[I].DeltaNormal.Y,
+        AMorphDeltas[I].DeltaNormal.Z) * W;
+    end;
+  end;
+
+  WeightsArr[0] := ASourceVertex.JointWeights.X;
+  WeightsArr[1] := ASourceVertex.JointWeights.Y;
+  WeightsArr[2] := ASourceVertex.JointWeights.Z;
+  WeightsArr[3] := ASourceVertex.JointWeights.W;
+  WeightSum := WeightsArr[0] + WeightsArr[1] + WeightsArr[2] + WeightsArr[3];
+
+  if (Length(AJointMatrices) > 0) and (WeightSum > 1e-5) then
+  begin
+    MaxJointIdx := High(AJointMatrices);
+    AccumPos := TVector3.Zero;
+    AccumNorm := TVector3.Zero;
+    for I := 0 to 3 do
+    begin
+      W := WeightsArr[I];
+      if W > 1e-6 then
+      begin
+        JointIdx := EnsureRange(Integer(ASourceVertex.JointIndices[I]), 0, MaxJointIdx);
+        JointMat := AJointMatrices[JointIdx];
+        AccumPos := AccumPos + JointMat.MultPoint(MorphedPos) * W;
+        AccumNorm := AccumNorm + JointMat.MultDirection(MorphedNorm) * W;
+      end;
+    end;
+    ASkinnedPos := AccumPos;
+    if AccumNorm.LengthSqr > 1e-10 then
+      ASkinnedNormal := AccumNorm.Normalize
+    else
+      ASkinnedNormal := Vector3(0.0, 1.0, 0.0);
+  end else
+  begin
+    ASkinnedPos := MorphedPos;
+    if MorphedNorm.LengthSqr > 1e-10 then
+      ASkinnedNormal := MorphedNorm.Normalize
+    else
+      ASkinnedNormal := Vector3(0.0, 1.0, 0.0);
+  end;
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanTerrainCDLOD                                                    }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanTerrainCDLOD.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FNodeCount := 0;
+  FBaseLODDistance := 64.0;
+  FMorphStartRatio := 0.70;
+  FTotalNodeUploads := 0;
+  FillChar(FNodes, SizeOf(FNodes), 0);
+end;
+
+destructor TCastleVulkanTerrainCDLOD.Destroy;
+begin
+  FreeAndNil(FNodeBuffer);
+  inherited;
+end;
+
+procedure TCastleVulkanTerrainCDLOD.ClearNodes;
+begin
+  FNodeCount := 0;
+  FillChar(FNodes, SizeOf(FNodes), 0);
+end;
+
+function TCastleVulkanTerrainCDLOD.AddTerrainNode(
+  const AWorldX, AWorldZ, APatchSize: Single;
+  const ALODLevel: Cardinal; const AMinY, AMaxY: Single): Integer;
+var
+  Idx: Cardinal;
+  ScaleFactor, NearDist, FarDist, MorphStart: Single;
+begin
+  if FNodeCount >= CASTLE_MAX_TERRAIN_CDLOD_NODES then
+    Exit(-1);
+  Idx := FNodeCount;
+  Inc(FNodeCount);
+
+  ScaleFactor := Power(2.0, Single(ALODLevel));
+  if ALODLevel = 0 then
+    NearDist := 0.0
+  else
+    NearDist := FBaseLODDistance * Power(2.0, Single(ALODLevel) - 1.0);
+  FarDist := FBaseLODDistance * ScaleFactor;
+  MorphStart := NearDist + (FarDist - NearDist) * EnsureRange(FMorphStartRatio, 0.1, 0.95);
+
+  FNodes[Idx].NodeXZAndScale := Vector4(AWorldX, AWorldZ, Max(1.0, APatchSize), Single(ALODLevel));
+  FNodes[Idx].MorphStartEndAndHeightRange := Vector4(MorphStart, FarDist, AMinY, AMaxY);
+  Result := Integer(Idx);
+end;
+
+function TCastleVulkanTerrainCDLOD.GetTerrainNode(const AIndex: Integer): TCastleTerrainCDLODNode;
+begin
+  if (AIndex >= 0) and (Cardinal(AIndex) < FNodeCount) then
+    Result := FNodes[AIndex]
+  else
+    FillChar(Result, SizeOf(Result), 0);
+end;
+
+procedure TCastleVulkanTerrainCDLOD.UploadNodes;
+var
+  BufDesc: TRHIBufferDesc;
+  MappedPtr: Pointer;
+begin
+  if FNodeBuffer = nil then
+  begin
+    BufDesc := TRHIBufferDesc.Create(
+      SizeOf(FNodes),
+      [buStorage, buUniform, buTransferDst],
+      muCpuToGpu,
+      'TerrainCDLODNodesBuffer');
+    FNodeBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+
+  MappedPtr := FNodeBuffer.Map;
+  if MappedPtr <> nil then
+  begin
+    Move(FNodes[0], MappedPtr^, SizeOf(FNodes));
+    FNodeBuffer.Unmap;
+  end;
+  Inc(FTotalNodeUploads);
+end;
+
+class function TCastleVulkanTerrainCDLOD.EvaluateCDLODMorphFactor(
+  const ACameraDistance, ALODNearDist, ALODFarDist, AMorphStartRatio: Single): Single;
+var
+  Ratio, MorphStart: Single;
+begin
+  Ratio := EnsureRange(AMorphStartRatio, 0.1, 0.95);
+  MorphStart := ALODNearDist + (ALODFarDist - ALODNearDist) * Ratio;
+  Result := EnsureRange((ACameraDistance - MorphStart) / Max(1e-4, ALODFarDist - MorphStart), 0.0, 1.0);
+end;
+
+class function TCastleVulkanTerrainCDLOD.MorphCDLODGridVertex(
+  const AGridUV: TVector2; const APatchResolution, AMorphFactor: Single): TVector2;
+var
+  Res, K, FracX, FracY: Single;
+begin
+  Res := Max(1.0, APatchResolution);
+  K := EnsureRange(AMorphFactor, 0.0, 1.0);
+  FracX := Frac(AGridUV.X * Res * 0.5) * 2.0 / Res;
+  FracY := Frac(AGridUV.Y * Res * 0.5) * 2.0 / Res;
+  Result := Vector2(AGridUV.X - FracX * K, AGridUV.Y - FracY * K);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -11801,12 +12226,28 @@ begin
   Result := FContactShadows;
 end;
 
+function TVulkanRHIDevice.GetComputeSkinner: TCastleVulkanComputeSkinner;
+begin
+  if FComputeSkinner = nil then
+    FComputeSkinner := TCastleVulkanComputeSkinner.Create(Self);
+  Result := FComputeSkinner;
+end;
+
+function TVulkanRHIDevice.GetTerrainCDLOD: TCastleVulkanTerrainCDLOD;
+begin
+  if FTerrainCDLOD = nil then
+    FTerrainCDLOD := TCastleVulkanTerrainCDLOD.Create(Self);
+  Result := FTerrainCDLOD;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FTerrainCDLOD);
+  FreeAndNil(FComputeSkinner);
   FreeAndNil(FContactShadows);
   FreeAndNil(FWeightedBlendedOIT);
   FreeAndNil(FComputeParticles);

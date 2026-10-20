@@ -123,6 +123,9 @@ type
     procedure TestGPUComputeParticleSimulationAndIndirectDrawRHI;
     procedure TestWeightedBlendedOrderIndependentTransparencyRHI;
     procedure TestScreenSpaceRaymarchedContactShadowsRHI;
+    procedure TestComputeSkinningAndMorphTargetsRHI;
+    procedure TestGPUDrivenTerrainCDLODRHI;
+    procedure TestSubsurfaceScatteringAndFoliageTransmissionPBRRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -7029,6 +7032,199 @@ begin
     FreeAndNil(Gen);
     FreeAndNil(CmdList);
     FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestComputeSkinningAndMorphTargetsRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Gen: TCastleShaderGeneratorRHI;
+  Skinner: TCastleVulkanComputeSkinner;
+  SkinCS: String;
+  SrcVert: TCastleSkinningVertex;
+  Deltas: array[0..1] of TCastleMorphTargetDelta;
+  Joints: array[0..1] of TMatrix4;
+  SkinnedPos, SkinnedNorm: TVector3;
+  Groups: Cardinal;
+begin
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0, cllPrimary);
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify struct sizes and Compute Skinning GLSL }
+    AssertEquals('TCastleSkinningVertex must be 64 bytes',
+      64, SizeOf(TCastleSkinningVertex));
+    AssertEquals('TCastleMorphTargetDelta must be 32 bytes',
+      32, SizeOf(TCastleMorphTargetDelta));
+    AssertEquals('TCastleComputeSkinningPushConstants must be 32 bytes',
+      32, SizeOf(TCastleComputeSkinningPushConstants));
+
+    SkinCS := Gen.GenerateComputeSkinningShader(64);
+    AssertTrue('Compute skinning CS must use local_size_x = 64',
+      Pos('layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;', SkinCS) > 0);
+    AssertTrue('Compute skinning CS must output previous positions for TAA motion vectors',
+      Pos('u_PreviousPositions[vid] = vec4(u_SkinnedVertices[vid].PositionAndUVX.xyz, 1.0);', SkinCS) > 0);
+
+    { 2. Verify morph target displacement + 2-bone linear blend skinning }
+    FillChar(SrcVert, SizeOf(SrcVert), 0);
+    SrcVert.PositionAndUVX := Vector4(1.0, 2.0, 0.0, 0.5);
+    SrcVert.NormalAndUVY := Vector4(0.0, 1.0, 0.0, 0.5);
+    SrcVert.JointIndices[0] := 0;
+    SrcVert.JointIndices[1] := 1;
+    SrcVert.JointWeights := Vector4(0.5, 0.5, 0.0, 0.0);
+
+    FillChar(Deltas, SizeOf(Deltas), 0);
+    Deltas[0].DeltaPosition := Vector4(2.0, 0.0, 0.0, 0.0); { weight 0.5 -> +1.0 X }
+    Deltas[1].DeltaPosition := Vector4(0.0, 4.0, 0.0, 0.0); { weight 0.25 -> +1.0 Y }
+
+    Joints[0] := TranslationMatrix(10.0, 0.0, 0.0);
+    Joints[1] := TranslationMatrix(20.0, 0.0, 0.0);
+
+    { Morphed pos = (1+1, 2+1, 0) = (2, 3, 0).
+      50% Joint 0 (+10 X -> 12) + 50% Joint 1 (+20 X -> 22) = (17, 3, 0) }
+    TCastleVulkanComputeSkinner.EvaluateVertexSkinningAndMorph(
+      SrcVert, Deltas, Vector4(0.5, 0.25, 0.0, 0.0), Joints, SkinnedPos, SkinnedNorm);
+    AssertSameValue(17.0, SkinnedPos.X, 1e-4);
+    AssertSameValue(3.0, SkinnedPos.Y, 1e-4);
+    AssertSameValue(0.0, SkinnedPos.Z, 1e-4);
+    AssertSameValue(1.0, SkinnedNorm.Y, 1e-4);
+
+    { 3. Verify GPU skinning buffer allocation and compute dispatch }
+    Skinner := VkDev.ComputeSkinner;
+    AssertTrue('ComputeSkinner must be lazily created by TVulkanRHIDevice', Skinner <> nil);
+    Skinner.EnsureSkinningBuffers(2048, 4);
+    AssertEquals('MaxVertices must be 2048', 2048, Skinner.MaxVertices);
+    AssertTrue('SourceVertexBuffer must be allocated', Skinner.SourceVertexBuffer <> nil);
+    AssertTrue('MorphDeltaBuffer must be allocated', Skinner.MorphDeltaBuffer <> nil);
+    AssertTrue('JointMatrixBuffer must be allocated', Skinner.JointMatrixBuffer <> nil);
+    AssertTrue('SkinnedVertexBuffer must be allocated', Skinner.SkinnedVertexBuffer <> nil);
+    AssertTrue('PreviousPositionBuffer must be allocated', Skinner.PreviousPositionBuffer <> nil);
+
+    CmdList.BeginRecording;
+    Groups := Skinner.DispatchComputeSkinning(CmdList, 1000, 32, True);
+    CmdList.EndRecording;
+
+    AssertEquals('1000 vertices / 64 threads = 16 workgroups', 16, Groups);
+    AssertEquals('TotalSkinningDispatches must be 1', 1, Skinner.TotalSkinningDispatches);
+    AssertTrue('SkinningPipeline must be compiled', Skinner.SkinningPipeline <> nil);
+  finally
+    FreeAndNil(Gen);
+    FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGPUDrivenTerrainCDLODRHI;
+var
+  VkDev: TVulkanRHIDevice;
+  Gen: TCastleShaderGeneratorRHI;
+  Terrain: TCastleVulkanTerrainCDLOD;
+  CDLODGLSL: String;
+  MorphNear, MorphMid, MorphFar: Single;
+  UnmorphedUV, MorphedUV: TVector2;
+  NodeIdx: Integer;
+  NodeEntry: TCastleTerrainCDLODNode;
+begin
+  VkDev := TVulkanRHIDevice.CreateHeadless(nil, True, True, VK_API_VERSION_1_3);
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify TCastleTerrainCDLODNode (32 bytes) & GLSL functions }
+    AssertEquals('TCastleTerrainCDLODNode must be 32 bytes',
+      32, SizeOf(TCastleTerrainCDLODNode));
+
+    CDLODGLSL := Gen.GenerateTerrainCDLODFunctions;
+    AssertTrue('Terrain CDLOD GLSL must include EvaluateCDLODMorphFactor',
+      Pos('float EvaluateCDLODMorphFactor(float cameraDist, float lodNearDist, float lodFarDist, float morphStartRatio)', CDLODGLSL) > 0);
+    AssertTrue('Terrain CDLOD GLSL must include MorphCDLODGridVertex',
+      Pos('vec2 MorphCDLODGridVertex(vec2 gridUV, float patchResolution, float morphFactor)', CDLODGLSL) > 0);
+
+    { 2. Verify continuous morph factor k in [0..1] and odd-grid-vertex snapping }
+    { Range [0..100] with MorphStartRatio=0.70 -> morphing starts at 70m and completes at 100m }
+    MorphNear := TCastleVulkanTerrainCDLOD.EvaluateCDLODMorphFactor(50.0, 0.0, 100.0, 0.70);
+    MorphMid  := TCastleVulkanTerrainCDLOD.EvaluateCDLODMorphFactor(85.0, 0.0, 100.0, 0.70);
+    MorphFar  := TCastleVulkanTerrainCDLOD.EvaluateCDLODMorphFactor(105.0, 0.0, 100.0, 0.70);
+    AssertSameValue(0.0, MorphNear, 1e-5);
+    AssertSameValue(0.5, MorphMid, 1e-4);
+    AssertSameValue(1.0, MorphFar, 1e-5);
+
+    { Odd grid vertex at UV=1/8 on an 8x8 patch must snap to even grid UV=0 when morphFactor=1 }
+    UnmorphedUV := TCastleVulkanTerrainCDLOD.MorphCDLODGridVertex(Vector2(0.125, 0.25), 8.0, 0.0);
+    MorphedUV   := TCastleVulkanTerrainCDLOD.MorphCDLODGridVertex(Vector2(0.125, 0.25), 8.0, 1.0);
+    AssertSameValue(0.125, UnmorphedUV.X, 1e-5);
+    AssertSameValue(0.0, MorphedUV.X, 1e-5);
+    AssertSameValue(0.25, MorphedUV.Y, 1e-5); { 0.25 = 2/8 is already an even grid vertex }
+
+    { 3. Verify quadtree node management & GPU buffer upload }
+    Terrain := VkDev.TerrainCDLOD;
+    AssertTrue('TerrainCDLOD must be lazily created by TVulkanRHIDevice', Terrain <> nil);
+    NodeIdx := Terrain.AddTerrainNode(-128.0, -128.0, 64.0, 1, -10.0, 45.0);
+    AssertEquals('First terrain node index must be 0', 0, NodeIdx);
+    AssertEquals('NodeCount must be 1', 1, Terrain.NodeCount);
+
+    NodeEntry := Terrain.GetTerrainNode(0);
+    AssertSameValue(64.0, NodeEntry.NodeXZAndScale.Z, 1e-4);
+    AssertSameValue(1.0, NodeEntry.NodeXZAndScale.W, 1e-4);
+
+    Terrain.UploadNodes;
+    AssertTrue('NodeBuffer must be allocated after UploadNodes', Terrain.NodeBuffer <> nil);
+    AssertEquals('TotalNodeUploads must be 1', 1, Terrain.TotalNodeUploads);
+  finally
+    FreeAndNil(Gen);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSubsurfaceScatteringAndFoliageTransmissionPBRRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  SSSGLSL: String;
+  TerminatorWrap, UnwrappedTerminator, BacklitLeaf, FrontlitLeaf, ThinLeaf, ThickLeaf: TVector3;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Subsurface Scattering & Foliage Transmission GLSL functions }
+    SSSGLSL := Gen.GenerateSubsurfaceAndTransmissionPBRFunctions;
+    AssertTrue('SSS GLSL must include EvaluateSubsurfaceWrapDiffuse',
+      Pos('vec3 EvaluateSubsurfaceWrapDiffuse(float NdotL, float wrapFactor, vec3 scatterColor)', SSSGLSL) > 0);
+    AssertTrue('SSS GLSL must include EvaluateFoliageTransmission',
+      Pos('vec3 EvaluateFoliageTransmission(vec3 viewDir, vec3 lightDir, vec3 surfaceNormal,', SSSGLSL) > 0);
+
+    { 2. Verify wrap-diffuse subsurface bleeding across the NdotL = 0 shadow terminator }
+    UnwrappedTerminator := TCastleShaderGeneratorRHI.EvaluateSubsurfaceWrapDiffuse(
+      0.0, 0.0, Vector3(0.8, 0.1, 0.05));
+    TerminatorWrap := TCastleShaderGeneratorRHI.EvaluateSubsurfaceWrapDiffuse(
+      0.0, 0.5, Vector3(0.8, 0.1, 0.05));
+    AssertSameValue(0.0, UnwrappedTerminator.X, 1e-5);
+    AssertTrue('Wrap-diffuse at NdotL=0 with wrapFactor=0.5 must bleed warm red subsurface light',
+      TerminatorWrap.X > TerminatorWrap.Z);
+
+    { 3. Verify back-lit foliage transmission (strong when view opposes light, attenuated by thickness) }
+    BacklitLeaf := TCastleShaderGeneratorRHI.EvaluateFoliageTransmission(
+      Vector3(0.0, 0.0, -1.0), { ViewDir looking along -Z }
+      Vector3(0.0, 0.0, 1.0),  { LightDir coming from +Z behind leaf }
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.4, 0.85, 0.2),
+      0.2, 0.2, 4.0, 1.0);
+    FrontlitLeaf := TCastleShaderGeneratorRHI.EvaluateFoliageTransmission(
+      Vector3(0.0, 0.0, 1.0),  { ViewDir looking from same side as light }
+      Vector3(0.0, 0.0, 1.0),
+      Vector3(0.0, 0.0, 1.0),
+      Vector3(0.4, 0.85, 0.2),
+      0.2, 0.2, 4.0, 1.0);
+    AssertTrue('Back-lit leaf must transmit green light (> 0)', BacklitLeaf.Y > 0.1);
+    AssertSameValue(0.0, FrontlitLeaf.Y, 1e-5);
+
+    ThinLeaf := TCastleShaderGeneratorRHI.EvaluateFoliageTransmission(
+      Vector3(0.0, 0.0, -1.0), Vector3(0.0, 0.0, 1.0), Vector3(0.0, 0.0, -1.0),
+      Vector3(0.4, 0.85, 0.2), 0.1, 0.0, 4.0, 1.0);
+    ThickLeaf := TCastleShaderGeneratorRHI.EvaluateFoliageTransmission(
+      Vector3(0.0, 0.0, -1.0), Vector3(0.0, 0.0, 1.0), Vector3(0.0, 0.0, -1.0),
+      Vector3(0.4, 0.85, 0.2), 2.0, 0.0, 4.0, 1.0);
+    AssertTrue('Thin leaf (thickness=0.1) must transmit more light than thick leaf (thickness=2.0)',
+      ThinLeaf.Y > ThickLeaf.Y);
+  finally
+    FreeAndNil(Gen);
   end;
 end;
 

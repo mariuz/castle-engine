@@ -77,9 +77,9 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–17**: **COMPLETED** (100%).
-- **Phase 18 (GPU Compute Particle System, Order-Independent Transparency (Weighted Blended OIT) & Screen-Space Contact Shadows)**: **COMPLETED** (100%, 84 unit tests passing):
-  - [x] **18.1. GPU Compute Particle Simulation & Indirect Billboard Rendering (`TCastleVulkanComputeParticles` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestGPUComputeParticleSimulationAndIndirectDrawRHI`).
-  - [x] **18.2. Weighted Blended Order-Independent Transparency (`TCastleVulkanWeightedBlendedOIT` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestWeightedBlendedOrderIndependentTransparencyRHI`).
-  - [x] **18.3. Screen-Space Raymarched Contact Shadows (`TCastleVulkanContactShadows` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestScreenSpaceRaymarchedContactShadowsRHI`).
-- **Phase 19**: Planned (Compute Skinning & Morph Targets, GPU-Driven Terrain CDLOD & Subsurface Scattering / Foliage Transmission).
+- **Phases 1–18**: **COMPLETED** (100%).
+- **Phase 19 (Compute Skinning & Morph Targets, GPU-Driven Terrain CDLOD & Subsurface Scattering / Foliage Transmission)**: **COMPLETED** (100%, 87 unit tests passing):
+  - [x] **19.1. Compute Shader Skeletal Skinning & Morph Target Blending (`TCastleVulkanComputeSkinner` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestComputeSkinningAndMorphTargetsRHI`).
+  - [x] **19.2. GPU-Driven Continuous Distance-Dependent LOD (CDLOD) Terrain (`TCastleVulkanTerrainCDLOD` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestGPUDrivenTerrainCDLODRHI`).
+  - [x] **19.3. Pre-Integrated Subsurface Scattering & Thin-Foliage Transmission (`GenerateSubsurfaceAndTransmissionPBRFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSubsurfaceScatteringAndFoliageTransmissionPBRRHI`).
+- **Phase 20**: Planned (Clear Coat & Anisotropic Brushed-Metal PBR, Procedural Sky & Atmospheric Scattering & Screen-Space Lens Flare / Chromatic Aberration).

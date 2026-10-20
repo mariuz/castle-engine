@@ -22,7 +22,7 @@ unit CastleInternalShaderRHI;
 interface
 
 uses
-  SysUtils, Classes, StrUtils, Generics.Collections,
+  SysUtils, Classes, StrUtils, Math, Generics.Collections,
   CastleVectors, CastleColors, CastleStringUtils, CastleLog,
   CastleInternalRHI;
 
@@ -261,6 +261,10 @@ const
   { Phase 18.1: Default GPU compute particle pool capacity }
   CASTLE_DEFAULT_MAX_PARTICLES = 65536;
 
+  { Phase 19.1 & 19.2: Default compute skinning vertex capacity and max CDLOD terrain quadtree nodes }
+  CASTLE_DEFAULT_MAX_SKINNED_VERTICES = 16384;
+  CASTLE_MAX_TERRAIN_CDLOD_NODES      = 256;
+
 type
   { HDR Tonemapping Operators (Phase 15.3) }
   TCastleTonemapOperator = (
@@ -414,6 +418,39 @@ type
     Contrast: Single;        // 4 bytes (Contact shadow contrast multiplier, e.g. 1.0)
     Reserved: Cardinal;      // 4 bytes (Padding to 16-byte alignment)
   end; // Total = 48 bytes
+
+  { Phase 19.1: Source bind-pose vertex entry for GPU Compute Skeletal Skinning (64 bytes) }
+  PCastleSkinningVertex = ^TCastleSkinningVertex;
+  TCastleSkinningVertex = packed record
+    PositionAndUVX: TVector4;             // 16 bytes (xyz = bind-pose position, w = u)
+    NormalAndUVY: TVector4;               // 16 bytes (xyz = bind-pose normal, w = v)
+    JointIndices: array[0..3] of Cardinal;// 16 bytes (4 bone matrix indices)
+    JointWeights: TVector4;               // 16 bytes (4 bone blend weights)
+  end; // Total = 64 bytes
+
+  { Phase 19.1: Morph target displacement delta entry (32 bytes) }
+  PCastleMorphTargetDelta = ^TCastleMorphTargetDelta;
+  TCastleMorphTargetDelta = packed record
+    DeltaPosition: TVector4; // 16 bytes (xyz = position displacement delta, w = 0)
+    DeltaNormal: TVector4;   // 16 bytes (xyz = normal displacement delta, w = 0)
+  end; // Total = 32 bytes
+
+  { Phase 19.1: Push constants for GPU Compute Skeletal Skinning & Morph Target Blending (32 bytes) }
+  PCastleComputeSkinningPushConstants = ^TCastleComputeSkinningPushConstants;
+  TCastleComputeSkinningPushConstants = packed record
+    MorphWeights: TVector4;       // 16 bytes (up to 4 active morph target blend weights)
+    VertexCount: Cardinal;        // 4 bytes (number of vertices to skin)
+    MorphTargetCount: Cardinal;   // 4 bytes (0..4 active morph targets)
+    JointCount: Cardinal;         // 4 bytes (active bone matrix count)
+    StorePreviousPos: Cardinal;   // 4 bytes (1 = copy previous skinned pos for TAA motion vectors)
+  end; // Total = 32 bytes
+
+  { Phase 19.2: GPU std430 entry for a Continuous Distance-Dependent LOD (CDLOD) Terrain quadtree patch (32 bytes) }
+  PCastleTerrainCDLODNode = ^TCastleTerrainCDLODNode;
+  TCastleTerrainCDLODNode = packed record
+    NodeXZAndScale: TVector4;              // 16 bytes (x = world X origin, y = world Z origin, z = patch world size, w = LOD level)
+    MorphStartEndAndHeightRange: TVector4; // 16 bytes (x = morph start dist, y = morph end dist, z = minY, w = maxY)
+  end; // Total = 32 bytes
 
   { Generates RHI-compliant GLSL headers, UBO blocks, and varying layouts }
   TCastleShaderGeneratorRHI = class
@@ -615,6 +652,30 @@ type
     function GenerateContactShadowsComputeShader(
       const AWorkgroupSizeX: Cardinal = 8;
       const AWorkgroupSizeY: Cardinal = 8): String;
+
+    { Phase 19.1: Generates a GLSL 450 compute shader for Skeletal Linear-Blend Skinning (LBS)
+      combined with up to 4 Morph Target displacements and previous-frame vertex position output. }
+    function GenerateComputeSkinningShader(
+      const AWorkgroupSizeX: Cardinal = 64): String;
+
+    { Phase 19.2: Generates GLSL 450 vertex shader functions for Continuous Distance-Dependent
+      LOD (CDLOD) terrain quadtree morphing (EvaluateCDLODMorphFactor, MorphCDLODGridVertex). }
+    function GenerateTerrainCDLODFunctions: String;
+
+    { Phase 19.3: Generates GLSL 450 PBR functions for Pre-Integrated Wrap-Diffuse Subsurface
+      Scattering (EvaluateSubsurfaceWrapDiffuse) and Thin-Foliage Back-Lit Transmission
+      (EvaluateFoliageTransmission). }
+    function GenerateSubsurfaceAndTransmissionPBRFunctions: String;
+
+    { Phase 19.3 CPU reference: Evaluates wrap-diffuse subsurface scattering with energy normalization. }
+    class function EvaluateSubsurfaceWrapDiffuse(
+      const ANdotL, AWrapFactor: Single;
+      const AScatterColor: TVector3): TVector3; static;
+
+    { Phase 19.3 CPU reference: Evaluates back-lit foliage/cloth translucent transmission. }
+    class function EvaluateFoliageTransmission(
+      const AViewDir, ALightDir, ASurfaceNormal, ATransmissionTint: TVector3;
+      const AThickness, ADistortion, APower, AScale: Single): TVector3; static;
 
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
@@ -3189,6 +3250,172 @@ begin
     '  }' + NL +
     '  imageStore(u_ContactShadowMask, pixelCoord, vec4(clamp(1.0 - shadowOcclusion, 0.0, 1.0)));' + NL +
     '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateComputeSkinningShader(
+  const AWorkgroupSizeX: Cardinal): String;
+var
+  LocalX: Cardinal;
+begin
+  if AWorkgroupSizeX = 0 then LocalX := 64 else LocalX := AWorkgroupSizeX;
+
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = 1, local_size_z = 1) in;', [LocalX]) + NL +
+    NL +
+    'struct CastleSkinningVertex {' + NL +
+    '  vec4  PositionAndUVX;' + NL +
+    '  vec4  NormalAndUVY;' + NL +
+    '  uvec4 JointIndices;' + NL +
+    '  vec4  JointWeights;' + NL +
+    '};' + NL +
+    NL +
+    'struct CastleMorphTargetDelta {' + NL +
+    '  vec4 DeltaPosition;' + NL +
+    '  vec4 DeltaNormal;' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 0) readonly buffer CastleSourceVertexBuffer {' + NL +
+    '  CastleSkinningVertex u_SourceVertices[];' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 1) readonly buffer CastleMorphDeltaBuffer {' + NL +
+    '  CastleMorphTargetDelta u_MorphDeltas[];' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 2) readonly buffer CastleJointMatrixBuffer {' + NL +
+    '  mat4 u_JointMatrices[];' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 3) buffer CastleSkinnedVertexOutputBuffer {' + NL +
+    '  CastleSkinningVertex u_SkinnedVertices[];' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 4) writeonly buffer CastlePreviousPositionBuffer {' + NL +
+    '  vec4 u_PreviousPositions[];' + NL +
+    '};' + NL +
+    NL +
+    'layout(push_constant) uniform CastleComputeSkinningPushConstants {' + NL +
+    '  vec4 u_MorphWeights;' + NL +
+    '  uint u_VertexCount;' + NL +
+    '  uint u_MorphTargetCount;' + NL +
+    '  uint u_JointCount;' + NL +
+    '  uint u_StorePreviousPos;' + NL +
+    '} pc;' + NL +
+    NL +
+    'void main() {' + NL +
+    '  uint vid = gl_GlobalInvocationID.x;' + NL +
+    '  if (vid >= pc.u_VertexCount) return;' + NL +
+    NL +
+    '  if (pc.u_StorePreviousPos != 0u) {' + NL +
+    '    u_PreviousPositions[vid] = vec4(u_SkinnedVertices[vid].PositionAndUVX.xyz, 1.0);' + NL +
+    '  }' + NL +
+    NL +
+    '  CastleSkinningVertex src = u_SourceVertices[vid];' + NL +
+    '  vec3 morphedPos = src.PositionAndUVX.xyz;' + NL +
+    '  vec3 morphedNorm = src.NormalAndUVY.xyz;' + NL +
+    NL +
+    '  uint morphCount = min(pc.u_MorphTargetCount, 4u);' + NL +
+    '  for (uint m = 0u; m < morphCount; ++m) {' + NL +
+    '    float w = pc.u_MorphWeights[m];' + NL +
+    '    if (abs(w) > 1e-5) {' + NL +
+    '      CastleMorphTargetDelta delta = u_MorphDeltas[m * pc.u_VertexCount + vid];' + NL +
+    '      morphedPos += delta.DeltaPosition.xyz * w;' + NL +
+    '      morphedNorm += delta.DeltaNormal.xyz * w;' + NL +
+    '    }' + NL +
+    '  }' + NL +
+    NL +
+    '  vec3 skinnedPos = morphedPos;' + NL +
+    '  vec3 skinnedNorm = morphedNorm;' + NL +
+    '  float weightSum = src.JointWeights.x + src.JointWeights.y + src.JointWeights.z + src.JointWeights.w;' + NL +
+    '  if (pc.u_JointCount > 0u && weightSum > 1e-5) {' + NL +
+    '    mat4 skinMat =' + NL +
+    '      u_JointMatrices[min(src.JointIndices.x, pc.u_JointCount - 1u)] * src.JointWeights.x +' + NL +
+    '      u_JointMatrices[min(src.JointIndices.y, pc.u_JointCount - 1u)] * src.JointWeights.y +' + NL +
+    '      u_JointMatrices[min(src.JointIndices.z, pc.u_JointCount - 1u)] * src.JointWeights.z +' + NL +
+    '      u_JointMatrices[min(src.JointIndices.w, pc.u_JointCount - 1u)] * src.JointWeights.w;' + NL +
+    '    skinnedPos = (skinMat * vec4(morphedPos, 1.0)).xyz;' + NL +
+    '    skinnedNorm = mat3(skinMat) * morphedNorm;' + NL +
+    '  }' + NL +
+    '  float normLen = length(skinnedNorm);' + NL +
+    '  if (normLen > 1e-5) skinnedNorm /= normLen;' + NL +
+    NL +
+    '  CastleSkinningVertex dst = src;' + NL +
+    '  dst.PositionAndUVX.xyz = skinnedPos;' + NL +
+    '  dst.NormalAndUVY.xyz = skinnedNorm;' + NL +
+    '  u_SkinnedVertices[vid] = dst;' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateTerrainCDLODFunctions: String;
+begin
+  Result :=
+    '// --- GPU-Driven Continuous Distance-Dependent LOD (CDLOD) Terrain (Phase 19.2) ---' + NL +
+    'struct CastleTerrainCDLODNode {' + NL +
+    '  vec4 NodeXZAndScale;' + NL +
+    '  vec4 MorphStartEndAndHeightRange;' + NL +
+    '};' + NL +
+    NL +
+    'float EvaluateCDLODMorphFactor(float cameraDist, float lodNearDist, float lodFarDist, float morphStartRatio) {' + NL +
+    '  float morphStart = mix(lodNearDist, lodFarDist, clamp(morphStartRatio, 0.1, 0.95));' + NL +
+    '  return clamp((cameraDist - morphStart) / max(lodFarDist - morphStart, 1e-4), 0.0, 1.0);' + NL +
+    '}' + NL +
+    NL +
+    'vec2 MorphCDLODGridVertex(vec2 gridUV, float patchResolution, float morphFactor) {' + NL +
+    '  vec2 fracPart = fract(gridUV * patchResolution * 0.5) * 2.0 / max(patchResolution, 1.0);' + NL +
+    '  return gridUV - fracPart * clamp(morphFactor, 0.0, 1.0);' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateSubsurfaceAndTransmissionPBRFunctions: String;
+begin
+  Result :=
+    '// --- Pre-Integrated Wrap-Diffuse Subsurface Scattering & Foliage Transmission (Phase 19.3) ---' + NL +
+    'vec3 EvaluateSubsurfaceWrapDiffuse(float NdotL, float wrapFactor, vec3 scatterColor) {' + NL +
+    '  float w = clamp(wrapFactor, 0.0, 1.0);' + NL +
+    '  float wrapped = max(0.0, (NdotL + w) / (1.0 + w));' + NL +
+    '  float normFactor = 1.0 / (1.0 + w);' + NL +
+    '  float sssBand = smoothstep(0.0, max(w, 1e-4), wrapped) * (1.0 - max(0.0, NdotL));' + NL +
+    '  return vec3(wrapped * normFactor) + scatterColor * sssBand;' + NL +
+    '}' + NL +
+    NL +
+    'vec3 EvaluateFoliageTransmission(vec3 viewDir, vec3 lightDir, vec3 surfaceNormal,' + NL +
+    '  vec3 transmissionTint, float thickness, float distortion, float powerExp, float scale) {' + NL +
+    '  vec3 transLightDir = normalize(lightDir + surfaceNormal * distortion);' + NL +
+    '  float VdotBackL = clamp(dot(viewDir, -transLightDir), 0.0, 1.0);' + NL +
+    '  float attenuation = exp(-max(0.0, thickness) * 2.0);' + NL +
+    '  float phase = pow(VdotBackL, max(1.0, powerExp)) * max(0.0, scale) * attenuation;' + NL +
+    '  return transmissionTint * phase;' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateSubsurfaceWrapDiffuse(
+  const ANdotL, AWrapFactor: Single;
+  const AScatterColor: TVector3): TVector3;
+var
+  W, Wrapped, NormFactor, T, SSSBand, BaseTerm: Single;
+begin
+  W := EnsureRange(AWrapFactor, 0.0, 1.0);
+  Wrapped := Max(0.0, (ANdotL + W) / (1.0 + W));
+  NormFactor := 1.0 / (1.0 + W);
+  T := EnsureRange(Wrapped / Max(W, 1e-4), 0.0, 1.0);
+  SSSBand := (T * T * (3.0 - 2.0 * T)) * (1.0 - Max(0.0, ANdotL));
+  BaseTerm := Wrapped * NormFactor;
+  Result := Vector3(BaseTerm, BaseTerm, BaseTerm) + AScatterColor * SSSBand;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateFoliageTransmission(
+  const AViewDir, ALightDir, ASurfaceNormal, ATransmissionTint: TVector3;
+  const AThickness, ADistortion, APower, AScale: Single): TVector3;
+var
+  TransLightDir: TVector3;
+  VdotBackL, Attenuation, Phase: Single;
+begin
+  TransLightDir := (ALightDir + ASurfaceNormal * ADistortion).Normalize;
+  VdotBackL := EnsureRange(TVector3.DotProduct(AViewDir.Normalize, -TransLightDir), 0.0, 1.0);
+  Attenuation := Exp(-Max(0.0, AThickness) * 2.0);
+  Phase := Power(VdotBackL, Max(1.0, APower)) * Max(0.0, AScale) * Attenuation;
+  Result := ATransmissionTint * Phase;
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;
