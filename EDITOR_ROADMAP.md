@@ -394,3 +394,26 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Bound to **`Ctrl+Shift+U`** in both the Viewport and Hierarchy Tree, plus **`Select Empty / Unreferenced Transforms (Ctrl+Shift+U)`** (`MenuTreeViewItemSelectEmptyTransforms`) in `MenuTreeView`.
 - [x] **55.2. 2D UI Fit To Parent Container (`FitSelectedUserInterfacesToParent` / `ButtonUIFitParent`)**
   - Implemented `TDesignFrame.FitSelectedUserInterfacesToParent(FitWidth, FitHeight)` and added **`UI Fit Parent`** (`ButtonUIFitParent`) to `PanelLayoutUI` (normal click matches both `Width` and `Height` to `ParentRenderRect` and centers in parent; `Shift`-click fits Width and horizontal position only; `Ctrl`-click fits Height and vertical position only).
+
+### Phase 56: 3D Sine-Wave / Undulating Ribbon Arrangement (`ArrangeSelectedInSineWave` / `ArrangeSelectedInSineWaveBetweenEndpoints` / `Alt+Shift+W`)
+- [x] **56.1. 3D Sinusoidal Wave & Tangent-Oriented Ribbon Arrangement (`TCastleTransformManipulate.ArrangeSelectedInSineWave`, `ArrangeSelectedInSineWaveBetweenEndpoints`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedInSineWave(StartWorldPos, EndWorldPos, Amplitude, Cycles, WaveAxis, OrientAlongWave): Boolean` and `TCastleTransformManipulate.ArrangeSelectedInSineWaveBetweenEndpoints(Amplitude, Cycles, WaveAxis, OrientAlongWave): Boolean`: arranges 2+ top-level selected transforms along a 3D line between `StartWorldPos` and `EndWorldPos` with sinusoidal displacement $A \sin(2\pi \cdot \text{Cycles} \cdot t)$ along `WaveAxis` (`X`, `Y`, or `Z`) and optional forward orientation along the instantaneous wave tangent $P'(t)$.
+  - Added **`Wave Arrange`** (`ButtonArrangeWave` in `PanelLayoutTransform`: normal click arranges in a vertical sine wave between first & last selected transforms; `Ctrl`-click also orients forward along the wave tangent; `Shift`-click opens the custom wave dialog) and `ShowArrangeInWaveDialog` bound to **`Alt+Shift+W`** in both the Viewport and Hierarchy Tree.
+
+### Phase 57: 3D Elliptical / Stadium Ring Arrangement (`ArrangeSelectedInEllipse` / `Alt+Shift+E`)
+- [x] **57.1. Horizontal XZ Ellipse & Tangent / Inward Orientation (`TCastleTransformManipulate.ArrangeSelectedInEllipse`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedInEllipse(RadiusX, RadiusZ, OrientMode): Boolean`: distributes 2+ top-level selected transforms evenly around a horizontal XZ ellipse centered at the active selection pivot with independent `RadiusX` and `RadiusZ` semi-axes and `OrientMode` (`0` = keep rotation, `1` = orient inward toward center, `2` = orient along ellipse tangent).
+  - Added **`Ellipse Arrange...`** (`ButtonArrangeEllipse`) in `PanelLayoutTransform` and `ShowArrangeInEllipseDialog` bound to **`Alt+Shift+E`** in both the Viewport and Hierarchy Tree.
+
+### Phase 58: Reverse / Flip Selection Order (`ReverseSelectedPositions` / `Alt+Shift+R`)
+- [x] **58.1. World-Space Position, Rotation & Scale Order Reversal (`TCastleTransformManipulate.ReverseSelectedPositions`)**
+  - Implemented `TCastleTransformManipulate.ReverseSelectedPositions(ReverseRotations, ReverseScales): Boolean`: reverses the order of world-space positions ($T_0 \leftrightarrow T_{N-1}, \; T_1 \leftrightarrow T_{N-2}, \dots$), and optionally world rotations and local scales, across 2+ top-level selected transforms.
+  - Added **`Reverse Order`** (`ButtonReversePositions` in `PanelLayoutTransform`: normal click reverses positions; `Shift`-click reverses positions + rotations; `Ctrl`-click reverses positions + rotations + scales) and bound **`Alt+Shift+R`** in both the Viewport and Hierarchy Tree.
+  - Added automated unit test `TestArrangeSineWaveEllipseAndReversePositions` in `tests/code/testcases/testcastletransformmanipulate.pas`.
+
+### Phase 59: Select Non-Uniformly Scaled Transforms (`SelectNonUniformlyScaledTransforms` / `Ctrl+Shift+N`) & 2D UI Equal-Span Split In Parent (`StretchSelectedUserInterfacesAcrossParent`)
+- [x] **59.1. Physics Collider Scale Audit: Select Non-Uniformly or Non-Positively Scaled Transforms (`SelectNonUniformlyScaledTransforms` / `Ctrl+Shift+N`)**
+  - Implemented `TDesignFrame.SelectNonUniformlyScaledTransforms`: selects all visible, unlocked `TCastleTransform` instances whose `Scale` has non-uniform components (`not SameValue(S.X, S.Y, 1e-3)` or `not SameValue(S.Y, S.Z, 1e-3)`) or non-positive components (`<= 0`).
+  - Bound to **`Ctrl+Shift+N`** in both the Viewport and Hierarchy Tree, plus **`Select Non-Uniformly Scaled Transforms (Ctrl+Shift+N)`** (`MenuTreeViewItemSelectNonUniformScale`) in `MenuTreeView`.
+- [x] **59.2. 2D UI Equal-Span Row & Column Split In Parent (`StretchSelectedUserInterfacesAcrossParent` / `ButtonUIStretchRow` & `ButtonUIStretchCol`)**
+  - Implemented `TDesignFrame.StretchSelectedUserInterfacesAcrossParent(Vertical, GapPx)` and added **`UI Split Row`** (`ButtonUIStretchRow`) and **`UI Split Col`** (`ButtonUIStretchCol`) to `PanelLayoutUI`, dividing `ParentRenderRect` width (`Vertical = false`) or height (`Vertical = true`) equally across 2+ selected `TCastleUserInterface` controls with `8 px` spacing on normal click or `0 px` flush spacing on `Shift`-click.

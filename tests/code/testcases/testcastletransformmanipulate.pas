@@ -50,6 +50,7 @@ type
     procedure TestArrangeLineSeparateOverlappingAndProgressiveTransform;
     procedure TestArrangeWaypointsHelixAndCenterOriginOnChildren;
     procedure TestArrangeBezierArchSphereAndScaleGroupAroundPivot;
+    procedure TestArrangeSineWaveEllipseAndReversePositions;
   end;
 
 implementation
@@ -1289,6 +1290,102 @@ begin
     AssertVectorEquals(Vector3(2, 0.5, 3), T1.Scale, 1e-4);
     AssertVectorEquals(Vector3(18, 7, -6), T2.Translation, 1e-4);
     AssertVectorEquals(Vector3(4, 1.5, 12), T2.Scale, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestArrangeSineWaveEllipseAndReversePositions;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  T1, T2, T3, T4, T5: TCastleTransform;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.OnTransformModified := {$ifdef FPC}@{$endif} HandleTransformModified;
+    Manipulate.OnTransformModifyEnd := {$ifdef FPC}@{$endif} HandleTransformModifyEnd;
+
+    T1 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T1);
+    T2 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T2);
+    T3 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T3);
+    T4 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T4);
+    T5 := TCastleTransform.Create(Viewport);
+    Viewport.Items.Add(T5);
+
+    // 1. Test ArrangeSelectedInSineWaveBetweenEndpoints:
+    // Start T1 at (0, 0, 0), End T5 at (20, 0, 0), Amplitude = 6, Cycles = 1.0, WaveAxis = 1 (Y), OrientAlongWave = true.
+    // Factors for 5 items: 0.0, 0.25, 0.5, 0.75, 1.0
+    // Sin(2*Pi*t): 0, +1, 0, -1, 0 -> Y values: 0, +6, 0, -6, 0.
+    // At t = 0.25 (T2, wave crest), Cos(Pi/2) = 0 -> tangent is purely horizontal (1, 0, 0).
+    T1.Translation := Vector3(0, 0, 0);
+    T5.Translation := Vector3(20, 0, 0);
+    Manipulate.SetSelected([T1, T2, T3, T4, T5]);
+    AssertTrue(Manipulate.ArrangeSelectedInSineWaveBetweenEndpoints(6.0, 1.0, 1, true));
+    AssertVectorEquals(Vector3(0, 0, 0), T1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(5, 6, 0), T2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10, 0, 0), T3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(15, -6, 0), T4.Translation, 1e-4);
+    AssertVectorEquals(Vector3(20, 0, 0), T5.Translation, 1e-4);
+    T2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+
+    // 2. Test ArrangeSelectedInEllipse:
+    // 4 transforms centered at (0, Y, 0) with RadiusX = 12, RadiusZ = 6, OrientMode = 2 (tangent).
+    // I=0 (Angle=0): (12, 1, 0), tangent (0, 0, 1)
+    // I=1 (Angle=Pi/2): (0, 2, 6), tangent (-1, 0, 0)
+    // I=2 (Angle=Pi): (-12, 3, 0), tangent (0, 0, -1)
+    // I=3 (Angle=3*Pi/2): (0, 4, -6), tangent (1, 0, 0)
+    T1.Translation := Vector3(-2, 1, 0);
+    T2.Translation := Vector3(2, 2, 0);
+    T3.Translation := Vector3(0, 3, -2);
+    T4.Translation := Vector3(0, 4, 2);
+    Manipulate.PivotMode := pmSelectionCenter;
+    Manipulate.SetSelected([T1, T2, T3, T4]);
+    AssertTrue(Manipulate.ArrangeSelectedInEllipse(12.0, 6.0, 2));
+    T1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(12, 1, 0), WorldPos, 1e-3);
+    AssertVectorEquals(Vector3(0, 0, 1), WorldDir.Normalize, 1e-3);
+    T2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 2, 6), WorldPos, 1e-3);
+    AssertVectorEquals(Vector3(-1, 0, 0), WorldDir.Normalize, 1e-3);
+    T3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(-12, 3, 0), WorldPos, 1e-3);
+    AssertVectorEquals(Vector3(0, 0, -1), WorldDir.Normalize, 1e-3);
+    T4.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 4, -6), WorldPos, 1e-3);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-3);
+
+    // 3. Test ReverseSelectedPositions(true, true):
+    // Reverses positions, rotations, and scales of [T1, T2, T3, T4].
+    T1.Scale := Vector3(1, 1, 1);
+    T2.Scale := Vector3(2, 2, 2);
+    T3.Scale := Vector3(3, 3, 3);
+    T4.Scale := Vector3(4, 4, 4);
+    Manipulate.SetSelected([T1, T2, T3, T4]);
+    AssertTrue(Manipulate.ReverseSelectedPositions(true, true));
+    AssertVectorEquals(Vector3(0, 4, -6), T1.Translation, 1e-3);
+    AssertVectorEquals(Vector3(4, 4, 4), T1.Scale, 1e-3);
+    T1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-3);
+
+    AssertVectorEquals(Vector3(-12, 3, 0), T2.Translation, 1e-3);
+    AssertVectorEquals(Vector3(3, 3, 3), T2.Scale, 1e-3);
+
+    AssertVectorEquals(Vector3(0, 2, 6), T3.Translation, 1e-3);
+    AssertVectorEquals(Vector3(2, 2, 2), T3.Scale, 1e-3);
+
+    AssertVectorEquals(Vector3(12, 1, 0), T4.Translation, 1e-3);
+    AssertVectorEquals(Vector3(1, 1, 1), T4.Scale, 1e-3);
+    T4.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 0, 1), WorldDir.Normalize, 1e-3);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

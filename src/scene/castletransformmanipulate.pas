@@ -660,6 +660,46 @@ type
       Returns @true if at least one selected transform was modified. }
     function ScaleSelectedGroupAroundPivot(const Factor: TVector3;
       const ScaleSizes: Boolean = true): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) along a
+      3D sinusoidal wave between @code(StartWorldPos) and @code(EndWorldPos):
+      $$P(t) = (1 - t) P_0 + t P_1 + A \sin(2\pi \cdot C \cdot t), \quad t = i / (N - 1)$$
+      When @code(OrientAlongWave) is @true, rotates each transform so its world
+      forward direction faces along the instantaneous wave tangent $P'(t)$.
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInSineWave(const StartWorldPos, EndWorldPos: TVector3;
+      const Amplitude: Single; const Cycles: Single = 1.0;
+      const WaveAxis: T3DAxis = 1;
+      const OrientAlongWave: Boolean = false): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) along a
+      3D sinusoidal wave between the first selected transform (@code(Selected[0]))
+      and the last selected transform (@code(Selected[N-1])).
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInSineWaveBetweenEndpoints(
+      const Amplitude: Single; const Cycles: Single = 1.0;
+      const WaveAxis: T3DAxis = 1;
+      const OrientAlongWave: Boolean = false): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) evenly
+      around a horizontal XZ ellipse centered at the active selection pivot
+      (@link(SelectionWorkingCenter) when @link(PivotMode) is @link(pmSelectionCenter),
+      or @code(Selected[0]) when @link(pmPrimarySelected)) with semi-axes @code(RadiusX)
+      and @code(RadiusZ) (auto-detected from average XZ distance when @code(<= 0)).
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient horizontally inward toward the ellipse center
+      - @code(2): orient horizontally along the ellipse tangent direction
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInEllipse(const RadiusX, RadiusZ: Single;
+      const OrientMode: Integer = 0): Boolean;
+
+    { Reverse the order of world-space positions (and optionally rotations and scales)
+      across all top-level selected transforms (@code(SelectedCount >= 2)), swapping
+      item @code(0) with @code(N - 1), item @code(1) with @code(N - 2), etc.
+      Returns @true if at least one selected transform was modified. }
+    function ReverseSelectedPositions(const ReverseRotations: Boolean = false;
+      const ReverseScales: Boolean = false): Boolean;
   end;
 
 var
@@ -4524,6 +4564,357 @@ begin
       if not TVector3.Equals(NewScale, T.Scale) then
       begin
         T.Scale := NewScale;
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInSineWave(
+  const StartWorldPos, EndWorldPos: TVector3;
+  const Amplitude: Single; const Cycles: Single;
+  const WaveAxis: T3DAxis;
+  const OrientAlongWave: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  Factor, Phase: Single;
+  BasePos, WaveOffset, NewPos, CurPos: TVector3;
+  Tangent, CurWorldPos, CurDir, CurUp, GravityUp, Side, NewUp: TVector3;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    Factor := Single(I) / Single(Count - 1);
+    Phase := 2.0 * Pi * Cycles * Factor;
+    BasePos := Lerp(Factor, StartWorldPos, EndWorldPos);
+    WaveOffset := TVector3.Zero;
+    WaveOffset.Data[WaveAxis] := Amplitude * Sin(Phase);
+    NewPos := BasePos + WaveOffset;
+
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(NewPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, NewPos);
+      Result := true;
+    end;
+
+    if OrientAlongWave then
+    begin
+      Tangent := EndWorldPos - StartWorldPos;
+      Tangent.Data[WaveAxis] := Tangent.Data[WaveAxis] +
+        Amplitude * 2.0 * Pi * Cycles * Cos(Phase);
+      if not Tangent.IsZero(1e-5) then
+      begin
+        Tangent := Tangent.Normalize;
+        if T.HasWorldTransform then
+          T.GetWorldView(CurWorldPos, CurDir, CurUp)
+        else
+        begin
+          CurWorldPos := T.Translation;
+          CurDir := T.Direction;
+          CurUp := T.Up;
+        end;
+        GravityUp := Vector3(0, 1, 0);
+        if Abs(TVector3.DotProduct(Tangent, GravityUp)) > 0.99 then
+          GravityUp := Vector3(0, 0, 1);
+        Side := TVector3.CrossProduct(Tangent, GravityUp);
+        if not Side.IsZero(1e-5) then
+        begin
+          Side := Side.Normalize;
+          NewUp := TVector3.CrossProduct(Side, Tangent).Normalize;
+          if (not TVector3.Equals(CurDir, Tangent, 1e-4)) or
+             (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+          begin
+            if T.HasWorldTransform then
+              T.SetWorldView(CurWorldPos, Tangent, NewUp)
+            else
+              T.SetView(CurWorldPos, Tangent, NewUp);
+            Result := true;
+          end;
+        end;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInSineWaveBetweenEndpoints(
+  const Amplitude: Single; const Cycles: Single;
+  const WaveAxis: T3DAxis;
+  const OrientAlongWave: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  StartPos, EndPos: TVector3;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  StartPos := GetTransformWorkingPos(Items[0]);
+  EndPos := GetTransformWorkingPos(Items[Count - 1]);
+  Result := ArrangeSelectedInSineWave(StartPos, EndPos, Amplitude, Cycles,
+    WaveAxis, OrientAlongWave);
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInEllipse(
+  const RadiusX, RadiusZ: Single; const OrientMode: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  I, Count: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, NewPos, TargetDir, CurWorldPos, CurDir, CurUp, GravityUp, Side, NewUp: TVector3;
+  EffRadiusX, EffRadiusZ, SumDist, Angle: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  if FPivotMode = pmSelectionCenter then
+    CenterPos := SelectionWorkingCenter
+  else
+    CenterPos := GetTransformWorkingPos(Items[0]);
+
+  SumDist := 0;
+  for I := 0 to Count - 1 do
+  begin
+    CurPos := GetTransformWorkingPos(Items[I]);
+    SumDist := SumDist + Hypot(CurPos.X - CenterPos.X, CurPos.Z - CenterPos.Z);
+  end;
+  SumDist := SumDist / Count;
+  if SumDist < 1e-4 then
+    SumDist := 2.0;
+
+  EffRadiusX := RadiusX;
+  if EffRadiusX <= 0 then
+    EffRadiusX := SumDist;
+  EffRadiusZ := RadiusZ;
+  if EffRadiusZ <= 0 then
+    EffRadiusZ := SumDist;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+    Angle := (2.0 * Pi * Single(I)) / Single(Count);
+    NewPos := Vector3(
+      CenterPos.X + Cos(Angle) * EffRadiusX,
+      CurPos.Y,
+      CenterPos.Z + Sin(Angle) * EffRadiusZ
+    );
+
+    if not TVector3.Equals(NewPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, NewPos);
+      Result := true;
+    end;
+
+    if (OrientMode = 1) or (OrientMode = 2) then
+    begin
+      if OrientMode = 1 then
+        TargetDir := Vector3(CenterPos.X - NewPos.X, 0, CenterPos.Z - NewPos.Z)
+      else
+        TargetDir := Vector3(-Sin(Angle) * EffRadiusX, 0, Cos(Angle) * EffRadiusZ);
+
+      if not TargetDir.IsZero(1e-5) then
+      begin
+        TargetDir := TargetDir.Normalize;
+        if T.HasWorldTransform then
+          T.GetWorldView(CurWorldPos, CurDir, CurUp)
+        else
+        begin
+          CurWorldPos := T.Translation;
+          CurDir := T.Direction;
+          CurUp := T.Up;
+        end;
+        GravityUp := Vector3(0, 1, 0);
+        Side := TVector3.CrossProduct(TargetDir, GravityUp);
+        if not Side.IsZero(1e-5) then
+        begin
+          Side := Side.Normalize;
+          NewUp := TVector3.CrossProduct(Side, TargetDir).Normalize;
+          if (not TVector3.Equals(CurDir, TargetDir, 1e-4)) or
+             (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+          begin
+            if T.HasWorldTransform then
+              T.SetWorldView(CurWorldPos, TargetDir, NewUp)
+            else
+              T.SetView(CurWorldPos, TargetDir, NewUp);
+            Result := true;
+          end;
+        end;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ReverseSelectedPositions(
+  const ReverseRotations: Boolean; const ReverseScales: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  OrigWorldPos: array of TVector3;
+  OrigRot: array of TVector4;
+  OrigWorldDir, OrigWorldUp: array of TVector3;
+  OrigScale: array of TVector3;
+  I, MirrorIdx, Count: Integer;
+  T: TCastleTransform;
+  DummyPos, CurWorldPos, CurDir, CurUp: TVector3;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  Count := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  SetLength(OrigWorldPos, Count);
+  SetLength(OrigRot, Count);
+  SetLength(OrigWorldDir, Count);
+  SetLength(OrigWorldUp, Count);
+  SetLength(OrigScale, Count);
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    OrigWorldPos[I] := GetTransformWorkingPos(T);
+    OrigRot[I] := T.Rotation;
+    if T.HasWorldTransform then
+      T.GetWorldView(DummyPos, OrigWorldDir[I], OrigWorldUp[I])
+    else
+    begin
+      OrigWorldDir[I] := T.Direction;
+      OrigWorldUp[I] := T.Up;
+    end;
+    OrigScale[I] := T.Scale;
+  end;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    MirrorIdx := Count - 1 - I;
+    if I = MirrorIdx then Continue;
+
+    if not TVector3.Equals(OrigWorldPos[MirrorIdx], OrigWorldPos[I]) then
+    begin
+      SetTransformWorkingPos(T, OrigWorldPos[MirrorIdx]);
+      Result := true;
+    end;
+
+    if ReverseRotations then
+    begin
+      if T.Parent = Items[MirrorIdx].Parent then
+      begin
+        if not TVector4.Equals(OrigRot[MirrorIdx], T.Rotation) then
+        begin
+          T.Rotation := OrigRot[MirrorIdx];
+          Result := true;
+        end;
+      end else
+      begin
+        if T.HasWorldTransform then
+          T.GetWorldView(CurWorldPos, CurDir, CurUp)
+        else
+        begin
+          CurWorldPos := T.Translation;
+          CurDir := T.Direction;
+          CurUp := T.Up;
+        end;
+        if (not TVector3.Equals(CurDir, OrigWorldDir[MirrorIdx], 1e-4)) or
+           (not TVector3.Equals(CurUp, OrigWorldUp[MirrorIdx], 1e-4)) then
+        begin
+          if T.HasWorldTransform then
+            T.SetWorldView(CurWorldPos, OrigWorldDir[MirrorIdx], OrigWorldUp[MirrorIdx])
+          else
+            T.SetView(CurWorldPos, OrigWorldDir[MirrorIdx], OrigWorldUp[MirrorIdx]);
+          Result := true;
+        end;
+      end;
+    end;
+
+    if ReverseScales then
+    begin
+      if not TVector3.Equals(OrigScale[MirrorIdx], T.Scale) then
+      begin
+        T.Scale := OrigScale[MirrorIdx];
         Result := true;
       end;
     end;

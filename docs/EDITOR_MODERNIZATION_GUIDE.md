@@ -1101,7 +1101,25 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 
 ---
 
-## 57. Complete Keyboard Shortcuts & Toolbar Reference
+## 57. Phases 56–59: 3D Sine-Wave Arrangement (`Alt+Shift+W`), 3D Elliptical Ring Arrangement (`Alt+Shift+E`), Reverse Selection Order (`Alt+Shift+R`), Non-Uniform Scale Audit (`Ctrl+Shift+N`) & 2D UI Equal-Span Parent Split (`UI Split Row` / `UI Split Col`)
+
+- **3D Sine-Wave / Undulating Ribbon Arrangement (`ArrangeSelectedInSineWave` / `Alt+Shift+W`):**
+  - `TCastleTransformManipulate.ArrangeSelectedInSineWave(StartWorldPos, EndWorldPos, Amplitude, Cycles, WaveAxis, OrientAlongWave)` and `ArrangeSelectedInSineWaveBetweenEndpoints` place 2+ top-level selected transforms along a 3D line between `StartWorldPos` and `EndWorldPos` with sinusoidal displacement $A \sin(2\pi \cdot \text{Cycles} \cdot t)$ along `WaveAxis` (`X`, `Y`, or `Z`) and optional forward orientation along the instantaneous wave tangent $P'(t)$.
+  - Accessible via **`Wave Arrange`** (`ButtonArrangeWave` in `PanelLayoutTransform`: **Click** arranges immediately; **`Ctrl`-click** also orients forward along the wave tangent; **`Shift`-click** or **`Alt+Shift+W`** opens `ShowArrangeInWaveDialog`).
+- **3D Elliptical / Stadium Ring Arrangement (`ArrangeSelectedInEllipse` / `Alt+Shift+E`):**
+  - `TCastleTransformManipulate.ArrangeSelectedInEllipse(RadiusX, RadiusZ, OrientMode)` distributes 2+ top-level selected transforms evenly around a horizontal XZ ellipse centered at the active selection pivot with independent `RadiusX` and `RadiusZ` semi-axes and `OrientMode` (`0` = keep rotation, `1` = orient inward toward center, `2` = orient along ellipse tangent).
+  - Accessible via **`Ellipse Arrange...`** (`ButtonArrangeEllipse` in `PanelLayoutTransform`) or **`Alt+Shift+E`** (`ShowArrangeInEllipseDialog`).
+- **Reverse / Flip Selection Order (`ReverseSelectedPositions` / `Alt+Shift+R`):**
+  - `TCastleTransformManipulate.ReverseSelectedPositions(ReverseRotations, ReverseScales)` reverses the order of world-space positions ($T_0 \leftrightarrow T_{N-1}, \; T_1 \leftrightarrow T_{N-2}, \dots$), and optionally world rotations and local scales, across 2+ top-level selected transforms.
+  - Accessible via **`Reverse Order`** (`ButtonReversePositions` in `PanelLayoutTransform`: **Click** or **`Alt+Shift+R`** reverses positions; **`Shift`-click** reverses positions + rotations; **`Ctrl`-click** reverses positions + rotations + scales).
+- **Select Non-Uniformly Scaled Transforms (`SelectNonUniformlyScaledTransforms` / `Ctrl+Shift+N`):**
+  - Pressing **`Ctrl+Shift+N`** or choosing **`Select Non-Uniformly Scaled Transforms (Ctrl+Shift+N)`** (`MenuTreeViewItemSelectNonUniformScale`) in the Hierarchy context menu selects all visible, unlocked `TCastleTransform` instances whose `Scale` is non-uniform (`S.X <> S.Y` or `S.Y <> S.Z`) or has any non-positive component (`<= 0`), helping level designers audit physics collider compatibility.
+- **2D UI Equal-Span Row & Column Split In Parent (`StretchSelectedUserInterfacesAcrossParent` / `ButtonUIStretchRow` & `ButtonUIStretchCol`):**
+  - Clicking **`UI Split Row`** (`ButtonUIStretchRow`) or **`UI Split Col`** (`ButtonUIStretchCol`) in `PanelLayoutUI` divides `ParentRenderRect` width (`UI Split Row`) or height (`UI Split Col`) equally across 2+ selected `TCastleUserInterface` controls with `8 px` spacing on normal click or `0 px` flush spacing on `Shift`-click.
+
+---
+
+## 58. Complete Keyboard Shortcuts & Toolbar Reference
 
 | Shortcut / Control | Context | Action |
 | :--- | :--- | :--- |
@@ -1124,6 +1142,9 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 | **`Alt+Shift+H`** / **`Helix Arrange...`** | Viewport / Hierarchy / Layout Tab | Open the **Arrange Selection in 3D Helix / Spiral** dialog (`StartRadius`, `EndRadius`, `HeightSpan`, `Turns`, `OrientToCenter`). |
 | **`Alt+Shift+A`** / **`Arch Arrange`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms in a 3D parabolic / Bezier arch** (**Click**: between first & last; **`Ctrl`-click**: orient along curve; **`Shift`-click** / **`Alt+Shift+A`**: dialog). |
 | **`Alt+Shift+S`** / **`Sphere / Dome...`** | Viewport / Hierarchy / Layout Tab | Open the **Arrange Selection on 3D Sphere / Dome** Fibonacci lattice dialog (`Radius`, `MinElevation`, `MaxElevation`, `OrientOutward`). |
+| **`Alt+Shift+W`** / **`Wave Arrange`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms in a 3D sine wave** (**Click**: between first & last; **`Ctrl`-click**: orient along wave; **`Shift`-click** / **`Alt+Shift+W`**: dialog). |
+| **`Alt+Shift+E`** / **`Ellipse Arrange...`** | Viewport / Hierarchy / Layout Tab | Open the **Arrange Selection in 3D Ellipse** dialog (`RadiusX`, `RadiusZ`, `OrientMode`). |
+| **`Alt+Shift+R`** / **`Reverse Order`** | Viewport / Hierarchy / Layout Tab | **Reverse order of world positions** across 2+ selected transforms (**`Shift`-click**: Pos+Rot; **`Ctrl`-click**: Pos+Rot+Scale). |
 | **`Alt+Shift+O`** / **`Center Parent Origin`** | Viewport / Hierarchy / Layout Tab | **Snap selected parent transform origin** to the center (`Click` / `Alt+Shift+O`) or bottom-center (`Shift`-click) of its direct children without moving children. |
 | **`Alt+Shift+X`** / **`Depenetrate`** | Viewport / Hierarchy / Layout Tab | **Separate overlapping selected transforms** by pushing intersecting bounding boxes apart (**`Shift`-click**: clearance padding & 3D dialog). |
 | **`Alt+Shift+T`** / **`Taper / Spiral...`** | Viewport / Hierarchy / Layout Tab | Open the **Progressive Scale Taper & Cumulative Rotation Step** dialog (`StartScale`, `EndScale`, `StepYawDeg`). |
@@ -1150,6 +1171,7 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 | **`Ctrl+Shift+F`** / **`Select Visible In Camera View`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects inside the active viewport camera's view frustum. |
 | **`Ctrl+Shift+B`** / **`Select By Axis Coordinate Slice...`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects whose world X, Y, or Z coordinate lies within `[MinCoord, MaxCoord]`. |
 | **`Ctrl+Shift+U`** / **`Select Empty / Unreferenced Transforms`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked empty `TCastleTransform` groups and unreferenced `TCastleScene` / `TCastleTransformDesign` nodes with no children or `Url`. |
+| **`Ctrl+Shift+N`** / **`Select Non-Uniformly Scaled Transforms`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects with non-uniform (`S.X <> S.Y` or `S.Y <> S.Z`) or non-positive (`<= 0`) `Scale` for physics collider auditing. |
 | **`Select By Bounding-Box Size Range...`** | Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects whose world bounding-box diagonal length lies within `[MinSize, MaxSize]`. |
 | **`Select By Name Pattern...`** | Hierarchy Context Menu | Select all components matching a substring or `*` / `?` wildcard pattern. |
 | **`Select All With Same Asset URL`** | Hierarchy Context Menu | Select all components in the design referencing the same `Url` asset as the selected component. |
@@ -1187,6 +1209,7 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 | **`UI Stack H` / `UI Stack V`** | Layout Tab (`PanelLayoutUI`) | **Stack** 2+ selected `TCastleUserInterface` controls flush edge-to-edge horizontally or vertically (`Shift`-click for $8\text{ px}$ gap). |
 | **`UI Center Parent`** | Layout Tab (`PanelLayoutUI`) | **Center** 1+ selected `TCastleUserInterface` controls inside their parent container (**Click**: H+V; **`Shift`**: H only; **`Ctrl`**: V only). |
 | **`UI Fit Parent`** | Layout Tab (`PanelLayoutUI`) | **Fit** 1+ selected `TCastleUserInterface` controls to their parent container's size and center (**Click**: W+H; **`Shift`**: Width only; **`Ctrl`**: Height only). |
+| **`UI Split Row` / `UI Split Col`** | Layout Tab (`PanelLayoutUI`) | **Divide parent container width or height equally** across 2+ selected `TCastleUserInterface` controls (**Click**: $8\text{ px}$ gap; **`Shift`-click**: $0\text{ px}$ flush). |
 | **`Reset Prop` Button** | Object Inspector Header | Reset the active Object Inspector property row to its default value. |
 | **`Select All of Same Class`** | Hierarchy Context Menu | Select all components in the design matching the selected component's class. |
 | **`Expand Subtree` / `Collapse Subtree`** | Hierarchy Context Menu | Recursively expand or collapse the selected hierarchy node(s). |
@@ -1203,9 +1226,9 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 
 ---
 
-## 58. Automated Unit Tests & Verification
+## 59. Automated Unit Tests & Verification
 
-All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 21 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
+All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 22 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
 
 1. **`TestSelectedCountAndFree`**: Verifies single/multi-selection filtering, freeing a selected transform while selected, and translating the remaining selection.
 2. **`TestTranslateSnapAndCoordSpace`**: Verifies grid snapping (`TranslateSnap := 2.0`) and `csLocal` vs. `csWorld` translation on a $90^\circ$-rotated transform.
@@ -1228,6 +1251,7 @@ All core 3D manipulation algorithms in `CastleTransformManipulate` are covered b
 19. **`TestArrangeLineSeparateOverlappingAndProgressiveTransform`**: Verifies `ArrangeSelectedBetweenEndpoints(true)` places 4 boxes at evenly spaced 3D intervals along the line segment from `B1` to `B4` and orients them along the line, verifies `ApplyProgressiveTransformSelected` applies a linear scale gradient from $(1,1,1)$ to $(4,4,4)$ and a cumulative $30^\circ$ rotation step per item, and verifies `SeparateOverlappingSelected(1.0, true, 8)` pushes two overlapping $2\times 2\times 2$ boxes apart to a center-to-center distance $\ge 3.0$ while preserving Y elevation.
 20. **`TestArrangeWaypointsHelixAndCenterOriginOnChildren`**: Verifies `ArrangeSelectedAlongWaypoints` places 5 transforms at equal arc-length intervals along an L-shaped 3-waypoint polyline and orients them along each segment tangent, verifies `ArrangeSelectedInHelix(10.0, 20.0, 40.0, 1.0, true)` arranges 5 transforms along a conical 3D helix while orienting them toward the central axis, and verifies `CenterSelectedOriginOnChildren` snaps a parent `TCastleTransform` origin to both the center and bottom-center (`MinY`) of its direct children's world bounding box while keeping all children's world positions unchanged.
 21. **`TestArrangeBezierArchSphereAndScaleGroupAroundPivot`**: Verifies `ArrangeSelectedInParabolicArchBetweenEndpoints(10.0, true)` places 5 transforms along a parabolic Bezier arch reaching apex $(10, 10, 0)$ with horizontal tangent $(1, 0, 0)$ at $t = 0.5$, verifies `ArrangeSelectedOnSphere(10.0, 0.0, 90.0, true)` distributes 5 transforms on a radius-$10$ upper hemisphere dome using the Fibonacci lattice and orients each transform radially outward, and verifies `ScaleSelectedGroupAroundPivot(Vector3(2.0, 0.5, 3.0))` scales both world offsets from the primary pivot and local `Scale` vectors simultaneously.
+22. **`TestArrangeSineWaveEllipseAndReversePositions`**: Verifies `ArrangeSelectedInSineWaveBetweenEndpoints(6.0, 1.0, 1, true)` places 5 transforms along a sinusoidal wave with crest $(5, 6, 0)$, zero-crossing $(10, 0, 0)$, and trough $(15, -6, 0)$ while orienting the crest tangent horizontally along $(1, 0, 0)$, verifies `ArrangeSelectedInEllipse(12.0, 6.0, 2)` arranges 4 transforms around a $12 \times 6$ XZ ellipse oriented along the ellipse tangent, and verifies `ReverseSelectedPositions(true, true)` reverses world positions, orientations, and scales across the 4 transforms.
 
 To run this test suite from the command line:
 ```bash
