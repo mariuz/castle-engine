@@ -354,6 +354,9 @@ type
       ButtonArrangeTorusKnot: TButton;
       ButtonArrangeConcentricRings: TButton;
       ButtonProjectOntoSphere: TButton;
+      ButtonArrangeCylinder: TButton;
+      ButtonArrangePyramid: TButton;
+      ButtonClampToPrimaryBounds: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -382,6 +385,7 @@ type
       ButtonUIGoldenRatio: TButton;
       ButtonUIAspect16x9: TButton;
       ButtonUIReverseOrder: TButton;
+      ButtonUICircleArrange: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -416,6 +420,7 @@ type
       MenuTreeViewItemSelectLightsAndCameras: TMenuItem;
       MenuTreeViewItemSelectSoundSources: TMenuItem;
       MenuTreeViewItemSelectHidden: TMenuItem;
+      MenuTreeViewItemSelectOutliers: TMenuItem;
       MenuTreeViewItemCopyTransform: TMenuItem;
       MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
@@ -515,6 +520,9 @@ type
     procedure ButtonArrangeTorusKnotClick(Sender: TObject);
     procedure ButtonArrangeConcentricRingsClick(Sender: TObject);
     procedure ButtonProjectOntoSphereClick(Sender: TObject);
+    procedure ButtonArrangeCylinderClick(Sender: TObject);
+    procedure ButtonArrangePyramidClick(Sender: TObject);
+    procedure ButtonClampToPrimaryBoundsClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -532,6 +540,7 @@ type
     procedure ButtonUIGoldenRatioClick(Sender: TObject);
     procedure ButtonUIAspect16x9Click(Sender: TObject);
     procedure ButtonUIReverseOrderClick(Sender: TObject);
+    procedure ButtonUICircleArrangeClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -573,6 +582,7 @@ type
     procedure MenuTreeViewItemSelectLightsAndCamerasClick(Sender: TObject);
     procedure MenuTreeViewItemSelectSoundSourcesClick(Sender: TObject);
     procedure MenuTreeViewItemSelectHiddenClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectOutliersClick(Sender: TObject);
     procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
@@ -1102,6 +1112,18 @@ type
     procedure ProjectSelectionOntoSphereOrCylinder(
       const CylinderMode: Boolean = false;
       const OrientOutward: Boolean = false);
+    procedure ArrangeSelectionOnCylinder(
+      const Radius: Single = 0.0;
+      const HeightSpan: Single = 10.0;
+      const OrientMode: Integer = 0);
+    procedure ShowArrangeOnCylinderDialog;
+    procedure ArrangeSelectionInPyramid(
+      const BaseSpacingXZ: Single = 0.0;
+      const LayerRiseY: Single = 0.0;
+      const OrientMode: Integer = 0);
+    procedure ShowArrangeInPyramidDialog;
+    procedure ClampSelectionToPrimaryBounds(
+      const UseObjectBounds: Boolean = true);
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -1122,6 +1144,9 @@ type
     procedure ApplyStandardAspectToSelectedUserInterfaces(
       const AspectMode: Integer = 0);
     procedure ReverseSelectedUserInterfacePositions(const SwapSizes: Boolean = false);
+    procedure ArrangeSelectedUserInterfacesInCircle(
+      const RadiusScale: Single = 1.0;
+      const HalfArc: Boolean = false);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -1163,6 +1188,7 @@ type
     procedure SelectLightsAndCameras(const FilterMode: Integer = 0);
     procedure SelectSoundAndTriggerTransforms(const TriggersOnly: Boolean = false);
     procedure SelectHiddenComponents(const TransformsOnly: Boolean = false);
+    procedure SelectOutlierTransforms(const MinDistance: Single = 100.0);
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -1767,11 +1793,18 @@ begin
   end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyY) and
-     (Event.ModifiersDown = [mkAlt, mkShift]) and
      (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
   begin
-    Frame.ShowArrangeInStairsDialog;
-    Exit(true);
+    if Event.ModifiersDown = [mkAlt, mkShift] then
+    begin
+      Frame.ShowArrangeInStairsDialog;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkShift] then
+    begin
+      Frame.SelectOutlierTransforms(100.0);
+      Exit(true);
+    end;
   end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyF) and
@@ -2146,6 +2179,21 @@ begin
     if Event.IsKey(keySlash) then
     begin
       Frame.ProjectSelectionOntoSphereOrCylinder(false, false);
+      Exit(true);
+    end else
+    if Event.IsKey(keyBackSlash) then
+    begin
+      Frame.ShowArrangeOnCylinderDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(keySemicolon) then
+    begin
+      Frame.ShowArrangeInPyramidDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(keyApostrophe) then
+    begin
+      Frame.ClampSelectionToPrimaryBounds(true);
       Exit(true);
     end;
   end;
@@ -3725,6 +3773,36 @@ begin
   ButtonProjectOntoSphere.OnClick := @ButtonProjectOntoSphereClick;
   ButtonProjectOntoSphere.Parent := PanelLayoutTransform;
 
+  ButtonArrangeCylinder := TButton.Create(Self);
+  ButtonArrangeCylinder.Align := alTop;
+  ButtonArrangeCylinder.AutoSize := true;
+  ButtonArrangeCylinder.Caption := 'Cylinder Wall...';
+  ButtonArrangeCylinder.Hint := 'Arrange 2+ selected 3D transforms across a vertical Fibonacci cylinder / pillar wall around pivot (Alt+Shift+\ | Shift-click: dialog | Ctrl-click: orient outward)';
+  ButtonArrangeCylinder.ShowHint := true;
+  ButtonArrangeCylinder.BorderSpacing.Around := 2;
+  ButtonArrangeCylinder.OnClick := @ButtonArrangeCylinderClick;
+  ButtonArrangeCylinder.Parent := PanelLayoutTransform;
+
+  ButtonArrangePyramid := TButton.Create(Self);
+  ButtonArrangePyramid.Align := alTop;
+  ButtonArrangePyramid.AutoSize := true;
+  ButtonArrangePyramid.Caption := 'Pyramid / Ziggurat';
+  ButtonArrangePyramid.Hint := 'Arrange 2+ selected 3D transforms into a stepped 3D pyramid / ziggurat of stacked square tiers around pivot (Alt+Shift+; | Shift-click: dialog | Ctrl-click: orient outward)';
+  ButtonArrangePyramid.ShowHint := true;
+  ButtonArrangePyramid.BorderSpacing.Around := 2;
+  ButtonArrangePyramid.OnClick := @ButtonArrangePyramidClick;
+  ButtonArrangePyramid.Parent := PanelLayoutTransform;
+
+  ButtonClampToPrimaryBounds := TButton.Create(Self);
+  ButtonClampToPrimaryBounds.Align := alTop;
+  ButtonClampToPrimaryBounds.AutoSize := true;
+  ButtonClampToPrimaryBounds.Caption := 'Clamp Inside Primary';
+  ButtonClampToPrimaryBounds.Hint := 'Clamp 2+ selected 3D transforms so their bounding boxes (or origins on Shift-click) stay inside the primary selected transform''s world bounding box (Alt+Shift+'')';
+  ButtonClampToPrimaryBounds.ShowHint := true;
+  ButtonClampToPrimaryBounds.BorderSpacing.Around := 2;
+  ButtonClampToPrimaryBounds.OnClick := @ButtonClampToPrimaryBoundsClick;
+  ButtonClampToPrimaryBounds.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -3943,6 +4021,14 @@ begin
   ButtonUIReverseOrder.OnClick := @ButtonUIReverseOrderClick;
   ButtonUIReverseOrder.Parent := PanelLayoutUI;
 
+  ButtonUICircleArrange := TButton.Create(Self);
+  ButtonUICircleArrange.AutoSize := true;
+  ButtonUICircleArrange.Caption := 'UI Circle / Dial';
+  ButtonUICircleArrange.Hint := 'Arrange 2+ selected 2D UI controls evenly around a 2D circle / radial menu dial around their shared center (Shift-click: 1.5x radius | Ctrl-click: 180 deg upper semicircle arc)';
+  ButtonUICircleArrange.ShowHint := true;
+  ButtonUICircleArrange.OnClick := @ButtonUICircleArrangeClick;
+  ButtonUICircleArrange.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -4141,6 +4227,11 @@ begin
   MenuTreeViewItemSelectHidden.Caption := 'Select All Hidden Components (Ctrl+Shift+H)';
   MenuTreeViewItemSelectHidden.OnClick := @MenuTreeViewItemSelectHiddenClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectHidden);
+
+  MenuTreeViewItemSelectOutliers := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectOutliers.Caption := 'Select Far Outlier Transforms (Ctrl+Shift+Y)';
+  MenuTreeViewItemSelectOutliers.OnClick := @MenuTreeViewItemSelectOutliersClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectOutliers);
 
   MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
   MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
@@ -7814,6 +7905,8 @@ begin
         ButtonUIAspect16x9.Enabled := SelectedUICount >= 1;
       if ButtonUIReverseOrder <> nil then
         ButtonUIReverseOrder.Enabled := SelectedUICount >= 2;
+      if ButtonUICircleArrange <> nil then
+        ButtonUICircleArrange.Enabled := SelectedUICount >= 2;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -7912,6 +8005,12 @@ begin
       ButtonArrangeConcentricRings.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonProjectOntoSphere <> nil then
       ButtonProjectOntoSphere.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeCylinder <> nil then
+      ButtonArrangeCylinder.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangePyramid <> nil then
+      ButtonArrangePyramid.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonClampToPrimaryBounds <> nil then
+      ButtonClampToPrimaryBounds.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -9361,6 +9460,11 @@ begin
       ShowArrangeInStairsDialog;
       Key := 0;
     end else
+    if (Key = Ord('Y')) and (Shift = [ssCtrl, ssShift]) then
+    begin
+      SelectOutlierTransforms(100.0);
+      Key := 0;
+    end else
     if (Key = Ord('F')) and (Shift = [ssCtrl, ssShift]) then
     begin
       SelectTransformsInCameraFrustum;
@@ -9431,6 +9535,21 @@ begin
     if (Key = VK_OEM_2) and (Shift = [ssAlt, ssShift]) then
     begin
       ProjectSelectionOntoSphereOrCylinder(false, false);
+      Key := 0;
+    end else
+    if (Key = VK_OEM_5) and (Shift = [ssAlt, ssShift]) then
+    begin
+      ShowArrangeOnCylinderDialog;
+      Key := 0;
+    end else
+    if (Key = VK_OEM_1) and (Shift = [ssAlt, ssShift]) then
+    begin
+      ShowArrangeInPyramidDialog;
+      Key := 0;
+    end else
+    if (Key = VK_OEM_7) and (Shift = [ssAlt, ssShift]) then
+    begin
+      ClampSelectionToPrimaryBounds(true);
       Key := 0;
     end else
     if (Key = Ord('Q')) and (Shift = [ssAlt, ssShift]) then
@@ -13167,6 +13286,126 @@ begin
   ProjectSelectionOntoSphereOrCylinder(ssShift in ShiftState, ssCtrl in ShiftState);
 end;
 
+procedure TDesignFrame.ArrangeSelectionOnCylinder(
+  const Radius: Single;
+  const HeightSpan: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedOnCylinder(Radius, HeightSpan, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeOnCylinderDialog;
+var
+  Prompts: array[0..2] of string;
+  Values: array[0..2] of string;
+  R, HSpan: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Cylinder Radius (0 = auto from selection):';
+  Prompts[1] := 'Vertical Height Span (Y):';
+  Prompts[2] := 'Orientation (0 = keep, 1 = inward, 2 = outward):';
+
+  Values[0] := '0';
+  Values[1] := '10';
+  Values[2] := '2';
+
+  if InputQuery('Arrange Selected on 3D Fibonacci Cylinder Wall', Prompts, Values) then
+  begin
+    R := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    HSpan := StrToFloatDefDot(Trim(Values[1]), 10.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[2]), 2), 0, 2);
+    ArrangeSelectionOnCylinder(R, HSpan, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeCylinderClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  OrientMode: Integer;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeOnCylinderDialog
+  else
+  begin
+    if ssCtrl in ShiftState then
+      OrientMode := 2
+    else
+      OrientMode := 0;
+    ArrangeSelectionOnCylinder(0.0, 10.0, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ArrangeSelectionInPyramid(
+  const BaseSpacingXZ: Single;
+  const LayerRiseY: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInPyramid(BaseSpacingXZ, LayerRiseY, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInPyramidDialog;
+var
+  Prompts: array[0..2] of string;
+  Values: array[0..2] of string;
+  SpacingXZ, RiseY: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Grid Cell Spacing XZ (0 = auto from bounding boxes):';
+  Prompts[1] := 'Vertical Step Rise Y Per Tier (0 = match XZ spacing):';
+  Prompts[2] := 'Orientation (0 = keep, 1 = outward, 2 = inward):';
+
+  Values[0] := '0';
+  Values[1] := '0';
+  Values[2] := '0';
+
+  if InputQuery('Arrange Selected in 3D Stepped Pyramid / Ziggurat', Prompts, Values) then
+  begin
+    SpacingXZ := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    RiseY := StrToFloatDefDot(Trim(Values[1]), 0.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[2]), 0), 0, 2);
+    ArrangeSelectionInPyramid(SpacingXZ, RiseY, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangePyramidClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  OrientMode: Integer;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInPyramidDialog
+  else
+  begin
+    if ssCtrl in ShiftState then
+      OrientMode := 1
+    else
+      OrientMode := 0;
+    ArrangeSelectionInPyramid(0.0, 0.0, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ClampSelectionToPrimaryBounds(
+  const UseObjectBounds: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ClampSelectedToPrimaryBounds(UseObjectBounds);
+end;
+
+procedure TDesignFrame.ButtonClampToPrimaryBoundsClick(Sender: TObject);
+begin
+  ClampSelectionToPrimaryBounds(not (ssShift in GetKeyShiftState));
+end;
+
 procedure TDesignFrame.StopPilotTransform;
 var
   SavedName: String;
@@ -14538,6 +14777,105 @@ end;
 procedure TDesignFrame.ButtonUIReverseOrderClick(Sender: TObject);
 begin
   ReverseSelectedUserInterfacePositions(ssShift in GetKeyShiftState);
+end;
+
+procedure TDesignFrame.ArrangeSelectedUserInterfacesInCircle(
+  const RadiusScale: Single;
+  const HalfArc: Boolean);
+var
+  Selected: TComponentList;
+  SelectedCount, I, Count, ChangedCount: Integer;
+  Items: array of TCastleUserInterface;
+  Centers: array of TVector2;
+  UI: TCastleUserInterface;
+  R, NewR: TFloatRectangle;
+  SumCenter, GroupCenter, TargetCenter: TVector2;
+  SumDist, MaxSize, EffRadius, AngleRad, SinA, CosA, DeltaX, DeltaY: Single;
+begin
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if (Selected = nil) or (SelectedCount < 2) then Exit;
+
+    SetLength(Items, SelectedCount);
+    SetLength(Centers, SelectedCount);
+    Count := 0;
+    SumCenter := TVector2.Zero;
+    MaxSize := 0.0;
+
+    for I := 0 to SelectedCount - 1 do
+      if (Selected[I] is TCastleUserInterface) and
+         (Selected[I] <> DesignRoot) and
+         (not (Selected[I] is TCastleTransformDesign)) and
+         (not IsComponentLocked(Selected[I])) then
+      begin
+        UI := TCastleUserInterface(Selected[I]);
+        R := UI.RenderRectWithBorder;
+        if R.IsEmpty or (UI.UIScale <= 0) then Continue;
+        Items[Count] := UI;
+        Centers[Count] := R.Center;
+        SumCenter := SumCenter + R.Center;
+        MaxSize := Max(MaxSize, Max(R.Width, R.Height));
+        Inc(Count);
+      end;
+
+    if Count < 2 then Exit;
+
+    GroupCenter := SumCenter / Single(Count);
+    SumDist := 0.0;
+    for I := 0 to Count - 1 do
+      SumDist := SumDist + PointsDistance(Centers[I], GroupCenter);
+    EffRadius := SumDist / Single(Count);
+    if EffRadius < Max(16.0, MaxSize * 0.75) then
+      EffRadius := Max(64.0, MaxSize * 1.25);
+    if RadiusScale > 0 then
+      EffRadius := EffRadius * RadiusScale;
+
+    ChangedCount := 0;
+    for I := 0 to Count - 1 do
+    begin
+      UI := Items[I];
+      if HalfArc then
+        AngleRad := Pi - (Single(I) / Single(Count - 1)) * Pi
+      else
+        AngleRad := (Pi * 0.5) - (Single(I) / Single(Count)) * (2.0 * Pi);
+
+      SinCos(AngleRad, SinA, CosA);
+      TargetCenter := Vector2(
+        GroupCenter.X + EffRadius * CosA,
+        GroupCenter.Y + EffRadius * SinA);
+
+      NewR := UI.RenderRectWithBorder;
+      if not NewR.IsEmpty then
+      begin
+        DeltaX := TargetCenter.X - NewR.Center.X;
+        DeltaY := TargetCenter.Y - NewR.Center.Y;
+        if (Abs(DeltaX) > 0.01) or (Abs(DeltaY) > 0.01) then
+        begin
+          UI.Translation := UI.Translation + Vector2(DeltaX / UI.UIScale, DeltaY / UI.UIScale);
+          Inc(ChangedCount);
+        end;
+      end;
+    end;
+
+    if ChangedCount > 0 then
+      ModifiedOutsideObjectInspector(
+        Format('Arrange %d UI control(s) in circle', [Count]), ucHigh);
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUICircleArrangeClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  RScale: Single;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    RScale := 1.5
+  else
+    RScale := 1.0;
+  ArrangeSelectedUserInterfacesInCircle(RScale, ssCtrl in ShiftState);
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -17541,6 +17879,64 @@ begin
   SelectHiddenComponents(ssShift in GetKeyShiftState);
 end;
 
+procedure TDesignFrame.SelectOutlierTransforms(const MinDistance: Single);
+var
+  TreeNode: TTreeNode;
+  C: TComponent;
+  CandT: TCastleTransform;
+  NewSelection: TComponentList;
+  RefPos, CandPos: TVector3;
+  EffMinDistSq: Single;
+begin
+  EffMinDistSq := Sqr(Max(0.01, Abs(MinDistance)));
+  if (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0) then
+    RefPos := TransformManipulate.SelectionWorkingCenter
+  else if (CurrentTransform <> nil) and CurrentTransform.HasWorldTransform then
+    RefPos := CurrentTransform.WorldTranslation
+  else
+    RefPos := TVector3.Zero;
+
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C is TCastleTransform) and (C <> DesignRoot) and
+         (not (C is TCastleAbstractRootTransform)) and
+         Selectable(C) and (not IsComponentLocked(C)) then
+      begin
+        CandT := TCastleTransform(C);
+        if CandT.Exists then
+        begin
+          if CandT.HasWorldTransform then
+            CandPos := CandT.WorldTranslation
+          else
+            CandPos := CandT.Translation;
+
+          if (PointsDistanceSqr(CandPos, RefPos) > EffMinDistSq) and
+             (NewSelection.IndexOf(CandT) = -1) then
+            NewSelection.Add(CandT);
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectOutliersClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    SelectOutlierTransforms(500.0)
+  else
+    SelectOutlierTransforms(100.0);
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -18051,6 +18447,8 @@ begin
     MenuTreeViewItemSelectSoundSources.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemSelectHidden <> nil then
     MenuTreeViewItemSelectHidden.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectOutliers <> nil then
+    MenuTreeViewItemSelectOutliers.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemCopyTransform <> nil then
     MenuTreeViewItemCopyTransform.Enabled := (CurrentTransform <> nil) or (SelectedUserInterface <> nil) or (ControlsTree.SelectionCount > 0);
   if MenuTreeViewItemPasteTransform <> nil then

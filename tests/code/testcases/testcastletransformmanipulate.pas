@@ -56,6 +56,7 @@ type
     procedure TestArrangeLissajousCatenaryAndProjectOntoLine;
     procedure TestArrangePolygonSpiralVortexAndProjectOntoPlane;
     procedure TestArrangeTorusKnotConcentricRingsAndProjectSphereCylinder;
+    procedure TestArrangeCylinderPyramidAndClampToBox;
   end;
 
 implementation
@@ -1816,6 +1817,114 @@ begin
     AssertVectorEquals(Vector3(-6, -7, -8), B2.Translation, 1e-4);
     B1.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(0.6, 0, 0.8), WorldDir.Normalize, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestArrangeCylinderPyramidAndClampToBox;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  RoomBox, B1, B2, B3, B4, B5: TCastleBox;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.OnTransformModified := {$ifdef FPC}@{$endif}HandleTransformModified;
+    Manipulate.OnTransformModifyEnd := {$ifdef FPC}@{$endif}HandleTransformModifyEnd;
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(2, 2, 2);
+    B1.Translation := Vector3(-4, 0, 0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(2, 2, 2);
+    B2.Translation := Vector3(-2, 0, 0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(2, 2, 2);
+    B3.Translation := Vector3(0, 0, 0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(2, 2, 2);
+    B4.Translation := Vector3(2, 0, 0);
+    Viewport.Items.Add(B4);
+
+    B5 := TCastleBox.Create(Viewport);
+    B5.Size := Vector3(2, 2, 2);
+    B5.Translation := Vector3(4, 0, 0);
+    Viewport.Items.Add(B5);
+
+    Manipulate.SetSelected([B1, B2, B3, B4, B5]);
+    Manipulate.PivotMode := pmSelectionCenter;
+
+    // 1. Test ArrangeSelectedOnCylinder(10.0, 20.0, 2):
+    // Center = (0, 0, 0). Every item has XZ radius = 10.0, Y from -10 to +10 in steps of 5,
+    // and outward horizontal orientation:
+    AssertTrue(Manipulate.ArrangeSelectedOnCylinder(10.0, 20.0, 2));
+    AssertVectorEquals(Vector3(10, -10, 0), B1.Translation, 1e-4);
+    AssertSameValue(10.0, Hypot(B2.Translation.X, B2.Translation.Z), 1e-4);
+    AssertSameValue(-5.0, B2.Translation.Y, 1e-4);
+    AssertSameValue(10.0, Hypot(B3.Translation.X, B3.Translation.Z), 1e-4);
+    AssertSameValue(0.0, B3.Translation.Y, 1e-4);
+    AssertSameValue(10.0, Hypot(B5.Translation.X, B5.Translation.Z), 1e-4);
+    AssertSameValue(10.0, B5.Translation.Y, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+
+    // 2. Test ArrangeSelectedInPyramid(4.0, 3.0, 1):
+    // Reset positions so Center = (0, 0, 0).
+    // With 5 items: TotalLayers = 2 (Layer 0 has 1x1=1 item at Y = 3.0; Layer 1 has 2x2=4 items at Y = 0.0).
+    // Layer 0: B1 at (0, 3, 0).
+    // Layer 1 (2x2 with spacing 4.0):
+    //   B2 (row=0, col=0): (-2, 0, -2)
+    //   B3 (row=0, col=1): ( 2, 0, -2)
+    //   B4 (row=1, col=0): (-2, 0,  2)
+    //   B5 (row=1, col=1): ( 2, 0,  2)
+    B1.Translation := Vector3(-4, 0, 0);
+    B2.Translation := Vector3(-2, 0, 0);
+    B3.Translation := Vector3(0, 0, 0);
+    B4.Translation := Vector3(2, 0, 0);
+    B5.Translation := Vector3(4, 0, 0);
+    AssertTrue(Manipulate.ArrangeSelectedInPyramid(4.0, 3.0, 1));
+    AssertVectorEquals(Vector3(0, 3, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-2, 0, -2), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(2, 0, -2), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-2, 0, 2), B4.Translation, 1e-4);
+    AssertVectorEquals(Vector3(2, 0, 2), B5.Translation, 1e-4);
+
+    // 3. Test ClampSelectedToBox and ClampSelectedToPrimaryBounds:
+    // RoomBox has Size (20, 10, 20) at (0, 5, 0) -> WorldBoundingBox is [-10..10] x [0..10] x [-10..10].
+    // B1..B3 have Size (2, 2, 2) (half-extent 1.0 on each axis).
+    // When UseObjectBounds = true, their centers must be clamped to [-9..9] x [1..9] x [-9..9]!
+    RoomBox := TCastleBox.Create(Viewport);
+    RoomBox.Size := Vector3(20, 10, 20);
+    RoomBox.Translation := Vector3(0, 5, 0);
+    Viewport.Items.Add(RoomBox);
+
+    B1.Rotation := Vector4(0, 1, 0, 0);
+    B2.Rotation := Vector4(0, 1, 0, 0);
+    B3.Rotation := Vector4(0, 1, 0, 0);
+    B1.Translation := Vector3(-25, -5, 30);
+    B2.Translation := Vector3(15, 20, -12);
+    B3.Translation := Vector3(3, 4, -2); // already inside
+    Manipulate.SetSelected([RoomBox, B1, B2, B3]);
+    AssertTrue(Manipulate.ClampSelectedToPrimaryBounds(true));
+    AssertVectorEquals(Vector3(-9, 1, 9), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(9, 9, -9), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(3, 4, -2), B3.Translation, 1e-4);
+
+    // Also test ClampSelectedToBox with UseObjectBounds = false (clamps origins to [-5..5]):
+    Manipulate.SetSelected([B1, B2]);
+    AssertTrue(Manipulate.ClampSelectedToBox(Vector3(-5, 2, -5), Vector3(5, 8, 5), false));
+    AssertVectorEquals(Vector3(-5, 2, 5), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(5, 8, -5), B2.Translation, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

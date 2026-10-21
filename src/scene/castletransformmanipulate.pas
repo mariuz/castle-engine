@@ -977,6 +977,53 @@ type
     function ProjectSelectedOntoCylinder(
       const Radius: Single = 0.0;
       const OrientOutward: Boolean = false): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) evenly
+      over a 3D vertical cylindrical shell / tower wall around the active selection
+      pivot using a 2D cylindrical Fibonacci golden-angle lattice:
+      $\theta_i = i \cdot \phi_(golden)$,
+      $y_i = C_y + (i / (N - 1) - 0.5) \cdot \text(HeightSpan)$,
+      $x_i = C_x + R \cos(\theta_i), \quad z_i = C_z + R \sin(\theta_i)$.
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient horizontally inward toward the central cylinder axis
+      - @code(2): orient horizontally outward away from the cylinder wall
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedOnCylinder(
+      const Radius: Single;
+      const HeightSpan: Single = 10.0;
+      const OrientMode: Integer = 2): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) into a
+      stepped 3D square pyramid / ziggurat centered horizontally at the active
+      selection pivot, where tier $L \ge 0$ (from top apex $L = 0$ down to base
+      $L = K - 1$) forms an $(L + 1) \times (L + 1)$ horizontal grid with cell
+      spacing @code(BaseSpacingXZ) and vertical elevation
+      $Y_L = C_y + (K - 1 - L) \cdot \text(LayerRiseY)$.
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient horizontally outward from the pyramid center
+      - @code(2): orient horizontally inward toward the pyramid center
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInPyramid(
+      const BaseSpacingXZ, LayerRiseY: Single;
+      const OrientMode: Integer = 0): Boolean;
+
+    { Clamp all top-level selected transforms (@code(SelectedCount >= 1)) so their
+      world positions (@code(UseObjectBounds = false)) or their entire world-space
+      axis-aligned bounding boxes (@code(UseObjectBounds = true)) lie within
+      the 3D axis-aligned box defined by @code(BoxMin) and @code(BoxMax).
+      Returns @true if at least one selected transform was modified. }
+    function ClampSelectedToBox(const BoxMin, BoxMax: TVector3;
+      const UseObjectBounds: Boolean = true): Boolean;
+
+    { Clamp all secondary top-level selected transforms (@code(Selected[1..N-1]))
+      so their world positions (@code(UseObjectBounds = false)) or their entire
+      world-space bounding boxes (@code(UseObjectBounds = true)) lie within the
+      world bounding box of the primary selected transform (@code(Selected[0])).
+      Returns @true if at least one selected transform was modified. }
+    function ClampSelectedToPrimaryBounds(
+      const UseObjectBounds: Boolean = true): Boolean;
   end;
 
 var
@@ -7202,6 +7249,419 @@ begin
         T.SetWorldView(GetTransformWorkingPos(T), UnitDirXZ, NewUp);
         Result := true;
       end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedOnCylinder(
+  const Radius: Single;
+  const HeightSpan: Single;
+  const OrientMode: Integer): Boolean;
+const
+  GoldenAngle = 2.39996322972865332; // Pi * (3 - Sqrt(5))
+var
+  Items: array of TCastleTransform;
+  ValidCount, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, GravityUp, LookDir, Side, NewUp,
+    CurWorldPos, CurDir, CurUp: TVector3;
+  EffRadius, AvgDistXZ, Theta, FracY, SinT, CosT: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, SelectedCount);
+  ValidCount := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if (T = nil) or IsDescendantOfAnySelected(T) then Continue;
+    Items[ValidCount] := T;
+    Inc(ValidCount);
+  end;
+
+  if ValidCount < 2 then Exit;
+
+  if (PivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+    CenterPos := GetTransformWorkingPos(FMainSelected)
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  EffRadius := Abs(Radius);
+  if EffRadius < 1e-4 then
+  begin
+    AvgDistXZ := 0.0;
+    for I := 0 to ValidCount - 1 do
+    begin
+      CurPos := GetTransformWorkingPos(Items[I]);
+      AvgDistXZ := AvgDistXZ + Hypot(CurPos.X - CenterPos.X, CurPos.Z - CenterPos.Z);
+    end;
+    EffRadius := AvgDistXZ / Single(ValidCount);
+    if EffRadius < 1e-4 then
+      EffRadius := 5.0;
+  end;
+
+  if (Items[0].World <> nil) and (not Items[0].World.GravityUp.IsZero) then
+    GravityUp := Items[0].World.GravityUp.Normalize
+  else
+    GravityUp := Vector3(0, 1, 0);
+
+  for I := 0 to ValidCount - 1 do
+  begin
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+    Theta := Single(I) * GoldenAngle;
+    SinCos(Theta, SinT, CosT);
+    FracY := (Single(I) / Single(ValidCount - 1)) - 0.5;
+
+    TargetPos := Vector3(
+      CenterPos.X + EffRadius * CosT,
+      CenterPos.Y + FracY * HeightSpan,
+      CenterPos.Z + EffRadius * SinT);
+
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      if OrientMode = 1 then
+        LookDir := Vector3(-CosT, 0.0, -SinT)
+      else
+        LookDir := Vector3(CosT, 0.0, SinT);
+
+      if not LookDir.IsZero(1e-5) then
+      begin
+        LookDir := LookDir.Normalize;
+        Side := TVector3.CrossProduct(LookDir, GravityUp);
+        if Side.IsZero(1e-5) then
+          Side := Vector3(0, 0, 1);
+        Side := Side.Normalize;
+        NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+        T.GetWorldView(CurWorldPos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInPyramid(
+  const BaseSpacingXZ, LayerRiseY: Single;
+  const OrientMode: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  ValidCount, I, TotalLayers, CapacitySum, LayerIdx, SlotInLayer,
+    GridDim, Row, Col: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, GravityUp, LookDir, Side, NewUp,
+    CurWorldPos, CurDir, CurUp: TVector3;
+  EffSpacing, AvgSizeXZ, EffRiseY, OffsetX, OffsetZ, DistXZ: Single;
+  BBox: TBox3D;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, SelectedCount);
+  ValidCount := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if (T = nil) or IsDescendantOfAnySelected(T) then Continue;
+    Items[ValidCount] := T;
+    Inc(ValidCount);
+  end;
+
+  if ValidCount < 2 then Exit;
+
+  if (PivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+    CenterPos := GetTransformWorkingPos(FMainSelected)
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  EffSpacing := Abs(BaseSpacingXZ);
+  if EffSpacing < 1e-4 then
+  begin
+    AvgSizeXZ := 0.0;
+    for I := 0 to ValidCount - 1 do
+    begin
+      BBox := Items[I].WorldBoundingBox;
+      if not BBox.IsEmpty then
+        AvgSizeXZ := AvgSizeXZ + Max(BBox.SizeX, BBox.SizeZ);
+    end;
+    EffSpacing := AvgSizeXZ / Single(ValidCount);
+    if EffSpacing < 1e-4 then
+      EffSpacing := 2.0;
+  end;
+
+  EffRiseY := LayerRiseY;
+  if Abs(EffRiseY) < 1e-4 then
+    EffRiseY := EffSpacing;
+
+  // Determine number of pyramid tiers TotalLayers so sum_{L=0..TotalLayers-1} (L+1)^2 >= ValidCount
+  TotalLayers := 1;
+  CapacitySum := 1;
+  while CapacitySum < ValidCount do
+  begin
+    Inc(TotalLayers);
+    CapacitySum := CapacitySum + Sqr(TotalLayers);
+  end;
+
+  if (Items[0].World <> nil) and (not Items[0].World.GravityUp.IsZero) then
+    GravityUp := Items[0].World.GravityUp.Normalize
+  else
+    GravityUp := Vector3(0, 1, 0);
+
+  LayerIdx := 0;
+  SlotInLayer := 0;
+  for I := 0 to ValidCount - 1 do
+  begin
+    GridDim := LayerIdx + 1;
+    if SlotInLayer >= Sqr(GridDim) then
+    begin
+      Inc(LayerIdx);
+      SlotInLayer := 0;
+      GridDim := LayerIdx + 1;
+    end;
+
+    Row := SlotInLayer div GridDim;
+    Col := SlotInLayer mod GridDim;
+    Inc(SlotInLayer);
+
+    OffsetX := (Single(Col) - 0.5 * Single(GridDim - 1)) * EffSpacing;
+    OffsetZ := (Single(Row) - 0.5 * Single(GridDim - 1)) * EffSpacing;
+
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+    TargetPos := Vector3(
+      CenterPos.X + OffsetX,
+      CenterPos.Y + Single(TotalLayers - 1 - LayerIdx) * EffRiseY,
+      CenterPos.Z + OffsetZ);
+
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      DistXZ := Hypot(OffsetX, OffsetZ);
+      if DistXZ < 1e-5 then
+        LookDir := Vector3(0, 0, -1)
+      else if OrientMode = 1 then
+        LookDir := Vector3(OffsetX / DistXZ, 0.0, OffsetZ / DistXZ)
+      else
+        LookDir := Vector3(-OffsetX / DistXZ, 0.0, -OffsetZ / DistXZ);
+
+      LookDir := LookDir.Normalize;
+      Side := TVector3.CrossProduct(LookDir, GravityUp);
+      if Side.IsZero(1e-5) then
+        Side := Vector3(0, 0, 1);
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ClampSelectedToBox(
+  const BoxMin, BoxMax: TVector3;
+  const UseObjectBounds: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  ValidCount, I, Axis: Integer;
+  T: TCastleTransform;
+  ActualMin, ActualMax, CurPos, TargetPos, DeltaWorld: TVector3;
+  ObjBox: TBox3D;
+  ObjMin, ObjMax, AllowedSpan, ObjSpan: Single;
+begin
+  Result := false;
+  if SelectedCount < 1 then Exit;
+
+  for Axis := 0 to 2 do
+  begin
+    ActualMin.Data[Axis] := Min(BoxMin.Data[Axis], BoxMax.Data[Axis]);
+    ActualMax.Data[Axis] := Max(BoxMin.Data[Axis], BoxMax.Data[Axis]);
+  end;
+
+  SetLength(Items, SelectedCount);
+  ValidCount := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if (T = nil) or IsDescendantOfAnySelected(T) then Continue;
+    Items[ValidCount] := T;
+    Inc(ValidCount);
+  end;
+
+  if ValidCount < 1 then Exit;
+
+  for I := 0 to ValidCount - 1 do
+  begin
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+    TargetPos := CurPos;
+
+    if UseObjectBounds then
+    begin
+      ObjBox := T.WorldBoundingBox;
+      if not ObjBox.IsEmpty then
+      begin
+        DeltaWorld := TVector3.Zero;
+        for Axis := 0 to 2 do
+        begin
+          ObjMin := ObjBox.Data[0].Data[Axis];
+          ObjMax := ObjBox.Data[1].Data[Axis];
+          ObjSpan := ObjMax - ObjMin;
+          AllowedSpan := ActualMax.Data[Axis] - ActualMin.Data[Axis];
+          if ObjSpan >= AllowedSpan then
+            DeltaWorld.Data[Axis] :=
+              0.5 * (ActualMin.Data[Axis] + ActualMax.Data[Axis]) -
+              0.5 * (ObjMin + ObjMax)
+          else if ObjMin < ActualMin.Data[Axis] then
+            DeltaWorld.Data[Axis] := ActualMin.Data[Axis] - ObjMin
+          else if ObjMax > ActualMax.Data[Axis] then
+            DeltaWorld.Data[Axis] := ActualMax.Data[Axis] - ObjMax;
+        end;
+        TargetPos := CurPos + DeltaWorld;
+      end else
+      begin
+        for Axis := 0 to 2 do
+          TargetPos.Data[Axis] := EnsureRange(
+            CurPos.Data[Axis], ActualMin.Data[Axis], ActualMax.Data[Axis]);
+      end;
+    end else
+    begin
+      for Axis := 0 to 2 do
+        TargetPos.Data[Axis] := EnsureRange(
+          CurPos.Data[Axis], ActualMin.Data[Axis], ActualMax.Data[Axis]);
+    end;
+
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ClampSelectedToPrimaryBounds(
+  const UseObjectBounds: Boolean): Boolean;
+var
+  PrimaryT, T: TCastleTransform;
+  PrimaryBox, ObjBox: TBox3D;
+  ActualMin, ActualMax, CurPos, TargetPos, DeltaWorld: TVector3;
+  I, Axis: Integer;
+  ObjMin, ObjMax, ObjSpan, AllowedSpan: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  PrimaryT := FMainSelected;
+  if PrimaryT = nil then
+    PrimaryT := Selected[0];
+  if PrimaryT = nil then Exit;
+
+  PrimaryBox := PrimaryT.WorldBoundingBox;
+  if PrimaryBox.IsEmpty then Exit;
+
+  ActualMin := PrimaryBox.Data[0];
+  ActualMax := PrimaryBox.Data[1];
+
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if (T = nil) or (T = PrimaryT) or IsDescendantOfAnySelected(T) then Continue;
+
+    CurPos := GetTransformWorkingPos(T);
+    TargetPos := CurPos;
+
+    if UseObjectBounds then
+    begin
+      ObjBox := T.WorldBoundingBox;
+      if not ObjBox.IsEmpty then
+      begin
+        DeltaWorld := TVector3.Zero;
+        for Axis := 0 to 2 do
+        begin
+          ObjMin := ObjBox.Data[0].Data[Axis];
+          ObjMax := ObjBox.Data[1].Data[Axis];
+          ObjSpan := ObjMax - ObjMin;
+          AllowedSpan := ActualMax.Data[Axis] - ActualMin.Data[Axis];
+          if ObjSpan >= AllowedSpan then
+            DeltaWorld.Data[Axis] :=
+              0.5 * (ActualMin.Data[Axis] + ActualMax.Data[Axis]) -
+              0.5 * (ObjMin + ObjMax)
+          else if ObjMin < ActualMin.Data[Axis] then
+            DeltaWorld.Data[Axis] := ActualMin.Data[Axis] - ObjMin
+          else if ObjMax > ActualMax.Data[Axis] then
+            DeltaWorld.Data[Axis] := ActualMax.Data[Axis] - ObjMax;
+        end;
+        TargetPos := CurPos + DeltaWorld;
+      end else
+      begin
+        for Axis := 0 to 2 do
+          TargetPos.Data[Axis] := EnsureRange(
+            CurPos.Data[Axis], ActualMin.Data[Axis], ActualMax.Data[Axis]);
+      end;
+    end else
+    begin
+      for Axis := 0 to 2 do
+        TargetPos.Data[Axis] := EnsureRange(
+          CurPos.Data[Axis], ActualMin.Data[Axis], ActualMax.Data[Axis]);
+    end;
+
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
     end;
   end;
 
