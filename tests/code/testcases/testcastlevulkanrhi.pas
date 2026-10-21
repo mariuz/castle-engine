@@ -150,6 +150,9 @@ type
     procedure TestVisibilityBufferPayloadAndBarycentricsRHI;
     procedure TestNaniteClusterDAGCutSelectionRHI;
     procedure TestSoftwareMicroPolygonComputeRasterizerRHI;
+    procedure TestGlobalSDFClipmapSphereTracingRHI;
+    procedure TestLumenSurfaceCacheSixAxisCardAtlasRHI;
+    procedure TestScreenSpaceRadianceCacheProbesRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -8312,6 +8315,159 @@ begin
     AssertTrue('Front-facing 3.6x4.3px micro-triangle must be routed to software compute rasterizer', MicroValid);
     AssertFalse('60x60px large triangle must be routed to hardware rasterizer instead of software compute', LargeTri);
     AssertFalse('Back-facing micro-triangle must be culled', BackfaceTri);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGlobalSDFClipmapSphereTracingRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Gen: TCastleShaderGeneratorRHI;
+  SDFGLSL: String;
+  DistOutside, DistInside, SmoothD, SoftVis: Single;
+  HitDist: Single;
+  HitSteps: Cardinal;
+  HitOk, MissOk: Boolean;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6666)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    { 1. Verify Global SDF Trace GLSL 450 functions }
+    SDFGLSL := Gen.GenerateGlobalSDFTraceFunctions;
+    AssertTrue('Global SDF GLSL must include EvaluateSDFBoxDistance, EvaluateSDFSmoothUnion, and EvaluateSDFSoftShadowCone',
+      (Pos('float EvaluateSDFBoxDistance(vec3 samplePos, vec3 boxCenter, vec3 boxHalfExtents)', SDFGLSL) > 0) and
+      (Pos('float EvaluateSDFSmoothUnion(float d1, float d2, float k)', SDFGLSL) > 0) and
+      (Pos('float EvaluateSDFSoftShadowCone(float currentVisibility, float sdfDistance, float rayDistance, float coneTanHalfAngle)', SDFGLSL) > 0));
+
+    { 2. Verify exact box SDF (outside + inside), polynomial smooth union, and soft cone visibility }
+    DistOutside := TCastleShaderGeneratorRHI.EvaluateSDFBoxDistance(
+      Vector3(5.0, 0.0, 0.0), Vector3(0.0, 0.0, 0.0), Vector3(2.0, 2.0, 2.0));
+    DistInside := TCastleShaderGeneratorRHI.EvaluateSDFBoxDistance(
+      Vector3(0.5, 0.0, 0.0), Vector3(0.0, 0.0, 0.0), Vector3(2.0, 2.0, 2.0));
+    AssertSameValue(3.0, DistOutside, 1e-5);
+    AssertSameValue(-1.5, DistInside, 1e-5);
+
+    SmoothD := TCastleShaderGeneratorRHI.EvaluateSDFSmoothUnion(0.1, 0.1, 0.4);
+    AssertTrue('Smooth union at equal distances must blend strictly below min(d1, d2)', SmoothD < 0.1);
+
+    SoftVis := TCastleShaderGeneratorRHI.EvaluateSDFSoftShadowCone(1.0, 0.25, 5.0, 0.1);
+    AssertSameValue(0.5, SoftVis, 1e-5);
+
+    { 3. Verify TCastleVulkanGlobalSDF sphere-marching and 3D clipmap volume allocation }
+    Device.GlobalSDF.ClearPrimitives;
+    Device.GlobalSDF.SmoothBlendRadius := 0.0;
+    Device.GlobalSDF.AddBoxPrimitive(Vector3(0.0, 0.0, -10.0), Vector3(2.0, 2.0, 2.0));
+
+    HitOk := Device.GlobalSDF.TraceSphereMarchCPU(
+      Vector3(0.0, 0.0, 0.0), Vector3(0.0, 0.0, -1.0), 50.0, HitDist, HitSteps);
+    MissOk := Device.GlobalSDF.TraceSphereMarchCPU(
+      Vector3(0.0, 10.0, 0.0), Vector3(0.0, 0.0, -1.0), 50.0, HitDist, HitSteps);
+    AssertTrue('Ray aimed at SDF box at Z=-10 (halfExtent=2 -> front face at Z=-8) must hit', HitOk);
+    AssertFalse('Ray aimed 10m above SDF box must miss', MissOk);
+
+    CmdList.BeginRecording;
+    Device.GlobalSDF.DispatchGlobalSDFBuild(CmdList, 32);
+    CmdList.EndRecording;
+
+    AssertEquals(Cardinal(1), Device.GlobalSDF.BuildCount);
+    AssertTrue('GlobalSDF ClipmapVolumeTexture (3D) must be allocated',
+      (Device.GlobalSDF.ClipmapVolumeTexture <> nil) and
+      (Device.GlobalSDF.ClipmapVolumeTexture.Desc.Dimension = td3D));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestLumenSurfaceCacheSixAxisCardAtlasRHI;
+var
+  Device: TVulkanRHIDevice;
+  Gen: TCastleShaderGeneratorRHI;
+  CardGLSL: String;
+  FirstSlot0, FirstSlot1: Cardinal;
+  OffUV, ScaleUV, HitAtlasUV: TVector2;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6666)) );
+  try
+    { 1. Verify Surface Cache Card GLSL 450 functions }
+    CardGLSL := Gen.GenerateSurfaceCacheCardFunctions;
+    AssertTrue('Surface Cache GLSL must include SelectDominantSurfaceCardAxis and ComputeSurfaceCacheAtlasUV',
+      (Pos('uint SelectDominantSurfaceCardAxis(vec3 worldNormal)', CardGLSL) > 0) and
+      (Pos('vec2 ComputeSurfaceCacheAtlasUV(vec3 localHitPos, vec3 boxHalfExtents, uint cardAxis,', CardGLSL) > 0));
+
+    { 2. Verify dominant 6-axis card selection (+X=0, -X=1, +Y=2, -Y=3, +Z=4, -Z=5) }
+    AssertEquals(Cardinal(0), TCastleShaderGeneratorRHI.SelectDominantSurfaceCardAxis(Vector3( 0.9,  0.2,  0.1)));
+    AssertEquals(Cardinal(1), TCastleShaderGeneratorRHI.SelectDominantSurfaceCardAxis(Vector3(-0.9,  0.2,  0.1)));
+    AssertEquals(Cardinal(2), TCastleShaderGeneratorRHI.SelectDominantSurfaceCardAxis(Vector3( 0.1,  0.95, 0.1)));
+    AssertEquals(Cardinal(3), TCastleShaderGeneratorRHI.SelectDominantSurfaceCardAxis(Vector3( 0.1, -0.95, 0.1)));
+    AssertEquals(Cardinal(4), TCastleShaderGeneratorRHI.SelectDominantSurfaceCardAxis(Vector3( 0.1,  0.2,  0.9)));
+    AssertEquals(Cardinal(5), TCastleShaderGeneratorRHI.SelectDominantSurfaceCardAxis(Vector3( 0.1,  0.2, -0.9)));
+
+    { 3. Verify TCastleVulkanSurfaceCache 6-axis card slot allocation and atlas UV projection }
+    Device.SurfaceCache.ResetCards;
+    AssertTrue(Device.SurfaceCache.AllocateSixAxisCards(FirstSlot0));
+    AssertTrue(Device.SurfaceCache.AllocateSixAxisCards(FirstSlot1));
+    AssertEquals(Cardinal(0), FirstSlot0);
+    AssertEquals(Cardinal(6), FirstSlot1);
+    AssertEquals(Cardinal(12), Device.SurfaceCache.AllocatedCardCount);
+
+    Device.SurfaceCache.GetCardAtlasOffsetAndScale(0, OffUV, ScaleUV);
+    HitAtlasUV := TCastleShaderGeneratorRHI.ComputeSurfaceCacheAtlasUV(
+      Vector3(0.0, 0.0, 0.0), Vector3(2.0, 2.0, 2.0), 4, OffUV, ScaleUV);
+    AssertSameValue(ScaleUV.X * 0.5, HitAtlasUV.X, 1e-5);
+    AssertSameValue(ScaleUV.Y * 0.5, HitAtlasUV.Y, 1e-5);
+
+    Device.SurfaceCache.EnsureAtlasTextures;
+    AssertTrue('SurfaceCache Albedo and DirectLighting atlas textures must be allocated',
+      (Device.SurfaceCache.AlbedoAtlasTexture <> nil) and
+      (Device.SurfaceCache.DirectLightingAtlasTexture <> nil));
+  finally
+    FreeAndNil(Device);
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestScreenSpaceRadianceCacheProbesRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  ProbeGLSL: String;
+  WeightCoplanar, WeightStepDiscontinuity, WeightOrthogonalNormal: Single;
+  SampleDir: TVector3;
+  SamplePdf: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Screen-Space Radiance Cache GLSL 450 functions }
+    ProbeGLSL := Gen.GenerateScreenRadianceCacheFunctions;
+    AssertTrue('Screen Radiance Cache GLSL must include EvaluateScreenProbeBilateralWeight and CosineWeightedHemisphereSample',
+      (Pos('float EvaluateScreenProbeBilateralWeight(vec3 pixelWorldPos, vec3 pixelNormal,', ProbeGLSL) > 0) and
+      (Pos('vec3 CosineWeightedHemisphereSample(vec2 xi, out float outPdf)', ProbeGLSL) > 0));
+
+    { 2. Verify bilateral probe weight preserves coplanar neighbors and rejects depth steps & perpendicular corners }
+    WeightCoplanar := TCastleShaderGeneratorRHI.EvaluateScreenProbeBilateralWeight(
+      Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0),
+      Vector3(2.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0), 10.0);
+    WeightStepDiscontinuity := TCastleShaderGeneratorRHI.EvaluateScreenProbeBilateralWeight(
+      Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0),
+      Vector3(1.0, 2.0, 0.0), Vector3(0.0, 1.0, 0.0), 10.0);
+    WeightOrthogonalNormal := TCastleShaderGeneratorRHI.EvaluateScreenProbeBilateralWeight(
+      Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0),
+      Vector3(1.0, 0.0, 0.0), Vector3(1.0, 0.0, 0.0), 10.0);
+
+    AssertSameValue(1.0, WeightCoplanar, 1e-5);
+    AssertTrue('2m plane height discontinuity must strongly reject probe weight', WeightStepDiscontinuity < 1e-4);
+    AssertSameValue(0.0, WeightOrthogonalNormal, 1e-6);
+
+    { 3. Verify CosineWeightedHemisphereSample produces unit direction and exact cos(theta)/pi PDF }
+    SampleDir := TCastleShaderGeneratorRHI.CosineWeightedHemisphereSample(Vector2(0.25, 0.36), SamplePdf);
+    AssertSameValue(1.0, SampleDir.Length, 1e-5);
+    AssertSameValue(0.8, SampleDir.Z, 1e-5);
+    AssertSameValue(0.8 / Pi, SamplePdf, 1e-5);
   finally
     FreeAndNil(Gen);
   end;

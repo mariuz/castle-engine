@@ -77,13 +77,12 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–26**: **COMPLETED** (100%).
-- **Phase 27 (Nanite-Style Visibility Buffer, Hierarchical Cluster DAG & Software Micro-Polygon Compute Rasterizer)**: **COMPLETED** (100%, 111 unit tests passing):
-  - [x] **27.1. 64-Bit Visibility Buffer (`Depth32 | InstanceID20 | PrimitiveID12`) & Analytic Partial-Derivative Barycentric Reconstruction (`GenerateVisibilityBufferFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestVisibilityBufferPayloadAndBarycentricsRHI`).
-  - [x] **27.2. Hierarchical Cluster DAG Cut Selection & Monotonic Parent-Child Screen-Space Error (`TCastleVulkanClusterDAG` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestNaniteClusterDAGCutSelectionRHI`).
-  - [x] **27.3. Sub-Pixel Software Compute Micro-Triangle Rasterizer (`GenerateSoftwareMicroRasterComputeShader` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSoftwareMicroPolygonComputeRasterizerRHI`).
-- **Unreal Engine 5 Feature Parity Roadmap (Phases 28–33)**:
-  - **Phase 28 (UE5 Lumen Parity)**: 3D Clipmap Global Signed Distance Field (SDF) Sphere Tracing (`TCastleVulkanGlobalSDF`), 6-Axis Surface Cache Card Atlas (`TCastleVulkanSurfaceCache`), and Screen-Space Radiance Cache Probes.
+- **Phases 1–27**: **COMPLETED** (100%).
+- **Phase 28 (Lumen-Style Signed Distance Field (SDF) Global Illumination, Surface Cache Cards & Screen-Space Radiance Cache)**: **COMPLETED** (100%, 114 unit tests passing):
+  - [x] **28.1. Mesh SDF & 3D Clipmap Global Signed Distance Field Sphere Tracing (`TCastleVulkanGlobalSDF` in `CastleInternalRHI_Vulkan`, `GenerateGlobalSDFTraceFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestGlobalSDFClipmapSphereTracingRHI`).
+  - [x] **28.2. Lumen-Style 6-Axis Surface Cache Card Atlas (`TCastleVulkanSurfaceCache` in `CastleInternalRHI_Vulkan`, `GenerateSurfaceCacheCardFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestLumenSurfaceCacheSixAxisCardAtlasRHI`).
+  - [x] **28.3. Screen-Space Radiance Cache Probe Interpolation & Importance Sampling (`GenerateScreenRadianceCacheFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestScreenSpaceRadianceCacheProbesRHI`).
+- **Unreal Engine 5 Feature Parity Roadmap (Phases 29–33)**:
   - **Phase 29 (UE5 MegaLights / ReSTIR Parity)**: Spatio-Temporal Reservoir Resampling (`TCastleVulkanReSTIR`, WRS/RIS streaming reservoirs + temporal/spatial neighbor combination for thousands of dynamic shadow-casting lights).
   - **Phase 30 (UE5 TSR Parity)**: Temporal Super Resolution (`TCastleVulkanTSRUpscaler`, Lanczos-2 / Blackman-Harris sub-pixel history upscaling, parallax disocclusion confidence, and thin-feature anti-ghosting).
   - **Phase 31 (UE5 Substrate / Strata & Hair Parity)**: Energy-Conserving Multi-Lobe Layered Material Slabs, Dual-Specular Marschner/Chiang Hair & Fur BSDF, and Stochastic Discrete Microfacet Glints.

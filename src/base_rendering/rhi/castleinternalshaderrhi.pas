@@ -1081,6 +1081,50 @@ type
       const AV0Screen, AV1Screen, AV2Screen: TVector2;
       const AMaxBoxPixels: Single = 16.0): Boolean; static;
 
+    { Phase 28.1: Generates GLSL 450 functions for Lumen-style Global Signed Distance Field (SDF)
+      box evaluation, polynomial smooth union, 3D clipmap UVW mapping, and soft cone tracing. }
+    function GenerateGlobalSDFTraceFunctions: String;
+
+    { Phase 28.1 CPU reference: Exact signed distance from ASamplePos to an axis-aligned box. }
+    class function EvaluateSDFBoxDistance(
+      const ASamplePos, ABoxCenter, ABoxHalfExtents: TVector3): Single; static;
+
+    { Phase 28.1 CPU reference: Polynomial smooth minimum (smin) of two SDF distances. }
+    class function EvaluateSDFSmoothUnion(
+      const AD1, AD2, AK: Single): Single; static;
+
+    { Phase 28.1 CPU reference: Updates soft cone-traced visibility / sky occlusion along an SDF ray. }
+    class function EvaluateSDFSoftShadowCone(
+      const ACurrentVisibility, ASDFDistance, ARayDistance, AConeTanHalfAngle: Single): Single; static;
+
+    { Phase 28.2: Generates GLSL 450 functions for Lumen-style 6-Axis Surface Cache Card
+      dominant axis selection and 2D card atlas UV projection. }
+    function GenerateSurfaceCacheCardFunctions: String;
+
+    { Phase 28.2 CPU reference: Selects dominant card axis 0..5 (+X, -X, +Y, -Y, +Z, -Z) for AWorldNormal. }
+    class function SelectDominantSurfaceCardAxis(
+      const AWorldNormal: TVector3): Cardinal; static;
+
+    { Phase 28.2 CPU reference: Projects local hit point onto card axis tangent plane and maps to atlas UV. }
+    class function ComputeSurfaceCacheAtlasUV(
+      const ALocalHitPos, ABoxHalfExtents: TVector3;
+      const ACardAxis: Cardinal;
+      const ACardAtlasOffsetUV, ACardAtlasScaleUV: TVector2): TVector2; static;
+
+    { Phase 28.3: Generates GLSL 450 functions for Screen-Space Radiance Cache bilateral
+      probe interpolation and cosine-weighted hemisphere importance sampling. }
+    function GenerateScreenRadianceCacheFunctions: String;
+
+    { Phase 28.3 CPU reference: Plane-distance and normal-aware bilateral weight for screen probe interpolation. }
+    class function EvaluateScreenProbeBilateralWeight(
+      const APixelWorldPos, APixelNormal, AProbeWorldPos, AProbeNormal: TVector3;
+      const APlaneDistSensitivity: Single = 10.0): Single; static;
+
+    { Phase 28.3 CPU reference: Cosine-weighted hemisphere sample (Z-up tangent space) with PDF = cos(theta)/pi. }
+    class function CosineWeightedHemisphereSample(
+      const AXi: TVector2;
+      out AOutPdf: Single): TVector3; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -5344,6 +5388,178 @@ begin
   MaxX := Max(AV0Screen.X, Max(AV1Screen.X, AV2Screen.X));
   MaxY := Max(AV0Screen.Y, Max(AV1Screen.Y, AV2Screen.Y));
   Result := ((MaxX - MinX) <= AMaxBoxPixels) and ((MaxY - MinY) <= AMaxBoxPixels);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateGlobalSDFTraceFunctions: String;
+begin
+  Result :=
+    '// Phase 28.1: Lumen-Style Global Signed Distance Field (SDF) Sphere Tracing & Cone Visibility' + NL +
+    'float EvaluateSDFBoxDistance(vec3 samplePos, vec3 boxCenter, vec3 boxHalfExtents) {' + NL +
+    '  vec3 q = abs(samplePos - boxCenter) - max(vec3(0.0), boxHalfExtents);' + NL +
+    '  return length(max(q, vec3(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0);' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateSDFSmoothUnion(float d1, float d2, float k) {' + NL +
+    '  float h = clamp(0.5 + 0.5 * (d2 - d1) / max(1e-5, k), 0.0, 1.0);' + NL +
+    '  return mix(d2, d1, h) - k * h * (1.0 - h);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 ComputeGlobalSDFClipmapUVW(vec3 worldPos, vec3 clipmapCenter, float cascadeHalfExtent) {' + NL +
+    '  return clamp((worldPos - clipmapCenter) / max(1e-4, 2.0 * cascadeHalfExtent) + vec3(0.5), vec3(0.0), vec3(1.0));' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateSDFSoftShadowCone(float currentVisibility, float sdfDistance, float rayDistance, float coneTanHalfAngle) {' + NL +
+    '  float coneRadius = max(1e-4, rayDistance * max(1e-3, coneTanHalfAngle));' + NL +
+    '  float stepVis = clamp(sdfDistance / coneRadius, 0.0, 1.0);' + NL +
+    '  return min(clamp(currentVisibility, 0.0, 1.0), stepVis);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateSDFBoxDistance(
+  const ASamplePos, ABoxCenter, ABoxHalfExtents: TVector3): Single;
+var
+  QX, QY, QZ, OutX, OutY, OutZ, InsideDist: Single;
+begin
+  QX := Abs(ASamplePos.X - ABoxCenter.X) - Max(0.0, ABoxHalfExtents.X);
+  QY := Abs(ASamplePos.Y - ABoxCenter.Y) - Max(0.0, ABoxHalfExtents.Y);
+  QZ := Abs(ASamplePos.Z - ABoxCenter.Z) - Max(0.0, ABoxHalfExtents.Z);
+  OutX := Max(0.0, QX);
+  OutY := Max(0.0, QY);
+  OutZ := Max(0.0, QZ);
+  InsideDist := Min(0.0, Max(QX, Max(QY, QZ)));
+  Result := Sqrt(OutX * OutX + OutY * OutY + OutZ * OutZ) + InsideDist;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateSDFSmoothUnion(
+  const AD1, AD2, AK: Single): Single;
+var
+  H, SafeK: Single;
+begin
+  SafeK := Max(1e-5, AK);
+  H := EnsureRange(0.5 + 0.5 * (AD2 - AD1) / SafeK, 0.0, 1.0);
+  Result := AD2 * (1.0 - H) + AD1 * H - SafeK * H * (1.0 - H);
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateSDFSoftShadowCone(
+  const ACurrentVisibility, ASDFDistance, ARayDistance, AConeTanHalfAngle: Single): Single;
+var
+  ConeRadius, StepVis: Single;
+begin
+  ConeRadius := Max(1e-4, ARayDistance * Max(1e-3, AConeTanHalfAngle));
+  StepVis := EnsureRange(ASDFDistance / ConeRadius, 0.0, 1.0);
+  Result := Min(EnsureRange(ACurrentVisibility, 0.0, 1.0), StepVis);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateSurfaceCacheCardFunctions: String;
+begin
+  Result :=
+    '// Phase 28.2: Lumen-Style 6-Axis Surface Cache Card Projection' + NL +
+    'uint SelectDominantSurfaceCardAxis(vec3 worldNormal) {' + NL +
+    '  vec3 an = abs(worldNormal);' + NL +
+    '  if (an.x >= an.y && an.x >= an.z) return (worldNormal.x >= 0.0) ? 0u : 1u;' + NL +
+    '  if (an.y >= an.x && an.y >= an.z) return (worldNormal.y >= 0.0) ? 2u : 3u;' + NL +
+    '  return (worldNormal.z >= 0.0) ? 4u : 5u;' + NL +
+    '}' + NL +
+    NL +
+    'vec2 ComputeSurfaceCacheAtlasUV(vec3 localHitPos, vec3 boxHalfExtents, uint cardAxis,' + NL +
+    '  vec2 cardAtlasOffsetUV, vec2 cardAtlasScaleUV) {' + NL +
+    '  vec3 normPos = clamp(localHitPos / max(vec3(1e-4), boxHalfExtents) * 0.5 + vec3(0.5), vec3(0.0), vec3(1.0));' + NL +
+    '  vec2 faceUV;' + NL +
+    '  if (cardAxis <= 1u) faceUV = normPos.yz;' + NL +
+    '  else if (cardAxis <= 3u) faceUV = normPos.xz;' + NL +
+    '  else faceUV = normPos.xy;' + NL +
+    '  return cardAtlasOffsetUV + faceUV * cardAtlasScaleUV;' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.SelectDominantSurfaceCardAxis(
+  const AWorldNormal: TVector3): Cardinal;
+var
+  AX, AY, AZ: Single;
+begin
+  AX := Abs(AWorldNormal.X);
+  AY := Abs(AWorldNormal.Y);
+  AZ := Abs(AWorldNormal.Z);
+  if (AX >= AY) and (AX >= AZ) then
+  begin
+    if AWorldNormal.X >= 0.0 then Exit(0) else Exit(1);
+  end;
+  if (AY >= AX) and (AY >= AZ) then
+  begin
+    if AWorldNormal.Y >= 0.0 then Exit(2) else Exit(3);
+  end;
+  if AWorldNormal.Z >= 0.0 then Result := 4 else Result := 5;
+end;
+
+class function TCastleShaderGeneratorRHI.ComputeSurfaceCacheAtlasUV(
+  const ALocalHitPos, ABoxHalfExtents: TVector3;
+  const ACardAxis: Cardinal;
+  const ACardAtlasOffsetUV, ACardAtlasScaleUV: TVector2): TVector2;
+var
+  NX, NY, NZ: Single;
+  FaceUV: TVector2;
+begin
+  NX := EnsureRange(ALocalHitPos.X / Max(1e-4, ABoxHalfExtents.X) * 0.5 + 0.5, 0.0, 1.0);
+  NY := EnsureRange(ALocalHitPos.Y / Max(1e-4, ABoxHalfExtents.Y) * 0.5 + 0.5, 0.0, 1.0);
+  NZ := EnsureRange(ALocalHitPos.Z / Max(1e-4, ABoxHalfExtents.Z) * 0.5 + 0.5, 0.0, 1.0);
+  if ACardAxis <= 1 then
+    FaceUV := Vector2(NY, NZ)
+  else
+  if ACardAxis <= 3 then
+    FaceUV := Vector2(NX, NZ)
+  else
+    FaceUV := Vector2(NX, NY);
+  Result := Vector2(
+    ACardAtlasOffsetUV.X + FaceUV.X * ACardAtlasScaleUV.X,
+    ACardAtlasOffsetUV.Y + FaceUV.Y * ACardAtlasScaleUV.Y);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateScreenRadianceCacheFunctions: String;
+begin
+  Result :=
+    '// Phase 28.3: Screen-Space Radiance Cache Probe Interpolation & Importance Sampling' + NL +
+    'float EvaluateScreenProbeBilateralWeight(vec3 pixelWorldPos, vec3 pixelNormal,' + NL +
+    '  vec3 probeWorldPos, vec3 probeNormal, float planeDistSensitivity) {' + NL +
+    '  float planeDist = abs(dot(pixelWorldPos - probeWorldPos, pixelNormal));' + NL +
+    '  float normalWeight = pow(max(0.0, dot(pixelNormal, probeNormal)), 8.0);' + NL +
+    '  float depthWeight = exp(-planeDist * max(0.0, planeDistSensitivity));' + NL +
+    '  return normalWeight * depthWeight;' + NL +
+    '}' + NL +
+    NL +
+    'vec3 CosineWeightedHemisphereSample(vec2 xi, out float outPdf) {' + NL +
+    '  float phi = 6.28318530718 * xi.x;' + NL +
+    '  float cosTheta = sqrt(clamp(1.0 - xi.y, 0.0, 1.0));' + NL +
+    '  float sinTheta = sqrt(clamp(xi.y, 0.0, 1.0));' + NL +
+    '  outPdf = cosTheta * 0.31830988618;' + NL +
+    '  return vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateScreenProbeBilateralWeight(
+  const APixelWorldPos, APixelNormal, AProbeWorldPos, AProbeNormal: TVector3;
+  const APlaneDistSensitivity: Single): Single;
+var
+  PlaneDist, NormalDot, NormalWeight, DepthWeight: Single;
+begin
+  PlaneDist := Abs(TVector3.DotProduct(APixelWorldPos - AProbeWorldPos, APixelNormal));
+  NormalDot := Max(0.0, TVector3.DotProduct(APixelNormal, AProbeNormal));
+  NormalWeight := Math.Power(NormalDot, 8.0);
+  DepthWeight := Exp(-PlaneDist * Max(0.0, APlaneDistSensitivity));
+  Result := NormalWeight * DepthWeight;
+end;
+
+class function TCastleShaderGeneratorRHI.CosineWeightedHemisphereSample(
+  const AXi: TVector2;
+  out AOutPdf: Single): TVector3;
+var
+  Phi, CosTheta, SinTheta, ClampedY: Single;
+begin
+  Phi := 2.0 * Pi * AXi.X;
+  ClampedY := EnsureRange(AXi.Y, 0.0, 1.0);
+  CosTheta := Sqrt(1.0 - ClampedY);
+  SinTheta := Sqrt(ClampedY);
+  AOutPdf := CosTheta / Pi;
+  Result := Vector3(Cos(Phi) * SinTheta, Sin(Phi) * SinTheta, CosTheta);
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

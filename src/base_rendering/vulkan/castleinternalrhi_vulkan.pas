@@ -2263,6 +2263,107 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Lumen-Style 3D Clipmap Global Signed Distance Field (Phase 28.1)           }
+  { -------------------------------------------------------------------------- }
+
+  TCastleSDFBoxPrimitive = record
+    Center: TVector3;
+    HalfExtents: TVector3;
+  end;
+
+  { Maintains a 3D Global Signed Distance Field (SDF) clipmap texture and scene
+    box SDF primitives for hardware-ray-tracing-free sphere marching and sky/soft-shadow cones. }
+  TCastleVulkanGlobalSDF = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FPrimitives: array of TCastleSDFBoxPrimitive;
+    FPrimitiveCount: Cardinal;
+    FGridResolution: Cardinal;
+    FClipmapHalfExtent: Single;
+    FSmoothBlendRadius: Single;
+    FClipmapVolumeTexture: TVulkanRHITexture;
+    FBuildCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Clears all registered SDF box primitives. }
+    procedure ClearPrimitives;
+
+    { Registers an axis-aligned box SDF primitive into the global distance field. }
+    function AddBoxPrimitive(const ABoxCenter, ABoxHalfExtents: TVector3): Integer;
+
+    { Allocates the 3D (td3D, pfR16_Float) Global SDF Clipmap volume texture. }
+    procedure EnsureVolumeResources(const AGridResolution: Cardinal = 32);
+
+    { Evaluates the smooth-unioned signed distance at AWorldPos across all registered primitives. }
+    function EvaluateGlobalSDFDistanceCPU(const AWorldPos: TVector3): Single;
+
+    { Sphere-marches a ray [ARayOrigin, ARayDir] up to AMaxDistance against the Global SDF. }
+    function TraceSphereMarchCPU(
+      const ARayOrigin, ARayDir: TVector3;
+      const AMaxDistance: Single;
+      out AHitDistance: Single;
+      out AHitSteps: Cardinal;
+      const AMaxSteps: Cardinal = 64;
+      const AHitEpsilon: Single = 0.01): Boolean;
+
+    { Records a Global SDF clipmap build/update dispatch. }
+    procedure DispatchGlobalSDFBuild(
+      const ACommandList: TVulkanRHICommandList;
+      const AGridResolution: Cardinal = 32);
+
+    property PrimitiveCount: Cardinal read FPrimitiveCount;
+    property GridResolution: Cardinal read FGridResolution;
+    property ClipmapHalfExtent: Single read FClipmapHalfExtent write FClipmapHalfExtent;
+    property SmoothBlendRadius: Single read FSmoothBlendRadius write FSmoothBlendRadius;
+    property ClipmapVolumeTexture: TVulkanRHITexture read FClipmapVolumeTexture;
+    property BuildCount: Cardinal read FBuildCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
+  { Lumen-Style 6-Axis Surface Cache Card Atlas (Phase 28.2)                   }
+  { -------------------------------------------------------------------------- }
+
+  { Manages a 2D Surface Cache Card Atlas (Albedo + Direct/Indirect Radiance)
+    storing 6-axis (+X, -X, +Y, -Y, +Z, -Z) orthographic surface cards per mesh. }
+  TCastleVulkanSurfaceCache = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FAtlasResolution: Cardinal;
+    FTileResolution: Cardinal;
+    FTilesPerRow: Cardinal;
+    FMaxCardSlots: Cardinal;
+    FAllocatedCardCount: Cardinal;
+    FAlbedoAtlasTexture: TVulkanRHITexture;
+    FDirectLightingAtlasTexture: TVulkanRHITexture;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Resets all allocated surface cache card slots. }
+    procedure ResetCards;
+
+    { Allocates 6 contiguous card slots (+X, -X, +Y, -Y, +Z, -Z) for a mesh instance. }
+    function AllocateSixAxisCards(out AFirstCardSlot: Cardinal): Boolean;
+
+    { Computes the normalized [0..1] atlas UV offset and scale for ACardSlot. }
+    procedure GetCardAtlasOffsetAndScale(
+      const ACardSlot: Cardinal;
+      out AOffsetUV, AScaleUV: TVector2);
+
+    { Allocates the Albedo and DirectLighting 2D Surface Cache Atlas textures. }
+    procedure EnsureAtlasTextures;
+
+    property AtlasResolution: Cardinal read FAtlasResolution;
+    property TileResolution: Cardinal read FTileResolution;
+    property MaxCardSlots: Cardinal read FMaxCardSlots;
+    property AllocatedCardCount: Cardinal read FAllocatedCardCount;
+    property AlbedoAtlasTexture: TVulkanRHITexture read FAlbedoAtlasTexture;
+    property DirectLightingAtlasTexture: TVulkanRHITexture read FDirectLightingAtlasTexture;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -2359,6 +2460,8 @@ type
     FTextureStreamer: TCastleVulkanTextureStreamer;
     FShadowCasterCuller: TCastleVulkanShadowCasterCuller;
     FClusterDAG: TCastleVulkanClusterDAG;
+    FGlobalSDF: TCastleVulkanGlobalSDF;
+    FSurfaceCache: TCastleVulkanSurfaceCache;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -2460,6 +2563,8 @@ type
     function GetTextureStreamer: TCastleVulkanTextureStreamer;
     function GetShadowCasterCuller: TCastleVulkanShadowCasterCuller;
     function GetClusterDAG: TCastleVulkanClusterDAG;
+    function GetGlobalSDF: TCastleVulkanGlobalSDF;
+    function GetSurfaceCache: TCastleVulkanSurfaceCache;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -2666,6 +2771,8 @@ type
     property TextureStreamer: TCastleVulkanTextureStreamer read GetTextureStreamer;
     property ShadowCasterCuller: TCastleVulkanShadowCasterCuller read GetShadowCasterCuller;
     property ClusterDAG: TCastleVulkanClusterDAG read GetClusterDAG;
+    property GlobalSDF: TCastleVulkanGlobalSDF read GetGlobalSDF;
+    property SurfaceCache: TCastleVulkanSurfaceCache read GetSurfaceCache;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -13422,6 +13529,213 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanGlobalSDF (Phase 28.1)                                          }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanGlobalSDF.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FGridResolution := 32;
+  FClipmapHalfExtent := 50.0;
+  FSmoothBlendRadius := 0.25;
+end;
+
+destructor TCastleVulkanGlobalSDF.Destroy;
+begin
+  FreeAndNil(FClipmapVolumeTexture);
+  inherited;
+end;
+
+procedure TCastleVulkanGlobalSDF.ClearPrimitives;
+begin
+  FPrimitiveCount := 0;
+  SetLength(FPrimitives, 0);
+end;
+
+function TCastleVulkanGlobalSDF.AddBoxPrimitive(
+  const ABoxCenter, ABoxHalfExtents: TVector3): Integer;
+var
+  Idx: Integer;
+begin
+  Idx := Integer(FPrimitiveCount);
+  Inc(FPrimitiveCount);
+  SetLength(FPrimitives, FPrimitiveCount);
+  FPrimitives[Idx].Center := ABoxCenter;
+  FPrimitives[Idx].HalfExtents := ABoxHalfExtents;
+  Result := Idx;
+end;
+
+procedure TCastleVulkanGlobalSDF.EnsureVolumeResources(const AGridResolution: Cardinal);
+var
+  TexDesc: TRHITextureDesc;
+begin
+  FGridResolution := Max(Cardinal(8), AGridResolution);
+  if (FClipmapVolumeTexture <> nil) and
+     (FClipmapVolumeTexture.Desc.Width = FGridResolution) then
+    Exit;
+
+  FreeAndNil(FClipmapVolumeTexture);
+  FillChar(TexDesc, SizeOf(TexDesc), 0);
+  TexDesc.Dimension := td3D;
+  TexDesc.Format := pfR16_Float;
+  TexDesc.Width := FGridResolution;
+  TexDesc.Height := FGridResolution;
+  TexDesc.DepthOrArrayLayers := FGridResolution;
+  TexDesc.MipLevels := 1;
+  TexDesc.SampleCount := 1;
+  TexDesc.Usage := [tuSampled, tuStorage, tuTransferDst];
+  TexDesc.DebugName := 'GlobalSDFClipmapVolume';
+  FClipmapVolumeTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+end;
+
+function TCastleVulkanGlobalSDF.EvaluateGlobalSDFDistanceCPU(const AWorldPos: TVector3): Single;
+var
+  I: Cardinal;
+  DistI: Single;
+begin
+  if FPrimitiveCount = 0 then
+    Exit(1e6);
+  Result := TCastleShaderGeneratorRHI.EvaluateSDFBoxDistance(
+    AWorldPos, FPrimitives[0].Center, FPrimitives[0].HalfExtents);
+  if FPrimitiveCount > 1 then
+    for I := 1 to FPrimitiveCount - 1 do
+    begin
+      DistI := TCastleShaderGeneratorRHI.EvaluateSDFBoxDistance(
+        AWorldPos, FPrimitives[I].Center, FPrimitives[I].HalfExtents);
+      if FSmoothBlendRadius > 1e-5 then
+        Result := TCastleShaderGeneratorRHI.EvaluateSDFSmoothUnion(Result, DistI, FSmoothBlendRadius)
+      else
+        Result := Min(Result, DistI);
+    end;
+end;
+
+function TCastleVulkanGlobalSDF.TraceSphereMarchCPU(
+  const ARayOrigin, ARayDir: TVector3;
+  const AMaxDistance: Single;
+  out AHitDistance: Single;
+  out AHitSteps: Cardinal;
+  const AMaxSteps: Cardinal;
+  const AHitEpsilon: Single): Boolean;
+var
+  DirNorm, SamplePos: TVector3;
+  T, Dist: Single;
+  StepIdx: Cardinal;
+begin
+  Result := False;
+  AHitDistance := AMaxDistance;
+  AHitSteps := 0;
+  if AMaxSteps = 0 then
+    Exit;
+
+  DirNorm := ARayDir.Normalize;
+  T := 0.0;
+  for StepIdx := 1 to AMaxSteps do
+  begin
+    AHitSteps := StepIdx;
+    SamplePos := ARayOrigin + DirNorm * T;
+    Dist := EvaluateGlobalSDFDistanceCPU(SamplePos);
+    if Dist <= AHitEpsilon then
+    begin
+      AHitDistance := T;
+      Exit(True);
+    end;
+    T := T + Max(AHitEpsilon * 0.5, Dist);
+    if T >= AMaxDistance then
+      Exit(False);
+  end;
+end;
+
+procedure TCastleVulkanGlobalSDF.DispatchGlobalSDFBuild(
+  const ACommandList: TVulkanRHICommandList;
+  const AGridResolution: Cardinal);
+var
+  Groups: Cardinal;
+begin
+  EnsureVolumeResources(AGridResolution);
+  if ACommandList = nil then
+    Exit;
+  Groups := (FGridResolution + 3) div 4;
+  ACommandList.Dispatch(Groups, Groups, Groups);
+  Inc(FBuildCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanSurfaceCache (Phase 28.2)                                       }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanSurfaceCache.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FAtlasResolution := 512;
+  FTileResolution := 64;
+  FTilesPerRow := FAtlasResolution div FTileResolution;
+  FMaxCardSlots := FTilesPerRow * FTilesPerRow;
+  FAllocatedCardCount := 0;
+end;
+
+destructor TCastleVulkanSurfaceCache.Destroy;
+begin
+  FreeAndNil(FDirectLightingAtlasTexture);
+  FreeAndNil(FAlbedoAtlasTexture);
+  inherited;
+end;
+
+procedure TCastleVulkanSurfaceCache.ResetCards;
+begin
+  FAllocatedCardCount := 0;
+end;
+
+function TCastleVulkanSurfaceCache.AllocateSixAxisCards(out AFirstCardSlot: Cardinal): Boolean;
+begin
+  if FAllocatedCardCount + 6 > FMaxCardSlots then
+  begin
+    AFirstCardSlot := 0;
+    Exit(False);
+  end;
+  AFirstCardSlot := FAllocatedCardCount;
+  Inc(FAllocatedCardCount, 6);
+  Result := True;
+end;
+
+procedure TCastleVulkanSurfaceCache.GetCardAtlasOffsetAndScale(
+  const ACardSlot: Cardinal;
+  out AOffsetUV, AScaleUV: TVector2);
+var
+  TileX, TileY: Cardinal;
+  InvTiles: Single;
+begin
+  InvTiles := 1.0 / Max(1.0, Single(FTilesPerRow));
+  TileX := ACardSlot mod Max(Cardinal(1), FTilesPerRow);
+  TileY := ACardSlot div Max(Cardinal(1), FTilesPerRow);
+  AOffsetUV := Vector2(Single(TileX) * InvTiles, Single(TileY) * InvTiles);
+  AScaleUV := Vector2(InvTiles, InvTiles);
+end;
+
+procedure TCastleVulkanSurfaceCache.EnsureAtlasTextures;
+var
+  TexDesc: TRHITextureDesc;
+begin
+  if FAlbedoAtlasTexture = nil then
+  begin
+    TexDesc := TRHITextureDesc.Create2D(
+      FAtlasResolution, FAtlasResolution, pfRGBA16_Float,
+      [tuSampled, tuColorAttachment, tuStorage]);
+    TexDesc.DebugName := 'LumenSurfaceCacheAlbedoAtlas';
+    FAlbedoAtlasTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+  end;
+  if FDirectLightingAtlasTexture = nil then
+  begin
+    TexDesc := TRHITextureDesc.Create2D(
+      FAtlasResolution, FAtlasResolution, pfRGBA16_Float,
+      [tuSampled, tuColorAttachment, tuStorage]);
+    TexDesc.DebugName := 'LumenSurfaceCacheDirectLightingAtlas';
+    FDirectLightingAtlasTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+  end;
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -13992,12 +14306,28 @@ begin
   Result := FClusterDAG;
 end;
 
+function TVulkanRHIDevice.GetGlobalSDF: TCastleVulkanGlobalSDF;
+begin
+  if FGlobalSDF = nil then
+    FGlobalSDF := TCastleVulkanGlobalSDF.Create(Self);
+  Result := FGlobalSDF;
+end;
+
+function TVulkanRHIDevice.GetSurfaceCache: TCastleVulkanSurfaceCache;
+begin
+  if FSurfaceCache = nil then
+    FSurfaceCache := TCastleVulkanSurfaceCache.Create(Self);
+  Result := FSurfaceCache;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FSurfaceCache);
+  FreeAndNil(FGlobalSDF);
   FreeAndNil(FClusterDAG);
   FreeAndNil(FShadowCasterCuller);
   FreeAndNil(FTextureStreamer);
