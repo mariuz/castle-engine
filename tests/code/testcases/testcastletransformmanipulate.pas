@@ -54,6 +54,7 @@ type
     procedure TestArrangePhyllotaxisDiskStaircaseAndRadialScale;
     procedure TestArrangeTorusZigzagAndNormalizeSizes;
     procedure TestArrangeLissajousCatenaryAndProjectOntoLine;
+    procedure TestArrangePolygonSpiralVortexAndProjectOntoPlane;
   end;
 
 implementation
@@ -1632,6 +1633,88 @@ begin
     AssertVectorEquals(Vector3(20, 0, 0), B4.Translation, 1e-4);
     B2.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestArrangePolygonSpiralVortexAndProjectOntoPlane;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  B1, B2, B3, B4: TCastleBox;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.OnTransformModified := {$ifdef FPC}@{$endif}HandleTransformModified;
+    Manipulate.OnTransformModifyEnd := {$ifdef FPC}@{$endif}HandleTransformModifyEnd;
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(1, 1, 1);
+    B1.Translation := Vector3(-6, 0, 0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(1, 1, 1);
+    B2.Translation := Vector3(-2, 0, 0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(1, 1, 1);
+    B3.Translation := Vector3(2, 0, 0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(1, 1, 1);
+    B4.Translation := Vector3(6, 0, 0);
+    Viewport.Items.Add(B4);
+
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    Manipulate.PivotMode := pmSelectionCenter;
+
+    // 1. Test ArrangeSelectedInPolygon:
+    // Sides = 4, OuterRadius = 10, InnerRadius = 0, OrientMode = 2 (along edge V1 - V0).
+    AssertTrue(Manipulate.ArrangeSelectedInPolygon(4, 10.0, 0.0, 2));
+    AssertVectorEquals(Vector3(10, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, 10), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-10, 0, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, -10), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(-1 / Sqrt(2), 0, 1 / Sqrt(2)), WorldDir.Normalize, 1e-4);
+
+    // 2. Test ArrangeSelectedInSpiralVortex:
+    // Center = (0, 0, 0), StartRadius = 2, EndRadius = 16, Turns = 1.0, HeightSpan = 6.0, Logarithmic = true, OrientMode = 1 (inward).
+    // t = 0, 1/3, 2/3, 1 -> r = 2 * 8^t = 2, 4, 8, 16; Theta = 0, 120 deg, 240 deg, 360 deg.
+    Manipulate.ResetSelectedTransform(true, true, false);
+    AssertTrue(Manipulate.ArrangeSelectedInSpiralVortex(2.0, 16.0, 1.0, 6.0, true, 1));
+    AssertVectorEquals(Vector3(2, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-2, 2, 2 * Sqrt(3)), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-4, 4, -4 * Sqrt(3)), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(16, 6, 0), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(-1, 0, 0), WorldDir.Normalize, 1e-4);
+
+    // 3. Test ProjectSelectedOntoPlaneThreePoints and ProjectSelectedOntoPlane:
+    // B1=(0,0,0), B2=(3, 9, 4), B3=(10,0,0), B4=(0,0,10).
+    // Three-point plane uses B1(0), B3(2), B4(3) -> plane Y = 0, so B2 projects to (3, 0, 4).
+    B1.Translation := Vector3(0, 0, 0);
+    B2.Translation := Vector3(3, 9, 4);
+    B3.Translation := Vector3(10, 0, 0);
+    B4.Translation := Vector3(0, 0, 10);
+    AssertTrue(Manipulate.ProjectSelectedOntoPlaneThreePoints(false));
+    AssertVectorEquals(Vector3(0, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(3, 0, 4), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10, 0, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, 10), B4.Translation, 1e-4);
+
+    // Project onto plane Y = 5 with normal (0, 1, 0) and AlignUpToNormal = true:
+    AssertTrue(Manipulate.ProjectSelectedOntoPlane(Vector3(0, 5, 0), Vector3(0, 1, 0), true));
+    AssertVectorEquals(Vector3(3, 5, 4), B2.Translation, 1e-4);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 1, 0), WorldUp.Normalize, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

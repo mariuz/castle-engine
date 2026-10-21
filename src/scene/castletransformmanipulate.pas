@@ -865,6 +865,61 @@ type
     function ProjectSelectedOntoLineBetweenEndpoints(
       const ClampToSegment: Boolean = false;
       const OrientAlongLine: Boolean = false): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) along the
+      perimeter edges of a regular $M$-sided polygon (@code(InnerRadius <= 0)) or an
+      alternating $2M$-vertex star polygon (@code(InnerRadius > 0)) in the horizontal
+      XZ plane around the active selection pivot.
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient horizontally inward toward the polygon center
+      - @code(2): orient forward along the active polygon edge direction
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInPolygon(
+      const Sides: Integer;
+      const OuterRadius: Single;
+      const InnerRadius: Single = 0.0;
+      const OrientMode: Integer = 0): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) along a
+      multi-turn 3D logarithmic / equiangular spiral vortex (@code(Logarithmic = true):
+      $r(t) = R_(\text(start)) \cdot (R_(\text(end)) / R_(\text(start)))^t$) or
+      Archimedean spiral (@code(Logarithmic = false):
+      $r(t) = R_(\text(start)) + (R_(\text(end)) - R_(\text(start))) \cdot t$) around
+      the active selection pivot over @code(Turns) revolutions and @code(HeightSpan)
+      vertical rise.
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient horizontally inward toward the vortex center
+      - @code(2): orient forward along the 3D spiral tangent vector
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInSpiralVortex(
+      const StartRadius, EndRadius: Single;
+      const Turns: Single = 2.0;
+      const HeightSpan: Single = 0.0;
+      const Logarithmic: Boolean = true;
+      const OrientMode: Integer = 0): Boolean;
+
+    { Project all top-level selected transforms (@code(SelectedCount >= 1))
+      orthogonally onto the 3D plane passing through @code(PlanePoint) with unit
+      normal @code(PlaneNormal):
+      $P'_i = P_i - ((P_i - P_0) \cdot \hat(n)) \hat(n)$.
+      When @code(AlignUpToNormal) is @true, each transform's world $+Y$ Up axis is
+      also aligned to @code(PlaneNormal) while preserving its forward direction
+      projected onto the plane.
+      Returns @true if at least one selected transform was modified. }
+    function ProjectSelectedOntoPlane(
+      const PlanePoint, PlaneNormal: TVector3;
+      const AlignUpToNormal: Boolean = false): Boolean;
+
+    { Project all top-level selected transforms (@code(SelectedCount >= 3))
+      orthogonally onto the 3D plane defined by the first (@code(Selected[0])),
+      middle (@code(Selected[N div 2])), and last (@code(Selected[N-1])) selected
+      transforms (falling back to the horizontal XZ plane at @code(Selected[0]) when
+      the three reference points are collinear or @code(SelectedCount = 2)).
+      Returns @true if at least one selected transform was modified. }
+    function ProjectSelectedOntoPlaneThreePoints(
+      const AlignUpToNormal: Boolean = false): Boolean;
   end;
 
 var
@@ -6218,6 +6273,426 @@ begin
   StartWorld := GetTransformWorkingPos(FirstT);
   EndWorld := GetTransformWorkingPos(LastT);
   Result := ProjectSelectedOntoLine(StartWorld, EndWorld, ClampToSegment, OrientAlongLine);
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInPolygon(
+  const Sides: Integer;
+  const OuterRadius: Single;
+  const InnerRadius: Single;
+  const OrientMode: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  Vertices: array of TVector3;
+  ValidCount, I, NumSides, NumVertices, EdgeIdx, NextEdgeIdx: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, TargetDir, GravityUp, Side, NewUp: TVector3;
+  CurWorldPos, CurDir, CurUp: TVector3;
+  EffOuter, EffInner, AvgExtent, Angle, R, EdgePos, EdgeFrac: Single;
+  BBox: TBox3D;
+  StarMode: Boolean;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  ValidCount := 0;
+  AvgExtent := 0.0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[ValidCount] := T;
+      Inc(ValidCount);
+      BBox := T.WorldBoundingBox;
+      if not BBox.IsEmpty then
+        AvgExtent := AvgExtent + BBox.AverageSize(false, 1.0);
+    end;
+  end;
+
+  if ValidCount < 2 then
+    Exit;
+
+  NumSides := Max(3, Sides);
+  if AvgExtent > 1e-4 then
+    AvgExtent := (AvgExtent / ValidCount) * 1.5
+  else
+    AvgExtent := 3.0;
+
+  EffOuter := OuterRadius;
+  if EffOuter <= 1e-4 then
+    EffOuter := Max(2.0, AvgExtent * ValidCount / (2.0 * Pi));
+
+  StarMode := InnerRadius > 1e-4;
+  EffInner := InnerRadius;
+  if StarMode then
+    NumVertices := NumSides * 2
+  else
+    NumVertices := NumSides;
+
+  if FPivotMode = pmSelectionCenter then
+    CenterPos := SelectionWorkingCenter
+  else
+    CenterPos := GetTransformWorkingPos(Items[0]);
+
+  SetLength(Vertices, NumVertices);
+  for I := 0 to NumVertices - 1 do
+  begin
+    Angle := (2.0 * Pi * I) / NumVertices;
+    if StarMode and Odd(I) then
+      R := EffInner
+    else
+      R := EffOuter;
+    Vertices[I] := CenterPos + Vector3(R * Cos(Angle), 0.0, R * Sin(Angle));
+  end;
+
+  for I := 0 to ValidCount - 1 do
+  begin
+    T := Items[I];
+    EdgePos := (Single(I) * NumVertices) / Single(ValidCount);
+    EdgeIdx := Floor(EdgePos) mod NumVertices;
+    if EdgeIdx < 0 then
+      Inc(EdgeIdx, NumVertices);
+    EdgeFrac := EdgePos - Floor(EdgePos);
+    NextEdgeIdx := (EdgeIdx + 1) mod NumVertices;
+
+    TargetPos := Lerp(EdgeFrac, Vertices[EdgeIdx], Vertices[NextEdgeIdx]);
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(TargetPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if OrientMode in [1, 2] then
+    begin
+      if OrientMode = 1 then
+      begin
+        TargetDir := CenterPos - TargetPos;
+        TargetDir.Y := 0.0;
+        if TargetDir.IsZero(1e-5) then
+          TargetDir := Vector3(0.0, 0.0, -1.0);
+      end else
+      begin
+        TargetDir := Vertices[NextEdgeIdx] - Vertices[EdgeIdx];
+        if TargetDir.IsZero(1e-5) then
+          TargetDir := Vector3(0.0, 0.0, -1.0);
+      end;
+
+      if not TargetDir.IsZero(1e-5) then
+      begin
+        TargetDir := TargetDir.Normalize;
+        if T.HasWorldTransform then
+          T.GetWorldView(CurWorldPos, CurDir, CurUp)
+        else
+        begin
+          CurWorldPos := T.Translation;
+          CurDir := T.Direction;
+          CurUp := T.Up;
+        end;
+
+        if T.World <> nil then
+          GravityUp := T.World.GravityUp
+        else
+          GravityUp := Vector3(0, 1, 0);
+
+        Side := TVector3.CrossProduct(TargetDir, GravityUp);
+        if Side.IsZero(1e-5) then
+          Side := TVector3.CrossProduct(TargetDir, Vector3(0, 0, 1));
+        if Side.IsZero(1e-5) then
+          Side := TVector3.CrossProduct(TargetDir, Vector3(1, 0, 0));
+        Side := Side.Normalize;
+        NewUp := TVector3.CrossProduct(Side, TargetDir).Normalize;
+
+        if (not TVector3.Equals(CurDir, TargetDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          if T.HasWorldTransform then
+            T.SetWorldView(CurWorldPos, TargetDir, NewUp)
+          else
+            T.SetView(CurWorldPos, TargetDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInSpiralVortex(
+  const StartRadius, EndRadius: Single;
+  const Turns: Single;
+  const HeightSpan: Single;
+  const Logarithmic: Boolean;
+  const OrientMode: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  ValidCount, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, TargetDir, GravityUp, Side, NewUp: TVector3;
+  CurWorldPos, CurDir, CurUp: TVector3;
+  EffStartR, EffEndR, EffTurns, ParamT, Theta, CurR, dRdt, dThetadt, SinTheta, CosTheta: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  ValidCount := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[ValidCount] := T;
+      Inc(ValidCount);
+    end;
+  end;
+
+  if ValidCount < 2 then
+    Exit;
+
+  EffStartR := StartRadius;
+  if EffStartR <= 1e-4 then
+    EffStartR := 2.0;
+
+  EffEndR := EndRadius;
+  if EffEndR <= 1e-4 then
+    EffEndR := EffStartR * 4.0;
+
+  EffTurns := Turns;
+  if Abs(EffTurns) <= 1e-4 then
+    EffTurns := 2.0;
+
+  if FPivotMode = pmSelectionCenter then
+    CenterPos := SelectionWorkingCenter
+  else
+    CenterPos := GetTransformWorkingPos(Items[0]);
+
+  for I := 0 to ValidCount - 1 do
+  begin
+    T := Items[I];
+    ParamT := Single(I) / Single(ValidCount - 1);
+    Theta := 2.0 * Pi * EffTurns * ParamT;
+    SinCos(Theta, SinTheta, CosTheta);
+
+    if Logarithmic and (EffStartR > 1e-4) and (EffEndR > 1e-4) then
+    begin
+      CurR := EffStartR * Power(EffEndR / EffStartR, ParamT);
+      dRdt := CurR * Ln(EffEndR / EffStartR);
+    end else
+    begin
+      CurR := Lerp(ParamT, EffStartR, EffEndR);
+      dRdt := EffEndR - EffStartR;
+    end;
+
+    TargetPos := CenterPos + Vector3(
+      CurR * CosTheta,
+      HeightSpan * ParamT,
+      CurR * SinTheta
+    );
+
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(TargetPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if OrientMode in [1, 2] then
+    begin
+      if OrientMode = 1 then
+      begin
+        TargetDir := Vector3(CenterPos.X - TargetPos.X, 0.0, CenterPos.Z - TargetPos.Z);
+        if TargetDir.IsZero(1e-5) then
+          TargetDir := Vector3(-CosTheta, 0.0, -SinTheta);
+      end else
+      begin
+        dThetadt := 2.0 * Pi * EffTurns;
+        TargetDir := Vector3(
+          dRdt * CosTheta - CurR * dThetadt * SinTheta,
+          HeightSpan,
+          dRdt * SinTheta + CurR * dThetadt * CosTheta
+        );
+        if TargetDir.IsZero(1e-5) then
+          TargetDir := Vector3(-SinTheta, 0.0, CosTheta);
+      end;
+
+      if not TargetDir.IsZero(1e-5) then
+      begin
+        TargetDir := TargetDir.Normalize;
+        if T.HasWorldTransform then
+          T.GetWorldView(CurWorldPos, CurDir, CurUp)
+        else
+        begin
+          CurWorldPos := T.Translation;
+          CurDir := T.Direction;
+          CurUp := T.Up;
+        end;
+
+        if T.World <> nil then
+          GravityUp := T.World.GravityUp
+        else
+          GravityUp := Vector3(0, 1, 0);
+
+        Side := TVector3.CrossProduct(TargetDir, GravityUp);
+        if Side.IsZero(1e-5) then
+          Side := TVector3.CrossProduct(TargetDir, Vector3(0, 0, 1));
+        if Side.IsZero(1e-5) then
+          Side := TVector3.CrossProduct(TargetDir, Vector3(1, 0, 0));
+        Side := Side.Normalize;
+        NewUp := TVector3.CrossProduct(Side, TargetDir).Normalize;
+
+        if (not TVector3.Equals(CurDir, TargetDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          if T.HasWorldTransform then
+            T.SetWorldView(CurWorldPos, TargetDir, NewUp)
+          else
+            T.SetView(CurWorldPos, TargetDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ProjectSelectedOntoPlane(
+  const PlanePoint, PlaneNormal: TVector3;
+  const AlignUpToNormal: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  ValidCount, I: Integer;
+  T: TCastleTransform;
+  UnitNormal, CurPos, TargetPos, CurWorldPos, CurDir, CurUp, Side, NewDir: TVector3;
+  SignedDist: Single;
+begin
+  Result := false;
+  if SelectedCount < 1 then Exit;
+  if PlaneNormal.IsZero(1e-6) then Exit;
+
+  UnitNormal := PlaneNormal.Normalize;
+
+  SetLength(Items, FMaxSelectedCount);
+  ValidCount := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[ValidCount] := T;
+      Inc(ValidCount);
+    end;
+  end;
+
+  if ValidCount < 1 then
+    Exit;
+
+  for I := 0 to ValidCount - 1 do
+  begin
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+    SignedDist := TVector3.DotProduct(CurPos - PlanePoint, UnitNormal);
+    TargetPos := CurPos - (UnitNormal * SignedDist);
+
+    if not TVector3.Equals(TargetPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if AlignUpToNormal then
+    begin
+      if T.HasWorldTransform then
+        T.GetWorldView(CurWorldPos, CurDir, CurUp)
+      else
+      begin
+        CurWorldPos := T.Translation;
+        CurDir := T.Direction;
+        CurUp := T.Up;
+      end;
+
+      Side := TVector3.CrossProduct(CurDir, UnitNormal);
+      if Side.IsZero(1e-5) then
+        Side := TVector3.CrossProduct(Vector3(0, 0, -1), UnitNormal);
+      if Side.IsZero(1e-5) then
+        Side := TVector3.CrossProduct(Vector3(1, 0, 0), UnitNormal);
+      Side := Side.Normalize;
+      NewDir := TVector3.CrossProduct(UnitNormal, Side).Normalize;
+
+      if (not TVector3.Equals(CurDir, NewDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, UnitNormal, 1e-4)) then
+      begin
+        if T.HasWorldTransform then
+          T.SetWorldView(CurWorldPos, NewDir, UnitNormal)
+        else
+          T.SetView(CurWorldPos, NewDir, UnitNormal);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ProjectSelectedOntoPlaneThreePoints(
+  const AlignUpToNormal: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  ValidCount, I: Integer;
+  T: TCastleTransform;
+  P0, PMid, PLast, PlaneNormal: TVector3;
+begin
+  Result := false;
+  SetLength(Items, FMaxSelectedCount);
+  ValidCount := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[ValidCount] := T;
+      Inc(ValidCount);
+    end;
+  end;
+
+  if ValidCount < 2 then
+    Exit;
+
+  P0 := GetTransformWorkingPos(Items[0]);
+  if ValidCount >= 3 then
+  begin
+    PMid := GetTransformWorkingPos(Items[ValidCount div 2]);
+    PLast := GetTransformWorkingPos(Items[ValidCount - 1]);
+    PlaneNormal := TVector3.CrossProduct(PMid - P0, PLast - P0);
+    if PlaneNormal.IsZero(1e-5) then
+      PlaneNormal := Vector3(0, 1, 0)
+    else
+      PlaneNormal := PlaneNormal.Normalize;
+  end else
+    PlaneNormal := Vector3(0, 1, 0);
+
+  Result := ProjectSelectedOntoPlane(P0, PlaneNormal, AlignUpToNormal);
 end;
 
 function TCastleTransformManipulate.SelectedCount: Integer;
