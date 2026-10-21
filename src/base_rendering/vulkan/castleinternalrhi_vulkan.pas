@@ -2404,6 +2404,52 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Temporal Super Resolution (TSR) History Upscaler (Phase 30.1)              }
+  { -------------------------------------------------------------------------- }
+
+  { Manages lower-resolution input render scaling (e.g. 67% Quality mode) and
+    full-resolution ping-pong history/upscaled HDR color textures for UE5-style
+    Temporal Super Resolution (TSR). }
+  TCastleVulkanTSRUpscaler = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FRenderScale: Single;
+    FOutputWidth: Cardinal;
+    FOutputHeight: Cardinal;
+    FUpscaledColorTexture: TVulkanRHITexture;
+    FHistoryColorTexture: TVulkanRHITexture;
+    FDispatchCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Computes the internal lower-resolution input dimensions for a target display resolution. }
+    procedure ComputeInputResolution(
+      const AOutputWidth, AOutputHeight: Cardinal;
+      out AInputWidth, AInputHeight: Cardinal);
+
+    { Allocates full-resolution Upscaled and History RGBA16F textures for AOutputWidth x AOutputHeight. }
+    procedure EnsureUpscaleTargets(const AOutputWidth, AOutputHeight: Cardinal);
+
+    { Swaps Upscaled and History textures at the end of a frame. }
+    procedure SwapHistoryTargets;
+
+    { Dispatches the TSR compute upscaling pass. }
+    procedure DispatchTSRUpscale(
+      const ACommandList: TVulkanRHICommandList;
+      const AOutputWidth, AOutputHeight: Cardinal;
+      const APipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property RenderScale: Single read FRenderScale write FRenderScale;
+    property OutputWidth: Cardinal read FOutputWidth;
+    property OutputHeight: Cardinal read FOutputHeight;
+    property UpscaledColorTexture: TVulkanRHITexture read FUpscaledColorTexture;
+    property HistoryColorTexture: TVulkanRHITexture read FHistoryColorTexture;
+    property DispatchCount: Cardinal read FDispatchCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -2503,6 +2549,7 @@ type
     FGlobalSDF: TCastleVulkanGlobalSDF;
     FSurfaceCache: TCastleVulkanSurfaceCache;
     FReSTIR: TCastleVulkanReSTIR;
+    FTSRUpscaler: TCastleVulkanTSRUpscaler;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -2607,6 +2654,7 @@ type
     function GetGlobalSDF: TCastleVulkanGlobalSDF;
     function GetSurfaceCache: TCastleVulkanSurfaceCache;
     function GetReSTIR: TCastleVulkanReSTIR;
+    function GetTSRUpscaler: TCastleVulkanTSRUpscaler;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -2816,6 +2864,7 @@ type
     property GlobalSDF: TCastleVulkanGlobalSDF read GetGlobalSDF;
     property SurfaceCache: TCastleVulkanSurfaceCache read GetSurfaceCache;
     property ReSTIR: TCastleVulkanReSTIR read GetReSTIR;
+    property TSRUpscaler: TCastleVulkanTSRUpscaler read GetTSRUpscaler;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -13862,6 +13911,99 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanTSRUpscaler (Phase 30.1)                                        }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanTSRUpscaler.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FRenderScale := 0.666667; // 67% Quality mode (e.g. 1280x720 -> 1920x1080)
+end;
+
+destructor TCastleVulkanTSRUpscaler.Destroy;
+begin
+  FreeAndNil(FHistoryColorTexture);
+  FreeAndNil(FUpscaledColorTexture);
+  inherited;
+end;
+
+procedure TCastleVulkanTSRUpscaler.ComputeInputResolution(
+  const AOutputWidth, AOutputHeight: Cardinal;
+  out AInputWidth, AInputHeight: Cardinal);
+var
+  ClampedScale: Single;
+begin
+  ClampedScale := EnsureRange(FRenderScale, 0.25, 1.0);
+  AInputWidth := Max(Cardinal(1), Cardinal(Round(Single(AOutputWidth) * ClampedScale)));
+  AInputHeight := Max(Cardinal(1), Cardinal(Round(Single(AOutputHeight) * ClampedScale)));
+end;
+
+procedure TCastleVulkanTSRUpscaler.EnsureUpscaleTargets(const AOutputWidth, AOutputHeight: Cardinal);
+var
+  TexDesc: TRHITextureDesc;
+begin
+  FOutputWidth := Max(Cardinal(1), AOutputWidth);
+  FOutputHeight := Max(Cardinal(1), AOutputHeight);
+
+  if (FUpscaledColorTexture = nil) or
+     (FUpscaledColorTexture.Desc.Width <> FOutputWidth) or
+     (FUpscaledColorTexture.Desc.Height <> FOutputHeight) then
+  begin
+    FreeAndNil(FUpscaledColorTexture);
+    TexDesc := TRHITextureDesc.Create2D(
+      FOutputWidth, FOutputHeight, pfRGBA16_Float,
+      [tuSampled, tuStorage, tuColorAttachment, tuTransferSrc]);
+    TexDesc.DebugName := 'TSRUpscaledColorTexture';
+    FUpscaledColorTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+  end;
+
+  if (FHistoryColorTexture = nil) or
+     (FHistoryColorTexture.Desc.Width <> FOutputWidth) or
+     (FHistoryColorTexture.Desc.Height <> FOutputHeight) then
+  begin
+    FreeAndNil(FHistoryColorTexture);
+    TexDesc := TRHITextureDesc.Create2D(
+      FOutputWidth, FOutputHeight, pfRGBA16_Float,
+      [tuSampled, tuStorage, tuColorAttachment, tuTransferDst]);
+    TexDesc.DebugName := 'TSRHistoryColorTexture';
+    FHistoryColorTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+  end;
+end;
+
+procedure TCastleVulkanTSRUpscaler.SwapHistoryTargets;
+var
+  Tmp: TVulkanRHITexture;
+begin
+  Tmp := FUpscaledColorTexture;
+  FUpscaledColorTexture := FHistoryColorTexture;
+  FHistoryColorTexture := Tmp;
+end;
+
+procedure TCastleVulkanTSRUpscaler.DispatchTSRUpscale(
+  const ACommandList: TVulkanRHICommandList;
+  const AOutputWidth, AOutputHeight: Cardinal;
+  const APipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+var
+  GroupsX, GroupsY: Cardinal;
+begin
+  EnsureUpscaleTargets(AOutputWidth, AOutputHeight);
+  if ACommandList = nil then
+    Exit;
+
+  if APipeline <> nil then
+    ACommandList.BindComputePipeline(APipeline);
+  if ADescriptorSet <> nil then
+    ACommandList.BindDescriptorSet(0, ADescriptorSet, []);
+
+  GroupsX := (FOutputWidth + 7) div 8;
+  GroupsY := (FOutputHeight + 7) div 8;
+  ACommandList.Dispatch(GroupsX, GroupsY, 1);
+  Inc(FDispatchCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -14453,12 +14595,20 @@ begin
   Result := FReSTIR;
 end;
 
+function TVulkanRHIDevice.GetTSRUpscaler: TCastleVulkanTSRUpscaler;
+begin
+  if FTSRUpscaler = nil then
+    FTSRUpscaler := TCastleVulkanTSRUpscaler.Create(Self);
+  Result := FTSRUpscaler;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FTSRUpscaler);
   FreeAndNil(FReSTIR);
   FreeAndNil(FSurfaceCache);
   FreeAndNil(FGlobalSDF);

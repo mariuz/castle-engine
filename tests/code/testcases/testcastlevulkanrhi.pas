@@ -156,6 +156,9 @@ type
     procedure TestReSTIRWeightedReservoirSamplingRISRHI;
     procedure TestReSTIRNeighborSimilarityAndReservoirCombineRHI;
     procedure TestVulkanReSTIRSpatioTemporalManagerRHI;
+    procedure TestTSRLanczos2AndBlackmanHarrisKernelsRHI;
+    procedure TestTSRDisocclusionAndThinGeometryAntiGhostingRHI;
+    procedure TestVulkanTSRUpscalerHistoryManagerRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -8589,6 +8592,111 @@ begin
     FreeAndNil(CmdList);
     FreeAndNil(Device);
     FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestTSRLanczos2AndBlackmanHarrisKernelsRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  TSRGLSL: String;
+  L0, LHalf, L1, L15, L25: Single;
+  BH0, BHHalf, BH1: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify TSR Upscale Compute Shader GLSL 450 }
+    TSRGLSL := Gen.GenerateTSRUpscaleComputeShader(8, 8);
+    AssertTrue('TSR GLSL must include EvaluateLanczos2Weight and EvaluateBlackmanHarrisWeight',
+      (Pos('float EvaluateLanczos2Weight(float x)', TSRGLSL) > 0) and
+      (Pos('float EvaluateBlackmanHarrisWeight(float x, float radius)', TSRGLSL) > 0));
+
+    { 2. Verify Lanczos-2 kernel properties: L(0)=1, L(0.5)>0, L(1)=0, L(1.5)<0 (sharpening lobe), L(2.5)=0 }
+    L0    := TCastleShaderGeneratorRHI.EvaluateLanczos2Weight(0.0);
+    LHalf := TCastleShaderGeneratorRHI.EvaluateLanczos2Weight(0.5);
+    L1    := TCastleShaderGeneratorRHI.EvaluateLanczos2Weight(1.0);
+    L15   := TCastleShaderGeneratorRHI.EvaluateLanczos2Weight(1.5);
+    L25   := TCastleShaderGeneratorRHI.EvaluateLanczos2Weight(2.5);
+
+    AssertSameValue(1.0, L0, 1e-5);
+    AssertTrue('Lanczos-2 main lobe at x=0.5 must be positive', LHalf > 0.5);
+    AssertSameValue(0.0, L1, 1e-5);
+    AssertTrue('Lanczos-2 second lobe at x=1.5 must be negative (sharpening ringed lobe)', L15 < -0.05);
+    AssertSameValue(0.0, L25, 1e-6);
+
+    { 3. Verify 4-term Blackman-Harris window: BH(0)=1, BH(0.5) in (0,1), BH(1.0)=0 }
+    BH0    := TCastleShaderGeneratorRHI.EvaluateBlackmanHarrisWeight(0.0, 1.0);
+    BHHalf := TCastleShaderGeneratorRHI.EvaluateBlackmanHarrisWeight(0.5, 1.0);
+    BH1    := TCastleShaderGeneratorRHI.EvaluateBlackmanHarrisWeight(1.0, 1.0);
+
+    AssertSameValue(1.0, BH0, 1e-4);
+    AssertTrue('Blackman-Harris window at x=0.5 must smoothly decay between 0 and 1',
+      (BHHalf > 0.05) and (BHHalf < 0.5));
+    AssertSameValue(0.0, BH1, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestTSRDisocclusionAndThinGeometryAntiGhostingRHI;
+var
+  ConfMatched, ConfHalf, ConfDisoccluded: Single;
+  BlendFlat, BlendThinWire: Single;
+begin
+  { 1. Verify Parallax Disocclusion Confidence }
+  ConfMatched     := TCastleShaderGeneratorRHI.EvaluateTSRDisocclusionConfidence(10.0, 10.0, 0.05);
+  ConfHalf        := TCastleShaderGeneratorRHI.EvaluateTSRDisocclusionConfidence(10.0, 10.25, 0.05);
+  ConfDisoccluded := TCastleShaderGeneratorRHI.EvaluateTSRDisocclusionConfidence(10.0, 15.0, 0.05);
+
+  AssertSameValue(1.0, ConfMatched, 1e-5);
+  AssertSameValue(0.5, ConfHalf, 1e-4);
+  AssertSameValue(0.0, ConfDisoccluded, 1e-5);
+
+  { 2. Verify Thin-Feature Responsiveness Boost (sub-pixel wires/foliage/hair) }
+  BlendFlat     := TCastleShaderGeneratorRHI.EvaluateTSRThinGeometryBlend(0.05, 0.0, 0.0);
+  BlendThinWire := TCastleShaderGeneratorRHI.EvaluateTSRThinGeometryBlend(0.05, 0.5, 0.8);
+
+  AssertSameValue(0.05, BlendFlat, 1e-5);
+  AssertTrue('Sub-pixel thin wire with high depth Laplacian and luma contrast must boost current-frame blend to prevent ghosting',
+    BlendThinWire > 0.7);
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanTSRUpscalerHistoryManagerRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  InW, InH: Cardinal;
+  OldUpscaled, OldHistory: TVulkanRHITexture;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6666)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    { 1. Verify 67% Quality render scale maps 1920x1080 display to 1280x720 internal render resolution }
+    Device.TSRUpscaler.RenderScale := 2.0 / 3.0;
+    Device.TSRUpscaler.ComputeInputResolution(1920, 1080, InW, InH);
+    AssertEquals(Cardinal(1280), InW);
+    AssertEquals(Cardinal(720), InH);
+
+    { 2. Verify full-resolution Upscaled and History texture allocation, compute dispatch, and ping-pong swap }
+    CmdList.BeginRecording;
+    Device.TSRUpscaler.DispatchTSRUpscale(CmdList, 1920, 1080, nil, nil);
+    CmdList.EndRecording;
+
+    AssertEquals(Cardinal(1), Device.TSRUpscaler.DispatchCount);
+    AssertTrue('TSRUpscaler Upscaled and History textures must be allocated at full 1920x1080 output resolution',
+      (Device.TSRUpscaler.UpscaledColorTexture <> nil) and
+      (Device.TSRUpscaler.HistoryColorTexture <> nil) and
+      (Device.TSRUpscaler.UpscaledColorTexture.Desc.Width = 1920) and
+      (Device.TSRUpscaler.UpscaledColorTexture.Desc.Height = 1080));
+
+    OldUpscaled := Device.TSRUpscaler.UpscaledColorTexture;
+    OldHistory := Device.TSRUpscaler.HistoryColorTexture;
+    Device.TSRUpscaler.SwapHistoryTargets;
+    AssertTrue('SwapHistoryTargets must exchange UpscaledColorTexture and HistoryColorTexture',
+      (Device.TSRUpscaler.UpscaledColorTexture = OldHistory) and
+      (Device.TSRUpscaler.HistoryColorTexture = OldUpscaled));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
   end;
 end;
 

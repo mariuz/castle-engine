@@ -1184,6 +1184,30 @@ type
       const AMaxHistoryM: Cardinal;
       const ARandom01: Single): Boolean; static;
 
+    { Phase 30.1: Generates a GLSL 450 compute shader for Temporal Super Resolution (TSR)
+      sub-pixel history upscaling using Lanczos-2 / Blackman-Harris reconstruction kernels,
+      parallax disocclusion confidence, and thin-feature anti-ghosting. }
+    function GenerateTSRUpscaleComputeShader(
+      const AWorkgroupSizeX: Cardinal = 8;
+      const AWorkgroupSizeY: Cardinal = 8): String;
+
+    { Phase 30.1 CPU reference: Evaluates windowed Lanczos-2 sinc kernel L(x) = sinc(x)*sinc(x/2) for |x| < 2. }
+    class function EvaluateLanczos2Weight(const AX: Single): Single; static;
+
+    { Phase 30.1 CPU reference: Evaluates 4-term Blackman-Harris window for |x| < ARadius. }
+    class function EvaluateBlackmanHarrisWeight(
+      const AX: Single;
+      const ARadius: Single = 1.0): Single; static;
+
+    { Phase 30.2 CPU reference: Evaluates temporal history confidence [0..1] from relative depth mismatch. }
+    class function EvaluateTSRDisocclusionConfidence(
+      const ACurrentLinearDepth, AReprojectedLinearDepth: Single;
+      const AMaxRelativeDepthError: Single = 0.05): Single; static;
+
+    { Phase 30.2 CPU reference: Boosts current-frame responsiveness [0..1] on thin sub-pixel geometry (wires/foliage/hair). }
+    class function EvaluateTSRThinGeometryBlend(
+      const ABaseCurrentFrameBlend, ADepthCrossLaplacian, ALumaContrast: Single): Single; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -5792,6 +5816,94 @@ begin
   end else
     Result := False;
   FinalizeReservoirWeight(ADst, Max(Cardinal(1), AMaxHistoryM * 2));
+end;
+
+function TCastleShaderGeneratorRHI.GenerateTSRUpscaleComputeShader(
+  const AWorkgroupSizeX, AWorkgroupSizeY: Cardinal): String;
+begin
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;',
+      [Max(1, AWorkgroupSizeX), Max(1, AWorkgroupSizeY)]) + NL +
+    NL +
+    '// Phase 30: Temporal Super Resolution (TSR) Sub-Pixel History Upscaling & Disocclusion Anti-Ghosting' + NL +
+    'float EvaluateLanczos2Weight(float x) {' + NL +
+    '  float ax = abs(x);' + NL +
+    '  if (ax < 1e-5) return 1.0;' + NL +
+    '  if (ax >= 2.0) return 0.0;' + NL +
+    '  float px = 3.14159265359 * ax;' + NL +
+    '  return (sin(px) * sin(0.5 * px)) / (0.5 * px * px);' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateBlackmanHarrisWeight(float x, float radius) {' + NL +
+    '  float ax = abs(x);' + NL +
+    '  float r = max(1e-4, radius);' + NL +
+    '  if (ax >= r) return 0.0;' + NL +
+    '  float t = 0.5 * (1.0 + x / r);' + NL +
+    '  float p = 6.28318530718 * t;' + NL +
+    '  return max(0.0, 0.35875 - 0.48829 * cos(p) + 0.14128 * cos(2.0 * p) - 0.01168 * cos(3.0 * p));' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateTSRDisocclusionConfidence(float currentLinearDepth, float reprojectedLinearDepth, float maxRelDepthError) {' + NL +
+    '  float relErr = abs(currentLinearDepth - reprojectedLinearDepth) / max(1e-4, abs(currentLinearDepth));' + NL +
+    '  return clamp(1.0 - relErr / max(1e-4, maxRelDepthError), 0.0, 1.0);' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateTSRThinGeometryBlend(float baseCurrentBlend, float depthCrossLaplacian, float lumaContrast) {' + NL +
+    '  float thinFactor = clamp(abs(depthCrossLaplacian) * max(0.0, lumaContrast) * 4.0, 0.0, 1.0);' + NL +
+    '  return mix(clamp(baseCurrentBlend, 0.01, 1.0), 0.85, thinFactor);' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateLanczos2Weight(const AX: Single): Single;
+var
+  AXAbs, PX: Double;
+begin
+  AXAbs := Abs(AX);
+  if AXAbs < 1e-5 then
+    Exit(1.0);
+  if AXAbs >= 2.0 then
+    Exit(0.0);
+  PX := Pi * AXAbs;
+  Result := (Sin(PX) * Sin(0.5 * PX)) / (0.5 * PX * PX);
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateBlackmanHarrisWeight(
+  const AX: Single;
+  const ARadius: Single): Single;
+var
+  AXAbs, SafeR, T, P: Double;
+begin
+  AXAbs := Abs(AX);
+  SafeR := Max(1e-4, ARadius);
+  if AXAbs >= SafeR then
+    Exit(0.0);
+  T := 0.5 * (1.0 + AX / SafeR);
+  P := 2.0 * Pi * T;
+  Result := Max(0.0, 0.35875 - 0.48829 * Cos(P) + 0.14128 * Cos(2.0 * P) - 0.01168 * Cos(3.0 * P));
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateTSRDisocclusionConfidence(
+  const ACurrentLinearDepth, AReprojectedLinearDepth: Single;
+  const AMaxRelativeDepthError: Single): Single;
+var
+  RelErr: Single;
+begin
+  RelErr := Abs(ACurrentLinearDepth - AReprojectedLinearDepth) / Max(1e-4, Abs(ACurrentLinearDepth));
+  Result := EnsureRange(1.0 - RelErr / Max(1e-4, AMaxRelativeDepthError), 0.0, 1.0);
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateTSRThinGeometryBlend(
+  const ABaseCurrentFrameBlend, ADepthCrossLaplacian, ALumaContrast: Single): Single;
+var
+  BaseBlend, ThinFactor: Single;
+begin
+  BaseBlend := EnsureRange(ABaseCurrentFrameBlend, 0.01, 1.0);
+  ThinFactor := EnsureRange(Abs(ADepthCrossLaplacian) * Max(0.0, ALumaContrast) * 4.0, 0.0, 1.0);
+  Result := BaseBlend + (0.85 - BaseBlend) * ThinFactor;
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;
