@@ -115,6 +115,15 @@ type
       FShadowVolumesRender: boolean;
       FShadowVolumesMaxLights: Cardinal;
       FHighDynamicRange: Boolean;
+      FTemporalAntiAliasing: Boolean;
+      { The projection of this frame without the jitter (TemporalAntiAliasing). }
+      FTemporalProjection: TMatrix4;
+      { Whether FTemporalProjection was set by ApplyProjection in this frame. }
+      FTemporalJittered: Boolean;
+      { The view and projection (without the jitter) of the previous frame
+        that used TemporalAntiAliasing. }
+      FTemporalPreviousViewProjection: TMatrix4;
+      FTemporalFrame: Cardinal;
       { Lights casting shadow volumes this frame, when ShadowVolumesMaxLights > 1,
         and their positions in world space. Calculated by ShadowVolumesLights. }
       FShadowVolumesLights: Contnrs.TObjectList;
@@ -443,6 +452,7 @@ type
     function InternalExtraScreenEffectsCount: Integer; override;
     function InternalExtraScreenEffectsNeedDepth: Boolean; override;
     function InternalHighDynamicRange: Boolean; override;
+    function InternalTemporalAntiAliasing: Boolean; override;
 
     { Called when PointingDevicePress was not handled by any TCastleTransform object.
       You can override this to make a message / sound signal to notify user
@@ -453,6 +463,9 @@ type
     procedure BoundViewpointChanged; virtual;
 
     procedure RenderWithoutScreenEffects; override;
+    { Blend the world rendered in this frame with the previous ones,
+      when TemporalAntiAliasing is used. }
+    procedure TemporalAntiAliasingResolve;
 
     procedure Loaded; override;
   public
@@ -1267,6 +1280,41 @@ type
     property HighDynamicRange: Boolean
       read FHighDynamicRange write FHighDynamicRange default false;
 
+    { Temporal anti-aliasing: blend every frame with the previous ones,
+      shifting the projection by a different sub-pixel offset (jitter) every frame,
+      so the edges (and thin details, shading, textures) are anti-aliased
+      over a few frames.
+
+      The previous result is found by motion vectors computed from the depth
+      buffer and the camera movement since the previous frame.
+      Moving objects are not followed by these motion vectors:
+      to avoid trails behind them, the previous result is limited
+      to the colors around each pixel in this frame (neighborhood clamping),
+      so they are anti-aliased less (they get only this frame's edges).
+
+      Notes:
+      @unorderedList(
+        @item(Applied to the world (@link(Items)), before the children
+          user interface and the screen effects; after @link(HighDynamicRange)
+          conversion to the screen colors.)
+        @item(Objects in the front layer (@link(TCastleTransform.RenderLayer) = rlFront,
+          like a weapon in an FPS game) are assumed to move with the camera.)
+        @item(The viewport must be redrawn every frame
+          (it is in usual games) to converge: a single frame is jittered,
+          and on the first frame the result is like without this.)
+        @item(Ignored with multi-sampling (when the container uses
+          @link(TCastleWindow.AntiAliasing)): anti-aliasing is already done then.)
+        @item(Ignored when @link(Transparent): the world is then rendered
+          over what is behind the viewport.)
+        @item(Needs depth textures (@link(TGLFeatures.TextureDepth)).
+          It is ignored otherwise.)
+        @item(Uses the same rendering to a texture as screen effects
+          (see @link(TCastleScreenEffects)), with the depth,
+          and 2 more textures of the viewport size for the history.)
+      ) }
+    property TemporalAntiAliasing: Boolean
+      read FTemporalAntiAliasing write FTemporalAntiAliasing default false;
+
     { Background (like a skybox) to display behind the @link(Items).
       Displayed only when not @link(Transparent).
       See https://castle-engine.io/background }
@@ -1546,6 +1594,26 @@ uses DOM, Math, TypInfo,
   CastleSoundEngine, CastleGLVersion, CastleTextureImages, X3DFields,
   CastleInternalSettings, CastleXmlUtils, CastleUriUtils, CastleInternalRenderer,
   CastleRenderContext, CastleApplicationProperties, X3DLoad, CastleInternalGLUtils;
+
+const
+  { Weight of the previous frames in TemporalAntiAliasing. }
+  TemporalFeedback = 0.9;
+
+{ The Index-th number (from 1) of the Halton sequence in Base:
+  well spread numbers in 0..1, for the TemporalAntiAliasing jitter. }
+function Halton(Index: Cardinal; const Base: Cardinal): Single;
+var
+  F: Single;
+begin
+  Result := 0;
+  F := 1;
+  while Index > 0 do
+  begin
+    F := F / Base;
+    Result := Result + F * (Index mod Base);
+    Index := Index div Base;
+  end;
+end;
 
 {$define read_implementation}
 {$I castleviewport_autonavigation.inc}
@@ -2519,6 +2587,20 @@ begin
 
   { Apply new FProjection values }
   M := FProjection.Matrix(AspectRatio);
+
+  { Shift the projection by a sub-pixel offset, different every frame
+    (the Halton sequence in bases 2 and 3, 8 frames),
+    when TemporalAntiAliasing is used. }
+  FTemporalJittered := InternalTemporalAntiAliasingActive and
+    (Viewport.Width > 0) and (Viewport.Height > 0);
+  if FTemporalJittered then
+  begin
+    FTemporalProjection := M;
+    M := TranslationMatrix(Vector3(
+      (Halton(FTemporalFrame mod 8 + 1, 2) - 0.5) * 2 / Viewport.Width,
+      (Halton(FTemporalFrame mod 8 + 1, 3) - 0.5) * 2 / Viewport.Height,
+      0)) * M;
+  end;
   if InternalCamera <> nil then // as InternalCamera is assignable, tolerate InternalCamera = nil
     InternalCamera.ProjectionMatrix := M;
   RenderContext.ProjectionMatrix := M;
@@ -3283,6 +3365,26 @@ begin
   { convert the world rendered in high dynamic range to the screen colors,
     before the children are rendered }
   InternalHighDynamicRangeResolve;
+  TemporalAntiAliasingResolve;
+end;
+
+procedure TCastleViewport.TemporalAntiAliasingResolve;
+var
+  ViewProjection, ViewProjectionInverse: TMatrix4;
+begin
+  if not FTemporalJittered then
+    Exit;
+  FTemporalJittered := false;
+  { The motion vectors: from this frame's normalized device coordinates
+    to the previous frame's clip coordinates, both without the jitter.
+    (On the first frame, the history is not used.) }
+  ViewProjection := FTemporalProjection * InternalCamera.Matrix;
+  if not ViewProjection.TryInverse(ViewProjectionInverse) then
+    ViewProjectionInverse := TMatrix4.Identity;
+  InternalTemporalAntiAliasingResolve(
+    FTemporalPreviousViewProjection * ViewProjectionInverse, TemporalFeedback);
+  FTemporalPreviousViewProjection := ViewProjection;
+  Inc(FTemporalFrame);
 end;
 
 function TCastleViewport.InternalExtraGetScreenEffects(const Index: Integer): TGLSLProgram;
@@ -3350,6 +3452,12 @@ begin
   { A transparent viewport doesn't fill the texture of screen effects,
     what is behind it would be lost. }
   Result := HighDynamicRange and not Transparent;
+end;
+
+function TCastleViewport.InternalTemporalAntiAliasing: Boolean;
+begin
+  { A transparent viewport doesn't fill the texture of screen effects. }
+  Result := TemporalAntiAliasing and not Transparent;
 end;
 
 function TCastleViewport.InternalExtraScreenEffectsNeedDepth: Boolean;

@@ -33,6 +33,9 @@ type
     procedure TestHighDynamicRangeTransparent;
     procedure TestHighDynamicRangeSameLook;
     procedure TestHighDynamicRangeMultiSampling;
+    procedure TestTemporalAntiAliasingEdges;
+    procedure TestTemporalAntiAliasingCameraMotion;
+    procedure TestTemporalAntiAliasingTransparent;
   end;
 
 implementation
@@ -577,6 +580,294 @@ begin
     finally FreeAndNil(S) end;
 
     CheckGLErrors('TestHighDynamicRangeMultiSampling');
+    Window.Close;
+  finally
+    DestroyWindowForTest(Window);
+  end;
+end;
+
+{ TemporalAntiAliasing tests -------------------------------------------------- }
+
+type
+  { Scene for the TemporalAntiAliasing tests: a white unlit box,
+    rotated so its edges are diagonal, on a black background. }
+  TTemporalTestScene = class
+    Window: TCastleWindow;
+    Viewport: TCastleViewport;
+    Box: TCastleBox;
+    constructor Create(const AWindow: TCastleWindow);
+    { Render Frames frames, return the last one. }
+    function Render(const Frames: Integer = 1): TCastleImage;
+  end;
+
+constructor TTemporalTestScene.Create(const AWindow: TCastleWindow);
+begin
+  inherited Create;
+  Window := AWindow;
+  Viewport := TCastleViewport.Create(Window);
+  Viewport.FullSize := true;
+  Viewport.BackgroundColor := Black;
+  Viewport.Camera.SetView(
+    Vector3(0, 0, 10),
+    Vector3(0, 0, -1),
+    Vector3(0, 1, 0));
+  Window.Controls.InsertFront(Viewport);
+
+  Box := TCastleBox.Create(Window);
+  Box.Size := Vector3(4, 3, 1);
+  Box.Rotation := Vector4(0, 0, 1, 0.5);
+  Box.Material := pmUnlit;
+  Box.Color := White;
+  Viewport.Items.Add(Box);
+end;
+
+function TTemporalTestScene.Render(const Frames: Integer): TCastleImage;
+var
+  I: Integer;
+begin
+  for I := 1 to Frames - 1 do
+    Window.SaveScreen.Free;
+  Result := Window.SaveScreen;
+end;
+
+{ Number of pixels neither black nor white (anti-aliased edges). }
+function PartialPixels(const Image: TCastleImage): Integer;
+var
+  X, Y: Integer;
+  G: Single;
+begin
+  Result := 0;
+  for Y := 0 to Image.Height - 1 do
+    for X := 0 to Image.Width - 1 do
+    begin
+      G := Image.Colors[X, Y, 0].X;
+      if (G > 0.15) and (G < 0.85) then
+        Inc(Result);
+    end;
+end;
+
+{ Number of pixels whose color differs by more than 0.75
+  (anti-aliased edges differ less from the aliased ones). }
+function VeryDifferentPixels(const A, B: TCastleImage): Integer;
+var
+  X, Y: Integer;
+begin
+  Result := 0;
+  for Y := 0 to A.Height - 1 do
+    for X := 0 to A.Width - 1 do
+      if Abs(A.Colors[X, Y, 0].X - B.Colors[X, Y, 0].X) > 0.75 then
+        Inc(Result);
+end;
+
+procedure TTestCastleViewport.TestTemporalAntiAliasingEdges;
+{ With TemporalAntiAliasing the edges get intermediate colors over a few frames,
+  the projection is jittered, the image doesn't move. }
+var
+  Window: TCastleWindow;
+  S: TTemporalTestScene;
+
+  procedure CheckAntiAliased(const What: String);
+  var
+    Aliased, AntiAliased: TCastleImage;
+    PartialBefore, PartialAfter: Integer;
+    Mean, Max: Single;
+    Projection1, Projection2: TMatrix4;
+  begin
+    S.Viewport.TemporalAntiAliasing := false;
+    Aliased := S.Render(2);
+    try
+      Projection1 := S.Viewport.Camera.ProjectionMatrix;
+      S.Render.Free;
+      Projection2 := S.Viewport.Camera.ProjectionMatrix;
+      AssertTrue(What + ': no jitter without TemporalAntiAliasing',
+        TMatrix4.PerfectlyEquals(Projection1, Projection2));
+
+      S.Viewport.TemporalAntiAliasing := true;
+      AntiAliased := S.Render(24);
+      try
+        Projection1 := S.Viewport.Camera.ProjectionMatrix;
+        S.Render.Free;
+        Projection2 := S.Viewport.Camera.ProjectionMatrix;
+        AssertFalse(What + ': jitter with TemporalAntiAliasing',
+          TMatrix4.PerfectlyEquals(Projection1, Projection2));
+
+        PartialBefore := PartialPixels(Aliased);
+        PartialAfter := PartialPixels(AntiAliased);
+        ImageDifference(Aliased, AntiAliased, Mean, Max);
+        WritelnLog('TemporalAntiAliasing %s: partial pixels %d -> %d, mean difference %.4f, max %.4f',
+          [What, PartialBefore, PartialAfter, Mean, Max]);
+        { the box's edges are about 350 pixels long }
+        if PartialAfter < PartialBefore + 100 then
+          Fail(Format('%s: edges not anti-aliased (partial pixels %d -> %d)',
+            [What, PartialBefore, PartialAfter]));
+        if Mean > 0.02 then
+          Fail(Format('%s: the image changed (mean difference %f)', [What, Mean]));
+      finally FreeAndNil(AntiAliased) end;
+    finally FreeAndNil(Aliased) end;
+    CheckGLErrors(What);
+  end;
+
+begin
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  Window := CreateWindowForTest;
+  try
+    Window.Width := 200;
+    Window.Height := 200;
+    Window.Open;
+
+    if (GLFeatures.CurrentMultiSampling > 1) or not GLFeatures.TextureDepth then
+    begin
+      Window.Close;
+      AbortTest;
+      Exit;
+    end;
+
+    S := TTemporalTestScene.Create(Window);
+    try
+      CheckAntiAliased('plain');
+
+      if GLFeatures.ColorBufferFloat then
+      begin
+        S.Viewport.HighDynamicRange := true;
+        CheckAntiAliased('HighDynamicRange');
+        S.Viewport.HighDynamicRange := false;
+      end;
+
+      S.Viewport.ScreenSpaceAmbientOcclusion := true;
+      CheckAntiAliased('ScreenSpaceAmbientOcclusion');
+      S.Viewport.ScreenSpaceAmbientOcclusion := false;
+    finally FreeAndNil(S) end;
+
+    Window.Close;
+  finally
+    DestroyWindowForTest(Window);
+  end;
+end;
+
+procedure TTestCastleViewport.TestTemporalAntiAliasingCameraMotion;
+{ When the camera moves, the history follows it (motion vectors from the depth):
+  no trails behind the edges. }
+const
+  StepCount = 5;
+var
+  Window: TCastleWindow;
+  S: TTemporalTestScene;
+  Reference: TCastleImage;
+  AntiAliased: array [1..StepCount] of TCastleImage;
+  Different: Integer;
+  Step: Integer;
+begin
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  Window := CreateWindowForTest;
+  try
+    Window.Width := 200;
+    Window.Height := 200;
+    Window.Open;
+
+    if (GLFeatures.CurrentMultiSampling > 1) or not GLFeatures.TextureDepth then
+    begin
+      Window.Close;
+      AbortTest;
+      Exit;
+    end;
+
+    for Step := 1 to StepCount do
+      AntiAliased[Step] := nil;
+    S := TTemporalTestScene.Create(Window);
+    try
+      S.Viewport.TemporalAntiAliasing := true;
+      S.Render(16).Free;
+      { pan the camera by about 6 pixels every frame
+        (the view is about 8.3 units wide at the box) }
+      for Step := 1 to StepCount do
+      begin
+        S.Viewport.Camera.Translation := Vector3(0.25 * Step, 0.1 * Step, 10);
+        AntiAliased[Step] := S.Render;
+      end;
+      { compare with the views without TemporalAntiAliasing
+        (rendered after, as switching it off forgets the history) }
+      S.Viewport.TemporalAntiAliasing := false;
+      for Step := 1 to StepCount do
+      begin
+        S.Viewport.Camera.Translation := Vector3(0.25 * Step, 0.1 * Step, 10);
+        Reference := S.Render;
+        try
+          Different := VeryDifferentPixels(Reference, AntiAliased[Step]);
+          WritelnLog('TemporalAntiAliasing camera motion step %d: %d very different pixels',
+            [Step, Different]);
+          { a trail along the edges would be dozens of pixels }
+          if Different > 5 then
+            Fail(Format('Camera motion step %d: %d very different pixels (trails)',
+              [Step, Different]));
+        finally FreeAndNil(Reference) end;
+      end;
+    finally
+      for Step := 1 to StepCount do
+        FreeAndNil(AntiAliased[Step]);
+      FreeAndNil(S);
+    end;
+
+    CheckGLErrors('TestTemporalAntiAliasingCameraMotion');
+    Window.Close;
+  finally
+    DestroyWindowForTest(Window);
+  end;
+end;
+
+procedure TTestCastleViewport.TestTemporalAntiAliasingTransparent;
+{ A transparent viewport ignores TemporalAntiAliasing:
+  what is behind it stays, the projection is not jittered. }
+var
+  Window: TCastleWindow;
+  Background: TCastleRectangleControl;
+  S: TTemporalTestScene;
+  Image: TCastleImage;
+  Projection1: TMatrix4;
+begin
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  Window := CreateWindowForTest;
+  try
+    Window.Width := 200;
+    Window.Height := 200;
+    Window.Open;
+
+    Background := TCastleRectangleControl.Create(Window);
+    Background.FullSize := true;
+    Background.Color := Red;
+    Window.Controls.InsertFront(Background);
+
+    S := TTemporalTestScene.Create(Window);
+    try
+      S.Viewport.Transparent := true;
+      S.Viewport.TemporalAntiAliasing := true;
+      Image := S.Render(3);
+      try
+        Projection1 := S.Viewport.Camera.ProjectionMatrix;
+        if not TVector3.Equals(Image.Colors[5, 5, 0].XYZ, Vector3(1, 0, 0), 0.02) then
+          Fail('Transparent viewport with TemporalAntiAliasing: expected red behind it, got ' +
+            Image.Colors[5, 5, 0].ToString);
+      finally FreeAndNil(Image) end;
+      S.Render.Free;
+      AssertTrue('Transparent viewport: no jitter',
+        TMatrix4.PerfectlyEquals(Projection1, S.Viewport.Camera.ProjectionMatrix));
+    finally FreeAndNil(S) end;
+
+    CheckGLErrors('TestTemporalAntiAliasingTransparent');
     Window.Close;
   finally
     DestroyWindowForTest(Window);
