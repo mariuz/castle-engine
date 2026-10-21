@@ -357,6 +357,9 @@ type
       ButtonArrangeCylinder: TButton;
       ButtonArrangePyramid: TButton;
       ButtonClampToPrimaryBounds: TButton;
+      ButtonArrangeCone: TButton;
+      ButtonArrangeHexGrid: TButton;
+      ButtonPushOutsidePrimaryBounds: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -386,6 +389,7 @@ type
       ButtonUIAspect16x9: TButton;
       ButtonUIReverseOrder: TButton;
       ButtonUICircleArrange: TButton;
+      ButtonUIFitAspect: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -421,6 +425,7 @@ type
       MenuTreeViewItemSelectSoundSources: TMenuItem;
       MenuTreeViewItemSelectHidden: TMenuItem;
       MenuTreeViewItemSelectOutliers: TMenuItem;
+      MenuTreeViewItemSelectMissingUrl: TMenuItem;
       MenuTreeViewItemCopyTransform: TMenuItem;
       MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
@@ -523,6 +528,9 @@ type
     procedure ButtonArrangeCylinderClick(Sender: TObject);
     procedure ButtonArrangePyramidClick(Sender: TObject);
     procedure ButtonClampToPrimaryBoundsClick(Sender: TObject);
+    procedure ButtonArrangeConeClick(Sender: TObject);
+    procedure ButtonArrangeHexGridClick(Sender: TObject);
+    procedure ButtonPushOutsidePrimaryBoundsClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -541,6 +549,7 @@ type
     procedure ButtonUIAspect16x9Click(Sender: TObject);
     procedure ButtonUIReverseOrderClick(Sender: TObject);
     procedure ButtonUICircleArrangeClick(Sender: TObject);
+    procedure ButtonUIFitAspectClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -583,6 +592,7 @@ type
     procedure MenuTreeViewItemSelectSoundSourcesClick(Sender: TObject);
     procedure MenuTreeViewItemSelectHiddenClick(Sender: TObject);
     procedure MenuTreeViewItemSelectOutliersClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectMissingUrlClick(Sender: TObject);
     procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
@@ -1124,6 +1134,19 @@ type
     procedure ShowArrangeInPyramidDialog;
     procedure ClampSelectionToPrimaryBounds(
       const UseObjectBounds: Boolean = true);
+    procedure ArrangeSelectionOnCone(
+      const BaseRadius: Single = 0.0;
+      const TopRadius: Single = 0.0;
+      const HeightSpan: Single = 10.0;
+      const OrientMode: Integer = 0);
+    procedure ShowArrangeOnConeDialog;
+    procedure ArrangeSelectionInHexGrid(
+      const Columns: Integer = 0;
+      const CellRadius: Single = 0.0;
+      const OrientMode: Integer = 0);
+    procedure ShowArrangeInHexGridDialog;
+    procedure PushSelectionOutsidePrimaryBounds(
+      const UseObjectBounds: Boolean = true);
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -1147,6 +1170,8 @@ type
     procedure ArrangeSelectedUserInterfacesInCircle(
       const RadiusScale: Single = 1.0;
       const HalfArc: Boolean = false);
+    procedure FitSelectedUserInterfacesMaintainAspect(
+      const CoverParent: Boolean = false);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -1189,6 +1214,7 @@ type
     procedure SelectSoundAndTriggerTransforms(const TriggersOnly: Boolean = false);
     procedure SelectHiddenComponents(const TransformsOnly: Boolean = false);
     procedure SelectOutlierTransforms(const MinDistance: Single = 100.0);
+    procedure SelectTransformsWithMissingUrl(const BrokenOnly: Boolean = false);
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -2097,11 +2123,18 @@ begin
   end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyQ) and
-     (Event.ModifiersDown = [mkAlt, mkShift]) and
      (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
   begin
-    Frame.ShowArrangeInTorusKnotDialog;
-    Exit(true);
+    if Event.ModifiersDown = [mkAlt, mkShift] then
+    begin
+      Frame.ShowArrangeInTorusKnotDialog;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkShift] then
+    begin
+      Frame.SelectTransformsWithMissingUrl(false);
+      Exit(true);
+    end;
   end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyO) and
@@ -2120,11 +2153,18 @@ begin
   end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyB) and
-     (Event.ModifiersDown = [mkCtrl, mkShift]) and
      (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
   begin
-    Frame.ShowSelectByAxisRangeDialog;
-    Exit(true);
+    if Event.ModifiersDown = [mkCtrl, mkShift] then
+    begin
+      Frame.ShowSelectByAxisRangeDialog;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt] then
+    begin
+      Frame.PushSelectionOutsidePrimaryBounds(true);
+      Exit(true);
+    end;
   end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyE) and
@@ -2194,6 +2234,11 @@ begin
     if Event.IsKey(keyApostrophe) then
     begin
       Frame.ClampSelectionToPrimaryBounds(true);
+      Exit(true);
+    end else
+    if Event.IsKey(keyBackQuote) then
+    begin
+      Frame.ShowArrangeOnConeDialog;
       Exit(true);
     end;
   end;
@@ -2285,6 +2330,11 @@ begin
     if Event.ModifiersDown = [mkAlt, mkShift] then
     begin
       Frame.ShowArrangeInHelixDialog;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt] then
+    begin
+      Frame.ShowArrangeInHexGridDialog;
       Exit(true);
     end else
     if Event.ModifiersDown = [mkCtrl, mkShift] then
@@ -3803,6 +3853,36 @@ begin
   ButtonClampToPrimaryBounds.OnClick := @ButtonClampToPrimaryBoundsClick;
   ButtonClampToPrimaryBounds.Parent := PanelLayoutTransform;
 
+  ButtonArrangeCone := TButton.Create(Self);
+  ButtonArrangeCone.Align := alTop;
+  ButtonArrangeCone.AutoSize := true;
+  ButtonArrangeCone.Caption := 'Cone / Funnel...';
+  ButtonArrangeCone.Hint := 'Arrange 2+ selected 3D transforms across a 3D conical or frustum funnel shell using a Fibonacci golden-angle lattice (Alt+Shift+` | Shift-click: dialog | Ctrl-click: orient outward)';
+  ButtonArrangeCone.ShowHint := true;
+  ButtonArrangeCone.BorderSpacing.Around := 2;
+  ButtonArrangeCone.OnClick := @ButtonArrangeConeClick;
+  ButtonArrangeCone.Parent := PanelLayoutTransform;
+
+  ButtonArrangeHexGrid := TButton.Create(Self);
+  ButtonArrangeHexGrid.Align := alTop;
+  ButtonArrangeHexGrid.AutoSize := true;
+  ButtonArrangeHexGrid.Caption := 'Hex Grid Arrange';
+  ButtonArrangeHexGrid.Hint := 'Arrange 2+ selected 3D transforms into a staggered hexagonal / honeycomb lattice grid on the XZ plane around pivot (Ctrl+Alt+H | Shift-click: dialog | Ctrl-click: orient outward)';
+  ButtonArrangeHexGrid.ShowHint := true;
+  ButtonArrangeHexGrid.BorderSpacing.Around := 2;
+  ButtonArrangeHexGrid.OnClick := @ButtonArrangeHexGridClick;
+  ButtonArrangeHexGrid.Parent := PanelLayoutTransform;
+
+  ButtonPushOutsidePrimaryBounds := TButton.Create(Self);
+  ButtonPushOutsidePrimaryBounds.Align := alTop;
+  ButtonPushOutsidePrimaryBounds.AutoSize := true;
+  ButtonPushOutsidePrimaryBounds.Caption := 'Push Outside Primary';
+  ButtonPushOutsidePrimaryBounds.Hint := 'Push / repel 2+ selected 3D transforms out of the primary selected transform''s world bounding box along the shortest escape axis (Ctrl+Alt+B | Shift-click: origins only)';
+  ButtonPushOutsidePrimaryBounds.ShowHint := true;
+  ButtonPushOutsidePrimaryBounds.BorderSpacing.Around := 2;
+  ButtonPushOutsidePrimaryBounds.OnClick := @ButtonPushOutsidePrimaryBoundsClick;
+  ButtonPushOutsidePrimaryBounds.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -4029,6 +4109,14 @@ begin
   ButtonUICircleArrange.OnClick := @ButtonUICircleArrangeClick;
   ButtonUICircleArrange.Parent := PanelLayoutUI;
 
+  ButtonUIFitAspect := TButton.Create(Self);
+  ButtonUIFitAspect.AutoSize := true;
+  ButtonUIFitAspect.Caption := 'UI Fit Aspect';
+  ButtonUIFitAspect.Hint := 'Fit and center selected 2D UI control(s) inside their parent container while preserving their current Width:Height aspect ratio (Click: Letterbox / Contain | Shift-click: Cover parent)';
+  ButtonUIFitAspect.ShowHint := true;
+  ButtonUIFitAspect.OnClick := @ButtonUIFitAspectClick;
+  ButtonUIFitAspect.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -4232,6 +4320,11 @@ begin
   MenuTreeViewItemSelectOutliers.Caption := 'Select Far Outlier Transforms (Ctrl+Shift+Y)';
   MenuTreeViewItemSelectOutliers.OnClick := @MenuTreeViewItemSelectOutliersClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectOutliers);
+
+  MenuTreeViewItemSelectMissingUrl := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectMissingUrl.Caption := 'Select Components With Missing / Broken Asset URL (Ctrl+Shift+Q)';
+  MenuTreeViewItemSelectMissingUrl.OnClick := @MenuTreeViewItemSelectMissingUrlClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectMissingUrl);
 
   MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
   MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
@@ -7907,6 +8000,8 @@ begin
         ButtonUIReverseOrder.Enabled := SelectedUICount >= 2;
       if ButtonUICircleArrange <> nil then
         ButtonUICircleArrange.Enabled := SelectedUICount >= 2;
+      if ButtonUIFitAspect <> nil then
+        ButtonUIFitAspect.Enabled := SelectedUICount >= 1;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -8011,6 +8106,12 @@ begin
       ButtonArrangePyramid.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonClampToPrimaryBounds <> nil then
       ButtonClampToPrimaryBounds.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeCone <> nil then
+      ButtonArrangeCone.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeHexGrid <> nil then
+      ButtonArrangeHexGrid.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonPushOutsidePrimaryBounds <> nil then
+      ButtonPushOutsidePrimaryBounds.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -9383,6 +9484,11 @@ begin
         ShowArrangeInHelixDialog;
         Key := 0;
       end else
+      if Shift = [ssCtrl, ssAlt] then
+      begin
+        ShowArrangeInHexGridDialog;
+        Key := 0;
+      end else
       if Shift = [ssCtrl, ssShift] then
       begin
         SelectHiddenComponents(false);
@@ -9552,9 +9658,19 @@ begin
       ClampSelectionToPrimaryBounds(true);
       Key := 0;
     end else
+    if (Key = VK_OEM_3) and (Shift = [ssAlt, ssShift]) then
+    begin
+      ShowArrangeOnConeDialog;
+      Key := 0;
+    end else
     if (Key = Ord('Q')) and (Shift = [ssAlt, ssShift]) then
     begin
       ShowArrangeInTorusKnotDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('Q')) and (Shift = [ssCtrl, ssShift]) then
+    begin
+      SelectTransformsWithMissingUrl(false);
       Key := 0;
     end else
     if (Key = Ord('V')) and (Shift = [ssAlt, ssShift]) then
@@ -9730,6 +9846,11 @@ begin
     if (Key = Ord('B')) and (Shift = [ssCtrl, ssShift]) then
     begin
       ShowSelectByAxisRangeDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('B')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      PushSelectionOutsidePrimaryBounds(true);
       Key := 0;
     end else
     if (Key = Ord('E')) and (Shift = [ssCtrl, ssShift]) then
@@ -13406,6 +13527,128 @@ begin
   ClampSelectionToPrimaryBounds(not (ssShift in GetKeyShiftState));
 end;
 
+procedure TDesignFrame.ArrangeSelectionOnCone(
+  const BaseRadius, TopRadius, HeightSpan: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedOnCone(BaseRadius, TopRadius, HeightSpan, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeOnConeDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  BaseR, TopR, HSpan: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Base Radius XZ at Bottom (0 = auto from selection):';
+  Prompts[1] := 'Top Radius XZ at Apex (0 = pointed cone, >0 = frustum):';
+  Prompts[2] := 'Vertical Height Span Y:';
+  Prompts[3] := 'Orientation (0 = keep, 1 = outward, 2 = inward):';
+
+  Values[0] := '0';
+  Values[1] := '0';
+  Values[2] := '10';
+  Values[3] := '0';
+
+  if InputQuery('Arrange Selected on 3D Cone / Funnel Shell', Prompts, Values) then
+  begin
+    BaseR := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    TopR := StrToFloatDefDot(Trim(Values[1]), 0.0);
+    HSpan := StrToFloatDefDot(Trim(Values[2]), 10.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[3]), 0), 0, 2);
+    ArrangeSelectionOnCone(BaseR, TopR, HSpan, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeConeClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  OrientMode: Integer;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeOnConeDialog
+  else
+  begin
+    if ssCtrl in ShiftState then
+      OrientMode := 1
+    else
+      OrientMode := 0;
+    ArrangeSelectionOnCone(0.0, 0.0, 10.0, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ArrangeSelectionInHexGrid(
+  const Columns: Integer;
+  const CellRadius: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInHexGrid(Columns, CellRadius, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInHexGridDialog;
+var
+  Prompts: array[0..2] of string;
+  Values: array[0..2] of string;
+  Cols, OrientMode: Integer;
+  CellRad: Single;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Hex Grid Columns (0 = auto from selection count):';
+  Prompts[1] := 'Hex Cell Circumradius (0 = auto from bounding boxes):';
+  Prompts[2] := 'Orientation (0 = keep, 1 = outward, 2 = inward):';
+
+  Values[0] := '0';
+  Values[1] := '0';
+  Values[2] := '0';
+
+  if InputQuery('Arrange Selected in 3D Hexagonal / Honeycomb Lattice Grid', Prompts, Values) then
+  begin
+    Cols := StrToIntDef(Trim(Values[0]), 0);
+    CellRad := StrToFloatDefDot(Trim(Values[1]), 0.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[2]), 0), 0, 2);
+    ArrangeSelectionInHexGrid(Cols, CellRad, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeHexGridClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  OrientMode: Integer;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInHexGridDialog
+  else
+  begin
+    if ssCtrl in ShiftState then
+      OrientMode := 1
+    else
+      OrientMode := 0;
+    ArrangeSelectionInHexGrid(0, 0.0, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.PushSelectionOutsidePrimaryBounds(
+  const UseObjectBounds: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.PushSelectedOutsidePrimaryBounds(UseObjectBounds);
+end;
+
+procedure TDesignFrame.ButtonPushOutsidePrimaryBoundsClick(Sender: TObject);
+begin
+  PushSelectionOutsidePrimaryBounds(not (ssShift in GetKeyShiftState));
+end;
+
 procedure TDesignFrame.StopPilotTransform;
 var
   SavedName: String;
@@ -14876,6 +15119,109 @@ begin
   else
     RScale := 1.0;
   ArrangeSelectedUserInterfacesInCircle(RScale, ssCtrl in ShiftState);
+end;
+
+procedure TDesignFrame.FitSelectedUserInterfacesMaintainAspect(
+  const CoverParent: Boolean);
+var
+  Selected: TComponentList;
+  SelectedCount, I, ChangedCount: Integer;
+  UI: TCastleUserInterface;
+  CurRect, ParentRect, NewR: TFloatRectangle;
+  CurW, CurH, ParW, ParH, ScaleFactor, TargetW, TargetH, DeltaX, DeltaY: Single;
+  ControlChanged: Boolean;
+begin
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if (Selected = nil) or (SelectedCount < 1) then Exit;
+
+    ChangedCount := 0;
+    for I := 0 to SelectedCount - 1 do
+      if (Selected[I] is TCastleUserInterface) and
+         (Selected[I] <> DesignRoot) and
+         (not (Selected[I] is TCastleTransformDesign)) and
+         (not IsComponentLocked(Selected[I])) then
+      begin
+        UI := TCastleUserInterface(Selected[I]);
+        if UI.UIScale <= 0 then Continue;
+        CurRect := UI.RenderRectWithBorder;
+        ParentRect := ParentRenderRect(UI);
+        if CurRect.IsEmpty or ParentRect.IsEmpty then Continue;
+
+        CurW := CurRect.Width / UI.UIScale;
+        CurH := CurRect.Height / UI.UIScale;
+        ParW := ParentRect.Width / UI.UIScale;
+        ParH := ParentRect.Height / UI.UIScale;
+        if (CurW <= 0) or (CurH <= 0) or (ParW <= 0) or (ParH <= 0) then Continue;
+
+        if CoverParent then
+          ScaleFactor := Max(ParW / CurW, ParH / CurH)
+        else
+          ScaleFactor := Min(ParW / CurW, ParH / CurH);
+
+        TargetW := CurW * ScaleFactor;
+        TargetH := CurH * ScaleFactor;
+        if (TargetW <= 0) or (TargetH <= 0) then Continue;
+
+        ControlChanged := false;
+        if UI.AutoSizeToChildren then
+        begin
+          UI.AutoSizeToChildren := false;
+          ControlChanged := true;
+        end;
+        if UI.FullSize then
+        begin
+          UI.FullSize := false;
+          ControlChanged := true;
+        end;
+        if UI.WidthFraction <> 0 then
+        begin
+          UI.WidthFraction := 0;
+          ControlChanged := true;
+        end;
+        if UI.HeightFraction <> 0 then
+        begin
+          UI.HeightFraction := 0;
+          ControlChanged := true;
+        end;
+        if not SameValue(UI.Width, TargetW, 0.01) then
+        begin
+          UI.Width := TargetW;
+          ControlChanged := true;
+        end;
+        if not SameValue(UI.Height, TargetH, 0.01) then
+        begin
+          UI.Height := TargetH;
+          ControlChanged := true;
+        end;
+
+        NewR := UI.RenderRectWithBorder;
+        if not NewR.IsEmpty then
+        begin
+          DeltaX := ParentRect.Center.X - NewR.Center.X;
+          DeltaY := ParentRect.Center.Y - NewR.Center.Y;
+          if (Abs(DeltaX) > 0.01) or (Abs(DeltaY) > 0.01) then
+          begin
+            UI.Translation := UI.Translation + Vector2(DeltaX / UI.UIScale, DeltaY / UI.UIScale);
+            ControlChanged := true;
+          end;
+        end;
+
+        if ControlChanged then
+          Inc(ChangedCount);
+      end;
+
+    if ChangedCount > 0 then
+      ModifiedOutsideObjectInspector(
+        Format('Fit %d UI control(s) inside parent maintaining aspect ratio', [ChangedCount]), ucHigh);
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUIFitAspectClick(Sender: TObject);
+begin
+  FitSelectedUserInterfacesMaintainAspect(ssShift in GetKeyShiftState);
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -17937,6 +18283,54 @@ begin
     SelectOutlierTransforms(100.0);
 end;
 
+procedure TDesignFrame.SelectTransformsWithMissingUrl(const BrokenOnly: Boolean);
+var
+  TreeNode: TTreeNode;
+  C: TComponent;
+  PropInfo: PPropInfo;
+  AssetUrl: String;
+  NewSelection: TComponentList;
+  IsMissingOrBroken: Boolean;
+begin
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C <> nil) and (C <> DesignRoot) and
+         (not (C is TCastleAbstractRootTransform)) and
+         Selectable(C) and (not IsComponentLocked(C)) then
+      begin
+        PropInfo := GetPropInfo(C, 'Url');
+        if (PropInfo <> nil) and
+           (PropInfo^.PropType^.Kind in [tkAString, tkString, tkLString]) then
+        begin
+          AssetUrl := Trim(GetStrProp(C, PropInfo));
+          if AssetUrl = '' then
+            IsMissingOrBroken := not BrokenOnly
+          else
+            IsMissingOrBroken := not URIFileExists(AssetUrl);
+
+          if IsMissingOrBroken and (NewSelection.IndexOf(C) = -1) then
+            NewSelection.Add(C);
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectMissingUrlClick(Sender: TObject);
+begin
+  SelectTransformsWithMissingUrl(ssShift in GetKeyShiftState);
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -18449,6 +18843,8 @@ begin
     MenuTreeViewItemSelectHidden.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemSelectOutliers <> nil then
     MenuTreeViewItemSelectOutliers.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectMissingUrl <> nil then
+    MenuTreeViewItemSelectMissingUrl.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemCopyTransform <> nil then
     MenuTreeViewItemCopyTransform.Enabled := (CurrentTransform <> nil) or (SelectedUserInterface <> nil) or (ControlsTree.SelectionCount > 0);
   if MenuTreeViewItemPasteTransform <> nil then

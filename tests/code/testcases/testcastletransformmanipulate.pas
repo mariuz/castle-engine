@@ -57,6 +57,7 @@ type
     procedure TestArrangePolygonSpiralVortexAndProjectOntoPlane;
     procedure TestArrangeTorusKnotConcentricRingsAndProjectSphereCylinder;
     procedure TestArrangeCylinderPyramidAndClampToBox;
+    procedure TestArrangeConeHexGridAndPushOutsideBox;
   end;
 
 implementation
@@ -1925,6 +1926,109 @@ begin
     AssertTrue(Manipulate.ClampSelectedToBox(Vector3(-5, 2, -5), Vector3(5, 8, 5), false));
     AssertVectorEquals(Vector3(-5, 2, 5), B1.Translation, 1e-4);
     AssertVectorEquals(Vector3(5, 8, -5), B2.Translation, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestArrangeConeHexGridAndPushOutsideBox;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  RoomBox, B1, B2, B3, B4, B5: TCastleBox;
+  WorldPos, WorldDir, WorldUp: TVector3;
+  ExpectedStep: Single;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.OnTransformModified := {$ifdef FPC}@{$endif}HandleTransformModified;
+    Manipulate.OnTransformModifyEnd := {$ifdef FPC}@{$endif}HandleTransformModifyEnd;
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(2, 2, 2);
+    B1.Translation := Vector3(-4, 0, 0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(2, 2, 2);
+    B2.Translation := Vector3(-2, 0, 0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(2, 2, 2);
+    B3.Translation := Vector3(0, 0, 0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(2, 2, 2);
+    B4.Translation := Vector3(2, 0, 0);
+    Viewport.Items.Add(B4);
+
+    B5 := TCastleBox.Create(Viewport);
+    B5.Size := Vector3(2, 2, 2);
+    B5.Translation := Vector3(4, 0, 0);
+    Viewport.Items.Add(B5);
+
+    Manipulate.SetSelected([B1, B2, B3, B4, B5]);
+    Manipulate.PivotMode := pmSelectionCenter;
+
+    // 1. Test ArrangeSelectedOnCone(10.0, 2.0, 16.0, 2):
+    // Center = (0, 0, 0). BaseRadius = 10.0, TopRadius = 2.0, HeightSpan = 16.0.
+    // B1 (t=0): radius 10.0, theta=0, Y = -8.0 -> (10, -8, 0)
+    // B3 (t=0.5): radius 6.0, Y = 0.0
+    // B5 (t=1.0): radius 2.0, Y = 8.0
+    AssertTrue(Manipulate.ArrangeSelectedOnCone(10.0, 2.0, 16.0, 2));
+    AssertVectorEquals(Vector3(10, -8, 0), B1.Translation, 1e-4);
+    AssertSameValue(6.0, Hypot(B3.Translation.X, B3.Translation.Z), 1e-4);
+    AssertSameValue(0.0, B3.Translation.Y, 1e-4);
+    AssertSameValue(2.0, Hypot(B5.Translation.X, B5.Translation.Z), 1e-4);
+    AssertSameValue(8.0, B5.Translation.Y, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(16.0, 8.0, 0.0).Normalize, WorldDir.Normalize, 1e-4);
+
+    // 2. Test ArrangeSelectedInHexGrid(2, 4.0, 1):
+    // Reset positions of B1..B4 so Center = (0, 0, 0).
+    // With CellRadius = 4.0, every hexagonal neighbor (same-row B1-B2 and diagonal B1-B3, B2-B3, B2-B4)
+    // is equidistant at 4 * Sqrt(3) = 6.92820323!
+    B1.Translation := Vector3(-3, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(1, 0, 0);
+    B4.Translation := Vector3(3, 0, 0);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.ArrangeSelectedInHexGrid(2, 4.0, 1));
+    ExpectedStep := 4.0 * Sqrt(3.0);
+    AssertSameValue(ExpectedStep, PointsDistance(B1.Translation, B2.Translation), 1e-4);
+    AssertSameValue(ExpectedStep, PointsDistance(B1.Translation, B3.Translation), 1e-4);
+    AssertSameValue(ExpectedStep, PointsDistance(B2.Translation, B3.Translation), 1e-4);
+    AssertSameValue(ExpectedStep, PointsDistance(B2.Translation, B4.Translation), 1e-4);
+    AssertSameValue(ExpectedStep, PointsDistance(B3.Translation, B4.Translation), 1e-4);
+
+    // 3. Test PushSelectedOutsidePrimaryBounds and PushSelectedOutsideBox:
+    // RoomBox has Size (20, 10, 20) at (0, 5, 0) -> WorldBoundingBox is [-10..10] x [0..10] x [-10..10].
+    RoomBox := TCastleBox.Create(Viewport);
+    RoomBox.Size := Vector3(20, 10, 20);
+    RoomBox.Translation := Vector3(0, 5, 0);
+    Viewport.Items.Add(RoomBox);
+
+    B1.Rotation := Vector4(0, 1, 0, 0);
+    B2.Rotation := Vector4(0, 1, 0, 0);
+    B3.Rotation := Vector4(0, 1, 0, 0);
+    B1.Translation := Vector3(8.5, 5, 0);  // closest exit is +X face (10.0) -> center at 11.0
+    B2.Translation := Vector3(0, 8.8, 0);  // closest exit is +Y face (10.0) -> center at 11.0
+    B3.Translation := Vector3(25, 5, 0);   // already outside -> unchanged
+    Manipulate.SetSelected([RoomBox, B1, B2, B3]);
+    AssertTrue(Manipulate.PushSelectedOutsidePrimaryBounds(true));
+    AssertVectorEquals(Vector3(11, 5, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 11, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(25, 5, 0), B3.Translation, 1e-4);
+
+    // Also test PushSelectedOutsideBox with UseObjectBounds = false (origin push):
+    B1.Translation := Vector3(-4.2, 5, 0);
+    Manipulate.SetSelected([B1]);
+    AssertTrue(Manipulate.PushSelectedOutsideBox(Vector3(-5, 0, -5), Vector3(5, 10, 5), false));
+    AssertVectorEquals(Vector3(-5, 5, 0), B1.Translation, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

@@ -1024,6 +1024,57 @@ type
       Returns @true if at least one selected transform was modified. }
     function ClampSelectedToPrimaryBounds(
       const UseObjectBounds: Boolean = true): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) evenly
+      over a 3D conical or frustum/funnel shell around the active selection pivot
+      using a conical Fibonacci golden-angle spiral lattice:
+      $t_i = i / (N - 1)$,
+      $r_i = R_(\text(base)) + (R_(\text(top)) - R_(\text(base))) \cdot t_i$,
+      $\theta_i = i \cdot \phi_(golden)$,
+      $x_i = C_x + r_i \cos(\theta_i), \quad y_i = C_y + (t_i - 0.5) \cdot \text(HeightSpan), \quad z_i = C_z + r_i \sin(\theta_i)$.
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient horizontally inward toward the cone axis
+      - @code(2): orient outward along the 3D conical surface normal
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedOnCone(
+      const BaseRadius: Single;
+      const TopRadius: Single = 0.0;
+      const HeightSpan: Single = 10.0;
+      const OrientMode: Integer = 0): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) in a
+      2D pointy-top hexagonal / honeycomb lattice on the horizontal XZ plane
+      centered at the active selection pivot, where every adjacent cell neighbor
+      in all 6 hexagonal directions is equidistant at $\sqrt(3) \cdot \text(CellRadius)$
+      ($\Delta X = \sqrt(3) R$, $\Delta Z = 1.5 R$, odd rows staggered by $+0.5 \Delta X$).
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): cycle 6-fold hexagonal symmetry yaw ($60^\circ \cdot (i \bmod 6)$)
+      - @code(2): orient horizontally outward from the honeycomb center
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInHexGrid(
+      const Columns: Integer = 0;
+      const CellRadius: Single = 0.0;
+      const OrientMode: Integer = 0): Boolean;
+
+    { Push all top-level selected transforms (@code(SelectedCount >= 1)) whose
+      world positions (@code(UseObjectBounds = false)) or world-space bounding
+      boxes (@code(UseObjectBounds = true)) penetrate the 3D axis-aligned box
+      @code([BoxMin, BoxMax]) outward to the nearest face of the exclusion box
+      along the minimum-penetration axis.
+      Returns @true if at least one selected transform was modified. }
+    function PushSelectedOutsideBox(const BoxMin, BoxMax: TVector3;
+      const UseObjectBounds: Boolean = true): Boolean;
+
+    { Push all secondary top-level selected transforms (@code(Selected[1..N-1]))
+      whose world positions (@code(UseObjectBounds = false)) or world-space
+      bounding boxes (@code(UseObjectBounds = true)) penetrate the world bounding
+      box of the primary selected transform (@code(Selected[0])) outward to the
+      nearest face of the primary bounding box.
+      Returns @true if at least one selected transform was modified. }
+    function PushSelectedOutsidePrimaryBounds(
+      const UseObjectBounds: Boolean = true): Boolean;
   end;
 
 var
@@ -7656,6 +7707,557 @@ begin
       for Axis := 0 to 2 do
         TargetPos.Data[Axis] := EnsureRange(
           CurPos.Data[Axis], ActualMin.Data[Axis], ActualMax.Data[Axis]);
+    end;
+
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedOnCone(
+  const BaseRadius: Single;
+  const TopRadius: Single;
+  const HeightSpan: Single;
+  const OrientMode: Integer): Boolean;
+const
+  GoldenAngle = 2.39996322972865332; // Pi * (3 - Sqrt(5))
+var
+  Items: array of TCastleTransform;
+  ValidCount, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, GravityUp, LookDir, Side, NewUp,
+    CurWorldPos, CurDir, CurUp: TVector3;
+  EffBaseR, EffTopR, EffHeight, AvgDistXZ, Theta, SinT, CosT,
+    FracT, CurR: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, SelectedCount);
+  ValidCount := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if (T = nil) or IsDescendantOfAnySelected(T) then Continue;
+    Items[ValidCount] := T;
+    Inc(ValidCount);
+  end;
+
+  if ValidCount < 2 then Exit;
+
+  if (PivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+    CenterPos := GetTransformWorkingPos(FMainSelected)
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  EffBaseR := BaseRadius;
+  if EffBaseR <= 1e-4 then
+  begin
+    AvgDistXZ := 0.0;
+    for I := 0 to ValidCount - 1 do
+    begin
+      CurPos := GetTransformWorkingPos(Items[I]);
+      AvgDistXZ := AvgDistXZ + Hypot(CurPos.X - CenterPos.X, CurPos.Z - CenterPos.Z);
+    end;
+    EffBaseR := (AvgDistXZ / Single(ValidCount)) * 1.25;
+    if EffBaseR < 1e-4 then
+      EffBaseR := 5.0;
+  end;
+
+  EffTopR := Max(0.0, TopRadius);
+  EffHeight := HeightSpan;
+  if Abs(EffHeight) < 1e-4 then
+    EffHeight := Max(4.0, EffBaseR * 1.5);
+
+  if (Items[0].World <> nil) and (not Items[0].World.GravityUp.IsZero) then
+    GravityUp := Items[0].World.GravityUp.Normalize
+  else
+    GravityUp := Vector3(0, 1, 0);
+
+  for I := 0 to ValidCount - 1 do
+  begin
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+    FracT := Single(I) / Single(ValidCount - 1);
+    CurR := EffBaseR + (EffTopR - EffBaseR) * FracT;
+    Theta := Single(I) * GoldenAngle;
+    SinCos(Theta, SinT, CosT);
+
+    TargetPos := Vector3(
+      CenterPos.X + CurR * CosT,
+      CenterPos.Y + (FracT - 0.5) * EffHeight,
+      CenterPos.Z + CurR * SinT);
+
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      if OrientMode = 1 then
+        LookDir := Vector3(-CosT, 0.0, -SinT)
+      else
+        LookDir := Vector3(
+          Abs(EffHeight) * CosT,
+          EffBaseR - EffTopR,
+          Abs(EffHeight) * SinT);
+
+      if not LookDir.IsZero(1e-5) then
+      begin
+        LookDir := LookDir.Normalize;
+        Side := TVector3.CrossProduct(LookDir, GravityUp);
+        if Side.IsZero(1e-5) then
+          Side := Vector3(0, 0, 1);
+        Side := Side.Normalize;
+        NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+        T.GetWorldView(CurWorldPos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInHexGrid(
+  const Columns: Integer;
+  const CellRadius: Single;
+  const OrientMode: Integer): Boolean;
+const
+  Sqrt3 = 1.7320508075688772;
+var
+  Items: array of TCastleTransform;
+  RawX, RawZ: array of Single;
+  ValidCount, I, EffCols, Row, Col: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, GravityUp, LookDir, Side, NewUp,
+    CurWorldPos, CurDir, CurUp: TVector3;
+  EffRadius, AvgSizeXZ, StepX, StepZ, MinX, MaxX, MinZ, MaxZ,
+    MidX, MidZ, OffsetX, OffsetZ, DistXZ, AngleRad, SinA, CosA: Single;
+  BBox: TBox3D;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, SelectedCount);
+  ValidCount := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if (T = nil) or IsDescendantOfAnySelected(T) then Continue;
+    Items[ValidCount] := T;
+    Inc(ValidCount);
+  end;
+
+  if ValidCount < 2 then Exit;
+
+  if (PivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+    CenterPos := GetTransformWorkingPos(FMainSelected)
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  if Columns > 0 then
+    EffCols := Columns
+  else
+    EffCols := Max(1, Ceil(Sqrt(Single(ValidCount))));
+
+  EffRadius := Abs(CellRadius);
+  if EffRadius < 1e-4 then
+  begin
+    AvgSizeXZ := 0.0;
+    for I := 0 to ValidCount - 1 do
+    begin
+      BBox := Items[I].WorldBoundingBox;
+      if not BBox.IsEmpty then
+        AvgSizeXZ := AvgSizeXZ + Max(BBox.SizeX, BBox.SizeZ);
+    end;
+    EffRadius := (AvgSizeXZ / Single(ValidCount)) / Sqrt3;
+    if EffRadius < 1e-4 then
+      EffRadius := 2.0;
+  end;
+
+  StepX := Sqrt3 * EffRadius;
+  StepZ := 1.5 * EffRadius;
+
+  SetLength(RawX, ValidCount);
+  SetLength(RawZ, ValidCount);
+  MinX := 0.0;
+  MaxX := 0.0;
+  MinZ := 0.0;
+  MaxZ := 0.0;
+
+  for I := 0 to ValidCount - 1 do
+  begin
+    Row := I div EffCols;
+    Col := I mod EffCols;
+    RawX[I] := (Single(Col) + 0.5 * Single(Row mod 2)) * StepX;
+    RawZ[I] := Single(Row) * StepZ;
+    if I = 0 then
+    begin
+      MinX := RawX[I];
+      MaxX := RawX[I];
+      MinZ := RawZ[I];
+      MaxZ := RawZ[I];
+    end else
+    begin
+      MinX := Min(MinX, RawX[I]);
+      MaxX := Max(MaxX, RawX[I]);
+      MinZ := Min(MinZ, RawZ[I]);
+      MaxZ := Max(MaxZ, RawZ[I]);
+    end;
+  end;
+
+  MidX := 0.5 * (MinX + MaxX);
+  MidZ := 0.5 * (MinZ + MaxZ);
+
+  if (Items[0].World <> nil) and (not Items[0].World.GravityUp.IsZero) then
+    GravityUp := Items[0].World.GravityUp.Normalize
+  else
+    GravityUp := Vector3(0, 1, 0);
+
+  for I := 0 to ValidCount - 1 do
+  begin
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+    OffsetX := RawX[I] - MidX;
+    OffsetZ := RawZ[I] - MidZ;
+    TargetPos := Vector3(
+      CenterPos.X + OffsetX,
+      CenterPos.Y,
+      CenterPos.Z + OffsetZ);
+
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      if OrientMode = 1 then
+      begin
+        AngleRad := Single(I mod 6) * (Pi / 3.0);
+        SinCos(AngleRad, SinA, CosA);
+        LookDir := Vector3(SinA, 0.0, -CosA);
+      end else
+      begin
+        DistXZ := Hypot(OffsetX, OffsetZ);
+        if DistXZ < 1e-5 then
+          LookDir := Vector3(0, 0, -1)
+        else
+          LookDir := Vector3(OffsetX / DistXZ, 0.0, OffsetZ / DistXZ);
+      end;
+
+      LookDir := LookDir.Normalize;
+      Side := TVector3.CrossProduct(LookDir, GravityUp);
+      if Side.IsZero(1e-5) then
+        Side := Vector3(0, 0, 1);
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.PushSelectedOutsideBox(
+  const BoxMin, BoxMax: TVector3;
+  const UseObjectBounds: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  ValidCount, I, Axis, BestAxis: Integer;
+  T: TCastleTransform;
+  ActualMin, ActualMax, CurPos, TargetPos: TVector3;
+  ObjBox: TBox3D;
+  Overlaps: Boolean;
+  DeltaNeg, DeltaPos, BestDelta: Single;
+begin
+  Result := false;
+  if SelectedCount < 1 then Exit;
+
+  for Axis := 0 to 2 do
+  begin
+    ActualMin.Data[Axis] := Min(BoxMin.Data[Axis], BoxMax.Data[Axis]);
+    ActualMax.Data[Axis] := Max(BoxMin.Data[Axis], BoxMax.Data[Axis]);
+  end;
+
+  SetLength(Items, SelectedCount);
+  ValidCount := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if (T = nil) or IsDescendantOfAnySelected(T) then Continue;
+    Items[ValidCount] := T;
+    Inc(ValidCount);
+  end;
+
+  if ValidCount < 1 then Exit;
+
+  for I := 0 to ValidCount - 1 do
+  begin
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+    TargetPos := CurPos;
+
+    if UseObjectBounds then
+    begin
+      ObjBox := T.WorldBoundingBox;
+      if not ObjBox.IsEmpty then
+      begin
+        Overlaps :=
+          (ObjBox.Data[1].X > ActualMin.X + 1e-5) and (ObjBox.Data[0].X < ActualMax.X - 1e-5) and
+          (ObjBox.Data[1].Y > ActualMin.Y + 1e-5) and (ObjBox.Data[0].Y < ActualMax.Y - 1e-5) and
+          (ObjBox.Data[1].Z > ActualMin.Z + 1e-5) and (ObjBox.Data[0].Z < ActualMax.Z - 1e-5);
+        if Overlaps then
+        begin
+          BestAxis := 0;
+          BestDelta := 1e30;
+          for Axis := 0 to 2 do
+          begin
+            DeltaNeg := ActualMin.Data[Axis] - ObjBox.Data[1].Data[Axis];
+            DeltaPos := ActualMax.Data[Axis] - ObjBox.Data[0].Data[Axis];
+            if Abs(DeltaNeg) < Abs(BestDelta) then
+            begin
+              BestDelta := DeltaNeg;
+              BestAxis := Axis;
+            end;
+            if Abs(DeltaPos) < Abs(BestDelta) then
+            begin
+              BestDelta := DeltaPos;
+              BestAxis := Axis;
+            end;
+          end;
+          TargetPos.Data[BestAxis] := CurPos.Data[BestAxis] + BestDelta;
+        end;
+      end else
+      begin
+        Overlaps :=
+          (CurPos.X > ActualMin.X + 1e-5) and (CurPos.X < ActualMax.X - 1e-5) and
+          (CurPos.Y > ActualMin.Y + 1e-5) and (CurPos.Y < ActualMax.Y - 1e-5) and
+          (CurPos.Z > ActualMin.Z + 1e-5) and (CurPos.Z < ActualMax.Z - 1e-5);
+        if Overlaps then
+        begin
+          BestAxis := 0;
+          BestDelta := 1e30;
+          for Axis := 0 to 2 do
+          begin
+            DeltaNeg := ActualMin.Data[Axis] - CurPos.Data[Axis];
+            DeltaPos := ActualMax.Data[Axis] - CurPos.Data[Axis];
+            if Abs(DeltaNeg) < Abs(BestDelta) then
+            begin
+              BestDelta := DeltaNeg;
+              BestAxis := Axis;
+            end;
+            if Abs(DeltaPos) < Abs(BestDelta) then
+            begin
+              BestDelta := DeltaPos;
+              BestAxis := Axis;
+            end;
+          end;
+          TargetPos.Data[BestAxis] := CurPos.Data[BestAxis] + BestDelta;
+        end;
+      end;
+    end else
+    begin
+      Overlaps :=
+        (CurPos.X > ActualMin.X + 1e-5) and (CurPos.X < ActualMax.X - 1e-5) and
+        (CurPos.Y > ActualMin.Y + 1e-5) and (CurPos.Y < ActualMax.Y - 1e-5) and
+        (CurPos.Z > ActualMin.Z + 1e-5) and (CurPos.Z < ActualMax.Z - 1e-5);
+      if Overlaps then
+      begin
+        BestAxis := 0;
+        BestDelta := 1e30;
+        for Axis := 0 to 2 do
+        begin
+          DeltaNeg := ActualMin.Data[Axis] - CurPos.Data[Axis];
+          DeltaPos := ActualMax.Data[Axis] - CurPos.Data[Axis];
+          if Abs(DeltaNeg) < Abs(BestDelta) then
+          begin
+            BestDelta := DeltaNeg;
+            BestAxis := Axis;
+          end;
+          if Abs(DeltaPos) < Abs(BestDelta) then
+          begin
+            BestDelta := DeltaPos;
+            BestAxis := Axis;
+          end;
+        end;
+        TargetPos.Data[BestAxis] := CurPos.Data[BestAxis] + BestDelta;
+      end;
+    end;
+
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.PushSelectedOutsidePrimaryBounds(
+  const UseObjectBounds: Boolean): Boolean;
+var
+  PrimaryT, T: TCastleTransform;
+  PrimaryBox, ObjBox: TBox3D;
+  ActualMin, ActualMax, CurPos, TargetPos: TVector3;
+  I, Axis, BestAxis: Integer;
+  Overlaps: Boolean;
+  DeltaNeg, DeltaPos, BestDelta: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  PrimaryT := FMainSelected;
+  if PrimaryT = nil then
+    PrimaryT := Selected[0];
+  if PrimaryT = nil then Exit;
+
+  PrimaryBox := PrimaryT.WorldBoundingBox;
+  if PrimaryBox.IsEmpty then Exit;
+
+  ActualMin := PrimaryBox.Data[0];
+  ActualMax := PrimaryBox.Data[1];
+
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if (T = nil) or (T = PrimaryT) or IsDescendantOfAnySelected(T) then Continue;
+
+    CurPos := GetTransformWorkingPos(T);
+    TargetPos := CurPos;
+
+    if UseObjectBounds then
+    begin
+      ObjBox := T.WorldBoundingBox;
+      if not ObjBox.IsEmpty then
+      begin
+        Overlaps :=
+          (ObjBox.Data[1].X > ActualMin.X + 1e-5) and (ObjBox.Data[0].X < ActualMax.X - 1e-5) and
+          (ObjBox.Data[1].Y > ActualMin.Y + 1e-5) and (ObjBox.Data[0].Y < ActualMax.Y - 1e-5) and
+          (ObjBox.Data[1].Z > ActualMin.Z + 1e-5) and (ObjBox.Data[0].Z < ActualMax.Z - 1e-5);
+        if Overlaps then
+        begin
+          BestAxis := 0;
+          BestDelta := 1e30;
+          for Axis := 0 to 2 do
+          begin
+            DeltaNeg := ActualMin.Data[Axis] - ObjBox.Data[1].Data[Axis];
+            DeltaPos := ActualMax.Data[Axis] - ObjBox.Data[0].Data[Axis];
+            if Abs(DeltaNeg) < Abs(BestDelta) then
+            begin
+              BestDelta := DeltaNeg;
+              BestAxis := Axis;
+            end;
+            if Abs(DeltaPos) < Abs(BestDelta) then
+            begin
+              BestDelta := DeltaPos;
+              BestAxis := Axis;
+            end;
+          end;
+          TargetPos.Data[BestAxis] := CurPos.Data[BestAxis] + BestDelta;
+        end;
+      end else
+      begin
+        Overlaps :=
+          (CurPos.X > ActualMin.X + 1e-5) and (CurPos.X < ActualMax.X - 1e-5) and
+          (CurPos.Y > ActualMin.Y + 1e-5) and (CurPos.Y < ActualMax.Y - 1e-5) and
+          (CurPos.Z > ActualMin.Z + 1e-5) and (CurPos.Z < ActualMax.Z - 1e-5);
+        if Overlaps then
+        begin
+          BestAxis := 0;
+          BestDelta := 1e30;
+          for Axis := 0 to 2 do
+          begin
+            DeltaNeg := ActualMin.Data[Axis] - CurPos.Data[Axis];
+            DeltaPos := ActualMax.Data[Axis] - CurPos.Data[Axis];
+            if Abs(DeltaNeg) < Abs(BestDelta) then
+            begin
+              BestDelta := DeltaNeg;
+              BestAxis := Axis;
+            end;
+            if Abs(DeltaPos) < Abs(BestDelta) then
+            begin
+              BestDelta := DeltaPos;
+              BestAxis := Axis;
+            end;
+          end;
+          TargetPos.Data[BestAxis] := CurPos.Data[BestAxis] + BestDelta;
+        end;
+      end;
+    end else
+    begin
+      Overlaps :=
+        (CurPos.X > ActualMin.X + 1e-5) and (CurPos.X < ActualMax.X - 1e-5) and
+        (CurPos.Y > ActualMin.Y + 1e-5) and (CurPos.Y < ActualMax.Y - 1e-5) and
+        (CurPos.Z > ActualMin.Z + 1e-5) and (CurPos.Z < ActualMax.Z - 1e-5);
+      if Overlaps then
+      begin
+        BestAxis := 0;
+        BestDelta := 1e30;
+        for Axis := 0 to 2 do
+        begin
+          DeltaNeg := ActualMin.Data[Axis] - CurPos.Data[Axis];
+          DeltaPos := ActualMax.Data[Axis] - CurPos.Data[Axis];
+          if Abs(DeltaNeg) < Abs(BestDelta) then
+          begin
+            BestDelta := DeltaNeg;
+            BestAxis := Axis;
+          end;
+          if Abs(DeltaPos) < Abs(BestDelta) then
+          begin
+            BestDelta := DeltaPos;
+            BestAxis := Axis;
+          end;
+        end;
+        TargetPos.Data[BestAxis] := CurPos.Data[BestAxis] + BestDelta;
+      end;
     end;
 
     if not TVector3.Equals(CurPos, TargetPos) then
