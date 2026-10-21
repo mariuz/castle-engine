@@ -101,6 +101,31 @@ X3DDirectionalLightNode : X3DPunctualLightNode {
     # force updating all GeneratedShadowMaps.
     change: chVisibleGeometry
     is-extension: true
+
+  SFInt32    [in,out]      shadowCascades        1
+    range: [1,4]
+    change: chVisibleGeometry
+    is-extension: true
+    doc: """
+    Number of cascades of the shadow map (when this light has @link(Shadows) by shadow maps).
+    With 1 (the default), one shadow map covers the shadow receivers (or @link(ProjectionRectangle)).
+    With 2 to 4, the view frustum of the main camera (TCastleAbstractRootTransform.MainCamera) is split
+    into this many parts by the distance, each with its own shadow map
+    (cascaded shadow maps): near the camera the shadows are sharper.
+    The cascades follow the camera, they are rendered again every frame.
+    Each cascade has the size of the @link(TGeneratedShadowMapNode.Size).
+    See https://castle-engine.io/shadow_maps .
+    """
+
+  SFFloat    [in,out]      shadowCascadesDistance 0
+    range: >= 0
+    change: chVisibleGeometry
+    is-extension: true
+    doc: """
+    How far from the camera the cascaded shadow maps reach (see @link(ShadowCascades)).
+    0 (the default) means automatic: to the farthest point of the world's bounding box.
+    Beyond it, nothing is shadowed by this light.
+    """
 }
 
 # We add abstract X3DPositionalLightNode, not present in X3D spec.

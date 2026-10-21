@@ -68,7 +68,7 @@
         <PackageName Value="castle_engine_base"/>
       </Item2>
     </RequiredPackages>
-    <Units Count="112">
+    <Units Count="113">
       <Unit0>
         <Filename Value="castle_tester_standalone.dpr"/>
         <IsPartOfProject Value="True"/>
@@ -624,6 +624,11 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="TestCastleEnvironmentLight"/>
       </Unit111>
+      <Unit112>
+        <Filename Value="code/testcases/testcastleshadowmaps.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="TestCastleShadowMaps"/>
+      </Unit112>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

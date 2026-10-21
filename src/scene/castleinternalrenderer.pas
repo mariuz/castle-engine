@@ -226,6 +226,7 @@ initialization
   TCastleRenderOptions.DefaultMagnificationFilter := magLinear;
 
   RendererCache := TRendererCache.Create;
+  ApplicationProperties.OnGLContextClose.Add(@ShadowMapAtlasContextClose);
 finalization
   RendererCache.FreeWhenEmpty(@RendererCache);
 end.

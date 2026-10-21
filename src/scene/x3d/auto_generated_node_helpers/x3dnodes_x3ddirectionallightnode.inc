@@ -30,6 +30,10 @@
     procedure SetProjectionRectangle(const Value: TVector4);
     function GetProjectionLocation: TVector3;
     procedure SetProjectionLocation(const Value: TVector3);
+    function GetShadowCascades: Integer;
+    procedure SetShadowCascades(const Value: Integer);
+    function GetShadowCascadesDistance: Single;
+    procedure SetShadowCascadesDistance(const Value: Single);
   public
     { Create node fields and events. }
     procedure CreateNode; override;
@@ -52,6 +56,27 @@
     public property FdProjectionLocation: TSFVec3f read FFdProjectionLocation;
     {  }
     property ProjectionLocation: TVector3 read GetProjectionLocation write SetProjectionLocation;
+
+    strict private FFdShadowCascades: TSFInt32;
+    { Internal wrapper for property @code(ShadowCascades). This wrapper API may change, we advise to access simpler @code(ShadowCascades) instead, if it is defined (TODO: for now, some field types do not have a simpler counterpart). }
+    public property FdShadowCascades: TSFInt32 read FFdShadowCascades;
+    { Number of cascades of the shadow map (when this light has @link(Shadows) by shadow maps).
+    With 1 (the default), one shadow map covers the shadow receivers (or @link(ProjectionRectangle)).
+    With 2 to 4, the view frustum of the main camera (TCastleAbstractRootTransform.MainCamera) is split
+    into this many parts by the distance, each with its own shadow map
+    (cascaded shadow maps): near the camera the shadows are sharper.
+    The cascades follow the camera, they are rendered again every frame.
+    Each cascade has the size of the @link(TGeneratedShadowMapNode.Size).
+    See https://castle-engine.io/shadow_maps . }
+    property ShadowCascades: Integer read GetShadowCascades write SetShadowCascades;
+
+    strict private FFdShadowCascadesDistance: TSFFloat;
+    { Internal wrapper for property @code(ShadowCascadesDistance). This wrapper API may change, we advise to access simpler @code(ShadowCascadesDistance) instead, if it is defined (TODO: for now, some field types do not have a simpler counterpart). }
+    public property FdShadowCascadesDistance: TSFFloat read FFdShadowCascadesDistance;
+    { How far from the camera the cascaded shadow maps reach (see @link(ShadowCascades)).
+    0 (the default) means automatic: to the farthest point of the world's bounding box.
+    Beyond it, nothing is shadowed by this light. }
+    property ShadowCascadesDistance: Single read GetShadowCascadesDistance write SetShadowCascadesDistance;
     procedure GetExtensions(const ExtensionNames: TStrings); override;
 
 {$endif read_interface}
@@ -90,6 +115,26 @@ begin
   FdProjectionLocation.Send(Value);
 end;
 
+function TAbstractDirectionalLightNode.GetShadowCascades: Integer;
+begin
+  Result := FdShadowCascades.Value;
+end;
+
+procedure TAbstractDirectionalLightNode.SetShadowCascades(const Value: Integer);
+begin
+  FdShadowCascades.Send(Value);
+end;
+
+function TAbstractDirectionalLightNode.GetShadowCascadesDistance: Single;
+begin
+  Result := FdShadowCascadesDistance.Value;
+end;
+
+procedure TAbstractDirectionalLightNode.SetShadowCascadesDistance(const Value: Single);
+begin
+  FdShadowCascadesDistance.Send(Value);
+end;
+
 class function TAbstractDirectionalLightNode.ClassX3DType: String;
 begin
   Result := 'X3DDirectionalLightNode';
@@ -110,6 +155,14 @@ begin
   FFdProjectionLocation := TSFVec3f.Create(Self, True, 'projectionLocation', Vector3(0, 0, 0));
    FdProjectionLocation.ChangeAlways := chVisibleGeometry;
   AddField(FFdProjectionLocation);
+
+  FFdShadowCascades := TSFInt32.Create(Self, True, 'shadowCascades', 1);
+   FdShadowCascades.ChangeAlways := chVisibleGeometry;
+  AddField(FFdShadowCascades);
+
+  FFdShadowCascadesDistance := TSFFloat.Create(Self, True, 'shadowCascadesDistance', 0);
+   FdShadowCascadesDistance.ChangeAlways := chVisibleGeometry;
+  AddField(FFdShadowCascadesDistance);
 end;
 
 procedure TAbstractDirectionalLightNode.GetExtensions(const ExtensionNames: TStrings);
@@ -119,6 +172,10 @@ begin
     ExtensionNames.Add(X3DType + '.' + FdProjectionRectangle.X3DName);
   if not FdProjectionLocation.EqualsDefaultValue then
     ExtensionNames.Add(X3DType + '.' + FdProjectionLocation.X3DName);
+  if not FdShadowCascades.EqualsDefaultValue then
+    ExtensionNames.Add(X3DType + '.' + FdShadowCascades.X3DName);
+  if not FdShadowCascadesDistance.EqualsDefaultValue then
+    ExtensionNames.Add(X3DType + '.' + FdShadowCascadesDistance.X3DName);
 end;
 
 {$endif read_implementation}

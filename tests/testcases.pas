@@ -93,6 +93,7 @@ uses
   TestCastleEnvironmentLight,
   TestCastleInternalRttiUtils,
   TestCastleShapes,
+  TestCastleShadowMaps,
   TestCastleInternalDelphiUtils,
   TestCastleFileFilters,
   TestCastleWindow,

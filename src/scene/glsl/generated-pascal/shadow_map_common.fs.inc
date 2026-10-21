@@ -111,4 +111,73 @@
 '#endif' + LineEnding +
 '' + LineEnding +
 '}' + LineEnding +
+'' + LineEnding +
+'/* Shadow from one view (tile) of a shadow map, in a texture that may hold' + LineEnding +
+'   many tiles (the shadow map atlas, or the 6 faces of a point light).' + LineEnding +
+'' + LineEnding +
+'   coord is the position in the texture coordinates (and depth in 0..1)' + LineEnding +
+'   of the tile, before the division by w. rect is the tile' + LineEnding +
+'   (minimum x, y and maximum x, y in 0..1), texel is 1 / the texture size.' + LineEnding +
+'' + LineEnding +
+'   When always_inside is false, positions outside the tile are lit' + LineEnding +
+'   (like outside of a whole shadow map). Otherwise (cube faces)' + LineEnding +
+'   they are clamped to it. The filtering samples (PCF) are clamped' + LineEnding +
+'   to the tile too, so they never read the neighboring tiles. */' + LineEnding +
+'float castle_shadow_tile(sampler2DShadow shadowMap, const shadowsPrecision vec4 coord,' + LineEnding +
+'  const in vec4 rect, const in vec2 texel, const in bool always_inside)' + LineEnding +
+'{' + LineEnding +
+'  /* Avoid back-projecting shadows. */' + LineEnding +
+'  if (!always_inside && coord.z < 0.0) return 0.0;' + LineEnding +
+'' + LineEnding +
+'  shadowsPrecision vec3 c = coord.xyz / coord.w;' + LineEnding +
+'  if (!always_inside &&' + LineEnding +
+'      (c.x < rect.x || c.x > rect.z ||' + LineEnding +
+'       c.y < rect.y || c.y > rect.w))' + LineEnding +
+'    return 1.0;' + LineEnding +
+'' + LineEnding +
+'#if defined(PCF16)' + LineEnding +
+'  vec2 inset = texel * 2.0;' + LineEnding +
+'#elif defined(PCF4) || defined(PCF4_BILINEAR)' + LineEnding +
+'  vec2 inset = texel * 1.5;' + LineEnding +
+'#else' + LineEnding +
+'  vec2 inset = texel * 0.5;' + LineEnding +
+'#endif' + LineEnding +
+'  c.xy = clamp(c.xy, rect.xy + inset, rect.zw - inset);' + LineEnding +
+'' + LineEnding +
+'#ifdef PCF4_BILINEAR' + LineEnding +
+'' + LineEnding +
+'  vec2 tc_full = c.xy / texel;' + LineEnding +
+'  vec2 tc = floor(tc_full);' + LineEnding +
+'  vec2 f = fract(tc_full);' + LineEnding +
+'  vec2 f1 = vec2(1.0, 1.0) - f;' + LineEnding +
+'' + LineEnding +
+'  return' + LineEnding +
+'    castleShadow2D(shadowMap, vec3( tc.x        * texel.x,  tc.y        * texel.y, c.z)) * f1.x * f1.y +' + LineEnding +
+'    castleShadow2D(shadowMap, vec3( tc.x        * texel.x, (tc.y + 1.0) * texel.y, c.z)) * f1.x *  f.y +' + LineEnding +
+'    castleShadow2D(shadowMap, vec3((tc.x + 1.0) * texel.x,  tc.y        * texel.y, c.z)) *  f.x * f1.y +' + LineEnding +
+'    castleShadow2D(shadowMap, vec3((tc.x + 1.0) * texel.x, (tc.y + 1.0) * texel.y, c.z)) *  f.x *  f.y;' + LineEnding +
+'' + LineEnding +
+'#elif defined(PCF4)' + LineEnding +
+'' + LineEnding +
+'  return (' + LineEnding +
+'    castleShadow2D(shadowMap, c + vec3(-texel.x, -texel.y, 0.0)) +' + LineEnding +
+'    castleShadow2D(shadowMap, c + vec3(-texel.x,  texel.y, 0.0)) +' + LineEnding +
+'    castleShadow2D(shadowMap, c + vec3( texel.x,  texel.y, 0.0)) +' + LineEnding +
+'    castleShadow2D(shadowMap, c + vec3( texel.x, -texel.y, 0.0))' + LineEnding +
+'    ) / 4.0;' + LineEnding +
+'' + LineEnding +
+'#elif defined(PCF16)' + LineEnding +
+'' + LineEnding +
+'  float result = 0.0;' + LineEnding +
+'  for (int y = 0; y < 4; y++)' + LineEnding +
+'    for (int x = 0; x < 4; x++)' + LineEnding +
+'      result += castleShadow2D(shadowMap, c + vec3(' + LineEnding +
+'        (float(x) - 1.5) * texel.x,' + LineEnding +
+'        (float(y) - 1.5) * texel.y, 0.0));' + LineEnding +
+'  return result / 16.0;' + LineEnding +
+'' + LineEnding +
+'#else' + LineEnding +
+'  return castleShadow2D(shadowMap, c);' + LineEnding +
+'#endif' + LineEnding +
+'}' + LineEnding +
 ''

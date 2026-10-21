@@ -100,6 +100,10 @@
     { Lights shining on all shapes, may be @nil. Set in each RenderBegin. }
     GlobalLights: TLightInstancesList;
 
+    { Shadow maps received by the shape now rendered: its own
+      (TShape.InternalShadowMaps) and of the global lights. }
+    ShapeShadowMaps: TX3DNodeList;
+
     { Rendering parameters. Set in each RenderBegin, cleared to nil in RenderEnd. }
     RenderingCamera: TRenderingCamera;
     Statistics: PRenderStatistics;
@@ -286,6 +290,7 @@ destructor TRenderer.Destroy;
 begin
   FreeAndNil(TextureTransformUnitsUsedMore);
   FreeAndNil(PreparedShader);
+  FreeAndNil(ShapeShadowMaps);
   FreeAndNil(ShadowMapsShaders);
   FreeAndNil(VarianceShadowMapsShaders);
   inherited;
@@ -1465,8 +1470,14 @@ procedure TRenderer.RenderShapeTextures(const Shape: TX3DRendererShape;
   var
     ShadowMapNode: TGeneratedShadowMapNode;
     Res: TTextureResource;
-    I: Integer;
+    I, J, TextureUnit: Integer;
+    { Textures already bound for the shadow maps, and their texture units:
+      shadow maps in the same texture (the shadow map atlas) share a unit. }
+    BoundNames: array of TGLTextureId;
+    BoundUnits: array of Cardinal;
   begin
+    SetLength(BoundNames, 0);
+    SetLength(BoundUnits, 0);
     for I := 0 to ShadowMaps.Count - 1 do
     begin
       Assert(ShadowMaps[I] is TGeneratedShadowMapNode);
@@ -1482,11 +1493,28 @@ procedure TRenderer.RenderShapeTextures(const Shape: TX3DRendererShape;
         Continue;
       end;
 
-      // bind the texture to the next free texture unit
-      Res.Bind(ABoundTextureUnits);
+      TextureUnit := -1;
+      if Res is T2DTextureResource then
+        for J := 0 to Length(BoundNames) - 1 do
+          if BoundNames[J] = T2DTextureResource(Res).GLName then
+            TextureUnit := BoundUnits[J];
 
-      Shader.EnableShadowMap(ABoundTextureUnits, ShadowMapNode);
-      Inc(ABoundTextureUnits); // we used one more texture unit
+      if TextureUnit = -1 then
+      begin
+        // bind the texture to the next free texture unit
+        Res.Bind(ABoundTextureUnits);
+        TextureUnit := ABoundTextureUnits;
+        if Res is T2DTextureResource then
+        begin
+          SetLength(BoundNames, Length(BoundNames) + 1);
+          SetLength(BoundUnits, Length(BoundUnits) + 1);
+          BoundNames[Length(BoundNames) - 1] := T2DTextureResource(Res).GLName;
+          BoundUnits[Length(BoundUnits) - 1] := TextureUnit;
+        end;
+        Inc(ABoundTextureUnits); // we used one more texture unit
+      end;
+
+      Shader.EnableShadowMap(TextureUnit, ShadowMapNode);
     end;
   end;
 
@@ -1527,6 +1555,41 @@ procedure TRenderer.RenderShapeTextures(const Shape: TX3DRendererShape;
       Res.Bind(ABoundTextureUnits);
       Inc(ABoundTextureUnits);
     end;
+  end;
+
+  { Collect ShapeShadowMaps, return if there are any. }
+  function CollectShapeShadowMaps: Boolean;
+  var
+    I: Integer;
+    Light: TAbstractLightNode;
+    ShadowMap: TX3DNode;
+  begin
+    if ShapeShadowMaps = nil then
+      ShapeShadowMaps := TX3DNodeList.Create(false)
+    else
+      ShapeShadowMaps.Clear;
+    if Shape.InternalShadowMaps <> nil then
+      ShapeShadowMaps.AddRange(Shape.InternalShadowMaps);
+
+    { Shadow maps of the global lights (from any scene)
+      are received by all shapes, see TCastleScene.PrepareGlobalLightsTextures. }
+    if (GlobalLights <> nil) and RenderOptions.ReceiveGlobalLights then
+      for I := 0 to GlobalLights.Count - 1 do
+      begin
+        Light := GlobalLights.L[I].Node;
+        if (Light is TAbstractPunctualLightNode) and
+           TAbstractPunctualLightNode(Light).Shadows then
+        begin
+          ShadowMap := TAbstractPunctualLightNode(Light).FdDefaultShadowMap.Value;
+          if (ShadowMap is TGeneratedShadowMapNode) and
+             (TGeneratedShadowMapNode(ShadowMap).FdLight.Value = Light) and
+             (TTextureResources.Get(TGeneratedShadowMapNode(ShadowMap)) <> nil) and
+             (ShapeShadowMaps.IndexOf(ShadowMap) = -1) then
+            ShapeShadowMaps.Add(ShadowMap);
+        end;
+      end;
+
+    Result := ShapeShadowMaps.Count <> 0;
   end;
 
   function GetAlphaCutoff(const Shape: TShape): Single;
@@ -1598,8 +1661,8 @@ procedure TRenderer.RenderShapeTextures(const Shape: TX3DRendererShape;
           FontTextureRes <> nil);
       BoundTextureUnits := TexCoordsNeeded;
 
-      if Shape.InternalShadowMaps <> nil then
-        EnableShadowMaps(Shape.InternalShadowMaps, BoundTextureUnits, Shader);
+      if CollectShapeShadowMaps then
+        EnableShadowMaps(ShapeShadowMaps, BoundTextureUnits, Shader);
       EnableSkinJointTexture(BoundTextureUnits, Shader);
 
       { If there is special texture like a normalmap, enable it. }

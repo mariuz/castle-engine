@@ -2877,8 +2877,10 @@ end;
 function TShader.DeclareShadowFunctions: String;
 const
   ShadowDeclare: array [boolean { vsm? }] of string =
-  ('float shadow(sampler2DShadow shadowMap, const shadowsPrecision vec4 shadowMapCoord, const in float size);',
-   'float shadow(sampler2D       shadowMap, const shadowsPrecision vec4 shadowMapCoord, const in float size);');
+  ('float shadow(sampler2DShadow shadowMap, const shadowsPrecision vec4 shadowMapCoord, const in float size);' + NL +
+   'float castle_shadow_tile(sampler2DShadow shadowMap, const shadowsPrecision vec4 coord, const in vec4 rect, const in vec2 texel, const in bool always_inside);',
+   'float shadow(sampler2D       shadowMap, const shadowsPrecision vec4 shadowMapCoord, const in float size);' + NL +
+   'float castle_shadow_tile(sampler2D shadowMap, const shadowsPrecision vec4 coord, const in vec4 rect, const in vec2 texel, const in bool always_inside);');
 begin
   Result := ShadowDeclare[ShadowSampling = ssVarianceShadowMaps];
 end;
@@ -2967,6 +2969,7 @@ begin
     it only adds information to ShadowMapShaders to do it later. }
   ShadowMapShader.ShadowMap := ShadowMap;
   ShadowMapShader.TextureUnit := TextureUnit;
+  ShadowMapShader.Id := ShadowMapShaders.Count;
   ShadowMapShaders.Add(ShadowMapShader);
 
   ShadowMapShader.PrepareHash(FCodeHash);

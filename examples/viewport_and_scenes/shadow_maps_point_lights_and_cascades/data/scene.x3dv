@@ -1,0 +1,117 @@
+#X3D V4.0 utf8
+PROFILE Interchange
+
+# Shadow maps from a point light (6 views: the faces of a cube around it)
+# and from a directional light with 4 cascades (the view of the camera
+# split by the distance, sharper shadows near the camera).
+# All these views are parts of one depth texture, the shadow map atlas.
+
+DEF Sun DirectionalLight {
+  direction 0.4 -1 -0.3
+  intensity 0.7
+  shadows TRUE
+  shadowCascades 4
+  defaultShadowMap GeneratedShadowMap { update "ALWAYS" size 1024 }
+}
+
+DEF Lamp PointLight {
+  location 0 2.5 0
+  color 1 0.8 0.5
+  intensity 1.5
+  radius 20
+  radiusFalloff TRUE
+  shadows TRUE
+  defaultShadowMap GeneratedShadowMap { update "ALWAYS" size 512 }
+}
+
+# The lamp itself (not casting shadows, the light is inside it).
+Transform { translation 0 2.5 0 children Shape {
+  appearance Appearance {
+    material Material { emissiveColor 1 0.9 0.6 }
+    shadowCaster FALSE
+  }
+  geometry Sphere { radius 0.15 }
+} }
+
+Shape {
+  appearance Appearance { material Material { diffuseColor 0.7 0.7 0.65 } }
+  geometry Box { size 200 0.1 200 }
+}
+
+# A ring of boxes around the lamp: their shadows go in all directions.
+Transform { translation 3.000 0.6 0.000 rotation 0 1 0 -0.000 children DEF Crate Shape {
+  appearance Appearance { material Material { diffuseColor 0.8 0.5 0.3 } }
+  geometry Box { size 0.6 1.2 0.6 }
+} }
+Transform { translation 2.121 0.6 2.121 rotation 0 1 0 -0.785 children USE Crate }
+Transform { translation 0.000 0.6 3.000 rotation 0 1 0 -1.571 children USE Crate }
+Transform { translation -2.121 0.6 2.121 rotation 0 1 0 -2.356 children USE Crate }
+Transform { translation -3.000 0.6 0.000 rotation 0 1 0 -3.142 children USE Crate }
+Transform { translation -2.121 0.6 -2.121 rotation 0 1 0 -3.927 children USE Crate }
+Transform { translation -0.000 0.6 -3.000 rotation 0 1 0 -4.712 children USE Crate }
+Transform { translation 2.121 0.6 -2.121 rotation 0 1 0 -5.498 children USE Crate }
+
+# Two rows of pillars going far away from the camera: the sun shadows
+# stay sharp near the camera thanks to the cascades.
+Transform { translation -8 3 20 children DEF Pillar Shape {
+  appearance Appearance { material Material { diffuseColor 0.6 0.65 0.75 } }
+  geometry Cylinder { radius 0.4 height 6 }
+} }
+Transform { translation 8 3 20 children USE Pillar }
+Transform { translation -8 3 12 children USE Pillar }
+Transform { translation 8 3 12 children USE Pillar }
+Transform { translation -8 3 4 children USE Pillar }
+Transform { translation 8 3 4 children USE Pillar }
+Transform { translation -8 3 -4 children USE Pillar }
+Transform { translation 8 3 -4 children USE Pillar }
+Transform { translation -8 3 -12 children USE Pillar }
+Transform { translation 8 3 -12 children USE Pillar }
+Transform { translation -8 3 -20 children USE Pillar }
+Transform { translation 8 3 -20 children USE Pillar }
+Transform { translation -8 3 -28 children USE Pillar }
+Transform { translation 8 3 -28 children USE Pillar }
+Transform { translation -8 3 -36 children USE Pillar }
+Transform { translation 8 3 -36 children USE Pillar }
+Transform { translation -8 3 -44 children USE Pillar }
+Transform { translation 8 3 -44 children USE Pillar }
+Transform { translation -8 3 -52 children USE Pillar }
+Transform { translation 8 3 -52 children USE Pillar }
+Transform { translation -8 3 -60 children USE Pillar }
+Transform { translation 8 3 -60 children USE Pillar }
+Transform { translation -8 3 -68 children USE Pillar }
+Transform { translation 8 3 -68 children USE Pillar }
+Transform { translation -8 3 -76 children USE Pillar }
+Transform { translation 8 3 -76 children USE Pillar }
+Transform { translation -8 3 -84 children USE Pillar }
+Transform { translation 8 3 -84 children USE Pillar }
+Transform { translation -8 3 -92 children USE Pillar }
+Transform { translation 8 3 -92 children USE Pillar }
+Transform { translation -8 3 -100 children USE Pillar }
+Transform { translation 8 3 -100 children USE Pillar }
+Transform { translation -8 3 -108 children USE Pillar }
+Transform { translation 8 3 -108 children USE Pillar }
+Transform { translation -8 3 -116 children USE Pillar }
+Transform { translation 8 3 -116 children USE Pillar }
+
+# Beams on top of the pillars.
+Transform { translation 0 6.2 20 children DEF Beam Shape {
+  appearance Appearance { material Material { diffuseColor 0.5 0.5 0.55 } }
+  geometry Box { size 17 0.4 0.6 }
+} }
+Transform { translation 0 6.2 12 children USE Beam }
+Transform { translation 0 6.2 4 children USE Beam }
+Transform { translation 0 6.2 -4 children USE Beam }
+Transform { translation 0 6.2 -12 children USE Beam }
+Transform { translation 0 6.2 -20 children USE Beam }
+Transform { translation 0 6.2 -28 children USE Beam }
+Transform { translation 0 6.2 -36 children USE Beam }
+Transform { translation 0 6.2 -44 children USE Beam }
+Transform { translation 0 6.2 -52 children USE Beam }
+Transform { translation 0 6.2 -60 children USE Beam }
+Transform { translation 0 6.2 -68 children USE Beam }
+Transform { translation 0 6.2 -76 children USE Beam }
+Transform { translation 0 6.2 -84 children USE Beam }
+Transform { translation 0 6.2 -92 children USE Beam }
+Transform { translation 0 6.2 -100 children USE Beam }
+Transform { translation 0 6.2 -108 children USE Beam }
+Transform { translation 0 6.2 -116 children USE Beam }
