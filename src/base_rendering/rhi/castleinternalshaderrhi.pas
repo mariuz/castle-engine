@@ -1208,6 +1208,39 @@ type
     class function EvaluateTSRThinGeometryBlend(
       const ABaseCurrentFrameBlend, ADepthCrossLaplacian, ALumaContrast: Single): Single; static;
 
+    { Phase 31.1: Generates GLSL 450 functions for UE5 Substrate/Strata Energy-Conserving
+      Layered Material Slabs (directional slab albedo & Beer-Lambert medium transmittance). }
+    function GenerateSubstrateLayeredMaterialFunctions: String;
+
+    { Phase 31.1 CPU reference: Evaluates directional slab reflectance albedo E(mu, roughness) in [0..1]. }
+    class function EvaluateDirectionalSlabAlbedo(
+      const AF0, ANdotV, ARoughness: Single): Single; static;
+
+    { Phase 31.1 CPU reference: Energy-conserving vertical composition of a top coating/medium slab over a bottom substrate slab. }
+    class function EvaluateLayeredSlabComposition(
+      const ATopLobeRadiance, ABottomLobeRadiance, AExtinctionSigmaT: TVector3;
+      const ATopF0, ATopRoughness, ANdotV, ANdotL, ASlabThickness: Single): TVector3; static;
+
+    { Phase 31.2: Generates GLSL 450 functions for Marschner / Chiang Dual-Specular
+      Hair & Fur Fiber BSDF (longitudinal R, TT, TRT cuticle-tilted lobes and Beer-Lambert absorption). }
+    function GenerateHairMarschnerBSDF: String;
+
+    { Phase 31.2 CPU reference: Normalized longitudinal Gaussian lobe M(theta_h - shift) for hair fibers. }
+    class function EvaluateMarschnerLongitudinalM(
+      const ASinThetaI, ASinThetaO, ACuticleShiftRad, ALongitudinalRoughnessBeta: Single): Single; static;
+
+    { Phase 31.2 CPU reference: Evaluates combined Marschner R + TT + TRT hair fiber scattering RGB. }
+    class function EvaluateHairDualSpecularBSDF(
+      const AHairAbsorptionSigmaA: TVector3;
+      const ASinThetaI, ASinThetaO, ACosPhiD, ACuticleTiltRad, APrimaryRoughnessBeta: Single): TVector3; static;
+
+    { Phase 31.3: Generates GLSL 450 functions for Stochastic Discrete Microfacet Glints & Sparkles. }
+    function GenerateStochasticGlintFunctions: String;
+
+    { Phase 31.3 CPU reference: Evaluates discrete microfacet glint NDF amplification for metallic paint/snow/minerals. }
+    class function EvaluateStochasticGlintNDF(
+      const ANdotH, AMacroRoughness, AFlakeAlignment01, AGlintDensity, AGlintSharpness: Single): Single; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -5904,6 +5937,159 @@ begin
   BaseBlend := EnsureRange(ABaseCurrentFrameBlend, 0.01, 1.0);
   ThinFactor := EnsureRange(Abs(ADepthCrossLaplacian) * Max(0.0, ALumaContrast) * 4.0, 0.0, 1.0);
   Result := BaseBlend + (0.85 - BaseBlend) * ThinFactor;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateSubstrateLayeredMaterialFunctions: String;
+begin
+  Result :=
+    '// Phase 31.1: UE5 Substrate / Strata Energy-Conserving Layered Material Slabs' + NL +
+    'float EvaluateDirectionalSlabAlbedo(float f0, float nDotV, float roughness) {' + NL +
+    '  float mu = clamp(nDotV, 0.0, 1.0);' + NL +
+    '  float r = clamp(roughness, 0.0, 1.0);' + NL +
+    '  float f90 = max(f0, 1.0 - r);' + NL +
+    '  return clamp(f0 + (f90 - f0) * pow(1.0 - mu, 5.0), 0.0, 1.0);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 EvaluateLayeredSlabComposition(vec3 topLobeRadiance, vec3 bottomLobeRadiance,' + NL +
+    '  vec3 extinctionSigmaT, float topF0, float topRoughness, float nDotV, float nDotL, float slabThickness) {' + NL +
+    '  float eo = EvaluateDirectionalSlabAlbedo(topF0, nDotV, topRoughness);' + NL +
+    '  float ei = EvaluateDirectionalSlabAlbedo(topF0, nDotL, topRoughness);' + NL +
+    '  float opticalPath = max(0.0, slabThickness) * (1.0 / max(0.1, nDotV) + 1.0 / max(0.1, nDotL));' + NL +
+    '  vec3 mediumTransmittance = exp(-max(vec3(0.0), extinctionSigmaT) * opticalPath);' + NL +
+    '  vec3 bottomWeight = (1.0 - eo) * (1.0 - ei) * mediumTransmittance;' + NL +
+    '  return max(vec3(0.0), topLobeRadiance) + bottomWeight * max(vec3(0.0), bottomLobeRadiance);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateDirectionalSlabAlbedo(
+  const AF0, ANdotV, ARoughness: Single): Single;
+var
+  Mu, R, F90: Single;
+begin
+  Mu := EnsureRange(ANdotV, 0.0, 1.0);
+  R := EnsureRange(ARoughness, 0.0, 1.0);
+  F90 := Max(AF0, 1.0 - R);
+  Result := EnsureRange(AF0 + (F90 - AF0) * Math.Power(1.0 - Mu, 5.0), 0.0, 1.0);
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateLayeredSlabComposition(
+  const ATopLobeRadiance, ABottomLobeRadiance, AExtinctionSigmaT: TVector3;
+  const ATopF0, ATopRoughness, ANdotV, ANdotL, ASlabThickness: Single): TVector3;
+var
+  Eo, Ei, OpticalPath, EnergyTransmit: Single;
+  MediumT: TVector3;
+begin
+  Eo := EvaluateDirectionalSlabAlbedo(ATopF0, ANdotV, ATopRoughness);
+  Ei := EvaluateDirectionalSlabAlbedo(ATopF0, ANdotL, ATopRoughness);
+  OpticalPath := Max(0.0, ASlabThickness) * (1.0 / Max(0.1, ANdotV) + 1.0 / Max(0.1, ANdotL));
+  MediumT := Vector3(
+    Exp(-Max(0.0, AExtinctionSigmaT.X) * OpticalPath),
+    Exp(-Max(0.0, AExtinctionSigmaT.Y) * OpticalPath),
+    Exp(-Max(0.0, AExtinctionSigmaT.Z) * OpticalPath));
+  EnergyTransmit := (1.0 - Eo) * (1.0 - Ei);
+  Result := Vector3(
+    Max(0.0, ATopLobeRadiance.X) + EnergyTransmit * MediumT.X * Max(0.0, ABottomLobeRadiance.X),
+    Max(0.0, ATopLobeRadiance.Y) + EnergyTransmit * MediumT.Y * Max(0.0, ABottomLobeRadiance.Y),
+    Max(0.0, ATopLobeRadiance.Z) + EnergyTransmit * MediumT.Z * Max(0.0, ABottomLobeRadiance.Z));
+end;
+
+function TCastleShaderGeneratorRHI.GenerateHairMarschnerBSDF: String;
+begin
+  Result :=
+    '// Phase 31.2: Marschner / Chiang Dual-Specular Hair & Fur Fiber BSDF' + NL +
+    'float EvaluateMarschnerLongitudinalM(float sinThetaI, float sinThetaO,' + NL +
+    '  float cuticleShiftRad, float longitudinalRoughnessBeta) {' + NL +
+    '  float thetaI = asin(clamp(sinThetaI, -1.0, 1.0));' + NL +
+    '  float thetaO = asin(clamp(sinThetaO, -1.0, 1.0));' + NL +
+    '  float thetaH = 0.5 * (thetaI + thetaO) - cuticleShiftRad;' + NL +
+    '  float beta = max(0.02, longitudinalRoughnessBeta);' + NL +
+    '  return (0.39894228 / beta) * exp(-0.5 * (thetaH * thetaH) / (beta * beta));' + NL +
+    '}' + NL +
+    NL +
+    'vec3 EvaluateHairDualSpecularBSDF(vec3 hairAbsorptionSigmaA, float sinThetaI, float sinThetaO,' + NL +
+    '  float cosPhiD, float cuticleTiltRad, float primaryRoughnessBeta) {' + NL +
+    '  float beta = max(0.02, primaryRoughnessBeta);' + NL +
+    '  float mR   = EvaluateMarschnerLongitudinalM(sinThetaI, sinThetaO, -2.0 * cuticleTiltRad, beta);' + NL +
+    '  float mTT  = EvaluateMarschnerLongitudinalM(sinThetaI, sinThetaO,  1.0 * cuticleTiltRad, 0.75 * beta);' + NL +
+    '  float mTRT = EvaluateMarschnerLongitudinalM(sinThetaI, sinThetaO,  4.0 * cuticleTiltRad, 1.50 * beta);' + NL +
+    '  float nR   = 0.25 * max(0.0, 0.5 + 0.5 * cosPhiD);' + NL +
+    '  float nTT  = 0.50 * pow(max(0.0, 0.5 - 0.5 * cosPhiD), 2.0);' + NL +
+    '  float nTRT = 0.35 * max(0.0, 0.5 + 0.5 * cosPhiD);' + NL +
+    '  vec3 transTT  = exp(-max(vec3(0.0), hairAbsorptionSigmaA) * 1.0);' + NL +
+    '  vec3 transTRT = exp(-max(vec3(0.0), hairAbsorptionSigmaA) * 2.0);' + NL +
+    '  return vec3(0.04 * mR * nR) + transTT * (mTT * nTT) + transTRT * (mTRT * nTRT);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateMarschnerLongitudinalM(
+  const ASinThetaI, ASinThetaO, ACuticleShiftRad, ALongitudinalRoughnessBeta: Single): Single;
+var
+  ThetaI, ThetaO, ThetaH, Beta: Double;
+begin
+  ThetaI := ArcSin(EnsureRange(ASinThetaI, -1.0, 1.0));
+  ThetaO := ArcSin(EnsureRange(ASinThetaO, -1.0, 1.0));
+  ThetaH := 0.5 * (ThetaI + ThetaO) - ACuticleShiftRad;
+  Beta := Max(0.02, ALongitudinalRoughnessBeta);
+  Result := (0.3989422804014327 / Beta) * Exp(-0.5 * (ThetaH * ThetaH) / (Beta * Beta));
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateHairDualSpecularBSDF(
+  const AHairAbsorptionSigmaA: TVector3;
+  const ASinThetaI, ASinThetaO, ACosPhiD, ACuticleTiltRad, APrimaryRoughnessBeta: Single): TVector3;
+var
+  Beta, MR, MTT, MTRT, NR, NTT, NTRT, SpecR: Single;
+  TransTT, TransTRT: TVector3;
+begin
+  Beta := Max(0.02, APrimaryRoughnessBeta);
+  MR   := EvaluateMarschnerLongitudinalM(ASinThetaI, ASinThetaO, -2.0 * ACuticleTiltRad, Beta);
+  MTT  := EvaluateMarschnerLongitudinalM(ASinThetaI, ASinThetaO,  1.0 * ACuticleTiltRad, 0.75 * Beta);
+  MTRT := EvaluateMarschnerLongitudinalM(ASinThetaI, ASinThetaO,  4.0 * ACuticleTiltRad, 1.50 * Beta);
+  NR   := 0.25 * Max(0.0, 0.5 + 0.5 * ACosPhiD);
+  NTT  := 0.50 * Sqr(Max(0.0, 0.5 - 0.5 * ACosPhiD));
+  NTRT := 0.35 * Max(0.0, 0.5 + 0.5 * ACosPhiD);
+  TransTT := Vector3(
+    Exp(-Max(0.0, AHairAbsorptionSigmaA.X) * 1.0),
+    Exp(-Max(0.0, AHairAbsorptionSigmaA.Y) * 1.0),
+    Exp(-Max(0.0, AHairAbsorptionSigmaA.Z) * 1.0));
+  TransTRT := Vector3(
+    Exp(-Max(0.0, AHairAbsorptionSigmaA.X) * 2.0),
+    Exp(-Max(0.0, AHairAbsorptionSigmaA.Y) * 2.0),
+    Exp(-Max(0.0, AHairAbsorptionSigmaA.Z) * 2.0));
+  SpecR := 0.04 * MR * NR;
+  Result := Vector3(
+    SpecR + TransTT.X * (MTT * NTT) + TransTRT.X * (MTRT * NTRT),
+    SpecR + TransTT.Y * (MTT * NTT) + TransTRT.Y * (MTRT * NTRT),
+    SpecR + TransTT.Z * (MTT * NTT) + TransTRT.Z * (MTRT * NTRT));
+end;
+
+function TCastleShaderGeneratorRHI.GenerateStochasticGlintFunctions: String;
+begin
+  Result :=
+    '// Phase 31.3: Stochastic Discrete Microfacet Glints & Sparkles' + NL +
+    'float EvaluateStochasticGlintNDF(float nDotH, float macroRoughness,' + NL +
+    '  float flakeAlignment01, float glintDensity, float glintSharpness) {' + NL +
+    '  float a = max(0.02, macroRoughness * macroRoughness);' + NL +
+    '  float a2 = a * a;' + NL +
+    '  float nh = clamp(nDotH, 0.0, 1.0);' + NL +
+    '  float denom = nh * nh * (a2 - 1.0) + 1.0;' + NL +
+    '  float dMacro = a2 / max(1e-6, 3.14159265 * denom * denom);' + NL +
+    '  float glintSpike = pow(clamp(flakeAlignment01, 0.0, 1.0), max(1.0, glintSharpness)) / max(0.01, glintDensity);' + NL +
+    '  return dMacro * (1.0 + glintSpike);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateStochasticGlintNDF(
+  const ANdotH, AMacroRoughness, AFlakeAlignment01, AGlintDensity, AGlintSharpness: Single): Single;
+var
+  A, A2, NH, Denom, DMacro, GlintSpike: Single;
+begin
+  A := Max(0.02, AMacroRoughness * AMacroRoughness);
+  A2 := A * A;
+  NH := EnsureRange(ANdotH, 0.0, 1.0);
+  Denom := NH * NH * (A2 - 1.0) + 1.0;
+  DMacro := A2 / Max(1e-6, Pi * Denom * Denom);
+  GlintSpike := Math.Power(EnsureRange(AFlakeAlignment01, 0.0, 1.0), Max(1.0, AGlintSharpness)) / Max(0.01, AGlintDensity);
+  Result := DMacro * (1.0 + GlintSpike);
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

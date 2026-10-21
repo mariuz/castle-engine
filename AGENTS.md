@@ -77,11 +77,11 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–29**: **COMPLETED** (100%).
-- **Phase 30 (Temporal Super Resolution — TSR Sub-Pixel History Upscaling & Disocclusion Anti-Ghosting)**: **COMPLETED** (100%, 120 unit tests passing):
-  - [x] **30.1. Lanczos-2 / Blackman-Harris Sub-Pixel Reconstruction Kernel & History Upsampling (`TCastleVulkanTSRUpscaler` in `CastleInternalRHI_Vulkan`, `GenerateTSRUpscaleComputeShader` in `CastleInternalShaderRHI`)** — Completed & tested (`TestTSRLanczos2AndBlackmanHarrisKernelsRHI`, `TestVulkanTSRUpscalerHistoryManagerRHI`).
-  - [x] **30.2. Parallax Disocclusion Detection, Thin-Feature Responsiveness & Flicker Suppression (`EvaluateTSRDisocclusionConfidence`, `EvaluateTSRThinGeometryBlend` in `CastleInternalShaderRHI`)** — Completed & tested (`TestTSRDisocclusionAndThinGeometryAntiGhostingRHI`).
-- **Unreal Engine 5 Feature Parity Roadmap (Phases 31–33)**:
-  - **Phase 31 (UE5 Substrate / Strata & Hair Parity)**: Energy-Conserving Multi-Lobe Layered Material Slabs, Dual-Specular Marschner/Chiang Hair & Fur BSDF, and Stochastic Discrete Microfacet Glints.
+- **Phases 1–30**: **COMPLETED** (100%).
+- **Phase 31 (Substrate / Strata Multi-Lobe Layered Material Slabs, Glint Microfacet Sparkles & Dual-Specular Marschner Hair/Fur BSDF)**: **COMPLETED** (100%, 123 unit tests passing):
+  - [x] **31.1. Energy-Conserving Layered Material Slabs & Vertical Coating Transmittance (`GenerateSubstrateLayeredMaterialFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSubstrateLayeredMaterialSlabsRHI`).
+  - [x] **31.2. Marschner / Chiang Dual-Specular Hair & Fur Fiber BSDF (`GenerateHairMarschnerBSDF` in `CastleInternalShaderRHI`)** — Completed & tested (`TestMarschnerDualSpecularHairBSDFRHI`).
+  - [x] **31.3. Stochastic Discrete Microfacet Glints & Sparkles (`GenerateStochasticGlintFunctions`, `EvaluateStochasticGlintNDF` in `CastleInternalShaderRHI`)** — Completed & tested (`TestStochasticDiscreteMicrofacetGlintsRHI`).
+- **Unreal Engine 5 Feature Parity Roadmap (Phases 32–33)**:
   - **Phase 32 (Next-Gen GPU Pipeline)**: Hardware Task/Mesh Shaders (`VK_EXT_mesh_shader`), Tile-Based Variable Rate Shading (`VK_KHR_fragment_shading_rate`, `TCastleVulkanVRSManager`), and Runtime Virtual Texturing (`TCastleVulkanRuntimeVirtualTexture`).
   - **Phase 33 (Water, Sparse Volumes & Diagnostics)**: Single-Layer Water Beer-Lambert Absorption, Snell Refraction & Photon Caustics, Sparse Brick-Atlas Heterogeneous Volumes (`TCastleVulkanSparseVolumeAtlas` with Planckian blackbody emission), and GPU Crash Breadcrumb Tracker (`TCastleVulkanBreadcrumbTracker`).

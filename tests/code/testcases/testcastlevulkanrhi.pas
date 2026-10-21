@@ -159,6 +159,9 @@ type
     procedure TestTSRLanczos2AndBlackmanHarrisKernelsRHI;
     procedure TestTSRDisocclusionAndThinGeometryAntiGhostingRHI;
     procedure TestVulkanTSRUpscalerHistoryManagerRHI;
+    procedure TestSubstrateLayeredMaterialSlabsRHI;
+    procedure TestMarschnerDualSpecularHairBSDFRHI;
+    procedure TestStochasticDiscreteMicrofacetGlintsRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -8697,6 +8700,99 @@ begin
   finally
     FreeAndNil(CmdList);
     FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSubstrateLayeredMaterialSlabsRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  SlabGLSL: String;
+  ENormal, EGrazing: Single;
+  CompClear, CompTintedAmber: TVector3;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Substrate Layered Material GLSL 450 functions }
+    SlabGLSL := Gen.GenerateSubstrateLayeredMaterialFunctions;
+    AssertTrue('Substrate GLSL must include EvaluateDirectionalSlabAlbedo and EvaluateLayeredSlabComposition',
+      (Pos('float EvaluateDirectionalSlabAlbedo(float f0, float nDotV, float roughness)', SlabGLSL) > 0) and
+      (Pos('vec3 EvaluateLayeredSlabComposition(vec3 topLobeRadiance, vec3 bottomLobeRadiance,', SlabGLSL) > 0));
+
+    { 2. Verify directional slab albedo increases toward grazing angles }
+    ENormal  := TCastleShaderGeneratorRHI.EvaluateDirectionalSlabAlbedo(0.04, 1.0, 0.1);
+    EGrazing := TCastleShaderGeneratorRHI.EvaluateDirectionalSlabAlbedo(0.04, 0.05, 0.1);
+    AssertSameValue(0.04, ENormal, 1e-5);
+    AssertTrue('Grazing directional slab albedo must strongly exceed normal incidence', EGrazing > 0.6);
+
+    { 3. Verify vertical slab composition conserves energy ((1-Eo)*(1-Ei) < 1) and applies Beer-Lambert medium tinting }
+    CompClear := TCastleShaderGeneratorRHI.EvaluateLayeredSlabComposition(
+      Vector3(0.0, 0.0, 0.0), Vector3(1.0, 1.0, 1.0), Vector3(0.0, 0.0, 0.0),
+      0.04, 0.1, 1.0, 1.0, 1.0);
+    CompTintedAmber := TCastleShaderGeneratorRHI.EvaluateLayeredSlabComposition(
+      Vector3(0.0, 0.0, 0.0), Vector3(1.0, 1.0, 1.0), Vector3(0.05, 0.5, 2.0),
+      0.04, 0.1, 1.0, 1.0, 1.0);
+
+    AssertSameValue(Sqr(1.0 - 0.04), CompClear.X, 1e-5);
+    AssertTrue('Amber absorbing top medium must attenuate blue far more than red',
+      (CompTintedAmber.X > CompTintedAmber.Y) and (CompTintedAmber.Y > CompTintedAmber.Z));
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestMarschnerDualSpecularHairBSDFRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  HairGLSL: String;
+  MPeak, MOffPeak: Single;
+  HairBlonde, HairDarkBrown: TVector3;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Marschner Hair BSDF GLSL 450 functions }
+    HairGLSL := Gen.GenerateHairMarschnerBSDF;
+    AssertTrue('Marschner Hair GLSL must include EvaluateMarschnerLongitudinalM and EvaluateHairDualSpecularBSDF',
+      (Pos('float EvaluateMarschnerLongitudinalM(float sinThetaI, float sinThetaO,', HairGLSL) > 0) and
+      (Pos('vec3 EvaluateHairDualSpecularBSDF(vec3 hairAbsorptionSigmaA, float sinThetaI, float sinThetaO,', HairGLSL) > 0));
+
+    { 2. Verify longitudinal Gaussian lobe M peaks when half-angle matches cuticle shift }
+    MPeak    := TCastleShaderGeneratorRHI.EvaluateMarschnerLongitudinalM(Sin(0.1), Sin(0.1), 0.1, 0.1);
+    MOffPeak := TCastleShaderGeneratorRHI.EvaluateMarschnerLongitudinalM(Sin(0.1), Sin(0.1), -0.3, 0.1);
+    AssertTrue('Longitudinal hair lobe M must peak at cuticle shift angle', MPeak > MOffPeak * 10.0);
+
+    { 3. Verify dual-specular R + TT + TRT scattering reflects brighter warm/blonde tones at low eumelanin absorption }
+    HairBlonde := TCastleShaderGeneratorRHI.EvaluateHairDualSpecularBSDF(
+      Vector3(0.06, 0.18, 0.45), 0.2, 0.2, -0.8, 0.05, 0.12);
+    HairDarkBrown := TCastleShaderGeneratorRHI.EvaluateHairDualSpecularBSDF(
+      Vector3(1.5, 2.2, 3.5), 0.2, 0.2, -0.8, 0.05, 0.12);
+
+    AssertTrue('Blonde hair internal TT+TRT scattering must be significantly brighter and warmer than dark brown hair',
+      (HairBlonde.X > HairDarkBrown.X * 2.0) and (HairBlonde.X > HairBlonde.Z));
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestStochasticDiscreteMicrofacetGlintsRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  GlintGLSL: String;
+  NDFNoFlake, NDFAlignedFlake: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Stochastic Glint GLSL 450 functions }
+    GlintGLSL := Gen.GenerateStochasticGlintFunctions;
+    AssertTrue('Stochastic Glint GLSL must include EvaluateStochasticGlintNDF',
+      Pos('float EvaluateStochasticGlintNDF(float nDotH, float macroRoughness,', GlintGLSL) > 0);
+
+    { 2. Verify aligned discrete micro-flake produces intense sparkle amplification over macro GGX baseline }
+    NDFNoFlake      := TCastleShaderGeneratorRHI.EvaluateStochasticGlintNDF(0.95, 0.35, 0.0, 0.05, 32.0);
+    NDFAlignedFlake := TCastleShaderGeneratorRHI.EvaluateStochasticGlintNDF(0.95, 0.35, 1.0, 0.05, 32.0);
+    AssertTrue('Aligned discrete micro-flake must amplify specular glint NDF by > 10x',
+      NDFAlignedFlake > NDFNoFlake * 10.0);
+  finally
+    FreeAndNil(Gen);
   end;
 end;
 
