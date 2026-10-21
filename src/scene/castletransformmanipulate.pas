@@ -1075,6 +1075,58 @@ type
       Returns @true if at least one selected transform was modified. }
     function PushSelectedOutsidePrimaryBounds(
       const UseObjectBounds: Boolean = true): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) along the
+      12 outer wireframe edges and 8 corner vertices of a 3D box with half-extents
+      @code(HalfExtents) around the active selection pivot (@code(ShellMode = false)),
+      or over the outer 6 boundary faces of a hollow cubic lattice (@code(ShellMode = true)).
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient outward from the cube center
+      - @code(2): orient inward toward the cube center
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedOnCubeFrame(
+      const HalfExtents: TVector3;
+      const ShellMode: Boolean = false;
+      const OrientMode: Integer = 0): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) in a
+      3D paraboloid dish / bowl / crater using a sunflower golden-angle Phyllotaxis
+      spiral centered at the active selection pivot:
+      $u_i = (i + 0.5) / N$,
+      $r_i = R \sqrt(u_i)$,
+      $\theta_i = i \cdot \phi_(golden)$,
+      $x_i = C_x + r_i \cos(\theta_i), \quad y_i = C_y + D_y (u_i - 0.5), \quad z_i = C_z + r_i \sin(\theta_i)$.
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient along the 3D paraboloid surface normal (concave inward when $D_y > 0$)
+      - @code(2): orient horizontally inward toward the central vertical axis
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInParaboloidBowl(
+      const RimRadius: Single = 0.0;
+      const DepthY: Single = 5.0;
+      const OrientMode: Integer = 0): Boolean;
+
+    { Snap / project all top-level selected transforms (@code(SelectedCount >= 1))
+      onto the nearest of the 6 outer faces ($\pm X, \pm Y, \pm Z$) of the 3D
+      axis-aligned box @code([BoxMin, BoxMax]).
+      Each transform's two tangential coordinates are clamped to the box face bounds,
+      while its normal coordinate is snapped to the nearest face (offset outward by
+      the transform's own half-extent along that face normal when @code(FlushOutside = true)).
+      When @code(OrientOutward = true), each transform is also rotated to face along
+      the snapped box face's outward normal.
+      Returns @true if at least one selected transform was modified. }
+    function SnapSelectedToBoxSurface(const BoxMin, BoxMax: TVector3;
+      const FlushOutside: Boolean = true;
+      const OrientOutward: Boolean = false): Boolean;
+
+    { Snap / project all secondary top-level selected transforms (@code(Selected[1..N-1]))
+      onto the nearest of the 6 outer faces of the primary selected transform's
+      (@code(Selected[0])) world bounding box.
+      Returns @true if at least one selected transform was modified. }
+    function SnapSelectedToPrimaryBoundsSurface(
+      const FlushOutside: Boolean = true;
+      const OrientOutward: Boolean = false): Boolean;
   end;
 
 var
@@ -8264,6 +8316,527 @@ begin
     begin
       SetTransformWorkingPos(T, TargetPos);
       Result := true;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedOnCubeFrame(
+  const HalfExtents: TVector3;
+  const ShellMode: Boolean;
+  const OrientMode: Integer): Boolean;
+const
+  EdgeStarts: array [0..11] of TVector3 = (
+    (X: -1; Y: -1; Z: -1), (X:  1; Y: -1; Z: -1), (X:  1; Y: -1; Z:  1), (X: -1; Y: -1; Z:  1),
+    (X: -1; Y:  1; Z: -1), (X:  1; Y:  1; Z: -1), (X:  1; Y:  1; Z:  1), (X: -1; Y:  1; Z:  1),
+    (X: -1; Y: -1; Z: -1), (X:  1; Y: -1; Z: -1), (X:  1; Y: -1; Z:  1), (X: -1; Y: -1; Z:  1)
+  );
+  EdgeEnds: array [0..11] of TVector3 = (
+    (X:  1; Y: -1; Z: -1), (X:  1; Y: -1; Z:  1), (X: -1; Y: -1; Z:  1), (X: -1; Y: -1; Z: -1),
+    (X:  1; Y:  1; Z: -1), (X:  1; Y:  1; Z:  1), (X: -1; Y:  1; Z:  1), (X: -1; Y:  1; Z: -1),
+    (X: -1; Y:  1; Z: -1), (X:  1; Y:  1; Z: -1), (X:  1; Y:  1; Z:  1), (X: -1; Y:  1; Z:  1)
+  );
+var
+  Items: array of TCastleTransform;
+  ValidCount, I, EdgeIdx, K, IX, IY, IZ, CapCount: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, Ext, P0, P1, EdgeVec, NormPos,
+    GravityUp, LookDir, Side, NewUp, CurWorldPos, CurDir, CurUp: TVector3;
+  EdgeLens: array [0..11] of Single;
+  TotalPerim, DistAlong, SegLen, Frac: Single;
+  ShellPts: array of TVector3;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, SelectedCount);
+  ValidCount := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if (T = nil) or IsDescendantOfAnySelected(T) then Continue;
+    Items[ValidCount] := T;
+    Inc(ValidCount);
+  end;
+
+  if ValidCount < 2 then Exit;
+
+  if (PivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+    CenterPos := GetTransformWorkingPos(FMainSelected)
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  Ext := Vector3(Abs(HalfExtents.X), Abs(HalfExtents.Y), Abs(HalfExtents.Z));
+  if (Ext.X <= 1e-4) and (Ext.Y <= 1e-4) and (Ext.Z <= 1e-4) then
+  begin
+    for I := 0 to ValidCount - 1 do
+    begin
+      CurPos := GetTransformWorkingPos(Items[I]) - CenterPos;
+      Ext.X := Max(Ext.X, Abs(CurPos.X));
+      Ext.Y := Max(Ext.Y, Abs(CurPos.Y));
+      Ext.Z := Max(Ext.Z, Abs(CurPos.Z));
+    end;
+    if Ext.X <= 1e-4 then Ext.X := 5.0;
+    if Ext.Y <= 1e-4 then Ext.Y := 5.0;
+    if Ext.Z <= 1e-4 then Ext.Z := 5.0;
+  end else
+  begin
+    if Ext.X <= 1e-4 then Ext.X := Max(Ext.Y, Ext.Z);
+    if Ext.Y <= 1e-4 then Ext.Y := Max(Ext.X, Ext.Z);
+    if Ext.Z <= 1e-4 then Ext.Z := Max(Ext.X, Ext.Y);
+  end;
+
+  if ShellMode then
+  begin
+    K := 2;
+    while (6 * K * K - 12 * K + 8) < ValidCount do
+      Inc(K);
+    CapCount := 6 * K * K - 12 * K + 8;
+    SetLength(ShellPts, CapCount);
+    EdgeIdx := 0;
+    for IY := 0 to K - 1 do
+      for IZ := 0 to K - 1 do
+        for IX := 0 to K - 1 do
+          if (IX = 0) or (IX = K - 1) or
+             (IY = 0) or (IY = K - 1) or
+             (IZ = 0) or (IZ = K - 1) then
+          begin
+            ShellPts[EdgeIdx] := Vector3(
+              -1.0 + 2.0 * Single(IX) / Single(K - 1),
+              -1.0 + 2.0 * Single(IY) / Single(K - 1),
+              -1.0 + 2.0 * Single(IZ) / Single(K - 1));
+            Inc(EdgeIdx);
+          end;
+  end else
+  begin
+    TotalPerim := 0.0;
+    for EdgeIdx := 0 to 11 do
+    begin
+      P0 := Vector3(EdgeStarts[EdgeIdx].X * Ext.X, EdgeStarts[EdgeIdx].Y * Ext.Y, EdgeStarts[EdgeIdx].Z * Ext.Z);
+      P1 := Vector3(EdgeEnds[EdgeIdx].X * Ext.X, EdgeEnds[EdgeIdx].Y * Ext.Y, EdgeEnds[EdgeIdx].Z * Ext.Z);
+      EdgeLens[EdgeIdx] := PointsDistance(P0, P1);
+      TotalPerim := TotalPerim + EdgeLens[EdgeIdx];
+    end;
+  end;
+
+  if (Items[0].World <> nil) and (not Items[0].World.GravityUp.IsZero) then
+    GravityUp := Items[0].World.GravityUp.Normalize
+  else
+    GravityUp := Vector3(0, 1, 0);
+
+  for I := 0 to ValidCount - 1 do
+  begin
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+
+    if ShellMode then
+    begin
+      NormPos := ShellPts[I];
+      TargetPos := CenterPos + Vector3(NormPos.X * Ext.X, NormPos.Y * Ext.Y, NormPos.Z * Ext.Z);
+    end else
+    begin
+      DistAlong := (Single(I) / Single(ValidCount)) * TotalPerim;
+      NormPos := EdgeStarts[0];
+      for EdgeIdx := 0 to 11 do
+      begin
+        SegLen := EdgeLens[EdgeIdx];
+        if (DistAlong < SegLen - 1e-5) or (EdgeIdx = 11) then
+        begin
+          if SegLen > 1e-5 then
+            Frac := Clamped(DistAlong / SegLen, 0.0, 1.0)
+          else
+            Frac := 0.0;
+          NormPos := Lerp(Frac, EdgeStarts[EdgeIdx], EdgeEnds[EdgeIdx]);
+          Break;
+        end;
+        DistAlong := Max(0.0, DistAlong - SegLen);
+      end;
+      TargetPos := CenterPos + Vector3(NormPos.X * Ext.X, NormPos.Y * Ext.Y, NormPos.Z * Ext.Z);
+    end;
+
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      EdgeVec := TargetPos - CenterPos;
+      if not EdgeVec.IsZero(1e-5) then
+      begin
+        if OrientMode = 1 then
+          LookDir := EdgeVec.Normalize
+        else
+          LookDir := (-EdgeVec).Normalize;
+
+        Side := TVector3.CrossProduct(LookDir, GravityUp);
+        if Side.IsZero(1e-5) then
+          Side := Vector3(0, 0, 1);
+        Side := Side.Normalize;
+        NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+        T.GetWorldView(CurWorldPos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInParaboloidBowl(
+  const RimRadius: Single;
+  const DepthY: Single;
+  const OrientMode: Integer): Boolean;
+const
+  GoldenAngle = 2.39996322972865332; // Pi * (3 - Sqrt(5))
+var
+  Items: array of TCastleTransform;
+  ValidCount, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, NormalVec,
+    GravityUp, LookDir, Side, NewUp, CurWorldPos, CurDir, CurUp: TVector3;
+  ActualRadius, U, R, Theta, CosT, SinT, SlopeFactor: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, SelectedCount);
+  ValidCount := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if (T = nil) or IsDescendantOfAnySelected(T) then Continue;
+    Items[ValidCount] := T;
+    Inc(ValidCount);
+  end;
+
+  if ValidCount < 2 then Exit;
+
+  if (PivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+    CenterPos := GetTransformWorkingPos(FMainSelected)
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  ActualRadius := Abs(RimRadius);
+  if ActualRadius <= 1e-4 then
+  begin
+    for I := 0 to ValidCount - 1 do
+    begin
+      CurPos := GetTransformWorkingPos(Items[I]) - CenterPos;
+      ActualRadius := Max(ActualRadius, Hypot(CurPos.X, CurPos.Z));
+    end;
+    if ActualRadius <= 1e-4 then
+      ActualRadius := 6.0;
+  end;
+
+  if (Items[0].World <> nil) and (not Items[0].World.GravityUp.IsZero) then
+    GravityUp := Items[0].World.GravityUp.Normalize
+  else
+    GravityUp := Vector3(0, 1, 0);
+
+  for I := 0 to ValidCount - 1 do
+  begin
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+
+    U := (Single(I) + 0.5) / Single(ValidCount);
+    R := ActualRadius * Sqrt(U);
+    Theta := Single(I) * GoldenAngle;
+    SinCos(Theta, SinT, CosT);
+
+    TargetPos := Vector3(
+      CenterPos.X + R * CosT,
+      CenterPos.Y + DepthY * (U - 0.5),
+      CenterPos.Z + R * SinT);
+
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      if OrientMode = 1 then
+      begin
+        SlopeFactor := 2.0 * DepthY * R;
+        NormalVec := Vector3(
+          -SlopeFactor * CosT,
+          ActualRadius * ActualRadius,
+          -SlopeFactor * SinT);
+        if NormalVec.IsZero(1e-5) then
+          LookDir := Vector3(0, 1, 0)
+        else
+          LookDir := NormalVec.Normalize;
+      end else
+      begin
+        NormalVec := Vector3(-CosT, 0.0, -SinT);
+        if NormalVec.IsZero(1e-5) then
+          LookDir := Vector3(0, 0, -1)
+        else
+          LookDir := NormalVec.Normalize;
+      end;
+
+      Side := TVector3.CrossProduct(LookDir, GravityUp);
+      if Side.IsZero(1e-5) then
+        Side := Vector3(0, 0, 1);
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.SnapSelectedToBoxSurface(
+  const BoxMin, BoxMax: TVector3;
+  const FlushOutside: Boolean;
+  const OrientOutward: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  ValidCount, I, Axis, BestAxis, BestSign: Integer;
+  T: TCastleTransform;
+  ActualMin, ActualMax, CurPos, TargetPos, HalfExt,
+    GravityUp, LookDir, Side, NewUp, CurWorldPos, CurDir, CurUp: TVector3;
+  ObjBox: TBox3D;
+  DistNeg, DistPos, BestDist: Single;
+begin
+  Result := false;
+  if SelectedCount < 1 then Exit;
+
+  for Axis := 0 to 2 do
+  begin
+    ActualMin.Data[Axis] := Min(BoxMin.Data[Axis], BoxMax.Data[Axis]);
+    ActualMax.Data[Axis] := Max(BoxMin.Data[Axis], BoxMax.Data[Axis]);
+  end;
+
+  SetLength(Items, SelectedCount);
+  ValidCount := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if (T = nil) or IsDescendantOfAnySelected(T) then Continue;
+    Items[ValidCount] := T;
+    Inc(ValidCount);
+  end;
+
+  if ValidCount < 1 then Exit;
+
+  if (Items[0].World <> nil) and (not Items[0].World.GravityUp.IsZero) then
+    GravityUp := Items[0].World.GravityUp.Normalize
+  else
+    GravityUp := Vector3(0, 1, 0);
+
+  for I := 0 to ValidCount - 1 do
+  begin
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+    HalfExt := TVector3.Zero;
+    if FlushOutside then
+    begin
+      ObjBox := T.WorldBoundingBox;
+      if not ObjBox.IsEmpty then
+        HalfExt := ObjBox.Size * 0.5;
+    end;
+
+    BestAxis := 0;
+    BestSign := 1;
+    BestDist := 1e30;
+    for Axis := 0 to 2 do
+    begin
+      DistNeg := Abs(CurPos.Data[Axis] - ActualMin.Data[Axis]);
+      if DistNeg < BestDist then
+      begin
+        BestDist := DistNeg;
+        BestAxis := Axis;
+        BestSign := -1;
+      end;
+      DistPos := Abs(CurPos.Data[Axis] - ActualMax.Data[Axis]);
+      if DistPos < BestDist then
+      begin
+        BestDist := DistPos;
+        BestAxis := Axis;
+        BestSign := 1;
+      end;
+    end;
+
+    for Axis := 0 to 2 do
+      if Axis = BestAxis then
+      begin
+        if BestSign < 0 then
+          TargetPos.Data[Axis] := ActualMin.Data[Axis] - HalfExt.Data[Axis]
+        else
+          TargetPos.Data[Axis] := ActualMax.Data[Axis] + HalfExt.Data[Axis];
+      end else
+        TargetPos.Data[Axis] := Clamped(CurPos.Data[Axis], ActualMin.Data[Axis], ActualMax.Data[Axis]);
+
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if OrientOutward and T.HasWorldTransform then
+    begin
+      LookDir := TVector3.Zero;
+      LookDir.Data[BestAxis] := Single(BestSign);
+      Side := TVector3.CrossProduct(LookDir, GravityUp);
+      if Side.IsZero(1e-5) then
+        Side := Vector3(0, 0, 1);
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.SnapSelectedToPrimaryBoundsSurface(
+  const FlushOutside: Boolean;
+  const OrientOutward: Boolean): Boolean;
+var
+  PrimaryT, T: TCastleTransform;
+  PrimaryBox, ObjBox: TBox3D;
+  ActualMin, ActualMax, CurPos, TargetPos, HalfExt,
+    GravityUp, LookDir, Side, NewUp, CurWorldPos, CurDir, CurUp: TVector3;
+  I, Axis, BestAxis, BestSign: Integer;
+  DistNeg, DistPos, BestDist: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  PrimaryT := FMainSelected;
+  if PrimaryT = nil then
+    PrimaryT := Selected[0];
+  if PrimaryT = nil then Exit;
+
+  PrimaryBox := PrimaryT.WorldBoundingBox;
+  if PrimaryBox.IsEmpty then Exit;
+
+  ActualMin := PrimaryBox.Data[0];
+  ActualMax := PrimaryBox.Data[1];
+
+  if (PrimaryT.World <> nil) and (not PrimaryT.World.GravityUp.IsZero) then
+    GravityUp := PrimaryT.World.GravityUp.Normalize
+  else
+    GravityUp := Vector3(0, 1, 0);
+
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if (T = nil) or (T = PrimaryT) or IsDescendantOfAnySelected(T) then Continue;
+
+    CurPos := GetTransformWorkingPos(T);
+    HalfExt := TVector3.Zero;
+    if FlushOutside then
+    begin
+      ObjBox := T.WorldBoundingBox;
+      if not ObjBox.IsEmpty then
+        HalfExt := ObjBox.Size * 0.5;
+    end;
+
+    BestAxis := 0;
+    BestSign := 1;
+    BestDist := 1e30;
+    for Axis := 0 to 2 do
+    begin
+      DistNeg := Abs(CurPos.Data[Axis] - ActualMin.Data[Axis]);
+      if DistNeg < BestDist then
+      begin
+        BestDist := DistNeg;
+        BestAxis := Axis;
+        BestSign := -1;
+      end;
+      DistPos := Abs(CurPos.Data[Axis] - ActualMax.Data[Axis]);
+      if DistPos < BestDist then
+      begin
+        BestDist := DistPos;
+        BestAxis := Axis;
+        BestSign := 1;
+      end;
+    end;
+
+    for Axis := 0 to 2 do
+      if Axis = BestAxis then
+      begin
+        if BestSign < 0 then
+          TargetPos.Data[Axis] := ActualMin.Data[Axis] - HalfExt.Data[Axis]
+        else
+          TargetPos.Data[Axis] := ActualMax.Data[Axis] + HalfExt.Data[Axis];
+      end else
+        TargetPos.Data[Axis] := Clamped(CurPos.Data[Axis], ActualMin.Data[Axis], ActualMax.Data[Axis]);
+
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if OrientOutward and T.HasWorldTransform then
+    begin
+      LookDir := TVector3.Zero;
+      LookDir.Data[BestAxis] := Single(BestSign);
+      Side := TVector3.CrossProduct(LookDir, GravityUp);
+      if Side.IsZero(1e-5) then
+        Side := Vector3(0, 0, 1);
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
     end;
   end;
 

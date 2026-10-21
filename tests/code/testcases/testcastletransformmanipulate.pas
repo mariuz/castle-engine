@@ -58,6 +58,7 @@ type
     procedure TestArrangeTorusKnotConcentricRingsAndProjectSphereCylinder;
     procedure TestArrangeCylinderPyramidAndClampToBox;
     procedure TestArrangeConeHexGridAndPushOutsideBox;
+    procedure TestArrangeCubeFrameParaboloidBowlAndSnapToBoxSurface;
   end;
 
 implementation
@@ -2028,6 +2029,119 @@ begin
     B1.Translation := Vector3(-4.2, 5, 0);
     Manipulate.SetSelected([B1]);
     AssertTrue(Manipulate.PushSelectedOutsideBox(Vector3(-5, 0, -5), Vector3(5, 10, 5), false));
+    AssertVectorEquals(Vector3(-5, 5, 0), B1.Translation, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestArrangeCubeFrameParaboloidBowlAndSnapToBoxSurface;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  RoomBox, B1, B2, B3, B4: TCastleBox;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.OnTransformModified := {$ifdef FPC}@{$endif}HandleTransformModified;
+    Manipulate.OnTransformModifyEnd := {$ifdef FPC}@{$endif}HandleTransformModifyEnd;
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(2, 2, 2);
+    B1.Translation := Vector3(-3, 0, 0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(2, 2, 2);
+    B2.Translation := Vector3(-1, 0, 0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(2, 2, 2);
+    B3.Translation := Vector3(1, 0, 0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(2, 2, 2);
+    B4.Translation := Vector3(3, 0, 0);
+    Viewport.Items.Add(B4);
+
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    Manipulate.PivotMode := pmSelectionCenter;
+
+    // 1. Test ArrangeSelectedOnCubeFrame(Vector3(5, 5, 5), false, 1):
+    // Center = (0, 0, 0). Total perimeter across 12 edges of length 10 = 120.
+    // B1 (i=0, dist=0) -> (-5, -5, -5)
+    // B2 (i=1, dist=30) -> edge 3 start (-5, -5, 5)
+    // B3 (i=2, dist=60) -> edge 6 start (5, 5, 5)
+    // B4 (i=3, dist=90) -> edge 9 start (5, -5, -5)
+    AssertTrue(Manipulate.ArrangeSelectedOnCubeFrame(Vector3(5, 5, 5), false, 1));
+    AssertVectorEquals(Vector3(-5, -5, -5), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-5, -5, 5), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(5, 5, 5), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(5, -5, -5), B4.Translation, 1e-4);
+    B3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 1, 1).Normalize, WorldDir.Normalize, 1e-4);
+
+    // Also test ShellMode = true (K=2 -> 8 corners of [-4..4]^3):
+    B1.Translation := Vector3(-3, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(1, 0, 0);
+    B4.Translation := Vector3(3, 0, 0);
+    AssertTrue(Manipulate.ArrangeSelectedOnCubeFrame(Vector3(4, 4, 4), true, 2));
+    AssertVectorEquals(Vector3(-4, -4, -4), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(4, -4, -4), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-4, -4, 4), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(4, -4, 4), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 1, 1).Normalize, WorldDir.Normalize, 1e-4);
+
+    // 2. Test ArrangeSelectedInParaboloidBowl(8.0, 10.0, 1):
+    // Reset positions so Center = (0, 0, 0). N = 4:
+    // u_i = (i + 0.5) / 4 -> u_0 = 0.125, u_1 = 0.375, u_2 = 0.625, u_3 = 0.875.
+    // Every point must satisfy the paraboloid equation:
+    // Y = DepthY * ((X^2 + Z^2) / RimRadius^2 - 0.5)!
+    B1.Translation := Vector3(-3, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(1, 0, 0);
+    B4.Translation := Vector3(3, 0, 0);
+    AssertTrue(Manipulate.ArrangeSelectedInParaboloidBowl(8.0, 10.0, 1));
+    AssertSameValue(8.0 * Sqrt(0.125), Hypot(B1.Translation.X, B1.Translation.Z), 1e-4);
+    AssertSameValue(10.0 * (0.125 - 0.5), B1.Translation.Y, 1e-4);
+    AssertSameValue(8.0 * Sqrt(0.875), Hypot(B4.Translation.X, B4.Translation.Z), 1e-4);
+    AssertSameValue(10.0 * (0.875 - 0.5), B4.Translation.Y, 1e-4);
+
+    // 3. Test SnapSelectedToPrimaryBoundsSurface and SnapSelectedToBoxSurface:
+    // RoomBox has Size (20, 10, 20) at (0, 5, 0) -> WorldBoundingBox is [-10..10] x [0..10] x [-10..10].
+    // B1..B3 have Size (2, 2, 2) (half-extent 1.0).
+    RoomBox := TCastleBox.Create(Viewport);
+    RoomBox.Size := Vector3(20, 10, 20);
+    RoomBox.Translation := Vector3(0, 5, 0);
+    Viewport.Items.Add(RoomBox);
+
+    B1.Rotation := Vector4(0, 1, 0, 0);
+    B2.Rotation := Vector4(0, 1, 0, 0);
+    B3.Rotation := Vector4(0, 1, 0, 0);
+    B1.Translation := Vector3(14, 5, 25);  // closest face is +X (dist 4 vs Z dist 15), Z clamped to 10, X snapped to 10 + 1 = 11
+    B2.Translation := Vector3(0, 9.2, -3); // closest face is +Y (dist 0.8), Y snapped to 10 + 1 = 11
+    B3.Translation := Vector3(-2, 4, -9.5); // closest face is -Z (dist 0.5), Z snapped to -10 - 1 = -11
+    Manipulate.SetSelected([RoomBox, B1, B2, B3]);
+    AssertTrue(Manipulate.SnapSelectedToPrimaryBoundsSurface(true, true));
+    AssertVectorEquals(Vector3(11, 5, 10), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 11, -3), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-2, 4, -11), B3.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+    B3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 0, -1), WorldDir.Normalize, 1e-4);
+
+    // Also test SnapSelectedToBoxSurface with FlushOutside = false (origin snapped to face):
+    B1.Translation := Vector3(-4.6, 5, 0);
+    Manipulate.SetSelected([B1]);
+    AssertTrue(Manipulate.SnapSelectedToBoxSurface(Vector3(-5, 0, -5), Vector3(5, 10, 5), false, false));
     AssertVectorEquals(Vector3(-5, 5, 0), B1.Translation, 1e-4);
   finally
     FreeAndNil(Manipulate);

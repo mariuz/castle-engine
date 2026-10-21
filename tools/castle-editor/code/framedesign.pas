@@ -360,6 +360,9 @@ type
       ButtonArrangeCone: TButton;
       ButtonArrangeHexGrid: TButton;
       ButtonPushOutsidePrimaryBounds: TButton;
+      ButtonArrangeCubeFrame: TButton;
+      ButtonArrangeBowl: TButton;
+      ButtonSnapToPrimarySurface: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -390,6 +393,7 @@ type
       ButtonUIReverseOrder: TButton;
       ButtonUICircleArrange: TButton;
       ButtonUIFitAspect: TButton;
+      ButtonUISnapParentEdge: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -426,6 +430,7 @@ type
       MenuTreeViewItemSelectHidden: TMenuItem;
       MenuTreeViewItemSelectOutliers: TMenuItem;
       MenuTreeViewItemSelectMissingUrl: TMenuItem;
+      MenuTreeViewItemSelectDuplicatePos: TMenuItem;
       MenuTreeViewItemCopyTransform: TMenuItem;
       MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
@@ -531,6 +536,9 @@ type
     procedure ButtonArrangeConeClick(Sender: TObject);
     procedure ButtonArrangeHexGridClick(Sender: TObject);
     procedure ButtonPushOutsidePrimaryBoundsClick(Sender: TObject);
+    procedure ButtonArrangeCubeFrameClick(Sender: TObject);
+    procedure ButtonArrangeBowlClick(Sender: TObject);
+    procedure ButtonSnapToPrimarySurfaceClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -550,6 +558,7 @@ type
     procedure ButtonUIReverseOrderClick(Sender: TObject);
     procedure ButtonUICircleArrangeClick(Sender: TObject);
     procedure ButtonUIFitAspectClick(Sender: TObject);
+    procedure ButtonUISnapParentEdgeClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -593,6 +602,7 @@ type
     procedure MenuTreeViewItemSelectHiddenClick(Sender: TObject);
     procedure MenuTreeViewItemSelectOutliersClick(Sender: TObject);
     procedure MenuTreeViewItemSelectMissingUrlClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectDuplicatePosClick(Sender: TObject);
     procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
@@ -1147,6 +1157,19 @@ type
     procedure ShowArrangeInHexGridDialog;
     procedure PushSelectionOutsidePrimaryBounds(
       const UseObjectBounds: Boolean = true);
+    procedure ArrangeSelectionOnCubeFrame(
+      const HalfExtents: TVector3;
+      const ShellMode: Boolean = false;
+      const OrientMode: Integer = 0);
+    procedure ShowArrangeOnCubeFrameDialog;
+    procedure ArrangeSelectionInParaboloidBowl(
+      const RimRadius: Single = 0.0;
+      const DepthY: Single = 5.0;
+      const OrientMode: Integer = 0);
+    procedure ShowArrangeInParaboloidBowlDialog;
+    procedure SnapSelectionToPrimaryBoundsSurface(
+      const FlushOutside: Boolean = true;
+      const OrientOutward: Boolean = false);
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -1172,6 +1195,9 @@ type
       const HalfArc: Boolean = false);
     procedure FitSelectedUserInterfacesMaintainAspect(
       const CoverParent: Boolean = false);
+    procedure SnapSelectedUserInterfacesToParentEdge(
+      const SnapCorner: Boolean = false;
+      const MarginPx: Single = 0.0);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -1215,6 +1241,9 @@ type
     procedure SelectHiddenComponents(const TransformsOnly: Boolean = false);
     procedure SelectOutlierTransforms(const MinDistance: Single = 100.0);
     procedure SelectTransformsWithMissingUrl(const BrokenOnly: Boolean = false);
+    procedure SelectDuplicatePositionTransforms(
+      const SameClassOnly: Boolean = false;
+      const Tolerance: Single = 0.01);
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -1961,11 +1990,18 @@ begin
   end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyF) and
-     (Event.ModifiersDown = [mkAlt, mkShift]) and
      (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
   begin
-    Frame.ShowArrangeInLissajousDialog;
-    Exit(true);
+    if Event.ModifiersDown = [mkAlt, mkShift] then
+    begin
+      Frame.ShowArrangeInLissajousDialog;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt] then
+    begin
+      Frame.ShowArrangeOnCubeFrameDialog;
+      Exit(true);
+    end;
   end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyB) and
@@ -1977,11 +2013,18 @@ begin
   end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyI) and
-     (Event.ModifiersDown = [mkAlt, mkShift]) and
      (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
   begin
-    Frame.ProjectSelectionOntoLine(false, false);
-    Exit(true);
+    if Event.ModifiersDown = [mkAlt, mkShift] then
+    begin
+      Frame.ProjectSelectionOntoLine(false, false);
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkShift] then
+    begin
+      Frame.SelectDuplicatePositionTransforms(false, 0.01);
+      Exit(true);
+    end;
   end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyJ) and
@@ -2059,6 +2102,11 @@ begin
     begin
       Frame.ShowArrangeAlongPathDialog;
       Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt] then
+    begin
+      Frame.ShowArrangeInParaboloidBowlDialog;
+      Exit(true);
     end;
   end;
 
@@ -2083,6 +2131,11 @@ begin
     if Event.ModifiersDown = [mkAlt, mkShift] then
     begin
       Frame.ProjectSelectionOntoPlane(false, false);
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt] then
+    begin
+      Frame.SnapSelectionToPrimaryBoundsSurface(true, false);
       Exit(true);
     end;
   end;
@@ -3883,6 +3936,36 @@ begin
   ButtonPushOutsidePrimaryBounds.OnClick := @ButtonPushOutsidePrimaryBoundsClick;
   ButtonPushOutsidePrimaryBounds.Parent := PanelLayoutTransform;
 
+  ButtonArrangeCubeFrame := TButton.Create(Self);
+  ButtonArrangeCubeFrame.Align := alTop;
+  ButtonArrangeCubeFrame.AutoSize := true;
+  ButtonArrangeCubeFrame.Caption := 'Cube Frame...';
+  ButtonArrangeCubeFrame.Hint := 'Arrange 2+ selected 3D transforms along the 12 wireframe edges and 8 vertices of a 3D box (or 6 hollow outer faces on Ctrl-click) around pivot (Ctrl+Alt+F | Shift-click: dialog)';
+  ButtonArrangeCubeFrame.ShowHint := true;
+  ButtonArrangeCubeFrame.BorderSpacing.Around := 2;
+  ButtonArrangeCubeFrame.OnClick := @ButtonArrangeCubeFrameClick;
+  ButtonArrangeCubeFrame.Parent := PanelLayoutTransform;
+
+  ButtonArrangeBowl := TButton.Create(Self);
+  ButtonArrangeBowl.Align := alTop;
+  ButtonArrangeBowl.AutoSize := true;
+  ButtonArrangeBowl.Caption := 'Bowl / Dish...';
+  ButtonArrangeBowl.Hint := 'Arrange 2+ selected 3D transforms in a 3D paraboloid dish / bowl / crater using a sunflower golden-angle Phyllotaxis spiral (Ctrl+Alt+P | Shift-click: dialog | Ctrl-click: orient along dish normal)';
+  ButtonArrangeBowl.ShowHint := true;
+  ButtonArrangeBowl.BorderSpacing.Around := 2;
+  ButtonArrangeBowl.OnClick := @ButtonArrangeBowlClick;
+  ButtonArrangeBowl.Parent := PanelLayoutTransform;
+
+  ButtonSnapToPrimarySurface := TButton.Create(Self);
+  ButtonSnapToPrimarySurface.Align := alTop;
+  ButtonSnapToPrimarySurface.AutoSize := true;
+  ButtonSnapToPrimarySurface.Caption := 'Snap Primary Face';
+  ButtonSnapToPrimarySurface.Hint := 'Snap / project 2+ selected 3D transforms onto the nearest outer face (+X/-X/+Y/-Y/+Z/-Z) of the primary selected transform''s bounding box (Ctrl+Alt+M | Shift-click: origins on face | Ctrl-click: orient outward)';
+  ButtonSnapToPrimarySurface.ShowHint := true;
+  ButtonSnapToPrimarySurface.BorderSpacing.Around := 2;
+  ButtonSnapToPrimarySurface.OnClick := @ButtonSnapToPrimarySurfaceClick;
+  ButtonSnapToPrimarySurface.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -4117,6 +4200,14 @@ begin
   ButtonUIFitAspect.OnClick := @ButtonUIFitAspectClick;
   ButtonUIFitAspect.Parent := PanelLayoutUI;
 
+  ButtonUISnapParentEdge := TButton.Create(Self);
+  ButtonUISnapParentEdge.AutoSize := true;
+  ButtonUISnapParentEdge.Caption := 'UI Snap Edge';
+  ButtonUISnapParentEdge.Hint := 'Snap selected 2D UI control(s) flush against the nearest edge or corner of their parent container (Click: Nearest of 4 edges | Shift-click: Nearest of 4 corners | Ctrl-click: Nearest edge with 16px margin)';
+  ButtonUISnapParentEdge.ShowHint := true;
+  ButtonUISnapParentEdge.OnClick := @ButtonUISnapParentEdgeClick;
+  ButtonUISnapParentEdge.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -4325,6 +4416,11 @@ begin
   MenuTreeViewItemSelectMissingUrl.Caption := 'Select Components With Missing / Broken Asset URL (Ctrl+Shift+Q)';
   MenuTreeViewItemSelectMissingUrl.OnClick := @MenuTreeViewItemSelectMissingUrlClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectMissingUrl);
+
+  MenuTreeViewItemSelectDuplicatePos := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectDuplicatePos.Caption := 'Select Co-Located / Duplicate-Position Transforms (Ctrl+Shift+I)';
+  MenuTreeViewItemSelectDuplicatePos.OnClick := @MenuTreeViewItemSelectDuplicatePosClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectDuplicatePos);
 
   MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
   MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
@@ -8002,6 +8098,8 @@ begin
         ButtonUICircleArrange.Enabled := SelectedUICount >= 2;
       if ButtonUIFitAspect <> nil then
         ButtonUIFitAspect.Enabled := SelectedUICount >= 1;
+      if ButtonUISnapParentEdge <> nil then
+        ButtonUISnapParentEdge.Enabled := SelectedUICount >= 1;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -8112,6 +8210,12 @@ begin
       ButtonArrangeHexGrid.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonPushOutsidePrimaryBounds <> nil then
       ButtonPushOutsidePrimaryBounds.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeCubeFrame <> nil then
+      ButtonArrangeCubeFrame.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeBowl <> nil then
+      ButtonArrangeBowl.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonSnapToPrimarySurface <> nil then
+      ButtonSnapToPrimarySurface.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -9723,6 +9827,11 @@ begin
       ShowArrangeInLissajousDialog;
       Key := 0;
     end else
+    if (Key = Ord('F')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowArrangeOnCubeFrameDialog;
+      Key := 0;
+    end else
     if (Key = Ord('B')) and (Shift = [ssAlt, ssShift]) then
     begin
       ShowArrangeInCatenaryDialog;
@@ -9731,6 +9840,11 @@ begin
     if (Key = Ord('I')) and (Shift = [ssAlt, ssShift]) then
     begin
       ProjectSelectionOntoLine(false, false);
+      Key := 0;
+    end else
+    if (Key = Ord('I')) and (Shift = [ssCtrl, ssShift]) then
+    begin
+      SelectDuplicatePositionTransforms(false, 0.01);
       Key := 0;
     end else
     if (Key = Ord('J')) and (Shift = [ssCtrl, ssShift]) then
@@ -9746,6 +9860,11 @@ begin
     if (Key = Ord('M')) and (Shift = [ssAlt, ssShift]) then
     begin
       ProjectSelectionOntoPlane(false, false);
+      Key := 0;
+    end else
+    if (Key = Ord('M')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      SnapSelectionToPrimaryBoundsSurface(true, false);
       Key := 0;
     end else
     if (Key = Ord('W')) and (Shift = [ssCtrl, ssShift]) then
@@ -9806,6 +9925,11 @@ begin
     if (Key = Ord('P')) and (Shift = [ssAlt, ssShift]) then
     begin
       ShowArrangeAlongPathDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('P')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowArrangeInParaboloidBowlDialog;
       Key := 0;
     end else
     if (Key = Ord('M')) and (Shift = [ssCtrl, ssShift]) then
@@ -13649,6 +13773,130 @@ begin
   PushSelectionOutsidePrimaryBounds(not (ssShift in GetKeyShiftState));
 end;
 
+procedure TDesignFrame.ArrangeSelectionOnCubeFrame(
+  const HalfExtents: TVector3;
+  const ShellMode: Boolean;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedOnCubeFrame(HalfExtents, ShellMode, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeOnCubeFrameDialog;
+var
+  Prompts: array[0..4] of string;
+  Values: array[0..4] of string;
+  ExtX, ExtY, ExtZ: Single;
+  ShellMode: Boolean;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Box Half-Extent X (0 = auto from selection):';
+  Prompts[1] := 'Box Half-Extent Y (0 = auto from selection):';
+  Prompts[2] := 'Box Half-Extent Z (0 = auto from selection):';
+  Prompts[3] := 'Mode (0 = 12 wireframe edges, 1 = 6 hollow shell faces):';
+  Prompts[4] := 'Orientation (0 = keep, 1 = outward, 2 = inward):';
+
+  Values[0] := '0';
+  Values[1] := '0';
+  Values[2] := '0';
+  Values[3] := '0';
+  Values[4] := '0';
+
+  if InputQuery('Arrange Selected on 3D Cube Frame / Hollow Shell', Prompts, Values) then
+  begin
+    ExtX := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    ExtY := StrToFloatDefDot(Trim(Values[1]), 0.0);
+    ExtZ := StrToFloatDefDot(Trim(Values[2]), 0.0);
+    ShellMode := StrToIntDef(Trim(Values[3]), 0) <> 0;
+    OrientMode := Clamped(StrToIntDef(Trim(Values[4]), 0), 0, 2);
+    ArrangeSelectionOnCubeFrame(Vector3(ExtX, ExtY, ExtZ), ShellMode, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeCubeFrameClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeOnCubeFrameDialog
+  else
+    ArrangeSelectionOnCubeFrame(TVector3.Zero, ssCtrl in ShiftState, 0);
+end;
+
+procedure TDesignFrame.ArrangeSelectionInParaboloidBowl(
+  const RimRadius: Single;
+  const DepthY: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInParaboloidBowl(RimRadius, DepthY, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInParaboloidBowlDialog;
+var
+  Prompts: array[0..2] of string;
+  Values: array[0..2] of string;
+  RimR, Depth: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Outer Rim Radius XZ (0 = auto from selection):';
+  Prompts[1] := 'Vertical Depth / Height Y (>0 = concave dish, <0 = dome):';
+  Prompts[2] := 'Orientation (0 = keep, 1 = surface normal, 2 = inward XZ):';
+
+  Values[0] := '0';
+  Values[1] := '5';
+  Values[2] := '1';
+
+  if InputQuery('Arrange Selected in 3D Paraboloid Dish / Bowl', Prompts, Values) then
+  begin
+    RimR := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    Depth := StrToFloatDefDot(Trim(Values[1]), 5.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[2]), 1), 0, 2);
+    ArrangeSelectionInParaboloidBowl(RimR, Depth, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeBowlClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  OrientMode: Integer;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInParaboloidBowlDialog
+  else
+  begin
+    if ssCtrl in ShiftState then
+      OrientMode := 1
+    else
+      OrientMode := 0;
+    ArrangeSelectionInParaboloidBowl(0.0, 5.0, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.SnapSelectionToPrimaryBoundsSurface(
+  const FlushOutside: Boolean;
+  const OrientOutward: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.SnapSelectedToPrimaryBoundsSurface(FlushOutside, OrientOutward);
+end;
+
+procedure TDesignFrame.ButtonSnapToPrimarySurfaceClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  SnapSelectionToPrimaryBoundsSurface(not (ssShift in ShiftState), ssCtrl in ShiftState);
+end;
+
 procedure TDesignFrame.StopPilotTransform;
 var
   SavedName: String;
@@ -15222,6 +15470,93 @@ end;
 procedure TDesignFrame.ButtonUIFitAspectClick(Sender: TObject);
 begin
   FitSelectedUserInterfacesMaintainAspect(ssShift in GetKeyShiftState);
+end;
+
+procedure TDesignFrame.SnapSelectedUserInterfacesToParentEdge(
+  const SnapCorner: Boolean;
+  const MarginPx: Single);
+var
+  Selected: TComponentList;
+  SelectedCount, I, ChangedCount: Integer;
+  UI: TCastleUserInterface;
+  CurRect, ParentRect: TFloatRectangle;
+  ScaledMargin, DistLeft, DistRight, DistBottom, DistTop, MinDist, DeltaX, DeltaY: Single;
+begin
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if (Selected = nil) or (SelectedCount < 1) then Exit;
+
+    ChangedCount := 0;
+    for I := 0 to SelectedCount - 1 do
+      if (Selected[I] is TCastleUserInterface) and
+         (Selected[I] <> DesignRoot) and
+         (not (Selected[I] is TCastleTransformDesign)) and
+         (not IsComponentLocked(Selected[I])) then
+      begin
+        UI := TCastleUserInterface(Selected[I]);
+        if UI.UIScale <= 0 then Continue;
+        CurRect := UI.RenderRectWithBorder;
+        ParentRect := ParentRenderRect(UI);
+        if CurRect.IsEmpty or ParentRect.IsEmpty then Continue;
+
+        ScaledMargin := Max(0.0, MarginPx) * UI.UIScale;
+        DistLeft := Abs(CurRect.Left - (ParentRect.Left + ScaledMargin));
+        DistRight := Abs((ParentRect.Right - ScaledMargin) - CurRect.Right);
+        DistBottom := Abs(CurRect.Bottom - (ParentRect.Bottom + ScaledMargin));
+        DistTop := Abs((ParentRect.Top - ScaledMargin) - CurRect.Top);
+
+        DeltaX := 0.0;
+        DeltaY := 0.0;
+        if SnapCorner then
+        begin
+          if DistLeft <= DistRight then
+            DeltaX := (ParentRect.Left + ScaledMargin) - CurRect.Left
+          else
+            DeltaX := (ParentRect.Right - ScaledMargin) - CurRect.Right;
+
+          if DistBottom <= DistTop then
+            DeltaY := (ParentRect.Bottom + ScaledMargin) - CurRect.Bottom
+          else
+            DeltaY := (ParentRect.Top - ScaledMargin) - CurRect.Top;
+        end else
+        begin
+          MinDist := Min(Min(DistLeft, DistRight), Min(DistBottom, DistTop));
+          if SameValue(MinDist, DistLeft, 1e-4) then
+            DeltaX := (ParentRect.Left + ScaledMargin) - CurRect.Left
+          else if SameValue(MinDist, DistRight, 1e-4) then
+            DeltaX := (ParentRect.Right - ScaledMargin) - CurRect.Right
+          else if SameValue(MinDist, DistBottom, 1e-4) then
+            DeltaY := (ParentRect.Bottom + ScaledMargin) - CurRect.Bottom
+          else
+            DeltaY := (ParentRect.Top - ScaledMargin) - CurRect.Top;
+        end;
+
+        if (Abs(DeltaX) > 0.01) or (Abs(DeltaY) > 0.01) then
+        begin
+          UI.Translation := UI.Translation + Vector2(DeltaX / UI.UIScale, DeltaY / UI.UIScale);
+          Inc(ChangedCount);
+        end;
+      end;
+
+    if ChangedCount > 0 then
+      ModifiedOutsideObjectInspector(
+        Format('Snap %d UI control(s) to parent edge/corner', [ChangedCount]), ucHigh);
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUISnapParentEdgeClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  Margin: Single;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssCtrl in ShiftState then
+    Margin := 16.0
+  else
+    Margin := 0.0;
+  SnapSelectedUserInterfacesToParentEdge(ssShift in ShiftState, Margin);
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -18331,6 +18666,80 @@ begin
   SelectTransformsWithMissingUrl(ssShift in GetKeyShiftState);
 end;
 
+procedure TDesignFrame.SelectDuplicatePositionTransforms(
+  const SameClassOnly: Boolean;
+  const Tolerance: Single);
+var
+  AllTransforms, NewSelection: TComponentList;
+  TreeNode: TTreeNode;
+  C: TComponent;
+  T, T1, T2: TCastleTransform;
+  Pos1, Pos2: TVector3;
+  TolSq: Single;
+  I, J: Integer;
+begin
+  TolSq := Sqr(Max(1e-5, Abs(Tolerance)));
+  AllTransforms := TComponentList.Create(false);
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C is TCastleTransform) and (C <> DesignRoot) and
+         (not (C is TCastleAbstractRootTransform)) and
+         Selectable(C) and (not IsComponentLocked(C)) then
+      begin
+        T := TCastleTransform(C);
+        if T.Exists and (AllTransforms.IndexOf(T) = -1) then
+          AllTransforms.Add(T);
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    for I := 0 to AllTransforms.Count - 2 do
+    begin
+      T1 := TCastleTransform(AllTransforms[I]);
+      if T1.HasWorldTransform then
+        Pos1 := T1.WorldTranslation
+      else
+        Pos1 := T1.Translation;
+
+      for J := I + 1 to AllTransforms.Count - 1 do
+      begin
+        T2 := TCastleTransform(AllTransforms[J]);
+        if SameClassOnly and (T1.ClassType <> T2.ClassType) then
+          Continue;
+        if (T1.Parent = T2) or (T2.Parent = T1) then
+          Continue;
+
+        if T2.HasWorldTransform then
+          Pos2 := T2.WorldTranslation
+        else
+          Pos2 := T2.Translation;
+
+        if PointsDistanceSqr(Pos1, Pos2) <= TolSq then
+        begin
+          // Select the later duplicate instance(s) so pressing Delete removes duplicates while keeping the first original
+          if NewSelection.IndexOf(T2) = -1 then
+            NewSelection.Add(T2);
+        end;
+      end;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+    FreeAndNil(AllTransforms);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectDuplicatePosClick(Sender: TObject);
+begin
+  SelectDuplicatePositionTransforms(ssShift in GetKeyShiftState, 0.01);
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -18845,6 +19254,8 @@ begin
     MenuTreeViewItemSelectOutliers.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemSelectMissingUrl <> nil then
     MenuTreeViewItemSelectMissingUrl.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectDuplicatePos <> nil then
+    MenuTreeViewItemSelectDuplicatePos.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemCopyTransform <> nil then
     MenuTreeViewItemCopyTransform.Enabled := (CurrentTransform <> nil) or (SelectedUserInterface <> nil) or (ControlsTree.SelectionCount > 0);
   if MenuTreeViewItemPasteTransform <> nil then
