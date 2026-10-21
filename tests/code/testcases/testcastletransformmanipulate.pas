@@ -55,6 +55,7 @@ type
     procedure TestArrangeTorusZigzagAndNormalizeSizes;
     procedure TestArrangeLissajousCatenaryAndProjectOntoLine;
     procedure TestArrangePolygonSpiralVortexAndProjectOntoPlane;
+    procedure TestArrangeTorusKnotConcentricRingsAndProjectSphereCylinder;
   end;
 
 implementation
@@ -1715,6 +1716,106 @@ begin
     AssertVectorEquals(Vector3(3, 5, 4), B2.Translation, 1e-4);
     B2.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(0, 1, 0), WorldUp.Normalize, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestArrangeTorusKnotConcentricRingsAndProjectSphereCylinder;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  B1, B2, B3, B4: TCastleBox;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.OnTransformModified := {$ifdef FPC}@{$endif}HandleTransformModified;
+    Manipulate.OnTransformModifyEnd := {$ifdef FPC}@{$endif}HandleTransformModifyEnd;
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(1, 1, 1);
+    B1.Translation := Vector3(-6, 0, 0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(1, 1, 1);
+    B2.Translation := Vector3(-2, 0, 0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(1, 1, 1);
+    B3.Translation := Vector3(2, 0, 0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(1, 1, 1);
+    B4.Translation := Vector3(6, 0, 0);
+    Viewport.Items.Add(B4);
+
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    Manipulate.PivotMode := pmSelectionCenter;
+
+    // 1. Test ArrangeSelectedInTorusKnot:
+    // Center = (0,0,0), MajorRadius = 10, TubeRadius = 2, KnotP = 2, KnotQ = 3, OrientMode = 1 (tube normal).
+    // Theta = 0, pi/2, pi, 3pi/2:
+    // i=0 (Theta=0): p*Theta=0, q*Theta=0 -> r=12, Pos=(12, 0, 0), Core=(10, 0, 0) -> Dir=(1, 0, 0)
+    // i=1 (Theta=pi/2): p*Theta=pi, q*Theta=3pi/2 -> cosQ=0, sinQ=-1 -> r=10, Pos=(-10, -2, 0)
+    // i=2 (Theta=pi): p*Theta=2pi, q*Theta=3pi -> cosQ=-1, sinQ=0 -> r=8, Pos=(8, 0, 0), Core=(10, 0, 0) -> Dir=(-1, 0, 0)
+    // i=3 (Theta=3pi/2): p*Theta=3pi, q*Theta=9pi/2 -> cosQ=0, sinQ=1 -> r=10, Pos=(-10, 2, 0)
+    AssertTrue(Manipulate.ArrangeSelectedInTorusKnot(10.0, 2.0, 2, 3, 1));
+    AssertVectorEquals(Vector3(12, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-10, -2, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(8, 0, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-10, 2, 0), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+    B3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(-1, 0, 0), WorldDir.Normalize, 1e-4);
+
+    // 2. Test ArrangeSelectedInConcentricRings:
+    // Center returns to (0,0,0) after reset; FirstRingRadius = 4, RingSpacing = 6, RingRiseY = 3, BaseRingCount = 2, OrientMode = 1 (inward).
+    // Ring 0 has capacity 2 (B1 at Theta=0 -> (4, 0, 0), B2 at Theta=pi -> (-4, 0, 0)).
+    // Ring 1 has 2 remaining items (B3 at Theta=0 -> (10, 3, 0), B4 at Theta=pi -> (-10, 3, 0)).
+    B1.Translation := Vector3(-3, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(1, 0, 0);
+    B4.Translation := Vector3(3, 0, 0);
+    AssertTrue(Manipulate.ArrangeSelectedInConcentricRings(4.0, 6.0, 3.0, 2, 1));
+    AssertVectorEquals(Vector3(4, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-4, 0, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10, 3, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-10, 3, 0), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(-1, 0, 0), WorldDir.Normalize, 1e-4);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+
+    // 3. Test ProjectSelectedOntoSphere and ProjectSelectedOntoCylinder:
+    // Place B1=(2, 0, 0), B2=(-6, 0, 0), B3=(0, 3, 0), B4=(4, -3, 0) -> Center = (0, 0, 0).
+    B1.Translation := Vector3(2, 0, 0);
+    B2.Translation := Vector3(-6, 0, 0);
+    B3.Translation := Vector3(0, 3, 0);
+    B4.Translation := Vector3(4, -3, 0);
+    AssertTrue(Manipulate.ProjectSelectedOntoSphere(10.0, true));
+    AssertVectorEquals(Vector3(10, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-10, 0, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 10, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(8, -6, 0), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+
+    // ProjectSelectedOntoCylinder(5.0, true) preserves Y while snapping XZ distance to 5.0:
+    B1.Translation := Vector3(3, 7, 4);
+    B2.Translation := Vector3(-3, -7, -4);
+    Manipulate.SetSelected([B1, B2]);
+    AssertTrue(Manipulate.ProjectSelectedOntoCylinder(10.0, true));
+    AssertVectorEquals(Vector3(6, 7, 8), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-6, -7, -8), B2.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.6, 0, 0.8), WorldDir.Normalize, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

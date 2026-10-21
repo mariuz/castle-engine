@@ -351,6 +351,9 @@ type
       ButtonArrangePolygon: TButton;
       ButtonArrangeSpiralVortex: TButton;
       ButtonProjectOntoPlane: TButton;
+      ButtonArrangeTorusKnot: TButton;
+      ButtonArrangeConcentricRings: TButton;
+      ButtonProjectOntoSphere: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -378,6 +381,7 @@ type
       ButtonUISquareSize: TButton;
       ButtonUIGoldenRatio: TButton;
       ButtonUIAspect16x9: TButton;
+      ButtonUIReverseOrder: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -411,6 +415,7 @@ type
       MenuTreeViewItemSelectWithBehaviors: TMenuItem;
       MenuTreeViewItemSelectLightsAndCameras: TMenuItem;
       MenuTreeViewItemSelectSoundSources: TMenuItem;
+      MenuTreeViewItemSelectHidden: TMenuItem;
       MenuTreeViewItemCopyTransform: TMenuItem;
       MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
@@ -507,6 +512,9 @@ type
     procedure ButtonArrangePolygonClick(Sender: TObject);
     procedure ButtonArrangeSpiralVortexClick(Sender: TObject);
     procedure ButtonProjectOntoPlaneClick(Sender: TObject);
+    procedure ButtonArrangeTorusKnotClick(Sender: TObject);
+    procedure ButtonArrangeConcentricRingsClick(Sender: TObject);
+    procedure ButtonProjectOntoSphereClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -523,6 +531,7 @@ type
     procedure ButtonUISquareSizeClick(Sender: TObject);
     procedure ButtonUIGoldenRatioClick(Sender: TObject);
     procedure ButtonUIAspect16x9Click(Sender: TObject);
+    procedure ButtonUIReverseOrderClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -563,6 +572,7 @@ type
     procedure MenuTreeViewItemSelectWithBehaviorsClick(Sender: TObject);
     procedure MenuTreeViewItemSelectLightsAndCamerasClick(Sender: TObject);
     procedure MenuTreeViewItemSelectSoundSourcesClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectHiddenClick(Sender: TObject);
     procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
@@ -1080,6 +1090,18 @@ type
     procedure ShowArrangeInSpiralVortexDialog;
     procedure ProjectSelectionOntoPlane(const UseThreePointsPlane: Boolean = false;
       const AlignUpToNormal: Boolean = false);
+    procedure ArrangeSelectionInTorusKnot(const MajorRadius, TubeRadius: Single;
+      const KnotP: Integer = 2; const KnotQ: Integer = 3;
+      const OrientMode: Integer = 0);
+    procedure ShowArrangeInTorusKnotDialog;
+    procedure ArrangeSelectionInConcentricRings(
+      const FirstRingRadius, RingSpacing, RingRiseY: Single;
+      const BaseRingCount: Integer = 6;
+      const OrientMode: Integer = 0);
+    procedure ShowArrangeInConcentricRingsDialog;
+    procedure ProjectSelectionOntoSphereOrCylinder(
+      const CylinderMode: Boolean = false;
+      const OrientOutward: Boolean = false);
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -1099,6 +1121,7 @@ type
       const Landscape: Boolean = true; const KeepWidth: Boolean = false);
     procedure ApplyStandardAspectToSelectedUserInterfaces(
       const AspectMode: Integer = 0);
+    procedure ReverseSelectedUserInterfacePositions(const SwapSizes: Boolean = false);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -1139,6 +1162,7 @@ type
     procedure SelectTransformsWithBehaviors(const PhysicsOnly: Boolean = false);
     procedure SelectLightsAndCameras(const FilterMode: Integer = 0);
     procedure SelectSoundAndTriggerTransforms(const TriggersOnly: Boolean = false);
+    procedure SelectHiddenComponents(const TransformsOnly: Boolean = false);
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -2031,7 +2055,20 @@ begin
     begin
       Frame.PasteTransform(true);
       Exit(true);
+    end else
+    if Event.ModifiersDown = [mkAlt, mkShift] then
+    begin
+      Frame.ShowArrangeInConcentricRingsDialog;
+      Exit(true);
     end;
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyQ) and
+     (Event.ModifiersDown = [mkAlt, mkShift]) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    Frame.ShowArrangeInTorusKnotDialog;
+    Exit(true);
   end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyO) and
@@ -2104,6 +2141,11 @@ begin
     if Event.IsKey(keyComma) then
     begin
       Frame.ScaleSelectionRadialDistanceXZ(0.8);
+      Exit(true);
+    end else
+    if Event.IsKey(keySlash) then
+    begin
+      Frame.ProjectSelectionOntoSphereOrCylinder(false, false);
       Exit(true);
     end;
   end;
@@ -2195,6 +2237,11 @@ begin
     if Event.ModifiersDown = [mkAlt, mkShift] then
     begin
       Frame.ShowArrangeInHelixDialog;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkShift] then
+    begin
+      Frame.SelectHiddenComponents(false);
       Exit(true);
     end;
   end;
@@ -3648,6 +3695,36 @@ begin
   ButtonProjectOntoPlane.OnClick := @ButtonProjectOntoPlaneClick;
   ButtonProjectOntoPlane.Parent := PanelLayoutTransform;
 
+  ButtonArrangeTorusKnot := TButton.Create(Self);
+  ButtonArrangeTorusKnot.Align := alTop;
+  ButtonArrangeTorusKnot.AutoSize := true;
+  ButtonArrangeTorusKnot.Caption := 'Torus Knot';
+  ButtonArrangeTorusKnot.Hint := 'Arrange 2+ selected 3D transforms along a 3D (p, q) trefoil / torus knot around pivot (Alt+Shift+Q | Shift-click: dialog | Ctrl-click: orient along knot tangent)';
+  ButtonArrangeTorusKnot.ShowHint := true;
+  ButtonArrangeTorusKnot.BorderSpacing.Around := 2;
+  ButtonArrangeTorusKnot.OnClick := @ButtonArrangeTorusKnotClick;
+  ButtonArrangeTorusKnot.Parent := PanelLayoutTransform;
+
+  ButtonArrangeConcentricRings := TButton.Create(Self);
+  ButtonArrangeConcentricRings.Align := alTop;
+  ButtonArrangeConcentricRings.AutoSize := true;
+  ButtonArrangeConcentricRings.Caption := 'Amphitheater Rings';
+  ButtonArrangeConcentricRings.Hint := 'Arrange 2+ selected 3D transforms into concentric amphitheater / stadium rings around pivot (Alt+Shift+V | Shift-click: dialog | Ctrl-click: orient inward toward center)';
+  ButtonArrangeConcentricRings.ShowHint := true;
+  ButtonArrangeConcentricRings.BorderSpacing.Around := 2;
+  ButtonArrangeConcentricRings.OnClick := @ButtonArrangeConcentricRingsClick;
+  ButtonArrangeConcentricRings.Parent := PanelLayoutTransform;
+
+  ButtonProjectOntoSphere := TButton.Create(Self);
+  ButtonProjectOntoSphere.Align := alTop;
+  ButtonProjectOntoSphere.AutoSize := true;
+  ButtonProjectOntoSphere.Caption := 'Snap to Sphere/Cyl';
+  ButtonProjectOntoSphere.Hint := 'Project 2+ selected 3D transforms radially from pivot onto a Sphere or vertical Cylinder while preserving angular directions (Alt+Shift+/ | Click: Sphere | Shift-click: Cylinder | Ctrl-click: orient outward)';
+  ButtonProjectOntoSphere.ShowHint := true;
+  ButtonProjectOntoSphere.BorderSpacing.Around := 2;
+  ButtonProjectOntoSphere.OnClick := @ButtonProjectOntoSphereClick;
+  ButtonProjectOntoSphere.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -3858,6 +3935,14 @@ begin
   ButtonUIAspect16x9.OnClick := @ButtonUIAspect16x9Click;
   ButtonUIAspect16x9.Parent := PanelLayoutUI;
 
+  ButtonUIReverseOrder := TButton.Create(Self);
+  ButtonUIReverseOrder.AutoSize := true;
+  ButtonUIReverseOrder.Caption := 'UI Reverse Order';
+  ButtonUIReverseOrder.Hint := 'Reverse the screen-space center positions across 2+ selected 2D UI controls (Shift-click: also swap Width and Height)';
+  ButtonUIReverseOrder.ShowHint := true;
+  ButtonUIReverseOrder.OnClick := @ButtonUIReverseOrderClick;
+  ButtonUIReverseOrder.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -4051,6 +4136,11 @@ begin
   MenuTreeViewItemSelectSoundSources.Caption := 'Select Transforms With Sound Sources (Ctrl+Shift+W)';
   MenuTreeViewItemSelectSoundSources.OnClick := @MenuTreeViewItemSelectSoundSourcesClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectSoundSources);
+
+  MenuTreeViewItemSelectHidden := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectHidden.Caption := 'Select All Hidden Components (Ctrl+Shift+H)';
+  MenuTreeViewItemSelectHidden.OnClick := @MenuTreeViewItemSelectHiddenClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectHidden);
 
   MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
   MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
@@ -7722,6 +7812,8 @@ begin
         ButtonUIGoldenRatio.Enabled := SelectedUICount >= 1;
       if ButtonUIAspect16x9 <> nil then
         ButtonUIAspect16x9.Enabled := SelectedUICount >= 1;
+      if ButtonUIReverseOrder <> nil then
+        ButtonUIReverseOrder.Enabled := SelectedUICount >= 2;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -7814,6 +7906,12 @@ begin
       ButtonArrangeSpiralVortex.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonProjectOntoPlane <> nil then
       ButtonProjectOntoPlane.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeTorusKnot <> nil then
+      ButtonArrangeTorusKnot.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeConcentricRings <> nil then
+      ButtonArrangeConcentricRings.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonProjectOntoSphere <> nil then
+      ButtonProjectOntoSphere.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -9185,6 +9283,11 @@ begin
       begin
         ShowArrangeInHelixDialog;
         Key := 0;
+      end else
+      if Shift = [ssCtrl, ssShift] then
+      begin
+        SelectHiddenComponents(false);
+        Key := 0;
       end;
     end else
     if Key = Ord('G') then
@@ -9323,6 +9426,21 @@ begin
     if (Key = VK_OEM_COMMA) and (Shift = [ssAlt, ssShift]) then
     begin
       ScaleSelectionRadialDistanceXZ(0.8);
+      Key := 0;
+    end else
+    if (Key = VK_OEM_2) and (Shift = [ssAlt, ssShift]) then
+    begin
+      ProjectSelectionOntoSphereOrCylinder(false, false);
+      Key := 0;
+    end else
+    if (Key = Ord('Q')) and (Shift = [ssAlt, ssShift]) then
+    begin
+      ShowArrangeInTorusKnotDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('V')) and (Shift = [ssAlt, ssShift]) then
+    begin
+      ShowArrangeInConcentricRingsDialog;
       Key := 0;
     end else
     if (Key = Ord('A')) and (Shift = [ssAlt, ssShift]) then
@@ -12908,6 +13026,147 @@ begin
   ProjectSelectionOntoPlane(ssShift in ShiftState, ssCtrl in ShiftState);
 end;
 
+procedure TDesignFrame.ArrangeSelectionInTorusKnot(const MajorRadius, TubeRadius: Single;
+  const KnotP: Integer; const KnotQ: Integer;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInTorusKnot(
+      MajorRadius, TubeRadius, KnotP, KnotQ, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInTorusKnotDialog;
+var
+  Prompts: array[0..4] of string;
+  Values: array[0..4] of string;
+  MajorR, TubeR: Single;
+  KnotP, KnotQ, OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Major Ring Radius (0 = auto from selection):';
+  Prompts[1] := 'Tube Minor Radius (0 = auto 35% of major radius):';
+  Prompts[2] := 'Longitudinal Winding p (>= 1, e.g. 2 for trefoil):';
+  Prompts[3] := 'Meridional Winding q (>= 1, e.g. 3 for trefoil):';
+  Prompts[4] := 'Orientation (0 = keep, 1 = tube normal, 2 = knot tangent):';
+
+  Values[0] := '0';
+  Values[1] := '0';
+  Values[2] := '2';
+  Values[3] := '3';
+  Values[4] := '0';
+
+  if InputQuery('Arrange Selected in 3D (p, q) Torus Knot', Prompts, Values) then
+  begin
+    MajorR := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    TubeR := StrToFloatDefDot(Trim(Values[1]), 0.0);
+    KnotP := Max(1, StrToIntDef(Trim(Values[2]), 2));
+    KnotQ := Max(1, StrToIntDef(Trim(Values[3]), 3));
+    OrientMode := Clamped(StrToIntDef(Trim(Values[4]), 0), 0, 2);
+    ArrangeSelectionInTorusKnot(MajorR, TubeR, KnotP, KnotQ, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeTorusKnotClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  OrientMode: Integer;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInTorusKnotDialog
+  else
+  begin
+    if ssCtrl in ShiftState then
+      OrientMode := 2
+    else
+      OrientMode := 0;
+    ArrangeSelectionInTorusKnot(0.0, 0.0, 2, 3, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ArrangeSelectionInConcentricRings(
+  const FirstRingRadius, RingSpacing, RingRiseY: Single;
+  const BaseRingCount: Integer;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInConcentricRings(
+      FirstRingRadius, RingSpacing, RingRiseY, BaseRingCount, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInConcentricRingsDialog;
+var
+  Prompts: array[0..4] of string;
+  Values: array[0..4] of string;
+  R0, StepR, RiseY: Single;
+  BaseCount, OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Inner Ring Radius (0 = auto from selection):';
+  Prompts[1] := 'Radial Spacing Between Rings (0 = auto):';
+  Prompts[2] := 'Vertical Elevation Step Per Ring (Y):';
+  Prompts[3] := 'Base Count in Inner Ring (ring k holds Base * (k+1)):';
+  Prompts[4] := 'Orientation (0 = keep, 1 = inward, 2 = outward):';
+
+  Values[0] := '0';
+  Values[1] := '0';
+  Values[2] := '1';
+  Values[3] := '6';
+  Values[4] := '1';
+
+  if InputQuery('Arrange Selected in Concentric Amphitheater Rings', Prompts, Values) then
+  begin
+    R0 := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    StepR := StrToFloatDefDot(Trim(Values[1]), 0.0);
+    RiseY := StrToFloatDefDot(Trim(Values[2]), 1.0);
+    BaseCount := Max(1, StrToIntDef(Trim(Values[3]), 6));
+    OrientMode := Clamped(StrToIntDef(Trim(Values[4]), 1), 0, 2);
+    ArrangeSelectionInConcentricRings(R0, StepR, RiseY, BaseCount, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeConcentricRingsClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  OrientMode: Integer;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInConcentricRingsDialog
+  else
+  begin
+    if ssCtrl in ShiftState then
+      OrientMode := 1
+    else
+      OrientMode := 0;
+    ArrangeSelectionInConcentricRings(0.0, 0.0, 0.0, 6, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ProjectSelectionOntoSphereOrCylinder(
+  const CylinderMode: Boolean;
+  const OrientOutward: Boolean);
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+  if CylinderMode then
+    TransformManipulate.ProjectSelectedOntoCylinder(0.0, OrientOutward)
+  else
+    TransformManipulate.ProjectSelectedOntoSphere(0.0, OrientOutward);
+end;
+
+procedure TDesignFrame.ButtonProjectOntoSphereClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  ProjectSelectionOntoSphereOrCylinder(ssShift in ShiftState, ssCtrl in ShiftState);
+end;
+
 procedure TDesignFrame.StopPilotTransform;
 var
   SavedName: String;
@@ -14169,6 +14428,116 @@ begin
     ApplyStandardAspectToSelectedUserInterfaces(2)
   else
     ApplyStandardAspectToSelectedUserInterfaces(0);
+end;
+
+procedure TDesignFrame.ReverseSelectedUserInterfacePositions(const SwapSizes: Boolean);
+var
+  Selected: TComponentList;
+  SelectedCount, I, Count,OppIdx, ChangedCount: Integer;
+  Items: array of TCastleUserInterface;
+  Centers: array of TVector2;
+  Widths, Heights: array of Single;
+  UI: TCastleUserInterface;
+  R, NewR: TFloatRectangle;
+  DeltaX, DeltaY: Single;
+  ItemChanged: Boolean;
+begin
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if (Selected = nil) or (SelectedCount < 2) then Exit;
+
+    SetLength(Items, SelectedCount);
+    SetLength(Centers, SelectedCount);
+    SetLength(Widths, SelectedCount);
+    SetLength(Heights, SelectedCount);
+    Count := 0;
+
+    for I := 0 to SelectedCount - 1 do
+      if (Selected[I] is TCastleUserInterface) and
+         (Selected[I] <> DesignRoot) and
+         (not (Selected[I] is TCastleTransformDesign)) and
+         (not IsComponentLocked(Selected[I])) then
+      begin
+        UI := TCastleUserInterface(Selected[I]);
+        R := UI.RenderRectWithBorder;
+        if R.IsEmpty or (UI.UIScale <= 0) then Continue;
+        Items[Count] := UI;
+        Centers[Count] := R.Center;
+        Widths[Count] := R.Width / UI.UIScale;
+        Heights[Count] := R.Height / UI.UIScale;
+        Inc(Count);
+      end;
+
+    if Count < 2 then Exit;
+
+    ChangedCount := 0;
+    for I := 0 to Count - 1 do
+    begin
+      UI := Items[I];
+      OppIdx := Count - 1 - I;
+      ItemChanged := false;
+
+      if SwapSizes then
+      begin
+        if UI.AutoSizeToChildren then
+        begin
+          UI.AutoSizeToChildren := false;
+          ItemChanged := true;
+        end;
+        if UI.FullSize then
+        begin
+          UI.FullSize := false;
+          ItemChanged := true;
+        end;
+        if UI.WidthFraction <> 0 then
+        begin
+          UI.WidthFraction := 0;
+          ItemChanged := true;
+        end;
+        if UI.HeightFraction <> 0 then
+        begin
+          UI.HeightFraction := 0;
+          ItemChanged := true;
+        end;
+        if not SameValue(UI.Width, Widths[OppIdx], 0.01) then
+        begin
+          UI.Width := Widths[OppIdx];
+          ItemChanged := true;
+        end;
+        if not SameValue(UI.Height, Heights[OppIdx], 0.01) then
+        begin
+          UI.Height := Heights[OppIdx];
+          ItemChanged := true;
+        end;
+      end;
+
+      NewR := UI.RenderRectWithBorder;
+      if not NewR.IsEmpty then
+      begin
+        DeltaX := Centers[OppIdx].X - NewR.Center.X;
+        DeltaY := Centers[OppIdx].Y - NewR.Center.Y;
+        if (Abs(DeltaX) > 0.01) or (Abs(DeltaY) > 0.01) then
+        begin
+          UI.Translation := UI.Translation + Vector2(DeltaX / UI.UIScale, DeltaY / UI.UIScale);
+          ItemChanged := true;
+        end;
+      end;
+
+      if ItemChanged then
+        Inc(ChangedCount);
+    end;
+
+    if ChangedCount > 0 then
+      ModifiedOutsideObjectInspector(
+        Format('Reverse visual order of %d UI control(s)', [Count]), ucHigh);
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUIReverseOrderClick(Sender: TObject);
+begin
+  ReverseSelectedUserInterfacePositions(ssShift in GetKeyShiftState);
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -17130,6 +17499,48 @@ begin
   SelectSoundAndTriggerTransforms(ssShift in GetKeyShiftState);
 end;
 
+procedure TDesignFrame.SelectHiddenComponents(const TransformsOnly: Boolean);
+var
+  TreeNode: TTreeNode;
+  C: TComponent;
+  NewSelection: TComponentList;
+  IsHidden: Boolean;
+begin
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C <> nil) and (C <> DesignRoot) and
+         (not (C is TCastleAbstractRootTransform)) and
+         Selectable(C) and (not IsComponentLocked(C)) then
+      begin
+        IsHidden := false;
+        if C is TCastleTransform then
+          IsHidden := not TCastleTransform(C).Exists
+        else if (not TransformsOnly) and (C is TCastleUserInterface) and
+                (not (C is TCastleTransformDesign)) then
+          IsHidden := not TCastleUserInterface(C).Exists;
+
+        if IsHidden and (NewSelection.IndexOf(C) = -1) then
+          NewSelection.Add(C);
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectHiddenClick(Sender: TObject);
+begin
+  SelectHiddenComponents(ssShift in GetKeyShiftState);
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -17638,6 +18049,8 @@ begin
     MenuTreeViewItemSelectLightsAndCameras.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemSelectSoundSources <> nil then
     MenuTreeViewItemSelectSoundSources.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectHidden <> nil then
+    MenuTreeViewItemSelectHidden.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemCopyTransform <> nil then
     MenuTreeViewItemCopyTransform.Enabled := (CurrentTransform <> nil) or (SelectedUserInterface <> nil) or (ControlsTree.SelectionCount > 0);
   if MenuTreeViewItemPasteTransform <> nil then
