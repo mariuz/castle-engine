@@ -162,6 +162,9 @@ type
     procedure TestSubstrateLayeredMaterialSlabsRHI;
     procedure TestMarschnerDualSpecularHairBSDFRHI;
     procedure TestStochasticDiscreteMicrofacetGlintsRHI;
+    procedure TestHardwareMeshShaderStageAndTaskGroupsRHI;
+    procedure TestVariableRateShadingTileClassifierRHI;
+    procedure TestRuntimeVirtualTexturePageTableAndAtlasRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -8793,6 +8796,128 @@ begin
       NDFAlignedFlake > NDFNoFlake * 10.0);
   finally
     FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestHardwareMeshShaderStageAndTaskGroupsRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  MeshGLSL: String;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify VK_EXT_mesh_shader GLSL 450 functions }
+    MeshGLSL := Gen.GenerateMeshShaderStageFunctions(64, 124);
+    AssertTrue('Mesh shader GLSL must require GL_EXT_mesh_shader and emit SetMeshOutputsEXT',
+      (Pos('#extension GL_EXT_mesh_shader : require', MeshGLSL) > 0) and
+      (Pos('layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;', MeshGLSL) > 0) and
+      (Pos('layout(triangles, max_vertices = 64, max_primitives = 124) out;', MeshGLSL) > 0) and
+      (Pos('SetMeshOutputsEXT(vertexCount, primitiveCount);', MeshGLSL) > 0));
+
+    { 2. Verify task shader group count ceiling division }
+    AssertEquals('0 meshlets -> 0 task groups', 0, Integer(TCastleShaderGeneratorRHI.ComputeMeshletTaskGroupCount(0, 32)));
+    AssertEquals('32 meshlets -> 1 task group', 1, Integer(TCastleShaderGeneratorRHI.ComputeMeshletTaskGroupCount(32, 32)));
+    AssertEquals('65 meshlets -> 3 task groups', 3, Integer(TCastleShaderGeneratorRHI.ComputeMeshletTaskGroupCount(65, 32)));
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVariableRateShadingTileClassifierRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  VRSGLSL: String;
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify VRS Contrast Compute Shader GLSL 450 }
+    VRSGLSL := Gen.GenerateVRSContrastComputeShader;
+    AssertTrue('VRS Compute GLSL must include SelectOptimalShadingRateTile',
+      Pos('uint SelectOptimalShadingRateTile(float lumaContrastX, float lumaContrastY,', VRSGLSL) > 0);
+
+    { 2. Verify VRS tile rate bitmask encoding (0=1x1, 1=2x1, 4=1x2, 5=2x2, 10=4x4) }
+    AssertEquals('High contrast in both X and Y must select 1x1 full rate (0)',
+      0, Integer(TCastleShaderGeneratorRHI.SelectOptimalShadingRateTile(0.25, 0.25, 0.0, 0.15, 0.04)));
+    AssertEquals('Low horizontal contrast + mid-high vertical contrast must select 2x1 rate (1)',
+      1, Integer(TCastleShaderGeneratorRHI.SelectOptimalShadingRateTile(0.02, 0.10, 0.0, 0.15, 0.04)));
+    AssertEquals('Mid-high horizontal contrast + low vertical contrast must select 1x2 rate (4)',
+      4, Integer(TCastleShaderGeneratorRHI.SelectOptimalShadingRateTile(0.10, 0.02, 0.0, 0.15, 0.04)));
+    AssertEquals('Moderate contrast below low threshold must select 2x2 rate (5)',
+      5, Integer(TCastleShaderGeneratorRHI.SelectOptimalShadingRateTile(0.02, 0.02, 1.0, 0.15, 0.04)));
+    AssertEquals('Ultra-flat luminance + high motion velocity must select 4x4 rate (10)',
+      10, Integer(TCastleShaderGeneratorRHI.SelectOptimalShadingRateTile(0.005, 0.005, 10.0, 0.15, 0.04)));
+  finally
+    FreeAndNil(Gen);
+  end;
+
+  { 3. Verify TCastleVulkanVRSManager tile grid allocation and dispatch }
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6667)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    CmdList.BeginRecording;
+    Device.VRSManager.DispatchVRSImageGeneration(CmdList, 1920, 1080, nil, nil);
+    CmdList.EndRecording;
+
+    AssertEquals('1920 / 16 = 120 VRS tiles wide', 120, Integer(Device.VRSManager.TileGridWidth));
+    AssertEquals('ceil(1080 / 16) = 68 VRS tiles tall', 68, Integer(Device.VRSManager.TileGridHeight));
+    AssertTrue('ShadingRateImage must be allocated', Device.VRSManager.ShadingRateImage <> nil);
+    AssertEquals('DispatchCount must be 1', 1, Integer(Device.VRSManager.DispatchCount));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRuntimeVirtualTexturePageTableAndAtlasRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  RVTGLSL: String;
+  PhysUVCenter: TVector2;
+  Device: TVulkanRHIDevice;
+  TileX0, TileY0, TileX0Repeat, TileY0Repeat, TileX1, TileY1: Cardinal;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify RVT Page Table GLSL 450 functions }
+    RVTGLSL := Gen.GenerateRVTLookupFunctions;
+    AssertTrue('RVT GLSL must include TranslateRVTPageToPhysicalUV',
+      Pos('vec2 TranslateRVTPageToPhysicalUV(vec2 inPageUV, uint physicalTileX, uint physicalTileY,', RVTGLSL) > 0);
+
+    { 2. Verify virtual-to-physical UV translation with 4-texel border gutter }
+    PhysUVCenter := TCastleShaderGeneratorRHI.TranslateRVTPageToPhysicalUV(
+      Vector2(0.5, 0.5), 0, 0, 16, 4.0 / 128.0);
+    { At tile (0,0) in 16x16 grid, center of tile (0.5,0.5) maps to 0.5 / 16 = 0.03125 }
+    AssertSameValue(0.5 / 16.0, PhysUVCenter.X, 1e-5);
+    AssertSameValue(0.5 / 16.0, PhysUVCenter.Y, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+
+  { 3. Verify TCastleVulkanRuntimeVirtualTexture on-demand page allocation and physical material cache }
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6668)) );
+  try
+    Device.RuntimeVirtualTexture.EnsurePhysicalAtlasTextures;
+    AssertTrue('PhysicalAlbedoAtlas must be allocated', Device.RuntimeVirtualTexture.PhysicalAlbedoAtlas <> nil);
+    AssertTrue('PhysicalNormalRoughnessAtlas must be allocated', Device.RuntimeVirtualTexture.PhysicalNormalRoughnessAtlas <> nil);
+
+    AssertTrue('First RVT page request must succeed',
+      Device.RuntimeVirtualTexture.RequestRVTPage(10, 20, TileX0, TileY0));
+    AssertTrue('Repeated RVT page request for (10,20) must hit cache',
+      Device.RuntimeVirtualTexture.RequestRVTPage(10, 20, TileX0Repeat, TileY0Repeat));
+    AssertTrue('Distinct RVT page (11,20) must succeed',
+      Device.RuntimeVirtualTexture.RequestRVTPage(11, 20, TileX1, TileY1));
+
+    AssertEquals('First RVT page request must allocate physical tile (0,0)', 0, Integer(TileX0));
+    AssertEquals('First RVT page request must allocate physical tile (0,0)', 0, Integer(TileY0));
+    AssertEquals('Repeated RVT page request for (10,20) must return cached tile X=0', 0, Integer(TileX0Repeat));
+    AssertEquals('Repeated RVT page request for (10,20) must return cached tile Y=0', 0, Integer(TileY0Repeat));
+    AssertEquals('Distinct RVT page (11,20) must allocate physical tile X=1', 1, Integer(TileX1));
+    AssertEquals('Distinct RVT page (11,20) must allocate physical tile Y=0', 0, Integer(TileY1));
+    AssertEquals('AllocatedTileCount must be 2', 2, Integer(Device.RuntimeVirtualTexture.AllocatedTileCount));
+  finally
+    FreeAndNil(Device);
   end;
 end;
 

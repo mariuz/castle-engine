@@ -2450,6 +2450,80 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Tile-Based Variable Rate Shading (VRS) Manager (Phase 32.2)                }
+  { -------------------------------------------------------------------------- }
+
+  { Generates and manages screen-space 16x16 tile shading rate images
+    (1x1, 2x1, 1x2, 2x2, 4x4) for VK_KHR_fragment_shading_rate. }
+  TCastleVulkanVRSManager = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FTileSize: Cardinal;
+    FTileGridWidth: Cardinal;
+    FTileGridHeight: Cardinal;
+    FShadingRateImage: TVulkanRHITexture;
+    FDispatchCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Allocates the 2D Shading Rate Image (1 texel per 16x16 screen pixel tile). }
+    procedure EnsureShadingRateImage(const AViewportWidth, AViewportHeight: Cardinal);
+
+    { Dispatches the luminance-contrast and velocity VRS tile classifier compute pass. }
+    procedure DispatchVRSImageGeneration(
+      const ACommandList: TVulkanRHICommandList;
+      const AViewportWidth, AViewportHeight: Cardinal;
+      const APipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property TileSize: Cardinal read FTileSize write FTileSize;
+    property TileGridWidth: Cardinal read FTileGridWidth;
+    property TileGridHeight: Cardinal read FTileGridHeight;
+    property ShadingRateImage: TVulkanRHITexture read FShadingRateImage;
+    property DispatchCount: Cardinal read FDispatchCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
+  { Runtime Virtual Texturing (RVT) Page Table & Physical Cache (Phase 32.3)   }
+  { -------------------------------------------------------------------------- }
+
+  { Manages a 64x64 virtual terrain/decal page table backed by a 16x16 physical
+    material tile cache (Albedo + NormalRoughness) for single-lookup landscape shading. }
+  TCastleVulkanRuntimeVirtualTexture = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FPageTable: array[0..63, 0..63] of Integer;
+    FPhysicalTilesPerRow: Cardinal;
+    FPhysicalTileResolution: Cardinal;
+    FMaxPhysicalTiles: Cardinal;
+    FAllocatedTileCount: Cardinal;
+    FPhysicalAlbedoAtlas: TVulkanRHITexture;
+    FPhysicalNormalRoughnessAtlas: TVulkanRHITexture;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Clears all virtual-to-physical page mappings. }
+    procedure ClearPages;
+
+    { Requests or returns an allocated physical tile (X, Y) for virtual page (AVirtualPageX, AVirtualPageY). }
+    function RequestRVTPage(
+      const AVirtualPageX, AVirtualPageY: Cardinal;
+      out APhysicalTileX, APhysicalTileY: Cardinal): Boolean;
+
+    { Allocates the Physical Albedo and NormalRoughness RVT atlas textures. }
+    procedure EnsurePhysicalAtlasTextures;
+
+    property PhysicalTilesPerRow: Cardinal read FPhysicalTilesPerRow;
+    property PhysicalTileResolution: Cardinal read FPhysicalTileResolution;
+    property MaxPhysicalTiles: Cardinal read FMaxPhysicalTiles;
+    property AllocatedTileCount: Cardinal read FAllocatedTileCount;
+    property PhysicalAlbedoAtlas: TVulkanRHITexture read FPhysicalAlbedoAtlas;
+    property PhysicalNormalRoughnessAtlas: TVulkanRHITexture read FPhysicalNormalRoughnessAtlas;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -2550,6 +2624,8 @@ type
     FSurfaceCache: TCastleVulkanSurfaceCache;
     FReSTIR: TCastleVulkanReSTIR;
     FTSRUpscaler: TCastleVulkanTSRUpscaler;
+    FVRSManager: TCastleVulkanVRSManager;
+    FRuntimeVirtualTexture: TCastleVulkanRuntimeVirtualTexture;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -2655,6 +2731,8 @@ type
     function GetSurfaceCache: TCastleVulkanSurfaceCache;
     function GetReSTIR: TCastleVulkanReSTIR;
     function GetTSRUpscaler: TCastleVulkanTSRUpscaler;
+    function GetVRSManager: TCastleVulkanVRSManager;
+    function GetRuntimeVirtualTexture: TCastleVulkanRuntimeVirtualTexture;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -2865,6 +2943,8 @@ type
     property SurfaceCache: TCastleVulkanSurfaceCache read GetSurfaceCache;
     property ReSTIR: TCastleVulkanReSTIR read GetReSTIR;
     property TSRUpscaler: TCastleVulkanTSRUpscaler read GetTSRUpscaler;
+    property VRSManager: TCastleVulkanVRSManager read GetVRSManager;
+    property RuntimeVirtualTexture: TCastleVulkanRuntimeVirtualTexture read GetRuntimeVirtualTexture;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -14004,6 +14084,150 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanVRSManager (Phase 32.2)                                         }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanVRSManager.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FTileSize := 16;
+end;
+
+destructor TCastleVulkanVRSManager.Destroy;
+begin
+  FreeAndNil(FShadingRateImage);
+  inherited;
+end;
+
+procedure TCastleVulkanVRSManager.EnsureShadingRateImage(
+  const AViewportWidth, AViewportHeight: Cardinal);
+var
+  SafeTile: Cardinal;
+  TexDesc: TRHITextureDesc;
+begin
+  SafeTile := Max(Cardinal(8), FTileSize);
+  FTileGridWidth := (Max(Cardinal(1), AViewportWidth) + SafeTile - 1) div SafeTile;
+  FTileGridHeight := (Max(Cardinal(1), AViewportHeight) + SafeTile - 1) div SafeTile;
+
+  if (FShadingRateImage = nil) or
+     (FShadingRateImage.Desc.Width <> FTileGridWidth) or
+     (FShadingRateImage.Desc.Height <> FTileGridHeight) then
+  begin
+    FreeAndNil(FShadingRateImage);
+    TexDesc := TRHITextureDesc.Create2D(
+      FTileGridWidth, FTileGridHeight, pfR8_UNorm,
+      [tuSampled, tuStorage, tuTransferDst]);
+    TexDesc.DebugName := 'VRSShadingRateTileImage';
+    FShadingRateImage := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+  end;
+end;
+
+procedure TCastleVulkanVRSManager.DispatchVRSImageGeneration(
+  const ACommandList: TVulkanRHICommandList;
+  const AViewportWidth, AViewportHeight: Cardinal;
+  const APipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+begin
+  EnsureShadingRateImage(AViewportWidth, AViewportHeight);
+  if ACommandList = nil then
+    Exit;
+
+  if APipeline <> nil then
+    ACommandList.BindComputePipeline(APipeline);
+  if ADescriptorSet <> nil then
+    ACommandList.BindDescriptorSet(0, ADescriptorSet, []);
+
+  ACommandList.Dispatch(FTileGridWidth, FTileGridHeight, 1);
+  Inc(FDispatchCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanRuntimeVirtualTexture (Phase 32.3)                              }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanRuntimeVirtualTexture.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FPhysicalTilesPerRow := 16;
+  FPhysicalTileResolution := 128;
+  FMaxPhysicalTiles := FPhysicalTilesPerRow * FPhysicalTilesPerRow;
+  ClearPages;
+end;
+
+destructor TCastleVulkanRuntimeVirtualTexture.Destroy;
+begin
+  FreeAndNil(FPhysicalNormalRoughnessAtlas);
+  FreeAndNil(FPhysicalAlbedoAtlas);
+  inherited;
+end;
+
+procedure TCastleVulkanRuntimeVirtualTexture.ClearPages;
+var
+  X, Y: Integer;
+begin
+  FAllocatedTileCount := 0;
+  for Y := 0 to 63 do
+    for X := 0 to 63 do
+      FPageTable[X, Y] := -1;
+end;
+
+function TCastleVulkanRuntimeVirtualTexture.RequestRVTPage(
+  const AVirtualPageX, AVirtualPageY: Cardinal;
+  out APhysicalTileX, APhysicalTileY: Cardinal): Boolean;
+var
+  ExistingTile, NewTile: Integer;
+begin
+  APhysicalTileX := 0;
+  APhysicalTileY := 0;
+  if (AVirtualPageX >= 64) or (AVirtualPageY >= 64) then
+    Exit(False);
+
+  ExistingTile := FPageTable[AVirtualPageX, AVirtualPageY];
+  if ExistingTile >= 0 then
+  begin
+    APhysicalTileX := Cardinal(ExistingTile) mod FPhysicalTilesPerRow;
+    APhysicalTileY := Cardinal(ExistingTile) div FPhysicalTilesPerRow;
+    Exit(True);
+  end;
+
+  if FAllocatedTileCount >= FMaxPhysicalTiles then
+    Exit(False);
+
+  NewTile := Integer(FAllocatedTileCount);
+  Inc(FAllocatedTileCount);
+  FPageTable[AVirtualPageX, AVirtualPageY] := NewTile;
+  APhysicalTileX := Cardinal(NewTile) mod FPhysicalTilesPerRow;
+  APhysicalTileY := Cardinal(NewTile) div FPhysicalTilesPerRow;
+  Result := True;
+end;
+
+procedure TCastleVulkanRuntimeVirtualTexture.EnsurePhysicalAtlasTextures;
+var
+  AtlasSize: Cardinal;
+  TexDesc: TRHITextureDesc;
+begin
+  AtlasSize := FPhysicalTilesPerRow * FPhysicalTileResolution;
+  if FPhysicalAlbedoAtlas = nil then
+  begin
+    TexDesc := TRHITextureDesc.Create2D(
+      AtlasSize, AtlasSize, pfRGBA8_UNorm,
+      [tuSampled, tuColorAttachment, tuStorage]);
+    TexDesc.DebugName := 'RVTPhysicalAlbedoAtlas';
+    FPhysicalAlbedoAtlas := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+  end;
+  if FPhysicalNormalRoughnessAtlas = nil then
+  begin
+    TexDesc := TRHITextureDesc.Create2D(
+      AtlasSize, AtlasSize, pfRGBA8_UNorm,
+      [tuSampled, tuColorAttachment, tuStorage]);
+    TexDesc.DebugName := 'RVTPhysicalNormalRoughnessAtlas';
+    FPhysicalNormalRoughnessAtlas := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+  end;
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -14602,12 +14826,28 @@ begin
   Result := FTSRUpscaler;
 end;
 
+function TVulkanRHIDevice.GetVRSManager: TCastleVulkanVRSManager;
+begin
+  if FVRSManager = nil then
+    FVRSManager := TCastleVulkanVRSManager.Create(Self);
+  Result := FVRSManager;
+end;
+
+function TVulkanRHIDevice.GetRuntimeVirtualTexture: TCastleVulkanRuntimeVirtualTexture;
+begin
+  if FRuntimeVirtualTexture = nil then
+    FRuntimeVirtualTexture := TCastleVulkanRuntimeVirtualTexture.Create(Self);
+  Result := FRuntimeVirtualTexture;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FRuntimeVirtualTexture);
+  FreeAndNil(FVRSManager);
   FreeAndNil(FTSRUpscaler);
   FreeAndNil(FReSTIR);
   FreeAndNil(FSurfaceCache);

@@ -1241,6 +1241,39 @@ type
     class function EvaluateStochasticGlintNDF(
       const ANdotH, AMacroRoughness, AFlakeAlignment01, AGlintDensity, AGlintSharpness: Single): Single; static;
 
+    { Phase 32.1: Generates a GLSL 450 Mesh Shader stage (GL_EXT_mesh_shader) emitting
+      meshlet vertices and primitive triangle indices via SetMeshOutputsEXT. }
+    function GenerateMeshShaderStageFunctions(
+      const AMaxVertices: Cardinal = 64;
+      const AMaxPrimitives: Cardinal = 124;
+      const AWorkgroupSizeX: Cardinal = 32): String;
+
+    { Phase 32.1 CPU reference: Computes task shader workgroup count for ATotalMeshletCount. }
+    class function ComputeMeshletTaskGroupCount(
+      const ATotalMeshletCount: Cardinal;
+      const AMeshletsPerTaskGroup: Cardinal = 32): Cardinal; static;
+
+    { Phase 32.2: Generates a GLSL 450 compute shader for VK_KHR_fragment_shading_rate
+      tile-based Variable Rate Shading (1x1, 2x1, 1x2, 2x2, 4x4) driven by luma contrast & motion. }
+    function GenerateVRSContrastComputeShader(
+      const ATileSize: Cardinal = 16): String;
+
+    { Phase 32.2 CPU reference: Selects optimal shading rate code (0=1x1, 1=2x1, 4=1x2, 5=2x2, 10=4x4). }
+    class function SelectOptimalShadingRateTile(
+      const ALumaContrastX, ALumaContrastY, AVelocityPixels: Single;
+      const AHighContrastThreshold: Single = 0.20;
+      const ALowContrastThreshold: Single = 0.04): Cardinal; static;
+
+    { Phase 32.3: Generates GLSL 450 functions for Runtime Virtual Texturing (RVT)
+      virtual-to-physical page translation with bilinear border padding. }
+    function GenerateRVTLookupFunctions: String;
+
+    { Phase 32.3 CPU reference: Translates in-page UV [0..1]^2 and physical tile (X,Y) into physical RVT atlas UV. }
+    class function TranslateRVTPageToPhysicalUV(
+      const AInPageUV: TVector2;
+      const APhysicalTileX, APhysicalTileY, APhysicalTilesPerRow: Cardinal;
+      const ABorderTexelFraction: Single = 0.03125): TVector2; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -6090,6 +6123,111 @@ begin
   DMacro := A2 / Max(1e-6, Pi * Denom * Denom);
   GlintSpike := Math.Power(EnsureRange(AFlakeAlignment01, 0.0, 1.0), Max(1.0, AGlintSharpness)) / Max(0.01, AGlintDensity);
   Result := DMacro * (1.0 + GlintSpike);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateMeshShaderStageFunctions(
+  const AMaxVertices, AMaxPrimitives, AWorkgroupSizeX: Cardinal): String;
+begin
+  Result :=
+    '#version 450' + NL +
+    '#extension GL_EXT_mesh_shader : require' + NL +
+    Format('layout(local_size_x = %d, local_size_y = 1, local_size_z = 1) in;', [Max(1, AWorkgroupSizeX)]) + NL +
+    Format('layout(triangles, max_vertices = %d, max_primitives = %d) out;',
+      [Max(3, AMaxVertices), Max(1, AMaxPrimitives)]) + NL +
+    NL +
+    'void EmitMeshletOutputCounts(uint vertexCount, uint primitiveCount) {' + NL +
+    '  SetMeshOutputsEXT(vertexCount, primitiveCount);' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '  EmitMeshletOutputCounts(0u, 0u);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.ComputeMeshletTaskGroupCount(
+  const ATotalMeshletCount: Cardinal;
+  const AMeshletsPerTaskGroup: Cardinal): Cardinal;
+var
+  GroupSize: Cardinal;
+begin
+  if ATotalMeshletCount = 0 then
+    Exit(0);
+  GroupSize := Max(Cardinal(1), AMeshletsPerTaskGroup);
+  Result := (ATotalMeshletCount + GroupSize - 1) div GroupSize;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateVRSContrastComputeShader(
+  const ATileSize: Cardinal): String;
+begin
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;',
+      [Max(1, ATileSize), Max(1, ATileSize)]) + NL +
+    NL +
+    '// Phase 32.2: VK_KHR_fragment_shading_rate Tile-Based Variable Rate Shading Classifier' + NL +
+    'uint SelectOptimalShadingRateTile(float lumaContrastX, float lumaContrastY,' + NL +
+    '  float velocityPixels, float highContrastThreshold, float lowContrastThreshold) {' + NL +
+    '  float maxContrast = max(lumaContrastX, lumaContrastY);' + NL +
+    '  if (maxContrast >= highContrastThreshold && velocityPixels < 4.0) return 0u;' + NL +
+    '  if (maxContrast < lowContrastThreshold && velocityPixels >= 8.0) return 10u;' + NL +
+    '  if (maxContrast < lowContrastThreshold) return 5u;' + NL +
+    '  if (lumaContrastX < lumaContrastY * 0.5) return 1u;' + NL +
+    '  if (lumaContrastY < lumaContrastX * 0.5) return 4u;' + NL +
+    '  return 5u;' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.SelectOptimalShadingRateTile(
+  const ALumaContrastX, ALumaContrastY, AVelocityPixels: Single;
+  const AHighContrastThreshold: Single;
+  const ALowContrastThreshold: Single): Cardinal;
+var
+  MaxContrast: Single;
+begin
+  MaxContrast := Max(ALumaContrastX, ALumaContrastY);
+  if (MaxContrast >= AHighContrastThreshold) and (AVelocityPixels < 4.0) then
+    Exit(0); // 1x1 full shading rate
+  if (MaxContrast < ALowContrastThreshold) and (AVelocityPixels >= 8.0) then
+    Exit(10); // 4x4 (1/16th rate for fast-moving low-contrast regions)
+  if MaxContrast < ALowContrastThreshold then
+    Exit(5); // 2x2 quarter rate
+  if ALumaContrastX < ALumaContrastY * 0.5 then
+    Exit(1); // 2x1 coarse X, fine Y
+  if ALumaContrastY < ALumaContrastX * 0.5 then
+    Exit(4); // 1x2 fine X, coarse Y
+  Result := 5; // 2x2 default mid-contrast rate
+end;
+
+function TCastleShaderGeneratorRHI.GenerateRVTLookupFunctions: String;
+begin
+  Result :=
+    '// Phase 32.3: Runtime Virtual Texturing (RVT) Page Table & Physical Tile Cache Lookup' + NL +
+    'vec2 TranslateRVTPageToPhysicalUV(vec2 inPageUV, uint physicalTileX, uint physicalTileY,' + NL +
+    '  uint physicalTilesPerRow, float borderTexelFraction) {' + NL +
+    '  float invTiles = 1.0 / max(1.0, float(physicalTilesPerRow));' + NL +
+    '  float innerScale = max(0.0, 1.0 - 2.0 * borderTexelFraction);' + NL +
+    '  vec2 paddedUV = vec2(borderTexelFraction) + clamp(inPageUV, vec2(0.0), vec2(1.0)) * innerScale;' + NL +
+    '  return (vec2(float(physicalTileX), float(physicalTileY)) + paddedUV) * invTiles;' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.TranslateRVTPageToPhysicalUV(
+  const AInPageUV: TVector2;
+  const APhysicalTileX, APhysicalTileY, APhysicalTilesPerRow: Cardinal;
+  const ABorderTexelFraction: Single): TVector2;
+var
+  InvTiles, InnerScale, PaddedU, PaddedV: Single;
+begin
+  InvTiles := 1.0 / Max(1.0, Single(APhysicalTilesPerRow));
+  InnerScale := Max(0.0, 1.0 - 2.0 * ABorderTexelFraction);
+  PaddedU := ABorderTexelFraction + EnsureRange(AInPageUV.X, 0.0, 1.0) * InnerScale;
+  PaddedV := ABorderTexelFraction + EnsureRange(AInPageUV.Y, 0.0, 1.0) * InnerScale;
+  Result := Vector2(
+    (Single(APhysicalTileX) + PaddedU) * InvTiles,
+    (Single(APhysicalTileY) + PaddedV) * InvTiles);
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

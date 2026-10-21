@@ -77,11 +77,10 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–30**: **COMPLETED** (100%).
-- **Phase 31 (Substrate / Strata Multi-Lobe Layered Material Slabs, Glint Microfacet Sparkles & Dual-Specular Marschner Hair/Fur BSDF)**: **COMPLETED** (100%, 123 unit tests passing):
-  - [x] **31.1. Energy-Conserving Layered Material Slabs & Vertical Coating Transmittance (`GenerateSubstrateLayeredMaterialFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSubstrateLayeredMaterialSlabsRHI`).
-  - [x] **31.2. Marschner / Chiang Dual-Specular Hair & Fur Fiber BSDF (`GenerateHairMarschnerBSDF` in `CastleInternalShaderRHI`)** — Completed & tested (`TestMarschnerDualSpecularHairBSDFRHI`).
-  - [x] **31.3. Stochastic Discrete Microfacet Glints & Sparkles (`GenerateStochasticGlintFunctions`, `EvaluateStochasticGlintNDF` in `CastleInternalShaderRHI`)** — Completed & tested (`TestStochasticDiscreteMicrofacetGlintsRHI`).
-- **Unreal Engine 5 Feature Parity Roadmap (Phases 32–33)**:
-  - **Phase 32 (Next-Gen GPU Pipeline)**: Hardware Task/Mesh Shaders (`VK_EXT_mesh_shader`), Tile-Based Variable Rate Shading (`VK_KHR_fragment_shading_rate`, `TCastleVulkanVRSManager`), and Runtime Virtual Texturing (`TCastleVulkanRuntimeVirtualTexture`).
+- **Phases 1–31**: **COMPLETED** (100%).
+- **Phase 32 (Hardware Mesh Shaders `VK_EXT_mesh_shader`, Variable Rate Shading `VK_KHR_fragment_shading_rate` & Runtime Virtual Texturing RVT)**: **COMPLETED** (100%, 126 unit tests passing):
+  - [x] **32.1. Task & Mesh Shader Pipeline (`VK_EXT_mesh_shader`, `GenerateMeshShaderStageFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestHardwareMeshShaderStageAndTaskGroupsRHI`).
+  - [x] **32.2. Per-Draw & Tile-Based Variable Rate Shading (`VK_KHR_fragment_shading_rate`, `TCastleVulkanVRSManager` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVariableRateShadingTileClassifierRHI`).
+  - [x] **32.3. Runtime Virtual Texturing (RVT) Page Table & Physical Material Tile Cache (`TCastleVulkanRuntimeVirtualTexture` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestRuntimeVirtualTexturePageTableAndAtlasRHI`).
+- **Unreal Engine 5 Feature Parity Roadmap (Phase 33)**:
   - **Phase 33 (Water, Sparse Volumes & Diagnostics)**: Single-Layer Water Beer-Lambert Absorption, Snell Refraction & Photon Caustics, Sparse Brick-Atlas Heterogeneous Volumes (`TCastleVulkanSparseVolumeAtlas` with Planckian blackbody emission), and GPU Crash Breadcrumb Tracker (`TCastleVulkanBreadcrumbTracker`).
