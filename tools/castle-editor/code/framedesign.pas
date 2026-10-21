@@ -363,6 +363,9 @@ type
       ButtonArrangeCubeFrame: TButton;
       ButtonArrangeBowl: TButton;
       ButtonSnapToPrimarySurface: TButton;
+      ButtonArrangeRose: TButton;
+      ButtonArrangeEllipsoid: TButton;
+      ButtonShearSelection: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -394,6 +397,7 @@ type
       ButtonUICircleArrange: TButton;
       ButtonUIFitAspect: TButton;
       ButtonUISnapParentEdge: TButton;
+      ButtonUICascade: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -431,6 +435,7 @@ type
       MenuTreeViewItemSelectOutliers: TMenuItem;
       MenuTreeViewItemSelectMissingUrl: TMenuItem;
       MenuTreeViewItemSelectDuplicatePos: TMenuItem;
+      MenuTreeViewItemSelectLeaves: TMenuItem;
       MenuTreeViewItemCopyTransform: TMenuItem;
       MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
@@ -539,6 +544,9 @@ type
     procedure ButtonArrangeCubeFrameClick(Sender: TObject);
     procedure ButtonArrangeBowlClick(Sender: TObject);
     procedure ButtonSnapToPrimarySurfaceClick(Sender: TObject);
+    procedure ButtonArrangeRoseClick(Sender: TObject);
+    procedure ButtonArrangeEllipsoidClick(Sender: TObject);
+    procedure ButtonShearSelectionClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -559,6 +567,7 @@ type
     procedure ButtonUICircleArrangeClick(Sender: TObject);
     procedure ButtonUIFitAspectClick(Sender: TObject);
     procedure ButtonUISnapParentEdgeClick(Sender: TObject);
+    procedure ButtonUICascadeClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -603,6 +612,7 @@ type
     procedure MenuTreeViewItemSelectOutliersClick(Sender: TObject);
     procedure MenuTreeViewItemSelectMissingUrlClick(Sender: TObject);
     procedure MenuTreeViewItemSelectDuplicatePosClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectLeavesClick(Sender: TObject);
     procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
@@ -1170,6 +1180,22 @@ type
     procedure SnapSelectionToPrimaryBoundsSurface(
       const FlushOutside: Boolean = true;
       const OrientOutward: Boolean = false);
+    procedure ArrangeSelectionInRoseCurve(
+      const OuterRadius: Single = 0.0;
+      const PetalsK: Single = 2.0;
+      const VerticalWaveY: Single = 0.0;
+      const OrientMode: Integer = 0);
+    procedure ShowArrangeInRoseCurveDialog;
+    procedure ArrangeSelectionOnEllipsoid(
+      const Radii: TVector3;
+      const UpperHemisphereOnly: Boolean = false;
+      const OrientMode: Integer = 0);
+    procedure ShowArrangeOnEllipsoidDialog;
+    procedure ShearSelection(
+      const ShearAxis, ReferenceAxis: T3DAxis;
+      const ShearFactor: Single;
+      const TiltOrientation: Boolean = false);
+    procedure ShowShearSelectionDialog;
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -1198,6 +1224,9 @@ type
     procedure SnapSelectedUserInterfacesToParentEdge(
       const SnapCorner: Boolean = false;
       const MarginPx: Single = 0.0);
+    procedure ArrangeSelectedUserInterfacesInCascade(
+      const StepX: Single = 24.0;
+      const StepY: Single = -24.0);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -1244,6 +1273,7 @@ type
     procedure SelectDuplicatePositionTransforms(
       const SameClassOnly: Boolean = false;
       const Tolerance: Single = 0.01);
+    procedure SelectLeafTransforms(const OnlySceneMeshes: Boolean = false);
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -1821,6 +1851,11 @@ begin
     begin
       Frame.ShowArrangeAlongLineDialog;
       Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt] then
+    begin
+      Frame.SelectLeafTransforms(false);
+      Exit(true);
     end;
   end;
 
@@ -1986,6 +2021,11 @@ begin
     begin
       Frame.ShowArrangeInPolygonDialog;
       Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt] then
+    begin
+      Frame.ShowShearSelectionDialog;
+      Exit(true);
     end;
   end;
 
@@ -2086,6 +2126,11 @@ begin
     if Event.ModifiersDown = [mkAlt, mkShift] then
     begin
       Frame.ShowArrangeOnTorusDialog;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt] then
+    begin
+      Frame.ShowArrangeOnEllipsoidDialog;
       Exit(true);
     end;
   end;
@@ -2201,6 +2246,11 @@ begin
     if Event.ModifiersDown = [mkAlt, mkShift] then
     begin
       Frame.CenterSelectionOriginOnChildren(false);
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt] then
+    begin
+      Frame.ShowArrangeInRoseCurveDialog;
       Exit(true);
     end;
   end;
@@ -3966,6 +4016,36 @@ begin
   ButtonSnapToPrimarySurface.OnClick := @ButtonSnapToPrimarySurfaceClick;
   ButtonSnapToPrimarySurface.Parent := PanelLayoutTransform;
 
+  ButtonArrangeRose := TButton.Create(Self);
+  ButtonArrangeRose.Align := alTop;
+  ButtonArrangeRose.AutoSize := true;
+  ButtonArrangeRose.Caption := 'Rose Curve...';
+  ButtonArrangeRose.Hint := 'Arrange 2+ selected 3D transforms along a polar Rose / Rhodonea petal curve r = R*cos(k*theta) around the active pivot (Ctrl+Alt+O | Shift-click: dialog | Ctrl-click: orient along petal tangent)';
+  ButtonArrangeRose.ShowHint := true;
+  ButtonArrangeRose.BorderSpacing.Around := 2;
+  ButtonArrangeRose.OnClick := @ButtonArrangeRoseClick;
+  ButtonArrangeRose.Parent := PanelLayoutTransform;
+
+  ButtonArrangeEllipsoid := TButton.Create(Self);
+  ButtonArrangeEllipsoid.Align := alTop;
+  ButtonArrangeEllipsoid.AutoSize := true;
+  ButtonArrangeEllipsoid.Caption := 'Ellipsoid...';
+  ButtonArrangeEllipsoid.Hint := 'Arrange 2+ selected 3D transforms over a triaxial 3D ellipsoid or dome using a Fibonacci golden-angle lattice (Ctrl+Alt+U | Shift-click: dialog | Ctrl-click: upper dome + outward normal)';
+  ButtonArrangeEllipsoid.ShowHint := true;
+  ButtonArrangeEllipsoid.BorderSpacing.Around := 2;
+  ButtonArrangeEllipsoid.OnClick := @ButtonArrangeEllipsoidClick;
+  ButtonArrangeEllipsoid.Parent := PanelLayoutTransform;
+
+  ButtonShearSelection := TButton.Create(Self);
+  ButtonShearSelection.Align := alTop;
+  ButtonShearSelection.AutoSize := true;
+  ButtonShearSelection.Caption := 'Shear / Skew...';
+  ButtonShearSelection.Hint := 'Shear / skew 2+ selected 3D transforms linearly along an axis relative to a reference axis around the active pivot (Ctrl+Alt+K | Shift-click: dialog | Click: Shear X by Y +0.35 | Ctrl-click: also tilt orientation)';
+  ButtonShearSelection.ShowHint := true;
+  ButtonShearSelection.BorderSpacing.Around := 2;
+  ButtonShearSelection.OnClick := @ButtonShearSelectionClick;
+  ButtonShearSelection.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -4208,6 +4288,14 @@ begin
   ButtonUISnapParentEdge.OnClick := @ButtonUISnapParentEdgeClick;
   ButtonUISnapParentEdge.Parent := PanelLayoutUI;
 
+  ButtonUICascade := TButton.Create(Self);
+  ButtonUICascade.AutoSize := true;
+  ButtonUICascade.Caption := 'UI Cascade';
+  ButtonUICascade.Hint := 'Arrange 2+ selected 2D UI controls in a diagonal cascade / stepped card deck starting from the primary selected control (Click: +24px X, -24px Y | Shift-click: tight +12px X, -12px Y | Ctrl-click: ascending +24px X, +24px Y)';
+  ButtonUICascade.ShowHint := true;
+  ButtonUICascade.OnClick := @ButtonUICascadeClick;
+  ButtonUICascade.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -4421,6 +4509,11 @@ begin
   MenuTreeViewItemSelectDuplicatePos.Caption := 'Select Co-Located / Duplicate-Position Transforms (Ctrl+Shift+I)';
   MenuTreeViewItemSelectDuplicatePos.OnClick := @MenuTreeViewItemSelectDuplicatePosClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectDuplicatePos);
+
+  MenuTreeViewItemSelectLeaves := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectLeaves.Caption := 'Select Leaf / Terminal Transforms (Ctrl+Alt+L)';
+  MenuTreeViewItemSelectLeaves.OnClick := @MenuTreeViewItemSelectLeavesClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectLeaves);
 
   MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
   MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
@@ -8100,6 +8193,8 @@ begin
         ButtonUIFitAspect.Enabled := SelectedUICount >= 1;
       if ButtonUISnapParentEdge <> nil then
         ButtonUISnapParentEdge.Enabled := SelectedUICount >= 1;
+      if ButtonUICascade <> nil then
+        ButtonUICascade.Enabled := SelectedUICount >= 2;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -8216,6 +8311,12 @@ begin
       ButtonArrangeBowl.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonSnapToPrimarySurface <> nil then
       ButtonSnapToPrimarySurface.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeRose <> nil then
+      ButtonArrangeRose.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeEllipsoid <> nil then
+      ButtonArrangeEllipsoid.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonShearSelection <> nil then
+      ButtonShearSelection.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -9648,6 +9749,11 @@ begin
       begin
         ShowArrangeAlongLineDialog;
         Key := 0;
+      end else
+      if Shift = [ssCtrl, ssAlt] then
+      begin
+        SelectLeafTransforms(false);
+        Key := 0;
       end;
     end else
     if (Key = Ord('X')) and (Shift = [ssAlt, ssShift]) then
@@ -9797,6 +9903,11 @@ begin
       ShowArrangeOnTorusDialog;
       Key := 0;
     end else
+    if (Key = Ord('U')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowArrangeOnEllipsoidDialog;
+      Key := 0;
+    end else
     if (Key = Ord('N')) and (Shift = [ssCtrl, ssShift]) then
     begin
       SelectNonUniformlyScaledTransforms;
@@ -9820,6 +9931,11 @@ begin
     if (Key = Ord('K')) and (Shift = [ssAlt, ssShift]) then
     begin
       ShowArrangeInPolygonDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('K')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowShearSelectionDialog;
       Key := 0;
     end else
     if (Key = Ord('F')) and (Shift = [ssAlt, ssShift]) then
@@ -9965,6 +10081,11 @@ begin
     if (Key = Ord('O')) and (Shift = [ssAlt, ssShift]) then
     begin
       CenterSelectionOriginOnChildren(false);
+      Key := 0;
+    end else
+    if (Key = Ord('O')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowArrangeInRoseCurveDialog;
       Key := 0;
     end else
     if (Key = Ord('B')) and (Shift = [ssCtrl, ssShift]) then
@@ -13897,6 +14018,181 @@ begin
   SnapSelectionToPrimaryBoundsSurface(not (ssShift in ShiftState), ssCtrl in ShiftState);
 end;
 
+procedure TDesignFrame.ArrangeSelectionInRoseCurve(
+  const OuterRadius: Single;
+  const PetalsK: Single;
+  const VerticalWaveY: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInRoseCurve(
+      OuterRadius, PetalsK, VerticalWaveY, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInRoseCurveDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  OuterR, PetalsK, WaveY: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Outer Petal Radius XZ (0 = auto from selection):';
+  Prompts[1] := 'Petal Frequency k (e.g. 2 = 4 petals, 3 = 3 petals, 5 = 5 petals):';
+  Prompts[2] := 'Vertical Wave Amplitude Y (0 = flat XZ rose):';
+  Prompts[3] := 'Orientation (0 = keep, 1 = inward XZ, 2 = 3D petal tangent):';
+
+  Values[0] := '0';
+  Values[1] := '2';
+  Values[2] := '0';
+  Values[3] := '2';
+
+  if InputQuery('Arrange Selected in 3D Rose / Rhodonea Petal Curve', Prompts, Values) then
+  begin
+    OuterR := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    PetalsK := StrToFloatDefDot(Trim(Values[1]), 2.0);
+    WaveY := StrToFloatDefDot(Trim(Values[2]), 0.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[3]), 2), 0, 2);
+    ArrangeSelectionInRoseCurve(OuterR, PetalsK, WaveY, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeRoseClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  OrientMode: Integer;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInRoseCurveDialog
+  else
+  begin
+    if ssCtrl in ShiftState then
+      OrientMode := 2
+    else
+      OrientMode := 0;
+    ArrangeSelectionInRoseCurve(0.0, 2.0, 0.0, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ArrangeSelectionOnEllipsoid(
+  const Radii: TVector3;
+  const UpperHemisphereOnly: Boolean;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedOnEllipsoid(
+      Radii, UpperHemisphereOnly, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeOnEllipsoidDialog;
+var
+  Prompts: array[0..4] of string;
+  Values: array[0..4] of string;
+  RX, RY, RZ: Single;
+  UpperOnly: Boolean;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Ellipsoid Semi-Axis Radius X (0 = auto):';
+  Prompts[1] := 'Ellipsoid Semi-Axis Radius Y (0 = auto):';
+  Prompts[2] := 'Ellipsoid Semi-Axis Radius Z (0 = auto):';
+  Prompts[3] := 'Shape (0 = Full Ellipsoid, 1 = Upper Hemisphere Dome):';
+  Prompts[4] := 'Orientation (0 = keep, 1 = outward ellipsoid normal, 2 = inward):';
+
+  Values[0] := '0';
+  Values[1] := '0';
+  Values[2] := '0';
+  Values[3] := '0';
+  Values[4] := '1';
+
+  if InputQuery('Arrange Selected on 3D Triaxial Ellipsoid / Dome', Prompts, Values) then
+  begin
+    RX := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    RY := StrToFloatDefDot(Trim(Values[1]), 0.0);
+    RZ := StrToFloatDefDot(Trim(Values[2]), 0.0);
+    UpperOnly := StrToIntDef(Trim(Values[3]), 0) <> 0;
+    OrientMode := Clamped(StrToIntDef(Trim(Values[4]), 1), 0, 2);
+    ArrangeSelectionOnEllipsoid(Vector3(RX, RY, RZ), UpperOnly, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeEllipsoidClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  UpperOnly: Boolean;
+  OrientMode: Integer;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeOnEllipsoidDialog
+  else
+  begin
+    UpperOnly := ssCtrl in ShiftState;
+    if UpperOnly then
+      OrientMode := 1
+    else
+      OrientMode := 0;
+    ArrangeSelectionOnEllipsoid(TVector3.Zero, UpperOnly, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ShearSelection(
+  const ShearAxis, ReferenceAxis: T3DAxis;
+  const ShearFactor: Single;
+  const TiltOrientation: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ShearSelected(
+      ShearAxis, ReferenceAxis, ShearFactor, TiltOrientation);
+end;
+
+procedure TDesignFrame.ShowShearSelectionDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  SAxis, RAxis: T3DAxis;
+  Factor: Single;
+  TiltRot: Boolean;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Shear Target Axis (0 = X, 1 = Y, 2 = Z):';
+  Prompts[1] := 'Reference Coordinate Axis (0 = X, 1 = Y, 2 = Z):';
+  Prompts[2] := 'Shear Factor (delta ShearAxis per unit ReferenceAxis):';
+  Prompts[3] := 'Tilt Transform Orientation by ArcTan(ShearFactor) (0 = no, 1 = yes):';
+
+  Values[0] := '0';
+  Values[1] := '1';
+  Values[2] := '0.35';
+  Values[3] := '0';
+
+  if InputQuery('3D Shear / Skew Selected Transforms', Prompts, Values) then
+  begin
+    SAxis := Clamped(StrToIntDef(Trim(Values[0]), 0), 0, 2);
+    RAxis := Clamped(StrToIntDef(Trim(Values[1]), 1), 0, 2);
+    Factor := StrToFloatDefDot(Trim(Values[2]), 0.35);
+    TiltRot := StrToIntDef(Trim(Values[3]), 0) <> 0;
+    ShearSelection(SAxis, RAxis, Factor, TiltRot);
+  end;
+end;
+
+procedure TDesignFrame.ButtonShearSelectionClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowShearSelectionDialog
+  else
+    ShearSelection(0, 1, 0.35, ssCtrl in ShiftState);
+end;
+
 procedure TDesignFrame.StopPilotTransform;
 var
   SavedName: String;
@@ -15557,6 +15853,84 @@ begin
   else
     Margin := 0.0;
   SnapSelectedUserInterfacesToParentEdge(ssShift in ShiftState, Margin);
+end;
+
+procedure TDesignFrame.ArrangeSelectedUserInterfacesInCascade(
+  const StepX: Single;
+  const StepY: Single);
+var
+  Selected: TComponentList;
+  SelectedCount, I, ItemIdx, ChangedCount: Integer;
+  PrimaryUI, UI: TCastleUserInterface;
+  PrimaryRect, CurRect: TFloatRectangle;
+  TargetLeft, TargetTop, DeltaX, DeltaY: Single;
+begin
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if (Selected = nil) or (SelectedCount < 2) then Exit;
+
+    PrimaryUI := nil;
+    for I := 0 to SelectedCount - 1 do
+      if (Selected[I] is TCastleUserInterface) and
+         (Selected[I] <> DesignRoot) and
+         (not (Selected[I] is TCastleTransformDesign)) and
+         (not IsComponentLocked(Selected[I])) then
+      begin
+        PrimaryUI := TCastleUserInterface(Selected[I]);
+        Break;
+      end;
+
+    if PrimaryUI = nil then Exit;
+    PrimaryRect := PrimaryUI.RenderRectWithBorder;
+    if PrimaryRect.IsEmpty then Exit;
+
+    ItemIdx := 0;
+    ChangedCount := 0;
+    for I := 0 to SelectedCount - 1 do
+      if (Selected[I] is TCastleUserInterface) and
+         (Selected[I] <> DesignRoot) and
+         (not (Selected[I] is TCastleTransformDesign)) and
+         (not IsComponentLocked(Selected[I])) then
+      begin
+        UI := TCastleUserInterface(Selected[I]);
+        if UI.UIScale <= 0 then Continue;
+        CurRect := UI.RenderRectWithBorder;
+        if CurRect.IsEmpty then Continue;
+
+        if ItemIdx > 0 then
+        begin
+          TargetLeft := PrimaryRect.Left + (ItemIdx * StepX * UI.UIScale);
+          TargetTop := PrimaryRect.Top + (ItemIdx * StepY * UI.UIScale);
+          DeltaX := TargetLeft - CurRect.Left;
+          DeltaY := TargetTop - CurRect.Top;
+          if (Abs(DeltaX) > 0.01) or (Abs(DeltaY) > 0.01) then
+          begin
+            UI.Translation := UI.Translation + Vector2(DeltaX / UI.UIScale, DeltaY / UI.UIScale);
+            Inc(ChangedCount);
+          end;
+        end;
+        Inc(ItemIdx);
+      end;
+
+    if ChangedCount > 0 then
+      ModifiedOutsideObjectInspector(
+        Format('Arrange %d UI control(s) in diagonal cascade', [ItemIdx]), ucHigh);
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUICascadeClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ArrangeSelectedUserInterfacesInCascade(12.0, -12.0)
+  else if ssCtrl in ShiftState then
+    ArrangeSelectedUserInterfacesInCascade(24.0, 24.0)
+  else
+    ArrangeSelectedUserInterfacesInCascade(24.0, -24.0);
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -18740,6 +19114,63 @@ begin
   SelectDuplicatePositionTransforms(ssShift in GetKeyShiftState, 0.01);
 end;
 
+procedure TDesignFrame.SelectLeafTransforms(const OnlySceneMeshes: Boolean);
+var
+  TreeNode: TTreeNode;
+  C: TComponent;
+  T: TCastleTransform;
+  NewSelection: TComponentList;
+  ChildIdx: Integer;
+  HasSelectableChildTransform, Matches: Boolean;
+begin
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C is TCastleTransform) and (C <> DesignRoot) and
+         (not (C is TCastleAbstractRootTransform)) and
+         Selectable(C) and (not IsComponentLocked(C)) then
+      begin
+        T := TCastleTransform(C);
+        if T.Exists then
+        begin
+          HasSelectableChildTransform := false;
+          for ChildIdx := 0 to T.Count - 1 do
+            if Selectable(T[ChildIdx]) then
+            begin
+              HasSelectableChildTransform := true;
+              Break;
+            end;
+
+          if not HasSelectableChildTransform then
+          begin
+            if OnlySceneMeshes then
+              Matches := (T is TCastleScene) and (Trim(TCastleScene(T).Url) <> '')
+            else
+              Matches := true;
+
+            if Matches and (NewSelection.IndexOf(T) = -1) then
+              NewSelection.Add(T);
+          end;
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectLeavesClick(Sender: TObject);
+begin
+  SelectLeafTransforms(ssShift in GetKeyShiftState);
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -19256,6 +19687,8 @@ begin
     MenuTreeViewItemSelectMissingUrl.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemSelectDuplicatePos <> nil then
     MenuTreeViewItemSelectDuplicatePos.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectLeaves <> nil then
+    MenuTreeViewItemSelectLeaves.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemCopyTransform <> nil then
     MenuTreeViewItemCopyTransform.Enabled := (CurrentTransform <> nil) or (SelectedUserInterface <> nil) or (ControlsTree.SelectionCount > 0);
   if MenuTreeViewItemPasteTransform <> nil then

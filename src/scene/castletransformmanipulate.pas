@@ -1127,6 +1127,50 @@ type
     function SnapSelectedToPrimaryBoundsSurface(
       const FlushOutside: Boolean = true;
       const OrientOutward: Boolean = false): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) along a
+      3D polar Rose / Rhodonea petal curve centered at the active selection pivot:
+      $\theta_i = \frac(2\pi i)(N), \quad r(\theta_i) = R \cos(k \theta_i)$,
+      $x_i = C_x + r(\theta_i)\cos(\theta_i), \quad y_i = C_y + H_y \sin(k \theta_i), \quad z_i = C_z + r(\theta_i)\sin(\theta_i)$.
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient horizontally inward toward the rose center
+      - @code(2): orient forward along the 3D rose petal tangent vector
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInRoseCurve(
+      const OuterRadius: Single = 0.0;
+      const PetalsK: Single = 2.0;
+      const VerticalWaveY: Single = 0.0;
+      const OrientMode: Integer = 0): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) over a
+      triaxial 3D ellipsoid or dome with semi-axes @code(Radii) $(R_x, R_y, R_z)$
+      centered at the active selection pivot using a Fibonacci golden-angle
+      spherical lattice scaled to $(R_x, R_y, R_z)$.
+      When @code(UpperHemisphereOnly = true), places items over the upper dome ($y \ge C_y$).
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient outward along the analytic 3D ellipsoid surface normal
+        $\mathbf(N)_i \propto (s_(ix)/R_x, s_(iy)/R_y, s_(iz)/R_z)$
+      - @code(2): orient inward toward the ellipsoid center
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedOnEllipsoid(
+      const Radii: TVector3;
+      const UpperHemisphereOnly: Boolean = false;
+      const OrientMode: Integer = 0): Boolean;
+
+    { Apply a linear 3D spatial shear / skew transformation across all top-level
+      selected transforms (@code(SelectedCount >= 2)) relative to the active
+      selection pivot $\mathbf(C)$:
+      $P'_(\text(ShearAxis)) = P_(\text(ShearAxis)) + \text(ShearFactor) \cdot (P_(\text(ReferenceAxis)) - C_(\text(ReferenceAxis)))$.
+      When @code(TiltOrientation = true), also tilts each selected transform's
+      orientation by $\arctan(\text(ShearFactor))$ from @code(ReferenceAxis)
+      toward @code(ShearAxis).
+      Returns @true if at least one selected transform was modified. }
+    function ShearSelected(
+      const ShearAxis, ReferenceAxis: T3DAxis;
+      const ShearFactor: Single;
+      const TiltOrientation: Boolean = false): Boolean;
   end;
 
 var
@@ -8837,6 +8881,332 @@ begin
         T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
         Result := true;
       end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInRoseCurve(
+  const OuterRadius: Single;
+  const PetalsK: Single;
+  const VerticalWaveY: Single;
+  const OrientMode: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  Count, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, GravityUp, LookDir, Side, NewUp: TVector3;
+  CurWorldPos, CurDir, CurUp: TVector3;
+  ActualR, ActualK, SumDist, Theta, CosT, SinT, CosKT, SinKT, RVal: Single;
+  DX, DY, DZ: Single;
+begin
+  Result := false;
+  Count := 0;
+  SetLength(Items, FMaxSelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+    CenterPos := GetTransformWorkingPos(FMainSelected)
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  ActualR := OuterRadius;
+  if ActualR <= 0 then
+  begin
+    SumDist := 0;
+    for I := 0 to Count - 1 do
+    begin
+      CurPos := GetTransformWorkingPos(Items[I]);
+      SumDist := SumDist + Hypot(CurPos.X - CenterPos.X, CurPos.Z - CenterPos.Z);
+    end;
+    ActualR := SumDist / Count;
+    if ActualR < 1e-3 then
+      ActualR := 6.0;
+  end;
+
+  ActualK := PetalsK;
+  if Abs(ActualK) < 1e-4 then
+    ActualK := 2.0;
+
+  if (FMainSelected <> nil) and (FMainSelected.World <> nil) then
+  begin
+    GravityUp := FMainSelected.World.GravityUp;
+    if GravityUp.IsZero then
+      GravityUp := Vector3(0, 1, 0)
+    else
+      GravityUp := GravityUp.Normalize;
+  end else
+    GravityUp := Vector3(0, 1, 0);
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    Theta := (2.0 * Pi * I) / Count;
+    SinCos(Theta, SinT, CosT);
+    SinCos(ActualK * Theta, SinKT, CosKT);
+    RVal := ActualR * CosKT;
+
+    TargetPos := Vector3(
+      CenterPos.X + RVal * CosT,
+      CenterPos.Y + VerticalWaveY * SinKT,
+      CenterPos.Z + RVal * SinT
+    );
+
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      if OrientMode = 1 then
+      begin
+        LookDir := Vector3(CenterPos.X - TargetPos.X, 0, CenterPos.Z - TargetPos.Z);
+        if LookDir.IsZero(1e-5) then
+          LookDir := Vector3(-CosT, 0, -SinT);
+        LookDir := LookDir.Normalize;
+      end else
+      begin
+        // Tangent dP/dTheta of Rose curve:
+        // r(theta) = R cos(k theta), r'(theta) = -R k sin(k theta)
+        // x' = r' cos(theta) - r sin(theta)
+        // y' = H_y k cos(k theta)
+        // z' = r' sin(theta) + r cos(theta)
+        DX := (-ActualR * ActualK * SinKT) * CosT - RVal * SinT;
+        DY := VerticalWaveY * ActualK * CosKT;
+        DZ := (-ActualR * ActualK * SinKT) * SinT + RVal * CosT;
+        LookDir := Vector3(DX, DY, DZ);
+        if LookDir.IsZero(1e-5) then
+          LookDir := Vector3(-SinT, 0, CosT);
+        LookDir := LookDir.Normalize;
+      end;
+
+      Side := TVector3.CrossProduct(LookDir, GravityUp);
+      if Side.IsZero(1e-5) then
+        Side := Vector3(1, 0, 0);
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedOnEllipsoid(
+  const Radii: TVector3;
+  const UpperHemisphereOnly: Boolean;
+  const OrientMode: Integer): Boolean;
+const
+  GoldenAngle = 2.39996322972865332; // Pi * (3 - Sqrt(5))
+var
+  Items: array of TCastleTransform;
+  Count, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, ActualRadii, UnitSpherePt, GravityUp, LookDir, Side, NewUp: TVector3;
+  CurWorldPos, CurDir, CurUp: TVector3;
+  SumDist, AvgR, U, Rho, Theta, SinT, CosT: Single;
+begin
+  Result := false;
+  Count := 0;
+  SetLength(Items, FMaxSelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+    CenterPos := GetTransformWorkingPos(FMainSelected)
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  SumDist := 0;
+  for I := 0 to Count - 1 do
+    SumDist := SumDist + PointsDistance(GetTransformWorkingPos(Items[I]), CenterPos);
+  AvgR := SumDist / Count;
+  if AvgR < 1e-3 then
+    AvgR := 6.0;
+
+  ActualRadii := Radii;
+  if ActualRadii.X <= 0 then ActualRadii.X := AvgR * 1.25;
+  if ActualRadii.Y <= 0 then ActualRadii.Y := AvgR * 0.75;
+  if ActualRadii.Z <= 0 then ActualRadii.Z := AvgR;
+
+  if (FMainSelected <> nil) and (FMainSelected.World <> nil) then
+  begin
+    GravityUp := FMainSelected.World.GravityUp;
+    if GravityUp.IsZero then
+      GravityUp := Vector3(0, 1, 0)
+    else
+      GravityUp := GravityUp.Normalize;
+  end else
+    GravityUp := Vector3(0, 1, 0);
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    if UpperHemisphereOnly then
+      U := 1.0 - ((I + 0.5) / Count) // U in (0, 1)
+    else
+      U := 1.0 - (2.0 * (I + 0.5) / Count); // U in (-1, 1)
+
+    Rho := Sqrt(Max(0.0, 1.0 - Sqr(U)));
+    Theta := I * GoldenAngle;
+    SinCos(Theta, SinT, CosT);
+
+    UnitSpherePt := Vector3(Rho * CosT, U, Rho * SinT);
+    TargetPos := Vector3(
+      CenterPos.X + ActualRadii.X * UnitSpherePt.X,
+      CenterPos.Y + ActualRadii.Y * UnitSpherePt.Y,
+      CenterPos.Z + ActualRadii.Z * UnitSpherePt.Z
+    );
+
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      if OrientMode = 1 then
+      begin
+        // Analytic outward normal of ellipsoid (x/Rx)^2 + (y/Ry)^2 + (z/Rz)^2 = 1:
+        // grad F proportional to (s_x / Rx, s_y / Ry, s_z / Rz)
+        LookDir := Vector3(
+          UnitSpherePt.X / ActualRadii.X,
+          UnitSpherePt.Y / ActualRadii.Y,
+          UnitSpherePt.Z / ActualRadii.Z
+        );
+      end else
+        LookDir := CenterPos - TargetPos;
+
+      if LookDir.IsZero(1e-5) then
+        LookDir := Vector3(0, 1, 0);
+      LookDir := LookDir.Normalize;
+
+      Side := TVector3.CrossProduct(LookDir, GravityUp);
+      if Side.IsZero(1e-5) then
+        Side := Vector3(1, 0, 0);
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ShearSelected(
+  const ShearAxis, ReferenceAxis: T3DAxis;
+  const ShearFactor: Single;
+  const TiltOrientation: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  Count, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, RefUnit, ShearUnit, RotAxis: TVector3;
+  DeltaRef, TiltAngle: Single;
+  TiltQuat: TQuaternion;
+begin
+  Result := false;
+  if (ShearAxis = ReferenceAxis) or (Abs(ShearFactor) < 1e-6) then Exit;
+
+  Count := 0;
+  SetLength(Items, FMaxSelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+    CenterPos := GetTransformWorkingPos(FMainSelected)
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  RefUnit := TVector3.Zero;
+  RefUnit.Data[ReferenceAxis] := 1.0;
+  ShearUnit := TVector3.Zero;
+  ShearUnit.Data[ShearAxis] := 1.0;
+  RotAxis := TVector3.CrossProduct(RefUnit, ShearUnit).Normalize;
+  TiltAngle := ArcTan(ShearFactor);
+  TiltQuat := QuatFromAxisAngle(Vector4(RotAxis, TiltAngle));
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+    DeltaRef := CurPos.Data[ReferenceAxis] - CenterPos.Data[ReferenceAxis];
+    TargetPos := CurPos;
+    TargetPos.Data[ShearAxis] := CurPos.Data[ShearAxis] + ShearFactor * DeltaRef;
+
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if TiltOrientation and (Abs(TiltAngle) > 1e-5) then
+    begin
+      T.Rotation := (TiltQuat * QuatFromAxisAngle(T.Rotation)).ToAxisAngle;
+      Result := true;
     end;
   end;
 

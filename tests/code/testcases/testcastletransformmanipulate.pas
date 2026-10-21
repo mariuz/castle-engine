@@ -59,6 +59,7 @@ type
     procedure TestArrangeCylinderPyramidAndClampToBox;
     procedure TestArrangeConeHexGridAndPushOutsideBox;
     procedure TestArrangeCubeFrameParaboloidBowlAndSnapToBoxSurface;
+    procedure TestArrangeRoseCurveEllipsoidAndShearSelected;
   end;
 
 implementation
@@ -2143,6 +2144,111 @@ begin
     Manipulate.SetSelected([B1]);
     AssertTrue(Manipulate.SnapSelectedToBoxSurface(Vector3(-5, 0, -5), Vector3(5, 10, 5), false, false));
     AssertVectorEquals(Vector3(-5, 5, 0), B1.Translation, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestArrangeRoseCurveEllipsoidAndShearSelected;
+var
+  Viewport: TCastleViewport;
+  B1, B2, B3, B4: TCastleBox;
+  Manipulate: TCastleTransformManipulate;
+  WorldPos, WorldDir, WorldUp, ExpectedNormal: TVector3;
+  EllipsoidEq: Single;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.OnTransformModified := {$ifdef FPC}@{$endif}HandleTransformModified;
+    Manipulate.OnTransformModifyEnd := {$ifdef FPC}@{$endif}HandleTransformModifyEnd;
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(2, 2, 2);
+    B1.Translation := Vector3(-3, 0, 0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(2, 2, 2);
+    B2.Translation := Vector3(-1, 0, 0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(2, 2, 2);
+    B3.Translation := Vector3(1, 0, 0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(2, 2, 2);
+    B4.Translation := Vector3(3, 0, 0);
+    Viewport.Items.Add(B4);
+
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    Manipulate.PivotMode := pmSelectionCenter;
+
+    // 1. Test ArrangeSelectedInRoseCurve(10.0, 2.0, 4.0, 2):
+    // Center = (0, 0, 0). N = 4 -> theta_i = 0, pi/2, pi, 3pi/2.
+    // For k = 2:
+    // i=0 (theta=0): cos(0)=1, sin(0)=0 -> r=10, pos=(10, 0, 0), tangent=(0, 8, 10)
+    // i=1 (theta=pi/2): cos(pi)=-1, sin(pi)=0 -> r=-10, pos=(0, 0, -10)
+    // i=2 (theta=pi): cos(2pi)=1, sin(2pi)=0 -> r=10, pos=(-10, 0, 0)
+    // i=3 (theta=3pi/2): cos(3pi)=-1, sin(3pi)=0 -> r=-10, pos=(0, 0, 10)
+    AssertTrue(Manipulate.ArrangeSelectedInRoseCurve(10.0, 2.0, 4.0, 2));
+    AssertVectorEquals(Vector3(10, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, -10), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-10, 0, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, 10), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 8, 10).Normalize, WorldDir.Normalize, 1e-4);
+
+    // 2. Test ArrangeSelectedOnEllipsoid(Vector3(10, 5, 8), true, 1):
+    // Reset positions so Center = (0, 0, 0). UpperHemisphereOnly = true (Y > 0).
+    // Every placed transform must lie on the ellipsoid (X/10)^2 + (Y/5)^2 + (Z/8)^2 = 1
+    // and have Y > 0, with WorldDir aligned to the outward ellipsoid normal!
+    B1.Translation := Vector3(-3, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(1, 0, 0);
+    B4.Translation := Vector3(3, 0, 0);
+    AssertTrue(Manipulate.ArrangeSelectedOnEllipsoid(Vector3(10, 5, 8), true, 1));
+    EllipsoidEq := Sqr(B1.Translation.X / 10.0) + Sqr(B1.Translation.Y / 5.0) + Sqr(B1.Translation.Z / 8.0);
+    AssertSameValue(1.0, EllipsoidEq, 1e-4);
+    AssertTrue(B1.Translation.Y > 0);
+    EllipsoidEq := Sqr(B4.Translation.X / 10.0) + Sqr(B4.Translation.Y / 5.0) + Sqr(B4.Translation.Z / 8.0);
+    AssertSameValue(1.0, EllipsoidEq, 1e-4);
+    AssertTrue(B4.Translation.Y > 0);
+    ExpectedNormal := Vector3(
+      B1.Translation.X / Sqr(10.0),
+      B1.Translation.Y / Sqr(5.0),
+      B1.Translation.Z / Sqr(8.0)
+    ).Normalize;
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(ExpectedNormal, WorldDir.Normalize, 1e-4);
+
+    // 3. Test ShearSelected(0, 1, 0.5, true):
+    // Stack B1..B4 vertically along Y at Y = 0, 2, 4, 6 (Center.Y = 3.0) with X = 0.
+    // Shearing X by Y with factor 0.5 around Center.Y = 3.0:
+    // B1 (Y=0, dY=-3) -> X = -1.5
+    // B2 (Y=2, dY=-1) -> X = -0.5
+    // B3 (Y=4, dY=+1) -> X = +0.5
+    // B4 (Y=6, dY=+3) -> X = +1.5
+    B1.Rotation := Vector4(0, 1, 0, 0);
+    B2.Rotation := Vector4(0, 1, 0, 0);
+    B3.Rotation := Vector4(0, 1, 0, 0);
+    B4.Rotation := Vector4(0, 1, 0, 0);
+    B1.Translation := Vector3(0, 0, 0);
+    B2.Translation := Vector3(0, 2, 0);
+    B3.Translation := Vector3(0, 4, 0);
+    B4.Translation := Vector3(0, 6, 0);
+    AssertTrue(Manipulate.ShearSelected(0, 1, 0.5, true));
+    AssertVectorEquals(Vector3(-1.5, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-0.5, 2, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.5, 4, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(1.5, 6, 0), B4.Translation, 1e-4);
+    // With TiltOrientation = true, RefUnit=(0,1,0), ShearUnit=(1,0,0), RotAxis=(0,0,-1), TiltAngle=ArcTan(0.5),
+    // so local +Y tilts toward +X: WorldUp = (sin(ArcTan(0.5)), cos(ArcTan(0.5)), 0) = Vector3(0.5, 1.0, 0).Normalize!
+    B4.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.5, 1.0, 0).Normalize, WorldUp.Normalize, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);
