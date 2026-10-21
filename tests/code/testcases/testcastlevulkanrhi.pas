@@ -153,6 +153,9 @@ type
     procedure TestGlobalSDFClipmapSphereTracingRHI;
     procedure TestLumenSurfaceCacheSixAxisCardAtlasRHI;
     procedure TestScreenSpaceRadianceCacheProbesRHI;
+    procedure TestReSTIRWeightedReservoirSamplingRISRHI;
+    procedure TestReSTIRNeighborSimilarityAndReservoirCombineRHI;
+    procedure TestVulkanReSTIRSpatioTemporalManagerRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -8469,6 +8472,122 @@ begin
     AssertSameValue(0.8, SampleDir.Z, 1e-5);
     AssertSameValue(0.8 / Pi, SamplePdf, 1e-5);
   finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestReSTIRWeightedReservoirSamplingRISRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  ResGLSL: String;
+  R: TCastleReSTIRReservoir;
+  LumaPDF: Single;
+begin
+  AssertEquals('TCastleReSTIRReservoir must be 32 bytes (2 x vec4)', 32, SizeOf(TCastleReSTIRReservoir));
+
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify ReSTIR Reservoir GLSL 450 functions }
+    ResGLSL := Gen.GenerateReSTIRReservoirFunctions;
+    AssertTrue('ReSTIR GLSL must include UpdateReservoirSample and FinalizeReservoirWeight',
+      (Pos('bool UpdateReservoirSample(inout CastleReSTIRReservoir r, int candidateLightID,', ResGLSL) > 0) and
+      (Pos('void FinalizeReservoirWeight(inout CastleReSTIRReservoir r, uint maxHistoryM)', ResGLSL) > 0));
+
+    { 2. Verify Rec.709 luminance target PDF p_hat(x) }
+    LumaPDF := TCastleShaderGeneratorRHI.EvaluateLuminanceTargetPDF(Vector3(1.0, 1.0, 1.0));
+    AssertSameValue(1.0, LumaPDF, 1e-5);
+
+    { 3. Verify Streaming WRS/RIS over 2 candidate lights:
+         - Light #10: targetPDF = 2.0, sourcePDF = 0.5 -> wi = 4.0 (first sample, accepted)
+         - Light #25: targetPDF = 6.0, sourcePDF = 0.5 -> wi = 12.0 (WeightSum = 16.0, random=0.5 -> 0.5*16 = 8 < 12 -> accepted!)
+         - FinalizeReservoirWeight(M=2): W = WeightSum / (TargetPDF * M) = 16.0 / (6.0 * 2.0) = 1.333333 }
+    TCastleShaderGeneratorRHI.InitReSTIRReservoir(R);
+    AssertEquals(-1, R.SelectedLightID);
+    AssertTrue(TCastleShaderGeneratorRHI.UpdateReservoirSample(R, 10, 2.0, 0.5, 0.9));
+    AssertEquals(10, R.SelectedLightID);
+    AssertTrue(TCastleShaderGeneratorRHI.UpdateReservoirSample(R, 25, 6.0, 0.5, 0.5));
+    AssertEquals(25, R.SelectedLightID);
+    AssertEquals(Cardinal(2), R.SampleCountM);
+    AssertSameValue(16.0, R.WeightSum, 1e-5);
+
+    TCastleShaderGeneratorRHI.FinalizeReservoirWeight(R, 20);
+    AssertSameValue(16.0 / 12.0, R.ContributionWeightW, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestReSTIRNeighborSimilarityAndReservoirCombineRHI;
+var
+  CenterR, NeighborR: TCastleReSTIRReservoir;
+  SimValid, SimDepthEdge, SimNormalEdge: Boolean;
+begin
+  { 1. Verify depth & normal edge-stopping similarity thresholds }
+  SimValid := TCastleShaderGeneratorRHI.EvaluateReSTIRNeighborSimilarity(
+    10.0, Vector3(0.0, 1.0, 0.0), 10.2, Vector3(0.0, 1.0, 0.0), 0.1, 0.9);
+  SimDepthEdge := TCastleShaderGeneratorRHI.EvaluateReSTIRNeighborSimilarity(
+    10.0, Vector3(0.0, 1.0, 0.0), 15.0, Vector3(0.0, 1.0, 0.0), 0.1, 0.9);
+  SimNormalEdge := TCastleShaderGeneratorRHI.EvaluateReSTIRNeighborSimilarity(
+    10.0, Vector3(0.0, 1.0, 0.0), 10.0, Vector3(1.0, 0.0, 0.0), 0.1, 0.9);
+
+  AssertTrue('Coplanar neighbor must pass ReSTIR similarity check', SimValid);
+  AssertFalse('50% depth discontinuity must be rejected', SimDepthEdge);
+  AssertFalse('90-degree normal corner must be rejected', SimNormalEdge);
+
+  { 2. Verify CombineReservoirs with history M-capping (neighbor M=100 capped to MaxHistoryM=20) }
+  TCastleShaderGeneratorRHI.InitReSTIRReservoir(CenterR);
+  TCastleShaderGeneratorRHI.UpdateReservoirSample(CenterR, 5, 4.0, 1.0, 0.1);
+  TCastleShaderGeneratorRHI.FinalizeReservoirWeight(CenterR, 20);
+
+  TCastleShaderGeneratorRHI.InitReSTIRReservoir(NeighborR);
+  NeighborR.SelectedLightID := 42;
+  NeighborR.TargetPDF := 8.0;
+  NeighborR.SampleCountM := 100; // Exceeds MaxHistoryM=20 -> must be capped to 20 during combination
+  NeighborR.ContributionWeightW := 1.5;
+
+  AssertTrue(TCastleShaderGeneratorRHI.CombineReservoirs(CenterR, NeighborR, 8.0, 20, 0.1));
+  AssertEquals('Combined reservoir must select strong neighbor light #42', 42, CenterR.SelectedLightID);
+  AssertEquals('Combined SampleCountM must equal 1 + capped(20) = 21', Cardinal(21), CenterR.SampleCountM);
+  AssertTrue('Combined ContributionWeightW must be positive', CenterR.ContributionWeightW > 0.0);
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanReSTIRSpatioTemporalManagerRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Gen: TCastleShaderGeneratorRHI;
+  CSGLSL: String;
+  OldCurr, OldHist: TVulkanRHIBuffer;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6666)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    { 1. Verify ReSTIR Spatio-Temporal Compute Shader GLSL 450 }
+    CSGLSL := Gen.GenerateReSTIRSpatialTemporalComputeShader(8, 8);
+    AssertTrue('ReSTIR Spatio-Temporal CS must include CombineReservoirs and CastleCurrentReservoirBlock',
+      (Pos('bool CombineReservoirs(inout CastleReSTIRReservoir dst,', CSGLSL) > 0) and
+      (Pos('CastleCurrentReservoirBlock', CSGLSL) > 0));
+
+    { 2. Verify TCastleVulkanReSTIR ping-pong buffer allocation, history swap, and compute dispatch }
+    CmdList.BeginRecording;
+    Device.ReSTIR.DispatchSpatioTemporalResampling(CmdList, 64, 64, nil, nil);
+    CmdList.EndRecording;
+
+    AssertEquals(Cardinal(1), Device.ReSTIR.DispatchCount);
+    AssertTrue('ReSTIR Current and TemporalHistory SSBOs must be allocated',
+      (Device.ReSTIR.CurrentReservoirBuffer <> nil) and
+      (Device.ReSTIR.TemporalHistoryReservoirBuffer <> nil));
+
+    OldCurr := Device.ReSTIR.CurrentReservoirBuffer;
+    OldHist := Device.ReSTIR.TemporalHistoryReservoirBuffer;
+    Device.ReSTIR.SwapReservoirHistory;
+    AssertTrue('SwapReservoirHistory must exchange Current and TemporalHistory SSBO pointers',
+      (Device.ReSTIR.CurrentReservoirBuffer = OldHist) and
+      (Device.ReSTIR.TemporalHistoryReservoirBuffer = OldCurr));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
     FreeAndNil(Gen);
   end;
 end;

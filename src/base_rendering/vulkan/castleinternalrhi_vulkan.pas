@@ -2364,6 +2364,46 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { ReSTIR DI/GI Spatio-Temporal Reservoir Resampler (Phase 29.2)              }
+  { -------------------------------------------------------------------------- }
+
+  { Manages screen-space current and temporal-history ReSTIR reservoir SSBOs
+    and dispatches spatio-temporal reservoir resampling (UE5 MegaLights architecture). }
+  TCastleVulkanReSTIR = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FWidth: Cardinal;
+    FHeight: Cardinal;
+    FMaxHistoryM: Cardinal;
+    FCurrentReservoirBuffer: TVulkanRHIBuffer;
+    FTemporalHistoryReservoirBuffer: TVulkanRHIBuffer;
+    FDispatchCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Allocates ping-pong Current and TemporalHistory ReSTIR reservoir SSBOs for AWidth x AHeight. }
+    procedure EnsureReservoirBuffers(const AWidth, AHeight: Cardinal);
+
+    { Swaps Current and TemporalHistory reservoir buffers at the end of a frame. }
+    procedure SwapReservoirHistory;
+
+    { Dispatches the ReSTIR spatio-temporal reservoir resampling compute pass. }
+    procedure DispatchSpatioTemporalResampling(
+      const ACommandList: TVulkanRHICommandList;
+      const AWidth, AHeight: Cardinal;
+      const APipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property Width: Cardinal read FWidth;
+    property Height: Cardinal read FHeight;
+    property MaxHistoryM: Cardinal read FMaxHistoryM write FMaxHistoryM;
+    property CurrentReservoirBuffer: TVulkanRHIBuffer read FCurrentReservoirBuffer;
+    property TemporalHistoryReservoirBuffer: TVulkanRHIBuffer read FTemporalHistoryReservoirBuffer;
+    property DispatchCount: Cardinal read FDispatchCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -2462,6 +2502,7 @@ type
     FClusterDAG: TCastleVulkanClusterDAG;
     FGlobalSDF: TCastleVulkanGlobalSDF;
     FSurfaceCache: TCastleVulkanSurfaceCache;
+    FReSTIR: TCastleVulkanReSTIR;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -2565,6 +2606,7 @@ type
     function GetClusterDAG: TCastleVulkanClusterDAG;
     function GetGlobalSDF: TCastleVulkanGlobalSDF;
     function GetSurfaceCache: TCastleVulkanSurfaceCache;
+    function GetReSTIR: TCastleVulkanReSTIR;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -2773,6 +2815,7 @@ type
     property ClusterDAG: TCastleVulkanClusterDAG read GetClusterDAG;
     property GlobalSDF: TCastleVulkanGlobalSDF read GetGlobalSDF;
     property SurfaceCache: TCastleVulkanSurfaceCache read GetSurfaceCache;
+    property ReSTIR: TCastleVulkanReSTIR read GetReSTIR;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -13736,6 +13779,89 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanReSTIR (Phase 29.2)                                             }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanReSTIR.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FMaxHistoryM := 20;
+end;
+
+destructor TCastleVulkanReSTIR.Destroy;
+begin
+  FreeAndNil(FTemporalHistoryReservoirBuffer);
+  FreeAndNil(FCurrentReservoirBuffer);
+  inherited;
+end;
+
+procedure TCastleVulkanReSTIR.EnsureReservoirBuffers(const AWidth, AHeight: Cardinal);
+var
+  PixelCount, RequiredBytes: Cardinal;
+  BufDesc: TRHIBufferDesc;
+begin
+  FWidth := Max(Cardinal(1), AWidth);
+  FHeight := Max(Cardinal(1), AHeight);
+  PixelCount := FWidth * FHeight;
+  RequiredBytes := PixelCount * SizeOf(TCastleReSTIRReservoir);
+
+  if (FCurrentReservoirBuffer = nil) or (FCurrentReservoirBuffer.Desc.Size < RequiredBytes) then
+  begin
+    FreeAndNil(FCurrentReservoirBuffer);
+    BufDesc := TRHIBufferDesc.Create(
+      RequiredBytes,
+      [buStorage, buTransferDst, buTransferSrc],
+      muGpuOnly,
+      'ReSTIRCurrentReservoirBuffer');
+    FCurrentReservoirBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+
+  if (FTemporalHistoryReservoirBuffer = nil) or (FTemporalHistoryReservoirBuffer.Desc.Size < RequiredBytes) then
+  begin
+    FreeAndNil(FTemporalHistoryReservoirBuffer);
+    BufDesc := TRHIBufferDesc.Create(
+      RequiredBytes,
+      [buStorage, buTransferDst, buTransferSrc],
+      muGpuOnly,
+      'ReSTIRHistoryReservoirBuffer');
+    FTemporalHistoryReservoirBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+end;
+
+procedure TCastleVulkanReSTIR.SwapReservoirHistory;
+var
+  Tmp: TVulkanRHIBuffer;
+begin
+  Tmp := FCurrentReservoirBuffer;
+  FCurrentReservoirBuffer := FTemporalHistoryReservoirBuffer;
+  FTemporalHistoryReservoirBuffer := Tmp;
+end;
+
+procedure TCastleVulkanReSTIR.DispatchSpatioTemporalResampling(
+  const ACommandList: TVulkanRHICommandList;
+  const AWidth, AHeight: Cardinal;
+  const APipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+var
+  GroupsX, GroupsY: Cardinal;
+begin
+  EnsureReservoirBuffers(AWidth, AHeight);
+  if ACommandList = nil then
+    Exit;
+
+  if APipeline <> nil then
+    ACommandList.BindComputePipeline(APipeline);
+  if ADescriptorSet <> nil then
+    ACommandList.BindDescriptorSet(0, ADescriptorSet, []);
+
+  GroupsX := (FWidth + 7) div 8;
+  GroupsY := (FHeight + 7) div 8;
+  ACommandList.Dispatch(GroupsX, GroupsY, 1);
+  Inc(FDispatchCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -14320,12 +14446,20 @@ begin
   Result := FSurfaceCache;
 end;
 
+function TVulkanRHIDevice.GetReSTIR: TCastleVulkanReSTIR;
+begin
+  if FReSTIR = nil then
+    FReSTIR := TCastleVulkanReSTIR.Create(Self);
+  Result := FReSTIR;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FReSTIR);
   FreeAndNil(FSurfaceCache);
   FreeAndNil(FGlobalSDF);
   FreeAndNil(FClusterDAG);

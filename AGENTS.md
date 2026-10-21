@@ -77,13 +77,11 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–27**: **COMPLETED** (100%).
-- **Phase 28 (Lumen-Style Signed Distance Field (SDF) Global Illumination, Surface Cache Cards & Screen-Space Radiance Cache)**: **COMPLETED** (100%, 114 unit tests passing):
-  - [x] **28.1. Mesh SDF & 3D Clipmap Global Signed Distance Field Sphere Tracing (`TCastleVulkanGlobalSDF` in `CastleInternalRHI_Vulkan`, `GenerateGlobalSDFTraceFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestGlobalSDFClipmapSphereTracingRHI`).
-  - [x] **28.2. Lumen-Style 6-Axis Surface Cache Card Atlas (`TCastleVulkanSurfaceCache` in `CastleInternalRHI_Vulkan`, `GenerateSurfaceCacheCardFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestLumenSurfaceCacheSixAxisCardAtlasRHI`).
-  - [x] **28.3. Screen-Space Radiance Cache Probe Interpolation & Importance Sampling (`GenerateScreenRadianceCacheFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestScreenSpaceRadianceCacheProbesRHI`).
-- **Unreal Engine 5 Feature Parity Roadmap (Phases 29–33)**:
-  - **Phase 29 (UE5 MegaLights / ReSTIR Parity)**: Spatio-Temporal Reservoir Resampling (`TCastleVulkanReSTIR`, WRS/RIS streaming reservoirs + temporal/spatial neighbor combination for thousands of dynamic shadow-casting lights).
+- **Phases 1–28**: **COMPLETED** (100%).
+- **Phase 29 (ReSTIR DI / GI Spatio-Temporal Reservoir Resampling — UE5 MegaLights Architecture)**: **COMPLETED** (100%, 117 unit tests passing):
+  - [x] **29.1. Weighted Reservoir Sampling (WRS) & Streaming RIS (`GenerateReSTIRReservoirFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestReSTIRWeightedReservoirSamplingRISRHI`).
+  - [x] **29.2. Temporal & Spatial Neighbor Reservoir Combination (`TCastleVulkanReSTIR` in `CastleInternalRHI_Vulkan`, `GenerateReSTIRSpatialTemporalComputeShader` in `CastleInternalShaderRHI`)** — Completed & tested (`TestReSTIRNeighborSimilarityAndReservoirCombineRHI`, `TestVulkanReSTIRSpatioTemporalManagerRHI`).
+- **Unreal Engine 5 Feature Parity Roadmap (Phases 30–33)**:
   - **Phase 30 (UE5 TSR Parity)**: Temporal Super Resolution (`TCastleVulkanTSRUpscaler`, Lanczos-2 / Blackman-Harris sub-pixel history upscaling, parallax disocclusion confidence, and thin-feature anti-ghosting).
   - **Phase 31 (UE5 Substrate / Strata & Hair Parity)**: Energy-Conserving Multi-Lobe Layered Material Slabs, Dual-Specular Marschner/Chiang Hair & Fur BSDF, and Stochastic Discrete Microfacet Glints.
   - **Phase 32 (Next-Gen GPU Pipeline)**: Hardware Task/Mesh Shaders (`VK_EXT_mesh_shader`), Tile-Based Variable Rate Shading (`VK_KHR_fragment_shading_rate`, `TCastleVulkanVRSManager`), and Runtime Virtual Texturing (`TCastleVulkanRuntimeVirtualTexture`).

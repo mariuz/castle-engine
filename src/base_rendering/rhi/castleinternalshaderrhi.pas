@@ -543,6 +543,19 @@ type
     TriangleCount: Cardinal;               // 4 bytes (triangle count <= 124)
   end; // Total = 48 bytes
 
+  { Phase 29.1: GPU std430 streaming reservoir for ReSTIR DI / GI (UE5 MegaLights, 32 bytes) }
+  PCastleReSTIRReservoir = ^TCastleReSTIRReservoir;
+  TCastleReSTIRReservoir = packed record
+    SelectedLightID: Integer;     // 4 bytes (selected candidate light index, -1 if empty)
+    WeightSum: Single;            // 4 bytes (running sum of resampling weights sum(w_i))
+    TargetPDF: Single;            // 4 bytes (unshadowed target PDF p_hat(y) of SelectedLightID)
+    SampleCountM: Cardinal;       // 4 bytes (number of candidates M seen by this reservoir)
+    ContributionWeightW: Single;  // 4 bytes (unbiased RIS weight W = WeightSum / (TargetPDF * M))
+    Reserved0: Cardinal;          // 4 bytes (std430 16/32-byte alignment padding)
+    Reserved1: Cardinal;          // 4 bytes
+    Reserved2: Cardinal;          // 4 bytes
+  end; // Total = 32 bytes
+
   { Generates RHI-compliant GLSL headers, UBO blocks, and varying layouts }
   TCastleShaderGeneratorRHI = class
   private
@@ -1124,6 +1137,52 @@ type
     class function CosineWeightedHemisphereSample(
       const AXi: TVector2;
       out AOutPdf: Single): TVector3; static;
+
+    { Phase 29.1: Generates GLSL 450 functions and structs for ReSTIR Weighted Reservoir
+      Sampling (WRS), Streaming Resampled Importance Sampling (RIS), and Temporal/Spatial
+      Reservoir Combination (UE5 MegaLights architecture). }
+    function GenerateReSTIRReservoirFunctions: String;
+
+    { Phase 29.2: Generates a GLSL 450 compute shader for ReSTIR Spatio-Temporal Reservoir
+      Resampling across temporal history and spatial neighbors with depth/normal edge rejection. }
+    function GenerateReSTIRSpatialTemporalComputeShader(
+      const AWorkgroupSizeX: Cardinal = 8;
+      const AWorkgroupSizeY: Cardinal = 8): String;
+
+    { Phase 29.1 CPU reference: Initializes an empty ReSTIR reservoir (SelectedLightID = -1). }
+    class procedure InitReSTIRReservoir(out AReservoir: TCastleReSTIRReservoir); static;
+
+    { Phase 29.1 CPU reference: Evaluates Rec.709 luminance target PDF p_hat(x) for unshadowed light contribution. }
+    class function EvaluateLuminanceTargetPDF(
+      const AUnshadowedContribution: TVector3): Single; static;
+
+    { Phase 29.1 CPU reference: Streams a single candidate light sample into AReservoir using WRS/RIS. }
+    class function UpdateReservoirSample(
+      var AReservoir: TCastleReSTIRReservoir;
+      const ACandidateLightID: Integer;
+      const ATargetPDF, ASourcePDF, ARandom01: Single): Boolean; static;
+
+    { Phase 29.1 CPU reference: Caps SampleCountM to AMaxHistoryM and computes unbiased ContributionWeightW. }
+    class procedure FinalizeReservoirWeight(
+      var AReservoir: TCastleReSTIRReservoir;
+      const AMaxHistoryM: Cardinal = 20); static;
+
+    { Phase 29.2 CPU reference: Returns True when a temporal/spatial neighbor passes depth & normal similarity thresholds. }
+    class function EvaluateReSTIRNeighborSimilarity(
+      const ACenterDepth: Single;
+      const ACenterNormal: TVector3;
+      const ANeighborDepth: Single;
+      const ANeighborNormal: TVector3;
+      const AMaxRelativeDepthDiff: Single = 0.1;
+      const AMinNormalCos: Single = 0.9): Boolean; static;
+
+    { Phase 29.2 CPU reference: Combines ANeighbor reservoir into ADst with M-capping and target PDF re-evaluation. }
+    class function CombineReservoirs(
+      var ADst: TCastleReSTIRReservoir;
+      const ANeighbor: TCastleReSTIRReservoir;
+      const ANeighborTargetPDFAtCenter: Single;
+      const AMaxHistoryM: Cardinal;
+      const ARandom01: Single): Boolean; static;
 
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
@@ -5560,6 +5619,179 @@ begin
   SinTheta := Sqrt(ClampedY);
   AOutPdf := CosTheta / Pi;
   Result := Vector3(Cos(Phi) * SinTheta, Sin(Phi) * SinTheta, CosTheta);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateReSTIRReservoirFunctions: String;
+begin
+  Result :=
+    '// Phase 29: ReSTIR DI/GI Spatio-Temporal Reservoir Resampling (UE5 MegaLights Architecture)' + NL +
+    'struct CastleReSTIRReservoir {' + NL +
+    '  int SelectedLightID;' + NL +
+    '  float WeightSum;' + NL +
+    '  float TargetPDF;' + NL +
+    '  uint SampleCountM;' + NL +
+    '  float ContributionWeightW;' + NL +
+    '  uint Reserved0;' + NL +
+    '  uint Reserved1;' + NL +
+    '  uint Reserved2;' + NL +
+    '};' + NL +
+    NL +
+    'float EvaluateLuminanceTargetPDF(vec3 unshadowedContribution) {' + NL +
+    '  return max(0.0, dot(max(vec3(0.0), unshadowedContribution), vec3(0.2126, 0.7152, 0.0722)));' + NL +
+    '}' + NL +
+    NL +
+    'bool UpdateReservoirSample(inout CastleReSTIRReservoir r, int candidateLightID,' + NL +
+    '  float targetPDF, float sourcePDF, float random01) {' + NL +
+    '  float wi = max(0.0, targetPDF) / max(1e-6, sourcePDF);' + NL +
+    '  r.WeightSum += wi;' + NL +
+    '  r.SampleCountM += 1u;' + NL +
+    '  if (wi > 0.0 && (random01 * r.WeightSum < wi)) {' + NL +
+    '    r.SelectedLightID = candidateLightID;' + NL +
+    '    r.TargetPDF = max(0.0, targetPDF);' + NL +
+    '    return true;' + NL +
+    '  }' + NL +
+    '  return false;' + NL +
+    '}' + NL +
+    NL +
+    'void FinalizeReservoirWeight(inout CastleReSTIRReservoir r, uint maxHistoryM) {' + NL +
+    '  r.SampleCountM = min(r.SampleCountM, max(1u, maxHistoryM));' + NL +
+    '  float denom = r.TargetPDF * float(r.SampleCountM);' + NL +
+    '  r.ContributionWeightW = (denom > 1e-6 && r.SelectedLightID >= 0) ? (r.WeightSum / denom) : 0.0;' + NL +
+    '}' + NL +
+    NL +
+    'bool EvaluateReSTIRNeighborSimilarity(float centerDepth, vec3 centerNormal,' + NL +
+    '  float neighborDepth, vec3 neighborNormal, float maxRelativeDepthDiff, float minNormalCos) {' + NL +
+    '  float relDepth = abs(centerDepth - neighborDepth) / max(1e-4, abs(centerDepth));' + NL +
+    '  float nDot = dot(centerNormal, neighborNormal);' + NL +
+    '  return (relDepth <= maxRelativeDepthDiff) && (nDot >= minNormalCos);' + NL +
+    '}' + NL +
+    NL +
+    'bool CombineReservoirs(inout CastleReSTIRReservoir dst, CastleReSTIRReservoir neighbor,' + NL +
+    '  float neighborTargetPDFAtCenter, uint maxHistoryM, float random01) {' + NL +
+    '  if (neighbor.SampleCountM == 0u || neighbor.SelectedLightID < 0) return false;' + NL +
+    '  uint cappedM = min(neighbor.SampleCountM, max(1u, maxHistoryM));' + NL +
+    '  float wi = max(0.0, neighborTargetPDFAtCenter) * max(0.0, neighbor.ContributionWeightW) * float(cappedM);' + NL +
+    '  dst.WeightSum += wi;' + NL +
+    '  dst.SampleCountM += cappedM;' + NL +
+    '  bool accepted = false;' + NL +
+    '  if (wi > 0.0 && (random01 * dst.WeightSum < wi)) {' + NL +
+    '    dst.SelectedLightID = neighbor.SelectedLightID;' + NL +
+    '    dst.TargetPDF = max(0.0, neighborTargetPDFAtCenter);' + NL +
+    '    accepted = true;' + NL +
+    '  }' + NL +
+    '  FinalizeReservoirWeight(dst, maxHistoryM * 2u);' + NL +
+    '  return accepted;' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateReSTIRSpatialTemporalComputeShader(
+  const AWorkgroupSizeX, AWorkgroupSizeY: Cardinal): String;
+begin
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;',
+      [Max(1, AWorkgroupSizeX), Max(1, AWorkgroupSizeY)]) + NL +
+    NL +
+    GenerateReSTIRReservoirFunctions + NL +
+    'layout(std430, set = 0, binding = 0) buffer CastleCurrentReservoirBlock {' + NL +
+    '  CastleReSTIRReservoir u_CurrentReservoirs[];' + NL +
+    '};' + NL +
+    NL +
+    'layout(std430, set = 0, binding = 1) readonly buffer CastleHistoryReservoirBlock {' + NL +
+    '  CastleReSTIRReservoir u_HistoryReservoirs[];' + NL +
+    '};' + NL +
+    NL +
+    'void main() {' + NL +
+    '}' + NL;
+end;
+
+class procedure TCastleShaderGeneratorRHI.InitReSTIRReservoir(out AReservoir: TCastleReSTIRReservoir);
+begin
+  FillChar(AReservoir, SizeOf(TCastleReSTIRReservoir), 0);
+  AReservoir.SelectedLightID := -1;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateLuminanceTargetPDF(
+  const AUnshadowedContribution: TVector3): Single;
+begin
+  Result := Max(0.0,
+    Max(0.0, AUnshadowedContribution.X) * 0.2126 +
+    Max(0.0, AUnshadowedContribution.Y) * 0.7152 +
+    Max(0.0, AUnshadowedContribution.Z) * 0.0722);
+end;
+
+class function TCastleShaderGeneratorRHI.UpdateReservoirSample(
+  var AReservoir: TCastleReSTIRReservoir;
+  const ACandidateLightID: Integer;
+  const ATargetPDF, ASourcePDF, ARandom01: Single): Boolean;
+var
+  Wi: Single;
+begin
+  Wi := Max(0.0, ATargetPDF) / Max(1e-6, ASourcePDF);
+  AReservoir.WeightSum := AReservoir.WeightSum + Wi;
+  Inc(AReservoir.SampleCountM);
+  if (Wi > 0.0) and (EnsureRange(ARandom01, 0.0, 0.999999) * AReservoir.WeightSum < Wi) then
+  begin
+    AReservoir.SelectedLightID := ACandidateLightID;
+    AReservoir.TargetPDF := Max(0.0, ATargetPDF);
+    Result := True;
+  end else
+    Result := False;
+end;
+
+class procedure TCastleShaderGeneratorRHI.FinalizeReservoirWeight(
+  var AReservoir: TCastleReSTIRReservoir;
+  const AMaxHistoryM: Cardinal);
+var
+  Denom: Single;
+begin
+  AReservoir.SampleCountM := Min(AReservoir.SampleCountM, Max(Cardinal(1), AMaxHistoryM));
+  Denom := AReservoir.TargetPDF * Single(AReservoir.SampleCountM);
+  if (Denom > 1e-6) and (AReservoir.SelectedLightID >= 0) then
+    AReservoir.ContributionWeightW := AReservoir.WeightSum / Denom
+  else
+    AReservoir.ContributionWeightW := 0.0;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateReSTIRNeighborSimilarity(
+  const ACenterDepth: Single;
+  const ACenterNormal: TVector3;
+  const ANeighborDepth: Single;
+  const ANeighborNormal: TVector3;
+  const AMaxRelativeDepthDiff: Single;
+  const AMinNormalCos: Single): Boolean;
+var
+  RelDepth, NDot: Single;
+begin
+  RelDepth := Abs(ACenterDepth - ANeighborDepth) / Max(1e-4, Abs(ACenterDepth));
+  NDot := TVector3.DotProduct(ACenterNormal, ANeighborNormal);
+  Result := (RelDepth <= AMaxRelativeDepthDiff) and (NDot >= AMinNormalCos);
+end;
+
+class function TCastleShaderGeneratorRHI.CombineReservoirs(
+  var ADst: TCastleReSTIRReservoir;
+  const ANeighbor: TCastleReSTIRReservoir;
+  const ANeighborTargetPDFAtCenter: Single;
+  const AMaxHistoryM: Cardinal;
+  const ARandom01: Single): Boolean;
+var
+  CappedM: Cardinal;
+  Wi: Single;
+begin
+  if (ANeighbor.SampleCountM = 0) or (ANeighbor.SelectedLightID < 0) then
+    Exit(False);
+  CappedM := Min(ANeighbor.SampleCountM, Max(Cardinal(1), AMaxHistoryM));
+  Wi := Max(0.0, ANeighborTargetPDFAtCenter) * Max(0.0, ANeighbor.ContributionWeightW) * Single(CappedM);
+  ADst.WeightSum := ADst.WeightSum + Wi;
+  Inc(ADst.SampleCountM, CappedM);
+  if (Wi > 0.0) and (EnsureRange(ARandom01, 0.0, 0.999999) * ADst.WeightSum < Wi) then
+  begin
+    ADst.SelectedLightID := ANeighbor.SelectedLightID;
+    ADst.TargetPDF := Max(0.0, ANeighborTargetPDFAtCenter);
+    Result := True;
+  end else
+    Result := False;
+  FinalizeReservoirWeight(ADst, Max(Cardinal(1), AMaxHistoryM * 2));
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;
