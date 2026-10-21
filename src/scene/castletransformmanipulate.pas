@@ -792,6 +792,79 @@ type
       Returns @true if at least one selected transform was modified. }
     function NormalizeSelectedSizes(
       const PreserveAspectRatio: Boolean = true): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) along a
+      3D Lissajous / figure-8 / lemniscate curve around the current selection pivot
+      in the XZ horizontal plane with optional Y-axis harmonic wave oscillation:
+      $x(\theta) = C_x + R_x \sin(\omega_x \theta)$,
+      $y(\theta) = C_y + H_y \cos(\omega_x \theta)$,
+      $z(\theta) = C_z + R_z \sin(\omega_z \theta)$
+      for $\theta_i = \frac(2\pi i)(N)$.
+      With default @code(FreqX = 1.0) and @code(FreqZ = 2.0), this forms a classic
+      figure-8 / Gerono lemniscate loop; other frequency ratios produce general
+      3D Lissajous knots and harmonic orbits.
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient horizontally inward toward the curve center
+      - @code(2): orient forward along the 3D Lissajous curve tangent
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInLissajous(
+      const RadiusX, RadiusZ: Single;
+      const FreqX: Single = 1.0; const FreqZ: Single = 2.0;
+      const VerticalAmplitude: Single = 0.0;
+      const OrientMode: Integer = 0): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) along a
+      3D catenary / hanging cable / suspension chain curve between @code(StartWorldPos)
+      and @code(EndWorldPos), sagging along the world $-Y$ axis by @code(SagDepth) at
+      the midpoint using a normalized hyperbolic cosine profile:
+      $S(u) = \frac(\cosh(k) - \cosh(k u))(\cosh(k) - 1)$ for $u = 2t - 1 \in [-1, 1]$
+      and $k = 1.5$, so the endpoints match @code(StartWorldPos) and @code(EndWorldPos)
+      exactly while the midpoint ($t = 0.5, u = 0$) drops by @code(SagDepth).
+      When @code(OrientAlongCurve) is @true, each transform is oriented along the
+      instantaneous 3D catenary tangent vector.
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInCatenary(
+      const StartWorldPos, EndWorldPos: TVector3;
+      const SagDepth: Single;
+      const OrientAlongCurve: Boolean = false): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2)) along a
+      3D catenary / hanging cable curve between the first selected transform
+      (@code(Selected[0])) and the last selected transform (@code(Selected[N-1])).
+      When @code(SagDepth = 0), auto-computes a natural sag equal to $25\%$ of the
+      chord distance between endpoints (or @code(2.0) when endpoints coincide).
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInCatenaryBetweenEndpoints(
+      const SagDepth: Single = 0.0;
+      const OrientAlongCurve: Boolean = false): Boolean;
+
+    { Project all top-level selected transforms (@code(SelectedCount >= 1))
+      orthogonally onto the 3D line connecting @code(LineStartWorldPos) and
+      @code(LineEndWorldPos):
+      $P'_i = P_0 + t_i (P_1 - P_0)$ where
+      $t_i = \frac((P_i - P_0) \cdot (P_1 - P_0))(\|P_1 - P_0\|^2)$.
+      Unlike @link(ArrangeSelectedOnLine) which spaces items uniformly along the
+      chord, orthogonal projection preserves each object's existing longitudinal
+      spacing along the axis while eliminating lateral and vertical drift.
+      When @code(ClampToSegment) is @true, $t_i$ is clamped to $[0, 1]$ so no
+      transform is projected outside the segment endpoints.
+      When @code(OrientAlongLine) is @true, each transform is also oriented to look
+      along the line direction from @code(LineStartWorldPos) toward @code(LineEndWorldPos).
+      Returns @true if at least one selected transform was modified. }
+    function ProjectSelectedOntoLine(
+      const LineStartWorldPos, LineEndWorldPos: TVector3;
+      const ClampToSegment: Boolean = false;
+      const OrientAlongLine: Boolean = false): Boolean;
+
+    { Project all top-level selected transforms (@code(SelectedCount >= 3), or
+      @code(SelectedCount >= 2) when @code(OrientAlongLine) is @true) orthogonally
+      onto the 3D line connecting the first selected transform (@code(Selected[0]))
+      and the last selected transform (@code(Selected[N-1])).
+      Returns @true if at least one selected transform was modified. }
+    function ProjectSelectedOntoLineBetweenEndpoints(
+      const ClampToSegment: Boolean = false;
+      const OrientAlongLine: Boolean = false): Boolean;
   end;
 
 var
@@ -5718,6 +5791,433 @@ begin
     GizmoHasTransformModified(Self);
     GizmoHasTransformModifyEnd(Self);
   end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInLissajous(
+  const RadiusX, RadiusZ: Single;
+  const FreqX: Single; const FreqZ: Single;
+  const VerticalAmplitude: Single;
+  const OrientMode: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  ValidCount, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, TargetDir, GravityUp, Side, NewUp: TVector3;
+  CurWorldPos, CurDir, CurUp: TVector3;
+  EffRx, EffRz, EffWx, EffWz, Theta, AvgExtent: Single;
+  BBox: TBox3D;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  ValidCount := 0;
+  AvgExtent := 0.0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[ValidCount] := T;
+      Inc(ValidCount);
+      BBox := T.WorldBoundingBox;
+      if not BBox.IsEmpty then
+        AvgExtent := AvgExtent + BBox.AverageSize(false, 1.0);
+    end;
+  end;
+
+  if ValidCount < 2 then
+    Exit;
+
+  if AvgExtent > 1e-4 then
+    AvgExtent := (AvgExtent / ValidCount) * 1.5
+  else
+    AvgExtent := 3.0;
+
+  EffRx := RadiusX;
+  if EffRx <= 1e-4 then
+    EffRx := Max(2.0, AvgExtent * ValidCount / (2.0 * Pi));
+
+  EffRz := RadiusZ;
+  if EffRz <= 1e-4 then
+    EffRz := EffRx * 0.5;
+
+  EffWx := FreqX;
+  if Abs(EffWx) <= 1e-4 then
+    EffWx := 1.0;
+
+  EffWz := FreqZ;
+  if Abs(EffWz) <= 1e-4 then
+    EffWz := 2.0;
+
+  if FPivotMode = pmSelectionCenter then
+    CenterPos := SelectionWorkingCenter
+  else
+    CenterPos := GetTransformWorkingPos(Items[0]);
+
+  for I := 0 to ValidCount - 1 do
+  begin
+    T := Items[I];
+    Theta := (2.0 * Pi * I) / ValidCount;
+
+    TargetPos := CenterPos + Vector3(
+      EffRx * Sin(EffWx * Theta),
+      VerticalAmplitude * Cos(EffWx * Theta),
+      EffRz * Sin(EffWz * Theta)
+    );
+
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(TargetPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if OrientMode in [1, 2] then
+    begin
+      if OrientMode = 1 then
+      begin
+        TargetDir := CenterPos - TargetPos;
+        TargetDir.Y := 0.0;
+        if TargetDir.IsZero(1e-5) then
+          TargetDir := Vector3(0.0, 0.0, -1.0);
+      end else
+      begin
+        TargetDir := Vector3(
+          EffRx * EffWx * Cos(EffWx * Theta),
+          -VerticalAmplitude * EffWx * Sin(EffWx * Theta),
+          EffRz * EffWz * Cos(EffWz * Theta)
+        );
+        if TargetDir.IsZero(1e-5) then
+          TargetDir := Vector3(0.0, 0.0, -1.0);
+      end;
+
+      if not TargetDir.IsZero(1e-5) then
+      begin
+        TargetDir := TargetDir.Normalize;
+        if T.HasWorldTransform then
+          T.GetWorldView(CurWorldPos, CurDir, CurUp)
+        else
+        begin
+          CurWorldPos := T.Translation;
+          CurDir := T.Direction;
+          CurUp := T.Up;
+        end;
+
+        if T.World <> nil then
+          GravityUp := T.World.GravityUp
+        else
+          GravityUp := Vector3(0, 1, 0);
+
+        Side := TVector3.CrossProduct(TargetDir, GravityUp);
+        if Side.IsZero(1e-5) then
+          Side := TVector3.CrossProduct(TargetDir, Vector3(0, 0, 1));
+        if Side.IsZero(1e-5) then
+          Side := TVector3.CrossProduct(TargetDir, Vector3(1, 0, 0));
+        Side := Side.Normalize;
+        NewUp := TVector3.CrossProduct(Side, TargetDir).Normalize;
+
+        if (not TVector3.Equals(CurDir, TargetDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          if T.HasWorldTransform then
+            T.SetWorldView(CurWorldPos, TargetDir, NewUp)
+          else
+            T.SetView(CurWorldPos, TargetDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInCatenary(
+  const StartWorldPos, EndWorldPos: TVector3;
+  const SagDepth: Single;
+  const OrientAlongCurve: Boolean): Boolean;
+const
+  CatenaryK = 1.5;
+var
+  Items: array of TCastleTransform;
+  ValidCount, I: Integer;
+  T: TCastleTransform;
+  ChordVec, TargetPos, CurPos, TargetDir, GravityUp, Side, NewUp: TVector3;
+  CurWorldPos, CurDir, CurUp: TVector3;
+  ParamT, ParamU, CoshK, Denom, SagFactor, dSdt: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  ValidCount := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[ValidCount] := T;
+      Inc(ValidCount);
+    end;
+  end;
+
+  if ValidCount < 2 then
+    Exit;
+
+  ChordVec := EndWorldPos - StartWorldPos;
+  CoshK := Cosh(CatenaryK);
+  Denom := CoshK - 1.0;
+
+  for I := 0 to ValidCount - 1 do
+  begin
+    T := Items[I];
+    ParamT := Single(I) / Single(ValidCount - 1);
+    ParamU := 2.0 * ParamT - 1.0;
+    if Denom > 1e-6 then
+      SagFactor := (CoshK - Cosh(CatenaryK * ParamU)) / Denom
+    else
+      SagFactor := 1.0 - Sqr(ParamU);
+
+    TargetPos := StartWorldPos + (ChordVec * ParamT) - Vector3(0.0, SagDepth * SagFactor, 0.0);
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(TargetPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if OrientAlongCurve then
+    begin
+      if Denom > 1e-6 then
+        dSdt := (-2.0 * CatenaryK * Sinh(CatenaryK * ParamU)) / Denom
+      else
+        dSdt := -4.0 * ParamU;
+
+      TargetDir := ChordVec - Vector3(0.0, SagDepth * dSdt, 0.0);
+      if not TargetDir.IsZero(1e-5) then
+      begin
+        TargetDir := TargetDir.Normalize;
+        if T.HasWorldTransform then
+          T.GetWorldView(CurWorldPos, CurDir, CurUp)
+        else
+        begin
+          CurWorldPos := T.Translation;
+          CurDir := T.Direction;
+          CurUp := T.Up;
+        end;
+
+        if T.World <> nil then
+          GravityUp := T.World.GravityUp
+        else
+          GravityUp := Vector3(0, 1, 0);
+
+        Side := TVector3.CrossProduct(TargetDir, GravityUp);
+        if Side.IsZero(1e-5) then
+          Side := TVector3.CrossProduct(TargetDir, Vector3(0, 0, 1));
+        if Side.IsZero(1e-5) then
+          Side := TVector3.CrossProduct(TargetDir, Vector3(1, 0, 0));
+        Side := Side.Normalize;
+        NewUp := TVector3.CrossProduct(Side, TargetDir).Normalize;
+
+        if (not TVector3.Equals(CurDir, TargetDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          if T.HasWorldTransform then
+            T.SetWorldView(CurWorldPos, TargetDir, NewUp)
+          else
+            T.SetView(CurWorldPos, TargetDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInCatenaryBetweenEndpoints(
+  const SagDepth: Single;
+  const OrientAlongCurve: Boolean): Boolean;
+var
+  FirstT, LastT, T: TCastleTransform;
+  I, ValidCount: Integer;
+  StartWorld, EndWorld: TVector3;
+  EffSag, ChordLen: Single;
+begin
+  Result := false;
+  FirstT := nil;
+  LastT := nil;
+  ValidCount := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      if FirstT = nil then
+        FirstT := T;
+      LastT := T;
+      Inc(ValidCount);
+    end;
+  end;
+
+  if (ValidCount < 2) or (FirstT = nil) or (LastT = nil) then
+    Exit;
+
+  StartWorld := GetTransformWorkingPos(FirstT);
+  EndWorld := GetTransformWorkingPos(LastT);
+
+  EffSag := SagDepth;
+  if Abs(EffSag) <= 1e-5 then
+  begin
+    ChordLen := PointsDistance(StartWorld, EndWorld);
+    if ChordLen > 1e-4 then
+      EffSag := ChordLen * 0.25
+    else
+      EffSag := 2.0;
+  end;
+
+  Result := ArrangeSelectedInCatenary(StartWorld, EndWorld, EffSag, OrientAlongCurve);
+end;
+
+function TCastleTransformManipulate.ProjectSelectedOntoLine(
+  const LineStartWorldPos, LineEndWorldPos: TVector3;
+  const ClampToSegment: Boolean;
+  const OrientAlongLine: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  ValidCount, I: Integer;
+  T: TCastleTransform;
+  LineVec, CurPos, TargetPos, TargetDir, GravityUp, Side, NewUp: TVector3;
+  CurWorldPos, CurDir, CurUp: TVector3;
+  LineLenSqr, ParamT: Single;
+begin
+  Result := false;
+  if SelectedCount < 1 then Exit;
+
+  SetLength(Items, FMaxSelectedCount);
+  ValidCount := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[ValidCount] := T;
+      Inc(ValidCount);
+    end;
+  end;
+
+  if ValidCount < 1 then
+    Exit;
+
+  LineVec := LineEndWorldPos - LineStartWorldPos;
+  LineLenSqr := LineVec.LengthSqr;
+  if LineLenSqr <= 1e-10 then
+    Exit;
+
+  for I := 0 to ValidCount - 1 do
+  begin
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+    ParamT := TVector3.DotProduct(CurPos - LineStartWorldPos, LineVec) / LineLenSqr;
+    if ClampToSegment then
+      ParamT := Clamped(ParamT, 0.0, 1.0);
+
+    TargetPos := LineStartWorldPos + (LineVec * ParamT);
+    if not TVector3.Equals(TargetPos, CurPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if OrientAlongLine then
+    begin
+      TargetDir := LineVec.Normalize;
+      if T.HasWorldTransform then
+        T.GetWorldView(CurWorldPos, CurDir, CurUp)
+      else
+      begin
+        CurWorldPos := T.Translation;
+        CurDir := T.Direction;
+        CurUp := T.Up;
+      end;
+
+      if T.World <> nil then
+        GravityUp := T.World.GravityUp
+      else
+        GravityUp := Vector3(0, 1, 0);
+
+      Side := TVector3.CrossProduct(TargetDir, GravityUp);
+      if Side.IsZero(1e-5) then
+        Side := TVector3.CrossProduct(TargetDir, Vector3(0, 0, 1));
+      if Side.IsZero(1e-5) then
+        Side := TVector3.CrossProduct(TargetDir, Vector3(1, 0, 0));
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, TargetDir).Normalize;
+
+      if (not TVector3.Equals(CurDir, TargetDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        if T.HasWorldTransform then
+          T.SetWorldView(CurWorldPos, TargetDir, NewUp)
+        else
+          T.SetView(CurWorldPos, TargetDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ProjectSelectedOntoLineBetweenEndpoints(
+  const ClampToSegment: Boolean;
+  const OrientAlongLine: Boolean): Boolean;
+var
+  FirstT, LastT, T: TCastleTransform;
+  I, ValidCount: Integer;
+  StartWorld, EndWorld: TVector3;
+begin
+  Result := false;
+  FirstT := nil;
+  LastT := nil;
+  ValidCount := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      if FirstT = nil then
+        FirstT := T;
+      LastT := T;
+      Inc(ValidCount);
+    end;
+  end;
+
+  if (ValidCount < 2) or (FirstT = nil) or (LastT = nil) then
+    Exit;
+
+  StartWorld := GetTransformWorkingPos(FirstT);
+  EndWorld := GetTransformWorkingPos(LastT);
+  Result := ProjectSelectedOntoLine(StartWorld, EndWorld, ClampToSegment, OrientAlongLine);
 end;
 
 function TCastleTransformManipulate.SelectedCount: Integer;

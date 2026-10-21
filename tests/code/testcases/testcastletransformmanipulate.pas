@@ -53,6 +53,7 @@ type
     procedure TestArrangeSineWaveEllipseAndReversePositions;
     procedure TestArrangePhyllotaxisDiskStaircaseAndRadialScale;
     procedure TestArrangeTorusZigzagAndNormalizeSizes;
+    procedure TestArrangeLissajousCatenaryAndProjectOntoLine;
   end;
 
 implementation
@@ -1552,6 +1553,85 @@ begin
     AssertVectorEquals(Vector3(3, 3, 3), B4.Scale, 1e-4);
     AvgDiag := B1.WorldBoundingBox.Size.Length;
     AssertSameValue(AvgDiag, B4.WorldBoundingBox.Size.Length, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestArrangeLissajousCatenaryAndProjectOntoLine;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  B1, B2, B3, B4: TCastleBox;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.OnTransformModified := {$ifdef FPC}@{$endif}HandleTransformModified;
+    Manipulate.OnTransformModifyEnd := {$ifdef FPC}@{$endif}HandleTransformModifyEnd;
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(1, 1, 1);
+    B1.Translation := Vector3(-6, 0, 0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(1, 1, 1);
+    B2.Translation := Vector3(-2, 0, 0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(1, 1, 1);
+    B3.Translation := Vector3(2, 0, 0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(1, 1, 1);
+    B4.Translation := Vector3(6, 0, 0);
+    Viewport.Items.Add(B4);
+
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    Manipulate.PivotMode := pmSelectionCenter;
+
+    // 1. Test ArrangeSelectedInLissajous:
+    // Center = (0, 0, 0), RadiusX = 8, RadiusZ = 4, FreqX = 1, FreqZ = 2, VerticalAmplitude = 2, OrientMode = 2 (tangent).
+    AssertTrue(Manipulate.ArrangeSelectedInLissajous(8.0, 4.0, 1.0, 2.0, 2.0, 2));
+    AssertVectorEquals(Vector3(0, 2, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(8, 0, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, -2, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-8, 0, 0), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1 / Sqrt(2), 0, 1 / Sqrt(2)), WorldDir.Normalize, 1e-4);
+
+    // 2. Test ArrangeSelectedInCatenary on 3 items:
+    // Start = (0, 10, 0), End = (20, 10, 0), SagDepth = 5.0, OrientAlongCurve = true.
+    Manipulate.SetSelected([B1, B2, B3]);
+    AssertTrue(Manipulate.ArrangeSelectedInCatenary(Vector3(0, 10, 0), Vector3(20, 10, 0), 5.0, true));
+    AssertVectorEquals(Vector3(0, 10, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10, 5, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(20, 10, 0), B3.Translation, 1e-4);
+    // At midpoint (u = 0), catenary tangent is horizontal along chord (1, 0, 0):
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+
+    // 3. Test ProjectSelectedOntoLineBetweenEndpoints:
+    // Place B1 at (0,0,0), B2 at (4, 7, -3), B3 at (-5, 3, 2), B4 at (20,0,0).
+    // With ClampToSegment = true and OrientAlongLine = true:
+    // B2 projects to (4, 0, 0); B3 has t = -0.25 -> clamped to 0 -> (0, 0, 0).
+    B1.Translation := Vector3(0, 0, 0);
+    B2.Translation := Vector3(4, 7, -3);
+    B3.Translation := Vector3(-5, 3, 2);
+    B4.Translation := Vector3(20, 0, 0);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.ProjectSelectedOntoLineBetweenEndpoints(true, true));
+    AssertVectorEquals(Vector3(0, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(4, 0, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(20, 0, 0), B4.Translation, 1e-4);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

@@ -1155,7 +1155,25 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 
 ---
 
-## 60. Complete Keyboard Shortcuts & Toolbar Reference
+## 60. Phases 68–71: 3D Figure-8 / Lissajous Arrangement (`Alt+Shift+F`), 3D Catenary / Hanging Cable Arrangement (`Alt+Shift+B`), Orthogonal Line Projection (`Alt+Shift+I`), Select All Lights & Cameras (`Ctrl+Shift+J`) & 2D UI Golden Ratio (`UI Golden Ratio`)
+
+- **3D Figure-8 / Lemniscate & Lissajous Curve Arrangement (`ArrangeSelectedInLissajous` / `Alt+Shift+F`):**
+  - `TCastleTransformManipulate.ArrangeSelectedInLissajous(RadiusX, RadiusZ, FreqX, FreqZ, VerticalAmplitude, OrientMode)` distributes 2+ top-level selected transforms along a 3D Lissajous / figure-8 / lemniscate curve around the active selection pivot ($x(\theta) = C_x + R_x \sin(\omega_x \theta), \; y(\theta) = C_y + H_y \cos(\omega_x \theta), \; z(\theta) = C_z + R_z \sin(\omega_z \theta)$ for $\theta_i = 2\pi i / N$) with `OrientMode` (`0` = keep rotation, `1` = orient horizontally inward toward center, `2` = orient forward along 3D curve tangent).
+  - Accessible via **`Figure-8 / Lissajous`** (`ButtonArrangeLissajous` in `PanelLayoutTransform`: **Click** arranges in a figure-8 loop; **`Ctrl`-click** also orients along the curve tangent; **`Shift`-click** or **`Alt+Shift+F`** opens `ShowArrangeInLissajousDialog`).
+- **3D Catenary / Hanging Cable / Suspension Chain Arrangement (`ArrangeSelectedInCatenary` / `Alt+Shift+B`):**
+  - `TCastleTransformManipulate.ArrangeSelectedInCatenary(StartWorldPos, EndWorldPos, SagDepth, OrientAlongCurve)` and `ArrangeSelectedInCatenaryBetweenEndpoints` arrange 2+ top-level selected transforms along a hanging catenary cable / suspension bridge chain between `StartWorldPos` and `EndWorldPos` with normalized hyperbolic cosine sag $S(u) = \frac{\cosh(k) - \cosh(k u)}{\cosh(k) - 1}$ ($k = 1.5, u = 2t - 1$) so endpoints match $P_0, P_1$ exactly while the midpoint sags by `SagDepth`, with optional 3D catenary tangent orientation.
+  - Accessible via **`Catenary Cable`** (`ButtonArrangeCatenary` in `PanelLayoutTransform`: **Click** arranges with auto $25\%$ span sag; **`Ctrl`-click** also orients along the cable tangent; **`Shift`-click** or **`Alt+Shift+B`** opens `ShowArrangeInCatenaryDialog`).
+- **Orthogonal Projection / Snap Selected Transforms Onto Connecting Line (`ProjectSelectedOntoLine` / `Alt+Shift+I`):**
+  - `TCastleTransformManipulate.ProjectSelectedOntoLine(LineStartWorldPos, LineEndWorldPos, ClampToSegment, OrientAlongLine)` and `ProjectSelectedOntoLineBetweenEndpoints` project each selected transform orthogonally onto the 3D line connecting `LineStartWorldPos` and `LineEndWorldPos` ($P'_i = P_0 + t_i(P_1 - P_0)$), straightening hand-placed rows of props without altering their relative longitudinal spacing.
+  - Accessible via **`Snap to Line`** (`ButtonProjectOntoLine` in `PanelLayoutTransform`: **Click** or **`Alt+Shift+I`** projects onto the line between first & last selected transforms; **`Shift`-click** clamps to segment $[0, 1]$; **`Ctrl`-click** orients along the line).
+- **Select All Lights & Cameras (`SelectLightsAndCameras` / `Ctrl+Shift+J`):**
+  - Pressing **`Ctrl+Shift+J`** or choosing **`Select All Lights & Cameras (Ctrl+Shift+J)`** (`MenuTreeViewItemSelectLightsAndCameras`) in the Hierarchy context menu selects all visible, unlocked `TCastleAbstractLight` and `TCastleCamera` instances in the hierarchy (`Shift`-click menu item for lights only; `Ctrl`-click for cameras only).
+- **2D UI Golden-Ratio Aspect Sizing (`ApplyGoldenRatioToSelectedUserInterfaces` / `ButtonUIGoldenRatio`):**
+  - Clicking **`UI Golden Ratio`** (`ButtonUIGoldenRatio`) in `PanelLayoutUI` resizes 1+ selected `TCastleUserInterface` controls around their current screen center to the golden ratio $\varphi = \frac{1 + \sqrt{5}}{2} \approx 1.618034$ (**Click**: landscape `Width := Height * Phi`; **`Shift`-click**: portrait `Height := Width * Phi`; **`Ctrl`-click**: landscape keeping width `Height := Width / Phi`).
+
+---
+
+## 61. Complete Keyboard Shortcuts & Toolbar Reference
 
 | Shortcut / Control | Context | Action |
 | :--- | :--- | :--- |
@@ -1185,6 +1203,9 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 | **`Alt+Shift+U`** / **`Torus / Coil...`** | Viewport / Hierarchy / Layout Tab | Open the **Arrange Selection on 3D Torus / Coil** dialog (`MajorRadius`, `MinorRadius`, `MinorTurns`, `OrientMode`). |
 | **`Alt+Shift+Z`** / **`Zigzag Arrange`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms in an alternating 3D zigzag** (**Click**: between first & last; **`Ctrl`-click**: orient inward to corridor; **`Shift`-click** / **`Alt+Shift+Z`**: dialog). |
 | **`Alt+Shift+N`** / **`Equalize Size`** | Viewport / Hierarchy / Layout Tab | **Equalize world bounding-box sizes** of 2+ selected transforms to their average diagonal (**`Shift`-click**: equalize X, Y, Z dimensions independently). |
+| **`Alt+Shift+F`** / **`Figure-8 / Lissajous`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms in a 3D Figure-8 / Lissajous loop** (**Click**: figure-8 around pivot; **`Ctrl`-click**: orient along tangent; **`Shift`-click** / **`Alt+Shift+F`**: dialog). |
+| **`Alt+Shift+B`** / **`Catenary Cable`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms along a 3D Catenary / Hanging Cable** (**Click**: auto $25\%$ sag between first & last; **`Ctrl`-click**: orient along cable; **`Shift`-click** / **`Alt+Shift+B`**: dialog). |
+| **`Alt+Shift+I`** / **`Snap to Line`** | Viewport / Hierarchy / Layout Tab | **Project 3+ selected transforms orthogonally onto the line connecting first & last** while preserving longitudinal spacing (**`Shift`-click**: clamp to segment; **`Ctrl`-click**: orient along line). |
 | **`Alt+Shift+.`** / **`Radial +25%`** | Viewport / Hierarchy / Layout Tab | **Push / Expand horizontal XZ radial distance** from active pivot by $+25\%$ while preserving Y elevation and `Scale`. |
 | **`Alt+Shift+,`** / **`Radial -20%`** | Viewport / Hierarchy / Layout Tab | **Pull / Contract horizontal XZ radial distance** toward active pivot by $-20\%$ while preserving Y elevation and `Scale`. |
 | **`Alt+Shift+R`** / **`Reverse Order`** | Viewport / Hierarchy / Layout Tab | **Reverse order of world positions** across 2+ selected transforms (**`Shift`-click**: Pos+Rot; **`Ctrl`-click**: Pos+Rot+Scale). |
@@ -1217,6 +1238,7 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 | **`Ctrl+Shift+N`** / **`Select Non-Uniformly Scaled Transforms`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects with non-uniform (`S.X <> S.Y` or `S.Y <> S.Z`) or non-positive (`<= 0`) `Scale` for physics collider auditing. |
 | **`Ctrl+Shift+T`** / **`Select Rotated / Tilted Transforms`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects with non-zero rotation (`Abs(Rotation.W) > 1e-3`) or tilted world orientation. |
 | **`Ctrl+Shift+K`** / **`Select Transforms With Behaviors / Physics`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects with attached behaviors (`Shift`-click menu item for physics rigid bodies/colliders only). |
+| **`Ctrl+Shift+J`** / **`Select All Lights & Cameras`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleAbstractLight` and `TCastleCamera` instances (`Shift`-click menu item for lights only; `Ctrl`-click for cameras only). |
 | **`Select By Bounding-Box Size Range...`** | Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects whose world bounding-box diagonal length lies within `[MinSize, MaxSize]`. |
 | **`Select By Name Pattern...`** | Hierarchy Context Menu | Select all components matching a substring or `*` / `?` wildcard pattern. |
 | **`Select All With Same Asset URL`** | Hierarchy Context Menu | Select all components in the design referencing the same `Url` asset as the selected component. |
@@ -1257,6 +1279,7 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 | **`UI Split Row` / `UI Split Col`** | Layout Tab (`PanelLayoutUI`) | **Divide parent container width or height equally** across 2+ selected `TCastleUserInterface` controls (**Click**: $8\text{ px}$ gap; **`Shift`-click**: $0\text{ px}$ flush). |
 | **`UI Inset Parent`** | Layout Tab (`PanelLayoutUI`) | **Fit and center** 1+ selected `TCastleUserInterface` controls inside their parent container with uniform margin (**Click**: $16\text{ px}$; **`Shift`**: $8\text{ px}$; **`Ctrl`**: $32\text{ px}$). |
 | **`UI Make Square`** | Layout Tab (`PanelLayoutUI`) | **Make 1+ selected `TCastleUserInterface` controls square** around their current center (**Click**: `Max(W,H)`; **`Shift`**: `Min(W,H)`; **`Ctrl`**: `Average(W,H)`). |
+| **`UI Golden Ratio`** | Layout Tab (`PanelLayoutUI`) | **Resize 1+ selected `TCastleUserInterface` controls to the Golden Ratio ($\varphi \approx 1.618$)** around their center (**Click**: `W = H * 1.618`; **`Shift`**: `H = W * 1.618`; **`Ctrl`**: `H = W / 1.618`). |
 | **`Reset Prop` Button** | Object Inspector Header | Reset the active Object Inspector property row to its default value. |
 | **`Select All of Same Class`** | Hierarchy Context Menu | Select all components in the design matching the selected component's class. |
 | **`Expand Subtree` / `Collapse Subtree`** | Hierarchy Context Menu | Recursively expand or collapse the selected hierarchy node(s). |
@@ -1273,9 +1296,9 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 
 ---
 
-## 61. Automated Unit Tests & Verification
+## 62. Automated Unit Tests & Verification
 
-All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 24 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
+All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 25 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
 
 1. **`TestSelectedCountAndFree`**: Verifies single/multi-selection filtering, freeing a selected transform while selected, and translating the remaining selection.
 2. **`TestTranslateSnapAndCoordSpace`**: Verifies grid snapping (`TranslateSnap := 2.0`) and `csLocal` vs. `csWorld` translation on a $90^\circ$-rotated transform.
@@ -1301,6 +1324,7 @@ All core 3D manipulation algorithms in `CastleTransformManipulate` are covered b
 22. **`TestArrangeSineWaveEllipseAndReversePositions`**: Verifies `ArrangeSelectedInSineWaveBetweenEndpoints(6.0, 1.0, 1, true)` places 5 transforms along a sinusoidal wave with crest $(5, 6, 0)$, zero-crossing $(10, 0, 0)$, and trough $(15, -6, 0)$ while orienting the crest tangent horizontally along $(1, 0, 0)$, verifies `ArrangeSelectedInEllipse(12.0, 6.0, 2)` arranges 4 transforms around a $12 \times 6$ XZ ellipse oriented along the ellipse tangent, and verifies `ReverseSelectedPositions(true, true)` reverses world positions, orientations, and scales across the 4 transforms.
 23. **`TestArrangePhyllotaxisDiskStaircaseAndRadialScale`**: Verifies `ArrangeSelectedInPhyllotaxisDisk(10.0, 2)` distributes 5 transforms on a Vogel golden-angle spiral disk of outer radius $10.0$ ($r_i = 10\sqrt{i/4}$) and orients outer items radially outward from the center, verifies `ArrangeSelectedInStaircaseBetweenEndpoints(2.0, true)` arranges 5 transforms between $(0, 0, 0)$ and $(20, 16, 0)$ with linear XZ steps ($X = 0, 5, 10, 15, 20$), quadratic Y elevation ($Y = 0, 1, 4, 9, 16$), and horizontal yaw orientation along $+X$ while keeping world Up at $(0, 1, 0)$, and verifies `ScaleSelectedRadialDistanceXZ(2.0)` doubles horizontal XZ radial offsets from the pivot while leaving Y elevation and `Scale` untouched.
 24. **`TestArrangeTorusZigzagAndNormalizeSizes`**: Verifies `ArrangeSelectedOnTorus(10.0, 2.0, 1.0, 1)` places 4 transforms around a $10 \times 2$ torus coil at $(12, 0, 0)$, $(0, 2, 10)$, $(-8, 0, 0)$, and $(0, -2, -10)$ with outward tube normal orientation, verifies `ArrangeSelectedInZigzag(Vector3(0, 0, 0), Vector3(0, 0, 30), 4.0, 2)` places 4 transforms in an alternating corridor zigzag at $(-4, 0, 0)$, $(4, 0, 10)$, $(-4, 0, 20)$, and $(4, 0, 30)$ oriented inward toward the central walkway, and verifies `NormalizeSelectedSizes(true)` equalizes 4 differently scaled boxes ($1\times, 2\times, 3\times, 6\times$) to their shared mean scale $(3, 3, 3)$.
+25. **`TestArrangeLissajousCatenaryAndProjectOntoLine`**: Verifies `ArrangeSelectedInLissajous(8.0, 4.0, 1.0, 2.0, 2.0, 2)` places 4 transforms along a 3D figure-8 / Lissajous curve at $(0, 2, 0)$, $(8, 0, 0)$, $(0, -2, 0)$, and $(-8, 0, 0)$ oriented along the 3D curve tangent, verifies `ArrangeSelectedInCatenary(Vector3(0, 10, 0), Vector3(20, 10, 0), 5.0, true)` places 3 transforms along a hanging catenary cable at $(0, 10, 0)$, midpoint $(10, 5, 0)$ with horizontal tangent $(1, 0, 0)$, and $(20, 10, 0)$, and verifies `ProjectSelectedOntoLineBetweenEndpoints(true, true)` orthogonally projects off-axis transforms onto the segment connecting `B1` and `B4` while clamping out-of-range parameters to $[0, 1]$ and orienting along the line.
 
 To run this test suite from the command line:
 ```bash

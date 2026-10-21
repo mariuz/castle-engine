@@ -345,6 +345,9 @@ type
       ButtonArrangeTorus: TButton;
       ButtonArrangeZigzag: TButton;
       ButtonNormalizeSize: TButton;
+      ButtonArrangeLissajous: TButton;
+      ButtonArrangeCatenary: TButton;
+      ButtonProjectOntoLine: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -370,6 +373,7 @@ type
       ButtonUIStretchCol: TButton;
       ButtonUIInsetParent: TButton;
       ButtonUISquareSize: TButton;
+      ButtonUIGoldenRatio: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -401,6 +405,7 @@ type
       MenuTreeViewItemSelectNonUniformScale: TMenuItem;
       MenuTreeViewItemSelectRotatedTransforms: TMenuItem;
       MenuTreeViewItemSelectWithBehaviors: TMenuItem;
+      MenuTreeViewItemSelectLightsAndCameras: TMenuItem;
       MenuTreeViewItemCopyTransform: TMenuItem;
       MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
@@ -491,6 +496,9 @@ type
     procedure ButtonArrangeTorusClick(Sender: TObject);
     procedure ButtonArrangeZigzagClick(Sender: TObject);
     procedure ButtonNormalizeSizeClick(Sender: TObject);
+    procedure ButtonArrangeLissajousClick(Sender: TObject);
+    procedure ButtonArrangeCatenaryClick(Sender: TObject);
+    procedure ButtonProjectOntoLineClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -505,6 +513,7 @@ type
     procedure ButtonUIStretchColClick(Sender: TObject);
     procedure ButtonUIInsetParentClick(Sender: TObject);
     procedure ButtonUISquareSizeClick(Sender: TObject);
+    procedure ButtonUIGoldenRatioClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -543,6 +552,7 @@ type
     procedure MenuTreeViewItemSelectNonUniformScaleClick(Sender: TObject);
     procedure MenuTreeViewItemSelectRotatedTransformsClick(Sender: TObject);
     procedure MenuTreeViewItemSelectWithBehaviorsClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectLightsAndCamerasClick(Sender: TObject);
     procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
@@ -1041,6 +1051,15 @@ type
       const OrientMode: Integer = 0);
     procedure ShowArrangeInZigzagDialog;
     procedure NormalizeSelectionSizes(const PreserveAspectRatio: Boolean = true);
+    procedure ArrangeSelectionInLissajous(const RadiusX, RadiusZ: Single;
+      const FreqX: Single = 1.0; const FreqZ: Single = 2.0;
+      const VerticalAmplitude: Single = 0.0; const OrientMode: Integer = 0);
+    procedure ShowArrangeInLissajousDialog;
+    procedure ArrangeSelectionInCatenary(const SagDepth: Single = 0.0;
+      const OrientAlongCurve: Boolean = false);
+    procedure ShowArrangeInCatenaryDialog;
+    procedure ProjectSelectionOntoLine(const ClampToSegment: Boolean = false;
+      const OrientAlongLine: Boolean = false);
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -1056,6 +1075,8 @@ type
       const GapPx: Single = 8.0);
     procedure InsetSelectedUserInterfacesInParent(const MarginPx: Single = 16.0);
     procedure MakeSelectedUserInterfacesSquare(const SizeMode: Integer = 0);
+    procedure ApplyGoldenRatioToSelectedUserInterfaces(
+      const Landscape: Boolean = true; const KeepWidth: Boolean = false);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -1094,6 +1115,7 @@ type
     procedure SelectNonUniformlyScaledTransforms;
     procedure SelectRotatedTransforms(const OffVerticalOnly: Boolean = false);
     procedure SelectTransformsWithBehaviors(const PhysicsOnly: Boolean = false);
+    procedure SelectLightsAndCameras(const FilterMode: Integer = 0);
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -1815,6 +1837,38 @@ begin
      (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
   begin
     Frame.SelectTransformsWithBehaviors(false);
+    Exit(true);
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyF) and
+     (Event.ModifiersDown = [mkAlt, mkShift]) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    Frame.ShowArrangeInLissajousDialog;
+    Exit(true);
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyB) and
+     (Event.ModifiersDown = [mkAlt, mkShift]) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    Frame.ShowArrangeInCatenaryDialog;
+    Exit(true);
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyI) and
+     (Event.ModifiersDown = [mkAlt, mkShift]) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    Frame.ProjectSelectionOntoLine(false, false);
+    Exit(true);
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyJ) and
+     (Event.ModifiersDown = [mkCtrl, mkShift]) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    Frame.SelectLightsAndCameras(0);
     Exit(true);
   end;
 
@@ -3485,6 +3539,36 @@ begin
   ButtonNormalizeSize.OnClick := @ButtonNormalizeSizeClick;
   ButtonNormalizeSize.Parent := PanelLayoutTransform;
 
+  ButtonArrangeLissajous := TButton.Create(Self);
+  ButtonArrangeLissajous.Align := alTop;
+  ButtonArrangeLissajous.AutoSize := true;
+  ButtonArrangeLissajous.Caption := 'Figure-8 / Lissajous';
+  ButtonArrangeLissajous.Hint := 'Arrange 2+ selected 3D transforms along a figure-8 / Lissajous curve around pivot (Alt+Shift+F | Shift-click: dialog | Ctrl-click: orient along curve tangent)';
+  ButtonArrangeLissajous.ShowHint := true;
+  ButtonArrangeLissajous.BorderSpacing.Around := 2;
+  ButtonArrangeLissajous.OnClick := @ButtonArrangeLissajousClick;
+  ButtonArrangeLissajous.Parent := PanelLayoutTransform;
+
+  ButtonArrangeCatenary := TButton.Create(Self);
+  ButtonArrangeCatenary.Align := alTop;
+  ButtonArrangeCatenary.AutoSize := true;
+  ButtonArrangeCatenary.Caption := 'Catenary Cable';
+  ButtonArrangeCatenary.Hint := 'Arrange 2+ selected 3D transforms along a hanging catenary cable / suspension chain curve between first & last (Alt+Shift+B | Shift-click: dialog | Ctrl-click: orient along cable tangent)';
+  ButtonArrangeCatenary.ShowHint := true;
+  ButtonArrangeCatenary.BorderSpacing.Around := 2;
+  ButtonArrangeCatenary.OnClick := @ButtonArrangeCatenaryClick;
+  ButtonArrangeCatenary.Parent := PanelLayoutTransform;
+
+  ButtonProjectOntoLine := TButton.Create(Self);
+  ButtonProjectOntoLine.Align := alTop;
+  ButtonProjectOntoLine.AutoSize := true;
+  ButtonProjectOntoLine.Caption := 'Snap to Line';
+  ButtonProjectOntoLine.Hint := 'Project 3+ selected 3D transforms orthogonally onto the line connecting first & last while preserving longitudinal spacing (Alt+Shift+I | Shift-click: clamp to segment | Ctrl-click: orient along line)';
+  ButtonProjectOntoLine.ShowHint := true;
+  ButtonProjectOntoLine.BorderSpacing.Around := 2;
+  ButtonProjectOntoLine.OnClick := @ButtonProjectOntoLineClick;
+  ButtonProjectOntoLine.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -3679,6 +3763,14 @@ begin
   ButtonUISquareSize.OnClick := @ButtonUISquareSizeClick;
   ButtonUISquareSize.Parent := PanelLayoutUI;
 
+  ButtonUIGoldenRatio := TButton.Create(Self);
+  ButtonUIGoldenRatio.AutoSize := true;
+  ButtonUIGoldenRatio.Caption := 'UI Golden Ratio';
+  ButtonUIGoldenRatio.Hint := 'Resize selected 2D UI control(s) around their center to the Golden Ratio 1.618:1 (Click: Landscape W = H * 1.618 | Shift-click: Portrait H = W * 1.618 | Ctrl-click: Landscape H = W / 1.618)';
+  ButtonUIGoldenRatio.ShowHint := true;
+  ButtonUIGoldenRatio.OnClick := @ButtonUIGoldenRatioClick;
+  ButtonUIGoldenRatio.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -3862,6 +3954,11 @@ begin
   MenuTreeViewItemSelectWithBehaviors.Caption := 'Select Transforms With Behaviors / Physics (Ctrl+Shift+K)';
   MenuTreeViewItemSelectWithBehaviors.OnClick := @MenuTreeViewItemSelectWithBehaviorsClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectWithBehaviors);
+
+  MenuTreeViewItemSelectLightsAndCameras := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectLightsAndCameras.Caption := 'Select All Lights & Cameras (Ctrl+Shift+J)';
+  MenuTreeViewItemSelectLightsAndCameras.OnClick := @MenuTreeViewItemSelectLightsAndCamerasClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectLightsAndCameras);
 
   MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
   MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
@@ -7529,6 +7626,8 @@ begin
         ButtonUIInsetParent.Enabled := SelectedUICount >= 1;
       if ButtonUISquareSize <> nil then
         ButtonUISquareSize.Enabled := SelectedUICount >= 1;
+      if ButtonUIGoldenRatio <> nil then
+        ButtonUIGoldenRatio.Enabled := SelectedUICount >= 1;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -7609,6 +7708,12 @@ begin
       ButtonArrangeZigzag.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonNormalizeSize <> nil then
       ButtonNormalizeSize.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeLissajous <> nil then
+      ButtonArrangeLissajous.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeCatenary <> nil then
+      ButtonArrangeCatenary.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonProjectOntoLine <> nil then
+      ButtonProjectOntoLine.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -9153,6 +9258,26 @@ begin
     if (Key = Ord('K')) and (Shift = [ssCtrl, ssShift]) then
     begin
       SelectTransformsWithBehaviors(false);
+      Key := 0;
+    end else
+    if (Key = Ord('F')) and (Shift = [ssAlt, ssShift]) then
+    begin
+      ShowArrangeInLissajousDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('B')) and (Shift = [ssAlt, ssShift]) then
+    begin
+      ShowArrangeInCatenaryDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('I')) and (Shift = [ssAlt, ssShift]) then
+    begin
+      ProjectSelectionOntoLine(false, false);
+      Key := 0;
+    end else
+    if (Key = Ord('J')) and (Shift = [ssCtrl, ssShift]) then
+    begin
+      SelectLightsAndCameras(0);
       Key := 0;
     end else
     if (Key = Ord('W')) and (Shift = [ssAlt, ssShift]) then
@@ -12399,6 +12524,127 @@ begin
   NormalizeSelectionSizes(not (ssShift in GetKeyShiftState));
 end;
 
+procedure TDesignFrame.ArrangeSelectionInLissajous(const RadiusX, RadiusZ: Single;
+  const FreqX: Single; const FreqZ: Single;
+  const VerticalAmplitude: Single; const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInLissajous(
+      RadiusX, RadiusZ, FreqX, FreqZ, VerticalAmplitude, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInLissajousDialog;
+var
+  Prompts: array[0..5] of string;
+  Values: array[0..5] of string;
+  Rx, Rz, Wx, Wz, AmpY: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'X Amplitude / Radius (<= 0 = auto from selection):';
+  Prompts[1] := 'Z Amplitude / Radius (<= 0 = half of X radius):';
+  Prompts[2] := 'X Frequency (1 = standard figure-8 loop):';
+  Prompts[3] := 'Z Frequency (2 = figure-8 / lemniscate, 3 = trefoil):';
+  Prompts[4] := 'Vertical Y Wave Amplitude (0 = flat horizontal loop):';
+  Prompts[5] := 'Orientation Mode (0=keep, 1=inward to center, 2=curve tangent):';
+
+  Values[0] := '0';
+  Values[1] := '0';
+  Values[2] := '1';
+  Values[3] := '2';
+  Values[4] := '0';
+  Values[5] := '0';
+
+  if InputQuery('Arrange Selected in 3D Figure-8 / Lissajous Curve', Prompts, Values) then
+  begin
+    Rx := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    Rz := StrToFloatDefDot(Trim(Values[1]), 0.0);
+    Wx := StrToFloatDefDot(Trim(Values[2]), 1.0);
+    Wz := StrToFloatDefDot(Trim(Values[3]), 2.0);
+    AmpY := StrToFloatDefDot(Trim(Values[4]), 0.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[5]), 0), 0, 2);
+    ArrangeSelectionInLissajous(Rx, Rz, Wx, Wz, AmpY, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeLissajousClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  OrientMode: Integer;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInLissajousDialog
+  else
+  begin
+    if ssCtrl in ShiftState then
+      OrientMode := 2
+    else
+      OrientMode := 0;
+    ArrangeSelectionInLissajous(0.0, 0.0, 1.0, 2.0, 0.0, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ArrangeSelectionInCatenary(const SagDepth: Single;
+  const OrientAlongCurve: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInCatenaryBetweenEndpoints(SagDepth, OrientAlongCurve);
+end;
+
+procedure TDesignFrame.ShowArrangeInCatenaryDialog;
+var
+  Prompts: array[0..1] of string;
+  Values: array[0..1] of string;
+  SagDepth: Single;
+  OrientVal: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Midpoint Sag Depth (0 = auto 25% of span, <0 = upward arch):';
+  Prompts[1] := 'Orient Along Catenary Tangent (0 = keep rotation, 1 = orient):';
+
+  Values[0] := '0';
+  Values[1] := '0';
+
+  if InputQuery('Arrange Selected in 3D Catenary / Hanging Cable Curve', Prompts, Values) then
+  begin
+    SagDepth := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    OrientVal := StrToIntDef(Trim(Values[1]), 0);
+    ArrangeSelectionInCatenary(SagDepth, OrientVal <> 0);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeCatenaryClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInCatenaryDialog
+  else
+    ArrangeSelectionInCatenary(0.0, ssCtrl in ShiftState);
+end;
+
+procedure TDesignFrame.ProjectSelectionOntoLine(const ClampToSegment: Boolean;
+  const OrientAlongLine: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ProjectSelectedOntoLineBetweenEndpoints(
+      ClampToSegment, OrientAlongLine);
+end;
+
+procedure TDesignFrame.ButtonProjectOntoLineClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  ProjectSelectionOntoLine(ssShift in ShiftState, ssCtrl in ShiftState);
+end;
+
 procedure TDesignFrame.StopPilotTransform;
 var
   SavedName: String;
@@ -13436,6 +13682,119 @@ begin
     MakeSelectedUserInterfacesSquare(2)
   else
     MakeSelectedUserInterfacesSquare(0);
+end;
+
+procedure TDesignFrame.ApplyGoldenRatioToSelectedUserInterfaces(
+  const Landscape: Boolean; const KeepWidth: Boolean);
+const
+  GoldenPhi = 1.61803398875;
+var
+  Selected: TComponentList;
+  SelectedCount, I, ChangedCount: Integer;
+  UI: TCastleUserInterface;
+  R, NewR: TFloatRectangle;
+  TargetW, TargetH, DeltaX, DeltaY: Single;
+  ControlChanged: Boolean;
+begin
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount < 1 then Exit;
+
+    ChangedCount := 0;
+    for I := 0 to SelectedCount - 1 do
+      if (Selected[I] is TCastleUserInterface) and (Selected[I] <> DesignRoot) and
+         (not IsComponentLocked(Selected[I])) then
+      begin
+        UI := TCastleUserInterface(Selected[I]);
+        if not UI.Exists then Continue;
+        R := UI.RenderRectWithBorder;
+        if (R.Width <= 0) or (R.Height <= 0) or (UI.UIScale <= 0) then Continue;
+
+        if Landscape then
+        begin
+          if KeepWidth then
+          begin
+            TargetW := UI.EffectiveWidth;
+            TargetH := TargetW / GoldenPhi;
+          end else
+          begin
+            TargetH := UI.EffectiveHeight;
+            TargetW := TargetH * GoldenPhi;
+          end;
+        end else
+        begin
+          TargetW := UI.EffectiveWidth;
+          TargetH := TargetW * GoldenPhi;
+        end;
+
+        if (TargetW <= 0) or (TargetH <= 0) then Continue;
+
+        ControlChanged := false;
+        if UI.AutoSizeToChildren then
+        begin
+          UI.AutoSizeToChildren := false;
+          ControlChanged := true;
+        end;
+        if UI.FullSize then
+        begin
+          UI.FullSize := false;
+          ControlChanged := true;
+        end;
+        if UI.WidthFraction <> 0 then
+        begin
+          UI.WidthFraction := 0;
+          ControlChanged := true;
+        end;
+        if UI.HeightFraction <> 0 then
+        begin
+          UI.HeightFraction := 0;
+          ControlChanged := true;
+        end;
+
+        if not SameValue(UI.Width, TargetW, 0.01) then
+        begin
+          UI.Width := TargetW;
+          ControlChanged := true;
+        end;
+        if not SameValue(UI.Height, TargetH, 0.01) then
+        begin
+          UI.Height := TargetH;
+          ControlChanged := true;
+        end;
+
+        if ControlChanged then
+        begin
+          NewR := UI.RenderRectWithBorder;
+          if (NewR.Width > 0) and (NewR.Height > 0) then
+          begin
+            DeltaX := R.Center.X - NewR.Center.X;
+            DeltaY := R.Center.Y - NewR.Center.Y;
+            if (Abs(DeltaX) > 0.01) or (Abs(DeltaY) > 0.01) then
+              UI.Translation := UI.Translation + Vector2(DeltaX / UI.UIScale, DeltaY / UI.UIScale);
+          end;
+          Inc(ChangedCount);
+        end;
+      end;
+
+    if ChangedCount > 0 then
+      ModifiedOutsideObjectInspector(
+        Format('Apply Golden Ratio to %d UI control(s)', [ChangedCount]), ucHigh);
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUIGoldenRatioClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ApplyGoldenRatioToSelectedUserInterfaces(false, true)
+  else if ssCtrl in ShiftState then
+    ApplyGoldenRatioToSelectedUserInterfaces(true, true)
+  else
+    ApplyGoldenRatioToSelectedUserInterfaces(true, false);
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -16283,6 +16642,62 @@ begin
   SelectTransformsWithBehaviors(ssShift in GetKeyShiftState);
 end;
 
+procedure TDesignFrame.SelectLightsAndCameras(const FilterMode: Integer);
+var
+  TreeNode: TTreeNode;
+  C: TComponent;
+  CandT: TCastleTransform;
+  NewSelection: TComponentList;
+  IsLight, IsCam, Matches: Boolean;
+begin
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C is TCastleTransform) and (C <> DesignRoot) and
+         (not (C is TCastleAbstractRootTransform)) and
+         Selectable(C) and (not IsComponentLocked(C)) then
+      begin
+        CandT := TCastleTransform(C);
+        if CandT.Exists then
+        begin
+          IsLight := CandT is TCastleAbstractLight;
+          IsCam := CandT is TCastleCamera;
+          case FilterMode of
+            1: Matches := IsLight;
+            2: Matches := IsCam;
+          else
+            Matches := IsLight or IsCam;
+          end;
+          if Matches and (NewSelection.IndexOf(CandT) = -1) then
+            NewSelection.Add(CandT);
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectLightsAndCamerasClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    SelectLightsAndCameras(1)
+  else if ssCtrl in ShiftState then
+    SelectLightsAndCameras(2)
+  else
+    SelectLightsAndCameras(0);
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -16787,6 +17202,8 @@ begin
     MenuTreeViewItemSelectRotatedTransforms.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemSelectWithBehaviors <> nil then
     MenuTreeViewItemSelectWithBehaviors.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectLightsAndCameras <> nil then
+    MenuTreeViewItemSelectLightsAndCameras.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemCopyTransform <> nil then
     MenuTreeViewItemCopyTransform.Enabled := (CurrentTransform <> nil) or (SelectedUserInterface <> nil) or (ControlsTree.SelectionCount > 0);
   if MenuTreeViewItemPasteTransform <> nil then
