@@ -48,7 +48,7 @@ var
 implementation
 
 uses SysUtils,
-  CastleUtils;
+  CastleUtils, CastleRenderOptions;
 
 constructor TViewMain.Create(AOwner: TComponent);
 begin
@@ -70,7 +70,11 @@ begin
     'FPS: ' + Container.Fps.ToString + NL +
     Format('Sun: %s, cascades: %d (press 1 to toggle the sun, C to change the cascades)', [
       Iff(Sun.IsOn, 'on', 'off'), Sun.ShadowCascades]) + NL +
+    Format('Blending between the cascades: %s (press B to toggle)', [
+      Iff(ShadowMapsCascadeBlend > 0, 'on', 'off')]) + NL +
     Format('Point light: %s (press 2 to toggle)', [Iff(Lamp.IsOn, 'on', 'off')]) + NL +
+    Format('Shadow map size by the size on the screen: %s (press Z to toggle)', [
+      Iff(ShadowMapsSizeByScreen, 'on', 'off')]) + NL +
     'Walk with AWSD and the mouse (drag), like in a FPS game.';
 end;
 
@@ -88,6 +92,21 @@ begin
   if Event.IsKey(key2) then
   begin
     Lamp.IsOn := not Lamp.IsOn;
+    Exit(true);
+  end;
+
+  if Event.IsKey(keyB) then
+  begin
+    if ShadowMapsCascadeBlend > 0 then
+      ShadowMapsCascadeBlend := 0
+    else
+      ShadowMapsCascadeBlend := 0.1;
+    Exit(true);
+  end;
+
+  if Event.IsKey(keyZ) then
+  begin
+    ShadowMapsSizeByScreen := not ShadowMapsSizeByScreen;
     Exit(true);
   end;
 

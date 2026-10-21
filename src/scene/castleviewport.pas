@@ -3361,6 +3361,8 @@ begin
     ]);
 
   ApplyProjection;
+  { cascaded shadow maps around this camera (when it is not the main one) }
+  TCastleScene.InternalUpdateCascadesForCamera(Items, InternalCamera);
   RenderOnScreen(InternalCamera);
   { convert the world rendered in high dynamic range to the screen colors,
     before the children are rendered }

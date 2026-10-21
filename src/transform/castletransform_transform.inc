@@ -89,6 +89,7 @@
       FCollides: Boolean;
       FPickable: Boolean;
       FVisible: Boolean;
+      FCastShadowsWhenHidden: Boolean;
       FCollidesWithMoving: Boolean;
       FWorld: TCastleAbstractRootTransform;
       { How many times this is a child in the FWorld, counting all possible paths in transformation tree. }
@@ -212,6 +213,9 @@
     procedure GLContextCloseEvent(Sender: TObject);
     procedure PendingRemovals;
     procedure SetExists(const Value: Boolean);
+    procedure SetVisible(const Value: Boolean);
+    procedure SetCastShadows(const Value: Boolean);
+    procedure SetCastShadowsWhenHidden(const Value: Boolean);
     procedure SetParentExistsInRoot(const Value: Boolean);
     { Value of FParent.ParentExistsInRoot, if FParent is non-nil.
       Always true, if FParent = nil.
@@ -721,6 +725,13 @@
     function CheckVisible: boolean;
     function GetVisible: boolean; virtual; deprecated 'use CheckVisible';
 
+    { Should this item render now, with the given rendering parameters.
+      This is @link(CheckVisible), except when rendering
+      to a shadow map (TRenderingCamera.Target is rtShadowMap or
+      rtVarianceShadowMap): then it also requires @link(CastShadows),
+      and @link(CastShadowsWhenHidden) allows it when not @link(Visible). }
+    function CheckVisibleToRender(const Params: TRenderParams): Boolean;
+
     { Add a child.
 
       Note that adding the same child multiple times is allowed,
@@ -923,7 +934,7 @@
     { Does the 3D object cast shadows by shadow volumes.
       See also TCastleScene.ReceiveShadowVolumes. }
     property CastShadowVolumes: boolean
-      read FCastShadows write FCastShadows default true;
+      read FCastShadows write SetCastShadows default true;
       {$ifdef FPC}deprecated 'use CastShadows';{$endif}
 
     { Render shadow quads for all the things rendered by @link(Render).
@@ -2213,7 +2224,7 @@
 
       This is independent from @link(Collides) or @link(Pickable).
       @noAutoLinkHere }
-    property Visible: boolean read FVisible write FVisible default true;
+    property Visible: boolean read FVisible write SetVisible default true;
 
     { When non-zero, we can approximate collisions with this object using a sphere
       in certain situations (@link(MoveAllowed), @link(Gravity)).
@@ -2230,10 +2241,22 @@
       and all children, recursively. In other words, setting this to @false
       makes this object and all children not cast shadows.
 
-      TODO: Right now this only affects casting shadows by shadow volumes.
-      It will be extended to account for shadow maps. }
+      This affects casting shadows by shadow volumes and by shadow maps. }
     property CastShadows: boolean
-      read FCastShadows write FCastShadows default true;
+      read FCastShadows write SetCastShadows default true;
+
+    { Render this object (and children) into shadow maps even when
+      it is not @link(Visible).
+
+      This is for culling by your own means (like portal visibility
+      in a game with rooms) that sets @link(Visible) to @false
+      for objects the camera cannot see: they should still cast
+      shadows (by shadow maps) into the visible parts of the world.
+      It does nothing when @link(Exists) or @link(CastShadows) is @false,
+      when a parent is not visible (its children are not rendered at all),
+      and for shadow volumes (they are only rendered by visible objects). }
+    property CastShadowsWhenHidden: Boolean
+      read FCastShadowsWhenHidden write SetCastShadowsWhenHidden default false;
 
     { Objects on front render layer are rendered in front of objects on back render layer,
       regardless of their actual position (depth) relative to camera.
@@ -2422,6 +2445,15 @@ end;
 function TCastleTransform.GetVisible: boolean;
 begin
   Result := FVisible and Exists;
+end;
+
+function TCastleTransform.CheckVisibleToRender(const Params: TRenderParams): Boolean;
+begin
+  if (Params.RenderingCamera <> nil) and
+     (Params.RenderingCamera.Target in [rtShadowMap, rtVarianceShadowMap]) then
+    Result := FCastShadows and Exists and (FVisible or FCastShadowsWhenHidden)
+  else
+    Result := CheckVisible;
 end;
 
 function TCastleTransform.Sphere(out Radius: Single): boolean;
@@ -2863,7 +2895,7 @@ var
   I: Integer;
   RenderList: TCastleTransformList;
 begin
-  if CheckVisible then
+  if CheckVisibleToRender(Params) then
   begin
     PendingRemovals;
     RenderList := GetRenderList(Params);
@@ -4613,6 +4645,40 @@ begin
   end;
 end;
 
+procedure TCastleTransform.SetVisible(const Value: Boolean);
+begin
+  if FVisible <> Value then
+  begin
+    FVisible := Value;
+    { The shadow maps are rendered again when the casters change,
+      not when they are only hidden from the camera
+      (CastShadowsWhenHidden, like by portal culling every frame). }
+    if FCastShadowsWhenHidden and FCastShadows then
+      VisibleChangeHere([vcVisibleNonGeometry])
+    else
+      VisibleChangeHere([vcVisibleGeometry]);
+  end;
+end;
+
+procedure TCastleTransform.SetCastShadows(const Value: Boolean);
+begin
+  if FCastShadows <> Value then
+  begin
+    FCastShadows := Value;
+    VisibleChangeHere([vcVisibleGeometry]);
+  end;
+end;
+
+procedure TCastleTransform.SetCastShadowsWhenHidden(const Value: Boolean);
+begin
+  if FCastShadowsWhenHidden <> Value then
+  begin
+    FCastShadowsWhenHidden := Value;
+    if not FVisible then
+      VisibleChangeHere([vcVisibleGeometry]);
+  end;
+end;
+
 procedure TCastleTransform.SetExists(const Value: Boolean);
 var
   RBody: TCastleRigidBody;
@@ -4621,6 +4687,7 @@ begin
   begin
     FExists := Value;
     UpdateExistsInRoot;
+    VisibleChangeHere([vcVisibleGeometry]);
 
     RBody := RigidBody; // FindBehavior(TCastleRigidBody) as TCastleRigidBody; // use cached value
     if (RBody <> nil) and RBody.Exists then

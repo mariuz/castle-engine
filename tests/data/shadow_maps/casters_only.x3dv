@@ -1,0 +1,12 @@
+#X3D V4.0 utf8
+PROFILE Interchange
+
+# Only the 4 boxes around the point light of point_light_only.x3dv,
+# casting shadows on the floor of floor_only.x3dv.
+Transform { translation 3 2 0 children DEF Caster Shape {
+  appearance Appearance { material Material { diffuseColor 1 0 0 } }
+  geometry Box { size 1 1 1 }
+} }
+Transform { translation -3 2 0 children USE Caster }
+Transform { translation 0 2 3 children USE Caster }
+Transform { translation 0 2 -3 children USE Caster }
