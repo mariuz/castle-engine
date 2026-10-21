@@ -68,6 +68,7 @@
   TFogCoordinateNode = class;
   TAbstractTextureCoordinateNode = class;
   TAbstractEnvironmentTextureNode = class;
+  TAbstractTexture3DNode = class;
   TAbstractPunctualLightNode = class;
   TAbstractColorNode = class;
   TTexturePropertiesNode = class;

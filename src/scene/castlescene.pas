@@ -1243,6 +1243,7 @@ begin
     begin
       HandleTexture(TEnvironmentLightNode(Light).FdDiffuseTexture.Value);
       HandleTexture(TEnvironmentLightNode(Light).FdSpecularTexture.Value);
+      HandleTexture(TEnvironmentLightNode(Light).FdIrradianceVolume.Value);
     end;
   end;
 end;

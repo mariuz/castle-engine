@@ -632,6 +632,10 @@ begin
     // by using Max(1, ...) for Height we should support 1D textures too
     Height := Max(1, Header.Height);
     Depth := Max(1, Header.Depth);
+    { A KTX with depth (pixelDepth > 0) is a 3D (volume) texture,
+      needed e.g. by ImageTexture3D. }
+    if Header.Depth > 0 then
+      Composite.FCompositeType := ctVolume;
 
     RowsTopToBottom := false;
     SlicesFrontToBack := false;

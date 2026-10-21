@@ -1,0 +1,124 @@
+#X3D V4.0 utf8
+PROFILE Interchange
+
+# Two rooms, each lit by its own environment probe (EnvironmentLight
+# with influenceCenter / influenceSize), and a fallback probe for everything
+# outside them. The cube maps are solid colors (PixelTexture) to keep the
+# example small: a real game bakes them (renders 6 views from the probe
+# and convolves them).
+#
+# The right room's probe also gets an irradiance volume, computed in
+# code/gameviewmain.pas.
+
+# Fallback probe: no box (influenceSize < 0), dim gray.
+EnvironmentLight {
+  global TRUE
+  diffuseTexture DEF FallbackCube ComposedCubeMapTexture {
+    right  PixelTexture { image 1 1 3 0x262626 }
+    left   PixelTexture { image 1 1 3 0x262626 }
+    top    PixelTexture { image 1 1 3 0x4D4D4D }
+    bottom PixelTexture { image 1 1 3 0x0D0D0D }
+    front  PixelTexture { image 1 1 3 0x262626 }
+    back   PixelTexture { image 1 1 3 0x262626 }
+  }
+  specularTexture USE FallbackCube
+}
+
+# Left room probe: warm light.
+DEF LeftProbe EnvironmentLight {
+  global TRUE
+  influenceCenter -5 1.5 0
+  influenceSize 10 5 10
+  diffuseTexture DEF WarmCube ComposedCubeMapTexture {
+    right  PixelTexture { image 1 1 3 0x995933 }
+    left   PixelTexture { image 1 1 3 0x995933 }
+    top    PixelTexture { image 1 1 3 0xFFD999 }
+    bottom PixelTexture { image 1 1 3 0x401F0F }
+    front  PixelTexture { image 1 1 3 0x995933 }
+    back   PixelTexture { image 1 1 3 0x995933 }
+  }
+  specularTexture USE WarmCube
+}
+
+# Right room probe: cool light (its irradiance volume is set in code).
+DEF RightProbe EnvironmentLight {
+  global TRUE
+  influenceCenter 5 1.5 0
+  influenceSize 10 5 10
+  diffuseTexture DEF CoolCube ComposedCubeMapTexture {
+    right  PixelTexture { image 1 1 3 0x335999 }
+    left   PixelTexture { image 1 1 3 0x335999 }
+    top    PixelTexture { image 1 1 3 0x99CCFF }
+    bottom PixelTexture { image 1 1 3 0x0D1A33 }
+    front  PixelTexture { image 1 1 3 0x335999 }
+    back   PixelTexture { image 1 1 3 0x335999 }
+  }
+  specularTexture USE CoolCube
+}
+
+# Floor and walls (white, rough), separate shapes for each room:
+# a shape uses the probe whose box contains the center of its bounding box.
+Transform {
+  translation -5 0 0
+  children [
+    Shape {
+      appearance DEF White Appearance {
+        material PhysicalMaterial { baseColor 1 1 1 metallic 0 roughness 0.9 }
+      }
+      geometry DEF RoomFloor Box { size 10 0.2 10 }
+    }
+    Transform {
+      translation 0 2 -5
+      children DEF BackWall Shape { appearance USE White geometry Box { size 10 4 0.2 } }
+    }
+    Transform {
+      translation 4.9 2 -2.5
+      children Shape { appearance USE White geometry Box { size 0.2 4 5 } }
+    }
+  ]
+}
+Transform {
+  translation 5 0 0
+  children [
+    Shape { appearance USE White geometry USE RoomFloor }
+    Transform {
+      translation 0 2 -5
+      children USE BackWall
+    }
+  ]
+}
+Transform {
+  translation 12.5 0 0
+  children Shape { appearance USE White geometry Box { size 5 0.2 10 } }
+}
+
+# Left room objects.
+Transform {
+  translation -7 1 -1
+  children Shape {
+    appearance DEF Mirror Appearance {
+      material PhysicalMaterial { baseColor 1 1 1 metallic 1 roughness 0.05 }
+    }
+    geometry Sphere { radius 1 }
+  }
+}
+Transform {
+  translation -3 1 1
+  children Shape { appearance USE White geometry Sphere { radius 1 } }
+}
+
+# Right room objects.
+Transform {
+  translation 3 1 -1
+  children Shape { appearance USE Mirror geometry Sphere { radius 1 } }
+}
+Transform {
+  translation 7 1 1
+  children Shape { appearance USE White geometry Sphere { radius 1 } }
+}
+
+# Outside the probes' boxes (x > 10): lit by the fallback probe.
+Transform {
+  translation 12 1 0
+  children Shape { appearance USE White geometry Sphere { radius 1 } }
+}

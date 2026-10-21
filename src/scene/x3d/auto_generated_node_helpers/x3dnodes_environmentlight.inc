@@ -28,6 +28,12 @@
     procedure SetDiffuseTexture(const Value: TAbstractEnvironmentTextureNode);
     function GetSpecularTexture: TAbstractEnvironmentTextureNode;
     procedure SetSpecularTexture(const Value: TAbstractEnvironmentTextureNode);
+    function GetInfluenceCenter: TVector3;
+    procedure SetInfluenceCenter(const Value: TVector3);
+    function GetInfluenceSize: TVector3;
+    procedure SetInfluenceSize(const Value: TVector3);
+    function GetIrradianceVolume: TAbstractTexture3DNode;
+    procedure SetIrradianceVolume(const Value: TAbstractTexture3DNode);
   public
     { Create node fields and events. }
     procedure CreateNode; override;
@@ -36,14 +42,51 @@
     strict private FFdDiffuseTexture: TSFNode;
     { Internal wrapper for property @code(DiffuseTexture). This wrapper API may change, we advise to access simpler @code(DiffuseTexture) instead, if it is defined (TODO: for now, some field types do not have a simpler counterpart). }
     public property FdDiffuseTexture: TSFNode read FFdDiffuseTexture;
-    {  }
+    { Irradiance cube map: the diffuse light for each normal direction (in the light's local coordinates),
+    multiplied by the material's diffuse color. Not used when @link(IrradianceVolume) is used. }
     property DiffuseTexture: TAbstractEnvironmentTextureNode read GetDiffuseTexture write SetDiffuseTexture;
 
     strict private FFdSpecularTexture: TSFNode;
     { Internal wrapper for property @code(SpecularTexture). This wrapper API may change, we advise to access simpler @code(SpecularTexture) instead, if it is defined (TODO: for now, some field types do not have a simpler counterpart). }
     public property FdSpecularTexture: TSFNode read FFdSpecularTexture;
-    {  }
+    { Prefiltered radiance cube map: the light reflected in the direction of the reflected view
+    (in the light's local coordinates). With physical materials, rougher surfaces use blurrier mipmap levels
+    (the last level for roughness 1), so the mipmaps should contain the radiance convolved for increasing roughness. }
     property SpecularTexture: TAbstractEnvironmentTextureNode read GetSpecularTexture write SetSpecularTexture;
+
+    strict private FFdInfluenceCenter: TSFVec3f;
+    { Internal wrapper for property @code(InfluenceCenter). This wrapper API may change, we advise to access simpler @code(InfluenceCenter) instead, if it is defined (TODO: for now, some field types do not have a simpler counterpart). }
+    public property FdInfluenceCenter: TSFVec3f read FFdInfluenceCenter;
+    { Center of the box where this light (an environment probe) is used, in the light's local coordinates.
+    See @link(InfluenceSize). }
+    property InfluenceCenter: TVector3 read GetInfluenceCenter write SetInfluenceCenter;
+
+    strict private FFdInfluenceSize: TSFVec3f;
+    { Internal wrapper for property @code(InfluenceSize). This wrapper API may change, we advise to access simpler @code(InfluenceSize) instead, if it is defined (TODO: for now, some field types do not have a simpler counterpart). }
+    public property FdInfluenceSize: TSFVec3f read FFdInfluenceSize;
+    { Size of the box where this light (an environment probe) is used, in the light's local coordinates.
+    A shape is lit by the environment light with the smallest box that contains the center
+    of the shape's bounding box. Environment lights without a box (any size component < 0,
+    the default) light only the shapes that are not inside any environment light's box:
+    they are the fallback.
+    So you can place many environment probes in a world, for example one for each room. }
+    property InfluenceSize: TVector3 read GetInfluenceSize write SetInfluenceSize;
+
+    strict private FFdIrradianceVolume: TSFNode;
+    { Internal wrapper for property @code(IrradianceVolume). This wrapper API may change, we advise to access simpler @code(IrradianceVolume) instead, if it is defined (TODO: for now, some field types do not have a simpler counterpart). }
+    public property FdIrradianceVolume: TSFNode read FFdIrradianceVolume;
+    { Diffuse light that varies with the position: a grid of spherical harmonics (order 1, 4 coefficients for each color component)
+    over the box of @link(InfluenceCenter) and @link(InfluenceSize), to use instead of @link(DiffuseTexture).
+
+    The 3D texture holds RGB values. Its depth is 4 times the number of grid points along Z:
+    first the slab of the constant coefficient (L0) of all grid points, then the slabs of the coefficients along X, Y and Z (L1),
+    so a point (x, y, z) of the box (from 0 to 1) uses the texture coordinates (x, y, (z + i) / 4) for the coefficient i.
+    The coefficients describe the irradiance (in light's local coordinates), so that the diffuse light for normal n
+    is L0 + L1x * n.x + L1y * n.y + L1z * n.z (and this multiplies the material's diffuse color).
+    Use linear filtering without mipmaps (@link(TTexturePropertiesNode.MinificationFilter) "AVG_PIXEL"),
+    and a float format (e.g. a DDS volume texture with float components) for negative coefficients. }
+    property IrradianceVolume: TAbstractTexture3DNode read GetIrradianceVolume write SetIrradianceVolume;
+    procedure GetExtensions(const ExtensionNames: TStrings); override;
 
 {$endif read_interface}
 
@@ -77,6 +120,39 @@ begin
   FdSpecularTexture.Send(Value);
 end;
 
+function TEnvironmentLightNode.GetInfluenceCenter: TVector3;
+begin
+  Result := FdInfluenceCenter.Value;
+end;
+
+procedure TEnvironmentLightNode.SetInfluenceCenter(const Value: TVector3);
+begin
+  FdInfluenceCenter.Send(Value);
+end;
+
+function TEnvironmentLightNode.GetInfluenceSize: TVector3;
+begin
+  Result := FdInfluenceSize.Value;
+end;
+
+procedure TEnvironmentLightNode.SetInfluenceSize(const Value: TVector3);
+begin
+  FdInfluenceSize.Send(Value);
+end;
+
+function TEnvironmentLightNode.GetIrradianceVolume: TAbstractTexture3DNode;
+begin
+  if FdIrradianceVolume.Value is TAbstractTexture3DNode then
+    Result := TAbstractTexture3DNode(FdIrradianceVolume.Value)
+  else
+    Result := nil;
+end;
+
+procedure TEnvironmentLightNode.SetIrradianceVolume(const Value: TAbstractTexture3DNode);
+begin
+  FdIrradianceVolume.Send(Value);
+end;
+
 class function TEnvironmentLightNode.ClassX3DType: String;
 begin
   Result := 'EnvironmentLight';
@@ -93,6 +169,29 @@ begin
   FFdSpecularTexture := TSFNode.Create(Self, True, 'specularTexture', [TAbstractEnvironmentTextureNode]);
    FdSpecularTexture.ChangeAlways := chVisibleNonGeometry;
   AddField(FFdSpecularTexture);
+
+  FFdInfluenceCenter := TSFVec3f.Create(Self, True, 'influenceCenter', Vector3(0, 0, 0));
+   FdInfluenceCenter.ChangeAlways := chVisibleNonGeometry;
+  AddField(FFdInfluenceCenter);
+
+  FFdInfluenceSize := TSFVec3f.Create(Self, True, 'influenceSize', Vector3(-1, -1, -1));
+   FdInfluenceSize.ChangeAlways := chVisibleNonGeometry;
+  AddField(FFdInfluenceSize);
+
+  FFdIrradianceVolume := TSFNode.Create(Self, True, 'irradianceVolume', [TAbstractTexture3DNode]);
+   FdIrradianceVolume.ChangeAlways := chVisibleNonGeometry;
+  AddField(FFdIrradianceVolume);
+end;
+
+procedure TEnvironmentLightNode.GetExtensions(const ExtensionNames: TStrings);
+begin
+  inherited;
+  if not FdInfluenceCenter.EqualsDefaultValue then
+    ExtensionNames.Add(X3DType + '.' + FdInfluenceCenter.X3DName);
+  if not FdInfluenceSize.EqualsDefaultValue then
+    ExtensionNames.Add(X3DType + '.' + FdInfluenceSize.X3DName);
+  if not FdIrradianceVolume.EqualsDefaultValue then
+    ExtensionNames.Add(X3DType + '.' + FdIrradianceVolume.X3DName);
 end;
 
 {$endif read_implementation}

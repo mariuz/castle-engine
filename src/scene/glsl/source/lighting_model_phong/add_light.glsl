@@ -56,10 +56,40 @@ uniform vec3 castle_LightSource<Light>Attenuation;
 uniform float castle_LightSource<Light>Radius;
 #endif
 
-/* EnvironmentLight parameters */
+/* EnvironmentLight parameters, see lighting_model_physical/add_light.glsl */
 #ifdef LIGHT<Light>_TYPE_ENVIRONMENT
-uniform samplerCube diffuseTexture;
-uniform samplerCube specularTexture;
+uniform mat4 castle_LightSource<Light>EyeToLight;
+#ifdef LIGHT<Light>_HAS_DIFFUSE_TEXTURE
+uniform samplerCube castle_LightSource<Light>DiffuseTexture;
+#endif
+#ifdef LIGHT<Light>_HAS_SPECULAR_TEXTURE
+uniform samplerCube castle_LightSource<Light>SpecularTexture;
+#endif
+#ifdef LIGHT<Light>_HAS_IRRADIANCE_VOLUME
+#ifdef GL_ES
+uniform highp sampler3D castle_LightSource<Light>IrradianceVolume;
+#else
+uniform sampler3D castle_LightSource<Light>IrradianceVolume;
+#endif
+uniform vec3 castle_LightSource<Light>InfluenceMin;
+uniform vec3 castle_LightSource<Light>InfluenceSize;
+
+vec3 castle_irradiance_volume<Light>(const in vec3 p, const in vec3 n)
+{
+  vec3 uvw = clamp((p - castle_LightSource<Light>InfluenceMin) /
+    castle_LightSource<Light>InfluenceSize, 0.0, 1.0);
+#ifdef CASTLE_GLSL_VERSION_UPGRADE
+  float slab_texels = float(textureSize(castle_LightSource<Light>IrradianceVolume, 0).z) / 4.0;
+  uvw.z = clamp(uvw.z, 0.5 / slab_texels, 1.0 - 0.5 / slab_texels);
+#endif
+  uvw.z /= 4.0;
+  vec3 l0  = texture3D(castle_LightSource<Light>IrradianceVolume, uvw).rgb;
+  vec3 l1x = texture3D(castle_LightSource<Light>IrradianceVolume, uvw + vec3(0.0, 0.0, 0.25)).rgb;
+  vec3 l1y = texture3D(castle_LightSource<Light>IrradianceVolume, uvw + vec3(0.0, 0.0, 0.5)).rgb;
+  vec3 l1z = texture3D(castle_LightSource<Light>IrradianceVolume, uvw + vec3(0.0, 0.0, 0.75)).rgb;
+  return max(l0 + l1x * n.x + l1y * n.y + l1z * n.z, vec3(0.0));
+}
+#endif
 #endif
 
 /* Add light contribution.
@@ -70,6 +100,30 @@ void PLUG_add_light(inout vec4 color,
   const in vec3 normal_eye,
   const in MaterialInfo material_info)
 {
+#ifdef LIGHT<Light>_TYPE_ENVIRONMENT
+  /* Image-based lighting, like in lighting_model_physical/add_light.glsl,
+     without roughness (the specular texture is used unblurred). */
+  {
+    vec3 env_normal = normalize((castle_LightSource<Light>EyeToLight * vec4(normal_eye, 0.0)).xyz);
+    vec3 env_light = vec3(0.0);
+#if defined(LIGHT<Light>_HAS_IRRADIANCE_VOLUME)
+    vec3 env_position = (castle_LightSource<Light>EyeToLight * vertex_eye).xyz;
+    env_light += material_info.diffuse_alpha.rgb *
+      castle_irradiance_volume<Light>(env_position, env_normal);
+#elif defined(LIGHT<Light>_HAS_DIFFUSE_TEXTURE)
+    env_light += material_info.diffuse_alpha.rgb *
+      textureCube(castle_LightSource<Light>DiffuseTexture, env_normal).rgb;
+#endif
+#if defined(LIGHT<Light>_HAS_SPECULAR_TEXTURE) && defined(LIGHT<Light>_HAS_SPECULAR)
+    vec3 env_reflect = normalize((castle_LightSource<Light>EyeToLight *
+      vec4(reflect(normalize(vec3(vertex_eye)), normal_eye), 0.0)).xyz);
+    env_light += material_info.specular *
+      textureCube(castle_LightSource<Light>SpecularTexture, env_reflect).rgb;
+#endif
+    color.rgb += castle_LightSource<Light>Color * env_light;
+    return;
+  }
+#else
   vec3 light_dir;
 
 /* Calculate light_dir */
@@ -150,9 +204,6 @@ void PLUG_add_light(inout vec4 color,
 
   /* add diffuse term */
   vec3 diffuse = castle_LightSource<Light>Color * material_info.diffuse_alpha.rgb;
-#ifdef LIGHT<Light>_TYPE_ENVIRONMENT
-  diffuse *= textureCube(diffuseTexture, light_dir).rgb;
-#endif
 
   float diffuse_factor = max(dot(normal_eye, light_dir), 0.0);
   light_color += diffuse * diffuse_factor;
@@ -168,14 +219,11 @@ void PLUG_add_light(inout vec4 color,
   if (diffuse_factor != 0.0) {
     vec3 specular_color = castle_LightSource<Light>Color * material_info.specular;
 
-    #ifdef LIGHT<Light>_TYPE_ENVIRONMENT
-      specular_color *= textureCube(specularTexture, light_dir).rgb;
-    #endif
-
     light_color += specular_color *
       pow(max(dot(halfVector, normal_eye), 0.0), material_info.shininess);
   }
 #endif
 
   color.rgb += light_color * scale * color_scale;
+#endif
 }

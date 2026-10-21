@@ -153,6 +153,52 @@ SpotLight : X3DPositionalLightNode {
 EnvironmentLight : X3DLightNode {
   SFNode  [in,out]  diffuseTexture   NULL
     range: X3DEnvironmentTextureNode
+    doc: """
+    Irradiance cube map: the diffuse light for each normal direction (in the light's local coordinates),
+    multiplied by the material's diffuse color. Not used when @link(IrradianceVolume) is used.
+    """
   SFNode  [in,out]  specularTexture  NULL
     range: X3DEnvironmentTextureNode
+    doc: """
+    Prefiltered radiance cube map: the light reflected in the direction of the reflected view
+    (in the light's local coordinates). With physical materials, rougher surfaces use blurrier mipmap levels
+    (the last level for roughness 1), so the mipmaps should contain the radiance convolved for increasing roughness.
+    """
+
+  # CASTLE GAME ENGINE EXTENSIONS:
+  SFVec3f [in,out]  influenceCenter  0 0 0
+    change: chVisibleNonGeometry
+    is-extension: true
+    doc: """
+    Center of the box where this light (an environment probe) is used, in the light's local coordinates.
+    See @link(InfluenceSize).
+    """
+
+  SFVec3f [in,out]  influenceSize    -1 -1 -1
+    change: chVisibleNonGeometry
+    is-extension: true
+    doc: """
+    Size of the box where this light (an environment probe) is used, in the light's local coordinates.
+    A shape is lit by the environment light with the smallest box that contains the center
+    of the shape's bounding box. Environment lights without a box (any size component < 0,
+    the default) light only the shapes that are not inside any environment light's box:
+    they are the fallback.
+    So you can place many environment probes in a world, for example one for each room.
+    """
+
+  SFNode  [in,out]  irradianceVolume NULL
+    range: X3DTexture3DNode
+    is-extension: true
+    doc: """
+    Diffuse light that varies with the position: a grid of spherical harmonics (order 1, 4 coefficients for each color component)
+    over the box of @link(InfluenceCenter) and @link(InfluenceSize), to use instead of @link(DiffuseTexture).
+
+    The 3D texture holds RGB values. Its depth is 4 times the number of grid points along Z:
+    first the slab of the constant coefficient (L0) of all grid points, then the slabs of the coefficients along X, Y and Z (L1),
+    so a point (x, y, z) of the box (from 0 to 1) uses the texture coordinates (x, y, (z + i) / 4) for the coefficient i.
+    The coefficients describe the irradiance (in light's local coordinates), so that the diffuse light for normal n
+    is L0 + L1x * n.x + L1y * n.y + L1z * n.z (and this multiplies the material's diffuse color).
+    Use linear filtering without mipmaps (@link(TTexturePropertiesNode.MinificationFilter) "AVG_PIXEL"),
+    and a float format (e.g. a DDS volume texture with float components) for negative coefficients.
+    """
 }
