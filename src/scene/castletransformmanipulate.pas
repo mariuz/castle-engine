@@ -1409,6 +1409,63 @@ type
       const MinorRadius: Single = 0.0;
       const CoilWindings: Single = 6.0;
       const OrientMode: Integer = 1): Boolean;
+
+    { Apply a volume-preserving 3D squash & stretch deformation along @code(Axis)
+      across all top-level selected transforms (@code(SelectedCount >= 1))
+      by @code(StretchFactor) ($> 0$, clamped to $\ge 0.05$):
+      - Longitudinal scale factor along @code(Axis): $s_\parallel = \text(StretchFactor)$
+      - Cross-sectional scale factor along the two perpendicular axes:
+        $s_\perp = \frac(1)(\sqrt(\text(StretchFactor)))$ so $s_\parallel \cdot s_\perp^2 = 1$.
+      - When @code(AnchorAtBase = true) and 2+ transforms are selected, anchors
+        the longitudinal stretch/squash at the minimum coordinate along @code(Axis)
+        so grounded props remain planted at their base; otherwise anchors at the
+        active selection pivot $\mathbf(C)$.
+      - When @code(ScaleObjects = true), also multiplies each transform's local
+        @code(Scale) by the volume-preserving factors $(s_\parallel, s_\perp, s_\perp)$.
+      Returns @true if at least one selected transform was modified. }
+    function VolumeSquashStretchSelected(
+      const Axis: T3DAxis;
+      const StretchFactor: Single;
+      const AnchorAtBase: Boolean = true;
+      const ScaleObjects: Boolean = true): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along Temple H. Fay's 3D Parametric Butterfly Curve centered at the active
+      selection pivot $\mathbf(C)$:
+      $t_i = \frac(2\pi i)(N)$,
+      $r(t_i) = e^(\sin t_i) - 2\cos(4 t_i) + \sin^5\!\left(\frac(2 t_i - \pi)(24)\right)$,
+      $x(t_i) = C_x + S \cdot r(t_i)\cos t_i$,
+      $z(t_i) = C_z + S \cdot r(t_i)\sin t_i$,
+      $y(t_i) = C_y + \text(WingFlapHeight) \cdot |\cos t_i|$.
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient horizontally inward toward $\mathbf(C)$
+      - @code(2): orient horizontally outward away from $\mathbf(C)$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInButterflyCurve(
+      const SizeScale: Single = 0.0;
+      const WingFlapHeight: Single = 0.0;
+      const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along a 3D Clélie Curve (spherical rosette / polar satellite orbit on a
+      sphere of radius @code(Radius) where latitude $\phi = m \theta$) centered
+      at the active selection pivot $\mathbf(C)$:
+      $\theta_i = \frac(2\pi i)(N), \quad \phi_i = m \theta_i$,
+      $x_i = C_x + R \cos\phi_i \cos\theta_i$,
+      $y_i = C_y + R \sin\phi_i$,
+      $z_i = C_z + R \cos\phi_i \sin\theta_i$.
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward radially outward along the sphere surface normal
+        with analytical Clélie tangent as Up
+      - @code(2): orient forward along the analytical 3D Clélie curve tangent
+        with outward sphere surface normal as Up
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInClelieCurve(
+      const Radius: Single = 0.0;
+      const PetalRatioM: Single = 2.0;
+      const OrientMode: Integer = 1): Boolean;
   end;
 
 var
@@ -10918,6 +10975,326 @@ begin
           Side := Vector3(0, 1, 0);
         Side := Side.Normalize;
         NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+      end;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.VolumeSquashStretchSelected(
+  const Axis: T3DAxis;
+  const StretchFactor: Single;
+  const AnchorAtBase: Boolean;
+  const ScaleObjects: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  Positions: array of TVector3;
+  Count, I: Integer;
+  T: TCastleTransform;
+  C1, C2: T3DAxis;
+  SafeStretch, InvSqrtStretch, MinCoord: Single;
+  AnchorPos, CurPos, TargetPos, ScaleMult, NewScale: TVector3;
+begin
+  Result := false;
+  Count := SelectedCount;
+  if Count < 1 then
+    Exit;
+
+  SetLength(Items, Count);
+  SetLength(Positions, Count);
+  Count := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if not IsDescendantOfAnySelected(T) then
+    begin
+      Items[Count] := T;
+      Positions[Count] := GetTransformWorkingPos(T);
+      Inc(Count);
+    end;
+  end;
+
+  if (Count < 1) or ((Count = 1) and (not ScaleObjects)) then
+    Exit;
+
+  SafeStretch := Max(0.05, StretchFactor);
+  InvSqrtStretch := 1.0 / Sqrt(SafeStretch);
+  RestOf3DCoords(Axis, C1, C2);
+
+  AnchorPos := SelectionWorkingCenter;
+  if AnchorAtBase and (Count >= 2) then
+  begin
+    MinCoord := Positions[0][Axis];
+    for I := 1 to Count - 1 do
+      if Positions[I][Axis] < MinCoord then
+        MinCoord := Positions[I][Axis];
+    AnchorPos.Data[Axis] := MinCoord;
+  end;
+
+  ScaleMult := Vector3(1.0, 1.0, 1.0);
+  ScaleMult.Data[Axis] := SafeStretch;
+  ScaleMult.Data[C1] := InvSqrtStretch;
+  ScaleMult.Data[C2] := InvSqrtStretch;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    if Count >= 2 then
+    begin
+      CurPos := Positions[I];
+      TargetPos := CurPos;
+      TargetPos.Data[Axis] := AnchorPos[Axis] + (CurPos[Axis] - AnchorPos[Axis]) * SafeStretch;
+      TargetPos.Data[C1] := AnchorPos[C1] + (CurPos[C1] - AnchorPos[C1]) * InvSqrtStretch;
+      TargetPos.Data[C2] := AnchorPos[C2] + (CurPos[C2] - AnchorPos[C2]) * InvSqrtStretch;
+      if not TVector3.Equals(CurPos, TargetPos, 1e-5) then
+      begin
+        SetTransformWorkingPos(T, TargetPos);
+        Result := true;
+      end;
+    end;
+
+    if ScaleObjects then
+    begin
+      NewScale := T.Scale * ScaleMult;
+      if not TVector3.Equals(T.Scale, NewScale, 1e-5) then
+      begin
+        T.Scale := NewScale;
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInButterflyCurve(
+  const SizeScale: Single;
+  const WingFlapHeight: Single;
+  const OrientMode: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  Positions: array of TVector3;
+  Count, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, GravityUp, LookDir, Side, NewUp, CurWorldPos, CurDir, CurUp: TVector3;
+  S, SumDist, Theta, SinT, CosT, SinTerm, SinTerm5, R, XOff, YOff, ZOff: Single;
+begin
+  Result := false;
+  Count := SelectedCount;
+  if Count < 2 then
+    Exit;
+
+  SetLength(Items, Count);
+  SetLength(Positions, Count);
+  Count := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if not IsDescendantOfAnySelected(T) then
+    begin
+      Items[Count] := T;
+      Positions[Count] := GetTransformWorkingPos(T);
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then
+    Exit;
+
+  CenterPos := SelectionWorkingCenter;
+  S := SizeScale;
+  if S <= 0 then
+  begin
+    SumDist := 0;
+    for I := 0 to Count - 1 do
+      SumDist := SumDist + Hypot(Positions[I].X - CenterPos.X, Positions[I].Z - CenterPos.Z);
+    S := (SumDist / Count) / 2.5;
+    if S < 1e-3 then
+      S := 3.0;
+  end;
+
+  GravityUp := Vector3(0, 1, 0);
+  if (Items[0].World <> nil) and (not Items[0].World.GravityUp.IsZero) then
+    GravityUp := Items[0].World.GravityUp.Normalize;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    Theta := (2.0 * Pi * I) / Count;
+    SinCos(Theta, SinT, CosT);
+    SinTerm := Sin((2.0 * Theta - Pi) / 24.0);
+    SinTerm5 := Sqr(SinTerm) * Sqr(SinTerm) * SinTerm;
+    R := Exp(SinT) - 2.0 * Cos(4.0 * Theta) + SinTerm5;
+
+    XOff := S * R * CosT;
+    ZOff := S * R * SinT;
+    YOff := WingFlapHeight * Abs(CosT);
+
+    TargetPos := Vector3(CenterPos.X + XOff, CenterPos.Y + YOff, CenterPos.Z + ZOff);
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(CurPos, TargetPos, 1e-5) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      if OrientMode = 1 then
+        LookDir := Vector3(CenterPos.X - TargetPos.X, 0, CenterPos.Z - TargetPos.Z)
+      else
+        LookDir := Vector3(TargetPos.X - CenterPos.X, 0, TargetPos.Z - CenterPos.Z);
+
+      if LookDir.IsZero(1e-5) then
+        LookDir := Vector3(0, 0, -1);
+      LookDir := LookDir.Normalize;
+
+      Side := TVector3.CrossProduct(LookDir, GravityUp);
+      if Side.IsZero(1e-5) then
+        Side := Vector3(1, 0, 0);
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInClelieCurve(
+  const Radius: Single;
+  const PetalRatioM: Single;
+  const OrientMode: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  Positions: array of TVector3;
+  Count, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, SphereNormal, CurveTangent, LookDir, NewUp, CurWorldPos, CurDir, CurUp: TVector3;
+  R, M, SumDist, Theta, Phi, SinT, CosT, SinP, CosP, DX, DY, DZ: Single;
+begin
+  Result := false;
+  Count := SelectedCount;
+  if Count < 2 then
+    Exit;
+
+  SetLength(Items, Count);
+  SetLength(Positions, Count);
+  Count := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if not IsDescendantOfAnySelected(T) then
+    begin
+      Items[Count] := T;
+      Positions[Count] := GetTransformWorkingPos(T);
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then
+    Exit;
+
+  CenterPos := SelectionWorkingCenter;
+  R := Radius;
+  if R <= 0 then
+  begin
+    SumDist := 0;
+    for I := 0 to Count - 1 do
+      SumDist := SumDist + PointsDistance(Positions[I], CenterPos);
+    R := SumDist / Count;
+    if R < 1e-4 then
+      R := 8.0;
+  end;
+
+  M := PetalRatioM;
+  if Abs(M) < 1e-4 then
+    M := 2.0;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    Theta := (2.0 * Pi * I) / Count;
+    Phi := M * Theta;
+    SinCos(Theta, SinT, CosT);
+    SinCos(Phi, SinP, CosP);
+
+    SphereNormal := Vector3(CosP * CosT, SinP, CosP * SinT);
+    if SphereNormal.IsZero(1e-5) then
+      SphereNormal := Vector3(0, 1, 0)
+    else
+      SphereNormal := SphereNormal.Normalize;
+
+    TargetPos := CenterPos + SphereNormal * R;
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(CurPos, TargetPos, 1e-5) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      // Analytical tangent d(SphereNormal)/d(theta):
+      // dx/dtheta = -m*sin(phi)*cos(theta) - cos(phi)*sin(theta)
+      // dy/dtheta = m*cos(phi)
+      // dz/dtheta = -m*sin(phi)*sin(theta) + cos(phi)*cos(theta)
+      DX := -M * SinP * CosT - CosP * SinT;
+      DY := M * CosP;
+      DZ := -M * SinP * SinT + CosP * CosT;
+      CurveTangent := Vector3(DX, DY, DZ);
+      if CurveTangent.IsZero(1e-5) then
+        CurveTangent := Vector3(-SinT, 0, CosT);
+      CurveTangent := CurveTangent.Normalize;
+
+      if OrientMode = 1 then
+      begin
+        LookDir := SphereNormal;
+        NewUp := CurveTangent - LookDir * TVector3.DotProduct(CurveTangent, LookDir);
+        if NewUp.IsZero(1e-5) then
+          NewUp := Vector3(0, 1, 0);
+        NewUp := NewUp.Normalize;
+      end else
+      begin
+        LookDir := CurveTangent;
+        NewUp := SphereNormal - LookDir * TVector3.DotProduct(SphereNormal, LookDir);
+        if NewUp.IsZero(1e-5) then
+          NewUp := Vector3(0, 1, 0);
+        NewUp := NewUp.Normalize;
       end;
 
       T.GetWorldView(CurWorldPos, CurDir, CurUp);

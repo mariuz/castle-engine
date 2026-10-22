@@ -378,6 +378,9 @@ type
       ButtonRippleSelection: TButton;
       ButtonArrangeLemniscate: TButton;
       ButtonArrangeTorusHelix: TButton;
+      ButtonSquashStretch: TButton;
+      ButtonArrangeButterfly: TButton;
+      ButtonArrangeClelie: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -414,6 +417,7 @@ type
       ButtonUIBorderRing: TButton;
       ButtonUIPyramid: TButton;
       ButtonUIDiamond: TButton;
+      ButtonUICross: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -456,6 +460,7 @@ type
       MenuTreeViewItemSelectDesignInstances: TMenuItem;
       MenuTreeViewItemSelectPrimitives: TMenuItem;
       MenuTreeViewItemSelectSceneMeshes: TMenuItem;
+      MenuTreeViewItemSelectUIControls: TMenuItem;
       MenuTreeViewItemCopyTransform: TMenuItem;
       MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
@@ -579,6 +584,9 @@ type
     procedure ButtonRippleSelectionClick(Sender: TObject);
     procedure ButtonArrangeLemniscateClick(Sender: TObject);
     procedure ButtonArrangeTorusHelixClick(Sender: TObject);
+    procedure ButtonSquashStretchClick(Sender: TObject);
+    procedure ButtonArrangeButterflyClick(Sender: TObject);
+    procedure ButtonArrangeClelieClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -604,6 +612,7 @@ type
     procedure ButtonUIBorderRingClick(Sender: TObject);
     procedure ButtonUIPyramidClick(Sender: TObject);
     procedure ButtonUIDiamondClick(Sender: TObject);
+    procedure ButtonUICrossClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -653,6 +662,7 @@ type
     procedure MenuTreeViewItemSelectDesignInstancesClick(Sender: TObject);
     procedure MenuTreeViewItemSelectPrimitivesClick(Sender: TObject);
     procedure MenuTreeViewItemSelectSceneMeshesClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectUIControlsClick(Sender: TObject);
     procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
@@ -1304,6 +1314,22 @@ type
       const CoilWindings: Single = 6.0;
       const OrientMode: Integer = 1);
     procedure ShowArrangeInTorusHelixDialog;
+    procedure VolumeSquashStretchSelection(
+      const Axis: T3DAxis = 1;
+      const StretchFactor: Single = 0.65;
+      const AnchorAtBase: Boolean = true;
+      const ScaleObjects: Boolean = true);
+    procedure ShowSquashStretchSelectionDialog;
+    procedure ArrangeSelectionInButterflyCurve(
+      const SizeScale: Single = 0.0;
+      const WingFlapHeight: Single = 0.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeInButterflyCurveDialog;
+    procedure ArrangeSelectionInClelieCurve(
+      const Radius: Single = 0.0;
+      const PetalRatioM: Single = 2.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeInClelieCurveDialog;
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -1345,6 +1371,9 @@ type
     procedure ArrangeSelectedUserInterfacesInDiamond(
       const RadiusScale: Single = 1.0;
       const EqualAspect: Boolean = false);
+    procedure ArrangeSelectedUserInterfacesInCross(
+      const GapPx: Single = 8.0;
+      const DiagonalX: Boolean = false);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -1396,6 +1425,7 @@ type
     procedure SelectDesignInstances(const TransformsOnly: Boolean = false);
     procedure SelectPrimitiveShapes(const OnlyBoxesAndSpheres: Boolean = false);
     procedure SelectSceneMeshes(const OnlyWithAnimations: Boolean = false);
+    procedure SelectUserInterfaceControls(const OnlyInteractiveControls: Boolean = false);
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -2556,6 +2586,26 @@ begin
     if Event.IsKey(keyRightBracket) then
     begin
       Frame.SelectSceneMeshes(false);
+      Exit(true);
+    end else
+    if Event.IsKey(keyComma) then
+    begin
+      Frame.ShowSquashStretchSelectionDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(keyPeriod) then
+    begin
+      Frame.ShowArrangeInButterflyCurveDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(keySlash) then
+    begin
+      Frame.ShowArrangeInClelieCurveDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(keyBackSlash) then
+    begin
+      Frame.SelectUserInterfaceControls(false);
       Exit(true);
     end;
   end;
@@ -4380,6 +4430,36 @@ begin
   ButtonArrangeTorusHelix.OnClick := @ButtonArrangeTorusHelixClick;
   ButtonArrangeTorusHelix.Parent := PanelLayoutTransform;
 
+  ButtonSquashStretch := TButton.Create(Self);
+  ButtonSquashStretch.Align := alTop;
+  ButtonSquashStretch.AutoSize := true;
+  ButtonSquashStretch.Caption := 'Squash/Stretch...';
+  ButtonSquashStretch.Hint := 'Apply volume-preserving 3D Squash & Stretch deformation along an axis (Ctrl+Alt+, | Shift-click: dialog | Click: 0.65x Y squash anchored at base | Ctrl-click: 1.5x Y stretch anchored at base)';
+  ButtonSquashStretch.ShowHint := true;
+  ButtonSquashStretch.BorderSpacing.Around := 2;
+  ButtonSquashStretch.OnClick := @ButtonSquashStretchClick;
+  ButtonSquashStretch.Parent := PanelLayoutTransform;
+
+  ButtonArrangeButterfly := TButton.Create(Self);
+  ButtonArrangeButterfly.Align := alTop;
+  ButtonArrangeButterfly.AutoSize := true;
+  ButtonArrangeButterfly.Caption := 'Butterfly...';
+  ButtonArrangeButterfly.Hint := 'Arrange 2+ selected 3D transforms along Temple H. Fay''s parametric Butterfly Curve around the active pivot (Ctrl+Alt+. | Shift-click: dialog | Click: flat butterfly facing inward | Ctrl-click: 3D dihedral wing flap)';
+  ButtonArrangeButterfly.ShowHint := true;
+  ButtonArrangeButterfly.BorderSpacing.Around := 2;
+  ButtonArrangeButterfly.OnClick := @ButtonArrangeButterflyClick;
+  ButtonArrangeButterfly.Parent := PanelLayoutTransform;
+
+  ButtonArrangeClelie := TButton.Create(Self);
+  ButtonArrangeClelie.Align := alTop;
+  ButtonArrangeClelie.AutoSize := true;
+  ButtonArrangeClelie.Caption := 'Clelie Sphere...';
+  ButtonArrangeClelie.Hint := 'Arrange 2+ selected 3D transforms along a 3D Clelie Spherical Rosette Orbit (latitude = m * longitude) around the active pivot (Ctrl+Alt+/ | Shift-click: dialog | Click: m=2 outward normal | Ctrl-click: m=3 curve tangent)';
+  ButtonArrangeClelie.ShowHint := true;
+  ButtonArrangeClelie.BorderSpacing.Around := 2;
+  ButtonArrangeClelie.OnClick := @ButtonArrangeClelieClick;
+  ButtonArrangeClelie.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -4662,6 +4742,14 @@ begin
   ButtonUIDiamond.OnClick := @ButtonUIDiamondClick;
   ButtonUIDiamond.Parent := PanelLayoutUI;
 
+  ButtonUICross := TButton.Create(Self);
+  ButtonUICross.AutoSize := true;
+  ButtonUICross.Caption := 'UI Cross / +';
+  ButtonUICross.Hint := 'Arrange 2+ selected 2D UI controls into a centered 4-arm Cross / Plus (+) or Diagonal Saltire (x) D-pad layout around their shared center (Click: Plus + with 8px gap | Shift-click: Diagonal X with 8px gap | Ctrl-click: Plus + with 0px flush)';
+  ButtonUICross.ShowHint := true;
+  ButtonUICross.OnClick := @ButtonUICrossClick;
+  ButtonUICross.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -4900,6 +4988,11 @@ begin
   MenuTreeViewItemSelectSceneMeshes.Caption := 'Select 3D Scene / Mesh Instances (Ctrl+Alt+])';
   MenuTreeViewItemSelectSceneMeshes.OnClick := @MenuTreeViewItemSelectSceneMeshesClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectSceneMeshes);
+
+  MenuTreeViewItemSelectUIControls := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectUIControls.Caption := 'Select 2D UI Controls / Interactive Widgets (Ctrl+Alt+\)';
+  MenuTreeViewItemSelectUIControls.OnClick := @MenuTreeViewItemSelectUIControlsClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectUIControls);
 
   MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
   MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
@@ -8589,6 +8682,8 @@ begin
         ButtonUIPyramid.Enabled := SelectedUICount >= 2;
       if ButtonUIDiamond <> nil then
         ButtonUIDiamond.Enabled := SelectedUICount >= 2;
+      if ButtonUICross <> nil then
+        ButtonUICross.Enabled := SelectedUICount >= 2;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -8735,6 +8830,12 @@ begin
       ButtonArrangeLemniscate.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonArrangeTorusHelix <> nil then
       ButtonArrangeTorusHelix.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonSquashStretch <> nil then
+      ButtonSquashStretch.Enabled := (T <> nil) or (TransformManipulate.SelectedCount >= 1);
+    if ButtonArrangeButterfly <> nil then
+      ButtonArrangeButterfly.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeClelie <> nil then
+      ButtonArrangeClelie.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -10291,14 +10392,34 @@ begin
       ScaleSelectionRadialDistanceXZ(0.8);
       Key := 0;
     end else
+    if (Key = VK_OEM_COMMA) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowSquashStretchSelectionDialog;
+      Key := 0;
+    end else
+    if (Key = VK_OEM_PERIOD) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowArrangeInButterflyCurveDialog;
+      Key := 0;
+    end else
     if (Key = VK_OEM_2) and (Shift = [ssAlt, ssShift]) then
     begin
       ProjectSelectionOntoSphereOrCylinder(false, false);
       Key := 0;
     end else
+    if (Key = VK_OEM_2) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowArrangeInClelieCurveDialog;
+      Key := 0;
+    end else
     if (Key = VK_OEM_5) and (Shift = [ssAlt, ssShift]) then
     begin
       ShowArrangeOnCylinderDialog;
+      Key := 0;
+    end else
+    if (Key = VK_OEM_5) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      SelectUserInterfaceControls(false);
       Key := 0;
     end else
     if (Key = VK_OEM_1) and (Shift = [ssAlt, ssShift]) then
@@ -15368,6 +15489,161 @@ begin
     ArrangeSelectionInTorusHelix(0.0, 0.0, 6.0, 1);
 end;
 
+procedure TDesignFrame.VolumeSquashStretchSelection(
+  const Axis: T3DAxis;
+  const StretchFactor: Single;
+  const AnchorAtBase: Boolean;
+  const ScaleObjects: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.VolumeSquashStretchSelected(
+      Axis, StretchFactor, AnchorAtBase, ScaleObjects);
+end;
+
+procedure TDesignFrame.ShowSquashStretchSelectionDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  AxisVal: T3DAxis;
+  StretchVal: Single;
+  AnchorBase, AffectScales: Boolean;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 1) then
+    Exit;
+
+  Prompts[0] := 'Longitudinal Axis (0 = X, 1 = Y, 2 = Z):';
+  Prompts[1] := 'Stretch / Squash Factor (< 1 = squash, > 1 = stretch):';
+  Prompts[2] := 'Anchor at Minimum Base Along Axis (1 = yes, 0 = pivot center):';
+  Prompts[3] := 'Also Scale Individual Transform Scales (1 = yes, 0 = positions only):';
+
+  Values[0] := '1';
+  Values[1] := '0.65';
+  Values[2] := '1';
+  Values[3] := '1';
+
+  if InputQuery('Volume-Preserving 3D Squash & Stretch Deformation', Prompts, Values) then
+  begin
+    AxisVal := Clamped(StrToIntDef(Trim(Values[0]), 1), 0, 2);
+    StretchVal := Max(0.05, StrToFloatDefDot(Trim(Values[1]), 0.65));
+    AnchorBase := StrToIntDef(Trim(Values[2]), 1) <> 0;
+    AffectScales := StrToIntDef(Trim(Values[3]), 1) <> 0;
+    VolumeSquashStretchSelection(AxisVal, StretchVal, AnchorBase, AffectScales);
+  end;
+end;
+
+procedure TDesignFrame.ButtonSquashStretchClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowSquashStretchSelectionDialog
+  else if ssCtrl in ShiftState then
+    VolumeSquashStretchSelection(1, 1.5, true, true)
+  else
+    VolumeSquashStretchSelection(1, 0.65, true, true);
+end;
+
+procedure TDesignFrame.ArrangeSelectionInButterflyCurve(
+  const SizeScale: Single;
+  const WingFlapHeight: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInButterflyCurve(
+      SizeScale, WingFlapHeight, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInButterflyCurveDialog;
+var
+  Prompts: array[0..2] of string;
+  Values: array[0..2] of string;
+  S, FlapY: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Butterfly Wing Scale S (0 = auto from selection):';
+  Prompts[1] := 'Dihedral Wing Flap Lift Y (0 = flat on XZ plane):';
+  Prompts[2] := 'Orientation (0 = keep, 1 = inward, 2 = outward):';
+
+  Values[0] := '0';
+  Values[1] := '0';
+  Values[2] := '1';
+
+  if InputQuery('Arrange Selected in 3D Parametric Butterfly Curve', Prompts, Values) then
+  begin
+    S := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    FlapY := StrToFloatDefDot(Trim(Values[1]), 0.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[2]), 1), 0, 2);
+    ArrangeSelectionInButterflyCurve(S, FlapY, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeButterflyClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInButterflyCurveDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionInButterflyCurve(0.0, 3.0, 1)
+  else
+    ArrangeSelectionInButterflyCurve(0.0, 0.0, 1);
+end;
+
+procedure TDesignFrame.ArrangeSelectionInClelieCurve(
+  const Radius: Single;
+  const PetalRatioM: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInClelieCurve(
+      Radius, PetalRatioM, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInClelieCurveDialog;
+var
+  Prompts: array[0..2] of string;
+  Values: array[0..2] of string;
+  R, RatioM: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Sphere Radius R (0 = auto from selection):';
+  Prompts[1] := 'Petal / Orbit Ratio m (latitude = m * longitude):';
+  Prompts[2] := 'Orientation (0 = keep, 1 = outward sphere normal, 2 = curve tangent):';
+
+  Values[0] := '0';
+  Values[1] := '2';
+  Values[2] := '1';
+
+  if InputQuery('Arrange Selected in 3D Clelie Spherical Rosette Orbit', Prompts, Values) then
+  begin
+    R := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    RatioM := StrToFloatDefDot(Trim(Values[1]), 2.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[2]), 1), 0, 2);
+    ArrangeSelectionInClelieCurve(R, RatioM, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeClelieClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInClelieCurveDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionInClelieCurve(0.0, 3.0, 2)
+  else
+    ArrangeSelectionInClelieCurve(0.0, 2.0, 1);
+end;
+
 procedure TDesignFrame.StopPilotTransform;
 var
   SavedName: String;
@@ -17613,6 +17889,133 @@ begin
   else
     RScale := 1.0;
   ArrangeSelectedUserInterfacesInDiamond(RScale, ssShift in ShiftState);
+end;
+
+procedure TDesignFrame.ArrangeSelectedUserInterfacesInCross(
+  const GapPx: Single;
+  const DiagonalX: Boolean);
+const
+  InvSqrt2 = 0.70710678;
+var
+  Selected: TComponentList;
+  SelectedCount, I, Count, ChangedCount, RingIdx, ArmDir: Integer;
+  UIControls: array of TCastleUserInterface;
+  UI: TCastleUserInterface;
+  R: TFloatRectangle;
+  MinX, MaxX, MinY, MaxY, AvgW, AvgH, GroupCenterX, GroupCenterY: Single;
+  StepW, StepH, DirX, DirY, TargetCenterX, TargetCenterY, DeltaX, DeltaY: Single;
+begin
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if (Selected = nil) or (SelectedCount < 2) then Exit;
+
+    SetLength(UIControls, SelectedCount);
+    Count := 0;
+    AvgW := 0;
+    AvgH := 0;
+    MinX := MaxSingle;
+    MaxX := -MaxSingle;
+    MinY := MaxSingle;
+    MaxY := -MaxSingle;
+
+    for I := 0 to SelectedCount - 1 do
+      if (Selected[I] is TCastleUserInterface) and
+         (Selected[I] <> DesignRoot) and
+         (not IsComponentLocked(Selected[I])) then
+      begin
+        UI := TCastleUserInterface(Selected[I]);
+        R := UI.RenderRectWithBorder;
+        if (not R.IsEmpty) and (UI.UIScale > 0) then
+        begin
+          UIControls[Count] := UI;
+          AvgW := AvgW + R.Width;
+          AvgH := AvgH + R.Height;
+          MinX := Min(MinX, R.Center.X);
+          MaxX := Max(MaxX, R.Center.X);
+          MinY := Min(MinY, R.Center.Y);
+          MaxY := Max(MaxY, R.Center.Y);
+          Inc(Count);
+        end;
+      end;
+
+    if Count < 2 then Exit;
+
+    AvgW := AvgW / Single(Count);
+    AvgH := AvgH / Single(Count);
+    GroupCenterX := (MinX + MaxX) * 0.5;
+    GroupCenterY := (MinY + MaxY) * 0.5;
+    StepW := AvgW + GapPx * UIControls[0].UIScale;
+    StepH := AvgH + GapPx * UIControls[0].UIScale;
+
+    ChangedCount := 0;
+    for I := 0 to Count - 1 do
+    begin
+      UI := UIControls[I];
+      if UI.UIScale <= 0 then Continue;
+      R := UI.RenderRectWithBorder;
+      if R.IsEmpty then Continue;
+
+      if I = 0 then
+      begin
+        TargetCenterX := GroupCenterX;
+        TargetCenterY := GroupCenterY;
+      end else
+      begin
+        RingIdx := ((I - 1) div 4) + 1;
+        ArmDir := (I - 1) mod 4;
+        if not DiagonalX then
+        begin
+          // Orthogonal Plus (+): 0 = Right, 1 = Up, 2 = Left, 3 = Down
+          case ArmDir of
+            0: begin DirX := 1.0;  DirY := 0.0; end;
+            1: begin DirX := 0.0;  DirY := 1.0; end;
+            2: begin DirX := -1.0; DirY := 0.0; end;
+          else
+               begin DirX := 0.0;  DirY := -1.0; end;
+          end;
+        end else
+        begin
+          // Diagonal Saltire (X): 0 = Top-Right, 1 = Bottom-Right, 2 = Bottom-Left, 3 = Top-Left
+          case ArmDir of
+            0: begin DirX := InvSqrt2;  DirY := InvSqrt2; end;
+            1: begin DirX := InvSqrt2;  DirY := -InvSqrt2; end;
+            2: begin DirX := -InvSqrt2; DirY := -InvSqrt2; end;
+          else
+               begin DirX := -InvSqrt2; DirY := InvSqrt2; end;
+          end;
+        end;
+        TargetCenterX := GroupCenterX + DirX * Single(RingIdx) * StepW;
+        TargetCenterY := GroupCenterY + DirY * Single(RingIdx) * StepH;
+      end;
+
+      DeltaX := TargetCenterX - R.Center.X;
+      DeltaY := TargetCenterY - R.Center.Y;
+      if (Abs(DeltaX) > 0.01) or (Abs(DeltaY) > 0.01) then
+      begin
+        UI.Translation := UI.Translation + Vector2(DeltaX / UI.UIScale, DeltaY / UI.UIScale);
+        Inc(ChangedCount);
+      end;
+    end;
+
+    if ChangedCount > 0 then
+      ModifiedOutsideObjectInspector(
+        Format('Arrange %d UI control(s) in cross layout', [ChangedCount]), ucHigh);
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUICrossClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  Gap: Single;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssCtrl in ShiftState then
+    Gap := 0.0
+  else
+    Gap := 8.0;
+  ArrangeSelectedUserInterfacesInCross(Gap, ssShift in ShiftState);
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -21035,6 +21438,53 @@ begin
   SelectSceneMeshes(ssShift in GetKeyShiftState);
 end;
 
+procedure TDesignFrame.SelectUserInterfaceControls(const OnlyInteractiveControls: Boolean);
+var
+  TreeNode: TTreeNode;
+  C: TComponent;
+  UI: TCastleUserInterface;
+  NewSelection: TComponentList;
+  Matches: Boolean;
+begin
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C is TCastleUserInterface) and (C <> DesignRoot) and
+         (not (C is TCastleViewport)) and
+         Selectable(C) and (not IsComponentLocked(C)) then
+      begin
+        UI := TCastleUserInterface(C);
+        if UI.Exists then
+        begin
+          if OnlyInteractiveControls then
+            Matches := (UI is TCastleButton) or (UI is TCastleEdit) or
+                       (UI is TCastleCheckbox) or (UI is TCastleIntegerEdit) or
+                       (UI is TCastleFloatEdit) or (UI is TCastleScrollView)
+          else
+            Matches := true;
+
+          if Matches and (NewSelection.IndexOf(UI) = -1) then
+            NewSelection.Add(UI);
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectUIControlsClick(Sender: TObject);
+begin
+  SelectUserInterfaceControls(ssShift in GetKeyShiftState);
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -21561,6 +22011,8 @@ begin
     MenuTreeViewItemSelectPrimitives.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemSelectSceneMeshes <> nil then
     MenuTreeViewItemSelectSceneMeshes.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectUIControls <> nil then
+    MenuTreeViewItemSelectUIControls.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemCopyTransform <> nil then
     MenuTreeViewItemCopyTransform.Enabled := (CurrentTransform <> nil) or (SelectedUserInterface <> nil) or (ControlsTree.SelectionCount > 0);
   if MenuTreeViewItemPasteTransform <> nil then

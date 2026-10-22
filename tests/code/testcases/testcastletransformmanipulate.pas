@@ -64,6 +64,7 @@ type
     procedure TestBendVivianiCurveAndSpirograph;
     procedure TestSpherifyMobiusStripAndCardioidHeart;
     procedure TestRippleLemniscateAndTorusHelix;
+    procedure TestSquashStretchButterflyAndClelie;
   end;
 
 implementation
@@ -2673,6 +2674,101 @@ begin
     AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
     B2.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(0, 1, 0), WorldDir.Normalize, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestSquashStretchButterflyAndClelie;
+var
+  Viewport: TCastleViewport;
+  B1, B2, B3, B4: TCastleBox;
+  Manipulate: TCastleTransformManipulate;
+  WorldPos, WorldDir, WorldUp: TVector3;
+  ExpectedZ2: Single;
+begin
+  Viewport := nil;
+  Manipulate := nil;
+  try
+    Viewport := TCastleViewport.Create(nil);
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(1, 1, 1);
+    B1.Translation := Vector3(4, 0, -2);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(1, 1, 1);
+    B2.Translation := Vector3(-4, 2, 2);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(1, 1, 1);
+    B3.Translation := Vector3(0, 0, 0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(1, 1, 1);
+    B4.Translation := Vector3(0, 0, 0);
+    Viewport.Items.Add(B4);
+
+    Manipulate := TCastleTransformManipulate.Create(nil);
+    Manipulate.SetSelected([B1, B2]);
+    Manipulate.PivotMode := pmSelectionCenter;
+
+    // 1. Test VolumeSquashStretchSelected(1 (Y axis), 4.0, true (AnchorAtBase), true (ScaleObjects)):
+    // B1=(4, 0, -2), B2=(-4, 2, 2) -> Center=(0, 1, 0), MinY=0 -> AnchorPos=(0, 0, 0)
+    // StretchFactor=4.0, InvSqrtStretch=0.5:
+    // B1 -> (4*0.5, 0*4.0, -2*0.5) = (2, 0, -1), Scale = (0.5, 4.0, 0.5)
+    // B2 -> (-4*0.5, 2*4.0, 2*0.5) = (-2, 8, 1), Scale = (0.5, 4.0, 0.5)
+    AssertTrue(Manipulate.VolumeSquashStretchSelected(1, 4.0, true, true));
+    AssertVectorEquals(Vector3(2, 0, -1), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-2, 8, 1), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.5, 4.0, 0.5), B1.Scale, 1e-4);
+    AssertVectorEquals(Vector3(0.5, 4.0, 0.5), B2.Scale, 1e-4);
+
+    // 2. Test ArrangeSelectedInButterflyCurve(2.0, 5.0, 1):
+    // Select B1..B4 around Center = (0, 0, 0), N = 4 -> theta = 0, pi/2, pi, 3pi/2:
+    // i=0 (theta=0): |cos(0)|=1 -> Y=5.0, Z=0
+    // i=1 (theta=pi/2): sin=1, cos=0, (2*theta-pi)/24 = 0 -> R = Exp(1) - 2*Cos(2*pi) + 0 = e - 2
+    //   -> Pos = (0, 0, 2*(e - 2)), OrientMode=1 (inward XZ) -> LookDir = (0, 0, -1)
+    // i=2 (theta=pi): |cos(pi)|=1 -> Y=5.0, Z=0
+    B1.Scale := Vector3(1, 1, 1);
+    B2.Scale := Vector3(1, 1, 1);
+    B1.Translation := Vector3(-3, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(1, 0, 0);
+    B4.Translation := Vector3(3, 0, 0);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.ArrangeSelectedInButterflyCurve(2.0, 5.0, 1));
+    AssertSameValue(5.0, B1.Translation.Y, 1e-4);
+    AssertSameValue(0.0, B1.Translation.Z, 1e-4);
+    ExpectedZ2 := 2.0 * (Exp(1.0) - 2.0);
+    AssertVectorEquals(Vector3(0, 0, ExpectedZ2), B2.Translation, 1e-4);
+    AssertSameValue(5.0, B3.Translation.Y, 1e-4);
+    AssertSameValue(0.0, B3.Translation.Z, 1e-4);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 0, -1), WorldDir.Normalize, 1e-4);
+
+    // 3. Test ArrangeSelectedInClelieCurve(10.0, 1.0, 1):
+    // Reset B1..B4 around Center = (0, 0, 0), R = 10, m = 1, N = 4 -> theta = phi = 0, pi/2, pi, 3pi/2:
+    // i=0 (0): SphereNormal = (1, 0, 0) -> (10, 0, 0), LookDir = (1, 0, 0), Up = Normalize(0, 1, 1)
+    // i=1 (pi/2): SphereNormal = (0, 1, 0) -> (0, 10, 0) (North Pole)
+    // i=2 (pi): SphereNormal = ((-1)*(-1), 0, 0) = (1, 0, 0) -> (10, 0, 0)
+    // i=3 (3pi/2): SphereNormal = (0, -1, 0) -> (0, -10, 0) (South Pole)
+    B1.Translation := Vector3(-3, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(1, 0, 0);
+    B4.Translation := Vector3(3, 0, 0);
+    AssertTrue(Manipulate.ArrangeSelectedInClelieCurve(10.0, 1.0, 1));
+    AssertVectorEquals(Vector3(10, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 10, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10, 0, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, -10, 0), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+    AssertVectorEquals(Vector3(0, 1, 1).Normalize, WorldUp.Normalize, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);
