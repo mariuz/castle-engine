@@ -62,6 +62,7 @@ type
     procedure TestArrangeRoseCurveEllipsoidAndShearSelected;
     procedure TestTwistTaperSphericalSpiralAndSuperellipse;
     procedure TestBendVivianiCurveAndSpirograph;
+    procedure TestSpherifyMobiusStripAndCardioidHeart;
   end;
 
 implementation
@@ -2471,6 +2472,114 @@ begin
     AssertVectorEquals(Vector3(0, 0, -7.5), B4.Translation, 1e-4);
     B1.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(0, 0, 1), WorldDir.Normalize, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestSpherifyMobiusStripAndCardioidHeart;
+var
+  Viewport: TCastleViewport;
+  B1, B2, B3, B4: TCastleBox;
+  Manipulate: TCastleTransformManipulate;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := nil;
+  Manipulate := nil;
+  try
+    Viewport := TCastleViewport.Create(nil);
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(1, 1, 1);
+    B1.Translation := Vector3(4, 0, 0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(1, 1, 1);
+    B2.Translation := Vector3(-4, 0, 0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(1, 1, 1);
+    B3.Translation := Vector3(0, 8, 0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(1, 1, 1);
+    B4.Translation := Vector3(0, -8, 0);
+    Viewport.Items.Add(B4);
+
+    Manipulate := TCastleTransformManipulate.Create(nil);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    Manipulate.PivotMode := pmSelectionCenter;
+
+    // 1. Test SpherifySelected(10.0, 0.5, true):
+    // Center = (0, 0, 0); B1/B2 at dist 4 -> Lerp(0.5, 4, 10) = 7
+    // B3/B4 at dist 8 -> Lerp(0.5, 8, 10) = 9
+    AssertTrue(Manipulate.SpherifySelected(10.0, 0.5, true));
+    AssertVectorEquals(Vector3(7, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-7, 0, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 9, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, -9, 0), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+
+    // 2. Test ArrangeSelectedInMobiusStrip(10.0, 2.0, 2, 1):
+    // Reset B1..B4 around Center = (0, 0, 0), N = 4 -> u = 0, pi/2, pi, 3pi/2:
+    // HalfTwists = 2 -> alpha = u, v_i = (-1)^i * 2.0:
+    // i=0 (u=0, alpha=0, v=+2): (12, 0, 0), LookDir = (0, 0, 1), Up = (0, 1, 0)
+    // i=1 (u=pi/2, alpha=pi/2, v=-2): (0, -2, 10), LookDir = (-1, 0, 0), Up = (0, 0, -1)
+    // i=2 (u=pi, alpha=pi, v=+2): (-8, 0, 0)
+    // i=3 (u=3pi/2, alpha=3pi/2, v=-2): (0, 2, -10)
+    B1.Translation := Vector3(-3, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(1, 0, 0);
+    B4.Translation := Vector3(3, 0, 0);
+    AssertTrue(Manipulate.ArrangeSelectedInMobiusStrip(10.0, 2.0, 2, 1));
+    AssertVectorEquals(Vector3(12, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, -2, 10), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-8, 0, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 2, -10), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 0, 1), WorldDir.Normalize, 1e-4);
+    AssertVectorEquals(Vector3(0, 1, 0), WorldUp.Normalize, 1e-4);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(-1, 0, 0), WorldDir.Normalize, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, -1), WorldUp.Normalize, 1e-4);
+
+    // 3. Test ArrangeSelectedInCardioidOrHeart(16.0, true, 0.0, 1) (Heart curve) &
+    //    ArrangeSelectedInCardioidOrHeart(10.0, false, 0.0, 2) (Cardioid curve):
+    // Reset B1..B4 around Center = (0, 0, 0), N = 4 -> theta = 0, pi/2, pi, 3pi/2:
+    // Heart (S = 16):
+    // i=0 (theta=0): x = 0, z = -16 * (13 - 5 - 2 - 1)/16 = -5
+    // i=1 (theta=pi/2): x = 16, z = -16 * (0 - (-5) - 0 - 1)/16 = -4
+    // i=2 (theta=pi): x = 0, z = -16 * (-13 - 5 + 2 - 1)/16 = 17
+    // i=3 (theta=3pi/2): x = -16, z = -4
+    B1.Translation := Vector3(-3, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(1, 0, 0);
+    B4.Translation := Vector3(3, 0, 0);
+    AssertTrue(Manipulate.ArrangeSelectedInCardioidOrHeart(16.0, true, 0.0, 1));
+    AssertVectorEquals(Vector3(0, 0, -5), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(16, 0, -4), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, 17), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-16, 0, -4), B4.Translation, 1e-4);
+
+    // Cardioid (S = 10, HeartShape = false):
+    // i=0 (theta=0): r = 10*(1-0) = 10 -> (10, 0, 0)
+    // i=1 (theta=pi/2): r = 10*(1-1) = 0 -> (0, 0, 0)
+    // i=2 (theta=pi): r = 10*(1-0) = 10 -> (-10, 0, 0)
+    // i=3 (theta=3pi/2): r = 10*(1+1) = 20 -> (0, 0, -20)
+    B1.Translation := Vector3(-3, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(1, 0, 0);
+    B4.Translation := Vector3(3, 0, 0);
+    AssertTrue(Manipulate.ArrangeSelectedInCardioidOrHeart(10.0, false, 0.0, 2));
+    AssertVectorEquals(Vector3(10, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-10, 0, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, -20), B4.Translation, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

@@ -372,6 +372,9 @@ type
       ButtonBendSelection: TButton;
       ButtonArrangeViviani: TButton;
       ButtonArrangeSpirograph: TButton;
+      ButtonSpherifySelection: TButton;
+      ButtonArrangeMobius: TButton;
+      ButtonArrangeHeart: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -406,6 +409,7 @@ type
       ButtonUICascade: TButton;
       ButtonUITileMosaic: TButton;
       ButtonUIBorderRing: TButton;
+      ButtonUIPyramid: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -446,6 +450,7 @@ type
       MenuTreeViewItemSelectLeaves: TMenuItem;
       MenuTreeViewItemSelectGroups: TMenuItem;
       MenuTreeViewItemSelectDesignInstances: TMenuItem;
+      MenuTreeViewItemSelectPrimitives: TMenuItem;
       MenuTreeViewItemCopyTransform: TMenuItem;
       MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
@@ -563,6 +568,9 @@ type
     procedure ButtonBendSelectionClick(Sender: TObject);
     procedure ButtonArrangeVivianiClick(Sender: TObject);
     procedure ButtonArrangeSpirographClick(Sender: TObject);
+    procedure ButtonSpherifySelectionClick(Sender: TObject);
+    procedure ButtonArrangeMobiusClick(Sender: TObject);
+    procedure ButtonArrangeHeartClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -586,6 +594,7 @@ type
     procedure ButtonUICascadeClick(Sender: TObject);
     procedure ButtonUITileMosaicClick(Sender: TObject);
     procedure ButtonUIBorderRingClick(Sender: TObject);
+    procedure ButtonUIPyramidClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -633,6 +642,7 @@ type
     procedure MenuTreeViewItemSelectLeavesClick(Sender: TObject);
     procedure MenuTreeViewItemSelectGroupsClick(Sender: TObject);
     procedure MenuTreeViewItemSelectDesignInstancesClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectPrimitivesClick(Sender: TObject);
     procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
@@ -1249,6 +1259,23 @@ type
       const Epitrochoid: Boolean = false;
       const OrientMode: Integer = 1);
     procedure ShowArrangeInSpirographDialog;
+    procedure SpherifySelection(
+      const TargetRadius: Single = 0.0;
+      const StrengthFactor: Single = 0.5;
+      const OrientRadially: Boolean = false);
+    procedure ShowSpherifySelectionDialog;
+    procedure ArrangeSelectionInMobiusStrip(
+      const MajorRadius: Single = 0.0;
+      const StripHalfWidth: Single = 0.0;
+      const HalfTwists: Integer = 1;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeInMobiusStripDialog;
+    procedure ArrangeSelectionInCardioidOrHeart(
+      const SizeScale: Single = 0.0;
+      const HeartShape: Boolean = true;
+      const VerticalWave: Single = 0.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeInCardioidOrHeartDialog;
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -1284,6 +1311,9 @@ type
       const GapPx: Single = 8.0);
     procedure ArrangeSelectedUserInterfacesOnParentBorder(
       const MarginPx: Single = 16.0);
+    procedure ArrangeSelectedUserInterfacesInPyramid(
+      const GapPx: Single = 8.0;
+      const Inverted: Boolean = false);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -1333,6 +1363,7 @@ type
     procedure SelectLeafTransforms(const OnlySceneMeshes: Boolean = false);
     procedure SelectGroupTransforms(const OnlyPureGroups: Boolean = false);
     procedure SelectDesignInstances(const TransformsOnly: Boolean = false);
+    procedure SelectPrimitiveShapes(const OnlyBoxesAndSpheres: Boolean = false);
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -1919,11 +1950,18 @@ begin
   end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyX) and
-     (Event.ModifiersDown = [mkAlt, mkShift]) and
      (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
   begin
-    Frame.SeparateOverlappingSelection(0.0, true);
-    Exit(true);
+    if Event.ModifiersDown = [mkAlt, mkShift] then
+    begin
+      Frame.SeparateOverlappingSelection(0.0, true);
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt] then
+    begin
+      Frame.ShowSpherifySelectionDialog;
+      Exit(true);
+    end;
   end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyT) and
@@ -1957,6 +1995,11 @@ begin
     if Event.ModifiersDown = [mkCtrl, mkShift] then
     begin
       Frame.SelectOutlierTransforms(100.0);
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt] then
+    begin
+      Frame.ShowArrangeInMobiusStripDialog;
       Exit(true);
     end;
   end;
@@ -2081,11 +2124,18 @@ begin
   end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyZ) and
-     (Event.ModifiersDown = [mkAlt, mkShift]) and
      (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
   begin
-    Frame.ShowArrangeInZigzagDialog;
-    Exit(true);
+    if Event.ModifiersDown = [mkAlt, mkShift] then
+    begin
+      Frame.ShowArrangeInZigzagDialog;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt] then
+    begin
+      Frame.ShowArrangeInCardioidOrHeartDialog;
+      Exit(true);
+    end;
   end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyK) and
@@ -2162,6 +2212,11 @@ begin
     if Event.ModifiersDown = [mkAlt, mkShift] then
     begin
       Frame.ShowArrangeInSpiralVortexDialog;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt] then
+    begin
+      Frame.SelectPrimitiveShapes(false);
       Exit(true);
     end;
   end;
@@ -4207,6 +4262,36 @@ begin
   ButtonArrangeSpirograph.OnClick := @ButtonArrangeSpirographClick;
   ButtonArrangeSpirograph.Parent := PanelLayoutTransform;
 
+  ButtonSpherifySelection := TButton.Create(Self);
+  ButtonSpherifySelection.Align := alTop;
+  ButtonSpherifySelection.AutoSize := true;
+  ButtonSpherifySelection.Caption := 'Spherify / Bulge...';
+  ButtonSpherifySelection.Hint := 'Deform 2+ selected 3D transforms by blending their positions toward a bounding sphere around their group center (Ctrl+Alt+X | Shift-click: dialog | Click: 100% spherify + radial orient | Ctrl-click: 50% spherical bulge)';
+  ButtonSpherifySelection.ShowHint := true;
+  ButtonSpherifySelection.BorderSpacing.Around := 2;
+  ButtonSpherifySelection.OnClick := @ButtonSpherifySelectionClick;
+  ButtonSpherifySelection.Parent := PanelLayoutTransform;
+
+  ButtonArrangeMobius := TButton.Create(Self);
+  ButtonArrangeMobius.Align := alTop;
+  ButtonArrangeMobius.AutoSize := true;
+  ButtonArrangeMobius.Caption := 'Mobius Strip...';
+  ButtonArrangeMobius.Hint := 'Arrange 2+ selected 3D transforms along a 3D Mobius Strip / Twisted Ribbon around their group center (Ctrl+Alt+Y | Shift-click: dialog | Click: 1 half-twist + twisting surface normal | Ctrl-click: 3 half-twists)';
+  ButtonArrangeMobius.ShowHint := true;
+  ButtonArrangeMobius.BorderSpacing.Around := 2;
+  ButtonArrangeMobius.OnClick := @ButtonArrangeMobiusClick;
+  ButtonArrangeMobius.Parent := PanelLayoutTransform;
+
+  ButtonArrangeHeart := TButton.Create(Self);
+  ButtonArrangeHeart.Align := alTop;
+  ButtonArrangeHeart.AutoSize := true;
+  ButtonArrangeHeart.Caption := 'Heart / Cardioid...';
+  ButtonArrangeHeart.Hint := 'Arrange 2+ selected 3D transforms along a 3D parametric Heart Curve or Cardioid on the XZ plane (Ctrl+Alt+Z | Shift-click: dialog | Click: Heart curve facing inward | Ctrl-click: Cardioid curve facing inward)';
+  ButtonArrangeHeart.ShowHint := true;
+  ButtonArrangeHeart.BorderSpacing.Around := 2;
+  ButtonArrangeHeart.OnClick := @ButtonArrangeHeartClick;
+  ButtonArrangeHeart.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -4473,6 +4558,14 @@ begin
   ButtonUIBorderRing.OnClick := @ButtonUIBorderRingClick;
   ButtonUIBorderRing.Parent := PanelLayoutUI;
 
+  ButtonUIPyramid := TButton.Create(Self);
+  ButtonUIPyramid.AutoSize := true;
+  ButtonUIPyramid.Caption := 'UI Pyramid';
+  ButtonUIPyramid.Hint := 'Arrange 2+ selected 2D UI controls into a centered triangular pyramid stack (1 item on row 0, 2 on row 1, 3 on row 2...) (Click: Top-Down 8px gap | Shift-click: Bottom-Up Inverted pyramid | Ctrl-click: Top-Down 0px flush)';
+  ButtonUIPyramid.ShowHint := true;
+  ButtonUIPyramid.OnClick := @ButtonUIPyramidClick;
+  ButtonUIPyramid.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -4701,6 +4794,11 @@ begin
   MenuTreeViewItemSelectDesignInstances.Caption := 'Select Nested Design / Prefab Instances (Ctrl+Alt+I)';
   MenuTreeViewItemSelectDesignInstances.OnClick := @MenuTreeViewItemSelectDesignInstancesClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectDesignInstances);
+
+  MenuTreeViewItemSelectPrimitives := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectPrimitives.Caption := 'Select 3D Primitive / Greybox Shapes (Ctrl+Alt+J)';
+  MenuTreeViewItemSelectPrimitives.OnClick := @MenuTreeViewItemSelectPrimitivesClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectPrimitives);
 
   MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
   MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
@@ -8386,6 +8484,8 @@ begin
         ButtonUITileMosaic.Enabled := SelectedUICount >= 2;
       if ButtonUIBorderRing <> nil then
         ButtonUIBorderRing.Enabled := SelectedUICount >= 2;
+      if ButtonUIPyramid <> nil then
+        ButtonUIPyramid.Enabled := SelectedUICount >= 2;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -8520,6 +8620,12 @@ begin
       ButtonArrangeViviani.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonArrangeSpirograph <> nil then
       ButtonArrangeSpirograph.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonSpherifySelection <> nil then
+      ButtonSpherifySelection.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeMobius <> nil then
+      ButtonArrangeMobius.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeHeart <> nil then
+      ButtonArrangeHeart.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -10194,6 +10300,26 @@ begin
     if (Key = Ord('I')) and (Shift = [ssCtrl, ssAlt]) then
     begin
       SelectDesignInstances(false);
+      Key := 0;
+    end else
+    if (Key = Ord('J')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      SelectPrimitiveShapes(false);
+      Key := 0;
+    end else
+    if (Key = Ord('X')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowSpherifySelectionDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('Y')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowArrangeInMobiusStripDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('Z')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowArrangeInCardioidOrHeartDialog;
       Key := 0;
     end else
     if (Key = Ord('J')) and (Shift = [ssCtrl, ssShift]) then
@@ -14775,6 +14901,172 @@ begin
   end;
 end;
 
+procedure TDesignFrame.SpherifySelection(
+  const TargetRadius: Single;
+  const StrengthFactor: Single;
+  const OrientRadially: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.SpherifySelected(
+      TargetRadius, StrengthFactor, OrientRadially);
+end;
+
+procedure TDesignFrame.ShowSpherifySelectionDialog;
+var
+  Prompts: array[0..2] of string;
+  Values: array[0..2] of string;
+  R, Strength: Single;
+  OrientRad: Boolean;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Target Sphere Radius (0 = auto average distance):';
+  Prompts[1] := 'Spherify Strength Factor (1.0 = full sphere, 0.5 = 50% bulge, -0.5 = pinch):';
+  Prompts[2] := 'Orient +Y Up Radially Outward? (1 = yes, 0 = keep):';
+
+  Values[0] := '0';
+  Values[1] := '1.0';
+  Values[2] := '1';
+
+  if InputQuery('Spherify / Bulge / Pinch Selected 3D Transforms', Prompts, Values) then
+  begin
+    R := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    Strength := StrToFloatDefDot(Trim(Values[1]), 1.0);
+    OrientRad := StrToIntDef(Trim(Values[2]), 1) <> 0;
+    SpherifySelection(R, Strength, OrientRad);
+  end;
+end;
+
+procedure TDesignFrame.ButtonSpherifySelectionClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowSpherifySelectionDialog
+  else if ssCtrl in ShiftState then
+    SpherifySelection(0.0, 0.5, false) // 50% spherical bulge
+  else
+    SpherifySelection(0.0, 1.0, true); // 100% spherify + radial orient
+end;
+
+procedure TDesignFrame.ArrangeSelectionInMobiusStrip(
+  const MajorRadius: Single;
+  const StripHalfWidth: Single;
+  const HalfTwists: Integer;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInMobiusStrip(
+      MajorRadius, StripHalfWidth, HalfTwists, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInMobiusStripDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  MajR, HalfW: Single;
+  Twists, OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Mobius Major Radius R (0 = auto from selection):';
+  Prompts[1] := 'Ribbon Half-Width W (0 = auto R * 0.35):';
+  Prompts[2] := 'Half-Twists (1 = classic Mobius strip, 3 = triple-twisted):';
+  Prompts[3] := 'Orientation (0 = keep, 1 = twisting surface normal + tangent, 2 = inward):';
+
+  Values[0] := '0';
+  Values[1] := '0';
+  Values[2] := '1';
+  Values[3] := '1';
+
+  if InputQuery('Arrange Selected in 3D Mobius Strip / Twisted Ribbon', Prompts, Values) then
+  begin
+    MajR := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    HalfW := StrToFloatDefDot(Trim(Values[1]), 0.0);
+    Twists := StrToIntDef(Trim(Values[2]), 1);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[3]), 1), 0, 2);
+    ArrangeSelectionInMobiusStrip(MajR, HalfW, Twists, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeMobiusClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  Twists: Integer;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInMobiusStripDialog
+  else
+  begin
+    if ssCtrl in ShiftState then
+      Twists := 3
+    else
+      Twists := 1;
+    ArrangeSelectionInMobiusStrip(0.0, 0.0, Twists, 1);
+  end;
+end;
+
+procedure TDesignFrame.ArrangeSelectionInCardioidOrHeart(
+  const SizeScale: Single;
+  const HeartShape: Boolean;
+  const VerticalWave: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInCardioidOrHeart(
+      SizeScale, HeartShape, VerticalWave, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInCardioidOrHeartDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  ScaleVal, VWave: Single;
+  IsHeart: Boolean;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Overall Curve Half-Span Radius (0 = auto from selection):';
+  Prompts[1] := 'Curve Type (1 = Algebraic Heart Curve, 0 = Classical Cardioid):';
+  Prompts[2] := 'Vertical Y Wave Amplitude (0 = flat on XZ plane):';
+  Prompts[3] := 'Orientation (0 = keep, 1 = inward XZ, 2 = outward XZ):';
+
+  Values[0] := '0';
+  Values[1] := '1';
+  Values[2] := '0';
+  Values[3] := '1';
+
+  if InputQuery('Arrange Selected in 3D Parametric Heart or Cardioid Curve', Prompts, Values) then
+  begin
+    ScaleVal := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    IsHeart := StrToIntDef(Trim(Values[1]), 1) <> 0;
+    VWave := StrToFloatDefDot(Trim(Values[2]), 0.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[3]), 1), 0, 2);
+    ArrangeSelectionInCardioidOrHeart(ScaleVal, IsHeart, VWave, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeHeartClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  IsHeart: Boolean;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInCardioidOrHeartDialog
+  else
+  begin
+    IsHeart := not (ssCtrl in ShiftState);
+    ArrangeSelectionInCardioidOrHeart(0.0, IsHeart, 0.0, 1);
+  end;
+end;
+
 procedure TDesignFrame.StopPilotTransform;
 var
   SavedName: String;
@@ -16764,6 +17056,127 @@ begin
     ArrangeSelectedUserInterfacesOnParentBorder(32.0)
   else
     ArrangeSelectedUserInterfacesOnParentBorder(16.0);
+end;
+
+procedure TDesignFrame.ArrangeSelectedUserInterfacesInPyramid(
+  const GapPx: Single;
+  const Inverted: Boolean);
+var
+  Selected: TComponentList;
+  SelectedCount, I, Count, ChangedCount: Integer;
+  UIControls: array of TCastleUserInterface;
+  UI: TCastleUserInterface;
+  R: TFloatRectangle;
+  AvgW, AvgH, ScaledGap, MinX, MaxX, MinY, MaxY, GroupCenterX, GroupCenterY: Single;
+  TotalRows, RowIdx, ItemsInRow, ItemStartIdx, ColIdx: Integer;
+  TotalStackH, RowW, RowStartX, TargetCenterX, TargetCenterY, DeltaX, DeltaY: Single;
+begin
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount < 2 then Exit;
+
+    Count := 0;
+    SetLength(UIControls, SelectedCount);
+    AvgW := 0.0;
+    AvgH := 0.0;
+    MinX := MaxSingle;
+    MaxX := -MaxSingle;
+    MinY := MaxSingle;
+    MaxY := -MaxSingle;
+
+    for I := 0 to SelectedCount - 1 do
+      if (Selected[I] is TCastleUserInterface) and (Selected[I] <> DesignRoot) then
+      begin
+        UI := TCastleUserInterface(Selected[I]);
+        R := UI.RenderRectWithBorder;
+        if not R.IsEmpty then
+        begin
+          UIControls[Count] := UI;
+          AvgW := AvgW + R.Width;
+          AvgH := AvgH + R.Height;
+          MinX := Min(MinX, R.Left);
+          MaxX := Max(MaxX, R.Right);
+          MinY := Min(MinY, R.Bottom);
+          MaxY := Max(MaxY, R.Top);
+          Inc(Count);
+        end;
+      end;
+
+    if Count < 2 then Exit;
+
+    AvgW := AvgW / Single(Count);
+    AvgH := AvgH / Single(Count);
+    GroupCenterX := (MinX + MaxX) * 0.5;
+    GroupCenterY := (MinY + MaxY) * 0.5;
+    ScaledGap := Max(0.0, GapPx) * UIControls[0].UIScale;
+
+    // Count how many triangular rows are needed: Row 0 has 1 item, Row 1 has 2 items, ...
+    TotalRows := 0;
+    ItemStartIdx := 0;
+    while ItemStartIdx < Count do
+    begin
+      Inc(TotalRows);
+      ItemStartIdx := ItemStartIdx + TotalRows;
+    end;
+
+    TotalStackH := Single(TotalRows) * AvgH + Single(Max(0, TotalRows - 1)) * ScaledGap;
+
+    ChangedCount := 0;
+    ItemStartIdx := 0;
+    for RowIdx := 0 to TotalRows - 1 do
+    begin
+      ItemsInRow := Min(RowIdx + 1, Count - ItemStartIdx);
+      RowW := Single(ItemsInRow) * AvgW + Single(Max(0, ItemsInRow - 1)) * ScaledGap;
+      RowStartX := GroupCenterX - RowW * 0.5 + AvgW * 0.5;
+
+      if Inverted then
+        // Row 0 at bottom (apex pointing down), expanding upward
+        TargetCenterY := (GroupCenterY - TotalStackH * 0.5 + AvgH * 0.5) +
+                         Single(RowIdx) * (AvgH + ScaledGap)
+      else
+        // Row 0 at top (apex pointing up), expanding downward
+        TargetCenterY := (GroupCenterY + TotalStackH * 0.5 - AvgH * 0.5) -
+                         Single(RowIdx) * (AvgH + ScaledGap);
+
+      for ColIdx := 0 to ItemsInRow - 1 do
+      begin
+        UI := UIControls[ItemStartIdx + ColIdx];
+        if UI.UIScale <= 0 then Continue;
+        R := UI.RenderRectWithBorder;
+        if R.IsEmpty then Continue;
+
+        TargetCenterX := RowStartX + Single(ColIdx) * (AvgW + ScaledGap);
+        DeltaX := TargetCenterX - R.Center.X;
+        DeltaY := TargetCenterY - R.Center.Y;
+        if (Abs(DeltaX) > 0.01) or (Abs(DeltaY) > 0.01) then
+        begin
+          UI.Translation := UI.Translation + Vector2(DeltaX / UI.UIScale, DeltaY / UI.UIScale);
+          Inc(ChangedCount);
+        end;
+      end;
+
+      ItemStartIdx := ItemStartIdx + ItemsInRow;
+    end;
+
+    if ChangedCount > 0 then
+      ModifiedOutsideObjectInspector(
+        Format('Arrange %d UI control(s) in pyramid stack', [ChangedCount]), ucHigh);
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUIPyramidClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  GapVal: Single;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssCtrl in ShiftState then
+    GapVal := 0.0
+  else
+    GapVal := 8.0;
+  ArrangeSelectedUserInterfacesInPyramid(GapVal, ssShift in ShiftState);
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -20101,6 +20514,46 @@ begin
   SelectDesignInstances(ssShift in GetKeyShiftState);
 end;
 
+procedure TDesignFrame.SelectPrimitiveShapes(const OnlyBoxesAndSpheres: Boolean);
+var
+  TreeNode: TTreeNode;
+  C: TComponent;
+  NewSelection: TComponentList;
+  Matches: Boolean;
+begin
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C is TCastleAbstractPrimitive) and (C <> DesignRoot) and
+         Selectable(C) and (not IsComponentLocked(C)) and
+         TCastleAbstractPrimitive(C).Exists then
+      begin
+        if OnlyBoxesAndSpheres then
+          Matches := (C is TCastleBox) or (C is TCastleSphere)
+        else
+          Matches := true;
+
+        if Matches and (NewSelection.IndexOf(C) = -1) then
+          NewSelection.Add(C);
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectPrimitivesClick(Sender: TObject);
+begin
+  SelectPrimitiveShapes(ssShift in GetKeyShiftState);
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -20623,6 +21076,8 @@ begin
     MenuTreeViewItemSelectGroups.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemSelectDesignInstances <> nil then
     MenuTreeViewItemSelectDesignInstances.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectPrimitives <> nil then
+    MenuTreeViewItemSelectPrimitives.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemCopyTransform <> nil then
     MenuTreeViewItemCopyTransform.Enabled := (CurrentTransform <> nil) or (SelectedUserInterface <> nil) or (ControlsTree.SelectionCount > 0);
   if MenuTreeViewItemPasteTransform <> nil then
