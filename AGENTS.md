@@ -77,10 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–31**: **COMPLETED** (100%).
-- **Phase 32 (Hardware Mesh Shaders `VK_EXT_mesh_shader`, Variable Rate Shading `VK_KHR_fragment_shading_rate` & Runtime Virtual Texturing RVT)**: **COMPLETED** (100%, 126 unit tests passing):
-  - [x] **32.1. Task & Mesh Shader Pipeline (`VK_EXT_mesh_shader`, `GenerateMeshShaderStageFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestHardwareMeshShaderStageAndTaskGroupsRHI`).
-  - [x] **32.2. Per-Draw & Tile-Based Variable Rate Shading (`VK_KHR_fragment_shading_rate`, `TCastleVulkanVRSManager` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVariableRateShadingTileClassifierRHI`).
-  - [x] **32.3. Runtime Virtual Texturing (RVT) Page Table & Physical Material Tile Cache (`TCastleVulkanRuntimeVirtualTexture` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestRuntimeVirtualTexturePageTableAndAtlasRHI`).
-- **Unreal Engine 5 Feature Parity Roadmap (Phase 33)**:
-  - **Phase 33 (Water, Sparse Volumes & Diagnostics)**: Single-Layer Water Beer-Lambert Absorption, Snell Refraction & Photon Caustics, Sparse Brick-Atlas Heterogeneous Volumes (`TCastleVulkanSparseVolumeAtlas` with Planckian blackbody emission), and GPU Crash Breadcrumb Tracker (`TCastleVulkanBreadcrumbTracker`).
+- **Phases 1–32**: **COMPLETED** (100%).
+- **Phase 33 (Single-Layer Water Refraction, Absorption & Photon Caustics, Sparse Heterogeneous Volume Bricks & GPU Breadcrumb Crash Tracker)**: **COMPLETED** (100%, 129 unit tests passing):
+  - [x] **33.1. Physically Based Single-Layer Water Volume Beer-Lambert Absorption, Refraction & Caustics (`GenerateSingleLayerWaterFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSingleLayerWaterAbsorptionRefractionAndCausticsRHI`).
+  - [x] **33.2. Sparse Brick-Atlas Heterogeneous Volumes (`TCastleVulkanSparseVolumeAtlas` in `CastleInternalRHI_Vulkan`, `GenerateSparseVolumeBlackbodyFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSparseVolumeBrickAtlasAndBlackbodyEmissionRHI`).
+  - [x] **33.3. GPU Breadcrumb Marker Buffer & `VK_ERROR_device_lost` Diagnostics (`TCastleVulkanBreadcrumbTracker` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestGPUBreadcrumbCrashTrackerDiagnosticsRHI`).

@@ -165,6 +165,9 @@ type
     procedure TestHardwareMeshShaderStageAndTaskGroupsRHI;
     procedure TestVariableRateShadingTileClassifierRHI;
     procedure TestRuntimeVirtualTexturePageTableAndAtlasRHI;
+    procedure TestSingleLayerWaterAbsorptionRefractionAndCausticsRHI;
+    procedure TestSparseVolumeBrickAtlasAndBlackbodyEmissionRHI;
+    procedure TestGPUBreadcrumbCrashTrackerDiagnosticsRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -8917,6 +8920,135 @@ begin
     AssertEquals('Distinct RVT page (11,20) must allocate physical tile Y=0', 0, Integer(TileY1));
     AssertEquals('AllocatedTileCount must be 2', 2, Integer(Device.RuntimeVirtualTexture.AllocatedTileCount));
   finally
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSingleLayerWaterAbsorptionRefractionAndCausticsRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  WaterGLSL: String;
+  Transmittance: TVector3;
+  RefractZeroDepth, RefractDeep: TVector2;
+  CausticsZero, CausticsShallow: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Single-Layer Water GLSL 450 functions }
+    WaterGLSL := Gen.GenerateSingleLayerWaterFunctions;
+    AssertTrue('Single-Layer Water GLSL must include Beer-Lambert absorption, Snell refraction, and caustics',
+      (Pos('vec3 EvaluateWaterBeerLambertAbsorption(vec3 absorptionCoeffRGB, float opticalDepthMeters)', WaterGLSL) > 0) and
+      (Pos('vec2 ComputeWaterRefractionUVOffset(vec3 viewSpaceNormal, float waterDepthMeters,', WaterGLSL) > 0) and
+      (Pos('float EvaluateWaterCausticsPattern(vec2 worldXZ, float timeSeconds, float waterDepthMeters)', WaterGLSL) > 0));
+
+    { 2. Verify spectral Beer-Lambert absorption attenuates Red much faster than Green/Blue in natural water }
+    Transmittance := TCastleShaderGeneratorRHI.EvaluateWaterBeerLambertAbsorption(
+      Vector3(0.45, 0.08, 0.03), 3.0);
+    AssertTrue('Deep water transmittance must preserve Blue > Green > Red',
+      (Transmittance.Z > Transmittance.Y) and (Transmittance.Y > Transmittance.X));
+
+    { 3. Verify shoreline fade suppresses refraction offset at zero depth and scales at deep water }
+    RefractZeroDepth := TCastleShaderGeneratorRHI.ComputeWaterRefractionUVOffset(
+      Vector3(0.5, -0.25, 0.8), 0.0, 0.75, 0.1);
+    RefractDeep := TCastleShaderGeneratorRHI.ComputeWaterRefractionUVOffset(
+      Vector3(0.5, -0.25, 0.8), 4.0, 0.75, 0.1);
+    AssertSameValue(0.0, RefractZeroDepth.X, 1e-6);
+    AssertTrue('Deep water must produce non-zero Snell screen-space refraction offset',
+      Abs(RefractDeep.X) > 0.005);
+
+    { 4. Verify underwater caustics vanish at zero depth and illuminate shallow seabed }
+    CausticsZero    := TCastleShaderGeneratorRHI.EvaluateWaterCausticsPattern(Vector2(1.2, 3.4), 1.0, 0.0);
+    CausticsShallow := TCastleShaderGeneratorRHI.EvaluateWaterCausticsPattern(Vector2(0.0, 0.0), 0.0, 1.5);
+    AssertSameValue(0.0, CausticsZero, 1e-6);
+    AssertTrue('Shallow water seabed must receive positive photon caustics', CausticsShallow > 0.01);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSparseVolumeBrickAtlasAndBlackbodyEmissionRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  VolGLSL: String;
+  ColdRGB, RedHotRGB, WhiteHotRGB: TVector3;
+  Device: TVulkanRHIDevice;
+  Brick0, Brick0Repeat, Brick1: Cardinal;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Planckian Blackbody GLSL 450 functions }
+    VolGLSL := Gen.GenerateSparseVolumeBlackbodyFunctions;
+    AssertTrue('Sparse Volume Blackbody GLSL must include EvaluateBlackbodyEmissionRGB',
+      Pos('vec3 EvaluateBlackbodyEmissionRGB(float temperatureKelvin, float intensity)', VolGLSL) > 0);
+
+    { 2. Verify Planckian blackbody progression from cold (<500K) -> red/orange (1200K) -> white-hot (6000K) }
+    ColdRGB     := TCastleShaderGeneratorRHI.EvaluateBlackbodyEmissionRGB(300.0, 1.0);
+    RedHotRGB   := TCastleShaderGeneratorRHI.EvaluateBlackbodyEmissionRGB(1200.0, 1.0);
+    WhiteHotRGB := TCastleShaderGeneratorRHI.EvaluateBlackbodyEmissionRGB(6000.0, 1.0);
+    AssertSameValue(0.0, ColdRGB.Length, 1e-6);
+    AssertTrue('1200K fire emission must be dominated by red over blue',
+      (RedHotRGB.X > 0.25) and (RedHotRGB.X > RedHotRGB.Z * 2.0));
+    AssertTrue('6000K white-hot core must saturate R, G, and B channels',
+      (WhiteHotRGB.X > 0.9) and (WhiteHotRGB.Y > 0.9) and (WhiteHotRGB.Z > 0.5));
+  finally
+    FreeAndNil(Gen);
+  end;
+
+  { 3. Verify TCastleVulkanSparseVolumeAtlas 3D brick allocation and 3D rgba16f texture pool }
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6669)) );
+  try
+    Device.SparseVolumeAtlas.EnsureVolumeAtlasTextures;
+    AssertTrue('PhysicalBrickAtlasTexture must be allocated as a 3D 64x64x64 rgba16f texture',
+      (Device.SparseVolumeAtlas.PhysicalBrickAtlasTexture <> nil) and
+      (Device.SparseVolumeAtlas.PhysicalBrickAtlasTexture.Desc.Dimension = td3D) and
+      (Device.SparseVolumeAtlas.PhysicalBrickAtlasTexture.Desc.Width = 64));
+
+    AssertTrue(Device.SparseVolumeAtlas.AllocateVolumeBrick(2, 3, 4, Brick0));
+    AssertTrue(Device.SparseVolumeAtlas.AllocateVolumeBrick(2, 3, 4, Brick0Repeat));
+    AssertTrue(Device.SparseVolumeAtlas.AllocateVolumeBrick(5, 3, 4, Brick1));
+
+    AssertEquals('First sparse volume brick must receive index 0', 0, Integer(Brick0));
+    AssertEquals('Repeated allocation of brick (2,3,4) must return index 0', 0, Integer(Brick0Repeat));
+    AssertEquals('Second distinct sparse volume brick must receive index 1', 1, Integer(Brick1));
+    AssertEquals('AllocatedBrickCount must be 2', 2, Integer(Device.SparseVolumeAtlas.AllocatedBrickCount));
+  finally
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGPUBreadcrumbCrashTrackerDiagnosticsRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  MarkerShadow, MarkerGI: Cardinal;
+  CrashReport: String;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($666A)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    Device.BreadcrumbTracker.ResetBreadcrumbs;
+    CmdList.BeginRecording;
+
+    { ShadowMapPass completes normally; LumenTracePass remains active (simulating a GPU hang/TDR inside LumenTracePass) }
+    MarkerShadow := Device.BreadcrumbTracker.BeginBreadcrumbScope(CmdList, 'ShadowMapPass');
+    Device.BreadcrumbTracker.EndBreadcrumbScope(CmdList, MarkerShadow);
+
+    MarkerGI := Device.BreadcrumbTracker.BeginBreadcrumbScope(CmdList, 'LumenScreenProbeTracePass');
+    AssertEquals('Second breadcrumb marker ID must be 2', 2, Integer(MarkerGI));
+
+    CmdList.EndRecording;
+
+    AssertTrue('BreadcrumbBuffer must be allocated', Device.BreadcrumbTracker.BreadcrumbBuffer <> nil);
+    AssertEquals('TotalScopesRecorded must be 2', 2, Integer(Device.BreadcrumbTracker.TotalScopesRecorded));
+    AssertEquals('CompletedScopeCount must be 1', 1, Integer(Device.BreadcrumbTracker.CompletedScopeCount));
+    AssertEquals('ActiveScopeCount must be 1', 1, Integer(Device.BreadcrumbTracker.ActiveScopeCount));
+
+    CrashReport := Device.BreadcrumbTracker.FormatBreadcrumbCrashReport;
+    AssertTrue('Crash report must mark ShadowMapPass as COMPLETED and LumenScreenProbeTracePass as ACTIVE_IN_FLIGHT',
+      (Pos('ShadowMapPass -> COMPLETED', CrashReport) > 0) and
+      (Pos('LumenScreenProbeTracePass -> ACTIVE_IN_FLIGHT (SUSPECTED GPU HANG)', CrashReport) > 0));
+  finally
+    FreeAndNil(CmdList);
     FreeAndNil(Device);
   end;
 end;

@@ -1274,6 +1274,34 @@ type
       const APhysicalTileX, APhysicalTileY, APhysicalTilesPerRow: Cardinal;
       const ABorderTexelFraction: Single = 0.03125): TVector2; static;
 
+    { Phase 33.1: Generates GLSL 450 functions for Physically Based Single-Layer Water
+      (Beer-Lambert RGB optical absorption, Snell screen-space refraction offset, and photon caustics). }
+    function GenerateSingleLayerWaterFunctions: String;
+
+    { Phase 33.1 CPU reference: Evaluates Beer-Lambert spectral water transmittance exp(-sigma_a * depth). }
+    class function EvaluateWaterBeerLambertAbsorption(
+      const AAbsorptionCoeffRGB: TVector3;
+      const AOpticalDepthMeters: Single): TVector3; static;
+
+    { Phase 33.1 CPU reference: Computes depth-faded Snell screen-space refraction UV offset. }
+    class function ComputeWaterRefractionUVOffset(
+      const AViewSpaceNormal: TVector3;
+      const AWaterDepthMeters, AIORRatio, ARefractionStrength: Single): TVector2; static;
+
+    { Phase 33.1 CPU reference: Evaluates animated dual-wave interference underwater photon caustics. }
+    class function EvaluateWaterCausticsPattern(
+      const AWorldXZ: TVector2;
+      const ATimeSeconds, AWaterDepthMeters: Single): Single; static;
+
+    { Phase 33.2: Generates GLSL 450 functions for Sparse Heterogeneous Volume Brick Atlas
+      lookup and physically based Planckian Blackbody temperature-to-RGB emission. }
+    function GenerateSparseVolumeBlackbodyFunctions: String;
+
+    { Phase 33.2 CPU reference: Converts temperature in Kelvin (e.g. 1000K..10000K) to Planckian blackbody RGB radiance. }
+    class function EvaluateBlackbodyEmissionRGB(
+      const ATemperatureKelvin: Single;
+      const AIntensity: Single = 1.0): TVector3; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -6228,6 +6256,106 @@ begin
   Result := Vector2(
     (Single(APhysicalTileX) + PaddedU) * InvTiles,
     (Single(APhysicalTileY) + PaddedV) * InvTiles);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateSingleLayerWaterFunctions: String;
+begin
+  Result :=
+    '// Phase 33.1: Physically Based Single-Layer Water (Beer-Lambert Absorption, Snell Refraction & Caustics)' + NL +
+    'vec3 EvaluateWaterBeerLambertAbsorption(vec3 absorptionCoeffRGB, float opticalDepthMeters) {' + NL +
+    '  float d = max(0.0, opticalDepthMeters);' + NL +
+    '  return exp(-max(absorptionCoeffRGB, vec3(0.0)) * d);' + NL +
+    '}' + NL +
+    NL +
+    'vec2 ComputeWaterRefractionUVOffset(vec3 viewSpaceNormal, float waterDepthMeters,' + NL +
+    '  float iorRatio, float refractionStrength) {' + NL +
+    '  float shorelineFade = clamp(max(0.0, waterDepthMeters) * 0.5, 0.0, 1.0);' + NL +
+    '  float etaFactor = max(0.0, 1.0 - iorRatio);' + NL +
+    '  return viewSpaceNormal.xy * (etaFactor * refractionStrength * shorelineFade);' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateWaterCausticsPattern(vec2 worldXZ, float timeSeconds, float waterDepthMeters) {' + NL +
+    '  float d = max(0.0, waterDepthMeters);' + NL +
+    '  float depthEnvelope = clamp(d * 2.0, 0.0, 1.0) * exp(-d * 0.15);' + NL +
+    '  vec2 uv1 = worldXZ * 1.7 + vec2(timeSeconds * 0.8, -timeSeconds * 0.6);' + NL +
+    '  vec2 uv2 = worldXZ * 2.3 + vec2(-timeSeconds * 0.7, timeSeconds * 0.9);' + NL +
+    '  float wave1 = sin(uv1.x) * cos(uv1.y);' + NL +
+    '  float wave2 = sin(uv2.x + 1.57) * cos(uv2.y - 0.78);' + NL +
+    '  float focus = pow(max(0.0, 0.5 + 0.5 * (wave1 + wave2) * 0.5), 4.0);' + NL +
+    '  return focus * depthEnvelope;' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateWaterBeerLambertAbsorption(
+  const AAbsorptionCoeffRGB: TVector3;
+  const AOpticalDepthMeters: Single): TVector3;
+var
+  D: Single;
+begin
+  D := Max(0.0, AOpticalDepthMeters);
+  Result := Vector3(
+    Exp(-Max(0.0, AAbsorptionCoeffRGB.X) * D),
+    Exp(-Max(0.0, AAbsorptionCoeffRGB.Y) * D),
+    Exp(-Max(0.0, AAbsorptionCoeffRGB.Z) * D));
+end;
+
+class function TCastleShaderGeneratorRHI.ComputeWaterRefractionUVOffset(
+  const AViewSpaceNormal: TVector3;
+  const AWaterDepthMeters, AIORRatio, ARefractionStrength: Single): TVector2;
+var
+  ShorelineFade, EtaFactor, Scale: Single;
+begin
+  ShorelineFade := EnsureRange(Max(0.0, AWaterDepthMeters) * 0.5, 0.0, 1.0);
+  EtaFactor := Max(0.0, 1.0 - AIORRatio);
+  Scale := EtaFactor * ARefractionStrength * ShorelineFade;
+  Result := Vector2(AViewSpaceNormal.X * Scale, AViewSpaceNormal.Y * Scale);
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateWaterCausticsPattern(
+  const AWorldXZ: TVector2;
+  const ATimeSeconds, AWaterDepthMeters: Single): Single;
+var
+  D, DepthEnvelope, Wave1, Wave2, Focus: Single;
+  UV1, UV2: TVector2;
+begin
+  D := Max(0.0, AWaterDepthMeters);
+  DepthEnvelope := EnsureRange(D * 2.0, 0.0, 1.0) * Exp(-D * 0.15);
+  UV1 := Vector2(AWorldXZ.X * 1.7 + ATimeSeconds * 0.8, AWorldXZ.Y * 1.7 - ATimeSeconds * 0.6);
+  UV2 := Vector2(AWorldXZ.X * 2.3 - ATimeSeconds * 0.7, AWorldXZ.Y * 2.3 + ATimeSeconds * 0.9);
+  Wave1 := Sin(UV1.X) * Cos(UV1.Y);
+  Wave2 := Sin(UV2.X + 1.57) * Cos(UV2.Y - 0.78);
+  Focus := Power(Max(0.0, 0.5 + 0.25 * (Wave1 + Wave2)), 4.0);
+  Result := Focus * DepthEnvelope;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateSparseVolumeBlackbodyFunctions: String;
+begin
+  Result :=
+    '// Phase 33.2: Sparse Brick-Atlas Heterogeneous Volumes & Planckian Blackbody Emission' + NL +
+    'vec3 EvaluateBlackbodyEmissionRGB(float temperatureKelvin, float intensity) {' + NL +
+    '  if (temperatureKelvin < 500.0) return vec3(0.0);' + NL +
+    '  float t = clamp((temperatureKelvin - 800.0) / 5200.0, 0.0, 2.0);' + NL +
+    '  float r = clamp(1.5 * t + 0.2, 0.0, 1.0);' + NL +
+    '  float g = clamp(1.2 * t - 0.25, 0.0, 1.0);' + NL +
+    '  float b = clamp(1.4 * t - 0.85, 0.0, 1.0);' + NL +
+    '  return vec3(r, g, b) * max(0.0, intensity);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateBlackbodyEmissionRGB(
+  const ATemperatureKelvin: Single;
+  const AIntensity: Single): TVector3;
+var
+  T, R, G, B, SafeIntensity: Single;
+begin
+  if ATemperatureKelvin < 500.0 then
+    Exit(TVector3.Zero);
+  T := EnsureRange((ATemperatureKelvin - 800.0) / 5200.0, 0.0, 2.0);
+  R := EnsureRange(1.5 * T + 0.2, 0.0, 1.0);
+  G := EnsureRange(1.2 * T - 0.25, 0.0, 1.0);
+  B := EnsureRange(1.4 * T - 0.85, 0.0, 1.0);
+  SafeIntensity := Max(0.0, AIntensity);
+  Result := Vector3(R * SafeIntensity, G * SafeIntensity, B * SafeIntensity);
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

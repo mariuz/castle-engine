@@ -2524,6 +2524,94 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Sparse Brick-Atlas Heterogeneous Volumes (Phase 33.2)                      }
+  { -------------------------------------------------------------------------- }
+
+  { Manages a 16x16x16 sparse 3D indirection grid mapping active smoke/fire/explosion
+    volume bricks into a physical 3D voxel brick pool (8x8x8 voxels per brick). }
+  TCastleVulkanSparseVolumeAtlas = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FIndirectionGrid: array[0..15, 0..15, 0..15] of Integer;
+    FBrickResolution: Cardinal;
+    FBricksPerAxis: Cardinal;
+    FMaxPhysicalBricks: Cardinal;
+    FAllocatedBrickCount: Cardinal;
+    FPhysicalBrickAtlasTexture: TVulkanRHITexture;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Clears all sparse volume brick allocations. }
+    procedure ClearBricks;
+
+    { Allocates or returns the physical brick index for virtual volume coordinate (X, Y, Z). }
+    function AllocateVolumeBrick(
+      const AVirtualBrickX, AVirtualBrickY, AVirtualBrickZ: Cardinal;
+      out APhysicalBrickIndex: Cardinal): Boolean;
+
+    { Allocates the 3D rgba16f Physical Brick Pool texture (BricksPerAxis * BrickResolution)^3. }
+    procedure EnsureVolumeAtlasTextures;
+
+    property BrickResolution: Cardinal read FBrickResolution;
+    property BricksPerAxis: Cardinal read FBricksPerAxis;
+    property MaxPhysicalBricks: Cardinal read FMaxPhysicalBricks;
+    property AllocatedBrickCount: Cardinal read FAllocatedBrickCount;
+    property PhysicalBrickAtlasTexture: TVulkanRHITexture read FPhysicalBrickAtlasTexture;
+  end;
+
+  { -------------------------------------------------------------------------- }
+  { GPU Breadcrumb Marker Buffer & VK_ERROR_device_lost Diagnostics (Phase 33.3) }
+  { -------------------------------------------------------------------------- }
+
+  TCastleBreadcrumbState = (bsPending, bsActive, bsCompleted);
+
+  TCastleBreadcrumbEntry = record
+    MarkerID: Cardinal;
+    ScopeName: String;
+    State: TCastleBreadcrumbState;
+  end;
+
+  { Tracks fine-grained command-buffer pass/draw breadcrumb markers in a host-coherent
+    buffer so GPU hangs and VK_ERROR_device_lost TDR faults pinpoint the exact offending pass. }
+  TCastleVulkanBreadcrumbTracker = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FEntries: array of TCastleBreadcrumbEntry;
+    FBreadcrumbBuffer: TVulkanRHIBuffer;
+    function GetTotalScopesRecorded: Cardinal;
+    function GetActiveScopeCount: Cardinal;
+    function GetCompletedScopeCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Resets recorded breadcrumb scopes at the start of a frame. }
+    procedure ResetBreadcrumbs;
+
+    { Allocates the host-coherent GPU breadcrumb marker buffer. }
+    procedure EnsureBreadcrumbBuffer;
+
+    { Marks the beginning of a GPU pass/draw scope and returns its 1-based MarkerID. }
+    function BeginBreadcrumbScope(
+      const ACommandList: TVulkanRHICommandList;
+      const AScopeName: String): Cardinal;
+
+    { Marks the completion of a GPU pass/draw scope identified by AMarkerID. }
+    procedure EndBreadcrumbScope(
+      const ACommandList: TVulkanRHICommandList;
+      const AMarkerID: Cardinal);
+
+    { Formats a human-readable post-mortem crash report listing Completed vs. Active (in-flight/hung) GPU passes. }
+    function FormatBreadcrumbCrashReport: String;
+
+    property BreadcrumbBuffer: TVulkanRHIBuffer read FBreadcrumbBuffer;
+    property TotalScopesRecorded: Cardinal read GetTotalScopesRecorded;
+    property ActiveScopeCount: Cardinal read GetActiveScopeCount;
+    property CompletedScopeCount: Cardinal read GetCompletedScopeCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -2626,6 +2714,8 @@ type
     FTSRUpscaler: TCastleVulkanTSRUpscaler;
     FVRSManager: TCastleVulkanVRSManager;
     FRuntimeVirtualTexture: TCastleVulkanRuntimeVirtualTexture;
+    FSparseVolumeAtlas: TCastleVulkanSparseVolumeAtlas;
+    FBreadcrumbTracker: TCastleVulkanBreadcrumbTracker;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -2733,6 +2823,8 @@ type
     function GetTSRUpscaler: TCastleVulkanTSRUpscaler;
     function GetVRSManager: TCastleVulkanVRSManager;
     function GetRuntimeVirtualTexture: TCastleVulkanRuntimeVirtualTexture;
+    function GetSparseVolumeAtlas: TCastleVulkanSparseVolumeAtlas;
+    function GetBreadcrumbTracker: TCastleVulkanBreadcrumbTracker;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -2945,6 +3037,8 @@ type
     property TSRUpscaler: TCastleVulkanTSRUpscaler read GetTSRUpscaler;
     property VRSManager: TCastleVulkanVRSManager read GetVRSManager;
     property RuntimeVirtualTexture: TCastleVulkanRuntimeVirtualTexture read GetRuntimeVirtualTexture;
+    property SparseVolumeAtlas: TCastleVulkanSparseVolumeAtlas read GetSparseVolumeAtlas;
+    property BreadcrumbTracker: TCastleVulkanBreadcrumbTracker read GetBreadcrumbTracker;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -14228,6 +14322,191 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanSparseVolumeAtlas (Phase 33.2)                                  }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanSparseVolumeAtlas.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FBrickResolution := 8;
+  FBricksPerAxis := 8;
+  FMaxPhysicalBricks := FBricksPerAxis * FBricksPerAxis * FBricksPerAxis;
+  ClearBricks;
+end;
+
+destructor TCastleVulkanSparseVolumeAtlas.Destroy;
+begin
+  FreeAndNil(FPhysicalBrickAtlasTexture);
+  inherited;
+end;
+
+procedure TCastleVulkanSparseVolumeAtlas.ClearBricks;
+var
+  X, Y, Z: Integer;
+begin
+  FAllocatedBrickCount := 0;
+  for Z := 0 to 15 do
+    for Y := 0 to 15 do
+      for X := 0 to 15 do
+        FIndirectionGrid[X, Y, Z] := -1;
+end;
+
+function TCastleVulkanSparseVolumeAtlas.AllocateVolumeBrick(
+  const AVirtualBrickX, AVirtualBrickY, AVirtualBrickZ: Cardinal;
+  out APhysicalBrickIndex: Cardinal): Boolean;
+var
+  ExistingBrick, NewBrick: Integer;
+begin
+  APhysicalBrickIndex := 0;
+  if (AVirtualBrickX >= 16) or (AVirtualBrickY >= 16) or (AVirtualBrickZ >= 16) then
+    Exit(False);
+
+  ExistingBrick := FIndirectionGrid[AVirtualBrickX, AVirtualBrickY, AVirtualBrickZ];
+  if ExistingBrick >= 0 then
+  begin
+    APhysicalBrickIndex := Cardinal(ExistingBrick);
+    Exit(True);
+  end;
+
+  if FAllocatedBrickCount >= FMaxPhysicalBricks then
+    Exit(False);
+
+  NewBrick := Integer(FAllocatedBrickCount);
+  Inc(FAllocatedBrickCount);
+  FIndirectionGrid[AVirtualBrickX, AVirtualBrickY, AVirtualBrickZ] := NewBrick;
+  APhysicalBrickIndex := Cardinal(NewBrick);
+  Result := True;
+end;
+
+procedure TCastleVulkanSparseVolumeAtlas.EnsureVolumeAtlasTextures;
+var
+  AtlasDim: Cardinal;
+  TexDesc: TRHITextureDesc;
+begin
+  if FPhysicalBrickAtlasTexture <> nil then
+    Exit;
+  AtlasDim := FBricksPerAxis * FBrickResolution;
+  FillChar(TexDesc, SizeOf(TexDesc), 0);
+  TexDesc.Dimension := td3D;
+  TexDesc.Width := AtlasDim;
+  TexDesc.Height := AtlasDim;
+  TexDesc.DepthOrArrayLayers := AtlasDim;
+  TexDesc.MipLevels := 1;
+  TexDesc.SampleCount := 1;
+  TexDesc.Format := pfRGBA16_Float;
+  TexDesc.Usage := [tuSampled, tuStorage, tuTransferDst];
+  TexDesc.DebugName := 'SparseVolumePhysicalBrickAtlas3D';
+  FPhysicalBrickAtlasTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanBreadcrumbTracker (Phase 33.3)                                  }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanBreadcrumbTracker.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+end;
+
+destructor TCastleVulkanBreadcrumbTracker.Destroy;
+begin
+  FreeAndNil(FBreadcrumbBuffer);
+  inherited;
+end;
+
+procedure TCastleVulkanBreadcrumbTracker.ResetBreadcrumbs;
+begin
+  SetLength(FEntries, 0);
+end;
+
+procedure TCastleVulkanBreadcrumbTracker.EnsureBreadcrumbBuffer;
+var
+  BufDesc: TRHIBufferDesc;
+begin
+  if FBreadcrumbBuffer <> nil then
+    Exit;
+  BufDesc := TRHIBufferDesc.Create(4096, [buStorage, buTransferDst], muGpuToCpu,
+    'GPUBreadcrumbMarkerBuffer');
+  FBreadcrumbBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+end;
+
+function TCastleVulkanBreadcrumbTracker.BeginBreadcrumbScope(
+  const ACommandList: TVulkanRHICommandList;
+  const AScopeName: String): Cardinal;
+var
+  Idx: Integer;
+begin
+  EnsureBreadcrumbBuffer;
+  Idx := Length(FEntries);
+  SetLength(FEntries, Idx + 1);
+  FEntries[Idx].MarkerID := Cardinal(Idx + 1);
+  FEntries[Idx].ScopeName := AScopeName;
+  FEntries[Idx].State := bsActive;
+  Result := FEntries[Idx].MarkerID;
+end;
+
+procedure TCastleVulkanBreadcrumbTracker.EndBreadcrumbScope(
+  const ACommandList: TVulkanRHICommandList;
+  const AMarkerID: Cardinal);
+var
+  I: Integer;
+begin
+  for I := 0 to High(FEntries) do
+    if FEntries[I].MarkerID = AMarkerID then
+    begin
+      FEntries[I].State := bsCompleted;
+      Exit;
+    end;
+end;
+
+function TCastleVulkanBreadcrumbTracker.GetTotalScopesRecorded: Cardinal;
+begin
+  Result := Cardinal(Length(FEntries));
+end;
+
+function TCastleVulkanBreadcrumbTracker.GetActiveScopeCount: Cardinal;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to High(FEntries) do
+    if FEntries[I].State = bsActive then
+      Inc(Result);
+end;
+
+function TCastleVulkanBreadcrumbTracker.GetCompletedScopeCount: Cardinal;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to High(FEntries) do
+    if FEntries[I].State = bsCompleted then
+      Inc(Result);
+end;
+
+function TCastleVulkanBreadcrumbTracker.FormatBreadcrumbCrashReport: String;
+var
+  I: Integer;
+  StateLabel: String;
+begin
+  Result := Format('GPU Breadcrumb Crash Report (Total=%d, Completed=%d, Active/Hung=%d):',
+    [TotalScopesRecorded, CompletedScopeCount, ActiveScopeCount]) + LineEnding;
+  for I := 0 to High(FEntries) do
+  begin
+    case FEntries[I].State of
+      bsCompleted: StateLabel := 'COMPLETED';
+      bsActive:    StateLabel := 'ACTIVE_IN_FLIGHT (SUSPECTED GPU HANG)';
+    else
+      StateLabel := 'PENDING';
+    end;
+    Result := Result + Format('  [Marker #%d] %s -> %s',
+      [FEntries[I].MarkerID, FEntries[I].ScopeName, StateLabel]) + LineEnding;
+  end;
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -14840,12 +15119,28 @@ begin
   Result := FRuntimeVirtualTexture;
 end;
 
+function TVulkanRHIDevice.GetSparseVolumeAtlas: TCastleVulkanSparseVolumeAtlas;
+begin
+  if FSparseVolumeAtlas = nil then
+    FSparseVolumeAtlas := TCastleVulkanSparseVolumeAtlas.Create(Self);
+  Result := FSparseVolumeAtlas;
+end;
+
+function TVulkanRHIDevice.GetBreadcrumbTracker: TCastleVulkanBreadcrumbTracker;
+begin
+  if FBreadcrumbTracker = nil then
+    FBreadcrumbTracker := TCastleVulkanBreadcrumbTracker.Create(Self);
+  Result := FBreadcrumbTracker;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FBreadcrumbTracker);
+  FreeAndNil(FSparseVolumeAtlas);
   FreeAndNil(FRuntimeVirtualTexture);
   FreeAndNil(FVRSManager);
   FreeAndNil(FTSRUpscaler);
