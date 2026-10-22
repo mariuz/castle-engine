@@ -60,6 +60,7 @@ type
     procedure TestArrangeConeHexGridAndPushOutsideBox;
     procedure TestArrangeCubeFrameParaboloidBowlAndSnapToBoxSurface;
     procedure TestArrangeRoseCurveEllipsoidAndShearSelected;
+    procedure TestTwistTaperSphericalSpiralAndSuperellipse;
   end;
 
 implementation
@@ -2249,6 +2250,126 @@ begin
     // so local +Y tilts toward +X: WorldUp = (sin(ArcTan(0.5)), cos(ArcTan(0.5)), 0) = Vector3(0.5, 1.0, 0).Normalize!
     B4.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(0.5, 1.0, 0).Normalize, WorldUp.Normalize, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestTwistTaperSphericalSpiralAndSuperellipse;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  B1, B2, B3, B4, B5: TCastleBox;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.OnTransformModified := {$ifdef FPC}@{$endif}HandleTransformModified;
+    Manipulate.OnTransformModifyEnd := {$ifdef FPC}@{$endif}HandleTransformModifyEnd;
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(2, 2, 2);
+    B1.Translation := Vector3(10, -4, 0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(2, 2, 2);
+    B2.Translation := Vector3(10, 0, 0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(2, 2, 2);
+    B3.Translation := Vector3(10, 4, 0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(2, 2, 2);
+    B4.Translation := Vector3(-30, 0, 0);
+    Viewport.Items.Add(B4);
+
+    B5 := TCastleBox.Create(Viewport);
+    B5.Size := Vector3(2, 2, 2);
+    B5.Translation := Vector3(0, 0, 0);
+    Viewport.Items.Add(B5);
+
+    // 1. Test TwistSelected(1, Pi, true) around Y axis with Center = (0, 0, 0):
+    // Select B1(10, -4, 0), B2(10, 0, 0), B3(10, 4, 0), B4(-30, 0, 0) -> Center = (0, 0, 0).
+    // MinY = -4, MaxY = +4, Span = 8.
+    // B1 (Y=-4, NormT=-0.5, Angle=-Pi/2 around +Y): (10, -4, 0) -> (0, -4, 10)
+    // B2 (Y=0, NormT=0.0, Angle=0): (10, 0, 0) -> (10, 0, 0)
+    // B3 (Y=+4, NormT=+0.5, Angle=+Pi/2 around +Y): (10, 4, 0) -> (0, 4, -10)
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    Manipulate.PivotMode := pmSelectionCenter;
+    AssertTrue(Manipulate.TwistSelected(1, Pi, true));
+    AssertVectorEquals(Vector3(0, -4, 10), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10, 0, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 4, -10), B3.Translation, 1e-4);
+
+    // 2. Test TaperSelected(1, 0.5, true) along Y axis:
+    // Reset B1..B4 so Center = (0, 0, 0), MinY = -4 (B1), Mid Y = 0 (B2, B4), MaxY = +4 (B3).
+    // NormT(B1) = 0 -> ScaleF = 1.0 -> B1 stays at (10, -4, 0), Scale = (1, 1, 1)
+    // NormT(B2) = 0.5 -> ScaleF = 0.75 -> B2 moves to (7.5, 0, 0), Scale = (0.75, 1, 0.75)
+    // NormT(B3) = 1.0 -> ScaleF = 0.5 -> B3 moves to (5.0, 4, 0), Scale = (0.5, 1, 0.5)
+    B1.Rotation := Vector4(0, 1, 0, 0);
+    B2.Rotation := Vector4(0, 1, 0, 0);
+    B3.Rotation := Vector4(0, 1, 0, 0);
+    B4.Rotation := Vector4(0, 1, 0, 0);
+    B1.Translation := Vector3(10, -4, 0);
+    B2.Translation := Vector3(10, 0, 0);
+    B3.Translation := Vector3(10, 4, 0);
+    B4.Translation := Vector3(-30, 0, 0);
+    AssertTrue(Manipulate.TaperSelected(1, 0.5, true));
+    AssertVectorEquals(Vector3(10, -4, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(1, 1, 1), B1.Scale, 1e-4);
+    AssertVectorEquals(Vector3(7.5, 0, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.75, 1, 0.75), B2.Scale, 1e-4);
+    AssertVectorEquals(Vector3(5.0, 4, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.5, 1, 0.5), B3.Scale, 1e-4);
+
+    // 3. Test ArrangeSelectedInSphericalSpiral(10.0, 1.0, 1) on 5 transforms:
+    // Reset B1..B5 around Center = (0, 0, 0).
+    // i=0 (t=0): U=-1, Rho=0 -> bottom pole (0, -10, 0)
+    // i=2 (t=0.5): U=0, Rho=1, Theta=Pi -> equator (-10, 0, 0), outward normal (-1, 0, 0)
+    // i=4 (t=1): U=+1, Rho=0 -> top pole (0, 10, 0)
+    B1.Scale := Vector3(1, 1, 1);
+    B2.Scale := Vector3(1, 1, 1);
+    B3.Scale := Vector3(1, 1, 1);
+    B4.Scale := Vector3(1, 1, 1);
+    B1.Translation := Vector3(-2, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(0, 0, 0);
+    B4.Translation := Vector3(1, 0, 0);
+    B5.Translation := Vector3(2, 0, 0);
+    Manipulate.SetSelected([B1, B2, B3, B4, B5]);
+    AssertTrue(Manipulate.ArrangeSelectedInSphericalSpiral(10.0, 1.0, 1));
+    AssertVectorEquals(Vector3(0, -10, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-10, 0, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 10, 0), B5.Translation, 1e-4);
+    AssertSameValue(10.0, B2.Translation.Length, 1e-4);
+    AssertSameValue(10.0, B4.Translation.Length, 1e-4);
+    B3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(-1, 0, 0), WorldDir.Normalize, 1e-4);
+
+    // 4. Test ArrangeSelectedInSuperellipse(10.0, 8.0, 4.0, 1) on 4 transforms:
+    // Reset B1..B4 around Center = (0, 0, 0). N = 4 -> theta = 0, pi/2, pi, 3pi/2:
+    // i=0: (10, 0, 0) oriented inward (-1, 0, 0)
+    // i=1: (0, 0, 8) oriented inward (0, 0, -1)
+    // i=2: (-10, 0, 0) oriented inward (1, 0, 0)
+    // i=3: (0, 0, -8) oriented inward (0, 0, 1)
+    B1.Translation := Vector3(-3, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(1, 0, 0);
+    B4.Translation := Vector3(3, 0, 0);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.ArrangeSelectedInSuperellipse(10.0, 8.0, 4.0, 1));
+    AssertVectorEquals(Vector3(10, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, 8), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-10, 0, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, -8), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(-1, 0, 0), WorldDir.Normalize, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

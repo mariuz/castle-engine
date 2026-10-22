@@ -1171,6 +1171,69 @@ type
       const ShearAxis, ReferenceAxis: T3DAxis;
       const ShearFactor: Single;
       const TiltOrientation: Boolean = false): Boolean;
+
+    { Apply a 3D helical twist deformation around @code(TwistAxis) passing
+      through the active selection pivot $\mathbf(C)$ across all top-level
+      selected transforms (@code(SelectedCount >= 2)).
+      Each transform is rotated around @code(TwistAxis) by an angle linearly
+      interpolated from $-\text(TotalAngleRad)/2$ at the minimum coordinate
+      along @code(TwistAxis) to $+\text(TotalAngleRad)/2$ at the maximum
+      coordinate along @code(TwistAxis) (or by selection index if all items
+      share the same coordinate along @code(TwistAxis)).
+      When @code(RotateOrientations = true), also twists each transform's
+      orientation around @code(TwistAxis) by the same angle.
+      Returns @true if at least one selected transform was modified. }
+    function TwistSelected(
+      const TwistAxis: T3DAxis;
+      const TotalAngleRad: Single;
+      const RotateOrientations: Boolean = true): Boolean;
+
+    { Apply a linear 3D spatial taper (pinch / flare) deformation along
+      @code(TaperAxis) across all top-level selected transforms
+      (@code(SelectedCount >= 2)) relative to the active selection pivot $\mathbf(C)$.
+      For each transform with normalized position $t_i \in [0, 1]$ from the
+      minimum to maximum coordinate along @code(TaperAxis), scales its two
+      perpendicular world offsets from $\mathbf(C)$ by
+      $s_i = \operatorname(Lerp)(t_i, 1.0, \text(TopScaleFactor))$.
+      When @code(ScaleObjects = true), also scales each transform's local
+      @code(Scale) along the two perpendicular axes by $s_i$.
+      Returns @true if at least one selected transform was modified. }
+    function TaperSelected(
+      const TaperAxis: T3DAxis;
+      const TopScaleFactor: Single;
+      const ScaleObjects: Boolean = false): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along a continuous 3D pole-to-pole spherical spiral curve on a sphere
+      of radius @code(Radius) centered at the active selection pivot $\mathbf(C)$
+      with @code(Turns) full revolutions from bottom pole ($y = -R$) to top
+      pole ($y = +R$).
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient radially outward from the sphere center
+      - @code(2): orient along the analytical 3D spherical spiral tangent
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInSphericalSpiral(
+      const Radius, Turns: Single;
+      const OrientMode: Integer = 0): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      around a 3D Superellipse (Lamé curve / Squircle / Astroid star) on the
+      horizontal XZ plane centered at the active selection pivot $\mathbf(C)$:
+      $x(\theta) = C_x + R_x \operatorname(sgn)(\cos\theta)|\cos\theta|^(2/n)$,
+      $z(\theta) = C_z + R_z \operatorname(sgn)(\sin\theta)|\sin\theta|^(2/n)$.
+      - @code(ExponentN = 0.6667) ($p = 3$): 4-cusped Astroid star
+      - @code(ExponentN = 1.0) ($p = 2$): diamond / rhombus
+      - @code(ExponentN = 2.0) ($p = 1$): standard ellipse
+      - @code(ExponentN = 4.0) ($p = 0.5$): rounded squircle stadium
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient horizontally inward toward the center
+      - @code(2): orient horizontally outward from the center
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInSuperellipse(
+      const RadiusX, RadiusZ, ExponentN: Single;
+      const OrientMode: Integer = 0): Boolean;
   end;
 
 var
@@ -9207,6 +9270,416 @@ begin
     begin
       T.Rotation := (TiltQuat * QuatFromAxisAngle(T.Rotation)).ToAxisAngle;
       Result := true;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.TwistSelected(
+  const TwistAxis: T3DAxis;
+  const TotalAngleRad: Single;
+  const RotateOrientations: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  Count, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, AxisUnit, Offset: TVector3;
+  MinCoord, MaxCoord, Span, CoordVal, NormT, Angle: Single;
+  TwistQuat: TQuaternion;
+begin
+  Result := false;
+  if Abs(TotalAngleRad) < 1e-6 then Exit;
+
+  Count := 0;
+  SetLength(Items, FMaxSelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+    CenterPos := GetTransformWorkingPos(FMainSelected)
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  MinCoord := GetTransformWorkingPos(Items[0]).Data[TwistAxis];
+  MaxCoord := MinCoord;
+  for I := 1 to Count - 1 do
+  begin
+    CoordVal := GetTransformWorkingPos(Items[I]).Data[TwistAxis];
+    if CoordVal < MinCoord then MinCoord := CoordVal;
+    if CoordVal > MaxCoord then MaxCoord := CoordVal;
+  end;
+  Span := MaxCoord - MinCoord;
+
+  AxisUnit := TVector3.Zero;
+  AxisUnit.Data[TwistAxis] := 1.0;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+    if Span > 1e-5 then
+      NormT := ((CurPos.Data[TwistAxis] - MinCoord) / Span) - 0.5
+    else
+      NormT := (Single(I) / Single(Count - 1)) - 0.5;
+
+    Angle := NormT * TotalAngleRad;
+    Offset := CurPos - CenterPos;
+    TargetPos := CenterPos + RotatePointAroundAxisRad(Angle, Offset, AxisUnit);
+
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if RotateOrientations and (Abs(Angle) > 1e-5) then
+    begin
+      TwistQuat := QuatFromAxisAngle(Vector4(AxisUnit, Angle));
+      T.Rotation := (TwistQuat * QuatFromAxisAngle(T.Rotation)).ToAxisAngle;
+      Result := true;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.TaperSelected(
+  const TaperAxis: T3DAxis;
+  const TopScaleFactor: Single;
+  const ScaleObjects: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  Count, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, NewScale: TVector3;
+  MinCoord, MaxCoord, Span, CoordVal, NormT, ScaleF: Single;
+  Axis1, Axis2: T3DAxis;
+begin
+  Result := false;
+  if Abs(TopScaleFactor - 1.0) < 1e-6 then Exit;
+
+  Count := 0;
+  SetLength(Items, FMaxSelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+    CenterPos := GetTransformWorkingPos(FMainSelected)
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  MinCoord := GetTransformWorkingPos(Items[0]).Data[TaperAxis];
+  MaxCoord := MinCoord;
+  for I := 1 to Count - 1 do
+  begin
+    CoordVal := GetTransformWorkingPos(Items[I]).Data[TaperAxis];
+    if CoordVal < MinCoord then MinCoord := CoordVal;
+    if CoordVal > MaxCoord then MaxCoord := CoordVal;
+  end;
+  Span := MaxCoord - MinCoord;
+
+  Axis1 := T3DAxis((Ord(TaperAxis) + 1) mod 3);
+  Axis2 := T3DAxis((Ord(TaperAxis) + 2) mod 3);
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+    if Span > 1e-5 then
+      NormT := (CurPos.Data[TaperAxis] - MinCoord) / Span
+    else
+      NormT := Single(I) / Single(Count - 1);
+
+    ScaleF := Lerp(NormT, 1.0, TopScaleFactor);
+    TargetPos := CurPos;
+    TargetPos.Data[Axis1] := CenterPos.Data[Axis1] + (CurPos.Data[Axis1] - CenterPos.Data[Axis1]) * ScaleF;
+    TargetPos.Data[Axis2] := CenterPos.Data[Axis2] + (CurPos.Data[Axis2] - CenterPos.Data[Axis2]) * ScaleF;
+
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if ScaleObjects and (Abs(ScaleF - 1.0) > 1e-5) then
+    begin
+      NewScale := T.Scale;
+      NewScale.Data[Axis1] := Max(1e-4, NewScale.Data[Axis1] * Abs(ScaleF));
+      NewScale.Data[Axis2] := Max(1e-4, NewScale.Data[Axis2] * Abs(ScaleF));
+      if not TVector3.Equals(T.Scale, NewScale) then
+      begin
+        T.Scale := NewScale;
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInSphericalSpiral(
+  const Radius, Turns: Single;
+  const OrientMode: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  Count, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, GravityUp, LookDir, Side, NewUp: TVector3;
+  CurWorldPos, CurDir, CurUp: TVector3;
+  ActualR, ActualTurns, SumDist, FracT, U, Rho, RhoSafe, DRhoDT, DThetaDT, Theta, SinT, CosT, DX, DY, DZ: Single;
+begin
+  Result := false;
+  Count := 0;
+  SetLength(Items, FMaxSelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+    CenterPos := GetTransformWorkingPos(FMainSelected)
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  if Radius > 0 then
+    ActualR := Radius
+  else
+  begin
+    SumDist := 0;
+    for I := 0 to Count - 1 do
+      SumDist := SumDist + PointsDistance(GetTransformWorkingPos(Items[I]), CenterPos);
+    ActualR := SumDist / Count;
+    if ActualR < 1e-3 then
+      ActualR := 6.0;
+  end;
+
+  ActualTurns := Turns;
+  if Abs(ActualTurns) < 1e-4 then
+    ActualTurns := 2.0;
+
+  if (FMainSelected <> nil) and (FMainSelected.World <> nil) then
+  begin
+    GravityUp := FMainSelected.World.GravityUp;
+    if GravityUp.IsZero then
+      GravityUp := Vector3(0, 1, 0)
+    else
+      GravityUp := GravityUp.Normalize;
+  end else
+    GravityUp := Vector3(0, 1, 0);
+
+  DThetaDT := 2.0 * Pi * ActualTurns;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    FracT := Single(I) / Single(Count - 1);
+    U := 2.0 * FracT - 1.0; // U in [-1, 1] from bottom pole to top pole
+    Rho := Sqrt(Max(0.0, 1.0 - Sqr(U)));
+    Theta := DThetaDT * FracT;
+    SinCos(Theta, SinT, CosT);
+
+    TargetPos := Vector3(
+      CenterPos.X + ActualR * Rho * CosT,
+      CenterPos.Y + ActualR * U,
+      CenterPos.Z + ActualR * Rho * SinT
+    );
+
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      if OrientMode = 1 then
+      begin
+        LookDir := Vector3(Rho * CosT, U, Rho * SinT);
+      end else
+      begin
+        RhoSafe := Max(0.05, Rho);
+        DRhoDT := (-2.0 * U) / RhoSafe;
+        DX := DRhoDT * CosT - Rho * DThetaDT * SinT;
+        DY := 2.0;
+        DZ := DRhoDT * SinT + Rho * DThetaDT * CosT;
+        LookDir := Vector3(DX, DY, DZ);
+      end;
+
+      if LookDir.IsZero(1e-5) then
+        LookDir := Vector3(0, 1, 0);
+      LookDir := LookDir.Normalize;
+
+      Side := TVector3.CrossProduct(LookDir, GravityUp);
+      if Side.IsZero(1e-5) then
+        Side := Vector3(1, 0, 0);
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInSuperellipse(
+  const RadiusX, RadiusZ, ExponentN: Single;
+  const OrientMode: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  Count, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, GravityUp, LookDir, Side, NewUp: TVector3;
+  CurWorldPos, CurDir, CurUp: TVector3;
+  ActualRX, ActualRZ, PowerP, SumDist, AvgR, Theta, SinT, CosT, SignedCosP, SignedSinP: Single;
+begin
+  Result := false;
+  Count := 0;
+  SetLength(Items, FMaxSelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+    CenterPos := GetTransformWorkingPos(FMainSelected)
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  SumDist := 0;
+  for I := 0 to Count - 1 do
+    SumDist := SumDist + PointsDistance(GetTransformWorkingPos(Items[I]), CenterPos);
+  AvgR := SumDist / Count;
+  if AvgR < 1e-3 then
+    AvgR := 6.0;
+
+  if RadiusX > 0 then ActualRX := RadiusX else ActualRX := AvgR;
+  if RadiusZ > 0 then ActualRZ := RadiusZ else ActualRZ := AvgR;
+  PowerP := 2.0 / Max(0.1, ExponentN);
+
+  if (FMainSelected <> nil) and (FMainSelected.World <> nil) then
+  begin
+    GravityUp := FMainSelected.World.GravityUp;
+    if GravityUp.IsZero then
+      GravityUp := Vector3(0, 1, 0)
+    else
+      GravityUp := GravityUp.Normalize;
+  end else
+    GravityUp := Vector3(0, 1, 0);
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    Theta := (2.0 * Pi * I) / Count;
+    SinCos(Theta, SinT, CosT);
+
+    if Abs(CosT) < 1e-6 then
+      SignedCosP := 0.0
+    else
+      SignedCosP := Sign(CosT) * Power(Abs(CosT), PowerP);
+
+    if Abs(SinT) < 1e-6 then
+      SignedSinP := 0.0
+    else
+      SignedSinP := Sign(SinT) * Power(Abs(SinT), PowerP);
+
+    TargetPos := Vector3(
+      CenterPos.X + ActualRX * SignedCosP,
+      CenterPos.Y,
+      CenterPos.Z + ActualRZ * SignedSinP
+    );
+
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      if OrientMode = 1 then
+        LookDir := Vector3(CenterPos.X - TargetPos.X, 0, CenterPos.Z - TargetPos.Z)
+      else
+        LookDir := Vector3(TargetPos.X - CenterPos.X, 0, TargetPos.Z - CenterPos.Z);
+
+      if LookDir.IsZero(1e-5) then
+        LookDir := Vector3(CosT, 0, SinT);
+      LookDir := LookDir.Normalize;
+
+      Side := TVector3.CrossProduct(LookDir, GravityUp);
+      if Side.IsZero(1e-5) then
+        Side := Vector3(1, 0, 0);
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
     end;
   end;
 
