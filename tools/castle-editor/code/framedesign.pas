@@ -390,6 +390,9 @@ type
       ButtonCylindrifySelection: TButton;
       ButtonArrangeCassini: TButton;
       ButtonArrangeCatenoid: TButton;
+      ButtonBarrelPincushion: TButton;
+      ButtonArrangeHippopede: TButton;
+      ButtonArrangeHelicoid: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -430,6 +433,7 @@ type
       ButtonUIZigzag: TButton;
       ButtonUISpiral: TButton;
       ButtonUIHexGrid: TButton;
+      ButtonUIWaveArch: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -476,6 +480,7 @@ type
       MenuTreeViewItemSelectUIContainers: TMenuItem;
       MenuTreeViewItemSelectUIImagesAndLabels: TMenuItem;
       MenuTreeViewItemSelectUISizingMode: TMenuItem;
+      MenuTreeViewItemSelectUICustomStyle: TMenuItem;
       MenuTreeViewItemCopyTransform: TMenuItem;
       MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
@@ -611,6 +616,9 @@ type
     procedure ButtonCylindrifySelectionClick(Sender: TObject);
     procedure ButtonArrangeCassiniClick(Sender: TObject);
     procedure ButtonArrangeCatenoidClick(Sender: TObject);
+    procedure ButtonBarrelPincushionClick(Sender: TObject);
+    procedure ButtonArrangeHippopedeClick(Sender: TObject);
+    procedure ButtonArrangeHelicoidClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -640,6 +648,7 @@ type
     procedure ButtonUIZigzagClick(Sender: TObject);
     procedure ButtonUISpiralClick(Sender: TObject);
     procedure ButtonUIHexGridClick(Sender: TObject);
+    procedure ButtonUIWaveArchClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -693,6 +702,7 @@ type
     procedure MenuTreeViewItemSelectUIContainersClick(Sender: TObject);
     procedure MenuTreeViewItemSelectUIImagesAndLabelsClick(Sender: TObject);
     procedure MenuTreeViewItemSelectUISizingModeClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectUICustomStyleClick(Sender: TObject);
     procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
@@ -1411,6 +1421,22 @@ type
       const NeckCurvature: Single = 1.0;
       const OrientMode: Integer = 1);
     procedure ShowArrangeOnCatenoidDialog;
+    procedure BarrelPincushionSelection(
+      const Axis: Integer = 1;
+      const BulgeFactor: Single = 0.5;
+      const ScaleObjects: Boolean = false);
+    procedure ShowBarrelPincushionSelectionDialog;
+    procedure ArrangeSelectionInHippopede(
+      const Radius: Single = 0.0;
+      const PinchLambda: Single = 0.64;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeInHippopedeDialog;
+    procedure ArrangeSelectionOnHelicoid(
+      const OuterRadius: Single = 0.0;
+      const HeightSpan: Single = 10.0;
+      const Turns: Single = 1.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeOnHelicoidDialog;
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -1464,6 +1490,9 @@ type
     procedure ArrangeSelectedUserInterfacesInHexGrid(
       const GapPx: Single = 8.0;
       const PointyTop: Boolean = true);
+    procedure ArrangeSelectedUserInterfacesInWaveArch(
+      const Amplitude: Single = 48.0;
+      const ParabolicArchMode: Boolean = true);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -1519,6 +1548,7 @@ type
     procedure SelectUserInterfaceContainers(const WithinSelection: Boolean = false);
     procedure SelectUserInterfaceImagesAndLabels(const OnlyLabels: Boolean = false);
     procedure SelectUserInterfacesBySizingMode(const OnlyAutoOrFullSize: Boolean = false);
+    procedure SelectUserInterfacesWithCustomStyle(const OnlyCustomFont: Boolean = false);
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -2438,6 +2468,11 @@ begin
     begin
       Frame.ShowArrangeOnEllipsoidDialog;
       Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt, mkShift] then
+    begin
+      Frame.SelectUserInterfacesWithCustomStyle(false);
+      Exit(true);
     end;
   end;
 
@@ -2457,6 +2492,11 @@ begin
     if Event.ModifiersDown = [mkCtrl, mkAlt] then
     begin
       Frame.ShowArrangeInParaboloidBowlDialog;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt, mkShift] then
+    begin
+      Frame.ShowArrangeInHippopedeDialog;
       Exit(true);
     end;
   end;
@@ -2582,6 +2622,11 @@ begin
     if Event.ModifiersDown = [mkCtrl, mkAlt] then
     begin
       Frame.PushSelectionOutsidePrimaryBounds(true);
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt, mkShift] then
+    begin
+      Frame.ShowBarrelPincushionSelectionDialog;
       Exit(true);
     end;
   end;
@@ -2855,6 +2900,11 @@ begin
     if Event.ModifiersDown = [mkCtrl, mkAlt] then
     begin
       Frame.ShowArrangeInHexGridDialog;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt, mkShift] then
+    begin
+      Frame.ShowArrangeOnHelicoidDialog;
       Exit(true);
     end else
     if Event.ModifiersDown = [mkCtrl, mkShift] then
@@ -4703,6 +4753,36 @@ begin
   ButtonArrangeCatenoid.OnClick := @ButtonArrangeCatenoidClick;
   ButtonArrangeCatenoid.Parent := PanelLayoutTransform;
 
+  ButtonBarrelPincushion := TButton.Create(Self);
+  ButtonBarrelPincushion.Align := alTop;
+  ButtonBarrelPincushion.AutoSize := true;
+  ButtonBarrelPincushion.Caption := 'Barrel / Pincushion...';
+  ButtonBarrelPincushion.Hint := 'Apply 3D Barrel / Bulge or Pincushion / Hourglass Waist quadratic deformation along X, Y, or Z around the active pivot (Ctrl+Alt+Shift+B | Shift-click: dialog | Click: +0.5 Barrel Bulge + Scale | Ctrl-click: -0.45 Pincushion Hourglass + Scale)';
+  ButtonBarrelPincushion.ShowHint := true;
+  ButtonBarrelPincushion.BorderSpacing.Around := 2;
+  ButtonBarrelPincushion.OnClick := @ButtonBarrelPincushionClick;
+  ButtonBarrelPincushion.Parent := PanelLayoutTransform;
+
+  ButtonArrangeHippopede := TButton.Create(Self);
+  ButtonArrangeHippopede.Align := alTop;
+  ButtonArrangeHippopede.AutoSize := true;
+  ButtonArrangeHippopede.Caption := 'Hippopede Seam...';
+  ButtonArrangeHippopede.Hint := 'Arrange 2+ selected 3D transforms along a 3D Spherical Hippopede / Tennis-Ball Seam Curve around the active pivot (Ctrl+Alt+Shift+P | Shift-click: dialog | Click: outward sphere normal | Ctrl-click: curve tangent)';
+  ButtonArrangeHippopede.ShowHint := true;
+  ButtonArrangeHippopede.BorderSpacing.Around := 2;
+  ButtonArrangeHippopede.OnClick := @ButtonArrangeHippopedeClick;
+  ButtonArrangeHippopede.Parent := PanelLayoutTransform;
+
+  ButtonArrangeHelicoid := TButton.Create(Self);
+  ButtonArrangeHelicoid.Align := alTop;
+  ButtonArrangeHelicoid.AutoSize := true;
+  ButtonArrangeHelicoid.Caption := 'Helicoid Ramp...';
+  ButtonArrangeHelicoid.Hint := 'Arrange 2+ selected 3D transforms across a 3D Helicoid Minimal Surface / Archimedes Screw Ramp around the active pivot (Ctrl+Alt+Shift+H | Shift-click: dialog | Click: helicoid surface normal | Ctrl-click: helical tangent)';
+  ButtonArrangeHelicoid.ShowHint := true;
+  ButtonArrangeHelicoid.BorderSpacing.Around := 2;
+  ButtonArrangeHelicoid.OnClick := @ButtonArrangeHelicoidClick;
+  ButtonArrangeHelicoid.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -5017,6 +5097,14 @@ begin
   ButtonUIHexGrid.OnClick := @ButtonUIHexGridClick;
   ButtonUIHexGrid.Parent := PanelLayoutUI;
 
+  ButtonUIWaveArch := TButton.Create(Self);
+  ButtonUIWaveArch.AutoSize := true;
+  ButtonUIWaveArch.Caption := 'UI Wave / Arch';
+  ButtonUIWaveArch.Hint := 'Arrange 2+ selected 2D UI controls along a 2D Parabolic Arch Banner or Sine Wave Ribbon around their shared center (Click: +48px Parabolic Arch | Shift-click: +-48px Sine Wave Ribbon | Ctrl-click: -48px Inverted Bowl U-Curve)';
+  ButtonUIWaveArch.ShowHint := true;
+  ButtonUIWaveArch.OnClick := @ButtonUIWaveArchClick;
+  ButtonUIWaveArch.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -5275,6 +5363,11 @@ begin
   MenuTreeViewItemSelectUISizingMode.Caption := 'Select 2D UI By Responsive Sizing / Anchor Mode (Ctrl+Alt+Shift+S)';
   MenuTreeViewItemSelectUISizingMode.OnClick := @MenuTreeViewItemSelectUISizingModeClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectUISizingMode);
+
+  MenuTreeViewItemSelectUICustomStyle := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectUICustomStyle.Caption := 'Select 2D UI With Custom Styling / Font / Border (Ctrl+Alt+Shift+U)';
+  MenuTreeViewItemSelectUICustomStyle.OnClick := @MenuTreeViewItemSelectUICustomStyleClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectUICustomStyle);
 
   MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
   MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
@@ -8972,6 +9065,8 @@ begin
         ButtonUISpiral.Enabled := SelectedUICount >= 2;
       if ButtonUIHexGrid <> nil then
         ButtonUIHexGrid.Enabled := SelectedUICount >= 2;
+      if ButtonUIWaveArch <> nil then
+        ButtonUIWaveArch.Enabled := SelectedUICount >= 2;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -9142,6 +9237,12 @@ begin
       ButtonArrangeCassini.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonArrangeCatenoid <> nil then
       ButtonArrangeCatenoid.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonBarrelPincushion <> nil then
+      ButtonBarrelPincushion.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeHippopede <> nil then
+      ButtonArrangeHippopede.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeHelicoid <> nil then
+      ButtonArrangeHelicoid.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -10519,6 +10620,11 @@ begin
         ShowArrangeInHexGridDialog;
         Key := 0;
       end else
+      if Shift = [ssCtrl, ssAlt, ssShift] then
+      begin
+        ShowArrangeOnHelicoidDialog;
+        Key := 0;
+      end else
       if Shift = [ssCtrl, ssShift] then
       begin
         SelectHiddenComponents(false);
@@ -10793,6 +10899,11 @@ begin
       ShowArrangeOnEllipsoidDialog;
       Key := 0;
     end else
+    if (Key = Ord('U')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      SelectUserInterfacesWithCustomStyle(false);
+      Key := 0;
+    end else
     if (Key = Ord('N')) and (Shift = [ssCtrl, ssShift]) then
     begin
       SelectNonUniformlyScaledTransforms;
@@ -10973,6 +11084,11 @@ begin
       ShowArrangeInParaboloidBowlDialog;
       Key := 0;
     end else
+    if (Key = Ord('P')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowArrangeInHippopedeDialog;
+      Key := 0;
+    end else
     if (Key = Ord('M')) and (Shift = [ssCtrl, ssShift]) then
     begin
       MatchSelectedTransformRotation(false, false);
@@ -11031,6 +11147,11 @@ begin
     if (Key = Ord('B')) and (Shift = [ssCtrl, ssAlt]) then
     begin
       PushSelectionOutsidePrimaryBounds(true);
+      Key := 0;
+    end else
+    if (Key = Ord('B')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowBarrelPincushionSelectionDialog;
       Key := 0;
     end else
     if (Key = Ord('E')) and (Shift = [ssCtrl, ssShift]) then
@@ -16487,6 +16608,155 @@ begin
     ArrangeSelectionOnCatenoid(0.0, 8.0, 1.0, 1);
 end;
 
+procedure TDesignFrame.BarrelPincushionSelection(
+  const Axis: Integer; const BulgeFactor: Single;
+  const ScaleObjects: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.BarrelPincushionSelected(
+      Axis, BulgeFactor, ScaleObjects);
+end;
+
+procedure TDesignFrame.ShowBarrelPincushionSelectionDialog;
+var
+  Prompts: array[0..2] of string;
+  Values: array[0..2] of string;
+  AxisVal, ScaleVal: Integer;
+  BulgeVal: Single;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Longitudinal Axis (0 = X, 1 = Y, 2 = Z):';
+  Prompts[1] := 'Bulge / Pinch Factor (>0 = Barrel Bulge, <0 = Pincushion / Hourglass Waist):';
+  Prompts[2] := 'Scale Objects Transversely (0 = Positions only, 1 = Scale transverse axes too):';
+
+  Values[0] := '1';
+  Values[1] := '0.5';
+  Values[2] := '1';
+
+  if InputQuery('Barrel / Pincushion / Hourglass Waist Deformation', Prompts, Values) then
+  begin
+    AxisVal := Clamped(StrToIntDef(Trim(Values[0]), 1), 0, 2);
+    BulgeVal := StrToFloatDefDot(Trim(Values[1]), 0.5);
+    ScaleVal := StrToIntDef(Trim(Values[2]), 1);
+    BarrelPincushionSelection(AxisVal, BulgeVal, ScaleVal <> 0);
+  end;
+end;
+
+procedure TDesignFrame.ButtonBarrelPincushionClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowBarrelPincushionSelectionDialog
+  else if ssCtrl in ShiftState then
+    BarrelPincushionSelection(1, -0.45, true)
+  else
+    BarrelPincushionSelection(1, 0.5, true);
+end;
+
+procedure TDesignFrame.ArrangeSelectionInHippopede(
+  const Radius, PinchLambda: Single; const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInHippopede(
+      Radius, PinchLambda, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInHippopedeDialog;
+var
+  Prompts: array[0..2] of string;
+  Values: array[0..2] of string;
+  R, Lambda: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Sphere Radius R (0 = auto from selection):';
+  Prompts[1] := 'Pinch Parameter Lambda (0.01..0.99; 0.5 = Viviani figure-8, 0.64 = Tennis-ball seam):';
+  Prompts[2] := 'Orientation (0 = keep, 1 = outward sphere normal, 2 = curve tangent):';
+
+  Values[0] := '0';
+  Values[1] := '0.64';
+  Values[2] := '1';
+
+  if InputQuery('Arrange Selected in 3D Hippopede / Spherical Tennis-Ball Seam Curve', Prompts, Values) then
+  begin
+    R := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    Lambda := Clamped(StrToFloatDefDot(Trim(Values[1]), 0.64), 0.01, 0.99);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[2]), 1), 0, 2);
+    ArrangeSelectionInHippopede(R, Lambda, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeHippopedeClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInHippopedeDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionInHippopede(0.0, 0.64, 2)
+  else
+    ArrangeSelectionInHippopede(0.0, 0.64, 1);
+end;
+
+procedure TDesignFrame.ArrangeSelectionOnHelicoid(
+  const OuterRadius, HeightSpan, Turns: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedOnHelicoid(
+      OuterRadius, HeightSpan, Turns, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeOnHelicoidDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  ROuter, HSpan, TurnsVal: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Outer Rim Radius XZ (0 = auto from selection):';
+  Prompts[1] := 'Vertical Height Span Y:';
+  Prompts[2] := 'Helical Revolutions / Turns:';
+  Prompts[3] := 'Orientation (0 = keep, 1 = helicoid surface normal, 2 = helical tangent):';
+
+  Values[0] := '0';
+  Values[1] := '10';
+  Values[2] := '1.0';
+  Values[3] := '1';
+
+  if InputQuery('Arrange Selected on 3D Helicoid Minimal Surface / Archimedes Screw Ramp', Prompts, Values) then
+  begin
+    ROuter := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    HSpan := StrToFloatDefDot(Trim(Values[1]), 10.0);
+    TurnsVal := StrToFloatDefDot(Trim(Values[2]), 1.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[3]), 1), 0, 2);
+    ArrangeSelectionOnHelicoid(ROuter, HSpan, TurnsVal, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeHelicoidClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeOnHelicoidDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionOnHelicoid(0.0, 10.0, 1.0, 2)
+  else
+    ArrangeSelectionOnHelicoid(0.0, 10.0, 1.0, 1);
+end;
+
 procedure TDesignFrame.StopPilotTransform;
 var
   SavedName: String;
@@ -19203,6 +19473,105 @@ begin
   else
     Gap := 8.0;
   ArrangeSelectedUserInterfacesInHexGrid(Gap, not (ssShift in ShiftState));
+end;
+
+procedure TDesignFrame.ArrangeSelectedUserInterfacesInWaveArch(
+  const Amplitude: Single; const ParabolicArchMode: Boolean);
+var
+  Selected: TComponentList;
+  SelectedCount, I, N, ChangedCount: Integer;
+  UIList: TCastleUserInterfaceList;
+  UI: TCastleUserInterface;
+  R: TFloatRectangle;
+  MinX, MaxX, MinY, MaxY, TotalW, AvgW, SpanX, CenterX, CenterY: Single;
+  U, NormS, TargetX, TargetY, CurCX, CurCY, DeltaX, DeltaY: Single;
+begin
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if Selected = nil then Exit;
+
+    UIList := TCastleUserInterfaceList.Create(false);
+    try
+      for I := 0 to SelectedCount - 1 do
+        if (Selected[I] is TCastleUserInterface) and
+           (Selected[I] <> DesignRoot) and
+           (not IsComponentLocked(Selected[I])) then
+        begin
+          UI := TCastleUserInterface(Selected[I]);
+          if (UI.Parent <> nil) and (UI.UIScale > 0) and (not UI.FullSize) then
+            UIList.Add(UI);
+        end;
+
+      N := UIList.Count;
+      if N < 2 then Exit;
+
+      MinX := MaxSingle;
+      MaxX := -MaxSingle;
+      MinY := MaxSingle;
+      MaxY := -MaxSingle;
+      TotalW := 0.0;
+
+      for I := 0 to N - 1 do
+      begin
+        R := UIList[I].RenderRectWithBorder;
+        MinX := Min(MinX, R.Center.X);
+        MaxX := Max(MaxX, R.Center.X);
+        MinY := Min(MinY, R.Center.Y);
+        MaxY := Max(MaxY, R.Center.Y);
+        TotalW := TotalW + R.Width;
+      end;
+
+      CenterX := (MinX + MaxX) * 0.5;
+      CenterY := (MinY + MaxY) * 0.5;
+      AvgW := TotalW / N;
+      SpanX := Max(MaxX - MinX, (N - 1) * (AvgW + 8.0));
+
+      ChangedCount := 0;
+      for I := 0 to N - 1 do
+      begin
+        UI := UIList[I];
+        U := I / (N - 1);
+        NormS := 2.0 * U - 1.0; // -1..+1
+        TargetX := CenterX + NormS * (SpanX * 0.5);
+        if ParabolicArchMode then
+          TargetY := CenterY + Amplitude * (0.5 - Sqr(NormS))
+        else
+          TargetY := CenterY + Amplitude * Sin(2.0 * Pi * U);
+
+        R := UI.RenderRectWithBorder;
+        CurCX := R.Center.X;
+        CurCY := R.Center.Y;
+        DeltaX := TargetX - CurCX;
+        DeltaY := TargetY - CurCY;
+        if (Abs(DeltaX) > 0.01) or (Abs(DeltaY) > 0.01) then
+        begin
+          UI.Translation := UI.Translation + Vector2(DeltaX / UI.UIScale, DeltaY / UI.UIScale);
+          Inc(ChangedCount);
+        end;
+      end;
+
+      if ChangedCount > 0 then
+        ModifiedOutsideObjectInspector(
+          Format('Arrange %d UI control(s) in wave / parabolic arch banner', [ChangedCount]), ucHigh);
+    finally
+      FreeAndNil(UIList);
+    end;
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUIWaveArchClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ArrangeSelectedUserInterfacesInWaveArch(48.0, false)
+  else if ssCtrl in ShiftState then
+    ArrangeSelectedUserInterfacesInWaveArch(-48.0, true)
+  else
+    ArrangeSelectedUserInterfacesInWaveArch(48.0, true);
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -22843,6 +23212,64 @@ end;
 procedure TDesignFrame.MenuTreeViewItemSelectUISizingModeClick(Sender: TObject);
 begin
   SelectUserInterfacesBySizingMode(ssShift in GetKeyShiftState);
+end;
+
+procedure TDesignFrame.SelectUserInterfacesWithCustomStyle(const OnlyCustomFont: Boolean);
+var
+  NewSelection: TComponentList;
+  TreeNode: TTreeNode;
+  C: TComponent;
+  UI: TCastleUserInterface;
+  HasFontOverride, Matches: Boolean;
+begin
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C is TCastleUserInterface) and (C <> DesignRoot) and
+         (not (C is TCastleViewport)) and
+         Selectable(C) and (not IsComponentLocked(C)) then
+      begin
+        UI := TCastleUserInterface(C);
+        if UI.Exists then
+        begin
+          HasFontOverride :=
+            ((UI is TCastleUserInterfaceFont) and
+             ((TCastleUserInterfaceFont(UI).CustomFont <> nil) or
+              (TCastleUserInterfaceFont(UI).FontSize > 0.0))) or
+            ((UI is TCastleCheckbox) and
+             ((TCastleCheckbox(UI).CustomFont <> nil) or
+              (TCastleCheckbox(UI).FontSize > 0.0)));
+
+          if OnlyCustomFont then
+            Matches := HasFontOverride
+          else
+            Matches := HasFontOverride or
+                       (UI.CustomTheme <> nil) or
+                       ((UI.Border <> nil) and
+                        ((UI.Border.TotalWidth > 0.0) or (UI.Border.TotalHeight > 0.0))) or
+                       ((UI is TCastleButton) and
+                        (TCastleButton(UI).CustomBackground or TCastleButton(UI).CustomTextColorUse));
+
+          if Matches and (NewSelection.IndexOf(UI) = -1) then
+            NewSelection.Add(UI);
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectUICustomStyleClick(Sender: TObject);
+begin
+  SelectUserInterfacesWithCustomStyle(ssShift in GetKeyShiftState);
 end;
 
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;

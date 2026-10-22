@@ -68,6 +68,7 @@ type
     procedure TestSwirlKnotCurveAndGeodesicDome;
     procedure TestRadialFalloffCycloidAndHyperboloid;
     procedure TestCylindrifyCassiniOvalAndCatenoid;
+    procedure TestBarrelHippopedeAndHelicoid;
   end;
 
 implementation
@@ -3068,6 +3069,91 @@ begin
     AssertSameValue(4.0 * Cosh(1.0), Hypot(B3.Translation.X, B3.Translation.Z), 1e-4);
     B1.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(1.0, Sinh(1.0), 0.0).Normalize, WorldDir.Normalize, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestBarrelHippopedeAndHelicoid;
+var
+  Viewport: TCastleViewport;
+  B1, B2, B3, B4: TCastleBox;
+  Manipulate: TCastleTransformManipulate;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    B1 := TCastleBox.Create(Viewport);
+    B2 := TCastleBox.Create(Viewport);
+    B3 := TCastleBox.Create(Viewport);
+    B4 := TCastleBox.Create(Viewport);
+    Viewport.Items.Add(B1);
+    Viewport.Items.Add(B2);
+    Viewport.Items.Add(B3);
+    Viewport.Items.Add(B4);
+
+    // 1. Test BarrelPincushionSelected(1, 0.5, true):
+    // Symmetric positions around Center = (0, 0, 0) with MaxAbsAlong = 6.0:
+    // B1(4, 0, 0) at u = 0 -> ScaleFactor = 1.5 -> Pos = (6, 0, 0), Scale = (1.5, 1.0, 1.5)
+    // B2(-4, 0, 0) at u = 0 -> ScaleFactor = 1.5 -> Pos = (-6, 0, 0)
+    // B3(2, 6, 0) at u = +1 -> ScaleFactor = 1.0 -> Pos = (2, 6, 0), Scale = (1, 1, 1)
+    // B4(-2, -6, 0) at u = -1 -> ScaleFactor = 1.0 -> Pos = (-2, -6, 0)
+    B1.Translation := Vector3(4, 0, 0);
+    B2.Translation := Vector3(-4, 0, 0);
+    B3.Translation := Vector3(2, 6, 0);
+    B4.Translation := Vector3(-2, -6, 0);
+    Manipulate.PivotMode := pmSelectionCenter;
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+
+    AssertTrue(Manipulate.BarrelPincushionSelected(1, 0.5, true));
+    AssertVectorEquals(Vector3(6, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(1.5, 1.0, 1.5), B1.Scale, 1e-4);
+    AssertVectorEquals(Vector3(-6, 0, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(2, 6, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(1.0, 1.0, 1.0), B3.Scale, 1e-4);
+    AssertVectorEquals(Vector3(-2, -6, 0), B4.Translation, 1e-4);
+
+    // Reset scales and test ArrangeSelectedInHippopede(10.0, 0.64, 1):
+    // SqrtLambda = 0.8, SqrtOneMinus = 0.6:
+    // B1 (t = 0): (10, 0, 0)
+    // B2 (t = Pi/2): (0, 8, 6), outward sphere normal = (0, 0.8, 0.6)
+    // B3 (t = Pi): (-10, 0, 0)
+    // B4 (t = 3*Pi/2): (0, -8, -6)
+    B1.Scale := Vector3(1, 1, 1);
+    B2.Scale := Vector3(1, 1, 1);
+    B3.Scale := Vector3(1, 1, 1);
+    B4.Scale := Vector3(1, 1, 1);
+    B1.Translation := Vector3(-2, 0, 0);
+    B2.Translation := Vector3(2, 0, 0);
+    B3.Translation := Vector3(0, 0, -2);
+    B4.Translation := Vector3(0, 0, 2);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.ArrangeSelectedInHippopede(10.0, 0.64, 1));
+    AssertVectorEquals(Vector3(10, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 8, 6), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-10, 0, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, -8, -6), B4.Translation, 1e-4);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 0.8, 0.6), WorldDir.Normalize, 1e-4);
+
+    // 3. Test ArrangeSelectedOnHelicoid(4.0, 6.0 * Pi, 1.0, 1):
+    // Select B1, B2, B3 around Center = (0, 0, 0):
+    // PitchC = (6*Pi) / (2*Pi) = 3.0, R = 4.0:
+    // B1 (i=0, u=-1, Theta=-Pi, s=+4): (-4, -3*Pi, 0)
+    // B2 (i=1, u=0, Theta=0, s=-4): (-4, 0, 0), helicoid surface normal = Normalize(0, 4, -3) = (0, 0.8, -0.6)
+    // B3 (i=2, u=+1, Theta=+Pi, s=+4): (-4, +3*Pi, 0)
+    B1.Translation := Vector3(-2, 0, 0);
+    B2.Translation := Vector3(0, 0, 0);
+    B3.Translation := Vector3(2, 0, 0);
+    Manipulate.SetSelected([B1, B2, B3]);
+    AssertTrue(Manipulate.ArrangeSelectedOnHelicoid(4.0, 6.0 * Pi, 1.0, 1));
+    AssertVectorEquals(Vector3(-4.0, -3.0 * Pi, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-4.0, 0.0, 0.0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-4.0, 3.0 * Pi, 0.0), B3.Translation, 1e-4);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.0, 0.8, -0.6), WorldDir.Normalize, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

@@ -1640,6 +1640,55 @@ type
       const HeightSpan: Single = 8.0;
       const NeckCurvature: Single = 1.0;
       const OrientMode: Integer = 1): Boolean;
+
+    { Deform all top-level selected transforms (@code(SelectedCount >= 2))
+      radially perpendicular to @code(Axis) ($0 = X, 1 = Y, 2 = Z$) around the
+      active selection pivot $\mathbf(C)$ using a quadratic Barrel bulge
+      (@code(BulgeFactor > 0)) or Pincushion / Corset waist pinch
+      (@code(BulgeFactor < 0)):
+      $$u_i = \text(Clamped)\left(\frac(P_(\text(axis),i) - C_(\text(axis)))(H_(\text(half))), -1, 1\right), \quad
+        s(u_i) = \max\left(0.05, \; 1.0 + \text(BulgeFactor) \cdot (1.0 - u_i^2)\right)$$
+      When @code(ScaleObjects) is @true, each transform's local @code(Scale)
+      perpendicular to @code(Axis) is also multiplied by $s(u_i)$.
+      Returns @true if at least one selected transform was modified. }
+    function BarrelPincushionSelected(
+      const Axis: Integer = 1;
+      const BulgeFactor: Single = 0.5;
+      const ScaleObjects: Boolean = false): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along a 3D Spherical Hippopede (Eudoxus Kampyle / Horse-Fetter curve on a
+      sphere of radius @code(Radius) centered at the active selection pivot $\mathbf(C)$):
+      $$r_(xz)(t) = R\sqrt(\max(0, 1 - \lambda\sin^2 t)), \quad \lambda = \text(Clamped)(\text(PinchLambda), 0, 1)$$
+      $$x(t) = C_x + r_(xz)(t)\cos t, \quad y(t) = C_y + R\sqrt(\lambda)\sin t, \quad z(t) = C_z + r_(xz)(t)\sin t$$
+      Every point lies identically on the sphere $(x - C_x)^2 + (y - C_y)^2 + (z - C_z)^2 = R^2$.
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the outward sphere normal
+      - @code(2): orient forward along the 3D Hippopede curve tangent
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInHippopede(
+      const Radius: Single = 0.0;
+      const PinchLambda: Single = 0.64;
+      const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      across a 3D Ruled Helicoid Minimal Surface (Archimedes screw / spiral ramp shell)
+      centered at the active selection pivot $\mathbf(C)$ with outer blade radius
+      @code(OuterRadius), vertical span @code(HeightSpan), and @code(Turns) revolutions:
+      $$u_i = -1 + \frac(2i)(N - 1), \quad y_i = C_y + \frac(H)(2)u_i, \quad
+        \theta_i = \pi \cdot \text(Turns) \cdot u_i, \quad s_i = (-1)^i R_(\text(outer))$$
+      $$x_i = C_x + s_i \cos\theta_i, \quad z_i = C_z + s_i \sin\theta_i$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the analytical Helicoid minimal-surface normal $(c\sin\theta_i, R, -c\cos\theta_i)$
+      - @code(2): orient forward along the straight horizontal Helicoid ruling $(\cos\theta_i, 0, \sin\theta_i)$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedOnHelicoid(
+      const OuterRadius: Single = 0.0;
+      const HeightSpan: Single = 10.0;
+      const Turns: Single = 1.0;
+      const OrientMode: Integer = 1): Boolean;
   end;
 
 var
@@ -12581,6 +12630,340 @@ begin
       begin
         { Catenary meridian tangent pointing upward along the profile }
         LookDir := Vector3(DrDy * CosT, 1.0, DrDy * SinT);
+      end;
+      LookDir := LookDir.Normalize;
+
+      if Abs(LookDir.Y) > 0.99 then
+        Side := TVector3.CrossProduct(LookDir, Vector3(0, 0, 1))
+      else
+        Side := TVector3.CrossProduct(LookDir, Vector3(0, 1, 0));
+      if Side.LengthSqr <= Sqr(1e-5) then
+        Side := Vector3(-SinT, 0.0, CosT);
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.BarrelPincushionSelected(
+  const Axis: Integer;
+  const BulgeFactor: Single;
+  const ScaleObjects: Boolean): Boolean;
+var
+  I, Count, SpineAxis, Perp1, Perp2: Integer;
+  T: TCastleTransform;
+  Targets: array of TCastleTransform;
+  Center, OldWorldPos, NewWorldPos, WorldDelta, LocalDelta, NewScale: TVector3;
+  MaxAbsAlong, HalfSpan, U, ScalePerp: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  Count := 0;
+  SetLength(Targets, SelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+    if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+    begin
+      Targets[Count] := Boxes[I].Parent;
+      Inc(Count);
+    end;
+
+  if Count < 2 then Exit;
+
+  SpineAxis := Clamped(Axis, 0, 2);
+  Perp1 := (SpineAxis + 1) mod 3;
+  Perp2 := (SpineAxis + 2) mod 3;
+
+  if (FPivotMode = pmPrimarySelected) and (Targets[0] <> nil) then
+    Center := GetTransformWorkingPos(Targets[0])
+  else
+    Center := SelectionWorkingCenter;
+
+  MaxAbsAlong := 0.0;
+  for I := 0 to Count - 1 do
+  begin
+    OldWorldPos := GetTransformWorkingPos(Targets[I]);
+    MaxAbsAlong := Max(MaxAbsAlong, Abs(OldWorldPos.Data[SpineAxis] - Center.Data[SpineAxis]));
+  end;
+  HalfSpan := Max(1e-4, MaxAbsAlong);
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Targets[I];
+    if T.Parent = nil then Continue;
+
+    OldWorldPos := GetTransformWorkingPos(T);
+    if MaxAbsAlong > 1e-4 then
+      U := Clamped((OldWorldPos.Data[SpineAxis] - Center.Data[SpineAxis]) / HalfSpan, -1.0, 1.0)
+    else
+      U := 0.0;
+
+    ScalePerp := Max(0.05, 1.0 + BulgeFactor * (1.0 - Sqr(U)));
+
+    NewWorldPos := OldWorldPos;
+    NewWorldPos.Data[Perp1] := Center.Data[Perp1] + (OldWorldPos.Data[Perp1] - Center.Data[Perp1]) * ScalePerp;
+    NewWorldPos.Data[Perp2] := Center.Data[Perp2] + (OldWorldPos.Data[Perp2] - Center.Data[Perp2]) * ScalePerp;
+
+    WorldDelta := NewWorldPos - OldWorldPos;
+    if WorldDelta.LengthSqr > Sqr(1e-5) then
+    begin
+      LocalDelta := T.Parent.WorldToLocalDirection(WorldDelta);
+      T.Translation := T.Translation + LocalDelta;
+      Result := true;
+    end;
+
+    if ScaleObjects and (Abs(ScalePerp - 1.0) > 1e-4) then
+    begin
+      NewScale := T.Scale;
+      NewScale.Data[Perp1] := NewScale.Data[Perp1] * ScalePerp;
+      NewScale.Data[Perp2] := NewScale.Data[Perp2] * ScalePerp;
+      T.Scale := NewScale;
+      Result := true;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInHippopede(
+  const Radius: Single;
+  const PinchLambda: Single;
+  const OrientMode: Integer): Boolean;
+const
+  DeltaTheta = 1e-3;
+var
+  I, Count: Integer;
+  T: TCastleTransform;
+  Targets: array of TCastleTransform;
+  Center, OldWorldPos, NewWorldPos, WorldDelta, LocalDelta: TVector3;
+  PosMinus, PosPlus, LookDir, CurWorldPos, CurDir, CurUp, Side, NewUp: TVector3;
+  ActualRadius, Lambda, SqrtLambda, AvgDist, Theta: Single;
+
+  function EvalHippopedePoint(const Angle: Single): TVector3;
+  var
+    SinT, CosT, RXZ: Single;
+  begin
+    SinCos(Angle, SinT, CosT);
+    RXZ := ActualRadius * Sqrt(Max(0.0, 1.0 - Lambda * Sqr(SinT)));
+    Result := Vector3(
+      Center.X + RXZ * CosT,
+      Center.Y + ActualRadius * SqrtLambda * SinT,
+      Center.Z + RXZ * SinT);
+  end;
+
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  Count := 0;
+  SetLength(Targets, SelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+    if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+    begin
+      Targets[Count] := Boxes[I].Parent;
+      Inc(Count);
+    end;
+
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (Targets[0] <> nil) then
+    Center := GetTransformWorkingPos(Targets[0])
+  else
+    Center := SelectionWorkingCenter;
+
+  Lambda := Clamped(PinchLambda, 0.0, 1.0);
+  SqrtLambda := Sqrt(Lambda);
+
+  ActualRadius := Radius;
+  if ActualRadius <= 1e-4 then
+  begin
+    AvgDist := 0.0;
+    for I := 0 to Count - 1 do
+      AvgDist := AvgDist + PointsDistance(GetTransformWorkingPos(Targets[I]), Center);
+    AvgDist := AvgDist / Single(Count);
+    if AvgDist > 1e-4 then
+      ActualRadius := AvgDist
+    else
+      ActualRadius := 6.0;
+  end;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Targets[I];
+    if T.Parent = nil then Continue;
+
+    Theta := (2.0 * Pi * Single(I)) / Single(Count);
+    OldWorldPos := GetTransformWorkingPos(T);
+    NewWorldPos := EvalHippopedePoint(Theta);
+
+    WorldDelta := NewWorldPos - OldWorldPos;
+    if WorldDelta.LengthSqr > Sqr(1e-5) then
+    begin
+      LocalDelta := T.Parent.WorldToLocalDirection(WorldDelta);
+      T.Translation := T.Translation + LocalDelta;
+      Result := true;
+    end;
+
+    if (OrientMode = 1) or (OrientMode = 2) then
+    begin
+      if OrientMode = 1 then
+      begin
+        LookDir := NewWorldPos - Center;
+        if LookDir.LengthSqr <= Sqr(1e-5) then
+          LookDir := Vector3(Cos(Theta), 0.0, Sin(Theta));
+      end else
+      begin
+        PosMinus := EvalHippopedePoint(Theta - DeltaTheta);
+        PosPlus := EvalHippopedePoint(Theta + DeltaTheta);
+        LookDir := PosPlus - PosMinus;
+        if LookDir.LengthSqr <= Sqr(1e-5) then
+          LookDir := Vector3(-Sin(Theta), 0.0, Cos(Theta));
+      end;
+      LookDir := LookDir.Normalize;
+
+      if Abs(LookDir.Y) > 0.99 then
+        Side := TVector3.CrossProduct(LookDir, Vector3(0, 0, 1))
+      else
+        Side := TVector3.CrossProduct(LookDir, Vector3(0, 1, 0));
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedOnHelicoid(
+  const OuterRadius: Single;
+  const HeightSpan: Single;
+  const Turns: Single;
+  const OrientMode: Integer): Boolean;
+var
+  I, Count: Integer;
+  T: TCastleTransform;
+  Targets: array of TCastleTransform;
+  Center, OldWorldPos, NewWorldPos, WorldDelta, LocalDelta: TVector3;
+  LookDir, CurWorldPos, CurDir, CurUp, Side, NewUp: TVector3;
+  ActualRadius, ActualHeight, ActualTurns, PitchPerRad, AvgDist, U, Theta, SinT, CosT, SignedS: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  Count := 0;
+  SetLength(Targets, SelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+    if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+    begin
+      Targets[Count] := Boxes[I].Parent;
+      Inc(Count);
+    end;
+
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (Targets[0] <> nil) then
+    Center := GetTransformWorkingPos(Targets[0])
+  else
+    Center := SelectionWorkingCenter;
+
+  ActualRadius := OuterRadius;
+  if ActualRadius <= 1e-4 then
+  begin
+    AvgDist := 0.0;
+    for I := 0 to Count - 1 do
+    begin
+      OldWorldPos := GetTransformWorkingPos(Targets[I]);
+      AvgDist := AvgDist + Hypot(OldWorldPos.X - Center.X, OldWorldPos.Z - Center.Z);
+    end;
+    AvgDist := AvgDist / Single(Count);
+    if AvgDist > 1e-4 then
+      ActualRadius := AvgDist
+    else
+      ActualRadius := 5.0;
+  end;
+
+  ActualHeight := HeightSpan;
+  if ActualHeight <= 1e-4 then
+    ActualHeight := ActualRadius * 2.0;
+
+  ActualTurns := Turns;
+  if Abs(ActualTurns) <= 1e-4 then
+    ActualTurns := 1.0;
+
+  PitchPerRad := ActualHeight / (2.0 * Pi * ActualTurns);
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Targets[I];
+    if T.Parent = nil then Continue;
+
+    U := -1.0 + (2.0 * Single(I)) / Single(Count - 1);
+    Theta := Pi * ActualTurns * U;
+    SinCos(Theta, SinT, CosT);
+    if (I and 1) = 0 then
+      SignedS := ActualRadius
+    else
+      SignedS := -ActualRadius;
+
+    OldWorldPos := GetTransformWorkingPos(T);
+    NewWorldPos := Vector3(
+      Center.X + SignedS * CosT,
+      Center.Y + 0.5 * ActualHeight * U,
+      Center.Z + SignedS * SinT);
+
+    WorldDelta := NewWorldPos - OldWorldPos;
+    if WorldDelta.LengthSqr > Sqr(1e-5) then
+    begin
+      LocalDelta := T.Parent.WorldToLocalDirection(WorldDelta);
+      T.Translation := T.Translation + LocalDelta;
+      Result := true;
+    end;
+
+    if (OrientMode = 1) or (OrientMode = 2) then
+    begin
+      if OrientMode = 1 then
+      begin
+        { Analytical Helicoid minimal-surface normal: (c*sin Theta, R, -c*cos Theta) }
+        LookDir := Vector3(PitchPerRad * SinT, ActualRadius, -PitchPerRad * CosT);
+      end else
+      begin
+        { Straight horizontal Helicoid ruling direction }
+        LookDir := Vector3(CosT, 0.0, SinT);
       end;
       LookDir := LookDir.Normalize;
 
