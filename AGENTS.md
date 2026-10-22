@@ -77,10 +77,10 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–37**: **COMPLETED** (100%).
-- **Phase 38 (GPU-Driven MegaGeometry / Displaced Subdivision Micro-Meshes, Dual-Quaternion Skinning DQS & Per-Instance Custom Data SSBO)**: **COMPLETED** (100%, 144 unit tests passing):
-  - [x] **38.1. Dual-Quaternion Skinning (DQS) Volume-Preserving Joint Blending (`GenerateDualQuaternionSkinningFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestDualQuaternionSkinningVolumePreservationRHI`).
-  - [x] **38.2. Displaced Micro-Mesh Barycentric Tessellation & Crack-Free Edge Snapping (`GenerateDisplacedMicroMeshFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestDisplacedMicroMeshBarycentricsAndEdgeSnappingRHI`).
-  - [x] **38.3. GPU Per-Instance Custom Float4 Payload Manager (`TCastleVulkanPerInstanceCustomData` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanPerInstanceCustomDataSSBORHI`).
-- **Unreal Engine 5.5+ Extended Roadmap (Phase 39)**:
-  - **Phase 39 (Neural Radiance Cache / MLP Denoising, Optical Flow & R2 Spatio-Temporal Blue-Noise)**: `TCastleVulkanNeuralDenoiser`, `GenerateOpticalFlowBlockMatchingShader`, and `EvaluateR2Sequence2D`.
+- **Phases 1–38**: **COMPLETED** (100%).
+- **Phase 39 (Neural / ML Cooperative Matrix Denoising & Radiance Caching, Spatio-Temporal Blue-Noise Stipple & Optical Flow Block Matching)**: **COMPLETED** (100%, 147 unit tests passing):
+  - [x] **39.1. Optical Flow SAD Block Matching & Sub-Pixel Motion Estimation (`GenerateOpticalFlowBlockMatchingShader` in `CastleInternalShaderRHI`)** — Completed & tested (`TestOpticalFlowBlockMatchingAndSubpixelOffsetRHI`).
+  - [x] **39.2. Golden-Ratio Spatio-Temporal Blue-Noise Dither & R2 Sequence (`GenerateSpatioTemporalBlueNoiseFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSpatioTemporalBlueNoiseAndR2SequenceRHI`).
+  - [x] **39.3. Cooperative Matrix MLP Inference Manager (`TCastleVulkanNeuralDenoiser` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanNeuralDenoiserMLPInferenceRHI`).
+- **Unreal Engine 5.5+ Extended Roadmap (Phase 40)**:
+  - **Phase 40 (Shader Execution Reordering SER, Dual-Source Colored Glass & Programmable MSAA Sample Positions)**: `PackSERCoherenceHintKey`, `EvaluateDualSourceGlassOutputs`, and `TCastleVulkanProgrammableSampleLocations`.

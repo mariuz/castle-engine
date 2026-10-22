@@ -183,6 +183,9 @@ type
     procedure TestDualQuaternionSkinningVolumePreservationRHI;
     procedure TestDisplacedMicroMeshBarycentricsAndEdgeSnappingRHI;
     procedure TestVulkanPerInstanceCustomDataSSBORHI;
+    procedure TestOpticalFlowBlockMatchingAndSubpixelOffsetRHI;
+    procedure TestSpatioTemporalBlueNoiseAndR2SequenceRHI;
+    procedure TestVulkanNeuralDenoiserMLPInferenceRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -9527,6 +9530,105 @@ begin
       (Device.PerInstanceCustomData.InstanceCustomDataBuffer.Desc.Size = 64));
     AssertEquals('UploadCount must be 1', 1, Integer(Device.PerInstanceCustomData.UploadCount));
   finally
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestOpticalFlowBlockMatchingAndSubpixelOffsetRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  FlowGLSL: String;
+  SADZero, SADDiff: Single;
+  SubpixSym, SubpixShift: TVector2;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Optical Flow SAD Block Matching GLSL 450 functions }
+    FlowGLSL := Gen.GenerateOpticalFlowBlockMatchingShader;
+    AssertTrue('Optical Flow GLSL must include EvaluateOpticalFlowPatchSAD and EstimateParabolicSubpixelOffset',
+      (Pos('float EvaluateOpticalFlowPatchSAD(vec4 patchCurr, vec4 patchPrev)', FlowGLSL) > 0) and
+      (Pos('vec2 EstimateParabolicSubpixelOffset(float sadLeft, float sadCenter, float sadRight,', FlowGLSL) > 0));
+
+    { 2. Verify SAD evaluation on 2x2 luma patches }
+    SADZero := TCastleShaderGeneratorRHI.EvaluateOpticalFlowPatchSAD(
+      Vector4(0.5, 0.5, 0.5, 0.5), Vector4(0.5, 0.5, 0.5, 0.5));
+    SADDiff := TCastleShaderGeneratorRHI.EvaluateOpticalFlowPatchSAD(
+      Vector4(0.5, 0.5, 0.5, 0.5), Vector4(0.25, 0.75, 0.25, 0.75));
+    AssertSameValue(0.0, SADZero, 1e-6);
+    AssertSameValue(1.0, SADDiff, 1e-5);
+
+    { 3. Verify parabolic sub-pixel motion refinement }
+    SubpixSym   := TCastleShaderGeneratorRHI.EstimateParabolicSubpixelOffset(4.0, 1.0, 4.0, 3.0, 3.0);
+    SubpixShift := TCastleShaderGeneratorRHI.EstimateParabolicSubpixelOffset(5.0, 1.0, 2.0, 3.0, 3.0);
+    AssertSameValue(0.0, SubpixSym.X, 1e-6);
+    AssertSameValue(0.0, SubpixSym.Y, 1e-6);
+    AssertTrue('Lower SAD on right neighbor must produce positive sub-pixel X shift',
+      (SubpixShift.X > 0.1) and (SubpixShift.X <= 0.5));
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSpatioTemporalBlueNoiseAndR2SequenceRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  BNGLSL: String;
+  P0, P1: TVector2;
+  J0, J1: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Spatio-Temporal Blue-Noise & R2 Sequence GLSL 450 functions }
+    BNGLSL := Gen.GenerateSpatioTemporalBlueNoiseFunctions;
+    AssertTrue('Blue-Noise GLSL must include EvaluateR2Sequence2D and EvaluateTemporalBlueNoiseJitter',
+      (Pos('vec2 EvaluateR2Sequence2D(uint sampleIndex)', BNGLSL) > 0) and
+      (Pos('float EvaluateTemporalBlueNoiseJitter(float baseBlueNoise, uint frameIndex)', BNGLSL) > 0));
+
+    { 2. Verify Martin Roberts 2D R2 low-discrepancy sequence stays in [0..1)^2 and advances quasi-uniformly }
+    P0 := TCastleShaderGeneratorRHI.EvaluateR2Sequence2D(0);
+    P1 := TCastleShaderGeneratorRHI.EvaluateR2Sequence2D(1);
+    AssertTrue('R2 sequence points must lie in [0..1)^2 and be well-separated',
+      (P0.X >= 0.0) and (P0.X < 1.0) and (P0.Y >= 0.0) and (P0.Y < 1.0) and
+      ((P1 - P0).Length > 0.2));
+
+    { 3. Verify golden-ratio temporal blue-noise rotation }
+    J0 := TCastleShaderGeneratorRHI.EvaluateTemporalBlueNoiseJitter(0.25, 0);
+    J1 := TCastleShaderGeneratorRHI.EvaluateTemporalBlueNoiseJitter(0.25, 1);
+    AssertSameValue(0.25, J0, 1e-5);
+    AssertSameValue(0.25 + 0.61803398875, J1, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanNeuralDenoiserMLPInferenceRHI;
+var
+  ActPos, ActNeg: Single;
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+begin
+  { 1. Verify Linear + ReLU activation }
+  ActPos := TCastleVulkanNeuralDenoiser.EvaluateLinearReLU4(
+    Vector4(1.0, 2.0, 0.5, 0.0), Vector4(0.5, 0.25, 1.0, 0.0), 0.25);
+  ActNeg := TCastleVulkanNeuralDenoiser.EvaluateLinearReLU4(
+    Vector4(1.0, 1.0, 1.0, 1.0), Vector4(-1.0, -1.0, 0.0, 0.0), 0.5);
+  AssertSameValue(1.75, ActPos, 1e-5);
+  AssertSameValue(0.0, ActNeg, 1e-6);
+
+  { 2. Verify TCastleVulkanNeuralDenoiser resource allocation and compute dispatch }
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6671)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    Device.NeuralDenoiser.HiddenUnits := 32;
+    CmdList.BeginRecording;
+    Device.NeuralDenoiser.DispatchNeuralInference(CmdList, 1920, 1080);
+    CmdList.EndRecording;
+
+    AssertTrue('MLPWeightsBuffer must be allocated', Device.NeuralDenoiser.MLPWeightsBuffer <> nil);
+    AssertTrue('DenoisedOutputTexture must be allocated', Device.NeuralDenoiser.DenoisedOutputTexture <> nil);
+    AssertEquals('InferenceDispatchCount must be 1', 1, Integer(Device.NeuralDenoiser.InferenceDispatchCount));
+  finally
+    FreeAndNil(CmdList);
     FreeAndNil(Device);
   end;
 end;

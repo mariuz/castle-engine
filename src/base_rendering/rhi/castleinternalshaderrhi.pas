@@ -1421,6 +1421,29 @@ type
       const ABaryUV: TVector2;
       const ASubdivisionSegments: Cardinal): TVector2; static;
 
+    { Phase 39.1: Generates GLSL 450 Optical Flow SAD Block Matching & parabolic sub-pixel motion estimation functions. }
+    function GenerateOpticalFlowBlockMatchingShader: String;
+
+    { Phase 39.1 CPU reference: Computes Sum of Absolute Differences (SAD) between two 2x2 luma patches. }
+    class function EvaluateOpticalFlowPatchSAD(
+      const APatchCurr, APatchPrev: TVector4): Single; static;
+
+    { Phase 39.1 CPU reference: Estimates parabolic sub-pixel motion offset [-0.5..0.5]^2 from 5-point SAD neighbors. }
+    class function EstimateParabolicSubpixelOffset(
+      const ASADLeft, ASADCenter, ASADRight, ASADDown, ASADUp: Single): TVector2; static;
+
+    { Phase 39.2: Generates GLSL 450 Martin Roberts R2 low-discrepancy sequence and golden-ratio spatio-temporal blue-noise functions. }
+    function GenerateSpatioTemporalBlueNoiseFunctions: String;
+
+    { Phase 39.2 CPU reference: Evaluates the 2D quasi-random R2 sequence in [0..1)^2 for ASampleIndex. }
+    class function EvaluateR2Sequence2D(
+      const ASampleIndex: Cardinal): TVector2; static;
+
+    { Phase 39.2 CPU reference: Rotates a spatial blue-noise value [0..1) temporally using the golden ratio conjugate. }
+    class function EvaluateTemporalBlueNoiseJitter(
+      const ABaseBlueNoise: Single;
+      const AFrameIndex: Cardinal): Single; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -6924,6 +6947,88 @@ begin
   U := EnsureRange(Round(EnsureRange(ABaryUV.X, 0.0, 1.0) * N) / N, 0.0, 1.0);
   V := EnsureRange(Round(EnsureRange(ABaryUV.Y, 0.0, 1.0) * N) / N, 0.0, 1.0 - U);
   Result := Vector2(U, V);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateOpticalFlowBlockMatchingShader: String;
+begin
+  Result :=
+    '// Phase 39.1: Optical Flow SAD Block Matching & Parabolic Sub-Pixel Motion Estimation' + NL +
+    'float EvaluateOpticalFlowPatchSAD(vec4 patchCurr, vec4 patchPrev) {' + NL +
+    '  vec4 diff = abs(patchCurr - patchPrev);' + NL +
+    '  return diff.x + diff.y + diff.z + diff.w;' + NL +
+    '}' + NL +
+    NL +
+    'vec2 EstimateParabolicSubpixelOffset(float sadLeft, float sadCenter, float sadRight,' + NL +
+    '  float sadDown, float sadUp) {' + NL +
+    '  float denomX = max(1e-5, sadLeft - 2.0 * sadCenter + sadRight);' + NL +
+    '  float denomY = max(1e-5, sadDown - 2.0 * sadCenter + sadUp);' + NL +
+    '  float dx = clamp((sadLeft - sadRight) / (2.0 * denomX), -0.5, 0.5);' + NL +
+    '  float dy = clamp((sadDown - sadUp) / (2.0 * denomY), -0.5, 0.5);' + NL +
+    '  return vec2(dx, dy);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateOpticalFlowPatchSAD(
+  const APatchCurr, APatchPrev: TVector4): Single;
+begin
+  Result :=
+    Abs(APatchCurr.X - APatchPrev.X) +
+    Abs(APatchCurr.Y - APatchPrev.Y) +
+    Abs(APatchCurr.Z - APatchPrev.Z) +
+    Abs(APatchCurr.W - APatchPrev.W);
+end;
+
+class function TCastleShaderGeneratorRHI.EstimateParabolicSubpixelOffset(
+  const ASADLeft, ASADCenter, ASADRight, ASADDown, ASADUp: Single): TVector2;
+var
+  DenomX, DenomY, DX, DY: Single;
+begin
+  DenomX := Max(1e-5, ASADLeft - 2.0 * ASADCenter + ASADRight);
+  DenomY := Max(1e-5, ASADDown - 2.0 * ASADCenter + ASADUp);
+  DX := EnsureRange((ASADLeft - ASADRight) / (2.0 * DenomX), -0.5, 0.5);
+  DY := EnsureRange((ASADDown - ASADUp) / (2.0 * DenomY), -0.5, 0.5);
+  Result := Vector2(DX, DY);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateSpatioTemporalBlueNoiseFunctions: String;
+begin
+  Result :=
+    '// Phase 39.2: Martin Roberts R2 Quasi-Random Sequence & Golden-Ratio Spatio-Temporal Blue-Noise' + NL +
+    'vec2 EvaluateR2Sequence2D(uint sampleIndex) {' + NL +
+    '  const vec2 alpha = vec2(0.7548776662466927, 0.5698402909980532);' + NL +
+    '  return fract(vec2(0.5) + float(sampleIndex + 1u) * alpha);' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateTemporalBlueNoiseJitter(float baseBlueNoise, uint frameIndex) {' + NL +
+    '  const float goldenConj = 0.6180339887498949;' + NL +
+    '  return fract(baseBlueNoise + float(frameIndex & 63u) * goldenConj);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateR2Sequence2D(
+  const ASampleIndex: Cardinal): TVector2;
+const
+  Alpha1 = 0.7548776662466927;
+  Alpha2 = 0.5698402909980532;
+var
+  N: Double;
+begin
+  N := Double(ASampleIndex) + 1.0;
+  Result := Vector2(
+    Single(Frac(0.5 + N * Alpha1)),
+    Single(Frac(0.5 + N * Alpha2)));
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateTemporalBlueNoiseJitter(
+  const ABaseBlueNoise: Single;
+  const AFrameIndex: Cardinal): Single;
+const
+  GoldenConj = 0.6180339887498949;
+var
+  Raw: Double;
+begin
+  Raw := EnsureRange(ABaseBlueNoise, 0.0, 1.0) + Double(AFrameIndex and 63) * GoldenConj;
+  Result := Single(Frac(Raw));
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

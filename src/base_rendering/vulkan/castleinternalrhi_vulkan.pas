@@ -2876,6 +2876,48 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Neural Radiance Cache & Cooperative Matrix MLP Denoiser (Phase 39.3)       }
+  { -------------------------------------------------------------------------- }
+
+  { Manages GPU MLP network weight SSBOs and compute inference dispatches for
+    neural radiance caching and ray-reconstruction denoising. }
+  TCastleVulkanNeuralDenoiser = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FWidth: Cardinal;
+    FHeight: Cardinal;
+    FHiddenUnits: Cardinal;
+    FMLPWeightsBuffer: TVulkanRHIBuffer;
+    FDenoisedOutputTexture: TVulkanRHITexture;
+    FInferenceDispatchCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Evaluates a 4-input linear layer with ReLU activation: max(0.0, dot(input, weights) + bias). }
+    class function EvaluateLinearReLU4(
+      const AInput, AWeights: TVector4;
+      const ABias: Single): Single; static;
+
+    { Allocates the MLP network weights SSBO and the rgba16f denoised output texture. }
+    procedure EnsureNeuralResources(const AWidth, AHeight: Cardinal);
+
+    { Dispatches the neural MLP inference compute pass over (AWidth x AHeight) tiles. }
+    procedure DispatchNeuralInference(
+      const ACommandList: TVulkanRHICommandList;
+      const AWidth, AHeight: Cardinal;
+      const APipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property Width: Cardinal read FWidth;
+    property Height: Cardinal read FHeight;
+    property HiddenUnits: Cardinal read FHiddenUnits write FHiddenUnits;
+    property MLPWeightsBuffer: TVulkanRHIBuffer read FMLPWeightsBuffer;
+    property DenoisedOutputTexture: TVulkanRHITexture read FDenoisedOutputTexture;
+    property InferenceDispatchCount: Cardinal read FInferenceDispatchCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -2986,6 +3028,7 @@ type
     FXPBDSimulator: TCastleVulkanXPBDSimulator;
     FMultiviewStereoManager: TCastleVulkanMultiviewStereoManager;
     FPerInstanceCustomData: TCastleVulkanPerInstanceCustomData;
+    FNeuralDenoiser: TCastleVulkanNeuralDenoiser;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -3101,6 +3144,7 @@ type
     function GetXPBDSimulator: TCastleVulkanXPBDSimulator;
     function GetMultiviewStereoManager: TCastleVulkanMultiviewStereoManager;
     function GetPerInstanceCustomData: TCastleVulkanPerInstanceCustomData;
+    function GetNeuralDenoiser: TCastleVulkanNeuralDenoiser;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -3321,6 +3365,7 @@ type
     property XPBDSimulator: TCastleVulkanXPBDSimulator read GetXPBDSimulator;
     property MultiviewStereoManager: TCastleVulkanMultiviewStereoManager read GetMultiviewStereoManager;
     property PerInstanceCustomData: TCastleVulkanPerInstanceCustomData read GetPerInstanceCustomData;
+    property NeuralDenoiser: TCastleVulkanNeuralDenoiser read GetNeuralDenoiser;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -15273,6 +15318,83 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanNeuralDenoiser (Phase 39.3)                                     }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanNeuralDenoiser.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FHiddenUnits := 32;
+end;
+
+destructor TCastleVulkanNeuralDenoiser.Destroy;
+begin
+  FreeAndNil(FDenoisedOutputTexture);
+  FreeAndNil(FMLPWeightsBuffer);
+  inherited;
+end;
+
+class function TCastleVulkanNeuralDenoiser.EvaluateLinearReLU4(
+  const AInput, AWeights: TVector4;
+  const ABias: Single): Single;
+begin
+  Result := Max(0.0, TVector4.DotProduct(AInput, AWeights) + ABias);
+end;
+
+procedure TCastleVulkanNeuralDenoiser.EnsureNeuralResources(
+  const AWidth, AHeight: Cardinal);
+var
+  SafeW, SafeH, WeightBytes: Cardinal;
+  BufDesc: TRHIBufferDesc;
+  TexDesc: TRHITextureDesc;
+begin
+  SafeW := Max(Cardinal(1), AWidth);
+  SafeH := Max(Cardinal(1), AHeight);
+  if (FDenoisedOutputTexture <> nil) and (FMLPWeightsBuffer <> nil) and
+     (FWidth = SafeW) and (FHeight = SafeH) then
+    Exit;
+
+  FWidth := SafeW;
+  FHeight := SafeH;
+  FreeAndNil(FDenoisedOutputTexture);
+  FreeAndNil(FMLPWeightsBuffer);
+
+  WeightBytes := Max(Cardinal(64), FHiddenUnits * FHiddenUnits * SizeOf(Single));
+  BufDesc := TRHIBufferDesc.Create(WeightBytes,
+    [buStorage, buTransferDst], muCpuToGpu, 'NeuralMLPWeightsSSBO');
+  FMLPWeightsBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+
+  TexDesc := TRHITextureDesc.Create2D(SafeW, SafeH, pfRGBA16_Float,
+    [tuStorage, tuSampled], 1, 1);
+  TexDesc.DebugName := 'NeuralDenoisedOutputTexture';
+  FDenoisedOutputTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+end;
+
+procedure TCastleVulkanNeuralDenoiser.DispatchNeuralInference(
+  const ACommandList: TVulkanRHICommandList;
+  const AWidth, AHeight: Cardinal;
+  const APipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+var
+  GroupsX, GroupsY: Cardinal;
+begin
+  EnsureNeuralResources(AWidth, AHeight);
+  if ACommandList = nil then
+    Exit;
+
+  if APipeline <> nil then
+    ACommandList.BindComputePipeline(APipeline);
+  if ADescriptorSet <> nil then
+    ACommandList.BindDescriptorSet(0, ADescriptorSet, []);
+
+  GroupsX := (FWidth + 7) div 8;
+  GroupsY := (FHeight + 7) div 8;
+  ACommandList.Dispatch(GroupsX, GroupsY, 1);
+  Inc(FInferenceDispatchCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -15941,12 +16063,20 @@ begin
   Result := FPerInstanceCustomData;
 end;
 
+function TVulkanRHIDevice.GetNeuralDenoiser: TCastleVulkanNeuralDenoiser;
+begin
+  if FNeuralDenoiser = nil then
+    FNeuralDenoiser := TCastleVulkanNeuralDenoiser.Create(Self);
+  Result := FNeuralDenoiser;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FNeuralDenoiser);
   FreeAndNil(FPerInstanceCustomData);
   FreeAndNil(FMultiviewStereoManager);
   FreeAndNil(FXPBDSimulator);
