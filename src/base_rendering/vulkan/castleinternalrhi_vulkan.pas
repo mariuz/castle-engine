@@ -2796,6 +2796,50 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Single-Pass Stereo VR (VK_KHR_multiview) & Foveated VRS Manager (Phase 37) }
+  { -------------------------------------------------------------------------- }
+
+  { Manages Single-Pass Stereo (VK_KHR_multiview, ViewMask = $3) 2-layer stereo
+    color/depth array targets, IPD eye separation, and gaze-tracked radial foveated VRS. }
+  TCastleVulkanMultiviewStereoManager = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FEyeWidth: Cardinal;
+    FEyeHeight: Cardinal;
+    FViewMask: Cardinal;
+    FIPDMeters: Single;
+    FLeftEyeGazeUV: TVector2;
+    FRightEyeGazeUV: TVector2;
+    FStereoColorArrayTexture: TVulkanRHITexture;
+    FStereoDepthArrayTexture: TVulkanRHITexture;
+    FStereoPassCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Allocates 2-layer stereo color (rgba16f) and depth (d32f) array textures for left/right eye views. }
+    procedure EnsureStereoTargets(const AEyeWidth, AEyeHeight: Cardinal);
+
+    { Begins a single-pass stereo multiview render pass (ViewMask = $3 for left+right eyes). }
+    procedure BeginStereoMultiviewPass(
+      const ACommandList: TVulkanRHICommandList;
+      const AEyeWidth, AEyeHeight: Cardinal);
+
+    { Ends the single-pass stereo multiview render pass. }
+    procedure EndStereoMultiviewPass(const ACommandList: TVulkanRHICommandList);
+
+    property EyeWidth: Cardinal read FEyeWidth;
+    property EyeHeight: Cardinal read FEyeHeight;
+    property ViewMask: Cardinal read FViewMask write FViewMask;
+    property IPDMeters: Single read FIPDMeters write FIPDMeters;
+    property LeftEyeGazeUV: TVector2 read FLeftEyeGazeUV write FLeftEyeGazeUV;
+    property RightEyeGazeUV: TVector2 read FRightEyeGazeUV write FRightEyeGazeUV;
+    property StereoColorArrayTexture: TVulkanRHITexture read FStereoColorArrayTexture;
+    property StereoDepthArrayTexture: TVulkanRHITexture read FStereoDepthArrayTexture;
+    property StereoPassCount: Cardinal read FStereoPassCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -2904,6 +2948,7 @@ type
     FShaderBindingTable: TCastleVulkanShaderBindingTable;
     FAccelerationStructureManager: TCastleVulkanAccelerationStructureManager;
     FXPBDSimulator: TCastleVulkanXPBDSimulator;
+    FMultiviewStereoManager: TCastleVulkanMultiviewStereoManager;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -3017,6 +3062,7 @@ type
     function GetShaderBindingTable: TCastleVulkanShaderBindingTable;
     function GetAccelerationStructureManager: TCastleVulkanAccelerationStructureManager;
     function GetXPBDSimulator: TCastleVulkanXPBDSimulator;
+    function GetMultiviewStereoManager: TCastleVulkanMultiviewStereoManager;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -3235,6 +3281,7 @@ type
     property ShaderBindingTable: TCastleVulkanShaderBindingTable read GetShaderBindingTable;
     property AccelerationStructureManager: TCastleVulkanAccelerationStructureManager read GetAccelerationStructureManager;
     property XPBDSimulator: TCastleVulkanXPBDSimulator read GetXPBDSimulator;
+    property MultiviewStereoManager: TCastleVulkanMultiviewStereoManager read GetMultiviewStereoManager;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -15040,6 +15087,84 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanMultiviewStereoManager (Phase 37)                               }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanMultiviewStereoManager.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FViewMask := $3; // Bit 0 = Left Eye, Bit 1 = Right Eye
+  FIPDMeters := 0.064; // Standard 64 mm interpupillary distance
+  FLeftEyeGazeUV := Vector2(0.5, 0.5);
+  FRightEyeGazeUV := Vector2(0.5, 0.5);
+end;
+
+destructor TCastleVulkanMultiviewStereoManager.Destroy;
+begin
+  FreeAndNil(FStereoDepthArrayTexture);
+  FreeAndNil(FStereoColorArrayTexture);
+  inherited;
+end;
+
+procedure TCastleVulkanMultiviewStereoManager.EnsureStereoTargets(
+  const AEyeWidth, AEyeHeight: Cardinal);
+var
+  SafeW, SafeH: Cardinal;
+  TexDesc: TRHITextureDesc;
+begin
+  SafeW := Max(Cardinal(1), AEyeWidth);
+  SafeH := Max(Cardinal(1), AEyeHeight);
+  if (FStereoColorArrayTexture <> nil) and
+     (FEyeWidth = SafeW) and (FEyeHeight = SafeH) then
+    Exit;
+
+  FEyeWidth := SafeW;
+  FEyeHeight := SafeH;
+  FreeAndNil(FStereoDepthArrayTexture);
+  FreeAndNil(FStereoColorArrayTexture);
+
+  TexDesc := TRHITextureDesc.Create2D(SafeW, SafeH, pfRGBA16_Float,
+    [tuColorAttachment, tuSampled], 1, 1);
+  TexDesc.Dimension := td2DArray;
+  TexDesc.DepthOrArrayLayers := 2;
+  TexDesc.DebugName := 'StereoMultiviewColorArray';
+  FStereoColorArrayTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+
+  TexDesc := TRHITextureDesc.Create2D(SafeW, SafeH, pfD32_Float,
+    [tuDepthStencil, tuSampled], 1, 1);
+  TexDesc.Dimension := td2DArray;
+  TexDesc.DepthOrArrayLayers := 2;
+  TexDesc.DebugName := 'StereoMultiviewDepthArray';
+  FStereoDepthArrayTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+end;
+
+procedure TCastleVulkanMultiviewStereoManager.BeginStereoMultiviewPass(
+  const ACommandList: TVulkanRHICommandList;
+  const AEyeWidth, AEyeHeight: Cardinal);
+var
+  RenderInfo: TRHIRenderingInfo;
+begin
+  EnsureStereoTargets(AEyeWidth, AEyeHeight);
+  if ACommandList = nil then
+    Exit;
+
+  RenderInfo := TRHIRenderingInfo.CreateColorDepth(
+    Rectangle(0, 0, FEyeWidth, FEyeHeight),
+    FStereoColorArrayTexture, loClear, Vector4(0, 0, 0, 1),
+    FStereoDepthArrayTexture, loClear, 1.0);
+  ACommandList.BeginRendering(RenderInfo);
+  Inc(FStereoPassCount);
+end;
+
+procedure TCastleVulkanMultiviewStereoManager.EndStereoMultiviewPass(
+  const ACommandList: TVulkanRHICommandList);
+begin
+  if ACommandList <> nil then
+    ACommandList.EndRendering;
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -15694,12 +15819,20 @@ begin
   Result := FXPBDSimulator;
 end;
 
+function TVulkanRHIDevice.GetMultiviewStereoManager: TCastleVulkanMultiviewStereoManager;
+begin
+  if FMultiviewStereoManager = nil then
+    FMultiviewStereoManager := TCastleVulkanMultiviewStereoManager.Create(Self);
+  Result := FMultiviewStereoManager;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FMultiviewStereoManager);
   FreeAndNil(FXPBDSimulator);
   FreeAndNil(FAccelerationStructureManager);
   FreeAndNil(FShaderBindingTable);

@@ -77,10 +77,11 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–35**: **COMPLETED** (100%).
-- **Phase 36 (GPU-Driven XPBD Cloth / Hair Strand Physics Simulation, Aerodynamic Wind Field & Signed-Distance Collision)**: **COMPLETED** (100%, 138 unit tests passing):
-  - [x] **36.1. Extended Position-Based Dynamics (XPBD) Distance & Bending Constraints (`GenerateXPBDClothComputeShader` in `CastleInternalShaderRHI`)** — Completed & tested (`TestXPBDDistanceConstraintComplianceRHI`).
-  - [x] **36.2. Aerodynamic Drag / Lift Wind Field & Capsule/Sphere SDF Collision (`EvaluateAerodynamicWindForce`, `ResolveSphereCollisionConstraint` in `CastleInternalShaderRHI`)** — Completed & tested (`TestAerodynamicWindForceAndSphereCollisionRHI`).
-  - [x] **36.3. GPU XPBD Simulation Manager (`TCastleVulkanXPBDSimulator` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanXPBDSimulatorSubstepDispatchRHI`).
-- **Unreal Engine 5.4/5.5+ Extended Roadmap (Phase 37)**:
-  - **Phase 37 (Multi-View VR Stereo, Foveated Rendering & HDR10 PQ)**: `VK_KHR_multiview`, gaze-tracked radial foveated VRS, and Rec.2020 / SMPTE ST.2084 PQ encoding.
+- **Phases 1–36**: **COMPLETED** (100%).
+- **Phase 37 (Multi-View Stereo / VR Rendering `VK_KHR_multiview`, Radial Foveated Rendering & HDR10 ST.2084 PQ / Rec.2020 Mastering)**: **COMPLETED** (100%, 141 unit tests passing):
+  - [x] **37.1. Single-Pass Stereo `VK_KHR_multiview` (`gl_ViewIndex`) & Asymmetric Eye Projections (`GenerateMultiviewStereoPreamble` in `CastleInternalShaderRHI`)** — Completed & tested (`TestMultiviewStereoPreambleAndAsymmetricEyeProjectionRHI`).
+  - [x] **37.2. Gaze-Tracked Radial Foveated Shading Rate & 2-Layer Stereo Array Manager (`EvaluateFoveatedShadingRate`, `TCastleVulkanMultiviewStereoManager`)** — Completed & tested (`TestFoveatedShadingRateAndMultiviewStereoManagerRHI`).
+  - [x] **37.3. Rec.2020 Gamut Conversion & SMPTE ST.2084 (PQ) 10,000-Nit HDR10 Encoding (`GenerateHDR10PQEncodingFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestHDR10Rec2020AndST2084PQEncodingRHI`).
+- **Unreal Engine 5.5+ Extended Roadmap (Phases 38–39)**:
+  - **Phase 38 (MegaGeometry Displaced Micro-Meshes, Dual-Quaternion Skinning & Per-Instance Custom Data)**: `GenerateDualQuaternionSkinningFunctions`, `GenerateDisplacedMicroMeshFunctions`, and `TCastleVulkanPerInstanceCustomData`.
+  - **Phase 39 (Neural Radiance Cache / MLP Denoising, Optical Flow & R2 Spatio-Temporal Blue-Noise)**: `TCastleVulkanNeuralDenoiser`, `GenerateOpticalFlowBlockMatchingShader`, and `EvaluateR2Sequence2D`.

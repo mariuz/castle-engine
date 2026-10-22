@@ -1365,6 +1365,33 @@ type
       const ASphereRadius: Single;
       const ACollisionMargin: Single = 0.01): TVector3; static;
 
+    { Phase 37.1 & 37.2: Generates GLSL 450 Multi-View Stereo VR preamble (GL_EXT_multiview / gl_ViewIndex),
+      asymmetric OpenXR eye frustum projection helper, and gaze-tracked radial foveated VRS shading rate. }
+    function GenerateMultiviewStereoPreamble: String;
+
+    { Phase 37.1 CPU reference: Computes OpenXR asymmetric eye frustum horizontal projection (XScale, XOffset) from tangent half-angles. }
+    class function ComputeAsymmetricEyeProjectionXScaleOffset(
+      const ATanLeft, ATanRight: Single): TVector2; static;
+
+    { Phase 37.2 CPU reference: Evaluates gaze-tracked radial foveated shading rate code
+      (0 = 1x1 fovea, $5 = 2x2 parafovea, $A = 4x4 periphery) around AGazeCenterUV. }
+    class function EvaluateFoveatedShadingRate(
+      const AUV, AGazeCenterUV: TVector2;
+      const AInnerFoveaRadius: Single = 0.18;
+      const AMiddleParafoveaRadius: Single = 0.42): Cardinal; static;
+
+    { Phase 37.3: Generates GLSL 450 HDR10 Rec.2020 Wide Color Gamut conversion and SMPTE ST.2084 (PQ)
+      10,000-nit perceptual quantizer transfer functions. }
+    function GenerateHDR10PQEncodingFunctions: String;
+
+    { Phase 37.3 CPU reference: Converts linear Rec.709 / sRGB radiance to linear Rec.2020 wide color gamut. }
+    class function EvaluateLinearRec709ToRec2020(
+      const ALinearRec709: TVector3): TVector3; static;
+
+    { Phase 37.3 CPU reference: Encodes linear luminance in nits [0..10000] with the SMPTE ST.2084 (PQ) transfer function [0..1]. }
+    class function EncodeST2084PQ(
+      const ALinearNits: TVector3): TVector3; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -6649,6 +6676,115 @@ begin
   else
     Dir := Vector3(0, 1, 0);
   Result := ASphereCenter + (Dir * MinRadius);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateMultiviewStereoPreamble: String;
+begin
+  Result :=
+    '#extension GL_EXT_multiview : enable' + NL +
+    NL +
+    '// Phase 37.1 & 37.2: Single-Pass Stereo (VK_KHR_multiview) & Gaze-Tracked Radial Foveated VRS' + NL +
+    'vec2 ComputeAsymmetricEyeProjectionXScaleOffset(float tanLeft, float tanRight) {' + NL +
+    '  float span = max(1e-5, tanRight - tanLeft);' + NL +
+    '  return vec2(2.0 / span, (tanRight + tanLeft) / span);' + NL +
+    '}' + NL +
+    NL +
+    'uint EvaluateFoveatedShadingRate(vec2 uv, vec2 gazeCenterUV, float innerFoveaRadius, float middleParafoveaRadius) {' + NL +
+    '  float ecc = length(uv - gazeCenterUV);' + NL +
+    '  if (ecc <= innerFoveaRadius) return 0u;' + NL +
+    '  if (ecc <= middleParafoveaRadius) return 5u;' + NL +
+    '  return 10u;' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.ComputeAsymmetricEyeProjectionXScaleOffset(
+  const ATanLeft, ATanRight: Single): TVector2;
+var
+  Span: Single;
+begin
+  Span := Max(1e-5, ATanRight - ATanLeft);
+  Result := Vector2(2.0 / Span, (ATanRight + ATanLeft) / Span);
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateFoveatedShadingRate(
+  const AUV, AGazeCenterUV: TVector2;
+  const AInnerFoveaRadius: Single;
+  const AMiddleParafoveaRadius: Single): Cardinal;
+var
+  Ecc: Single;
+begin
+  Ecc := (AUV - AGazeCenterUV).Length;
+  if Ecc <= AInnerFoveaRadius then
+    Result := 0  // 1x1 foveal full resolution
+  else if Ecc <= AMiddleParafoveaRadius then
+    Result := $5 // 2x2 parafoveal shading rate
+  else
+    Result := $A; // 4x4 peripheral shading rate
+end;
+
+function TCastleShaderGeneratorRHI.GenerateHDR10PQEncodingFunctions: String;
+begin
+  Result :=
+    '// Phase 37.3: ITU-R BT.2020 Wide Color Gamut & SMPTE ST.2084 (PQ) 10,000-Nit HDR10 Encoding' + NL +
+    'vec3 EvaluateLinearRec709ToRec2020(vec3 rec709) {' + NL +
+    '  vec3 c = max(rec709, vec3(0.0));' + NL +
+    '  return vec3(' + NL +
+    '    0.6274040 * c.r + 0.3292820 * c.g + 0.0433136 * c.b,' + NL +
+    '    0.0690970 * c.r + 0.9195400 * c.g + 0.0113612 * c.b,' + NL +
+    '    0.0163916 * c.r + 0.0880132 * c.g + 0.8955950 * c.b);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 EncodeST2084PQ(vec3 linearNits) {' + NL +
+    '  const float m1 = 0.1593017578125;' + NL +
+    '  const float m2 = 78.84375;' + NL +
+    '  const float c1 = 0.8359375;' + NL +
+    '  const float c2 = 18.8515625;' + NL +
+    '  const float c3 = 18.6875;' + NL +
+    '  vec3 y = clamp(linearNits / 10000.0, vec3(0.0), vec3(1.0));' + NL +
+    '  vec3 ym1 = pow(y, vec3(m1));' + NL +
+    '  return pow((vec3(c1) + c2 * ym1) / (vec3(1.0) + c3 * ym1), vec3(m2));' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateLinearRec709ToRec2020(
+  const ALinearRec709: TVector3): TVector3;
+var
+  R, G, B: Single;
+begin
+  R := Max(0.0, ALinearRec709.X);
+  G := Max(0.0, ALinearRec709.Y);
+  B := Max(0.0, ALinearRec709.Z);
+  Result := Vector3(
+    0.6274040 * R + 0.3292820 * G + 0.0433136 * B,
+    0.0690970 * R + 0.9195400 * G + 0.0113612 * B,
+    0.0163916 * R + 0.0880132 * G + 0.8955950 * B);
+end;
+
+class function TCastleShaderGeneratorRHI.EncodeST2084PQ(
+  const ALinearNits: TVector3): TVector3;
+const
+  M1 = 0.1593017578125; // 2610 / 16384
+  M2 = 78.84375;        // (2523 / 4096) * 128
+  C1 = 0.8359375;       // 3424 / 4096
+  C2 = 18.8515625;      // (2413 / 4096) * 32
+  C3 = 18.6875;         // (2392 / 4096) * 32
+
+  function EncodeChannel(const ANits: Single): Single;
+  var
+    Y, YM1: Single;
+  begin
+    Y := EnsureRange(ANits / 10000.0, 0.0, 1.0);
+    if Y <= 0.0 then
+      Exit(0.0);
+    YM1 := Power(Y, M1);
+    Result := EnsureRange(Power((C1 + C2 * YM1) / (1.0 + C3 * YM1), M2), 0.0, 1.0);
+  end;
+
+begin
+  Result := Vector3(
+    EncodeChannel(ALinearNits.X),
+    EncodeChannel(ALinearNits.Y),
+    EncodeChannel(ALinearNits.Z));
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

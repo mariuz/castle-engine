@@ -177,6 +177,9 @@ type
     procedure TestXPBDDistanceConstraintComplianceRHI;
     procedure TestAerodynamicWindForceAndSphereCollisionRHI;
     procedure TestVulkanXPBDSimulatorSubstepDispatchRHI;
+    procedure TestMultiviewStereoPreambleAndAsymmetricEyeProjectionRHI;
+    procedure TestFoveatedShadingRateAndMultiviewStereoManagerRHI;
+    procedure TestHDR10Rec2020AndST2084PQEncodingRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -9322,6 +9325,108 @@ begin
   finally
     FreeAndNil(CmdList);
     FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestMultiviewStereoPreambleAndAsymmetricEyeProjectionRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  StereoGLSL: String;
+  SymScaleOff, AsymScaleOff: TVector2;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Multiview Stereo GLSL 450 preamble }
+    StereoGLSL := Gen.GenerateMultiviewStereoPreamble;
+    AssertTrue('Multiview Stereo GLSL must enable GL_EXT_multiview and include ComputeAsymmetricEyeProjectionXScaleOffset',
+      (Pos('#extension GL_EXT_multiview : enable', StereoGLSL) > 0) and
+      (Pos('vec2 ComputeAsymmetricEyeProjectionXScaleOffset(float tanLeft, float tanRight)', StereoGLSL) > 0));
+
+    { 2. Verify symmetric and asymmetric OpenXR eye frustum horizontal scale & offset }
+    SymScaleOff  := TCastleShaderGeneratorRHI.ComputeAsymmetricEyeProjectionXScaleOffset(-1.0, 1.0);
+    AsymScaleOff := TCastleShaderGeneratorRHI.ComputeAsymmetricEyeProjectionXScaleOffset(-1.2, 0.8);
+
+    AssertSameValue(1.0, SymScaleOff.X, 1e-5);
+    AssertSameValue(0.0, SymScaleOff.Y, 1e-5);
+    AssertSameValue(1.0, AsymScaleOff.X, 1e-5);
+    AssertSameValue(-0.2, AsymScaleOff.Y, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestFoveatedShadingRateAndMultiviewStereoManagerRHI;
+var
+  RateFovea, RateParafovea, RatePeriphery: Cardinal;
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+begin
+  { 1. Verify gaze-tracked radial foveated VRS shading rate (1x1 fovea, 2x2 parafovea, 4x4 periphery) }
+  RateFovea     := TCastleShaderGeneratorRHI.EvaluateFoveatedShadingRate(Vector2(0.5, 0.5), Vector2(0.5, 0.5));
+  RateParafovea := TCastleShaderGeneratorRHI.EvaluateFoveatedShadingRate(Vector2(0.78, 0.5), Vector2(0.5, 0.5));
+  RatePeriphery := TCastleShaderGeneratorRHI.EvaluateFoveatedShadingRate(Vector2(0.05, 0.05), Vector2(0.5, 0.5));
+
+  AssertEquals('Foveal center must use 1x1 shading rate (0)', 0, Integer(RateFovea));
+  AssertEquals('Parafoveal ring must use 2x2 shading rate ($5)', $5, Integer(RateParafovea));
+  AssertEquals('Peripheral region must use 4x4 shading rate ($A)', $A, Integer(RatePeriphery));
+
+  { 2. Verify TCastleVulkanMultiviewStereoManager 2-layer stereo array targets and single-pass execution }
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($666F)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    CmdList.BeginRecording;
+    Device.MultiviewStereoManager.BeginStereoMultiviewPass(CmdList, 2064, 2208);
+    Device.MultiviewStereoManager.EndStereoMultiviewPass(CmdList);
+    CmdList.EndRecording;
+
+    AssertEquals('ViewMask must default to $3 (Left + Right eyes)', $3, Integer(Device.MultiviewStereoManager.ViewMask));
+    AssertTrue('StereoColorArrayTexture must be allocated with 2 array layers',
+      (Device.MultiviewStereoManager.StereoColorArrayTexture <> nil) and
+      (Device.MultiviewStereoManager.StereoColorArrayTexture.Desc.DepthOrArrayLayers = 2));
+    AssertTrue('StereoDepthArrayTexture must be allocated with 2 array layers',
+      (Device.MultiviewStereoManager.StereoDepthArrayTexture <> nil) and
+      (Device.MultiviewStereoManager.StereoDepthArrayTexture.Desc.DepthOrArrayLayers = 2));
+    AssertEquals('StereoPassCount must be 1', 1, Integer(Device.MultiviewStereoManager.StereoPassCount));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestHDR10Rec2020AndST2084PQEncodingRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  HDR10GLSL: String;
+  White2020, Red2020: TVector3;
+  PQBlack, PQSDRWhite, PQPeak10k: TVector3;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify HDR10 Rec.2020 & ST.2084 PQ GLSL 450 functions }
+    HDR10GLSL := Gen.GenerateHDR10PQEncodingFunctions;
+    AssertTrue('HDR10 GLSL must include EvaluateLinearRec709ToRec2020 and EncodeST2084PQ',
+      (Pos('vec3 EvaluateLinearRec709ToRec2020(vec3 rec709)', HDR10GLSL) > 0) and
+      (Pos('vec3 EncodeST2084PQ(vec3 linearNits)', HDR10GLSL) > 0));
+
+    { 2. Verify ITU-R BT.709 -> BT.2020 gamut matrix preserves D65 neutral white and maps Rec.709 red }
+    White2020 := TCastleShaderGeneratorRHI.EvaluateLinearRec709ToRec2020(Vector3(1.0, 1.0, 1.0));
+    Red2020   := TCastleShaderGeneratorRHI.EvaluateLinearRec709ToRec2020(Vector3(1.0, 0.0, 0.0));
+    AssertSameValue(1.0, White2020.X, 1e-4);
+    AssertSameValue(1.0, White2020.Y, 1e-4);
+    AssertSameValue(1.0, White2020.Z, 1e-4);
+    AssertSameValue(0.627404, Red2020.X, 1e-5);
+    AssertSameValue(0.069097, Red2020.Y, 1e-5);
+
+    { 3. Verify SMPTE ST.2084 (PQ) transfer function at 0 nits, 100 nits (SDR reference white ~0.508078), and 10,000 nits (1.0) }
+    PQBlack    := TCastleShaderGeneratorRHI.EncodeST2084PQ(Vector3(0.0, 0.0, 0.0));
+    PQSDRWhite := TCastleShaderGeneratorRHI.EncodeST2084PQ(Vector3(100.0, 100.0, 100.0));
+    PQPeak10k  := TCastleShaderGeneratorRHI.EncodeST2084PQ(Vector3(10000.0, 10000.0, 10000.0));
+
+    AssertSameValue(0.0, PQBlack.X, 1e-6);
+    AssertSameValue(0.508078, PQSDRWhite.X, 1e-4);
+    AssertSameValue(1.0, PQPeak10k.X, 1e-5);
+  finally
+    FreeAndNil(Gen);
   end;
 end;
 
