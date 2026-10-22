@@ -180,6 +180,9 @@ type
     procedure TestMultiviewStereoPreambleAndAsymmetricEyeProjectionRHI;
     procedure TestFoveatedShadingRateAndMultiviewStereoManagerRHI;
     procedure TestHDR10Rec2020AndST2084PQEncodingRHI;
+    procedure TestDualQuaternionSkinningVolumePreservationRHI;
+    procedure TestDisplacedMicroMeshBarycentricsAndEdgeSnappingRHI;
+    procedure TestVulkanPerInstanceCustomDataSSBORHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -9427,6 +9430,104 @@ begin
     AssertSameValue(1.0, PQPeak10k.X, 1e-5);
   finally
     FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestDualQuaternionSkinningVolumePreservationRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  DQSGLSL: String;
+  DQReal0, DQDual0, DQReal1, DQDual1, BlendedReal, BlendedDual: TVector4;
+  TransformedPos: TVector3;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Dual-Quaternion Skinning GLSL 450 functions }
+    DQSGLSL := Gen.GenerateDualQuaternionSkinningFunctions;
+    AssertTrue('DQS GLSL must include BlendDualQuaternionAntipodal and EvaluateDualQuaternionTransform',
+      (Pos('void BlendDualQuaternionAntipodal(vec4 dqReal0, vec4 dqDual0, vec4 dqReal1, vec4 dqDual1,', DQSGLSL) > 0) and
+      (Pos('vec3 EvaluateDualQuaternionTransform(vec4 dqReal, vec4 dqDual, vec3 pos)', DQSGLSL) > 0));
+
+    { 2. Verify antipodality-aware blending between q = (0,0,0,1) and -q = (0,0,0,-1) does not collapse to zero }
+    DQReal0 := Vector4(0, 0, 0, 1);
+    DQDual0 := Vector4(0, 0, 0, 0);
+    DQReal1 := Vector4(0, 0, 0, -1);
+    DQDual1 := Vector4(0, 0, 0, 0);
+    TCastleShaderGeneratorRHI.BlendDualQuaternionAntipodal(
+      DQReal0, DQDual0, DQReal1, DQDual1, 0.5, 0.5, BlendedReal, BlendedDual);
+    AssertSameValue(1.0, BlendedReal.Length, 1e-5);
+
+    { 3. Verify 90-degree Z-axis rotation + translation preserves radial distance (zero volume collapse) }
+    { 90 deg around Z: q_r = (0, 0, sin(45), cos(45)) = (0, 0, 0.70710678, 0.70710678), no translation }
+    DQReal0 := Vector4(0, 0, Sqrt(0.5), Sqrt(0.5));
+    TransformedPos := TCastleShaderGeneratorRHI.EvaluateDualQuaternionTransform(
+      DQReal0, Vector4(0, 0, 0, 0), Vector3(2.0, 0.0, 0.0));
+    AssertSameValue(0.0, TransformedPos.X, 1e-5);
+    AssertSameValue(2.0, TransformedPos.Y, 1e-5);
+    AssertSameValue(2.0, TransformedPos.Length, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestDisplacedMicroMeshBarycentricsAndEdgeSnappingRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  MicroGLSL: String;
+  DispPos: TVector3;
+  SnappedUV: TVector2;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Displaced Micro-Mesh GLSL 450 functions }
+    MicroGLSL := Gen.GenerateDisplacedMicroMeshFunctions;
+    AssertTrue('Micro-Mesh GLSL must include EvaluateMicroMeshDisplacedPosition and SnapMicroMeshBarycentricToGrid',
+      (Pos('vec3 EvaluateMicroMeshDisplacedPosition(vec3 p0, vec3 p1, vec3 p2,', MicroGLSL) > 0) and
+      (Pos('vec2 SnapMicroMeshBarycentricToGrid(vec2 baryUV, uint subdivisionSegments)', MicroGLSL) > 0));
+
+    { 2. Verify barycentric displacement along +Z normal }
+    DispPos := TCastleShaderGeneratorRHI.EvaluateMicroMeshDisplacedPosition(
+      Vector3(0, 0, 0), Vector3(3, 0, 0), Vector3(0, 3, 0),
+      Vector3(0, 0, 1), Vector3(0, 0, 1), Vector3(0, 0, 1),
+      Vector2(1.0 / 3.0, 1.0 / 3.0), 0.5, 4.0, 0.25);
+    AssertSameValue(1.0, DispPos.X, 1e-5);
+    AssertSameValue(1.0, DispPos.Y, 1e-5);
+    AssertSameValue(2.25, DispPos.Z, 1e-5);
+
+    { 3. Verify crack-free barycentric snapping onto a 4-segment grid }
+    SnappedUV := TCastleShaderGeneratorRHI.SnapMicroMeshBarycentricToGrid(
+      Vector2(0.24, 0.51), 4);
+    AssertSameValue(0.25, SnappedUV.X, 1e-5);
+    AssertSameValue(0.50, SnappedUV.Y, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanPerInstanceCustomDataSSBORHI;
+var
+  Device: TVulkanRHIDevice;
+  ReadBack0, ReadBack3: TVector4;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6670)) );
+  try
+    Device.PerInstanceCustomData.ClearInstanceCustomData;
+    Device.PerInstanceCustomData.SetInstanceCustomData(0, Vector4(1.0, 0.5, 0.25, 0.0));
+    Device.PerInstanceCustomData.SetInstanceCustomData(3, Vector4(0.2, 0.8, 1.0, 1.0));
+    Device.PerInstanceCustomData.UploadCustomDataBuffer;
+
+    ReadBack0 := Device.PerInstanceCustomData.GetInstanceCustomData(0);
+    ReadBack3 := Device.PerInstanceCustomData.GetInstanceCustomData(3);
+
+    AssertEquals('InstanceCount must grow to 4 (indices 0..3)', 4, Integer(Device.PerInstanceCustomData.InstanceCount));
+    AssertSameValue(1.0, ReadBack0.X, 1e-5);
+    AssertSameValue(0.8, ReadBack3.Y, 1e-5);
+    AssertTrue('InstanceCustomDataBuffer must be allocated (64 bytes for 4 vec4 entries)',
+      (Device.PerInstanceCustomData.InstanceCustomDataBuffer <> nil) and
+      (Device.PerInstanceCustomData.InstanceCustomDataBuffer.Desc.Size = 64));
+    AssertEquals('UploadCount must be 1', 1, Integer(Device.PerInstanceCustomData.UploadCount));
+  finally
+    FreeAndNil(Device);
   end;
 end;
 

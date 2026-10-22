@@ -2840,6 +2840,42 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { GPU Per-Instance Custom Float4 Payload Manager (Phase 38.3)                }
+  { -------------------------------------------------------------------------- }
+
+  { Manages a GPU Storage Buffer (SSBO) storing arbitrary per-instance TVector4
+    custom attributes (e.g. wind phase, team tint, dissolve/damage factor) indexed via gl_InstanceIndex. }
+  TCastleVulkanPerInstanceCustomData = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FCustomDataEntries: array of TVector4;
+    FInstanceCustomDataBuffer: TVulkanRHIBuffer;
+    FUploadCount: Cardinal;
+    function GetInstanceCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Clears all per-instance custom float4 payloads. }
+    procedure ClearInstanceCustomData;
+
+    { Sets the custom float4 payload for AInstanceIndex, growing the backing array as needed. }
+    procedure SetInstanceCustomData(
+      const AInstanceIndex: Cardinal;
+      const ACustomPayload: TVector4);
+
+    { Returns the custom float4 payload for AInstanceIndex (or Zero if out of range). }
+    function GetInstanceCustomData(const AInstanceIndex: Cardinal): TVector4;
+
+    { Allocates/updates the GPU SSBO containing all per-instance custom float4 payloads. }
+    procedure UploadCustomDataBuffer;
+
+    property InstanceCount: Cardinal read GetInstanceCount;
+    property InstanceCustomDataBuffer: TVulkanRHIBuffer read FInstanceCustomDataBuffer;
+    property UploadCount: Cardinal read FUploadCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -2949,6 +2985,7 @@ type
     FAccelerationStructureManager: TCastleVulkanAccelerationStructureManager;
     FXPBDSimulator: TCastleVulkanXPBDSimulator;
     FMultiviewStereoManager: TCastleVulkanMultiviewStereoManager;
+    FPerInstanceCustomData: TCastleVulkanPerInstanceCustomData;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -3063,6 +3100,7 @@ type
     function GetAccelerationStructureManager: TCastleVulkanAccelerationStructureManager;
     function GetXPBDSimulator: TCastleVulkanXPBDSimulator;
     function GetMultiviewStereoManager: TCastleVulkanMultiviewStereoManager;
+    function GetPerInstanceCustomData: TCastleVulkanPerInstanceCustomData;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -3282,6 +3320,7 @@ type
     property AccelerationStructureManager: TCastleVulkanAccelerationStructureManager read GetAccelerationStructureManager;
     property XPBDSimulator: TCastleVulkanXPBDSimulator read GetXPBDSimulator;
     property MultiviewStereoManager: TCastleVulkanMultiviewStereoManager read GetMultiviewStereoManager;
+    property PerInstanceCustomData: TCastleVulkanPerInstanceCustomData read GetPerInstanceCustomData;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -15165,6 +15204,75 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanPerInstanceCustomData (Phase 38.3)                              }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanPerInstanceCustomData.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+end;
+
+destructor TCastleVulkanPerInstanceCustomData.Destroy;
+begin
+  FreeAndNil(FInstanceCustomDataBuffer);
+  inherited;
+end;
+
+procedure TCastleVulkanPerInstanceCustomData.ClearInstanceCustomData;
+begin
+  SetLength(FCustomDataEntries, 0);
+end;
+
+procedure TCastleVulkanPerInstanceCustomData.SetInstanceCustomData(
+  const AInstanceIndex: Cardinal;
+  const ACustomPayload: TVector4);
+var
+  OldLen, I: Integer;
+begin
+  if AInstanceIndex >= Cardinal(Length(FCustomDataEntries)) then
+  begin
+    OldLen := Length(FCustomDataEntries);
+    SetLength(FCustomDataEntries, AInstanceIndex + 1);
+    for I := OldLen to High(FCustomDataEntries) do
+      FCustomDataEntries[I] := TVector4.Zero;
+  end;
+  FCustomDataEntries[AInstanceIndex] := ACustomPayload;
+end;
+
+function TCastleVulkanPerInstanceCustomData.GetInstanceCustomData(
+  const AInstanceIndex: Cardinal): TVector4;
+begin
+  if AInstanceIndex < Cardinal(Length(FCustomDataEntries)) then
+    Result := FCustomDataEntries[AInstanceIndex]
+  else
+    Result := TVector4.Zero;
+end;
+
+procedure TCastleVulkanPerInstanceCustomData.UploadCustomDataBuffer;
+var
+  Count: Cardinal;
+  BufDesc: TRHIBufferDesc;
+  InitPtr: Pointer;
+begin
+  Count := Max(Cardinal(1), Cardinal(Length(FCustomDataEntries)));
+  FreeAndNil(FInstanceCustomDataBuffer);
+  BufDesc := TRHIBufferDesc.Create(Count * SizeOf(TVector4),
+    [buStorage, buTransferDst], muCpuToGpu, 'PerInstanceCustomDataSSBO');
+  if Length(FCustomDataEntries) > 0 then
+    InitPtr := @FCustomDataEntries[0]
+  else
+    InitPtr := nil;
+  FInstanceCustomDataBuffer := FDevice.CreateBuffer(BufDesc, InitPtr) as TVulkanRHIBuffer;
+  Inc(FUploadCount);
+end;
+
+function TCastleVulkanPerInstanceCustomData.GetInstanceCount: Cardinal;
+begin
+  Result := Cardinal(Length(FCustomDataEntries));
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -15826,12 +15934,20 @@ begin
   Result := FMultiviewStereoManager;
 end;
 
+function TVulkanRHIDevice.GetPerInstanceCustomData: TCastleVulkanPerInstanceCustomData;
+begin
+  if FPerInstanceCustomData = nil then
+    FPerInstanceCustomData := TCastleVulkanPerInstanceCustomData.Create(Self);
+  Result := FPerInstanceCustomData;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FPerInstanceCustomData);
   FreeAndNil(FMultiviewStereoManager);
   FreeAndNil(FXPBDSimulator);
   FreeAndNil(FAccelerationStructureManager);

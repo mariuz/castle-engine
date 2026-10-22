@@ -77,11 +77,10 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–36**: **COMPLETED** (100%).
-- **Phase 37 (Multi-View Stereo / VR Rendering `VK_KHR_multiview`, Radial Foveated Rendering & HDR10 ST.2084 PQ / Rec.2020 Mastering)**: **COMPLETED** (100%, 141 unit tests passing):
-  - [x] **37.1. Single-Pass Stereo `VK_KHR_multiview` (`gl_ViewIndex`) & Asymmetric Eye Projections (`GenerateMultiviewStereoPreamble` in `CastleInternalShaderRHI`)** — Completed & tested (`TestMultiviewStereoPreambleAndAsymmetricEyeProjectionRHI`).
-  - [x] **37.2. Gaze-Tracked Radial Foveated Shading Rate & 2-Layer Stereo Array Manager (`EvaluateFoveatedShadingRate`, `TCastleVulkanMultiviewStereoManager`)** — Completed & tested (`TestFoveatedShadingRateAndMultiviewStereoManagerRHI`).
-  - [x] **37.3. Rec.2020 Gamut Conversion & SMPTE ST.2084 (PQ) 10,000-Nit HDR10 Encoding (`GenerateHDR10PQEncodingFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestHDR10Rec2020AndST2084PQEncodingRHI`).
-- **Unreal Engine 5.5+ Extended Roadmap (Phases 38–39)**:
-  - **Phase 38 (MegaGeometry Displaced Micro-Meshes, Dual-Quaternion Skinning & Per-Instance Custom Data)**: `GenerateDualQuaternionSkinningFunctions`, `GenerateDisplacedMicroMeshFunctions`, and `TCastleVulkanPerInstanceCustomData`.
+- **Phases 1–37**: **COMPLETED** (100%).
+- **Phase 38 (GPU-Driven MegaGeometry / Displaced Subdivision Micro-Meshes, Dual-Quaternion Skinning DQS & Per-Instance Custom Data SSBO)**: **COMPLETED** (100%, 144 unit tests passing):
+  - [x] **38.1. Dual-Quaternion Skinning (DQS) Volume-Preserving Joint Blending (`GenerateDualQuaternionSkinningFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestDualQuaternionSkinningVolumePreservationRHI`).
+  - [x] **38.2. Displaced Micro-Mesh Barycentric Tessellation & Crack-Free Edge Snapping (`GenerateDisplacedMicroMeshFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestDisplacedMicroMeshBarycentricsAndEdgeSnappingRHI`).
+  - [x] **38.3. GPU Per-Instance Custom Float4 Payload Manager (`TCastleVulkanPerInstanceCustomData` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanPerInstanceCustomDataSSBORHI`).
+- **Unreal Engine 5.5+ Extended Roadmap (Phase 39)**:
   - **Phase 39 (Neural Radiance Cache / MLP Denoising, Optical Flow & R2 Spatio-Temporal Blue-Noise)**: `TCastleVulkanNeuralDenoiser`, `GenerateOpticalFlowBlockMatchingShader`, and `EvaluateR2Sequence2D`.

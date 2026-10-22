@@ -1392,6 +1392,35 @@ type
     class function EncodeST2084PQ(
       const ALinearNits: TVector3): TVector3; static;
 
+    { Phase 38.1: Generates GLSL 450 Dual-Quaternion Skinning (DQS) functions for volume-preserving joint blending. }
+    function GenerateDualQuaternionSkinningFunctions: String;
+
+    { Phase 38.1 CPU reference: Blends two dual quaternions with antipodality sign correction and normalizes the result. }
+    class procedure BlendDualQuaternionAntipodal(
+      const ADQReal0, ADQDual0, ADQReal1, ADQDual1: TVector4;
+      const AW0, AW1: Single;
+      out AOutReal, AOutDual: TVector4); static;
+
+    { Phase 38.1 CPU reference: Transforms a 3D vertex position by a normalized dual quaternion (q_real, q_dual). }
+    class function EvaluateDualQuaternionTransform(
+      const ADQReal, ADQDual: TVector4;
+      const APosition: TVector3): TVector3; static;
+
+    { Phase 38.2: Generates GLSL 450 MegaGeometry Displaced Micro-Mesh barycentric tessellation and edge-snapping functions. }
+    function GenerateDisplacedMicroMeshFunctions: String;
+
+    { Phase 38.2 CPU reference: Evaluates a micro-mesh vertex position displaced along the barycentrically interpolated normal. }
+    class function EvaluateMicroMeshDisplacedPosition(
+      const AP0, AP1, AP2, AN0, AN1, AN2: TVector3;
+      const ABaryUV: TVector2;
+      const AHeightSample, ADisplacementScale: Single;
+      const ADisplacementBias: Single = 0.0): TVector3; static;
+
+    { Phase 38.2 CPU reference: Snaps barycentric (u, v) coordinates onto a uniform subdivision grid for crack-free edges. }
+    class function SnapMicroMeshBarycentricToGrid(
+      const ABaryUV: TVector2;
+      const ASubdivisionSegments: Cardinal): TVector2; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -6785,6 +6814,116 @@ begin
     EncodeChannel(ALinearNits.X),
     EncodeChannel(ALinearNits.Y),
     EncodeChannel(ALinearNits.Z));
+end;
+
+function TCastleShaderGeneratorRHI.GenerateDualQuaternionSkinningFunctions: String;
+begin
+  Result :=
+    '// Phase 38.1: Volume-Preserving Dual-Quaternion Skinning (DQS)' + NL +
+    'void BlendDualQuaternionAntipodal(vec4 dqReal0, vec4 dqDual0, vec4 dqReal1, vec4 dqDual1,' + NL +
+    '  float w0, float w1, out vec4 outReal, out vec4 outDual) {' + NL +
+    '  float sign1 = (dot(dqReal0, dqReal1) < 0.0) ? -1.0 : 1.0;' + NL +
+    '  vec4 rawReal = dqReal0 * w0 + dqReal1 * (w1 * sign1);' + NL +
+    '  vec4 rawDual = dqDual0 * w0 + dqDual1 * (w1 * sign1);' + NL +
+    '  float invNorm = 1.0 / max(1e-6, length(rawReal));' + NL +
+    '  outReal = rawReal * invNorm;' + NL +
+    '  outDual = rawDual * invNorm;' + NL +
+    '}' + NL +
+    NL +
+    'vec3 EvaluateDualQuaternionTransform(vec4 dqReal, vec4 dqDual, vec3 pos) {' + NL +
+    '  vec3 rVec = dqReal.xyz;' + NL +
+    '  vec3 dVec = dqDual.xyz;' + NL +
+    '  vec3 rotated = pos + 2.0 * cross(rVec, cross(rVec, pos) + pos * dqReal.w);' + NL +
+    '  vec3 trans = 2.0 * (dVec * dqReal.w - rVec * dqDual.w + cross(rVec, dVec));' + NL +
+    '  return rotated + trans;' + NL +
+    '}' + NL;
+end;
+
+class procedure TCastleShaderGeneratorRHI.BlendDualQuaternionAntipodal(
+  const ADQReal0, ADQDual0, ADQReal1, ADQDual1: TVector4;
+  const AW0, AW1: Single;
+  out AOutReal, AOutDual: TVector4);
+var
+  Sign1, InvNorm: Single;
+  RawReal, RawDual: TVector4;
+begin
+  if TVector4.DotProduct(ADQReal0, ADQReal1) < 0.0 then
+    Sign1 := -1.0
+  else
+    Sign1 := 1.0;
+  RawReal := (ADQReal0 * AW0) + (ADQReal1 * (AW1 * Sign1));
+  RawDual := (ADQDual0 * AW0) + (ADQDual1 * (AW1 * Sign1));
+  InvNorm := 1.0 / Max(1e-6, RawReal.Length);
+  AOutReal := RawReal * InvNorm;
+  AOutDual := RawDual * InvNorm;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateDualQuaternionTransform(
+  const ADQReal, ADQDual: TVector4;
+  const APosition: TVector3): TVector3;
+var
+  RVec, DVec, Rotated, Trans: TVector3;
+begin
+  RVec := Vector3(ADQReal.X, ADQReal.Y, ADQReal.Z);
+  DVec := Vector3(ADQDual.X, ADQDual.Y, ADQDual.Z);
+  Rotated := APosition + (TVector3.CrossProduct(RVec,
+    TVector3.CrossProduct(RVec, APosition) + (APosition * ADQReal.W)) * 2.0);
+  Trans := ((DVec * ADQReal.W) - (RVec * ADQDual.W) + TVector3.CrossProduct(RVec, DVec)) * 2.0;
+  Result := Rotated + Trans;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateDisplacedMicroMeshFunctions: String;
+begin
+  Result :=
+    '// Phase 38.2: MegaGeometry Displaced Micro-Mesh Barycentric Tessellation & Crack-Free Edge Snapping' + NL +
+    'vec3 EvaluateMicroMeshDisplacedPosition(vec3 p0, vec3 p1, vec3 p2,' + NL +
+    '  vec3 n0, vec3 n1, vec3 n2, vec2 baryUV, float heightSample,' + NL +
+    '  float displacementScale, float displacementBias) {' + NL +
+    '  float w0 = 1.0 - baryUV.x - baryUV.y;' + NL +
+    '  vec3 basePos = p0 * w0 + p1 * baryUV.x + p2 * baryUV.y;' + NL +
+    '  vec3 baseNorm = normalize(n0 * w0 + n1 * baryUV.x + n2 * baryUV.y);' + NL +
+    '  float disp = heightSample * displacementScale + displacementBias;' + NL +
+    '  return basePos + baseNorm * disp;' + NL +
+    '}' + NL +
+    NL +
+    'vec2 SnapMicroMeshBarycentricToGrid(vec2 baryUV, uint subdivisionSegments) {' + NL +
+    '  float n = max(1.0, float(subdivisionSegments));' + NL +
+    '  float u = clamp(round(clamp(baryUV.x, 0.0, 1.0) * n) / n, 0.0, 1.0);' + NL +
+    '  float v = clamp(round(clamp(baryUV.y, 0.0, 1.0) * n) / n, 0.0, 1.0 - u);' + NL +
+    '  return vec2(u, v);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateMicroMeshDisplacedPosition(
+  const AP0, AP1, AP2, AN0, AN1, AN2: TVector3;
+  const ABaryUV: TVector2;
+  const AHeightSample, ADisplacementScale: Single;
+  const ADisplacementBias: Single): TVector3;
+var
+  W0, Disp: Single;
+  BasePos, BaseNorm: TVector3;
+begin
+  W0 := 1.0 - ABaryUV.X - ABaryUV.Y;
+  BasePos := (AP0 * W0) + (AP1 * ABaryUV.X) + (AP2 * ABaryUV.Y);
+  BaseNorm := (AN0 * W0) + (AN1 * ABaryUV.X) + (AN2 * ABaryUV.Y);
+  if BaseNorm.LengthSqr > 1e-12 then
+    BaseNorm := BaseNorm.Normalize
+  else
+    BaseNorm := Vector3(0, 0, 1);
+  Disp := AHeightSample * ADisplacementScale + ADisplacementBias;
+  Result := BasePos + (BaseNorm * Disp);
+end;
+
+class function TCastleShaderGeneratorRHI.SnapMicroMeshBarycentricToGrid(
+  const ABaryUV: TVector2;
+  const ASubdivisionSegments: Cardinal): TVector2;
+var
+  N, U, V: Single;
+begin
+  N := Max(1.0, Single(ASubdivisionSegments));
+  U := EnsureRange(Round(EnsureRange(ABaryUV.X, 0.0, 1.0) * N) / N, 0.0, 1.0);
+  V := EnsureRange(Round(EnsureRange(ABaryUV.Y, 0.0, 1.0) * N) / N, 0.0, 1.0 - U);
+  Result := Vector2(U, V);
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;
