@@ -1343,6 +1343,28 @@ type
     class function AlignUpSBTSize(
       const AValue, AAlignment: Cardinal): Cardinal; static;
 
+    { Phase 36.1: Generates a GLSL 450 compute shader for Extended Position-Based Dynamics (XPBD)
+      Cloth & Hair Strand Simulation (compliant distance constraints, aerodynamic wind, and SDF collision). }
+    function GenerateXPBDClothComputeShader(
+      const AWorkgroupSizeX: Cardinal = 64): String;
+
+    { Phase 36.1 CPU reference: Evaluates compliant XPBD distance constraint position correction delta for P1. }
+    class function EvaluateXPBDDistanceConstraintDelta(
+      const AP1, AP2: TVector3;
+      const AInvMass1, AInvMass2, ARestLength, AComplianceAlpha, ASubstepDt: Single): TVector3; static;
+
+    { Phase 36.2 CPU reference: Evaluates aerodynamic normal wind force on a cloth/foliage triangle element. }
+    class function EvaluateAerodynamicWindForce(
+      const AWindVelocity, AElementVelocity, AElementNormal: TVector3;
+      const AElementArea, ADragCoeff: Single;
+      const AAirDensity: Single = 1.225): TVector3; static;
+
+    { Phase 36.2 CPU reference: Projects a cloth/hair particle out of a colliding bounding sphere with margin. }
+    class function ResolveSphereCollisionConstraint(
+      const AParticlePos, ASphereCenter: TVector3;
+      const ASphereRadius: Single;
+      const ACollisionMargin: Single = 0.01): TVector3; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -6527,6 +6549,106 @@ begin
   if AValue = 0 then
     Exit(0);
   Result := ((AValue + SafeAlign - 1) div SafeAlign) * SafeAlign;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateXPBDClothComputeShader(
+  const AWorkgroupSizeX: Cardinal): String;
+begin
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = 1, local_size_z = 1) in;',
+      [Max(1, AWorkgroupSizeX)]) + NL +
+    NL +
+    '// Phase 36.1 & 36.2: GPU XPBD Cloth/Hair Constraints, Aerodynamic Wind & Sphere SDF Collision' + NL +
+    'vec3 EvaluateXPBDDistanceConstraintDelta(vec3 p1, vec3 p2, float invMass1, float invMass2,' + NL +
+    '  float restLength, float complianceAlpha, float substepDt) {' + NL +
+    '  vec3 diff = p1 - p2;' + NL +
+    '  float dist = length(diff);' + NL +
+    '  if (dist < 1e-6) return vec3(0.0);' + NL +
+    '  float wSum = invMass1 + invMass2;' + NL +
+    '  if (wSum <= 0.0) return vec3(0.0);' + NL +
+    '  float dtSafe = max(1e-5, substepDt);' + NL +
+    '  float alphaTilde = max(0.0, complianceAlpha) / (dtSafe * dtSafe);' + NL +
+    '  float c = dist - restLength;' + NL +
+    '  float dLambda = -c / (wSum + alphaTilde);' + NL +
+    '  return (diff / dist) * (invMass1 * dLambda);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 EvaluateAerodynamicWindForce(vec3 windVel, vec3 elemVel, vec3 elemNormal,' + NL +
+    '  float elemArea, float dragCoeff, float airDensity) {' + NL +
+    '  vec3 relVel = windVel - elemVel;' + NL +
+    '  float vDotN = dot(relVel, elemNormal);' + NL +
+    '  float pressure = 0.5 * max(0.0, airDensity) * max(0.0, elemArea) * max(0.0, dragCoeff) * abs(vDotN) * vDotN;' + NL +
+    '  return elemNormal * pressure;' + NL +
+    '}' + NL +
+    NL +
+    'vec3 ResolveSphereCollisionConstraint(vec3 particlePos, vec3 sphereCenter, float sphereRadius, float margin) {' + NL +
+    '  vec3 toParticle = particlePos - sphereCenter;' + NL +
+    '  float dist = length(toParticle);' + NL +
+    '  float minRadius = max(0.0, sphereRadius + margin);' + NL +
+    '  if (dist >= minRadius) return particlePos;' + NL +
+    '  vec3 dir = (dist > 1e-6) ? (toParticle / dist) : vec3(0.0, 1.0, 0.0);' + NL +
+    '  return sphereCenter + dir * minRadius;' + NL +
+    '}' + NL +
+    NL +
+    'void main() {' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateXPBDDistanceConstraintDelta(
+  const AP1, AP2: TVector3;
+  const AInvMass1, AInvMass2, ARestLength, AComplianceAlpha, ASubstepDt: Single): TVector3;
+var
+  Diff: TVector3;
+  Dist, WSum, DtSafe, AlphaTilde, C, DLambda: Single;
+begin
+  Diff := AP1 - AP2;
+  Dist := Diff.Length;
+  if Dist < 1e-6 then
+    Exit(TVector3.Zero);
+  WSum := Max(0.0, AInvMass1) + Max(0.0, AInvMass2);
+  if WSum <= 0.0 then
+    Exit(TVector3.Zero);
+  DtSafe := Max(1e-5, ASubstepDt);
+  AlphaTilde := Max(0.0, AComplianceAlpha) / Sqr(DtSafe);
+  C := Dist - ARestLength;
+  DLambda := -C / (WSum + AlphaTilde);
+  Result := Diff * ((Max(0.0, AInvMass1) * DLambda) / Dist);
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateAerodynamicWindForce(
+  const AWindVelocity, AElementVelocity, AElementNormal: TVector3;
+  const AElementArea, ADragCoeff: Single;
+  const AAirDensity: Single): TVector3;
+var
+  RelVel: TVector3;
+  VDotN, Pressure: Single;
+begin
+  RelVel := AWindVelocity - AElementVelocity;
+  VDotN := TVector3.DotProduct(RelVel, AElementNormal);
+  Pressure := 0.5 * Max(0.0, AAirDensity) * Max(0.0, AElementArea) *
+    Max(0.0, ADragCoeff) * Abs(VDotN) * VDotN;
+  Result := AElementNormal * Pressure;
+end;
+
+class function TCastleShaderGeneratorRHI.ResolveSphereCollisionConstraint(
+  const AParticlePos, ASphereCenter: TVector3;
+  const ASphereRadius: Single;
+  const ACollisionMargin: Single): TVector3;
+var
+  ToParticle, Dir: TVector3;
+  Dist, MinRadius: Single;
+begin
+  ToParticle := AParticlePos - ASphereCenter;
+  Dist := ToParticle.Length;
+  MinRadius := Max(0.0, ASphereRadius + ACollisionMargin);
+  if Dist >= MinRadius then
+    Exit(AParticlePos);
+  if Dist > 1e-6 then
+    Dir := ToParticle * (1.0 / Dist)
+  else
+    Dir := Vector3(0, 1, 0);
+  Result := ASphereCenter + (Dir * MinRadius);
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

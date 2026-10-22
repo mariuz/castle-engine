@@ -2756,6 +2756,46 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { GPU-Driven XPBD Cloth / Hair Strand Physics Simulator (Phase 36.3)         }
+  { -------------------------------------------------------------------------- }
+
+  { Manages GPU Extended Position-Based Dynamics (XPBD) particle and distance-constraint
+    SSBOs and sub-stepped compute solver dispatches for cloth, foliage, and hair strands. }
+  TCastleVulkanXPBDSimulator = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FParticleCount: Cardinal;
+    FConstraintCount: Cardinal;
+    FSubstepCount: Cardinal;
+    FParticlePositionBuffer: TVulkanRHIBuffer;
+    FPreviousPositionBuffer: TVulkanRHIBuffer;
+    FConstraintBuffer: TVulkanRHIBuffer;
+    FTotalSubstepsDispatched: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Allocates the GPU particle position, previous-position, and constraint SSBOs. }
+    procedure EnsureSimulationBuffers(
+      const AParticleCount, AConstraintCount: Cardinal);
+
+    { Dispatches FSubstepCount XPBD solver substeps on the GPU. }
+    procedure DispatchXPBDSubsteps(
+      const ACommandList: TVulkanRHICommandList;
+      const AParticleCount, AConstraintCount: Cardinal;
+      const APipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property ParticleCount: Cardinal read FParticleCount;
+    property ConstraintCount: Cardinal read FConstraintCount;
+    property SubstepCount: Cardinal read FSubstepCount write FSubstepCount;
+    property ParticlePositionBuffer: TVulkanRHIBuffer read FParticlePositionBuffer;
+    property PreviousPositionBuffer: TVulkanRHIBuffer read FPreviousPositionBuffer;
+    property ConstraintBuffer: TVulkanRHIBuffer read FConstraintBuffer;
+    property TotalSubstepsDispatched: Cardinal read FTotalSubstepsDispatched;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -2863,6 +2903,7 @@ type
     FSVGFDenoiser: TCastleVulkanSVGFDenoiser;
     FShaderBindingTable: TCastleVulkanShaderBindingTable;
     FAccelerationStructureManager: TCastleVulkanAccelerationStructureManager;
+    FXPBDSimulator: TCastleVulkanXPBDSimulator;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -2975,6 +3016,7 @@ type
     function GetSVGFDenoiser: TCastleVulkanSVGFDenoiser;
     function GetShaderBindingTable: TCastleVulkanShaderBindingTable;
     function GetAccelerationStructureManager: TCastleVulkanAccelerationStructureManager;
+    function GetXPBDSimulator: TCastleVulkanXPBDSimulator;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -3192,6 +3234,7 @@ type
     property SVGFDenoiser: TCastleVulkanSVGFDenoiser read GetSVGFDenoiser;
     property ShaderBindingTable: TCastleVulkanShaderBindingTable read GetShaderBindingTable;
     property AccelerationStructureManager: TCastleVulkanAccelerationStructureManager read GetAccelerationStructureManager;
+    property XPBDSimulator: TCastleVulkanXPBDSimulator read GetXPBDSimulator;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -14921,6 +14964,82 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanXPBDSimulator (Phase 36.3)                                      }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanXPBDSimulator.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FSubstepCount := 4;
+end;
+
+destructor TCastleVulkanXPBDSimulator.Destroy;
+begin
+  FreeAndNil(FConstraintBuffer);
+  FreeAndNil(FPreviousPositionBuffer);
+  FreeAndNil(FParticlePositionBuffer);
+  inherited;
+end;
+
+procedure TCastleVulkanXPBDSimulator.EnsureSimulationBuffers(
+  const AParticleCount, AConstraintCount: Cardinal);
+var
+  SafeParticles, SafeConstraints: Cardinal;
+  BufDesc: TRHIBufferDesc;
+begin
+  SafeParticles := Max(Cardinal(1), AParticleCount);
+  SafeConstraints := Max(Cardinal(1), AConstraintCount);
+  if (FParticlePositionBuffer <> nil) and
+     (FParticleCount = SafeParticles) and
+     (FConstraintCount = SafeConstraints) then
+    Exit;
+
+  FParticleCount := SafeParticles;
+  FConstraintCount := SafeConstraints;
+  FreeAndNil(FConstraintBuffer);
+  FreeAndNil(FPreviousPositionBuffer);
+  FreeAndNil(FParticlePositionBuffer);
+
+  BufDesc := TRHIBufferDesc.Create(SafeParticles * 16, [buStorage, buTransferDst], muCpuToGpu,
+    'XPBDParticlePositionSSBO');
+  FParticlePositionBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+
+  BufDesc.DebugName := 'XPBDPreviousPositionSSBO';
+  FPreviousPositionBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+
+  BufDesc := TRHIBufferDesc.Create(SafeConstraints * 16, [buStorage, buTransferDst], muCpuToGpu,
+    'XPBDDistanceConstraintSSBO');
+  FConstraintBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+end;
+
+procedure TCastleVulkanXPBDSimulator.DispatchXPBDSubsteps(
+  const ACommandList: TVulkanRHICommandList;
+  const AParticleCount, AConstraintCount: Cardinal;
+  const APipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+var
+  GroupsX, Step, Steps: Cardinal;
+begin
+  EnsureSimulationBuffers(AParticleCount, AConstraintCount);
+  if ACommandList = nil then
+    Exit;
+
+  if APipeline <> nil then
+    ACommandList.BindComputePipeline(APipeline);
+  if ADescriptorSet <> nil then
+    ACommandList.BindDescriptorSet(0, ADescriptorSet, []);
+
+  GroupsX := (Max(FParticleCount, FConstraintCount) + 63) div 64;
+  Steps := Max(Cardinal(1), FSubstepCount);
+  for Step := 0 to Steps - 1 do
+  begin
+    ACommandList.Dispatch(GroupsX, 1, 1);
+    Inc(FTotalSubstepsDispatched);
+  end;
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -15568,12 +15687,20 @@ begin
   Result := FAccelerationStructureManager;
 end;
 
+function TVulkanRHIDevice.GetXPBDSimulator: TCastleVulkanXPBDSimulator;
+begin
+  if FXPBDSimulator = nil then
+    FXPBDSimulator := TCastleVulkanXPBDSimulator.Create(Self);
+  Result := FXPBDSimulator;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FXPBDSimulator);
   FreeAndNil(FAccelerationStructureManager);
   FreeAndNil(FShaderBindingTable);
   FreeAndNil(FSVGFDenoiser);

@@ -174,6 +174,9 @@ type
     procedure TestRayTracingPipelineStagesAndBarycentricNormalRHI;
     procedure TestVulkanShaderBindingTableAlignmentAndDispatchRHI;
     procedure TestVulkanAccelerationStructureCompactionAndTLASRHI;
+    procedure TestXPBDDistanceConstraintComplianceRHI;
+    procedure TestAerodynamicWindForceAndSphereCollisionRHI;
+    procedure TestVulkanXPBDSimulatorSubstepDispatchRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -9244,6 +9247,80 @@ begin
     AssertEquals('TLASBuildCount must be 1', 1, Integer(Device.AccelerationStructureManager.TLASBuildCount));
     AssertTrue('TLASBuffer must be allocated', Device.AccelerationStructureManager.TLASBuffer <> nil);
   finally
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestXPBDDistanceConstraintComplianceRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  XPBDGLSL: String;
+  DeltaStiff, DeltaSoft: TVector3;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify XPBD Cloth Compute GLSL 450 functions }
+    XPBDGLSL := Gen.GenerateXPBDClothComputeShader;
+    AssertTrue('XPBD Cloth GLSL must include EvaluateXPBDDistanceConstraintDelta and ResolveSphereCollisionConstraint',
+      (Pos('vec3 EvaluateXPBDDistanceConstraintDelta(vec3 p1, vec3 p2, float invMass1, float invMass2,', XPBDGLSL) > 0) and
+      (Pos('vec3 ResolveSphereCollisionConstraint(vec3 particlePos, vec3 sphereCenter, float sphereRadius, float margin)', XPBDGLSL) > 0));
+
+    { 2. Verify stiff constraint (compliance = 0) moves p1 halfway toward rest length when w1 = w2 = 1 }
+    DeltaStiff := TCastleShaderGeneratorRHI.EvaluateXPBDDistanceConstraintDelta(
+      Vector3(0, 0, 0), Vector3(2.0, 0, 0), 1.0, 1.0, 1.0, 0.0, 0.01);
+    DeltaSoft := TCastleShaderGeneratorRHI.EvaluateXPBDDistanceConstraintDelta(
+      Vector3(0, 0, 0), Vector3(2.0, 0, 0), 1.0, 1.0, 1.0, 0.1, 0.01);
+
+    { C = 2.0 - 1.0 = 1.0; DeltaP1 = -(-1.0 / 2.0) * (-1,0,0) = (+0.5, 0, 0) }
+    AssertSameValue(0.5, DeltaStiff.X, 1e-5);
+    AssertTrue('Compliant (soft) XPBD constraint must produce smaller single-step correction than zero-compliance stiff constraint',
+      (DeltaSoft.X > 0.0) and (DeltaSoft.X < DeltaStiff.X));
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestAerodynamicWindForceAndSphereCollisionRHI;
+var
+  WindForce: TVector3;
+  PosInside, PosOutside: TVector3;
+begin
+  { 1. Verify aerodynamic wind force pushes surface normal facing relative wind }
+  WindForce := TCastleShaderGeneratorRHI.EvaluateAerodynamicWindForce(
+    Vector3(0, 0, 10), Vector3(0, 0, 0), Vector3(0, 0, 1), 0.5, 1.2);
+  AssertTrue('Aerodynamic wind force along +Z normal must be positive in Z',
+    WindForce.Z > 1.0);
+
+  { 2. Verify sphere SDF collision pushes penetrating particle to sphere surface + default 0.01 collision margin and leaves outside particle unchanged }
+  PosInside := TCastleShaderGeneratorRHI.ResolveSphereCollisionConstraint(
+    Vector3(0.3, 0, 0), Vector3(0, 0, 0), 1.0);
+  PosOutside := TCastleShaderGeneratorRHI.ResolveSphereCollisionConstraint(
+    Vector3(2.5, 0, 0), Vector3(0, 0, 0), 1.0);
+
+  AssertSameValue(1.01, PosInside.X, 1e-5);
+  AssertSameValue(2.5, PosOutside.X, 1e-5);
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanXPBDSimulatorSubstepDispatchRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($666E)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    Device.XPBDSimulator.SubstepCount := 4;
+    CmdList.BeginRecording;
+    Device.XPBDSimulator.DispatchXPBDSubsteps(CmdList, 1024, 2048);
+    CmdList.EndRecording;
+
+    AssertTrue('ParticlePositionBuffer must be allocated', Device.XPBDSimulator.ParticlePositionBuffer <> nil);
+    AssertTrue('PreviousPositionBuffer must be allocated', Device.XPBDSimulator.PreviousPositionBuffer <> nil);
+    AssertTrue('ConstraintBuffer must be allocated', Device.XPBDSimulator.ConstraintBuffer <> nil);
+    AssertEquals('4 XPBD substeps must record 4 compute dispatches',
+      4, Integer(Device.XPBDSimulator.TotalSubstepsDispatched));
+  finally
+    FreeAndNil(CmdList);
     FreeAndNil(Device);
   end;
 end;

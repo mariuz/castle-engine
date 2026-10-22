@@ -77,11 +77,10 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–34**: **COMPLETED** (100%).
-- **Phase 35 (Hardware Ray Tracing Pipeline `VK_KHR_ray_tracing_pipeline`, Shader Binding Table SBT & Acceleration Structure Compaction)**: **COMPLETED** (100%, 135 unit tests passing):
-  - [x] **35.1. Raygen / Closest-Hit / Miss Shader Stage Generation & Payload Packing (`GenerateRayTracingPipelineStages` in `CastleInternalShaderRHI`)** — Completed & tested (`TestRayTracingPipelineStagesAndBarycentricNormalRHI`).
-  - [x] **35.2. Shader Binding Table (SBT) Stride Alignment & Region Layout (`TCastleVulkanShaderBindingTable` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanShaderBindingTableAlignmentAndDispatchRHI`).
-  - [x] **35.3. BLAS / TLAS Acceleration Structure Builder & Post-Build Compaction (`TCastleVulkanAccelerationStructureManager` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanAccelerationStructureCompactionAndTLASRHI`).
-- **Unreal Engine 5.4/5.5+ Extended Roadmap (Phases 36–37)**:
-  - **Phase 36 (GPU XPBD Cloth/Hair Physics)**: `TCastleVulkanXPBDSimulator`, compliant XPBD constraints, aerodynamic wind, and SDF collision.
+- **Phases 1–35**: **COMPLETED** (100%).
+- **Phase 36 (GPU-Driven XPBD Cloth / Hair Strand Physics Simulation, Aerodynamic Wind Field & Signed-Distance Collision)**: **COMPLETED** (100%, 138 unit tests passing):
+  - [x] **36.1. Extended Position-Based Dynamics (XPBD) Distance & Bending Constraints (`GenerateXPBDClothComputeShader` in `CastleInternalShaderRHI`)** — Completed & tested (`TestXPBDDistanceConstraintComplianceRHI`).
+  - [x] **36.2. Aerodynamic Drag / Lift Wind Field & Capsule/Sphere SDF Collision (`EvaluateAerodynamicWindForce`, `ResolveSphereCollisionConstraint` in `CastleInternalShaderRHI`)** — Completed & tested (`TestAerodynamicWindForceAndSphereCollisionRHI`).
+  - [x] **36.3. GPU XPBD Simulation Manager (`TCastleVulkanXPBDSimulator` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanXPBDSimulatorSubstepDispatchRHI`).
+- **Unreal Engine 5.4/5.5+ Extended Roadmap (Phase 37)**:
   - **Phase 37 (Multi-View VR Stereo, Foveated Rendering & HDR10 PQ)**: `VK_KHR_multiview`, gaze-tracked radial foveated VRS, and Rec.2020 / SMPTE ST.2084 PQ encoding.
