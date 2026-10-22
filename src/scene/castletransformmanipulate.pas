@@ -1234,6 +1234,62 @@ type
     function ArrangeSelectedInSuperellipse(
       const RadiusX, RadiusZ, ExponentN: Single;
       const OrientMode: Integer = 0): Boolean;
+
+    { Apply a 3D circular arc bend deformation across all top-level selected
+      transforms (@code(SelectedCount >= 2)) along @code(SpineAxis) toward
+      @code(BendDirAxis) by a total arc angle of @code(TotalAngleRad) radians
+      centered at the active selection pivot $\mathbf(C)$:
+      - Radius of curvature $R = \text(Span) / \text(TotalAngleRad)$
+      - Bend angle $\theta_i = ((P_(i,\text(Spine)) - C_(\text(Spine))) / \text(Span)) \cdot \text(TotalAngleRad)$
+      - Effective radial distance $r_i = R - (P_(i,\text(BendDir)) - C_(\text(BendDir)))$
+      - $P'_(i,\text(Spine)) = C_(\text(Spine)) + r_i \sin(\theta_i)$
+      - $P'_(i,\text(BendDir)) = C_(\text(BendDir)) + R - r_i \cos(\theta_i)$
+      When @code(RotateOrientations = true), also rotates each transform's
+      orientation by $\theta_i$ from @code(SpineAxis) toward @code(BendDirAxis).
+      Returns @true if at least one selected transform was modified. }
+    function BendSelected(
+      const SpineAxis, BendDirAxis: T3DAxis;
+      const TotalAngleRad: Single;
+      const RotateOrientations: Boolean = true): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along a 3D Viviani's curve (spherical figure-8 window formed by the
+      intersection of a sphere of radius @code(Radius) and a tangent cylinder)
+      centered at the active selection pivot $\mathbf(C)$:
+      $\theta_i = \frac(2\pi i)(N)$,
+      $x(\theta_i) = C_x + R \cos^2(\theta_i)$,
+      $y(\theta_i) = C_y + R \sin(\theta_i)$,
+      $z(\theta_i) = C_z + R \sin(\theta_i)\cos(\theta_i)$.
+      Every placed point lies on the sphere of radius $R$ centered at $\mathbf(C)$.
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient radially outward along the sphere surface normal
+      - @code(2): orient forward along the analytical 3D Viviani curve tangent
+        $\mathbf(T)(\theta_i) \propto (-\sin(2\theta_i), \cos(\theta_i), \cos(2\theta_i))$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInVivianiCurve(
+      const Radius: Single = 0.0;
+      const OrientMode: Integer = 0): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along a 3D Hypotrochoid (@code(Epitrochoid = false)) or Epitrochoid
+      (@code(Epitrochoid = true)) Spirograph gear curve on the horizontal XZ
+      plane centered at the active selection pivot $\mathbf(C)$:
+      - Hypotrochoid:
+        $x(\theta) = C_x + (R - r)\cos\theta + d\cos\left(\frac(R - r)(r)\theta\right)$,
+        $z(\theta) = C_z + (R - r)\sin\theta - d\sin\left(\frac(R - r)(r)\theta\right)$
+      - Epitrochoid:
+        $x(\theta) = C_x + (R + r)\cos\theta - d\cos\left(\frac(R + r)(r)\theta\right)$,
+        $z(\theta) = C_z + (R + r)\sin\theta - d\sin\left(\frac(R + r)(r)\theta\right)$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient horizontally inward toward the spirograph center
+      - @code(2): orient forward along the analytical spirograph tangent vector
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInSpirograph(
+      const FixedRadiusR, RollingRadiusSmallR, PenOffsetD: Single;
+      const Epitrochoid: Boolean = false;
+      const OrientMode: Integer = 0): Boolean;
   end;
 
 var
@@ -9665,6 +9721,372 @@ begin
 
       if LookDir.IsZero(1e-5) then
         LookDir := Vector3(CosT, 0, SinT);
+      LookDir := LookDir.Normalize;
+
+      Side := TVector3.CrossProduct(LookDir, GravityUp);
+      if Side.IsZero(1e-5) then
+        Side := Vector3(1, 0, 0);
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.BendSelected(
+  const SpineAxis, BendDirAxis: T3DAxis;
+  const TotalAngleRad: Single;
+  const RotateOrientations: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  OrigPos: array of TVector3;
+  Count, I: Integer;
+  T: TCastleTransform;
+  ActualSpine, ActualBendDir: T3DAxis;
+  CenterPos, CurPos, TargetPos, SpineUnit, BendUnit, RotAxis: TVector3;
+  CurWorldPos, CurDir, CurUp, NewDir, NewUp: TVector3;
+  MinS, MaxS, Span, RadiusR, RelS, RelD, Theta, SinT, CosT, EffR: Single;
+  UseIndexSpan: Boolean;
+begin
+  Result := false;
+  if Abs(TotalAngleRad) < 1e-5 then Exit;
+
+  Count := 0;
+  SetLength(Items, FMaxSelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+  if Count < 2 then Exit;
+
+  ActualSpine := SpineAxis;
+  if BendDirAxis = ActualSpine then
+    ActualBendDir := (ActualSpine + 1) mod 3
+  else
+    ActualBendDir := BendDirAxis;
+
+  if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+    CenterPos := GetTransformWorkingPos(FMainSelected)
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  SetLength(OrigPos, Count);
+  for I := 0 to Count - 1 do
+    OrigPos[I] := GetTransformWorkingPos(Items[I]);
+
+  MinS := OrigPos[0].Data[ActualSpine];
+  MaxS := MinS;
+  for I := 1 to Count - 1 do
+  begin
+    if OrigPos[I].Data[ActualSpine] < MinS then
+      MinS := OrigPos[I].Data[ActualSpine];
+    if OrigPos[I].Data[ActualSpine] > MaxS then
+      MaxS := OrigPos[I].Data[ActualSpine];
+  end;
+
+  Span := MaxS - MinS;
+  UseIndexSpan := Span < 1e-4;
+  if UseIndexSpan then
+    Span := 10.0;
+
+  RadiusR := Span / TotalAngleRad;
+
+  SpineUnit := TVector3.Zero;
+  SpineUnit.Data[ActualSpine] := 1.0;
+  BendUnit := TVector3.Zero;
+  BendUnit.Data[ActualBendDir] := 1.0;
+  RotAxis := TVector3.CrossProduct(SpineUnit, BendUnit).Normalize;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    CurPos := OrigPos[I];
+
+    if UseIndexSpan then
+      RelS := ((Single(I) / Single(Count - 1)) - 0.5) * Span
+    else
+      RelS := CurPos.Data[ActualSpine] - CenterPos.Data[ActualSpine];
+
+    RelD := CurPos.Data[ActualBendDir] - CenterPos.Data[ActualBendDir];
+    Theta := (RelS / Span) * TotalAngleRad;
+    SinCos(Theta, SinT, CosT);
+
+    EffR := RadiusR - RelD;
+    TargetPos := CurPos;
+    TargetPos.Data[ActualSpine] := CenterPos.Data[ActualSpine] + EffR * SinT;
+    TargetPos.Data[ActualBendDir] := CenterPos.Data[ActualBendDir] + RadiusR - EffR * CosT;
+
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if RotateOrientations and (Abs(Theta) > 1e-5) and T.HasWorldTransform then
+    begin
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      NewDir := RotatePointAroundAxisRad(Theta, CurDir, RotAxis);
+      NewUp := RotatePointAroundAxisRad(Theta, CurUp, RotAxis);
+      if (not TVector3.Equals(CurDir, NewDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), NewDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInVivianiCurve(
+  const Radius: Single;
+  const OrientMode: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  Count, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, GravityUp, LookDir, Side, NewUp: TVector3;
+  CurWorldPos, CurDir, CurUp: TVector3;
+  ActualR, SumDist, Theta, SinT, CosT, Sin2T, Cos2T: Single;
+begin
+  Result := false;
+  Count := 0;
+  SetLength(Items, FMaxSelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+    CenterPos := GetTransformWorkingPos(FMainSelected)
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  if Radius > 0 then
+    ActualR := Radius
+  else
+  begin
+    SumDist := 0;
+    for I := 0 to Count - 1 do
+      SumDist := SumDist + PointsDistance(GetTransformWorkingPos(Items[I]), CenterPos);
+    ActualR := SumDist / Count;
+    if ActualR < 1e-3 then
+      ActualR := 6.0;
+  end;
+
+  if (FMainSelected <> nil) and (FMainSelected.World <> nil) then
+  begin
+    GravityUp := FMainSelected.World.GravityUp;
+    if GravityUp.IsZero then
+      GravityUp := Vector3(0, 1, 0)
+    else
+      GravityUp := GravityUp.Normalize;
+  end else
+    GravityUp := Vector3(0, 1, 0);
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    Theta := (2.0 * Pi * I) / Count;
+    SinCos(Theta, SinT, CosT);
+
+    TargetPos := Vector3(
+      CenterPos.X + ActualR * Sqr(CosT),
+      CenterPos.Y + ActualR * SinT,
+      CenterPos.Z + ActualR * SinT * CosT
+    );
+
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      if OrientMode = 1 then
+      begin
+        LookDir := Vector3(Sqr(CosT), SinT, SinT * CosT);
+      end else
+      begin
+        SinCos(2.0 * Theta, Sin2T, Cos2T);
+        LookDir := Vector3(-Sin2T, CosT, Cos2T);
+      end;
+
+      if LookDir.IsZero(1e-5) then
+        LookDir := Vector3(0, 1, 0);
+      LookDir := LookDir.Normalize;
+
+      Side := TVector3.CrossProduct(LookDir, GravityUp);
+      if Side.IsZero(1e-5) then
+        Side := Vector3(1, 0, 0);
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInSpirograph(
+  const FixedRadiusR, RollingRadiusSmallR, PenOffsetD: Single;
+  const Epitrochoid: Boolean;
+  const OrientMode: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  Count, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, GravityUp, LookDir, Side, NewUp: TVector3;
+  CurWorldPos, CurDir, CurUp: TVector3;
+  BigR, SmallR, PenD, SumDist, AvgR, BaseR, FreqK, Theta: Single;
+  SinT, CosT, SinKT, CosKT, DX, DZ: Single;
+begin
+  Result := false;
+  Count := 0;
+  SetLength(Items, FMaxSelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+    CenterPos := GetTransformWorkingPos(FMainSelected)
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  SumDist := 0;
+  for I := 0 to Count - 1 do
+    SumDist := SumDist + PointsDistance(GetTransformWorkingPos(Items[I]), CenterPos);
+  AvgR := SumDist / Count;
+  if AvgR < 1e-3 then
+    AvgR := 8.0;
+
+  if FixedRadiusR > 0 then BigR := FixedRadiusR else BigR := AvgR;
+  if RollingRadiusSmallR > 0 then SmallR := RollingRadiusSmallR else SmallR := BigR * 0.25;
+  SmallR := Max(1e-3, SmallR);
+  if PenOffsetD > 0 then PenD := PenOffsetD else PenD := SmallR * 0.8;
+
+  if Epitrochoid then
+    BaseR := BigR + SmallR
+  else
+    BaseR := BigR - SmallR;
+  FreqK := BaseR / SmallR;
+
+  if (FMainSelected <> nil) and (FMainSelected.World <> nil) then
+  begin
+    GravityUp := FMainSelected.World.GravityUp;
+    if GravityUp.IsZero then
+      GravityUp := Vector3(0, 1, 0)
+    else
+      GravityUp := GravityUp.Normalize;
+  end else
+    GravityUp := Vector3(0, 1, 0);
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    Theta := (2.0 * Pi * I) / Count;
+    SinCos(Theta, SinT, CosT);
+    SinCos(FreqK * Theta, SinKT, CosKT);
+
+    if Epitrochoid then
+    begin
+      TargetPos := Vector3(
+        CenterPos.X + BaseR * CosT - PenD * CosKT,
+        CenterPos.Y,
+        CenterPos.Z + BaseR * SinT - PenD * SinKT
+      );
+    end else
+    begin
+      TargetPos := Vector3(
+        CenterPos.X + BaseR * CosT + PenD * CosKT,
+        CenterPos.Y,
+        CenterPos.Z + BaseR * SinT - PenD * SinKT
+      );
+    end;
+
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(CurPos, TargetPos) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      if OrientMode = 1 then
+      begin
+        LookDir := Vector3(CenterPos.X - TargetPos.X, 0, CenterPos.Z - TargetPos.Z);
+      end else
+      begin
+        if Epitrochoid then
+        begin
+          DX := -BaseR * SinT + PenD * FreqK * SinKT;
+          DZ := BaseR * CosT - PenD * FreqK * CosKT;
+        end else
+        begin
+          DX := -BaseR * SinT - PenD * FreqK * SinKT;
+          DZ := BaseR * CosT - PenD * FreqK * CosKT;
+        end;
+        LookDir := Vector3(DX, 0, DZ);
+      end;
+
+      if LookDir.IsZero(1e-5) then
+        LookDir := Vector3(-SinT, 0, CosT);
       LookDir := LookDir.Normalize;
 
       Side := TVector3.CrossProduct(LookDir, GravityUp);

@@ -61,6 +61,7 @@ type
     procedure TestArrangeCubeFrameParaboloidBowlAndSnapToBoxSurface;
     procedure TestArrangeRoseCurveEllipsoidAndShearSelected;
     procedure TestTwistTaperSphericalSpiralAndSuperellipse;
+    procedure TestBendVivianiCurveAndSpirograph;
   end;
 
 implementation
@@ -2370,6 +2371,106 @@ begin
     AssertVectorEquals(Vector3(0, 0, -8), B4.Translation, 1e-4);
     B1.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(-1, 0, 0), WorldDir.Normalize, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestBendVivianiCurveAndSpirograph;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  B1, B2, B3, B4: TCastleBox;
+  WorldPos, WorldDir, WorldUp: TVector3;
+  RadiusR: Single;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.OnTransformModified := {$ifdef FPC}@{$endif}HandleTransformModified;
+    Manipulate.OnTransformModifyEnd := {$ifdef FPC}@{$endif}HandleTransformModifyEnd;
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(2, 2, 2);
+    B1.Translation := Vector3(0, -5, 0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(2, 2, 2);
+    B2.Translation := Vector3(0, 0, 0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(2, 2, 2);
+    B3.Translation := Vector3(0, 5, 0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(2, 2, 2);
+    B4.Translation := Vector3(0, 0, 0);
+    Viewport.Items.Add(B4);
+
+    // 1. Test BendSelected(1, 0, Pi, true):
+    // SpineAxis = 1 (Y), BendDirAxis = 0 (X), TotalAngleRad = Pi.
+    // B1(0, -5, 0), B2(0, 0, 0), B3(0, +5, 0) -> Center = (0, 0, 0), Span = 10, RadiusR = 10 / Pi.
+    // B1 (theta = -Pi/2): X = R, Y = -R
+    // B2 (theta = 0): X = 0, Y = 0
+    // B3 (theta = +Pi/2): X = R, Y = +R, WorldUp rotated +90 deg from +Y to +X -> (1, 0, 0)
+    Manipulate.SetSelected([B1, B2, B3]);
+    Manipulate.PivotMode := pmSelectionCenter;
+    RadiusR := 10.0 / Pi;
+    AssertTrue(Manipulate.BendSelected(1, 0, Pi, true));
+    AssertVectorEquals(Vector3(RadiusR, -RadiusR, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(RadiusR, RadiusR, 0), B3.Translation, 1e-4);
+    B3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldUp.Normalize, 1e-4);
+
+    // 2. Test ArrangeSelectedInVivianiCurve(10.0, 2) on 4 transforms:
+    // Reset B1..B4 around Center = (0, 0, 0), N = 4 -> theta = 0, pi/2, pi, 3pi/2:
+    // i=0 (theta=0): (10, 0, 0), tangent (-sin(0), cos(0), cos(0)) = (0, 1, 1)
+    // i=1 (theta=pi/2): (0, 10, 0)
+    // i=2 (theta=pi): (10, 0, 0)
+    // i=3 (theta=3pi/2): (0, -10, 0)
+    B1.Rotation := Vector4(0, 1, 0, 0);
+    B2.Rotation := Vector4(0, 1, 0, 0);
+    B3.Rotation := Vector4(0, 1, 0, 0);
+    B4.Rotation := Vector4(0, 1, 0, 0);
+    B1.Translation := Vector3(-3, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(1, 0, 0);
+    B4.Translation := Vector3(3, 0, 0);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.ArrangeSelectedInVivianiCurve(10.0, 2));
+    AssertVectorEquals(Vector3(10, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 10, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10, 0, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, -10, 0), B4.Translation, 1e-4);
+    AssertSameValue(10.0, B1.Translation.Length, 1e-4);
+    AssertSameValue(10.0, B2.Translation.Length, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 1, 1).Normalize, WorldDir.Normalize, 1e-4);
+
+    // 3. Test ArrangeSelectedInSpirograph(8.0, 2.0, 1.5, false, 2) on 4 transforms:
+    // Reset B1..B4 around Center = (0, 0, 0).
+    // Hypotrochoid: R = 8, r = 2, d = 1.5 -> BaseR = R - r = 6, k = (R - r)/r = 3.
+    // N = 4 -> theta = 0, pi/2, pi, 3pi/2:
+    // i=0: (7.5, 0, 0), tangent = (0, 0, 6 - 4.5) = (0, 0, 1.5) -> (0, 0, 1)
+    // i=1: (0, 0, 7.5)
+    // i=2: (-7.5, 0, 0)
+    // i=3: (0, 0, -7.5)
+    B1.Translation := Vector3(-3, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(1, 0, 0);
+    B4.Translation := Vector3(3, 0, 0);
+    AssertTrue(Manipulate.ArrangeSelectedInSpirograph(8.0, 2.0, 1.5, false, 2));
+    AssertVectorEquals(Vector3(7.5, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, 7.5), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-7.5, 0, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, -7.5), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 0, 1), WorldDir.Normalize, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);
