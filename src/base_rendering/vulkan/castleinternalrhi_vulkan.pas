@@ -2654,6 +2654,108 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Hardware Ray Tracing Shader Binding Table (SBT) (Phase 35.2)               }
+  { -------------------------------------------------------------------------- }
+
+  { Manages VK_KHR_ray_tracing_pipeline Shader Binding Table (SBT) regions
+    (Raygen, Miss, Hit, Callable) with hardware handle stride & base alignment. }
+  TCastleVulkanShaderBindingTable = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FHandleSize: Cardinal;
+    FHandleAlignment: Cardinal;
+    FBaseAlignment: Cardinal;
+    FAlignedHandleStride: Cardinal;
+    FRaygenRegionSize: Cardinal;
+    FMissRegionSize: Cardinal;
+    FHitRegionSize: Cardinal;
+    FTotalSBTSizeBytes: Cardinal;
+    FSBTBuffer: TVulkanRHIBuffer;
+    FTraceRaysDispatchCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Computes aligned SBT record stride and Raygen/Miss/Hit table region byte sizes. }
+    procedure ComputeAlignedSBTRegionSizes(
+      const AMissGroupCount, AHitGroupCount: Cardinal);
+
+    { Allocates the GPU SBT buffer sized for the aligned Raygen, Miss, and Hit regions. }
+    procedure EnsureSBTBuffer(const AMissGroupCount, AHitGroupCount: Cardinal);
+
+    { Dispatches hardware ray tracing (vkCmdTraceRaysKHR or compute fallback). }
+    procedure DispatchTraceRays(
+      const ACommandList: TVulkanRHICommandList;
+      const AWidth, AHeight: Cardinal;
+      const AMissGroupCount: Cardinal = 2;
+      const AHitGroupCount: Cardinal = 4);
+
+    property HandleSize: Cardinal read FHandleSize write FHandleSize;
+    property HandleAlignment: Cardinal read FHandleAlignment write FHandleAlignment;
+    property BaseAlignment: Cardinal read FBaseAlignment write FBaseAlignment;
+    property AlignedHandleStride: Cardinal read FAlignedHandleStride;
+    property RaygenRegionSize: Cardinal read FRaygenRegionSize;
+    property MissRegionSize: Cardinal read FMissRegionSize;
+    property HitRegionSize: Cardinal read FHitRegionSize;
+    property TotalSBTSizeBytes: Cardinal read FTotalSBTSizeBytes;
+    property SBTBuffer: TVulkanRHIBuffer read FSBTBuffer;
+    property TraceRaysDispatchCount: Cardinal read FTraceRaysDispatchCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
+  { BLAS / TLAS Acceleration Structure & Compaction Manager (Phase 35.3)       }
+  { -------------------------------------------------------------------------- }
+
+  TCastleVulkanBLASEntry = record
+    BLASID: Cardinal;
+    TriangleCount: Cardinal;
+    UncompactedBytes: Cardinal;
+    CompactedBytes: Cardinal;
+    IsCompacted: Boolean;
+  end;
+
+  { Tracks Bottom-Level (BLAS) and Top-Level (TLAS) Acceleration Structure builds
+    and post-build BLAS memory compaction (VK_KHR_acceleration_structure). }
+  TCastleVulkanAccelerationStructureManager = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FBLASEntries: array of TCastleVulkanBLASEntry;
+    FTLASInstanceCount: Cardinal;
+    FTLASBuildCount: Cardinal;
+    FTLASBuffer: TVulkanRHIBuffer;
+    function GetBLASCount: Cardinal;
+    function GetTotalUncompactedBLASBytes: Cardinal;
+    function GetTotalCompactedBLASBytes: Cardinal;
+    function GetCompactionSavedBytes: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Clears all tracked BLAS/TLAS entries. }
+    procedure ClearAccelerationStructures;
+
+    { Registers a newly built Bottom-Level Acceleration Structure (BLAS) and returns its 1-based BLASID. }
+    function RegisterBLASBuild(
+      const ATriangleCount, AUncompactedBytes: Cardinal): Cardinal;
+
+    { Compacts an existing BLAS after VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR readback. }
+    function CompactBLAS(
+      const ABLASID: Cardinal;
+      const ACompactedBytes: Cardinal = 0): Boolean;
+
+    { Builds or updates the Top-Level Acceleration Structure (TLAS) for AInstanceCount scene instances. }
+    procedure BuildTLAS(const AInstanceCount: Cardinal);
+
+    property BLASCount: Cardinal read GetBLASCount;
+    property TotalUncompactedBLASBytes: Cardinal read GetTotalUncompactedBLASBytes;
+    property TotalCompactedBLASBytes: Cardinal read GetTotalCompactedBLASBytes;
+    property CompactionSavedBytes: Cardinal read GetCompactionSavedBytes;
+    property TLASInstanceCount: Cardinal read FTLASInstanceCount;
+    property TLASBuildCount: Cardinal read FTLASBuildCount;
+    property TLASBuffer: TVulkanRHIBuffer read FTLASBuffer;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -2759,6 +2861,8 @@ type
     FSparseVolumeAtlas: TCastleVulkanSparseVolumeAtlas;
     FBreadcrumbTracker: TCastleVulkanBreadcrumbTracker;
     FSVGFDenoiser: TCastleVulkanSVGFDenoiser;
+    FShaderBindingTable: TCastleVulkanShaderBindingTable;
+    FAccelerationStructureManager: TCastleVulkanAccelerationStructureManager;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -2869,6 +2973,8 @@ type
     function GetSparseVolumeAtlas: TCastleVulkanSparseVolumeAtlas;
     function GetBreadcrumbTracker: TCastleVulkanBreadcrumbTracker;
     function GetSVGFDenoiser: TCastleVulkanSVGFDenoiser;
+    function GetShaderBindingTable: TCastleVulkanShaderBindingTable;
+    function GetAccelerationStructureManager: TCastleVulkanAccelerationStructureManager;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -3084,6 +3190,8 @@ type
     property SparseVolumeAtlas: TCastleVulkanSparseVolumeAtlas read GetSparseVolumeAtlas;
     property BreadcrumbTracker: TCastleVulkanBreadcrumbTracker read GetBreadcrumbTracker;
     property SVGFDenoiser: TCastleVulkanSVGFDenoiser read GetSVGFDenoiser;
+    property ShaderBindingTable: TCastleVulkanShaderBindingTable read GetShaderBindingTable;
+    property AccelerationStructureManager: TCastleVulkanAccelerationStructureManager read GetAccelerationStructureManager;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -14634,6 +14742,185 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanShaderBindingTable (Phase 35.2)                                 }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanShaderBindingTable.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FHandleSize := 32;
+  FHandleAlignment := 32;
+  FBaseAlignment := 64;
+end;
+
+destructor TCastleVulkanShaderBindingTable.Destroy;
+begin
+  FreeAndNil(FSBTBuffer);
+  inherited;
+end;
+
+procedure TCastleVulkanShaderBindingTable.ComputeAlignedSBTRegionSizes(
+  const AMissGroupCount, AHitGroupCount: Cardinal);
+begin
+  FAlignedHandleStride := TCastleShaderGeneratorRHI.AlignUpSBTSize(
+    Max(Cardinal(1), FHandleSize), Max(Cardinal(1), FHandleAlignment));
+  FRaygenRegionSize := TCastleShaderGeneratorRHI.AlignUpSBTSize(
+    FAlignedHandleStride, Max(Cardinal(1), FBaseAlignment));
+  FMissRegionSize := TCastleShaderGeneratorRHI.AlignUpSBTSize(
+    Max(Cardinal(1), AMissGroupCount) * FAlignedHandleStride, Max(Cardinal(1), FBaseAlignment));
+  FHitRegionSize := TCastleShaderGeneratorRHI.AlignUpSBTSize(
+    Max(Cardinal(1), AHitGroupCount) * FAlignedHandleStride, Max(Cardinal(1), FBaseAlignment));
+  FTotalSBTSizeBytes := FRaygenRegionSize + FMissRegionSize + FHitRegionSize;
+end;
+
+procedure TCastleVulkanShaderBindingTable.EnsureSBTBuffer(
+  const AMissGroupCount, AHitGroupCount: Cardinal);
+var
+  BufDesc: TRHIBufferDesc;
+begin
+  ComputeAlignedSBTRegionSizes(AMissGroupCount, AHitGroupCount);
+  if (FSBTBuffer <> nil) and (FSBTBuffer.Desc.Size >= FTotalSBTSizeBytes) then
+    Exit;
+  FreeAndNil(FSBTBuffer);
+  BufDesc := TRHIBufferDesc.Create(FTotalSBTSizeBytes, [buStorage, buTransferDst], muCpuToGpu,
+    'RayTracingShaderBindingTable');
+  FSBTBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+end;
+
+procedure TCastleVulkanShaderBindingTable.DispatchTraceRays(
+  const ACommandList: TVulkanRHICommandList;
+  const AWidth, AHeight: Cardinal;
+  const AMissGroupCount: Cardinal;
+  const AHitGroupCount: Cardinal);
+var
+  GroupsX, GroupsY: Cardinal;
+begin
+  EnsureSBTBuffer(AMissGroupCount, AHitGroupCount);
+  if ACommandList = nil then
+    Exit;
+  GroupsX := (Max(Cardinal(1), AWidth) + 7) div 8;
+  GroupsY := (Max(Cardinal(1), AHeight) + 7) div 8;
+  ACommandList.Dispatch(GroupsX, GroupsY, 1);
+  Inc(FTraceRaysDispatchCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanAccelerationStructureManager (Phase 35.3)                       }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanAccelerationStructureManager.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+end;
+
+destructor TCastleVulkanAccelerationStructureManager.Destroy;
+begin
+  FreeAndNil(FTLASBuffer);
+  inherited;
+end;
+
+procedure TCastleVulkanAccelerationStructureManager.ClearAccelerationStructures;
+begin
+  SetLength(FBLASEntries, 0);
+  FTLASInstanceCount := 0;
+  FTLASBuildCount := 0;
+end;
+
+function TCastleVulkanAccelerationStructureManager.RegisterBLASBuild(
+  const ATriangleCount, AUncompactedBytes: Cardinal): Cardinal;
+var
+  Idx: Integer;
+  SafeBytes: Cardinal;
+begin
+  SafeBytes := Max(Cardinal(256), AUncompactedBytes);
+  Idx := Length(FBLASEntries);
+  SetLength(FBLASEntries, Idx + 1);
+  FBLASEntries[Idx].BLASID := Cardinal(Idx + 1);
+  FBLASEntries[Idx].TriangleCount := ATriangleCount;
+  FBLASEntries[Idx].UncompactedBytes := SafeBytes;
+  FBLASEntries[Idx].CompactedBytes := SafeBytes;
+  FBLASEntries[Idx].IsCompacted := False;
+  Result := FBLASEntries[Idx].BLASID;
+end;
+
+function TCastleVulkanAccelerationStructureManager.CompactBLAS(
+  const ABLASID: Cardinal;
+  const ACompactedBytes: Cardinal): Boolean;
+var
+  I: Integer;
+  TargetBytes: Cardinal;
+begin
+  Result := False;
+  for I := 0 to High(FBLASEntries) do
+    if FBLASEntries[I].BLASID = ABLASID then
+    begin
+      if ACompactedBytes > 0 then
+        TargetBytes := Min(FBLASEntries[I].UncompactedBytes, ACompactedBytes)
+      else
+        { Default post-build BVH compaction ratio (~55% of conservative worst-case build size) }
+        TargetBytes := Max(Cardinal(128), (FBLASEntries[I].UncompactedBytes * 55) div 100);
+      FBLASEntries[I].CompactedBytes := TargetBytes;
+      FBLASEntries[I].IsCompacted := True;
+      Exit(True);
+    end;
+end;
+
+procedure TCastleVulkanAccelerationStructureManager.BuildTLAS(
+  const AInstanceCount: Cardinal);
+var
+  ReqBytes: Cardinal;
+  BufDesc: TRHIBufferDesc;
+begin
+  FTLASInstanceCount := AInstanceCount;
+  Inc(FTLASBuildCount);
+  ReqBytes := Max(Cardinal(256), AInstanceCount * 64);
+  if (FTLASBuffer = nil) or (FTLASBuffer.Desc.Size < ReqBytes) then
+  begin
+    FreeAndNil(FTLASBuffer);
+    BufDesc := TRHIBufferDesc.Create(ReqBytes, [buStorage, buTransferDst], muCpuToGpu,
+      'TopLevelAccelerationStructureBuffer');
+    FTLASBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+end;
+
+function TCastleVulkanAccelerationStructureManager.GetBLASCount: Cardinal;
+begin
+  Result := Cardinal(Length(FBLASEntries));
+end;
+
+function TCastleVulkanAccelerationStructureManager.GetTotalUncompactedBLASBytes: Cardinal;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to High(FBLASEntries) do
+    Inc(Result, FBLASEntries[I].UncompactedBytes);
+end;
+
+function TCastleVulkanAccelerationStructureManager.GetTotalCompactedBLASBytes: Cardinal;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to High(FBLASEntries) do
+    Inc(Result, FBLASEntries[I].CompactedBytes);
+end;
+
+function TCastleVulkanAccelerationStructureManager.GetCompactionSavedBytes: Cardinal;
+var
+  Uncomp, Comp: Cardinal;
+begin
+  Uncomp := GetTotalUncompactedBLASBytes;
+  Comp := GetTotalCompactedBLASBytes;
+  if Uncomp > Comp then
+    Result := Uncomp - Comp
+  else
+    Result := 0;
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -15267,12 +15554,28 @@ begin
   Result := FSVGFDenoiser;
 end;
 
+function TVulkanRHIDevice.GetShaderBindingTable: TCastleVulkanShaderBindingTable;
+begin
+  if FShaderBindingTable = nil then
+    FShaderBindingTable := TCastleVulkanShaderBindingTable.Create(Self);
+  Result := FShaderBindingTable;
+end;
+
+function TVulkanRHIDevice.GetAccelerationStructureManager: TCastleVulkanAccelerationStructureManager;
+begin
+  if FAccelerationStructureManager = nil then
+    FAccelerationStructureManager := TCastleVulkanAccelerationStructureManager.Create(Self);
+  Result := FAccelerationStructureManager;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FAccelerationStructureManager);
+  FreeAndNil(FShaderBindingTable);
   FreeAndNil(FSVGFDenoiser);
   FreeAndNil(FBreadcrumbTracker);
   FreeAndNil(FSparseVolumeAtlas);

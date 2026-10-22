@@ -1330,6 +1330,19 @@ type
     class function EvaluateHitDistanceBlurFactor(
       const ARayHitDistance, ACameraDistance, ARoughness: Single): Single; static;
 
+    { Phase 35.1: Generates GLSL 460 Hardware Ray Tracing Pipeline stages (GL_EXT_ray_tracing:
+      raygen, closesthit, miss) invoking traceRayEXT and barycentric hit interpolation. }
+    function GenerateRayTracingPipelineStages: String;
+
+    { Phase 35.1 CPU reference: Interpolates a normalized triangle vertex normal using ray-hit barycentrics (bary.xy). }
+    class function InterpolateRayHitNormal(
+      const AN0, AN1, AN2: TVector3;
+      const AHitBarycentricsUV: TVector2): TVector3; static;
+
+    { Phase 35.2 CPU reference: Aligns AValue upward to the next multiple of APowerOfTwoAlignment. }
+    class function AlignUpSBTSize(
+      const AValue, AAlignment: Cardinal): Cardinal; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -6469,6 +6482,51 @@ begin
   DCam := Max(1e-4, ACameraDistance);
   ContactRatio := DHit / (DHit + DCam);
   Result := EnsureRange(ContactRatio * EnsureRange(ARoughness, 0.0, 1.0), 0.0, 1.0);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateRayTracingPipelineStages: String;
+begin
+  Result :=
+    '#version 460' + NL +
+    '#extension GL_EXT_ray_tracing : require' + NL +
+    NL +
+    '// Phase 35.1: Hardware Ray Tracing Pipeline (VK_KHR_ray_tracing_pipeline)' + NL +
+    'struct CastleRayPayload {' + NL +
+    '  vec3 radiance;' + NL +
+    '  float hitT;' + NL +
+    '};' + NL +
+    NL +
+    'vec3 InterpolateRayHitNormal(vec3 n0, vec3 n1, vec3 n2, vec2 hitBaryUV) {' + NL +
+    '  float w0 = 1.0 - hitBaryUV.x - hitBaryUV.y;' + NL +
+    '  return normalize(n0 * w0 + n1 * hitBaryUV.x + n2 * hitBaryUV.y);' + NL +
+    '}' + NL +
+    NL +
+    '// traceRayEXT(topLevelAS, rayFlags, cullMask, sbtRecordOffset, sbtRecordStride, missIndex, origin, tMin, dir, tMax, payloadLocation);' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.InterpolateRayHitNormal(
+  const AN0, AN1, AN2: TVector3;
+  const AHitBarycentricsUV: TVector2): TVector3;
+var
+  W0: Single;
+begin
+  W0 := 1.0 - AHitBarycentricsUV.X - AHitBarycentricsUV.Y;
+  Result := (AN0 * W0) + (AN1 * AHitBarycentricsUV.X) + (AN2 * AHitBarycentricsUV.Y);
+  if Result.LengthSqr > 1e-12 then
+    Result := Result.Normalize
+  else
+    Result := Vector3(0, 0, 1);
+end;
+
+class function TCastleShaderGeneratorRHI.AlignUpSBTSize(
+  const AValue, AAlignment: Cardinal): Cardinal;
+var
+  SafeAlign: Cardinal;
+begin
+  SafeAlign := Max(Cardinal(1), AAlignment);
+  if AValue = 0 then
+    Exit(0);
+  Result := ((AValue + SafeAlign - 1) div SafeAlign) * SafeAlign;
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

@@ -171,6 +171,9 @@ type
     procedure TestSVGFVarianceMomentsAndTemporalVarianceRHI;
     procedure TestSVGFAttrousWaveletEdgeStoppingAndContactHardeningRHI;
     procedure TestVulkanSVGFDenoiserMultiPassDispatchRHI;
+    procedure TestRayTracingPipelineStagesAndBarycentricNormalRHI;
+    procedure TestVulkanShaderBindingTableAlignmentAndDispatchRHI;
+    procedure TestVulkanAccelerationStructureCompactionAndTLASRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -9150,6 +9153,97 @@ begin
       4, Integer(Device.SVGFDenoiser.DispatchCount));
   finally
     FreeAndNil(CmdList);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRayTracingPipelineStagesAndBarycentricNormalRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  RTGLSL: String;
+  HitNorm: TVector3;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Hardware Ray Tracing Pipeline GLSL 460 functions }
+    RTGLSL := Gen.GenerateRayTracingPipelineStages;
+    AssertTrue('Ray Tracing Pipeline GLSL must require GL_EXT_ray_tracing and include InterpolateRayHitNormal',
+      (Pos('#extension GL_EXT_ray_tracing : require', RTGLSL) > 0) and
+      (Pos('vec3 InterpolateRayHitNormal(vec3 n0, vec3 n1, vec3 n2, vec2 hitBaryUV)', RTGLSL) > 0));
+
+    { 2. Verify barycentric normal interpolation at triangle centroid (1/3, 1/3) }
+    HitNorm := TCastleShaderGeneratorRHI.InterpolateRayHitNormal(
+      Vector3(1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1),
+      Vector2(1.0 / 3.0, 1.0 / 3.0));
+    AssertSameValue(1.0 / Sqrt(3.0), HitNorm.X, 1e-5);
+    AssertSameValue(1.0 / Sqrt(3.0), HitNorm.Y, 1e-5);
+    AssertSameValue(1.0 / Sqrt(3.0), HitNorm.Z, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanShaderBindingTableAlignmentAndDispatchRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+begin
+  AssertEquals('AlignUpSBTSize(36, 32) must round up to 64',
+    64, Integer(TCastleShaderGeneratorRHI.AlignUpSBTSize(36, 32)));
+
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($666C)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    Device.ShaderBindingTable.HandleSize := 32;
+    Device.ShaderBindingTable.HandleAlignment := 32;
+    Device.ShaderBindingTable.BaseAlignment := 64;
+
+    CmdList.BeginRecording;
+    Device.ShaderBindingTable.DispatchTraceRays(CmdList, 1920, 1080, 2, 4);
+    CmdList.EndRecording;
+
+    AssertEquals('Aligned handle stride must be 32', 32, Integer(Device.ShaderBindingTable.AlignedHandleStride));
+    AssertEquals('Raygen region (1*32 aligned to 64) must be 64 bytes', 64, Integer(Device.ShaderBindingTable.RaygenRegionSize));
+    AssertEquals('Miss region (2*32 aligned to 64) must be 64 bytes', 64, Integer(Device.ShaderBindingTable.MissRegionSize));
+    AssertEquals('Hit region (4*32 aligned to 64) must be 128 bytes', 128, Integer(Device.ShaderBindingTable.HitRegionSize));
+    AssertEquals('Total SBT size must be 64 + 64 + 128 = 256 bytes', 256, Integer(Device.ShaderBindingTable.TotalSBTSizeBytes));
+    AssertTrue('SBTBuffer must be allocated', Device.ShaderBindingTable.SBTBuffer <> nil);
+    AssertEquals('TraceRaysDispatchCount must be 1', 1, Integer(Device.ShaderBindingTable.TraceRaysDispatchCount));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanAccelerationStructureCompactionAndTLASRHI;
+var
+  Device: TVulkanRHIDevice;
+  BLAS1, BLAS2: Cardinal;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($666D)) );
+  try
+    Device.AccelerationStructureManager.ClearAccelerationStructures;
+    BLAS1 := Device.AccelerationStructureManager.RegisterBLASBuild(4096, 100000);
+    BLAS2 := Device.AccelerationStructureManager.RegisterBLASBuild(2048, 60000);
+
+    AssertEquals('BLASCount must be 2', 2, Integer(Device.AccelerationStructureManager.BLASCount));
+    AssertEquals('TotalUncompactedBLASBytes must be 160000', 160000, Integer(Device.AccelerationStructureManager.TotalUncompactedBLASBytes));
+
+    AssertTrue('CompactBLAS(BLAS1) with explicit 50000 bytes must succeed',
+      Device.AccelerationStructureManager.CompactBLAS(BLAS1, 50000));
+    AssertTrue('CompactBLAS(BLAS2) with default 55% ratio (33000 bytes) must succeed',
+      Device.AccelerationStructureManager.CompactBLAS(BLAS2, 0));
+
+    AssertEquals('TotalCompactedBLASBytes must be 50000 + 33000 = 83000',
+      83000, Integer(Device.AccelerationStructureManager.TotalCompactedBLASBytes));
+    AssertEquals('CompactionSavedBytes must be 160000 - 83000 = 77000',
+      77000, Integer(Device.AccelerationStructureManager.CompactionSavedBytes));
+
+    Device.AccelerationStructureManager.BuildTLAS(128);
+    AssertEquals('TLASInstanceCount must be 128', 128, Integer(Device.AccelerationStructureManager.TLASInstanceCount));
+    AssertEquals('TLASBuildCount must be 1', 1, Integer(Device.AccelerationStructureManager.TLASBuildCount));
+    AssertTrue('TLASBuffer must be allocated', Device.AccelerationStructureManager.TLASBuffer <> nil);
+  finally
     FreeAndNil(Device);
   end;
 end;
