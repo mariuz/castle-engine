@@ -387,6 +387,9 @@ type
       ButtonRadialFalloff: TButton;
       ButtonArrangeCycloid: TButton;
       ButtonArrangeHyperboloid: TButton;
+      ButtonCylindrifySelection: TButton;
+      ButtonArrangeCassini: TButton;
+      ButtonArrangeCatenoid: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -426,6 +429,7 @@ type
       ButtonUICross: TButton;
       ButtonUIZigzag: TButton;
       ButtonUISpiral: TButton;
+      ButtonUIHexGrid: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -471,6 +475,7 @@ type
       MenuTreeViewItemSelectUIControls: TMenuItem;
       MenuTreeViewItemSelectUIContainers: TMenuItem;
       MenuTreeViewItemSelectUIImagesAndLabels: TMenuItem;
+      MenuTreeViewItemSelectUISizingMode: TMenuItem;
       MenuTreeViewItemCopyTransform: TMenuItem;
       MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
@@ -603,6 +608,9 @@ type
     procedure ButtonRadialFalloffClick(Sender: TObject);
     procedure ButtonArrangeCycloidClick(Sender: TObject);
     procedure ButtonArrangeHyperboloidClick(Sender: TObject);
+    procedure ButtonCylindrifySelectionClick(Sender: TObject);
+    procedure ButtonArrangeCassiniClick(Sender: TObject);
+    procedure ButtonArrangeCatenoidClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -631,6 +639,7 @@ type
     procedure ButtonUICrossClick(Sender: TObject);
     procedure ButtonUIZigzagClick(Sender: TObject);
     procedure ButtonUISpiralClick(Sender: TObject);
+    procedure ButtonUIHexGridClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -683,6 +692,7 @@ type
     procedure MenuTreeViewItemSelectUIControlsClick(Sender: TObject);
     procedure MenuTreeViewItemSelectUIContainersClick(Sender: TObject);
     procedure MenuTreeViewItemSelectUIImagesAndLabelsClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectUISizingModeClick(Sender: TObject);
     procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
@@ -1383,6 +1393,24 @@ type
       const FlareFactor: Single = 1.0;
       const OrientMode: Integer = 1);
     procedure ShowArrangeOnHyperboloidDialog;
+    procedure CylindrifySelection(
+      const TargetRadius: Single = 0.0;
+      const StrengthFactor: Single = 1.0;
+      const CapsuleHemispheres: Boolean = false;
+      const OrientRadially: Boolean = false);
+    procedure ShowCylindrifySelectionDialog;
+    procedure ArrangeSelectionInCassiniOval(
+      const FocusHalfDistA: Single = 0.0;
+      const ShapeRatioBOverA: Single = 1.11803399;
+      const VerticalRimWave: Single = 0.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeInCassiniOvalDialog;
+    procedure ArrangeSelectionOnCatenoid(
+      const WaistRadius: Single = 0.0;
+      const HeightSpan: Single = 8.0;
+      const NeckCurvature: Single = 1.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeOnCatenoidDialog;
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -1433,6 +1461,9 @@ type
     procedure ArrangeSelectedUserInterfacesInSpiral(
       const Turns: Single = 1.5;
       const GoldenPhyllotaxis: Boolean = false);
+    procedure ArrangeSelectedUserInterfacesInHexGrid(
+      const GapPx: Single = 8.0;
+      const PointyTop: Boolean = true);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -1487,6 +1518,7 @@ type
     procedure SelectUserInterfaceControls(const OnlyInteractiveControls: Boolean = false);
     procedure SelectUserInterfaceContainers(const WithinSelection: Boolean = false);
     procedure SelectUserInterfaceImagesAndLabels(const OnlyLabels: Boolean = false);
+    procedure SelectUserInterfacesBySizingMode(const OnlyAutoOrFullSize: Boolean = false);
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -2357,6 +2389,11 @@ begin
       Frame.ShowScatterDuplicateDialog;
       Exit(true);
     end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt, mkShift] then
+    begin
+      Frame.SelectUserInterfacesBySizingMode(false);
+      Exit(true);
+    end else
     if Event.ModifiersDown = [mkAlt, mkShift] then
     begin
       Frame.ShowArrangeOnSphereDialog;
@@ -2465,6 +2502,11 @@ begin
     if Event.ModifiersDown = [mkCtrl, mkAlt] then
     begin
       Frame.CopyTransform;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt, mkShift] then
+    begin
+      Frame.ShowArrangeOnCatenoidDialog;
       Exit(true);
     end;
   end;
@@ -2707,6 +2749,16 @@ begin
     if Event.IsKey(key8) then
     begin
       Frame.SelectUserInterfaceImagesAndLabels(false);
+      Exit(true);
+    end else
+    if Event.IsKey(key5) then
+    begin
+      Frame.ShowCylindrifySelectionDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(key9) then
+    begin
+      Frame.ShowArrangeInCassiniOvalDialog;
       Exit(true);
     end;
   end;
@@ -4621,6 +4673,36 @@ begin
   ButtonArrangeHyperboloid.OnClick := @ButtonArrangeHyperboloidClick;
   ButtonArrangeHyperboloid.Parent := PanelLayoutTransform;
 
+  ButtonCylindrifySelection := TButton.Create(Self);
+  ButtonCylindrifySelection.Align := alTop;
+  ButtonCylindrifySelection.AutoSize := true;
+  ButtonCylindrifySelection.Caption := 'Cylindrify / Capsule...';
+  ButtonCylindrifySelection.Hint := 'Project / blend 2+ selected 3D transforms toward a vertical 3D Cylinder or Capsule / Pill shell with hemispherical caps around the active pivot (Ctrl+Alt+5 | Shift-click: dialog | Click: 100% Cylinder + outward normal | Ctrl-click: 100% Capsule with hemispherical end-caps)';
+  ButtonCylindrifySelection.ShowHint := true;
+  ButtonCylindrifySelection.BorderSpacing.Around := 2;
+  ButtonCylindrifySelection.OnClick := @ButtonCylindrifySelectionClick;
+  ButtonCylindrifySelection.Parent := PanelLayoutTransform;
+
+  ButtonArrangeCassini := TButton.Create(Self);
+  ButtonArrangeCassini.Align := alTop;
+  ButtonArrangeCassini.AutoSize := true;
+  ButtonArrangeCassini.Caption := 'Cassini Oval...';
+  ButtonArrangeCassini.Hint := 'Arrange 2+ selected 3D transforms along a 3D Cassini Oval / Pinched Peanut / Biconcave Discoid Loop around the active pivot (Ctrl+Alt+9 | Shift-click: dialog | Click: pinched peanut + tangent | Ctrl-click: inward toward center)';
+  ButtonArrangeCassini.ShowHint := true;
+  ButtonArrangeCassini.BorderSpacing.Around := 2;
+  ButtonArrangeCassini.OnClick := @ButtonArrangeCassiniClick;
+  ButtonArrangeCassini.Parent := PanelLayoutTransform;
+
+  ButtonArrangeCatenoid := TButton.Create(Self);
+  ButtonArrangeCatenoid.Align := alTop;
+  ButtonArrangeCatenoid.AutoSize := true;
+  ButtonArrangeCatenoid.Caption := 'Catenoid Shell...';
+  ButtonArrangeCatenoid.Hint := 'Arrange 2+ selected 3D transforms across a 3D Catenoid Minimal Surface / Soap-Film Waist Shell around the active pivot (Ctrl+Alt+Shift+C | Shift-click: dialog | Click: outward surface normal | Ctrl-click: catenary meridian tangent)';
+  ButtonArrangeCatenoid.ShowHint := true;
+  ButtonArrangeCatenoid.BorderSpacing.Around := 2;
+  ButtonArrangeCatenoid.OnClick := @ButtonArrangeCatenoidClick;
+  ButtonArrangeCatenoid.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -4927,6 +5009,14 @@ begin
   ButtonUISpiral.OnClick := @ButtonUISpiralClick;
   ButtonUISpiral.Parent := PanelLayoutUI;
 
+  ButtonUIHexGrid := TButton.Create(Self);
+  ButtonUIHexGrid.AutoSize := true;
+  ButtonUIHexGrid.Caption := 'UI Hex Grid';
+  ButtonUIHexGrid.Hint := 'Arrange 2+ selected 2D UI controls into a 2D Staggered Honeycomb / Hexagonal Grid around their shared center (Click: Pointy-top odd-row stagger 8px gap | Shift-click: Flat-top odd-column stagger 8px gap | Ctrl-click: Pointy-top 0px flush)';
+  ButtonUIHexGrid.ShowHint := true;
+  ButtonUIHexGrid.OnClick := @ButtonUIHexGridClick;
+  ButtonUIHexGrid.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -5180,6 +5270,11 @@ begin
   MenuTreeViewItemSelectUIImagesAndLabels.Caption := 'Select 2D UI Images & Text Labels (Ctrl+Alt+8)';
   MenuTreeViewItemSelectUIImagesAndLabels.OnClick := @MenuTreeViewItemSelectUIImagesAndLabelsClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectUIImagesAndLabels);
+
+  MenuTreeViewItemSelectUISizingMode := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectUISizingMode.Caption := 'Select 2D UI By Responsive Sizing / Anchor Mode (Ctrl+Alt+Shift+S)';
+  MenuTreeViewItemSelectUISizingMode.OnClick := @MenuTreeViewItemSelectUISizingModeClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectUISizingMode);
 
   MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
   MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
@@ -8875,6 +8970,8 @@ begin
         ButtonUIZigzag.Enabled := SelectedUICount >= 2;
       if ButtonUISpiral <> nil then
         ButtonUISpiral.Enabled := SelectedUICount >= 2;
+      if ButtonUIHexGrid <> nil then
+        ButtonUIHexGrid.Enabled := SelectedUICount >= 2;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -9039,6 +9136,12 @@ begin
       ButtonArrangeCycloid.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonArrangeHyperboloid <> nil then
       ButtonArrangeHyperboloid.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonCylindrifySelection <> nil then
+      ButtonCylindrifySelection.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeCassini <> nil then
+      ButtonArrangeCassini.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeCatenoid <> nil then
+      ButtonArrangeCatenoid.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -10885,6 +10988,16 @@ begin
       CopyTransform;
       Key := 0;
     end else
+    if (Key = Ord('C')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowArrangeOnCatenoidDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('S')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      SelectUserInterfacesBySizingMode(false);
+      Key := 0;
+    end else
     if (Key = Ord('V')) and (Shift = [ssCtrl, ssAlt]) then
     begin
       PasteTransform(false);
@@ -10973,6 +11086,16 @@ begin
     if (Key = Ord('8')) and (Shift = [ssCtrl, ssAlt]) then
     begin
       SelectUserInterfaceImagesAndLabels(false);
+      Key := 0;
+    end else
+    if (Key = Ord('5')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowCylindrifySelectionDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('9')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowArrangeInCassiniOvalDialog;
       Key := 0;
     end;
   end;
@@ -16202,6 +16325,168 @@ begin
     ArrangeSelectionOnHyperboloid(0.0, 10.0, 1.0, 1);
 end;
 
+procedure TDesignFrame.CylindrifySelection(
+  const TargetRadius: Single;
+  const StrengthFactor: Single;
+  const CapsuleHemispheres: Boolean;
+  const OrientRadially: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.CylindrifySelected(
+      TargetRadius, StrengthFactor, CapsuleHemispheres, OrientRadially);
+end;
+
+procedure TDesignFrame.ShowCylindrifySelectionDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  RTarget, Strength: Single;
+  CapsuleVal, OrientVal: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Target Cylinder / Capsule Radius R (0 = auto average XZ radius):';
+  Prompts[1] := 'Strength / Blend Factor (0.0 to 1.0, 1.0 = full projection):';
+  Prompts[2] := 'Shape Mode (0 = Vertical Cylinder, 1 = 3D Capsule / Pill with Hemispheres):';
+  Prompts[3] := 'Orient Outward Along Surface Normal (0 = keep rotation, 1 = outward normal):';
+
+  Values[0] := '0';
+  Values[1] := '1.0';
+  Values[2] := '0';
+  Values[3] := '1';
+
+  if InputQuery('Cylindrify / Capsule Shell Deformation', Prompts, Values) then
+  begin
+    RTarget := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    Strength := Clamped(StrToFloatDefDot(Trim(Values[1]), 1.0), 0.0, 1.0);
+    CapsuleVal := StrToIntDef(Trim(Values[2]), 0);
+    OrientVal := StrToIntDef(Trim(Values[3]), 1);
+    CylindrifySelection(RTarget, Strength, CapsuleVal <> 0, OrientVal <> 0);
+  end;
+end;
+
+procedure TDesignFrame.ButtonCylindrifySelectionClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowCylindrifySelectionDialog
+  else if ssCtrl in ShiftState then
+    CylindrifySelection(0.0, 1.0, true, true)
+  else
+    CylindrifySelection(0.0, 1.0, false, true);
+end;
+
+procedure TDesignFrame.ArrangeSelectionInCassiniOval(
+  const FocusHalfDistA: Single;
+  const ShapeRatioBOverA: Single;
+  const VerticalRimWave: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInCassiniOval(
+      FocusHalfDistA, ShapeRatioBOverA, VerticalRimWave, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInCassiniOvalDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  ADist, RatioC, RimWave: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Focus Half-Distance a (0 = auto from selection):';
+  Prompts[1] := 'Shape Ratio c = b/a (> 1.0, 1.05..1.41 = pinched peanut, >= 1.42 = stadium):';
+  Prompts[2] := 'Vertical Biconcave Rim Wave Amplitude (0 = flat XZ):';
+  Prompts[3] := 'Orientation (0 = keep, 1 = curve tangent, 2 = inward toward center):';
+
+  Values[0] := '0';
+  Values[1] := '1.12';
+  Values[2] := '0';
+  Values[3] := '1';
+
+  if InputQuery('Arrange Selected in 3D Cassini Oval / Pinched Peanut Loop', Prompts, Values) then
+  begin
+    ADist := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    RatioC := Max(1.0001, StrToFloatDefDot(Trim(Values[1]), 1.12));
+    RimWave := StrToFloatDefDot(Trim(Values[2]), 0.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[3]), 1), 0, 2);
+    ArrangeSelectionInCassiniOval(ADist, RatioC, RimWave, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeCassiniClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInCassiniOvalDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionInCassiniOval(0.0, 1.11803399, 0.0, 2)
+  else
+    ArrangeSelectionInCassiniOval(0.0, 1.11803399, 0.0, 1);
+end;
+
+procedure TDesignFrame.ArrangeSelectionOnCatenoid(
+  const WaistRadius: Single;
+  const HeightSpan: Single;
+  const NeckCurvature: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedOnCatenoid(
+      WaistRadius, HeightSpan, NeckCurvature, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeOnCatenoidDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  RWaist, HSpan, Kappa: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Waist Radius R_waist (0 = auto from selection):';
+  Prompts[1] := 'Vertical Height Span H (0 = auto 2 * R_waist):';
+  Prompts[2] := 'Neck Curvature Kappa (> 0, 1.0 = cosh(1) ~ 1.54x waist at rim):';
+  Prompts[3] := 'Orientation (0 = keep, 1 = outward normal, 2 = catenary meridian tangent):';
+
+  Values[0] := '0';
+  Values[1] := '8';
+  Values[2] := '1.0';
+  Values[3] := '1';
+
+  if InputQuery('Arrange Selected on 3D Catenoid Minimal Surface / Soap-Film Shell', Prompts, Values) then
+  begin
+    RWaist := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    HSpan := StrToFloatDefDot(Trim(Values[1]), 8.0);
+    Kappa := Max(0.01, StrToFloatDefDot(Trim(Values[2]), 1.0));
+    OrientMode := Clamped(StrToIntDef(Trim(Values[3]), 1), 0, 2);
+    ArrangeSelectionOnCatenoid(RWaist, HSpan, Kappa, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeCatenoidClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeOnCatenoidDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionOnCatenoid(0.0, 8.0, 1.0, 2)
+  else
+    ArrangeSelectionOnCatenoid(0.0, 8.0, 1.0, 1);
+end;
+
 procedure TDesignFrame.StopPilotTransform;
 var
   SavedName: String;
@@ -18793,6 +19078,131 @@ begin
   else
     TurnsVal := 1.5;
   ArrangeSelectedUserInterfacesInSpiral(TurnsVal, ssShift in ShiftState);
+end;
+
+procedure TDesignFrame.ArrangeSelectedUserInterfacesInHexGrid(
+  const GapPx: Single;
+  const PointyTop: Boolean);
+var
+  Selected: TComponentList;
+  SelectedCount, I, Count, Cols, Rows, ColIdx, RowIdx, ChangedCount: Integer;
+  UIControls: array of TCastleUserInterface;
+  UI: TCastleUserInterface;
+  R: TFloatRectangle;
+  AvgW, AvgH, MinX, MaxX, MinY, MaxY, GroupCenterX, GroupCenterY: Single;
+  StepX, StepY, GridW, GridH, StartX, StartY, StaggerX, StaggerY: Single;
+  TargetCenterX, TargetCenterY, DeltaX, DeltaY: Single;
+begin
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount < 2 then Exit;
+
+    Count := 0;
+    SetLength(UIControls, SelectedCount);
+    AvgW := 0.0;
+    AvgH := 0.0;
+    MinX := MaxSingle;
+    MaxX := -MaxSingle;
+    MinY := MaxSingle;
+    MaxY := -MaxSingle;
+
+    for I := 0 to SelectedCount - 1 do
+      if (Selected[I] is TCastleUserInterface) and (Selected[I] <> DesignRoot) then
+      begin
+        UI := TCastleUserInterface(Selected[I]);
+        R := UI.RenderRectWithBorder;
+        if not R.IsEmpty then
+        begin
+          UIControls[Count] := UI;
+          AvgW := AvgW + R.Width;
+          AvgH := AvgH + R.Height;
+          MinX := Min(MinX, R.Center.X);
+          MaxX := Max(MaxX, R.Center.X);
+          MinY := Min(MinY, R.Center.Y);
+          MaxY := Max(MaxY, R.Center.Y);
+          Inc(Count);
+        end;
+      end;
+
+    if Count < 2 then Exit;
+
+    AvgW := Max(16.0, AvgW / Single(Count));
+    AvgH := Max(16.0, AvgH / Single(Count));
+    GroupCenterX := (MinX + MaxX) * 0.5;
+    GroupCenterY := (MinY + MaxY) * 0.5;
+
+    Cols := Max(2, Ceil(Sqrt(Single(Count))));
+    Rows := (Count + Cols - 1) div Cols;
+
+    if PointyTop then
+    begin
+      StepX := AvgW + GapPx;
+      StepY := (AvgH + GapPx) * 0.8660254; // Sqrt(3)/2 honeycomb packing
+      GridW := (Single(Cols - 1) + Iff(Rows > 1, 0.5, 0.0)) * StepX;
+      GridH := Single(Rows - 1) * StepY;
+    end else
+    begin
+      StepX := (AvgW + GapPx) * 0.8660254;
+      StepY := AvgH + GapPx;
+      GridW := Single(Cols - 1) * StepX;
+      GridH := (Single(Rows - 1) + Iff(Cols > 1, 0.5, 0.0)) * StepY;
+    end;
+
+    StartX := GroupCenterX - GridW * 0.5;
+    StartY := GroupCenterY + GridH * 0.5;
+
+    ChangedCount := 0;
+    for I := 0 to Count - 1 do
+    begin
+      UI := UIControls[I];
+      if UI.UIScale <= 0 then Continue;
+      R := UI.RenderRectWithBorder;
+      if R.IsEmpty then Continue;
+
+      ColIdx := I mod Cols;
+      RowIdx := I div Cols;
+
+      if PointyTop then
+      begin
+        StaggerX := Iff((RowIdx and 1) = 1, 0.5 * StepX, 0.0);
+        StaggerY := 0.0;
+      end else
+      begin
+        StaggerX := 0.0;
+        StaggerY := Iff((ColIdx and 1) = 1, -0.5 * StepY, 0.0);
+      end;
+
+      TargetCenterX := StartX + Single(ColIdx) * StepX + StaggerX;
+      TargetCenterY := StartY - Single(RowIdx) * StepY + StaggerY;
+
+      DeltaX := TargetCenterX - R.Center.X;
+      DeltaY := TargetCenterY - R.Center.Y;
+      if (Abs(DeltaX) > 0.01) or (Abs(DeltaY) > 0.01) then
+      begin
+        UI.Translation := UI.Translation + Vector2(DeltaX / UI.UIScale, DeltaY / UI.UIScale);
+        Inc(ChangedCount);
+      end;
+    end;
+
+    if ChangedCount > 0 then
+      ModifiedOutsideObjectInspector(
+        Format('Arrange %d UI control(s) in hexagonal honeycomb grid', [ChangedCount]), ucHigh);
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUIHexGridClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  Gap: Single;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssCtrl in ShiftState then
+    Gap := 0.0
+  else
+    Gap := 8.0;
+  ArrangeSelectedUserInterfacesInHexGrid(Gap, not (ssShift in ShiftState));
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -22381,6 +22791,58 @@ end;
 procedure TDesignFrame.MenuTreeViewItemSelectUIImagesAndLabelsClick(Sender: TObject);
 begin
   SelectUserInterfaceImagesAndLabels(ssShift in GetKeyShiftState);
+end;
+
+procedure TDesignFrame.SelectUserInterfacesBySizingMode(const OnlyAutoOrFullSize: Boolean);
+var
+  NewSelection: TComponentList;
+  TreeNode: TTreeNode;
+  C: TComponent;
+  UI: TCastleUserInterface;
+  Matches: Boolean;
+begin
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C is TCastleUserInterface) and (C <> DesignRoot) and
+         (not (C is TCastleViewport)) and
+         Selectable(C) and (not IsComponentLocked(C)) then
+      begin
+        UI := TCastleUserInterface(C);
+        if UI.Exists then
+        begin
+          if OnlyAutoOrFullSize then
+            Matches := UI.FullSize or UI.AutoSizeToChildren
+          else
+            Matches := UI.FullSize or
+                       UI.AutoSizeToChildren or
+                       (UI.WidthFraction > 0.0) or
+                       (UI.HeightFraction > 0.0) or
+                       (UI.HorizontalAnchorSelf <> hpLeft) or
+                       (UI.VerticalAnchorSelf <> vpBottom) or
+                       (UI.HorizontalAnchorParent <> hpLeft) or
+                       (UI.VerticalAnchorParent <> vpBottom);
+
+          if Matches and (NewSelection.IndexOf(UI) = -1) then
+            NewSelection.Add(UI);
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectUISizingModeClick(Sender: TObject);
+begin
+  SelectUserInterfacesBySizingMode(ssShift in GetKeyShiftState);
 end;
 
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;

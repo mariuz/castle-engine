@@ -1587,6 +1587,59 @@ type
       const HeightSpan: Single = 10.0;
       const FlareFactor: Single = 1.0;
       const OrientMode: Integer = 1): Boolean;
+
+    { Deform all top-level selected transforms (@code(SelectedCount >= 2))
+      toward a vertical 3D Cylinder (`CapsuleHemispheres = false`) or 3D Capsule /
+      Pill shell with hemispherical end-caps (`CapsuleHemispheres = true`) of radius
+      @code(TargetRadius) centered at the active selection pivot $\mathbf(C)$,
+      blending each transform's world position from its original position toward
+      the cylinder/capsule shell by @code(StrengthFactor) ($\in [0, 1]$).
+      When @code(OrientRadially) is @true, each transform is also rotated to face
+      outward along the cylinder or capsule surface normal.
+      Returns @true if at least one selected transform was modified. }
+    function CylindrifySelected(
+      const TargetRadius: Single = 0.0;
+      const StrengthFactor: Single = 1.0;
+      const CapsuleHemispheres: Boolean = false;
+      const OrientRadially: Boolean = false): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along a 3D Cassini Oval (pinched peanut / biconcave red-blood-cell / stadium loop)
+      in the horizontal XZ plane around the active selection pivot $\mathbf(C)$:
+      $$r(\theta) = a\sqrt(\max(0, \cos(2\theta) + \sqrt(\max(0, c^4 - \sin^2(2\theta))))), \quad
+        c = \max(1.0001, \text(ShapeRatioBOverA))$$
+      $$x(\theta) = C_x + r(\theta)\cos\theta, \quad
+        z(\theta) = C_z + r(\theta)\sin\theta, \quad
+        y(\theta) = C_y + \text(VerticalRimWave)\cos(2\theta)$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the analytical 3D Cassini oval tangent
+      - @code(2): orient forward inward toward the oval center $\mathbf(C)$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInCassiniOval(
+      const FocusHalfDistA: Single = 0.0;
+      const ShapeRatioBOverA: Single = 1.11803399;
+      const VerticalRimWave: Single = 0.0;
+      const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      across a 3D Catenoid Minimal Surface (soap-film waist / hyperbolic-cosine shell)
+      centered at the active selection pivot $\mathbf(C)$ with waist radius
+      @code(WaistRadius), vertical span @code(HeightSpan), and neck curvature
+      @code(NeckCurvature):
+      $$u_i = -1 + \frac(2i)(N - 1), \quad y_i = C_y + \frac(H)(2)u_i, \quad
+        r_i = R_(\text(waist))\cosh(\kappa u_i), \quad
+        \theta_i = i \cdot \phi_(\text(golden))$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the outward catenoid minimal-surface normal
+      - @code(2): orient forward along the catenary meridian profile tangent
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedOnCatenoid(
+      const WaistRadius: Single = 0.0;
+      const HeightSpan: Single = 8.0;
+      const NeckCurvature: Single = 1.0;
+      const OrientMode: Integer = 1): Boolean;
   end;
 
 var
@@ -12167,6 +12220,375 @@ begin
 
       Side := TVector3.CrossProduct(LookDir, GravityUp);
       if Side.IsZero(1e-5) then
+        Side := Vector3(-SinT, 0.0, CosT);
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.CylindrifySelected(
+  const TargetRadius: Single;
+  const StrengthFactor: Single;
+  const CapsuleHemispheres: Boolean;
+  const OrientRadially: Boolean): Boolean;
+var
+  I, Count, ValidHorizCount: Integer;
+  T: TCastleTransform;
+  Targets: array of TCastleTransform;
+  Center, OldWorldPos, SpinePt, OffsetVec, OutwardDir, TargetPos, NewWorldPos, WorldDelta, LocalDelta: TVector3;
+  CurWorldPos, CurDir, CurUp, Side, NewUp: TVector3;
+  HorizDist, SumHoriz, ActualRadius, MaxAbsDY, HalfSpineY, SpineY, Blend, Len: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  Count := 0;
+  SetLength(Targets, SelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+    if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+    begin
+      Targets[Count] := Boxes[I].Parent;
+      Inc(Count);
+    end;
+
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (Targets[0] <> nil) then
+    Center := GetTransformWorkingPos(Targets[0])
+  else
+    Center := SelectionWorkingCenter;
+  SumHoriz := 0.0;
+  ValidHorizCount := 0;
+  MaxAbsDY := 0.0;
+
+  for I := 0 to Count - 1 do
+  begin
+    OldWorldPos := GetTransformWorkingPos(Targets[I]);
+    HorizDist := Hypot(OldWorldPos.X - Center.X, OldWorldPos.Z - Center.Z);
+    if HorizDist > 1e-4 then
+    begin
+      SumHoriz := SumHoriz + HorizDist;
+      Inc(ValidHorizCount);
+    end;
+    MaxAbsDY := Max(MaxAbsDY, Abs(OldWorldPos.Y - Center.Y));
+  end;
+
+  if TargetRadius <= 1e-4 then
+  begin
+    if ValidHorizCount > 0 then
+      ActualRadius := SumHoriz / Single(ValidHorizCount)
+    else
+      ActualRadius := 5.0;
+  end else
+    ActualRadius := TargetRadius;
+
+  HalfSpineY := MaxAbsDY * 0.5;
+  Blend := Clamped(StrengthFactor, 0.0, 1.0);
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Targets[I];
+    if T.Parent = nil then Continue;
+
+    OldWorldPos := GetTransformWorkingPos(T);
+    if CapsuleHemispheres then
+      SpineY := Clamped(OldWorldPos.Y, Center.Y - HalfSpineY, Center.Y + HalfSpineY)
+    else
+      SpineY := OldWorldPos.Y;
+
+    SpinePt := Vector3(Center.X, SpineY, Center.Z);
+    OffsetVec := OldWorldPos - SpinePt;
+    if not CapsuleHemispheres then
+      OffsetVec.Y := 0.0;
+
+    Len := OffsetVec.Length;
+    if Len > 1e-5 then
+      OutwardDir := OffsetVec / Len
+    else if CapsuleHemispheres and (Abs(OldWorldPos.Y - SpineY) > 1e-5) then
+      OutwardDir := Vector3(0.0, Sign(OldWorldPos.Y - SpineY), 0.0)
+    else
+      OutwardDir := Vector3(1.0, 0.0, 0.0);
+
+    TargetPos := SpinePt + OutwardDir * ActualRadius;
+    NewWorldPos := Lerp(Blend, OldWorldPos, TargetPos);
+    WorldDelta := NewWorldPos - OldWorldPos;
+    if WorldDelta.LengthSqr > Sqr(1e-5) then
+    begin
+      LocalDelta := T.Parent.WorldToLocalDirection(WorldDelta);
+      T.Translation := T.Translation + LocalDelta;
+      Result := true;
+    end;
+
+    if OrientRadially then
+    begin
+      if Abs(OutwardDir.Y) > 0.99 then
+        Side := TVector3.CrossProduct(OutwardDir, Vector3(0, 0, 1))
+      else
+        Side := TVector3.CrossProduct(OutwardDir, Vector3(0, 1, 0));
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, OutwardDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, OutwardDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), OutwardDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInCassiniOval(
+  const FocusHalfDistA: Single;
+  const ShapeRatioBOverA: Single;
+  const VerticalRimWave: Single;
+  const OrientMode: Integer): Boolean;
+const
+  DeltaTheta = 1e-3;
+var
+  I, Count: Integer;
+  T: TCastleTransform;
+  Targets: array of TCastleTransform;
+  Center, OldWorldPos, NewWorldPos, WorldDelta, LocalDelta: TVector3;
+  PosMinus, PosPlus, LookDir, CurWorldPos, CurDir, CurUp, Side, NewUp: TVector3;
+  ActualA, CVal, C4, AvgDist, Theta: Single;
+
+  function EvalCassiniPoint(const Angle: Single): TVector3;
+  var
+    SinT, CosT, Sin2T, Cos2T, InnerRad, Rad: Single;
+  begin
+    SinCos(Angle, SinT, CosT);
+    SinCos(2.0 * Angle, Sin2T, Cos2T);
+    InnerRad := Cos2T + Sqrt(Max(0.0, C4 - Sqr(Sin2T)));
+    Rad := ActualA * Sqrt(Max(0.0, InnerRad));
+    Result := Vector3(
+      Center.X + Rad * CosT,
+      Center.Y + VerticalRimWave * Cos2T,
+      Center.Z + Rad * SinT);
+  end;
+
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  Count := 0;
+  SetLength(Targets, SelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+    if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+    begin
+      Targets[Count] := Boxes[I].Parent;
+      Inc(Count);
+    end;
+
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (Targets[0] <> nil) then
+    Center := GetTransformWorkingPos(Targets[0])
+  else
+    Center := SelectionWorkingCenter;
+  CVal := Max(1.0001, Abs(ShapeRatioBOverA));
+  C4 := Sqr(Sqr(CVal));
+
+  ActualA := FocusHalfDistA;
+  if ActualA <= 1e-4 then
+  begin
+    AvgDist := 0.0;
+    for I := 0 to Count - 1 do
+    begin
+      OldWorldPos := GetTransformWorkingPos(Targets[I]);
+      AvgDist := AvgDist + Hypot(OldWorldPos.X - Center.X, OldWorldPos.Z - Center.Z);
+    end;
+    AvgDist := AvgDist / Single(Count);
+    if AvgDist > 1e-4 then
+      ActualA := AvgDist / Sqrt(1.0 + Sqr(CVal))
+    else
+      ActualA := 5.0;
+  end;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Targets[I];
+    if T.Parent = nil then Continue;
+
+    Theta := (2.0 * Pi * Single(I)) / Single(Count);
+    OldWorldPos := GetTransformWorkingPos(T);
+    NewWorldPos := EvalCassiniPoint(Theta);
+
+    WorldDelta := NewWorldPos - OldWorldPos;
+    if WorldDelta.LengthSqr > Sqr(1e-5) then
+    begin
+      LocalDelta := T.Parent.WorldToLocalDirection(WorldDelta);
+      T.Translation := T.Translation + LocalDelta;
+      Result := true;
+    end;
+
+    if (OrientMode = 1) or (OrientMode = 2) then
+    begin
+      if OrientMode = 1 then
+      begin
+        PosMinus := EvalCassiniPoint(Theta - DeltaTheta);
+        PosPlus := EvalCassiniPoint(Theta + DeltaTheta);
+        LookDir := PosPlus - PosMinus;
+        if LookDir.LengthSqr <= Sqr(1e-5) then
+          LookDir := Vector3(-Sin(Theta), 0.0, Cos(Theta));
+      end else
+      begin
+        LookDir := Center - NewWorldPos;
+        LookDir.Y := 0.0;
+        if LookDir.LengthSqr <= Sqr(1e-5) then
+          LookDir := Vector3(-Cos(Theta), 0.0, -Sin(Theta));
+      end;
+      LookDir := LookDir.Normalize;
+
+      if Abs(LookDir.Y) > 0.99 then
+        Side := TVector3.CrossProduct(LookDir, Vector3(0, 0, 1))
+      else
+        Side := TVector3.CrossProduct(LookDir, Vector3(0, 1, 0));
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedOnCatenoid(
+  const WaistRadius: Single;
+  const HeightSpan: Single;
+  const NeckCurvature: Single;
+  const OrientMode: Integer): Boolean;
+const
+  GoldenAngle = 2.39996322972865332; // Pi * (3 - Sqrt(5))
+var
+  I, Count: Integer;
+  T: TCastleTransform;
+  Targets: array of TCastleTransform;
+  Center, OldWorldPos, NewWorldPos, WorldDelta, LocalDelta: TVector3;
+  LookDir, CurWorldPos, CurDir, CurUp, Side, NewUp: TVector3;
+  ActualWaist, ActualHeight, Kappa, AvgDist, U, Theta, SinT, CosT, RadAtU, DrDy: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  Count := 0;
+  SetLength(Targets, SelectedCount);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+    if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+    begin
+      Targets[Count] := Boxes[I].Parent;
+      Inc(Count);
+    end;
+
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (Targets[0] <> nil) then
+    Center := GetTransformWorkingPos(Targets[0])
+  else
+    Center := SelectionWorkingCenter;
+  ActualWaist := WaistRadius;
+  if ActualWaist <= 1e-4 then
+  begin
+    AvgDist := 0.0;
+    for I := 0 to Count - 1 do
+    begin
+      OldWorldPos := GetTransformWorkingPos(Targets[I]);
+      AvgDist := AvgDist + Hypot(OldWorldPos.X - Center.X, OldWorldPos.Z - Center.Z);
+    end;
+    AvgDist := AvgDist / Single(Count);
+    if AvgDist > 1e-4 then
+      ActualWaist := AvgDist
+    else
+      ActualWaist := 4.0;
+  end;
+
+  ActualHeight := HeightSpan;
+  if ActualHeight <= 1e-4 then
+    ActualHeight := ActualWaist * 2.0;
+  Kappa := Max(0.01, Abs(NeckCurvature));
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Targets[I];
+    if T.Parent = nil then Continue;
+
+    U := -1.0 + (2.0 * Single(I)) / Single(Count - 1);
+    RadAtU := ActualWaist * Cosh(Kappa * U);
+    Theta := Single(I) * GoldenAngle;
+    SinCos(Theta, SinT, CosT);
+
+    OldWorldPos := GetTransformWorkingPos(T);
+    NewWorldPos := Vector3(
+      Center.X + RadAtU * CosT,
+      Center.Y + 0.5 * ActualHeight * U,
+      Center.Z + RadAtU * SinT);
+
+    WorldDelta := NewWorldPos - OldWorldPos;
+    if WorldDelta.LengthSqr > Sqr(1e-5) then
+    begin
+      LocalDelta := T.Parent.WorldToLocalDirection(WorldDelta);
+      T.Translation := T.Translation + LocalDelta;
+      Result := true;
+    end;
+
+    if (OrientMode = 1) or (OrientMode = 2) then
+    begin
+      DrDy := (2.0 * Kappa * ActualWaist / ActualHeight) * Sinh(Kappa * U);
+      if OrientMode = 1 then
+      begin
+        { Outward catenoid minimal-surface normal: (cos Theta, -dr/dy, sin Theta) }
+        LookDir := Vector3(CosT, -DrDy, SinT);
+      end else
+      begin
+        { Catenary meridian tangent pointing upward along the profile }
+        LookDir := Vector3(DrDy * CosT, 1.0, DrDy * SinT);
+      end;
+      LookDir := LookDir.Normalize;
+
+      if Abs(LookDir.Y) > 0.99 then
+        Side := TVector3.CrossProduct(LookDir, Vector3(0, 0, 1))
+      else
+        Side := TVector3.CrossProduct(LookDir, Vector3(0, 1, 0));
+      if Side.LengthSqr <= Sqr(1e-5) then
         Side := Vector3(-SinT, 0.0, CosT);
       Side := Side.Normalize;
       NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;

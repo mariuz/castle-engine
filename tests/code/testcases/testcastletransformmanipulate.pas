@@ -67,6 +67,7 @@ type
     procedure TestSquashStretchButterflyAndClelie;
     procedure TestSwirlKnotCurveAndGeodesicDome;
     procedure TestRadialFalloffCycloidAndHyperboloid;
+    procedure TestCylindrifyCassiniOvalAndCatenoid;
   end;
 
 implementation
@@ -2980,6 +2981,93 @@ begin
     AssertSameValue(6.0, Hypot(B3.Translation.X, B3.Translation.Z), 1e-4);
     B1.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(2.0, 2.25, 0.0).Normalize, WorldDir.Normalize, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestCylindrifyCassiniOvalAndCatenoid;
+var
+  Viewport: TCastleViewport;
+  B1, B2, B3, B4: TCastleBox;
+  Manipulate: TCastleTransformManipulate;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    B1 := TCastleBox.Create(Viewport);
+    B2 := TCastleBox.Create(Viewport);
+    B3 := TCastleBox.Create(Viewport);
+    B4 := TCastleBox.Create(Viewport);
+    Viewport.Items.Add(B1);
+    Viewport.Items.Add(B2);
+    Viewport.Items.Add(B3);
+    Viewport.Items.Add(B4);
+
+    // 1. Test CylindrifySelected in Cylinder mode (50% blend) and Capsule mode (100% + radial normal):
+    B1.Translation := Vector3(4, 0, 0);
+    B2.Translation := Vector3(-4, 0, 0);
+    B3.Translation := Vector3(0, 6, 0);
+    B4.Translation := Vector3(0, -6, 0);
+    Manipulate.PivotMode := pmSelectionCenter; // Center = (0, 0, 0)
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+
+    AssertTrue(Manipulate.CylindrifySelected(10.0, 0.5, false, false));
+    AssertVectorEquals(Vector3(7, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-7, 0, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(5, 6, 0), B3.Translation, 1e-4);
+
+    // Reset and test CapsuleHemispheres = true (HalfSpineY = 3.0 -> top/bottom caps at Y = +/-3):
+    B1.Translation := Vector3(4, 0, 0);
+    B2.Translation := Vector3(-4, 0, 0);
+    B3.Translation := Vector3(0, 6, 0);
+    B4.Translation := Vector3(0, -6, 0);
+    AssertTrue(Manipulate.CylindrifySelected(10.0, 1.0, true, true));
+    AssertVectorEquals(Vector3(10, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-10, 0, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 13, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, -13, 0), B4.Translation, 1e-4);
+    B3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 1, 0), WorldDir.Normalize, 1e-4);
+
+    // 2. Test ArrangeSelectedInCassiniOval(4.0, Sqrt(2.0), 2.0, 1):
+    // c = Sqrt(2) -> c^4 = 4:
+    // B1 (Theta = 0): r = 4 * Sqrt(1 + 2) = 4*Sqrt(3), Y = +2
+    // B2 (Theta = Pi/2): r = 4 * Sqrt(-1 + 2) = 4, Y = -2, tangent = (-1, 0, 0)
+    // B3 (Theta = Pi): (-4*Sqrt(3), 2, 0)
+    // B4 (Theta = 3*Pi/2): (0, -2, -4)
+    B1.Translation := Vector3(-2, 0, 0);
+    B2.Translation := Vector3(2, 0, 0);
+    B3.Translation := Vector3(0, 0, -2);
+    B4.Translation := Vector3(0, 0, 2);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.ArrangeSelectedInCassiniOval(4.0, Sqrt(2.0), 2.0, 1));
+    AssertVectorEquals(Vector3(4.0 * Sqrt(3.0), 2.0, 0.0), B1.Translation, 1e-3);
+    AssertVectorEquals(Vector3(0.0, -2.0, 4.0), B2.Translation, 1e-3);
+    AssertVectorEquals(Vector3(-4.0 * Sqrt(3.0), 2.0, 0.0), B3.Translation, 1e-3);
+    AssertVectorEquals(Vector3(0.0, -2.0, -4.0), B4.Translation, 1e-3);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(-1, 0, 0), WorldDir.Normalize, 1e-3);
+
+    // 3. Test ArrangeSelectedOnCatenoid(4.0, 8.0, 1.0, 1):
+    // Select B1, B2, B3 around Center = (0, 0, 0):
+    // B1 (u=-1, Theta=0): R = 4*Cosh(1), Y = -4 -> (4*Cosh(1), -4, 0), outward normal = Normalize(1, Sinh(1), 0)
+    // B2 (u=0): R = 4, Y = 0
+    // B3 (u=+1): R = 4*Cosh(1), Y = 4
+    B1.Translation := Vector3(-2, 0, 0);
+    B2.Translation := Vector3(0, 0, 0);
+    B3.Translation := Vector3(2, 0, 0);
+    Manipulate.SetSelected([B1, B2, B3]);
+    AssertTrue(Manipulate.ArrangeSelectedOnCatenoid(4.0, 8.0, 1.0, 1));
+    AssertVectorEquals(Vector3(4.0 * Cosh(1.0), -4.0, 0.0), B1.Translation, 1e-4);
+    AssertSameValue(0.0, B2.Translation.Y, 1e-4);
+    AssertSameValue(4.0, Hypot(B2.Translation.X, B2.Translation.Z), 1e-4);
+    AssertSameValue(4.0, B3.Translation.Y, 1e-4);
+    AssertSameValue(4.0 * Cosh(1.0), Hypot(B3.Translation.X, B3.Translation.Z), 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1.0, Sinh(1.0), 0.0).Normalize, WorldDir.Normalize, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);
