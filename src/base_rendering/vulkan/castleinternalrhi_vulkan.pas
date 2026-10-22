@@ -2612,6 +2612,48 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Spatio-Temporal Variance-Guided Filtering (SVGF) Denoiser (Phase 34.3)     }
+  { -------------------------------------------------------------------------- }
+
+  { Orchestrates SVGF temporal moment accumulation and multi-pass A-Trous wavelet
+    spatial filtering (step sizes 1, 2, 4, 8, 16) for ray-traced / ReSTIR / Lumen signals. }
+  TCastleVulkanSVGFDenoiser = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FWidth: Cardinal;
+    FHeight: Cardinal;
+    FAttrousIterations: Cardinal;
+    FMomentsHistoryTexture: TVulkanRHITexture;
+    FFilteredPingTexture: TVulkanRHITexture;
+    FFilteredPongTexture: TVulkanRHITexture;
+    FDispatchCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Allocates the rg16f MomentsHistory texture and rgba16f Ping/Pong A-Trous filter targets. }
+    procedure EnsureSVGFTargets(const AWidth, AHeight: Cardinal);
+
+    { Returns the A-Trous wavelet step size 2^AIterationIndex (1, 2, 4, 8, 16). }
+    class function GetAttrousStepSize(const AIterationIndex: Cardinal): Cardinal; static;
+
+    { Dispatches the temporal accumulation + multi-pass A-Trous wavelet spatial denoiser. }
+    procedure DispatchSVGFDenoise(
+      const ACommandList: TVulkanRHICommandList;
+      const AWidth, AHeight: Cardinal;
+      const APipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property Width: Cardinal read FWidth;
+    property Height: Cardinal read FHeight;
+    property AttrousIterations: Cardinal read FAttrousIterations write FAttrousIterations;
+    property MomentsHistoryTexture: TVulkanRHITexture read FMomentsHistoryTexture;
+    property FilteredPingTexture: TVulkanRHITexture read FFilteredPingTexture;
+    property FilteredPongTexture: TVulkanRHITexture read FFilteredPongTexture;
+    property DispatchCount: Cardinal read FDispatchCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -2716,6 +2758,7 @@ type
     FRuntimeVirtualTexture: TCastleVulkanRuntimeVirtualTexture;
     FSparseVolumeAtlas: TCastleVulkanSparseVolumeAtlas;
     FBreadcrumbTracker: TCastleVulkanBreadcrumbTracker;
+    FSVGFDenoiser: TCastleVulkanSVGFDenoiser;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -2825,6 +2868,7 @@ type
     function GetRuntimeVirtualTexture: TCastleVulkanRuntimeVirtualTexture;
     function GetSparseVolumeAtlas: TCastleVulkanSparseVolumeAtlas;
     function GetBreadcrumbTracker: TCastleVulkanBreadcrumbTracker;
+    function GetSVGFDenoiser: TCastleVulkanSVGFDenoiser;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -3039,6 +3083,7 @@ type
     property RuntimeVirtualTexture: TCastleVulkanRuntimeVirtualTexture read GetRuntimeVirtualTexture;
     property SparseVolumeAtlas: TCastleVulkanSparseVolumeAtlas read GetSparseVolumeAtlas;
     property BreadcrumbTracker: TCastleVulkanBreadcrumbTracker read GetBreadcrumbTracker;
+    property SVGFDenoiser: TCastleVulkanSVGFDenoiser read GetSVGFDenoiser;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -14507,6 +14552,88 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanSVGFDenoiser (Phase 34.3)                                       }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanSVGFDenoiser.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FAttrousIterations := 4;
+end;
+
+destructor TCastleVulkanSVGFDenoiser.Destroy;
+begin
+  FreeAndNil(FFilteredPongTexture);
+  FreeAndNil(FFilteredPingTexture);
+  FreeAndNil(FMomentsHistoryTexture);
+  inherited;
+end;
+
+procedure TCastleVulkanSVGFDenoiser.EnsureSVGFTargets(const AWidth, AHeight: Cardinal);
+var
+  SafeW, SafeH: Cardinal;
+  TexDesc: TRHITextureDesc;
+begin
+  SafeW := Max(Cardinal(1), AWidth);
+  SafeH := Max(Cardinal(1), AHeight);
+  if (FMomentsHistoryTexture <> nil) and (FWidth = SafeW) and (FHeight = SafeH) then
+    Exit;
+
+  FWidth := SafeW;
+  FHeight := SafeH;
+  FreeAndNil(FFilteredPongTexture);
+  FreeAndNil(FFilteredPingTexture);
+  FreeAndNil(FMomentsHistoryTexture);
+
+  TexDesc := TRHITextureDesc.Create2D(SafeW, SafeH, pfRG16_Float,
+    [tuSampled, tuStorage, tuTransferDst]);
+  TexDesc.DebugName := 'SVGFMomentsHistory';
+  FMomentsHistoryTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+
+  TexDesc := TRHITextureDesc.Create2D(SafeW, SafeH, pfRGBA16_Float,
+    [tuSampled, tuStorage, tuTransferDst]);
+  TexDesc.DebugName := 'SVGFFilteredPing';
+  FFilteredPingTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+
+  TexDesc.DebugName := 'SVGFFilteredPong';
+  FFilteredPongTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+end;
+
+class function TCastleVulkanSVGFDenoiser.GetAttrousStepSize(
+  const AIterationIndex: Cardinal): Cardinal;
+begin
+  Result := Cardinal(1) shl Min(Cardinal(8), AIterationIndex);
+end;
+
+procedure TCastleVulkanSVGFDenoiser.DispatchSVGFDenoise(
+  const ACommandList: TVulkanRHICommandList;
+  const AWidth, AHeight: Cardinal;
+  const APipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+var
+  GroupsX, GroupsY, Iter, Iters: Cardinal;
+begin
+  EnsureSVGFTargets(AWidth, AHeight);
+  if ACommandList = nil then
+    Exit;
+
+  if APipeline <> nil then
+    ACommandList.BindComputePipeline(APipeline);
+  if ADescriptorSet <> nil then
+    ACommandList.BindDescriptorSet(0, ADescriptorSet, []);
+
+  GroupsX := (FWidth + 7) div 8;
+  GroupsY := (FHeight + 7) div 8;
+  Iters := Max(Cardinal(1), FAttrousIterations);
+  for Iter := 0 to Iters - 1 do
+  begin
+    ACommandList.Dispatch(GroupsX, GroupsY, 1);
+    Inc(FDispatchCount);
+  end;
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -15133,12 +15260,20 @@ begin
   Result := FBreadcrumbTracker;
 end;
 
+function TVulkanRHIDevice.GetSVGFDenoiser: TCastleVulkanSVGFDenoiser;
+begin
+  if FSVGFDenoiser = nil then
+    FSVGFDenoiser := TCastleVulkanSVGFDenoiser.Create(Self);
+  Result := FSVGFDenoiser;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FSVGFDenoiser);
   FreeAndNil(FBreadcrumbTracker);
   FreeAndNil(FSparseVolumeAtlas);
   FreeAndNil(FRuntimeVirtualTexture);

@@ -1302,6 +1302,34 @@ type
       const ATemperatureKelvin: Single;
       const AIntensity: Single = 1.0): TVector3; static;
 
+    { Phase 34.1: Generates GLSL 450 functions for Spatio-Temporal Variance-Guided Filtering (SVGF)
+      temporal luminance moment accumulation (E[L], E[L^2]) and variance estimation. }
+    function GenerateSVGFVarianceMomentsFunctions: String;
+
+    { Phase 34.1 CPU reference: Evaluates first and second luminance moments (L, L^2) from linear RGB radiance. }
+    class function EvaluateLuminanceMoments(const ARadianceRGB: TVector3): TVector2; static;
+
+    { Phase 34.1 CPU reference: Computes temporal variance max(0, M2 - M1^2) from exponentially blended moments. }
+    class function ComputeTemporalVariance(const AMoments: TVector2): Single; static;
+
+    { Phase 34.2: Generates GLSL 450 functions for SVGF Edge-Stopping A-Trous Wavelet
+      Spatial Filtering (normal, depth-gradient, and variance-guided luminance weights)
+      and Specular Ray Hit-Distance Contact Hardening. }
+    function GenerateSVGFAttrousWaveletFunctions: String;
+
+    { Phase 34.2 CPU reference: Evaluates combined SVGF edge-stopping weight w_z * w_n * w_l in [0..1]. }
+    class function EvaluateSVGFEdgeStoppingWeight(
+      const ACenterNormal, ASampleNormal: TVector3;
+      const ACenterDepth, ASampleDepth, ADepthGradientDotOffset: Single;
+      const ACenterLuma, ASampleLuma, AVariance: Single;
+      const APhiDepth: Single = 1.0;
+      const APhiNormal: Single = 128.0;
+      const APhiLuma: Single = 4.0): Single; static;
+
+    { Phase 34.3 CPU reference: Evaluates contact-hardening reflection kernel factor [0..1] from ray hit distance and roughness. }
+    class function EvaluateHitDistanceBlurFactor(
+      const ARayHitDistance, ACameraDistance, ARoughness: Single): Single; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -6356,6 +6384,91 @@ begin
   B := EnsureRange(1.4 * T - 0.85, 0.0, 1.0);
   SafeIntensity := Max(0.0, AIntensity);
   Result := Vector3(R * SafeIntensity, G * SafeIntensity, B * SafeIntensity);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateSVGFVarianceMomentsFunctions: String;
+begin
+  Result :=
+    '// Phase 34.1: Spatio-Temporal Variance-Guided Filtering (SVGF) Luminance Moments & Variance' + NL +
+    'vec2 EvaluateLuminanceMoments(vec3 radianceRGB) {' + NL +
+    '  float luma = dot(max(radianceRGB, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));' + NL +
+    '  return vec2(luma, luma * luma);' + NL +
+    '}' + NL +
+    NL +
+    'float ComputeTemporalVariance(vec2 moments) {' + NL +
+    '  return max(0.0, moments.y - moments.x * moments.x);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateLuminanceMoments(
+  const ARadianceRGB: TVector3): TVector2;
+var
+  Luma: Single;
+begin
+  Luma := Max(0.0, ARadianceRGB.X) * 0.2126 +
+          Max(0.0, ARadianceRGB.Y) * 0.7152 +
+          Max(0.0, ARadianceRGB.Z) * 0.0722;
+  Result := Vector2(Luma, Luma * Luma);
+end;
+
+class function TCastleShaderGeneratorRHI.ComputeTemporalVariance(
+  const AMoments: TVector2): Single;
+begin
+  Result := Max(0.0, AMoments.Y - Sqr(AMoments.X));
+end;
+
+function TCastleShaderGeneratorRHI.GenerateSVGFAttrousWaveletFunctions: String;
+begin
+  Result :=
+    '// Phase 34.2 & 34.3: SVGF Edge-Stopping A-Trous Wavelet Filter & Specular Hit-Distance Contact Hardening' + NL +
+    'float EvaluateSVGFEdgeStoppingWeight(vec3 centerNormal, vec3 sampleNormal,' + NL +
+    '  float centerDepth, float sampleDepth, float depthGradientDotOffset,' + NL +
+    '  float centerLuma, float sampleLuma, float variance,' + NL +
+    '  float phiDepth, float phiNormal, float phiLuma) {' + NL +
+    '  float wNormal = pow(clamp(dot(centerNormal, sampleNormal), 0.0, 1.0), max(1.0, phiNormal));' + NL +
+    '  float depthDenom = max(1e-5, abs(depthGradientDotOffset) * max(1e-4, phiDepth) + 1e-4);' + NL +
+    '  float wDepth = exp(-abs(centerDepth - sampleDepth) / depthDenom);' + NL +
+    '  float lumaDenom = max(1e-5, phiLuma * sqrt(max(0.0, variance) + 1e-6));' + NL +
+    '  float wLuma = exp(-abs(centerLuma - sampleLuma) / lumaDenom);' + NL +
+    '  return clamp(wNormal * wDepth * wLuma, 0.0, 1.0);' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateHitDistanceBlurFactor(float rayHitDistance, float cameraDistance, float roughness) {' + NL +
+    '  float dHit = max(0.0, rayHitDistance);' + NL +
+    '  float dCam = max(1e-4, cameraDistance);' + NL +
+    '  float contactRatio = dHit / (dHit + dCam);' + NL +
+    '  return clamp(contactRatio * clamp(roughness, 0.0, 1.0), 0.0, 1.0);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateSVGFEdgeStoppingWeight(
+  const ACenterNormal, ASampleNormal: TVector3;
+  const ACenterDepth, ASampleDepth, ADepthGradientDotOffset: Single;
+  const ACenterLuma, ASampleLuma, AVariance: Single;
+  const APhiDepth: Single;
+  const APhiNormal: Single;
+  const APhiLuma: Single): Single;
+var
+  WNormal, DepthDenom, WDepth, LumaDenom, WLuma: Single;
+begin
+  WNormal := Power(EnsureRange(TVector3.DotProduct(ACenterNormal, ASampleNormal), 0.0, 1.0),
+    Max(1.0, APhiNormal));
+  DepthDenom := Max(1e-5, Abs(ADepthGradientDotOffset) * Max(1e-4, APhiDepth) + 1e-4);
+  WDepth := Exp(-Abs(ACenterDepth - ASampleDepth) / DepthDenom);
+  LumaDenom := Max(1e-5, APhiLuma * Sqrt(Max(0.0, AVariance) + 1e-6));
+  WLuma := Exp(-Abs(ACenterLuma - ASampleLuma) / LumaDenom);
+  Result := EnsureRange(WNormal * WDepth * WLuma, 0.0, 1.0);
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateHitDistanceBlurFactor(
+  const ARayHitDistance, ACameraDistance, ARoughness: Single): Single;
+var
+  DHit, DCam, ContactRatio: Single;
+begin
+  DHit := Max(0.0, ARayHitDistance);
+  DCam := Max(1e-4, ACameraDistance);
+  ContactRatio := DHit / (DHit + DCam);
+  Result := EnsureRange(ContactRatio * EnsureRange(ARoughness, 0.0, 1.0), 0.0, 1.0);
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

@@ -168,6 +168,9 @@ type
     procedure TestSingleLayerWaterAbsorptionRefractionAndCausticsRHI;
     procedure TestSparseVolumeBrickAtlasAndBlackbodyEmissionRHI;
     procedure TestGPUBreadcrumbCrashTrackerDiagnosticsRHI;
+    procedure TestSVGFVarianceMomentsAndTemporalVarianceRHI;
+    procedure TestSVGFAttrousWaveletEdgeStoppingAndContactHardeningRHI;
+    procedure TestVulkanSVGFDenoiserMultiPassDispatchRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -9047,6 +9050,104 @@ begin
     AssertTrue('Crash report must mark ShadowMapPass as COMPLETED and LumenScreenProbeTracePass as ACTIVE_IN_FLIGHT',
       (Pos('ShadowMapPass -> COMPLETED', CrashReport) > 0) and
       (Pos('LumenScreenProbeTracePass -> ACTIVE_IN_FLIGHT (SUSPECTED GPU HANG)', CrashReport) > 0));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSVGFVarianceMomentsAndTemporalVarianceRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  MomentsGLSL: String;
+  M0, M1, MBlend: TVector2;
+  VarConstant, VarNoisy: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify SVGF Moments GLSL 450 functions }
+    MomentsGLSL := Gen.GenerateSVGFVarianceMomentsFunctions;
+    AssertTrue('SVGF Moments GLSL must include EvaluateLuminanceMoments and ComputeTemporalVariance',
+      (Pos('vec2 EvaluateLuminanceMoments(vec3 radianceRGB)', MomentsGLSL) > 0) and
+      (Pos('float ComputeTemporalVariance(vec2 moments)', MomentsGLSL) > 0));
+
+    { 2. Verify constant luminance produces zero temporal variance, while fluctuating luminance produces positive variance }
+    M0 := TCastleShaderGeneratorRHI.EvaluateLuminanceMoments(Vector3(1.0, 1.0, 1.0));
+    M1 := TCastleShaderGeneratorRHI.EvaluateLuminanceMoments(Vector3(3.0, 3.0, 3.0));
+    VarConstant := TCastleShaderGeneratorRHI.ComputeTemporalVariance(M0);
+    MBlend := Vector2((M0.X + M1.X) * 0.5, (M0.Y + M1.Y) * 0.5);
+    VarNoisy := TCastleShaderGeneratorRHI.ComputeTemporalVariance(MBlend);
+
+    AssertSameValue(1.0, M0.X, 1e-5);
+    AssertSameValue(1.0, M0.Y, 1e-5);
+    AssertSameValue(0.0, VarConstant, 1e-6);
+    AssertSameValue(1.0, VarNoisy, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSVGFAttrousWaveletEdgeStoppingAndContactHardeningRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  WaveletGLSL: String;
+  WIdentical, WNormalEdge, WDepthEdge, WLumaOutlier: Single;
+  BlurContact, BlurFar: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify SVGF A-Trous Wavelet & Contact Hardening GLSL 450 functions }
+    WaveletGLSL := Gen.GenerateSVGFAttrousWaveletFunctions;
+    AssertTrue('SVGF Wavelet GLSL must include EvaluateSVGFEdgeStoppingWeight and EvaluateHitDistanceBlurFactor',
+      (Pos('float EvaluateSVGFEdgeStoppingWeight(vec3 centerNormal, vec3 sampleNormal,', WaveletGLSL) > 0) and
+      (Pos('float EvaluateHitDistanceBlurFactor(float rayHitDistance, float cameraDistance, float roughness)', WaveletGLSL) > 0));
+
+    { 2. Verify edge-stopping weights preserve normal creases, depth silhouettes, and low-variance luminance edges }
+    WIdentical := TCastleShaderGeneratorRHI.EvaluateSVGFEdgeStoppingWeight(
+      Vector3(0, 0, 1), Vector3(0, 0, 1), 5.0, 5.0, 0.01, 1.0, 1.0, 0.25);
+    WNormalEdge := TCastleShaderGeneratorRHI.EvaluateSVGFEdgeStoppingWeight(
+      Vector3(0, 0, 1), Vector3(1, 0, 0), 5.0, 5.0, 0.01, 1.0, 1.0, 0.25);
+    WDepthEdge := TCastleShaderGeneratorRHI.EvaluateSVGFEdgeStoppingWeight(
+      Vector3(0, 0, 1), Vector3(0, 0, 1), 5.0, 12.0, 0.01, 1.0, 1.0, 0.25);
+    WLumaOutlier := TCastleShaderGeneratorRHI.EvaluateSVGFEdgeStoppingWeight(
+      Vector3(0, 0, 1), Vector3(0, 0, 1), 5.0, 5.0, 0.01, 1.0, 10.0, 0.0001);
+
+    AssertSameValue(1.0, WIdentical, 1e-5);
+    AssertSameValue(0.0, WNormalEdge, 1e-6);
+    AssertTrue('Depth silhouette jump must strongly attenuate A-Trous weight', WDepthEdge < 0.01);
+    AssertTrue('Luminance outlier at near-zero variance must strongly attenuate A-Trous weight', WLumaOutlier < 0.01);
+
+    { 3. Verify specular ray hit-distance contact hardening keeps contact reflections sharp }
+    BlurContact := TCastleShaderGeneratorRHI.EvaluateHitDistanceBlurFactor(0.02, 5.0, 0.5);
+    BlurFar     := TCastleShaderGeneratorRHI.EvaluateHitDistanceBlurFactor(20.0, 5.0, 0.5);
+    AssertTrue('Contact hit distance must produce near-zero blur factor compared to distant hits',
+      (BlurContact < 0.01) and (BlurFar > 0.35));
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanSVGFDenoiserMultiPassDispatchRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+begin
+  AssertEquals('A-Trous iteration 0 step size must be 1', 1, Integer(TCastleVulkanSVGFDenoiser.GetAttrousStepSize(0)));
+  AssertEquals('A-Trous iteration 3 step size must be 8', 8, Integer(TCastleVulkanSVGFDenoiser.GetAttrousStepSize(3)));
+
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($666B)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    Device.SVGFDenoiser.AttrousIterations := 4;
+    CmdList.BeginRecording;
+    Device.SVGFDenoiser.DispatchSVGFDenoise(CmdList, 1920, 1080, nil, nil);
+    CmdList.EndRecording;
+
+    AssertTrue('MomentsHistoryTexture must be allocated', Device.SVGFDenoiser.MomentsHistoryTexture <> nil);
+    AssertTrue('FilteredPingTexture must be allocated', Device.SVGFDenoiser.FilteredPingTexture <> nil);
+    AssertTrue('FilteredPongTexture must be allocated', Device.SVGFDenoiser.FilteredPongTexture <> nil);
+    AssertEquals('4 A-Trous wavelet iterations must record 4 compute dispatches',
+      4, Integer(Device.SVGFDenoiser.DispatchCount));
   finally
     FreeAndNil(CmdList);
     FreeAndNil(Device);

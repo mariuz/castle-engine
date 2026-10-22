@@ -77,8 +77,12 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–32**: **COMPLETED** (100%).
-- **Phase 33 (Single-Layer Water Refraction, Absorption & Photon Caustics, Sparse Heterogeneous Volume Bricks & GPU Breadcrumb Crash Tracker)**: **COMPLETED** (100%, 129 unit tests passing):
-  - [x] **33.1. Physically Based Single-Layer Water Volume Beer-Lambert Absorption, Refraction & Caustics (`GenerateSingleLayerWaterFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSingleLayerWaterAbsorptionRefractionAndCausticsRHI`).
-  - [x] **33.2. Sparse Brick-Atlas Heterogeneous Volumes (`TCastleVulkanSparseVolumeAtlas` in `CastleInternalRHI_Vulkan`, `GenerateSparseVolumeBlackbodyFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSparseVolumeBrickAtlasAndBlackbodyEmissionRHI`).
-  - [x] **33.3. GPU Breadcrumb Marker Buffer & `VK_ERROR_device_lost` Diagnostics (`TCastleVulkanBreadcrumbTracker` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestGPUBreadcrumbCrashTrackerDiagnosticsRHI`).
+- **Phases 1–33**: **COMPLETED** (100%).
+- **Phase 34 (Spatio-Temporal Variance-Guided Filtering SVGF / À-Trous Wavelet Denoiser & Specular Hit-Distance Contact Hardening)**: **COMPLETED** (100%, 132 unit tests passing):
+  - [x] **34.1. Temporal Luminance Moment Accumulation & Variance Estimation (`GenerateSVGFVarianceMomentsFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSVGFVarianceMomentsAndTemporalVarianceRHI`).
+  - [x] **34.2. Edge-Stopping À-Trous Wavelet Spatial Filter (`GenerateSVGFAttrousWaveletFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSVGFAttrousWaveletEdgeStoppingAndContactHardeningRHI`).
+  - [x] **34.3. Specular Ray Hit-Distance Contact Hardening & Multi-Pass SVGF Denoiser (`TCastleVulkanSVGFDenoiser` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanSVGFDenoiserMultiPassDispatchRHI`).
+- **Unreal Engine 5.4/5.5+ Extended Roadmap (Phases 35–37)**:
+  - **Phase 35 (Hardware Ray Tracing Pipeline & SBT)**: `VK_KHR_ray_tracing_pipeline`, `TCastleVulkanShaderBindingTable`, and `TCastleVulkanAccelerationStructureManager`.
+  - **Phase 36 (GPU XPBD Cloth/Hair Physics)**: `TCastleVulkanXPBDSimulator`, compliant XPBD constraints, aerodynamic wind, and SDF collision.
+  - **Phase 37 (Multi-View VR Stereo, Foveated Rendering & HDR10 PQ)**: `VK_KHR_multiview`, gaze-tracked radial foveated VRS, and Rec.2020 / SMPTE ST.2084 PQ encoding.
