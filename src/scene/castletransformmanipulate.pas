@@ -1351,6 +1351,64 @@ type
       const HeartShape: Boolean = true;
       const VerticalWave: Single = 0.0;
       const OrientMode: Integer = 1): Boolean;
+
+    { Apply a concentric 3D radial ripple / water-drop wave deformation across all
+      top-level selected transforms (@code(SelectedCount >= 2)) around the active
+      selection pivot $\mathbf(C)$:
+      - Horizontal radial distance $r_i = \sqrt((P_(i,x) - C_x)^2 + (P_(i,z) - C_z)^2)$
+      - Wave number $k = 2\pi / \max(0.01, \text(Wavelength))$
+      - Vertical wave displacement:
+        $\Delta y_i = \text(Amplitude) \cdot e^(-\max(0, \text(DecayRate)) \cdot r_i) \cdot \cos(k r_i + \text(PhaseRad))$
+      - When @code(TiltNormals = true), tilts each transform's world $+Y$ Up axis
+        to match the analytical ripple surface normal
+        $\mathbf(N)_i = \operatorname(Normalize)(-\frac(\partial y)(\partial r)\frac(\Delta x_i)(r_i), 1, -\frac(\partial y)(\partial r)\frac(\Delta z_i)(r_i))$.
+      Returns @true if at least one selected transform was modified. }
+    function RippleSelected(
+      const Amplitude, Wavelength: Single;
+      const PhaseRad: Single = 0.0;
+      const DecayRate: Single = 0.0;
+      const TiltNormals: Boolean = false): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along a 3D Lemniscate of Bernoulli (classic $\infty$ infinity loop /
+      figure-8 overpass track) centered at the active selection pivot $\mathbf(C)$:
+      $t_i = \frac(2\pi i)(N)$,
+      $x(t_i) = C_x + \frac(a \cos t_i)(1 + \sin^2 t_i)$,
+      $z(t_i) = C_z + \frac(a \sin t_i \cos t_i)(1 + \sin^2 t_i)$,
+      $y(t_i) = C_y + H \sin t_i$,
+      where $a = \text(HalfWidthA)$ (auto-computed when $\le 0$) is the half-width
+      of the infinity lobes and $H = \text(VerticalBridgeLift)$ optionally lifts
+      one crossing pass over the other at the central origin.
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the analytical 3D lemniscate curve tangent
+      - @code(2): orient horizontally inward toward $\mathbf(C)$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInLemniscate(
+      const HalfWidthA: Single = 0.0;
+      const VerticalBridgeLift: Single = 0.0;
+      const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along a continuous 3D Toroidal Solenoid / Helical Coil winding
+      @code(CoilWindings) times around a torus of major radius @code(MajorRadius)
+      and minor tube radius @code(MinorRadius) centered at the active selection
+      pivot $\mathbf(C)$:
+      $u_i = \frac(2\pi i)(N), \quad v_i = \text(CoilWindings) \cdot u_i$,
+      $x_i = C_x + (R + r\cos v_i)\cos u_i$,
+      $y_i = C_y + r\sin v_i$,
+      $z_i = C_z + (R + r\cos v_i)\sin u_i$.
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the analytical 3D solenoid coil tangent
+        with outward tube normal as Up
+      - @code(2): orient radially outward from the torus tube centerline
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInTorusHelix(
+      const MajorRadius: Single = 0.0;
+      const MinorRadius: Single = 0.0;
+      const CoilWindings: Single = 6.0;
+      const OrientMode: Integer = 1): Boolean;
   end;
 
 var
@@ -10521,6 +10579,346 @@ begin
         Side := Vector3(1, 0, 0);
       Side := Side.Normalize;
       NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.RippleSelected(
+  const Amplitude, Wavelength: Single;
+  const PhaseRad: Single;
+  const DecayRate: Single;
+  const TiltNormals: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  Positions: array of TVector3;
+  Count, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, CurWorldPos, CurDir, CurUp, SurfNormal, NewDir, NewUp: TVector3;
+  DX, DZ, R, K, Alpha, Damping, Arg, SinArg, CosArg, DeltaY, Dydr: Single;
+begin
+  Result := false;
+  Count := SelectedCount;
+  if Count < 2 then
+    Exit;
+
+  SetLength(Items, Count);
+  SetLength(Positions, Count);
+  Count := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if not IsDescendantOfAnySelected(T) then
+    begin
+      Items[Count] := T;
+      Positions[Count] := GetTransformWorkingPos(T);
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then
+    Exit;
+
+  CenterPos := SelectionWorkingCenter;
+  K := (2.0 * Pi) / Max(0.01, Abs(Wavelength));
+  Alpha := Max(0.0, DecayRate);
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    CurPos := Positions[I];
+    DX := CurPos.X - CenterPos.X;
+    DZ := CurPos.Z - CenterPos.Z;
+    R := Sqrt(Sqr(DX) + Sqr(DZ));
+
+    Damping := Exp(-Alpha * R);
+    Arg := K * R + PhaseRad;
+    SinCos(Arg, SinArg, CosArg);
+    DeltaY := Amplitude * Damping * CosArg;
+
+    TargetPos := Vector3(CurPos.X, CurPos.Y + DeltaY, CurPos.Z);
+    if not TVector3.Equals(CurPos, TargetPos, 1e-5) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if TiltNormals and T.HasWorldTransform and (R > 1e-4) then
+    begin
+      // dy/dr = -Amplitude * e^(-Alpha*r) * (Alpha*cos(k*r + phi) + k*sin(k*r + phi))
+      Dydr := -Amplitude * Damping * (Alpha * CosArg + K * SinArg);
+      SurfNormal := Vector3(-Dydr * (DX / R), 1.0, -Dydr * (DZ / R)).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      NewUp := SurfNormal;
+      NewDir := CurDir - NewUp * TVector3.DotProduct(CurDir, NewUp);
+      if NewDir.IsZero(1e-5) then
+      begin
+        NewDir := TVector3.CrossProduct(NewUp, Vector3(1, 0, 0));
+        if NewDir.IsZero(1e-5) then
+          NewDir := TVector3.CrossProduct(NewUp, Vector3(0, 0, 1));
+      end;
+      NewDir := NewDir.Normalize;
+
+      if (not TVector3.Equals(CurDir, NewDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), NewDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInLemniscate(
+  const HalfWidthA: Single;
+  const VerticalBridgeLift: Single;
+  const OrientMode: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  Positions: array of TVector3;
+  Count, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, CurWorldPos, CurDir, CurUp, LookDir, Side, NewUp, GravityUp: TVector3;
+  A, SumDist, Theta, SinT, CosT, Denom, DenomSq, XOff, YOff, ZOff, DXdt, DYdt, DZdt: Single;
+begin
+  Result := false;
+  Count := SelectedCount;
+  if Count < 2 then
+    Exit;
+
+  SetLength(Items, Count);
+  SetLength(Positions, Count);
+  Count := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if not IsDescendantOfAnySelected(T) then
+    begin
+      Items[Count] := T;
+      Positions[Count] := GetTransformWorkingPos(T);
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then
+    Exit;
+
+  CenterPos := SelectionWorkingCenter;
+  A := HalfWidthA;
+  if A <= 0 then
+  begin
+    SumDist := 0;
+    for I := 0 to Count - 1 do
+      SumDist := SumDist + Sqrt(Sqr(Positions[I].X - CenterPos.X) + Sqr(Positions[I].Z - CenterPos.Z));
+    A := SumDist / Count;
+    if A < 1e-4 then
+      A := 6.0;
+  end;
+
+  GravityUp := Vector3(0, 1, 0);
+  if (Items[0].World <> nil) and (not Items[0].World.GravityUp.IsZero) then
+    GravityUp := Items[0].World.GravityUp.Normalize;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    Theta := (2.0 * Pi * I) / Count;
+    SinCos(Theta, SinT, CosT);
+    Denom := 1.0 + Sqr(SinT);
+
+    XOff := (A * CosT) / Denom;
+    ZOff := (A * SinT * CosT) / Denom;
+    YOff := VerticalBridgeLift * SinT;
+
+    TargetPos := Vector3(CenterPos.X + XOff, CenterPos.Y + YOff, CenterPos.Z + ZOff);
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(CurPos, TargetPos, 1e-5) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      if OrientMode = 1 then
+      begin
+        // Analytical derivative of Lemniscate of Bernoulli:
+        // x(t) = a*cos(t)/(1 + sin^2(t)) => dx/dt = -a*sin(t)*(3 - sin^2(t)) / (1 + sin^2(t))^2
+        // z(t) = a*sin(t)*cos(t)/(1 + sin^2(t)) => dz/dt = a*(1 - 3*sin^2(t)) / (1 + sin^2(t))^2
+        // y(t) = H*sin(t) => dy/dt = H*cos(t)
+        DenomSq := Sqr(Denom);
+        DXdt := (-A * SinT * (3.0 - Sqr(SinT))) / DenomSq;
+        DZdt := (A * (1.0 - 3.0 * Sqr(SinT))) / DenomSq;
+        DYdt := VerticalBridgeLift * CosT;
+        LookDir := Vector3(DXdt, DYdt, DZdt);
+      end else
+        LookDir := Vector3(CenterPos.X - TargetPos.X, 0, CenterPos.Z - TargetPos.Z);
+
+      if LookDir.IsZero(1e-5) then
+        LookDir := Vector3(0, 0, -1);
+      LookDir := LookDir.Normalize;
+
+      Side := TVector3.CrossProduct(LookDir, GravityUp);
+      if Side.IsZero(1e-5) then
+        Side := Vector3(1, 0, 0);
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInTorusHelix(
+  const MajorRadius: Single;
+  const MinorRadius: Single;
+  const CoilWindings: Single;
+  const OrientMode: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  Positions: array of TVector3;
+  Count, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, TubeCenter, TubeNormal, CoilTangent, LookDir, Side, NewUp, CurWorldPos, CurDir, CurUp: TVector3;
+  MajR, MinR, Windings, SumDist, U, V, SinU, CosU, SinV, CosV, RadialR, DXdu, DYdu, DZdu: Single;
+begin
+  Result := false;
+  Count := SelectedCount;
+  if Count < 2 then
+    Exit;
+
+  SetLength(Items, Count);
+  SetLength(Positions, Count);
+  Count := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if not IsDescendantOfAnySelected(T) then
+    begin
+      Items[Count] := T;
+      Positions[Count] := GetTransformWorkingPos(T);
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then
+    Exit;
+
+  CenterPos := SelectionWorkingCenter;
+  MajR := MajorRadius;
+  if MajR <= 0 then
+  begin
+    SumDist := 0;
+    for I := 0 to Count - 1 do
+      SumDist := SumDist + Sqrt(Sqr(Positions[I].X - CenterPos.X) + Sqr(Positions[I].Z - CenterPos.Z));
+    MajR := SumDist / Count;
+    if MajR < 1e-4 then
+      MajR := 6.0;
+  end;
+
+  MinR := MinorRadius;
+  if MinR <= 0 then
+    MinR := MajR * 0.3;
+
+  Windings := CoilWindings;
+  if Abs(Windings) < 1e-4 then
+    Windings := 6.0;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    U := (2.0 * Pi * I) / Count;
+    V := Windings * U;
+    SinCos(U, SinU, CosU);
+    SinCos(V, SinV, CosV);
+
+    RadialR := MajR + MinR * CosV;
+    TargetPos := Vector3(
+      CenterPos.X + RadialR * CosU,
+      CenterPos.Y + MinR * SinV,
+      CenterPos.Z + RadialR * SinU);
+
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(CurPos, TargetPos, 1e-5) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      TubeCenter := Vector3(CenterPos.X + MajR * CosU, CenterPos.Y, CenterPos.Z + MajR * SinU);
+      TubeNormal := TargetPos - TubeCenter;
+      if TubeNormal.IsZero(1e-5) then
+        TubeNormal := Vector3(CosU * CosV, SinV, SinU * CosV);
+      TubeNormal := TubeNormal.Normalize;
+
+      // Analytical tangent dP/du of the toroidal helix:
+      // dx/du = -MinR*Windings*sin(v)*cos(u) - (MajR + MinR*cos(v))*sin(u)
+      // dy/du = MinR*Windings*cos(v)
+      // dz/du = -MinR*Windings*sin(v)*sin(u) + (MajR + MinR*cos(v))*cos(u)
+      DXdu := -MinR * Windings * SinV * CosU - RadialR * SinU;
+      DYdu := MinR * Windings * CosV;
+      DZdu := -MinR * Windings * SinV * SinU + RadialR * CosU;
+      CoilTangent := Vector3(DXdu, DYdu, DZdu);
+      if CoilTangent.IsZero(1e-5) then
+        CoilTangent := Vector3(-SinU, 0, CosU);
+      CoilTangent := CoilTangent.Normalize;
+
+      if OrientMode = 1 then
+      begin
+        LookDir := CoilTangent;
+        NewUp := TubeNormal - LookDir * TVector3.DotProduct(TubeNormal, LookDir);
+        if NewUp.IsZero(1e-5) then
+          NewUp := Vector3(0, 1, 0);
+        NewUp := NewUp.Normalize;
+      end else
+      begin
+        LookDir := TubeNormal;
+        Side := TVector3.CrossProduct(LookDir, CoilTangent);
+        if Side.IsZero(1e-5) then
+          Side := Vector3(0, 1, 0);
+        Side := Side.Normalize;
+        NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+      end;
 
       T.GetWorldView(CurWorldPos, CurDir, CurUp);
       if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or

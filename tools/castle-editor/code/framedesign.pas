@@ -375,6 +375,9 @@ type
       ButtonSpherifySelection: TButton;
       ButtonArrangeMobius: TButton;
       ButtonArrangeHeart: TButton;
+      ButtonRippleSelection: TButton;
+      ButtonArrangeLemniscate: TButton;
+      ButtonArrangeTorusHelix: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -410,6 +413,7 @@ type
       ButtonUITileMosaic: TButton;
       ButtonUIBorderRing: TButton;
       ButtonUIPyramid: TButton;
+      ButtonUIDiamond: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -451,6 +455,7 @@ type
       MenuTreeViewItemSelectGroups: TMenuItem;
       MenuTreeViewItemSelectDesignInstances: TMenuItem;
       MenuTreeViewItemSelectPrimitives: TMenuItem;
+      MenuTreeViewItemSelectSceneMeshes: TMenuItem;
       MenuTreeViewItemCopyTransform: TMenuItem;
       MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
@@ -571,6 +576,9 @@ type
     procedure ButtonSpherifySelectionClick(Sender: TObject);
     procedure ButtonArrangeMobiusClick(Sender: TObject);
     procedure ButtonArrangeHeartClick(Sender: TObject);
+    procedure ButtonRippleSelectionClick(Sender: TObject);
+    procedure ButtonArrangeLemniscateClick(Sender: TObject);
+    procedure ButtonArrangeTorusHelixClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -595,6 +603,7 @@ type
     procedure ButtonUITileMosaicClick(Sender: TObject);
     procedure ButtonUIBorderRingClick(Sender: TObject);
     procedure ButtonUIPyramidClick(Sender: TObject);
+    procedure ButtonUIDiamondClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -643,6 +652,7 @@ type
     procedure MenuTreeViewItemSelectGroupsClick(Sender: TObject);
     procedure MenuTreeViewItemSelectDesignInstancesClick(Sender: TObject);
     procedure MenuTreeViewItemSelectPrimitivesClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectSceneMeshesClick(Sender: TObject);
     procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
@@ -1276,6 +1286,24 @@ type
       const VerticalWave: Single = 0.0;
       const OrientMode: Integer = 1);
     procedure ShowArrangeInCardioidOrHeartDialog;
+    procedure RippleSelection(
+      const Amplitude: Single = 2.0;
+      const Wavelength: Single = 8.0;
+      const PhaseDeg: Single = 0.0;
+      const DecayRate: Single = 0.0;
+      const TiltNormals: Boolean = false);
+    procedure ShowRippleSelectionDialog;
+    procedure ArrangeSelectionInLemniscate(
+      const HalfWidthA: Single = 0.0;
+      const VerticalBridgeLift: Single = 0.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeInLemniscateDialog;
+    procedure ArrangeSelectionInTorusHelix(
+      const MajorRadius: Single = 0.0;
+      const MinorRadius: Single = 0.0;
+      const CoilWindings: Single = 6.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeInTorusHelixDialog;
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -1314,6 +1342,9 @@ type
     procedure ArrangeSelectedUserInterfacesInPyramid(
       const GapPx: Single = 8.0;
       const Inverted: Boolean = false);
+    procedure ArrangeSelectedUserInterfacesInDiamond(
+      const RadiusScale: Single = 1.0;
+      const EqualAspect: Boolean = false);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -1364,6 +1395,7 @@ type
     procedure SelectGroupTransforms(const OnlyPureGroups: Boolean = false);
     procedure SelectDesignInstances(const TransformsOnly: Boolean = false);
     procedure SelectPrimitiveShapes(const OnlyBoxesAndSpheres: Boolean = false);
+    procedure SelectSceneMeshes(const OnlyWithAnimations: Boolean = false);
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -2498,6 +2530,32 @@ begin
     if Event.IsKey(keyBackQuote) then
     begin
       Frame.ShowArrangeOnConeDialog;
+      Exit(true);
+    end;
+  end;
+
+  if (Frame.Mode <> moInteract) and
+     (Event.ModifiersDown = [mkCtrl, mkAlt]) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    if Event.IsKey(keySemicolon) then
+    begin
+      Frame.ShowRippleSelectionDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(keyApostrophe) then
+    begin
+      Frame.ShowArrangeInLemniscateDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(keyLeftBracket) then
+    begin
+      Frame.ShowArrangeInTorusHelixDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(keyRightBracket) then
+    begin
+      Frame.SelectSceneMeshes(false);
       Exit(true);
     end;
   end;
@@ -4292,6 +4350,36 @@ begin
   ButtonArrangeHeart.OnClick := @ButtonArrangeHeartClick;
   ButtonArrangeHeart.Parent := PanelLayoutTransform;
 
+  ButtonRippleSelection := TButton.Create(Self);
+  ButtonRippleSelection.Align := alTop;
+  ButtonRippleSelection.AutoSize := true;
+  ButtonRippleSelection.Caption := 'Ripple Wave...';
+  ButtonRippleSelection.Hint := 'Deform 2+ selected 3D transforms with a concentric radial ripple / water-drop wave around their group center (Ctrl+Alt+; | Shift-click: dialog | Click: radial ripple + tilt normals | Ctrl-click: damped water-drop ripple)';
+  ButtonRippleSelection.ShowHint := true;
+  ButtonRippleSelection.BorderSpacing.Around := 2;
+  ButtonRippleSelection.OnClick := @ButtonRippleSelectionClick;
+  ButtonRippleSelection.Parent := PanelLayoutTransform;
+
+  ButtonArrangeLemniscate := TButton.Create(Self);
+  ButtonArrangeLemniscate.Align := alTop;
+  ButtonArrangeLemniscate.AutoSize := true;
+  ButtonArrangeLemniscate.Caption := 'Infinity Loop...';
+  ButtonArrangeLemniscate.Hint := 'Arrange 2+ selected 3D transforms along a 3D Lemniscate of Bernoulli (infinity loop / figure-8 overpass track) (Ctrl+Alt+'' | Shift-click: dialog | Click: flat infinity loop + tangent | Ctrl-click: 3D overpass bridge)';
+  ButtonArrangeLemniscate.ShowHint := true;
+  ButtonArrangeLemniscate.BorderSpacing.Around := 2;
+  ButtonArrangeLemniscate.OnClick := @ButtonArrangeLemniscateClick;
+  ButtonArrangeLemniscate.Parent := PanelLayoutTransform;
+
+  ButtonArrangeTorusHelix := TButton.Create(Self);
+  ButtonArrangeTorusHelix.Align := alTop;
+  ButtonArrangeTorusHelix.AutoSize := true;
+  ButtonArrangeTorusHelix.Caption := 'Torus Coil...';
+  ButtonArrangeTorusHelix.Hint := 'Arrange 2+ selected 3D transforms along a 3D Toroidal Solenoid / Helical Coil winding around a torus ring (Ctrl+Alt+[ | Shift-click: dialog | Click: 6-turn coil + tangent | Ctrl-click: 12-turn coil + outward normal)';
+  ButtonArrangeTorusHelix.ShowHint := true;
+  ButtonArrangeTorusHelix.BorderSpacing.Around := 2;
+  ButtonArrangeTorusHelix.OnClick := @ButtonArrangeTorusHelixClick;
+  ButtonArrangeTorusHelix.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -4566,6 +4654,14 @@ begin
   ButtonUIPyramid.OnClick := @ButtonUIPyramidClick;
   ButtonUIPyramid.Parent := PanelLayoutUI;
 
+  ButtonUIDiamond := TButton.Create(Self);
+  ButtonUIDiamond.AutoSize := true;
+  ButtonUIDiamond.Caption := 'UI Diamond';
+  ButtonUIDiamond.Hint := 'Arrange 2+ selected 2D UI controls clockwise along the 4 diagonal edges of a 2D diamond / rhombus around their shared center (Click: auto Rx,Ry diamond | Shift-click: equal-aspect 45 deg square diamond | Ctrl-click: 1.5x radius)';
+  ButtonUIDiamond.ShowHint := true;
+  ButtonUIDiamond.OnClick := @ButtonUIDiamondClick;
+  ButtonUIDiamond.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -4799,6 +4895,11 @@ begin
   MenuTreeViewItemSelectPrimitives.Caption := 'Select 3D Primitive / Greybox Shapes (Ctrl+Alt+J)';
   MenuTreeViewItemSelectPrimitives.OnClick := @MenuTreeViewItemSelectPrimitivesClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectPrimitives);
+
+  MenuTreeViewItemSelectSceneMeshes := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectSceneMeshes.Caption := 'Select 3D Scene / Mesh Instances (Ctrl+Alt+])';
+  MenuTreeViewItemSelectSceneMeshes.OnClick := @MenuTreeViewItemSelectSceneMeshesClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectSceneMeshes);
 
   MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
   MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
@@ -8486,6 +8587,8 @@ begin
         ButtonUIBorderRing.Enabled := SelectedUICount >= 2;
       if ButtonUIPyramid <> nil then
         ButtonUIPyramid.Enabled := SelectedUICount >= 2;
+      if ButtonUIDiamond <> nil then
+        ButtonUIDiamond.Enabled := SelectedUICount >= 2;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -8626,6 +8729,12 @@ begin
       ButtonArrangeMobius.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonArrangeHeart <> nil then
       ButtonArrangeHeart.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonRippleSelection <> nil then
+      ButtonRippleSelection.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeLemniscate <> nil then
+      ButtonArrangeLemniscate.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeTorusHelix <> nil then
+      ButtonArrangeTorusHelix.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -10145,11 +10254,31 @@ begin
       begin
         ScaleSelectionGroupAroundPivot(Vector3(1.25, 1.25, 1.25));
         Key := 0;
+      end else
+      if Shift = [ssCtrl, ssAlt] then
+      begin
+        SelectSceneMeshes(false);
+        Key := 0;
       end;
     end else
     if (Key = VK_OEM_4) and (Shift = [ssAlt, ssShift]) then
     begin
       ScaleSelectionGroupAroundPivot(Vector3(0.8, 0.8, 0.8));
+      Key := 0;
+    end else
+    if (Key = VK_OEM_4) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowArrangeInTorusHelixDialog;
+      Key := 0;
+    end else
+    if (Key = VK_OEM_1) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowRippleSelectionDialog;
+      Key := 0;
+    end else
+    if (Key = VK_OEM_7) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowArrangeInLemniscateDialog;
       Key := 0;
     end else
     if (Key = VK_OEM_PERIOD) and (Shift = [ssAlt, ssShift]) then
@@ -15067,6 +15196,178 @@ begin
   end;
 end;
 
+procedure TDesignFrame.RippleSelection(
+  const Amplitude: Single;
+  const Wavelength: Single;
+  const PhaseDeg: Single;
+  const DecayRate: Single;
+  const TiltNormals: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.RippleSelected(
+      Amplitude, Wavelength, DegToRad(PhaseDeg), DecayRate, TiltNormals);
+end;
+
+procedure TDesignFrame.ShowRippleSelectionDialog;
+var
+  Prompts: array[0..4] of string;
+  Values: array[0..4] of string;
+  Amp, WaveLen, PhaseDeg, DecayVal: Single;
+  TiltNorm: Boolean;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Ripple Wave Amplitude Y:';
+  Prompts[1] := 'Concentric Wavelength (distance between crests):';
+  Prompts[2] := 'Phase Angle Offset (degrees):';
+  Prompts[3] := 'Radial Damping / Decay Rate (0 = undamped, 0.15 = damped):';
+  Prompts[4] := 'Tilt +Y Up to Ripple Surface Normal? (1 = yes, 0 = no):';
+
+  Values[0] := '2.0';
+  Values[1] := '8.0';
+  Values[2] := '0.0';
+  Values[3] := '0.0';
+  Values[4] := '1';
+
+  if InputQuery('Concentric 3D Radial Ripple / Water-Drop Wave Deformation', Prompts, Values) then
+  begin
+    Amp := StrToFloatDefDot(Trim(Values[0]), 2.0);
+    WaveLen := StrToFloatDefDot(Trim(Values[1]), 8.0);
+    PhaseDeg := StrToFloatDefDot(Trim(Values[2]), 0.0);
+    DecayVal := StrToFloatDefDot(Trim(Values[3]), 0.0);
+    TiltNorm := StrToIntDef(Trim(Values[4]), 1) <> 0;
+    RippleSelection(Amp, WaveLen, PhaseDeg, DecayVal, TiltNorm);
+  end;
+end;
+
+procedure TDesignFrame.ButtonRippleSelectionClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  DecayVal: Single;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowRippleSelectionDialog
+  else
+  begin
+    if ssCtrl in ShiftState then
+      DecayVal := 0.15
+    else
+      DecayVal := 0.0;
+    RippleSelection(2.0, 8.0, 0.0, DecayVal, true);
+  end;
+end;
+
+procedure TDesignFrame.ArrangeSelectionInLemniscate(
+  const HalfWidthA: Single;
+  const VerticalBridgeLift: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInLemniscate(
+      HalfWidthA, VerticalBridgeLift, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInLemniscateDialog;
+var
+  Prompts: array[0..2] of string;
+  Values: array[0..2] of string;
+  LobeA, BridgeLift: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Infinity Lobe Half-Width a (0 = auto from selection):';
+  Prompts[1] := 'Vertical Overpass Bridge Lift Y (0 = flat on XZ plane):';
+  Prompts[2] := 'Orientation (0 = keep, 1 = curve tangent, 2 = inward):';
+
+  Values[0] := '0';
+  Values[1] := '0';
+  Values[2] := '1';
+
+  if InputQuery('Arrange Selected in 3D Lemniscate of Bernoulli (Infinity Loop)', Prompts, Values) then
+  begin
+    LobeA := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    BridgeLift := StrToFloatDefDot(Trim(Values[1]), 0.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[2]), 1), 0, 2);
+    ArrangeSelectionInLemniscate(LobeA, BridgeLift, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeLemniscateClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  BridgeLift: Single;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInLemniscateDialog
+  else
+  begin
+    if ssCtrl in ShiftState then
+      BridgeLift := 2.0
+    else
+      BridgeLift := 0.0;
+    ArrangeSelectionInLemniscate(0.0, BridgeLift, 1);
+  end;
+end;
+
+procedure TDesignFrame.ArrangeSelectionInTorusHelix(
+  const MajorRadius: Single;
+  const MinorRadius: Single;
+  const CoilWindings: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInTorusHelix(
+      MajorRadius, MinorRadius, CoilWindings, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInTorusHelixDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  MajR, MinR, Windings: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Torus Major Radius R (0 = auto from selection):';
+  Prompts[1] := 'Tube Minor Radius r (0 = auto R * 0.3):';
+  Prompts[2] := 'Number of Helical Coil Windings Around Torus:';
+  Prompts[3] := 'Orientation (0 = keep, 1 = coil tangent + tube normal, 2 = outward tube normal):';
+
+  Values[0] := '0';
+  Values[1] := '0';
+  Values[2] := '6';
+  Values[3] := '1';
+
+  if InputQuery('Arrange Selected in 3D Toroidal Solenoid / Helical Coil', Prompts, Values) then
+  begin
+    MajR := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    MinR := StrToFloatDefDot(Trim(Values[1]), 0.0);
+    Windings := StrToFloatDefDot(Trim(Values[2]), 6.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[3]), 1), 0, 2);
+    ArrangeSelectionInTorusHelix(MajR, MinR, Windings, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeTorusHelixClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInTorusHelixDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionInTorusHelix(0.0, 0.0, 12.0, 2)
+  else
+    ArrangeSelectionInTorusHelix(0.0, 0.0, 6.0, 1);
+end;
+
 procedure TDesignFrame.StopPilotTransform;
 var
   SavedName: String;
@@ -17177,6 +17478,141 @@ begin
   else
     GapVal := 8.0;
   ArrangeSelectedUserInterfacesInPyramid(GapVal, ssShift in ShiftState);
+end;
+
+procedure TDesignFrame.ArrangeSelectedUserInterfacesInDiamond(
+  const RadiusScale: Single;
+  const EqualAspect: Boolean);
+var
+  Selected: TComponentList;
+  SelectedCount, I, Count, ChangedCount, EdgeIdx: Integer;
+  UIControls: array of TCastleUserInterface;
+  UI: TCastleUserInterface;
+  R: TFloatRectangle;
+  MinX, MaxX, MinY, MaxY, AvgW, AvgH, GroupCenterX, GroupCenterY: Single;
+  RX, RY,ScaleMult, T, EdgeFrac, TargetCenterX, TargetCenterY, DeltaX, DeltaY: Single;
+begin
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount < 2 then Exit;
+
+    Count := 0;
+    SetLength(UIControls, SelectedCount);
+    AvgW := 0.0;
+    AvgH := 0.0;
+    MinX := MaxSingle;
+    MaxX := -MaxSingle;
+    MinY := MaxSingle;
+    MaxY := -MaxSingle;
+
+    for I := 0 to SelectedCount - 1 do
+      if (Selected[I] is TCastleUserInterface) and (Selected[I] <> DesignRoot) then
+      begin
+        UI := TCastleUserInterface(Selected[I]);
+        R := UI.RenderRectWithBorder;
+        if not R.IsEmpty then
+        begin
+          UIControls[Count] := UI;
+          AvgW := AvgW + R.Width;
+          AvgH := AvgH + R.Height;
+          MinX := Min(MinX, R.Center.X);
+          MaxX := Max(MaxX, R.Center.X);
+          MinY := Min(MinY, R.Center.Y);
+          MaxY := Max(MaxY, R.Center.Y);
+          Inc(Count);
+        end;
+      end;
+
+    if Count < 2 then Exit;
+
+    AvgW := AvgW / Single(Count);
+    AvgH := AvgH / Single(Count);
+    GroupCenterX := (MinX + MaxX) * 0.5;
+    GroupCenterY := (MinY + MaxY) * 0.5;
+
+    RX := Max((MaxX - MinX) * 0.5, AvgW * Single(Count) * 0.25);
+    RY := Max((MaxY - MinY) * 0.5, AvgH * Single(Count) * 0.25);
+    if EqualAspect then
+    begin
+      RX := Max(RX, RY);
+      RY := RX;
+    end;
+
+    ScaleMult := RadiusScale;
+    if ScaleMult <= 0 then
+      ScaleMult := 1.0;
+    RX := RX * ScaleMult;
+    RY := RY * ScaleMult;
+
+    ChangedCount := 0;
+    for I := 0 to Count - 1 do
+    begin
+      UI := UIControls[I];
+      if UI.UIScale <= 0 then Continue;
+      R := UI.RenderRectWithBorder;
+      if R.IsEmpty then Continue;
+
+      // Clockwise around the 4 diamond edges:
+      // Edge 0: Top (0, +RY) -> Right (+RX, 0)
+      // Edge 1: Right (+RX, 0) -> Bottom (0, -RY)
+      // Edge 2: Bottom (0, -RY) -> Left (-RX, 0)
+      // Edge 3: Left (-RX, 0) -> Top (0, +RY)
+      T := (Single(I) / Single(Count)) * 4.0;
+      EdgeIdx := Trunc(T);
+      if EdgeIdx > 3 then EdgeIdx := 3;
+      EdgeFrac := T - Single(EdgeIdx);
+
+      case EdgeIdx of
+        0:
+          begin
+            TargetCenterX := GroupCenterX + EdgeFrac * RX;
+            TargetCenterY := GroupCenterY + (1.0 - EdgeFrac) * RY;
+          end;
+        1:
+          begin
+            TargetCenterX := GroupCenterX + (1.0 - EdgeFrac) * RX;
+            TargetCenterY := GroupCenterY - EdgeFrac * RY;
+          end;
+        2:
+          begin
+            TargetCenterX := GroupCenterX - EdgeFrac * RX;
+            TargetCenterY := GroupCenterY - (1.0 - EdgeFrac) * RY;
+          end;
+      else
+        begin
+          TargetCenterX := GroupCenterX - (1.0 - EdgeFrac) * RX;
+          TargetCenterY := GroupCenterY + EdgeFrac * RY;
+        end;
+      end;
+
+      DeltaX := TargetCenterX - R.Center.X;
+      DeltaY := TargetCenterY - R.Center.Y;
+      if (Abs(DeltaX) > 0.01) or (Abs(DeltaY) > 0.01) then
+      begin
+        UI.Translation := UI.Translation + Vector2(DeltaX / UI.UIScale, DeltaY / UI.UIScale);
+        Inc(ChangedCount);
+      end;
+    end;
+
+    if ChangedCount > 0 then
+      ModifiedOutsideObjectInspector(
+        Format('Arrange %d UI control(s) in diamond ring', [ChangedCount]), ucHigh);
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUIDiamondClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  RScale: Single;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssCtrl in ShiftState then
+    RScale := 1.5
+  else
+    RScale := 1.0;
+  ArrangeSelectedUserInterfacesInDiamond(RScale, ssShift in ShiftState);
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -20554,6 +20990,51 @@ begin
   SelectPrimitiveShapes(ssShift in GetKeyShiftState);
 end;
 
+procedure TDesignFrame.SelectSceneMeshes(const OnlyWithAnimations: Boolean);
+var
+  TreeNode: TTreeNode;
+  C: TComponent;
+  Scene: TCastleScene;
+  NewSelection: TComponentList;
+  Matches: Boolean;
+begin
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C is TCastleScene) and (C <> DesignRoot) and
+         Selectable(C) and (not IsComponentLocked(C)) then
+      begin
+        Scene := TCastleScene(C);
+        if Scene.Exists and (Trim(Scene.Url) <> '') then
+        begin
+          if OnlyWithAnimations then
+            Matches := (Trim(Scene.AutoAnimation) <> '') or
+                       ((Scene.AnimationsList <> nil) and (Scene.AnimationsList.Count > 0))
+          else
+            Matches := true;
+
+          if Matches and (NewSelection.IndexOf(Scene) = -1) then
+            NewSelection.Add(Scene);
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectSceneMeshesClick(Sender: TObject);
+begin
+  SelectSceneMeshes(ssShift in GetKeyShiftState);
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -21078,6 +21559,8 @@ begin
     MenuTreeViewItemSelectDesignInstances.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemSelectPrimitives <> nil then
     MenuTreeViewItemSelectPrimitives.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectSceneMeshes <> nil then
+    MenuTreeViewItemSelectSceneMeshes.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemCopyTransform <> nil then
     MenuTreeViewItemCopyTransform.Enabled := (CurrentTransform <> nil) or (SelectedUserInterface <> nil) or (ControlsTree.SelectionCount > 0);
   if MenuTreeViewItemPasteTransform <> nil then

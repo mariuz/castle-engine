@@ -63,6 +63,7 @@ type
     procedure TestTwistTaperSphericalSpiralAndSuperellipse;
     procedure TestBendVivianiCurveAndSpirograph;
     procedure TestSpherifyMobiusStripAndCardioidHeart;
+    procedure TestRippleLemniscateAndTorusHelix;
   end;
 
 implementation
@@ -2580,6 +2581,98 @@ begin
     AssertVectorEquals(Vector3(0, 0, 0), B2.Translation, 1e-4);
     AssertVectorEquals(Vector3(-10, 0, 0), B3.Translation, 1e-4);
     AssertVectorEquals(Vector3(0, 0, -20), B4.Translation, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestRippleLemniscateAndTorusHelix;
+var
+  Viewport: TCastleViewport;
+  B1, B2, B3, B4: TCastleBox;
+  Manipulate: TCastleTransformManipulate;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := nil;
+  Manipulate := nil;
+  try
+    Viewport := TCastleViewport.Create(nil);
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(1, 1, 1);
+    B1.Translation := Vector3(0, 0, 0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(1, 1, 1);
+    B2.Translation := Vector3(2, 0, 0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(1, 1, 1);
+    B3.Translation := Vector3(-2, 0, 0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(1, 1, 1);
+    B4.Translation := Vector3(0, 0, 0);
+    Viewport.Items.Add(B4);
+
+    Manipulate := TCastleTransformManipulate.Create(nil);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    Manipulate.PivotMode := pmSelectionCenter;
+
+    // 1. Test RippleSelected(4.0, 8.0, 0.0, 0.0, true):
+    // Center = (0, 0, 0), k = 2*pi/8 = pi/4:
+    // B1 (r=0): dy = 4 * cos(0) = 4 -> (0, 4, 0)
+    // B2 (x=+2, r=2): k*r = pi/2 -> dy = 4 * cos(pi/2) = 0 -> (2, 0, 0),
+    //   dy/dr = -4 * (pi/4) * sin(pi/2) = -pi -> SurfNormal = Normalize(pi, 1, 0)
+    // B3 (x=-2, r=2): dy = 0 -> (-2, 0, 0)
+    AssertTrue(Manipulate.RippleSelected(4.0, 8.0, 0.0, 0.0, true));
+    AssertVectorEquals(Vector3(0, 4, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(2, 0, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-2, 0, 0), B3.Translation, 1e-4);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(Pi, 1.0, 0.0).Normalize, WorldUp.Normalize, 1e-4);
+
+    // 2. Test ArrangeSelectedInLemniscate(10.0, 3.0, 1):
+    // Reset B1..B4 around Center = (0, 0, 0), N = 4 -> theta = 0, pi/2, pi, 3pi/2:
+    // i=0 (t=0): sin=0, cos=1, denom=1 -> (10, 0, 0), dx/dt=0, dz/dt=10, dy/dt=3 -> LookDir=Normalize(0, 3, 10)
+    // i=1 (t=pi/2): sin=1, cos=0, denom=2 -> (0, 3, 0), dx/dt=-10*2/4=-5, dz/dt=10*(-2)/4=-5, dy/dt=0
+    // i=2 (t=pi): sin=0, cos=-1, denom=1 -> (-10, 0, 0)
+    // i=3 (t=3pi/2): sin=-1, cos=0, denom=2 -> (0, -3, 0)
+    B1.Translation := Vector3(-3, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(1, 0, 0);
+    B4.Translation := Vector3(3, 0, 0);
+    AssertTrue(Manipulate.ArrangeSelectedInLemniscate(10.0, 3.0, 1));
+    AssertVectorEquals(Vector3(10, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 3, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-10, 0, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, -3, 0), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 3, 10).Normalize, WorldDir.Normalize, 1e-4);
+
+    // 3. Test ArrangeSelectedInTorusHelix(10.0, 2.0, 1.0, 2):
+    // Reset B1..B4 around Center = (0, 0, 0), N = 4 -> u = 0, pi/2, pi, 3pi/2, v = u:
+    // i=0 (u=0, v=0): R_rad = 10+2=12, y=0 -> (12, 0, 0), TubeNormal = (1, 0, 0)
+    // i=1 (u=pi/2, v=pi/2): R_rad = 10, y=2 -> (0, 2, 10), TubeNormal = (0, 1, 0)
+    // i=2 (u=pi, v=pi): R_rad = 8, y=0 -> (-8, 0, 0), TubeNormal = (1, 0, 0)
+    // i=3 (u=3pi/2, v=3pi/2): R_rad = 10, y=-2 -> (0, -2, -10), TubeNormal = (0, -1, 0)
+    B1.Translation := Vector3(-3, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(1, 0, 0);
+    B4.Translation := Vector3(3, 0, 0);
+    AssertTrue(Manipulate.ArrangeSelectedInTorusHelix(10.0, 2.0, 1.0, 2));
+    AssertVectorEquals(Vector3(12, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 2, 10), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-8, 0, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, -2, -10), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 1, 0), WorldDir.Normalize, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

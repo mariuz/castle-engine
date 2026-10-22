@@ -1199,7 +1199,30 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 
 ---
 
-## 62. Complete Keyboard Shortcuts & Toolbar Reference
+## 62. Phases 104–111: Spherify / Bulge (`Ctrl+Alt+X`), Möbius Strip (`Ctrl+Alt+Y`), Heart / Cardioid (`Ctrl+Alt+Z`), Select Primitive Shapes (`Ctrl+Alt+J`), 2D UI Pyramid (`UI Pyramid`), 3D Radial Ripple Wave (`Ctrl+Alt+;`), Lemniscate of Bernoulli (`Ctrl+Alt+'`), Toroidal Solenoid Coil (`Ctrl+Alt+[`), Select 3D Scene / Mesh Instances (`Ctrl+Alt+]`) & 2D UI Diamond Ring (`UI Diamond`)
+
+- **3D Spherical Spherify / Bulge / Pinch Deformation (`SpherifySelected` / `Ctrl+Alt+X`):**
+  - `TCastleTransformManipulate.SpherifySelected(TargetRadius, StrengthFactor, OrientRadially)` blends 2+ top-level selected transforms toward (`StrengthFactor > 0`) or away from (`StrengthFactor < 0`) a bounding sphere of radius `TargetRadius` around the active selection pivot, optionally orienting world $+Y$ Up radially outward (`ButtonSpherifySelection` or **`Ctrl+Alt+X`**).
+- **3D Möbius Strip / Twisted Ribbon Arrangement (`ArrangeSelectedInMobiusStrip` / `Ctrl+Alt+Y`):**
+  - `TCastleTransformManipulate.ArrangeSelectedInMobiusStrip(MajorRadius, StripHalfWidth, HalfTwists, OrientMode)` distributes 2+ top-level selected transforms along a 3D Möbius Strip / Twisted Ribbon with `HalfTwists` half-twists and twisting ribbon surface normal orientation (`ButtonArrangeMobius` or **`Ctrl+Alt+Y`**).
+- **3D Parametric Heart & Cardioid Curve Arrangement (`ArrangeSelectedInCardioidOrHeart` / `Ctrl+Alt+Z`):**
+  - `TCastleTransformManipulate.ArrangeSelectedInCardioidOrHeart(SizeScale, HeartShape, VerticalWave, OrientMode)` distributes 2+ top-level selected transforms along an algebraic Heart curve (`HeartShape = true`) or classical Cardioid (`HeartShape = false`) (`ButtonArrangeHeart` or **`Ctrl+Alt+Z`**).
+- **Select 3D Primitive / Greybox Shapes (`SelectPrimitiveShapes` / `Ctrl+Alt+J`) & 2D UI Pyramid Layout (`ArrangeSelectedUserInterfacesInPyramid` / `ButtonUIPyramid`):**
+  - Pressing **`Ctrl+Alt+J`** selects all visible, unlocked `TCastleAbstractPrimitive` instances (`Shift`-click menu item for `TCastleBox` and `TCastleSphere` only).
+  - Clicking **`UI Pyramid`** (`ButtonUIPyramid`) arranges 2+ selected `TCastleUserInterface` controls into a centered triangular pyramid stack (1 on row 0, 2 on row 1, 3 on row 2...).
+- **3D Radial Ripple / Concentric Wave Deformation (`RippleSelected` / `Ctrl+Alt+;`):**
+  - `TCastleTransformManipulate.RippleSelected(Amplitude, Wavelength, PhaseRad, DecayRate, TiltNormals)` applies a damped concentric sinusoidal wave displacement along Y as a function of radial XZ distance $r_i$ from the selection pivot ($\Delta Y_i = A e^{-\alpha r_i}\cos(kr_i + \phi)$), optionally tilting each transform's world $+Y$ Up to the analytical wave surface normal (`ButtonRippleSelection` or **`Ctrl+Alt+;`**).
+- **3D Lemniscate of Bernoulli / Infinity Curve ($\infty$) Arrangement (`ArrangeSelectedInLemniscate` / `Ctrl+Alt+'`):**
+  - `TCastleTransformManipulate.ArrangeSelectedInLemniscate(HalfWidthA, VerticalBridgeLift, OrientMode)` distributes 2+ top-level selected transforms along a 3D Lemniscate of Bernoulli ($\infty$ curve) with optional vertical overpass bridge lift at the central crossing (`ButtonArrangeLemniscate` or **`Ctrl+Alt+'`**).
+- **3D Toroidal Solenoid / Helical Coil Arrangement (`ArrangeSelectedInTorusHelix` / `Ctrl+Alt+[`):**
+  - `TCastleTransformManipulate.ArrangeSelectedInTorusHelix(MajorRadius, MinorRadius, CoilWindings, OrientMode)` distributes 2+ top-level selected transforms along a 3D Toroidal Solenoid winding `CoilWindings` times around a circular torus with analytical 3D coil tangent or outward tube normal orientation (`ButtonArrangeTorusHelix` or **`Ctrl+Alt+[`**).
+- **Select 3D Scene / Mesh Instances (`SelectSceneMeshes` / `Ctrl+Alt+]`) & 2D UI Diamond Ring (`ArrangeSelectedUserInterfacesInDiamond` / `ButtonUIDiamond`):**
+  - Pressing **`Ctrl+Alt+]`** or choosing **`Select 3D Scene / Mesh Instances (Ctrl+Alt+])`** (`MenuTreeViewItemSelectSceneMeshes`) selects all visible, unlocked `TCastleScene` 3D mesh instances (`Shift`-click menu item for non-empty `Url` only).
+  - Clicking **`UI Diamond`** (`ButtonUIDiamond` in `PanelLayoutUI`) arranges 2+ selected `TCastleUserInterface` controls evenly clockwise along the 4 diagonal edges of a 2D Diamond / Rhombus ($L_1$ Manhattan circle) around their shared center.
+
+---
+
+## 63. Complete Keyboard Shortcuts & Toolbar Reference
 
 | Shortcut / Control | Context | Action |
 | :--- | :--- | :--- |
@@ -1259,6 +1282,9 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 | **`Ctrl+Alt+X`** / **`Spherify / Bulge...`** | Viewport / Hierarchy / Layout Tab | **Deform 2+ selected transforms toward or away from a bounding sphere** around their group center (**Click**: 100% spherify + radial orient; **`Ctrl`-click**: 50% spherical bulge; **`Shift`-click** / **`Ctrl+Alt+X`**: dialog). |
 | **`Ctrl+Alt+Y`** / **`Mobius Strip...`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms along a 3D Möbius Strip / Twisted Ribbon** (**Click**: 1 half-twist + twisting surface normal; **`Ctrl`-click**: 3 half-twists; **`Shift`-click** / **`Ctrl+Alt+Y`**: dialog). |
 | **`Ctrl+Alt+Z`** / **`Heart / Cardioid...`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms along a 3D Parametric Heart or Cardioid Curve** (**Click**: Heart curve facing inward; **`Ctrl`-click**: Cardioid curve facing inward; **`Shift`-click** / **`Ctrl+Alt+Z`**: dialog). |
+| **`Ctrl+Alt+;`** / **`Ripple Wave...`** | Viewport / Hierarchy / Layout Tab | **Deform 2+ selected transforms with a 3D concentric radial sine wave** around their group center (**Click**: amplitude $2.0$, wavelength $10.0$ + surface normal tilt; **`Ctrl`-click**: damped ripple with decay $0.08$; **`Shift`-click** / **`Ctrl+Alt+;`**: dialog). |
+| **`Ctrl+Alt+'`** / **`Infinity Loop...`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms along a 3D Lemniscate of Bernoulli ($\infty$) curve** (**Click**: flat infinity curve + tangent orient; **`Ctrl`-click**: $+2.0$ vertical bridge overpass at center crossing; **`Shift`-click** / **`Ctrl+Alt+'`**: dialog). |
+| **`Ctrl+Alt+[`** / **`Torus Coil...`** | Viewport / Hierarchy / Layout Tab | **Arrange 2+ selected transforms along a 3D Toroidal Solenoid / Helical Coil** (**Click**: 8 windings + coil tangent orient; **`Ctrl`-click**: 12 windings + outward tube normal; **`Shift`-click** / **`Ctrl+Alt+[`**: dialog). |
 | **`Alt+Shift+.`** / **`Radial +25%`** | Viewport / Hierarchy / Layout Tab | **Push / Expand horizontal XZ radial distance** from active pivot by $+25\%$ while preserving Y elevation and `Scale`. |
 | **`Alt+Shift+,`** / **`Radial -20%`** | Viewport / Hierarchy / Layout Tab | **Pull / Contract horizontal XZ radial distance** toward active pivot by $-20\%$ while preserving Y elevation and `Scale`. |
 | **`Alt+Shift+R`** / **`Reverse Order`** | Viewport / Hierarchy / Layout Tab | **Reverse order of world positions** across 2+ selected transforms (**`Shift`-click**: Pos+Rot; **`Ctrl`-click**: Pos+Rot+Scale). |
@@ -1301,6 +1327,7 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 | **`Ctrl+Alt+N`** / **`Select Group / Parent Transforms`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked parent `TCastleTransform` nodes that have 1+ selectable child `TCastleTransform` nodes (`Shift`-click menu item for pure `TCastleTransform` container groups only). |
 | **`Ctrl+Alt+I`** / **`Select Nested Design / Prefab Instances`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleTransformDesign` and `TCastleDesign` nested prefab instances (`Shift`-click menu item for 3D `TCastleTransformDesign` instances only). |
 | **`Ctrl+Alt+J`** / **`Select 3D Primitive / Greybox Shapes`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleAbstractPrimitive` instances (`TCastleBox`, `TCastleSphere`, `TCastleCylinder`, `TCastleCone`, `TCastlePlane`, `TCastleText`, `TCastleImageTransform`) (`Shift`-click menu item for `TCastleBox` and `TCastleSphere` only). |
+| **`Ctrl+Alt+]`** / **`Select 3D Scene / Mesh Instances`** | Viewport / Hierarchy Context Menu | Select all visible, unlocked `TCastleScene` 3D mesh/model instances (`Shift`-click menu item for `TCastleScene` instances with non-empty `Url` only). |
 | **`Select By Bounding-Box Size Range...`** | Hierarchy Context Menu | Select all visible, unlocked `TCastleTransform` objects whose world bounding-box diagonal length lies within `[MinSize, MaxSize]`. |
 | **`Select By Name Pattern...`** | Hierarchy Context Menu | Select all components matching a substring or `*` / `?` wildcard pattern. |
 | **`Select All With Same Asset URL`** | Hierarchy Context Menu | Select all components in the design referencing the same `Url` asset as the selected component. |
@@ -1351,6 +1378,7 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 | **`UI Tile Mosaic`** | Layout Tab (`PanelLayoutUI`) | **Resize and arrange 2+ selected `TCastleUserInterface` controls to completely tile their parent container** in an automatic $\text{Cols} \times \text{Rows}$ mosaic grid (**Click**: $8\text{ px}$ gap; **`Shift`-click**: $0\text{ px}$ flush mosaic; **`Ctrl`-click**: $16\text{ px}$ padded cards). |
 | **`UI Border Ring`** | Layout Tab (`PanelLayoutUI`) | **Arrange 2+ selected `TCastleUserInterface` controls clockwise around the inner rectangular perimeter border of their parent container** (**Click**: $16\text{ px}$ margin; **`Shift`-click**: $0\text{ px}$ flush border; **`Ctrl`-click**: $32\text{ px}$ inset margin). |
 | **`UI Pyramid`** | Layout Tab (`PanelLayoutUI`) | **Arrange 2+ selected `TCastleUserInterface` controls into a centered triangular pyramid stack** (1 control on row 0, 2 on row 1, 3 on row 2...) (**Click**: top-down $8\text{ px}$ gap; **`Shift`-click**: inverted bottom-up pyramid; **`Ctrl`-click**: top-down $0\text{ px}$ flush). |
+| **`UI Diamond`** | Layout Tab (`PanelLayoutUI`) | **Arrange 2+ selected `TCastleUserInterface` controls evenly clockwise along the 4 diagonal edges of a 2D Diamond / Rhombus ring** (**Click**: $1.0\times$ auto radius; **`Shift`-click**: $1.5\times$ expanded diamond; **`Ctrl`-click**: $0.65\times$ compact diamond). |
 | **`Reset Prop` Button** | Object Inspector Header | Reset the active Object Inspector property row to its default value. |
 | **`Select All of Same Class`** | Hierarchy Context Menu | Select all components in the design matching the selected component's class. |
 | **`Expand Subtree` / `Collapse Subtree`** | Hierarchy Context Menu | Recursively expand or collapse the selected hierarchy node(s). |
@@ -1367,9 +1395,9 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 
 ---
 
-## 63. Automated Unit Tests & Verification
+## 64. Automated Unit Tests & Verification
 
-All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 34 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
+All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 35 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
 
 1. **`TestSelectedCountAndFree`**: Verifies single/multi-selection filtering, freeing a selected transform while selected, and translating the remaining selection.
 2. **`TestTranslateSnapAndCoordSpace`**: Verifies grid snapping (`TranslateSnap := 2.0`) and `csLocal` vs. `csWorld` translation on a $90^\circ$-rotated transform.
@@ -1405,6 +1433,7 @@ All core 3D manipulation algorithms in `CastleTransformManipulate` are covered b
 32. **`TestTwistTaperSphericalSpiralAndSuperellipse`**: Verifies `TwistSelected(1, Pi, true)` twists 4 transforms around the Y axis by $[-90^\circ, +90^\circ]$ across their Y span (`B1` at $(10, -4, 0) \to (0, -4, 10)$, `B2` at $(10, 0, 0) \to (10, 0, 0)$, `B3` at $(10, 4, 0) \to (0, 4, -10)$), verifies `TaperSelected(1, 0.5, true)` linearly tapers XZ offsets and XZ scales along Y from $1.0\times$ at $Y = -4$ (`B1` at $(10, -4, 0)$) through $0.75\times$ at $Y = 0$ (`B2` at $(7.5, 0, 0)$, scale $(0.75, 1, 0.75)$) to $0.5\times$ at $Y = 4$ (`B3` at $(5, 4, 0)$, scale $(0.5, 1, 0.5)$), verifies `ArrangeSelectedInSphericalSpiral(10.0, 1.0, 1)` distributes 5 transforms from bottom pole $(0, -10, 0)$ through equator $(-10, 0, 0)$ to top pole $(0, 10, 0)$ with outward sphere normal orientation, and verifies `ArrangeSelectedInSuperellipse(10.0, 8.0, 4.0, 1)` arranges 4 transforms around a $10 \times 8$ squircle oriented inward toward the center.
 33. **`TestBendVivianiCurveAndSpirograph`**: Verifies `BendSelected(1, 0, Pi, true)` bends 3 transforms distributed along $Y \in [-5, 5]$ into a $180^\circ$ circular arc of radius $R = 10/\pi$ curving toward $+X$ (`B1` at $(R, -R, 2)$, `B2` at $(0, 0, 2)$, `B3` at $(R, +R, 2)$), verifies `ArrangeSelectedInVivianiCurve(10.0, 1)` distributes 4 transforms along a radius-$10$ spherical figure-8 Viviani curve at $(10, 0, 0)$, $(5, 10/\sqrt{2}, 5)$, $(5, 10/\sqrt{2}, -5)$, and $(5, -10/\sqrt{2}, 5)$ on the sphere $X^2 + Y^2 + Z^2 = 100$ with outward normal orientation, and verifies `ArrangeSelectedInSpirograph(10.0, 2.5, 2.0, false, 1)` (4-cusp hypotrochoid at $(9.5, 0, 0)$, $(0, 0, 5.5)$, $(-9.5, 0, 0)$, $(0, 0, -5.5)$) and `ArrangeSelectedInSpirograph(10.0, 2.5, 2.0, true, 2)` (epitrochoid at $(10.5, 0, 0)$, $(0, 0, 14.5)$, $(-10.5, 0, 0)$, $(0, 0, -14.5)$).
 34. **`TestSpherifyMobiusStripAndCardioidHeart`**: Verifies `SpherifySelected(10.0, 0.5, false)` blends 4 transforms halfway from $(4, 0, 0), (-4, 0, 0), (0, 2, 0), (0, 0, 8)$ to $(7, 0, 0), (-7, 0, 0), (0, 6, 0), (0, 0, 9)$ and `SpherifySelected(10.0, 1.0, true)` projects them onto the radius-$10$ sphere with outward radial $+Y$ Up orientation, verifies `ArrangeSelectedInMobiusStrip(10.0, 2.0, 1, 1)` distributes 4 transforms along a 1-half-twist Möbius ribbon (`B1` at $(8, 0, 0)$ with $+Y$ Up, `B3` at $(-10, 2, 0)$ with $+X$ Up), and verifies `ArrangeSelectedInCardioidOrHeart(16.0, true, 0.0, 1)` (Heart curve at $(0, 0, 5), (16, 0, 4), (0, 0, -17), (-16, 0, 4)$) and `ArrangeSelectedInCardioidOrHeart(10.0, false, 0.0, 2)` (Cardioid at $(5, 0, 0), (0, 0, 0), (-5, 0, 0), (0, 0, -10)$).
+35. **`TestRippleLemniscateAndTorusHelix`**: Verifies `RippleSelected(3.0, 8.0, 0.0, 0.0, true)` applies a concentric radial cosine wave along Y across 4 transforms (`B1` at $r=0 \to Y=3$, `B2` at $r=4 \to Y=-3$, `B3` at $r=8 \to Y=3$, `B4` at $r=2 \to Y=0$ with tilted surface normal $(-\frac{3\pi}{4}, 1, 0)$ normalized), verifies `ArrangeSelectedInLemniscate(10.0, 2.0, 1)` distributes 4 transforms along a Lemniscate of Bernoulli with bridge lift (`B1` at $(10, 0, 0)$ with $+Z$ tangent, `B2` at $(0, 2, 0)$, `B3` at $(-10, 0, 0)$, `B4` at $(0, -2, 0)$), and verifies `ArrangeSelectedInTorusHelix(10.0, 2.0, 1.0, 2)` distributes 4 transforms around a toroidal solenoid coil at $(12, 0, 0)$, $(0, 2, 10)$, $(-8, 0, 0)$, and $(0, -2, -10)$ with outward tube normal orientation.
 
 To run this test suite from the command line:
 ```bash
