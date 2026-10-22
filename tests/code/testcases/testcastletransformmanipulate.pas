@@ -66,6 +66,7 @@ type
     procedure TestRippleLemniscateAndTorusHelix;
     procedure TestSquashStretchButterflyAndClelie;
     procedure TestSwirlKnotCurveAndGeodesicDome;
+    procedure TestRadialFalloffCycloidAndHyperboloid;
   end;
 
 implementation
@@ -2881,6 +2882,104 @@ begin
     AssertVectorEquals(Vector3(0, 1, 0), WorldUp.Normalize, 1e-4);
     B2.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(1, 0, 1).Normalize, WorldUp.Normalize, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestRadialFalloffCycloidAndHyperboloid;
+var
+  Viewport: TCastleViewport;
+  B1, B2, B3, B4: TCastleBox;
+  Manipulate: TCastleTransformManipulate;
+  WorldPos, WorldDir, WorldUp: TVector3;
+  W1: Single;
+begin
+  Viewport := nil;
+  Manipulate := nil;
+  try
+    Viewport := TCastleViewport.Create(nil);
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(1, 1, 1);
+    B1.Translation := Vector3(0, 0, 0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(1, 1, 1);
+    B2.Translation := Vector3(5, 0, 0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(1, 1, 1);
+    B3.Translation := Vector3(0, 0, 0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(1, 1, 1);
+    B4.Translation := Vector3(0, 0, 0);
+    Viewport.Items.Add(B4);
+
+    Manipulate := TCastleTransformManipulate.Create(nil);
+
+    // 1. Test RadialFalloffSelected(10.0, 5.0, true):
+    // PivotMode = pmPrimarySelected -> CenterPos = B1 = (0, 0, 0)
+    // B1 (d=0): Weight = 1.0 -> Pos stays (0, 0, 0), ScaleFactor = 1 + 0.5*(10/5)*1 = 2.0
+    // B2 (d=5): Weight = Exp(-1) -> Pos = (5 + 10*Exp(-1), 0, 0), ScaleFactor = 1 + Exp(-1)
+    Manipulate.SetSelected([B1, B2]);
+    Manipulate.PivotMode := pmPrimarySelected;
+    W1 := Exp(-1.0);
+    AssertTrue(Manipulate.RadialFalloffSelected(10.0, 5.0, true));
+    AssertVectorEquals(Vector3(0, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(2, 2, 2), B1.Scale, 1e-4);
+    AssertVectorEquals(Vector3(5.0 + 10.0 * W1, 0, 0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(1.0 + W1, 1.0 + W1, 1.0 + W1), B2.Scale, 1e-4);
+
+    // 2. Test ArrangeSelectedInCycloid:
+    // Case A: 4-cusped Astroid Hypocycloid (Radius = 8.0, Cusps = 4, Epicycloid = false, OrientMode = 2)
+    Manipulate.PivotMode := pmSelectionCenter;
+    B1.Translation := Vector3(-3, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(1, 0, 0);
+    B4.Translation := Vector3(3, 0, 0);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.ArrangeSelectedInCycloid(8.0, 4, false, 2));
+    AssertVectorEquals(Vector3(8, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, 8), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-8, 0, 0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, -8), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+
+    // Case B: 2-cusped Nephroid Epicycloid (Radius = 8.0, Cusps = 2, Epicycloid = true, OrientMode = 1)
+    B1.Translation := Vector3(-3, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(1, 0, 0);
+    B4.Translation := Vector3(3, 0, 0);
+    AssertTrue(Manipulate.ArrangeSelectedInCycloid(8.0, 2, true, 1));
+    AssertVectorEquals(Vector3(4, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, 8), B2.Translation, 1e-4);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(-1, 0, 0), WorldDir.Normalize, 1e-4);
+
+    // 3. Test ArrangeSelectedOnHyperboloid(3.0, 8.0, Sqrt(3.0), 1):
+    // Select B1, B2, B3 around Center = (0, 0, 0):
+    // B1 (u=-1, Theta=0): R = 6, Y = -4 -> (6, -4, 0), outward normal = Normalize(2.0, 2.25, 0)
+    // B2 (u=0): R = 3, Y = 0
+    // B3 (u=+1): R = 6, Y = 4
+    B1.Translation := Vector3(-2, 0, 0);
+    B2.Translation := Vector3(0, 0, 0);
+    B3.Translation := Vector3(2, 0, 0);
+    Manipulate.SetSelected([B1, B2, B3]);
+    AssertTrue(Manipulate.ArrangeSelectedOnHyperboloid(3.0, 8.0, Sqrt(3.0), 1));
+    AssertVectorEquals(Vector3(6, -4, 0), B1.Translation, 1e-4);
+    AssertSameValue(0.0, B2.Translation.Y, 1e-4);
+    AssertSameValue(3.0, Hypot(B2.Translation.X, B2.Translation.Z), 1e-4);
+    AssertSameValue(4.0, B3.Translation.Y, 1e-4);
+    AssertSameValue(6.0, Hypot(B3.Translation.X, B3.Translation.Z), 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(2.0, 2.25, 0.0).Normalize, WorldDir.Normalize, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

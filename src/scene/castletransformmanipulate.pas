@@ -1525,6 +1525,68 @@ type
       const Radius: Single = 0.0;
       const RingsCount: Integer = 0;
       const OrientMode: Integer = 1): Boolean;
+
+    { Apply a 3D radial implode / explode / gravity-well displacement with
+      Gaussian distance falloff around the active selection pivot $\mathbf(C)$
+      across all top-level selected transforms (@code(SelectedCount >= 2)).
+      Each transform at radial distance $d_i = \|\mathbf(P)_i - \mathbf(C)\|$ is
+      radially displaced along $\hat(\mathbf(u))_i = (\mathbf(P)_i - \mathbf(C)) / d_i$
+      to a new radial distance:
+      $$d'_i = \max\left(0, d_i + \text(Strength) \cdot \exp\left(-\left(\frac(d_i)(R_(\text(falloff)))\right)^2\right)\right)$$
+      where positive @code(Strength > 0) pushes objects outward (explode / shockwave)
+      and negative @code(Strength < 0) pulls objects inward toward $\mathbf(C)$
+      (gravity well / implode, clamped at $d'_i \ge 0$).
+      When @code(FalloffRadius <= 0), automatically sets $R_(\text(falloff))$ to the
+      average distance from $\mathbf(C)$ (fallback $5.0$).
+      When @code(ScaleWithDisplacement = true), also uniformly scales each transform
+      proportionally to the local radial falloff intensity.
+      Returns @true if at least one selected transform was modified. }
+    function RadialFalloffSelected(
+      const Strength: Single = 3.0;
+      const FalloffRadius: Single = 0.0;
+      const ScaleWithDisplacement: Boolean = false): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along a 3D $k$-cusped Hypocycloid (@code(Epicycloid = false), e.g. Deltoid
+      $k=3$, Astroid $k=4$) or Epicycloid (@code(Epicycloid = true), e.g. Nephroid
+      $k=2$, Ranunculoid $k=5$) of outer radius @code(Radius) in the horizontal
+      XZ plane centered at the active selection pivot $\mathbf(C)$:
+      - Hypocycloid (@code(Epicycloid = false)):
+        $x(t) = C_x + \frac(R)(k)((k - 1)\cos t + \cos((k - 1)t))$,
+        $z(t) = C_z + \frac(R)(k)((k - 1)\sin t - \sin((k - 1)t))$
+      - Epicycloid (@code(Epicycloid = true)):
+        $x(t) = C_x + \frac(R)(k + 2)((k + 1)\cos t - \cos((k + 1)t))$,
+        $z(t) = C_z + \frac(R)(k + 2)((k + 1)\sin t - \sin((k + 1)t))$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the analytical cycloid curve tangent
+      - @code(2): orient horizontally outward from $\mathbf(C)$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInCycloid(
+      const Radius: Single = 0.0;
+      const Cusps: Integer = 4;
+      const Epicycloid: Boolean = false;
+      const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      across a 3D Hyperboloid of One Sheet (doubly-ruled cooling-tower / hourglass
+      shell) centered at the active selection pivot $\mathbf(C)$ with waist radius
+      @code(WaistRadius), vertical span @code(HeightSpan), and rim flare factor
+      @code(FlareFactor):
+      $$u_i = -1 + \frac(2i)(N - 1), \quad y_i = C_y + \frac(H)(2) u_i, \quad
+        r_i = R_(\text(waist))\sqrt(1 + (\text(FlareFactor) \cdot u_i)^2)$$
+      $$x_i = C_x + r_i \cos(i \cdot \phi_(\text(golden))), \quad
+        z_i = C_z + r_i \sin(i \cdot \phi_(\text(golden)))$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the outward hyperboloid surface normal
+      - @code(2): orient forward along the straight-line hyperboloid ruling generator
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedOnHyperboloid(
+      const WaistRadius: Single = 0.0;
+      const HeightSpan: Single = 10.0;
+      const FlareFactor: Single = 1.0;
+      const OrientMode: Integer = 1): Boolean;
   end;
 
 var
@@ -11753,6 +11815,368 @@ begin
           T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
           Result := true;
         end;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.RadialFalloffSelected(
+  const Strength: Single;
+  const FalloffRadius: Single;
+  const ScaleWithDisplacement: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  Count, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, Offset, RadialDir, TargetPos, TargetScale: TVector3;
+  SumDist, RFalloff, Dist, Weight, NewDist, ScaleFactor: Single;
+begin
+  Result := false;
+  if SameValue(Strength, 0.0, 1e-6) then Exit;
+
+  SetLength(Items, SelectedCount);
+  Count := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (Items[0] <> nil) then
+    CenterPos := GetTransformWorkingPos(Items[0])
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  if FalloffRadius > 0 then
+    RFalloff := FalloffRadius
+  else
+  begin
+    SumDist := 0.0;
+    for I := 0 to Count - 1 do
+      SumDist := SumDist + PointsDistance(GetTransformWorkingPos(Items[I]), CenterPos);
+    RFalloff := SumDist / Count;
+    if RFalloff < 0.05 then
+      RFalloff := 5.0;
+  end;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+    Offset := CurPos - CenterPos;
+    Dist := Offset.Length;
+    Weight := Exp(-Sqr(Dist / RFalloff));
+
+    if Dist > 1e-5 then
+    begin
+      RadialDir := Offset / Dist;
+      NewDist := Max(0.0, Dist + Strength * Weight);
+      TargetPos := CenterPos + RadialDir * NewDist;
+      if not TVector3.Equals(CurPos, TargetPos, 1e-5) then
+      begin
+        SetTransformWorkingPos(T, TargetPos);
+        Result := true;
+      end;
+    end;
+
+    if ScaleWithDisplacement then
+    begin
+      ScaleFactor := Clamped(1.0 + 0.5 * (Strength / RFalloff) * Weight, 0.1, 10.0);
+      TargetScale := T.Scale * ScaleFactor;
+      if not TVector3.Equals(T.Scale, TargetScale, 1e-5) then
+      begin
+        T.Scale := TargetScale;
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInCycloid(
+  const Radius: Single;
+  const Cusps: Integer;
+  const Epicycloid: Boolean;
+  const OrientMode: Integer): Boolean;
+
+  procedure EvalCycloidPointAndTangent(const TParam, R: Single;
+    const K: Integer; const IsEpicycloid: Boolean;
+    out LocalXZ, TangentDir: TVector3);
+  var
+    SinT, CosT, SinSub, CosSub, ScaleF, DX, DZ, SinT2, CosT2, SinSub2, CosSub2: Single;
+    T2: Single;
+  begin
+    SinCos(TParam, SinT, CosT);
+    if IsEpicycloid then
+    begin
+      SinCos((K + 1) * TParam, SinSub, CosSub);
+      ScaleF := R / (K + 2);
+      LocalXZ := Vector3(
+        ScaleF * ((K + 1) * CosT - CosSub),
+        0.0,
+        ScaleF * ((K + 1) * SinT - SinSub));
+      DX := ScaleF * (K + 1) * (-SinT + SinSub);
+      DZ := ScaleF * (K + 1) * (CosT - CosSub);
+      if Hypot(DX, DZ) < 1e-5 then
+      begin
+        T2 := TParam + 0.01;
+        SinCos(T2, SinT2, CosT2);
+        SinCos((K + 1) * T2, SinSub2, CosSub2);
+        DX := -SinT2 + SinSub2;
+        DZ := CosT2 - CosSub2;
+      end;
+    end else
+    begin
+      SinCos((K - 1) * TParam, SinSub, CosSub);
+      ScaleF := R / K;
+      LocalXZ := Vector3(
+        ScaleF * ((K - 1) * CosT + CosSub),
+        0.0,
+        ScaleF * ((K - 1) * SinT - SinSub));
+      DX := ScaleF * (K - 1) * (-SinT - SinSub);
+      DZ := ScaleF * (K - 1) * (CosT - CosSub);
+      if Hypot(DX, DZ) < 1e-5 then
+      begin
+        T2 := TParam + 0.01;
+        SinCos(T2, SinT2, CosT2);
+        SinCos((K - 1) * T2, SinSub2, CosSub2);
+        DX := -SinT2 - SinSub2;
+        DZ := CosT2 - CosSub2;
+      end;
+    end;
+    TangentDir := Vector3(DX, 0.0, DZ);
+    if TangentDir.IsZero(1e-6) then
+      TangentDir := Vector3(0.0, 0.0, -1.0)
+    else
+      TangentDir := TangentDir.Normalize;
+  end;
+
+var
+  Items: array of TCastleTransform;
+  Count, I, KVal: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, LocalXZ, TargetPos, TangentDir, LookDir, NewUp: TVector3;
+  CurWorldPos, CurDir, CurUp: TVector3;
+  SumDist, R, TParam: Single;
+begin
+  Result := false;
+  SetLength(Items, SelectedCount);
+  Count := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (Items[0] <> nil) then
+    CenterPos := GetTransformWorkingPos(Items[0])
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  if Radius > 0 then
+    R := Radius
+  else
+  begin
+    SumDist := 0.0;
+    for I := 0 to Count - 1 do
+    begin
+      CurPos := GetTransformWorkingPos(Items[I]) - CenterPos;
+      SumDist := SumDist + Hypot(CurPos.X, CurPos.Z);
+    end;
+    R := SumDist / Count;
+    if R < 0.05 then
+      R := 5.0;
+  end;
+
+  KVal := Max(2, Cusps);
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    TParam := (2.0 * Pi * I) / Count;
+    EvalCycloidPointAndTangent(TParam, R, KVal, Epicycloid, LocalXZ, TangentDir);
+    TargetPos := CenterPos + LocalXZ;
+
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(CurPos, TargetPos, 1e-5) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      if OrientMode = 1 then
+        LookDir := TangentDir
+      else
+      begin
+        LookDir := Vector3(LocalXZ.X, 0.0, LocalXZ.Z);
+        if LookDir.IsZero(1e-5) then
+          LookDir := Vector3(Cos(TParam), 0.0, Sin(TParam))
+        else
+          LookDir := LookDir.Normalize;
+      end;
+
+      NewUp := Vector3(0.0, 1.0, 0.0);
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedOnHyperboloid(
+  const WaistRadius: Single;
+  const HeightSpan: Single;
+  const FlareFactor: Single;
+  const OrientMode: Integer): Boolean;
+const
+  GoldenAngle = 2.39996322972865332; // Pi * (3 - Sqrt(5))
+var
+  Items: array of TCastleTransform;
+  Count, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, LookDir, Side, NewUp, GravityUp: TVector3;
+  CurWorldPos, CurDir, CurUp: TVector3;
+  SumDist, RWaist, HSpan, HalfH, Alpha, U, RadScale, R, Theta, SinT, CosT: Single;
+begin
+  Result := false;
+  SetLength(Items, SelectedCount);
+  Count := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (Items[0] <> nil) then
+    CenterPos := GetTransformWorkingPos(Items[0])
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  if WaistRadius > 0 then
+    RWaist := WaistRadius
+  else
+  begin
+    SumDist := 0.0;
+    for I := 0 to Count - 1 do
+    begin
+      CurPos := GetTransformWorkingPos(Items[I]) - CenterPos;
+      SumDist := SumDist + Hypot(CurPos.X, CurPos.Z);
+    end;
+    RWaist := SumDist / Count;
+    if RWaist < 0.05 then
+      RWaist := 4.0;
+  end;
+
+  if HeightSpan > 0 then
+    HSpan := HeightSpan
+  else
+    HSpan := 2.0 * RWaist;
+  HalfH := 0.5 * HSpan;
+  Alpha := Max(0.0, FlareFactor);
+
+  if (Items[0].World <> nil) and (not Items[0].World.GravityUp.IsZero) then
+    GravityUp := Items[0].World.GravityUp.Normalize
+  else
+    GravityUp := Vector3(0, 1, 0);
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    U := -1.0 + (2.0 * I) / (Count - 1);
+    RadScale := Sqrt(1.0 + Sqr(Alpha * U));
+    R := RWaist * RadScale;
+    Theta := I * GoldenAngle;
+    SinCos(Theta, SinT, CosT);
+
+    TargetPos := Vector3(
+      CenterPos.X + R * CosT,
+      CenterPos.Y + HalfH * U,
+      CenterPos.Z + R * SinT);
+
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(CurPos, TargetPos, 1e-5) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      if OrientMode = 1 then
+      begin
+        // Outward surface normal of Hyperboloid of One Sheet
+        LookDir := Vector3(
+          RadScale * CosT,
+          -(RWaist * Sqr(Alpha) / Max(1e-4, HalfH)) * U,
+          RadScale * SinT).Normalize;
+      end else
+      begin
+        // Straight-line generator ruling of Hyperboloid of One Sheet
+        LookDir := Vector3(
+          -RWaist * Alpha * SinT,
+          HalfH,
+          RWaist * Alpha * CosT).Normalize;
+      end;
+
+      Side := TVector3.CrossProduct(LookDir, GravityUp);
+      if Side.IsZero(1e-5) then
+        Side := Vector3(-SinT, 0.0, CosT);
+      Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
       end;
     end;
   end;

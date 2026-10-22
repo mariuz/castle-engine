@@ -384,6 +384,9 @@ type
       ButtonSwirlSelection: TButton;
       ButtonArrangeKnot: TButton;
       ButtonArrangeDome: TButton;
+      ButtonRadialFalloff: TButton;
+      ButtonArrangeCycloid: TButton;
+      ButtonArrangeHyperboloid: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -422,6 +425,7 @@ type
       ButtonUIDiamond: TButton;
       ButtonUICross: TButton;
       ButtonUIZigzag: TButton;
+      ButtonUISpiral: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -466,6 +470,7 @@ type
       MenuTreeViewItemSelectSceneMeshes: TMenuItem;
       MenuTreeViewItemSelectUIControls: TMenuItem;
       MenuTreeViewItemSelectUIContainers: TMenuItem;
+      MenuTreeViewItemSelectUIImagesAndLabels: TMenuItem;
       MenuTreeViewItemCopyTransform: TMenuItem;
       MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
@@ -595,6 +600,9 @@ type
     procedure ButtonSwirlSelectionClick(Sender: TObject);
     procedure ButtonArrangeKnotClick(Sender: TObject);
     procedure ButtonArrangeDomeClick(Sender: TObject);
+    procedure ButtonRadialFalloffClick(Sender: TObject);
+    procedure ButtonArrangeCycloidClick(Sender: TObject);
+    procedure ButtonArrangeHyperboloidClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -622,6 +630,7 @@ type
     procedure ButtonUIDiamondClick(Sender: TObject);
     procedure ButtonUICrossClick(Sender: TObject);
     procedure ButtonUIZigzagClick(Sender: TObject);
+    procedure ButtonUISpiralClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -673,6 +682,7 @@ type
     procedure MenuTreeViewItemSelectSceneMeshesClick(Sender: TObject);
     procedure MenuTreeViewItemSelectUIControlsClick(Sender: TObject);
     procedure MenuTreeViewItemSelectUIContainersClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectUIImagesAndLabelsClick(Sender: TObject);
     procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
@@ -1356,6 +1366,23 @@ type
       const RingsCount: Integer = 0;
       const OrientMode: Integer = 1);
     procedure ShowArrangeInGeodesicDomeDialog;
+    procedure RadialFalloffSelection(
+      const Strength: Single = 3.0;
+      const FalloffRadius: Single = 0.0;
+      const ScaleWithDisplacement: Boolean = false);
+    procedure ShowRadialFalloffSelectionDialog;
+    procedure ArrangeSelectionInCycloid(
+      const Radius: Single = 0.0;
+      const Cusps: Integer = 4;
+      const Epicycloid: Boolean = false;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeInCycloidDialog;
+    procedure ArrangeSelectionOnHyperboloid(
+      const WaistRadius: Single = 0.0;
+      const HeightSpan: Single = 10.0;
+      const FlareFactor: Single = 1.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeOnHyperboloidDialog;
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -1403,6 +1430,9 @@ type
     procedure ArrangeSelectedUserInterfacesInZigzag(
       const AmplitudePx: Single = 32.0;
       const VerticalRibbon: Boolean = false);
+    procedure ArrangeSelectedUserInterfacesInSpiral(
+      const Turns: Single = 1.5;
+      const GoldenPhyllotaxis: Boolean = false);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -1456,6 +1486,7 @@ type
     procedure SelectSceneMeshes(const OnlyWithAnimations: Boolean = false);
     procedure SelectUserInterfaceControls(const OnlyInteractiveControls: Boolean = false);
     procedure SelectUserInterfaceContainers(const WithinSelection: Boolean = false);
+    procedure SelectUserInterfaceImagesAndLabels(const OnlyLabels: Boolean = false);
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -2656,6 +2687,26 @@ begin
     if Event.IsKey(key0) then
     begin
       Frame.SelectUserInterfaceContainers(false);
+      Exit(true);
+    end else
+    if Event.IsKey(key2) then
+    begin
+      Frame.ShowRadialFalloffSelectionDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(key4) then
+    begin
+      Frame.ShowArrangeInCycloidDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(key6) then
+    begin
+      Frame.ShowArrangeOnHyperboloidDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(key8) then
+    begin
+      Frame.SelectUserInterfaceImagesAndLabels(false);
       Exit(true);
     end;
   end;
@@ -4540,6 +4591,36 @@ begin
   ButtonArrangeDome.OnClick := @ButtonArrangeDomeClick;
   ButtonArrangeDome.Parent := PanelLayoutTransform;
 
+  ButtonRadialFalloff := TButton.Create(Self);
+  ButtonRadialFalloff.Align := alTop;
+  ButtonRadialFalloff.AutoSize := true;
+  ButtonRadialFalloff.Caption := 'Radial Falloff...';
+  ButtonRadialFalloff.Hint := 'Apply a 3D radial implode / explode / gravity-well displacement with Gaussian distance falloff around the active pivot (Ctrl+Alt+2 | Shift-click: dialog | Click: +3.0 explode outward | Ctrl-click: -3.0 implode inward)';
+  ButtonRadialFalloff.ShowHint := true;
+  ButtonRadialFalloff.BorderSpacing.Around := 2;
+  ButtonRadialFalloff.OnClick := @ButtonRadialFalloffClick;
+  ButtonRadialFalloff.Parent := PanelLayoutTransform;
+
+  ButtonArrangeCycloid := TButton.Create(Self);
+  ButtonArrangeCycloid.Align := alTop;
+  ButtonArrangeCycloid.AutoSize := true;
+  ButtonArrangeCycloid.Caption := 'Cycloid Star...';
+  ButtonArrangeCycloid.Hint := 'Arrange 2+ selected 3D transforms along a 3D k-cusped Hypocycloid (Deltoid / Astroid) or Epicycloid (Nephroid / Ranunculoid) around the active pivot (Ctrl+Alt+4 | Shift-click: dialog | Click: 4-cusp Astroid | Ctrl-click: 5-cusp Epicycloid)';
+  ButtonArrangeCycloid.ShowHint := true;
+  ButtonArrangeCycloid.BorderSpacing.Around := 2;
+  ButtonArrangeCycloid.OnClick := @ButtonArrangeCycloidClick;
+  ButtonArrangeCycloid.Parent := PanelLayoutTransform;
+
+  ButtonArrangeHyperboloid := TButton.Create(Self);
+  ButtonArrangeHyperboloid.Align := alTop;
+  ButtonArrangeHyperboloid.AutoSize := true;
+  ButtonArrangeHyperboloid.Caption := 'Hyperboloid...';
+  ButtonArrangeHyperboloid.Hint := 'Arrange 2+ selected 3D transforms across a 3D Hyperboloid of One Sheet / Ruled Cooling-Tower Shell around the active pivot (Ctrl+Alt+6 | Shift-click: dialog | Click: outward normal | Ctrl-click: straight ruling)';
+  ButtonArrangeHyperboloid.ShowHint := true;
+  ButtonArrangeHyperboloid.BorderSpacing.Around := 2;
+  ButtonArrangeHyperboloid.OnClick := @ButtonArrangeHyperboloidClick;
+  ButtonArrangeHyperboloid.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -4838,6 +4919,14 @@ begin
   ButtonUIZigzag.OnClick := @ButtonUIZigzagClick;
   ButtonUIZigzag.Parent := PanelLayoutUI;
 
+  ButtonUISpiral := TButton.Create(Self);
+  ButtonUISpiral.AutoSize := true;
+  ButtonUISpiral.Caption := 'UI Spiral';
+  ButtonUISpiral.Hint := 'Arrange 2+ selected 2D UI controls along a 2D Archimedean or Golden-Angle Sunflower Phyllotaxis Spiral around their shared center (Click: 1.5-turn Archimedean | Shift-click: Golden-Angle Phyllotaxis | Ctrl-click: 2.5-turn Archimedean)';
+  ButtonUISpiral.ShowHint := true;
+  ButtonUISpiral.OnClick := @ButtonUISpiralClick;
+  ButtonUISpiral.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -5086,6 +5175,11 @@ begin
   MenuTreeViewItemSelectUIContainers.Caption := 'Select 2D UI Layout Containers (Panels / Groups) (Ctrl+Alt+0)';
   MenuTreeViewItemSelectUIContainers.OnClick := @MenuTreeViewItemSelectUIContainersClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectUIContainers);
+
+  MenuTreeViewItemSelectUIImagesAndLabels := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectUIImagesAndLabels.Caption := 'Select 2D UI Images & Text Labels (Ctrl+Alt+8)';
+  MenuTreeViewItemSelectUIImagesAndLabels.OnClick := @MenuTreeViewItemSelectUIImagesAndLabelsClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectUIImagesAndLabels);
 
   MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
   MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
@@ -8779,6 +8873,8 @@ begin
         ButtonUICross.Enabled := SelectedUICount >= 2;
       if ButtonUIZigzag <> nil then
         ButtonUIZigzag.Enabled := SelectedUICount >= 2;
+      if ButtonUISpiral <> nil then
+        ButtonUISpiral.Enabled := SelectedUICount >= 2;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -8937,6 +9033,12 @@ begin
       ButtonArrangeKnot.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonArrangeDome <> nil then
       ButtonArrangeDome.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonRadialFalloff <> nil then
+      ButtonRadialFalloff.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeCycloid <> nil then
+      ButtonArrangeCycloid.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeHyperboloid <> nil then
+      ButtonArrangeHyperboloid.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -10851,6 +10953,26 @@ begin
     if (Key = Ord('0')) and (Shift = [ssCtrl, ssAlt]) then
     begin
       SelectUserInterfaceContainers(false);
+      Key := 0;
+    end else
+    if (Key = Ord('2')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowRadialFalloffSelectionDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('4')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowArrangeInCycloidDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('6')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      ShowArrangeOnHyperboloidDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('8')) and (Shift = [ssCtrl, ssAlt]) then
+    begin
+      SelectUserInterfaceImagesAndLabels(false);
       Key := 0;
     end;
   end;
@@ -15921,6 +16043,165 @@ begin
     ArrangeSelectionInGeodesicDome(0.0, 0, 1);
 end;
 
+procedure TDesignFrame.RadialFalloffSelection(
+  const Strength: Single;
+  const FalloffRadius: Single;
+  const ScaleWithDisplacement: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.RadialFalloffSelected(
+      Strength, FalloffRadius, ScaleWithDisplacement);
+end;
+
+procedure TDesignFrame.ShowRadialFalloffSelectionDialog;
+var
+  Prompts: array[0..2] of string;
+  Values: array[0..2] of string;
+  StrVal, FalloffR: Single;
+  ScaleObjs: Boolean;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Radial Strength (+ = explode outward, - = implode inward):';
+  Prompts[1] := 'Gaussian Falloff Radius (0 = auto average distance):';
+  Prompts[2] := 'Modulate Object Scale by Falloff (1 = yes, 0 = no):';
+
+  Values[0] := '3.0';
+  Values[1] := '0';
+  Values[2] := '0';
+
+  if InputQuery('3D Radial Implode / Explode / Gravity Well Falloff', Prompts, Values) then
+  begin
+    StrVal := StrToFloatDefDot(Trim(Values[0]), 3.0);
+    FalloffR := StrToFloatDefDot(Trim(Values[1]), 0.0);
+    ScaleObjs := StrToIntDef(Trim(Values[2]), 0) <> 0;
+    RadialFalloffSelection(StrVal, FalloffR, ScaleObjs);
+  end;
+end;
+
+procedure TDesignFrame.ButtonRadialFalloffClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowRadialFalloffSelectionDialog
+  else if ssCtrl in ShiftState then
+    RadialFalloffSelection(-3.0, 0.0, false)
+  else
+    RadialFalloffSelection(3.0, 0.0, false);
+end;
+
+procedure TDesignFrame.ArrangeSelectionInCycloid(
+  const Radius: Single;
+  const Cusps: Integer;
+  const Epicycloid: Boolean;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInCycloid(
+      Radius, Cusps, Epicycloid, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInCycloidDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  R: Single;
+  CuspsVal, OrientMode: Integer;
+  EpiMode: Boolean;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Outer Cycloid Radius R (0 = auto from selection):';
+  Prompts[1] := 'Number of Cusps / Lobes k (>= 2, e.g. 3=Deltoid, 4=Astroid):';
+  Prompts[2] := 'Curve Type (0 = Hypocycloid inside, 1 = Epicycloid outside):';
+  Prompts[3] := 'Orientation (0 = keep, 1 = curve tangent, 2 = outward XZ):';
+
+  Values[0] := '0';
+  Values[1] := '4';
+  Values[2] := '0';
+  Values[3] := '1';
+
+  if InputQuery('Arrange Selected in 3D Hypocycloid / Epicycloid Star', Prompts, Values) then
+  begin
+    R := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    CuspsVal := Max(2, StrToIntDef(Trim(Values[1]), 4));
+    EpiMode := StrToIntDef(Trim(Values[2]), 0) <> 0;
+    OrientMode := Clamped(StrToIntDef(Trim(Values[3]), 1), 0, 2);
+    ArrangeSelectionInCycloid(R, CuspsVal, EpiMode, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeCycloidClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInCycloidDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionInCycloid(0.0, 5, true, 1)
+  else
+    ArrangeSelectionInCycloid(0.0, 4, false, 1);
+end;
+
+procedure TDesignFrame.ArrangeSelectionOnHyperboloid(
+  const WaistRadius: Single;
+  const HeightSpan: Single;
+  const FlareFactor: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedOnHyperboloid(
+      WaistRadius, HeightSpan, FlareFactor, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeOnHyperboloidDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  RWaist, HSpan, Flare: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Waist Radius R_waist (0 = auto from selection):';
+  Prompts[1] := 'Vertical Height Span H (0 = auto 2 * R_waist):';
+  Prompts[2] := 'Rim Flare Factor (>= 0, 1.0 = sqrt(2)x waist at rim):';
+  Prompts[3] := 'Orientation (0 = keep, 1 = outward normal, 2 = straight ruling):';
+
+  Values[0] := '0';
+  Values[1] := '10';
+  Values[2] := '1.0';
+  Values[3] := '1';
+
+  if InputQuery('Arrange Selected on 3D Hyperboloid / Cooling-Tower Shell', Prompts, Values) then
+  begin
+    RWaist := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    HSpan := StrToFloatDefDot(Trim(Values[1]), 10.0);
+    Flare := Max(0.0, StrToFloatDefDot(Trim(Values[2]), 1.0));
+    OrientMode := Clamped(StrToIntDef(Trim(Values[3]), 1), 0, 2);
+    ArrangeSelectionOnHyperboloid(RWaist, HSpan, Flare, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeHyperboloidClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeOnHyperboloidDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionOnHyperboloid(0.0, 10.0, 1.0, 2)
+  else
+    ArrangeSelectionOnHyperboloid(0.0, 10.0, 1.0, 1);
+end;
+
 procedure TDesignFrame.StopPilotTransform;
 var
   SavedName: String;
@@ -18405,6 +18686,113 @@ begin
   else
     Amp := 32.0;
   ArrangeSelectedUserInterfacesInZigzag(Amp, ssShift in ShiftState);
+end;
+
+procedure TDesignFrame.ArrangeSelectedUserInterfacesInSpiral(
+  const Turns: Single;
+  const GoldenPhyllotaxis: Boolean);
+const
+  GoldenAngle = 2.39996322972865332; // Pi * (3 - Sqrt(5))
+var
+  Selected: TComponentList;
+  SelectedCount, I, Count, ChangedCount: Integer;
+  UIControls: array of TCastleUserInterface;
+  UI: TCastleUserInterface;
+  R: TFloatRectangle;
+  AvgDiag, MinX, MaxX, MinY, MaxY, GroupCenterX, GroupCenterY: Single;
+  MaxRadius, U, Rad, Theta, SinT, CosT, ActualTurns: Single;
+  TargetCenterX, TargetCenterY, DeltaX, DeltaY: Single;
+begin
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount < 2 then Exit;
+
+    Count := 0;
+    SetLength(UIControls, SelectedCount);
+    AvgDiag := 0.0;
+    MinX := MaxSingle;
+    MaxX := -MaxSingle;
+    MinY := MaxSingle;
+    MaxY := -MaxSingle;
+
+    for I := 0 to SelectedCount - 1 do
+      if (Selected[I] is TCastleUserInterface) and (Selected[I] <> DesignRoot) then
+      begin
+        UI := TCastleUserInterface(Selected[I]);
+        R := UI.RenderRectWithBorder;
+        if not R.IsEmpty then
+        begin
+          UIControls[Count] := UI;
+          AvgDiag := AvgDiag + Hypot(R.Width, R.Height);
+          MinX := Min(MinX, R.Center.X);
+          MaxX := Max(MaxX, R.Center.X);
+          MinY := Min(MinY, R.Center.Y);
+          MaxY := Max(MaxY, R.Center.Y);
+          Inc(Count);
+        end;
+      end;
+
+    if Count < 2 then Exit;
+
+    AvgDiag := AvgDiag / Single(Count);
+    GroupCenterX := (MinX + MaxX) * 0.5;
+    GroupCenterY := (MinY + MaxY) * 0.5;
+    MaxRadius := Max(
+      Hypot(MaxX - MinX, MaxY - MinY) * 0.5,
+      AvgDiag * Sqrt(Single(Count)) * 0.65);
+    ActualTurns := Max(0.25, Abs(Turns));
+
+    ChangedCount := 0;
+    for I := 0 to Count - 1 do
+    begin
+      UI := UIControls[I];
+      if UI.UIScale <= 0 then Continue;
+      R := UI.RenderRectWithBorder;
+      if R.IsEmpty then Continue;
+
+      U := Single(I) / Single(Count - 1);
+      if GoldenPhyllotaxis then
+      begin
+        Rad := MaxRadius * Sqrt(U);
+        Theta := Single(I) * GoldenAngle;
+      end else
+      begin
+        Rad := MaxRadius * U;
+        Theta := 0.5 * Pi - 2.0 * Pi * ActualTurns * U;
+      end;
+      SinCos(Theta, SinT, CosT);
+
+      TargetCenterX := GroupCenterX + Rad * CosT;
+      TargetCenterY := GroupCenterY + Rad * SinT;
+
+      DeltaX := TargetCenterX - R.Center.X;
+      DeltaY := TargetCenterY - R.Center.Y;
+      if (Abs(DeltaX) > 0.01) or (Abs(DeltaY) > 0.01) then
+      begin
+        UI.Translation := UI.Translation + Vector2(DeltaX / UI.UIScale, DeltaY / UI.UIScale);
+        Inc(ChangedCount);
+      end;
+    end;
+
+    if ChangedCount > 0 then
+      ModifiedOutsideObjectInspector(
+        Format('Arrange %d UI control(s) in spiral', [ChangedCount]), ucHigh);
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUISpiralClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+  TurnsVal: Single;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssCtrl in ShiftState then
+    TurnsVal := 2.5
+  else
+    TurnsVal := 1.5;
+  ArrangeSelectedUserInterfacesInSpiral(TurnsVal, ssShift in ShiftState);
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -21948,6 +22336,53 @@ begin
   SelectUserInterfaceContainers(ssShift in GetKeyShiftState);
 end;
 
+procedure TDesignFrame.SelectUserInterfaceImagesAndLabels(const OnlyLabels: Boolean);
+var
+  NewSelection: TComponentList;
+  TreeNode: TTreeNode;
+  C: TComponent;
+  UI: TCastleUserInterface;
+  Matches: Boolean;
+begin
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C is TCastleUserInterface) and (C <> DesignRoot) and
+         (not (C is TCastleViewport)) and
+         Selectable(C) and (not IsComponentLocked(C)) then
+      begin
+        UI := TCastleUserInterface(C);
+        if UI.Exists then
+        begin
+          if OnlyLabels then
+            Matches := UI is TCastleLabel
+          else
+            Matches := (UI is TCastleImageControl) or
+                       (UI is TCastleLabel) or
+                       (UI is TCastleShape);
+
+          if Matches and (NewSelection.IndexOf(UI) = -1) then
+            NewSelection.Add(UI);
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectUIImagesAndLabelsClick(Sender: TObject);
+begin
+  SelectUserInterfaceImagesAndLabels(ssShift in GetKeyShiftState);
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -22478,6 +22913,8 @@ begin
     MenuTreeViewItemSelectUIControls.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemSelectUIContainers <> nil then
     MenuTreeViewItemSelectUIContainers.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectUIImagesAndLabels <> nil then
+    MenuTreeViewItemSelectUIImagesAndLabels.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemCopyTransform <> nil then
     MenuTreeViewItemCopyTransform.Enabled := (CurrentTransform <> nil) or (SelectedUserInterface <> nil) or (ControlsTree.SelectionCount > 0);
   if MenuTreeViewItemPasteTransform <> nil then
