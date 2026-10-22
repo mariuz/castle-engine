@@ -1466,6 +1466,65 @@ type
       const Radius: Single = 0.0;
       const PetalRatioM: Single = 2.0;
       const OrientMode: Integer = 1): Boolean;
+
+    { Apply a 3D radial vortex / swirl deformation around @code(Axis) passing
+      through the active selection pivot $\mathbf(C)$ across all top-level
+      selected transforms (@code(SelectedCount >= 2)).
+      Each transform at radial distance $r_i$ from the swirl axis is rotated
+      around @code(Axis) by a radially decaying angle:
+      $$\theta_i = \text(MaxCenterAngleRad) \cdot \max\left(0, 1 - \frac(r_i)(R_(\text(falloff)))\right)$$
+      so objects near the center ($r_i \to 0$) twist by the full @code(MaxCenterAngleRad)
+      while objects at or beyond $R_(\text(falloff))$ remain stationary.
+      When @code(FalloffRadius <= 0), automatically sets $R_(\text(falloff)) = 1.25 \max_i(r_i)$.
+      When @code(RotateOrientations = true), also rotates each transform's world
+      orientation around @code(Axis) by $\theta_i$.
+      Returns @true if at least one selected transform was modified. }
+    function SwirlSelected(
+      const Axis: T3DAxis = 1;
+      const MaxCenterAngleRad: Single = Pi;
+      const FalloffRadius: Single = 0.0;
+      const RotateOrientations: Boolean = true): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along a 3D Trefoil Knot ($3_1$, @code(FigureEightKnot = false)) or
+      Figure-Eight / Listing's Knot ($4_1$, @code(FigureEightKnot = true))
+      of outer horizontal radius @code(Radius) centered at the active selection
+      pivot $\mathbf(C)$:
+      - Trefoil Knot (@code(FigureEightKnot = false)):
+        $x(t) = C_x + \frac(R)(3)(\sin t + 2\sin 2t)$,
+        $y(t) = C_y - \frac(R)(3)\sin 3t$,
+        $z(t) = C_z + \frac(R)(3)(\cos t - 2\cos 2t)$
+      - Figure-Eight Knot (@code(FigureEightKnot = true)):
+        $x(t) = C_x + \frac(R)(3)(2 + \cos 2t)\cos 3t$,
+        $y(t) = C_y + \frac(R)(3)\sin 4t$,
+        $z(t) = C_z + \frac(R)(3)(2 + \cos 2t)\sin 3t$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the analytical 3D knot curve tangent
+      - @code(2): orient horizontally outward from $\mathbf(C)$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInKnotCurve(
+      const Radius: Single = 0.0;
+      const FigureEightKnot: Boolean = false;
+      const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      across concentric horizontal latitude rings of a 3D Geodesic / Upper-Hemisphere
+      Dome of radius @code(Radius) ($y \in [C_y, C_y + R]$) centered at the active
+      selection pivot $\mathbf(C)$:
+      - Places @code(Selected[0]) at the dome apex $(C_x, C_y + R, C_z)$ and
+        distributes the remaining items across @code(RingsCount) latitude tiers
+        (auto-computed when @code(RingsCount <= 0)) with ring capacity proportional
+        to $\sin\phi_r$ and half-step azimuth stagger on alternating rings.
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): align each transform's $+Y$ Up axis with the outward dome normal
+      - @code(2): orient forward radially inward toward the dome center $\mathbf(C)$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInGeodesicDome(
+      const Radius: Single = 0.0;
+      const RingsCount: Integer = 0;
+      const OrientMode: Integer = 1): Boolean;
   end;
 
 var
@@ -11303,6 +11362,397 @@ begin
       begin
         T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
         Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.SwirlSelected(
+  const Axis: T3DAxis;
+  const MaxCenterAngleRad: Single;
+  const FalloffRadius: Single;
+  const RotateOrientations: Boolean): Boolean;
+var
+  Items: array of TCastleTransform;
+  Count, I, Perp1, Perp2: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, Offset, AxisVec, TargetPos: TVector3;
+  CurWorldPos, CurDir, CurUp, NewDir, NewUp: TVector3;
+  RadDist, MaxRad, EffRadius, Factor, Theta: Single;
+  RadialDistances: array of Single;
+begin
+  Result := false;
+  if Abs(MaxCenterAngleRad) < 1e-6 then Exit;
+
+  SetLength(Items, SelectedCount);
+  Count := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (Items[0] <> nil) then
+    CenterPos := GetTransformWorkingPos(Items[0])
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  Perp1 := (Axis + 1) mod 3;
+  Perp2 := (Axis + 2) mod 3;
+  AxisVec := TVector3.Zero;
+  AxisVec.Data[Axis] := 1.0;
+
+  SetLength(RadialDistances, Count);
+  MaxRad := 0.0;
+  for I := 0 to Count - 1 do
+  begin
+    Offset := GetTransformWorkingPos(Items[I]) - CenterPos;
+    RadDist := Hypot(Offset.Data[Perp1], Offset.Data[Perp2]);
+    RadialDistances[I] := RadDist;
+    if RadDist > MaxRad then
+      MaxRad := RadDist;
+  end;
+
+  if FalloffRadius > 1e-4 then
+    EffRadius := FalloffRadius
+  else
+  begin
+    EffRadius := MaxRad * 1.25;
+    if EffRadius < 1e-4 then
+      EffRadius := 10.0;
+  end;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    CurPos := GetTransformWorkingPos(T);
+    Offset := CurPos - CenterPos;
+    Factor := Max(0.0, 1.0 - (RadialDistances[I] / EffRadius));
+    Theta := MaxCenterAngleRad * Factor;
+    if Abs(Theta) < 1e-6 then
+      Continue;
+
+    TargetPos := CenterPos + RotatePointAroundAxisRad(Theta, Offset, AxisVec);
+    if not TVector3.Equals(CurPos, TargetPos, 1e-5) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if RotateOrientations and T.HasWorldTransform then
+    begin
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      NewDir := RotatePointAroundAxisRad(Theta, CurDir, AxisVec);
+      NewUp := RotatePointAroundAxisRad(Theta, CurUp, AxisVec);
+      if (not TVector3.Equals(CurDir, NewDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), NewDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInKnotCurve(
+  const Radius: Single;
+  const FigureEightKnot: Boolean;
+  const OrientMode: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  Count, I: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, CurveTangent, LookDir, NewUp: TVector3;
+  CurWorldPos, CurDir, CurUp: TVector3;
+  SumDist, R, S, ParamT, SinT, CosT, Sin2T, Cos2T, Sin3T, Cos3T, Sin4T, Cos4T: Single;
+  DX, DY, DZ: Single;
+begin
+  Result := false;
+  SetLength(Items, SelectedCount);
+  Count := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (Items[0] <> nil) then
+    CenterPos := GetTransformWorkingPos(Items[0])
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  if Radius > 0 then
+    R := Radius
+  else
+  begin
+    SumDist := 0.0;
+    for I := 0 to Count - 1 do
+    begin
+      CurPos := GetTransformWorkingPos(Items[I]);
+      SumDist := SumDist + Hypot(CurPos.X - CenterPos.X, CurPos.Z - CenterPos.Z);
+    end;
+    R := (SumDist / Count) * 1.25;
+    if R < 0.05 then
+      R := 5.0;
+  end;
+
+  S := R / 3.0;
+
+  for I := 0 to Count - 1 do
+  begin
+    T := Items[I];
+    ParamT := (2.0 * Pi * I) / Count;
+    SinCos(ParamT, SinT, CosT);
+    SinCos(2.0 * ParamT, Sin2T, Cos2T);
+    SinCos(3.0 * ParamT, Sin3T, Cos3T);
+
+    if FigureEightKnot then
+    begin
+      SinCos(4.0 * ParamT, Sin4T, Cos4T);
+      TargetPos := Vector3(
+        CenterPos.X + S * (2.0 + Cos2T) * Cos3T,
+        CenterPos.Y + S * Sin4T,
+        CenterPos.Z + S * (2.0 + Cos2T) * Sin3T);
+      DX := -2.0 * Sin2T * Cos3T - 3.0 * (2.0 + Cos2T) * Sin3T;
+      DY := 4.0 * Cos4T;
+      DZ := -2.0 * Sin2T * Sin3T + 3.0 * (2.0 + Cos2T) * Cos3T;
+    end else
+    begin
+      TargetPos := Vector3(
+        CenterPos.X + S * (SinT + 2.0 * Sin2T),
+        CenterPos.Y - S * Sin3T,
+        CenterPos.Z + S * (CosT - 2.0 * Cos2T));
+      DX := CosT + 4.0 * Cos2T;
+      DY := -3.0 * Cos3T;
+      DZ := -SinT + 4.0 * Sin2T;
+    end;
+
+    CurPos := GetTransformWorkingPos(T);
+    if not TVector3.Equals(CurPos, TargetPos, 1e-5) then
+    begin
+      SetTransformWorkingPos(T, TargetPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      if OrientMode = 1 then
+      begin
+        CurveTangent := Vector3(DX, DY, DZ);
+        if CurveTangent.IsZero(1e-5) then
+          CurveTangent := Vector3(1, 0, 0)
+        else
+          CurveTangent := CurveTangent.Normalize;
+        LookDir := CurveTangent;
+      end else
+      begin
+        LookDir := Vector3(TargetPos.X - CenterPos.X, 0, TargetPos.Z - CenterPos.Z);
+        if LookDir.IsZero(1e-5) then
+          LookDir := Vector3(CosT, 0, SinT)
+        else
+          LookDir := LookDir.Normalize;
+      end;
+
+      NewUp := Vector3(0, 1, 0) - LookDir * LookDir.Y;
+      if NewUp.IsZero(1e-5) then
+        NewUp := Vector3(1, 0, 0) - LookDir * LookDir.X;
+      NewUp := NewUp.Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInGeodesicDome(
+  const Radius: Single;
+  const RingsCount: Integer;
+  const OrientMode: Integer): Boolean;
+var
+  Items: array of TCastleTransform;
+  Count, I, RIdx, J, NumRings, RemItems, Allocated, RingCap, ItemIdx: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, DomeNormal, LookDir, NewUp: TVector3;
+  CurWorldPos, CurDir, CurUp: TVector3;
+  SumDist, R, Phi, Theta, SinP, CosP, SinT, CosT, WeightSum: Single;
+  RingWeights: array of Single;
+  RingSizes: array of Integer;
+begin
+  Result := false;
+  SetLength(Items, SelectedCount);
+  Count := 0;
+  for I := 0 to SelectedCount - 1 do
+  begin
+    T := Selected[I];
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Items[Count] := T;
+      Inc(Count);
+    end;
+  end;
+
+  if Count < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (Items[0] <> nil) then
+    CenterPos := GetTransformWorkingPos(Items[0])
+  else
+    CenterPos := SelectionWorkingCenter;
+
+  if Radius > 0 then
+    R := Radius
+  else
+  begin
+    SumDist := 0.0;
+    for I := 0 to Count - 1 do
+      SumDist := SumDist + PointsDistance(GetTransformWorkingPos(Items[I]), CenterPos);
+    R := SumDist / Count;
+    if R < 0.05 then
+      R := 5.0;
+  end;
+
+  if RingsCount >= 2 then
+    NumRings := Min(Count, RingsCount)
+  else
+    NumRings := Max(2, Min(Count, Ceil(Sqrt(Count / 1.5)) + 1));
+
+  SetLength(RingWeights, NumRings);
+  SetLength(RingSizes, NumRings);
+  RingSizes[0] := 1; // Item 0 at dome apex
+  RemItems := Count - 1;
+
+  WeightSum := 0.0;
+  for RIdx := 1 to NumRings - 1 do
+  begin
+    Phi := (0.5 * Pi * RIdx) / (NumRings - 1);
+    RingWeights[RIdx] := Sin(Phi);
+    WeightSum := WeightSum + RingWeights[RIdx];
+  end;
+
+  Allocated := 0;
+  for RIdx := 1 to NumRings - 1 do
+  begin
+    if RIdx = NumRings - 1 then
+      RingCap := Max(0, RemItems - Allocated)
+    else
+    begin
+      RingCap := Max(1, Round((RingWeights[RIdx] / Max(1e-5, WeightSum)) * RemItems));
+      if Allocated + RingCap > RemItems - (NumRings - 1 - RIdx) then
+        RingCap := Max(1, RemItems - Allocated - (NumRings - 1 - RIdx));
+    end;
+    RingSizes[RIdx] := RingCap;
+    Allocated := Allocated + RingCap;
+  end;
+
+  ItemIdx := 0;
+  for RIdx := 0 to NumRings - 1 do
+  begin
+    RingCap := RingSizes[RIdx];
+    if RingCap <= 0 then Continue;
+
+    if RIdx = 0 then
+      Phi := 0.0
+    else
+      Phi := (0.5 * Pi * RIdx) / (NumRings - 1);
+    SinCos(Phi, SinP, CosP);
+
+    for J := 0 to RingCap - 1 do
+    begin
+      if ItemIdx >= Count then Break;
+      T := Items[ItemIdx];
+      Inc(ItemIdx);
+
+      if RIdx = 0 then
+      begin
+        Theta := 0.0;
+        DomeNormal := Vector3(0, 1, 0);
+      end else
+      begin
+        Theta := (2.0 * Pi * (J + 0.5 * (RIdx mod 2))) / RingCap;
+        SinCos(Theta, SinT, CosT);
+        DomeNormal := Vector3(SinP * CosT, CosP, SinP * SinT).Normalize;
+      end;
+
+      TargetPos := CenterPos + DomeNormal * R;
+      CurPos := GetTransformWorkingPos(T);
+      if not TVector3.Equals(CurPos, TargetPos, 1e-5) then
+      begin
+        SetTransformWorkingPos(T, TargetPos);
+        Result := true;
+      end;
+
+      if (OrientMode in [1, 2]) and T.HasWorldTransform then
+      begin
+        if OrientMode = 1 then
+        begin
+          NewUp := DomeNormal;
+          if RIdx = 0 then
+            LookDir := Vector3(0, 0, -1)
+          else
+          begin
+            SinCos(Theta, SinT, CosT);
+            LookDir := Vector3(-SinT, 0, CosT);
+          end;
+          LookDir := LookDir - NewUp * TVector3.DotProduct(LookDir, NewUp);
+          if LookDir.IsZero(1e-5) then
+            LookDir := Vector3(1, 0, 0) - NewUp * NewUp.X;
+          LookDir := LookDir.Normalize;
+        end else
+        begin
+          LookDir := -DomeNormal;
+          NewUp := Vector3(0, 1, 0) - LookDir * LookDir.Y;
+          if NewUp.IsZero(1e-5) then
+            NewUp := Vector3(0, 0, -1) - LookDir * LookDir.Z;
+          NewUp := NewUp.Normalize;
+        end;
+
+        T.GetWorldView(CurWorldPos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
       end;
     end;
   end;

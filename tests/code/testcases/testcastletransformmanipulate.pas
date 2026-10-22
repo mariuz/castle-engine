@@ -65,6 +65,7 @@ type
     procedure TestSpherifyMobiusStripAndCardioidHeart;
     procedure TestRippleLemniscateAndTorusHelix;
     procedure TestSquashStretchButterflyAndClelie;
+    procedure TestSwirlKnotCurveAndGeodesicDome;
   end;
 
 implementation
@@ -2769,6 +2770,117 @@ begin
     B1.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
     AssertVectorEquals(Vector3(0, 1, 1).Normalize, WorldUp.Normalize, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestSwirlKnotCurveAndGeodesicDome;
+var
+  Viewport: TCastleViewport;
+  B1, B2, B3, B4, B5: TCastleBox;
+  Manipulate: TCastleTransformManipulate;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := nil;
+  Manipulate := nil;
+  try
+    Viewport := TCastleViewport.Create(nil);
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(1, 1, 1);
+    B1.Translation := Vector3(0, 0, 0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(1, 1, 1);
+    B2.Translation := Vector3(5, 0, 0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(1, 1, 1);
+    B3.Translation := Vector3(10, 0, 0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(1, 1, 1);
+    B4.Translation := Vector3(0, 0, 0);
+    Viewport.Items.Add(B4);
+
+    B5 := TCastleBox.Create(Viewport);
+    B5.Size := Vector3(1, 1, 1);
+    B5.Translation := Vector3(0, 0, 0);
+    Viewport.Items.Add(B5);
+
+    Manipulate := TCastleTransformManipulate.Create(nil);
+
+    // 1. Test SwirlSelected(1 (Y axis), Pi (180 deg at center), 10.0, true):
+    // PivotMode = pmPrimarySelected -> PivotPos = B1 = (0, 0, 0):
+    // B1 (r=0): Angle = Pi -> Pos stays (0, 0, 0), LookDir rotated Pi around +Y -> (0, 0, 1)
+    // B2 (r=5): t = 0.5, Angle = Pi/2 -> (5, 0, 0) rotated +Pi/2 around +Y -> (0, 0, -5), LookDir -> (-1, 0, 0)
+    // B3 (r=10): t = 1.0, Angle = 0 -> stays (10, 0, 0)
+    Manipulate.SetSelected([B1, B2, B3]);
+    Manipulate.PivotMode := pmPrimarySelected;
+    AssertTrue(Manipulate.SwirlSelected(1, Pi, 10.0, true));
+    AssertVectorEquals(Vector3(0, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, -5), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10, 0, 0), B3.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 0, -1), WorldDir.Normalize, 1e-4);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+
+    // 2. Test ArrangeSelectedInKnotCurve:
+    // Case A: Trefoil Knot (FigureEightKnot = false), Radius = 3.0 (S = 1.0), OrientMode = 1 (tangent)
+    // Center = (0, 0, 0), N = 4 -> t = 0, pi/2, pi, 3pi/2:
+    // i=0 (t=0): K = (0, 0, -1), dK = (5, -3, 0)
+    // i=2 (t=pi): K = (0, 0, -3)
+    Manipulate.PivotMode := pmSelectionCenter;
+    B1.Translation := Vector3(-3, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(1, 0, 0);
+    B4.Translation := Vector3(3, 0, 0);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.ArrangeSelectedInKnotCurve(3.0, false, 1));
+    AssertVectorEquals(Vector3(0, 0, -1), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0, 0, -3), B3.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(5, -3, 0).Normalize, WorldDir.Normalize, 1e-4);
+
+    // Case B: Figure-Eight Knot (FigureEightKnot = true), Radius = 3.0 (S = 1.0), OrientMode = 2 (outward)
+    // i=0 (t=0): K = (3, 0, 0), LookDir = (1, 0, 0)
+    // i=2 (t=pi): K = (-3, 0, 0), LookDir = (-1, 0, 0)
+    B1.Translation := Vector3(-3, 0, 0);
+    B2.Translation := Vector3(-1, 0, 0);
+    B3.Translation := Vector3(1, 0, 0);
+    B4.Translation := Vector3(3, 0, 0);
+    AssertTrue(Manipulate.ArrangeSelectedInKnotCurve(3.0, true, 2));
+    AssertVectorEquals(Vector3(3, 0, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-3, 0, 0), B3.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 0), WorldDir.Normalize, 1e-4);
+
+    // 3. Test ArrangeSelectedInGeodesicDome(10.0, 2, 1):
+    // Select B1..B5 around Center = (0, 0, 0), Radius = 10, RingsCount = 2, OrientMode = 1 (outward normal):
+    // B1 (apex, RIdx=0): (0, 10, 0), WorldUp = (0, 1, 0), WorldDir = (0, 0, -1)
+    // B2..B5 on equator ring (RIdx=1, phi = pi/2, staggered theta = pi/4, 3pi/4, 5pi/4, 7pi/4):
+    B1.Translation := Vector3(-4, 0, 0);
+    B2.Translation := Vector3(-2, 0, 0);
+    B3.Translation := Vector3(0, 0, 0);
+    B4.Translation := Vector3(2, 0, 0);
+    B5.Translation := Vector3(4, 0, 0);
+    Manipulate.SetSelected([B1, B2, B3, B4, B5]);
+    AssertTrue(Manipulate.ArrangeSelectedInGeodesicDome(10.0, 2, 1));
+    AssertVectorEquals(Vector3(0, 10, 0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10.0 / Sqrt(2.0), 0, 10.0 / Sqrt(2.0)), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-10.0 / Sqrt(2.0), 0, 10.0 / Sqrt(2.0)), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-10.0 / Sqrt(2.0), 0, -10.0 / Sqrt(2.0)), B4.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10.0 / Sqrt(2.0), 0, -10.0 / Sqrt(2.0)), B5.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0, 1, 0), WorldUp.Normalize, 1e-4);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1, 0, 1).Normalize, WorldUp.Normalize, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);
