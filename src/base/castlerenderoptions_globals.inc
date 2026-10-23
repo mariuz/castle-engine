@@ -649,6 +649,35 @@ var
     0 means that every shadow map has its own texture. }
   ShadowMapsAtlasSize: Cardinal = 4096;
 
+  { The part of each cascade of a cascaded shadow map
+    (a directional light with @code(shadowCascades), see https://castle-engine.io/shadow_maps )
+    blended with the next cascade, from 0 to 1.
+    Near the far end of a cascade, the shadow is a mix of it and the next one
+    (the last cascade fades to unshadowed there),
+    so the change of the shadow map resolution (and the end of the shadows)
+    is not a visible line. 0 switches cascades abruptly.
+    It is a shader uniform: it can be changed at any time. }
+  ShadowMapsCascadeBlend: Single = 0.1;
+
+  { Choose the size of each shadow map by how big its light is on the screen.
+
+    When @true, spot and point lights (the lights with a limited range)
+    get a shadow map of the size TGeneratedShadowMapNode.Size
+    only when their range (sphere of the light radius, or the projection far
+    of the shadow map) covers the whole screen of the camera
+    (TCastleAbstractRootTransform.MainCamera). Smaller (further) lights get smaller
+    shadow maps, with power of 2 sizes, at least ShadowMapsMinSizeByScreen.
+    This saves the time to render them and the space in the shadow map atlas
+    (ShadowMapsAtlasSize), so more lights fit there in their full size.
+
+    The size changes with some hysteresis, so it doesn't switch
+    back and forth when the camera moves a bit.
+    Directional lights don't depend on it. }
+  ShadowMapsSizeByScreen: Boolean = false;
+
+  { Smallest shadow map size chosen by ShadowMapsSizeByScreen. }
+  ShadowMapsMinSizeByScreen: Cardinal = 128;
+
   { Force given rendering for all scenes, if not weNormal. }
   InternalForceWireframe: TWireframeEffect;
 

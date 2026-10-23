@@ -139,7 +139,7 @@ const
     '#endif' + NL;
   VectorComponent: array [0..3] of String = ('x', 'y', 'z', 'w');
 var
-  SamplerType, Declarations, Body, M, R: String;
+  SamplerType, Declarations, Body, M, R, CascadeFunction: String;
   ShadowLightShader: TLightShader;
   Kind: TShadowMapKind;
   TileCount, K: Integer;
@@ -162,6 +162,7 @@ begin
   if not (ShadowMap.Light is TAbstractPunctualLightNode) then
     Exit;
   Kind := ShadowMapKind(TAbstractPunctualLightNode(ShadowMap.Light), TileCount);
+  CascadeFunction := '';
 
   { For variance shadow maps, use normal sampler2D, not sampler2DShadow }
   if Shader.ShadowSampling = ssVarianceShadowMaps then
@@ -229,22 +230,45 @@ begin
     smkCascades:
       begin
         Declarations := Declarations +
-          Format('uniform vec4 %s;', [UniformName('splits')]) + NL;
-        { Choose the cascade by the distance from the camera. }
-        Body :=
-          '  float depth = -castle_shadow_vertex_eye.z;' + NL +
+          Format('uniform vec4 %s;', [UniformName('splits')]) + NL +
+          Format('uniform float %s;', [UniformName('blend')]) + NL;
+        { The shadow of one cascade (1.0 after the last one).
+          Declared after the shadow functions (below). }
+        CascadeFunction :=
+          Format('float %s(const in int k, const in vec3 normal_eye)', [UniformName('cascade')]) + NL +
+          '{' + NL +
           '  mat4 m;' + NL +
           '  vec4 r;' + NL +
           '  float o;' + NL +
-          Format('  if (depth < %s.x) ', [UniformName('splits')]) + TileChoice(0) + NL;
+          '  if (k == 0) ' + TileChoice(0) + NL;
         for K := 1 to TileCount - 1 do
-          Body := Body + Format('  else if (depth < %s.%s) ', [
-            UniformName('splits'), VectorComponent[K]]) + TileChoice(K) + NL;
+          CascadeFunction := CascadeFunction +
+            Format('  else if (k == %d) ', [K]) + TileChoice(K) + NL;
+        CascadeFunction := CascadeFunction +
+          '  else return 1.0;' + NL +
+          { normal offset, like for point lights }
+          Format('  return castle_shadow_tile(%s, m * (castle_shadow_vertex_eye + vec4(normal_eye * o, 0.0)), r, %s, false);', [
+            ShadowMapName, UniformName('texel')]) + NL +
+          '}' + NL;
+        { Choose the cascade by the distance from the camera.
+          In the last part (blend) of a cascade's range,
+          mix it with the next cascade. }
+        Body :=
+          '  float depth = -castle_shadow_vertex_eye.z;' + NL +
+          '  int k;' + NL +
+          '  float start_depth;' + NL +
+          '  float end_depth;' + NL +
+          Format('  if (depth < %0:s.x) { k = 0; start_depth = 0.0; end_depth = %0:s.x; }', [UniformName('splits')]) + NL;
+        for K := 1 to TileCount - 1 do
+          Body := Body + Format('  else if (depth < %0:s.%1:s) { k = %2:d; start_depth = %0:s.%3:s; end_depth = %0:s.%1:s; }', [
+            UniformName('splits'), VectorComponent[K], K, VectorComponent[K - 1]]) + NL;
         Body := Body +
           '  else return;' + NL +
-          { normal offset, like for point lights }
-          Format('  scale *= castle_shadow_tile(%s, m * (castle_shadow_vertex_eye + vec4(normal_eye * o, 0.0)), r, %s, false);', [
-            ShadowMapName, UniformName('texel')]) + NL;
+          Format('  float s = %s(k, normal_eye);', [UniformName('cascade')]) + NL +
+          Format('  float blend_start = end_depth - (end_depth - start_depth) * %s;', [UniformName('blend')]) + NL +
+          '  if (depth > blend_start)' + NL +
+          Format('    s = mix(s, %s(k + 1, normal_eye), (depth - blend_start) / (end_depth - blend_start));', [UniformName('cascade')]) + NL +
+          '  scale *= s;' + NL;
       end;
     {$ifndef COMPILER_CASE_ANALYSIS}
     else raise EInternalError.Create('ShadowMapKind?');
@@ -260,6 +284,7 @@ begin
     {$ifndef OpenGLES}
     Shader.DeclareShadowFunctions + NL +
     {$endif}
+    CascadeFunction +
 
     'void PLUG_light_scale(inout float scale, const in vec3 normal_eye, const in vec3 light_dir)' + NL +
     '{' + NL +
@@ -328,7 +353,10 @@ begin
         TranslationMatrix(-ShadowMap.InternalLightPosition) *
         RenderingCamera.InverseMatrix);
     smkCascades:
-      AProgram.SetUniform(UniformName('splits'), ShadowMap.InternalCascadeSplits);
+      begin
+        AProgram.SetUniform(UniformName('splits'), ShadowMap.InternalCascadeSplits);
+        AProgram.SetUniform(UniformName('blend'), Clamped(ShadowMapsCascadeBlend, 0.0, 1.0));
+      end;
     else ;
   end;
 end;

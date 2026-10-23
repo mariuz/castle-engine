@@ -488,6 +488,12 @@
     AtlasRects: array of TRectangle;
     { Size of the texture with the tiles. }
     TextureWidth, TextureHeight: Cardinal;
+    { EffectiveSize for which the tiles were allocated. }
+    AllocatedSize: Cardinal;
+    { Size chosen by ChooseScreenSize, 0 if none. }
+    ScreenSize: Cardinal;
+    { Size of the views now: Size, or smaller ScreenSize. }
+    function EffectiveSize: Cardinal;
     { Make sure that ATileCount tiles are allocated. }
     procedure AllocateTiles(const ATileCount: Integer);
     procedure FreeTiles;
@@ -501,6 +507,9 @@
   public
     { Size of the views, from TGeneratedShadowMapNode.Size. }
     Size: Cardinal;
+    { Camera for which the cascades were last rendered by @link(Update)
+      (only compared, may be already freed). }
+    CascadesCamera: TCastleCamera;
 
     function TextureNode: TGeneratedShadowMapNode;
 
@@ -519,6 +528,16 @@
       const Light: TAbstractPunctualLightNode;
       const Camera: TCastleCamera;
       const WorldBox: TBox3D);
+
+    { Choose the size of the views by how big the light's range
+      is on the screen of Camera, when ShadowMapsSizeByScreen.
+      Returns @true when it changed: the shadow map should be updated
+      (@link(Update) allocates the views of the new size). }
+    function ChooseScreenSize(const Light: TAbstractPunctualLightNode;
+      const Camera: TCastleCamera; const WorldBox: TBox3D): Boolean;
+
+    { Size of the views (tiles) rendered by the last @link(Update). }
+    property CurrentTileSize: Cardinal read TileSize;
 
     { Check would we use Variance Shadow Maps with current ARenderer
       attributes and OpenGL version/extensions. }
@@ -2497,7 +2516,7 @@ procedure TGeneratedShadowMapResource.AllocateTiles(const ATileCount: Integer);
   var
     I: Integer;
   begin
-    TileSize := Smallest2Power(Size);
+    TileSize := Smallest2Power(EffectiveSize);
     while TileSize >= TShadowMapAtlas.MinBlockSize do
     begin
       SetLength(AtlasRects, 0);
@@ -2511,7 +2530,7 @@ procedure TGeneratedShadowMapResource.AllocateTiles(const ATileCount: Integer);
       end;
       if I = ATileCount then
       begin
-        if TileSize < Smallest2Power(Size) then
+        if TileSize < Smallest2Power(EffectiveSize) then
           WritelnWarning('Shadow Maps', 'Shadow map "%s" does not fit in the shadow map atlas (ShadowMapsAtlasSize), using %d instead of %d', [
             TextureNode.NiceName, TileSize, Size]);
         Exit(true);
@@ -2532,9 +2551,11 @@ procedure TGeneratedShadowMapResource.AllocateTiles(const ATileCount: Integer);
 var
   Columns, Rows: Integer;
 begin
-  if (TileCount = ATileCount) and (TileCount <> 0) then
+  if (TileCount = ATileCount) and (TileCount <> 0) and
+     (AllocatedSize = EffectiveSize) then
     Exit;
   FreeTiles;
+  AllocatedSize := EffectiveSize;
 
   if InAtlas then
   begin
@@ -2552,7 +2573,7 @@ begin
   end;
 
   { Own texture, with the tiles in a grid. }
-  TileSize := Size;
+  TileSize := EffectiveSize;
   Columns := Ceil(Sqrt(ATileCount));
   Rows := DivRoundUp(ATileCount, Columns);
   TextureWidth := TileSize * Columns;
@@ -2575,6 +2596,87 @@ begin
   RenderToTexture.Stencil := false;
   RenderToTexture.GLContextOpen;
   TileCount := ATileCount;
+end;
+
+function TGeneratedShadowMapResource.EffectiveSize: Cardinal;
+begin
+  if (ScreenSize <> 0) and (ScreenSize < Size) then
+    Result := ScreenSize
+  else
+    Result := Size;
+end;
+
+function TGeneratedShadowMapResource.ChooseScreenSize(
+  const Light: TAbstractPunctualLightNode;
+  const Camera: TCastleCamera; const WorldBox: TBox3D): Boolean;
+const
+  { Go to a smaller size only when the light needs 20% less than it:
+    the size doesn't switch back and forth when the camera moves a bit. }
+  Hysteresis = 0.8;
+var
+  NewSize, Current, MaxSize, MinSize: Cardinal;
+  Range, MinDistance, MaxDistance, Distance, Coverage, Ideal: Single;
+  Projection: TMatrix4;
+begin
+  NewSize := 0;
+  if ShadowMapsSizeByScreen and
+     (Camera <> nil) and
+     (Light is TAbstractPositionalLightNode) then
+  begin
+    { the range of the light: a sphere around it }
+    Range := 0;
+    if TAbstractPositionalLightNode(Light).HasRadius and
+       (TAbstractPositionalLightNode(Light).Radius > 0) then
+      Range := TAbstractPositionalLightNode(Light).Radius;
+    if Light.FdProjectionFar.Value > 0 then
+    begin
+      if Range > 0 then
+        Range := Min(Range, Light.FdProjectionFar.Value)
+      else
+        Range := Light.FdProjectionFar.Value;
+    end;
+    if (Range <= 0) and not WorldBox.IsEmpty then
+    begin
+      Light.Box3DDistances(WorldBox, MinDistance, MaxDistance);
+      Range := MaxDistance;
+    end;
+
+    if Range > 0 then
+    begin
+      { How much of the screen height the sphere covers (1 = all of it). }
+      Projection := Camera.ProjectionMatrix;
+      Distance := PointsDistance(Camera.WorldTranslation, Light.ProjectionWorldLocation);
+      if Projection.Data[3, 3] = 1 then
+        Coverage := Projection.Data[1, 1] * Range // orthographic
+      else
+      if Distance <= Range then
+        Coverage := 1 // inside the range
+      else
+        Coverage := Projection.Data[1, 1] * Range / Sqrt(Sqr(Distance) - Sqr(Range));
+
+      MaxSize := Smallest2Power(Size);
+      MinSize := Min(MaxSize, Max(Smallest2Power(Max(ShadowMapsMinSizeByScreen, 1)),
+        TShadowMapAtlas.MinBlockSize));
+      Ideal := Size * Min(Coverage, 1);
+      if Ideal >= MaxSize then
+        NewSize := MaxSize
+      else
+        NewSize := Max(MinSize, Smallest2Power(Max(Ceil(Ideal), 1)));
+      NewSize := Min(NewSize, MaxSize);
+
+      { hysteresis }
+      Current := ScreenSize;
+      if Current = 0 then
+        Current := MaxSize;
+      if (NewSize < Current) and (Ideal > Hysteresis * (Current div 2)) then
+        NewSize := Current;
+      if NewSize = MaxSize then
+        NewSize := 0; // as without ShadowMapsSizeByScreen
+    end;
+  end;
+
+  Result := NewSize <> ScreenSize;
+  ScreenSize := NewSize;
 end;
 
 function TGeneratedShadowMapResource.TileRect(const Index: Integer): TRectangle;
@@ -2776,7 +2878,8 @@ var
     CameraProjection: TMatrix4;
     Orthographic: Boolean;
     CameraNear, CameraFar, MinDistance, MaxDistance: Single;
-    SliceNear, SliceFar, D, Radius, Texel, CX, CY, CZ, ZMin, ZMax: Single;
+    SliceNear, SliceFar, CoverNear, PreviousNear, Blend: Single;
+    D, Radius, Texel, CX, CY, CZ, ZMin, ZMax: Single;
     HalfX, HalfY, OffsetX, OffsetY: Single;
     Corners: array [0..7] of TVector3;
     I, J: Integer;
@@ -2841,9 +2944,14 @@ var
     else
       WorldBox.Corners(BoxCorners);
 
+    Blend := Clamped(ShadowMapsCascadeBlend, 0.0, 1.0);
     SliceNear := CameraNear;
+    PreviousNear := CameraNear;
     for I := 0 to Count - 1 do
     begin
+      { The shaders blend the end of the previous cascade with this one:
+        this one covers that part too. }
+      CoverNear := Max(CameraNear, SliceNear - (SliceNear - PreviousNear) * Blend);
       SliceFar :=
         SplitLambda * CameraNear * Power(CameraFar / CameraNear, (I + 1) / Count) +
         (1 - SplitLambda) * (CameraNear + (CameraFar - CameraNear) * (I + 1) / Count);
@@ -2852,7 +2960,7 @@ var
       { the corners of this slice of the camera frustum, in world space }
       for J := 0 to 7 do
       begin
-        if J < 4 then D := SliceNear else D := SliceFar;
+        if J < 4 then D := CoverNear else D := SliceFar;
         if Orthographic then
           Corner := Vector3(
             OffsetX + HalfX * (2 * (J mod 2) - 1),
@@ -2906,6 +3014,7 @@ var
         0.5, ZMax - ZMin + 2);
       Views[I].NormalOffset := 1.5 * Texel;
 
+      PreviousNear := SliceNear;
       SliceNear := SliceFar;
     end;
   end;
@@ -2923,6 +3032,8 @@ begin
   Kind := TShadowMapShader.ShadowMapKind(Light, ATileCount);
   AllocateTiles(ATileCount);
   if GLName = GLObjectNone then Exit;
+  if Kind = smkCascades then
+    CascadesCamera := Camera;
 
   Splits := Vector4(MaxSingle, MaxSingle, MaxSingle, MaxSingle);
   case Kind of

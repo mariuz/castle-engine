@@ -239,6 +239,10 @@ type
     { Shadow map of this global light of this scene,
       cast on the shapes of all scenes. @nil if none. }
     function GlobalLightShadowMap(const Light: TAbstractLightNode): TGeneratedShadowMapNode;
+    { Render the cascades of this shadow map for Camera,
+      if they were rendered for another camera. }
+    procedure UpdateCascadesForCamera(const ShadowMap: TGeneratedShadowMapNode;
+      const Camera: TCastleCamera);
 
     { Fog for this shape. @nil if none. }
     function ShapeFog(const Shape: TShape; const GlobalFog: TFogNode): TFogFunctionality;
@@ -420,6 +424,15 @@ type
     destructor Destroy; override;
     procedure Update(const SecondsPassed: Single; var RemoveMe: TRemoveType); override;
     function PropertySections(const PropertyName: String): TPropertySections; override;
+
+    { Render the cascaded shadow maps (of directional lights
+      with @code(shadowCascades)) of the scenes in this World again,
+      following this Camera, if they were rendered for another camera.
+      Called by TCastleViewport before it renders the world, so each viewport
+      gets the cascades around its own camera.
+      @exclude }
+    class procedure InternalUpdateCascadesForCamera(
+      const AWorld: TCastleAbstractRootTransform; const Camera: TCastleCamera);
 
     { Destroy any associations of this object with current OpenGL context.
       For example, release any allocated texture names.
@@ -729,6 +742,10 @@ uses Math,
   CastleComponentSerialize, CastleRenderContext, CastleFilesUtils,
   CastleInternalGLUtils, CastleInternalRenderer, X3DCameraUtils;
 
+var
+  { Scenes that have cascaded shadow maps, see TCastleScene.InternalUpdateCascadesForCamera. }
+  CascadeScenes: {$ifdef FPC}specialize{$endif} TList<TCastleScene>;
+
 {$define read_implementation}
 {$I castlescene_roottransform.inc}
 {$I castlescene_abstractprimitive.inc}
@@ -804,6 +821,8 @@ end;
 
 destructor TCastleScene.Destroy;
 begin
+  if CascadeScenes <> nil then
+    CascadeScenes.Remove(Self);
   FreeAndNil(FilteredShapes);
   FreeAndNil(FTempPrepareParams);
 
@@ -1337,6 +1356,55 @@ begin
     Result := nil;
 end;
 
+procedure TCastleScene.UpdateCascadesForCamera(const ShadowMap: TGeneratedShadowMapNode;
+  const Camera: TCastleCamera);
+var
+  Res: TGeneratedShadowMapResource;
+begin
+  if not ((ShadowMap.FdLight.Value is TAbstractDirectionalLightNode) and
+          (TAbstractDirectionalLightNode(ShadowMap.FdLight.Value).ShadowCascades > 1)) then
+    Exit;
+  Res := TGeneratedShadowMapResource(TTextureResources.Get(ShadowMap));
+  if (Res = nil) or (Res.CascadesCamera = Camera) then
+    Exit;
+  AvoidNonShadowCasterRendering := true;
+  try
+    Res.Update(World.InternalRenderEverythingEvent,
+      TAbstractPunctualLightNode(ShadowMap.FdLight.Value),
+      Camera, World.BoundingBox);
+  finally
+    AvoidNonShadowCasterRendering := false;
+  end;
+end;
+
+class procedure TCastleScene.InternalUpdateCascadesForCamera(
+  const AWorld: TCastleAbstractRootTransform; const Camera: TCastleCamera);
+var
+  I, J: Integer;
+  Scene: TCastleScene;
+  ShadowMap: TGeneratedShadowMapNode;
+begin
+  if (CascadeScenes = nil) or (Camera = nil) or (not InternalEnableRendering) or
+     (not Assigned(AWorld.InternalRenderEverythingEvent)) then
+    Exit;
+  for I := 0 to CascadeScenes.Count - 1 do
+  begin
+    Scene := CascadeScenes[I];
+    if (Scene.World <> AWorld) or (Scene.InternalDirty <> 0) then
+      Continue;
+    for J := 0 to Scene.GeneratedTextures.Count - 1 do
+      if Scene.GeneratedTextures.L[J].TextureNode is TGeneratedShadowMapNode then
+        Scene.UpdateCascadesForCamera(
+          TGeneratedShadowMapNode(Scene.GeneratedTextures.L[J].TextureNode), Camera);
+    for J := 0 to Scene.InternalGlobalLights.Count - 1 do
+    begin
+      ShadowMap := Scene.GlobalLightShadowMap(Scene.InternalGlobalLights.L[J].Node);
+      if ShadowMap <> nil then
+        Scene.UpdateCascadesForCamera(ShadowMap, Camera);
+    end;
+  end;
+end;
+
 procedure TCastleScene.LocalRenderOutside(
   const TestShapeVisibility: TTestShapeVisibility;
   const Params: TRenderParams);
@@ -1374,7 +1442,7 @@ begin
   { This is usually called by LocalRender(Params) that probably
     already did tests below. But it may also be called directly,
     so do the checks below anyway. (The checks are trivial, so no speed harm.) }
-  if CheckVisible and
+  if CheckVisibleToRender(Params) and
      (InternalDirty = 0) then
   begin
     { I used to make here more complex "prepare" mechanism, that was trying
@@ -1838,6 +1906,32 @@ procedure TCastleScene.Update(const SecondsPassed: Single; var RemoveMe: TRemove
       Result := false;
     end;
 
+    { Update the shadow map also when
+      - it has cascades (they follow the camera),
+      - or the size chosen by ShadowMapsSizeByScreen changes. }
+    procedure CheckShadowMap(const ShadowMap: TGeneratedShadowMapNode);
+    var
+      Res: TGeneratedShadowMapResource;
+    begin
+      if (ShadowMap.FdLight.Value is TAbstractDirectionalLightNode) and
+         (TAbstractDirectionalLightNode(ShadowMap.FdLight.Value).ShadowCascades > 1) then
+      begin
+        ShadowMap.GenTexFunctionality.InternalUpdateNeeded := true;
+        if CascadeScenes = nil then
+          CascadeScenes := {$ifdef FPC}specialize{$endif} TList<TCastleScene>.Create;
+        if not CascadeScenes.Contains(Self) then
+          CascadeScenes.Add(Self);
+      end else
+      if ShadowMap.FdLight.Value is TAbstractPunctualLightNode then
+      begin
+        Res := TGeneratedShadowMapResource(TTextureResources.Get(ShadowMap));
+        if (Res <> nil) and
+           Res.ChooseScreenSize(TAbstractPunctualLightNode(ShadowMap.FdLight.Value),
+             World.MainCamera, World.BoundingBox) then
+          ShadowMap.GenTexFunctionality.InternalUpdateNeeded := true;
+      end;
+    end;
+
   begin
     if (GeneratedTextures.Count = 0) and not GlobalLightsShadowMaps then
       Exit; // optimize away common case
@@ -1878,9 +1972,7 @@ procedure TCastleScene.Update(const SecondsPassed: Single; var RemoveMe: TRemove
           GenTexFunctionality.InternalLastStateId := World.InternalVisibleGeometryStateId;
           GenTexFunctionality.InternalUpdateNeeded := true;
         end;
-        if (TGeneratedShadowMapNode(TextureNode).FdLight.Value is TAbstractDirectionalLightNode) and
-           (TAbstractDirectionalLightNode(TGeneratedShadowMapNode(TextureNode).FdLight.Value).ShadowCascades > 1) then
-          GenTexFunctionality.InternalUpdateNeeded := true;
+        CheckShadowMap(TGeneratedShadowMapNode(TextureNode));
       end else
       begin
         { For TRenderedTextureNode, TGeneratedCubeMapTextureNode etc.
@@ -1918,9 +2010,7 @@ procedure TCastleScene.Update(const SecondsPassed: Single; var RemoveMe: TRemove
         GenTexFunctionality.InternalLastStateId := World.InternalVisibleGeometryStateId;
         GenTexFunctionality.InternalUpdateNeeded := true;
       end;
-      if (ShadowMap.FdLight.Value is TAbstractDirectionalLightNode) and
-         (TAbstractDirectionalLightNode(ShadowMap.FdLight.Value).ShadowCascades > 1) then
-        GenTexFunctionality.InternalUpdateNeeded := true;
+      CheckShadowMap(ShadowMap);
       AvoidNonShadowCasterRendering := true;
       UpdateOneGeneratedTexture(nil, ShadowMap,
         RenderFunc, ProjectionNear, ProjectionFar,
@@ -1978,7 +2068,7 @@ begin
     PrepareGlobalLightsTextures;
 
   if InternalEnableRendering and
-     CheckVisible and
+     CheckVisibleToRender(Params) and
      (InternalDirty = 0) then
   begin
     FrameProfiler.Start(fmRenderScene);
@@ -2382,4 +2472,6 @@ initialization
   {$ifdef CASTLE_EXPERIMENTAL_ENVIRONMENT_LIGHT}
   RegisterSerializableComponent(TCastleEnvironmentLight, ['Light', 'Environment']);
   {$endif}
+finalization
+  FreeAndNil(CascadeScenes);
 end.

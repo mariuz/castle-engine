@@ -1,0 +1,19 @@
+#X3D V4.0 utf8
+PROFILE Interchange
+
+# Directional light with 4 shadow map cascades up to 15 from the camera, and boxes floating
+# at various distances from the camera (that looks along -Z from 0 6 20).
+DEF Sun DirectionalLight {
+  direction 0.5 -1 0 shadows TRUE shadowCascades 4 shadowCascadesDistance 15
+  defaultShadowMap GeneratedShadowMap { update "ALWAYS" size 1024 }
+}
+Shape {
+  appearance Appearance { material Material { diffuseColor 1 1 1 } }
+  geometry Box { size 100 0.1 100 }
+}
+Transform { translation 0 2.5 5 children DEF Caster Shape {
+  appearance Appearance { material Material { diffuseColor 1 0 0 } }
+  geometry Box { size 1 1 1 }
+} }
+Transform { translation 0 2.5 -10 children USE Caster }
+Transform { translation 0 2.5 -30 children USE Caster }
