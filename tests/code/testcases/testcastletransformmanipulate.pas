@@ -70,6 +70,7 @@ type
     procedure TestCylindrifyCassiniOvalAndCatenoid;
     procedure TestBarrelHippopedeAndHelicoid;
     procedure TestWaveDeformEnneperAndGearWheel;
+    procedure TestSaddleDomeKleinBottleAndFermatSpiral;
   end;
 
 implementation
@@ -3226,6 +3227,91 @@ begin
     AssertVectorEquals(Vector3(1.0, 0.0, 0.0), WorldDir.Normalize, 1e-3);
     B2.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(0.0, 0.0, 1.0), WorldDir.Normalize, 1e-3);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestSaddleDomeKleinBottleAndFermatSpiral;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  B1, B2, B3, B4, B5: TCastleBox;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.PivotMode := pmPrimarySelected;
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(1, 1, 1);
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(1, 1, 1);
+    B2.Translation := Vector3(4.0, 0.0, 0.0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(1, 1, 1);
+    B3.Translation := Vector3(0.0, 0.0, 4.0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(1, 1, 1);
+    B4.Translation := Vector3(-4.0, 0.0, -4.0);
+    Viewport.Items.Add(B4);
+
+    B5 := TCastleBox.Create(Viewport);
+    B5.Size := Vector3(1, 1, 1);
+    Viewport.Items.Add(B5);
+
+    { 1. Test SaddleDomeDeformSelected (DisplaceAxis=1 (Y), CurvatureU=3.0, CurvatureV=-2.0, OrientNormals=true)
+      Around B1=(0,0,0), MaxExtU = 4.0, MaxExtV = 4.0:
+      - B1 (u=0, v=0): DeltaD = 0 -> (0, 0, 0), Normal=(0, 1, 0), Tangent=(1, 0, 0)
+      - B2 (u=1, v=0): DeltaD = 3.0 -> (4, 3, 0), SlopeU = 2*3/4 = 1.5 -> Tangent=(1, 1.5, 0).Normalize, Normal=(-1.5, 1, 0).Normalize
+      - B3 (u=0, v=1): DeltaD = -2.0 -> (0, -2, 4)
+      - B4 (u=-1, v=-1): DeltaD = 3.0 - 2.0 = 1.0 -> (-4, 1, -4) }
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.SaddleDomeDeformSelected(1, 3.0, -2.0, true));
+    AssertVectorEquals(Vector3(0.0, 0.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(4.0, 3.0, 0.0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, -2.0, 4.0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-4.0, 1.0, -4.0), B4.Translation, 1e-4);
+
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1.0, 0.0, 0.0), WorldDir.Normalize, 1e-3);
+    AssertVectorEquals(Vector3(0.0, 1.0, 0.0), WorldUp.Normalize, 1e-3);
+
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1.0, 1.5, 0.0).Normalize, WorldDir.Normalize, 1e-3);
+    AssertVectorEquals(Vector3(-1.5, 1.0, 0.0).Normalize, WorldUp.Normalize, 1e-3);
+
+    { 2. Test ArrangeSelectedOnKleinBottle (MajorRadius=10, TubeScale=2, Twists=1, OrientMode=2) }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.ArrangeSelectedOnKleinBottle(10.0, 2.0, 1.0, 2));
+    AssertVectorEquals(Vector3(10.0, 0.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, Sqrt(2.0), 10.0 + Sqrt(2.0)), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-10.0, 0.0, 0.0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, -Sqrt(2.0), -(10.0 + Sqrt(2.0))), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1.0, 0.0, 0.0), WorldDir.Normalize, 1e-3);
+
+    { 3. Test ArrangeSelectedInFermatSpiral (MaxRadius=10, Turns=1, HeightSpan=6, DualArm=false, OrientMode=2) }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Manipulate.SetSelected([B1, B2, B3, B4, B5]);
+    AssertTrue(Manipulate.ArrangeSelectedInFermatSpiral(10.0, 1.0, 6.0, false, 2));
+    AssertVectorEquals(Vector3(0.0, -3.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, -1.5, 5.0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10.0, 3.0, 0.0), B5.Translation, 1e-4);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.0, 0.0, 1.0), WorldDir.Normalize, 1e-3);
+    B5.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1.0, 0.0, 0.0), WorldDir.Normalize, 1e-3);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);
