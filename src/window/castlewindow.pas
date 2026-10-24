@@ -364,7 +364,8 @@ uses {$define read_interface_uses}
   CastleKeysMouse, CastleStringUtils, CastleFilesUtils, CastleTimeUtils,
   CastleFileFilters, CastleUIControls, CastleInternalContextBase,
   CastleInternalPk3DConnexion, CastleParameters, CastleSoundEngine,
-  CastleApplicationProperties;
+  CastleApplicationProperties, CastleInternalVulkan, CastleInternalVulkanWSI,
+  CastleInternalRHI, CastleInternalRHI_Vulkan;
 
 {$define read_interface}
 
@@ -534,6 +535,11 @@ type
     { Ready TGLContextRequirements instance.
       Call UpdateRequirements to initialize its fields correctly. }
     FRequirements: TGLContextRequirements;
+    FCustomVulkanSurfaceDesc: TVulkanNativeSurfaceDesc;
+    FHasCustomVulkanSurfaceDesc: Boolean;
+    FOnCreateVulkanSurface: TVulkanCreateSurfaceEvent;
+    FVulkanSurfaceHandle: VkSurfaceKHR;
+    FOwnsVulkanRHIDevice: Boolean;
     function GetColorBits: Cardinal;
     procedure SetColorBits(const Value: Cardinal);
     procedure SetAntiAliasing(const Value: TAntiAliasing);
@@ -1621,6 +1627,35 @@ type
       which means we are between an @link(Open) and @link(Close) calls. }
     function GLInitialized: boolean;
 
+    { Builds a platform-native Vulkan WSI surface descriptor from the active
+      TCastleWindow backend (Win32 HWND/HINSTANCE, Linux X11 Display/Window or
+      Wayland wl_display/wl_surface, Android ANativeWindow, macOS/iOS CAMetalLayer,
+      or custom override). }
+    function BuildVulkanNativeSurfaceDesc: TVulkanNativeSurfaceDesc;
+
+    { Override the native Vulkan surface descriptor (useful for embedded
+      CASTLE_WINDOW_LIBRARY / CASTLE_WINDOW_FORM hosts, custom CAMetalLayer /
+      Nintendo Switch ViLayer, or headless surface creation tests). }
+    procedure SetCustomVulkanSurfaceDesc(const ADesc: TVulkanNativeSurfaceDesc);
+    procedure ClearCustomVulkanSurfaceDesc;
+
+    { Callback compatible with TVulkanCreateSurfaceEvent that creates a
+      VkSurfaceKHR for the given VkInstance using OnCreateVulkanSurface (if assigned)
+      or BuildVulkanNativeSurfaceDesc. }
+    function CreateVulkanSurface(const AInstance: VkInstance): VkSurfaceKHR;
+
+    { Returns True when ApplicationProperties.RenderBackend is backendVulkan. }
+    function IsVulkanBackendRequested: Boolean;
+
+    { Initializes a TVulkanRHIDevice bound to this window's VkSurfaceKHR when
+      IsVulkanBackendRequested is True and no RHIDevice is active yet. }
+    procedure InitializeVulkanRHIDeviceIfNeeded;
+
+    property OnCreateVulkanSurface: TVulkanCreateSurfaceEvent
+      read FOnCreateVulkanSurface write FOnCreateVulkanSurface;
+    property VulkanSurfaceHandle: VkSurfaceKHR read FVulkanSurfaceHandle;
+    property HasCustomVulkanSurfaceDesc: Boolean read FHasCustomVulkanSurfaceDesc;
+
     { Create the window with associated rendering context and show it.
 
       @unorderedList(
@@ -2655,7 +2690,6 @@ implementation
 uses
   CastleLog, CastleGLVersion, CastleUriUtils, CastleControls, CastleMessaging,
   CastleRenderContext, CastleInternalGLUtils, CastleInternalFileMonitor,
-  CastleInternalRHI, CastleInternalRHI_Vulkan,
   {$define read_implementation_uses}
   {$I castlewindow_backend.inc}
   {$undef read_implementation_uses}
@@ -2888,6 +2922,9 @@ const
       sizes). }
     RenderContext.Viewport := Rect;
 
+    if IsVulkanBackendRequested then
+      InitializeVulkanRHIDeviceIfNeeded;
+
     {$ifndef OpenGLES}
     if AntiAliasingNicest[AntiAliasing] and
        GLFeatures.NV_multisample_filter_hint then
@@ -3020,6 +3057,13 @@ begin
     { call CloseBackend, controlling FInCloseBackend around }
     FInCloseBackend := true;
     try
+      if FOwnsVulkanRHIDevice and (RHIDevice <> nil) then
+      begin
+        RHIDevice.Free;
+        SetRHIDevice(nil);
+        FOwnsVulkanRHIDevice := False;
+      end;
+      FVulkanSurfaceHandle := VK_NULL_HANDLE;
       CloseBackend;
     finally FInCloseBackend := false end;
 
@@ -3126,6 +3170,107 @@ begin
     TVulkanRHIDevice(RHIDevice).AntiAliasing := Value;
 end;
 
+function TCastleWindow.BuildVulkanNativeSurfaceDesc: TVulkanNativeSurfaceDesc;
+begin
+  if FHasCustomVulkanSurfaceDesc then
+    Exit(FCustomVulkanSurfaceDesc);
+
+  FillChar(Result, SizeOf(Result), 0);
+  {$if defined(CASTLE_WINDOW_WINAPI)}
+  Result := TVulkanNativeSurfaceDesc.CreateWin32(
+    VkWin32HINSTANCE(System.HInstance), VkWin32HWND(h_Wnd));
+  {$elseif defined(CASTLE_WINDOW_XLIB)}
+  Result := TVulkanNativeSurfaceDesc.CreateXlib(
+    PVkXlibDisplay(Application.XDisplay), VkXlibWindow(WindowXID));
+  {$elseif defined(CASTLE_WINDOW_GTK_ANY)}
+    {$if defined(CASTLE_WINDOW_GTK_WAYLAND)}
+    Result.Platform := vwsiWayland;
+    if (Application.DisplayGdk <> nil) and (GLAreaGtk <> nil) and
+       (gtk_widget_get_window(GTK_WIDGET(GLAreaGtk)) <> nil) then
+      Result := TVulkanNativeSurfaceDesc.CreateWayland(
+        gdk_wayland_display_get_wl_display(Application.DisplayGdk),
+        gdk_wayland_window_get_wl_surface(gtk_widget_get_window(GTK_WIDGET(GLAreaGtk))));
+    {$elseif defined(CASTLE_WINDOW_GTK_WITH_XLIB)}
+    Result := TVulkanNativeSurfaceDesc.CreateXlib(
+      PVkXlibDisplay(Application.XDisplay), VkXlibWindow(RenderingAreaXID));
+    {$else}
+    Result.Platform := GetDefaultVulkanWSIPlatform;
+    {$endif}
+  {$elseif defined(CASTLE_WINDOW_ANDROID)}
+  Result := TVulkanNativeSurfaceDesc.CreateAndroid(PANativeWindow(NativeWindow));
+  {$elseif defined(CASTLE_WINDOW_COCOA)}
+  Result.Platform := vwsiMetal;
+  if (Ref <> nil) and (Ref.contentView <> nil) then
+    Result.MetalLayer := PCAMetalLayer(Ref.contentView.layer);
+  {$else}
+  Result.Platform := GetDefaultVulkanWSIPlatform;
+  {$endif}
+end;
+
+procedure TCastleWindow.SetCustomVulkanSurfaceDesc(const ADesc: TVulkanNativeSurfaceDesc);
+begin
+  FCustomVulkanSurfaceDesc := ADesc;
+  FHasCustomVulkanSurfaceDesc := True;
+end;
+
+procedure TCastleWindow.ClearCustomVulkanSurfaceDesc;
+begin
+  FillChar(FCustomVulkanSurfaceDesc, SizeOf(FCustomVulkanSurfaceDesc), 0);
+  FHasCustomVulkanSurfaceDesc := False;
+end;
+
+function TCastleWindow.CreateVulkanSurface(const AInstance: VkInstance): VkSurfaceKHR;
+begin
+  if Assigned(FOnCreateVulkanSurface) then
+    Result := FOnCreateVulkanSurface(AInstance)
+  else
+    Result := CreateVulkanSurfaceFromNativeDesc(AInstance, BuildVulkanNativeSurfaceDesc);
+  FVulkanSurfaceHandle := Result;
+end;
+
+function TCastleWindow.IsVulkanBackendRequested: Boolean;
+begin
+  Result := ApplicationProperties.RenderBackend = backendVulkan;
+end;
+
+procedure TCastleWindow.InitializeVulkanRHIDeviceIfNeeded;
+var
+  VkDev: TVulkanRHIDevice;
+  Desc: TVulkanNativeSurfaceDesc;
+begin
+  if not IsVulkanBackendRequested then
+    Exit;
+
+  if RHIDevice <> nil then
+  begin
+    if RHIDevice is TVulkanRHIDevice then
+      TVulkanRHIDevice(RHIDevice).AntiAliasing := FAntiAliasing;
+    Exit;
+  end;
+
+  Desc := BuildVulkanNativeSurfaceDesc;
+  if (not Assigned(FOnCreateVulkanSurface)) and
+     (not ValidateVulkanNativeSurfaceDesc(Desc)) then
+  begin
+    WritelnLog('Vulkan', 'Skipping automatic TVulkanRHIDevice creation: native window surface handle is not initialized');
+    Exit;
+  end;
+
+  try
+    VkDev := TVulkanRHIDevice.Create(
+      {$ifdef FPC}@{$endif}CreateVulkanSurface,
+      Cardinal(Max(1, FWidth)),
+      Cardinal(Max(1, FHeight)),
+      False);
+    VkDev.AntiAliasing := FAntiAliasing;
+    SetRHIDevice(VkDev);
+    FOwnsVulkanRHIDevice := True;
+  except
+    on E: Exception do
+      WritelnLog('Vulkan', 'Automatic Vulkan WSI surface / device initialization fell back cleanly: ' + E.Message);
+  end;
+end;
+
 { ----------------------------------------------------------------------------
 
   TCastleWindow events DoXxx methods,
@@ -3189,6 +3334,8 @@ begin
   if (not FirstResizeAfterOpen) and (ResizeAllowed <> raAllowed) then Exit;
 
   MakeCurrent;
+  if (RHIDevice <> nil) and (RHIDevice is TVulkanRHIDevice) then
+    RHIDevice.ResizeSwapchain(Cardinal(Max(1, FWidth)), Cardinal(Max(1, FHeight)));
   Container.EventResize;
 end;
 

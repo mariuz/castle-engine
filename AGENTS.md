@@ -77,8 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–53**: **COMPLETED** (100%).
-- **Phase 54 (High-Level `TCastleRenderOptions` & `TCastleViewport` Next-Gen Vulkan RHI Wiring)**: **COMPLETED** (100%, 192 unit tests passing):
-  - [x] **54.1. High-Level Next-Gen Rendering Enums (`CastleRenderOptions`)** — Completed & tested (`TestRenderOptionsNextGenPropertiesAndHashingRHI`).
-  - [x] **54.2. Per-Scene Next-Gen Material & Geometry Options on `TCastleRenderOptions`** — Completed & tested (`TestRenderOptionsNextGenPropertiesAndHashingRHI`).
-  - [x] **54.3. High-Level `TCastleViewport` Subsystem Orchestration & Physical Camera Exposure (`CastleViewport`)** — Completed & tested (`TestViewportCameraEV100AndNextGenPropertiesRHI`, `TestViewportExecuteVulkanSubsystemsOrchestrationRHI`).
+- **Phases 1–54**: **COMPLETED** (100%).
+- **Phase 55 (Native Window Surface `VkSurfaceKHR` Creation Across All OS Backends)**: **COMPLETED** (100%, 195 unit tests passing):
+  - [x] **55.1. Cross-Platform Native Surface Descriptor & Extension Resolution (`CastleInternalVulkanWSI`)** — Completed & tested (`TestVulkanWSINativeSurfaceDescAndExtensionsRHI`, `TestCreateVulkanSurfaceAcrossAllOSBackendsRHI`).
+  - [x] **55.2. Automatic `TCastleWindow` Native Handle Extraction & `VkSurfaceKHR` Creation (`CastleWindow`)** — Completed & tested (`TestCastleWindowVulkanSurfaceCreationAndLifecycleRHI`).
+  - [x] **55.3. `TCastleWindow` Vulkan Lifecycle Wiring (`OpenCore`, `DoResize`, `Close`)** — Completed & tested (`TestCastleWindowVulkanSurfaceCreationAndLifecycleRHI`).

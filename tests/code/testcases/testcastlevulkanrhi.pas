@@ -231,6 +231,9 @@ type
     procedure TestRenderOptionsNextGenPropertiesAndHashingRHI;
     procedure TestViewportCameraEV100AndNextGenPropertiesRHI;
     procedure TestViewportExecuteVulkanSubsystemsOrchestrationRHI;
+    procedure TestVulkanWSINativeSurfaceDescAndExtensionsRHI;
+    procedure TestCreateVulkanSurfaceAcrossAllOSBackendsRHI;
+    procedure TestCastleWindowVulkanSurfaceCreationAndLifecycleRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -11109,6 +11112,297 @@ begin
     SetRHIDevice(SavedRHI);
     FreeAndNil(Viewport);
     FreeAndNil(Device);
+  end;
+end;
+
+var
+  GMockLastSurfaceCreateInfoSType: VkStructureType;
+  GMockLastWin32HInstance: VkWin32HINSTANCE;
+  GMockLastWin32HWND: VkWin32HWND;
+  GMockLastXlibDisplay: PVkXlibDisplay;
+  GMockLastXlibWindow: VkXlibWindow;
+  GMockLastWaylandDisplay: Pwl_display;
+  GMockLastWaylandSurface: Pwl_surface;
+  GMockLastAndroidWindow: PANativeWindow;
+  GMockLastMetalLayer: PCAMetalLayer;
+  GMockLastViWindow: PViWindowHandleNN;
+
+function MockCreateWin32SurfaceKHR(
+  instance: VkInstance;
+  const pCreateInfo: PVkWin32SurfaceCreateInfoKHR;
+  const pAllocator: PVkAllocationCallbacks;
+  pSurface: PVkSurfaceKHR): VkResult; {$ifdef MSWINDOWS}stdcall;{$else}cdecl;{$endif}
+begin
+  if instance = nil then;
+  if pAllocator = nil then;
+  GMockLastSurfaceCreateInfoSType := pCreateInfo^.sType;
+  GMockLastWin32HInstance := pCreateInfo^.hinstance;
+  GMockLastWin32HWND := pCreateInfo^.hwnd;
+  pSurface^ := VkSurfaceKHR($A001);
+  Result := VK_SUCCESS;
+end;
+
+function MockCreateXlibSurfaceKHR(
+  instance: VkInstance;
+  const pCreateInfo: PVkXlibSurfaceCreateInfoKHR;
+  const pAllocator: PVkAllocationCallbacks;
+  pSurface: PVkSurfaceKHR): VkResult; {$ifdef MSWINDOWS}stdcall;{$else}cdecl;{$endif}
+begin
+  if instance = nil then;
+  if pAllocator = nil then;
+  GMockLastSurfaceCreateInfoSType := pCreateInfo^.sType;
+  GMockLastXlibDisplay := pCreateInfo^.dpy;
+  GMockLastXlibWindow := pCreateInfo^.window;
+  pSurface^ := VkSurfaceKHR($A002);
+  Result := VK_SUCCESS;
+end;
+
+function MockCreateWaylandSurfaceKHR(
+  instance: VkInstance;
+  const pCreateInfo: PVkWaylandSurfaceCreateInfoKHR;
+  const pAllocator: PVkAllocationCallbacks;
+  pSurface: PVkSurfaceKHR): VkResult; {$ifdef MSWINDOWS}stdcall;{$else}cdecl;{$endif}
+begin
+  if instance = nil then;
+  if pAllocator = nil then;
+  GMockLastSurfaceCreateInfoSType := pCreateInfo^.sType;
+  GMockLastWaylandDisplay := pCreateInfo^.display;
+  GMockLastWaylandSurface := pCreateInfo^.surface;
+  pSurface^ := VkSurfaceKHR($A003);
+  Result := VK_SUCCESS;
+end;
+
+function MockCreateAndroidSurfaceKHR(
+  instance: VkInstance;
+  const pCreateInfo: PVkAndroidSurfaceCreateInfoKHR;
+  const pAllocator: PVkAllocationCallbacks;
+  pSurface: PVkSurfaceKHR): VkResult; {$ifdef MSWINDOWS}stdcall;{$else}cdecl;{$endif}
+begin
+  if instance = nil then;
+  if pAllocator = nil then;
+  GMockLastSurfaceCreateInfoSType := pCreateInfo^.sType;
+  GMockLastAndroidWindow := pCreateInfo^.window;
+  pSurface^ := VkSurfaceKHR($A004);
+  Result := VK_SUCCESS;
+end;
+
+function MockCreateMetalSurfaceEXT(
+  instance: VkInstance;
+  const pCreateInfo: PVkMetalSurfaceCreateInfoEXT;
+  const pAllocator: PVkAllocationCallbacks;
+  pSurface: PVkSurfaceKHR): VkResult; {$ifdef MSWINDOWS}stdcall;{$else}cdecl;{$endif}
+begin
+  if instance = nil then;
+  if pAllocator = nil then;
+  GMockLastSurfaceCreateInfoSType := pCreateInfo^.sType;
+  GMockLastMetalLayer := pCreateInfo^.pLayer;
+  pSurface^ := VkSurfaceKHR($A005);
+  Result := VK_SUCCESS;
+end;
+
+function MockCreateViSurfaceNN(
+  instance: VkInstance;
+  const pCreateInfo: PVkViSurfaceCreateInfoNN;
+  const pAllocator: PVkAllocationCallbacks;
+  pSurface: PVkSurfaceKHR): VkResult; {$ifdef MSWINDOWS}stdcall;{$else}cdecl;{$endif}
+begin
+  if instance = nil then;
+  if pAllocator = nil then;
+  GMockLastSurfaceCreateInfoSType := pCreateInfo^.sType;
+  GMockLastViWindow := pCreateInfo^.window;
+  pSurface^ := VkSurfaceKHR($A006);
+  Result := VK_SUCCESS;
+end;
+
+function MockWSIGetInstanceProcAddr(
+  instance: VkInstance;
+  pName: PAnsiChar): Pointer; {$ifdef MSWINDOWS}stdcall;{$else}cdecl;{$endif}
+var
+  NameStr: String;
+begin
+  if instance = nil then;
+  NameStr := String(pName);
+  if NameStr = 'vkCreateWin32SurfaceKHR' then
+    Result := @MockCreateWin32SurfaceKHR
+  else if NameStr = 'vkCreateXlibSurfaceKHR' then
+    Result := @MockCreateXlibSurfaceKHR
+  else if NameStr = 'vkCreateWaylandSurfaceKHR' then
+    Result := @MockCreateWaylandSurfaceKHR
+  else if NameStr = 'vkCreateAndroidSurfaceKHR' then
+    Result := @MockCreateAndroidSurfaceKHR
+  else if NameStr = 'vkCreateMetalSurfaceEXT' then
+    Result := @MockCreateMetalSurfaceEXT
+  else if NameStr = 'vkCreateViSurfaceNN' then
+    Result := @MockCreateViSurfaceNN
+  else
+    Result := nil;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanWSINativeSurfaceDescAndExtensionsRHI;
+var
+  Desc: TVulkanNativeSurfaceDesc;
+  Exts: TAnsiStringArray;
+begin
+  { 1. Validate Win32 descriptor and required instance extensions }
+  Desc := TVulkanNativeSurfaceDesc.CreateWin32(VkWin32HINSTANCE($400000), VkWin32HWND($123456));
+  AssertEquals('Win32 platform', Ord(vwsiWin32), Ord(Desc.Platform));
+  AssertTrue('Valid Win32 desc must pass validation', ValidateVulkanNativeSurfaceDesc(Desc));
+  Desc.Win32WindowHandle := 0;
+  AssertFalse('Win32 desc with HWND=0 must fail validation', ValidateVulkanNativeSurfaceDesc(Desc));
+  Exts := GetRequiredVulkanInstanceExtensionsForPlatform(vwsiWin32);
+  AssertEquals('Win32 requires 2 instance extensions', 2, Length(Exts));
+  AssertEquals('Win32 ext 1 is VK_KHR_win32_surface', VK_KHR_WIN32_SURFACE_EXTENSION_NAME, String(Exts[1]));
+
+  { 2. Validate Linux X11 (Xlib) and Wayland descriptors and extensions }
+  Desc := TVulkanNativeSurfaceDesc.CreateXlib(PVkXlibDisplay(PtrUInt($7000)), VkXlibWindow($8001));
+  AssertTrue('Valid Xlib desc must pass validation', ValidateVulkanNativeSurfaceDesc(Desc));
+  Exts := GetRequiredVulkanInstanceExtensionsForPlatform(vwsiXlib);
+  AssertEquals('Xlib ext 1 is VK_KHR_xlib_surface', VK_KHR_XLIB_SURFACE_EXTENSION_NAME, String(Exts[1]));
+
+  Desc := TVulkanNativeSurfaceDesc.CreateWayland(Pointer($9001), Pointer($9002));
+  AssertTrue('Valid Wayland desc must pass validation', ValidateVulkanNativeSurfaceDesc(Desc));
+  Exts := GetRequiredVulkanInstanceExtensionsForPlatform(vwsiWayland);
+  AssertEquals('Wayland ext 1 is VK_KHR_wayland_surface', VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME, String(Exts[1]));
+
+  { 3. Validate Android, macOS/iOS Metal (MoltenVK), and Nintendo Switch Vi descriptors }
+  Desc := TVulkanNativeSurfaceDesc.CreateAndroid(Pointer($B001));
+  AssertTrue('Valid Android desc must pass validation', ValidateVulkanNativeSurfaceDesc(Desc));
+  Exts := GetRequiredVulkanInstanceExtensionsForPlatform(vwsiAndroid);
+  AssertEquals('Android ext 1 is VK_KHR_android_surface', VK_KHR_ANDROID_SURFACE_EXTENSION_NAME, String(Exts[1]));
+
+  Desc := TVulkanNativeSurfaceDesc.CreateMetal(Pointer($C001));
+  AssertTrue('Valid Metal desc must pass validation', ValidateVulkanNativeSurfaceDesc(Desc));
+  Exts := GetRequiredVulkanInstanceExtensionsForPlatform(vwsiMetal);
+  AssertEquals('Metal requires 3 instance extensions (including portability)', 3, Length(Exts));
+  AssertEquals('Metal ext 1 is VK_EXT_metal_surface', VK_EXT_METAL_SURFACE_EXTENSION_NAME, String(Exts[1]));
+  AssertEquals('Metal ext 2 is VK_KHR_portability_enumeration', VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME, String(Exts[2]));
+
+  Desc := TVulkanNativeSurfaceDesc.CreateViSwitch(Pointer($D001));
+  AssertTrue('Valid ViSwitch desc must pass validation', ValidateVulkanNativeSurfaceDesc(Desc));
+  Exts := GetRequiredVulkanInstanceExtensionsForPlatform(vwsiViSwitch);
+  AssertEquals('ViSwitch ext 1 is VK_NN_vi_surface', VK_NN_VI_SURFACE_EXTENSION_NAME, String(Exts[1]));
+end;
+
+procedure TTestCastleVulkanRHI.TestCreateVulkanSurfaceAcrossAllOSBackendsRHI;
+var
+  SavedGetInstanceProcAddr: PFN_vkGetInstanceProcAddr;
+  DummyInstance: VkInstance;
+  Surf: VkSurfaceKHR;
+begin
+  SavedGetInstanceProcAddr := vkGetInstanceProcAddr;
+  DummyInstance := VkInstance(PtrUInt($1111));
+  vkGetInstanceProcAddr := @MockWSIGetInstanceProcAddr;
+  try
+    { 1. Win32 surface creation }
+    Surf := CreateVulkanSurfaceFromNativeDesc(DummyInstance,
+      TVulkanNativeSurfaceDesc.CreateWin32(VkWin32HINSTANCE($400000), VkWin32HWND($2222)));
+    AssertTrue('Win32 surface handle must match $A001', Surf = VkSurfaceKHR($A001));
+    AssertEquals('Win32 sType must match',
+      VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR, Integer(GMockLastSurfaceCreateInfoSType));
+    AssertTrue('Win32 HWND must match', GMockLastWin32HWND = VkWin32HWND($2222));
+
+    { 2. Linux X11 (Xlib) surface creation }
+    Surf := CreateVulkanSurfaceFromNativeDesc(DummyInstance,
+      TVulkanNativeSurfaceDesc.CreateXlib(PVkXlibDisplay(PtrUInt($3333)), VkXlibWindow($4444)));
+    AssertTrue('Xlib surface handle must match $A002', Surf = VkSurfaceKHR($A002));
+    AssertEquals('Xlib sType must match',
+      VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR, Integer(GMockLastSurfaceCreateInfoSType));
+    AssertTrue('Xlib Display must match', GMockLastXlibDisplay = PVkXlibDisplay(PtrUInt($3333)));
+    AssertTrue('Xlib Window must match', GMockLastXlibWindow = VkXlibWindow($4444));
+
+    { 3. Linux Wayland surface creation }
+    Surf := CreateVulkanSurfaceFromNativeDesc(DummyInstance,
+      TVulkanNativeSurfaceDesc.CreateWayland(Pointer($5551), Pointer($5552)));
+    AssertTrue('Wayland surface handle must match $A003', Surf = VkSurfaceKHR($A003));
+    AssertEquals('Wayland sType must match',
+      VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR, Integer(GMockLastSurfaceCreateInfoSType));
+    AssertTrue('Wayland wl_display must match', GMockLastWaylandDisplay = Pointer($5551));
+    AssertTrue('Wayland wl_surface must match', GMockLastWaylandSurface = Pointer($5552));
+
+    { 4. Android ANativeWindow surface creation }
+    Surf := CreateVulkanSurfaceFromNativeDesc(DummyInstance,
+      TVulkanNativeSurfaceDesc.CreateAndroid(Pointer($6666)));
+    AssertTrue('Android surface handle must match $A004', Surf = VkSurfaceKHR($A004));
+    AssertEquals('Android sType must match',
+      VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR, Integer(GMockLastSurfaceCreateInfoSType));
+    AssertTrue('Android ANativeWindow must match', GMockLastAndroidWindow = Pointer($6666));
+
+    { 5. macOS / iOS MoltenVK CAMetalLayer surface creation }
+    Surf := CreateVulkanSurfaceFromNativeDesc(DummyInstance,
+      TVulkanNativeSurfaceDesc.CreateMetal(Pointer($7777)));
+    AssertTrue('Metal surface handle must match $A005', Surf = VkSurfaceKHR($A005));
+    AssertEquals('Metal sType must match',
+      VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT, Integer(GMockLastSurfaceCreateInfoSType));
+    AssertTrue('Metal CAMetalLayer must match', GMockLastMetalLayer = Pointer($7777));
+
+    { 6. Nintendo Switch ViLayer surface creation }
+    Surf := CreateVulkanSurfaceFromNativeDesc(DummyInstance,
+      TVulkanNativeSurfaceDesc.CreateViSwitch(Pointer($8888)));
+    AssertTrue('ViSwitch surface handle must match $A006', Surf = VkSurfaceKHR($A006));
+    AssertEquals('ViSwitch sType must match',
+      VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN, Integer(GMockLastSurfaceCreateInfoSType));
+    AssertTrue('ViSwitch window must match', GMockLastViWindow = Pointer($8888));
+  finally
+    vkGetInstanceProcAddr := SavedGetInstanceProcAddr;
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCastleWindowVulkanSurfaceCreationAndLifecycleRHI;
+var
+  SavedGetInstanceProcAddr: PFN_vkGetInstanceProcAddr;
+  SavedBackend: TRenderBackend;
+  Win: TCastleWindow;
+  DummyInstance: VkInstance;
+  Surf: VkSurfaceKHR;
+  Desc: TVulkanNativeSurfaceDesc;
+begin
+  SavedGetInstanceProcAddr := vkGetInstanceProcAddr;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  DummyInstance := VkInstance(PtrUInt($9999));
+  vkGetInstanceProcAddr := @MockWSIGetInstanceProcAddr;
+  Win := TCastleWindow.Create(nil);
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    AssertTrue('IsVulkanBackendRequested must be True when RenderBackend = backendVulkan',
+      Win.IsVulkanBackendRequested);
+
+    { 1. Default BuildVulkanNativeSurfaceDesc matches current OS WSI platform }
+    Desc := Win.BuildVulkanNativeSurfaceDesc;
+    AssertTrue('Default window WSI platform must not be vwsiAuto', Desc.Platform <> vwsiAuto);
+
+    { 2. Test Win32 surface creation through TCastleWindow.CreateVulkanSurface }
+    Win.SetCustomVulkanSurfaceDesc(
+      TVulkanNativeSurfaceDesc.CreateWin32(VkWin32HINSTANCE($400000), VkWin32HWND($ABCD)));
+    AssertTrue('HasCustomVulkanSurfaceDesc must be True', Win.HasCustomVulkanSurfaceDesc);
+    Surf := Win.CreateVulkanSurface(DummyInstance);
+    AssertTrue('Window CreateVulkanSurface (Win32) must return $A001', Surf = VkSurfaceKHR($A001));
+    AssertTrue('Window VulkanSurfaceHandle must track $A001', Win.VulkanSurfaceHandle = VkSurfaceKHR($A001));
+
+    { 3. Test Linux Wayland surface creation through TCastleWindow.CreateVulkanSurface }
+    Win.SetCustomVulkanSurfaceDesc(
+      TVulkanNativeSurfaceDesc.CreateWayland(Pointer($1122), Pointer($3344)));
+    Surf := Win.CreateVulkanSurface(DummyInstance);
+    AssertTrue('Window CreateVulkanSurface (Wayland) must return $A003', Surf = VkSurfaceKHR($A003));
+
+    { 4. Test macOS/iOS Metal surface creation through TCastleWindow.CreateVulkanSurface }
+    Win.SetCustomVulkanSurfaceDesc(
+      TVulkanNativeSurfaceDesc.CreateMetal(Pointer($5566)));
+    Surf := Win.CreateVulkanSurface(DummyInstance);
+    AssertTrue('Window CreateVulkanSurface (Metal) must return $A005', Surf = VkSurfaceKHR($A005));
+
+    { 5. Test Android surface creation through TCastleWindow.CreateVulkanSurface }
+    Win.SetCustomVulkanSurfaceDesc(
+      TVulkanNativeSurfaceDesc.CreateAndroid(Pointer($7788)));
+    Surf := Win.CreateVulkanSurface(DummyInstance);
+    AssertTrue('Window CreateVulkanSurface (Android) must return $A004', Surf = VkSurfaceKHR($A004));
+
+    Win.ClearCustomVulkanSurfaceDesc;
+    AssertFalse('HasCustomVulkanSurfaceDesc must be False after ClearCustomVulkanSurfaceDesc',
+      Win.HasCustomVulkanSurfaceDesc);
+  finally
+    FreeAndNil(Win);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    vkGetInstanceProcAddr := SavedGetInstanceProcAddr;
   end;
 end;
 
