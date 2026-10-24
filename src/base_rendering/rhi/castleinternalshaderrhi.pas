@@ -1625,6 +1625,29 @@ type
       const ADNormalDx, ADNormalDy: TVector3;
       const ACurvatureScale: Single): Single; static;
 
+    { Phase 49.1: Generates GLSL 450 Physically Based Camera Exposure (EV100) functions. }
+    function GenerateCameraEV100ExposureFunctions: String;
+
+    { Phase 49.1 CPU reference: Computes photographic EV100 from aperture f-stops (N),
+      shutter time in seconds (t), and sensor ISO sensitivity (S):
+      EV100 = log2((N^2 / t) * (100.0 / S)). }
+    class function EvaluateEV100FromCameraSettings(
+      const AApertureFStops, AShutterSeconds, AISO: Single): Single; static;
+
+    { Phase 49.1 CPU reference: Computes ISO 12232 saturation-based linear exposure
+      multiplier from EV100: 1.0 / (1.2 * 2^EV100). }
+    class function EvaluateExposureMultiplierFromEV100(
+      const AEV100: Single): Single; static;
+
+    { Phase 49.2: Generates GLSL 450 AgX Filmic Log Encoding & Highlight Chroma Gamut Compression functions. }
+    function GenerateAgXGamutCompressionFunctions: String;
+
+    { Phase 49.2 CPU reference: Compresses out-of-gamut high-intensity saturated RGB colors
+      toward their Rec.709 luminance achromatic axis to prevent hard channel clipping. }
+    class function EvaluateChromaGamutCompression(
+      const ALinearRGB: TVector3;
+      const ACompressionStrength: Single): TVector3; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -7824,6 +7847,64 @@ var
 begin
   Curv := (ADNormalDx.X + ADNormalDy.Y) * ACurvatureScale;
   Result := EnsureRange(1.0 + Curv, 0.0, 2.0);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateCameraEV100ExposureFunctions: String;
+begin
+  Result :=
+    '// Phase 49.1: Physically Based Camera Exposure (EV100)' + NL +
+    'float EvaluateEV100FromCameraSettings(float apertureFStops, float shutterSeconds, float iso) {' + NL +
+    '  float n2 = max(0.5, apertureFStops) * max(0.5, apertureFStops);' + NL +
+    '  float t = max(1e-6, shutterSeconds);' + NL +
+    '  float s = max(1.0, iso);' + NL +
+    '  return log2((n2 / t) * (100.0 / s));' + NL +
+    '}' + NL +
+    'float EvaluateExposureMultiplierFromEV100(float ev100) {' + NL +
+    '  return 1.0 / (1.2 * exp2(ev100));' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateEV100FromCameraSettings(
+  const AApertureFStops, AShutterSeconds, AISO: Single): Single;
+var
+  N, T, S: Single;
+begin
+  N := Max(0.5, AApertureFStops);
+  T := Max(1e-6, AShutterSeconds);
+  S := Max(1.0, AISO);
+  Result := Log2(((N * N) / T) * (100.0 / S));
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateExposureMultiplierFromEV100(
+  const AEV100: Single): Single;
+begin
+  Result := 1.0 / (1.2 * Power(2.0, AEV100));
+end;
+
+function TCastleShaderGeneratorRHI.GenerateAgXGamutCompressionFunctions: String;
+begin
+  Result :=
+    '// Phase 49.2: AgX Filmic Log Encoding & Highlight Chroma Gamut Compression' + NL +
+    'vec3 EvaluateChromaGamutCompression(vec3 linearRGB, float compressionStrength) {' + NL +
+    '  float luma = dot(linearRGB, vec3(0.2126, 0.7152, 0.0722));' + NL +
+    '  float maxCh = max(max(linearRGB.r, linearRGB.g), linearRGB.b);' + NL +
+    '  float highlightFactor = maxCh / (1.0 + maxCh);' + NL +
+    '  float desat = clamp(highlightFactor * clamp(compressionStrength, 0.0, 1.0), 0.0, 1.0);' + NL +
+    '  return mix(linearRGB, vec3(luma), desat);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateChromaGamutCompression(
+  const ALinearRGB: TVector3;
+  const ACompressionStrength: Single): TVector3;
+var
+  Luma, MaxCh, HighlightFactor, Desat: Single;
+begin
+  Luma := ALinearRGB.X * 0.2126 + ALinearRGB.Y * 0.7152 + ALinearRGB.Z * 0.0722;
+  MaxCh := Max(Max(ALinearRGB.X, ALinearRGB.Y), ALinearRGB.Z);
+  HighlightFactor := MaxCh / (1.0 + MaxCh);
+  Desat := EnsureRange(HighlightFactor * EnsureRange(ACompressionStrength, 0.0, 1.0), 0.0, 1.0);
+  Result := ALinearRGB * (1.0 - Desat) + Vector3(Luma, Luma, Luma) * Desat;
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

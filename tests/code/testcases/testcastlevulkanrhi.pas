@@ -213,6 +213,9 @@ type
     procedure TestCarPaintMultiLayerFlakeBRDFRHI;
     procedure TestScreenSpaceCurvatureCavityShadingRHI;
     procedure TestVulkanHiZPyramidGeneratorDownsampleAndDispatchRHI;
+    procedure TestCameraEV100AndExposureMultiplierRHI;
+    procedure TestAgXChromaGamutCompressionRHI;
+    procedure TestVulkanAutoExposureHistogramTrimmedEVAndDispatchRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -10513,6 +10516,104 @@ begin
     AssertEquals('MipLevelCount for 512x256 must be 10', 10, Integer(Device.HiZPyramidGenerator.MipLevelCount));
     AssertEquals('BuildDispatchCount must be 1', 1, Integer(Device.HiZPyramidGenerator.BuildDispatchCount));
     AssertEquals('CmdList ComputeDispatchCount must equal 10 mip dispatches', 10, Integer(CmdList.ComputeDispatchCount));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCameraEV100AndExposureMultiplierRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  EV100GLSL: String;
+  EVSunny16, EVIndoor, MultSunny, MultIndoor: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Camera EV100 GLSL 450 functions }
+    EV100GLSL := Gen.GenerateCameraEV100ExposureFunctions;
+    AssertTrue('Camera EV100 GLSL must include EvaluateEV100FromCameraSettings',
+      Pos('float EvaluateEV100FromCameraSettings(float apertureFStops, float shutterSeconds, float iso)', EV100GLSL) > 0);
+    AssertTrue('Camera EV100 GLSL must include EvaluateExposureMultiplierFromEV100',
+      Pos('float EvaluateExposureMultiplierFromEV100(float ev100)', EV100GLSL) > 0);
+
+    { 2. Verify "Sunny 16" rule: f/16, 1/128 s (0.0078125 s), ISO 100 -> log2(256 / 0.0078125) = log2(32768) = 15.0 }
+    EVSunny16 := TCastleShaderGeneratorRHI.EvaluateEV100FromCameraSettings(16.0, 1.0 / 128.0, 100.0);
+    EVIndoor  := TCastleShaderGeneratorRHI.EvaluateEV100FromCameraSettings(2.0, 1.0 / 32.0, 400.0);
+    AssertSameValue(15.0, EVSunny16, 1e-5);
+    { f/2, 1/32s, ISO 400 -> (4 / (1/32)) * (100/400) = 128 * 0.25 = 32 -> log2(32) = 5.0 }
+    AssertSameValue(5.0, EVIndoor, 1e-5);
+
+    MultSunny  := TCastleShaderGeneratorRHI.EvaluateExposureMultiplierFromEV100(EVSunny16);
+    MultIndoor := TCastleShaderGeneratorRHI.EvaluateExposureMultiplierFromEV100(EVIndoor);
+    AssertTrue('Lower EV100 (indoor) must produce much larger exposure multiplier than Sunny 16',
+      MultIndoor > MultSunny * 500.0);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestAgXChromaGamutCompressionRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  AgXGLSL: String;
+  InputColor, CompressedColor: TVector3;
+  InputLuma, CompressedLuma: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify AgX Gamut Compression GLSL 450 functions }
+    AgXGLSL := Gen.GenerateAgXGamutCompressionFunctions;
+    AssertTrue('AgX GLSL must include EvaluateChromaGamutCompression',
+      Pos('vec3 EvaluateChromaGamutCompression(vec3 linearRGB, float compressionStrength)', AgXGLSL) > 0);
+
+    { 2. Verify intense saturated red (10, 0, 0) compresses toward achromatic luminance while preserving Rec.709 luma }
+    InputColor := Vector3(10.0, 0.0, 0.0);
+    CompressedColor := TCastleShaderGeneratorRHI.EvaluateChromaGamutCompression(InputColor, 0.8);
+    InputLuma := InputColor.X * 0.2126 + InputColor.Y * 0.7152 + InputColor.Z * 0.0722;
+    CompressedLuma := CompressedColor.X * 0.2126 + CompressedColor.Y * 0.7152 + CompressedColor.Z * 0.0722;
+
+    AssertSameValue(InputLuma, CompressedLuma, 1e-4);
+    AssertTrue('Chroma compression must lift G/B channels and reduce peak R saturation in bright highlights',
+      (CompressedColor.X < InputColor.X) and (CompressedColor.Y > 1.0) and (CompressedColor.Z > 1.0));
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanAutoExposureHistogramTrimmedEVAndDispatchRHI;
+var
+  Bins: array[0..3] of Cardinal;
+  TrimmedEV: Single;
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+begin
+  { 1. Verify outlier-trimmed histogram EV discards bottom 10% and top 10% outliers }
+  Bins[0] := 10; { Darkest 10% outlier at -4 EV }
+  Bins[1] := 40; { Mid-low at 0 EV }
+  Bins[2] := 40; { Mid-high at +4 EV }
+  Bins[3] := 10; { Brightest 10% outlier at +8 EV }
+  TrimmedEV := TCastleVulkanAutoExposureHistogram.EvaluateTrimmedHistogramAverageEV(
+    Bins, -4.0, 8.0, 0.10, 0.90);
+  { Middle 80 pixels are split 40 at bin 1 (0 EV) and 40 at bin 2 (+4 EV) -> exact average = +2.0 EV }
+  AssertSameValue(2.0, TrimmedEV, 1e-5);
+
+  { 2. Verify TCastleVulkanAutoExposureHistogram SSBO allocation, eye adaptation, and compute dispatch }
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($667B)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    Device.AutoExposureHistogram.CurrentAdaptedEV := 0.0;
+    CmdList.BeginRecording;
+    Device.AutoExposureHistogram.DispatchHistogramAutoExposure(CmdList, 1920, 1080, 4.0, 0.5, 2.0);
+    CmdList.EndRecording;
+
+    AssertTrue('HistogramBuffer and AdaptedExposureBuffer must be allocated',
+      (Device.AutoExposureHistogram.HistogramBuffer <> nil) and
+      (Device.AutoExposureHistogram.AdaptedExposureBuffer <> nil));
+    AssertTrue('CurrentAdaptedEV must adapt positively toward target EV 4.0',
+      (Device.AutoExposureHistogram.CurrentAdaptedEV > 2.0) and
+      (Device.AutoExposureHistogram.CurrentAdaptedEV < 4.0));
+    AssertEquals('DispatchCount must be 1', 1, Integer(Device.AutoExposureHistogram.DispatchCount));
   finally
     FreeAndNil(CmdList);
     FreeAndNil(Device);

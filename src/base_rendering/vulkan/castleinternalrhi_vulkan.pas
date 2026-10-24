@@ -3288,6 +3288,47 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { GPU 64-Bin Luminance Histogram Auto-Exposure Manager                       }
+  { -------------------------------------------------------------------------- }
+
+  { Manages a 64-bin log-luminance histogram SSBO, outlier-trimmed average EV
+    reduction, and temporal eye adaptation compute dispatches. }
+  TCastleVulkanAutoExposureHistogram = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FHistogramBuffer: TVulkanRHIBuffer;
+    FAdaptedExposureBuffer: TVulkanRHIBuffer;
+    FCurrentAdaptedEV: Single;
+    FDispatchCount: Cardinal;
+    FHistogramComputePipeline: TVulkanRHIComputePipeline;
+    procedure EnsureHistogramResources;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Evaluates the outlier-trimmed weighted average EV across a luminance histogram
+      by discarding the darkest ALowPercentile and brightest AHighPercentile pixel counts. }
+    class function EvaluateTrimmedHistogramAverageEV(
+      const ABins: array of Cardinal;
+      const AMinLogLum, AMaxLogLum, ALowPercentile, AHighPercentile: Single): Single; static;
+
+    { Dispatches the luminance histogram build and temporal eye adaptation compute pass. }
+    procedure DispatchHistogramAutoExposure(
+      const ACommandList: TVulkanRHICommandList;
+      const AViewportWidth, AViewportHeight: Cardinal;
+      const ATargetEV, ADeltaTimeSeconds, AAdaptationSpeed: Single;
+      const AComputePipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property HistogramBuffer: TVulkanRHIBuffer read FHistogramBuffer;
+    property AdaptedExposureBuffer: TVulkanRHIBuffer read FAdaptedExposureBuffer;
+    property CurrentAdaptedEV: Single read FCurrentAdaptedEV write FCurrentAdaptedEV;
+    property DispatchCount: Cardinal read FDispatchCount;
+    property HistogramComputePipeline: TVulkanRHIComputePipeline
+      read FHistogramComputePipeline write FHistogramComputePipeline;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -3408,6 +3449,7 @@ type
     FGaussianSplatRenderer: TCastleVulkanGaussianSplatRenderer;
     FDescriptorBufferManager: TCastleVulkanDescriptorBufferManager;
     FHiZPyramidGenerator: TCastleVulkanHiZPyramidGenerator;
+    FAutoExposureHistogram: TCastleVulkanAutoExposureHistogram;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -3533,6 +3575,7 @@ type
     function GetGaussianSplatRenderer: TCastleVulkanGaussianSplatRenderer;
     function GetDescriptorBufferManager: TCastleVulkanDescriptorBufferManager;
     function GetHiZPyramidGenerator: TCastleVulkanHiZPyramidGenerator;
+    function GetAutoExposureHistogram: TCastleVulkanAutoExposureHistogram;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -3763,6 +3806,7 @@ type
     property GaussianSplatRenderer: TCastleVulkanGaussianSplatRenderer read GetGaussianSplatRenderer;
     property DescriptorBufferManager: TCastleVulkanDescriptorBufferManager read GetDescriptorBufferManager;
     property HiZPyramidGenerator: TCastleVulkanHiZPyramidGenerator read GetHiZPyramidGenerator;
+    property AutoExposureHistogram: TCastleVulkanAutoExposureHistogram read GetAutoExposureHistogram;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -16641,6 +16685,132 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanAutoExposureHistogram                                           }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanAutoExposureHistogram.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FHistogramBuffer := nil;
+  FAdaptedExposureBuffer := nil;
+  FCurrentAdaptedEV := 0.0;
+  FDispatchCount := 0;
+  FHistogramComputePipeline := nil;
+end;
+
+destructor TCastleVulkanAutoExposureHistogram.Destroy;
+begin
+  FreeAndNil(FAdaptedExposureBuffer);
+  FreeAndNil(FHistogramBuffer);
+  inherited;
+end;
+
+class function TCastleVulkanAutoExposureHistogram.EvaluateTrimmedHistogramAverageEV(
+  const ABins: array of Cardinal;
+  const AMinLogLum, AMaxLogLum, ALowPercentile, AHighPercentile: Single): Single;
+var
+  I, BinCount: Integer;
+  TotalPixels, LowCut, HighCut, RunningSum, NextSum, ValidCount, OverlapStart, OverlapEnd: Double;
+  BinNorm, BinEV, WeightedSum, TotalWeight: Double;
+begin
+  BinCount := Length(ABins);
+  if BinCount = 0 then
+    Exit(AMinLogLum);
+
+  TotalPixels := 0.0;
+  for I := 0 to BinCount - 1 do
+    TotalPixels := TotalPixels + ABins[I];
+
+  if TotalPixels <= 0.0 then
+    Exit(AMinLogLum);
+
+  LowCut := TotalPixels * EnsureRange(ALowPercentile, 0.0, 0.99);
+  HighCut := TotalPixels * EnsureRange(AHighPercentile, ALowPercentile + 0.01, 1.0);
+
+  RunningSum := 0.0;
+  WeightedSum := 0.0;
+  TotalWeight := 0.0;
+  for I := 0 to BinCount - 1 do
+  begin
+    NextSum := RunningSum + ABins[I];
+    OverlapStart := Max(RunningSum, LowCut);
+    OverlapEnd := Min(NextSum, HighCut);
+    if OverlapEnd > OverlapStart then
+    begin
+      ValidCount := OverlapEnd - OverlapStart;
+      if BinCount > 1 then
+        BinNorm := I / (BinCount - 1)
+      else
+        BinNorm := 0.5;
+      BinEV := AMinLogLum + BinNorm * (AMaxLogLum - AMinLogLum);
+      WeightedSum := WeightedSum + ValidCount * BinEV;
+      TotalWeight := TotalWeight + ValidCount;
+    end;
+    RunningSum := NextSum;
+  end;
+
+  if TotalWeight > 0.0 then
+    Result := Single(WeightedSum / TotalWeight)
+  else
+    Result := AMinLogLum;
+end;
+
+procedure TCastleVulkanAutoExposureHistogram.EnsureHistogramResources;
+var
+  BufDesc: TRHIBufferDesc;
+begin
+  if FDevice = nil then
+    Exit;
+  if FHistogramBuffer = nil then
+  begin
+    BufDesc := TRHIBufferDesc.Create(64 * SizeOf(Cardinal), [buStorage, buTransferDst],
+      muGpuOnly, 'LuminanceHistogram64BinsSSBO');
+    FHistogramBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+  if FAdaptedExposureBuffer = nil then
+  begin
+    BufDesc := TRHIBufferDesc.Create(16, [buStorage, buUniform],
+      muCpuToGpu, 'AdaptedExposureStateSSBO');
+    FAdaptedExposureBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+end;
+
+procedure TCastleVulkanAutoExposureHistogram.DispatchHistogramAutoExposure(
+  const ACommandList: TVulkanRHICommandList;
+  const AViewportWidth, AViewportHeight: Cardinal;
+  const ATargetEV, ADeltaTimeSeconds, AAdaptationSpeed: Single;
+  const AComputePipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+var
+  ActivePipeline: TVulkanRHIComputePipeline;
+  GroupsX, GroupsY: Cardinal;
+  Alpha: Single;
+begin
+  if ACommandList = nil then
+    Exit;
+  EnsureHistogramResources;
+
+  Alpha := 1.0 - Exp(-Max(0.0, ADeltaTimeSeconds) * Max(0.0, AAdaptationSpeed));
+  FCurrentAdaptedEV := FCurrentAdaptedEV + (ATargetEV - FCurrentAdaptedEV) * EnsureRange(Alpha, 0.0, 1.0);
+
+  if AComputePipeline <> nil then
+    ActivePipeline := AComputePipeline
+  else
+    ActivePipeline := FHistogramComputePipeline;
+
+  if ActivePipeline <> nil then
+    ACommandList.BindComputePipeline(ActivePipeline);
+  if ADescriptorSet <> nil then
+    ACommandList.BindComputeDescriptorSet(0, ADescriptorSet, []);
+
+  GroupsX := (Max(Cardinal(1), AViewportWidth) + 15) div 16;
+  GroupsY := (Max(Cardinal(1), AViewportHeight) + 15) div 16;
+  ACommandList.Dispatch(GroupsX, GroupsY, 1);
+  Inc(FDispatchCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -17379,12 +17549,20 @@ begin
   Result := FHiZPyramidGenerator;
 end;
 
+function TVulkanRHIDevice.GetAutoExposureHistogram: TCastleVulkanAutoExposureHistogram;
+begin
+  if FAutoExposureHistogram = nil then
+    FAutoExposureHistogram := TCastleVulkanAutoExposureHistogram.Create(Self);
+  Result := FAutoExposureHistogram;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FAutoExposureHistogram);
   FreeAndNil(FHiZPyramidGenerator);
   FreeAndNil(FDescriptorBufferManager);
   FreeAndNil(FGaussianSplatRenderer);

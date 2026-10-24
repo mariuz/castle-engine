@@ -733,14 +733,16 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 48 Status**: Completed. Multi-Layer Metallic Flake & Clear-Coat Car-Paint BRDF (`GenerateCarPaintFlakeFunctions`, `EvaluateCarPaintMultiLayerBRDF`), Screen-Space Normal Curvature & Ridge/Valley Cavity Occlusion (`GenerateScreenSpaceCurvatureFunctions`, `EvaluateScreenSpaceCurvatureCavity`), and GPU Hierarchical-Z (Hi-Z) Conservative Min/Max Depth Pyramid Generator (`TCastleVulkanHiZPyramidGenerator`) fully integrated and tested (174 unit tests passing).
 
 
-### Phase 49: AgX Filmic Gamut Compression, Physically Based Camera Exposure ($\text{EV}_{100}$) & GPU Luminance Histogram Auto-Exposure Manager (PLANNED)
+### Phase 49: AgX Filmic Gamut Compression, Physically Based Camera Exposure ($\text{EV}_{100}$) & GPU Luminance Histogram Auto-Exposure Manager (COMPLETED)
 
-* [ ] **49.1. Physically Based Camera Exposure ($\text{EV}_{100}$) from Aperture, Shutter Speed & ISO (`GenerateCameraEV100ExposureFunctions` in `CastleInternalShaderRHI`)**:
+* [x] **49.1. Physically Based Camera Exposure ($\text{EV}_{100}$) from Aperture, Shutter Speed & ISO (`GenerateCameraEV100ExposureFunctions` in `CastleInternalShaderRHI`)**:
   * Compute photographic $\text{EV}_{100}$ and ISO 12232 saturation-based linear exposure multipliers (`EvaluateEV100FromCameraSettings`, `EvaluateExposureMultiplierFromEV100`).
-* [ ] **49.2. AgX Filmic Log Encoding & Highlight Chroma Gamut Compression (`GenerateAgXGamutCompressionFunctions` in `CastleInternalShaderRHI`)**:
+* [x] **49.2. AgX Filmic Log Encoding & Highlight Chroma Gamut Compression (`GenerateAgXGamutCompressionFunctions` in `CastleInternalShaderRHI`)**:
   * Compress out-of-gamut high-intensity saturated colors toward achromatic white (`EvaluateChromaGamutCompression`) to eliminate clipping artifacts.
-* [ ] **49.3. GPU 64-Bin Luminance Histogram Auto-Exposure Manager (`TCastleVulkanAutoExposureHistogram` in `CastleInternalRHI_Vulkan`)**:
+* [x] **49.3. GPU 64-Bin Luminance Histogram Auto-Exposure Manager (`TCastleVulkanAutoExposureHistogram` in `CastleInternalRHI_Vulkan`)**:
   * Manage 64-bin log-luminance histogram SSBOs (`HistogramBuffer`), outlier-trimmed average luminance calculation (`EvaluateTrimmedHistogramAverageEV`), and temporal eye adaptation (`DispatchHistogramAutoExposure`).
+
+**Milestone 49 Status**: Completed. Physically Based Camera Exposure ($\text{EV}_{100}$) & ISO 12232 linear exposure multiplier (`GenerateCameraEV100ExposureFunctions`, `EvaluateEV100FromCameraSettings`, `EvaluateExposureMultiplierFromEV100`), AgX Highlight Chroma Gamut Compression (`GenerateAgXGamutCompressionFunctions`, `EvaluateChromaGamutCompression`), and GPU 64-Bin Luminance Histogram Auto-Exposure Manager (`TCastleVulkanAutoExposureHistogram`) fully integrated and tested (177 unit tests passing).
 
 
 ### Phase 50: Analytical Capsule Soft Shadow & Ambient Occlusion, Epipolar Volumetric Light Shafts & GPU Frame Pacing Manager (PLANNED)
