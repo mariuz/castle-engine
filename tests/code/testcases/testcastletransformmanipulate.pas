@@ -78,6 +78,7 @@ type
     procedure TestDupinCyclideBourSurfaceAndLimacon;
     procedure TestHennebergSphericalEpicycloidAndTalbotCurve;
     procedure TestKuenRichmondAndDevilsCurve;
+    procedure TestPluckerSuperellipsoidAndGeronoLemniscate;
   end;
 
 implementation
@@ -3905,6 +3906,90 @@ begin
     AssertVectorEquals(Vector3(0.0, 0.0, -12.0), B4.Translation, 1e-4);
     B1.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(0.0, 6.0, 12.0).Normalize, WorldDir.Normalize, 1e-3);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestPluckerSuperellipsoidAndGeronoLemniscate;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  B1, B2, B3, B4: TCastleBox;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.PivotMode := pmPrimarySelected;
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(1, 1, 1);
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(1, 1, 1);
+    B2.Translation := Vector3(10.0, 0.0, 0.0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(1, 1, 1);
+    B3.Translation := Vector3(0.0, 0.0, 10.0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(1, 1, 1);
+    B4.Translation := Vector3(-10.0, 0.0, 0.0);
+    Viewport.Items.Add(B4);
+
+    { 1. Test ArrangeSelectedOnPluckerConoid (ScaleRadius=8.0, FoldsN=2, FoldHeight=3.0, Turns=1.0, OrientMode=2)
+      Around B1=(0,0,0) for N=3 (Frac = 0, 0.5, 1.0):
+      - B1 (Frac=0, RadR=2.0, Theta=0): (2, 0, 0)
+      - B2 (Frac=0.5, RadR=5.0, Theta=Pi): (-5, 0, 0)
+      - B3 (Frac=1.0, RadR=8.0, Theta=2*Pi): (8, 0, 0), surface normal Pth x Pr = Normalize(0, 8, -6) = (0, 0.8, -0.6) }
+    Manipulate.SetSelected([B1, B2, B3]);
+    AssertTrue(Manipulate.ArrangeSelectedOnPluckerConoid(8.0, 2, 3.0, 1.0, 2));
+    AssertVectorEquals(Vector3(2.0, 0.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-5.0, 0.0, 0.0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(8.0, 0.0, 0.0), B3.Translation, 1e-4);
+    B3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.0, 0.8, -0.6), WorldDir.Normalize, 1e-3);
+
+    { 2. Test ArrangeSelectedOnSuperellipsoid (Radii=(10, 6, 8), EastWestExp=0.5, NorthSouthExp=0.5, Turns=1.0, OrientMode=1)
+      Around B1=(0,0,0) for N=3 (Frac = 0, 0.5, 1.0):
+      - B1 (Frac=0, Phi=-Pi/2, Theta=0): (0, -6, 0), normal = (0, -1, 0)
+      - B2 (Frac=0.5, Phi=0, Theta=Pi): (-10, 0, 0), normal = (-1, 0, 0)
+      - B3 (Frac=1.0, Phi=+Pi/2, Theta=2*Pi): (0, 6, 0), normal = (0, 1, 0) }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Manipulate.SetSelected([B1, B2, B3]);
+    AssertTrue(Manipulate.ArrangeSelectedOnSuperellipsoid(Vector3(10.0, 6.0, 8.0), 0.5, 0.5, 1.0, 1));
+    AssertVectorEquals(Vector3(0.0, -6.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-10.0, 0.0, 0.0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, 6.0, 0.0), B3.Translation, 1e-4);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(-1.0, 0.0, 0.0), WorldDir.Normalize, 1e-3);
+    B3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.0, 1.0, 0.0), WorldDir.Normalize, 1e-3);
+
+    { 3. Test ArrangeSelectedInGeronoLemniscate (LobeRadiusA=10.0, LobeWidthB=8.0, SaddleHeight=3.0, OrientMode=1)
+      Around B1=(0,0,0) for N=4 (theta = 0, Pi/2, Pi, 3*Pi/2):
+      - B1 (theta=0): (10, 3, 0), analytical tangent = (0, 0, 1)
+      - B2 (theta=Pi/2): (0, -3, 0), analytical tangent = Normalize(-10, 0, -8)
+      - B3 (theta=Pi): (-10, 3, 0), analytical tangent = (0, 0, 1)
+      - B4 (theta=3*Pi/2): (0, -3, 0), analytical tangent = Normalize(10, 0, -8) }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.ArrangeSelectedInGeronoLemniscate(10.0, 8.0, 3.0, 1));
+    AssertVectorEquals(Vector3(10.0, 3.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, -3.0, 0.0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-10.0, 3.0, 0.0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, -3.0, 0.0), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.0, 0.0, 1.0), WorldDir.Normalize, 1e-3);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(-10.0, 0.0, -8.0).Normalize, WorldDir.Normalize, 1e-3);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

@@ -420,6 +420,9 @@ type
       ButtonArrangeKuen: TButton;
       ButtonArrangeRichmond: TButton;
       ButtonArrangeDevilsCurve: TButton;
+      ButtonArrangePlucker: TButton;
+      ButtonArrangeSuperellipsoid: TButton;
+      ButtonArrangeGerono: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -470,6 +473,7 @@ type
       ButtonUISplitScreen: TButton;
       ButtonUISidebars: TButton;
       ButtonUIPipOverlay: TButton;
+      ButtonUIBentoGrid: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -526,6 +530,7 @@ type
       MenuTreeViewItemSelectNegativeScale: TMenuItem;
       MenuTreeViewItemSelectUIFractional: TMenuItem;
       MenuTreeViewItemSelectMultiViewports: TMenuItem;
+      MenuTreeViewItemSelectUIClipped: TMenuItem;
       MenuTreeViewItemCopyTransform: TMenuItem;
       MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
@@ -691,6 +696,9 @@ type
     procedure ButtonArrangeKuenClick(Sender: TObject);
     procedure ButtonArrangeRichmondClick(Sender: TObject);
     procedure ButtonArrangeDevilsCurveClick(Sender: TObject);
+    procedure ButtonArrangePluckerClick(Sender: TObject);
+    procedure ButtonArrangeSuperellipsoidClick(Sender: TObject);
+    procedure ButtonArrangeGeronoClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -730,6 +738,7 @@ type
     procedure ButtonUISplitScreenClick(Sender: TObject);
     procedure ButtonUISidebarsClick(Sender: TObject);
     procedure ButtonUIPipOverlayClick(Sender: TObject);
+    procedure ButtonUIBentoGridClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -793,6 +802,7 @@ type
     procedure MenuTreeViewItemSelectNegativeScaleClick(Sender: TObject);
     procedure MenuTreeViewItemSelectUIFractionalClick(Sender: TObject);
     procedure MenuTreeViewItemSelectMultiViewportsClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectUIClippedClick(Sender: TObject);
     procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
@@ -1692,6 +1702,26 @@ type
       const CrestHeight: Single = 0.0;
       const OrientMode: Integer = 1);
     procedure ShowArrangeInDevilsCurveDialog;
+    procedure ArrangeSelectionOnPluckerConoid(
+      const ScaleRadius: Single = 0.0;
+      const FoldsN: Integer = 2;
+      const FoldHeight: Single = 3.0;
+      const Turns: Single = 1.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeOnPluckerConoidDialog;
+    procedure ArrangeSelectionOnSuperellipsoid(
+      const Radii: TVector3;
+      const EastWestExp: Single = 0.5;
+      const NorthSouthExp: Single = 0.5;
+      const Turns: Single = 2.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeOnSuperellipsoidDialog;
+    procedure ArrangeSelectionInGeronoLemniscate(
+      const LobeRadiusA: Single = 0.0;
+      const LobeWidthB: Single = 0.0;
+      const SaddleHeight: Single = 0.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeInGeronoLemniscateDialog;
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -1780,6 +1810,11 @@ type
       const PipScaleFraction: Single = 0.26;
       const MarginPx: Single = 16.0;
       const GapPx: Single = 10.0);
+    procedure ArrangeSelectedUserInterfacesInBentoGrid(
+      const HeroFraction: Single = 0.55;
+      const MarginPx: Single = 10.0;
+      const GapPx: Single = 8.0;
+      const HeroOnTop: Boolean = false);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -1845,6 +1880,7 @@ type
     procedure SelectNegativeScaleTransforms(const OddMirroredOnly: Boolean = false);
     procedure SelectFractionalUserInterfaces(const SnapToWholePixels: Boolean = false);
     procedure SelectMultiViewportCameras(const SecondaryOnly: Boolean = false);
+    procedure SelectClippedAndMaskedUserInterfaces(const ClipChildrenOnly: Boolean = false);
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -3287,6 +3323,26 @@ begin
     if Event.IsKey(key5) then
     begin
       Frame.SelectMultiViewportCameras(false);
+      Exit(true);
+    end else
+    if Event.IsKey(key6) then
+    begin
+      Frame.ShowArrangeOnPluckerConoidDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(key7) then
+    begin
+      Frame.ShowArrangeOnSuperellipsoidDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(key8) then
+    begin
+      Frame.ShowArrangeInGeronoLemniscateDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(key9) then
+    begin
+      Frame.SelectClippedAndMaskedUserInterfaces(false);
       Exit(true);
     end;
   end;
@@ -5536,6 +5592,36 @@ begin
   ButtonArrangeDevilsCurve.OnClick := @ButtonArrangeDevilsCurveClick;
   ButtonArrangeDevilsCurve.Parent := PanelLayoutTransform;
 
+  ButtonArrangePlucker := TButton.Create(Self);
+  ButtonArrangePlucker.Align := alTop;
+  ButtonArrangePlucker.AutoSize := true;
+  ButtonArrangePlucker.Caption := 'Arrange Plucker Conoid';
+  ButtonArrangePlucker.Hint := 'Arrange 2+ selected 3D transforms along a 3D Julius Plucker Ruled Conoid Surface around the active pivot (Ctrl+Alt+Shift+6 | Shift-click: dialog | Click: 2-fold Plucker conoid + tangent | Ctrl-click: 3-fold Plucker conoid + exact ruled surface normal)';
+  ButtonArrangePlucker.ShowHint := true;
+  ButtonArrangePlucker.BorderSpacing.Around := 2;
+  ButtonArrangePlucker.OnClick := @ButtonArrangePluckerClick;
+  ButtonArrangePlucker.Parent := PanelLayoutTransform;
+
+  ButtonArrangeSuperellipsoid := TButton.Create(Self);
+  ButtonArrangeSuperellipsoid.Align := alTop;
+  ButtonArrangeSuperellipsoid.AutoSize := true;
+  ButtonArrangeSuperellipsoid.Caption := 'Arrange Superellipsoid';
+  ButtonArrangeSuperellipsoid.Hint := 'Arrange 2+ selected 3D transforms across a 3D Alan Barr Superellipsoid / Lame Surface around the active pivot (Ctrl+Alt+Shift+7 | Shift-click: dialog | Click: Rounded cube e1=0.5, e2=0.5 + exact Barr dual normal | Ctrl-click: Octahedral star e1=1.5, e2=1.5 + outward normal)';
+  ButtonArrangeSuperellipsoid.ShowHint := true;
+  ButtonArrangeSuperellipsoid.BorderSpacing.Around := 2;
+  ButtonArrangeSuperellipsoid.OnClick := @ButtonArrangeSuperellipsoidClick;
+  ButtonArrangeSuperellipsoid.Parent := PanelLayoutTransform;
+
+  ButtonArrangeGerono := TButton.Create(Self);
+  ButtonArrangeGerono.Align := alTop;
+  ButtonArrangeGerono.AutoSize := true;
+  ButtonArrangeGerono.Caption := 'Arrange Gerono Curve';
+  ButtonArrangeGerono.Hint := 'Arrange 2+ selected 3D transforms along a 3D Camillo-Christophe Gerono Figure-Eight Lemniscate / Besace Saddle Curve around the active pivot (Ctrl+Alt+Shift+8 | Shift-click: dialog | Click: Planar Gerono lemniscate + tangent | Ctrl-click: 3D Besace saddle curve + tangent)';
+  ButtonArrangeGerono.ShowHint := true;
+  ButtonArrangeGerono.BorderSpacing.Around := 2;
+  ButtonArrangeGerono.OnClick := @ButtonArrangeGeronoClick;
+  ButtonArrangeGerono.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -5930,6 +6016,14 @@ begin
   ButtonUIPipOverlay.OnClick := @ButtonUIPipOverlayClick;
   ButtonUIPipOverlay.Parent := PanelLayoutUI;
 
+  ButtonUIBentoGrid := TButton.Create(Self);
+  ButtonUIBentoGrid.AutoSize := true;
+  ButtonUIBentoGrid.Caption := 'UI Bento Grid';
+  ButtonUIBentoGrid.Hint := 'Arrange and resize 2+ selected 2D UI controls into an Asymmetric Bento Dashboard Grid (Featured Hero Card + Secondary Bento Tiles) inside their parent container (Click: 55% Left Hero + Right Bento cards, 10px margin, 8px gap | Shift-click: 0px flush Bento grid | Ctrl-click: Top Hero banner + Bottom Bento cards)';
+  ButtonUIBentoGrid.ShowHint := true;
+  ButtonUIBentoGrid.OnClick := @ButtonUIBentoGridClick;
+  ButtonUIBentoGrid.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -6238,6 +6332,11 @@ begin
   MenuTreeViewItemSelectMultiViewports.Caption := 'Select Viewports & Cameras / PiP Viewports (Ctrl+Alt+Shift+5)';
   MenuTreeViewItemSelectMultiViewports.OnClick := @MenuTreeViewItemSelectMultiViewportsClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectMultiViewports);
+
+  MenuTreeViewItemSelectUIClipped := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectUIClipped.Caption := 'Select Clipped & ScrollView 2D UI Controls (Ctrl+Alt+Shift+9)';
+  MenuTreeViewItemSelectUIClipped.OnClick := @MenuTreeViewItemSelectUIClippedClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectUIClipped);
 
   MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
   MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
@@ -9955,6 +10054,8 @@ begin
         ButtonUISidebars.Enabled := SelectedUICount >= 2;
       if ButtonUIPipOverlay <> nil then
         ButtonUIPipOverlay.Enabled := SelectedUICount >= 2;
+      if ButtonUIBentoGrid <> nil then
+        ButtonUIBentoGrid.Enabled := SelectedUICount >= 2;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -10185,6 +10286,12 @@ begin
       ButtonArrangeRichmond.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonArrangeDevilsCurve <> nil then
       ButtonArrangeDevilsCurve.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangePlucker <> nil then
+      ButtonArrangePlucker.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeSuperellipsoid <> nil then
+      ButtonArrangeSuperellipsoid.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeGerono <> nil then
+      ButtonArrangeGerono.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -11874,6 +11981,26 @@ begin
     if (Key = Ord('5')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
     begin
       SelectMultiViewportCameras(false);
+      Key := 0;
+    end else
+    if (Key = Ord('6')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowArrangeOnPluckerConoidDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('7')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowArrangeOnSuperellipsoidDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('8')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowArrangeInGeronoLemniscateDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('9')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      SelectClippedAndMaskedUserInterfaces(false);
       Key := 0;
     end else
     if (Key = VK_OEM_1) and (Shift = [ssAlt, ssShift]) then
@@ -19337,6 +19464,182 @@ begin
     ArrangeSelectionInDevilsCurve(0.0, 0.8, 0.0, 1);
 end;
 
+procedure TDesignFrame.ArrangeSelectionOnPluckerConoid(
+  const ScaleRadius: Single;
+  const FoldsN: Integer;
+  const FoldHeight: Single;
+  const Turns: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedOnPluckerConoid(
+      ScaleRadius, FoldsN, FoldHeight, Turns, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeOnPluckerConoidDialog;
+var
+  Prompts: array[0..4] of string;
+  Values: array[0..4] of string;
+  ScaleR, FoldH, TurnsW: Single;
+  FoldsN, OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+  begin
+    ErrorBox('Select at least 2 TCastleTransform components to arrange on a Plucker Conoid surface.');
+    Exit;
+  end;
+
+  Prompts[0] := 'Plucker conoid scale radius R (0 = auto from selection):';
+  Prompts[1] := 'Fold symmetry order n (1..8, 2 = classic Plucker conoid):';
+  Prompts[2] := 'Vertical fold amplitude height H:';
+  Prompts[3] := 'Azimuthal spiral turns W:';
+  Prompts[4] := 'Orientation (0 = keep, 1 = trajectory tangent, 2 = exact ruled surface normal):';
+  Values[0] := '0.0';
+  Values[1] := '2';
+  Values[2] := '3.0';
+  Values[3] := '1.0';
+  Values[4] := '1';
+
+  if InputQuery('Arrange on 3D Plucker Ruled Conoid Surface (Ctrl+Alt+Shift+6)', Prompts, Values) then
+  begin
+    ScaleR := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    FoldsN := Clamped(StrToIntDef(Trim(Values[1]), 2), 1, 8);
+    FoldH := StrToFloatDefDot(Trim(Values[2]), 3.0);
+    TurnsW := StrToFloatDefDot(Trim(Values[3]), 1.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[4]), 1), 0, 2);
+    ArrangeSelectionOnPluckerConoid(ScaleR, FoldsN, FoldH, TurnsW, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangePluckerClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeOnPluckerConoidDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionOnPluckerConoid(0.0, 3, 3.0, 1.0, 2)
+  else
+    ArrangeSelectionOnPluckerConoid(0.0, 2, 3.0, 1.0, 1);
+end;
+
+procedure TDesignFrame.ArrangeSelectionOnSuperellipsoid(
+  const Radii: TVector3;
+  const EastWestExp: Single;
+  const NorthSouthExp: Single;
+  const Turns: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedOnSuperellipsoid(
+      Radii, EastWestExp, NorthSouthExp, Turns, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeOnSuperellipsoidDialog;
+var
+  Prompts: array[0..4] of string;
+  Values: array[0..4] of string;
+  RadR, E1, E2, TurnsW: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+  begin
+    ErrorBox('Select at least 2 TCastleTransform components to arrange on a 3D Superellipsoid.');
+    Exit;
+  end;
+
+  Prompts[0] := 'Superellipsoid uniform radius R (0 = auto from selection):';
+  Prompts[1] := 'East-West exponent e1 (0.1..5.0; 0.5 = squircle, 1 = sphere, 2 = octahedron):';
+  Prompts[2] := 'North-South exponent e2 (0.1..5.0; 0.5 = pillow, 1 = sphere, 2 = pinch):';
+  Prompts[3] := 'Azimuthal spiral turns W:';
+  Prompts[4] := 'Orientation (0 = keep, 1 = exact Barr dual surface normal, 2 = outward radial):';
+  Values[0] := '0.0';
+  Values[1] := '0.5';
+  Values[2] := '0.5';
+  Values[3] := '2.0';
+  Values[4] := '1';
+
+  if InputQuery('Arrange on 3D Alan Barr Superellipsoid (Ctrl+Alt+Shift+7)', Prompts, Values) then
+  begin
+    RadR := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    E1 := Clamped(StrToFloatDefDot(Trim(Values[1]), 0.5), 0.1, 5.0);
+    E2 := Clamped(StrToFloatDefDot(Trim(Values[2]), 0.5), 0.1, 5.0);
+    TurnsW := StrToFloatDefDot(Trim(Values[3]), 2.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[4]), 1), 0, 2);
+    ArrangeSelectionOnSuperellipsoid(Vector3(RadR, RadR, RadR), E1, E2, TurnsW, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeSuperellipsoidClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeOnSuperellipsoidDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionOnSuperellipsoid(TVector3.Zero, 1.5, 1.5, 2.0, 1)
+  else
+    ArrangeSelectionOnSuperellipsoid(TVector3.Zero, 0.5, 0.5, 2.0, 1);
+end;
+
+procedure TDesignFrame.ArrangeSelectionInGeronoLemniscate(
+  const LobeRadiusA: Single;
+  const LobeWidthB: Single;
+  const SaddleHeight: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInGeronoLemniscate(
+      LobeRadiusA, LobeWidthB, SaddleHeight, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInGeronoLemniscateDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  LobeA, LobeB, SaddleH: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+  begin
+    ErrorBox('Select at least 2 TCastleTransform components to arrange in a Gerono Lemniscate / Besace Curve.');
+    Exit;
+  end;
+
+  Prompts[0] := 'Gerono lemniscate lobe radius A (0 = auto from selection):';
+  Prompts[1] := 'Figure-eight transverse width B (0 = match A):';
+  Prompts[2] := 'Vertical 3D Besace parabolic saddle height H:';
+  Prompts[3] := 'Orientation (0 = keep, 1 = analytical Gerono tangent, 2 = outward radial):';
+  Values[0] := '0.0';
+  Values[1] := '0.0';
+  Values[2] := '0.0';
+  Values[3] := '1';
+
+  if InputQuery('Arrange in 3D Gerono Lemniscate / Besace Curve (Ctrl+Alt+Shift+8)', Prompts, Values) then
+  begin
+    LobeA := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    LobeB := StrToFloatDefDot(Trim(Values[1]), 0.0);
+    SaddleH := StrToFloatDefDot(Trim(Values[2]), 0.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[3]), 1), 0, 2);
+    ArrangeSelectionInGeronoLemniscate(LobeA, LobeB, SaddleH, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeGeronoClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInGeronoLemniscateDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionInGeronoLemniscate(0.0, 0.0, 3.0, 1)
+  else
+    ArrangeSelectionInGeronoLemniscate(0.0, 0.0, 0.0, 1);
+end;
+
 procedure TDesignFrame.StopPilotTransform;
 var
   SavedName: String;
@@ -23263,6 +23566,170 @@ begin
     ArrangeSelectedUserInterfacesInPipOverlay(0.32, 24.0, 12.0)
   else
     ArrangeSelectedUserInterfacesInPipOverlay(0.26, 16.0, 10.0);
+end;
+
+procedure TDesignFrame.ArrangeSelectedUserInterfacesInBentoGrid(
+  const HeroFraction: Single;
+  const MarginPx: Single;
+  const GapPx: Single;
+  const HeroOnTop: Boolean);
+var
+  Selected, UIList: TComponentList;
+  SelectedCount, I, N, ChangedCount, BottomCols, SubIdx: Integer;
+  UI: TCastleUserInterface;
+  ParentRect, CurRect: TFloatRectangle;
+  EffHeroFrac, EffMargin, EffGap, AvailW, AvailH: Single;
+  HeroW, HeroH, SecW, SecH, TopSubH, BotSubH, CellW, CellH, TargetCX, TargetCY, Scale: Single;
+  SecLeft, SecBottom: Single;
+  DeltaPx: TVector2;
+begin
+  GetSelected(Selected, SelectedCount);
+  try
+    UIList := TComponentList.Create(false);
+    try
+      for I := 0 to SelectedCount - 1 do
+        if (Selected[I] is TCastleUserInterface) and
+           (not (Selected[I] is TCastleTransform)) and
+           (TCastleUserInterface(Selected[I]).Parent <> nil) and
+           (not IsComponentLocked(Selected[I])) then
+          UIList.Add(Selected[I]);
+
+      N := UIList.Count;
+      if N < 2 then Exit;
+
+      ParentRect := ParentRenderRect(TCastleUserInterface(UIList[0]));
+      if ParentRect.IsEmpty then Exit;
+
+      EffHeroFrac := Clamped(HeroFraction, 0.30, 0.75);
+      EffMargin := Max(0.0, MarginPx);
+      EffGap := Max(0.0, GapPx);
+      AvailW := Max(32.0, ParentRect.Width - 2.0 * EffMargin);
+      AvailH := Max(32.0, ParentRect.Height - 2.0 * EffMargin);
+
+      ChangedCount := 0;
+      for I := 0 to N - 1 do
+      begin
+        UI := TCastleUserInterface(UIList[I]);
+        Scale := UI.UIScale;
+        if Scale <= 0 then
+          Scale := 1.0;
+
+        if not HeroOnTop then
+        begin
+          HeroW := Max(16.0, (AvailW - EffGap) * EffHeroFrac);
+          HeroH := AvailH;
+          SecW := Max(16.0, AvailW - HeroW - EffGap);
+          SecH := AvailH;
+          SecLeft := ParentRect.Left + EffMargin + HeroW + EffGap;
+          SecBottom := ParentRect.Bottom + EffMargin;
+
+          if I = 0 then
+          begin
+            CellW := HeroW;
+            CellH := HeroH;
+            TargetCX := ParentRect.Left + EffMargin + CellW * 0.5;
+            TargetCY := ParentRect.Bottom + EffMargin + CellH * 0.5;
+          end else
+          if N = 2 then
+          begin
+            CellW := SecW;
+            CellH := SecH;
+            TargetCX := SecLeft + CellW * 0.5;
+            TargetCY := SecBottom + CellH * 0.5;
+          end else
+          if N = 3 then
+          begin
+            CellW := SecW;
+            CellH := Max(8.0, (SecH - EffGap) * 0.5);
+            TargetCX := SecLeft + CellW * 0.5;
+            if I = 1 then
+              TargetCY := SecBottom + SecH - CellH * 0.5
+            else
+              TargetCY := SecBottom + CellH * 0.5;
+          end else
+          begin
+            TopSubH := Max(8.0, (SecH - EffGap) * 0.5);
+            BotSubH := Max(8.0, SecH - TopSubH - EffGap);
+            if I = 1 then
+            begin
+              CellW := SecW;
+              CellH := TopSubH;
+              TargetCX := SecLeft + CellW * 0.5;
+              TargetCY := SecBottom + SecH - CellH * 0.5;
+            end else
+            begin
+              BottomCols := N - 2;
+              SubIdx := I - 2;
+              CellW := Max(8.0, (SecW - (BottomCols - 1) * EffGap) / BottomCols);
+              CellH := BotSubH;
+              TargetCX := SecLeft + SubIdx * (CellW + EffGap) + CellW * 0.5;
+              TargetCY := SecBottom + CellH * 0.5;
+            end;
+          end;
+        end else
+        begin
+          HeroW := AvailW;
+          HeroH := Max(16.0, (AvailH - EffGap) * EffHeroFrac);
+          SecW := AvailW;
+          SecH := Max(16.0, AvailH - HeroH - EffGap);
+          SecLeft := ParentRect.Left + EffMargin;
+          SecBottom := ParentRect.Bottom + EffMargin;
+
+          if I = 0 then
+          begin
+            CellW := HeroW;
+            CellH := HeroH;
+            TargetCX := ParentRect.Left + EffMargin + CellW * 0.5;
+            TargetCY := ParentRect.Top - EffMargin - CellH * 0.5;
+          end else
+          begin
+            BottomCols := N - 1;
+            SubIdx := I - 1;
+            CellW := Max(8.0, (SecW - (BottomCols - 1) * EffGap) / BottomCols);
+            CellH := SecH;
+            TargetCX := SecLeft + SubIdx * (CellW + EffGap) + CellW * 0.5;
+            TargetCY := SecBottom + CellH * 0.5;
+          end;
+        end;
+
+        UI.FullSize := false;
+        UI.AutoSizeToChildren := false;
+        UI.WidthFraction := 0.0;
+        UI.HeightFraction := 0.0;
+        UI.Width := CellW / Scale;
+        UI.Height := CellH / Scale;
+
+        CurRect := UI.RenderRectWithBorder;
+        if not CurRect.IsEmpty then
+        begin
+          DeltaPx := Vector2(TargetCX, TargetCY) - CurRect.Center;
+          UI.Translation := UI.Translation + (DeltaPx / Scale);
+        end;
+        Inc(ChangedCount);
+      end;
+
+      if ChangedCount > 0 then
+        ModifiedOutsideObjectInspector(
+          Format('Arrange %d UI control(s) into Bento dashboard grid layout', [ChangedCount]), ucHigh);
+    finally
+      FreeAndNil(UIList);
+    end;
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUIBentoGridClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ArrangeSelectedUserInterfacesInBentoGrid(0.55, 0.0, 0.0, false)
+  else if ssCtrl in ShiftState then
+    ArrangeSelectedUserInterfacesInBentoGrid(0.55, 10.0, 8.0, true)
+  else
+    ArrangeSelectedUserInterfacesInBentoGrid(0.55, 10.0, 8.0, false);
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -27539,6 +28006,57 @@ begin
   SelectMultiViewportCameras(ssShift in GetKeyShiftState);
 end;
 
+procedure TDesignFrame.SelectClippedAndMaskedUserInterfaces(const ClipChildrenOnly: Boolean);
+var
+  NewSelection: TComponentList;
+  TreeNode: TTreeNode;
+  Obj: TObject;
+  UI: TCastleUserInterface;
+  IsMatch: Boolean;
+begin
+  if FDesignRoot = nil then Exit;
+
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      if TreeNode.Data <> nil then
+      begin
+        Obj := TObject(TreeNode.Data);
+        if (Obj is TCastleUserInterface) and
+           (Obj <> FDesignRoot) and
+           (not (csSubComponent in TComponent(Obj).ComponentStyle)) and
+           (not IsComponentLocked(TComponent(Obj))) then
+        begin
+          UI := TCastleUserInterface(Obj);
+          if UI.Exists then
+          begin
+            if ClipChildrenOnly then
+              IsMatch := UI.ClipChildren
+            else
+              IsMatch := UI.ClipChildren or (UI is TCastleScrollViewCustom);
+
+            if IsMatch and (NewSelection.IndexOf(UI) = -1) then
+              NewSelection.Add(UI);
+          end;
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectUIClippedClick(Sender: TObject);
+begin
+  SelectClippedAndMaskedUserInterfaces(ssShift in GetKeyShiftState);
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -28093,6 +28611,8 @@ begin
     MenuTreeViewItemSelectUIFractional.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemSelectMultiViewports <> nil then
     MenuTreeViewItemSelectMultiViewports.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectUIClipped <> nil then
+    MenuTreeViewItemSelectUIClipped.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemCopyTransform <> nil then
     MenuTreeViewItemCopyTransform.Enabled := (CurrentTransform <> nil) or (SelectedUserInterface <> nil) or (ControlsTree.SelectionCount > 0);
   if MenuTreeViewItemPasteTransform <> nil then

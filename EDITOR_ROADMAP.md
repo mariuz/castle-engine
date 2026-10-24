@@ -1089,9 +1089,40 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
 
 ---
 
-## Roadmap Completion Status (Phases 1–167)
+### Phase 168: 3D Julius Plücker Ruled Conoid Surface Arrangement (`ArrangeSelectedOnPluckerConoid` / `Ctrl+Alt+Shift+6`)
+- [x] **168.1. Parametric Julius Plücker Ruled Conoid Surface (`TCastleTransformManipulate.ArrangeSelectedOnPluckerConoid`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedOnPluckerConoid(ScaleRadius, FoldsN, FoldHeight, Turns, OrientMode): Boolean`: distributes 2+ top-level selected transforms across Julius Plücker's 1865 ruled conoid surface centered at $\mathbf{C}$ with scale radius $R$, fold symmetry order $n = \text{Clamped}(\text{FoldsN}, 1, 8)$, fold height $H = \text{FoldHeight}$, and azimuthal turns $W = \text{Turns}$ ($t_i = \frac{i}{N - 1}, \; r_i = R(0.25 + 0.75 t_i), \; \theta_i = 2\pi W t_i$):
+    $$x = C_x + r_i\cos\theta_i, \quad y = C_y + H\sin(n\theta_i), \quad z = C_z + r_i\sin\theta_i$$
+    supporting `OrientMode` (`0` = keep rotation, `1` = Plücker conoid trajectory tangent, `2` = exact ruled conoid surface normal $\mathbf{P}_\theta \times \mathbf{P}_r = (-nH\cos(n\theta_i)\sin\theta_i, \; r_i, \; nH\cos(n\theta_i)\cos\theta_i)$).
+  - Added **`Arrange Plucker Conoid`** (`ButtonArrangePlucker` in `PanelLayoutTransform`: normal click arranges on a 2-fold Plücker conoid along the tangent; `Ctrl`-click arranges on a 3-fold Plücker conoid aligned to the exact ruled surface normal; `Shift`-click opens the custom dialog) and `ShowArrangeOnPluckerConoidDialog` bound to **`Ctrl+Alt+Shift+6`** in both the Viewport and Hierarchy Tree.
 
-All **167 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 49 automated unit tests (`0 unfreed memory blocks`), and documented**.
+### Phase 169: 3D Alan Barr Superellipsoid / Lamé Surface Arrangement (`ArrangeSelectedOnSuperellipsoid` / `Ctrl+Alt+Shift+7`)
+- [x] **169.1. Parametric Alan H. Barr 3D Superellipsoid (`TCastleTransformManipulate.ArrangeSelectedOnSuperellipsoid`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedOnSuperellipsoid(Radii, EastWestExp, NorthSouthExp, Turns, OrientMode): Boolean`: distributes 2+ top-level selected transforms across Alan H. Barr's 1981 parametric 3D Superellipsoid centered at $\mathbf{C}$ with semi-axes $\mathbf{R} = (R_x, R_y, R_z)$, East-West exponent $e_1 = \text{Clamped}(\text{EastWestExp}, 0.1, 5.0)$, North-South exponent $e_2 = \text{Clamped}(\text{NorthSouthExp}, 0.1, 5.0)$, and azimuthal spiral turns $W = \text{Turns}$ ($t_i = \frac{i}{N - 1}, \; \phi_i = \pi(t_i - 0.5), \; \theta_i = 2\pi W t_i, \; C(\alpha, p) = \operatorname{sgn}(\cos\alpha)|\cos\alpha|^p, \; S(\alpha, p) = \operatorname{sgn}(\sin\alpha)|\sin\alpha|^p$):
+    $$x = C_x + R_x C(\phi_i, e_2) C(\theta_i, e_1), \quad y = C_y + R_y S(\phi_i, e_2), \quad z = C_z + R_z C(\phi_i, e_2) S(\theta_i, e_1)$$
+    supporting `OrientMode` (`0` = keep rotation, `1` = exact Barr dual-superellipsoid outward normal $\left(\frac{1}{R_x} C(\phi_i, 2 - e_2) C(\theta_i, 2 - e_1), \; \frac{1}{R_y} S(\phi_i, 2 - e_2), \; \frac{1}{R_z} C(\phi_i, 2 - e_2) S(\theta_i, 2 - e_1)\right)$, `2` = outward radial from $\mathbf{C}$).
+  - Added **`Arrange Superellipsoid`** (`ButtonArrangeSuperellipsoid` in `PanelLayoutTransform`: normal click arranges on a rounded-cube superellipsoid $e_1=0.5, e_2=0.5$ aligned to the exact Barr dual normal; `Ctrl`-click arranges on an octahedral star superellipsoid $e_1=1.5, e_2=1.5$; `Shift`-click opens the custom dialog) and `ShowArrangeOnSuperellipsoidDialog` bound to **`Ctrl+Alt+Shift+7`** in both the Viewport and Hierarchy Tree.
+
+### Phase 170: 3D Camillo-Christophe Gerono Lemniscate / Besace Saddle Curve Arrangement (`ArrangeSelectedInGeronoLemniscate` / `Ctrl+Alt+Shift+8`)
+- [x] **170.1. Parametric Gerono Figure-Eight Lemniscate & Besace Saddle Space Curve (`TCastleTransformManipulate.ArrangeSelectedInGeronoLemniscate`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedInGeronoLemniscate(LobeRadiusA, LobeWidthB, SaddleHeight, OrientMode): Boolean`: distributes 2+ top-level selected transforms around the active selection pivot $\mathbf{C}$ at $\theta_i = \frac{2\pi i}{N}$ along Camillo-Christophe Gerono's 1854 Figure-Eight Lemniscate / Besace Saddle Space Curve with lobe radius $A$, figure-eight width $B$, and parabolic saddle height $H$:
+    $$x = C_x + A\cos\theta_i, \quad y = C_y + H\cos(2\theta_i), \quad z = C_z + B\sin\theta_i\cos\theta_i$$
+    with exact non-vanishing analytical tangent derivative $\frac{d\mathbf{P}}{d\theta} = (-A\sin\theta_i, \; -2H\sin(2\theta_i), \; B\cos(2\theta_i))$ and `OrientMode` (`0` = keep rotation, `1` = analytical Gerono/Besace tangent, `2` = outward radial from $\mathbf{C}$).
+  - Added **`Arrange Gerono Curve`** (`ButtonArrangeGerono` in `PanelLayoutTransform`: normal click arranges in a planar Gerono lemniscate along the tangent; `Ctrl`-click arranges in a 3D Besace parabolic saddle curve $H=3.0$ along the tangent; `Shift`-click opens the custom dialog) and `ShowArrangeInGeronoLemniscateDialog` bound to **`Ctrl+Alt+Shift+8`** in both the Viewport and Hierarchy Tree.
+  - Added automated unit test `TestPluckerSuperellipsoidAndGeronoLemniscate` in `tests/code/testcases/testcastletransformmanipulate.pas`.
+
+### Phase 171: Hierarchy Audit: Select Clipped & ScrollView 2D UI Controls (`SelectClippedAndMaskedUserInterfaces` / `Ctrl+Alt+Shift+9`) & 2D UI Asymmetric Bento Dashboard Grid Layout (`ArrangeSelectedUserInterfacesInBentoGrid` / `ButtonUIBentoGrid`)
+- [x] **171.1. Hierarchy UI Clipping & Scroll Audit: Select Clipped & ScrollView 2D UI Controls (`SelectClippedAndMaskedUserInterfaces` / `Ctrl+Alt+Shift+9`)**
+  - Implemented `TDesignFrame.SelectClippedAndMaskedUserInterfaces(ClipChildrenOnly)`: audits all visible, unlocked `TCastleUserInterface` controls in the hierarchy and selects UI controls with scissor clipping (`ClipChildren = true`) or scrollable viewport containers (`TCastleScrollViewCustom`) when `ClipChildrenOnly = false`, or strictly `ClipChildren = true` controls when `ClipChildrenOnly = true`.
+  - Bound to **`Ctrl+Alt+Shift+9`** in both the Viewport and Hierarchy Tree, plus **`Select Clipped & ScrollView 2D UI Controls (Ctrl+Alt+Shift+9)`** (`MenuTreeViewItemSelectUIClipped`) in `MenuTreeView` (`Shift`-click selects `ClipChildren = true` controls only).
+- [x] **171.2. 2D UI Asymmetric Bento Dashboard Grid Layout (`ArrangeSelectedUserInterfacesInBentoGrid` / `ButtonUIBentoGrid`)**
+  - Implemented `TDesignFrame.ArrangeSelectedUserInterfacesInBentoGrid(HeroFraction, MarginPx, GapPx, HeroOnTop)` and added **`UI Bento Grid`** (`ButtonUIBentoGrid`) to `PanelLayoutUI`, resizing `UIList[0]` as the Featured Hero Bento Card ($55\%$ Left column or Top banner when `HeroOnTop = true`) and subdividing the remaining $45\%$ zone into asymmetric secondary Bento tiles (**Click**: $55\%$ Left Hero + Right Bento cards with $10\text{ px}$ margin and $8\text{ px}$ gap; **`Shift`-click**: $0\text{ px}$ flush Bento grid; **`Ctrl`-click**: Top Hero banner + Bottom Bento cards).
+
+---
+
+## Roadmap Completion Status (Phases 1–171)
+
+All **171 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 

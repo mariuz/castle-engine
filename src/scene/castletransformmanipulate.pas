@@ -2216,6 +2216,71 @@ type
       const LobeRatioK: Single = 0.8;
       const CrestHeight: Single = 0.0;
       const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along Julius Plucker's 1865 ruled conoid surface centered at the active
+      selection pivot $\mathbf(C)$ with scale radius @code(ScaleRadius) ($R$),
+      fold symmetry order @code(FoldsN) ($n \in [1..8]$), fold height
+      @code(FoldHeight) ($H$), and azimuthal turns @code(Turns) ($W$):
+      $$t_i = \frac(i)(N - 1), \quad r_i = R(0.25 + 0.75 t_i), \quad \theta_i = 2\pi W t_i$$
+      $$x_i = C_x + r_i\cos\theta_i, \quad
+        y_i = C_y + H\sin(n\theta_i), \quad
+        z_i = C_z + r_i\sin\theta_i$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the Plucker conoid trajectory tangent
+      - @code(2): orient forward along the exact ruled conoid surface normal $\mathbf(P)_\theta \times \mathbf(P)_r$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedOnPluckerConoid(
+      const ScaleRadius: Single = 0.0;
+      const FoldsN: Integer = 2;
+      const FoldHeight: Single = 3.0;
+      const Turns: Single = 1.0;
+      const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      across Alan H. Barr's 1981 parametric 3D Superellipsoid centered at the
+      active selection pivot $\mathbf(C)$ with semi-axes @code(Radii)
+      $\mathbf(R) = (R_x, R_y, R_z)$, East-West exponent @code(EastWestExp) ($e_1$),
+      North-South exponent @code(NorthSouthExp) ($e_2$), and azimuthal spiral
+      turns @code(Turns) ($W$):
+      $$t_i = \frac(i)(N - 1), \quad \phi_i = \pi(t_i - 0.5), \quad \theta_i = 2\pi W t_i$$
+      $$C(\alpha, p) = \operatorname(sgn)(\cos\alpha)|\cos\alpha|^p, \quad
+        S(\alpha, p) = \operatorname(sgn)(\sin\alpha)|\sin\alpha|^p$$
+      $$x_i = C_x + R_x C(\phi_i, e_2) C(\theta_i, e_1), \quad
+        y_i = C_y + R_y S(\phi_i, e_2), \quad
+        z_i = C_z + R_z C(\phi_i, e_2) S(\theta_i, e_1)$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the exact Barr dual-superellipsoid outward normal
+      - @code(2): orient forward radially outward from $\mathbf(C)$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedOnSuperellipsoid(
+      const Radii: TVector3;
+      const EastWestExp: Single = 0.5;
+      const NorthSouthExp: Single = 0.5;
+      const Turns: Single = 2.0;
+      const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along Camillo-Christophe Gerono's 1854 Figure-Eight Lemniscate / Besace
+      Saddle Space Curve centered at the active selection pivot $\mathbf(C)$
+      with lobe radius @code(LobeRadiusA) ($A$), figure-eight width
+      @code(LobeWidthB) ($B$), and parabolic saddle height @code(SaddleHeight) ($H$):
+      $$\theta_i = \frac(2\pi i)(N)$$
+      $$x_i = C_x + A\cos\theta_i, \quad
+        y_i = C_y + H\cos(2\theta_i), \quad
+        z_i = C_z + B\sin\theta_i\cos\theta_i$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the exact analytical Gerono/Besace tangent
+      - @code(2): orient forward radially outward from $\mathbf(C)$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInGeronoLemniscate(
+      const LobeRadiusA: Single = 0.0;
+      const LobeWidthB: Single = 0.0;
+      const SaddleHeight: Single = 0.0;
+      const OrientMode: Integer = 1): Boolean;
   end;
 
 var
@@ -16872,6 +16937,388 @@ begin
 
         if LookDir.LengthSqr <= 1e-8 then
           LookDir := Vector3(-SinTh, 0, CosTh)
+        else
+          LookDir := LookDir.Normalize;
+
+        NewUp := Vector3(0, 1, 0);
+        if Abs(TVector3.DotProduct(LookDir, NewUp)) > 0.98 then
+          NewUp := Vector3(0, 0, 1);
+        NewUp := (NewUp - LookDir * TVector3.DotProduct(NewUp, LookDir)).Normalize;
+
+        T.GetWorldView(Pos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+
+    if Result then
+    begin
+      if Gizmo[Mode] <> nil then
+        Gizmo[Mode].UpdateSize;
+      GizmoHasTransformModified(Self);
+      GizmoHasTransformModifyEnd(Self);
+    end;
+  finally
+    FreeAndNil(TopLevel);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedOnPluckerConoid(
+  const ScaleRadius: Single;
+  const FoldsN: Integer;
+  const FoldHeight: Single;
+  const Turns: Single;
+  const OrientMode: Integer): Boolean;
+var
+  TopLevel: TComponentList;
+  I, N, EffN: Integer;
+  T: TCastleTransform;
+  CenterPos, Pos, TargetPos, LookDir, NewUp, CurDir, CurUp: TVector3;
+  Pr, Pth: TVector3;
+  MaxDist, Dist, EffR, EffH, EffW, Frac, RadR, Theta: Single;
+  SinTh, CosTh, SinNTh, CosNTh: Single;
+begin
+  Result := false;
+  TopLevel := TComponentList.Create(false);
+  try
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+        TopLevel.Add(Boxes[I].Parent);
+    N := TopLevel.Count;
+    if N < 2 then
+      Exit;
+
+    CenterPos := TVector3.Zero;
+    for I := 0 to N - 1 do
+      CenterPos := CenterPos + GetTransformWorkingPos(TCastleTransform(TopLevel[I]));
+    CenterPos := CenterPos / N;
+    if (PivotMode = pmPrimarySelected) and (TopLevel.Count > 0) then
+      CenterPos := GetTransformWorkingPos(TCastleTransform(TopLevel[0]));
+
+    EffR := Abs(ScaleRadius);
+    if EffR <= 1e-4 then
+    begin
+      MaxDist := 0;
+      for I := 0 to N - 1 do
+      begin
+        Pos := GetTransformWorkingPos(TCastleTransform(TopLevel[I]));
+        Dist := PointsDistance(Pos, CenterPos);
+        if Dist > MaxDist then
+          MaxDist := Dist;
+      end;
+      if MaxDist <= 1e-4 then
+        EffR := 8.0
+      else
+        EffR := MaxDist;
+    end;
+
+    EffN := Clamped(FoldsN, 1, 8);
+    EffH := FoldHeight;
+    if Abs(EffH) <= 1e-4 then
+      EffH := EffR * 0.35;
+    EffW := Turns;
+    if Abs(EffW) <= 1e-4 then
+      EffW := 1.0;
+
+    GizmoHasTransformModifyBegin(Self);
+    for I := 0 to N - 1 do
+    begin
+      T := TCastleTransform(TopLevel[I]);
+      Pos := GetTransformWorkingPos(T);
+      Frac := I / (N - 1);
+      RadR := EffR * (0.25 + 0.75 * Frac);
+      Theta := 2.0 * Pi * EffW * Frac;
+      SinCos(Theta, SinTh, CosTh);
+      SinCos(EffN * Theta, SinNTh, CosNTh);
+
+      TargetPos.X := CenterPos.X + RadR * CosTh;
+      TargetPos.Y := CenterPos.Y + EffH * SinNTh;
+      TargetPos.Z := CenterPos.Z + RadR * SinTh;
+
+      if not TVector3.Equals(Pos, TargetPos, 1e-4) then
+      begin
+        SetTransformWorkingPos(T, TargetPos);
+        Result := true;
+      end;
+
+      if OrientMode in [1, 2] then
+      begin
+        Pr := Vector3(CosTh, 0.0, SinTh);
+        Pth := Vector3(-RadR * SinTh, EffN * EffH * CosNTh, RadR * CosTh);
+
+        if OrientMode = 1 then
+          LookDir := Pr * (0.75 * EffR) + Pth * (2.0 * Pi * EffW)
+        else
+          LookDir := TVector3.CrossProduct(Pth, Pr);
+
+        if LookDir.LengthSqr <= 1e-8 then
+          LookDir := Vector3(0, 1, 0)
+        else
+          LookDir := LookDir.Normalize;
+
+        NewUp := Vector3(0, 1, 0);
+        if Abs(TVector3.DotProduct(LookDir, NewUp)) > 0.98 then
+          NewUp := Vector3(0, 0, 1);
+        NewUp := (NewUp - LookDir * TVector3.DotProduct(NewUp, LookDir)).Normalize;
+
+        T.GetWorldView(Pos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+
+    if Result then
+    begin
+      if Gizmo[Mode] <> nil then
+        Gizmo[Mode].UpdateSize;
+      GizmoHasTransformModified(Self);
+      GizmoHasTransformModifyEnd(Self);
+    end;
+  finally
+    FreeAndNil(TopLevel);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedOnSuperellipsoid(
+  const Radii: TVector3;
+  const EastWestExp: Single;
+  const NorthSouthExp: Single;
+  const Turns: Single;
+  const OrientMode: Integer): Boolean;
+
+  function SignedPow(const Val, ExpP: Single): Single;
+  begin
+    if Abs(Val) <= 1e-7 then
+      Result := 0.0
+    else
+    if Val > 0 then
+      Result := Power(Val, ExpP)
+    else
+      Result := -Power(-Val, ExpP);
+  end;
+
+var
+  TopLevel: TComponentList;
+  I, N: Integer;
+  T: TCastleTransform;
+  CenterPos, Pos, TargetPos, LookDir, NewUp, CurDir, CurUp, EffR: TVector3;
+  MaxDist, Dist, E1, E2, EffW, Frac, Phi, Theta: Single;
+  SinPhi, CosPhi, SinTh, CosTh: Single;
+  CPhi, SPhi, CTh, STh, NCPhi, NSPhi, NCTh, NSTh: Single;
+begin
+  Result := false;
+  TopLevel := TComponentList.Create(false);
+  try
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+        TopLevel.Add(Boxes[I].Parent);
+    N := TopLevel.Count;
+    if N < 2 then
+      Exit;
+
+    CenterPos := TVector3.Zero;
+    for I := 0 to N - 1 do
+      CenterPos := CenterPos + GetTransformWorkingPos(TCastleTransform(TopLevel[I]));
+    CenterPos := CenterPos / N;
+    if (PivotMode = pmPrimarySelected) and (TopLevel.Count > 0) then
+      CenterPos := GetTransformWorkingPos(TCastleTransform(TopLevel[0]));
+
+    EffR := Vector3(Abs(Radii.X), Abs(Radii.Y), Abs(Radii.Z));
+    if (EffR.X <= 1e-4) or (EffR.Y <= 1e-4) or (EffR.Z <= 1e-4) then
+    begin
+      MaxDist := 0;
+      for I := 0 to N - 1 do
+      begin
+        Pos := GetTransformWorkingPos(TCastleTransform(TopLevel[I]));
+        Dist := PointsDistance(Pos, CenterPos);
+        if Dist > MaxDist then
+          MaxDist := Dist;
+      end;
+      if MaxDist <= 1e-4 then
+        MaxDist := 8.0;
+      if EffR.X <= 1e-4 then EffR.X := MaxDist;
+      if EffR.Y <= 1e-4 then EffR.Y := MaxDist;
+      if EffR.Z <= 1e-4 then EffR.Z := MaxDist;
+    end;
+
+    E1 := Clamped(EastWestExp, 0.1, 5.0);
+    E2 := Clamped(NorthSouthExp, 0.1, 5.0);
+    EffW := Turns;
+    if Abs(EffW) <= 1e-4 then
+      EffW := 2.0;
+
+    GizmoHasTransformModifyBegin(Self);
+    for I := 0 to N - 1 do
+    begin
+      T := TCastleTransform(TopLevel[I]);
+      Pos := GetTransformWorkingPos(T);
+      Frac := I / (N - 1);
+      Phi := Pi * (Frac - 0.5);
+      Theta := 2.0 * Pi * EffW * Frac;
+      SinCos(Phi, SinPhi, CosPhi);
+      SinCos(Theta, SinTh, CosTh);
+
+      CPhi := SignedPow(CosPhi, E2);
+      SPhi := SignedPow(SinPhi, E2);
+      CTh := SignedPow(CosTh, E1);
+      STh := SignedPow(SinTh, E1);
+
+      TargetPos.X := CenterPos.X + EffR.X * CPhi * CTh;
+      TargetPos.Y := CenterPos.Y + EffR.Y * SPhi;
+      TargetPos.Z := CenterPos.Z + EffR.Z * CPhi * STh;
+
+      if not TVector3.Equals(Pos, TargetPos, 1e-4) then
+      begin
+        SetTransformWorkingPos(T, TargetPos);
+        Result := true;
+      end;
+
+      if OrientMode in [1, 2] then
+      begin
+        if OrientMode = 1 then
+        begin
+          if Abs(CosPhi) <= 1e-5 then
+          begin
+            if SinPhi >= 0 then
+              LookDir := Vector3(0, 1, 0)
+            else
+              LookDir := Vector3(0, -1, 0);
+          end else
+          begin
+            NCPhi := SignedPow(CosPhi, 2.0 - E2);
+            NSPhi := SignedPow(SinPhi, 2.0 - E2);
+            NCTh := SignedPow(CosTh, 2.0 - E1);
+            NSTh := SignedPow(SinTh, 2.0 - E1);
+            LookDir := Vector3(
+              (NCPhi * NCTh) / EffR.X,
+              NSPhi / EffR.Y,
+              (NCPhi * NSTh) / EffR.Z);
+          end;
+        end else
+          LookDir := TargetPos - CenterPos;
+
+        if LookDir.LengthSqr <= 1e-8 then
+          LookDir := Vector3(0, 1, 0)
+        else
+          LookDir := LookDir.Normalize;
+
+        NewUp := Vector3(0, 1, 0);
+        if Abs(TVector3.DotProduct(LookDir, NewUp)) > 0.98 then
+          NewUp := Vector3(0, 0, 1);
+        NewUp := (NewUp - LookDir * TVector3.DotProduct(NewUp, LookDir)).Normalize;
+
+        T.GetWorldView(Pos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+
+    if Result then
+    begin
+      if Gizmo[Mode] <> nil then
+        Gizmo[Mode].UpdateSize;
+      GizmoHasTransformModified(Self);
+      GizmoHasTransformModifyEnd(Self);
+    end;
+  finally
+    FreeAndNil(TopLevel);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInGeronoLemniscate(
+  const LobeRadiusA: Single;
+  const LobeWidthB: Single;
+  const SaddleHeight: Single;
+  const OrientMode: Integer): Boolean;
+var
+  TopLevel: TComponentList;
+  I, N: Integer;
+  T: TCastleTransform;
+  CenterPos, Pos, TargetPos, LookDir, NewUp, CurDir, CurUp: TVector3;
+  MaxDist, Dist, EffA, EffB, EffH, Theta, SinTh, CosTh, Sin2Th, Cos2Th: Single;
+begin
+  Result := false;
+  TopLevel := TComponentList.Create(false);
+  try
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+        TopLevel.Add(Boxes[I].Parent);
+    N := TopLevel.Count;
+    if N < 2 then
+      Exit;
+
+    CenterPos := TVector3.Zero;
+    for I := 0 to N - 1 do
+      CenterPos := CenterPos + GetTransformWorkingPos(TCastleTransform(TopLevel[I]));
+    CenterPos := CenterPos / N;
+    if (PivotMode = pmPrimarySelected) and (TopLevel.Count > 0) then
+      CenterPos := GetTransformWorkingPos(TCastleTransform(TopLevel[0]));
+
+    EffA := Abs(LobeRadiusA);
+    if EffA <= 1e-4 then
+    begin
+      MaxDist := 0;
+      for I := 0 to N - 1 do
+      begin
+        Pos := GetTransformWorkingPos(TCastleTransform(TopLevel[I]));
+        Dist := PointsDistance(Pos, CenterPos);
+        if Dist > MaxDist then
+          MaxDist := Dist;
+      end;
+      if MaxDist <= 1e-4 then
+        EffA := 8.0
+      else
+        EffA := MaxDist;
+    end;
+
+    EffB := Abs(LobeWidthB);
+    if EffB <= 1e-4 then
+      EffB := EffA;
+    EffH := SaddleHeight;
+
+    GizmoHasTransformModifyBegin(Self);
+    for I := 0 to N - 1 do
+    begin
+      T := TCastleTransform(TopLevel[I]);
+      Pos := GetTransformWorkingPos(T);
+      Theta := (2.0 * Pi * I) / N;
+      SinCos(Theta, SinTh, CosTh);
+      SinCos(2.0 * Theta, Sin2Th, Cos2Th);
+
+      TargetPos.X := CenterPos.X + EffA * CosTh;
+      TargetPos.Y := CenterPos.Y + EffH * Cos2Th;
+      TargetPos.Z := CenterPos.Z + EffB * SinTh * CosTh;
+
+      if not TVector3.Equals(Pos, TargetPos, 1e-4) then
+      begin
+        SetTransformWorkingPos(T, TargetPos);
+        Result := true;
+      end;
+
+      if OrientMode in [1, 2] then
+      begin
+        if OrientMode = 1 then
+        begin
+          LookDir.X := -EffA * SinTh;
+          LookDir.Y := -2.0 * EffH * Sin2Th;
+          LookDir.Z := EffB * Cos2Th;
+        end else
+          LookDir := TargetPos - CenterPos;
+
+        if LookDir.LengthSqr <= 1e-8 then
+          LookDir := Vector3(0, 0, 1)
         else
           LookDir := LookDir.Normalize;
 
