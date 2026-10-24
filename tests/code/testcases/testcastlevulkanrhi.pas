@@ -195,6 +195,9 @@ type
     procedure TestBufferDeviceAddressAlignmentAndPreambleRHI;
     procedure TestVoxelDominantAxisAndConeStepApertureRHI;
     procedure TestVulkanVoxelConeTracerMipChainAndDispatchRHI;
+    procedure TestSpecularNormalVarianceAARoughnessFilteringRHI;
+    procedure TestRectilinearShadowMapUVWarpingRHI;
+    procedure TestVulkanMaterialBinnerHistogramAndOffsetsRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -9932,6 +9935,100 @@ begin
     AssertTrue('IndirectIrradianceTexture must be allocated',
       Device.VoxelConeTracer.IndirectIrradianceTexture <> nil);
     AssertEquals('ConeTraceDispatchCount must be 1', 1, Integer(Device.VoxelConeTracer.ConeTraceDispatchCount));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSpecularNormalVarianceAARoughnessFilteringRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  SpecAAGLSL: String;
+  RoughFlat, RoughCurved: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Normal-Variance Specular AA GLSL 450 functions }
+    SpecAAGLSL := Gen.GenerateSpecularNormalVarianceAAFunctions;
+    AssertTrue('Specular AA GLSL must include EvaluateSpecularAARoughness',
+      Pos('float EvaluateSpecularAARoughness(float baseRoughness, vec3 dNdU, vec3 dNdV,', SpecAAGLSL) > 0);
+
+    { 2. Verify zero normal derivatives preserve base roughness while high normal variance increases roughness }
+    RoughFlat := TCastleShaderGeneratorRHI.EvaluateSpecularAARoughness(
+      0.1, TVector3.Zero, TVector3.Zero, 0.5, 0.18);
+    RoughCurved := TCastleShaderGeneratorRHI.EvaluateSpecularAARoughness(
+      0.1, Vector3(0.4, 0.0, 0.0), Vector3(0.0, 0.4, 0.0), 0.5, 0.18);
+
+    AssertSameValue(0.1, RoughFlat, 1e-5);
+    AssertTrue('High screen-space normal variance must increase filtered perceptual roughness (> 0.5)',
+      (RoughCurved > 0.5) and (RoughCurved <= 1.0));
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRectilinearShadowMapUVWarpingRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  WarpGLSL: String;
+  UVCenter, UVEdge0, UVEdge1, UVQuarter: TVector2;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Rectilinear Shadow Warp GLSL 450 functions }
+    WarpGLSL := Gen.GenerateRectilinearShadowWarpFunctions;
+    AssertTrue('Shadow Warp GLSL must include EvaluateRectilinearShadowWarpUV',
+      Pos('vec2 EvaluateRectilinearShadowWarpUV(vec2 shadowUV, float warpStrength)', WarpGLSL) > 0);
+
+    { 2. Verify center (0.5, 0.5) and corners (0,0)/(1,1) remain fixed while interior stretches outward }
+    UVCenter  := TCastleShaderGeneratorRHI.EvaluateRectilinearShadowWarpUV(Vector2(0.5, 0.5), 2.0);
+    UVEdge0   := TCastleShaderGeneratorRHI.EvaluateRectilinearShadowWarpUV(Vector2(0.0, 0.0), 2.0);
+    UVEdge1   := TCastleShaderGeneratorRHI.EvaluateRectilinearShadowWarpUV(Vector2(1.0, 1.0), 2.0);
+    UVQuarter := TCastleShaderGeneratorRHI.EvaluateRectilinearShadowWarpUV(Vector2(0.75, 0.5), 2.0);
+
+    AssertSameValue(0.5, UVCenter.X, 1e-6);
+    AssertSameValue(0.5, UVCenter.Y, 1e-6);
+    AssertSameValue(0.0, UVEdge0.X, 1e-6);
+    AssertSameValue(1.0, UVEdge1.X, 1e-6);
+    { p = 0.5 with w = 2.0 -> warpedP = 0.5 * 3 / (1 + 1) = 0.75 -> UV = 0.875 > 0.75 }
+    AssertSameValue(0.875, UVQuarter.X, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanMaterialBinnerHistogramAndOffsetsRHI;
+var
+  BinCounts, BinOffsets: TCardinalDynamicArray;
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+begin
+  { 1. Verify per-material histogram and exclusive prefix-sum bin offset calculation }
+  TCastleVulkanMaterialBinner.EvaluateMaterialBinRanges(
+    [2, 0, 2, 1, 0, 2], 4, BinCounts, BinOffsets);
+  AssertEquals('Material 0 count must be 2', 2, Integer(BinCounts[0]));
+  AssertEquals('Material 1 count must be 1', 1, Integer(BinCounts[1]));
+  AssertEquals('Material 2 count must be 3', 3, Integer(BinCounts[2]));
+  AssertEquals('Material 3 count must be 0', 0, Integer(BinCounts[3]));
+  AssertEquals('Material 0 offset must be 0', 0, Integer(BinOffsets[0]));
+  AssertEquals('Material 1 offset must be 2', 2, Integer(BinOffsets[1]));
+  AssertEquals('Material 2 offset must be 3', 3, Integer(BinOffsets[2]));
+  AssertEquals('Material 3 offset must be 6', 6, Integer(BinOffsets[3]));
+
+  { 2. Verify TCastleVulkanMaterialBinner GPU buffer allocation and compute dispatch }
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6675)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    Device.MaterialBinner.MaxMaterialBins := 128;
+    CmdList.BeginRecording;
+    Device.MaterialBinner.DispatchMaterialBinning(CmdList, 1920, 1080);
+    CmdList.EndRecording;
+
+    AssertTrue('BinCountsBuffer and BinOffsetsBuffer must be allocated',
+      (Device.MaterialBinner.BinCountsBuffer <> nil) and
+      (Device.MaterialBinner.BinOffsetsBuffer <> nil));
+    AssertEquals('BinningDispatchCount must be 1', 1, Integer(Device.MaterialBinner.BinningDispatchCount));
   finally
     FreeAndNil(CmdList);
     FreeAndNil(Device);

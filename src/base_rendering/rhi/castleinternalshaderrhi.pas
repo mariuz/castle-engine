@@ -1506,6 +1506,26 @@ type
     class function EvaluateVoxelConeStepAperture(
       const ADistanceAlongCone, AConeHalfAngleTan, ABaseVoxelSize: Single): TVector2; static;
 
+    { Phase 43.1: Generates GLSL 450 Normal-Variance Specular Anti-Aliasing (Kaplanyan & Antonov / Toksvig)
+      functions to filter sub-pixel normal derivatives into GGX roughness and eliminate distant specular aliasing. }
+    function GenerateSpecularNormalVarianceAAFunctions: String;
+
+    { Phase 43.1 CPU reference: Evaluates filtered GGX perceptual roughness in [0..1] from base roughness and screen-space normal derivatives dNdU, dNdV. }
+    class function EvaluateSpecularAARoughness(
+      const ABaseRoughness: Single;
+      const ADNdU, ADNdV: TVector3;
+      const AVarianceStrength: Single = 0.5;
+      const AMaxVarianceThreshold: Single = 0.18): Single; static;
+
+    { Phase 43.2: Generates GLSL 450 Rectilinear Shadow Map Warping functions to concentrate shadow map
+      texel density near the camera focus region while keeping [0..1]^2 boundaries invariant. }
+    function GenerateRectilinearShadowWarpFunctions: String;
+
+    { Phase 43.2 CPU reference: Warps normalized shadow map UV [0..1]^2 using rectilinear warp strength AWarpStrength >= 0. }
+    class function EvaluateRectilinearShadowWarpUV(
+      const AShadowUV: TVector2;
+      const AWarpStrength: Single): TVector2; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -7350,6 +7370,63 @@ begin
   Diameter := Max(SafeVoxel, 2.0 * Max(0.0, ADistanceAlongCone) * Max(0.0, AConeHalfAngleTan));
   MipLevel := Max(0.0, Log2(Diameter / SafeVoxel));
   Result := Vector2(Diameter, MipLevel);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateSpecularNormalVarianceAAFunctions: String;
+begin
+  Result :=
+    '// Phase 43.1: Normal-Variance Specular Anti-Aliasing (Kaplanyan & Antonov 2016)' + NL +
+    'float EvaluateSpecularAARoughness(float baseRoughness, vec3 dNdU, vec3 dNdV,' + NL +
+    '  float varianceStrength, float maxVarianceThreshold) {' + NL +
+    '  float r = clamp(baseRoughness, 0.0, 1.0);' + NL +
+    '  float alpha = r * r;' + NL +
+    '  float normalVar = dot(dNdU, dNdU) + dot(dNdV, dNdV);' + NL +
+    '  float kernelVar = min(max(0.0, maxVarianceThreshold), max(0.0, varianceStrength) * normalVar);' + NL +
+    '  float filteredAlpha2 = min(1.0, alpha * alpha + kernelVar);' + NL +
+    '  return sqrt(sqrt(filteredAlpha2));' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateSpecularAARoughness(
+  const ABaseRoughness: Single;
+  const ADNdU, ADNdV: TVector3;
+  const AVarianceStrength: Single;
+  const AMaxVarianceThreshold: Single): Single;
+var
+  R, Alpha, NormalVar, KernelVar, FilteredAlpha2: Single;
+begin
+  R := EnsureRange(ABaseRoughness, 0.0, 1.0);
+  Alpha := R * R;
+  NormalVar := ADNdU.LengthSqr + ADNdV.LengthSqr;
+  KernelVar := Min(Max(0.0, AMaxVarianceThreshold), Max(0.0, AVarianceStrength) * NormalVar);
+  FilteredAlpha2 := Min(1.0, Alpha * Alpha + KernelVar);
+  Result := Sqrt(Sqrt(FilteredAlpha2));
+end;
+
+function TCastleShaderGeneratorRHI.GenerateRectilinearShadowWarpFunctions: String;
+begin
+  Result :=
+    '// Phase 43.2: Rectilinear Shadow Map UV Warping' + NL +
+    'vec2 EvaluateRectilinearShadowWarpUV(vec2 shadowUV, float warpStrength) {' + NL +
+    '  float w = max(0.0, warpStrength);' + NL +
+    '  vec2 p = clamp(shadowUV, vec2(0.0), vec2(1.0)) * 2.0 - 1.0;' + NL +
+    '  vec2 warpedP = p * (1.0 + w) / (1.0 + w * abs(p));' + NL +
+    '  return warpedP * 0.5 + 0.5;' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateRectilinearShadowWarpUV(
+  const AShadowUV: TVector2;
+  const AWarpStrength: Single): TVector2;
+var
+  W, PX, PY, WarpedX, WarpedY: Single;
+begin
+  W := Max(0.0, AWarpStrength);
+  PX := EnsureRange(AShadowUV.X, 0.0, 1.0) * 2.0 - 1.0;
+  PY := EnsureRange(AShadowUV.Y, 0.0, 1.0) * 2.0 - 1.0;
+  WarpedX := PX * (1.0 + W) / (1.0 + W * Abs(PX));
+  WarpedY := PY * (1.0 + W) / (1.0 + W * Abs(PY));
+  Result := Vector2(WarpedX * 0.5 + 0.5, WarpedY * 0.5 + 0.5);
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

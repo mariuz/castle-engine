@@ -3035,6 +3035,46 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { GPU Indirect Material Binning Manager (Phase 43.3)                         }
+  { -------------------------------------------------------------------------- }
+
+  { Bins visibility-buffer or ray-hit fragments by material ID into contiguous
+    indirect dispatch ranges (BinCountsBuffer, BinOffsetsBuffer) for coherent shading. }
+  TCastleVulkanMaterialBinner = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FMaxMaterialBins: Cardinal;
+    FBinCountsBuffer: TVulkanRHIBuffer;
+    FBinOffsetsBuffer: TVulkanRHIBuffer;
+    FBinningComputePipeline: TVulkanRHIComputePipeline;
+    FBinningDispatchCount: Cardinal;
+    procedure EnsureBinningBuffers;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { CPU reference: Computes per-material histogram counts and exclusive prefix-sum starting offsets. }
+    class procedure EvaluateMaterialBinRanges(
+      const AMaterialIDs: array of Cardinal;
+      const ABinCount: Cardinal;
+      out AOutBinCounts: TCardinalDynamicArray;
+      out AOutBinOffsets: TCardinalDynamicArray); static;
+
+    { Dispatches the GPU material binning pass across an AScreenWidth x AScreenHeight visibility buffer. }
+    procedure DispatchMaterialBinning(const ACommandList: TVulkanRHICommandList;
+      const AScreenWidth, AScreenHeight: Cardinal;
+      const AComputePipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property MaxMaterialBins: Cardinal read FMaxMaterialBins write FMaxMaterialBins;
+    property BinCountsBuffer: TVulkanRHIBuffer read FBinCountsBuffer;
+    property BinOffsetsBuffer: TVulkanRHIBuffer read FBinOffsetsBuffer;
+    property BinningComputePipeline: TVulkanRHIComputePipeline
+      read FBinningComputePipeline write FBinningComputePipeline;
+    property BinningDispatchCount: Cardinal read FBinningDispatchCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -3149,6 +3189,7 @@ type
     FProgrammableSampleLocations: TCastleVulkanProgrammableSampleLocations;
     FStreamCompactor: TCastleVulkanStreamCompactor;
     FVoxelConeTracer: TCastleVulkanVoxelConeTracer;
+    FMaterialBinner: TCastleVulkanMaterialBinner;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -3268,6 +3309,7 @@ type
     function GetProgrammableSampleLocations: TCastleVulkanProgrammableSampleLocations;
     function GetStreamCompactor: TCastleVulkanStreamCompactor;
     function GetVoxelConeTracer: TCastleVulkanVoxelConeTracer;
+    function GetMaterialBinner: TCastleVulkanMaterialBinner;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -3492,6 +3534,7 @@ type
     property ProgrammableSampleLocations: TCastleVulkanProgrammableSampleLocations read GetProgrammableSampleLocations;
     property StreamCompactor: TCastleVulkanStreamCompactor read GetStreamCompactor;
     property VoxelConeTracer: TCastleVulkanVoxelConeTracer read GetVoxelConeTracer;
+    property MaterialBinner: TCastleVulkanMaterialBinner read GetMaterialBinner;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -15799,6 +15842,111 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanMaterialBinner (Phase 43.3)                                     }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanMaterialBinner.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FMaxMaterialBins := 256;
+end;
+
+destructor TCastleVulkanMaterialBinner.Destroy;
+begin
+  FreeAndNil(FBinCountsBuffer);
+  FreeAndNil(FBinOffsetsBuffer);
+  inherited;
+end;
+
+class procedure TCastleVulkanMaterialBinner.EvaluateMaterialBinRanges(
+  const AMaterialIDs: array of Cardinal;
+  const ABinCount: Cardinal;
+  out AOutBinCounts: TCardinalDynamicArray;
+  out AOutBinOffsets: TCardinalDynamicArray);
+var
+  SafeBins, I, MatID, RunningOffset: Cardinal;
+begin
+  SafeBins := Max(Cardinal(1), ABinCount);
+  SetLength(AOutBinCounts, SafeBins);
+  SetLength(AOutBinOffsets, SafeBins);
+  for I := 0 to SafeBins - 1 do
+  begin
+    AOutBinCounts[I] := 0;
+    AOutBinOffsets[I] := 0;
+  end;
+
+  if Length(AMaterialIDs) > 0 then
+  begin
+    for I := 0 to Cardinal(High(AMaterialIDs)) do
+    begin
+      MatID := AMaterialIDs[I] mod SafeBins;
+      Inc(AOutBinCounts[MatID]);
+    end;
+  end;
+
+  RunningOffset := 0;
+  for I := 0 to SafeBins - 1 do
+  begin
+    AOutBinOffsets[I] := RunningOffset;
+    Inc(RunningOffset, AOutBinCounts[I]);
+  end;
+end;
+
+procedure TCastleVulkanMaterialBinner.EnsureBinningBuffers;
+var
+  Bins: Cardinal;
+  BufDesc: TRHIBufferDesc;
+begin
+  if FDevice = nil then
+    Exit;
+  Bins := Max(Cardinal(16), FMaxMaterialBins);
+  FMaxMaterialBins := Bins;
+
+  if (FBinCountsBuffer = nil) or (FBinCountsBuffer.Desc.Size < PtrUInt(Bins) * SizeOf(Cardinal)) then
+  begin
+    FreeAndNil(FBinCountsBuffer);
+    FreeAndNil(FBinOffsetsBuffer);
+
+    BufDesc := TRHIBufferDesc.Create(PtrUInt(Bins) * SizeOf(Cardinal),
+      [buStorage, buIndirect], muGpuOnly, 'MaterialBinCountsSSBO');
+    FBinCountsBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+
+    BufDesc := TRHIBufferDesc.Create(PtrUInt(Bins) * SizeOf(Cardinal),
+      [buStorage, buIndirect], muGpuOnly, 'MaterialBinOffsetsSSBO');
+    FBinOffsetsBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+end;
+
+procedure TCastleVulkanMaterialBinner.DispatchMaterialBinning(
+  const ACommandList: TVulkanRHICommandList;
+  const AScreenWidth, AScreenHeight: Cardinal;
+  const AComputePipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+var
+  ActivePipe: TVulkanRHIComputePipeline;
+  GroupsX, GroupsY: Cardinal;
+begin
+  if (ACommandList = nil) or (AScreenWidth = 0) or (AScreenHeight = 0) then
+    Exit;
+  EnsureBinningBuffers;
+
+  if AComputePipeline <> nil then
+    ActivePipe := AComputePipeline
+  else
+    ActivePipe := FBinningComputePipeline;
+  if ActivePipe <> nil then
+    ACommandList.BindComputePipeline(ActivePipe);
+  if ADescriptorSet <> nil then
+    ACommandList.BindDescriptorSet(0, ADescriptorSet, []);
+
+  GroupsX := (AScreenWidth + 7) div 8;
+  GroupsY := (AScreenHeight + 7) div 8;
+  ACommandList.Dispatch(GroupsX, GroupsY, 1);
+  Inc(FBinningDispatchCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -16495,12 +16643,20 @@ begin
   Result := FVoxelConeTracer;
 end;
 
+function TVulkanRHIDevice.GetMaterialBinner: TCastleVulkanMaterialBinner;
+begin
+  if FMaterialBinner = nil then
+    FMaterialBinner := TCastleVulkanMaterialBinner.Create(Self);
+  Result := FMaterialBinner;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FMaterialBinner);
   FreeAndNil(FVoxelConeTracer);
   FreeAndNil(FStreamCompactor);
   FreeAndNil(FProgrammableSampleLocations);
