@@ -5804,7 +5804,8 @@ begin
         'Shader module "%s" SPIR-V execution model stage (Ord=%d) does not match requested TRHIShaderStage (Ord=%d).',
         [ADebugName, Ord(FReflection.Stage), Ord(AStage)]));
   end;
-  if (ADevice = nil) or (ADevice.Handle = nil) or not Assigned(vkCreateShaderModule) then
+  if (ADevice = nil) or (ADevice.Handle = nil) or
+     (not Assigned(vkCreateShaderModule)) or (ASizeInBytes <= 10 * SizeOf(UInt32)) then
     Exit;
   FillChar(CreateInfo, SizeOf(CreateInfo), 0);
   CreateInfo.sType := VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -18440,7 +18441,8 @@ end;
 
 procedure TVulkanRHIDevice.CreateLogicalDevice;
 var
-  QueueCount, QueueInfoCount, I, ExtCount: Cardinal;
+  QueueCount, QueueInfoCount, ExtCount: Cardinal;
+  I: Integer;
   QueueProps: array of VkQueueFamilyProperties;
   PresentSupport: VkBool32;
   QueueInfos: array[0..2] of VkDeviceQueueCreateInfo;
@@ -18461,20 +18463,21 @@ begin
   QueueCount := 0;
   vkGetPhysicalDeviceQueueFamilyProperties(FPhysicalDevice, @QueueCount, nil);
   SetLength(QueueProps, QueueCount);
-  vkGetPhysicalDeviceQueueFamilyProperties(FPhysicalDevice, @QueueCount, @QueueProps[0]);
+  if QueueCount > 0 then
+    vkGetPhysicalDeviceQueueFamilyProperties(FPhysicalDevice, @QueueCount, @QueueProps[0]);
 
   FGraphicsQueueFamily := 0;
   FPresentQueueFamily := 0;
-  for I := 0 to QueueCount - 1 do
+  for I := 0 to Integer(QueueCount) - 1 do
   begin
     if (QueueProps[I].queueFlags and VK_QUEUE_GRAPHICS_BIT) <> 0 then
-      FGraphicsQueueFamily := I;
+      FGraphicsQueueFamily := Cardinal(I);
     if (FSurface <> VK_NULL_HANDLE) and Assigned(vkGetPhysicalDeviceSurfaceSupportKHR) then
     begin
       PresentSupport := VK_FALSE;
-      if vkGetPhysicalDeviceSurfaceSupportKHR(FPhysicalDevice, I, FSurface, @PresentSupport) = VK_SUCCESS then
+      if vkGetPhysicalDeviceSurfaceSupportKHR(FPhysicalDevice, Cardinal(I), FSurface, @PresentSupport) = VK_SUCCESS then
         if PresentSupport = VK_TRUE then
-          FPresentQueueFamily := I;
+          FPresentQueueFamily := Cardinal(I);
     end else
       FPresentQueueFamily := FGraphicsQueueFamily;
   end;
@@ -19686,7 +19689,7 @@ begin
     SPIRV := TCastleShaderCompiler.Instance.GetOrCompileSPIRV(AStage, AGLSLSource, ADebugName);
   except
     on ERHIShaderCompilationError do
-      if (FDevice = nil) and (AGLSLSource <> '') and
+      if (AGLSLSource <> '') and
          not TCastleShaderCompiler.Instance.IsRuntimeCompilationAvailable then
         SPIRV := nil
       else
@@ -19694,7 +19697,7 @@ begin
   end;
   if Length(SPIRV) = 0 then
   begin
-    if (FDevice = nil) and (AGLSLSource <> '') and
+    if (AGLSLSource <> '') and
        not TCastleShaderCompiler.Instance.IsRuntimeCompilationAvailable then
     begin
       case AStage of

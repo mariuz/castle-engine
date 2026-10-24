@@ -25,9 +25,33 @@ program vulkan_3d_scene;
 uses
   SysUtils, Classes,
   CastleVectors, CastleColors, CastleRectangles, CastleLog,
-  CastleApplicationProperties, CastleRenderOptions, CastleViewport, CastleScene, CastleWindow,
+  CastleApplicationProperties, CastleRenderOptions, CastleViewport, CastleScene,
+  CastleTransform, CastleUIControls, CastleControls, CastleComponentSerialize,
+  CastleCameras, CastleWindow, CastleParameters,
   CastleInternalRHI, CastleInternalShaderRHI, CastleInternalShaderCompiler,
   CastleInternalVulkan, CastleInternalVulkanWSI, CastleInternalRHI_Vulkan;
+
+type
+  TVulkanDemoController = class(TCastleUserInterface)
+  public
+    Viewport: TCastleViewport;
+    GoldenBox: TCastleBox;
+    StatusLabel: TCastleLabel;
+    Angle: Single;
+    procedure Update(const SecondsPassed: Single; var HandleInput: Boolean); override;
+  end;
+
+procedure TVulkanDemoController.Update(const SecondsPassed: Single; var HandleInput: Boolean);
+begin
+  inherited;
+  Angle := Angle + SecondsPassed * 1.2;
+  if GoldenBox <> nil then
+    GoldenBox.Rotation := Vector4(0.2, 1.0, 0.15, Angle);
+  if (StatusLabel <> nil) and (Viewport <> nil) then
+    StatusLabel.Caption := Format(
+      'Backend: Vulkan 1.3 RHI | FPS: %s | GI: Lumen SDF+SurfaceCache | TSR + VRS | EV100: %.1f',
+      [Container.Fps.ToString, Viewport.EvaluateCurrentCameraEV100]);
+end;
 
 var
   ActiveBackend: TRenderBackend;
@@ -40,15 +64,21 @@ var
   Viewport: TCastleViewport;
   Scene: TCastleScene;
   Win: TCastleWindow;
+  DesignRoot: TCastleUserInterface;
+  DesignOwner: TComponent;
+  Navigation: TCastleExamineNavigation;
+  Controller: TVulkanDemoController;
   SurfaceDesc: TVulkanNativeSurfaceDesc;
   WSIExts: TAnsiStringArray;
   ExecutedSubsystems: Cardinal;
+  HeadlessMode: Boolean;
   I: Integer;
 begin
   ApplicationProperties._FileAccessSafe := true;
   InitializeLog;
   ApplicationProperties.RenderBackend := backendVulkan;
   ActiveBackend := SelectOptimalRenderBackend(ApplicationProperties.RenderBackend, True, 1, 3);
+  HeadlessMode := Parameters.IndexOf('--headless') <> -1;
 
   WritelnLog('Vulkan3DScene', 'Castle Game Engine - Vulkan 3D Forward Pass & Next-Gen RHI Example');
   WritelnLog('Vulkan3DScene', 'Selected optimal render backend: %d (Vulkan=3)', [Ord(ActiveBackend)]);
@@ -127,6 +157,36 @@ begin
       [Ord(SurfaceDesc.Platform),
        BoolToStr(Win.IsVulkanBackendRequested, True),
        Length(WSIExts)]);
+
+    SetRHIDevice(nil);
+    if not HeadlessMode then
+    begin
+      Application.MainWindow := Win;
+      Win.Caption := 'Castle Game Engine - Vulkan 1.3 RHI 3D Scene & Lighting';
+      Win.Width := 1280;
+      Win.Height := 720;
+      DesignOwner := TComponent.Create(Win);
+      DesignRoot := UserInterfaceLoad('castle-data:/gameviewmain.castle-user-interface', DesignOwner);
+      Win.Controls.InsertFront(DesignRoot);
+
+      Controller := TVulkanDemoController.Create(Win);
+      Controller.Viewport := DesignOwner.FindComponent('VulkanViewport3D') as TCastleViewport;
+      Controller.GoldenBox := DesignOwner.FindComponent('VulkanGoldenBox') as TCastleBox;
+      Controller.StatusLabel := DesignOwner.FindComponent('LabelVulkanStatus') as TCastleLabel;
+      if Controller.Viewport <> nil then
+      begin
+        Controller.Viewport.GlobalIlluminationMode := giLumenSDFAndSurfaceCache;
+        Controller.Viewport.TemporalAntiAliasingMode := taaTSRUpscaler;
+        Controller.Viewport.VariableRateShadingMode := vrsContrastAdaptive;
+        Controller.Viewport.NextGenToneMappingMode := ntmAgXGamutCompressed;
+        Controller.Viewport.VolumetricFogEnabled := True;
+        Controller.Viewport.AutoExposureEnabled := True;
+        Navigation := TCastleExamineNavigation.Create(DesignOwner);
+        Controller.Viewport.InsertBack(Navigation);
+      end;
+      Win.Controls.InsertBack(Controller);
+      Win.OpenAndRun;
+    end;
   finally
     SetRHIDevice(nil);
     FreeAndNil(Win);

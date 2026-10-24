@@ -3051,7 +3051,9 @@ begin
     begin
       MakeCurrent;
       Container.EventClose(Application.OpenWindowsCount);
-    end;
+    end else
+    if ApplicationProperties.IsGLContextOpen and (Application.OpenWindowsCount <= 1) then
+      ApplicationProperties._GLContextClose;
   finally
 
     { call CloseBackend, controlling FInCloseBackend around }
@@ -3191,8 +3193,10 @@ begin
         gdk_wayland_display_get_wl_display(Application.DisplayGdk),
         gdk_wayland_window_get_wl_surface(gtk_widget_get_window(GTK_WIDGET(GLAreaGtk))));
     {$elseif defined(CASTLE_WINDOW_GTK_WITH_XLIB)}
-    Result := TVulkanNativeSurfaceDesc.CreateXlib(
-      PVkXlibDisplay(Application.XDisplay), VkXlibWindow(RenderingAreaXID));
+    Result.Platform := vwsiXlib;
+    if (GLAreaGtk <> nil) and (gtk_widget_get_window(GTK_WIDGET(GLAreaGtk)) <> nil) then
+      Result := TVulkanNativeSurfaceDesc.CreateXlib(
+        PVkXlibDisplay(Application.XDisplay), VkXlibWindow(RenderingAreaXID));
     {$else}
     Result.Platform := GetDefaultVulkanWSIPlatform;
     {$endif}

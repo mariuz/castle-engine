@@ -2301,6 +2301,7 @@ implementation
 
 var
   VulkanLibrary: TDynLib = nil;
+  LoadedVulkanInstance: VkInstance = nil;
 
 function VK_MAKE_VERSION(const Major, Minor, Patch: Cardinal): Cardinal;
 begin
@@ -2386,6 +2387,11 @@ procedure LoadVulkanInstance(const Instance: VkInstance);
 begin
   if not Assigned(vkGetInstanceProcAddr) then Exit;
 
+  LoadedVulkanInstance := Instance;
+  Pointer(vkGetDeviceProcAddr) := vkGetInstanceProcAddr(Instance, 'vkGetDeviceProcAddr');
+  if (not Assigned(vkGetDeviceProcAddr)) and (VulkanLibrary <> nil) then
+    Pointer(vkGetDeviceProcAddr) := VulkanLibrary.Symbol('vkGetDeviceProcAddr');
+
   Pointer(vkDestroyInstance) := vkGetInstanceProcAddr(Instance, 'vkDestroyInstance');
   Pointer(vkEnumeratePhysicalDevices) := vkGetInstanceProcAddr(Instance, 'vkEnumeratePhysicalDevices');
   Pointer(vkGetPhysicalDeviceFeatures) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceFeatures');
@@ -2413,161 +2419,189 @@ begin
 end;
 
 procedure LoadVulkanDevice(const Device: VkDevice);
+
+  function GetDevProc(const AName: PAnsiChar): Pointer;
+  begin
+    Result := nil;
+    if (Device <> nil) and Assigned(vkGetDeviceProcAddr) then
+      Result := vkGetDeviceProcAddr(Device, AName);
+    if (Result = nil) and (LoadedVulkanInstance <> nil) and Assigned(vkGetInstanceProcAddr) then
+      Result := vkGetInstanceProcAddr(LoadedVulkanInstance, AName);
+    if (Result = nil) and Assigned(vkGetInstanceProcAddr) then
+      Result := vkGetInstanceProcAddr(nil, AName);
+  end;
+
+  function GetInstOrDevProc(const AName: PAnsiChar): Pointer;
+  begin
+    Result := nil;
+    if (LoadedVulkanInstance <> nil) and Assigned(vkGetInstanceProcAddr) then
+      Result := vkGetInstanceProcAddr(LoadedVulkanInstance, AName);
+    if (Result = nil) and (Device <> nil) and Assigned(vkGetDeviceProcAddr) then
+      Result := vkGetDeviceProcAddr(Device, AName);
+    if (Result = nil) and Assigned(vkGetInstanceProcAddr) then
+      Result := vkGetInstanceProcAddr(nil, AName);
+  end;
+
 begin
   if not Assigned(vkGetInstanceProcAddr) then Exit;
 
-  Pointer(vkGetDeviceProcAddr) := vkGetInstanceProcAddr(nil, 'vkGetDeviceProcAddr');
+  if not Assigned(vkGetDeviceProcAddr) then
+    Pointer(vkGetDeviceProcAddr) := GetInstOrDevProc('vkGetDeviceProcAddr');
 
-  Pointer(vkGetDeviceQueue) := vkGetInstanceProcAddr(nil, 'vkGetDeviceQueue');
-  Pointer(vkQueueSubmit) := vkGetInstanceProcAddr(nil, 'vkQueueSubmit');
-  Pointer(vkQueueWaitIdle) := vkGetInstanceProcAddr(nil, 'vkQueueWaitIdle');
-  Pointer(vkDeviceWaitIdle) := vkGetInstanceProcAddr(nil, 'vkDeviceWaitIdle');
-  Pointer(vkCreateFence) := vkGetInstanceProcAddr(nil, 'vkCreateFence');
-  Pointer(vkDestroyFence) := vkGetInstanceProcAddr(nil, 'vkDestroyFence');
-  Pointer(vkResetFences) := vkGetInstanceProcAddr(nil, 'vkResetFences');
-  Pointer(vkWaitForFences) := vkGetInstanceProcAddr(nil, 'vkWaitForFences');
-  Pointer(vkCreateSemaphore) := vkGetInstanceProcAddr(nil, 'vkCreateSemaphore');
-  Pointer(vkDestroySemaphore) := vkGetInstanceProcAddr(nil, 'vkDestroySemaphore');
-  Pointer(vkAllocateMemory) := vkGetInstanceProcAddr(nil, 'vkAllocateMemory');
-  Pointer(vkFreeMemory) := vkGetInstanceProcAddr(nil, 'vkFreeMemory');
-  Pointer(vkMapMemory) := vkGetInstanceProcAddr(nil, 'vkMapMemory');
-  Pointer(vkUnmapMemory) := vkGetInstanceProcAddr(nil, 'vkUnmapMemory');
-  Pointer(vkBindBufferMemory) := vkGetInstanceProcAddr(nil, 'vkBindBufferMemory');
-  Pointer(vkBindImageMemory) := vkGetInstanceProcAddr(nil, 'vkBindImageMemory');
-  Pointer(vkGetBufferMemoryRequirements) := vkGetInstanceProcAddr(nil, 'vkGetBufferMemoryRequirements');
-  Pointer(vkGetImageMemoryRequirements) := vkGetInstanceProcAddr(nil, 'vkGetImageMemoryRequirements');
-  Pointer(vkCreateBuffer) := vkGetInstanceProcAddr(nil, 'vkCreateBuffer');
-  Pointer(vkDestroyBuffer) := vkGetInstanceProcAddr(nil, 'vkDestroyBuffer');
-  Pointer(vkCreateImage) := vkGetInstanceProcAddr(nil, 'vkCreateImage');
-  Pointer(vkDestroyImage) := vkGetInstanceProcAddr(nil, 'vkDestroyImage');
-  Pointer(vkCreateImageView) := vkGetInstanceProcAddr(nil, 'vkCreateImageView');
-  Pointer(vkDestroyImageView) := vkGetInstanceProcAddr(nil, 'vkDestroyImageView');
-  Pointer(vkCreateSampler) := vkGetInstanceProcAddr(nil, 'vkCreateSampler');
-  Pointer(vkDestroySampler) := vkGetInstanceProcAddr(nil, 'vkDestroySampler');
-  Pointer(vkCreateShaderModule) := vkGetInstanceProcAddr(nil, 'vkCreateShaderModule');
-  Pointer(vkDestroyShaderModule) := vkGetInstanceProcAddr(nil, 'vkDestroyShaderModule');
-  Pointer(vkCreatePipelineLayout) := vkGetInstanceProcAddr(nil, 'vkCreatePipelineLayout');
-  Pointer(vkDestroyPipelineLayout) := vkGetInstanceProcAddr(nil, 'vkDestroyPipelineLayout');
-  Pointer(vkCreateGraphicsPipelines) := vkGetInstanceProcAddr(nil, 'vkCreateGraphicsPipelines');
-  Pointer(vkDestroyPipeline) := vkGetInstanceProcAddr(nil, 'vkDestroyPipeline');
-  Pointer(vkCreateDescriptorSetLayout) := vkGetInstanceProcAddr(nil, 'vkCreateDescriptorSetLayout');
-  Pointer(vkDestroyDescriptorSetLayout) := vkGetInstanceProcAddr(nil, 'vkDestroyDescriptorSetLayout');
-  Pointer(vkCreateDescriptorPool) := vkGetInstanceProcAddr(nil, 'vkCreateDescriptorPool');
-  Pointer(vkDestroyDescriptorPool) := vkGetInstanceProcAddr(nil, 'vkDestroyDescriptorPool');
-  Pointer(vkAllocateDescriptorSets) := vkGetInstanceProcAddr(nil, 'vkAllocateDescriptorSets');
-  Pointer(vkFreeDescriptorSets) := vkGetInstanceProcAddr(nil, 'vkFreeDescriptorSets');
-  Pointer(vkUpdateDescriptorSets) := vkGetInstanceProcAddr(nil, 'vkUpdateDescriptorSets');
-  Pointer(vkCreateCommandPool) := vkGetInstanceProcAddr(nil, 'vkCreateCommandPool');
-  Pointer(vkDestroyCommandPool) := vkGetInstanceProcAddr(nil, 'vkDestroyCommandPool');
-  Pointer(vkResetCommandPool) := vkGetInstanceProcAddr(nil, 'vkResetCommandPool');
-  Pointer(vkAllocateCommandBuffers) := vkGetInstanceProcAddr(nil, 'vkAllocateCommandBuffers');
-  Pointer(vkFreeCommandBuffers) := vkGetInstanceProcAddr(nil, 'vkFreeCommandBuffers');
-  Pointer(vkBeginCommandBuffer) := vkGetInstanceProcAddr(nil, 'vkBeginCommandBuffer');
-  Pointer(vkEndCommandBuffer) := vkGetInstanceProcAddr(nil, 'vkEndCommandBuffer');
-  Pointer(vkCmdBindPipeline) := vkGetInstanceProcAddr(nil, 'vkCmdBindPipeline');
-  Pointer(vkCmdSetViewport) := vkGetInstanceProcAddr(nil, 'vkCmdSetViewport');
-  Pointer(vkCmdSetScissor) := vkGetInstanceProcAddr(nil, 'vkCmdSetScissor');
-  Pointer(vkCmdBindDescriptorSets) := vkGetInstanceProcAddr(nil, 'vkCmdBindDescriptorSets');
-  Pointer(vkCmdBindIndexBuffer) := vkGetInstanceProcAddr(nil, 'vkCmdBindIndexBuffer');
-  Pointer(vkCmdBindVertexBuffers) := vkGetInstanceProcAddr(nil, 'vkCmdBindVertexBuffers');
-  Pointer(vkCmdDraw) := vkGetInstanceProcAddr(nil, 'vkCmdDraw');
-  Pointer(vkCmdDrawIndexed) := vkGetInstanceProcAddr(nil, 'vkCmdDrawIndexed');
-  Pointer(vkCmdPushConstants) := vkGetInstanceProcAddr(nil, 'vkCmdPushConstants');
-  Pointer(vkCmdPipelineBarrier) := vkGetInstanceProcAddr(nil, 'vkCmdPipelineBarrier');
-  Pointer(vkCmdCopyBuffer) := vkGetInstanceProcAddr(nil, 'vkCmdCopyBuffer');
-  Pointer(vkCmdCopyBufferToImage) := vkGetInstanceProcAddr(nil, 'vkCmdCopyBufferToImage');
-  Pointer(vkCmdCopyImageToBuffer) := vkGetInstanceProcAddr(nil, 'vkCmdCopyImageToBuffer');
-  Pointer(vkCmdBeginRendering) := vkGetInstanceProcAddr(nil, 'vkCmdBeginRendering');
+  Pointer(vkGetDeviceQueue) := GetDevProc('vkGetDeviceQueue');
+  Pointer(vkQueueSubmit) := GetDevProc('vkQueueSubmit');
+  Pointer(vkQueueWaitIdle) := GetDevProc('vkQueueWaitIdle');
+  Pointer(vkDeviceWaitIdle) := GetDevProc('vkDeviceWaitIdle');
+  Pointer(vkCreateFence) := GetDevProc('vkCreateFence');
+  Pointer(vkDestroyFence) := GetDevProc('vkDestroyFence');
+  Pointer(vkResetFences) := GetDevProc('vkResetFences');
+  Pointer(vkWaitForFences) := GetDevProc('vkWaitForFences');
+  Pointer(vkCreateSemaphore) := GetDevProc('vkCreateSemaphore');
+  Pointer(vkDestroySemaphore) := GetDevProc('vkDestroySemaphore');
+  Pointer(vkAllocateMemory) := GetDevProc('vkAllocateMemory');
+  Pointer(vkFreeMemory) := GetDevProc('vkFreeMemory');
+  Pointer(vkMapMemory) := GetDevProc('vkMapMemory');
+  Pointer(vkUnmapMemory) := GetDevProc('vkUnmapMemory');
+  Pointer(vkBindBufferMemory) := GetDevProc('vkBindBufferMemory');
+  Pointer(vkBindImageMemory) := GetDevProc('vkBindImageMemory');
+  Pointer(vkGetBufferMemoryRequirements) := GetDevProc('vkGetBufferMemoryRequirements');
+  Pointer(vkGetImageMemoryRequirements) := GetDevProc('vkGetImageMemoryRequirements');
+  Pointer(vkCreateBuffer) := GetDevProc('vkCreateBuffer');
+  Pointer(vkDestroyBuffer) := GetDevProc('vkDestroyBuffer');
+  Pointer(vkCreateImage) := GetDevProc('vkCreateImage');
+  Pointer(vkDestroyImage) := GetDevProc('vkDestroyImage');
+  Pointer(vkCreateImageView) := GetDevProc('vkCreateImageView');
+  Pointer(vkDestroyImageView) := GetDevProc('vkDestroyImageView');
+  Pointer(vkCreateSampler) := GetDevProc('vkCreateSampler');
+  Pointer(vkDestroySampler) := GetDevProc('vkDestroySampler');
+  Pointer(vkCreateShaderModule) := GetDevProc('vkCreateShaderModule');
+  Pointer(vkDestroyShaderModule) := GetDevProc('vkDestroyShaderModule');
+  Pointer(vkCreatePipelineLayout) := GetDevProc('vkCreatePipelineLayout');
+  Pointer(vkDestroyPipelineLayout) := GetDevProc('vkDestroyPipelineLayout');
+  Pointer(vkCreateGraphicsPipelines) := GetDevProc('vkCreateGraphicsPipelines');
+  Pointer(vkDestroyPipeline) := GetDevProc('vkDestroyPipeline');
+  Pointer(vkCreateDescriptorSetLayout) := GetDevProc('vkCreateDescriptorSetLayout');
+  Pointer(vkDestroyDescriptorSetLayout) := GetDevProc('vkDestroyDescriptorSetLayout');
+  Pointer(vkCreateDescriptorPool) := GetDevProc('vkCreateDescriptorPool');
+  Pointer(vkDestroyDescriptorPool) := GetDevProc('vkDestroyDescriptorPool');
+  Pointer(vkAllocateDescriptorSets) := GetDevProc('vkAllocateDescriptorSets');
+  Pointer(vkFreeDescriptorSets) := GetDevProc('vkFreeDescriptorSets');
+  Pointer(vkUpdateDescriptorSets) := GetDevProc('vkUpdateDescriptorSets');
+  Pointer(vkCreateCommandPool) := GetDevProc('vkCreateCommandPool');
+  Pointer(vkDestroyCommandPool) := GetDevProc('vkDestroyCommandPool');
+  Pointer(vkResetCommandPool) := GetDevProc('vkResetCommandPool');
+  Pointer(vkAllocateCommandBuffers) := GetDevProc('vkAllocateCommandBuffers');
+  Pointer(vkFreeCommandBuffers) := GetDevProc('vkFreeCommandBuffers');
+  Pointer(vkBeginCommandBuffer) := GetDevProc('vkBeginCommandBuffer');
+  Pointer(vkEndCommandBuffer) := GetDevProc('vkEndCommandBuffer');
+  Pointer(vkCmdBindPipeline) := GetDevProc('vkCmdBindPipeline');
+  Pointer(vkCmdSetViewport) := GetDevProc('vkCmdSetViewport');
+  Pointer(vkCmdSetScissor) := GetDevProc('vkCmdSetScissor');
+  Pointer(vkCmdBindDescriptorSets) := GetDevProc('vkCmdBindDescriptorSets');
+  Pointer(vkCmdBindIndexBuffer) := GetDevProc('vkCmdBindIndexBuffer');
+  Pointer(vkCmdBindVertexBuffers) := GetDevProc('vkCmdBindVertexBuffers');
+  Pointer(vkCmdDraw) := GetDevProc('vkCmdDraw');
+  Pointer(vkCmdDrawIndexed) := GetDevProc('vkCmdDrawIndexed');
+  Pointer(vkCmdPushConstants) := GetDevProc('vkCmdPushConstants');
+  Pointer(vkCmdPipelineBarrier) := GetDevProc('vkCmdPipelineBarrier');
+  Pointer(vkCmdCopyBuffer) := GetDevProc('vkCmdCopyBuffer');
+  Pointer(vkCmdCopyBufferToImage) := GetDevProc('vkCmdCopyBufferToImage');
+  Pointer(vkCmdCopyImageToBuffer) := GetDevProc('vkCmdCopyImageToBuffer');
+  Pointer(vkCmdBeginRendering) := GetDevProc('vkCmdBeginRendering');
   if not Assigned(vkCmdBeginRendering) then
-    Pointer(vkCmdBeginRendering) := vkGetInstanceProcAddr(nil, 'vkCmdBeginRenderingKHR');
-  Pointer(vkCmdEndRendering) := vkGetInstanceProcAddr(nil, 'vkCmdEndRendering');
+    Pointer(vkCmdBeginRendering) := GetDevProc('vkCmdBeginRenderingKHR');
+  Pointer(vkCmdEndRendering) := GetDevProc('vkCmdEndRendering');
   if not Assigned(vkCmdEndRendering) then
-    Pointer(vkCmdEndRendering) := vkGetInstanceProcAddr(nil, 'vkCmdEndRenderingKHR');
-  Pointer(vkCreateRenderPass) := vkGetInstanceProcAddr(nil, 'vkCreateRenderPass');
-  Pointer(vkDestroyRenderPass) := vkGetInstanceProcAddr(nil, 'vkDestroyRenderPass');
-  Pointer(vkCreateFramebuffer) := vkGetInstanceProcAddr(nil, 'vkCreateFramebuffer');
-  Pointer(vkDestroyFramebuffer) := vkGetInstanceProcAddr(nil, 'vkDestroyFramebuffer');
-  Pointer(vkCmdBeginRenderPass) := vkGetInstanceProcAddr(nil, 'vkCmdBeginRenderPass');
-  Pointer(vkCmdEndRenderPass) := vkGetInstanceProcAddr(nil, 'vkCmdEndRenderPass');
-  Pointer(vkCreateSwapchainKHR) := vkGetInstanceProcAddr(nil, 'vkCreateSwapchainKHR');
-  Pointer(vkDestroySwapchainKHR) := vkGetInstanceProcAddr(nil, 'vkDestroySwapchainKHR');
-  Pointer(vkGetSwapchainImagesKHR) := vkGetInstanceProcAddr(nil, 'vkGetSwapchainImagesKHR');
-  Pointer(vkAcquireNextImageKHR) := vkGetInstanceProcAddr(nil, 'vkAcquireNextImageKHR');
-  Pointer(vkQueuePresentKHR) := vkGetInstanceProcAddr(nil, 'vkQueuePresentKHR');
-  Pointer(vkCmdBeginDebugUtilsLabelEXT) := vkGetInstanceProcAddr(nil, 'vkCmdBeginDebugUtilsLabelEXT');
-  Pointer(vkCmdEndDebugUtilsLabelEXT) := vkGetInstanceProcAddr(nil, 'vkCmdEndDebugUtilsLabelEXT');
-  Pointer(vkCmdBlitImage) := vkGetInstanceProcAddr(nil, 'vkCmdBlitImage');
-  Pointer(vkCmdDrawIndirect) := vkGetInstanceProcAddr(nil, 'vkCmdDrawIndirect');
-  Pointer(vkGetPhysicalDeviceFeatures2) := vkGetInstanceProcAddr(nil, 'vkGetPhysicalDeviceFeatures2');
-  Pointer(vkGetPhysicalDeviceProperties2) := vkGetInstanceProcAddr(nil, 'vkGetPhysicalDeviceProperties2');
-  Pointer(vkCmdDrawIndexedIndirect) := vkGetInstanceProcAddr(nil, 'vkCmdDrawIndexedIndirect');
-  Pointer(vkCmdDrawIndirectCount) := vkGetInstanceProcAddr(nil, 'vkCmdDrawIndirectCount');
+    Pointer(vkCmdEndRendering) := GetDevProc('vkCmdEndRenderingKHR');
+  Pointer(vkCreateRenderPass) := GetDevProc('vkCreateRenderPass');
+  Pointer(vkDestroyRenderPass) := GetDevProc('vkDestroyRenderPass');
+  Pointer(vkCreateFramebuffer) := GetDevProc('vkCreateFramebuffer');
+  Pointer(vkDestroyFramebuffer) := GetDevProc('vkDestroyFramebuffer');
+  Pointer(vkCmdBeginRenderPass) := GetDevProc('vkCmdBeginRenderPass');
+  Pointer(vkCmdEndRenderPass) := GetDevProc('vkCmdEndRenderPass');
+  Pointer(vkCreateSwapchainKHR) := GetDevProc('vkCreateSwapchainKHR');
+  Pointer(vkDestroySwapchainKHR) := GetDevProc('vkDestroySwapchainKHR');
+  Pointer(vkGetSwapchainImagesKHR) := GetDevProc('vkGetSwapchainImagesKHR');
+  Pointer(vkAcquireNextImageKHR) := GetDevProc('vkAcquireNextImageKHR');
+  Pointer(vkQueuePresentKHR) := GetDevProc('vkQueuePresentKHR');
+  Pointer(vkCmdBeginDebugUtilsLabelEXT) := GetDevProc('vkCmdBeginDebugUtilsLabelEXT');
+  Pointer(vkCmdEndDebugUtilsLabelEXT) := GetDevProc('vkCmdEndDebugUtilsLabelEXT');
+  Pointer(vkCmdBlitImage) := GetDevProc('vkCmdBlitImage');
+  Pointer(vkCmdDrawIndirect) := GetDevProc('vkCmdDrawIndirect');
+  if not Assigned(vkGetPhysicalDeviceFeatures2) then
+    Pointer(vkGetPhysicalDeviceFeatures2) := GetInstOrDevProc('vkGetPhysicalDeviceFeatures2');
+  if not Assigned(vkGetPhysicalDeviceProperties2) then
+    Pointer(vkGetPhysicalDeviceProperties2) := GetInstOrDevProc('vkGetPhysicalDeviceProperties2');
+  Pointer(vkCmdDrawIndexedIndirect) := GetDevProc('vkCmdDrawIndexedIndirect');
+  Pointer(vkCmdDrawIndirectCount) := GetDevProc('vkCmdDrawIndirectCount');
   if not Assigned(vkCmdDrawIndirectCount) then
-    Pointer(vkCmdDrawIndirectCount) := vkGetInstanceProcAddr(nil, 'vkCmdDrawIndirectCountKHR');
-  Pointer(vkCmdDrawIndexedIndirectCount) := vkGetInstanceProcAddr(nil, 'vkCmdDrawIndexedIndirectCount');
+    Pointer(vkCmdDrawIndirectCount) := GetDevProc('vkCmdDrawIndirectCountKHR');
+  Pointer(vkCmdDrawIndexedIndirectCount) := GetDevProc('vkCmdDrawIndexedIndirectCount');
   if not Assigned(vkCmdDrawIndexedIndirectCount) then
-    Pointer(vkCmdDrawIndexedIndirectCount) := vkGetInstanceProcAddr(nil, 'vkCmdDrawIndexedIndirectCountKHR');
-  Pointer(vkCmdSetDepthBias) := vkGetInstanceProcAddr(nil, 'vkCmdSetDepthBias');
-  Pointer(vkCreatePipelineCache) := vkGetInstanceProcAddr(nil, 'vkCreatePipelineCache');
-  Pointer(vkDestroyPipelineCache) := vkGetInstanceProcAddr(nil, 'vkDestroyPipelineCache');
-  Pointer(vkGetPipelineCacheData) := vkGetInstanceProcAddr(nil, 'vkGetPipelineCacheData');
-  Pointer(vkResetCommandBuffer) := vkGetInstanceProcAddr(nil, 'vkResetCommandBuffer');
-  Pointer(vkCmdExecuteCommands) := vkGetInstanceProcAddr(nil, 'vkCmdExecuteCommands');
-  Pointer(vkGetBufferMemoryRequirements2) := vkGetInstanceProcAddr(nil, 'vkGetBufferMemoryRequirements2');
+    Pointer(vkCmdDrawIndexedIndirectCount) := GetDevProc('vkCmdDrawIndexedIndirectCountKHR');
+  Pointer(vkCmdSetDepthBias) := GetDevProc('vkCmdSetDepthBias');
+  Pointer(vkCreatePipelineCache) := GetDevProc('vkCreatePipelineCache');
+  Pointer(vkDestroyPipelineCache) := GetDevProc('vkDestroyPipelineCache');
+  Pointer(vkGetPipelineCacheData) := GetDevProc('vkGetPipelineCacheData');
+  Pointer(vkResetCommandBuffer) := GetDevProc('vkResetCommandBuffer');
+  Pointer(vkCmdExecuteCommands) := GetDevProc('vkCmdExecuteCommands');
+  Pointer(vkGetBufferMemoryRequirements2) := GetDevProc('vkGetBufferMemoryRequirements2');
   if not Assigned(vkGetBufferMemoryRequirements2) then
-    Pointer(vkGetBufferMemoryRequirements2) := vkGetInstanceProcAddr(nil, 'vkGetBufferMemoryRequirements2KHR');
-  Pointer(vkGetImageMemoryRequirements2) := vkGetInstanceProcAddr(nil, 'vkGetImageMemoryRequirements2');
+    Pointer(vkGetBufferMemoryRequirements2) := GetDevProc('vkGetBufferMemoryRequirements2KHR');
+  Pointer(vkGetImageMemoryRequirements2) := GetDevProc('vkGetImageMemoryRequirements2');
   if not Assigned(vkGetImageMemoryRequirements2) then
-    Pointer(vkGetImageMemoryRequirements2) := vkGetInstanceProcAddr(nil, 'vkGetImageMemoryRequirements2KHR');
-  Pointer(vkGetPhysicalDeviceFormatProperties) := vkGetInstanceProcAddr(nil, 'vkGetPhysicalDeviceFormatProperties');
-  Pointer(vkFlushMappedMemoryRanges) := vkGetInstanceProcAddr(nil, 'vkFlushMappedMemoryRanges');
-  Pointer(vkInvalidateMappedMemoryRanges) := vkGetInstanceProcAddr(nil, 'vkInvalidateMappedMemoryRanges');
-  Pointer(vkResetDescriptorPool) := vkGetInstanceProcAddr(nil, 'vkResetDescriptorPool');
-  Pointer(vkCreateComputePipelines) := vkGetInstanceProcAddr(nil, 'vkCreateComputePipelines');
-  Pointer(vkCmdDispatch) := vkGetInstanceProcAddr(nil, 'vkCmdDispatch');
-  Pointer(vkCmdDispatchIndirect) := vkGetInstanceProcAddr(nil, 'vkCmdDispatchIndirect');
-  Pointer(vkCmdSetCullMode) := vkGetInstanceProcAddr(nil, 'vkCmdSetCullMode');
+    Pointer(vkGetImageMemoryRequirements2) := GetDevProc('vkGetImageMemoryRequirements2KHR');
+  if not Assigned(vkGetPhysicalDeviceFormatProperties) then
+    Pointer(vkGetPhysicalDeviceFormatProperties) := GetInstOrDevProc('vkGetPhysicalDeviceFormatProperties');
+  Pointer(vkFlushMappedMemoryRanges) := GetDevProc('vkFlushMappedMemoryRanges');
+  Pointer(vkInvalidateMappedMemoryRanges) := GetDevProc('vkInvalidateMappedMemoryRanges');
+  Pointer(vkResetDescriptorPool) := GetDevProc('vkResetDescriptorPool');
+  Pointer(vkCreateComputePipelines) := GetDevProc('vkCreateComputePipelines');
+  Pointer(vkCmdDispatch) := GetDevProc('vkCmdDispatch');
+  Pointer(vkCmdDispatchIndirect) := GetDevProc('vkCmdDispatchIndirect');
+  Pointer(vkCmdSetCullMode) := GetDevProc('vkCmdSetCullMode');
   if not Assigned(vkCmdSetCullMode) then
-    Pointer(vkCmdSetCullMode) := vkGetInstanceProcAddr(nil, 'vkCmdSetCullModeEXT');
-  Pointer(vkCmdSetFrontFace) := vkGetInstanceProcAddr(nil, 'vkCmdSetFrontFace');
+    Pointer(vkCmdSetCullMode) := GetDevProc('vkCmdSetCullModeEXT');
+  Pointer(vkCmdSetFrontFace) := GetDevProc('vkCmdSetFrontFace');
   if not Assigned(vkCmdSetFrontFace) then
-    Pointer(vkCmdSetFrontFace) := vkGetInstanceProcAddr(nil, 'vkCmdSetFrontFaceEXT');
-  Pointer(vkCmdSetPrimitiveTopology) := vkGetInstanceProcAddr(nil, 'vkCmdSetPrimitiveTopology');
+    Pointer(vkCmdSetFrontFace) := GetDevProc('vkCmdSetFrontFaceEXT');
+  Pointer(vkCmdSetPrimitiveTopology) := GetDevProc('vkCmdSetPrimitiveTopology');
   if not Assigned(vkCmdSetPrimitiveTopology) then
-    Pointer(vkCmdSetPrimitiveTopology) := vkGetInstanceProcAddr(nil, 'vkCmdSetPrimitiveTopologyEXT');
-  Pointer(vkCmdSetDepthTestEnable) := vkGetInstanceProcAddr(nil, 'vkCmdSetDepthTestEnable');
+    Pointer(vkCmdSetPrimitiveTopology) := GetDevProc('vkCmdSetPrimitiveTopologyEXT');
+  Pointer(vkCmdSetDepthTestEnable) := GetDevProc('vkCmdSetDepthTestEnable');
   if not Assigned(vkCmdSetDepthTestEnable) then
-    Pointer(vkCmdSetDepthTestEnable) := vkGetInstanceProcAddr(nil, 'vkCmdSetDepthTestEnableEXT');
-  Pointer(vkCmdSetDepthWriteEnable) := vkGetInstanceProcAddr(nil, 'vkCmdSetDepthWriteEnable');
+    Pointer(vkCmdSetDepthTestEnable) := GetDevProc('vkCmdSetDepthTestEnableEXT');
+  Pointer(vkCmdSetDepthWriteEnable) := GetDevProc('vkCmdSetDepthWriteEnable');
   if not Assigned(vkCmdSetDepthWriteEnable) then
-    Pointer(vkCmdSetDepthWriteEnable) := vkGetInstanceProcAddr(nil, 'vkCmdSetDepthWriteEnableEXT');
-  Pointer(vkCmdSetDepthCompareOp) := vkGetInstanceProcAddr(nil, 'vkCmdSetDepthCompareOp');
+    Pointer(vkCmdSetDepthWriteEnable) := GetDevProc('vkCmdSetDepthWriteEnableEXT');
+  Pointer(vkCmdSetDepthCompareOp) := GetDevProc('vkCmdSetDepthCompareOp');
   if not Assigned(vkCmdSetDepthCompareOp) then
-    Pointer(vkCmdSetDepthCompareOp) := vkGetInstanceProcAddr(nil, 'vkCmdSetDepthCompareOpEXT');
-  Pointer(vkCmdPipelineBarrier2) := vkGetInstanceProcAddr(nil, 'vkCmdPipelineBarrier2');
+    Pointer(vkCmdSetDepthCompareOp) := GetDevProc('vkCmdSetDepthCompareOpEXT');
+  Pointer(vkCmdPipelineBarrier2) := GetDevProc('vkCmdPipelineBarrier2');
   if not Assigned(vkCmdPipelineBarrier2) then
-    Pointer(vkCmdPipelineBarrier2) := vkGetInstanceProcAddr(nil, 'vkCmdPipelineBarrier2KHR');
-  Pointer(vkWaitSemaphores) := vkGetInstanceProcAddr(nil, 'vkWaitSemaphores');
+    Pointer(vkCmdPipelineBarrier2) := GetDevProc('vkCmdPipelineBarrier2KHR');
+  Pointer(vkWaitSemaphores) := GetDevProc('vkWaitSemaphores');
   if not Assigned(vkWaitSemaphores) then
-    Pointer(vkWaitSemaphores) := vkGetInstanceProcAddr(nil, 'vkWaitSemaphoresKHR');
-  Pointer(vkSignalSemaphore) := vkGetInstanceProcAddr(nil, 'vkSignalSemaphore');
+    Pointer(vkWaitSemaphores) := GetDevProc('vkWaitSemaphoresKHR');
+  Pointer(vkSignalSemaphore) := GetDevProc('vkSignalSemaphore');
   if not Assigned(vkSignalSemaphore) then
-    Pointer(vkSignalSemaphore) := vkGetInstanceProcAddr(nil, 'vkSignalSemaphoreKHR');
-  Pointer(vkGetSemaphoreCounterValue) := vkGetInstanceProcAddr(nil, 'vkGetSemaphoreCounterValue');
+    Pointer(vkSignalSemaphore) := GetDevProc('vkSignalSemaphoreKHR');
+  Pointer(vkGetSemaphoreCounterValue) := GetDevProc('vkGetSemaphoreCounterValue');
   if not Assigned(vkGetSemaphoreCounterValue) then
-    Pointer(vkGetSemaphoreCounterValue) := vkGetInstanceProcAddr(nil, 'vkGetSemaphoreCounterValueKHR');
-  Pointer(vkCreateQueryPool) := vkGetInstanceProcAddr(nil, 'vkCreateQueryPool');
-  Pointer(vkDestroyQueryPool) := vkGetInstanceProcAddr(nil, 'vkDestroyQueryPool');
-  Pointer(vkGetQueryPoolResults) := vkGetInstanceProcAddr(nil, 'vkGetQueryPoolResults');
-  Pointer(vkCmdResetQueryPool) := vkGetInstanceProcAddr(nil, 'vkCmdResetQueryPool');
-  Pointer(vkCmdBeginQuery) := vkGetInstanceProcAddr(nil, 'vkCmdBeginQuery');
-  Pointer(vkCmdEndQuery) := vkGetInstanceProcAddr(nil, 'vkCmdEndQuery');
-  Pointer(vkCmdWriteTimestamp) := vkGetInstanceProcAddr(nil, 'vkCmdWriteTimestamp');
+    Pointer(vkGetSemaphoreCounterValue) := GetDevProc('vkGetSemaphoreCounterValueKHR');
+  Pointer(vkCreateQueryPool) := GetDevProc('vkCreateQueryPool');
+  Pointer(vkDestroyQueryPool) := GetDevProc('vkDestroyQueryPool');
+  Pointer(vkGetQueryPoolResults) := GetDevProc('vkGetQueryPoolResults');
+  Pointer(vkCmdResetQueryPool) := GetDevProc('vkCmdResetQueryPool');
+  Pointer(vkCmdBeginQuery) := GetDevProc('vkCmdBeginQuery');
+  Pointer(vkCmdEndQuery) := GetDevProc('vkCmdEndQuery');
+  Pointer(vkCmdWriteTimestamp) := GetDevProc('vkCmdWriteTimestamp');
 end;
 
 procedure FreeVulkan;
 begin
   FreeAndNil(VulkanLibrary);
+  LoadedVulkanInstance := nil;
   vkGetInstanceProcAddr := nil;
   vkGetDeviceProcAddr := nil;
   vkCreateInstance := nil;

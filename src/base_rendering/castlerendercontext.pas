@@ -470,7 +470,14 @@ const
 
 implementation
 
-uses CastleLog, CastleProjection, CastleInternalGLUtils, CastleGLImages, CastleInternalRHI;
+uses CastleLog, CastleProjection, CastleInternalGLUtils, CastleGLImages,
+  CastleApplicationProperties, CastleInternalRHI;
+
+function SkipOpenGLStateWhenRHIActive: Boolean; inline;
+begin
+  Result := (RHIDevice <> nil) and
+    ((ActiveCommandList <> nil) or (ApplicationProperties = nil) or (not ApplicationProperties.IsGLContextOpen));
+end;
 
 constructor TRenderContext.Create(AOwner: TComponent);
 begin
@@ -558,7 +565,7 @@ begin
     UpdateClearColor;
   end;
 
-  if RHIDevice <> nil then
+  if SkipOpenGLStateWhenRHIActive then
     Exit;
 
   Mask := 0;
@@ -570,7 +577,7 @@ end;
 
 procedure TRenderContext.UpdateClearColor;
 begin
-  if RHIDevice <> nil then
+  if SkipOpenGLStateWhenRHIActive then
     Exit;
   glClearColor(FClearColor.X, FClearColor.Y, FClearColor.Z, FClearColor.W);
 end;
@@ -589,7 +596,7 @@ end;
 
 procedure TRenderContext.UpdateLineWidth;
 begin
-  if RHIDevice <> nil then
+  if SkipOpenGLStateWhenRHIActive then
     Exit;
   {$if (not defined(DARWIN)) or defined(OpenGLES)}
   // on desktop macOS, glLineWidth raise GL_INVALID_VALUE for parameters <> 1.0
@@ -611,7 +618,7 @@ end;
 
 procedure TRenderContext.UpdatePointSize;
 begin
-  if RHIDevice <> nil then
+  if SkipOpenGLStateWhenRHIActive then
     Exit;
   { Not possible with OpenGL ES.
     See http://stackoverflow.com/questions/9381562/using-gl-points-in-glkit-ios-5
@@ -736,7 +743,8 @@ begin
     Inc(FRHIViewportUpdateCount);
     if ActiveCommandList <> nil then
       ActiveCommandList.SetViewport(FRHILastViewport, MinD, MaxD);
-    Exit;
+    if SkipOpenGLStateWhenRHIActive then
+      Exit;
   end;
 
   case FDepthRange of
@@ -769,7 +777,8 @@ begin
       else
         ActiveCommandList.SetCullMode(cmNone);
     end;
-    Exit;
+    if SkipOpenGLStateWhenRHIActive then
+      Exit;
   end;
   GLSetEnabled(GL_CULL_FACE, FCullFace);
 end;
@@ -797,7 +806,8 @@ begin
       else
         ActiveCommandList.SetFrontFace(ffClockwise);
     end;
-    Exit;
+    if SkipOpenGLStateWhenRHIActive then
+      Exit;
   end;
   if FFrontFaceCcw then
     glFrontFace(GL_CCW)
@@ -823,7 +833,8 @@ begin
   begin
     if ActiveCommandList <> nil then
       ActiveCommandList.SetDepthTestEnable(FDepthTest);
-    Exit;
+    if SkipOpenGLStateWhenRHIActive then
+      Exit;
   end;
   GLSetEnabled(GL_DEPTH_TEST, FDepthTest);
 end;
@@ -857,7 +868,8 @@ begin
         dfAlways:       ActiveCommandList.SetDepthCompareOp(coAlways);
       end;
     end;
-    Exit;
+    if SkipOpenGLStateWhenRHIActive then
+      Exit;
   end;
   glDepthFunc(Ord(FDepthFunc));
 end;
@@ -889,7 +901,7 @@ end;
 
 procedure TRenderContext.UpdateColorChannels;
 begin
-  if RHIDevice <> nil then
+  if SkipOpenGLStateWhenRHIActive then
     Exit;
   glColorMask(
     BoolToGL(0 in FColorChannels),
@@ -917,7 +929,8 @@ begin
   begin
     if ActiveCommandList <> nil then
       ActiveCommandList.SetDepthWriteEnable(FDepthBufferUpdate);
-    Exit;
+    if SkipOpenGLStateWhenRHIActive then
+      Exit;
   end;
   glDepthMask(BoolToGL(FDepthBufferUpdate));
 end;
@@ -960,7 +973,8 @@ begin
       if ActiveCommandList <> nil then
         ActiveCommandList.SetScissor(EffRect);
     end;
-    Exit;
+    if SkipOpenGLStateWhenRHIActive then
+      Exit;
   end;
 
   glViewport(
@@ -1031,7 +1045,7 @@ end;
 
 procedure TRenderContext.UpdateCurrentProgram;
 begin
-  if RHIDevice <> nil then
+  if SkipOpenGLStateWhenRHIActive then
     Exit;
   InternalSetCurrentProgram(FCurrentProgram);
 end;
@@ -1047,7 +1061,7 @@ end;
 
 procedure TRenderContext.UpdateCurrentVao;
 begin
-  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.VertexArrayObject then
+  if (not SkipOpenGLStateWhenRHIActive) and (GLFeatures <> nil) and GLFeatures.VertexArrayObject then
   begin
     if FCurrentVao <> nil then
       glBindVertexArray(FCurrentVao.InternalHandle(Self))
@@ -1091,14 +1105,14 @@ end;
 
 procedure TRenderContext.UpdateBlendingEnabled;
 begin
-  if RHIDevice <> nil then
+  if SkipOpenGLStateWhenRHIActive then
     Exit;
   GLSetEnabled(GL_BLEND, FBlendingEnabled);
 end;
 
 procedure TRenderContext.UpdateBlendingFunction;
 begin
-  if RHIDevice <> nil then
+  if SkipOpenGLStateWhenRHIActive then
     Exit;
   {$warnings off} // using deprecated routine that should be internal here
   GLBlendFunction(FBlendingSourceFactor, FBlendingDestinationFactor);
@@ -1179,7 +1193,7 @@ end;
 
 procedure TRenderContext.UpdateLineType;
 begin
-  if RHIDevice <> nil then
+  if SkipOpenGLStateWhenRHIActive then
     Exit;
   {$ifndef OpenGLES}
   case FLineType of
@@ -1218,7 +1232,8 @@ begin
       else
         ActiveCommandList.SetDepthBias(0, 0);
     end;
-    Exit;
+    if SkipOpenGLStateWhenRHIActive then
+      Exit;
   end;
 
   if FPolygonOffset.Enabled then
@@ -1267,11 +1282,9 @@ end;
 
 procedure TRenderContext.SetBoundBuffer(const Target: TBufferTarget; const Value: TGLBuffer);
 begin
-  if RHIDevice <> nil then
-  begin
-    FBoundBuffer[Target] := Value;
+  FBoundBuffer[Target] := Value;
+  if SkipOpenGLStateWhenRHIActive then
     Exit;
-  end;
 
   { TODO: Optimization (avoiding glBindBuffer) disabled.
     Reason: castle-model-viewer (rock.gltf, triangulatio.x3dv) shows
@@ -1378,7 +1391,8 @@ begin
       ParentContext.FRHIScissorActive := True;
       if ActiveCommandList <> nil then
         ActiveCommandList.SetScissor(R);
-    end else
+    end;
+    if not SkipOpenGLStateWhenRHIActive then
     begin
       glScissor(R.Left, R.Bottom, R.Width, R.Height);
       glEnable(GL_SCISSOR_TEST);
@@ -1392,7 +1406,8 @@ begin
       ParentContext.FRHIScissorActive := False;
       if ActiveCommandList <> nil then
         ActiveCommandList.SetScissor(ParentContext.FRHILastScissor);
-    end else
+    end;
+    if not SkipOpenGLStateWhenRHIActive then
       glDisable(GL_SCISSOR_TEST);
   end;
 end;

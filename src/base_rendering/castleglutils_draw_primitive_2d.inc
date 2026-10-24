@@ -537,8 +537,11 @@ begin
       ActiveCommandList.Draw(High(Points) + 1, 1, 0, 0);
     end;
 
-    FrameProfiler.Stop(fmDrawPrimitive2D);
-    Exit;
+    if (ActiveCommandList <> nil) or (ApplicationProperties = nil) or (not ApplicationProperties.IsGLContextOpen) then
+    begin
+      FrameProfiler.Stop(fmDrawPrimitive2D);
+      Exit;
+    end;
   end;
 
   if not GLFeatures.EnableFixedFunction then

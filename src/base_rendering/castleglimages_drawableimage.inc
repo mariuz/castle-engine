@@ -1016,7 +1016,7 @@ begin
   if RHIDevice <> nil then
   begin
     RHIContextOpen(AImage);
-  end else
+  end;
   if ApplicationProperties.IsGLContextOpen then
   begin
     GLContextOpen(AImage);
@@ -1856,7 +1856,7 @@ begin
   begin
     if (FRHITexture = nil) and (FImage <> nil) then
       RHIContextOpen(FImage);
-  end else
+  end;
   if ApplicationProperties.IsGLContextOpen then
   begin
     { initialize OpenGL resources on-demand }
