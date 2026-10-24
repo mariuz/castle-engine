@@ -414,6 +414,9 @@ type
       ButtonArrangeCyclide: TButton;
       ButtonArrangeBour: TButton;
       ButtonArrangeLimacon: TButton;
+      ButtonArrangeHenneberg: TButton;
+      ButtonArrangeSphEpicycloid: TButton;
+      ButtonArrangeTalbot: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -462,6 +465,7 @@ type
       ButtonUIFibonacciSplit: TButton;
       ButtonUIHudBars: TButton;
       ButtonUISplitScreen: TButton;
+      ButtonUISidebars: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -516,6 +520,7 @@ type
       MenuTreeViewItemSelectShadowAudit: TMenuItem;
       MenuTreeViewItemSelectPhysicsAudit: TMenuItem;
       MenuTreeViewItemSelectNegativeScale: TMenuItem;
+      MenuTreeViewItemSelectUIFractional: TMenuItem;
       MenuTreeViewItemCopyTransform: TMenuItem;
       MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
@@ -675,6 +680,9 @@ type
     procedure ButtonArrangeCyclideClick(Sender: TObject);
     procedure ButtonArrangeBourClick(Sender: TObject);
     procedure ButtonArrangeLimaconClick(Sender: TObject);
+    procedure ButtonArrangeHennebergClick(Sender: TObject);
+    procedure ButtonArrangeSphEpicycloidClick(Sender: TObject);
+    procedure ButtonArrangeTalbotClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -712,6 +720,7 @@ type
     procedure ButtonUIFibonacciSplitClick(Sender: TObject);
     procedure ButtonUIHudBarsClick(Sender: TObject);
     procedure ButtonUISplitScreenClick(Sender: TObject);
+    procedure ButtonUISidebarsClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -773,6 +782,7 @@ type
     procedure MenuTreeViewItemSelectShadowAuditClick(Sender: TObject);
     procedure MenuTreeViewItemSelectPhysicsAuditClick(Sender: TObject);
     procedure MenuTreeViewItemSelectNegativeScaleClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectUIFractionalClick(Sender: TObject);
     procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
@@ -1638,6 +1648,23 @@ type
       const CrestHeight: Single = 0.0;
       const OrientMode: Integer = 1);
     procedure ShowArrangeInLimaconCurveDialog;
+    procedure ArrangeSelectionOnHennebergSurface(
+      const ScaleRadius: Single = 0.0;
+      const Turns: Single = 1.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeOnHennebergSurfaceDialog;
+    procedure ArrangeSelectionOnSphericalEpicycloid(
+      const Radius: Single = 0.0;
+      const CuspsK: Integer = 2;
+      const ConeAngleDeg: Single = 45.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeOnSphericalEpicycloidDialog;
+    procedure ArrangeSelectionInTalbotCurve(
+      const MajorRadiusA: Single = 0.0;
+      const EccentricityF: Single = 0.5;
+      const CrestHeight: Single = 0.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeInTalbotCurveDialog;
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -1717,6 +1744,11 @@ type
       const MarginPx: Single = 8.0;
       const GapPx: Single = 8.0;
       const VerticalTwoPlayer: Boolean = false);
+    procedure ArrangeSelectedUserInterfacesInSidebars(
+      const SidebarWidthFraction: Single = 0.22;
+      const MarginPx: Single = 8.0;
+      const GapPx: Single = 8.0;
+      const BothSidebars: Boolean = true);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -1780,6 +1812,7 @@ type
     procedure SelectShadowCastersAndReceivers(const ShadowLightsOnly: Boolean = false);
     procedure SelectPhysicsMisconfigurations(const MissingColliderOnly: Boolean = false);
     procedure SelectNegativeScaleTransforms(const OddMirroredOnly: Boolean = false);
+    procedure SelectFractionalUserInterfaces(const SnapToWholePixels: Boolean = false);
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -3182,6 +3215,26 @@ begin
     if Event.IsKey(keyMinus) or Event.IsKey(keyNumpadMinus) then
     begin
       Frame.SelectNegativeScaleTransforms(false);
+      Exit(true);
+    end else
+    if Event.IsKey(keyEqual) or Event.IsKey(keyPlus) or Event.IsKey(keyNumpadPlus) then
+    begin
+      Frame.ShowArrangeOnHennebergSurfaceDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(keyBackQuote) then
+    begin
+      Frame.ShowArrangeOnSphericalEpicycloidDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(key1) then
+    begin
+      Frame.ShowArrangeInTalbotCurveDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(key0) then
+    begin
+      Frame.SelectFractionalUserInterfaces(false);
       Exit(true);
     end;
   end;
@@ -5371,6 +5424,36 @@ begin
   ButtonArrangeLimacon.OnClick := @ButtonArrangeLimaconClick;
   ButtonArrangeLimacon.Parent := PanelLayoutTransform;
 
+  ButtonArrangeHenneberg := TButton.Create(Self);
+  ButtonArrangeHenneberg.Align := alTop;
+  ButtonArrangeHenneberg.AutoSize := true;
+  ButtonArrangeHenneberg.Caption := 'Arrange Henneberg Surf';
+  ButtonArrangeHenneberg.Hint := 'Arrange 2+ selected 3D transforms along a 3D Henneberg Non-Orientable Minimal Surface around the active pivot (Ctrl+Alt+Shift+= | Shift-click: dialog | Click: 1-turn Henneberg minimal surface + tangent | Ctrl-click: 2-turn Henneberg surface + normal)';
+  ButtonArrangeHenneberg.ShowHint := true;
+  ButtonArrangeHenneberg.BorderSpacing.Around := 2;
+  ButtonArrangeHenneberg.OnClick := @ButtonArrangeHennebergClick;
+  ButtonArrangeHenneberg.Parent := PanelLayoutTransform;
+
+  ButtonArrangeSphEpicycloid := TButton.Create(Self);
+  ButtonArrangeSphEpicycloid.Align := alTop;
+  ButtonArrangeSphEpicycloid.AutoSize := true;
+  ButtonArrangeSphEpicycloid.Caption := 'Arrange Sphere Epicycloid';
+  ButtonArrangeSphEpicycloid.Hint := 'Arrange 2+ selected 3D transforms along a 3D Spherical Epicycloid / Cam-Follower Seam Curve around the active pivot (Ctrl+Alt+Shift+~ | Shift-click: dialog | Click: 2-lobe spherical nephroid seam + tangent | Ctrl-click: 3-lobe spherical cam seam + outward sphere normal)';
+  ButtonArrangeSphEpicycloid.ShowHint := true;
+  ButtonArrangeSphEpicycloid.BorderSpacing.Around := 2;
+  ButtonArrangeSphEpicycloid.OnClick := @ButtonArrangeSphEpicycloidClick;
+  ButtonArrangeSphEpicycloid.Parent := PanelLayoutTransform;
+
+  ButtonArrangeTalbot := TButton.Create(Self);
+  ButtonArrangeTalbot.Align := alTop;
+  ButtonArrangeTalbot.AutoSize := true;
+  ButtonArrangeTalbot.Caption := 'Arrange Talbot Curve';
+  ButtonArrangeTalbot.Hint := 'Arrange 2+ selected 3D transforms along a 3D Henry Fox Talbot Negative-Pedal Curve around the active pivot (Ctrl+Alt+Shift+1 | Shift-click: dialog | Click: Talbot curve F=0.5 + tangent | Ctrl-click: Tricuspid-cusp Talbot curve F=0.75 + 3D crest)';
+  ButtonArrangeTalbot.ShowHint := true;
+  ButtonArrangeTalbot.BorderSpacing.Around := 2;
+  ButtonArrangeTalbot.OnClick := @ButtonArrangeTalbotClick;
+  ButtonArrangeTalbot.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -5749,6 +5832,14 @@ begin
   ButtonUISplitScreen.OnClick := @ButtonUISplitScreenClick;
   ButtonUISplitScreen.Parent := PanelLayoutUI;
 
+  ButtonUISidebars := TButton.Create(Self);
+  ButtonUISidebars.AutoSize := true;
+  ButtonUISidebars.Caption := 'UI Sidebars';
+  ButtonUISidebars.Hint := 'Arrange and resize 2+ selected 2D UI controls into Left/Right Sidebar + Center Content Columns inside their parent container (Click: 22% Left & Right Sidebars + Center Content, 8px margin/gap | Shift-click: 0px flush Sidebars + Center | Ctrl-click: Left Sidebar only + stacked Center Content)';
+  ButtonUISidebars.ShowHint := true;
+  ButtonUISidebars.OnClick := @ButtonUISidebarsClick;
+  ButtonUISidebars.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -6047,6 +6138,11 @@ begin
   MenuTreeViewItemSelectNegativeScale.Caption := 'Select Negative-Scale / Mirrored-Determinant Transforms (Ctrl+Alt+Shift+-)';
   MenuTreeViewItemSelectNegativeScale.OnClick := @MenuTreeViewItemSelectNegativeScaleClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectNegativeScale);
+
+  MenuTreeViewItemSelectUIFractional := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectUIFractional.Caption := 'Select Fractional-Pixel / Unsnapped 2D UI Controls (Ctrl+Alt+Shift+0)';
+  MenuTreeViewItemSelectUIFractional.OnClick := @MenuTreeViewItemSelectUIFractionalClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectUIFractional);
 
   MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
   MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
@@ -9760,6 +9856,8 @@ begin
         ButtonUIHudBars.Enabled := SelectedUICount >= 2;
       if ButtonUISplitScreen <> nil then
         ButtonUISplitScreen.Enabled := SelectedUICount >= 2;
+      if ButtonUISidebars <> nil then
+        ButtonUISidebars.Enabled := SelectedUICount >= 2;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -9978,6 +10076,12 @@ begin
       ButtonArrangeBour.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonArrangeLimacon <> nil then
       ButtonArrangeLimacon.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeHenneberg <> nil then
+      ButtonArrangeHenneberg.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeSphEpicycloid <> nil then
+      ButtonArrangeSphEpicycloid.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeTalbot <> nil then
+      ButtonArrangeTalbot.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -11627,6 +11731,26 @@ begin
     if (Key in [VK_OEM_MINUS, VK_SUBTRACT]) and (Shift = [ssCtrl, ssAlt, ssShift]) then
     begin
       SelectNegativeScaleTransforms(false);
+      Key := 0;
+    end else
+    if (Key in [VK_OEM_PLUS, VK_ADD]) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowArrangeOnHennebergSurfaceDialog;
+      Key := 0;
+    end else
+    if (Key = VK_OEM_3) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowArrangeOnSphericalEpicycloidDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('1')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowArrangeInTalbotCurveDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('0')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      SelectFractionalUserInterfaces(false);
       Key := 0;
     end else
     if (Key = VK_OEM_1) and (Shift = [ssAlt, ssShift]) then
@@ -18768,6 +18892,167 @@ begin
     ArrangeSelectionInLimaconCurve(0.0, 0.0, 0.0, 1);
 end;
 
+procedure TDesignFrame.ArrangeSelectionOnHennebergSurface(
+  const ScaleRadius, Turns: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedOnHennebergSurface(
+      ScaleRadius, Turns, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeOnHennebergSurfaceDialog;
+var
+  Prompts: array[0..2] of string;
+  Values: array[0..2] of string;
+  ScaleS, TurnsW: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+  begin
+    ErrorBox('Select at least 2 TCastleTransform components to arrange on a Henneberg minimal surface.');
+    Exit;
+  end;
+
+  Prompts[0] := 'Henneberg minimal surface scale S (0 = auto from selection):';
+  Prompts[1] := 'Azimuthal turns W across surface:';
+  Prompts[2] := 'Orientation (0 = keep, 1 = trajectory tangent, 2 = Henneberg surface normal):';
+  Values[0] := '0.0';
+  Values[1] := '1.0';
+  Values[2] := '1';
+
+  if InputQuery('Arrange on 3D Henneberg Minimal Surface (Ctrl+Alt+Shift+=)', Prompts, Values) then
+  begin
+    ScaleS := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    TurnsW := StrToFloatDefDot(Trim(Values[1]), 1.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[2]), 1), 0, 2);
+    ArrangeSelectionOnHennebergSurface(ScaleS, TurnsW, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeHennebergClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeOnHennebergSurfaceDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionOnHennebergSurface(0.0, 2.0, 2)
+  else
+    ArrangeSelectionOnHennebergSurface(0.0, 1.0, 1);
+end;
+
+procedure TDesignFrame.ArrangeSelectionOnSphericalEpicycloid(
+  const Radius: Single;
+  const CuspsK: Integer;
+  const ConeAngleDeg: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedOnSphericalEpicycloid(
+      Radius, CuspsK, ConeAngleDeg, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeOnSphericalEpicycloidDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  R, ConeDeg: Single;
+  CuspsK, OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+  begin
+    ErrorBox('Select at least 2 TCastleTransform components to arrange on a spherical epicycloid seam curve.');
+    Exit;
+  end;
+
+  Prompts[0] := 'Sphere radius R (0 = auto from selection):';
+  Prompts[1] := 'Number of epicycloid lobes / cusps k:';
+  Prompts[2] := 'Max latitude cone angle omega (degrees):';
+  Prompts[3] := 'Orientation (0 = keep, 1 = analytical seam tangent, 2 = outward sphere normal):';
+  Values[0] := '0.0';
+  Values[1] := '2';
+  Values[2] := '45.0';
+  Values[3] := '1';
+
+  if InputQuery('Arrange on 3D Spherical Epicycloid Seam Curve (Ctrl+Alt+Shift+~)', Prompts, Values) then
+  begin
+    R := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    CuspsK := Max(1, StrToIntDef(Trim(Values[1]), 2));
+    ConeDeg := StrToFloatDefDot(Trim(Values[2]), 45.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[3]), 1), 0, 2);
+    ArrangeSelectionOnSphericalEpicycloid(R, CuspsK, ConeDeg, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeSphEpicycloidClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeOnSphericalEpicycloidDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionOnSphericalEpicycloid(0.0, 3, 50.0, 2)
+  else
+    ArrangeSelectionOnSphericalEpicycloid(0.0, 2, 45.0, 1);
+end;
+
+procedure TDesignFrame.ArrangeSelectionInTalbotCurve(
+  const MajorRadiusA, EccentricityF, CrestHeight: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInTalbotCurve(
+      MajorRadiusA, EccentricityF, CrestHeight, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInTalbotCurveDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  MajA, EccF, CrestH: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+  begin
+    ErrorBox('Select at least 2 TCastleTransform components to arrange in a Talbot negative-pedal curve.');
+    Exit;
+  end;
+
+  Prompts[0] := 'Talbot curve scale radius A (0 = auto from selection):';
+  Prompts[1] := 'Eccentricity parameter F (e.g. 0.5 smooth, 0.75 cusped):';
+  Prompts[2] := 'Vertical 3D crest / wave height H:';
+  Prompts[3] := 'Orientation (0 = keep, 1 = analytical Talbot tangent, 2 = outward radial):';
+  Values[0] := '0.0';
+  Values[1] := '0.5';
+  Values[2] := '0.0';
+  Values[3] := '1';
+
+  if InputQuery('Arrange in 3D Talbot Negative-Pedal Curve (Ctrl+Alt+Shift+1)', Prompts, Values) then
+  begin
+    MajA := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    EccF := StrToFloatDefDot(Trim(Values[1]), 0.5);
+    CrestH := StrToFloatDefDot(Trim(Values[2]), 0.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[3]), 1), 0, 2);
+    ArrangeSelectionInTalbotCurve(MajA, EccF, CrestH, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeTalbotClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInTalbotCurveDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionInTalbotCurve(0.0, 0.75, 2.0, 1)
+  else
+    ArrangeSelectionInTalbotCurve(0.0, 0.5, 0.0, 1);
+end;
+
 procedure TDesignFrame.StopPilotTransform;
 var
   SavedName: String;
@@ -22451,6 +22736,130 @@ begin
     ArrangeSelectedUserInterfacesInSplitScreen(8.0, 8.0, true)
   else
     ArrangeSelectedUserInterfacesInSplitScreen(8.0, 8.0, false);
+end;
+
+procedure TDesignFrame.ArrangeSelectedUserInterfacesInSidebars(
+  const SidebarWidthFraction: Single;
+  const MarginPx: Single;
+  const GapPx: Single;
+  const BothSidebars: Boolean);
+var
+  Selected, UIList: TComponentList;
+  SelectedCount, I, N, CenterCount, CenterIdx, ChangedCount: Integer;
+  UI: TCastleUserInterface;
+  ParentRect, CurRect: TFloatRectangle;
+  Scale, EffFrac, EffMargin, EffGap, AvailW, AvailH, SideW, CenterW, CenterLeft, CellW, CellH, TargetCX, TargetCY: Single;
+  UseRightSidebar: Boolean;
+  DeltaPx: TVector2;
+begin
+  GetSelected(Selected, SelectedCount);
+  try
+    UIList := TComponentList.Create(false);
+    try
+      for I := 0 to SelectedCount - 1 do
+        if (Selected[I] is TCastleUserInterface) and
+           (not (Selected[I] is TCastleTransform)) and
+           (TCastleUserInterface(Selected[I]).Parent <> nil) and
+           (not IsComponentLocked(Selected[I])) then
+          UIList.Add(Selected[I]);
+
+      N := UIList.Count;
+      if N < 2 then Exit;
+
+      ParentRect := TCastleUserInterface(UIList[0]).Parent.RenderRect;
+      if ParentRect.IsEmpty then Exit;
+
+      Scale := TCastleUserInterface(UIList[0]).UIScale;
+      if Scale <= 0 then Scale := 1.0;
+
+      EffFrac := Clamped(SidebarWidthFraction, 0.10, 0.40);
+      EffMargin := Max(0.0, MarginPx) * Scale;
+      EffGap := Max(0.0, GapPx) * Scale;
+
+      AvailW := Max(24.0, ParentRect.Width - 2.0 * EffMargin);
+      AvailH := Max(24.0, ParentRect.Height - 2.0 * EffMargin);
+      SideW := Max(8.0, AvailW * EffFrac);
+      UseRightSidebar := BothSidebars and (N >= 3);
+
+      if UseRightSidebar then
+      begin
+        CenterCount := N - 2;
+        CenterW := Max(8.0, AvailW - 2.0 * SideW - 2.0 * EffGap);
+      end else
+      begin
+        CenterCount := N - 1;
+        CenterW := Max(8.0, AvailW - SideW - EffGap);
+      end;
+      CenterLeft := ParentRect.Left + EffMargin + SideW + EffGap;
+
+      ChangedCount := 0;
+      for I := 0 to N - 1 do
+      begin
+        UI := TCastleUserInterface(UIList[I]);
+
+        if I = 0 then
+        begin
+          { Left Sidebar }
+          CellW := SideW;
+          CellH := AvailH;
+          TargetCX := ParentRect.Left + EffMargin + CellW * 0.5;
+          TargetCY := ParentRect.Center.Y;
+        end else
+        if UseRightSidebar and (I = N - 1) then
+        begin
+          { Right Sidebar }
+          CellW := SideW;
+          CellH := AvailH;
+          TargetCX := ParentRect.Right - EffMargin - CellW * 0.5;
+          TargetCY := ParentRect.Center.Y;
+        end else
+        begin
+          { Center Content Column (stacked top-to-bottom if multiple center panels) }
+          CenterIdx := I - 1;
+          CellW := CenterW;
+          CellH := Max(4.0, (AvailH - (CenterCount - 1) * EffGap) / Max(1, CenterCount));
+          TargetCX := CenterLeft + CellW * 0.5;
+          TargetCY := ParentRect.Top - EffMargin - CenterIdx * (CellH + EffGap) - CellH * 0.5;
+        end;
+
+        UI.FullSize := false;
+        UI.AutoSizeToChildren := false;
+        UI.WidthFraction := 0.0;
+        UI.HeightFraction := 0.0;
+        UI.Width := CellW / Scale;
+        UI.Height := CellH / Scale;
+
+        CurRect := UI.RenderRectWithBorder;
+        if not CurRect.IsEmpty then
+        begin
+          DeltaPx := Vector2(TargetCX, TargetCY) - CurRect.Center;
+          UI.Translation := UI.Translation + (DeltaPx / Scale);
+        end;
+        Inc(ChangedCount);
+      end;
+
+      if ChangedCount > 0 then
+        ModifiedOutsideObjectInspector(
+          Format('Arrange %d UI control(s) into sidebar + content columns', [ChangedCount]), ucHigh);
+    finally
+      FreeAndNil(UIList);
+    end;
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUISidebarsClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ArrangeSelectedUserInterfacesInSidebars(0.22, 0.0, 0.0, true)
+  else if ssCtrl in ShiftState then
+    ArrangeSelectedUserInterfacesInSidebars(0.24, 8.0, 8.0, false)
+  else
+    ArrangeSelectedUserInterfacesInSidebars(0.22, 8.0, 8.0, true);
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -26587,6 +26996,79 @@ begin
   SelectNegativeScaleTransforms(ssShift in GetKeyShiftState);
 end;
 
+procedure TDesignFrame.SelectFractionalUserInterfaces(const SnapToWholePixels: Boolean);
+var
+  NewSelection: TComponentList;
+  TreeNode: TTreeNode;
+  Obj: TObject;
+  UI: TCastleUserInterface;
+  HasFracTrans, HasFracSize: Boolean;
+  SnappedCount: Integer;
+begin
+  if DesignOwner = nil then Exit;
+
+  NewSelection := TComponentList.Create(false);
+  SnappedCount := 0;
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      if TreeNode.Data <> nil then
+      begin
+        Obj := TObject(TreeNode.Data);
+        if (Obj is TCastleUserInterface) and
+           (not (Obj is TCastleTransform)) and
+           (Obj <> FDesignRoot) and
+           (not (csSubComponent in TComponent(Obj).ComponentStyle)) and
+           (not IsComponentLocked(TComponent(Obj))) then
+        begin
+          UI := TCastleUserInterface(Obj);
+          if UI.Exists then
+          begin
+            HasFracTrans :=
+              (Abs(UI.Translation.X - Round(UI.Translation.X)) > 0.01) or
+              (Abs(UI.Translation.Y - Round(UI.Translation.Y)) > 0.01);
+            HasFracSize :=
+              ((UI.Width > 0) and (Abs(UI.Width - Round(UI.Width)) > 0.01)) or
+              ((UI.Height > 0) and (Abs(UI.Height - Round(UI.Height)) > 0.01));
+
+            if HasFracTrans or HasFracSize then
+            begin
+              if NewSelection.IndexOf(UI) = -1 then
+                NewSelection.Add(UI);
+              if SnapToWholePixels then
+              begin
+                UI.Translation := Vector2(Round(UI.Translation.X), Round(UI.Translation.Y));
+                if UI.Width > 0 then
+                  UI.Width := Round(UI.Width);
+                if UI.Height > 0 then
+                  UI.Height := Round(UI.Height);
+                Inc(SnappedCount);
+              end;
+            end;
+          end;
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+    begin
+      SetSelected(NewSelection);
+      if SnappedCount > 0 then
+        ModifiedOutsideObjectInspector(
+          Format('Snap %d fractional-pixel UI control(s) to whole pixels', [SnappedCount]), ucHigh);
+    end;
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectUIFractionalClick(Sender: TObject);
+begin
+  SelectFractionalUserInterfaces(ssShift in GetKeyShiftState);
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -27137,6 +27619,8 @@ begin
     MenuTreeViewItemSelectPhysicsAudit.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemSelectNegativeScale <> nil then
     MenuTreeViewItemSelectNegativeScale.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectUIFractional <> nil then
+    MenuTreeViewItemSelectUIFractional.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemCopyTransform <> nil then
     MenuTreeViewItemCopyTransform.Enabled := (CurrentTransform <> nil) or (SelectedUserInterface <> nil) or (ControlsTree.SelectionCount > 0);
   if MenuTreeViewItemPasteTransform <> nil then

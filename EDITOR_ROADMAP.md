@@ -1027,29 +1027,52 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
 
 ---
 
-## Recommended Next Roadmap Focus Areas (Phases 160+)
+### Phase 160: 3D Henneberg Minimal Surface Arrangement (`ArrangeSelectedOnHennebergSurface` / `Ctrl+Alt+Shift+=`)
+- [x] **160.1. Parametric Lebrecht Henneberg Non-Orientable Minimal Surface (`TCastleTransformManipulate.ArrangeSelectedOnHennebergSurface`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedOnHennebergSurface(ScaleRadius, Turns, OrientMode): Boolean`: distributes 2+ top-level selected transforms across Lebrecht Henneberg's 1875 algebraic non-orientable minimal surface centered at $\mathbf{C}$ with scale radius $S$ and azimuthal turns $W = \text{Turns}$ ($t_i = \frac{i}{N - 1}, \; u_i = 0.8 t_i, \; v_i = 2\pi W t_i$):
+    $$x = C_x + S\!\left(2\sinh u_i\cos v_i - \frac{2}{3}\sinh(3u_i)\cos(3v_i)\right), \quad y = C_y + 2S\cosh(2u_i)\cos(2v_i), \quad z = C_z + S\!\left(2\sinh u_i\sin v_i + \frac{2}{3}\sinh(3u_i)\sin(3v_i)\right)$$
+    supporting `OrientMode` (`0` = keep rotation, `1` = Henneberg trajectory tangent, `2` = Henneberg surface normal $\mathbf{P}_v \times \mathbf{P}_u$).
+  - Added **`Arrange Henneberg Surf`** (`ButtonArrangeHenneberg` in `PanelLayoutTransform`: normal click arranges on a 1-turn Henneberg minimal surface along the tangent; `Ctrl`-click arranges on a 2-turn Henneberg surface aligned to the surface normal; `Shift`-click opens the custom dialog) and `ShowArrangeOnHennebergSurfaceDialog` bound to **`Ctrl+Alt+Shift+=`** in both the Viewport and Hierarchy Tree.
 
-To maximize level-design, procedural geometry, UI/HUD authoring, and scene-hygiene productivity in the Castle Game Engine Editor, the following four strategic pillars and concrete upcoming phases (Phases 160–167) are recommended:
+### Phase 161: 3D Spherical Epicycloid / Nephroid Seam Curve Arrangement (`ArrangeSelectedOnSphericalEpicycloid` / `Ctrl+Alt+Shift+~`)
+- [x] **161.1. Parametric 3D Spherical Epicycloid / Cam-Follower Seam Curve (`TCastleTransformManipulate.ArrangeSelectedOnSphericalEpicycloid`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedOnSphericalEpicycloid(Radius, CuspsK, ConeAngleDeg, OrientMode): Boolean`: distributes 2+ top-level selected transforms on a sphere of radius $R$ centered at $\mathbf{C}$ along a $k$-lobe spherical epicycloid / cam seam curve with maximum latitude cone angle $\omega = \text{DegToRad}(\text{ConeAngleDeg})$ ($\theta_i = \frac{2\pi i}{N}, \; \phi_i = \omega\cos(k\theta_i)$):
+    $$x = C_x + R\cos\phi_i\cos\theta_i, \quad y = C_y + R\sin\phi_i, \quad z = C_z + R\cos\phi_i\sin\theta_i$$
+    with exact analytical seam tangent $\left(-\sin\phi_i\cdot\phi'_i\cos\theta_i - \cos\phi_i\sin\theta_i, \; \cos\phi_i\cdot\phi'_i, \; -\sin\phi_i\cdot\phi'_i\sin\theta_i + \cos\phi_i\cos\theta_i\right)$ and `OrientMode` (`0` = keep rotation, `1` = analytical spherical seam tangent, `2` = outward unit sphere normal).
+  - Added **`Arrange Sphere Epicycloid`** (`ButtonArrangeSphEpicycloid` in `PanelLayoutTransform`: normal click arranges on a 2-lobe spherical nephroid seam curve along the tangent; `Ctrl`-click arranges on a 3-lobe spherical cam seam curve aligned to the outward sphere normal; `Shift`-click opens the custom dialog) and `ShowArrangeOnSphericalEpicycloidDialog` bound to **`Ctrl+Alt+Shift+~`** in both the Viewport and Hierarchy Tree.
+
+### Phase 162: 3D Talbot / Plateau Lemniscate Curve Arrangement (`ArrangeSelectedInTalbotCurve` / `Ctrl+Alt+Shift+1`)
+- [x] **162.1. Parametric Henry Fox Talbot Negative-Pedal Curve (`TCastleTransformManipulate.ArrangeSelectedInTalbotCurve`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedInTalbotCurve(MajorRadiusA, EccentricityF, CrestHeight, OrientMode): Boolean`: distributes 2+ top-level selected transforms around the active selection pivot $\mathbf{C}$ at $\theta_i = \frac{2\pi i}{N}$ along Henry Fox Talbot's 1874 Negative Pedal Curve of an Ellipse with scale radius $A$, eccentricity parameter $F$, and vertical 3D crest modulation $Y = H\sin(2\theta_i)$:
+    $$x = C_x + A\big(1 + F\sin^2\theta_i\big)\cos\theta_i, \quad y = C_y + H\sin(2\theta_i), \quad z = C_z + A\big(1 - F\cos^2\theta_i\big)\sin\theta_i$$
+    with exact analytical tangent derivatives and `OrientMode` (`0` = keep rotation, `1` = analytical Talbot curve tangent, `2` = outward radial from $\mathbf{C}$).
+  - Added **`Arrange Talbot Curve`** (`ButtonArrangeTalbot` in `PanelLayoutTransform`: normal click arranges in a smooth Talbot curve $F=0.5$ along the tangent; `Ctrl`-click arranges in a cusped Talbot curve $F=0.75$ with 3D vertical crest; `Shift`-click opens the custom dialog) and `ShowArrangeInTalbotCurveDialog` bound to **`Ctrl+Alt+Shift+1`** in both the Viewport and Hierarchy Tree.
+  - Added automated unit test `TestHennebergSphericalEpicycloidAndTalbotCurve` in `tests/code/testcases/testcastletransformmanipulate.pas`.
+
+### Phase 163: Hierarchy Audit: Select Fractional-Pixel / Unsnapped 2D UI Controls (`SelectFractionalUserInterfaces` / `Ctrl+Alt+Shift+0`) & 2D UI Left/Right Sidebar Columns Layout (`ArrangeSelectedUserInterfacesInSidebars` / `ButtonUISidebars`)
+- [x] **163.1. Hierarchy UI Crispness Audit: Select Fractional-Pixel / Unsnapped 2D UI Controls (`SelectFractionalUserInterfaces` / `Ctrl+Alt+Shift+0`)**
+  - Implemented `TDesignFrame.SelectFractionalUserInterfaces(SnapToWholePixels)`: audits all visible, unlocked `TCastleUserInterface` controls in the hierarchy and selects controls whose `Translation.X`, `Translation.Y`, `Width`, or `Height` has a non-integer fractional sub-pixel component (`Abs(V - Round(V)) > 0.01`), and when `SnapToWholePixels = true`, automatically rounds their `Translation` and `Width`/`Height` to exact whole pixels.
+  - Bound to **`Ctrl+Alt+Shift+0`** in both the Viewport and Hierarchy Tree, plus **`Select Fractional-Pixel / Unsnapped 2D UI Controls (Ctrl+Alt+Shift+0)`** (`MenuTreeViewItemSelectUIFractional`) in `MenuTreeView` (`Shift`-click also snaps all matched fractional UI controls to whole pixels).
+- [x] **163.2. 2D UI Left/Right Sidebar Columns Layout (`ArrangeSelectedUserInterfacesInSidebars` / `ButtonUISidebars`)**
+  - Implemented `TDesignFrame.ArrangeSelectedUserInterfacesInSidebars(SidebarWidthFraction, MarginPx, GapPx, BothSidebars)` and added **`UI Sidebars`** (`ButtonUISidebars`) to `PanelLayoutUI`, arranging and resizing 2+ selected `TCastleUserInterface` controls inside their parent container into a full-height Left Sidebar (`UIList[0]`), an optional full-height Right Sidebar (`UIList[N-1]` when `BothSidebars = true` and $N \ge 3$), and stacked Center Content panel(s) (**Click**: $22\%$ Left & Right Sidebars + Center Content with $8\text{ px}$ margin/gap; **`Shift`-click**: $0\text{ px}$ flush Sidebars + Center; **`Ctrl`-click**: Left Sidebar only + stacked Center Content).
+
+---
+
+## Recommended Next Roadmap Focus Areas (Phases 164+)
+
+To maximize level-design, procedural geometry, UI/HUD authoring, and scene-hygiene productivity in the Castle Game Engine Editor, the following four strategic pillars and concrete upcoming phases (Phases 164–167) are recommended:
 
 ### Strategic Focus Pillars
 1. **Pillar A — 3D Procedural Deformations & Classical Differential Geometry Surfaces**:
-   - Expand `TCastleTransformManipulate` with curvature-driven and minimal/projective surface arrangements (Henneberg's minimal surface, Spherical Epicycloid seam curves, Talbot / Plateau sinusoidal-spiral curves, Kuen's surface, and Richmond's minimal surface) for sci-fi architecture, organic clusters, and procedural arenas.
+   - Expand `TCastleTransformManipulate` with curvature-driven and minimal/projective surface arrangements (Kuen's pseudospherical surface, Richmond's planar-end minimal surface, and Cramer's Devil's Curve / Maltese Cross lemniscate) for sci-fi architecture, organic clusters, and procedural arenas.
 2. **Pillar B — 2D UI Responsive HUD Templates & Safe-Frame / Margin Layouts**:
-   - Add one-click HUD/menu layout generators in `PanelLayoutUI` (Left/Right Sidebar + Center Content Columns, Radial Compass / Minimap Bezel Slots, and Picture-in-Picture Overlay Layout).
+   - Add one-click HUD/menu layout generators in `PanelLayoutUI` (Picture-in-Picture (PiP) Overlay Layout).
 3. **Pillar C — Scene Performance, Physics & Hierarchy Hygiene Audits**:
-   - Add one-click hierarchy diagnostic selectors for fractional-pixel blurry 2D UI controls, unreferenced / zero-vertex scenes, and non-default blend/render-options scenes.
+   - Add one-click hierarchy diagnostic selectors for viewports and secondary/unreferenced cameras.
 4. **Pillar D — Multi-Selection Batch Authoring & Camera/Light Staging**:
    - Provide fast batch lighting rigs and camera turntables / orbit waypoint rings.
 
-### Planned Upcoming Phases (Phases 160–167)
-- [ ] **Phase 160: 3D Henneberg Minimal Surface Arrangement (`ArrangeSelectedOnHennebergSurface`)**
-  - Distribute 2+ selected 3D transforms across Lebrecht Henneberg's algebraic non-orientable minimal surface with analytical surface normals.
-- [ ] **Phase 161: 3D Spherical Epicycloid / Nephroid Seam Curve Arrangement (`ArrangeSelectedOnSphericalEpicycloid`)**
-  - Distribute 2+ selected 3D transforms along a 3D spherical epicycloid / cam seam curve on a sphere of radius $R$.
-- [ ] **Phase 162: 3D Talbot / Plateau Lemniscate Curve Arrangement (`ArrangeSelectedInTalbotCurve`)**
-  - Distribute 2+ selected 3D transforms along a 3D Talbot / Plateau sinusoidal-spiral curve with analytical tangents.
-- [ ] **Phase 163: Hierarchy Audit: Select Fractional-Pixel / Unsnapped 2D UI Controls & 2D UI Left/Right Sidebar Columns Layout (`ButtonUISidebars`)**
-  - Audit 2D UI controls with non-integer pixel coordinates or dimensions that can cause sub-pixel texture blurring, and arrange 2+ selected 2D UI controls into Left/Right Sidebar + Center Content columns.
+### Planned Upcoming Phases (Phases 164–167)
 - [ ] **Phase 164: 3D Kuen Pseudospherical Surface Arrangement (`ArrangeSelectedOnKuenSurface`)**
   - Distribute 2+ selected 3D transforms across Theodor Kuen's constant-negative-curvature pseudospherical surface with analytical normals.
 - [ ] **Phase 165: 3D Herbert Richmond Minimal Surface Arrangement (`ArrangeSelectedOnRichmondSurface`)**
