@@ -938,37 +938,63 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
 - [x] **147.2. 2D UI 4-Corner HUD Brackets / L-Frame Perimeter Layout (`ArrangeSelectedUserInterfacesInCornerBrackets` / `ButtonUICornerBrackets`)**
   - Implemented `TDesignFrame.ArrangeSelectedUserInterfacesInCornerBrackets(MarginPx, StepGapPx)` and added **`UI Corner Brackets`** (`ButtonUICornerBrackets`) to `PanelLayoutUI`, distributing 2+ selected `TCastleUserInterface` controls into the 4 corners of their parent container (`Bottom-Left`, `Top-Left`, `Top-Right`, `Bottom-Right`) with `MarginPx` inset and stepping additional controls inward along alternating horizontal and vertical L-bracket arms around each corner (**Click**: $16\text{ px}$ corner margin, $8\text{ px}$ bracket step; **`Shift`-click**: $0\text{ px}$ flush corners, $4\text{ px}$ step; **`Ctrl`-click**: $32\text{ px}$ inset HUD corners, $12\text{ px}$ step).
 
+### Phase 148: 3D Scherk Minimal Surface / Doubly-Periodic Saddle Tower Deformation (`ScherkDeformSelected` / `Ctrl+Alt+Shift+J`)
+- [x] **148.1. Parametric Scherk First Doubly-Periodic Minimal Surface & Saddle Tower Deformation (`TCastleTransformManipulate.ScherkDeformSelected`)**
+  - Implemented `TCastleTransformManipulate.ScherkDeformSelected(Wavelength, Amplitude, SaddleTowerMode, OrientNormals): Boolean`: deforms 2+ top-level selected transforms around the active selection pivot $\mathbf{C}$ by displacing their vertical $Y$ coordinate according to Heinrich Scherk's First Doubly-Periodic Minimal Surface ($F(u, v) = \ln\left(\frac{|\cos v|}{|\cos u|}\right)$ with smooth asymptote clamping $\ge 0.18$ when `SaddleTowerMode = false`) or Scherk's Second Saddle-Tower Surface ($F(u, v) = \sin u \sin v$ when `SaddleTowerMode = true`) with spatial wavenumber $k = \frac{2\pi}{\lambda}$, and optionally aligns each transform's $+Y$ Up vector to the exact analytical Scherk surface normal $\mathbf{N} = \text{Normalize}\!\left(-\frac{\partial \Delta y}{\partial x}, \; 1, \; -\frac{\partial \Delta y}{\partial z}\right)$ (`OrientNormals = true`).
+  - Added **`Scherk Surface...`** (`ButtonScherkDeform` in `PanelLayoutTransform`: normal click deforms along Scherk's First Minimal Surface with analytical normals; `Ctrl`-click deforms along Scherk's Saddle Tower; `Shift`-click opens the custom dialog) and `ShowScherkDeformSelectionDialog` bound to **`Ctrl+Alt+Shift+J`** in both the Viewport and Hierarchy Tree.
+
+### Phase 149: 3D Werner Boy Projective Surface / 3-Fold Immersion Arrangement (`ArrangeSelectedOnBoysSurface` / `Ctrl+Alt+Shift+X`)
+- [x] **149.1. Parametric Bryant–Kusner 3-Fold Symmetric Werner Boy Immersion of $\mathbb{RP}^2$ (`TCastleTransformManipulate.ArrangeSelectedOnBoysSurface`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedOnBoysSurface(Radius, Turns, OrientMode): Boolean`: distributes 2+ top-level selected transforms across the Bryant–Kusner parameterization of Werner Boy's 3-fold symmetric non-orientable projective surface centered at $\mathbf{C}$ over the complex unit disk $w = r_i e^{i\theta_i}$ ($r_i = \sqrt{t_i}, \; \theta_i = 2\pi W t_i$):
+    $$g_1 = -\frac{3}{2}\operatorname{Im}\!\left(\frac{w(1 - w^4)}{D}\right), \quad g_2 = -\frac{3}{2}\operatorname{Re}\!\left(\frac{w(1 + w^4)}{D}\right), \quad g_3 = \operatorname{Im}\!\left(\frac{1 + w^6}{D}\right) - \frac{1}{2}, \quad D = w^6 + \sqrt{5}w^3 - 1$$
+    mapped via $\mathbf{P}_i = \mathbf{C} + \frac{R}{g_1^2 + g_2^2 + g_3^2}(g_1, \; -g_3, \; g_2)$, supporting `OrientMode` (`0` = keep rotation, `1` = analytical spiral tangent, `2` = outward radial from $\mathbf{C}$).
+  - Added **`Boy's Surface...`** (`ButtonArrangeBoys` in `PanelLayoutTransform`: normal click arranges on a 2-turn Boy's surface along the tangent; `Ctrl`-click arranges on a 3-turn Boy's surface facing outward; `Shift`-click opens the custom dialog) and `ShowArrangeOnBoysSurfaceDialog` bound to **`Ctrl+Alt+Shift+X`** in both the Viewport and Hierarchy Tree.
+
+### Phase 150: 3D Bicorn (Cocked-Hat) / Piriform Teardrop Algebraic Curve Arrangement (`ArrangeSelectedInBicornCurve` / `Ctrl+Alt+Shift+Y`)
+- [x] **150.1. Parametric Quartic Bicorn (Cocked-Hat) & Piriform Teardrop Curve (`TCastleTransformManipulate.ArrangeSelectedInBicornCurve`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedInBicornCurve(ScaleRadius, CrestHeight, PiriformTeardrop, OrientMode): Boolean`: distributes 2+ top-level selected transforms along Sylvester/Cayley's quartic Bicorn / Cocked-Hat curve (`PiriformTeardrop = false`: $x = A\sin\theta, \; z = A\frac{\cos^2\theta(2 + \cos\theta)}{3 + \sin^2\theta}, \; y = H\cos(2\theta)$) or De Sluse's Piriform Teardrop loop (`PiriformTeardrop = true`: $x = \frac{A}{2}(1 + \cos\theta), \; z = \frac{A}{2}\sin\theta(1 + \cos\theta), \; y = H\sin\theta$) centered at $\mathbf{C}$, with exact analytical tangent derivatives and `OrientMode` (`0` = keep rotation, `1` = analytical curve tangent, `2` = outward radial from $\mathbf{C}$).
+  - Added **`Bicorn / Piriform...`** (`ButtonArrangeBicorn` in `PanelLayoutTransform`: normal click arranges in a Bicorn cocked-hat arch along the analytical tangent; `Ctrl`-click arranges in a Piriform teardrop loop; `Shift`-click opens the custom dialog) and `ShowArrangeInBicornCurveDialog` bound to **`Ctrl+Alt+Shift+Y`** in both the Viewport and Hierarchy Tree.
+  - Added automated unit test `TestScherkDeformBoysSurfaceAndBicorn` in `tests/code/testcases/testcastletransformmanipulate.pas`.
+
+### Phase 151: Hierarchy Audit: Select Shadow-Casting Lights / Custom Shadow-Culling Scenes (`SelectShadowCastersAndReceivers` / `Ctrl+Alt+Shift+;`) & 2D UI Golden-Rectangle / Fibonacci Spiral Split Layout (`ArrangeSelectedUserInterfacesInFibonacciSplit` / `ButtonUIFibonacciSplit`)
+- [x] **151.1. Hierarchy Rendering Audit: Select Shadow-Casting Lights / Custom Shadow-Culling Scenes (`SelectShadowCastersAndReceivers` / `Ctrl+Alt+Shift+;`)**
+  - Implemented `TDesignFrame.SelectShadowCastersAndReceivers(ShadowLightsOnly)`: audits all visible, unlocked `TCastleTransform` components in the hierarchy and selects active shadow-casting lights (`TCastleAbstractLight(C).Shadows = true`) as well as transforms/scenes with custom shadow-culling overrides (`not TCastleTransform(C).CastShadows` or `(C is TCastleSceneCore) and (not TCastleSceneCore(C).ReceiveShadows)`) when `ShadowLightsOnly = false`, or only shadow-casting lights when `ShadowLightsOnly = true`.
+  - Bound to **`Ctrl+Alt+Shift+;`** in both the Viewport and Hierarchy Tree, plus **`Select Shadow-Casting Lights / Custom Shadow-Culling Scenes (Ctrl+Alt+Shift+;)`** (`MenuTreeViewItemSelectShadowAudit`) in `MenuTreeView` (`Shift`-click selects shadow-casting lights only).
+- [x] **151.2. 2D UI Golden-Rectangle / Fibonacci Spiral Split Layout (`ArrangeSelectedUserInterfacesInFibonacciSplit` / `ButtonUIFibonacciSplit`)**
+  - Implemented `TDesignFrame.ArrangeSelectedUserInterfacesInFibonacciSplit(MarginPx, GapPx, ReverseSpiral)` and added **`UI Golden Split`** (`ButtonUIFibonacciSplit`) to `PanelLayoutUI`, recursively subdividing the parent container by the Golden Ratio $\varphi^{-1} \approx 0.618034$ into a clockwise Fibonacci spiral of golden chambers (`Left`, `Top`, `Right`, `Bottom`) and resizing/positioning 2+ selected `TCastleUserInterface` controls to fill each chamber (**Click**: $8\text{ px}$ margin, $6\text{ px}$ gap; **`Shift`-click**: $0\text{ px}$ flush golden chambers; **`Ctrl`-click**: rotated top-first Fibonacci spiral).
+
 ---
 
-## Recommended Next Roadmap Focus Areas (Phases 148+)
+## Recommended Next Roadmap Focus Areas (Phases 152+)
 
-To maximize level-design, procedural geometry, UI/HUD authoring, and scene-hygiene productivity in the Castle Game Engine Editor, the following four strategic pillars and concrete upcoming phases (Phases 148–155) are recommended:
+To maximize level-design, procedural geometry, UI/HUD authoring, and scene-hygiene productivity in the Castle Game Engine Editor, the following four strategic pillars and concrete upcoming phases (Phases 152–159) are recommended:
 
 ### Strategic Focus Pillars
 1. **Pillar A — 3D Procedural Deformations & Classical Differential Geometry Surfaces**:
-   - Expand `TCastleTransformManipulate` with curvature-driven and minimal/projective surface arrangements (Werner Boy's Surface immersion, Catalan / Scherk minimal surfaces, Spherical Mercator / Stereographic conformal projections, and Kelvin wake / Bicorn / Piriform curves) for sci-fi architecture, organic clusters, and procedural arenas.
+   - Expand `TCastleTransformManipulate` with curvature-driven and minimal/projective surface arrangements (Spherical Stereographic conformal projection, Catalan minimal surface, Cylindrical Harmonic wave rings, Bour's minimal surface, and Dupin Cyclides) for sci-fi architecture, organic clusters, and procedural arenas.
 2. **Pillar B — 2D UI Responsive HUD Templates & Safe-Frame / Margin Layouts**:
-   - Add one-click HUD/menu layout generators in `PanelLayoutUI` (Golden-Spiral Fibonacci Split Panels, Peripheral Top/Bottom Action Bars, Split-Screen 2P/4P Viewports, and Symmetric Pill/Dock Ribbons).
+   - Add one-click HUD/menu layout generators in `PanelLayoutUI` (Top/Bottom HUD Action Bars, Split-Screen 2P/4P Viewports, Symmetric Pill/Dock Ribbons, and Radial Compass / Minimap Bezel Slots).
 3. **Pillar C — Scene Performance, Physics & Hierarchy Hygiene Audits**:
-   - Add one-click hierarchy diagnostic selectors for shadow-casting lights & high-cost renderables, physics rigid-body/collider mismatches, unanchored or fractional-pixel blurry 2D UI controls, and transforms with negative/mirrored determinants.
+   - Add one-click hierarchy diagnostic selectors for physics rigid-body/collider mismatches, transforms with negative/mirrored determinants, unanchored or fractional-pixel blurry 2D UI controls, and non-default blend/render-options scenes.
 4. **Pillar D — Multi-Selection Batch Authoring & Camera/Light Staging**:
-   - Provide fast batch lighting rigs (Three-Point Key/Fill/Rim staging around primary selection) and camera turntables / orbit waypoint rings.
+   - Provide fast batch lighting rigs and camera turntables / orbit waypoint rings.
 
-### Planned Upcoming Phases (Phases 148–155)
-- [ ] **Phase 148: 3D Scherk Minimal Surface / Doubly-Periodic Saddle Tower Deformation (`ScherkDeformSelected` / `Ctrl+Alt+Shift+J`)**
-  - Deform 2+ selected 3D transforms along Heinrich Scherk's first doubly-periodic minimal surface $z = \frac{1}{k}\ln\left(\frac{\cos(ky)}{\cos(kx)}\right)$ (clamped smoothly near asymptotes) with analytical surface normal alignment.
-- [ ] **Phase 149: 3D Werner Boy Projective Surface / 3-Fold Immersion Arrangement (`ArrangeSelectedOnBoysSurface` / `Ctrl+Alt+Shift+X`)**
-  - Distribute 2+ selected 3D transforms across Bryant–Kusner's parameterization of Werner Boy's 3-fold symmetric immersion of $\mathbb{RP}^2$ in $\mathbb{R}^3$ with outward radial or surface tangent orientation.
-- [ ] **Phase 150: 3D Talbot / Bicorn / Cocked-Hat Algebraic Curve Arrangement (`ArrangeSelectedInBicornCurve` / `Ctrl+Alt+Shift+Y`)**
-  - Distribute 2+ selected 3D transforms along a 3D Bicorn (Cocked-Hat) / Piriform teardrop curve with configurable crest height and analytical tangent orientation.
-- [ ] **Phase 151: Hierarchy Audit: Select Shadow-Casting Lights / High-Range Emitters & 2D UI Golden-Rectangle / Fibonacci Split Layout (`ButtonUIFibonacciSplit`)**
-  - Audit lights and scenes with shadow casting or large attenuation radii, and arrange 2+ selected 2D UI controls into a nested Golden-Spiral Fibonacci subdivision inside their parent container.
-- [ ] **Phase 152: 3D Spherical Stereographic / Mercator Conformal Projection Deformation (`StereographicDeformSelected`)**
+### Planned Upcoming Phases (Phases 152–159)
+- [ ] **Phase 152: 3D Spherical Stereographic / Inverse Conformal Projection Deformation (`StereographicDeformSelected` / `Ctrl+Alt+Shift+'`)**
   - Map 2+ selected planar XZ transforms onto a sphere around the active pivot via inverse stereographic conformal projection $(u, v) \mapsto \frac{1}{u^2+v^2+4R^2}(4R^2 u, \; R(u^2+v^2-4R^2), \; 4R^2 v)$ with exact conformal normal orientation.
-- [ ] **Phase 153: 3D Catalan Minimal Surface / Cycloidal Ribbon Arrangement (`ArrangeSelectedOnCatalanSurface`)**
+- [ ] **Phase 153: 3D Catalan Minimal Surface / Cycloidal Ribbon Arrangement (`ArrangeSelectedOnCatalanSurface` / `Ctrl+Alt+Shift+[`)**
   - Distribute 2+ selected 3D transforms across Eugène Catalan's minimal surface bounded by a cycloid and a parabola: $x = u - \sin u\cosh v, \; z = 1 - \cos u\cosh v, \; y = 4\sin(u/2)\sinh(v/2)$.
-- [ ] **Phase 154: 3D Lissajous Torus / Cylindrical Harmonic Wave Ring (`ArrangeSelectedInCylindricalHarmonic`)**
-  - Distribute 2+ selected 3D transforms along a cylindrical crown harmonic wave $R(\theta) = R_0 + A_r\cos(m\theta), \; Y(\theta) = A_y\sin(n\theta + \phi)$ with analytical 3D tangent orientation.
-- [ ] **Phase 155: Hierarchy Audit: Select Physics Collider / RigidBody Misconfigurations & 2D UI Top/Bottom HUD Action Bars Layout (`ButtonUIHudBars`)**
+- [ ] **Phase 154: 3D Cylindrical Harmonic / Crown Wave Ring Arrangement (`ArrangeSelectedInCylindricalHarmonic` / `Ctrl+Alt+Shift+]`)**
+  - Distribute 2+ selected 3D transforms along a cylindrical crown harmonic wave $R(\theta) = R_0 + A_r\cos(m\theta), \; Y(\theta) = A_y\sin(n\theta)$ with analytical 3D tangent orientation.
+- [ ] **Phase 155: Hierarchy Audit: Select Physics Collider / RigidBody Misconfigurations (`SelectPhysicsMisconfigurations` / `Ctrl+Alt+Shift+\`) & 2D UI Top/Bottom HUD Action Bars Layout (`ButtonUIHudBars`)**
   - Audit transforms with `TCastleRigidBody` missing a `TCastleCollider` (or vice versa), and arrange 2+ selected 2D UI controls into split Top Status Bar + Bottom Action Dock HUD rows inside their parent container.
+- [ ] **Phase 156: 3D Dupin Cyclide / Asymmetric Horn Torus Deformation & Arrangement (`ArrangeSelectedOnDupinCyclide`)**
+  - Distribute 2+ selected 3D transforms across Charles Dupin's Variable-Thickness Cyclide Ring Shell with analytical cyclide surface normals.
+- [ ] **Phase 157: 3D Edmond Bour Minimal Surface Arrangement (`ArrangeSelectedOnBourSurface`)**
+  - Distribute 2+ selected 3D transforms across Edmond Bour's algebraic minimal surface in polar coordinates $(r, \theta)$ with exact Weierstrass–Enneper Gauss-map normals.
+- [ ] **Phase 158: 3D Epitrochoid / Pascal Limaçon Inner-Loop Curve Arrangement (`ArrangeSelectedInLimaconCurve`)**
+  - Distribute 2+ selected 3D transforms along Étienne Pascal's Limaçon / Trisectrix inner-loop curve $r(\theta) = b + a\cos\theta$ with 3D elevation wave and analytical tangent orientation.
+- [ ] **Phase 159: Hierarchy Audit: Select Negative-Scale / Mirrored-Determinant Transforms & 2D UI Split-Screen 2P/3P/4P Viewport Layout (`ButtonUISplitScreen`)**
+  - Audit transforms with negative scale components (`S.X < 0`, `S.Y < 0`, or `S.Z < 0`) that invert winding/normals, and subdivide 2+ selected 2D UI controls or viewports into standard 2-player (H/V), 3-player (1+2), or 4-player quad split-screen layouts.
+
 

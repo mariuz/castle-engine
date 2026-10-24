@@ -73,6 +73,7 @@ type
     procedure TestSaddleDomeKleinBottleAndFermatSpiral;
     procedure TestOctahedralDeformDiniAndCornuSpiral;
     procedure TestGyroidDeformRomanSurfaceAndCochleoid;
+    procedure TestScherkDeformBoysSurfaceAndBicorn;
   end;
 
 implementation
@@ -3473,6 +3474,108 @@ begin
     AssertVectorEquals(Vector3(0.0, 0.0, 0.0), B3.Translation, 1e-4);
     B1.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(0.0, 0.0, 1.0), WorldDir.Normalize, 1e-3);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestScherkDeformBoysSurfaceAndBicorn;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  B1, B2, B3, B4: TCastleBox;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.PivotMode := pmPrimarySelected;
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(1, 1, 1);
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(1, 1, 1);
+    B2.Translation := Vector3(4.0, 0.0, 0.0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(1, 1, 1);
+    B3.Translation := Vector3(0.0, 0.0, 4.0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(1, 1, 1);
+    B4.Translation := Vector3(2.0, 0.0, 2.0);
+    Viewport.Items.Add(B4);
+
+    { 1a. Test ScherkDeformSelected (Wavelength=8.0, Amplitude=3.0, SaddleTowerMode=false, OrientNormals=true)
+      Around B1=(0,0,0) with k = 2*Pi/8 = Pi/4:
+      - B1 (0,0,0): u=0, v=0 -> C_u=1, C_v=1 -> dy = 0, normal = (0, 1, 0)
+      - B2 (4,0,0): u=Pi, v=0 -> C_u=-1 (clamped +0.18), C_v=1 -> dy = +3.0, S_u=0, S_v=0 -> normal = (0, 1, 0)
+      - B3 (0,0,4): u=0, v=Pi -> C_u=1, C_v=-1 (clamped -0.18) -> dy = -3.0, normal = (0, 1, 0) }
+    Manipulate.SetSelected([B1, B2, B3]);
+    AssertTrue(Manipulate.ScherkDeformSelected(8.0, 3.0, false, true));
+    AssertVectorEquals(Vector3(0.0, 0.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(4.0, 3.0, 0.0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, -3.0, 4.0), B3.Translation, 1e-4);
+
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.0, 1.0, 0.0), WorldDir.Normalize, 1e-3);
+
+    { 1b. Test ScherkDeformSelected in SaddleTowerMode=true (Wavelength=8.0, Amplitude=3.0):
+      - B1 (0,0,0) and B4 (2,0,2) where u=Pi/2, v=Pi/2 -> S_u=1, S_v=1 -> dy = +3.0 }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    B4.Translation := Vector3(2.0, 0.0, 2.0);
+    Manipulate.SetSelected([B1, B4]);
+    AssertTrue(Manipulate.ScherkDeformSelected(8.0, 3.0, true, true));
+    AssertVectorEquals(Vector3(0.0, 0.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(2.0, 3.0, 2.0), B4.Translation, 1e-4);
+
+    { 2. Test ArrangeSelectedOnBoysSurface (Radius=10.0, Turns=2.0, OrientMode=1)
+      Around B1=(0,0,0) for N=2:
+      - B1 (t=0, r=0, theta=0): g1=0, g2=-1, g3=-Sqrt(2)/2 -> Pos = (10*Sqrt(2)/2, 7.5, 0) = (7.0710678, 7.5, 0)
+      - B2 (t=1, r=1, theta=4*Pi): g1=0, g2=0, g3=+Sqrt(2)/2 -> Pos = (0, -7.5, 0) }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Manipulate.SetSelected([B1, B2]);
+    AssertTrue(Manipulate.ArrangeSelectedOnBoysSurface(10.0, 2.0, 1));
+    AssertVectorEquals(Vector3(10.0 * Sqrt(2.0) * 0.5, 7.5, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, -7.5, 0.0), B2.Translation, 1e-4);
+
+    { 3a. Test ArrangeSelectedInBicornCurve (ScaleRadius=9.0, CrestHeight=2.0, PiriformTeardrop=false, OrientMode=1)
+      Around B1=(0,0,0) for N=4 (theta = 0, Pi/2, Pi, 3*Pi/2):
+      - B1 (theta=0): x=0, z=9*(2+1)/3=9, y=2*cos(0)=2 -> (0, 2, 9), tangent=(+1, 0, 0)
+      - B2 (theta=Pi/2): x=9*1=9, z=0, y=2*cos(Pi)=-2 -> (9, -2, 0)
+      - B3 (theta=Pi): x=0, z=9*(2-1)/3=3, y=2*cos(2*Pi)=2 -> (0, 2, 3), tangent=(-1, 0, 0)
+      - B4 (theta=3*Pi/2): x=-9, z=0, y=-2 -> (-9, -2, 0) }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.ArrangeSelectedInBicornCurve(9.0, 2.0, false, 1));
+    AssertVectorEquals(Vector3(0.0, 2.0, 9.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(9.0, -2.0, 0.0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, 2.0, 3.0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-9.0, -2.0, 0.0), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1.0, 0.0, 0.0), WorldDir.Normalize, 1e-3);
+    B3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(-1.0, 0.0, 0.0), WorldDir.Normalize, 1e-3);
+
+    { 3b. Test ArrangeSelectedInBicornCurve in PiriformTeardrop=true (ScaleRadius=8.0, CrestHeight=2.0, OrientMode=1)
+      Around B1=(0,0,0) for N=4 (theta = 0, Pi/2, Pi, 3*Pi/2):
+      - B1 (theta=0): x=8*(1+1)/2=8, z=0, y=0 -> (8, 0, 0)
+      - B2 (theta=Pi/2): x=0, z=8*0.5=4, y=2 -> (0, 2, 4)
+      - B3 (theta=Pi): x=-8, z=0, y=0 -> (-8, 0, 0)
+      - B4 (theta=3*Pi/2): x=0, z=-4, y=-2 -> (0, -2, -4) }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.ArrangeSelectedInBicornCurve(8.0, 2.0, true, 1));
+    AssertVectorEquals(Vector3(8.0, 0.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, 2.0, 4.0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-8.0, 0.0, 0.0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, -2.0, -4.0), B4.Translation, 1e-4);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);
