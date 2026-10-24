@@ -1592,6 +1592,21 @@ type
       const ASH0, ASH1X, ASH1Y, ASH1Z: TVector3;
       const AViewDir: TVector3): TVector3; static;
 
+    { Phase 47.1: Generates GLSL 450 Percentage-Closer Soft Shadows (PCSS) blocker search
+      and contact-hardening penumbra width evaluation functions. }
+    function GeneratePCSSSoftShadowFunctions: String;
+
+    { Phase 47.1 CPU reference: Evaluates PCSS contact-hardening penumbra filter width
+      (d_receiver - d_blocker) * lightWorldSize / d_blocker. }
+    class function EvaluatePCSSPenumbraWidth(
+      const AReceiverDepth, AAvgBlockerDepth, ALightSize: Single): Single; static;
+
+    { Phase 47.2 CPU reference: Computes hardware-aligned byte offset into a Vulkan Descriptor Buffer (`VK_EXT_descriptor_buffer`). }
+    class function ComputeDescriptorBufferAlignedOffset(
+      const ASetIndex: Cardinal;
+      const ASetByteSize: UInt64;
+      const AOffsetAlignment: UInt64 = 64): UInt64; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -7709,6 +7724,36 @@ begin
   Result.X := Max(0.0, Result.X);
   Result.Y := Max(0.0, Result.Y);
   Result.Z := Max(0.0, Result.Z);
+end;
+
+function TCastleShaderGeneratorRHI.GeneratePCSSSoftShadowFunctions: String;
+begin
+  Result :=
+    '// Phase 47.1: Percentage-Closer Soft Shadows (PCSS) Contact-Hardening Penumbra' + NL +
+    'float EvaluatePCSSPenumbraWidth(float receiverDepth, float avgBlockerDepth, float lightSize) {' + NL +
+    '  if (avgBlockerDepth <= 1e-6 || receiverDepth <= avgBlockerDepth) return 0.0;' + NL +
+    '  return max(0.0, (receiverDepth - avgBlockerDepth) * max(0.0, lightSize) / avgBlockerDepth);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluatePCSSPenumbraWidth(
+  const AReceiverDepth, AAvgBlockerDepth, ALightSize: Single): Single;
+begin
+  if (AAvgBlockerDepth <= 1e-6) or (AReceiverDepth <= AAvgBlockerDepth) then
+    Exit(0.0);
+  Result := Max(0.0, (AReceiverDepth - AAvgBlockerDepth) * Max(0.0, ALightSize) / AAvgBlockerDepth);
+end;
+
+class function TCastleShaderGeneratorRHI.ComputeDescriptorBufferAlignedOffset(
+  const ASetIndex: Cardinal;
+  const ASetByteSize: UInt64;
+  const AOffsetAlignment: UInt64): UInt64;
+var
+  AlignVal, AlignedStride: UInt64;
+begin
+  AlignVal := Max(UInt64(1), AOffsetAlignment);
+  AlignedStride := ((Max(UInt64(1), ASetByteSize) + AlignVal - 1) div AlignVal) * AlignVal;
+  Result := UInt64(ASetIndex) * AlignedStride;
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

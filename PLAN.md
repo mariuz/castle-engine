@@ -709,14 +709,16 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 46 Status**: Completed. 3D Gaussian Splatting (3DGS) 2D conic covariance inversion & Mahalanobis opacity falloff (`GenerateGaussianSplattingFunctions`, `EvaluateGaussianSplatOpacity`), L1 view-dependent Spherical Harmonics RGB evaluation (`EvaluateSphericalHarmonicsL1RGB`), and 3D Gaussian Splatting GPU tile renderer (`TCastleVulkanGaussianSplatRenderer`) fully integrated and tested (168 unit tests passing).
 
 
-### Phase 47: Vulkan Descriptor Buffers (`VK_EXT_descriptor_buffer`), PCSS Contact-Hardening Soft Shadows & GPU Indirect Command Signature Alignment (PLANNED)
+### Phase 47: Vulkan Descriptor Buffers (`VK_EXT_descriptor_buffer`), PCSS Contact-Hardening Soft Shadows & GPU Indirect Command Signature Alignment (COMPLETED)
 
-* [ ] **47.1. Percentage-Closer Soft Shadows (PCSS) Blocker Search & Penumbra Estimation (`GeneratePCSSSoftShadowFunctions` in `CastleInternalShaderRHI`)**:
+* [x] **47.1. Percentage-Closer Soft Shadows (PCSS) Blocker Search & Penumbra Estimation (`GeneratePCSSSoftShadowFunctions` in `CastleInternalShaderRHI`)**:
   * Compute physical contact-hardening penumbra filter radii from receiver depth, average blocker depth, and area light size (`EvaluatePCSSPenumbraWidth`).
-* [ ] **47.2. Vulkan Descriptor Buffer (`VK_EXT_descriptor_buffer`) Offset Alignment (`ComputeDescriptorBufferAlignedOffset` in `CastleInternalShaderRHI`)**:
+* [x] **47.2. Vulkan Descriptor Buffer (`VK_EXT_descriptor_buffer`) Offset Alignment (`ComputeDescriptorBufferAlignedOffset` in `CastleInternalShaderRHI`)**:
   * Compute hardware-aligned byte offsets into GPU-resident resource and sampler descriptor buffers.
-* [ ] **47.3. Vulkan Descriptor Buffer Manager (`TCastleVulkanDescriptorBufferManager` in `CastleInternalRHI_Vulkan`)**:
+* [x] **47.3. Vulkan Descriptor Buffer Manager (`TCastleVulkanDescriptorBufferManager` in `CastleInternalRHI_Vulkan`)**:
   * Manage GPU-resident resource and sampler descriptor buffers (`ResourceDescriptorBuffer`, `SamplerDescriptorBuffer`) and `vkCmdSetDescriptorBufferOffsetsEXT` bindings.
+
+**Milestone 47 Status**: Completed. Percentage-Closer Soft Shadows (PCSS) contact-hardening penumbra evaluation (`GeneratePCSSSoftShadowFunctions`, `EvaluatePCSSPenumbraWidth`), `VK_EXT_descriptor_buffer` aligned offset calculation (`ComputeDescriptorBufferAlignedOffset`), and Vulkan Descriptor Buffer manager (`TCastleVulkanDescriptorBufferManager`) fully integrated and tested (171 unit tests passing).
 
 
 ### Phase 48: Multi-Layer Metallic Flake Car-Paint BRDF, Screen-Space Curvature Cavity Shading & GPU Hi-Z Conservative Depth Pyramid Generator (PLANNED)

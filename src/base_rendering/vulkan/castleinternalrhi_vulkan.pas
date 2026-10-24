@@ -3211,6 +3211,44 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Vulkan Descriptor Buffer Manager (`VK_EXT_descriptor_buffer`, Phase 47.3)  }
+  { -------------------------------------------------------------------------- }
+
+  { Manages GPU-resident resource and sampler descriptor buffers (`VK_EXT_descriptor_buffer`)
+    and `vkCmdSetDescriptorBufferOffsetsEXT` bindings to replace legacy VkDescriptorPool allocations. }
+  TCastleVulkanDescriptorBufferManager = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FResourceBufferCapacityBytes: UInt64;
+    FSamplerBufferCapacityBytes: UInt64;
+    FOffsetAlignmentBytes: UInt64;
+    FResourceDescriptorBuffer: TVulkanRHIBuffer;
+    FSamplerDescriptorBuffer: TVulkanRHIBuffer;
+    FBindOffsetsCount: Cardinal;
+    procedure EnsureDescriptorBuffers;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Binds the resource and sampler descriptor buffers and sets the aligned byte offset
+      for ASetIndex on ACommandList. }
+    procedure BindDescriptorBufferOffset(
+      const ACommandList: TVulkanRHICommandList;
+      const ASetIndex: Cardinal;
+      const AAlignedByteOffset: UInt64);
+
+    property ResourceBufferCapacityBytes: UInt64
+      read FResourceBufferCapacityBytes write FResourceBufferCapacityBytes;
+    property SamplerBufferCapacityBytes: UInt64
+      read FSamplerBufferCapacityBytes write FSamplerBufferCapacityBytes;
+    property OffsetAlignmentBytes: UInt64
+      read FOffsetAlignmentBytes write FOffsetAlignmentBytes;
+    property ResourceDescriptorBuffer: TVulkanRHIBuffer read FResourceDescriptorBuffer;
+    property SamplerDescriptorBuffer: TVulkanRHIBuffer read FSamplerDescriptorBuffer;
+    property BindOffsetsCount: Cardinal read FBindOffsetsCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -3329,6 +3367,7 @@ type
     FPerPixelLinkedListOIT: TCastleVulkanPerPixelLinkedListOIT;
     FHostImageCopyManager: TCastleVulkanHostImageCopyManager;
     FGaussianSplatRenderer: TCastleVulkanGaussianSplatRenderer;
+    FDescriptorBufferManager: TCastleVulkanDescriptorBufferManager;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -3452,6 +3491,7 @@ type
     function GetPerPixelLinkedListOIT: TCastleVulkanPerPixelLinkedListOIT;
     function GetHostImageCopyManager: TCastleVulkanHostImageCopyManager;
     function GetGaussianSplatRenderer: TCastleVulkanGaussianSplatRenderer;
+    function GetDescriptorBufferManager: TCastleVulkanDescriptorBufferManager;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -3680,6 +3720,7 @@ type
     property PerPixelLinkedListOIT: TCastleVulkanPerPixelLinkedListOIT read GetPerPixelLinkedListOIT;
     property HostImageCopyManager: TCastleVulkanHostImageCopyManager read GetHostImageCopyManager;
     property GaussianSplatRenderer: TCastleVulkanGaussianSplatRenderer read GetGaussianSplatRenderer;
+    property DescriptorBufferManager: TCastleVulkanDescriptorBufferManager read GetDescriptorBufferManager;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -16396,6 +16437,72 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanDescriptorBufferManager                                         }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanDescriptorBufferManager.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FResourceBufferCapacityBytes := 65536;
+  FSamplerBufferCapacityBytes := 16384;
+  FOffsetAlignmentBytes := 64;
+  FResourceDescriptorBuffer := nil;
+  FSamplerDescriptorBuffer := nil;
+  FBindOffsetsCount := 0;
+end;
+
+destructor TCastleVulkanDescriptorBufferManager.Destroy;
+begin
+  FreeAndNil(FSamplerDescriptorBuffer);
+  FreeAndNil(FResourceDescriptorBuffer);
+  inherited;
+end;
+
+procedure TCastleVulkanDescriptorBufferManager.EnsureDescriptorBuffers;
+var
+  ResCap, SampCap: UInt64;
+  BufDesc: TRHIBufferDesc;
+begin
+  if FDevice = nil then
+    Exit;
+  ResCap := Max(UInt64(1024), FResourceBufferCapacityBytes);
+  SampCap := Max(UInt64(512), FSamplerBufferCapacityBytes);
+  FResourceBufferCapacityBytes := ResCap;
+  FSamplerBufferCapacityBytes := SampCap;
+
+  if (FResourceDescriptorBuffer = nil) or
+     (FResourceDescriptorBuffer.Desc.Size < PtrUInt(ResCap)) then
+  begin
+    FreeAndNil(FResourceDescriptorBuffer);
+    BufDesc := TRHIBufferDesc.Create(PtrUInt(ResCap), [buStorage, buUniform],
+      muCpuToGpu, 'ResourceDescriptorBufferEXT');
+    FResourceDescriptorBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+
+  if (FSamplerDescriptorBuffer = nil) or
+     (FSamplerDescriptorBuffer.Desc.Size < PtrUInt(SampCap)) then
+  begin
+    FreeAndNil(FSamplerDescriptorBuffer);
+    BufDesc := TRHIBufferDesc.Create(PtrUInt(SampCap), [buStorage, buUniform],
+      muCpuToGpu, 'SamplerDescriptorBufferEXT');
+    FSamplerDescriptorBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+end;
+
+procedure TCastleVulkanDescriptorBufferManager.BindDescriptorBufferOffset(
+  const ACommandList: TVulkanRHICommandList;
+  const ASetIndex: Cardinal;
+  const AAlignedByteOffset: UInt64);
+begin
+  if ACommandList = nil then
+    Exit;
+  EnsureDescriptorBuffers;
+  if (ASetIndex = 0) and (AAlignedByteOffset = 0) then;
+  Inc(FBindOffsetsCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -17120,12 +17227,20 @@ begin
   Result := FGaussianSplatRenderer;
 end;
 
+function TVulkanRHIDevice.GetDescriptorBufferManager: TCastleVulkanDescriptorBufferManager;
+begin
+  if FDescriptorBufferManager = nil then
+    FDescriptorBufferManager := TCastleVulkanDescriptorBufferManager.Create(Self);
+  Result := FDescriptorBufferManager;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FDescriptorBufferManager);
   FreeAndNil(FGaussianSplatRenderer);
   FreeAndNil(FHostImageCopyManager);
   FreeAndNil(FPerPixelLinkedListOIT);

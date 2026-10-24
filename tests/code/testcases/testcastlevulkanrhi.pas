@@ -207,6 +207,9 @@ type
     procedure TestGaussianSplatConicOpacityFalloffRHI;
     procedure TestSphericalHarmonicsL1ViewDependentRadianceRHI;
     procedure TestVulkanGaussianSplatRendererFrontToBackRHI;
+    procedure TestPCSSContactHardeningPenumbraWidthRHI;
+    procedure TestDescriptorBufferAlignedOffsetCalculationRHI;
+    procedure TestVulkanDescriptorBufferManagerAllocationAndBindRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -10353,6 +10356,70 @@ begin
       (Device.GaussianSplatRenderer.SplatBuffer <> nil) and
       (Device.GaussianSplatRenderer.SortedKeysBuffer <> nil));
     AssertEquals('RenderDispatchCount must be 1', 1, Integer(Device.GaussianSplatRenderer.RenderDispatchCount));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestPCSSContactHardeningPenumbraWidthRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  PCSSGLSL: String;
+  PenumbraContact, PenumbraNear, PenumbraFar: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify PCSS GLSL 450 functions }
+    PCSSGLSL := Gen.GeneratePCSSSoftShadowFunctions;
+    AssertTrue('PCSS GLSL must include EvaluatePCSSPenumbraWidth',
+      Pos('float EvaluatePCSSPenumbraWidth(float receiverDepth, float avgBlockerDepth, float lightSize)', PCSSGLSL) > 0);
+
+    { 2. Verify contact-hardening penumbra width: zero at contact, grows with receiver-blocker separation }
+    PenumbraContact := TCastleShaderGeneratorRHI.EvaluatePCSSPenumbraWidth(0.5, 0.5, 0.04);
+    PenumbraNear    := TCastleShaderGeneratorRHI.EvaluatePCSSPenumbraWidth(0.6, 0.5, 0.04);
+    PenumbraFar     := TCastleShaderGeneratorRHI.EvaluatePCSSPenumbraWidth(0.9, 0.5, 0.04);
+
+    AssertSameValue(0.0, PenumbraContact, 1e-6);
+    { (0.6 - 0.5) * 0.04 / 0.5 = 0.008; (0.9 - 0.5) * 0.04 / 0.5 = 0.032 }
+    AssertSameValue(0.008, PenumbraNear, 1e-6);
+    AssertSameValue(0.032, PenumbraFar, 1e-6);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestDescriptorBufferAlignedOffsetCalculationRHI;
+var
+  Offset0, Offset1, Offset3: UInt64;
+begin
+  { Verify VK_EXT_descriptor_buffer 64-byte aligned stride for 100-byte descriptor set -> stride = 128 }
+  Offset0 := TCastleShaderGeneratorRHI.ComputeDescriptorBufferAlignedOffset(0, 100, 64);
+  Offset1 := TCastleShaderGeneratorRHI.ComputeDescriptorBufferAlignedOffset(1, 100, 64);
+  Offset3 := TCastleShaderGeneratorRHI.ComputeDescriptorBufferAlignedOffset(3, 100, 64);
+
+  AssertEquals('Set 0 offset must be 0', Int64(0), Int64(Offset0));
+  AssertEquals('Set 1 offset must be 128', Int64(128), Int64(Offset1));
+  AssertEquals('Set 3 offset must be 384', Int64(384), Int64(Offset3));
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanDescriptorBufferManagerAllocationAndBindRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6679)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    CmdList.BeginRecording;
+    Device.DescriptorBufferManager.BindDescriptorBufferOffset(CmdList, 0, 0);
+    Device.DescriptorBufferManager.BindDescriptorBufferOffset(CmdList, 1, 128);
+    CmdList.EndRecording;
+
+    AssertTrue('ResourceDescriptorBuffer and SamplerDescriptorBuffer must be allocated',
+      (Device.DescriptorBufferManager.ResourceDescriptorBuffer <> nil) and
+      (Device.DescriptorBufferManager.SamplerDescriptorBuffer <> nil));
+    AssertEquals('BindOffsetsCount must be 2', 2, Integer(Device.DescriptorBufferManager.BindOffsetsCount));
   finally
     FreeAndNil(CmdList);
     FreeAndNil(Device);
