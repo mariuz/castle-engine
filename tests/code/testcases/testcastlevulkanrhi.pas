@@ -216,6 +216,9 @@ type
     procedure TestCameraEV100AndExposureMultiplierRHI;
     procedure TestAgXChromaGamutCompressionRHI;
     procedure TestVulkanAutoExposureHistogramTrimmedEVAndDispatchRHI;
+    procedure TestCapsuleSoftShadowOcclusionRHI;
+    procedure TestEpipolarSliceRayStepRHI;
+    procedure TestVulkanFramePacerWaitMicrosecondsAndTelemetryRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -10616,6 +10619,101 @@ begin
     AssertEquals('DispatchCount must be 1', 1, Integer(Device.AutoExposureHistogram.DispatchCount));
   finally
     FreeAndNil(CmdList);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCapsuleSoftShadowOcclusionRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  CapGLSL: String;
+  VisBlocked, VisGrazing, VisClear: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Analytical Capsule Occlusion GLSL 450 functions }
+    CapGLSL := Gen.GenerateCapsuleOcclusionFunctions;
+    AssertTrue('Capsule GLSL must include EvaluateCapsuleSoftShadowOcclusion',
+      Pos('float EvaluateCapsuleSoftShadowOcclusion(', CapGLSL) > 0);
+
+    { 2. Verify ray passing directly through capsule axis is occluded (0.0),
+         grazing ray is partially occluded (~0.5), and far offset ray is unoccluded (1.0) }
+    VisBlocked := TCastleShaderGeneratorRHI.EvaluateCapsuleSoftShadowOcclusion(
+      Vector3(0.0, 0.0, 0.0),
+      Vector3(0.0, 0.0, 1.0),
+      Vector3(0.0, -1.0, 5.0),
+      Vector3(0.0,  1.0, 5.0),
+      0.5, 0.05);
+    VisGrazing := TCastleShaderGeneratorRHI.EvaluateCapsuleSoftShadowOcclusion(
+      Vector3(0.5, 0.0, 0.0),
+      Vector3(0.0, 0.0, 1.0),
+      Vector3(0.0, -1.0, 5.0),
+      Vector3(0.0,  1.0, 5.0),
+      0.5, 0.05);
+    VisClear := TCastleShaderGeneratorRHI.EvaluateCapsuleSoftShadowOcclusion(
+      Vector3(2.0, 0.0, 0.0),
+      Vector3(0.0, 0.0, 1.0),
+      Vector3(0.0, -1.0, 5.0),
+      Vector3(0.0,  1.0, 5.0),
+      0.5, 0.05);
+
+    AssertSameValue(0.0, VisBlocked, 1e-5);
+    AssertSameValue(0.5, VisGrazing, 1e-5);
+    AssertSameValue(1.0, VisClear, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestEpipolarSliceRayStepRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  EpiGLSL: String;
+  Step0, StepHalf, Step1: TVector2;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Epipolar Light Shaft GLSL 450 functions }
+    EpiGLSL := Gen.GenerateEpipolarLightShaftFunctions;
+    AssertTrue('Epipolar GLSL must include EvaluateEpipolarSliceRayStep',
+      Pos('vec2 EvaluateEpipolarSliceRayStep(vec2 lightScreenUV, vec2 sliceEndpointUV, float sliceFraction)', EpiGLSL) > 0);
+
+    { 2. Verify linear radial interpolation from light screen UV (0.2, 0.8) to border UV (1.0, 0.0) }
+    Step0    := TCastleShaderGeneratorRHI.EvaluateEpipolarSliceRayStep(Vector2(0.2, 0.8), Vector2(1.0, 0.0), 0.0);
+    StepHalf := TCastleShaderGeneratorRHI.EvaluateEpipolarSliceRayStep(Vector2(0.2, 0.8), Vector2(1.0, 0.0), 0.5);
+    Step1    := TCastleShaderGeneratorRHI.EvaluateEpipolarSliceRayStep(Vector2(0.2, 0.8), Vector2(1.0, 0.0), 1.0);
+
+    AssertSameValue(0.2, Step0.X, 1e-6);
+    AssertSameValue(0.8, Step0.Y, 1e-6);
+    AssertSameValue(0.6, StepHalf.X, 1e-6);
+    AssertSameValue(0.4, StepHalf.Y, 1e-6);
+    AssertSameValue(1.0, Step1.X, 1e-6);
+    AssertSameValue(0.0, Step1.Y, 1e-6);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanFramePacerWaitMicrosecondsAndTelemetryRHI;
+var
+  Wait60Hz, WaitOverBudget: Int64;
+  Device: TVulkanRHIDevice;
+begin
+  { 1. Verify 60 Hz frame pacing (16667 us target): 10.0 ms elapsed + 250 us safety margin -> 6417 us wait }
+  Wait60Hz := TCastleVulkanFramePacer.EvaluateFramePacingWaitMicroseconds(60.0, 10.0, 250.0);
+  WaitOverBudget := TCastleVulkanFramePacer.EvaluateFramePacingWaitMicroseconds(60.0, 20.0, 250.0);
+  AssertEquals('60Hz frame with 10ms elapsed + 250us safety margin must wait 6417 us', Int64(6417), Wait60Hz);
+  AssertEquals('Over-budget 20ms frame at 60Hz must wait 0 us', Int64(0), WaitOverBudget);
+
+  { 2. Verify TCastleVulkanFramePacer telemetry tracking on TVulkanRHIDevice }
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($667C)) );
+  try
+    Device.FramePacer.TargetRefreshHz := 120.0; { 8333 us target }
+    Device.FramePacer.RecordFramePresentTiming(5.0, 200.0); { 8333 - 5000 - 200 = 3133 us }
+    AssertEquals('PacedFrameCount must be 1', 1, Integer(Device.FramePacer.PacedFrameCount));
+    AssertEquals('LastWaitMicroseconds at 120Hz with 5ms elapsed must be 3133 us',
+      Int64(3133), Device.FramePacer.LastWaitMicroseconds);
+  finally
     FreeAndNil(Device);
   end;
 end;

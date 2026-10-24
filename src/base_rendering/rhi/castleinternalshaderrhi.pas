@@ -1648,6 +1648,25 @@ type
       const ALinearRGB: TVector3;
       const ACompressionStrength: Single): TVector3; static;
 
+    { Phase 50.1: Generates GLSL 450 Analytical Capsule Soft Shadow & Ambient Occlusion functions. }
+    function GenerateCapsuleOcclusionFunctions: String;
+
+    { Phase 50.1 CPU reference: Evaluates analytical soft shadow visibility in [0..1]
+      (1 = unoccluded, 0 = fully occluded) for a ray from AShadingPos along ALightDir
+      against a capsule segment [ACapsuleA, ACapsuleB] with ACapsuleRadius and AConeTang. }
+    class function EvaluateCapsuleSoftShadowOcclusion(
+      const AShadingPos, ALightDir, ACapsuleA, ACapsuleB: TVector3;
+      const ACapsuleRadius, AConeTang: Single): Single; static;
+
+    { Phase 50.2: Generates GLSL 450 Epipolar Volumetric Light Shafts (Crepuscular God Rays) functions. }
+    function GenerateEpipolarLightShaftFunctions: String;
+
+    { Phase 50.2 CPU reference: Evaluates the 2D screen-space sample UV along an epipolar
+      slice ray from ALightScreenUV to ASliceEndpointUV at normalized step ASliceFraction in [0..1]. }
+    class function EvaluateEpipolarSliceRayStep(
+      const ALightScreenUV, ASliceEndpointUV: TVector2;
+      const ASliceFraction: Single): TVector2; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -7905,6 +7924,70 @@ begin
   HighlightFactor := MaxCh / (1.0 + MaxCh);
   Desat := EnsureRange(HighlightFactor * EnsureRange(ACompressionStrength, 0.0, 1.0), 0.0, 1.0);
   Result := ALinearRGB * (1.0 - Desat) + Vector3(Luma, Luma, Luma) * Desat;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateCapsuleOcclusionFunctions: String;
+begin
+  Result :=
+    '// Phase 50.1: Analytical Capsule Soft Shadow & Ambient Occlusion' + NL +
+    'float EvaluateCapsuleSoftShadowOcclusion(vec3 shadingPos, vec3 lightDir,' + NL +
+    '  vec3 capA, vec3 capB, float capRadius, float coneTang) {' + NL +
+    '  vec3 ba = capB - capA;' + NL +
+    '  float l2 = dot(ba, ba);' + NL +
+    '  vec3 mid = 0.5 * (capA + capB);' + NL +
+    '  vec3 oc = mid - shadingPos;' + NL +
+    '  float tRay = max(0.001, dot(oc, lightDir));' + NL +
+    '  vec3 rayPt = shadingPos + lightDir * tRay;' + NL +
+    '  float hSeg = (l2 > 1e-6) ? clamp(dot(rayPt - capA, ba) / l2, 0.0, 1.0) : 0.0;' + NL +
+    '  vec3 closestCap = capA + ba * hSeg;' + NL +
+    '  float dist = length(rayPt - closestCap) - capRadius;' + NL +
+    '  float coneWidth = max(1e-4, tRay * max(1e-4, coneTang));' + NL +
+    '  float u = clamp(0.5 + 0.5 * (dist / coneWidth), 0.0, 1.0);' + NL +
+    '  return u * u * (3.0 - 2.0 * u);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateCapsuleSoftShadowOcclusion(
+  const AShadingPos, ALightDir, ACapsuleA, ACapsuleB: TVector3;
+  const ACapsuleRadius, AConeTang: Single): Single;
+var
+  BA, Mid, OC, RayPt, ClosestCap: TVector3;
+  L2, TRay, HSeg, Dist, ConeWidth, U: Single;
+begin
+  BA := ACapsuleB - ACapsuleA;
+  L2 := TVector3.DotProduct(BA, BA);
+  Mid := (ACapsuleA + ACapsuleB) * 0.5;
+  OC := Mid - AShadingPos;
+  TRay := Max(0.001, TVector3.DotProduct(OC, ALightDir));
+  RayPt := AShadingPos + ALightDir * TRay;
+  if L2 > 1e-6 then
+    HSeg := EnsureRange(TVector3.DotProduct(RayPt - ACapsuleA, BA) / L2, 0.0, 1.0)
+  else
+    HSeg := 0.0;
+  ClosestCap := ACapsuleA + BA * HSeg;
+  Dist := (RayPt - ClosestCap).Length - ACapsuleRadius;
+  ConeWidth := Max(1e-4, TRay * Max(1e-4, AConeTang));
+  U := EnsureRange(0.5 + 0.5 * (Dist / ConeWidth), 0.0, 1.0);
+  Result := U * U * (3.0 - 2.0 * U);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateEpipolarLightShaftFunctions: String;
+begin
+  Result :=
+    '// Phase 50.2: Epipolar Volumetric Light Shafts (Crepuscular God Rays)' + NL +
+    'vec2 EvaluateEpipolarSliceRayStep(vec2 lightScreenUV, vec2 sliceEndpointUV, float sliceFraction) {' + NL +
+    '  return mix(lightScreenUV, sliceEndpointUV, clamp(sliceFraction, 0.0, 1.0));' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateEpipolarSliceRayStep(
+  const ALightScreenUV, ASliceEndpointUV: TVector2;
+  const ASliceFraction: Single): TVector2;
+var
+  T: Single;
+begin
+  T := EnsureRange(ASliceFraction, 0.0, 1.0);
+  Result := ALightScreenUV * (1.0 - T) + ASliceEndpointUV * T;
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

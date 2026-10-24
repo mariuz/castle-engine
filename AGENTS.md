@@ -77,10 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–48**: **COMPLETED** (100%).
-- **Phase 49 (AgX Gamut Compression, Physically Based Camera EV100 & GPU Histogram Auto-Exposure)**: **COMPLETED** (100%, 177 unit tests passing):
-  - [x] **49.1. Physically Based Camera Exposure ($\text{EV}_{100}$) from Aperture, Shutter Speed & ISO (`GenerateCameraEV100ExposureFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestCameraEV100AndExposureMultiplierRHI`).
-  - [x] **49.2. AgX Filmic Log Encoding & Highlight Chroma Gamut Compression (`GenerateAgXGamutCompressionFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestAgXChromaGamutCompressionRHI`).
-  - [x] **49.3. GPU 64-Bin Luminance Histogram Auto-Exposure Manager (`TCastleVulkanAutoExposureHistogram` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanAutoExposureHistogramTrimmedEVAndDispatchRHI`).
-- **Vulkan 1.4 / Next-Gen Extended Roadmap (Phase 50)**:
-  - **Phase 50 (Analytical Capsule Soft Shadows, Epipolar Light Shafts & GPU Frame Pacing Manager)**: `EvaluateCapsuleSoftShadowOcclusion`, `EvaluateEpipolarSliceRayStep`, and `TCastleVulkanFramePacer`.
+- **Phases 1–49**: **COMPLETED** (100%).
+- **Phase 50 (Analytical Capsule Soft Shadows, Epipolar Light Shafts & GPU Frame Pacing Manager)**: **COMPLETED** (100%, 180 unit tests passing):
+  - [x] **50.1. Analytical Capsule Soft Shadow & Ambient Occlusion (`GenerateCapsuleOcclusionFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestCapsuleSoftShadowOcclusionRHI`).
+  - [x] **50.2. Epipolar Volumetric Light Shafts (Crepuscular God Rays) Slice Stepping (`GenerateEpipolarLightShaftFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestEpipolarSliceRayStepRHI`).
+  - [x] **50.3. GPU Frame Pacing & Present Timing Manager (`TCastleVulkanFramePacer` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanFramePacerWaitMicrosecondsAndTelemetryRHI`).

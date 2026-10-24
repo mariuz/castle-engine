@@ -3329,6 +3329,42 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { GPU Frame Pacing & Present Timing Manager                                  }
+  { -------------------------------------------------------------------------- }
+
+  { Tracks rolling frame durations, calculates low-latency frame-pacing wait
+    intervals for target display refresh rates, and records present telemetry. }
+  TCastleVulkanFramePacer = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FTargetRefreshHz: Single;
+    FLastFrameDurationMilliseconds: Single;
+    FSmoothedFrameMilliseconds: Single;
+    FLastWaitMicroseconds: Int64;
+    FPacedFrameCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+
+    { Computes the exact frame-pacing wait interval in microseconds for a target
+      display refresh rate (ATargetRefreshHz), elapsed GPU/CPU frame time
+      (AElapsedFrameMilliseconds), and scheduler safety margin (ASafetyMarginMicroseconds). }
+    class function EvaluateFramePacingWaitMicroseconds(
+      const ATargetRefreshHz, AElapsedFrameMilliseconds,
+      ASafetyMarginMicroseconds: Single): Int64; static;
+
+    { Records a completed frame's duration and updates smoothed frame-time and wait telemetry. }
+    procedure RecordFramePresentTiming(
+      const AElapsedFrameMilliseconds: Single;
+      const ASafetyMarginMicroseconds: Single = 250.0);
+
+    property TargetRefreshHz: Single read FTargetRefreshHz write FTargetRefreshHz;
+    property LastFrameDurationMilliseconds: Single read FLastFrameDurationMilliseconds;
+    property SmoothedFrameMilliseconds: Single read FSmoothedFrameMilliseconds;
+    property LastWaitMicroseconds: Int64 read FLastWaitMicroseconds;
+    property PacedFrameCount: Cardinal read FPacedFrameCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -3450,6 +3486,7 @@ type
     FDescriptorBufferManager: TCastleVulkanDescriptorBufferManager;
     FHiZPyramidGenerator: TCastleVulkanHiZPyramidGenerator;
     FAutoExposureHistogram: TCastleVulkanAutoExposureHistogram;
+    FFramePacer: TCastleVulkanFramePacer;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -3576,6 +3613,7 @@ type
     function GetDescriptorBufferManager: TCastleVulkanDescriptorBufferManager;
     function GetHiZPyramidGenerator: TCastleVulkanHiZPyramidGenerator;
     function GetAutoExposureHistogram: TCastleVulkanAutoExposureHistogram;
+    function GetFramePacer: TCastleVulkanFramePacer;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -3807,6 +3845,7 @@ type
     property DescriptorBufferManager: TCastleVulkanDescriptorBufferManager read GetDescriptorBufferManager;
     property HiZPyramidGenerator: TCastleVulkanHiZPyramidGenerator read GetHiZPyramidGenerator;
     property AutoExposureHistogram: TCastleVulkanAutoExposureHistogram read GetAutoExposureHistogram;
+    property FramePacer: TCastleVulkanFramePacer read GetFramePacer;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -16811,6 +16850,53 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanFramePacer                                                      }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanFramePacer.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FTargetRefreshHz := 60.0;
+  FLastFrameDurationMilliseconds := 0.0;
+  FSmoothedFrameMilliseconds := 16.6667;
+  FLastWaitMicroseconds := 0;
+  FPacedFrameCount := 0;
+end;
+
+class function TCastleVulkanFramePacer.EvaluateFramePacingWaitMicroseconds(
+  const ATargetRefreshHz, AElapsedFrameMilliseconds,
+  ASafetyMarginMicroseconds: Single): Int64;
+var
+  TargetPeriodUs, ElapsedUs, RemainingUs: Double;
+begin
+  if ATargetRefreshHz <= 0.0 then
+    Exit(0);
+  TargetPeriodUs := 1000000.0 / ATargetRefreshHz;
+  ElapsedUs := Max(0.0, AElapsedFrameMilliseconds) * 1000.0;
+  RemainingUs := TargetPeriodUs - ElapsedUs - Max(0.0, ASafetyMarginMicroseconds);
+  if RemainingUs > 0.0 then
+    Result := Round(RemainingUs)
+  else
+    Result := 0;
+end;
+
+procedure TCastleVulkanFramePacer.RecordFramePresentTiming(
+  const AElapsedFrameMilliseconds: Single;
+  const ASafetyMarginMicroseconds: Single);
+begin
+  if FDevice = nil then;
+  FLastFrameDurationMilliseconds := Max(0.0, AElapsedFrameMilliseconds);
+  if FPacedFrameCount = 0 then
+    FSmoothedFrameMilliseconds := FLastFrameDurationMilliseconds
+  else
+    FSmoothedFrameMilliseconds := FSmoothedFrameMilliseconds * 0.9 + FLastFrameDurationMilliseconds * 0.1;
+  FLastWaitMicroseconds := EvaluateFramePacingWaitMicroseconds(
+    FTargetRefreshHz, FLastFrameDurationMilliseconds, ASafetyMarginMicroseconds);
+  Inc(FPacedFrameCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -17556,12 +17642,20 @@ begin
   Result := FAutoExposureHistogram;
 end;
 
+function TVulkanRHIDevice.GetFramePacer: TCastleVulkanFramePacer;
+begin
+  if FFramePacer = nil then
+    FFramePacer := TCastleVulkanFramePacer.Create(Self);
+  Result := FFramePacer;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FFramePacer);
   FreeAndNil(FAutoExposureHistogram);
   FreeAndNil(FHiZPyramidGenerator);
   FreeAndNil(FDescriptorBufferManager);
