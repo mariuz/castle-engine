@@ -1120,9 +1120,39 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
 
 ---
 
-## Roadmap Completion Status (Phases 1–171)
+### Phase 172: Consolidate Niche Mathematical Surfaces & Curves into a Compact `"Parametric Surface / Curve..."` Launcher Dialog (`ShowParametricArrangePresetDialog` / `ButtonParametricPreset`)
+- [x] **172.1. Declutter `PanelLayoutTransform` & Unify 47 Parametric Surfaces, Curves, Knots & Spatial Deformers (`ShowParametricArrangePresetDialog`)**
+  - Set `.Visible := false` on the 47 individual niche mathematical surface/curve buttons (`ButtonArrangeRose` through `ButtonArrangeGerono`) in `PanelLayoutTransform` so the 3D Layout tab stays clean and focused on core Unreal/Unity/Godot level-design tools (`Align`, `Distribute`, `Stack`, `Circle`, `Grid`, `Line`, `Waypoints`, `Helix`, `Sphere`, `Cylinder`, `Cone`, `Hex Grid`, `Cube Frame`, `Bowl`, `Snap Primary Face`, `Shear`, `Twist/Taper`, `Bend`, `Spherify`, `Ripple`, `Squash/Stretch`, `Swirl`, `Radial Falloff`, `Cylindrify`, `Barrel/Pincushion`, `Wave Deform`, `Saddle/Dome`, `Octahedron`).
+  - Added a single compact **`Parametric Surface / Curve...`** button (`ButtonParametricPreset`) in `PanelLayoutTransform` that opens `TDesignFrame.ShowParametricArrangePresetDialog`, providing a searchable dropdown of all 47 mathematical curves, minimal surfaces, knots, and spatial deformers while preserving all direct keyboard shortcuts.
 
-All **171 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+### Phase 173: Unreal-Style Viewport Grid, Angle & Scale Snap Preset Switcher (`CycleSnapPreset` / `ButtonSnapPreset`)
+- [x] **173.1. Quick-Cycle Translation Grid, Rotation Angle & Scale Snap Presets (`TDesignFrame.CycleSnapPreset`)**
+  - Added **`Snap: Off` / `G:... R:...° S:...`** (`ButtonSnapPreset`) next to `SpinEditSnap3D` on `PanelMiddleTop` and implemented `TDesignFrame.CycleSnapPreset(SnapKind)` and `TDesignFrame.UpdateSnapPresetButtonCaption`:
+    - **Click**: Cycles 3D Translation Grid Snap (`Off -> 0.25 -> 0.5 -> 1 -> 5 -> 10 -> 50 -> 100 -> Off`).
+    - **`Shift`-Click**: Cycles 3D Rotation Angle Snap (`Off -> 5° -> 10° -> 15° -> 30° -> 45° -> 90° -> Off`).
+    - **`Ctrl`-Click**: Cycles 3D Scale Snap (`Off -> 0.05 -> 0.1 -> 0.25 -> 0.5 -> 1.0 -> Off`).
+
+### Phase 174: Unreal-Style Scene & Asset Statistics / Map-Check Reference Audit Dialog (`ShowSceneAssetStatisticsDialog` / `Alt+A` / `ButtonSceneStats`)
+- [x] **174.1. Scene Geometry Budget, Asset URL Reference Table & Map-Check Health Audit (`TDesignFrame.ShowSceneAssetStatisticsDialog`)**
+  - Implemented `TDesignFrame.ShowSceneAssetStatisticsDialog` bound to **`Alt+A`** (in both the Viewport and Hierarchy Tree), the **`Audit`** toolbar button (`ButtonSceneStats` on `PanelMiddleTop`), and **`Scene & Asset Statistics / Map Check... (Alt+A)`** (`MenuTreeViewItemSceneStats` in `MenuTreeView`).
+  - Reports total component counts by category (`TCastleTransform`, `TCastleScene`, `TCastleAbstractPrimitive`, `TCastleAbstractLight`, `TCastleCamera`, `TCastleUserInterface`, `TCastleBehavior`, Starred `[★]`, Locked, and Hidden), total 3D vertex and triangle counts (`VerticesCount` and `TrianglesCount` summed across all `TCastleScene` instances), a deduplicated table of all external Asset `Url` references with instance counts and `[OK]` vs. `[MISSING!]` file verification (`URIFileExists`), and a Map-Check summary with a one-click **`Select Flagged Issue(s)`** button to select all components with broken URLs or empty leaf transforms.
+
+### Phase 175: Component Starred Favorites / Bookmarks in the Hierarchy Tree (`FFavoriteComponents` / `Alt+F` / `[★]` Badge / `+fav` Filter)
+- [x] **175.1. Hierarchy Starred Bookmarks, `[★]` Badge Rendering & `+fav` / `+star` Live Filter (`ToggleSelectedFavorite` / `SelectFavoriteComponents`)**
+  - Added `FFavoriteComponents: TComponentList` and implemented `IsComponentFavorite`, `ToggleSelectedFavorite` (**`Alt+F`** in Viewport and Hierarchy Tree, plus `MenuTreeViewItemToggleFavorite`), and `SelectFavoriteComponents` (`MenuTreeViewItemSelectFavorites` in `MenuTreeView`).
+  - Updated `ControlsTreeAdvancedCustomDrawItem` (`DrawTreeNodeClassName`) to render a **`[★]`** badge next to starred components in the Hierarchy Tree, and updated `NodeMatchesHierarchyFilter` so typing **`+fav`**, **`+favorite`**, **`+star`**, or **`+starred`** in the Hierarchy search box (`Ctrl+F`) filters and highlights all starred favorite components.
+
+### Phase 176: Unreal-Style Property Matrix / Bulk Multi-Component Edit Dialog (`ShowBulkPropertyMatrixDialog` / `Alt+B` / `ButtonPropertyMatrix`)
+- [x] **176.1. Multi-Component Property Matrix Table & RTTI Bulk Property Setter (`TDesignFrame.ShowBulkPropertyMatrixDialog`)**
+  - Implemented `TDesignFrame.ShowBulkPropertyMatrixDialog` bound to **`Alt+B`** (in both the Viewport and Hierarchy Tree), the **`Matrix...`** button (`ButtonPropertyMatrix` in `PanelPropertyFilter` at the top of the Object Inspector), and **`Bulk Edit via Property Matrix... (Alt+B)`** (`MenuTreeViewItemPropertyMatrix` in `MenuTreeView`).
+  - Displays a formatted monospace comparison table of all selected components (`Name`, `Class`, `Exists`, `Translation / Pos`, `Scale / Size`, `Asset URL`) alongside a bulk property setter (`TComboBox` + `TEdit`) supporting `Exists`, `Url`, `Tag`, `Translation`, `Scale`, `Rotation`, `Width`, `Height`, `FullSize`, `ClipChildren`, `CastShadows`, `Pickable`, `Collides`, or any published boolean/integer/float/string RTTI property across all unlocked selected components in one undoable transaction.
+
+---
+
+## Roadmap Completion Status (Phases 1–176)
+
+All **176 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+
 
 
 

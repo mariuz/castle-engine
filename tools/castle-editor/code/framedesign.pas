@@ -423,6 +423,7 @@ type
       ButtonArrangePlucker: TButton;
       ButtonArrangeSuperellipsoid: TButton;
       ButtonArrangeGerono: TButton;
+      ButtonParametricPreset: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -477,11 +478,16 @@ type
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
+      ButtonPropertyMatrix: TSpeedButton;
       MenuTreeViewItemToggleVisibility: TMenuItem;
       MenuTreeViewItemIsolateSelected: TMenuItem;
       MenuTreeViewItemShowAllHidden: TMenuItem;
       MenuTreeViewItemToggleLock: TMenuItem;
       MenuTreeViewItemUnlockAll: TMenuItem;
+      MenuTreeViewItemToggleFavorite: TMenuItem;
+      MenuTreeViewItemSelectFavorites: TMenuItem;
+      MenuTreeViewItemPropertyMatrix: TMenuItem;
+      MenuTreeViewItemSceneStats: TMenuItem;
       MenuTreeViewItemGroupSelected: TMenuItem;
       MenuTreeViewItemUngroupSelected: TMenuItem;
       MenuTreeViewItemArrayDuplicate: TMenuItem;
@@ -536,6 +542,7 @@ type
       MenuTreeViewItemExpandAll: TMenuItem;
       MenuTreeViewItemCollapseAll: TMenuItem;
       FLockedComponents: TComponentList;
+      FFavoriteComponents: TComponentList;
       FSelectionSets: array [0..9] of TStringList;
       FPilotTransform: TCastleTransform;
       FPilotModified: Boolean;
@@ -569,8 +576,10 @@ type
       FCopiedUIVertAnchorParent: TVerticalPosition;
       FCopiedUIBorderAllSides: Single;
       FShowStatisticsToolbar: Boolean;
+      ButtonSnapPreset: TSpeedButton;
       ButtonViewMode: TSpeedButton;
       ButtonShowStats: TSpeedButton;
+      ButtonSceneStats: TSpeedButton;
       ButtonShowColliders: TSpeedButton;
       ButtonQuickAdd: TSpeedButton;
       ButtonSimulationStep: TSpeedButton;
@@ -699,6 +708,7 @@ type
     procedure ButtonArrangePluckerClick(Sender: TObject);
     procedure ButtonArrangeSuperellipsoidClick(Sender: TObject);
     procedure ButtonArrangeGeronoClick(Sender: TObject);
+    procedure ButtonParametricPresetClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -747,6 +757,9 @@ type
     procedure ButtonAxisViewClick(Sender: TObject);
     procedure EditPropertyFilterChange(Sender: TObject);
     procedure ButtonResetPropertyClick(Sender: TObject);
+    procedure ButtonPropertyMatrixClick(Sender: TObject);
+    procedure ButtonSnapPresetClick(Sender: TObject);
+    procedure ButtonSceneStatsClick(Sender: TObject);
     procedure ControlsTreeDblClick(Sender: TObject);
     procedure ControlsTreeKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure MenuTreeViewItemToggleVisibilityClick(Sender: TObject);
@@ -754,6 +767,10 @@ type
     procedure MenuTreeViewItemShowAllHiddenClick(Sender: TObject);
     procedure MenuTreeViewItemToggleLockClick(Sender: TObject);
     procedure MenuTreeViewItemUnlockAllClick(Sender: TObject);
+    procedure MenuTreeViewItemToggleFavoriteClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectFavoritesClick(Sender: TObject);
+    procedure MenuTreeViewItemPropertyMatrixClick(Sender: TObject);
+    procedure MenuTreeViewItemSceneStatsClick(Sender: TObject);
     procedure MenuTreeViewItemGroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemUngroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemArrayDuplicateClick(Sender: TObject);
@@ -1886,6 +1903,14 @@ type
     function IsComponentLocked(const C: TComponent): Boolean;
     procedure ToggleSelectedLock;
     procedure UnlockAll;
+    function IsComponentFavorite(const C: TComponent): Boolean;
+    procedure ToggleSelectedFavorite;
+    procedure SelectFavoriteComponents;
+    procedure ShowParametricArrangePresetDialog;
+    procedure CycleSnapPreset(const SnapKind: Integer = 0);
+    procedure UpdateSnapPresetButtonCaption;
+    procedure ShowSceneAssetStatisticsDialog;
+    procedure ShowBulkPropertyMatrixDialog;
     procedure SaveCameraBookmark(const Slot: Integer);
     procedure RecallCameraBookmark(const Slot: Integer);
     procedure AdjustCameraSpeed(const Factor: Single);
@@ -2734,6 +2759,11 @@ begin
   if (Frame.Mode <> moInteract) and Event.IsKey(keyF) and
      (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
   begin
+    if Event.ModifiersDown = [mkAlt] then
+    begin
+      Frame.ToggleSelectedFavorite;
+      Exit(true);
+    end else
     if Event.ModifiersDown = [mkAlt, mkShift] then
     begin
       Frame.ShowArrangeInLissajousDialog;
@@ -2752,11 +2782,18 @@ begin
   end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyB) and
-     (Event.ModifiersDown = [mkAlt, mkShift]) and
      (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
   begin
-    Frame.ShowArrangeInCatenaryDialog;
-    Exit(true);
+    if Event.ModifiersDown = [mkAlt] then
+    begin
+      Frame.ShowBulkPropertyMatrixDialog;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkAlt, mkShift] then
+    begin
+      Frame.ShowArrangeInCatenaryDialog;
+      Exit(true);
+    end;
   end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyI) and
@@ -2842,6 +2879,11 @@ begin
   if (Frame.Mode <> moInteract) and Event.IsKey(keyA) and
      (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
   begin
+    if Event.ModifiersDown = [mkAlt] then
+    begin
+      Frame.ShowSceneAssetStatisticsDialog;
+      Exit(true);
+    end else
     if Event.ModifiersDown = [mkAlt, mkShift] then
     begin
       Frame.ShowArrangeInArchDialog;
@@ -4158,6 +4200,7 @@ begin
 
   LastSelected := TComponentList.Create(false);
   FLockedComponents := TComponentList.Create(false);
+  FFavoriteComponents := TComponentList.Create(false);
   for I := 0 to 9 do
     FSelectionSets[I] := TStringList.Create;
 
@@ -4268,6 +4311,18 @@ begin
   SpinEditSnap3D.OnChange := @SpinEditSnap3DChange;
   SpinEditSnap3D.Parent := PanelSpinEditSnap3D;
 
+  ButtonSnapPreset := TSpeedButton.Create(Self);
+  ButtonSnapPreset.Caption := 'Snap: Off';
+  ButtonSnapPreset.Hint := 'Cycle 3D Viewport Snap Presets (Click: Grid 0/0.25/0.5/1/5/10/50/100 | Shift-click: Angle 0/5/10/15/30/45/90 deg | Ctrl-click: Scale 0/0.05/0.1/0.25/0.5/1.0)';
+  ButtonSnapPreset.ShowHint := true;
+  ButtonSnapPreset.AutoSize := true;
+  ButtonSnapPreset.Constraints.MinHeight := 33;
+  ButtonSnapPreset.Constraints.MinWidth := 68;
+  ButtonSnapPreset.BorderSpacing.Left := 4;
+  ButtonSnapPreset.OnClick := @ButtonSnapPresetClick;
+  ButtonSnapPreset.Parent := PanelMiddleTop;
+  UpdateSnapPresetButtonCaption;
+
   ButtonViewMode := TSpeedButton.Create(Self);
   ButtonViewMode.Caption := 'View: Lit';
   ButtonViewMode.Hint := 'Cycle viewport rendering mode: Lit -> Unlit -> Wireframe -> Solid Wireframe (Ctrl+T)';
@@ -4292,6 +4347,17 @@ begin
   ButtonShowStats.BorderSpacing.Left := 4;
   ButtonShowStats.OnClick := @ButtonShowStatsClick;
   ButtonShowStats.Parent := PanelMiddleTop;
+
+  ButtonSceneStats := TSpeedButton.Create(Self);
+  ButtonSceneStats.Caption := 'Audit';
+  ButtonSceneStats.Hint := 'Open Scene & Asset Statistics / Map-Check Reference Audit Dialog (Alt+A): view vertex/triangle counts, asset URLs, and health warnings';
+  ButtonSceneStats.ShowHint := true;
+  ButtonSceneStats.AutoSize := true;
+  ButtonSceneStats.Constraints.MinHeight := 33;
+  ButtonSceneStats.Constraints.MinWidth := 48;
+  ButtonSceneStats.BorderSpacing.Left := 4;
+  ButtonSceneStats.OnClick := @ButtonSceneStatsClick;
+  ButtonSceneStats.Parent := PanelMiddleTop;
 
   ButtonShowColliders := TSpeedButton.Create(Self);
   ButtonShowColliders.Caption := 'Colliders';
@@ -5622,6 +5688,67 @@ begin
   ButtonArrangeGerono.OnClick := @ButtonArrangeGeronoClick;
   ButtonArrangeGerono.Parent := PanelLayoutTransform;
 
+  { Group niche mathematical surface/curve buttons into a single compact
+    "Parametric Surface / Curve..." launcher button so PanelLayoutTransform
+    remains clean and focused on core 3D level-design tools. }
+  ButtonArrangeRose.Visible := false;
+  ButtonArrangeEllipsoid.Visible := false;
+  ButtonArrangeSphericalSpiral.Visible := false;
+  ButtonArrangeSuperellipse.Visible := false;
+  ButtonArrangeViviani.Visible := false;
+  ButtonArrangeSpirograph.Visible := false;
+  ButtonArrangeMobius.Visible := false;
+  ButtonArrangeHeart.Visible := false;
+  ButtonArrangeLemniscate.Visible := false;
+  ButtonArrangeTorusHelix.Visible := false;
+  ButtonArrangeButterfly.Visible := false;
+  ButtonArrangeClelie.Visible := false;
+  ButtonArrangeKnot.Visible := false;
+  ButtonArrangeDome.Visible := false;
+  ButtonArrangeCycloid.Visible := false;
+  ButtonArrangeHyperboloid.Visible := false;
+  ButtonArrangeCassini.Visible := false;
+  ButtonArrangeCatenoid.Visible := false;
+  ButtonArrangeHippopede.Visible := false;
+  ButtonArrangeHelicoid.Visible := false;
+  ButtonArrangeEnneper.Visible := false;
+  ButtonArrangeGear.Visible := false;
+  ButtonArrangeKlein.Visible := false;
+  ButtonArrangeFermat.Visible := false;
+  ButtonArrangeDini.Visible := false;
+  ButtonArrangeCornu.Visible := false;
+  ButtonGyroidDeform.Visible := false;
+  ButtonArrangeRoman.Visible := false;
+  ButtonArrangeCochleoid.Visible := false;
+  ButtonScherkDeform.Visible := false;
+  ButtonArrangeBoys.Visible := false;
+  ButtonArrangeBicorn.Visible := false;
+  ButtonStereographicDeform.Visible := false;
+  ButtonArrangeCatalan.Visible := false;
+  ButtonArrangeCylHarmonic.Visible := false;
+  ButtonArrangeCyclide.Visible := false;
+  ButtonArrangeBour.Visible := false;
+  ButtonArrangeLimacon.Visible := false;
+  ButtonArrangeHenneberg.Visible := false;
+  ButtonArrangeSphEpicycloid.Visible := false;
+  ButtonArrangeTalbot.Visible := false;
+  ButtonArrangeKuen.Visible := false;
+  ButtonArrangeRichmond.Visible := false;
+  ButtonArrangeDevilsCurve.Visible := false;
+  ButtonArrangePlucker.Visible := false;
+  ButtonArrangeSuperellipsoid.Visible := false;
+  ButtonArrangeGerono.Visible := false;
+
+  ButtonParametricPreset := TButton.Create(Self);
+  ButtonParametricPreset.Align := alTop;
+  ButtonParametricPreset.AutoSize := true;
+  ButtonParametricPreset.Caption := 'Parametric Surface / Curve...';
+  ButtonParametricPreset.Hint := 'Open unified Parametric Surface, Curve & Deformer Preset Launcher (all 55+ mathematical surfaces, curves, knots, and spatial deformers in one compact dialog)';
+  ButtonParametricPreset.ShowHint := true;
+  ButtonParametricPreset.BorderSpacing.Around := 2;
+  ButtonParametricPreset.OnClick := @ButtonParametricPresetClick;
+  ButtonParametricPreset.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -6074,6 +6201,16 @@ begin
   ButtonResetProperty.OnClick := @ButtonResetPropertyClick;
   ButtonResetProperty.Parent := PanelPropertyFilter;
 
+  ButtonPropertyMatrix := TSpeedButton.Create(Self);
+  ButtonPropertyMatrix.Align := alRight;
+  ButtonPropertyMatrix.AutoSize := true;
+  ButtonPropertyMatrix.Caption := 'Matrix...';
+  ButtonPropertyMatrix.Hint := 'Open Property Matrix / Bulk Multi-Component Edit Dialog (Alt+B): inspect & batch-edit properties across all selected components';
+  ButtonPropertyMatrix.ShowHint := true;
+  ButtonPropertyMatrix.BorderSpacing.Around := 4;
+  ButtonPropertyMatrix.OnClick := @ButtonPropertyMatrixClick;
+  ButtonPropertyMatrix.Parent := PanelPropertyFilter;
+
   EditPropertyFilter := TEdit.Create(Self);
   EditPropertyFilter.Align := alClient;
   EditPropertyFilter.BorderSpacing.Around := 4;
@@ -6107,6 +6244,26 @@ begin
   MenuTreeViewItemUnlockAll.Caption := 'Unlock All Components (Alt+L)';
   MenuTreeViewItemUnlockAll.OnClick := @MenuTreeViewItemUnlockAllClick;
   MenuTreeView.Items.Add(MenuTreeViewItemUnlockAll);
+
+  MenuTreeViewItemToggleFavorite := TMenuItem.Create(Self);
+  MenuTreeViewItemToggleFavorite.Caption := 'Toggle Starred Favorite / Bookmark [★] (Alt+F)';
+  MenuTreeViewItemToggleFavorite.OnClick := @MenuTreeViewItemToggleFavoriteClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemToggleFavorite);
+
+  MenuTreeViewItemSelectFavorites := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectFavorites.Caption := 'Select All Starred Favorites [★]';
+  MenuTreeViewItemSelectFavorites.OnClick := @MenuTreeViewItemSelectFavoritesClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectFavorites);
+
+  MenuTreeViewItemPropertyMatrix := TMenuItem.Create(Self);
+  MenuTreeViewItemPropertyMatrix.Caption := 'Bulk Edit via Property Matrix... (Alt+B)';
+  MenuTreeViewItemPropertyMatrix.OnClick := @MenuTreeViewItemPropertyMatrixClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemPropertyMatrix);
+
+  MenuTreeViewItemSceneStats := TMenuItem.Create(Self);
+  MenuTreeViewItemSceneStats.Caption := 'Scene & Asset Statistics / Map Check... (Alt+A)';
+  MenuTreeViewItemSceneStats.OnClick := @MenuTreeViewItemSceneStatsClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSceneStats);
 
   MenuTreeViewItemGroupSelected := TMenuItem.Create(Self);
   MenuTreeViewItemGroupSelected.Caption := 'Group Selected Under New Transform (Ctrl+G)';
@@ -6454,6 +6611,7 @@ begin
   FreeAndNil(FComponentEditorDesigner);
   FreeAndNil(LastSelected);
   FreeAndNil(FLockedComponents);
+  FreeAndNil(FFavoriteComponents);
 
   if CollectionPropertyEditorForm <> nil then
   begin
@@ -6515,6 +6673,8 @@ begin
 
   if FLockedComponents <> nil then
     FLockedComponents.Clear;
+  if FFavoriteComponents <> nil then
+    FFavoriteComponents.Clear;
   for I := 0 to 9 do
     if FSelectionSets[I] <> nil then
       FSelectionSets[I].Clear;
@@ -9923,6 +10083,8 @@ begin
     SetEnabledVisible(ControlProperties, SelectedCount <> 0);
     if PanelPropertyFilter <> nil then
       SetEnabledVisible(PanelPropertyFilter, SelectedCount <> 0);
+    if ButtonPropertyMatrix <> nil then
+      ButtonPropertyMatrix.Enabled := SelectedCount <> 0;
 
     SelectionForOI := TPersistentSelectionList.Create;
     try
@@ -10292,6 +10454,8 @@ begin
       ButtonArrangeSuperellipsoid.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonArrangeGerono <> nil then
       ButtonArrangeGerono.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonParametricPreset <> nil then
+      ButtonParametricPreset.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -11103,6 +11267,8 @@ var
                      (NodeObj is TComponent) and NodeMatchesHierarchyFilter(TComponent(NodeObj));
 
     Suffix := ' (' + NodeObj.ClassName + ')';
+    if (NodeObj is TComponent) and IsComponentFavorite(TComponent(NodeObj)) then
+      Suffix := Suffix + ' [★]';
     if IsHidden then
       Suffix := Suffix + ' [Hidden]';
     if IsLocked then
@@ -11383,6 +11549,7 @@ begin
     TransformManipulate.RotateSnap := 0;
     TransformManipulate.ScaleSnap := 0;
   end;
+  UpdateSnapPresetButtonCaption;
 end;
 
 procedure TDesignFrame.ViewportSnapToFloor(const AlignToNormal: Boolean);
@@ -12053,6 +12220,11 @@ begin
       ShowArrangeInConcentricRingsDialog;
       Key := 0;
     end else
+    if (Key = Ord('A')) and (Shift = [ssAlt]) then
+    begin
+      ShowSceneAssetStatisticsDialog;
+      Key := 0;
+    end else
     if (Key = Ord('A')) and (Shift = [ssAlt, ssShift]) then
     begin
       ShowArrangeInArchDialog;
@@ -12133,6 +12305,11 @@ begin
       ShowArrangeOnKleinBottleDialog;
       Key := 0;
     end else
+    if (Key = Ord('F')) and (Shift = [ssAlt]) then
+    begin
+      ToggleSelectedFavorite;
+      Key := 0;
+    end else
     if (Key = Ord('F')) and (Shift = [ssAlt, ssShift]) then
     begin
       ShowArrangeInLissajousDialog;
@@ -12146,6 +12323,11 @@ begin
     if (Key = Ord('F')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
     begin
       ShowArrangeInFermatSpiralDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('B')) and (Shift = [ssAlt]) then
+    begin
+      ShowBulkPropertyMatrixDialog;
       Key := 0;
     end else
     if (Key = Ord('B')) and (Shift = [ssAlt, ssShift]) then
@@ -12485,7 +12667,10 @@ begin
   if (Length(Query) > 1) and (Query[1] = '+') then
   begin
     Delete(Query, 1, 1);
-    Result := Pos(Query, LowerClass) <> 0;
+    if (Query = 'fav') or (Query = 'favorite') or (Query = 'star') or (Query = 'starred') then
+      Result := IsComponentFavorite(C)
+    else
+      Result := Pos(Query, LowerClass) <> 0;
   end else
     Result := (Pos(Query, LowerName) <> 0) or (Pos(Query, LowerClass) <> 0);
 end;
@@ -28057,6 +28242,798 @@ begin
   SelectClippedAndMaskedUserInterfaces(ssShift in GetKeyShiftState);
 end;
 
+function TDesignFrame.IsComponentFavorite(const C: TComponent): Boolean;
+begin
+  Result := (C <> nil) and (FFavoriteComponents <> nil) and
+            (FFavoriteComponents.IndexOf(C) <> -1);
+end;
+
+procedure TDesignFrame.ToggleSelectedFavorite;
+var
+  Selected: TComponentList;
+  SelectedCount, I: Integer;
+  C: TComponent;
+  MakeFav: Boolean;
+begin
+  if FFavoriteComponents = nil then Exit;
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if (Selected = nil) or (SelectedCount = 0) then Exit;
+    MakeFav := false;
+    for I := 0 to SelectedCount - 1 do
+      if not IsComponentFavorite(Selected[I]) then
+      begin
+        MakeFav := true;
+        Break;
+      end;
+
+    for I := 0 to SelectedCount - 1 do
+    begin
+      C := Selected[I];
+      if C = nil then Continue;
+      if MakeFav then
+      begin
+        if FFavoriteComponents.IndexOf(C) = -1 then
+          FFavoriteComponents.Add(C);
+      end else
+        FFavoriteComponents.Remove(C);
+    end;
+    ControlsTree.Invalidate;
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.SelectFavoriteComponents;
+var
+  NewSelection: TComponentList;
+  I: Integer;
+begin
+  if (FFavoriteComponents = nil) or (FFavoriteComponents.Count = 0) then Exit;
+  NewSelection := TComponentList.Create(false);
+  try
+    for I := 0 to FFavoriteComponents.Count - 1 do
+      if (FFavoriteComponents[I] <> nil) and Selectable(FFavoriteComponents[I]) and
+         (not IsComponentLocked(FFavoriteComponents[I])) then
+        NewSelection.Add(FFavoriteComponents[I]);
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemToggleFavoriteClick(Sender: TObject);
+begin
+  ToggleSelectedFavorite;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectFavoritesClick(Sender: TObject);
+begin
+  SelectFavoriteComponents;
+end;
+
+procedure TDesignFrame.UpdateSnapPresetButtonCaption;
+var
+  TSnap, RSnapDeg, SSnap: Single;
+begin
+  if (ButtonSnapPreset = nil) or (TransformManipulate = nil) then Exit;
+  TSnap := TransformManipulate.TranslateSnap;
+  RSnapDeg := RadToDeg(TransformManipulate.RotateSnap);
+  SSnap := TransformManipulate.ScaleSnap;
+
+  if (TSnap <= 0.0) and (RSnapDeg <= 0.0) and (SSnap <= 0.0) then
+    ButtonSnapPreset.Caption := 'Snap: Off'
+  else
+    ButtonSnapPreset.Caption := Format('G:%s R:%.0f° S:%s', [
+       FloatToStr(SimpleRoundTo(TSnap, -2)),
+      RSnapDeg,
+      FloatToStr(SimpleRoundTo(SSnap, -2))
+    ]);
+end;
+
+procedure TDesignFrame.CycleSnapPreset(const SnapKind: Integer);
+const
+  GridPresets: array[0..7] of Single = (0.0, 0.25, 0.5, 1.0, 5.0, 10.0, 50.0, 100.0);
+  AnglePresets: array[0..6] of Single = (0.0, 5.0, 10.0, 15.0, 30.0, 45.0, 90.0);
+  ScalePresets: array[0..5] of Single = (0.0, 0.05, 0.1, 0.25, 0.5, 1.0);
+var
+  CurVal, NextVal: Single;
+  I: Integer;
+begin
+  if TransformManipulate = nil then Exit;
+
+  if SnapKind = 1 then
+  begin
+    { Shift-click: cycle Rotation Angle Snap }
+    CurVal := RadToDeg(TransformManipulate.RotateSnap);
+    NextVal := AnglePresets[0];
+    for I := 0 to High(AnglePresets) do
+      if AnglePresets[I] > CurVal + 0.1 then
+      begin
+        NextVal := AnglePresets[I];
+        Break;
+      end;
+    TransformManipulate.RotateSnap := DegToRad(NextVal);
+  end else
+  if SnapKind = 2 then
+  begin
+    { Ctrl-click: cycle Scale Snap }
+    CurVal := TransformManipulate.ScaleSnap;
+    NextVal := ScalePresets[0];
+    for I := 0 to High(ScalePresets) do
+      if ScalePresets[I] > CurVal + 0.001 then
+      begin
+        NextVal := ScalePresets[I];
+        Break;
+      end;
+    TransformManipulate.ScaleSnap := NextVal;
+  end else
+  begin
+    { Normal click: cycle Translation Grid Snap }
+    CurVal := TransformManipulate.TranslateSnap;
+    NextVal := GridPresets[0];
+    for I := 0 to High(GridPresets) do
+      if GridPresets[I] > CurVal + 0.01 then
+      begin
+        NextVal := GridPresets[I];
+        Break;
+      end;
+    if SpinEditSnap3D <> nil then
+      SpinEditSnap3D.Value := NextVal
+    else
+      TransformManipulate.TranslateSnap := NextVal;
+  end;
+
+  UpdateSnapPresetButtonCaption;
+end;
+
+procedure TDesignFrame.ButtonSnapPresetClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    CycleSnapPreset(1)
+  else if ssCtrl in ShiftState then
+    CycleSnapPreset(2)
+  else
+    CycleSnapPreset(0);
+end;
+
+procedure TDesignFrame.ShowParametricArrangePresetDialog;
+var
+  Dialog: TForm;
+  LblInfo: TLabel;
+  ComboPreset: TComboBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+  PresetIdx: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+  begin
+    ErrorBox('Select at least 2 unlocked TCastleTransform objects before opening Parametric Surface / Curve presets.');
+    Exit;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Parametric Surface / Curve / Deformer Presets';
+    Dialog.Position := poMainFormCenter;
+    Dialog.Width := 460;
+    Dialog.Height := 165;
+    Dialog.BorderStyle := bsDialog;
+
+    LblInfo := TLabel.Create(Dialog);
+    LblInfo.Caption := 'Choose a 3D Parametric Surface, Curve, or Spatial Deformer Dialog:';
+    LblInfo.Left := 16;
+    LblInfo.Top := 16;
+    LblInfo.Parent := Dialog;
+
+    ComboPreset := TComboBox.Create(Dialog);
+    ComboPreset.Style := csDropDownList;
+    ComboPreset.DropDownCount := 24;
+    ComboPreset.Left := 16;
+    ComboPreset.Top := 42;
+    ComboPreset.Width := 424;
+    ComboPreset.Items.Add('01. Rose / Rhodonea Petal Curve (Ctrl+Alt+O)');
+    ComboPreset.Items.Add('02. Triaxial Ellipsoid / Dome Shell (Ctrl+Alt+U)');
+    ComboPreset.Items.Add('03. Spherical Spiral / Loxodrome (Ctrl+Alt+W)');
+    ComboPreset.Items.Add('04. Superellipse / Squircle / Astroid Star (Ctrl+Alt+E)');
+    ComboPreset.Items.Add('05. Viviani Spherical Figure-8 Curve (Ctrl+Alt+Q)');
+    ComboPreset.Items.Add('06. Spirograph / Hypotrochoid / Epitrochoid (Ctrl+Alt+R)');
+    ComboPreset.Items.Add('07. Mobius Strip / Twisted Ribbon (Ctrl+Alt+Y)');
+    ComboPreset.Items.Add('08. Heart Curve / Cardioid Loop (Ctrl+Alt+Z)');
+    ComboPreset.Items.Add('09. Lemniscate of Bernoulli Infinity Loop (Ctrl+Alt+'')');
+    ComboPreset.Items.Add('10. Toroidal Solenoid / Helical Coil (Ctrl+Alt+[)');
+    ComboPreset.Items.Add('11. Butterfly Curve (Ctrl+Alt+.)');
+    ComboPreset.Items.Add('12. Clelie Spherical Rosette Orbit (Ctrl+Alt+/)');
+    ComboPreset.Items.Add('13. Trefoil / Figure-Eight Knot Curve (Ctrl+Alt+-)');
+    ComboPreset.Items.Add('14. Geodesic Latitude-Tier Dome (Ctrl+Alt+=)');
+    ComboPreset.Items.Add('15. Cycloid Star (Hypocycloid / Epicycloid) (Ctrl+Alt+4)');
+    ComboPreset.Items.Add('16. Hyperboloid of One Sheet / Cooling Tower (Ctrl+Alt+6)');
+    ComboPreset.Items.Add('17. Cassini Oval / Pinched Peanut Loop (Ctrl+Alt+9)');
+    ComboPreset.Items.Add('18. Catenoid Minimal Surface Shell (Ctrl+Alt+Shift+C)');
+    ComboPreset.Items.Add('19. Spherical Hippopede / Tennis-Ball Seam (Ctrl+Alt+Shift+P)');
+    ComboPreset.Items.Add('20. Helicoid Minimal Surface / Screw Ramp (Ctrl+Alt+Shift+H)');
+    ComboPreset.Items.Add('21. Enneper Minimal Saddle Surface (Ctrl+Alt+Shift+E)');
+    ComboPreset.Items.Add('22. Gear-Tooth / Battlement Crenellation Ring (Ctrl+Alt+Shift+G)');
+    ComboPreset.Items.Add('23. Klein Bottle Figure-8 Immersion (Ctrl+Alt+Shift+K)');
+    ComboPreset.Items.Add('24. Fermat Spiral / Barred Galaxy Pinwheel (Ctrl+Alt+Shift+F)');
+    ComboPreset.Items.Add('25. Dini Pseudospherical Twisted Horn (Ctrl+Alt+Shift+T)');
+    ComboPreset.Items.Add('26. Euler / Cornu Clothoid S-Curve Spiral (Ctrl+Alt+Shift+L)');
+    ComboPreset.Items.Add('27. Schoen Gyroid / Schwarz P TPMS Deform (Ctrl+Alt+Shift+M)');
+    ComboPreset.Items.Add('28. Jakob Steiner Roman Projective Surface (Ctrl+Alt+Shift+R)');
+    ComboPreset.Items.Add('29. Cochleoid Snail-Shell Spiral Curve (Ctrl+Alt+Shift+A)');
+    ComboPreset.Items.Add('30. Scherk Minimal Surface / Saddle Tower Deform (Ctrl+Alt+Shift+J)');
+    ComboPreset.Items.Add('31. Werner Boy''s Projective Surface (Ctrl+Alt+Shift+X)');
+    ComboPreset.Items.Add('32. Bicorn Cocked-Hat / Piriform Teardrop (Ctrl+Alt+Shift+Y)');
+    ComboPreset.Items.Add('33. Inverse Stereographic Conformal Sphere Deform (Ctrl+Alt+Shift+'')');
+    ComboPreset.Items.Add('34. Catalan Minimal Surface / Cycloidal Ribbon (Ctrl+Alt+Shift+[)');
+    ComboPreset.Items.Add('35. Cylindrical Harmonic / Crown Wave Ring (Ctrl+Alt+Shift+])');
+    ComboPreset.Items.Add('36. Dupin Cyclide / Asymmetric Horn Torus (Ctrl+Alt+Shift+,)');
+    ComboPreset.Items.Add('37. Edmond Bour Minimal Surface (Ctrl+Alt+Shift+.)');
+    ComboPreset.Items.Add('38. Pascal Limacon / Trisectrix Inner-Loop (Ctrl+Alt+Shift+/)');
+    ComboPreset.Items.Add('39. Henneberg Non-Orientable Minimal Surface (Ctrl+Alt+Shift+=)');
+    ComboPreset.Items.Add('40. Spherical Epicycloid / Cam-Follower Seam (Ctrl+Alt+Shift+~)');
+    ComboPreset.Items.Add('41. Henry Fox Talbot Negative-Pedal Curve (Ctrl+Alt+Shift+1)');
+    ComboPreset.Items.Add('42. Theodor Kuen Pseudospherical Surface (Ctrl+Alt+Shift+2)');
+    ComboPreset.Items.Add('43. Herbert Richmond Planar-End Minimal Surface (Ctrl+Alt+Shift+3)');
+    ComboPreset.Items.Add('44. Devil''s Curve / Maltese Cross Lemniscate (Ctrl+Alt+Shift+4)');
+    ComboPreset.Items.Add('45. Julius Plucker Ruled Conoid Surface (Ctrl+Alt+Shift+6)');
+    ComboPreset.Items.Add('46. Alan Barr Superellipsoid / Lame Surface (Ctrl+Alt+Shift+7)');
+    ComboPreset.Items.Add('47. Gerono Figure-Eight Lemniscate / Besace Curve (Ctrl+Alt+Shift+8)');
+    ComboPreset.ItemIndex := 0;
+    ComboPreset.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Configure Preset...';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      PresetIdx := ComboPreset.ItemIndex
+    else
+      PresetIdx := -1;
+  finally
+    FreeAndNil(Dialog);
+  end;
+
+  case PresetIdx of
+    0: ShowArrangeInRoseCurveDialog;
+    1: ShowArrangeOnEllipsoidDialog;
+    2: ShowArrangeInSphericalSpiralDialog;
+    3: ShowArrangeInSuperellipseDialog;
+    4: ShowArrangeInVivianiCurveDialog;
+    5: ShowArrangeInSpirographDialog;
+    6: ShowArrangeInMobiusStripDialog;
+    7: ShowArrangeInCardioidOrHeartDialog;
+    8: ShowArrangeInLemniscateDialog;
+    9: ShowArrangeInTorusHelixDialog;
+    10: ShowArrangeInButterflyCurveDialog;
+    11: ShowArrangeInClelieCurveDialog;
+    12: ShowArrangeInKnotCurveDialog;
+    13: ShowArrangeInGeodesicDomeDialog;
+    14: ShowArrangeInCycloidDialog;
+    15: ShowArrangeOnHyperboloidDialog;
+    16: ShowArrangeInCassiniOvalDialog;
+    17: ShowArrangeOnCatenoidDialog;
+    18: ShowArrangeInHippopedeDialog;
+    19: ShowArrangeOnHelicoidDialog;
+    20: ShowArrangeOnEnneperSurfaceDialog;
+    21: ShowArrangeInGearWheelDialog;
+    22: ShowArrangeOnKleinBottleDialog;
+    23: ShowArrangeInFermatSpiralDialog;
+    24: ShowArrangeOnDiniSurfaceDialog;
+    25: ShowArrangeInCornuSpiralDialog;
+    26: ShowGyroidDeformSelectionDialog;
+    27: ShowArrangeOnRomanSurfaceDialog;
+    28: ShowArrangeInCochleoidDialog;
+    29: ShowScherkDeformSelectionDialog;
+    30: ShowArrangeOnBoysSurfaceDialog;
+    31: ShowArrangeInBicornCurveDialog;
+    32: ShowStereographicDeformSelectionDialog;
+    33: ShowArrangeOnCatalanSurfaceDialog;
+    34: ShowArrangeInCylindricalHarmonicDialog;
+    35: ShowArrangeOnDupinCyclideDialog;
+    36: ShowArrangeOnBourSurfaceDialog;
+    37: ShowArrangeInLimaconCurveDialog;
+    38: ShowArrangeOnHennebergSurfaceDialog;
+    39: ShowArrangeOnSphericalEpicycloidDialog;
+    40: ShowArrangeInTalbotCurveDialog;
+    41: ShowArrangeOnKuenSurfaceDialog;
+    42: ShowArrangeOnRichmondSurfaceDialog;
+    43: ShowArrangeInDevilsCurveDialog;
+    44: ShowArrangeOnPluckerConoidDialog;
+    45: ShowArrangeOnSuperellipsoidDialog;
+    46: ShowArrangeInGeronoLemniscateDialog;
+  end;
+end;
+
+procedure TDesignFrame.ButtonParametricPresetClick(Sender: TObject);
+begin
+  ShowParametricArrangePresetDialog;
+end;
+
+procedure TDesignFrame.ShowSceneAssetStatisticsDialog;
+var
+  Dialog: TForm;
+  MemoReport: TMemo;
+  BottomPanel: TPanel;
+  BtnSelectIssues, BtnClose: TButton;
+  IssueComponents: TComponentList;
+  UrlCounts: TStringList;
+  TreeNode: TTreeNode;
+  Obj: TObject;
+  C: TComponent;
+  T: TCastleTransform;
+  S: TCastleScene;
+  UI: TCastleUserInterface;
+  TotalComponents, TotalTransforms, TotalScenes, TotalPrimitives,
+  TotalLights, TotalCameras, TotalBehaviors, TotalUI,
+  HiddenCount, LockedCount, FavCount, MissingUrlCount, EmptyTransformCount,
+  NonUniformScaleCount: Integer;
+  TotalVertices, TotalTriangles: QWord;
+  UrlStr, StatusStr: String;
+  UrlIdx, I: Integer;
+  SelectFlagged: Boolean;
+begin
+  if FDesignRoot = nil then Exit;
+
+  IssueComponents := TComponentList.Create(false);
+  UrlCounts := TStringList.Create;
+  Dialog := TForm.CreateNew(Self);
+  try
+    TotalComponents := 0;
+    TotalTransforms := 0;
+    TotalScenes := 0;
+    TotalPrimitives := 0;
+    TotalLights := 0;
+    TotalCameras := 0;
+    TotalBehaviors := 0;
+    TotalUI := 0;
+    HiddenCount := 0;
+    LockedCount := 0;
+    FavCount := 0;
+    MissingUrlCount := 0;
+    EmptyTransformCount := 0;
+    NonUniformScaleCount := 0;
+    TotalVertices := 0;
+    TotalTriangles := 0;
+
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      if TreeNode.Data <> nil then
+      begin
+        Obj := TObject(TreeNode.Data);
+        if (Obj is TComponent) and (not (csSubComponent in TComponent(Obj).ComponentStyle)) then
+        begin
+          C := TComponent(Obj);
+          Inc(TotalComponents);
+          if IsComponentLocked(C) then Inc(LockedCount);
+          if IsComponentFavorite(C) then Inc(FavCount);
+
+          if C is TCastleTransform then
+          begin
+            T := TCastleTransform(C);
+            Inc(TotalTransforms);
+            if not T.Exists then Inc(HiddenCount);
+            if not (SameValue(T.Scale.X, T.Scale.Y, 0.001) and SameValue(T.Scale.Y, T.Scale.Z, 0.001)) then
+              Inc(NonUniformScaleCount);
+
+            if T is TCastleScene then
+            begin
+              S := TCastleScene(T);
+              Inc(TotalScenes);
+              TotalVertices := TotalVertices + S.VerticesCount;
+              TotalTriangles := TotalTriangles + S.TrianglesCount;
+            end else
+            if T is TCastleAbstractPrimitive then
+              Inc(TotalPrimitives)
+            else
+            if T is TCastleAbstractLight then
+              Inc(TotalLights)
+            else
+            if T is TCastleCamera then
+              Inc(TotalCameras)
+            else
+            if (T.ClassType = TCastleTransform) and (T.Count = 0) and (T.BehaviorsCount = 0) and (T <> FDesignRoot) then
+            begin
+              Inc(EmptyTransformCount);
+              if IssueComponents.IndexOf(T) = -1 then
+                IssueComponents.Add(T);
+            end;
+          end else
+          if C is TCastleUserInterface then
+          begin
+            UI := TCastleUserInterface(C);
+            Inc(TotalUI);
+            if not UI.Exists then Inc(HiddenCount);
+          end else
+          if C is TCastleBehavior then
+            Inc(TotalBehaviors);
+
+          UrlStr := Trim(GetComponentAssetUrl(C));
+          if UrlStr <> '' then
+          begin
+            UrlIdx := UrlCounts.IndexOfName(UrlStr);
+            if UrlIdx = -1 then
+              UrlCounts.Add(UrlStr + '=1')
+            else
+              UrlCounts.ValueFromIndex[UrlIdx] := IntToStr(StrToIntDef(UrlCounts.ValueFromIndex[UrlIdx], 0) + 1);
+
+            if not URIFileExists(UrlStr) then
+            begin
+              Inc(MissingUrlCount);
+              if IssueComponents.IndexOf(C) = -1 then
+                IssueComponents.Add(C);
+            end;
+          end;
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    Dialog.Caption := 'Scene & Asset Statistics / Map Check Audit (Alt+A)';
+    Dialog.Position := poMainFormCenter;
+    Dialog.Width := 620;
+    Dialog.Height := 480;
+    Dialog.BorderStyle := bsSizeable;
+
+    MemoReport := TMemo.Create(Dialog);
+    MemoReport.Align := alClient;
+    MemoReport.BorderSpacing.Around := 8;
+    MemoReport.ReadOnly := true;
+    MemoReport.ScrollBars := ssAutoBoth;
+    MemoReport.Font.Name := 'Monospace';
+    MemoReport.Parent := Dialog;
+
+    MemoReport.Lines.BeginUpdate;
+    try
+      MemoReport.Lines.Add('=== SCENE & HIERARCHY STATISTICS ===');
+      MemoReport.Lines.Add(Format('Root Component       : %s (%s)', [FDesignRoot.Name, FDesignRoot.ClassName]));
+      MemoReport.Lines.Add(Format('Total Components     : %d', [TotalComponents]));
+      MemoReport.Lines.Add(Format('  3D Transforms      : %d (Scenes: %d, Primitives: %d, Lights: %d, Cameras: %d)',
+        [TotalTransforms, TotalScenes, TotalPrimitives, TotalLights, TotalCameras]));
+      MemoReport.Lines.Add(Format('  2D UI Controls     : %d', [TotalUI]));
+      MemoReport.Lines.Add(Format('  Behaviors          : %d', [TotalBehaviors]));
+      MemoReport.Lines.Add(Format('  Starred [★] / Lock : %d Starred, %d Locked, %d Hidden',
+        [FavCount, LockedCount, HiddenCount]));
+      MemoReport.Lines.Add('');
+      MemoReport.Lines.Add('=== 3D GEOMETRY BUDGET (TCastleScene) ===');
+      MemoReport.Lines.Add(Format('Total Vertices       : %d', [TotalVertices]));
+      MemoReport.Lines.Add(Format('Total Triangles      : %d', [TotalTriangles]));
+      MemoReport.Lines.Add('');
+      MemoReport.Lines.Add(Format('=== ASSET URL REFERENCES (%d Unique URLs) ===', [UrlCounts.Count]));
+      if UrlCounts.Count = 0 then
+        MemoReport.Lines.Add('  (No external asset URLs referenced)')
+      else
+        for I := 0 to UrlCounts.Count - 1 do
+        begin
+          UrlStr := UrlCounts.Names[I];
+          if URIFileExists(UrlStr) then
+            StatusStr := '[OK]'
+          else
+            StatusStr := '[MISSING!]';
+          MemoReport.Lines.Add(Format('  %s (%sx) %s', [StatusStr, UrlCounts.ValueFromIndex[I], UrlStr]));
+        end;
+      MemoReport.Lines.Add('');
+      MemoReport.Lines.Add('=== MAP CHECK / HEALTH AUDIT ===');
+      MemoReport.Lines.Add(Format('  Missing / Broken Asset URLs : %d', [MissingUrlCount]));
+      MemoReport.Lines.Add(Format('  Empty Leaf TCastleTransforms: %d', [EmptyTransformCount]));
+      MemoReport.Lines.Add(Format('  Non-Uniformly Scaled 3D     : %d', [NonUniformScaleCount]));
+    finally
+      MemoReport.Lines.EndUpdate;
+    end;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnClose := TButton.Create(Dialog);
+    BtnClose.Caption := 'Close';
+    BtnClose.Cancel := true;
+    BtnClose.Default := true;
+    BtnClose.ModalResult := mrCancel;
+    BtnClose.Align := alRight;
+    BtnClose.BorderSpacing.Around := 6;
+    BtnClose.Parent := BottomPanel;
+
+    BtnSelectIssues := TButton.Create(Dialog);
+    BtnSelectIssues.Caption := Format('Select %d Flagged Issue(s)', [IssueComponents.Count]);
+    BtnSelectIssues.Enabled := IssueComponents.Count > 0;
+    BtnSelectIssues.ModalResult := mrOk;
+    BtnSelectIssues.AutoSize := true;
+    BtnSelectIssues.Align := alRight;
+    BtnSelectIssues.BorderSpacing.Around := 6;
+    BtnSelectIssues.Parent := BottomPanel;
+
+    SelectFlagged := (Dialog.ShowModal = mrOk) and (IssueComponents.Count > 0);
+    if SelectFlagged then
+      SetSelected(IssueComponents);
+  finally
+    FreeAndNil(Dialog);
+    FreeAndNil(UrlCounts);
+    FreeAndNil(IssueComponents);
+  end;
+end;
+
+procedure TDesignFrame.ButtonSceneStatsClick(Sender: TObject);
+begin
+  ShowSceneAssetStatisticsDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSceneStatsClick(Sender: TObject);
+begin
+  ShowSceneAssetStatisticsDialog;
+end;
+
+procedure TDesignFrame.ShowBulkPropertyMatrixDialog;
+var
+  Selected: TComponentList;
+  SelectedCount, I, AppliedCount: Integer;
+  Dialog: TForm;
+  TopPanel, BottomPanel: TPanel;
+  LblProp, LblVal, LblMatrix: TLabel;
+  ComboProp: TComboBox;
+  EditVal: TEdit;
+  MemoMatrix: TMemo;
+  BtnApply, BtnCancel: TButton;
+  C: TComponent;
+  T: TCastleTransform;
+  UI: TCastleUserInterface;
+  PropName, ValStr, PosStr, SizeStr, UrlStr, ExistsStr: String;
+  FloatVal: Single;
+  IntVal: Integer;
+  BoolVal: Boolean;
+  Vec3Val: TVector3;
+  Vec4Val: TVector4;
+  PropInfo: PPropInfo;
+begin
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if (Selected = nil) or (SelectedCount = 0) then
+    begin
+      ErrorBox('Select one or more components in the Hierarchy or Viewport before opening the Property Matrix.');
+      Exit;
+    end;
+
+    Dialog := TForm.CreateNew(Self);
+    try
+      Dialog.Caption := Format('Property Matrix / Bulk Multi-Component Edit (%d Selected) (Alt+B)', [SelectedCount]);
+      Dialog.Position := poMainFormCenter;
+      Dialog.Width := 680;
+      Dialog.Height := 460;
+      Dialog.BorderStyle := bsSizeable;
+
+      TopPanel := TPanel.Create(Dialog);
+      TopPanel.Align := alTop;
+      TopPanel.Height := 76;
+      TopPanel.BevelOuter := bvNone;
+      TopPanel.Parent := Dialog;
+
+      LblProp := TLabel.Create(Dialog);
+      LblProp.Caption := 'Property to Bulk-Set:';
+      LblProp.Left := 12;
+      LblProp.Top := 12;
+      LblProp.Parent := TopPanel;
+
+      ComboProp := TComboBox.Create(Dialog);
+      ComboProp.Left := 150;
+      ComboProp.Top := 8;
+      ComboProp.Width := 210;
+      ComboProp.Items.Add('Exists (true / false)');
+      ComboProp.Items.Add('Url (asset path)');
+      ComboProp.Items.Add('Tag (integer)');
+      ComboProp.Items.Add('Translation (X Y Z)');
+      ComboProp.Items.Add('Scale (uniform or X Y Z)');
+      ComboProp.Items.Add('Rotation (X Y Z AngleDeg)');
+      ComboProp.Items.Add('Width (2D UI)');
+      ComboProp.Items.Add('Height (2D UI)');
+      ComboProp.Items.Add('FullSize (true / false)');
+      ComboProp.Items.Add('ClipChildren (true / false)');
+      ComboProp.Items.Add('CastShadows (true / false)');
+      ComboProp.Items.Add('Pickable (true / false)');
+      ComboProp.Items.Add('Collides (true / false)');
+      ComboProp.ItemIndex := 0;
+      ComboProp.Parent := TopPanel;
+
+      LblVal := TLabel.Create(Dialog);
+      LblVal.Caption := 'New Value:';
+      LblVal.Left := 372;
+      LblVal.Top := 12;
+      LblVal.Parent := TopPanel;
+
+      EditVal := TEdit.Create(Dialog);
+      EditVal.Left := 448;
+      EditVal.Top := 8;
+      EditVal.Width := 216;
+      EditVal.Text := 'true';
+      EditVal.Parent := TopPanel;
+
+      LblMatrix := TLabel.Create(Dialog);
+      LblMatrix.Caption := 'Selected Components Property Matrix Summary (you can also type any published RTTI property name above):';
+      LblMatrix.Left := 12;
+      LblMatrix.Top := 48;
+      LblMatrix.Parent := TopPanel;
+
+      MemoMatrix := TMemo.Create(Dialog);
+      MemoMatrix.Align := alClient;
+      MemoMatrix.BorderSpacing.Around := 8;
+      MemoMatrix.ReadOnly := true;
+      MemoMatrix.ScrollBars := ssAutoBoth;
+      MemoMatrix.Font.Name := 'Monospace';
+      MemoMatrix.Parent := Dialog;
+
+      MemoMatrix.Lines.BeginUpdate;
+      try
+        MemoMatrix.Lines.Add(Format('%-22s | %-22s | %-6s | %-24s | %-20s | %s',
+          ['Name', 'Class', 'Exists', 'Translation / Pos', 'Scale / Size', 'Asset URL']));
+        MemoMatrix.Lines.Add(StringOfChar('-', 115));
+        for I := 0 to SelectedCount - 1 do
+        begin
+          C := Selected[I];
+          ExistsStr := 'n/a';
+          PosStr := '-';
+          SizeStr := '-';
+          UrlStr := GetComponentAssetUrl(C);
+          if C is TCastleTransform then
+          begin
+            T := TCastleTransform(C);
+            ExistsStr := BoolToStr(T.Exists, 'true', 'false');
+            PosStr := Format('%.2f, %.2f, %.2f', [T.Translation.X, T.Translation.Y, T.Translation.Z]);
+            SizeStr := Format('%.2f, %.2f, %.2f', [T.Scale.X, T.Scale.Y, T.Scale.Z]);
+          end else
+          if C is TCastleUserInterface then
+          begin
+            UI := TCastleUserInterface(C);
+            ExistsStr := BoolToStr(UI.Exists, 'true', 'false');
+            PosStr := Format('%.1f, %.1f', [UI.Translation.X, UI.Translation.Y]);
+            SizeStr := Format('%.1f x %.1f', [UI.Width, UI.Height]);
+          end;
+          MemoMatrix.Lines.Add(Format('%-22s | %-22s | %-6s | %-24s | %-20s | %s',
+            [C.Name, C.ClassName, ExistsStr, PosStr, SizeStr, UrlStr]));
+        end;
+      finally
+        MemoMatrix.Lines.EndUpdate;
+      end;
+
+      BottomPanel := TPanel.Create(Dialog);
+      BottomPanel.Align := alBottom;
+      BottomPanel.AutoSize := true;
+      BottomPanel.BevelOuter := bvNone;
+      BottomPanel.Parent := Dialog;
+
+      BtnCancel := TButton.Create(Dialog);
+      BtnCancel.Caption := 'Close';
+      BtnCancel.Cancel := true;
+      BtnCancel.ModalResult := mrCancel;
+      BtnCancel.Align := alRight;
+      BtnCancel.BorderSpacing.Around := 6;
+      BtnCancel.Parent := BottomPanel;
+
+      BtnApply := TButton.Create(Dialog);
+      BtnApply.Caption := Format('Apply to %d Selected', [SelectedCount]);
+      BtnApply.Default := true;
+      BtnApply.ModalResult := mrOk;
+      BtnApply.AutoSize := true;
+      BtnApply.Align := alRight;
+      BtnApply.BorderSpacing.Around := 6;
+      BtnApply.Parent := BottomPanel;
+
+      if Dialog.ShowModal = mrOk then
+      begin
+        PropName := Trim(ComboProp.Text);
+        if Pos(' ', PropName) > 0 then
+          PropName := Trim(Copy(PropName, 1, Pos(' ', PropName) - 1));
+        ValStr := Trim(EditVal.Text);
+        BoolVal := SameText(ValStr, 'true') or SameText(ValStr, '1') or SameText(ValStr, 'yes');
+        AppliedCount := 0;
+
+        for I := 0 to SelectedCount - 1 do
+        begin
+          C := Selected[I];
+          if IsComponentLocked(C) then Continue;
+
+          if SameText(PropName, 'Translation') and (C is TCastleTransform) then
+          begin
+            Vec3Val := Vector3FromStr(ValStr);
+            TCastleTransform(C).Translation := Vec3Val;
+            Inc(AppliedCount);
+          end else
+          if SameText(PropName, 'Scale') and (C is TCastleTransform) then
+          begin
+            if TryStrToFloatDot(ValStr, FloatVal) then
+              TCastleTransform(C).Scale := Vector3(FloatVal, FloatVal, FloatVal)
+            else
+              TCastleTransform(C).Scale := Vector3FromStr(ValStr);
+            Inc(AppliedCount);
+          end else
+          if SameText(PropName, 'Rotation') and (C is TCastleTransform) then
+          begin
+            Vec4Val := Vector4FromStr(ValStr);
+            Vec4Val.W := DegToRad(Vec4Val.W);
+            TCastleTransform(C).Rotation := Vec4Val;
+            Inc(AppliedCount);
+          end else
+          begin
+            PropInfo := GetPropInfo(C.ClassInfo, PropName);
+            if PropInfo <> nil then
+            begin
+              case PropInfo^.PropType^.Kind of
+                tkBool:
+                  begin
+                    SetOrdProp(C, PropInfo, Ord(BoolVal));
+                    Inc(AppliedCount);
+                  end;
+                tkInteger, tkInt64, tkQWord:
+                  if TryStrToInt(ValStr, IntVal) then
+                  begin
+                    SetOrdProp(C, PropInfo, IntVal);
+                    Inc(AppliedCount);
+                  end;
+                tkFloat:
+                  if TryStrToFloatDot(ValStr, FloatVal) then
+                  begin
+                    SetFloatProp(C, PropInfo, FloatVal);
+                    Inc(AppliedCount);
+                  end;
+                tkSString, tkLString, tkAString, tkWString, tkUString:
+                  begin
+                    SetStrProp(C, PropInfo, ValStr);
+                    Inc(AppliedCount);
+                  end;
+              end;
+            end;
+          end;
+        end;
+
+        if AppliedCount > 0 then
+        begin
+          ControlsTree.Invalidate;
+          ModifiedOutsideObjectInspector(
+            Format('Property Matrix: set %s on %d component(s)', [PropName, AppliedCount]), ucHigh);
+        end;
+      end;
+    finally
+      FreeAndNil(Dialog);
+    end;
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonPropertyMatrixClick(Sender: TObject);
+begin
+  ShowBulkPropertyMatrixDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemPropertyMatrixClick(Sender: TObject);
+begin
+  ShowBulkPropertyMatrixDialog;
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -28521,6 +29498,14 @@ begin
     MenuTreeViewItemToggleLock.Enabled := ControlsTree.SelectionCount > 0;
   if MenuTreeViewItemUnlockAll <> nil then
     MenuTreeViewItemUnlockAll.Enabled := (FLockedComponents <> nil) and (FLockedComponents.Count > 0);
+  if MenuTreeViewItemToggleFavorite <> nil then
+    MenuTreeViewItemToggleFavorite.Enabled := ControlsTree.SelectionCount > 0;
+  if MenuTreeViewItemSelectFavorites <> nil then
+    MenuTreeViewItemSelectFavorites.Enabled := (FFavoriteComponents <> nil) and (FFavoriteComponents.Count > 0);
+  if MenuTreeViewItemPropertyMatrix <> nil then
+    MenuTreeViewItemPropertyMatrix.Enabled := ControlsTree.SelectionCount > 0;
+  if MenuTreeViewItemSceneStats <> nil then
+    MenuTreeViewItemSceneStats.Enabled := FDesignRoot <> nil;
   if MenuTreeViewItemGroupSelected <> nil then
     MenuTreeViewItemGroupSelected.Enabled := (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0);
   if MenuTreeViewItemUngroupSelected <> nil then
