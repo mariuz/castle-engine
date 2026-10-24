@@ -2157,6 +2157,65 @@ type
       const EccentricityF: Single = 0.5;
       const CrestHeight: Single = 0.0;
       const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along Theodor Kuen's 1884 constant-negative-curvature pseudospherical
+      surface centered at the active selection pivot $\mathbf(C)$ with scale
+      radius @code(ScaleRadius) ($S$) and loop turns @code(Turns) ($W$):
+      $$t_i = \frac(i)(N - 1), \quad u_i = 2\pi W (t_i - 0.5), \quad v_i = -1.5 + 3.0 t_i$$
+      $$\Delta = \cosh^2 v_i + u_i^2\sinh^2 v_i$$
+      $$x_i = C_x + \frac(2S\cosh v_i (\cos u_i + u_i\sin u_i))(\Delta), \quad
+        y_i = C_y + S\left(v_i - \frac(\sinh(2v_i))(\Delta)\right), \quad
+        z_i = C_z + \frac(2S\cosh v_i (\sin u_i - u_i\cos u_i))(\Delta)$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the Kuen surface trajectory tangent
+      - @code(2): orient forward along the Kuen surface normal $\mathbf(P)_v \times \mathbf(P)_u$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedOnKuenSurface(
+      const ScaleRadius: Single = 0.0;
+      const Turns: Single = 1.0;
+      const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along Herbert William Richmond's 1904 planar-end minimal surface in
+      polar coordinates $(r, \theta)$ centered at the active selection pivot
+      $\mathbf(C)$ with scale radius @code(ScaleRadius) ($S$), integer order
+      @code(OrderM) ($m \ge 1$), and angular turns @code(Turns) ($W$):
+      $$t_i = \frac(i)(N - 1), \quad r_i = 0.6 + 0.4 t_i, \quad \theta_i = 2\pi W t_i$$
+      $$x_i = C_x + S\left(-\frac(\cos\theta_i)(2r_i) - \frac(r_i^(2m+1))(4m+2)\cos((2m+1)\theta_i)\right)$$
+      $$y_i = C_y + S\left(\frac(r_i^m)(m)\cos(m\theta_i)\right)$$
+      $$z_i = C_z + S\left(-\frac(\sin\theta_i)(2r_i) + \frac(r_i^(2m+1))(4m+2)\sin((2m+1)\theta_i)\right)$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the Richmond minimal surface trajectory tangent
+      - @code(2): orient forward along the exact Weierstrass-Enneper Gauss-map normal
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedOnRichmondSurface(
+      const ScaleRadius: Single = 0.0;
+      const OrderM: Integer = 2;
+      const Turns: Single = 1.0;
+      const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along a 3D Devil's Curve / Maltese Cross 4-Lobe Lemniscate centered at
+      the active selection pivot $\mathbf(C)$ with scale radius @code(ScaleRadius) ($A$),
+      4-lobe modulation @code(LobeRatioK) ($K \in [0, 0.98]$), and vertical wave
+      amplitude @code(CrestHeight) ($H$):
+      $$\theta_i = \frac(2\pi i)(N), \quad r(\theta_i) = A\sqrt(1 + K\cos(4\theta_i))$$
+      $$x_i = C_x + r(\theta_i)\cos\theta_i, \quad
+        y_i = C_y + H\sin(2\theta_i), \quad
+        z_i = C_z + r(\theta_i)\sin\theta_i$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the exact analytical curve tangent
+      - @code(2): orient forward radially outward from $\mathbf(C)$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInDevilsCurve(
+      const ScaleRadius: Single = 0.0;
+      const LobeRatioK: Single = 0.8;
+      const CrestHeight: Single = 0.0;
+      const OrientMode: Integer = 1): Boolean;
   end;
 
 var
@@ -16424,6 +16483,388 @@ begin
           LookDir.X := EffA * (-SinTh + EffF * (2.0 * SinTh * Sqr(CosTh) - SinTh * Sqr(SinTh)));
           LookDir.Y := 2.0 * EffH * Cos2Th;
           LookDir.Z := EffA * (CosTh - EffF * (CosTh * Sqr(CosTh) - 2.0 * CosTh * Sqr(SinTh)));
+        end else
+        begin
+          LookDir := TargetPos - CenterPos;
+        end;
+
+        if LookDir.LengthSqr <= 1e-8 then
+          LookDir := Vector3(-SinTh, 0, CosTh)
+        else
+          LookDir := LookDir.Normalize;
+
+        NewUp := Vector3(0, 1, 0);
+        if Abs(TVector3.DotProduct(LookDir, NewUp)) > 0.98 then
+          NewUp := Vector3(0, 0, 1);
+        NewUp := (NewUp - LookDir * TVector3.DotProduct(NewUp, LookDir)).Normalize;
+
+        T.GetWorldView(Pos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+
+    if Result then
+    begin
+      if Gizmo[Mode] <> nil then
+        Gizmo[Mode].UpdateSize;
+      GizmoHasTransformModified(Self);
+      GizmoHasTransformModifyEnd(Self);
+    end;
+  finally
+    FreeAndNil(TopLevel);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedOnKuenSurface(
+  const ScaleRadius: Single;
+  const Turns: Single;
+  const OrientMode: Integer): Boolean;
+var
+  TopLevel: TComponentList;
+  I, N: Integer;
+  T: TCastleTransform;
+  CenterPos, Pos, MinPos, MaxPos, TargetPos, LookDir, NewUp, CurDir, CurUp: TVector3;
+  Pu, Pv: TVector3;
+  AutoSpan, EffScale, EffTurns, ParamT, AngleU, ParamV: Single;
+
+  function EvalKuenSurface(const U, V: Single): TVector3;
+  var
+    SinU, CosU, SinhV, CoshV, Denom: Single;
+  begin
+    SinCos(U, SinU, CosU);
+    SinhV := Sinh(V);
+    CoshV := Cosh(V);
+    Denom := Sqr(CoshV) + Sqr(U) * Sqr(SinhV);
+    if Denom < 1e-5 then
+      Denom := 1e-5;
+    Result.X := CenterPos.X + (2.0 * EffScale * CoshV * (CosU + U * SinU)) / Denom;
+    Result.Y := CenterPos.Y + EffScale * (V - (2.0 * SinhV * CoshV) / Denom);
+    Result.Z := CenterPos.Z + (2.0 * EffScale * CoshV * (SinU - U * CosU)) / Denom;
+  end;
+
+  function EvalKuenPoint(const TParam: Single): TVector3;
+  begin
+    Result := EvalKuenSurface(2.0 * Pi * EffTurns * (TParam - 0.5), -1.5 + 3.0 * TParam);
+  end;
+
+begin
+  Result := false;
+  TopLevel := TComponentList.Create(false);
+  try
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+        TopLevel.Add(Boxes[I].Parent);
+    N := TopLevel.Count;
+    if N < 2 then
+      Exit;
+
+    if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+      CenterPos := GetTransformWorkingPos(FMainSelected)
+    else
+      CenterPos := SelectionWorkingCenter;
+
+    MinPos := GetTransformWorkingPos(TCastleTransform(TopLevel[0]));
+    MaxPos := MinPos;
+    for I := 1 to N - 1 do
+    begin
+      Pos := GetTransformWorkingPos(TCastleTransform(TopLevel[I]));
+      MinPos.X := Min(MinPos.X, Pos.X);
+      MinPos.Y := Min(MinPos.Y, Pos.Y);
+      MinPos.Z := Min(MinPos.Z, Pos.Z);
+      MaxPos.X := Max(MaxPos.X, Pos.X);
+      MaxPos.Y := Max(MaxPos.Y, Pos.Y);
+      MaxPos.Z := Max(MaxPos.Z, Pos.Z);
+    end;
+    AutoSpan := Max(Max(MaxPos.X - MinPos.X, MaxPos.Y - MinPos.Y), MaxPos.Z - MinPos.Z);
+
+    if ScaleRadius > 1e-4 then
+      EffScale := ScaleRadius
+    else
+      EffScale := Max(3.0, AutoSpan * 0.4);
+
+    if Abs(Turns) > 1e-4 then
+      EffTurns := Turns
+    else
+      EffTurns := 1.0;
+
+    GizmoHasTransformModifyBegin(Self);
+    for I := 0 to N - 1 do
+    begin
+      T := TCastleTransform(TopLevel[I]);
+      Pos := GetTransformWorkingPos(T);
+      ParamT := I / (N - 1);
+      AngleU := 2.0 * Pi * EffTurns * (ParamT - 0.5);
+      ParamV := -1.5 + 3.0 * ParamT;
+      TargetPos := EvalKuenSurface(AngleU, ParamV);
+
+      if not TVector3.Equals(Pos, TargetPos, 1e-4) then
+      begin
+        SetTransformWorkingPos(T, TargetPos);
+        Result := true;
+      end;
+
+      if OrientMode in [1, 2] then
+      begin
+        if OrientMode = 1 then
+        begin
+          LookDir := EvalKuenPoint(ParamT + 0.001) - EvalKuenPoint(ParamT - 0.001);
+        end else
+        begin
+          Pu := EvalKuenSurface(AngleU + 0.001, ParamV) - EvalKuenSurface(AngleU - 0.001, ParamV);
+          Pv := EvalKuenSurface(AngleU, ParamV + 0.001) - EvalKuenSurface(AngleU, ParamV - 0.001);
+          LookDir := TVector3.CrossProduct(Pv, Pu);
+          if LookDir.LengthSqr <= 1e-8 then
+            LookDir := TargetPos - CenterPos;
+        end;
+
+        if LookDir.LengthSqr <= 1e-8 then
+          LookDir := Vector3(1, 0, 0)
+        else
+          LookDir := LookDir.Normalize;
+
+        NewUp := Vector3(0, 1, 0);
+        if Abs(TVector3.DotProduct(LookDir, NewUp)) > 0.98 then
+          NewUp := Vector3(0, 0, 1);
+        NewUp := (NewUp - LookDir * TVector3.DotProduct(NewUp, LookDir)).Normalize;
+
+        T.GetWorldView(Pos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+
+    if Result then
+    begin
+      if Gizmo[Mode] <> nil then
+        Gizmo[Mode].UpdateSize;
+      GizmoHasTransformModified(Self);
+      GizmoHasTransformModifyEnd(Self);
+    end;
+  finally
+    FreeAndNil(TopLevel);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedOnRichmondSurface(
+  const ScaleRadius: Single;
+  const OrderM: Integer;
+  const Turns: Single;
+  const OrientMode: Integer): Boolean;
+var
+  TopLevel: TComponentList;
+  I, N, EffM: Integer;
+  T: TCastleTransform;
+  CenterPos, Pos, MinPos, MaxPos, TargetPos, LookDir, NewUp, CurDir, CurUp: TVector3;
+  AutoSpan, EffScale, EffTurns, ParamT, RadR, Theta, Rho, Alpha, SinA, CosA: Single;
+
+  function EvalRichmondPoint(const TParam: Single): TVector3;
+  var
+    R, Th, PowM, Pow2M1, SinTh, CosTh, Sin2M1, Cos2M1: Single;
+  begin
+    R := Max(0.2, 0.6 + 0.4 * TParam);
+    Th := 2.0 * Pi * EffTurns * TParam;
+    PowM := Power(R, EffM);
+    Pow2M1 := Power(R, 2 * EffM + 1);
+    SinCos(Th, SinTh, CosTh);
+    SinCos((2 * EffM + 1) * Th, Sin2M1, Cos2M1);
+    Result.X := CenterPos.X + EffScale * (-CosTh / (2.0 * R) - (Pow2M1 / (4.0 * EffM + 2.0)) * Cos2M1);
+    Result.Y := CenterPos.Y + EffScale * ((PowM / EffM) * Cos(EffM * Th));
+    Result.Z := CenterPos.Z + EffScale * (-SinTh / (2.0 * R) + (Pow2M1 / (4.0 * EffM + 2.0)) * Sin2M1);
+  end;
+
+begin
+  Result := false;
+  TopLevel := TComponentList.Create(false);
+  try
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+        TopLevel.Add(Boxes[I].Parent);
+    N := TopLevel.Count;
+    if N < 2 then
+      Exit;
+
+    if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+      CenterPos := GetTransformWorkingPos(FMainSelected)
+    else
+      CenterPos := SelectionWorkingCenter;
+
+    MinPos := GetTransformWorkingPos(TCastleTransform(TopLevel[0]));
+    MaxPos := MinPos;
+    for I := 1 to N - 1 do
+    begin
+      Pos := GetTransformWorkingPos(TCastleTransform(TopLevel[I]));
+      MinPos.X := Min(MinPos.X, Pos.X);
+      MinPos.Y := Min(MinPos.Y, Pos.Y);
+      MinPos.Z := Min(MinPos.Z, Pos.Z);
+      MaxPos.X := Max(MaxPos.X, Pos.X);
+      MaxPos.Y := Max(MaxPos.Y, Pos.Y);
+      MaxPos.Z := Max(MaxPos.Z, Pos.Z);
+    end;
+    AutoSpan := Max(Max(MaxPos.X - MinPos.X, MaxPos.Y - MinPos.Y), MaxPos.Z - MinPos.Z);
+
+    if ScaleRadius > 1e-4 then
+      EffScale := ScaleRadius
+    else
+      EffScale := Max(3.0, AutoSpan * 0.35);
+
+    EffM := Clamped(OrderM, 1, 8);
+    if Abs(Turns) > 1e-4 then
+      EffTurns := Turns
+    else
+      EffTurns := 1.0;
+
+    GizmoHasTransformModifyBegin(Self);
+    for I := 0 to N - 1 do
+    begin
+      T := TCastleTransform(TopLevel[I]);
+      Pos := GetTransformWorkingPos(T);
+      ParamT := I / (N - 1);
+      RadR := 0.6 + 0.4 * ParamT;
+      Theta := 2.0 * Pi * EffTurns * ParamT;
+      TargetPos := EvalRichmondPoint(ParamT);
+
+      if not TVector3.Equals(Pos, TargetPos, 1e-4) then
+      begin
+        SetTransformWorkingPos(T, TargetPos);
+        Result := true;
+      end;
+
+      if OrientMode in [1, 2] then
+      begin
+        if OrientMode = 1 then
+        begin
+          LookDir := EvalRichmondPoint(ParamT + 0.001) - EvalRichmondPoint(ParamT - 0.001);
+        end else
+        begin
+          { Exact Weierstrass-Enneper Gauss-map normal for Richmond's surface g(w) = w^(m+1) }
+          Rho := Power(RadR, EffM + 1);
+          Alpha := (EffM + 1) * Theta;
+          SinCos(Alpha, SinA, CosA);
+          LookDir := Vector3(
+            (2.0 * Rho * CosA) / (1.0 + Sqr(Rho)),
+            (Sqr(Rho) - 1.0) / (1.0 + Sqr(Rho)),
+            (2.0 * Rho * SinA) / (1.0 + Sqr(Rho)));
+        end;
+
+        if LookDir.LengthSqr <= 1e-8 then
+          LookDir := Vector3(1, 0, 0)
+        else
+          LookDir := LookDir.Normalize;
+
+        NewUp := Vector3(0, 1, 0);
+        if Abs(TVector3.DotProduct(LookDir, NewUp)) > 0.98 then
+          NewUp := Vector3(0, 0, 1);
+        NewUp := (NewUp - LookDir * TVector3.DotProduct(NewUp, LookDir)).Normalize;
+
+        T.GetWorldView(Pos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+
+    if Result then
+    begin
+      if Gizmo[Mode] <> nil then
+        Gizmo[Mode].UpdateSize;
+      GizmoHasTransformModified(Self);
+      GizmoHasTransformModifyEnd(Self);
+    end;
+  finally
+    FreeAndNil(TopLevel);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInDevilsCurve(
+  const ScaleRadius: Single;
+  const LobeRatioK: Single;
+  const CrestHeight: Single;
+  const OrientMode: Integer): Boolean;
+var
+  TopLevel: TComponentList;
+  I, N: Integer;
+  T: TCastleTransform;
+  CenterPos, Pos, MinPos, MaxPos, TargetPos, LookDir, NewUp, CurDir, CurUp: TVector3;
+  AutoSpan, EffA, EffK, EffH, Theta, SinTh, CosTh, Sin2Th, Cos2Th, Sin4Th, Cos4Th, RadR, DRad: Single;
+begin
+  Result := false;
+  TopLevel := TComponentList.Create(false);
+  try
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+        TopLevel.Add(Boxes[I].Parent);
+    N := TopLevel.Count;
+    if N < 2 then
+      Exit;
+
+    if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+      CenterPos := GetTransformWorkingPos(FMainSelected)
+    else
+      CenterPos := SelectionWorkingCenter;
+
+    MinPos := GetTransformWorkingPos(TCastleTransform(TopLevel[0]));
+    MaxPos := MinPos;
+    for I := 1 to N - 1 do
+    begin
+      Pos := GetTransformWorkingPos(TCastleTransform(TopLevel[I]));
+      MinPos.X := Min(MinPos.X, Pos.X);
+      MinPos.Y := Min(MinPos.Y, Pos.Y);
+      MinPos.Z := Min(MinPos.Z, Pos.Z);
+      MaxPos.X := Max(MaxPos.X, Pos.X);
+      MaxPos.Y := Max(MaxPos.Y, Pos.Y);
+      MaxPos.Z := Max(MaxPos.Z, Pos.Z);
+    end;
+    AutoSpan := Max(Max(MaxPos.X - MinPos.X, MaxPos.Y - MinPos.Y), MaxPos.Z - MinPos.Z);
+
+    if ScaleRadius > 1e-4 then
+      EffA := ScaleRadius
+    else
+      EffA := Max(4.0, AutoSpan * 0.5);
+
+    EffK := Clamped(LobeRatioK, -0.98, 0.98);
+    EffH := CrestHeight;
+
+    GizmoHasTransformModifyBegin(Self);
+    for I := 0 to N - 1 do
+    begin
+      T := TCastleTransform(TopLevel[I]);
+      Pos := GetTransformWorkingPos(T);
+      Theta := (2.0 * Pi * I) / N;
+      SinCos(Theta, SinTh, CosTh);
+      SinCos(2.0 * Theta, Sin2Th, Cos2Th);
+      SinCos(4.0 * Theta, Sin4Th, Cos4Th);
+      RadR := EffA * Sqrt(Max(0.01, 1.0 + EffK * Cos4Th));
+      DRad := -(2.0 * Sqr(EffA) * EffK * Sin4Th) / Max(1e-4, RadR);
+
+      TargetPos.X := CenterPos.X + RadR * CosTh;
+      TargetPos.Y := CenterPos.Y + EffH * Sin2Th;
+      TargetPos.Z := CenterPos.Z + RadR * SinTh;
+
+      if not TVector3.Equals(Pos, TargetPos, 1e-4) then
+      begin
+        SetTransformWorkingPos(T, TargetPos);
+        Result := true;
+      end;
+
+      if OrientMode in [1, 2] then
+      begin
+        if OrientMode = 1 then
+        begin
+          LookDir.X := DRad * CosTh - RadR * SinTh;
+          LookDir.Y := 2.0 * EffH * Cos2Th;
+          LookDir.Z := DRad * SinTh + RadR * CosTh;
         end else
         begin
           LookDir := TargetPos - CenterPos;

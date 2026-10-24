@@ -77,6 +77,7 @@ type
     procedure TestStereographicCatalanAndCylindricalHarmonic;
     procedure TestDupinCyclideBourSurfaceAndLimacon;
     procedure TestHennebergSphericalEpicycloidAndTalbotCurve;
+    procedure TestKuenRichmondAndDevilsCurve;
   end;
 
 implementation
@@ -3833,6 +3834,77 @@ begin
     AssertVectorEquals(Vector3(0.0, 0.0, -10.0), B4.Translation, 1e-4);
     B1.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(0.0, 6.0, 5.0).Normalize, WorldDir.Normalize, 1e-3);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestKuenRichmondAndDevilsCurve;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  B1, B2, B3, B4: TCastleBox;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.PivotMode := pmPrimarySelected;
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(1, 1, 1);
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(1, 1, 1);
+    B2.Translation := Vector3(10.0, 0.0, 0.0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(1, 1, 1);
+    B3.Translation := Vector3(0.0, 0.0, 10.0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(1, 1, 1);
+    B4.Translation := Vector3(-10.0, 0.0, 0.0);
+    Viewport.Items.Add(B4);
+
+    { 1. Test ArrangeSelectedOnKuenSurface (ScaleRadius=5.0, Turns=1.0, OrientMode=1)
+      Around B1=(0,0,0) for N=3 (ParamT = 0, 0.5, 1.0):
+      - B2 (t=0.5, u=0, v=0): Denom = 1, x = 2*5*1*1/1 = 10, y = 0, z = 0 -> (10, 0, 0) }
+    Manipulate.SetSelected([B1, B2, B3]);
+    AssertTrue(Manipulate.ArrangeSelectedOnKuenSurface(5.0, 1.0, 1));
+    AssertVectorEquals(Vector3(10.0, 0.0, 0.0), B2.Translation, 1e-4);
+
+    { 2. Test ArrangeSelectedOnRichmondSurface (ScaleRadius=10.0, OrderM=2, Turns=1.0, OrientMode=2)
+      Around B1=(0,0,0) for N=3 (ParamT = 0, 0.5, 1.0):
+      - B3 (t=1.0, r=1.0, theta=2*Pi): x = 10*(-0.5 - 0.1) = -6, y = 10*(0.5) = 5, z = 0,
+        Weierstrass-Enneper Gauss-map normal = (1, 0, 0) }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Manipulate.SetSelected([B1, B2, B3]);
+    AssertTrue(Manipulate.ArrangeSelectedOnRichmondSurface(10.0, 2, 1.0, 2));
+    AssertVectorEquals(Vector3(-6.0, 5.0, 0.0), B3.Translation, 1e-4);
+    B3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1.0, 0.0, 0.0), WorldDir.Normalize, 1e-3);
+
+    { 3. Test ArrangeSelectedInDevilsCurve (ScaleRadius=10.0, LobeRatioK=0.44, CrestHeight=3.0, OrientMode=1)
+      Around B1=(0,0,0) for N=4 (theta = 0, Pi/2, Pi, 3*Pi/2), Sqrt(1 + 0.44) = 1.2 -> r = 12:
+      - B1 (theta=0): (12, 0, 0), analytical tangent = Normalize(0, 6, 12)
+      - B2 (theta=Pi/2): (0, 0, 12)
+      - B3 (theta=Pi): (-12, 0, 0)
+      - B4 (theta=3*Pi/2): (0, 0, -12) }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.ArrangeSelectedInDevilsCurve(10.0, 0.44, 3.0, 1));
+    AssertVectorEquals(Vector3(12.0, 0.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, 0.0, 12.0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-12.0, 0.0, 0.0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, 0.0, -12.0), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.0, 6.0, 12.0).Normalize, WorldDir.Normalize, 1e-3);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);
