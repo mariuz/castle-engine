@@ -1201,9 +1201,35 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
 
 ---
 
-## Roadmap Completion Status (Phases 1–186)
+### Phase 187: Quick Physics Collider & RigidBody Setup (`ShowQuickAddColliderDialog` / `ApplyQuickPhysicsCollider` / `ButtonQuickCollider` / `MenuTreeViewItemQuickCollider`)
+- [x] **187.1. Multi-Transform Auto-Collider & RigidBody Preset Setup (`TDesignFrame.ApplyQuickPhysicsCollider` / `ShowQuickAddColliderDialog`)**
+  - Implemented `TDesignFrame.ApplyQuickPhysicsCollider` and `TDesignFrame.ShowQuickAddColliderDialog`, accessible via **`Quick Collider...`** (`ButtonQuickCollider` in `PanelLayoutTransform`: normal click opens dialog; `Shift`-click quickly adds `TCastleBoxCollider` + Static `TCastleRigidBody`; `Ctrl`-click quickly adds `TCastleBoxCollider` + Dynamic `TCastleRigidBody`) and **`Quick Physics Collider & RigidBody Setup...`** (`MenuTreeViewItemQuickCollider` in `MenuTreeView`).
+  - Supports **Auto-Detect** (`TCastleSphereCollider`, `TCastleCapsuleCollider`, `TCastlePlaneCollider`, `TCastleMeshCollider`, or `TCastleBoxCollider`), **Box**, **Sphere**, **Capsule**, **Mesh**, **Plane**, or **Remove Existing Collider & RigidBody**, paired with **Static**, **Dynamic**, **Kinematic / Animated**, **Trigger Volume**, or **Collider Only** modes across all selected unlocked 3D transforms.
 
-All **186 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+### Phase 188: Copy & Paste All Published Component Properties (`CopyAllComponentProperties` / `PasteAllComponentProperties` / `MenuTreeViewItemCopyProps` & `MenuTreeViewItemPasteProps`)
+- [x] **188.1. Recursive RTTI Published Property Copy & Paste Across 1+ Target Components (`TDesignFrame.CopyAllComponentProperties` / `PasteAllComponentProperties`)**
+  - Implemented `TDesignFrame.CopyAllComponentProperties` and `TDesignFrame.PasteAllComponentProperties` (`MenuTreeViewItemCopyProps` and `MenuTreeViewItemPasteProps` in `MenuTreeView`).
+  - Serializes the source component (`FCopiedComponentPropsJson`) and recursively copies all matching published RTTI properties (including nested subcomponents such as `TranslationPersistent`, `RotationPersistent`, `ScalePersistent`, `ColorPersistent`, `Border`, and same-design component references while preserving each target's unique `Name`) onto one or more selected target components in a single Undo step.
+
+### Phase 189: Move Selected Component Up / Down in Parent Order (`MoveSelectedInParentOrder` / `Ctrl+PageUp` & `Ctrl+PageDown` / `MenuTreeViewItemMoveUp` & `MenuTreeViewItemMoveDown`)
+- [x] **189.1. Sibling Index / 2D UI Z-Order Reordering (`TDesignFrame.MoveSelectedInParentOrder`)**
+  - Implemented `TDesignFrame.MoveSelectedInParentOrder(MoveUp, MoveToExtreme)` bound to **`Ctrl+PageUp`** (Move Up in Parent) and **`Ctrl+PageDown`** (Move Down in Parent) in both the Viewport and Hierarchy Tree (`Ctrl+Shift+PageUp` / `Ctrl+Shift+PageDown` moves to Top/First or Bottom/Last), plus **`Move Up in Parent Order`** (`MenuTreeViewItemMoveUp`) and **`Move Down in Parent Order`** (`MenuTreeViewItemMoveDown`) in `MenuTreeView`.
+
+### Phase 190: Select Referencing / Referenced Components (`SelectComponentReferences` / `MenuTreeViewItemSelectReferences`)
+- [x] **190.1. Bi-Directional RTTI Object Reference Finder (`TDesignFrame.SelectComponentReferences`)**
+  - Implemented `TDesignFrame.SelectComponentReferences(SelectReferencedTargets)` and added **`Select Referencing / Referenced Components (Shift: Targets)`** (`MenuTreeViewItemSelectReferences`) in `MenuTreeView`.
+  - Scans all components and behaviors in `FDesignRoot` for published `tkClass` object properties referencing the selected component (`TCastleTransformReference.Reference`, `TCastleMeshCollider.Mesh`, `TCastleViewport.Camera`, `TCastleSoundSource.Sound`, physics joints, etc.)—or selects the target component(s) referenced by the selected component on `Shift`-click.
+
+### Phase 191: Viewport Screenshot / Thumbnail Capture (`CaptureViewportScreenshot` / `ButtonCaptureScreenshot`)
+- [x] **191.1. Clean Design Viewport Screenshot Export (`TDesignFrame.CaptureViewportScreenshot`)**
+  - Added **`Shot`** (`ButtonCaptureScreenshot` on `PanelMiddleTop`) and implemented `TDesignFrame.CaptureViewportScreenshot(HideEditorOverlays)`.
+  - Prompts for a `.png` / `.jpg` destination file (defaulting to `<DesignName>_screenshot.png` in the project data folder) and captures `CastleControl.Container.SaveScreen(SaveUrl)` while temporarily hiding `FDesignerLayer` and `CameraPreview.UiRoot` overlays on normal click (or keeping editor overlays visible on `Shift`-click).
+
+---
+
+## Roadmap Completion Status (Phases 1–191)
+
+All **191 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 

@@ -560,6 +560,17 @@ type
       MenuTreeViewItemBatchReplaceUrls: TMenuItem;
       MenuTreeViewItemAlignTransformToCamera: TMenuItem;
       ButtonAlignTransformToCam: TButton;
+      MenuTreeViewItemQuickCollider: TMenuItem;
+      ButtonQuickCollider: TButton;
+      MenuTreeViewItemCopyProps: TMenuItem;
+      MenuTreeViewItemPasteProps: TMenuItem;
+      MenuTreeViewItemMoveUp: TMenuItem;
+      MenuTreeViewItemMoveDown: TMenuItem;
+      MenuTreeViewItemSelectReferences: TMenuItem;
+      ButtonCaptureScreenshot: TSpeedButton;
+      FCopiedComponentPropsJson: String;
+      FCopiedComponentPropsSourceName: String;
+      FCopiedComponentPropsClassName: String;
       ButtonSelBack: TSpeedButton;
       ButtonSelForward: TSpeedButton;
       ButtonCameraSettings: TSpeedButton;
@@ -804,6 +815,14 @@ type
     procedure MenuTreeViewItemBatchReplaceUrlsClick(Sender: TObject);
     procedure MenuTreeViewItemAlignTransformToCameraClick(Sender: TObject);
     procedure ButtonAlignTransformToCamClick(Sender: TObject);
+    procedure MenuTreeViewItemQuickColliderClick(Sender: TObject);
+    procedure ButtonQuickColliderClick(Sender: TObject);
+    procedure MenuTreeViewItemCopyPropsClick(Sender: TObject);
+    procedure MenuTreeViewItemPastePropsClick(Sender: TObject);
+    procedure MenuTreeViewItemMoveUpClick(Sender: TObject);
+    procedure MenuTreeViewItemMoveDownClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectReferencesClick(Sender: TObject);
+    procedure ButtonCaptureScreenshotClick(Sender: TObject);
     procedure MenuTreeViewItemGroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemUngroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemArrayDuplicateClick(Sender: TObject);
@@ -1960,6 +1979,14 @@ type
     procedure SortSelectedChildren(const SortMode: Integer = 0);
     procedure ShowBatchReplaceAssetUrlsDialog;
     procedure AlignSelectedTransformWithCameraView(const OrientationOnly: Boolean = false);
+    procedure ApplyQuickPhysicsCollider(const ColliderShapeMode, RigidBodyMode: Integer;
+      const ReplaceExisting: Boolean = true; const EnableShowColliders: Boolean = true);
+    procedure ShowQuickAddColliderDialog;
+    procedure CopyAllComponentProperties;
+    procedure PasteAllComponentProperties;
+    procedure MoveSelectedInParentOrder(const MoveUp: Boolean; const MoveToExtreme: Boolean = false);
+    procedure SelectComponentReferences(const SelectReferencedTargets: Boolean = false);
+    procedure CaptureViewportScreenshot(const HideEditorOverlays: Boolean = true);
     procedure SaveCameraBookmark(const Slot: Integer);
     procedure RecallCameraBookmark(const Slot: Integer);
     procedure AdjustCameraSpeed(const Factor: Single);
@@ -2491,6 +2518,22 @@ begin
      (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
   begin
     Frame.NavigateSelectionHistoryForward;
+    Exit(true);
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyPageUp) and
+     (mkCtrl in Event.ModifiersDown) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    Frame.MoveSelectedInParentOrder(true, mkShift in Event.ModifiersDown);
+    Exit(true);
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyPageDown) and
+     (mkCtrl in Event.ModifiersDown) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    Frame.MoveSelectedInParentOrder(false, mkShift in Event.ModifiersDown);
     Exit(true);
   end;
 
@@ -4460,6 +4503,17 @@ begin
   ButtonCameraSettings.OnClick := @ButtonCameraSettingsClick;
   ButtonCameraSettings.Parent := PanelMiddleTop;
 
+  ButtonCaptureScreenshot := TSpeedButton.Create(Self);
+  ButtonCaptureScreenshot.Caption := 'Shot';
+  ButtonCaptureScreenshot.Hint := 'Capture Viewport Screenshot to PNG Image (Click: Clean render without editor overlays | Shift-click: Include editor gizmos/HUD overlays)';
+  ButtonCaptureScreenshot.ShowHint := true;
+  ButtonCaptureScreenshot.AutoSize := true;
+  ButtonCaptureScreenshot.Constraints.MinHeight := 33;
+  ButtonCaptureScreenshot.Constraints.MinWidth := 44;
+  ButtonCaptureScreenshot.BorderSpacing.Left := 4;
+  ButtonCaptureScreenshot.OnClick := @ButtonCaptureScreenshotClick;
+  ButtonCaptureScreenshot.Parent := PanelMiddleTop;
+
   ButtonSelBack := TSpeedButton.Create(Self);
   ButtonSelBack.Caption := '<';
   ButtonSelBack.Hint := 'Navigate Back in Selection History (Alt+Left)';
@@ -5884,6 +5938,16 @@ begin
   ButtonAlignTransformToCam.OnClick := @ButtonAlignTransformToCamClick;
   ButtonAlignTransformToCam.Parent := PanelLayoutTransform;
 
+  ButtonQuickCollider := TButton.Create(Self);
+  ButtonQuickCollider.Align := alTop;
+  ButtonQuickCollider.AutoSize := true;
+  ButtonQuickCollider.Caption := 'Quick Collider...';
+  ButtonQuickCollider.Hint := 'Quick Physics Collider & RigidBody Setup for selected 3D transform(s) (Click: Dialog | Shift-click: Auto Box Collider + Static Body | Ctrl-click: Auto Box Collider + Dynamic Body)';
+  ButtonQuickCollider.ShowHint := true;
+  ButtonQuickCollider.BorderSpacing.Around := 2;
+  ButtonQuickCollider.OnClick := @ButtonQuickColliderClick;
+  ButtonQuickCollider.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -6449,6 +6513,36 @@ begin
   MenuTreeViewItemAlignTransformToCamera.Caption := 'Align Selected Transform With Camera View (Shift: Rotation Only)';
   MenuTreeViewItemAlignTransformToCamera.OnClick := @MenuTreeViewItemAlignTransformToCameraClick;
   MenuTreeView.Items.Add(MenuTreeViewItemAlignTransformToCamera);
+
+  MenuTreeViewItemQuickCollider := TMenuItem.Create(Self);
+  MenuTreeViewItemQuickCollider.Caption := 'Quick Physics Collider & RigidBody Setup...';
+  MenuTreeViewItemQuickCollider.OnClick := @MenuTreeViewItemQuickColliderClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemQuickCollider);
+
+  MenuTreeViewItemCopyProps := TMenuItem.Create(Self);
+  MenuTreeViewItemCopyProps.Caption := 'Copy All Published Component Properties';
+  MenuTreeViewItemCopyProps.OnClick := @MenuTreeViewItemCopyPropsClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemCopyProps);
+
+  MenuTreeViewItemPasteProps := TMenuItem.Create(Self);
+  MenuTreeViewItemPasteProps.Caption := 'Paste Published Component Properties';
+  MenuTreeViewItemPasteProps.OnClick := @MenuTreeViewItemPastePropsClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemPasteProps);
+
+  MenuTreeViewItemMoveUp := TMenuItem.Create(Self);
+  MenuTreeViewItemMoveUp.Caption := 'Move Up in Parent Order (Ctrl+PageUp | Shift: Move to Top/Back)';
+  MenuTreeViewItemMoveUp.OnClick := @MenuTreeViewItemMoveUpClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemMoveUp);
+
+  MenuTreeViewItemMoveDown := TMenuItem.Create(Self);
+  MenuTreeViewItemMoveDown.Caption := 'Move Down in Parent Order (Ctrl+PageDown | Shift: Move to Bottom/Front)';
+  MenuTreeViewItemMoveDown.OnClick := @MenuTreeViewItemMoveDownClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemMoveDown);
+
+  MenuTreeViewItemSelectReferences := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectReferences.Caption := 'Select Referencing / Referenced Components (Shift: Targets)';
+  MenuTreeViewItemSelectReferences.OnClick := @MenuTreeViewItemSelectReferencesClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectReferences);
 
   MenuTreeViewItemGroupSelected := TMenuItem.Create(Self);
   MenuTreeViewItemGroupSelected.Caption := 'Group Selected Under New Transform (Ctrl+G)';
@@ -10659,6 +10753,8 @@ begin
       ButtonParametricPreset.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonAlignTransformToCam <> nil then
       ButtonAlignTransformToCam.Enabled := (T <> nil) or (TransformManipulate.SelectedCount > 0);
+    if ButtonQuickCollider <> nil then
+      ButtonQuickCollider.Enabled := (T <> nil) or (TransformManipulate.SelectedCount > 0);
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -12043,6 +12139,16 @@ begin
     if (Key = VK_RIGHT) and (Shift = [ssAlt]) then
     begin
       NavigateSelectionHistoryForward;
+      Key := 0;
+    end else
+    if (Key = VK_PRIOR) and (ssCtrl in Shift) then
+    begin
+      MoveSelectedInParentOrder(true, ssShift in Shift);
+      Key := 0;
+    end else
+    if (Key = VK_NEXT) and (ssCtrl in Shift) then
+    begin
+      MoveSelectedInParentOrder(false, ssShift in Shift);
       Key := 0;
     end else
     if Key = Ord('H') then
@@ -30760,6 +30866,794 @@ begin
   AlignSelectedTransformWithCameraView(ssShift in GetKeyShiftState);
 end;
 
+procedure TDesignFrame.ApplyQuickPhysicsCollider(const ColliderShapeMode, RigidBodyMode: Integer;
+  const ReplaceExisting: Boolean; const EnableShowColliders: Boolean);
+var
+  SelectedList, Transforms: TComponentList;
+  SelectedCount, I, ModifiedCount: Integer;
+  T: TCastleTransform;
+  ExistingCollider, NewCollider: TCastleCollider;
+  ExistingRBody: TCastleRigidBody;
+  ColliderClass: TComponentClass;
+begin
+  if DesignOwner = nil then Exit;
+
+  Transforms := TComponentList.Create(false);
+  try
+    GetSelected(SelectedList, SelectedCount, false);
+    try
+      if SelectedList <> nil then
+        for I := 0 to SelectedList.Count - 1 do
+          if (SelectedList[I] is TCastleTransform) and
+             (not (SelectedList[I] is TCastleAbstractRootTransform)) and
+             Selectable(SelectedList[I]) and
+             (not IsComponentLocked(SelectedList[I])) then
+            Transforms.Add(SelectedList[I]);
+    finally
+      FreeAndNil(SelectedList);
+    end;
+
+    if (Transforms.Count = 0) and (CurrentTransform <> nil) and
+       (not (CurrentTransform is TCastleAbstractRootTransform)) and
+       Selectable(CurrentTransform) and (not IsComponentLocked(CurrentTransform)) then
+      Transforms.Add(CurrentTransform);
+
+    if Transforms.Count = 0 then
+    begin
+      ErrorBox('Select at least one unlocked 3D transform to configure physics colliders.');
+      Exit;
+    end;
+
+    ModifiedCount := 0;
+    for I := 0 to Transforms.Count - 1 do
+    begin
+      T := TCastleTransform(Transforms[I]);
+      ExistingCollider := T.FindBehavior(TCastleCollider) as TCastleCollider;
+      ExistingRBody := T.FindBehavior(TCastleRigidBody) as TCastleRigidBody;
+
+      if ColliderShapeMode = 6 then
+      begin
+        // Remove existing collider & rigid body
+        if (ExistingCollider <> nil) and Deletable(ExistingCollider) then
+        begin
+          FreeComponentRecursively(ExistingCollider);
+          Inc(ModifiedCount);
+        end;
+        if (ExistingRBody <> nil) and Deletable(ExistingRBody) then
+        begin
+          FreeComponentRecursively(ExistingRBody);
+          Inc(ModifiedCount);
+        end;
+        Continue;
+      end;
+
+      if (ExistingCollider <> nil) and ReplaceExisting and Deletable(ExistingCollider) then
+      begin
+        FreeComponentRecursively(ExistingCollider);
+        ExistingCollider := nil;
+      end;
+
+      if ExistingCollider = nil then
+      begin
+        case ColliderShapeMode of
+          0: begin
+               if T is TCastleSphere then
+                 ColliderClass := TCastleSphereCollider
+               else if T is TCastleCylinder then
+                 ColliderClass := TCastleCapsuleCollider
+               else if T is TCastlePlane then
+                 ColliderClass := TCastlePlaneCollider
+               else if (RigidBodyMode = 0) and T.HasColliderMesh and (T is TCastleScene) then
+                 ColliderClass := TCastleMeshCollider
+               else
+                 ColliderClass := TCastleBoxCollider;
+             end;
+          1: ColliderClass := TCastleBoxCollider;
+          2: ColliderClass := TCastleSphereCollider;
+          3: ColliderClass := TCastleCapsuleCollider;
+          4: ColliderClass := TCastleMeshCollider;
+          5: ColliderClass := TCastlePlaneCollider;
+          else ColliderClass := TCastleBoxCollider;
+        end;
+
+        NewCollider := ColliderClass.Create(DesignOwner) as TCastleCollider;
+        NewCollider.Name := ProposeComponentName(ColliderClass, DesignOwner, '');
+        T.AddBehavior(NewCollider);
+        if (NewCollider is TCastleMeshCollider) and T.HasColliderMesh then
+          TCastleMeshCollider(NewCollider).Mesh := T;
+        NewCollider.AutoSize := true;
+        NewCollider.CalculateSize;
+        Inc(ModifiedCount);
+      end;
+
+      if RigidBodyMode in [0..3] then
+      begin
+        if ExistingRBody = nil then
+        begin
+          ExistingRBody := TCastleRigidBody.Create(DesignOwner);
+          ExistingRBody.Name := ProposeComponentName(TCastleRigidBody, DesignOwner, '');
+          T.AddBehavior(ExistingRBody);
+        end;
+        case RigidBodyMode of
+          0: begin
+               ExistingRBody.Dynamic := false;
+               ExistingRBody.Animated := false;
+               ExistingRBody.Trigger := false;
+             end;
+          1: begin
+               ExistingRBody.Dynamic := true;
+               ExistingRBody.Animated := false;
+               ExistingRBody.Gravity := true;
+               ExistingRBody.Trigger := false;
+             end;
+          2: begin
+               ExistingRBody.Dynamic := true;
+               ExistingRBody.Animated := true;
+               ExistingRBody.Gravity := false;
+               ExistingRBody.Trigger := false;
+             end;
+          3: begin
+               ExistingRBody.Dynamic := false;
+               ExistingRBody.Animated := false;
+               ExistingRBody.Trigger := true;
+             end;
+        end;
+        Inc(ModifiedCount);
+      end;
+    end;
+
+    if EnableShowColliders and (ColliderShapeMode <> 6) then
+      ShowColliders := true
+    else
+      UpdateColliders;
+
+    if ModifiedCount > 0 then
+    begin
+      UpdateDesign;
+      SetSelected(Transforms);
+      ModifiedOutsideObjectInspector(
+        Format('Quick Physics Collider Setup on %d Transform(s)', [Transforms.Count]),
+        ucHigh);
+    end;
+  finally
+    FreeAndNil(Transforms);
+  end;
+end;
+
+procedure TDesignFrame.ShowQuickAddColliderDialog;
+var
+  Dialog: TForm;
+  LblShape, LblBody: TLabel;
+  ComboShape, ComboBody: TComboBox;
+  CheckReplace, CheckShowWireframe: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if (CurrentTransform = nil) and
+     ((TransformManipulate = nil) or (TransformManipulate.SelectedCount = 0)) then
+  begin
+    ErrorBox('Select at least one 3D transform to configure physics colliders.');
+    Exit;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick Physics Collider & RigidBody Setup';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 460;
+    Dialog.Height := 270;
+
+    LblShape := TLabel.Create(Dialog);
+    LblShape.Left := 16;
+    LblShape.Top := 16;
+    LblShape.Caption := 'Collider Shape:';
+    LblShape.Parent := Dialog;
+
+    ComboShape := TComboBox.Create(Dialog);
+    ComboShape.Left := 16;
+    ComboShape.Top := 38;
+    ComboShape.Width := 424;
+    ComboShape.Style := csDropDownList;
+    ComboShape.Items.Add('Auto-Detect (Sphere/Capsule/Plane/Mesh or Box Collider)');
+    ComboShape.Items.Add('Box Collider (TCastleBoxCollider - AutoSize)');
+    ComboShape.Items.Add('Sphere Collider (TCastleSphereCollider - AutoSize)');
+    ComboShape.Items.Add('Capsule Collider (TCastleCapsuleCollider - AutoSize)');
+    ComboShape.Items.Add('Mesh Collider (TCastleMeshCollider - Static Triangle Mesh)');
+    ComboShape.Items.Add('Plane Collider (TCastlePlaneCollider - Infinite Floor)');
+    ComboShape.Items.Add('Remove Existing Collider & RigidBody Behaviors');
+    ComboShape.ItemIndex := 0;
+    ComboShape.Parent := Dialog;
+
+    LblBody := TLabel.Create(Dialog);
+    LblBody.Left := 16;
+    LblBody.Top := 74;
+    LblBody.Caption := 'RigidBody Mode (TCastleRigidBody):';
+    LblBody.Parent := Dialog;
+
+    ComboBody := TComboBox.Create(Dialog);
+    ComboBody.Left := 16;
+    ComboBody.Top := 96;
+    ComboBody.Width := 424;
+    ComboBody.Style := csDropDownList;
+    ComboBody.Items.Add('Static Collider (Dynamic = False, Animated = False)');
+    ComboBody.Items.Add('Dynamic Physics Body (Dynamic = True, Gravity = True)');
+    ComboBody.Items.Add('Kinematic / Animated Body (Dynamic = True, Animated = True)');
+    ComboBody.Items.Add('Trigger Volume Only (Dynamic = False, Trigger = True)');
+    ComboBody.Items.Add('Collider Only (Do not add TCastleRigidBody)');
+    ComboBody.ItemIndex := 0;
+    ComboBody.Parent := Dialog;
+
+    CheckReplace := TCheckBox.Create(Dialog);
+    CheckReplace.Left := 16;
+    CheckReplace.Top := 136;
+    CheckReplace.Caption := 'Replace existing TCastleCollider on selected transforms';
+    CheckReplace.Checked := true;
+    CheckReplace.Parent := Dialog;
+
+    CheckShowWireframe := TCheckBox.Create(Dialog);
+    CheckShowWireframe.Left := 16;
+    CheckShowWireframe.Top := 164;
+    CheckShowWireframe.Caption := 'Enable Show Colliders wireframe visualization in viewport';
+    CheckShowWireframe.Checked := true;
+    CheckShowWireframe.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Apply Physics Setup';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyQuickPhysicsCollider(
+        ComboShape.ItemIndex,
+        ComboBody.ItemIndex,
+        CheckReplace.Checked,
+        CheckShowWireframe.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.ButtonQuickColliderClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssCtrl in ShiftState then
+    ApplyQuickPhysicsCollider(1, 1, true, true)
+  else if ssShift in ShiftState then
+    ApplyQuickPhysicsCollider(1, 0, true, true)
+  else
+    ShowQuickAddColliderDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemQuickColliderClick(Sender: TObject);
+begin
+  ShowQuickAddColliderDialog;
+end;
+
+procedure TDesignFrame.CopyAllComponentProperties;
+var
+  Sel: TComponent;
+begin
+  Sel := SelectedComponent;
+  if (Sel = nil) or (csSubComponent in Sel.ComponentStyle) then
+  begin
+    ErrorBox('Select a single component (not a subcomponent) to copy all published properties from.');
+    Exit;
+  end;
+  FCopiedComponentPropsJson := ComponentToString(Sel);
+  FCopiedComponentPropsSourceName := Sel.Name;
+  FCopiedComponentPropsClassName := Sel.ClassName;
+end;
+
+procedure TDesignFrame.PasteAllComponentProperties;
+
+  procedure CopyPublishedPropsRecursive(const SrcObj, DstObj: TObject);
+  var
+    PropList: PPropList;
+    PropCount, PIdx: Integer;
+    DstProp, SrcProp: PPropInfo;
+    PropName: String;
+    SrcSubObj, DstSubObj, ResolvedComp: TObject;
+  begin
+    if (SrcObj = nil) or (DstObj = nil) then Exit;
+    PropCount := GetPropList(DstObj.ClassInfo, tkProperties, nil);
+    if PropCount <= 0 then Exit;
+    GetMem(PropList, PropCount * SizeOf(Pointer));
+    try
+      GetPropList(DstObj.ClassInfo, tkProperties, PropList);
+      for PIdx := 0 to PropCount - 1 do
+      begin
+        DstProp := PropList^[PIdx];
+        if DstProp = nil then Continue;
+        PropName := DstProp^.Name;
+        if SameText(PropName, 'Name') or SameText(PropName, 'Tag') then
+          Continue;
+
+        SrcProp := GetPropInfo(SrcObj.ClassInfo, PropName);
+        if (SrcProp = nil) or (SrcProp^.PropType <> DstProp^.PropType) then
+          Continue;
+
+        case DstProp^.PropType^.Kind of
+          tkInteger, tkChar, tkEnumeration, tkBool, tkWChar, tkSet:
+            if DstProp^.SetProc <> nil then
+              SetOrdProp(DstObj, DstProp, GetOrdProp(SrcObj, SrcProp));
+          tkFloat:
+            if DstProp^.SetProc <> nil then
+              SetFloatProp(DstObj, DstProp, GetFloatProp(SrcObj, SrcProp));
+          tkInt64, tkQWord:
+            if DstProp^.SetProc <> nil then
+              SetInt64Prop(DstObj, DstProp, GetInt64Prop(SrcObj, SrcProp));
+          tkSString, tkLString, tkAString:
+            if DstProp^.SetProc <> nil then
+              SetStrProp(DstObj, DstProp, GetStrProp(SrcObj, SrcProp));
+          tkClass:
+            begin
+              SrcSubObj := GetObjectProp(SrcObj, SrcProp);
+              DstSubObj := GetObjectProp(DstObj, DstProp);
+              if (SrcSubObj <> nil) and (DstSubObj <> nil) and
+                 (SrcSubObj.ClassType = DstSubObj.ClassType) and
+                 ((not (DstSubObj is TComponent)) or
+                  (csSubComponent in TComponent(DstSubObj).ComponentStyle)) then
+              begin
+                CopyPublishedPropsRecursive(SrcSubObj, DstSubObj);
+              end else
+              if (DstProp^.SetProc <> nil) and (SrcSubObj is TComponent) and
+                 (not (csSubComponent in TComponent(SrcSubObj).ComponentStyle)) and
+                 (DesignOwner <> nil) then
+              begin
+                ResolvedComp := DesignOwner.FindComponent(TComponent(SrcSubObj).Name);
+                if (ResolvedComp <> nil) and (ResolvedComp <> DstObj) then
+                  SetObjectProp(DstObj, DstProp, ResolvedComp);
+              end;
+            end;
+        end;
+      end;
+    finally
+      FreeMem(PropList);
+    end;
+  end;
+
+var
+  TempOwner, SrcComp: TComponent;
+  SelectedList: TComponentList;
+  SelectedCount, I, PastedCount: Integer;
+begin
+  if (FCopiedComponentPropsJson = '') or (DesignOwner = nil) then
+  begin
+    ErrorBox('Copy component properties first using "Copy All Published Component Properties".');
+    Exit;
+  end;
+
+  GetSelected(SelectedList, SelectedCount, false);
+  try
+    if (SelectedList = nil) or (SelectedList.Count = 0) then
+    begin
+      ErrorBox('Select one or more target components to paste properties onto.');
+      Exit;
+    end;
+
+    TempOwner := TComponent.Create(nil);
+    try
+      SrcComp := StringToComponent(FCopiedComponentPropsJson, TempOwner);
+      PastedCount := 0;
+      for I := 0 to SelectedList.Count - 1 do
+      begin
+        if (SelectedList[I] = nil) or IsComponentLocked(SelectedList[I]) or
+           (csSubComponent in SelectedList[I].ComponentStyle) then
+          Continue;
+        CopyPublishedPropsRecursive(SrcComp, SelectedList[I]);
+        Inc(PastedCount);
+      end;
+
+      if PastedCount > 0 then
+      begin
+        UpdateDesign;
+        SetSelected(SelectedList);
+        ModifiedOutsideObjectInspector(
+          Format('Paste Properties from %s (%s) onto %d Component(s)',
+            [FCopiedComponentPropsSourceName, FCopiedComponentPropsClassName, PastedCount]),
+          ucHigh);
+      end;
+    finally
+      FreeAndNil(TempOwner);
+    end;
+  finally
+    FreeAndNil(SelectedList);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemCopyPropsClick(Sender: TObject);
+begin
+  CopyAllComponentProperties;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemPastePropsClick(Sender: TObject);
+begin
+  PasteAllComponentProperties;
+end;
+
+procedure TDesignFrame.MoveSelectedInParentOrder(const MoveUp: Boolean;
+  const MoveToExtreme: Boolean);
+var
+  Sel: TComponent;
+  T, ParentT: TCastleTransform;
+  UI, ParentUI: TCastleUserInterface;
+  CurIdx, TargetIdx, I: Integer;
+  DirStr: String;
+begin
+  Sel := SelectedComponent;
+  if (Sel = nil) or (Sel = FDesignRoot) or (not Deletable(Sel)) or IsComponentLocked(Sel) then
+    Exit;
+
+  if MoveUp then
+  begin
+    if MoveToExtreme then DirStr := 'Top/First' else DirStr := 'Up';
+  end else
+  begin
+    if MoveToExtreme then DirStr := 'Bottom/Last' else DirStr := 'Down';
+  end;
+
+  if Sel is TCastleTransform then
+  begin
+    T := TCastleTransform(Sel);
+    ParentT := T.Parent;
+    if ParentT = nil then Exit;
+    CurIdx := ParentT.List.IndexOf(T);
+    if CurIdx < 0 then Exit;
+
+    TargetIdx := -1;
+    if MoveUp then
+    begin
+      if MoveToExtreme then
+      begin
+        for I := 0 to CurIdx - 1 do
+          if Selectable(ParentT[I]) and Deletable(ParentT[I]) then
+          begin
+            TargetIdx := I;
+            Break;
+          end;
+      end else
+      begin
+        for I := CurIdx - 1 downto 0 do
+          if Selectable(ParentT[I]) and Deletable(ParentT[I]) then
+          begin
+            TargetIdx := I;
+            Break;
+          end;
+      end;
+    end else
+    begin
+      if MoveToExtreme then
+      begin
+        for I := ParentT.Count - 1 downto CurIdx + 1 do
+          if Selectable(ParentT[I]) and Deletable(ParentT[I]) then
+          begin
+            TargetIdx := I;
+            Break;
+          end;
+      end else
+      begin
+        for I := CurIdx + 1 to ParentT.Count - 1 do
+          if Selectable(ParentT[I]) and Deletable(ParentT[I]) then
+          begin
+            TargetIdx := I;
+            Break;
+          end;
+      end;
+    end;
+
+    if (TargetIdx < 0) or (TargetIdx = CurIdx) then Exit;
+    ParentT.Remove(T);
+    ParentT.Insert(TargetIdx, T);
+    UpdateDesign;
+    SelectedComponent := T;
+    ModifiedOutsideObjectInspector(
+      Format('Move %s %s in %s', [T.Name, DirStr, ParentT.Name]),
+      ucHigh);
+  end else
+  if Sel is TCastleUserInterface then
+  begin
+    UI := TCastleUserInterface(Sel);
+    ParentUI := UI.Parent;
+    if ParentUI = nil then Exit;
+    CurIdx := ParentUI.IndexOfControl(UI);
+    if CurIdx < 0 then Exit;
+
+    TargetIdx := -1;
+    if MoveUp then
+    begin
+      if MoveToExtreme then
+      begin
+        for I := 0 to CurIdx - 1 do
+          if Selectable(ParentUI.Controls[I]) and Deletable(ParentUI.Controls[I]) then
+          begin
+            TargetIdx := I;
+            Break;
+          end;
+      end else
+      begin
+        for I := CurIdx - 1 downto 0 do
+          if Selectable(ParentUI.Controls[I]) and Deletable(ParentUI.Controls[I]) then
+          begin
+            TargetIdx := I;
+            Break;
+          end;
+      end;
+    end else
+    begin
+      if MoveToExtreme then
+      begin
+        for I := ParentUI.ControlsCount - 1 downto CurIdx + 1 do
+          if Selectable(ParentUI.Controls[I]) and Deletable(ParentUI.Controls[I]) then
+          begin
+            TargetIdx := I;
+            Break;
+          end;
+      end else
+      begin
+        for I := CurIdx + 1 to ParentUI.ControlsCount - 1 do
+          if Selectable(ParentUI.Controls[I]) and Deletable(ParentUI.Controls[I]) then
+          begin
+            TargetIdx := I;
+            Break;
+          end;
+      end;
+    end;
+
+    if (TargetIdx < 0) or (TargetIdx = CurIdx) then Exit;
+    ParentUI.RemoveControl(UI);
+    ParentUI.InsertControl(TargetIdx, UI);
+    UpdateDesign;
+    SelectedComponent := UI;
+    ModifiedOutsideObjectInspector(
+      Format('Move UI %s %s in %s', [UI.Name, DirStr, ParentUI.Name]),
+      ucHigh);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemMoveUpClick(Sender: TObject);
+begin
+  MoveSelectedInParentOrder(true, ssShift in GetKeyShiftState);
+end;
+
+procedure TDesignFrame.MenuTreeViewItemMoveDownClick(Sender: TObject);
+begin
+  MoveSelectedInParentOrder(false, ssShift in GetKeyShiftState);
+end;
+
+procedure TDesignFrame.SelectComponentReferences(const SelectReferencedTargets: Boolean);
+var
+  Sel: TComponent;
+  ReferencingList, ReferencedList: TComponentList;
+
+  function ObjectReferencesTarget(const Obj: TObject; const Target: TComponent): Boolean;
+  var
+    PropList: PPropList;
+    PropCount, PIdx: Integer;
+    PropInfo: PPropInfo;
+    ValObj: TObject;
+  begin
+    Result := false;
+    if (Obj = nil) or (Target = nil) then Exit;
+    PropCount := GetPropList(Obj.ClassInfo, [tkClass], nil);
+    if PropCount <= 0 then Exit;
+    GetMem(PropList, PropCount * SizeOf(Pointer));
+    try
+      GetPropList(Obj.ClassInfo, [tkClass], PropList);
+      for PIdx := 0 to PropCount - 1 do
+      begin
+        PropInfo := PropList^[PIdx];
+        if PropInfo = nil then Continue;
+        if SameText(PropInfo^.Name, 'Owner') or SameText(PropInfo^.Name, 'Parent') or
+           SameText(PropInfo^.Name, 'World') then
+          Continue;
+        ValObj := GetObjectProp(Obj, PropInfo);
+        if ValObj = Target then
+          Exit(true);
+      end;
+    finally
+      FreeMem(PropList);
+    end;
+  end;
+
+  procedure CollectTargetsReferencedBy(const Obj: TObject);
+  var
+    PropList: PPropList;
+    PropCount, PIdx: Integer;
+    PropInfo: PPropInfo;
+    ValObj: TObject;
+    ValComp: TComponent;
+  begin
+    if Obj = nil then Exit;
+    PropCount := GetPropList(Obj.ClassInfo, [tkClass], nil);
+    if PropCount <= 0 then Exit;
+    GetMem(PropList, PropCount * SizeOf(Pointer));
+    try
+      GetPropList(Obj.ClassInfo, [tkClass], PropList);
+      for PIdx := 0 to PropCount - 1 do
+      begin
+        PropInfo := PropList^[PIdx];
+        if PropInfo = nil then Continue;
+        if SameText(PropInfo^.Name, 'Owner') or SameText(PropInfo^.Name, 'Parent') or
+           SameText(PropInfo^.Name, 'World') then
+          Continue;
+        ValObj := GetObjectProp(Obj, PropInfo);
+        if (ValObj is TComponent) then
+        begin
+          ValComp := TComponent(ValObj);
+          if (ValComp <> Sel) and Selectable(ValComp) and
+             (not (csSubComponent in ValComp.ComponentStyle)) and
+             (not IsComponentLocked(ValComp)) and
+             (ReferencedList.IndexOf(ValComp) = -1) then
+            ReferencedList.Add(ValComp);
+        end;
+      end;
+    finally
+      FreeMem(PropList);
+    end;
+  end;
+
+  procedure TraverseDesignForRefs(const C: TComponent);
+  var
+    ChildIdx: Integer;
+    T: TCastleTransform;
+    UI: TCastleUserInterface;
+    CC: TCastleComponent;
+    SelectableOwner: TComponent;
+  begin
+    if (C = nil) or (not Selectable(C)) then Exit;
+
+    if (C <> Sel) and ObjectReferencesTarget(C, Sel) then
+    begin
+      SelectableOwner := C;
+      if (SelectableOwner is TCastleBehavior) and (TCastleBehavior(SelectableOwner).Parent <> nil) then
+        SelectableOwner := TCastleBehavior(SelectableOwner).Parent;
+      if Selectable(SelectableOwner) and (not IsComponentLocked(SelectableOwner)) and
+         (ReferencingList.IndexOf(SelectableOwner) = -1) then
+        ReferencingList.Add(SelectableOwner);
+    end;
+
+    if C is TCastleComponent then
+    begin
+      CC := TCastleComponent(C);
+      for ChildIdx := 0 to CC.NonVisualComponentsCount - 1 do
+        TraverseDesignForRefs(CC.NonVisualComponents[ChildIdx]);
+    end;
+    if C is TCastleTransform then
+    begin
+      T := TCastleTransform(C);
+      for ChildIdx := 0 to T.BehaviorsCount - 1 do
+        TraverseDesignForRefs(T.Behaviors[ChildIdx]);
+      for ChildIdx := 0 to T.Count - 1 do
+        TraverseDesignForRefs(T[ChildIdx]);
+    end else
+    if C is TCastleUserInterface then
+    begin
+      UI := TCastleUserInterface(C);
+      if UI is TCastleViewport then
+        TraverseDesignForRefs(TCastleViewport(UI).Items);
+      for ChildIdx := 0 to UI.ControlsCount - 1 do
+        TraverseDesignForRefs(UI.Controls[ChildIdx]);
+    end;
+  end;
+
+var
+  I: Integer;
+begin
+  Sel := SelectedComponent;
+  if (Sel = nil) or (FDesignRoot = nil) then Exit;
+
+  ReferencingList := TComponentList.Create(false);
+  ReferencedList := TComponentList.Create(false);
+  try
+    CollectTargetsReferencedBy(Sel);
+    if Sel is TCastleTransform then
+      for I := 0 to TCastleTransform(Sel).BehaviorsCount - 1 do
+        CollectTargetsReferencedBy(TCastleTransform(Sel).Behaviors[I]);
+
+    TraverseDesignForRefs(FDesignRoot);
+
+    if SelectReferencedTargets then
+    begin
+      if ReferencedList.Count > 0 then
+        SetSelected(ReferencedList)
+      else if ReferencingList.Count > 0 then
+        SetSelected(ReferencingList)
+      else
+        InfoBox(Format('No components are referenced by or referencing "%s".', [Sel.Name]));
+    end else
+    begin
+      if ReferencingList.Count > 0 then
+        SetSelected(ReferencingList)
+      else if ReferencedList.Count > 0 then
+        SetSelected(ReferencedList)
+      else
+        InfoBox(Format('No components in the design reference "%s" (or are referenced by it).', [Sel.Name]));
+    end;
+  finally
+    FreeAndNil(ReferencedList);
+    FreeAndNil(ReferencingList);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectReferencesClick(Sender: TObject);
+begin
+  SelectComponentReferences(ssShift in GetKeyShiftState);
+end;
+
+procedure TDesignFrame.CaptureViewportScreenshot(const HideEditorOverlays: Boolean);
+var
+  SaveDlg: TSaveDialog;
+  SaveUrl, BaseName: String;
+  OldLayerExists, OldCamPreviewExists: Boolean;
+begin
+  if (CastleControl = nil) or (CastleControl.Container = nil) then Exit;
+
+  SaveDlg := TSaveDialog.Create(Self);
+  try
+    SaveDlg.Title := 'Save Viewport Screenshot';
+    SaveDlg.Filter := 'PNG Image (*.png)|*.png|JPEG Image (*.jpg)|*.jpg|All Files (*.*)|*.*';
+    SaveDlg.DefaultExt := 'png';
+    SaveDlg.Options := [ofOverwritePrompt, ofPathMustExist];
+    SaveDlg.InitialDir := UriToFilenameSafe(ApplicationDataOverride);
+    if FDesignUrl <> '' then
+      BaseName := DeleteUriExt(ExtractUriName(FDesignUrl)) + '_screenshot.png'
+    else if FDesignRoot <> nil then
+      BaseName := FDesignRoot.Name + '_screenshot.png'
+    else
+      BaseName := 'viewport_screenshot.png';
+    SaveDlg.FileName := BaseName;
+
+    if not SaveDlg.Execute then Exit;
+    SaveUrl := FilenameToUriSafe(SaveDlg.FileName);
+  finally
+    FreeAndNil(SaveDlg);
+  end;
+
+  OldLayerExists := (FDesignerLayer <> nil) and FDesignerLayer.Exists;
+  OldCamPreviewExists := (CameraPreview <> nil) and (CameraPreview.UiRoot <> nil) and CameraPreview.UiRoot.Exists;
+  try
+    if HideEditorOverlays then
+    begin
+      if FDesignerLayer <> nil then
+        FDesignerLayer.Exists := false;
+      if (CameraPreview <> nil) and (CameraPreview.UiRoot <> nil) then
+        CameraPreview.UiRoot.Exists := false;
+    end;
+    CastleControl.Container.SaveScreen(SaveUrl);
+  finally
+    if FDesignerLayer <> nil then
+      FDesignerLayer.Exists := OldLayerExists;
+    if (CameraPreview <> nil) and (CameraPreview.UiRoot <> nil) then
+      CameraPreview.UiRoot.Exists := OldCamPreviewExists;
+  end;
+end;
+
+procedure TDesignFrame.ButtonCaptureScreenshotClick(Sender: TObject);
+begin
+  CaptureViewportScreenshot(not (ssShift in GetKeyShiftState));
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -31256,6 +32150,21 @@ begin
   if MenuTreeViewItemAlignTransformToCamera <> nil then
     MenuTreeViewItemAlignTransformToCamera.Enabled := (CurrentViewport <> nil) and
       ((CurrentTransform <> nil) or ((TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0)));
+  if MenuTreeViewItemQuickCollider <> nil then
+    MenuTreeViewItemQuickCollider.Enabled :=
+      (CurrentTransform <> nil) or ((TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0));
+  if MenuTreeViewItemCopyProps <> nil then
+    MenuTreeViewItemCopyProps.Enabled := Sel <> nil;
+  if MenuTreeViewItemPasteProps <> nil then
+    MenuTreeViewItemPasteProps.Enabled := (FCopiedComponentPropsJson <> '') and (ControlsTree.SelectionCount > 0);
+  if MenuTreeViewItemMoveUp <> nil then
+    MenuTreeViewItemMoveUp.Enabled := (Sel <> nil) and (Sel <> FDesignRoot) and
+      Deletable(Sel) and ((Sel is TCastleTransform) or (Sel is TCastleUserInterface));
+  if MenuTreeViewItemMoveDown <> nil then
+    MenuTreeViewItemMoveDown.Enabled := (Sel <> nil) and (Sel <> FDesignRoot) and
+      Deletable(Sel) and ((Sel is TCastleTransform) or (Sel is TCastleUserInterface));
+  if MenuTreeViewItemSelectReferences <> nil then
+    MenuTreeViewItemSelectReferences.Enabled := (Sel <> nil) and (FDesignRoot <> nil);
   if MenuTreeViewItemGroupSelected <> nil then
     MenuTreeViewItemGroupSelected.Enabled := (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0);
   if MenuTreeViewItemUngroupSelected <> nil then
