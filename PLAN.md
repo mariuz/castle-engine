@@ -757,6 +757,42 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 50 Status**: Completed. Analytical Capsule Soft Shadow & Ambient Occlusion (`GenerateCapsuleOcclusionFunctions`, `EvaluateCapsuleSoftShadowOcclusion`), Epipolar Volumetric Light Shafts Slice Stepping (`GenerateEpipolarLightShaftFunctions`, `EvaluateEpipolarSliceRayStep`), and GPU Frame Pacing & Present Timing Manager (`TCastleVulkanFramePacer`) fully integrated and tested (180 unit tests passing).
 
 
+### Phase 51: Cooperative Matrix / Tensor Core Intrinsics (`VK_KHR_cooperative_matrix`), Anisotropic Kuwahara Structure-Tensor Filter & GPU Indirect Compute Dispatcher (COMPLETED)
+
+* [x] **51.1. Cooperative Matrix / Hardware Tensor Core Intrinsics & E4M3 FP8 Decoding (`GenerateCooperativeMatrixPreamble` in `CastleInternalShaderRHI`)**:
+  * Emit `#extension GL_KHR_cooperative_matrix : enable` and `#extension GL_KHR_memory_scope_semantics : enable` declarations with E4M3 FP8-to-IEEE-754 decoding (`EvaluateQuantizedFP8ToFloat`) for hardware-accelerated neural shading and denoising.
+* [x] **51.2. Anisotropic Kuwahara Structure-Tensor Eigenvalue & Orientation Filter (`GenerateAnisotropicKuwaharaFunctions` in `CastleInternalShaderRHI`)**:
+  * Compute principal orientation angle and normalized eigenvalue anisotropy (`EvaluateStructureTensorEigenOrientation`) from local structure tensors $(J_{xx}, J_{yy}, J_{xy})$ for edge-preserving stylized filtering and denoising.
+* [x] **51.3. GPU-Driven Indirect Compute Workgroup Dispatcher (`TCastleVulkanIndirectComputeDispatcher` in `CastleInternalRHI_Vulkan`)**:
+  * Manage indirect compute dispatch argument buffers (`VkDispatchIndirectCommand`), compute workgroup counts from active item counts (`ComputeWorkgroupCountsFromItemCount`), and record `vkCmdDispatchIndirect` commands (`RecordIndirectComputeDispatch`).
+
+**Milestone 51 Status**: Completed. Cooperative Matrix / Tensor Core Intrinsics & E4M3 FP8 Decoding (`GenerateCooperativeMatrixPreamble`, `EvaluateQuantizedFP8ToFloat`), Anisotropic Kuwahara Structure-Tensor Eigen-Orientation (`GenerateAnisotropicKuwaharaFunctions`, `EvaluateStructureTensorEigenOrientation`), and GPU-Driven Indirect Compute Dispatcher (`TCastleVulkanIndirectComputeDispatcher`) fully integrated and tested (183 unit tests passing).
+
+
+### Phase 52: Physically Based Eye Cornea Refraction & Iris Parallax, Six-Point Directional Lightmap Basis & Real-Time GPU BC1/BC6H Block Compressor (COMPLETED)
+
+* [x] **52.1. Physically Based Eye Cornea Snell Refraction & Anterior Chamber Iris Parallax (`GeneratePhysicalEyeRefractionFunctions` in `CastleInternalShaderRHI`)**:
+  * Compute Snell refraction at the cornea surface and anterior chamber depth parallax UV offset onto the iris plane (`EvaluateEyeIrisRefractionUVOffset`).
+* [x] **52.2. Six-Point Directional Lightmap Basis for Volumetric Smoke & Clouds (`GenerateSixPointLightmapFunctions` in `CastleInternalShaderRHI`)**:
+  * Evaluate 6-axis tangent-space directional lightmap weights $(+X, -X, +Y, -Y, +Z, -Z)$ (`EvaluateSixPointDirectionalBasis`) for multi-directional volumetric particle and cloud lighting.
+* [x] **52.3. Real-Time GPU BC1/BC6H Block Texture Compressor (`TCastleVulkanBCnCompressor` in `CastleInternalRHI_Vulkan`)**:
+  * Quantize RGB565 endpoints (`EvaluateBC1EndpointQuantization565`) and dispatch GPU compute 4x4 block compression (`DispatchBCnBlockCompression`) for runtime virtual textures and reflection probes.
+
+**Milestone 52 Status**: Completed. Physically Based Eye Cornea Snell Refraction & Iris Parallax (`GeneratePhysicalEyeRefractionFunctions`, `EvaluateEyeIrisRefractionUVOffset`), Six-Point Directional Lightmap Basis (`GenerateSixPointLightmapFunctions`, `EvaluateSixPointDirectionalBasis`), and Real-Time GPU BC1/BC6H Block Compressor (`TCastleVulkanBCnCompressor`) fully integrated and tested (186 unit tests passing).
+
+
+### Phase 53: Secant-Refined Parallax Occlusion Mapping (POM), Spectral Cauchy Chromatic Dispersion & Vulkan 1.4 Pipeline Binary Manager (`VK_KHR_pipeline_binary`) (COMPLETED)
+
+* [x] **53.1. Secant-Refined Parallax Occlusion Mapping (POM) Intersection (`GenerateParallaxOcclusionMappingFunctions` in `CastleInternalShaderRHI`)**:
+  * Refine linear heightfield ray-marching steps with exact secant root interpolation (`EvaluateSecantRefinedPOMIntersection`) for artifact-free micro-surface displacement.
+* [x] **53.2. Physically Based Spectral Cauchy Chromatic Dispersion (`GenerateChromaticDispersionFlareFunctions` in `CastleInternalShaderRHI`)**:
+  * Evaluate wavelength-dependent Cauchy refractive indices $n(\lambda) = A + B/\lambda^2$ across Red (0.65 $\mu\text{m}$), Green (0.55 $\mu\text{m}$), and Blue (0.45 $\mu\text{m}$) spectral bands (`EvaluateCauchyRefractiveIndexRGB`).
+* [x] **53.3. Vulkan 1.4 Pipeline Binary Manager (`VK_KHR_pipeline_binary` / `TCastleVulkanPipelineBinaryManager` in `CastleInternalRHI_Vulkan`)**:
+  * Manage standalone driver pipeline binaries indexed by 64-bit FNV-1a keys (`ComputePipelineKeyFNV1a64`, `StorePipelineBinary`, `LookupPipelineBinary`) for lock-free zero-compilation PSO restoration.
+
+**Milestone 53 Status**: Completed. Secant-Refined Parallax Occlusion Mapping (`GenerateParallaxOcclusionMappingFunctions`, `EvaluateSecantRefinedPOMIntersection`), Spectral Cauchy Chromatic Dispersion (`GenerateChromaticDispersionFlareFunctions`, `EvaluateCauchyRefractiveIndexRGB`), and Vulkan 1.4 Pipeline Binary Manager (`TCastleVulkanPipelineBinaryManager`) fully integrated and tested (189 unit tests passing).
+
+
 ## 4.1. Unreal Engine 5 vs. Castle Game Engine Vulkan RHI Feature Parity Matrix
 
 | Unreal Engine 5 Subsystem | Castle Game Engine Vulkan RHI Equivalent | Phase & Status |
@@ -792,6 +828,9 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 | **Multi-Layer Car-Paint Flake BRDF, Screen-Space Curvature & Hi-Z Depth Pyramid** | `EvaluateCarPaintMultiLayerBRDF`, `EvaluateScreenSpaceCurvatureCavity` & `TCastleVulkanHiZPyramidGenerator` | Phase 48 (COMPLETED) |
 | **AgX Chroma Gamut Compression, Camera EV100 & GPU Luminance Histogram Auto-Exposure** | `EvaluateEV100FromCameraSettings`, `EvaluateChromaGamutCompression` & `TCastleVulkanAutoExposureHistogram` | Phase 49 (COMPLETED) |
 | **Analytical Capsule Soft Shadow/AO, Epipolar Light Shafts & GPU Frame Pacing Manager** | `EvaluateCapsuleSoftShadowOcclusion`, `EvaluateEpipolarSliceRayStep` & `TCastleVulkanFramePacer` | Phase 50 (COMPLETED) |
+| **Cooperative Matrix Tensor Cores, Anisotropic Kuwahara Filter & Indirect Compute Dispatcher** | `EvaluateQuantizedFP8ToFloat`, `EvaluateStructureTensorEigenOrientation` & `TCastleVulkanIndirectComputeDispatcher` | Phase 51 (COMPLETED) |
+| **Physical Eye Cornea Refraction, 6-Point Lightmap Basis & GPU BC1/BC6H Block Compressor** | `EvaluateEyeIrisRefractionUVOffset`, `EvaluateSixPointDirectionalBasis` & `TCastleVulkanBCnCompressor` | Phase 52 (COMPLETED) |
+| **Secant-Refined POM, Spectral Cauchy Chromatic Dispersion & Pipeline Binary Manager** | `EvaluateSecantRefinedPOMIntersection`, `EvaluateCauchyRefractiveIndexRGB` & `TCastleVulkanPipelineBinaryManager` | Phase 53 (COMPLETED) |
 
 
 ## 5. Build Tool (castle-engine) & Editor Integration
@@ -818,5 +857,5 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 ## 7. Testing & Verification Criteria
 
 * [x] Automated Visual Regression Tests: `CompareImagesPerceptualDiff` in `CastleInternalRHI` compares framebuffer readbacks (`GrabTextureImage`) between `rbOpenGL` and `rbVulkan` using normalized RMSE perceptual diff thresholds.
-* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 180 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
+* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 189 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
 * [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance/Hi-Z occlusion culling (`TCastleVulkanComputeCuller`), Clustered Forward+ compute light culling (`TCastleVulkanClusteredLightCuller`), Declarative Render Graph (`TRHIRenderGraph`), Compute GTAO (`TCastleVulkanGTAO`), Hi-Z SSR (`TCastleVulkanSSR`), Froxel Volumetric Fog (`TCastleVulkanVolumetricFog`), Temporal Anti-Aliasing (`TCastleVulkanTAA`), Box-Projected Reflection Probes (`TCastleVulkanReflectionProbeManager`), OBB Decal Projection (`TCastleVulkanDecalManager`), GPU Compute Particles (`TCastleVulkanComputeParticles`), Weighted Blended OIT (`TCastleVulkanWeightedBlendedOIT`), Contact Shadows (`TCastleVulkanContactShadows`), Compute Skinning & Morph Targets (`TCastleVulkanComputeSkinner`), GPU-Driven Terrain CDLOD (`TCastleVulkanTerrainCDLOD`), Atmosphere Sky-View LUT (`TCastleVulkanAtmosphereRenderer`), Gerstner Ocean Simulator (`TCastleVulkanOceanSimulator`), DDGI Octahedral Probe Grid (`TCastleVulkanDDGIGrid`), GPU Meshlet Culler (`TCastleVulkanMeshletCuller`), Virtual Shadow Maps (`TCastleVulkanVirtualShadowMap`), GPU-Driven LOD Selector (`TCastleVulkanLODSelector`), GPU Texture Streamer (`TCastleVulkanTextureStreamer`), Shadow Caster Extrusion Culler (`TCastleVulkanShadowCasterCuller`), Nanite Cluster DAG (`TCastleVulkanClusterDAG`), Lumen Global SDF & Surface Cache (`TCastleVulkanGlobalSDF`, `TCastleVulkanSurfaceCache`), ReSTIR Spatio-Temporal Reservoir Resampler (`TCastleVulkanReSTIR`), Temporal Super Resolution Upscaler (`TCastleVulkanTSRUpscaler`), Variable Rate Shading (`TCastleVulkanVRSManager`), Runtime Virtual Texturing (`TCastleVulkanRuntimeVirtualTexture`), Sparse Brick-Atlas Heterogeneous Volumes (`TCastleVulkanSparseVolumeAtlas`), GPU Breadcrumb Crash Tracker (`TCastleVulkanBreadcrumbTracker`), SVGF Spatio-Temporal Wavelet Denoiser (`TCastleVulkanSVGFDenoiser`), Hardware Ray Tracing SBT & Acceleration Structure Compaction (`TCastleVulkanShaderBindingTable`, `TCastleVulkanAccelerationStructureManager`), GPU XPBD Cloth/Hair Simulator (`TCastleVulkanXPBDSimulator`), Single-Pass Stereo Multiview & Foveated VRS Manager (`TCastleVulkanMultiviewStereoManager`), Per-Instance Custom Float4 Payload SSBO (`TCastleVulkanPerInstanceCustomData`), Neural MLP Denoiser (`TCastleVulkanNeuralDenoiser`), Programmable MSAA Sample Locations (`TCastleVulkanProgrammableSampleLocations`), GPU Parallel Prefix-Sum Stream Compactor (`TCastleVulkanStreamCompactor`), 3D Voxel Cone Tracer (`TCastleVulkanVoxelConeTracer`), GPU Indirect Material Binner (`TCastleVulkanMaterialBinner`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.

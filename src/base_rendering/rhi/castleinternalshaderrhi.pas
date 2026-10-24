@@ -1667,6 +1667,57 @@ type
       const ALightScreenUV, ASliceEndpointUV: TVector2;
       const ASliceFraction: Single): TVector2; static;
 
+    { Phase 51.1: Generates GLSL 450 Cooperative Matrix / Tensor Core preamble (`GL_KHR_cooperative_matrix`). }
+    function GenerateCooperativeMatrixPreamble: String;
+
+    { Phase 51.1 CPU reference: Decodes an 8-bit E4M3 floating-point byte (1 sign bit,
+      4 exponent bits with bias 7, 3 mantissa bits) into a 32-bit IEEE 754 Single. }
+    class function EvaluateQuantizedFP8ToFloat(
+      const AFP8Byte: Byte): Single; static;
+
+    { Phase 51.2: Generates GLSL 450 Anisotropic Kuwahara Structure-Tensor functions. }
+    function GenerateAnisotropicKuwaharaFunctions: String;
+
+    { Phase 51.2 CPU reference: Computes the principal orientation angle in radians
+      [-Pi/2..Pi/2] and normalized eigenvalue anisotropy in [0..1] from structure
+      tensor components (AJxx, AJyy, AJxy). }
+    class function EvaluateStructureTensorEigenOrientation(
+      const AJxx, AJyy, AJxy: Single;
+      out AAnisotropy: Single): Single; static;
+
+    { Phase 52.1: Generates GLSL 450 Physically Based Eye Cornea Snell Refraction & Iris Parallax functions. }
+    function GeneratePhysicalEyeRefractionFunctions: String;
+
+    { Phase 52.1 CPU reference: Evaluates the 2D iris UV parallax offset caused by
+      Snell refraction at the cornea surface (ACorneaIOR) across AAnteriorChamberDepth. }
+    class function EvaluateEyeIrisRefractionUVOffset(
+      const AViewDirTS, ACorneaNormalTS: TVector3;
+      const ACorneaIOR, AAnteriorChamberDepth: Single): TVector2; static;
+
+    { Phase 52.2: Generates GLSL 450 Six-Point Directional Lightmap Basis functions for volumetric smoke/clouds. }
+    function GenerateSixPointLightmapFunctions: String;
+
+    { Phase 52.2 CPU reference: Evaluates 6-axis directional lightmap irradiance
+      (+X, -X, +Y in AMapPosXNegXPosY; -Y, +Z, -Z in AMapNegYPosZNegZ) for ALightDirTS. }
+    class function EvaluateSixPointDirectionalBasis(
+      const ALightDirTS, AMapPosXNegXPosY, AMapNegYPosZNegZ: TVector3): Single; static;
+
+    { Phase 53.1: Generates GLSL 450 Secant-Refined Parallax Occlusion Mapping (POM) functions. }
+    function GenerateParallaxOcclusionMappingFunctions: String;
+
+    { Phase 53.1 CPU reference: Computes the secant-interpolated ray-heightfield
+      intersection depth between two POM step layers. }
+    class function EvaluateSecantRefinedPOMIntersection(
+      const APrevLayerDepth, ACurrLayerDepth, APrevHeight, ACurrHeight: Single): Single; static;
+
+    { Phase 53.2: Generates GLSL 450 Spectral Cauchy Chromatic Dispersion & Lens Flare functions. }
+    function GenerateChromaticDispersionFlareFunctions: String;
+
+    { Phase 53.2 CPU reference: Evaluates wavelength-dependent Cauchy refractive indices
+      n(lambda) = A + B / lambda^2 for Red (0.65 um), Green (0.55 um), and Blue (0.45 um). }
+    class function EvaluateCauchyRefractiveIndexRGB(
+      const ACoeffA, ACoeffBMicronsSq: Single): TVector3; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -7988,6 +8039,191 @@ var
 begin
   T := EnsureRange(ASliceFraction, 0.0, 1.0);
   Result := ALightScreenUV * (1.0 - T) + ASliceEndpointUV * T;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateCooperativeMatrixPreamble: String;
+begin
+  Result :=
+    '// Phase 51.1: Cooperative Matrix / Hardware Tensor Core Intrinsics (VK_KHR_cooperative_matrix)' + NL +
+    '#extension GL_KHR_cooperative_matrix : enable' + NL +
+    '#extension GL_KHR_memory_scope_semantics : enable' + NL +
+    '#extension GL_EXT_shader_explicit_arithmetic_types_float16 : enable' + NL +
+    'float EvaluateQuantizedFP8ToFloat(uint fp8Byte) {' + NL +
+    '  uint signBit = (fp8Byte >> 7u) & 1u;' + NL +
+    '  uint expBits = (fp8Byte >> 3u) & 15u;' + NL +
+    '  uint mantBits = fp8Byte & 7u;' + NL +
+    '  if (expBits == 0u && mantBits == 0u) return 0.0;' + NL +
+    '  float m = (expBits == 0u) ? (float(mantBits) / 8.0) : (1.0 + float(mantBits) / 8.0);' + NL +
+    '  int e = (expBits == 0u) ? -6 : (int(expBits) - 7);' + NL +
+    '  float val = ldexp(m, e);' + NL +
+    '  return (signBit != 0u) ? -val : val;' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateQuantizedFP8ToFloat(
+  const AFP8Byte: Byte): Single;
+var
+  SignBit, ExpBits, MantBits: Byte;
+  M: Single;
+  E: Integer;
+begin
+  SignBit := (AFP8Byte shr 7) and 1;
+  ExpBits := (AFP8Byte shr 3) and 15;
+  MantBits := AFP8Byte and 7;
+  if (ExpBits = 0) and (MantBits = 0) then
+    Exit(0.0);
+  if ExpBits = 0 then
+  begin
+    M := MantBits / 8.0;
+    E := -6;
+  end else
+  begin
+    M := 1.0 + (MantBits / 8.0);
+    E := Integer(ExpBits) - 7;
+  end;
+  Result := M * Power(2.0, E);
+  if SignBit <> 0 then
+    Result := -Result;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateAnisotropicKuwaharaFunctions: String;
+begin
+  Result :=
+    '// Phase 51.2: Anisotropic Kuwahara Structure-Tensor Filter' + NL +
+    'vec2 EvaluateStructureTensorEigenOrientation(float jxx, float jyy, float jxy) {' + NL +
+    '  float angle = 0.5 * atan(2.0 * jxy, jxx - jyy);' + NL +
+    '  float d = sqrt(max(0.0, (jxx - jyy) * (jxx - jyy) + 4.0 * jxy * jxy));' + NL +
+    '  float l1 = 0.5 * (jxx + jyy + d);' + NL +
+    '  float l2 = 0.5 * (jxx + jyy - d);' + NL +
+    '  float aniso = (l1 + l2 > 1e-6) ? clamp((l1 - l2) / (l1 + l2), 0.0, 1.0) : 0.0;' + NL +
+    '  return vec2(angle, aniso);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateStructureTensorEigenOrientation(
+  const AJxx, AJyy, AJxy: Single;
+  out AAnisotropy: Single): Single;
+var
+  D, L1, L2: Single;
+begin
+  Result := 0.5 * ArcTan2(2.0 * AJxy, AJxx - AJyy);
+  D := Sqrt(Max(0.0, Sqr(AJxx - AJyy) + 4.0 * Sqr(AJxy)));
+  L1 := 0.5 * (AJxx + AJyy + D);
+  L2 := 0.5 * (AJxx + AJyy - D);
+  if (L1 + L2) > 1e-6 then
+    AAnisotropy := EnsureRange((L1 - L2) / (L1 + L2), 0.0, 1.0)
+  else
+    AAnisotropy := 0.0;
+end;
+
+function TCastleShaderGeneratorRHI.GeneratePhysicalEyeRefractionFunctions: String;
+begin
+  Result :=
+    '// Phase 52.1: Physically Based Eye Cornea Snell Refraction & Iris Parallax' + NL +
+    'vec2 EvaluateEyeIrisRefractionUVOffset(vec3 viewDirTS, vec3 corneaNormalTS,' + NL +
+    '  float corneaIOR, float anteriorChamberDepth) {' + NL +
+    '  float eta = 1.0 / max(1.0, corneaIOR);' + NL +
+    '  vec3 refracted = refract(- normalize(viewDirTS), normalize(corneaNormalTS), eta);' + NL +
+    '  float cosZ = max(0.15, abs(refracted.z));' + NL +
+    '  return refracted.xy * (anteriorChamberDepth / cosZ);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateEyeIrisRefractionUVOffset(
+  const AViewDirTS, ACorneaNormalTS: TVector3;
+  const ACorneaIOR, AAnteriorChamberDepth: Single): TVector2;
+var
+  I, N, Refracted: TVector3;
+  Eta, NdotI, K, CosZ: Single;
+begin
+  Eta := 1.0 / Max(1.0, ACorneaIOR);
+  I := -AViewDirTS.Normalize;
+  N := ACorneaNormalTS.Normalize;
+  NdotI := TVector3.DotProduct(N, I);
+  K := 1.0 - Eta * Eta * (1.0 - NdotI * NdotI);
+  if K < 0.0 then
+    Refracted := TVector3.Zero
+  else
+    Refracted := I * Eta - N * (Eta * NdotI + Sqrt(K));
+  CosZ := Max(0.15, Abs(Refracted.Z));
+  Result := Vector2(
+    Refracted.X * (AAnteriorChamberDepth / CosZ),
+    Refracted.Y * (AAnteriorChamberDepth / CosZ));
+end;
+
+function TCastleShaderGeneratorRHI.GenerateSixPointLightmapFunctions: String;
+begin
+  Result :=
+    '// Phase 52.2: Six-Point Directional Lightmap Basis (6-Axis Smoke/Cloud Lighting)' + NL +
+    'float EvaluateSixPointDirectionalBasis(vec3 lightDirTS, vec3 mapPosXNegXPosY, vec3 mapNegYPosZNegZ) {' + NL +
+    '  vec3 d = normalize(lightDirTS);' + NL +
+    '  vec3 d2 = d * d;' + NL +
+    '  float wx = (d.x >= 0.0) ? mapPosXNegXPosY.x : mapPosXNegXPosY.y;' + NL +
+    '  float wy = (d.y >= 0.0) ? mapPosXNegXPosY.z : mapNegYPosZNegZ.x;' + NL +
+    '  float wz = (d.z >= 0.0) ? mapNegYPosZNegZ.y : mapNegYPosZNegZ.z;' + NL +
+    '  return d2.x * wx + d2.y * wy + d2.z * wz;' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateSixPointDirectionalBasis(
+  const ALightDirTS, AMapPosXNegXPosY, AMapNegYPosZNegZ: TVector3): Single;
+var
+  D: TVector3;
+  WX, WY, WZ: Single;
+begin
+  D := ALightDirTS.Normalize;
+  if D.X >= 0.0 then WX := AMapPosXNegXPosY.X else WX := AMapPosXNegXPosY.Y;
+  if D.Y >= 0.0 then WY := AMapPosXNegXPosY.Z else WY := AMapNegYPosZNegZ.X;
+  if D.Z >= 0.0 then WZ := AMapNegYPosZNegZ.Y else WZ := AMapNegYPosZNegZ.Z;
+  Result := Sqr(D.X) * WX + Sqr(D.Y) * WY + Sqr(D.Z) * WZ;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateParallaxOcclusionMappingFunctions: String;
+begin
+  Result :=
+    '// Phase 53.1: Secant-Refined Parallax Occlusion Mapping (POM)' + NL +
+    'float EvaluateSecantRefinedPOMIntersection(float prevLayerDepth, float currLayerDepth,' + NL +
+    '  float prevHeight, float currHeight) {' + NL +
+    '  float afterDepth = currHeight - currLayerDepth;' + NL +
+    '  float beforeDepth = prevHeight - prevLayerDepth;' + NL +
+    '  float denom = afterDepth - beforeDepth;' + NL +
+    '  float weight = (abs(denom) > 1e-6) ? clamp(afterDepth / denom, 0.0, 1.0) : 0.5;' + NL +
+    '  return mix(currLayerDepth, prevLayerDepth, weight);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateSecantRefinedPOMIntersection(
+  const APrevLayerDepth, ACurrLayerDepth, APrevHeight, ACurrHeight: Single): Single;
+var
+  AfterDepth, BeforeDepth, Denom, Weight: Single;
+begin
+  AfterDepth := ACurrHeight - ACurrLayerDepth;
+  BeforeDepth := APrevHeight - APrevLayerDepth;
+  Denom := AfterDepth - BeforeDepth;
+  if Abs(Denom) > 1e-6 then
+    Weight := EnsureRange(AfterDepth / Denom, 0.0, 1.0)
+  else
+    Weight := 0.5;
+  Result := ACurrLayerDepth * (1.0 - Weight) + APrevLayerDepth * Weight;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateChromaticDispersionFlareFunctions: String;
+begin
+  Result :=
+    '// Phase 53.2: Spectral Cauchy Chromatic Dispersion & Lens Flare' + NL +
+    'vec3 EvaluateCauchyRefractiveIndexRGB(float coeffA, float coeffBMicronsSq) {' + NL +
+    '  const vec3 invLambdaSq = vec3(1.0 / (0.65 * 0.65), 1.0 / (0.55 * 0.55), 1.0 / (0.45 * 0.45));' + NL +
+    '  return vec3(coeffA) + coeffBMicronsSq * invLambdaSq;' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateCauchyRefractiveIndexRGB(
+  const ACoeffA, ACoeffBMicronsSq: Single): TVector3;
+begin
+  Result := Vector3(
+    ACoeffA + ACoeffBMicronsSq / (0.65 * 0.65),
+    ACoeffA + ACoeffBMicronsSq / (0.55 * 0.55),
+    ACoeffA + ACoeffBMicronsSq / (0.45 * 0.45));
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

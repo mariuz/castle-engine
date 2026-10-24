@@ -219,6 +219,15 @@ type
     procedure TestCapsuleSoftShadowOcclusionRHI;
     procedure TestEpipolarSliceRayStepRHI;
     procedure TestVulkanFramePacerWaitMicrosecondsAndTelemetryRHI;
+    procedure TestCooperativeMatrixPreambleAndFP8DecodingRHI;
+    procedure TestAnisotropicKuwaharaStructureTensorOrientationRHI;
+    procedure TestVulkanIndirectComputeDispatcherWorkgroupsAndRecordRHI;
+    procedure TestPhysicalEyeCorneaRefractionUVOffsetRHI;
+    procedure TestSixPointDirectionalLightmapBasisRHI;
+    procedure TestVulkanBCnCompressorEndpoint565AndDispatchRHI;
+    procedure TestSecantRefinedPOMIntersectionRHI;
+    procedure TestCauchyChromaticDispersionRefractiveIndexRHI;
+    procedure TestVulkanPipelineBinaryManagerStoreAndLookupRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -10713,6 +10722,277 @@ begin
     AssertEquals('PacedFrameCount must be 1', 1, Integer(Device.FramePacer.PacedFrameCount));
     AssertEquals('LastWaitMicroseconds at 120Hz with 5ms elapsed must be 3133 us',
       Int64(3133), Device.FramePacer.LastWaitMicroseconds);
+  finally
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCooperativeMatrixPreambleAndFP8DecodingRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  CoopGLSL: String;
+  ValZero, ValOne, ValNegTwoPointFive: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Cooperative Matrix GLSL 450 preamble }
+    CoopGLSL := Gen.GenerateCooperativeMatrixPreamble;
+    AssertTrue('Cooperative Matrix preamble must enable GL_KHR_cooperative_matrix',
+      Pos('#extension GL_KHR_cooperative_matrix : enable', CoopGLSL) > 0);
+    AssertTrue('Cooperative Matrix preamble must include EvaluateQuantizedFP8ToFloat',
+      Pos('float EvaluateQuantizedFP8ToFloat(uint fp8Byte)', CoopGLSL) > 0);
+
+    { 2. Verify E4M3 FP8 decoding (bias = 7):
+         - 0x00 -> 0.0
+         - sign=0, exp=7 (0111), mant=0 (000) -> 0x38 -> +1.0
+         - sign=1, exp=8 (1000), mant=2 (010 -> 1 + 2/8 = 1.25) -> 0xC2 -> -1.25 * 2^1 = -2.5 }
+    ValZero := TCastleShaderGeneratorRHI.EvaluateQuantizedFP8ToFloat($00);
+    ValOne := TCastleShaderGeneratorRHI.EvaluateQuantizedFP8ToFloat($38);
+    ValNegTwoPointFive := TCastleShaderGeneratorRHI.EvaluateQuantizedFP8ToFloat($C2);
+
+    AssertSameValue(0.0, ValZero, 1e-6);
+    AssertSameValue(1.0, ValOne, 1e-6);
+    AssertSameValue(-2.5, ValNegTwoPointFive, 1e-6);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestAnisotropicKuwaharaStructureTensorOrientationRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  KuwaharaGLSL: String;
+  AngleHorizontal, AngleDiagonal, AnisoHorizontal, AnisoIsotropic: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Anisotropic Kuwahara Structure-Tensor GLSL 450 functions }
+    KuwaharaGLSL := Gen.GenerateAnisotropicKuwaharaFunctions;
+    AssertTrue('Kuwahara GLSL must include EvaluateStructureTensorEigenOrientation',
+      Pos('vec2 EvaluateStructureTensorEigenOrientation(float jxx, float jyy, float jxy)', KuwaharaGLSL) > 0);
+
+    { 2. Pure X gradient (Jxx=4, Jyy=0, Jxy=0) -> angle = 0, anisotropy = 1.0;
+         Isotropic gradient (Jxx=2, Jyy=2, Jxy=0) -> anisotropy = 0.0;
+         Diagonal gradient (Jxx=1, Jyy=1, Jxy=1) -> angle = Pi/4 }
+    AngleHorizontal := TCastleShaderGeneratorRHI.EvaluateStructureTensorEigenOrientation(
+      4.0, 0.0, 0.0, AnisoHorizontal);
+    TCastleShaderGeneratorRHI.EvaluateStructureTensorEigenOrientation(
+      2.0, 2.0, 0.0, AnisoIsotropic);
+    AngleDiagonal := TCastleShaderGeneratorRHI.EvaluateStructureTensorEigenOrientation(
+      1.0, 1.0, 1.0, AnisoHorizontal);
+
+    AssertSameValue(0.0, AngleHorizontal, 1e-6);
+    AssertSameValue(1.0, AnisoHorizontal, 1e-6);
+    AssertSameValue(0.0, AnisoIsotropic, 1e-6);
+    AssertSameValue(Pi * 0.25, AngleDiagonal, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanIndirectComputeDispatcherWorkgroupsAndRecordRHI;
+var
+  WgZero, WgPartial: TVector3Cardinal;
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+begin
+  { 1. Verify 1D workgroup count calculation ceil(N / 64) }
+  WgZero := TCastleVulkanIndirectComputeDispatcher.ComputeWorkgroupCountsFromItemCount(0, 64);
+  WgPartial := TCastleVulkanIndirectComputeDispatcher.ComputeWorkgroupCountsFromItemCount(130, 64);
+  AssertEquals('0 active items must produce 0 X workgroups', 0, Integer(WgZero.X));
+  AssertEquals('130 active items with workgroup size 64 must produce 3 X workgroups', 3, Integer(WgPartial.X));
+  AssertEquals('Y workgroup count must be 1', 1, Integer(WgPartial.Y));
+  AssertEquals('Z workgroup count must be 1', 1, Integer(WgPartial.Z));
+
+  { 2. Verify TCastleVulkanIndirectComputeDispatcher buffer creation & DispatchIndirect recording }
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($667D)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    CmdList.BeginRecording;
+    Device.IndirectComputeDispatcher.RecordIndirectComputeDispatch(CmdList, 2);
+    CmdList.EndRecording;
+
+    AssertTrue('IndirectArgumentBuffer must be allocated',
+      Device.IndirectComputeDispatcher.IndirectArgumentBuffer <> nil);
+    AssertEquals('DispatchedCommandCount must be 1',
+      1, Integer(Device.IndirectComputeDispatcher.DispatchedCommandCount));
+    AssertEquals('CommandList ComputeDispatchCount must be 1',
+      1, Integer(CmdList.ComputeDispatchCount));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestPhysicalEyeCorneaRefractionUVOffsetRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  EyeGLSL: String;
+  OffsetPerp, OffsetOblique: TVector2;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Physical Eye Refraction GLSL 450 functions }
+    EyeGLSL := Gen.GeneratePhysicalEyeRefractionFunctions;
+    AssertTrue('Eye refraction GLSL must include EvaluateEyeIrisRefractionUVOffset',
+      Pos('vec2 EvaluateEyeIrisRefractionUVOffset(', EyeGLSL) > 0);
+
+    { 2. Perpendicular view (0,0,1) along cornea normal (0,0,1) -> zero UV parallax offset;
+         Oblique view (0.5, 0.0, 0.866) -> non-zero X parallax offset scaled by anterior chamber depth }
+    OffsetPerp := TCastleShaderGeneratorRHI.EvaluateEyeIrisRefractionUVOffset(
+      Vector3(0.0, 0.0, 1.0), Vector3(0.0, 0.0, 1.0), 1.376, 0.12);
+    OffsetOblique := TCastleShaderGeneratorRHI.EvaluateEyeIrisRefractionUVOffset(
+      Vector3(0.5, 0.0, 0.8660254), Vector3(0.0, 0.0, 1.0), 1.376, 0.12);
+
+    AssertSameValue(0.0, OffsetPerp.X, 1e-6);
+    AssertSameValue(0.0, OffsetPerp.Y, 1e-6);
+    AssertTrue('Oblique view must produce negative X refracted iris offset', OffsetOblique.X < -0.02);
+    AssertSameValue(0.0, OffsetOblique.Y, 1e-6);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSixPointDirectionalLightmapBasisRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  SixPtGLSL: String;
+  ValPosX, ValNegY, ValDiag: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Six-Point Lightmap GLSL 450 functions }
+    SixPtGLSL := Gen.GenerateSixPointLightmapFunctions;
+    AssertTrue('Six-point lightmap GLSL must include EvaluateSixPointDirectionalBasis',
+      Pos('float EvaluateSixPointDirectionalBasis(', SixPtGLSL) > 0);
+
+    { 2. Map values: (+X=1.0, -X=0.2, +Y=0.8), (-Y=0.1, +Z=0.6, -Z=0.0) }
+    ValPosX := TCastleShaderGeneratorRHI.EvaluateSixPointDirectionalBasis(
+      Vector3(1.0, 0.0, 0.0), Vector3(1.0, 0.2, 0.8), Vector3(0.1, 0.6, 0.0));
+    ValNegY := TCastleShaderGeneratorRHI.EvaluateSixPointDirectionalBasis(
+      Vector3(0.0, -1.0, 0.0), Vector3(1.0, 0.2, 0.8), Vector3(0.1, 0.6, 0.0));
+    ValDiag := TCastleShaderGeneratorRHI.EvaluateSixPointDirectionalBasis(
+      Vector3(1.0, 1.0, 0.0), Vector3(1.0, 0.2, 0.8), Vector3(0.1, 0.6, 0.0));
+
+    AssertSameValue(1.0, ValPosX, 1e-6);
+    AssertSameValue(0.1, ValNegY, 1e-6);
+    AssertSameValue(0.9, ValDiag, 1e-6); { 0.5 * 1.0 + 0.5 * 0.8 = 0.9 }
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanBCnCompressorEndpoint565AndDispatchRHI;
+var
+  White565, Red565, Green565, Blue565: Word;
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+begin
+  { 1. Verify RGB565 BC1 endpoint quantization }
+  White565 := TCastleVulkanBCnCompressor.EvaluateBC1EndpointQuantization565(Vector3(1.0, 1.0, 1.0));
+  Red565   := TCastleVulkanBCnCompressor.EvaluateBC1EndpointQuantization565(Vector3(1.0, 0.0, 0.0));
+  Green565 := TCastleVulkanBCnCompressor.EvaluateBC1EndpointQuantization565(Vector3(0.0, 1.0, 0.0));
+  Blue565  := TCastleVulkanBCnCompressor.EvaluateBC1EndpointQuantization565(Vector3(0.0, 0.0, 1.0));
+
+  AssertEquals('White RGB(1,1,1) must quantize to $FFFF', $FFFF, Integer(White565));
+  AssertEquals('Pure Red RGB(1,0,0) must quantize to $F800', $F800, Integer(Red565));
+  AssertEquals('Pure Green RGB(0,1,0) must quantize to $07E0', $07E0, Integer(Green565));
+  AssertEquals('Pure Blue RGB(0,0,1) must quantize to $001F', $001F, Integer(Blue565));
+
+  { 2. Verify TCastleVulkanBCnCompressor 4x4 block count and compute dispatch }
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($667E)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    CmdList.BeginRecording;
+    Device.BCnCompressor.DispatchBCnBlockCompression(CmdList, 256, 256, 8); { 64x64 = 4096 blocks * 8B = 32768B }
+    CmdList.EndRecording;
+
+    AssertTrue('CompressedOutputBuffer must be allocated',
+      Device.BCnCompressor.CompressedOutputBuffer <> nil);
+    AssertEquals('256x256 texture must produce 4096 4x4 BC1 blocks',
+      4096, Integer(Device.BCnCompressor.CompressedBlockCount));
+    AssertEquals('CompressedOutputBuffer size must be 32768 bytes',
+      Int64(32768), Int64(Device.BCnCompressor.CompressedOutputBuffer.Desc.Size));
+    AssertEquals('BCnCompressor DispatchCount must be 1',
+      1, Integer(Device.BCnCompressor.DispatchCount));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSecantRefinedPOMIntersectionRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  POMGLSL: String;
+  HitMid, HitQuarter: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Secant-Refined POM GLSL 450 functions }
+    POMGLSL := Gen.GenerateParallaxOcclusionMappingFunctions;
+    AssertTrue('POM GLSL must include EvaluateSecantRefinedPOMIntersection',
+      Pos('float EvaluateSecantRefinedPOMIntersection(', POMGLSL) > 0);
+
+    { 2. Verify exact secant root between layer [0.2, 0.4] and height [0.35, 0.25]:
+         beforeDepth = 0.35 - 0.20 = +0.15, afterDepth = 0.25 - 0.40 = -0.15 -> midpoint 0.30 }
+    HitMid := TCastleShaderGeneratorRHI.EvaluateSecantRefinedPOMIntersection(0.20, 0.40, 0.35, 0.25);
+    { beforeDepth = 0.25 - 0.20 = +0.05, afterDepth = 0.25 - 0.40 = -0.15 -> quarter step 0.25 }
+    HitQuarter := TCastleShaderGeneratorRHI.EvaluateSecantRefinedPOMIntersection(0.20, 0.40, 0.25, 0.25);
+
+    AssertSameValue(0.30, HitMid, 1e-6);
+    AssertSameValue(0.25, HitQuarter, 1e-6);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCauchyChromaticDispersionRefractiveIndexRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  DispGLSL: String;
+  IorRGB: TVector3;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Cauchy Chromatic Dispersion GLSL 450 functions }
+    DispGLSL := Gen.GenerateChromaticDispersionFlareFunctions;
+    AssertTrue('Chromatic dispersion GLSL must include EvaluateCauchyRefractiveIndexRGB',
+      Pos('vec3 EvaluateCauchyRefractiveIndexRGB(float coeffA, float coeffBMicronsSq)', DispGLSL) > 0);
+
+    { 2. Verify normal dispersion order: n(Blue 0.45um) > n(Green 0.55um) > n(Red 0.65um) for B > 0 }
+    IorRGB := TCastleShaderGeneratorRHI.EvaluateCauchyRefractiveIndexRGB(1.50, 0.0045);
+    AssertTrue('Blue IOR must exceed Green IOR under Cauchy dispersion', IorRGB.Z > IorRGB.Y);
+    AssertTrue('Green IOR must exceed Red IOR under Cauchy dispersion', IorRGB.Y > IorRGB.X);
+    AssertSameValue(1.50 + 0.0045 / (0.65 * 0.65), IorRGB.X, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanPipelineBinaryManagerStoreAndLookupRHI;
+var
+  Key1, Key2: UInt64;
+  FoundSize: Cardinal;
+  Device: TVulkanRHIDevice;
+begin
+  { 1. Verify deterministic 64-bit FNV-1a pipeline binary key calculation }
+  Key1 := TCastleVulkanPipelineBinaryManager.ComputePipelineKeyFNV1a64($1111, $2222, $03);
+  Key2 := TCastleVulkanPipelineBinaryManager.ComputePipelineKeyFNV1a64($1111, $2222, $07);
+  AssertTrue('Distinct render state flags must produce distinct pipeline binary keys', Key1 <> Key2);
+
+  { 2. Verify TCastleVulkanPipelineBinaryManager store, update, and lookup telemetry }
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($667F)) );
+  try
+    Device.PipelineBinaryManager.StorePipelineBinary(Key1, 4096);
+    Device.PipelineBinaryManager.StorePipelineBinary(Key2, 8192);
+    AssertEquals('BinaryEntryCount must be 2', 2, Integer(Device.PipelineBinaryManager.BinaryEntryCount));
+    AssertEquals('TotalBinaryBytes must be 12288', Int64(12288), Int64(Device.PipelineBinaryManager.TotalBinaryBytes));
+
+    AssertTrue('LookupPipelineBinary for Key1 must hit',
+      Device.PipelineBinaryManager.LookupPipelineBinary(Key1, FoundSize));
+    AssertEquals('FoundSize for Key1 must be 4096', 4096, Integer(FoundSize));
+    AssertEquals('CacheHitCount must be 1', 1, Integer(Device.PipelineBinaryManager.CacheHitCount));
   finally
     FreeAndNil(Device);
   end;

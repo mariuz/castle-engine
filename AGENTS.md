@@ -77,8 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–49**: **COMPLETED** (100%).
-- **Phase 50 (Analytical Capsule Soft Shadows, Epipolar Light Shafts & GPU Frame Pacing Manager)**: **COMPLETED** (100%, 180 unit tests passing):
-  - [x] **50.1. Analytical Capsule Soft Shadow & Ambient Occlusion (`GenerateCapsuleOcclusionFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestCapsuleSoftShadowOcclusionRHI`).
-  - [x] **50.2. Epipolar Volumetric Light Shafts (Crepuscular God Rays) Slice Stepping (`GenerateEpipolarLightShaftFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestEpipolarSliceRayStepRHI`).
-  - [x] **50.3. GPU Frame Pacing & Present Timing Manager (`TCastleVulkanFramePacer` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanFramePacerWaitMicrosecondsAndTelemetryRHI`).
+- **Phases 1–52**: **COMPLETED** (100%).
+- **Phase 53 (Secant-Refined POM, Spectral Cauchy Chromatic Dispersion & Vulkan 1.4 Pipeline Binary Manager)**: **COMPLETED** (100%, 189 unit tests passing):
+  - [x] **53.1. Secant-Refined Parallax Occlusion Mapping (`GenerateParallaxOcclusionMappingFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSecantRefinedPOMIntersectionRHI`).
+  - [x] **53.2. Physically Based Spectral Cauchy Chromatic Dispersion (`GenerateChromaticDispersionFlareFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestCauchyChromaticDispersionRefractiveIndexRHI`).
+  - [x] **53.3. Vulkan 1.4 Pipeline Binary Manager (`TCastleVulkanPipelineBinaryManager` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanPipelineBinaryManagerStoreAndLookupRHI`).

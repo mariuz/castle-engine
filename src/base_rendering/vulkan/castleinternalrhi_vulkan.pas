@@ -3365,6 +3365,118 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { GPU-Driven Indirect Compute Workgroup Dispatcher                           }
+  { -------------------------------------------------------------------------- }
+
+  { Manages indirect compute dispatch argument buffers (VkDispatchIndirectCommand:
+    GroupCountX, GroupCountY, GroupCountZ) and records vkCmdDispatchIndirect calls. }
+  TCastleVulkanIndirectComputeDispatcher = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FIndirectArgumentBuffer: TVulkanRHIBuffer;
+    FDispatchedCommandCount: Cardinal;
+    procedure EnsureIndirectBuffer(const AMaxCommandSlots: Cardinal);
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Computes the 1D workgroup dispatch count ceil(AActiveItemCount / AWorkgroupSizeX)
+      for a GPU-written VkDispatchIndirectCommand structure. }
+    class function ComputeWorkgroupCountsFromItemCount(
+      const AActiveItemCount, AWorkgroupSizeX: Cardinal): TVector3Cardinal; static;
+
+    { Ensures the indirect dispatch argument buffer is allocated and records a
+      DispatchIndirect command at ACommandSlotIndex * 12 bytes. }
+    procedure RecordIndirectComputeDispatch(
+      const ACommandList: TVulkanRHICommandList;
+      const ACommandSlotIndex: Cardinal = 0;
+      const AComputePipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property IndirectArgumentBuffer: TVulkanRHIBuffer read FIndirectArgumentBuffer;
+    property DispatchedCommandCount: Cardinal read FDispatchedCommandCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
+  { Real-Time GPU BC1/BC6H Block Texture Compressor                            }
+  { -------------------------------------------------------------------------- }
+
+  { Compresses 4x4 texel blocks into BC1 (8 bytes/block) or BC6H (16 bytes/block)
+    compressed GPU storage buffers for runtime virtual textures and reflection probes. }
+  TCastleVulkanBCnCompressor = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FCompressedOutputBuffer: TVulkanRHIBuffer;
+    FCompressedBlockCount: Cardinal;
+    FDispatchCount: Cardinal;
+    FCompressionPipeline: TVulkanRHIComputePipeline;
+    procedure EnsureCompressionBuffer(const AWidth, AHeight, ABytesPerBlock: Cardinal);
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Quantizes a linear/sRGB RGB color in [0..1]^3 into a 16-bit RGB565 BC1 endpoint word. }
+    class function EvaluateBC1EndpointQuantization565(
+      const AColorRGB: TVector3): Word; static;
+
+    { Allocates the output block buffer for (AWidth x AHeight) 4x4 blocks and
+      dispatches the GPU BCn block compression compute shader. }
+    procedure DispatchBCnBlockCompression(
+      const ACommandList: TVulkanRHICommandList;
+      const AWidth, AHeight: Cardinal;
+      const ABytesPerBlock: Cardinal = 8;
+      const AComputePipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property CompressedOutputBuffer: TVulkanRHIBuffer read FCompressedOutputBuffer;
+    property CompressedBlockCount: Cardinal read FCompressedBlockCount;
+    property DispatchCount: Cardinal read FDispatchCount;
+    property CompressionPipeline: TVulkanRHIComputePipeline
+      read FCompressionPipeline write FCompressionPipeline;
+  end;
+
+  { -------------------------------------------------------------------------- }
+  { Vulkan 1.4 Pipeline Binary Manager (VK_KHR_pipeline_binary)                }
+  { -------------------------------------------------------------------------- }
+
+  TVulkanPipelineBinaryEntry = record
+    PipelineKeyHash: UInt64;
+    BinarySize: Cardinal;
+  end;
+
+  { Manages standalone driver pipeline binaries (VK_KHR_pipeline_binary) indexed by
+    64-bit FNV-1a pipeline keys for lock-free zero-compilation PSO restoration. }
+  TCastleVulkanPipelineBinaryManager = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FEntries: array of TVulkanPipelineBinaryEntry;
+    FTotalBinaryBytes: UInt64;
+    FCacheHitCount: Cardinal;
+    function GetBinaryEntryCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+
+    { Computes a 64-bit FNV-1a pipeline binary key from shader hashes and state flags. }
+    class function ComputePipelineKeyFNV1a64(
+      const AVertexShaderHash, AFragmentShaderHash: UInt64;
+      const ARenderStateFlags: Cardinal): UInt64; static;
+
+    { Stores or updates a captured pipeline binary record of ABinarySize bytes. }
+    procedure StorePipelineBinary(
+      const APipelineKeyHash: UInt64;
+      const ABinarySize: Cardinal);
+
+    { Looks up a previously captured pipeline binary by key and increments CacheHitCount on hit. }
+    function LookupPipelineBinary(
+      const APipelineKeyHash: UInt64;
+      out AOutBinarySize: Cardinal): Boolean;
+
+    property BinaryEntryCount: Cardinal read GetBinaryEntryCount;
+    property TotalBinaryBytes: UInt64 read FTotalBinaryBytes;
+    property CacheHitCount: Cardinal read FCacheHitCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -3487,6 +3599,9 @@ type
     FHiZPyramidGenerator: TCastleVulkanHiZPyramidGenerator;
     FAutoExposureHistogram: TCastleVulkanAutoExposureHistogram;
     FFramePacer: TCastleVulkanFramePacer;
+    FIndirectComputeDispatcher: TCastleVulkanIndirectComputeDispatcher;
+    FBCnCompressor: TCastleVulkanBCnCompressor;
+    FPipelineBinaryManager: TCastleVulkanPipelineBinaryManager;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -3614,6 +3729,9 @@ type
     function GetHiZPyramidGenerator: TCastleVulkanHiZPyramidGenerator;
     function GetAutoExposureHistogram: TCastleVulkanAutoExposureHistogram;
     function GetFramePacer: TCastleVulkanFramePacer;
+    function GetIndirectComputeDispatcher: TCastleVulkanIndirectComputeDispatcher;
+    function GetBCnCompressor: TCastleVulkanBCnCompressor;
+    function GetPipelineBinaryManager: TCastleVulkanPipelineBinaryManager;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -3846,6 +3964,9 @@ type
     property HiZPyramidGenerator: TCastleVulkanHiZPyramidGenerator read GetHiZPyramidGenerator;
     property AutoExposureHistogram: TCastleVulkanAutoExposureHistogram read GetAutoExposureHistogram;
     property FramePacer: TCastleVulkanFramePacer read GetFramePacer;
+    property IndirectComputeDispatcher: TCastleVulkanIndirectComputeDispatcher read GetIndirectComputeDispatcher;
+    property BCnCompressor: TCastleVulkanBCnCompressor read GetBCnCompressor;
+    property PipelineBinaryManager: TCastleVulkanPipelineBinaryManager read GetPipelineBinaryManager;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -16897,6 +17018,224 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanIndirectComputeDispatcher                                       }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanIndirectComputeDispatcher.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FIndirectArgumentBuffer := nil;
+  FDispatchedCommandCount := 0;
+end;
+
+destructor TCastleVulkanIndirectComputeDispatcher.Destroy;
+begin
+  FreeAndNil(FIndirectArgumentBuffer);
+  inherited;
+end;
+
+class function TCastleVulkanIndirectComputeDispatcher.ComputeWorkgroupCountsFromItemCount(
+  const AActiveItemCount, AWorkgroupSizeX: Cardinal): TVector3Cardinal;
+var
+  WgSize, GroupsX: Cardinal;
+begin
+  if AActiveItemCount = 0 then
+    Exit(Vector3Cardinal(0, 1, 1));
+  WgSize := Max(Cardinal(1), AWorkgroupSizeX);
+  GroupsX := (AActiveItemCount + WgSize - 1) div WgSize;
+  Result := Vector3Cardinal(GroupsX, 1, 1);
+end;
+
+procedure TCastleVulkanIndirectComputeDispatcher.EnsureIndirectBuffer(
+  const AMaxCommandSlots: Cardinal);
+var
+  RequiredBytes: UInt64;
+  BufDesc: TRHIBufferDesc;
+begin
+  if FDevice = nil then
+    Exit;
+  RequiredBytes := UInt64(Max(Cardinal(16), AMaxCommandSlots)) * 12;
+  if (FIndirectArgumentBuffer = nil) or (FIndirectArgumentBuffer.Desc.Size < RequiredBytes) then
+  begin
+    FreeAndNil(FIndirectArgumentBuffer);
+    BufDesc := TRHIBufferDesc.Create(RequiredBytes, [buStorage, buIndirect],
+      muGpuOnly, 'IndirectComputeDispatchArgsSSBO');
+    FIndirectArgumentBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+end;
+
+procedure TCastleVulkanIndirectComputeDispatcher.RecordIndirectComputeDispatch(
+  const ACommandList: TVulkanRHICommandList;
+  const ACommandSlotIndex: Cardinal;
+  const AComputePipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+begin
+  if ACommandList = nil then
+    Exit;
+  EnsureIndirectBuffer(ACommandSlotIndex + 1);
+  if AComputePipeline <> nil then
+    ACommandList.BindComputePipeline(AComputePipeline);
+  if ADescriptorSet <> nil then
+    ACommandList.BindComputeDescriptorSet(0, ADescriptorSet, []);
+  if FIndirectArgumentBuffer <> nil then
+    ACommandList.DispatchIndirect(FIndirectArgumentBuffer, PtrUInt(ACommandSlotIndex) * 12);
+  Inc(FDispatchedCommandCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanBCnCompressor                                                   }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanBCnCompressor.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FCompressedOutputBuffer := nil;
+  FCompressedBlockCount := 0;
+  FDispatchCount := 0;
+  FCompressionPipeline := nil;
+end;
+
+destructor TCastleVulkanBCnCompressor.Destroy;
+begin
+  FreeAndNil(FCompressedOutputBuffer);
+  inherited;
+end;
+
+class function TCastleVulkanBCnCompressor.EvaluateBC1EndpointQuantization565(
+  const AColorRGB: TVector3): Word;
+var
+  R5, G6, B5: Word;
+begin
+  R5 := Word(Round(EnsureRange(AColorRGB.X, 0.0, 1.0) * 31.0));
+  G6 := Word(Round(EnsureRange(AColorRGB.Y, 0.0, 1.0) * 63.0));
+  B5 := Word(Round(EnsureRange(AColorRGB.Z, 0.0, 1.0) * 31.0));
+  Result := (R5 shl 11) or (G6 shl 5) or B5;
+end;
+
+procedure TCastleVulkanBCnCompressor.EnsureCompressionBuffer(
+  const AWidth, AHeight, ABytesPerBlock: Cardinal);
+var
+  BlocksX, BlocksY, BlockBytes: Cardinal;
+  TotalBytes: UInt64;
+  BufDesc: TRHIBufferDesc;
+begin
+  if FDevice = nil then
+    Exit;
+  BlocksX := (Max(Cardinal(1), AWidth) + 3) div 4;
+  BlocksY := (Max(Cardinal(1), AHeight) + 3) div 4;
+  FCompressedBlockCount := BlocksX * BlocksY;
+  BlockBytes := Max(Cardinal(8), ABytesPerBlock);
+  TotalBytes := UInt64(FCompressedBlockCount) * BlockBytes;
+  if (FCompressedOutputBuffer = nil) or (FCompressedOutputBuffer.Desc.Size < TotalBytes) then
+  begin
+    FreeAndNil(FCompressedOutputBuffer);
+    BufDesc := TRHIBufferDesc.Create(TotalBytes, [buStorage, buTransferSrc],
+      muGpuOnly, 'BCnCompressedBlocksOutputSSBO');
+    FCompressedOutputBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+end;
+
+procedure TCastleVulkanBCnCompressor.DispatchBCnBlockCompression(
+  const ACommandList: TVulkanRHICommandList;
+  const AWidth, AHeight: Cardinal;
+  const ABytesPerBlock: Cardinal;
+  const AComputePipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+var
+  ActivePipeline: TVulkanRHIComputePipeline;
+  BlocksX, BlocksY, GroupsX, GroupsY: Cardinal;
+begin
+  if ACommandList = nil then
+    Exit;
+  EnsureCompressionBuffer(AWidth, AHeight, ABytesPerBlock);
+  if AComputePipeline <> nil then
+    ActivePipeline := AComputePipeline
+  else
+    ActivePipeline := FCompressionPipeline;
+  if ActivePipeline <> nil then
+    ACommandList.BindComputePipeline(ActivePipeline);
+  if ADescriptorSet <> nil then
+    ACommandList.BindComputeDescriptorSet(0, ADescriptorSet, []);
+  BlocksX := (Max(Cardinal(1), AWidth) + 3) div 4;
+  BlocksY := (Max(Cardinal(1), AHeight) + 3) div 4;
+  GroupsX := (BlocksX + 7) div 8;
+  GroupsY := (BlocksY + 7) div 8;
+  ACommandList.Dispatch(Max(Cardinal(1), GroupsX), Max(Cardinal(1), GroupsY), 1);
+  Inc(FDispatchCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanPipelineBinaryManager                                           }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanPipelineBinaryManager.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  SetLength(FEntries, 0);
+  FTotalBinaryBytes := 0;
+  FCacheHitCount := 0;
+end;
+
+function TCastleVulkanPipelineBinaryManager.GetBinaryEntryCount: Cardinal;
+begin
+  if FDevice = nil then;
+  Result := Cardinal(Length(FEntries));
+end;
+
+class function TCastleVulkanPipelineBinaryManager.ComputePipelineKeyFNV1a64(
+  const AVertexShaderHash, AFragmentShaderHash: UInt64;
+  const ARenderStateFlags: Cardinal): UInt64;
+begin
+  {$Q-}{$R-}
+  Result := FNV1aOffsetBasis64;
+  Result := (Result xor AVertexShaderHash) * FNV1aPrime64;
+  Result := (Result xor AFragmentShaderHash) * FNV1aPrime64;
+  Result := (Result xor UInt64(ARenderStateFlags)) * FNV1aPrime64;
+  {$Q+}{$R+}
+end;
+
+procedure TCastleVulkanPipelineBinaryManager.StorePipelineBinary(
+  const APipelineKeyHash: UInt64;
+  const ABinarySize: Cardinal);
+var
+  I, N: Integer;
+begin
+  for I := 0 to High(FEntries) do
+    if FEntries[I].PipelineKeyHash = APipelineKeyHash then
+    begin
+      Dec(FTotalBinaryBytes, FEntries[I].BinarySize);
+      FEntries[I].BinarySize := ABinarySize;
+      Inc(FTotalBinaryBytes, ABinarySize);
+      Exit;
+    end;
+  N := Length(FEntries);
+  SetLength(FEntries, N + 1);
+  FEntries[N].PipelineKeyHash := APipelineKeyHash;
+  FEntries[N].BinarySize := ABinarySize;
+  Inc(FTotalBinaryBytes, ABinarySize);
+end;
+
+function TCastleVulkanPipelineBinaryManager.LookupPipelineBinary(
+  const APipelineKeyHash: UInt64;
+  out AOutBinarySize: Cardinal): Boolean;
+var
+  I: Integer;
+begin
+  for I := 0 to High(FEntries) do
+    if FEntries[I].PipelineKeyHash = APipelineKeyHash then
+    begin
+      AOutBinarySize := FEntries[I].BinarySize;
+      Inc(FCacheHitCount);
+      Exit(True);
+    end;
+  AOutBinarySize := 0;
+  Result := False;
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -17649,12 +17988,36 @@ begin
   Result := FFramePacer;
 end;
 
+function TVulkanRHIDevice.GetIndirectComputeDispatcher: TCastleVulkanIndirectComputeDispatcher;
+begin
+  if FIndirectComputeDispatcher = nil then
+    FIndirectComputeDispatcher := TCastleVulkanIndirectComputeDispatcher.Create(Self);
+  Result := FIndirectComputeDispatcher;
+end;
+
+function TVulkanRHIDevice.GetBCnCompressor: TCastleVulkanBCnCompressor;
+begin
+  if FBCnCompressor = nil then
+    FBCnCompressor := TCastleVulkanBCnCompressor.Create(Self);
+  Result := FBCnCompressor;
+end;
+
+function TVulkanRHIDevice.GetPipelineBinaryManager: TCastleVulkanPipelineBinaryManager;
+begin
+  if FPipelineBinaryManager = nil then
+    FPipelineBinaryManager := TCastleVulkanPipelineBinaryManager.Create(Self);
+  Result := FPipelineBinaryManager;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FPipelineBinaryManager);
+  FreeAndNil(FBCnCompressor);
+  FreeAndNil(FIndirectComputeDispatcher);
   FreeAndNil(FFramePacer);
   FreeAndNil(FAutoExposureHistogram);
   FreeAndNil(FHiZPyramidGenerator);
