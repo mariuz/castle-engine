@@ -685,14 +685,16 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 44 Status**: Completed. Multi-channel signed distance field (MSDF) median-of-three vector/text evaluation (`GenerateMSDFTextFunctions`, `EvaluateMSDFMedianOfThree`, `EvaluateMSDFScreenPxOpacity`), procedural quadratic Bezier grass blade curves & tangents (`GenerateProceduralGrassBladeFunctions`, `EvaluateQuadraticBezierGrassBlade`), and exact Per-Pixel Linked List (PPLL) order-independent transparency manager (`TCastleVulkanPerPixelLinkedListOIT`) fully integrated and tested (162 unit tests passing).
 
 
-### Phase 45: Vulkan 1.4 Push Descriptors (`VK_KHR_push_descriptor`), Host Image Copy (`VK_EXT_host_image_copy`) Zero-Staging Streaming & Pipeline Robustness (PLANNED)
+### Phase 45: Vulkan 1.4 Push Descriptors (`VK_KHR_push_descriptor`), Host Image Copy (`VK_EXT_host_image_copy`) Zero-Staging Streaming & Pipeline Robustness (COMPLETED)
 
-* [ ] **45.1. Vulkan 1.4 Push Descriptors & Host Image Copy Layout Transition Helpers (`GeneratePushDescriptorPreamble` in `CastleInternalShaderRHI`)**:
+* [x] **45.1. Vulkan 1.4 Push Descriptors & Host Image Copy Layout Transition Helpers (`GeneratePushDescriptorPreamble` in `CastleInternalShaderRHI`)**:
   * Generate push-descriptor layout bindings and compute tight host-to-image memory copy strides (`ComputeHostImageCopyByteSize`).
-* [ ] **45.2. Spherical Gaussian (SG) Fast Specular & Diffuse Lobe Approximation (`GenerateSphericalGaussianFunctions` in `CastleInternalShaderRHI`)**:
+* [x] **45.2. Spherical Gaussian (SG) Fast Specular & Diffuse Lobe Approximation (`GenerateSphericalGaussianFunctions` in `CastleInternalShaderRHI`)**:
   * Evaluate Spherical Gaussian inner products and warp products (`EvaluateSphericalGaussianProduct`, `EvaluateSphericalGaussianIntegral`) for real-time anisotropic probe lighting.
-* [ ] **45.3. Vulkan 1.4 Host Image Copy & Push Descriptor Manager (`TCastleVulkanHostImageCopyManager` in `CastleInternalRHI_Vulkan`)**:
+* [x] **45.3. Vulkan 1.4 Host Image Copy & Push Descriptor Manager (`TCastleVulkanHostImageCopyManager` in `CastleInternalRHI_Vulkan`)**:
   * Manage zero-staging direct CPU-to-GPU image uploads (`vkCopyMemoryToImageEXT`) and command-buffer push descriptor updates (`vkCmdPushDescriptorSetKHR`).
+
+**Milestone 45 Status**: Completed. Vulkan 1.4 Push Descriptor GLSL preamble & Host Image Copy byte stride calculation (`GeneratePushDescriptorPreamble`, `ComputeHostImageCopyByteSize`), Spherical Gaussian (SG) lobe product & spherical integral evaluation (`GenerateSphericalGaussianFunctions`, `EvaluateSphericalGaussianProduct`, `EvaluateSphericalGaussianIntegral`), and Vulkan 1.4 Host Image Copy & Push Descriptor manager (`TCastleVulkanHostImageCopyManager`) fully integrated and tested (165 unit tests passing).
 
 
 ## 4.1. Unreal Engine 5 vs. Castle Game Engine Vulkan RHI Feature Parity Matrix

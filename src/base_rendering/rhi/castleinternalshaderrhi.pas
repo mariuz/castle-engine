@@ -1549,6 +1549,32 @@ type
       const AT: Single;
       out AOutPosition, AOutTangent: TVector3); static;
 
+    { Phase 45.1: Generates Vulkan 1.4 Push Descriptor (`VK_KHR_push_descriptor`) GLSL 450 set layout preamble
+      for zero-allocation command-buffer descriptor updates. }
+    function GeneratePushDescriptorPreamble(const ASetIndex: Cardinal = 1): String;
+
+    { Phase 45.1 CPU reference: Computes the byte size required for a Vulkan 1.4 Host Image Copy (`VK_EXT_host_image_copy`)
+      subresource transfer with aligned row pitch. }
+    class function ComputeHostImageCopyByteSize(
+      const AWidth, AHeight, ADepth, ABytesPerTexel: Cardinal;
+      const ARowAlignmentBytes: Cardinal = 1): UInt64; static;
+
+    { Phase 45.2: Generates GLSL 450 Spherical Gaussian (SG) lobe evaluation, inner product, and spherical integral
+      functions for real-time anisotropic specular and diffuse probe lighting. }
+    function GenerateSphericalGaussianFunctions: String;
+
+    { Phase 45.2 CPU reference: Evaluates the exact product of two normalized Spherical Gaussian lobes. }
+    class procedure EvaluateSphericalGaussianProduct(
+      const AAxis1: TVector3; const ASharpness1: Single;
+      const AAxis2: TVector3; const ASharpness2: Single;
+      out AProductAxis: TVector3;
+      out AProductSharpness, ALogAmplitudeScale: Single); static;
+
+    { Phase 45.2 CPU reference: Evaluates the exact integral of a Spherical Gaussian lobe over the unit sphere S^2. }
+    class function EvaluateSphericalGaussianIntegral(
+      const AAmplitude: TVector3;
+      const ASharpness: Single): TVector3; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -7514,6 +7540,87 @@ begin
     AOutTangent := Deriv.Normalize
   else
     AOutTangent := Vector3(0.0, 1.0, 0.0);
+end;
+
+function TCastleShaderGeneratorRHI.GeneratePushDescriptorPreamble(
+  const ASetIndex: Cardinal): String;
+begin
+  Result :=
+    '// Phase 45.1: Vulkan 1.4 Push Descriptor Set Preamble (VK_KHR_push_descriptor)' + NL +
+    Format('layout(set = %d, binding = 0) uniform CastlePushMaterialBlock {', [ASetIndex]) + NL +
+    '  vec4 baseColorFactor;' + NL +
+    '  vec4 metallicRoughnessNormalOcclusion;' + NL +
+    '} castle_PushMaterial;' + NL +
+    Format('layout(set = %d, binding = 1) uniform sampler2D castle_PushBaseColorTex;', [ASetIndex]) + NL +
+    Format('layout(set = %d, binding = 2) uniform sampler2D castle_PushNormalRoughnessTex;', [ASetIndex]) + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.ComputeHostImageCopyByteSize(
+  const AWidth, AHeight, ADepth, ABytesPerTexel: Cardinal;
+  const ARowAlignmentBytes: Cardinal): UInt64;
+var
+  W, H, D, Bpp, AlignVal, RawRowBytes, AlignedRowPitch: UInt64;
+begin
+  W := Max(Cardinal(1), AWidth);
+  H := Max(Cardinal(1), AHeight);
+  D := Max(Cardinal(1), ADepth);
+  Bpp := Max(Cardinal(1), ABytesPerTexel);
+  AlignVal := Max(Cardinal(1), ARowAlignmentBytes);
+  RawRowBytes := W * Bpp;
+  AlignedRowPitch := ((RawRowBytes + AlignVal - 1) div AlignVal) * AlignVal;
+  Result := AlignedRowPitch * H * D;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateSphericalGaussianFunctions: String;
+begin
+  Result :=
+    '// Phase 45.2: Spherical Gaussian (SG) Fast Specular & Diffuse Lobe Approximation' + NL +
+    'vec3 EvaluateSphericalGaussian(vec3 dir, vec3 axis, float sharpness, vec3 amplitude) {' + NL +
+    '  return amplitude * exp(sharpness * (dot(dir, axis) - 1.0));' + NL +
+    '}' + NL +
+    'vec3 EvaluateSphericalGaussianIntegral(vec3 amplitude, float sharpness) {' + NL +
+    '  if (sharpness <= 1e-4) return amplitude * (4.0 * 3.14159265359);' + NL +
+    '  float expTerm = 1.0 - exp(-2.0 * sharpness);' + NL +
+    '  return amplitude * (2.0 * 3.14159265359 * expTerm / sharpness);' + NL +
+    '}' + NL;
+end;
+
+class procedure TCastleShaderGeneratorRHI.EvaluateSphericalGaussianProduct(
+  const AAxis1: TVector3; const ASharpness1: Single;
+  const AAxis2: TVector3; const ASharpness2: Single;
+  out AProductAxis: TVector3;
+  out AProductSharpness, ALogAmplitudeScale: Single);
+var
+  S1, S2, UmLen: Single;
+  Um: TVector3;
+begin
+  S1 := Max(0.0, ASharpness1);
+  S2 := Max(0.0, ASharpness2);
+  Um := AAxis1 * S1 + AAxis2 * S2;
+  UmLen := Um.Length;
+  AProductSharpness := UmLen;
+  if UmLen > 1e-6 then
+    AProductAxis := Um / UmLen
+  else
+    AProductAxis := Vector3(0.0, 1.0, 0.0);
+  ALogAmplitudeScale := UmLen - (S1 + S2);
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateSphericalGaussianIntegral(
+  const AAmplitude: TVector3;
+  const ASharpness: Single): TVector3;
+var
+  S, ExpTerm, Factor: Single;
+begin
+  S := Max(0.0, ASharpness);
+  if S <= 1e-4 then
+    Factor := 4.0 * Pi
+  else
+  begin
+    ExpTerm := 1.0 - Exp(-2.0 * S);
+    Factor := 2.0 * Pi * ExpTerm / S;
+  end;
+  Result := AAmplitude * Factor;
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

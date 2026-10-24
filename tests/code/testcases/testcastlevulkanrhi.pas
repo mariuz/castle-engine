@@ -201,6 +201,9 @@ type
     procedure TestMSDFMedianOfThreeAndScreenPxOpacityRHI;
     procedure TestQuadraticBezierGrassBladePositionAndTangentRHI;
     procedure TestVulkanPerPixelLinkedListOITSortAndResolveRHI;
+    procedure TestPushDescriptorPreambleAndHostImageCopyByteSizeRHI;
+    procedure TestSphericalGaussianProductAndIntegralRHI;
+    procedure TestVulkanHostImageCopyAndPushDescriptorManagerRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -10150,6 +10153,101 @@ begin
       (Device.PerPixelLinkedListOIT.AtomicCounterBuffer <> nil));
     AssertEquals('ResolveDispatchCount must be 1', 1, Integer(Device.PerPixelLinkedListOIT.ResolveDispatchCount));
   finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestPushDescriptorPreambleAndHostImageCopyByteSizeRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  PushGLSL: String;
+  TightBytes, AlignedBytes: UInt64;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Push Descriptor GLSL 450 preamble }
+    PushGLSL := Gen.GeneratePushDescriptorPreamble(2);
+    AssertTrue('Push Descriptor GLSL must include CastlePushMaterialBlock at set 2, binding 0',
+      Pos('layout(set = 2, binding = 0) uniform CastlePushMaterialBlock', PushGLSL) > 0);
+    AssertTrue('Push Descriptor GLSL must include castle_PushBaseColorTex at set 2, binding 1',
+      Pos('layout(set = 2, binding = 1) uniform sampler2D castle_PushBaseColorTex;', PushGLSL) > 0);
+
+    { 2. Verify Host Image Copy byte size with tight (1-byte) and aligned (256-byte) row pitch }
+    TightBytes := TCastleShaderGeneratorRHI.ComputeHostImageCopyByteSize(50, 10, 1, 4, 1);
+    AlignedBytes := TCastleShaderGeneratorRHI.ComputeHostImageCopyByteSize(50, 10, 1, 4, 256);
+
+    { 50 * 4 = 200 bytes/row -> tight = 200 * 10 = 2000; 256-aligned = 256 * 10 = 2560 }
+    AssertEquals('Tight host image copy size must be 2000 bytes', Int64(2000), Int64(TightBytes));
+    AssertEquals('256-byte row-aligned host image copy size must be 2560 bytes', Int64(2560), Int64(AlignedBytes));
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSphericalGaussianProductAndIntegralRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  SGGLSL: String;
+  ProdAxis: TVector3;
+  ProdSharpness, LogAmpScale: Single;
+  IsoIntegral, SharpIntegral: TVector3;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Spherical Gaussian GLSL 450 functions }
+    SGGLSL := Gen.GenerateSphericalGaussianFunctions;
+    AssertTrue('SG GLSL must include EvaluateSphericalGaussian',
+      Pos('vec3 EvaluateSphericalGaussian(vec3 dir, vec3 axis, float sharpness, vec3 amplitude)', SGGLSL) > 0);
+    AssertTrue('SG GLSL must include EvaluateSphericalGaussianIntegral',
+      Pos('vec3 EvaluateSphericalGaussianIntegral(vec3 amplitude, float sharpness)', SGGLSL) > 0);
+
+    { 2. Verify Spherical Gaussian lobe product for aligned and orthogonal lobes }
+    TCastleShaderGeneratorRHI.EvaluateSphericalGaussianProduct(
+      Vector3(0.0, 1.0, 0.0), 4.0,
+      Vector3(0.0, 1.0, 0.0), 6.0,
+      ProdAxis, ProdSharpness, LogAmpScale);
+    AssertSameValue(1.0, ProdAxis.Y, 1e-6);
+    AssertSameValue(10.0, ProdSharpness, 1e-5);
+    AssertSameValue(0.0, LogAmpScale, 1e-5);
+
+    { 3. Verify Spherical Gaussian integral approaches 4*pi*amplitude at sharpness->0 and decreases as sharpness grows }
+    IsoIntegral := TCastleShaderGeneratorRHI.EvaluateSphericalGaussianIntegral(Vector3(1.0, 1.0, 1.0), 0.0);
+    SharpIntegral := TCastleShaderGeneratorRHI.EvaluateSphericalGaussianIntegral(Vector3(1.0, 1.0, 1.0), 8.0);
+    AssertSameValue(4.0 * Pi, IsoIntegral.X, 1e-4);
+    AssertTrue('Sharper SG lobe must integrate to smaller total solid angle than isotropic lobe',
+      (SharpIntegral.X > 0.0) and (SharpIntegral.X < IsoIntegral.X));
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanHostImageCopyAndPushDescriptorManagerRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  TexDesc: TRHITextureDesc;
+  Tex: TVulkanRHITexture;
+  CopyOK: Boolean;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6677)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  Tex := nil;
+  try
+    TexDesc := TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuSampled, tuTransferDst], 1, 1);
+    Tex := Device.CreateTexture(TexDesc) as TVulkanRHITexture;
+
+    CopyOK := Device.HostImageCopyManager.CopyHostMemoryToTexture(Tex, nil, 64 * 64 * 4, 0);
+    AssertTrue('Zero-staging host image copy must succeed for valid mip 0', CopyOK);
+    AssertEquals('HostImageCopyCount must be 1', 1, Integer(Device.HostImageCopyManager.HostImageCopyCount));
+    AssertEquals('HostImageBytesCopied must be 16384', Int64(16384), Int64(Device.HostImageCopyManager.HostImageBytesCopied));
+
+    CmdList.BeginRecording;
+    Device.HostImageCopyManager.RecordPushDescriptorUpdate(CmdList, 1, 3);
+    CmdList.EndRecording;
+    AssertEquals('PushDescriptorUpdateCount must be 1', 1, Integer(Device.HostImageCopyManager.PushDescriptorUpdateCount));
+  finally
+    FreeAndNil(Tex);
     FreeAndNil(CmdList);
     FreeAndNil(Device);
   end;

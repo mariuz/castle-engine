@@ -77,10 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–43**: **COMPLETED** (100%).
-- **Phase 44 (GPU-Driven Procedural Foliage / Grass Blade Instancing, Multi-Channel Signed Distance Field Text & Per-Pixel Linked List Exact OIT)**: **COMPLETED** (100%, 162 unit tests passing):
-  - [x] **44.1. Multi-Channel Signed Distance Field (MSDF) Median-of-Three Crisp Vector / Text Evaluation (`GenerateMSDFTextFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestMSDFMedianOfThreeAndScreenPxOpacityRHI`).
-  - [x] **44.2. Procedural Quadratic Bezier Grass Blade Bending & Wind Flutter (`GenerateProceduralGrassBladeFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestQuadraticBezierGrassBladePositionAndTangentRHI`).
-  - [x] **44.3. Exact Order-Independent Transparency Per-Pixel Linked List Manager (`TCastleVulkanPerPixelLinkedListOIT` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanPerPixelLinkedListOITSortAndResolveRHI`).
-- **Vulkan 1.4 / Next-Gen Extended Roadmap (Phase 45)**:
-  - **Phase 45 (Vulkan 1.4 Push Descriptors, Host Image Copy & Spherical Gaussians)**: `ComputeHostImageCopyByteSize`, `GenerateSphericalGaussianFunctions`, and `TCastleVulkanHostImageCopyManager`.
+- **Phases 1–44**: **COMPLETED** (100%).
+- **Phase 45 (Vulkan 1.4 Push Descriptors, Host Image Copy Zero-Staging Streaming & Spherical Gaussian Fast Lobe Approximation)**: **COMPLETED** (100%, 165 unit tests passing):
+  - [x] **45.1. Vulkan 1.4 Push Descriptors & Host Image Copy Layout Transition Helpers (`GeneratePushDescriptorPreamble` in `CastleInternalShaderRHI`)** — Completed & tested (`TestPushDescriptorPreambleAndHostImageCopyByteSizeRHI`).
+  - [x] **45.2. Spherical Gaussian (SG) Fast Specular & Diffuse Lobe Approximation (`GenerateSphericalGaussianFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSphericalGaussianProductAndIntegralRHI`).
+  - [x] **45.3. Vulkan 1.4 Host Image Copy & Push Descriptor Manager (`TCastleVulkanHostImageCopyManager` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanHostImageCopyAndPushDescriptorManagerRHI`).
