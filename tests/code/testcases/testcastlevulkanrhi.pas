@@ -210,6 +210,9 @@ type
     procedure TestPCSSContactHardeningPenumbraWidthRHI;
     procedure TestDescriptorBufferAlignedOffsetCalculationRHI;
     procedure TestVulkanDescriptorBufferManagerAllocationAndBindRHI;
+    procedure TestCarPaintMultiLayerFlakeBRDFRHI;
+    procedure TestScreenSpaceCurvatureCavityShadingRHI;
+    procedure TestVulkanHiZPyramidGeneratorDownsampleAndDispatchRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -10420,6 +10423,96 @@ begin
       (Device.DescriptorBufferManager.ResourceDescriptorBuffer <> nil) and
       (Device.DescriptorBufferManager.SamplerDescriptorBuffer <> nil));
     AssertEquals('BindOffsetsCount must be 2', 2, Integer(Device.DescriptorBufferManager.BindOffsetsCount));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCarPaintMultiLayerFlakeBRDFRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  CarPaintGLSL: String;
+  FlakeOff, FlakeAligned: TVector3;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Car-Paint GLSL 450 functions }
+    CarPaintGLSL := Gen.GenerateCarPaintFlakeFunctions;
+    AssertTrue('Car-Paint GLSL must include EvaluateCarPaintMultiLayerBRDF',
+      Pos('vec3 EvaluateCarPaintMultiLayerBRDF(', CarPaintGLSL) > 0);
+
+    { 2. Verify metallic flake glint lobe increases radiance when AFlakeNdotH = 1.0 vs 0.0 }
+    FlakeOff := TCastleShaderGeneratorRHI.EvaluateCarPaintMultiLayerBRDF(
+      Vector3(0.1, 0.0, 0.8),
+      Vector3(0.0, 0.2, 0.5),
+      Vector3(0.9, 0.9, 1.0),
+      0.8, 0.5, 0.0, 64.0);
+    FlakeAligned := TCastleShaderGeneratorRHI.EvaluateCarPaintMultiLayerBRDF(
+      Vector3(0.1, 0.0, 0.8),
+      Vector3(0.0, 0.2, 0.5),
+      Vector3(0.9, 0.9, 1.0),
+      0.8, 0.5, 1.0, 64.0);
+
+    AssertTrue('Aligned metallic flake normal must boost car-paint specular radiance',
+      FlakeAligned.Z > FlakeOff.Z + 0.5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestScreenSpaceCurvatureCavityShadingRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  CurvatureGLSL: String;
+  ConvexEdge, ConcaveCavity: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Screen-Space Curvature GLSL 450 functions }
+    CurvatureGLSL := Gen.GenerateScreenSpaceCurvatureFunctions;
+    AssertTrue('Curvature GLSL must include EvaluateScreenSpaceCurvatureCavity',
+      Pos('float EvaluateScreenSpaceCurvatureCavity(', CurvatureGLSL) > 0);
+
+    { 2. Verify positive normal divergence produces convex edge highlight (> 1.0)
+         and negative normal divergence produces concave cavity darkening (< 1.0) }
+    ConvexEdge := TCastleShaderGeneratorRHI.EvaluateScreenSpaceCurvatureCavity(
+      Vector3(0.3, 0.0, 0.0), Vector3(0.0, 0.3, 0.0), 1.0);
+    ConcaveCavity := TCastleShaderGeneratorRHI.EvaluateScreenSpaceCurvatureCavity(
+      Vector3(-0.3, 0.0, 0.0), Vector3(0.0, -0.3, 0.0), 1.0);
+
+    AssertSameValue(1.6, ConvexEdge, 1e-6);
+    AssertSameValue(0.4, ConcaveCavity, 1e-6);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanHiZPyramidGeneratorDownsampleAndDispatchRHI;
+var
+  MinD, MaxD: Single;
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+begin
+  { 1. Verify conservative 2x2 depth downsample computes exact min/max depth }
+  TCastleVulkanHiZPyramidGenerator.EvaluateConservativeDepthDownsample2x2(
+    0.25, 0.85, 0.12, 0.60, MinD, MaxD);
+  AssertSameValue(0.12, MinD, 1e-6);
+  AssertSameValue(0.85, MaxD, 1e-6);
+
+  { 2. Verify TCastleVulkanHiZPyramidGenerator mip-chain allocation and compute dispatches }
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($667A)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    CmdList.BeginRecording;
+    Device.HiZPyramidGenerator.DispatchHiZPyramidBuild(CmdList, 512, 256);
+    CmdList.EndRecording;
+
+    AssertTrue('HiZPyramidTexture must be allocated', Device.HiZPyramidGenerator.HiZPyramidTexture <> nil);
+    { 512x256 has 10 mip levels (512 -> 256 -> 128 -> 64 -> 32 -> 16 -> 8 -> 4 -> 2 -> 1) }
+    AssertEquals('MipLevelCount for 512x256 must be 10', 10, Integer(Device.HiZPyramidGenerator.MipLevelCount));
+    AssertEquals('BuildDispatchCount must be 1', 1, Integer(Device.HiZPyramidGenerator.BuildDispatchCount));
+    AssertEquals('CmdList ComputeDispatchCount must equal 10 mip dispatches', 10, Integer(CmdList.ComputeDispatchCount));
   finally
     FreeAndNil(CmdList);
     FreeAndNil(Device);

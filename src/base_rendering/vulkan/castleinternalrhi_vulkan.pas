@@ -3249,6 +3249,45 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { GPU Hi-Z Conservative Depth Pyramid Generator                              }
+  { -------------------------------------------------------------------------- }
+
+  { Builds a conservative min/max hierarchical depth (Hi-Z) pyramid texture
+    across mip levels for two-phase occlusion culling and screen-space raytracing. }
+  TCastleVulkanHiZPyramidGenerator = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FHiZPyramidTexture: TVulkanRHITexture;
+    FMipLevelCount: Cardinal;
+    FBuildDispatchCount: Cardinal;
+    FDownsampleComputePipeline: TVulkanRHIComputePipeline;
+    procedure EnsureHiZPyramidResources(const ABaseWidth, ABaseHeight: Cardinal);
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Evaluates conservative 2x2 depth reduction producing both the closest (min)
+      and farthest (max) depth values across 4 texels. }
+    class procedure EvaluateConservativeDepthDownsample2x2(
+      const AD00, AD10, AD01, AD11: Single;
+      out AMinDepth, AMaxDepth: Single); static;
+
+    { Dispatches the hierarchical depth mip-chain downsample compute passes
+      across all mip levels of the Hi-Z pyramid texture. }
+    procedure DispatchHiZPyramidBuild(
+      const ACommandList: TVulkanRHICommandList;
+      const ABaseWidth, ABaseHeight: Cardinal;
+      const AComputePipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property HiZPyramidTexture: TVulkanRHITexture read FHiZPyramidTexture;
+    property MipLevelCount: Cardinal read FMipLevelCount;
+    property BuildDispatchCount: Cardinal read FBuildDispatchCount;
+    property DownsampleComputePipeline: TVulkanRHIComputePipeline
+      read FDownsampleComputePipeline write FDownsampleComputePipeline;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -3368,6 +3407,7 @@ type
     FHostImageCopyManager: TCastleVulkanHostImageCopyManager;
     FGaussianSplatRenderer: TCastleVulkanGaussianSplatRenderer;
     FDescriptorBufferManager: TCastleVulkanDescriptorBufferManager;
+    FHiZPyramidGenerator: TCastleVulkanHiZPyramidGenerator;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -3492,6 +3532,7 @@ type
     function GetHostImageCopyManager: TCastleVulkanHostImageCopyManager;
     function GetGaussianSplatRenderer: TCastleVulkanGaussianSplatRenderer;
     function GetDescriptorBufferManager: TCastleVulkanDescriptorBufferManager;
+    function GetHiZPyramidGenerator: TCastleVulkanHiZPyramidGenerator;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -3721,6 +3762,7 @@ type
     property HostImageCopyManager: TCastleVulkanHostImageCopyManager read GetHostImageCopyManager;
     property GaussianSplatRenderer: TCastleVulkanGaussianSplatRenderer read GetGaussianSplatRenderer;
     property DescriptorBufferManager: TCastleVulkanDescriptorBufferManager read GetDescriptorBufferManager;
+    property HiZPyramidGenerator: TCastleVulkanHiZPyramidGenerator read GetHiZPyramidGenerator;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -16503,6 +16545,102 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanHiZPyramidGenerator                                             }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanHiZPyramidGenerator.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FHiZPyramidTexture := nil;
+  FMipLevelCount := 0;
+  FBuildDispatchCount := 0;
+  FDownsampleComputePipeline := nil;
+end;
+
+destructor TCastleVulkanHiZPyramidGenerator.Destroy;
+begin
+  FreeAndNil(FHiZPyramidTexture);
+  inherited;
+end;
+
+class procedure TCastleVulkanHiZPyramidGenerator.EvaluateConservativeDepthDownsample2x2(
+  const AD00, AD10, AD01, AD11: Single;
+  out AMinDepth, AMaxDepth: Single);
+begin
+  AMinDepth := Min(Min(AD00, AD10), Min(AD01, AD11));
+  AMaxDepth := Max(Max(AD00, AD10), Max(AD01, AD11));
+end;
+
+procedure TCastleVulkanHiZPyramidGenerator.EnsureHiZPyramidResources(
+  const ABaseWidth, ABaseHeight: Cardinal);
+var
+  W, H, Mips, MaxDim: Cardinal;
+  TexDesc: TRHITextureDesc;
+begin
+  if FDevice = nil then
+    Exit;
+  W := Max(Cardinal(1), ABaseWidth);
+  H := Max(Cardinal(1), ABaseHeight);
+  MaxDim := Max(W, H);
+  Mips := 1;
+  while MaxDim > 1 do
+  begin
+    MaxDim := MaxDim shr 1;
+    Inc(Mips);
+  end;
+  FMipLevelCount := Mips;
+
+  if (FHiZPyramidTexture = nil) or
+     (FHiZPyramidTexture.Desc.Width <> W) or
+     (FHiZPyramidTexture.Desc.Height <> H) or
+     (FHiZPyramidTexture.Desc.MipLevels <> Mips) then
+  begin
+    FreeAndNil(FHiZPyramidTexture);
+    TexDesc := TRHITextureDesc.Create2D(W, H, pfRG16_Float,
+      [tuSampled, tuStorage], Mips, 1);
+    TexDesc.DebugName := 'HiZConservativeDepthPyramid';
+    FHiZPyramidTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+  end;
+end;
+
+procedure TCastleVulkanHiZPyramidGenerator.DispatchHiZPyramidBuild(
+  const ACommandList: TVulkanRHICommandList;
+  const ABaseWidth, ABaseHeight: Cardinal;
+  const AComputePipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+var
+  ActivePipeline: TVulkanRHIComputePipeline;
+  MipIdx, MipW, MipH, GroupsX, GroupsY: Cardinal;
+begin
+  if ACommandList = nil then
+    Exit;
+  EnsureHiZPyramidResources(ABaseWidth, ABaseHeight);
+
+  if AComputePipeline <> nil then
+    ActivePipeline := AComputePipeline
+  else
+    ActivePipeline := FDownsampleComputePipeline;
+
+  if ActivePipeline <> nil then
+    ACommandList.BindComputePipeline(ActivePipeline);
+  if ADescriptorSet <> nil then
+    ACommandList.BindComputeDescriptorSet(0, ADescriptorSet, []);
+
+  MipW := Max(Cardinal(1), ABaseWidth);
+  MipH := Max(Cardinal(1), ABaseHeight);
+  for MipIdx := 0 to FMipLevelCount - 1 do
+  begin
+    GroupsX := (MipW + 7) div 8;
+    GroupsY := (MipH + 7) div 8;
+    ACommandList.Dispatch(Max(Cardinal(1), GroupsX), Max(Cardinal(1), GroupsY), 1);
+    MipW := Max(Cardinal(1), MipW shr 1);
+    MipH := Max(Cardinal(1), MipH shr 1);
+  end;
+  Inc(FBuildDispatchCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -17234,12 +17372,20 @@ begin
   Result := FDescriptorBufferManager;
 end;
 
+function TVulkanRHIDevice.GetHiZPyramidGenerator: TCastleVulkanHiZPyramidGenerator;
+begin
+  if FHiZPyramidGenerator = nil then
+    FHiZPyramidGenerator := TCastleVulkanHiZPyramidGenerator.Create(Self);
+  Result := FHiZPyramidGenerator;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FHiZPyramidGenerator);
   FreeAndNil(FDescriptorBufferManager);
   FreeAndNil(FGaussianSplatRenderer);
   FreeAndNil(FHostImageCopyManager);

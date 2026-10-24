@@ -1607,6 +1607,24 @@ type
       const ASetByteSize: UInt64;
       const AOffsetAlignment: UInt64 = 64): UInt64; static;
 
+    { Phase 48.1: Generates GLSL 450 Multi-Layer Metallic Flake & Clear-Coat Car-Paint BRDF functions. }
+    function GenerateCarPaintFlakeFunctions: String;
+
+    { Phase 48.1 CPU reference: Evaluates multi-layer automotive car-paint radiance combining
+      view-dependent two-tone base coat, metallic flake sparkle lobe, and dielectric clear coat Fresnel. }
+    class function EvaluateCarPaintMultiLayerBRDF(
+      const ABaseColorNormal, ABaseColorGrazing, AFlakeColor: TVector3;
+      const ANdotV, ANdotH, AFlakeNdotH, AFlakeExponent: Single): TVector3; static;
+
+    { Phase 48.2: Generates GLSL 450 Screen-Space Normal Curvature & Ridge/Valley Cavity Shading functions. }
+    function GenerateScreenSpaceCurvatureFunctions: String;
+
+    { Phase 48.2 CPU reference: Evaluates screen-space ridge/valley cavity multiplier in [0..2]
+      from horizontal and vertical view-normal derivatives. }
+    class function EvaluateScreenSpaceCurvatureCavity(
+      const ADNormalDx, ADNormalDy: TVector3;
+      const ACurvatureScale: Single): Single; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -7754,6 +7772,58 @@ begin
   AlignVal := Max(UInt64(1), AOffsetAlignment);
   AlignedStride := ((Max(UInt64(1), ASetByteSize) + AlignVal - 1) div AlignVal) * AlignVal;
   Result := UInt64(ASetIndex) * AlignedStride;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateCarPaintFlakeFunctions: String;
+begin
+  Result :=
+    '// Phase 48.1: Multi-Layer Metallic Flake & Clear-Coat Car-Paint BRDF' + NL +
+    'vec3 EvaluateCarPaintMultiLayerBRDF(vec3 baseNormal, vec3 baseGrazing, vec3 flakeColor,' + NL +
+    '  float ndotV, float ndotH, float flakeNdotH, float flakeExp) {' + NL +
+    '  float v = clamp(ndotV, 0.0, 1.0);' + NL +
+    '  float fresnelClearCoat = 0.04 + 0.96 * pow(1.0 - v, 5.0);' + NL +
+    '  vec3 twoToneBase = mix(baseGrazing, baseNormal, v);' + NL +
+    '  float flakeSpec = pow(clamp(flakeNdotH, 0.0, 1.0), max(1.0, flakeExp));' + NL +
+    '  float coatSpec = pow(clamp(ndotH, 0.0, 1.0), 128.0) * fresnelClearCoat;' + NL +
+    '  return (twoToneBase + flakeColor * flakeSpec) * (1.0 - fresnelClearCoat) + vec3(coatSpec);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateCarPaintMultiLayerBRDF(
+  const ABaseColorNormal, ABaseColorGrazing, AFlakeColor: TVector3;
+  const ANdotV, ANdotH, AFlakeNdotH, AFlakeExponent: Single): TVector3;
+var
+  V, OneMinusV, FresnelClearCoat, FlakeSpec, CoatSpec: Single;
+  TwoToneBase: TVector3;
+begin
+  V := EnsureRange(ANdotV, 0.0, 1.0);
+  OneMinusV := 1.0 - V;
+  FresnelClearCoat := 0.04 + 0.96 * (OneMinusV * OneMinusV * OneMinusV * OneMinusV * OneMinusV);
+  TwoToneBase := ABaseColorGrazing * (1.0 - V) + ABaseColorNormal * V;
+  FlakeSpec := Power(EnsureRange(AFlakeNdotH, 0.0, 1.0), Max(1.0, AFlakeExponent));
+  CoatSpec := Power(EnsureRange(ANdotH, 0.0, 1.0), 128.0) * FresnelClearCoat;
+  Result := (TwoToneBase + AFlakeColor * FlakeSpec) * (1.0 - FresnelClearCoat) +
+    Vector3(CoatSpec, CoatSpec, CoatSpec);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateScreenSpaceCurvatureFunctions: String;
+begin
+  Result :=
+    '// Phase 48.2: Screen-Space Normal Curvature & Ridge/Valley Cavity Shading' + NL +
+    'float EvaluateScreenSpaceCurvatureCavity(vec3 dNdx, vec3 dNdy, float curvatureScale) {' + NL +
+    '  float curv = (dNdx.x + dNdy.y) * curvatureScale;' + NL +
+    '  return clamp(1.0 + curv, 0.0, 2.0);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateScreenSpaceCurvatureCavity(
+  const ADNormalDx, ADNormalDy: TVector3;
+  const ACurvatureScale: Single): Single;
+var
+  Curv: Single;
+begin
+  Curv := (ADNormalDx.X + ADNormalDy.Y) * ACurvatureScale;
+  Result := EnsureRange(1.0 + Curv, 0.0, 2.0);
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

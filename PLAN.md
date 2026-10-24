@@ -721,14 +721,16 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 47 Status**: Completed. Percentage-Closer Soft Shadows (PCSS) contact-hardening penumbra evaluation (`GeneratePCSSSoftShadowFunctions`, `EvaluatePCSSPenumbraWidth`), `VK_EXT_descriptor_buffer` aligned offset calculation (`ComputeDescriptorBufferAlignedOffset`), and Vulkan Descriptor Buffer manager (`TCastleVulkanDescriptorBufferManager`) fully integrated and tested (171 unit tests passing).
 
 
-### Phase 48: Multi-Layer Metallic Flake Car-Paint BRDF, Screen-Space Curvature Cavity Shading & GPU Hi-Z Conservative Depth Pyramid Generator (PLANNED)
+### Phase 48: Multi-Layer Metallic Flake Car-Paint BRDF, Screen-Space Curvature Cavity Shading & GPU Hi-Z Conservative Depth Pyramid Generator (COMPLETED)
 
-* [ ] **48.1. Multi-Layer Metallic Flake & Clear-Coat Car-Paint BRDF (`GenerateCarPaintFlakeFunctions` in `CastleInternalShaderRHI`)**:
+* [x] **48.1. Multi-Layer Metallic Flake & Clear-Coat Car-Paint BRDF (`GenerateCarPaintFlakeFunctions` in `CastleInternalShaderRHI`)**:
   * Evaluate view-dependent two-tone base coat, stochastic metallic sparkle flakes, and dielectric clear coat (`EvaluateCarPaintMultiLayerBRDF`).
-* [ ] **48.2. Screen-Space Normal Curvature & Ridge/Valley Cavity Occlusion (`GenerateScreenSpaceCurvatureFunctions` in `CastleInternalShaderRHI`)**:
+* [x] **48.2. Screen-Space Normal Curvature & Ridge/Valley Cavity Occlusion (`GenerateScreenSpaceCurvatureFunctions` in `CastleInternalShaderRHI`)**:
   * Compute screen-space surface curvature from normal derivatives (`EvaluateScreenSpaceCurvatureCavity`) for procedural edge wear and crease darkening.
-* [ ] **48.3. GPU Hierarchical-Z (Hi-Z) Conservative Min/Max Depth Pyramid Generator (`TCastleVulkanHiZPyramidGenerator` in `CastleInternalRHI_Vulkan`)**:
+* [x] **48.3. GPU Hierarchical-Z (Hi-Z) Conservative Min/Max Depth Pyramid Generator (`TCastleVulkanHiZPyramidGenerator` in `CastleInternalRHI_Vulkan`)**:
   * Manage conservative $2 \times 2$ min/max depth reduction across mip levels (`EvaluateConservativeDepthDownsample2x2`, `DispatchHiZPyramidBuild`).
+
+**Milestone 48 Status**: Completed. Multi-Layer Metallic Flake & Clear-Coat Car-Paint BRDF (`GenerateCarPaintFlakeFunctions`, `EvaluateCarPaintMultiLayerBRDF`), Screen-Space Normal Curvature & Ridge/Valley Cavity Occlusion (`GenerateScreenSpaceCurvatureFunctions`, `EvaluateScreenSpaceCurvatureCavity`), and GPU Hierarchical-Z (Hi-Z) Conservative Min/Max Depth Pyramid Generator (`TCastleVulkanHiZPyramidGenerator`) fully integrated and tested (174 unit tests passing).
 
 
 ### Phase 49: AgX Filmic Gamut Compression, Physically Based Camera Exposure ($\text{EV}_{100}$) & GPU Luminance Histogram Auto-Exposure Manager (PLANNED)

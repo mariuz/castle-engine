@@ -77,12 +77,11 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–46**: **COMPLETED** (100%).
-- **Phase 47 (Vulkan Descriptor Buffers, PCSS Contact-Hardening Soft Shadows & Descriptor Buffer Alignment)**: **COMPLETED** (100%, 171 unit tests passing):
-  - [x] **47.1. Percentage-Closer Soft Shadows (PCSS) Blocker Search & Penumbra Estimation (`GeneratePCSSSoftShadowFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestPCSSContactHardeningPenumbraWidthRHI`).
-  - [x] **47.2. Vulkan Descriptor Buffer (`VK_EXT_descriptor_buffer`) Offset Alignment (`ComputeDescriptorBufferAlignedOffset` in `CastleInternalShaderRHI`)** — Completed & tested (`TestDescriptorBufferAlignedOffsetCalculationRHI`).
-  - [x] **47.3. Vulkan Descriptor Buffer Manager (`TCastleVulkanDescriptorBufferManager` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanDescriptorBufferManagerAllocationAndBindRHI`).
-- **Vulkan 1.4 / Next-Gen Extended Roadmap (Phases 48–50)**:
-  - **Phase 48 (Multi-Layer Metallic Flake Car-Paint BRDF, Screen-Space Curvature Cavity & Hi-Z Depth Pyramid)**: `EvaluateCarPaintMultiLayerBRDF`, `EvaluateScreenSpaceCurvatureCavity`, and `TCastleVulkanHiZPyramidGenerator`.
+- **Phases 1–47**: **COMPLETED** (100%).
+- **Phase 48 (Multi-Layer Metallic Flake Car-Paint BRDF, Screen-Space Curvature Cavity & Hi-Z Depth Pyramid)**: **COMPLETED** (100%, 174 unit tests passing):
+  - [x] **48.1. Multi-Layer Metallic Flake & Clear-Coat Car-Paint BRDF (`GenerateCarPaintFlakeFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestCarPaintMultiLayerFlakeBRDFRHI`).
+  - [x] **48.2. Screen-Space Normal Curvature & Ridge/Valley Cavity Occlusion (`GenerateScreenSpaceCurvatureFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestScreenSpaceCurvatureCavityShadingRHI`).
+  - [x] **48.3. GPU Hierarchical-Z (Hi-Z) Conservative Min/Max Depth Pyramid Generator (`TCastleVulkanHiZPyramidGenerator` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanHiZPyramidGeneratorDownsampleAndDispatchRHI`).
+- **Vulkan 1.4 / Next-Gen Extended Roadmap (Phases 49–50)**:
   - **Phase 49 (AgX Gamut Compression, Physically Based Camera EV100 & GPU Histogram Auto-Exposure)**: `EvaluateEV100FromCameraSettings`, `EvaluateChromaGamutCompression`, and `TCastleVulkanAutoExposureHistogram`.
   - **Phase 50 (Analytical Capsule Soft Shadows, Epipolar Light Shafts & GPU Frame Pacing Manager)**: `EvaluateCapsuleSoftShadowOcclusion`, `EvaluateEpipolarSliceRayStep`, and `TCastleVulkanFramePacer`.
