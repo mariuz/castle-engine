@@ -186,6 +186,9 @@ type
     procedure TestOpticalFlowBlockMatchingAndSubpixelOffsetRHI;
     procedure TestSpatioTemporalBlueNoiseAndR2SequenceRHI;
     procedure TestVulkanNeuralDenoiserMLPInferenceRHI;
+    procedure TestSERCoherenceHintKeyPackingRHI;
+    procedure TestDualSourceColoredGlassTransmissionRHI;
+    procedure TestVulkanProgrammableSampleLocationsRGSSRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -9627,6 +9630,101 @@ begin
     AssertTrue('MLPWeightsBuffer must be allocated', Device.NeuralDenoiser.MLPWeightsBuffer <> nil);
     AssertTrue('DenoisedOutputTexture must be allocated', Device.NeuralDenoiser.DenoisedOutputTexture <> nil);
     AssertEquals('InferenceDispatchCount must be 1', 1, Integer(Device.NeuralDenoiser.InferenceDispatchCount));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSERCoherenceHintKeyPackingRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  SERGLSL: String;
+  KeyHitPos, KeyHitNeg, KeyMiss: Cardinal;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify SER Coherence Hint GLSL 450 functions }
+    SERGLSL := Gen.GenerateSERCoherenceHintFunctions;
+    AssertTrue('SER GLSL must include PackSERCoherenceHintKey',
+      Pos('uint PackSERCoherenceHintKey(bool isHit, uint materialShadingModelID, vec3 rayDirection)', SERGLSL) > 0);
+
+    { 2. Verify 8-bit coherence key packing: bit 7 = hit/miss, bits 3..6 = materialId, bits 0..2 = octant }
+    KeyHitPos := TCastleShaderGeneratorRHI.PackSERCoherenceHintKey(True, 5, Vector3(1.0, 1.0, 1.0));
+    KeyHitNeg := TCastleShaderGeneratorRHI.PackSERCoherenceHintKey(True, 5, Vector3(-1.0, -1.0, -1.0));
+    KeyMiss   := TCastleShaderGeneratorRHI.PackSERCoherenceHintKey(False, 5, Vector3(1.0, 1.0, 1.0));
+
+    AssertEquals('Hit in (+,+,+) octant (7) with mat 5 must pack to 128 + 40 + 7 = 175',
+      175, Integer(KeyHitPos));
+    AssertEquals('Hit in (-,-,-) octant (0) with mat 5 must pack to 128 + 40 + 0 = 168',
+      168, Integer(KeyHitNeg));
+    AssertEquals('Miss must clear bit 7 (40 + 7 = 47)',
+      47, Integer(KeyMiss));
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestDualSourceColoredGlassTransmissionRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  GlassGLSL: String;
+  Src0, Src1: TVector3;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Dual-Source Colored Glass GLSL 450 functions }
+    GlassGLSL := Gen.GenerateDualSourceGlassTransmissionFunctions;
+    AssertTrue('Dual-Source Glass GLSL must include index = 1 output and EvaluateDualSourceGlassOutputs',
+      (Pos('layout(location = 0, index = 1)', GlassGLSL) > 0) and
+      (Pos('void EvaluateDualSourceGlassOutputs(', GlassGLSL) > 0));
+
+    { 2. Verify Src0 (additive reflection) and Src1 (colored background transmittance) }
+    TCastleShaderGeneratorRHI.EvaluateDualSourceGlassOutputs(
+      Vector3(0.175, 0.400, 0.250), Vector3(0.2, 0.8, 0.4), 0.25, 0.5, Src0, Src1);
+
+    AssertSameValue(0.175, Src0.X, 1e-5);
+    AssertSameValue(0.400, Src0.Y, 1e-5);
+    AssertSameValue(0.250, Src0.Z, 1e-5);
+
+    { Src1.rgb = (1 - 0.25) * mix((1,1,1), (0.2, 0.8, 0.4), 0.5) = 0.75 * (0.6, 0.9, 0.7) = (0.45, 0.675, 0.525) }
+    AssertSameValue(0.450, Src1.X, 1e-5);
+    AssertSameValue(0.675, Src1.Y, 1e-5);
+    AssertSameValue(0.525, Src1.Z, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanProgrammableSampleLocationsRGSSRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  S0, S1, S2, S3: TVector2;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6672)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    Device.ProgrammableSampleLocations.ConfigureRotatedGridPattern(4);
+    S0 := Device.ProgrammableSampleLocations.GetSampleLocation(0);
+    S1 := Device.ProgrammableSampleLocations.GetSampleLocation(1);
+    S2 := Device.ProgrammableSampleLocations.GetSampleLocation(2);
+    S3 := Device.ProgrammableSampleLocations.GetSampleLocation(3);
+
+    AssertEquals('SampleCount must be 4', 4, Integer(Device.ProgrammableSampleLocations.SampleCount));
+    AssertSameValue(0.375, S0.X, 1e-5);
+    AssertSameValue(0.125, S0.Y, 1e-5);
+    AssertSameValue(0.875, S1.X, 1e-5);
+    AssertSameValue(0.375, S1.Y, 1e-5);
+    AssertSameValue(0.125, S2.X, 1e-5);
+    AssertSameValue(0.625, S2.Y, 1e-5);
+    AssertSameValue(0.625, S3.X, 1e-5);
+    AssertSameValue(0.875, S3.Y, 1e-5);
+
+    CmdList.BeginRecording;
+    Device.ProgrammableSampleLocations.ApplySampleLocations(CmdList);
+    CmdList.EndRecording;
+    AssertEquals('LocationsAppliedCount must be 1', 1, Integer(Device.ProgrammableSampleLocations.LocationsAppliedCount));
   finally
     FreeAndNil(CmdList);
     FreeAndNil(Device);

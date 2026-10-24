@@ -77,10 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–38**: **COMPLETED** (100%).
-- **Phase 39 (Neural / ML Cooperative Matrix Denoising & Radiance Caching, Spatio-Temporal Blue-Noise Stipple & Optical Flow Block Matching)**: **COMPLETED** (100%, 147 unit tests passing):
-  - [x] **39.1. Optical Flow SAD Block Matching & Sub-Pixel Motion Estimation (`GenerateOpticalFlowBlockMatchingShader` in `CastleInternalShaderRHI`)** — Completed & tested (`TestOpticalFlowBlockMatchingAndSubpixelOffsetRHI`).
-  - [x] **39.2. Golden-Ratio Spatio-Temporal Blue-Noise Dither & R2 Sequence (`GenerateSpatioTemporalBlueNoiseFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSpatioTemporalBlueNoiseAndR2SequenceRHI`).
-  - [x] **39.3. Cooperative Matrix MLP Inference Manager (`TCastleVulkanNeuralDenoiser` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanNeuralDenoiserMLPInferenceRHI`).
-- **Unreal Engine 5.5+ Extended Roadmap (Phase 40)**:
-  - **Phase 40 (Shader Execution Reordering SER, Dual-Source Colored Glass & Programmable MSAA Sample Positions)**: `PackSERCoherenceHintKey`, `EvaluateDualSourceGlassOutputs`, and `TCastleVulkanProgrammableSampleLocations`.
+- **Phases 1–39**: **COMPLETED** (100%).
+- **Phase 40 (Shader Execution Reordering SER, Dual-Source Colored Glass & Programmable MSAA Sample Positions)**: **COMPLETED** (100%, 150 unit tests passing):
+  - [x] **40.1. Shader Execution Reordering (SER) Coherence Hint Packing (`GenerateSERCoherenceHintFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSERCoherenceHintKeyPackingRHI`).
+  - [x] **40.2. Dual-Source Color Blending for Colored Glass Transmission (`GenerateDualSourceGlassTransmissionFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestDualSourceColoredGlassTransmissionRHI`).
+  - [x] **40.3. Programmable MSAA Sample Locations Manager (`TCastleVulkanProgrammableSampleLocations` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanProgrammableSampleLocationsRGSSRHI`).

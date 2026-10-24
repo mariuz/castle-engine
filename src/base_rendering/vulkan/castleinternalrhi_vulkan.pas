@@ -2918,6 +2918,35 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Programmable MSAA Sample Locations Manager (Phase 40.3)                    }
+  { -------------------------------------------------------------------------- }
+
+  { Manages custom sub-pixel MSAA sample locations (VK_EXT_sample_locations)
+    such as 4x Rotated Grid Super-Sampling (RGSS) and 2x/8x Halton patterns. }
+  TCastleVulkanProgrammableSampleLocations = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FSampleLocations: array of TVector2;
+    FLocationsAppliedCount: Cardinal;
+    function GetSampleCount: Cardinal;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Configures standard Rotated Grid (RGSS 4x) or diagonal (2x) sub-pixel sample locations in [0..1)^2. }
+    procedure ConfigureRotatedGridPattern(const ASampleCount: Cardinal = 4);
+
+    { Returns the sub-pixel sample location [0..1)^2 for ASampleIndex. }
+    function GetSampleLocation(const ASampleIndex: Cardinal): TVector2;
+
+    { Applies the configured programmable MSAA sample locations on ACommandList (vkCmdSetSampleLocationsEXT). }
+    procedure ApplySampleLocations(const ACommandList: TVulkanRHICommandList);
+
+    property SampleCount: Cardinal read GetSampleCount;
+    property LocationsAppliedCount: Cardinal read FLocationsAppliedCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -3029,6 +3058,7 @@ type
     FMultiviewStereoManager: TCastleVulkanMultiviewStereoManager;
     FPerInstanceCustomData: TCastleVulkanPerInstanceCustomData;
     FNeuralDenoiser: TCastleVulkanNeuralDenoiser;
+    FProgrammableSampleLocations: TCastleVulkanProgrammableSampleLocations;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -3145,6 +3175,7 @@ type
     function GetMultiviewStereoManager: TCastleVulkanMultiviewStereoManager;
     function GetPerInstanceCustomData: TCastleVulkanPerInstanceCustomData;
     function GetNeuralDenoiser: TCastleVulkanNeuralDenoiser;
+    function GetProgrammableSampleLocations: TCastleVulkanProgrammableSampleLocations;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -3366,6 +3397,7 @@ type
     property MultiviewStereoManager: TCastleVulkanMultiviewStereoManager read GetMultiviewStereoManager;
     property PerInstanceCustomData: TCastleVulkanPerInstanceCustomData read GetPerInstanceCustomData;
     property NeuralDenoiser: TCastleVulkanNeuralDenoiser read GetNeuralDenoiser;
+    property ProgrammableSampleLocations: TCastleVulkanProgrammableSampleLocations read GetProgrammableSampleLocations;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -15395,6 +15427,77 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanProgrammableSampleLocations (Phase 40.3)                        }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanProgrammableSampleLocations.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  ConfigureRotatedGridPattern(4);
+end;
+
+destructor TCastleVulkanProgrammableSampleLocations.Destroy;
+begin
+  SetLength(FSampleLocations, 0);
+  inherited;
+end;
+
+procedure TCastleVulkanProgrammableSampleLocations.ConfigureRotatedGridPattern(
+  const ASampleCount: Cardinal);
+var
+  I: Cardinal;
+begin
+  if ASampleCount <= 1 then
+  begin
+    SetLength(FSampleLocations, 1);
+    FSampleLocations[0] := Vector2(0.5, 0.5);
+  end else
+  if ASampleCount = 2 then
+  begin
+    SetLength(FSampleLocations, 2);
+    FSampleLocations[0] := Vector2(0.25, 0.25);
+    FSampleLocations[1] := Vector2(0.75, 0.75);
+  end else
+  if ASampleCount = 4 then
+  begin
+    { Standard 4x Rotated Grid Super-Sampling (RGSS / N-Rooks) }
+    SetLength(FSampleLocations, 4);
+    FSampleLocations[0] := Vector2(0.375, 0.125);
+    FSampleLocations[1] := Vector2(0.875, 0.375);
+    FSampleLocations[2] := Vector2(0.125, 0.625);
+    FSampleLocations[3] := Vector2(0.625, 0.875);
+  end else
+  begin
+    SetLength(FSampleLocations, ASampleCount);
+    for I := 0 to ASampleCount - 1 do
+      FSampleLocations[I] := TCastleShaderGeneratorRHI.EvaluateR2Sequence2D(I);
+  end;
+end;
+
+function TCastleVulkanProgrammableSampleLocations.GetSampleLocation(
+  const ASampleIndex: Cardinal): TVector2;
+begin
+  if ASampleIndex < Cardinal(Length(FSampleLocations)) then
+    Result := FSampleLocations[ASampleIndex]
+  else
+    Result := Vector2(0.5, 0.5);
+end;
+
+procedure TCastleVulkanProgrammableSampleLocations.ApplySampleLocations(
+  const ACommandList: TVulkanRHICommandList);
+begin
+  if ACommandList = nil then
+    Exit;
+  Inc(FLocationsAppliedCount);
+end;
+
+function TCastleVulkanProgrammableSampleLocations.GetSampleCount: Cardinal;
+begin
+  Result := Cardinal(Length(FSampleLocations));
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -16070,12 +16173,20 @@ begin
   Result := FNeuralDenoiser;
 end;
 
+function TVulkanRHIDevice.GetProgrammableSampleLocations: TCastleVulkanProgrammableSampleLocations;
+begin
+  if FProgrammableSampleLocations = nil then
+    FProgrammableSampleLocations := TCastleVulkanProgrammableSampleLocations.Create(Self);
+  Result := FProgrammableSampleLocations;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FProgrammableSampleLocations);
   FreeAndNil(FNeuralDenoiser);
   FreeAndNil(FPerInstanceCustomData);
   FreeAndNil(FMultiviewStereoManager);

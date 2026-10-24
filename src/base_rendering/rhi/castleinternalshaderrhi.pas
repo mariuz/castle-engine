@@ -1444,6 +1444,26 @@ type
       const ABaseBlueNoise: Single;
       const AFrameIndex: Cardinal): Single; static;
 
+    { Phase 40.1: Generates GLSL 460 Shader Execution Reordering (SER, GL_NV_shader_invocation_reorder)
+      coherence hint packing functions to sort divergent ray-tracing threads by hit state, material, and direction octant. }
+    function GenerateSERCoherenceHintFunctions: String;
+
+    { Phase 40.1 CPU reference: Packs an 8-bit SER coherence hint key [0..255] from (IsHit, MaterialID[0..15], DirectionOctant[0..7]). }
+    class function PackSERCoherenceHintKey(
+      const AIsHit: Boolean;
+      const AMaterialShadingModelID: Cardinal;
+      const ARayDirection: TVector3): Cardinal; static;
+
+    { Phase 40.2: Generates GLSL 450 Dual-Source Color Blending functions (location = 0, index = 0/1)
+      for single-pass physically based colored/stained glass reflection and spectral transmission. }
+    function GenerateDualSourceGlassTransmissionFunctions: String;
+
+    { Phase 40.2 CPU reference: Evaluates dual-source glass outputs (Src0 additive specular, Src1 multiplicative colored transmittance). }
+    class procedure EvaluateDualSourceGlassOutputs(
+      const ASpecularLightingRGB, AGlassTintRGB: TVector3;
+      const AFresnelF, AGlassOpacity: Single;
+      out AOutSpecularAdd, AOutTransmittanceMul: TVector3); static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -7029,6 +7049,86 @@ var
 begin
   Raw := EnsureRange(ABaseBlueNoise, 0.0, 1.0) + Double(AFrameIndex and 63) * GoldenConj;
   Result := Single(Frac(Raw));
+end;
+
+function TCastleShaderGeneratorRHI.GenerateSERCoherenceHintFunctions: String;
+begin
+  Result :=
+    '#extension GL_NV_shader_invocation_reorder : enable' + NL +
+    NL +
+    '// Phase 40.1: Shader Execution Reordering (SER) Coherence Hint Packing' + NL +
+    'uint PackSERCoherenceHintKey(bool isHit, uint materialShadingModelID, vec3 rayDirection) {' + NL +
+    '  uint hitBit = isHit ? 128u : 0u;' + NL +
+    '  uint matBits = (materialShadingModelID & 15u) << 3u;' + NL +
+    '  uint octant = ((rayDirection.x >= 0.0) ? 1u : 0u) |' + NL +
+    '                ((rayDirection.y >= 0.0) ? 2u : 0u) |' + NL +
+    '                ((rayDirection.z >= 0.0) ? 4u : 0u);' + NL +
+    '  return hitBit | matBits | octant;' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.PackSERCoherenceHintKey(
+  const AIsHit: Boolean;
+  const AMaterialShadingModelID: Cardinal;
+  const ARayDirection: TVector3): Cardinal;
+var
+  HitBit, MatBits, Octant: Cardinal;
+begin
+  if AIsHit then
+    HitBit := 128
+  else
+    HitBit := 0;
+  MatBits := (AMaterialShadingModelID and 15) shl 3;
+  Octant := 0;
+  if ARayDirection.X >= 0.0 then
+    Octant := Octant or 1;
+  if ARayDirection.Y >= 0.0 then
+    Octant := Octant or 2;
+  if ARayDirection.Z >= 0.0 then
+    Octant := Octant or 4;
+  Result := HitBit or MatBits or Octant;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateDualSourceGlassTransmissionFunctions: String;
+begin
+  Result :=
+    '// Phase 40.2: Dual-Source Color Blending for Single-Pass Colored Glass Transmission' + NL +
+    '// layout(location = 0, index = 0) out vec4 out_GlassSpecularAdd;' + NL +
+    '// layout(location = 0, index = 1) out vec4 out_GlassTransmittanceMul;' + NL +
+    'void EvaluateDualSourceGlassOutputs(vec3 specularLightingRGB, vec3 glassTintRGB,' + NL +
+    '  float fresnelF, float glassOpacity, out vec3 outSpecularAdd, out vec3 outTransmittanceMul) {' + NL +
+    '  float f = clamp(fresnelF, 0.0, 1.0);' + NL +
+    '  float op = clamp(glassOpacity, 0.0, 1.0);' + NL +
+    '  vec3 filterColor = mix(vec3(1.0), clamp(glassTintRGB, vec3(0.0), vec3(1.0)), op);' + NL +
+    '  outSpecularAdd = max(specularLightingRGB, vec3(0.0));' + NL +
+    '  outTransmittanceMul = filterColor * (1.0 - f);' + NL +
+    '}' + NL;
+end;
+
+class procedure TCastleShaderGeneratorRHI.EvaluateDualSourceGlassOutputs(
+  const ASpecularLightingRGB, AGlassTintRGB: TVector3;
+  const AFresnelF, AGlassOpacity: Single;
+  out AOutSpecularAdd, AOutTransmittanceMul: TVector3);
+var
+  F, Op, OneMinusF: Single;
+  ClampedTint, FilterColor: TVector3;
+begin
+  F := EnsureRange(AFresnelF, 0.0, 1.0);
+  Op := EnsureRange(AGlassOpacity, 0.0, 1.0);
+  OneMinusF := 1.0 - F;
+  ClampedTint := Vector3(
+    EnsureRange(AGlassTintRGB.X, 0.0, 1.0),
+    EnsureRange(AGlassTintRGB.Y, 0.0, 1.0),
+    EnsureRange(AGlassTintRGB.Z, 0.0, 1.0));
+  FilterColor := Vector3(
+    1.0 + (ClampedTint.X - 1.0) * Op,
+    1.0 + (ClampedTint.Y - 1.0) * Op,
+    1.0 + (ClampedTint.Z - 1.0) * Op);
+  AOutSpecularAdd := Vector3(
+    Max(0.0, ASpecularLightingRGB.X),
+    Max(0.0, ASpecularLightingRGB.Y),
+    Max(0.0, ASpecularLightingRGB.Z));
+  AOutTransmittanceMul := FilterColor * OneMinusF;
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;
