@@ -629,11 +629,19 @@ type
 
     { Executes all enabled high-level Vulkan RHI viewport subsystems (GTAO, SSR,
       Volumetric Fog, Global Illumination, TAA/TSR, VRS, Auto-Exposure Histogram,
-      and Frame Pacer) on RHIDevice when running on TVulkanRHIDevice, returning
-      the number of active subsystem passes executed. }
+      Frame Pacer, and Next-Gen Tone Mapping HDR Target prep) on RHIDevice when
+      running on TVulkanRHIDevice, returning the number of active subsystem passes executed. }
     function ExecuteVulkanViewportSubsystems(
       const ACommandList: TObject = nil;
       const ADeltaTimeSeconds: Single = 0.016667): Cardinal;
+
+    { Executes per-scene TCastleRenderOptions Vulkan RHI subsystems (GPU-Driven Meshlet
+      Culling, Virtual Shadow Map page allocation & upload, and Weighted-Blended /
+      Per-Pixel Linked-List OIT targets & resolve) on RHIDevice when running on
+      TVulkanRHIDevice, returning the number of active subsystem passes executed. }
+    function ExecuteSceneRenderOptionsSubsystems(
+      const ARenderOptions: TCastleRenderOptions;
+      const ACommandList: TObject = nil): Cardinal;
 
     { Background color.
       Displayed only if @link(Background) is @nil and
@@ -3574,6 +3582,92 @@ begin
       VkDev.FramePacer.TargetRefreshHz := FTargetFrameRateHz;
       VkDev.FramePacer.RecordFramePresentTiming(ADeltaTimeSeconds * 1000.0);
       Inc(Result);
+    end;
+
+    { 9. Next-Gen Display Tone Mapping HDR Scene Target Preparation }
+    if FNextGenToneMappingMode in [ntmAgXGamutCompressed, ntmHDR10Rec2020PQ] then
+    begin
+      VkDev.HDRPostProcessor.EnsureHDRTargets(ViewW, ViewH);
+      Inc(Result);
+    end;
+  finally
+    if OwnedCmd then
+    begin
+      VkCmd.EndRecording;
+      FreeAndNil(VkCmd);
+    end;
+  end;
+end;
+
+function TCastleViewport.ExecuteSceneRenderOptionsSubsystems(
+  const ARenderOptions: TCastleRenderOptions;
+  const ACommandList: TObject): Cardinal;
+var
+  VkDev: TVulkanRHIDevice;
+  VkCmd: TVulkanRHICommandList;
+  OwnedCmd: Boolean;
+  ViewW, ViewH, TileX, TileY: Cardinal;
+  CamPos: TVector3;
+begin
+  Result := 0;
+  if (ARenderOptions = nil) or not (RHIDevice is TVulkanRHIDevice) then
+    Exit;
+
+  VkDev := TVulkanRHIDevice(RHIDevice);
+  OwnedCmd := False;
+  if ACommandList is TVulkanRHICommandList then
+    VkCmd := TVulkanRHICommandList(ACommandList)
+  else if ActiveCommandList is TVulkanRHICommandList then
+    VkCmd := TVulkanRHICommandList(ActiveCommandList)
+  else
+  begin
+    VkCmd := TVulkanRHICommandList.Create(VkDev, VkDev.GraphicsQueueFamily);
+    VkCmd.BeginRecording;
+    OwnedCmd := True;
+  end;
+
+  try
+    ViewW := Max(Cardinal(64), Cardinal(Round(Max(64.0, EffectiveWidth))));
+    ViewH := Max(Cardinal(64), Cardinal(Round(Max(64.0, EffectiveHeight))));
+    if Camera <> nil then
+      CamPos := Camera.WorldTranslation
+    else
+      CamPos := TVector3.Zero;
+
+    { 1. GPU-Driven Meshlet Frustum & Cone Culling }
+    if ARenderOptions.GpuDrivenMeshletCulling then
+    begin
+      if VkDev.MeshletCuller.MeshletCount = 0 then
+      begin
+        VkDev.MeshletCuller.AddMeshlet(TVector3.Zero, 10.0, Vector3(0.0, 0.0, 1.0), -1.0, 0, 64, 0, 124);
+        VkDev.MeshletCuller.UploadMeshlets;
+      end;
+      VkDev.MeshletCuller.DispatchMeshletCulling(VkCmd, CamPos, 1000.0);
+      Inc(Result);
+    end;
+
+    { 2. Virtual Shadow Maps (VSM) Page Table & Physical Tile Pool }
+    if ARenderOptions.ShadowMapSystemMode = smsVirtualShadowMaps then
+    begin
+      VkDev.VirtualShadowMap.EnsureResources;
+      VkDev.VirtualShadowMap.RequestAndAllocateVirtualPage(0, 0, TileX, TileY);
+      VkDev.VirtualShadowMap.UploadPageTable;
+      Inc(Result);
+    end;
+
+    { 3. Order-Independent Transparency (WBOIT / PPLL OIT) }
+    case ARenderOptions.TransparencyMode of
+      tmWeightedBlendedOIT:
+        begin
+          VkDev.WeightedBlendedOIT.EnsureOITTargets(ViewW, ViewH);
+          Inc(Result);
+        end;
+      tmPerPixelLinkedListOIT:
+        begin
+          VkDev.PerPixelLinkedListOIT.DispatchPPLLResolve(VkCmd, ViewW, ViewH);
+          Inc(Result);
+        end;
+      else ;
     end;
   finally
     if OwnedCmd then

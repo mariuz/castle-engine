@@ -77,8 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–56**: **COMPLETED** (100%).
-- **Phase 57 (Complete Vulkan Examples, Live Vulkan 1.4 Driver Hardening & Documentation Completion)**: **COMPLETED** (100%, 766/766 total engine tests and 197/197 `TTestCastleVulkanRHI` tests passing):
-  - [x] **57.1. Live Vulkan 1.4 Driver Hardening & First-Run Cache Directory Creation** — Completed & tested (`TestAllThreeVulkanExampleManifestsAndPipelineCacheGuardRHI`).
-  - [x] **57.2. Full RHI & Interactive `TCastleWindow` Upgrade for `vulkan_triangle` and `vulkan_sprite_batch`** — Completed & tested (`TestBatch2DRendererMultiBatchCoalescingAndFlushCounterRHI`).
-  - [x] **57.3. Comprehensive Architecture & Feature Reference (`doc/vulkan_renderer.md`)** — Completed & verified across all 3 examples (`vulkan_triangle`, `vulkan_sprite_batch`, `vulkan_3d_scene`).
+- **Phases 1–57**: **COMPLETED** (100%).
+- **Phase 58 (Per-Shape `TCastleRenderOptions` Push-Constant Packing & Scene Subsystem Orchestration)**: **COMPLETED** (100%, 769/769 total engine tests and 200/200 `TTestCastleVulkanRHI` tests passing):
+  - [x] **58.1. Per-Shape `BuildShapeRHIPushConstants` & `TMeshRenderer` Wiring** — Completed & tested (`TestBuildShapeRHIPushConstantsObjectParamsPackingRHI`).
+  - [x] **58.2. Per-Scene `ExecuteSceneRenderOptionsSubsystems` & Next-Gen Tone Mapping HDR Target Prep** — Completed & tested (`TestViewportExecuteSceneRenderOptionsSubsystemsRHI`, `TestViewportNextGenToneMappingHDRTargetPreparationRHI`).
+  - [x] **58.3. 200-Test `TTestCastleVulkanRHI` Milestone Verification** — Completed & verified across `castle_tester_standalone` and `examples/vulkan/vulkan_3d_scene`.

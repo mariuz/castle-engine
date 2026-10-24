@@ -1718,6 +1718,19 @@ type
     class function EvaluateCauchyRefractiveIndexRGB(
       const ACoeffA, ACoeffBMicronsSq: Single): TVector3; static;
 
+    { Phase 58.1: Builds the 128-byte per-draw TCastlePushConstantsBlock for a shape,
+      packing ModelViewMatrix, std140-padded 3x3 NormalMatrix rows, and ObjectParams:
+      - ObjectParams.X: Bindless material index (ABindlessMaterialIndex)
+      - ObjectParams.Y: Skinning mode (0.0 = static mesh, 1.0 = Linear Blend Skinning, 2.0 = Dual-Quaternion Skinning)
+      - ObjectParams.Z: Specular Anti-Aliasing flag (1.0 = enabled, 0.0 = disabled)
+      - ObjectParams.W: ShadowMapSystemMode ordinal (0 = PCF, 1 = PCSS, 2 = VSM) }
+    class function BuildShapeRHIPushConstants(
+      const AShapeModelView: TMatrix4;
+      const ANormalMatrix: TMatrix3;
+      const AHasSkinJoints, ADualQuaternionSkinning, ASpecularAntiAliasing: Boolean;
+      const AShadowMapSystemModeOrd: Cardinal = 0;
+      const ABindlessMaterialIndex: Cardinal = 0): TCastlePushConstantsBlock; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -8224,6 +8237,36 @@ begin
     ACoeffA + ACoeffBMicronsSq / (0.65 * 0.65),
     ACoeffA + ACoeffBMicronsSq / (0.55 * 0.55),
     ACoeffA + ACoeffBMicronsSq / (0.45 * 0.45));
+end;
+
+class function TCastleShaderGeneratorRHI.BuildShapeRHIPushConstants(
+  const AShapeModelView: TMatrix4;
+  const ANormalMatrix: TMatrix3;
+  const AHasSkinJoints, ADualQuaternionSkinning, ASpecularAntiAliasing: Boolean;
+  const AShadowMapSystemModeOrd: Cardinal;
+  const ABindlessMaterialIndex: Cardinal): TCastlePushConstantsBlock;
+var
+  SkinMode, SpecAA: Single;
+begin
+  Result.ModelViewMatrix := AShapeModelView;
+  Result.NormalMatrixRow0 := Vector4(ANormalMatrix.Rows[0], 0.0);
+  Result.NormalMatrixRow1 := Vector4(ANormalMatrix.Rows[1], 0.0);
+  Result.NormalMatrixRow2 := Vector4(ANormalMatrix.Rows[2], 0.0);
+  if not AHasSkinJoints then
+    SkinMode := 0.0
+  else if ADualQuaternionSkinning then
+    SkinMode := 2.0
+  else
+    SkinMode := 1.0;
+  if ASpecularAntiAliasing then
+    SpecAA := 1.0
+  else
+    SpecAA := 0.0;
+  Result.ObjectParams := Vector4(
+    Single(ABindlessMaterialIndex),
+    SkinMode,
+    SpecAA,
+    Single(AShadowMapSystemModeOrd));
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

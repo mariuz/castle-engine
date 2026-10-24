@@ -236,6 +236,9 @@ type
     procedure TestCastleWindowVulkanSurfaceCreationAndLifecycleRHI;
     procedure TestBatch2DRendererMultiBatchCoalescingAndFlushCounterRHI;
     procedure TestAllThreeVulkanExampleManifestsAndPipelineCacheGuardRHI;
+    procedure TestBuildShapeRHIPushConstantsObjectParamsPackingRHI;
+    procedure TestViewportExecuteSceneRenderOptionsSubsystemsRHI;
+    procedure TestViewportNextGenToneMappingHDRTargetPreparationRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -11513,6 +11516,124 @@ begin
     finally
       FreeAndNil(Manifest);
     end;
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestBuildShapeRHIPushConstantsObjectParamsPackingRHI;
+var
+  PC: TCastlePushConstantsBlock;
+  MV: TMatrix4;
+  NM: TMatrix3;
+begin
+  MV := TMatrix4.Identity;
+  MV.Data[3, 0] := 12.5;
+  NM := TMatrix3.Identity;
+
+  { 1. Static mesh, SpecularAA enabled, default PCF shadows (0), material 7 }
+  PC := TCastleShaderGeneratorRHI.BuildShapeRHIPushConstants(
+    MV, NM, False, False, True, Ord(smsStandardShadowMaps), 7);
+  AssertEquals('PushConstants size must be 128 bytes', 128, SizeOf(PC));
+  AssertSameValue(12.5, PC.ModelViewMatrix.Data[3, 0], 1e-5);
+  AssertSameValue(1.0, PC.NormalMatrixRow0.X, 1e-5);
+  AssertSameValue(7.0, PC.ObjectParams.X, 1e-5);
+  AssertSameValue(0.0, PC.ObjectParams.Y, 1e-5);
+  AssertSameValue(1.0, PC.ObjectParams.Z, 1e-5);
+  AssertSameValue(0.0, PC.ObjectParams.W, 1e-5);
+
+  { 2. Skinned mesh with Linear Blend Skinning (DualQuaternion = False), SpecularAA disabled, PCSS shadows (1) }
+  PC := TCastleShaderGeneratorRHI.BuildShapeRHIPushConstants(
+    MV, NM, True, False, False, Ord(smsPCSSContactHardening), 3);
+  AssertSameValue(3.0, PC.ObjectParams.X, 1e-5);
+  AssertSameValue(1.0, PC.ObjectParams.Y, 1e-5);
+  AssertSameValue(0.0, PC.ObjectParams.Z, 1e-5);
+  AssertSameValue(1.0, PC.ObjectParams.W, 1e-5);
+
+  { 3. Skinned mesh with Dual-Quaternion Skinning (DualQuaternion = True), SpecularAA enabled, VSM shadows (2) }
+  PC := TCastleShaderGeneratorRHI.BuildShapeRHIPushConstants(
+    MV, NM, True, True, True, Ord(smsVirtualShadowMaps), 42);
+  AssertSameValue(42.0, PC.ObjectParams.X, 1e-5);
+  AssertSameValue(2.0, PC.ObjectParams.Y, 1e-5);
+  AssertSameValue(1.0, PC.ObjectParams.Z, 1e-5);
+  AssertSameValue(2.0, PC.ObjectParams.W, 1e-5);
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportExecuteSceneRenderOptionsSubsystemsRHI;
+var
+  Device: TVulkanRHIDevice;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  SavedRHI: TRHIDevice;
+  ExecutedCount: Cardinal;
+begin
+  SavedRHI := RHIDevice;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7201)));
+  Viewport := TCastleViewport.Create(nil);
+  Scene := TCastleScene.Create(nil);
+  try
+    SetRHIDevice(Device);
+    Viewport.Width := 640;
+    Viewport.Height := 360;
+    Viewport.Items.Add(Scene);
+
+    { 1. Default RenderOptions (all next-gen scene subsystems off) -> 0 passes }
+    ExecutedCount := Viewport.ExecuteSceneRenderOptionsSubsystems(Scene.RenderOptions);
+    AssertEquals('Default RenderOptions must execute 0 scene subsystems', 0, Integer(ExecutedCount));
+
+    { 2. Enable Meshlet Culling + VSM + WBOIT -> 3 passes }
+    Scene.RenderOptions.GpuDrivenMeshletCulling := True;
+    Scene.RenderOptions.ShadowMapSystemMode := smsVirtualShadowMaps;
+    Scene.RenderOptions.TransparencyMode := tmWeightedBlendedOIT;
+    ExecutedCount := Viewport.ExecuteSceneRenderOptionsSubsystems(Scene.RenderOptions);
+    AssertEquals('Meshlet + VSM + WBOIT must execute 3 scene subsystems', 3, Integer(ExecutedCount));
+    AssertEquals('MeshletCuller DispatchCount must be 1', 1, Integer(Device.MeshletCuller.DispatchCount));
+    AssertTrue('VirtualShadowMap AllocatedTileCount must be >= 1', Device.VirtualShadowMap.AllocatedTileCount >= 1);
+    AssertTrue('VirtualShadowMap TotalPageUploads must be >= 1', Device.VirtualShadowMap.TotalPageUploads >= 1);
+    AssertTrue('WeightedBlendedOIT OITAccumTexture must be allocated',
+      Device.WeightedBlendedOIT.OITAccumTexture <> nil);
+
+    { 3. Switch TransparencyMode to PPLL OIT -> dispatches PPLL resolve }
+    Scene.RenderOptions.TransparencyMode := tmPerPixelLinkedListOIT;
+    ExecutedCount := Viewport.ExecuteSceneRenderOptionsSubsystems(Scene.RenderOptions);
+    AssertEquals('Meshlet + VSM + PPLL OIT must execute 3 scene subsystems', 3, Integer(ExecutedCount));
+    AssertEquals('PerPixelLinkedListOIT ResolveDispatchCount must be 1',
+      1, Integer(Device.PerPixelLinkedListOIT.ResolveDispatchCount));
+  finally
+    SetRHIDevice(SavedRHI);
+    FreeAndNil(Scene);
+    FreeAndNil(Viewport);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportNextGenToneMappingHDRTargetPreparationRHI;
+var
+  Device: TVulkanRHIDevice;
+  Viewport: TCastleViewport;
+  SavedRHI: TRHIDevice;
+  ExecutedCount: Cardinal;
+begin
+  SavedRHI := RHIDevice;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7202)));
+  Viewport := TCastleViewport.Create(nil);
+  try
+    SetRHIDevice(Device);
+    Viewport.Width := 1280;
+    Viewport.Height := 720;
+    AssertTrue('HDRSceneTexture must initially be nil',
+      Device.HDRPostProcessor.HDRSceneTexture = nil);
+
+    { Enable AgX Gamut-Compressed Tone Mapping }
+    Viewport.NextGenToneMappingMode := ntmAgXGamutCompressed;
+    ExecutedCount := Viewport.ExecuteVulkanViewportSubsystems(nil, 0.016);
+    AssertEquals('AgX NextGenToneMappingMode must execute 1 subsystem pass', 1, Integer(ExecutedCount));
+    AssertTrue('HDRSceneTexture must be allocated by NextGenToneMappingMode',
+      Device.HDRPostProcessor.HDRSceneTexture <> nil);
+    AssertEquals('HDRSceneTexture width must match viewport', 1280, Integer(Device.HDRPostProcessor.Width));
+    AssertEquals('HDRSceneTexture height must match viewport', 720, Integer(Device.HDRPostProcessor.Height));
+  finally
+    SetRHIDevice(SavedRHI);
+    FreeAndNil(Viewport);
+    FreeAndNil(Device);
   end;
 end;
 

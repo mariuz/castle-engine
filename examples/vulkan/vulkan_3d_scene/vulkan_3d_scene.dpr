@@ -141,9 +141,10 @@ begin
     Viewport.AutoExposureEnabled := True;
     Viewport.TargetFrameRateHz := 60.0;
 
-    ExecutedSubsystems := Viewport.ExecuteVulkanViewportSubsystems(nil, 0.016);
+    ExecutedSubsystems := Viewport.ExecuteVulkanViewportSubsystems(nil, 0.016) +
+      Viewport.ExecuteSceneRenderOptionsSubsystems(Scene.RenderOptions, nil);
     WritelnLog('Vulkan3DScene',
-      'Executed %d Next-Gen Vulkan viewport subsystems (EV100=%.2f, ExposureMultiplier=%.4f, RenderBackend=%s)',
+      'Executed %d Next-Gen Vulkan viewport & scene subsystems (EV100=%.2f, ExposureMultiplier=%.4f, RenderBackend=%s)',
       [ExecutedSubsystems,
        Viewport.EvaluateCurrentCameraEV100,
        Viewport.EvaluateCurrentCameraExposureMultiplier,

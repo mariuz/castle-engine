@@ -536,16 +536,16 @@ begin
          (ApplicationProperties.RenderBackend = backendVulkan) and
          (ActiveCommandList <> nil) then
       begin
-        { 1. Push constants for per-draw ModelView and Normal matrices }
-        PushConstants.ModelViewMatrix := ShapeModelView;
+        { 1. Push constants for per-draw ModelView, Normal matrices, and RenderOptions flags }
         NormalMat := ModelViewToNormalMatrix(ShapeModelView);
-        PushConstants.NormalMatrixRow0 := Vector4(NormalMat.Rows[0], 0);
-        PushConstants.NormalMatrixRow1 := Vector4(NormalMat.Rows[1], 0);
-        PushConstants.NormalMatrixRow2 := Vector4(NormalMat.Rows[2], 0);
-        if (Shape.Cache <> nil) and (Shape.Cache.RHIJointBuffer <> nil) then
-          PushConstants.ObjectParams := Vector4(0, 1.0, 0, 0)
-        else
-          PushConstants.ObjectParams := Vector4(0, 0, 0, 0);
+        PushConstants := TCastleShaderGeneratorRHI.BuildShapeRHIPushConstants(
+          ShapeModelView,
+          NormalMat,
+          (Shape.Cache <> nil) and (Shape.Cache.RHIJointBuffer <> nil),
+          (RenderOptions <> nil) and RenderOptions.DualQuaternionSkinning,
+          (RenderOptions = nil) or RenderOptions.SpecularAntiAliasing,
+          IfThen(RenderOptions <> nil, Ord(RenderOptions.ShadowMapSystemMode), 0),
+          0);
         ActiveCommandList.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConstants), PushConstants);
 
         { 2. Bind vertex buffers (Coordinate and Attribute) }
