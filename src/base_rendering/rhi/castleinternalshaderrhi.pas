@@ -1526,6 +1526,29 @@ type
       const AShadowUV: TVector2;
       const AWarpStrength: Single): TVector2; static;
 
+    { Phase 44.1: Generates GLSL 450 Multi-Channel Signed Distance Field (MSDF, Chlumsky median-of-three)
+      evaluation functions for sharp corner-preserving vector shapes and 3D text at arbitrary magnification. }
+    function GenerateMSDFTextFunctions: String;
+
+    { Phase 44.1 CPU reference: Evaluates the median of three MSDF RGB channels. }
+    class function EvaluateMSDFMedianOfThree(
+      const AR, AG, AB: Single): Single; static;
+
+    { Phase 44.1 CPU reference: Evaluates anti-aliased screen-space glyph opacity in [0..1] from MSDF RGB and screen pixel range. }
+    class function EvaluateMSDFScreenPxOpacity(
+      const AMSDFSampleRGB: TVector3;
+      const AScreenPxRange: Single): Single; static;
+
+    { Phase 44.2: Generates GLSL 450 Procedural Quadratic Bezier Grass Blade position and tangent evaluation
+      functions for GPU-instanced foliage and meadows. }
+    function GenerateProceduralGrassBladeFunctions: String;
+
+    { Phase 44.2 CPU reference: Evaluates quadratic Bezier grass blade position B(t) and normalized tangent B'(t) for t in [0..1]. }
+    class procedure EvaluateQuadraticBezierGrassBlade(
+      const AP0, AP1, AP2: TVector3;
+      const AT: Single;
+      out AOutPosition, AOutTangent: TVector3); static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -7427,6 +7450,70 @@ begin
   WarpedX := PX * (1.0 + W) / (1.0 + W * Abs(PX));
   WarpedY := PY * (1.0 + W) / (1.0 + W * Abs(PY));
   Result := Vector2(WarpedX * 0.5 + 0.5, WarpedY * 0.5 + 0.5);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateMSDFTextFunctions: String;
+begin
+  Result :=
+    '// Phase 44.1: Multi-Channel Signed Distance Field (MSDF) Median-of-Three Text & Vector Rendering' + NL +
+    'float EvaluateMSDFMedianOfThree(float r, float g, float b) {' + NL +
+    '  return max(min(r, g), min(max(r, g), b));' + NL +
+    '}' + NL +
+    NL +
+    'float EvaluateMSDFScreenPxOpacity(vec3 msdfRGB, float screenPxRange) {' + NL +
+    '  float sd = EvaluateMSDFMedianOfThree(msdfRGB.r, msdfRGB.g, msdfRGB.b) - 0.5;' + NL +
+    '  float screenPxDistance = max(1.0, screenPxRange) * sd;' + NL +
+    '  return clamp(screenPxDistance + 0.5, 0.0, 1.0);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateMSDFMedianOfThree(
+  const AR, AG, AB: Single): Single;
+begin
+  Result := Max(Min(AR, AG), Min(Max(AR, AG), AB));
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateMSDFScreenPxOpacity(
+  const AMSDFSampleRGB: TVector3;
+  const AScreenPxRange: Single): Single;
+var
+  SD, ScreenPxDist: Single;
+begin
+  SD := EvaluateMSDFMedianOfThree(AMSDFSampleRGB.X, AMSDFSampleRGB.Y, AMSDFSampleRGB.Z) - 0.5;
+  ScreenPxDist := Max(1.0, AScreenPxRange) * SD;
+  Result := EnsureRange(ScreenPxDist + 0.5, 0.0, 1.0);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateProceduralGrassBladeFunctions: String;
+begin
+  Result :=
+    '// Phase 44.2: Procedural Quadratic Bezier Grass Blade Position & Tangent' + NL +
+    'void EvaluateQuadraticBezierGrassBlade(vec3 p0, vec3 p1, vec3 p2, float t,' + NL +
+    '  out vec3 outPosition, out vec3 outTangent) {' + NL +
+    '  float s = clamp(t, 0.0, 1.0);' + NL +
+    '  float omt = 1.0 - s;' + NL +
+    '  outPosition = (omt * omt) * p0 + (2.0 * omt * s) * p1 + (s * s) * p2;' + NL +
+    '  vec3 deriv = 2.0 * omt * (p1 - p0) + 2.0 * s * (p2 - p1);' + NL +
+    '  outTangent = normalize(deriv);' + NL +
+    '}' + NL;
+end;
+
+class procedure TCastleShaderGeneratorRHI.EvaluateQuadraticBezierGrassBlade(
+  const AP0, AP1, AP2: TVector3;
+  const AT: Single;
+  out AOutPosition, AOutTangent: TVector3);
+var
+  S, Omt: Single;
+  Deriv: TVector3;
+begin
+  S := EnsureRange(AT, 0.0, 1.0);
+  Omt := 1.0 - S;
+  AOutPosition := AP0 * (Omt * Omt) + AP1 * (2.0 * Omt * S) + AP2 * (S * S);
+  Deriv := (AP1 - AP0) * (2.0 * Omt) + (AP2 - AP1) * (2.0 * S);
+  if Deriv.LengthSqr > 1e-12 then
+    AOutTangent := Deriv.Normalize
+  else
+    AOutTangent := Vector3(0.0, 1.0, 0.0);
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

@@ -198,6 +198,9 @@ type
     procedure TestSpecularNormalVarianceAARoughnessFilteringRHI;
     procedure TestRectilinearShadowMapUVWarpingRHI;
     procedure TestVulkanMaterialBinnerHistogramAndOffsetsRHI;
+    procedure TestMSDFMedianOfThreeAndScreenPxOpacityRHI;
+    procedure TestQuadraticBezierGrassBladePositionAndTangentRHI;
+    procedure TestVulkanPerPixelLinkedListOITSortAndResolveRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -10029,6 +10032,123 @@ begin
       (Device.MaterialBinner.BinCountsBuffer <> nil) and
       (Device.MaterialBinner.BinOffsetsBuffer <> nil));
     AssertEquals('BinningDispatchCount must be 1', 1, Integer(Device.MaterialBinner.BinningDispatchCount));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestMSDFMedianOfThreeAndScreenPxOpacityRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  MSDFGLSL: String;
+  MedianVal, OpacityInside, OpacityEdge, OpacityOutside: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify MSDF GLSL 450 functions }
+    MSDFGLSL := Gen.GenerateMSDFTextFunctions;
+    AssertTrue('MSDF GLSL must include EvaluateMSDFMedianOfThree',
+      Pos('float EvaluateMSDFMedianOfThree(float r, float g, float b)', MSDFGLSL) > 0);
+    AssertTrue('MSDF GLSL must include EvaluateMSDFScreenPxOpacity',
+      Pos('float EvaluateMSDFScreenPxOpacity(vec3 msdfRGB, float screenPxRange)', MSDFGLSL) > 0);
+
+    { 2. Verify Chlumsky median-of-three and screen-pixel AA opacity }
+    MedianVal := TCastleShaderGeneratorRHI.EvaluateMSDFMedianOfThree(0.2, 0.8, 0.6);
+    AssertSameValue(0.6, MedianVal, 1e-6);
+
+    OpacityInside  := TCastleShaderGeneratorRHI.EvaluateMSDFScreenPxOpacity(Vector3(0.2, 0.8, 0.7), 4.0);
+    OpacityEdge    := TCastleShaderGeneratorRHI.EvaluateMSDFScreenPxOpacity(Vector3(0.5, 0.9, 0.1), 4.0);
+    OpacityOutside := TCastleShaderGeneratorRHI.EvaluateMSDFScreenPxOpacity(Vector3(0.1, 0.2, 0.9), 4.0);
+
+    AssertTrue('Glyph interior (median > 0.5) must approach full opacity', OpacityInside > 0.95);
+    AssertSameValue(0.5, OpacityEdge, 1e-6);
+    AssertTrue('Glyph exterior (median < 0.5) must approach zero opacity', OpacityOutside < 0.05);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestQuadraticBezierGrassBladePositionAndTangentRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  GrassGLSL: String;
+  P0, P1, P2, PosBase, TanBase, PosMid, TanMid, PosTip, TanTip: TVector3;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Procedural Grass Blade GLSL 450 functions }
+    GrassGLSL := Gen.GenerateProceduralGrassBladeFunctions;
+    AssertTrue('Grass GLSL must include EvaluateQuadraticBezierGrassBlade',
+      Pos('void EvaluateQuadraticBezierGrassBlade(vec3 p0, vec3 p1, vec3 p2, float t,', GrassGLSL) > 0);
+
+    { 2. Verify Quadratic Bezier position and tangent at root (t=0), midpoint (t=0.5), and tip (t=1) }
+    P0 := Vector3(0.0, 0.0, 0.0);
+    P1 := Vector3(0.0, 1.0, 0.0);
+    P2 := Vector3(1.0, 1.0, 0.0);
+
+    TCastleShaderGeneratorRHI.EvaluateQuadraticBezierGrassBlade(P0, P1, P2, 0.0, PosBase, TanBase);
+    TCastleShaderGeneratorRHI.EvaluateQuadraticBezierGrassBlade(P0, P1, P2, 0.5, PosMid, TanMid);
+    TCastleShaderGeneratorRHI.EvaluateQuadraticBezierGrassBlade(P0, P1, P2, 1.0, PosTip, TanTip);
+
+    AssertSameValue(0.0, PosBase.X, 1e-6);
+    AssertSameValue(1.0, TanBase.Y, 1e-6); { Vertical tangent at root }
+    AssertSameValue(0.25, PosMid.X, 1e-6);
+    AssertSameValue(0.75, PosMid.Y, 1e-6);
+    AssertSameValue(1.0, PosTip.X, 1e-6);
+    AssertSameValue(1.0, PosTip.Y, 1e-6);
+    AssertSameValue(1.0, TanTip.X, 1e-6); { Horizontal wind-bent tangent at tip }
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanPerPixelLinkedListOITSortAndResolveRHI;
+var
+  Nodes: array[0..1] of TPPLLFragmentNode;
+  ResolvedA, ResolvedB: TVector3;
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+begin
+  AssertEquals('TPPLLFragmentNode must be 24 bytes', 24, SizeOf(TPPLLFragmentNode));
+
+  { 1. Verify exact OIT back-to-front sorting yields identical result regardless of submission order }
+  { Far blue layer (depth = 0.8, alpha = 0.5) and Near red layer (depth = 0.2, alpha = 0.5) }
+  Nodes[0].ColorRGBA := Vector4(1.0, 0.0, 0.0, 0.5);
+  Nodes[0].Depth := 0.2;
+  Nodes[0].NextIndex := 1;
+  Nodes[1].ColorRGBA := Vector4(0.0, 0.0, 1.0, 0.5);
+  Nodes[1].Depth := 0.8;
+  Nodes[1].NextIndex := $FFFFFFFF;
+  ResolvedA := TCastleVulkanPerPixelLinkedListOIT.SortAndCompositeFragmentsBackToFront(
+    Nodes, Vector3(0.0, 0.0, 0.0));
+
+  { Swap submission order }
+  Nodes[0].ColorRGBA := Vector4(0.0, 0.0, 1.0, 0.5);
+  Nodes[0].Depth := 0.8;
+  Nodes[1].ColorRGBA := Vector4(1.0, 0.0, 0.0, 0.5);
+  Nodes[1].Depth := 0.2;
+  ResolvedB := TCastleVulkanPerPixelLinkedListOIT.SortAndCompositeFragmentsBackToFront(
+    Nodes, Vector3(0.0, 0.0, 0.0));
+
+  AssertSameValue(ResolvedA.X, ResolvedB.X, 1e-6);
+  AssertSameValue(ResolvedA.Z, ResolvedB.Z, 1e-6);
+  AssertTrue('Near red layer must dominate over occluded far blue layer (R > B)',
+    ResolvedA.X > ResolvedA.Z);
+
+  { 2. Verify TCastleVulkanPerPixelLinkedListOIT resource allocation and resolve dispatch }
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6676)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    CmdList.BeginRecording;
+    Device.PerPixelLinkedListOIT.DispatchPPLLResolve(CmdList, 1920, 1080);
+    CmdList.EndRecording;
+
+    AssertTrue('HeadPointerTexture, FragmentNodeBuffer, and AtomicCounterBuffer must be allocated',
+      (Device.PerPixelLinkedListOIT.HeadPointerTexture <> nil) and
+      (Device.PerPixelLinkedListOIT.FragmentNodeBuffer <> nil) and
+      (Device.PerPixelLinkedListOIT.AtomicCounterBuffer <> nil));
+    AssertEquals('ResolveDispatchCount must be 1', 1, Integer(Device.PerPixelLinkedListOIT.ResolveDispatchCount));
   finally
     FreeAndNil(CmdList);
     FreeAndNil(Device);

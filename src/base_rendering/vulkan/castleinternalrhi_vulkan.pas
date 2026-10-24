@@ -3075,6 +3075,53 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { Per-Pixel Linked List (PPLL) Exact OIT Manager (Phase 44.3)                }
+  { -------------------------------------------------------------------------- }
+
+  TPPLLFragmentNode = record
+    ColorRGBA: TVector4; { Straight-alpha RGBA }
+    Depth: Single;       { View/NDC depth [0..1] }
+    NextIndex: Cardinal;
+  end;
+
+  { Manages per-pixel head-pointer texture (pfR32_UInt) and atomic fragment node
+    pool SSBO for exact Order-Independent Transparency (PPLL OIT) with depth sorting. }
+  TCastleVulkanPerPixelLinkedListOIT = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FMaxNodes: Cardinal;
+    FHeadPointerTexture: TVulkanRHITexture;
+    FFragmentNodeBuffer: TVulkanRHIBuffer;
+    FAtomicCounterBuffer: TVulkanRHIBuffer;
+    FResolveComputePipeline: TVulkanRHIComputePipeline;
+    FResolveDispatchCount: Cardinal;
+    procedure EnsurePPLLResources(const AScreenWidth, AScreenHeight: Cardinal);
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { CPU reference: Sorts an array of PPLL fragment nodes back-to-front by Depth (descending)
+      and composites them using standard over blending onto ABackgroundRGB. }
+    class function SortAndCompositeFragmentsBackToFront(
+      const AFragments: array of TPPLLFragmentNode;
+      const ABackgroundRGB: TVector3): TVector3; static;
+
+    { Dispatches the PPLL OIT sorting and compositing resolve pass across AScreenWidth x AScreenHeight. }
+    procedure DispatchPPLLResolve(const ACommandList: TVulkanRHICommandList;
+      const AScreenWidth, AScreenHeight: Cardinal;
+      const AComputePipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property MaxNodes: Cardinal read FMaxNodes write FMaxNodes;
+    property HeadPointerTexture: TVulkanRHITexture read FHeadPointerTexture;
+    property FragmentNodeBuffer: TVulkanRHIBuffer read FFragmentNodeBuffer;
+    property AtomicCounterBuffer: TVulkanRHIBuffer read FAtomicCounterBuffer;
+    property ResolveComputePipeline: TVulkanRHIComputePipeline
+      read FResolveComputePipeline write FResolveComputePipeline;
+    property ResolveDispatchCount: Cardinal read FResolveDispatchCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -3190,6 +3237,7 @@ type
     FStreamCompactor: TCastleVulkanStreamCompactor;
     FVoxelConeTracer: TCastleVulkanVoxelConeTracer;
     FMaterialBinner: TCastleVulkanMaterialBinner;
+    FPerPixelLinkedListOIT: TCastleVulkanPerPixelLinkedListOIT;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -3310,6 +3358,7 @@ type
     function GetStreamCompactor: TCastleVulkanStreamCompactor;
     function GetVoxelConeTracer: TCastleVulkanVoxelConeTracer;
     function GetMaterialBinner: TCastleVulkanMaterialBinner;
+    function GetPerPixelLinkedListOIT: TCastleVulkanPerPixelLinkedListOIT;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -3535,6 +3584,7 @@ type
     property StreamCompactor: TCastleVulkanStreamCompactor read GetStreamCompactor;
     property VoxelConeTracer: TCastleVulkanVoxelConeTracer read GetVoxelConeTracer;
     property MaterialBinner: TCastleVulkanMaterialBinner read GetMaterialBinner;
+    property PerPixelLinkedListOIT: TCastleVulkanPerPixelLinkedListOIT read GetPerPixelLinkedListOIT;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -15947,6 +15997,133 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanPerPixelLinkedListOIT (Phase 44.3)                              }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanPerPixelLinkedListOIT.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FMaxNodes := 262144;
+end;
+
+destructor TCastleVulkanPerPixelLinkedListOIT.Destroy;
+begin
+  FreeAndNil(FHeadPointerTexture);
+  FreeAndNil(FFragmentNodeBuffer);
+  FreeAndNil(FAtomicCounterBuffer);
+  inherited;
+end;
+
+class function TCastleVulkanPerPixelLinkedListOIT.SortAndCompositeFragmentsBackToFront(
+  const AFragments: array of TPPLLFragmentNode;
+  const ABackgroundRGB: TVector3): TVector3;
+var
+  Sorted: array of TPPLLFragmentNode;
+  I, J: Integer;
+  Key: TPPLLFragmentNode;
+  Alpha: Single;
+  FragRGB: TVector3;
+begin
+  Result := ABackgroundRGB;
+  if Length(AFragments) = 0 then
+    Exit;
+
+  SetLength(Sorted, Length(AFragments));
+  for I := 0 to High(AFragments) do
+    Sorted[I] := AFragments[I];
+
+  { Insertion sort by descending Depth (back-to-front: largest depth first) }
+  for I := 1 to High(Sorted) do
+  begin
+    Key := Sorted[I];
+    J := I - 1;
+    while (J >= 0) and (Sorted[J].Depth < Key.Depth) do
+    begin
+      Sorted[J + 1] := Sorted[J];
+      Dec(J);
+    end;
+    Sorted[J + 1] := Key;
+  end;
+
+  { Composite back-to-front using standard Over operator }
+  for I := 0 to High(Sorted) do
+  begin
+    Alpha := EnsureRange(Sorted[I].ColorRGBA.W, 0.0, 1.0);
+    FragRGB := Vector3(Sorted[I].ColorRGBA.X, Sorted[I].ColorRGBA.Y, Sorted[I].ColorRGBA.Z);
+    Result := Result * (1.0 - Alpha) + FragRGB * Alpha;
+  end;
+end;
+
+procedure TCastleVulkanPerPixelLinkedListOIT.EnsurePPLLResources(
+  const AScreenWidth, AScreenHeight: Cardinal);
+var
+  W, H, Nodes: Cardinal;
+  TexDesc: TRHITextureDesc;
+  BufDesc: TRHIBufferDesc;
+begin
+  if FDevice = nil then
+    Exit;
+  W := Max(Cardinal(1), AScreenWidth);
+  H := Max(Cardinal(1), AScreenHeight);
+  Nodes := Max(Cardinal(1024), FMaxNodes);
+  FMaxNodes := Nodes;
+
+  if (FHeadPointerTexture = nil) or
+     (FHeadPointerTexture.Desc.Width <> W) or
+     (FHeadPointerTexture.Desc.Height <> H) then
+  begin
+    FreeAndNil(FHeadPointerTexture);
+    TexDesc := TRHITextureDesc.Create2D(W, H, pfR32_Float, [tuSampled, tuStorage, tuTransferDst], 1, 1);
+    TexDesc.DebugName := 'PPLLHeadPointerTexture';
+    FHeadPointerTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+  end;
+
+  if (FFragmentNodeBuffer = nil) or
+     (FFragmentNodeBuffer.Desc.Size < PtrUInt(Nodes) * SizeOf(TPPLLFragmentNode)) then
+  begin
+    FreeAndNil(FFragmentNodeBuffer);
+    BufDesc := TRHIBufferDesc.Create(PtrUInt(Nodes) * SizeOf(TPPLLFragmentNode),
+      [buStorage], muGpuOnly, 'PPLLFragmentNodesSSBO');
+    FFragmentNodeBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+
+  if FAtomicCounterBuffer = nil then
+  begin
+    BufDesc := TRHIBufferDesc.Create(16, [buStorage, buTransferDst], muGpuOnly, 'PPLLAtomicCounterSSBO');
+    FAtomicCounterBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+end;
+
+procedure TCastleVulkanPerPixelLinkedListOIT.DispatchPPLLResolve(
+  const ACommandList: TVulkanRHICommandList;
+  const AScreenWidth, AScreenHeight: Cardinal;
+  const AComputePipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+var
+  ActivePipe: TVulkanRHIComputePipeline;
+  GroupsX, GroupsY: Cardinal;
+begin
+  if (ACommandList = nil) or (AScreenWidth = 0) or (AScreenHeight = 0) then
+    Exit;
+  EnsurePPLLResources(AScreenWidth, AScreenHeight);
+
+  if AComputePipeline <> nil then
+    ActivePipe := AComputePipeline
+  else
+    ActivePipe := FResolveComputePipeline;
+  if ActivePipe <> nil then
+    ACommandList.BindComputePipeline(ActivePipe);
+  if ADescriptorSet <> nil then
+    ACommandList.BindDescriptorSet(0, ADescriptorSet, []);
+
+  GroupsX := (AScreenWidth + 7) div 8;
+  GroupsY := (AScreenHeight + 7) div 8;
+  ACommandList.Dispatch(GroupsX, GroupsY, 1);
+  Inc(FResolveDispatchCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -16650,12 +16827,20 @@ begin
   Result := FMaterialBinner;
 end;
 
+function TVulkanRHIDevice.GetPerPixelLinkedListOIT: TCastleVulkanPerPixelLinkedListOIT;
+begin
+  if FPerPixelLinkedListOIT = nil then
+    FPerPixelLinkedListOIT := TCastleVulkanPerPixelLinkedListOIT.Create(Self);
+  Result := FPerPixelLinkedListOIT;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FPerPixelLinkedListOIT);
   FreeAndNil(FMaterialBinner);
   FreeAndNil(FVoxelConeTracer);
   FreeAndNil(FStreamCompactor);

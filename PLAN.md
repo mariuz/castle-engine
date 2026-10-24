@@ -673,14 +673,16 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 43 Status**: Completed. Normal-variance specular anti-aliasing (`GenerateSpecularNormalVarianceAAFunctions`, `EvaluateSpecularAARoughness`), rectilinear shadow map UV warping (`GenerateRectilinearShadowWarpFunctions`, `EvaluateRectilinearShadowWarpUV`), and GPU indirect material binning manager (`TCastleVulkanMaterialBinner`) fully integrated and tested (159 unit tests passing).
 
 
-### Phase 44: GPU-Driven Procedural Foliage / Grass Blade Instancing, Multi-Channel Signed Distance Field (MSDF) Text & Per-Pixel Linked List (PPLL) Exact OIT (PLANNED)
+### Phase 44: GPU-Driven Procedural Foliage / Grass Blade Instancing, Multi-Channel Signed Distance Field (MSDF) Text & Per-Pixel Linked List (PPLL) Exact OIT (COMPLETED)
 
-* [ ] **44.1. Multi-Channel Signed Distance Field (MSDF) Median-of-Three Crisp Vector / Text Evaluation (`GenerateMSDFTextFunctions` in `CastleInternalShaderRHI`)**:
+* [x] **44.1. Multi-Channel Signed Distance Field (MSDF) Median-of-Three Crisp Vector / Text Evaluation (`GenerateMSDFTextFunctions` in `CastleInternalShaderRHI`)**:
   * Evaluate Chlumsky's median-of-three RGB signed distance field (`EvaluateMSDFMedianOfThree`, `EvaluateMSDFScreenPxOpacity`) for sharp corner-preserving vector shapes and 3D text at any magnification.
-* [ ] **44.2. Procedural Quadratic Bezier Grass Blade Bending & Wind Flutter (`GenerateProceduralGrassBladeFunctions` in `CastleInternalShaderRHI`)**:
+* [x] **44.2. Procedural Quadratic Bezier Grass Blade Bending & Wind Flutter (`GenerateProceduralGrassBladeFunctions` in `CastleInternalShaderRHI`)**:
   * Evaluate quadratic Bezier grass blade curves and normal derivatives (`EvaluateQuadraticBezierGrassBlade`) for GPU-instanced meadows.
-* [ ] **44.3. Exact Order-Independent Transparency Per-Pixel Linked List Manager (`TCastleVulkanPerPixelLinkedListOIT` in `CastleInternalRHI_Vulkan`)**:
+* [x] **44.3. Exact Order-Independent Transparency Per-Pixel Linked List Manager (`TCastleVulkanPerPixelLinkedListOIT` in `CastleInternalRHI_Vulkan`)**:
   * Manage per-pixel head-pointer image (`HeadPointerTexture`) and atomic node pool SSBO (`FragmentNodeBuffer`) with insertion-sort resolve for exact order-independent transparency.
+
+**Milestone 44 Status**: Completed. Multi-channel signed distance field (MSDF) median-of-three vector/text evaluation (`GenerateMSDFTextFunctions`, `EvaluateMSDFMedianOfThree`, `EvaluateMSDFScreenPxOpacity`), procedural quadratic Bezier grass blade curves & tangents (`GenerateProceduralGrassBladeFunctions`, `EvaluateQuadraticBezierGrassBlade`), and exact Per-Pixel Linked List (PPLL) order-independent transparency manager (`TCastleVulkanPerPixelLinkedListOIT`) fully integrated and tested (162 unit tests passing).
 
 
 ### Phase 45: Vulkan 1.4 Push Descriptors (`VK_KHR_push_descriptor`), Host Image Copy (`VK_EXT_host_image_copy`) Zero-Staging Streaming & Pipeline Robustness (PLANNED)

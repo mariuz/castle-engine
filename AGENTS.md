@@ -77,11 +77,10 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–42**: **COMPLETED** (100%).
-- **Phase 43 (GPU-Driven Indirect Material Batching / Shader Execution Binning, Specular AA & Rectilinear Shadow Warping)**: **COMPLETED** (100%, 159 unit tests passing):
-  - [x] **43.1. Normal-Variance Specular Anti-Aliasing (`GenerateSpecularNormalVarianceAAFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSpecularNormalVarianceAARoughnessFilteringRHI`).
-  - [x] **43.2. Rectilinear / Perspective Shadow Map Warping (`GenerateRectilinearShadowWarpFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestRectilinearShadowMapUVWarpingRHI`).
-  - [x] **43.3. GPU Indirect Material Binning Manager (`TCastleVulkanMaterialBinner` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanMaterialBinnerHistogramAndOffsetsRHI`).
-- **Vulkan 1.4 / Next-Gen Extended Roadmap (Phases 44–45)**:
-  - **Phase 44 (Procedural Bezier Grass Blades, MSDF Text & Per-Pixel Linked List OIT)**: `EvaluateMSDFMedianOfThree`, `EvaluateQuadraticBezierGrassBlade`, and `TCastleVulkanPerPixelLinkedListOIT`.
+- **Phases 1–43**: **COMPLETED** (100%).
+- **Phase 44 (GPU-Driven Procedural Foliage / Grass Blade Instancing, Multi-Channel Signed Distance Field Text & Per-Pixel Linked List Exact OIT)**: **COMPLETED** (100%, 162 unit tests passing):
+  - [x] **44.1. Multi-Channel Signed Distance Field (MSDF) Median-of-Three Crisp Vector / Text Evaluation (`GenerateMSDFTextFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestMSDFMedianOfThreeAndScreenPxOpacityRHI`).
+  - [x] **44.2. Procedural Quadratic Bezier Grass Blade Bending & Wind Flutter (`GenerateProceduralGrassBladeFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestQuadraticBezierGrassBladePositionAndTangentRHI`).
+  - [x] **44.3. Exact Order-Independent Transparency Per-Pixel Linked List Manager (`TCastleVulkanPerPixelLinkedListOIT` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanPerPixelLinkedListOITSortAndResolveRHI`).
+- **Vulkan 1.4 / Next-Gen Extended Roadmap (Phase 45)**:
   - **Phase 45 (Vulkan 1.4 Push Descriptors, Host Image Copy & Spherical Gaussians)**: `ComputeHostImageCopyByteSize`, `GenerateSphericalGaussianFunctions`, and `TCastleVulkanHostImageCopyManager`.
