@@ -2991,6 +2991,50 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { 3D Voxel Radiance Clipmap & Voxel Cone Tracer (Phase 42.3)                 }
+  { -------------------------------------------------------------------------- }
+
+  { Manages 3D mipmapped voxel radiance/opacity clipmap textures and compute
+    dispatches for Voxel Cone Tracing (VXGI) diffuse & specular global illumination. }
+  TCastleVulkanVoxelConeTracer = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FVoxelGridResolution: Cardinal;
+    FVoxelMipLevels: Cardinal;
+    FWorldExtent: Single;
+    FVoxelRadianceTexture: TVulkanRHITexture;
+    FIndirectIrradianceTexture: TVulkanRHITexture;
+    FVoxelConeTracePipeline: TVulkanRHIComputePipeline;
+    FConeTraceDispatchCount: Cardinal;
+    procedure EnsureVoxelResources(const AScreenWidth, AScreenHeight: Cardinal);
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { Evaluates front-to-back alpha-composited radiance accumulation for a single voxel cone step. }
+    class procedure AccumulateVoxelConeSample(
+      const ASampleRadianceRGB: TVector3;
+      const ASampleOpacity: Single;
+      var AAccumRadianceRGB: TVector3;
+      var AAccumOpacity: Single); static;
+
+    { Dispatches the 3D Voxel Cone Tracing global illumination pass for an AScreenWidth x AScreenHeight viewport. }
+    procedure DispatchVoxelConeTrace(const ACommandList: TVulkanRHICommandList;
+      const AScreenWidth, AScreenHeight: Cardinal;
+      const AComputePipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property VoxelGridResolution: Cardinal read FVoxelGridResolution write FVoxelGridResolution;
+    property VoxelMipLevels: Cardinal read FVoxelMipLevels;
+    property WorldExtent: Single read FWorldExtent write FWorldExtent;
+    property VoxelRadianceTexture: TVulkanRHITexture read FVoxelRadianceTexture;
+    property IndirectIrradianceTexture: TVulkanRHITexture read FIndirectIrradianceTexture;
+    property VoxelConeTracePipeline: TVulkanRHIComputePipeline
+      read FVoxelConeTracePipeline write FVoxelConeTracePipeline;
+    property ConeTraceDispatchCount: Cardinal read FConeTraceDispatchCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -3104,6 +3148,7 @@ type
     FNeuralDenoiser: TCastleVulkanNeuralDenoiser;
     FProgrammableSampleLocations: TCastleVulkanProgrammableSampleLocations;
     FStreamCompactor: TCastleVulkanStreamCompactor;
+    FVoxelConeTracer: TCastleVulkanVoxelConeTracer;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -3222,6 +3267,7 @@ type
     function GetNeuralDenoiser: TCastleVulkanNeuralDenoiser;
     function GetProgrammableSampleLocations: TCastleVulkanProgrammableSampleLocations;
     function GetStreamCompactor: TCastleVulkanStreamCompactor;
+    function GetVoxelConeTracer: TCastleVulkanVoxelConeTracer;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -3445,6 +3491,7 @@ type
     property NeuralDenoiser: TCastleVulkanNeuralDenoiser read GetNeuralDenoiser;
     property ProgrammableSampleLocations: TCastleVulkanProgrammableSampleLocations read GetProgrammableSampleLocations;
     property StreamCompactor: TCastleVulkanStreamCompactor read GetStreamCompactor;
+    property VoxelConeTracer: TCastleVulkanVoxelConeTracer read GetVoxelConeTracer;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -15650,6 +15697,108 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanVoxelConeTracer (Phase 42.3)                                    }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanVoxelConeTracer.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FVoxelGridResolution := 64;
+  FVoxelMipLevels := 6;
+  FWorldExtent := 64.0;
+end;
+
+destructor TCastleVulkanVoxelConeTracer.Destroy;
+begin
+  FreeAndNil(FVoxelRadianceTexture);
+  FreeAndNil(FIndirectIrradianceTexture);
+  inherited;
+end;
+
+class procedure TCastleVulkanVoxelConeTracer.AccumulateVoxelConeSample(
+  const ASampleRadianceRGB: TVector3;
+  const ASampleOpacity: Single;
+  var AAccumRadianceRGB: TVector3;
+  var AAccumOpacity: Single);
+var
+  Transmittance, Weight: Single;
+begin
+  Transmittance := Max(0.0, 1.0 - AAccumOpacity);
+  Weight := Transmittance * EnsureRange(ASampleOpacity, 0.0, 1.0);
+  AAccumRadianceRGB := AAccumRadianceRGB + ASampleRadianceRGB * Weight;
+  AAccumOpacity := EnsureRange(AAccumOpacity + Weight, 0.0, 1.0);
+end;
+
+procedure TCastleVulkanVoxelConeTracer.EnsureVoxelResources(
+  const AScreenWidth, AScreenHeight: Cardinal);
+var
+  Res, Mips, Temp: Cardinal;
+  TexDesc: TRHITextureDesc;
+begin
+  if FDevice = nil then
+    Exit;
+  Res := Max(Cardinal(16), FVoxelGridResolution);
+  Mips := 1;
+  Temp := Res;
+  while Temp > 1 do
+  begin
+    Temp := Temp shr 1;
+    Inc(Mips);
+  end;
+  FVoxelMipLevels := Mips;
+
+  if (FVoxelRadianceTexture = nil) or (FVoxelRadianceTexture.Desc.Width <> Res) then
+  begin
+    FreeAndNil(FVoxelRadianceTexture);
+    TexDesc := TRHITextureDesc.Create3D(Res, Res, Res, pfRGBA16_Float,
+      [tuSampled, tuStorage, tuTransferDst], Mips);
+    TexDesc.DebugName := 'VXGIVoxelRadiance3D';
+    FVoxelRadianceTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+  end;
+
+  if (FIndirectIrradianceTexture = nil) or
+     (FIndirectIrradianceTexture.Desc.Width <> Max(Cardinal(1), AScreenWidth)) or
+     (FIndirectIrradianceTexture.Desc.Height <> Max(Cardinal(1), AScreenHeight)) then
+  begin
+    FreeAndNil(FIndirectIrradianceTexture);
+    TexDesc := TRHITextureDesc.Create2D(
+      Max(Cardinal(1), AScreenWidth), Max(Cardinal(1), AScreenHeight),
+      pfRGBA16_Float, [tuSampled, tuStorage], 1, 1);
+    TexDesc.DebugName := 'VXGIIndirectIrradiance2D';
+    FIndirectIrradianceTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+  end;
+end;
+
+procedure TCastleVulkanVoxelConeTracer.DispatchVoxelConeTrace(
+  const ACommandList: TVulkanRHICommandList;
+  const AScreenWidth, AScreenHeight: Cardinal;
+  const AComputePipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+var
+  ActivePipe: TVulkanRHIComputePipeline;
+  GroupsX, GroupsY: Cardinal;
+begin
+  if (ACommandList = nil) or (AScreenWidth = 0) or (AScreenHeight = 0) then
+    Exit;
+  EnsureVoxelResources(AScreenWidth, AScreenHeight);
+
+  if AComputePipeline <> nil then
+    ActivePipe := AComputePipeline
+  else
+    ActivePipe := FVoxelConeTracePipeline;
+  if ActivePipe <> nil then
+    ACommandList.BindComputePipeline(ActivePipe);
+  if ADescriptorSet <> nil then
+    ACommandList.BindDescriptorSet(0, ADescriptorSet, []);
+
+  GroupsX := (AScreenWidth + 7) div 8;
+  GroupsY := (AScreenHeight + 7) div 8;
+  ACommandList.Dispatch(GroupsX, GroupsY, 1);
+  Inc(FConeTraceDispatchCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -16339,12 +16488,20 @@ begin
   Result := FStreamCompactor;
 end;
 
+function TVulkanRHIDevice.GetVoxelConeTracer: TCastleVulkanVoxelConeTracer;
+begin
+  if FVoxelConeTracer = nil then
+    FVoxelConeTracer := TCastleVulkanVoxelConeTracer.Create(Self);
+  Result := FVoxelConeTracer;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FVoxelConeTracer);
   FreeAndNil(FStreamCompactor);
   FreeAndNil(FProgrammableSampleLocations);
   FreeAndNil(FNeuralDenoiser);

@@ -1486,6 +1486,26 @@ type
     class function EvaluateSubgroupExclusivePrefixSum4(
       const AValues: TVector4Cardinal): TVector4Cardinal; static;
 
+    { Phase 42.1: Generates GLSL 450 Buffer Device Address (GL_EXT_buffer_reference2 / VK_KHR_buffer_device_address)
+      64-bit GPU pointer definitions for bindless vertex/index/material buffer dereferencing. }
+    function GenerateBufferDeviceAddressPreamble: String;
+
+    { Phase 42.1 CPU reference: Aligns a 64-bit GPU VkDeviceAddress upward to AAlignment (buffer_reference_align). }
+    class function AlignBufferDeviceAddress(
+      const AAddress: UInt64;
+      const AAlignment: Cardinal = 16): UInt64; static;
+
+    { Phase 42.2: Generates GLSL 450 Conservative Dominant-Axis Voxelization and 3D Mipmapped Voxel Cone Tracing (VXGI) functions. }
+    function GenerateVoxelConeTracingFunctions: String;
+
+    { Phase 42.2 CPU reference: Selects the dominant projection axis (0=X, 1=Y, 2=Z) that maximizes projected triangle area. }
+    class function SelectDominantVoxelProjectionAxis(
+      const AFaceNormal: TVector3): Cardinal; static;
+
+    { Phase 42.2 CPU reference: Evaluates voxel cone diameter (X) and 3D texture mip level (Y) at ADistanceAlongCone. }
+    class function EvaluateVoxelConeStepAperture(
+      const ADistanceAlongCone, AConeHalfAngleTan, ABaseVoxelSize: Single): TVector2; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -7254,6 +7274,82 @@ begin
   Result.Y := AValues.X;
   Result.Z := AValues.X + AValues.Y;
   Result.W := AValues.X + AValues.Y + AValues.Z;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateBufferDeviceAddressPreamble: String;
+begin
+  Result :=
+    '#extension GL_EXT_buffer_reference2 : require' + NL +
+    '#extension GL_EXT_scalar_block_layout : require' + NL +
+    '#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require' + NL +
+    NL +
+    '// Phase 42.1: Bindless 64-Bit Buffer Device Address (VK_KHR_buffer_device_address)' + NL +
+    'layout(buffer_reference, scalar, buffer_reference_align = 16) readonly buffer CastleBDAVertexBuffer {' + NL +
+    '  vec4 positions[];' + NL +
+    '};' + NL +
+    'layout(buffer_reference, scalar, buffer_reference_align = 4) readonly buffer CastleBDAIndexBuffer {' + NL +
+    '  uint indices[];' + NL +
+    '};' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.AlignBufferDeviceAddress(
+  const AAddress: UInt64;
+  const AAlignment: Cardinal): UInt64;
+var
+  Align64, Mask: UInt64;
+begin
+  if AAlignment <= 1 then
+    Exit(AAddress);
+  Align64 := UInt64(AAlignment);
+  Mask := Align64 - 1;
+  Result := (AAddress + Mask) and (not Mask);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateVoxelConeTracingFunctions: String;
+begin
+  Result :=
+    '// Phase 42.2: Dominant-Axis Voxelization & 3D Mipmapped Voxel Cone Tracing (VXGI)' + NL +
+    'uint SelectDominantVoxelProjectionAxis(vec3 faceNormal) {' + NL +
+    '  vec3 an = abs(faceNormal);' + NL +
+    '  if (an.x >= an.y && an.x >= an.z) return 0u;' + NL +
+    '  if (an.y >= an.x && an.y >= an.z) return 1u;' + NL +
+    '  return 2u;' + NL +
+    '}' + NL +
+    NL +
+    'vec2 EvaluateVoxelConeStepAperture(float distanceAlongCone, float coneHalfAngleTan, float baseVoxelSize) {' + NL +
+    '  float safeVoxel = max(1e-4, baseVoxelSize);' + NL +
+    '  float diameter = max(safeVoxel, 2.0 * max(0.0, distanceAlongCone) * max(0.0, coneHalfAngleTan));' + NL +
+    '  float mipLevel = max(0.0, log2(diameter / safeVoxel));' + NL +
+    '  return vec2(diameter, mipLevel);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.SelectDominantVoxelProjectionAxis(
+  const AFaceNormal: TVector3): Cardinal;
+var
+  AX, AY, AZ: Single;
+begin
+  AX := Abs(AFaceNormal.X);
+  AY := Abs(AFaceNormal.Y);
+  AZ := Abs(AFaceNormal.Z);
+  if (AX >= AY) and (AX >= AZ) then
+    Result := 0
+  else
+  if (AY >= AX) and (AY >= AZ) then
+    Result := 1
+  else
+    Result := 2;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateVoxelConeStepAperture(
+  const ADistanceAlongCone, AConeHalfAngleTan, ABaseVoxelSize: Single): TVector2;
+var
+  SafeVoxel, Diameter, MipLevel: Single;
+begin
+  SafeVoxel := Max(1e-4, ABaseVoxelSize);
+  Diameter := Max(SafeVoxel, 2.0 * Max(0.0, ADistanceAlongCone) * Max(0.0, AConeHalfAngleTan));
+  MipLevel := Max(0.0, Log2(Diameter / SafeVoxel));
+  Result := Vector2(Diameter, MipLevel);
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

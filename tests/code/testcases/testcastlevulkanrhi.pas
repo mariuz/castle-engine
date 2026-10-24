@@ -192,6 +192,9 @@ type
     procedure TestDynamicRenderingLocalReadDeferredLightingRHI;
     procedure TestSubgroupWaveBallotAndExclusivePrefixSumRHI;
     procedure TestVulkanStreamCompactorPrefixSumRHI;
+    procedure TestBufferDeviceAddressAlignmentAndPreambleRHI;
+    procedure TestVoxelDominantAxisAndConeStepApertureRHI;
+    procedure TestVulkanVoxelConeTracerMipChainAndDispatchRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -9828,6 +9831,107 @@ begin
       (Device.StreamCompactor.CompactedIndicesBuffer <> nil) and
       (Device.StreamCompactor.CompactedCountBuffer <> nil));
     AssertEquals('CompactionDispatchCount must be 1', 1, Integer(Device.StreamCompactor.CompactionDispatchCount));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestBufferDeviceAddressAlignmentAndPreambleRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  BDAGLSL: String;
+  Aligned16, AlignedExact: UInt64;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Buffer Device Address GLSL 450 preamble }
+    BDAGLSL := Gen.GenerateBufferDeviceAddressPreamble;
+    AssertTrue('BDA GLSL must require GL_EXT_buffer_reference2 and declare CastleBDAVertexBuffer',
+      (Pos('#extension GL_EXT_buffer_reference2 : require', BDAGLSL) > 0) and
+      (Pos('layout(buffer_reference, scalar, buffer_reference_align = 16) readonly buffer CastleBDAVertexBuffer', BDAGLSL) > 0));
+
+    { 2. Verify 64-bit GPU device address alignment }
+    Aligned16 := TCastleShaderGeneratorRHI.AlignBufferDeviceAddress(UInt64($10000003), 16);
+    AlignedExact := TCastleShaderGeneratorRHI.AlignBufferDeviceAddress(UInt64($10000020), 16);
+    AssertEquals('Address $10000003 aligned to 16 must be $10000010', Int64($10000010), Int64(Aligned16));
+    AssertEquals('Address $10000020 aligned to 16 must remain $10000020', Int64($10000020), Int64(AlignedExact));
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVoxelDominantAxisAndConeStepApertureRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  VXGIGLSL: String;
+  AxisX, AxisY, AxisZ: Cardinal;
+  Step0, StepFar: TVector2;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Voxelization & Voxel Cone Tracing GLSL 450 functions }
+    VXGIGLSL := Gen.GenerateVoxelConeTracingFunctions;
+    AssertTrue('VXGI GLSL must include SelectDominantVoxelProjectionAxis and EvaluateVoxelConeStepAperture',
+      (Pos('uint SelectDominantVoxelProjectionAxis(vec3 faceNormal)', VXGIGLSL) > 0) and
+      (Pos('vec2 EvaluateVoxelConeStepAperture(float distanceAlongCone, float coneHalfAngleTan, float baseVoxelSize)', VXGIGLSL) > 0));
+
+    { 2. Verify dominant-axis selection for conservative triangle voxelization }
+    AxisX := TCastleShaderGeneratorRHI.SelectDominantVoxelProjectionAxis(Vector3(-0.9, 0.3, 0.2));
+    AxisY := TCastleShaderGeneratorRHI.SelectDominantVoxelProjectionAxis(Vector3(0.2, 0.85, -0.4));
+    AxisZ := TCastleShaderGeneratorRHI.SelectDominantVoxelProjectionAxis(Vector3(0.1, -0.2, 0.95));
+    AssertEquals('Dominant X axis must be 0', 0, Integer(AxisX));
+    AssertEquals('Dominant Y axis must be 1', 1, Integer(AxisY));
+    AssertEquals('Dominant Z axis must be 2', 2, Integer(AxisZ));
+
+    { 3. Verify cone diameter and 3D mip level growth along cone distance }
+    Step0   := TCastleShaderGeneratorRHI.EvaluateVoxelConeStepAperture(0.0, 0.5, 0.25);
+    StepFar := TCastleShaderGeneratorRHI.EvaluateVoxelConeStepAperture(1.0, 0.5, 0.25);
+    AssertSameValue(0.25, Step0.X, 1e-5);
+    AssertSameValue(0.0, Step0.Y, 1e-5);
+    { At distance=1.0, tan=0.5 -> diameter = 2*1*0.5 = 1.0 = 4x baseVoxelSize (0.25) -> mipLevel = log2(4) = 2.0 }
+    AssertSameValue(1.0, StepFar.X, 1e-5);
+    AssertSameValue(2.0, StepFar.Y, 1e-5);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanVoxelConeTracerMipChainAndDispatchRHI;
+var
+  AccumRad: TVector3;
+  AccumOp: Single;
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+begin
+  { 1. Verify front-to-back voxel cone opacity & radiance compositing }
+  AccumRad := TVector3.Zero;
+  AccumOp  := 0.0;
+  TCastleVulkanVoxelConeTracer.AccumulateVoxelConeSample(
+    Vector3(1.0, 0.5, 0.0), 0.5, AccumRad, AccumOp);
+  TCastleVulkanVoxelConeTracer.AccumulateVoxelConeSample(
+    Vector3(0.0, 1.0, 0.0), 0.5, AccumRad, AccumOp);
+
+  AssertSameValue(0.5, AccumRad.X, 1e-5);
+  AssertSameValue(0.5, AccumRad.Y, 1e-5);
+  AssertSameValue(0.75, AccumOp, 1e-5);
+
+  { 2. Verify TCastleVulkanVoxelConeTracer 3D mipmapped volume allocation and compute dispatch }
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6674)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    Device.VoxelConeTracer.VoxelGridResolution := 64;
+    CmdList.BeginRecording;
+    Device.VoxelConeTracer.DispatchVoxelConeTrace(CmdList, 1920, 1080);
+    CmdList.EndRecording;
+
+    AssertEquals('64^3 voxel grid must have 7 mip levels (64..1)', 7, Integer(Device.VoxelConeTracer.VoxelMipLevels));
+    AssertTrue('VoxelRadianceTexture must be allocated as a 3D texture',
+      (Device.VoxelConeTracer.VoxelRadianceTexture <> nil) and
+      (Device.VoxelConeTracer.VoxelRadianceTexture.Desc.Dimension = td3D));
+    AssertTrue('IndirectIrradianceTexture must be allocated',
+      Device.VoxelConeTracer.IndirectIrradianceTexture <> nil);
+    AssertEquals('ConeTraceDispatchCount must be 1', 1, Integer(Device.VoxelConeTracer.ConeTraceDispatchCount));
   finally
     FreeAndNil(CmdList);
     FreeAndNil(Device);

@@ -77,13 +77,12 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–40**: **COMPLETED** (100%).
-- **Phase 41 (Vulkan 1.4 Dynamic Rendering Local Read, Subgroup Wave Intrinsics & GPU Prefix-Sum Stream Compaction)**: **COMPLETED** (100%, 153 unit tests passing):
-  - [x] **41.1. Vulkan 1.4 Dynamic Rendering Local Read (`GenerateDynamicRenderingLocalReadPreamble` in `CastleInternalShaderRHI`)** — Completed & tested (`TestDynamicRenderingLocalReadDeferredLightingRHI`).
-  - [x] **41.2. Subgroup Wave Intrinsics (`GenerateSubgroupWaveIntrinsicsFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSubgroupWaveBallotAndExclusivePrefixSumRHI`).
-  - [x] **41.3. GPU Parallel Prefix-Sum & Predicate Stream Compactor (`TCastleVulkanStreamCompactor` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanStreamCompactorPrefixSumRHI`).
-- **Vulkan 1.4 / Next-Gen Extended Roadmap (Phases 42–45)**:
-  - **Phase 42 (Buffer Device Address Pointer Chasing & 3D Voxel Cone Tracing VXGI)**: `GenerateBufferDeviceAddressPreamble`, `GenerateVoxelConeTracingFunctions`, and `TCastleVulkanVoxelConeTracer`.
+- **Phases 1–41**: **COMPLETED** (100%).
+- **Phase 42 (Bindless Buffer Device Address Pointer Chasing, Conservative Rasterization Voxelization & 3D Voxel Cone Tracing VXGI)**: **COMPLETED** (100%, 156 unit tests passing):
+  - [x] **42.1. Buffer Device Address (`GL_EXT_buffer_reference2`) 64-Bit GPU Pointer Arithmetic (`GenerateBufferDeviceAddressPreamble` in `CastleInternalShaderRHI`)** — Completed & tested (`TestBufferDeviceAddressAlignmentAndPreambleRHI`).
+  - [x] **42.2. Conservative Rasterization Dominant-Axis Voxelization & 3D Voxel Cone Tracing (`GenerateVoxelConeTracingFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestVoxelDominantAxisAndConeStepApertureRHI`).
+  - [x] **42.3. 3D Voxel Radiance Clipmap Manager (`TCastleVulkanVoxelConeTracer` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanVoxelConeTracerMipChainAndDispatchRHI`).
+- **Vulkan 1.4 / Next-Gen Extended Roadmap (Phases 43–45)**:
   - **Phase 43 (GPU Indirect Material Binning, Specular Normal-Variance AA & Rectilinear Shadow Warping)**: `EvaluateSpecularAARoughness`, `EvaluateRectilinearShadowWarpUV`, and `TCastleVulkanMaterialBinner`.
   - **Phase 44 (Procedural Bezier Grass Blades, MSDF Text & Per-Pixel Linked List OIT)**: `EvaluateMSDFMedianOfThree`, `EvaluateQuadraticBezierGrassBlade`, and `TCastleVulkanPerPixelLinkedListOIT`.
   - **Phase 45 (Vulkan 1.4 Push Descriptors, Host Image Copy & Spherical Gaussians)**: `ComputeHostImageCopyByteSize`, `GenerateSphericalGaussianFunctions`, and `TCastleVulkanHostImageCopyManager`.
