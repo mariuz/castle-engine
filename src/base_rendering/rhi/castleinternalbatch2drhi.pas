@@ -76,6 +76,7 @@ type
     FMappedVertices: PCastle2DVertex;
     FFrameQuadCount: Cardinal;
     FBatchStartQuad: Cardinal;
+    FBatchFlushCount: Cardinal;
 
     { Active batch state }
     FCurrentCmd: TRHICommandList;
@@ -132,6 +133,8 @@ type
     property NearestSampler: TRHISampler read FNearestSampler;
     property TextureSetLayout: TRHIDescriptorSetLayout read FTextureSetLayout;
     property WhitePixelTexture: TRHITexture read FWhitePixelTexture;
+    property FrameQuadCount: Cardinal read FFrameQuadCount;
+    property BatchFlushCount: Cardinal read FBatchFlushCount;
   end;
 
 { Currently active 2D batch renderer for TDrawableImage / UI rendering. }
@@ -319,8 +322,14 @@ begin
   PipeDesc.PushConstantStages := [ssVertex];
 
   SetLength(PipeDesc.ColorAttachmentFormats, 1);
-  PipeDesc.ColorAttachmentFormats[0] := FDevice.GetSwapchainColorTexture.Desc.Format;
-  PipeDesc.DepthAttachmentFormat := FDevice.GetSwapchainDepthTexture.Desc.Format;
+  if FDevice.GetSwapchainColorTexture <> nil then
+    PipeDesc.ColorAttachmentFormats[0] := FDevice.GetSwapchainColorTexture.Desc.Format
+  else
+    PipeDesc.ColorAttachmentFormats[0] := pfBGRA8_UNorm;
+  if FDevice.GetSwapchainDepthTexture <> nil then
+    PipeDesc.DepthAttachmentFormat := FDevice.GetSwapchainDepthTexture.Desc.Format
+  else
+    PipeDesc.DepthAttachmentFormat := pfD32_Float;
   PipeDesc.SampleCount := 1;
 
   for BM := Low(TCastle2DBlendMode) to High(TCastle2DBlendMode) do
@@ -403,6 +412,7 @@ begin
 
   FFrameQuadCount := 0;
   FBatchStartQuad := 0;
+  FBatchFlushCount := 0;
   FCurrentTexture := nil;
   FCurrentDescriptorSet := nil;
   FCurrentScissor := Rectangle(0, 0, Round(FViewportWidth), Round(FViewportHeight));
@@ -447,6 +457,7 @@ begin
 
   { 5. Issue single indexed draw call for all coalesced quads }
   FCurrentCmd.DrawIndexed(QueuedQuads * 6, 1, 0, 0, 0);
+  Inc(FBatchFlushCount);
 
   FBatchStartQuad := FFrameQuadCount;
 end;

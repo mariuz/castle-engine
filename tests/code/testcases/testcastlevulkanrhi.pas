@@ -234,6 +234,8 @@ type
     procedure TestVulkanWSINativeSurfaceDescAndExtensionsRHI;
     procedure TestCreateVulkanSurfaceAcrossAllOSBackendsRHI;
     procedure TestCastleWindowVulkanSurfaceCreationAndLifecycleRHI;
+    procedure TestBatch2DRendererMultiBatchCoalescingAndFlushCounterRHI;
+    procedure TestAllThreeVulkanExampleManifestsAndPipelineCacheGuardRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -11408,6 +11410,109 @@ begin
     FreeAndNil(Win);
     ApplicationProperties.RenderBackend := SavedBackend;
     vkGetInstanceProcAddr := SavedGetInstanceProcAddr;
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestBatch2DRendererMultiBatchCoalescingAndFlushCounterRHI;
+const
+  QuadSubmissionCount = 20000;
+var
+  VkDev: TVulkanRHIDevice;
+  Batch2D: TCastleBatch2DRenderer;
+  AtlasSet: TRHIDescriptorSet;
+  Cmd: TVulkanRHICommandList;
+  ScreenRects, ImageRects: array of TFloatRectangle;
+  I: Integer;
+begin
+  SetLength(ScreenRects, QuadSubmissionCount);
+  SetLength(ImageRects, QuadSubmissionCount);
+  for I := 0 to QuadSubmissionCount - 1 do
+  begin
+    ScreenRects[I] := FloatRectangle((I mod 200) * 6.0, (I div 200) * 6.0, 5.0, 5.0);
+    ImageRects[I] := FloatRectangle(0, 0, 1, 1);
+  end;
+
+  { Create headless TVulkanRHIDevice without prior SetActiveRenderTargets to verify nil-target safety }
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7101)));
+  Batch2D := nil;
+  AtlasSet := nil;
+  Cmd := nil;
+  try
+    Batch2D := TCastleBatch2DRenderer.Create(VkDev);
+    AssertTrue('WhitePixelTexture must be created', Batch2D.WhitePixelTexture <> nil);
+    AssertTrue('LinearSampler must be created', Batch2D.LinearSampler <> nil);
+    AssertTrue('NearestSampler must be created', Batch2D.NearestSampler <> nil);
+
+    AtlasSet := VkDev.CreateDescriptorSet(Batch2D.TextureSetLayout);
+    AtlasSet.BindTexture(0, Batch2D.WhitePixelTexture, Batch2D.LinearSampler);
+    AtlasSet.Update;
+
+    Cmd := TVulkanRHICommandList.Create(VkDev, VkDev.GraphicsQueueFamily);
+    Cmd.BeginRecording;
+    Batch2D.Begin2DPass(Cmd, 1280, 720);
+    AssertEquals('Initial FrameQuadCount must be 0', 0, Integer(Batch2D.FrameQuadCount));
+    AssertEquals('Initial BatchFlushCount must be 0', 0, Integer(Batch2D.BatchFlushCount));
+
+    { Submit 10,000 + 10,000 = 20,000 quads (> MaxQuadsPerBatch = 16,384 -> 2 flushes) }
+    Batch2D.DrawQuads(Batch2D.WhitePixelTexture, AtlasSet,
+      PFloatRectangleArray(@ScreenRects[0]), PFloatRectangleArray(@ImageRects[0]),
+      10000, Vector4(1.0, 0.8, 0.2, 1.0), bmAlphaBlend, True, Rectangle(0, 0, 1280, 720));
+    Batch2D.DrawQuads(Batch2D.WhitePixelTexture, AtlasSet,
+      PFloatRectangleArray(@ScreenRects[10000]), PFloatRectangleArray(@ImageRects[10000]),
+      10000, Vector4(0.4, 0.9, 1.0, 1.0), bmAlphaBlend, True, Rectangle(0, 0, 1280, 720));
+    Batch2D.End2DPass;
+    Cmd.EndRecording;
+
+    AssertEquals('Total FrameQuadCount must equal 20000', 20000, Integer(Batch2D.FrameQuadCount));
+    AssertEquals('BatchFlushCount must equal 2 for 20000 quads (MaxQuadsPerBatch=16384)',
+      2, Integer(Batch2D.BatchFlushCount));
+  finally
+    FreeAndNil(Cmd);
+    FreeAndNil(AtlasSet);
+    FreeAndNil(Batch2D);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestAllThreeVulkanExampleManifestsAndPipelineCacheGuardRHI;
+const
+  ExampleDirs: array[0..2] of String = (
+    'examples/vulkan/vulkan_triangle',
+    'examples/vulkan/vulkan_sprite_batch',
+    'examples/vulkan/vulkan_3d_scene'
+  );
+var
+  VkDev: TVulkanRHIDevice;
+  ManifestUrl: String;
+  Manifest: TCastleManifest;
+  I: Integer;
+begin
+  { 1. Verify LoadPipelineCache and SavePipelineCache guards }
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7102)));
+  try
+    VkDev.LoadPipelineCache('');
+    VkDev.LoadPipelineCache('castle-config:/non_existent_vulkan_pipeline_cache.bin');
+    VkDev.SavePipelineCache('');
+  finally
+    FreeAndNil(VkDev);
+  end;
+
+  { 2. Verify all 3 examples/vulkan/* CastleEngineManifest.xml files declare render_backend="vulkan" }
+  for I := 0 to High(ExampleDirs) do
+  begin
+    ManifestUrl := ExampleDirs[I] + '/CastleEngineManifest.xml';
+    if not FileExists(ManifestUrl) then
+      ManifestUrl := '../' + ExampleDirs[I] + '/CastleEngineManifest.xml';
+
+    Manifest := TCastleManifest.CreateFromUrl(ManifestUrl);
+    try
+      AssertEquals(ExampleDirs[I] + ' RenderBackend must be backendVulkan',
+        Ord(backendVulkan), Ord(Manifest.RenderBackend));
+      AssertTrue(ExampleDirs[I] + ' ShouldPrewarmVulkanShaders must be True',
+        Manifest.ShouldPrewarmVulkanShaders);
+    finally
+      FreeAndNil(Manifest);
+    end;
   end;
 end;
 

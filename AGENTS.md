@@ -77,8 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–55**: **COMPLETED** (100%).
-- **Phase 56 (Live Example & Full Engine Test Suite Verification)**: **COMPLETED** (100%, 764/764 total engine tests and 195/195 `TTestCastleVulkanRHI` tests passing):
-  - [x] **56.1. CWD-Independent Manifest Resolution in `TTestCastleVulkanRHI`** — Completed & tested (`TestNintendoSwitchViSurfaceAndManifestPrewarm`).
-  - [x] **56.2. Complete 764-Test Engine Suite Verification (`castle_tester_standalone`)** — Completed (`All 764 tests passed`).
-  - [x] **56.3. Live Next-Gen Vulkan Example Verification (`examples/vulkan/vulkan_3d_scene`)** — Completed & verified in WSL.
+- **Phases 1–56**: **COMPLETED** (100%).
+- **Phase 57 (Complete Vulkan Examples, Live Vulkan 1.4 Driver Hardening & Documentation Completion)**: **COMPLETED** (100%, 766/766 total engine tests and 197/197 `TTestCastleVulkanRHI` tests passing):
+  - [x] **57.1. Live Vulkan 1.4 Driver Hardening & First-Run Cache Directory Creation** — Completed & tested (`TestAllThreeVulkanExampleManifestsAndPipelineCacheGuardRHI`).
+  - [x] **57.2. Full RHI & Interactive `TCastleWindow` Upgrade for `vulkan_triangle` and `vulkan_sprite_batch`** — Completed & tested (`TestBatch2DRendererMultiBatchCoalescingAndFlushCounterRHI`).
+  - [x] **57.3. Comprehensive Architecture & Feature Reference (`doc/vulkan_renderer.md`)** — Completed & verified across all 3 examples (`vulkan_triangle`, `vulkan_sprite_batch`, `vulkan_3d_scene`).

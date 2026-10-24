@@ -4148,7 +4148,7 @@ function LoadPipelineCacheBlobFromStream(const AStream: TStream;
 implementation
 
 uses
-  CastleDownload;
+  CastleDownload, CastleFilesUtils, CastleUriUtils;
 
 const
   FNV1aOffsetBasis64 = UInt64($CBF29CE484222325);
@@ -20147,6 +20147,7 @@ var
   CacheInfo: VkPipelineCacheCreateInfo;
 begin
   if (FDevice = nil) or not Assigned(vkCreatePipelineCache) then Exit;
+  if (CacheFileUrl = '') or (not UriFileExists(CacheFileUrl)) then Exit;
   try
     Stream := Download(CacheFileUrl);
     try
@@ -20177,8 +20178,11 @@ var
   DataSize: PtrUInt;
   Blob: TBytes;
   Stream: TStream;
+  LocalFileName, LocalDir: String;
 begin
   if (FDevice = nil) or (FPipelineCache = VK_NULL_HANDLE) or not Assigned(vkGetPipelineCacheData) then
+    Exit;
+  if CacheFileUrl = '' then
     Exit;
 
   DataSize := 0;
@@ -20192,6 +20196,13 @@ begin
     Exit;
 
   try
+    LocalFileName := UriToFilenameSafe(CacheFileUrl);
+    if LocalFileName <> '' then
+    begin
+      LocalDir := ExtractFilePath(LocalFileName);
+      if LocalDir <> '' then
+        CheckForceDirectories(LocalDir);
+    end;
     Stream := UrlSaveStream(CacheFileUrl);
     try
       SavePipelineCacheBlobToStream(Stream, FCapabilities.VendorId, FDeviceId, @Blob[0], DataSize);

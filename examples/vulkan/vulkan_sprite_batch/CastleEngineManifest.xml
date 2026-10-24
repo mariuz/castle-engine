@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <project name="vulkan_sprite_batch"
   caption="Castle Game Engine - Vulkan RHI 2D Sprite Batcher"
+  render_backend="vulkan"
+  standalone_source="vulkan_sprite_batch.dpr"
   version="1.0.0">
   <compiler_options>
     <search_paths>

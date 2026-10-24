@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <project name="vulkan_triangle"
   caption="Castle Game Engine - Vulkan RHI Triangle"
+  render_backend="vulkan"
+  standalone_source="vulkan_triangle.dpr"
   version="1.0.0">
   <compiler_options>
     <search_paths>

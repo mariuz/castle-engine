@@ -409,7 +409,7 @@ end;
 procedure TCastleShaderCompiler.SaveToDiskCache(const AHash: UInt64;
   const AStage: TRHIShaderStage; const ASPIRV: TSPIRVBytecode);
 var
-  CacheUrl: String;
+  CacheUrl, LocalFileName, LocalDir: String;
   Stream: TStream;
   Header: TCastleSPIRVCacheHeader;
 begin
@@ -417,6 +417,13 @@ begin
 
   CacheUrl := GetCacheFileUrl(AHash, AStage);
   try
+    LocalFileName := UriToFilenameSafe(CacheUrl);
+    if LocalFileName <> '' then
+    begin
+      LocalDir := ExtractFilePath(LocalFileName);
+      if LocalDir <> '' then
+        CheckForceDirectories(LocalDir);
+    end;
     Header.FileMagic := SPIRV_CACHE_FILE_MAGIC;
     Header.CacheVersion := SPIRV_CACHE_FILE_VERSION;
     Header.SourceHash := AHash;
