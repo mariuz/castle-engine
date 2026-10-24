@@ -408,6 +408,9 @@ type
       ButtonScherkDeform: TButton;
       ButtonArrangeBoys: TButton;
       ButtonArrangeBicorn: TButton;
+      ButtonStereographicDeform: TButton;
+      ButtonArrangeCatalan: TButton;
+      ButtonArrangeCylHarmonic: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -454,6 +457,7 @@ type
       ButtonUIDiagonalRamp: TButton;
       ButtonUICornerBrackets: TButton;
       ButtonUIFibonacciSplit: TButton;
+      ButtonUIHudBars: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -506,6 +510,7 @@ type
       MenuTreeViewItemSelectUIDegenerate: TMenuItem;
       MenuTreeViewItemSelectDefaultNamed: TMenuItem;
       MenuTreeViewItemSelectShadowAudit: TMenuItem;
+      MenuTreeViewItemSelectPhysicsAudit: TMenuItem;
       MenuTreeViewItemCopyTransform: TMenuItem;
       MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
@@ -659,6 +664,9 @@ type
     procedure ButtonScherkDeformClick(Sender: TObject);
     procedure ButtonArrangeBoysClick(Sender: TObject);
     procedure ButtonArrangeBicornClick(Sender: TObject);
+    procedure ButtonStereographicDeformClick(Sender: TObject);
+    procedure ButtonArrangeCatalanClick(Sender: TObject);
+    procedure ButtonArrangeCylHarmonicClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -694,6 +702,7 @@ type
     procedure ButtonUIDiagonalRampClick(Sender: TObject);
     procedure ButtonUICornerBracketsClick(Sender: TObject);
     procedure ButtonUIFibonacciSplitClick(Sender: TObject);
+    procedure ButtonUIHudBarsClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -753,6 +762,7 @@ type
     procedure MenuTreeViewItemSelectUIDegenerateClick(Sender: TObject);
     procedure MenuTreeViewItemSelectDefaultNamedClick(Sender: TObject);
     procedure MenuTreeViewItemSelectShadowAuditClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectPhysicsAuditClick(Sender: TObject);
     procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
@@ -1580,6 +1590,26 @@ type
       const PiriformTeardrop: Boolean = false;
       const OrientMode: Integer = 1);
     procedure ShowArrangeInBicornCurveDialog;
+    procedure StereographicDeformSelection(
+      const Radius: Single = 0.0;
+      const Strength: Single = 1.0;
+      const NorthPoleProjection: Boolean = false;
+      const OrientNormals: Boolean = true);
+    procedure ShowStereographicDeformSelectionDialog;
+    procedure ArrangeSelectionOnCatalanSurface(
+      const ScaleRadius: Single = 0.0;
+      const TurnsU: Single = 1.0;
+      const WidthV: Single = 1.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeOnCatalanSurfaceDialog;
+    procedure ArrangeSelectionInCylindricalHarmonic(
+      const BaseRadius: Single = 0.0;
+      const RadialAmp: Single = 0.0;
+      const VerticalAmp: Single = 2.0;
+      const RadialFreqM: Integer = 3;
+      const VerticalFreqN: Integer = 3;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeInCylindricalHarmonicDialog;
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -1651,6 +1681,10 @@ type
       const MarginPx: Single = 8.0;
       const GapPx: Single = 6.0;
       const ReverseSpiral: Boolean = false);
+    procedure ArrangeSelectedUserInterfacesInHudBars(
+      const BarHeightPx: Single = 48.0;
+      const MarginPx: Single = 12.0;
+      const GapPx: Single = 8.0);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -1712,6 +1746,7 @@ type
     procedure SelectDegenerateUserInterfaces(const IncludeHiddenControls: Boolean = false);
     procedure SelectDefaultNamedOrDeepComponents(const DeepNestingOnly: Boolean = false);
     procedure SelectShadowCastersAndReceivers(const ShadowLightsOnly: Boolean = false);
+    procedure SelectPhysicsMisconfigurations(const MissingColliderOnly: Boolean = false);
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -3074,6 +3109,26 @@ begin
     if Event.IsKey(keySemicolon) then
     begin
       Frame.SelectShadowCastersAndReceivers(false);
+      Exit(true);
+    end else
+    if Event.IsKey(keyApostrophe) then
+    begin
+      Frame.ShowStereographicDeformSelectionDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(keyLeftBracket) then
+    begin
+      Frame.ShowArrangeOnCatalanSurfaceDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(keyRightBracket) then
+    begin
+      Frame.ShowArrangeInCylindricalHarmonicDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(keyBackSlash) then
+    begin
+      Frame.SelectPhysicsMisconfigurations(false);
       Exit(true);
     end;
   end;
@@ -5203,6 +5258,36 @@ begin
   ButtonArrangeBicorn.OnClick := @ButtonArrangeBicornClick;
   ButtonArrangeBicorn.Parent := PanelLayoutTransform;
 
+  ButtonStereographicDeform := TButton.Create(Self);
+  ButtonStereographicDeform.Align := alTop;
+  ButtonStereographicDeform.AutoSize := true;
+  ButtonStereographicDeform.Caption := 'Stereo Sphere Deform';
+  ButtonStereographicDeform.Hint := 'Deform 2+ selected 3D transforms via 3D Inverse Stereographic Conformal Sphere Projection around the active pivot (Ctrl+Alt+Shift+'' | Shift-click: dialog | Click: South-Pole conformal sphere + normals | Ctrl-click: North-Pole conformal dome + normals)';
+  ButtonStereographicDeform.ShowHint := true;
+  ButtonStereographicDeform.BorderSpacing.Around := 2;
+  ButtonStereographicDeform.OnClick := @ButtonStereographicDeformClick;
+  ButtonStereographicDeform.Parent := PanelLayoutTransform;
+
+  ButtonArrangeCatalan := TButton.Create(Self);
+  ButtonArrangeCatalan.Align := alTop;
+  ButtonArrangeCatalan.AutoSize := true;
+  ButtonArrangeCatalan.Caption := 'Arrange Catalan Surf';
+  ButtonArrangeCatalan.Hint := 'Arrange 2+ selected 3D transforms along a 3D Catalan Minimal Surface / Cycloidal Ribbon around the active pivot (Ctrl+Alt+Shift+[ | Shift-click: dialog | Click: 1-turn Catalan cycloid + tangent | Ctrl-click: 2-turn Catalan ribbon + surface normal)';
+  ButtonArrangeCatalan.ShowHint := true;
+  ButtonArrangeCatalan.BorderSpacing.Around := 2;
+  ButtonArrangeCatalan.OnClick := @ButtonArrangeCatalanClick;
+  ButtonArrangeCatalan.Parent := PanelLayoutTransform;
+
+  ButtonArrangeCylHarmonic := TButton.Create(Self);
+  ButtonArrangeCylHarmonic.Align := alTop;
+  ButtonArrangeCylHarmonic.AutoSize := true;
+  ButtonArrangeCylHarmonic.Caption := 'Arrange Crown Ring';
+  ButtonArrangeCylHarmonic.Hint := 'Arrange 2+ selected 3D transforms along a 3D Cylindrical Harmonic / Crown Wave Ring around the active pivot (Ctrl+Alt+Shift+] | Shift-click: dialog | Click: 3-crest crown wave ring + tangent | Ctrl-click: 5-petal radial + 5-crest crown wave)';
+  ButtonArrangeCylHarmonic.ShowHint := true;
+  ButtonArrangeCylHarmonic.BorderSpacing.Around := 2;
+  ButtonArrangeCylHarmonic.OnClick := @ButtonArrangeCylHarmonicClick;
+  ButtonArrangeCylHarmonic.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -5565,6 +5650,14 @@ begin
   ButtonUIFibonacciSplit.OnClick := @ButtonUIFibonacciSplitClick;
   ButtonUIFibonacciSplit.Parent := PanelLayoutUI;
 
+  ButtonUIHudBars := TButton.Create(Self);
+  ButtonUIHudBars.AutoSize := true;
+  ButtonUIHudBars.Caption := 'UI HUD Bars';
+  ButtonUIHudBars.Hint := 'Arrange and stretch 2+ selected 2D UI controls into Top & Bottom HUD Action Bars inside their parent container (Click: 48px height, 12px margin, 8px gap | Shift-click: 36px compact flush HUD bars | Ctrl-click: 64px tall arcade HUD bars)';
+  ButtonUIHudBars.ShowHint := true;
+  ButtonUIHudBars.OnClick := @ButtonUIHudBarsClick;
+  ButtonUIHudBars.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -5853,6 +5946,11 @@ begin
   MenuTreeViewItemSelectShadowAudit.Caption := 'Select Shadow-Casting Lights / Custom Shadow-Culling Scenes (Ctrl+Alt+Shift+;)';
   MenuTreeViewItemSelectShadowAudit.OnClick := @MenuTreeViewItemSelectShadowAuditClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectShadowAudit);
+
+  MenuTreeViewItemSelectPhysicsAudit := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectPhysicsAudit.Caption := 'Select Physics Collider / RigidBody Misconfigurations (Ctrl+Alt+Shift+\)';
+  MenuTreeViewItemSelectPhysicsAudit.OnClick := @MenuTreeViewItemSelectPhysicsAuditClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectPhysicsAudit);
 
   MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
   MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
@@ -9562,6 +9660,8 @@ begin
         ButtonUICornerBrackets.Enabled := SelectedUICount >= 2;
       if ButtonUIFibonacciSplit <> nil then
         ButtonUIFibonacciSplit.Enabled := SelectedUICount >= 2;
+      if ButtonUIHudBars <> nil then
+        ButtonUIHudBars.Enabled := SelectedUICount >= 2;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -9768,6 +9868,12 @@ begin
       ButtonArrangeBoys.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonArrangeBicorn <> nil then
       ButtonArrangeBicorn.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonStereographicDeform <> nil then
+      ButtonStereographicDeform.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeCatalan <> nil then
+      ButtonArrangeCatalan.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeCylHarmonic <> nil then
+      ButtonArrangeCylHarmonic.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -11312,6 +11418,11 @@ begin
       begin
         SelectSceneMeshes(false);
         Key := 0;
+      end else
+      if Shift = [ssCtrl, ssAlt, ssShift] then
+      begin
+        ShowArrangeInCylindricalHarmonicDialog;
+        Key := 0;
       end;
     end else
     if (Key = VK_OEM_4) and (Shift = [ssAlt, ssShift]) then
@@ -11322,6 +11433,11 @@ begin
     if (Key = VK_OEM_4) and (Shift = [ssCtrl, ssAlt]) then
     begin
       ShowArrangeInTorusHelixDialog;
+      Key := 0;
+    end else
+    if (Key = VK_OEM_4) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowArrangeOnCatalanSurfaceDialog;
       Key := 0;
     end else
     if (Key = VK_OEM_1) and (Shift = [ssCtrl, ssAlt]) then
@@ -11337,6 +11453,11 @@ begin
     if (Key = VK_OEM_7) and (Shift = [ssCtrl, ssAlt]) then
     begin
       ShowArrangeInLemniscateDialog;
+      Key := 0;
+    end else
+    if (Key = VK_OEM_7) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowStereographicDeformSelectionDialog;
       Key := 0;
     end else
     if (Key = VK_OEM_PERIOD) and (Shift = [ssAlt, ssShift]) then
@@ -11377,6 +11498,11 @@ begin
     if (Key = VK_OEM_5) and (Shift = [ssCtrl, ssAlt]) then
     begin
       SelectUserInterfaceControls(false);
+      Key := 0;
+    end else
+    if (Key = VK_OEM_5) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      SelectPhysicsMisconfigurations(false);
       Key := 0;
     end else
     if (Key = VK_OEM_1) and (Shift = [ssAlt, ssShift]) then
@@ -18186,6 +18312,174 @@ begin
     ArrangeSelectionInBicornCurve(0.0, 0.0, false, 1);
 end;
 
+procedure TDesignFrame.StereographicDeformSelection(
+  const Radius, Strength: Single;
+  const NorthPoleProjection, OrientNormals: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.StereographicDeformSelected(
+      Radius, Strength, NorthPoleProjection, OrientNormals);
+end;
+
+procedure TDesignFrame.ShowStereographicDeformSelectionDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  R, Alpha: Single;
+  NorthPole, OrientNorm: Boolean;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+  begin
+    ErrorBox('Select at least 2 TCastleTransform components to apply stereographic conformal sphere deformation.');
+    Exit;
+  end;
+
+  Prompts[0] := 'Conformal sphere radius R (0 = auto from selection XZ span):';
+  Prompts[1] := 'Conformal projection strength alpha (0.0 to 1.0):';
+  Prompts[2] := 'Pole mode (0 = South-Pole tangent sphere, 1 = North-Pole conformal dome):';
+  Prompts[3] := 'Orient forward to spherical outward normal (1 = yes, 0 = no):';
+  Values[0] := '0.0';
+  Values[1] := '1.0';
+  Values[2] := '0';
+  Values[3] := '1';
+
+  if InputQuery('3D Inverse Stereographic Conformal Sphere Deform (Ctrl+Alt+Shift+'')', Prompts, Values) then
+  begin
+    R := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    Alpha := Clamped(StrToFloatDefDot(Trim(Values[1]), 1.0), 0.0, 1.0);
+    NorthPole := StrToIntDef(Trim(Values[2]), 0) <> 0;
+    OrientNorm := StrToIntDef(Trim(Values[3]), 1) <> 0;
+    StereographicDeformSelection(R, Alpha, NorthPole, OrientNorm);
+  end;
+end;
+
+procedure TDesignFrame.ButtonStereographicDeformClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowStereographicDeformSelectionDialog
+  else if ssCtrl in ShiftState then
+    StereographicDeformSelection(0.0, 1.0, true, true)
+  else
+    StereographicDeformSelection(0.0, 1.0, false, true);
+end;
+
+procedure TDesignFrame.ArrangeSelectionOnCatalanSurface(
+  const ScaleRadius, TurnsU, WidthV: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedOnCatalanSurface(
+      ScaleRadius, TurnsU, WidthV, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeOnCatalanSurfaceDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  ScaleA, TurnsU, WidthV: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+  begin
+    ErrorBox('Select at least 2 TCastleTransform components to arrange on a Catalan minimal surface.');
+    Exit;
+  end;
+
+  Prompts[0] := 'Catalan scale radius A (0 = auto from selection):';
+  Prompts[1] := 'Longitudinal cycloid turns W:';
+  Prompts[2] := 'Transverse hyperbolic width V_max:';
+  Prompts[3] := 'Orientation (0 = keep, 1 = trajectory tangent, 2 = Catalan surface normal):';
+  Values[0] := '0.0';
+  Values[1] := '1.0';
+  Values[2] := '1.0';
+  Values[3] := '1';
+
+  if InputQuery('Arrange on 3D Catalan Minimal Surface (Ctrl+Alt+Shift+[)', Prompts, Values) then
+  begin
+    ScaleA := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    TurnsU := StrToFloatDefDot(Trim(Values[1]), 1.0);
+    WidthV := StrToFloatDefDot(Trim(Values[2]), 1.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[3]), 1), 0, 2);
+    ArrangeSelectionOnCatalanSurface(ScaleA, TurnsU, WidthV, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeCatalanClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeOnCatalanSurfaceDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionOnCatalanSurface(0.0, 2.0, 1.2, 2)
+  else
+    ArrangeSelectionOnCatalanSurface(0.0, 1.0, 1.0, 1);
+end;
+
+procedure TDesignFrame.ArrangeSelectionInCylindricalHarmonic(
+  const BaseRadius, RadialAmp, VerticalAmp: Single;
+  const RadialFreqM, VerticalFreqN, OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInCylindricalHarmonic(
+      BaseRadius, RadialAmp, VerticalAmp, RadialFreqM, VerticalFreqN, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInCylindricalHarmonicDialog;
+var
+  Prompts: array[0..5] of string;
+  Values: array[0..5] of string;
+  BaseR, RadAmp, VertAmp: Single;
+  FreqM, FreqN, OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+  begin
+    ErrorBox('Select at least 2 TCastleTransform components to arrange in a cylindrical harmonic crown wave ring.');
+    Exit;
+  end;
+
+  Prompts[0] := 'Base ring radius R (0 = auto from selection):';
+  Prompts[1] := 'Radial petal wave amplitude A_r:';
+  Prompts[2] := 'Vertical crown wave amplitude A_y:';
+  Prompts[3] := 'Radial petal frequency m:';
+  Prompts[4] := 'Vertical crown frequency n:';
+  Prompts[5] := 'Orientation (0 = keep, 1 = analytical wave tangent, 2 = outward radial):';
+  Values[0] := '0.0';
+  Values[1] := '0.0';
+  Values[2] := '2.0';
+  Values[3] := '3';
+  Values[4] := '3';
+  Values[5] := '1';
+
+  if InputQuery('Arrange in 3D Cylindrical Harmonic / Crown Wave Ring (Ctrl+Alt+Shift+])', Prompts, Values) then
+  begin
+    BaseR := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    RadAmp := StrToFloatDefDot(Trim(Values[1]), 0.0);
+    VertAmp := StrToFloatDefDot(Trim(Values[2]), 2.0);
+    FreqM := Max(0, StrToIntDef(Trim(Values[3]), 3));
+    FreqN := Max(0, StrToIntDef(Trim(Values[4]), 3));
+    OrientMode := Clamped(StrToIntDef(Trim(Values[5]), 1), 0, 2);
+    ArrangeSelectionInCylindricalHarmonic(BaseR, RadAmp, VertAmp, FreqM, FreqN, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeCylHarmonicClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInCylindricalHarmonicDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionInCylindricalHarmonic(0.0, 1.5, 2.5, 5, 5, 1)
+  else
+    ArrangeSelectionInCylindricalHarmonic(0.0, 0.0, 2.0, 3, 3, 1);
+end;
+
 procedure TDesignFrame.StopPilotTransform;
 var
   SavedName: String;
@@ -21607,6 +21901,115 @@ begin
     ArrangeSelectedUserInterfacesInFibonacciSplit(8.0, 6.0, true)
   else
     ArrangeSelectedUserInterfacesInFibonacciSplit(8.0, 6.0, false);
+end;
+
+procedure TDesignFrame.ArrangeSelectedUserInterfacesInHudBars(
+  const BarHeightPx, MarginPx, GapPx: Single);
+var
+  Selected, UIList: TComponentList;
+  SelectedCount, I, N, TopCount, BottomCount, RowIdx, RowCount, ChangedCount: Integer;
+  C: TComponent;
+  UI, ParentUI: TCastleUserInterface;
+  ParentRect, CurRect: TFloatRectangle;
+  PrimaryScale, ScaledMargin, ScaledGap, ScaledBarH, RowAvailW, SlotW, TargetW, TargetH, TargetCX, TargetCY: Single;
+  IsTopRow: Boolean;
+  DeltaPx: TVector2;
+begin
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if (Selected = nil) or (SelectedCount < 2) then Exit;
+
+    UIList := TComponentList.Create(false);
+    try
+      for I := 0 to Selected.Count - 1 do
+      begin
+        C := Selected[I];
+        if (C is TCastleUserInterface) and (C <> DesignRoot) and
+           (not (C is TCastleViewport)) and (not IsComponentLocked(C)) then
+        begin
+          UI := TCastleUserInterface(C);
+          if (UI.Parent <> nil) and (UI.UIScale > 0) then
+            UIList.Add(UI);
+        end;
+      end;
+
+      N := UIList.Count;
+      if N < 2 then Exit;
+
+      ParentUI := TCastleUserInterface(UIList[0]).Parent;
+      ParentRect := ParentUI.RenderRect;
+      if (ParentRect.Width <= 1.0) or (ParentRect.Height <= 1.0) then Exit;
+
+      PrimaryScale := TCastleUserInterface(UIList[0]).UIScale;
+      ScaledMargin := Max(0.0, MarginPx) * PrimaryScale;
+      ScaledGap := Max(0.0, GapPx) * PrimaryScale;
+      ScaledBarH := Max(4.0, BarHeightPx * PrimaryScale);
+
+      TopCount := (N + 1) div 2;
+      BottomCount := N - TopCount;
+
+      ChangedCount := 0;
+      for I := 0 to N - 1 do
+      begin
+        UI := TCastleUserInterface(UIList[I]);
+        IsTopRow := I < TopCount;
+        if IsTopRow then
+        begin
+          RowIdx := I;
+          RowCount := TopCount;
+          TargetCY := ParentRect.Top - ScaledMargin - 0.5 * ScaledBarH;
+        end else
+        begin
+          RowIdx := I - TopCount;
+          RowCount := Max(1, BottomCount);
+          TargetCY := ParentRect.Bottom + ScaledMargin + 0.5 * ScaledBarH;
+        end;
+
+        RowAvailW := Max(4.0, ParentRect.Width - 2.0 * ScaledMargin - Single(RowCount - 1) * ScaledGap);
+        SlotW := Max(2.0, RowAvailW / Single(RowCount));
+        TargetCX := ParentRect.Left + ScaledMargin + Single(RowIdx) * (SlotW + ScaledGap) + 0.5 * SlotW;
+
+        TargetW := Max(1.0, SlotW / UI.UIScale);
+        TargetH := Max(1.0, ScaledBarH / UI.UIScale);
+
+        UI.FullSize := false;
+        UI.AutoSizeToChildren := false;
+        UI.WidthFraction := 0.0;
+        UI.HeightFraction := 0.0;
+        UI.Width := TargetW;
+        UI.Height := TargetH;
+
+        CurRect := UI.RenderRectWithBorder;
+        if not CurRect.IsEmpty then
+        begin
+          DeltaPx := Vector2(TargetCX, TargetCY) - CurRect.Center;
+          UI.Translation := UI.Translation + (DeltaPx / UI.UIScale);
+        end;
+        Inc(ChangedCount);
+      end;
+
+      if ChangedCount > 0 then
+        ModifiedOutsideObjectInspector(
+          Format('Arrange %d UI control(s) into top & bottom HUD action bars', [ChangedCount]), ucHigh);
+    finally
+      FreeAndNil(UIList);
+    end;
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUIHudBarsClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ArrangeSelectedUserInterfacesInHudBars(36.0, 0.0, 4.0)
+  else if ssCtrl in ShiftState then
+    ArrangeSelectedUserInterfacesInHudBars(64.0, 20.0, 12.0)
+  else
+    ArrangeSelectedUserInterfacesInHudBars(48.0, 12.0, 8.0);
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -25627,6 +26030,67 @@ begin
   SelectShadowCastersAndReceivers(ssShift in GetKeyShiftState);
 end;
 
+procedure TDesignFrame.SelectPhysicsMisconfigurations(const MissingColliderOnly: Boolean);
+var
+  NewSelection: TComponentList;
+  TreeNode: TTreeNode;
+  C: TComponent;
+  T: TCastleTransform;
+  HasRigidBody, HasCollider, HasNonUniformOrDegenerateScale, IsMatch: Boolean;
+begin
+  if DesignRoot = nil then Exit;
+
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      if (TreeNode.Data <> nil) and (TObject(TreeNode.Data) is TComponent) then
+      begin
+        C := TComponent(TreeNode.Data);
+        if (C is TCastleTransform) and (C <> DesignRoot) and
+           (not (C is TCastleAbstractRootTransform)) and
+           (not (csSubComponent in C.ComponentStyle)) and
+           (not (C is TCastleToolTransform)) and (not IsComponentLocked(C)) then
+        begin
+          T := TCastleTransform(C);
+          if T.Exists then
+          begin
+            HasRigidBody := T.FindBehavior(TCastleRigidBody) <> nil;
+            HasCollider := T.FindBehavior(TCastleCollider) <> nil;
+            if MissingColliderOnly then
+              IsMatch := HasRigidBody and (not HasCollider)
+            else
+            begin
+              HasNonUniformOrDegenerateScale :=
+                (T.Scale.X <= 1e-4) or (T.Scale.Y <= 1e-4) or (T.Scale.Z <= 1e-4) or
+                (not SameValue(T.Scale.X, T.Scale.Y, 1e-3)) or
+                (not SameValue(T.Scale.Y, T.Scale.Z, 1e-3));
+              IsMatch :=
+                (HasRigidBody <> HasCollider) or
+                (HasCollider and HasNonUniformOrDegenerateScale);
+            end;
+
+            if IsMatch and (NewSelection.IndexOf(T) = -1) then
+              NewSelection.Add(T);
+          end;
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectPhysicsAuditClick(Sender: TObject);
+begin
+  SelectPhysicsMisconfigurations(ssShift in GetKeyShiftState);
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -26173,6 +26637,8 @@ begin
     MenuTreeViewItemSelectDefaultNamed.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemSelectShadowAudit <> nil then
     MenuTreeViewItemSelectShadowAudit.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectPhysicsAudit <> nil then
+    MenuTreeViewItemSelectPhysicsAudit.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemCopyTransform <> nil then
     MenuTreeViewItemCopyTransform.Enabled := (CurrentTransform <> nil) or (SelectedUserInterface <> nil) or (ControlsTree.SelectionCount > 0);
   if MenuTreeViewItemPasteTransform <> nil then

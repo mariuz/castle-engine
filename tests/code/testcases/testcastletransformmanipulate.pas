@@ -74,6 +74,7 @@ type
     procedure TestOctahedralDeformDiniAndCornuSpiral;
     procedure TestGyroidDeformRomanSurfaceAndCochleoid;
     procedure TestScherkDeformBoysSurfaceAndBicorn;
+    procedure TestStereographicCatalanAndCylindricalHarmonic;
   end;
 
 implementation
@@ -3576,6 +3577,99 @@ begin
     AssertVectorEquals(Vector3(0.0, 2.0, 4.0), B2.Translation, 1e-4);
     AssertVectorEquals(Vector3(-8.0, 0.0, 0.0), B3.Translation, 1e-4);
     AssertVectorEquals(Vector3(0.0, -2.0, -4.0), B4.Translation, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestStereographicCatalanAndCylindricalHarmonic;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  B1, B2, B3, B4: TCastleBox;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.PivotMode := pmPrimarySelected;
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(1, 1, 1);
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(1, 1, 1);
+    B2.Translation := Vector3(10.0, 0.0, 0.0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(1, 1, 1);
+    B3.Translation := Vector3(0.0, 0.0, 10.0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(1, 1, 1);
+    B4.Translation := Vector3(-10.0, 0.0, 0.0);
+    Viewport.Items.Add(B4);
+
+    { 1a. Test StereographicDeformSelected (Radius=10.0, Strength=1.0, NorthPoleProjection=false, OrientNormals=true)
+      Around B1=(0,0,0):
+      - B1 (0,0,0) -> u=0, w=0, r^2=0 -> (0, -10, 0), normal=(0, -1, 0)
+      - B2 (10,0,0) -> u=1, w=0, r^2=1 -> (10, 0, 0), normal=(1, 0, 0)
+      - B3 (0,0,10) -> u=0, w=1, r^2=1 -> (0, 0, 10), normal=(0, 0, 1) }
+    Manipulate.SetSelected([B1, B2, B3]);
+    AssertTrue(Manipulate.StereographicDeformSelected(10.0, 1.0, false, true));
+    AssertVectorEquals(Vector3(0.0, -10.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10.0, 0.0, 0.0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, 0.0, 10.0), B3.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.0, -1.0, 0.0), WorldDir.Normalize, 1e-3);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1.0, 0.0, 0.0), WorldDir.Normalize, 1e-3);
+
+    { 1b. Test StereographicDeformSelected with NorthPoleProjection=true (Radius=10.0, Strength=1.0):
+      - B1 (0,0,0) -> (0, +10, 0), normal=(0, +1, 0) }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    B2.Translation := Vector3(10.0, 0.0, 0.0);
+    Manipulate.SetSelected([B1, B2]);
+    AssertTrue(Manipulate.StereographicDeformSelected(10.0, 1.0, true, true));
+    AssertVectorEquals(Vector3(0.0, 10.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(10.0, 0.0, 0.0), B2.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.0, 1.0, 0.0), WorldDir.Normalize, 1e-3);
+
+    { 2. Test ArrangeSelectedOnCatalanSurface (ScaleRadius=5.0, TurnsU=1.0, WidthV=1.0, OrientMode=2)
+      Around B1=(0,0,0) for N=3 (ParamT = 0, 0.5, 1.0):
+      - B1 (t=0, u=-Pi, v=0): (-5*Pi, 0, 10)
+      - B2 (t=0.5, u=0, v=0): (0, 0, 0)
+      - B3 (t=1.0, u=+Pi, v=0): (+5*Pi, 0, 10), normal=(0, 0, 1) }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Manipulate.SetSelected([B1, B2, B3]);
+    AssertTrue(Manipulate.ArrangeSelectedOnCatalanSurface(5.0, 1.0, 1.0, 2));
+    AssertVectorEquals(Vector3(-5.0 * Pi, 0.0, 10.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, 0.0, 0.0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(5.0 * Pi, 0.0, 10.0), B3.Translation, 1e-4);
+    B3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.0, 0.0, 1.0), WorldDir.Normalize, 1e-3);
+
+    { 3. Test ArrangeSelectedInCylindricalHarmonic (BaseRadius=10.0, RadialAmp=2.0, VerticalAmp=4.0, RadialFreqM=2, VerticalFreqN=1, OrientMode=1)
+      Around B1=(0,0,0) for N=4 (theta = 0, Pi/2, Pi, 3*Pi/2):
+      - B1 (theta=0): r=12 -> (12, 0, 0), tangent = Normalize(0, 4, 12)
+      - B2 (theta=Pi/2): r=8 -> (0, 4, 8)
+      - B3 (theta=Pi): r=12 -> (-12, 0, 0)
+      - B4 (theta=3*Pi/2): r=8 -> (0, -4, -8) }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.ArrangeSelectedInCylindricalHarmonic(10.0, 2.0, 4.0, 2, 1, 1));
+    AssertVectorEquals(Vector3(12.0, 0.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, 4.0, 8.0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-12.0, 0.0, 0.0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, -4.0, -8.0), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.0, 4.0, 12.0).Normalize, WorldDir.Normalize, 1e-3);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

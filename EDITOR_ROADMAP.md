@@ -965,36 +965,68 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
 
 ---
 
-## Recommended Next Roadmap Focus Areas (Phases 152+)
+### Phase 152: 3D Spherical Stereographic / Inverse Conformal Projection Deformation (`StereographicDeformSelected` / `Ctrl+Alt+Shift+'`)
+- [x] **152.1. Parametric Inverse Stereographic Conformal Sphere Projection (`TCastleTransformManipulate.StereographicDeformSelected`)**
+  - Implemented `TCastleTransformManipulate.StereographicDeformSelected(Radius, Strength, NorthPoleProjection, OrientNormals): Boolean`: deforms 2+ top-level selected transforms around the active selection pivot $\mathbf{C}$ by mapping their horizontal planar offsets $u = \frac{x - C_x}{R}, \; w = \frac{z - C_z}{R}$ ($r^2 = u^2 + w^2$) onto a sphere of radius $R$ via inverse stereographic conformal projection:
+    $$\mathbf{S}(u, w) = \mathbf{C} + \frac{R}{r^2 + 1}\Big(2u, \; \pm(r^2 - 1), \; 2w\Big) + (0, \; y - C_y, \; 0)$$
+    (using $+1$ for South-Pole projection where origin maps to South Pole $(0, -R, 0)$ when `NorthPoleProjection = false`, or $-1$ for North-Pole dome projection where origin maps to North Pole $(0, +R, 0)$ when `NorthPoleProjection = true`), blended by `Strength` $\in [0, 1]$, and optionally aligns each transform's orientation to the exact conformal spherical normal $\mathbf{N} = \frac{1}{r^2 + 1}(2u, \; \pm(r^2 - 1), \; 2w)$ (`OrientNormals = true`).
+  - Added **`Stereographic...`** (`ButtonStereographicDeform` in `PanelLayoutTransform`: normal click applies 100% South-Pole inverse stereographic projection with conformal normals; `Ctrl`-click applies North-Pole dome projection; `Shift`-click opens the custom dialog) and `ShowStereographicDeformSelectionDialog` bound to **`Ctrl+Alt+Shift+'`** in both the Viewport and Hierarchy Tree.
 
-To maximize level-design, procedural geometry, UI/HUD authoring, and scene-hygiene productivity in the Castle Game Engine Editor, the following four strategic pillars and concrete upcoming phases (Phases 152–159) are recommended:
+### Phase 153: 3D Catalan Minimal Surface / Cycloidal Ribbon Arrangement (`ArrangeSelectedOnCatalanSurface` / `Ctrl+Alt+Shift+[`)
+- [x] **153.1. Parametric Eugène Catalan Cycloidal-Geodesic Minimal Surface (`TCastleTransformManipulate.ArrangeSelectedOnCatalanSurface`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedOnCatalanSurface(ScaleRadius, TurnsU, WidthV, OrientMode): Boolean`: distributes 2+ top-level selected transforms across Eugène Charles Catalan's 1855 minimal surface centered at $\mathbf{C}$ with scale radius $A$, cycloidal wave turns $W = \text{TurnsU}$ ($u_i = 2\pi W(t_i - 0.5)$), and transverse hyperbolic span $V = \text{WidthV}$ ($v_i = V\sin(2\pi t_i)$):
+    $$x = C_x + A\big(u_i - \sin u_i \cosh v_i\big), \quad y = C_y + 4A\sin\!\left(\frac{u_i}{2}\right)\sinh\!\left(\frac{v_i}{2}\right), \quad z = C_z + A\big(1 - \cos u_i \cosh v_i\big)$$
+    supporting `OrientMode` (`0` = keep rotation, `1` = analytical curve tangent, `2` = exact Catalan surface normal $\mathbf{P}_u \times \mathbf{P}_v$).
+  - Added **`Catalan Surface...`** (`ButtonArrangeCatalan` in `PanelLayoutTransform`: normal click arranges on a 1-turn Catalan minimal surface along the tangent; `Ctrl`-click arranges on a 2-turn Catalan surface aligned to the surface normal; `Shift`-click opens the custom dialog) and `ShowArrangeOnCatalanSurfaceDialog` bound to **`Ctrl+Alt+Shift+[`** in both the Viewport and Hierarchy Tree.
+
+### Phase 154: 3D Cylindrical Harmonic / Crown Wave Ring Arrangement (`ArrangeSelectedInCylindricalHarmonic` / `Ctrl+Alt+Shift+]`)
+- [x] **154.1. Parametric Cylindrical Harmonic / Star-Crown Wave Ring (`TCastleTransformManipulate.ArrangeSelectedInCylindricalHarmonic`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedInCylindricalHarmonic(BaseRadius, RadialAmp, VerticalAmp, RadialFreqM, VerticalFreqN, OrientMode): Boolean`: distributes 2+ top-level selected transforms around the active selection pivot $\mathbf{C}$ at $\theta_i = \frac{2\pi i}{N}$ along a 3D cylindrical harmonic / crown wave ring with radial harmonic modulation $R(\theta_i) = R_0 + A_r\cos(m\theta_i)$ and vertical harmonic wave $Y(\theta_i) = A_y\sin(n\theta_i)$:
+    $$x = C_x + R(\theta_i)\cos\theta_i, \quad y = C_y + A_y\sin(n\theta_i), \quad z = C_z + R(\theta_i)\sin\theta_i$$
+    with exact analytical tangent derivatives $\left(R'(\theta)\cos\theta - R(\theta)\sin\theta, \; n A_y\cos(n\theta), \; R'(\theta)\sin\theta + R(\theta)\cos\theta\right)$ and `OrientMode` (`0` = keep rotation, `1` = analytical 3D crown tangent, `2` = outward radial from $\mathbf{C}$).
+  - Added **`Crown Wave Ring...`** (`ButtonArrangeCylHarmonic` in `PanelLayoutTransform`: normal click arranges in a 3-crest cylindrical crown wave ring along the tangent; `Ctrl`-click arranges in a 5-lobe star-crown wave ring; `Shift`-click opens the custom dialog) and `ShowArrangeInCylindricalHarmonicDialog` bound to **`Ctrl+Alt+Shift+]`** in both the Viewport and Hierarchy Tree.
+  - Added automated unit test `TestStereographicCatalanAndCylindricalHarmonic` in `tests/code/testcases/testcastletransformmanipulate.pas`.
+
+### Phase 155: Hierarchy Audit: Select Physics Collider / RigidBody Misconfigurations (`SelectPhysicsMisconfigurations` / `Ctrl+Alt+Shift+\`) & 2D UI Top/Bottom HUD Action Bars Layout (`ArrangeSelectedUserInterfacesInHudBars` / `ButtonUIHudBars`)
+- [x] **155.1. Hierarchy Physics Audit: Select Physics Collider / RigidBody Misconfigurations (`SelectPhysicsMisconfigurations` / `Ctrl+Alt+Shift+\`)**
+  - Implemented `TDesignFrame.SelectPhysicsMisconfigurations(RigidBodyWithoutColliderOnly)`: audits all visible, unlocked `TCastleTransform` components in the hierarchy and selects transforms that have a `TCastleRigidBody` behavior without a `TCastleCollider` behavior (which cannot participate in collisions), transforms with a `TCastleCollider` behavior without a `TCastleRigidBody` behavior when `RigidBodyWithoutColliderOnly = false`, or transforms with a `TCastleCollider` and non-uniform/non-positive `Scale`.
+  - Bound to **`Ctrl+Alt+Shift+\`** in both the Viewport and Hierarchy Tree, plus **`Select Physics Collider / RigidBody Misconfigurations (Ctrl+Alt+Shift+\)`** (`MenuTreeViewItemSelectPhysicsAudit`) in `MenuTreeView` (`Shift`-click selects `TCastleRigidBody` without `TCastleCollider` only).
+- [x] **155.2. 2D UI Top/Bottom HUD Action Bars Layout (`ArrangeSelectedUserInterfacesInHudBars` / `ButtonUIHudBars`)**
+  - Implemented `TDesignFrame.ArrangeSelectedUserInterfacesInHudBars(MarginPx, GapPx, BarHeightPx, BottomOnly)` and added **`UI HUD Bars`** (`ButtonUIHudBars`) to `PanelLayoutUI`, splitting 2+ selected `TCastleUserInterface` controls into a top HUD status bar ($\lceil N/2 \rceil$ controls anchored along the top edge) and a bottom HUD action bar ($\lfloor N/2 \rfloor$ controls anchored along the bottom edge) inside their parent container and resizing/distributing each row evenly across the container width (**Click**: split Top + Bottom HUD bars, $12\text{ px}$ margin, $8\text{ px}$ gap, $48\text{ px}$ height; **`Shift`-click**: single Bottom Action Dock only; **`Ctrl`-click**: compact $36\text{ px}$ Top + Bottom HUD bars with $0\text{ px}$ flush margin).
+
+---
+
+## Recommended Next Roadmap Focus Areas (Phases 156+)
+
+To maximize level-design, procedural geometry, UI/HUD authoring, and scene-hygiene productivity in the Castle Game Engine Editor, the following four strategic pillars and concrete upcoming phases (Phases 156–163) are recommended:
 
 ### Strategic Focus Pillars
 1. **Pillar A — 3D Procedural Deformations & Classical Differential Geometry Surfaces**:
-   - Expand `TCastleTransformManipulate` with curvature-driven and minimal/projective surface arrangements (Spherical Stereographic conformal projection, Catalan minimal surface, Cylindrical Harmonic wave rings, Bour's minimal surface, and Dupin Cyclides) for sci-fi architecture, organic clusters, and procedural arenas.
+   - Expand `TCastleTransformManipulate` with curvature-driven and minimal/projective surface arrangements (Dupin Cyclides, Edmond Bour's minimal surface, Pascal's Limaçon inner-loop curves, Twist-Bend Helix-Arc deformations, and Costa/Henneberg minimal surfaces) for sci-fi architecture, organic clusters, and procedural arenas.
 2. **Pillar B — 2D UI Responsive HUD Templates & Safe-Frame / Margin Layouts**:
-   - Add one-click HUD/menu layout generators in `PanelLayoutUI` (Top/Bottom HUD Action Bars, Split-Screen 2P/4P Viewports, Symmetric Pill/Dock Ribbons, and Radial Compass / Minimap Bezel Slots).
+   - Add one-click HUD/menu layout generators in `PanelLayoutUI` (Split-Screen 2P/3P/4P Viewports, Left/Right Side-Panel Inspector Columns, and Radial Compass / Minimap Bezel Slots).
 3. **Pillar C — Scene Performance, Physics & Hierarchy Hygiene Audits**:
-   - Add one-click hierarchy diagnostic selectors for physics rigid-body/collider mismatches, transforms with negative/mirrored determinants, unanchored or fractional-pixel blurry 2D UI controls, and non-default blend/render-options scenes.
+   - Add one-click hierarchy diagnostic selectors for transforms with negative/mirrored scale determinants, unanchored or fractional-pixel blurry 2D UI controls, and non-default blend/render-options scenes.
 4. **Pillar D — Multi-Selection Batch Authoring & Camera/Light Staging**:
    - Provide fast batch lighting rigs and camera turntables / orbit waypoint rings.
 
-### Planned Upcoming Phases (Phases 152–159)
-- [ ] **Phase 152: 3D Spherical Stereographic / Inverse Conformal Projection Deformation (`StereographicDeformSelected` / `Ctrl+Alt+Shift+'`)**
-  - Map 2+ selected planar XZ transforms onto a sphere around the active pivot via inverse stereographic conformal projection $(u, v) \mapsto \frac{1}{u^2+v^2+4R^2}(4R^2 u, \; R(u^2+v^2-4R^2), \; 4R^2 v)$ with exact conformal normal orientation.
-- [ ] **Phase 153: 3D Catalan Minimal Surface / Cycloidal Ribbon Arrangement (`ArrangeSelectedOnCatalanSurface` / `Ctrl+Alt+Shift+[`)**
-  - Distribute 2+ selected 3D transforms across Eugène Catalan's minimal surface bounded by a cycloid and a parabola: $x = u - \sin u\cosh v, \; z = 1 - \cos u\cosh v, \; y = 4\sin(u/2)\sinh(v/2)$.
-- [ ] **Phase 154: 3D Cylindrical Harmonic / Crown Wave Ring Arrangement (`ArrangeSelectedInCylindricalHarmonic` / `Ctrl+Alt+Shift+]`)**
-  - Distribute 2+ selected 3D transforms along a cylindrical crown harmonic wave $R(\theta) = R_0 + A_r\cos(m\theta), \; Y(\theta) = A_y\sin(n\theta)$ with analytical 3D tangent orientation.
-- [ ] **Phase 155: Hierarchy Audit: Select Physics Collider / RigidBody Misconfigurations (`SelectPhysicsMisconfigurations` / `Ctrl+Alt+Shift+\`) & 2D UI Top/Bottom HUD Action Bars Layout (`ButtonUIHudBars`)**
-  - Audit transforms with `TCastleRigidBody` missing a `TCastleCollider` (or vice versa), and arrange 2+ selected 2D UI controls into split Top Status Bar + Bottom Action Dock HUD rows inside their parent container.
-- [ ] **Phase 156: 3D Dupin Cyclide / Asymmetric Horn Torus Deformation & Arrangement (`ArrangeSelectedOnDupinCyclide`)**
+### Planned Upcoming Phases (Phases 156–163)
+- [ ] **Phase 156: 3D Dupin Cyclide / Asymmetric Horn Torus Arrangement (`ArrangeSelectedOnDupinCyclide`)**
   - Distribute 2+ selected 3D transforms across Charles Dupin's Variable-Thickness Cyclide Ring Shell with analytical cyclide surface normals.
 - [ ] **Phase 157: 3D Edmond Bour Minimal Surface Arrangement (`ArrangeSelectedOnBourSurface`)**
   - Distribute 2+ selected 3D transforms across Edmond Bour's algebraic minimal surface in polar coordinates $(r, \theta)$ with exact Weierstrass–Enneper Gauss-map normals.
-- [ ] **Phase 158: 3D Epitrochoid / Pascal Limaçon Inner-Loop Curve Arrangement (`ArrangeSelectedInLimaconCurve`)**
+- [ ] **Phase 158: 3D Pascal Limaçon / Trisectrix Inner-Loop Curve Arrangement (`ArrangeSelectedInLimaconCurve`)**
   - Distribute 2+ selected 3D transforms along Étienne Pascal's Limaçon / Trisectrix inner-loop curve $r(\theta) = b + a\cos\theta$ with 3D elevation wave and analytical tangent orientation.
 - [ ] **Phase 159: Hierarchy Audit: Select Negative-Scale / Mirrored-Determinant Transforms & 2D UI Split-Screen 2P/3P/4P Viewport Layout (`ButtonUISplitScreen`)**
   - Audit transforms with negative scale components (`S.X < 0`, `S.Y < 0`, or `S.Z < 0`) that invert winding/normals, and subdivide 2+ selected 2D UI controls or viewports into standard 2-player (H/V), 3-player (1+2), or 4-player quad split-screen layouts.
+- [ ] **Phase 160: 3D Henneberg Minimal Surface Arrangement (`ArrangeSelectedOnHennebergSurface`)**
+  - Distribute 2+ selected 3D transforms across Lebrecht Henneberg's algebraic non-orientable minimal surface with analytical surface normals.
+- [ ] **Phase 161: 3D Spherical Epicycloid / Nephroid Seam Curve Arrangement (`ArrangeSelectedOnSphericalEpicycloid`)**
+  - Distribute 2+ selected 3D transforms along a 3D spherical epicycloid / cam seam curve on a sphere of radius $R$.
+- [ ] **Phase 162: 3D Talbot / Plateaulemniscate Curve Arrangement (`ArrangeSelectedInTalbotCurve`)**
+  - Distribute 2+ selected 3D transforms along a 3D Talbot / Plateau sinusoidal-spiral curve with analytical tangents.
+- [ ] **Phase 163: Hierarchy Audit: Select Fractional-Pixel / Unsnapped 2D UI Controls & 2D UI Left/Right Sidebar Columns Layout (`ButtonUISidebars`)**
+  - Audit 2D UI controls with non-integer pixel coordinates or dimensions that can cause sub-pixel texture blurring, and arrange 2+ selected 2D UI controls into Left/Right Sidebar + Center Content columns.
+
 
 

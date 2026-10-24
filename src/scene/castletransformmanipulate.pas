@@ -1973,6 +1973,70 @@ type
       const CrestHeight: Single = 0.0;
       const PiriformTeardrop: Boolean = false;
       const OrientMode: Integer = 1): Boolean;
+
+    { Deform all top-level selected transforms (@code(SelectedCount >= 2))
+      via 3D Inverse Stereographic Conformal Sphere Projection (Riemann Sphere
+      Mapping) centered at the active selection pivot $\mathbf(C)$ with sphere
+      radius @code(Radius) ($R$) and conformal blend factor @code(Strength)
+      ($\alpha \in [0, 1]$):
+      $$u_i = \frac(x_i - C_x)(R), \quad w_i = \frac(z_i - C_z)(R), \quad r^2 = u_i^2 + w_i^2$$
+      - South-Pole Tangent Projection (@code(NorthPoleProjection = false)):
+        $$X_(\text(sphere)) = C_x + R\frac(2u_i)(r^2 + 1), \quad Y_(\text(sphere)) = C_y + R\frac(r^2 - 1)(r^2 + 1), \quad Z_(\text(sphere)) = C_z + R\frac(2w_i)(r^2 + 1)$$
+      - North-Pole Dome Projection (@code(NorthPoleProjection = true)):
+        $$X_(\text(sphere)) = C_x + R\frac(2u_i)(r^2 + 1), \quad Y_(\text(sphere)) = C_y + R\frac(1 - r^2)(r^2 + 1), \quad Z_(\text(sphere)) = C_z + R\frac(2w_i)(r^2 + 1)$$
+      Interpolates $\mathbf(P)_i' = \text(Lerp)(\mathbf(P)_i, \mathbf(P)_(\text(sphere)) + (0, y_i - C_y, 0), \alpha)$
+      and optionally orients each transform's forward axis along the exact
+      spherical outward normal (@code(OrientNormals = true)).
+      Returns @true if at least one selected transform was modified. }
+    function StereographicDeformSelected(
+      const Radius: Single = 0.0;
+      const Strength: Single = 1.0;
+      const NorthPoleProjection: Boolean = false;
+      const OrientNormals: Boolean = true): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along Eugène Charles Catalan's 1855 Minimal Surface (a periodic minimal
+      surface whose planar parameter lines are cycloids and parabolas) centered
+      at the active selection pivot $\mathbf(C)$ with scale radius
+      @code(ScaleRadius) ($A$), longitudinal cycloid turns @code(TurnsU) ($W$),
+      and transverse hyperbolic span @code(WidthV) ($V_(\max)$):
+      $$t_i = \frac(i)(N - 1), \quad u_i = 2\pi W (t_i - 0.5), \quad v_i = V_(\max)\sin(2\pi t_i)$$
+      $$x_i = C_x + A\left(u_i - \sin u_i \cosh v_i\right), \quad
+        y_i = C_y + 4A\sin\left(\frac(u_i)(2)\right)\sinh\left(\frac(v_i)(2)\right), \quad
+        z_i = C_z + A\left(1 - \cos u_i \cosh v_i\right)$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the Catalan trajectory tangent
+      - @code(2): orient forward along the analytical Catalan minimal surface normal
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedOnCatalanSurface(
+      const ScaleRadius: Single = 0.0;
+      const TurnsU: Single = 1.0;
+      const WidthV: Single = 1.0;
+      const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along a 3D Cylindrical Harmonic / Crown Standing-Wave Ring centered at the
+      active selection pivot $\mathbf(C)$ with base radius @code(BaseRadius) ($R$),
+      radial harmonic amplitude @code(RadialAmp) ($A_r$), vertical crown wave
+      amplitude @code(VerticalAmp) ($A_y$), radial petal frequency
+      @code(RadialFreqM) ($m$), and vertical crown frequency @code(VerticalFreqN) ($n$):
+      $$\theta_i = \frac(2\pi i)(N), \quad r(\theta_i) = R + A_r\cos(m\theta_i)$$
+      $$x_i = C_x + r(\theta_i)\cos\theta_i, \quad
+        y_i = C_y + A_y\sin(n\theta_i), \quad
+        z_i = C_z + r(\theta_i)\sin(theta_i)$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the exact analytical cylindrical harmonic tangent
+      - @code(2): orient forward radially outward from $\mathbf(C)$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInCylindricalHarmonic(
+      const BaseRadius: Single = 0.0;
+      const RadialAmp: Single = 0.0;
+      const VerticalAmp: Single = 2.0;
+      const RadialFreqM: Integer = 3;
+      const VerticalFreqN: Integer = 3;
+      const OrientMode: Integer = 1): Boolean;
   end;
 
 var
@@ -15091,6 +15155,413 @@ begin
         NewUp := Vector3(0, 1, 0);
         if Abs(TVector3.DotProduct(LookDir, NewUp)) > 0.99 then
           NewUp := Vector3(1, 0, 0);
+        Side := TVector3.CrossProduct(LookDir, NewUp).Normalize;
+        NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+        T.GetWorldView(CurWorldPos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+
+    if Result then
+    begin
+      if Gizmo[Mode] <> nil then
+        Gizmo[Mode].UpdateSize;
+      GizmoHasTransformModified(Self);
+      GizmoHasTransformModifyEnd(Self);
+    end;
+  finally
+    FreeAndNil(TopLevel);
+  end;
+end;
+
+function TCastleTransformManipulate.StereographicDeformSelected(
+  const Radius: Single;
+  const Strength: Single;
+  const NorthPoleProjection: Boolean;
+  const OrientNormals: Boolean): Boolean;
+var
+  TopLevel: TComponentList;
+  I, N: Integer;
+  T: TCastleTransform;
+  Positions: array of TVector3;
+  CenterPos, Pos, SpherePos, TargetPos, CurWorldPos, CurDir, CurUp, SurfNormal, UpVec, Side: TVector3;
+  MinCorner, MaxCorner: TVector3;
+  SpanX, SpanZ, MaxSpan, ActualR, ActualStrength, U, W, RSqr, InvDenom, PoleSign: Single;
+begin
+  Result := false;
+  TopLevel := TComponentList.Create(false);
+  try
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+        TopLevel.Add(Boxes[I].Parent);
+
+    N := TopLevel.Count;
+    if N < 2 then
+      Exit;
+
+    SetLength(Positions, N);
+    MinCorner := GetTransformWorkingPos(TCastleTransform(TopLevel[0]));
+    MaxCorner := MinCorner;
+    for I := 0 to N - 1 do
+    begin
+      Positions[I] := GetTransformWorkingPos(TCastleTransform(TopLevel[I]));
+      MinCorner.X := Min(MinCorner.X, Positions[I].X);
+      MinCorner.Y := Min(MinCorner.Y, Positions[I].Y);
+      MinCorner.Z := Min(MinCorner.Z, Positions[I].Z);
+      MaxCorner.X := Max(MaxCorner.X, Positions[I].X);
+      MaxCorner.Y := Max(MaxCorner.Y, Positions[I].Y);
+      MaxCorner.Z := Max(MaxCorner.Z, Positions[I].Z);
+    end;
+
+    if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+      CenterPos := GetTransformWorkingPos(FMainSelected)
+    else
+      CenterPos := SelectionWorkingCenter;
+
+    SpanX := MaxCorner.X - MinCorner.X;
+    SpanZ := MaxCorner.Z - MinCorner.Z;
+    MaxSpan := Max(SpanX, SpanZ);
+
+    if Radius > 1e-4 then
+      ActualR := Radius
+    else if MaxSpan > 1e-4 then
+      ActualR := MaxSpan * 0.5
+    else
+      ActualR := 5.0;
+
+    ActualStrength := Clamped(Strength, 0.0, 1.0);
+    if NorthPoleProjection then
+      PoleSign := -1.0
+    else
+      PoleSign := 1.0;
+
+    for I := 0 to N - 1 do
+    begin
+      T := TCastleTransform(TopLevel[I]);
+      Pos := Positions[I];
+      U := (Pos.X - CenterPos.X) / ActualR;
+      W := (Pos.Z - CenterPos.Z) / ActualR;
+      RSqr := Sqr(U) + Sqr(W);
+      InvDenom := 1.0 / (RSqr + 1.0);
+
+      SpherePos := Vector3(
+        CenterPos.X + ActualR * (2.0 * U * InvDenom),
+        CenterPos.Y + ActualR * (PoleSign * (RSqr - 1.0) * InvDenom) + (Pos.Y - CenterPos.Y),
+        CenterPos.Z + ActualR * (2.0 * W * InvDenom)
+      );
+
+      TargetPos := Lerp(ActualStrength, Pos, SpherePos);
+
+      if not TVector3.Equals(Pos, TargetPos, 1e-4) then
+      begin
+        SetTransformWorkingPos(T, TargetPos);
+        Result := true;
+      end;
+
+      if OrientNormals then
+      begin
+        SurfNormal := Vector3(
+          2.0 * U * InvDenom,
+          PoleSign * (RSqr - 1.0) * InvDenom,
+          2.0 * W * InvDenom
+        );
+        SurfNormal := Lerp(ActualStrength, Vector3(0.0, 1.0, 0.0), SurfNormal);
+        if SurfNormal.LengthSqr < 1e-8 then
+          SurfNormal := Vector3(0.0, 1.0, 0.0)
+        else
+          SurfNormal := SurfNormal.Normalize;
+
+        UpVec := Vector3(0.0, 0.0, 1.0);
+        if Abs(TVector3.DotProduct(SurfNormal, UpVec)) > 0.99 then
+          UpVec := Vector3(1.0, 0.0, 0.0);
+        Side := TVector3.CrossProduct(SurfNormal, UpVec).Normalize;
+        UpVec := TVector3.CrossProduct(Side, SurfNormal).Normalize;
+
+        T.GetWorldView(CurWorldPos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, SurfNormal, 1e-4)) or
+           (not TVector3.Equals(CurUp, UpVec, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), SurfNormal, UpVec);
+          Result := true;
+        end;
+      end;
+    end;
+
+    if Result then
+    begin
+      if Gizmo[Mode] <> nil then
+        Gizmo[Mode].UpdateSize;
+      GizmoHasTransformModified(Self);
+      GizmoHasTransformModifyEnd(Self);
+    end;
+  finally
+    FreeAndNil(TopLevel);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedOnCatalanSurface(
+  const ScaleRadius: Single;
+  const TurnsU: Single;
+  const WidthV: Single;
+  const OrientMode: Integer): Boolean;
+var
+  TopLevel: TComponentList;
+  I, N: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, CurWorldPos, CurDir, CurUp, LookDir, NewUp, Side, dPdU, dPdV: TVector3;
+  MinCorner, MaxCorner: TVector3;
+  SpanX, SpanY, SpanZ, MaxSpan, ActualA, ActualTurns, ActualWidthV: Single;
+
+  function EvalCatalanPoint(const ParamT: Single): TVector3;
+  var
+    U, V: Single;
+  begin
+    U := 2.0 * Pi * ActualTurns * (ParamT - 0.5);
+    V := ActualWidthV * Sin(2.0 * Pi * ParamT);
+    Result := Vector3(
+      CenterPos.X + ActualA * (U - Sin(U) * Cosh(V)),
+      CenterPos.Y + 4.0 * ActualA * Sin(0.5 * U) * Sinh(0.5 * V),
+      CenterPos.Z + ActualA * (1.0 - Cos(U) * Cosh(V))
+    );
+  end;
+
+  function EvalCatalanNormal(const ParamT: Single): TVector3;
+  var
+    U, V: Single;
+  begin
+    U := 2.0 * Pi * ActualTurns * (ParamT - 0.5);
+    V := ActualWidthV * Sin(2.0 * Pi * ParamT);
+    dPdU := Vector3(
+      1.0 - Cos(U) * Cosh(V),
+      2.0 * Cos(0.5 * U) * Sinh(0.5 * V),
+      Sin(U) * Cosh(V)
+    );
+    dPdV := Vector3(
+      -Sin(U) * Sinh(V),
+      2.0 * Sin(0.5 * U) * Cosh(0.5 * V),
+      -Cos(U) * Sinh(V)
+    );
+    Result := TVector3.CrossProduct(dPdU, dPdV);
+    if Result.LengthSqr < 1e-8 then
+      Result := Vector3(0.0, 1.0, 0.0)
+    else
+      Result := Result.Normalize;
+  end;
+
+var
+  ParamT: Single;
+begin
+  Result := false;
+  TopLevel := TComponentList.Create(false);
+  try
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+        TopLevel.Add(Boxes[I].Parent);
+
+    N := TopLevel.Count;
+    if N < 2 then
+      Exit;
+
+    MinCorner := GetTransformWorkingPos(TCastleTransform(TopLevel[0]));
+    MaxCorner := MinCorner;
+    for I := 0 to N - 1 do
+    begin
+      CurPos := GetTransformWorkingPos(TCastleTransform(TopLevel[I]));
+      MinCorner.X := Min(MinCorner.X, CurPos.X);
+      MinCorner.Y := Min(MinCorner.Y, CurPos.Y);
+      MinCorner.Z := Min(MinCorner.Z, CurPos.Z);
+      MaxCorner.X := Max(MaxCorner.X, CurPos.X);
+      MaxCorner.Y := Max(MaxCorner.Y, CurPos.Y);
+      MaxCorner.Z := Max(MaxCorner.Z, CurPos.Z);
+    end;
+
+    if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+      CenterPos := GetTransformWorkingPos(FMainSelected)
+    else
+      CenterPos := SelectionWorkingCenter;
+
+    SpanX := MaxCorner.X - MinCorner.X;
+    SpanY := MaxCorner.Y - MinCorner.Y;
+    SpanZ := MaxCorner.Z - MinCorner.Z;
+    MaxSpan := Max(Max(SpanX, SpanY), SpanZ);
+
+    if ScaleRadius > 1e-4 then
+      ActualA := ScaleRadius
+    else if MaxSpan > 1e-4 then
+      ActualA := MaxSpan * 0.2
+    else
+      ActualA := 2.0;
+
+    if Abs(TurnsU) > 1e-4 then
+      ActualTurns := TurnsU
+    else
+      ActualTurns := 1.0;
+
+    if Abs(WidthV) > 1e-4 then
+      ActualWidthV := WidthV
+    else
+      ActualWidthV := 1.0;
+
+    for I := 0 to N - 1 do
+    begin
+      T := TCastleTransform(TopLevel[I]);
+      ParamT := Single(I) / Single(N - 1);
+      TargetPos := EvalCatalanPoint(ParamT);
+
+      CurPos := GetTransformWorkingPos(T);
+      if not TVector3.Equals(CurPos, TargetPos, 1e-4) then
+      begin
+        SetTransformWorkingPos(T, TargetPos);
+        Result := true;
+      end;
+
+      if OrientMode in [1, 2] then
+      begin
+        if OrientMode = 1 then
+          LookDir := EvalCatalanPoint(ParamT + 0.001) - EvalCatalanPoint(ParamT - 0.001)
+        else
+          LookDir := EvalCatalanNormal(ParamT);
+
+        if LookDir.LengthSqr < 1e-8 then
+          LookDir := Vector3(1.0, 0.0, 0.0)
+        else
+          LookDir := LookDir.Normalize;
+
+        NewUp := Vector3(0.0, 1.0, 0.0);
+        if Abs(TVector3.DotProduct(LookDir, NewUp)) > 0.99 then
+          NewUp := Vector3(0.0, 0.0, 1.0);
+        Side := TVector3.CrossProduct(LookDir, NewUp).Normalize;
+        NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+        T.GetWorldView(CurWorldPos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+
+    if Result then
+    begin
+      if Gizmo[Mode] <> nil then
+        Gizmo[Mode].UpdateSize;
+      GizmoHasTransformModified(Self);
+      GizmoHasTransformModifyEnd(Self);
+    end;
+  finally
+    FreeAndNil(TopLevel);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInCylindricalHarmonic(
+  const BaseRadius: Single;
+  const RadialAmp: Single;
+  const VerticalAmp: Single;
+  const RadialFreqM: Integer;
+  const VerticalFreqN: Integer;
+  const OrientMode: Integer): Boolean;
+var
+  TopLevel: TComponentList;
+  I, N, FreqM, FreqN: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, CurWorldPos, CurDir, CurUp, LookDir, NewUp, Side: TVector3;
+  MinCorner, MaxCorner: TVector3;
+  SpanX, SpanY, SpanZ, MaxSpan, ActualR, ActualAr, ActualAy, Theta, RTheta, dRdTheta: Single;
+begin
+  Result := false;
+  TopLevel := TComponentList.Create(false);
+  try
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+        TopLevel.Add(Boxes[I].Parent);
+
+    N := TopLevel.Count;
+    if N < 2 then
+      Exit;
+
+    MinCorner := GetTransformWorkingPos(TCastleTransform(TopLevel[0]));
+    MaxCorner := MinCorner;
+    for I := 0 to N - 1 do
+    begin
+      CurPos := GetTransformWorkingPos(TCastleTransform(TopLevel[I]));
+      MinCorner.X := Min(MinCorner.X, CurPos.X);
+      MinCorner.Y := Min(MinCorner.Y, CurPos.Y);
+      MinCorner.Z := Min(MinCorner.Z, CurPos.Z);
+      MaxCorner.X := Max(MaxCorner.X, CurPos.X);
+      MaxCorner.Y := Max(MaxCorner.Y, CurPos.Y);
+      MaxCorner.Z := Max(MaxCorner.Z, CurPos.Z);
+    end;
+
+    if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+      CenterPos := GetTransformWorkingPos(FMainSelected)
+    else
+      CenterPos := SelectionWorkingCenter;
+
+    SpanX := MaxCorner.X - MinCorner.X;
+    SpanY := MaxCorner.Y - MinCorner.Y;
+    SpanZ := MaxCorner.Z - MinCorner.Z;
+    MaxSpan := Max(Max(SpanX, SpanY), SpanZ);
+
+    if BaseRadius > 1e-4 then
+      ActualR := BaseRadius
+    else if MaxSpan > 1e-4 then
+      ActualR := MaxSpan * 0.5
+    else
+      ActualR := 6.0;
+
+    ActualAr := RadialAmp;
+    ActualAy := VerticalAmp;
+    FreqM := Max(0, RadialFreqM);
+    FreqN := Max(0, VerticalFreqN);
+
+    for I := 0 to N - 1 do
+    begin
+      T := TCastleTransform(TopLevel[I]);
+      Theta := 2.0 * Pi * Single(I) / Single(N);
+      RTheta := ActualR + ActualAr * Cos(Single(FreqM) * Theta);
+
+      TargetPos := Vector3(
+        CenterPos.X + RTheta * Cos(Theta),
+        CenterPos.Y + ActualAy * Sin(Single(FreqN) * Theta),
+        CenterPos.Z + RTheta * Sin(Theta)
+      );
+
+      CurPos := GetTransformWorkingPos(T);
+      if not TVector3.Equals(CurPos, TargetPos, 1e-4) then
+      begin
+        SetTransformWorkingPos(T, TargetPos);
+        Result := true;
+      end;
+
+      if OrientMode in [1, 2] then
+      begin
+        if OrientMode = 1 then
+        begin
+          dRdTheta := -ActualAr * Single(FreqM) * Sin(Single(FreqM) * Theta);
+          LookDir := Vector3(
+            dRdTheta * Cos(Theta) - RTheta * Sin(Theta),
+            ActualAy * Single(FreqN) * Cos(Single(FreqN) * Theta),
+            dRdTheta * Sin(Theta) + RTheta * Cos(Theta)
+          );
+        end else
+          LookDir := TargetPos - CenterPos;
+
+        if LookDir.LengthSqr < 1e-8 then
+          LookDir := Vector3(-Sin(Theta), 0.0, Cos(Theta))
+        else
+          LookDir := LookDir.Normalize;
+
+        NewUp := Vector3(0.0, 1.0, 0.0);
+        if Abs(TVector3.DotProduct(LookDir, NewUp)) > 0.99 then
+          NewUp := Vector3(1.0, 0.0, 0.0);
         Side := TVector3.CrossProduct(LookDir, NewUp).Normalize;
         NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
 
