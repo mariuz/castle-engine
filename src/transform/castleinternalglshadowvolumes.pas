@@ -71,6 +71,7 @@ type
       in RenderSeveralLights. Created on demand. }
     FLightScissor: TScissor;
     FCountLightsOutside: Cardinal;
+    FCountLightsDepthBounded: Cardinal;
 
     procedure UpdateCount;
     procedure SetDebugRender(const Value: Boolean);
@@ -192,6 +193,19 @@ type
       A light with an empty rectangle is skipped
       (it doesn't light anything visible), see @link(CountLightsOutside).
 
+      LightDepthBounds (if not empty, it must have the same length as Lights)
+      limits each light's passes to the window depth range (0..1) of its
+      sphere with the depth bounds test (TRenderContext.DepthBounds;
+      when the context lacks it, GLFeatures.DepthBoundsTest, they are
+      ignored), like Doom 3's renderer does: pixels whose surface is nearer
+      or farther than the light reaches are skipped by the stencil and
+      light passes. Calculate them with @link(ShadowVolumeLightDepthBounds);
+      a range of (0, 1) means no limit.
+
+      While rendering each light, @link(CurrentLight) is that light,
+      so casters can cast for one light only
+      (TCastleTransform.CastShadowVolumesLight).
+
       Before calling this, call InitFrustumAndLight (with any light position,
       it will be replaced by each light in turn).
       After this, CountCasters and other counters sum all lights. }
@@ -201,11 +215,16 @@ type
       const RenderShadowVolumes: TSVRenderProc;
       const Lights: Contnrs.TObjectList;
       const LightPositions: array of TVector4;
-      const LightScissors: array of TRectangle);
+      const LightScissors: array of TRectangle;
+      const LightDepthBounds: array of TVector2);
 
     { How many lights were skipped by the last RenderSeveralLights call,
       because their LightScissors rectangle was empty. }
     property CountLightsOutside: Cardinal read FCountLightsOutside;
+
+    { How many lights' passes were limited by the depth bounds test
+      in the last RenderSeveralLights call. }
+    property CountLightsDepthBounded: Cardinal read FCountLightsDepthBounded;
 
     { Use this to render shadow quads. }
     property Mesh: TCastleRenderUnlitMesh read FMesh;
@@ -233,6 +252,24 @@ type
 function ShadowVolumeLightScissor(const ProjectionViewMatrix: TMatrix4;
   const Frustum: TFrustum; const Viewport: TRectangle;
   const LightPosition: TVector4; const LightRadius: Single): TRectangle;
+
+{ Window depth range (0..1) where a light can contribute,
+  to limit its passes in TGLShadowVolumeRenderer.RenderSeveralLights
+  with the depth bounds test.
+
+  The light at LightPosition (in world space, W = 0 for a directional light)
+  lights nothing further than LightRadius (in world space;
+  LightRadius < 0 means it's infinite). ProjectionMatrix and CameraMatrix
+  (the view matrix) are the ones used to render.
+
+  Returns the window depths (X: the nearest, Y: the farthest) of the
+  light's sphere along the view direction, for the whole depth range
+  (glDepthRange 0..1; TRenderContext.DepthBounds maps them to the
+  depth range in use). Returns (0, 1) when the light
+  may reach any depth (a directional light, an infinite radius, a sphere
+  around the camera or behind it). }
+function ShadowVolumeLightDepthBounds(const ProjectionMatrix, CameraMatrix: TMatrix4;
+  const LightPosition: TVector4; const LightRadius: Single): TVector2;
 
 implementation
 
@@ -294,6 +331,39 @@ begin
   Top    := Viewport.Bottom + Ceil ((MaxY + 1) / 2 * Viewport.Height);
   Result := Rectangle(Left, Bottom, Right - Left, Top - Bottom);
   Result := Result * Viewport;
+end;
+
+function ShadowVolumeLightDepthBounds(const ProjectionMatrix, CameraMatrix: TMatrix4;
+  const LightPosition: TVector4; const LightRadius: Single): TVector2;
+
+  { Window depth (0..1) of a point Distance in front of the camera
+    (window depth depends only on the eye space z). }
+  function DepthAt(const Distance: Single): Single;
+  var
+    Clip: TVector4;
+  begin
+    Clip := ProjectionMatrix * Vector4(0, 0, -Distance, 1);
+    if Clip.W <= 0 then
+      Exit(0);
+    Result := Clamped(Clip.Z / Clip.W * 0.5 + 0.5, 0, 1);
+  end;
+
+var
+  CenterEye: TVector4;
+  Distance: Single;
+begin
+  Result := Vector2(0, 1);
+  if (LightPosition.W = 0) or (LightRadius < 0) then
+    Exit;
+  CenterEye := CameraMatrix * Vector4(LightPosition.XYZ / LightPosition.W, 1);
+  { the sphere's center along the view direction }
+  Distance := -CenterEye.Z;
+  { entirely behind the camera: the scissor skips such a light }
+  if Distance + LightRadius <= 0 then
+    Exit;
+  if Distance - LightRadius > 0 then
+    Result.X := DepthAt(Distance - LightRadius);
+  Result.Y := DepthAt(Distance + LightRadius);
 end;
 
 constructor TGLShadowVolumeRenderer.Create;
@@ -655,6 +725,9 @@ var
 begin
   Assert(GLFeatures.ShadowVolumesPossible);
 
+  { the single main light: not known as a node }
+  CurrentLight := nil;
+
   // render opaque stuff that is never in shadow, because it does not receive shadows
   PassParams.Init;
   PassParams.UsingBlending := false;
@@ -810,7 +883,8 @@ procedure TGLShadowVolumeRenderer.RenderSeveralLights(
   const RenderShadowVolumes: TSVRenderProc;
   const Lights: Contnrs.TObjectList;
   const LightPositions: array of TVector4;
-  const LightScissors: array of TRectangle);
+  const LightScissors: array of TRectangle;
+  const LightDepthBounds: array of TVector2);
 const
   { See TGLShadowVolumeRenderer.Render. }
   StencilShadowBits = $FF;
@@ -826,7 +900,9 @@ begin
   Assert(GLFeatures.ShadowVolumesPossible);
   Assert(Lights.Count = Length(LightPositions));
   Assert((Length(LightScissors) = 0) or (Lights.Count = Length(LightScissors)));
+  Assert((Length(LightDepthBounds) = 0) or (Lights.Count = Length(LightDepthBounds)));
   FCountLightsOutside := 0;
+  FCountLightsDepthBounded := 0;
 
   // render opaque stuff that is never in shadow, because it does not receive shadows
   PassParams.Init;
@@ -872,6 +948,21 @@ begin
       FLightScissor.Rect := LightScissors[I];
       FLightScissor.Enabled := true;
     end;
+
+    { Limit the stencil and light passes to the depth range of the
+      light's sphere (the depth bounds test discards fragments where the
+      depth buffer is outside the range: surfaces the light can't reach). }
+    if (Length(LightDepthBounds) <> 0) and
+       ((LightDepthBounds[I].X > 0) or (LightDepthBounds[I].Y < 1)) and
+       GLFeatures.DepthBoundsTest then
+    begin
+      RenderContext.DepthBounds := LightDepthBounds[I];
+      RenderContext.DepthBoundsEnabled := true;
+      Inc(FCountLightsDepthBounded);
+    end;
+
+    { casters may cast for this light only (TCastleTransform.CastShadowVolumesLight) }
+    CurrentLight := Lights[I];
 
     { InitFrustumAndLight resets counters, so sum them ourselves }
     InitFrustumAndLight(FFrustum, LightPositions[I]);
@@ -932,7 +1023,9 @@ begin
 
     if FLightScissor <> nil then
       FLightScissor.Enabled := false;
+    RenderContext.DepthBoundsEnabled := false;
   end;
+  CurrentLight := nil;
 
   FCountCasters := SumCasters;
   FCountShadowsNotVisible := SumShadowsNotVisible;
@@ -954,9 +1047,11 @@ begin
 
     for I := 0 to Lights.Count - 1 do
     begin
+      CurrentLight := Lights[I];
       InitFrustumAndLight(FFrustum, LightPositions[I]);
       RenderShadowVolumes(Params);
     end;
+    CurrentLight := nil;
 
     RenderContext.BlendingDisable;
     RenderContext.DepthBufferUpdate := SavedDepthBufferUpdate;

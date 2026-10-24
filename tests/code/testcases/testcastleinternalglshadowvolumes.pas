@@ -35,6 +35,14 @@ type
     { Several lights with a radius look the same with and without
       limiting their passes to their screen rectangles. }
     procedure TestSeveralLightsScissor;
+    { ShadowVolumeLightDepthBounds results. }
+    procedure TestShadowVolumeLightDepthBounds;
+    { Several lights with a radius look the same with and without
+      limiting their passes to their depth ranges. }
+    procedure TestSeveralLightsDepthBounds;
+    { TCastleTransform.CastShadowVolumesLight: a caster casting for
+      one light only. }
+    procedure TestCastShadowVolumesLight;
   end;
 
 implementation
@@ -595,6 +603,328 @@ begin
     finally FreeAndNil(WithoutScissor) end;
 
     CheckGLErrors('TestSeveralLightsScissor');
+    Window.Close;
+  finally
+    DestroyWindowForTest(Window);
+  end;
+end;
+
+procedure TTestCastleInternalGLShadowVolumes.TestShadowVolumeLightDepthBounds;
+var
+  Viewport: TCastleViewport;
+  Projection: TProjection;
+  ProjectionMatrix: TMatrix4;
+
+  function Bounds(const Position: TVector4; const Radius: Single): TVector2;
+  begin
+    Result := ShadowVolumeLightDepthBounds(ProjectionMatrix, Viewport.Camera.Matrix,
+      Position, Radius);
+  end;
+
+  procedure AssertBounds(const ExpectedX, ExpectedY: Single; const Actual: TVector2);
+  begin
+    if (Abs(ExpectedX - Actual.X) > 0.0005) or
+       (Abs(ExpectedY - Actual.Y) > 0.0005) then
+      Fail(Format('Expected depth bounds (%f, %f), got %s',
+        [ExpectedX, ExpectedY, Actual.ToString]));
+  end;
+
+const
+  Near = 0.1;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  try
+    { camera at the origin, looking in -Z, up in +Y }
+    Viewport.Camera.SetView(
+      Vector3(0, 0, 0),
+      Vector3(0, 0, -1),
+      Vector3(0, 1, 0));
+
+    FillChar(Projection, SizeOf(Projection), #0);
+    Projection.ProjectionType := ptPerspective;
+    Projection.PerspectiveAnglesRad := Vector2(Pi / 2, Pi / 2);
+    Projection.ProjectionNear := Near;
+    Projection.ProjectionFar := ZFarInfinity;
+    ProjectionMatrix := Projection.Matrix(1);
+
+    { directional light, infinite radius: every depth }
+    AssertBounds(0, 1, Bounds(Vector4(0, 0, -1, 0), 10));
+    AssertBounds(0, 1, Bounds(Vector4(0, 0, -10, 1), -1));
+
+    { a light in front: the window depth of a point at distance D
+      with an infinite far plane is 1 - Near / D }
+    AssertBounds(1 - Near / 9, 1 - Near / 11, Bounds(Vector4(0, 0, -10, 1), 1));
+    { to the side: the same distances along the view direction }
+    AssertBounds(1 - Near / 9, 1 - Near / 11, Bounds(Vector4(5, 3, -10, 1), 1));
+
+    { around the camera: from the near plane }
+    AssertBounds(0, 1 - Near / 2.5, Bounds(Vector4(0, 0, -0.5, 1), 2));
+
+    { entirely behind the camera: no limit (the scissor skips such a light) }
+    AssertBounds(0, 1, Bounds(Vector4(0, 0, 10, 1), 1));
+  finally FreeAndNil(Viewport) end;
+end;
+
+procedure TTestCastleInternalGLShadowVolumes.TestSeveralLightsDepthBounds;
+{ Four point lights with a radius casting shadow volumes
+  (one of them off-screen, one around the camera),
+  rendered with and without InternalShadowVolumesLightDepthBounds:
+  the same image. }
+var
+  Window: TCastleWindow;
+  Viewport: TCastleViewport;
+
+  procedure AddLight(const Position: TVector3; const Color: TVector3; const Radius: Single);
+  var
+    Light: TCastlePointLight;
+  begin
+    Light := TCastlePointLight.Create(Window);
+    Light.Translation := Position;
+    Light.Color := Color;
+    Light.Intensity := 10;
+    Light.Radius := Radius;
+    Light.Shadows := true;
+    Viewport.Items.Add(Light);
+  end;
+
+  procedure AddBox(const Translation, Size: TVector3);
+  var
+    Box: TCastleBox;
+  begin
+    Box := TCastleBox.Create(Window);
+    Box.Translation := Translation;
+    Box.Size := Size;
+    Box.Material := pmPhong;
+    Viewport.Items.Add(Box);
+  end;
+
+var
+  Floor: TCastleBox;
+  WithBounds, WithoutBounds: TCastleImage;
+  X, Y, I, Lit: Integer;
+  CA, CB: TCastleColor;
+  MaxDifference: Single;
+begin
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  Window := CreateWindowForTest;
+  try
+    Window.Width := 300;
+    Window.Height := 200;
+    Window.Open;
+
+    WritelnLog('Depth bounds test supported: %s',
+      [BoolToStr(GLFeatures.DepthBoundsTest, true)]);
+    if not (GLFeatures.ShadowVolumesPossible and GLFeatures.DepthBoundsTest) then
+    begin
+      Window.Close;
+      AbortTest;
+      Exit;
+    end;
+
+    Viewport := TCastleViewport.Create(Window);
+    Viewport.FullSize := true;
+    Viewport.BackgroundColor := Black;
+    Viewport.Camera.SetView(
+      Vector3(0, 6, 9),
+      Vector3(0, -6, -9),
+      Vector3(0, 9, -6));
+    Window.Controls.InsertFront(Viewport);
+
+    Floor := TCastleBox.Create(Window);
+    Floor.Size := Vector3(30, 0.2, 30);
+    Floor.Translation := Vector3(0, -0.1, 0);
+    Floor.Material := pmPhong;
+    Floor.CastShadows := false;
+    Viewport.Items.Add(Floor);
+
+    AddBox(Vector3(-2, 0.5, 0), Vector3(1, 1, 1));
+    AddBox(Vector3(2, 0.5, -1), Vector3(1, 1, 1));
+    { a tall box in front, nearer than the lights reach }
+    AddBox(Vector3(0, 1.5, 6), Vector3(1, 3, 1));
+
+    AddLight(Vector3(-3, 1.5, 0.5), Vector3(1, 0, 0), 3);
+    AddLight(Vector3(3, 1.5, -1), Vector3(0, 1, 0), 3);
+    { off-screen (behind the camera) }
+    AddLight(Vector3(0, 1.5, 20), Vector3(1, 1, 1), 3);
+    { around the camera }
+    AddLight(Vector3(0, 6, 8), Vector3(0, 0, 1), 9);
+    Viewport.ShadowVolumesMaxLights := 4;
+
+    InternalShadowVolumesLightDepthBounds := false;
+    try
+      WithoutBounds := Window.SaveScreen;
+    finally
+      InternalShadowVolumesLightDepthBounds := true;
+    end;
+    try
+      WithBounds := Window.SaveScreen;
+      try
+        MaxDifference := 0;
+        Lit := 0;
+        for Y := 0 to WithBounds.Height - 1 do
+          for X := 0 to WithBounds.Width - 1 do
+          begin
+            CA := WithBounds.Colors[X, Y, 0];
+            CB := WithoutBounds.Colors[X, Y, 0];
+            for I := 0 to 2 do
+              MaxDifference := Max(MaxDifference, Abs(CA.Data[I] - CB.Data[I]));
+            if CA.XYZ.Max > 0.2 then
+              Inc(Lit);
+          end;
+        WritelnLog('Shadow volume light depth bounds: max difference %f, %d lit pixels',
+          [MaxDifference, Lit]);
+        { something is lit, so the comparison means something }
+        AssertTrue(Lit > 1000);
+        if MaxDifference > 1 / 255 + 0.001 then
+          Fail(Format('Light passes with depth bounds differ, max difference %f', [MaxDifference]));
+      finally FreeAndNil(WithBounds) end;
+    finally FreeAndNil(WithoutBounds) end;
+
+    CheckGLErrors('TestSeveralLightsDepthBounds');
+    Window.Close;
+  finally
+    DestroyWindowForTest(Window);
+  end;
+end;
+
+procedure TTestCastleInternalGLShadowVolumes.TestCastShadowVolumesLight;
+{ The scene of TestSeveralLights (a red light on the left, a green one
+  on the right, a box between them) with the box casting for one light only:
+  the other light's shadow disappears. }
+var
+  Window: TCastleWindow;
+  Viewport: TCastleViewport;
+  Floor, Box: TCastleBox;
+  LightRed, LightGreen: TCastlePointLight;
+
+  function FloorColor(const Image: TCastleImage; const X: Single): TCastleColor;
+  var
+    P: TVector2;
+  begin
+    P := Viewport.PositionFromWorld(Vector3(X, 0, 0));
+    Result := Image.Colors[Round(P.X), Round(P.Y), 0];
+  end;
+
+  procedure Measure(out ColorLeft, ColorRight: TCastleColor);
+  var
+    Image: TCastleImage;
+  begin
+    Image := Window.SaveScreen;
+    try
+      ColorLeft := FloorColor(Image, -2);
+      ColorRight := FloorColor(Image, 2);
+    finally FreeAndNil(Image) end;
+  end;
+
+const
+  Dark = 0.05;
+  Lit = 0.2;
+var
+  ColorLeft, ColorRight: TCastleColor;
+  LeftBlack, RightBlack: Boolean;
+begin
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  Window := CreateWindowForTest;
+  try
+    Window.Width := 400;
+    Window.Height := 400;
+    Window.Open;
+
+    if not GLFeatures.ShadowVolumesPossible then
+    begin
+      Window.Close;
+      AbortTest;
+      Exit;
+    end;
+
+    Viewport := TCastleViewport.Create(Window);
+    Viewport.FullSize := true;
+    Viewport.BackgroundColor := Black;
+    Viewport.Camera.SetView(
+      Vector3(0, 12, 0),
+      Vector3(0, -1, 0),
+      Vector3(0, 0, -1));
+    Window.Controls.InsertFront(Viewport);
+
+    Floor := TCastleBox.Create(Window);
+    Floor.Size := Vector3(10, 0.2, 10);
+    Floor.Translation := Vector3(0, -0.1, 0);
+    Floor.Material := pmPhong;
+    Floor.CastShadows := false;
+    Viewport.Items.Add(Floor);
+
+    Box := TCastleBox.Create(Window);
+    Box.Size := Vector3(1, 2, 1);
+    Box.Translation := Vector3(0, 1, 0);
+    Box.Material := pmPhong;
+    Viewport.Items.Add(Box);
+
+    LightRed := TCastlePointLight.Create(Window);
+    LightRed.Translation := Vector3(-2.5, 3, 0);
+    LightRed.Color := Vector3(1, 0, 0);
+    LightRed.Intensity := 20;
+    LightRed.Shadows := true;
+    Viewport.Items.Add(LightRed);
+
+    LightGreen := TCastlePointLight.Create(Window);
+    LightGreen.Translation := Vector3(2.5, 3, 0);
+    LightGreen.Color := Vector3(0, 1, 0);
+    LightGreen.Intensity := 20;
+    LightGreen.Shadows := true;
+    Viewport.Items.Add(LightGreen);
+
+    Viewport.ShadowVolumesMaxLights := 2;
+
+    { casting for every light: each side in one light's shadow }
+    Measure(ColorLeft, ColorRight);
+    AssertTrue(ColorLeft.X > Lit);
+    AssertTrue(ColorLeft.Y < Dark);
+    AssertTrue(ColorRight.X < Dark);
+    AssertTrue(ColorRight.Y > Lit);
+
+    { casting for the red light only: the right side stays in its shadow,
+      the left side is lit by both }
+    Box.CastShadowVolumesLight := LightRed.InternalLightNode;
+    Measure(ColorLeft, ColorRight);
+    AssertTrue(ColorLeft.X > Lit);
+    AssertTrue(ColorLeft.Y > Lit);
+    AssertTrue(ColorRight.X < Dark);
+    AssertTrue(ColorRight.Y > Lit);
+
+    { for the green light only }
+    Box.CastShadowVolumesLight := LightGreen.InternalLightNode;
+    Measure(ColorLeft, ColorRight);
+    AssertTrue(ColorLeft.X > Lit);
+    AssertTrue(ColorLeft.Y < Dark);
+    AssertTrue(ColorRight.X > Lit);
+    AssertTrue(ColorRight.Y > Lit);
+
+    { with one shadow light the light isn't known: the box casts
+      for the main light whatever CastShadowVolumesLight says }
+    Viewport.ShadowVolumesMaxLights := 1;
+    Measure(ColorLeft, ColorRight);
+    LeftBlack := (ColorLeft.X < Dark) and (ColorLeft.Y < Dark);
+    RightBlack := (ColorRight.X < Dark) and (ColorRight.Y < Dark);
+    AssertTrue(LeftBlack <> RightBlack);
+
+    { back to every light }
+    Viewport.ShadowVolumesMaxLights := 2;
+    Box.CastShadowVolumesLight := nil;
+    Measure(ColorLeft, ColorRight);
+    AssertTrue(ColorLeft.Y < Dark);
+    AssertTrue(ColorRight.X < Dark);
+
+    CheckGLErrors('TestCastShadowVolumesLight');
     Window.Close;
   finally
     DestroyWindowForTest(Window);

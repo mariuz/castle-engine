@@ -71,6 +71,15 @@
 
   { Shadow volumes helper, not depending on OpenGL. }
   TBaseShadowVolumeRenderer = class
+  strict private
+    FCurrentLight: TObject;
+  public
+    { The light (a light node, TAbstractLightNode) whose shadow volumes
+      are rendered now, when TCastleViewport.ShadowVolumesMaxLights > 1
+      renders the lights one by one. @nil when rendering the single
+      main light's shadow volumes (the light is not known then).
+      See @link(TCastleTransform.CastShadowVolumesLight). }
+    property CurrentLight: TObject read FCurrentLight write FCurrentLight;
   end;
 
   TCastleTransformList = class;

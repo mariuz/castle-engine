@@ -38,6 +38,7 @@ type
       These fields will be automatically initialized at Start. }
     MainViewport: TCastleViewport;
     Light1, Light2, Light3: TCastlePointLight;
+    Box1: TCastleBox;
     LabelInfo: TCastleLabel;
   private
     Lights: array [0..2] of TCastlePointLight;
@@ -95,6 +96,8 @@ begin
   S := S +
     Format('Shadow volumes: %s (press S)', [Iff(MainViewport.ShadowVolumes, 'on', 'off')]) + NL +
     Format('Show shadow volumes: %s (press V)', [Iff(MainViewport.ShadowVolumesRender, 'yes', 'no')]) + NL +
+    Format('Depth bounds test per light: %s (press D)', [Iff(InternalShadowVolumesLightDepthBounds, 'on', 'off')]) + NL +
+    Format('Box casts for: %s (press C)', [Iff(Box1.CastShadowVolumesLight <> nil, 'light 1 only', 'every light')]) + NL +
     Format('Lights move: %s (press Space)', [Iff(LightsMove, 'yes', 'no')]) + NL +
     'Drag with mouse to rotate the view.';
   LabelInfo.Caption := S;
@@ -156,6 +159,28 @@ begin
   if Event.IsKey(keyV) then
   begin
     MainViewport.ShadowVolumesRender := not MainViewport.ShadowVolumesRender;
+    UpdateInfo;
+    Exit(true);
+  end;
+
+  if Event.IsKey(keyD) then
+  begin
+    { Limiting each light's passes to the depth range of its sphere
+      is only an optimization: the image stays the same. }
+    InternalShadowVolumesLightDepthBounds := not InternalShadowVolumesLightDepthBounds;
+    UpdateInfo;
+    Exit(true);
+  end;
+
+  if Event.IsKey(keyC) then
+  begin
+    { The box then casts a shadow for light 1 only
+      (with ShadowVolumesMaxLights > 1; with 1 light casting,
+      the light isn't known and this has no effect). }
+    if Box1.CastShadowVolumesLight = nil then
+      Box1.CastShadowVolumesLight := Light1.InternalLightNode
+    else
+      Box1.CastShadowVolumesLight := nil;
     UpdateInfo;
     Exit(true);
   end;

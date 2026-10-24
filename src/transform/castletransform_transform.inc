@@ -90,6 +90,7 @@
       FPickable: Boolean;
       FVisible: Boolean;
       FCastShadowsWhenHidden: Boolean;
+      FCastShadowVolumesLight: TObject;
       FCollidesWithMoving: Boolean;
       FWorld: TCastleAbstractRootTransform;
       { How many times this is a child in the FWorld, counting all possible paths in transformation tree. }
@@ -2258,6 +2259,22 @@
     property CastShadowsWhenHidden: Boolean
       read FCastShadowsWhenHidden write SetCastShadowsWhenHidden default false;
 
+    { Cast shadow volumes only for this light (a light node, like
+      TAbstractPunctualLightNode, the same instance that casts;
+      for a light component like TCastlePointLight, its
+      @link(TCastleAbstractLight.InternalLightNode)).
+
+      This matters when @link(TCastleViewport.ShadowVolumesMaxLights) > 1
+      renders the shadow volumes of each light in turn: this object
+      (and children) then casts for the given light only. It is for
+      shadow geometry made for one light (like a precomputed shadow
+      volume of a static light), that would wrongly shadow the other
+      lights. @nil (default) casts for every light. When one light casts
+      shadow volumes (ShadowVolumesMaxLights = 1) the light is not known
+      and this has no effect: use @link(Exists) then. }
+    property CastShadowVolumesLight: TObject
+      read FCastShadowVolumesLight write FCastShadowVolumesLight;
+
     { Objects on front render layer are rendered in front of objects on back render layer,
       regardless of their actual position (depth) relative to camera.
 
@@ -3645,6 +3662,13 @@ var
   NewTransformation: TTransformation;
   NewFrustum: TFrustum;
 begin
+  { a caster for one light only (CastShadowVolumesLight), rendering
+    another light's shadow volumes now }
+  if (FCastShadowVolumesLight <> nil) and
+     (ShadowVolumeRenderer.CurrentLight <> nil) and
+     (ShadowVolumeRenderer.CurrentLight <> FCastShadowVolumesLight) then
+    Exit;
+
   T := Translation;
   if FOnlyTranslation and T.IsZero then
   begin

@@ -10,6 +10,8 @@ Keys:
 - _1_, _2_, _3_: turn a light on / off.
 - _S_: shadow volumes on / off.
 - _V_: show the shadow volumes.
+- _D_: limit each light's passes to the depth range of its sphere with the depth bounds test (`InternalShadowVolumesLightDepthBounds`, an optimization: the image stays the same).
+- _C_: make the box cast a shadow for light 1 only ([TCastleTransform.CastShadowVolumesLight](https://castle-engine.io/api?id=TCastleTransform.CastShadowVolumesLight)).
 - _Space_: stop / resume moving the lights.
 - Drag with the mouse to rotate the view (follows [TCastleExamineNavigation](https://castle-engine.io/api?id=TCastleExamineNavigation)).
 

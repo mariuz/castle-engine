@@ -115,6 +115,8 @@ type
       FGlobalScissor: TScissor;
       FProjectionMatrix: TMatrix4;
       FDepthRange: TDepthRange;
+      FDepthBoundsEnabled: Boolean;
+      FDepthBounds: TVector2;
       FCullFace, FFrontFaceCcw: boolean;
       FDepthTest: Boolean;
       FDepthFunc: TDepthFunction;
@@ -142,6 +144,8 @@ type
     procedure WarnContextNotCurrent;
     procedure SetProjectionMatrix(const Value: TMatrix4);
     procedure SetDepthRange(const Value: TDepthRange);
+    procedure SetDepthBoundsEnabled(const Value: Boolean);
+    procedure SetDepthBounds(const Value: TVector2);
     procedure SetCullFace(const Value: boolean);
     procedure SetFrontFaceCcw(const Value: boolean);
     procedure SetDepthTest(const Value: Boolean);
@@ -171,6 +175,7 @@ type
     procedure UpdateGlobalAmbient;
     procedure UpdateProjectionMatrix;
     procedure UpdateDepthRange;
+    procedure UpdateDepthBounds;
     procedure UpdateCullFace;
     procedure UpdateFrontFace;
     procedure UpdateDepthTest;
@@ -278,6 +283,21 @@ type
     { Use this to operate on OpenGL glDepthRange. For now, our engine has
       very simple use for this, for TPlayer.RenderOnTop. }
     property DepthRange: TDepthRange read FDepthRange write SetDepthRange;
+
+    { Discard fragments whose pixel's depth buffer value is outside
+      @link(DepthBounds) (the depth bounds test, GL_EXT_depth_bounds_test).
+      Does nothing when the context lacks it (GLFeatures.DepthBoundsTest).
+      Used to limit the passes of a light casting shadow volumes
+      to the depth range of its sphere. }
+    property DepthBoundsEnabled: Boolean
+      read FDepthBoundsEnabled write SetDepthBoundsEnabled default false;
+
+    { Range of window depths (0..1) that passes when @link(DepthBoundsEnabled),
+      X is the nearest and Y the farthest, as if the whole depth range
+      (glDepthRange 0..1) was in use: it follows @link(DepthRange),
+      so the same bounds apply to things rendered in a smaller
+      depth range (drNear, drFar). }
+    property DepthBounds: TVector2 read FDepthBounds write SetDepthBounds;
 
     { Should we use backface-culling (ignore some faces during rendering). }
     property CullFace: boolean read FCullFace write SetCullFace
@@ -453,6 +473,8 @@ begin
   FEnabledScissors.ParentContext := Self;
   FProjectionMatrix := TMatrix4.Identity;
   FDepthRange := drFull;
+  FDepthBoundsEnabled := false;
+  FDepthBounds := Vector2(0, 1);
   FCullFace := false;
   FFrontFaceCcw := true;
   FColorChannels := AllColorChannels;
@@ -667,6 +689,61 @@ begin
     drNear: glDepthRange(0  , 0.1);
     drFar : glDepthRange(0.1, 1);
   end;
+  { the depth bounds follow the depth range }
+  if FDepthBoundsEnabled then
+    UpdateDepthBounds;
+end;
+
+procedure TRenderContext.SetDepthBoundsEnabled(const Value: Boolean);
+begin
+  if Self <> RenderContext then
+    WarnContextNotCurrent;
+
+  if FDepthBoundsEnabled <> Value then
+  begin
+    FDepthBoundsEnabled := Value;
+    UpdateDepthBounds;
+  end;
+end;
+
+procedure TRenderContext.SetDepthBounds(const Value: TVector2);
+begin
+  if Self <> RenderContext then
+    WarnContextNotCurrent;
+
+  if not TVector2.PerfectlyEquals(FDepthBounds, Value) then
+  begin
+    FDepthBounds := Value;
+    if FDepthBoundsEnabled then
+      UpdateDepthBounds;
+  end;
+end;
+
+procedure TRenderContext.UpdateDepthBounds;
+{$ifndef OpenGLES}
+var
+  RangeNear, RangeFar: Single;
+{$endif}
+begin
+  {$ifndef OpenGLES}
+  if not GLFeatures.DepthBoundsTest then
+    Exit;
+  if FDepthBoundsEnabled then
+  begin
+    { the window depths of DepthBounds assume the whole depth range,
+      map them to the current DepthRange (see UpdateDepthRange) }
+    case FDepthRange of
+      drNear: begin RangeNear := 0  ; RangeFar := 0.1; end;
+      drFar : begin RangeNear := 0.1; RangeFar := 1  ; end;
+      else    begin RangeNear := 0  ; RangeFar := 1  ; end;
+    end;
+    glDepthBoundsEXT(
+      RangeNear + (RangeFar - RangeNear) * FDepthBounds.X,
+      RangeNear + (RangeFar - RangeNear) * FDepthBounds.Y);
+    glEnable(GL_DEPTH_BOUNDS_TEST_EXT);
+  end else
+    glDisable(GL_DEPTH_BOUNDS_TEST_EXT);
+  {$endif}
 end;
 
 procedure TRenderContext.SetCullFace(const Value: boolean);
@@ -1123,6 +1200,7 @@ begin
   UpdateGlobalAmbient;
   UpdateProjectionMatrix;
   UpdateDepthRange;
+  UpdateDepthBounds;
   UpdateCullFace;
   UpdateFrontFace;
   UpdateDepthTest;
