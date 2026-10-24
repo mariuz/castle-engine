@@ -1174,9 +1174,37 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
 
 ---
 
-## Roadmap Completion Status (Phases 1–181)
+### Phase 182: Extract Selection to Reusable Sub-Design / Prefab (`ExtractSelectedToSubDesign` / `MenuTreeViewItemExtractSubDesign`)
+- [x] **182.1. Convert Selected 3D Transform or 2D UI Subtree into a Referenced `.castle-transform` / `.castle-user-interface` Sub-Design (`TDesignFrame.ExtractSelectedToSubDesign`)**
+  - Implemented `TDesignFrame.ExtractSelectedToSubDesign` and added **`Extract Selection to Reusable Sub-Design (Prefab)...`** (`MenuTreeViewItemExtractSubDesign`) in `MenuTreeView`.
+  - Prompts for a destination `.castle-transform` or `.castle-user-interface` file via `SaveDesignDialog`, normalizes the saved subtree's local root translation/rotation/scale before calling `TransformSave` or `UserInterfaceSave`, replaces the original hierarchy in-place with a `TCastleTransformDesign` or `TCastleDesign` instance referencing `MaybeUseDataProtocol(SaveDesignDialog.Url)` while preserving outer transform/layout/anchors, and records a single Undo transaction.
 
-All **181 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+### Phase 183: Unpack / Inline Sub-Design Instance (`UnpackSelectedDesignInstance` / `MenuTreeViewItemUnpackDesign`)
+- [x] **183.1. Convert Selected `TCastleTransformDesign` or `TCastleDesign` Instance into an Editable In-Place Hierarchy (`TDesignFrame.UnpackSelectedDesignInstance`)**
+  - Implemented `TDesignFrame.UnpackSelectedDesignInstance` and added **`Unpack / Inline Sub-Design Instance`** (`MenuTreeViewItemUnpackDesign`) in `MenuTreeView`.
+  - Loads a fresh editable hierarchy from the instance's `Url` via `TransformLoad(SubUrl, DesignOwner)` or `UserInterfaceLoad(SubUrl, DesignOwner)`, transfers the outer instance's world transform or 2D anchors/translation onto the unpacked root component, replaces the `TCastleTransformDesign` / `TCastleDesign` at its exact child index in its parent, and records an Undo step.
+
+### Phase 184: Sort Hierarchy Direct Children Alphabetically or Spatially (`SortSelectedChildren` / `MenuTreeViewItemSortChildrenAZ` & `MenuTreeViewItemSortChildrenSpatial`)
+- [x] **184.1. Alphabetical (`A->Z` / `Z->A`) and Spatial (`X` / `Y` / `Z`) Child Reordering (`TDesignFrame.SortSelectedChildren`)**
+  - Implemented `TDesignFrame.SortSelectedChildren(SortMode)` and added **`Sort Direct Children Alphabetically (A->Z | Shift: Z->A)`** (`MenuTreeViewItemSortChildrenAZ`) and **`Sort Direct Children Spatially (X | Shift: Y | Ctrl: Z)`** (`MenuTreeViewItemSortChildrenSpatial`) in `MenuTreeView`.
+  - Sorts all selectable, deletable direct child `TCastleTransform` or `TCastleUserInterface` components of the selected parent container (or the selected leaf's parent if the selected component has fewer than 2 children, or `TCastleViewport.Items` when a viewport is selected) and records an Undo step.
+
+### Phase 185: Batch Asset URL Remapper / Find & Replace Asset Paths Dialog (`ShowBatchReplaceAssetUrlsDialog` / `MenuTreeViewItemBatchReplaceUrls`)
+- [x] **185.1. Substring Find & Replace Across All Component `Url` Properties (`TDesignFrame.ShowBatchReplaceAssetUrlsDialog`)**
+  - Implemented `TDesignFrame.ShowBatchReplaceAssetUrlsDialog` and added **`Batch Replace Asset URLs (Find & Replace Paths)...`** (`MenuTreeViewItemBatchReplaceUrls`) in `MenuTreeView`.
+  - Lists all components in the design with a non-empty `Url` (`TCastleScene`, `TCastleTransformDesign`, `TCastleDesign`, `TCastleImageControl`, `TCastleImageTransform`, `TCastleSound`, `TCastleTiledMap`), pre-fills the current asset directory prefix, and performs bulk substring Find & Replace across `Url` properties with options for case sensitivity, restricting to the current selection, and verifying `URIFileExists(NewUrl)` before applying.
+
+### Phase 186: Align Selected Transform With Active Camera View (`AlignSelectedTransformWithCameraView` / `ButtonAlignTransformToCam` / `MenuTreeViewItemAlignTransformToCamera`)
+- [x] **186.1. Snap Selected 3D Transform Position & Orientation (or Orientation Only) to Active Viewport Camera (`TDesignFrame.AlignSelectedTransformWithCameraView`)**
+  - Implemented `TDesignFrame.AlignSelectedTransformWithCameraView(OrientationOnly)` and added **`Align With Camera View`** (`ButtonAlignTransformToCam` in `PanelLayoutTransform`) and **`Align Transform With Active Camera View (Shift: Rotation Only)`** (`MenuTreeViewItemAlignTransformToCamera` in `MenuTreeView`).
+  - Matches selected unlocked `TCastleTransform` instances (including lights, cameras, spawn points, or props) to `CurrentViewport.InternalCamera`'s world position, forward direction, and up vector via `SetWorldView` (or matches orientation only while preserving each transform's world position when `Shift`-clicked).
+
+---
+
+## Roadmap Completion Status (Phases 1–186)
+
+All **186 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+
 
 
 

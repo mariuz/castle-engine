@@ -553,6 +553,13 @@ type
       MenuTreeViewItemPasteHere: TMenuItem;
       MenuTreeViewItemColorTag: TMenuItem;
       MenuTreeViewItemSelectColorTag: TMenuItem;
+      MenuTreeViewItemExtractSubDesign: TMenuItem;
+      MenuTreeViewItemUnpackDesign: TMenuItem;
+      MenuTreeViewItemSortChildrenAZ: TMenuItem;
+      MenuTreeViewItemSortChildrenSpatial: TMenuItem;
+      MenuTreeViewItemBatchReplaceUrls: TMenuItem;
+      MenuTreeViewItemAlignTransformToCamera: TMenuItem;
+      ButtonAlignTransformToCam: TButton;
       ButtonSelBack: TSpeedButton;
       ButtonSelForward: TSpeedButton;
       ButtonCameraSettings: TSpeedButton;
@@ -790,6 +797,13 @@ type
     procedure MenuTreeViewItemPasteHereClick(Sender: TObject);
     procedure MenuTreeViewItemColorTagClick(Sender: TObject);
     procedure MenuTreeViewItemSelectColorTagClick(Sender: TObject);
+    procedure MenuTreeViewItemExtractSubDesignClick(Sender: TObject);
+    procedure MenuTreeViewItemUnpackDesignClick(Sender: TObject);
+    procedure MenuTreeViewItemSortChildrenAZClick(Sender: TObject);
+    procedure MenuTreeViewItemSortChildrenSpatialClick(Sender: TObject);
+    procedure MenuTreeViewItemBatchReplaceUrlsClick(Sender: TObject);
+    procedure MenuTreeViewItemAlignTransformToCameraClick(Sender: TObject);
+    procedure ButtonAlignTransformToCamClick(Sender: TObject);
     procedure MenuTreeViewItemGroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemUngroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemArrayDuplicateClick(Sender: TObject);
@@ -1941,6 +1955,11 @@ type
     procedure SetComponentColorTag(const C: TComponent; const TagIndex: Integer);
     procedure CycleSelectedColorTag(const ClearTags: Boolean = false);
     procedure SelectSameColorTagComponents;
+    procedure ExtractSelectedToSubDesign;
+    procedure UnpackSelectedDesignInstance;
+    procedure SortSelectedChildren(const SortMode: Integer = 0);
+    procedure ShowBatchReplaceAssetUrlsDialog;
+    procedure AlignSelectedTransformWithCameraView(const OrientationOnly: Boolean = false);
     procedure SaveCameraBookmark(const Slot: Integer);
     procedure RecallCameraBookmark(const Slot: Integer);
     procedure AdjustCameraSpeed(const Factor: Single);
@@ -5855,6 +5874,16 @@ begin
   ButtonParametricPreset.OnClick := @ButtonParametricPresetClick;
   ButtonParametricPreset.Parent := PanelLayoutTransform;
 
+  ButtonAlignTransformToCam := TButton.Create(Self);
+  ButtonAlignTransformToCam.Align := alTop;
+  ButtonAlignTransformToCam.AutoSize := true;
+  ButtonAlignTransformToCam.Caption := 'Align to Cam View';
+  ButtonAlignTransformToCam.Hint := 'Align selected 3D transform(s) to the active viewport camera''s world position and orientation (Click: Position + Rotation | Shift-click: Rotation only)';
+  ButtonAlignTransformToCam.ShowHint := true;
+  ButtonAlignTransformToCam.BorderSpacing.Around := 2;
+  ButtonAlignTransformToCam.OnClick := @ButtonAlignTransformToCamClick;
+  ButtonAlignTransformToCam.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -6390,6 +6419,36 @@ begin
   MenuTreeViewItemSelectColorTag.Caption := 'Select All With Same Color Tag [●]';
   MenuTreeViewItemSelectColorTag.OnClick := @MenuTreeViewItemSelectColorTagClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectColorTag);
+
+  MenuTreeViewItemExtractSubDesign := TMenuItem.Create(Self);
+  MenuTreeViewItemExtractSubDesign.Caption := 'Extract Selection to Reusable Sub-Design...';
+  MenuTreeViewItemExtractSubDesign.OnClick := @MenuTreeViewItemExtractSubDesignClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemExtractSubDesign);
+
+  MenuTreeViewItemUnpackDesign := TMenuItem.Create(Self);
+  MenuTreeViewItemUnpackDesign.Caption := 'Unpack / Inline Sub-Design Instance';
+  MenuTreeViewItemUnpackDesign.OnClick := @MenuTreeViewItemUnpackDesignClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemUnpackDesign);
+
+  MenuTreeViewItemSortChildrenAZ := TMenuItem.Create(Self);
+  MenuTreeViewItemSortChildrenAZ.Caption := 'Sort Direct Children Alphabetically (A-Z / Shift: Z-A)';
+  MenuTreeViewItemSortChildrenAZ.OnClick := @MenuTreeViewItemSortChildrenAZClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSortChildrenAZ);
+
+  MenuTreeViewItemSortChildrenSpatial := TMenuItem.Create(Self);
+  MenuTreeViewItemSortChildrenSpatial.Caption := 'Sort Direct Children Spatially (X / Shift: Y / Ctrl: Z)';
+  MenuTreeViewItemSortChildrenSpatial.OnClick := @MenuTreeViewItemSortChildrenSpatialClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSortChildrenSpatial);
+
+  MenuTreeViewItemBatchReplaceUrls := TMenuItem.Create(Self);
+  MenuTreeViewItemBatchReplaceUrls.Caption := 'Batch Remap / Replace Asset URLs...';
+  MenuTreeViewItemBatchReplaceUrls.OnClick := @MenuTreeViewItemBatchReplaceUrlsClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemBatchReplaceUrls);
+
+  MenuTreeViewItemAlignTransformToCamera := TMenuItem.Create(Self);
+  MenuTreeViewItemAlignTransformToCamera.Caption := 'Align Selected Transform With Camera View (Shift: Rotation Only)';
+  MenuTreeViewItemAlignTransformToCamera.OnClick := @MenuTreeViewItemAlignTransformToCameraClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemAlignTransformToCamera);
 
   MenuTreeViewItemGroupSelected := TMenuItem.Create(Self);
   MenuTreeViewItemGroupSelected.Caption := 'Group Selected Under New Transform (Ctrl+G)';
@@ -10598,6 +10657,8 @@ begin
       ButtonArrangeGerono.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonParametricPreset <> nil then
       ButtonParametricPreset.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonAlignTransformToCam <> nil then
+      ButtonAlignTransformToCam.Enabled := (T <> nil) or (TransformManipulate.SelectedCount > 0);
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -29908,6 +29969,797 @@ begin
   SelectSameColorTagComponents;
 end;
 
+procedure TDesignFrame.ExtractSelectedToSubDesign;
+var
+  Sel: TComponent;
+  SaveUrl, OrigName: String;
+  ParentT: TCastleTransform;
+  SrcT: TCastleTransform;
+  NewTD: TCastleTransformDesign;
+  OrigTrans, OrigScale, OrigCenter: TVector3;
+  OrigRot, OrigScaleOrient: TVector4;
+  OrigVisible, OrigExists: Boolean;
+  ParentUI: TCastleUserInterface;
+  SrcUI: TCastleUserInterface;
+  NewUID: TCastleDesign;
+  OrigTrans2D: TVector2;
+  OrigHAnchorSelf, OrigHAnchorParent: THorizontalPosition;
+  OrigVAnchorSelf, OrigVAnchorParent: TVerticalPosition;
+  OrigWidth, OrigHeight, OrigWidthFrac, OrigHeightFrac: Single;
+  OrigFullSize: Boolean;
+  InsertIdx: Integer;
+begin
+  Sel := SelectedComponent;
+  if (Sel = nil) or (Sel = FDesignRoot) or (not Deletable(Sel)) then
+  begin
+    ErrorBox('Select a non-root TCastleTransform or TCastleUserInterface component to extract to a reusable sub-design.');
+    Exit;
+  end;
+  if IsComponentLocked(Sel) then
+  begin
+    ErrorBox('Cannot extract a locked component. Unlock it first (Ctrl+L).');
+    Exit;
+  end;
+  if not ((Sel is TCastleTransform) or (Sel is TCastleUserInterface)) then
+  begin
+    ErrorBox('Only TCastleTransform or TCastleUserInterface hierarchies can be extracted to a sub-design.');
+    Exit;
+  end;
+
+  PrepareSaveDesignDialog(SaveDesignDialog, Sel);
+  SaveDesignDialog.Url := '';
+  if not SaveDesignDialog.Execute then Exit;
+
+  SaveUrl := MaybeUseDataProtocol(SaveDesignDialog.Url);
+  if Trim(SaveUrl) = '' then Exit;
+
+  if Sel is TCastleTransform then
+  begin
+    SrcT := TCastleTransform(Sel);
+    ParentT := SrcT.Parent;
+    if ParentT = nil then
+    begin
+      ErrorBox('Selected transform has no parent container.');
+      Exit;
+    end;
+    InsertIdx := ParentT.List.IndexOf(SrcT);
+    OrigName := SrcT.Name;
+    OrigTrans := SrcT.Translation;
+    OrigRot := SrcT.Rotation;
+    OrigScale := SrcT.Scale;
+    OrigCenter := SrcT.Center;
+    OrigScaleOrient := SrcT.ScaleOrientation;
+    OrigVisible := SrcT.Visible;
+    OrigExists := SrcT.Exists;
+
+    try
+      SrcT.Translation := TVector3.Zero;
+      SrcT.Rotation := Vector4(0, 1, 0, 0);
+      SrcT.Scale := Vector3(1, 1, 1);
+      SrcT.Center := TVector3.Zero;
+      TransformSave(SrcT, SaveUrl);
+    except
+      on E: Exception do
+      begin
+        SrcT.Translation := OrigTrans;
+        SrcT.Rotation := OrigRot;
+        SrcT.Scale := OrigScale;
+        SrcT.Center := OrigCenter;
+        ErrorBox('Failed to save sub-design to "' + SaveUrl + '":' + NL + E.Message);
+        Exit;
+      end;
+    end;
+
+    FreeComponentRecursively(SrcT);
+    NewTD := TCastleTransformDesign.Create(DesignOwner);
+    NewTD.Name := ProposeComponentName(TCastleTransformDesign, DesignOwner, OrigName);
+    NewTD.Translation := OrigTrans;
+    NewTD.Rotation := OrigRot;
+    NewTD.Scale := OrigScale;
+    NewTD.Center := OrigCenter;
+    NewTD.ScaleOrientation := OrigScaleOrient;
+    NewTD.Visible := OrigVisible;
+    NewTD.Exists := OrigExists;
+    NewTD.Url := SaveUrl;
+    if (InsertIdx >= 0) and (InsertIdx <= ParentT.Count) then
+      ParentT.Insert(InsertIdx, NewTD)
+    else
+      ParentT.Add(NewTD);
+
+    UpdateDesign;
+    SelectedComponent := NewTD;
+    ModifiedOutsideObjectInspector(
+      Format('Extract %s to Sub-Design (%s)', [OrigName, ExtractUriName(SaveUrl)]),
+      ucHigh);
+  end else
+  if Sel is TCastleUserInterface then
+  begin
+    SrcUI := TCastleUserInterface(Sel);
+    ParentUI := SrcUI.Parent;
+    if ParentUI = nil then
+    begin
+      ErrorBox('Selected UI control has no parent container.');
+      Exit;
+    end;
+    InsertIdx := ParentUI.IndexOfControl(SrcUI);
+    OrigName := SrcUI.Name;
+    OrigTrans2D := SrcUI.Translation;
+    OrigHAnchorSelf := SrcUI.HorizontalAnchorSelf;
+    OrigHAnchorParent := SrcUI.HorizontalAnchorParent;
+    OrigVAnchorSelf := SrcUI.VerticalAnchorSelf;
+    OrigVAnchorParent := SrcUI.VerticalAnchorParent;
+    OrigWidth := SrcUI.Width;
+    OrigHeight := SrcUI.Height;
+    OrigWidthFrac := SrcUI.WidthFraction;
+    OrigHeightFrac := SrcUI.HeightFraction;
+    OrigFullSize := SrcUI.FullSize;
+    OrigExists := SrcUI.Exists;
+
+    try
+      SrcUI.Translation := TVector2.Zero;
+      UserInterfaceSave(SrcUI, SaveUrl);
+    except
+      on E: Exception do
+      begin
+        SrcUI.Translation := OrigTrans2D;
+        ErrorBox('Failed to save UI sub-design to "' + SaveUrl + '":' + NL + E.Message);
+        Exit;
+      end;
+    end;
+
+    FreeComponentRecursively(SrcUI);
+    NewUID := TCastleDesign.Create(DesignOwner);
+    NewUID.Name := ProposeComponentName(TCastleDesign, DesignOwner, OrigName);
+    NewUID.HorizontalAnchorSelf := OrigHAnchorSelf;
+    NewUID.HorizontalAnchorParent := OrigHAnchorParent;
+    NewUID.VerticalAnchorSelf := OrigVAnchorSelf;
+    NewUID.VerticalAnchorParent := OrigVAnchorParent;
+    NewUID.Translation := OrigTrans2D;
+    NewUID.Width := OrigWidth;
+    NewUID.Height := OrigHeight;
+    NewUID.WidthFraction := OrigWidthFrac;
+    NewUID.HeightFraction := OrigHeightFrac;
+    NewUID.FullSize := OrigFullSize;
+    NewUID.Exists := OrigExists;
+    NewUID.Url := SaveUrl;
+    if (InsertIdx >= 0) and (InsertIdx <= ParentUI.ControlsCount) then
+      ParentUI.InsertControl(InsertIdx, NewUID)
+    else
+      ParentUI.InsertFront(NewUID);
+
+    UpdateDesign;
+    SelectedComponent := NewUID;
+    ModifiedOutsideObjectInspector(
+      Format('Extract %s to UI Sub-Design (%s)', [OrigName, ExtractUriName(SaveUrl)]),
+      ucHigh);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemExtractSubDesignClick(Sender: TObject);
+begin
+  ExtractSelectedToSubDesign;
+end;
+
+procedure TDesignFrame.UnpackSelectedDesignInstance;
+var
+  Sel: TComponent;
+  TD: TCastleTransformDesign;
+  ParentT, LoadedT: TCastleTransform;
+  UID: TCastleDesign;
+  ParentUI, LoadedUI: TCastleUserInterface;
+  SubUrl, OrigName: String;
+  InsertIdx: Integer;
+begin
+  Sel := SelectedComponent;
+  if (Sel = nil) or (Sel = FDesignRoot) or (not Deletable(Sel)) then
+  begin
+    ErrorBox('Select a non-root TCastleTransformDesign or TCastleDesign instance to unpack in-place.');
+    Exit;
+  end;
+  if IsComponentLocked(Sel) then
+  begin
+    ErrorBox('Cannot unpack a locked design instance. Unlock it first (Ctrl+L).');
+    Exit;
+  end;
+
+  if Sel is TCastleTransformDesign then
+  begin
+    TD := TCastleTransformDesign(Sel);
+    ParentT := TD.Parent;
+    SubUrl := Trim(TD.Url);
+    if (ParentT = nil) or (SubUrl = '') then
+    begin
+      ErrorBox('Selected TCastleTransformDesign must have a parent and a non-empty Url.');
+      Exit;
+    end;
+
+    try
+      LoadedT := TransformLoad(SubUrl, DesignOwner);
+    except
+      on E: Exception do
+      begin
+        ErrorBox('Failed to load sub-design "' + SubUrl + '":' + NL + E.Message);
+        Exit;
+      end;
+    end;
+
+    LoadedT.Translation := TD.Translation +
+      RotatePointAroundAxis(TD.Rotation, LoadedT.Translation * TD.Scale);
+    LoadedT.Rotation := (QuatFromAxisAngle(TD.Rotation) * QuatFromAxisAngle(LoadedT.Rotation)).ToAxisAngle;
+    LoadedT.Scale := LoadedT.Scale * TD.Scale;
+    LoadedT.Visible := TD.Visible and LoadedT.Visible;
+    LoadedT.Exists := TD.Exists and LoadedT.Exists;
+
+    InsertIdx := ParentT.List.IndexOf(TD);
+    OrigName := TD.Name;
+    FreeComponentRecursively(TD);
+
+    if (OrigName <> '') and IsValidIdent(OrigName) and (DesignOwner.FindComponent(OrigName) = nil) then
+      LoadedT.Name := OrigName
+    else if (LoadedT.Name = '') or (DesignOwner.FindComponent(LoadedT.Name) <> LoadedT) then
+      LoadedT.Name := ProposeComponentName(TComponentClass(LoadedT.ClassType), DesignOwner, OrigName);
+
+    if (InsertIdx >= 0) and (InsertIdx <= ParentT.Count) then
+      ParentT.Insert(InsertIdx, LoadedT)
+    else
+      ParentT.Add(LoadedT);
+
+    UpdateDesign;
+    SelectedComponent := LoadedT;
+    ModifiedOutsideObjectInspector(
+      Format('Unpack Sub-Design %s (%s)', [LoadedT.Name, ExtractUriName(SubUrl)]),
+      ucHigh);
+  end else
+  if Sel is TCastleDesign then
+  begin
+    UID := TCastleDesign(Sel);
+    ParentUI := UID.Parent;
+    SubUrl := Trim(UID.Url);
+    if (ParentUI = nil) or (SubUrl = '') then
+    begin
+      ErrorBox('Selected TCastleDesign must have a parent and a non-empty Url.');
+      Exit;
+    end;
+
+    try
+      LoadedUI := UserInterfaceLoad(SubUrl, DesignOwner);
+    except
+      on E: Exception do
+      begin
+        ErrorBox('Failed to load UI sub-design "' + SubUrl + '":' + NL + E.Message);
+        Exit;
+      end;
+    end;
+
+    LoadedUI.HorizontalAnchorSelf := UID.HorizontalAnchorSelf;
+    LoadedUI.HorizontalAnchorParent := UID.HorizontalAnchorParent;
+    LoadedUI.VerticalAnchorSelf := UID.VerticalAnchorSelf;
+    LoadedUI.VerticalAnchorParent := UID.VerticalAnchorParent;
+    LoadedUI.Translation := UID.Translation + LoadedUI.Translation;
+    LoadedUI.Exists := UID.Exists and LoadedUI.Exists;
+
+    InsertIdx := ParentUI.IndexOfControl(UID);
+    OrigName := UID.Name;
+    FreeComponentRecursively(UID);
+
+    if (OrigName <> '') and IsValidIdent(OrigName) and (DesignOwner.FindComponent(OrigName) = nil) then
+      LoadedUI.Name := OrigName
+    else if (LoadedUI.Name = '') or (DesignOwner.FindComponent(LoadedUI.Name) <> LoadedUI) then
+      LoadedUI.Name := ProposeComponentName(TComponentClass(LoadedUI.ClassType), DesignOwner, OrigName);
+
+    if (InsertIdx >= 0) and (InsertIdx <= ParentUI.ControlsCount) then
+      ParentUI.InsertControl(InsertIdx, LoadedUI)
+    else
+      ParentUI.InsertFront(LoadedUI);
+
+    UpdateDesign;
+    SelectedComponent := LoadedUI;
+    ModifiedOutsideObjectInspector(
+      Format('Unpack UI Sub-Design %s (%s)', [LoadedUI.Name, ExtractUriName(SubUrl)]),
+      ucHigh);
+  end else
+    ErrorBox('Select a TCastleTransformDesign or TCastleDesign component to unpack.');
+end;
+
+procedure TDesignFrame.MenuTreeViewItemUnpackDesignClick(Sender: TObject);
+begin
+  UnpackSelectedDesignInstance;
+end;
+
+procedure TDesignFrame.SortSelectedChildren(const SortMode: Integer);
+
+  function GetSortKey(const C: TComponent): Single;
+  begin
+    Result := 0.0;
+    if C is TCastleTransform then
+    begin
+      case SortMode of
+        2: Result := TCastleTransform(C).Translation.X;
+        3: Result := TCastleTransform(C).Translation.Y;
+        4: Result := TCastleTransform(C).Translation.Z;
+      end;
+    end else
+    if C is TCastleUserInterface then
+    begin
+      case SortMode of
+        2: Result := TCastleUserInterface(C).Translation.X;
+        3, 4: Result := TCastleUserInterface(C).Translation.Y;
+      end;
+    end;
+  end;
+
+  function CompareChildren(const A, B: TComponent): Integer;
+  var
+    KeyA, KeyB: Single;
+  begin
+    case SortMode of
+      0: Result := CompareText(A.Name, B.Name);
+      1: Result := -CompareText(A.Name, B.Name);
+      else
+      begin
+        KeyA := GetSortKey(A);
+        KeyB := GetSortKey(B);
+        if KeyA < KeyB then
+          Result := -1
+        else if KeyA > KeyB then
+          Result := 1
+        else
+          Result := CompareText(A.Name, B.Name);
+      end;
+    end;
+  end;
+
+var
+  Target: TComponent;
+  ParentT: TCastleTransform;
+  ParentUI: TCastleUserInterface;
+  ChildList: TComponentList;
+  I, J: Integer;
+  TempC: TComponent;
+  ModeDesc: String;
+begin
+  if FDesignRoot = nil then Exit;
+  Target := SelectedComponent;
+  if Target = nil then
+    Target := FDesignRoot;
+
+  if (Target is TCastleViewport) and (TCastleViewport(Target).Items <> nil) and
+     (TCastleViewport(Target).Items.Count >= 2) then
+    Target := TCastleViewport(Target).Items;
+
+  case SortMode of
+    0: ModeDesc := 'A->Z';
+    1: ModeDesc := 'Z->A';
+    2: ModeDesc := 'Spatial X';
+    3: ModeDesc := 'Spatial Y';
+    4: ModeDesc := 'Spatial Z';
+    else ModeDesc := 'A->Z';
+  end;
+
+  if Target is TCastleTransform then
+  begin
+    ParentT := TCastleTransform(Target);
+    if (ParentT.Count < 2) and (ParentT.Parent <> nil) and (ParentT.Parent.Count >= 2) then
+      ParentT := ParentT.Parent;
+
+    ChildList := TComponentList.Create(false);
+    try
+      for I := 0 to ParentT.Count - 1 do
+        if Selectable(ParentT[I]) and Deletable(ParentT[I]) then
+          ChildList.Add(ParentT[I]);
+
+      if ChildList.Count < 2 then
+      begin
+        ErrorBox('Selected transform container has fewer than 2 sortable child transforms.');
+        Exit;
+      end;
+
+      for I := 0 to ChildList.Count - 2 do
+        for J := I + 1 to ChildList.Count - 1 do
+          if CompareChildren(ChildList[I], ChildList[J]) > 0 then
+          begin
+            TempC := ChildList[I];
+            ChildList[I] := ChildList[J];
+            ChildList[J] := TempC;
+          end;
+
+      for I := 0 to ChildList.Count - 1 do
+      begin
+        ParentT.Remove(TCastleTransform(ChildList[I]));
+        ParentT.Insert(I, TCastleTransform(ChildList[I]));
+      end;
+
+      UpdateDesign;
+      ModifiedOutsideObjectInspector(
+        Format('Sort %d Children of %s (%s)', [ChildList.Count, ParentT.Name, ModeDesc]),
+        ucHigh);
+    finally
+      FreeAndNil(ChildList);
+    end;
+  end else
+  if Target is TCastleUserInterface then
+  begin
+    ParentUI := TCastleUserInterface(Target);
+    if (ParentUI.ControlsCount < 2) and (ParentUI.Parent <> nil) and (ParentUI.Parent.ControlsCount >= 2) then
+      ParentUI := ParentUI.Parent;
+
+    ChildList := TComponentList.Create(false);
+    try
+      for I := 0 to ParentUI.ControlsCount - 1 do
+        if Selectable(ParentUI.Controls[I]) and Deletable(ParentUI.Controls[I]) then
+          ChildList.Add(ParentUI.Controls[I]);
+
+      if ChildList.Count < 2 then
+      begin
+        ErrorBox('Selected UI container has fewer than 2 sortable child controls.');
+        Exit;
+      end;
+
+      for I := 0 to ChildList.Count - 2 do
+        for J := I + 1 to ChildList.Count - 1 do
+          if CompareChildren(ChildList[I], ChildList[J]) > 0 then
+          begin
+            TempC := ChildList[I];
+            ChildList[I] := ChildList[J];
+            ChildList[J] := TempC;
+          end;
+
+      for I := 0 to ChildList.Count - 1 do
+      begin
+        ParentUI.RemoveControl(TCastleUserInterface(ChildList[I]));
+        ParentUI.InsertControl(I, TCastleUserInterface(ChildList[I]));
+      end;
+
+      UpdateDesign;
+      ModifiedOutsideObjectInspector(
+        Format('Sort %d UI Children of %s (%s)', [ChildList.Count, ParentUI.Name, ModeDesc]),
+        ucHigh);
+    finally
+      FreeAndNil(ChildList);
+    end;
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSortChildrenAZClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    SortSelectedChildren(1)
+  else
+    SortSelectedChildren(0);
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSortChildrenSpatialClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssCtrl in ShiftState then
+    SortSelectedChildren(4)
+  else if ssShift in ShiftState then
+    SortSelectedChildren(3)
+  else
+    SortSelectedChildren(2);
+end;
+
+procedure TDesignFrame.ShowBatchReplaceAssetUrlsDialog;
+var
+  UrlComponents, SelectedList, ModifiedComponents: TComponentList;
+  SelectedCount, I, ReplacedCount, SkippedMissingCount: Integer;
+  Dialog: TForm;
+  LblInfo, LblFind, LblReplace: TLabel;
+  MemoUrls: TMemo;
+  EditFind, EditReplace: TEdit;
+  CheckCaseSensitive, CheckSelectedOnly, CheckRequireExists: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+  DefaultPrefix, CurUrl, NewUrl, FindStr, ReplaceStr: String;
+  Flags: TReplaceFlags;
+  PropInfo: PPropInfo;
+
+  procedure TraverseForUrls(const C: TComponent);
+  var
+    ChildIdx: Integer;
+    T: TCastleTransform;
+    UI: TCastleUserInterface;
+    CC: TCastleComponent;
+    U: String;
+  begin
+    if (C = nil) or (not Selectable(C)) then Exit;
+    U := GetComponentAssetUrl(C);
+    if (U <> '') and (UrlComponents.IndexOf(C) = -1) then
+    begin
+      UrlComponents.Add(C);
+      MemoUrls.Lines.Add(Format('%s (%s): %s', [C.Name, C.ClassName, U]));
+    end;
+
+    if C is TCastleComponent then
+    begin
+      CC := TCastleComponent(C);
+      for ChildIdx := 0 to CC.NonVisualComponentsCount - 1 do
+        TraverseForUrls(CC.NonVisualComponents[ChildIdx]);
+    end;
+    if C is TCastleTransform then
+    begin
+      T := TCastleTransform(C);
+      for ChildIdx := 0 to T.BehaviorsCount - 1 do
+        TraverseForUrls(T.Behaviors[ChildIdx]);
+      for ChildIdx := 0 to T.Count - 1 do
+        TraverseForUrls(T[ChildIdx]);
+    end else
+    if C is TCastleUserInterface then
+    begin
+      UI := TCastleUserInterface(C);
+      if UI is TCastleViewport then
+        TraverseForUrls(TCastleViewport(UI).Items);
+      for ChildIdx := 0 to UI.ControlsCount - 1 do
+        TraverseForUrls(UI.Controls[ChildIdx]);
+    end;
+  end;
+
+begin
+  if FDesignRoot = nil then Exit;
+
+  UrlComponents := TComponentList.Create(false);
+  ModifiedComponents := TComponentList.Create(false);
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Batch Replace Asset URLs (Find & Replace Paths)';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsSizeable;
+    Dialog.Width := 620;
+    Dialog.Height := 440;
+
+    LblInfo := TLabel.Create(Dialog);
+    LblInfo.Align := alTop;
+    LblInfo.WordWrap := true;
+    LblInfo.BorderSpacing.Around := 8;
+    LblInfo.Caption := 'Batch remap asset URLs across TCastleScene, TCastleTransformDesign, TCastleDesign, TCastleImageControl, TCastleImageTransform, TCastleSound, and TCastleTiledMap components:';
+    LblInfo.Parent := Dialog;
+
+    MemoUrls := TMemo.Create(Dialog);
+    MemoUrls.Align := alClient;
+    MemoUrls.ReadOnly := true;
+    MemoUrls.ScrollBars := ssAutoBoth;
+    MemoUrls.WordWrap := false;
+    MemoUrls.BorderSpacing.Around := 8;
+    MemoUrls.Parent := Dialog;
+
+    TraverseForUrls(FDesignRoot);
+    if UrlComponents.Count = 0 then
+      MemoUrls.Lines.Add('(No components with non-empty Url properties found in the current design.)');
+
+    DefaultPrefix := 'castle-data:/';
+    if SelectedComponent <> nil then
+    begin
+      CurUrl := GetComponentAssetUrl(SelectedComponent);
+      if CurUrl <> '' then
+        DefaultPrefix := ExtractUriPath(CurUrl);
+    end;
+    if (DefaultPrefix = 'castle-data:/') and (UrlComponents.Count > 0) then
+    begin
+      CurUrl := GetComponentAssetUrl(UrlComponents[0]);
+      if ExtractUriPath(CurUrl) <> '' then
+        DefaultPrefix := ExtractUriPath(CurUrl);
+    end;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    LblFind := TLabel.Create(Dialog);
+    LblFind.Align := alTop;
+    LblFind.Caption := 'Find URL Substring (e.g. castle-data:/old_folder/):';
+    LblFind.BorderSpacing.Around := 6;
+    LblFind.Parent := BottomPanel;
+
+    EditFind := TEdit.Create(Dialog);
+    EditFind.Align := alTop;
+    EditFind.Text := DefaultPrefix;
+    EditFind.BorderSpacing.Around := 6;
+    EditFind.Parent := BottomPanel;
+
+    LblReplace := TLabel.Create(Dialog);
+    LblReplace.Align := alTop;
+    LblReplace.Caption := 'Replace With (e.g. castle-data:/new_folder/):';
+    LblReplace.BorderSpacing.Around := 6;
+    LblReplace.Parent := BottomPanel;
+
+    EditReplace := TEdit.Create(Dialog);
+    EditReplace.Align := alTop;
+    EditReplace.Text := DefaultPrefix;
+    EditReplace.BorderSpacing.Around := 6;
+    EditReplace.Parent := BottomPanel;
+
+    CheckCaseSensitive := TCheckBox.Create(Dialog);
+    CheckCaseSensitive.Align := alTop;
+    CheckCaseSensitive.Caption := 'Case-sensitive substring match';
+    CheckCaseSensitive.Checked := false;
+    CheckCaseSensitive.BorderSpacing.Around := 6;
+    CheckCaseSensitive.Parent := BottomPanel;
+
+    CheckSelectedOnly := TCheckBox.Create(Dialog);
+    CheckSelectedOnly.Align := alTop;
+    CheckSelectedOnly.Caption := 'Only replace on currently selected components';
+    CheckSelectedOnly.Checked := false;
+    CheckSelectedOnly.BorderSpacing.Around := 6;
+    CheckSelectedOnly.Parent := BottomPanel;
+
+    CheckRequireExists := TCheckBox.Create(Dialog);
+    CheckRequireExists.Align := alTop;
+    CheckRequireExists.Caption := 'Only apply replacement if target asset file exists (URIFileExists)';
+    CheckRequireExists.Checked := false;
+    CheckRequireExists.BorderSpacing.Around := 6;
+    CheckRequireExists.Parent := BottomPanel;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Replace URLs';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+    begin
+      FindStr := EditFind.Text;
+      ReplaceStr := EditReplace.Text;
+      if FindStr = '' then
+      begin
+        ErrorBox('Specify a non-empty Find URL Substring.');
+        Exit;
+      end;
+
+      Flags := [rfReplaceAll];
+      if not CheckCaseSensitive.Checked then
+        Include(Flags, rfIgnoreCase);
+
+      SelectedList := nil;
+      try
+        if CheckSelectedOnly.Checked then
+          GetSelected(SelectedList, SelectedCount, false);
+
+        ReplacedCount := 0;
+        SkippedMissingCount := 0;
+        for I := 0 to UrlComponents.Count - 1 do
+        begin
+          if IsComponentLocked(UrlComponents[I]) then Continue;
+          if CheckSelectedOnly.Checked and
+             ((SelectedList = nil) or (SelectedList.IndexOf(UrlComponents[I]) = -1)) then
+            Continue;
+
+          PropInfo := GetPropInfo(UrlComponents[I].ClassInfo, 'Url');
+          if (PropInfo = nil) or (PropInfo^.SetProc = nil) then Continue;
+
+          CurUrl := GetStrProp(UrlComponents[I], PropInfo);
+          NewUrl := StringReplace(CurUrl, FindStr, ReplaceStr, Flags);
+          if NewUrl <> CurUrl then
+          begin
+            if CheckRequireExists.Checked and (not URIFileExists(NewUrl)) then
+            begin
+              Inc(SkippedMissingCount);
+              Continue;
+            end;
+            SetStrProp(UrlComponents[I], PropInfo, NewUrl);
+            ModifiedComponents.Add(UrlComponents[I]);
+            Inc(ReplacedCount);
+          end;
+        end;
+      finally
+        FreeAndNil(SelectedList);
+      end;
+
+      if ReplacedCount > 0 then
+      begin
+        UpdateDesign;
+        SetSelected(ModifiedComponents);
+        ModifiedOutsideObjectInspector(
+          Format('Batch Replace %d Asset URL(s) ("%s" -> "%s")', [ReplacedCount, FindStr, ReplaceStr]),
+          ucHigh);
+      end else
+      if SkippedMissingCount > 0 then
+        InfoBox(Format('No URLs were replaced (%d candidate replacement(s) skipped because target file did not exist).',
+          [SkippedMissingCount]))
+      else
+        InfoBox('No asset URLs matched "' + FindStr + '".');
+    end;
+  finally
+    FreeAndNil(Dialog);
+    FreeAndNil(ModifiedComponents);
+    FreeAndNil(UrlComponents);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemBatchReplaceUrlsClick(Sender: TObject);
+begin
+  ShowBatchReplaceAssetUrlsDialog;
+end;
+
+procedure TDesignFrame.AlignSelectedTransformWithCameraView(const OrientationOnly: Boolean);
+var
+  V: TCastleViewport;
+  CamPos, CamDir, CamUp, TPos, TDir, TUp: TVector3;
+  SelectedList, Transforms: TComponentList;
+  SelectedCount, I: Integer;
+  T: TCastleTransform;
+begin
+  V := CurrentViewport;
+  if (V = nil) or (V.InternalCamera = nil) then
+  begin
+    ErrorBox('No active 3D viewport camera available.');
+    Exit;
+  end;
+
+  V.InternalCamera.GetWorldView(CamPos, CamDir, CamUp);
+  Transforms := TComponentList.Create(false);
+  try
+    GetSelected(SelectedList, SelectedCount, false);
+    try
+      if SelectedList <> nil then
+        for I := 0 to SelectedList.Count - 1 do
+          if (SelectedList[I] is TCastleTransform) and
+             Deletable(SelectedList[I]) and
+             (not IsComponentLocked(SelectedList[I])) and
+             (not IsComponentDescendantOfSelection(SelectedList[I], SelectedList)) then
+            Transforms.Add(SelectedList[I]);
+    finally
+      FreeAndNil(SelectedList);
+    end;
+
+    if (Transforms.Count = 0) and (CurrentTransform <> nil) and
+       Deletable(CurrentTransform) and (not IsComponentLocked(CurrentTransform)) then
+      Transforms.Add(CurrentTransform);
+
+    if Transforms.Count = 0 then
+    begin
+      ErrorBox('Select at least one unlocked 3D transform to align with the active camera view.');
+      Exit;
+    end;
+
+    for I := 0 to Transforms.Count - 1 do
+    begin
+      T := TCastleTransform(Transforms[I]);
+      if OrientationOnly then
+      begin
+        T.GetWorldView(TPos, TDir, TUp);
+        T.SetWorldView(TPos, CamDir, CamUp);
+      end else
+        T.SetWorldView(CamPos, CamDir, CamUp);
+    end;
+
+    if OrientationOnly then
+      ModifiedOutsideObjectInspector(
+        Format('Match %d Transform Orientation(s) to Camera View', [Transforms.Count]),
+        ucHigh)
+    else
+      ModifiedOutsideObjectInspector(
+        Format('Align %d Transform(s) With Active Camera View', [Transforms.Count]),
+        ucHigh);
+  finally
+    FreeAndNil(Transforms);
+  end;
+end;
+
+procedure TDesignFrame.ButtonAlignTransformToCamClick(Sender: TObject);
+begin
+  AlignSelectedTransformWithCameraView(ssShift in GetKeyShiftState);
+end;
+
+procedure TDesignFrame.MenuTreeViewItemAlignTransformToCameraClick(Sender: TObject);
+begin
+  AlignSelectedTransformWithCameraView(ssShift in GetKeyShiftState);
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -30388,6 +31240,22 @@ begin
     MenuTreeViewItemColorTag.Enabled := ControlsTree.SelectionCount > 0;
   if MenuTreeViewItemSelectColorTag <> nil then
     MenuTreeViewItemSelectColorTag.Enabled := (Sel <> nil) and (GetComponentColorTag(Sel) > 0);
+  if MenuTreeViewItemExtractSubDesign <> nil then
+    MenuTreeViewItemExtractSubDesign.Enabled := (Sel <> nil) and (Sel <> FDesignRoot) and
+      Deletable(Sel) and ((Sel is TCastleTransform) or (Sel is TCastleUserInterface));
+  if MenuTreeViewItemUnpackDesign <> nil then
+    MenuTreeViewItemUnpackDesign.Enabled := (Sel <> nil) and (Sel <> FDesignRoot) and
+      Deletable(Sel) and (((Sel is TCastleTransformDesign) and (Trim(TCastleTransformDesign(Sel).Url) <> '')) or
+                          ((Sel is TCastleDesign) and (Trim(TCastleDesign(Sel).Url) <> '')));
+  if MenuTreeViewItemSortChildrenAZ <> nil then
+    MenuTreeViewItemSortChildrenAZ.Enabled := FDesignRoot <> nil;
+  if MenuTreeViewItemSortChildrenSpatial <> nil then
+    MenuTreeViewItemSortChildrenSpatial.Enabled := FDesignRoot <> nil;
+  if MenuTreeViewItemBatchReplaceUrls <> nil then
+    MenuTreeViewItemBatchReplaceUrls.Enabled := FDesignRoot <> nil;
+  if MenuTreeViewItemAlignTransformToCamera <> nil then
+    MenuTreeViewItemAlignTransformToCamera.Enabled := (CurrentViewport <> nil) and
+      ((CurrentTransform <> nil) or ((TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0)));
   if MenuTreeViewItemGroupSelected <> nil then
     MenuTreeViewItemGroupSelected.Enabled := (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0);
   if MenuTreeViewItemUngroupSelected <> nil then
