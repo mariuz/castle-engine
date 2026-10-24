@@ -1689,6 +1689,62 @@ type
       const HeightSpan: Single = 10.0;
       const Turns: Single = 1.0;
       const OrientMode: Integer = 1): Boolean;
+
+    { Deform all top-level selected transforms (@code(SelectedCount >= 2))
+      along @code(DisplaceAxis) ($0 = X, 1 = Y, 2 = Z$) as a sinusoidal wave
+      function of their signed coordinate along @code(WaveAxis) ($0 = X, 1 = Y, 2 = Z$)
+      relative to the active selection pivot $\mathbf(C)$:
+      $$\phi_i = \frac(2\pi)(\lambda)(P_(\text(WaveAxis),i) - C_(\text(WaveAxis))) + \text(PhaseRad), \quad
+        \Delta d_i = \text(Amplitude) \cdot \sin(\phi_i)$$
+      When @code(OrientNormals) is @true, each transform's orientation is tilted
+      to match the analytical wave tangent and normal vectors.
+      Returns @true if at least one selected transform was modified. }
+    function WaveDeformSelected(
+      const WaveAxis: Integer = 0;
+      const DisplaceAxis: Integer = 1;
+      const Amplitude: Single = 2.0;
+      const Wavelength: Single = 10.0;
+      const PhaseRad: Single = 0.0;
+      const OrientNormals: Boolean = true): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      across a 3D Enneper Minimal Surface saddle shell of order @code(OrderK) ($\ge 1$)
+      centered at the active selection pivot $\mathbf(C)$:
+      $$u_i = \frac(i)(N - 1), \quad r_i = R_(\max)\sqrt(u_i), \quad \theta_i = 2\pi u_i$$
+      $$x_i = C_x + S\left(r_i\cos\theta_i - \frac(r_i^(2k+1))(2k+1)\cos((2k+1)\theta_i)\right)$$
+      $$y_i = C_y + S\left(\frac(2)(k+1)r_i^(k+1)\cos((k+1)\theta_i)\right)$$
+      $$z_i = C_z + S\left(-r_i\sin\theta_i - \frac(r_i^(2k+1))(2k+1)\sin((2k+1)\theta_i)\right)$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the exact Gauss-map Enneper minimal-surface normal
+      - @code(2): orient forward along the Enneper azimuthal surface tangent
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedOnEnneperSurface(
+      const ScaleRadius: Single = 0.0;
+      const MaxR: Single = 1.15;
+      const OrderK: Integer = 1;
+      const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      around a horizontal 3D Gear-Tooth / Castle Battlement Crenellation / Sawtooth
+      Starburst ring centered at the active selection pivot $\mathbf(C)$ with
+      pitch radius @code(PitchRadius), radial tooth modulation @code(ToothDepth),
+      and @code(TeethCount) teeth:
+      - When @code(SharpSawtooth) is @false (harmonic gear / crenellation profile):
+        $r(\theta_i) = \max(0.05, R_(\text(pitch)) + D\cos(M\theta_i))$
+      - When @code(SharpSawtooth) is @true (ratchet sawtooth starburst profile):
+        $r(\theta_i) = \max(0.05, R_(\text(pitch)) + D(2\tau_i - 1))$ where $\tau_i = \text(Frac)(M i / N)$.
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the outward gear profile normal
+      - @code(2): orient forward along the analytical gear rim tangent
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInGearWheel(
+      const PitchRadius: Single = 0.0;
+      const ToothDepth: Single = 2.0;
+      const TeethCount: Integer = 6;
+      const SharpSawtooth: Boolean = false;
+      const OrientMode: Integer = 1): Boolean;
   end;
 
 var
@@ -12974,6 +13030,356 @@ begin
       if Side.LengthSqr <= Sqr(1e-5) then
         Side := Vector3(-SinT, 0.0, CosT);
       Side := Side.Normalize;
+      NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+         (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.WaveDeformSelected(
+  const WaveAxis: Integer;
+  const DisplaceAxis: Integer;
+  const Amplitude: Single;
+  const Wavelength: Single;
+  const PhaseRad: Single;
+  const OrientNormals: Boolean): Boolean;
+var
+  Targets: array of TCastleTransform;
+  Positions: array of TVector3;
+  N, I, WAxis, DAxis: Integer;
+  T: TCastleTransform;
+  Center, P, NewPos, TangentVec, NormalVec, CurWorldPos, CurDir, CurUp: TVector3;
+  MinW, MaxW, ActualWavelength, KWave, U, Phi, Slope: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Targets, FMaxSelectedCount);
+  N := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Targets[N] := T;
+      Inc(N);
+    end;
+  end;
+  if N < 2 then Exit;
+
+  WAxis := Clamped(WaveAxis, 0, 2);
+  DAxis := Clamped(DisplaceAxis, 0, 2);
+  if DAxis = WAxis then
+    DAxis := (WAxis + 1) mod 3;
+
+  if (FPivotMode = pmPrimarySelected) and (Targets[0] <> nil) then
+    Center := GetTransformWorkingPos(Targets[0])
+  else
+    Center := SelectionWorkingCenter;
+
+  SetLength(Positions, N);
+  MinW := MaxSingle;
+  MaxW := -MaxSingle;
+  for I := 0 to N - 1 do
+  begin
+    Positions[I] := GetTransformWorkingPos(Targets[I]);
+    MinW := Min(MinW, Positions[I].Data[WAxis]);
+    MaxW := Max(MaxW, Positions[I].Data[WAxis]);
+  end;
+
+  ActualWavelength := Wavelength;
+  if ActualWavelength <= 1e-4 then
+  begin
+    ActualWavelength := MaxW - MinW;
+    if ActualWavelength < 1e-3 then
+      ActualWavelength := 10.0;
+  end;
+  KWave := (2.0 * Pi) / ActualWavelength;
+
+  for I := 0 to N - 1 do
+  begin
+    T := Targets[I];
+    P := Positions[I];
+    U := P.Data[WAxis] - Center.Data[WAxis];
+    Phi := KWave * U + PhaseRad;
+
+    NewPos := P;
+    NewPos.Data[DAxis] := P.Data[DAxis] + Amplitude * Sin(Phi);
+
+    if not TVector3.Equals(P, NewPos, 1e-5) then
+    begin
+      SetTransformWorkingPos(T, NewPos);
+      Result := true;
+    end;
+
+    if OrientNormals and T.HasWorldTransform then
+    begin
+      Slope := Amplitude * KWave * Cos(Phi);
+
+      TangentVec := TVector3.Zero;
+      TangentVec.Data[WAxis] := 1.0;
+      TangentVec.Data[DAxis] := Slope;
+      TangentVec := TangentVec.Normalize;
+
+      NormalVec := TVector3.Zero;
+      NormalVec.Data[DAxis] := 1.0;
+      NormalVec.Data[WAxis] := -Slope;
+      NormalVec := NormalVec.Normalize;
+
+      T.GetWorldView(CurWorldPos, CurDir, CurUp);
+      if (not TVector3.Equals(CurDir, TangentVec, 1e-4)) or
+         (not TVector3.Equals(CurUp, NormalVec, 1e-4)) then
+      begin
+        T.SetWorldView(GetTransformWorkingPos(T), TangentVec, NormalVec);
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedOnEnneperSurface(
+  const ScaleRadius: Single;
+  const MaxR: Single;
+  const OrderK: Integer;
+  const OrientMode: Integer): Boolean;
+var
+  Targets: array of TCastleTransform;
+  N, I, K, M, P: Integer;
+  T: TCastleTransform;
+  Center, CurPos, NewPos, LookDir, NewUp, Side, CurWorldPos, CurDir, CurUp: TVector3;
+  ActualScale, ActualMaxR, SumDist, U, RParam, Theta, SinT, CosT: Single;
+  RK, R2K, RP, RM, InvDenom, DX, DY, DZ: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Targets, FMaxSelectedCount);
+  N := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Targets[N] := T;
+      Inc(N);
+    end;
+  end;
+  if N < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (Targets[0] <> nil) then
+    Center := GetTransformWorkingPos(Targets[0])
+  else
+    Center := SelectionWorkingCenter;
+
+  K := Max(1, OrderK);
+  M := 2 * K + 1;
+  P := K + 1;
+  ActualMaxR := Clamped(MaxR, 0.2, 1.8);
+
+  ActualScale := ScaleRadius;
+  if ActualScale <= 1e-4 then
+  begin
+    SumDist := 0.0;
+    for I := 0 to N - 1 do
+      SumDist := SumDist + PointsDistance(GetTransformWorkingPos(Targets[I]), Center);
+    ActualScale := (SumDist / N) / Max(0.5, ActualMaxR);
+    if ActualScale < 1e-3 then
+      ActualScale := 4.0;
+  end;
+
+  for I := 0 to N - 1 do
+  begin
+    T := Targets[I];
+    CurPos := GetTransformWorkingPos(T);
+    U := I / (N - 1);
+    RParam := ActualMaxR * Sqrt(U);
+    Theta := 2.0 * Pi * U;
+    SinCos(Theta, SinT, CosT);
+
+    RM := Power(RParam, M);
+    RP := Power(RParam, P);
+    RK := Power(RParam, K);
+    R2K := Sqr(RK);
+
+    NewPos.X := Center.X + ActualScale * (RParam * CosT - (RM / M) * Cos(M * Theta));
+    NewPos.Y := Center.Y + ActualScale * ((2.0 / P) * RP * Cos(P * Theta));
+    NewPos.Z := Center.Z + ActualScale * (-RParam * SinT - (RM / M) * Sin(M * Theta));
+
+    if not TVector3.Equals(CurPos, NewPos, 1e-5) then
+    begin
+      SetTransformWorkingPos(T, NewPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      if OrientMode = 1 then
+      begin
+        // Exact Gauss-map unit normal of Enneper's minimal surface:
+        InvDenom := 1.0 / (1.0 + R2K);
+        LookDir := Vector3(
+          2.0 * RK * Cos(K * Theta) * InvDenom,
+          (1.0 - R2K) * InvDenom,
+          2.0 * RK * Sin(K * Theta) * InvDenom);
+      end else
+      begin
+        // Azimuthal derivative dPos/dTheta on Enneper surface:
+        if RParam > 1e-4 then
+        begin
+          DX := -RParam * SinT + RM * Sin(M * Theta);
+          DY := -2.0 * RP * Sin(P * Theta);
+          DZ := -RParam * CosT - RM * Cos(M * Theta);
+          LookDir := Vector3(DX, DY, DZ);
+        end else
+          LookDir := Vector3(0.0, 0.0, -1.0);
+      end;
+
+      if LookDir.LengthSqr > 1e-8 then
+      begin
+        LookDir := LookDir.Normalize;
+        NewUp := Vector3(0, 1, 0);
+        if Abs(TVector3.DotProduct(LookDir, NewUp)) > 0.98 then
+          NewUp := Vector3(0, 0, 1);
+        Side := TVector3.CrossProduct(LookDir, NewUp).Normalize;
+        NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+        T.GetWorldView(CurWorldPos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+  end;
+
+  if Result then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+    GizmoHasTransformModifyEnd(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInGearWheel(
+  const PitchRadius: Single;
+  const ToothDepth: Single;
+  const TeethCount: Integer;
+  const SharpSawtooth: Boolean;
+  const OrientMode: Integer): Boolean;
+var
+  Targets: array of TCastleTransform;
+  N, I, M: Integer;
+  T: TCastleTransform;
+  Center, CurPos, NewPos, LookDir, NewUp, Side, CurWorldPos, CurDir, CurUp: TVector3;
+  ActualPitchR, SumDist, Theta, SinT, CosT, Tau, RVal, DRDTheta, DX, DZ: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then Exit;
+
+  SetLength(Targets, FMaxSelectedCount);
+  N := 0;
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      Targets[N] := T;
+      Inc(N);
+    end;
+  end;
+  if N < 2 then Exit;
+
+  if (FPivotMode = pmPrimarySelected) and (Targets[0] <> nil) then
+    Center := GetTransformWorkingPos(Targets[0])
+  else
+    Center := SelectionWorkingCenter;
+
+  M := Max(1, TeethCount);
+  ActualPitchR := PitchRadius;
+  if ActualPitchR <= 1e-4 then
+  begin
+    SumDist := 0.0;
+    for I := 0 to N - 1 do
+    begin
+      CurPos := GetTransformWorkingPos(Targets[I]);
+      SumDist := SumDist + Hypot(CurPos.X - Center.X, CurPos.Z - Center.Z);
+    end;
+    ActualPitchR := SumDist / N;
+    if ActualPitchR < 1e-3 then
+      ActualPitchR := 8.0;
+  end;
+
+  for I := 0 to N - 1 do
+  begin
+    T := Targets[I];
+    CurPos := GetTransformWorkingPos(T);
+    Theta := (2.0 * Pi * I) / N;
+    SinCos(Theta, SinT, CosT);
+
+    if SharpSawtooth then
+    begin
+      Tau := Frac((M * I) / N);
+      if Tau < 0.0 then
+        Tau := Tau + 1.0;
+      RVal := Max(0.05, ActualPitchR + ToothDepth * (2.0 * Tau - 1.0));
+      DRDTheta := (ToothDepth * M) / Pi;
+    end else
+    begin
+      RVal := Max(0.05, ActualPitchR + ToothDepth * Cos(M * Theta));
+      DRDTheta := -ToothDepth * M * Sin(M * Theta);
+    end;
+
+    NewPos.X := Center.X + RVal * CosT;
+    NewPos.Y := Center.Y;
+    NewPos.Z := Center.Z + RVal * SinT;
+
+    if not TVector3.Equals(CurPos, NewPos, 1e-5) then
+    begin
+      SetTransformWorkingPos(T, NewPos);
+      Result := true;
+    end;
+
+    if (OrientMode in [1, 2]) and T.HasWorldTransform then
+    begin
+      DX := DRDTheta * CosT - RVal * SinT;
+      DZ := DRDTheta * SinT + RVal * CosT;
+      if OrientMode = 1 then
+        LookDir := Vector3(DZ, 0.0, -DX)
+      else
+        LookDir := Vector3(DX, 0.0, DZ);
+
+      if LookDir.LengthSqr < 1e-8 then
+        LookDir := Vector3(CosT, 0.0, SinT);
+
+      LookDir := LookDir.Normalize;
+      NewUp := Vector3(0, 1, 0);
+      Side := TVector3.CrossProduct(LookDir, NewUp).Normalize;
       NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
 
       T.GetWorldView(CurWorldPos, CurDir, CurUp);

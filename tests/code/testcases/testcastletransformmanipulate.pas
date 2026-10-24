@@ -69,6 +69,7 @@ type
     procedure TestRadialFalloffCycloidAndHyperboloid;
     procedure TestCylindrifyCassiniOvalAndCatenoid;
     procedure TestBarrelHippopedeAndHelicoid;
+    procedure TestWaveDeformEnneperAndGearWheel;
   end;
 
 implementation
@@ -3154,6 +3155,77 @@ begin
     AssertVectorEquals(Vector3(-4.0, 3.0 * Pi, 0.0), B3.Translation, 1e-4);
     B2.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(0.0, 0.8, -0.6), WorldDir.Normalize, 1e-4);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestWaveDeformEnneperAndGearWheel;
+var
+  Viewport: TCastleViewport;
+  B1, B2, B3, B4: TCastleBox;
+  Manipulate: TCastleTransformManipulate;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := nil;
+  Manipulate := nil;
+  try
+    Viewport := TCastleViewport.Create(nil);
+    B1 := TCastleBox.Create(Viewport);
+    B2 := TCastleBox.Create(Viewport);
+    B3 := TCastleBox.Create(Viewport);
+    B4 := TCastleBox.Create(Viewport);
+    Viewport.Items.Add(B1);
+    Viewport.Items.Add(B2);
+    Viewport.Items.Add(B3);
+    Viewport.Items.Add(B4);
+
+    Manipulate := TCastleTransformManipulate.Create(nil);
+    Manipulate.PivotMode := pmPrimarySelected;
+
+    { 1. Test WaveDeformSelected along X -> Y with Amplitude=3, Wavelength=8 }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    B2.Translation := Vector3(2.0, 0.0, 0.0);
+    B3.Translation := Vector3(4.0, 0.0, 0.0);
+    B4.Translation := Vector3(-2.0, 0.0, 0.0);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+
+    AssertTrue(Manipulate.WaveDeformSelected(0, 1, 3.0, 8.0, 0.0, true));
+    AssertVectorEquals(Vector3(0.0, 0.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(2.0, 3.0, 0.0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(4.0, 0.0, 0.0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-2.0, -3.0, 0.0), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1.0, 3.0 * Pi / 4.0, 0.0).Normalize, WorldDir.Normalize, 1e-3);
+    AssertVectorEquals(Vector3(-3.0 * Pi / 4.0, 1.0, 0.0).Normalize, WorldUp.Normalize, 1e-3);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1.0, 0.0, 0.0), WorldDir.Normalize, 1e-3);
+    AssertVectorEquals(Vector3(0.0, 1.0, 0.0), WorldUp.Normalize, 1e-3);
+
+    { 2. Test ArrangeSelectedOnEnneperSurface (ScaleRadius=3, MaxR=1, OrderK=1, OrientMode=1) }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Manipulate.SetSelected([B1, B2, B3]);
+    AssertTrue(Manipulate.ArrangeSelectedOnEnneperSurface(3.0, 1.0, 1, 1));
+    AssertVectorEquals(Vector3(0.0, 0.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(2.0, 3.0, 0.0), B3.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.0, 1.0, 0.0), WorldDir.Normalize, 1e-3);
+    B3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1.0, 0.0, 0.0), WorldDir.Normalize, 1e-3);
+
+    { 3. Test ArrangeSelectedInGearWheel (PitchRadius=10, ToothDepth=2, TeethCount=2, Smooth, OrientMode=1) }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.ArrangeSelectedInGearWheel(10.0, 2.0, 2, false, 1));
+    AssertVectorEquals(Vector3(12.0, 0.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, 0.0, 8.0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-12.0, 0.0, 0.0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, 0.0, -8.0), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1.0, 0.0, 0.0), WorldDir.Normalize, 1e-3);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.0, 0.0, 1.0), WorldDir.Normalize, 1e-3);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

@@ -393,6 +393,9 @@ type
       ButtonBarrelPincushion: TButton;
       ButtonArrangeHippopede: TButton;
       ButtonArrangeHelicoid: TButton;
+      ButtonWaveDeform: TButton;
+      ButtonArrangeEnneper: TButton;
+      ButtonArrangeGear: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -434,6 +437,7 @@ type
       ButtonUISpiral: TButton;
       ButtonUIHexGrid: TButton;
       ButtonUIWaveArch: TButton;
+      ButtonUIArcFan: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -481,6 +485,7 @@ type
       MenuTreeViewItemSelectUIImagesAndLabels: TMenuItem;
       MenuTreeViewItemSelectUISizingMode: TMenuItem;
       MenuTreeViewItemSelectUICustomStyle: TMenuItem;
+      MenuTreeViewItemSelectUIOutsideParent: TMenuItem;
       MenuTreeViewItemCopyTransform: TMenuItem;
       MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
@@ -619,6 +624,9 @@ type
     procedure ButtonBarrelPincushionClick(Sender: TObject);
     procedure ButtonArrangeHippopedeClick(Sender: TObject);
     procedure ButtonArrangeHelicoidClick(Sender: TObject);
+    procedure ButtonWaveDeformClick(Sender: TObject);
+    procedure ButtonArrangeEnneperClick(Sender: TObject);
+    procedure ButtonArrangeGearClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -649,6 +657,7 @@ type
     procedure ButtonUISpiralClick(Sender: TObject);
     procedure ButtonUIHexGridClick(Sender: TObject);
     procedure ButtonUIWaveArchClick(Sender: TObject);
+    procedure ButtonUIArcFanClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -703,6 +712,7 @@ type
     procedure MenuTreeViewItemSelectUIImagesAndLabelsClick(Sender: TObject);
     procedure MenuTreeViewItemSelectUISizingModeClick(Sender: TObject);
     procedure MenuTreeViewItemSelectUICustomStyleClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectUIOutsideParentClick(Sender: TObject);
     procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
@@ -1437,6 +1447,27 @@ type
       const Turns: Single = 1.0;
       const OrientMode: Integer = 1);
     procedure ShowArrangeOnHelicoidDialog;
+    procedure WaveDeformSelection(
+      const WaveAxis: Integer = 0;
+      const DisplaceAxis: Integer = 1;
+      const Amplitude: Single = 2.0;
+      const Wavelength: Single = 10.0;
+      const PhaseRad: Single = 0.0;
+      const OrientNormals: Boolean = true);
+    procedure ShowWaveDeformSelectionDialog;
+    procedure ArrangeSelectionOnEnneperSurface(
+      const ScaleRadius: Single = 0.0;
+      const MaxR: Single = 1.15;
+      const OrderK: Integer = 1;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeOnEnneperSurfaceDialog;
+    procedure ArrangeSelectionInGearWheel(
+      const PitchRadius: Single = 0.0;
+      const ToothDepth: Single = 2.0;
+      const TeethCount: Integer = 6;
+      const SharpSawtooth: Boolean = false;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeInGearWheelDialog;
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -1493,6 +1524,8 @@ type
     procedure ArrangeSelectedUserInterfacesInWaveArch(
       const Amplitude: Single = 48.0;
       const ParabolicArchMode: Boolean = true);
+    procedure ArrangeSelectedUserInterfacesInArcFan(
+      const ArcAngleDeg: Single = 120.0);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -1549,6 +1582,7 @@ type
     procedure SelectUserInterfaceImagesAndLabels(const OnlyLabels: Boolean = false);
     procedure SelectUserInterfacesBySizingMode(const OnlyAutoOrFullSize: Boolean = false);
     procedure SelectUserInterfacesWithCustomStyle(const OnlyCustomFont: Boolean = false);
+    procedure SelectUserInterfacesOutsideParent(const OnlyCompletelyOutside: Boolean = false);
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -2224,6 +2258,11 @@ begin
       Frame.ShowGridDuplicateDialog;
       Exit(true);
     end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt, mkShift] then
+    begin
+      Frame.ShowArrangeInGearWheelDialog;
+      Exit(true);
+    end else
     if Event.ModifiersDown = [mkAlt, mkShift] then
     begin
       Frame.ShowArrangeInGridDialog;
@@ -2284,6 +2323,11 @@ begin
     if Event.ModifiersDown = [mkCtrl, mkAlt] then
     begin
       Frame.ShowArrangeInSphericalSpiralDialog;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt, mkShift] then
+    begin
+      Frame.ShowWaveDeformSelectionDialog;
       Exit(true);
     end;
   end;
@@ -2608,6 +2652,11 @@ begin
     begin
       Frame.ShowArrangeInRoseCurveDialog;
       Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt, mkShift] then
+    begin
+      Frame.SelectUserInterfacesOutsideParent(false);
+      Exit(true);
     end;
   end;
 
@@ -2647,6 +2696,11 @@ begin
     if Event.ModifiersDown = [mkCtrl, mkAlt] then
     begin
       Frame.ShowArrangeInSuperellipseDialog;
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt, mkShift] then
+    begin
+      Frame.ShowArrangeOnEnneperSurfaceDialog;
       Exit(true);
     end;
   end;
@@ -4783,6 +4837,36 @@ begin
   ButtonArrangeHelicoid.OnClick := @ButtonArrangeHelicoidClick;
   ButtonArrangeHelicoid.Parent := PanelLayoutTransform;
 
+  ButtonWaveDeform := TButton.Create(Self);
+  ButtonWaveDeform.Align := alTop;
+  ButtonWaveDeform.AutoSize := true;
+  ButtonWaveDeform.Caption := 'Wave Deform...';
+  ButtonWaveDeform.Hint := 'Apply 3D directional sinusoidal wave / flag / snake deformation to 2+ selected 3D transforms around the active pivot (Ctrl+Alt+Shift+W | Shift-click: dialog | Click: X->Y wave + tilt normals | Ctrl-click: Z->Y wave + tilt normals)';
+  ButtonWaveDeform.ShowHint := true;
+  ButtonWaveDeform.BorderSpacing.Around := 2;
+  ButtonWaveDeform.OnClick := @ButtonWaveDeformClick;
+  ButtonWaveDeform.Parent := PanelLayoutTransform;
+
+  ButtonArrangeEnneper := TButton.Create(Self);
+  ButtonArrangeEnneper.Align := alTop;
+  ButtonArrangeEnneper.AutoSize := true;
+  ButtonArrangeEnneper.Caption := 'Enneper Saddle...';
+  ButtonArrangeEnneper.Hint := 'Arrange 2+ selected 3D transforms across a 3D Enneper Minimal Surface Saddle Shell around the active pivot (Ctrl+Alt+Shift+E | Shift-click: dialog | Click: Order k=1 surface normal | Ctrl-click: Order k=2 6-fold saddle)';
+  ButtonArrangeEnneper.ShowHint := true;
+  ButtonArrangeEnneper.BorderSpacing.Around := 2;
+  ButtonArrangeEnneper.OnClick := @ButtonArrangeEnneperClick;
+  ButtonArrangeEnneper.Parent := PanelLayoutTransform;
+
+  ButtonArrangeGear := TButton.Create(Self);
+  ButtonArrangeGear.Align := alTop;
+  ButtonArrangeGear.AutoSize := true;
+  ButtonArrangeGear.Caption := 'Gear / Battlement...';
+  ButtonArrangeGear.Hint := 'Arrange 2+ selected 3D transforms along a 3D Gear-Tooth / Castle Battlement Crenellation / Sawtooth Starburst Wheel around the active pivot (Ctrl+Alt+Shift+G | Shift-click: dialog | Click: 6-tooth smooth gear | Ctrl-click: 8-tooth sharp sawtooth)';
+  ButtonArrangeGear.ShowHint := true;
+  ButtonArrangeGear.BorderSpacing.Around := 2;
+  ButtonArrangeGear.OnClick := @ButtonArrangeGearClick;
+  ButtonArrangeGear.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -5105,6 +5189,14 @@ begin
   ButtonUIWaveArch.OnClick := @ButtonUIWaveArchClick;
   ButtonUIWaveArch.Parent := PanelLayoutUI;
 
+  ButtonUIArcFan := TButton.Create(Self);
+  ButtonUIArcFan.AutoSize := true;
+  ButtonUIArcFan.Caption := 'UI Arc Fan';
+  ButtonUIArcFan.Hint := 'Arrange 2+ selected 2D UI controls along a 2D Circular Arc / Card-Hand Fan around their shared center (Click: 120 deg top card-hand fan | Shift-click: 180 deg upper semicircle | Ctrl-click: -120 deg bottom smile arc)';
+  ButtonUIArcFan.ShowHint := true;
+  ButtonUIArcFan.OnClick := @ButtonUIArcFanClick;
+  ButtonUIArcFan.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -5368,6 +5460,11 @@ begin
   MenuTreeViewItemSelectUICustomStyle.Caption := 'Select 2D UI With Custom Styling / Font / Border (Ctrl+Alt+Shift+U)';
   MenuTreeViewItemSelectUICustomStyle.OnClick := @MenuTreeViewItemSelectUICustomStyleClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectUICustomStyle);
+
+  MenuTreeViewItemSelectUIOutsideParent := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectUIOutsideParent.Caption := 'Select 2D UI Extending Outside Parent Bounds (Ctrl+Alt+Shift+O)';
+  MenuTreeViewItemSelectUIOutsideParent.OnClick := @MenuTreeViewItemSelectUIOutsideParentClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectUIOutsideParent);
 
   MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
   MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
@@ -9067,6 +9164,8 @@ begin
         ButtonUIHexGrid.Enabled := SelectedUICount >= 2;
       if ButtonUIWaveArch <> nil then
         ButtonUIWaveArch.Enabled := SelectedUICount >= 2;
+      if ButtonUIArcFan <> nil then
+        ButtonUIArcFan.Enabled := SelectedUICount >= 2;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -9243,6 +9342,12 @@ begin
       ButtonArrangeHippopede.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonArrangeHelicoid <> nil then
       ButtonArrangeHelicoid.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonWaveDeform <> nil then
+      ButtonWaveDeform.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeEnneper <> nil then
+      ButtonArrangeEnneper.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeGear <> nil then
+      ButtonArrangeGear.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -11024,6 +11129,11 @@ begin
       ShowArrangeInSphericalSpiralDialog;
       Key := 0;
     end else
+    if (Key = Ord('W')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowWaveDeformSelectionDialog;
+      Key := 0;
+    end else
     if (Key = Ord('E')) and (Shift = [ssAlt, ssShift]) then
     begin
       ShowArrangeInEllipseDialog;
@@ -11032,6 +11142,16 @@ begin
     if (Key = Ord('E')) and (Shift = [ssCtrl, ssAlt]) then
     begin
       ShowArrangeInSuperellipseDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('E')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowArrangeOnEnneperSurfaceDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('G')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowArrangeInGearWheelDialog;
       Key := 0;
     end else
     if (Key = Ord('R')) and (Shift = [ssCtrl, ssShift]) then
@@ -11137,6 +11257,11 @@ begin
     if (Key = Ord('O')) and (Shift = [ssCtrl, ssAlt]) then
     begin
       ShowArrangeInRoseCurveDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('O')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      SelectUserInterfacesOutsideParent(false);
       Key := 0;
     end else
     if (Key = Ord('B')) and (Shift = [ssCtrl, ssShift]) then
@@ -16757,6 +16882,174 @@ begin
     ArrangeSelectionOnHelicoid(0.0, 10.0, 1.0, 1);
 end;
 
+procedure TDesignFrame.WaveDeformSelection(
+  const WaveAxis, DisplaceAxis: Integer;
+  const Amplitude, Wavelength, PhaseRad: Single;
+  const OrientNormals: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.WaveDeformSelected(
+      WaveAxis, DisplaceAxis, Amplitude, Wavelength, PhaseRad, OrientNormals);
+end;
+
+procedure TDesignFrame.ShowWaveDeformSelectionDialog;
+var
+  Prompts: array[0..5] of string;
+  Values: array[0..5] of string;
+  WAxis, DAxis, OrientVal: Integer;
+  Amp, WLen, PhaseDeg: Single;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Wave Propagation Axis (0 = X, 1 = Y, 2 = Z):';
+  Prompts[1] := 'Displacement Axis (0 = X, 1 = Y, 2 = Z):';
+  Prompts[2] := 'Wave Amplitude:';
+  Prompts[3] := 'Wavelength (> 0, 0 = auto span):';
+  Prompts[4] := 'Phase Angle (degrees):';
+  Prompts[5] := 'Tilt Normals Along Wave Slope (0 = keep rotation, 1 = tilt normals):';
+
+  Values[0] := '0';
+  Values[1] := '1';
+  Values[2] := '2.0';
+  Values[3] := '10.0';
+  Values[4] := '0.0';
+  Values[5] := '1';
+
+  if InputQuery('3D Directional Sinusoidal Wave / Flag / Snake Deformation', Prompts, Values) then
+  begin
+    WAxis := Clamped(StrToIntDef(Trim(Values[0]), 0), 0, 2);
+    DAxis := Clamped(StrToIntDef(Trim(Values[1]), 1), 0, 2);
+    Amp := StrToFloatDefDot(Trim(Values[2]), 2.0);
+    WLen := StrToFloatDefDot(Trim(Values[3]), 10.0);
+    PhaseDeg := StrToFloatDefDot(Trim(Values[4]), 0.0);
+    OrientVal := StrToIntDef(Trim(Values[5]), 1);
+    WaveDeformSelection(WAxis, DAxis, Amp, WLen, DegToRad(PhaseDeg), OrientVal <> 0);
+  end;
+end;
+
+procedure TDesignFrame.ButtonWaveDeformClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowWaveDeformSelectionDialog
+  else if ssCtrl in ShiftState then
+    WaveDeformSelection(2, 1, 2.0, 10.0, 0.0, true)
+  else
+    WaveDeformSelection(0, 1, 2.0, 10.0, 0.0, true);
+end;
+
+procedure TDesignFrame.ArrangeSelectionOnEnneperSurface(
+  const ScaleRadius, MaxR: Single;
+  const OrderK, OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedOnEnneperSurface(
+      ScaleRadius, MaxR, OrderK, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeOnEnneperSurfaceDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  SRad, MaxRVal: Single;
+  KOrder, OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Scale Radius R_scale (0 = auto from selection):';
+  Prompts[1] := 'Max Polar Radius R_max (0.2..2.5; 1.15 = classic saddle):';
+  Prompts[2] := 'Symmetry Order k (1..4; 1 = classic 4-fold, 2 = 6-fold monkey saddle):';
+  Prompts[3] := 'Orientation (0 = keep, 1 = Enneper Gauss-map normal, 2 = outward radial):';
+
+  Values[0] := '0';
+  Values[1] := '1.15';
+  Values[2] := '1';
+  Values[3] := '1';
+
+  if InputQuery('Arrange Selected on 3D Enneper Minimal Surface Saddle Shell', Prompts, Values) then
+  begin
+    SRad := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    MaxRVal := Clamped(StrToFloatDefDot(Trim(Values[1]), 1.15), 0.2, 2.5);
+    KOrder := Clamped(StrToIntDef(Trim(Values[2]), 1), 1, 4);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[3]), 1), 0, 2);
+    ArrangeSelectionOnEnneperSurface(SRad, MaxRVal, KOrder, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeEnneperClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeOnEnneperSurfaceDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionOnEnneperSurface(0.0, 1.15, 2, 1)
+  else
+    ArrangeSelectionOnEnneperSurface(0.0, 1.15, 1, 1);
+end;
+
+procedure TDesignFrame.ArrangeSelectionInGearWheel(
+  const PitchRadius, ToothDepth: Single;
+  const TeethCount: Integer;
+  const SharpSawtooth: Boolean;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInGearWheel(
+      PitchRadius, ToothDepth, TeethCount, SharpSawtooth, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInGearWheelDialog;
+var
+  Prompts: array[0..4] of string;
+  Values: array[0..4] of string;
+  PRad, TDepth: Single;
+  TCount, SawVal, OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Pitch Radius XZ (0 = auto from selection):';
+  Prompts[1] := 'Tooth Depth / Crest Amplitude:';
+  Prompts[2] := 'Number of Gear Teeth / Battlements (>= 2):';
+  Prompts[3] := 'Tooth Profile (0 = Smooth Sinusoidal Gear, 1 = Sharp Sawtooth Starburst):';
+  Prompts[4] := 'Orientation (0 = keep, 1 = outward radial, 2 = gear tangent):';
+
+  Values[0] := '0';
+  Values[1] := '2.0';
+  Values[2] := '6';
+  Values[3] := '0';
+  Values[4] := '1';
+
+  if InputQuery('Arrange Selected in 3D Gear-Tooth / Castle Battlement / Sawtooth Wheel', Prompts, Values) then
+  begin
+    PRad := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    TDepth := StrToFloatDefDot(Trim(Values[1]), 2.0);
+    TCount := Max(2, StrToIntDef(Trim(Values[2]), 6));
+    SawVal := StrToIntDef(Trim(Values[3]), 0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[4]), 1), 0, 2);
+    ArrangeSelectionInGearWheel(PRad, TDepth, TCount, SawVal <> 0, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeGearClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInGearWheelDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionInGearWheel(0.0, 2.0, 8, true, 1)
+  else
+    ArrangeSelectionInGearWheel(0.0, 2.0, 6, false, 1);
+end;
+
 procedure TDesignFrame.StopPilotTransform;
 var
   SavedName: String;
@@ -19572,6 +19865,115 @@ begin
     ArrangeSelectedUserInterfacesInWaveArch(-48.0, true)
   else
     ArrangeSelectedUserInterfacesInWaveArch(48.0, true);
+end;
+
+procedure TDesignFrame.ArrangeSelectedUserInterfacesInArcFan(
+  const ArcAngleDeg: Single);
+var
+  Selected: TComponentList;
+  SelectedCount, I, N, ChangedCount: Integer;
+  UIList: TCastleUserInterfaceList;
+  UI: TCastleUserInterface;
+  R: TFloatRectangle;
+  MinX, MaxX, MinY, MaxY, TotalDiag, AvgDiag, CenterX, CenterY: Single;
+  ArcRad, Radius, MidCos, ArcPivotY, U, Theta, SinT, CosT: Single;
+  TargetX, TargetY, CurCX, CurCY, DeltaX, DeltaY: Single;
+  BottomArc: Boolean;
+begin
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if Selected = nil then Exit;
+
+    UIList := TCastleUserInterfaceList.Create(false);
+    try
+      for I := 0 to SelectedCount - 1 do
+        if (Selected[I] is TCastleUserInterface) and
+           (Selected[I] <> DesignRoot) and
+           (not IsComponentLocked(Selected[I])) then
+        begin
+          UI := TCastleUserInterface(Selected[I]);
+          if (UI.Parent <> nil) and (UI.UIScale > 0) and (not UI.FullSize) then
+            UIList.Add(UI);
+        end;
+
+      N := UIList.Count;
+      if N < 2 then Exit;
+
+      MinX := MaxSingle;
+      MaxX := -MaxSingle;
+      MinY := MaxSingle;
+      MaxY := -MaxSingle;
+      TotalDiag := 0.0;
+
+      for I := 0 to N - 1 do
+      begin
+        R := UIList[I].RenderRectWithBorder;
+        MinX := Min(MinX, R.Center.X);
+        MaxX := Max(MaxX, R.Center.X);
+        MinY := Min(MinY, R.Center.Y);
+        MaxY := Max(MaxY, R.Center.Y);
+        TotalDiag := TotalDiag + Hypot(R.Width, R.Height);
+      end;
+
+      CenterX := (MinX + MaxX) * 0.5;
+      CenterY := (MinY + MaxY) * 0.5;
+      AvgDiag := Max(24.0, TotalDiag / N);
+      BottomArc := ArcAngleDeg < 0.0;
+      ArcRad := DegToRad(Clamped(Abs(ArcAngleDeg), 15.0, 330.0));
+      Radius := Max((MaxX - MinX) * 0.6, ((N - 1) * AvgDiag * 0.75) / Max(0.25, ArcRad));
+      MidCos := (1.0 + Cos(ArcRad * 0.5)) * 0.5;
+      if BottomArc then
+        ArcPivotY := CenterY + Radius * MidCos
+      else
+        ArcPivotY := CenterY - Radius * MidCos;
+
+      ChangedCount := 0;
+      for I := 0 to N - 1 do
+      begin
+        UI := UIList[I];
+        U := I / (N - 1);
+        Theta := (U - 0.5) * ArcRad;
+        SinCos(Theta, SinT, CosT);
+        TargetX := CenterX + Radius * SinT;
+        if BottomArc then
+          TargetY := ArcPivotY - Radius * CosT
+        else
+          TargetY := ArcPivotY + Radius * CosT;
+
+        R := UI.RenderRectWithBorder;
+        CurCX := R.Center.X;
+        CurCY := R.Center.Y;
+        DeltaX := TargetX - CurCX;
+        DeltaY := TargetY - CurCY;
+        if (Abs(DeltaX) > 0.01) or (Abs(DeltaY) > 0.01) then
+        begin
+          UI.Translation := UI.Translation + Vector2(DeltaX / UI.UIScale, DeltaY / UI.UIScale);
+          Inc(ChangedCount);
+        end;
+      end;
+
+      if ChangedCount > 0 then
+        ModifiedOutsideObjectInspector(
+          Format('Arrange %d UI control(s) in circular arc / card-hand fan', [ChangedCount]), ucHigh);
+    finally
+      FreeAndNil(UIList);
+    end;
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUIArcFanClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ArrangeSelectedUserInterfacesInArcFan(180.0)
+  else if ssCtrl in ShiftState then
+    ArrangeSelectedUserInterfacesInArcFan(-120.0)
+  else
+    ArrangeSelectedUserInterfacesInArcFan(120.0);
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -23272,6 +23674,65 @@ begin
   SelectUserInterfacesWithCustomStyle(ssShift in GetKeyShiftState);
 end;
 
+procedure TDesignFrame.SelectUserInterfacesOutsideParent(const OnlyCompletelyOutside: Boolean);
+const
+  Eps = 0.5;
+var
+  NewSelection: TComponentList;
+  TreeNode: TTreeNode;
+  C: TComponent;
+  UI: TCastleUserInterface;
+  R, PR: TFloatRectangle;
+  Matches: Boolean;
+begin
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C is TCastleUserInterface) and (C <> DesignRoot) and
+         (not (C is TCastleViewport)) and
+         Selectable(C) and (not IsComponentLocked(C)) then
+      begin
+        UI := TCastleUserInterface(C);
+        if UI.Exists and (UI.Parent <> nil) then
+        begin
+          R := UI.RenderRectWithBorder;
+          PR := ParentRenderRect(UI);
+          if (not R.IsEmpty) and (not PR.IsEmpty) then
+          begin
+            if OnlyCompletelyOutside then
+              Matches := (R.Right < PR.Left + Eps) or
+                         (R.Left > PR.Right - Eps) or
+                         (R.Top < PR.Bottom + Eps) or
+                         (R.Bottom > PR.Top - Eps)
+            else
+              Matches := (R.Left < PR.Left - Eps) or
+                         (R.Right > PR.Right + Eps) or
+                         (R.Bottom < PR.Bottom - Eps) or
+                         (R.Top > PR.Top + Eps);
+
+            if Matches and (NewSelection.IndexOf(UI) = -1) then
+              NewSelection.Add(UI);
+          end;
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectUIOutsideParentClick(Sender: TObject);
+begin
+  SelectUserInterfacesOutsideParent(ssShift in GetKeyShiftState);
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -23804,6 +24265,12 @@ begin
     MenuTreeViewItemSelectUIContainers.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemSelectUIImagesAndLabels <> nil then
     MenuTreeViewItemSelectUIImagesAndLabels.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectUISizingMode <> nil then
+    MenuTreeViewItemSelectUISizingMode.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectUICustomStyle <> nil then
+    MenuTreeViewItemSelectUICustomStyle.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectUIOutsideParent <> nil then
+    MenuTreeViewItemSelectUIOutsideParent.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemCopyTransform <> nil then
     MenuTreeViewItemCopyTransform.Enabled := (CurrentTransform <> nil) or (SelectedUserInterface <> nil) or (ControlsTree.SelectionCount > 0);
   if MenuTreeViewItemPasteTransform <> nil then
