@@ -205,6 +205,7 @@ type
     FCurrentMultiSampling: Cardinal;
     FPackedDepthStencil: Boolean;
     FShadowVolumesPossible: Boolean;
+    FDepthBoundsTest: Boolean;
     FTextureNonPowerOfTwo: Boolean;
     FTextureCubeMap: Boolean;
     FTextureCompression: TTextureCompressions;
@@ -402,6 +403,11 @@ type
       - separate stencil operation (glStencilOpSeparate, without this shadow volumes
         are more complicated, and now we just require it) }
     property ShadowVolumesPossible: Boolean read FShadowVolumesPossible;
+
+    { Does OpenGL context support the depth bounds test
+      (GL_EXT_depth_bounds_test), see @link(TRenderContext.DepthBounds).
+      Never on OpenGLES. }
+    property DepthBoundsTest: Boolean read FDepthBoundsTest;
 
     { Are non-power-of-2 textures supported. }
     property TextureNonPowerOfTwo: Boolean read FTextureNonPowerOfTwo;
@@ -1196,6 +1202,11 @@ begin
       see bottom table at https://registry.khronos.org/OpenGL-Refpages/es3.0/html/glStencilOpSeparate.xhtml }
     {$ifdef OpenGLES} true
     {$else} Version_2_0
+    {$endif};
+
+  FDepthBoundsTest :=
+    {$ifdef OpenGLES} false
+    {$else} GL_EXT_depth_bounds_test and Assigned(glDepthBoundsEXT)
     {$endif};
 
   FTextureNonPowerOfTwo :=

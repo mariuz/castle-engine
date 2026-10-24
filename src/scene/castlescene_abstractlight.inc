@@ -44,6 +44,10 @@ type
       See https://castle-engine.io/shaders for documentation
       how shader effects work in Castle Game Engine. }
     procedure SetEffects(const Value: array of TEffectNode);
+
+    { The X3D light node that does the lighting, to name this light
+      in @link(TCastleTransform.CastShadowVolumesLight). }
+    property InternalLightNode: TAbstractLightNode read FLightNode;
   published
   end;
 

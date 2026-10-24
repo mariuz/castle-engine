@@ -1587,6 +1587,15 @@ var
     @exclude }
   InternalShadowVolumesLightScissor: Boolean = true;
 
+  { Limit the passes of each light casting shadow volumes
+    (with TCastleViewport.ShadowVolumesMaxLights > 1) to the depth range
+    of the light's sphere with the depth bounds test
+    (GLFeatures.DepthBoundsTest, when the context has it),
+    see ShadowVolumeLightDepthBounds.
+    Only to compare and test, the result looks the same.
+    @exclude }
+  InternalShadowVolumesLightDepthBounds: Boolean = true;
+
 implementation
 
 uses DOM, Math, TypInfo,
@@ -3022,6 +3031,7 @@ procedure TCastleViewport.RenderFromView3D(const Params: TRenderParams);
   procedure RenderWithShadowVolumes(const MainLightPosition: TVector4);
   var
     LightScissors: array of TRectangle;
+    LightDepthBounds: array of TVector2;
     ProjectionViewMatrix: TMatrix4;
     I: Integer;
   begin
@@ -3052,10 +3062,19 @@ procedure TCastleViewport.RenderFromView3D(const Params: TRenderParams);
             FShadowVolumesLightPositions[I], FShadowVolumesLightRadii[I]);
       end else
         SetLength(LightScissors, 0);
+      if InternalShadowVolumesLightDepthBounds then
+      begin
+        SetLength(LightDepthBounds, FShadowVolumesLights.Count);
+        for I := 0 to FShadowVolumesLights.Count - 1 do
+          LightDepthBounds[I] := ShadowVolumeLightDepthBounds(RenderContext.ProjectionMatrix,
+            Params.RenderingCamera.Matrix,
+            FShadowVolumesLightPositions[I], FShadowVolumesLightRadii[I]);
+      end else
+        SetLength(LightDepthBounds, 0);
       FShadowVolumeRenderer.RenderSeveralLights(Params,
         {$ifdef FPC}@{$endif}RenderOnePass,
         {$ifdef FPC}@{$endif}RenderShadowVolume,
-        FShadowVolumesLights, FShadowVolumesLightPositions, LightScissors);
+        FShadowVolumesLights, FShadowVolumesLightPositions, LightScissors, LightDepthBounds);
     end else
       FShadowVolumeRenderer.Render(Params,
         {$ifdef FPC}@{$endif}RenderOnePass,
