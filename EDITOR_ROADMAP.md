@@ -1149,9 +1149,34 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
 
 ---
 
-## Roadmap Completion Status (Phases 1–176)
+### Phase 177: Batch Rename / Numbered Pattern Renamer Dialog (`ShowBatchRenameDialog` / `Ctrl+F2` / `MenuTreeViewItemBatchRename`)
+- [x] **177.1. Multi-Component Batch Rename with Prefix, Suffix, Find/Replace, Strip Digits & Zero-Padded Numbering (`TDesignFrame.ShowBatchRenameDialog`)**
+  - Implemented `TDesignFrame.ShowBatchRenameDialog` bound to **`Ctrl+F2`** (in both the Viewport and Hierarchy Tree) and **`Batch Rename Selected... (Ctrl+F2)`** (`MenuTreeViewItemBatchRename` in `MenuTreeView`).
+  - Supports replacing the base name (`EditBase`), stripping existing trailing digits/underscores (`CheckStripDigits`), case-insensitive substring Find & Replace (`EditFind` / `EditReplace`), adding Prefix and Suffix (`EditPrefix` / `EditSuffix`), and appending zero-padded sequential numbering (`_01`, `_02`, ... via `CheckNumbering`, `SpinStart`, and `SpinPad`), validating identifier syntax (`IsValidIdent`), ensuring uniqueness in `DesignOwner`, synchronizing `TreeNodeMap` captions, and recording a single Undo transaction.
 
-All **176 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+### Phase 178: Selection History Navigation (`NavigateSelectionHistoryBack` / `NavigateSelectionHistoryForward` / `Alt+Left` & `Alt+Right` / `ButtonSelBack` & `ButtonSelForward`)
+- [x] **178.1. Back / Forward Selection History Stack (`FSelectionHistory` / `Alt+Left` & `Alt+Right`)**
+  - Added a 32-slot selection history stack (`FSelectionHistory`) recorded automatically in `UpdateSelectedControl` (`RecordSelectionHistory`) and implemented `NavigateSelectionHistoryBack` (**`Alt+Left`** in Viewport and Hierarchy Tree, or **`<`** `ButtonSelBack` on `PanelMiddleTop`) and `NavigateSelectionHistoryForward` (**`Alt+Right`** in Viewport and Hierarchy Tree, or **`>`** `ButtonSelForward` on `PanelMiddleTop`).
+
+### Phase 179: Viewport Camera Settings Quick-Dialog (`ShowCameraSettingsDialog` / `ButtonCameraSettings`)
+- [x] **179.1. Camera Projection, FOV, Near/Far Clipping Planes & Scene Camera Sync (`TDesignFrame.ShowCameraSettingsDialog`)**
+  - Added **`Cam...`** (`ButtonCameraSettings` on `PanelMiddleTop`) opening `TDesignFrame.ShowCameraSettingsDialog` to inspect and adjust the active viewport camera's **Projection Mode** (`Perspective` / `Orthographic`), **Perspective Field of View** ($10^\circ\text{–}150^\circ$), **Projection Near Plane**, **Projection Far Plane**, and **Orthographic Width**, with an option (`CheckSyncSceneCam`) to apply the same projection settings to the assigned `Viewport.Camera` component in an undoable step.
+
+### Phase 180: Paste Component Here / Spawn at 3D Cursor Ray Hit or UI Parent Center (`PasteComponentHere` / `Ctrl+Shift+V` / `MenuTreeViewItemPasteHere`)
+- [x] **180.1. Context-Aware 3D Ray-Hit / Camera-Front & 2D Parent-Center Paste (`TDesignFrame.PasteComponentHere`)**
+  - Implemented `TDesignFrame.PasteComponentHere` bound to **`Ctrl+Shift+V`** (in both the Viewport and Hierarchy Tree) and **`Paste Component Here (At 3D Cursor / UI Center) (Ctrl+Shift+V)`** (`MenuTreeViewItemPasteHere` in `MenuTreeView`).
+  - Pastes the clipboard component and automatically snaps a pasted `TCastleTransform` onto the 3D surface under the mouse cursor (`SnapSelectedToRay`)—or places it $10\text{ units}$ in front of `InternalCamera` if no surface is hit—and centers a pasted `TCastleUserInterface` inside its parent container (`CenterSelectedUserInterfacesInParent`).
+
+### Phase 181: Hierarchy Tree Color Tags / Category Tint Badges & Filter (`CycleSelectedColorTag` / `Alt+C` / `[●Red..Purple]` / `+red..+purple` Filter)
+- [x] **181.1. 5-Color Hierarchy Category Tags, Colored Node Tint & `+tag` / `+red..+purple` Live Filter (`FComponentColorTags` / `CycleSelectedColorTag`)**
+  - Added `FComponentColorTags: array[1..5] of TComponentList` (`1 = Red`, `2 = Green`, `3 = Blue`, `4 = Yellow`, `5 = Purple`) and implemented `GetComponentColorTag`, `SetComponentColorTag`, `CycleSelectedColorTag` (**`Alt+C`** in Viewport and Hierarchy Tree, or `MenuTreeViewItemColorTag`; `Shift`-click clears tags), and `SelectSameColorTagComponents` (`MenuTreeViewItemSelectColorTag`).
+  - Updated `DrawTreeNodeClassName` in `ControlsTreeAdvancedCustomDrawItem` to render `[●Red]`, `[●Green]`, `[●Blue]`, `[●Yellow]`, and `[●Purple]` badges in their respective highlight colors, and updated `NodeMatchesHierarchyFilter` so typing **`+tag`**, **`+color`**, **`+red`**, **`+green`**, **`+blue`**, **`+yellow`**, or **`+purple`** in the Hierarchy filter box (`Ctrl+F`) filters components by color tag.
+
+---
+
+## Roadmap Completion Status (Phases 1–181)
+
+All **181 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 

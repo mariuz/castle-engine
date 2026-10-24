@@ -543,7 +543,19 @@ type
       MenuTreeViewItemCollapseAll: TMenuItem;
       FLockedComponents: TComponentList;
       FFavoriteComponents: TComponentList;
+      FComponentColorTags: array [1..5] of TComponentList;
       FSelectionSets: array [0..9] of TStringList;
+      FSelectionHistory: array [0..31] of TStringList;
+      FSelectionHistoryCount: Integer;
+      FSelectionHistoryIndex: Integer;
+      FNavigatingSelectionHistory: Boolean;
+      MenuTreeViewItemBatchRename: TMenuItem;
+      MenuTreeViewItemPasteHere: TMenuItem;
+      MenuTreeViewItemColorTag: TMenuItem;
+      MenuTreeViewItemSelectColorTag: TMenuItem;
+      ButtonSelBack: TSpeedButton;
+      ButtonSelForward: TSpeedButton;
+      ButtonCameraSettings: TSpeedButton;
       FPilotTransform: TCastleTransform;
       FPilotModified: Boolean;
       FAltDragDuplicated: Boolean;
@@ -760,6 +772,9 @@ type
     procedure ButtonPropertyMatrixClick(Sender: TObject);
     procedure ButtonSnapPresetClick(Sender: TObject);
     procedure ButtonSceneStatsClick(Sender: TObject);
+    procedure ButtonSelBackClick(Sender: TObject);
+    procedure ButtonSelForwardClick(Sender: TObject);
+    procedure ButtonCameraSettingsClick(Sender: TObject);
     procedure ControlsTreeDblClick(Sender: TObject);
     procedure ControlsTreeKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure MenuTreeViewItemToggleVisibilityClick(Sender: TObject);
@@ -771,6 +786,10 @@ type
     procedure MenuTreeViewItemSelectFavoritesClick(Sender: TObject);
     procedure MenuTreeViewItemPropertyMatrixClick(Sender: TObject);
     procedure MenuTreeViewItemSceneStatsClick(Sender: TObject);
+    procedure MenuTreeViewItemBatchRenameClick(Sender: TObject);
+    procedure MenuTreeViewItemPasteHereClick(Sender: TObject);
+    procedure MenuTreeViewItemColorTagClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectColorTagClick(Sender: TObject);
     procedure MenuTreeViewItemGroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemUngroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemArrayDuplicateClick(Sender: TObject);
@@ -1911,6 +1930,17 @@ type
     procedure UpdateSnapPresetButtonCaption;
     procedure ShowSceneAssetStatisticsDialog;
     procedure ShowBulkPropertyMatrixDialog;
+    procedure ShowBatchRenameDialog;
+    procedure RecordSelectionHistory(const Selected: TComponentList);
+    procedure NavigateSelectionHistoryBack;
+    procedure NavigateSelectionHistoryForward;
+    procedure UpdateSelectionHistoryButtons;
+    procedure ShowCameraSettingsDialog;
+    procedure PasteComponentHere;
+    function GetComponentColorTag(const C: TComponent): Integer;
+    procedure SetComponentColorTag(const C: TComponent; const TagIndex: Integer);
+    procedure CycleSelectedColorTag(const ClearTags: Boolean = false);
+    procedure SelectSameColorTagComponents;
     procedure SaveCameraBookmark(const Slot: Integer);
     procedure RecallCameraBookmark(const Slot: Integer);
     procedure AdjustCameraSpeed(const Factor: Single);
@@ -2420,6 +2450,30 @@ var
 begin
   Result := inherited Press(Event);
   if Result then Exit;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyF2) and
+     (Event.ModifiersDown = [mkCtrl]) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    Frame.ShowBatchRenameDialog;
+    Exit(true);
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyArrowLeft) and
+     (Event.ModifiersDown = [mkAlt]) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    Frame.NavigateSelectionHistoryBack;
+    Exit(true);
+  end;
+
+  if (Frame.Mode <> moInteract) and Event.IsKey(keyArrowRight) and
+     (Event.ModifiersDown = [mkAlt]) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    Frame.NavigateSelectionHistoryForward;
+    Exit(true);
+  end;
 
   if (Frame.Mode <> moInteract) and Event.IsKey(keyEnd) then
   begin
@@ -2989,6 +3043,11 @@ begin
   if (Frame.Mode <> moInteract) and Event.IsKey(keyC) and
      (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
   begin
+    if Event.ModifiersDown = [mkAlt] then
+    begin
+      Frame.CycleSelectedColorTag(false);
+      Exit(true);
+    end else
     if Event.ModifiersDown = [mkAlt, mkShift] then
     begin
       Frame.ShowArrangeInCircleDialog;
@@ -3009,6 +3068,11 @@ begin
   if (Frame.Mode <> moInteract) and Event.IsKey(keyV) and
      (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
   begin
+    if Event.ModifiersDown = [mkCtrl, mkShift] then
+    begin
+      Frame.PasteComponentHere;
+      Exit(true);
+    end else
     if Event.ModifiersDown = [mkCtrl, mkAlt] then
     begin
       Frame.PasteTransform(false);
@@ -4201,8 +4265,15 @@ begin
   LastSelected := TComponentList.Create(false);
   FLockedComponents := TComponentList.Create(false);
   FFavoriteComponents := TComponentList.Create(false);
+  for I := 1 to 5 do
+    FComponentColorTags[I] := TComponentList.Create(false);
   for I := 0 to 9 do
     FSelectionSets[I] := TStringList.Create;
+  for I := 0 to High(FSelectionHistory) do
+    FSelectionHistory[I] := TStringList.Create;
+  FSelectionHistoryCount := 0;
+  FSelectionHistoryIndex := -1;
+  FNavigatingSelectionHistory := false;
 
   PropertyEditorHook := TCastlePropertyEditorHook.Create(Self);
 
@@ -4358,6 +4429,41 @@ begin
   ButtonSceneStats.BorderSpacing.Left := 4;
   ButtonSceneStats.OnClick := @ButtonSceneStatsClick;
   ButtonSceneStats.Parent := PanelMiddleTop;
+
+  ButtonCameraSettings := TSpeedButton.Create(Self);
+  ButtonCameraSettings.Caption := 'Cam...';
+  ButtonCameraSettings.Hint := 'Open Viewport Camera Settings Dialog: adjust Field of View (FOV), Near/Far Clipping Planes, Navigation Move Speed, and Headlight';
+  ButtonCameraSettings.ShowHint := true;
+  ButtonCameraSettings.AutoSize := true;
+  ButtonCameraSettings.Constraints.MinHeight := 33;
+  ButtonCameraSettings.Constraints.MinWidth := 48;
+  ButtonCameraSettings.BorderSpacing.Left := 4;
+  ButtonCameraSettings.OnClick := @ButtonCameraSettingsClick;
+  ButtonCameraSettings.Parent := PanelMiddleTop;
+
+  ButtonSelBack := TSpeedButton.Create(Self);
+  ButtonSelBack.Caption := '<';
+  ButtonSelBack.Hint := 'Navigate Back in Selection History (Alt+Left)';
+  ButtonSelBack.ShowHint := true;
+  ButtonSelBack.AutoSize := true;
+  ButtonSelBack.Constraints.MinHeight := 33;
+  ButtonSelBack.Constraints.MinWidth := 28;
+  ButtonSelBack.BorderSpacing.Left := 6;
+  ButtonSelBack.Enabled := false;
+  ButtonSelBack.OnClick := @ButtonSelBackClick;
+  ButtonSelBack.Parent := PanelMiddleTop;
+
+  ButtonSelForward := TSpeedButton.Create(Self);
+  ButtonSelForward.Caption := '>';
+  ButtonSelForward.Hint := 'Navigate Forward in Selection History (Alt+Right)';
+  ButtonSelForward.ShowHint := true;
+  ButtonSelForward.AutoSize := true;
+  ButtonSelForward.Constraints.MinHeight := 33;
+  ButtonSelForward.Constraints.MinWidth := 28;
+  ButtonSelForward.BorderSpacing.Left := 2;
+  ButtonSelForward.Enabled := false;
+  ButtonSelForward.OnClick := @ButtonSelForwardClick;
+  ButtonSelForward.Parent := PanelMiddleTop;
 
   ButtonShowColliders := TSpeedButton.Create(Self);
   ButtonShowColliders.Caption := 'Colliders';
@@ -6265,6 +6371,26 @@ begin
   MenuTreeViewItemSceneStats.OnClick := @MenuTreeViewItemSceneStatsClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSceneStats);
 
+  MenuTreeViewItemBatchRename := TMenuItem.Create(Self);
+  MenuTreeViewItemBatchRename.Caption := 'Batch Rename Selected... (Ctrl+F2)';
+  MenuTreeViewItemBatchRename.OnClick := @MenuTreeViewItemBatchRenameClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemBatchRename);
+
+  MenuTreeViewItemPasteHere := TMenuItem.Create(Self);
+  MenuTreeViewItemPasteHere.Caption := 'Paste Component Here (At 3D Cursor / UI Center) (Ctrl+Shift+V)';
+  MenuTreeViewItemPasteHere.OnClick := @MenuTreeViewItemPasteHereClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemPasteHere);
+
+  MenuTreeViewItemColorTag := TMenuItem.Create(Self);
+  MenuTreeViewItemColorTag.Caption := 'Cycle Color Tag [●R/G/B/Y/P] (Alt+C)';
+  MenuTreeViewItemColorTag.OnClick := @MenuTreeViewItemColorTagClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemColorTag);
+
+  MenuTreeViewItemSelectColorTag := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectColorTag.Caption := 'Select All With Same Color Tag [●]';
+  MenuTreeViewItemSelectColorTag.OnClick := @MenuTreeViewItemSelectColorTagClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectColorTag);
+
   MenuTreeViewItemGroupSelected := TMenuItem.Create(Self);
   MenuTreeViewItemGroupSelected.Caption := 'Group Selected Under New Transform (Ctrl+G)';
   MenuTreeViewItemGroupSelected.OnClick := @MenuTreeViewItemGroupSelectedClick;
@@ -6606,6 +6732,10 @@ var
 begin
   for I := 0 to 9 do
     FreeAndNil(FSelectionSets[I]);
+  for I := 0 to High(FSelectionHistory) do
+    FreeAndNil(FSelectionHistory[I]);
+  for I := 1 to 5 do
+    FreeAndNil(FComponentColorTags[I]);
   FreeAndNil(TreeNodeMap);
   FreeAndNil(CameraPreview);
   FreeAndNil(FComponentEditorDesigner);
@@ -6675,9 +6805,18 @@ begin
     FLockedComponents.Clear;
   if FFavoriteComponents <> nil then
     FFavoriteComponents.Clear;
+  for I := 1 to 5 do
+    if FComponentColorTags[I] <> nil then
+      FComponentColorTags[I].Clear;
   for I := 0 to 9 do
     if FSelectionSets[I] <> nil then
       FSelectionSets[I].Clear;
+  for I := 0 to High(FSelectionHistory) do
+    if FSelectionHistory[I] <> nil then
+      FSelectionHistory[I].Clear;
+  FSelectionHistoryCount := 0;
+  FSelectionHistoryIndex := -1;
+  UpdateSelectionHistoryButtons;
 
   ControlsTree.ClearSelection; // TODO: for now we reset selection, though maybe we could preserve it in some cases
 
@@ -10085,6 +10224,9 @@ begin
       SetEnabledVisible(PanelPropertyFilter, SelectedCount <> 0);
     if ButtonPropertyMatrix <> nil then
       ButtonPropertyMatrix.Enabled := SelectedCount <> 0;
+    if not FNavigatingSelectionHistory then
+      RecordSelectionHistory(Selected);
+    UpdateSelectionHistoryButtons;
 
     SelectionForOI := TPersistentSelectionList.Create;
     try
@@ -11269,6 +11411,14 @@ var
     Suffix := ' (' + NodeObj.ClassName + ')';
     if (NodeObj is TComponent) and IsComponentFavorite(TComponent(NodeObj)) then
       Suffix := Suffix + ' [★]';
+    if NodeObj is TComponent then
+      case GetComponentColorTag(TComponent(NodeObj)) of
+        1: Suffix := Suffix + ' [●Red]';
+        2: Suffix := Suffix + ' [●Green]';
+        3: Suffix := Suffix + ' [●Blue]';
+        4: Suffix := Suffix + ' [●Yellow]';
+        5: Suffix := Suffix + ' [●Purple]';
+      end;
     if IsHidden then
       Suffix := Suffix + ' [Hidden]';
     if IsLocked then
@@ -11278,6 +11428,16 @@ var
     C.Brush.Style := bsClear;
     if IsFilterMatch then
       C.Font.Color := clYellow
+    else if (NodeObj is TComponent) and (GetComponentColorTag(TComponent(NodeObj)) > 0) then
+    begin
+      case GetComponentColorTag(TComponent(NodeObj)) of
+        1: C.Font.Color := $6060FF; // Red
+        2: C.Font.Color := $60E060; // Green
+        3: C.Font.Color := $FFAA40; // Blue
+        4: C.Font.Color := $40E0FF; // Yellow
+        5: C.Font.Color := $FF70D8; // Purple
+      end;
+    end
     else if IsHidden then
       C.Font.Color := clGray
     else
@@ -11809,6 +11969,21 @@ procedure TDesignFrame.ControlsTreeKeyDown(Sender: TObject; var Key: Word;
 begin
   if not ControlsTree.IsEditing then
   begin
+    if (Key = VK_F2) and (Shift = [ssCtrl]) then
+    begin
+      ShowBatchRenameDialog;
+      Key := 0;
+    end else
+    if (Key = VK_LEFT) and (Shift = [ssAlt]) then
+    begin
+      NavigateSelectionHistoryBack;
+      Key := 0;
+    end else
+    if (Key = VK_RIGHT) and (Shift = [ssAlt]) then
+    begin
+      NavigateSelectionHistoryForward;
+      Key := 0;
+    end else
     if Key = Ord('H') then
     begin
       if Shift = [] then
@@ -12520,6 +12695,11 @@ begin
       MatchSelectedTransformRotation(false, false);
       Key := 0;
     end else
+    if (Key = Ord('C')) and (Shift = [ssAlt]) then
+    begin
+      CycleSelectedColorTag(false);
+      Key := 0;
+    end else
     if (Key = Ord('C')) and (Shift = [ssAlt, ssShift]) then
     begin
       ShowArrangeInCircleDialog;
@@ -12538,6 +12718,11 @@ begin
     if (Key = Ord('S')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
     begin
       SelectUserInterfacesBySizingMode(false);
+      Key := 0;
+    end else
+    if (Key = Ord('V')) and (Shift = [ssCtrl, ssShift]) then
+    begin
+      PasteComponentHere;
       Key := 0;
     end else
     if (Key = Ord('V')) and (Shift = [ssCtrl, ssAlt]) then
@@ -12669,6 +12854,18 @@ begin
     Delete(Query, 1, 1);
     if (Query = 'fav') or (Query = 'favorite') or (Query = 'star') or (Query = 'starred') then
       Result := IsComponentFavorite(C)
+    else if (Query = 'tag') or (Query = 'color') then
+      Result := GetComponentColorTag(C) > 0
+    else if Query = 'red' then
+      Result := GetComponentColorTag(C) = 1
+    else if Query = 'green' then
+      Result := GetComponentColorTag(C) = 2
+    else if Query = 'blue' then
+      Result := GetComponentColorTag(C) = 3
+    else if Query = 'yellow' then
+      Result := GetComponentColorTag(C) = 4
+    else if Query = 'purple' then
+      Result := GetComponentColorTag(C) = 5
     else
       Result := Pos(Query, LowerClass) <> 0;
   end else
@@ -29034,6 +29231,683 @@ begin
   ShowBulkPropertyMatrixDialog;
 end;
 
+procedure TDesignFrame.ShowBatchRenameDialog;
+var
+  Selected, RenameTargets: TComponentList;
+  SelectedCount, I, RenamedCount, StartIdx, ZeroPad, NumVal: Integer;
+  Dialog: TForm;
+  LblBase, LblPrefix, LblSuffix, LblFind, LblReplace, LblStart, LblPad: TLabel;
+  EditBase, EditPrefix, EditSuffix, EditFind, EditReplace: TEdit;
+  CheckStripDigits, CheckNumbering: TCheckBox;
+  SpinStart, SpinPad: TSpinEdit;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+  C: TComponent;
+  CandidateName, BaseStr, FindStr,ReplStr, PrefixStr, SuffixStr, NumFmt: String;
+  SelNode: TTreeNode;
+
+  function StripTrailingDigitsAndUnderscore(const S: String): String;
+  var
+    Len: Integer;
+  begin
+    Result := S;
+    Len := Length(Result);
+    while (Len > 1) and (Result[Len] in ['0'..'9']) do
+      Dec(Len);
+    if (Len > 1) and (Len < Length(Result)) and (Result[Len] = '_') then
+      Dec(Len);
+    SetLength(Result, Len);
+  end;
+
+begin
+  GetSelected(Selected, SelectedCount, false);
+  RenameTargets := TComponentList.Create(false);
+  try
+    if Selected <> nil then
+      for I := 0 to SelectedCount - 1 do
+        if (Selected[I] <> nil) and RenamePossible(Selected[I]) and
+           (not IsComponentLocked(Selected[I])) then
+          RenameTargets.Add(Selected[I]);
+
+    if RenameTargets.Count = 0 then
+    begin
+      ErrorBox('Select one or more unlocked, renamable components in the Hierarchy or Viewport before opening Batch Rename (Ctrl+F2).');
+      Exit;
+    end;
+
+    Dialog := TForm.CreateNew(Self);
+    try
+      Dialog.Caption := Format('Batch Rename (%d Selected) (Ctrl+F2)', [RenameTargets.Count]);
+      Dialog.Position := poMainFormCenter;
+      Dialog.Width := 420;
+      Dialog.Height := 340;
+      Dialog.BorderStyle := bsDialog;
+
+      LblBase := TLabel.Create(Dialog);
+      LblBase.Caption := 'Replace Base Name (empty = keep current):';
+      LblBase.Left := 16;
+      LblBase.Top := 16;
+      LblBase.Parent := Dialog;
+
+      EditBase := TEdit.Create(Dialog);
+      EditBase.Left := 250;
+      EditBase.Top := 12;
+      EditBase.Width := 150;
+      EditBase.Text := '';
+      EditBase.Parent := Dialog;
+
+      LblPrefix := TLabel.Create(Dialog);
+      LblPrefix.Caption := 'Add Prefix:';
+      LblPrefix.Left := 16;
+      LblPrefix.Top := 50;
+      LblPrefix.Parent := Dialog;
+
+      EditPrefix := TEdit.Create(Dialog);
+      EditPrefix.Left := 250;
+      EditPrefix.Top := 46;
+      EditPrefix.Width := 150;
+      EditPrefix.Text := '';
+      EditPrefix.Parent := Dialog;
+
+      LblSuffix := TLabel.Create(Dialog);
+      LblSuffix.Caption := 'Add Suffix:';
+      LblSuffix.Left := 16;
+      LblSuffix.Top := 84;
+      LblSuffix.Parent := Dialog;
+
+      EditSuffix := TEdit.Create(Dialog);
+      EditSuffix.Left := 250;
+      EditSuffix.Top := 80;
+      EditSuffix.Width := 150;
+      EditSuffix.Text := '';
+      EditSuffix.Parent := Dialog;
+
+      LblFind := TLabel.Create(Dialog);
+      LblFind.Caption := 'Find Substring:';
+      LblFind.Left := 16;
+      LblFind.Top := 118;
+      LblFind.Parent := Dialog;
+
+      EditFind := TEdit.Create(Dialog);
+      EditFind.Left := 250;
+      EditFind.Top := 114;
+      EditFind.Width := 150;
+      EditFind.Text := '';
+      EditFind.Parent := Dialog;
+
+      LblReplace := TLabel.Create(Dialog);
+      LblReplace.Caption := 'Replace With:';
+      LblReplace.Left := 16;
+      LblReplace.Top := 152;
+      LblReplace.Parent := Dialog;
+
+      EditReplace := TEdit.Create(Dialog);
+      EditReplace.Left := 250;
+      EditReplace.Top := 148;
+      EditReplace.Width := 150;
+      EditReplace.Text := '';
+      EditReplace.Parent := Dialog;
+
+      CheckStripDigits := TCheckBox.Create(Dialog);
+      CheckStripDigits.Caption := 'Strip existing trailing digits (e.g. Box1 -> Box)';
+      CheckStripDigits.Checked := RenameTargets.Count > 1;
+      CheckStripDigits.Left := 16;
+      CheckStripDigits.Top := 186;
+      CheckStripDigits.Parent := Dialog;
+
+      CheckNumbering := TCheckBox.Create(Dialog);
+      CheckNumbering.Caption := 'Append sequential numbering (_01, _02, ...)';
+      CheckNumbering.Checked := RenameTargets.Count > 1;
+      CheckNumbering.Left := 16;
+      CheckNumbering.Top := 212;
+      CheckNumbering.Parent := Dialog;
+
+      LblStart := TLabel.Create(Dialog);
+      LblStart.Caption := 'Start Number:';
+      LblStart.Left := 16;
+      LblStart.Top := 246;
+      LblStart.Parent := Dialog;
+
+      SpinStart := TSpinEdit.Create(Dialog);
+      SpinStart.MinValue := 0;
+      SpinStart.MaxValue := 99999;
+      SpinStart.Value := 1;
+      SpinStart.Left := 110;
+      SpinStart.Top := 242;
+      SpinStart.Width := 80;
+      SpinStart.Parent := Dialog;
+
+      LblPad := TLabel.Create(Dialog);
+      LblPad.Caption := 'Zero-Pad Digits:';
+      LblPad.Left := 210;
+      LblPad.Top := 246;
+      LblPad.Parent := Dialog;
+
+      SpinPad := TSpinEdit.Create(Dialog);
+      SpinPad.MinValue := 1;
+      SpinPad.MaxValue := 6;
+      SpinPad.Value := 2;
+      SpinPad.Left := 320;
+      SpinPad.Top := 242;
+      SpinPad.Width := 80;
+      SpinPad.Parent := Dialog;
+
+      BottomPanel := TPanel.Create(Dialog);
+      BottomPanel.Align := alBottom;
+      BottomPanel.AutoSize := true;
+      BottomPanel.BevelOuter := bvNone;
+      BottomPanel.Parent := Dialog;
+
+      BtnCancel := TButton.Create(Dialog);
+      BtnCancel.Caption := 'Cancel';
+      BtnCancel.Cancel := true;
+      BtnCancel.ModalResult := mrCancel;
+      BtnCancel.Align := alRight;
+      BtnCancel.BorderSpacing.Around := 6;
+      BtnCancel.Parent := BottomPanel;
+
+      BtnOk := TButton.Create(Dialog);
+      BtnOk.Caption := 'Batch Rename';
+      BtnOk.Default := true;
+      BtnOk.ModalResult := mrOk;
+      BtnOk.AutoSize := true;
+      BtnOk.Align := alRight;
+      BtnOk.BorderSpacing.Around := 6;
+      BtnOk.Parent := BottomPanel;
+
+      if Dialog.ShowModal = mrOk then
+      begin
+        BaseStr := Trim(EditBase.Text);
+        PrefixStr := Trim(EditPrefix.Text);
+        SuffixStr := Trim(EditSuffix.Text);
+        FindStr := EditFind.Text;
+        ReplStr := EditReplace.Text;
+        StartIdx := SpinStart.Value;
+        ZeroPad := SpinPad.Value;
+        RenamedCount := 0;
+
+        for I := 0 to RenameTargets.Count - 1 do
+        begin
+          C := RenameTargets[I];
+          if BaseStr <> '' then
+            CandidateName := BaseStr
+          else
+            CandidateName := C.Name;
+
+          if CheckStripDigits.Checked and (BaseStr = '') then
+            CandidateName := StripTrailingDigitsAndUnderscore(CandidateName);
+
+          if FindStr <> '' then
+            CandidateName := StringReplace(CandidateName, FindStr, ReplStr, [rfReplaceAll, rfIgnoreCase]);
+
+          CandidateName := PrefixStr + CandidateName + SuffixStr;
+
+          if CheckNumbering.Checked then
+          begin
+            NumVal := StartIdx + I;
+            NumFmt := Format('%.*d', [ZeroPad, NumVal]);
+            CandidateName := CandidateName + '_' + NumFmt;
+          end;
+
+          if (CandidateName <> '') and (CandidateName <> C.Name) and IsValidIdent(CandidateName) then
+          begin
+            while (DesignOwner <> nil) and
+                  (DesignOwner.FindComponent(CandidateName) <> nil) and
+                  (DesignOwner.FindComponent(CandidateName) <> C) do
+              CandidateName := CandidateName + '_1';
+
+            C.Name := CandidateName;
+            if TreeNodeMap.TryGetValue(C, SelNode) then
+              SelNode.Text := TreeNodeCaption(C);
+            Inc(RenamedCount);
+          end;
+        end;
+
+        if RenamedCount > 0 then
+        begin
+          ControlsTree.Invalidate;
+          UpdateSelectedControl;
+          ModifiedOutsideObjectInspector(
+            Format('Batch rename %d component(s)', [RenamedCount]), ucHigh);
+        end;
+      end;
+    finally
+      FreeAndNil(Dialog);
+    end;
+  finally
+    FreeAndNil(RenameTargets);
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemBatchRenameClick(Sender: TObject);
+begin
+  ShowBatchRenameDialog;
+end;
+
+procedure TDesignFrame.UpdateSelectionHistoryButtons;
+begin
+  if ButtonSelBack <> nil then
+    ButtonSelBack.Enabled := FSelectionHistoryIndex > 0;
+  if ButtonSelForward <> nil then
+    ButtonSelForward.Enabled := (FSelectionHistoryIndex >= 0) and
+                                (FSelectionHistoryIndex < FSelectionHistoryCount - 1);
+end;
+
+procedure TDesignFrame.RecordSelectionHistory(const Selected: TComponentList);
+var
+  I, J: Integer;
+  SameAsCurrent: Boolean;
+begin
+  if (Selected = nil) or (Selected.Count = 0) then Exit;
+
+  if (FSelectionHistoryIndex >= 0) and (FSelectionHistoryIndex < FSelectionHistoryCount) and
+     (FSelectionHistory[FSelectionHistoryIndex] <> nil) then
+  begin
+    SameAsCurrent := FSelectionHistory[FSelectionHistoryIndex].Count = Selected.Count;
+    if SameAsCurrent then
+      for I := 0 to Selected.Count - 1 do
+        if (Selected[I] = nil) or
+           (FSelectionHistory[FSelectionHistoryIndex][I] <> Selected[I].Name) then
+        begin
+          SameAsCurrent := false;
+          Break;
+        end;
+    if SameAsCurrent then Exit;
+  end;
+
+  if FSelectionHistoryIndex < High(FSelectionHistory) then
+  begin
+    Inc(FSelectionHistoryIndex);
+    FSelectionHistoryCount := FSelectionHistoryIndex + 1;
+  end else
+  begin
+    for J := 0 to High(FSelectionHistory) - 1 do
+      FSelectionHistory[J].Assign(FSelectionHistory[J + 1]);
+    FSelectionHistoryIndex := High(FSelectionHistory);
+    FSelectionHistoryCount := High(FSelectionHistory) + 1;
+  end;
+
+  FSelectionHistory[FSelectionHistoryIndex].Clear;
+  for I := 0 to Selected.Count - 1 do
+    if (Selected[I] <> nil) and (Selected[I].Name <> '') then
+      FSelectionHistory[FSelectionHistoryIndex].Add(Selected[I].Name);
+end;
+
+procedure TDesignFrame.NavigateSelectionHistoryBack;
+var
+  NewSelection: TComponentList;
+  I: Integer;
+  C: TComponent;
+begin
+  if FSelectionHistoryIndex <= 0 then Exit;
+  Dec(FSelectionHistoryIndex);
+
+  FNavigatingSelectionHistory := true;
+  NewSelection := TComponentList.Create(false);
+  try
+    for I := 0 to FSelectionHistory[FSelectionHistoryIndex].Count - 1 do
+    begin
+      if DesignOwner <> nil then
+        C := DesignOwner.FindComponent(FSelectionHistory[FSelectionHistoryIndex][I])
+      else
+        C := nil;
+      if (C = nil) and (FDesignRoot <> nil) and
+         SameText(FDesignRoot.Name, FSelectionHistory[FSelectionHistoryIndex][I]) then
+        C := FDesignRoot;
+      if (C <> nil) and Selectable(C) then
+        NewSelection.Add(C);
+    end;
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+    FNavigatingSelectionHistory := false;
+    UpdateSelectionHistoryButtons;
+  end;
+end;
+
+procedure TDesignFrame.NavigateSelectionHistoryForward;
+var
+  NewSelection: TComponentList;
+  I: Integer;
+  C: TComponent;
+begin
+  if (FSelectionHistoryIndex < 0) or
+     (FSelectionHistoryIndex >= FSelectionHistoryCount - 1) then Exit;
+  Inc(FSelectionHistoryIndex);
+
+  FNavigatingSelectionHistory := true;
+  NewSelection := TComponentList.Create(false);
+  try
+    for I := 0 to FSelectionHistory[FSelectionHistoryIndex].Count - 1 do
+    begin
+      if DesignOwner <> nil then
+        C := DesignOwner.FindComponent(FSelectionHistory[FSelectionHistoryIndex][I])
+      else
+        C := nil;
+      if (C = nil) and (FDesignRoot <> nil) and
+         SameText(FDesignRoot.Name, FSelectionHistory[FSelectionHistoryIndex][I]) then
+        C := FDesignRoot;
+      if (C <> nil) and Selectable(C) then
+        NewSelection.Add(C);
+    end;
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+    FNavigatingSelectionHistory := false;
+    UpdateSelectionHistoryButtons;
+  end;
+end;
+
+procedure TDesignFrame.ButtonSelBackClick(Sender: TObject);
+begin
+  NavigateSelectionHistoryBack;
+end;
+
+procedure TDesignFrame.ButtonSelForwardClick(Sender: TObject);
+begin
+  NavigateSelectionHistoryForward;
+end;
+
+procedure TDesignFrame.ShowCameraSettingsDialog;
+var
+  V: TCastleViewport;
+  Cam: TCastleCamera;
+  Dialog: TForm;
+  LblProj, LblFOV, LblNear, LblFar, LblOrthoW: TLabel;
+  ComboProj: TComboBox;
+  SpinFOV, SpinNear, SpinFar, SpinOrthoW: TFloatSpinEdit;
+  CheckSyncSceneCam: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  V := CurrentViewport;
+  if (V = nil) or (V.InternalCamera = nil) then
+  begin
+    ErrorBox('No active 3D/2D TCastleViewport found in the current design.');
+    Exit;
+  end;
+  Cam := V.InternalCamera;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Viewport Camera Settings (' + V.Name + ')';
+    Dialog.Position := poMainFormCenter;
+    Dialog.Width := 390;
+    Dialog.Height := 270;
+    Dialog.BorderStyle := bsDialog;
+
+    LblProj := TLabel.Create(Dialog);
+    LblProj.Caption := 'Projection Mode:';
+    LblProj.Left := 16;
+    LblProj.Top := 18;
+    LblProj.Parent := Dialog;
+
+    ComboProj := TComboBox.Create(Dialog);
+    ComboProj.Style := csDropDownList;
+    ComboProj.Left := 215;
+    ComboProj.Top := 14;
+    ComboProj.Width := 155;
+    ComboProj.Items.Add('Perspective');
+    ComboProj.Items.Add('Orthographic');
+    if Cam.ProjectionType = ptOrthographic then
+      ComboProj.ItemIndex := 1
+    else
+      ComboProj.ItemIndex := 0;
+    ComboProj.Parent := Dialog;
+
+    LblFOV := TLabel.Create(Dialog);
+    LblFOV.Caption := 'Perspective Field of View (deg):';
+    LblFOV.Left := 16;
+    LblFOV.Top := 54;
+    LblFOV.Parent := Dialog;
+
+    SpinFOV := TFloatSpinEdit.Create(Dialog);
+    SpinFOV.DecimalPlaces := 1;
+    SpinFOV.Increment := 5.0;
+    SpinFOV.MinValue := 10.0;
+    SpinFOV.MaxValue := 150.0;
+    SpinFOV.Value := RadToDeg(Cam.Perspective.FieldOfView);
+    SpinFOV.Left := 215;
+    SpinFOV.Top := 50;
+    SpinFOV.Width := 155;
+    SpinFOV.Parent := Dialog;
+
+    LblNear := TLabel.Create(Dialog);
+    LblNear.Caption := 'Projection Near Plane:';
+    LblNear.Left := 16;
+    LblNear.Top := 90;
+    LblNear.Parent := Dialog;
+
+    SpinNear := TFloatSpinEdit.Create(Dialog);
+    SpinNear.DecimalPlaces := 3;
+    SpinNear.Increment := 0.05;
+    SpinNear.MinValue := 0.0;
+    SpinNear.MaxValue := 1000.0;
+    SpinNear.Value := Cam.ProjectionNear;
+    SpinNear.Left := 215;
+    SpinNear.Top := 86;
+    SpinNear.Width := 155;
+    SpinNear.Parent := Dialog;
+
+    LblFar := TLabel.Create(Dialog);
+    LblFar.Caption := 'Projection Far Plane (0 = auto):';
+    LblFar.Left := 16;
+    LblFar.Top := 126;
+    LblFar.Parent := Dialog;
+
+    SpinFar := TFloatSpinEdit.Create(Dialog);
+    SpinFar.DecimalPlaces := 1;
+    SpinFar.Increment := 100.0;
+    SpinFar.MinValue := 0.0;
+    SpinFar.MaxValue := 1000000.0;
+    SpinFar.Value := Cam.ProjectionFar;
+    SpinFar.Left := 215;
+    SpinFar.Top := 122;
+    SpinFar.Width := 155;
+    SpinFar.Parent := Dialog;
+
+    LblOrthoW := TLabel.Create(Dialog);
+    LblOrthoW.Caption := 'Orthographic Width (0 = auto):';
+    LblOrthoW.Left := 16;
+    LblOrthoW.Top := 162;
+    LblOrthoW.Parent := Dialog;
+
+    SpinOrthoW := TFloatSpinEdit.Create(Dialog);
+    SpinOrthoW.DecimalPlaces := 1;
+    SpinOrthoW.Increment := 10.0;
+    SpinOrthoW.MinValue := 0.0;
+    SpinOrthoW.MaxValue := 100000.0;
+    SpinOrthoW.Value := Cam.Orthographic.Width;
+    SpinOrthoW.Left := 215;
+    SpinOrthoW.Top := 158;
+    SpinOrthoW.Width := 155;
+    SpinOrthoW.Parent := Dialog;
+
+    CheckSyncSceneCam := TCheckBox.Create(Dialog);
+    CheckSyncSceneCam.Caption := 'Also apply to Viewport.Camera component (if assigned)';
+    CheckSyncSceneCam.Checked := (V.Camera <> nil) and (V.Camera <> Cam);
+    CheckSyncSceneCam.Enabled := (V.Camera <> nil) and (V.Camera <> Cam);
+    CheckSyncSceneCam.Left := 16;
+    CheckSyncSceneCam.Top := 196;
+    CheckSyncSceneCam.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Apply Camera Settings';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+    begin
+      if ComboProj.ItemIndex = 1 then
+        Cam.ProjectionType := ptOrthographic
+      else
+        Cam.ProjectionType := ptPerspective;
+      Cam.Perspective.FieldOfView := DegToRad(SpinFOV.Value);
+      Cam.ProjectionNear := SpinNear.Value;
+      Cam.ProjectionFar := SpinFar.Value;
+      Cam.Orthographic.Width := SpinOrthoW.Value;
+
+      if CheckSyncSceneCam.Checked and (V.Camera <> nil) and (V.Camera <> Cam) then
+      begin
+        V.Camera.ProjectionType := Cam.ProjectionType;
+        V.Camera.Perspective.FieldOfView := Cam.Perspective.FieldOfView;
+        V.Camera.ProjectionNear := Cam.ProjectionNear;
+        V.Camera.ProjectionFar := Cam.ProjectionFar;
+        V.Camera.Orthographic.Width := Cam.Orthographic.Width;
+        ModifiedOutsideObjectInspector('Apply camera settings to ' + V.Camera.Name, ucHigh);
+      end;
+    end;
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.ButtonCameraSettingsClick(Sender: TObject);
+begin
+  ShowCameraSettingsDialog;
+end;
+
+procedure TDesignFrame.PasteComponentHere;
+var
+  PastedComp: TComponent;
+  T: TCastleTransform;
+  V: TCastleViewport;
+  RayOrigin, RayDir, CamPos, CamDir, CamUp, TargetWorldPos: TVector3;
+begin
+  PasteComponent;
+  PastedComp := SelectedComponent;
+  if PastedComp = nil then Exit;
+
+  if PastedComp is TCastleTransform then
+  begin
+    T := TCastleTransform(PastedComp);
+    V := CurrentViewport;
+    if (V <> nil) and (TransformManipulate <> nil) then
+    begin
+      V.PositionToRay(CastleControl.Container.MousePosition, true, RayOrigin, RayDir);
+      if not TransformManipulate.SnapSelectedToRay(RayOrigin, RayDir, false, false) then
+      begin
+        if (V.InternalCamera <> nil) and (T.Parent <> nil) and T.Parent.HasWorldTransform then
+        begin
+          V.InternalCamera.GetWorldView(CamPos, CamDir, CamUp);
+          TargetWorldPos := CamPos + CamDir * 10.0;
+          T.Translation := T.Parent.WorldToLocal(TargetWorldPos);
+          ModifiedOutsideObjectInspector('Paste ' + T.Name + ' in front of camera', ucHigh);
+        end;
+      end;
+    end;
+  end else
+  if PastedComp is TCastleUserInterface then
+    CenterSelectedUserInterfacesInParent(true, true);
+end;
+
+procedure TDesignFrame.MenuTreeViewItemPasteHereClick(Sender: TObject);
+begin
+  PasteComponentHere;
+end;
+
+function TDesignFrame.GetComponentColorTag(const C: TComponent): Integer;
+var
+  TagIdx: Integer;
+begin
+  Result := 0;
+  if C = nil then Exit;
+  for TagIdx := 1 to 5 do
+    if (FComponentColorTags[TagIdx] <> nil) and
+       (FComponentColorTags[TagIdx].IndexOf(C) <> -1) then
+      Exit(TagIdx);
+end;
+
+procedure TDesignFrame.SetComponentColorTag(const C: TComponent; const TagIndex: Integer);
+var
+  I: Integer;
+begin
+  if C = nil then Exit;
+  for I := 1 to 5 do
+    if FComponentColorTags[I] <> nil then
+      FComponentColorTags[I].Remove(C);
+  if (TagIndex >= 1) and (TagIndex <= 5) and (FComponentColorTags[TagIndex] <> nil) then
+    FComponentColorTags[TagIndex].Add(C);
+end;
+
+procedure TDesignFrame.CycleSelectedColorTag(const ClearTags: Boolean);
+var
+  Selected: TComponentList;
+  SelectedCount, I, NextTag: Integer;
+begin
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if (Selected = nil) or (SelectedCount = 0) then Exit;
+    if ClearTags then
+      NextTag := 0
+    else
+      NextTag := (GetComponentColorTag(Selected[0]) + 1) mod 6;
+
+    for I := 0 to SelectedCount - 1 do
+      SetComponentColorTag(Selected[I], NextTag);
+    ControlsTree.Invalidate;
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.SelectSameColorTagComponents;
+var
+  RefTag: Integer;
+  NewSelection: TComponentList;
+  I: Integer;
+  C: TComponent;
+begin
+  if SelectedComponent = nil then Exit;
+  RefTag := GetComponentColorTag(SelectedComponent);
+  if (RefTag < 1) or (RefTag > 5) or (FComponentColorTags[RefTag] = nil) then Exit;
+
+  NewSelection := TComponentList.Create(false);
+  try
+    for I := 0 to FComponentColorTags[RefTag].Count - 1 do
+    begin
+      C := FComponentColorTags[RefTag][I];
+      if (C <> nil) and Selectable(C) and (not IsComponentLocked(C)) then
+        NewSelection.Add(C);
+    end;
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemColorTagClick(Sender: TObject);
+begin
+  CycleSelectedColorTag(ssShift in GetKeyShiftState);
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectColorTagClick(Sender: TObject);
+begin
+  SelectSameColorTagComponents;
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -29506,6 +30380,14 @@ begin
     MenuTreeViewItemPropertyMatrix.Enabled := ControlsTree.SelectionCount > 0;
   if MenuTreeViewItemSceneStats <> nil then
     MenuTreeViewItemSceneStats.Enabled := FDesignRoot <> nil;
+  if MenuTreeViewItemBatchRename <> nil then
+    MenuTreeViewItemBatchRename.Enabled := ControlsTree.SelectionCount > 0;
+  if MenuTreeViewItemPasteHere <> nil then
+    MenuTreeViewItemPasteHere.Enabled := FDesignRoot <> nil;
+  if MenuTreeViewItemColorTag <> nil then
+    MenuTreeViewItemColorTag.Enabled := ControlsTree.SelectionCount > 0;
+  if MenuTreeViewItemSelectColorTag <> nil then
+    MenuTreeViewItemSelectColorTag.Enabled := (Sel <> nil) and (GetComponentColorTag(Sel) > 0);
   if MenuTreeViewItemGroupSelected <> nil then
     MenuTreeViewItemGroupSelected.Enabled := (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0);
   if MenuTreeViewItemUngroupSelected <> nil then
