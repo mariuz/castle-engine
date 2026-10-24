@@ -3165,6 +3165,52 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { 3D Gaussian Splatting (3DGS) GPU Renderer (Phase 46.3)                     }
+  { -------------------------------------------------------------------------- }
+
+  TGaussianSplatNode = record
+    ColorRGBA: TVector4; { RGB radiance + splat opacity }
+    Depth: Single;       { View-space depth }
+    SplatID: Cardinal;
+  end;
+
+  { Manages 3D Gaussian Splatting (3DGS) SSBOs, front-to-back transmittance
+    alpha compositing with early-ray termination, and tile rasterization dispatches. }
+  TCastleVulkanGaussianSplatRenderer = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FMaxSplats: Cardinal;
+    FSplatBuffer: TVulkanRHIBuffer;
+    FSortedKeysBuffer: TVulkanRHIBuffer;
+    FRenderComputePipeline: TVulkanRHIComputePipeline;
+    FRenderDispatchCount: Cardinal;
+    procedure EnsureSplatBuffers;
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { CPU reference: Sorts 3D Gaussian splats front-to-back (ascending Depth) and composites
+      them with Beer-Lambert transmittance T_i = prod_{j<i}(1 - alpha_j) and early termination. }
+    class function SortAndCompositeSplatsFrontToBack(
+      const ASplats: array of TGaussianSplatNode;
+      const ABackgroundRGB: TVector3): TVector3; static;
+
+    { Dispatches the 3D Gaussian Splatting tile sort & rasterization pass across AScreenWidth x AScreenHeight. }
+    procedure DispatchGaussianSplatRender(
+      const ACommandList: TVulkanRHICommandList;
+      const AScreenWidth, AScreenHeight, AActiveSplatCount: Cardinal;
+      const AComputePipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property MaxSplats: Cardinal read FMaxSplats write FMaxSplats;
+    property SplatBuffer: TVulkanRHIBuffer read FSplatBuffer;
+    property SortedKeysBuffer: TVulkanRHIBuffer read FSortedKeysBuffer;
+    property RenderComputePipeline: TVulkanRHIComputePipeline
+      read FRenderComputePipeline write FRenderComputePipeline;
+    property RenderDispatchCount: Cardinal read FRenderDispatchCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -3282,6 +3328,7 @@ type
     FMaterialBinner: TCastleVulkanMaterialBinner;
     FPerPixelLinkedListOIT: TCastleVulkanPerPixelLinkedListOIT;
     FHostImageCopyManager: TCastleVulkanHostImageCopyManager;
+    FGaussianSplatRenderer: TCastleVulkanGaussianSplatRenderer;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -3404,6 +3451,7 @@ type
     function GetMaterialBinner: TCastleVulkanMaterialBinner;
     function GetPerPixelLinkedListOIT: TCastleVulkanPerPixelLinkedListOIT;
     function GetHostImageCopyManager: TCastleVulkanHostImageCopyManager;
+    function GetGaussianSplatRenderer: TCastleVulkanGaussianSplatRenderer;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -3631,6 +3679,7 @@ type
     property MaterialBinner: TCastleVulkanMaterialBinner read GetMaterialBinner;
     property PerPixelLinkedListOIT: TCastleVulkanPerPixelLinkedListOIT read GetPerPixelLinkedListOIT;
     property HostImageCopyManager: TCastleVulkanHostImageCopyManager read GetHostImageCopyManager;
+    property GaussianSplatRenderer: TCastleVulkanGaussianSplatRenderer read GetGaussianSplatRenderer;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -16220,6 +16269,133 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanGaussianSplatRenderer                                           }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanGaussianSplatRenderer.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FMaxSplats := 65536;
+  FSplatBuffer := nil;
+  FSortedKeysBuffer := nil;
+  FRenderComputePipeline := nil;
+  FRenderDispatchCount := 0;
+end;
+
+destructor TCastleVulkanGaussianSplatRenderer.Destroy;
+begin
+  FreeAndNil(FSortedKeysBuffer);
+  FreeAndNil(FSplatBuffer);
+  inherited;
+end;
+
+class function TCastleVulkanGaussianSplatRenderer.SortAndCompositeSplatsFrontToBack(
+  const ASplats: array of TGaussianSplatNode;
+  const ABackgroundRGB: TVector3): TVector3;
+var
+  Sorted: array of TGaussianSplatNode;
+  I, J: Integer;
+  Key: TGaussianSplatNode;
+  Transmittance, Alpha: Single;
+  AccumRGB, SplatRGB: TVector3;
+begin
+  if Length(ASplats) = 0 then
+    Exit(ABackgroundRGB);
+
+  SetLength(Sorted, Length(ASplats));
+  for I := 0 to High(ASplats) do
+    Sorted[I] := ASplats[I];
+
+  { Insertion sort by ascending Depth (front-to-back: smallest depth first) }
+  for I := 1 to High(Sorted) do
+  begin
+    Key := Sorted[I];
+    J := I - 1;
+    while (J >= 0) and (Sorted[J].Depth > Key.Depth) do
+    begin
+      Sorted[J + 1] := Sorted[J];
+      Dec(J);
+    end;
+    Sorted[J + 1] := Key;
+  end;
+
+  AccumRGB := Vector3(0.0, 0.0, 0.0);
+  Transmittance := 1.0;
+  for I := 0 to High(Sorted) do
+  begin
+    Alpha := EnsureRange(Sorted[I].ColorRGBA.W, 0.0, 0.99);
+    if Alpha < (1.0 / 255.0) then
+      Continue;
+    SplatRGB := Vector3(Sorted[I].ColorRGBA.X, Sorted[I].ColorRGBA.Y, Sorted[I].ColorRGBA.Z);
+    AccumRGB := AccumRGB + SplatRGB * (Alpha * Transmittance);
+    Transmittance := Transmittance * (1.0 - Alpha);
+    if Transmittance < 1e-4 then
+      Break;
+  end;
+  Result := AccumRGB + ABackgroundRGB * Transmittance;
+end;
+
+procedure TCastleVulkanGaussianSplatRenderer.EnsureSplatBuffers;
+var
+  Splats: Cardinal;
+  BufDesc: TRHIBufferDesc;
+begin
+  if FDevice = nil then
+    Exit;
+  Splats := Max(Cardinal(256), FMaxSplats);
+  FMaxSplats := Splats;
+
+  if (FSplatBuffer = nil) or
+     (FSplatBuffer.Desc.Size < PtrUInt(Splats) * SizeOf(TGaussianSplatNode)) then
+  begin
+    FreeAndNil(FSplatBuffer);
+    BufDesc := TRHIBufferDesc.Create(PtrUInt(Splats) * SizeOf(TGaussianSplatNode),
+      [buStorage, buTransferDst], muGpuOnly, 'GaussianSplatNodesSSBO');
+    FSplatBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+
+  if (FSortedKeysBuffer = nil) or
+     (FSortedKeysBuffer.Desc.Size < PtrUInt(Splats) * SizeOf(UInt64)) then
+  begin
+    FreeAndNil(FSortedKeysBuffer);
+    BufDesc := TRHIBufferDesc.Create(PtrUInt(Splats) * SizeOf(UInt64),
+      [buStorage, buTransferDst], muGpuOnly, 'GaussianSplatSortedKeysSSBO');
+    FSortedKeysBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+  end;
+end;
+
+procedure TCastleVulkanGaussianSplatRenderer.DispatchGaussianSplatRender(
+  const ACommandList: TVulkanRHICommandList;
+  const AScreenWidth, AScreenHeight, AActiveSplatCount: Cardinal;
+  const AComputePipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+var
+  ActivePipe: TVulkanRHIComputePipeline;
+  GroupsX, GroupsY: Cardinal;
+begin
+  if (ACommandList = nil) or (AScreenWidth = 0) or (AScreenHeight = 0) or (AActiveSplatCount = 0) then
+    Exit;
+  if AActiveSplatCount > FMaxSplats then
+    FMaxSplats := AActiveSplatCount;
+  EnsureSplatBuffers;
+
+  if AComputePipeline <> nil then
+    ActivePipe := AComputePipeline
+  else
+    ActivePipe := FRenderComputePipeline;
+  if ActivePipe <> nil then
+    ACommandList.BindComputePipeline(ActivePipe);
+  if ADescriptorSet <> nil then
+    ACommandList.BindDescriptorSet(0, ADescriptorSet, []);
+
+  GroupsX := (AScreenWidth + 15) div 16;
+  GroupsY := (AScreenHeight + 15) div 16;
+  ACommandList.Dispatch(GroupsX, GroupsY, 1);
+  Inc(FRenderDispatchCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -16937,12 +17113,20 @@ begin
   Result := FHostImageCopyManager;
 end;
 
+function TVulkanRHIDevice.GetGaussianSplatRenderer: TCastleVulkanGaussianSplatRenderer;
+begin
+  if FGaussianSplatRenderer = nil then
+    FGaussianSplatRenderer := TCastleVulkanGaussianSplatRenderer.Create(Self);
+  Result := FGaussianSplatRenderer;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FGaussianSplatRenderer);
   FreeAndNil(FHostImageCopyManager);
   FreeAndNil(FPerPixelLinkedListOIT);
   FreeAndNil(FMaterialBinner);

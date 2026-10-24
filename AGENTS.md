@@ -77,8 +77,13 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–44**: **COMPLETED** (100%).
-- **Phase 45 (Vulkan 1.4 Push Descriptors, Host Image Copy Zero-Staging Streaming & Spherical Gaussian Fast Lobe Approximation)**: **COMPLETED** (100%, 165 unit tests passing):
-  - [x] **45.1. Vulkan 1.4 Push Descriptors & Host Image Copy Layout Transition Helpers (`GeneratePushDescriptorPreamble` in `CastleInternalShaderRHI`)** — Completed & tested (`TestPushDescriptorPreambleAndHostImageCopyByteSizeRHI`).
-  - [x] **45.2. Spherical Gaussian (SG) Fast Specular & Diffuse Lobe Approximation (`GenerateSphericalGaussianFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSphericalGaussianProductAndIntegralRHI`).
-  - [x] **45.3. Vulkan 1.4 Host Image Copy & Push Descriptor Manager (`TCastleVulkanHostImageCopyManager` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanHostImageCopyAndPushDescriptorManagerRHI`).
+- **Phases 1–45**: **COMPLETED** (100%).
+- **Phase 46 (3D Gaussian Splatting Ellipsoid Covariance Projection, Spherical Harmonics View-Dependent Radiance & GPU Tile Splat Renderer)**: **COMPLETED** (100%, 168 unit tests passing):
+  - [x] **46.1. 3D Gaussian Splatting (3DGS) 2D Covariance Conic & Mahalanobis Opacity Falloff (`GenerateGaussianSplattingFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestGaussianSplatConicOpacityFalloffRHI`).
+  - [x] **46.2. Degree-1 (L0 + L1) View-Dependent Spherical Harmonics Radiance (`EvaluateSphericalHarmonicsL1RGB` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSphericalHarmonicsL1ViewDependentRadianceRHI`).
+  - [x] **46.3. 3D Gaussian Splatting GPU Tile Sorter & Compositor (`TCastleVulkanGaussianSplatRenderer` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanGaussianSplatRendererFrontToBackRHI`).
+- **Vulkan 1.4 / Next-Gen Extended Roadmap (Phases 47–50)**:
+  - **Phase 47 (Vulkan Descriptor Buffers, PCSS Contact-Hardening Soft Shadows & Indirect Command Alignment)**: `EvaluatePCSSPenumbraWidth`, `ComputeDescriptorBufferAlignedOffset`, and `TCastleVulkanDescriptorBufferManager`.
+  - **Phase 48 (Multi-Layer Metallic Flake Car-Paint BRDF, Screen-Space Curvature Cavity & Hi-Z Depth Pyramid)**: `EvaluateCarPaintMultiLayerBRDF`, `EvaluateScreenSpaceCurvatureCavity`, and `TCastleVulkanHiZPyramidGenerator`.
+  - **Phase 49 (AgX Gamut Compression, Physically Based Camera EV100 & GPU Histogram Auto-Exposure)**: `EvaluateEV100FromCameraSettings`, `EvaluateChromaGamutCompression`, and `TCastleVulkanAutoExposureHistogram`.
+  - **Phase 50 (Analytical Capsule Soft Shadows, Epipolar Light Shafts & GPU Frame Pacing Manager)**: `EvaluateCapsuleSoftShadowOcclusion`, `EvaluateEpipolarSliceRayStep`, and `TCastleVulkanFramePacer`.

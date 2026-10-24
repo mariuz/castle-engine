@@ -1575,6 +1575,23 @@ type
       const AAmplitude: TVector3;
       const ASharpness: Single): TVector3; static;
 
+    { Phase 46.1: Generates GLSL 450 3D Gaussian Splatting (3DGS) EWA 2D covariance conic projection
+      and Mahalanobis opacity falloff evaluation functions. }
+    function GenerateGaussianSplattingFunctions: String;
+
+    { Phase 46.1 CPU reference: Invert a 2D symmetric covariance matrix (CovXX, CovXY, CovYY) with low-pass dilation
+      into conic coefficients (ConicX, ConicY, ConicZ) and evaluate Gaussian splat opacity at PixelOffset. }
+    class function EvaluateGaussianSplatOpacity(
+      const ACov2D: TVector3;
+      const APixelOffset: TVector2;
+      const ABaseOpacity: Single): Single; static;
+
+    { Phase 46.2 CPU reference: Evaluates degree-1 (L0 + L1) view-dependent Spherical Harmonics RGB color
+      clamped to non-negative radiance for 3D Gaussian Splats. }
+    class function EvaluateSphericalHarmonicsL1RGB(
+      const ASH0, ASH1X, ASH1Y, ASH1Z: TVector3;
+      const AViewDir: TVector3): TVector3; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -7621,6 +7638,77 @@ begin
     Factor := 2.0 * Pi * ExpTerm / S;
   end;
   Result := AAmplitude * Factor;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateGaussianSplattingFunctions: String;
+begin
+  Result :=
+    '// Phase 46.1 & 46.2: 3D Gaussian Splatting (3DGS) 2D Conic Opacity & L1 Spherical Harmonics' + NL +
+    'float EvaluateGaussianSplatOpacity(vec3 cov2D, vec2 pixelOffset, float baseOpacity) {' + NL +
+    '  float covXX = cov2D.x + 0.3;' + NL +
+    '  float covXY = cov2D.y;' + NL +
+    '  float covYY = cov2D.z + 0.3;' + NL +
+    '  float det = covXX * covYY - covXY * covXY;' + NL +
+    '  if (det <= 1e-6) return 0.0;' + NL +
+    '  float invDet = 1.0 / det;' + NL +
+    '  vec3 conic = vec3(covYY * invDet, -covXY * invDet, covXX * invDet);' + NL +
+    '  float power = -0.5 * (conic.x * pixelOffset.x * pixelOffset.x + conic.z * pixelOffset.y * pixelOffset.y) - conic.y * pixelOffset.x * pixelOffset.y;' + NL +
+    '  if (power > 0.0) return 0.0;' + NL +
+    '  return clamp(baseOpacity * exp(power), 0.0, 0.99);' + NL +
+    '}' + NL +
+    'vec3 EvaluateSphericalHarmonicsL1RGB(vec3 sh0, vec3 sh1X, vec3 sh1Y, vec3 sh1Z, vec3 viewDir) {' + NL +
+    '  const float SH_C0 = 0.28209479177387814;' + NL +
+    '  const float SH_C1 = 0.4886025119029199;' + NL +
+    '  vec3 color = vec3(0.5) + SH_C0 * sh0 - SH_C1 * viewDir.y * sh1Y + SH_C1 * viewDir.z * sh1Z - SH_C1 * viewDir.x * sh1X;' + NL +
+    '  return max(color, vec3(0.0));' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateGaussianSplatOpacity(
+  const ACov2D: TVector3;
+  const APixelOffset: TVector2;
+  const ABaseOpacity: Single): Single;
+var
+  CovXX, CovXY, CovYY, Det, InvDet, ConicX, ConicY, ConicZ, Power: Single;
+begin
+  CovXX := ACov2D.X + 0.3;
+  CovXY := ACov2D.Y;
+  CovYY := ACov2D.Z + 0.3;
+  Det := CovXX * CovYY - CovXY * CovXY;
+  if Det <= 1e-6 then
+    Exit(0.0);
+  InvDet := 1.0 / Det;
+  ConicX := CovYY * InvDet;
+  ConicY := -CovXY * InvDet;
+  ConicZ := CovXX * InvDet;
+  Power := -0.5 * (ConicX * Sqr(APixelOffset.X) + ConicZ * Sqr(APixelOffset.Y)) -
+    ConicY * APixelOffset.X * APixelOffset.Y;
+  if Power > 0.0 then
+    Exit(0.0);
+  Result := EnsureRange(EnsureRange(ABaseOpacity, 0.0, 1.0) * Exp(Power), 0.0, 0.99);
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateSphericalHarmonicsL1RGB(
+  const ASH0, ASH1X, ASH1Y, ASH1Z: TVector3;
+  const AViewDir: TVector3): TVector3;
+const
+  SH_C0 = 0.28209479177387814;
+  SH_C1 = 0.4886025119029199;
+var
+  Dir: TVector3;
+begin
+  if AViewDir.LengthSqr > 1e-12 then
+    Dir := AViewDir.Normalize
+  else
+    Dir := Vector3(0.0, 0.0, 1.0);
+  Result := Vector3(0.5, 0.5, 0.5) +
+    ASH0 * SH_C0 -
+    ASH1Y * (SH_C1 * Dir.Y) +
+    ASH1Z * (SH_C1 * Dir.Z) -
+    ASH1X * (SH_C1 * Dir.X);
+  Result.X := Max(0.0, Result.X);
+  Result.Y := Max(0.0, Result.Y);
+  Result.Z := Max(0.0, Result.Z);
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

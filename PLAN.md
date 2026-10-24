@@ -697,6 +697,58 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 45 Status**: Completed. Vulkan 1.4 Push Descriptor GLSL preamble & Host Image Copy byte stride calculation (`GeneratePushDescriptorPreamble`, `ComputeHostImageCopyByteSize`), Spherical Gaussian (SG) lobe product & spherical integral evaluation (`GenerateSphericalGaussianFunctions`, `EvaluateSphericalGaussianProduct`, `EvaluateSphericalGaussianIntegral`), and Vulkan 1.4 Host Image Copy & Push Descriptor manager (`TCastleVulkanHostImageCopyManager`) fully integrated and tested (165 unit tests passing).
 
 
+### Phase 46: 3D Gaussian Splatting (3DGS) Ellipsoid Covariance Projection, Spherical Harmonics (SH) View-Dependent Radiance & GPU Tile Splat Renderer (COMPLETED)
+
+* [x] **46.1. 3D Gaussian Splatting (3DGS) 2D Covariance Conic & Mahalanobis Opacity Falloff (`GenerateGaussianSplattingFunctions` in `CastleInternalShaderRHI`)**:
+  * Invert 2D projected symmetric covariance matrices with low-pass anti-aliasing dilation (+0.3) into conic coefficients and evaluate Gaussian splat opacity (`EvaluateGaussianSplatOpacity`).
+* [x] **46.2. Degree-1 (L0 + L1) View-Dependent Spherical Harmonics Radiance (`EvaluateSphericalHarmonicsL1RGB` in `CastleInternalShaderRHI`)**:
+  * Evaluate 4-band view-dependent Spherical Harmonics RGB color for neural/photogrammetry 3D Gaussian Splats.
+* [x] **46.3. 3D Gaussian Splatting GPU Tile Sorter & Compositor (`TCastleVulkanGaussianSplatRenderer` in `CastleInternalRHI_Vulkan`)**:
+  * Manage 3D Gaussian splat payload and radix key SSBOs (`SplatBuffer`, `SortedKeysBuffer`), front-to-back Beer-Lambert transmittance compositing with early-ray termination (`SortAndCompositeSplatsFrontToBack`), and tile rasterization dispatches (`DispatchGaussianSplatRender`).
+
+**Milestone 46 Status**: Completed. 3D Gaussian Splatting (3DGS) 2D conic covariance inversion & Mahalanobis opacity falloff (`GenerateGaussianSplattingFunctions`, `EvaluateGaussianSplatOpacity`), L1 view-dependent Spherical Harmonics RGB evaluation (`EvaluateSphericalHarmonicsL1RGB`), and 3D Gaussian Splatting GPU tile renderer (`TCastleVulkanGaussianSplatRenderer`) fully integrated and tested (168 unit tests passing).
+
+
+### Phase 47: Vulkan Descriptor Buffers (`VK_EXT_descriptor_buffer`), PCSS Contact-Hardening Soft Shadows & GPU Indirect Command Signature Alignment (PLANNED)
+
+* [ ] **47.1. Percentage-Closer Soft Shadows (PCSS) Blocker Search & Penumbra Estimation (`GeneratePCSSSoftShadowFunctions` in `CastleInternalShaderRHI`)**:
+  * Compute physical contact-hardening penumbra filter radii from receiver depth, average blocker depth, and area light size (`EvaluatePCSSPenumbraWidth`).
+* [ ] **47.2. Vulkan Descriptor Buffer (`VK_EXT_descriptor_buffer`) Offset Alignment (`ComputeDescriptorBufferAlignedOffset` in `CastleInternalShaderRHI`)**:
+  * Compute hardware-aligned byte offsets into GPU-resident resource and sampler descriptor buffers.
+* [ ] **47.3. Vulkan Descriptor Buffer Manager (`TCastleVulkanDescriptorBufferManager` in `CastleInternalRHI_Vulkan`)**:
+  * Manage GPU-resident resource and sampler descriptor buffers (`ResourceDescriptorBuffer`, `SamplerDescriptorBuffer`) and `vkCmdSetDescriptorBufferOffsetsEXT` bindings.
+
+
+### Phase 48: Multi-Layer Metallic Flake Car-Paint BRDF, Screen-Space Curvature Cavity Shading & GPU Hi-Z Conservative Depth Pyramid Generator (PLANNED)
+
+* [ ] **48.1. Multi-Layer Metallic Flake & Clear-Coat Car-Paint BRDF (`GenerateCarPaintFlakeFunctions` in `CastleInternalShaderRHI`)**:
+  * Evaluate view-dependent two-tone base coat, stochastic metallic sparkle flakes, and dielectric clear coat (`EvaluateCarPaintMultiLayerBRDF`).
+* [ ] **48.2. Screen-Space Normal Curvature & Ridge/Valley Cavity Occlusion (`GenerateScreenSpaceCurvatureFunctions` in `CastleInternalShaderRHI`)**:
+  * Compute screen-space surface curvature from normal derivatives (`EvaluateScreenSpaceCurvatureCavity`) for procedural edge wear and crease darkening.
+* [ ] **48.3. GPU Hierarchical-Z (Hi-Z) Conservative Min/Max Depth Pyramid Generator (`TCastleVulkanHiZPyramidGenerator` in `CastleInternalRHI_Vulkan`)**:
+  * Manage conservative $2 \times 2$ min/max depth reduction across mip levels (`EvaluateConservativeDepthDownsample2x2`, `DispatchHiZPyramidBuild`).
+
+
+### Phase 49: AgX Filmic Gamut Compression, Physically Based Camera Exposure ($\text{EV}_{100}$) & GPU Luminance Histogram Auto-Exposure Manager (PLANNED)
+
+* [ ] **49.1. Physically Based Camera Exposure ($\text{EV}_{100}$) from Aperture, Shutter Speed & ISO (`GenerateCameraEV100ExposureFunctions` in `CastleInternalShaderRHI`)**:
+  * Compute photographic $\text{EV}_{100}$ and ISO 12232 saturation-based linear exposure multipliers (`EvaluateEV100FromCameraSettings`, `EvaluateExposureMultiplierFromEV100`).
+* [ ] **49.2. AgX Filmic Log Encoding & Highlight Chroma Gamut Compression (`GenerateAgXGamutCompressionFunctions` in `CastleInternalShaderRHI`)**:
+  * Compress out-of-gamut high-intensity saturated colors toward achromatic white (`EvaluateChromaGamutCompression`) to eliminate clipping artifacts.
+* [ ] **49.3. GPU 64-Bin Luminance Histogram Auto-Exposure Manager (`TCastleVulkanAutoExposureHistogram` in `CastleInternalRHI_Vulkan`)**:
+  * Manage 64-bin log-luminance histogram SSBOs (`HistogramBuffer`), outlier-trimmed average luminance calculation (`EvaluateTrimmedHistogramAverageEV`), and temporal eye adaptation (`DispatchHistogramAutoExposure`).
+
+
+### Phase 50: Analytical Capsule Soft Shadow & Ambient Occlusion, Epipolar Volumetric Light Shafts & GPU Frame Pacing Manager (PLANNED)
+
+* [ ] **50.1. Analytical Capsule Soft Shadow & Ambient Occlusion (`GenerateCapsuleOcclusionFunctions` in `CastleInternalShaderRHI`)**:
+  * Compute analytical cone-capsule intersection occlusion (`EvaluateCapsuleSoftShadowOcclusion`) for articulated character shadows and ambient occlusion.
+* [ ] **50.2. Epipolar Volumetric Light Shafts (Crepuscular God Rays) Slice Stepping (`GenerateEpipolarLightShaftFunctions` in `CastleInternalShaderRHI`)**:
+  * Transform screen-space rays into epipolar slice coordinates (`EvaluateEpipolarSliceRayStep`) for high-speed volumetric god-ray marching.
+* [ ] **50.3. GPU Frame Pacing & Present Timing Manager (`TCastleVulkanFramePacer` in `CastleInternalRHI_Vulkan`)**:
+  * Track rolling frame-time variance, compute target refresh-rate sleep deadlines (`EvaluateFramePacingWaitMicroseconds`), and manage present timing telemetry.
+
+
 ## 4.1. Unreal Engine 5 vs. Castle Game Engine Vulkan RHI Feature Parity Matrix
 
 | Unreal Engine 5 Subsystem | Castle Game Engine Vulkan RHI Equivalent | Phase & Status |

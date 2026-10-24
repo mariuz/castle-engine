@@ -204,6 +204,9 @@ type
     procedure TestPushDescriptorPreambleAndHostImageCopyByteSizeRHI;
     procedure TestSphericalGaussianProductAndIntegralRHI;
     procedure TestVulkanHostImageCopyAndPushDescriptorManagerRHI;
+    procedure TestGaussianSplatConicOpacityFalloffRHI;
+    procedure TestSphericalHarmonicsL1ViewDependentRadianceRHI;
+    procedure TestVulkanGaussianSplatRendererFrontToBackRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -10248,6 +10251,109 @@ begin
     AssertEquals('PushDescriptorUpdateCount must be 1', 1, Integer(Device.HostImageCopyManager.PushDescriptorUpdateCount));
   finally
     FreeAndNil(Tex);
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGaussianSplatConicOpacityFalloffRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  SplatGLSL: String;
+  AlphaCenter, AlphaNear, AlphaFar: Single;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify 3D Gaussian Splatting GLSL 450 functions }
+    SplatGLSL := Gen.GenerateGaussianSplattingFunctions;
+    AssertTrue('3DGS GLSL must include EvaluateGaussianSplatOpacity',
+      Pos('float EvaluateGaussianSplatOpacity(vec3 cov2D, vec2 pixelOffset, float baseOpacity)', SplatGLSL) > 0);
+    AssertTrue('3DGS GLSL must include EvaluateSphericalHarmonicsL1RGB',
+      Pos('vec3 EvaluateSphericalHarmonicsL1RGB(vec3 sh0, vec3 sh1X, vec3 sh1Y, vec3 sh1Z, vec3 viewDir)', SplatGLSL) > 0);
+
+    { 2. Verify 2D covariance conic Mahalanobis opacity falloff from splat center }
+    AlphaCenter := TCastleShaderGeneratorRHI.EvaluateGaussianSplatOpacity(
+      Vector3(2.0, 0.0, 2.0), Vector2(0.0, 0.0), 0.9);
+    AlphaNear := TCastleShaderGeneratorRHI.EvaluateGaussianSplatOpacity(
+      Vector3(2.0, 0.0, 2.0), Vector2(1.0, 0.0), 0.9);
+    AlphaFar := TCastleShaderGeneratorRHI.EvaluateGaussianSplatOpacity(
+      Vector3(2.0, 0.0, 2.0), Vector2(5.0, 0.0), 0.9);
+
+    AssertSameValue(0.9, AlphaCenter, 1e-6);
+    AssertTrue('Splat opacity must monotonically decay with pixel distance from center',
+      (AlphaCenter > AlphaNear) and (AlphaNear > AlphaFar) and (AlphaFar < 0.01));
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSphericalHarmonicsL1ViewDependentRadianceRHI;
+var
+  ColorFront, ColorBack: TVector3;
+begin
+  { Verify L1 Spherical Harmonics view-dependent specular lobe along +Z vs -Z }
+  ColorFront := TCastleShaderGeneratorRHI.EvaluateSphericalHarmonicsL1RGB(
+    Vector3(0.0, 0.0, 0.0),
+    Vector3(0.0, 0.0, 0.0),
+    Vector3(0.0, 0.0, 0.0),
+    Vector3(1.0, 0.5, 0.0),
+    Vector3(0.0, 0.0, 1.0));
+  ColorBack := TCastleShaderGeneratorRHI.EvaluateSphericalHarmonicsL1RGB(
+    Vector3(0.0, 0.0, 0.0),
+    Vector3(0.0, 0.0, 0.0),
+    Vector3(0.0, 0.0, 0.0),
+    Vector3(1.0, 0.5, 0.0),
+    Vector3(0.0, 0.0, -1.0));
+
+  AssertTrue('Positive SH1Z coefficient must brighten +Z view direction relative to -Z',
+    (ColorFront.X > 0.9) and (ColorBack.X < 0.1));
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanGaussianSplatRendererFrontToBackRHI;
+var
+  Splats: array[0..1] of TGaussianSplatNode;
+  ResolvedA, ResolvedB: TVector3;
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+begin
+  AssertEquals('TGaussianSplatNode must be 24 bytes', 24, SizeOf(TGaussianSplatNode));
+
+  { 1. Verify front-to-back Beer-Lambert transmittance compositing }
+  Splats[0].ColorRGBA := Vector4(0.0, 1.0, 0.0, 0.8); { Near green splat at depth 1.5 }
+  Splats[0].Depth := 1.5;
+  Splats[0].SplatID := 0;
+  Splats[1].ColorRGBA := Vector4(1.0, 0.0, 0.0, 0.8); { Far red splat at depth 5.0 }
+  Splats[1].Depth := 5.0;
+  Splats[1].SplatID := 1;
+  ResolvedA := TCastleVulkanGaussianSplatRenderer.SortAndCompositeSplatsFrontToBack(
+    Splats, Vector3(0.0, 0.0, 0.0));
+
+  { Swap input order }
+  Splats[0].ColorRGBA := Vector4(1.0, 0.0, 0.0, 0.8);
+  Splats[0].Depth := 5.0;
+  Splats[1].ColorRGBA := Vector4(0.0, 1.0, 0.0, 0.8);
+  Splats[1].Depth := 1.5;
+  ResolvedB := TCastleVulkanGaussianSplatRenderer.SortAndCompositeSplatsFrontToBack(
+    Splats, Vector3(0.0, 0.0, 0.0));
+
+  AssertSameValue(ResolvedA.X, ResolvedB.X, 1e-6);
+  AssertSameValue(ResolvedA.Y, ResolvedB.Y, 1e-6);
+  AssertTrue('Near green splat (alpha=0.8) must dominate over occluded far red splat (G > R)',
+    ResolvedA.Y > ResolvedA.X * 4.0);
+
+  { 2. Verify TCastleVulkanGaussianSplatRenderer buffer allocation and tile compute dispatch }
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6678)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    CmdList.BeginRecording;
+    Device.GaussianSplatRenderer.DispatchGaussianSplatRender(CmdList, 1920, 1080, 10000);
+    CmdList.EndRecording;
+
+    AssertTrue('SplatBuffer and SortedKeysBuffer must be allocated',
+      (Device.GaussianSplatRenderer.SplatBuffer <> nil) and
+      (Device.GaussianSplatRenderer.SortedKeysBuffer <> nil));
+    AssertEquals('RenderDispatchCount must be 1', 1, Integer(Device.GaussianSplatRenderer.RenderDispatchCount));
+  finally
     FreeAndNil(CmdList);
     FreeAndNil(Device);
   end;
