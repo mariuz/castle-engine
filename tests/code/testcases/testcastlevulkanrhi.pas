@@ -1286,6 +1286,7 @@ procedure TTestCastleVulkanRHI.TestNintendoSwitchViSurfaceAndManifestPrewarm;
 var
   ViCreateInfo: VkViSurfaceCreateInfoNN;
   Manifest: TCastleManifest;
+  ManifestUrl: String;
   RaisedError: Boolean;
 begin
   { 1. Verify Nintendo Switch VK_NN_vi_surface ABI layout and constants }
@@ -1308,7 +1309,10 @@ begin
   AssertTrue('CreateVulkanViSurface raises ERHIError when vkCreateViSurfaceNN is not loaded', RaisedError);
 
   { 2. Verify TCastleManifest loading of vulkan_3d_scene and ShouldPrewarmVulkanShaders }
-  Manifest := TCastleManifest.CreateFromUrl('examples/vulkan/vulkan_3d_scene/CastleEngineManifest.xml');
+  ManifestUrl := 'examples/vulkan/vulkan_3d_scene/CastleEngineManifest.xml';
+  if not FileExists(ManifestUrl) then
+    ManifestUrl := '../examples/vulkan/vulkan_3d_scene/CastleEngineManifest.xml';
+  Manifest := TCastleManifest.CreateFromUrl(ManifestUrl);
   try
     AssertEquals('Manifest name', 'vulkan_3d_scene', Manifest.Name);
     AssertEquals('Manifest RenderBackend is backendVulkan', Ord(backendVulkan), Ord(Manifest.RenderBackend));
@@ -11299,6 +11303,7 @@ begin
     AssertTrue('Win32 surface handle must match $A001', Surf = VkSurfaceKHR($A001));
     AssertEquals('Win32 sType must match',
       VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR, Integer(GMockLastSurfaceCreateInfoSType));
+    AssertTrue('Win32 HINSTANCE must match', GMockLastWin32HInstance = VkWin32HINSTANCE($400000));
     AssertTrue('Win32 HWND must match', GMockLastWin32HWND = VkWin32HWND($2222));
 
     { 2. Linux X11 (Xlib) surface creation }

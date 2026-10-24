@@ -11,11 +11,13 @@
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 }
 
-{ Example demonstrating the Vulkan RHI 3D forward rendering pipeline:
+{ Example demonstrating the Castle Game Engine Next-Gen Vulkan RHI pipeline:
   - Shader pre-warming (SPIR-V cache)
   - Per-Pass Scene Camera UBO (Set 0, Binding 0) & Multi-light UBO (Set 0, Binding 1)
   - Shadow Map depth-only dynamic rendering pass (TRHIRenderingInfo.CreateDepthOnly)
-  - GPU Skinning joint matrix UBO (Set 2, Binding 0) }
+  - GPU Skinning joint matrix UBO (Set 2, Binding 0)
+  - High-level TCastleRenderOptions & TCastleViewport Next-Gen subsystem orchestration
+  - TCastleWindow cross-platform WSI VkSurfaceKHR descriptor resolution }
 program vulkan_3d_scene;
 
 {$I castleconf.inc}
@@ -23,9 +25,9 @@ program vulkan_3d_scene;
 uses
   SysUtils, Classes,
   CastleVectors, CastleColors, CastleRectangles, CastleLog,
-  CastleApplicationProperties,
+  CastleApplicationProperties, CastleRenderOptions, CastleViewport, CastleScene, CastleWindow,
   CastleInternalRHI, CastleInternalShaderRHI, CastleInternalShaderCompiler,
-  CastleInternalVulkanWSI;
+  CastleInternalVulkan, CastleInternalVulkanWSI, CastleInternalRHI_Vulkan;
 
 var
   ActiveBackend: TRenderBackend;
@@ -34,13 +36,21 @@ var
   LightsUBO: TCastleLightsUniformBlock;
   SkinUBO: TCastleSkinningUniformBlock;
   ShadowPassInfo: TRHIRenderingInfo;
+  Device: TVulkanRHIDevice;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Win: TCastleWindow;
+  SurfaceDesc: TVulkanNativeSurfaceDesc;
+  WSIExts: TAnsiStringArray;
+  ExecutedSubsystems: Cardinal;
   I: Integer;
 begin
+  ApplicationProperties._FileAccessSafe := true;
   InitializeLog;
   ApplicationProperties.RenderBackend := backendVulkan;
   ActiveBackend := SelectOptimalRenderBackend(ApplicationProperties.RenderBackend, True, 1, 3);
 
-  WritelnLog('Vulkan3DScene', 'Castle Game Engine - Vulkan 3D Forward Pass & Lighting Example');
+  WritelnLog('Vulkan3DScene', 'Castle Game Engine - Vulkan 3D Forward Pass & Next-Gen RHI Example');
   WritelnLog('Vulkan3DScene', 'Selected optimal render backend: %d (Vulkan=3)', [Ord(ActiveBackend)]);
 
   { 1. Pre-warm core engine shaders into SPIR-V cache }
@@ -74,4 +84,54 @@ begin
     SkinUBO.JointMatrices[I] := TMatrix4.Identity;
   WritelnLog('Vulkan3DScene', 'Initialized GPU skinning UBO for %d active bones (%d B)',
     [SkinUBO.JointCount, SizeOf(SkinUBO)]);
+
+  { 5. Exercise High-Level TCastleRenderOptions & TCastleViewport Next-Gen Subsystem Orchestration }
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7701)));
+  Viewport := TCastleViewport.Create(nil);
+  Scene := TCastleScene.Create(nil);
+  Win := TCastleWindow.Create(nil);
+  try
+    SetRHIDevice(Device);
+    Scene.RenderOptions.SpecularAntiAliasing := True;
+    Scene.RenderOptions.DualQuaternionSkinning := True;
+    Scene.RenderOptions.GpuDrivenMeshletCulling := True;
+    Scene.RenderOptions.TransparencyMode := tmWeightedBlendedOIT;
+    Scene.RenderOptions.ShadowMapSystemMode := smsVirtualShadowMaps;
+    Viewport.Items.Add(Scene);
+
+    Viewport.Width := 1280;
+    Viewport.Height := 720;
+    Viewport.ScreenSpaceAmbientOcclusion := True;
+    Viewport.ScreenSpaceReflections := True;
+    Viewport.VolumetricFogEnabled := True;
+    Viewport.GlobalIlluminationMode := giLumenSDFAndSurfaceCache;
+    Viewport.TemporalAntiAliasingMode := taaTSRUpscaler;
+    Viewport.VariableRateShadingMode := vrsContrastAdaptive;
+    Viewport.NextGenToneMappingMode := ntmAgXGamutCompressed;
+    Viewport.AutoExposureEnabled := True;
+    Viewport.TargetFrameRateHz := 60.0;
+
+    ExecutedSubsystems := Viewport.ExecuteVulkanViewportSubsystems(nil, 0.016);
+    WritelnLog('Vulkan3DScene',
+      'Executed %d Next-Gen Vulkan viewport subsystems (EV100=%.2f, ExposureMultiplier=%.4f, RenderBackend=%s)',
+      [ExecutedSubsystems,
+       Viewport.EvaluateCurrentCameraEV100,
+       Viewport.EvaluateCurrentCameraExposureMultiplier,
+       Scene.RenderOptions.ActiveRenderBackendName]);
+
+    { 6. Verify TCastleWindow WSI Native Surface Descriptor & Extensions }
+    SurfaceDesc := Win.BuildVulkanNativeSurfaceDesc;
+    WSIExts := GetRequiredVulkanInstanceExtensionsForPlatform(SurfaceDesc.Platform);
+    WritelnLog('Vulkan3DScene',
+      'TCastleWindow WSI Platform=%d, IsVulkanBackendRequested=%s, InstanceExtensions=%d',
+      [Ord(SurfaceDesc.Platform),
+       BoolToStr(Win.IsVulkanBackendRequested, True),
+       Length(WSIExts)]);
+  finally
+    SetRHIDevice(nil);
+    FreeAndNil(Win);
+    FreeAndNil(Scene);
+    FreeAndNil(Viewport);
+    FreeAndNil(Device);
+  end;
 end.

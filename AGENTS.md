@@ -77,8 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–54**: **COMPLETED** (100%).
-- **Phase 55 (Native Window Surface `VkSurfaceKHR` Creation Across All OS Backends)**: **COMPLETED** (100%, 195 unit tests passing):
-  - [x] **55.1. Cross-Platform Native Surface Descriptor & Extension Resolution (`CastleInternalVulkanWSI`)** — Completed & tested (`TestVulkanWSINativeSurfaceDescAndExtensionsRHI`, `TestCreateVulkanSurfaceAcrossAllOSBackendsRHI`).
-  - [x] **55.2. Automatic `TCastleWindow` Native Handle Extraction & `VkSurfaceKHR` Creation (`CastleWindow`)** — Completed & tested (`TestCastleWindowVulkanSurfaceCreationAndLifecycleRHI`).
-  - [x] **55.3. `TCastleWindow` Vulkan Lifecycle Wiring (`OpenCore`, `DoResize`, `Close`)** — Completed & tested (`TestCastleWindowVulkanSurfaceCreationAndLifecycleRHI`).
+- **Phases 1–55**: **COMPLETED** (100%).
+- **Phase 56 (Live Example & Full Engine Test Suite Verification)**: **COMPLETED** (100%, 764/764 total engine tests and 195/195 `TTestCastleVulkanRHI` tests passing):
+  - [x] **56.1. CWD-Independent Manifest Resolution in `TTestCastleVulkanRHI`** — Completed & tested (`TestNintendoSwitchViSurfaceAndManifestPrewarm`).
+  - [x] **56.2. Complete 764-Test Engine Suite Verification (`castle_tester_standalone`)** — Completed (`All 764 tests passed`).
+  - [x] **56.3. Live Next-Gen Vulkan Example Verification (`examples/vulkan/vulkan_3d_scene`)** — Completed & verified in WSL.
