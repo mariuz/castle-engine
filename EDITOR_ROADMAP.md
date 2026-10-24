@@ -912,3 +912,63 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Bound to **`Ctrl+Alt+Shift+Z`** in both the Viewport and Hierarchy Tree, plus **`Select Zero-Sized / Tiny 2D UI Controls (Ctrl+Alt+Shift+Z)`** (`MenuTreeViewItemSelectUIDegenerate`) in `MenuTreeView` (`Shift`-click also selects hidden `Exists = false` 2D UI controls).
 - [x] **143.2. 2D UI Diagonal / Corner-to-Corner Stepped Ramp Layout (`ArrangeSelectedUserInterfacesInDiagonalRamp` / `ButtonUIDiagonalRamp`)**
   - Implemented `TDesignFrame.ArrangeSelectedUserInterfacesInDiagonalRamp(MarginPx, RampMode)` and added **`UI Diag Ramp`** (`ButtonUIDiagonalRamp`) to `PanelLayoutUI`, distributing 2+ selected `TCastleUserInterface` controls along a corner-to-corner diagonal stepped ramp or V-chevron across their shared bounding box (**Click**: Top-Left $\to$ Bottom-Right descending diagonal ramp; **`Shift`-click**: Bottom-Left $\to$ Top-Right ascending diagonal ramp; **`Ctrl`-click**: Symmetric V-Chevron diagonal layout).
+
+### Phase 144: 3D Triply Periodic Minimal Surface (Schoen Gyroid / Schwarz P Lattice Wave) Deformation (`GyroidDeformSelected` / `Ctrl+Alt+Shift+M`)
+- [x] **144.1. Parametric Schoen Gyroid & Schwarz P Triply Periodic Minimal Surface (TPMS) Lattice Deformation (`TCastleTransformManipulate.GyroidDeformSelected`)**
+  - Implemented `TCastleTransformManipulate.GyroidDeformSelected(Wavelength, Amplitude, SchwarzPMode, OrientNormals): Boolean`: deforms 2+ top-level selected transforms around the active selection pivot $\mathbf{C}$ by evaluating either Alan Schoen's Gyroid minimal surface ($F(x,y,z) = \sin(kx)\cos(ky) + \sin(ky)\cos(kz) + \sin(kz)\cos(kx)$ when `SchwarzPMode = false`) or Hermann Schwarz's Primitive (Schwarz P) minimal lattice ($F(x,y,z) = \cos(kx) + \cos(ky) + \cos(kz)$ when `SchwarzPMode = true`) with spatial wavenumber $k = \frac{2\pi}{\lambda}$, displacing each transform along the normalized analytical TPMS iso-surface gradient $\hat{\mathbf{g}} = \frac{\nabla F}{\|\nabla F\|}$ by $\Delta \mathbf{P}_i = A \cdot F(\mathbf{d}_i) \cdot \hat{\mathbf{g}}(\mathbf{d}_i)$, and optionally aligning each transform's world forward (`LookDir`) with $\hat{\mathbf{g}}(\mathbf{d}_i)$ (`OrientNormals = true`).
+  - Added **`Gyroid / TPMS...`** (`ButtonGyroidDeform` in `PanelLayoutTransform`: normal click deforms along a Schoen Gyroid minimal surface with analytical gradient normals; `Ctrl`-click deforms along a Schwarz P lattice wave; `Shift`-click opens the custom dialog) and `ShowGyroidDeformSelectionDialog` bound to **`Ctrl+Alt+Shift+M`** in both the Viewport and Hierarchy Tree.
+
+### Phase 145: 3D Jakob Steiner Roman Projective Surface Arrangement (`ArrangeSelectedOnRomanSurface` / `Ctrl+Alt+Shift+R`)
+- [x] **145.1. Parametric Jakob Steiner Roman Self-Intersecting Real Projective Plane Immersion (`TCastleTransformManipulate.ArrangeSelectedOnRomanSurface`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedOnRomanSurface(Radius, Turns, OrientMode): Boolean`: distributes 2+ top-level selected transforms across Jakob Steiner's Roman Surface (tetrahedrally symmetric immersion of $\mathbb{RP}^2$ in $\mathbb{R}^3$) centered at $\mathbf{C}$ with outer radius $R$ and meridional winding $W = \text{Turns}$ ($u_i = \pi W t_i$, $v_i = -\frac{\pi}{4} + \frac{\pi}{2}t_i \in [-\frac{\pi}{4}, +\frac{\pi}{4}]$):
+    $$x = C_x + \frac{R}{2}\sin(2u_i)\cos^2 v_i, \quad y = C_y + \frac{R}{2}\sin u_i \sin(2v_i), \quad z = C_z + \frac{R}{2}\cos u_i \sin(2v_i)$$
+    supporting `OrientMode` (`0` = keep rotation, `1` = analytical spiral tangent, `2` = outward radial from $\mathbf{C}$).
+  - Added **`Roman Surface...`** (`ButtonArrangeRoman` in `PanelLayoutTransform`: normal click arranges on a 2-turn Steiner Roman surface along the tangent; `Ctrl`-click arranges on a 3-turn Roman surface facing outward; `Shift`-click opens the custom dialog) and `ShowArrangeOnRomanSurfaceDialog` bound to **`Ctrl+Alt+Shift+R`** in both the Viewport and Hierarchy Tree.
+
+### Phase 146: 3D Cochleoid Snail-Shell Spiral Curve Arrangement (`ArrangeSelectedInCochleoid` / `Ctrl+Alt+Shift+A`)
+- [x] **146.1. Parametric Sinc-Envelope Cochleoid Snail-Shell Spiral Curve (`TCastleTransformManipulate.ArrangeSelectedInCochleoid`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedInCochleoid(ScaleRadius, MaxAngleTurns, HeightSpan, SymmetricDualLobe, OrientMode): Boolean`: distributes 2+ top-level selected transforms along a 3D Cochleoid snail-shell spiral $r(\theta) = A \frac{\sin\theta}{\theta}$ (with removable singularity $r(0) = A, \; r'(0) = 0$) centered at $\mathbf{C}$ across $\theta_i \in [0, \pi \cdot \text{MaxAngleTurns}]$ (`SymmetricDualLobe = false`) or symmetric dual-lobe $\theta_i \in [-\pi \cdot \text{MaxAngleTurns}, +\pi \cdot \text{MaxAngleTurns}]$ (`SymmetricDualLobe = true`), with linear vertical span $Y_i = C_y + H(t_i - 0.5)$ and `OrientMode` (`0` = keep rotation, `1` = exact analytical cochleoid tangent using $r'(\theta) = A\frac{\theta\cos\theta - \sin\theta}{\theta^2}$, `2` = outward radial from $\mathbf{C}$).
+  - Added **`Cochleoid Spiral...`** (`ButtonArrangeCochleoid` in `PanelLayoutTransform`: normal click arranges in a 2-turn unilateral cochleoid along the analytical tangent; `Ctrl`-click arranges in a symmetric dual-lobe cochleoid; `Shift`-click opens the custom dialog) and `ShowArrangeInCochleoidDialog` bound to **`Ctrl+Alt+Shift+A`** in both the Viewport and Hierarchy Tree.
+  - Added automated unit test `TestGyroidDeformRomanSurfaceAndCochleoid` in `tests/code/testcases/testcastletransformmanipulate.pas`.
+
+### Phase 147: Hierarchy Audit: Select Default-Named / Deeply Nested Components (`SelectDefaultNamedOrDeepComponents` / `Ctrl+Alt+Shift+N`) & 2D UI 4-Corner HUD Brackets / L-Frame Perimeter Layout (`ArrangeSelectedUserInterfacesInCornerBrackets` / `ButtonUICornerBrackets`)
+- [x] **147.1. Hierarchy Hygiene Audit: Select Default-Named / Unnamed or Deeply Nested Components (`SelectDefaultNamedOrDeepComponents` / `Ctrl+Alt+Shift+N`)**
+  - Implemented `TDesignFrame.SelectDefaultNamedOrDeepComponents(DeepNestingOnly)`: audits all selectable, unlocked components in the hierarchy (`C <> DesignRoot`) and selects components that still have auto-generated default names (`ClassBase + digits`, e.g., `Scene1`, `Transform2`, `Button3`, `ImageControl1`, or empty `Name`) or are deeply nested in the hierarchy tree (`TreeNode.Level >= 5`) when `DeepNestingOnly = false`, or only deeply nested components (`TreeNode.Level >= 5`) when `DeepNestingOnly = true`.
+  - Bound to **`Ctrl+Alt+Shift+N`** in both the Viewport and Hierarchy Tree, plus **`Select Default-Named / Deeply Nested Components (Ctrl+Alt+Shift+N)`** (`MenuTreeViewItemSelectDefaultNamed`) in `MenuTreeView` (`Shift`-click selects deeply nested `Level >= 5` components only).
+- [x] **147.2. 2D UI 4-Corner HUD Brackets / L-Frame Perimeter Layout (`ArrangeSelectedUserInterfacesInCornerBrackets` / `ButtonUICornerBrackets`)**
+  - Implemented `TDesignFrame.ArrangeSelectedUserInterfacesInCornerBrackets(MarginPx, StepGapPx)` and added **`UI Corner Brackets`** (`ButtonUICornerBrackets`) to `PanelLayoutUI`, distributing 2+ selected `TCastleUserInterface` controls into the 4 corners of their parent container (`Bottom-Left`, `Top-Left`, `Top-Right`, `Bottom-Right`) with `MarginPx` inset and stepping additional controls inward along alternating horizontal and vertical L-bracket arms around each corner (**Click**: $16\text{ px}$ corner margin, $8\text{ px}$ bracket step; **`Shift`-click**: $0\text{ px}$ flush corners, $4\text{ px}$ step; **`Ctrl`-click**: $32\text{ px}$ inset HUD corners, $12\text{ px}$ step).
+
+---
+
+## Recommended Next Roadmap Focus Areas (Phases 148+)
+
+To maximize level-design, procedural geometry, UI/HUD authoring, and scene-hygiene productivity in the Castle Game Engine Editor, the following four strategic pillars and concrete upcoming phases (Phases 148–155) are recommended:
+
+### Strategic Focus Pillars
+1. **Pillar A — 3D Procedural Deformations & Classical Differential Geometry Surfaces**:
+   - Expand `TCastleTransformManipulate` with curvature-driven and minimal/projective surface arrangements (Werner Boy's Surface immersion, Catalan / Scherk minimal surfaces, Spherical Mercator / Stereographic conformal projections, and Kelvin wake / Bicorn / Piriform curves) for sci-fi architecture, organic clusters, and procedural arenas.
+2. **Pillar B — 2D UI Responsive HUD Templates & Safe-Frame / Margin Layouts**:
+   - Add one-click HUD/menu layout generators in `PanelLayoutUI` (Golden-Spiral Fibonacci Split Panels, Peripheral Top/Bottom Action Bars, Split-Screen 2P/4P Viewports, and Symmetric Pill/Dock Ribbons).
+3. **Pillar C — Scene Performance, Physics & Hierarchy Hygiene Audits**:
+   - Add one-click hierarchy diagnostic selectors for shadow-casting lights & high-cost renderables, physics rigid-body/collider mismatches, unanchored or fractional-pixel blurry 2D UI controls, and transforms with negative/mirrored determinants.
+4. **Pillar D — Multi-Selection Batch Authoring & Camera/Light Staging**:
+   - Provide fast batch lighting rigs (Three-Point Key/Fill/Rim staging around primary selection) and camera turntables / orbit waypoint rings.
+
+### Planned Upcoming Phases (Phases 148–155)
+- [ ] **Phase 148: 3D Scherk Minimal Surface / Doubly-Periodic Saddle Tower Deformation (`ScherkDeformSelected` / `Ctrl+Alt+Shift+J`)**
+  - Deform 2+ selected 3D transforms along Heinrich Scherk's first doubly-periodic minimal surface $z = \frac{1}{k}\ln\left(\frac{\cos(ky)}{\cos(kx)}\right)$ (clamped smoothly near asymptotes) with analytical surface normal alignment.
+- [ ] **Phase 149: 3D Werner Boy Projective Surface / 3-Fold Immersion Arrangement (`ArrangeSelectedOnBoysSurface` / `Ctrl+Alt+Shift+X`)**
+  - Distribute 2+ selected 3D transforms across Bryant–Kusner's parameterization of Werner Boy's 3-fold symmetric immersion of $\mathbb{RP}^2$ in $\mathbb{R}^3$ with outward radial or surface tangent orientation.
+- [ ] **Phase 150: 3D Talbot / Bicorn / Cocked-Hat Algebraic Curve Arrangement (`ArrangeSelectedInBicornCurve` / `Ctrl+Alt+Shift+Y`)**
+  - Distribute 2+ selected 3D transforms along a 3D Bicorn (Cocked-Hat) / Piriform teardrop curve with configurable crest height and analytical tangent orientation.
+- [ ] **Phase 151: Hierarchy Audit: Select Shadow-Casting Lights / High-Range Emitters & 2D UI Golden-Rectangle / Fibonacci Split Layout (`ButtonUIFibonacciSplit`)**
+  - Audit lights and scenes with shadow casting or large attenuation radii, and arrange 2+ selected 2D UI controls into a nested Golden-Spiral Fibonacci subdivision inside their parent container.
+- [ ] **Phase 152: 3D Spherical Stereographic / Mercator Conformal Projection Deformation (`StereographicDeformSelected`)**
+  - Map 2+ selected planar XZ transforms onto a sphere around the active pivot via inverse stereographic conformal projection $(u, v) \mapsto \frac{1}{u^2+v^2+4R^2}(4R^2 u, \; R(u^2+v^2-4R^2), \; 4R^2 v)$ with exact conformal normal orientation.
+- [ ] **Phase 153: 3D Catalan Minimal Surface / Cycloidal Ribbon Arrangement (`ArrangeSelectedOnCatalanSurface`)**
+  - Distribute 2+ selected 3D transforms across Eugène Catalan's minimal surface bounded by a cycloid and a parabola: $x = u - \sin u\cosh v, \; z = 1 - \cos u\cosh v, \; y = 4\sin(u/2)\sinh(v/2)$.
+- [ ] **Phase 154: 3D Lissajous Torus / Cylindrical Harmonic Wave Ring (`ArrangeSelectedInCylindricalHarmonic`)**
+  - Distribute 2+ selected 3D transforms along a cylindrical crown harmonic wave $R(\theta) = R_0 + A_r\cos(m\theta), \; Y(\theta) = A_y\sin(n\theta + \phi)$ with analytical 3D tangent orientation.
+- [ ] **Phase 155: Hierarchy Audit: Select Physics Collider / RigidBody Misconfigurations & 2D UI Top/Bottom HUD Action Bars Layout (`ButtonUIHudBars`)**
+  - Audit transforms with `TCastleRigidBody` missing a `TCastleCollider` (or vice versa), and arrange 2+ selected 2D UI controls into split Top Status Bar + Bottom Action Dock HUD rows inside their parent container.
+

@@ -402,6 +402,9 @@ type
       ButtonOctahedralDeform: TButton;
       ButtonArrangeDini: TButton;
       ButtonArrangeCornu: TButton;
+      ButtonGyroidDeform: TButton;
+      ButtonArrangeRoman: TButton;
+      ButtonArrangeCochleoid: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -446,6 +449,7 @@ type
       ButtonUIArcFan: TButton;
       ButtonUIConcentricRings: TButton;
       ButtonUIDiagonalRamp: TButton;
+      ButtonUICornerBrackets: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -496,6 +500,7 @@ type
       MenuTreeViewItemSelectUIOutsideParent: TMenuItem;
       MenuTreeViewItemSelectUIOverlapping: TMenuItem;
       MenuTreeViewItemSelectUIDegenerate: TMenuItem;
+      MenuTreeViewItemSelectDefaultNamed: TMenuItem;
       MenuTreeViewItemCopyTransform: TMenuItem;
       MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
@@ -643,6 +648,9 @@ type
     procedure ButtonOctahedralDeformClick(Sender: TObject);
     procedure ButtonArrangeDiniClick(Sender: TObject);
     procedure ButtonArrangeCornuClick(Sender: TObject);
+    procedure ButtonGyroidDeformClick(Sender: TObject);
+    procedure ButtonArrangeRomanClick(Sender: TObject);
+    procedure ButtonArrangeCochleoidClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -676,6 +684,7 @@ type
     procedure ButtonUIArcFanClick(Sender: TObject);
     procedure ButtonUIConcentricRingsClick(Sender: TObject);
     procedure ButtonUIDiagonalRampClick(Sender: TObject);
+    procedure ButtonUICornerBracketsClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -733,6 +742,7 @@ type
     procedure MenuTreeViewItemSelectUIOutsideParentClick(Sender: TObject);
     procedure MenuTreeViewItemSelectUIOverlappingClick(Sender: TObject);
     procedure MenuTreeViewItemSelectUIDegenerateClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectDefaultNamedClick(Sender: TObject);
     procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
@@ -1525,6 +1535,24 @@ type
       const HeightSpan: Single = 0.0;
       const OrientMode: Integer = 1);
     procedure ShowArrangeInCornuSpiralDialog;
+    procedure GyroidDeformSelection(
+      const Wavelength: Single = 0.0;
+      const Amplitude: Single = 1.0;
+      const SchwarzPMode: Boolean = false;
+      const OrientNormals: Boolean = true);
+    procedure ShowGyroidDeformSelectionDialog;
+    procedure ArrangeSelectionOnRomanSurface(
+      const Radius: Single = 0.0;
+      const Turns: Single = 2.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeOnRomanSurfaceDialog;
+    procedure ArrangeSelectionInCochleoid(
+      const ScaleRadius: Single = 0.0;
+      const MaxAngleTurns: Single = 2.0;
+      const HeightSpan: Single = 0.0;
+      const SymmetricDualLobe: Boolean = false;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeInCochleoidDialog;
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -1589,6 +1617,9 @@ type
     procedure ArrangeSelectedUserInterfacesInDiagonalRamp(
       const MarginPx: Single = 16.0;
       const RampMode: Integer = 0);
+    procedure ArrangeSelectedUserInterfacesInCornerBrackets(
+      const MarginPx: Single = 16.0;
+      const StepGapPx: Single = 8.0);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -1648,6 +1679,7 @@ type
     procedure SelectUserInterfacesOutsideParent(const OnlyCompletelyOutside: Boolean = false);
     procedure SelectOverlappingUserInterfaces(const OnlyIdenticalRects: Boolean = false);
     procedure SelectDegenerateUserInterfaces(const IncludeHiddenControls: Boolean = false);
+    procedure SelectDefaultNamedOrDeepComponents(const DeepNestingOnly: Boolean = false);
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -2381,6 +2413,11 @@ begin
       Frame.ShowArrangeInSpirographDialog;
       Exit(true);
     end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt, mkShift] then
+    begin
+      Frame.ShowArrangeOnRomanSurfaceDialog;
+      Exit(true);
+    end else
     if Event.ModifiersDown = [mkAlt] then
     begin
       Frame.ResetSelectionTransformAttributes(false, true, false);
@@ -2429,6 +2466,11 @@ begin
     if Event.ModifiersDown = [mkCtrl, mkAlt] then
     begin
       Frame.SelectGroupTransforms(false);
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt, mkShift] then
+    begin
+      Frame.SelectDefaultNamedOrDeepComponents(false);
       Exit(true);
     end;
   end;
@@ -2593,6 +2635,11 @@ begin
     begin
       Frame.ShowBendSelectionDialog;
       Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt, mkShift] then
+    begin
+      Frame.ShowArrangeInCochleoidDialog;
+      Exit(true);
     end;
   end;
 
@@ -2672,6 +2719,11 @@ begin
     if Event.ModifiersDown = [mkCtrl, mkAlt] then
     begin
       Frame.SnapSelectionToPrimaryBoundsSurface(true, false);
+      Exit(true);
+    end else
+    if Event.ModifiersDown = [mkCtrl, mkAlt, mkShift] then
+    begin
+      Frame.ShowGyroidDeformSelectionDialog;
       Exit(true);
     end;
   end;
@@ -5033,6 +5085,36 @@ begin
   ButtonArrangeCornu.OnClick := @ButtonArrangeCornuClick;
   ButtonArrangeCornu.Parent := PanelLayoutTransform;
 
+  ButtonGyroidDeform := TButton.Create(Self);
+  ButtonGyroidDeform.Align := alTop;
+  ButtonGyroidDeform.AutoSize := true;
+  ButtonGyroidDeform.Caption := 'Gyroid / TPMS...';
+  ButtonGyroidDeform.Hint := 'Deform 2+ selected 3D transforms along a 3D Triply Periodic Minimal Surface (Schoen Gyroid or Schwarz P Lattice Wave) around the active pivot (Ctrl+Alt+Shift+M | Shift-click: dialog | Click: Schoen Gyroid + normals | Ctrl-click: Schwarz P lattice + normals)';
+  ButtonGyroidDeform.ShowHint := true;
+  ButtonGyroidDeform.BorderSpacing.Around := 2;
+  ButtonGyroidDeform.OnClick := @ButtonGyroidDeformClick;
+  ButtonGyroidDeform.Parent := PanelLayoutTransform;
+
+  ButtonArrangeRoman := TButton.Create(Self);
+  ButtonArrangeRoman.Align := alTop;
+  ButtonArrangeRoman.AutoSize := true;
+  ButtonArrangeRoman.Caption := 'Roman Surface...';
+  ButtonArrangeRoman.Hint := 'Arrange 2+ selected 3D transforms across a 3D Jakob Steiner Roman Projective Surface around the active pivot (Ctrl+Alt+Shift+R | Shift-click: dialog | Click: 2-turn Roman surface + tangent | Ctrl-click: 3-turn Roman surface + outward radial)';
+  ButtonArrangeRoman.ShowHint := true;
+  ButtonArrangeRoman.BorderSpacing.Around := 2;
+  ButtonArrangeRoman.OnClick := @ButtonArrangeRomanClick;
+  ButtonArrangeRoman.Parent := PanelLayoutTransform;
+
+  ButtonArrangeCochleoid := TButton.Create(Self);
+  ButtonArrangeCochleoid.Align := alTop;
+  ButtonArrangeCochleoid.AutoSize := true;
+  ButtonArrangeCochleoid.Caption := 'Cochleoid Spiral...';
+  ButtonArrangeCochleoid.Hint := 'Arrange 2+ selected 3D transforms along a 3D Cochleoid Snail-Shell Spiral Curve r = a*sin(theta)/theta around the active pivot (Ctrl+Alt+Shift+A | Shift-click: dialog | Click: 2-turn unilateral cochleoid + tangent | Ctrl-click: 2-turn symmetric dual-lobe cochleoid + tangent)';
+  ButtonArrangeCochleoid.ShowHint := true;
+  ButtonArrangeCochleoid.BorderSpacing.Around := 2;
+  ButtonArrangeCochleoid.OnClick := @ButtonArrangeCochleoidClick;
+  ButtonArrangeCochleoid.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -5379,6 +5461,14 @@ begin
   ButtonUIDiagonalRamp.OnClick := @ButtonUIDiagonalRampClick;
   ButtonUIDiagonalRamp.Parent := PanelLayoutUI;
 
+  ButtonUICornerBrackets := TButton.Create(Self);
+  ButtonUICornerBrackets.AutoSize := true;
+  ButtonUICornerBrackets.Caption := 'UI Corner Brackets';
+  ButtonUICornerBrackets.Hint := 'Arrange 2+ selected 2D UI controls into 4-Corner HUD Brackets / L-Frame Perimeter Arms inside their parent container (Click: 16px margin, 8px step | Shift-click: 0px flush corners, 4px step | Ctrl-click: 32px inset HUD corners, 12px step)';
+  ButtonUICornerBrackets.ShowHint := true;
+  ButtonUICornerBrackets.OnClick := @ButtonUICornerBracketsClick;
+  ButtonUICornerBrackets.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -5657,6 +5747,11 @@ begin
   MenuTreeViewItemSelectUIDegenerate.Caption := 'Select Zero-Sized / Tiny 2D UI Controls (Ctrl+Alt+Shift+Z)';
   MenuTreeViewItemSelectUIDegenerate.OnClick := @MenuTreeViewItemSelectUIDegenerateClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectUIDegenerate);
+
+  MenuTreeViewItemSelectDefaultNamed := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectDefaultNamed.Caption := 'Select Default-Named / Deeply Nested Components (Ctrl+Alt+Shift+N)';
+  MenuTreeViewItemSelectDefaultNamed.OnClick := @MenuTreeViewItemSelectDefaultNamedClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectDefaultNamed);
 
   MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
   MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
@@ -9362,6 +9457,8 @@ begin
         ButtonUIConcentricRings.Enabled := SelectedUICount >= 2;
       if ButtonUIDiagonalRamp <> nil then
         ButtonUIDiagonalRamp.Enabled := SelectedUICount >= 2;
+      if ButtonUICornerBrackets <> nil then
+        ButtonUICornerBrackets.Enabled := SelectedUICount >= 2;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -9556,6 +9653,12 @@ begin
       ButtonArrangeDini.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonArrangeCornu <> nil then
       ButtonArrangeCornu.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonGyroidDeform <> nil then
+      ButtonGyroidDeform.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeRoman <> nil then
+      ButtonArrangeRoman.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeCochleoid <> nil then
+      ButtonArrangeCochleoid.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -11202,6 +11305,11 @@ begin
       ShowArrangeInSpirographDialog;
       Key := 0;
     end else
+    if (Key = Ord('R')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowArrangeOnRomanSurfaceDialog;
+      Key := 0;
+    end else
     if (Key = Ord('V')) and (Shift = [ssAlt, ssShift]) then
     begin
       ShowArrangeInConcentricRingsDialog;
@@ -11215,6 +11323,11 @@ begin
     if (Key = Ord('A')) and (Shift = [ssCtrl, ssAlt]) then
     begin
       ShowBendSelectionDialog;
+      Key := 0;
+    end else
+    if (Key = Ord('A')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowArrangeInCochleoidDialog;
       Key := 0;
     end else
     if (Key = Ord('U')) and (Shift = [ssCtrl, ssShift]) then
@@ -11250,6 +11363,11 @@ begin
     if (Key = Ord('N')) and (Shift = [ssCtrl, ssAlt]) then
     begin
       SelectGroupTransforms(false);
+      Key := 0;
+    end else
+    if (Key = Ord('N')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      SelectDefaultNamedOrDeepComponents(false);
       Key := 0;
     end else
     if (Key = Ord('Z')) and (Shift = [ssAlt, ssShift]) then
@@ -11360,6 +11478,11 @@ begin
     if (Key = Ord('M')) and (Shift = [ssCtrl, ssAlt]) then
     begin
       SnapSelectionToPrimaryBoundsSurface(true, false);
+      Key := 0;
+    end else
+    if (Key = Ord('M')) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowGyroidDeformSelectionDialog;
       Key := 0;
     end else
     if (Key = Ord('W')) and (Shift = [ssCtrl, ssShift]) then
@@ -17615,6 +17738,164 @@ begin
     ArrangeSelectionInCornuSpiral(0.0, 2.2, 0.0, 1);
 end;
 
+procedure TDesignFrame.GyroidDeformSelection(
+  const Wavelength, Amplitude: Single;
+  const SchwarzPMode, OrientNormals: Boolean);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.GyroidDeformSelected(
+      Wavelength, Amplitude, SchwarzPMode, OrientNormals);
+end;
+
+procedure TDesignFrame.ShowGyroidDeformSelectionDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  WaveLen, AmpVal: Single;
+  SchwarzP, OrientNorm: Boolean;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'TPMS Spatial Wavelength lambda (0 = auto from selection):';
+  Prompts[1] := 'Displacement Amplitude along TPMS gradient:';
+  Prompts[2] := 'Surface Type (0 = Schoen Gyroid, 1 = Schwarz P Lattice):';
+  Prompts[3] := 'Orient Along TPMS Iso-Surface Gradient Normal (1 = yes, 0 = no):';
+
+  Values[0] := '0';
+  Values[1] := '1.0';
+  Values[2] := '0';
+  Values[3] := '1';
+
+  if InputQuery('3D Triply Periodic Minimal Surface (Schoen Gyroid / Schwarz P) Deformation', Prompts, Values) then
+  begin
+    WaveLen := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    AmpVal := StrToFloatDefDot(Trim(Values[1]), 1.0);
+    SchwarzP := StrToIntDef(Trim(Values[2]), 0) <> 0;
+    OrientNorm := StrToIntDef(Trim(Values[3]), 1) <> 0;
+    GyroidDeformSelection(WaveLen, AmpVal, SchwarzP, OrientNorm);
+  end;
+end;
+
+procedure TDesignFrame.ButtonGyroidDeformClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowGyroidDeformSelectionDialog
+  else if ssCtrl in ShiftState then
+    GyroidDeformSelection(0.0, 1.0, true, true)
+  else
+    GyroidDeformSelection(0.0, 1.0, false, true);
+end;
+
+procedure TDesignFrame.ArrangeSelectionOnRomanSurface(
+  const Radius, Turns: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedOnRomanSurface(
+      Radius, Turns, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeOnRomanSurfaceDialog;
+var
+  Prompts: array[0..2] of string;
+  Values: array[0..2] of string;
+  RadVal, TurnsVal: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Roman Surface Radius R (0 = auto from selection):';
+  Prompts[1] := 'Meridional Winding Turns W:';
+  Prompts[2] := 'Orientation (0 = keep, 1 = surface tangent, 2 = outward radial):';
+
+  Values[0] := '0';
+  Values[1] := '2.0';
+  Values[2] := '1';
+
+  if InputQuery('Arrange Selected on 3D Jakob Steiner Roman Projective Surface', Prompts, Values) then
+  begin
+    RadVal := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    TurnsVal := StrToFloatDefDot(Trim(Values[1]), 2.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[2]), 1), 0, 2);
+    ArrangeSelectionOnRomanSurface(RadVal, TurnsVal, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeRomanClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeOnRomanSurfaceDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionOnRomanSurface(0.0, 3.0, 2)
+  else
+    ArrangeSelectionOnRomanSurface(0.0, 2.0, 1);
+end;
+
+procedure TDesignFrame.ArrangeSelectionInCochleoid(
+  const ScaleRadius, MaxAngleTurns, HeightSpan: Single;
+  const SymmetricDualLobe: Boolean;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInCochleoid(
+      ScaleRadius, MaxAngleTurns, HeightSpan, SymmetricDualLobe, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInCochleoidDialog;
+var
+  Prompts: array[0..4] of string;
+  Values: array[0..4] of string;
+  ScaleR, MaxTurns, HSpan: Single;
+  DualLobe: Boolean;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+    Exit;
+
+  Prompts[0] := 'Cochleoid Outer Scale Radius A (0 = auto from selection):';
+  Prompts[1] := 'Max Angle Turns in half-turns pi (e.g. 2.0 = 2*pi):';
+  Prompts[2] := 'Vertical Height Span H across cochleoid:';
+  Prompts[3] := 'Symmetric Dual-Lobe Mode (1 = [-Theta..+Theta], 0 = [0..+Theta]):';
+  Prompts[4] := 'Orientation (0 = keep, 1 = spiral tangent, 2 = outward from centroid):';
+
+  Values[0] := '0';
+  Values[1] := '2.0';
+  Values[2] := '0.0';
+  Values[3] := '0';
+  Values[4] := '1';
+
+  if InputQuery('Arrange Selected in 3D Cochleoid Snail-Shell Spiral Curve', Prompts, Values) then
+  begin
+    ScaleR := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    MaxTurns := Max(0.25, StrToFloatDefDot(Trim(Values[1]), 2.0));
+    HSpan := StrToFloatDefDot(Trim(Values[2]), 0.0);
+    DualLobe := StrToIntDef(Trim(Values[3]), 0) <> 0;
+    OrientMode := Clamped(StrToIntDef(Trim(Values[4]), 1), 0, 2);
+    ArrangeSelectionInCochleoid(ScaleR, MaxTurns, HSpan, DualLobe, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeCochleoidClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInCochleoidDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionInCochleoid(0.0, 2.0, 0.0, true, 1)
+  else
+    ArrangeSelectionInCochleoid(0.0, 2.0, 0.0, false, 1);
+end;
+
 procedure TDesignFrame.StopPilotTransform;
 var
   SavedName: String;
@@ -20768,6 +21049,116 @@ begin
     ArrangeSelectedUserInterfacesInDiagonalRamp(12.0, 2)
   else
     ArrangeSelectedUserInterfacesInDiagonalRamp(12.0, 0);
+end;
+
+procedure TDesignFrame.ArrangeSelectedUserInterfacesInCornerBrackets(
+  const MarginPx, StepGapPx: Single);
+var
+  Selected, UIList: TComponentList;
+  SelectedCount, I, N, CornerIdx, LayerIdx, ChangedCount: Integer;
+  UI: TCastleUserInterface;
+  ParentR, R: TFloatRectangle;
+  StepShiftX, StepShiftY, TargetX, TargetY, CurCX, CurCY, DeltaX, DeltaY: Single;
+begin
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if SelectedCount < 2 then Exit;
+    UIList := TComponentList.Create(false);
+    try
+      for I := 0 to Selected.Count - 1 do
+        if (Selected[I] is TCastleUserInterface) and
+           (Selected[I] <> DesignRoot) and
+           (not (Selected[I] is TCastleViewport)) and
+           (not IsComponentLocked(Selected[I])) then
+        begin
+          UI := TCastleUserInterface(Selected[I]);
+          if (UI.Parent <> nil) and (not UI.FullSize) then
+            UIList.Add(UI);
+        end;
+
+      N := UIList.Count;
+      if N < 2 then Exit;
+
+      ChangedCount := 0;
+      for I := 0 to N - 1 do
+      begin
+        UI := TCastleUserInterface(UIList[I]);
+        ParentR := UI.Parent.RenderRect;
+        R := UI.RenderRectWithBorder;
+        if ParentR.IsEmpty or R.IsEmpty then Continue;
+
+        CornerIdx := I mod 4;
+        LayerIdx := I div 4;
+        if LayerIdx = 0 then
+        begin
+          StepShiftX := 0.0;
+          StepShiftY := 0.0;
+        end else if Odd(LayerIdx) then
+        begin
+          StepShiftX := ((LayerIdx + 1) div 2) * (R.Width + Max(0.0, StepGapPx));
+          StepShiftY := 0.0;
+        end else
+        begin
+          StepShiftX := 0.0;
+          StepShiftY := (LayerIdx div 2) * (R.Height + Max(0.0, StepGapPx));
+        end;
+
+        case CornerIdx of
+          0: { Bottom-Left corner }
+            begin
+              TargetX := ParentR.Left + MarginPx + R.Width * 0.5 + StepShiftX;
+              TargetY := ParentR.Bottom + MarginPx + R.Height * 0.5 + StepShiftY;
+            end;
+          1: { Top-Left corner }
+            begin
+              TargetX := ParentR.Left + MarginPx + R.Width * 0.5 + StepShiftX;
+              TargetY := ParentR.Top - MarginPx - R.Height * 0.5 - StepShiftY;
+            end;
+          2: { Top-Right corner }
+            begin
+              TargetX := ParentR.Right - MarginPx - R.Width * 0.5 - StepShiftX;
+              TargetY := ParentR.Top - MarginPx - R.Height * 0.5 - StepShiftY;
+            end;
+        else { Bottom-Right corner }
+          begin
+            TargetX := ParentR.Right - MarginPx - R.Width * 0.5 - StepShiftX;
+            TargetY := ParentR.Bottom + MarginPx + R.Height * 0.5 + StepShiftY;
+          end;
+        end;
+
+        CurCX := R.Center.X;
+        CurCY := R.Center.Y;
+        DeltaX := TargetX - CurCX;
+        DeltaY := TargetY - CurCY;
+        if (Abs(DeltaX) > 0.01) or (Abs(DeltaY) > 0.01) then
+        begin
+          UI.Translation := UI.Translation + Vector2(DeltaX / UI.UIScale, DeltaY / UI.UIScale);
+          Inc(ChangedCount);
+        end;
+      end;
+
+      if ChangedCount > 0 then
+        ModifiedOutsideObjectInspector(
+          Format('Arrange %d UI control(s) into 4-corner HUD brackets', [ChangedCount]), ucHigh);
+    finally
+      FreeAndNil(UIList);
+    end;
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUICornerBracketsClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ArrangeSelectedUserInterfacesInCornerBrackets(0.0, 4.0)
+  else if ssCtrl in ShiftState then
+    ArrangeSelectedUserInterfacesInCornerBrackets(32.0, 12.0)
+  else
+    ArrangeSelectedUserInterfacesInCornerBrackets(16.0, 8.0);
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -24654,6 +25045,81 @@ end;
 procedure TDesignFrame.MenuTreeViewItemSelectUIDegenerateClick(Sender: TObject);
 begin
   SelectDegenerateUserInterfaces(ssShift in GetKeyShiftState);
+end;
+
+procedure TDesignFrame.SelectDefaultNamedOrDeepComponents(const DeepNestingOnly: Boolean);
+const
+  DeepHierarchyLevel = 5;
+
+  function HasTrailingDigitsOnly(const S: String; const StartIdx: Integer): Boolean;
+  var
+    K: Integer;
+  begin
+    Result := StartIdx <= Length(S);
+    if not Result then Exit;
+    for K := StartIdx to Length(S) do
+      if not (S[K] in ['0'..'9']) then
+        Exit(false);
+  end;
+
+  function IsDefaultComponentName(const Comp: TComponent): Boolean;
+  var
+    CompName, ClsName, ShortClsName: String;
+  begin
+    CompName := Trim(Comp.Name);
+    if CompName = '' then
+      Exit(true);
+    ClsName := Comp.ClassName;
+    if SameText(Copy(ClsName, 1, 7), 'TCastle') then
+      ShortClsName := Copy(ClsName, 8, MaxInt)
+    else if (Length(ClsName) > 1) and ((ClsName[1] = 'T') or (ClsName[1] = 't')) then
+      ShortClsName := Copy(ClsName, 2, MaxInt)
+    else
+      ShortClsName := ClsName;
+
+    Result :=
+      (SameText(Copy(CompName, 1, Length(ShortClsName)), ShortClsName) and
+       HasTrailingDigitsOnly(CompName, Length(ShortClsName) + 1)) or
+      (SameText(Copy(CompName, 1, Length(ClsName)), ClsName) and
+       HasTrailingDigitsOnly(CompName, Length(ClsName) + 1));
+  end;
+
+var
+  NewSelection: TComponentList;
+  TreeNode: TTreeNode;
+  C: TComponent;
+  IsMatch: Boolean;
+begin
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      C := SelectedFromNode(TreeNode, false);
+      if (C <> nil) and (C <> DesignRoot) and
+         Selectable(C) and (not IsComponentLocked(C)) then
+      begin
+        if DeepNestingOnly then
+          IsMatch := TreeNode.Level >= DeepHierarchyLevel
+        else
+          IsMatch := IsDefaultComponentName(C) or (TreeNode.Level >= DeepHierarchyLevel);
+
+        if IsMatch and (NewSelection.IndexOf(C) = -1) then
+          NewSelection.Add(C);
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectDefaultNamedClick(Sender: TObject);
+begin
+  SelectDefaultNamedOrDeepComponents(ssShift in GetKeyShiftState);
 end;
 
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;

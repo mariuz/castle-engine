@@ -72,6 +72,7 @@ type
     procedure TestWaveDeformEnneperAndGearWheel;
     procedure TestSaddleDomeKleinBottleAndFermatSpiral;
     procedure TestOctahedralDeformDiniAndCornuSpiral;
+    procedure TestGyroidDeformRomanSurfaceAndCochleoid;
   end;
 
 implementation
@@ -3389,6 +3390,88 @@ begin
     B2.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(1.0, 0.0, 0.0), WorldDir.Normalize, 1e-3);
     B3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.0, 0.0, 1.0), WorldDir.Normalize, 1e-3);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestGyroidDeformRomanSurfaceAndCochleoid;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  B1, B2, B3: TCastleBox;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.PivotMode := pmPrimarySelected;
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(1, 1, 1);
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(1, 1, 1);
+    B2.Translation := Vector3(2.0, 0.0, 0.0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(1, 1, 1);
+    B3.Translation := Vector3(0.0, 2.0, 0.0);
+    Viewport.Items.Add(B3);
+
+    { 1. Test GyroidDeformSelected (Wavelength=8.0, Amplitude=3.0, SchwarzPMode=false, OrientNormals=true)
+      Around B1=(0,0,0) with k = 2*Pi/8 = Pi/4:
+      - B1 (0,0,0): F = 0, grad = k*(1, 1, 1) -> stays at (0, 0, 0), LookDir = (1, 1, 1).Normalize
+      - B2 (2,0,0) (kx=Pi/2, ky=kz=0): F = sin(Pi/2)*cos(0) = 1.0, grad = k*(0, 1, 0) ->
+        displaced by 3.0 * 1.0 * (0, 1, 0) to (2, 3, 0), LookDir = (0, 1, 0)
+      - B3 (0,2,0) (ky=Pi/2, kx=kz=0): F = 1.0, grad = k*(0, 0, 1) ->
+        displaced by 3.0 * 1.0 * (0, 0, 1) to (0, 2, 3), LookDir = (0, 0, 1) }
+    Manipulate.SetSelected([B1, B2, B3]);
+    AssertTrue(Manipulate.GyroidDeformSelected(8.0, 3.0, false, true));
+    AssertVectorEquals(Vector3(0.0, 0.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(2.0, 3.0, 0.0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, 2.0, 3.0), B3.Translation, 1e-4);
+
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1.0, 1.0, 1.0).Normalize, WorldDir.Normalize, 1e-3);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.0, 1.0, 0.0), WorldDir.Normalize, 1e-3);
+    B3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.0, 0.0, 1.0), WorldDir.Normalize, 1e-3);
+
+    { 2. Test ArrangeSelectedOnRomanSurface (Radius=10.0, Turns=0.5, OrientMode=2)
+      Around B1=(0,0,0) for N=3:
+      - B1 (t=0, u=0, v=-Pi/4): x=0, y=0, z=-5.0, LookDir=(0, 0, -1)
+      - B2 (t=0.5, u=Pi/4, v=0): x=5.0, y=0, z=0, LookDir=(1, 0, 0)
+      - B3 (t=1, u=Pi/2, v=+Pi/4): x=0, y=5.0, z=0, LookDir=(0, 1, 0) }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Manipulate.SetSelected([B1, B2, B3]);
+    AssertTrue(Manipulate.ArrangeSelectedOnRomanSurface(10.0, 0.5, 2));
+    AssertVectorEquals(Vector3(0.0, 0.0, -5.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(5.0, 0.0, 0.0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, 5.0, 0.0), B3.Translation, 1e-4);
+    B2.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(1.0, 0.0, 0.0), WorldDir.Normalize, 1e-3);
+    B3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.0, 1.0, 0.0), WorldDir.Normalize, 1e-3);
+
+    { 3. Test ArrangeSelectedInCochleoid (ScaleRadius=10.0, MaxAngleTurns=1.0, HeightSpan=0.0, SymmetricDualLobe=false, OrientMode=1)
+      Around B1=(0,0,0) for N=3 (ThetaMax=Pi):
+      - B1 (t=0, theta=0): r=10 -> (10, 0, 0), analytical tangent = (0, 0, 1)
+      - B2 (t=0.5, theta=Pi/2): r=10/(Pi/2)=20/Pi -> (0, 0, 20/Pi)
+      - B3 (t=1, theta=Pi): r=0 -> (0, 0, 0) }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Manipulate.SetSelected([B1, B2, B3]);
+    AssertTrue(Manipulate.ArrangeSelectedInCochleoid(10.0, 1.0, 0.0, false, 1));
+    AssertVectorEquals(Vector3(10.0, 0.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, 0.0, 20.0 / Pi), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, 0.0, 0.0), B3.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(0.0, 0.0, 1.0), WorldDir.Normalize, 1e-3);
   finally
     FreeAndNil(Manipulate);

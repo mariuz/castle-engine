@@ -1858,6 +1858,63 @@ type
       const MaxParamT: Single = 1.6;
       const HeightSpan: Single = 0.0;
       const OrientMode: Integer = 1): Boolean;
+
+    { Deform all top-level selected transforms (@code(SelectedCount >= 2))
+      along the analytical gradient of a 3D Triply Periodic Minimal Surface
+      (Schoen Gyroid when @code(SchwarzPMode = false), or Schwarz P Primitive
+      Cubic Minimal Surface when @code(SchwarzPMode = true)) centered at the
+      active selection pivot $\mathbf(C)$ with spatial period @code(Wavelength) ($\lambda$)
+      and displacement @code(Amplitude) ($A$):
+      - Schoen Gyroid (@code(SchwarzPMode = false)):
+        $F(\mathbf(d)) = \sin(kx)\cos(ky) + \sin(ky)\cos(kz) + \sin(kz)\cos(kx)$
+      - Schwarz P (@code(SchwarzPMode = true)):
+        $F(\mathbf(d)) = \cos(kx) + \cos(ky) + \cos(kz)$
+      where $k = 2\pi / \lambda$, displacing each transform by $A \cdot F(\mathbf(d)) \cdot \hat(\mathbf(g))$
+      along the normalized spatial gradient $\hat(\mathbf(g)) = \nabla F / \|\nabla F\|$
+      and optionally orienting its forward axis along $\hat(\mathbf(g))$ (@code(OrientNormals = true)).
+      Returns @true if at least one selected transform was modified. }
+    function GyroidDeformSelected(
+      const Wavelength: Single = 0.0;
+      const Amplitude: Single = 2.0;
+      const SchwarzPMode: Boolean = false;
+      const OrientNormals: Boolean = true): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      across Jakob Steiner's 3D Roman Projective Surface centered at the active
+      selection pivot $\mathbf(C)$ with outer radius @code(Radius) ($R$) and
+      azimuthal winding @code(Turns) ($W$):
+      $$t_i = \frac(i)(N - 1), \quad u_i = \pi W t_i, \quad v_i = -\frac(\pi)(4) + \frac(\pi)(2)t_i$$
+      $$x_i = C_x + \frac(R)(2)\sin(2u_i)\cos^2 v_i, \quad
+        y_i = C_y + \frac(R)(2)\sin u_i \sin(2v_i), \quad
+        z_i = C_z + \frac(R)(2)\cos u_i \sin(2v_i)$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the analytical Roman surface curve tangent
+      - @code(2): orient forward radially outward from $\mathbf(C)$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedOnRomanSurface(
+      const Radius: Single = 0.0;
+      const Turns: Single = 2.0;
+      const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along a 3D Cochleoid Snail-Shell Spiral ($r(\theta) = A\frac(\sin\theta)(\theta)$)
+      centered at the active selection pivot $\mathbf(C)$ with scale radius
+      @code(ScaleRadius) ($A$), angular span @code(MaxAngleTurns) ($\Theta_(\max) = \pi W$),
+      and vertical rise @code(HeightSpan) ($H$):
+      - When @code(SymmetricDualLobe) is @false: $\theta_i = \Theta_(\max) t_i \in [0, \Theta_(\max)]$
+      - When @code(SymmetricDualLobe) is @true: $\theta_i = \Theta_(\max)(2t_i - 1) \in [-\Theta_(\max), +\Theta_(\max)]$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the analytical 3D Cochleoid tangent
+      - @code(2): orient forward radially outward from $\mathbf(C)$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInCochleoid(
+      const ScaleRadius: Single = 0.0;
+      const MaxAngleTurns: Single = 2.0;
+      const HeightSpan: Single = 0.0;
+      const SymmetricDualLobe: Boolean = false;
+      const OrientMode: Integer = 1): Boolean;
   end;
 
 var
@@ -14284,6 +14341,357 @@ begin
 
         if LookDir.LengthSqr < 1e-8 then
           LookDir := Vector3(1.0, 0.0, 0.0);
+        LookDir := LookDir.Normalize;
+
+        NewUp := Vector3(0, 1, 0);
+        if Abs(TVector3.DotProduct(LookDir, NewUp)) > 0.99 then
+          NewUp := Vector3(1, 0, 0);
+        Side := TVector3.CrossProduct(LookDir, NewUp).Normalize;
+        NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+        T.GetWorldView(CurWorldPos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+
+    if Result then
+    begin
+      if Gizmo[Mode] <> nil then
+        Gizmo[Mode].UpdateSize;
+      GizmoHasTransformModified(Self);
+      GizmoHasTransformModifyEnd(Self);
+    end;
+  finally
+    FreeAndNil(TopLevel);
+  end;
+end;
+
+function TCastleTransformManipulate.GyroidDeformSelected(
+  const Wavelength, Amplitude: Single;
+  const SchwarzPMode, OrientNormals: Boolean): Boolean;
+var
+  TopLevel: TComponentList;
+  I, N: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, RelVec, TargetPos, GradVec, UnitGrad, CurWorldPos, CurDir, CurUp, NewUp, Side: TVector3;
+  ActualLambda, WaveK, KX, KY, KZ, SinX, CosX, SinY, CosY, SinZ, CosZ, FieldVal, TotalSpan, Dist: Single;
+begin
+  Result := false;
+  TopLevel := TComponentList.Create(false);
+  try
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+        TopLevel.Add(Boxes[I].Parent);
+
+    N := TopLevel.Count;
+    if N < 2 then Exit;
+
+    if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+      CenterPos := GetTransformWorkingPos(FMainSelected)
+    else
+      CenterPos := SelectionWorkingCenter;
+
+    ActualLambda := Wavelength;
+    if ActualLambda <= 0.0 then
+    begin
+      TotalSpan := 0.0;
+      for I := 0 to N - 1 do
+      begin
+        Dist := (GetTransformWorkingPos(TCastleTransform(TopLevel[I])) - CenterPos).Length;
+        TotalSpan := Max(TotalSpan, Dist * 2.0);
+      end;
+      ActualLambda := Max(4.0, TotalSpan);
+    end;
+    ActualLambda := Max(0.25, ActualLambda);
+    WaveK := (2.0 * Pi) / ActualLambda;
+
+    for I := 0 to N - 1 do
+    begin
+      T := TCastleTransform(TopLevel[I]);
+      CurPos := GetTransformWorkingPos(T);
+      RelVec := CurPos - CenterPos;
+
+      KX := WaveK * RelVec.X;
+      KY := WaveK * RelVec.Y;
+      KZ := WaveK * RelVec.Z;
+      SinCos(KX, SinX, CosX);
+      SinCos(KY, SinY, CosY);
+      SinCos(KZ, SinZ, CosZ);
+
+      if SchwarzPMode then
+      begin
+        FieldVal := CosX + CosY + CosZ;
+        GradVec := Vector3(-WaveK * SinX, -WaveK * SinY, -WaveK * SinZ);
+      end else
+      begin
+        FieldVal := SinX * CosY + SinY * CosZ + SinZ * CosX;
+        GradVec := Vector3(
+          WaveK * (CosX * CosY - SinZ * SinX),
+          WaveK * (-SinX * SinY + CosY * CosZ),
+          WaveK * (-SinY * SinZ + CosZ * CosX));
+      end;
+
+      if GradVec.LengthSqr > 1e-8 then
+        UnitGrad := GradVec.Normalize
+      else
+        UnitGrad := Vector3(0.0, 1.0, 0.0);
+
+      TargetPos := CurPos + UnitGrad * (Amplitude * FieldVal);
+      if not TVector3.Equals(CurPos, TargetPos, 1e-5) then
+      begin
+        SetTransformWorkingPos(T, TargetPos);
+        Result := true;
+      end;
+
+      if OrientNormals then
+      begin
+        NewUp := Vector3(0, 1, 0);
+        if Abs(TVector3.DotProduct(UnitGrad, NewUp)) > 0.99 then
+          NewUp := Vector3(1, 0, 0);
+        Side := TVector3.CrossProduct(UnitGrad, NewUp).Normalize;
+        NewUp := TVector3.CrossProduct(Side, UnitGrad).Normalize;
+
+        T.GetWorldView(CurWorldPos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, UnitGrad, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), UnitGrad, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+
+    if Result then
+    begin
+      if Gizmo[Mode] <> nil then
+        Gizmo[Mode].UpdateSize;
+      GizmoHasTransformModified(Self);
+      GizmoHasTransformModifyEnd(Self);
+    end;
+  finally
+    FreeAndNil(TopLevel);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedOnRomanSurface(
+  const Radius: Single;
+  const Turns: Single;
+  const OrientMode: Integer): Boolean;
+var
+  TopLevel: TComponentList;
+  I, N: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, LookDir, CurWorldPos, CurDir, CurUp, NewUp, Side: TVector3;
+  ActualR, ActualTurns, TParam, UVal, VVal, SinU, CosU, Sin2U, Cos2U, SinV, CosV, Sin2V, Cos2V: Single;
+  DuDt, DvDt, DxDt, DyDt, DzDt, TotalDist, Dist: Single;
+begin
+  Result := false;
+  TopLevel := TComponentList.Create(false);
+  try
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+        TopLevel.Add(Boxes[I].Parent);
+
+    N := TopLevel.Count;
+    if N < 2 then Exit;
+
+    if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+      CenterPos := GetTransformWorkingPos(FMainSelected)
+    else
+      CenterPos := SelectionWorkingCenter;
+
+    ActualR := Radius;
+    if ActualR <= 0.0 then
+    begin
+      TotalDist := 0.0;
+      for I := 0 to N - 1 do
+      begin
+        Dist := (GetTransformWorkingPos(TCastleTransform(TopLevel[I])) - CenterPos).Length;
+        TotalDist := TotalDist + Dist;
+      end;
+      ActualR := Max(4.0, (TotalDist / N) * 2.0);
+    end;
+    ActualR := Max(0.1, ActualR);
+
+    ActualTurns := Turns;
+    if Abs(ActualTurns) < 0.05 then
+      ActualTurns := 2.0;
+
+    DuDt := Pi * ActualTurns;
+    DvDt := Pi * 0.5;
+
+    for I := 0 to N - 1 do
+    begin
+      T := TCastleTransform(TopLevel[I]);
+      CurPos := GetTransformWorkingPos(T);
+      TParam := I / (N - 1);
+      UVal := DuDt * TParam;
+      VVal := (-Pi * 0.25) + DvDt * TParam;
+
+      SinCos(UVal, SinU, CosU);
+      SinCos(2.0 * UVal, Sin2U, Cos2U);
+      SinCos(VVal, SinV, CosV);
+      SinCos(2.0 * VVal, Sin2V, Cos2V);
+
+      TargetPos := Vector3(
+        CenterPos.X + 0.5 * ActualR * Sin2U * Sqr(CosV),
+        CenterPos.Y + 0.5 * ActualR * SinU * Sin2V,
+        CenterPos.Z + 0.5 * ActualR * CosU * Sin2V);
+
+      if not TVector3.Equals(CurPos, TargetPos, 1e-5) then
+      begin
+        SetTransformWorkingPos(T, TargetPos);
+        Result := true;
+      end;
+
+      if OrientMode in [1, 2] then
+      begin
+        if OrientMode = 1 then
+        begin
+          DxDt := 0.5 * ActualR * (2.0 * DuDt * Cos2U * Sqr(CosV) - DvDt * Sin2U * Sin2V);
+          DyDt := 0.5 * ActualR * (DuDt * CosU * Sin2V + 2.0 * DvDt * SinU * Cos2V);
+          DzDt := 0.5 * ActualR * (-DuDt * SinU * Sin2V + 2.0 * DvDt * CosU * Cos2V);
+          LookDir := Vector3(DxDt, DyDt, DzDt);
+        end else
+          LookDir := TargetPos - CenterPos;
+
+        if LookDir.LengthSqr < 1e-8 then
+          LookDir := Vector3(0.0, 0.0, 1.0);
+        LookDir := LookDir.Normalize;
+
+        NewUp := Vector3(0, 1, 0);
+        if Abs(TVector3.DotProduct(LookDir, NewUp)) > 0.99 then
+          NewUp := Vector3(1, 0, 0);
+        Side := TVector3.CrossProduct(LookDir, NewUp).Normalize;
+        NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+        T.GetWorldView(CurWorldPos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+
+    if Result then
+    begin
+      if Gizmo[Mode] <> nil then
+        Gizmo[Mode].UpdateSize;
+      GizmoHasTransformModified(Self);
+      GizmoHasTransformModifyEnd(Self);
+    end;
+  finally
+    FreeAndNil(TopLevel);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInCochleoid(
+  const ScaleRadius, MaxAngleTurns, HeightSpan: Single;
+  const SymmetricDualLobe: Boolean;
+  const OrientMode: Integer): Boolean;
+var
+  TopLevel: TComponentList;
+  I, N: Integer;
+  T: TCastleTransform;
+  CenterPos, CurPos, TargetPos, LookDir, CurWorldPos, CurDir, CurUp, NewUp, Side: TVector3;
+  ActualA, ActualTurns, ThetaMax, TParam, Theta, SinT, CosT, RVal, DrDTheta, DThetaDt, DxDt, DyDt, DzDt, TotalDist, Dist: Single;
+begin
+  Result := false;
+  TopLevel := TComponentList.Create(false);
+  try
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+        TopLevel.Add(Boxes[I].Parent);
+
+    N := TopLevel.Count;
+    if N < 2 then Exit;
+
+    if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+      CenterPos := GetTransformWorkingPos(FMainSelected)
+    else
+      CenterPos := SelectionWorkingCenter;
+
+    ActualA := ScaleRadius;
+    if ActualA <= 0.0 then
+    begin
+      TotalDist := 0.0;
+      for I := 0 to N - 1 do
+      begin
+        Dist := Hypot(
+          GetTransformWorkingPos(TCastleTransform(TopLevel[I])).X - CenterPos.X,
+          GetTransformWorkingPos(TCastleTransform(TopLevel[I])).Z - CenterPos.Z);
+        TotalDist := TotalDist + Dist;
+      end;
+      ActualA := Max(5.0, (TotalDist / N) * 1.5);
+    end;
+    ActualA := Max(0.1, ActualA);
+
+    ActualTurns := MaxAngleTurns;
+    if Abs(ActualTurns) < 0.05 then
+      ActualTurns := 2.0;
+    ThetaMax := Pi * ActualTurns;
+
+    if SymmetricDualLobe then
+      DThetaDt := 2.0 * ThetaMax
+    else
+      DThetaDt := ThetaMax;
+
+    for I := 0 to N - 1 do
+    begin
+      T := TCastleTransform(TopLevel[I]);
+      CurPos := GetTransformWorkingPos(T);
+      TParam := I / (N - 1);
+      if SymmetricDualLobe then
+        Theta := ThetaMax * (2.0 * TParam - 1.0)
+      else
+        Theta := ThetaMax * TParam;
+
+      SinCos(Theta, SinT, CosT);
+      if Abs(Theta) < 1e-5 then
+      begin
+        RVal := ActualA;
+        DrDTheta := 0.0;
+      end else
+      begin
+        RVal := ActualA * (SinT / Theta);
+        DrDTheta := ActualA * ((Theta * CosT - SinT) / Sqr(Theta));
+      end;
+
+      TargetPos := Vector3(
+        CenterPos.X + RVal * CosT,
+        CenterPos.Y + HeightSpan * (TParam - 0.5),
+        CenterPos.Z + RVal * SinT);
+
+      if not TVector3.Equals(CurPos, TargetPos, 1e-5) then
+      begin
+        SetTransformWorkingPos(T, TargetPos);
+        Result := true;
+      end;
+
+      if OrientMode in [1, 2] then
+      begin
+        if OrientMode = 1 then
+        begin
+          DxDt := (DrDTheta * CosT - RVal * SinT) * DThetaDt;
+          DyDt := HeightSpan;
+          DzDt := (DrDTheta * SinT + RVal * CosT) * DThetaDt;
+          LookDir := Vector3(DxDt, DyDt, DzDt);
+        end else
+        begin
+          LookDir := Vector3(TargetPos.X - CenterPos.X, 0.0, TargetPos.Z - CenterPos.Z);
+          if LookDir.LengthSqr < 1e-8 then
+            LookDir := Vector3(CosT, 0.0, SinT);
+        end;
+
+        if LookDir.LengthSqr < 1e-8 then
+          LookDir := Vector3(0.0, 0.0, 1.0);
         LookDir := LookDir.Normalize;
 
         NewUp := Vector3(0, 1, 0);
