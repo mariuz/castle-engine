@@ -75,6 +75,7 @@ type
     procedure TestGyroidDeformRomanSurfaceAndCochleoid;
     procedure TestScherkDeformBoysSurfaceAndBicorn;
     procedure TestStereographicCatalanAndCylindricalHarmonic;
+    procedure TestDupinCyclideBourSurfaceAndLimacon;
   end;
 
 implementation
@@ -3670,6 +3671,83 @@ begin
     AssertVectorEquals(Vector3(0.0, -4.0, -8.0), B4.Translation, 1e-4);
     B1.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(0.0, 4.0, 12.0).Normalize, WorldDir.Normalize, 1e-3);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestDupinCyclideBourSurfaceAndLimacon;
+var
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  B1, B2, B3, B4: TCastleBox;
+  WorldPos, WorldDir, WorldUp: TVector3;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Manipulate.PivotMode := pmPrimarySelected;
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(1, 1, 1);
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Viewport.Items.Add(B1);
+
+    B2 := TCastleBox.Create(Viewport);
+    B2.Size := Vector3(1, 1, 1);
+    B2.Translation := Vector3(10.0, 0.0, 0.0);
+    Viewport.Items.Add(B2);
+
+    B3 := TCastleBox.Create(Viewport);
+    B3.Size := Vector3(1, 1, 1);
+    B3.Translation := Vector3(0.0, 0.0, 10.0);
+    Viewport.Items.Add(B3);
+
+    B4 := TCastleBox.Create(Viewport);
+    B4.Size := Vector3(1, 1, 1);
+    B4.Translation := Vector3(-10.0, 0.0, 0.0);
+    Viewport.Items.Add(B4);
+
+    { 1. Test ArrangeSelectedOnDupinCyclide (MajorRadiusA=10.0, MinorRadiusB=8.0, TubeRadiusD=3.0, Turns=1.0, OrientMode=1)
+      Around B1=(0,0,0) for N=3 (ParamT = 0, 0.5, 1.0), c = Sqrt(100 - 64) = 6:
+      - B1 (t=0, u=0, v=0): Denom = 10 - 6 = 4, x = (3*(6-10) + 64)/4 = 52/4 = 13 -> (13, 0, 0)
+      - B2 (t=0.5, u=Pi, v=Pi): Denom = 10 - 6 = 4, x = (3*(6-10) - 64)/4 = -76/4 = -19 -> (-19, 0, 0)
+      - B3 (t=1.0, u=2*Pi, v=2*Pi): (13, 0, 0) }
+    Manipulate.SetSelected([B1, B2, B3]);
+    AssertTrue(Manipulate.ArrangeSelectedOnDupinCyclide(10.0, 8.0, 3.0, 1.0, 1));
+    AssertVectorEquals(Vector3(13.0, 0.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(-19.0, 0.0, 0.0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(13.0, 0.0, 0.0), B3.Translation, 1e-4);
+
+    { 2. Test ArrangeSelectedOnBourSurface (ScaleRadius=6.0, Turns=1.0, OrientMode=2)
+      Around B1=(0,0,0) for N=3 (ParamT = 0, 0.5, 1.0):
+      - B1 (t=0, r=0.25, theta=0): x = 6*(0.25 - 0.5*0.0625) = 1.3125, y = 6*(4/3)*0.125 = 1.0, z = 0
+      - B3 (t=1.0, r=1.0, theta=2*Pi): x = 6*(1 - 0.5) = 3.0, y = 6*(4/3)*1*cos(3*Pi) = -8.0, z = 0,
+        Weierstrass-Enneper Gauss-map normal = (-1, 0, 0) }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Manipulate.SetSelected([B1, B2, B3]);
+    AssertTrue(Manipulate.ArrangeSelectedOnBourSurface(6.0, 1.0, 2));
+    AssertVectorEquals(Vector3(1.3125, 1.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(3.0, -8.0, 0.0), B3.Translation, 1e-4);
+    B3.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(-1.0, 0.0, 0.0), WorldDir.Normalize, 1e-3);
+
+    { 3. Test ArrangeSelectedInLimaconCurve (LoopRadiusA=8.0, OffsetB=4.0, CrestHeight=3.0, OrientMode=1)
+      Around B1=(0,0,0) for N=4 (theta = 0, Pi/2, Pi, 3*Pi/2):
+      - B1 (theta=0): r=12 -> (12, 0, 0), tangent = Normalize(0, 6, 12)
+      - B2 (theta=Pi/2): r=4 -> (0, 0, 4)
+      - B3 (theta=Pi): r=-4, cos(Pi)=-1 -> (4, 0, 0) (inner loop apex)
+      - B4 (theta=3*Pi/2): r=4 -> (0, 0, -4) }
+    B1.Translation := Vector3(0.0, 0.0, 0.0);
+    Manipulate.SetSelected([B1, B2, B3, B4]);
+    AssertTrue(Manipulate.ArrangeSelectedInLimaconCurve(8.0, 4.0, 3.0, 1));
+    AssertVectorEquals(Vector3(12.0, 0.0, 0.0), B1.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, 0.0, 4.0), B2.Translation, 1e-4);
+    AssertVectorEquals(Vector3(4.0, 0.0, 0.0), B3.Translation, 1e-4);
+    AssertVectorEquals(Vector3(0.0, 0.0, -4.0), B4.Translation, 1e-4);
+    B1.GetWorldView(WorldPos, WorldDir, WorldUp);
+    AssertVectorEquals(Vector3(0.0, 6.0, 12.0).Normalize, WorldDir.Normalize, 1e-3);
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

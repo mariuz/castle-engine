@@ -996,37 +996,68 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
 
 ---
 
-## Recommended Next Roadmap Focus Areas (Phases 156+)
+### Phase 156: 3D Dupin Cyclide / Asymmetric Horn Torus Arrangement (`ArrangeSelectedOnDupinCyclide` / `Ctrl+Alt+Shift+,`)
+- [x] **156.1. Parametric Charles Dupin Variable-Thickness Cyclide Ring Shell (`TCastleTransformManipulate.ArrangeSelectedOnDupinCyclide`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedOnDupinCyclide(MajorRadiusA, MinorRadiusB, TubeRadiusD, Turns, OrientMode): Boolean`: distributes 2+ top-level selected transforms across Charles Dupin's 1822 Cyclide / Asymmetric Horn Torus centered at $\mathbf{C}$ with major radius $A$, minor radius $B \in (0, A)$, focal eccentricity $c = \sqrt{A^2 - B^2}$, tube parameter $D$, and poloidal winding $W = \text{Turns}$ ($u_i = 2\pi t_i, \; v_i = 2\pi W t_i, \; \Delta = A - c\cos u_i \cos v_i$):
+    $$x = C_x + \frac{D(c - A\cos u_i \cos v_i) + B^2\cos u_i}{\Delta}, \quad y = C_y + \frac{B\sin v_i(c\cos u_i - D)}{\Delta}, \quad z = C_z + \frac{B\sin u_i(A - D\cos v_i)}{\Delta}$$
+    supporting `OrientMode` (`0` = keep rotation, `1` = Dupin cyclide curve tangent, `2` = Dupin cyclide surface normal $\mathbf{P}_v \times \mathbf{P}_u$).
+  - Added **`Arrange Dupin Cyclide`** (`ButtonArrangeCyclide` in `PanelLayoutTransform`: normal click arranges on a 2-turn Dupin cyclide along the tangent; `Ctrl`-click arranges on a 3-turn Dupin cyclide aligned to the surface normal; `Shift`-click opens the custom dialog) and `ShowArrangeOnDupinCyclideDialog` bound to **`Ctrl+Alt+Shift+,`** in both the Viewport and Hierarchy Tree.
 
-To maximize level-design, procedural geometry, UI/HUD authoring, and scene-hygiene productivity in the Castle Game Engine Editor, the following four strategic pillars and concrete upcoming phases (Phases 156–163) are recommended:
+### Phase 157: 3D Edmond Bour Minimal Surface Arrangement (`ArrangeSelectedOnBourSurface` / `Ctrl+Alt+Shift+.`)
+- [x] **157.1. Parametric Edmond Bour Algebraic Minimal Surface in Polar Coordinates (`TCastleTransformManipulate.ArrangeSelectedOnBourSurface`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedOnBourSurface(ScaleRadius, Turns, OrientMode): Boolean`: distributes 2+ top-level selected transforms across Edmond Bour's 1862 algebraic minimal surface in polar Weierstrass–Enneper coordinates $(r_i, \theta_i)$ ($r_i = 0.25 + 0.75 t_i \in [0.25, 1.0], \; \theta_i = 2\pi W t_i$) centered at $\mathbf{C}$ with scale radius $S$:
+    $$x = C_x + S\!\left(r_i\cos\theta_i - \frac{1}{2}r_i^2\cos(2\theta_i)\right), \quad y = C_y + S\!\left(\frac{4}{3}r_i^{3/2}\cos\!\left(\frac{3\theta_i}{2}\right)\right), \quad z = C_z + S\!\left(-r_i\sin\theta_i - \frac{1}{2}r_i^2\sin(2\theta_i)\right)$$
+    supporting `OrientMode` (`0` = keep rotation, `1` = Bour trajectory tangent, `2` = exact unit Weierstrass–Enneper Gauss-map normal $\mathbf{N}(r_i, \theta_i) = \frac{1}{1 + r_i}\!\left(2\sqrt{r_i}\cos\frac{\theta_i}{2}, \; r_i - 1, \; -2\sqrt{r_i}\sin\frac{\theta_i}{2}\right)$).
+  - Added **`Arrange Bour Surface`** (`ButtonArrangeBour` in `PanelLayoutTransform`: normal click arranges on a 2-turn Bour minimal surface along the tangent; `Ctrl`-click arranges on a 3-turn Bour minimal surface aligned to the exact Weierstrass–Enneper normal; `Shift`-click opens the custom dialog) and `ShowArrangeOnBourSurfaceDialog` bound to **`Ctrl+Alt+Shift+.`** in both the Viewport and Hierarchy Tree.
+
+### Phase 158: 3D Pascal Limaçon / Trisectrix Inner-Loop Curve Arrangement (`ArrangeSelectedInLimaconCurve` / `Ctrl+Alt+Shift+/`)
+- [x] **158.1. Parametric Étienne Pascal Limaçon / Trisectrix Inner-Loop Curve (`TCastleTransformManipulate.ArrangeSelectedInLimaconCurve`)**
+  - Implemented `TCastleTransformManipulate.ArrangeSelectedInLimaconCurve(LoopRadiusA, OffsetB, CrestHeight, OrientMode): Boolean`: distributes 2+ top-level selected transforms around the active selection pivot $\mathbf{C}$ at $\theta_i = \frac{2\pi i}{N}$ along Étienne Pascal's Limaçon $r(\theta_i) = B + A\cos\theta_i$ (defaulting to $B = 0.5 A$ for the self-intersecting Trisectrix inner-loop limaçon when $B \le 0$) with vertical 3D crest modulation $Y = H\sin(2\theta_i)$:
+    $$x = C_x + (B + A\cos\theta_i)\cos\theta_i, \quad y = C_y + H\sin(2\theta_i), \quad z = C_z + (B + A\cos\theta_i)\sin\theta_i$$
+    with exact analytical tangent derivatives $\left(-B\sin\theta_i - A\sin(2\theta_i), \; 2H\cos(2\theta_i), \; B\cos\theta_i + A\cos(2\theta_i)\right)$ and `OrientMode` (`0` = keep rotation, `1` = analytical limaçon tangent, `2` = outward radial from $\mathbf{C}$).
+  - Added **`Arrange Limacon Loop`** (`ButtonArrangeLimacon` in `PanelLayoutTransform`: normal click arranges in a Trisectrix inner-loop limaçon along the tangent; `Ctrl`-click arranges in a dimpled convex limaçon with 3D vertical crest; `Shift`-click opens the custom dialog) and `ShowArrangeInLimaconCurveDialog` bound to **`Ctrl+Alt+Shift+/`** in both the Viewport and Hierarchy Tree.
+  - Added automated unit test `TestDupinCyclideBourSurfaceAndLimacon` in `tests/code/testcases/testcastletransformmanipulate.pas`.
+
+### Phase 159: Hierarchy Audit: Select Negative-Scale / Mirrored-Determinant Transforms (`SelectNegativeScaleTransforms` / `Ctrl+Alt+Shift+-`) & 2D UI Split-Screen 2P/3P/4P Viewport Layout (`ArrangeSelectedUserInterfacesInSplitScreen` / `ButtonUISplitScreen`)
+- [x] **159.1. Hierarchy Scale & Winding Audit: Select Negative-Scale / Mirrored-Determinant Transforms (`SelectNegativeScaleTransforms` / `Ctrl+Alt+Shift+-`)**
+  - Implemented `TDesignFrame.SelectNegativeScaleTransforms(OddMirroredOnly)`: audits all visible, unlocked `TCastleTransform` components in the hierarchy and selects transforms that have any non-positive scale axis (`S.X <= 0`, `S.Y <= 0`, or `S.Z <= 0`) when `OddMirroredOnly = false`, or strictly negative scale determinant (`S.X * S.Y * S.Z < 0`, which flips triangle winding and face normals inside-out and breaks physics colliders) when `OddMirroredOnly = true`.
+  - Bound to **`Ctrl+Alt+Shift+-`** in both the Viewport and Hierarchy Tree, plus **`Select Negative-Scale / Mirrored-Determinant Transforms (Ctrl+Alt+Shift+-)`** (`MenuTreeViewItemSelectNegativeScale`) in `MenuTreeView` (`Shift`-click selects negative-determinant mirrored transforms only).
+- [x] **159.2. 2D UI Split-Screen 2P/3P/4P Viewport Layout (`ArrangeSelectedUserInterfacesInSplitScreen` / `ButtonUISplitScreen`)**
+  - Implemented `TDesignFrame.ArrangeSelectedUserInterfacesInSplitScreen(MarginPx, GapPx, VerticalTwoPlayer)` and added **`UI Split-Screen`** (`ButtonUISplitScreen`) to `PanelLayoutUI`, subdividing 2+ selected `TCastleUserInterface` controls or viewports inside their parent container into standard multiplayer split-screen layouts: 2 items in Top/Bottom horizontal split (or Left/Right vertical split when `VerticalTwoPlayer = true`), 3 items in 1 full-width Top + 2 half-width Bottom viewports (or 1 full-height Left + 2 stacked Right viewports when `VerticalTwoPlayer = true`), and 4+ items in a $\lceil\sqrt{N}\rceil \times \lceil N/\text{Cols}\rceil$ quad/grid split-screen (**Click**: $8\text{ px}$ margin/gap horizontal split; **`Shift`-click**: $0\text{ px}$ flush split-screen; **`Ctrl`-click**: Vertical Left/Right 2P/3P split).
+
+---
+
+## Recommended Next Roadmap Focus Areas (Phases 160+)
+
+To maximize level-design, procedural geometry, UI/HUD authoring, and scene-hygiene productivity in the Castle Game Engine Editor, the following four strategic pillars and concrete upcoming phases (Phases 160–167) are recommended:
 
 ### Strategic Focus Pillars
 1. **Pillar A — 3D Procedural Deformations & Classical Differential Geometry Surfaces**:
-   - Expand `TCastleTransformManipulate` with curvature-driven and minimal/projective surface arrangements (Dupin Cyclides, Edmond Bour's minimal surface, Pascal's Limaçon inner-loop curves, Twist-Bend Helix-Arc deformations, and Costa/Henneberg minimal surfaces) for sci-fi architecture, organic clusters, and procedural arenas.
+   - Expand `TCastleTransformManipulate` with curvature-driven and minimal/projective surface arrangements (Henneberg's minimal surface, Spherical Epicycloid seam curves, Talbot / Plateau sinusoidal-spiral curves, Kuen's surface, and Richmond's minimal surface) for sci-fi architecture, organic clusters, and procedural arenas.
 2. **Pillar B — 2D UI Responsive HUD Templates & Safe-Frame / Margin Layouts**:
-   - Add one-click HUD/menu layout generators in `PanelLayoutUI` (Split-Screen 2P/3P/4P Viewports, Left/Right Side-Panel Inspector Columns, and Radial Compass / Minimap Bezel Slots).
+   - Add one-click HUD/menu layout generators in `PanelLayoutUI` (Left/Right Sidebar + Center Content Columns, Radial Compass / Minimap Bezel Slots, and Picture-in-Picture Overlay Layout).
 3. **Pillar C — Scene Performance, Physics & Hierarchy Hygiene Audits**:
-   - Add one-click hierarchy diagnostic selectors for transforms with negative/mirrored scale determinants, unanchored or fractional-pixel blurry 2D UI controls, and non-default blend/render-options scenes.
+   - Add one-click hierarchy diagnostic selectors for fractional-pixel blurry 2D UI controls, unreferenced / zero-vertex scenes, and non-default blend/render-options scenes.
 4. **Pillar D — Multi-Selection Batch Authoring & Camera/Light Staging**:
    - Provide fast batch lighting rigs and camera turntables / orbit waypoint rings.
 
-### Planned Upcoming Phases (Phases 156–163)
-- [ ] **Phase 156: 3D Dupin Cyclide / Asymmetric Horn Torus Arrangement (`ArrangeSelectedOnDupinCyclide`)**
-  - Distribute 2+ selected 3D transforms across Charles Dupin's Variable-Thickness Cyclide Ring Shell with analytical cyclide surface normals.
-- [ ] **Phase 157: 3D Edmond Bour Minimal Surface Arrangement (`ArrangeSelectedOnBourSurface`)**
-  - Distribute 2+ selected 3D transforms across Edmond Bour's algebraic minimal surface in polar coordinates $(r, \theta)$ with exact Weierstrass–Enneper Gauss-map normals.
-- [ ] **Phase 158: 3D Pascal Limaçon / Trisectrix Inner-Loop Curve Arrangement (`ArrangeSelectedInLimaconCurve`)**
-  - Distribute 2+ selected 3D transforms along Étienne Pascal's Limaçon / Trisectrix inner-loop curve $r(\theta) = b + a\cos\theta$ with 3D elevation wave and analytical tangent orientation.
-- [ ] **Phase 159: Hierarchy Audit: Select Negative-Scale / Mirrored-Determinant Transforms & 2D UI Split-Screen 2P/3P/4P Viewport Layout (`ButtonUISplitScreen`)**
-  - Audit transforms with negative scale components (`S.X < 0`, `S.Y < 0`, or `S.Z < 0`) that invert winding/normals, and subdivide 2+ selected 2D UI controls or viewports into standard 2-player (H/V), 3-player (1+2), or 4-player quad split-screen layouts.
+### Planned Upcoming Phases (Phases 160–167)
 - [ ] **Phase 160: 3D Henneberg Minimal Surface Arrangement (`ArrangeSelectedOnHennebergSurface`)**
   - Distribute 2+ selected 3D transforms across Lebrecht Henneberg's algebraic non-orientable minimal surface with analytical surface normals.
 - [ ] **Phase 161: 3D Spherical Epicycloid / Nephroid Seam Curve Arrangement (`ArrangeSelectedOnSphericalEpicycloid`)**
   - Distribute 2+ selected 3D transforms along a 3D spherical epicycloid / cam seam curve on a sphere of radius $R$.
-- [ ] **Phase 162: 3D Talbot / Plateaulemniscate Curve Arrangement (`ArrangeSelectedInTalbotCurve`)**
+- [ ] **Phase 162: 3D Talbot / Plateau Lemniscate Curve Arrangement (`ArrangeSelectedInTalbotCurve`)**
   - Distribute 2+ selected 3D transforms along a 3D Talbot / Plateau sinusoidal-spiral curve with analytical tangents.
 - [ ] **Phase 163: Hierarchy Audit: Select Fractional-Pixel / Unsnapped 2D UI Controls & 2D UI Left/Right Sidebar Columns Layout (`ButtonUISidebars`)**
   - Audit 2D UI controls with non-integer pixel coordinates or dimensions that can cause sub-pixel texture blurring, and arrange 2+ selected 2D UI controls into Left/Right Sidebar + Center Content columns.
+- [ ] **Phase 164: 3D Kuen Pseudospherical Surface Arrangement (`ArrangeSelectedOnKuenSurface`)**
+  - Distribute 2+ selected 3D transforms across Theodor Kuen's constant-negative-curvature pseudospherical surface with analytical normals.
+- [ ] **Phase 165: 3D Herbert Richmond Minimal Surface Arrangement (`ArrangeSelectedOnRichmondSurface`)**
+  - Distribute 2+ selected 3D transforms across Herbert William Richmond's planar-end minimal surface with exact Weierstrass–Enneper Gauss-map normals.
+- [ ] **Phase 166: 3D Devil's Curve / Maltese Cross Lemniscate Arrangement (`ArrangeSelectedInDevilsCurve`)**
+  - Distribute 2+ selected 3D transforms along Gabriel Cramer's Devil's Curve / Maltese Cross quartic curve with analytical tangents.
+- [ ] **Phase 167: Hierarchy Audit: Select Picture-in-Picture / Multi-Viewport Cameras & 2D UI Picture-in-Picture (PiP) Overlay Layout (`ButtonUIPipOverlay`)**
+  - Audit viewports and cameras in the hierarchy, and arrange 2+ selected 2D UI controls into a main full-container view plus corner Picture-in-Picture (PiP) thumbnails.
 
 
 

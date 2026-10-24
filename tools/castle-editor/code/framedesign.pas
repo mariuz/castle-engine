@@ -411,6 +411,9 @@ type
       ButtonStereographicDeform: TButton;
       ButtonArrangeCatalan: TButton;
       ButtonArrangeCylHarmonic: TButton;
+      ButtonArrangeCyclide: TButton;
+      ButtonArrangeBour: TButton;
+      ButtonArrangeLimacon: TButton;
       ButtonAimAtTarget: TButton;
       ButtonPilotTransform: TButton;
       ButtonViewTop: TButton;
@@ -458,6 +461,7 @@ type
       ButtonUICornerBrackets: TButton;
       ButtonUIFibonacciSplit: TButton;
       ButtonUIHudBars: TButton;
+      ButtonUISplitScreen: TButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -511,6 +515,7 @@ type
       MenuTreeViewItemSelectDefaultNamed: TMenuItem;
       MenuTreeViewItemSelectShadowAudit: TMenuItem;
       MenuTreeViewItemSelectPhysicsAudit: TMenuItem;
+      MenuTreeViewItemSelectNegativeScale: TMenuItem;
       MenuTreeViewItemCopyTransform: TMenuItem;
       MenuTreeViewItemPasteTransform: TMenuItem;
       MenuTreeViewItemExpandAll: TMenuItem;
@@ -667,6 +672,9 @@ type
     procedure ButtonStereographicDeformClick(Sender: TObject);
     procedure ButtonArrangeCatalanClick(Sender: TObject);
     procedure ButtonArrangeCylHarmonicClick(Sender: TObject);
+    procedure ButtonArrangeCyclideClick(Sender: TObject);
+    procedure ButtonArrangeBourClick(Sender: TObject);
+    procedure ButtonArrangeLimaconClick(Sender: TObject);
     procedure ButtonAimAtTargetClick(Sender: TObject);
     procedure ButtonPilotTransformClick(Sender: TObject);
     procedure ButtonUIAlignClick(Sender: TObject);
@@ -703,6 +711,7 @@ type
     procedure ButtonUICornerBracketsClick(Sender: TObject);
     procedure ButtonUIFibonacciSplitClick(Sender: TObject);
     procedure ButtonUIHudBarsClick(Sender: TObject);
+    procedure ButtonUISplitScreenClick(Sender: TObject);
     procedure ButtonArrayDuplicateClick(Sender: TObject);
     procedure ButtonRadialDuplicateClick(Sender: TObject);
     procedure ButtonGridDuplicateClick(Sender: TObject);
@@ -763,6 +772,7 @@ type
     procedure MenuTreeViewItemSelectDefaultNamedClick(Sender: TObject);
     procedure MenuTreeViewItemSelectShadowAuditClick(Sender: TObject);
     procedure MenuTreeViewItemSelectPhysicsAuditClick(Sender: TObject);
+    procedure MenuTreeViewItemSelectNegativeScaleClick(Sender: TObject);
     procedure MenuTreeViewItemCopyTransformClick(Sender: TObject);
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
@@ -1610,6 +1620,24 @@ type
       const VerticalFreqN: Integer = 3;
       const OrientMode: Integer = 1);
     procedure ShowArrangeInCylindricalHarmonicDialog;
+    procedure ArrangeSelectionOnDupinCyclide(
+      const MajorRadiusA: Single = 0.0;
+      const MinorRadiusB: Single = 0.0;
+      const TubeRadiusD: Single = 0.0;
+      const Turns: Single = 2.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeOnDupinCyclideDialog;
+    procedure ArrangeSelectionOnBourSurface(
+      const ScaleRadius: Single = 0.0;
+      const Turns: Single = 2.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeOnBourSurfaceDialog;
+    procedure ArrangeSelectionInLimaconCurve(
+      const LoopRadiusA: Single = 0.0;
+      const OffsetB: Single = 0.0;
+      const CrestHeight: Single = 0.0;
+      const OrientMode: Integer = 1);
+    procedure ShowArrangeInLimaconCurveDialog;
     procedure AimSelectionAtPrimaryOrCursor;
     procedure TogglePilotTransform;
     procedure StopPilotTransform;
@@ -1685,6 +1713,10 @@ type
       const BarHeightPx: Single = 48.0;
       const MarginPx: Single = 12.0;
       const GapPx: Single = 8.0);
+    procedure ArrangeSelectedUserInterfacesInSplitScreen(
+      const MarginPx: Single = 8.0;
+      const GapPx: Single = 8.0;
+      const VerticalTwoPlayer: Boolean = false);
     procedure ArrayDuplicateSelected(const Count: Integer;
       const StepOffset: TVector3; const StepYawDeg: Single);
     procedure ShowArrayDuplicateDialog;
@@ -1747,6 +1779,7 @@ type
     procedure SelectDefaultNamedOrDeepComponents(const DeepNestingOnly: Boolean = false);
     procedure SelectShadowCastersAndReceivers(const ShadowLightsOnly: Boolean = false);
     procedure SelectPhysicsMisconfigurations(const MissingColliderOnly: Boolean = false);
+    procedure SelectNegativeScaleTransforms(const OddMirroredOnly: Boolean = false);
     procedure ViewportMeasureToCursor;
     procedure ClearViewportMeasurement;
     function IsComponentLocked(const C: TComponent): Boolean;
@@ -3129,6 +3162,26 @@ begin
     if Event.IsKey(keyBackSlash) then
     begin
       Frame.SelectPhysicsMisconfigurations(false);
+      Exit(true);
+    end else
+    if Event.IsKey(keyComma) then
+    begin
+      Frame.ShowArrangeOnDupinCyclideDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(keyPeriod) then
+    begin
+      Frame.ShowArrangeOnBourSurfaceDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(keySlash) then
+    begin
+      Frame.ShowArrangeInLimaconCurveDialog;
+      Exit(true);
+    end else
+    if Event.IsKey(keyMinus) or Event.IsKey(keyNumpadMinus) then
+    begin
+      Frame.SelectNegativeScaleTransforms(false);
       Exit(true);
     end;
   end;
@@ -5288,6 +5341,36 @@ begin
   ButtonArrangeCylHarmonic.OnClick := @ButtonArrangeCylHarmonicClick;
   ButtonArrangeCylHarmonic.Parent := PanelLayoutTransform;
 
+  ButtonArrangeCyclide := TButton.Create(Self);
+  ButtonArrangeCyclide.Align := alTop;
+  ButtonArrangeCyclide.AutoSize := true;
+  ButtonArrangeCyclide.Caption := 'Arrange Dupin Cyclide';
+  ButtonArrangeCyclide.Hint := 'Arrange 2+ selected 3D transforms along a 3D Dupin Cyclide / Asymmetric Horn Torus around the active pivot (Ctrl+Alt+Shift+, | Shift-click: dialog | Click: 2-turn Dupin cyclide + tangent | Ctrl-click: 3-turn Dupin cyclide + surface normal)';
+  ButtonArrangeCyclide.ShowHint := true;
+  ButtonArrangeCyclide.BorderSpacing.Around := 2;
+  ButtonArrangeCyclide.OnClick := @ButtonArrangeCyclideClick;
+  ButtonArrangeCyclide.Parent := PanelLayoutTransform;
+
+  ButtonArrangeBour := TButton.Create(Self);
+  ButtonArrangeBour.Align := alTop;
+  ButtonArrangeBour.AutoSize := true;
+  ButtonArrangeBour.Caption := 'Arrange Bour Surface';
+  ButtonArrangeBour.Hint := 'Arrange 2+ selected 3D transforms along a 3D Edmond Bour Minimal Surface around the active pivot (Ctrl+Alt+Shift+. | Shift-click: dialog | Click: 2-turn Bour minimal surface + tangent | Ctrl-click: 3-turn Bour minimal surface + exact Weierstrass-Enneper normal)';
+  ButtonArrangeBour.ShowHint := true;
+  ButtonArrangeBour.BorderSpacing.Around := 2;
+  ButtonArrangeBour.OnClick := @ButtonArrangeBourClick;
+  ButtonArrangeBour.Parent := PanelLayoutTransform;
+
+  ButtonArrangeLimacon := TButton.Create(Self);
+  ButtonArrangeLimacon.Align := alTop;
+  ButtonArrangeLimacon.AutoSize := true;
+  ButtonArrangeLimacon.Caption := 'Arrange Limacon Loop';
+  ButtonArrangeLimacon.Hint := 'Arrange 2+ selected 3D transforms along a 3D Pascal Limacon / Trisectrix Inner-Loop Curve around the active pivot (Ctrl+Alt+Shift+/ | Shift-click: dialog | Click: Trisectrix inner-loop limacon B=0.5*A + tangent | Ctrl-click: Dimpled convex limacon B=1.5*A + crest)';
+  ButtonArrangeLimacon.ShowHint := true;
+  ButtonArrangeLimacon.BorderSpacing.Around := 2;
+  ButtonArrangeLimacon.OnClick := @ButtonArrangeLimaconClick;
+  ButtonArrangeLimacon.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -5658,6 +5741,14 @@ begin
   ButtonUIHudBars.OnClick := @ButtonUIHudBarsClick;
   ButtonUIHudBars.Parent := PanelLayoutUI;
 
+  ButtonUISplitScreen := TButton.Create(Self);
+  ButtonUISplitScreen.AutoSize := true;
+  ButtonUISplitScreen.Caption := 'UI Split-Screen';
+  ButtonUISplitScreen.Hint := 'Subdivide 2+ selected 2D UI controls into Multiplayer 2P/3P/4P Split-Screen Viewports inside their parent container (Click: 8px margin/gap, horizontal 2P / 1-top+2-bottom 3P / 2x2 4P | Shift-click: 0px flush split-screen | Ctrl-click: Vertical Left/Right 2P / 1-left+2-right 3P)';
+  ButtonUISplitScreen.ShowHint := true;
+  ButtonUISplitScreen.OnClick := @ButtonUISplitScreenClick;
+  ButtonUISplitScreen.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -5951,6 +6042,11 @@ begin
   MenuTreeViewItemSelectPhysicsAudit.Caption := 'Select Physics Collider / RigidBody Misconfigurations (Ctrl+Alt+Shift+\)';
   MenuTreeViewItemSelectPhysicsAudit.OnClick := @MenuTreeViewItemSelectPhysicsAuditClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectPhysicsAudit);
+
+  MenuTreeViewItemSelectNegativeScale := TMenuItem.Create(Self);
+  MenuTreeViewItemSelectNegativeScale.Caption := 'Select Negative-Scale / Mirrored-Determinant Transforms (Ctrl+Alt+Shift+-)';
+  MenuTreeViewItemSelectNegativeScale.OnClick := @MenuTreeViewItemSelectNegativeScaleClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSelectNegativeScale);
 
   MenuTreeViewItemCopyTransform := TMenuItem.Create(Self);
   MenuTreeViewItemCopyTransform.Caption := 'Copy Transform / UI Layout (Ctrl+Alt+C)';
@@ -9662,6 +9758,8 @@ begin
         ButtonUIFibonacciSplit.Enabled := SelectedUICount >= 2;
       if ButtonUIHudBars <> nil then
         ButtonUIHudBars.Enabled := SelectedUICount >= 2;
+      if ButtonUISplitScreen <> nil then
+        ButtonUISplitScreen.Enabled := SelectedUICount >= 2;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -9874,6 +9972,12 @@ begin
       ButtonArrangeCatalan.Enabled := TransformManipulate.SelectedCount >= 2;
     if ButtonArrangeCylHarmonic <> nil then
       ButtonArrangeCylHarmonic.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeCyclide <> nil then
+      ButtonArrangeCyclide.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeBour <> nil then
+      ButtonArrangeBour.Enabled := TransformManipulate.SelectedCount >= 2;
+    if ButtonArrangeLimacon <> nil then
+      ButtonArrangeLimacon.Enabled := TransformManipulate.SelectedCount >= 2;
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -11503,6 +11607,26 @@ begin
     if (Key = VK_OEM_5) and (Shift = [ssCtrl, ssAlt, ssShift]) then
     begin
       SelectPhysicsMisconfigurations(false);
+      Key := 0;
+    end else
+    if (Key = VK_OEM_COMMA) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowArrangeOnDupinCyclideDialog;
+      Key := 0;
+    end else
+    if (Key = VK_OEM_PERIOD) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowArrangeOnBourSurfaceDialog;
+      Key := 0;
+    end else
+    if (Key = VK_OEM_2) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      ShowArrangeInLimaconCurveDialog;
+      Key := 0;
+    end else
+    if (Key in [VK_OEM_MINUS, VK_SUBTRACT]) and (Shift = [ssCtrl, ssAlt, ssShift]) then
+    begin
+      SelectNegativeScaleTransforms(false);
       Key := 0;
     end else
     if (Key = VK_OEM_1) and (Shift = [ssAlt, ssShift]) then
@@ -18184,8 +18308,8 @@ begin
 
   if InputQuery('3D Scherk Minimal Surface / Saddle Tower Deform (Ctrl+Alt+Shift+J)', Prompts, Values) then
   begin
-    WaveLen := StrToFloatDef(Trim(Values[0]), 0.0);
-    Amp := StrToFloatDef(Trim(Values[1]), 2.0);
+    WaveLen := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    Amp := StrToFloatDefDot(Trim(Values[1]), 2.0);
     SaddleTower := StrToIntDef(Trim(Values[2]), 0) <> 0;
     OrientNorm := StrToIntDef(Trim(Values[3]), 1) <> 0;
     ScherkDeformSelection(WaveLen, Amp, SaddleTower, OrientNorm);
@@ -18236,8 +18360,8 @@ begin
 
   if InputQuery('Arrange on 3D Werner Boy Projective Surface (Ctrl+Alt+Shift+X)', Prompts, Values) then
   begin
-    R := StrToFloatDef(Trim(Values[0]), 0.0);
-    W := StrToFloatDef(Trim(Values[1]), 2.0);
+    R := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    W := StrToFloatDefDot(Trim(Values[1]), 2.0);
     OrientMode := Clamped(StrToIntDef(Trim(Values[2]), 1), 0, 2);
     ArrangeSelectionOnBoysSurface(R, W, OrientMode);
   end;
@@ -18291,8 +18415,8 @@ begin
 
   if InputQuery('Arrange in 3D Bicorn / Piriform Teardrop Curve (Ctrl+Alt+Shift+Y)', Prompts, Values) then
   begin
-    ScaleR := StrToFloatDef(Trim(Values[0]), 0.0);
-    CrestH := StrToFloatDef(Trim(Values[1]), 0.0);
+    ScaleR := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    CrestH := StrToFloatDefDot(Trim(Values[1]), 0.0);
     Piriform := StrToIntDef(Trim(Values[2]), 0) <> 0;
     OrientMode := Clamped(StrToIntDef(Trim(Values[3]), 1), 0, 2);
     ArrangeSelectionInBicornCurve(ScaleR, CrestH, Piriform, OrientMode);
@@ -18478,6 +18602,170 @@ begin
     ArrangeSelectionInCylindricalHarmonic(0.0, 1.5, 2.5, 5, 5, 1)
   else
     ArrangeSelectionInCylindricalHarmonic(0.0, 0.0, 2.0, 3, 3, 1);
+end;
+
+procedure TDesignFrame.ArrangeSelectionOnDupinCyclide(
+  const MajorRadiusA, MinorRadiusB, TubeRadiusD, Turns: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedOnDupinCyclide(
+      MajorRadiusA, MinorRadiusB, TubeRadiusD, Turns, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeOnDupinCyclideDialog;
+var
+  Prompts: array[0..4] of string;
+  Values: array[0..4] of string;
+  MajA, MinB, TubeD, TurnsW: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+  begin
+    ErrorBox('Select at least 2 TCastleTransform components to arrange on a Dupin cyclide.');
+    Exit;
+  end;
+
+  Prompts[0] := 'Major cyclide radius A (0 = auto from selection):';
+  Prompts[1] := 'Minor cyclide radius B (0 = auto 0.85*A):';
+  Prompts[2] := 'Tube thickness parameter D (0 = auto 0.45*A):';
+  Prompts[3] := 'Poloidal winding turns W:';
+  Prompts[4] := 'Orientation (0 = keep, 1 = cyclide tangent, 2 = cyclide surface normal):';
+  Values[0] := '0.0';
+  Values[1] := '0.0';
+  Values[2] := '0.0';
+  Values[3] := '2.0';
+  Values[4] := '1';
+
+  if InputQuery('Arrange on 3D Dupin Cyclide / Horn Torus (Ctrl+Alt+Shift+,)', Prompts, Values) then
+  begin
+    MajA := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    MinB := StrToFloatDefDot(Trim(Values[1]), 0.0);
+    TubeD := StrToFloatDefDot(Trim(Values[2]), 0.0);
+    TurnsW := StrToFloatDefDot(Trim(Values[3]), 2.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[4]), 1), 0, 2);
+    ArrangeSelectionOnDupinCyclide(MajA, MinB, TubeD, TurnsW, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeCyclideClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeOnDupinCyclideDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionOnDupinCyclide(0.0, 0.0, 0.0, 3.0, 2)
+  else
+    ArrangeSelectionOnDupinCyclide(0.0, 0.0, 0.0, 2.0, 1);
+end;
+
+procedure TDesignFrame.ArrangeSelectionOnBourSurface(
+  const ScaleRadius, Turns: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedOnBourSurface(
+      ScaleRadius, Turns, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeOnBourSurfaceDialog;
+var
+  Prompts: array[0..2] of string;
+  Values: array[0..2] of string;
+  ScaleS, TurnsW: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+  begin
+    ErrorBox('Select at least 2 TCastleTransform components to arrange on an Edmond Bour minimal surface.');
+    Exit;
+  end;
+
+  Prompts[0] := 'Bour minimal surface scale radius S (0 = auto from selection):';
+  Prompts[1] := 'Angular turns W across polar surface:';
+  Prompts[2] := 'Orientation (0 = keep, 1 = trajectory tangent, 2 = Weierstrass-Enneper normal):';
+  Values[0] := '0.0';
+  Values[1] := '2.0';
+  Values[2] := '1';
+
+  if InputQuery('Arrange on 3D Edmond Bour Minimal Surface (Ctrl+Alt+Shift+.)', Prompts, Values) then
+  begin
+    ScaleS := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    TurnsW := StrToFloatDefDot(Trim(Values[1]), 2.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[2]), 1), 0, 2);
+    ArrangeSelectionOnBourSurface(ScaleS, TurnsW, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeBourClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeOnBourSurfaceDialog
+  else if ssCtrl in ShiftState then
+    ArrangeSelectionOnBourSurface(0.0, 3.0, 2)
+  else
+    ArrangeSelectionOnBourSurface(0.0, 2.0, 1);
+end;
+
+procedure TDesignFrame.ArrangeSelectionInLimaconCurve(
+  const LoopRadiusA, OffsetB, CrestHeight: Single;
+  const OrientMode: Integer);
+begin
+  if TransformManipulate <> nil then
+    TransformManipulate.ArrangeSelectedInLimaconCurve(
+      LoopRadiusA, OffsetB, CrestHeight, OrientMode);
+end;
+
+procedure TDesignFrame.ShowArrangeInLimaconCurveDialog;
+var
+  Prompts: array[0..3] of string;
+  Values: array[0..3] of string;
+  LoopA, OffB, CrestH: Single;
+  OrientMode: Integer;
+begin
+  if (TransformManipulate = nil) or (TransformManipulate.SelectedCount < 2) then
+  begin
+    ErrorBox('Select at least 2 TCastleTransform components to arrange in a Pascal Limacon curve.');
+    Exit;
+  end;
+
+  Prompts[0] := 'Limacon loop cosine amplitude A (0 = auto from selection):';
+  Prompts[1] := 'Radial offset B (0 = auto 0.5*A Trisectrix inner loop):';
+  Prompts[2] := 'Vertical 3D crest / wave height H:';
+  Prompts[3] := 'Orientation (0 = keep, 1 = analytical limacon tangent, 2 = outward radial):';
+  Values[0] := '0.0';
+  Values[1] := '0.0';
+  Values[2] := '0.0';
+  Values[3] := '1';
+
+  if InputQuery('Arrange in 3D Pascal Limacon / Trisectrix Loop Curve (Ctrl+Alt+Shift+/)', Prompts, Values) then
+  begin
+    LoopA := StrToFloatDefDot(Trim(Values[0]), 0.0);
+    OffB := StrToFloatDefDot(Trim(Values[1]), 0.0);
+    CrestH := StrToFloatDefDot(Trim(Values[2]), 0.0);
+    OrientMode := Clamped(StrToIntDef(Trim(Values[3]), 1), 0, 2);
+    ArrangeSelectionInLimaconCurve(LoopA, OffB, CrestH, OrientMode);
+  end;
+end;
+
+procedure TDesignFrame.ButtonArrangeLimaconClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ShowArrangeInLimaconCurveDialog
+  else if ssCtrl in ShiftState then
+  begin
+    { Dimpled / convex limacon preset with 3D vertical crest }
+    ArrangeSelectionInLimaconCurve(6.0, 9.0, 2.0, 1);
+  end else
+    ArrangeSelectionInLimaconCurve(0.0, 0.0, 0.0, 1);
 end;
 
 procedure TDesignFrame.StopPilotTransform;
@@ -22010,6 +22298,159 @@ begin
     ArrangeSelectedUserInterfacesInHudBars(64.0, 20.0, 12.0)
   else
     ArrangeSelectedUserInterfacesInHudBars(48.0, 12.0, 8.0);
+end;
+
+procedure TDesignFrame.ArrangeSelectedUserInterfacesInSplitScreen(
+  const MarginPx: Single;
+  const GapPx: Single;
+  const VerticalTwoPlayer: Boolean);
+var
+  Selected, UIList: TComponentList;
+  SelectedCount, I, N, Cols, Rows, ColIdx, RowIdx, ChangedCount: Integer;
+  UI: TCastleUserInterface;
+  ParentRect, CurRect: TFloatRectangle;
+  Scale, EffMargin, EffGap, AvailW, AvailH, CellW, CellH, TargetCX, TargetCY: Single;
+  DeltaPx: TVector2;
+begin
+  GetSelected(Selected, SelectedCount);
+  try
+    UIList := TComponentList.Create(false);
+    try
+      for I := 0 to SelectedCount - 1 do
+        if (Selected[I] is TCastleUserInterface) and
+           (not (Selected[I] is TCastleTransform)) and
+           (TCastleUserInterface(Selected[I]).Parent <> nil) and
+           (not IsComponentLocked(Selected[I])) then
+          UIList.Add(Selected[I]);
+
+      N := UIList.Count;
+      if N < 2 then Exit;
+
+      ParentRect := TCastleUserInterface(UIList[0]).Parent.RenderRect;
+      if ParentRect.IsEmpty then Exit;
+
+      Scale := TCastleUserInterface(UIList[0]).UIScale;
+      if Scale <= 0 then Scale := 1.0;
+
+      EffMargin := Max(0.0, MarginPx) * Scale;
+      EffGap := Max(0.0, GapPx) * Scale;
+
+      AvailW := Max(16.0, ParentRect.Width - 2.0 * EffMargin);
+      AvailH := Max(16.0, ParentRect.Height - 2.0 * EffMargin);
+
+      ChangedCount := 0;
+      for I := 0 to N - 1 do
+      begin
+        UI := TCastleUserInterface(UIList[I]);
+
+        if N = 2 then
+        begin
+          if VerticalTwoPlayer then
+          begin
+            { Left / Right side-by-side 2P split }
+            CellW := Max(4.0, (AvailW - EffGap) * 0.5);
+            CellH := AvailH;
+            TargetCX := ParentRect.Left + EffMargin + I * (CellW + EffGap) + CellW * 0.5;
+            TargetCY := ParentRect.Center.Y;
+          end else
+          begin
+            { Top / Bottom horizontal 2P split }
+            CellW := AvailW;
+            CellH := Max(4.0, (AvailH - EffGap) * 0.5);
+            TargetCX := ParentRect.Center.X;
+            if I = 0 then
+              TargetCY := ParentRect.Top - EffMargin - CellH * 0.5
+            else
+              TargetCY := ParentRect.Bottom + EffMargin + CellH * 0.5;
+          end;
+        end else
+        if N = 3 then
+        begin
+          if VerticalTwoPlayer then
+          begin
+            { 1 full-height Left viewport + 2 stacked Right viewports }
+            CellW := Max(4.0, (AvailW - EffGap) * 0.5);
+            if I = 0 then
+            begin
+              CellH := AvailH;
+              TargetCX := ParentRect.Left + EffMargin + CellW * 0.5;
+              TargetCY := ParentRect.Center.Y;
+            end else
+            begin
+              CellH := Max(4.0, (AvailH - EffGap) * 0.5);
+              TargetCX := ParentRect.Right - EffMargin - CellW * 0.5;
+              if I = 1 then
+                TargetCY := ParentRect.Top - EffMargin - CellH * 0.5
+              else
+                TargetCY := ParentRect.Bottom + EffMargin + CellH * 0.5;
+            end;
+          end else
+          begin
+            { 1 full-width Top viewport + 2 Bottom half-width viewports }
+            CellH := Max(4.0, (AvailH - EffGap) * 0.5);
+            if I = 0 then
+            begin
+              CellW := AvailW;
+              TargetCX := ParentRect.Center.X;
+              TargetCY := ParentRect.Top - EffMargin - CellH * 0.5;
+            end else
+            begin
+              CellW := Max(4.0, (AvailW - EffGap) * 0.5);
+              TargetCX := ParentRect.Left + EffMargin + (I - 1) * (CellW + EffGap) + CellW * 0.5;
+              TargetCY := ParentRect.Bottom + EffMargin + CellH * 0.5;
+            end;
+          end;
+        end else
+        begin
+          { 4+ players: Cols x Rows split-screen grid (2x2 for 4P) }
+          Cols := Max(2, Ceil(Sqrt(N)));
+          Rows := Max(2, (N + Cols - 1) div Cols);
+          ColIdx := I mod Cols;
+          RowIdx := I div Cols;
+          CellW := Max(4.0, (AvailW - (Cols - 1) * EffGap) / Cols);
+          CellH := Max(4.0, (AvailH - (Rows - 1) * EffGap) / Rows);
+          TargetCX := ParentRect.Left + EffMargin + ColIdx * (CellW + EffGap) + CellW * 0.5;
+          TargetCY := ParentRect.Top - EffMargin - RowIdx * (CellH + EffGap) - CellH * 0.5;
+        end;
+
+        UI.FullSize := false;
+        UI.AutoSizeToChildren := false;
+        UI.WidthFraction := 0.0;
+        UI.HeightFraction := 0.0;
+        UI.Width := CellW / Scale;
+        UI.Height := CellH / Scale;
+
+        CurRect := UI.RenderRectWithBorder;
+        if not CurRect.IsEmpty then
+        begin
+          DeltaPx := Vector2(TargetCX, TargetCY) - CurRect.Center;
+          UI.Translation := UI.Translation + (DeltaPx / Scale);
+        end;
+        Inc(ChangedCount);
+      end;
+
+      if ChangedCount > 0 then
+        ModifiedOutsideObjectInspector(
+          Format('Arrange %d UI control(s) into split-screen layout', [ChangedCount]), ucHigh);
+    finally
+      FreeAndNil(UIList);
+    end;
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUISplitScreenClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ArrangeSelectedUserInterfacesInSplitScreen(0.0, 0.0, false)
+  else if ssCtrl in ShiftState then
+    ArrangeSelectedUserInterfacesInSplitScreen(8.0, 8.0, true)
+  else
+    ArrangeSelectedUserInterfacesInSplitScreen(8.0, 8.0, false);
 end;
 
 procedure TDesignFrame.AdjustCameraSpeed(const Factor: Single);
@@ -26091,6 +26532,61 @@ begin
   SelectPhysicsMisconfigurations(ssShift in GetKeyShiftState);
 end;
 
+procedure TDesignFrame.SelectNegativeScaleTransforms(const OddMirroredOnly: Boolean);
+var
+  NewSelection: TComponentList;
+  TreeNode: TTreeNode;
+  Obj: TObject;
+  T: TCastleTransform;
+  S: TVector3;
+  HasNonPositiveAxis, HasNegativeDet, IsMatch: Boolean;
+begin
+  if DesignOwner = nil then Exit;
+
+  NewSelection := TComponentList.Create(false);
+  try
+    TreeNode := ControlsTree.Items.GetFirstNode;
+    while TreeNode <> nil do
+    begin
+      if TreeNode.Data <> nil then
+      begin
+        Obj := TObject(TreeNode.Data);
+        if (Obj is TCastleTransform) and
+           (Obj <> FDesignRoot) and
+           (not (csSubComponent in TComponent(Obj).ComponentStyle)) and
+           (not IsComponentLocked(TComponent(Obj))) then
+        begin
+          T := TCastleTransform(Obj);
+          if T.Exists then
+          begin
+            S := T.Scale;
+            HasNonPositiveAxis := (S.X <= 1e-5) or (S.Y <= 1e-5) or (S.Z <= 1e-5);
+            HasNegativeDet := (S.X * S.Y * S.Z) < -1e-7;
+            if OddMirroredOnly then
+              IsMatch := HasNegativeDet
+            else
+              IsMatch := HasNonPositiveAxis or HasNegativeDet;
+
+            if IsMatch and (NewSelection.IndexOf(T) = -1) then
+              NewSelection.Add(T);
+          end;
+        end;
+      end;
+      TreeNode := TreeNode.GetNext;
+    end;
+
+    if NewSelection.Count > 0 then
+      SetSelected(NewSelection);
+  finally
+    FreeAndNil(NewSelection);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSelectNegativeScaleClick(Sender: TObject);
+begin
+  SelectNegativeScaleTransforms(ssShift in GetKeyShiftState);
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -26639,6 +27135,8 @@ begin
     MenuTreeViewItemSelectShadowAudit.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemSelectPhysicsAudit <> nil then
     MenuTreeViewItemSelectPhysicsAudit.Enabled := ControlsTree.Items.Count > 1;
+  if MenuTreeViewItemSelectNegativeScale <> nil then
+    MenuTreeViewItemSelectNegativeScale.Enabled := ControlsTree.Items.Count > 1;
   if MenuTreeViewItemCopyTransform <> nil then
     MenuTreeViewItemCopyTransform.Enabled := (CurrentTransform <> nil) or (SelectedUserInterface <> nil) or (ControlsTree.SelectionCount > 0);
   if MenuTreeViewItemPasteTransform <> nil then

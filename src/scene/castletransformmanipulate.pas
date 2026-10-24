@@ -2037,6 +2037,68 @@ type
       const RadialFreqM: Integer = 3;
       const VerticalFreqN: Integer = 3;
       const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along a 3D Dupin Cyclide / Asymmetric Horn Torus surface trajectory
+      centered at the active selection pivot $\mathbf(C)$ with major radius
+      @code(MajorRadiusA) ($A$), minor radius @code(MinorRadiusB) ($B$),
+      focal eccentricity $c = \sqrt(\max(0, A^2 - B^2))$, tube parameter
+      @code(TubeRadiusD) ($D$), and poloidal winding @code(Turns) ($W$):
+      $$t_i = \frac(i)(N - 1), \quad u_i = 2\pi t_i, \quad v_i = 2\pi W t_i, \quad
+        \Delta = A - c\cos u_i \cos v_i$$
+      $$x_i = C_x + \frac(D(c - A\cos u_i \cos v_i) + B^2\cos u_i)(\Delta), \quad
+        y_i = C_y + \frac(B\sin v_i (c\cos u_i - D))(\Delta), \quad
+        z_i = C_z + \frac(B\sin u_i (A - D\cos v_i))(\Delta)$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the Dupin cyclide curve tangent
+      - @code(2): orient forward along the Dupin cyclide surface normal $\mathbf(P)_u \times \mathbf(P)_v$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedOnDupinCyclide(
+      const MajorRadiusA: Single = 0.0;
+      const MinorRadiusB: Single = 0.0;
+      const TubeRadiusD: Single = 0.0;
+      const Turns: Single = 2.0;
+      const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along Edmond Bour's 1862 algebraic minimal surface in polar
+      Weierstrass-Enneper coordinates $(r, \theta)$ centered at the active
+      selection pivot $\mathbf(C)$ with scale radius @code(ScaleRadius) ($S$)
+      and angular turns @code(Turns) ($W$):
+      $$t_i = \frac(i)(N - 1), \quad r_i = 0.25 + 0.75 t_i, \quad \theta_i = 2\pi W t_i$$
+      $$x_i = C_x + S\left(r_i\cos\theta_i - \frac(1)(2)r_i^2\cos(2\theta_i)\right), \quad
+        y_i = C_y + S\left(\frac(4)(3)r_i^(3/2)\cos\left(\frac(3\theta_i)(2)\right)\right), \quad
+        z_i = C_z + S\left(-r_i\sin\theta_i - \frac(1)(2)r_i^2\sin(2\theta_i)\right)$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the Bour minimal surface trajectory tangent
+      - @code(2): orient forward along the exact Weierstrass-Enneper Gauss-map normal
+        $\mathbf(N)(r_i, \theta_i) = \frac(1)(1 + r_i)\left(2\sqrt(r_i)\cos\frac(\theta_i)(2), \; r_i - 1, \; -2\sqrt(r_i)\sin\frac(\theta_i)(2)\right)$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedOnBourSurface(
+      const ScaleRadius: Single = 0.0;
+      const Turns: Single = 2.0;
+      const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along a 3D Pascal Limacon / Trisectrix Inner-Loop Curve
+      $r(\theta) = B + A\cos\theta$ centered at the active selection pivot
+      $\mathbf(C)$ with loop cosine amplitude @code(LoopRadiusA) ($A$), radial
+      offset @code(OffsetB) ($B$, defaulting to $0.5 A$ for the Trisectrix
+      inner-loop limacon when $\le 0$), and vertical crest height @code(CrestHeight) ($H$):
+      $$\theta_i = \frac(2\pi i)(N), \quad r_i = B + A\cos\theta_i$$
+      $$x_i = C_x + r_i\cos\theta_i, \quad y_i = C_y + H\sin(2\theta_i), \quad z_i = C_z + r_i\sin\theta_i$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the analytical limacon curve tangent
+      - @code(2): orient forward radially outward from $\mathbf(C)$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInLimaconCurve(
+      const LoopRadiusA: Single = 0.0;
+      const OffsetB: Single = 0.0;
+      const CrestHeight: Single = 0.0;
+      const OrientMode: Integer = 1): Boolean;
   end;
 
 var
@@ -15566,6 +15628,404 @@ begin
         NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
 
         T.GetWorldView(CurWorldPos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+
+    if Result then
+    begin
+      if Gizmo[Mode] <> nil then
+        Gizmo[Mode].UpdateSize;
+      GizmoHasTransformModified(Self);
+      GizmoHasTransformModifyEnd(Self);
+    end;
+  finally
+    FreeAndNil(TopLevel);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedOnDupinCyclide(
+  const MajorRadiusA: Single;
+  const MinorRadiusB: Single;
+  const TubeRadiusD: Single;
+  const Turns: Single;
+  const OrientMode: Integer): Boolean;
+var
+  TopLevel: TComponentList;
+  I, N: Integer;
+  T: TCastleTransform;
+  CenterPos, Pos, MinPos, MaxPos, TargetPos, LookDir, NewUp, CurDir, CurUp: TVector3;
+  Pu, Pv: TVector3;
+  AutoSpan, EffA, EffB, EffC, EffD, EffTurns, ParamT, AngleU, AngleV: Single;
+
+  function EvalCyclideSurface(const U, V: Single): TVector3;
+  var
+    SinU, CosU, SinV, CosV, Denom: Single;
+  begin
+    SinCos(U, SinU, CosU);
+    SinCos(V, SinV, CosV);
+    Denom := EffA - EffC * CosU * CosV;
+    if Abs(Denom) < 1e-4 then
+    begin
+      if Denom >= 0 then
+        Denom := 1e-4
+      else
+        Denom := -1e-4;
+    end;
+    Result.X := CenterPos.X + (EffD * (EffC - EffA * CosU * CosV) + Sqr(EffB) * CosU) / Denom;
+    Result.Y := CenterPos.Y + (EffB * SinV * (EffC * CosU - EffD)) / Denom;
+    Result.Z := CenterPos.Z + (EffB * SinU * (EffA - EffD * CosV)) / Denom;
+  end;
+
+  function EvalCyclidePoint(const TParam: Single): TVector3;
+  begin
+    Result := EvalCyclideSurface(2.0 * Pi * TParam, 2.0 * Pi * EffTurns * TParam);
+  end;
+
+begin
+  Result := false;
+  TopLevel := TComponentList.Create(false);
+  try
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+        TopLevel.Add(Boxes[I].Parent);
+    N := TopLevel.Count;
+    if N < 2 then
+      Exit;
+
+    if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+      CenterPos := GetTransformWorkingPos(FMainSelected)
+    else
+      CenterPos := SelectionWorkingCenter;
+
+    MinPos := GetTransformWorkingPos(TCastleTransform(TopLevel[0]));
+    MaxPos := MinPos;
+    for I := 1 to N - 1 do
+    begin
+      Pos := GetTransformWorkingPos(TCastleTransform(TopLevel[I]));
+      MinPos.X := Min(MinPos.X, Pos.X);
+      MinPos.Y := Min(MinPos.Y, Pos.Y);
+      MinPos.Z := Min(MinPos.Z, Pos.Z);
+      MaxPos.X := Max(MaxPos.X, Pos.X);
+      MaxPos.Y := Max(MaxPos.Y, Pos.Y);
+      MaxPos.Z := Max(MaxPos.Z, Pos.Z);
+    end;
+    AutoSpan := Max(Max(MaxPos.X - MinPos.X, MaxPos.Y - MinPos.Y), MaxPos.Z - MinPos.Z);
+
+    if MajorRadiusA > 1e-4 then
+      EffA := MajorRadiusA
+    else
+      EffA := Max(4.0, AutoSpan * 0.5);
+
+    if MinorRadiusB > 1e-4 then
+      EffB := Clamped(MinorRadiusB, 0.1, EffA * 0.999)
+    else
+      EffB := EffA * 0.85;
+
+    EffC := Sqrt(Max(0.0, Sqr(EffA) - Sqr(EffB)));
+
+    if TubeRadiusD > 1e-4 then
+      EffD := TubeRadiusD
+    else
+      EffD := EffA * 0.45;
+
+    if Abs(Turns) > 1e-4 then
+      EffTurns := Turns
+    else
+      EffTurns := 2.0;
+
+    GizmoHasTransformModifyBegin(Self);
+    for I := 0 to N - 1 do
+    begin
+      T := TCastleTransform(TopLevel[I]);
+      Pos := GetTransformWorkingPos(T);
+      ParamT := I / (N - 1);
+      AngleU := 2.0 * Pi * ParamT;
+      AngleV := 2.0 * Pi * EffTurns * ParamT;
+      TargetPos := EvalCyclideSurface(AngleU, AngleV);
+
+      if not TVector3.Equals(Pos, TargetPos, 1e-4) then
+      begin
+        SetTransformWorkingPos(T, TargetPos);
+        Result := true;
+      end;
+
+      if OrientMode in [1, 2] then
+      begin
+        if OrientMode = 1 then
+        begin
+          LookDir := EvalCyclidePoint(ParamT + 0.001) - EvalCyclidePoint(ParamT - 0.001);
+        end else
+        begin
+          Pu := EvalCyclideSurface(AngleU + 0.001, AngleV) - EvalCyclideSurface(AngleU - 0.001, AngleV);
+          Pv := EvalCyclideSurface(AngleU, AngleV + 0.001) - EvalCyclideSurface(AngleU, AngleV - 0.001);
+          LookDir := TVector3.CrossProduct(Pv, Pu);
+          if LookDir.LengthSqr <= 1e-8 then
+            LookDir := TargetPos - CenterPos;
+        end;
+
+        if LookDir.LengthSqr <= 1e-8 then
+          LookDir := Vector3(0, 0, -1)
+        else
+          LookDir := LookDir.Normalize;
+
+        NewUp := Vector3(0, 1, 0);
+        if Abs(TVector3.DotProduct(LookDir, NewUp)) > 0.98 then
+          NewUp := Vector3(0, 0, 1);
+        NewUp := (NewUp - LookDir * TVector3.DotProduct(NewUp, LookDir)).Normalize;
+
+        T.GetWorldView(Pos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+
+    if Result then
+    begin
+      if Gizmo[Mode] <> nil then
+        Gizmo[Mode].UpdateSize;
+      GizmoHasTransformModified(Self);
+      GizmoHasTransformModifyEnd(Self);
+    end;
+  finally
+    FreeAndNil(TopLevel);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedOnBourSurface(
+  const ScaleRadius: Single;
+  const Turns: Single;
+  const OrientMode: Integer): Boolean;
+var
+  TopLevel: TComponentList;
+  I, N: Integer;
+  T: TCastleTransform;
+  CenterPos, Pos, MinPos, MaxPos, TargetPos, LookDir, NewUp, CurDir, CurUp: TVector3;
+  AutoSpan, EffScale, EffTurns, ParamT, RadR, Theta, SqrtR, SinHalf, CosHalf: Single;
+
+  function EvalBourPoint(const TParam: Single): TVector3;
+  var
+    R, Th, SinTh, CosTh, Sin2Th, Cos2Th: Single;
+  begin
+    R := Max(0.05, 0.25 + 0.75 * TParam);
+    Th := 2.0 * Pi * EffTurns * TParam;
+    SinCos(Th, SinTh, CosTh);
+    SinCos(2.0 * Th, Sin2Th, Cos2Th);
+    Result.X := CenterPos.X + EffScale * (R * CosTh - 0.5 * Sqr(R) * Cos2Th);
+    Result.Y := CenterPos.Y + EffScale * ((4.0 / 3.0) * R * Sqrt(R) * Cos(1.5 * Th));
+    Result.Z := CenterPos.Z + EffScale * (-R * SinTh - 0.5 * Sqr(R) * Sin2Th);
+  end;
+
+begin
+  Result := false;
+  TopLevel := TComponentList.Create(false);
+  try
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+        TopLevel.Add(Boxes[I].Parent);
+    N := TopLevel.Count;
+    if N < 2 then
+      Exit;
+
+    if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+      CenterPos := GetTransformWorkingPos(FMainSelected)
+    else
+      CenterPos := SelectionWorkingCenter;
+
+    MinPos := GetTransformWorkingPos(TCastleTransform(TopLevel[0]));
+    MaxPos := MinPos;
+    for I := 1 to N - 1 do
+    begin
+      Pos := GetTransformWorkingPos(TCastleTransform(TopLevel[I]));
+      MinPos.X := Min(MinPos.X, Pos.X);
+      MinPos.Y := Min(MinPos.Y, Pos.Y);
+      MinPos.Z := Min(MinPos.Z, Pos.Z);
+      MaxPos.X := Max(MaxPos.X, Pos.X);
+      MaxPos.Y := Max(MaxPos.Y, Pos.Y);
+      MaxPos.Z := Max(MaxPos.Z, Pos.Z);
+    end;
+    AutoSpan := Max(Max(MaxPos.X - MinPos.X, MaxPos.Y - MinPos.Y), MaxPos.Z - MinPos.Z);
+
+    if ScaleRadius > 1e-4 then
+      EffScale := ScaleRadius
+    else
+      EffScale := Max(3.0, AutoSpan * 0.4);
+
+    if Abs(Turns) > 1e-4 then
+      EffTurns := Turns
+    else
+      EffTurns := 2.0;
+
+    GizmoHasTransformModifyBegin(Self);
+    for I := 0 to N - 1 do
+    begin
+      T := TCastleTransform(TopLevel[I]);
+      Pos := GetTransformWorkingPos(T);
+      ParamT := I / (N - 1);
+      RadR := 0.25 + 0.75 * ParamT;
+      Theta := 2.0 * Pi * EffTurns * ParamT;
+      TargetPos := EvalBourPoint(ParamT);
+
+      if not TVector3.Equals(Pos, TargetPos, 1e-4) then
+      begin
+        SetTransformWorkingPos(T, TargetPos);
+        Result := true;
+      end;
+
+      if OrientMode in [1, 2] then
+      begin
+        if OrientMode = 1 then
+        begin
+          LookDir := EvalBourPoint(ParamT + 0.001) - EvalBourPoint(ParamT - 0.001);
+        end else
+        begin
+          { Exact Weierstrass-Enneper Gauss-map normal for Bour's surface (m=2):
+            N = (2*sqrt(r)*cos(theta/2), r - 1, -2*sqrt(r)*sin(theta/2)) / (1 + r) }
+          SqrtR := Sqrt(RadR);
+          SinCos(0.5 * Theta, SinHalf, CosHalf);
+          LookDir := Vector3(
+            (2.0 * SqrtR * CosHalf) / (1.0 + RadR),
+            (RadR - 1.0) / (1.0 + RadR),
+            (-2.0 * SqrtR * SinHalf) / (1.0 + RadR));
+        end;
+
+        if LookDir.LengthSqr <= 1e-8 then
+          LookDir := Vector3(0, 1, 0)
+        else
+          LookDir := LookDir.Normalize;
+
+        NewUp := Vector3(0, 1, 0);
+        if Abs(TVector3.DotProduct(LookDir, NewUp)) > 0.98 then
+          NewUp := Vector3(0, 0, 1);
+        NewUp := (NewUp - LookDir * TVector3.DotProduct(NewUp, LookDir)).Normalize;
+
+        T.GetWorldView(Pos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+
+    if Result then
+    begin
+      if Gizmo[Mode] <> nil then
+        Gizmo[Mode].UpdateSize;
+      GizmoHasTransformModified(Self);
+      GizmoHasTransformModifyEnd(Self);
+    end;
+  finally
+    FreeAndNil(TopLevel);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInLimaconCurve(
+  const LoopRadiusA: Single;
+  const OffsetB: Single;
+  const CrestHeight: Single;
+  const OrientMode: Integer): Boolean;
+var
+  TopLevel: TComponentList;
+  I, N: Integer;
+  T: TCastleTransform;
+  CenterPos, Pos, MinPos, MaxPos, TargetPos, LookDir, NewUp, CurDir, CurUp: TVector3;
+  AutoSpan, EffA, EffB, EffH, Theta, SinTh, CosTh, Sin2Th, Cos2Th, RadR: Single;
+begin
+  Result := false;
+  TopLevel := TComponentList.Create(false);
+  try
+    for I := 0 to Integer(FMaxSelectedCount) - 1 do
+      if (Boxes[I].Parent <> nil) and (not IsDescendantOfAnySelected(Boxes[I].Parent)) then
+        TopLevel.Add(Boxes[I].Parent);
+    N := TopLevel.Count;
+    if N < 2 then
+      Exit;
+
+    if (FPivotMode = pmPrimarySelected) and (FMainSelected <> nil) then
+      CenterPos := GetTransformWorkingPos(FMainSelected)
+    else
+      CenterPos := SelectionWorkingCenter;
+
+    MinPos := GetTransformWorkingPos(TCastleTransform(TopLevel[0]));
+    MaxPos := MinPos;
+    for I := 1 to N - 1 do
+    begin
+      Pos := GetTransformWorkingPos(TCastleTransform(TopLevel[I]));
+      MinPos.X := Min(MinPos.X, Pos.X);
+      MinPos.Y := Min(MinPos.Y, Pos.Y);
+      MinPos.Z := Min(MinPos.Z, Pos.Z);
+      MaxPos.X := Max(MaxPos.X, Pos.X);
+      MaxPos.Y := Max(MaxPos.Y, Pos.Y);
+      MaxPos.Z := Max(MaxPos.Z, Pos.Z);
+    end;
+    AutoSpan := Max(Max(MaxPos.X - MinPos.X, MaxPos.Y - MinPos.Y), MaxPos.Z - MinPos.Z);
+
+    if LoopRadiusA > 1e-4 then
+      EffA := LoopRadiusA
+    else
+      EffA := Max(4.0, AutoSpan * 0.5);
+
+    if OffsetB > 1e-4 then
+      EffB := OffsetB
+    else
+      EffB := EffA * 0.5; // Trisectrix inner-loop limacon default
+
+    EffH := CrestHeight;
+
+    GizmoHasTransformModifyBegin(Self);
+    for I := 0 to N - 1 do
+    begin
+      T := TCastleTransform(TopLevel[I]);
+      Pos := GetTransformWorkingPos(T);
+      Theta := (2.0 * Pi * I) / N;
+      SinCos(Theta, SinTh, CosTh);
+      SinCos(2.0 * Theta, Sin2Th, Cos2Th);
+      RadR := EffB + EffA * CosTh;
+
+      TargetPos.X := CenterPos.X + RadR * CosTh;
+      TargetPos.Y := CenterPos.Y + EffH * Sin2Th;
+      TargetPos.Z := CenterPos.Z + RadR * SinTh;
+
+      if not TVector3.Equals(Pos, TargetPos, 1e-4) then
+      begin
+        SetTransformWorkingPos(T, TargetPos);
+        Result := true;
+      end;
+
+      if OrientMode in [1, 2] then
+      begin
+        if OrientMode = 1 then
+        begin
+          LookDir.X := -EffB * SinTh - EffA * Sin2Th;
+          LookDir.Y := 2.0 * EffH * Cos2Th;
+          LookDir.Z := EffB * CosTh + EffA * Cos2Th;
+        end else
+        begin
+          LookDir := TargetPos - CenterPos;
+        end;
+
+        if LookDir.LengthSqr <= 1e-8 then
+          LookDir := Vector3(-SinTh, 0, CosTh)
+        else
+          LookDir := LookDir.Normalize;
+
+        NewUp := Vector3(0, 1, 0);
+        if Abs(TVector3.DotProduct(LookDir, NewUp)) > 0.98 then
+          NewUp := Vector3(0, 0, 1);
+        NewUp := (NewUp - LookDir * TVector3.DotProduct(NewUp, LookDir)).Normalize;
+
+        T.GetWorldView(Pos, CurDir, CurUp);
         if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
            (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
         begin
