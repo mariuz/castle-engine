@@ -189,6 +189,9 @@ type
     procedure TestSERCoherenceHintKeyPackingRHI;
     procedure TestDualSourceColoredGlassTransmissionRHI;
     procedure TestVulkanProgrammableSampleLocationsRGSSRHI;
+    procedure TestDynamicRenderingLocalReadDeferredLightingRHI;
+    procedure TestSubgroupWaveBallotAndExclusivePrefixSumRHI;
+    procedure TestVulkanStreamCompactorPrefixSumRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -9725,6 +9728,106 @@ begin
     Device.ProgrammableSampleLocations.ApplySampleLocations(CmdList);
     CmdList.EndRecording;
     AssertEquals('LocationsAppliedCount must be 1', 1, Integer(Device.ProgrammableSampleLocations.LocationsAppliedCount));
+  finally
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestDynamicRenderingLocalReadDeferredLightingRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  LocalReadGLSL: String;
+  LitSpec, LitBackface: TVector3;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Vulkan 1.4 Dynamic Rendering Local Read subpassInput preamble }
+    LocalReadGLSL := Gen.GenerateDynamicRenderingLocalReadPreamble;
+    AssertTrue('LocalRead GLSL must declare subpassInput and EvaluateTileLocalDeferredLighting',
+      (Pos('layout(input_attachment_index = 0, set = 0, binding = 0) uniform subpassInput castle_TileGBufferAlbedo;', LocalReadGLSL) > 0) and
+      (Pos('vec3 EvaluateTileLocalDeferredLighting(vec3 albedo, vec3 normalWS, float roughness,', LocalReadGLSL) > 0));
+
+    { 2. Verify tile-local deferred lighting evaluation }
+    LitSpec := TCastleShaderGeneratorRHI.EvaluateTileLocalDeferredLighting(
+      Vector3(0.5, 0.5, 0.5), Vector3(0.0, 0.0, 1.0), 0.25,
+      Vector3(0.0, 0.0, 1.0), Vector3(0.0, 0.0, 1.0), Vector3(1.0, 1.0, 1.0));
+    LitBackface := TCastleShaderGeneratorRHI.EvaluateTileLocalDeferredLighting(
+      Vector3(0.5, 0.5, 0.5), Vector3(0.0, 0.0, 1.0), 0.25,
+      Vector3(0.0, 0.0, -1.0), Vector3(0.0, 0.0, 1.0), Vector3(1.0, 1.0, 1.0));
+
+    AssertTrue('Front-lit tile G-Buffer pixel with aligned view/light must produce strong specular + diffuse lighting',
+      LitSpec.X > 1.0);
+    AssertSameValue(0.0, LitBackface.X, 1e-6);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSubgroupWaveBallotAndExclusivePrefixSumRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  WaveGLSL: String;
+  BitCount: Cardinal;
+  ScanOut: TVector4Cardinal;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    { 1. Verify Subgroup Wave Intrinsics GLSL 450 functions }
+    WaveGLSL := Gen.GenerateSubgroupWaveIntrinsicsFunctions;
+    AssertTrue('Subgroup GLSL must enable GL_KHR_shader_subgroup_ballot and GL_KHR_shader_subgroup_arithmetic',
+      (Pos('#extension GL_KHR_shader_subgroup_ballot : enable', WaveGLSL) > 0) and
+      (Pos('uint EvaluateSubgroupExclusivePrefixSum(uint value)', WaveGLSL) > 0));
+
+    { 2. Verify 64-bit ballot bit count (popcount) }
+    BitCount := TCastleShaderGeneratorRHI.EvaluateSubgroupBallotBitCount(UInt64($000F000F000F000F));
+    AssertEquals('Ballot mask $000F000F000F000F must have 16 active lanes', 16, Integer(BitCount));
+
+    { 3. Verify 4-lane subgroup exclusive prefix sum: (3, 1, 4, 2) -> (0, 3, 4, 8) }
+    ScanOut := TCastleShaderGeneratorRHI.EvaluateSubgroupExclusivePrefixSum4(
+      Vector4Cardinal(3, 1, 4, 2));
+    AssertEquals('Lane 0 exclusive scan must be 0', 0, Integer(ScanOut.X));
+    AssertEquals('Lane 1 exclusive scan must be 3', 3, Integer(ScanOut.Y));
+    AssertEquals('Lane 2 exclusive scan must be 4', 4, Integer(ScanOut.Z));
+    AssertEquals('Lane 3 exclusive scan must be 8', 8, Integer(ScanOut.W));
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanStreamCompactorPrefixSumRHI;
+var
+  PrefixSum, Compacted: TCardinalDynamicArray;
+  SurvivingCount: Cardinal;
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+begin
+  { 1. Verify Blelloch exclusive prefix-sum and predicate stream compaction }
+  SurvivingCount := TCastleVulkanStreamCompactor.EvaluatePrefixSumAndCompact(
+    [True, False, True, True, False, True], PrefixSum, Compacted);
+  AssertEquals('Surviving element count must be 4', 4, Integer(SurvivingCount));
+  AssertEquals('PrefixSum[0] = 0', 0, Integer(PrefixSum[0]));
+  AssertEquals('PrefixSum[2] = 1', 1, Integer(PrefixSum[2]));
+  AssertEquals('PrefixSum[5] = 3', 3, Integer(PrefixSum[5]));
+  AssertEquals('Compacted[0] = 0', 0, Integer(Compacted[0]));
+  AssertEquals('Compacted[1] = 2', 2, Integer(Compacted[1]));
+  AssertEquals('Compacted[2] = 3', 3, Integer(Compacted[2]));
+  AssertEquals('Compacted[3] = 5', 5, Integer(Compacted[3]));
+
+  { 2. Verify TCastleVulkanStreamCompactor GPU buffer allocation and compute dispatch }
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6673)) );
+  CmdList := TVulkanRHICommandList.Create(Device, 0);
+  try
+    CmdList.BeginRecording;
+    Device.StreamCompactor.DispatchStreamCompaction(CmdList, 1024);
+    CmdList.EndRecording;
+
+    AssertEquals('MaxElementCount must be 1024', 1024, Integer(Device.StreamCompactor.MaxElementCount));
+    AssertTrue('PrefixSumBuffer and CompactedIndicesBuffer must be allocated',
+      (Device.StreamCompactor.PrefixSumBuffer <> nil) and
+      (Device.StreamCompactor.CompactedIndicesBuffer <> nil) and
+      (Device.StreamCompactor.CompactedCountBuffer <> nil));
+    AssertEquals('CompactionDispatchCount must be 1', 1, Integer(Device.StreamCompactor.CompactionDispatchCount));
   finally
     FreeAndNil(CmdList);
     FreeAndNil(Device);

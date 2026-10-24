@@ -2947,6 +2947,50 @@ type
   end;
 
   { -------------------------------------------------------------------------- }
+  { GPU Parallel Prefix-Sum & Stream Compactor (Phase 41.3)                    }
+  { -------------------------------------------------------------------------- }
+
+  TCardinalDynamicArray = array of Cardinal;
+
+  { Manages GPU parallel prefix-sum (Blelloch exclusive scan) and predicate stream
+    compaction buffers for compacting surviving visible instances, meshlets, or rays. }
+  TCastleVulkanStreamCompactor = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FMaxElementCount: Cardinal;
+    FPrefixSumBuffer: TVulkanRHIBuffer;
+    FCompactedIndicesBuffer: TVulkanRHIBuffer;
+    FCompactedCountBuffer: TVulkanRHIBuffer;
+    FCompactionComputePipeline: TVulkanRHIComputePipeline;
+    FCompactionDispatchCount: Cardinal;
+    procedure EnsureCompactionBuffers(const AElementCount: Cardinal);
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice);
+    destructor Destroy; override;
+
+    { CPU reference: Computes exclusive prefix-sum offsets and compacts indices where APredicates[i] = True.
+      Returns the total compacted count of surviving elements. }
+    class function EvaluatePrefixSumAndCompact(
+      const APredicates: array of Boolean;
+      out AExclusivePrefixSum: TCardinalDynamicArray;
+      out ACompactedIndices: TCardinalDynamicArray): Cardinal; static;
+
+    { Dispatches the GPU prefix-sum and stream compaction compute pass across AElementCount elements. }
+    procedure DispatchStreamCompaction(const ACommandList: TVulkanRHICommandList;
+      const AElementCount: Cardinal;
+      const AComputePipeline: TVulkanRHIComputePipeline = nil;
+      const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
+
+    property MaxElementCount: Cardinal read FMaxElementCount;
+    property PrefixSumBuffer: TVulkanRHIBuffer read FPrefixSumBuffer;
+    property CompactedIndicesBuffer: TVulkanRHIBuffer read FCompactedIndicesBuffer;
+    property CompactedCountBuffer: TVulkanRHIBuffer read FCompactedCountBuffer;
+    property CompactionComputePipeline: TVulkanRHIComputePipeline
+      read FCompactionComputePipeline write FCompactionComputePipeline;
+    property CompactionDispatchCount: Cardinal read FCompactionDispatchCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
   { Vulkan Render Device                                                       }
   { -------------------------------------------------------------------------- }
 
@@ -3059,6 +3103,7 @@ type
     FPerInstanceCustomData: TCastleVulkanPerInstanceCustomData;
     FNeuralDenoiser: TCastleVulkanNeuralDenoiser;
     FProgrammableSampleLocations: TCastleVulkanProgrammableSampleLocations;
+    FStreamCompactor: TCastleVulkanStreamCompactor;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -3176,6 +3221,7 @@ type
     function GetPerInstanceCustomData: TCastleVulkanPerInstanceCustomData;
     function GetNeuralDenoiser: TCastleVulkanNeuralDenoiser;
     function GetProgrammableSampleLocations: TCastleVulkanProgrammableSampleLocations;
+    function GetStreamCompactor: TCastleVulkanStreamCompactor;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -3398,6 +3444,7 @@ type
     property PerInstanceCustomData: TCastleVulkanPerInstanceCustomData read GetPerInstanceCustomData;
     property NeuralDenoiser: TCastleVulkanNeuralDenoiser read GetNeuralDenoiser;
     property ProgrammableSampleLocations: TCastleVulkanProgrammableSampleLocations read GetProgrammableSampleLocations;
+    property StreamCompactor: TCastleVulkanStreamCompactor read GetStreamCompactor;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -15498,6 +15545,111 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
+{ TCastleVulkanStreamCompactor (Phase 41.3)                                    }
+{ ---------------------------------------------------------------------------- }
+
+constructor TCastleVulkanStreamCompactor.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+end;
+
+destructor TCastleVulkanStreamCompactor.Destroy;
+begin
+  FreeAndNil(FPrefixSumBuffer);
+  FreeAndNil(FCompactedIndicesBuffer);
+  FreeAndNil(FCompactedCountBuffer);
+  inherited;
+end;
+
+class function TCastleVulkanStreamCompactor.EvaluatePrefixSumAndCompact(
+  const APredicates: array of Boolean;
+  out AExclusivePrefixSum: TCardinalDynamicArray;
+  out ACompactedIndices: TCardinalDynamicArray): Cardinal;
+var
+  I, RunningSum: Cardinal;
+begin
+  SetLength(AExclusivePrefixSum, Length(APredicates));
+  RunningSum := 0;
+  if Length(APredicates) > 0 then
+  begin
+    for I := 0 to Cardinal(High(APredicates)) do
+    begin
+      AExclusivePrefixSum[I] := RunningSum;
+      if APredicates[I] then
+        Inc(RunningSum);
+    end;
+  end;
+
+  SetLength(ACompactedIndices, RunningSum);
+  if Length(APredicates) > 0 then
+  begin
+    for I := 0 to Cardinal(High(APredicates)) do
+      if APredicates[I] then
+        ACompactedIndices[AExclusivePrefixSum[I]] := I;
+  end;
+  Result := RunningSum;
+end;
+
+procedure TCastleVulkanStreamCompactor.EnsureCompactionBuffers(
+  const AElementCount: Cardinal);
+var
+  Cap: Cardinal;
+  BufDesc: TRHIBufferDesc;
+begin
+  if FDevice = nil then
+    Exit;
+  Cap := Max(Cardinal(64), AElementCount);
+  if (FPrefixSumBuffer <> nil) and (FMaxElementCount >= Cap) then
+    Exit;
+
+  FreeAndNil(FPrefixSumBuffer);
+  FreeAndNil(FCompactedIndicesBuffer);
+  FreeAndNil(FCompactedCountBuffer);
+
+  FMaxElementCount := Cap;
+
+  BufDesc := TRHIBufferDesc.Create(PtrUInt(Cap) * SizeOf(Cardinal),
+    [buStorage], muGpuOnly, 'StreamCompactorPrefixSumSSBO');
+  FPrefixSumBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+
+  BufDesc := TRHIBufferDesc.Create(PtrUInt(Cap) * SizeOf(Cardinal),
+    [buStorage], muGpuOnly, 'StreamCompactorIndicesSSBO');
+  FCompactedIndicesBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+
+  BufDesc := TRHIBufferDesc.Create(SizeOf(Cardinal) * 4,
+    [buStorage, buIndirect], muGpuOnly, 'StreamCompactorCountSSBO');
+  FCompactedCountBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+end;
+
+procedure TCastleVulkanStreamCompactor.DispatchStreamCompaction(
+  const ACommandList: TVulkanRHICommandList;
+  const AElementCount: Cardinal;
+  const AComputePipeline: TVulkanRHIComputePipeline;
+  const ADescriptorSet: TVulkanRHIDescriptorSet);
+var
+  ActivePipe: TVulkanRHIComputePipeline;
+  Workgroups: Cardinal;
+begin
+  if (ACommandList = nil) or (AElementCount = 0) then
+    Exit;
+  EnsureCompactionBuffers(AElementCount);
+
+  if AComputePipeline <> nil then
+    ActivePipe := AComputePipeline
+  else
+    ActivePipe := FCompactionComputePipeline;
+  if ActivePipe <> nil then
+    ACommandList.BindComputePipeline(ActivePipe);
+  if ADescriptorSet <> nil then
+    ACommandList.BindDescriptorSet(0, ADescriptorSet, []);
+
+  Workgroups := (AElementCount + 255) div 256;
+  ACommandList.Dispatch(Workgroups, 1, 1);
+  Inc(FCompactionDispatchCount);
+end;
+
+{ ---------------------------------------------------------------------------- }
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
@@ -16180,12 +16332,20 @@ begin
   Result := FProgrammableSampleLocations;
 end;
 
+function TVulkanRHIDevice.GetStreamCompactor: TCastleVulkanStreamCompactor;
+begin
+  if FStreamCompactor = nil then
+    FStreamCompactor := TCastleVulkanStreamCompactor.Create(Self);
+  Result := FStreamCompactor;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FStreamCompactor);
   FreeAndNil(FProgrammableSampleLocations);
   FreeAndNil(FNeuralDenoiser);
   FreeAndNil(FPerInstanceCustomData);

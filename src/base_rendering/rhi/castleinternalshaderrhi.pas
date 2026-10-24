@@ -1464,6 +1464,28 @@ type
       const AFresnelF, AGlassOpacity: Single;
       out AOutSpecularAdd, AOutTransmittanceMul: TVector3); static;
 
+    { Phase 41.1: Generates Vulkan 1.4 Dynamic Rendering Local Read (VK_KHR_dynamic_rendering_local_read)
+      subpassInput preamble and tile-local G-Buffer deferred lighting evaluation functions. }
+    function GenerateDynamicRenderingLocalReadPreamble: String;
+
+    { Phase 41.1 CPU reference: Evaluates tile-local G-Buffer deferred lighting (diffuse + roughness-driven specular)
+      without external VRAM bandwidth round-trips. }
+    class function EvaluateTileLocalDeferredLighting(
+      const AAlbedo, ANormalWS: TVector3;
+      const ARoughness: Single;
+      const ALightDirWS, AViewDirWS, ALightColor: TVector3): TVector3; static;
+
+    { Phase 41.2: Generates GLSL 450 Subgroup Wave Intrinsics (GL_KHR_shader_subgroup_ballot / arithmetic)
+      for lock-free wave-level ballot bit-counting and exclusive prefix-sum reductions. }
+    function GenerateSubgroupWaveIntrinsicsFunctions: String;
+
+    { Phase 41.2 CPU reference: Counts active threads (popcount) in a 64-bit subgroup ballot mask. }
+    class function EvaluateSubgroupBallotBitCount(const ABallotMask: UInt64): Cardinal; static;
+
+    { Phase 41.2 CPU reference: Computes the exclusive prefix sum (0, v0, v0+v1, v0+v1+v2) across 4 subgroup lanes. }
+    class function EvaluateSubgroupExclusivePrefixSum4(
+      const AValues: TVector4Cardinal): TVector4Cardinal; static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -7129,6 +7151,109 @@ begin
     Max(0.0, ASpecularLightingRGB.Y),
     Max(0.0, ASpecularLightingRGB.Z));
   AOutTransmittanceMul := FilterColor * OneMinusF;
+end;
+
+function TCastleShaderGeneratorRHI.GenerateDynamicRenderingLocalReadPreamble: String;
+begin
+  Result :=
+    '// Phase 41.1: Vulkan 1.4 Dynamic Rendering Local Read (VK_KHR_dynamic_rendering_local_read)' + NL +
+    'layout(input_attachment_index = 0, set = 0, binding = 0) uniform subpassInput castle_TileGBufferAlbedo;' + NL +
+    'layout(input_attachment_index = 1, set = 0, binding = 1) uniform subpassInput castle_TileGBufferNormalRoughness;' + NL +
+    NL +
+    'vec3 EvaluateTileLocalDeferredLighting(vec3 albedo, vec3 normalWS, float roughness,' + NL +
+    '  vec3 lightDirWS, vec3 viewDirWS, vec3 lightColor) {' + NL +
+    '  vec3 N = normalize(normalWS);' + NL +
+    '  vec3 L = normalize(lightDirWS);' + NL +
+    '  vec3 V = normalize(viewDirWS);' + NL +
+    '  float NdotL = max(0.0, dot(N, L));' + NL +
+    '  if (NdotL <= 0.0) return vec3(0.0);' + NL +
+    '  vec3 H = normalize(L + V);' + NL +
+    '  float NdotH = max(0.0, dot(N, H));' + NL +
+    '  float r = clamp(roughness, 0.04, 1.0);' + NL +
+    '  float alpha2 = max(0.001, r * r * r * r);' + NL +
+    '  float specPower = max(2.0, (2.0 / alpha2) - 2.0);' + NL +
+    '  float specTerm = ((specPower + 2.0) / 25.1327412) * pow(NdotH, specPower);' + NL +
+    '  return (albedo * 0.318309886 + vec3(specTerm)) * lightColor * NdotL;' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateTileLocalDeferredLighting(
+  const AAlbedo, ANormalWS: TVector3;
+  const ARoughness: Single;
+  const ALightDirWS, AViewDirWS, ALightColor: TVector3): TVector3;
+var
+  N, L, V, H: TVector3;
+  NdotL, NdotH, R, Alpha2, SpecPower, SpecTerm, InvPi: Single;
+begin
+  if (ANormalWS.LengthSqr <= 1e-12) or (ALightDirWS.LengthSqr <= 1e-12) then
+    Exit(TVector3.Zero);
+  N := ANormalWS.Normalize;
+  L := ALightDirWS.Normalize;
+  NdotL := Max(0.0, TVector3.DotProduct(N, L));
+  if NdotL <= 0.0 then
+    Exit(TVector3.Zero);
+
+  if AViewDirWS.LengthSqr > 1e-12 then
+    V := AViewDirWS.Normalize
+  else
+    V := L;
+  if (L + V).LengthSqr > 1e-12 then
+    H := (L + V).Normalize
+  else
+    H := N;
+
+  NdotH := Max(0.0, TVector3.DotProduct(N, H));
+  R := EnsureRange(ARoughness, 0.04, 1.0);
+  Alpha2 := Max(0.001, Sqr(Sqr(R)));
+  SpecPower := Max(2.0, (2.0 / Alpha2) - 2.0);
+  SpecTerm := ((SpecPower + 2.0) / (8.0 * Pi)) * Power(NdotH, SpecPower);
+  InvPi := 1.0 / Pi;
+
+  Result := Vector3(
+    (Max(0.0, AAlbedo.X) * InvPi + SpecTerm) * Max(0.0, ALightColor.X) * NdotL,
+    (Max(0.0, AAlbedo.Y) * InvPi + SpecTerm) * Max(0.0, ALightColor.Y) * NdotL,
+    (Max(0.0, AAlbedo.Z) * InvPi + SpecTerm) * Max(0.0, ALightColor.Z) * NdotL);
+end;
+
+function TCastleShaderGeneratorRHI.GenerateSubgroupWaveIntrinsicsFunctions: String;
+begin
+  Result :=
+    '#extension GL_KHR_shader_subgroup_basic : enable' + NL +
+    '#extension GL_KHR_shader_subgroup_ballot : enable' + NL +
+    '#extension GL_KHR_shader_subgroup_arithmetic : enable' + NL +
+    NL +
+    '// Phase 41.2: Subgroup Wave Intrinsics for Lock-Free Reduction & Prefix Scans' + NL +
+    'uint EvaluateSubgroupWaveActiveCount(bool predicate) {' + NL +
+    '  uvec4 ballot = subgroupBallot(predicate);' + NL +
+    '  return subgroupBallotBitCount(ballot);' + NL +
+    '}' + NL +
+    NL +
+    'uint EvaluateSubgroupExclusivePrefixSum(uint value) {' + NL +
+    '  return subgroupExclusiveAdd(value);' + NL +
+    '}' + NL;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateSubgroupBallotBitCount(
+  const ABallotMask: UInt64): Cardinal;
+var
+  Mask: UInt64;
+begin
+  Result := 0;
+  Mask := ABallotMask;
+  while Mask <> 0 do
+  begin
+    Inc(Result, Cardinal(Mask and 1));
+    Mask := Mask shr 1;
+  end;
+end;
+
+class function TCastleShaderGeneratorRHI.EvaluateSubgroupExclusivePrefixSum4(
+  const AValues: TVector4Cardinal): TVector4Cardinal;
+begin
+  Result.X := 0;
+  Result.Y := AValues.X;
+  Result.Z := AValues.X + AValues.Y;
+  Result.W := AValues.X + AValues.Y + AValues.Z;
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

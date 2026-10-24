@@ -637,6 +637,58 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 40 Status**: Completed. Shader Execution Reordering (SER) 8-bit coherence hint key packing (`GenerateSERCoherenceHintFunctions`, `PackSERCoherenceHintKey`), Dual-Source Color Blending (`location = 0, index = 0/1`) colored glass transmission (`GenerateDualSourceGlassTransmissionFunctions`, `EvaluateDualSourceGlassOutputs`), and Programmable MSAA Rotated-Grid Supersampling (RGSS) sample locations manager (`TCastleVulkanProgrammableSampleLocations`) fully integrated and tested (150 unit tests passing).
 
 
+### Phase 41: Vulkan 1.4 Dynamic Rendering Local Read (Tile-Local Subpass Merging), Subgroup Wave Reduction Intrinsics & GPU Prefix-Sum Stream Compaction (COMPLETED)
+
+* [x] **41.1. Vulkan 1.4 Dynamic Rendering Local Read (`VK_KHR_dynamic_rendering_local_read`) Tile-Local G-Buffer Lighting (`GenerateDynamicRenderingLocalReadPreamble` in `CastleInternalShaderRHI`)**:
+  * Generate `subpassInput` tile-local attachment inputs (`castle_TileGBufferAlbedo`, `castle_TileGBufferNormalRoughness`) and on-chip tile-local deferred lighting (`EvaluateTileLocalDeferredLighting`) to eliminate external VRAM round-trips during deferred shading.
+* [x] **41.2. Subgroup Wave Intrinsics (`GL_KHR_shader_subgroup_ballot` / `arithmetic`) Reduction & Prefix Scans (`GenerateSubgroupWaveIntrinsicsFunctions` in `CastleInternalShaderRHI`)**:
+  * Provide lock-free wave-level ballot bit-counting (`EvaluateSubgroupBallotBitCount`) and exclusive prefix-sum scans (`EvaluateSubgroupExclusivePrefixSum4`).
+* [x] **41.3. GPU Parallel Prefix-Sum (Blelloch Scan) & Predicate Stream Compactor (`TCastleVulkanStreamCompactor` in `CastleInternalRHI_Vulkan`)**:
+  * Manage exclusive prefix-sum and predicate stream compaction buffers (`PrefixSumBuffer`, `CompactedIndicesBuffer`, `CompactedCountBuffer`, `EvaluatePrefixSumAndCompact`, `DispatchStreamCompaction`) for compacting surviving visible instances, meshlets, or ray payloads.
+
+**Milestone 41 Status**: Completed. Vulkan 1.4 Dynamic Rendering Local Read (`VK_KHR_dynamic_rendering_local_read`) `subpassInput` preamble & tile-local G-Buffer deferred lighting (`GenerateDynamicRenderingLocalReadPreamble`, `EvaluateTileLocalDeferredLighting`), Subgroup wave ballot & exclusive prefix-sum intrinsics (`GenerateSubgroupWaveIntrinsicsFunctions`, `EvaluateSubgroupBallotBitCount`, `EvaluateSubgroupExclusivePrefixSum4`), and GPU parallel prefix-sum & predicate stream compactor (`TCastleVulkanStreamCompactor`) fully integrated and tested (153 unit tests passing).
+
+
+### Phase 42: Bindless Buffer Device Address (`VK_KHR_buffer_device_address`) Pointer Chasing, Conservative Rasterization Voxelization & 3D Voxel Cone Tracing (VXGI) (PLANNED)
+
+* [ ] **42.1. Buffer Device Address (`GL_EXT_buffer_reference2`) 64-Bit GPU Pointer Arithmetic (`GenerateBufferDeviceAddressPreamble` in `CastleInternalShaderRHI`)**:
+  * Generate `layout(buffer_reference, std430, buffer_reference_align = 16)` 64-bit GPU pointer declarations and aligned address offset helpers (`AlignBufferDeviceAddress`).
+* [ ] **42.2. Conservative Rasterization Dominant-Axis Voxelization & 3D Voxel Cone Tracing (`GenerateVoxelConeTracingFunctions` in `CastleInternalShaderRHI`)**:
+  * Project triangle geometry along its dominant normal axis (`SelectDominantVoxelProjectionAxis`) and trace aperture-growing 3D mipmapped voxel cones (`EvaluateVoxelConeStepAperture`).
+* [ ] **42.3. 3D Voxel Radiance Clipmap Manager (`TCastleVulkanVoxelConeTracer` in `CastleInternalRHI_Vulkan`)**:
+  * Manage 3D voxel opacity/radiance clipmap textures and voxelization/cone-tracing dispatches (`VoxelRadianceTexture`, `DispatchVoxelConeTrace`).
+
+
+### Phase 43: GPU-Driven Indirect Material Batching / Shader Execution Binning, Specular AA (Toksvig / Kaplanyan Normal Variance) & Rectilinear Shadow Warping (PLANNED)
+
+* [ ] **43.1. Normal-Variance Specular Anti-Aliasing (`GenerateSpecularNormalVarianceAAFunctions` in `CastleInternalShaderRHI`)**:
+  * Filter sub-pixel normal map variance (Toksvig / Kaplanyan & Antonov roughness kernel filtering `EvaluateSpecularAARoughness`) to eliminate distant specular shimmering.
+* [ ] **43.2. Rectilinear / Perspective Shadow Map Warping (`GenerateRectilinearShadowWarpFunctions` in `CastleInternalShaderRHI`)**:
+  * Warp shadow UV coordinates (`EvaluateRectilinearShadowWarpUV`) to concentrate texel density near the camera focus region.
+* [ ] **43.3. GPU Indirect Material Binning Manager (`TCastleVulkanMaterialBinner` in `CastleInternalRHI_Vulkan`)**:
+  * Bin visibility-buffer or ray-hit fragments by material ID into contiguous indirect dispatch ranges (`BinCountBuffer`, `MaterialRangesBuffer`, `DispatchMaterialBinning`).
+
+
+### Phase 44: GPU-Driven Procedural Foliage / Grass Blade Instancing, Multi-Channel Signed Distance Field (MSDF) Text & Per-Pixel Linked List (PPLL) Exact OIT (PLANNED)
+
+* [ ] **44.1. Multi-Channel Signed Distance Field (MSDF) Median-of-Three Crisp Vector / Text Evaluation (`GenerateMSDFTextFunctions` in `CastleInternalShaderRHI`)**:
+  * Evaluate Chlumsky's median-of-three RGB signed distance field (`EvaluateMSDFMedianOfThree`, `EvaluateMSDFScreenPxOpacity`) for sharp corner-preserving vector shapes and 3D text at any magnification.
+* [ ] **44.2. Procedural Quadratic Bezier Grass Blade Bending & Wind Flutter (`GenerateProceduralGrassBladeFunctions` in `CastleInternalShaderRHI`)**:
+  * Evaluate quadratic Bezier grass blade curves and normal derivatives (`EvaluateQuadraticBezierGrassBlade`) for GPU-instanced meadows.
+* [ ] **44.3. Exact Order-Independent Transparency Per-Pixel Linked List Manager (`TCastleVulkanPerPixelLinkedListOIT` in `CastleInternalRHI_Vulkan`)**:
+  * Manage per-pixel head-pointer image (`HeadPointerTexture`) and atomic node pool SSBO (`FragmentNodeBuffer`) with insertion-sort resolve for exact order-independent transparency.
+
+
+### Phase 45: Vulkan 1.4 Push Descriptors (`VK_KHR_push_descriptor`), Host Image Copy (`VK_EXT_host_image_copy`) Zero-Staging Streaming & Pipeline Robustness (PLANNED)
+
+* [ ] **45.1. Vulkan 1.4 Push Descriptors & Host Image Copy Layout Transition Helpers (`GeneratePushDescriptorPreamble` in `CastleInternalShaderRHI`)**:
+  * Generate push-descriptor layout bindings and compute tight host-to-image memory copy strides (`ComputeHostImageCopyByteSize`).
+* [ ] **45.2. Spherical Gaussian (SG) Fast Specular & Diffuse Lobe Approximation (`GenerateSphericalGaussianFunctions` in `CastleInternalShaderRHI`)**:
+  * Evaluate Spherical Gaussian inner products and warp products (`EvaluateSphericalGaussianProduct`, `EvaluateSphericalGaussianIntegral`) for real-time anisotropic probe lighting.
+* [ ] **45.3. Vulkan 1.4 Host Image Copy & Push Descriptor Manager (`TCastleVulkanHostImageCopyManager` in `CastleInternalRHI_Vulkan`)**:
+  * Manage zero-staging direct CPU-to-GPU image uploads (`vkCopyMemoryToImageEXT`) and command-buffer push descriptor updates (`vkCmdPushDescriptorSetKHR`).
+
+
 ## 4.1. Unreal Engine 5 vs. Castle Game Engine Vulkan RHI Feature Parity Matrix
 
 | Unreal Engine 5 Subsystem | Castle Game Engine Vulkan RHI Equivalent | Phase & Status |
@@ -662,6 +714,11 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 | **MegaGeometry Displaced Micro-Meshes, Dual-Quaternion Skinning & Per-Instance Custom Data** | `GenerateDualQuaternionSkinningFunctions`, `GenerateDisplacedMicroMeshFunctions` & `TCastleVulkanPerInstanceCustomData` | Phase 38 (COMPLETED) |
 | **Neural Radiance Cache / MLP Denoising, Optical Flow & R2 Spatio-Temporal Blue-Noise** | `TCastleVulkanNeuralDenoiser`, `GenerateOpticalFlowBlockMatchingShader` & `EvaluateR2Sequence2D` | Phase 39 (COMPLETED) |
 | **Shader Execution Reordering (SER), Dual-Source Colored Glass & Programmable MSAA Sample Locations** | `PackSERCoherenceHintKey`, `EvaluateDualSourceGlassOutputs` & `TCastleVulkanProgrammableSampleLocations` | Phase 40 (COMPLETED) |
+| **Vulkan 1.4 Dynamic Rendering Local Read, Subgroup Wave Intrinsics & GPU Stream Compaction** | `GenerateDynamicRenderingLocalReadPreamble`, `GenerateSubgroupWaveIntrinsicsFunctions` & `TCastleVulkanStreamCompactor` | Phase 41 (COMPLETED) |
+| **Buffer Device Address (`VK_KHR_buffer_device_address`) & 3D Voxel Cone Tracing (VXGI)** | `GenerateBufferDeviceAddressPreamble`, `GenerateVoxelConeTracingFunctions` & `TCastleVulkanVoxelConeTracer` | Phase 42 (PLANNED) |
+| **GPU Indirect Material Binning, Normal-Variance Specular AA & Rectilinear Shadow Warping** | `EvaluateSpecularAARoughness`, `EvaluateRectilinearShadowWarpUV` & `TCastleVulkanMaterialBinner` | Phase 43 (PLANNED) |
+| **Procedural Bezier Grass Blades, Multi-Channel SDF (MSDF) Text & Per-Pixel Linked List OIT** | `EvaluateMSDFMedianOfThree`, `EvaluateQuadraticBezierGrassBlade` & `TCastleVulkanPerPixelLinkedListOIT` | Phase 44 (PLANNED) |
+| **Vulkan 1.4 Push Descriptors, Host Image Copy (`VK_EXT_host_image_copy`) & Spherical Gaussians** | `ComputeHostImageCopyByteSize`, `GenerateSphericalGaussianFunctions` & `TCastleVulkanHostImageCopyManager` | Phase 45 (PLANNED) |
 
 
 ## 5. Build Tool (castle-engine) & Editor Integration
@@ -688,5 +745,5 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 ## 7. Testing & Verification Criteria
 
 * [x] Automated Visual Regression Tests: `CompareImagesPerceptualDiff` in `CastleInternalRHI` compares framebuffer readbacks (`GrabTextureImage`) between `rbOpenGL` and `rbVulkan` using normalized RMSE perceptual diff thresholds.
-* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 150 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
-* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance/Hi-Z occlusion culling (`TCastleVulkanComputeCuller`), Clustered Forward+ compute light culling (`TCastleVulkanClusteredLightCuller`), Declarative Render Graph (`TRHIRenderGraph`), Compute GTAO (`TCastleVulkanGTAO`), Hi-Z SSR (`TCastleVulkanSSR`), Froxel Volumetric Fog (`TCastleVulkanVolumetricFog`), Temporal Anti-Aliasing (`TCastleVulkanTAA`), Box-Projected Reflection Probes (`TCastleVulkanReflectionProbeManager`), OBB Decal Projection (`TCastleVulkanDecalManager`), GPU Compute Particles (`TCastleVulkanComputeParticles`), Weighted Blended OIT (`TCastleVulkanWeightedBlendedOIT`), Contact Shadows (`TCastleVulkanContactShadows`), Compute Skinning & Morph Targets (`TCastleVulkanComputeSkinner`), GPU-Driven Terrain CDLOD (`TCastleVulkanTerrainCDLOD`), Atmosphere Sky-View LUT (`TCastleVulkanAtmosphereRenderer`), Gerstner Ocean Simulator (`TCastleVulkanOceanSimulator`), DDGI Octahedral Probe Grid (`TCastleVulkanDDGIGrid`), GPU Meshlet Culler (`TCastleVulkanMeshletCuller`), Virtual Shadow Maps (`TCastleVulkanVirtualShadowMap`), GPU-Driven LOD Selector (`TCastleVulkanLODSelector`), GPU Texture Streamer (`TCastleVulkanTextureStreamer`), Shadow Caster Extrusion Culler (`TCastleVulkanShadowCasterCuller`), Nanite Cluster DAG (`TCastleVulkanClusterDAG`), Lumen Global SDF & Surface Cache (`TCastleVulkanGlobalSDF`, `TCastleVulkanSurfaceCache`), ReSTIR Spatio-Temporal Reservoir Resampler (`TCastleVulkanReSTIR`), Temporal Super Resolution Upscaler (`TCastleVulkanTSRUpscaler`), Variable Rate Shading (`TCastleVulkanVRSManager`), Runtime Virtual Texturing (`TCastleVulkanRuntimeVirtualTexture`), Sparse Brick-Atlas Heterogeneous Volumes (`TCastleVulkanSparseVolumeAtlas`), GPU Breadcrumb Crash Tracker (`TCastleVulkanBreadcrumbTracker`), SVGF Spatio-Temporal Wavelet Denoiser (`TCastleVulkanSVGFDenoiser`), Hardware Ray Tracing SBT & Acceleration Structure Compaction (`TCastleVulkanShaderBindingTable`, `TCastleVulkanAccelerationStructureManager`), GPU XPBD Cloth/Hair Simulator (`TCastleVulkanXPBDSimulator`), Single-Pass Stereo Multiview & Foveated VRS Manager (`TCastleVulkanMultiviewStereoManager`), Per-Instance Custom Float4 Payload SSBO (`TCastleVulkanPerInstanceCustomData`), Neural MLP Denoiser (`TCastleVulkanNeuralDenoiser`), Programmable MSAA Sample Locations (`TCastleVulkanProgrammableSampleLocations`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.
+* [x] Validation Cleanliness: Headless test suite (`TTestCastleVulkanRHI`, 153 unit tests) runs cleanly on Linux/WSL and supports `VK_LAYER_KHRONOS_validation`.
+* [x] Performance Target: Batched 2D/3D RHI command recording, push constants, secondary command buffers, bindless texture indexing, extended dynamic state, GPU-driven compute frustum/distance/Hi-Z occlusion culling (`TCastleVulkanComputeCuller`), Clustered Forward+ compute light culling (`TCastleVulkanClusteredLightCuller`), Declarative Render Graph (`TRHIRenderGraph`), Compute GTAO (`TCastleVulkanGTAO`), Hi-Z SSR (`TCastleVulkanSSR`), Froxel Volumetric Fog (`TCastleVulkanVolumetricFog`), Temporal Anti-Aliasing (`TCastleVulkanTAA`), Box-Projected Reflection Probes (`TCastleVulkanReflectionProbeManager`), OBB Decal Projection (`TCastleVulkanDecalManager`), GPU Compute Particles (`TCastleVulkanComputeParticles`), Weighted Blended OIT (`TCastleVulkanWeightedBlendedOIT`), Contact Shadows (`TCastleVulkanContactShadows`), Compute Skinning & Morph Targets (`TCastleVulkanComputeSkinner`), GPU-Driven Terrain CDLOD (`TCastleVulkanTerrainCDLOD`), Atmosphere Sky-View LUT (`TCastleVulkanAtmosphereRenderer`), Gerstner Ocean Simulator (`TCastleVulkanOceanSimulator`), DDGI Octahedral Probe Grid (`TCastleVulkanDDGIGrid`), GPU Meshlet Culler (`TCastleVulkanMeshletCuller`), Virtual Shadow Maps (`TCastleVulkanVirtualShadowMap`), GPU-Driven LOD Selector (`TCastleVulkanLODSelector`), GPU Texture Streamer (`TCastleVulkanTextureStreamer`), Shadow Caster Extrusion Culler (`TCastleVulkanShadowCasterCuller`), Nanite Cluster DAG (`TCastleVulkanClusterDAG`), Lumen Global SDF & Surface Cache (`TCastleVulkanGlobalSDF`, `TCastleVulkanSurfaceCache`), ReSTIR Spatio-Temporal Reservoir Resampler (`TCastleVulkanReSTIR`), Temporal Super Resolution Upscaler (`TCastleVulkanTSRUpscaler`), Variable Rate Shading (`TCastleVulkanVRSManager`), Runtime Virtual Texturing (`TCastleVulkanRuntimeVirtualTexture`), Sparse Brick-Atlas Heterogeneous Volumes (`TCastleVulkanSparseVolumeAtlas`), GPU Breadcrumb Crash Tracker (`TCastleVulkanBreadcrumbTracker`), SVGF Spatio-Temporal Wavelet Denoiser (`TCastleVulkanSVGFDenoiser`), Hardware Ray Tracing SBT & Acceleration Structure Compaction (`TCastleVulkanShaderBindingTable`, `TCastleVulkanAccelerationStructureManager`), GPU XPBD Cloth/Hair Simulator (`TCastleVulkanXPBDSimulator`), Single-Pass Stereo Multiview & Foveated VRS Manager (`TCastleVulkanMultiviewStereoManager`), Per-Instance Custom Float4 Payload SSBO (`TCastleVulkanPerInstanceCustomData`), Neural MLP Denoiser (`TCastleVulkanNeuralDenoiser`), Programmable MSAA Sample Locations (`TCastleVulkanProgrammableSampleLocations`), GPU Parallel Prefix-Sum Stream Compactor (`TCastleVulkanStreamCompactor`), and `vkCmdDrawIndexedIndirect` / `vkCmdDrawIndexedIndirectCount` / `vkCmdDispatchIndirect` minimize CPU driver overhead.
