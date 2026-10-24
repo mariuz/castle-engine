@@ -1800,6 +1800,64 @@ type
       const VerticalRise: Single = 0.0;
       const DualArmPinwheel: Boolean = false;
       const OrientMode: Integer = 1): Boolean;
+
+    { Project / blend all top-level selected transforms (@code(SelectedCount >= 2))
+      onto a 3D Generalized $\ell_p$-Norm Octahedral Diamond / Superquadric Shell
+      centered at the active selection pivot $\mathbf(C)$ with shell radius
+      @code(Radius) ($R$) and norm exponent @code(ExponentP) ($p > 0$):
+      $$\|\mathbf(d)_i\|_p = \left(|d_x|^p + |d_y|^p + |d_z|^p\right)^(1/p), \quad
+        \mathbf(P)^(\text(target))_i = \mathbf(C) + \frac(R)(\|\mathbf(d)_i\|_p)\mathbf(d)_i$$
+      - $p = 1.0$: 3D Octahedron / Diamond shell ($|x| + |y| + |z| = R$)
+      - $p = 0.5$: 3D Astroidal Star-Octahedron shell
+      - $p = 4.0$: 3D Rounded Cube Superquadric shell
+      Blends each transform's world position by @code(Strength) $\in [0, 1]$.
+      When @code(OrientNormals) is @true, orients each transform's forward axis
+      along the analytical outward $\ell_p$ surface normal
+      $\nabla \|\mathbf(d)\|_p^p \propto (\text(sgn)(d_x)|d_x|^(p-1), \text(sgn)(d_y)|d_y|^(p-1), \text(sgn)(d_z)|d_z|^(p-1))$.
+      Returns @true if at least one selected transform was modified. }
+    function OctahedralDeformSelected(
+      const Radius: Single = 0.0;
+      const ExponentP: Single = 1.0;
+      const Strength: Single = 1.0;
+      const OrientNormals: Boolean = true): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      across a 3D Ulisse Dini Pseudospherical Twisted Horn Surface centered at
+      the active selection pivot $\mathbf(C)$ with radial scale @code(RadiusA) ($a$),
+      helical pitch @code(PitchB) ($b$), and @code(Turns) ($W$) revolutions:
+      $$t_i = \frac(i)(N - 1), \quad u_i = 2\pi W t_i, \quad v_i = \frac(\pi)(6) + \frac(\pi)(3)t_i$$
+      $$x_i = C_x + a\cos u_i \sin v_i, \quad z_i = C_z + a\sin u_i \sin v_i, \quad
+        y_i = C_y + a\left(\cos v_i + \ln\tan\frac(v_i)(2)\right) + b u_i$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the analytical 3D Dini spiral curve tangent
+      - @code(2): orient forward horizontally outward from the central $Y$ axis
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedOnDiniSurface(
+      const RadiusA: Single = 0.0;
+      const PitchB: Single = 1.2;
+      const Turns: Single = 2.0;
+      const OrientMode: Integer = 1): Boolean;
+
+    { Arrange all top-level selected transforms (@code(SelectedCount >= 2))
+      along a 3D Euler / Cornu Clothoid S-Curve Spiral centered at the active
+      selection pivot $\mathbf(C)$ with scale length @code(ScaleLength) ($L$),
+      maximum Fresnel parameter @code(MaxParamT) ($T_(\max)$), and vertical span
+      @code(HeightSpan) ($H$):
+      $$s_i = T_(\max)\left(\frac(2i)(N - 1) - 1\right), \quad
+        C(s_i) = \int_0^(s_i)\cos\left(\frac(\pi)(2)\tau^2\right)d\tau, \quad
+        S(s_i) = \int_0^(s_i)\sin\left(\frac(\pi)(2)\tau^2\right)d\tau$$
+      $$x_i = C_x + L \cdot C(s_i), \quad y_i = C_y + H\left(\frac(i)(N - 1) - 0.5\right), \quad z_i = C_z + L \cdot S(s_i)$$
+      @code(OrientMode):
+      - @code(0): keep current rotation
+      - @code(1): orient forward along the exact analytical Cornu tangent $(L\cos(\frac(\pi)(2)s_i^2), \frac(H)(2T_(\max)), L\sin(\frac(\pi)(2)s_i^2))$
+      - @code(2): orient forward along the horizontal principal normal $(-\sin(\frac(\pi)(2)s_i^2), 0, \cos(\frac(\pi)(2)s_i^2))$
+      Returns @true if at least one selected transform was modified. }
+    function ArrangeSelectedInCornuSpiral(
+      const ScaleLength: Single = 0.0;
+      const MaxParamT: Single = 1.6;
+      const HeightSpan: Single = 0.0;
+      const OrientMode: Integer = 1): Boolean;
   end;
 
 var
@@ -13824,6 +13882,408 @@ begin
 
         if LookDir.LengthSqr < 1e-8 then
           LookDir := Vector3(CosT, 0.0, SinT);
+        LookDir := LookDir.Normalize;
+
+        NewUp := Vector3(0, 1, 0);
+        if Abs(TVector3.DotProduct(LookDir, NewUp)) > 0.99 then
+          NewUp := Vector3(1, 0, 0);
+        Side := TVector3.CrossProduct(LookDir, NewUp).Normalize;
+        NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+        T.GetWorldView(CurWorldPos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+
+    if Result then
+    begin
+      if Gizmo[Mode] <> nil then
+        Gizmo[Mode].UpdateSize;
+      GizmoHasTransformModified(Self);
+      GizmoHasTransformModifyEnd(Self);
+    end;
+  finally
+    FreeAndNil(TopLevel);
+  end;
+end;
+
+function TCastleTransformManipulate.OctahedralDeformSelected(
+  const Radius: Single;
+  const ExponentP: Single;
+  const Strength: Single;
+  const OrientNormals: Boolean): Boolean;
+var
+  TopLevel: TCastleTransformList;
+  I, N, ValidCount: Integer;
+  T: TCastleTransform;
+  Center, CurPos, Rel, TargetPos, NewPos, Grad, LookDir, NewUp, Side, CurWorldPos, CurDir, CurUp: TVector3;
+  PExp, ActualStrength, ActualR, SumNorm, LpNorm: Single;
+
+  function SignedPowPMinus1(const V: Single): Single;
+  begin
+    if Abs(V) < 1e-5 then
+      Result := 0.0
+    else if V > 0.0 then
+      Result := Power(V, PExp - 1.0)
+    else
+      Result := -Power(-V, PExp - 1.0);
+  end;
+
+begin
+  Result := false;
+  if SelectedCount < 2 then
+    Exit;
+
+  PExp := Clamped(ExponentP, 0.25, 16.0);
+  ActualStrength := Clamped(Strength, 0.0, 1.0);
+  if (ActualStrength < 1e-6) and (not OrientNormals) then
+    Exit;
+
+  TopLevel := TCastleTransformList.Create(false);
+  try
+    for I := 0 to SelectedCount - 1 do
+    begin
+      T := Selected[I];
+      if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+        TopLevel.Add(T);
+    end;
+
+    N := TopLevel.Count;
+    if N < 2 then
+      Exit;
+
+    if (FPivotMode = pmPrimarySelected) and (TopLevel[0] <> nil) then
+      Center := GetTransformWorkingPos(TopLevel[0])
+    else
+      Center := SelectionWorkingCenter;
+
+    if Radius > 1e-4 then
+      ActualR := Radius
+    else
+    begin
+      SumNorm := 0.0;
+      ValidCount := 0;
+      for I := 0 to N - 1 do
+      begin
+        Rel := GetTransformWorkingPos(TopLevel[I]) - Center;
+        LpNorm := Power(
+          Power(Abs(Rel.X), PExp) +
+          Power(Abs(Rel.Y), PExp) +
+          Power(Abs(Rel.Z), PExp), 1.0 / PExp);
+        if LpNorm > 1e-4 then
+        begin
+          SumNorm := SumNorm + LpNorm;
+          Inc(ValidCount);
+        end;
+      end;
+      if ValidCount > 0 then
+        ActualR := SumNorm / ValidCount
+      else
+        ActualR := 10.0;
+    end;
+
+    for I := 0 to N - 1 do
+    begin
+      T := TopLevel[I];
+      CurPos := GetTransformWorkingPos(T);
+      Rel := CurPos - Center;
+      LpNorm := Power(
+        Power(Abs(Rel.X), PExp) +
+        Power(Abs(Rel.Y), PExp) +
+        Power(Abs(Rel.Z), PExp), 1.0 / PExp);
+
+      if LpNorm > 1e-5 then
+      begin
+        TargetPos := Center + Rel * (ActualR / LpNorm);
+        NewPos := Lerp(ActualStrength, CurPos, TargetPos);
+        if not TVector3.Equals(CurPos, NewPos, 1e-5) then
+        begin
+          SetTransformWorkingPos(T, NewPos);
+          Result := true;
+        end;
+
+        if OrientNormals and T.HasWorldTransform then
+        begin
+          Grad := Vector3(
+            SignedPowPMinus1(Rel.X),
+            SignedPowPMinus1(Rel.Y),
+            SignedPowPMinus1(Rel.Z));
+          if Grad.LengthSqr < 1e-8 then
+            LookDir := Rel.Normalize
+          else
+            LookDir := Grad.Normalize;
+
+          NewUp := Vector3(0, 1, 0);
+          if Abs(TVector3.DotProduct(LookDir, NewUp)) > 0.99 then
+            NewUp := Vector3(1, 0, 0);
+          Side := TVector3.CrossProduct(LookDir, NewUp).Normalize;
+          NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+          T.GetWorldView(CurWorldPos, CurDir, CurUp);
+          if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+             (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+          begin
+            T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+            Result := true;
+          end;
+        end;
+      end;
+    end;
+
+    if Result then
+    begin
+      if Gizmo[Mode] <> nil then
+        Gizmo[Mode].UpdateSize;
+      GizmoHasTransformModified(Self);
+      GizmoHasTransformModifyEnd(Self);
+    end;
+  finally
+    FreeAndNil(TopLevel);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedOnDiniSurface(
+  const RadiusA: Single;
+  const PitchB: Single;
+  const Turns: Single;
+  const OrientMode: Integer): Boolean;
+var
+  TopLevel: TCastleTransformList;
+  I, N: Integer;
+  T: TCastleTransform;
+  Center, CurPos, NewPos, LookDir, NewUp, Side, CurWorldPos, CurDir, CurUp: TVector3;
+  AutoA, ActualA, ActualW, TParam, UParam, VParam, SinU, CosU, SinV, CosV, TanHalfV: Single;
+  DUDT, DVDT, DX, DY, DZ: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then
+    Exit;
+
+  TopLevel := TCastleTransformList.Create(false);
+  try
+    for I := 0 to SelectedCount - 1 do
+    begin
+      T := Selected[I];
+      if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+        TopLevel.Add(T);
+    end;
+
+    N := TopLevel.Count;
+    if N < 2 then
+      Exit;
+
+    if (FPivotMode = pmPrimarySelected) and (TopLevel[0] <> nil) then
+      Center := GetTransformWorkingPos(TopLevel[0])
+    else
+      Center := SelectionWorkingCenter;
+
+    if RadiusA > 1e-4 then
+      ActualA := RadiusA
+    else
+    begin
+      AutoA := 0.0;
+      for I := 0 to N - 1 do
+      begin
+        CurPos := GetTransformWorkingPos(TopLevel[I]);
+        AutoA := Max(AutoA, Hypot(CurPos.X - Center.X, CurPos.Z - Center.Z));
+      end;
+      if AutoA < 1e-4 then
+        AutoA := 8.0;
+      ActualA := AutoA;
+    end;
+
+    if Abs(Turns) < 1e-4 then
+      ActualW := 1.0
+    else
+      ActualW := Turns;
+
+    DUDT := 2.0 * Pi * ActualW;
+    DVDT := Pi / 3.0;
+
+    for I := 0 to N - 1 do
+    begin
+      T := TopLevel[I];
+      CurPos := GetTransformWorkingPos(T);
+      TParam := I / (N - 1);
+      UParam := DUDT * TParam;
+      VParam := (Pi / 6.0) + DVDT * TParam;
+      SinCos(UParam, SinU, CosU);
+      SinCos(VParam, SinV, CosV);
+      TanHalfV := Max(1e-5, Tan(0.5 * VParam));
+
+      NewPos.X := Center.X + ActualA * CosU * SinV;
+      NewPos.Z := Center.Z + ActualA * SinU * SinV;
+      NewPos.Y := Center.Y + ActualA * (CosV + Ln(TanHalfV)) + PitchB * UParam;
+
+      if not TVector3.Equals(CurPos, NewPos, 1e-5) then
+      begin
+        SetTransformWorkingPos(T, NewPos);
+        Result := true;
+      end;
+
+      if (OrientMode in [1, 2]) and T.HasWorldTransform then
+      begin
+        if OrientMode = 1 then
+        begin
+          DX := ActualA * (-SinU * DUDT * SinV + CosU * CosV * DVDT);
+          DZ := ActualA * (CosU * DUDT * SinV + SinU * CosV * DVDT);
+          DY := ActualA * (-SinV + (1.0 / Max(1e-4, SinV))) * DVDT + PitchB * DUDT;
+          LookDir := Vector3(DX, DY, DZ);
+        end else
+        begin
+          LookDir := Vector3(CosU, 0.0, SinU);
+        end;
+
+        if LookDir.LengthSqr < 1e-8 then
+          LookDir := Vector3(CosU, 0.0, SinU);
+        LookDir := LookDir.Normalize;
+
+        NewUp := Vector3(0, 1, 0);
+        if Abs(TVector3.DotProduct(LookDir, NewUp)) > 0.99 then
+          NewUp := Vector3(1, 0, 0);
+        Side := TVector3.CrossProduct(LookDir, NewUp).Normalize;
+        NewUp := TVector3.CrossProduct(Side, LookDir).Normalize;
+
+        T.GetWorldView(CurWorldPos, CurDir, CurUp);
+        if (not TVector3.Equals(CurDir, LookDir, 1e-4)) or
+           (not TVector3.Equals(CurUp, NewUp, 1e-4)) then
+        begin
+          T.SetWorldView(GetTransformWorkingPos(T), LookDir, NewUp);
+          Result := true;
+        end;
+      end;
+    end;
+
+    if Result then
+    begin
+      if Gizmo[Mode] <> nil then
+        Gizmo[Mode].UpdateSize;
+      GizmoHasTransformModified(Self);
+      GizmoHasTransformModifyEnd(Self);
+    end;
+  finally
+    FreeAndNil(TopLevel);
+  end;
+end;
+
+function TCastleTransformManipulate.ArrangeSelectedInCornuSpiral(
+  const ScaleLength: Single;
+  const MaxParamT: Single;
+  const HeightSpan: Single;
+  const OrientMode: Integer): Boolean;
+
+  procedure EvalFresnel(const SVal: Single; out FresnelC, FresnelS: Single);
+  const
+    Steps = 64;
+  var
+    K: Integer;
+    HStep, Tau, Angle, Weight, SumC, SumS: Double;
+  begin
+    if Abs(SVal) < 1e-7 then
+    begin
+      FresnelC := 0.0;
+      FresnelS := 0.0;
+      Exit;
+    end;
+    HStep := SVal / Steps;
+    SumC := 0.0;
+    SumS := 0.0;
+    for K := 0 to Steps do
+    begin
+      Tau := K * HStep;
+      Angle := 0.5 * Pi * Sqr(Tau);
+      if (K = 0) or (K = Steps) then
+        Weight := 1.0
+      else if (K mod 2) = 1 then
+        Weight := 4.0
+      else
+        Weight := 2.0;
+      SumC := SumC + Weight * Cos(Angle);
+      SumS := SumS + Weight * Sin(Angle);
+    end;
+    FresnelC := (HStep / 3.0) * SumC;
+    FresnelS := (HStep / 3.0) * SumS;
+  end;
+
+var
+  TopLevel: TCastleTransformList;
+  I, N: Integer;
+  T: TCastleTransform;
+  Center, CurPos, NewPos, LookDir, NewUp, Side, CurWorldPos, CurDir, CurUp: TVector3;
+  AutoL, ActualL, ActualTMax, UParam, SVal, FC, FS, Phase, SinP, CosP: Single;
+begin
+  Result := false;
+  if SelectedCount < 2 then
+    Exit;
+
+  TopLevel := TCastleTransformList.Create(false);
+  try
+    for I := 0 to SelectedCount - 1 do
+    begin
+      T := Selected[I];
+      if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+        TopLevel.Add(T);
+    end;
+
+    N := TopLevel.Count;
+    if N < 2 then
+      Exit;
+
+    if (FPivotMode = pmPrimarySelected) and (TopLevel[0] <> nil) then
+      Center := GetTransformWorkingPos(TopLevel[0])
+    else
+      Center := SelectionWorkingCenter;
+
+    ActualTMax := Clamped(Abs(MaxParamT), 0.2, 3.5);
+    if ScaleLength > 1e-4 then
+      ActualL := ScaleLength
+    else
+    begin
+      AutoL := 0.0;
+      for I := 0 to N - 1 do
+      begin
+        CurPos := GetTransformWorkingPos(TopLevel[I]);
+        AutoL := Max(AutoL, Hypot(CurPos.X - Center.X, CurPos.Z - Center.Z));
+      end;
+      if AutoL < 1e-4 then
+        AutoL := 10.0;
+      ActualL := AutoL;
+    end;
+
+    for I := 0 to N - 1 do
+    begin
+      T := TopLevel[I];
+      CurPos := GetTransformWorkingPos(T);
+      UParam := I / (N - 1);
+      SVal := ActualTMax * (2.0 * UParam - 1.0);
+      EvalFresnel(SVal, FC, FS);
+
+      NewPos.X := Center.X + ActualL * FC;
+      NewPos.Y := Center.Y + HeightSpan * (UParam - 0.5);
+      NewPos.Z := Center.Z + ActualL * FS;
+
+      if not TVector3.Equals(CurPos, NewPos, 1e-5) then
+      begin
+        SetTransformWorkingPos(T, NewPos);
+        Result := true;
+      end;
+
+      if (OrientMode in [1, 2]) and T.HasWorldTransform then
+      begin
+        Phase := 0.5 * Pi * Sqr(SVal);
+        SinCos(Phase, SinP, CosP);
+        if OrientMode = 1 then
+          LookDir := Vector3(ActualL * CosP, HeightSpan / (2.0 * ActualTMax), ActualL * SinP)
+        else
+          LookDir := Vector3(-SinP, 0.0, CosP);
+
+        if LookDir.LengthSqr < 1e-8 then
+          LookDir := Vector3(1.0, 0.0, 0.0);
         LookDir := LookDir.Normalize;
 
         NewUp := Vector3(0, 1, 0);
