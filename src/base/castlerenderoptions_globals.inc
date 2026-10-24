@@ -516,6 +516,50 @@ type
     aa16SamplesNicer   //< 16 samples, "nicest" hint.
   );
 
+  { High-level Global Illumination modes for TCastleViewport on the Vulkan RHI backend. }
+  TGlobalIlluminationMode = (
+    giNone,
+    giDDGIProbes,
+    giVoxelConeTracing,
+    giLumenSDFAndSurfaceCache,
+    giReSTIRGI
+  );
+
+  { High-level Temporal Anti-Aliasing & Super Resolution modes for TCastleViewport. }
+  TTemporalAntiAliasingMode = (
+    taaNone,
+    taaStandardTAA,
+    taaTSRUpscaler
+  );
+
+  { Order-Independent Transparency (OIT) & Alpha Blending modes for TCastleRenderOptions. }
+  TTransparencyMode = (
+    tmAlphaBlending,
+    tmWeightedBlendedOIT,
+    tmPerPixelLinkedListOIT
+  );
+
+  { Hardware / Tile Variable Rate Shading (VRS) modes for TCastleViewport. }
+  TVariableRateShadingMode = (
+    vrsNone,
+    vrsContrastAdaptive,
+    vrsFoveatedStereo
+  );
+
+  { Next-gen shadow map architecture modes for TCastleRenderOptions. }
+  TShadowMapSystemMode = (
+    smsStandardShadowMaps,
+    smsPCSSContactHardening,
+    smsVirtualShadowMaps
+  );
+
+  { Next-gen HDR tone-mapping and wide-gamut display output modes for TCastleViewport. }
+  TNextGenToneMappingMode = (
+    ntmStandard,
+    ntmAgXGamutCompressed,
+    ntmHDR10Rec2020PQ
+  );
+
 const
   DefaultAntiAliasing = aaNone;
   aa2SamplesRegular = aa2SamplesFaster;

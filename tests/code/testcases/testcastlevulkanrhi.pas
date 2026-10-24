@@ -228,6 +228,9 @@ type
     procedure TestSecantRefinedPOMIntersectionRHI;
     procedure TestCauchyChromaticDispersionRefractiveIndexRHI;
     procedure TestVulkanPipelineBinaryManagerStoreAndLookupRHI;
+    procedure TestRenderOptionsNextGenPropertiesAndHashingRHI;
+    procedure TestViewportCameraEV100AndNextGenPropertiesRHI;
+    procedure TestViewportExecuteVulkanSubsystemsOrchestrationRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -10994,6 +10997,117 @@ begin
     AssertEquals('FoundSize for Key1 must be 4096', 4096, Integer(FoundSize));
     AssertEquals('CacheHitCount must be 1', 1, Integer(Device.PipelineBinaryManager.CacheHitCount));
   finally
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRenderOptionsNextGenPropertiesAndHashingRHI;
+var
+  Opts1, Opts2: TCastleRenderOptions;
+begin
+  Opts1 := TCastleRenderOptions.Create(nil);
+  Opts2 := TCastleRenderOptions.Create(nil);
+  try
+    { 1. Verify defaults }
+    AssertTrue('Default SpecularAntiAliasing must be True', Opts1.SpecularAntiAliasing);
+    AssertFalse('Default DualQuaternionSkinning must be False', Opts1.DualQuaternionSkinning);
+    AssertFalse('Default GpuDrivenMeshletCulling must be False', Opts1.GpuDrivenMeshletCulling);
+    AssertEquals('Default TransparencyMode must be tmAlphaBlending',
+      Ord(tmAlphaBlending), Ord(Opts1.TransparencyMode));
+    AssertEquals('Default ShadowMapSystemMode must be smsStandardShadowMaps',
+      Ord(smsStandardShadowMaps), Ord(Opts1.ShadowMapSystemMode));
+    AssertTrue('Identical default TCastleRenderOptions must be Equals', Opts1.Equals(Opts2));
+
+    { 2. Verify hash changes and Assign }
+    Opts1.SpecularAntiAliasing := False;
+    Opts1.DualQuaternionSkinning := True;
+    Opts1.GpuDrivenMeshletCulling := True;
+    Opts1.TransparencyMode := tmPerPixelLinkedListOIT;
+    Opts1.ShadowMapSystemMode := smsVirtualShadowMaps;
+    AssertFalse('Modified TCastleRenderOptions must not equal default', Opts1.Equals(Opts2));
+
+    Opts2.Assign(Opts1);
+    AssertTrue('Assigned TCastleRenderOptions must equal source', Opts1.Equals(Opts2));
+    AssertFalse('Assigned SpecularAntiAliasing must be False', Opts2.SpecularAntiAliasing);
+    AssertTrue('Assigned DualQuaternionSkinning must be True', Opts2.DualQuaternionSkinning);
+    AssertTrue('Assigned GpuDrivenMeshletCulling must be True', Opts2.GpuDrivenMeshletCulling);
+    AssertEquals('Assigned TransparencyMode must be tmPerPixelLinkedListOIT',
+      Ord(tmPerPixelLinkedListOIT), Ord(Opts2.TransparencyMode));
+    AssertEquals('Assigned ShadowMapSystemMode must be smsVirtualShadowMaps',
+      Ord(smsVirtualShadowMaps), Ord(Opts2.ShadowMapSystemMode));
+  finally
+    FreeAndNil(Opts2);
+    FreeAndNil(Opts1);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportCameraEV100AndNextGenPropertiesRHI;
+var
+  Viewport: TCastleViewport;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  try
+    { 1. Verify default next-gen viewport properties }
+    AssertEquals('Default GlobalIlluminationMode must be giNone',
+      Ord(giNone), Ord(Viewport.GlobalIlluminationMode));
+    AssertEquals('Default TemporalAntiAliasingMode must be taaNone',
+      Ord(taaNone), Ord(Viewport.TemporalAntiAliasingMode));
+    AssertEquals('Default VariableRateShadingMode must be vrsNone',
+      Ord(vrsNone), Ord(Viewport.VariableRateShadingMode));
+    AssertEquals('Default NextGenToneMappingMode must be ntmStandard',
+      Ord(ntmStandard), Ord(Viewport.NextGenToneMappingMode));
+    AssertFalse('Default VolumetricFogEnabled must be False', Viewport.VolumetricFogEnabled);
+    AssertFalse('Default AutoExposureEnabled must be False', Viewport.AutoExposureEnabled);
+
+    { 2. Verify f/1.0, 1.0s, ISO 100 -> EV100 = 0.0, ExposureMultiplier = 1/1.2 }
+    Viewport.CameraApertureFStops := 1.0;
+    Viewport.CameraShutterSeconds := 1.0;
+    Viewport.CameraISO := 100.0;
+    AssertSameValue(0.0, Viewport.EvaluateCurrentCameraEV100, 1e-5);
+    AssertSameValue(1.0 / 1.2, Viewport.EvaluateCurrentCameraExposureMultiplier, 1e-5);
+  finally
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportExecuteVulkanSubsystemsOrchestrationRHI;
+var
+  SavedRHI: TRHIDevice;
+  Device: TVulkanRHIDevice;
+  Viewport: TCastleViewport;
+  ExecutedPasses: Cardinal;
+begin
+  SavedRHI := RHIDevice;
+  Device := TVulkanRHIDevice.CreateHeadless( VkPhysicalDevice(PtrUInt($6680)) );
+  Viewport := TCastleViewport.Create(nil);
+  try
+    SetRHIDevice(Device);
+    Viewport.Width := 320;
+    Viewport.Height := 180;
+    Viewport.ScreenSpaceAmbientOcclusion := True;
+    Viewport.ScreenSpaceReflections := True;
+    Viewport.VolumetricFogEnabled := True;
+    Viewport.GlobalIlluminationMode := giLumenSDFAndSurfaceCache;
+    Viewport.TemporalAntiAliasingMode := taaTSRUpscaler;
+    Viewport.VariableRateShadingMode := vrsContrastAdaptive;
+    Viewport.AutoExposureEnabled := True;
+    Viewport.TargetFrameRateHz := 120.0;
+
+    ExecutedPasses := Viewport.ExecuteVulkanViewportSubsystems(nil, 0.005);
+    AssertEquals('All 8 enabled Vulkan viewport subsystems must execute', 8, Integer(ExecutedPasses));
+    AssertTrue('Hi-Z pyramid must be built', Device.HiZPyramidGenerator.BuildDispatchCount >= 1);
+    AssertTrue('GlobalSDF must be built', Device.GlobalSDF.BuildCount >= 1);
+    AssertTrue('SurfaceCache AlbedoAtlasTexture must be allocated',
+      Device.SurfaceCache.AlbedoAtlasTexture <> nil);
+    AssertEquals('TSRUpscaler DispatchCount must be 1', 1, Integer(Device.TSRUpscaler.DispatchCount));
+    AssertEquals('VRSManager DispatchCount must be 1', 1, Integer(Device.VRSManager.DispatchCount));
+    AssertEquals('AutoExposureHistogram DispatchCount must be 1',
+      1, Integer(Device.AutoExposureHistogram.DispatchCount));
+    AssertEquals('FramePacer PacedFrameCount must be 1',
+      1, Integer(Device.FramePacer.PacedFrameCount));
+  finally
+    SetRHIDevice(SavedRHI);
+    FreeAndNil(Viewport);
     FreeAndNil(Device);
   end;
 end;

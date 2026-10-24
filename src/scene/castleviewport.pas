@@ -167,6 +167,16 @@ type
       FBlendingSort: TShapeSort;
       FOnCustomShapeSort: TShapeSortEvent;
       FUpdateSoundListener: Boolean;
+      FGlobalIlluminationMode: TGlobalIlluminationMode;
+      FTemporalAntiAliasingMode: TTemporalAntiAliasingMode;
+      FVariableRateShadingMode: TVariableRateShadingMode;
+      FNextGenToneMappingMode: TNextGenToneMappingMode;
+      FVolumetricFogEnabled: Boolean;
+      FAutoExposureEnabled: Boolean;
+      FCameraApertureFStops: Single;
+      FCameraShutterSeconds: Single;
+      FCameraISO: Single;
+      FTargetFrameRateHz: Single;
 
       AllShapesCollector, FilteredShapesCollector: TShapesCollector;
       ShapesRenderer: TShapesRenderer;
@@ -610,6 +620,20 @@ type
 
     { Statistics about last rendering frame. See TRenderStatistics docs. }
     function Statistics: TRenderStatistics;
+
+    { Evaluates photographic EV100 from CameraApertureFStops, CameraShutterSeconds, and CameraISO. }
+    function EvaluateCurrentCameraEV100: Single;
+
+    { Evaluates ISO 12232 saturation-based linear exposure multiplier from EvaluateCurrentCameraEV100. }
+    function EvaluateCurrentCameraExposureMultiplier: Single;
+
+    { Executes all enabled high-level Vulkan RHI viewport subsystems (GTAO, SSR,
+      Volumetric Fog, Global Illumination, TAA/TSR, VRS, Auto-Exposure Histogram,
+      and Frame Pacer) on RHIDevice when running on TVulkanRHIDevice, returning
+      the number of active subsystem passes executed. }
+    function ExecuteVulkanViewportSubsystems(
+      const ACommandList: TObject = nil;
+      const ADeltaTimeSeconds: Single = 0.016667): Cardinal;
 
     { Background color.
       Displayed only if @link(Background) is @nil and
@@ -1375,6 +1399,47 @@ type
     property UpdateSoundListener: Boolean
       read FUpdateSoundListener write FUpdateSoundListener default true;
 
+    { High-level Global Illumination mode (DDGI Probes, Voxel Cone Tracing,
+      Lumen Global SDF + Surface Cache, or ReSTIR GI) on the Vulkan RHI backend. }
+    property GlobalIlluminationMode: TGlobalIlluminationMode
+      read FGlobalIlluminationMode write FGlobalIlluminationMode default giNone;
+
+    { High-level Temporal Anti-Aliasing or Temporal Super Resolution (TSR) upscaling mode. }
+    property TemporalAntiAliasingMode: TTemporalAntiAliasingMode
+      read FTemporalAntiAliasingMode write FTemporalAntiAliasingMode default taaNone;
+
+    { Hardware / tile-based Variable Rate Shading (VRS) mode. }
+    property VariableRateShadingMode: TVariableRateShadingMode
+      read FVariableRateShadingMode write FVariableRateShadingMode default vrsNone;
+
+    { Next-gen HDR tone-mapping and gamut compression mode (Standard, AgX, or HDR10 PQ). }
+    property NextGenToneMappingMode: TNextGenToneMappingMode
+      read FNextGenToneMappingMode write FNextGenToneMappingMode default ntmStandard;
+
+    { Enables 3D Froxel Volumetric Fog injection and Beer-Lambert ray-marching on the Vulkan RHI backend. }
+    property VolumetricFogEnabled: Boolean
+      read FVolumetricFogEnabled write FVolumetricFogEnabled default false;
+
+    { Enables 64-bin GPU log-luminance histogram auto-exposure adaptation on the Vulkan RHI backend. }
+    property AutoExposureEnabled: Boolean
+      read FAutoExposureEnabled write FAutoExposureEnabled default false;
+
+    { Physical camera aperture in f-stops (N, default 16.0 for Sunny 16 rule) used for EV100 calculation. }
+    property CameraApertureFStops: Single
+      read FCameraApertureFStops write FCameraApertureFStops;
+
+    { Physical camera shutter time in seconds (t, default 0.008s = 1/125s) used for EV100 calculation. }
+    property CameraShutterSeconds: Single
+      read FCameraShutterSeconds write FCameraShutterSeconds;
+
+    { Physical camera sensor ISO sensitivity (S, default 100.0) used for EV100 calculation. }
+    property CameraISO: Single
+      read FCameraISO write FCameraISO;
+
+    { Target display refresh rate in Hz (0 = unpaced) for TCastleVulkanFramePacer. }
+    property TargetFrameRateHz: Single
+      read FTargetFrameRateHz write FTargetFrameRateHz;
+
   {$define read_interface_class}
   {$I auto_generated_persistent_vectors/tcastleviewport_persistent_vectors.inc}
   {$undef read_interface_class}
@@ -1414,7 +1479,7 @@ uses DOM, Math, TypInfo,
   CastleSoundEngine, CastleGLVersion, CastleTextureImages, X3DFields,
   CastleInternalSettings, CastleXmlUtils, CastleUriUtils, CastleInternalRenderer,
   CastleRenderContext, CastleApplicationProperties, X3DLoad, CastleInternalGLUtils,
-  CastleInternalRHI, CastleInternalRHI_Vulkan;
+  CastleInternalRHI, CastleInternalShaderRHI, CastleInternalRHI_Vulkan;
 
 {$define read_implementation}
 {$I castleviewport_autonavigation.inc}
@@ -1515,6 +1580,16 @@ begin
   FilteredShapesCollector := TShapesCollector.Create(false);
   ShapesRenderer := TShapesRenderer.Create;
   FUpdateSoundListener := true;
+  FGlobalIlluminationMode := giNone;
+  FTemporalAntiAliasingMode := taaNone;
+  FVariableRateShadingMode := vrsNone;
+  FNextGenToneMappingMode := ntmStandard;
+  FVolumetricFogEnabled := false;
+  FAutoExposureEnabled := false;
+  FCameraApertureFStops := 16.0;
+  FCameraShutterSeconds := 0.008;
+  FCameraISO := 100.0;
+  FTargetFrameRateHz := 0.0;
 
   FItems := TCastleRootTransform.Create(Self);
   FItems.SetSubComponent(true);
@@ -2992,6 +3067,7 @@ begin
   RenderFromView3D(FRenderParams);
   if RHIDevice is TVulkanRHIDevice then
   begin
+    ExecuteVulkanViewportSubsystems(ActiveCommandList);
     FRenderParams.Statistics.ActiveBackend := 'Vulkan 1.3';
     FRenderParams.Statistics.PipelineCacheHits := TVulkanRHIDevice(RHIDevice).PipelineCacheHits;
     FRenderParams.Statistics.PipelineCacheMisses := TVulkanRHIDevice(RHIDevice).PipelineCacheMisses;
@@ -3350,6 +3426,162 @@ function TCastleViewport.Statistics: TRenderStatistics;
 begin
   UpdateVulkanRHIRenderStatistics(FRenderParams.Statistics);
   Result := FRenderParams.Statistics;
+end;
+
+function TCastleViewport.EvaluateCurrentCameraEV100: Single;
+begin
+  Result := TCastleShaderGeneratorRHI.EvaluateEV100FromCameraSettings(
+    FCameraApertureFStops, FCameraShutterSeconds, FCameraISO);
+end;
+
+function TCastleViewport.EvaluateCurrentCameraExposureMultiplier: Single;
+begin
+  Result := TCastleShaderGeneratorRHI.EvaluateExposureMultiplierFromEV100(
+    EvaluateCurrentCameraEV100);
+end;
+
+function TCastleViewport.ExecuteVulkanViewportSubsystems(
+  const ACommandList: TObject;
+  const ADeltaTimeSeconds: Single): Cardinal;
+var
+  VkDev: TVulkanRHIDevice;
+  VkCmd: TVulkanRHICommandList;
+  OwnedCmd: Boolean;
+  ViewW, ViewH: Cardinal;
+begin
+  Result := 0;
+  if not (RHIDevice is TVulkanRHIDevice) then
+    Exit;
+
+  VkDev := TVulkanRHIDevice(RHIDevice);
+  OwnedCmd := False;
+  if ACommandList is TVulkanRHICommandList then
+    VkCmd := TVulkanRHICommandList(ACommandList)
+  else if ActiveCommandList is TVulkanRHICommandList then
+    VkCmd := TVulkanRHICommandList(ActiveCommandList)
+  else
+  begin
+    VkCmd := TVulkanRHICommandList.Create(VkDev, VkDev.GraphicsQueueFamily);
+    VkCmd.BeginRecording;
+    OwnedCmd := True;
+  end;
+
+  try
+    ViewW := Max(Cardinal(64), Cardinal(Round(Max(64.0, EffectiveWidth))));
+    ViewH := Max(Cardinal(64), Cardinal(Round(Max(64.0, EffectiveHeight))));
+
+    { 1. Screen-Space Ambient Occlusion (GTAO) + Hi-Z Depth Pyramid }
+    if FScreenSpaceAmbientOcclusion then
+    begin
+      VkDev.HiZPyramidGenerator.DispatchHiZPyramidBuild(VkCmd, ViewW, ViewH);
+      VkDev.GTAO.EnsureGTAOTargets(ViewW, ViewH);
+      VkDev.GTAO.DispatchGTAO(VkCmd, VkDev.HiZPyramidGenerator.HiZPyramidTexture);
+      Inc(Result);
+    end;
+
+    { 2. Screen-Space Reflections (Hi-Z SSR) }
+    if FScreenSpaceReflections then
+    begin
+      VkDev.HiZPyramidGenerator.DispatchHiZPyramidBuild(VkCmd, ViewW, ViewH);
+      VkDev.HDRPostProcessor.EnsureHDRTargets(ViewW, ViewH);
+      VkDev.SSR.EnsureSSRTarget(ViewW, ViewH);
+      VkDev.SSR.DispatchSSR(VkCmd, VkDev.HDRPostProcessor.HDRSceneTexture,
+        VkDev.HiZPyramidGenerator.HiZPyramidTexture);
+      Inc(Result);
+    end;
+
+    { 3. 3D Froxel Volumetric Fog }
+    if FVolumetricFogEnabled then
+    begin
+      VkDev.VolumetricFog.EnsureFroxelVolumes;
+      VkDev.VolumetricFog.DispatchVolumetricFog(VkCmd);
+      Inc(Result);
+    end;
+
+    { 4. Global Illumination Mode (DDGI / VXGI / Lumen Global SDF + Surface Cache / ReSTIR GI) }
+    case FGlobalIlluminationMode of
+      giDDGIProbes:
+        begin
+          VkDev.DDGIGrid.EnsureProbeAtlases;
+          VkDev.DDGIGrid.DispatchDDGIUpdate(VkCmd);
+          Inc(Result);
+        end;
+      giVoxelConeTracing:
+        begin
+          VkDev.VoxelConeTracer.DispatchVoxelConeTrace(VkCmd, ViewW, ViewH);
+          Inc(Result);
+        end;
+      giLumenSDFAndSurfaceCache:
+        begin
+          VkDev.GlobalSDF.DispatchGlobalSDFBuild(VkCmd, 32);
+          VkDev.SurfaceCache.EnsureAtlasTextures;
+          Inc(Result);
+        end;
+      giReSTIRGI:
+        begin
+          VkDev.ReSTIR.EnsureReservoirBuffers(ViewW, ViewH);
+          VkDev.ReSTIR.DispatchSpatioTemporalResampling(VkCmd, ViewW, ViewH);
+          Inc(Result);
+        end;
+      else ;
+    end;
+
+    { 5. Temporal Anti-Aliasing (TAA) or Temporal Super Resolution (TSR) }
+    case FTemporalAntiAliasingMode of
+      taaStandardTAA:
+        begin
+          VkDev.HDRPostProcessor.EnsureHDRTargets(ViewW, ViewH);
+          VkDev.TAA.EnsureTAATargets(ViewW, ViewH);
+          VkDev.TAA.DispatchTAAResolve(VkCmd, VkDev.HDRPostProcessor.HDRSceneTexture, VkDev.FrameIndex);
+          Inc(Result);
+        end;
+      taaTSRUpscaler:
+        begin
+          VkDev.TSRUpscaler.EnsureUpscaleTargets(ViewW, ViewH);
+          VkDev.TSRUpscaler.DispatchTSRUpscale(VkCmd, ViewW, ViewH);
+          Inc(Result);
+        end;
+      else ;
+    end;
+
+    { 6. Variable Rate Shading (Contrast-Adaptive Tile VRS or Foveated Stereo Multiview) }
+    case FVariableRateShadingMode of
+      vrsContrastAdaptive:
+        begin
+          VkDev.VRSManager.EnsureShadingRateImage(ViewW, ViewH);
+          VkDev.VRSManager.DispatchVRSImageGeneration(VkCmd, ViewW, ViewH);
+          Inc(Result);
+        end;
+      vrsFoveatedStereo:
+        begin
+          VkDev.MultiviewStereoManager.EnsureStereoTargets(ViewW div 2, ViewH);
+          Inc(Result);
+        end;
+      else ;
+    end;
+
+    { 7. GPU 64-Bin Luminance Histogram Auto-Exposure }
+    if FAutoExposureEnabled then
+    begin
+      VkDev.AutoExposureHistogram.DispatchHistogramAutoExposure(
+        VkCmd, ViewW, ViewH, EvaluateCurrentCameraEV100, ADeltaTimeSeconds, 3.0);
+      Inc(Result);
+    end;
+
+    { 8. Target Refresh-Rate Frame Pacing }
+    if FTargetFrameRateHz > 0.0 then
+    begin
+      VkDev.FramePacer.TargetRefreshHz := FTargetFrameRateHz;
+      VkDev.FramePacer.RecordFramePresentTiming(ADeltaTimeSeconds * 1000.0);
+      Inc(Result);
+    end;
+  finally
+    if OwnedCmd then
+    begin
+      VkCmd.EndRecording;
+      FreeAndNil(VkCmd);
+    end;
+  end;
 end;
 
 procedure TCastleViewport.Setup2D;
@@ -4378,7 +4610,10 @@ begin
   if ArrayContainsString(PropertyName, [
         'Transparent', 'Camera', 'Navigation', 'Background',
         'Fog', 'BackgroundColorPersistent', 'DynamicBatching', 'Items',
-        'OcclusionSort', 'OcclusionCulling', 'BlendingSort'
+        'OcclusionSort', 'OcclusionCulling', 'BlendingSort',
+        'GlobalIlluminationMode', 'TemporalAntiAliasingMode', 'VariableRateShadingMode',
+        'NextGenToneMappingMode', 'VolumetricFogEnabled', 'AutoExposureEnabled',
+        'CameraApertureFStops', 'CameraShutterSeconds', 'CameraISO', 'TargetFrameRateHz'
       ]) then
     Result := [psBasic]
   else

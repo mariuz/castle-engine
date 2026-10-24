@@ -77,8 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–52**: **COMPLETED** (100%).
-- **Phase 53 (Secant-Refined POM, Spectral Cauchy Chromatic Dispersion & Vulkan 1.4 Pipeline Binary Manager)**: **COMPLETED** (100%, 189 unit tests passing):
-  - [x] **53.1. Secant-Refined Parallax Occlusion Mapping (`GenerateParallaxOcclusionMappingFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestSecantRefinedPOMIntersectionRHI`).
-  - [x] **53.2. Physically Based Spectral Cauchy Chromatic Dispersion (`GenerateChromaticDispersionFlareFunctions` in `CastleInternalShaderRHI`)** — Completed & tested (`TestCauchyChromaticDispersionRefractiveIndexRHI`).
-  - [x] **53.3. Vulkan 1.4 Pipeline Binary Manager (`TCastleVulkanPipelineBinaryManager` in `CastleInternalRHI_Vulkan`)** — Completed & tested (`TestVulkanPipelineBinaryManagerStoreAndLookupRHI`).
+- **Phases 1–53**: **COMPLETED** (100%).
+- **Phase 54 (High-Level `TCastleRenderOptions` & `TCastleViewport` Next-Gen Vulkan RHI Wiring)**: **COMPLETED** (100%, 192 unit tests passing):
+  - [x] **54.1. High-Level Next-Gen Rendering Enums (`CastleRenderOptions`)** — Completed & tested (`TestRenderOptionsNextGenPropertiesAndHashingRHI`).
+  - [x] **54.2. Per-Scene Next-Gen Material & Geometry Options on `TCastleRenderOptions`** — Completed & tested (`TestRenderOptionsNextGenPropertiesAndHashingRHI`).
+  - [x] **54.3. High-Level `TCastleViewport` Subsystem Orchestration & Physical Camera Exposure (`CastleViewport`)** — Completed & tested (`TestViewportCameraEV100AndNextGenPropertiesRHI`, `TestViewportExecuteVulkanSubsystemsOrchestrationRHI`).
