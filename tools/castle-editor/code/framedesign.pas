@@ -568,6 +568,13 @@ type
       MenuTreeViewItemMoveDown: TMenuItem;
       MenuTreeViewItemSelectReferences: TMenuItem;
       ButtonCaptureScreenshot: TSpeedButton;
+      MenuTreeViewItemFlattenSelected: TMenuItem;
+      MenuTreeViewItemFreezeScale: TMenuItem;
+      ButtonFreezeScale: TButton;
+      MenuTreeViewItemLightingRig: TMenuItem;
+      MenuTreeViewItemCompareComponents: TMenuItem;
+      MenuTreeViewItemEditNote: TMenuItem;
+      FComponentNotes: TStringList;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
       FCopiedComponentPropsClassName: String;
@@ -823,6 +830,12 @@ type
     procedure MenuTreeViewItemMoveDownClick(Sender: TObject);
     procedure MenuTreeViewItemSelectReferencesClick(Sender: TObject);
     procedure ButtonCaptureScreenshotClick(Sender: TObject);
+    procedure MenuTreeViewItemFlattenSelectedClick(Sender: TObject);
+    procedure MenuTreeViewItemFreezeScaleClick(Sender: TObject);
+    procedure ButtonFreezeScaleClick(Sender: TObject);
+    procedure MenuTreeViewItemLightingRigClick(Sender: TObject);
+    procedure MenuTreeViewItemCompareComponentsClick(Sender: TObject);
+    procedure MenuTreeViewItemEditNoteClick(Sender: TObject);
     procedure MenuTreeViewItemGroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemUngroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemArrayDuplicateClick(Sender: TObject);
@@ -1987,6 +2000,15 @@ type
     procedure MoveSelectedInParentOrder(const MoveUp: Boolean; const MoveToExtreme: Boolean = false);
     procedure SelectComponentReferences(const SelectReferencedTargets: Boolean = false);
     procedure CaptureViewportScreenshot(const HideEditorOverlays: Boolean = true);
+    procedure FlattenSelectedHierarchy(const PreserveWorldTransform: Boolean = true);
+    procedure FreezeSelectedPrimitiveScale(const BakeIntoChildrenScale: Boolean = false);
+    procedure ApplyQuickLightingRig(const RigPreset, ColorPreset: Integer;
+      const BaseIntensity, RigRadius: Single; const EnableShadows: Boolean);
+    procedure ShowQuickLightingRigDialog;
+    procedure ShowCompareComponentsDialog;
+    function GetComponentNote(const C: TComponent): String;
+    procedure SetComponentNote(const C: TComponent; const NoteText: String);
+    procedure EditSelectedComponentNote;
     procedure SaveCameraBookmark(const Slot: Integer);
     procedure RecallCameraBookmark(const Slot: Integer);
     procedure AdjustCameraSpeed(const Factor: Single);
@@ -2805,6 +2827,11 @@ begin
   if (Frame.Mode <> moInteract) and Event.IsKey(keyN) and
      (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
   begin
+    if Event.ModifiersDown = [mkAlt] then
+    begin
+      Frame.EditSelectedComponentNote;
+      Exit(true);
+    end else
     if Event.ModifiersDown = [mkCtrl, mkShift] then
     begin
       Frame.SelectNonUniformlyScaledTransforms;
@@ -4327,6 +4354,7 @@ begin
   LastSelected := TComponentList.Create(false);
   FLockedComponents := TComponentList.Create(false);
   FFavoriteComponents := TComponentList.Create(false);
+  FComponentNotes := TStringList.Create;
   for I := 1 to 5 do
     FComponentColorTags[I] := TComponentList.Create(false);
   for I := 0 to 9 do
@@ -5948,6 +5976,16 @@ begin
   ButtonQuickCollider.OnClick := @ButtonQuickColliderClick;
   ButtonQuickCollider.Parent := PanelLayoutTransform;
 
+  ButtonFreezeScale := TButton.Create(Self);
+  ButtonFreezeScale.Align := alTop;
+  ButtonFreezeScale.AutoSize := true;
+  ButtonFreezeScale.Caption := 'Freeze Scale';
+  ButtonFreezeScale.Hint := 'Bake / Freeze local Scale into 3D primitive geometry dimensions (Box/Sphere/Cylinder/Cone/Plane) and direct child offsets, then reset Scale to (1,1,1) (Shift-click: also bake into child Scale)';
+  ButtonFreezeScale.ShowHint := true;
+  ButtonFreezeScale.BorderSpacing.Around := 2;
+  ButtonFreezeScale.OnClick := @ButtonFreezeScaleClick;
+  ButtonFreezeScale.Parent := PanelLayoutTransform;
+
   ButtonPilotTransform := TButton.Create(Self);
   ButtonPilotTransform.Align := alTop;
   ButtonPilotTransform.AutoSize := true;
@@ -6544,6 +6582,31 @@ begin
   MenuTreeViewItemSelectReferences.OnClick := @MenuTreeViewItemSelectReferencesClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSelectReferences);
 
+  MenuTreeViewItemFlattenSelected := TMenuItem.Create(Self);
+  MenuTreeViewItemFlattenSelected.Caption := 'Flatten / Unparent Selected to World Root (Shift: Local)';
+  MenuTreeViewItemFlattenSelected.OnClick := @MenuTreeViewItemFlattenSelectedClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemFlattenSelected);
+
+  MenuTreeViewItemFreezeScale := TMenuItem.Create(Self);
+  MenuTreeViewItemFreezeScale.Caption := 'Bake / Freeze Scale into Primitive Geometry & Children';
+  MenuTreeViewItemFreezeScale.OnClick := @MenuTreeViewItemFreezeScaleClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemFreezeScale);
+
+  MenuTreeViewItemLightingRig := TMenuItem.Create(Self);
+  MenuTreeViewItemLightingRig.Caption := 'Quick 3D Lighting Rig / Preset Generator...';
+  MenuTreeViewItemLightingRig.OnClick := @MenuTreeViewItemLightingRigClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemLightingRig);
+
+  MenuTreeViewItemCompareComponents := TMenuItem.Create(Self);
+  MenuTreeViewItemCompareComponents.Caption := 'Compare / Diff Selected Components...';
+  MenuTreeViewItemCompareComponents.OnClick := @MenuTreeViewItemCompareComponentsClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemCompareComponents);
+
+  MenuTreeViewItemEditNote := TMenuItem.Create(Self);
+  MenuTreeViewItemEditNote.Caption := 'Edit Component Note / Comment & Tag... (Alt+N)';
+  MenuTreeViewItemEditNote.OnClick := @MenuTreeViewItemEditNoteClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemEditNote);
+
   MenuTreeViewItemGroupSelected := TMenuItem.Create(Self);
   MenuTreeViewItemGroupSelected.Caption := 'Group Selected Under New Transform (Ctrl+G)';
   MenuTreeViewItemGroupSelected.OnClick := @MenuTreeViewItemGroupSelectedClick;
@@ -6895,6 +6958,7 @@ begin
   FreeAndNil(LastSelected);
   FreeAndNil(FLockedComponents);
   FreeAndNil(FFavoriteComponents);
+  FreeAndNil(FComponentNotes);
 
   if CollectionPropertyEditorForm <> nil then
   begin
@@ -6958,6 +7022,8 @@ begin
     FLockedComponents.Clear;
   if FFavoriteComponents <> nil then
     FFavoriteComponents.Clear;
+  if FComponentNotes <> nil then
+    FComponentNotes.Clear;
   for I := 1 to 5 do
     if FComponentColorTags[I] <> nil then
       FComponentColorTags[I].Clear;
@@ -10755,6 +10821,8 @@ begin
       ButtonAlignTransformToCam.Enabled := (T <> nil) or (TransformManipulate.SelectedCount > 0);
     if ButtonQuickCollider <> nil then
       ButtonQuickCollider.Enabled := (T <> nil) or (TransformManipulate.SelectedCount > 0);
+    if ButtonFreezeScale <> nil then
+      ButtonFreezeScale.Enabled := (T <> nil) or (TransformManipulate.SelectedCount > 0);
   finally FreeAndNil(Selected) end;
 
   if CameraPreview <> nil then
@@ -11580,6 +11648,13 @@ var
       Suffix := Suffix + ' [Hidden]';
     if IsLocked then
       Suffix := Suffix + ' [Locked]';
+    if NodeObj is TComponent then
+    begin
+      if GetComponentNote(TComponent(NodeObj)) <> '' then
+        Suffix := Suffix + ' [#' + GetComponentNote(TComponent(NodeObj)) + ']'
+      else if TComponent(NodeObj).Tag <> 0 then
+        Suffix := Suffix + ' [Tag:' + IntToStr(TComponent(NodeObj).Tag) + ']';
+    end;
 
     TextRect := Node.DisplayRect(true);
     C.Brush.Style := bsClear;
@@ -12602,6 +12677,11 @@ begin
       SelectUserInterfacesWithCustomStyle(false);
       Key := 0;
     end else
+    if (Key = Ord('N')) and (Shift = [ssAlt]) then
+    begin
+      EditSelectedComponentNote;
+      Key := 0;
+    end else
     if (Key = Ord('N')) and (Shift = [ssCtrl, ssShift]) then
     begin
       SelectNonUniformlyScaledTransforms;
@@ -13007,7 +13087,7 @@ end;
 
 function TDesignFrame.NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
 var
-  Query, LowerName, LowerClass: String;
+  Query, LowerName, LowerClass, LowerNote: String;
 begin
   if C = nil then Exit(false);
   Query := Trim(LowerCase(EditFindInHierarchy.Text));
@@ -13015,14 +13095,17 @@ begin
 
   LowerName := LowerCase(C.Name);
   LowerClass := LowerCase(C.ClassName);
+  LowerNote := LowerCase(GetComponentNote(C));
 
   if (Length(Query) > 1) and (Query[1] = '+') then
   begin
     Delete(Query, 1, 1);
     if (Query = 'fav') or (Query = 'favorite') or (Query = 'star') or (Query = 'starred') then
       Result := IsComponentFavorite(C)
+    else if (Query = 'note') or (Query = 'comment') then
+      Result := (LowerNote <> '') or (C.Tag <> 0)
     else if (Query = 'tag') or (Query = 'color') then
-      Result := GetComponentColorTag(C) > 0
+      Result := (GetComponentColorTag(C) > 0) or (C.Tag <> 0)
     else if Query = 'red' then
       Result := GetComponentColorTag(C) = 1
     else if Query = 'green' then
@@ -13036,7 +13119,8 @@ begin
     else
       Result := Pos(Query, LowerClass) <> 0;
   end else
-    Result := (Pos(Query, LowerName) <> 0) or (Pos(Query, LowerClass) <> 0);
+    Result := (Pos(Query, LowerName) <> 0) or (Pos(Query, LowerClass) <> 0) or
+              ((LowerNote <> '') and (Pos(Query, LowerNote) <> 0));
 end;
 
 procedure TDesignFrame.UpdateViewModeButtonCaption;
@@ -31654,6 +31738,929 @@ begin
   CaptureViewportScreenshot(not (ssShift in GetKeyShiftState));
 end;
 
+procedure TDesignFrame.FlattenSelectedHierarchy(const PreserveWorldTransform: Boolean);
+var
+  SelectedList, MovedList: TComponentList;
+  SelectedCount, I: Integer;
+  C: TComponent;
+  T, TargetRootT: TCastleTransform;
+  UI, TargetRootUI: TCastleUserInterface;
+  HasWorld: Boolean;
+  WorldPos, WorldDir, WorldUp, WorldScale, ParentScale: TVector3;
+  OldRect: TFloatRectangle;
+begin
+  if FDesignRoot = nil then Exit;
+
+  GetSelected(SelectedList, SelectedCount, false);
+  MovedList := TComponentList.Create(false);
+  try
+    if (SelectedList = nil) or (SelectedList.Count = 0) then Exit;
+
+    for I := 0 to SelectedList.Count - 1 do
+    begin
+      C := SelectedList[I];
+      if (C = nil) or (C = FDesignRoot) or (not Deletable(C)) or IsComponentLocked(C) then
+        Continue;
+
+      if C is TCastleTransform then
+      begin
+        T := TCastleTransform(C);
+        if FDesignRoot is TCastleTransform then
+          TargetRootT := TCastleTransform(FDesignRoot)
+        else if T.World <> nil then
+          TargetRootT := T.World
+        else if CurrentViewport <> nil then
+          TargetRootT := CurrentViewport.Items
+        else
+          TargetRootT := nil;
+
+        if (TargetRootT = nil) or (T.Parent = nil) or (T.Parent = TargetRootT) then
+          Continue;
+
+        HasWorld := PreserveWorldTransform and T.HasWorldTransform;
+        if HasWorld then
+        begin
+          T.GetWorldView(WorldPos, WorldDir, WorldUp);
+          WorldScale := ScaleFromMatrix(T.WorldTransform);
+        end;
+
+        T.Parent.Remove(T);
+        TargetRootT.Add(T);
+
+        if HasWorld then
+        begin
+          T.SetWorldView(WorldPos, WorldDir, WorldUp);
+          if TargetRootT.HasWorldTransform then
+          begin
+            ParentScale := ScaleFromMatrix(TargetRootT.WorldTransform);
+            T.Scale := Vector3(
+              WorldScale.X / Max(0.0001, ParentScale.X),
+              WorldScale.Y / Max(0.0001, ParentScale.Y),
+              WorldScale.Z / Max(0.0001, ParentScale.Z));
+          end else
+            T.Scale := WorldScale;
+        end;
+        MovedList.Add(T);
+      end else
+      if (C is TCastleUserInterface) and (FDesignRoot is TCastleUserInterface) then
+      begin
+        UI := TCastleUserInterface(C);
+        TargetRootUI := TCastleUserInterface(FDesignRoot);
+        if (UI.Parent = nil) or (UI.Parent = TargetRootUI) then
+          Continue;
+
+        OldRect := UI.RenderRectWithBorder;
+        UI.Parent.RemoveControl(UI);
+        TargetRootUI.InsertFront(UI);
+        if PreserveWorldTransform and (not OldRect.IsEmpty) then
+          AdjustUserInterfaceAnchorsToKeepRect(UI, OldRect);
+        MovedList.Add(UI);
+      end;
+    end;
+
+    if MovedList.Count > 0 then
+    begin
+      UpdateDesign;
+      SetSelected(MovedList);
+      ModifiedOutsideObjectInspector(
+        Format('Flatten / Unparent %d Component(s) to World Root', [MovedList.Count]),
+        ucHigh);
+    end else
+      InfoBox('Selected component(s) are already at the top-level root.');
+  finally
+    FreeAndNil(MovedList);
+    FreeAndNil(SelectedList);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemFlattenSelectedClick(Sender: TObject);
+begin
+  FlattenSelectedHierarchy(not (ssShift in GetKeyShiftState));
+end;
+
+procedure TDesignFrame.FreezeSelectedPrimitiveScale(const BakeIntoChildrenScale: Boolean);
+var
+  Transforms: TComponentList;
+  I, ChildIdx, FrozenCount: Integer;
+  T, ChildT: TCastleTransform;
+  S, AbsS: TVector3;
+  Collider: TCastleCollider;
+  IsPrimitive: Boolean;
+begin
+  Transforms := TComponentList.Create(false);
+  try
+    if (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0) then
+    begin
+      for I := 0 to TransformManipulate.SelectedCount - 1 do
+        if (TransformManipulate.Selected[I] <> nil) and
+           (not IsComponentLocked(TransformManipulate.Selected[I])) then
+          Transforms.Add(TransformManipulate.Selected[I]);
+    end else
+    if (CurrentTransform <> nil) and (not IsComponentLocked(CurrentTransform)) then
+      Transforms.Add(CurrentTransform);
+
+    if Transforms.Count = 0 then
+    begin
+      ErrorBox('Select at least one unlocked 3D transform to freeze/bake scale.');
+      Exit;
+    end;
+
+    FrozenCount := 0;
+    for I := 0 to Transforms.Count - 1 do
+    begin
+      T := TCastleTransform(Transforms[I]);
+      S := T.Scale;
+      AbsS := Vector3(Abs(S.X), Abs(S.Y), Abs(S.Z));
+      if TVector3.Equals(S, Vector3(1, 1, 1), 0.0001) then
+        Continue;
+
+      IsPrimitive := false;
+      if T is TCastleBox then
+      begin
+        TCastleBox(T).Size := Vector3(
+          TCastleBox(T).Size.X * AbsS.X,
+          TCastleBox(T).Size.Y * AbsS.Y,
+          TCastleBox(T).Size.Z * AbsS.Z);
+        IsPrimitive := true;
+      end else
+      if T is TCastleSphere then
+      begin
+        TCastleSphere(T).Radius := TCastleSphere(T).Radius * ((AbsS.X + AbsS.Y + AbsS.Z) / 3.0);
+        IsPrimitive := true;
+      end else
+      if T is TCastleCylinder then
+      begin
+        TCastleCylinder(T).Radius := TCastleCylinder(T).Radius * ((AbsS.X + AbsS.Z) * 0.5);
+        TCastleCylinder(T).Height := TCastleCylinder(T).Height * AbsS.Y;
+        IsPrimitive := true;
+      end else
+      if T is TCastleCone then
+      begin
+        TCastleCone(T).BottomRadius := TCastleCone(T).BottomRadius * ((AbsS.X + AbsS.Z) * 0.5);
+        TCastleCone(T).Height := TCastleCone(T).Height * AbsS.Y;
+        IsPrimitive := true;
+      end else
+      if T is TCastlePlane then
+      begin
+        TCastlePlane(T).Size := Vector2(
+          TCastlePlane(T).Size.X * AbsS.X,
+          TCastlePlane(T).Size.Y * AbsS.Z);
+        IsPrimitive := true;
+      end;
+
+      for ChildIdx := 0 to T.Count - 1 do
+        if Selectable(T[ChildIdx]) then
+        begin
+          ChildT := T[ChildIdx];
+          ChildT.Translation := Vector3(
+            ChildT.Translation.X * S.X,
+            ChildT.Translation.Y * S.Y,
+            ChildT.Translation.Z * S.Z);
+          if BakeIntoChildrenScale or (not IsPrimitive) then
+            ChildT.Scale := Vector3(
+              ChildT.Scale.X * AbsS.X,
+              ChildT.Scale.Y * AbsS.Y,
+              ChildT.Scale.Z * AbsS.Z);
+        end;
+
+      T.Scale := Vector3(1, 1, 1);
+      Collider := T.FindBehavior(TCastleCollider) as TCastleCollider;
+      if (Collider <> nil) and Collider.AutoSize then
+        Collider.CalculateSize;
+      Inc(FrozenCount);
+    end;
+
+    if FrozenCount > 0 then
+    begin
+      UpdateColliders;
+      UpdateDesign;
+      SetSelected(Transforms);
+      ModifiedOutsideObjectInspector(
+        Format('Bake / Freeze Scale on %d Transform(s)', [FrozenCount]),
+        ucHigh);
+    end else
+      InfoBox('Selected 3D transform(s) already have unit scale (1, 1, 1).');
+  finally
+    FreeAndNil(Transforms);
+  end;
+end;
+
+procedure TDesignFrame.ButtonFreezeScaleClick(Sender: TObject);
+begin
+  FreezeSelectedPrimitiveScale(ssShift in GetKeyShiftState);
+end;
+
+procedure TDesignFrame.MenuTreeViewItemFreezeScaleClick(Sender: TObject);
+begin
+  FreezeSelectedPrimitiveScale(ssShift in GetKeyShiftState);
+end;
+
+procedure TDesignFrame.ApplyQuickLightingRig(const RigPreset, ColorPreset: Integer;
+  const BaseIntensity, RigRadius: Single; const EnableShadows: Boolean);
+var
+  TargetParent, RigGroup: TCastleTransform;
+  FocusCenter, LightPos, DirToCenter: TVector3;
+  EffRadius, AngleRad: Single;
+  KeyColor, FillColor, RimColor: TCastleColorRGB;
+  DirLight: TCastleDirectionalLight;
+  PtLight: TCastlePointLight;
+  BBox: TBox3D;
+  I: Integer;
+begin
+  if DesignOwner = nil then Exit;
+  if FDesignRoot is TCastleTransform then
+    TargetParent := TCastleTransform(FDesignRoot)
+  else if CurrentViewport <> nil then
+    TargetParent := CurrentViewport.Items
+  else
+  begin
+    ErrorBox('Select a 3D viewport or transform design before creating a lighting rig.');
+    Exit;
+  end;
+
+  FocusCenter := TVector3.Zero;
+  EffRadius := Max(1.0, RigRadius);
+  if (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0) then
+    FocusCenter := TransformManipulate.SelectionWorkingCenter
+  else if CurrentTransform <> nil then
+  begin
+    BBox := CurrentTransform.WorldBoundingBox;
+    if not BBox.IsEmpty then
+      FocusCenter := BBox.Center
+    else
+      FocusCenter := CurrentTransform.WorldTranslation;
+  end;
+
+  case ColorPreset of
+    1: begin // Warm Golden / Sunset
+         KeyColor  := Vector3(1.00, 0.86, 0.68);
+         FillColor := Vector3(0.55, 0.72, 0.96);
+         RimColor  := Vector3(1.00, 0.92, 0.78);
+       end;
+    2: begin // Cool Sci-Fi / Moonlight
+         KeyColor  := Vector3(0.76, 0.90, 1.00);
+         FillColor := Vector3(0.45, 0.62, 0.95);
+         RimColor  := Vector3(0.90, 0.68, 1.00);
+       end;
+    3: begin // Dramatic High-Contrast
+         KeyColor  := Vector3(1.00, 0.95, 0.88);
+         FillColor := Vector3(0.35, 0.45, 0.65);
+         RimColor  := Vector3(1.00, 0.55, 0.32);
+       end;
+    else begin // Neutral Studio
+         KeyColor  := Vector3(1.00, 0.98, 0.95);
+         FillColor := Vector3(0.75, 0.85, 1.00);
+         RimColor  := Vector3(0.95, 0.95, 1.00);
+       end;
+  end;
+
+  RigGroup := TCastleTransform.Create(DesignOwner);
+  RigGroup.Name := ProposeComponentName(TCastleTransform, DesignOwner, 'LightingRig');
+  RigGroup.Translation := FocusCenter;
+  TargetParent.Add(RigGroup);
+
+  case RigPreset of
+    0: begin // Outdoor Sun + Sky Fill Rig
+         DirLight := TCastleDirectionalLight.Create(DesignOwner);
+         DirLight.Name := ProposeComponentName(TCastleDirectionalLight, DesignOwner, 'SunKeyLight');
+         DirLight.Translation := Vector3(EffRadius * 0.5, EffRadius, EffRadius * 0.4);
+         DirToCenter := -DirLight.Translation.Normalize;
+         DirLight.Direction := DirToCenter;
+         DirLight.Color := KeyColor;
+         DirLight.Intensity := BaseIntensity;
+         DirLight.Shadows := EnableShadows;
+         RigGroup.Add(DirLight);
+
+         DirLight := TCastleDirectionalLight.Create(DesignOwner);
+         DirLight.Name := ProposeComponentName(TCastleDirectionalLight, DesignOwner, 'SkyFillLight');
+         DirLight.Translation := Vector3(-EffRadius * 0.5, EffRadius * 0.8, -EffRadius * 0.4);
+         DirLight.Direction := -DirLight.Translation.Normalize;
+         DirLight.Color := FillColor;
+         DirLight.Intensity := BaseIntensity * 0.35;
+         DirLight.Shadows := false;
+         RigGroup.Add(DirLight);
+       end;
+    1: begin // 3-Point Studio Rig (Key + Fill + Rim)
+         // Key Light (front-right, elevated 45 deg)
+         DirLight := TCastleDirectionalLight.Create(DesignOwner);
+         DirLight.Name := ProposeComponentName(TCastleDirectionalLight, DesignOwner, 'StudioKeyLight');
+         DirLight.Translation := Vector3(EffRadius * 0.7, EffRadius * 0.8, EffRadius * 0.7);
+         DirLight.Direction := -DirLight.Translation.Normalize;
+         DirLight.Color := KeyColor;
+         DirLight.Intensity := BaseIntensity;
+         DirLight.Shadows := EnableShadows;
+         RigGroup.Add(DirLight);
+
+         // Fill Light (front-left, softer)
+         DirLight := TCastleDirectionalLight.Create(DesignOwner);
+         DirLight.Name := ProposeComponentName(TCastleDirectionalLight, DesignOwner, 'StudioFillLight');
+         DirLight.Translation := Vector3(-EffRadius * 0.8, EffRadius * 0.45, EffRadius * 0.6);
+         DirLight.Direction := -DirLight.Translation.Normalize;
+         DirLight.Color := FillColor;
+         DirLight.Intensity := BaseIntensity * 0.45;
+         DirLight.Shadows := false;
+         RigGroup.Add(DirLight);
+
+         // Rim / Back Light (behind subject, elevated)
+         DirLight := TCastleDirectionalLight.Create(DesignOwner);
+         DirLight.Name := ProposeComponentName(TCastleDirectionalLight, DesignOwner, 'StudioRimLight');
+         DirLight.Translation := Vector3(0.0, EffRadius * 0.75, -EffRadius * 0.85);
+         DirLight.Direction := -DirLight.Translation.Normalize;
+         DirLight.Color := RimColor;
+         DirLight.Intensity := BaseIntensity * 0.65;
+         DirLight.Shadows := false;
+         RigGroup.Add(DirLight);
+       end;
+    2: begin // Point Light Ring (6 Omni Lights)
+         for I := 0 to 5 do
+         begin
+           AngleRad := (2.0 * Pi * I) / 6.0;
+           LightPos := Vector3(Cos(AngleRad) * EffRadius, EffRadius * 0.45, Sin(AngleRad) * EffRadius);
+           PtLight := TCastlePointLight.Create(DesignOwner);
+           PtLight.Name := ProposeComponentName(TCastlePointLight, DesignOwner, 'RingPointLight');
+           PtLight.Translation := LightPos;
+           if Odd(I) then
+             PtLight.Color := FillColor
+           else
+             PtLight.Color := KeyColor;
+           PtLight.Intensity := BaseIntensity * 0.65;
+           PtLight.Shadows := EnableShadows and (I = 0);
+           RigGroup.Add(PtLight);
+         end;
+       end;
+  end;
+
+  UpdateDesign;
+  SelectedComponent := RigGroup;
+  ModifiedOutsideObjectInspector(
+    Format('Create 3D Lighting Rig "%s"', [RigGroup.Name]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowQuickLightingRigDialog;
+var
+  Dialog: TForm;
+  LblPreset, LblColor, LblIntensity, LblRadius: TLabel;
+  ComboPreset, ComboColor: TComboBox;
+  SpinIntensity, SpinRadius: TFloatSpinEdit;
+  CheckShadows: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if (CurrentViewport = nil) and (not (FDesignRoot is TCastleTransform)) then
+  begin
+    ErrorBox('Open or select a 3D viewport or transform design to generate a lighting rig.');
+    Exit;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 3D Lighting Rig / Preset Generator';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 440;
+    Dialog.Height := 310;
+
+    LblPreset := TLabel.Create(Dialog);
+    LblPreset.Left := 16;
+    LblPreset.Top := 16;
+    LblPreset.Caption := 'Lighting Rig Setup:';
+    LblPreset.Parent := Dialog;
+
+    ComboPreset := TComboBox.Create(Dialog);
+    ComboPreset.Left := 16;
+    ComboPreset.Top := 38;
+    ComboPreset.Width := 404;
+    ComboPreset.Style := csDropDownList;
+    ComboPreset.Items.Add('Outdoor Sun + Sky Fill Rig (2 Directional Lights)');
+    ComboPreset.Items.Add('3-Point Studio Rig (Key + Fill + Rim Directional Lights)');
+    ComboPreset.Items.Add('Point Light Ring (6 Omni Point Lights Around Target)');
+    ComboPreset.ItemIndex := 1;
+    ComboPreset.Parent := Dialog;
+
+    LblColor := TLabel.Create(Dialog);
+    LblColor.Left := 16;
+    LblColor.Top := 74;
+    LblColor.Caption := 'Color Temperature / Mood Preset:';
+    LblColor.Parent := Dialog;
+
+    ComboColor := TComboBox.Create(Dialog);
+    ComboColor.Left := 16;
+    ComboColor.Top := 96;
+    ComboColor.Width := 404;
+    ComboColor.Style := csDropDownList;
+    ComboColor.Items.Add('Neutral Studio (Balanced Warm Key / Cool Fill)');
+    ComboColor.Items.Add('Warm Golden / Sunset (Golden Key / Sky Blue Fill)');
+    ComboColor.Items.Add('Cool Sci-Fi / Moonlight (Cyan-Blue Key / Violet Rim)');
+    ComboColor.Items.Add('Dramatic High-Contrast (Bright Key / Deep Fill / Amber Rim)');
+    ComboColor.ItemIndex := 0;
+    ComboColor.Parent := Dialog;
+
+    LblIntensity := TLabel.Create(Dialog);
+    LblIntensity.Left := 16;
+    LblIntensity.Top := 138;
+    LblIntensity.Caption := 'Key Light Base Intensity:';
+    LblIntensity.Parent := Dialog;
+
+    SpinIntensity := TFloatSpinEdit.Create(Dialog);
+    SpinIntensity.Left := 220;
+    SpinIntensity.Top := 134;
+    SpinIntensity.Width := 120;
+    SpinIntensity.MinValue := 0.05;
+    SpinIntensity.MaxValue := 1000.0;
+    SpinIntensity.Increment := 0.25;
+    SpinIntensity.DecimalPlaces := 2;
+    SpinIntensity.Value := 1.50;
+    SpinIntensity.Parent := Dialog;
+
+    LblRadius := TLabel.Create(Dialog);
+    LblRadius.Left := 16;
+    LblRadius.Top := 174;
+    LblRadius.Caption := 'Rig Radius Around Selection / Origin:';
+    LblRadius.Parent := Dialog;
+
+    SpinRadius := TFloatSpinEdit.Create(Dialog);
+    SpinRadius.Left := 220;
+    SpinRadius.Top := 170;
+    SpinRadius.Width := 120;
+    SpinRadius.MinValue := 0.5;
+    SpinRadius.MaxValue := 1000.0;
+    SpinRadius.Increment := 1.0;
+    SpinRadius.DecimalPlaces := 1;
+    SpinRadius.Value := 8.0;
+    SpinRadius.Parent := Dialog;
+
+    CheckShadows := TCheckBox.Create(Dialog);
+    CheckShadows.Left := 16;
+    CheckShadows.Top := 210;
+    CheckShadows.Caption := 'Enable Shadow Casting on Key Light (Shadows := True)';
+    CheckShadows.Checked := true;
+    CheckShadows.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Create Lighting Rig';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyQuickLightingRig(
+        ComboPreset.ItemIndex,
+        ComboColor.ItemIndex,
+        SpinIntensity.Value,
+        SpinRadius.Value,
+        CheckShadows.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemLightingRigClick(Sender: TObject);
+begin
+  ShowQuickLightingRigDialog;
+end;
+
+procedure TDesignFrame.ShowCompareComponentsDialog;
+
+  function FormatPropValue(const Obj: TObject; const PropInfo: PPropInfo): String;
+  var
+    SubObj: TObject;
+  begin
+    Result := '';
+    if (Obj = nil) or (PropInfo = nil) then Exit;
+    case PropInfo^.PropType^.Kind of
+      tkInteger, tkChar, tkWChar:
+        Result := IntToStr(GetOrdProp(Obj, PropInfo));
+      tkBool:
+        Result := BoolToStr(GetOrdProp(Obj, PropInfo) <> 0, true);
+      tkEnumeration:
+        Result := GetEnumName(PropInfo^.PropType, GetOrdProp(Obj, PropInfo));
+      tkSet:
+        Result := SetToString(PropInfo, GetOrdProp(Obj, PropInfo), true);
+      tkFloat:
+        Result := FormatFloat('0.####', GetFloatProp(Obj, PropInfo));
+      tkInt64, tkQWord:
+        Result := IntToStr(GetInt64Prop(Obj, PropInfo));
+      tkSString, tkLString, tkAString:
+        Result := '"' + GetStrProp(Obj, PropInfo) + '"';
+      tkClass:
+        begin
+          SubObj := GetObjectProp(Obj, PropInfo);
+          if SubObj = nil then
+            Result := 'nil'
+          else if SubObj is TComponent then
+            Result := TComponent(SubObj).Name + ' (' + SubObj.ClassName + ')'
+          else
+            Result := '(' + SubObj.ClassName + ')';
+        end;
+    end;
+  end;
+
+  procedure CompareObjectsRecursive(const Prefix: String; const ObjA, ObjB: TObject;
+    const DiffLines, EqualLines: TStringList; const SyncDirection: Integer);
+  var
+    PropList: PPropList;
+    PropCount, PIdx: Integer;
+    PropA, PropB: PPropInfo;
+    PropName, FullPropName, ValA, ValB: String;
+    SubA, SubB: TObject;
+  begin
+    if (ObjA = nil) or (ObjB = nil) then Exit;
+    PropCount := GetPropList(ObjA.ClassInfo, tkProperties, nil);
+    if PropCount <= 0 then Exit;
+    GetMem(PropList, PropCount * SizeOf(Pointer));
+    try
+      GetPropList(ObjA.ClassInfo, tkProperties, PropList);
+      for PIdx := 0 to PropCount - 1 do
+      begin
+        PropA := PropList^[PIdx];
+        if PropA = nil then Continue;
+        PropName := PropA^.Name;
+        if SameText(PropName, 'Name') or SameText(PropName, 'Owner') or
+           SameText(PropName, 'Parent') or SameText(PropName, 'World') then
+          Continue;
+
+        PropB := GetPropInfo(ObjB.ClassInfo, PropName);
+        if (PropB = nil) or (PropA^.PropType <> PropB^.PropType) then
+          Continue;
+
+        FullPropName := Prefix + PropName;
+        if PropA^.PropType^.Kind = tkClass then
+        begin
+          SubA := GetObjectProp(ObjA, PropA);
+          SubB := GetObjectProp(ObjB, PropB);
+          if (SubA <> nil) and (SubB <> nil) and (SubA.ClassType = SubB.ClassType) and
+             ((not (SubA is TComponent)) or (csSubComponent in TComponent(SubA).ComponentStyle)) then
+          begin
+            CompareObjectsRecursive(FullPropName + '.', SubA, SubB, DiffLines, EqualLines, SyncDirection);
+            Continue;
+          end;
+        end;
+
+        ValA := FormatPropValue(ObjA, PropA);
+        ValB := FormatPropValue(ObjB, PropB);
+        if ValA <> ValB then
+        begin
+          if DiffLines <> nil then
+            DiffLines.Add(Format('  %-32s | %-24s | %s', [FullPropName, ValA, ValB]));
+          if SyncDirection = 1 then
+          begin
+            if PropB^.SetProc <> nil then
+              case PropB^.PropType^.Kind of
+                tkInteger, tkChar, tkEnumeration, tkBool, tkWChar, tkSet:
+                  SetOrdProp(ObjB, PropB, GetOrdProp(ObjA, PropA));
+                tkFloat:
+                  SetFloatProp(ObjB, PropB, GetFloatProp(ObjA, PropA));
+                tkInt64, tkQWord:
+                  SetInt64Prop(ObjB, PropB, GetInt64Prop(ObjA, PropA));
+                tkSString, tkLString, tkAString:
+                  SetStrProp(ObjB, PropB, GetStrProp(ObjA, PropA));
+                tkClass:
+                  SetObjectProp(ObjB, PropB, GetObjectProp(ObjA, PropA));
+              end;
+          end else
+          if SyncDirection = 2 then
+          begin
+            if PropA^.SetProc <> nil then
+              case PropA^.PropType^.Kind of
+                tkInteger, tkChar, tkEnumeration, tkBool, tkWChar, tkSet:
+                  SetOrdProp(ObjA, PropA, GetOrdProp(ObjB, PropB));
+                tkFloat:
+                  SetFloatProp(ObjA, PropA, GetFloatProp(ObjB, PropB));
+                tkInt64, tkQWord:
+                  SetInt64Prop(ObjA, PropA, GetInt64Prop(ObjB, PropB));
+                tkSString, tkLString, tkAString:
+                  SetStrProp(ObjA, PropA, GetStrProp(ObjB, PropB));
+                tkClass:
+                  SetObjectProp(ObjA, PropA, GetObjectProp(ObjB, PropB));
+              end;
+          end;
+        end else
+        begin
+          if EqualLines <> nil then
+            EqualLines.Add(Format('  %-32s | %-24s | %s', [FullPropName, ValA, ValB]));
+        end;
+      end;
+    finally
+      FreeMem(PropList);
+    end;
+  end;
+
+var
+  SelectedList: TComponentList;
+  SelectedCount, ModalRes: Integer;
+  CompA, CompB: TComponent;
+  DiffLines, EqualLines: TStringList;
+  Dialog: TForm;
+  MemoReport: TMemo;
+  BottomPanel: TPanel;
+  BtnClose, BtnSyncAToB, BtnSyncBToA: TButton;
+begin
+  CompA := nil;
+  CompB := nil;
+  GetSelected(SelectedList, SelectedCount, false);
+  try
+    if (SelectedList <> nil) and (SelectedList.Count >= 2) then
+    begin
+      CompA := SelectedList[0];
+      CompB := SelectedList[1];
+    end else
+    if (SelectedList <> nil) and (SelectedList.Count = 1) then
+    begin
+      CompA := SelectedList[0];
+      if (CompA is TCastleTransform) and (TCastleTransform(CompA).Parent <> nil) and
+         (TCastleTransform(CompA).Parent.Count >= 2) then
+      begin
+        if TCastleTransform(CompA).Parent[0] <> CompA then
+          CompB := TCastleTransform(CompA).Parent[0]
+        else
+          CompB := TCastleTransform(CompA).Parent[1];
+      end else
+      if (CompA is TCastleUserInterface) and (TCastleUserInterface(CompA).Parent <> nil) and
+         (TCastleUserInterface(CompA).Parent.ControlsCount >= 2) then
+      begin
+        if TCastleUserInterface(CompA).Parent.Controls[0] <> CompA then
+          CompB := TCastleUserInterface(CompA).Parent.Controls[0]
+        else
+          CompB := TCastleUserInterface(CompA).Parent.Controls[1];
+      end;
+    end;
+  finally
+    FreeAndNil(SelectedList);
+  end;
+
+  if (CompA = nil) or (CompB = nil) then
+  begin
+    ErrorBox('Select 2 components in the Hierarchy Tree (using Ctrl-click) to compare their properties.');
+    Exit;
+  end;
+
+  DiffLines := TStringList.Create;
+  EqualLines := TStringList.Create;
+  Dialog := TForm.CreateNew(Self);
+  try
+    CompareObjectsRecursive('', CompA, CompB, DiffLines, EqualLines, 0);
+
+    Dialog.Caption := Format('Compare Components: %s vs %s', [CompA.Name, CompB.Name]);
+    Dialog.Position := poMainFormCenter;
+    Dialog.Width := 760;
+    Dialog.Height := 520;
+
+    MemoReport := TMemo.Create(Dialog);
+    MemoReport.Align := alClient;
+    MemoReport.BorderSpacing.Around := 8;
+    MemoReport.ReadOnly := true;
+    MemoReport.ScrollBars := ssAutoBoth;
+    MemoReport.WordWrap := false;
+    MemoReport.Font.Name := 'Monospace';
+    MemoReport.Parent := Dialog;
+
+    MemoReport.Lines.Add(Format('Component A: %s (%s)', [CompA.Name, CompA.ClassName]));
+    MemoReport.Lines.Add(Format('Component B: %s (%s)', [CompB.Name, CompB.ClassName]));
+    MemoReport.Lines.Add(StringOfChar('=', 86));
+    MemoReport.Lines.Add(Format('  %-32s | %-24s | %s', ['Property', 'Component A (' + CompA.Name + ')', 'Component B (' + CompB.Name + ')']));
+    MemoReport.Lines.Add(StringOfChar('-', 86));
+    MemoReport.Lines.Add(Format('[DIFFERENT PROPERTIES: %d]', [DiffLines.Count]));
+    if DiffLines.Count = 0 then
+      MemoReport.Lines.Add('  (All shared published properties are identical!)')
+    else
+      MemoReport.Lines.AddStrings(DiffLines);
+    MemoReport.Lines.Add('');
+    MemoReport.Lines.Add(Format('[MATCHING PROPERTIES: %d]', [EqualLines.Count]));
+    MemoReport.Lines.AddStrings(EqualLines);
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnClose := TButton.Create(Dialog);
+    BtnClose.Caption := 'Close';
+    BtnClose.Default := true;
+    BtnClose.Cancel := true;
+    BtnClose.ModalResult := mrCancel;
+    BtnClose.Align := alRight;
+    BtnClose.BorderSpacing.Around := 6;
+    BtnClose.Parent := BottomPanel;
+
+    BtnSyncBToA := TButton.Create(Dialog);
+    BtnSyncBToA.Caption := Format('Sync All B -> A (%s -> %s)', [CompB.Name, CompA.Name]);
+    BtnSyncBToA.ModalResult := 102;
+    BtnSyncBToA.AutoSize := true;
+    BtnSyncBToA.Align := alRight;
+    BtnSyncBToA.BorderSpacing.Around := 6;
+    BtnSyncBToA.Enabled := (DiffLines.Count > 0) and (not IsComponentLocked(CompA));
+    BtnSyncBToA.Parent := BottomPanel;
+
+    BtnSyncAToB := TButton.Create(Dialog);
+    BtnSyncAToB.Caption := Format('Sync All A -> B (%s -> %s)', [CompA.Name, CompB.Name]);
+    BtnSyncAToB.ModalResult := 101;
+    BtnSyncAToB.AutoSize := true;
+    BtnSyncAToB.Align := alRight;
+    BtnSyncAToB.BorderSpacing.Around := 6;
+    BtnSyncAToB.Enabled := (DiffLines.Count > 0) and (not IsComponentLocked(CompB));
+    BtnSyncAToB.Parent := BottomPanel;
+
+    ModalRes := Dialog.ShowModal;
+    if ModalRes = 101 then
+    begin
+      CompareObjectsRecursive('', CompA, CompB, nil, nil, 1);
+      UpdateDesign;
+      ModifiedOutsideObjectInspector(
+        Format('Sync Differing Properties %s -> %s', [CompA.Name, CompB.Name]),
+        ucHigh);
+    end else
+    if ModalRes = 102 then
+    begin
+      CompareObjectsRecursive('', CompA, CompB, nil, nil, 2);
+      UpdateDesign;
+      ModifiedOutsideObjectInspector(
+        Format('Sync Differing Properties %s -> %s', [CompB.Name, CompA.Name]),
+        ucHigh);
+    end;
+  finally
+    FreeAndNil(Dialog);
+    FreeAndNil(EqualLines);
+    FreeAndNil(DiffLines);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemCompareComponentsClick(Sender: TObject);
+begin
+  ShowCompareComponentsDialog;
+end;
+
+function TDesignFrame.GetComponentNote(const C: TComponent): String;
+begin
+  if (C = nil) or (FComponentNotes = nil) or (C.Name = '') then
+    Exit('');
+  Result := Trim(FComponentNotes.Values[C.Name]);
+end;
+
+procedure TDesignFrame.SetComponentNote(const C: TComponent; const NoteText: String);
+var
+  CleanNote: String;
+  Idx: Integer;
+begin
+  if (C = nil) or (FComponentNotes = nil) or (C.Name = '') then
+    Exit;
+  CleanNote := Trim(NoteText);
+  if CleanNote = '' then
+  begin
+    Idx := FComponentNotes.IndexOfName(C.Name);
+    if Idx >= 0 then
+      FComponentNotes.Delete(Idx);
+  end else
+    FComponentNotes.Values[C.Name] := CleanNote;
+end;
+
+procedure TDesignFrame.EditSelectedComponentNote;
+var
+  SelectedList: TComponentList;
+  SelectedCount, I: Integer;
+  PrimaryComp: TComponent;
+  Dialog: TForm;
+  LblNote, LblTag: TLabel;
+  EditNote: TEdit;
+  SpinTag: TSpinEdit;
+  BottomPanel: TPanel;
+  BtnOk, BtnClear, BtnCancel: TButton;
+  ModalRes: Integer;
+  TagChanged: Boolean;
+begin
+  GetSelected(SelectedList, SelectedCount, false);
+  try
+    if (SelectedList = nil) or (SelectedList.Count = 0) then
+    begin
+      ErrorBox('Select at least one component to attach a designer note/comment or Tag.');
+      Exit;
+    end;
+
+    PrimaryComp := SelectedList[0];
+    Dialog := TForm.CreateNew(Self);
+    try
+      Dialog.Caption := Format('Component Note / Comment & Tag (%s)', [PrimaryComp.Name]);
+      Dialog.Position := poMainFormCenter;
+      Dialog.BorderStyle := bsDialog;
+      Dialog.Width := 440;
+      Dialog.Height := 190;
+
+      LblNote := TLabel.Create(Dialog);
+      LblNote.Left := 16;
+      LblNote.Top := 16;
+      LblNote.Caption := 'Hierarchy Note / Comment Badge ([#Note], searchable via +note):';
+      LblNote.Parent := Dialog;
+
+      EditNote := TEdit.Create(Dialog);
+      EditNote.Left := 16;
+      EditNote.Top := 38;
+      EditNote.Width := 404;
+      EditNote.Text := GetComponentNote(PrimaryComp);
+      EditNote.TextHint := 'e.g. TODO: adjust collider, Boss Spawn Trigger, Key Door #2...';
+      EditNote.Parent := Dialog;
+
+      LblTag := TLabel.Create(Dialog);
+      LblTag.Left := 16;
+      LblTag.Top := 78;
+      LblTag.Caption := 'Component Integer Tag (TComponent.Tag):';
+      LblTag.Parent := Dialog;
+
+      SpinTag := TSpinEdit.Create(Dialog);
+      SpinTag.Left := 260;
+      SpinTag.Top := 74;
+      SpinTag.Width := 160;
+      SpinTag.MinValue := -2147483648;
+      SpinTag.MaxValue := 2147483647;
+      SpinTag.Value := PrimaryComp.Tag;
+      SpinTag.Parent := Dialog;
+
+      BottomPanel := TPanel.Create(Dialog);
+      BottomPanel.Align := alBottom;
+      BottomPanel.AutoSize := true;
+      BottomPanel.BevelOuter := bvNone;
+      BottomPanel.Parent := Dialog;
+
+      BtnCancel := TButton.Create(Dialog);
+      BtnCancel.Caption := 'Cancel';
+      BtnCancel.Cancel := true;
+      BtnCancel.ModalResult := mrCancel;
+      BtnCancel.Align := alRight;
+      BtnCancel.BorderSpacing.Around := 6;
+      BtnCancel.Parent := BottomPanel;
+
+      BtnClear := TButton.Create(Dialog);
+      BtnClear.Caption := 'Clear Note';
+      BtnClear.ModalResult := mrIgnore;
+      BtnClear.AutoSize := true;
+      BtnClear.Align := alRight;
+      BtnClear.BorderSpacing.Around := 6;
+      BtnClear.Parent := BottomPanel;
+
+      BtnOk := TButton.Create(Dialog);
+      BtnOk.Caption := 'Save Note & Tag';
+      BtnOk.Default := true;
+      BtnOk.ModalResult := mrOk;
+      BtnOk.AutoSize := true;
+      BtnOk.Align := alRight;
+      BtnOk.BorderSpacing.Around := 6;
+      BtnOk.Parent := BottomPanel;
+
+      ModalRes := Dialog.ShowModal;
+      if (ModalRes = mrOk) or (ModalRes = mrIgnore) then
+      begin
+        TagChanged := false;
+        for I := 0 to SelectedList.Count - 1 do
+          if SelectedList[I] <> nil then
+          begin
+            if ModalRes = mrIgnore then
+              SetComponentNote(SelectedList[I], '')
+            else
+            begin
+              SetComponentNote(SelectedList[I], EditNote.Text);
+              if SelectedList[I].Tag <> SpinTag.Value then
+              begin
+                SelectedList[I].Tag := SpinTag.Value;
+                TagChanged := true;
+              end;
+            end;
+          end;
+        ControlsTree.Invalidate;
+        if TagChanged then
+          ModifiedOutsideObjectInspector(
+            Format('Update Component Note & Tag (%d) on %d Component(s)', [SpinTag.Value, SelectedList.Count]),
+            ucHigh);
+      end;
+    finally
+      FreeAndNil(Dialog);
+    end;
+  finally
+    FreeAndNil(SelectedList);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemEditNoteClick(Sender: TObject);
+begin
+  EditSelectedComponentNote;
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -32165,6 +33172,18 @@ begin
       Deletable(Sel) and ((Sel is TCastleTransform) or (Sel is TCastleUserInterface));
   if MenuTreeViewItemSelectReferences <> nil then
     MenuTreeViewItemSelectReferences.Enabled := (Sel <> nil) and (FDesignRoot <> nil);
+  if MenuTreeViewItemFlattenSelected <> nil then
+    MenuTreeViewItemFlattenSelected.Enabled := ControlsTree.SelectionCount > 0;
+  if MenuTreeViewItemFreezeScale <> nil then
+    MenuTreeViewItemFreezeScale.Enabled :=
+      (CurrentTransform <> nil) or ((TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0));
+  if MenuTreeViewItemLightingRig <> nil then
+    MenuTreeViewItemLightingRig.Enabled :=
+      (CurrentViewport <> nil) or (FDesignRoot is TCastleTransform);
+  if MenuTreeViewItemCompareComponents <> nil then
+    MenuTreeViewItemCompareComponents.Enabled := ControlsTree.SelectionCount >= 1;
+  if MenuTreeViewItemEditNote <> nil then
+    MenuTreeViewItemEditNote.Enabled := ControlsTree.SelectionCount >= 1;
   if MenuTreeViewItemGroupSelected <> nil then
     MenuTreeViewItemGroupSelected.Enabled := (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0);
   if MenuTreeViewItemUngroupSelected <> nil then

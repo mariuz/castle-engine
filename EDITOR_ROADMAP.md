@@ -1225,11 +1225,36 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Added **`Shot`** (`ButtonCaptureScreenshot` on `PanelMiddleTop`) and implemented `TDesignFrame.CaptureViewportScreenshot(HideEditorOverlays)`.
   - Prompts for a `.png` / `.jpg` destination file (defaulting to `<DesignName>_screenshot.png` in the project data folder) and captures `CastleControl.Container.SaveScreen(SaveUrl)` while temporarily hiding `FDesignerLayer` and `CameraPreview.UiRoot` overlays on normal click (or keeping editor overlays visible on `Shift`-click).
 
+### Phase 192: Flatten / Unparent Selected Components to World / Root (`FlattenSelectedHierarchy` / `MenuTreeViewItemFlattenSelected`)
+- [x] **192.1. World-Transform-Preserving Unparenting (`TDesignFrame.FlattenSelectedHierarchy`)**
+  - Implemented `TDesignFrame.FlattenSelectedHierarchy` and added **`Flatten / Unparent Selected to World Root`** (`MenuTreeViewItemFlattenSelected`) in `MenuTreeView`.
+  - Detaches selected `TCastleTransform` or `TCastleUserInterface` components from nested parent containers and reparents them directly under the top-level world root (`CurrentViewport.Items` or `FDesignRoot`) while preserving their world-space `GetWorldView` / `SetWorldView` and world scale (for 3D transforms) or container-space rectangle via `AdjustUserInterfaceAnchorsToKeepRect` (for 2D UI controls).
+
+### Phase 193: Bake / Freeze Scale into Primitive Geometry & Children (`FreezeSelectedPrimitiveScale` / `ButtonFreezeScale`)
+- [x] **193.1. Primitive Geometry & Child Offset Scale Baker (`TDesignFrame.FreezeSelectedPrimitiveScale`)**
+  - Added **`Freeze Scale (1,1,1)`** (`ButtonFreezeScale` on `PanelLayoutTransform` and `MenuTreeViewItemFreezeScale` in `MenuTreeView`) and implemented `TDesignFrame.FreezeSelectedPrimitiveScale(PropagateScaleToChildren)`.
+  - Bakes local `Scale` into primitive geometry dimensions (`TCastleBox.Size`, `TCastleSphere.Radius`, `TCastleCylinder.Radius`/`Height`, `TCastleCone.BottomRadius`/`Height`, `TCastlePlane.Size`) and direct child `Translation` offsets (plus child `Scale` for groups or when `Shift` is held), resets `Scale` to `Vector3(1, 1, 1)`, and recalculates attached `TCastleCollider.CalculateSize`.
+
+### Phase 194: Quick 3D Lighting Rig / Preset Generator (`ShowQuickLightingRigDialog` / `ApplyQuickLightingRig`)
+- [x] **194.1. Multi-Light Rig & Color Temperature Generator (`TDesignFrame.ShowQuickLightingRigDialog` / `TDesignFrame.ApplyQuickLightingRig`)**
+  - Implemented `TDesignFrame.ShowQuickLightingRigDialog` and `TDesignFrame.ApplyQuickLightingRig` (`MenuTreeViewItemLightingRig` in `MenuTreeView`).
+  - Spawns a parent `TCastleTransform` group (`LightingRig`) centered at the active selection or origin with 3 rig presets (**Outdoor Sun + Sky Fill Rig**, **3-Point Studio Rig (Key + Fill + Rim)**, **Point Light Ring (6 Omni Lights)**), 4 color temperature presets (**Neutral Studio**, **Warm Golden / Sunset**, **Cool Sci-Fi / Moonlight**, **Dramatic High-Contrast**), and configurable base intensity, radius, and shadow casting.
+
+### Phase 195: Component Comparison / Diff Dialog (`ShowCompareComponentsDialog` / `MenuTreeViewItemCompareComponents`)
+- [x] **195.1. Side-by-Side RTTI Property Diff & One-Click Sync (`TDesignFrame.ShowCompareComponentsDialog`)**
+  - Implemented `TDesignFrame.ShowCompareComponentsDialog` and added **`Compare Selected Components (Diff Properties)...`** (`MenuTreeViewItemCompareComponents`) in `MenuTreeView`.
+  - Compares 2 selected components (or 1 selected component against its sibling) recursively across all published RTTI properties and subcomponents, displaying `[DIFFERENT PROPERTIES]` and `[MATCHING PROPERTIES]` side-by-side with one-click **`Sync All A -> B`** and **`Sync All B -> A`** actions.
+
+### Phase 196: Hierarchy Node Notes / Comments & Tag Filter (`EditSelectedComponentNote` / `MenuTreeViewItemEditNote`)
+- [x] **196.1. Component Notes, `[#Note]` Badges & `+note` Hierarchy Filter (`TDesignFrame.EditSelectedComponentNote`)**
+  - Added per-component notes (`FComponentNotes`, `GetComponentNote`, `SetComponentNote`, `EditSelectedComponentNote`) accessible via **`Alt+N`** in the Viewport/Hierarchy Tree and **`Edit Component Note / Comment... (Alt+N)`** (`MenuTreeViewItemEditNote`) in `MenuTreeView`.
+  - Renders `[#NoteText]` (or `[Tag:N]` when `Component.Tag <> 0`) badges on hierarchy tree nodes in `DrawTreeNodeClassName` and supports filtering by `+note` / `+comment` or note substring in the Hierarchy Search box (`NodeMatchesHierarchyFilter`).
+
 ---
 
-## Roadmap Completion Status (Phases 1–191)
+## Roadmap Completion Status (Phases 1–196)
 
-All **191 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **196 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 
