@@ -579,6 +579,11 @@ type
       MenuTreeViewItemComplexityProfiler: TMenuItem;
       MenuTreeViewItemSyncNameWithUrl: TMenuItem;
       MenuTreeViewItemCameraNavSetup: TMenuItem;
+      MenuTreeViewItemUiThemePalette: TMenuItem;
+      MenuTreeViewItemMaterialPreset: TMenuItem;
+      MenuTreeViewItemGeneratePascalCode: TMenuItem;
+      MenuTreeViewItemAnimationController: TMenuItem;
+      MenuTreeViewItemReplaceWithDesignFile: TMenuItem;
       FComponentNotes: TStringList;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
@@ -846,6 +851,11 @@ type
     procedure MenuTreeViewItemComplexityProfilerClick(Sender: TObject);
     procedure MenuTreeViewItemSyncNameWithUrlClick(Sender: TObject);
     procedure MenuTreeViewItemCameraNavSetupClick(Sender: TObject);
+    procedure MenuTreeViewItemUiThemePaletteClick(Sender: TObject);
+    procedure MenuTreeViewItemMaterialPresetClick(Sender: TObject);
+    procedure MenuTreeViewItemGeneratePascalCodeClick(Sender: TObject);
+    procedure MenuTreeViewItemAnimationControllerClick(Sender: TObject);
+    procedure MenuTreeViewItemReplaceWithDesignFileClick(Sender: TObject);
     procedure MenuTreeViewItemGroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemUngroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemArrayDuplicateClick(Sender: TObject);
@@ -2030,6 +2040,18 @@ type
     procedure ApplyQuickCameraNavigation(const RigPreset: Integer;
       const MoveSpeed, FovOrOrthoHeight: Single; const EnableMouseLook: Boolean);
     procedure ShowQuickCameraNavigationDialog;
+    procedure ApplyUiThemePalette(const ThemePreset: Integer;
+      const FontScale, BorderWidthPx: Single; const ApplyRecursive: Boolean);
+    procedure ShowUiThemePaletteDialog;
+    procedure ApplyMaterialColorPreset(const ColorPreset, MaterialTypeIndex: Integer;
+      const AlphaValue: Single; const ApplyRecursive: Boolean);
+    procedure ShowMaterialColorPresetDialog;
+    procedure ShowPascalCodeGeneratorDialog;
+    procedure ApplySceneAnimationSettings(const AnimName: String;
+      const LoopAnim, TimePlayingEnabled: Boolean; const PlaySpeed: Single;
+      const ActionMode: Integer);
+    procedure ShowAnimationControllerDialog;
+    procedure ReplaceSelectedWithDesignFile;
     procedure SaveCameraBookmark(const Slot: Integer);
     procedure RecallCameraBookmark(const Slot: Integer);
     procedure AdjustCameraSpeed(const Factor: Single);
@@ -6652,6 +6674,31 @@ begin
   MenuTreeViewItemCameraNavSetup.Caption := 'Quick 3D Camera & Gameplay Navigation Rig...';
   MenuTreeViewItemCameraNavSetup.OnClick := @MenuTreeViewItemCameraNavSetupClick;
   MenuTreeView.Items.Add(MenuTreeViewItemCameraNavSetup);
+
+  MenuTreeViewItemUiThemePalette := TMenuItem.Create(Self);
+  MenuTreeViewItemUiThemePalette.Caption := 'Quick 2D UI Theme / Color Palette Styler... (Shift: Dark Slate)';
+  MenuTreeViewItemUiThemePalette.OnClick := @MenuTreeViewItemUiThemePaletteClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemUiThemePalette);
+
+  MenuTreeViewItemMaterialPreset := TMenuItem.Create(Self);
+  MenuTreeViewItemMaterialPreset.Caption := 'Quick 3D Primitive / Greybox Material & Color Swatch... (Shift: Distinct Colors)';
+  MenuTreeViewItemMaterialPreset.OnClick := @MenuTreeViewItemMaterialPresetClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemMaterialPreset);
+
+  MenuTreeViewItemGeneratePascalCode := TMenuItem.Create(Self);
+  MenuTreeViewItemGeneratePascalCode.Caption := 'Generate Pascal TCastleView Code Snippet...';
+  MenuTreeViewItemGeneratePascalCode.OnClick := @MenuTreeViewItemGeneratePascalCodeClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemGeneratePascalCode);
+
+  MenuTreeViewItemAnimationController := TMenuItem.Create(Self);
+  MenuTreeViewItemAnimationController.Caption := 'Scene Animation & TimeScale Preview / Controller...';
+  MenuTreeViewItemAnimationController.OnClick := @MenuTreeViewItemAnimationControllerClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemAnimationController);
+
+  MenuTreeViewItemReplaceWithDesignFile := TMenuItem.Create(Self);
+  MenuTreeViewItemReplaceWithDesignFile.Caption := 'Replace Selected With Sub-Design / 3D Model File...';
+  MenuTreeViewItemReplaceWithDesignFile.OnClick := @MenuTreeViewItemReplaceWithDesignFileClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemReplaceWithDesignFile);
 
   MenuTreeViewItemGroupSelected := TMenuItem.Create(Self);
   MenuTreeViewItemGroupSelected.Caption := 'Group Selected Under New Transform (Ctrl+G)';
@@ -33975,6 +34022,1103 @@ begin
   ShowQuickCameraNavigationDialog;
 end;
 
+procedure TDesignFrame.ApplyUiThemePalette(const ThemePreset: Integer;
+  const FontScale, BorderWidthPx: Single; const ApplyRecursive: Boolean);
+var
+  PanelColor, ButtonColor, TextColor, BorderColor: TCastleColor;
+  StyledCount: Integer;
+
+  procedure StyleSingleUiControl(const UI: TCastleUserInterface);
+  var
+    ChildIdx: Integer;
+    RectCtrl: TCastleRectangleControl;
+    BtnCtrl: TCastleButton;
+    LblCtrl: TCastleLabel;
+    EditCtrl: TCastleEdit;
+    CheckCtrl: TCastleCheckBox;
+  begin
+    if (UI = nil) or (not Selectable(UI)) then Exit;
+
+    if ( not IsComponentLocked(UI) ) then
+    begin
+      if UI is TCastleRectangleControl then
+      begin
+        RectCtrl := TCastleRectangleControl(UI);
+        RectCtrl.Color := PanelColor;
+        RectCtrl.Border.AllSides := Max(0.0, BorderWidthPx);
+        RectCtrl.BorderColor := BorderColor;
+        Inc(StyledCount);
+      end else
+      if UI is TCastleButton then
+      begin
+        BtnCtrl := TCastleButton(UI);
+        BtnCtrl.CustomBackground := true;
+        BtnCtrl.CustomBackgroundNormal.Color := ButtonColor;
+        BtnCtrl.CustomTextColorUse := true;
+        BtnCtrl.CustomTextColor := TextColor;
+        if Abs(FontScale - 1.0) > 0.01 then
+        begin
+          if BtnCtrl.FontSize <= 0 then
+            BtnCtrl.FontSize := Round(20.0 * FontScale)
+          else
+            BtnCtrl.FontSize := Max(8.0, BtnCtrl.FontSize * FontScale);
+        end;
+        Inc(StyledCount);
+      end else
+      if UI is TCastleLabel then
+      begin
+        LblCtrl := TCastleLabel(UI);
+        LblCtrl.Color := TextColor;
+        if Abs(FontScale - 1.0) > 0.01 then
+        begin
+          if LblCtrl.FontSize <= 0 then
+            LblCtrl.FontSize := Round(20.0 * FontScale)
+          else
+            LblCtrl.FontSize := Max(8.0, LblCtrl.FontSize * FontScale);
+        end;
+        Inc(StyledCount);
+      end else
+      if UI is TCastleEdit then
+      begin
+        EditCtrl := TCastleEdit(UI);
+        EditCtrl.FocusedColor := TextColor;
+        EditCtrl.UnfocusedColor := TextColor;
+        EditCtrl.BackgroundColor := PanelColor;
+        if Abs(FontScale - 1.0) > 0.01 then
+        begin
+          if EditCtrl.FontSize <= 0 then
+            EditCtrl.FontSize := Round(20.0 * FontScale)
+          else
+            EditCtrl.FontSize := Max(8.0, EditCtrl.FontSize * FontScale);
+        end;
+        Inc(StyledCount);
+      end else
+      if UI is TCastleCheckBox then
+      begin
+        CheckCtrl := TCastleCheckBox(UI);
+        CheckCtrl.TextColor := TextColor;
+        CheckCtrl.CheckboxColor := ButtonColor;
+        if Abs(FontScale - 1.0) > 0.01 then
+        begin
+          if CheckCtrl.FontSize <= 0 then
+            CheckCtrl.FontSize := Round(20.0 * FontScale)
+          else
+            CheckCtrl.FontSize := Max(8.0, CheckCtrl.FontSize * FontScale);
+        end;
+        Inc(StyledCount);
+      end;
+    end;
+
+    if ApplyRecursive then
+      for ChildIdx := 0 to UI.ControlsCount - 1 do
+        StyleSingleUiControl(UI.Controls[ChildIdx]);
+  end;
+
+var
+  SelectedList: TComponentList;
+  SelectedCount, I: Integer;
+begin
+  case ThemePreset of
+    1: begin // Clean Light / Minimalist Daytime
+         PanelColor  := Vector4(0.94, 0.95, 0.97, 0.96);
+         ButtonColor := Vector4(0.18, 0.42, 0.78, 1.00);
+         TextColor   := Vector4(0.12, 0.15, 0.18, 1.00);
+         BorderColor := Vector4(0.75, 0.78, 0.84, 1.00);
+       end;
+    2: begin // Cyberpunk / Neon Synthwave
+         PanelColor  := Vector4(0.08, 0.05, 0.15, 0.94);
+         ButtonColor := Vector4(0.84, 0.16, 0.54, 1.00);
+         TextColor   := Vector4(0.40, 0.98, 0.95, 1.00);
+         BorderColor := Vector4(0.00, 0.90, 0.96, 1.00);
+       end;
+    3: begin // Medieval / Fantasy Parchment & Gold
+         PanelColor  := Vector4(0.23, 0.17, 0.12, 0.95);
+         ButtonColor := Vector4(0.62, 0.45, 0.16, 1.00);
+         TextColor   := Vector4(0.98, 0.94, 0.86, 1.00);
+         BorderColor := Vector4(0.82, 0.64, 0.28, 1.00);
+       end;
+    4: begin // Retro Arcade / High-Contrast Emerald
+         PanelColor  := Vector4(0.04, 0.10, 0.07, 0.94);
+         ButtonColor := Vector4(0.12, 0.66, 0.33, 1.00);
+         TextColor   := Vector4(0.76, 1.00, 0.85, 1.00);
+         BorderColor := Vector4(0.22, 0.88, 0.48, 1.00);
+       end;
+    else begin // 0: Modern Dark Slate
+         PanelColor  := Vector4(0.14, 0.16, 0.20, 0.94);
+         ButtonColor := Vector4(0.18, 0.46, 0.80, 1.00);
+         TextColor   := Vector4(0.96, 0.97, 0.98, 1.00);
+         BorderColor := Vector4(0.28, 0.34, 0.42, 1.00);
+       end;
+  end;
+
+  StyledCount := 0;
+  GetSelected(SelectedList, SelectedCount, false);
+  try
+    if (SelectedList <> nil) and (SelectedList.Count > 0) then
+    begin
+      for I := 0 to SelectedList.Count - 1 do
+        if SelectedList[I] is TCastleUserInterface then
+          StyleSingleUiControl(TCastleUserInterface(SelectedList[I]));
+    end else
+    if FDesignRoot is TCastleUserInterface then
+      StyleSingleUiControl(TCastleUserInterface(FDesignRoot));
+
+    if StyledCount > 0 then
+    begin
+      UpdateDesign;
+      if (SelectedList <> nil) and (SelectedList.Count > 0) then
+        SetSelected(SelectedList);
+      ModifiedOutsideObjectInspector(
+        Format('Apply 2D UI Theme Palette to %d Control(s)', [StyledCount]),
+        ucHigh);
+    end else
+      InfoBox('No 2D UI controls (RectangleControl, Button, Label, Edit, CheckBox) found in the target selection.');
+  finally
+    FreeAndNil(SelectedList);
+  end;
+end;
+
+procedure TDesignFrame.ShowUiThemePaletteDialog;
+var
+  Dialog: TForm;
+  LblPreset, LblFontScale, LblBorder: TLabel;
+  ComboPreset: TComboBox;
+  SpinFontScale, SpinBorder: TFloatSpinEdit;
+  CheckRecursive: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if (SelectedUserInterface = nil) and (not (FDesignRoot is TCastleUserInterface)) then
+  begin
+    ErrorBox('Select a 2D User Interface control or container first.');
+    Exit;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 2D UI Theme / Color Palette Styler';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 450;
+    Dialog.Height := 270;
+
+    LblPreset := TLabel.Create(Dialog);
+    LblPreset.Left := 16;
+    LblPreset.Top := 16;
+    LblPreset.Caption := '2D UI Color & Typography Theme Preset:';
+    LblPreset.Parent := Dialog;
+
+    ComboPreset := TComboBox.Create(Dialog);
+    ComboPreset.Left := 16;
+    ComboPreset.Top := 38;
+    ComboPreset.Width := 414;
+    ComboPreset.Style := csDropDownList;
+    ComboPreset.Items.Add('Modern Dark Slate (Slate Panels, Cyan-Blue Buttons, Crisp White Text)');
+    ComboPreset.Items.Add('Clean Light / Minimalist Daytime (Soft Alabaster, Royal Blue, Charcoal)');
+    ComboPreset.Items.Add('Cyberpunk / Neon Synthwave (Midnight Purple, Magenta Buttons, Cyan Text)');
+    ComboPreset.Items.Add('Medieval / Fantasy Parchment & Gold (Warm Umber, Burnished Gold, Cream)');
+    ComboPreset.Items.Add('Retro Arcade / High-Contrast Emerald (Terminal Dark, Phosphor Green)');
+    ComboPreset.ItemIndex := 0;
+    ComboPreset.Parent := Dialog;
+
+    LblFontScale := TLabel.Create(Dialog);
+    LblFontScale.Left := 16;
+    LblFontScale.Top := 82;
+    LblFontScale.Caption := 'Font Size Multiplier (1.00 = Unchanged):';
+    LblFontScale.Parent := Dialog;
+
+    SpinFontScale := TFloatSpinEdit.Create(Dialog);
+    SpinFontScale.Left := 260;
+    SpinFontScale.Top := 78;
+    SpinFontScale.Width := 110;
+    SpinFontScale.MinValue := 0.50;
+    SpinFontScale.MaxValue := 4.00;
+    SpinFontScale.Increment := 0.10;
+    SpinFontScale.DecimalPlaces := 2;
+    SpinFontScale.Value := 1.00;
+    SpinFontScale.Parent := Dialog;
+
+    LblBorder := TLabel.Create(Dialog);
+    LblBorder.Left := 16;
+    LblBorder.Top := 118;
+    LblBorder.Caption := 'Panel Border Width (px):';
+    LblBorder.Parent := Dialog;
+
+    SpinBorder := TFloatSpinEdit.Create(Dialog);
+    SpinBorder.Left := 260;
+    SpinBorder.Top := 114;
+    SpinBorder.Width := 110;
+    SpinBorder.MinValue := 0.0;
+    SpinBorder.MaxValue := 32.0;
+    SpinBorder.Increment := 1.0;
+    SpinBorder.DecimalPlaces := 1;
+    SpinBorder.Value := 2.0;
+    SpinBorder.Parent := Dialog;
+
+    CheckRecursive := TCheckBox.Create(Dialog);
+    CheckRecursive.Left := 16;
+    CheckRecursive.Top := 156;
+    CheckRecursive.Caption := 'Apply Recursively to All Child UI Controls in Subtree';
+    CheckRecursive.Checked := true;
+    CheckRecursive.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Apply UI Theme';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyUiThemePalette(
+        ComboPreset.ItemIndex,
+        SpinFontScale.Value,
+        SpinBorder.Value,
+        CheckRecursive.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemUiThemePaletteClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyUiThemePalette(0, 1.0, 2.0, true)
+  else
+    ShowUiThemePaletteDialog;
+end;
+
+procedure TDesignFrame.ApplyMaterialColorPreset(const ColorPreset, MaterialTypeIndex: Integer;
+  const AlphaValue: Single; const ApplyRecursive: Boolean);
+var
+  StyledCount: Integer;
+  ClampedAlpha: Single;
+
+  function SwatchColorForIndex(const ObjIndex: Integer): TCastleColor;
+  var
+    Rgb: TCastleColorRGB;
+    Hue: Single;
+  begin
+    case ColorPreset of
+      0: Rgb := Vector3(0.62, 0.65, 0.68); // Prototyping Greybox Neutral
+      1: Rgb := Vector3(0.95, 0.45, 0.12); // Prototyping Accent Orange
+      2: Rgb := Vector3(0.20, 0.55, 0.90); // Prototyping Traversable Blue
+      3: Rgb := Vector3(0.18, 0.80, 0.42); // Prototyping Goal / Trigger Green
+      4: Rgb := Vector3(0.88, 0.22, 0.22); // Prototyping Blocker Crimson Red
+      5: Rgb := Vector3(0.92, 0.74, 0.28); // Brushed Gold / Warm Amber
+      else
+      begin
+        // 6: Distinct Per-Object Golden-Ratio HSV Color
+        Hue := Frac(ObjIndex * 0.61803398875) * 6.0;
+        Rgb := HsvToRgb(Vector3(Hue, 0.68, 0.92));
+      end;
+    end;
+    Result := Vector4(Rgb, ClampedAlpha);
+  end;
+
+  procedure StyleTransformNode(const T: TCastleTransform);
+  var
+    ChildIdx: Integer;
+    Prim: TCastleAbstractPrimitive;
+    Col: TCastleColor;
+  begin
+    if (T = nil) or (not Selectable(T)) then Exit;
+
+    if not IsComponentLocked(T) then
+    begin
+      Col := SwatchColorForIndex(StyledCount);
+      if T is TCastleAbstractPrimitive then
+      begin
+        Prim := TCastleAbstractPrimitive(T);
+        Prim.Color := Col;
+        case MaterialTypeIndex of
+          0: Prim.Material := pmPhysical;
+          1: Prim.Material := pmPhong;
+          2: Prim.Material := pmUnlit;
+        end;
+        Inc(StyledCount);
+      end else
+      if T is TCastleDirectionalLight then
+      begin
+        TCastleDirectionalLight(T).Color := Vector3(Col.X, Col.Y, Col.Z);
+        Inc(StyledCount);
+      end else
+      if T is TCastlePointLight then
+      begin
+        TCastlePointLight(T).Color := Vector3(Col.X, Col.Y, Col.Z);
+        Inc(StyledCount);
+      end else
+      if T is TCastleSpotLight then
+      begin
+        TCastleSpotLight(T).Color := Vector3(Col.X, Col.Y, Col.Z);
+        Inc(StyledCount);
+      end;
+    end;
+
+    if ApplyRecursive then
+      for ChildIdx := 0 to T.Count - 1 do
+        StyleTransformNode(T[ChildIdx]);
+  end;
+
+var
+  Transforms: TComponentList;
+  I: Integer;
+begin
+  ClampedAlpha := Clamped(AlphaValue, 0.05, 1.0);
+  StyledCount := 0;
+  Transforms := TComponentList.Create(false);
+  try
+    if (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0) then
+    begin
+      for I := 0 to TransformManipulate.SelectedCount - 1 do
+        if TransformManipulate.Selected[I] <> nil then
+          Transforms.Add(TransformManipulate.Selected[I]);
+    end else
+    if CurrentTransform <> nil then
+      Transforms.Add(CurrentTransform);
+
+    for I := 0 to Transforms.Count - 1 do
+      StyleTransformNode(TCastleTransform(Transforms[I]));
+
+    if StyledCount > 0 then
+    begin
+      UpdateDesign;
+      SetSelected(Transforms);
+      ModifiedOutsideObjectInspector(
+        Format('Apply 3D Material & Color Swatch to %d Object(s)', [StyledCount]),
+        ucHigh);
+    end else
+      InfoBox('Select one or more 3D Primitives (Box, Sphere, Cylinder, Cone, Plane, Text) or Lights to apply a color/material swatch.');
+  finally
+    FreeAndNil(Transforms);
+  end;
+end;
+
+procedure TDesignFrame.ShowMaterialColorPresetDialog;
+var
+  Dialog: TForm;
+  LblColor, LblMat, LblAlpha: TLabel;
+  ComboColor, ComboMat: TComboBox;
+  SpinAlpha: TFloatSpinEdit;
+  CheckRecursive: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if (CurrentTransform = nil) and ((TransformManipulate = nil) or (TransformManipulate.SelectedCount = 0)) then
+  begin
+    ErrorBox('Select at least one 3D primitive or transform group first.');
+    Exit;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 3D Primitive / Greybox Material & Color Swatch';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 450;
+    Dialog.Height := 290;
+
+    LblColor := TLabel.Create(Dialog);
+    LblColor.Left := 16;
+    LblColor.Top := 16;
+    LblColor.Caption := 'Level Prototyping / Look-Dev Color Swatch:';
+    LblColor.Parent := Dialog;
+
+    ComboColor := TComboBox.Create(Dialog);
+    ComboColor.Left := 16;
+    ComboColor.Top := 38;
+    ComboColor.Width := 414;
+    ComboColor.Style := csDropDownList;
+    ComboColor.Items.Add('Prototyping Greybox Neutral (Cool Slate Grey)');
+    ComboColor.Items.Add('Prototyping Accent Orange (Interactive / Hazard)');
+    ComboColor.Items.Add('Prototyping Traversable Blue (Walkway / Ramp)');
+    ComboColor.Items.Add('Prototyping Goal / Trigger Emerald Green');
+    ComboColor.Items.Add('Prototyping Blocker / Danger Crimson Red');
+    ComboColor.Items.Add('Brushed Gold / Warm Amber');
+    ComboColor.Items.Add('Distinct Per-Object Golden-Ratio Colors (Auto-Tint Each Object)');
+    ComboColor.ItemIndex := 6;
+    ComboColor.Parent := Dialog;
+
+    LblMat := TLabel.Create(Dialog);
+    LblMat.Left := 16;
+    LblMat.Top := 78;
+    LblMat.Caption := 'Primitive Shading Material Mode (TCastleAbstractPrimitive.Material):';
+    LblMat.Parent := Dialog;
+
+    ComboMat := TComboBox.Create(Dialog);
+    ComboMat.Left := 16;
+    ComboMat.Top := 100;
+    ComboMat.Width := 414;
+    ComboMat.Style := csDropDownList;
+    ComboMat.Items.Add('Physical PBR (pmPhysical - Realistic Lighting)');
+    ComboMat.Items.Add('Phong Shading (pmPhong - Classic Specular)');
+    ComboMat.Items.Add('Unlit / Emissive (pmUnlit - Flat Self-Illuminated)');
+    ComboMat.Items.Add('Keep Existing Material Mode');
+    ComboMat.ItemIndex := 0;
+    ComboMat.Parent := Dialog;
+
+    LblAlpha := TLabel.Create(Dialog);
+    LblAlpha.Left := 16;
+    LblAlpha.Top := 142;
+    LblAlpha.Caption := 'Opacity / Alpha (0.05 .. 1.00):';
+    LblAlpha.Parent := Dialog;
+
+    SpinAlpha := TFloatSpinEdit.Create(Dialog);
+    SpinAlpha.Left := 260;
+    SpinAlpha.Top := 138;
+    SpinAlpha.Width := 110;
+    SpinAlpha.MinValue := 0.05;
+    SpinAlpha.MaxValue := 1.00;
+    SpinAlpha.Increment := 0.05;
+    SpinAlpha.DecimalPlaces := 2;
+    SpinAlpha.Value := 1.00;
+    SpinAlpha.Parent := Dialog;
+
+    CheckRecursive := TCheckBox.Create(Dialog);
+    CheckRecursive.Left := 16;
+    CheckRecursive.Top := 178;
+    CheckRecursive.Caption := 'Apply Recursively to All Child Primitives in Selected Group(s)';
+    CheckRecursive.Checked := true;
+    CheckRecursive.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Apply Swatch';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyMaterialColorPreset(
+        ComboColor.ItemIndex,
+        ComboMat.ItemIndex,
+        SpinAlpha.Value,
+        CheckRecursive.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemMaterialPresetClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyMaterialColorPreset(6, 0, 1.0, true)
+  else
+    ShowMaterialColorPresetDialog;
+end;
+
+procedure TDesignFrame.ShowPascalCodeGeneratorDialog;
+var
+  TargetComponents: TComponentList;
+
+  procedure CollectAllNamedComponents(const C: TComponent);
+  var
+    ChildIdx: Integer;
+    T: TCastleTransform;
+    UI: TCastleUserInterface;
+    CC: TCastleComponent;
+  begin
+    if (C = nil) or (not Selectable(C)) then Exit;
+    if (C.Name <> '') and (not (csSubComponent in C.ComponentStyle)) and
+       (TargetComponents.IndexOf(C) = -1) then
+      TargetComponents.Add(C);
+
+    if C is TCastleComponent then
+    begin
+      CC := TCastleComponent(C);
+      for ChildIdx := 0 to CC.NonVisualComponentsCount - 1 do
+        CollectAllNamedComponents(CC.NonVisualComponents[ChildIdx]);
+    end;
+    if C is TCastleTransform then
+    begin
+      T := TCastleTransform(C);
+      for ChildIdx := 0 to T.BehaviorsCount - 1 do
+        CollectAllNamedComponents(T.Behaviors[ChildIdx]);
+      for ChildIdx := 0 to T.Count - 1 do
+        CollectAllNamedComponents(T[ChildIdx]);
+    end else
+    if C is TCastleUserInterface then
+    begin
+      UI := TCastleUserInterface(C);
+      if UI is TCastleViewport then
+        CollectAllNamedComponents(TCastleViewport(UI).Items);
+      for ChildIdx := 0 to UI.ControlsCount - 1 do
+        CollectAllNamedComponents(UI.Controls[ChildIdx]);
+    end;
+  end;
+
+var
+  SelectedList: TComponentList;
+  SelectedCount, I: Integer;
+  C: TComponent;
+  Dialog: TForm;
+  MemoCode: TMemo;
+  BottomPanel: TPanel;
+  BtnCopy, BtnClose: TButton;
+  FieldLines, LookupLines, EventAssignLines, EventMethodLines, EventImplLines: TStringList;
+begin
+  if FDesignRoot = nil then Exit;
+
+  TargetComponents := TComponentList.Create(false);
+  FieldLines := TStringList.Create;
+  LookupLines := TStringList.Create;
+  EventAssignLines := TStringList.Create;
+  EventMethodLines := TStringList.Create;
+  EventImplLines := TStringList.Create;
+  Dialog := TForm.CreateNew(Self);
+  try
+    GetSelected(SelectedList, SelectedCount, false);
+    try
+      if (SelectedList <> nil) and (SelectedList.Count > 0) and
+         (not ((SelectedList.Count = 1) and (SelectedList[0] = FDesignRoot))) then
+      begin
+        for I := 0 to SelectedList.Count - 1 do
+          if (SelectedList[I] <> nil) and (SelectedList[I].Name <> '') and
+             (not (csSubComponent in SelectedList[I].ComponentStyle)) then
+            TargetComponents.Add(SelectedList[I]);
+      end else
+        CollectAllNamedComponents(FDesignRoot);
+    finally
+      FreeAndNil(SelectedList);
+    end;
+
+    for I := 0 to TargetComponents.Count - 1 do
+    begin
+      C := TargetComponents[I];
+      FieldLines.Add(Format('    %s: %s;', [C.Name, C.ClassName]));
+      LookupLines.Add(Format('  %s := DesignedComponent(''%s'') as %s;', [C.Name, C.Name, C.ClassName]));
+      if C is TCastleButton then
+      begin
+        EventMethodLines.Add(Format('    procedure Click%s(Sender: TObject);', [C.Name]));
+        EventAssignLines.Add(Format('  %s.OnClick := {$ifdef FPC}@{$endif}Click%s;', [C.Name, C.Name]));
+        EventImplLines.Add(Format('procedure TViewMain.Click%s(Sender: TObject);', [C.Name]));
+        EventImplLines.Add('begin');
+        EventImplLines.Add(Format('  // TODO: handle %s click', [C.Name]));
+        EventImplLines.Add('end;');
+        EventImplLines.Add('');
+      end;
+    end;
+
+    Dialog.Caption := Format('Pascal TCastleView Code Generator (%d Component(s))', [TargetComponents.Count]);
+    Dialog.Position := poMainFormCenter;
+    Dialog.Width := 740;
+    Dialog.Height := 520;
+
+    MemoCode := TMemo.Create(Dialog);
+    MemoCode.Align := alClient;
+    MemoCode.BorderSpacing.Around := 8;
+    MemoCode.ReadOnly := true;
+    MemoCode.ScrollBars := ssAutoBoth;
+    MemoCode.WordWrap := false;
+    MemoCode.Font.Name := 'Monospace';
+    MemoCode.Parent := Dialog;
+
+    MemoCode.Lines.Add('{ 1. Published Fields for TViewMain = class(TCastleView) }');
+    MemoCode.Lines.Add('  published');
+    MemoCode.Lines.Add('    { Components designed using CGE Editor. }');
+    MemoCode.Lines.AddStrings(FieldLines);
+    if EventMethodLines.Count > 0 then
+    begin
+      MemoCode.Lines.Add('  strict private');
+      MemoCode.Lines.AddStrings(EventMethodLines);
+    end;
+    MemoCode.Lines.Add('');
+    MemoCode.Lines.Add('{ 2. TViewMain.Start Wire-Up }');
+    MemoCode.Lines.Add('procedure TViewMain.Start;');
+    MemoCode.Lines.Add('begin');
+    MemoCode.Lines.Add('  inherited;');
+    if EventAssignLines.Count > 0 then
+      MemoCode.Lines.AddStrings(EventAssignLines)
+    else
+      MemoCode.Lines.Add('  // Published fields above are automatically bound by TCastleView.');
+    MemoCode.Lines.Add('end;');
+    MemoCode.Lines.Add('');
+    if EventImplLines.Count > 0 then
+    begin
+      MemoCode.Lines.Add('{ 3. Button Click Event Handlers }');
+      MemoCode.Lines.AddStrings(EventImplLines);
+    end;
+    MemoCode.Lines.Add('{ 4. Explicit DesignedComponent(...) Lookups (if not using published fields) }');
+    MemoCode.Lines.AddStrings(LookupLines);
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnClose := TButton.Create(Dialog);
+    BtnClose.Caption := 'Close';
+    BtnClose.Cancel := true;
+    BtnClose.ModalResult := mrCancel;
+    BtnClose.Align := alRight;
+    BtnClose.BorderSpacing.Around := 6;
+    BtnClose.Parent := BottomPanel;
+
+    BtnCopy := TButton.Create(Dialog);
+    BtnCopy.Caption := 'Copy Pascal Snippet to Clipboard';
+    BtnCopy.Default := true;
+    BtnCopy.ModalResult := mrOk;
+    BtnCopy.AutoSize := true;
+    BtnCopy.Align := alRight;
+    BtnCopy.BorderSpacing.Around := 6;
+    BtnCopy.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      Clipboard.AsText := MemoCode.Text;
+  finally
+    FreeAndNil(Dialog);
+    FreeAndNil(EventImplLines);
+    FreeAndNil(EventMethodLines);
+    FreeAndNil(EventAssignLines);
+    FreeAndNil(LookupLines);
+    FreeAndNil(FieldLines);
+    FreeAndNil(TargetComponents);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemGeneratePascalCodeClick(Sender: TObject);
+begin
+  ShowPascalCodeGeneratorDialog;
+end;
+
+procedure TDesignFrame.ApplySceneAnimationSettings(const AnimName: String;
+  const LoopAnim, TimePlayingEnabled: Boolean; const PlaySpeed: Single;
+  const ActionMode: Integer);
+var
+  Scenes: TComponentList;
+
+  procedure CollectScenes(const C: TComponent);
+  var
+    ChildIdx: Integer;
+    T: TCastleTransform;
+    UI: TCastleUserInterface;
+  begin
+    if (C = nil) or (not Selectable(C)) then Exit;
+    if (C is TCastleScene) and (not IsComponentLocked(C)) and (Scenes.IndexOf(C) = -1) then
+      Scenes.Add(C);
+    if C is TCastleTransform then
+    begin
+      T := TCastleTransform(C);
+      for ChildIdx := 0 to T.Count - 1 do
+        CollectScenes(T[ChildIdx]);
+    end else
+    if C is TCastleUserInterface then
+    begin
+      UI := TCastleUserInterface(C);
+      if UI is TCastleViewport then
+        CollectScenes(TCastleViewport(UI).Items);
+      for ChildIdx := 0 to UI.ControlsCount - 1 do
+        CollectScenes(UI.Controls[ChildIdx]);
+    end;
+  end;
+
+var
+  SelectedList: TComponentList;
+  SelectedCount, I: Integer;
+  Sc: TCastleScene;
+  TrimmedAnim: String;
+begin
+  if FDesignRoot = nil then Exit;
+  TrimmedAnim := Trim(AnimName);
+
+  Scenes := TComponentList.Create(false);
+  try
+    GetSelected(SelectedList, SelectedCount, false);
+    try
+      if (SelectedList <> nil) and (SelectedList.Count > 0) then
+        for I := 0 to SelectedList.Count - 1 do
+          CollectScenes(SelectedList[I]);
+      if Scenes.Count = 0 then
+        CollectScenes(FDesignRoot);
+    finally
+      FreeAndNil(SelectedList);
+    end;
+
+    if Scenes.Count = 0 then
+    begin
+      InfoBox('No TCastleScene instances found in the current selection or design.');
+      Exit;
+    end;
+
+    for I := 0 to Scenes.Count - 1 do
+    begin
+      Sc := TCastleScene(Scenes[I]);
+      Sc.TimePlaying := TimePlayingEnabled;
+      Sc.TimePlayingSpeed := Max(0.0, PlaySpeed);
+      if ActionMode = 2 then
+      begin
+        Sc.AutoAnimation := '';
+        Sc.StopAnimation;
+        Sc.ResetAnimationState;
+      end else
+      begin
+        Sc.ProcessEvents := true;
+        Sc.AutoAnimation := TrimmedAnim;
+        if TrimmedAnim <> '' then
+          Sc.PlayAnimation(TrimmedAnim, LoopAnim)
+        else
+          Sc.StopAnimation;
+      end;
+    end;
+
+    UpdateDesign;
+    SetSelected(Scenes);
+    ModifiedOutsideObjectInspector(
+      Format('Configure Animation (%s) on %d Scene(s)', [Iff(TrimmedAnim <> '', TrimmedAnim, 'Stop/Reset'), Scenes.Count]),
+      ucHigh);
+  finally
+    FreeAndNil(Scenes);
+  end;
+end;
+
+procedure TDesignFrame.ShowAnimationControllerDialog;
+var
+  Scenes: TComponentList;
+  AnimNames: TStringList;
+
+  procedure CollectScenesAndAnims(const C: TComponent);
+  var
+    ChildIdx, AIdx: Integer;
+    Sc: TCastleScene;
+    T: TCastleTransform;
+    UI: TCastleUserInterface;
+  begin
+    if (C = nil) or (not Selectable(C)) then Exit;
+    if (C is TCastleScene) and (not IsComponentLocked(C)) then
+    begin
+      Sc := TCastleScene(C);
+      if Scenes.IndexOf(Sc) = -1 then
+        Scenes.Add(Sc);
+      if Sc.AnimationsList <> nil then
+        for AIdx := 0 to Sc.AnimationsList.Count - 1 do
+          if (Sc.AnimationsList[AIdx] <> '') and (AnimNames.IndexOf(Sc.AnimationsList[AIdx]) = -1) then
+            AnimNames.Add(Sc.AnimationsList[AIdx]);
+    end;
+    if C is TCastleTransform then
+    begin
+      T := TCastleTransform(C);
+      for ChildIdx := 0 to T.Count - 1 do
+        CollectScenesAndAnims(T[ChildIdx]);
+    end else
+    if C is TCastleUserInterface then
+    begin
+      UI := TCastleUserInterface(C);
+      if UI is TCastleViewport then
+        CollectScenesAndAnims(TCastleViewport(UI).Items);
+      for ChildIdx := 0 to UI.ControlsCount - 1 do
+        CollectScenesAndAnims(UI.Controls[ChildIdx]);
+    end;
+  end;
+
+var
+  SelectedList: TComponentList;
+  SelectedCount, I, ModalRes: Integer;
+  FirstScene: TCastleScene;
+  Dialog: TForm;
+  LblAnim, LblSpeed: TLabel;
+  ComboAnim: TComboBox;
+  SpinSpeed: TFloatSpinEdit;
+  CheckLoop, CheckTimePlaying: TCheckBox;
+  BottomPanel: TPanel;
+  BtnPlay, BtnStop, BtnCancel: TButton;
+begin
+  if FDesignRoot = nil then Exit;
+
+  Scenes := TComponentList.Create(false);
+  AnimNames := TStringList.Create;
+  Dialog := TForm.CreateNew(Self);
+  try
+    GetSelected(SelectedList, SelectedCount, false);
+    try
+      if (SelectedList <> nil) and (SelectedList.Count > 0) then
+        for I := 0 to SelectedList.Count - 1 do
+          CollectScenesAndAnims(SelectedList[I]);
+      if Scenes.Count = 0 then
+        CollectScenesAndAnims(FDesignRoot);
+    finally
+      FreeAndNil(SelectedList);
+    end;
+
+    if Scenes.Count = 0 then
+    begin
+      ErrorBox('Add or select at least one TCastleScene component to configure animations.');
+      Exit;
+    end;
+
+    FirstScene := TCastleScene(Scenes[0]);
+
+    Dialog.Caption := Format('Scene Animation & TimeScale Controller (%d Scene(s))', [Scenes.Count]);
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 460;
+    Dialog.Height := 250;
+
+    LblAnim := TLabel.Create(Dialog);
+    LblAnim.Left := 16;
+    LblAnim.Top := 16;
+    LblAnim.Caption := Format('Animation Clip Name (%d discovered in loaded models):', [AnimNames.Count]);
+    LblAnim.Parent := Dialog;
+
+    ComboAnim := TComboBox.Create(Dialog);
+    ComboAnim.Left := 16;
+    ComboAnim.Top := 38;
+    ComboAnim.Width := 424;
+    ComboAnim.Items.AddStrings(AnimNames);
+    if FirstScene.AutoAnimation <> '' then
+      ComboAnim.Text := FirstScene.AutoAnimation
+    else if AnimNames.Count > 0 then
+      ComboAnim.Text := AnimNames[0]
+    else
+      ComboAnim.Text := 'idle';
+    ComboAnim.Parent := Dialog;
+
+    LblSpeed := TLabel.Create(Dialog);
+    LblSpeed.Left := 16;
+    LblSpeed.Top := 82;
+    LblSpeed.Caption := 'TimePlayingSpeed Multiplier (1.00 = Normal Speed):';
+    LblSpeed.Parent := Dialog;
+
+    SpinSpeed := TFloatSpinEdit.Create(Dialog);
+    SpinSpeed.Left := 310;
+    SpinSpeed.Top := 78;
+    SpinSpeed.Width := 110;
+    SpinSpeed.MinValue := 0.00;
+    SpinSpeed.MaxValue := 20.00;
+    SpinSpeed.Increment := 0.10;
+    SpinSpeed.DecimalPlaces := 2;
+    SpinSpeed.Value := FirstScene.TimePlayingSpeed;
+    SpinSpeed.Parent := Dialog;
+
+    CheckLoop := TCheckBox.Create(Dialog);
+    CheckLoop.Left := 16;
+    CheckLoop.Top := 118;
+    CheckLoop.Caption := 'Loop Animation Playback';
+    CheckLoop.Checked := true;
+    CheckLoop.Parent := Dialog;
+
+    CheckTimePlaying := TCheckBox.Create(Dialog);
+    CheckTimePlaying.Left := 16;
+    CheckTimePlaying.Top := 146;
+    CheckTimePlaying.Caption := 'Enable TimePlaying & ProcessEvents on Target Scene(s)';
+    CheckTimePlaying.Checked := FirstScene.TimePlaying;
+    CheckTimePlaying.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnStop := TButton.Create(Dialog);
+    BtnStop.Caption := 'Stop & Reset Pose';
+    BtnStop.ModalResult := mrIgnore;
+    BtnStop.AutoSize := true;
+    BtnStop.Align := alRight;
+    BtnStop.BorderSpacing.Around := 6;
+    BtnStop.Parent := BottomPanel;
+
+    BtnPlay := TButton.Create(Dialog);
+    BtnPlay.Caption := 'Apply & Play Animation';
+    BtnPlay.Default := true;
+    BtnPlay.ModalResult := mrOk;
+    BtnPlay.AutoSize := true;
+    BtnPlay.Align := alRight;
+    BtnPlay.BorderSpacing.Around := 6;
+    BtnPlay.Parent := BottomPanel;
+
+    ModalRes := Dialog.ShowModal;
+    if ModalRes = mrOk then
+      ApplySceneAnimationSettings(
+        ComboAnim.Text,
+        CheckLoop.Checked,
+        CheckTimePlaying.Checked,
+        SpinSpeed.Value,
+        1)
+    else if ModalRes = mrIgnore then
+      ApplySceneAnimationSettings(
+        '',
+        CheckLoop.Checked,
+        CheckTimePlaying.Checked,
+        SpinSpeed.Value,
+        2);
+  finally
+    FreeAndNil(Dialog);
+    FreeAndNil(AnimNames);
+    FreeAndNil(Scenes);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemAnimationControllerClick(Sender: TObject);
+begin
+  ShowAnimationControllerDialog;
+end;
+
+procedure TDesignFrame.ReplaceSelectedWithDesignFile;
+var
+  OpenDlg: TCastleOpenDialog;
+  ChosenUrl, Ext, BaseToken: String;
+  SelectedList, NewSelection: TComponentList;
+  SelectedCount, I, InsertIdx, ReplacedCount: Integer;
+  C: TComponent;
+  OldT, ParentT, NewT: TCastleTransform;
+  OldUI, ParentUI, NewUI: TCastleUserInterface;
+begin
+  if (FDesignRoot = nil) or (DesignOwner = nil) then Exit;
+
+  GetSelected(SelectedList, SelectedCount, false);
+  NewSelection := TComponentList.Create(false);
+  OpenDlg := TCastleOpenDialog.Create(Self);
+  try
+    if (SelectedList = nil) or (SelectedList.Count = 0) then
+    begin
+      ErrorBox('Select one or more 3D transforms or 2D UI controls to replace with a sub-design or model file.');
+      Exit;
+    end;
+
+    OpenDlg.Title := 'Choose Sub-Design or 3D Model File to Replace Selection With';
+    OpenDlg.Filter :=
+      'All Reusable Designs & Models (*.castle-transform;*.castle-user-interface;*.gltf;*.glb;*.x3d;*.x3dv;*.obj)|*.castle-transform;*.castle-user-interface;*.gltf;*.glb;*.x3d;*.x3dv;*.obj|' +
+      'Transform Sub-Design (*.castle-transform)|*.castle-transform|' +
+      'UI Sub-Design (*.castle-user-interface)|*.castle-user-interface|' +
+      '3D Models (*.gltf;*.glb;*.x3d;*.x3dv;*.obj)|*.gltf;*.glb;*.x3d;*.x3dv;*.obj|' +
+      'All Files (*.*)|*.*';
+    OpenDlg.AdviceDataDirectory := true;
+    if not OpenDlg.Execute then Exit;
+
+    ChosenUrl := OpenDlg.Url;
+    Ext := LowerCase(ExtractUriExt(ChosenUrl));
+    BaseToken := DeleteUriExt(ExtractUriName(ChosenUrl));
+
+    ReplacedCount := 0;
+    for I := 0 to SelectedList.Count - 1 do
+    begin
+      C := SelectedList[I];
+      if (C = nil) or (C = FDesignRoot) or (not Deletable(C)) or IsComponentLocked(C) then
+        Continue;
+
+      if (C is TCastleTransform) and (Ext <> '.castle-user-interface') then
+      begin
+        OldT := TCastleTransform(C);
+        ParentT := OldT.Parent;
+        if ParentT = nil then Continue;
+        InsertIdx := ParentT.List.IndexOf(OldT);
+
+        if Ext = '.castle-transform' then
+        begin
+          NewT := TCastleTransformDesign.Create(DesignOwner);
+          NewT.Name := ProposeComponentName(TCastleTransformDesign, DesignOwner, 'Design' + BaseToken);
+          TCastleTransformDesign(NewT).Url := ChosenUrl;
+        end else
+        begin
+          NewT := TCastleScene.Create(DesignOwner);
+          NewT.Name := ProposeComponentName(TCastleScene, DesignOwner, 'Scene' + BaseToken);
+          TCastleScene(NewT).Url := ChosenUrl;
+        end;
+
+        NewT.Translation := OldT.Translation;
+        NewT.Rotation := OldT.Rotation;
+        NewT.Scale := OldT.Scale;
+        if InsertIdx >= 0 then
+          ParentT.Insert(InsertIdx, NewT)
+        else
+          ParentT.Add(NewT);
+
+        FreeComponentRecursively(OldT);
+        NewSelection.Add(NewT);
+        Inc(ReplacedCount);
+      end else
+      if (C is TCastleUserInterface) and (Ext = '.castle-user-interface') then
+      begin
+        OldUI := TCastleUserInterface(C);
+        ParentUI := OldUI.Parent;
+        if ParentUI = nil then Continue;
+        InsertIdx := ParentUI.IndexOfControl(OldUI);
+
+        NewUI := TCastleDesign.Create(DesignOwner);
+        NewUI.Name := ProposeComponentName(TCastleDesign, DesignOwner, 'UiDesign' + BaseToken);
+        TCastleDesign(NewUI).Url := ChosenUrl;
+        NewUI.HorizontalAnchorSelf := OldUI.HorizontalAnchorSelf;
+        NewUI.HorizontalAnchorParent := OldUI.HorizontalAnchorParent;
+        NewUI.VerticalAnchorSelf := OldUI.VerticalAnchorSelf;
+        NewUI.VerticalAnchorParent := OldUI.VerticalAnchorParent;
+        NewUI.Translation := OldUI.Translation;
+        NewUI.Width := OldUI.Width;
+        NewUI.Height := OldUI.Height;
+        NewUI.FullSize := OldUI.FullSize;
+
+        if InsertIdx >= 0 then
+          ParentUI.InsertControl(InsertIdx, NewUI)
+        else
+          ParentUI.InsertFront(NewUI);
+
+        FreeComponentRecursively(OldUI);
+        NewSelection.Add(NewUI);
+        Inc(ReplacedCount);
+      end;
+    end;
+
+    if ReplacedCount > 0 then
+    begin
+      UpdateDesign;
+      SetSelected(NewSelection);
+      ModifiedOutsideObjectInspector(
+        Format('Replace %d Component(s) With "%s"', [ReplacedCount, ExtractUriName(ChosenUrl)]),
+        ucHigh);
+    end else
+      ErrorBox('Selected component type does not match the chosen file type (.castle-transform / 3D model requires 3D transforms; .castle-user-interface requires 2D UI controls).');
+  finally
+    FreeAndNil(OpenDlg);
+    FreeAndNil(NewSelection);
+    FreeAndNil(SelectedList);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemReplaceWithDesignFileClick(Sender: TObject);
+begin
+  ReplaceSelectedWithDesignFile;
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -34510,6 +35654,18 @@ begin
       (ControlsTree.SelectionCount >= 1) or (FDesignRoot <> nil);
   if MenuTreeViewItemCameraNavSetup <> nil then
     MenuTreeViewItemCameraNavSetup.Enabled := CurrentViewport <> nil;
+  if MenuTreeViewItemUiThemePalette <> nil then
+    MenuTreeViewItemUiThemePalette.Enabled :=
+      (SelectedUserInterface <> nil) or (FDesignRoot is TCastleUserInterface);
+  if MenuTreeViewItemMaterialPreset <> nil then
+    MenuTreeViewItemMaterialPreset.Enabled :=
+      (CurrentTransform <> nil) or ((TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0));
+  if MenuTreeViewItemGeneratePascalCode <> nil then
+    MenuTreeViewItemGeneratePascalCode.Enabled := FDesignRoot <> nil;
+  if MenuTreeViewItemAnimationController <> nil then
+    MenuTreeViewItemAnimationController.Enabled := FDesignRoot <> nil;
+  if MenuTreeViewItemReplaceWithDesignFile <> nil then
+    MenuTreeViewItemReplaceWithDesignFile.Enabled := ControlsTree.SelectionCount >= 1;
   if MenuTreeViewItemGroupSelected <> nil then
     MenuTreeViewItemGroupSelected.Enabled := (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0);
   if MenuTreeViewItemUngroupSelected <> nil then

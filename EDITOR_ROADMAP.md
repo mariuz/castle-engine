@@ -1275,11 +1275,36 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Implemented `TDesignFrame.ShowQuickCameraNavigationDialog` and `TDesignFrame.ApplyQuickCameraNavigation` (`MenuTreeViewItemCameraNavSetup` in `MenuTreeView`).
   - Configures and binds `Viewport.Camera` (`TCastleCamera`) and a gameplay navigation controller in `CurrentViewport` across 5 presets: **First-Person Walk / FPS Rig (`TCastleWalkNavigation`)**, **Orbit / Turntable Examine Rig (`TCastleExamineNavigation`)**, **Third-Person Follow Rig (`TCastleThirdPersonNavigation` linked to the selected avatar transform/scene)**, **Top-Down / Isometric Strategy Rig**, and **2D Orthographic Side-Scroller Rig (`TCastle2DNavigation`)**.
 
+### Phase 202: Quick 2D UI Theme / Color Palette Styler (`ShowUiThemePaletteDialog` / `ApplyUiThemePalette`)
+- [x] **202.1. UMG / UI Toolkit Theme & Typography Styler (`TDesignFrame.ShowUiThemePaletteDialog` / `TDesignFrame.ApplyUiThemePalette`)**
+  - Implemented `TDesignFrame.ShowUiThemePaletteDialog` and `TDesignFrame.ApplyUiThemePalette` (`MenuTreeViewItemUiThemePalette` in `MenuTreeView`).
+  - Applies 5 cohesive color & typography themes (**Modern Dark Slate**, **Clean Light / Minimalist Daytime**, **Cyberpunk / Neon Synthwave**, **Medieval / Fantasy Parchment & Gold**, and **Retro Arcade / High-Contrast Emerald**) with configurable font scaling and border width across selected `TCastleRectangleControl`, `TCastleButton`, `TCastleLabel`, `TCastleEdit`, and `TCastleCheckBox` controls (`Shift`-click applies Modern Dark Slate immediately).
+
+### Phase 203: Quick 3D Primitive / Greybox Material & Color Swatch (`ShowMaterialColorPresetDialog` / `ApplyMaterialColorPreset`)
+- [x] **203.1. Level Prototyping Color Swatches & Primitive Shading Mode (`TDesignFrame.ShowMaterialColorPresetDialog` / `TDesignFrame.ApplyMaterialColorPreset`)**
+  - Implemented `TDesignFrame.ShowMaterialColorPresetDialog` and `TDesignFrame.ApplyMaterialColorPreset` (`MenuTreeViewItemMaterialPreset` in `MenuTreeView`).
+  - Applies 7 prototyping/look-dev color swatches (**Prototyping Greybox Neutral**, **Accent Orange**, **Traversable Blue**, **Goal Emerald Green**, **Blocker Crimson Red**, **Brushed Gold**, and **Distinct Per-Object Golden-Ratio Colors**) and shading material modes (`pmPhysical`, `pmPhong`, `pmUnlit`) across selected `TCastleAbstractPrimitive` and `TCastleAbstractLight` nodes (`Shift`-click applies Distinct Per-Object Colors immediately).
+
+### Phase 204: Pascal `TCastleView` Code Generator (`ShowPascalCodeGeneratorDialog` / `MenuTreeViewItemGeneratePascalCode`)
+- [x] **204.1. Published Fields, `DesignedComponent` Lookups & Event Stubs Generator (`TDesignFrame.ShowPascalCodeGeneratorDialog`)**
+  - Implemented `TDesignFrame.ShowPascalCodeGeneratorDialog` and added **`Generate Pascal TCastleView Code Snippet...`** (`MenuTreeViewItemGeneratePascalCode`) in `MenuTreeView`.
+  - Generates ready-to-paste Object Pascal code for selected components (or the entire design) including `published` field declarations, `TViewMain.Start` `OnClick` event wire-up, button handler method stubs, and explicit `DesignedComponent(...)` lookups with one-click clipboard copy.
+
+### Phase 205: Scene Animation & TimeScale Preview / Bulk Controller (`ShowAnimationControllerDialog` / `ApplySceneAnimationSettings`)
+- [x] **205.1. Multi-Scene Animation Discovery, AutoAnimation & TimePlayingSpeed Controller (`TDesignFrame.ShowAnimationControllerDialog` / `TDesignFrame.ApplySceneAnimationSettings`)**
+  - Implemented `TDesignFrame.ShowAnimationControllerDialog` and `TDesignFrame.ApplySceneAnimationSettings` (`MenuTreeViewItemAnimationController` in `MenuTreeView`).
+  - Scans selected (or all) `TCastleScene` components for available `AnimationsList` clips, configures `AutoAnimation`, `ProcessEvents`, `TimePlaying`, and `TimePlayingSpeed`, and immediately previews or stops/resets animations in the viewport.
+
+### Phase 206: Replace Selected With Sub-Design / 3D Model File (`ReplaceSelectedWithDesignFile` / `MenuTreeViewItemReplaceWithDesignFile`)
+- [x] **206.1. In-Place Greybox-to-Prefab / 3D Model Replacer (`TDesignFrame.ReplaceSelectedWithDesignFile`)**
+  - Implemented `TDesignFrame.ReplaceSelectedWithDesignFile` and added **`Replace Selected With Sub-Design / 3D Model File...`** (`MenuTreeViewItemReplaceWithDesignFile`) in `MenuTreeView`.
+  - Replaces selected `TCastleTransform` or `TCastleUserInterface` components in-place with a chosen `.castle-transform` (`TCastleTransformDesign`), `.gltf`/`.glb`/`.x3d`/`.obj` (`TCastleScene`), or `.castle-user-interface` (`TCastleDesign`) file while preserving parent hierarchy, sibling order, and local 3D transforms or 2D UI anchors/bounds.
+
 ---
 
-## Roadmap Completion Status (Phases 1–201)
+## Roadmap Completion Status (Phases 1–206)
 
-All **201 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **206 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 
