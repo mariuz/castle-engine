@@ -48,7 +48,7 @@ procedure RenderMaterialsBegin;
 
     if RenderOptions.Mode <> rmFull then Exit;
 
-    if GLFeatures.EnableFixedFunction then
+    if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
     begin
       {$ifndef OpenGLES}
       if Lighting then

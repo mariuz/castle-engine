@@ -227,7 +227,7 @@ var
   var
     I: Integer;
   begin
-    if CurrentMeshShader = nil then
+    if (CurrentMeshShader = nil) and (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
     begin
       {$ifndef OpenGLES}
       { disable fixed-function parameters }
@@ -243,7 +243,7 @@ var
         glDisableClientState(GL_FOG_COORDINATE_ARRAY_EXT);
       }
 
-      if GLFeatures.UseMultiTexturing then
+      if (RHIDevice = nil) and (GLFeatures <> nil) then if GLFeatures.UseMultiTexturing then
       begin
         for I := 0 to Arrays.TexCoords.Count - 1 do
           if (Arrays.TexCoords[I] <> nil) and
@@ -385,7 +385,7 @@ begin
       {$ifdef OpenGLES}
       Assert(CurrentMeshShader <> nil, 'OpenGL ES 2.0 rendering must go through shaders');
       {$else}
-      if not GLFeatures.EnableFixedFunction then
+      if (RHIDevice = nil) and (GLFeatures <> nil) and (not GLFeatures.EnableFixedFunction) then
         Assert(CurrentMeshShader <> nil, 'All rendering must go through shaders when GLFeatures.EnableFixedFunction = false');
       {$endif}
 
@@ -416,7 +416,7 @@ begin
         end;
       end else
       begin
-        { set fixed-function parameters }
+        { set fixed-function parameters } {$ifndef OpenGLES} if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then begin {$endif}
         {$ifndef OpenGLES}
         glEnableClientState(GL_VERTEX_ARRAY);
         glVertexPointer(3, GL_FLOAT, Arrays.CoordinateSize, Arrays.Position);
@@ -426,7 +426,7 @@ begin
           glEnableClientState(GL_NORMAL_ARRAY);
           glNormalPointer(GL_FLOAT, Arrays.CoordinateSize, Arrays.Normal);
         end;
-        {$endif not OpenGLES}
+        end; {$endif not OpenGLES}
       end;
 
       if Vbo[vtAttribute] <> GLObjectNone then
@@ -478,7 +478,7 @@ begin
           end;
       end else
       begin
-        { set fixed-function parameters }
+        { set fixed-function parameters } {$ifndef OpenGLES} if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then begin {$endif}
         {$ifndef OpenGLES}
         if PerVertexColor then
         begin
@@ -502,7 +502,7 @@ begin
         end;
         }
 
-        if GLFeatures.UseMultiTexturing then
+        if (GLFeatures <> nil) and GLFeatures.UseMultiTexturing then
         begin
           for I := 0 to Arrays.TexCoords.Count - 1 do
             if (Arrays.TexCoords[I] <> nil) and
@@ -522,7 +522,7 @@ begin
           glTexCoordPointer(Arrays.TexCoords[0].Dimensions, GL_FLOAT,
             Arrays.AttributeSize, Arrays.TexCoord(0, 0));
         end;
-        {$endif not OpenGLES}
+        end; {$endif not OpenGLES}
       end;
 
       { We know now that CurrentMeshShader is the program set by
@@ -590,30 +590,30 @@ begin
       begin
         if Arrays.HasIndexes then
         begin
-          if Vbo[vtIndex] <> GLObjectNone then
+          if (RHIDevice = nil) and (GLFeatures <> nil) and (Vbo[vtIndex] <> GLObjectNone) then
           begin
             RenderContext.CurrentVao := Vao;
             RenderContext.BindBuffer[btElementArray] := Vbo[vtIndex];
           end;
 
           if Arrays.Counts = nil then
-            glDrawElements(Mode, Arrays.IndexesCount,
+            if (RHIDevice = nil) and (GLFeatures <> nil) then glDrawElements(Mode, Arrays.IndexesCount,
               GLIndexConst, Pointer(Arrays.IndexesPtr(First)))
           else
             for I := 0 to Arrays.Counts.Count - 1 do
             begin
-              glDrawElements(Mode, Arrays.Counts[I],
+              if (RHIDevice = nil) and (GLFeatures <> nil) then glDrawElements(Mode, Arrays.Counts[I],
                 GLIndexConst, Pointer(Arrays.IndexesPtr(First)));
               First := First + Arrays.Counts[I];
             end;
         end else
         begin
           if Arrays.Counts = nil then
-            glDrawArrays(Mode, First, Arrays.Count)
+            if (RHIDevice = nil) and (GLFeatures <> nil) then glDrawArrays(Mode, First, Arrays.Count)
           else
             for I := 0 to Arrays.Counts.Count - 1 do
             begin
-              glDrawArrays(Mode, First, Arrays.Counts[I]);
+              if (RHIDevice = nil) and (GLFeatures <> nil) then glDrawArrays(Mode, First, Arrays.Counts[I]);
               First := First + Arrays.Counts[I];
             end;
         end;
@@ -678,7 +678,7 @@ end;
   available, and shifting TextureUnit by GL_TEXTURE0) is taken care of inside here. }
 procedure MultiTexCoord(const TextureUnit: Cardinal; const TexCoord: TVector4);
 begin
-  if GLFeatures.UseMultiTexturing then
+  if (RHIDevice = nil) and (GLFeatures <> nil) then if GLFeatures.UseMultiTexturing then
     glMultiTexCoord4fv(GL_TEXTURE0 + TextureUnit, @TexCoord)
   else
     glTexCoord4fv(@TexCoord);
@@ -699,7 +699,7 @@ procedure TTextureCoordinateRenderer.RenderCoordinateBegin;
       of this is entirely inside EnableTexGen. }
     procedure TextureTransformToWorldSpace(const SuccessName, FailName: string);
     begin
-      if not GLFeatures.EnableFixedFunction then
+      if (RHIDevice = nil) and (GLFeatures <> nil) and (not GLFeatures.EnableFixedFunction) then
         Exit;
 
       { Set the 4th texture coord component (Q) to 0.0.
@@ -782,7 +782,7 @@ procedure TTextureCoordinateRenderer.RenderCoordinateBegin;
         Shader.EnableTexGen(TexUnit, tgSphere);
       tgCoord:
         begin
-          if GLFeatures.EnableFixedFunction then
+          if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
           begin
             {$ifndef OpenGLES}
             glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_OBJECT_LINEAR);
@@ -799,7 +799,7 @@ procedure TTextureCoordinateRenderer.RenderCoordinateBegin;
         end;
       tgCoordEye:
         begin
-          if GLFeatures.EnableFixedFunction then
+          if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
           begin
             {$ifndef OpenGLES}
             { Vectors given to EYE_PLANE are transformed by inverted
@@ -832,11 +832,11 @@ procedure TTextureCoordinateRenderer.RenderCoordinateBegin;
           {$ifdef OpenGLES}
           Assert(GLFeatures.TextureCubeMap); // on OpenGLES, cubemaps are always supported
           {$else}
-          if not GLFeatures.TextureCubeMap then
+          if (RHIDevice = nil) and (GLFeatures <> nil) and (not GLFeatures.TextureCubeMap) then
           begin
             WritelnWarning('VRML/X3D', 'Rendering context doesn''t support cube maps, cannot generate texture coordinates with mode = "CAMERASPACENORMAL", will do "COORD" instead');
 
-            if GLFeatures.EnableFixedFunction then
+            if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
             begin
               glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_OBJECT_LINEAR);
               glTexGenv(GL_S, GL_OBJECT_PLANE, GenerationVectorsIdentity[0]);
@@ -865,11 +865,11 @@ procedure TTextureCoordinateRenderer.RenderCoordinateBegin;
           {$ifdef OpenGLES}
           Assert(GLFeatures.TextureCubeMap); // on OpenGLES, cubemaps are always supported
           {$else}
-          if not GLFeatures.TextureCubeMap then
+          if (RHIDevice = nil) and (GLFeatures <> nil) and (not GLFeatures.TextureCubeMap) then
           begin
             WritelnWarning('VRML/X3D', 'Rendering context doesn''t support cube maps, cannot generate texture coordinates with mode = "CAMERASPACEREFLECTIONVECTOR", will do "COORD" instead');
 
-            if GLFeatures.EnableFixedFunction then
+            if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
             begin
               glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_OBJECT_LINEAR);
               glTexGenv(GL_S, GL_OBJECT_PLANE, GenerationVectorsIdentity[0]);
@@ -898,7 +898,7 @@ procedure TTextureCoordinateRenderer.RenderCoordinateBegin;
           begin
             ProjectorMatrix := ProjectorScalingMatrix * TexCoord.GenerationProjectorMatrix();
 
-            if GLFeatures.EnableFixedFunction then
+            if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
             begin
               {$ifndef OpenGLES}
               glPushMatrix;
@@ -930,7 +930,7 @@ procedure TTextureCoordinateRenderer.RenderCoordinateBegin;
         end;
       tgBounds2d:
         begin
-          if GLFeatures.EnableFixedFunction then
+          if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
           begin
             {$ifndef OpenGLES}
             glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_OBJECT_LINEAR);
@@ -944,7 +944,7 @@ procedure TTextureCoordinateRenderer.RenderCoordinateBegin;
         end;
       tgBounds3d:
         begin
-          if GLFeatures.EnableFixedFunction then
+          if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
           begin
             {$ifndef OpenGLES}
             glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_OBJECT_LINEAR);
@@ -1039,7 +1039,7 @@ begin
 
     {$ifndef OpenGLES}
     { For fixed-function pipeline, GL_COLOR_MATERIAL is needed only if Lighting. }
-    MaterialFromColorEnabled := GLFeatures.EnableFixedFunction and Lighting;
+    MaterialFromColorEnabled := (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction and Lighting;
     if MaterialFromColorEnabled then
       { Note: glColorMaterial is already set by TRenderer.ClassRenderBegin }
       glEnable(GL_COLOR_MATERIAL);
@@ -1160,7 +1160,7 @@ begin
       ((ColorSpace = csLinearWhenPhysicalMaterial) and
        (Shader.Material is TPhysicalMaterialInfo));
 
-    if not GLFeatures.EnableFixedFunction then
+    if (RHIDevice = nil) and (GLFeatures <> nil) and (not GLFeatures.EnableFixedFunction) then
     begin
       Pass := Renderer.FPass;
 
@@ -1186,7 +1186,7 @@ begin
       Assert(Shape.ProgramCache[Pass] <> nil);
       CurrentX3DProgram := Shape.ProgramCache[Pass].ShaderProgram;
       CurrentMeshShader := CurrentX3DProgram;
-      if not GLFeatures.EnableFixedFunction then
+      if (RHIDevice = nil) and (GLFeatures <> nil) and (not GLFeatures.EnableFixedFunction) then
         Assert(CurrentX3DProgram <> nil, 'Shader is not initialized, but it has to be (creation of fallback shaders failed?)');
       if CurrentX3DProgram <> nil then // may be nil on desktops
         Shader.SetDynamicUniforms(CurrentX3DProgram);

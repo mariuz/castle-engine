@@ -114,7 +114,7 @@ procedure TRenderer.BumpMappingEnable(const Shape: TX3DRendererShape;
       "NormalTextureResource <> nil" lower is enough. }
     if Shape.BumpMappingAllowed and
        (BumpMapping(RenderOptions) <> bmNone) and
-       (ABoundTextureUnits < GLFeatures.MaxTextureUnits) then
+       (((GLFeatures <> nil) and (ABoundTextureUnits < GLFeatures.MaxTextureUnits)) or ((GLFeatures = nil) and (ABoundTextureUnits < 16))) then
     begin
       NormalTextureResource := TTextureResources.Get(NormalTexture);
       if (NormalTextureResource <> nil) and
@@ -206,7 +206,7 @@ procedure TRenderer.SurfaceTexturesEnable(const Shape: TX3DRendererShape;
     TextureType: TTextureType;
   begin
     if (TextureNode <> nil) and
-       (ABoundTextureUnits < GLFeatures.MaxTextureUnits) then
+       (((GLFeatures <> nil) and (ABoundTextureUnits < GLFeatures.MaxTextureUnits)) or ((GLFeatures = nil) and (ABoundTextureUnits < 16))) then
     begin
       TextureResource := TTextureResources.Get(TextureNode);
       if (TextureResource <> nil) and

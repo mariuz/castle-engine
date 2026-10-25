@@ -148,7 +148,7 @@ begin
     So just set them always, if needed. }
   if ( (NewSrc in SrcConstColor) or (NewDest in DestConstColor) or
        (NewSrc in SrcConstAlpha) or (NewDest in DestConstAlpha) ) and
-     GLFeatures.BlendConstant then
+     (GLFeatures <> nil) and GLFeatures.BlendConstant then
   begin
     glBlendColor(NewConstColor.X, NewConstColor.Y, NewConstColor.Z, NewConstColor.W);
   end;

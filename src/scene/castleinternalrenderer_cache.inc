@@ -1022,7 +1022,7 @@ begin
   end;
 
   { We *must* have some GLSL shader when GLFeatures.EnableFixedFunction = false }
-  if (not GLFeatures.EnableFixedFunction) and (Result.ShaderProgram = nil) then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and (not GLFeatures.EnableFixedFunction) and (Result.ShaderProgram = nil) then
   begin
     try
       Result.ShaderProgram := TX3DGLSLProgram.Create;

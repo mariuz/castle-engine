@@ -285,21 +285,21 @@ begin
   if (RenderOptions.BumpMapping <> bmNone) and
      RenderOptions.Textures and
      (RenderOptions.Mode = rmFull) and
-     GLFeatures.UseMultiTexturing and
-     GLFeatures.Shaders then
+     ((RHIDevice <> nil) or ((GLFeatures <> nil) and GLFeatures.UseMultiTexturing)) and
+     ((RHIDevice <> nil) or ((GLFeatures <> nil) and GLFeatures.Shaders)) then
     Result := RenderOptions.BumpMapping else
     Result := bmNone;
 end;
 
 class procedure TRenderer.ActiveTexture(const TextureUnit: Cardinal);
 begin
-  if GLFeatures.UseMultiTexturing then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.UseMultiTexturing then
     glActiveTexture(GL_TEXTURE0 + TextureUnit);
 end;
 
 class procedure TRenderer.DisableTexture(const TextureUnit: Cardinal);
 begin
-  if GLFeatures.EnableFixedFunction then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
   begin
     { This must be synchronized, and disable all that can be enabled
       by TShape.EnableTexture }
@@ -325,7 +325,7 @@ begin
   Volumetric := Enabled and
     AFogFunctionality.Volumetric and
     // Volumetric fog is now only supported by shaders
-    (not GLFeatures.EnableFixedFunction);
+    ((GLFeatures = nil) or (not GLFeatures.EnableFixedFunction));
 
   if Volumetric then
   begin
@@ -348,7 +348,7 @@ var
 {$endif}
 begin
   {$ifndef OpenGLES}
-  if GLFeatures.EnableFixedFunction then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
   begin
     { ------------------------------------------------------------------------
 
@@ -365,7 +365,7 @@ begin
     }
 
     // set texture unit to 0, this determines what is affected by glDisable(GL_TEXTURE_GEN_xxx)
-    if GLFeatures.UseMultiTexturing then
+    if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.UseMultiTexturing then
     begin
       ActiveTexture(0);
       glClientActiveTexture(GL_TEXTURE0);
@@ -466,7 +466,7 @@ begin
     of TRenderer may not be prepared for it). }
 
   {$ifndef OpenGLES}
-  if GLFeatures.EnableFixedFunction then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
   begin
     for I := 0 to GLFeatures.MaxLights - 1 do
       glDisable(GL_LIGHT0 + I);
@@ -474,7 +474,7 @@ begin
 
     { Restore active texture unit to 0.
       This also sets texture unit for subsequent glTexEnvi call. }
-    if GLFeatures.UseMultiTexturing then
+    if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.UseMultiTexturing then
     begin
       ActiveTexture(0);
       {$ifndef OpenGLES}
@@ -666,7 +666,7 @@ procedure TRenderer.RenderShape(const Shape: TX3DRendererShape;
   procedure FixedFunctionBegin(const SceneModelView: TMatrix4);
   begin
     {$ifndef OpenGLES}
-    if GLFeatures.EnableFixedFunction then
+    if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
     begin
       glPushMatrix;
       glLoadMatrix(SceneModelView);
@@ -680,7 +680,7 @@ procedure TRenderer.RenderShape(const Shape: TX3DRendererShape;
   procedure FixedFunctionEnd;
   begin
     {$ifndef OpenGLES}
-    if GLFeatures.EnableFixedFunction then
+    if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
       glPopMatrix;
     {$endif}
   end;
@@ -842,7 +842,7 @@ begin
       FogVolumetricDirection, FogVolumetricVisibilityStart);
 
     {$ifndef OpenGLES}
-    if GLFeatures.EnableFixedFunction then
+    if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
     begin
       { Set fixed-function fog parameters. }
       if FogEnabled then
@@ -908,7 +908,7 @@ begin
      ) then
   begin
     {$ifndef OpenGLES}
-    if GLFeatures.EnableFixedFunction then
+    if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
     begin
       glMatrixMode(GL_TEXTURE);
     end;
@@ -940,10 +940,10 @@ begin
     if State.ShapeNode = nil then
     begin
       { No multitexturing in VRML 1.0, just always transform first tex unit. }
-      if FirstTexUnit < GLFeatures.MaxTextureUnits then
+      if FirstTexUnit < IfThen(GLFeatures <> nil, GLFeatures.MaxTextureUnits, 16) then
       begin
         TextureTransformUnitsUsed := 1;
-        if GLFeatures.EnableFixedFunction then
+        if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
         begin
           {$ifndef OpenGLES}
           ActiveTexture(FirstTexUnit);
@@ -970,11 +970,11 @@ begin
             MultiTextureTransform.textureTransform.
             Cap by available texture units. }
           TextureTransformUnitsUsed := Min(Transforms.Count,
-            GLFeatures.MaxTextureUnits - FirstTexUnit);
+            IfThen(GLFeatures <> nil, Integer(GLFeatures.MaxTextureUnits), 16) - FirstTexUnit);
 
           for I := 0 to TextureTransformUnitsUsed - 1 do
           begin
-            if GLFeatures.EnableFixedFunction then
+            if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
             begin
               {$ifndef OpenGLES}
               ActiveTexture(FirstTexUnit + I);
@@ -989,7 +989,7 @@ begin
                 WritelnWarning('VRML/X3D', 'MultiTextureTransform.textureTransform list cannot contain another MultiTextureTransform instance') else
               begin
                 Matrix := TAbstractTextureTransformNode(Child).TransformMatrix;
-                if GLFeatures.EnableFixedFunction then
+                if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
                 begin
                   {$ifndef OpenGLES}
                   glMultMatrix(Matrix);
@@ -1015,11 +1015,11 @@ begin
         if (State.MainTexture <> nil) and
            (not (State.MainTexture is TMultiTextureNode)) then
         begin
-          if FirstTexUnit < GLFeatures.MaxTextureUnits then
+          if FirstTexUnit < IfThen(GLFeatures <> nil, GLFeatures.MaxTextureUnits, 16) then
           begin
             TextureTransformUnitsUsed := 1;
             Matrix := TextureTransform.TransformMatrix;
-            if GLFeatures.EnableFixedFunction then
+            if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
             begin
               {$ifndef OpenGLES}
               ActiveTexture(FirstTexUnit);
@@ -1034,7 +1034,7 @@ begin
     end;
 
     {$ifndef OpenGLES}
-    if GLFeatures.EnableFixedFunction then
+    if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
     begin
       { restore GL_MODELVIEW }
       glMatrixMode(GL_MODELVIEW);
@@ -1044,7 +1044,7 @@ begin
 
   RenderShapeClipPlanes(Shape, RenderOptions, Shader, Lighting);
 
-  if GLFeatures.EnableFixedFunction then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
   begin
     {$ifndef OpenGLES}
     if (TextureTransformUnitsUsed <> 0) or
@@ -1138,7 +1138,7 @@ var
     ClipPlanesEnabled := 0;
     { GLMaxClipPlanes should be >= 6 with every conforming OpenGL,
       but still better check. }
-    if (GLFeatures.MaxClipPlanes > 0) and
+    if ((GLFeatures = nil) or (GLFeatures.MaxClipPlanes > 0)) and
        (ClipPlanes <> nil) and
        (ClipPlanes.Count <> 0) then
     begin
@@ -1149,7 +1149,7 @@ var
         ClipPlane := PClipPlane(ClipPlanes.Ptr(I));
         if ClipPlane^.Node.FdEnabled.Value then
         begin
-          Assert(ClipPlanesEnabled < GLFeatures.MaxClipPlanes);
+          Assert((GLFeatures = nil) or (ClipPlanesEnabled < GLFeatures.MaxClipPlanes));
           Shader.EnableClipPlane(ClipPlanesEnabled,
             PlaneTransform(ClipPlane^.Node.FdPlane.Value, ClipPlane^.Transform),
             GeometryShaderEffectsPossible);
@@ -1157,7 +1157,7 @@ var
 
           { No more clip planes possible, regardless if there are any more
             enabled clip planes on the list. }
-          if ClipPlanesEnabled = GLFeatures.MaxClipPlanes then Break;
+          if ((GLFeatures <> nil) and (ClipPlanesEnabled = GLFeatures.MaxClipPlanes)) or ((GLFeatures = nil) and (ClipPlanesEnabled = 8)) then Break;
         end;
       end;
     end;
@@ -1181,7 +1181,7 @@ begin
   ClipPlanesBegin(Shape.State.ClipPlanes);
 
   {$ifndef OpenGLES}
-  if GLFeatures.EnableFixedFunction then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
   begin
     glPushMatrix;
       glMultMatrix(Shape.State.Transformation.Transform);
@@ -1191,7 +1191,7 @@ begin
     RenderShapeCreateMeshRenderer(Shape, RenderOptions, Shader, Lighting);
 
   {$ifndef OpenGLES}
-  if GLFeatures.EnableFixedFunction then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
     glPopMatrix;
   {$endif}
 
@@ -1494,10 +1494,10 @@ procedure TRenderer.RenderShapeTextures(const Shape: TX3DRendererShape;
       AlphaTest := TGLShape(Shape).AlphaChannel = acTest;
 
       if FontTextureRes <> nil then
-        FontTextureRes.EnableAll(Self, GLFeatures.MaxTextureUnits, TexCoordsNeeded, Shader,
+        if GLFeatures <> nil then FontTextureRes.EnableAll(Self, GLFeatures.MaxTextureUnits, TexCoordsNeeded, Shader, false) else FontTextureRes.EnableAll(Self, 16, TexCoordsNeeded, Shader,
           false);
       if TextureRes <> nil then
-        TextureRes.EnableAll(Self, GLFeatures.MaxTextureUnits, TexCoordsNeeded, Shader,
+        if GLFeatures <> nil then TextureRes.EnableAll(Self, GLFeatures.MaxTextureUnits, TexCoordsNeeded, Shader, FontTextureRes <> nil) else TextureRes.EnableAll(Self, 16, TexCoordsNeeded, Shader,
           FontTextureRes <> nil);
       BoundTextureUnits := TexCoordsNeeded;
 
@@ -1526,7 +1526,7 @@ procedure TRenderer.RenderShapeTextures(const Shape: TX3DRendererShape;
       this way they will at least define correct texture coordinates
       for texture unit 0. }
 
-    if (TexCoordsNeeded > 0) and GLFeatures.UseMultiTexturing then
+    if (TexCoordsNeeded > 0) and (GLFeatures <> nil) and GLFeatures.UseMultiTexturing then
       ActiveTexture(0);
   end;
 
@@ -1644,7 +1644,7 @@ begin
       end;
     end;
 
-    if GLFeatures.VertexBufferObject then
+    if (GLFeatures <> nil) and GLFeatures.VertexBufferObject then
     begin
       { Shape.Arrays contents are already loaded,
         so Vbo contents are already loaded too }
@@ -1664,7 +1664,7 @@ begin
   TMeshRenderer(ExposedMeshRenderer).PrepareRenderShape := RenderMode in [rmPrepareRenderSelf, rmPrepareRenderClones];
   TMeshRenderer(ExposedMeshRenderer).Render;
 
-  if (GeneratorClass <> nil) and GLFeatures.VertexBufferObject then
+  if (GeneratorClass <> nil) and (GLFeatures <> nil) and GLFeatures.VertexBufferObject then
   begin
     { unbind arrays, to have a clean state on exit.
       TODO: this should not be needed, instead move to RenderEnd.
@@ -1684,7 +1684,7 @@ begin
   if (TexUnit >= TextureTransformUnitsUsed) and
      (TextureTransformUnitsUsedMore.IndexOf(TexUnit) = -1) then
   begin
-    if GLFeatures.EnableFixedFunction then
+    if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
       glPushMatrix;
 
     { Simple implementation would just add always TexUnit

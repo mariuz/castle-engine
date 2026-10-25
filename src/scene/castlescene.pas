@@ -1117,7 +1117,7 @@ begin
     But let the check InternalDirty remain, for future security. }
   if InternalDirty <> 0 then Exit;
 
-  if not ApplicationProperties.IsGLContextOpen then
+  if (not ApplicationProperties.IsGLContextOpen) and (ApplicationProperties.RenderBackend <> backendVulkan) then
   begin
     WritelnLog('PrepareResources', 'Rendering context not available, skipping preparing TCastleScene rendering resources for "%s"', [
       UriDisplay(URL)

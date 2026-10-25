@@ -2278,9 +2278,9 @@ var
   TextureShader: TTextureShader;
 begin
   { Enable for fixed-function pipeline }
-  if GLFeatures.EnableFixedFunction then
+  if (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
   begin
-    if GLFeatures.UseMultiTexturing then
+    if (GLFeatures <> nil) and GLFeatures.UseMultiTexturing then
       glActiveTexture(GL_TEXTURE0 + TextureUnit);
     case TextureType of
       tt2D     : GLEnableTexture(et2D);
@@ -2349,7 +2349,7 @@ var
   TexCoordName: String;
 begin
   { Enable for fixed-function pipeline }
-  if GLFeatures.UseMultiTexturing then
+  if (GLFeatures <> nil) and GLFeatures.UseMultiTexturing then
     glActiveTexture(GL_TEXTURE0 + TextureUnit);
   { Rest of code for fixed-function pipeline
     (glTexGeni and glEnable(GL_TEXTURE_GEN_*)) is below }
@@ -2364,7 +2364,7 @@ begin
   case Generation of
     tgSphere:
       begin
-        if GLFeatures.EnableFixedFunction then
+        if (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
         begin
           {$ifndef OpenGLES}
           glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_SPHERE_MAP);
@@ -2379,7 +2379,7 @@ begin
       end;
     tgNormal:
       begin
-        if GLFeatures.EnableFixedFunction then
+        if (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
         begin
           {$ifndef OpenGLES}
           glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_NORMAL_MAP_ARB);
@@ -2396,7 +2396,7 @@ begin
       end;
     tgReflection:
       begin
-        if GLFeatures.EnableFixedFunction then
+        if (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
         begin
           {$ifndef OpenGLES}
           glTexGeni(GL_S, GL_TEXTURE_GEN_MODE, GL_REFLECTION_MAP_ARB);
@@ -2445,10 +2445,10 @@ var
   Uniform: TDynamicUniformVec4;
 begin
   { Enable for fixed-function pipeline }
-  if GLFeatures.UseMultiTexturing then
+  if (GLFeatures <> nil) and GLFeatures.UseMultiTexturing then
     glActiveTexture(GL_TEXTURE0 + TextureUnit);
 
-  if GLFeatures.EnableFixedFunction then
+  if (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
   begin
     {$ifndef OpenGLES}
     case Component of
@@ -2493,10 +2493,10 @@ end;
 procedure TShader.DisableTexGen(const TextureUnit: Cardinal);
 begin
   {$ifndef OpenGLES}
-  if GLFeatures.EnableFixedFunction then
+  if (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
   begin
     { Disable for fixed-function pipeline }
-    if GLFeatures.UseMultiTexturing then
+    if (GLFeatures <> nil) and GLFeatures.UseMultiTexturing then
       glActiveTexture(GL_TEXTURE0 + TextureUnit);
     glDisable(GL_TEXTURE_GEN_S);
     glDisable(GL_TEXTURE_GEN_T);
@@ -2539,7 +2539,7 @@ begin
   FCodeHash.AddInteger(2003);
 
   {$ifndef OpenGLES}
-  if GLFeatures.EnableFixedFunction or (not GLFeatures.Version_3_1) then
+  if (GLFeatures <> nil) and (GLFeatures.EnableFixedFunction or (not GLFeatures.Version_3_1)) then
   begin
     FClipPlaneAlgorithm := cpFixedFunction;
 
@@ -2552,7 +2552,7 @@ begin
   begin
     FClipPlaneAlgorithm := cpClipDistance;
 
-    glEnable(GL_CLIP_DISTANCE0 + ClipPlaneIndex);
+    if GLFeatures <> nil then glEnable(GL_CLIP_DISTANCE0 + ClipPlaneIndex);
 
     Uniform := TDynamicUniformVec4.Create;
     Uniform.Name := 'castle_ClipPlane' + IntToStr(ClipPlaneIndex);
@@ -2584,7 +2584,7 @@ begin
     cpFixedFunction:
       glDisable(GL_CLIP_PLANE0 + ClipPlaneIndex);
     cpClipDistance:
-      glDisable(GL_CLIP_DISTANCE0 + ClipPlaneIndex);
+      if GLFeatures <> nil then glDisable(GL_CLIP_DISTANCE0 + ClipPlaneIndex);
     else ;
   end;
   {$endif}

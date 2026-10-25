@@ -246,6 +246,9 @@ type
     procedure TestDefault3DShadersConsumeCastleObjectParamsRHI;
     procedure TestCastleContainerAndUIControlsHeadlessVulkanRenderRHI;
     procedure TestProjectionHelpersNilSafeRenderContextRHI;
+    procedure TestCastleScenePrepareResourcesHeadlessVulkanRHI;
+    procedure TestCastleViewport3DSceneHeadlessVulkanRenderRHI;
+    procedure TestCastleViewportWireframeAndShadowVolumesHeadlessVulkanRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -11926,6 +11929,313 @@ begin
   finally
     RenderContext := SavedCtx;
     FreeAndNil(TestCtx);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCastleScenePrepareResourcesHeadlessVulkanRHI;
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  SavedCtx: TRenderContext;
+  Device: TVulkanRHIDevice;
+  TestCtx: TRenderContext;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  BoxNode: TBoxNode;
+  Appearance: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  PixTex: TPixelTextureNode;
+  Img: TRGBAlphaImage;
+  ShapeList: TShapeList;
+  RShape: TX3DRendererShape;
+begin
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedRHI := RHIDevice;
+  SavedCtx := RenderContext;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($6101)));
+  TestCtx := TRenderContext.Create(nil);
+  Viewport := nil;
+  Scene := nil;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+    RenderContext := TestCtx;
+    AssertTrue('GLFeatures must be nil in pure headless Vulkan test', GLFeatures = nil);
+
+    Viewport := TCastleViewport.Create(nil);
+    Scene := TCastleScene.Create(nil);
+
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    BoxNode := TBoxNode.Create;
+    BoxNode.Size := Vector3(2.0, 2.0, 2.0);
+    ShapeNode.Geometry := BoxNode;
+
+    Appearance := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    Mat.BaseColor := Vector3(0.8, 0.4, 0.2);
+    Mat.Roughness := 0.35;
+    Mat.Metallic := 0.1;
+
+    PixTex := TPixelTextureNode.Create;
+    Img := TRGBAlphaImage.Create(4, 4);
+    Img.Clear(Vector4Byte(255, 128, 64, 255));
+    PixTex.FdImage.Value := Img;
+    Mat.BaseTexture := PixTex;
+
+    Appearance.Material := Mat;
+    ShapeNode.Appearance := Appearance;
+    Root.AddChildren(ShapeNode);
+
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+
+    { PrepareResources in pure Vulkan RHI mode with GLFeatures = nil }
+    Viewport.PrepareResources(Scene);
+
+    ShapeList := Scene.Shapes.TraverseList(True);
+    AssertEquals('Scene must contain 1 active shape', 1, ShapeList.Count);
+    AssertTrue('Shape must be TX3DRendererShape', ShapeList[0] is TX3DRendererShape);
+    RShape := TX3DRendererShape(ShapeList[0]);
+    AssertTrue('Prepared shape must have non-nil Shape.Cache', RShape.Cache <> nil);
+    AssertTrue('Prepared shape cache must have non-nil RHICoordinateBuffer',
+      RShape.Cache.RHICoordinateBuffer <> nil);
+    AssertTrue('Prepared shape cache must have non-nil RHIAttributeBuffer',
+      RShape.Cache.RHIAttributeBuffer <> nil);
+  finally
+    FreeAndNil(Scene);
+    FreeAndNil(Viewport);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCastleViewport3DSceneHeadlessVulkanRenderRHI;
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  SavedCtx: TRenderContext;
+  Device: TVulkanRHIDevice;
+  TestCtx: TRenderContext;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  OpaqueShape, BlendedShape: TShapeNode;
+  BoxNode: TBoxNode;
+  SphereNode: TSphereNode;
+  OpaqueApp, BlendedApp: TAppearanceNode;
+  PhysMat: TPhysicalMaterialNode;
+  BlendMat: TMaterialNode;
+  DirLight: TDirectionalLightNode;
+  FogNode: TFogNode;
+  Cmd: TRHICommandList;
+begin
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedRHI := RHIDevice;
+  SavedCtx := RenderContext;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($6102)));
+  TestCtx := TRenderContext.Create(nil);
+  Container := nil;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+    RenderContext := TestCtx;
+    AssertTrue('GLFeatures must be nil in pure headless Vulkan test', GLFeatures = nil);
+
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := False;
+    Viewport.Width := 800;
+    Viewport.Height := 600;
+    Viewport.BackgroundColor := Vector4(0.05, 0.08, 0.12, 1.0);
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 10.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Scene := TCastleScene.Create(Viewport);
+    Scene.RenderOptions.DualQuaternionSkinning := True;
+    Scene.RenderOptions.SpecularAntiAliasing := True;
+    Scene.RenderOptions.ShadowMapSystemMode := smsVirtualShadowMaps;
+    Viewport.NextGenToneMappingMode := ntmAgXGamutCompressed;
+
+    Root := TX3DRootNode.Create;
+
+    { 1. Directional light + Fog }
+    DirLight := TDirectionalLightNode.Create;
+    DirLight.Direction := Vector3(-0.4, -0.8, -0.4).Normalize;
+    DirLight.Color := Vector3(1.0, 0.95, 0.85);
+    DirLight.Intensity := 1.5;
+    DirLight.Global := True;
+    Root.AddChildren(DirLight);
+
+    FogNode := TFogNode.Create;
+    FogNode.Color := Vector3(0.6, 0.7, 0.8);
+    FogNode.VisibilityRange := 80.0;
+    Root.AddChildren(FogNode);
+
+    { 2. Opaque PBR Box }
+    OpaqueShape := TShapeNode.Create;
+    BoxNode := TBoxNode.Create;
+    BoxNode.Size := Vector3(2.0, 2.0, 2.0);
+    OpaqueShape.Geometry := BoxNode;
+    OpaqueApp := TAppearanceNode.Create;
+    PhysMat := TPhysicalMaterialNode.Create;
+    PhysMat.BaseColor := Vector3(0.2, 0.7, 0.4);
+    PhysMat.Roughness := 0.4;
+    PhysMat.Metallic := 0.2;
+    OpaqueApp.Material := PhysMat;
+    OpaqueShape.Appearance := OpaqueApp;
+    Root.AddChildren(OpaqueShape);
+
+    { 3. Blended translucent Sphere }
+    BlendedShape := TShapeNode.Create;
+    SphereNode := TSphereNode.Create;
+    SphereNode.Radius := 1.5;
+    BlendedShape.Geometry := SphereNode;
+    BlendedApp := TAppearanceNode.Create;
+    BlendMat := TMaterialNode.Create;
+    BlendMat.DiffuseColor := Vector3(0.9, 0.3, 0.3);
+    BlendMat.Transparency := 0.5;
+    BlendedApp.Material := BlendMat;
+    BlendedShape.Appearance := BlendedApp;
+    Root.AddChildren(BlendedShape);
+
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+
+    Cmd := Device.BeginFrame;
+    AssertTrue('BeginFrame must return non-nil command list', Cmd <> nil);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+    finally
+      Device.EndFrameAndPresent;
+    end;
+
+    AssertEquals('Container.RHIRenderedFramesCount must be 1',
+      1, Integer(Container.RHIRenderedFramesCount));
+    AssertEquals('Device.TotalFramesPresented must be 1',
+      1, Integer(Device.TotalFramesPresented));
+    AssertEquals('Viewport must have rendered 1 scene',
+      1, Integer(Viewport.Statistics.ScenesRendered));
+    AssertEquals('Viewport must have rendered 2 shapes (opaque box + blended sphere)',
+      2, Integer(Viewport.Statistics.ShapesRendered));
+    AssertEquals('Viewport must have recorded 2 RHI 3D mesh draw calls',
+      2, Integer(Viewport.Statistics.DrawCalls));
+    AssertEquals('Viewport ActiveBackend must be Vulkan 1.3',
+      'Vulkan 1.3', Viewport.Statistics.ActiveBackend);
+    AssertTrue('Scene Next-Gen Tone Mapping HDR target must be prepared during viewport render',
+      Device.HDRPostProcessor.HDRSceneTexture <> nil);
+  finally
+    FreeAndNil(Container);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCastleViewportWireframeAndShadowVolumesHeadlessVulkanRHI;
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  SavedCtx: TRenderContext;
+  Device: TVulkanRHIDevice;
+  TestCtx: TRenderContext;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  BoxNode: TBoxNode;
+  NormalDraws, WireframeOnlyDraws, SolidWireframeDraws: Cardinal;
+begin
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedRHI := RHIDevice;
+  SavedCtx := RenderContext;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($6103)));
+  TestCtx := TRenderContext.Create(nil);
+  Container := nil;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+    RenderContext := TestCtx;
+
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.ShadowVolumes := True; { Must be safely guarded when GLFeatures = nil }
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 8.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Scene := TCastleScene.Create(Viewport);
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    BoxNode := TBoxNode.Create;
+    BoxNode.Size := Vector3(2.0, 2.0, 2.0);
+    ShapeNode.Geometry := BoxNode;
+    Root.AddChildren(ShapeNode);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+
+    { 1. Render with weNormal }
+    Scene.RenderOptions.WireframeEffect := weNormal;
+    Device.BeginFrame;
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+    finally
+      Device.EndFrameAndPresent;
+    end;
+    NormalDraws := Viewport.Statistics.DrawCalls;
+    AssertEquals('weNormal must record 1 draw call', 1, Integer(NormalDraws));
+
+    { 2. Render with weWireframeOnly }
+    Scene.RenderOptions.WireframeEffect := weWireframeOnly;
+    Device.BeginFrame;
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+    finally
+      Device.EndFrameAndPresent;
+    end;
+    WireframeOnlyDraws := Viewport.Statistics.DrawCalls;
+    AssertEquals('weWireframeOnly must record 1 draw call without OpenGL crash',
+      1, Integer(WireframeOnlyDraws));
+
+    { 3. Render with weSolidWireframe (2 passes: fill + wireframe) }
+    Scene.RenderOptions.WireframeEffect := weSolidWireframe;
+    Device.BeginFrame;
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+    finally
+      Device.EndFrameAndPresent;
+    end;
+    SolidWireframeDraws := Viewport.Statistics.DrawCalls;
+    AssertEquals('weSolidWireframe must record 2 draw calls (fill pass + wireframe pass)',
+      2, Integer(SolidWireframeDraws));
+  finally
+    FreeAndNil(Container);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
   end;
 end;
 

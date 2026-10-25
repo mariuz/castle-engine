@@ -2892,7 +2892,7 @@ begin
   Assert(Params.Collector = AllShapesCollector);
   Params.Frustum := @Params.RenderingCamera.Frustum;
   Params.UsingShadowVolumes :=
-    GLFeatures.ShadowVolumesPossible and
+    (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.ShadowVolumesPossible and
     ShadowVolumes and
     MainLightForShadowVolumes(MainLightPosition);
   Items.Render(Params);
@@ -2963,7 +2963,7 @@ procedure TCastleViewport.RenderFromViewEverything(const RenderingCamera: TRende
       ClearColor := BackgroundColor;
     end;
 
-    if GLFeatures.ShadowVolumesPossible and
+    if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.ShadowVolumesPossible and
        ShadowVolumes and
        MainLightForShadowVolumes(MainLightPosition) then
       Include(ClearBuffers, cbStencil);
@@ -2982,7 +2982,7 @@ procedure TCastleViewport.RenderFromViewEverything(const RenderingCamera: TRende
       or Background not set and MainScene not set or doesn't define background. }
     if BackgroundRenderer <> nil then
     begin
-      if GLFeatures.EnableFixedFunction then
+      if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
       begin
         {$ifndef OpenGLES}
         glLoadMatrix(RenderingCamera.RotationMatrix);
@@ -3024,7 +3024,7 @@ begin
   RenderClear;
   RenderBackground;
 
-  if GLFeatures.EnableFixedFunction then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
   begin
     {$ifndef OpenGLES}
     glLoadMatrix(RenderingCamera.Matrix);
@@ -3262,7 +3262,7 @@ begin
   // SSAOShaderInitialized = false implies SSAOShader = nil
   Assert(SSAOShader = nil);
 
-  if GLFeatures.Shaders then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.Shaders then
   begin
     try
       SSAOShader := TSSAOScreenEffect.Create;
@@ -3291,7 +3291,7 @@ begin
 
   // SSAOShaderInitialized = false implies SSRShader = nil
   Assert(SSRShader = nil);
-  if GLFeatures.Shaders then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.Shaders then
   begin
     try
       SSRShader := TSSRScreenEffect.Create;
@@ -4087,7 +4087,7 @@ begin
   end;
 
   if (GLFeatures <> nil) and
-     GLFeatures.ShadowVolumesPossible and
+     (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.ShadowVolumesPossible and
      ShadowVolumes and
      MainLightForShadowVolumes(MainLightPosition) then
     Include(Options, prShadowVolume);

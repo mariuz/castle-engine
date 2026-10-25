@@ -181,7 +181,7 @@ var
   Color3, AmbientColor3: TVector3;
   Color4, AmbientColor4: TVector4;
 begin
-  if not GLFeatures.EnableFixedFunction then
+  if (RHIDevice <> nil) or (GLFeatures = nil) or (not GLFeatures.EnableFixedFunction) then
     Exit;
 
   if not (Light.Node is TAbstractPunctualLightNode) then
@@ -427,7 +427,7 @@ procedure TLightsRenderer.UploadLightsToRHI;
 var
   BufDesc: TRHIBufferDesc;
 begin
-  if (RHIDevice = nil) or (ActiveCommandList = nil) then
+  if RHIDevice = nil then
     Exit;
 
   if FRHILightsBuffer = nil then
@@ -443,7 +443,7 @@ begin
   if FMaxLightsPerShape <> Value then
   begin
     FMaxLightsPerShape := Value;
-    if GLFeatures.EnableFixedFunction then
+    if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
       MinVar(FMaxLightsPerShape, GLFeatures.MaxLights);
     SetLength(LightsDone, FMaxLightsPerShape);
   end;
@@ -509,7 +509,7 @@ var
 begin
   Assert(RenderingCamera <> nil);
 
-  if (ApplicationProperties <> nil) and (ApplicationProperties.RenderBackend = backendVulkan) then
+  if (RHIDevice <> nil) or ((ApplicationProperties <> nil) and (ApplicationProperties.RenderBackend = backendVulkan)) then
   begin
     BuildLightsUniformBlock(Shape, GlobalLights, SceneLights, Shader, FLightsUniformBlock);
     UploadLightsToRHI;
@@ -530,7 +530,7 @@ begin
     if LightsEnabled >= FMaxLightsPerShape then Exit;
   end;
 
-  if GLFeatures.EnableFixedFunction then
+  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
   begin
     {$ifndef OpenGLES}
     { Disable remaining light for fixed-function pipeline }

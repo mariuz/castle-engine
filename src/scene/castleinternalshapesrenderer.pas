@@ -460,7 +460,7 @@ var
     SavedSolidColor: TCastleColorRGB;
   begin
     {$ifndef OpenGLES} // TODO-es For OpenGLES, wireframe must be done differently
-    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    if GLFeatures <> nil then glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
     {$endif}
 
     if UseWireframeColor then
@@ -502,7 +502,7 @@ var
          with a mouse in editor.  }
 
     {$ifndef OpenGLES} // TODO-es For OpenGLES, wireframe must be done differently
-    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    if GLFeatures <> nil then glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     {$endif}
   end;
 

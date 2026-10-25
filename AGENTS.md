@@ -77,8 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–59**: **COMPLETED** (100%).
-- **Phase 60 (Default 3D Shader Consumption of `castle_ObjectParams` & `TCastleContainer` / `TCastleUserInterface` Headless Vulkan RHI Rendering)**: **COMPLETED** (100%, 775/775 total engine tests and 206/206 `TTestCastleVulkanRHI` tests passing):
-  - [x] **60.1. Default 3D Shader Consumption of `castle_ObjectParams`** — Completed & tested (`TestDefault3DShadersConsumeCastleObjectParamsRHI`).
-  - [x] **60.2. `TCastleContainer` & `TCastleUserInterface` Headless Vulkan RHI Rendering** — Completed & tested (`TestCastleContainerAndUIControlsHeadlessVulkanRenderRHI`).
-  - [x] **60.3. Nil-Safe `PerspectiveProjection` / `OrthoProjection` / `FrustumProjection` Helpers** — Completed & tested (`TestProjectionHelpersNilSafeRenderContextRHI`).
+- **Phases 1–60**: **COMPLETED** (100%).
+- **Phase 61 (Full End-to-End `TCastleViewport` + `TCastleScene` 3D Rendering Inside `TCastleContainer.EventRender` in Pure/Headless Vulkan RHI Mode)**: **COMPLETED** (100%, 778/778 total engine tests and 209/209 `TTestCastleVulkanRHI` tests passing):
+  - [x] **61.1. Pure/Headless Vulkan RHI `TCastleScene.PrepareResources` & Shape Buffer/Texture Preparation (`GLFeatures = nil`)** — Completed & tested (`TestCastleScenePrepareResourcesHeadlessVulkanRHI`).
+  - [x] **61.2. End-to-End `TCastleViewport` + `TCastleScene` 3D Rendering (Opaque + Blended Shapes, Lights, Fog, Next-Gen Subsystems) in `TCastleContainer.EventRender`** — Completed & tested (`TestCastleViewport3DSceneHeadlessVulkanRenderRHI`).
+  - [x] **61.3. Wireframe Rendering (`weWireframeOnly`, `weSolidWireframe`) & ShadowVolumes Guarding in Pure Vulkan RHI Mode** — Completed & tested (`TestCastleViewportWireframeAndShadowVolumesHeadlessVulkanRHI`).
