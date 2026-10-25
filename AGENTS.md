@@ -77,8 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–61**: **COMPLETED** (100%).
-- **Phase 62 (`TRenderer` Scene UBO Upload, `TShapeCache` Material UBO Upload & `vulkan_3d_scene` Headless 3D Frame Execution)**: **COMPLETED** (100%, 781/781 total engine tests and 212/212 `TTestCastleVulkanRHI` tests passing):
-  - [x] **62.1. `TRenderer.BuildSceneUniformBlock` & `UploadSceneUniformBlockToRHI` (`CastleSceneUBO`, Set 0 Binding 0)** — Completed & tested (`TestRendererSceneUniformBlockUploadRHI`).
-  - [x] **62.2. `TShapeCache.UploadMaterialBlock` (`CastleMaterialUBO`, Set 1 Binding 0), `TX3DRendererShape.UploadRHIMaterialToCache` & `RHIBindlessMaterialIndex` Wiring** — Completed & tested (`TestShapeCacheMaterialUniformBlockAndBindlessIndexRHI`).
-  - [x] **62.3. `examples/vulkan/vulkan_3d_scene` 3D X3D Scene Resource Preparation & Frame Lifecycle Verification** — Completed & tested (`TestVulkan3DSceneExampleSourceVerificationRHI`).
+- **Phases 1–62**: **COMPLETED** (100%).
+- **Phase 63 (Automatic Bindless Texture & Material SSBO Table Registration in `TCastleVulkanBindlessTextureManager` and `TX3DRendererShape`)**: **COMPLETED** (100%, 784/784 total engine tests and 215/215 `TTestCastleVulkanRHI` tests passing):
+  - [x] **63.1. `TCastleVulkanBindlessTextureManager.RegisterOrUpdateMaterial` & `FlushMaterialTableToSSBO` (Managed Set 1, Binding 1 Material SSBO Table)** — Completed & tested (`TestBindlessManagerMaterialTableAndAutoSSBOFlushRHI`).
+  - [x] **63.2. `TRHIDevice.RegisterBindlessTexture` / `RegisterOrUpdateBindlessMaterial` & `TX3DRendererShape.UploadRHIMaterialToCache` Auto-Registration** — Completed & tested (`TestShapeAutoBindlessTextureAndMaterialRegistrationRHI`).
+  - [x] **63.3. Multi-Shape `TCastleViewport` Bindless Material Indexing & End-of-Frame SSBO Flush** — Completed & tested (`TestViewportMultiShapeBindlessMaterialIndicesRHI`).

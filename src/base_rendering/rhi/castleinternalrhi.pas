@@ -858,6 +858,17 @@ type
     function GetInformationString: String; virtual;
     function GetInformationStringSummary: String; virtual;
 
+    { Registers a (Texture, Sampler) pair in the device's global bindless descriptor array
+      (Set 1, Binding 0) and returns its 0-based bindless slot index (or 0 if Texture = nil). }
+    function RegisterBindlessTexture(const ATexture: TRHITexture;
+      const ASampler: TRHISampler = nil): Cardinal; virtual;
+
+    { Registers or updates an 80-byte std430 bindless material entry in the device's
+      global Material SSBO table (Set 1, Binding 1) and returns its 0-based material index. }
+    function RegisterOrUpdateBindlessMaterial(var AMaterialIndex: Cardinal;
+      var AAlreadyRegistered: Boolean;
+      const AEntryData; const AEntrySizeInBytes: Cardinal): Cardinal; virtual;
+
     property Capabilities: TRHIDeviceCapabilities read FCapabilities;
     { Current frame-in-flight index (0 .. MaxFramesInFlight - 1) }
     property FrameIndex: Cardinal read FFrameIndex;
@@ -1690,6 +1701,20 @@ begin
     '  Extended dynamic state: ' + BoolToStr(FCapabilities.SupportsExtendedDynamicState, True) + LineEnding +
     '  Synchronization2: ' + BoolToStr(FCapabilities.SupportsSynchronization2, True) + LineEnding +
     '  Timeline semaphores: ' + BoolToStr(FCapabilities.SupportsTimelineSemaphores, True);
+end;
+
+function TRHIDevice.RegisterBindlessTexture(const ATexture: TRHITexture;
+  const ASampler: TRHISampler): Cardinal;
+begin
+  Result := 0;
+end;
+
+function TRHIDevice.RegisterOrUpdateBindlessMaterial(var AMaterialIndex: Cardinal;
+  var AAlreadyRegistered: Boolean;
+  const AEntryData; const AEntrySizeInBytes: Cardinal): Cardinal;
+begin
+  AAlreadyRegistered := True;
+  Result := AMaterialIndex;
 end;
 
 function TRHIDevice.GetInformationStringSummary: String;

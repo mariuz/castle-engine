@@ -252,6 +252,9 @@ type
     procedure TestRendererSceneUniformBlockUploadRHI;
     procedure TestShapeCacheMaterialUniformBlockAndBindlessIndexRHI;
     procedure TestVulkan3DSceneExampleSourceVerificationRHI;
+    procedure TestBindlessManagerMaterialTableAndAutoSSBOFlushRHI;
+    procedure TestShapeAutoBindlessTextureAndMaterialRegistrationRHI;
+    procedure TestViewportMultiShapeBindlessMaterialIndicesRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -12408,6 +12411,246 @@ begin
       Pos('Device.EndFrameAndPresent', SourceText) > 0);
   finally
     FreeAndNil(SL);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestBindlessManagerMaterialTableAndAutoSSBOFlushRHI;
+var
+  Device: TVulkanRHIDevice;
+  Mgr: TCastleVulkanBindlessTextureManager;
+  Entry0, Entry1, Fetched0, Fetched1: TCastleBindlessMaterialEntry;
+  Idx0, Idx1: Cardinal;
+  Reg0, Reg1: Boolean;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($6699)));
+  try
+    Mgr := Device.BindlessTextureManager;
+    AssertTrue('BindlessTextureManager must be created on TVulkanRHIDevice', Mgr <> nil);
+    AssertEquals('Initial MaterialCount must be 0', 0, Integer(Mgr.MaterialCount));
+
+    FillChar(Entry0, SizeOf(Entry0), 0);
+    Entry0.BaseColor := Vector4(0.8, 0.2, 0.1, 1.0);
+    Entry0.PBRParams := Vector4(0.35, 1.0, 1.0, 0.5);
+    Entry0.BaseColorTexIndex := 3;
+    Entry0.NormalTexIndex := 7;
+
+    FillChar(Entry1, SizeOf(Entry1), 0);
+    Entry1.BaseColor := Vector4(0.1, 0.7, 0.9, 1.0);
+    Entry1.PBRParams := Vector4(0.65, 1.0, 1.0, 0.5);
+    Entry1.BaseColorTexIndex := 5;
+
+    Idx0 := 0;
+    Reg0 := False;
+    Idx1 := 0;
+    Reg1 := False;
+    AssertEquals('First registered material must get index 0',
+      0, Integer(Device.RegisterOrUpdateBindlessMaterial(Idx0, Reg0, Entry0, SizeOf(Entry0))));
+    AssertTrue('Reg0 must be set to True after registration', Reg0);
+
+    AssertEquals('Second registered material must get index 1',
+      1, Integer(Device.RegisterOrUpdateBindlessMaterial(Idx1, Reg1, Entry1, SizeOf(Entry1))));
+    AssertTrue('Reg1 must be set to True after registration', Reg1);
+    AssertEquals('MaterialCount must be 2', 2, Integer(Mgr.MaterialCount));
+
+    { Updating Entry0 in-place must preserve index 0 }
+    Entry0.BaseColor.X := 0.95;
+    AssertEquals('Updating registered material must keep index 0',
+      0, Integer(Device.RegisterOrUpdateBindlessMaterial(Idx0, Reg0, Entry0, SizeOf(Entry0))));
+    AssertEquals('MaterialCount must remain 2 after in-place update', 2, Integer(Mgr.MaterialCount));
+
+    { FlushPendingUpdates must allocate MaterialSSBOBuffer and upload table }
+    Mgr.FlushPendingUpdates;
+    AssertTrue('MaterialSSBOBuffer must be allocated after FlushPendingUpdates',
+      Mgr.MaterialSSBOBuffer <> nil);
+    AssertEquals('MaterialFlushCount must be 1', 1, Integer(Mgr.MaterialFlushCount));
+
+    Fetched0 := Mgr.GetMaterialEntry(0);
+    Fetched1 := Mgr.GetMaterialEntry(1);
+    AssertSameValue(0.95, Fetched0.BaseColor.X, 1e-5);
+    AssertEquals('Entry0 BaseColorTexIndex must be 3', 3, Integer(Fetched0.BaseColorTexIndex));
+    AssertEquals('Entry0 NormalTexIndex must be 7', 7, Integer(Fetched0.NormalTexIndex));
+    AssertSameValue(0.7, Fetched1.BaseColor.Y, 1e-5);
+    AssertEquals('Entry1 BaseColorTexIndex must be 5', 5, Integer(Fetched1.BaseColorTexIndex));
+  finally
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestShapeAutoBindlessTextureAndMaterialRegistrationRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  BoxNode: TBoxNode;
+  App: TAppearanceNode;
+  PhysMat: TPhysicalMaterialNode;
+  BaseTexNode, NormTexNode: TPixelTextureNode;
+  ShapeList: TShapeList;
+  RShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  FetchedEntry: TCastleBindlessMaterialEntry;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($669A)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Viewport := TCastleViewport.Create(nil);
+  Scene := TCastleScene.Create(nil);
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    BoxNode := TBoxNode.Create;
+    ShapeNode.Geometry := BoxNode;
+    App := TAppearanceNode.Create;
+    PhysMat := TPhysicalMaterialNode.Create;
+    PhysMat.BaseColor := Vector3(0.4, 0.8, 0.2);
+    PhysMat.Roughness := 0.3;
+
+    BaseTexNode := TPixelTextureNode.Create;
+    BaseTexNode.FdImage.Value := TRGBImage.Create(2, 2);
+    PhysMat.BaseTexture := BaseTexNode;
+
+    NormTexNode := TPixelTextureNode.Create;
+    NormTexNode.FdImage.Value := TRGBImage.Create(2, 2);
+    PhysMat.NormalTexture := NormTexNode;
+
+    App.Material := PhysMat;
+    ShapeNode.Appearance := App;
+    Root.AddChildren(ShapeNode);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+    Viewport.PrepareResources(Scene);
+
+    ShapeList := Scene.Shapes.TraverseList(True);
+    AssertEquals('Scene must have 1 shape', 1, ShapeList.Count);
+    RShape := TX3DRendererShape(ShapeList[0]);
+
+    RShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertEquals('ShadingModel must be smPBRMetallicRoughness',
+      Ord(smPBRMetallicRoughness), Ord(ShadingModel));
+    AssertTrue('RShape.RHIBindlessMaterialRegistered must be True',
+      RShape.RHIBindlessMaterialRegistered);
+    AssertEquals('RShape.RHIBindlessMaterialIndex must be 0',
+      0, Integer(RShape.RHIBindlessMaterialIndex));
+    AssertEquals('BindlessTextureManager must have 2 active texture slots (BaseColor + Normal)',
+      2, Integer(Device.BindlessTextureManager.ActiveSlotCount));
+    AssertEquals('BindlessTextureManager MaterialCount must be 1',
+      1, Integer(Device.BindlessTextureManager.MaterialCount));
+
+    FetchedEntry := Device.BindlessTextureManager.GetMaterialEntry(RShape.RHIBindlessMaterialIndex);
+    AssertSameValue(0.4, FetchedEntry.BaseColor.X, 1e-4);
+    AssertSameValue(0.8, FetchedEntry.BaseColor.Y, 1e-4);
+    AssertSameValue(0.3, FetchedEntry.PBRParams.X, 1e-4);
+    AssertEquals('BaseColorTexIndex must be slot 0', 0, Integer(FetchedEntry.BaseColorTexIndex));
+    AssertEquals('NormalTexIndex must be slot 1', 1, Integer(FetchedEntry.NormalTexIndex));
+  finally
+    FreeAndNil(Scene);
+    FreeAndNil(Viewport);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportMultiShapeBindlessMaterialIndicesRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode1, ShapeNode2: TShapeNode;
+  App1, App2: TAppearanceNode;
+  Mat1, Mat2: TPhysicalMaterialNode;
+  ShapeList: TShapeList;
+  RShape1, RShape2: TX3DRendererShape;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($669B)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 8.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Scene := TCastleScene.Create(Viewport);
+    Root := TX3DRootNode.Create;
+
+    ShapeNode1 := TShapeNode.Create;
+    ShapeNode1.Geometry := TBoxNode.Create;
+    App1 := TAppearanceNode.Create;
+    Mat1 := TPhysicalMaterialNode.Create;
+    Mat1.BaseColor := Vector3(1.0, 0.2, 0.1);
+    App1.Material := Mat1;
+    ShapeNode1.Appearance := App1;
+    Root.AddChildren(ShapeNode1);
+
+    ShapeNode2 := TShapeNode.Create;
+    ShapeNode2.Geometry := TBoxNode.Create;
+    App2 := TAppearanceNode.Create;
+    Mat2 := TPhysicalMaterialNode.Create;
+    Mat2.BaseColor := Vector3(0.1, 0.3, 1.0);
+    App2.Material := Mat2;
+    ShapeNode2.Appearance := App2;
+    Root.AddChildren(ShapeNode2);
+
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+
+    Device.BeginFrame;
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+    finally
+      Device.EndFrameAndPresent;
+    end;
+
+    ShapeList := Scene.Shapes.TraverseList(True);
+    AssertEquals('Scene must have 2 shapes', 2, ShapeList.Count);
+    RShape1 := TX3DRendererShape(ShapeList[0]);
+    RShape2 := TX3DRendererShape(ShapeList[1]);
+
+    AssertTrue('Both shapes must be registered in bindless material table',
+      RShape1.RHIBindlessMaterialRegistered and RShape2.RHIBindlessMaterialRegistered);
+    AssertTrue('Shapes must receive distinct bindless material indices (0 and 1)',
+      RShape1.RHIBindlessMaterialIndex <> RShape2.RHIBindlessMaterialIndex);
+    AssertEquals('BindlessTextureManager MaterialCount must be 2',
+      2, Integer(Device.BindlessTextureManager.MaterialCount));
+    AssertTrue('EndFrameAndPresent must have flushed MaterialSSBOBuffer',
+      (Device.BindlessTextureManager.MaterialSSBOBuffer <> nil) and
+      (Device.BindlessTextureManager.MaterialFlushCount >= 1));
+  finally
+    FreeAndNil(Container);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
   end;
 end;
 

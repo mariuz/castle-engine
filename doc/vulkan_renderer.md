@@ -138,7 +138,7 @@ Three runnable examples demonstrate the Vulkan backend (supporting both interact
 
 ## 7. Running Unit Tests
 
-The test suite (`TTestCastleVulkanRHI`, 212 unit tests within the 781-test `castle_tester_standalone` suite) validates RHI types, dynamic loading, pipeline caching, memory sub-allocation, shader generation, full end-to-end 3D/2D `TCastleContainer` + `TCastleViewport` + `TCastleScene` rendering, and all next-gen rendering subsystems:
+The test suite (`TTestCastleVulkanRHI`, 215 unit tests within the 784-test `castle_tester_standalone` suite) validates RHI types, dynamic loading, pipeline caching, memory sub-allocation, shader generation, full end-to-end 3D/2D `TCastleContainer` + `TCastleViewport` + `TCastleScene` rendering, automatic bindless texture & material SSBO registration, and all next-gen rendering subsystems:
 
 ```bash
 fpc -Mobjfpc -Sh -Ci -Co -Cr -gl -dCASTLE_WINDOW_XLIB @castle-fpc.cfg \

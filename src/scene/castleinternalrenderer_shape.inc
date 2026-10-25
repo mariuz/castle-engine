@@ -103,6 +103,7 @@
 
   public
     RHIBindlessMaterialIndex: Cardinal;
+    RHIBindlessMaterialRegistered: Boolean;
 
     { Extracts the shape's PBR/Phong/Unlit material block and uploads it to Cache.RHIMaterialBuffer (Set 1, Binding 0). }
     procedure UploadRHIMaterialToCache(out AShadingModel: TCastleShadingModelRHI);
@@ -496,10 +497,48 @@ end;
 procedure TX3DRendererShape.UploadRHIMaterialToCache(out AShadingModel: TCastleShadingModelRHI);
 var
   MatBlock: TCastleMaterialUniformBlock;
+  BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex: TRHITexture;
+  BaseColorIdx, NormalIdx, MetallicRoughnessIdx, EmissiveIdx: Cardinal;
+  BindlessEntry: TCastleBindlessMaterialEntry;
 begin
   ExtractRHIMaterialBlock(MatBlock, AShadingModel);
   if Cache <> nil then
     Cache.UploadMaterialBlock(MatBlock);
+  if RHIDevice <> nil then
+  begin
+    ExtractRHIMaterialTextures(BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex);
+    if BaseColorTex <> nil then
+      BaseColorIdx := RHIDevice.RegisterBindlessTexture(BaseColorTex)
+    else
+      BaseColorIdx := 0;
+    if NormalTex <> nil then
+      NormalIdx := RHIDevice.RegisterBindlessTexture(NormalTex)
+    else
+      NormalIdx := 0;
+    if MetallicRoughnessTex <> nil then
+      MetallicRoughnessIdx := RHIDevice.RegisterBindlessTexture(MetallicRoughnessTex)
+    else
+      MetallicRoughnessIdx := 0;
+    if EmissiveTex <> nil then
+      EmissiveIdx := RHIDevice.RegisterBindlessTexture(EmissiveTex)
+    else
+      EmissiveIdx := 0;
+    if OcclusionTex <> nil then
+      RHIDevice.RegisterBindlessTexture(OcclusionTex);
+    BindlessEntry.BaseColor := MatBlock.BaseColor;
+    BindlessEntry.SpecularColor := MatBlock.SpecularColor;
+    BindlessEntry.EmissiveColor := MatBlock.EmissiveColor;
+    BindlessEntry.PBRParams := MatBlock.PBRParams;
+    BindlessEntry.BaseColorTexIndex := BaseColorIdx;
+    BindlessEntry.NormalTexIndex := NormalIdx;
+    BindlessEntry.MetallicRoughnessTexIndex := MetallicRoughnessIdx;
+    BindlessEntry.EmissiveTexIndex := EmissiveIdx;
+    RHIDevice.RegisterOrUpdateBindlessMaterial(
+      RHIBindlessMaterialIndex,
+      RHIBindlessMaterialRegistered,
+      BindlessEntry,
+      SizeOf(BindlessEntry));
+  end;
 end;
 
 function TX3DRendererShape.RecordRHIDraw(const ACmd: TRHICommandList;

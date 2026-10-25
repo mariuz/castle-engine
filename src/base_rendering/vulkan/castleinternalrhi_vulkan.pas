@@ -467,6 +467,10 @@ type
     FLayout: TVulkanRHIDescriptorSetLayout;
     FDescriptorSet: TVulkanRHIDescriptorSet;
     FMaterialSSBOBuffer: TRHIBuffer;
+    FOwnsMaterialSSBOBuffer: Boolean;
+    FMaterialEntries: array of TCastleBindlessMaterialEntry;
+    FMaterialTableDirty: Boolean;
+    FMaterialFlushCount: Cardinal;
     FSlots: array of TVulkanBindlessTextureSlot;
     FFreeSlots: array of Cardinal;
     FActiveSlotCount: Cardinal;
@@ -510,7 +514,26 @@ type
     procedure SetMaterialStorageBuffer(const ASSBOBuffer: TRHIBuffer;
       const AOffset: PtrUInt = 0; const ARange: PtrUInt = 0);
 
-    { Batches all dirty slot bindings into FDescriptorSet via BindTextureAtIndex + Update.
+    { Registers or updates a TCastleBindlessMaterialEntry in the managed Material SSBO table
+      (Set 1, Binding 1). When AAlreadyRegistered is False, appends a new entry and sets
+      AMaterialIndex to the allocated 0-based index and AAlreadyRegistered to True;
+      otherwise updates the existing entry at AMaterialIndex in-place. }
+    function RegisterOrUpdateMaterial(var AMaterialIndex: Cardinal;
+      var AAlreadyRegistered: Boolean;
+      const AEntry: TCastleBindlessMaterialEntry): Cardinal;
+
+    { Returns the CPU-side TCastleBindlessMaterialEntry at AIndex (or zeroed if out of bounds). }
+    function GetMaterialEntry(const AIndex: Cardinal): TCastleBindlessMaterialEntry;
+
+    { Returns the number of registered materials in the CPU-side Material SSBO table. }
+    function GetMaterialCount: Cardinal;
+
+    { Uploads the CPU-side FMaterialEntries table into FMaterialSSBOBuffer (allocating or
+      growing an owned Storage+TransferDst buffer as needed) and binds it to Set 1, Binding 1. }
+    function FlushMaterialTableToSSBO: Boolean;
+
+    { Batches all dirty slot bindings into FDescriptorSet via BindTextureAtIndex + Update,
+      and flushes FMaterialEntries to FMaterialSSBOBuffer if FMaterialTableDirty is True.
       Returns the number of descriptor writes committed in this flush. }
     function FlushPendingUpdates: Cardinal;
 
@@ -520,6 +543,8 @@ type
     property Layout: TVulkanRHIDescriptorSetLayout read FLayout;
     property DescriptorSet: TVulkanRHIDescriptorSet read FDescriptorSet;
     property MaterialSSBOBuffer: TRHIBuffer read FMaterialSSBOBuffer;
+    property MaterialCount: Cardinal read GetMaterialCount;
+    property MaterialFlushCount: Cardinal read FMaterialFlushCount;
     property ActiveSlotCount: Cardinal read FActiveSlotCount;
     property FreeSlotCount: Cardinal read GetFreeSlotCount;
     property PendingWriteCount: Cardinal read FPendingWriteCount;
@@ -3884,6 +3909,12 @@ type
 
     function GetInformationString: String; override;
     function GetInformationStringSummary: String; override;
+
+    function RegisterBindlessTexture(const ATexture: TRHITexture;
+      const ASampler: TRHISampler = nil): Cardinal; override;
+    function RegisterOrUpdateBindlessMaterial(var AMaterialIndex: Cardinal;
+      var AAlreadyRegistered: Boolean;
+      const AEntryData; const AEntrySizeInBytes: Cardinal): Cardinal; override;
 
     property Handle: VkDevice read FDevice;
     property PhysicalDevice: VkPhysicalDevice read FPhysicalDevice;
@@ -7864,6 +7895,11 @@ destructor TCastleVulkanBindlessTextureManager.Destroy;
 begin
   SetLength(FSlots, 0);
   SetLength(FFreeSlots, 0);
+  SetLength(FMaterialEntries, 0);
+  if FOwnsMaterialSSBOBuffer then
+    FreeAndNil(FMaterialSSBOBuffer)
+  else
+    FMaterialSSBOBuffer := nil;
   FreeAndNil(FDescriptorSet);
   FreeAndNil(FLayout);
   inherited;
@@ -8026,6 +8062,11 @@ procedure TCastleVulkanBindlessTextureManager.SetMaterialStorageBuffer(
   const ASSBOBuffer: TRHIBuffer; const AOffset, ARange: PtrUInt);
 begin
   EnsureDescriptorSetCreated;
+  if FOwnsMaterialSSBOBuffer and (FMaterialSSBOBuffer <> ASSBOBuffer) then
+  begin
+    FreeAndNil(FMaterialSSBOBuffer);
+    FOwnsMaterialSSBOBuffer := False;
+  end;
   FMaterialSSBOBuffer := ASSBOBuffer;
   if (FDescriptorSet <> nil) and (ASSBOBuffer <> nil) then
   begin
@@ -8034,12 +8075,94 @@ begin
   end;
 end;
 
+function TCastleVulkanBindlessTextureManager.RegisterOrUpdateMaterial(
+  var AMaterialIndex: Cardinal; var AAlreadyRegistered: Boolean;
+  const AEntry: TCastleBindlessMaterialEntry): Cardinal;
+begin
+  EnsureDescriptorSetCreated;
+  if AAlreadyRegistered and (AMaterialIndex < Cardinal(Length(FMaterialEntries))) then
+  begin
+    if not CompareMem(@FMaterialEntries[AMaterialIndex], @AEntry, SizeOf(TCastleBindlessMaterialEntry)) then
+    begin
+      FMaterialEntries[AMaterialIndex] := AEntry;
+      FMaterialTableDirty := True;
+      Inc(FPendingWriteCount);
+    end;
+    Result := AMaterialIndex;
+  end else
+  begin
+    AMaterialIndex := Cardinal(Length(FMaterialEntries));
+    SetLength(FMaterialEntries, AMaterialIndex + 1);
+    FMaterialEntries[AMaterialIndex] := AEntry;
+    AAlreadyRegistered := True;
+    FMaterialTableDirty := True;
+    Inc(FPendingWriteCount);
+    Result := AMaterialIndex;
+  end;
+end;
+
+function TCastleVulkanBindlessTextureManager.GetMaterialEntry(
+  const AIndex: Cardinal): TCastleBindlessMaterialEntry;
+begin
+  if AIndex < Cardinal(Length(FMaterialEntries)) then
+    Result := FMaterialEntries[AIndex]
+  else
+    FillChar(Result, SizeOf(Result), 0);
+end;
+
+function TCastleVulkanBindlessTextureManager.GetMaterialCount: Cardinal;
+begin
+  Result := Cardinal(Length(FMaterialEntries));
+end;
+
+function TCastleVulkanBindlessTextureManager.FlushMaterialTableToSSBO: Boolean;
+var
+  RequiredBytes, AllocBytes: PtrUInt;
+  BufDesc: TRHIBufferDesc;
+begin
+  Result := False;
+  if (FDevice = nil) or (Length(FMaterialEntries) = 0) then
+    Exit;
+
+  EnsureDescriptorSetCreated;
+  RequiredBytes := PtrUInt(Length(FMaterialEntries)) * SizeOf(TCastleBindlessMaterialEntry);
+  if (FMaterialSSBOBuffer = nil) or (FMaterialSSBOBuffer.Desc.Size < RequiredBytes) then
+  begin
+    if FOwnsMaterialSSBOBuffer then
+      FreeAndNil(FMaterialSSBOBuffer);
+    AllocBytes := Max(PtrUInt(64 * SizeOf(TCastleBindlessMaterialEntry)), RequiredBytes * 2);
+    FillChar(BufDesc, SizeOf(BufDesc), 0);
+    BufDesc.Size := AllocBytes;
+    BufDesc.Usage := [buStorage, buTransferDst];
+    BufDesc.MemoryUsage := muCpuToGpu;
+    BufDesc.DebugName := 'CastleBindlessMaterialTableSSBO';
+    FMaterialSSBOBuffer := FDevice.CreateBuffer(BufDesc, nil);
+    FOwnsMaterialSSBOBuffer := True;
+    if (FDescriptorSet <> nil) and (FMaterialSSBOBuffer <> nil) then
+      FDescriptorSet.BindStorageBuffer(1, FMaterialSSBOBuffer, 0, AllocBytes);
+  end;
+
+  if FMaterialSSBOBuffer <> nil then
+  begin
+    FMaterialSSBOBuffer.UploadData(FMaterialEntries[0], RequiredBytes, 0);
+    FMaterialTableDirty := False;
+    Inc(FMaterialFlushCount);
+    Result := True;
+  end;
+end;
+
 function TCastleVulkanBindlessTextureManager.FlushPendingUpdates: Cardinal;
 var
   I: Integer;
 begin
   Result := 0;
-  if (FDescriptorSet = nil) or (FPendingWriteCount = 0) then
+  if FDescriptorSet = nil then
+    Exit;
+
+  if FMaterialTableDirty then
+    FlushMaterialTableToSSBO;
+
+  if (FPendingWriteCount = 0) and (Length(FDescriptorSet.FPendingWrites) = 0) then
     Exit;
 
   for I := 0 to High(FSlots) do
@@ -19603,6 +19726,8 @@ begin
 
   if FStagingUploader <> nil then
     FStagingUploader.FlushPendingUploads(Frame.CommandList);
+  if FBindlessTextureManager <> nil then
+    FBindlessTextureManager.FlushPendingUpdates;
 
   { Ensure swapchain backbuffer is transitioned to VK_IMAGE_LAYOUT_PRESENT_SRC_KHR }
   if GetSwapchainColorTexture <> nil then
@@ -20318,6 +20443,31 @@ begin
     MinorVer,
     DevStr
   ]);
+end;
+
+function TVulkanRHIDevice.RegisterBindlessTexture(const ATexture: TRHITexture;
+  const ASampler: TRHISampler): Cardinal;
+begin
+  if (FBindlessTextureManager <> nil) and (ATexture <> nil) then
+    Result := FBindlessTextureManager.RegisterTexture(ATexture, ASampler)
+  else
+    Result := 0;
+end;
+
+function TVulkanRHIDevice.RegisterOrUpdateBindlessMaterial(
+  var AMaterialIndex: Cardinal; var AAlreadyRegistered: Boolean;
+  const AEntryData; const AEntrySizeInBytes: Cardinal): Cardinal;
+var
+  Entry: TCastleBindlessMaterialEntry;
+begin
+  if (FBindlessTextureManager <> nil) and
+     (AEntrySizeInBytes = SizeOf(TCastleBindlessMaterialEntry)) then
+  begin
+    Move(AEntryData, Entry, SizeOf(TCastleBindlessMaterialEntry));
+    Result := FBindlessTextureManager.RegisterOrUpdateMaterial(
+      AMaterialIndex, AAlreadyRegistered, Entry);
+  end else
+    Result := AMaterialIndex;
 end;
 
 function TVulkanRHIDevice.BeginSingleTimeCommands: VkCommandBuffer;
