@@ -86,6 +86,10 @@
 
     { Available between RenderBegin / RenderEnd. }
     LightsRenderer: TLightsRenderer;
+    FRHISceneBuffer: TRHIBuffer;
+    FRHISceneOwnerDevice: TRHIDevice;
+    FSceneUniformBlock: TCastleSceneUniformBlock;
+    FRHISceneBufferUploadCount: Cardinal;
 
     { Currently set fog parameters, during render. }
     FogFunctionality: TFogFunctionality;
@@ -257,6 +261,15 @@
       Each RenderBegin sets it (to given parameter). }
     property WireframePass: TWireframeRenderingPass
       read FWireframePass write SetWireframePass;
+
+    { Build and upload Set 0 Binding 0 Per-Pass Scene Camera + Fog UBO (TCastleSceneUniformBlock). }
+    procedure BuildSceneUniformBlock(out UniformBlock: TCastleSceneUniformBlock);
+    procedure UploadSceneUniformBlockToRHI;
+
+    property RHISceneBuffer: TRHIBuffer read FRHISceneBuffer;
+    property SceneUniformBlock: TCastleSceneUniformBlock read FSceneUniformBlock;
+    property RHISceneBufferUploadCount: Cardinal read FRHISceneBufferUploadCount;
+    property ActiveLightsRenderer: TLightsRenderer read LightsRenderer;
   end;
 {$endif read_interface}
 
@@ -277,7 +290,80 @@ begin
   FreeAndNil(PreparedShader);
   FreeAndNil(ShadowMapsShaders);
   FreeAndNil(VarianceShadowMapsShaders);
+  if (FRHISceneBuffer <> nil) and (RHIDevice = FRHISceneOwnerDevice) then
+    FreeAndNil(FRHISceneBuffer)
+  else
+    FRHISceneBuffer := nil;
   inherited;
+end;
+
+procedure TRenderer.BuildSceneUniformBlock(out UniformBlock: TCastleSceneUniformBlock);
+var
+  FogDensity: Single;
+begin
+  FillChar(UniformBlock, SizeOf(UniformBlock), 0);
+  if RenderContext <> nil then
+    UniformBlock.ProjectionMatrix := RenderContext.ProjectionMatrix
+  else
+    UniformBlock.ProjectionMatrix := TMatrix4.Identity;
+
+  if RenderingCamera <> nil then
+  begin
+    UniformBlock.ViewMatrix := RenderingCamera.Matrix;
+    RenderingCamera.InverseMatrixNeeded;
+    UniformBlock.ViewMatrixInverse := RenderingCamera.InverseMatrix;
+    UniformBlock.CameraPosition := Vector4(
+      UniformBlock.ViewMatrixInverse.Rows[0].W,
+      UniformBlock.ViewMatrixInverse.Rows[1].W,
+      UniformBlock.ViewMatrixInverse.Rows[2].W,
+      0.0);
+  end else
+  begin
+    UniformBlock.ViewMatrix := TMatrix4.Identity;
+    UniformBlock.ViewMatrixInverse := TMatrix4.Identity;
+  end;
+
+  if FogEnabled then
+  begin
+    if FogVisibilityRangeScaled > 1e-5 then
+      FogDensity := 2.0 / FogVisibilityRangeScaled
+    else
+      FogDensity := 0.0;
+    UniformBlock.FogColor := Vector4(FogColor, FogDensity);
+    UniformBlock.FogParams := Vector4(
+      FogVolumetricVisibilityStart,
+      FogVisibilityRangeScaled,
+      Single(Ord(FogType) + 1),
+      Single(Ord(FogVolumetric)));
+  end else
+  begin
+    UniformBlock.FogColor := Vector4(0.0, 0.0, 0.0, 0.0);
+    UniformBlock.FogParams := Vector4(0.0, 0.0, 0.0, 0.0);
+  end;
+
+  if LightsRenderer <> nil then
+    UniformBlock.LightCount := LightsRenderer.LightsUniformBlock.Count;
+end;
+
+procedure TRenderer.UploadSceneUniformBlockToRHI;
+var
+  BufDesc: TRHIBufferDesc;
+begin
+  BuildSceneUniformBlock(FSceneUniformBlock);
+  if RHIDevice = nil then
+    Exit;
+
+  if (FRHISceneBuffer <> nil) and (FRHISceneOwnerDevice <> RHIDevice) then
+    FRHISceneBuffer := nil;
+
+  if FRHISceneBuffer = nil then
+  begin
+    BufDesc := TRHIBufferDesc.Create(SizeOf(TCastleSceneUniformBlock), [buUniform], muCpuToGpu, 'CastleSceneUBO');
+    FRHISceneBuffer := RHIDevice.CreateBuffer(BufDesc, @FSceneUniformBlock);
+    FRHISceneOwnerDevice := RHIDevice;
+  end else
+    FRHISceneBuffer.UploadData(FSceneUniformBlock, SizeOf(TCastleSceneUniformBlock));
+  Inc(FRHISceneBufferUploadCount);
 end;
 
 function TRenderer.BumpMapping(const RenderOptions: TCastleRenderOptions): TBumpMapping;
@@ -877,6 +963,8 @@ begin
   if FogEnabled then
     Shader.EnableFog(FogType, FogCoordinateSource[FogVolumetric],
       FogColor, FogVisibilityRangeScaled);
+  if (RHIDevice <> nil) or ((ApplicationProperties <> nil) and (ApplicationProperties.RenderBackend = backendVulkan)) then
+    UploadSceneUniformBlockToRHI;
   RenderShapeTextureTransform(Shape, RenderOptions, Shader, Lighting);
 end;
 

@@ -126,6 +126,9 @@
     FRHIAttribBuffer: TRHIBuffer;
     FRHIIndexBuffer: TRHIBuffer;
     FRHIJointBuffer: TRHIBuffer;
+    FRHIMaterialBuffer: TRHIBuffer;
+    FRHIMaterialBlock: TCastleMaterialUniformBlock;
+    FRHIMaterialUploadCount: Cardinal;
     FRHIUploadCount: Cardinal;
 
     { Like TX3DRendererShape.LoadArraysToVbo,
@@ -137,6 +140,7 @@
     destructor Destroy; override;
     procedure InvalidateVertexData(const Changed: TVboTypes);
     procedure UploadJointMatrices(const JointMatrices: Pointer; const Count: Cardinal);
+    procedure UploadMaterialBlock(const AMatBlock: TCastleMaterialUniformBlock);
     { Debug description of this shape cache. }
     function ToString: String; override;
 
@@ -144,6 +148,9 @@
     property RHIAttributeBuffer: TRHIBuffer read FRHIAttribBuffer;
     property RHIIndexBuffer: TRHIBuffer read FRHIIndexBuffer;
     property RHIJointBuffer: TRHIBuffer read FRHIJointBuffer;
+    property RHIMaterialBuffer: TRHIBuffer read FRHIMaterialBuffer;
+    property RHIMaterialBlock: TCastleMaterialUniformBlock read FRHIMaterialBlock;
+    property RHIMaterialUploadCount: Cardinal read FRHIMaterialUploadCount;
     property RHIUploadCount: Cardinal read FRHIUploadCount;
   end;
 
@@ -205,6 +212,7 @@ begin
   FreeAndNil(FRHIAttribBuffer);
   FreeAndNil(FRHIIndexBuffer);
   FreeAndNil(FRHIJointBuffer);
+  FreeAndNil(FRHIMaterialBuffer);
 end;
 
 procedure TShapeCache.InvalidateVertexData(const Changed: TVboTypes);
@@ -228,6 +236,25 @@ begin
     FreeAndNil(FRHIJointBuffer);
     BufDesc := TRHIBufferDesc.Create(DataSize, [buUniform], muCpuToGpu);
     FRHIJointBuffer := RHIDevice.CreateBuffer(BufDesc, JointMatrices);
+  end;
+end;
+
+procedure TShapeCache.UploadMaterialBlock(const AMatBlock: TCastleMaterialUniformBlock);
+var
+  BufDesc: TRHIBufferDesc;
+begin
+  FRHIMaterialBlock := AMatBlock;
+  if RHIDevice = nil then
+    Exit;
+
+  if FRHIMaterialBuffer = nil then
+  begin
+    BufDesc := TRHIBufferDesc.Create(SizeOf(TCastleMaterialUniformBlock), [buUniform], muCpuToGpu, 'CastleMaterialUBO');
+    FRHIMaterialBuffer := RHIDevice.CreateBuffer(BufDesc, @FRHIMaterialBlock);
+  end else
+    FRHIMaterialBuffer.UploadData(FRHIMaterialBlock, SizeOf(TCastleMaterialUniformBlock));
+  begin
+    Inc(FRHIMaterialUploadCount);
   end;
 end;
 

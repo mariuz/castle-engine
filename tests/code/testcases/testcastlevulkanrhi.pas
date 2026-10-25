@@ -249,6 +249,9 @@ type
     procedure TestCastleScenePrepareResourcesHeadlessVulkanRHI;
     procedure TestCastleViewport3DSceneHeadlessVulkanRenderRHI;
     procedure TestCastleViewportWireframeAndShadowVolumesHeadlessVulkanRHI;
+    procedure TestRendererSceneUniformBlockUploadRHI;
+    procedure TestShapeCacheMaterialUniformBlockAndBindlessIndexRHI;
+    procedure TestVulkan3DSceneExampleSourceVerificationRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -12236,6 +12239,175 @@ begin
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(TestCtx);
     FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRendererSceneUniformBlockUploadRHI;
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  SavedCtx: TRenderContext;
+  Device: TVulkanRHIDevice;
+  TestCtx: TRenderContext;
+  Renderer: TRenderer;
+  SceneBlock: TCastleSceneUniformBlock;
+begin
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedRHI := RHIDevice;
+  SavedCtx := RenderContext;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($6201)));
+  TestCtx := TRenderContext.Create(nil);
+  Renderer := nil;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+    RenderContext := TestCtx;
+    TestCtx.ProjectionMatrix := PerspectiveProjection(60.0, 16.0 / 9.0, 0.1, 500.0);
+
+    Renderer := TRenderer.Create(nil);
+    AssertTrue('Initial RHISceneBuffer must be nil', Renderer.RHISceneBuffer = nil);
+    AssertEquals('Initial RHISceneBufferUploadCount must be 0',
+      0, Integer(Renderer.RHISceneBufferUploadCount));
+
+    Renderer.UploadSceneUniformBlockToRHI;
+    AssertTrue('RHISceneBuffer must be allocated after UploadSceneUniformBlockToRHI',
+      Renderer.RHISceneBuffer <> nil);
+    AssertEquals('RHISceneBuffer size must match TCastleSceneUniformBlock',
+      SizeOf(TCastleSceneUniformBlock), Integer(Renderer.RHISceneBuffer.Desc.Size));
+    AssertEquals('RHISceneBufferUploadCount must increment to 1',
+      1, Integer(Renderer.RHISceneBufferUploadCount));
+
+    SceneBlock := Renderer.SceneUniformBlock;
+    AssertSameValue(TestCtx.ProjectionMatrix.Data[0, 0],
+      SceneBlock.ProjectionMatrix.Data[0, 0], 1e-5);
+
+    { Second upload reuses buffer and increments counter }
+    Renderer.UploadSceneUniformBlockToRHI;
+    AssertEquals('RHISceneBufferUploadCount must increment to 2',
+      2, Integer(Renderer.RHISceneBufferUploadCount));
+  finally
+    FreeAndNil(Renderer);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestShapeCacheMaterialUniformBlockAndBindlessIndexRHI;
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  SavedCtx: TRenderContext;
+  Device: TVulkanRHIDevice;
+  TestCtx: TRenderContext;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  BoxNode: TBoxNode;
+  App: TAppearanceNode;
+  PhysMat: TPhysicalMaterialNode;
+  ShapeList: TShapeList;
+  RShape: TX3DRendererShape;
+  Cmd: TRHICommandList;
+  DrawsRecorded: Cardinal;
+begin
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedRHI := RHIDevice;
+  SavedCtx := RenderContext;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($6202)));
+  TestCtx := TRenderContext.Create(nil);
+  Container := nil;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+    RenderContext := TestCtx;
+
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 8.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Scene := TCastleScene.Create(Viewport);
+    Scene.RenderOptions.DualQuaternionSkinning := True;
+    Scene.RenderOptions.SpecularAntiAliasing := True;
+    Scene.RenderOptions.ShadowMapSystemMode := smsVirtualShadowMaps;
+
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    BoxNode := TBoxNode.Create;
+    BoxNode.Size := Vector3(2.0, 2.0, 2.0);
+    ShapeNode.Geometry := BoxNode;
+    App := TAppearanceNode.Create;
+    PhysMat := TPhysicalMaterialNode.Create;
+    PhysMat.BaseColor := Vector3(0.9, 0.6, 0.2);
+    PhysMat.Metallic := 0.75;
+    PhysMat.Roughness := 0.25;
+    App.Material := PhysMat;
+    ShapeNode.Appearance := App;
+    Root.AddChildren(ShapeNode);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+
+    ShapeList := Scene.Shapes.TraverseList(True);
+    AssertEquals('Scene must have 1 shape', 1, ShapeList.Count);
+    RShape := TX3DRendererShape(ShapeList[0]);
+    RShape.RHIBindlessMaterialIndex := 42;
+
+    Cmd := Device.BeginFrame;
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+      DrawsRecorded := RShape.RecordRHIDraw(Cmd, TMatrix4.Identity, RShape.RHIBindlessMaterialIndex);
+    finally
+      Device.EndFrameAndPresent;
+    end;
+
+    AssertEquals('RecordRHIDraw must record 1 draw call', 1, Integer(DrawsRecorded));
+    AssertTrue('Shape.Cache must have non-nil RHIMaterialBuffer after viewport render',
+      (RShape.Cache <> nil) and (RShape.Cache.RHIMaterialBuffer <> nil));
+    AssertTrue('RHIMaterialUploadCount must be >= 1',
+      RShape.Cache.RHIMaterialUploadCount >= 1);
+    AssertSameValue(0.9, RShape.Cache.RHIMaterialBlock.BaseColor.X, 1e-4);
+    AssertSameValue(0.75, RShape.Cache.RHIMaterialBlock.EmissiveColor.W, 1e-4);
+    AssertSameValue(0.25, RShape.Cache.RHIMaterialBlock.PBRParams.X, 1e-4);
+  finally
+    FreeAndNil(Container);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkan3DSceneExampleSourceVerificationRHI;
+var
+  SourceText: String;
+  SL: TStringList;
+begin
+  SL := TStringList.Create;
+  try
+    SL.LoadFromFile('examples/vulkan/vulkan_3d_scene/vulkan_3d_scene.dpr');
+    SourceText := SL.Text;
+    AssertTrue('vulkan_3d_scene.dpr must call Viewport.PrepareResources(Scene)',
+      Pos('Viewport.PrepareResources(Scene)', SourceText) > 0);
+    AssertTrue('vulkan_3d_scene.dpr must call Device.BeginFrame',
+      Pos('Device.BeginFrame', SourceText) > 0);
+    AssertTrue('vulkan_3d_scene.dpr must call Viewport.ExecuteAllScenesRenderOptionsSubsystems',
+      Pos('Viewport.ExecuteAllScenesRenderOptionsSubsystems', SourceText) > 0);
+    AssertTrue('vulkan_3d_scene.dpr must call Device.EndFrameAndPresent',
+      Pos('Device.EndFrameAndPresent', SourceText) > 0);
+  finally
+    FreeAndNil(SL);
   end;
 end;
 

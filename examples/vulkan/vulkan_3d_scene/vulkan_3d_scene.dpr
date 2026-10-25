@@ -27,7 +27,7 @@ uses
   CastleVectors, CastleColors, CastleRectangles, CastleLog,
   CastleApplicationProperties, CastleRenderOptions, CastleViewport, CastleScene,
   CastleTransform, CastleUIControls, CastleControls, CastleComponentSerialize,
-  CastleCameras, CastleWindow, CastleParameters,
+  CastleCameras, CastleWindow, CastleParameters, CastleRenderContext, X3DNodes,
   CastleInternalRHI, CastleInternalShaderRHI, CastleInternalShaderCompiler,
   CastleInternalVulkan, CastleInternalVulkanWSI, CastleInternalRHI_Vulkan;
 
@@ -72,6 +72,14 @@ var
   WSIExts: TAnsiStringArray;
   ExecutedSubsystems: Cardinal;
   HeadlessMode: Boolean;
+  RootNode: TX3DRootNode;
+  BoxShape: TShapeNode;
+  BoxGeom: TBoxNode;
+  BoxApp: TAppearanceNode;
+  BoxMat: TPhysicalMaterialNode;
+  DirLight: TDirectionalLightNode;
+  FogNode: TFogNode;
+  SavedCtx, HeadlessCtx: TRenderContext;
   I: Integer;
 begin
   ApplicationProperties._FileAccessSafe := true;
@@ -115,19 +123,49 @@ begin
   WritelnLog('Vulkan3DScene', 'Initialized GPU skinning UBO for %d active bones (%d B)',
     [SkinUBO.JointCount, SizeOf(SkinUBO)]);
 
-  { 5. Exercise High-Level TCastleRenderOptions & TCastleViewport Next-Gen Subsystem Orchestration }
+  { 5. Exercise High-Level TCastleRenderOptions, 3D X3D Scene Preparation & Next-Gen Subsystem Orchestration }
+  SavedCtx := RenderContext;
+  HeadlessCtx := TRenderContext.Create(nil);
   Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7701)));
   Viewport := TCastleViewport.Create(nil);
   Scene := TCastleScene.Create(nil);
   Win := TCastleWindow.Create(nil);
   try
     SetRHIDevice(Device);
+    RenderContext := HeadlessCtx;
+
+    RootNode := TX3DRootNode.Create;
+    DirLight := TDirectionalLightNode.Create;
+    DirLight.Direction := Vector3(-0.3, -0.8, -0.5).Normalize;
+    DirLight.Global := True;
+    RootNode.AddChildren(DirLight);
+
+    FogNode := TFogNode.Create;
+    FogNode.Color := Vector3(0.5, 0.6, 0.75);
+    FogNode.VisibilityRange := 60.0;
+    RootNode.AddChildren(FogNode);
+
+    BoxShape := TShapeNode.Create;
+    BoxGeom := TBoxNode.Create;
+    BoxGeom.Size := Vector3(2.0, 2.0, 2.0);
+    BoxShape.Geometry := BoxGeom;
+    BoxApp := TAppearanceNode.Create;
+    BoxMat := TPhysicalMaterialNode.Create;
+    BoxMat.BaseColor := Vector3(0.95, 0.75, 0.25);
+    BoxMat.Metallic := 0.85;
+    BoxMat.Roughness := 0.2;
+    BoxApp.Material := BoxMat;
+    BoxShape.Appearance := BoxApp;
+    RootNode.AddChildren(BoxShape);
+    Scene.Load(RootNode, True);
+
     Scene.RenderOptions.SpecularAntiAliasing := True;
     Scene.RenderOptions.DualQuaternionSkinning := True;
     Scene.RenderOptions.GpuDrivenMeshletCulling := True;
     Scene.RenderOptions.TransparencyMode := tmWeightedBlendedOIT;
     Scene.RenderOptions.ShadowMapSystemMode := smsVirtualShadowMaps;
     Viewport.Items.Add(Scene);
+    Viewport.PrepareResources(Scene);
 
     Viewport.Width := 1280;
     Viewport.Height := 720;
@@ -141,14 +179,20 @@ begin
     Viewport.AutoExposureEnabled := True;
     Viewport.TargetFrameRateHz := 60.0;
 
-    ExecutedSubsystems := Viewport.ExecuteVulkanViewportSubsystems(nil, 0.016) +
-      Viewport.ExecuteSceneRenderOptionsSubsystems(Scene.RenderOptions, nil);
+    Device.BeginFrame;
+    try
+      ExecutedSubsystems := Viewport.ExecuteVulkanViewportSubsystems(ActiveCommandList, 0.016) +
+        Viewport.ExecuteAllScenesRenderOptionsSubsystems(ActiveCommandList);
+    finally
+      Device.EndFrameAndPresent;
+    end;
     WritelnLog('Vulkan3DScene',
-      'Executed %d Next-Gen Vulkan viewport & scene subsystems (EV100=%.2f, ExposureMultiplier=%.4f, RenderBackend=%s)',
+      'Executed %d Next-Gen Vulkan viewport & scene subsystems (EV100=%.2f, ExposureMultiplier=%.4f, RenderBackend=%s, Frames=%d)',
       [ExecutedSubsystems,
        Viewport.EvaluateCurrentCameraEV100,
        Viewport.EvaluateCurrentCameraExposureMultiplier,
-       Scene.RenderOptions.ActiveRenderBackendName]);
+       Scene.RenderOptions.ActiveRenderBackendName,
+       Device.TotalFramesPresented]);
 
     { 6. Verify TCastleWindow WSI Native Surface Descriptor & Extensions }
     SurfaceDesc := Win.BuildVulkanNativeSurfaceDesc;
@@ -159,6 +203,9 @@ begin
        BoolToStr(Win.IsVulkanBackendRequested, True),
        Length(WSIExts)]);
 
+    FreeAndNil(Scene);
+    FreeAndNil(Viewport);
+    RenderContext := SavedCtx;
     SetRHIDevice(nil);
     if not HeadlessMode then
     begin
@@ -189,10 +236,12 @@ begin
       Win.OpenAndRun;
     end;
   finally
-    SetRHIDevice(nil);
-    FreeAndNil(Win);
     FreeAndNil(Scene);
     FreeAndNil(Viewport);
+    RenderContext := SavedCtx;
+    SetRHIDevice(nil);
+    FreeAndNil(Win);
+    FreeAndNil(HeadlessCtx);
     FreeAndNil(Device);
   end;
 end.

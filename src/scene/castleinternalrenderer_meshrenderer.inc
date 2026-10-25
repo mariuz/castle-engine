@@ -371,6 +371,8 @@ var
   TexCoordAttrib: TGLSLAttribute;
   PushConstants: TCastlePushConstantsBlock;
   NormalMat: TMatrix3;
+  ShadingModel: TCastleShadingModelRHI;
+  ShadowModeOrd: Cardinal;
 begin
   Attribs := nil;
 
@@ -536,7 +538,9 @@ begin
          (ApplicationProperties.RenderBackend = backendVulkan) and
          (ActiveCommandList <> nil) then
       begin
-        { 1. Push constants for per-draw ModelView, Normal matrices, and RenderOptions flags }
+        { 1. Upload per-shape RHI Material UBO and push constants for ModelView, Normal, and RenderOptions }
+        Shape.UploadRHIMaterialToCache(ShadingModel);
+        if RenderOptions <> nil then ShadowModeOrd := Ord(RenderOptions.ShadowMapSystemMode) else ShadowModeOrd := 0;
         NormalMat := ModelViewToNormalMatrix(ShapeModelView);
         PushConstants := TCastleShaderGeneratorRHI.BuildShapeRHIPushConstants(
           ShapeModelView,
@@ -544,8 +548,8 @@ begin
           (Shape.Cache <> nil) and (Shape.Cache.RHIJointBuffer <> nil),
           (RenderOptions <> nil) and RenderOptions.DualQuaternionSkinning,
           (RenderOptions = nil) or RenderOptions.SpecularAntiAliasing,
-          IfThen(RenderOptions <> nil, Ord(RenderOptions.ShadowMapSystemMode), 0),
-          0);
+          ShadowModeOrd,
+          Shape.RHIBindlessMaterialIndex);
         ActiveCommandList.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConstants), PushConstants);
 
         { 2. Bind vertex buffers (Coordinate and Attribute) }

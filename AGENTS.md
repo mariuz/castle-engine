@@ -77,8 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–60**: **COMPLETED** (100%).
-- **Phase 61 (Full End-to-End `TCastleViewport` + `TCastleScene` 3D Rendering Inside `TCastleContainer.EventRender` in Pure/Headless Vulkan RHI Mode)**: **COMPLETED** (100%, 778/778 total engine tests and 209/209 `TTestCastleVulkanRHI` tests passing):
-  - [x] **61.1. Pure/Headless Vulkan RHI `TCastleScene.PrepareResources` & Shape Buffer/Texture Preparation (`GLFeatures = nil`)** — Completed & tested (`TestCastleScenePrepareResourcesHeadlessVulkanRHI`).
-  - [x] **61.2. End-to-End `TCastleViewport` + `TCastleScene` 3D Rendering (Opaque + Blended Shapes, Lights, Fog, Next-Gen Subsystems) in `TCastleContainer.EventRender`** — Completed & tested (`TestCastleViewport3DSceneHeadlessVulkanRenderRHI`).
-  - [x] **61.3. Wireframe Rendering (`weWireframeOnly`, `weSolidWireframe`) & ShadowVolumes Guarding in Pure Vulkan RHI Mode** — Completed & tested (`TestCastleViewportWireframeAndShadowVolumesHeadlessVulkanRHI`).
+- **Phases 1–61**: **COMPLETED** (100%).
+- **Phase 62 (`TRenderer` Scene UBO Upload, `TShapeCache` Material UBO Upload & `vulkan_3d_scene` Headless 3D Frame Execution)**: **COMPLETED** (100%, 781/781 total engine tests and 212/212 `TTestCastleVulkanRHI` tests passing):
+  - [x] **62.1. `TRenderer.BuildSceneUniformBlock` & `UploadSceneUniformBlockToRHI` (`CastleSceneUBO`, Set 0 Binding 0)** — Completed & tested (`TestRendererSceneUniformBlockUploadRHI`).
+  - [x] **62.2. `TShapeCache.UploadMaterialBlock` (`CastleMaterialUBO`, Set 1 Binding 0), `TX3DRendererShape.UploadRHIMaterialToCache` & `RHIBindlessMaterialIndex` Wiring** — Completed & tested (`TestShapeCacheMaterialUniformBlockAndBindlessIndexRHI`).
+  - [x] **62.3. `examples/vulkan/vulkan_3d_scene` 3D X3D Scene Resource Preparation & Frame Lifecycle Verification** — Completed & tested (`TestVulkan3DSceneExampleSourceVerificationRHI`).

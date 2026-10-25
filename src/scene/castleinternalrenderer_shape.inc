@@ -101,6 +101,12 @@
       const AModelView: TMatrix4;
       const AMaterialIndex: Cardinal = 0): Cardinal;
 
+  public
+    RHIBindlessMaterialIndex: Cardinal;
+
+    { Extracts the shape's PBR/Phong/Unlit material block and uploads it to Cache.RHIMaterialBuffer (Set 1, Binding 0). }
+    procedure UploadRHIMaterialToCache(out AShadingModel: TCastleShadingModelRHI);
+
     destructor Destroy; override;
   end;
 {$endif read_interface}
@@ -487,6 +493,15 @@ begin
   Result.EmissiveTexIndex := AEmissiveTexIdx;
 end;
 
+procedure TX3DRendererShape.UploadRHIMaterialToCache(out AShadingModel: TCastleShadingModelRHI);
+var
+  MatBlock: TCastleMaterialUniformBlock;
+begin
+  ExtractRHIMaterialBlock(MatBlock, AShadingModel);
+  if Cache <> nil then
+    Cache.UploadMaterialBlock(MatBlock);
+end;
+
 function TX3DRendererShape.RecordRHIDraw(const ACmd: TRHICommandList;
   const AModelView: TMatrix4;
   const AMaterialIndex: Cardinal): Cardinal;
@@ -509,6 +524,18 @@ begin
     PushConstants.ObjectParams := Vector4(Single(AMaterialIndex), 1.0, 0.0, 0.0)
   else
     PushConstants.ObjectParams := Vector4(Single(AMaterialIndex), 0.0, 0.0, 0.0);
+  if Cache.RenderOptions <> nil then
+    I := Ord(Cache.RenderOptions.ShadowMapSystemMode)
+  else
+    I := 0;
+  PushConstants := TCastleShaderGeneratorRHI.BuildShapeRHIPushConstants(
+    AModelView,
+    NormalMat,
+    Cache.RHIJointBuffer <> nil,
+    (Cache.RenderOptions <> nil) and Cache.RenderOptions.DualQuaternionSkinning,
+    (Cache.RenderOptions = nil) or Cache.RenderOptions.SpecularAntiAliasing,
+    I,
+    AMaterialIndex);
   ACmd.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConstants), PushConstants);
 
   if Cache.RHICoordinateBuffer <> nil then
