@@ -574,6 +574,11 @@ type
       MenuTreeViewItemLightingRig: TMenuItem;
       MenuTreeViewItemCompareComponents: TMenuItem;
       MenuTreeViewItemEditNote: TMenuItem;
+      MenuTreeViewItemQuickUiLayout: TMenuItem;
+      MenuTreeViewItemEnvironmentPreset: TMenuItem;
+      MenuTreeViewItemComplexityProfiler: TMenuItem;
+      MenuTreeViewItemSyncNameWithUrl: TMenuItem;
+      MenuTreeViewItemCameraNavSetup: TMenuItem;
       FComponentNotes: TStringList;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
@@ -836,6 +841,11 @@ type
     procedure MenuTreeViewItemLightingRigClick(Sender: TObject);
     procedure MenuTreeViewItemCompareComponentsClick(Sender: TObject);
     procedure MenuTreeViewItemEditNoteClick(Sender: TObject);
+    procedure MenuTreeViewItemQuickUiLayoutClick(Sender: TObject);
+    procedure MenuTreeViewItemEnvironmentPresetClick(Sender: TObject);
+    procedure MenuTreeViewItemComplexityProfilerClick(Sender: TObject);
+    procedure MenuTreeViewItemSyncNameWithUrlClick(Sender: TObject);
+    procedure MenuTreeViewItemCameraNavSetupClick(Sender: TObject);
     procedure MenuTreeViewItemGroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemUngroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemArrayDuplicateClick(Sender: TObject);
@@ -2009,6 +2019,17 @@ type
     function GetComponentNote(const C: TComponent): String;
     procedure SetComponentNote(const C: TComponent; const NoteText: String);
     procedure EditSelectedComponentNote;
+    procedure ApplyQuickUiLayoutPreset(const LayoutPreset: Integer;
+      const SpacingPx, PaddingPx: Single; const AutoSizeGroup: Boolean);
+    procedure ShowQuickUiLayoutDialog;
+    procedure ApplyEnvironmentPreset(const EnvPreset: Integer;
+      const EnableFog, LinearFog: Boolean; const FogVisibilityRange: Single);
+    procedure ShowEnvironmentPresetDialog;
+    procedure ShowComponentComplexityDialog;
+    procedure SyncSelectedNamesWithAssetUrl(const EntireDesign: Boolean = false);
+    procedure ApplyQuickCameraNavigation(const RigPreset: Integer;
+      const MoveSpeed, FovOrOrthoHeight: Single; const EnableMouseLook: Boolean);
+    procedure ShowQuickCameraNavigationDialog;
     procedure SaveCameraBookmark(const Slot: Integer);
     procedure RecallCameraBookmark(const Slot: Integer);
     procedure AdjustCameraSpeed(const Factor: Single);
@@ -2069,7 +2090,7 @@ uses
   CastleLog, CastleProjection, CastleQuaternions, CastleStringUtils, CastleTimeUtils,
   CastleUriUtils, X3DLoad, CastleFilesUtils, CastleInternalPhysicsVisualization,
   CastleInternalUrlUtils, CastleInternalFileMonitor, X3DNodes, CastleSoundEngine,
-  CastleBehaviors,
+  CastleBehaviors, CastleThirdPersonNavigation,
   { Editor units }
   EditorRegisterAllComponents,
   FormProject, CastleComponentEditorDesigner;
@@ -6606,6 +6627,31 @@ begin
   MenuTreeViewItemEditNote.Caption := 'Edit Component Note / Comment & Tag... (Alt+N)';
   MenuTreeViewItemEditNote.OnClick := @MenuTreeViewItemEditNoteClick;
   MenuTreeView.Items.Add(MenuTreeViewItemEditNote);
+
+  MenuTreeViewItemQuickUiLayout := TMenuItem.Create(Self);
+  MenuTreeViewItemQuickUiLayout.Caption := 'Quick 2D UI Layout & Container Generator... (Shift: V-Group | Ctrl: H-Group)';
+  MenuTreeViewItemQuickUiLayout.OnClick := @MenuTreeViewItemQuickUiLayoutClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemQuickUiLayout);
+
+  MenuTreeViewItemEnvironmentPreset := TMenuItem.Create(Self);
+  MenuTreeViewItemEnvironmentPreset.Caption := 'Quick 3D Environment / Sky & Fog Preset... (Shift: Clear Daylight)';
+  MenuTreeViewItemEnvironmentPreset.OnClick := @MenuTreeViewItemEnvironmentPresetClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemEnvironmentPreset);
+
+  MenuTreeViewItemComplexityProfiler := TMenuItem.Create(Self);
+  MenuTreeViewItemComplexityProfiler.Caption := 'Component Complexity & Heavy Subtree Profiler...';
+  MenuTreeViewItemComplexityProfiler.OnClick := @MenuTreeViewItemComplexityProfilerClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemComplexityProfiler);
+
+  MenuTreeViewItemSyncNameWithUrl := TMenuItem.Create(Self);
+  MenuTreeViewItemSyncNameWithUrl.Caption := 'Sync Component Name(s) With Asset URL / Caption (Shift: Entire Design)';
+  MenuTreeViewItemSyncNameWithUrl.OnClick := @MenuTreeViewItemSyncNameWithUrlClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSyncNameWithUrl);
+
+  MenuTreeViewItemCameraNavSetup := TMenuItem.Create(Self);
+  MenuTreeViewItemCameraNavSetup.Caption := 'Quick 3D Camera & Gameplay Navigation Rig...';
+  MenuTreeViewItemCameraNavSetup.OnClick := @MenuTreeViewItemCameraNavSetupClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemCameraNavSetup);
 
   MenuTreeViewItemGroupSelected := TMenuItem.Create(Self);
   MenuTreeViewItemGroupSelected.Caption := 'Group Selected Under New Transform (Ctrl+G)';
@@ -32661,6 +32707,1274 @@ begin
   EditSelectedComponentNote;
 end;
 
+procedure TDesignFrame.ApplyQuickUiLayoutPreset(const LayoutPreset: Integer;
+  const SpacingPx, PaddingPx: Single; const AutoSizeGroup: Boolean);
+var
+  SelectedList, UiItems: TComponentList;
+  SelectedCount, I: Integer;
+  TargetParentUI, CreatedRootUI, ChildUI: TCastleUserInterface;
+  HGroup: TCastleHorizontalGroup;
+  VGroup: TCastleVerticalGroup;
+  ScrollView: TCastleScrollView;
+  BackdropRect, CardRect, TopBarRect: TCastleRectangleControl;
+  TitleLabel, LeftLabel, RightLabel: TCastleLabel;
+  CloseBtn, SampleBtn: TCastleButton;
+begin
+  if DesignOwner = nil then Exit;
+
+  UiItems := TComponentList.Create(false);
+  GetSelected(SelectedList, SelectedCount, false);
+  try
+    if SelectedList <> nil then
+      for I := 0 to SelectedList.Count - 1 do
+        if (SelectedList[I] is TCastleUserInterface) and
+           (SelectedList[I] <> FDesignRoot) and
+           Deletable(SelectedList[I]) and
+           (not IsComponentLocked(SelectedList[I])) then
+          UiItems.Add(SelectedList[I]);
+  finally
+    FreeAndNil(SelectedList);
+  end;
+
+  try
+    TargetParentUI := nil;
+    if (UiItems.Count > 0) and (TCastleUserInterface(UiItems[0]).Parent <> nil) then
+      TargetParentUI := TCastleUserInterface(UiItems[0]).Parent
+    else if SelectedUserInterface <> nil then
+      TargetParentUI := SelectedUserInterface
+    else if FDesignRoot is TCastleUserInterface then
+      TargetParentUI := TCastleUserInterface(FDesignRoot);
+
+    if TargetParentUI = nil then
+    begin
+      ErrorBox('Select a 2D User Interface control or container first.');
+      Exit;
+    end;
+
+    CreatedRootUI := nil;
+    case LayoutPreset of
+      0: begin // Horizontal Stack / Toolbar Row (TCastleHorizontalGroup)
+           HGroup := TCastleHorizontalGroup.Create(DesignOwner);
+           HGroup.Name := ProposeComponentName(TCastleHorizontalGroup, DesignOwner, 'GroupHorizontal');
+           HGroup.Spacing := SpacingPx;
+           HGroup.Padding := PaddingPx;
+           HGroup.AutoSizeWidth := AutoSizeGroup;
+           HGroup.AutoSizeHeight := AutoSizeGroup;
+           HGroup.Alignment := vpMiddle;
+           if not AutoSizeGroup then
+           begin
+             HGroup.Width := 420;
+             HGroup.Height := 64;
+           end;
+           HGroup.Anchor(hpMiddle);
+           HGroup.Anchor(vpMiddle);
+           TargetParentUI.InsertFront(HGroup);
+
+           if UiItems.Count > 0 then
+           begin
+             for I := 0 to UiItems.Count - 1 do
+             begin
+               ChildUI := TCastleUserInterface(UiItems[I]);
+               if (ChildUI <> HGroup) and (ChildUI.Parent <> nil) then
+               begin
+                 ChildUI.FullSize := false;
+                 ChildUI.Translation := TVector2.Zero;
+                 ChildUI.Parent.RemoveControl(ChildUI);
+                 HGroup.InsertFront(ChildUI);
+               end;
+             end;
+           end else
+           begin
+             for I := 1 to 3 do
+             begin
+               SampleBtn := TCastleButton.Create(DesignOwner);
+               SampleBtn.Name := ProposeComponentName(TCastleButton, DesignOwner, 'ButtonToolbar');
+               SampleBtn.Caption := Format('Action %d', [I]);
+               HGroup.InsertFront(SampleBtn);
+             end;
+           end;
+           CreatedRootUI := HGroup;
+         end;
+
+      1: begin // Vertical Stack / Menu Column (TCastleVerticalGroup)
+           VGroup := TCastleVerticalGroup.Create(DesignOwner);
+           VGroup.Name := ProposeComponentName(TCastleVerticalGroup, DesignOwner, 'GroupVertical');
+           VGroup.Spacing := SpacingPx;
+           VGroup.Padding := PaddingPx;
+           VGroup.AutoSizeWidth := AutoSizeGroup;
+           VGroup.AutoSizeHeight := AutoSizeGroup;
+           VGroup.Alignment := hpMiddle;
+           if not AutoSizeGroup then
+           begin
+             VGroup.Width := 260;
+             VGroup.Height := 320;
+           end;
+           VGroup.Anchor(hpMiddle);
+           VGroup.Anchor(vpMiddle);
+           TargetParentUI.InsertFront(VGroup);
+
+           if UiItems.Count > 0 then
+           begin
+             for I := 0 to UiItems.Count - 1 do
+             begin
+               ChildUI := TCastleUserInterface(UiItems[I]);
+               if (ChildUI <> VGroup) and (ChildUI.Parent <> nil) then
+               begin
+                 ChildUI.FullSize := false;
+                 ChildUI.Translation := TVector2.Zero;
+                 ChildUI.Parent.RemoveControl(ChildUI);
+                 VGroup.InsertFront(ChildUI);
+               end;
+             end;
+           end else
+           begin
+             for I := 1 to 3 do
+             begin
+               SampleBtn := TCastleButton.Create(DesignOwner);
+               SampleBtn.Name := ProposeComponentName(TCastleButton, DesignOwner, 'ButtonMenu');
+               SampleBtn.Caption := Format('Menu Option %d', [I]);
+               VGroup.InsertFront(SampleBtn);
+             end;
+           end;
+           CreatedRootUI := VGroup;
+         end;
+
+      2: begin // Scrollable Panel (TCastleScrollView + TCastleVerticalGroup in ScrollArea)
+           ScrollView := TCastleScrollView.Create(DesignOwner);
+           ScrollView.Name := ProposeComponentName(TCastleScrollView, DesignOwner, 'ScrollViewPanel');
+           ScrollView.Width := 380;
+           ScrollView.Height := 320;
+           ScrollView.Anchor(hpMiddle);
+           ScrollView.Anchor(vpMiddle);
+           TargetParentUI.InsertFront(ScrollView);
+
+           VGroup := TCastleVerticalGroup.Create(DesignOwner);
+           VGroup.Name := ProposeComponentName(TCastleVerticalGroup, DesignOwner, 'ScrollContentGroup');
+           VGroup.Spacing := SpacingPx;
+           VGroup.Padding := PaddingPx;
+           VGroup.Anchor(hpLeft);
+           VGroup.Anchor(vpTop);
+           ScrollView.ScrollArea.InsertFront(VGroup);
+
+           if UiItems.Count > 0 then
+           begin
+             for I := 0 to UiItems.Count - 1 do
+             begin
+               ChildUI := TCastleUserInterface(UiItems[I]);
+               if (ChildUI <> ScrollView) and (ChildUI.Parent <> nil) then
+               begin
+                 ChildUI.FullSize := false;
+                 ChildUI.Translation := TVector2.Zero;
+                 ChildUI.Parent.RemoveControl(ChildUI);
+                 VGroup.InsertFront(ChildUI);
+               end;
+             end;
+           end else
+           begin
+             for I := 1 to 5 do
+             begin
+               SampleBtn := TCastleButton.Create(DesignOwner);
+               SampleBtn.Name := ProposeComponentName(TCastleButton, DesignOwner, 'ButtonScrollItem');
+               SampleBtn.Caption := Format('Scroll Item %d', [I]);
+               VGroup.InsertFront(SampleBtn);
+             end;
+           end;
+           CreatedRootUI := ScrollView;
+         end;
+
+      3: begin // Modal Dialog Card (Backdrop + Card + Title + Close Button)
+           BackdropRect := TCastleRectangleControl.Create(DesignOwner);
+           BackdropRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner, 'ModalBackdrop');
+           BackdropRect.FullSize := true;
+           BackdropRect.Color := Vector4(0.0, 0.0, 0.0, 0.65);
+           TargetParentUI.InsertFront(BackdropRect);
+
+           CardRect := TCastleRectangleControl.Create(DesignOwner);
+           CardRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner, 'ModalCard');
+           CardRect.Width := 460;
+           CardRect.Height := 300;
+           CardRect.Color := Vector4(0.16, 0.18, 0.22, 0.98);
+           CardRect.Anchor(hpMiddle);
+           CardRect.Anchor(vpMiddle);
+           BackdropRect.InsertFront(CardRect);
+
+           TitleLabel := TCastleLabel.Create(DesignOwner);
+           TitleLabel.Name := ProposeComponentName(TCastleLabel, DesignOwner, 'LabelModalTitle');
+           TitleLabel.Caption := 'Dialog Title';
+           TitleLabel.FontSize := 26;
+           TitleLabel.Color := Vector4(1.0, 1.0, 1.0, 1.0);
+           TitleLabel.Anchor(hpMiddle);
+           TitleLabel.Anchor(vpTop, -20);
+           CardRect.InsertFront(TitleLabel);
+
+           CloseBtn := TCastleButton.Create(DesignOwner);
+           CloseBtn.Name := ProposeComponentName(TCastleButton, DesignOwner, 'ButtonModalClose');
+           CloseBtn.Caption := 'OK / Close';
+           CloseBtn.Anchor(hpMiddle);
+           CloseBtn.Anchor(vpBottom, 20);
+           CardRect.InsertFront(CloseBtn);
+
+           CreatedRootUI := BackdropRect;
+         end;
+
+      4: begin // HUD Top Status Bar (Full-Width Top Bar + Left/Right Labels)
+           TopBarRect := TCastleRectangleControl.Create(DesignOwner);
+           TopBarRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner, 'HudTopBar');
+           TopBarRect.WidthFraction := 1.0;
+           TopBarRect.Height := 52;
+           TopBarRect.Color := Vector4(0.08, 0.10, 0.14, 0.82);
+           TopBarRect.Anchor(hpMiddle);
+           TopBarRect.Anchor(vpTop);
+           TargetParentUI.InsertFront(TopBarRect);
+
+           LeftLabel := TCastleLabel.Create(DesignOwner);
+           LeftLabel.Name := ProposeComponentName(TCastleLabel, DesignOwner, 'LabelHudStatus');
+           LeftLabel.Caption := 'HP: 100 / 100';
+           LeftLabel.FontSize := 22;
+           LeftLabel.Anchor(hpLeft, 16);
+           LeftLabel.Anchor(vpMiddle);
+           TopBarRect.InsertFront(LeftLabel);
+
+           RightLabel := TCastleLabel.Create(DesignOwner);
+           RightLabel.Name := ProposeComponentName(TCastleLabel, DesignOwner, 'LabelHudScore');
+           RightLabel.Caption := 'Score: 0';
+           RightLabel.FontSize := 22;
+           RightLabel.Anchor(hpRight, -16);
+           RightLabel.Anchor(vpMiddle);
+           TopBarRect.InsertFront(RightLabel);
+
+           CreatedRootUI := TopBarRect;
+         end;
+    end;
+
+    if CreatedRootUI <> nil then
+    begin
+      UpdateDesign;
+      SelectedComponent := CreatedRootUI;
+      ModifiedOutsideObjectInspector(
+        Format('Create 2D UI Layout "%s"', [CreatedRootUI.Name]),
+        ucHigh);
+    end;
+  finally
+    FreeAndNil(UiItems);
+  end;
+end;
+
+procedure TDesignFrame.ShowQuickUiLayoutDialog;
+var
+  Dialog: TForm;
+  LblPreset, LblSpacing, LblPadding: TLabel;
+  ComboPreset: TComboBox;
+  SpinSpacing, SpinPadding: TFloatSpinEdit;
+  CheckAutoSize: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if (SelectedUserInterface = nil) and (not (FDesignRoot is TCastleUserInterface)) then
+  begin
+    ErrorBox('Open or select a 2D User Interface control first.');
+    Exit;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 2D UI Layout & Container Generator';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 460;
+    Dialog.Height := 270;
+
+    LblPreset := TLabel.Create(Dialog);
+    LblPreset.Left := 16;
+    LblPreset.Top := 16;
+    LblPreset.Caption := '2D UI Container / Template Preset (wraps selected UI or creates sample):';
+    LblPreset.Parent := Dialog;
+
+    ComboPreset := TComboBox.Create(Dialog);
+    ComboPreset.Left := 16;
+    ComboPreset.Top := 38;
+    ComboPreset.Width := 424;
+    ComboPreset.Style := csDropDownList;
+    ComboPreset.Items.Add('Horizontal Stack / Toolbar Row (TCastleHorizontalGroup)');
+    ComboPreset.Items.Add('Vertical Stack / Menu Column (TCastleVerticalGroup)');
+    ComboPreset.Items.Add('Scrollable Panel (TCastleScrollView + Vertical Content Group)');
+    ComboPreset.Items.Add('Modal Dialog Card (Backdrop + Card + Title + Close Button)');
+    ComboPreset.Items.Add('HUD Top Status Bar (Full-Width Top Bar + Left/Right Labels)');
+    ComboPreset.ItemIndex := 1;
+    ComboPreset.Parent := Dialog;
+
+    LblSpacing := TLabel.Create(Dialog);
+    LblSpacing.Left := 16;
+    LblSpacing.Top := 82;
+    LblSpacing.Caption := 'Child Spacing (px):';
+    LblSpacing.Parent := Dialog;
+
+    SpinSpacing := TFloatSpinEdit.Create(Dialog);
+    SpinSpacing.Left := 240;
+    SpinSpacing.Top := 78;
+    SpinSpacing.Width := 120;
+    SpinSpacing.MinValue := 0.0;
+    SpinSpacing.MaxValue := 500.0;
+    SpinSpacing.Increment := 2.0;
+    SpinSpacing.DecimalPlaces := 1;
+    SpinSpacing.Value := 10.0;
+    SpinSpacing.Parent := Dialog;
+
+    LblPadding := TLabel.Create(Dialog);
+    LblPadding.Left := 16;
+    LblPadding.Top := 118;
+    LblPadding.Caption := 'Container Padding (px):';
+    LblPadding.Parent := Dialog;
+
+    SpinPadding := TFloatSpinEdit.Create(Dialog);
+    SpinPadding.Left := 240;
+    SpinPadding.Top := 114;
+    SpinPadding.Width := 120;
+    SpinPadding.MinValue := 0.0;
+    SpinPadding.MaxValue := 500.0;
+    SpinPadding.Increment := 2.0;
+    SpinPadding.DecimalPlaces := 1;
+    SpinPadding.Value := 12.0;
+    SpinPadding.Parent := Dialog;
+
+    CheckAutoSize := TCheckBox.Create(Dialog);
+    CheckAutoSize.Left := 16;
+    CheckAutoSize.Top := 156;
+    CheckAutoSize.Caption := 'Auto-Size Group to Children (AutoSizeWidth / AutoSizeHeight := True)';
+    CheckAutoSize.Checked := true;
+    CheckAutoSize.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Generate UI Layout';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyQuickUiLayoutPreset(
+        ComboPreset.ItemIndex,
+        SpinSpacing.Value,
+        SpinPadding.Value,
+        CheckAutoSize.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemQuickUiLayoutClick(Sender: TObject);
+var
+  ShiftState: TShiftState;
+begin
+  ShiftState := GetKeyShiftState;
+  if ssShift in ShiftState then
+    ApplyQuickUiLayoutPreset(1, 10.0, 12.0, true)
+  else if ssCtrl in ShiftState then
+    ApplyQuickUiLayoutPreset(0, 10.0, 12.0, true)
+  else
+    ShowQuickUiLayoutDialog;
+end;
+
+procedure TDesignFrame.ApplyEnvironmentPreset(const EnvPreset: Integer;
+  const EnableFog, LinearFog: Boolean; const FogVisibilityRange: Single);
+var
+  V: TCastleViewport;
+  Bg: TCastleBackground;
+  FogComp: TCastleFog;
+  SkyTop, SkyEq, GroundEq, GroundBot, FogCol: TCastleColorRGB;
+begin
+  V := CurrentViewport;
+  if (V = nil) or (DesignOwner = nil) then
+  begin
+    ErrorBox('Select a 3D viewport before applying an environment sky/fog preset.');
+    Exit;
+  end;
+
+  case EnvPreset of
+    1: begin // Golden Hour / Sunset
+         SkyTop    := Vector3(0.18, 0.24, 0.52);
+         SkyEq     := Vector3(0.96, 0.58, 0.30);
+         GroundEq  := Vector3(0.45, 0.30, 0.22);
+         GroundBot := Vector3(0.14, 0.10, 0.08);
+         FogCol    := Vector3(0.92, 0.62, 0.38);
+       end;
+    2: begin // Overcast / Foggy Mist
+         SkyTop    := Vector3(0.58, 0.63, 0.68);
+         SkyEq     := Vector3(0.76, 0.80, 0.84);
+         GroundEq  := Vector3(0.48, 0.50, 0.52);
+         GroundBot := Vector3(0.25, 0.27, 0.28);
+         FogCol    := Vector3(0.74, 0.78, 0.82);
+       end;
+    3: begin // Midnight / Starry Night
+         SkyTop    := Vector3(0.02, 0.03, 0.09);
+         SkyEq     := Vector3(0.08, 0.13, 0.26);
+         GroundEq  := Vector3(0.05, 0.07, 0.12);
+         GroundBot := Vector3(0.01, 0.02, 0.04);
+         FogCol    := Vector3(0.07, 0.11, 0.22);
+       end;
+    4: begin // Sci-Fi / Cyberpunk Neon
+         SkyTop    := Vector3(0.08, 0.02, 0.18);
+         SkyEq     := Vector3(0.55, 0.12, 0.48);
+         GroundEq  := Vector3(0.06, 0.25, 0.32);
+         GroundBot := Vector3(0.02, 0.05, 0.08);
+         FogCol    := Vector3(0.38, 0.14, 0.42);
+       end;
+    5: begin // Studio Neutral Grey Backdrop
+         SkyTop    := Vector3(0.28, 0.29, 0.31);
+         SkyEq     := Vector3(0.36, 0.37, 0.39);
+         GroundEq  := Vector3(0.24, 0.25, 0.27);
+         GroundBot := Vector3(0.16, 0.17, 0.18);
+         FogCol    := Vector3(0.34, 0.35, 0.37);
+       end;
+    else begin // 0: Clear Daylight Sky
+         SkyTop    := Vector3(0.22, 0.50, 0.92);
+         SkyEq     := Vector3(0.72, 0.86, 0.98);
+         GroundEq  := Vector3(0.42, 0.40, 0.36);
+         GroundBot := Vector3(0.22, 0.20, 0.18);
+         FogCol    := Vector3(0.72, 0.86, 0.98);
+       end;
+  end;
+
+  Bg := V.Background;
+  if (Bg = nil) or (Bg.Owner <> DesignOwner) then
+  begin
+    Bg := TCastleBackground.Create(DesignOwner);
+    Bg.Name := ProposeComponentName(TCastleBackground, DesignOwner, 'BackgroundSky');
+    V.AddNonVisualComponent(Bg);
+    V.Background := Bg;
+  end;
+  Bg.SkyTopColor := SkyTop;
+  Bg.SkyEquatorColor := SkyEq;
+  Bg.GroundEquatorColor := GroundEq;
+  Bg.GroundBottomColor := GroundBot;
+  Bg.SmoothEquator := 0.12;
+
+  if EnableFog and (EnvPreset <> 5) then
+  begin
+    FogComp := V.Fog;
+    if (FogComp = nil) or (FogComp.Owner <> DesignOwner) then
+    begin
+      FogComp := TCastleFog.Create(DesignOwner);
+      FogComp.Name := ProposeComponentName(TCastleFog, DesignOwner, 'AtmosphericFog');
+      V.AddNonVisualComponent(FogComp);
+      V.Fog := FogComp;
+    end;
+    FogComp.Color := FogCol;
+    FogComp.VisibilityRange := Max(1.0, FogVisibilityRange);
+    if LinearFog then
+      FogComp.FogType := ftLinear
+    else
+      FogComp.FogType := ftExponential;
+  end else
+  begin
+    V.Fog := nil;
+  end;
+
+  UpdateDesign;
+  SelectedComponent := Bg;
+  ModifiedOutsideObjectInspector(
+    Format('Apply 3D Environment Preset on %s', [V.Name]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowEnvironmentPresetDialog;
+var
+  Dialog: TForm;
+  LblPreset, LblRange: TLabel;
+  ComboPreset: TComboBox;
+  CheckFog, CheckLinear: TCheckBox;
+  SpinRange: TFloatSpinEdit;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if CurrentViewport = nil then
+  begin
+    ErrorBox('Select a 3D viewport before configuring environment sky & fog presets.');
+    Exit;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 3D Environment / Sky & Fog Preset Generator';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 450;
+    Dialog.Height := 250;
+
+    LblPreset := TLabel.Create(Dialog);
+    LblPreset.Left := 16;
+    LblPreset.Top := 16;
+    LblPreset.Caption := 'Atmosphere / Skybox Gradient & Fog Preset:';
+    LblPreset.Parent := Dialog;
+
+    ComboPreset := TComboBox.Create(Dialog);
+    ComboPreset.Left := 16;
+    ComboPreset.Top := 38;
+    ComboPreset.Width := 414;
+    ComboPreset.Style := csDropDownList;
+    ComboPreset.Items.Add('Clear Daylight Sky (Blue Zenith, Soft Horizon & Distance Fog)');
+    ComboPreset.Items.Add('Golden Hour / Sunset (Warm Amber Horizon & Golden Haze)');
+    ComboPreset.Items.Add('Overcast / Foggy Mist (Muted Grey-Blue Sky & Dense Mist)');
+    ComboPreset.Items.Add('Midnight / Starry Night (Deep Navy Sky & Dark Horizon)');
+    ComboPreset.Items.Add('Sci-Fi / Cyberpunk Neon (Magenta-Teal Gradient & Neon Fog)');
+    ComboPreset.Items.Add('Studio Neutral Grey Backdrop (Look-Dev Grey, No Fog)');
+    ComboPreset.ItemIndex := 0;
+    ComboPreset.Parent := Dialog;
+
+    CheckFog := TCheckBox.Create(Dialog);
+    CheckFog.Left := 16;
+    CheckFog.Top := 80;
+    CheckFog.Caption := 'Create & Bind TCastleFog on Active Viewport';
+    CheckFog.Checked := true;
+    CheckFog.Parent := Dialog;
+
+    CheckLinear := TCheckBox.Create(Dialog);
+    CheckLinear.Left := 16;
+    CheckLinear.Top := 108;
+    CheckLinear.Caption := 'Use Linear Fog Falloff (ftLinear instead of ftExponential)';
+    CheckLinear.Checked := false;
+    CheckLinear.Parent := Dialog;
+
+    LblRange := TLabel.Create(Dialog);
+    LblRange.Left := 16;
+    LblRange.Top := 144;
+    LblRange.Caption := 'Fog Visibility Range (World Units):';
+    LblRange.Parent := Dialog;
+
+    SpinRange := TFloatSpinEdit.Create(Dialog);
+    SpinRange.Left := 250;
+    SpinRange.Top := 140;
+    SpinRange.Width := 120;
+    SpinRange.MinValue := 2.0;
+    SpinRange.MaxValue := 100000.0;
+    SpinRange.Increment := 10.0;
+    SpinRange.DecimalPlaces := 1;
+    SpinRange.Value := 85.0;
+    SpinRange.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Apply Environment';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyEnvironmentPreset(
+        ComboPreset.ItemIndex,
+        CheckFog.Checked,
+        CheckLinear.Checked,
+        SpinRange.Value);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemEnvironmentPresetClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyEnvironmentPreset(0, true, false, 85.0)
+  else
+    ShowEnvironmentPresetDialog;
+end;
+
+procedure TDesignFrame.ShowComponentComplexityDialog;
+type
+  TComplexityEntry = record
+    Comp: TComponent;
+    Descendants: Integer;
+    BehaviorsCount: Integer;
+    AssetBytes: Int64;
+    BBoxDiag: Single;
+    Score: Double;
+    SummaryLine: String;
+  end;
+var
+  Entries: array of TComplexityEntry;
+  EntryCount: Integer;
+
+  procedure AnalyzeSubtree(const C: TComponent; out SubtreeCount, SubtreeBehaviors: Integer;
+    out SubtreeBytes: Int64);
+  var
+    ChildIdx: Integer;
+    ChildNodes, ChildBehs: Integer;
+    ChildBytes: Int64;
+    UrlStr, LocalFile: String;
+    T: TCastleTransform;
+    UI: TCastleUserInterface;
+    CC: TCastleComponent;
+  begin
+    SubtreeCount := 0;
+    SubtreeBehaviors := 0;
+    SubtreeBytes := 0;
+    if (C = nil) or (not Selectable(C)) then Exit;
+
+    UrlStr := Trim(GetComponentAssetUrl(C));
+    if UrlStr <> '' then
+    begin
+      LocalFile := UriToFilenameSafe(UrlStr);
+      if (LocalFile <> '') and FileExists(LocalFile) then
+        SubtreeBytes := SubtreeBytes + Max(0, FileSize(LocalFile));
+    end;
+
+    if C is TCastleComponent then
+    begin
+      CC := TCastleComponent(C);
+      for ChildIdx := 0 to CC.NonVisualComponentsCount - 1 do
+        if Selectable(CC.NonVisualComponents[ChildIdx]) then
+        begin
+          Inc(SubtreeCount);
+          AnalyzeSubtree(CC.NonVisualComponents[ChildIdx], ChildNodes, ChildBehs, ChildBytes);
+          Inc(SubtreeCount, ChildNodes);
+          Inc(SubtreeBehaviors, ChildBehs);
+          Inc(SubtreeBytes, ChildBytes);
+        end;
+    end;
+
+    if C is TCastleTransform then
+    begin
+      T := TCastleTransform(C);
+      for ChildIdx := 0 to T.BehaviorsCount - 1 do
+        if Selectable(T.Behaviors[ChildIdx]) then
+          Inc(SubtreeBehaviors);
+      for ChildIdx := 0 to T.Count - 1 do
+        if Selectable(T[ChildIdx]) then
+        begin
+          Inc(SubtreeCount);
+          AnalyzeSubtree(T[ChildIdx], ChildNodes, ChildBehs, ChildBytes);
+          Inc(SubtreeCount, ChildNodes);
+          Inc(SubtreeBehaviors, ChildBehs);
+          Inc(SubtreeBytes, ChildBytes);
+        end;
+    end else
+    if C is TCastleUserInterface then
+    begin
+      UI := TCastleUserInterface(C);
+      if (UI is TCastleViewport) and Selectable(TCastleViewport(UI).Items) then
+      begin
+        AnalyzeSubtree(TCastleViewport(UI).Items, ChildNodes, ChildBehs, ChildBytes);
+        Inc(SubtreeCount, ChildNodes);
+        Inc(SubtreeBehaviors, ChildBehs);
+        Inc(SubtreeBytes, ChildBytes);
+      end;
+      for ChildIdx := 0 to UI.ControlsCount - 1 do
+        if Selectable(UI.Controls[ChildIdx]) then
+        begin
+          Inc(SubtreeCount);
+          AnalyzeSubtree(UI.Controls[ChildIdx], ChildNodes, ChildBehs, ChildBytes);
+          Inc(SubtreeCount, ChildNodes);
+          Inc(SubtreeBehaviors, ChildBehs);
+          Inc(SubtreeBytes, ChildBytes);
+        end;
+    end;
+  end;
+
+  procedure CollectComponentEntries(const C: TComponent);
+  var
+    ChildIdx: Integer;
+    DescCount, BehCount: Integer;
+    AssetB: Int64;
+    Diag: Single;
+    BBox: TBox3D;
+    SizeStr: String;
+    T: TCastleTransform;
+    UI: TCastleUserInterface;
+  begin
+    if (C = nil) or (not Selectable(C)) then Exit;
+
+    AnalyzeSubtree(C, DescCount, BehCount, AssetB);
+    Diag := 0.0;
+    if C is TCastleTransform then
+    begin
+      BBox := TCastleTransform(C).WorldBoundingBox;
+      if not BBox.IsEmpty then
+        Diag := BBox.Size.Length;
+    end;
+
+    if AssetB >= 1024 * 1024 then
+      SizeStr := Format('%.2f MB', [AssetB / (1024.0 * 1024.0)])
+    else if AssetB > 0 then
+      SizeStr := Format('%.1f KB', [AssetB / 1024.0])
+    else
+      SizeStr := '-';
+
+    SetLength(Entries, EntryCount + 1);
+    Entries[EntryCount].Comp := C;
+    Entries[EntryCount].Descendants := DescCount;
+    Entries[EntryCount].BehaviorsCount := BehCount;
+    Entries[EntryCount].AssetBytes := AssetB;
+    Entries[EntryCount].BBoxDiag := Diag;
+    Entries[EntryCount].Score :=
+      (DescCount * 15.0) + (BehCount * 25.0) + (AssetB / 2048.0) + (Diag * 0.5);
+    Entries[EntryCount].SummaryLine := Format(
+      '%-26s | %-24s | Subtree:%4d | Beh:%2d | Asset:%9s | Bounds:%.1f',
+      [C.Name, C.ClassName, DescCount, BehCount, SizeStr, Diag]);
+    Inc(EntryCount);
+
+    if C is TCastleTransform then
+    begin
+      T := TCastleTransform(C);
+      for ChildIdx := 0 to T.Count - 1 do
+        CollectComponentEntries(T[ChildIdx]);
+    end else
+    if C is TCastleUserInterface then
+    begin
+      UI := TCastleUserInterface(C);
+      if UI is TCastleViewport then
+        CollectComponentEntries(TCastleViewport(UI).Items);
+      for ChildIdx := 0 to UI.ControlsCount - 1 do
+        CollectComponentEntries(UI.Controls[ChildIdx]);
+    end;
+  end;
+
+var
+  I, J: Integer;
+  Temp: TComplexityEntry;
+  Dialog: TForm;
+  LblHeader: TLabel;
+  ListBox: TListBox;
+  BottomPanel: TPanel;
+  BtnSelect, BtnClose: TButton;
+begin
+  if FDesignRoot = nil then Exit;
+
+  EntryCount := 0;
+  CollectComponentEntries(FDesignRoot);
+
+  for I := 0 to EntryCount - 2 do
+    for J := I + 1 to EntryCount - 1 do
+      if Entries[J].Score > Entries[I].Score then
+      begin
+        Temp := Entries[I];
+        Entries[I] := Entries[J];
+        Entries[J] := Temp;
+      end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Component Complexity & Heavy Subtree Profiler';
+    Dialog.Position := poMainFormCenter;
+    Dialog.Width := 780;
+    Dialog.Height := 480;
+
+    LblHeader := TLabel.Create(Dialog);
+    LblHeader.Align := alTop;
+    LblHeader.BorderSpacing.Around := 8;
+    LblHeader.Caption :=
+      'Components ranked by subtree node count, attached behaviors/colliders, external asset size on disk, and 3D bounds:';
+    LblHeader.Parent := Dialog;
+
+    ListBox := TListBox.Create(Dialog);
+    ListBox.Align := alClient;
+    ListBox.BorderSpacing.Around := 8;
+    ListBox.Font.Name := 'Monospace';
+    ListBox.Parent := Dialog;
+
+    for I := 0 to EntryCount - 1 do
+      ListBox.Items.AddObject(Entries[I].SummaryLine, Entries[I].Comp);
+    if ListBox.Items.Count > 0 then
+      ListBox.ItemIndex := 0;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnClose := TButton.Create(Dialog);
+    BtnClose.Caption := 'Close';
+    BtnClose.Cancel := true;
+    BtnClose.ModalResult := mrCancel;
+    BtnClose.Align := alRight;
+    BtnClose.BorderSpacing.Around := 6;
+    BtnClose.Parent := BottomPanel;
+
+    BtnSelect := TButton.Create(Dialog);
+    BtnSelect.Caption := 'Select Highlighted Component in Hierarchy';
+    BtnSelect.Default := true;
+    BtnSelect.ModalResult := mrOk;
+    BtnSelect.AutoSize := true;
+    BtnSelect.Align := alRight;
+    BtnSelect.BorderSpacing.Around := 6;
+    BtnSelect.Enabled := ListBox.Items.Count > 0;
+    BtnSelect.Parent := BottomPanel;
+
+    if (Dialog.ShowModal = mrOk) and (ListBox.ItemIndex >= 0) and
+       (ListBox.Items.Objects[ListBox.ItemIndex] is TComponent) then
+    begin
+      SelectedComponent := TComponent(ListBox.Items.Objects[ListBox.ItemIndex]);
+    end;
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemComplexityProfilerClick(Sender: TObject);
+begin
+  ShowComponentComplexityDialog;
+end;
+
+procedure TDesignFrame.SyncSelectedNamesWithAssetUrl(const EntireDesign: Boolean);
+
+  function CleanPascalToken(const RawText: String): String;
+  var
+    I: Integer;
+    Ch: Char;
+    CapNext: Boolean;
+  begin
+    Result := '';
+    CapNext := true;
+    for I := 1 to Length(RawText) do
+    begin
+      Ch := RawText[I];
+      if Ch in ['a'..'z', 'A'..'Z', '0'..'9'] then
+      begin
+        if CapNext and (Ch in ['a'..'z']) then
+          Result := Result + UpCase(Ch)
+        else
+          Result := Result + Ch;
+        CapNext := false;
+      end else
+        CapNext := true;
+    end;
+  end;
+
+  function DeriveBaseName(const C: TComponent): String;
+  var
+    UrlStr, FileBase, CapStr, Prefix: String;
+    PropInfo: PPropInfo;
+  begin
+    Result := '';
+    if C = nil then Exit;
+
+    UrlStr := Trim(GetComponentAssetUrl(C));
+    if UrlStr <> '' then
+    begin
+      FileBase := CleanPascalToken(DeleteUriExt(ExtractUriName(UrlStr)));
+      if FileBase <> '' then
+      begin
+        if C is TCastleScene then Prefix := 'Scene'
+        else if C is TCastleImageControl then Prefix := 'Image'
+        else if C is TCastleImageTransform then Prefix := 'ImageTransform'
+        else if C is TCastleTransformDesign then Prefix := 'Design'
+        else if C is TCastleDesign then Prefix := 'UiDesign'
+        else if C is TCastleSoundSource then Prefix := 'Sound'
+        else Prefix := StripNumericSuffix(Copy(C.ClassName, 8, MaxInt));
+        if StartsText(Prefix, FileBase) then
+          Result := FileBase
+        else
+          Result := Prefix + FileBase;
+        Exit;
+      end;
+    end;
+
+    PropInfo := GetPropInfo(C.ClassInfo, 'Caption');
+    if (PropInfo <> nil) and (PropInfo^.PropType^.Kind in [tkSString, tkLString, tkAString]) then
+    begin
+      CapStr := CleanPascalToken(Copy(Trim(GetStrProp(C, PropInfo)), 1, 28));
+      if CapStr <> '' then
+      begin
+        if C is TCastleButton then Prefix := 'Button'
+        else if C is TCastleLabel then Prefix := 'Label'
+        else Prefix := StripNumericSuffix(Copy(C.ClassName, 8, MaxInt));
+        if StartsText(Prefix, CapStr) then
+          Result := CapStr
+        else
+          Result := Prefix + CapStr;
+      end;
+    end;
+  end;
+
+  procedure CollectTargets(const C: TComponent; const TargetList: TComponentList);
+  var
+    ChildIdx: Integer;
+    T: TCastleTransform;
+    UI: TCastleUserInterface;
+  begin
+    if (C = nil) or (not Selectable(C)) then Exit;
+    if (C <> FDesignRoot) and RenamePossible(C) and (not IsComponentLocked(C)) then
+      TargetList.Add(C);
+    if C is TCastleTransform then
+    begin
+      T := TCastleTransform(C);
+      for ChildIdx := 0 to T.Count - 1 do
+        CollectTargets(T[ChildIdx], TargetList);
+    end else
+    if C is TCastleUserInterface then
+    begin
+      UI := TCastleUserInterface(C);
+      if UI is TCastleViewport then
+        CollectTargets(TCastleViewport(UI).Items, TargetList);
+      for ChildIdx := 0 to UI.ControlsCount - 1 do
+        CollectTargets(UI.Controls[ChildIdx], TargetList);
+    end;
+  end;
+
+var
+  TargetList, SelectedList: TComponentList;
+  SelectedCount, I, RenamedCount: Integer;
+  C: TComponent;
+  BaseName, NewName: String;
+begin
+  if (FDesignRoot = nil) or (DesignOwner = nil) then Exit;
+
+  TargetList := TComponentList.Create(false);
+  try
+    if EntireDesign then
+      CollectTargets(FDesignRoot, TargetList)
+    else
+    begin
+      GetSelected(SelectedList, SelectedCount, false);
+      try
+        if SelectedList <> nil then
+          for I := 0 to SelectedList.Count - 1 do
+            if (SelectedList[I] <> nil) and (SelectedList[I] <> FDesignRoot) and
+               RenamePossible(SelectedList[I]) and (not IsComponentLocked(SelectedList[I])) then
+              TargetList.Add(SelectedList[I]);
+      finally
+        FreeAndNil(SelectedList);
+      end;
+    end;
+
+    if TargetList.Count = 0 then
+    begin
+      ErrorBox('Select one or more renameable components (or Shift-click to sync names across the entire design).');
+      Exit;
+    end;
+
+    RenamedCount := 0;
+    for I := 0 to TargetList.Count - 1 do
+    begin
+      C := TargetList[I];
+      BaseName := DeriveBaseName(C);
+      if BaseName = '' then Continue;
+      if SameText(C.Name, BaseName) or StartsText(BaseName, C.Name) then
+        Continue;
+      NewName := ProposeComponentName(TComponentClass(C.ClassType), DesignOwner, BaseName);
+      if (NewName <> '') and IsValidIdent(NewName) and (NewName <> C.Name) then
+      begin
+        C.Name := NewName;
+        Inc(RenamedCount);
+      end;
+    end;
+
+    if RenamedCount > 0 then
+    begin
+      UpdateDesign;
+      SetSelected(TargetList);
+      ModifiedOutsideObjectInspector(
+        Format('Sync %d Component Name(s) With Asset URL / Caption', [RenamedCount]),
+        ucHigh);
+    end else
+      InfoBox('All target component names are already synchronized with their Asset URL / Caption.');
+  finally
+    FreeAndNil(TargetList);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSyncNameWithUrlClick(Sender: TObject);
+begin
+  SyncSelectedNamesWithAssetUrl(ssShift in GetKeyShiftState);
+end;
+
+procedure TDesignFrame.ApplyQuickCameraNavigation(const RigPreset: Integer;
+  const MoveSpeed, FovOrOrthoHeight: Single; const EnableMouseLook: Boolean);
+var
+  V: TCastleViewport;
+  Cam: TCastleCamera;
+  WalkNav: TCastleWalkNavigation;
+  ExamNav: TCastleExamineNavigation;
+  ThirdNav: TCastleThirdPersonNavigation;
+  Nav2D: TCastle2DNavigation;
+  AvatarT: TCastleTransform;
+  FocusCenter: TVector3;
+  BBox: TBox3D;
+  I: Integer;
+begin
+  V := CurrentViewport;
+  if (V = nil) or (DesignOwner = nil) then
+  begin
+    ErrorBox('Select a 3D viewport before creating a Camera & Navigation rig.');
+    Exit;
+  end;
+
+  FocusCenter := TVector3.Zero;
+  AvatarT := CurrentTransform;
+  if (AvatarT <> nil) and (AvatarT <> V.Items) and (not (AvatarT is TCastleCamera)) then
+  begin
+    BBox := AvatarT.WorldBoundingBox;
+    if not BBox.IsEmpty then
+      FocusCenter := BBox.Center
+    else
+      FocusCenter := AvatarT.WorldTranslation;
+  end else
+  begin
+    BBox := V.Items.BoundingBox;
+    if not BBox.IsEmpty then
+      FocusCenter := BBox.Center;
+  end;
+
+  for I := V.ControlsCount - 1 downto 0 do
+    if (V.Controls[I] is TCastleNavigation) and Deletable(V.Controls[I]) then
+      FreeComponentRecursively(V.Controls[I]);
+
+  Cam := V.Camera;
+  if (Cam = nil) or (Cam.Owner <> DesignOwner) then
+  begin
+    Cam := TCastleCamera.Create(DesignOwner);
+    Cam.Name := ProposeComponentName(TCastleCamera, DesignOwner, 'GameplayCamera');
+    V.Items.Add(Cam);
+    V.Camera := Cam;
+  end;
+
+  case RigPreset of
+    0: begin // First-Person Walk / FPS Rig
+         Cam.ProjectionType := ptPerspective;
+         Cam.Perspective.FieldOfView := DegToRad(Clamped(FovOrOrthoHeight, 20.0, 140.0));
+         Cam.SetWorldView(
+           FocusCenter + Vector3(0.0, 1.8, 6.0),
+           Vector3(0.0, 0.0, -1.0),
+           Vector3(0.0, 1.0, 0.0));
+
+         WalkNav := TCastleWalkNavigation.Create(DesignOwner);
+         WalkNav.Name := ProposeComponentName(TCastleWalkNavigation, DesignOwner, 'WalkNavigation');
+         WalkNav.MoveSpeed := Max(0.1, MoveSpeed);
+         WalkNav.MouseLook := EnableMouseLook;
+         WalkNav.PreferredHeight := 1.8;
+         V.InsertFront(WalkNav);
+       end;
+
+    1: begin // Orbit / Turntable Examine Rig
+         Cam.ProjectionType := ptPerspective;
+         Cam.Perspective.FieldOfView := DegToRad(Clamped(FovOrOrthoHeight, 20.0, 140.0));
+         Cam.SetWorldView(
+           FocusCenter + Vector3(0.0, 4.0, 8.0),
+           (FocusCenter - (FocusCenter + Vector3(0.0, 4.0, 8.0))).Normalize,
+           Vector3(0.0, 1.0, 0.0));
+
+         ExamNav := TCastleExamineNavigation.Create(DesignOwner);
+         ExamNav.Name := ProposeComponentName(TCastleExamineNavigation, DesignOwner, 'ExamineNavigation');
+         ExamNav.Turntable := true;
+         ExamNav.ZoomEnabled := true;
+         V.InsertFront(ExamNav);
+       end;
+
+    2: begin // Third-Person Follow Rig
+         Cam.ProjectionType := ptPerspective;
+         Cam.Perspective.FieldOfView := DegToRad(Clamped(FovOrOrthoHeight, 20.0, 140.0));
+         Cam.SetWorldView(
+           FocusCenter + Vector3(0.0, 2.5, -5.0),
+           Vector3(0.0, -0.2, 1.0).Normalize,
+           Vector3(0.0, 1.0, 0.0));
+
+         ThirdNav := TCastleThirdPersonNavigation.Create(DesignOwner);
+         ThirdNav.Name := ProposeComponentName(TCastleThirdPersonNavigation, DesignOwner, 'ThirdPersonNavigation');
+         ThirdNav.MoveSpeed := Max(0.1, MoveSpeed);
+         ThirdNav.MouseLook := EnableMouseLook;
+         if (AvatarT <> nil) and (AvatarT <> V.Items) and (not (AvatarT is TCastleCamera)) then
+         begin
+           if AvatarT is TCastleScene then
+             ThirdNav.Avatar := TCastleScene(AvatarT)
+           else
+             ThirdNav.AvatarHierarchy := AvatarT;
+         end;
+         V.InsertFront(ThirdNav);
+       end;
+
+    3: begin // Top-Down / Isometric Strategy Rig
+         Cam.ProjectionType := ptPerspective;
+         Cam.Perspective.FieldOfView := DegToRad(Clamped(FovOrOrthoHeight, 15.0, 90.0));
+         Cam.SetWorldView(
+           FocusCenter + Vector3(0.0, 14.0, 10.0),
+           Vector3(0.0, -14.0, -10.0).Normalize,
+           Vector3(0.0, 1.0, 0.0));
+
+         ExamNav := TCastleExamineNavigation.Create(DesignOwner);
+         ExamNav.Name := ProposeComponentName(TCastleExamineNavigation, DesignOwner, 'StrategyNavigation');
+         ExamNav.Turntable := true;
+         ExamNav.ZoomEnabled := true;
+         ExamNav.KeysMoveSpeed := Max(0.1, MoveSpeed);
+         V.InsertFront(ExamNav);
+       end;
+
+    4: begin // 2D Orthographic Side-Scroller Rig
+         Cam.ProjectionType := ptOrthographic;
+         Cam.Orthographic.Height := Max(1.0, FovOrOrthoHeight);
+         Cam.Orthographic.Origin := Vector2(0.5, 0.5);
+         Cam.SetWorldView(
+           Vector3(FocusCenter.X, FocusCenter.Y, 10.0),
+           Vector3(0.0, 0.0, -1.0),
+           Vector3(0.0, 1.0, 0.0));
+
+         Nav2D := TCastle2DNavigation.Create(DesignOwner);
+         Nav2D.Name := ProposeComponentName(TCastle2DNavigation, DesignOwner, 'Navigation2D');
+         Nav2D.ZoomEnabled := true;
+         V.InsertFront(Nav2D);
+       end;
+  end;
+
+  UpdateDesign;
+  SelectedComponent := Cam;
+  ModifiedOutsideObjectInspector(
+    Format('Configure Camera & Navigation Rig on %s', [V.Name]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowQuickCameraNavigationDialog;
+var
+  Dialog: TForm;
+  LblPreset, LblSpeed, LblFov: TLabel;
+  ComboPreset: TComboBox;
+  SpinSpeed, SpinFov: TFloatSpinEdit;
+  CheckMouseLook: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if CurrentViewport = nil then
+  begin
+    ErrorBox('Select a 3D viewport before configuring a Camera & Navigation rig.');
+    Exit;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 3D Camera & Gameplay Navigation Rig';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 460;
+    Dialog.Height := 270;
+
+    LblPreset := TLabel.Create(Dialog);
+    LblPreset.Left := 16;
+    LblPreset.Top := 16;
+    LblPreset.Caption := 'Gameplay Camera & Navigation Controller Preset:';
+    LblPreset.Parent := Dialog;
+
+    ComboPreset := TComboBox.Create(Dialog);
+    ComboPreset.Left := 16;
+    ComboPreset.Top := 38;
+    ComboPreset.Width := 424;
+    ComboPreset.Style := csDropDownList;
+    ComboPreset.Items.Add('First-Person Walk / FPS Rig (TCastleWalkNavigation + Camera)');
+    ComboPreset.Items.Add('Orbit / Turntable Examine Rig (TCastleExamineNavigation + Camera)');
+    ComboPreset.Items.Add('Third-Person Follow Rig (TCastleThirdPersonNavigation + Selected Avatar)');
+    ComboPreset.Items.Add('Top-Down / Isometric Strategy Rig (Angled Camera + Pan/Zoom)');
+    ComboPreset.Items.Add('2D Orthographic Side-Scroller Rig (TCastle2DNavigation + Ortho Camera)');
+    ComboPreset.ItemIndex := 0;
+    ComboPreset.Parent := Dialog;
+
+    LblSpeed := TLabel.Create(Dialog);
+    LblSpeed.Left := 16;
+    LblSpeed.Top := 82;
+    LblSpeed.Caption := 'Movement Speed (Units / Sec):';
+    LblSpeed.Parent := Dialog;
+
+    SpinSpeed := TFloatSpinEdit.Create(Dialog);
+    SpinSpeed.Left := 260;
+    SpinSpeed.Top := 78;
+    SpinSpeed.Width := 120;
+    SpinSpeed.MinValue := 0.1;
+    SpinSpeed.MaxValue := 5000.0;
+    SpinSpeed.Increment := 1.0;
+    SpinSpeed.DecimalPlaces := 1;
+    SpinSpeed.Value := 8.0;
+    SpinSpeed.Parent := Dialog;
+
+    LblFov := TLabel.Create(Dialog);
+    LblFov.Left := 16;
+    LblFov.Top := 118;
+    LblFov.Caption := 'Perspective FOV (deg) / 2D Ortho Height:';
+    LblFov.Parent := Dialog;
+
+    SpinFov := TFloatSpinEdit.Create(Dialog);
+    SpinFov.Left := 260;
+    SpinFov.Top := 114;
+    SpinFov.Width := 120;
+    SpinFov.MinValue := 5.0;
+    SpinFov.MaxValue := 10000.0;
+    SpinFov.Increment := 5.0;
+    SpinFov.DecimalPlaces := 1;
+    SpinFov.Value := 60.0;
+    SpinFov.Parent := Dialog;
+
+    CheckMouseLook := TCheckBox.Create(Dialog);
+    CheckMouseLook.Left := 16;
+    CheckMouseLook.Top := 156;
+    CheckMouseLook.Caption := 'Enable Runtime MouseLook (PointerLock) for Walk / Third-Person Rig';
+    CheckMouseLook.Checked := true;
+    CheckMouseLook.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Setup Camera & Navigation';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyQuickCameraNavigation(
+        ComboPreset.ItemIndex,
+        SpinSpeed.Value,
+        SpinFov.Value,
+        CheckMouseLook.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemCameraNavSetupClick(Sender: TObject);
+begin
+  ShowQuickCameraNavigationDialog;
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -33184,6 +34498,18 @@ begin
     MenuTreeViewItemCompareComponents.Enabled := ControlsTree.SelectionCount >= 1;
   if MenuTreeViewItemEditNote <> nil then
     MenuTreeViewItemEditNote.Enabled := ControlsTree.SelectionCount >= 1;
+  if MenuTreeViewItemQuickUiLayout <> nil then
+    MenuTreeViewItemQuickUiLayout.Enabled :=
+      (SelectedUserInterface <> nil) or (FDesignRoot is TCastleUserInterface);
+  if MenuTreeViewItemEnvironmentPreset <> nil then
+    MenuTreeViewItemEnvironmentPreset.Enabled := CurrentViewport <> nil;
+  if MenuTreeViewItemComplexityProfiler <> nil then
+    MenuTreeViewItemComplexityProfiler.Enabled := FDesignRoot <> nil;
+  if MenuTreeViewItemSyncNameWithUrl <> nil then
+    MenuTreeViewItemSyncNameWithUrl.Enabled :=
+      (ControlsTree.SelectionCount >= 1) or (FDesignRoot <> nil);
+  if MenuTreeViewItemCameraNavSetup <> nil then
+    MenuTreeViewItemCameraNavSetup.Enabled := CurrentViewport <> nil;
   if MenuTreeViewItemGroupSelected <> nil then
     MenuTreeViewItemGroupSelected.Enabled := (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0);
   if MenuTreeViewItemUngroupSelected <> nil then

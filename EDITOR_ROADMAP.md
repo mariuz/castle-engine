@@ -1250,11 +1250,36 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Added per-component notes (`FComponentNotes`, `GetComponentNote`, `SetComponentNote`, `EditSelectedComponentNote`) accessible via **`Alt+N`** in the Viewport/Hierarchy Tree and **`Edit Component Note / Comment... (Alt+N)`** (`MenuTreeViewItemEditNote`) in `MenuTreeView`.
   - Renders `[#NoteText]` (or `[Tag:N]` when `Component.Tag <> 0`) badges on hierarchy tree nodes in `DrawTreeNodeClassName` and supports filtering by `+note` / `+comment` or note substring in the Hierarchy Search box (`NodeMatchesHierarchyFilter`).
 
+### Phase 197: Quick 2D UI Layout & Container Generator (`ShowQuickUiLayoutDialog` / `ApplyQuickUiLayoutPreset`)
+- [x] **197.1. UMG / UI Toolkit Container & Template Generator (`TDesignFrame.ShowQuickUiLayoutDialog` / `TDesignFrame.ApplyQuickUiLayoutPreset`)**
+  - Implemented `TDesignFrame.ShowQuickUiLayoutDialog` and `TDesignFrame.ApplyQuickUiLayoutPreset` (`MenuTreeViewItemQuickUiLayout` in `MenuTreeView`).
+  - Wraps selected `TCastleUserInterface` controls (or generates sample controls when none are selected) into 5 UI presets: **Horizontal Stack / Toolbar Row (`TCastleHorizontalGroup`)**, **Vertical Stack / Menu Column (`TCastleVerticalGroup`)**, **Scrollable Panel (`TCastleScrollView` + `TCastleVerticalGroup`)**, **Modal Dialog Card (`TCastleRectangleControl` Backdrop + Card + Title + Close Button)**, and **HUD Top Status Bar** (`Shift`-click wraps in `TCastleVerticalGroup`; `Ctrl`-click wraps in `TCastleHorizontalGroup`).
+
+### Phase 198: Quick 3D Environment / Sky & Fog Preset Generator (`ShowEnvironmentPresetDialog` / `ApplyEnvironmentPreset`)
+- [x] **198.1. Viewport Skybox Gradient & Atmospheric Fog Generator (`TDesignFrame.ShowEnvironmentPresetDialog` / `TDesignFrame.ApplyEnvironmentPreset`)**
+  - Implemented `TDesignFrame.ShowEnvironmentPresetDialog` and `TDesignFrame.ApplyEnvironmentPreset` (`MenuTreeViewItemEnvironmentPreset` in `MenuTreeView`).
+  - Creates or updates `TCastleBackground` and `TCastleFog` in the active `TCastleViewport` and automatically binds `Viewport.Background` and `Viewport.Fog` across 6 presets: **Clear Daylight Sky**, **Golden Hour / Sunset**, **Overcast / Foggy Mist**, **Midnight / Starry Night**, **Sci-Fi / Cyberpunk Neon**, and **Studio Neutral Grey Backdrop** (`Shift`-click applies Clear Daylight Sky immediately).
+
+### Phase 199: Component Complexity & Heavy Subtree Profiler Dialog (`ShowComponentComplexityDialog` / `MenuTreeViewItemComplexityProfiler`)
+- [x] **199.1. Subtree Node, Behavior, Bounds & Disk Asset Size Profiler (`TDesignFrame.ShowComponentComplexityDialog`)**
+  - Implemented `TDesignFrame.ShowComponentComplexityDialog` and added **`Component Complexity & Heavy Subtree Profiler...`** (`MenuTreeViewItemComplexityProfiler`) in `MenuTreeView`.
+  - Ranks every component/subtree in `FDesignRoot` from heaviest to lightest by descendant node count, attached behaviors/colliders, referenced external asset file size on disk (in KB/MB), and 3D bounding-box diagonal, with one-click **`Select Highlighted Component in Hierarchy`** navigation.
+
+### Phase 200: Sync Component Names With Asset URL / Caption (`SyncSelectedNamesWithAssetUrl` / `MenuTreeViewItemSyncNameWithUrl`)
+- [x] **200.1. Automatic Pascal Identifier Naming from Asset URL & UI Caption (`TDesignFrame.SyncSelectedNamesWithAssetUrl`)**
+  - Implemented `TDesignFrame.SyncSelectedNamesWithAssetUrl` and added **`Sync Component Name(s) With Asset URL / Caption (Shift: Entire Design)`** (`MenuTreeViewItemSyncNameWithUrl`) in `MenuTreeView`.
+  - Automatically renames selected components (or all renameable components in the design on `Shift`-click) from generic names (`Scene1`, `ImageControl1`, `Button1`) to clean, unique Pascal identifiers derived from their assigned `Url` filename or `Caption` (`ScenePineTall`, `ImageIconSword`, `ButtonStartGame`).
+
+### Phase 201: Quick 3D Camera & Gameplay Navigation Rig (`ShowQuickCameraNavigationDialog` / `ApplyQuickCameraNavigation`)
+- [x] **201.1. One-Click Gameplay Camera & Controller Setup (`TDesignFrame.ShowQuickCameraNavigationDialog` / `TDesignFrame.ApplyQuickCameraNavigation`)**
+  - Implemented `TDesignFrame.ShowQuickCameraNavigationDialog` and `TDesignFrame.ApplyQuickCameraNavigation` (`MenuTreeViewItemCameraNavSetup` in `MenuTreeView`).
+  - Configures and binds `Viewport.Camera` (`TCastleCamera`) and a gameplay navigation controller in `CurrentViewport` across 5 presets: **First-Person Walk / FPS Rig (`TCastleWalkNavigation`)**, **Orbit / Turntable Examine Rig (`TCastleExamineNavigation`)**, **Third-Person Follow Rig (`TCastleThirdPersonNavigation` linked to the selected avatar transform/scene)**, **Top-Down / Isometric Strategy Rig**, and **2D Orthographic Side-Scroller Rig (`TCastle2DNavigation`)**.
+
 ---
 
-## Roadmap Completion Status (Phases 1–196)
+## Roadmap Completion Status (Phases 1–201)
 
-All **196 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **201 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 
