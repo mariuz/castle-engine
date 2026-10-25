@@ -540,6 +540,7 @@ type
     FOnCreateVulkanSurface: TVulkanCreateSurfaceEvent;
     FVulkanSurfaceHandle: VkSurfaceKHR;
     FOwnsVulkanRHIDevice: Boolean;
+    FVulkanFramesRenderedCount: Cardinal;
     function GetColorBits: Cardinal;
     procedure SetColorBits(const Value: Cardinal);
     procedure SetAntiAliasing(const Value: TAntiAliasing);
@@ -1651,10 +1652,20 @@ type
       IsVulkanBackendRequested is True and no RHIDevice is active yet. }
     procedure InitializeVulkanRHIDeviceIfNeeded;
 
+    { Begins a Vulkan RHI frame (acquiring the frame command list and setting
+      ActiveCommandList) when IsVulkanBackendRequested and RHIDevice is TVulkanRHIDevice.
+      Returns True if a Vulkan frame was started and EndVulkanFrameIfNeeded must be called. }
+    function BeginVulkanFrameIfNeeded: Boolean;
+
+    { Ends and submits/presents the current Vulkan RHI frame started by BeginVulkanFrameIfNeeded,
+      advancing the frame ring index and incrementing VulkanFramesRenderedCount. }
+    procedure EndVulkanFrameIfNeeded;
+
     property OnCreateVulkanSurface: TVulkanCreateSurfaceEvent
       read FOnCreateVulkanSurface write FOnCreateVulkanSurface;
     property VulkanSurfaceHandle: VkSurfaceKHR read FVulkanSurfaceHandle;
     property HasCustomVulkanSurfaceDesc: Boolean read FHasCustomVulkanSurfaceDesc;
+    property VulkanFramesRenderedCount: Cardinal read FVulkanFramesRenderedCount;
 
     { Create the window with associated rendering context and show it.
 
@@ -3275,6 +3286,24 @@ begin
   end;
 end;
 
+function TCastleWindow.BeginVulkanFrameIfNeeded: Boolean;
+begin
+  Result := False;
+  if not IsVulkanBackendRequested then
+    Exit;
+  if not (RHIDevice is TVulkanRHIDevice) then
+    Exit;
+  Result := RHIDevice.BeginFrame <> nil;
+end;
+
+procedure TCastleWindow.EndVulkanFrameIfNeeded;
+begin
+  if not (RHIDevice is TVulkanRHIDevice) then
+    Exit;
+  RHIDevice.EndFrameAndPresent;
+  Inc(FVulkanFramesRenderedCount);
+end;
+
 { ----------------------------------------------------------------------------
 
   TCastleWindow events DoXxx methods,
@@ -3352,6 +3381,8 @@ begin
 end;
 
 procedure TCastleWindow.DoRender;
+var
+  VulkanFrameStarted: Boolean;
 begin
   FrameProfiler.Start(fmBeforeRender);
   { We set Invalidated := false before EventRender (that calls OnRender),
@@ -3366,8 +3397,14 @@ begin
 
   FrameProfiler.Start(fmRender);
   Container.Fps.InternalRenderBegin;
+  VulkanFrameStarted := BeginVulkanFrameIfNeeded;
   try
-    Container.EventRender;
+    try
+      Container.EventRender;
+    finally
+      if VulkanFrameStarted then
+        EndVulkanFrameIfNeeded;
+    end;
     if Closed then Exit; { check, in case window got closed in the event }
 
     if GLVersion.BuggySwapNonStandardViewport then

@@ -1731,6 +1731,16 @@ type
       const AShadowMapSystemModeOrd: Cardinal = 0;
       const ABindlessMaterialIndex: Cardinal = 0): TCastlePushConstantsBlock; static;
 
+    { Phase 59.1: Unpacks ObjectParams from a TCastlePushConstantsBlock into
+      ABindlessMaterialIndex, ASkinningMode (0 = static, 1 = LBS, 2 = Dual-Quaternion),
+      ASpecularAntiAliasing, and AShadowMapSystemModeOrd (0 = PCF, 1 = PCSS, 2 = VSM),
+      mirroring the GLSL 450 castle_Object* macros. }
+    class procedure UnpackShapeRHIPushConstantsObjectParams(
+      const APushConstants: TCastlePushConstantsBlock;
+      out ABindlessMaterialIndex, ASkinningMode: Cardinal;
+      out ASpecularAntiAliasing: Boolean;
+      out AShadowMapSystemModeOrd: Cardinal); static;
+
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
   end;
@@ -1986,7 +1996,12 @@ begin
     '} CastleDraw;' + NL +
     NL +
     '#define castle_ModelViewMatrix CastleDraw.u_ModelViewMatrix' + NL +
-    '#define castle_NormalMatrix mat3(CastleDraw.u_NormalMatrixRow0.xyz, CastleDraw.u_NormalMatrixRow1.xyz, CastleDraw.u_NormalMatrixRow2.xyz)' + NL;
+    '#define castle_NormalMatrix mat3(CastleDraw.u_NormalMatrixRow0.xyz, CastleDraw.u_NormalMatrixRow1.xyz, CastleDraw.u_NormalMatrixRow2.xyz)' + NL +
+    '#define castle_ObjectParams CastleDraw.u_ObjectParams' + NL +
+    '#define castle_ObjectMaterialIndex uint(CastleDraw.u_ObjectParams.x + 0.5)' + NL +
+    '#define castle_ObjectSkinningMode int(CastleDraw.u_ObjectParams.y + 0.5)' + NL +
+    '#define castle_ObjectSpecularAAEnabled (CastleDraw.u_ObjectParams.z > 0.5)' + NL +
+    '#define castle_ObjectShadowMapMode int(CastleDraw.u_ObjectParams.w + 0.5)' + NL;
 end;
 
 function TCastleShaderGeneratorRHI.GenerateStageIO(const AStage: TRHIShaderStage): String;
@@ -8267,6 +8282,18 @@ begin
     SkinMode,
     SpecAA,
     Single(AShadowMapSystemModeOrd));
+end;
+
+class procedure TCastleShaderGeneratorRHI.UnpackShapeRHIPushConstantsObjectParams(
+  const APushConstants: TCastlePushConstantsBlock;
+  out ABindlessMaterialIndex, ASkinningMode: Cardinal;
+  out ASpecularAntiAliasing: Boolean;
+  out AShadowMapSystemModeOrd: Cardinal);
+begin
+  ABindlessMaterialIndex := Cardinal(Max(0, Round(APushConstants.ObjectParams.X)));
+  ASkinningMode := Cardinal(Max(0, Round(APushConstants.ObjectParams.Y)));
+  ASpecularAntiAliasing := APushConstants.ObjectParams.Z > 0.5;
+  AShadowMapSystemModeOrd := Cardinal(Max(0, Round(APushConstants.ObjectParams.W)));
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

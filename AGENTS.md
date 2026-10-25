@@ -77,8 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–57**: **COMPLETED** (100%).
-- **Phase 58 (Per-Shape `TCastleRenderOptions` Push-Constant Packing & Scene Subsystem Orchestration)**: **COMPLETED** (100%, 769/769 total engine tests and 200/200 `TTestCastleVulkanRHI` tests passing):
-  - [x] **58.1. Per-Shape `BuildShapeRHIPushConstants` & `TMeshRenderer` Wiring** — Completed & tested (`TestBuildShapeRHIPushConstantsObjectParamsPackingRHI`).
-  - [x] **58.2. Per-Scene `ExecuteSceneRenderOptionsSubsystems` & Next-Gen Tone Mapping HDR Target Prep** — Completed & tested (`TestViewportExecuteSceneRenderOptionsSubsystemsRHI`, `TestViewportNextGenToneMappingHDRTargetPreparationRHI`).
-  - [x] **58.3. 200-Test `TTestCastleVulkanRHI` Milestone Verification** — Completed & verified across `castle_tester_standalone` and `examples/vulkan/vulkan_3d_scene`.
+- **Phases 1–58**: **COMPLETED** (100%).
+- **Phase 59 (GLSL 450 `castle_ObjectParams` Unpacking Macros, Scene-Tree `ExecuteAllScenesRenderOptionsSubsystems` & `TCastleWindow` Vulkan Frame Lifecycle)**: **COMPLETED** (100%, 772/772 total engine tests and 203/203 `TTestCastleVulkanRHI` tests passing):
+  - [x] **59.1. GLSL 450 `castle_ObjectParams` Unpacking Macros & CPU Mirror** — Completed & tested (`TestShaderObjectParamsMacrosAndUnpackingRHI`).
+  - [x] **59.2. Automatic Scene-Tree `ExecuteAllScenesRenderOptionsSubsystems`** — Completed & tested (`TestViewportExecuteAllScenesRenderOptionsSubsystemsTreeRHI`).
+  - [x] **59.3. Headless-Safe `BeginFrame` / `EndFrameAndPresent` & `TCastleWindow` Vulkan Frame Lifecycle** — Completed & tested (`TestVulkanBeginEndFrameHeadlessAndWindowLifecycleRHI`).

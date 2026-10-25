@@ -239,6 +239,9 @@ type
     procedure TestBuildShapeRHIPushConstantsObjectParamsPackingRHI;
     procedure TestViewportExecuteSceneRenderOptionsSubsystemsRHI;
     procedure TestViewportNextGenToneMappingHDRTargetPreparationRHI;
+    procedure TestShaderObjectParamsMacrosAndUnpackingRHI;
+    procedure TestViewportExecuteAllScenesRenderOptionsSubsystemsTreeRHI;
+    procedure TestVulkanBeginEndFrameHeadlessAndWindowLifecycleRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -11633,6 +11636,136 @@ begin
   finally
     SetRHIDevice(SavedRHI);
     FreeAndNil(Viewport);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestShaderObjectParamsMacrosAndUnpackingRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  Preamble: String;
+  PC: TCastlePushConstantsBlock;
+  MatIdx, SkinMode, ShadowOrd: Cardinal;
+  SpecAA: Boolean;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    Preamble := Gen.GeneratePreamble(ssFragment);
+    AssertTrue('Preamble must define castle_ObjectParams',
+      Pos('#define castle_ObjectParams CastleDraw.u_ObjectParams', Preamble) > 0);
+    AssertTrue('Preamble must define castle_ObjectMaterialIndex',
+      Pos('#define castle_ObjectMaterialIndex uint(CastleDraw.u_ObjectParams.x + 0.5)', Preamble) > 0);
+    AssertTrue('Preamble must define castle_ObjectSkinningMode',
+      Pos('#define castle_ObjectSkinningMode int(CastleDraw.u_ObjectParams.y + 0.5)', Preamble) > 0);
+    AssertTrue('Preamble must define castle_ObjectSpecularAAEnabled',
+      Pos('#define castle_ObjectSpecularAAEnabled (CastleDraw.u_ObjectParams.z > 0.5)', Preamble) > 0);
+    AssertTrue('Preamble must define castle_ObjectShadowMapMode',
+      Pos('#define castle_ObjectShadowMapMode int(CastleDraw.u_ObjectParams.w + 0.5)', Preamble) > 0);
+  finally
+    FreeAndNil(Gen);
+  end;
+
+  PC := TCastleShaderGeneratorRHI.BuildShapeRHIPushConstants(
+    TMatrix4.Identity, TMatrix3.Identity, True, True, False, Ord(smsVirtualShadowMaps), 19);
+  TCastleShaderGeneratorRHI.UnpackShapeRHIPushConstantsObjectParams(
+    PC, MatIdx, SkinMode, SpecAA, ShadowOrd);
+  AssertEquals('Unpacked BindlessMaterialIndex must be 19', 19, Integer(MatIdx));
+  AssertEquals('Unpacked SkinningMode must be 2 (Dual-Quaternion)', 2, Integer(SkinMode));
+  AssertFalse('Unpacked SpecularAntiAliasing must be False', SpecAA);
+  AssertEquals('Unpacked ShadowMapSystemModeOrd must be smsVirtualShadowMaps (2)',
+    Ord(smsVirtualShadowMaps), Integer(ShadowOrd));
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportExecuteAllScenesRenderOptionsSubsystemsTreeRHI;
+var
+  Device: TVulkanRHIDevice;
+  Viewport: TCastleViewport;
+  Group: TCastleTransform;
+  SceneA, SceneB, HiddenScene: TCastleScene;
+  SavedRHI: TRHIDevice;
+  TotalPasses: Cardinal;
+begin
+  SavedRHI := RHIDevice;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7301)));
+  Viewport := TCastleViewport.Create(nil);
+  Group := TCastleTransform.Create(Viewport);
+  SceneA := TCastleScene.Create(Viewport);
+  SceneB := TCastleScene.Create(Viewport);
+  HiddenScene := TCastleScene.Create(Viewport);
+  try
+    SetRHIDevice(Device);
+    Viewport.Width := 800;
+    Viewport.Height := 600;
+
+    SceneA.RenderOptions.GpuDrivenMeshletCulling := True;
+    SceneA.RenderOptions.TransparencyMode := tmWeightedBlendedOIT;
+
+    SceneB.RenderOptions.ShadowMapSystemMode := smsVirtualShadowMaps;
+    SceneB.RenderOptions.TransparencyMode := tmPerPixelLinkedListOIT;
+
+    HiddenScene.Exists := False;
+    HiddenScene.RenderOptions.GpuDrivenMeshletCulling := True;
+    HiddenScene.RenderOptions.ShadowMapSystemMode := smsVirtualShadowMaps;
+
+    Viewport.Items.Add(SceneA);
+    Group.Add(SceneB);
+    Group.Add(HiddenScene);
+    Viewport.Items.Add(Group);
+
+    TotalPasses := Viewport.ExecuteAllScenesRenderOptionsSubsystems(nil);
+    AssertEquals('SceneA (2) + SceneB (2) must execute 4 subsystem passes (HiddenScene skipped)',
+      4, Integer(TotalPasses));
+    AssertEquals('MeshletCuller DispatchCount must be 1', 1, Integer(Device.MeshletCuller.DispatchCount));
+    AssertTrue('WeightedBlendedOIT OITAccumTexture must be allocated',
+      Device.WeightedBlendedOIT.OITAccumTexture <> nil);
+    AssertTrue('VirtualShadowMap AllocatedTileCount must be >= 1',
+      Device.VirtualShadowMap.AllocatedTileCount >= 1);
+    AssertEquals('PerPixelLinkedListOIT ResolveDispatchCount must be 1',
+      1, Integer(Device.PerPixelLinkedListOIT.ResolveDispatchCount));
+  finally
+    SetRHIDevice(SavedRHI);
+    FreeAndNil(Viewport);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanBeginEndFrameHeadlessAndWindowLifecycleRHI;
+var
+  Device: TVulkanRHIDevice;
+  Win: TCastleWindow;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Cmd: TRHICommandList;
+begin
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7302)));
+  Win := TCastleWindow.Create(nil);
+  try
+    SetRHIDevice(Device);
+    ApplicationProperties.RenderBackend := backendVulkan;
+
+    { 1. Direct headless BeginFrame / EndFrameAndPresent cycle }
+    AssertEquals('Initial TotalFramesPresented must be 0', 0, Integer(Device.TotalFramesPresented));
+    Cmd := Device.BeginFrame;
+    AssertTrue('BeginFrame must return a non-nil command list', Cmd <> nil);
+    AssertTrue('ActiveCommandList must be set to Frame.CommandList during frame', ActiveCommandList = Cmd);
+    Device.EndFrameAndPresent;
+    AssertTrue('ActiveCommandList must be reset to nil after EndFrameAndPresent', ActiveCommandList = nil);
+    AssertEquals('TotalFramesPresented must increment to 1', 1, Integer(Device.TotalFramesPresented));
+
+    { 2. TCastleWindow BeginVulkanFrameIfNeeded / EndVulkanFrameIfNeeded cycle }
+    AssertEquals('Initial VulkanFramesRenderedCount must be 0', 0, Integer(Win.VulkanFramesRenderedCount));
+    AssertTrue('BeginVulkanFrameIfNeeded must return True when backendVulkan is active',
+      Win.BeginVulkanFrameIfNeeded);
+    AssertTrue('ActiveCommandList must be active inside window Vulkan frame', ActiveCommandList <> nil);
+    Win.EndVulkanFrameIfNeeded;
+    AssertEquals('VulkanFramesRenderedCount must increment to 1', 1, Integer(Win.VulkanFramesRenderedCount));
+    AssertEquals('TotalFramesPresented must increment to 2', 2, Integer(Device.TotalFramesPresented));
+  finally
+    ApplicationProperties.RenderBackend := SavedBackend;
+    SetRHIDevice(SavedRHI);
+    FreeAndNil(Win);
     FreeAndNil(Device);
   end;
 end;

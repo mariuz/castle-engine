@@ -3542,6 +3542,7 @@ type
     FFrames: array[0 .. MaxFramesInFlight - 1] of TVulkanFrameContext;
     FDeferredDeletions: array[0 .. MaxFramesInFlight - 1] of array of TVulkanDeferredDeletionItem;
     FDeferResourceDestruction: Boolean;
+    FTotalFramesPresented: Cardinal;
 
     { GPU memory sub-allocator (pooled blocks + per-frame ring buffers), async staging uploader, bindless manager, timestamp profiler, compute culler, IBL generator, clustered culler, shadow atlas, HDR post-processor, GTAO, SSR, volumetric fog, TAA, reflection probes, decals, compute particles, OIT, contact shadows, compute skinner & CDLOD terrain }
     FMemoryAllocator: TCastleVulkanMemoryAllocator;
@@ -3913,6 +3914,7 @@ type
     property MaxBindlessTextures: Cardinal read FMaxBindlessTextures write FMaxBindlessTextures;
     property BindlessTextureManager: TCastleVulkanBindlessTextureManager read FBindlessTextureManager;
     property TimestampProfiler: TCastleVulkanTimestampProfiler read FTimestampProfiler;
+    property TotalFramesPresented: Cardinal read FTotalFramesPresented;
     property ComputeCuller: TCastleVulkanComputeCuller read GetComputeCuller;
     property IBLGenerator: TCastleVulkanIBLGenerator read GetIBLGenerator;
     property ClusteredLightCuller: TCastleVulkanClusteredLightCuller read GetClusteredLightCuller;
@@ -19537,10 +19539,17 @@ var
   Frame: TVulkanFrameContext;
   AcquireRes: VkResult;
 begin
+  if FFrames[FFrameIndex].CommandList = nil then
+    FFrames[FFrameIndex].CommandList := TVulkanRHICommandList.Create(Self, FGraphicsQueueFamily);
+  if FFrames[FFrameIndex].TransientDescriptorAllocator = nil then
+    FFrames[FFrameIndex].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096);
+
   Frame := FFrames[FFrameIndex];
 
   { 1. Wait for the GPU to finish executing the previous frame occupying this slot }
-  CheckVk(vkWaitForFences(FDevice, 1, @Frame.InFlightFence, VK_TRUE, High(UInt64)), 'vkWaitForFences');
+  if (FDevice <> nil) and (Frame.InFlightFence <> VK_NULL_HANDLE) and Assigned(vkWaitForFences) then
+    CheckVk(vkWaitForFences(FDevice, 1, @Frame.InFlightFence, VK_TRUE, High(UInt64)), 'vkWaitForFences');
+
   { Retire any VkBuffers/VkImages/VkDescriptorSets/TVulkanMemoryAllocations destroyed while this slot was in flight }
   FlushDeferredDeletions(FFrameIndex);
   if FMemoryAllocator <> nil then
@@ -19551,17 +19560,21 @@ begin
     Frame.TransientDescriptorAllocator.ResetPools;
   FDeferResourceDestruction := True;
 
-  { 2. Acquire next swapchain image }
-  AcquireRes := vkAcquireNextImageKHR(FDevice, FSwapchain, High(UInt64),
-    Frame.ImageAvailableSemaphore, VK_NULL_HANDLE, @FCurrentSwapchainImageIndex);
-
-  if AcquireRes = VK_ERROR_OUT_OF_DATE_KHR then
+  { 2. Acquire next swapchain image when bound to a native swapchain }
+  if (FDevice <> nil) and (FSwapchain <> VK_NULL_HANDLE) and Assigned(vkAcquireNextImageKHR) then
   begin
-    ResizeSwapchain(FSwapchainExtent.width, FSwapchainExtent.height);
-    Exit(nil);
+    AcquireRes := vkAcquireNextImageKHR(FDevice, FSwapchain, High(UInt64),
+      Frame.ImageAvailableSemaphore, VK_NULL_HANDLE, @FCurrentSwapchainImageIndex);
+
+    if AcquireRes = VK_ERROR_OUT_OF_DATE_KHR then
+    begin
+      ResizeSwapchain(FSwapchainExtent.width, FSwapchainExtent.height);
+      Exit(nil);
+    end;
   end;
 
-  CheckVk(vkResetFences(FDevice, 1, @Frame.InFlightFence), 'vkResetFences');
+  if (FDevice <> nil) and (Frame.InFlightFence <> VK_NULL_HANDLE) and Assigned(vkResetFences) then
+    CheckVk(vkResetFences(FDevice, 1, @Frame.InFlightFence), 'vkResetFences');
 
   { 3. Begin command list recording }
   Frame.CommandList.BeginRecording;
@@ -19585,40 +19598,50 @@ var
 begin
   SetActiveCommandList(nil);
   Frame := FFrames[FFrameIndex];
+  if Frame.CommandList = nil then
+    Exit;
 
   if FStagingUploader <> nil then
     FStagingUploader.FlushPendingUploads(Frame.CommandList);
 
   { Ensure swapchain backbuffer is transitioned to VK_IMAGE_LAYOUT_PRESENT_SRC_KHR }
-  Frame.CommandList.TransitionTexture(GetSwapchainColorTexture, rsPresent);
+  if GetSwapchainColorTexture <> nil then
+    Frame.CommandList.TransitionTexture(GetSwapchainColorTexture, rsPresent);
   Frame.CommandList.EndRecording;
 
-  WaitStages := VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-  CmdHandle := Frame.CommandList.Handle;
+  if (FDevice <> nil) and (FSwapchain <> VK_NULL_HANDLE) and Assigned(vkQueueSubmit) then
+  begin
+    WaitStages := VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    CmdHandle := Frame.CommandList.Handle;
 
-  FillChar(SubmitInfo, SizeOf(SubmitInfo), 0);
-  SubmitInfo.sType := VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  SubmitInfo.waitSemaphoreCount := 1;
-  SubmitInfo.pWaitSemaphores := @Frame.ImageAvailableSemaphore;
-  SubmitInfo.pWaitDstStageMask := @WaitStages;
-  SubmitInfo.commandBufferCount := 1;
-  SubmitInfo.pCommandBuffers := @CmdHandle;
-  SubmitInfo.signalSemaphoreCount := 1;
-  SubmitInfo.pSignalSemaphores := @Frame.RenderFinishedSemaphore;
+    FillChar(SubmitInfo, SizeOf(SubmitInfo), 0);
+    SubmitInfo.sType := VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    SubmitInfo.waitSemaphoreCount := 1;
+    SubmitInfo.pWaitSemaphores := @Frame.ImageAvailableSemaphore;
+    SubmitInfo.pWaitDstStageMask := @WaitStages;
+    SubmitInfo.commandBufferCount := 1;
+    SubmitInfo.pCommandBuffers := @CmdHandle;
+    SubmitInfo.signalSemaphoreCount := 1;
+    SubmitInfo.pSignalSemaphores := @Frame.RenderFinishedSemaphore;
 
-  CheckVk(vkQueueSubmit(FGraphicsQueue, 1, @SubmitInfo, Frame.InFlightFence), 'vkQueueSubmit');
+    CheckVk(vkQueueSubmit(FGraphicsQueue, 1, @SubmitInfo, Frame.InFlightFence), 'vkQueueSubmit');
 
-  FillChar(PresentInfo, SizeOf(PresentInfo), 0);
-  PresentInfo.sType := VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-  PresentInfo.waitSemaphoreCount := 1;
-  PresentInfo.pWaitSemaphores := @Frame.RenderFinishedSemaphore;
-  PresentInfo.swapchainCount := 1;
-  PresentInfo.pSwapchains := @FSwapchain;
-  PresentInfo.pImageIndices := @FCurrentSwapchainImageIndex;
+    if Assigned(vkQueuePresentKHR) then
+    begin
+      FillChar(PresentInfo, SizeOf(PresentInfo), 0);
+      PresentInfo.sType := VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+      PresentInfo.waitSemaphoreCount := 1;
+      PresentInfo.pWaitSemaphores := @Frame.RenderFinishedSemaphore;
+      PresentInfo.swapchainCount := 1;
+      PresentInfo.pSwapchains := @FSwapchain;
+      PresentInfo.pImageIndices := @FCurrentSwapchainImageIndex;
 
-  vkQueuePresentKHR(FPresentQueue, @PresentInfo);
+      vkQueuePresentKHR(FPresentQueue, @PresentInfo);
+    end;
+  end;
 
   FFrameIndex := (FFrameIndex + 1) mod MaxFramesInFlight;
+  Inc(FTotalFramesPresented);
 end;
 
 procedure TVulkanRHIDevice.ResizeSwapchain(const NewWidth, NewHeight: Cardinal);

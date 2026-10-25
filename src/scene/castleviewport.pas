@@ -643,6 +643,12 @@ type
       const ARenderOptions: TCastleRenderOptions;
       const ACommandList: TObject = nil): Cardinal;
 
+    { Recursively traverses Items and executes ExecuteSceneRenderOptionsSubsystems
+      for every visible TCastleScene in the viewport hierarchy, returning the total
+      number of scene subsystem passes executed. }
+    function ExecuteAllScenesRenderOptionsSubsystems(
+      const ACommandList: TObject = nil): Cardinal;
+
     { Background color.
       Displayed only if @link(Background) is @nil and
       @link(TCastleRootTransform.MainScene MainScene) doesn't define any background either.
@@ -3076,6 +3082,7 @@ begin
   if RHIDevice is TVulkanRHIDevice then
   begin
     ExecuteVulkanViewportSubsystems(ActiveCommandList);
+    ExecuteAllScenesRenderOptionsSubsystems(ActiveCommandList);
     FRenderParams.Statistics.ActiveBackend := 'Vulkan 1.3';
     FRenderParams.Statistics.PipelineCacheHits := TVulkanRHIDevice(RHIDevice).PipelineCacheHits;
     FRenderParams.Statistics.PipelineCacheMisses := TVulkanRHIDevice(RHIDevice).PipelineCacheMisses;
@@ -3676,6 +3683,29 @@ begin
       FreeAndNil(VkCmd);
     end;
   end;
+end;
+
+function TCastleViewport.ExecuteAllScenesRenderOptionsSubsystems(
+  const ACommandList: TObject): Cardinal;
+
+  function TraverseTransform(const ATransform: TCastleTransform): Cardinal;
+  var
+    I: Integer;
+  begin
+    Result := 0;
+    if (ATransform = nil) or (not ATransform.Exists) then
+      Exit;
+    if ATransform is TCastleScene then
+      Inc(Result, ExecuteSceneRenderOptionsSubsystems(TCastleScene(ATransform).RenderOptions, ACommandList));
+    for I := 0 to ATransform.Count - 1 do
+      Inc(Result, TraverseTransform(ATransform[I]));
+  end;
+
+begin
+  Result := 0;
+  if not (RHIDevice is TVulkanRHIDevice) then
+    Exit;
+  Result := TraverseTransform(Items);
 end;
 
 procedure TCastleViewport.Setup2D;
