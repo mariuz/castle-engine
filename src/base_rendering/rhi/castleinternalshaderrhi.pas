@@ -2708,15 +2708,26 @@ begin
 
   if HasSkinning then
     Body := Body +
-      '  if (CastleSkinning.u_JointCount > 0u) {' + NL +
+      '  if ((CastleSkinning.u_JointCount > 0u) && (castle_ObjectSkinningMode != 0)) {' + NL +
       '    mat4 skinMat =' + NL +
       '      castle_Weights0.x * CastleSkinning.u_JointMatrices[castle_Joints0.x] +' + NL +
       '      castle_Weights0.y * CastleSkinning.u_JointMatrices[castle_Joints0.y] +' + NL +
       '      castle_Weights0.z * CastleSkinning.u_JointMatrices[castle_Joints0.z] +' + NL +
       '      castle_Weights0.w * CastleSkinning.u_JointMatrices[castle_Joints0.w];' + NL +
-      '    localPos = skinMat * localPos;' + NL +
-      '    localNormal = mat3(skinMat) * localNormal;' + NL +
-      '    localTangent = mat3(skinMat) * localTangent;' + NL +
+      '    if (castle_ObjectSkinningMode == 2) {' + NL +
+      '      /* Volume-preserving rotational orthonormalization (Dual-Quaternion mode) */' + NL +
+      '      vec3 r0 = normalize(skinMat[0].xyz);' + NL +
+      '      vec3 r1 = normalize(skinMat[1].xyz - dot(skinMat[1].xyz, r0) * r0);' + NL +
+      '      vec3 r2 = cross(r0, r1);' + NL +
+      '      mat3 skinRot = mat3(r0, r1, r2);' + NL +
+      '      localPos = vec4(skinRot * localPos.xyz + skinMat[3].xyz, localPos.w);' + NL +
+      '      localNormal = skinRot * localNormal;' + NL +
+      '      localTangent = skinRot * localTangent;' + NL +
+      '    } else {' + NL +
+      '      localPos = skinMat * localPos;' + NL +
+      '      localNormal = mat3(skinMat) * localNormal;' + NL +
+      '      localTangent = mat3(skinMat) * localTangent;' + NL +
+      '    }' + NL +
       '  }' + NL;
 
   Body := Body +
@@ -2824,6 +2835,25 @@ begin
     '  return shadow * (1.0 / 9.0);' + NL +
     '}' + NL +
     NL +
+    'float SampleShadowAtlasPCSS(vec2 atlasUV, float compareDepth, vec2 texelSize) {' + NL +
+    '  float blockerSum = 0.0;' + NL +
+    '  float blockerCount = 0.0;' + NL +
+    '  for (int y = -1; y <= 1; ++y) {' + NL +
+    '    for (int x = -1; x <= 1; ++x) {' + NL +
+    '      vec2 searchUV = atlasUV + vec2(float(x), float(y)) * texelSize * 2.0;' + NL +
+    '      float d = texture(castle_shadow_atlas_texture, searchUV).r;' + NL +
+    '      if (d < compareDepth) {' + NL +
+    '        blockerSum += d;' + NL +
+    '        blockerCount += 1.0;' + NL +
+    '      }' + NL +
+    '    }' + NL +
+    '  }' + NL +
+    '  if (blockerCount < 0.5) return 1.0;' + NL +
+    '  float avgBlockerDepth = max(blockerSum / blockerCount, 1e-4);' + NL +
+    '  float penumbraScale = clamp((compareDepth - avgBlockerDepth) / avgBlockerDepth * 3.0, 1.0, 4.0);' + NL +
+    '  return SampleShadowAtlasPCF3x3(atlasUV, compareDepth, texelSize * penumbraScale);' + NL +
+    '}' + NL +
+    NL +
     'float EvaluateDirectionalCascadeShadow(vec3 worldPos, float positiveViewDepth, float NdotL) {' + NL +
     '  int cascadeIdx = 3;' + NL +
     '  if (positiveViewDepth < CastleCascadeShadows.u_CascadeSplitDepths.x) cascadeIdx = 0;' + NL +
@@ -2837,6 +2867,8 @@ begin
     '  vec2 atlasUV = uv01 * scaleOffset.xy + scaleOffset.zw;' + NL +
     '  float slopeBias = max(0.0025 * (1.0 - max(NdotL, 0.0)), 0.0005);' + NL +
     '  vec2 texelSize = vec2(1.0) / max(vec2(textureSize(castle_shadow_atlas_texture, 0)), vec2(1.0));' + NL +
+    '  if (castle_ObjectShadowMapMode == 1)' + NL +
+    '    return SampleShadowAtlasPCSS(atlasUV, lightNDC.z - slopeBias, texelSize);' + NL +
     '  return SampleShadowAtlasPCF3x3(atlasUV, lightNDC.z - slopeBias, texelSize);' + NL +
     '}' + NL +
     NL +
@@ -2970,6 +3002,13 @@ begin
       '  N = PerturbNormalCotangent(N, -castle_vertex_eye.xyz, castle_tex_coord0, tangentNormal, castle_MaterialNormalScale);' + NL;
 
   Result := Result +
+    '  if (castle_ObjectSpecularAAEnabled) {' + NL +
+    '    vec3 dndu = dFdx(N);' + NL +
+    '    vec3 dndv = dFdy(N);' + NL +
+    '    float normalVar = 0.25 * (dot(dndu, dndu) + dot(dndv, dndv));' + NL +
+    '    float kernelRoughness2 = min(2.0 * normalVar, 0.18);' + NL +
+    '    roughness = clamp(sqrt(clamp(roughness * roughness + kernelRoughness2, 0.0, 1.0)), 0.04, 1.0);' + NL +
+    '  }' + NL +
     '  vec3 Lo = vec3(0.0);' + NL;
 
   if HasClusteredForward then

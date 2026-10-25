@@ -319,6 +319,7 @@ type
     PointPtrAllocated: Integer;
 
     { RHI resources and diagnostic counters }
+    RHIOwnerDevice: TRHIDevice;
     RHIVbo: TRHIBuffer;
     RHIPipeline: TRHIPipeline;
     RHIPipelineTopology: TRHIPrimitiveTopology;
@@ -389,6 +390,9 @@ procedure RHIPrimitive2DResetStats;
 begin
   if Primitive2DRes <> nil then
   begin
+    FreeAndNil(Primitive2DRes.RHIVbo);
+    Primitive2DRes.RHIPipeline := nil;
+    Primitive2DRes.RHIOwnerDevice := nil;
     Primitive2DRes.RHIDrawCallCount := 0;
     Primitive2DRes.RHILastVertexCount := 0;
     Primitive2DRes.RHILastMode := pmPoints;
@@ -480,6 +484,12 @@ begin
 
   if RHIDevice <> nil then
   begin
+    if Primitive2DRes.RHIOwnerDevice <> RHIDevice then
+    begin
+      FreeAndNil(Primitive2DRes.RHIVbo);
+      Primitive2DRes.RHIPipeline := nil;
+      Primitive2DRes.RHIOwnerDevice := RHIDevice;
+    end;
     if (Primitive2DRes.RHIVbo = nil) or (Primitive2DRes.RHIVbo.Desc.Size < Cardinal(RequiredPointPtrSize)) then
     begin
       FreeAndNil(Primitive2DRes.RHIVbo);

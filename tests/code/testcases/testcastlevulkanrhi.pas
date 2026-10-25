@@ -30,6 +30,7 @@ uses
   CastleRendererInternalLights, X3DNodes,
   CastleSceneInternalShape, CastleInternalOcclusionCulling,
   CastleTransform, CastleScene, CastleProjection, CastleViewport, CastleScreenEffects, CastleRenderOptions, CastleWindow,
+  CastleUIControls, CastleControls,
   CastleVideos, CastleInternalBackgroundRenderer, CastleInternalGLShadowVolumes,
   CastleGLUtils, CastleRenderPrimitives, CastleShapes, CastleRenderContext,
   CastleShapeInternalShadowVolumes, CastleShapeInternalRenderShadowVolumes,
@@ -242,6 +243,9 @@ type
     procedure TestShaderObjectParamsMacrosAndUnpackingRHI;
     procedure TestViewportExecuteAllScenesRenderOptionsSubsystemsTreeRHI;
     procedure TestVulkanBeginEndFrameHeadlessAndWindowLifecycleRHI;
+    procedure TestDefault3DShadersConsumeCastleObjectParamsRHI;
+    procedure TestCastleContainerAndUIControlsHeadlessVulkanRenderRHI;
+    procedure TestProjectionHelpersNilSafeRenderContextRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -5020,6 +5024,7 @@ begin
 
     CmdList.EndRecording;
   finally
+    RHIPrimitive2DResetStats;
     SetActiveCommandList(SavedCmdList);
     SetRHIDevice(SavedDevice);
     FreeAndNil(CmdList);
@@ -11767,6 +11772,160 @@ begin
     SetRHIDevice(SavedRHI);
     FreeAndNil(Win);
     FreeAndNil(Device);
+  end;
+end;
+
+type
+  TTestHeadlessVulkanContainer = class(TCastleContainer)
+  public
+    function PixelsWidth: Integer; override;
+    function PixelsHeight: Integer; override;
+    function GLInitialized: Boolean; override;
+  end;
+
+function TTestHeadlessVulkanContainer.PixelsWidth: Integer;
+begin
+  Result := 1280;
+end;
+
+function TTestHeadlessVulkanContainer.PixelsHeight: Integer;
+begin
+  Result := 720;
+end;
+
+function TTestHeadlessVulkanContainer.GLInitialized: Boolean;
+begin
+  Result := True;
+end;
+
+procedure TTestCastleVulkanRHI.TestDefault3DShadersConsumeCastleObjectParamsRHI;
+var
+  Gen: TCastleShaderGeneratorRHI;
+  VS, FS: String;
+begin
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    VS := Gen.GenerateDefault3DVertexShader(True, True);
+    AssertTrue('Default 3D VS with skinning must check castle_ObjectSkinningMode != 0',
+      Pos('castle_ObjectSkinningMode != 0', VS) > 0);
+    AssertTrue('Default 3D VS with skinning must branch on castle_ObjectSkinningMode == 2 (Dual-Quaternion mode)',
+      Pos('castle_ObjectSkinningMode == 2', VS) > 0);
+    AssertTrue('Default 3D VS must orthonormalize skinRot in Dual-Quaternion mode',
+      Pos('mat3 skinRot = mat3(r0, r1, r2);', VS) > 0);
+
+    FS := Gen.GenerateDefault3DFragmentShader(True, True, True, True, True, True, True, True, True);
+    AssertTrue('Default 3D FS must check castle_ObjectSpecularAAEnabled',
+      Pos('if (castle_ObjectSpecularAAEnabled)', FS) > 0);
+    AssertTrue('Default 3D FS must compute screen-space normal variance kernelRoughness2',
+      Pos('kernelRoughness2 = min(2.0 * normalVar, 0.18)', FS) > 0);
+    AssertTrue('Default 3D FS with shadows must emit SampleShadowAtlasPCSS',
+      Pos('float SampleShadowAtlasPCSS(', FS) > 0);
+    AssertTrue('Default 3D FS must branch on castle_ObjectShadowMapMode == 1 for PCSS',
+      Pos('if (castle_ObjectShadowMapMode == 1)', FS) > 0);
+  finally
+    FreeAndNil(Gen);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCastleContainerAndUIControlsHeadlessVulkanRenderRHI;
+var
+  Device: TVulkanRHIDevice;
+  Container: TTestHeadlessVulkanContainer;
+  ParentUI: TCastleUserInterface;
+  RectCtrl: TCastleRectangleControl;
+  SavedRHI: TRHIDevice;
+  SavedCtx: TRenderContext;
+  TestCtx: TRenderContext;
+  Cmd: TRHICommandList;
+begin
+  SavedRHI := RHIDevice;
+  SavedCtx := RenderContext;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7401)));
+  TestCtx := TRenderContext.Create(nil);
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  ParentUI := TCastleUserInterface.Create(Container);
+  RectCtrl := TCastleRectangleControl.Create(Container);
+  try
+    SetRHIDevice(Device);
+    RenderContext := TestCtx;
+    RHIPrimitive2DResetStats;
+
+    Container.BackgroundEnable := True;
+    Container.BackgroundColor := Vector4(0.1, 0.2, 0.3, 1.0);
+
+    ParentUI.Width := 400;
+    ParentUI.Height := 300;
+    ParentUI.Border.AllSides := 4;
+    ParentUI.BorderColor := Vector4(1.0, 0.8, 0.2, 1.0);
+    ParentUI.ClipChildren := True;
+    ParentUI.GLContextOpen;
+
+    RectCtrl.Width := 200;
+    RectCtrl.Height := 120;
+    RectCtrl.Color := Vector4(0.2, 0.6, 0.9, 1.0);
+    RectCtrl.GLContextOpen;
+    ParentUI.InsertFront(RectCtrl);
+    Container.Controls.InsertFront(ParentUI);
+
+    AssertEquals('Initial RHIRenderedFramesCount must be 0', 0, Integer(Container.RHIRenderedFramesCount));
+
+    Cmd := Device.BeginFrame;
+    AssertTrue('BeginFrame must return a non-nil command list', Cmd <> nil);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+    finally
+      Device.EndFrameAndPresent;
+    end;
+
+    AssertEquals('RHIRenderedFramesCount must increment to 1 after EventRender',
+      1, Integer(Container.RHIRenderedFramesCount));
+    AssertTrue('Container BackgroundEnable must record at least 1 RHI Clear',
+      TestCtx.RHIClearCount >= 1);
+    AssertTrue('ClipChildren = True must trigger RHI Scissor updates (enable + disable)',
+      TestCtx.RHIScissorUpdateCount >= 2);
+    AssertFalse('After ClipChildrenEnd, RHIScissorActive must be restored to False',
+      TestCtx.RHIScissorActive);
+    AssertEquals('4 ParentUI borders + 1 TCastleRectangleControl must record 5 RHI 2D draw calls',
+      5, Integer(RHIPrimitive2DDrawCallCount));
+  finally
+    RHIPrimitive2DResetStats;
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    FreeAndNil(Container);
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestProjectionHelpersNilSafeRenderContextRHI;
+var
+  SavedCtx: TRenderContext;
+  TestCtx: TRenderContext;
+  MatP, MatO, MatF: TMatrix4;
+begin
+  SavedCtx := RenderContext;
+  TestCtx := TRenderContext.Create(nil);
+  try
+    { 1. Verify nil-safety when RenderContext = nil }
+    RenderContext := nil;
+    MatP := PerspectiveProjection(60.0, 16.0 / 9.0, 0.1, 1000.0);
+    MatO := OrthoProjection(FloatRectangle(0, 0, 1280, 720), -1.0, 1.0);
+    MatF := FrustumProjection(FloatRectangle(-1, -1, 2, 2), 0.5, 500.0);
+    AssertTrue('PerspectiveProjection with nil RenderContext must return non-zero M[0,0]',
+      Abs(MatP.Data[0, 0]) > 1e-4);
+    AssertTrue('OrthoProjection with nil RenderContext must return non-zero M[0,0]',
+      Abs(MatO.Data[0, 0]) > 1e-6);
+    AssertTrue('FrustumProjection with nil RenderContext must return non-zero M[0,0]',
+      Abs(MatF.Data[0, 0]) > 1e-4);
+
+    { 2. Verify RenderContext.ProjectionMatrix assignment when RenderContext <> nil }
+    RenderContext := TestCtx;
+    MatO := OrthoProjection(FloatRectangle(0, 0, 800, 600), -1.0, 1.0);
+    AssertSameValue(MatO.Data[0, 0], TestCtx.ProjectionMatrix.Data[0, 0], 1e-6);
+  finally
+    RenderContext := SavedCtx;
+    FreeAndNil(TestCtx);
   end;
 end;
 

@@ -166,6 +166,7 @@
       FCurrentViewStack, FPendingViewStack: TCastleViewList;
       FDisableStackChange: Cardinal;
       FControls: TInternalChildrenControls;
+      FRHIRenderedFramesCount: Cardinal;
       FInternalOverrideCursor: TMouseCursor; //< overrides even public OverrideCursor
     class var
       FInputInspector: TInputInspector;
@@ -679,6 +680,9 @@
     function TouchesCount: Integer;
 
     property Context: TRenderContext read FContext;
+
+    { Phase 60.2: Number of container frames rendered via EventRender while an RHI device is active. }
+    property RHIRenderedFramesCount: Cardinal read FRHIRenderedFramesCount;
 
     { Render a TCastleUserInterface (along with all it's children).
 
@@ -2666,24 +2670,27 @@ end;
 
 class procedure TCastleContainer.RenderControlPrepare(const ViewportRect: TRectangle);
 begin
-  if GLFeatures.EnableFixedFunction then
+  if (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
   begin
     { Set OpenGL state that is guaranteed for TCastleUserInterface.Render calls,
       but TCastleUserInterface.Render cannot change it carelessly. }
     {$ifndef OpenGLES}
-    RenderContext.FixedFunctionLighting := false;
+    if RenderContext <> nil then
+      RenderContext.FixedFunctionLighting := false;
     glDisable(GL_FOG);
     {$endif}
     GLEnableTexture(etNone);
   end;
 
-  RenderContext.DepthTest := false;
+  if RenderContext <> nil then
+    RenderContext.DepthTest := false;
 
-  RenderContext.Viewport := ViewportRect;
+  if RenderContext <> nil then
+    RenderContext.Viewport := ViewportRect;
   OrthoProjection(FloatRectangle(0, 0, ViewportRect.Width, ViewportRect.Height));
 
   {$ifndef OpenGLES}
-  if GLFeatures.EnableFixedFunction then
+  if (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
   begin
     { Set OpenGL state that may be changed carelessly, and has some
       guaranteed value, for TCastleUserInterface.Render calls. }
@@ -2723,8 +2730,11 @@ begin
     we never show outdated view. }
   ProcessViewChanges;
 
-  if BackgroundEnable then
+  if BackgroundEnable and (RenderContext <> nil) then
     RenderContext.Clear([cbColor], BackgroundColor);
+
+  if RHIDevice <> nil then
+    Inc(FRHIRenderedFramesCount);
 
   FillChar(TDrawableImage.Statistics, SizeOf(TDrawableImage.Statistics), #0);
 

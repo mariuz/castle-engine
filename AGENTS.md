@@ -77,8 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–58**: **COMPLETED** (100%).
-- **Phase 59 (GLSL 450 `castle_ObjectParams` Unpacking Macros, Scene-Tree `ExecuteAllScenesRenderOptionsSubsystems` & `TCastleWindow` Vulkan Frame Lifecycle)**: **COMPLETED** (100%, 772/772 total engine tests and 203/203 `TTestCastleVulkanRHI` tests passing):
-  - [x] **59.1. GLSL 450 `castle_ObjectParams` Unpacking Macros & CPU Mirror** — Completed & tested (`TestShaderObjectParamsMacrosAndUnpackingRHI`).
-  - [x] **59.2. Automatic Scene-Tree `ExecuteAllScenesRenderOptionsSubsystems`** — Completed & tested (`TestViewportExecuteAllScenesRenderOptionsSubsystemsTreeRHI`).
-  - [x] **59.3. Headless-Safe `BeginFrame` / `EndFrameAndPresent` & `TCastleWindow` Vulkan Frame Lifecycle** — Completed & tested (`TestVulkanBeginEndFrameHeadlessAndWindowLifecycleRHI`).
+- **Phases 1–59**: **COMPLETED** (100%).
+- **Phase 60 (Default 3D Shader Consumption of `castle_ObjectParams` & `TCastleContainer` / `TCastleUserInterface` Headless Vulkan RHI Rendering)**: **COMPLETED** (100%, 775/775 total engine tests and 206/206 `TTestCastleVulkanRHI` tests passing):
+  - [x] **60.1. Default 3D Shader Consumption of `castle_ObjectParams`** — Completed & tested (`TestDefault3DShadersConsumeCastleObjectParamsRHI`).
+  - [x] **60.2. `TCastleContainer` & `TCastleUserInterface` Headless Vulkan RHI Rendering** — Completed & tested (`TestCastleContainerAndUIControlsHeadlessVulkanRenderRHI`).
+  - [x] **60.3. Nil-Safe `PerspectiveProjection` / `OrthoProjection` / `FrustumProjection` Helpers** — Completed & tested (`TestProjectionHelpersNilSafeRenderContextRHI`).

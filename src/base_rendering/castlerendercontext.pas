@@ -1446,19 +1446,22 @@ end;
 function PerspectiveProjection(const fovy, aspect, ZNear, ZFar: Single): TMatrix4;
 begin
   Result := PerspectiveProjectionMatrixDeg(fovy, aspect, ZNear, ZFar);
-  RenderContext.ProjectionMatrix := Result;
+  if RenderContext <> nil then
+    RenderContext.ProjectionMatrix := Result;
 end;
 
 function OrthoProjection(const Dimensions: TFloatRectangle; const ZNear, ZFar: Single): TMatrix4;
 begin
   Result := OrthoProjectionMatrix(Dimensions, ZNear, ZFar);
-  RenderContext.ProjectionMatrix := Result;
+  if RenderContext <> nil then
+    RenderContext.ProjectionMatrix := Result;
 end;
 
 function FrustumProjection(const Dimensions: TFloatRectangle; const ZNear, ZFar: Single): TMatrix4;
 begin
   Result := FrustumProjectionMatrix(Dimensions, ZNear, ZFar);
-  RenderContext.ProjectionMatrix := Result;
+  if RenderContext <> nil then
+    RenderContext.ProjectionMatrix := Result;
 end;
 
 end.
