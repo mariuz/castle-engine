@@ -508,8 +508,19 @@ begin
   begin
     ExtractRHIMaterialTextures(BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex);
     if Cache <> nil then
+    begin
       Cache.BindMaterialTexturesToDescriptorSet(
         BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex);
+      Cache.EnsureRHIShaders(
+        Cache.RHIJointBuffer <> nil,
+        (Cache.Arrays <> nil) and Cache.Arrays.HasTangent,
+        BaseColorTex <> nil,
+        NormalTex <> nil,
+        MetallicRoughnessTex <> nil,
+        EmissiveTex <> nil,
+        OcclusionTex <> nil,
+        MatBlock.PBRParams.W > 0.0);
+    end;
     if BaseColorTex <> nil then
       BaseColorIdx := RHIDevice.RegisterBindlessTexture(BaseColorTex)
     else

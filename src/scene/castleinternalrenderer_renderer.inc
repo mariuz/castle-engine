@@ -510,8 +510,16 @@ begin
   EnsureRHIDefaultShaders;
   EnsureRHISceneDescriptorSet;
 
-  ADesc.VertexShader := FRHIDefaultVertexShader;
-  ADesc.FragmentShader := FRHIDefaultFragmentShader;
+  if (AShape <> nil) and (AShape.Cache <> nil) and
+     (AShape.Cache.RHIVertexShader <> nil) and (AShape.Cache.RHIFragmentShader <> nil) then
+  begin
+    ADesc.VertexShader := AShape.Cache.RHIVertexShader;
+    ADesc.FragmentShader := AShape.Cache.RHIFragmentShader;
+  end else
+  begin
+    ADesc.VertexShader := FRHIDefaultVertexShader;
+    ADesc.FragmentShader := FRHIDefaultFragmentShader;
+  end;
   ADesc.GeometryShader := nil;
 
   Arrays := nil;
@@ -659,7 +667,16 @@ begin
     ADesc.DepthAttachmentFormat := pfD32_Float;
 
   ADesc.SampleCount := 1;
-  ADesc.DebugName := 'CastleShapeForwardPSO';
+  if ((RenderingCamera <> nil) and (RenderingCamera.Target = rtShadowMap)) or
+     ((ARenderOptions <> nil) and (ARenderOptions.Mode = rmDepth)) then
+  begin
+    ADesc.FragmentShader := nil;
+    ADesc.Rasterizer.DepthBiasEnable := True;
+    ADesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultShadowMap;
+    SetLength(ADesc.ColorAttachmentFormats, 0);
+    ADesc.DebugName := 'CastleShapeShadowDepthPSO';
+  end else
+    ADesc.DebugName := 'CastleShapeForwardPSO';
 end;
 
 function TRenderer.GetOrCreateShapePipeline(const AShape: TX3DRendererShape;

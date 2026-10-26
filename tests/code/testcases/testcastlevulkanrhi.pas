@@ -261,6 +261,9 @@ type
     procedure TestRendererBuildShapePipelineDescAndCachingRHI;
     procedure TestViewportRenderBindsGraphicsPipelineAndWireframePSORHI;
     procedure TestViewportOpaqueAndBlendedPipelineStatesRHI;
+    procedure TestShapeCacheEnsureRHIShadersPermutationMaskRHI;
+    procedure TestUploadRHIMaterialAutoSpecializesShapeShadersRHI;
+    procedure TestShadowMapDepthOnlyPipelineSpecializationRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -13167,6 +13170,245 @@ begin
     end;
   finally
     FreeAndNil(Container);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestShapeCacheEnsureRHIShadersPermutationMaskRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Cache: TShapeCache;
+  Vert1, Frag1, Vert2, Frag2: TRHIShaderModule;
+  JointMats: array[0..1] of TMatrix4;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($66C1)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  Cache := TShapeCache.Create;
+  try
+    { 1. Untextured static permutation (Mask = 0) }
+    Cache.EnsureRHIShaders(False, False, False, False, False, False, False, False);
+    AssertEquals('Untextured static mask must be 0', 0, Integer(Cache.RHIShaderPermutationMask));
+    AssertTrue('RHIVertexShader must be created', Cache.RHIVertexShader <> nil);
+    AssertTrue('RHIFragmentShader must be created', Cache.RHIFragmentShader <> nil);
+    Vert1 := Cache.RHIVertexShader;
+    Frag1 := Cache.RHIFragmentShader;
+
+    { Repeated call with identical flags must reuse cached shader modules }
+    Cache.EnsureRHIShaders(False, False, False, False, False, False, False, False);
+    AssertTrue('RHIVertexShader must be cached', Cache.RHIVertexShader = Vert1);
+    AssertTrue('RHIFragmentShader must be cached', Cache.RHIFragmentShader = Frag1);
+
+    { 2. UploadJointMatrices invalidates static vertex shader and upgrades to skinning ($01) + BaseColorTex ($04) + AlphaTest ($80) }
+    JointMats[0] := TMatrix4.Identity;
+    JointMats[1] := TMatrix4.Identity;
+    Cache.UploadJointMatrices(@JointMats[0], 2);
+    Cache.EnsureRHIShaders(True, True, True, False, False, False, False, True);
+    AssertEquals('Permutation mask must be $01 or $02 or $04 or $80 = $87',
+      $87, Integer(Cache.RHIShaderPermutationMask));
+    Vert2 := Cache.RHIVertexShader;
+    Frag2 := Cache.RHIFragmentShader;
+    AssertTrue('Upgraded RHIVertexShader must be non-nil', Vert2 <> nil);
+    AssertTrue('Upgraded RHIFragmentShader must be non-nil', Frag2 <> nil);
+    AssertTrue('Vertex shader source must include CastleSkinningBlock',
+      Pos('CastleSkinningBlock', Cache.RHIVertexShaderSource) > 0);
+    AssertTrue('Fragment shader source must include castle_base_color_texture and discard',
+      (Pos('castle_base_color_texture', Cache.RHIFragmentShaderSource) > 0) and
+      (Pos('discard', Cache.RHIFragmentShaderSource) > 0));
+  finally
+    FreeAndNil(Cache);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestUploadRHIMaterialAutoSpecializesShapeShadersRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  BoxNode: TBoxNode;
+  App: TAppearanceNode;
+  PhysMat: TPhysicalMaterialNode;
+  BasePixTex, NormalPixTex: TPixelTextureNode;
+  RShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  Renderer: TRenderer;
+  Cam: TRenderingCamera;
+  Stats: TRenderStatistics;
+  Desc: TRHIGraphicsPipelineDesc;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($66C2)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Viewport := TCastleViewport.Create(nil);
+  Scene := TCastleScene.Create(nil);
+  Renderer := TRenderer.Create(nil);
+  Cam := TRenderingCamera.Create;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    BoxNode := TBoxNode.Create;
+    BoxNode.Size := Vector3(2.0, 2.0, 2.0);
+    ShapeNode.Geometry := BoxNode;
+    App := TAppearanceNode.Create;
+    App.AlphaMode := amMask;
+    App.AlphaCutoff := 0.4;
+    PhysMat := TPhysicalMaterialNode.Create;
+
+    BasePixTex := TPixelTextureNode.Create;
+    BasePixTex.FdImage.Value := TRGBImage.Create(2, 2);
+    PhysMat.BaseTexture := BasePixTex;
+
+    NormalPixTex := TPixelTextureNode.Create;
+    NormalPixTex.FdImage.Value := TRGBImage.Create(2, 2);
+    PhysMat.NormalTexture := NormalPixTex;
+
+    App.Material := PhysMat;
+    ShapeNode.Appearance := App;
+    Root.AddChildren(ShapeNode);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+    Viewport.PrepareResources(Scene);
+
+    RShape := TX3DRendererShape(Scene.Shapes.TraverseList(True)[0]);
+    RShape.PrepareRHIBuffers(Scene.RenderOptions, 1);
+    RShape.UploadRHIMaterialToCache(ShadingModel);
+
+    AssertTrue('UploadRHIMaterialToCache must set BaseColorTex ($04), NormalTex ($08), and AlphaTest ($80) bits',
+      (RShape.Cache.RHIShaderPermutationMask and ($04 or $08 or $80)) = ($04 or $08 or $80));
+    AssertTrue('Fragment shader source must sample castle_normal_texture',
+      Pos('castle_normal_texture', RShape.Cache.RHIFragmentShaderSource) > 0);
+
+    Cam.Target := rtScreen;
+    Cam.Matrix := TMatrix4.Identity;
+    FillChar(Stats, SizeOf(Stats), 0);
+    Renderer.RenderBegin(nil, Cam, nil, 0, 0, 0, @Stats);
+    try
+      Renderer.BuildShapePipelineDesc(RShape, Scene.RenderOptions, Desc);
+      AssertTrue('BuildShapePipelineDesc must bind specialized shape RHIVertexShader',
+        Desc.VertexShader = RShape.Cache.RHIVertexShader);
+      AssertTrue('BuildShapePipelineDesc must bind specialized shape RHIFragmentShader',
+        Desc.FragmentShader = RShape.Cache.RHIFragmentShader);
+    finally
+      Renderer.RenderEnd;
+    end;
+  finally
+    FreeAndNil(Cam);
+    FreeAndNil(Renderer);
+    FreeAndNil(Scene);
+    FreeAndNil(Viewport);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestShadowMapDepthOnlyPipelineSpecializationRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  BoxNode: TBoxNode;
+  App: TAppearanceNode;
+  PhysMat: TPhysicalMaterialNode;
+  RShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  Renderer: TRenderer;
+  Cam: TRenderingCamera;
+  Stats: TRenderStatistics;
+  Desc: TRHIGraphicsPipelineDesc;
+  ShadowPso, ForwardPso: TRHIPipeline;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($66C3)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Viewport := TCastleViewport.Create(nil);
+  Scene := TCastleScene.Create(nil);
+  Renderer := TRenderer.Create(nil);
+  Cam := TRenderingCamera.Create;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    BoxNode := TBoxNode.Create;
+    BoxNode.Size := Vector3(2.0, 2.0, 2.0);
+    ShapeNode.Geometry := BoxNode;
+    App := TAppearanceNode.Create;
+    PhysMat := TPhysicalMaterialNode.Create;
+    App.Material := PhysMat;
+    ShapeNode.Appearance := App;
+    Root.AddChildren(ShapeNode);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+
+    RShape := TX3DRendererShape(Scene.Shapes.TraverseList(True)[0]);
+    RShape.PrepareRHIBuffers(Scene.RenderOptions, 1);
+    RShape.UploadRHIMaterialToCache(ShadingModel);
+
+    Cam.Target := rtScreen;
+    Cam.Matrix := TMatrix4.Identity;
+    FillChar(Stats, SizeOf(Stats), 0);
+    Renderer.RenderBegin(nil, Cam, nil, 0, 0, 0, @Stats);
+    try
+      ForwardPso := Renderer.GetOrCreateShapePipeline(RShape, Scene.RenderOptions);
+    finally
+      Renderer.RenderEnd;
+    end;
+
+    { Shadow map pass (Cam.Target = rtShadowMap) }
+    Cam.Target := rtShadowMap;
+    Renderer.RenderBegin(nil, Cam, nil, 0, 0, 0, @Stats);
+    try
+      Renderer.BuildShapePipelineDesc(RShape, Scene.RenderOptions, Desc);
+      AssertTrue('Shadow map PSO must have VertexShader <> nil', Desc.VertexShader <> nil);
+      AssertTrue('Shadow map PSO must have FragmentShader = nil (depth-only)', Desc.FragmentShader = nil);
+      AssertEquals('Shadow map PSO must have 0 ColorAttachmentFormats',
+        0, Length(Desc.ColorAttachmentFormats));
+      AssertTrue('Shadow map PSO must enable DepthBiasEnable', Desc.Rasterizer.DepthBiasEnable);
+      AssertEquals('Shadow map PSO DebugName', 'CastleShapeShadowDepthPSO', Desc.DebugName);
+
+      ShadowPso := Renderer.GetOrCreateShapePipeline(RShape, Scene.RenderOptions);
+      AssertTrue('Shadow map PSO must be created', ShadowPso <> nil);
+      AssertTrue('Shadow map PSO must be distinct from forward PSO', ShadowPso <> ForwardPso);
+    finally
+      Renderer.RenderEnd;
+    end;
+  finally
+    FreeAndNil(Cam);
+    FreeAndNil(Renderer);
+    FreeAndNil(Scene);
+    FreeAndNil(Viewport);
     RenderContext := SavedCtx;
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;

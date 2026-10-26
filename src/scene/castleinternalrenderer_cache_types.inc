@@ -131,6 +131,12 @@
     FRHIMaterialDescriptorSet: TRHIDescriptorSet;
     FRHISkinningDescriptorLayout: TRHIDescriptorSetLayout;
     FRHISkinningDescriptorSet: TRHIDescriptorSet;
+    FRHIVertexShader: TRHIShaderModule;
+    FRHIFragmentShader: TRHIShaderModule;
+    FRHIVertexShaderSource: String;
+    FRHIFragmentShaderSource: String;
+    FRHIShaderPermutationMask: Cardinal;
+    FRHIShadersInitialized: Boolean;
     FRHIOwnerDevice: TRHIDevice;
     FRHIMaterialBlock: TCastleMaterialUniformBlock;
     FRHIMaterialUploadCount: Cardinal;
@@ -150,6 +156,10 @@
     procedure BindMaterialTexturesToDescriptorSet(
       const ABaseColorTex, ANormalTex, AMetallicRoughnessTex,
             AEmissiveTex, AOcclusionTex: TRHITexture);
+    procedure EnsureRHIShaders(
+      const AHasSkinning, AHasTangents,
+            AHasBaseColorTex, AHasNormalTex, AHasMetallicRoughnessTex,
+            AHasEmissiveTex, AHasOcclusionTex, AUseAlphaTest: Boolean);
     { Debug description of this shape cache. }
     function ToString: String; override;
 
@@ -162,6 +172,11 @@
     property RHIMaterialDescriptorSet: TRHIDescriptorSet read FRHIMaterialDescriptorSet;
     property RHISkinningDescriptorLayout: TRHIDescriptorSetLayout read FRHISkinningDescriptorLayout;
     property RHISkinningDescriptorSet: TRHIDescriptorSet read FRHISkinningDescriptorSet;
+    property RHIVertexShader: TRHIShaderModule read FRHIVertexShader;
+    property RHIFragmentShader: TRHIShaderModule read FRHIFragmentShader;
+    property RHIVertexShaderSource: String read FRHIVertexShaderSource;
+    property RHIFragmentShaderSource: String read FRHIFragmentShaderSource;
+    property RHIShaderPermutationMask: Cardinal read FRHIShaderPermutationMask;
     property RHIMaterialBlock: TCastleMaterialUniformBlock read FRHIMaterialBlock;
     property RHIMaterialUploadCount: Cardinal read FRHIMaterialUploadCount;
     property RHIUploadCount: Cardinal read FRHIUploadCount;
@@ -232,6 +247,8 @@ begin
     FreeAndNil(FRHIMaterialDescriptorLayout);
     FreeAndNil(FRHISkinningDescriptorSet);
     FreeAndNil(FRHISkinningDescriptorLayout);
+    FreeAndNil(FRHIVertexShader);
+    FreeAndNil(FRHIFragmentShader);
   end else
   begin
     FRHICoordBuffer := nil;
@@ -243,7 +260,10 @@ begin
     FRHIMaterialDescriptorLayout := nil;
     FRHISkinningDescriptorSet := nil;
     FRHISkinningDescriptorLayout := nil;
+    FRHIVertexShader := nil;
+    FRHIFragmentShader := nil;
   end;
+  FRHIShadersInitialized := False;
   FRHIOwnerDevice := nil;
   if False then
   begin
@@ -272,6 +292,9 @@ begin
     FRHIMaterialDescriptorLayout := nil;
     FRHISkinningDescriptorSet := nil;
     FRHISkinningDescriptorLayout := nil;
+    FRHIVertexShader := nil;
+    FRHIFragmentShader := nil;
+    FRHIShadersInitialized := False;
     FRHIOwnerDevice := RHIDevice;
   end;
 end;
@@ -316,6 +339,8 @@ begin
     FRHISkinningDescriptorSet.BindUniformBuffer(0, FRHIJointBuffer);
     FRHISkinningDescriptorSet.Update;
   end;
+  if FRHIShadersInitialized and ((FRHIShaderPermutationMask and $01) = 0) then
+    FRHIShadersInitialized := False;
 end;
 
 procedure TShapeCache.UploadMaterialBlock(const AMatBlock: TCastleMaterialUniformBlock);
@@ -399,6 +424,51 @@ begin
   end;
   if AnyBound then
     FRHIMaterialDescriptorSet.Update;
+end;
+
+procedure TShapeCache.EnsureRHIShaders(
+  const AHasSkinning, AHasTangents,
+        AHasBaseColorTex, AHasNormalTex, AHasMetallicRoughnessTex,
+        AHasEmissiveTex, AHasOcclusionTex, AUseAlphaTest: Boolean);
+var
+  Mask: Cardinal;
+  Gen: TCastleShaderGeneratorRHI;
+begin
+  if RHIDevice = nil then
+    Exit;
+  EnsureRHIDeviceMatch;
+
+  Mask := 0;
+  if AHasSkinning then Mask := Mask or $01;
+  if AHasTangents then Mask := Mask or $02;
+  if AHasBaseColorTex then Mask := Mask or $04;
+  if AHasNormalTex then Mask := Mask or $08;
+  if AHasMetallicRoughnessTex then Mask := Mask or $10;
+  if AHasEmissiveTex then Mask := Mask or $20;
+  if AHasOcclusionTex then Mask := Mask or $40;
+  if AUseAlphaTest then Mask := Mask or $80;
+
+  if FRHIShadersInitialized and (FRHIShaderPermutationMask = Mask) and
+     (FRHIVertexShader <> nil) and (FRHIFragmentShader <> nil) then
+    Exit;
+
+  FreeAndNil(FRHIVertexShader);
+  FreeAndNil(FRHIFragmentShader);
+  Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+  try
+    FRHIVertexShaderSource := Gen.GenerateDefault3DVertexShader(AHasSkinning, AHasTangents);
+    FRHIFragmentShaderSource := Gen.GenerateDefault3DFragmentShader(
+      AHasBaseColorTex, AHasNormalTex, AHasMetallicRoughnessTex,
+      AHasEmissiveTex, AHasOcclusionTex, False, AUseAlphaTest, False, False);
+    FRHIVertexShader := RHIDevice.CreateShaderModuleFromGLSL(
+      ssVertex, FRHIVertexShaderSource, Format('CastleShapeVert_Perm%.2x', [Mask]));
+    FRHIFragmentShader := RHIDevice.CreateShaderModuleFromGLSL(
+      ssFragment, FRHIFragmentShaderSource, Format('CastleShapeFrag_Perm%.2x', [Mask]));
+    FRHIShaderPermutationMask := Mask;
+    FRHIShadersInitialized := True;
+  finally
+    FreeAndNil(Gen);
+  end;
 end;
 
 procedure TShapeCache.LoadArraysToVbo(const DynamicGeometry: boolean);

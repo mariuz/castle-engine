@@ -77,8 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–64**: **COMPLETED** (100%).
-- **Phase 65 (Automatic RHI Graphics Pipeline Construction, Caching & Command-List Binding in `TRenderer` & `TBaseCoordinateRenderer`)**: **COMPLETED** (100%, 790/790 total engine tests and 221/221 `TTestCastleVulkanRHI` tests passing):
-  - [x] **65.1. `TRenderer.EnsureRHIDefaultShaders`, `BuildShapePipelineDesc` & `GetOrCreateShapePipeline`** — Completed & tested (`TestRendererBuildShapePipelineDescAndCachingRHI`).
-  - [x] **65.2. Automatic `ActiveCommandList.BindPipeline` & Wireframe (`pmLine`) vs Solid (`pmFill`) PSO Selection** — Completed & tested (`TestViewportRenderBindsGraphicsPipelineAndWireframePSORHI`).
-  - [x] **65.3. Automatic Opaque vs Alpha-Blended PSO State Synchronization (`BlendState`, `DepthWriteEnable`)** — Completed & tested (`TestViewportOpaqueAndBlendedPipelineStatesRHI`).
+- **Phases 1–65**: **COMPLETED** (100%).
+- **Phase 66 (Per-Shape RHI Shader Permutation Specialization, Caching & Shadow-Map Depth-Only PSO Construction)**: **COMPLETED** (100%, 793/793 total engine tests and 224/224 `TTestCastleVulkanRHI` tests passing):
+  - [x] **66.1. `TShapeCache.EnsureRHIShaders` & 8-Bit Permutation Bitmask Caching (`RHIShaderPermutationMask`)** — Completed & tested (`TestShapeCacheEnsureRHIShadersPermutationMaskRHI`).
+  - [x] **66.2. Automatic Material/Texture/AlphaTest Shader Specialization in `TX3DRendererShape.UploadRHIMaterialToCache`** — Completed & tested (`TestUploadRHIMaterialAutoSpecializesShapeShadersRHI`).
+  - [x] **66.3. Automatic Shadow-Map Depth-Only PSO Construction (`CastleShapeShadowDepthPSO`) in `TRenderer.BuildShapePipelineDesc`** — Completed & tested (`TestShadowMapDepthOnlyPipelineSpecializationRHI`).
