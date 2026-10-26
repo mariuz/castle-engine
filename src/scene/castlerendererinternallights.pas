@@ -39,6 +39,7 @@ type
     LightsDone: array of PLightInstance;
     FMaxLightsPerShape: Cardinal;
     FRHILightsBuffer: TRHIBuffer;
+    FRHILightsOwnerDevice: TRHIDevice;
     FLightsUniformBlock: TCastleLightsUniformBlock;
     function InsideLightRadius(const Light: TLightInstance; const Shader: TShader): Boolean;
     { This avoids configuring the same light many times in case of fixed-function.
@@ -263,7 +264,10 @@ end;
 
 destructor TLightsRenderer.Destroy;
 begin
-  FreeAndNil(FRHILightsBuffer);
+  if (FRHILightsBuffer <> nil) and (RHIDevice = FRHILightsOwnerDevice) then
+    FreeAndNil(FRHILightsBuffer)
+  else
+    FRHILightsBuffer := nil;
   inherited Destroy;
 end;
 
@@ -430,10 +434,13 @@ begin
   if RHIDevice = nil then
     Exit;
 
+  if (FRHILightsBuffer <> nil) and (FRHILightsOwnerDevice <> RHIDevice) then
+    FRHILightsBuffer := nil;
   if FRHILightsBuffer = nil then
   begin
     BufDesc := TRHIBufferDesc.Create(SizeOf(TCastleLightsUniformBlock), [buUniform], muCpuToGpu, 'CastleLightsUBO');
     FRHILightsBuffer := RHIDevice.CreateBuffer(BufDesc, @FLightsUniformBlock);
+    FRHILightsOwnerDevice := RHIDevice;
   end else
     FRHILightsBuffer.UploadData(FLightsUniformBlock, SizeOf(TCastleLightsUniformBlock));
 end;

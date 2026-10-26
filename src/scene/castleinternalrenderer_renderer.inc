@@ -87,6 +87,8 @@
     { Available between RenderBegin / RenderEnd. }
     LightsRenderer: TLightsRenderer;
     FRHISceneBuffer: TRHIBuffer;
+    FRHISceneDescriptorSetLayout: TRHIDescriptorSetLayout;
+    FRHISceneDescriptorSet: TRHIDescriptorSet;
     FRHISceneOwnerDevice: TRHIDevice;
     FSceneUniformBlock: TCastleSceneUniformBlock;
     FRHISceneBufferUploadCount: Cardinal;
@@ -265,8 +267,11 @@
     { Build and upload Set 0 Binding 0 Per-Pass Scene Camera + Fog UBO (TCastleSceneUniformBlock). }
     procedure BuildSceneUniformBlock(out UniformBlock: TCastleSceneUniformBlock);
     procedure UploadSceneUniformBlockToRHI;
+    function EnsureRHISceneDescriptorSet: TRHIDescriptorSet;
 
     property RHISceneBuffer: TRHIBuffer read FRHISceneBuffer;
+    property RHISceneDescriptorSetLayout: TRHIDescriptorSetLayout read FRHISceneDescriptorSetLayout;
+    property RHISceneDescriptorSet: TRHIDescriptorSet read FRHISceneDescriptorSet;
     property SceneUniformBlock: TCastleSceneUniformBlock read FSceneUniformBlock;
     property RHISceneBufferUploadCount: Cardinal read FRHISceneBufferUploadCount;
     property ActiveLightsRenderer: TLightsRenderer read LightsRenderer;
@@ -291,9 +296,16 @@ begin
   FreeAndNil(ShadowMapsShaders);
   FreeAndNil(VarianceShadowMapsShaders);
   if (FRHISceneBuffer <> nil) and (RHIDevice = FRHISceneOwnerDevice) then
-    FreeAndNil(FRHISceneBuffer)
-  else
+  begin
+    FreeAndNil(FRHISceneDescriptorSet);
+    FreeAndNil(FRHISceneDescriptorSetLayout);
+    FreeAndNil(FRHISceneBuffer);
+  end else
+  begin
+    FRHISceneDescriptorSet := nil;
+    FRHISceneDescriptorSetLayout := nil;
     FRHISceneBuffer := nil;
+  end;
   inherited;
 end;
 
@@ -354,7 +366,11 @@ begin
     Exit;
 
   if (FRHISceneBuffer <> nil) and (FRHISceneOwnerDevice <> RHIDevice) then
+  begin
+    FRHISceneDescriptorSet := nil;
+    FRHISceneDescriptorSetLayout := nil;
     FRHISceneBuffer := nil;
+  end;
 
   if FRHISceneBuffer = nil then
   begin
@@ -364,6 +380,47 @@ begin
   end else
     FRHISceneBuffer.UploadData(FSceneUniformBlock, SizeOf(TCastleSceneUniformBlock));
   Inc(FRHISceneBufferUploadCount);
+  EnsureRHISceneDescriptorSet;
+end;
+
+function TRenderer.EnsureRHISceneDescriptorSet: TRHIDescriptorSet;
+var
+  Bindings: array[0..1] of TRHIDescriptorBindingDesc;
+begin
+  if RHIDevice = nil then
+    Exit(nil);
+  if (FRHISceneOwnerDevice <> RHIDevice) then
+  begin
+    FRHISceneDescriptorSet := nil;
+    FRHISceneDescriptorSetLayout := nil;
+    FRHISceneBuffer := nil;
+  end;
+  if FRHISceneBuffer = nil then
+    UploadSceneUniformBlockToRHI;
+  if FRHISceneDescriptorSetLayout = nil then
+  begin
+    FillChar(Bindings, SizeOf(Bindings), 0);
+    Bindings[0].Binding := 0;
+    Bindings[0].DescriptorType := dtUniformBuffer;
+    Bindings[0].Count := 1;
+    Bindings[0].StageFlags := [ssVertex, ssFragment];
+    Bindings[1].Binding := 1;
+    Bindings[1].DescriptorType := dtUniformBuffer;
+    Bindings[1].Count := 1;
+    Bindings[1].StageFlags := [ssVertex, ssFragment];
+    FRHISceneDescriptorSetLayout := RHIDevice.CreateDescriptorSetLayout(Bindings);
+  end;
+  if (FRHISceneDescriptorSet = nil) and (FRHISceneDescriptorSetLayout <> nil) then
+    FRHISceneDescriptorSet := RHIDevice.CreateDescriptorSet(FRHISceneDescriptorSetLayout);
+  if FRHISceneDescriptorSet <> nil then
+  begin
+    if FRHISceneBuffer <> nil then
+      FRHISceneDescriptorSet.BindUniformBuffer(0, FRHISceneBuffer);
+    if (LightsRenderer <> nil) and (LightsRenderer.RHILightsBuffer <> nil) then
+      FRHISceneDescriptorSet.BindUniformBuffer(1, LightsRenderer.RHILightsBuffer);
+    FRHISceneDescriptorSet.Update;
+  end;
+  Result := FRHISceneDescriptorSet;
 end;
 
 function TRenderer.BumpMapping(const RenderOptions: TCastleRenderOptions): TBumpMapping;

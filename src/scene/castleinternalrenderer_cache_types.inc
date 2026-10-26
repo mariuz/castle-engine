@@ -127,6 +127,11 @@
     FRHIIndexBuffer: TRHIBuffer;
     FRHIJointBuffer: TRHIBuffer;
     FRHIMaterialBuffer: TRHIBuffer;
+    FRHIMaterialDescriptorLayout: TRHIDescriptorSetLayout;
+    FRHIMaterialDescriptorSet: TRHIDescriptorSet;
+    FRHISkinningDescriptorLayout: TRHIDescriptorSetLayout;
+    FRHISkinningDescriptorSet: TRHIDescriptorSet;
+    FRHIOwnerDevice: TRHIDevice;
     FRHIMaterialBlock: TCastleMaterialUniformBlock;
     FRHIMaterialUploadCount: Cardinal;
     FRHIUploadCount: Cardinal;
@@ -135,12 +140,16 @@
       but takes explicit DynamicGeometry. }
     procedure LoadArraysToVbo(const DynamicGeometry: boolean);
     procedure GLContextClose;
+    procedure EnsureRHIDeviceMatch;
   public
     constructor Create;
     destructor Destroy; override;
     procedure InvalidateVertexData(const Changed: TVboTypes);
     procedure UploadJointMatrices(const JointMatrices: Pointer; const Count: Cardinal);
     procedure UploadMaterialBlock(const AMatBlock: TCastleMaterialUniformBlock);
+    procedure BindMaterialTexturesToDescriptorSet(
+      const ABaseColorTex, ANormalTex, AMetallicRoughnessTex,
+            AEmissiveTex, AOcclusionTex: TRHITexture);
     { Debug description of this shape cache. }
     function ToString: String; override;
 
@@ -149,6 +158,8 @@
     property RHIIndexBuffer: TRHIBuffer read FRHIIndexBuffer;
     property RHIJointBuffer: TRHIBuffer read FRHIJointBuffer;
     property RHIMaterialBuffer: TRHIBuffer read FRHIMaterialBuffer;
+    property RHIMaterialDescriptorSet: TRHIDescriptorSet read FRHIMaterialDescriptorSet;
+    property RHISkinningDescriptorSet: TRHIDescriptorSet read FRHISkinningDescriptorSet;
     property RHIMaterialBlock: TCastleMaterialUniformBlock read FRHIMaterialBlock;
     property RHIMaterialUploadCount: Cardinal read FRHIMaterialUploadCount;
     property RHIUploadCount: Cardinal read FRHIUploadCount;
@@ -208,11 +219,59 @@ begin
   end;
 
   FreeAndNil(Vao);
+  if (FRHIOwnerDevice <> nil) and (RHIDevice = FRHIOwnerDevice) then
+  begin
+    FreeAndNil(FRHICoordBuffer);
+    FreeAndNil(FRHIAttribBuffer);
+    FreeAndNil(FRHIIndexBuffer);
+    FreeAndNil(FRHIJointBuffer);
+    FreeAndNil(FRHIMaterialBuffer);
+    FreeAndNil(FRHIMaterialDescriptorSet);
+    FreeAndNil(FRHIMaterialDescriptorLayout);
+    FreeAndNil(FRHISkinningDescriptorSet);
+    FreeAndNil(FRHISkinningDescriptorLayout);
+  end else
+  begin
+    FRHICoordBuffer := nil;
+    FRHIAttribBuffer := nil;
+    FRHIIndexBuffer := nil;
+    FRHIJointBuffer := nil;
+    FRHIMaterialBuffer := nil;
+    FRHIMaterialDescriptorSet := nil;
+    FRHIMaterialDescriptorLayout := nil;
+    FRHISkinningDescriptorSet := nil;
+    FRHISkinningDescriptorLayout := nil;
+  end;
+  FRHIOwnerDevice := nil;
+  if False then
+  begin
   FreeAndNil(FRHICoordBuffer);
   FreeAndNil(FRHIAttribBuffer);
   FreeAndNil(FRHIIndexBuffer);
   FreeAndNil(FRHIJointBuffer);
   FreeAndNil(FRHIMaterialBuffer);
+  FreeAndNil(FRHIMaterialDescriptorSet);
+  FreeAndNil(FRHIMaterialDescriptorLayout);
+  FreeAndNil(FRHISkinningDescriptorSet);
+  FreeAndNil(FRHISkinningDescriptorLayout);
+  end;
+end;
+
+procedure TShapeCache.EnsureRHIDeviceMatch;
+begin
+  if FRHIOwnerDevice <> RHIDevice then
+  begin
+    FRHICoordBuffer := nil;
+    FRHIAttribBuffer := nil;
+    FRHIIndexBuffer := nil;
+    FRHIJointBuffer := nil;
+    FRHIMaterialBuffer := nil;
+    FRHIMaterialDescriptorSet := nil;
+    FRHIMaterialDescriptorLayout := nil;
+    FRHISkinningDescriptorSet := nil;
+    FRHISkinningDescriptorLayout := nil;
+    FRHIOwnerDevice := RHIDevice;
+  end;
 end;
 
 procedure TShapeCache.InvalidateVertexData(const Changed: TVboTypes);
@@ -224,11 +283,13 @@ procedure TShapeCache.UploadJointMatrices(const JointMatrices: Pointer; const Co
 var
   BufDesc: TRHIBufferDesc;
   DataSize: PtrUInt;
+  Bindings: array[0..0] of TRHIDescriptorBindingDesc;
 begin
   if (RHIDevice = nil) or (Count = 0) then
     Exit;
 
   DataSize := Count * SizeOf(TMatrix4);
+  EnsureRHIDeviceMatch;
   if (FRHIJointBuffer <> nil) and (FRHIJointBuffer.Desc.Size = DataSize) then
     FRHIJointBuffer.UploadData(JointMatrices^, DataSize)
   else
@@ -237,15 +298,34 @@ begin
     BufDesc := TRHIBufferDesc.Create(DataSize, [buUniform], muCpuToGpu);
     FRHIJointBuffer := RHIDevice.CreateBuffer(BufDesc, JointMatrices);
   end;
+  if FRHISkinningDescriptorLayout = nil then
+  begin
+    FillChar(Bindings, SizeOf(Bindings), 0);
+    Bindings[0].Binding := 0;
+    Bindings[0].DescriptorType := dtUniformBuffer;
+    Bindings[0].Count := 1;
+    Bindings[0].StageFlags := [ssVertex];
+    FRHISkinningDescriptorLayout := RHIDevice.CreateDescriptorSetLayout(Bindings);
+  end;
+  if (FRHISkinningDescriptorSet = nil) and (FRHISkinningDescriptorLayout <> nil) then
+    FRHISkinningDescriptorSet := RHIDevice.CreateDescriptorSet(FRHISkinningDescriptorLayout);
+  if (FRHISkinningDescriptorSet <> nil) and (FRHIJointBuffer <> nil) then
+  begin
+    FRHISkinningDescriptorSet.BindUniformBuffer(0, FRHIJointBuffer);
+    FRHISkinningDescriptorSet.Update;
+  end;
 end;
 
 procedure TShapeCache.UploadMaterialBlock(const AMatBlock: TCastleMaterialUniformBlock);
 var
   BufDesc: TRHIBufferDesc;
+  Bindings: array[0..5] of TRHIDescriptorBindingDesc;
+  I: Integer;
 begin
   FRHIMaterialBlock := AMatBlock;
   if RHIDevice = nil then
     Exit;
+  EnsureRHIDeviceMatch;
 
   if FRHIMaterialBuffer = nil then
   begin
@@ -255,7 +335,68 @@ begin
     FRHIMaterialBuffer.UploadData(FRHIMaterialBlock, SizeOf(TCastleMaterialUniformBlock));
   begin
     Inc(FRHIMaterialUploadCount);
+  if FRHIMaterialDescriptorLayout = nil then
+  begin
+    FillChar(Bindings, SizeOf(Bindings), 0);
+    Bindings[0].Binding := 0;
+    Bindings[0].DescriptorType := dtUniformBuffer;
+    Bindings[0].Count := 1;
+    Bindings[0].StageFlags := [ssVertex, ssFragment];
+    for I := 1 to 5 do
+    begin
+      Bindings[I].Binding := Cardinal(I);
+      Bindings[I].DescriptorType := dtCombinedImageSampler;
+      Bindings[I].Count := 1;
+      Bindings[I].StageFlags := [ssFragment];
+    end;
+    FRHIMaterialDescriptorLayout := RHIDevice.CreateDescriptorSetLayout(Bindings);
   end;
+  if (FRHIMaterialDescriptorSet = nil) and (FRHIMaterialDescriptorLayout <> nil) then
+    FRHIMaterialDescriptorSet := RHIDevice.CreateDescriptorSet(FRHIMaterialDescriptorLayout);
+  if (FRHIMaterialDescriptorSet <> nil) and (FRHIMaterialBuffer <> nil) then
+  begin
+    FRHIMaterialDescriptorSet.BindUniformBuffer(0, FRHIMaterialBuffer);
+    FRHIMaterialDescriptorSet.Update;
+  end;
+  end;
+end;
+
+procedure TShapeCache.BindMaterialTexturesToDescriptorSet(
+  const ABaseColorTex, ANormalTex, AMetallicRoughnessTex,
+        AEmissiveTex, AOcclusionTex: TRHITexture);
+var
+  AnyBound: Boolean;
+begin
+  if FRHIMaterialDescriptorSet = nil then
+    Exit;
+  AnyBound := False;
+  if ABaseColorTex <> nil then
+  begin
+    FRHIMaterialDescriptorSet.BindTexture(1, ABaseColorTex, nil);
+    AnyBound := True;
+  end;
+  if ANormalTex <> nil then
+  begin
+    FRHIMaterialDescriptorSet.BindTexture(2, ANormalTex, nil);
+    AnyBound := True;
+  end;
+  if AMetallicRoughnessTex <> nil then
+  begin
+    FRHIMaterialDescriptorSet.BindTexture(3, AMetallicRoughnessTex, nil);
+    AnyBound := True;
+  end;
+  if AEmissiveTex <> nil then
+  begin
+    FRHIMaterialDescriptorSet.BindTexture(4, AEmissiveTex, nil);
+    AnyBound := True;
+  end;
+  if AOcclusionTex <> nil then
+  begin
+    FRHIMaterialDescriptorSet.BindTexture(5, AOcclusionTex, nil);
+    AnyBound := True;
+  end;
+  if AnyBound then
+    FRHIMaterialDescriptorSet.Update;
 end;
 
 procedure TShapeCache.LoadArraysToVbo(const DynamicGeometry: boolean);
@@ -374,6 +515,7 @@ begin
     end;
 
     VboCoordinatePreserveGeometryOrder := Arrays.CoordinatePreserveGeometryOrder;
+    EnsureRHIDeviceMatch;
 
     BufferData(vtCoordinate, btArray,
       Arrays.Count * Arrays.CoordinateSize, Arrays.CoordinateArray);
@@ -395,6 +537,7 @@ begin
   begin
     Assert(not Arrays.DataFreed);
     VboCoordinatePreserveGeometryOrder := Arrays.CoordinatePreserveGeometryOrder;
+    EnsureRHIDeviceMatch;
     VboAllocatedUsage := DataUsage;
     VboAllocatedSize[vtCoordinate] := Arrays.Count * Arrays.CoordinateSize;
     VboAllocatedSize[vtAttribute] := Arrays.Count * Arrays.AttributeSize;

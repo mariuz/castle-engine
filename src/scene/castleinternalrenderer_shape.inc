@@ -507,6 +507,9 @@ begin
   if RHIDevice <> nil then
   begin
     ExtractRHIMaterialTextures(BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex);
+    if Cache <> nil then
+      Cache.BindMaterialTexturesToDescriptorSet(
+        BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex);
     if BaseColorTex <> nil then
       BaseColorIdx := RHIDevice.RegisterBindlessTexture(BaseColorTex)
     else
@@ -576,6 +579,12 @@ begin
     I,
     AMaterialIndex);
   ACmd.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConstants), PushConstants);
+  if Cache.RHIMaterialDescriptorSet <> nil then
+    ACmd.BindDescriptorSet(1, Cache.RHIMaterialDescriptorSet, [])
+  else if (RHIDevice <> nil) and (RHIDevice.GetBindlessDescriptorSet <> nil) then
+    ACmd.BindDescriptorSet(1, RHIDevice.GetBindlessDescriptorSet, []);
+  if Cache.RHISkinningDescriptorSet <> nil then
+    ACmd.BindDescriptorSet(2, Cache.RHISkinningDescriptorSet, []);
 
   if Cache.RHICoordinateBuffer <> nil then
   begin

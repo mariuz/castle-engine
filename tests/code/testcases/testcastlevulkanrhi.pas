@@ -255,6 +255,9 @@ type
     procedure TestBindlessManagerMaterialTableAndAutoSSBOFlushRHI;
     procedure TestShapeAutoBindlessTextureAndMaterialRegistrationRHI;
     procedure TestViewportMultiShapeBindlessMaterialIndicesRHI;
+    procedure TestRendererSceneAndLightsDescriptorSetRHI;
+    procedure TestShapeCacheMaterialAndSkinningDescriptorSetsRHI;
+    procedure TestViewportRenderBindsSet0Set1DescriptorSetsRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -12644,6 +12647,235 @@ begin
     AssertTrue('EndFrameAndPresent must have flushed MaterialSSBOBuffer',
       (Device.BindlessTextureManager.MaterialSSBOBuffer <> nil) and
       (Device.BindlessTextureManager.MaterialFlushCount >= 1));
+  finally
+    FreeAndNil(Container);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRendererSceneAndLightsDescriptorSetRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Renderer: TRenderer;
+  Cam: TRenderingCamera;
+  Stats: TRenderStatistics;
+  DescSet: TRHIDescriptorSet;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($66A1)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Renderer := TRenderer.Create(nil);
+  Cam := TRenderingCamera.Create;
+  try
+    FillChar(Stats, SizeOf(Stats), 0);
+    Renderer.RenderBegin(nil, Cam, nil, 0, 0, 0, @Stats);
+    try
+      AssertTrue('Renderer.ActiveLightsRenderer must be non-nil inside RenderBegin',
+        Renderer.ActiveLightsRenderer <> nil);
+      Renderer.ActiveLightsRenderer.UploadLightsToRHI;
+      DescSet := Renderer.EnsureRHISceneDescriptorSet;
+      AssertTrue('EnsureRHISceneDescriptorSet must allocate Set 0 descriptor set',
+        DescSet <> nil);
+      AssertTrue('Renderer.RHISceneDescriptorSetLayout must be allocated',
+        Renderer.RHISceneDescriptorSetLayout <> nil);
+      AssertTrue('Renderer.RHISceneBuffer must be allocated',
+        Renderer.RHISceneBuffer <> nil);
+      AssertTrue('ActiveLightsRenderer.RHILightsBuffer must be allocated',
+        Renderer.ActiveLightsRenderer.RHILightsBuffer <> nil);
+      AssertTrue('Set 0 TVulkanRHIDescriptorSet.UpdateCount must be >= 1',
+        (DescSet as TVulkanRHIDescriptorSet).UpdateCount >= 1);
+    finally
+      Renderer.RenderEnd;
+    end;
+  finally
+    FreeAndNil(Cam);
+    FreeAndNil(Renderer);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestShapeCacheMaterialAndSkinningDescriptorSetsRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  BoxNode: TBoxNode;
+  App: TAppearanceNode;
+  PhysMat: TPhysicalMaterialNode;
+  PixTex: TPixelTextureNode;
+  ShapeList: TShapeList;
+  RShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  JointMats: array[0..1] of TMatrix4;
+  Cmd: TRHICommandList;
+  VkCmd: TVulkanRHICommandList;
+  Draws: Cardinal;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($66A2)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Viewport := TCastleViewport.Create(nil);
+  Scene := TCastleScene.Create(nil);
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    BoxNode := TBoxNode.Create;
+    BoxNode.Size := Vector3(3.0, 3.0, 3.0);
+    ShapeNode.Geometry := BoxNode;
+    App := TAppearanceNode.Create;
+    PhysMat := TPhysicalMaterialNode.Create;
+    PhysMat.BaseColor := Vector3(0.5, 0.7, 0.9);
+    PixTex := TPixelTextureNode.Create;
+    PixTex.FdImage.Value := TRGBImage.Create(2, 2);
+    PhysMat.BaseTexture := PixTex;
+    App.Material := PhysMat;
+    ShapeNode.Appearance := App;
+    Root.AddChildren(ShapeNode);
+
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+    Viewport.PrepareResources(Scene);
+
+    ShapeList := Scene.Shapes.TraverseList(True);
+    AssertEquals('Scene must have 1 shape', 1, ShapeList.Count);
+    RShape := TX3DRendererShape(ShapeList[0]);
+    AssertTrue('RShape.Cache must be prepared', RShape.Cache <> nil);
+
+    RShape.UploadRHIMaterialToCache(ShadingModel);
+    JointMats[0] := TMatrix4.Identity;
+    JointMats[1] := TMatrix4.Identity;
+    RShape.Cache.UploadJointMatrices(@JointMats[0], 2);
+
+    AssertTrue('RShape.Cache.RHIMaterialDescriptorSet (Set 1) must be created',
+      RShape.Cache.RHIMaterialDescriptorSet <> nil);
+    AssertTrue('RShape.Cache.RHISkinningDescriptorSet (Set 2) must be created',
+      RShape.Cache.RHISkinningDescriptorSet <> nil);
+
+    Cmd := Device.BeginFrame;
+    try
+      Draws := RShape.RecordRHIDraw(Cmd, TMatrix4.Identity, RShape.RHIBindlessMaterialIndex);
+      VkCmd := Cmd as TVulkanRHICommandList;
+      AssertEquals('RecordRHIDraw must record 1 draw call', 1, Integer(Draws));
+      AssertTrue('Set 1 must be bound to RHIMaterialDescriptorSet',
+        VkCmd.BoundDescriptorSets[1] = RShape.Cache.RHIMaterialDescriptorSet);
+      AssertTrue('Set 2 must be bound to RHISkinningDescriptorSet',
+        VkCmd.BoundDescriptorSets[2] = RShape.Cache.RHISkinningDescriptorSet);
+      AssertTrue('DescriptorSetBindCount must be >= 2',
+        VkCmd.DescriptorSetBindCount >= 2);
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Scene);
+    FreeAndNil(Viewport);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportRenderBindsSet0Set1DescriptorSetsRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  DirLight: TDirectionalLightNode;
+  ShapeNode: TShapeNode;
+  BoxNode: TBoxNode;
+  App: TAppearanceNode;
+  PhysMat: TPhysicalMaterialNode;
+  Cmd: TRHICommandList;
+  VkCmd: TVulkanRHICommandList;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($66A3)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 8.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Scene := TCastleScene.Create(Viewport);
+    Root := TX3DRootNode.Create;
+
+    DirLight := TDirectionalLightNode.Create;
+    DirLight.Global := True;
+    Root.AddChildren(DirLight);
+
+    ShapeNode := TShapeNode.Create;
+    BoxNode := TBoxNode.Create;
+    BoxNode.Size := Vector3(2.5, 2.5, 2.5);
+    ShapeNode.Geometry := BoxNode;
+    App := TAppearanceNode.Create;
+    PhysMat := TPhysicalMaterialNode.Create;
+    PhysMat.BaseColor := Vector3(0.8, 0.3, 0.2);
+    App.Material := PhysMat;
+    ShapeNode.Appearance := App;
+    Root.AddChildren(ShapeNode);
+
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+
+    Cmd := Device.BeginFrame;
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+      VkCmd := Cmd as TVulkanRHICommandList;
+      AssertTrue('Viewport render must bind Set 0 (Global Scene + Lights UBOs)',
+        VkCmd.BoundDescriptorSets[0] <> nil);
+      AssertTrue('Viewport render must bind Set 1 (Material UBO + Textures)',
+        VkCmd.BoundDescriptorSets[1] <> nil);
+      AssertTrue('DescriptorSetBindCount must be >= 2 after rendering lit 3D shape',
+        VkCmd.DescriptorSetBindCount >= 2);
+      AssertTrue('Device.GetBindlessDescriptorSet must return non-nil Set 1 bindless set',
+        Device.GetBindlessDescriptorSet <> nil);
+    finally
+      Device.EndFrameAndPresent;
+    end;
   finally
     FreeAndNil(Container);
     RenderContext := SavedCtx;

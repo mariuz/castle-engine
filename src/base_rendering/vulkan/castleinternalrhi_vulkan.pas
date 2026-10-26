@@ -259,6 +259,9 @@ type
     FDynamicScissorRect: TRectangle;
     FDynamicDepthBiasConstant: Single;
     FDynamicDepthBiasSlope: Single;
+    FBoundDescriptorSets: array[0..3] of TRHIDescriptorSet;
+    FDescriptorSetBindCount: Cardinal;
+    function GetBoundDescriptorSet(const ASetIndex: Cardinal): TRHIDescriptorSet;
   public
     constructor Create(const ADevice: TVulkanRHIDevice; const AQueueFamilyIndex: Cardinal;
       const ALevel: TRHICommandListLevel = cllPrimary);
@@ -364,6 +367,8 @@ type
     property DynamicScissorRect: TRectangle read FDynamicScissorRect;
     property DynamicDepthBiasConstant: Single read FDynamicDepthBiasConstant;
     property DynamicDepthBiasSlope: Single read FDynamicDepthBiasSlope;
+    property BoundDescriptorSets[const ASetIndex: Cardinal]: TRHIDescriptorSet read GetBoundDescriptorSet;
+    property DescriptorSetBindCount: Cardinal read FDescriptorSetBindCount;
   end;
 
   { -------------------------------------------------------------------------- }
@@ -3915,6 +3920,7 @@ type
     function RegisterOrUpdateBindlessMaterial(var AMaterialIndex: Cardinal;
       var AAlreadyRegistered: Boolean;
       const AEntryData; const AEntrySizeInBytes: Cardinal): Cardinal; override;
+    function GetBindlessDescriptorSet: TRHIDescriptorSet; override;
 
     property Handle: VkDevice read FDevice;
     property PhysicalDevice: VkPhysicalDevice read FPhysicalDevice;
@@ -6662,6 +6668,8 @@ begin
   FIndirectDrawCallCount := 0;
   FIndirectCountDrawCallCount := 0;
   FLastEffectiveIndirectDrawCount := 0;
+  FillChar(FBoundDescriptorSets, SizeOf(FBoundDescriptorSets), 0);
+  FDescriptorSetBindCount := 0;
 end;
 
 procedure TVulkanRHICommandList.EndRecording;
@@ -7285,6 +7293,14 @@ begin
   end;
 end;
 
+function TVulkanRHICommandList.GetBoundDescriptorSet(const ASetIndex: Cardinal): TRHIDescriptorSet;
+begin
+  if ASetIndex <= High(FBoundDescriptorSets) then
+    Result := FBoundDescriptorSets[ASetIndex]
+  else
+    Result := nil;
+end;
+
 procedure TVulkanRHICommandList.BindDescriptorSet(const SetIndex: Cardinal;
   const DescriptorSet: TRHIDescriptorSet; const DynamicOffsets: array of Cardinal);
 var
@@ -7292,6 +7308,9 @@ var
   OffsetPtr: PUInt32;
 begin
   if DescriptorSet = nil then Exit;
+  if SetIndex <= High(FBoundDescriptorSets) then
+    FBoundDescriptorSets[SetIndex] := DescriptorSet;
+  Inc(FDescriptorSetBindCount);
   SetHandle := (DescriptorSet as TVulkanRHIDescriptorSet).Handle;
   if Length(DynamicOffsets) > 0 then
     OffsetPtr := @DynamicOffsets[0]
@@ -20468,6 +20487,17 @@ begin
       AMaterialIndex, AAlreadyRegistered, Entry);
   end else
     Result := AMaterialIndex;
+end;
+
+function TVulkanRHIDevice.GetBindlessDescriptorSet: TRHIDescriptorSet;
+begin
+  if FBindlessTextureManager <> nil then
+  begin
+    FBindlessTextureManager.EnsureDescriptorSetCreated;
+    FBindlessTextureManager.FlushPendingUpdates;
+    Result := FBindlessTextureManager.DescriptorSet;
+  end else
+    Result := nil;
 end;
 
 function TVulkanRHIDevice.BeginSingleTimeCommands: VkCommandBuffer;

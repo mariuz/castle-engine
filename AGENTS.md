@@ -77,8 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–62**: **COMPLETED** (100%).
-- **Phase 63 (Automatic Bindless Texture & Material SSBO Table Registration in `TCastleVulkanBindlessTextureManager` and `TX3DRendererShape`)**: **COMPLETED** (100%, 784/784 total engine tests and 215/215 `TTestCastleVulkanRHI` tests passing):
-  - [x] **63.1. `TCastleVulkanBindlessTextureManager.RegisterOrUpdateMaterial` & `FlushMaterialTableToSSBO` (Managed Set 1, Binding 1 Material SSBO Table)** — Completed & tested (`TestBindlessManagerMaterialTableAndAutoSSBOFlushRHI`).
-  - [x] **63.2. `TRHIDevice.RegisterBindlessTexture` / `RegisterOrUpdateBindlessMaterial` & `TX3DRendererShape.UploadRHIMaterialToCache` Auto-Registration** — Completed & tested (`TestShapeAutoBindlessTextureAndMaterialRegistrationRHI`).
-  - [x] **63.3. Multi-Shape `TCastleViewport` Bindless Material Indexing & End-of-Frame SSBO Flush** — Completed & tested (`TestViewportMultiShapeBindlessMaterialIndicesRHI`).
+- **Phases 1–63**: **COMPLETED** (100%).
+- **Phase 64 (Automatic RHI Descriptor Set Creation, Updating & Command-List Binding for Set 0 Scene/Lights, Set 1 Material/Bindless, and Set 2 Skinning)**: **COMPLETED** (100%, 787/787 total engine tests and 218/218 `TTestCastleVulkanRHI` tests passing):
+  - [x] **64.1. `TRenderer.EnsureRHISceneDescriptorSet` (Set 0 Global Scene + Lights Descriptor Set)** — Completed & tested (`TestRendererSceneAndLightsDescriptorSetRHI`).
+  - [x] **64.2. `TShapeCache.RHIMaterialDescriptorSet` (Set 1), `BindMaterialTexturesToDescriptorSet` & `RHISkinningDescriptorSet` (Set 2)** — Completed & tested (`TestShapeCacheMaterialAndSkinningDescriptorSetsRHI`).
+  - [x] **64.3. Automatic Set 0, Set 1 & Set 2 Command-List Binding in `TBaseCoordinateRenderer.Render` & `TX3DRendererShape.RecordRHIDraw`** — Completed & tested (`TestViewportRenderBindsSet0Set1DescriptorSetsRHI`).

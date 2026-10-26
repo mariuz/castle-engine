@@ -552,6 +552,16 @@ begin
           Shape.RHIBindlessMaterialIndex);
         ActiveCommandList.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConstants), PushConstants);
 
+        { 1b. Bind Set 0 (Global Scene + Lights UBOs), Set 1 (Material UBO / Bindless Table), and Set 2 (Skinning UBO) }
+        if (Renderer <> nil) and (Renderer.EnsureRHISceneDescriptorSet <> nil) then
+          ActiveCommandList.BindDescriptorSet(0, Renderer.RHISceneDescriptorSet, []);
+        if (Shape.Cache <> nil) and (Shape.Cache.RHIMaterialDescriptorSet <> nil) then
+          ActiveCommandList.BindDescriptorSet(1, Shape.Cache.RHIMaterialDescriptorSet, [])
+        else if (RHIDevice <> nil) and (RHIDevice.GetBindlessDescriptorSet <> nil) then
+          ActiveCommandList.BindDescriptorSet(1, RHIDevice.GetBindlessDescriptorSet, []);
+        if (Shape.Cache <> nil) and (Shape.Cache.RHISkinningDescriptorSet <> nil) then
+          ActiveCommandList.BindDescriptorSet(2, Shape.Cache.RHISkinningDescriptorSet, []);
+
         { 2. Bind vertex buffers (Coordinate and Attribute) }
         if (Shape.Cache <> nil) and (Shape.Cache.RHICoordinateBuffer <> nil) then
         begin

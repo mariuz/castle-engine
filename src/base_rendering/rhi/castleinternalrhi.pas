@@ -869,6 +869,10 @@ type
       var AAlreadyRegistered: Boolean;
       const AEntryData; const AEntrySizeInBytes: Cardinal): Cardinal; virtual;
 
+    { Returns the device's global bindless descriptor set (Set 1, holding castle_BindlessTextures[]
+      at Binding 0 and CastleBindlessMaterialsBlock at Binding 1), or nil if not supported. }
+    function GetBindlessDescriptorSet: TRHIDescriptorSet; virtual;
+
     property Capabilities: TRHIDeviceCapabilities read FCapabilities;
     { Current frame-in-flight index (0 .. MaxFramesInFlight - 1) }
     property FrameIndex: Cardinal read FFrameIndex;
@@ -1715,6 +1719,11 @@ function TRHIDevice.RegisterOrUpdateBindlessMaterial(var AMaterialIndex: Cardina
 begin
   AAlreadyRegistered := True;
   Result := AMaterialIndex;
+end;
+
+function TRHIDevice.GetBindlessDescriptorSet: TRHIDescriptorSet;
+begin
+  Result := nil;
 end;
 
 function TRHIDevice.GetInformationStringSummary: String;
