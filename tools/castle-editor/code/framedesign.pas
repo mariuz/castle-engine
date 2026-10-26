@@ -614,6 +614,15 @@ type
       MenuTreeViewItemQuickComponentFactory: TMenuItem;
       MenuTreeViewItemQuickShapeGenerator: TMenuItem;
       MenuTreeViewItemQuickInteractiveForm: TMenuItem;
+      MenuTreeViewItemQuickTouchNav: TMenuItem;
+      MenuTreeViewItemQuickToggleGroup: TMenuItem;
+      MenuTreeViewItemNineSliceSetup: TMenuItem;
+      MenuTreeViewItemMultiLightTweaker: TMenuItem;
+      MenuTreeViewSubmenu3DTools: TMenuItem;
+      MenuTreeViewSubmenu2DTools: TMenuItem;
+      MenuTreeViewSubmenuBatchTools: TMenuItem;
+      MenuTreeViewSubmenuDuplicate: TMenuItem;
+      MenuTreeViewSubmenuSelect: TMenuItem;
       FComponentPresets: TStringList;
       FComponentNotes: TStringList;
       FCopiedComponentPropsJson: String;
@@ -917,6 +926,10 @@ type
     procedure MenuTreeViewItemQuickComponentFactoryClick(Sender: TObject);
     procedure MenuTreeViewItemQuickShapeGeneratorClick(Sender: TObject);
     procedure MenuTreeViewItemQuickInteractiveFormClick(Sender: TObject);
+    procedure MenuTreeViewItemQuickTouchNavClick(Sender: TObject);
+    procedure MenuTreeViewItemQuickToggleGroupClick(Sender: TObject);
+    procedure MenuTreeViewItemNineSliceSetupClick(Sender: TObject);
+    procedure MenuTreeViewItemMultiLightTweakerClick(Sender: TObject);
     procedure MenuTreeViewItemGroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemUngroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemArrayDuplicateClick(Sender: TObject);
@@ -2218,6 +2231,21 @@ type
     procedure ApplyQuickInteractiveForm(const FormPreset: Integer;
       const AddPeriodicTimer: Boolean; const TimerIntervalSec: Single);
     procedure ShowQuickInteractiveFormDialog;
+    procedure ApplyQuickTouchNavigation(const TouchPreset: Integer;
+      const ControlScale: Single; const AutoTouchDevice: Boolean);
+    procedure ShowQuickTouchNavigationDialog;
+    procedure ApplyQuickToggleGroup(const TogglePreset: Integer;
+      const UsePillToggleButtons: Boolean; const FontSizeVal: Single);
+    procedure ShowQuickToggleGroupDialog;
+    procedure ApplyNineSliceSetup(const MarginLeft, MarginRight, MarginTop,
+      MarginBottom: Single; const TargetW, TargetH: Single;
+      const ImageUrl: String; const SmoothScale: Boolean);
+    procedure ShowNineSliceSetupDialog;
+    procedure ApplyMultiLightTweaker(const TempPreset: Integer;
+      const IntensityMult: Single; const ShadowPolicy: Integer;
+      const EntireDesign: Boolean);
+    procedure ShowMultiLightTweakerDialog;
+    procedure OrganizeHierarchyContextMenuSubmenus;
     procedure SaveCameraBookmark(const Slot: Integer);
     procedure RecallCameraBookmark(const Slot: Integer);
     procedure AdjustCameraSpeed(const Factor: Single);
@@ -7018,6 +7046,26 @@ begin
   MenuTreeViewItemQuickInteractiveForm.OnClick := @MenuTreeViewItemQuickInteractiveFormClick;
   MenuTreeView.Items.Add(MenuTreeViewItemQuickInteractiveForm);
 
+  MenuTreeViewItemQuickTouchNav := TMenuItem.Create(Self);
+  MenuTreeViewItemQuickTouchNav.Caption := 'Quick 2D Touch Navigation (TCastleTouchNavigation) & Mobile Virtual Joystick Setup... (Shift: Dual Touchsticks)';
+  MenuTreeViewItemQuickTouchNav.OnClick := @MenuTreeViewItemQuickTouchNavClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemQuickTouchNav);
+
+  MenuTreeViewItemQuickToggleGroup := TMenuItem.Create(Self);
+  MenuTreeViewItemQuickToggleGroup.Caption := 'Quick 2D Checkbox (TCastleCheckbox) & Toggle Pill Settings Card Builder... (Shift: Graphics Toggles)';
+  MenuTreeViewItemQuickToggleGroup.OnClick := @MenuTreeViewItemQuickToggleGroupClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemQuickToggleGroup);
+
+  MenuTreeViewItemNineSliceSetup := TMenuItem.Create(Self);
+  MenuTreeViewItemNineSliceSetup.Caption := 'Quick 2D Nine-Slice (ProtectedSides) Scalable Frame & Button Skin Configurator... (Shift: 16px 9-Slice)';
+  MenuTreeViewItemNineSliceSetup.OnClick := @MenuTreeViewItemNineSliceSetupClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemNineSliceSetup);
+
+  MenuTreeViewItemMultiLightTweaker := TMenuItem.Create(Self);
+  MenuTreeViewItemMultiLightTweaker.Caption := 'Quick 3D Multi-Light Kelvin Color Temperature, Intensity & Shadow Tweaker... (Shift: Golden Hour)';
+  MenuTreeViewItemMultiLightTweaker.OnClick := @MenuTreeViewItemMultiLightTweakerClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemMultiLightTweaker);
+
   MenuTreeViewItemGroupSelected := TMenuItem.Create(Self);
   MenuTreeViewItemGroupSelected.Caption := 'Group Selected Under New Transform (Ctrl+G)';
   MenuTreeViewItemGroupSelected.OnClick := @MenuTreeViewItemGroupSelectedClick;
@@ -7282,6 +7330,8 @@ begin
   MenuTreeViewItemCollapseAll.Caption := 'Collapse Subtree';
   MenuTreeViewItemCollapseAll.OnClick := @MenuTreeViewItemCollapseAllClick;
   MenuTreeView.Items.Add(MenuTreeViewItemCollapseAll);
+
+  OrganizeHierarchyContextMenuSubmenus;
 
   ControlsTree.OnDblClick := @ControlsTreeDblClick;
   ControlsTree.OnKeyDown := @ControlsTreeKeyDown;
@@ -43963,6 +44013,1067 @@ begin
     ShowQuickInteractiveFormDialog;
 end;
 
+procedure TDesignFrame.ApplyQuickTouchNavigation(const TouchPreset: Integer;
+  const ControlScale: Single; const AutoTouchDevice: Boolean);
+var
+  ParentUI: TCastleUserInterface;
+  TouchNav: TCastleTouchNavigation;
+  TargetVP: TCastleViewport;
+begin
+  if DesignOwner = nil then Exit;
+
+  TargetVP := CurrentViewport;
+  TouchNav := nil;
+  ParentUI := nil;
+
+  if SelectedUserInterface is TCastleTouchNavigation then
+  begin
+    TouchNav := TCastleTouchNavigation(SelectedUserInterface);
+    ParentUI := TouchNav.Parent;
+  end else
+  if TargetVP <> nil then
+    ParentUI := TargetVP
+  else
+  if SelectedUserInterface <> nil then
+    ParentUI := SelectedUserInterface
+  else
+  if FDesignRoot is TCastleUserInterface then
+    ParentUI := TCastleUserInterface(FDesignRoot);
+
+  if (TouchNav = nil) and (ParentUI = nil) then
+  begin
+    ErrorBox('Select a TCastleViewport or 2D UI container first.');
+    Exit;
+  end;
+
+  if TouchNav = nil then
+  begin
+    TouchNav := TCastleTouchNavigation.Create(DesignOwner);
+    TouchNav.Name := ProposeComponentName(TCastleTouchNavigation, DesignOwner);
+    TouchNav.FullSize := true;
+    ParentUI.InsertFront(TouchNav);
+  end;
+
+  if (TouchNav.Viewport = nil) and (TargetVP <> nil) then
+    TouchNav.Viewport := TargetVP;
+
+  TouchNav.Scale := Max(0.25, ControlScale);
+  TouchNav.AutoTouchInterface := AutoTouchDevice;
+
+  case TouchPreset of
+    0: // Dual Virtual Touchsticks (Walk + Rotate)
+      begin
+        TouchNav.AutoWalkTouchInterface := tiWalkRotate;
+        if not AutoTouchDevice then
+          TouchNav.TouchInterface := tiWalkRotate;
+      end;
+    1: // Single Walk + Side-Rotate Stick
+      begin
+        TouchNav.AutoWalkTouchInterface := tiWalk;
+        if not AutoTouchDevice then
+          TouchNav.TouchInterface := tiWalk;
+      end;
+    2: // Dual 3D Flight + Walk Touchsticks (tiFlyWalk)
+      begin
+        TouchNav.AutoWalkTouchInterface := tiFlyWalk;
+        if not AutoTouchDevice then
+          TouchNav.TouchInterface := tiFlyWalk;
+      end;
+    else // 3: 2D / Examine Panning Touchstick (tiPan)
+      begin
+        TouchNav.AutoExamineTouchInterface := tiPan;
+        if not AutoTouchDevice then
+          TouchNav.TouchInterface := tiPan;
+      end;
+  end;
+
+  UpdateDesign;
+  SetSelectedComponent(TouchNav);
+  ModifiedOutsideObjectInspector(
+    Format('Configure TCastleTouchNavigation (%s)', [TouchNav.Name]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowQuickTouchNavigationDialog;
+var
+  Dialog: TForm;
+  LblPreset, LblScale: TLabel;
+  ComboPreset: TComboBox;
+  SpinScale: TFloatSpinEdit;
+  CheckAuto: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if DesignOwner = nil then Exit;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 2D Touch Navigation (TCastleTouchNavigation) & Mobile Joystick Setup';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.AutoSize := true;
+    Dialog.ChildSizing.LeftRightSpacing := 14;
+    Dialog.ChildSizing.TopBottomSpacing := 12;
+    Dialog.ChildSizing.VerticalSpacing := 8;
+    Dialog.Constraints.MinWidth := 470;
+
+    LblPreset := TLabel.Create(Dialog);
+    LblPreset.Caption := 'Touch Navigation Virtual Joystick Layout:';
+    LblPreset.Parent := Dialog;
+
+    ComboPreset := TComboBox.Create(Dialog);
+    ComboPreset.Style := csDropDownList;
+    ComboPreset.Items.Add('Dual Virtual Touchsticks — Left Walk + Right Look/Rotate (tiWalkRotate)');
+    ComboPreset.Items.Add('Single Left Touchstick — Walk + Side Turn (tiWalk)');
+    ComboPreset.Items.Add('Dual 3D Flight & Walk Touchsticks (tiFlyWalk)');
+    ComboPreset.Items.Add('Examine / 2D Camera Pan Touchstick (tiPan)');
+    ComboPreset.ItemIndex := 0;
+    ComboPreset.Parent := Dialog;
+
+    LblScale := TLabel.Create(Dialog);
+    LblScale.Caption := 'Touch Gizmo Visual Scale Multiplier (Scale):';
+    LblScale.Parent := Dialog;
+
+    SpinScale := TFloatSpinEdit.Create(Dialog);
+    SpinScale.MinValue := 0.25;
+    SpinScale.MaxValue := 4.0;
+    SpinScale.Increment := 0.10;
+    SpinScale.DecimalPlaces := 2;
+    SpinScale.Value := 1.00;
+    SpinScale.Parent := Dialog;
+
+    CheckAuto := TCheckBox.Create(Dialog);
+    CheckAuto.Caption := 'Auto-Adjust From Active Viewport Navigation (AutoTouchInterface := true)';
+    CheckAuto.Checked := false;
+    CheckAuto.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Create Touch Navigation';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyQuickTouchNavigation(
+        ComboPreset.ItemIndex,
+        SpinScale.Value,
+        CheckAuto.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemQuickTouchNavClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyQuickTouchNavigation(0, 1.0, false)
+  else
+    ShowQuickTouchNavigationDialog;
+end;
+
+procedure TDesignFrame.ApplyQuickToggleGroup(const TogglePreset: Integer;
+  const UsePillToggleButtons: Boolean; const FontSizeVal: Single);
+var
+  ParentUI: TCastleUserInterface;
+  Card: TCastleRectangleControl;
+  VGroup: TCastleVerticalGroup;
+  HeaderLbl: TCastleLabel;
+  ActualFont: Single;
+
+  procedure AddToggleItem(const BaseName, CapStr: String; const DefChecked: Boolean);
+  var
+    Chk: TCastleCheckbox;
+    Btn: TCastleButton;
+  begin
+    if UsePillToggleButtons then
+    begin
+      Btn := TCastleButton.Create(DesignOwner);
+      Btn.Name := ProposeComponentName(TCastleButton, DesignOwner, 'ToggleBtn' + BaseName);
+      Btn.Caption := CapStr;
+      Btn.Toggle := true;
+      Btn.Pressed := DefChecked;
+      Btn.AutoSize := false;
+      Btn.Width := 340;
+      Btn.Height := 42;
+      Btn.FontSize := ActualFont;
+      Btn.CustomBackground := true;
+      Btn.CustomColorNormal := Vector4(0.14, 0.19, 0.27, 0.94);
+      Btn.CustomColorPressed := Vector4(0.18, 0.56, 0.86, 0.96);
+      Btn.CustomColorFocused := Vector4(0.22, 0.30, 0.42, 0.96);
+      Btn.CustomTextColorUse := true;
+      Btn.CustomTextColor := White;
+      VGroup.InsertFront(Btn);
+    end else
+    begin
+      Chk := TCastleCheckbox.Create(DesignOwner);
+      Chk.Name := ProposeComponentName(TCastleCheckbox, DesignOwner, 'Checkbox' + BaseName);
+      Chk.Caption := CapStr;
+      Chk.Checked := DefChecked;
+      Chk.FontSize := ActualFont;
+      Chk.CheckboxSize := Max(20.0, ActualFont + 4.0);
+      Chk.TextColor := Vector4(0.92, 0.95, 0.99, 1.0);
+      Chk.CheckboxColor := Vector4(0.32, 0.82, 0.98, 1.0);
+      VGroup.InsertFront(Chk);
+    end;
+  end;
+
+begin
+  if DesignOwner = nil then Exit;
+
+  if SelectedUserInterface <> nil then
+    ParentUI := SelectedUserInterface
+  else if FDesignRoot is TCastleUserInterface then
+    ParentUI := TCastleUserInterface(FDesignRoot)
+  else
+  begin
+    ErrorBox('Select a 2D UI container or open a .castle-user-interface design first.');
+    Exit;
+  end;
+
+  ActualFont := Max(12.0, FontSizeVal);
+
+  Card := TCastleRectangleControl.Create(DesignOwner);
+  Card.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner, 'ToggleSettingsCard');
+  Card.Width := 420;
+  Card.Height := 310;
+  Card.Anchor(hpMiddle, 0.0);
+  Card.Anchor(vpMiddle, 0.0);
+  Card.Color := Vector4(0.07, 0.10, 0.15, 0.93);
+  Card.Border.AllSides := 2;
+  Card.BorderColor := Vector4(0.26, 0.68, 0.94, 0.85);
+  ParentUI.InsertFront(Card);
+
+  VGroup := TCastleVerticalGroup.Create(DesignOwner);
+  VGroup.Name := ProposeComponentName(TCastleVerticalGroup, DesignOwner, 'ToggleRowsGroup');
+  VGroup.Anchor(hpMiddle, 0.0);
+  VGroup.Anchor(vpMiddle, 0.0);
+  VGroup.Spacing := 14.0;
+  VGroup.Padding := 18.0;
+  Card.InsertFront(VGroup);
+
+  HeaderLbl := TCastleLabel.Create(DesignOwner);
+  HeaderLbl.Name := ProposeComponentName(TCastleLabel, DesignOwner, 'ToggleGroupHeader');
+  HeaderLbl.FontSize := ActualFont + 4.0;
+  HeaderLbl.Outline := 2;
+  HeaderLbl.OutlineColor := Vector4(0.02, 0.04, 0.08, 1.0);
+  HeaderLbl.Color := Vector4(0.98, 0.88, 0.45, 1.0);
+  VGroup.InsertFront(HeaderLbl);
+
+  case TogglePreset of
+    0: // Graphics & Display Toggles
+      begin
+        HeaderLbl.Caption := 'DISPLAY & GRAPHICS OPTIONS';
+        AddToggleItem('Fullscreen', 'Fullscreen Display Mode', true);
+        AddToggleItem('VSync', 'Vertical Sync (VSync)', true);
+        AddToggleItem('Shadows', 'Dynamic Shadow Volumes', true);
+        AddToggleItem('AntiAliasing', 'Anti-Aliasing & Post-FX', false);
+      end;
+    1: // Gameplay & Camera Toggles
+      begin
+        HeaderLbl.Caption := 'GAMEPLAY & CAMERA';
+        AddToggleItem('InvertY', 'Invert Vertical Mouse Look', false);
+        AddToggleItem('ScreenShake', 'Camera Screen Shake Effects', true);
+        AddToggleItem('AutoSprint', 'Auto-Sprint Movement', false);
+        AddToggleItem('HitMarkers', 'Show Combat Damage Numbers', true);
+      end;
+    else // 2: Accessibility & Audio Toggles
+      begin
+        HeaderLbl.Caption := 'ACCESSIBILITY & AUDIO';
+        AddToggleItem('Subtitles', 'Dialogue & Cutscene Subtitles', true);
+        AddToggleItem('HighContrast', 'High-Contrast HUD Outlines', false);
+        AddToggleItem('MuteUnfocused', 'Mute Audio When Window Unfocused', true);
+        AddToggleItem(' arachnophobiaSafe', 'Simplified Arachnid/Hazard Visuals', false);
+      end;
+  end;
+
+  UpdateDesign;
+  SetSelectedComponent(Card);
+  ModifiedOutsideObjectInspector(
+    Format('Generate 2D Toggle Settings Card (%s)', [Card.Name]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowQuickToggleGroupDialog;
+var
+  Dialog: TForm;
+  LblPreset, LblFont: TLabel;
+  ComboPreset: TComboBox;
+  SpinFont: TFloatSpinEdit;
+  CheckPills: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if DesignOwner = nil then Exit;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 2D Checkbox (TCastleCheckbox) & Toggle Pill Settings Card Builder';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.AutoSize := true;
+    Dialog.ChildSizing.LeftRightSpacing := 14;
+    Dialog.ChildSizing.TopBottomSpacing := 12;
+    Dialog.ChildSizing.VerticalSpacing := 8;
+    Dialog.Constraints.MinWidth := 470;
+
+    LblPreset := TLabel.Create(Dialog);
+    LblPreset.Caption := 'Toggle Settings Group Preset:';
+    LblPreset.Parent := Dialog;
+
+    ComboPreset := TComboBox.Create(Dialog);
+    ComboPreset.Style := csDropDownList;
+    ComboPreset.Items.Add('Display & Graphics Options (Fullscreen, VSync, Shadows, Anti-Aliasing)');
+    ComboPreset.Items.Add('Gameplay & Camera Toggles (Invert Y, Screen Shake, Auto-Sprint, Hit Markers)');
+    ComboPreset.Items.Add('Accessibility & Audio Toggles (Subtitles, High-Contrast HUD, Mute Unfocused)');
+    ComboPreset.ItemIndex := 0;
+    ComboPreset.Parent := Dialog;
+
+    LblFont := TLabel.Create(Dialog);
+    LblFont.Caption := 'Toggle Caption Font Size (Pixels):';
+    LblFont.Parent := Dialog;
+
+    SpinFont := TFloatSpinEdit.Create(Dialog);
+    SpinFont.MinValue := 12.0;
+    SpinFont.MaxValue := 64.0;
+    SpinFont.Increment := 2.0;
+    SpinFont.DecimalPlaces := 0;
+    SpinFont.Value := 20.0;
+    SpinFont.Parent := Dialog;
+
+    CheckPills := TCheckBox.Create(Dialog);
+    CheckPills.Caption := 'Use Toggleable Pill Buttons (TCastleButton.Toggle := true) Instead of TCastleCheckbox';
+    CheckPills.Checked := false;
+    CheckPills.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Build Toggle Card';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyQuickToggleGroup(
+        ComboPreset.ItemIndex,
+        CheckPills.Checked,
+        SpinFont.Value);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemQuickToggleGroupClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyQuickToggleGroup(0, false, 20.0)
+  else
+    ShowQuickToggleGroupDialog;
+end;
+
+procedure TDesignFrame.ApplyNineSliceSetup(const MarginLeft, MarginRight,
+  MarginTop, MarginBottom: Single; const TargetW, TargetH: Single;
+  const ImageUrl: String; const SmoothScale: Boolean);
+var
+  SelectedList: TComponentList;
+  SelectedCount, I, ConfiguredCount: Integer;
+  ParentUI: TCastleUserInterface;
+  NewImg: TCastleImageControl;
+
+  procedure ConfigureBorderSides(const B: TBorder);
+  begin
+    if B = nil then Exit;
+    B.AllSides := 0;
+    B.Left := Max(0.0, MarginLeft);
+    B.Right := Max(0.0, MarginRight);
+    B.Top := Max(0.0, MarginTop);
+    B.Bottom := Max(0.0, MarginBottom);
+  end;
+
+  procedure ProcessUIForNineSlice(const C: TComponent);
+  var
+    ImgCtrl: TCastleImageControl;
+    BtnCtrl: TCastleButton;
+  begin
+    if C is TCastleImageControl then
+    begin
+      ImgCtrl := TCastleImageControl(C);
+      if Trim(ImageUrl) <> '' then
+        ImgCtrl.Url := Trim(ImageUrl);
+      ImgCtrl.Stretch := true;
+      ImgCtrl.ProportionalScaling := psNone;
+      ImgCtrl.SmoothScaling := SmoothScale;
+      if TargetW > 0 then ImgCtrl.Width := TargetW;
+      if TargetH > 0 then ImgCtrl.Height := TargetH;
+      ConfigureBorderSides(ImgCtrl.ProtectedSides);
+      Inc(ConfiguredCount);
+    end else
+    if C is TCastleButton then
+    begin
+      BtnCtrl := TCastleButton(C);
+      BtnCtrl.CustomBackground := true;
+      if Trim(ImageUrl) <> '' then
+        BtnCtrl.CustomBackgroundNormal.Url := Trim(ImageUrl);
+      BtnCtrl.CustomBackgroundNormal.SmoothScaling := SmoothScale;
+      ConfigureBorderSides(BtnCtrl.CustomBackgroundNormal.ProtectedSides);
+      ConfigureBorderSides(BtnCtrl.CustomBackgroundPressed.ProtectedSides);
+      ConfigureBorderSides(BtnCtrl.CustomBackgroundFocused.ProtectedSides);
+      ConfigureBorderSides(BtnCtrl.CustomBackgroundDisabled.ProtectedSides);
+      if (TargetW > 0) and (TargetH > 0) then
+      begin
+        BtnCtrl.AutoSize := false;
+        BtnCtrl.Width := TargetW;
+        BtnCtrl.Height := TargetH;
+      end;
+      Inc(ConfiguredCount);
+    end;
+  end;
+
+begin
+  if DesignOwner = nil then Exit;
+
+  ConfiguredCount := 0;
+  GetSelected(SelectedList, SelectedCount, false);
+  try
+    if (SelectedList <> nil) and (SelectedList.Count > 0) then
+      for I := 0 to SelectedList.Count - 1 do
+        ProcessUIForNineSlice(SelectedList[I]);
+  finally
+    FreeAndNil(SelectedList);
+  end;
+
+  if ConfiguredCount = 0 then
+  begin
+    if SelectedUserInterface <> nil then
+      ParentUI := SelectedUserInterface
+    else if FDesignRoot is TCastleUserInterface then
+      ParentUI := TCastleUserInterface(FDesignRoot)
+    else
+    begin
+      ErrorBox('Select a TCastleImageControl, TCastleButton, or 2D UI parent first.');
+      Exit;
+    end;
+
+    NewImg := TCastleImageControl.Create(DesignOwner);
+    NewImg.Name := ProposeComponentName(TCastleImageControl, DesignOwner, 'NineSliceFrame');
+    NewImg.Anchor(hpMiddle, 0.0);
+    NewImg.Anchor(vpMiddle, 0.0);
+    ParentUI.InsertFront(NewImg);
+    ProcessUIForNineSlice(NewImg);
+    SetSelectedComponent(NewImg);
+  end;
+
+  UpdateDesign;
+  ModifiedOutsideObjectInspector(
+    Format('Configure 9-Slice ProtectedSides on %d Control(s)', [ConfiguredCount]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowNineSliceSetupDialog;
+var
+  Dialog: TForm;
+  LblMargins, LblSize, LblUrl: TLabel;
+  MarginPanel, SizePanel, UrlPanel: TPanel;
+  SpinL, SpinR, SpinT, SpinB, SpinW, SpinH: TFloatSpinEdit;
+  EditUrl: TEdit;
+  BtnBrowse: TButton;
+  CheckSmooth: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+  OpenDlg: TCastleOpenDialog;
+begin
+  if DesignOwner = nil then Exit;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 2D Nine-Slice (ProtectedSides) Scalable Frame & Button Configurator';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.AutoSize := true;
+    Dialog.ChildSizing.LeftRightSpacing := 14;
+    Dialog.ChildSizing.TopBottomSpacing := 12;
+    Dialog.ChildSizing.VerticalSpacing := 8;
+    Dialog.Constraints.MinWidth := 480;
+
+    LblMargins := TLabel.Create(Dialog);
+    LblMargins.Caption := '9-Slice Unstretched Corner/Edge Margins — Left / Right / Top / Bottom (px):';
+    LblMargins.Parent := Dialog;
+
+    MarginPanel := TPanel.Create(Dialog);
+    MarginPanel.BevelOuter := bvNone;
+    MarginPanel.AutoSize := true;
+    MarginPanel.ChildSizing.Layout := cclLeftToRightThenTopToBottom;
+    MarginPanel.ChildSizing.ControlsPerLine := 4;
+    MarginPanel.ChildSizing.HorizontalSpacing := 8;
+    MarginPanel.Parent := Dialog;
+
+    SpinL := TFloatSpinEdit.Create(Dialog);
+    SpinL.MinValue := 0;
+    SpinL.MaxValue := 512;
+    SpinL.DecimalPlaces := 0;
+    SpinL.Value := 16;
+    SpinL.Parent := MarginPanel;
+
+    SpinR := TFloatSpinEdit.Create(Dialog);
+    SpinR.MinValue := 0;
+    SpinR.MaxValue := 512;
+    SpinR.DecimalPlaces := 0;
+    SpinR.Value := 16;
+    SpinR.Parent := MarginPanel;
+
+    SpinT := TFloatSpinEdit.Create(Dialog);
+    SpinT.MinValue := 0;
+    SpinT.MaxValue := 512;
+    SpinT.DecimalPlaces := 0;
+    SpinT.Value := 16;
+    SpinT.Parent := MarginPanel;
+
+    SpinB := TFloatSpinEdit.Create(Dialog);
+    SpinB.MinValue := 0;
+    SpinB.MaxValue := 512;
+    SpinB.DecimalPlaces := 0;
+    SpinB.Value := 16;
+    SpinB.Parent := MarginPanel;
+
+    LblSize := TLabel.Create(Dialog);
+    LblSize.Caption := 'Stretched Frame Width & Height (Pixels, 0 = Keep Existing):';
+    LblSize.Parent := Dialog;
+
+    SizePanel := TPanel.Create(Dialog);
+    SizePanel.BevelOuter := bvNone;
+    SizePanel.AutoSize := true;
+    SizePanel.ChildSizing.Layout := cclLeftToRightThenTopToBottom;
+    SizePanel.ChildSizing.ControlsPerLine := 2;
+    SizePanel.ChildSizing.HorizontalSpacing := 10;
+    SizePanel.Parent := Dialog;
+
+    SpinW := TFloatSpinEdit.Create(Dialog);
+    SpinW.MinValue := 0;
+    SpinW.MaxValue := 4096;
+    SpinW.DecimalPlaces := 0;
+    SpinW.Value := 360;
+    SpinW.Parent := SizePanel;
+
+    SpinH := TFloatSpinEdit.Create(Dialog);
+    SpinH.MinValue := 0;
+    SpinH.MaxValue := 4096;
+    SpinH.DecimalPlaces := 0;
+    SpinH.Value := 220;
+    SpinH.Parent := SizePanel;
+
+    LblUrl := TLabel.Create(Dialog);
+    LblUrl.Caption := 'Optional 9-Slice Frame Image URL (Leave Empty to Keep Current):';
+    LblUrl.Parent := Dialog;
+
+    UrlPanel := TPanel.Create(Dialog);
+    UrlPanel.BevelOuter := bvNone;
+    UrlPanel.AutoSize := true;
+    UrlPanel.Parent := Dialog;
+
+    BtnBrowse := TButton.Create(Dialog);
+    BtnBrowse.Caption := 'Browse...';
+    BtnBrowse.ModalResult := mrRetry;
+    BtnBrowse.AutoSize := true;
+    BtnBrowse.Align := alRight;
+    BtnBrowse.BorderSpacing.Left := 6;
+    BtnBrowse.Parent := UrlPanel;
+
+    EditUrl := TEdit.Create(Dialog);
+    EditUrl.Align := alClient;
+    if SelectedUserInterface is TCastleImageControl then
+      EditUrl.Text := TCastleImageControl(SelectedUserInterface).Url
+    else
+      EditUrl.Text := '';
+    EditUrl.TextHint := 'castle-data:/ui/panel_frame_9slice.png';
+    EditUrl.Parent := UrlPanel;
+
+    CheckSmooth := TCheckBox.Create(Dialog);
+    CheckSmooth.Caption := 'Smooth Bilinear Filtering (Uncheck for Crisp Pixel-Art 9-Slice Borders)';
+    CheckSmooth.Checked := true;
+    CheckSmooth.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Apply 9-Slice';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    while true do
+    begin
+      case Dialog.ShowModal of
+        mrRetry:
+          begin
+            OpenDlg := TCastleOpenDialog.Create(Self);
+            try
+              OpenDlg.Title := 'Select 9-Slice Frame Image';
+              OpenDlg.Filter := 'Image Files (*.png;*.webp;*.jpg)|*.png;*.webp;*.jpg|All Files (*.*)|*.*';
+              OpenDlg.AdviceDataDirectory := true;
+              if OpenDlg.Execute then
+                EditUrl.Text := OpenDlg.Url;
+            finally
+              FreeAndNil(OpenDlg);
+            end;
+          end;
+        mrOk:
+          begin
+            ApplyNineSliceSetup(
+              SpinL.Value,
+              SpinR.Value,
+              SpinT.Value,
+              SpinB.Value,
+              SpinW.Value,
+              SpinH.Value,
+              EditUrl.Text,
+              CheckSmooth.Checked);
+            Break;
+          end;
+        else
+          Break;
+      end;
+    end;
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemNineSliceSetupClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyNineSliceSetup(16.0, 16.0, 16.0, 16.0, 360.0, 220.0, '', true)
+  else
+    ShowNineSliceSetupDialog;
+end;
+
+procedure TDesignFrame.ApplyMultiLightTweaker(const TempPreset: Integer;
+  const IntensityMult: Single; const ShadowPolicy: Integer;
+  const EntireDesign: Boolean);
+var
+  TargetCol: TCastleColorRGB;
+  AffectedLights: Integer;
+  ShadowAssigned: Boolean;
+
+  procedure ProcessLightComponent(const C: TComponent);
+  var
+    DirL: TCastleDirectionalLight;
+    PtL: TCastlePointLight;
+    SpotL: TCastleSpotLight;
+    PuncL: TCastlePunctualLight;
+    I: Integer;
+  begin
+    if C = nil then Exit;
+
+    if C is TCastleDirectionalLight then
+    begin
+      DirL := TCastleDirectionalLight(C);
+      if TempPreset < 6 then
+        DirL.Color := TargetCol;
+      DirL.Intensity := Max(0.0, DirL.Intensity * IntensityMult);
+      Inc(AffectedLights);
+    end else
+    if C is TCastlePointLight then
+    begin
+      PtL := TCastlePointLight(C);
+      if TempPreset < 6 then
+        PtL.Color := TargetCol;
+      PtL.Intensity := Max(0.0, PtL.Intensity * IntensityMult);
+      Inc(AffectedLights);
+    end else
+    if C is TCastleSpotLight then
+    begin
+      SpotL := TCastleSpotLight(C);
+      if TempPreset < 6 then
+        SpotL.Color := TargetCol;
+      SpotL.Intensity := Max(0.0, SpotL.Intensity * IntensityMult);
+      Inc(AffectedLights);
+    end;
+
+    if (C is TCastlePunctualLight) and (ShadowPolicy > 0) then
+    begin
+      PuncL := TCastlePunctualLight(C);
+      if ShadowPolicy = 2 then
+        PuncL.Shadows := false
+      else if ShadowPolicy = 1 then
+      begin
+        if (not ShadowAssigned) and ((C is TCastleDirectionalLight) or (C is TCastleSpotLight)) then
+        begin
+          PuncL.Shadows := true;
+          ShadowAssigned := true;
+        end else
+          PuncL.Shadows := false;
+      end;
+    end;
+
+    if C is TCastleTransform then
+      for I := 0 to TCastleTransform(C).Count - 1 do
+        ProcessLightComponent(TCastleTransform(C)[I])
+    else if C is TCastleViewport then
+      ProcessLightComponent(TCastleViewport(C).Items)
+    else if C is TCastleUserInterface then
+      for I := 0 to TCastleUserInterface(C).ControlsCount - 1 do
+        ProcessLightComponent(TCastleUserInterface(C).Controls[I]);
+  end;
+
+var
+  SelectedList: TComponentList;
+  SelectedCount, I: Integer;
+begin
+  if FDesignRoot = nil then Exit;
+
+  case TempPreset of
+    0: TargetCol := Vector3(1.00, 0.58, 0.24); // 1900K Candle / Torch Flame
+    1: TargetCol := Vector3(1.00, 0.78, 0.52); // 2700K Warm Incandescent Bulb
+    2: TargetCol := Vector3(1.00, 0.88, 0.68); // 3800K Golden Hour Sunset
+    3: TargetCol := Vector3(1.00, 0.98, 0.96); // 5500K Noon Daylight White
+    4: TargetCol := Vector3(0.84, 0.92, 1.00); // 7500K Overcast Cool Sky
+    5: TargetCol := Vector3(0.62, 0.80, 1.00); // 9500K Moonlight / Sci-Fi Cyan
+    else TargetCol := Vector3(1.0, 1.0, 1.0);  // 6: Keep Existing Colors
+  end;
+
+  AffectedLights := 0;
+  ShadowAssigned := false;
+
+  if EntireDesign then
+    ProcessLightComponent(FDesignRoot)
+  else
+  begin
+    GetSelected(SelectedList, SelectedCount, false);
+    try
+      if (SelectedList <> nil) and (SelectedList.Count > 0) then
+        for I := 0 to SelectedList.Count - 1 do
+          ProcessLightComponent(SelectedList[I])
+      else
+        ProcessLightComponent(FDesignRoot);
+    finally
+      FreeAndNil(SelectedList);
+    end;
+  end;
+
+  UpdateDesign;
+  ModifiedOutsideObjectInspector(
+    Format('Tweak %d 3D Light(s) (Kelvin & Intensity x%.2f)', [AffectedLights, IntensityMult]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowMultiLightTweakerDialog;
+var
+  Dialog: TForm;
+  LblTemp, LblMult, LblShadows: TLabel;
+  ComboTemp, ComboShadows: TComboBox;
+  SpinMult: TFloatSpinEdit;
+  CheckEntire: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if FDesignRoot = nil then Exit;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 3D Multi-Light Kelvin Color Temperature, Intensity & Shadow Tweaker';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.AutoSize := true;
+    Dialog.ChildSizing.LeftRightSpacing := 14;
+    Dialog.ChildSizing.TopBottomSpacing := 12;
+    Dialog.ChildSizing.VerticalSpacing := 8;
+    Dialog.Constraints.MinWidth := 480;
+
+    LblTemp := TLabel.Create(Dialog);
+    LblTemp.Caption := 'Kelvin Color Temperature Preset:';
+    LblTemp.Parent := Dialog;
+
+    ComboTemp := TComboBox.Create(Dialog);
+    ComboTemp.Style := csDropDownList;
+    ComboTemp.Items.Add('1900K Candle / Dungeon Torch Flame (Deep Warm Amber)');
+    ComboTemp.Items.Add('2700K Warm Incandescent Indoor Lamp');
+    ComboTemp.Items.Add('3800K Golden Hour Sunset / Sunrise');
+    ComboTemp.Items.Add('5500K Noon Daylight Neutral White');
+    ComboTemp.Items.Add('7500K Overcast Cool Sky');
+    ComboTemp.Items.Add('9500K Moonlight / Sci-Fi Cyber Cyan');
+    ComboTemp.Items.Add('Keep Existing Light Colors (Scale Intensity Only)');
+    ComboTemp.ItemIndex := 2;
+    ComboTemp.Parent := Dialog;
+
+    LblMult := TLabel.Create(Dialog);
+    LblMult.Caption := 'Light Intensity Multiplier (1.00 = Unchanged):';
+    LblMult.Parent := Dialog;
+
+    SpinMult := TFloatSpinEdit.Create(Dialog);
+    SpinMult.MinValue := 0.05;
+    SpinMult.MaxValue := 20.0;
+    SpinMult.Increment := 0.10;
+    SpinMult.DecimalPlaces := 2;
+    SpinMult.Value := 1.00;
+    SpinMult.Parent := Dialog;
+
+    LblShadows := TLabel.Create(Dialog);
+    LblShadows.Caption := 'Shadow Volumes Policy (TCastlePunctualLight.Shadows):';
+    LblShadows.Parent := Dialog;
+
+    ComboShadows := TComboBox.Create(Dialog);
+    ComboShadows.Style := csDropDownList;
+    ComboShadows.Items.Add('Keep Existing Light Shadow Settings');
+    ComboShadows.Items.Add('Enable Shadows on First Directional/Spot Light Only (Recommended)');
+    ComboShadows.Items.Add('Disable Shadows on All Lights');
+    ComboShadows.ItemIndex := 1;
+    ComboShadows.Parent := Dialog;
+
+    CheckEntire := TCheckBox.Create(Dialog);
+    CheckEntire.Caption := 'Apply Across Entire Design (Unchecked = Selected Subtree Only)';
+    CheckEntire.Checked := true;
+    CheckEntire.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Apply Light Tweak';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyMultiLightTweaker(
+        ComboTemp.ItemIndex,
+        SpinMult.Value,
+        ComboShadows.ItemIndex,
+        CheckEntire.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemMultiLightTweakerClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyMultiLightTweaker(2, 1.0, 1, true)
+  else
+    ShowMultiLightTweakerDialog;
+end;
+
+procedure TDesignFrame.OrganizeHierarchyContextMenuSubmenus;
+
+  procedure MoveItemToSubmenu(const TargetSubmenu, Item: TMenuItem);
+  begin
+    if (TargetSubmenu = nil) or (Item = nil) then Exit;
+    if Item.Parent <> nil then
+      Item.Parent.Remove(Item);
+    TargetSubmenu.Add(Item);
+  end;
+
+begin
+  if MenuTreeView = nil then Exit;
+
+  MenuTreeViewSubmenu3DTools := TMenuItem.Create(Self);
+  MenuTreeViewSubmenu3DTools.Caption := '3D Level, Scene & Physics Tools';
+  MenuTreeView.Items.Add(MenuTreeViewSubmenu3DTools);
+
+  MenuTreeViewSubmenu2DTools := TMenuItem.Create(Self);
+  MenuTreeViewSubmenu2DTools.Caption := '2D UI, HUD & Screen Generators';
+  MenuTreeView.Items.Add(MenuTreeViewSubmenu2DTools);
+
+  MenuTreeViewSubmenuBatchTools := TMenuItem.Create(Self);
+  MenuTreeViewSubmenuBatchTools.Caption := 'Batch, Prefab & Asset Utilities';
+  MenuTreeView.Items.Add(MenuTreeViewSubmenuBatchTools);
+
+  MenuTreeViewSubmenuDuplicate := TMenuItem.Create(Self);
+  MenuTreeViewSubmenuDuplicate.Caption := 'Duplicate, Group & Array';
+  MenuTreeView.Items.Add(MenuTreeViewSubmenuDuplicate);
+
+  MenuTreeViewSubmenuSelect := TMenuItem.Create(Self);
+  MenuTreeViewSubmenuSelect.Caption := 'Select & Scene Audit Filters';
+  MenuTreeView.Items.Add(MenuTreeViewSubmenuSelect);
+
+  // 1. 3D Level, Scene & Physics Tools
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemAlignTransformToCamera);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemQuickCollider);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemFreezeScale);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemLightingRig);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemMultiLightTweaker);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemEnvironmentPreset);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemCameraNavSetup);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemMaterialPreset);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemAnimationController);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemBlockoutKit);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemQuickSoundSetup);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemQuickPhysicsJoint);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemRenderingOptimizer);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemGameplayMarkers);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemBillboardStickSetup);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemPhysicsConfigurator);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemWorldTextCallout);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemQuickImageTransform);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemQuickTerrainGenerator);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemLivingAiSetup);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemQuickTiledMap);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemClipPlaneSlicer);
+  MoveItemToSubmenu(MenuTreeViewSubmenu3DTools, MenuTreeViewItemLevelBoundaryWalls);
+
+  // 2. 2D UI, HUD & Screen Generators
+  MoveItemToSubmenu(MenuTreeViewSubmenu2DTools, MenuTreeViewItemQuickUiLayout);
+  MoveItemToSubmenu(MenuTreeViewSubmenu2DTools, MenuTreeViewItemUiThemePalette);
+  MoveItemToSubmenu(MenuTreeViewSubmenu2DTools, MenuTreeViewItemUiResolutionTester);
+  MoveItemToSubmenu(MenuTreeViewSubmenu2DTools, MenuTreeViewItemQuickHudElements);
+  MoveItemToSubmenu(MenuTreeViewSubmenu2DTools, MenuTreeViewItemGameScreenTemplate);
+  MoveItemToSubmenu(MenuTreeViewSubmenu2DTools, MenuTreeViewItemMultiViewportSetup);
+  MoveItemToSubmenu(MenuTreeViewSubmenu2DTools, MenuTreeViewItemQuickFlashEffect);
+  MoveItemToSubmenu(MenuTreeViewSubmenu2DTools, MenuTreeViewItemQuickNotifications);
+  MoveItemToSubmenu(MenuTreeViewSubmenu2DTools, MenuTreeViewItemQuickMaskSetup);
+  MoveItemToSubmenu(MenuTreeViewSubmenu2DTools, MenuTreeViewItemQuickTypography);
+  MoveItemToSubmenu(MenuTreeViewSubmenu2DTools, MenuTreeViewItemQuickShapeGenerator);
+  MoveItemToSubmenu(MenuTreeViewSubmenu2DTools, MenuTreeViewItemQuickInteractiveForm);
+  MoveItemToSubmenu(MenuTreeViewSubmenu2DTools, MenuTreeViewItemQuickTouchNav);
+  MoveItemToSubmenu(MenuTreeViewSubmenu2DTools, MenuTreeViewItemQuickToggleGroup);
+  MoveItemToSubmenu(MenuTreeViewSubmenu2DTools, MenuTreeViewItemNineSliceSetup);
+
+  // 3. Batch, Prefab & Asset Utilities
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemPropertyMatrix);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemSceneStats);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemComplexityProfiler);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemBatchRename);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemBatchReplaceUrls);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemSyncNameWithUrl);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemExtractSubDesign);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemUnpackDesign);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemReplaceWithDesignFile);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemQuickComponentFactory);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemComponentPresets);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemSceneInstancing);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemCompareComponents);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemGeneratePascalCode);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemHierarchySanitizer);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemExportHierarchyReport);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemBookmarksManager);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemEditNote);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemCopyProps);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemPasteProps);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemCopyTransform);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemPasteTransform);
+
+  // 4. Duplicate, Group & Array
+  MoveItemToSubmenu(MenuTreeViewSubmenuDuplicate, MenuTreeViewItemGroupSelected);
+  MoveItemToSubmenu(MenuTreeViewSubmenuDuplicate, MenuTreeViewItemUngroupSelected);
+  MoveItemToSubmenu(MenuTreeViewSubmenuDuplicate, MenuTreeViewItemFlattenSelected);
+  MoveItemToSubmenu(MenuTreeViewSubmenuDuplicate, MenuTreeViewItemMoveUp);
+  MoveItemToSubmenu(MenuTreeViewSubmenuDuplicate, MenuTreeViewItemMoveDown);
+  MoveItemToSubmenu(MenuTreeViewSubmenuDuplicate, MenuTreeViewItemSortChildrenAZ);
+  MoveItemToSubmenu(MenuTreeViewSubmenuDuplicate, MenuTreeViewItemSortChildrenSpatial);
+  MoveItemToSubmenu(MenuTreeViewSubmenuDuplicate, MenuTreeViewItemArrayDuplicate);
+  MoveItemToSubmenu(MenuTreeViewSubmenuDuplicate, MenuTreeViewItemRadialDuplicate);
+  MoveItemToSubmenu(MenuTreeViewSubmenuDuplicate, MenuTreeViewItemGridDuplicate);
+  MoveItemToSubmenu(MenuTreeViewSubmenuDuplicate, MenuTreeViewItemScatterDuplicate);
+  MoveItemToSubmenu(MenuTreeViewSubmenuDuplicate, MenuTreeViewItemReplaceSelected);
+
+  // 5. Select & Scene Audit Filters
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemInvertSelection);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectChildren);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectDescendants);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectFavorites);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectColorTag);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectReferences);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectSameClass);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectSameUrl);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectWithinRadius);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectByPattern);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectOverlapping);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectBySize);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectSameElevation);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectInCameraFrustum);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectByAxisRange);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectEmptyTransforms);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectNonUniformScale);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectRotatedTransforms);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectWithBehaviors);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectLightsAndCameras);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectSoundSources);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectHidden);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectOutliers);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectMissingUrl);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectDuplicatePos);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectLeaves);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectGroups);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectDesignInstances);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectPrimitives);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectSceneMeshes);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectUIControls);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectUIContainers);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectUIImagesAndLabels);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectUISizingMode);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectUICustomStyle);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectUIOutsideParent);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectUIOverlapping);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectUIDegenerate);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectDefaultNamed);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectShadowAudit);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectPhysicsAudit);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectNegativeScale);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectUIFractional);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectMultiViewports);
+  MoveItemToSubmenu(MenuTreeViewSubmenuSelect, MenuTreeViewItemSelectUIClipped);
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -44592,6 +45703,18 @@ begin
   if MenuTreeViewItemQuickInteractiveForm <> nil then
     MenuTreeViewItemQuickInteractiveForm.Enabled :=
       (SelectedUserInterface <> nil) or (FDesignRoot is TCastleUserInterface);
+  if MenuTreeViewItemQuickTouchNav <> nil then
+    MenuTreeViewItemQuickTouchNav.Enabled :=
+      (CurrentViewport <> nil) or (SelectedUserInterface <> nil) or (FDesignRoot is TCastleUserInterface);
+  if MenuTreeViewItemQuickToggleGroup <> nil then
+    MenuTreeViewItemQuickToggleGroup.Enabled :=
+      (SelectedUserInterface <> nil) or (FDesignRoot is TCastleUserInterface);
+  if MenuTreeViewItemNineSliceSetup <> nil then
+    MenuTreeViewItemNineSliceSetup.Enabled :=
+      (SelectedUserInterface <> nil) or (FDesignRoot is TCastleUserInterface);
+  if MenuTreeViewItemMultiLightTweaker <> nil then
+    MenuTreeViewItemMultiLightTweaker.Enabled :=
+      (CurrentViewport <> nil) or (FDesignRoot is TCastleTransform);
   if MenuTreeViewItemGroupSelected <> nil then
     MenuTreeViewItemGroupSelected.Enabled := (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0);
   if MenuTreeViewItemUngroupSelected <> nil then

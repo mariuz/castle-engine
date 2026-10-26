@@ -1450,11 +1450,36 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Implemented `TDesignFrame.ShowQuickInteractiveFormDialog` and `TDesignFrame.ApplyQuickInteractiveForm` (`MenuTreeViewItemQuickInteractiveForm` in `MenuTreeView`).
   - Spawns a framed 2D form card containing labeled `TCastleFloatSlider`, `TCastleIntegerSlider`, `TCastleEdit`, `TCastleFloatEdit`, and `TCastleIntegerEdit` rows across 3 presets (**Audio, Mouse Sensitivity & FOV Sliders**, **Player Profile & Server Join Inputs**, **Gameplay Seed, Speed & Difficulty Card**) plus an optional `TCastleTimer` (`IntervalSeconds`) (`Shift`-click spawns an Audio & Camera Settings Slider Form).
 
+### Phase 237: Quick 2D Touch Navigation (`TCastleTouchNavigation`) & Mobile Virtual Joystick Setup (`ShowQuickTouchNavigationDialog` / `ApplyQuickTouchNavigation`)
+- [x] **237.1. Mobile Dual-Touchstick & Camera Touchpad Wizard (`TDesignFrame.ShowQuickTouchNavigationDialog` / `TDesignFrame.ApplyQuickTouchNavigation`)**
+  - Implemented `TDesignFrame.ShowQuickTouchNavigationDialog` and `TDesignFrame.ApplyQuickTouchNavigation` (`MenuTreeViewItemQuickTouchNav` in `MenuTreeView`).
+  - Spawns or updates a `TCastleTouchNavigation` (`FullSize := true`, automatically bound to `CurrentViewport`) across 4 presets (**Dual Virtual Touchsticks `tiWalkRotate`**, **Single Left Walk + Side-Turn Stick `tiWalk`**, **Dual 3D Flight & Walk Sticks `tiFlyWalk`**, **Examine / 2D Pan Stick `tiPan`**) with `Scale` and `AutoTouchInterface` (`Shift`-click spawns Dual Virtual Touchsticks immediately).
+
+### Phase 238: Quick 2D Checkbox (`TCastleCheckbox`) & Toggle Pill (`TCastleButton.Toggle`) Settings Card Builder (`ShowQuickToggleGroupDialog` / `ApplyQuickToggleGroup`)
+- [x] **238.1. Boolean Settings Card & Toggle Pill Row Generator (`TDesignFrame.ShowQuickToggleGroupDialog` / `TDesignFrame.ApplyQuickToggleGroup`)**
+  - Implemented `TDesignFrame.ShowQuickToggleGroupDialog` and `TDesignFrame.ApplyQuickToggleGroup` (`MenuTreeViewItemQuickToggleGroup` in `MenuTreeView`).
+  - Spawns a framed 2D settings card containing a `TCastleVerticalGroup` of `TCastleCheckbox` controls or toggleable pill `TCastleButton` controls (`Toggle := true`, `Pressed`, `CustomBackground := true`) across 3 presets (**Display & Graphics Options**, **Gameplay & Camera Toggles**, **Accessibility & Audio Toggles**) (`Shift`-click spawns Display & Graphics Checkboxes immediately).
+
+### Phase 239: Quick 2D Nine-Slice (`ProtectedSides`) Scalable Frame & Button Skin Configurator (`ShowNineSliceSetupDialog` / `ApplyNineSliceSetup`)
+- [x] **239.1. 9-Slice `ProtectedSides` Corner/Edge Margin Wizard (`TDesignFrame.ShowNineSliceSetupDialog` / `TDesignFrame.ApplyNineSliceSetup`)**
+  - Implemented `TDesignFrame.ShowNineSliceSetupDialog` and `TDesignFrame.ApplyNineSliceSetup` (`MenuTreeViewItemNineSliceSetup` in `MenuTreeView`).
+  - Configures 9-slice border scaling (`ProtectedSides.Left`/`Right`/`Top`/`Bottom`, `Stretch := true`, `ProportionalScaling := psNone`, `SmoothScaling`) on selected or newly created `TCastleImageControl` and `TCastleButton` (`CustomBackgroundNormal`/`Pressed`/`Focused`/`Disabled.ProtectedSides`) (`Shift`-click applies `16px` 9-slice margins immediately).
+
+### Phase 240: Quick 3D Multi-Light Kelvin Color Temperature, Intensity & Shadow Tweaker (`ShowMultiLightTweakerDialog` / `ApplyMultiLightTweaker`)
+- [x] **240.1. Batch Kelvin Color Temperature, Intensity Multiplier & Shadow Volume Policy (`TDesignFrame.ShowMultiLightTweakerDialog` / `TDesignFrame.ApplyMultiLightTweaker`)**
+  - Implemented `TDesignFrame.ShowMultiLightTweakerDialog` and `TDesignFrame.ApplyMultiLightTweaker` (`MenuTreeViewItemMultiLightTweaker` in `MenuTreeView`).
+  - Batch-adjusts all `TCastleDirectionalLight`, `TCastlePointLight`, `TCastleSpotLight`, and `TCastlePunctualLight` components across the selected subtree or entire design with Kelvin color temperatures (**$1900\text{K}$ Candle/Torch**, **$2700\text{K}$ Warm Lamp**, **$3800\text{K}$ Golden Hour**, **$5500\text{K}$ Noon Daylight**, **$7500\text{K}$ Overcast Sky**, **$9500\text{K}$ Moonlight/Sci-Fi Cyan**), an `Intensity` multiplier, and shadow-volume policy (`Shift`-click applies Golden Hour + Primary Shadow policy immediately).
+
+### Phase 241: Hierarchy Context Menu (`MenuTreeView`) Categorized Submenu Organizer (`OrganizeHierarchyContextMenuSubmenus`)
+- [x] **241.1. Structured 5-Submenu Hierarchy Context Menu (`TDesignFrame.OrganizeHierarchyContextMenuSubmenus`)**
+  - Implemented `TDesignFrame.OrganizeHierarchyContextMenuSubmenus` in `tools/castle-editor/code/framedesign.pas`.
+  - Organizes all specialized hierarchy context menu commands into 5 logical top-level submenus (**`3D Level, Scene & Physics Tools`**, **`2D UI, HUD & Screen Generators`**, **`Batch, Prefab & Asset Utilities`**, **`Duplicate, Group & Array`**, and **`Select & Scene Audit Filters`**) so the right-click hierarchy menu stays compact and fast to navigate.
+
 ---
 
-## Roadmap Completion Status (Phases 1–236)
+## Roadmap Completion Status (Phases 1–241)
 
-All **236 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **241 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 
