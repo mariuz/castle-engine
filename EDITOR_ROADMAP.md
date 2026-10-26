@@ -1425,11 +1425,36 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Implemented `TDesignFrame.ShowLevelBoundaryWallDialog` and `TDesignFrame.ApplyLevelBoundaryWalls` (`MenuTreeViewItemLevelBoundaryWalls` in `MenuTreeView`).
   - Computes the combined world bounding box of the selection (or level) and spawns a `LevelBoundaryWalls` group with static `TCastleBoxCollider` + `TCastleRigidBody` North/South/West/East blocker walls, optional Ceiling blocker, and optional bottom Kill-Z trigger volume (`Shift`-click spawns a 4-wall + Kill-Z enclosure immediately).
 
+### Phase 232: Quick 2D Stencil Mask (`TCastleMask`) & Circular/Shape Clipping Setup (`ShowQuickMaskSetupDialog` / `ApplyQuickMaskSetup`)
+- [x] **232.1. Stencil Mask Container & Vector/Alpha Clipping Wizard (`TDesignFrame.ShowQuickMaskSetupDialog` / `TDesignFrame.ApplyQuickMaskSetup`)**
+  - Implemented `TDesignFrame.ShowQuickMaskSetupDialog` and `TDesignFrame.ApplyQuickMaskSetup` (`MenuTreeViewItemQuickMaskSetup` in `MenuTreeView`).
+  - Wraps the selected 2D UI control (or creates a masked container) in a `TCastleMask` (`mrChildrenWhereMask` or `mrChildrenWhereNoMask`), populates `MaskComp.Mask` with a `TCastleShape` (`stCircle`, `stRectangle`, `stTriangleUp`, `stTriangleDown`) or `TCastleImageControl` alpha stencil, optionally adds a matching vector border frame, and disables `ShadowVolumes` on any nested `TCastleViewport` (`Shift`-click wraps/creates a Circular Stencil Mask immediately).
+
+### Phase 233: Quick Custom Font (`TCastleFont`) & Typography Outline Styler (`ShowQuickTypographyDialog` / `ApplyQuickTypography`)
+- [x] **233.1. Non-Visual `TCastleFont` & Batch Text Outline/SDF Configurator (`TDesignFrame.ShowQuickTypographyDialog` / `TDesignFrame.ApplyQuickTypography`)**
+  - Implemented `TDesignFrame.ShowQuickTypographyDialog` and `TDesignFrame.ApplyQuickTypography` (`MenuTreeViewItemQuickTypography` in `MenuTreeView`).
+  - Creates or updates a non-visual `TCastleFont` (`Url` `.ttf`/`.otf`, `OptimalSize`, `AntiAliased`, `DistanceField`) and batch-applies `CustomFont`, `FontSize`, `Outline`, `OutlineColor`, and `OutlineHighQuality` across `TCastleUserInterfaceFont` controls and `TCastleText` in the selected subtree or entire design (`Shift`-click applies crisp 2px dark-outlined typography immediately).
+
+### Phase 234: Quick Component Factory (`TCastleComponentFactory`) & Spawner Template Setup (`ShowQuickComponentFactoryDialog` / `ApplyQuickComponentFactory`)
+- [x] **234.1. Non-Visual `TCastleComponentFactory` Prefab & Test-Instance Spawner (`TDesignFrame.ShowQuickComponentFactoryDialog` / `TDesignFrame.ApplyQuickComponentFactory`)**
+  - Implemented `TDesignFrame.ShowQuickComponentFactoryDialog` and `TDesignFrame.ApplyQuickComponentFactory` (`MenuTreeViewItemQuickComponentFactory` in `MenuTreeView`).
+  - Creates or configures a non-visual `TCastleComponentFactory` (`Url` pointing to a `.castle-transform` or `.castle-user-interface`, or exports the currently selected component to a new prefab file and binds `Factory.Url` to it) and optionally spawns $N$ test instances via `Factory.ComponentLoad(DesignOwner)` at staggered offsets.
+
+### Phase 235: Quick 2D Vector Shape (`TCastleShape`) Badge, Pointer Arrow & Reticle Generator (`ShowQuickShapeGeneratorDialog` / `ApplyQuickShapeGenerator`)
+- [x] **235.1. Composite 2D Vector Shape Widget Factory (`TDesignFrame.ShowQuickShapeGeneratorDialog` / `TDesignFrame.ApplyQuickShapeGenerator`)**
+  - Implemented `TDesignFrame.ShowQuickShapeGeneratorDialog` and `TDesignFrame.ApplyQuickShapeGenerator` (`MenuTreeViewItemQuickShapeGenerator` in `MenuTreeView`).
+  - Spawns 5 single or composite `TCastleShape` vector widgets (**Quest Objective Down-Arrow Pointer**, **Circular Badge / Radar Blip Dot**, **Compass North/South Diamond Needle**, **Hazard Warning Triangle Sign (`!`)**, and **4-Triangle Target Lock Reticle & Ring**) across 4 color palettes (`Shift`-click spawns a Quest Objective Arrow immediately).
+
+### Phase 236: Quick 2D Timer (`TCastleTimer`), Slider (`TCastleFloatSlider` / `TCastleIntegerSlider`) & Input Form Builder (`ShowQuickInteractiveFormDialog` / `ApplyQuickInteractiveForm`)
+- [x] **236.1. Interactive 2D Sliders, Text/Number Edits & Periodic Timer Card Builder (`TDesignFrame.ShowQuickInteractiveFormDialog` / `TDesignFrame.ApplyQuickInteractiveForm`)**
+  - Implemented `TDesignFrame.ShowQuickInteractiveFormDialog` and `TDesignFrame.ApplyQuickInteractiveForm` (`MenuTreeViewItemQuickInteractiveForm` in `MenuTreeView`).
+  - Spawns a framed 2D form card containing labeled `TCastleFloatSlider`, `TCastleIntegerSlider`, `TCastleEdit`, `TCastleFloatEdit`, and `TCastleIntegerEdit` rows across 3 presets (**Audio, Mouse Sensitivity & FOV Sliders**, **Player Profile & Server Join Inputs**, **Gameplay Seed, Speed & Difficulty Card**) plus an optional `TCastleTimer` (`IntervalSeconds`) (`Shift`-click spawns an Audio & Camera Settings Slider Form).
+
 ---
 
-## Roadmap Completion Status (Phases 1–231)
+## Roadmap Completion Status (Phases 1–236)
 
-All **231 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **236 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 
