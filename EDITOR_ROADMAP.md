@@ -1325,11 +1325,36 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Implemented `TDesignFrame.ShowBookmarksAndSelectionSetsDialog` and added **`Bookmarks, Selection Sets & Tagged Groups Manager...`** (`MenuTreeViewItemBookmarksManager`) in `MenuTreeView`.
   - Displays all 10 Selection Sets (`0..9`), all 10 Viewport Camera Bookmarks (`0..9`), Favorite components (`[★]`), Color-Tag groups (`Red`, `Gold`, `Green`, `Blue`, `Purple`), and Annotated (`[#Note]`) components with one-click **Recall / Jump to Slot**, **Add Slot to Selection**, **Save Current to Slot**, and **Clear Highlighted Slot** actions.
 
+### Phase 212: Quick 3D Trigger Volume, Waypoint Route & Spawn Point Rig (`ShowGameplayMarkersRigDialog` / `ApplyGameplayMarkersRig`)
+- [x] **212.1. Gameplay Sensor Volumes, PlayerSpawnPoint & Patrol Waypoint Generator (`TDesignFrame.ShowGameplayMarkersRigDialog` / `TDesignFrame.ApplyGameplayMarkersRig`)**
+  - Implemented `TDesignFrame.ShowGameplayMarkersRigDialog` and `TDesignFrame.ApplyGameplayMarkersRig` (`MenuTreeViewItemGameplayMarkers` in `MenuTreeView`).
+  - Spawns 5 ready-to-use gameplay level rigs: **Trigger Volume Box (`TCastleBox` + `TCastleBoxCollider` + `TCastleRigidBody` with `Trigger := true`)**, **Hazard / Kill Zone Volume**, **Player Start / Spawn Point Rig (Pad + Forward Direction Cone + `MiddleHeight`)**, **AI Patrol / Waypoint Route (`Waypoint01..N` marker nodes)**, and **Collectible / Pickup Sensor Sphere** (`Shift`-click spawns a Trigger Volume Box immediately).
+
+### Phase 213: Quick 3D Billboard & Stick-To-Surface Behavior Wizard (`ShowBillboardAndSurfaceBehaviorDialog` / `ApplyBillboardAndSurfaceBehavior`)
+- [x] **213.1. Cylindrical/Spherical `TCastleBillboard` & Terrain `TCastleStickToSurface` Setup (`TDesignFrame.ShowBillboardAndSurfaceBehaviorDialog` / `TDesignFrame.ApplyBillboardAndSurfaceBehavior`)**
+  - Implemented `TDesignFrame.ShowBillboardAndSurfaceBehaviorDialog` and `TDesignFrame.ApplyBillboardAndSurfaceBehavior` (`MenuTreeViewItemBillboardStickSetup` in `MenuTreeView`).
+  - Attaches or updates `TCastleBillboard` (Upright Y-Axis `+Y` or Full-3D Spherical `0` with automatic `Viewport.BlendingSort` configuration) or `TCastleStickToSurface` (binding `Selected[1..N-1]` to `Selected[0]` as the target terrain/floor with `OnlyAtDesign` support) (`Shift`-click applies Upright Y-Axis Billboard immediately).
+
+### Phase 214: Scene Instancing & `TCastleTransformReference` Deduplicator / Unlinker (`ShowSceneInstancingDialog` / `ApplySceneInstancing`)
+- [x] **214.1. Duplicate-URL `TCastleScene` to `TCastleTransformReference` Converter & Unlinker (`TDesignFrame.ShowSceneInstancingDialog` / `TDesignFrame.ApplySceneInstancing`)**
+  - Implemented `TDesignFrame.ShowSceneInstancingDialog` and `TDesignFrame.ApplySceneInstancing` (`MenuTreeViewItemSceneInstancing` in `MenuTreeView`).
+  - Scans the selected subtree or entire design for leaf `TCastleScene` instances sharing the same `Url`, keeps the first as the master scene, and converts duplicates in-place into lightweight `TCastleTransformReference` instances (`rtIgnoreTransform`, `rtIgnoreTranslation`, or `rtDoNotIgnore`), or unlinks `TCastleTransformReference` instances back into independent deep-copied clones.
+
+### Phase 215: Physics World Gravity, Solver & Collider Material Configurator (`ShowPhysicsWorldConfiguratorDialog` / `ApplyPhysicsWorldConfiguration`)
+- [x] **215.1. Viewport `PhysicsProperties` & Bulk Collider/RigidBody Material Wizard (`TDesignFrame.ShowPhysicsWorldConfiguratorDialog` / `TDesignFrame.ApplyPhysicsWorldConfiguration`)**
+  - Implemented `TDesignFrame.ShowPhysicsWorldConfiguratorDialog` and `TDesignFrame.ApplyPhysicsWorldConfiguration` (`MenuTreeViewItemPhysicsConfigurator` in `MenuTreeView`).
+  - Configures `CurrentViewport.Items.PhysicsProperties` (`GravityStrength`, `Frequency`, `MaxPhysicsTicksPerUpdate`, `ContinuousCollisionDetection`, `LinearVelocityRK4Integration`, `AngularVelocityRK4Integration`) and optionally bulk-applies physics `Layer` (`0..31`), `Friction`, `Restitution`, and `Density` across selected `TCastleCollider` / `TCastleRigidBody` components.
+
+### Phase 216: 2D UI Responsive Screen Resolution & Aspect Ratio Tester (`ShowUiResolutionTesterDialog` / `ApplyUiResolutionPreset`)
+- [x] **216.1. Multi-Device Resolution & Aspect Ratio Preview Frame Switcher (`TDesignFrame.ShowUiResolutionTesterDialog` / `TDesignFrame.ApplyUiResolutionPreset`)**
+  - Implemented `TDesignFrame.ShowUiResolutionTesterDialog` and `TDesignFrame.ApplyUiResolutionPreset` (`MenuTreeViewItemUiResolutionTester` in `MenuTreeView`).
+  - Switches the target 2D UI container between **Responsive Full-Viewport Fill (`FullSize := true`)**, **Full HD 1080p (`1920x1080`)**, **HD 720p (`1280x720`)**, **Steam Deck 16:10 (`1280x800`)**, **Ultrawide 21:9 (`2560x1080`)**, **Mobile Portrait 9:16 (`540x960`)**, **Tablet 4:3 (`1024x768`)**, or custom dimensions centered in the design canvas.
+
 ---
 
-## Roadmap Completion Status (Phases 1–211)
+## Roadmap Completion Status (Phases 1–216)
 
-All **211 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **216 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 

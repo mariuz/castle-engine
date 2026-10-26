@@ -589,6 +589,11 @@ type
       MenuTreeViewItemQuickPhysicsJoint: TMenuItem;
       MenuTreeViewItemRenderingOptimizer: TMenuItem;
       MenuTreeViewItemBookmarksManager: TMenuItem;
+      MenuTreeViewItemGameplayMarkers: TMenuItem;
+      MenuTreeViewItemBillboardStickSetup: TMenuItem;
+      MenuTreeViewItemSceneInstancing: TMenuItem;
+      MenuTreeViewItemPhysicsConfigurator: TMenuItem;
+      MenuTreeViewItemUiResolutionTester: TMenuItem;
       FComponentNotes: TStringList;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
@@ -866,6 +871,11 @@ type
     procedure MenuTreeViewItemQuickPhysicsJointClick(Sender: TObject);
     procedure MenuTreeViewItemRenderingOptimizerClick(Sender: TObject);
     procedure MenuTreeViewItemBookmarksManagerClick(Sender: TObject);
+    procedure MenuTreeViewItemGameplayMarkersClick(Sender: TObject);
+    procedure MenuTreeViewItemBillboardStickSetupClick(Sender: TObject);
+    procedure MenuTreeViewItemSceneInstancingClick(Sender: TObject);
+    procedure MenuTreeViewItemPhysicsConfiguratorClick(Sender: TObject);
+    procedure MenuTreeViewItemUiResolutionTesterClick(Sender: TObject);
     procedure MenuTreeViewItemGroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemUngroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemArrayDuplicateClick(Sender: TObject);
@@ -2080,6 +2090,24 @@ type
       const EntireDesign: Boolean);
     procedure ShowRenderingOptimizerDialog;
     procedure ShowBookmarksAndSelectionSetsDialog;
+    procedure ApplyGameplayMarkersRig(const MarkerPreset, WaypointCount: Integer;
+      const VolumeWidth, VolumeHeight, VolumeDepth: Single;
+      const VisibleAtRuntime: Boolean);
+    procedure ShowGameplayMarkersRigDialog;
+    procedure ApplyBillboardAndSurfaceBehavior(const ModeIndex: Integer;
+      const MatchCameraDir, OnlyDesignTime, ConfigureViewportSort: Boolean);
+    procedure ShowBillboardAndSurfaceBehaviorDialog;
+    procedure ApplySceneInstancing(const UnlinkReferences: Boolean;
+      const RefTransformMode: Integer; const EntireDesign: Boolean);
+    procedure ShowSceneInstancingDialog;
+    procedure ApplyPhysicsWorldConfiguration(const GravityVal, FreqVal: Single;
+      const MaxTicks: Integer; const EnableCcd, EnableRk4: Boolean;
+      const ApplyToSelectedBodies: Boolean; const LayerIdx: Integer;
+      const FrictionVal, RestitutionVal, DensityVal: Single);
+    procedure ShowPhysicsWorldConfiguratorDialog;
+    procedure ApplyUiResolutionPreset(const ResolutionPreset: Integer;
+      const CustomWidth, CustomHeight: Single);
+    procedure ShowUiResolutionTesterDialog;
     procedure SaveCameraBookmark(const Slot: Integer);
     procedure RecallCameraBookmark(const Slot: Integer);
     procedure AdjustCameraSpeed(const Factor: Single);
@@ -6752,6 +6780,31 @@ begin
   MenuTreeViewItemBookmarksManager.Caption := 'Bookmarks, Selection Sets & Tagged Groups Manager...';
   MenuTreeViewItemBookmarksManager.OnClick := @MenuTreeViewItemBookmarksManagerClick;
   MenuTreeView.Items.Add(MenuTreeViewItemBookmarksManager);
+
+  MenuTreeViewItemGameplayMarkers := TMenuItem.Create(Self);
+  MenuTreeViewItemGameplayMarkers.Caption := 'Quick 3D Trigger Volume, Waypoint Route & Spawn Point Rig... (Shift: TriggerBox)';
+  MenuTreeViewItemGameplayMarkers.OnClick := @MenuTreeViewItemGameplayMarkersClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemGameplayMarkers);
+
+  MenuTreeViewItemBillboardStickSetup := TMenuItem.Create(Self);
+  MenuTreeViewItemBillboardStickSetup.Caption := 'Quick 3D Billboard & Stick-To-Surface Behavior Setup... (Shift: Y-Billboard)';
+  MenuTreeViewItemBillboardStickSetup.OnClick := @MenuTreeViewItemBillboardStickSetupClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemBillboardStickSetup);
+
+  MenuTreeViewItemSceneInstancing := TMenuItem.Create(Self);
+  MenuTreeViewItemSceneInstancing.Caption := 'Scene Instancing & TransformReference Deduplicator / Unlinker...';
+  MenuTreeViewItemSceneInstancing.OnClick := @MenuTreeViewItemSceneInstancingClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSceneInstancing);
+
+  MenuTreeViewItemPhysicsConfigurator := TMenuItem.Create(Self);
+  MenuTreeViewItemPhysicsConfigurator.Caption := 'Physics World Gravity, Solver & Collider Material Configurator...';
+  MenuTreeViewItemPhysicsConfigurator.OnClick := @MenuTreeViewItemPhysicsConfiguratorClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemPhysicsConfigurator);
+
+  MenuTreeViewItemUiResolutionTester := TMenuItem.Create(Self);
+  MenuTreeViewItemUiResolutionTester.Caption := '2D UI Responsive Screen Resolution & Aspect Ratio Tester...';
+  MenuTreeViewItemUiResolutionTester.OnClick := @MenuTreeViewItemUiResolutionTesterClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemUiResolutionTester);
 
   MenuTreeViewItemGroupSelected := TMenuItem.Create(Self);
   MenuTreeViewItemGroupSelected.Caption := 'Group Selected Under New Transform (Ctrl+G)';
@@ -36679,6 +36732,1313 @@ begin
   ShowBookmarksAndSelectionSetsDialog;
 end;
 
+procedure TDesignFrame.ApplyGameplayMarkersRig(const MarkerPreset, WaypointCount: Integer;
+  const VolumeWidth, VolumeHeight, VolumeDepth: Single;
+  const VisibleAtRuntime: Boolean);
+var
+  TargetParent, SpawnedRoot, WpNode: TCastleTransform;
+  FocusCenter: TVector3;
+  BBox: TBox3D;
+  EffW, EffH, EffD, AngleRad: Single;
+  ActualCount, I: Integer;
+  BoxVol: TCastleBox;
+  SphereVol: TCastleSphere;
+  PadCyl: TCastleCylinder;
+  ArrowCone: TCastleCone;
+  BoxCol: TCastleBoxCollider;
+  SphereCol: TCastleSphereCollider;
+  Body: TCastleRigidBody;
+begin
+  if DesignOwner = nil then Exit;
+  if FDesignRoot is TCastleTransform then
+    TargetParent := TCastleTransform(FDesignRoot)
+  else if CurrentViewport <> nil then
+    TargetParent := CurrentViewport.Items
+  else
+  begin
+    ErrorBox('Select a 3D viewport or transform design before spawning gameplay volumes or markers.');
+    Exit;
+  end;
+
+  FocusCenter := TVector3.Zero;
+  if (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0) then
+    FocusCenter := TransformManipulate.SelectionWorkingCenter
+  else if CurrentTransform <> nil then
+  begin
+    BBox := CurrentTransform.WorldBoundingBox;
+    if not BBox.IsEmpty then
+      FocusCenter := Vector3(BBox.Center.X, BBox.Data[0].Y, BBox.Center.Z)
+    else
+      FocusCenter := CurrentTransform.WorldTranslation;
+  end;
+
+  EffW := Max(0.5, VolumeWidth);
+  EffH := Max(0.5, VolumeHeight);
+  EffD := Max(0.5, VolumeDepth);
+  ActualCount := Clamped(WaypointCount, 2, 64);
+  SpawnedRoot := nil;
+
+  case MarkerPreset of
+    0, 1:
+      begin // 0: Trigger Volume Box, 1: Hazard / Kill Zone Volume
+        BoxVol := TCastleBox.Create(DesignOwner);
+        if MarkerPreset = 0 then
+        begin
+          BoxVol.Name := ProposeComponentName(TCastleBox, DesignOwner, 'TriggerVolume');
+          BoxVol.Color := Vector4(0.15, 0.90, 0.45, 0.28);
+        end else
+        begin
+          BoxVol.Name := ProposeComponentName(TCastleBox, DesignOwner, 'HazardZoneVolume');
+          BoxVol.Color := Vector4(0.95, 0.20, 0.20, 0.28);
+        end;
+        BoxVol.Translation := FocusCenter + Vector3(0, EffH * 0.5, 0);
+        BoxVol.Size := Vector3(EffW, EffH, EffD);
+        BoxVol.Material := pmUnlit;
+        BoxVol.CastShadows := false;
+        BoxVol.Visible := VisibleAtRuntime;
+        TargetParent.Add(BoxVol);
+
+        BoxCol := TCastleBoxCollider.Create(DesignOwner);
+        BoxCol.Name := ProposeComponentName(TCastleBoxCollider, DesignOwner, BoxVol.Name + 'Collider');
+        BoxCol.AutoSize := true;
+        BoxVol.AddBehavior(BoxCol);
+
+        Body := TCastleRigidBody.Create(DesignOwner);
+        Body.Name := ProposeComponentName(TCastleRigidBody, DesignOwner, BoxVol.Name + 'SensorBody');
+        Body.Dynamic := false;
+        Body.Animated := false;
+        Body.Gravity := false;
+        Body.Trigger := true;
+        BoxVol.AddBehavior(Body);
+
+        SpawnedRoot := BoxVol;
+      end;
+    2:
+      begin // Player Start / Spawn Point Rig
+        SpawnedRoot := TCastleTransform.Create(DesignOwner);
+        SpawnedRoot.Name := ProposeComponentName(TCastleTransform, DesignOwner, 'PlayerSpawnPoint');
+        SpawnedRoot.Translation := FocusCenter;
+        SpawnedRoot.MiddleHeight := Max(0.9, EffH * 0.5);
+        TargetParent.Add(SpawnedRoot);
+
+        PadCyl := TCastleCylinder.Create(DesignOwner);
+        PadCyl.Name := ProposeComponentName(TCastleCylinder, DesignOwner, 'SpawnBasePad');
+        PadCyl.Radius := EffW * 0.35;
+        PadCyl.Height := 0.12;
+        PadCyl.Translation := Vector3(0, 0.06, 0);
+        PadCyl.Color := Vector4(0.20, 0.72, 1.00, 0.85);
+        PadCyl.Material := pmUnlit;
+        PadCyl.CastShadows := false;
+        PadCyl.Collides := false;
+        PadCyl.Visible := VisibleAtRuntime;
+        SpawnedRoot.Add(PadCyl);
+
+        ArrowCone := TCastleCone.Create(DesignOwner);
+        ArrowCone.Name := ProposeComponentName(TCastleCone, DesignOwner, 'SpawnForwardArrow');
+        ArrowCone.BottomRadius := 0.22;
+        ArrowCone.Height := 0.75;
+        ArrowCone.Translation := Vector3(0, 0.90, -0.45);
+        ArrowCone.Rotation := Vector4(1, 0, 0, -Pi * 0.5);
+        ArrowCone.Color := Vector4(1.00, 0.85, 0.20, 0.90);
+        ArrowCone.Material := pmUnlit;
+        ArrowCone.CastShadows := false;
+        ArrowCone.Collides := false;
+        ArrowCone.Visible := VisibleAtRuntime;
+        SpawnedRoot.Add(ArrowCone);
+      end;
+    3:
+      begin // AI Patrol / Waypoint Route
+        SpawnedRoot := TCastleTransform.Create(DesignOwner);
+        SpawnedRoot.Name := ProposeComponentName(TCastleTransform, DesignOwner, 'PatrolWaypointRoute');
+        SpawnedRoot.Translation := FocusCenter;
+        TargetParent.Add(SpawnedRoot);
+
+        for I := 0 to ActualCount - 1 do
+        begin
+          AngleRad := (2.0 * Pi * I) / ActualCount;
+          SphereVol := TCastleSphere.Create(DesignOwner);
+          SphereVol.Name := ProposeComponentName(TCastleSphere, DesignOwner, Format('Waypoint%.2d', [I + 1]));
+          SphereVol.Radius := 0.30;
+          SphereVol.Translation := Vector3(Sin(AngleRad) * EffW, 0.30, Cos(AngleRad) * EffD);
+          SphereVol.Color := Vector4(1.00, 0.72, 0.15, 0.85);
+          SphereVol.Material := pmUnlit;
+          SphereVol.CastShadows := false;
+          SphereVol.Collides := false;
+          SphereVol.Visible := VisibleAtRuntime;
+          WpNode := SphereVol;
+          SpawnedRoot.Add(WpNode);
+        end;
+      end;
+    4:
+      begin // Collectible / Pickup Sensor Sphere
+        SphereVol := TCastleSphere.Create(DesignOwner);
+        SphereVol.Name := ProposeComponentName(TCastleSphere, DesignOwner, 'PickupTriggerSphere');
+        SphereVol.Radius := EffW * 0.5;
+        SphereVol.Translation := FocusCenter + Vector3(0, EffW * 0.5, 0);
+        SphereVol.Color := Vector4(1.00, 0.84, 0.18, 0.75);
+        SphereVol.Material := pmUnlit;
+        SphereVol.CastShadows := false;
+        SphereVol.Visible := VisibleAtRuntime;
+        TargetParent.Add(SphereVol);
+
+        SphereCol := TCastleSphereCollider.Create(DesignOwner);
+        SphereCol.Name := ProposeComponentName(TCastleSphereCollider, DesignOwner, SphereVol.Name + 'Collider');
+        SphereCol.AutoSize := true;
+        SphereVol.AddBehavior(SphereCol);
+
+        Body := TCastleRigidBody.Create(DesignOwner);
+        Body.Name := ProposeComponentName(TCastleRigidBody, DesignOwner, SphereVol.Name + 'SensorBody');
+        Body.Dynamic := false;
+        Body.Animated := false;
+        Body.Gravity := false;
+        Body.Trigger := true;
+        SphereVol.AddBehavior(Body);
+
+        SpawnedRoot := SphereVol;
+      end;
+  end;
+
+  if SpawnedRoot <> nil then
+  begin
+    ShowColliders := true;
+    UpdateColliders;
+    UpdateDesign;
+    SetSelectedComponent(SpawnedRoot);
+    ModifiedOutsideObjectInspector(
+      Format('Create Gameplay Marker / Trigger Rig (%s)', [SpawnedRoot.Name]),
+      ucHigh);
+  end;
+end;
+
+procedure TDesignFrame.ShowGameplayMarkersRigDialog;
+var
+  Dialog: TForm;
+  LblPreset, LblCount, LblW, LblH, LblD: TLabel;
+  ComboPreset: TComboBox;
+  SpinCount: TSpinEdit;
+  SpinW, SpinH, SpinD: TFloatSpinEdit;
+  CheckVisible: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if (CurrentViewport = nil) and (not (FDesignRoot is TCastleTransform)) then
+  begin
+    ErrorBox('Select a 3D viewport or transform design before spawning gameplay volumes or markers.');
+    Exit;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 3D Trigger Volume, Waypoint Route & Spawn Point Rig';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 470;
+    Dialog.Height := 340;
+
+    LblPreset := TLabel.Create(Dialog);
+    LblPreset.Left := 16;
+    LblPreset.Top := 16;
+    LblPreset.Caption := 'Gameplay Volume / Level Marker Preset:';
+    LblPreset.Parent := Dialog;
+
+    ComboPreset := TComboBox.Create(Dialog);
+    ComboPreset.Left := 16;
+    ComboPreset.Top := 38;
+    ComboPreset.Width := 434;
+    ComboPreset.Style := csDropDownList;
+    ComboPreset.Items.Add('Trigger Volume Box (TCastleBox + BoxCollider + Trigger RigidBody)');
+    ComboPreset.Items.Add('Hazard / Kill Zone Volume (Crimson Sensor Box + Trigger RigidBody)');
+    ComboPreset.Items.Add('Player Start / Spawn Point Rig (Pad + Forward Direction Cone)');
+    ComboPreset.Items.Add('AI Patrol / Waypoint Route (Group of Numbered Waypoint01..N Nodes)');
+    ComboPreset.Items.Add('Collectible / Pickup Sensor Sphere (SphereCollider + Trigger Body)');
+    ComboPreset.ItemIndex := 0;
+    ComboPreset.Parent := Dialog;
+
+    LblCount := TLabel.Create(Dialog);
+    LblCount.Left := 16;
+    LblCount.Top := 82;
+    LblCount.Caption := 'Waypoint Count (for Patrol Route preset, 2..64):';
+    LblCount.Parent := Dialog;
+
+    SpinCount := TSpinEdit.Create(Dialog);
+    SpinCount.Left := 320;
+    SpinCount.Top := 78;
+    SpinCount.Width := 110;
+    SpinCount.MinValue := 2;
+    SpinCount.MaxValue := 64;
+    SpinCount.Value := 6;
+    SpinCount.Parent := Dialog;
+
+    LblW := TLabel.Create(Dialog);
+    LblW.Left := 16;
+    LblW.Top := 118;
+    LblW.Caption := 'Volume Width X / Route Radius X (m):';
+    LblW.Parent := Dialog;
+
+    SpinW := TFloatSpinEdit.Create(Dialog);
+    SpinW.Left := 320;
+    SpinW.Top := 114;
+    SpinW.Width := 110;
+    SpinW.MinValue := 0.5;
+    SpinW.MaxValue := 500.0;
+    SpinW.Increment := 0.5;
+    SpinW.DecimalPlaces := 2;
+    SpinW.Value := 4.0;
+    SpinW.Parent := Dialog;
+
+    LblH := TLabel.Create(Dialog);
+    LblH.Left := 16;
+    LblH.Top := 154;
+    LblH.Caption := 'Volume Height Y / Spawn Eye Height (m):';
+    LblH.Parent := Dialog;
+
+    SpinH := TFloatSpinEdit.Create(Dialog);
+    SpinH.Left := 320;
+    SpinH.Top := 150;
+    SpinH.Width := 110;
+    SpinH.MinValue := 0.5;
+    SpinH.MaxValue := 500.0;
+    SpinH.Increment := 0.5;
+    SpinH.DecimalPlaces := 2;
+    SpinH.Value := 2.5;
+    SpinH.Parent := Dialog;
+
+    LblD := TLabel.Create(Dialog);
+    LblD.Left := 16;
+    LblD.Top := 190;
+    LblD.Caption := 'Volume Depth Z / Route Radius Z (m):';
+    LblD.Parent := Dialog;
+
+    SpinD := TFloatSpinEdit.Create(Dialog);
+    SpinD.Left := 320;
+    SpinD.Top := 186;
+    SpinD.Width := 110;
+    SpinD.MinValue := 0.5;
+    SpinD.MaxValue := 500.0;
+    SpinD.Increment := 0.5;
+    SpinD.DecimalPlaces := 2;
+    SpinD.Value := 4.0;
+    SpinD.Parent := Dialog;
+
+    CheckVisible := TCheckBox.Create(Dialog);
+    CheckVisible.Left := 16;
+    CheckVisible.Top := 228;
+    CheckVisible.Caption := 'Keep Volume / Marker Mesh Visible at Runtime (Uncheck for Invisible Trigger)';
+    CheckVisible.Checked := true;
+    CheckVisible.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Create Gameplay Rig';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyGameplayMarkersRig(
+        ComboPreset.ItemIndex,
+        SpinCount.Value,
+        SpinW.Value,
+        SpinH.Value,
+        SpinD.Value,
+        CheckVisible.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemGameplayMarkersClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyGameplayMarkersRig(0, 6, 4.0, 2.5, 4.0, true)
+  else
+    ShowGameplayMarkersRigDialog;
+end;
+
+procedure TDesignFrame.ApplyBillboardAndSurfaceBehavior(const ModeIndex: Integer;
+  const MatchCameraDir, OnlyDesignTime, ConfigureViewportSort: Boolean);
+var
+  Transforms: TComponentList;
+  I, AppliedCount: Integer;
+  T, SurfaceTarget: TCastleTransform;
+  BB: TCastleBillboard;
+  Stick: TCastleStickToSurface;
+begin
+  if DesignOwner = nil then Exit;
+
+  Transforms := TComponentList.Create(false);
+  try
+    if (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0) then
+    begin
+      for I := 0 to TransformManipulate.SelectedCount - 1 do
+        if (TransformManipulate.Selected[I] <> nil) and
+           (not IsComponentLocked(TransformManipulate.Selected[I])) then
+          Transforms.Add(TransformManipulate.Selected[I]);
+    end else
+    if (CurrentTransform <> nil) and (not IsComponentLocked(CurrentTransform)) then
+      Transforms.Add(CurrentTransform);
+
+    if Transforms.Count = 0 then
+    begin
+      ErrorBox('Select at least one 3D transform to configure Billboard or StickToSurface behaviors.');
+      Exit;
+    end;
+
+    if (ModeIndex = 2) and (Transforms.Count < 2) then
+    begin
+      ErrorBox('For Stick To Surface, select 2 or more transforms: first select the terrain/surface target, then Shift-select the objects that should stick to it.');
+      Exit;
+    end;
+
+    AppliedCount := 0;
+    if ModeIndex = 2 then
+    begin
+      SurfaceTarget := TCastleTransform(Transforms[0]);
+      for I := 1 to Transforms.Count - 1 do
+      begin
+        T := TCastleTransform(Transforms[I]);
+        Stick := T.FindBehavior(TCastleStickToSurface) as TCastleStickToSurface;
+        if Stick = nil then
+        begin
+          Stick := TCastleStickToSurface.Create(DesignOwner);
+          Stick.Name := ProposeComponentName(TCastleStickToSurface, DesignOwner, T.Name + 'StickToSurface');
+          T.AddBehavior(Stick);
+        end;
+        Stick.Target := SurfaceTarget;
+        Stick.Direction := Vector3(0, -1, 0);
+        Stick.OnlyAtDesign := OnlyDesignTime;
+        Inc(AppliedCount);
+      end;
+    end else
+    for I := 0 to Transforms.Count - 1 do
+    begin
+      T := TCastleTransform(Transforms[I]);
+      case ModeIndex of
+        0, 1:
+          begin
+            BB := T.FindBehavior(TCastleBillboard) as TCastleBillboard;
+            if BB = nil then
+            begin
+              BB := TCastleBillboard.Create(DesignOwner);
+              BB.Name := ProposeComponentName(TCastleBillboard, DesignOwner, T.Name + 'Billboard');
+              T.AddBehavior(BB);
+            end;
+            if ModeIndex = 0 then
+              BB.AxisOfRotation := Vector3(0, 1, 0)
+            else
+              BB.AxisOfRotation := TVector3.Zero;
+            BB.MatchCameraDirection := MatchCameraDir;
+            Inc(AppliedCount);
+          end;
+        3:
+          begin
+            BB := T.FindBehavior(TCastleBillboard) as TCastleBillboard;
+            if BB <> nil then
+            begin
+              FreeComponentRecursively(BB);
+              Inc(AppliedCount);
+            end;
+            Stick := T.FindBehavior(TCastleStickToSurface) as TCastleStickToSurface;
+            if Stick <> nil then
+            begin
+              FreeComponentRecursively(Stick);
+              Inc(AppliedCount);
+            end;
+          end;
+      end;
+    end;
+
+    if ConfigureViewportSort and (CurrentViewport <> nil) then
+    begin
+      if ModeIndex = 0 then
+        CurrentViewport.BlendingSort := sort3DVerticalBillboards
+      else if ModeIndex = 1 then
+        CurrentViewport.BlendingSort := sort3D;
+    end;
+
+    if AppliedCount > 0 then
+    begin
+      UpdateDesign;
+      SetSelected(Transforms);
+      ModifiedOutsideObjectInspector(
+        Format('Configure Billboard / StickToSurface on %d Transform(s)', [AppliedCount]),
+        ucHigh);
+    end else
+      InfoBox('No Billboard or StickToSurface changes were needed on the selected transforms.');
+  finally
+    FreeAndNil(Transforms);
+  end;
+end;
+
+procedure TDesignFrame.ShowBillboardAndSurfaceBehaviorDialog;
+var
+  Dialog: TForm;
+  LblMode: TLabel;
+  ComboMode: TComboBox;
+  CheckMatchCam, CheckOnlyDesign, CheckViewportSort: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if (CurrentTransform = nil) and ((TransformManipulate = nil) or (TransformManipulate.SelectedCount = 0)) then
+  begin
+    ErrorBox('Select at least one 3D transform first.');
+    Exit;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 3D Billboard & Stick-To-Surface Behavior Setup';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 480;
+    Dialog.Height := 250;
+
+    LblMode := TLabel.Create(Dialog);
+    LblMode.Left := 16;
+    LblMode.Top := 16;
+    LblMode.Caption := 'Behavior Mode to Apply to Selected 3D Transform(s):';
+    LblMode.Parent := Dialog;
+
+    ComboMode := TComboBox.Create(Dialog);
+    ComboMode.Left := 16;
+    ComboMode.Top := 38;
+    ComboMode.Width := 444;
+    ComboMode.Style := csDropDownList;
+    ComboMode.Items.Add('Cylindrical Upright Y-Axis Billboard (AxisOfRotation = +Y, Trees / Foliage)');
+    ComboMode.Items.Add('Spherical Full-3D Camera-Facing Billboard (AxisOfRotation = 0, Sprites / FX)');
+    ComboMode.Items.Add('Stick To Surface (Attach Selected[1..N] onto Selected[0] Terrain/Floor)');
+    ComboMode.Items.Add('Remove Billboard & StickToSurface Behaviors from Selection');
+    ComboMode.ItemIndex := 0;
+    ComboMode.Parent := Dialog;
+
+    CheckMatchCam := TCheckBox.Create(Dialog);
+    CheckMatchCam.Left := 16;
+    CheckMatchCam.Top := 82;
+    CheckMatchCam.Caption := 'Billboard MatchCameraDirection (Parallel to Camera Plane)';
+    CheckMatchCam.Checked := true;
+    CheckMatchCam.Parent := Dialog;
+
+    CheckViewportSort := TCheckBox.Create(Dialog);
+    CheckViewportSort.Left := 16;
+    CheckViewportSort.Top := 110;
+    CheckViewportSort.Caption := 'Auto-Configure Viewport.BlendingSort (sort3DVerticalBillboards / sort3D)';
+    CheckViewportSort.Checked := true;
+    CheckViewportSort.Parent := Dialog;
+
+    CheckOnlyDesign := TCheckBox.Create(Dialog);
+    CheckOnlyDesign.Left := 16;
+    CheckOnlyDesign.Top := 138;
+    CheckOnlyDesign.Caption := 'StickToSurface OnlyAtDesign := true (Zero Runtime Overhead)';
+    CheckOnlyDesign.Checked := true;
+    CheckOnlyDesign.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Apply Behavior';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyBillboardAndSurfaceBehavior(
+        ComboMode.ItemIndex,
+        CheckMatchCam.Checked,
+        CheckOnlyDesign.Checked,
+        CheckViewportSort.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemBillboardStickSetupClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyBillboardAndSurfaceBehavior(0, true, true, true)
+  else
+    ShowBillboardAndSurfaceBehaviorDialog;
+end;
+
+procedure TDesignFrame.ApplySceneInstancing(const UnlinkReferences: Boolean;
+  const RefTransformMode: Integer; const EntireDesign: Boolean);
+var
+  Candidates, NewSelection: TComponentList;
+  MasterUrls: TStringList;
+  MasterScenes: TComponentList;
+
+  procedure CollectCandidates(const C: TComponent);
+  var
+    ChildIdx: Integer;
+    T: TCastleTransform;
+    UI: TCastleUserInterface;
+  begin
+    if (C = nil) or (not Selectable(C)) then Exit;
+    if (C <> FDesignRoot) and Deletable(C) and (not IsComponentLocked(C)) then
+    begin
+      if UnlinkReferences then
+      begin
+        if (C is TCastleTransformReference) and (TCastleTransformReference(C).Reference <> nil) and
+           (Candidates.IndexOf(C) = -1) then
+          Candidates.Add(C);
+      end else
+      begin
+        if (C is TCastleScene) and (Trim(TCastleScene(C).Url) <> '') and
+           (TCastleScene(C).Count = 0) and (TCastleScene(C).BehaviorsCount = 0) and
+           (Candidates.IndexOf(C) = -1) then
+          Candidates.Add(C);
+      end;
+    end;
+
+    if C is TCastleTransform then
+    begin
+      T := TCastleTransform(C);
+      for ChildIdx := 0 to T.Count - 1 do
+        CollectCandidates(T[ChildIdx]);
+    end else
+    if C is TCastleUserInterface then
+    begin
+      UI := TCastleUserInterface(C);
+      if UI is TCastleViewport then
+        CollectCandidates(TCastleViewport(UI).Items);
+      for ChildIdx := 0 to UI.ControlsCount - 1 do
+        CollectCandidates(UI.Controls[ChildIdx]);
+    end;
+  end;
+
+var
+  SelectedList: TComponentList;
+  SelectedCount, I, UrlIdx, InsertIdx, ConvertedCount: Integer;
+  Sc, MasterSc: TCastleScene;
+  RefComp: TCastleTransformReference;
+  ClonedT, ParentT: TCastleTransform;
+  NormUrl, OrigName, CompStr: String;
+begin
+  if (FDesignRoot = nil) or (DesignOwner = nil) then Exit;
+
+  Candidates := TComponentList.Create(false);
+  NewSelection := TComponentList.Create(false);
+  MasterUrls := TStringList.Create;
+  MasterScenes := TComponentList.Create(false);
+  try
+    GetSelected(SelectedList, SelectedCount, false);
+    try
+      if (not EntireDesign) and (SelectedList <> nil) and (SelectedList.Count > 0) and
+         (not ((SelectedList.Count = 1) and (SelectedList[0] = FDesignRoot))) then
+      begin
+        for I := 0 to SelectedList.Count - 1 do
+          CollectCandidates(SelectedList[I]);
+      end else
+        CollectCandidates(FDesignRoot);
+    finally
+      FreeAndNil(SelectedList);
+    end;
+
+    ConvertedCount := 0;
+    if UnlinkReferences then
+    begin
+      for I := 0 to Candidates.Count - 1 do
+      begin
+        RefComp := TCastleTransformReference(Candidates[I]);
+        if (RefComp.Reference = nil) or (RefComp.Parent = nil) then Continue;
+        ParentT := RefComp.Parent;
+        InsertIdx := ParentT.List.IndexOf(RefComp);
+        OrigName := RefComp.Name;
+
+        CompStr := ComponentToString(RefComp.Reference);
+        ClonedT := StringToComponent(CompStr, DesignOwner) as TCastleTransform;
+        ClonedT.Translation := RefComp.Translation;
+        ClonedT.Rotation := RefComp.Rotation;
+        ClonedT.Scale := RefComp.Scale;
+        ClonedT.Visible := RefComp.Visible;
+        ClonedT.Exists := RefComp.Exists;
+
+        FreeComponentRecursively(RefComp);
+        if (OrigName <> '') and (DesignOwner.FindComponent(OrigName) = nil) then
+          ClonedT.Name := OrigName;
+
+        if InsertIdx >= 0 then
+          ParentT.Insert(InsertIdx, ClonedT)
+        else
+          ParentT.Add(ClonedT);
+
+        NewSelection.Add(ClonedT);
+        Inc(ConvertedCount);
+      end;
+
+      if ConvertedCount > 0 then
+      begin
+        UpdateDesign;
+        SetSelected(NewSelection);
+        ModifiedOutsideObjectInspector(
+          Format('Unlink %d TCastleTransformReference Instance(s) to Independent Clones', [ConvertedCount]),
+          ucHigh);
+      end else
+        InfoBox('No TCastleTransformReference instances with a valid Reference were found in the target scope.');
+    end else
+    begin
+      for I := 0 to Candidates.Count - 1 do
+      begin
+        Sc := TCastleScene(Candidates[I]);
+        NormUrl := LowerCase(Trim(Sc.Url));
+        UrlIdx := MasterUrls.IndexOf(NormUrl);
+        if UrlIdx < 0 then
+        begin
+          MasterUrls.Add(NormUrl);
+          MasterScenes.Add(Sc);
+        end else
+        begin
+          MasterSc := TCastleScene(MasterScenes[UrlIdx]);
+          ParentT := Sc.Parent;
+          if (ParentT = nil) or (MasterSc = nil) or (Sc.World <> MasterSc.World) then
+            Continue;
+
+          InsertIdx := ParentT.List.IndexOf(Sc);
+          RefComp := TCastleTransformReference.Create(DesignOwner);
+          RefComp.Name := ProposeComponentName(TCastleTransformReference, DesignOwner, Sc.Name + 'Ref');
+          RefComp.Translation := Sc.Translation;
+          RefComp.Rotation := Sc.Rotation;
+          RefComp.Scale := Sc.Scale;
+          RefComp.Visible := Sc.Visible;
+          RefComp.Exists := Sc.Exists;
+          RefComp.CastShadows := Sc.CastShadows;
+          case RefTransformMode of
+            1: RefComp.ReferenceTransformation := rtIgnoreTranslation;
+            2: RefComp.ReferenceTransformation := rtDoNotIgnore;
+            else RefComp.ReferenceTransformation := rtIgnoreTransform;
+          end;
+          RefComp.Reference := MasterSc;
+
+          if InsertIdx >= 0 then
+            ParentT.Insert(InsertIdx, RefComp)
+          else
+            ParentT.Add(RefComp);
+
+          FreeComponentRecursively(Sc);
+          NewSelection.Add(RefComp);
+          Inc(ConvertedCount);
+        end;
+      end;
+
+      if ConvertedCount > 0 then
+      begin
+        UpdateDesign;
+        SetSelected(NewSelection);
+        ModifiedOutsideObjectInspector(
+          Format('Convert %d Duplicate TCastleScene(s) into TCastleTransformReference Instances (%d Master URL(s))',
+            [ConvertedCount, MasterUrls.Count]),
+          ucHigh);
+      end else
+        InfoBox('No duplicate leaf TCastleScene instances sharing the same asset URL were found to deduplicate.');
+    end;
+  finally
+    FreeAndNil(MasterScenes);
+    FreeAndNil(MasterUrls);
+    FreeAndNil(NewSelection);
+    FreeAndNil(Candidates);
+  end;
+end;
+
+procedure TDesignFrame.ShowSceneInstancingDialog;
+var
+  Dialog: TForm;
+  LblAction, LblRefMode: TLabel;
+  ComboAction, ComboRefMode: TComboBox;
+  CheckEntireDesign: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if FDesignRoot = nil then Exit;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Scene Instancing & TCastleTransformReference Deduplicator';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 490;
+    Dialog.Height := 250;
+
+    LblAction := TLabel.Create(Dialog);
+    LblAction.Left := 16;
+    LblAction.Top := 16;
+    LblAction.Caption := 'Scene Instancing / Reference Operation:';
+    LblAction.Parent := Dialog;
+
+    ComboAction := TComboBox.Create(Dialog);
+    ComboAction.Left := 16;
+    ComboAction.Top := 38;
+    ComboAction.Width := 454;
+    ComboAction.Style := csDropDownList;
+    ComboAction.Items.Add('Deduplicate Identical-URL TCastleScenes -> TCastleTransformReference');
+    ComboAction.Items.Add('Unlink / Make Unique: Convert TCastleTransformReference -> Independent Clone');
+    ComboAction.ItemIndex := 0;
+    ComboAction.Parent := Dialog;
+
+    LblRefMode := TLabel.Create(Dialog);
+    LblRefMode.Left := 16;
+    LblRefMode.Top := 82;
+    LblRefMode.Caption := 'ReferenceTransformation Mode (when creating TCastleTransformReference):';
+    LblRefMode.Parent := Dialog;
+
+    ComboRefMode := TComboBox.Create(Dialog);
+    ComboRefMode.Left := 16;
+    ComboRefMode.Top := 104;
+    ComboRefMode.Width := 454;
+    ComboRefMode.Style := csDropDownList;
+    ComboRefMode.Items.Add('Ignore Master Transform (rtIgnoreTransform - Recommended)');
+    ComboRefMode.Items.Add('Ignore Master Translation Only (rtIgnoreTranslation - Share Rot/Scale)');
+    ComboRefMode.Items.Add('Do Not Ignore Master Transform (rtDoNotIgnore)');
+    ComboRefMode.ItemIndex := 0;
+    ComboRefMode.Parent := Dialog;
+
+    CheckEntireDesign := TCheckBox.Create(Dialog);
+    CheckEntireDesign.Left := 16;
+    CheckEntireDesign.Top := 148;
+    CheckEntireDesign.Caption := 'Scan Entire Design Hierarchy (Uncheck for Selected Subtree Only)';
+    CheckEntireDesign.Checked := (ControlsTree.SelectionCount <= 1);
+    CheckEntireDesign.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Execute Instancing Operation';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplySceneInstancing(
+        ComboAction.ItemIndex = 1,
+        ComboRefMode.ItemIndex,
+        CheckEntireDesign.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSceneInstancingClick(Sender: TObject);
+begin
+  ShowSceneInstancingDialog;
+end;
+
+procedure TDesignFrame.ApplyPhysicsWorldConfiguration(const GravityVal, FreqVal: Single;
+  const MaxTicks: Integer; const EnableCcd, EnableRk4: Boolean;
+  const ApplyToSelectedBodies: Boolean; const LayerIdx: Integer;
+  const FrictionVal, RestitutionVal, DensityVal: Single);
+var
+  PhysProps: TPhysicsProperties;
+  SelectedList: TComponentList;
+  SelectedCount, I, UpdatedBodies: Integer;
+
+  procedure ConfigureTransformPhysics(const C: TComponent);
+  var
+    ChildIdx: Integer;
+    T: TCastleTransform;
+    Col: TCastleCollider;
+    Body: TCastleRigidBody;
+  begin
+    if (C = nil) or (not Selectable(C)) then Exit;
+    if (C is TCastleTransform) and (not IsComponentLocked(C)) then
+    begin
+      T := TCastleTransform(C);
+      Col := T.FindBehavior(TCastleCollider) as TCastleCollider;
+      if Col <> nil then
+      begin
+        Col.Friction := Max(0.0, FrictionVal);
+        Col.Restitution := Clamped(RestitutionVal, 0.0, 2.0);
+        Col.Density := Max(0.01, DensityVal);
+        Inc(UpdatedBodies);
+      end;
+      Body := T.FindBehavior(TCastleRigidBody) as TCastleRigidBody;
+      if Body <> nil then
+      begin
+        Body.Layer := Clamped(LayerIdx, Low(TPhysicsLayer), High(TPhysicsLayer));
+        Inc(UpdatedBodies);
+      end;
+      for ChildIdx := 0 to T.Count - 1 do
+        ConfigureTransformPhysics(T[ChildIdx]);
+    end;
+  end;
+
+begin
+  if CurrentViewport <> nil then
+  begin
+    PhysProps := CurrentViewport.Items.PhysicsProperties;
+    PhysProps.GravityStrength := Max(0.0, GravityVal);
+    PhysProps.Frequency := Max(10.0, FreqVal);
+    PhysProps.MaxPhysicsTicksPerUpdate := Max(0, MaxTicks);
+    PhysProps.ContinuousCollisionDetection := EnableCcd;
+    PhysProps.LinearVelocityRK4Integration := EnableRk4;
+    PhysProps.AngularVelocityRK4Integration := EnableRk4;
+  end;
+
+  UpdatedBodies := 0;
+  if ApplyToSelectedBodies then
+  begin
+    GetSelected(SelectedList, SelectedCount, false);
+    try
+      if SelectedList <> nil then
+        for I := 0 to SelectedList.Count - 1 do
+          ConfigureTransformPhysics(SelectedList[I]);
+    finally
+      FreeAndNil(SelectedList);
+    end;
+  end;
+
+  UpdateDesign;
+  ModifiedOutsideObjectInspector(
+    Format('Configure Physics World (Gravity=%.2f, %.0f Hz, %d Body/Collider Props)',
+      [GravityVal, FreqVal, UpdatedBodies]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowPhysicsWorldConfiguratorDialog;
+var
+  PhysProps: TPhysicsProperties;
+  Dialog: TForm;
+  LblGrav, LblFreq, LblTicks, LblLayer, LblFriction, LblRestitution, LblDensity: TLabel;
+  SpinGrav, SpinFreq, SpinFriction, SpinRestitution, SpinDensity: TFloatSpinEdit;
+  SpinTicks, SpinLayer: TSpinEdit;
+  CheckCcd, CheckRk4, CheckApplySelected: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if (CurrentViewport = nil) and (not (FDesignRoot is TCastleTransform)) then
+  begin
+    ErrorBox('Select a 3D viewport or transform design to configure physics settings.');
+    Exit;
+  end;
+
+  if CurrentViewport <> nil then
+    PhysProps := CurrentViewport.Items.PhysicsProperties
+  else
+    PhysProps := nil;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Physics World Gravity, Solver & Collider Material Configurator';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 490;
+    Dialog.Height := 390;
+
+    LblGrav := TLabel.Create(Dialog);
+    LblGrav.Left := 16;
+    LblGrav.Top := 16;
+    LblGrav.Caption := 'World Gravity Strength (Earth = 9.81, Moon = 1.62, Zero-G = 0):';
+    LblGrav.Parent := Dialog;
+
+    SpinGrav := TFloatSpinEdit.Create(Dialog);
+    SpinGrav.Left := 360;
+    SpinGrav.Top := 12;
+    SpinGrav.Width := 110;
+    SpinGrav.MinValue := 0.0;
+    SpinGrav.MaxValue := 500.0;
+    SpinGrav.Increment := 0.5;
+    SpinGrav.DecimalPlaces := 2;
+    if PhysProps <> nil then
+      SpinGrav.Value := PhysProps.GravityStrength
+    else
+      SpinGrav.Value := 9.81;
+    SpinGrav.Parent := Dialog;
+
+    LblFreq := TLabel.Create(Dialog);
+    LblFreq.Left := 16;
+    LblFreq.Top := 50;
+    LblFreq.Caption := 'Physics Solver Frequency Hz (Default = 60, High-Precision = 120):';
+    LblFreq.Parent := Dialog;
+
+    SpinFreq := TFloatSpinEdit.Create(Dialog);
+    SpinFreq.Left := 360;
+    SpinFreq.Top := 46;
+    SpinFreq.Width := 110;
+    SpinFreq.MinValue := 15.0;
+    SpinFreq.MaxValue := 240.0;
+    SpinFreq.Increment := 15.0;
+    SpinFreq.DecimalPlaces := 0;
+    if PhysProps <> nil then
+      SpinFreq.Value := PhysProps.Frequency
+    else
+      SpinFreq.Value := 60.0;
+    SpinFreq.Parent := Dialog;
+
+    LblTicks := TLabel.Create(Dialog);
+    LblTicks.Left := 16;
+    LblTicks.Top := 84;
+    LblTicks.Caption := 'Max Physics Ticks Per Update (Spiral-of-Death Guard):';
+    LblTicks.Parent := Dialog;
+
+    SpinTicks := TSpinEdit.Create(Dialog);
+    SpinTicks.Left := 360;
+    SpinTicks.Top := 80;
+    SpinTicks.Width := 110;
+    SpinTicks.MinValue := 0;
+    SpinTicks.MaxValue := 30;
+    if PhysProps <> nil then
+      SpinTicks.Value := PhysProps.MaxPhysicsTicksPerUpdate
+    else
+      SpinTicks.Value := 5;
+    SpinTicks.Parent := Dialog;
+
+    CheckCcd := TCheckBox.Create(Dialog);
+    CheckCcd.Left := 16;
+    CheckCcd.Top := 116;
+    CheckCcd.Caption := 'Enable Continuous Collision Detection (CCD)';
+    CheckCcd.Checked := (PhysProps = nil) or PhysProps.ContinuousCollisionDetection;
+    CheckCcd.Parent := Dialog;
+
+    CheckRk4 := TCheckBox.Create(Dialog);
+    CheckRk4.Left := 16;
+    CheckRk4.Top := 140;
+    CheckRk4.Caption := 'Enable RK4 Runge-Kutta Velocity Integration (Higher Precision)';
+    CheckRk4.Checked := (PhysProps <> nil) and PhysProps.LinearVelocityRK4Integration;
+    CheckRk4.Parent := Dialog;
+
+    CheckApplySelected := TCheckBox.Create(Dialog);
+    CheckApplySelected.Left := 16;
+    CheckApplySelected.Top := 172;
+    CheckApplySelected.Caption := 'Also Apply Collider Material & Layer Below to Selected Transform(s):';
+    CheckApplySelected.Checked := ControlsTree.SelectionCount > 0;
+    CheckApplySelected.Parent := Dialog;
+
+    LblLayer := TLabel.Create(Dialog);
+    LblLayer.Left := 16;
+    LblLayer.Top := 204;
+    LblLayer.Caption := 'RigidBody Physics Layer (0..31):';
+    LblLayer.Parent := Dialog;
+
+    SpinLayer := TSpinEdit.Create(Dialog);
+    SpinLayer.Left := 360;
+    SpinLayer.Top := 200;
+    SpinLayer.Width := 110;
+    SpinLayer.MinValue := Low(TPhysicsLayer);
+    SpinLayer.MaxValue := High(TPhysicsLayer);
+    SpinLayer.Value := 0;
+    SpinLayer.Parent := Dialog;
+
+    LblFriction := TLabel.Create(Dialog);
+    LblFriction.Left := 16;
+    LblFriction.Top := 238;
+    LblFriction.Caption := 'Collider Surface Friction (Ice = 0.05, Default = 0.50, Rubber = 0.95):';
+    LblFriction.Parent := Dialog;
+
+    SpinFriction := TFloatSpinEdit.Create(Dialog);
+    SpinFriction.Left := 360;
+    SpinFriction.Top := 234;
+    SpinFriction.Width := 110;
+    SpinFriction.MinValue := 0.0;
+    SpinFriction.MaxValue := 5.0;
+    SpinFriction.Increment := 0.05;
+    SpinFriction.DecimalPlaces := 2;
+    SpinFriction.Value := 0.50;
+    SpinFriction.Parent := Dialog;
+
+    LblRestitution := TLabel.Create(Dialog);
+    LblRestitution.Left := 16;
+    LblRestitution.Top := 272;
+    LblRestitution.Caption := 'Collider Bounciness / Restitution (0.00 = Inelastic .. 1.00 = Elastic):';
+    LblRestitution.Parent := Dialog;
+
+    SpinRestitution := TFloatSpinEdit.Create(Dialog);
+    SpinRestitution.Left := 360;
+    SpinRestitution.Top := 268;
+    SpinRestitution.Width := 110;
+    SpinRestitution.MinValue := 0.0;
+    SpinRestitution.MaxValue := 2.0;
+    SpinRestitution.Increment := 0.05;
+    SpinRestitution.DecimalPlaces := 2;
+    SpinRestitution.Value := 0.15;
+    SpinRestitution.Parent := Dialog;
+
+    LblDensity := TLabel.Create(Dialog);
+    LblDensity.Left := 16;
+    LblDensity.Top := 306;
+    LblDensity.Caption := 'Collider Density (kg/m³):';
+    LblDensity.Parent := Dialog;
+
+    SpinDensity := TFloatSpinEdit.Create(Dialog);
+    SpinDensity.Left := 360;
+    SpinDensity.Top := 302;
+    SpinDensity.Width := 110;
+    SpinDensity.MinValue := 0.01;
+    SpinDensity.MaxValue := 50000.0;
+    SpinDensity.Increment := 0.5;
+    SpinDensity.DecimalPlaces := 2;
+    SpinDensity.Value := 1.00;
+    SpinDensity.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Apply Physics Configuration';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyPhysicsWorldConfiguration(
+        SpinGrav.Value,
+        SpinFreq.Value,
+        SpinTicks.Value,
+        CheckCcd.Checked,
+        CheckRk4.Checked,
+        CheckApplySelected.Checked,
+        SpinLayer.Value,
+        SpinFriction.Value,
+        SpinRestitution.Value,
+        SpinDensity.Value);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemPhysicsConfiguratorClick(Sender: TObject);
+begin
+  ShowPhysicsWorldConfiguratorDialog;
+end;
+
+procedure TDesignFrame.ApplyUiResolutionPreset(const ResolutionPreset: Integer;
+  const CustomWidth, CustomHeight: Single);
+var
+  TargetUI: TCastleUserInterface;
+  TargetW, TargetH: Single;
+  PresetLabel: String;
+begin
+  if SelectedUserInterface <> nil then
+    TargetUI := SelectedUserInterface
+  else if FDesignRoot is TCastleUserInterface then
+    TargetUI := TCastleUserInterface(FDesignRoot)
+  else
+  begin
+    ErrorBox('Select a 2D User Interface root or container control to test screen resolution presets.');
+    Exit;
+  end;
+
+  if IsComponentLocked(TargetUI) then
+  begin
+    ErrorBox('Target UI control is locked. Unlock it first (Ctrl+L).');
+    Exit;
+  end;
+
+  if ResolutionPreset = 0 then
+  begin
+    TargetUI.FullSize := true;
+    TargetUI.Translation := TVector2.Zero;
+    PresetLabel := 'Responsive FullSize Fill';
+  end else
+  begin
+    case ResolutionPreset of
+      1: begin TargetW := 1920; TargetH := 1080; PresetLabel := '1920x1080 (Full HD 16:9)'; end;
+      2: begin TargetW := 1280; TargetH := 720;  PresetLabel := '1280x720 (HD 16:9)'; end;
+      3: begin TargetW := 1280; TargetH := 800;  PresetLabel := '1280x800 (Steam Deck 16:10)'; end;
+      4: begin TargetW := 2560; TargetH := 1080; PresetLabel := '2560x1080 (Ultrawide 21:9)'; end;
+      5: begin TargetW := 540;  TargetH := 960;  PresetLabel := '540x960 (Mobile Portrait 9:16)'; end;
+      6: begin TargetW := 1024; TargetH := 768;  PresetLabel := '1024x768 (Tablet 4:3)'; end;
+      else
+      begin
+        TargetW := Max(64.0, CustomWidth);
+        TargetH := Max(64.0, CustomHeight);
+        PresetLabel := Format('Custom %.0fx%.0f', [TargetW, TargetH]);
+      end;
+    end;
+
+    TargetUI.FullSize := false;
+    TargetUI.AutoSizeToChildren := false;
+    TargetUI.WidthFraction := 0.0;
+    TargetUI.HeightFraction := 0.0;
+    TargetUI.Width := TargetW;
+    TargetUI.Height := TargetH;
+    TargetUI.HorizontalAnchorSelf := hpMiddle;
+    TargetUI.HorizontalAnchorParent := hpMiddle;
+    TargetUI.VerticalAnchorSelf := vpMiddle;
+    TargetUI.VerticalAnchorParent := vpMiddle;
+    TargetUI.Translation := TVector2.Zero;
+  end;
+
+  UpdateDesign;
+  SetSelectedComponent(TargetUI);
+  ModifiedOutsideObjectInspector(
+    Format('Apply 2D UI Resolution Preset (%s) on %s', [PresetLabel, TargetUI.Name]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowUiResolutionTesterDialog;
+var
+  Dialog: TForm;
+  LblPreset, LblW, LblH: TLabel;
+  ComboPreset: TComboBox;
+  SpinW, SpinH: TFloatSpinEdit;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if (SelectedUserInterface = nil) and (not (FDesignRoot is TCastleUserInterface)) then
+  begin
+    ErrorBox('Select a 2D User Interface root or container control first.');
+    Exit;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := '2D UI Responsive Screen Resolution & Aspect Ratio Tester';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 460;
+    Dialog.Height := 240;
+
+    LblPreset := TLabel.Create(Dialog);
+    LblPreset.Left := 16;
+    LblPreset.Top := 16;
+    LblPreset.Caption := 'Target Screen Resolution / Aspect Ratio Preset:';
+    LblPreset.Parent := Dialog;
+
+    ComboPreset := TComboBox.Create(Dialog);
+    ComboPreset.Left := 16;
+    ComboPreset.Top := 38;
+    ComboPreset.Width := 424;
+    ComboPreset.Style := csDropDownList;
+    ComboPreset.Items.Add('Responsive Full-Viewport Fill (FullSize := true - Restore Default)');
+    ComboPreset.Items.Add('Full HD 1080p Landscape (1920 x 1080 - 16:9)');
+    ComboPreset.Items.Add('HD 720p / Handheld Landscape (1280 x 720 - 16:9)');
+    ComboPreset.Items.Add('Steam Deck / Laptop Widescreen (1280 x 800 - 16:10)');
+    ComboPreset.Items.Add('Ultrawide Cinema Display (2560 x 1080 - 21:9)');
+    ComboPreset.Items.Add('Mobile Smartphone Portrait (540 x 960 - 9:16)');
+    ComboPreset.Items.Add('Tablet / Classic Monitor (1024 x 768 - 4:3)');
+    ComboPreset.Items.Add('Custom Width x Height Frame (Specify Below)');
+    ComboPreset.ItemIndex := 2;
+    ComboPreset.Parent := Dialog;
+
+    LblW := TLabel.Create(Dialog);
+    LblW.Left := 16;
+    LblW.Top := 84;
+    LblW.Caption := 'Custom Frame Width (px):';
+    LblW.Parent := Dialog;
+
+    SpinW := TFloatSpinEdit.Create(Dialog);
+    SpinW.Left := 290;
+    SpinW.Top := 80;
+    SpinW.Width := 110;
+    SpinW.MinValue := 64.0;
+    SpinW.MaxValue := 7680.0;
+    SpinW.Increment := 64.0;
+    SpinW.DecimalPlaces := 0;
+    SpinW.Value := 1280.0;
+    SpinW.Parent := Dialog;
+
+    LblH := TLabel.Create(Dialog);
+    LblH.Left := 16;
+    LblH.Top := 120;
+    LblH.Caption := 'Custom Frame Height (px):';
+    LblH.Parent := Dialog;
+
+    SpinH := TFloatSpinEdit.Create(Dialog);
+    SpinH.Left := 290;
+    SpinH.Top := 116;
+    SpinH.Width := 110;
+    SpinH.MinValue := 64.0;
+    SpinH.MaxValue := 4320.0;
+    SpinH.Increment := 64.0;
+    SpinH.DecimalPlaces := 0;
+    SpinH.Value := 720.0;
+    SpinH.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Apply Resolution Frame';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyUiResolutionPreset(
+        ComboPreset.ItemIndex,
+        SpinW.Value,
+        SpinH.Value);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemUiResolutionTesterClick(Sender: TObject);
+begin
+  ShowUiResolutionTesterDialog;
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -37239,6 +38599,20 @@ begin
     MenuTreeViewItemRenderingOptimizer.Enabled := FDesignRoot <> nil;
   if MenuTreeViewItemBookmarksManager <> nil then
     MenuTreeViewItemBookmarksManager.Enabled := FDesignRoot <> nil;
+  if MenuTreeViewItemGameplayMarkers <> nil then
+    MenuTreeViewItemGameplayMarkers.Enabled :=
+      (CurrentViewport <> nil) or (FDesignRoot is TCastleTransform);
+  if MenuTreeViewItemBillboardStickSetup <> nil then
+    MenuTreeViewItemBillboardStickSetup.Enabled :=
+      (CurrentTransform <> nil) or ((TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0));
+  if MenuTreeViewItemSceneInstancing <> nil then
+    MenuTreeViewItemSceneInstancing.Enabled := FDesignRoot <> nil;
+  if MenuTreeViewItemPhysicsConfigurator <> nil then
+    MenuTreeViewItemPhysicsConfigurator.Enabled :=
+      (CurrentViewport <> nil) or (FDesignRoot is TCastleTransform);
+  if MenuTreeViewItemUiResolutionTester <> nil then
+    MenuTreeViewItemUiResolutionTester.Enabled :=
+      (SelectedUserInterface <> nil) or (FDesignRoot is TCastleUserInterface);
   if MenuTreeViewItemGroupSelected <> nil then
     MenuTreeViewItemGroupSelected.Enabled := (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0);
   if MenuTreeViewItemUngroupSelected <> nil then
