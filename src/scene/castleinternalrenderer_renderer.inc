@@ -336,14 +336,22 @@ begin
 
   if RenderingCamera <> nil then
   begin
-    UniformBlock.ViewMatrix := RenderingCamera.Matrix;
-    RenderingCamera.InverseMatrixNeeded;
-    UniformBlock.ViewMatrixInverse := RenderingCamera.InverseMatrix;
-    UniformBlock.CameraPosition := Vector4(
-      UniformBlock.ViewMatrixInverse.Rows[0].W,
-      UniformBlock.ViewMatrixInverse.Rows[1].W,
-      UniformBlock.ViewMatrixInverse.Rows[2].W,
-      0.0);
+    UniformBlock.ViewMatrix := RenderingCamera.CurrentMatrix;
+    if RenderingCamera.RotationOnly then
+    begin
+      RenderingCamera.RotationInverseMatrixNeeded;
+      UniformBlock.ViewMatrixInverse := RenderingCamera.RotationInverseMatrix;
+      UniformBlock.CameraPosition := Vector4(0.0, 0.0, 0.0, 0.0);
+    end else
+    begin
+      RenderingCamera.InverseMatrixNeeded;
+      UniformBlock.ViewMatrixInverse := RenderingCamera.InverseMatrix;
+      UniformBlock.CameraPosition := Vector4(
+        UniformBlock.ViewMatrixInverse.Rows[0].W,
+        UniformBlock.ViewMatrixInverse.Rows[1].W,
+        UniformBlock.ViewMatrixInverse.Rows[2].W,
+        0.0);
+    end;
   end else
   begin
     UniformBlock.ViewMatrix := TMatrix4.Identity;
@@ -619,6 +627,11 @@ begin
   begin
     ADesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthReadOnly;
     ADesc.BlendState := TRHIBlendStateDesc.DefaultAlphaBlend;
+  end else
+  if FInternalPass = 1 then
+  begin
+    ADesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultStencilLitPass(0, $FF);
+    ADesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
   end else
   begin
     ADesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;

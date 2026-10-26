@@ -270,6 +270,9 @@ type
     procedure TestDrawPrimitive2DFanAndLineLoopExpansionAndShadersRHI;
     procedure TestRenderUnlitMeshShadersPushConstantsAndDepthStateRHI;
     procedure TestViewportMainSceneScreenEffectRHIPipelineAndRenderRHI;
+    procedure TestViewport3DSkyboxAndImageBackgroundRotationOnlyViewMatrixRHI;
+    procedure TestViewportStencilShadowVolumesEndToEndMultiPassAndMeshPSORHI;
+    procedure TestSceneUpdateGeneratedTexturesRenderedTextureAndShadowMapRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -4247,6 +4250,9 @@ end;
 procedure TTestCastleVulkanRHI.DummyRenderFromViewpointCallback(const RenderCamera: TRenderingCamera);
 begin
   Inc(FRenderFromViewpointCalls);
+  if (RenderContext <> nil) and (RenderCamera <> nil) then
+    AssertEquals('RenderContext.Viewport.Left must be 0 during generated texture Update',
+      0, RenderContext.Viewport.Left);
 end;
 
 procedure TTestCastleVulkanRHI.TestDynamicTextureResourcesRHI;
@@ -13898,6 +13904,328 @@ begin
   finally
     FreeAndNil(Container);
     FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewport3DSkyboxAndImageBackgroundRotationOnlyViewMatrixRHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TRHICommandList;
+  VkCmd: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Bg: TCastleBackground;
+  Renderer: TRenderer;
+  Cam: TRenderingCamera;
+  Stats: TRenderStatistics;
+  Block: TCastleSceneUniformBlock;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($6901)));
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  TestCtx.Viewport := Rectangle(0, 0, 256, 256);
+  Container := nil;
+  Renderer := nil;
+  Cam := nil;
+  try
+    { 1. Verify TRenderer.BuildSceneUniformBlock honors RenderingCamera.RotationOnly }
+    Renderer := TRenderer.Create(nil);
+    Cam := TRenderingCamera.Create;
+    Cam.Target := rtScreen;
+    Cam.FromViewVectors(
+      Vector3(100.0, 200.0, 300.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0),
+      TMatrix4.Identity);
+    Cam.RotationOnly := True;
+    FillChar(Stats, SizeOf(Stats), 0);
+    Renderer.RenderBegin(nil, Cam, nil, 0, 0, 0, @Stats);
+    try
+      Renderer.BuildSceneUniformBlock(Block);
+      AssertTrue('RotationOnly ViewMatrix must have zero translation X',
+        SameValue(Block.ViewMatrix.Rows[0].W, 0.0, 1e-4));
+      AssertTrue('RotationOnly ViewMatrix must have zero translation Y',
+        SameValue(Block.ViewMatrix.Rows[1].W, 0.0, 1e-4));
+      AssertTrue('RotationOnly ViewMatrix must have zero translation Z',
+        SameValue(Block.ViewMatrix.Rows[2].W, 0.0, 1e-4));
+      AssertTrue('RotationOnly CameraPosition must be (0,0,0,0)',
+        SameValue(Block.CameraPosition.Length, 0.0, 1e-4));
+    finally
+      Renderer.RenderEnd;
+    end;
+
+    { 2. Render TCastleViewport with TCastleBackground skybox/sphere in headless Vulkan RHI mode }
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.Camera.SetView(
+      Vector3(50.0, 25.0, 75.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Bg := TCastleBackground.Create(Viewport);
+    Bg.SkyEquatorColor := Vector3(0.5, 0.7, 1.0);
+    Bg.GroundEquatorColor := Vector3(0.3, 0.25, 0.2);
+    Viewport.Background := Bg;
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Cmd := Device.BeginFrame;
+    SetActiveCommandList(Cmd);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+      VkCmd := Cmd as TVulkanRHICommandList;
+      AssertTrue('TCastleBackground must have an initialized InternalBackgroundRenderer',
+        Bg.InternalBackgroundRenderer <> nil);
+      AssertTrue('TCastleBackground InternalBackgroundRenderer must record >= 1 RHI render pass',
+        Bg.InternalBackgroundRenderer.RHIRenderCount >= 1);
+      AssertTrue('Viewport with skybox background must bind a graphics pipeline',
+        VkCmd.PipelineBindCount >= 1);
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Cam);
+    FreeAndNil(Renderer);
+    FreeAndNil(Container);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportStencilShadowVolumesEndToEndMultiPassAndMeshPSORHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  LightNode: TPointLightNode;
+  CasterShape, ReceiverShape: TShapeNode;
+  CasterBox, ReceiverBox: TBoxNode;
+  CasterApp, ReceiverApp: TAppearanceNode;
+  CasterMat, ReceiverMat: TPhysicalMaterialNode;
+  SvRenderer: TGLShadowVolumeRenderer;
+  Renderer: TRenderer;
+  Cam: TRenderingCamera;
+  Stats: TRenderStatistics;
+  RShape: TX3DRendererShape;
+  LitDesc: TRHIGraphicsPipelineDesc;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($6902)));
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  TestCtx.Viewport := Rectangle(0, 0, 256, 256);
+  Container := nil;
+  Renderer := nil;
+  Cam := nil;
+  try
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.ShadowVolumes := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 2.0, 10.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Scene := TCastleScene.Create(Viewport);
+    Root := TX3DRootNode.Create;
+
+    LightNode := TPointLightNode.Create;
+    LightNode.Location := Vector3(0.0, 8.0, 2.0);
+    LightNode.FdShadowVolumes.Value := True;
+    LightNode.FdShadowVolumesMain.Value := True;
+    Root.AddChildren(LightNode);
+
+    CasterShape := TShapeNode.Create;
+    CasterBox := TBoxNode.Create;
+    CasterBox.Size := Vector3(1.5, 1.5, 1.5);
+    CasterShape.Geometry := CasterBox;
+    CasterApp := TAppearanceNode.Create;
+    CasterMat := TPhysicalMaterialNode.Create;
+    CasterMat.BaseColor := Vector3(0.8, 0.2, 0.2);
+    CasterApp.Material := CasterMat;
+    CasterShape.Appearance := CasterApp;
+    Root.AddChildren(CasterShape);
+
+    ReceiverShape := TShapeNode.Create;
+    ReceiverBox := TBoxNode.Create;
+    ReceiverBox.Size := Vector3(6.0, 0.5, 6.0);
+    ReceiverShape.Geometry := ReceiverBox;
+    ReceiverApp := TAppearanceNode.Create;
+    ReceiverMat := TPhysicalMaterialNode.Create;
+    ReceiverMat.BaseColor := Vector3(0.7, 0.7, 0.7);
+    ReceiverApp.Material := ReceiverMat;
+    ReceiverShape.Appearance := ReceiverApp;
+    Root.AddChildren(ReceiverShape);
+
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+    {$warnings off}
+    Viewport.Items.MainScene := Scene;
+    {$warnings on}
+
+    Cmd := Device.BeginFrame;
+    SetActiveCommandList(Cmd);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+    finally
+      Device.EndFrameAndPresent;
+    end;
+
+    SvRenderer := Viewport.InternalShadowVolumeRenderer;
+    AssertTrue('Viewport.InternalShadowVolumeRenderer must be allocated', SvRenderer <> nil);
+    AssertTrue('ShadowVolumeRenderer must execute >= 4 RHI passes during Viewport render',
+      SvRenderer.RHIRenderPassCount >= 4);
+    AssertTrue('ShadowVolumeRenderer.Mesh must record >= 1 RHI draw call for silhouette quads',
+      SvRenderer.Mesh.RHIDrawCallCount >= 1);
+    AssertTrue('ShadowVolumeRenderer.Mesh must bind a stencil shadow volume RHI PSO',
+      SvRenderer.Mesh.RHIPipeline <> nil);
+    AssertTrue('ShadowVolumeRenderer.Mesh PSO must have StencilTestEnable = True',
+      (SvRenderer.Mesh.RHIPipeline as TVulkanRHIPipeline).Desc.DepthStencil.StencilTestEnable);
+
+    { Verify TRenderer.BuildShapePipelineDesc in FInternalPass = 1 produces DefaultStencilLitPass }
+    Renderer := TRenderer.Create(nil);
+    Cam := TRenderingCamera.Create;
+    Cam.Target := rtScreen;
+    Cam.Matrix := TMatrix4.Identity;
+    RShape := TX3DRendererShape(Scene.Shapes.TraverseList(True)[0]);
+    FillChar(Stats, SizeOf(Stats), 0);
+    Renderer.RenderBegin(nil, Cam, nil, 1 { InternalPass = 1 }, 0, 0, @Stats);
+    try
+      Renderer.BuildShapePipelineDesc(RShape, Scene.RenderOptions, LitDesc);
+      AssertTrue('InternalPass = 1 opaque shape PSO must have StencilTestEnable = True',
+        LitDesc.DepthStencil.StencilTestEnable);
+      AssertEquals('InternalPass = 1 opaque shape PSO must use DepthCompareOp = coLessOrEqual',
+        Ord(coLessOrEqual), Ord(LitDesc.DepthStencil.DepthCompareOp));
+      AssertEquals('InternalPass = 1 opaque shape PSO must use FrontStencil.CompareOp = coEqual',
+        Ord(coEqual), Ord(LitDesc.DepthStencil.FrontStencil.CompareOp));
+    finally
+      Renderer.RenderEnd;
+    end;
+  finally
+    FreeAndNil(Cam);
+    FreeAndNil(Renderer);
+    FreeAndNil(Container);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSceneUpdateGeneratedTexturesRenderedTextureAndShadowMapRHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Options: TCastleRenderOptions;
+  RtNode: TRenderedTextureNode;
+  RtRes: TRenderedTextureResource;
+  SmNode: TGeneratedShadowMapNode;
+  SmRes: TGeneratedShadowMapResource;
+  CamView: TViewVectors;
+  InitialProj: TMatrix4;
+  InitialVp: TRectangle;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($6903)));
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  InitialVp := Rectangle(10, 20, 800, 600);
+  InitialProj := OrthoProjectionMatrix(FloatRectangle(0, 0, 800, 600), -1, 1);
+  TestCtx.Viewport := InitialVp;
+  TestCtx.ProjectionMatrix := InitialProj;
+  Options := TCastleRenderOptions.Create(nil);
+  RtNode := TRenderedTextureNode.Create;
+  SmNode := TGeneratedShadowMapNode.Create;
+  try
+    RtNode.SetDimensions([128, 64, 4, 1, 1]);
+    TTextureResources.Prepare(Options, RtNode);
+    RtRes := TRenderedTextureResource(RtNode.InternalRendererResource);
+    SmNode.Size := 256;
+    TTextureResources.Prepare(Options, SmNode);
+    SmRes := TGeneratedShadowMapResource(SmNode.InternalRendererResource);
+
+    FillChar(CamView, SizeOf(CamView), 0);
+    CamView.Direction := Vector3(0, 0, -1);
+    CamView.Up := Vector3(0, 1, 0);
+
+    Cmd := Device.BeginFrame;
+    SetActiveCommandList(Cmd);
+    try
+      FRenderFromViewpointCalls := 0;
+      RtRes.Update(@DummyRenderFromViewpointCallback, 0.1, 100.0, nil, True, CamView, nil);
+      AssertEquals('RenderedTexture.Update must invoke callback once', 1, FRenderFromViewpointCalls);
+      AssertEquals('RenderedTexture.Update must increment RHIUpdateCount', 1, RtRes.RHIUpdateCount);
+      AssertTrue('RenderedTexture.Update must restore RenderContext.Viewport',
+        TestCtx.Viewport.Equals(InitialVp));
+      AssertTrue('RenderedTexture.Update must restore RenderContext.ProjectionMatrix',
+        TMatrix4.PerfectlyEquals(TestCtx.ProjectionMatrix, InitialProj));
+
+      SmRes.Update(@DummyRenderFromViewpointCallback, 0.1, 100.0, nil);
+      AssertEquals('GeneratedShadowMap.Update must invoke callback once', 2, FRenderFromViewpointCalls);
+      AssertEquals('GeneratedShadowMap.Update must increment RHIUpdateCount', 1, SmRes.RHIUpdateCount);
+      AssertTrue('GeneratedShadowMap.Update must restore RenderContext.Viewport',
+        TestCtx.Viewport.Equals(InitialVp));
+      AssertTrue('GeneratedShadowMap.Update must restore RenderContext.ProjectionMatrix',
+        TMatrix4.PerfectlyEquals(TestCtx.ProjectionMatrix, InitialProj));
+    finally
+      Device.EndFrameAndPresent;
+    end;
+    TTextureResources.Unprepare(RtNode);
+    TTextureResources.Unprepare(SmNode);
+  finally
+    FreeAndNil(SmNode);
+    FreeAndNil(RtNode);
+    FreeAndNil(Options);
     SetActiveCommandList(SavedCmd);
     RenderContext := SavedCtx;
     SetRHIDevice(SavedRHI);

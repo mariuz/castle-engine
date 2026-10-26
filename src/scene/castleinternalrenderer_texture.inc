@@ -1953,7 +1953,7 @@ begin
 
     RenderToTexture.RenderBegin;
 
-      if (RHIDevice = nil) and (RenderContext <> nil) then
+      if RenderContext <> nil then
       begin
         SavedViewport := RenderContext.Viewport;
         RenderContext.Viewport := Rectangle(0, 0, Width, Height);
@@ -1964,7 +1964,7 @@ begin
 
       Render(Camera);
 
-      if (RHIDevice = nil) and (RenderContext <> nil) then
+      if RenderContext <> nil then
       begin
         RenderContext.ProjectionMatrix := SavedProjectionMatrix;
         RenderContext.Viewport := SavedViewport;
@@ -2758,7 +2758,7 @@ begin
 
     RenderToTexture.RenderBegin;
 
-      if (RHIDevice = nil) and (RenderContext <> nil) then
+      if RenderContext <> nil then
       begin
         SavedViewport := RenderContext.Viewport;
         RenderContext.Viewport := Rectangle(0, 0, Size, Size);
@@ -2780,7 +2780,7 @@ begin
 
       Render(Camera);
 
-      if (RHIDevice = nil) and (RenderContext <> nil) then
+      if RenderContext <> nil then
       begin
         RenderContext.PolygonOffset := SavedPolygonOffset;
         RenderContext.ProjectionMatrix := SavedProjectionMatrix;

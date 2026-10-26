@@ -147,6 +147,8 @@ type
   public
     { By default all zeros, you must set this before any rendering. }
     ModelViewProjection: TMatrix4;
+    CustomDepthStencilState: TRHIDepthStencilStateDesc;
+    UseCustomDepthStencilState: Boolean;
 
     constructor Create(const AUseColor: Boolean = true);
     destructor Destroy; override;
@@ -313,6 +315,21 @@ begin
     PipeDesc.DepthStencil.DepthWriteEnable := FUseColor;
   end else
     PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDisabled;
+  if UseCustomDepthStencilState then
+    PipeDesc.DepthStencil := CustomDepthStencilState;
+  if RenderContext <> nil then
+  begin
+    case RenderContext.DepthFunc of
+      dfNever:        PipeDesc.DepthStencil.DepthCompareOp := coNever;
+      dfLess:         PipeDesc.DepthStencil.DepthCompareOp := coLess;
+      dfEqual:        PipeDesc.DepthStencil.DepthCompareOp := coEqual;
+      dfLessEqual:    PipeDesc.DepthStencil.DepthCompareOp := coLessOrEqual;
+      dfGreater:      PipeDesc.DepthStencil.DepthCompareOp := coGreater;
+      dfNotEqual:     PipeDesc.DepthStencil.DepthCompareOp := coNotEqual;
+      dfGreaterEqual: PipeDesc.DepthStencil.DepthCompareOp := coGreaterOrEqual;
+      dfAlways:       PipeDesc.DepthStencil.DepthCompareOp := coAlways;
+    end;
+  end;
   if ColorWriteActive then
     PipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque
   else

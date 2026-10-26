@@ -300,7 +300,7 @@ begin
     FRHIProjectionMatrix := RenderContext.ProjectionMatrix;
   Inc(FRHIRenderCount);
 
-  if UseClearColor and (RHIDevice = nil) and (RenderContext <> nil) then
+  if UseClearColor and (RenderContext <> nil) then
     RenderContext.Clear([cbColor], ClearColor);
 
   if (AllShapesCollector <> nil) and (FilteredShapesCollector <> nil) and

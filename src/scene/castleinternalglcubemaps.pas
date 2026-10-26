@@ -247,7 +247,7 @@ var
   begin
     RenderToTexture.RenderBegin;
 
-      if (RHIDevice = nil) and (RenderContext <> nil) then
+      if RenderContext <> nil then
         RenderContext.Viewport := Rectangle(0, 0, Width, Height);
 
       RenderingCamera := TRenderingCamera.Create;
@@ -286,7 +286,7 @@ begin
     RenderToTexture.GLContextOpen;
 
     CubeProjectionMatrix := PerspectiveProjectionMatrixDeg(90, 1, ProjectionNear, ProjectionFar);
-    if (RHIDevice = nil) and (RenderContext <> nil) then
+    if RenderContext <> nil then
     begin
       SavedProjectionMatrix := RenderContext.ProjectionMatrix;
       RenderContext.ProjectionMatrix := CubeProjectionMatrix;
@@ -295,7 +295,7 @@ begin
     for Side := Low(TCubeMapSide) to High(TCubeMapSide) do
       DrawMap(Side);
 
-    if (RHIDevice = nil) and (RenderContext <> nil) then
+    if RenderContext <> nil then
       RenderContext.ProjectionMatrix := SavedProjectionMatrix;
   finally FreeAndNil(RenderToTexture) end;
 end;
@@ -361,7 +361,7 @@ begin
   RenderToTexture.CompleteTextureTarget := GL_TEXTURE_CUBE_MAP;
 
   CubeProjectionMatrix := PerspectiveProjectionMatrixDeg(90, 1, ProjectionNear, ProjectionFar);
-  if (RHIDevice = nil) and (RenderContext <> nil) then
+  if RenderContext <> nil then
   begin
     SavedProjectionMatrix := RenderContext.ProjectionMatrix;
     RenderContext.ProjectionMatrix := CubeProjectionMatrix;
@@ -373,7 +373,7 @@ begin
   for Side := Low(TCubeMapSide) to High(TCubeMapSide) do
     DrawMap(Side);
 
-  if (RHIDevice = nil) and (RenderContext <> nil) then
+  if RenderContext <> nil then
   begin
     RenderContext.ProjectionMatrix := SavedProjectionMatrix;
     RenderContext.Viewport := SavedViewport;

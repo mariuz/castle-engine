@@ -456,6 +456,11 @@ procedure TGLShadowVolumeRenderer.InitCaster(const CasterBox: TBox3D);
       else
         FRHIStencilDepthState := TRHIDepthStencilStateDesc.DefaultStencilShadowVolumeZPass;
       FRHIBlendState := TRHIBlendStateDesc.DefaultColorMaskNone;
+      if FMesh <> nil then
+      begin
+        FMesh.CustomDepthStencilState := FRHIStencilDepthState;
+        FMesh.UseCustomDepthStencilState := not DebugRender;
+      end;
 
       if RHIDevice <> nil then
         Exit;
@@ -567,10 +572,28 @@ begin
     Inc(FRHIRenderPassCount);
 
     // Pass 3: calculate shadows into stencil buffer (color writes disabled, depth writes disabled)
+    if RenderContext <> nil then
+    begin
+      SavedCullFace := RenderContext.CullFace;
+      SavedDepthTest := RenderContext.DepthTest;
+      SavedDepthBufferUpdate := RenderContext.DepthBufferUpdate;
+      SavedColorChannels := RenderContext.ColorChannels;
+      RenderContext.DepthTest := true;
+      RenderContext.DepthBufferUpdate := false;
+      RenderContext.ColorChannels := [];
+    end;
     FRHIBlendState := TRHIBlendStateDesc.DefaultColorMaskNone;
     if Assigned(RenderShadowVolumes) then
       RenderShadowVolumes(Params);
     Inc(FRHIRenderPassCount);
+
+    if RenderContext <> nil then
+    begin
+      RenderContext.DepthBufferUpdate := SavedDepthBufferUpdate;
+      RenderContext.ColorChannels := SavedColorChannels;
+      RenderContext.CullFace := SavedCullFace;
+      RenderContext.DepthTest := SavedDepthTest;
+    end;
 
     // Pass 4: render opaque stuff that is not in shadow (stencil == 0, depth LEQUAL)
     if Params <> nil then

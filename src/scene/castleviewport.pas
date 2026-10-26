@@ -1181,6 +1181,8 @@ type
       purposes. Shadow volumes will be rendered on top of the scene,
       as yellow blended polygons. }
     property ShadowVolumesRender: boolean read FShadowVolumesRender write FShadowVolumesRender default false;
+    { @exclude }
+    property InternalShadowVolumeRenderer: TGLShadowVolumeRenderer read FShadowVolumeRenderer;
 
     { Background (like a skybox) to display behind the @link(Items).
       Displayed only when not @link(Transparent).
@@ -2894,7 +2896,7 @@ begin
   Assert(Params.Collector = AllShapesCollector);
   Params.Frustum := @Params.RenderingCamera.Frustum;
   Params.UsingShadowVolumes :=
-    (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.ShadowVolumesPossible and
+    ((RHIDevice <> nil) or ((GLFeatures <> nil) and GLFeatures.ShadowVolumesPossible)) and
     ShadowVolumes and
     MainLightForShadowVolumes(MainLightPosition);
   Items.Render(Params);
@@ -2965,7 +2967,7 @@ procedure TCastleViewport.RenderFromViewEverything(const RenderingCamera: TRende
       ClearColor := BackgroundColor;
     end;
 
-    if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.ShadowVolumesPossible and
+    if ((RHIDevice <> nil) or ((GLFeatures <> nil) and GLFeatures.ShadowVolumesPossible)) and
        ShadowVolumes and
        MainLightForShadowVolumes(MainLightPosition) then
       Include(ClearBuffers, cbStencil);
@@ -4107,7 +4109,7 @@ begin
   end;
 
   if (GLFeatures <> nil) and
-     (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.ShadowVolumesPossible and
+     ((RHIDevice <> nil) or ((GLFeatures <> nil) and GLFeatures.ShadowVolumesPossible)) and
      ShadowVolumes and
      MainLightForShadowVolumes(MainLightPosition) then
     Include(Options, prShadowVolume);
