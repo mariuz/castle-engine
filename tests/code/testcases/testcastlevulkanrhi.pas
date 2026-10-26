@@ -264,6 +264,9 @@ type
     procedure TestShapeCacheEnsureRHIShadersPermutationMaskRHI;
     procedure TestUploadRHIMaterialAutoSpecializesShapeShadersRHI;
     procedure TestShadowMapDepthOnlyPipelineSpecializationRHI;
+    procedure TestEnsureBatch2DRendererAndStandaloneDrawableImageDrawRHI;
+    procedure TestCastleImageControlAndButtonHeadlessVulkanRenderRHI;
+    procedure TestDrawableImageBlendModesAndRotationBatch2DRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -13409,6 +13412,225 @@ begin
     FreeAndNil(Renderer);
     FreeAndNil(Scene);
     FreeAndNil(Viewport);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestEnsureBatch2DRendererAndStandaloneDrawableImageDrawRHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Batcher: TCastleBatch2DRenderer;
+  Img: TRGBAlphaImage;
+  DrawImg: TDrawableImage;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($6701)));
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  TestCtx.Viewport := Rectangle(0, 0, 800, 600);
+  DrawImg := nil;
+  try
+    Batcher := EnsureBatch2DRenderer(Device);
+    AssertTrue('EnsureBatch2DRenderer must return non-nil TCastleBatch2DRenderer', Batcher <> nil);
+    AssertTrue('EnsureBatch2DRenderer must bind to Device', Batcher.Device = Device);
+    AssertTrue('Batcher.WhitePixelTexture must be allocated', Batcher.WhitePixelTexture <> nil);
+    AssertTrue('Batcher.TextureSetLayout must be allocated', Batcher.TextureSetLayout <> nil);
+    AssertTrue('Repeated EnsureBatch2DRenderer must return cached instance',
+      EnsureBatch2DRenderer(Device) = Batcher);
+
+    Cmd := Device.BeginFrame;
+    SetActiveCommandList(Cmd);
+
+    FillChar(TDrawableImage.Statistics, SizeOf(TDrawableImage.Statistics), 0);
+    Img := TRGBAlphaImage.Create(16, 16);
+    Img.Clear(Vector4Byte(255, 128, 64, 255));
+    DrawImg := TDrawableImage.Create(Img, True, True);
+
+    { Standalone Draw call outside explicit Begin2DPass/End2DPass must auto-bracket and flush }
+    DrawImg.Draw(FloatRectangle(10, 20, 64, 32));
+
+    AssertTrue('DrawImg.RHITexture must be created', DrawImg.RHITexture <> nil);
+    AssertTrue('DrawImg.RHIDescriptorSet must be created', DrawImg.RHIDescriptorSet <> nil);
+    AssertEquals('Standalone Draw must record 1 quad', 1, Batcher.TotalQuadsDrawn);
+    AssertEquals('Standalone Draw must flush 1 batch', 1, Batcher.TotalFlushes);
+    AssertFalse('Standalone Draw must end auto-started 2D pass', Batcher.In2DPass);
+    AssertEquals('TDrawableImage.Statistics.ImageDraws', 1, TDrawableImage.Statistics.ImageDraws);
+    AssertEquals('TDrawableImage.Statistics.DrawCalls', 1, TDrawableImage.Statistics.DrawCalls);
+
+    Device.EndFrameAndPresent;
+  finally
+    FreeAndNil(DrawImg);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCastleImageControlAndButtonHeadlessVulkanRenderRHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Window: TCastleWindow;
+  ImgCtrl: TCastleImageControl;
+  Btn: TCastleButton;
+  Lbl: TCastleLabel;
+  Img: TRGBAlphaImage;
+  Batcher: TCastleBatch2DRenderer;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($6702)));
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  TestCtx.Viewport := Rectangle(0, 0, 800, 600);
+  Window := TCastleWindow.Create(nil);
+  try
+    Img := TRGBAlphaImage.Create(32, 32);
+    Img.Clear(Vector4Byte(64, 180, 255, 255));
+
+    ImgCtrl := TCastleImageControl.Create(Window);
+    ImgCtrl.Image := Img;
+    ImgCtrl.OwnsImage := True;
+    Window.Controls.InsertFront(ImgCtrl);
+
+    Btn := TCastleButton.Create(Window);
+    Btn.Caption := 'Play Vulkan';
+    Window.Controls.InsertFront(Btn);
+
+    Lbl := TCastleLabel.Create(Window);
+    Lbl.Caption := 'FPS: 120';
+    Window.Controls.InsertFront(Lbl);
+
+    Window.Container.EventOpen(1);
+    try
+      Cmd := Device.BeginFrame;
+      SetActiveCommandList(Cmd);
+
+      Window.Container.EventRender;
+
+      Batcher := EnsureBatch2DRenderer(Device);
+      AssertEquals('Container.RHIRenderedFramesCount must be 1',
+        1, Window.Container.RHIRenderedFramesCount);
+      AssertTrue('ImgCtrl.DrawableImage.RHITexture must be uploaded',
+        (ImgCtrl.Content.DrawableImage <> nil) and (ImgCtrl.Content.DrawableImage.RHITexture <> nil));
+      AssertTrue('UI controls (ImageControl + Button + Label) must draw multiple 2D quads',
+        Batcher.TotalQuadsDrawn >= 10);
+      AssertTrue('Container.EventRender must flush 2D batches at End2DPass',
+        Batcher.TotalFlushes >= 1);
+      AssertFalse('Container.EventRender must close 2D pass on exit', Batcher.In2DPass);
+
+      Device.EndFrameAndPresent;
+    finally
+      Window.Container.EventClose(1);
+    end;
+  finally
+    FreeAndNil(Window);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestDrawableImageBlendModesAndRotationBatch2DRHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TRHICommandList;
+  VkCmd: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Batcher: TCastleBatch2DRenderer;
+  ImgA, ImgB: TRGBAlphaImage;
+  DrawA, DrawB: TDrawableImage;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($6703)));
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  TestCtx.Viewport := Rectangle(0, 0, 800, 600);
+  DrawA := nil;
+  DrawB := nil;
+  try
+    ImgA := TRGBAlphaImage.Create(32, 32);
+    ImgA.Clear(Vector4Byte(255, 200, 100, 200));
+    DrawA := TDrawableImage.Create(ImgA, True, True);
+
+    ImgB := TRGBAlphaImage.Create(48, 48);
+    ImgB.Clear(Vector4Byte(100, 255, 150, 255));
+    DrawB := TDrawableImage.Create(ImgB, False, True);
+
+    Cmd := Device.BeginFrame;
+    VkCmd := Cmd as TVulkanRHICommandList;
+    SetActiveCommandList(Cmd);
+
+    Batcher := EnsureBatch2DRenderer(Device);
+    Batcher.Begin2DPass(Cmd, 800, 600);
+    try
+      { 1. Standard alpha-blended rotated sprite }
+      DrawA.Alpha := acBlending;
+      DrawA.Rotation := Pi / 4;
+      DrawA.RotationCenter := Vector2(0.5, 0.5);
+      DrawA.Draw(FloatRectangle(50, 50, 64, 64));
+
+      { 2. Additive blend mode on same texture -> triggers batch flush }
+      DrawA.BlendingSourceFactor := bsSrcAlpha;
+      DrawA.BlendingDestinationFactor := bdOne;
+      DrawA.Draw(FloatRectangle(120, 50, 64, 64));
+
+      { 3. 9-slice Draw3x3 with rotation on second texture -> triggers batch flush + 9 quads }
+      DrawB.Rotation := Pi / 6;
+      DrawB.Draw3x3(FloatRectangle(200, 100, 120, 80), Vector4Integer(8, 8, 8, 8));
+    finally
+      Batcher.End2DPass;
+    end;
+
+    AssertEquals('Total quads in 2D pass (1 + 1 + 9)', 11, Batcher.FrameQuadCount);
+    AssertEquals('Three distinct state batches must flush 3 times', 3, Batcher.BatchFlushCount);
+    AssertTrue('Each flushed batch must bind a 2D graphics pipeline on the command list',
+      VkCmd.PipelineBindCount >= 3);
+
+    Device.EndFrameAndPresent;
+  finally
+    FreeAndNil(DrawB);
+    FreeAndNil(DrawA);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
     RenderContext := SavedCtx;
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;

@@ -79,6 +79,7 @@ type
     FBatchFlushCount: Cardinal;
 
     { Active batch state }
+    FIn2DPass: Boolean;
     FCurrentCmd: TRHICommandList;
     FViewportWidth: Single;
     FViewportHeight: Single;
@@ -87,6 +88,8 @@ type
     FCurrentBlendMode: TCastle2DBlendMode;
     FCurrentSmoothScaling: Boolean;
     FCurrentScissor: TRectangle;
+    FTotalQuadsDrawn: Cardinal;
+    FTotalFlushes: Cardinal;
 
     procedure CreateShadersAndPipelines;
     procedure CreateStaticIndexBuffer;
@@ -117,7 +120,8 @@ type
       const SmoothScaling: Boolean;
       const ScissorRect: TRectangle;
       const RotationRad: Single;
-      const RotationCenter: TVector2); overload;
+      const RotationCenter: TVector2;
+      const RotationCenterInScreenCoords: Boolean = False); overload;
 
     procedure DrawQuads(
       const ATexture: TRHITexture;
@@ -129,17 +133,26 @@ type
       const SmoothScaling: Boolean;
       const ScissorRect: TRectangle); overload;
 
+    property Device: TRHIDevice read FDevice;
+    property In2DPass: Boolean read FIn2DPass;
     property LinearSampler: TRHISampler read FLinearSampler;
     property NearestSampler: TRHISampler read FNearestSampler;
     property TextureSetLayout: TRHIDescriptorSetLayout read FTextureSetLayout;
     property WhitePixelTexture: TRHITexture read FWhitePixelTexture;
     property FrameQuadCount: Cardinal read FFrameQuadCount;
     property BatchFlushCount: Cardinal read FBatchFlushCount;
+    property TotalQuadsDrawn: Cardinal read FTotalQuadsDrawn;
+    property TotalFlushes: Cardinal read FTotalFlushes;
   end;
 
 { Currently active 2D batch renderer for TDrawableImage / UI rendering. }
 function ActiveBatch2DRenderer: TCastleBatch2DRenderer;
 procedure SetActiveBatch2DRenderer(const ARenderer: TCastleBatch2DRenderer);
+
+{ Returns ActiveBatch2DRenderer if already bound for ADevice, or lazily creates
+  and caches a shared TCastleBatch2DRenderer instance for ADevice. }
+function EnsureBatch2DRenderer(const ADevice: TRHIDevice): TCastleBatch2DRenderer;
+procedure FreeGlobalBatch2DRenderer;
 
 { Packs a floating-point TCastleColor into a 32-bit R8G8B8A8 normalized integer }
 function PackColorRgba8(const C: TCastleColor): Cardinal; inline;
@@ -148,6 +161,7 @@ implementation
 
 var
   FActiveBatch2DRenderer: TCastleBatch2DRenderer = nil;
+  GAutoBatch2DRenderer: TCastleBatch2DRenderer = nil;
 
 function ActiveBatch2DRenderer: TCastleBatch2DRenderer;
 begin
@@ -157,6 +171,30 @@ end;
 procedure SetActiveBatch2DRenderer(const ARenderer: TCastleBatch2DRenderer);
 begin
   FActiveBatch2DRenderer := ARenderer;
+end;
+
+function EnsureBatch2DRenderer(const ADevice: TRHIDevice): TCastleBatch2DRenderer;
+begin
+  if ADevice = nil then
+    Exit(nil);
+  if (FActiveBatch2DRenderer <> nil) and (FActiveBatch2DRenderer.Device = ADevice) and
+     (FActiveBatch2DRenderer.WhitePixelTexture <> nil) and
+     (FActiveBatch2DRenderer.WhitePixelTexture.Device = ADevice) then
+    Exit(FActiveBatch2DRenderer);
+  if (GAutoBatch2DRenderer = nil) or
+     (GAutoBatch2DRenderer.Device <> ADevice) or
+     (GAutoBatch2DRenderer.WhitePixelTexture = nil) or
+     (GAutoBatch2DRenderer.WhitePixelTexture.Device <> ADevice) then
+  begin
+    FreeAndNil(GAutoBatch2DRenderer);
+    GAutoBatch2DRenderer := TCastleBatch2DRenderer.Create(ADevice);
+  end;
+  Result := GAutoBatch2DRenderer;
+end;
+
+procedure FreeGlobalBatch2DRenderer;
+begin
+  FreeAndNil(GAutoBatch2DRenderer);
 end;
 
 const
@@ -220,6 +258,8 @@ begin
   FreeAndNil(FNearestSampler);
   if FActiveBatch2DRenderer = Self then
     FActiveBatch2DRenderer := nil;
+  if GAutoBatch2DRenderer = Self then
+    GAutoBatch2DRenderer := nil;
   inherited;
 end;
 
@@ -406,6 +446,7 @@ procedure TCastleBatch2DRenderer.Begin2DPass(const ACmd: TRHICommandList;
   const AViewportWidth, AViewportHeight: Single);
 begin
   SetActiveBatch2DRenderer(Self);
+  FIn2DPass := True;
   FCurrentCmd := ACmd;
   FViewportWidth := Max(1.0, AViewportWidth);
   FViewportHeight := Max(1.0, AViewportHeight);
@@ -458,6 +499,7 @@ begin
   { 5. Issue single indexed draw call for all coalesced quads }
   FCurrentCmd.DrawIndexed(QueuedQuads * 6, 1, 0, 0, 0);
   Inc(FBatchFlushCount);
+  Inc(FTotalFlushes);
 
   FBatchStartQuad := FFrameQuadCount;
 end;
@@ -465,6 +507,7 @@ end;
 procedure TCastleBatch2DRenderer.End2DPass;
 begin
   Flush;
+  FIn2DPass := False;
   if (FDevice <> nil) and (FFrameVBOs[FDevice.FrameIndex] <> nil) then
     FFrameVBOs[FDevice.FrameIndex].Unmap;
   FMappedVertices := nil;
@@ -483,7 +526,8 @@ procedure TCastleBatch2DRenderer.DrawQuads(
   const SmoothScaling: Boolean;
   const ScissorRect: TRectangle;
   const RotationRad: Single;
-  const RotationCenter: TVector2);
+  const RotationCenter: TVector2;
+  const RotationCenterInScreenCoords: Boolean);
 var
   I: Integer;
   SR, IR: TFloatRectangle;
@@ -514,7 +558,7 @@ var
   end;
 
 begin
-  if (Count <= 0) or (FMappedVertices = nil) then Exit;
+  if (Count <= 0) or (FMappedVertices = nil) or (ATexture = nil) then Exit;
 
   { Flush current batch if state changes or batch limit is reached }
   if (FCurrentTexture <> ATexture) or
@@ -561,8 +605,15 @@ begin
 
     if RotationRad <> 0.0 then
     begin
-      CX := SR.Left + RotationCenter.X;
-      CY := SR.Bottom + RotationCenter.Y;
+      if RotationCenterInScreenCoords then
+      begin
+        CX := RotationCenter.X;
+        CY := RotationCenter.Y;
+      end else
+      begin
+        CX := SR.Left + RotationCenter.X * SR.Width;
+        CY := SR.Bottom + RotationCenter.Y * SR.Height;
+      end;
     end;
 
     WriteRotVertex(X0, Y0, U0, V0); // Bottom-Left
@@ -572,6 +623,7 @@ begin
   end;
 
   Inc(FFrameQuadCount, Count);
+  Inc(FTotalQuadsDrawn, Count);
 end;
 
 procedure TCastleBatch2DRenderer.DrawQuads(
@@ -585,7 +637,10 @@ procedure TCastleBatch2DRenderer.DrawQuads(
   const ScissorRect: TRectangle);
 begin
   DrawQuads(ATexture, ADescriptorSet, ScreenRects, ImageRects, Count,
-    ColorTint, BlendMode, SmoothScaling, ScissorRect, 0.0, Vector2(0, 0));
+    ColorTint, BlendMode, SmoothScaling, ScissorRect, 0.0, Vector2(0, 0), False);
 end;
 
+initialization
+finalization
+  FreeGlobalBatch2DRenderer;
 end.

@@ -2720,9 +2720,12 @@ procedure TCastleContainer.EventRender;
       {$warnings on}
     end;
 
-    RenderControlPrepare(PixelsRect);
+  RenderControlPrepare(PixelsRect);
   end;
 
+var
+  Batch2D: TCastleBatch2DRenderer;
+  AutoStartedBatch2D: Boolean;
 begin
   FlushCollectedMotion;
 
@@ -2738,13 +2741,32 @@ begin
 
   FillChar(TDrawableImage.Statistics, SizeOf(TDrawableImage.Statistics), #0);
 
-  if UserInterfaceBatching then
+  Batch2D := nil;
+  AutoStartedBatch2D := False;
+  if (RHIDevice <> nil) and (ActiveCommandList <> nil) then
   begin
-    TDrawableImage.BatchingBegin;
-    RenderCore;
-    TDrawableImage.BatchingEnd;
-  end else
-    RenderCore;
+    Batch2D := EnsureBatch2DRenderer(RHIDevice);
+    if (Batch2D <> nil) and (not Batch2D.In2DPass) then
+    begin
+      Batch2D.Begin2DPass(ActiveCommandList, Max(1, PixelsWidth), Max(1, PixelsHeight));
+      AutoStartedBatch2D := True;
+    end;
+  end;
+  try
+    if UserInterfaceBatching then
+    begin
+      TDrawableImage.BatchingBegin;
+      try
+        RenderCore;
+      finally
+        TDrawableImage.BatchingEnd;
+      end;
+    end else
+      RenderCore;
+  finally
+    if AutoStartedBatch2D and (Batch2D <> nil) then
+      Batch2D.End2DPass;
+  end;
 end;
 
 procedure TCastleContainer.RenderControl(const Control: TCastleUserInterface;

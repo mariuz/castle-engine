@@ -968,6 +968,8 @@ begin
     FRHITexture.UploadImage(AImage);
 
     Batcher := ActiveBatch2DRenderer;
+    if (Batcher = nil) and (RHIDevice <> nil) then
+      Batcher := EnsureBatch2DRenderer(RHIDevice);
     if Batcher <> nil then
     begin
       FRHIDescriptorSet := RHIDevice.CreateDescriptorSet(Batcher.TextureSetLayout);
@@ -1017,7 +1019,7 @@ begin
   begin
     RHIContextOpen(AImage);
   end;
-  if ApplicationProperties.IsGLContextOpen then
+  if ApplicationProperties.IsGLContextOpen and (GLFeatures <> nil) then
   begin
     GLContextOpen(AImage);
     StaticGLContextOpen;
@@ -1034,6 +1036,8 @@ var
   VS, FS: string;
   I: Integer;
 begin
+  if GLFeatures = nil then
+    Exit;
   if not GLFeatures.EnableFixedFunction then
   begin
     for I := Low(VboStorage) to High(VboStorage) do
@@ -1335,8 +1339,11 @@ var
   Vbo: PVboStorage;
   IndexPtr: Pointer;
   UseIndex: Boolean;
+  Batcher: TCastleBatch2DRenderer;
   BatchBlendMode: TCastle2DBlendMode;
   ScissorR: TRectangle;
+  EffRotCenter: TVector2;
+  AutoStarted2DPass: Boolean;
 begin
   if (Count = 0) or
      ((Count = 1) and
@@ -1345,18 +1352,25 @@ begin
     Exit;
 
   if (ActiveBatch2DRenderer <> nil) or
-     ((ApplicationProperties <> nil) and (ApplicationProperties.RenderBackend = backendVulkan) and (RHIDevice <> nil)) then
+     ((RHIDevice <> nil) and
+      (((ApplicationProperties <> nil) and (ApplicationProperties.RenderBackend = backendVulkan)) or
+       (GLFeatures = nil) or (ApplicationProperties = nil) or (not ApplicationProperties.IsGLContextOpen))) then
   begin
     PrepareResources;
-    if ActiveBatch2DRenderer <> nil then
+    Batcher := ActiveBatch2DRenderer;
+    if (Batcher = nil) and (RHIDevice <> nil) then
+      Batcher := EnsureBatch2DRenderer(RHIDevice);
+    if Batcher <> nil then
     begin
-      if (FRHITexture <> nil) and (FRHIDescriptorSet = nil) then
+      if (FRHIDescriptorSet <> nil) and (FRHIDescriptorSet.Device <> Batcher.Device) then
+        FreeAndNil(FRHIDescriptorSet);
+      if (FRHITexture <> nil) and (FRHIDescriptorSet = nil) and (Batcher.Device <> nil) then
       begin
-        FRHIDescriptorSet := RHIDevice.CreateDescriptorSet(ActiveBatch2DRenderer.TextureSetLayout);
+        FRHIDescriptorSet := Batcher.Device.CreateDescriptorSet(Batcher.TextureSetLayout);
         if SmoothScaling then
-          FRHIDescriptorSet.BindTexture(0, FRHITexture, ActiveBatch2DRenderer.LinearSampler)
+          FRHIDescriptorSet.BindTexture(0, FRHITexture, Batcher.LinearSampler)
         else
-          FRHIDescriptorSet.BindTexture(0, FRHITexture, ActiveBatch2DRenderer.NearestSampler);
+          FRHIDescriptorSet.BindTexture(0, FRHITexture, Batcher.NearestSampler);
         FRHIDescriptorSet.Update;
       end;
 
@@ -1377,25 +1391,48 @@ begin
         end;
 
         if not RenderContext.FinalScissor(ScissorR) then
-          ScissorR := Rectangle(0, 0, Round(RenderContext.Viewport.Width), Round(RenderContext.Viewport.Height));
+          ScissorR := Rectangle(0, 0,
+            Max(1, Round(RenderContext.Viewport.Width)),
+            Max(1, Round(RenderContext.Viewport.Height)));
 
-        ActiveBatch2DRenderer.DrawQuads(
-          FRHITexture,
-          FRHIDescriptorSet,
-          ScreenRects,
-          ImageRects,
-          Count,
-          Color,
-          BatchBlendMode,
-          SmoothScaling,
-          ScissorR,
-          Rotation,
-          RotationCenter
-        );
+        if UseScreenRotationCenter then
+          EffRotCenter := ScreenRotationCenter
+        else
+          EffRotCenter := RotationCenter;
+
+        AutoStarted2DPass := False;
+        if (not Batcher.In2DPass) and (ActiveCommandList <> nil) then
+        begin
+          Batcher.Begin2DPass(ActiveCommandList,
+            Max(1, RenderContext.Viewport.Width),
+            Max(1, RenderContext.Viewport.Height));
+          AutoStarted2DPass := True;
+        end;
+        try
+          Batcher.DrawQuads(
+            FRHITexture,
+            FRHIDescriptorSet,
+            ScreenRects,
+            ImageRects,
+            Count,
+            Color,
+            BatchBlendMode,
+            SmoothScaling,
+            ScissorR,
+            Rotation,
+            EffRotCenter,
+            UseScreenRotationCenter
+          );
+        finally
+          if AutoStarted2DPass then
+            Batcher.End2DPass;
+        end;
         Inc(Statistics.DrawCalls);
         Exit;
       end;
     end;
+    if (GLFeatures = nil) or (ApplicationProperties = nil) or (not ApplicationProperties.IsGLContextOpen) then
+      Exit;
   end;
 
   FrameProfiler.Start(fmDrawImage);
@@ -1819,6 +1856,8 @@ begin
 end;
 
 procedure TDrawableImage.SetSmoothScaling(const Value: boolean);
+var
+  Batcher: TCastleBatch2DRenderer;
 begin
   if FSmoothScaling <> Value then
   begin
@@ -1829,13 +1868,20 @@ begin
       glBindTexture(GL_TEXTURE_2D, FTexture);
       SetTextureFilter(GL_TEXTURE_2D, CurrentFilter);
     end;
-    if (FRHIDescriptorSet <> nil) and (FRHITexture <> nil) and (ActiveBatch2DRenderer <> nil) then
+    if (FRHIDescriptorSet <> nil) and (FRHITexture <> nil) and
+       (FRHITexture.Device <> nil) then
     begin
-      if Value then
-        FRHIDescriptorSet.BindTexture(0, FRHITexture, ActiveBatch2DRenderer.LinearSampler)
-      else
-        FRHIDescriptorSet.BindTexture(0, FRHITexture, ActiveBatch2DRenderer.NearestSampler);
-      FRHIDescriptorSet.Update;
+      Batcher := ActiveBatch2DRenderer;
+      if Batcher = nil then
+        Batcher := EnsureBatch2DRenderer(FRHITexture.Device);
+      if Batcher <> nil then
+      begin
+        if Value then
+          FRHIDescriptorSet.BindTexture(0, FRHITexture, Batcher.LinearSampler)
+        else
+          FRHIDescriptorSet.BindTexture(0, FRHITexture, Batcher.NearestSampler);
+        FRHIDescriptorSet.Update;
+      end;
     end;
   end;
 end;
@@ -1854,10 +1900,12 @@ procedure TDrawableImage.PrepareResources;
 begin
   if RHIDevice <> nil then
   begin
+    if (FRHITexture <> nil) and (FRHITexture.Device <> RHIDevice) then
+      RHIContextClose;
     if (FRHITexture = nil) and (FImage <> nil) then
       RHIContextOpen(FImage);
   end;
-  if ApplicationProperties.IsGLContextOpen then
+  if ApplicationProperties.IsGLContextOpen and (GLFeatures <> nil) then
   begin
     { initialize OpenGL resources on-demand }
     if not StaticResourcesReady then
@@ -2157,6 +2205,8 @@ begin
     BatchingLastImageRects.Clear;
     BatchingLastImage := nil;
   end;
+  if (ActiveBatch2DRenderer <> nil) and ActiveBatch2DRenderer.In2DPass then
+    ActiveBatch2DRenderer.Flush;
 end;
 
 function TDrawableImageRenderStatistics.ToString: String;

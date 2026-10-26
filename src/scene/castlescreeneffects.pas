@@ -945,8 +945,7 @@ begin
 
   { Whether we have to render screen effects or not (regular TCastleViewport items),
     break TDrawableImage batching as we no longer draw only images. }
-  if RHIDevice = nil then
-    TDrawableImage.BatchingFlush;
+  TDrawableImage.BatchingFlush;
 
   CheckScreenEffects;
   if RenderScreenEffects then

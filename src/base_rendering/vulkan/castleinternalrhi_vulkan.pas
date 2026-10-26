@@ -5858,8 +5858,10 @@ end;
 
 destructor TVulkanRHIShaderModule.Destroy;
 begin
-  if FHandle <> VK_NULL_HANDLE then
+  if (FHandle <> VK_NULL_HANDLE) and (Device <> nil) and
+     (TVulkanRHIDevice(Device).Handle <> nil) and Assigned(vkDestroyShaderModule) then
     vkDestroyShaderModule(TVulkanRHIDevice(Device).Handle, FHandle, nil);
+  FHandle := VK_NULL_HANDLE;
   inherited;
 end;
 

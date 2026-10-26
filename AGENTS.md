@@ -77,8 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–65**: **COMPLETED** (100%).
-- **Phase 66 (Per-Shape RHI Shader Permutation Specialization, Caching & Shadow-Map Depth-Only PSO Construction)**: **COMPLETED** (100%, 793/793 total engine tests and 224/224 `TTestCastleVulkanRHI` tests passing):
-  - [x] **66.1. `TShapeCache.EnsureRHIShaders` & 8-Bit Permutation Bitmask Caching (`RHIShaderPermutationMask`)** — Completed & tested (`TestShapeCacheEnsureRHIShadersPermutationMaskRHI`).
-  - [x] **66.2. Automatic Material/Texture/AlphaTest Shader Specialization in `TX3DRendererShape.UploadRHIMaterialToCache`** — Completed & tested (`TestUploadRHIMaterialAutoSpecializesShapeShadersRHI`).
-  - [x] **66.3. Automatic Shadow-Map Depth-Only PSO Construction (`CastleShapeShadowDepthPSO`) in `TRenderer.BuildShapePipelineDesc`** — Completed & tested (`TestShadowMapDepthOnlyPipelineSpecializationRHI`).
+- **Phases 1–66**: **COMPLETED** (100%).
+- **Phase 67 (Automatic `TCastleBatch2DRenderer` Lifecycle Management & `TDrawableImage` / 2D UI Controls Vulkan RHI Rendering)**: **COMPLETED** (100%, 796/796 total engine tests and 227/227 `TTestCastleVulkanRHI` tests passing):
+  - [x] **67.1. Safe `TRHIResource` Device-Destruction Detachment & `EnsureBatch2DRenderer`** — Completed & tested (`TestEnsureBatch2DRendererAndStandaloneDrawableImageDrawRHI`).
+  - [x] **67.2. Automatic `Begin2DPass` / `End2DPass` in `TCastleContainer.EventRender` & 2D UI Controls (`TCastleImageControl`, `TCastleButton`, `TCastleLabel`)** — Completed & tested (`TestCastleImageControlAndButtonHeadlessVulkanRenderRHI`).
+  - [x] **67.3. `TDrawableImage` Blend Modes, Rotation & `Draw3x3` 9-Slice Batching** — Completed & tested (`TestDrawableImageBlendModesAndRotationBatch2DRHI`).

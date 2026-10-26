@@ -410,6 +410,12 @@ procedure TCastleFont.PrepareResources;
   var
     VS, FS: String;
   begin
+    if (GLFeatures = nil) or (ApplicationProperties = nil) or (not ApplicationProperties.IsGLContextOpen) then
+    begin
+      DrawableImage.SmoothScaling := true;
+      Exit;
+    end;
+
     VS := {$I image.vs.inc};
     FS := {$I distance_field_font.fs.inc};
 

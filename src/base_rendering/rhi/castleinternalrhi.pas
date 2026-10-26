@@ -586,6 +586,7 @@ type
     FDebugName: String;
   public
     constructor Create(const ADevice: TRHIDevice; const ADebugName: String = '');
+    destructor Destroy; override;
     property Device: TRHIDevice read FDevice;
     property DebugName: String read FDebugName;
   end;
@@ -797,6 +798,8 @@ type
   { Main entry point for the RHI backend. Manages GPU device lifecycles,
     swapchain presentation, frames-in-flight synchronization, and resource creation. }
   TRHIDevice = class abstract
+  private
+    FResources: TFPList;
   protected
     FCapabilities: TRHIDeviceCapabilities;
     FFrameIndex: Cardinal;
@@ -1485,6 +1488,16 @@ begin
   inherited Create;
   FDevice := ADevice;
   FDebugName := ADebugName;
+  if (FDevice <> nil) and (FDevice.FResources <> nil) then
+    FDevice.FResources.Add(Self);
+end;
+
+destructor TRHIResource.Destroy;
+begin
+  if (FDevice <> nil) and (FDevice.FResources <> nil) then
+    FDevice.FResources.Remove(Self);
+  FDevice := nil;
+  inherited;
 end;
 
 { TRHIBuffer }
@@ -1650,11 +1663,20 @@ end;
 constructor TRHIDevice.Create;
 begin
   inherited Create;
+  FResources := TFPList.Create;
   FFrameIndex := 0;
 end;
 
 destructor TRHIDevice.Destroy;
+var
+  I: Integer;
 begin
+  if FResources <> nil then
+  begin
+    for I := FResources.Count - 1 downto 0 do
+      TRHIResource(FResources[I]).FDevice := nil;
+    FreeAndNil(FResources);
+  end;
   if FRHIDevice = Self then
     FRHIDevice := nil;
   inherited;
