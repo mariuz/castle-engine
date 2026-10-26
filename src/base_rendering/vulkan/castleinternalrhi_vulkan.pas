@@ -261,6 +261,7 @@ type
     FDynamicDepthBiasSlope: Single;
     FBoundDescriptorSets: array[0..3] of TRHIDescriptorSet;
     FDescriptorSetBindCount: Cardinal;
+    FPipelineBindCount: Cardinal;
     function GetBoundDescriptorSet(const ASetIndex: Cardinal): TRHIDescriptorSet;
   public
     constructor Create(const ADevice: TVulkanRHIDevice; const AQueueFamilyIndex: Cardinal;
@@ -369,6 +370,8 @@ type
     property DynamicDepthBiasSlope: Single read FDynamicDepthBiasSlope;
     property BoundDescriptorSets[const ASetIndex: Cardinal]: TRHIDescriptorSet read GetBoundDescriptorSet;
     property DescriptorSetBindCount: Cardinal read FDescriptorSetBindCount;
+    property BoundPipeline: TVulkanRHIPipeline read FCurrentPipeline;
+    property PipelineBindCount: Cardinal read FPipelineBindCount;
   end;
 
   { -------------------------------------------------------------------------- }
@@ -6670,6 +6673,7 @@ begin
   FLastEffectiveIndirectDrawCount := 0;
   FillChar(FBoundDescriptorSets, SizeOf(FBoundDescriptorSets), 0);
   FDescriptorSetBindCount := 0;
+  FPipelineBindCount := 0;
 end;
 
 procedure TVulkanRHICommandList.EndRecording;
@@ -7279,6 +7283,8 @@ end;
 procedure TVulkanRHICommandList.BindPipeline(const Pipeline: TRHIPipeline);
 begin
   FCurrentPipeline := Pipeline as TVulkanRHIPipeline;
+  if FCurrentPipeline <> nil then
+    Inc(FPipelineBindCount);
   if (FHandle <> nil) and (FCurrentPipeline <> nil) and Assigned(vkCmdBindPipeline) then
     vkCmdBindPipeline(FHandle, VK_PIPELINE_BIND_POINT_GRAPHICS, FCurrentPipeline.Handle);
 

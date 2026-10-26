@@ -77,8 +77,8 @@ Whenever new Vulkan constants, enums, bitmasks, structs, or function pointers ar
 
 ## 5. Current Status & Roadmap in `PLAN.md`
 
-- **Phases 1–63**: **COMPLETED** (100%).
-- **Phase 64 (Automatic RHI Descriptor Set Creation, Updating & Command-List Binding for Set 0 Scene/Lights, Set 1 Material/Bindless, and Set 2 Skinning)**: **COMPLETED** (100%, 787/787 total engine tests and 218/218 `TTestCastleVulkanRHI` tests passing):
-  - [x] **64.1. `TRenderer.EnsureRHISceneDescriptorSet` (Set 0 Global Scene + Lights Descriptor Set)** — Completed & tested (`TestRendererSceneAndLightsDescriptorSetRHI`).
-  - [x] **64.2. `TShapeCache.RHIMaterialDescriptorSet` (Set 1), `BindMaterialTexturesToDescriptorSet` & `RHISkinningDescriptorSet` (Set 2)** — Completed & tested (`TestShapeCacheMaterialAndSkinningDescriptorSetsRHI`).
-  - [x] **64.3. Automatic Set 0, Set 1 & Set 2 Command-List Binding in `TBaseCoordinateRenderer.Render` & `TX3DRendererShape.RecordRHIDraw`** — Completed & tested (`TestViewportRenderBindsSet0Set1DescriptorSetsRHI`).
+- **Phases 1–64**: **COMPLETED** (100%).
+- **Phase 65 (Automatic RHI Graphics Pipeline Construction, Caching & Command-List Binding in `TRenderer` & `TBaseCoordinateRenderer`)**: **COMPLETED** (100%, 790/790 total engine tests and 221/221 `TTestCastleVulkanRHI` tests passing):
+  - [x] **65.1. `TRenderer.EnsureRHIDefaultShaders`, `BuildShapePipelineDesc` & `GetOrCreateShapePipeline`** — Completed & tested (`TestRendererBuildShapePipelineDescAndCachingRHI`).
+  - [x] **65.2. Automatic `ActiveCommandList.BindPipeline` & Wireframe (`pmLine`) vs Solid (`pmFill`) PSO Selection** — Completed & tested (`TestViewportRenderBindsGraphicsPipelineAndWireframePSORHI`).
+  - [x] **65.3. Automatic Opaque vs Alpha-Blended PSO State Synchronization (`BlendState`, `DepthWriteEnable`)** — Completed & tested (`TestViewportOpaqueAndBlendedPipelineStatesRHI`).

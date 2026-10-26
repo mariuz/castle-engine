@@ -373,6 +373,7 @@ var
   NormalMat: TMatrix3;
   ShadingModel: TCastleShadingModelRHI;
   ShadowModeOrd: Cardinal;
+  ShapePipeline: TRHIPipeline;
 begin
   Attribs := nil;
 
@@ -540,6 +541,12 @@ begin
       begin
         { 1. Upload per-shape RHI Material UBO and push constants for ModelView, Normal, and RenderOptions }
         Shape.UploadRHIMaterialToCache(ShadingModel);
+        if Renderer <> nil then
+        begin
+          ShapePipeline := Renderer.GetOrCreateShapePipeline(Shape, RenderOptions);
+          if ShapePipeline <> nil then
+            ActiveCommandList.BindPipeline(ShapePipeline);
+        end;
         if RenderOptions <> nil then ShadowModeOrd := Ord(RenderOptions.ShadowMapSystemMode) else ShadowModeOrd := 0;
         NormalMat := ModelViewToNormalMatrix(ShapeModelView);
         PushConstants := TCastleShaderGeneratorRHI.BuildShapeRHIPushConstants(

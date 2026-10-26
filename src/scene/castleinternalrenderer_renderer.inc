@@ -90,6 +90,8 @@
     FRHISceneDescriptorSetLayout: TRHIDescriptorSetLayout;
     FRHISceneDescriptorSet: TRHIDescriptorSet;
     FRHISceneOwnerDevice: TRHIDevice;
+    FRHIDefaultVertexShader: TRHIShaderModule;
+    FRHIDefaultFragmentShader: TRHIShaderModule;
     FSceneUniformBlock: TCastleSceneUniformBlock;
     FRHISceneBufferUploadCount: Cardinal;
 
@@ -268,10 +270,18 @@
     procedure BuildSceneUniformBlock(out UniformBlock: TCastleSceneUniformBlock);
     procedure UploadSceneUniformBlockToRHI;
     function EnsureRHISceneDescriptorSet: TRHIDescriptorSet;
+    procedure EnsureRHIDefaultShaders;
+    procedure BuildShapePipelineDesc(const AShape: TX3DRendererShape;
+      const ARenderOptions: TCastleRenderOptions;
+      out ADesc: TRHIGraphicsPipelineDesc);
+    function GetOrCreateShapePipeline(const AShape: TX3DRendererShape;
+      const ARenderOptions: TCastleRenderOptions): TRHIPipeline;
 
     property RHISceneBuffer: TRHIBuffer read FRHISceneBuffer;
     property RHISceneDescriptorSetLayout: TRHIDescriptorSetLayout read FRHISceneDescriptorSetLayout;
     property RHISceneDescriptorSet: TRHIDescriptorSet read FRHISceneDescriptorSet;
+    property RHIDefaultVertexShader: TRHIShaderModule read FRHIDefaultVertexShader;
+    property RHIDefaultFragmentShader: TRHIShaderModule read FRHIDefaultFragmentShader;
     property SceneUniformBlock: TCastleSceneUniformBlock read FSceneUniformBlock;
     property RHISceneBufferUploadCount: Cardinal read FRHISceneBufferUploadCount;
     property ActiveLightsRenderer: TLightsRenderer read LightsRenderer;
@@ -295,16 +305,21 @@ begin
   FreeAndNil(PreparedShader);
   FreeAndNil(ShadowMapsShaders);
   FreeAndNil(VarianceShadowMapsShaders);
-  if (FRHISceneBuffer <> nil) and (RHIDevice = FRHISceneOwnerDevice) then
+  if ((FRHISceneBuffer <> nil) or (FRHIDefaultVertexShader <> nil) or (FRHIDefaultFragmentShader <> nil)) and
+     (RHIDevice = FRHISceneOwnerDevice) then
   begin
     FreeAndNil(FRHISceneDescriptorSet);
     FreeAndNil(FRHISceneDescriptorSetLayout);
     FreeAndNil(FRHISceneBuffer);
+    FreeAndNil(FRHIDefaultVertexShader);
+    FreeAndNil(FRHIDefaultFragmentShader);
   end else
   begin
     FRHISceneDescriptorSet := nil;
     FRHISceneDescriptorSetLayout := nil;
     FRHISceneBuffer := nil;
+    FRHIDefaultVertexShader := nil;
+    FRHIDefaultFragmentShader := nil;
   end;
   inherited;
 end;
@@ -394,6 +409,8 @@ begin
     FRHISceneDescriptorSet := nil;
     FRHISceneDescriptorSetLayout := nil;
     FRHISceneBuffer := nil;
+    FRHIDefaultVertexShader := nil;
+    FRHIDefaultFragmentShader := nil;
   end;
   if FRHISceneBuffer = nil then
     UploadSceneUniformBlockToRHI;
@@ -421,6 +438,239 @@ begin
     FRHISceneDescriptorSet.Update;
   end;
   Result := FRHISceneDescriptorSet;
+end;
+
+procedure TRenderer.EnsureRHIDefaultShaders;
+var
+  Gen: TCastleShaderGeneratorRHI;
+begin
+  if RHIDevice = nil then
+    Exit;
+  if FRHISceneOwnerDevice <> RHIDevice then
+  begin
+    FRHISceneDescriptorSet := nil;
+    FRHISceneDescriptorSetLayout := nil;
+    FRHISceneBuffer := nil;
+    FRHIDefaultVertexShader := nil;
+    FRHIDefaultFragmentShader := nil;
+    FRHISceneOwnerDevice := RHIDevice;
+  end;
+  if (FRHIDefaultVertexShader = nil) or (FRHIDefaultFragmentShader = nil) then
+  begin
+    Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+    try
+      if FRHIDefaultVertexShader = nil then
+        FRHIDefaultVertexShader := RHIDevice.CreateShaderModuleFromGLSL(
+          ssVertex, Gen.GenerateDefault3DVertexShader(False, False), 'CastleDefault3DVert');
+      if FRHIDefaultFragmentShader = nil then
+        FRHIDefaultFragmentShader := RHIDevice.CreateShaderModuleFromGLSL(
+          ssFragment, Gen.GenerateDefault3DFragmentShader(False, False, False, False, False, False, False, False, False), 'CastleDefault3DFrag');
+    finally
+      FreeAndNil(Gen);
+    end;
+  end;
+end;
+
+procedure TRenderer.BuildShapePipelineDesc(const AShape: TX3DRendererShape;
+  const ARenderOptions: TCastleRenderOptions;
+  out ADesc: TRHIGraphicsPipelineDesc);
+
+  procedure AddVertexAttribute(const ALocation, ABinding: Cardinal;
+    const AFormat: TRHIVertexAttributeFormat; const AOffset: Cardinal;
+    const AName: String);
+  var
+    Idx: Integer;
+  begin
+    Idx := Length(ADesc.VertexInput.Attributes);
+    SetLength(ADesc.VertexInput.Attributes, Idx + 1);
+    ADesc.VertexInput.Attributes[Idx].Location := ALocation;
+    ADesc.VertexInput.Attributes[Idx].Binding := ABinding;
+    ADesc.VertexInput.Attributes[Idx].Format := AFormat;
+    ADesc.VertexInput.Attributes[Idx].Offset := AOffset;
+    ADesc.VertexInput.Attributes[Idx].AttributeName := AName;
+  end;
+
+  function TexCoordDimToFormat(const ADimensions: Cardinal): TRHIVertexAttributeFormat;
+  begin
+    case ADimensions of
+      2: Result := vafVector2;
+      3: Result := vafVector3;
+      4: Result := vafVector4;
+    else
+      Result := vafFloat;
+    end;
+  end;
+
+var
+  Arrays: TGeometryArrays;
+  Set1Layout, Set2Layout: TRHIDescriptorSetLayout;
+  LayoutCount: Integer;
+begin
+  FillChar(ADesc, SizeOf(ADesc), 0);
+  EnsureRHIDefaultShaders;
+  EnsureRHISceneDescriptorSet;
+
+  ADesc.VertexShader := FRHIDefaultVertexShader;
+  ADesc.FragmentShader := FRHIDefaultFragmentShader;
+  ADesc.GeometryShader := nil;
+
+  Arrays := nil;
+  if (AShape <> nil) and (AShape.Cache <> nil) then
+    Arrays := AShape.Cache.Arrays;
+
+  if Arrays <> nil then
+  begin
+    if Arrays.AttributeSize > 0 then
+      SetLength(ADesc.VertexInput.Bindings, 2)
+    else
+      SetLength(ADesc.VertexInput.Bindings, 1);
+
+    ADesc.VertexInput.Bindings[0].Binding := 0;
+    ADesc.VertexInput.Bindings[0].Stride := Arrays.CoordinateSize;
+    ADesc.VertexInput.Bindings[0].PerInstance := False;
+
+    if Arrays.AttributeSize > 0 then
+    begin
+      ADesc.VertexInput.Bindings[1].Binding := 1;
+      ADesc.VertexInput.Bindings[1].Stride := Arrays.AttributeSize;
+      ADesc.VertexInput.Bindings[1].PerInstance := False;
+    end;
+
+    AddVertexAttribute(Ord(vlPosition), 0, vafVector3, PtrUInt(Arrays.Position), 'castle_Vertex');
+    AddVertexAttribute(Ord(vlNormal), 0, vafVector3, PtrUInt(Arrays.Normal), 'castle_Normal');
+    if Arrays.HasTangent then
+      AddVertexAttribute(Ord(vlTangent), 0, vafVector4, PtrUInt(Arrays.Tangent), 'castle_Tangent');
+
+    if (Arrays.TexCoords.Count > 0) and (Arrays.TexCoords[0] <> nil) and
+       (Arrays.TexCoords[0].Generation = tgExplicit) then
+      AddVertexAttribute(Ord(vlTexCoord0), 1,
+        TexCoordDimToFormat(Arrays.TexCoords[0].Dimensions),
+        PtrUInt(Arrays.TexCoord(0, 0)), 'castle_MultiTexCoord0');
+
+    if (Arrays.TexCoords.Count > 1) and (Arrays.TexCoords[1] <> nil) and
+       (Arrays.TexCoords[1].Generation = tgExplicit) then
+      AddVertexAttribute(Ord(vlTexCoord1), 1,
+        TexCoordDimToFormat(Arrays.TexCoords[1].Dimensions),
+        PtrUInt(Arrays.TexCoord(1, 0)), 'castle_MultiTexCoord1');
+
+    case Arrays.ColorType of
+      ctRgb:
+        AddVertexAttribute(Ord(vlColor), 1, vafVector3, PtrUInt(Arrays.ColorRgb), 'castle_ColorPerVertex');
+      ctRgbAlpha:
+        AddVertexAttribute(Ord(vlColor), 1, vafVector4, PtrUInt(Arrays.ColorRgbAlpha), 'castle_ColorPerVertex');
+      else ;
+    end;
+
+    if Arrays.HasSkinWeights0 and Arrays.HasSkinJoints0 then
+    begin
+      AddVertexAttribute(Ord(vlJoints0), 1, vafVector4, PtrUInt(Arrays.SkinJoints0), 'castle_SkinJoints0');
+      AddVertexAttribute(Ord(vlWeights0), 1, vafVector4, PtrUInt(Arrays.SkinWeights0), 'castle_SkinWeights0');
+    end;
+
+    case Arrays.Primitive of
+      gpTriangles, gpTriangleFan: ADesc.Topology := ptTriangleList;
+      gpTriangleStrip:            ADesc.Topology := ptTriangleStrip;
+      gpLines:                    ADesc.Topology := ptLineList;
+      gpLineStrip, gpLineLoop:    ADesc.Topology := ptLineStrip;
+      gpPoints:                   ADesc.Topology := ptPointList;
+    else
+      ADesc.Topology := ptTriangleList;
+    end;
+  end else
+  begin
+    SetLength(ADesc.VertexInput.Bindings, 1);
+    ADesc.VertexInput.Bindings[0].Binding := 0;
+    ADesc.VertexInput.Bindings[0].Stride := 24;
+    ADesc.VertexInput.Bindings[0].PerInstance := False;
+    AddVertexAttribute(Ord(vlPosition), 0, vafVector3, 0, 'castle_Vertex');
+    AddVertexAttribute(Ord(vlNormal), 0, vafVector3, 12, 'castle_Normal');
+    ADesc.Topology := ptTriangleList;
+  end;
+
+  ADesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+  if (FWireframePass = 1) or
+     ((ARenderOptions <> nil) and (ARenderOptions.WireframeEffect = weWireframeOnly)) then
+    ADesc.Rasterizer.PolygonMode := pmLine
+  else
+    ADesc.Rasterizer.PolygonMode := pmFill;
+
+  if RenderContext <> nil then
+  begin
+    if RenderContext.CullFace then
+      ADesc.Rasterizer.CullMode := cmBack
+    else
+      ADesc.Rasterizer.CullMode := cmNone;
+
+    if RenderContext.FrontFaceCcw then
+      ADesc.Rasterizer.FrontFace := ffCounterClockwise
+    else
+      ADesc.Rasterizer.FrontFace := ffClockwise;
+  end;
+
+  if (RenderContext <> nil) and (not RenderContext.DepthBufferUpdate) then
+  begin
+    ADesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthReadOnly;
+    ADesc.BlendState := TRHIBlendStateDesc.DefaultAlphaBlend;
+  end else
+  begin
+    ADesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+    ADesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+  end;
+  if (RenderContext <> nil) and (not RenderContext.DepthTest) then
+    ADesc.DepthStencil.DepthTestEnable := False;
+
+  Set1Layout := nil;
+  Set2Layout := nil;
+  if (AShape <> nil) and (AShape.Cache <> nil) then
+  begin
+    Set1Layout := AShape.Cache.RHIMaterialDescriptorLayout;
+    Set2Layout := AShape.Cache.RHISkinningDescriptorLayout;
+  end;
+
+  if Set2Layout <> nil then
+    LayoutCount := 3
+  else if Set1Layout <> nil then
+    LayoutCount := 2
+  else if FRHISceneDescriptorSetLayout <> nil then
+    LayoutCount := 1
+  else
+    LayoutCount := 0;
+
+  SetLength(ADesc.DescriptorSetLayouts, LayoutCount);
+  if LayoutCount >= 1 then
+    ADesc.DescriptorSetLayouts[0] := FRHISceneDescriptorSetLayout;
+  if LayoutCount >= 2 then
+    ADesc.DescriptorSetLayouts[1] := Set1Layout;
+  if LayoutCount >= 3 then
+    ADesc.DescriptorSetLayouts[2] := Set2Layout;
+
+  ADesc.PushConstantSize := SizeOf(TCastlePushConstantsBlock);
+  ADesc.PushConstantStages := [ssVertex, ssFragment];
+
+  SetLength(ADesc.ColorAttachmentFormats, 1);
+  if (RHIDevice <> nil) and (RHIDevice.GetSwapchainColorTexture <> nil) then
+    ADesc.ColorAttachmentFormats[0] := RHIDevice.GetSwapchainColorTexture.Desc.Format
+  else
+    ADesc.ColorAttachmentFormats[0] := pfBGRA8_UNorm;
+
+  if (RHIDevice <> nil) and (RHIDevice.GetSwapchainDepthTexture <> nil) then
+    ADesc.DepthAttachmentFormat := RHIDevice.GetSwapchainDepthTexture.Desc.Format
+  else
+    ADesc.DepthAttachmentFormat := pfD32_Float;
+
+  ADesc.SampleCount := 1;
+  ADesc.DebugName := 'CastleShapeForwardPSO';
+end;
+
+function TRenderer.GetOrCreateShapePipeline(const AShape: TX3DRendererShape;
+  const ARenderOptions: TCastleRenderOptions): TRHIPipeline;
+var
+  Desc: TRHIGraphicsPipelineDesc;
+begin
+  if RHIDevice = nil then
+    Exit(nil);
+  BuildShapePipelineDesc(AShape, ARenderOptions, Desc);
+  Result := RHIDevice.GetOrCreatePipeline(Desc);
 end;
 
 function TRenderer.BumpMapping(const RenderOptions: TCastleRenderOptions): TBumpMapping;

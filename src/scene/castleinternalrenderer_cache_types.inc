@@ -158,7 +158,9 @@
     property RHIIndexBuffer: TRHIBuffer read FRHIIndexBuffer;
     property RHIJointBuffer: TRHIBuffer read FRHIJointBuffer;
     property RHIMaterialBuffer: TRHIBuffer read FRHIMaterialBuffer;
+    property RHIMaterialDescriptorLayout: TRHIDescriptorSetLayout read FRHIMaterialDescriptorLayout;
     property RHIMaterialDescriptorSet: TRHIDescriptorSet read FRHIMaterialDescriptorSet;
+    property RHISkinningDescriptorLayout: TRHIDescriptorSetLayout read FRHISkinningDescriptorLayout;
     property RHISkinningDescriptorSet: TRHIDescriptorSet read FRHISkinningDescriptorSet;
     property RHIMaterialBlock: TCastleMaterialUniformBlock read FRHIMaterialBlock;
     property RHIMaterialUploadCount: Cardinal read FRHIMaterialUploadCount;

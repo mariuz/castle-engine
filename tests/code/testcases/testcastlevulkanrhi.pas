@@ -258,6 +258,9 @@ type
     procedure TestRendererSceneAndLightsDescriptorSetRHI;
     procedure TestShapeCacheMaterialAndSkinningDescriptorSetsRHI;
     procedure TestViewportRenderBindsSet0Set1DescriptorSetsRHI;
+    procedure TestRendererBuildShapePipelineDescAndCachingRHI;
+    procedure TestViewportRenderBindsGraphicsPipelineAndWireframePSORHI;
+    procedure TestViewportOpaqueAndBlendedPipelineStatesRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -12873,6 +12876,292 @@ begin
         VkCmd.DescriptorSetBindCount >= 2);
       AssertTrue('Device.GetBindlessDescriptorSet must return non-nil Set 1 bindless set',
         Device.GetBindlessDescriptorSet <> nil);
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Container);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRendererBuildShapePipelineDescAndCachingRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  BoxNode: TBoxNode;
+  App: TAppearanceNode;
+  PhysMat: TPhysicalMaterialNode;
+  RShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  Renderer: TRenderer;
+  Cam: TRenderingCamera;
+  Stats: TRenderStatistics;
+  Desc: TRHIGraphicsPipelineDesc;
+  Pso1, Pso2: TRHIPipeline;
+  HitsBefore: Cardinal;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($66B1)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  TestCtx.CullFace := True;
+  TestCtx.FrontFaceCcw := True;
+  TestCtx.DepthTest := True;
+  TestCtx.DepthBufferUpdate := True;
+  Viewport := TCastleViewport.Create(nil);
+  Scene := TCastleScene.Create(nil);
+  Renderer := TRenderer.Create(nil);
+  Cam := TRenderingCamera.Create;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    BoxNode := TBoxNode.Create;
+    BoxNode.Size := Vector3(2.0, 2.0, 2.0);
+    ShapeNode.Geometry := BoxNode;
+    App := TAppearanceNode.Create;
+    PhysMat := TPhysicalMaterialNode.Create;
+    PhysMat.BaseColor := Vector3(0.5, 0.7, 0.9);
+    App.Material := PhysMat;
+    ShapeNode.Appearance := App;
+    Root.AddChildren(ShapeNode);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+
+    RShape := TX3DRendererShape(Scene.Shapes.TraverseList(True)[0]);
+    RShape.PrepareRHIBuffers(Scene.RenderOptions, 1);
+    RShape.UploadRHIMaterialToCache(ShadingModel);
+
+    Cam.Target := rtScreen;
+    Cam.Matrix := TMatrix4.Identity;
+    FillChar(Stats, SizeOf(Stats), 0);
+    Renderer.RenderBegin(nil, Cam, nil, 0, 0, 0, @Stats);
+    try
+      Renderer.BuildShapePipelineDesc(RShape, Scene.RenderOptions, Desc);
+      AssertTrue('BuildShapePipelineDesc must assign VertexShader', Desc.VertexShader <> nil);
+      AssertTrue('BuildShapePipelineDesc must assign FragmentShader', Desc.FragmentShader <> nil);
+      AssertEquals('Box with texcoords must have 2 vertex bindings (Coordinate + Attribute)',
+        2, Length(Desc.VertexInput.Bindings));
+      AssertTrue('Box must have >= 3 vertex attributes (Position, Normal, TexCoord0)',
+        Length(Desc.VertexInput.Attributes) >= 3);
+      AssertEquals('Topology must be ptTriangleList', Ord(ptTriangleList), Ord(Desc.Topology));
+      AssertEquals('PolygonMode must be pmFill', Ord(pmFill), Ord(Desc.Rasterizer.PolygonMode));
+      AssertEquals('CullMode must be cmBack when RenderContext.CullFace = True',
+        Ord(cmBack), Ord(Desc.Rasterizer.CullMode));
+      AssertEquals('DescriptorSetLayouts must have 2 layouts (Set 0 + Set 1)',
+        2, Length(Desc.DescriptorSetLayouts));
+      AssertEquals('PushConstantSize must match SizeOf(TCastlePushConstantsBlock)',
+        SizeOf(TCastlePushConstantsBlock), Integer(Desc.PushConstantSize));
+
+      Pso1 := Renderer.GetOrCreateShapePipeline(RShape, Scene.RenderOptions);
+      AssertTrue('GetOrCreateShapePipeline must return non-nil PSO', Pso1 <> nil);
+      HitsBefore := Device.PipelineCacheHits;
+      Pso2 := Renderer.GetOrCreateShapePipeline(RShape, Scene.RenderOptions);
+      AssertTrue('Repeated GetOrCreateShapePipeline must return identical cached PSO', Pso1 = Pso2);
+      AssertEquals('Repeated GetOrCreateShapePipeline must increment PipelineCacheHits',
+        HitsBefore + 1, Device.PipelineCacheHits);
+    finally
+      Renderer.RenderEnd;
+    end;
+  finally
+    FreeAndNil(Cam);
+    FreeAndNil(Renderer);
+    FreeAndNil(Scene);
+    FreeAndNil(Viewport);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportRenderBindsGraphicsPipelineAndWireframePSORHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  BoxNode: TBoxNode;
+  App: TAppearanceNode;
+  PhysMat: TPhysicalMaterialNode;
+  Cmd: TRHICommandList;
+  VkCmd: TVulkanRHICommandList;
+  SolidPso, WirePso: TVulkanRHIPipeline;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($66B2)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 8.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Scene := TCastleScene.Create(Viewport);
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    BoxNode := TBoxNode.Create;
+    BoxNode.Size := Vector3(2.0, 2.0, 2.0);
+    ShapeNode.Geometry := BoxNode;
+    App := TAppearanceNode.Create;
+    PhysMat := TPhysicalMaterialNode.Create;
+    PhysMat.BaseColor := Vector3(0.9, 0.4, 0.2);
+    App.Material := PhysMat;
+    ShapeNode.Appearance := App;
+    Root.AddChildren(ShapeNode);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+
+    { 1. Normal solid pass -> PolygonMode = pmFill }
+    Cmd := Device.BeginFrame;
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+      VkCmd := Cmd as TVulkanRHICommandList;
+      SolidPso := VkCmd.BoundPipeline;
+      AssertTrue('Viewport render must bind a graphics pipeline', SolidPso <> nil);
+      AssertTrue('PipelineBindCount must be >= 1', VkCmd.PipelineBindCount >= 1);
+      AssertEquals('Solid render PSO must use PolygonMode = pmFill',
+        Ord(pmFill), Ord(SolidPso.Desc.Rasterizer.PolygonMode));
+    finally
+      Device.EndFrameAndPresent;
+    end;
+
+    { 2. Wireframe-only pass -> PolygonMode = pmLine }
+    Scene.RenderOptions.WireframeEffect := weWireframeOnly;
+    Cmd := Device.BeginFrame;
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+      VkCmd := Cmd as TVulkanRHICommandList;
+      WirePso := VkCmd.BoundPipeline;
+      AssertTrue('Wireframe viewport render must bind a graphics pipeline', WirePso <> nil);
+      AssertTrue('Wireframe PSO must be distinct from solid PSO', WirePso <> SolidPso);
+      AssertEquals('Wireframe render PSO must use PolygonMode = pmLine',
+        Ord(pmLine), Ord(WirePso.Desc.Rasterizer.PolygonMode));
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Container);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportOpaqueAndBlendedPipelineStatesRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  BoxNode: TBoxNode;
+  App: TAppearanceNode;
+  PhysMat: TPhysicalMaterialNode;
+  Cmd: TRHICommandList;
+  VkCmd: TVulkanRHICommandList;
+  OpaquePso, BlendedPso: TVulkanRHIPipeline;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($66B3)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 8.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Scene := TCastleScene.Create(Viewport);
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    BoxNode := TBoxNode.Create;
+    BoxNode.Size := Vector3(2.0, 2.0, 2.0);
+    ShapeNode.Geometry := BoxNode;
+    App := TAppearanceNode.Create;
+    PhysMat := TPhysicalMaterialNode.Create;
+    PhysMat.BaseColor := Vector3(0.2, 0.8, 0.4);
+    PhysMat.Transparency := 0.0;
+    App.Material := PhysMat;
+    ShapeNode.Appearance := App;
+    Root.AddChildren(ShapeNode);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+
+    { 1. Opaque material (Transparency = 0.0) -> BlendEnable = False, DepthWriteEnable = True }
+    Cmd := Device.BeginFrame;
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+      VkCmd := Cmd as TVulkanRHICommandList;
+      OpaquePso := VkCmd.BoundPipeline;
+      AssertTrue('Opaque shape must bind PSO', OpaquePso <> nil);
+      AssertFalse('Opaque PSO must have BlendEnable = False', OpaquePso.Desc.BlendState.BlendEnable);
+      AssertTrue('Opaque PSO must have DepthWriteEnable = True', OpaquePso.Desc.DepthStencil.DepthWriteEnable);
+    finally
+      Device.EndFrameAndPresent;
+    end;
+
+    { 2. Transparent material (Transparency = 0.5) -> BlendEnable = True, DepthWriteEnable = False }
+    PhysMat.Transparency := 0.5;
+    Scene.ChangedAll;
+    Cmd := Device.BeginFrame;
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+      VkCmd := Cmd as TVulkanRHICommandList;
+      BlendedPso := VkCmd.BoundPipeline;
+      AssertTrue('Transparent shape must bind PSO', BlendedPso <> nil);
+      AssertTrue('Transparent PSO must be distinct from opaque PSO', BlendedPso <> OpaquePso);
+      AssertTrue('Transparent PSO must have BlendEnable = True', BlendedPso.Desc.BlendState.BlendEnable);
+      AssertFalse('Transparent PSO must have DepthWriteEnable = False', BlendedPso.Desc.DepthStencil.DepthWriteEnable);
     finally
       Device.EndFrameAndPresent;
     end;
