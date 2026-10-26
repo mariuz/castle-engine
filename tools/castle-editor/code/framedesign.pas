@@ -584,6 +584,11 @@ type
       MenuTreeViewItemGeneratePascalCode: TMenuItem;
       MenuTreeViewItemAnimationController: TMenuItem;
       MenuTreeViewItemReplaceWithDesignFile: TMenuItem;
+      MenuTreeViewItemBlockoutKit: TMenuItem;
+      MenuTreeViewItemQuickSoundSetup: TMenuItem;
+      MenuTreeViewItemQuickPhysicsJoint: TMenuItem;
+      MenuTreeViewItemRenderingOptimizer: TMenuItem;
+      MenuTreeViewItemBookmarksManager: TMenuItem;
       FComponentNotes: TStringList;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
@@ -856,6 +861,11 @@ type
     procedure MenuTreeViewItemGeneratePascalCodeClick(Sender: TObject);
     procedure MenuTreeViewItemAnimationControllerClick(Sender: TObject);
     procedure MenuTreeViewItemReplaceWithDesignFileClick(Sender: TObject);
+    procedure MenuTreeViewItemBlockoutKitClick(Sender: TObject);
+    procedure MenuTreeViewItemQuickSoundSetupClick(Sender: TObject);
+    procedure MenuTreeViewItemQuickPhysicsJointClick(Sender: TObject);
+    procedure MenuTreeViewItemRenderingOptimizerClick(Sender: TObject);
+    procedure MenuTreeViewItemBookmarksManagerClick(Sender: TObject);
     procedure MenuTreeViewItemGroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemUngroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemArrayDuplicateClick(Sender: TObject);
@@ -2052,6 +2062,24 @@ type
       const ActionMode: Integer);
     procedure ShowAnimationControllerDialog;
     procedure ReplaceSelectedWithDesignFile;
+    procedure ApplyQuickBlockoutKit(const KitPreset, ItemCount: Integer;
+      const SpanWidth, SpanHeight, SpanDepth: Single;
+      const AddStaticColliders: Boolean);
+    procedure ShowQuickBlockoutKitDialog;
+    procedure ApplyQuickSoundSetup(const SoundUrl: String;
+      const StreamAudio, SpatialAudio, AutoPlayLoop: Boolean;
+      const VolumeVal, PitchVal, RefDist, MaxDist: Single);
+    procedure ShowQuickSoundSetupDialog;
+    procedure ApplyQuickPhysicsJoint(const JointKind: Integer;
+      const PinFirstStatic, ConnectedCollideFlag, BreakableFlag: Boolean;
+      const ParamA, ParamB: Single);
+    procedure ShowQuickPhysicsJointDialog;
+    procedure ApplyRenderingOptimization(const CastShadowsFlag, ReceiveShadowsFlag,
+      ShapeCullingFlag, SceneCullingFlag, ManifoldFlag: Boolean;
+      const TransformOptIndex: Integer; const DistCulling: Single;
+      const EntireDesign: Boolean);
+    procedure ShowRenderingOptimizerDialog;
+    procedure ShowBookmarksAndSelectionSetsDialog;
     procedure SaveCameraBookmark(const Slot: Integer);
     procedure RecallCameraBookmark(const Slot: Integer);
     procedure AdjustCameraSpeed(const Factor: Single);
@@ -6699,6 +6727,31 @@ begin
   MenuTreeViewItemReplaceWithDesignFile.Caption := 'Replace Selected With Sub-Design / 3D Model File...';
   MenuTreeViewItemReplaceWithDesignFile.OnClick := @MenuTreeViewItemReplaceWithDesignFileClick;
   MenuTreeView.Items.Add(MenuTreeViewItemReplaceWithDesignFile);
+
+  MenuTreeViewItemBlockoutKit := TMenuItem.Create(Self);
+  MenuTreeViewItemBlockoutKit.Caption := 'Quick 3D Level Blockout / Architectural Kit... (Shift: Staircase)';
+  MenuTreeViewItemBlockoutKit.OnClick := @MenuTreeViewItemBlockoutKitClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemBlockoutKit);
+
+  MenuTreeViewItemQuickSoundSetup := TMenuItem.Create(Self);
+  MenuTreeViewItemQuickSoundSetup.Caption := 'Quick 3D Spatial Audio & Sound Emitter Setup...';
+  MenuTreeViewItemQuickSoundSetup.OnClick := @MenuTreeViewItemQuickSoundSetupClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemQuickSoundSetup);
+
+  MenuTreeViewItemQuickPhysicsJoint := TMenuItem.Create(Self);
+  MenuTreeViewItemQuickPhysicsJoint.Caption := 'Quick 3D Physics Joint & Chain Connector...';
+  MenuTreeViewItemQuickPhysicsJoint.OnClick := @MenuTreeViewItemQuickPhysicsJointClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemQuickPhysicsJoint);
+
+  MenuTreeViewItemRenderingOptimizer := TMenuItem.Create(Self);
+  MenuTreeViewItemRenderingOptimizer.Caption := 'Scene Shadow, Culling & Rendering Optimizer...';
+  MenuTreeViewItemRenderingOptimizer.OnClick := @MenuTreeViewItemRenderingOptimizerClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemRenderingOptimizer);
+
+  MenuTreeViewItemBookmarksManager := TMenuItem.Create(Self);
+  MenuTreeViewItemBookmarksManager.Caption := 'Bookmarks, Selection Sets & Tagged Groups Manager...';
+  MenuTreeViewItemBookmarksManager.OnClick := @MenuTreeViewItemBookmarksManagerClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemBookmarksManager);
 
   MenuTreeViewItemGroupSelected := TMenuItem.Create(Self);
   MenuTreeViewItemGroupSelected.Caption := 'Group Selected Under New Transform (Ctrl+G)';
@@ -35119,6 +35172,1513 @@ begin
   ReplaceSelectedWithDesignFile;
 end;
 
+procedure TDesignFrame.ApplyQuickBlockoutKit(const KitPreset, ItemCount: Integer;
+  const SpanWidth, SpanHeight, SpanDepth: Single;
+  const AddStaticColliders: Boolean);
+var
+  TargetParent, KitGroup: TCastleTransform;
+  FocusCenter: TVector3;
+  BBox: TBox3D;
+  EffW, EffH, EffD: Single;
+  ActualCount, I: Integer;
+  KitPrefix: String;
+  SwatchCol, AccentCol: TCastleColor;
+
+  function AddBlockoutBox(const PiecePrefix: String; const Pos, BoxSize: TVector3;
+    const Col: TCastleColor): TCastleBox;
+  var
+    ColBehavior: TCastleBoxCollider;
+    BodyBehavior: TCastleRigidBody;
+  begin
+    Result := TCastleBox.Create(DesignOwner);
+    Result.Name := ProposeComponentName(TCastleBox, DesignOwner, PiecePrefix);
+    Result.Translation := Pos;
+    Result.Size := Vector3(Max(0.05, BoxSize.X), Max(0.05, BoxSize.Y), Max(0.05, BoxSize.Z));
+    Result.Color := Col;
+    Result.Material := pmPhysical;
+    KitGroup.Add(Result);
+
+    if AddStaticColliders then
+    begin
+      ColBehavior := TCastleBoxCollider.Create(DesignOwner);
+      ColBehavior.Name := ProposeComponentName(TCastleBoxCollider, DesignOwner, Result.Name + 'Collider');
+      ColBehavior.AutoSize := true;
+      Result.AddBehavior(ColBehavior);
+
+      BodyBehavior := TCastleRigidBody.Create(DesignOwner);
+      BodyBehavior.Name := ProposeComponentName(TCastleRigidBody, DesignOwner, Result.Name + 'Body');
+      BodyBehavior.Dynamic := false;
+      BodyBehavior.Animated := false;
+      BodyBehavior.Gravity := false;
+      Result.AddBehavior(BodyBehavior);
+    end;
+  end;
+
+  function AddBlockoutCylinder(const PiecePrefix: String; const Pos: TVector3;
+    const Rad, CylHeight: Single; const Col: TCastleColor): TCastleCylinder;
+  var
+    ColBehavior: TCastleBoxCollider;
+    BodyBehavior: TCastleRigidBody;
+  begin
+    Result := TCastleCylinder.Create(DesignOwner);
+    Result.Name := ProposeComponentName(TCastleCylinder, DesignOwner, PiecePrefix);
+    Result.Translation := Pos;
+    Result.Radius := Max(0.05, Rad);
+    Result.Height := Max(0.05, CylHeight);
+    Result.Color := Col;
+    Result.Material := pmPhysical;
+    KitGroup.Add(Result);
+
+    if AddStaticColliders then
+    begin
+      ColBehavior := TCastleBoxCollider.Create(DesignOwner);
+      ColBehavior.Name := ProposeComponentName(TCastleBoxCollider, DesignOwner, Result.Name + 'Collider');
+      ColBehavior.AutoSize := true;
+      Result.AddBehavior(ColBehavior);
+
+      BodyBehavior := TCastleRigidBody.Create(DesignOwner);
+      BodyBehavior.Name := ProposeComponentName(TCastleRigidBody, DesignOwner, Result.Name + 'Body');
+      BodyBehavior.Dynamic := false;
+      BodyBehavior.Animated := false;
+      BodyBehavior.Gravity := false;
+      Result.AddBehavior(BodyBehavior);
+    end;
+  end;
+
+var
+  StepH, StepD, WallT, DoorW, DoorH, SideWallW, PillarW, LintelH: Single;
+  TierFrac, TierH: Single;
+begin
+  if DesignOwner = nil then Exit;
+  if FDesignRoot is TCastleTransform then
+    TargetParent := TCastleTransform(FDesignRoot)
+  else if CurrentViewport <> nil then
+    TargetParent := CurrentViewport.Items
+  else
+  begin
+    ErrorBox('Select a 3D viewport or transform design before spawning a 3D Blockout Kit.');
+    Exit;
+  end;
+
+  FocusCenter := TVector3.Zero;
+  if (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0) then
+    FocusCenter := TransformManipulate.SelectionWorkingCenter
+  else if CurrentTransform <> nil then
+  begin
+    BBox := CurrentTransform.WorldBoundingBox;
+    if not BBox.IsEmpty then
+      FocusCenter := Vector3(BBox.Center.X, BBox.Data[0].Y, BBox.Center.Z)
+    else
+      FocusCenter := CurrentTransform.WorldTranslation;
+  end;
+
+  EffW := Max(1.0, SpanWidth);
+  EffH := Max(0.5, SpanHeight);
+  EffD := Max(1.0, SpanDepth);
+  ActualCount := Clamped(ItemCount, 2, 64);
+
+  SwatchCol := Vector4(0.62, 0.66, 0.70, 1.0);
+  AccentCol := Vector4(0.24, 0.56, 0.88, 1.0);
+
+  case KitPreset of
+    1: KitPrefix := 'BlockoutRoom';
+    2: KitPrefix := 'BlockoutArchway';
+    3: KitPrefix := 'BlockoutColonnade';
+    4: KitPrefix := 'BlockoutArenaTiers';
+    else KitPrefix := 'BlockoutStairs';
+  end;
+
+  KitGroup := TCastleTransform.Create(DesignOwner);
+  KitGroup.Name := ProposeComponentName(TCastleTransform, DesignOwner, KitPrefix);
+  KitGroup.Translation := FocusCenter;
+  TargetParent.Add(KitGroup);
+
+  case KitPreset of
+    0: begin // Staircase / Steps Ramp
+         StepH := EffH / ActualCount;
+         StepD := EffD / ActualCount;
+         for I := 0 to ActualCount - 1 do
+         begin
+           if (I mod 2) = 0 then
+             AddBlockoutBox('StairStep',
+               Vector3(0, StepH * (I + 0.5), -EffD * 0.5 + StepD * (I + 0.5)),
+               Vector3(EffW, StepH, StepD),
+               SwatchCol)
+           else
+             AddBlockoutBox('StairStep',
+               Vector3(0, StepH * (I + 0.5), -EffD * 0.5 + StepD * (I + 0.5)),
+               Vector3(EffW, StepH, StepD),
+               AccentCol);
+         end;
+       end;
+    1: begin // Walled Room Enclosure with Doorway Opening
+         WallT := Max(0.2, Min(EffW, EffD) * 0.05);
+         DoorW := Min(EffW * 0.35, 2.2);
+         DoorH := Min(EffH * 0.75, 2.4);
+         SideWallW := Max(0.2, (EffW - DoorW) * 0.5);
+
+         // Floor Slab
+         AddBlockoutBox('RoomFloor',
+           Vector3(0, WallT * 0.5, 0),
+           Vector3(EffW, WallT, EffD),
+           SwatchCol);
+         // Back Wall (-Z)
+         AddBlockoutBox('RoomWallBack',
+           Vector3(0, EffH * 0.5, -EffD * 0.5 + WallT * 0.5),
+           Vector3(EffW, EffH, WallT),
+           SwatchCol);
+         // Left Wall (-X)
+         AddBlockoutBox('RoomWallLeft',
+           Vector3(-EffW * 0.5 + WallT * 0.5, EffH * 0.5, 0),
+           Vector3(WallT, EffH, EffD - WallT * 2.0),
+           SwatchCol);
+         // Right Wall (+X)
+         AddBlockoutBox('RoomWallRight',
+           Vector3(EffW * 0.5 - WallT * 0.5, EffH * 0.5, 0),
+           Vector3(WallT, EffH, EffD - WallT * 2.0),
+           SwatchCol);
+         // Front Wall Left Segment (+Z)
+         AddBlockoutBox('RoomFrontLeft',
+           Vector3(-EffW * 0.5 + SideWallW * 0.5, EffH * 0.5, EffD * 0.5 - WallT * 0.5),
+           Vector3(SideWallW, EffH, WallT),
+           SwatchCol);
+         // Front Wall Right Segment (+Z)
+         AddBlockoutBox('RoomFrontRight',
+           Vector3(EffW * 0.5 - SideWallW * 0.5, EffH * 0.5, EffD * 0.5 - WallT * 0.5),
+           Vector3(SideWallW, EffH, WallT),
+           SwatchCol);
+         // Doorway Header Lintel (+Z)
+         if EffH > DoorH + 0.1 then
+           AddBlockoutBox('RoomDoorHeader',
+             Vector3(0, DoorH + (EffH - DoorH) * 0.5, EffD * 0.5 - WallT * 0.5),
+             Vector3(DoorW, EffH - DoorH, WallT),
+             AccentCol);
+       end;
+    2: begin // Archway / Portal Frame
+         PillarW := Max(0.3, EffW * 0.18);
+         LintelH := Max(0.3, EffH * 0.18);
+         // Left Pillar
+         AddBlockoutBox('ArchPillarLeft',
+           Vector3(-EffW * 0.5 + PillarW * 0.5, (EffH - LintelH) * 0.5, 0),
+           Vector3(PillarW, EffH - LintelH, EffD),
+           SwatchCol);
+         // Right Pillar
+         AddBlockoutBox('ArchPillarRight',
+           Vector3(EffW * 0.5 - PillarW * 0.5, (EffH - LintelH) * 0.5, 0),
+           Vector3(PillarW, EffH - LintelH, EffD),
+           SwatchCol);
+         // Top Lintel Beam
+         AddBlockoutBox('ArchLintelBeam',
+           Vector3(0, EffH - LintelH * 0.5, 0),
+           Vector3(EffW + PillarW * 0.4, LintelH, EffD * 1.15),
+           AccentCol);
+       end;
+    3: begin // Colonnade / Pillar Corridor
+         WallT := 0.25;
+         PillarW := Max(0.2, Min(EffW, EffD) * 0.06);
+         // Corridor Floor
+         AddBlockoutBox('CorridorFloor',
+           Vector3(0, WallT * 0.5, 0),
+           Vector3(EffW, WallT, EffD),
+           SwatchCol);
+         // Two rows of cylindrical columns
+         for I := 0 to ActualCount - 1 do
+         begin
+           StepD := -EffD * 0.45 + (EffD * 0.90) * (I / Max(1, ActualCount - 1));
+           AddBlockoutCylinder('ColumnLeft',
+             Vector3(-EffW * 0.40, WallT + (EffH - WallT * 2.0) * 0.5, StepD),
+             PillarW, EffH - WallT * 2.0, AccentCol);
+           AddBlockoutCylinder('ColumnRight',
+             Vector3(EffW * 0.40, WallT + (EffH - WallT * 2.0) * 0.5, StepD),
+             PillarW, EffH - WallT * 2.0, AccentCol);
+         end;
+         // Top Architrave Beams
+         AddBlockoutBox('ArchitraveLeft',
+           Vector3(-EffW * 0.40, EffH - WallT * 0.5, 0),
+           Vector3(PillarW * 2.4, WallT, EffD),
+           SwatchCol);
+         AddBlockoutBox('ArchitraveRight',
+           Vector3(EffW * 0.40, EffH - WallT * 0.5, 0),
+           Vector3(PillarW * 2.4, WallT, EffD),
+           SwatchCol);
+       end;
+    4: begin // Multi-Tier Stepped Arena Platforms
+         TierH := EffH / ActualCount;
+         for I := 0 to ActualCount - 1 do
+         begin
+           TierFrac := 1.0 - (I / (ActualCount + 0.5));
+           if (I mod 2) = 0 then
+             AddBlockoutBox('ArenaTier',
+               Vector3(0, TierH * (I + 0.5), 0),
+               Vector3(EffW * TierFrac, TierH, EffD * TierFrac),
+               SwatchCol)
+           else
+             AddBlockoutBox('ArenaTier',
+               Vector3(0, TierH * (I + 0.5), 0),
+               Vector3(EffW * TierFrac, TierH, EffD * TierFrac),
+               AccentCol);
+         end;
+       end;
+  end;
+
+  if AddStaticColliders then
+    UpdateColliders;
+  UpdateDesign;
+  SetSelectedComponent(KitGroup);
+  ModifiedOutsideObjectInspector(
+    Format('Create 3D Level Blockout Kit (%s)', [KitGroup.Name]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowQuickBlockoutKitDialog;
+var
+  Dialog: TForm;
+  LblPreset, LblCount, LblWidth, LblHeight, LblDepth: TLabel;
+  ComboPreset: TComboBox;
+  SpinCount: TSpinEdit;
+  SpinWidth, SpinHeight, SpinDepth: TFloatSpinEdit;
+  CheckColliders: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if (CurrentViewport = nil) and (not (FDesignRoot is TCastleTransform)) then
+  begin
+    ErrorBox('Select a 3D viewport or transform design before opening the 3D Blockout Kit Generator.');
+    Exit;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 3D Level Blockout / Architectural Kit Generator';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 460;
+    Dialog.Height := 340;
+
+    LblPreset := TLabel.Create(Dialog);
+    LblPreset.Left := 16;
+    LblPreset.Top := 16;
+    LblPreset.Caption := 'Architectural / Level Blockout Assembly Preset:';
+    LblPreset.Parent := Dialog;
+
+    ComboPreset := TComboBox.Create(Dialog);
+    ComboPreset.Left := 16;
+    ComboPreset.Top := 38;
+    ComboPreset.Width := 424;
+    ComboPreset.Style := csDropDownList;
+    ComboPreset.Items.Add('Staircase / Steps Ramp (Multi-Step Traversable Ramp)');
+    ComboPreset.Items.Add('Walled Room Enclosure with Front Doorway & Header');
+    ComboPreset.Items.Add('Archway / Portal Frame (Left/Right Pillars + Lintel Beam)');
+    ComboPreset.Items.Add('Colonnade / Pillar Corridor (Floor + Dual Column Rows + Beams)');
+    ComboPreset.Items.Add('Multi-Tier Arena Platforms (Concentric Stepped Dais)');
+    ComboPreset.ItemIndex := 0;
+    ComboPreset.Parent := Dialog;
+
+    LblCount := TLabel.Create(Dialog);
+    LblCount.Left := 16;
+    LblCount.Top := 82;
+    LblCount.Caption := 'Steps / Columns / Tiers Count (2..64):';
+    LblCount.Parent := Dialog;
+
+    SpinCount := TSpinEdit.Create(Dialog);
+    SpinCount.Left := 290;
+    SpinCount.Top := 78;
+    SpinCount.Width := 110;
+    SpinCount.MinValue := 2;
+    SpinCount.MaxValue := 64;
+    SpinCount.Value := 8;
+    SpinCount.Parent := Dialog;
+
+    LblWidth := TLabel.Create(Dialog);
+    LblWidth.Left := 16;
+    LblWidth.Top := 118;
+    LblWidth.Caption := 'Total Span Width X (m):';
+    LblWidth.Parent := Dialog;
+
+    SpinWidth := TFloatSpinEdit.Create(Dialog);
+    SpinWidth.Left := 290;
+    SpinWidth.Top := 114;
+    SpinWidth.Width := 110;
+    SpinWidth.MinValue := 1.0;
+    SpinWidth.MaxValue := 500.0;
+    SpinWidth.Increment := 0.5;
+    SpinWidth.DecimalPlaces := 2;
+    SpinWidth.Value := 4.0;
+    SpinWidth.Parent := Dialog;
+
+    LblHeight := TLabel.Create(Dialog);
+    LblHeight.Left := 16;
+    LblHeight.Top := 154;
+    LblHeight.Caption := 'Total Elevation / Wall Height Y (m):';
+    LblHeight.Parent := Dialog;
+
+    SpinHeight := TFloatSpinEdit.Create(Dialog);
+    SpinHeight.Left := 290;
+    SpinHeight.Top := 150;
+    SpinHeight.Width := 110;
+    SpinHeight.MinValue := 0.5;
+    SpinHeight.MaxValue := 500.0;
+    SpinHeight.Increment := 0.5;
+    SpinHeight.DecimalPlaces := 2;
+    SpinHeight.Value := 3.0;
+    SpinHeight.Parent := Dialog;
+
+    LblDepth := TLabel.Create(Dialog);
+    LblDepth.Left := 16;
+    LblDepth.Top := 190;
+    LblDepth.Caption := 'Total Run / Corridor Depth Z (m):';
+    LblDepth.Parent := Dialog;
+
+    SpinDepth := TFloatSpinEdit.Create(Dialog);
+    SpinDepth.Left := 290;
+    SpinDepth.Top := 186;
+    SpinDepth.Width := 110;
+    SpinDepth.MinValue := 1.0;
+    SpinDepth.MaxValue := 500.0;
+    SpinDepth.Increment := 0.5;
+    SpinDepth.DecimalPlaces := 2;
+    SpinDepth.Value := 6.0;
+    SpinDepth.Parent := Dialog;
+
+    CheckColliders := TCheckBox.Create(Dialog);
+    CheckColliders.Left := 16;
+    CheckColliders.Top := 228;
+    CheckColliders.Caption := 'Attach Auto-Sized Static Box Colliders & RigidBodies to All Pieces';
+    CheckColliders.Checked := true;
+    CheckColliders.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Create Blockout Kit';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyQuickBlockoutKit(
+        ComboPreset.ItemIndex,
+        SpinCount.Value,
+        SpinWidth.Value,
+        SpinHeight.Value,
+        SpinDepth.Value,
+        CheckColliders.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemBlockoutKitClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyQuickBlockoutKit(0, 8, 4.0, 3.0, 6.0, true)
+  else
+    ShowQuickBlockoutKitDialog;
+end;
+
+procedure TDesignFrame.ApplyQuickSoundSetup(const SoundUrl: String;
+  const StreamAudio, SpatialAudio, AutoPlayLoop: Boolean;
+  const VolumeVal, PitchVal, RefDist, MaxDist: Single);
+var
+  EmitterTransform, TargetParent: TCastleTransform;
+  SoundComp: TCastleSound;
+  SoundSource: TCastleSoundSource;
+  RawToken, BaseToken: String;
+  Ch: Char;
+begin
+  if (FDesignRoot = nil) or (DesignOwner = nil) then Exit;
+
+  EmitterTransform := CurrentTransform;
+  if EmitterTransform = nil then
+  begin
+    if FDesignRoot is TCastleTransform then
+      TargetParent := TCastleTransform(FDesignRoot)
+    else if CurrentViewport <> nil then
+      TargetParent := CurrentViewport.Items
+    else
+    begin
+      ErrorBox('Select a 3D transform or viewport before creating a 3D Spatial Audio Emitter.');
+      Exit;
+    end;
+
+    EmitterTransform := TCastleTransform.Create(DesignOwner);
+    EmitterTransform.Name := ProposeComponentName(TCastleTransform, DesignOwner, 'SoundEmitter');
+    TargetParent.Add(EmitterTransform);
+  end;
+
+  RawToken := DeleteUriExt(ExtractUriName(Trim(SoundUrl)));
+  BaseToken := '';
+  for Ch in RawToken do
+    if Ch in ['A'..'Z', 'a'..'z', '0'..'9'] then
+      BaseToken := BaseToken + Ch;
+  if BaseToken = '' then
+    BaseToken := 'Ambient';
+
+  SoundComp := TCastleSound.Create(DesignOwner);
+  SoundComp.Name := ProposeComponentName(TCastleSound, DesignOwner, 'Sound' + BaseToken);
+  SoundComp.Stream := StreamAudio;
+  if Trim(SoundUrl) <> '' then
+    SoundComp.Url := Trim(SoundUrl);
+  SoundComp.Volume := Clamped(VolumeVal, 0.0, 4.0);
+  SoundComp.Pitch := Clamped(PitchVal, 0.1, 4.0);
+  SoundComp.ReferenceDistance := Max(0.1, RefDist);
+  SoundComp.MaxDistance := Max(SoundComp.ReferenceDistance + 0.1, MaxDist);
+
+  if FDesignRoot is TCastleComponent then
+    TCastleComponent(FDesignRoot).AddNonVisualComponent(SoundComp)
+  else
+    EmitterTransform.AddNonVisualComponent(SoundComp);
+
+  SoundSource := EmitterTransform.FindBehavior(TCastleSoundSource) as TCastleSoundSource;
+  if SoundSource = nil then
+  begin
+    SoundSource := TCastleSoundSource.Create(DesignOwner);
+    SoundSource.Name := ProposeComponentName(TCastleSoundSource, DesignOwner, 'SoundSource' + BaseToken);
+    EmitterTransform.AddBehavior(SoundSource);
+  end;
+
+  SoundSource.Spatial := SpatialAudio;
+  SoundSource.Volume := 1.0;
+  SoundSource.Pitch := 1.0;
+  SoundSource.Sound := SoundComp;
+  SoundSource.SoundPlaying := AutoPlayLoop;
+
+  UpdateDesign;
+  SetSelectedComponent(SoundSource);
+  ModifiedOutsideObjectInspector(
+    Format('Setup 3D Sound Emitter (%s -> %s)', [EmitterTransform.Name, SoundComp.Name]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowQuickSoundSetupDialog;
+var
+  Dialog: TForm;
+  LblUrl, LblVol, LblPitch, LblRefDist, LblMaxDist: TLabel;
+  EditUrl: TEdit;
+  SpinVol, SpinPitch, SpinRefDist, SpinMaxDist: TFloatSpinEdit;
+  CheckSpatial, CheckLoop, CheckStream: TCheckBox;
+  BottomPanel: TPanel;
+  BtnBrowse, BtnOk, BtnCancel: TButton;
+  OpenDlg: TCastleOpenDialog;
+begin
+  if (FDesignRoot = nil) or ((CurrentViewport = nil) and (not (FDesignRoot is TCastleTransform))) then
+  begin
+    ErrorBox('Open a 3D viewport or transform design before configuring a 3D Sound Emitter.');
+    Exit;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 3D Spatial Audio & Sound Emitter Setup';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 470;
+    Dialog.Height := 340;
+
+    LblUrl := TLabel.Create(Dialog);
+    LblUrl.Left := 16;
+    LblUrl.Top := 16;
+    LblUrl.Caption := 'Audio Clip URL (castle-data:/... .wav, .ogg, .mp3 - optional):';
+    LblUrl.Parent := Dialog;
+
+    EditUrl := TEdit.Create(Dialog);
+    EditUrl.Left := 16;
+    EditUrl.Top := 38;
+    EditUrl.Width := 434;
+    EditUrl.Text := '';
+    EditUrl.Parent := Dialog;
+
+    LblVol := TLabel.Create(Dialog);
+    LblVol.Left := 16;
+    LblVol.Top := 78;
+    LblVol.Caption := 'Sound Volume (0.00 .. 2.00):';
+    LblVol.Parent := Dialog;
+
+    SpinVol := TFloatSpinEdit.Create(Dialog);
+    SpinVol.Left := 320;
+    SpinVol.Top := 74;
+    SpinVol.Width := 110;
+    SpinVol.MinValue := 0.00;
+    SpinVol.MaxValue := 2.00;
+    SpinVol.Increment := 0.10;
+    SpinVol.DecimalPlaces := 2;
+    SpinVol.Value := 1.00;
+    SpinVol.Parent := Dialog;
+
+    LblPitch := TLabel.Create(Dialog);
+    LblPitch.Left := 16;
+    LblPitch.Top := 112;
+    LblPitch.Caption := 'Sound Pitch / Playback Speed (0.10 .. 4.00):';
+    LblPitch.Parent := Dialog;
+
+    SpinPitch := TFloatSpinEdit.Create(Dialog);
+    SpinPitch.Left := 320;
+    SpinPitch.Top := 108;
+    SpinPitch.Width := 110;
+    SpinPitch.MinValue := 0.10;
+    SpinPitch.MaxValue := 4.00;
+    SpinPitch.Increment := 0.05;
+    SpinPitch.DecimalPlaces := 2;
+    SpinPitch.Value := 1.00;
+    SpinPitch.Parent := Dialog;
+
+    LblRefDist := TLabel.Create(Dialog);
+    LblRefDist.Left := 16;
+    LblRefDist.Top := 146;
+    LblRefDist.Caption := 'Spatial Reference Distance (Full Volume Radius):';
+    LblRefDist.Parent := Dialog;
+
+    SpinRefDist := TFloatSpinEdit.Create(Dialog);
+    SpinRefDist.Left := 320;
+    SpinRefDist.Top := 142;
+    SpinRefDist.Width := 110;
+    SpinRefDist.MinValue := 0.10;
+    SpinRefDist.MaxValue := 1000.0;
+    SpinRefDist.Increment := 1.0;
+    SpinRefDist.DecimalPlaces := 1;
+    SpinRefDist.Value := 2.0;
+    SpinRefDist.Parent := Dialog;
+
+    LblMaxDist := TLabel.Create(Dialog);
+    LblMaxDist.Left := 16;
+    LblMaxDist.Top := 180;
+    LblMaxDist.Caption := 'Spatial Max Attenuation Distance:';
+    LblMaxDist.Parent := Dialog;
+
+    SpinMaxDist := TFloatSpinEdit.Create(Dialog);
+    SpinMaxDist.Left := 320;
+    SpinMaxDist.Top := 176;
+    SpinMaxDist.Width := 110;
+    SpinMaxDist.MinValue := 1.0;
+    SpinMaxDist.MaxValue := 50000.0;
+    SpinMaxDist.Increment := 10.0;
+    SpinMaxDist.DecimalPlaces := 1;
+    SpinMaxDist.Value := 50.0;
+    SpinMaxDist.Parent := Dialog;
+
+    CheckSpatial := TCheckBox.Create(Dialog);
+    CheckSpatial.Left := 16;
+    CheckSpatial.Top := 214;
+    CheckSpatial.Caption := '3D Spatialized Audio (Attenuate & Pan by 3D Listener Distance)';
+    CheckSpatial.Checked := true;
+    CheckSpatial.Parent := Dialog;
+
+    CheckLoop := TCheckBox.Create(Dialog);
+    CheckLoop.Left := 16;
+    CheckLoop.Top := 238;
+    CheckLoop.Caption := 'Auto-Play Looping Sound (SoundPlaying := true)';
+    CheckLoop.Checked := true;
+    CheckLoop.Parent := Dialog;
+
+    CheckStream := TCheckBox.Create(Dialog);
+    CheckStream.Left := 16;
+    CheckStream.Top := 262;
+    CheckStream.Caption := 'Stream Audio From Disk (Recommended for Ambient Loops & Music)';
+    CheckStream.Checked := false;
+    CheckStream.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnBrowse := TButton.Create(Dialog);
+    BtnBrowse.Caption := 'Browse Audio File...';
+    BtnBrowse.ModalResult := mrRetry;
+    BtnBrowse.AutoSize := true;
+    BtnBrowse.Align := alRight;
+    BtnBrowse.BorderSpacing.Around := 6;
+    BtnBrowse.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Create Sound & Source';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    while true do
+    begin
+      case Dialog.ShowModal of
+        mrRetry:
+          begin
+            OpenDlg := TCastleOpenDialog.Create(Self);
+            try
+              OpenDlg.Title := 'Select Sound File';
+              OpenDlg.Filter := 'Audio Files (*.wav;*.ogg;*.mp3)|*.wav;*.ogg;*.mp3|All Files (*.*)|*.*';
+              OpenDlg.AdviceDataDirectory := true;
+              if OpenDlg.Execute then
+                EditUrl.Text := OpenDlg.Url;
+            finally
+              FreeAndNil(OpenDlg);
+            end;
+          end;
+        mrOk:
+          begin
+            ApplyQuickSoundSetup(
+              EditUrl.Text,
+              CheckStream.Checked,
+              CheckSpatial.Checked,
+              CheckLoop.Checked,
+              SpinVol.Value,
+              SpinPitch.Value,
+              SpinRefDist.Value,
+              SpinMaxDist.Value);
+            Break;
+          end;
+        else
+          Break;
+      end;
+    end;
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemQuickSoundSetupClick(Sender: TObject);
+begin
+  ShowQuickSoundSetupDialog;
+end;
+
+procedure TDesignFrame.ApplyQuickPhysicsJoint(const JointKind: Integer;
+  const PinFirstStatic, ConnectedCollideFlag, BreakableFlag: Boolean;
+  const ParamA, ParamB: Single);
+var
+  Transforms: TComponentList;
+  I, CreatedJoints: Integer;
+  T, NextT: TCastleTransform;
+  Col: TCastleBoxCollider;
+  Body: TCastleRigidBody;
+  HingeJ: TCastleHingeJoint;
+  BallJ: TCastleBallJoint;
+  RopeJ: TCastleRopeJoint;
+  DistJ: TCastleDistanceJoint;
+  GrabJ: TCastleGrabJoint;
+  TwoBodyJ: TCastleAbstractTwoBodiesJoint;
+begin
+  if DesignOwner = nil then Exit;
+
+  Transforms := TComponentList.Create(false);
+  try
+    if (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0) then
+    begin
+      for I := 0 to TransformManipulate.SelectedCount - 1 do
+        if (TransformManipulate.Selected[I] <> nil) and
+           (not IsComponentLocked(TransformManipulate.Selected[I])) then
+          Transforms.Add(TransformManipulate.Selected[I]);
+    end else
+    if (CurrentTransform <> nil) and (not IsComponentLocked(CurrentTransform)) then
+      Transforms.Add(CurrentTransform);
+
+    if (JointKind <> 4) and (Transforms.Count < 2) then
+    begin
+      ErrorBox('Select at least 2 TCastleTransform objects in sequence to connect with a two-body physics joint (Hinge, Ball, Rope, or Distance).');
+      Exit;
+    end;
+    if Transforms.Count < 1 then
+    begin
+      ErrorBox('Select at least 1 TCastleTransform object to attach a Grab Joint.');
+      Exit;
+    end;
+
+    // Ensure every participating transform has a collider and a rigid body
+    for I := 0 to Transforms.Count - 1 do
+    begin
+      T := TCastleTransform(Transforms[I]);
+      if T.FindBehavior(TCastleCollider) = nil then
+      begin
+        Col := TCastleBoxCollider.Create(DesignOwner);
+        Col.Name := ProposeComponentName(TCastleBoxCollider, DesignOwner, T.Name + 'Collider');
+        Col.AutoSize := true;
+        T.AddBehavior(Col);
+      end;
+
+      Body := T.FindBehavior(TCastleRigidBody) as TCastleRigidBody;
+      if Body = nil then
+      begin
+        Body := TCastleRigidBody.Create(DesignOwner);
+        Body.Name := ProposeComponentName(TCastleRigidBody, DesignOwner, T.Name + 'Body');
+        T.AddBehavior(Body);
+      end;
+
+      if (JointKind <> 4) and (Transforms.Count >= 2) and PinFirstStatic then
+      begin
+        Body.Dynamic := (I > 0);
+        Body.Gravity := (I > 0);
+      end else
+      begin
+        Body.Dynamic := true;
+        Body.Gravity := true;
+      end;
+    end;
+
+    CreatedJoints := 0;
+    if JointKind = 4 then
+    begin
+      // TCastleGrabJoint on each selected transform
+      for I := 0 to Transforms.Count - 1 do
+      begin
+        T := TCastleTransform(Transforms[I]);
+        GrabJ := TCastleGrabJoint.Create(DesignOwner);
+        GrabJ.Name := ProposeComponentName(TCastleGrabJoint, DesignOwner, T.Name + 'GrabJoint');
+        GrabJ.TargetWorld := T.WorldTranslation;
+        GrabJ.FrequencyHz := Max(0.1, ParamA);
+        GrabJ.DampingRatio := Clamped(ParamB, 0.0, 10.0);
+        GrabJ.Breakable := BreakableFlag;
+        T.AddBehavior(GrabJ);
+        Inc(CreatedJoints);
+      end;
+    end else
+    begin
+      // Chain T[I] -> T[I + 1]
+      for I := 0 to Transforms.Count - 2 do
+      begin
+        T := TCastleTransform(Transforms[I]);
+        NextT := TCastleTransform(Transforms[I + 1]);
+        TwoBodyJ := nil;
+
+        case JointKind of
+          0: begin
+               HingeJ := TCastleHingeJoint.Create(DesignOwner);
+               HingeJ.Name := ProposeComponentName(TCastleHingeJoint, DesignOwner, T.Name + 'HingeJoint');
+               HingeJ.Axis := Vector3(0, 1, 0);
+               if ParamA > 0.0 then
+               begin
+                 HingeJ.AngleLimits := true;
+                 HingeJ.MinAngle := -DegToRad(Min(179.0, ParamA));
+                 HingeJ.MaxAngle := DegToRad(Min(179.0, ParamA));
+               end;
+               TwoBodyJ := HingeJ;
+             end;
+          1: begin
+               BallJ := TCastleBallJoint.Create(DesignOwner);
+               BallJ.Name := ProposeComponentName(TCastleBallJoint, DesignOwner, T.Name + 'BallJoint');
+               TwoBodyJ := BallJ;
+             end;
+          2: begin
+               RopeJ := TCastleRopeJoint.Create(DesignOwner);
+               RopeJ.Name := ProposeComponentName(TCastleRopeJoint, DesignOwner, T.Name + 'RopeJoint');
+               if ParamA > 0.0 then
+                 RopeJ.Distance := ParamA
+               else
+                 RopeJ.Distance := Max(0.25, PointsDistance(T.WorldTranslation, NextT.WorldTranslation) * 1.05);
+               TwoBodyJ := RopeJ;
+             end;
+          3: begin
+               DistJ := TCastleDistanceJoint.Create(DesignOwner);
+               DistJ.Name := ProposeComponentName(TCastleDistanceJoint, DesignOwner, T.Name + 'DistanceJoint');
+               DistJ.FrequencyHz := Max(0.1, ParamA);
+               DistJ.DampingRatio := Clamped(ParamB, 0.0, 10.0);
+               TwoBodyJ := DistJ;
+             end;
+        end;
+
+        if TwoBodyJ <> nil then
+        begin
+          T.AddBehavior(TwoBodyJ);
+          TwoBodyJ.Connected := NextT;
+          TwoBodyJ.ConnectedCollide := ConnectedCollideFlag;
+          TwoBodyJ.Breakable := BreakableFlag;
+          if BreakableFlag and (ParamB > 0.0) then
+          begin
+            TwoBodyJ.BreakThresholdForce := ParamB;
+            TwoBodyJ.BreakThresholdTorque := ParamB;
+          end;
+          Inc(CreatedJoints);
+        end;
+      end;
+    end;
+
+    ShowColliders := true;
+    UpdateColliders;
+    ShowAllJointsTools;
+    UpdateDesign;
+    SetSelected(Transforms);
+    ModifiedOutsideObjectInspector(
+      Format('Connect %d Physics Joint(s) Across %d Transform(s)', [CreatedJoints, Transforms.Count]),
+      ucHigh);
+  finally
+    FreeAndNil(Transforms);
+  end;
+end;
+
+procedure TDesignFrame.ShowQuickPhysicsJointDialog;
+var
+  Dialog: TForm;
+  LblJoint, LblParamA, LblParamB: TLabel;
+  ComboJoint: TComboBox;
+  SpinParamA, SpinParamB: TFloatSpinEdit;
+  CheckPinFirst, CheckCollide, CheckBreakable: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if (CurrentTransform = nil) and ((TransformManipulate = nil) or (TransformManipulate.SelectedCount = 0)) then
+  begin
+    ErrorBox('Select 2 or more 3D transforms (or 1+ for Grab Joint) to connect with physics joints.');
+    Exit;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 3D Physics Joint & Chain Connector';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 470;
+    Dialog.Height := 310;
+
+    LblJoint := TLabel.Create(Dialog);
+    LblJoint.Left := 16;
+    LblJoint.Top := 16;
+    LblJoint.Caption := 'Physics Constraint / Joint Type (Chains Selected T[0]->T[1]->...):';
+    LblJoint.Parent := Dialog;
+
+    ComboJoint := TComboBox.Create(Dialog);
+    ComboJoint.Left := 16;
+    ComboJoint.Top := 38;
+    ComboJoint.Width := 434;
+    ComboJoint.Style := csDropDownList;
+    ComboJoint.Items.Add('Hinge Joint (TCastleHingeJoint - Door / Pendulum / Axle)');
+    ComboJoint.Items.Add('Ball & Socket Joint (TCastleBallJoint - Chain Link / Ragdoll)');
+    ComboJoint.Items.Add('Rope Constraint (TCastleRopeJoint - Max Distance Tether)');
+    ComboJoint.Items.Add('Spring / Distance Joint (TCastleDistanceJoint - Elastic Suspension)');
+    ComboJoint.Items.Add('World Grab / Spring Joint (TCastleGrabJoint - Hold in World Space)');
+    ComboJoint.ItemIndex := 1;
+    ComboJoint.Parent := Dialog;
+
+    LblParamA := TLabel.Create(Dialog);
+    LblParamA.Left := 16;
+    LblParamA.Top := 82;
+    LblParamA.Caption := 'Angle Limit Deg / Rope Dist / Spring Frequency Hz (0 = Auto):';
+    LblParamA.Parent := Dialog;
+
+    SpinParamA := TFloatSpinEdit.Create(Dialog);
+    SpinParamA.Left := 340;
+    SpinParamA.Top := 78;
+    SpinParamA.Width := 110;
+    SpinParamA.MinValue := 0.0;
+    SpinParamA.MaxValue := 1000.0;
+    SpinParamA.Increment := 1.0;
+    SpinParamA.DecimalPlaces := 2;
+    SpinParamA.Value := 0.0;
+    SpinParamA.Parent := Dialog;
+
+    LblParamB := TLabel.Create(Dialog);
+    LblParamB.Left := 16;
+    LblParamB.Top := 118;
+    LblParamB.Caption := 'Spring Damping Ratio / Break Threshold Force:';
+    LblParamB.Parent := Dialog;
+
+    SpinParamB := TFloatSpinEdit.Create(Dialog);
+    SpinParamB.Left := 340;
+    SpinParamB.Top := 114;
+    SpinParamB.Width := 110;
+    SpinParamB.MinValue := 0.0;
+    SpinParamB.MaxValue := 100000.0;
+    SpinParamB.Increment := 0.5;
+    SpinParamB.DecimalPlaces := 2;
+    SpinParamB.Value := 0.70;
+    SpinParamB.Parent := Dialog;
+
+    CheckPinFirst := TCheckBox.Create(Dialog);
+    CheckPinFirst.Left := 16;
+    CheckPinFirst.Top := 156;
+    CheckPinFirst.Caption := 'Pin First Selected Transform as Static Anchor (Dynamic := false)';
+    CheckPinFirst.Checked := true;
+    CheckPinFirst.Parent := Dialog;
+
+    CheckCollide := TCheckBox.Create(Dialog);
+    CheckCollide.Left := 16;
+    CheckCollide.Top := 182;
+    CheckCollide.Caption := 'Connected Bodies Collide With Each Other (ConnectedCollide)';
+    CheckCollide.Checked := false;
+    CheckCollide.Parent := Dialog;
+
+    CheckBreakable := TCheckBox.Create(Dialog);
+    CheckBreakable.Left := 16;
+    CheckBreakable.Top := 208;
+    CheckBreakable.Caption := 'Breakable Joint Under High Force / Torque';
+    CheckBreakable.Checked := false;
+    CheckBreakable.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Connect Physics Joint(s)';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyQuickPhysicsJoint(
+        ComboJoint.ItemIndex,
+        CheckPinFirst.Checked,
+        CheckCollide.Checked,
+        CheckBreakable.Checked,
+        SpinParamA.Value,
+        SpinParamB.Value);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemQuickPhysicsJointClick(Sender: TObject);
+begin
+  ShowQuickPhysicsJointDialog;
+end;
+
+procedure TDesignFrame.ApplyRenderingOptimization(const CastShadowsFlag, ReceiveShadowsFlag,
+  ShapeCullingFlag, SceneCullingFlag, ManifoldFlag: Boolean;
+  const TransformOptIndex: Integer; const DistCulling: Single;
+  const EntireDesign: Boolean);
+var
+  ModifiedTransforms, ModifiedScenes: Integer;
+
+  procedure OptimizeNode(const C: TComponent);
+  var
+    ChildIdx: Integer;
+    T: TCastleTransform;
+    Sc: TCastleScene;
+    UI: TCastleUserInterface;
+  begin
+    if (C = nil) or (not Selectable(C)) then Exit;
+
+    if (C is TCastleTransform) and (not IsComponentLocked(C)) and (C <> FDesignRoot) then
+    begin
+      T := TCastleTransform(C);
+      T.CastShadows := CastShadowsFlag;
+      Inc(ModifiedTransforms);
+
+      if T is TCastleScene then
+      begin
+        Sc := TCastleScene(T);
+        Sc.ReceiveShadowVolumes := ReceiveShadowsFlag;
+        Sc.ShapeFrustumCulling := ShapeCullingFlag;
+        Sc.SceneFrustumCulling := SceneCullingFlag;
+        Sc.RenderOptions.WholeSceneManifold := ManifoldFlag;
+        Sc.DistanceCulling := Max(0.0, DistCulling);
+        case TransformOptIndex of
+          1: Sc.TransformOptimization := toStatic;
+          2: Sc.TransformOptimization := toDynamic;
+          else Sc.TransformOptimization := toAutomatic;
+        end;
+        Inc(ModifiedScenes);
+      end;
+    end;
+
+    if C is TCastleTransform then
+    begin
+      T := TCastleTransform(C);
+      for ChildIdx := 0 to T.Count - 1 do
+        OptimizeNode(T[ChildIdx]);
+    end else
+    if C is TCastleUserInterface then
+    begin
+      UI := TCastleUserInterface(C);
+      if UI is TCastleViewport then
+        OptimizeNode(TCastleViewport(UI).Items);
+      for ChildIdx := 0 to UI.ControlsCount - 1 do
+        OptimizeNode(UI.Controls[ChildIdx]);
+    end;
+  end;
+
+var
+  SelectedList: TComponentList;
+  SelectedCount, I: Integer;
+begin
+  if FDesignRoot = nil then Exit;
+
+  ModifiedTransforms := 0;
+  ModifiedScenes := 0;
+  GetSelected(SelectedList, SelectedCount, false);
+  try
+    if (not EntireDesign) and (SelectedList <> nil) and (SelectedList.Count > 0) and
+       (not ((SelectedList.Count = 1) and (SelectedList[0] = FDesignRoot))) then
+    begin
+      for I := 0 to SelectedList.Count - 1 do
+        OptimizeNode(SelectedList[I]);
+    end else
+      OptimizeNode(FDesignRoot);
+
+    if ModifiedTransforms > 0 then
+    begin
+      UpdateDesign;
+      if (SelectedList <> nil) and (SelectedList.Count > 0) then
+        SetSelected(SelectedList);
+      ModifiedOutsideObjectInspector(
+        Format('Optimize Rendering on %d Transform(s) (%d Scene(s))',
+          [ModifiedTransforms, ModifiedScenes]),
+        ucHigh);
+    end else
+      InfoBox('No 3D transforms or scenes found in the target scope to optimize.');
+  finally
+    FreeAndNil(SelectedList);
+  end;
+end;
+
+procedure TDesignFrame.ShowRenderingOptimizerDialog;
+var
+  Dialog: TForm;
+  LblOpt, LblDist: TLabel;
+  ComboOpt: TComboBox;
+  SpinDist: TFloatSpinEdit;
+  CheckCastShadows, CheckReceiveShadows, CheckShapeCull, CheckSceneCull,
+    CheckManifold, CheckEntireDesign: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if FDesignRoot = nil then Exit;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Scene Shadow, Culling & Rendering Optimizer';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 480;
+    Dialog.Height := 340;
+
+    LblOpt := TLabel.Create(Dialog);
+    LblOpt.Left := 16;
+    LblOpt.Top := 16;
+    LblOpt.Caption := 'Scene Transform Shader Optimization (TCastleScene.TransformOptimization):';
+    LblOpt.Parent := Dialog;
+
+    ComboOpt := TComboBox.Create(Dialog);
+    ComboOpt.Left := 16;
+    ComboOpt.Top := 38;
+    ComboOpt.Width := 444;
+    ComboOpt.Style := csDropDownList;
+    ComboOpt.Items.Add('Automatic Detection (toAutomatic - Recommended Default)');
+    ComboOpt.Items.Add('Static Level / Environment Geometry (toStatic - Faster Light Shaders)');
+    ComboOpt.Items.Add('Dynamic Moving Actor / Prop (toDynamic - Avoid Shader Rebuilds)');
+    ComboOpt.ItemIndex := 0;
+    ComboOpt.Parent := Dialog;
+
+    LblDist := TLabel.Create(Dialog);
+    LblDist.Left := 16;
+    LblDist.Top := 82;
+    LblDist.Caption := 'Distance Culling Far Threshold (0 = Disabled / Infinite):';
+    LblDist.Parent := Dialog;
+
+    SpinDist := TFloatSpinEdit.Create(Dialog);
+    SpinDist.Left := 340;
+    SpinDist.Top := 78;
+    SpinDist.Width := 110;
+    SpinDist.MinValue := 0.0;
+    SpinDist.MaxValue := 50000.0;
+    SpinDist.Increment := 10.0;
+    SpinDist.DecimalPlaces := 1;
+    SpinDist.Value := 0.0;
+    SpinDist.Parent := Dialog;
+
+    CheckCastShadows := TCheckBox.Create(Dialog);
+    CheckCastShadows.Left := 16;
+    CheckCastShadows.Top := 118;
+    CheckCastShadows.Caption := 'Cast Shadows (TCastleTransform.CastShadows)';
+    CheckCastShadows.Checked := true;
+    CheckCastShadows.Parent := Dialog;
+
+    CheckReceiveShadows := TCheckBox.Create(Dialog);
+    CheckReceiveShadows.Left := 16;
+    CheckReceiveShadows.Top := 142;
+    CheckReceiveShadows.Caption := 'Receive Shadow Volumes (TCastleScene.ReceiveShadowVolumes)';
+    CheckReceiveShadows.Checked := true;
+    CheckReceiveShadows.Parent := Dialog;
+
+    CheckShapeCull := TCheckBox.Create(Dialog);
+    CheckShapeCull.Left := 16;
+    CheckShapeCull.Top := 166;
+    CheckShapeCull.Caption := 'Per-Shape Frustum Culling (TCastleScene.ShapeFrustumCulling)';
+    CheckShapeCull.Checked := true;
+    CheckShapeCull.Parent := Dialog;
+
+    CheckSceneCull := TCheckBox.Create(Dialog);
+    CheckSceneCull.Left := 16;
+    CheckSceneCull.Top := 190;
+    CheckSceneCull.Caption := 'Whole-Scene Frustum Culling (TCastleScene.SceneFrustumCulling)';
+    CheckSceneCull.Checked := true;
+    CheckSceneCull.Parent := Dialog;
+
+    CheckManifold := TCheckBox.Create(Dialog);
+    CheckManifold.Left := 16;
+    CheckManifold.Top := 214;
+    CheckManifold.Caption := 'Force WholeSceneManifold for Shadow Volumes (RenderOptions.WholeSceneManifold)';
+    CheckManifold.Checked := false;
+    CheckManifold.Parent := Dialog;
+
+    CheckEntireDesign := TCheckBox.Create(Dialog);
+    CheckEntireDesign.Left := 16;
+    CheckEntireDesign.Top := 242;
+    CheckEntireDesign.Caption := 'Apply to Entire Design Hierarchy (Uncheck for Selected Subtree Only)';
+    CheckEntireDesign.Checked := (ControlsTree.SelectionCount <= 1);
+    CheckEntireDesign.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Apply Rendering Optimization';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyRenderingOptimization(
+        CheckCastShadows.Checked,
+        CheckReceiveShadows.Checked,
+        CheckShapeCull.Checked,
+        CheckSceneCull.Checked,
+        CheckManifold.Checked,
+        ComboOpt.ItemIndex,
+        SpinDist.Value,
+        CheckEntireDesign.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemRenderingOptimizerClick(Sender: TObject);
+begin
+  ShowRenderingOptimizerDialog;
+end;
+
+procedure TDesignFrame.ShowBookmarksAndSelectionSetsDialog;
+var
+  Dialog: TForm;
+  ListEntries: TListBox;
+  BottomPanel: TPanel;
+  BtnRecall, BtnAddSelect, BtnSaveSlot, BtnClearSlot, BtnClose: TButton;
+
+  procedure PopulateEntries;
+  var
+    Slot, TagIdx, I, ValidCount: Integer;
+    PreviewNames: String;
+    C: TComponent;
+  begin
+    ListEntries.Items.BeginUpdate;
+    try
+      ListEntries.Items.Clear;
+      // 0..9: Selection Sets 0..9
+      for Slot := 0 to 9 do
+      begin
+        ValidCount := 0;
+        PreviewNames := '';
+        if FSelectionSets[Slot] <> nil then
+          for I := 0 to FSelectionSets[Slot].Count - 1 do
+          begin
+            C := DesignOwner.FindComponent(FSelectionSets[Slot][I]);
+            if (C <> nil) and Selectable(C) then
+            begin
+              Inc(ValidCount);
+              if PreviewNames <> '' then
+                PreviewNames := PreviewNames + ', ';
+              if Length(PreviewNames) < 48 then
+                PreviewNames := PreviewNames + C.Name;
+            end;
+          end;
+        if ValidCount > 0 then
+          ListEntries.Items.AddObject(
+            Format('[Selection Set #%d]  %d component(s): %s', [Slot, ValidCount, PreviewNames]),
+            TObject(PtrInt(Slot)))
+        else
+          ListEntries.Items.AddObject(
+            Format('[Selection Set #%d]  (empty - Ctrl+Alt+%d to save)', [Slot, Slot]),
+            TObject(PtrInt(Slot)));
+      end;
+
+      // 10..19: Camera Bookmarks 0..9
+      for Slot := 0 to 9 do
+      begin
+        if FCameraBookmarks[Slot].Valid then
+          ListEntries.Items.AddObject(
+            Format('[Camera Bookmark #%d]  Pos (%.1f, %.1f, %.1f)  Dir (%.2f, %.2f, %.2f)',
+              [Slot,
+               FCameraBookmarks[Slot].Pos.X, FCameraBookmarks[Slot].Pos.Y, FCameraBookmarks[Slot].Pos.Z,
+               FCameraBookmarks[Slot].Dir.X, FCameraBookmarks[Slot].Dir.Y, FCameraBookmarks[Slot].Dir.Z]),
+            TObject(PtrInt(10 + Slot)))
+        else
+          ListEntries.Items.AddObject(
+            Format('[Camera Bookmark #%d]  (empty - Ctrl+%d to save view)', [Slot, Slot]),
+            TObject(PtrInt(10 + Slot)));
+      end;
+
+      // 20: Favorites
+      ValidCount := 0;
+      if FFavoriteComponents <> nil then
+        ValidCount := FFavoriteComponents.Count;
+      ListEntries.Items.AddObject(
+        Format('[★ Favorite Components]  %d bookmarked component(s)', [ValidCount]),
+        TObject(PtrInt(20)));
+
+      // 21..25: Color Tags 1..5
+      for TagIdx := 1 to 5 do
+      begin
+        ValidCount := 0;
+        if FComponentColorTags[TagIdx] <> nil then
+          ValidCount := FComponentColorTags[TagIdx].Count;
+        case TagIdx of
+          1: PreviewNames := 'Red';
+          2: PreviewNames := 'Gold';
+          3: PreviewNames := 'Green';
+          4: PreviewNames := 'Blue';
+          else PreviewNames := 'Purple';
+        end;
+        ListEntries.Items.AddObject(
+          Format('[Color Tag #%d: %s]  %d tagged component(s)',
+            [TagIdx, PreviewNames, ValidCount]),
+          TObject(PtrInt(20 + TagIdx)));
+      end;
+
+      // 26: Annotated [#Note] components
+      ValidCount := 0;
+      if FComponentNotes <> nil then
+        ValidCount := FComponentNotes.Count;
+      ListEntries.Items.AddObject(
+        Format('[# Annotated Components]  %d component(s) with notes', [ValidCount]),
+        TObject(PtrInt(26)));
+    finally
+      ListEntries.Items.EndUpdate;
+    end;
+    if ListEntries.Items.Count > 0 then
+      ListEntries.ItemIndex := 0;
+  end;
+
+  procedure SelectTagOrNoteGroup(const Code: Integer; const Additive: Boolean);
+  var
+    List, CurSel: TComponentList;
+    CurCount, I, TagIdx: Integer;
+    C: TComponent;
+  begin
+    List := TComponentList.Create(false);
+    try
+      if Additive then
+      begin
+        GetSelected(CurSel, CurCount, false);
+        try
+          if CurSel <> nil then
+            for I := 0 to CurSel.Count - 1 do
+              if List.IndexOf(CurSel[I]) = -1 then
+                List.Add(CurSel[I]);
+        finally
+          FreeAndNil(CurSel);
+        end;
+      end;
+
+      if Code = 20 then
+      begin
+        if FFavoriteComponents <> nil then
+          for I := 0 to FFavoriteComponents.Count - 1 do
+            if Selectable(FFavoriteComponents[I]) and (List.IndexOf(FFavoriteComponents[I]) = -1) then
+              List.Add(FFavoriteComponents[I]);
+      end else
+      if (Code >= 21) and (Code <= 25) then
+      begin
+        TagIdx := Code - 20;
+        if FComponentColorTags[TagIdx] <> nil then
+          for I := 0 to FComponentColorTags[TagIdx].Count - 1 do
+            if Selectable(FComponentColorTags[TagIdx][I]) and (List.IndexOf(FComponentColorTags[TagIdx][I]) = -1) then
+              List.Add(FComponentColorTags[TagIdx][I]);
+      end else
+      if (Code = 26) and (FComponentNotes <> nil) and (DesignOwner <> nil) then
+      begin
+        for I := 0 to FComponentNotes.Count - 1 do
+        begin
+          C := DesignOwner.FindComponent(FComponentNotes.Names[I]);
+          if (C <> nil) and Selectable(C) and (List.IndexOf(C) = -1) then
+            List.Add(C);
+        end;
+      end;
+
+      if List.Count > 0 then
+        SetSelected(List)
+      else
+        InfoBox('No matching components in the chosen group.');
+    finally
+      FreeAndNil(List);
+    end;
+  end;
+
+var
+  ModalRes, EntryCode: Integer;
+begin
+  if (FDesignRoot = nil) or (DesignOwner = nil) then Exit;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Bookmarks, Selection Sets & Tagged Groups Manager';
+    Dialog.Position := poMainFormCenter;
+    Dialog.Width := 680;
+    Dialog.Height := 480;
+
+    ListEntries := TListBox.Create(Dialog);
+    ListEntries.Align := alClient;
+    ListEntries.BorderSpacing.Around := 8;
+    ListEntries.Font.Name := 'Monospace';
+    ListEntries.Parent := Dialog;
+
+    PopulateEntries;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnClose := TButton.Create(Dialog);
+    BtnClose.Caption := 'Close';
+    BtnClose.Cancel := true;
+    BtnClose.ModalResult := mrCancel;
+    BtnClose.Align := alRight;
+    BtnClose.BorderSpacing.Around := 6;
+    BtnClose.Parent := BottomPanel;
+
+    BtnClearSlot := TButton.Create(Dialog);
+    BtnClearSlot.Caption := 'Clear Highlighted Slot';
+    BtnClearSlot.ModalResult := mrAbort;
+    BtnClearSlot.AutoSize := true;
+    BtnClearSlot.Align := alRight;
+    BtnClearSlot.BorderSpacing.Around := 6;
+    BtnClearSlot.Parent := BottomPanel;
+
+    BtnSaveSlot := TButton.Create(Dialog);
+    BtnSaveSlot.Caption := 'Save Current to Slot';
+    BtnSaveSlot.ModalResult := mrRetry;
+    BtnSaveSlot.AutoSize := true;
+    BtnSaveSlot.Align := alRight;
+    BtnSaveSlot.BorderSpacing.Around := 6;
+    BtnSaveSlot.Parent := BottomPanel;
+
+    BtnAddSelect := TButton.Create(Dialog);
+    BtnAddSelect.Caption := 'Add Slot to Selection';
+    BtnAddSelect.ModalResult := mrYes;
+    BtnAddSelect.AutoSize := true;
+    BtnAddSelect.Align := alRight;
+    BtnAddSelect.BorderSpacing.Around := 6;
+    BtnAddSelect.Parent := BottomPanel;
+
+    BtnRecall := TButton.Create(Dialog);
+    BtnRecall.Caption := 'Recall / Jump to Slot';
+    BtnRecall.Default := true;
+    BtnRecall.ModalResult := mrOk;
+    BtnRecall.AutoSize := true;
+    BtnRecall.Align := alRight;
+    BtnRecall.BorderSpacing.Around := 6;
+    BtnRecall.Parent := BottomPanel;
+
+    while true do
+    begin
+      ModalRes := Dialog.ShowModal;
+      if (ModalRes = mrCancel) or (ListEntries.ItemIndex < 0) then
+        Break;
+
+      EntryCode := PtrInt(ListEntries.Items.Objects[ListEntries.ItemIndex]);
+      case ModalRes of
+        mrOk:
+          begin
+            if (EntryCode >= 0) and (EntryCode <= 9) then
+              RecallSelectionSet(EntryCode, false)
+            else if (EntryCode >= 10) and (EntryCode <= 19) then
+              RecallCameraBookmark(EntryCode - 10)
+            else
+              SelectTagOrNoteGroup(EntryCode, false);
+            Break;
+          end;
+        mrYes:
+          begin
+            if (EntryCode >= 0) and (EntryCode <= 9) then
+              RecallSelectionSet(EntryCode, true)
+            else if (EntryCode >= 10) and (EntryCode <= 19) then
+              RecallCameraBookmark(EntryCode - 10)
+            else
+              SelectTagOrNoteGroup(EntryCode, true);
+            Break;
+          end;
+        mrRetry:
+          begin
+            if (EntryCode >= 0) and (EntryCode <= 9) then
+              SaveSelectionSet(EntryCode)
+            else if (EntryCode >= 10) and (EntryCode <= 19) then
+              SaveCameraBookmark(EntryCode - 10);
+            PopulateEntries;
+            ListEntries.ItemIndex := EntryCode;
+          end;
+        mrAbort:
+          begin
+            if (EntryCode >= 0) and (EntryCode <= 9) and (FSelectionSets[EntryCode] <> nil) then
+              FSelectionSets[EntryCode].Clear
+            else if (EntryCode >= 10) and (EntryCode <= 19) then
+              FCameraBookmarks[EntryCode - 10].Valid := false;
+            PopulateEntries;
+            ListEntries.ItemIndex := EntryCode;
+          end;
+        else
+          Break;
+      end;
+    end;
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemBookmarksManagerClick(Sender: TObject);
+begin
+  ShowBookmarksAndSelectionSetsDialog;
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -35666,6 +37226,19 @@ begin
     MenuTreeViewItemAnimationController.Enabled := FDesignRoot <> nil;
   if MenuTreeViewItemReplaceWithDesignFile <> nil then
     MenuTreeViewItemReplaceWithDesignFile.Enabled := ControlsTree.SelectionCount >= 1;
+  if MenuTreeViewItemBlockoutKit <> nil then
+    MenuTreeViewItemBlockoutKit.Enabled :=
+      (CurrentViewport <> nil) or (FDesignRoot is TCastleTransform);
+  if MenuTreeViewItemQuickSoundSetup <> nil then
+    MenuTreeViewItemQuickSoundSetup.Enabled :=
+      (CurrentViewport <> nil) or (FDesignRoot is TCastleTransform);
+  if MenuTreeViewItemQuickPhysicsJoint <> nil then
+    MenuTreeViewItemQuickPhysicsJoint.Enabled :=
+      (CurrentTransform <> nil) or ((TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0));
+  if MenuTreeViewItemRenderingOptimizer <> nil then
+    MenuTreeViewItemRenderingOptimizer.Enabled := FDesignRoot <> nil;
+  if MenuTreeViewItemBookmarksManager <> nil then
+    MenuTreeViewItemBookmarksManager.Enabled := FDesignRoot <> nil;
   if MenuTreeViewItemGroupSelected <> nil then
     MenuTreeViewItemGroupSelected.Enabled := (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0);
   if MenuTreeViewItemUngroupSelected <> nil then

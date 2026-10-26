@@ -1300,11 +1300,36 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Implemented `TDesignFrame.ReplaceSelectedWithDesignFile` and added **`Replace Selected With Sub-Design / 3D Model File...`** (`MenuTreeViewItemReplaceWithDesignFile`) in `MenuTreeView`.
   - Replaces selected `TCastleTransform` or `TCastleUserInterface` components in-place with a chosen `.castle-transform` (`TCastleTransformDesign`), `.gltf`/`.glb`/`.x3d`/`.obj` (`TCastleScene`), or `.castle-user-interface` (`TCastleDesign`) file while preserving parent hierarchy, sibling order, and local 3D transforms or 2D UI anchors/bounds.
 
+### Phase 207: Quick 3D Level Blockout / Architectural Kit Generator (`ShowQuickBlockoutKitDialog` / `ApplyQuickBlockoutKit`)
+- [x] **207.1. Multi-Piece Architectural Prototyping & Auto-Collider Generator (`TDesignFrame.ShowQuickBlockoutKitDialog` / `TDesignFrame.ApplyQuickBlockoutKit`)**
+  - Implemented `TDesignFrame.ShowQuickBlockoutKitDialog` and `TDesignFrame.ApplyQuickBlockoutKit` (`MenuTreeViewItemBlockoutKit` in `MenuTreeView`).
+  - Generates multi-primitive 3D architectural assemblies inside a parent `TCastleTransform` group centered at the active selection or origin across 5 presets (**Staircase / Steps Ramp**, **Walled Room Enclosure with Front Doorway & Header**, **Archway / Portal Frame**, **Colonnade / Pillar Corridor**, and **Multi-Tier Arena Platforms**) with optional auto-sized static `TCastleBoxCollider` + `TCastleRigidBody` behaviors (`Shift`-click spawns an 8-step Staircase immediately).
+
+### Phase 208: Quick 3D Spatial Audio & Sound Emitter Setup (`ShowQuickSoundSetupDialog` / `ApplyQuickSoundSetup`)
+- [x] **208.1. One-Click `TCastleSound` + `TCastleSoundSource` Spatial Emitter Wizard (`TDesignFrame.ShowQuickSoundSetupDialog` / `TDesignFrame.ApplyQuickSoundSetup`)**
+  - Implemented `TDesignFrame.ShowQuickSoundSetupDialog` and `TDesignFrame.ApplyQuickSoundSetup` (`MenuTreeViewItemQuickSoundSetup` in `MenuTreeView`).
+  - Creates a non-visual `TCastleSound` component (with browsable `.wav`/`.ogg`/`.mp3` `Url`, `Stream`, `Volume`, `Pitch`, `ReferenceDistance`, and `MaxDistance`), attaches a `TCastleSoundSource` behavior to the selected `TCastleTransform` (or spawns a new `SoundEmitter` transform), and binds `SoundSource.Sound := SoundComp` with `Spatial` and `SoundPlaying` configured.
+
+### Phase 209: Quick 3D Physics Joint & Chain Connector (`ShowQuickPhysicsJointDialog` / `ApplyQuickPhysicsJoint`)
+- [x] **209.1. Multi-Body Physics Constraint & Chain Builder (`TDesignFrame.ShowQuickPhysicsJointDialog` / `TDesignFrame.ApplyQuickPhysicsJoint`)**
+  - Implemented `TDesignFrame.ShowQuickPhysicsJointDialog` and `TDesignFrame.ApplyQuickPhysicsJoint` (`MenuTreeViewItemQuickPhysicsJoint` in `MenuTreeView`).
+  - Connects 2+ selected `TCastleTransform` objects in sequence (`T[0] -> T[1] -> ... -> T[N-1]`) using `TCastleHingeJoint`, `TCastleBallJoint`, `TCastleRopeJoint`, `TCastleDistanceJoint`, or attaches `TCastleGrabJoint` to 1+ transforms, automatically ensuring every transform has a `TCastleCollider` and `TCastleRigidBody` (optionally pinning `T[0]` as a static anchor) and enabling joint gizmos.
+
+### Phase 210: Scene Shadow, Culling & Rendering Optimizer Dialog (`ShowRenderingOptimizerDialog` / `ApplyRenderingOptimization`)
+- [x] **210.1. Bulk Shadow Volume, Frustum/Distance Culling & Shader Optimization Matrix (`TDesignFrame.ShowRenderingOptimizerDialog` / `TDesignFrame.ApplyRenderingOptimization`)**
+  - Implemented `TDesignFrame.ShowRenderingOptimizerDialog` and `TDesignFrame.ApplyRenderingOptimization` (`MenuTreeViewItemRenderingOptimizer` in `MenuTreeView`).
+  - Bulk-configures `TCastleTransform.CastShadows`, `TCastleScene.ReceiveShadowVolumes`, `ShapeFrustumCulling`, `SceneFrustumCulling`, `RenderOptions.WholeSceneManifold`, `DistanceCulling`, and `TransformOptimization` (`toAutomatic`, `toStatic`, `toDynamic`) across the selected subtree or entire design.
+
+### Phase 211: Bookmarks, Selection Sets & Tagged Groups Manager Dialog (`ShowBookmarksAndSelectionSetsDialog` / `MenuTreeViewItemBookmarksManager`)
+- [x] **211.1. Unified Selection Sets (`0..9`), Camera Bookmarks (`0..9`), Favorites & Color-Tag Manager (`TDesignFrame.ShowBookmarksAndSelectionSetsDialog`)**
+  - Implemented `TDesignFrame.ShowBookmarksAndSelectionSetsDialog` and added **`Bookmarks, Selection Sets & Tagged Groups Manager...`** (`MenuTreeViewItemBookmarksManager`) in `MenuTreeView`.
+  - Displays all 10 Selection Sets (`0..9`), all 10 Viewport Camera Bookmarks (`0..9`), Favorite components (`[★]`), Color-Tag groups (`Red`, `Gold`, `Green`, `Blue`, `Purple`), and Annotated (`[#Note]`) components with one-click **Recall / Jump to Slot**, **Add Slot to Selection**, **Save Current to Slot**, and **Clear Highlighted Slot** actions.
+
 ---
 
-## Roadmap Completion Status (Phases 1–206)
+## Roadmap Completion Status (Phases 1–211)
 
-All **206 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **211 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 
