@@ -599,6 +599,12 @@ type
       MenuTreeViewItemHierarchySanitizer: TMenuItem;
       MenuTreeViewItemExportHierarchyReport: TMenuItem;
       MenuTreeViewItemQuickHudElements: TMenuItem;
+      MenuTreeViewItemQuickTerrainGenerator: TMenuItem;
+      MenuTreeViewItemLivingAiSetup: TMenuItem;
+      MenuTreeViewItemGameScreenTemplate: TMenuItem;
+      MenuTreeViewItemMultiViewportSetup: TMenuItem;
+      MenuTreeViewItemComponentPresets: TMenuItem;
+      FComponentPresets: TStringList;
       FComponentNotes: TStringList;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
@@ -886,6 +892,11 @@ type
     procedure MenuTreeViewItemHierarchySanitizerClick(Sender: TObject);
     procedure MenuTreeViewItemExportHierarchyReportClick(Sender: TObject);
     procedure MenuTreeViewItemQuickHudElementsClick(Sender: TObject);
+    procedure MenuTreeViewItemQuickTerrainGeneratorClick(Sender: TObject);
+    procedure MenuTreeViewItemLivingAiSetupClick(Sender: TObject);
+    procedure MenuTreeViewItemGameScreenTemplateClick(Sender: TObject);
+    procedure MenuTreeViewItemMultiViewportSetupClick(Sender: TObject);
+    procedure MenuTreeViewItemComponentPresetsClick(Sender: TObject);
     procedure MenuTreeViewItemGroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemUngroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemArrayDuplicateClick(Sender: TObject);
@@ -2133,6 +2144,23 @@ type
     procedure ApplyQuickHudElements(const HudPreset, ColorPreset: Integer;
       const BarWidth, BarHeight: Single);
     procedure ShowQuickHudElementsDialog;
+    procedure ApplyQuickTerrainGenerator(const TerrainPreset: Integer;
+      const TerrainSize, AmplitudeVal, FrequencyVal: Single;
+      const SubdivCount, SeedVal: Integer; const HeightmapUrl: String;
+      const AddStaticCollider: Boolean);
+    procedure ShowQuickTerrainGeneratorDialog;
+    procedure ApplyLivingAiBehavior(const RolePreset: Integer;
+      const MaxLifeVal, MoveSpeedVal, AttackDistVal, SmellDistVal: Single;
+      const AnimIdle, AnimMove, AnimAttack, AnimDie: String;
+      const LinkPrimaryAsEnemy: Boolean);
+    procedure ShowLivingAiBehaviorDialog;
+    procedure ApplyQuickGameScreenTemplate(const ScreenPreset, ThemePreset: Integer;
+      const ScreenTitle: String);
+    procedure ShowQuickGameScreenTemplateDialog;
+    procedure ApplyMultiViewportSetup(const LayoutPreset: Integer;
+      const OverlayWidth, OverlayHeight, CamHeight: Single);
+    procedure ShowMultiViewportSetupDialog;
+    procedure ShowComponentPresetDialog;
     procedure SaveCameraBookmark(const Slot: Integer);
     procedure RecallCameraBookmark(const Slot: Integer);
     procedure AdjustCameraSpeed(const Factor: Single);
@@ -2193,7 +2221,7 @@ uses
   CastleLog, CastleProjection, CastleQuaternions, CastleStringUtils, CastleTimeUtils,
   CastleUriUtils, X3DLoad, CastleFilesUtils, CastleInternalPhysicsVisualization,
   CastleInternalUrlUtils, CastleInternalFileMonitor, X3DNodes, CastleSoundEngine,
-  CastleBehaviors, CastleThirdPersonNavigation,
+  CastleBehaviors, CastleThirdPersonNavigation, CastleTerrain, CastleLivingBehaviors,
   { Editor units }
   EditorRegisterAllComponents,
   FormProject, CastleComponentEditorDesigner;
@@ -4479,6 +4507,7 @@ begin
   FLockedComponents := TComponentList.Create(false);
   FFavoriteComponents := TComponentList.Create(false);
   FComponentNotes := TStringList.Create;
+  FComponentPresets := TStringList.Create;
   for I := 1 to 5 do
     FComponentColorTags[I] := TComponentList.Create(false);
   for I := 0 to 9 do
@@ -6856,6 +6885,31 @@ begin
   MenuTreeViewItemQuickHudElements.OnClick := @MenuTreeViewItemQuickHudElementsClick;
   MenuTreeView.Items.Add(MenuTreeViewItemQuickHudElements);
 
+  MenuTreeViewItemQuickTerrainGenerator := TMenuItem.Create(Self);
+  MenuTreeViewItemQuickTerrainGenerator.Caption := 'Quick 3D Procedural & Heightmap Terrain Generator... (Shift: Rolling Hills)';
+  MenuTreeViewItemQuickTerrainGenerator.OnClick := @MenuTreeViewItemQuickTerrainGeneratorClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemQuickTerrainGenerator);
+
+  MenuTreeViewItemLivingAiSetup := TMenuItem.Create(Self);
+  MenuTreeViewItemLivingAiSetup.Caption := 'Quick 3D Living Creature & AI Combat Behavior Setup... (Shift: Melee Enemy)';
+  MenuTreeViewItemLivingAiSetup.OnClick := @MenuTreeViewItemLivingAiSetupClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemLivingAiSetup);
+
+  MenuTreeViewItemGameScreenTemplate := TMenuItem.Create(Self);
+  MenuTreeViewItemGameScreenTemplate.Caption := 'Quick 2D Full-Screen Game Menu & Dialogue Screen Generator... (Shift: Main Menu)';
+  MenuTreeViewItemGameScreenTemplate.OnClick := @MenuTreeViewItemGameScreenTemplateClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemGameScreenTemplate);
+
+  MenuTreeViewItemMultiViewportSetup := TMenuItem.Create(Self);
+  MenuTreeViewItemMultiViewportSetup.Caption := 'Multi-Viewport PiP, 3D Minimap & Split-Screen Camera Rig...';
+  MenuTreeViewItemMultiViewportSetup.OnClick := @MenuTreeViewItemMultiViewportSetupClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemMultiViewportSetup);
+
+  MenuTreeViewItemComponentPresets := TMenuItem.Create(Self);
+  MenuTreeViewItemComponentPresets.Caption := 'Component Property Template / Preset Manager...';
+  MenuTreeViewItemComponentPresets.OnClick := @MenuTreeViewItemComponentPresetsClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemComponentPresets);
+
   MenuTreeViewItemGroupSelected := TMenuItem.Create(Self);
   MenuTreeViewItemGroupSelected.Caption := 'Group Selected Under New Transform (Ctrl+G)';
   MenuTreeViewItemGroupSelected.OnClick := @MenuTreeViewItemGroupSelectedClick;
@@ -7208,6 +7262,7 @@ begin
   FreeAndNil(FLockedComponents);
   FreeAndNil(FFavoriteComponents);
   FreeAndNil(FComponentNotes);
+  FreeAndNil(FComponentPresets);
 
   if CollectionPropertyEditorForm <> nil then
   begin
@@ -39504,6 +39559,1659 @@ begin
     ShowQuickHudElementsDialog;
 end;
 
+procedure TDesignFrame.ApplyQuickTerrainGenerator(const TerrainPreset: Integer;
+  const TerrainSize, AmplitudeVal, FrequencyVal: Single;
+  const SubdivCount, SeedVal: Integer; const HeightmapUrl: String;
+  const AddStaticCollider: Boolean);
+var
+  ParentT: TCastleTransform;
+  TerrainComp: TCastleTerrain;
+  NoiseComp: TCastleTerrainNoise;
+  ImgComp: TCastleTerrainImage;
+  MeshCol: TCastleMeshCollider;
+  RBody: TCastleRigidBody;
+  ActualSize: Single;
+  ActualSubdiv: Integer;
+begin
+  if DesignOwner = nil then Exit;
+
+  ParentT := nil;
+  TerrainComp := nil;
+  if CurrentTransform is TCastleTerrain then
+  begin
+    TerrainComp := TCastleTerrain(CurrentTransform);
+    ParentT := TerrainComp.Parent;
+  end else
+  if CurrentTransform <> nil then
+    ParentT := CurrentTransform
+  else
+  if CurrentViewport <> nil then
+    ParentT := CurrentViewport.Items
+  else
+  if FDesignRoot is TCastleTransform then
+    ParentT := TCastleTransform(FDesignRoot);
+
+  if (TerrainComp = nil) and (ParentT = nil) then
+  begin
+    ErrorBox('Open a 3D Transform or Viewport design before generating a 3D Terrain.');
+    Exit;
+  end;
+
+  ActualSize := Max(10.0, TerrainSize);
+  ActualSubdiv := Max(8, Min(512, SubdivCount));
+
+  if TerrainComp = nil then
+  begin
+    TerrainComp := TCastleTerrain.Create(DesignOwner);
+    TerrainComp.Name := ProposeComponentName(TCastleTerrain, DesignOwner);
+    ParentT.Add(TerrainComp);
+  end;
+
+  TerrainComp.Size := Vector2(ActualSize, ActualSize);
+  TerrainComp.Subdivisions := Vector2(ActualSubdiv, ActualSubdiv);
+  TerrainComp.PreciseCollisions := true;
+
+  if TerrainPreset = 4 then
+  begin
+    if TerrainComp.Data is TCastleTerrainImage then
+      ImgComp := TCastleTerrainImage(TerrainComp.Data)
+    else
+    begin
+      ImgComp := TCastleTerrainImage.Create(DesignOwner);
+      ImgComp.Name := ProposeComponentName(TCastleTerrainImage, DesignOwner);
+    end;
+    ImgComp.Url := Trim(HeightmapUrl);
+    ImgComp.MinLevel := 0.0;
+    ImgComp.MaxLevel := Max(1.0, AmplitudeVal);
+    TerrainComp.Data := ImgComp;
+    TerrainComp.Height1 := AmplitudeVal * 0.35;
+    TerrainComp.Height2 := AmplitudeVal * 0.75;
+    TerrainComp.SteepEmphasize := 2.0;
+    TerrainComp.Layer1.Color := Vector3(0.28, 0.52, 0.24);
+    TerrainComp.Layer2.Color := Vector3(0.42, 0.38, 0.34);
+    TerrainComp.Layer3.Color := Vector3(0.82, 0.85, 0.88);
+    TerrainComp.Layer4.Color := Vector3(0.32, 0.30, 0.28);
+  end else
+  begin
+    if TerrainComp.Data is TCastleTerrainNoise then
+      NoiseComp := TCastleTerrainNoise(TerrainComp.Data)
+    else
+    begin
+      NoiseComp := TCastleTerrainNoise.Create(DesignOwner);
+      NoiseComp.Name := ProposeComponentName(TCastleTerrainNoise, DesignOwner);
+    end;
+    NoiseComp.Amplitude := Max(0.5, AmplitudeVal);
+    NoiseComp.Frequency := Max(0.002, FrequencyVal);
+    NoiseComp.Seed := Cardinal(Max(0, SeedVal));
+    NoiseComp.Interpolation := niCosine;
+
+    case TerrainPreset of
+      0: // Gentle Rolling Hills (Grassland / Rock / Snow)
+        begin
+          NoiseComp.Octaves := 4.0;
+          NoiseComp.Smoothness := 2.2;
+          NoiseComp.Heterogeneous := 0.5;
+          TerrainComp.Height1 := AmplitudeVal * 0.35;
+          TerrainComp.Height2 := AmplitudeVal * 0.75;
+          TerrainComp.SteepEmphasize := 2.0;
+          TerrainComp.Layer1.Color := Vector3(0.26, 0.54, 0.22); // Low flat grass
+          TerrainComp.Layer2.Color := Vector3(0.44, 0.39, 0.33); // Low steep dirt/cliff
+          TerrainComp.Layer3.Color := Vector3(0.62, 0.68, 0.45); // High flat meadow/snow
+          TerrainComp.Layer4.Color := Vector3(0.36, 0.36, 0.38); // High steep rock
+        end;
+      1: // Rugged Alpine Mountains (Granite / Snow Peaks)
+        begin
+          NoiseComp.Octaves := 6.0;
+          NoiseComp.Smoothness := 1.8;
+          NoiseComp.Heterogeneous := 0.85;
+          TerrainComp.Height1 := AmplitudeVal * 0.30;
+          TerrainComp.Height2 := AmplitudeVal * 0.65;
+          TerrainComp.SteepEmphasize := 3.0;
+          TerrainComp.Layer1.Color := Vector3(0.22, 0.42, 0.24); // Alpine valley pine green
+          TerrainComp.Layer2.Color := Vector3(0.38, 0.37, 0.36); // Steep granite
+          TerrainComp.Layer3.Color := Vector3(0.92, 0.95, 0.98); // Snow cap
+          TerrainComp.Layer4.Color := Vector3(0.30, 0.32, 0.36); // Dark slate cliff
+        end;
+      2: // Desert Sand Dunes
+        begin
+          NoiseComp.Octaves := 2.5;
+          NoiseComp.Smoothness := 2.8;
+          NoiseComp.Heterogeneous := 0.2;
+          NoiseComp.Blur := true;
+          TerrainComp.Height1 := AmplitudeVal * 0.40;
+          TerrainComp.Height2 := AmplitudeVal * 0.80;
+          TerrainComp.SteepEmphasize := 1.6;
+          TerrainComp.Layer1.Color := Vector3(0.84, 0.68, 0.42); // Golden sand
+          TerrainComp.Layer2.Color := Vector3(0.72, 0.52, 0.30); // Shaded dune slope
+          TerrainComp.Layer3.Color := Vector3(0.92, 0.80, 0.55); // Sunlit dune crest
+          TerrainComp.Layer4.Color := Vector3(0.64, 0.44, 0.26); // Sandstone outcrop
+        end;
+      else // 3: Volcanic / Alien Crater Badlands
+        begin
+          NoiseComp.Octaves := 5.0;
+          NoiseComp.Smoothness := 1.65;
+          NoiseComp.Heterogeneous := 0.75;
+          TerrainComp.Height1 := AmplitudeVal * 0.25;
+          TerrainComp.Height2 := AmplitudeVal * 0.70;
+          TerrainComp.SteepEmphasize := 2.6;
+          TerrainComp.Layer1.Color := Vector3(0.85, 0.28, 0.08); // Lava / ember basin
+          TerrainComp.Layer2.Color := Vector3(0.18, 0.16, 0.18); // Obsidian wall
+          TerrainComp.Layer3.Color := Vector3(0.28, 0.26, 0.30); // Ash plateau
+          TerrainComp.Layer4.Color := Vector3(0.14, 0.12, 0.14); // Basalt crag
+        end;
+    end;
+    TerrainComp.Data := NoiseComp;
+  end;
+
+  if AddStaticCollider then
+  begin
+    MeshCol := TerrainComp.FindBehavior(TCastleMeshCollider) as TCastleMeshCollider;
+    if MeshCol = nil then
+    begin
+      MeshCol := TCastleMeshCollider.Create(DesignOwner);
+      MeshCol.Name := ProposeComponentName(TCastleMeshCollider, DesignOwner);
+      TerrainComp.AddBehavior(MeshCol);
+    end;
+    MeshCol.Mesh := TerrainComp;
+
+    RBody := TerrainComp.FindBehavior(TCastleRigidBody) as TCastleRigidBody;
+    if RBody = nil then
+    begin
+      RBody := TCastleRigidBody.Create(DesignOwner);
+      RBody.Name := ProposeComponentName(TCastleRigidBody, DesignOwner);
+      TerrainComp.AddBehavior(RBody);
+    end;
+    RBody.Dynamic := false;
+  end;
+
+  UpdateDesign;
+  SetSelectedComponent(TerrainComp);
+  ModifiedOutsideObjectInspector(
+    Format('Generate 3D Terrain (%s, %.0fx%.0f, Subdiv %d)',
+      [TerrainComp.Name, ActualSize, ActualSize, ActualSubdiv]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowQuickTerrainGeneratorDialog;
+var
+  Dialog: TForm;
+  LblPreset, LblSize, LblSubdiv, LblAmp, LblFreq, LblSeed, LblUrl: TLabel;
+  ComboPreset: TComboBox;
+  SpinSize, SpinAmp, SpinFreq: TFloatSpinEdit;
+  SpinSubdiv, SpinSeed: TSpinEdit;
+  UrlPanel: TPanel;
+  EditUrl: TEdit;
+  BtnBrowse: TButton;
+  CheckCollider: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+  OpenDlg: TCastleOpenDialog;
+begin
+  if DesignOwner = nil then Exit;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 3D Procedural & Heightmap Terrain Generator';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.AutoSize := true;
+    Dialog.ChildSizing.LeftRightSpacing := 14;
+    Dialog.ChildSizing.TopBottomSpacing := 12;
+    Dialog.ChildSizing.VerticalSpacing := 8;
+    Dialog.Constraints.MinWidth := 480;
+
+    LblPreset := TLabel.Create(Dialog);
+    LblPreset.Caption := 'Terrain Biome / Height Source Preset:';
+    LblPreset.Parent := Dialog;
+
+    ComboPreset := TComboBox.Create(Dialog);
+    ComboPreset.Style := csDropDownList;
+    ComboPreset.Items.Add('Gentle Rolling Hills (Grassland / Rock / Meadow)');
+    ComboPreset.Items.Add('Rugged Alpine Mountains (Steep Granite / Snow Peaks)');
+    ComboPreset.Items.Add('Desert Sand Dunes (Smooth Wind-Swept Dunes)');
+    ComboPreset.Items.Add('Volcanic / Alien Crater Badlands (Basalt / Ember Basin)');
+    ComboPreset.Items.Add('Heightmap Image Terrain (TCastleTerrainImage from URL)');
+    ComboPreset.ItemIndex := 0;
+    ComboPreset.Parent := Dialog;
+
+    LblSize := TLabel.Create(Dialog);
+    LblSize.Caption := 'Terrain World Size (X and Z Span in Meters):';
+    LblSize.Parent := Dialog;
+
+    SpinSize := TFloatSpinEdit.Create(Dialog);
+    SpinSize.MinValue := 10.0;
+    SpinSize.MaxValue := 5000.0;
+    SpinSize.Increment := 20.0;
+    SpinSize.DecimalPlaces := 1;
+    SpinSize.Value := 100.0;
+    SpinSize.Parent := Dialog;
+
+    LblSubdiv := TLabel.Create(Dialog);
+    LblSubdiv.Caption := 'Mesh Subdivisions (Grid Resolution X and Z):';
+    LblSubdiv.Parent := Dialog;
+
+    SpinSubdiv := TSpinEdit.Create(Dialog);
+    SpinSubdiv.MinValue := 8;
+    SpinSubdiv.MaxValue := 512;
+    SpinSubdiv.Increment := 16;
+    SpinSubdiv.Value := 64;
+    SpinSubdiv.Parent := Dialog;
+
+    LblAmp := TLabel.Create(Dialog);
+    LblAmp.Caption := 'Height Amplitude / Max Elevation (Y Meters):';
+    LblAmp.Parent := Dialog;
+
+    SpinAmp := TFloatSpinEdit.Create(Dialog);
+    SpinAmp.MinValue := 0.5;
+    SpinAmp.MaxValue := 500.0;
+    SpinAmp.Increment := 2.0;
+    SpinAmp.DecimalPlaces := 1;
+    SpinAmp.Value := 10.0;
+    SpinAmp.Parent := Dialog;
+
+    LblFreq := TLabel.Create(Dialog);
+    LblFreq.Caption := 'Noise Frequency (Hill Density, e.g. 0.04):';
+    LblFreq.Parent := Dialog;
+
+    SpinFreq := TFloatSpinEdit.Create(Dialog);
+    SpinFreq.MinValue := 0.002;
+    SpinFreq.MaxValue := 1.0;
+    SpinFreq.Increment := 0.005;
+    SpinFreq.DecimalPlaces := 3;
+    SpinFreq.Value := 0.040;
+    SpinFreq.Parent := Dialog;
+
+    LblSeed := TLabel.Create(Dialog);
+    LblSeed.Caption := 'Random Seed (Integer >= 0):';
+    LblSeed.Parent := Dialog;
+
+    SpinSeed := TSpinEdit.Create(Dialog);
+    SpinSeed.MinValue := 0;
+    SpinSeed.MaxValue := 999999;
+    SpinSeed.Value := 42;
+    SpinSeed.Parent := Dialog;
+
+    LblUrl := TLabel.Create(Dialog);
+    LblUrl.Caption := 'Heightmap Image URL (Used for Heightmap Image Preset):';
+    LblUrl.Parent := Dialog;
+
+    UrlPanel := TPanel.Create(Dialog);
+    UrlPanel.BevelOuter := bvNone;
+    UrlPanel.AutoSize := true;
+    UrlPanel.Parent := Dialog;
+
+    BtnBrowse := TButton.Create(Dialog);
+    BtnBrowse.Caption := 'Browse...';
+    BtnBrowse.ModalResult := mrRetry;
+    BtnBrowse.AutoSize := true;
+    BtnBrowse.Align := alRight;
+    BtnBrowse.BorderSpacing.Left := 6;
+    BtnBrowse.Parent := UrlPanel;
+
+    EditUrl := TEdit.Create(Dialog);
+    EditUrl.Align := alClient;
+    EditUrl.Text := '';
+    EditUrl.TextHint := 'castle-data:/terrains/heightmap.png';
+    EditUrl.Parent := UrlPanel;
+
+    CheckCollider := TCheckBox.Create(Dialog);
+    CheckCollider.Caption := 'Attach Static Mesh Collider (TCastleMeshCollider + TCastleRigidBody)';
+    CheckCollider.Checked := true;
+    CheckCollider.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Generate Terrain';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    while true do
+    begin
+      case Dialog.ShowModal of
+        mrRetry:
+          begin
+            OpenDlg := TCastleOpenDialog.Create(Self);
+            try
+              OpenDlg.Title := 'Select Heightmap Image File';
+              OpenDlg.Filter := 'Image Files (*.png;*.jpg;*.jpeg;*.webp;*.dds;*.ktx)|*.png;*.jpg;*.jpeg;*.webp;*.dds;*.ktx|All Files (*.*)|*.*';
+              OpenDlg.AdviceDataDirectory := true;
+              if Trim(EditUrl.Text) <> '' then
+                OpenDlg.Url := Trim(EditUrl.Text);
+              if OpenDlg.Execute then
+              begin
+                EditUrl.Text := OpenDlg.Url;
+                ComboPreset.ItemIndex := 4;
+              end;
+            finally
+              FreeAndNil(OpenDlg);
+            end;
+          end;
+        mrOk:
+          begin
+            ApplyQuickTerrainGenerator(
+              ComboPreset.ItemIndex,
+              SpinSize.Value,
+              SpinAmp.Value,
+              SpinFreq.Value,
+              SpinSubdiv.Value,
+              SpinSeed.Value,
+              EditUrl.Text,
+              CheckCollider.Checked);
+            Break;
+          end;
+        else
+          Break;
+      end;
+    end;
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemQuickTerrainGeneratorClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyQuickTerrainGenerator(0, 100.0, 10.0, 0.04, 64, 42, '', true)
+  else
+    ShowQuickTerrainGeneratorDialog;
+end;
+
+procedure TDesignFrame.ApplyLivingAiBehavior(const RolePreset: Integer;
+  const MaxLifeVal, MoveSpeedVal, AttackDistVal, SmellDistVal: Single;
+  const AnimIdle, AnimMove, AnimAttack, AnimDie: String;
+  const LinkPrimaryAsEnemy: Boolean);
+var
+  SelectedList, TargetTransforms: TComponentList;
+  SelectedCount, I, AppliedCount: Integer;
+  T, PrimaryT: TCastleTransform;
+  LivingBeh, PrimaryLiving: TCastleLiving;
+  MoveAtk: TCastleMoveAttack;
+begin
+  if DesignOwner = nil then Exit;
+
+  TargetTransforms := TComponentList.Create(false);
+  try
+    GetSelected(SelectedList, SelectedCount, false);
+    try
+      if SelectedList <> nil then
+        for I := 0 to SelectedList.Count - 1 do
+          if (SelectedList[I] is TCastleTransform) and
+             (not IsComponentLocked(SelectedList[I])) then
+            TargetTransforms.Add(SelectedList[I]);
+    finally
+      FreeAndNil(SelectedList);
+    end;
+
+    if (TargetTransforms.Count = 0) and (CurrentTransform <> nil) and
+       (not IsComponentLocked(CurrentTransform)) then
+      TargetTransforms.Add(CurrentTransform);
+
+    if TargetTransforms.Count = 0 then
+    begin
+      ErrorBox('Select one or more TCastleTransform objects to attach Living / AI Combat Behaviors.');
+      Exit;
+    end;
+
+    PrimaryT := TCastleTransform(TargetTransforms[0]);
+    PrimaryLiving := PrimaryT.FindBehavior(TCastleLiving) as TCastleLiving;
+    if (PrimaryLiving = nil) and LinkPrimaryAsEnemy and (TargetTransforms.Count >= 2) then
+    begin
+      PrimaryLiving := TCastleLiving.Create(DesignOwner);
+      PrimaryLiving.Name := ProposeComponentName(TCastleLiving, DesignOwner);
+      PrimaryLiving.MaxLife := 100.0;
+      PrimaryLiving.Life := 100.0;
+      PrimaryT.AddBehavior(PrimaryLiving);
+    end;
+
+    AppliedCount := 0;
+    for I := 0 to TargetTransforms.Count - 1 do
+    begin
+      T := TCastleTransform(TargetTransforms[I]);
+      // If 2+ selected and LinkPrimaryAsEnemy is true, T[0] is the Player/Target and T[1..N-1] are the AI NPCs
+      if LinkPrimaryAsEnemy and (TargetTransforms.Count >= 2) and (I = 0) then
+        Continue;
+
+      LivingBeh := T.FindBehavior(TCastleLiving) as TCastleLiving;
+      if LivingBeh = nil then
+      begin
+        LivingBeh := TCastleLiving.Create(DesignOwner);
+        LivingBeh.Name := ProposeComponentName(TCastleLiving, DesignOwner);
+        T.AddBehavior(LivingBeh);
+      end;
+      LivingBeh.MaxLife := Max(1.0, MaxLifeVal);
+      LivingBeh.Life := LivingBeh.MaxLife;
+
+      if RolePreset > 0 then
+      begin
+        MoveAtk := T.FindBehavior(TCastleMoveAttack) as TCastleMoveAttack;
+        if MoveAtk = nil then
+        begin
+          MoveAtk := TCastleMoveAttack.Create(DesignOwner);
+          MoveAtk.Name := ProposeComponentName(TCastleMoveAttack, DesignOwner);
+          T.AddBehavior(MoveAtk);
+        end;
+
+        MoveAtk.MoveSpeed := Max(0.0, MoveSpeedVal);
+        MoveAtk.SmellDistance := Max(0.0, SmellDistVal);
+        if Trim(AnimIdle) <> '' then MoveAtk.AnimationIdle := Trim(AnimIdle);
+        if Trim(AnimMove) <> '' then MoveAtk.AnimationMove := Trim(AnimMove);
+        if Trim(AnimDie) <> '' then MoveAtk.AnimationDie := Trim(AnimDie);
+
+        case RolePreset of
+          1: // Melee Chaser Enemy NPC
+            begin
+              MoveAtk.AttackMaxDistance := Max(0.5, AttackDistVal);
+              MoveAtk.PreferredDistance := Max(0.5, AttackDistVal * 0.85);
+              MoveAtk.RunAwayLife := 0.2;
+              MoveAtk.RunAwayDistance := 10.0;
+              if Trim(AnimAttack) <> '' then MoveAtk.AnimationAttack := Trim(AnimAttack);
+            end;
+          2: // Ranged / Turret Enemy NPC
+            begin
+              MoveAtk.FireMissileMaxDistance := Max(2.0, AttackDistVal);
+              MoveAtk.PreferredDistance := Max(1.0, AttackDistVal * 0.65);
+              MoveAtk.RunAwayLife := 0.35;
+              MoveAtk.RunAwayDistance := 12.0;
+              if Trim(AnimAttack) <> '' then MoveAtk.AnimationFireMissile := Trim(AnimAttack);
+            end;
+          3: // Boss / Heavy Tank NPC
+            begin
+              MoveAtk.AttackMaxDistance := Max(1.0, AttackDistVal);
+              MoveAtk.PreferredDistance := Max(1.0, AttackDistVal * 0.8);
+              MoveAtk.RunAwayLife := 0.0; // Never flees
+              if Trim(AnimAttack) <> '' then MoveAtk.AnimationAttack := Trim(AnimAttack);
+            end;
+          4: // Timid / Fleeing Critter
+            begin
+              MoveAtk.RunAwayLife := 1.0; // Always flees when enemy approaches
+              MoveAtk.RunAwayDistance := Max(5.0, AttackDistVal);
+              MoveAtk.PreferredDistance := Max(5.0, AttackDistVal);
+            end;
+        end;
+
+        if LinkPrimaryAsEnemy and (PrimaryLiving <> nil) and (PrimaryLiving <> LivingBeh) then
+          MoveAtk.Enemy := PrimaryLiving;
+      end;
+
+      Inc(AppliedCount);
+    end;
+
+    UpdateDesign;
+    ModifiedOutsideObjectInspector(
+      Format('Setup Living / AI Combat Behavior on %d Transform(s)', [AppliedCount]),
+      ucHigh);
+  finally
+    FreeAndNil(TargetTransforms);
+  end;
+end;
+
+procedure TDesignFrame.ShowLivingAiBehaviorDialog;
+var
+  Dialog: TForm;
+  LblRole, LblLife, LblSpeed, LblDist, LblSmell, LblAnims: TLabel;
+  ComboRole: TComboBox;
+  SpinLife, SpinSpeed, SpinDist, SpinSmell: TFloatSpinEdit;
+  EditIdle, EditMove, EditAttack, EditDie: TEdit;
+  CheckLinkEnemy: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if DesignOwner = nil then Exit;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 3D Living Creature & AI Combat Behavior Setup';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.AutoSize := true;
+    Dialog.ChildSizing.LeftRightSpacing := 14;
+    Dialog.ChildSizing.TopBottomSpacing := 12;
+    Dialog.ChildSizing.VerticalSpacing := 6;
+    Dialog.Constraints.MinWidth := 460;
+
+    LblRole := TLabel.Create(Dialog);
+    LblRole.Caption := 'Character / AI Role Preset:';
+    LblRole.Parent := Dialog;
+
+    ComboRole := TComboBox.Create(Dialog);
+    ComboRole.Style := csDropDownList;
+    ComboRole.Items.Add('Player / Friendly Character (TCastleLiving Only)');
+    ComboRole.Items.Add('Melee Chaser Enemy NPC (TCastleLiving + TCastleMoveAttack)');
+    ComboRole.Items.Add('Ranged / Missile Enemy NPC (TCastleLiving + TCastleMoveAttack)');
+    ComboRole.Items.Add('Boss / Heavy Tank NPC (High Life, Never Flees)');
+    ComboRole.Items.Add('Timid / Fleeing Critter (Always Runs Away From Enemy)');
+    ComboRole.ItemIndex := 1;
+    ComboRole.Parent := Dialog;
+
+    LblLife := TLabel.Create(Dialog);
+    LblLife.Caption := 'MaxLife & Initial Life (Hit Points):';
+    LblLife.Parent := Dialog;
+
+    SpinLife := TFloatSpinEdit.Create(Dialog);
+    SpinLife.MinValue := 1.0;
+    SpinLife.MaxValue := 100000.0;
+    SpinLife.Increment := 25.0;
+    SpinLife.DecimalPlaces := 0;
+    SpinLife.Value := 100.0;
+    SpinLife.Parent := Dialog;
+
+    LblSpeed := TLabel.Create(Dialog);
+    LblSpeed.Caption := 'AI MoveSpeed (Units / Sec):';
+    LblSpeed.Parent := Dialog;
+
+    SpinSpeed := TFloatSpinEdit.Create(Dialog);
+    SpinSpeed.MinValue := 0.0;
+    SpinSpeed.MaxValue := 100.0;
+    SpinSpeed.Increment := 0.5;
+    SpinSpeed.DecimalPlaces := 1;
+    SpinSpeed.Value := 4.0;
+    SpinSpeed.Parent := Dialog;
+
+    LblDist := TLabel.Create(Dialog);
+    LblDist.Caption := 'Attack / Missile / Flee Range (Meters):';
+    LblDist.Parent := Dialog;
+
+    SpinDist := TFloatSpinEdit.Create(Dialog);
+    SpinDist.MinValue := 0.5;
+    SpinDist.MaxValue := 500.0;
+    SpinDist.Increment := 1.0;
+    SpinDist.DecimalPlaces := 1;
+    SpinDist.Value := 2.5;
+    SpinDist.Parent := Dialog;
+
+    LblSmell := TLabel.Create(Dialog);
+    LblSmell.Caption := '360° Detection / Smell Distance (Meters):';
+    LblSmell.Parent := Dialog;
+
+    SpinSmell := TFloatSpinEdit.Create(Dialog);
+    SpinSmell.MinValue := 0.0;
+    SpinSmell.MaxValue := 500.0;
+    SpinSmell.Increment := 2.0;
+    SpinSmell.DecimalPlaces := 1;
+    SpinSmell.Value := 12.0;
+    SpinSmell.Parent := Dialog;
+
+    LblAnims := TLabel.Create(Dialog);
+    LblAnims.Caption := 'Animation Names (Idle / Move / Attack / Die):';
+    LblAnims.Parent := Dialog;
+
+    EditIdle := TEdit.Create(Dialog);
+    EditIdle.Text := 'idle';
+    EditIdle.TextHint := 'Idle Animation (e.g. idle)';
+    EditIdle.Parent := Dialog;
+
+    EditMove := TEdit.Create(Dialog);
+    EditMove.Text := 'move';
+    EditMove.TextHint := 'Move Animation (e.g. walk, run, move)';
+    EditMove.Parent := Dialog;
+
+    EditAttack := TEdit.Create(Dialog);
+    EditAttack.Text := 'attack';
+    EditAttack.TextHint := 'Attack / Shoot Animation (e.g. attack, shoot)';
+    EditAttack.Parent := Dialog;
+
+    EditDie := TEdit.Create(Dialog);
+    EditDie.Text := 'die';
+    EditDie.TextHint := 'Die Animation (e.g. die)';
+    EditDie.Parent := Dialog;
+
+    CheckLinkEnemy := TCheckBox.Create(Dialog);
+    CheckLinkEnemy.Caption := 'If 2+ Transforms Selected: Set 1st Selected as Enemy Target of Others';
+    CheckLinkEnemy.Checked := true;
+    CheckLinkEnemy.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Apply AI Setup';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyLivingAiBehavior(
+        ComboRole.ItemIndex,
+        SpinLife.Value,
+        SpinSpeed.Value,
+        SpinDist.Value,
+        SpinSmell.Value,
+        EditIdle.Text,
+        EditMove.Text,
+        EditAttack.Text,
+        EditDie.Text,
+        CheckLinkEnemy.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemLivingAiSetupClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyLivingAiBehavior(1, 100.0, 4.0, 2.5, 12.0, 'idle', 'move', 'attack', 'die', true)
+  else
+    ShowLivingAiBehaviorDialog;
+end;
+
+procedure TDesignFrame.ApplyQuickGameScreenTemplate(const ScreenPreset, ThemePreset: Integer;
+  const ScreenTitle: String);
+var
+  ParentUI: TCastleUserInterface;
+  ScreenRoot, CardRect, PortraitRect, SlotRect: TCastleRectangleControl;
+  LblTitle, LblSub, LblBody: TCastleLabel;
+  Btn: TCastleButton;
+  Chk: TCastleCheckBox;
+  BgCol, CardCol, AccentCol, TextCol: TCastleColor;
+  I, Row, Col: Integer;
+  ActualTitle: String;
+  BtnCaptions: array [0..3] of String;
+begin
+  if DesignOwner = nil then Exit;
+
+  ParentUI := SelectedUserInterface;
+  if (ParentUI = nil) and (FDesignRoot is TCastleUserInterface) then
+    ParentUI := TCastleUserInterface(FDesignRoot);
+  if ParentUI = nil then
+  begin
+    ErrorBox('Select a 2D User Interface container (or open a .castle-user-interface design) first.');
+    Exit;
+  end;
+
+  case ThemePreset of
+    1: // Sci-Fi Cyan
+      begin
+        BgCol := Vector4(0.03, 0.07, 0.12, 0.90);
+        CardCol := Vector4(0.06, 0.14, 0.22, 0.95);
+        AccentCol := Vector4(0.15, 0.78, 0.96, 1.0);
+        TextCol := Vector4(0.90, 0.98, 1.0, 1.0);
+      end;
+    2: // Medieval Gold & Parchment Dark
+      begin
+        BgCol := Vector4(0.09, 0.07, 0.05, 0.92);
+        CardCol := Vector4(0.16, 0.12, 0.08, 0.96);
+        AccentCol := Vector4(0.92, 0.74, 0.26, 1.0);
+        TextCol := Vector4(0.98, 0.94, 0.84, 1.0);
+      end;
+    3: // Crimson Dark
+      begin
+        BgCol := Vector4(0.09, 0.03, 0.04, 0.92);
+        CardCol := Vector4(0.18, 0.06, 0.08, 0.96);
+        AccentCol := Vector4(0.92, 0.24, 0.28, 1.0);
+        TextCol := Vector4(0.98, 0.92, 0.92, 1.0);
+      end;
+    else // 0: Modern Dark Slate
+      begin
+        BgCol := Vector4(0.06, 0.08, 0.11, 0.88);
+        CardCol := Vector4(0.12, 0.15, 0.20, 0.96);
+        AccentCol := Vector4(0.28, 0.62, 0.96, 1.0);
+        TextCol := Vector4(0.95, 0.97, 1.0, 1.0);
+      end;
+  end;
+
+  ActualTitle := Trim(ScreenTitle);
+  if ActualTitle = '' then
+    ActualTitle := 'CASTLE GAME';
+
+  ScreenRoot := TCastleRectangleControl.Create(DesignOwner);
+  ParentUI.InsertFront(ScreenRoot);
+
+  case ScreenPreset of
+    0: // Main Title Menu Screen
+      begin
+        ScreenRoot.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner);
+        ScreenRoot.FullSize := true;
+        ScreenRoot.Color := BgCol;
+
+        LblTitle := TCastleLabel.Create(DesignOwner);
+        LblTitle.Name := ProposeComponentName(TCastleLabel, DesignOwner);
+        LblTitle.Caption := ActualTitle;
+        LblTitle.FontSize := 54;
+        LblTitle.Color := AccentCol;
+        LblTitle.Anchor(hpMiddle, 0);
+        LblTitle.Anchor(vpTop, -110);
+        ScreenRoot.InsertFront(LblTitle);
+
+        LblSub := TCastleLabel.Create(DesignOwner);
+        LblSub.Name := ProposeComponentName(TCastleLabel, DesignOwner);
+        LblSub.Caption := 'PRESS PLAY TO BEGIN';
+        LblSub.FontSize := 20;
+        LblSub.Color := TextCol;
+        LblSub.Anchor(hpMiddle, 0);
+        LblSub.Anchor(vpTop, -180);
+        ScreenRoot.InsertFront(LblSub);
+
+        BtnCaptions[0] := 'Play Game';
+        BtnCaptions[1] := 'Options';
+        BtnCaptions[2] := 'Credits';
+        BtnCaptions[3] := 'Quit to Desktop';
+        for I := 0 to 3 do
+        begin
+          Btn := TCastleButton.Create(DesignOwner);
+          Btn.Name := ProposeComponentName(TCastleButton, DesignOwner);
+          Btn.Caption := BtnCaptions[I];
+          Btn.AutoSize := false;
+          Btn.Width := 320;
+          Btn.Height := 54;
+          Btn.CustomBackground := true;
+          Btn.CustomBackgroundNormal.Color := CardCol;
+          Btn.CustomTextColorUse := true;
+          Btn.CustomTextColor := TextCol;
+          Btn.Anchor(hpMiddle, 0);
+          Btn.Anchor(vpMiddle, 70 - I * 68);
+          ScreenRoot.InsertFront(Btn);
+        end;
+      end;
+
+    1: // Pause Overlay Modal
+      begin
+        ScreenRoot.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner);
+        ScreenRoot.FullSize := true;
+        ScreenRoot.Color := Vector4(0.0, 0.0, 0.0, 0.65);
+
+        CardRect := TCastleRectangleControl.Create(DesignOwner);
+        CardRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner);
+        CardRect.Width := 420;
+        CardRect.Height := 360;
+        CardRect.Color := CardCol;
+        CardRect.Anchor(hpMiddle, 0);
+        CardRect.Anchor(vpMiddle, 0);
+        ScreenRoot.InsertFront(CardRect);
+
+        LblTitle := TCastleLabel.Create(DesignOwner);
+        LblTitle.Name := ProposeComponentName(TCastleLabel, DesignOwner);
+        LblTitle.Caption := 'GAME PAUSED';
+        LblTitle.FontSize := 32;
+        LblTitle.Color := AccentCol;
+        LblTitle.Anchor(hpMiddle, 0);
+        LblTitle.Anchor(vpTop, -28);
+        CardRect.InsertFront(LblTitle);
+
+        BtnCaptions[0] := 'Resume Game';
+        BtnCaptions[1] := 'Restart Level';
+        BtnCaptions[2] := 'Settings';
+        BtnCaptions[3] := 'Quit to Main Menu';
+        for I := 0 to 3 do
+        begin
+          Btn := TCastleButton.Create(DesignOwner);
+          Btn.Name := ProposeComponentName(TCastleButton, DesignOwner);
+          Btn.Caption := BtnCaptions[I];
+          Btn.AutoSize := false;
+          Btn.Width := 300;
+          Btn.Height := 48;
+          Btn.Anchor(hpMiddle, 0);
+          Btn.Anchor(vpTop, -96 - I * 60);
+          CardRect.InsertFront(Btn);
+        end;
+      end;
+
+    2: // RPG / Adventure Dialogue Box
+      begin
+        ScreenRoot.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner);
+        ScreenRoot.Width := 920;
+        ScreenRoot.Height := 220;
+        ScreenRoot.Color := CardCol;
+        ScreenRoot.Anchor(hpMiddle, 0);
+        ScreenRoot.Anchor(vpBottom, 24);
+
+        PortraitRect := TCastleRectangleControl.Create(DesignOwner);
+        PortraitRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner);
+        PortraitRect.Width := 160;
+        PortraitRect.Height := 160;
+        PortraitRect.Color := AccentCol;
+        PortraitRect.Anchor(hpLeft, 24);
+        PortraitRect.Anchor(vpMiddle, 0);
+        ScreenRoot.InsertFront(PortraitRect);
+
+        LblTitle := TCastleLabel.Create(DesignOwner);
+        LblTitle.Name := ProposeComponentName(TCastleLabel, DesignOwner);
+        LblTitle.Caption := ActualTitle;
+        LblTitle.FontSize := 24;
+        LblTitle.Color := AccentCol;
+        LblTitle.Anchor(hpLeft, 208);
+        LblTitle.Anchor(vpTop, -22);
+        ScreenRoot.InsertFront(LblTitle);
+
+        LblBody := TCastleLabel.Create(DesignOwner);
+        LblBody.Name := ProposeComponentName(TCastleLabel, DesignOwner);
+        LblBody.Caption := '"Traveler, the ancient gates ahead are sealed. Choose your path wisely."';
+        LblBody.MaxWidth := 680;
+        LblBody.FontSize := 19;
+        LblBody.Color := TextCol;
+        LblBody.Anchor(hpLeft, 208);
+        LblBody.Anchor(vpTop, -64);
+        ScreenRoot.InsertFront(LblBody);
+
+        Btn := TCastleButton.Create(DesignOwner);
+        Btn.Name := ProposeComponentName(TCastleButton, DesignOwner);
+        Btn.Caption := '1. Ask about the key';
+        Btn.AutoSize := false;
+        Btn.Width := 320;
+        Btn.Height := 40;
+        Btn.Anchor(hpLeft, 208);
+        Btn.Anchor(vpBottom, 20);
+        ScreenRoot.InsertFront(Btn);
+
+        Btn := TCastleButton.Create(DesignOwner);
+        Btn.Name := ProposeComponentName(TCastleButton, DesignOwner);
+        Btn.Caption := '2. Leave immediately';
+        Btn.AutoSize := false;
+        Btn.Width := 320;
+        Btn.Height := 40;
+        Btn.Anchor(hpLeft, 548);
+        Btn.Anchor(vpBottom, 20);
+        ScreenRoot.InsertFront(Btn);
+      end;
+
+    3: // Settings / Options Screen
+      begin
+        ScreenRoot.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner);
+        ScreenRoot.FullSize := true;
+        ScreenRoot.Color := BgCol;
+
+        CardRect := TCastleRectangleControl.Create(DesignOwner);
+        CardRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner);
+        CardRect.Width := 560;
+        CardRect.Height := 420;
+        CardRect.Color := CardCol;
+        CardRect.Anchor(hpMiddle, 0);
+        CardRect.Anchor(vpMiddle, 0);
+        ScreenRoot.InsertFront(CardRect);
+
+        LblTitle := TCastleLabel.Create(DesignOwner);
+        LblTitle.Name := ProposeComponentName(TCastleLabel, DesignOwner);
+        LblTitle.Caption := 'SETTINGS & OPTIONS';
+        LblTitle.FontSize := 30;
+        LblTitle.Color := AccentCol;
+        LblTitle.Anchor(hpMiddle, 0);
+        LblTitle.Anchor(vpTop, -24);
+        CardRect.InsertFront(LblTitle);
+
+        BtnCaptions[0] := 'Fullscreen Display';
+        BtnCaptions[1] := 'Enable VSync';
+        BtnCaptions[2] := 'Enable Spatial Audio & Music';
+        BtnCaptions[3] := 'Show Performance FPS Counter';
+        for I := 0 to 3 do
+        begin
+          Chk := TCastleCheckBox.Create(DesignOwner);
+          Chk.Name := ProposeComponentName(TCastleCheckBox, DesignOwner);
+          Chk.Caption := BtnCaptions[I];
+          Chk.Checked := I < 3;
+          Chk.TextColor := TextCol;
+          Chk.CheckboxColor := AccentCol;
+          Chk.Anchor(hpLeft, 64);
+          Chk.Anchor(vpTop, -100 - I * 52);
+          CardRect.InsertFront(Chk);
+        end;
+
+        Btn := TCastleButton.Create(DesignOwner);
+        Btn.Name := ProposeComponentName(TCastleButton, DesignOwner);
+        Btn.Caption := 'Apply & Close';
+        Btn.AutoSize := false;
+        Btn.Width := 220;
+        Btn.Height := 46;
+        Btn.Anchor(hpMiddle, 0);
+        Btn.Anchor(vpBottom, 24);
+        CardRect.InsertFront(Btn);
+      end;
+
+    else // 4: Grid Inventory / Loot Window (4x3 Slot Grid)
+      begin
+        ScreenRoot.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner);
+        ScreenRoot.Width := 480;
+        ScreenRoot.Height := 430;
+        ScreenRoot.Color := CardCol;
+        ScreenRoot.Anchor(hpMiddle, 0);
+        ScreenRoot.Anchor(vpMiddle, 0);
+
+        LblTitle := TCastleLabel.Create(DesignOwner);
+        LblTitle.Name := ProposeComponentName(TCastleLabel, DesignOwner);
+        LblTitle.Caption := 'INVENTORY';
+        LblTitle.FontSize := 28;
+        LblTitle.Color := AccentCol;
+        LblTitle.Anchor(hpMiddle, 0);
+        LblTitle.Anchor(vpTop, -20);
+        ScreenRoot.InsertFront(LblTitle);
+
+        for Row := 0 to 2 do
+          for Col := 0 to 3 do
+          begin
+            SlotRect := TCastleRectangleControl.Create(DesignOwner);
+            SlotRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner);
+            SlotRect.Width := 92;
+            SlotRect.Height := 92;
+            SlotRect.Color := BgCol;
+            SlotRect.Border.AllSides := 2;
+            SlotRect.BorderColor := AccentCol;
+            SlotRect.Anchor(hpLeft, 36 + Col * 104);
+            SlotRect.Anchor(vpTop, -76 - Row * 104);
+            ScreenRoot.InsertFront(SlotRect);
+          end;
+      end;
+  end;
+
+  UpdateDesign;
+  SetSelectedComponent(ScreenRoot);
+  ModifiedOutsideObjectInspector(
+    Format('Generate 2D Game Screen Template (%s)', [ScreenRoot.Name]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowQuickGameScreenTemplateDialog;
+var
+  Dialog: TForm;
+  LblPreset, LblTheme, LblTitle: TLabel;
+  ComboPreset, ComboTheme: TComboBox;
+  EditTitle: TEdit;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if DesignOwner = nil then Exit;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 2D Full-Screen Game Menu & Dialogue Screen Generator';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.AutoSize := true;
+    Dialog.ChildSizing.LeftRightSpacing := 14;
+    Dialog.ChildSizing.TopBottomSpacing := 12;
+    Dialog.ChildSizing.VerticalSpacing := 8;
+    Dialog.Constraints.MinWidth := 460;
+
+    LblPreset := TLabel.Create(Dialog);
+    LblPreset.Caption := 'Game Screen / Overlay Template:';
+    LblPreset.Parent := Dialog;
+
+    ComboPreset := TComboBox.Create(Dialog);
+    ComboPreset.Style := csDropDownList;
+    ComboPreset.Items.Add('Main Title Menu Screen (Title + Play / Options / Credits / Quit)');
+    ComboPreset.Items.Add('Pause Overlay Modal (Dimmed Backdrop + Centered Pause Card)');
+    ComboPreset.Items.Add('RPG / Adventure Dialogue Box (Portrait + Speaker + Text + 2 Choices)');
+    ComboPreset.Items.Add('Settings / Options Screen (Audio / Display Checkboxes + Apply Button)');
+    ComboPreset.Items.Add('Grid Inventory / Loot Window (Header + 4x3 Item Slot Grid)');
+    ComboPreset.ItemIndex := 0;
+    ComboPreset.Parent := Dialog;
+
+    LblTheme := TLabel.Create(Dialog);
+    LblTheme.Caption := 'Color Theme Palette:';
+    LblTheme.Parent := Dialog;
+
+    ComboTheme := TComboBox.Create(Dialog);
+    ComboTheme.Style := csDropDownList;
+    ComboTheme.Items.Add('Modern Dark Slate (Blue Accent)');
+    ComboTheme.Items.Add('Sci-Fi Cyan Hologram');
+    ComboTheme.Items.Add('Medieval Gold & Dark Parchment');
+    ComboTheme.Items.Add('Crimson Dark');
+    ComboTheme.ItemIndex := 0;
+    ComboTheme.Parent := Dialog;
+
+    LblTitle := TLabel.Create(Dialog);
+    LblTitle.Caption := 'Game Title / Speaker Name Caption:';
+    LblTitle.Parent := Dialog;
+
+    EditTitle := TEdit.Create(Dialog);
+    EditTitle.Text := 'CASTLE GAME';
+    EditTitle.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Generate Screen';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyQuickGameScreenTemplate(
+        ComboPreset.ItemIndex,
+        ComboTheme.ItemIndex,
+        EditTitle.Text);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemGameScreenTemplateClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyQuickGameScreenTemplate(0, 0, 'CASTLE GAME')
+  else
+    ShowQuickGameScreenTemplateDialog;
+end;
+
+procedure TDesignFrame.ApplyMultiViewportSetup(const LayoutPreset: Integer;
+  const OverlayWidth, OverlayHeight, CamHeight: Single);
+var
+  PrimaryVP, SecVP: TCastleViewport;
+  ParentUI: TCastleUserInterface;
+  FrameRect: TCastleRectangleControl;
+  SecCam: TCastleCamera;
+begin
+  if DesignOwner = nil then Exit;
+  PrimaryVP := CurrentViewport;
+  if (PrimaryVP = nil) or (not (FDesignRoot is TCastleUserInterface)) then
+  begin
+    ErrorBox('Open a .castle-user-interface design containing a TCastleViewport first.');
+    Exit;
+  end;
+
+  ParentUI := PrimaryVP.Parent;
+  if ParentUI = nil then
+    ParentUI := TCastleUserInterface(FDesignRoot);
+
+  SecCam := TCastleCamera.Create(DesignOwner);
+  SecCam.Name := ProposeComponentName(TCastleCamera, DesignOwner);
+  PrimaryVP.Items.Add(SecCam);
+
+  SecVP := TCastleViewport.Create(DesignOwner);
+  SecVP.Name := ProposeComponentName(TCastleViewport, DesignOwner);
+  SecVP.Items := PrimaryVP.Items;
+  SecVP.Camera := SecCam;
+
+  case LayoutPreset of
+    0: // Top-Right 3D Minimap / Radar Viewport (Orthographic Top-Down)
+      begin
+        SecCam.ProjectionType := ptOrthographic;
+        SecCam.Orthographic.Width := Max(10.0, CamHeight);
+        SecCam.Orthographic.Origin := Vector2(0.5, 0.5);
+        SecCam.SetView(
+          Vector3(0.0, Max(10.0, CamHeight), 0.0),
+          Vector3(0.0, -1.0, 0.0),
+          Vector3(0.0, 0.0, -1.0));
+
+        FrameRect := TCastleRectangleControl.Create(DesignOwner);
+        FrameRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner);
+        FrameRect.Width := Max(80.0, OverlayWidth) + 8.0;
+        FrameRect.Height := Max(80.0, OverlayHeight) + 8.0;
+        FrameRect.Color := Vector4(0.12, 0.16, 0.22, 0.92);
+        FrameRect.Border.AllSides := 2;
+        FrameRect.BorderColor := Vector4(0.35, 0.75, 0.98, 1.0);
+        FrameRect.Anchor(hpRight, -16.0);
+        FrameRect.Anchor(vpTop, -16.0);
+        ParentUI.InsertFront(FrameRect);
+
+        SecVP.FullSize := false;
+        SecVP.Width := Max(80.0, OverlayWidth);
+        SecVP.Height := Max(80.0, OverlayHeight);
+        SecVP.Anchor(hpMiddle, 0.0);
+        SecVP.Anchor(vpMiddle, 0.0);
+        FrameRect.InsertFront(SecVP);
+      end;
+
+    1: // Top-Center Rear-View Mirror Viewport
+      begin
+        SecCam.ProjectionType := ptPerspective;
+        SecCam.SetView(
+          Vector3(0.0, 2.0, 0.0),
+          Vector3(0.0, 0.0, 1.0),
+          Vector3(0.0, 1.0, 0.0));
+
+        FrameRect := TCastleRectangleControl.Create(DesignOwner);
+        FrameRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner);
+        FrameRect.Width := Max(120.0, OverlayWidth) + 8.0;
+        FrameRect.Height := Max(60.0, OverlayHeight) + 8.0;
+        FrameRect.Color := Vector4(0.10, 0.12, 0.15, 0.92);
+        FrameRect.Border.AllSides := 2;
+        FrameRect.BorderColor := Vector4(0.75, 0.80, 0.85, 1.0);
+        FrameRect.Anchor(hpMiddle, 0.0);
+        FrameRect.Anchor(vpTop, -14.0);
+        ParentUI.InsertFront(FrameRect);
+
+        SecVP.FullSize := false;
+        SecVP.Width := Max(120.0, OverlayWidth);
+        SecVP.Height := Max(60.0, OverlayHeight);
+        SecVP.Anchor(hpMiddle, 0.0);
+        SecVP.Anchor(vpMiddle, 0.0);
+        FrameRect.InsertFront(SecVP);
+      end;
+
+    2: // Bottom-Right Picture-in-Picture Security / Boss Cam
+      begin
+        SecCam.ProjectionType := ptPerspective;
+        SecCam.SetView(
+          Vector3(12.0, Max(4.0, CamHeight * 0.35), 12.0),
+          Vector3(-0.7, -0.3, -0.7),
+          Vector3(0.0, 1.0, 0.0));
+
+        FrameRect := TCastleRectangleControl.Create(DesignOwner);
+        FrameRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner);
+        FrameRect.Width := Max(100.0, OverlayWidth) + 8.0;
+        FrameRect.Height := Max(80.0, OverlayHeight) + 8.0;
+        FrameRect.Color := Vector4(0.08, 0.10, 0.14, 0.94);
+        FrameRect.Border.AllSides := 2;
+        FrameRect.BorderColor := Vector4(0.95, 0.65, 0.20, 1.0);
+        FrameRect.Anchor(hpRight, -16.0);
+        FrameRect.Anchor(vpBottom, 16.0);
+        ParentUI.InsertFront(FrameRect);
+
+        SecVP.FullSize := false;
+        SecVP.Width := Max(100.0, OverlayWidth);
+        SecVP.Height := Max(80.0, OverlayHeight);
+        SecVP.Anchor(hpMiddle, 0.0);
+        SecVP.Anchor(vpMiddle, 0.0);
+        FrameRect.InsertFront(SecVP);
+      end;
+
+    3: // Left / Right 2-Player Split-Screen Viewports (50% / 50%)
+      begin
+        SecCam.ProjectionType := ptPerspective;
+        SecCam.SetView(
+          Vector3(4.0, 2.0, 10.0),
+          Vector3(0.0, 0.0, -1.0),
+          Vector3(0.0, 1.0, 0.0));
+
+        PrimaryVP.FullSize := false;
+        PrimaryVP.WidthFraction := 0.5;
+        PrimaryVP.HeightFraction := 1.0;
+        PrimaryVP.Anchor(hpLeft, 0.0);
+        PrimaryVP.Anchor(vpBottom, 0.0);
+
+        SecVP.FullSize := false;
+        SecVP.WidthFraction := 0.5;
+        SecVP.HeightFraction := 1.0;
+        SecVP.Anchor(hpRight, 0.0);
+        SecVP.Anchor(vpBottom, 0.0);
+        ParentUI.InsertFront(SecVP);
+      end;
+
+    else // 4: Top / Bottom 2-Player Split-Screen Viewports (50% / 50%)
+      begin
+        SecCam.ProjectionType := ptPerspective;
+        SecCam.SetView(
+          Vector3(4.0, 2.0, 10.0),
+          Vector3(0.0, 0.0, -1.0),
+          Vector3(0.0, 1.0, 0.0));
+
+        PrimaryVP.FullSize := false;
+        PrimaryVP.WidthFraction := 1.0;
+        PrimaryVP.HeightFraction := 0.5;
+        PrimaryVP.Anchor(hpLeft, 0.0);
+        PrimaryVP.Anchor(vpTop, 0.0);
+
+        SecVP.FullSize := false;
+        SecVP.WidthFraction := 1.0;
+        SecVP.HeightFraction := 0.5;
+        SecVP.Anchor(hpLeft, 0.0);
+        SecVP.Anchor(vpBottom, 0.0);
+        ParentUI.InsertFront(SecVP);
+      end;
+  end;
+
+  UpdateDesign;
+  SetSelectedComponent(SecVP);
+  ModifiedOutsideObjectInspector(
+    Format('Setup Secondary Viewport (%s -> %s.Items)', [SecVP.Name, PrimaryVP.Name]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowMultiViewportSetupDialog;
+var
+  Dialog: TForm;
+  LblPreset, LblW, LblH, LblCamH: TLabel;
+  ComboPreset: TComboBox;
+  SpinW, SpinH, SpinCamH: TFloatSpinEdit;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if DesignOwner = nil then Exit;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Multi-Viewport PiP, 3D Minimap & Split-Screen Camera Rig';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.AutoSize := true;
+    Dialog.ChildSizing.LeftRightSpacing := 14;
+    Dialog.ChildSizing.TopBottomSpacing := 12;
+    Dialog.ChildSizing.VerticalSpacing := 8;
+    Dialog.Constraints.MinWidth := 460;
+
+    LblPreset := TLabel.Create(Dialog);
+    LblPreset.Caption := 'Secondary Viewport Layout & Camera Rig:';
+    LblPreset.Parent := Dialog;
+
+    ComboPreset := TComboBox.Create(Dialog);
+    ComboPreset.Style := csDropDownList;
+    ComboPreset.Items.Add('Top-Right 3D Minimap / Radar Viewport (Orthographic Top-Down)');
+    ComboPreset.Items.Add('Top-Center Rear-View Mirror Viewport (Backward Camera)');
+    ComboPreset.Items.Add('Bottom-Right Picture-in-Picture (PiP) Security / Boss Camera');
+    ComboPreset.Items.Add('2-Player Left / Right Split-Screen Viewports (50% / 50% WidthFraction)');
+    ComboPreset.Items.Add('2-Player Top / Bottom Split-Screen Viewports (50% / 50% HeightFraction)');
+    ComboPreset.ItemIndex := 0;
+    ComboPreset.Parent := Dialog;
+
+    LblW := TLabel.Create(Dialog);
+    LblW.Caption := 'Overlay Viewport Width (Pixels, for Minimap / Mirror / PiP):';
+    LblW.Parent := Dialog;
+
+    SpinW := TFloatSpinEdit.Create(Dialog);
+    SpinW.MinValue := 60.0;
+    SpinW.MaxValue := 1920.0;
+    SpinW.Increment := 20.0;
+    SpinW.DecimalPlaces := 0;
+    SpinW.Value := 240.0;
+    SpinW.Parent := Dialog;
+
+    LblH := TLabel.Create(Dialog);
+    LblH.Caption := 'Overlay Viewport Height (Pixels, for Minimap / Mirror / PiP):';
+    LblH.Parent := Dialog;
+
+    SpinH := TFloatSpinEdit.Create(Dialog);
+    SpinH.MinValue := 60.0;
+    SpinH.MaxValue := 1080.0;
+    SpinH.Increment := 20.0;
+    SpinH.DecimalPlaces := 0;
+    SpinH.Value := 240.0;
+    SpinH.Parent := Dialog;
+
+    LblCamH := TLabel.Create(Dialog);
+    LblCamH.Caption := 'Minimap Ortho Span / Camera Elevation (Meters):';
+    LblCamH.Parent := Dialog;
+
+    SpinCamH := TFloatSpinEdit.Create(Dialog);
+    SpinCamH.MinValue := 5.0;
+    SpinCamH.MaxValue := 1000.0;
+    SpinCamH.Increment := 5.0;
+    SpinCamH.DecimalPlaces := 1;
+    SpinCamH.Value := 40.0;
+    SpinCamH.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Create Secondary Viewport';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyMultiViewportSetup(
+        ComboPreset.ItemIndex,
+        SpinW.Value,
+        SpinH.Value,
+        SpinCamH.Value);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemMultiViewportSetupClick(Sender: TObject);
+begin
+  ShowMultiViewportSetupDialog;
+end;
+
+procedure TDesignFrame.ShowComponentPresetDialog;
+var
+  Dialog: TForm;
+  LblInfo, LblName: TLabel;
+  ListPresets: TListBox;
+  EditName: TEdit;
+  CheckKeepPlacement: TCheckBox;
+  ActionPanel, BottomPanel: TPanel;
+  BtnSaveCurrent, BtnApplySelected, BtnDeletePreset, BtnClose: TButton;
+
+  procedure RefreshPresetList;
+  var
+    I, Sep1, Sep2: Integer;
+    LineStr, PName, PClass: String;
+  begin
+    ListPresets.Items.BeginUpdate;
+    try
+      ListPresets.Items.Clear;
+      for I := 0 to FComponentPresets.Count - 1 do
+      begin
+        LineStr := FComponentPresets[I];
+        Sep1 := Pos('|', LineStr);
+        if Sep1 > 0 then
+        begin
+          PName := Copy(LineStr, 1, Sep1 - 1);
+          Sep2 := PosEx('|', LineStr, Sep1 + 1);
+          if Sep2 > Sep1 then
+          begin
+            PClass := Copy(LineStr, Sep1 + 1, Sep2 - Sep1 - 1);
+            ListPresets.Items.Add(Format('[%d] %s  (%s)', [I + 1, PName, PClass]));
+          end;
+        end;
+      end;
+      if (ListPresets.Items.Count > 0) and (ListPresets.ItemIndex < 0) then
+        ListPresets.ItemIndex := 0;
+    finally
+      ListPresets.Items.EndUpdate;
+    end;
+  end;
+
+  procedure CopyPresetPropsRecursive(const SrcObj, DstObj: TObject; const KeepPlacement: Boolean);
+  var
+    PropList: PPropList;
+    PropCount, PIdx: Integer;
+    DstProp, SrcProp: PPropInfo;
+    PropName: String;
+    SrcSubObj, DstSubObj: TObject;
+  begin
+    if (SrcObj = nil) or (DstObj = nil) then Exit;
+    PropCount := GetPropList(DstObj.ClassInfo, tkProperties, nil);
+    if PropCount <= 0 then Exit;
+    GetMem(PropList, PropCount * SizeOf(Pointer));
+    try
+      GetPropList(DstObj.ClassInfo, tkProperties, PropList);
+      for PIdx := 0 to PropCount - 1 do
+      begin
+        DstProp := PropList^[PIdx];
+        if DstProp = nil then Continue;
+        PropName := DstProp^.Name;
+        if SameText(PropName, 'Name') or SameText(PropName, 'Tag') then
+          Continue;
+        if KeepPlacement and (
+           SameText(PropName, 'TranslationPersistent') or
+           SameText(PropName, 'RotationPersistent') or
+           SameText(PropName, 'HorizontalAnchorSelf') or
+           SameText(PropName, 'HorizontalAnchorParent') or
+           SameText(PropName, 'HorizontalAnchorDelta') or
+           SameText(PropName, 'VerticalAnchorSelf') or
+           SameText(PropName, 'VerticalAnchorParent') or
+           SameText(PropName, 'VerticalAnchorDelta')) then
+          Continue;
+
+        SrcProp := GetPropInfo(SrcObj.ClassInfo, PropName);
+        if (SrcProp = nil) or (SrcProp^.PropType <> DstProp^.PropType) then
+          Continue;
+
+        case DstProp^.PropType^.Kind of
+          tkInteger, tkChar, tkEnumeration, tkBool, tkWChar, tkSet:
+            if DstProp^.SetProc <> nil then
+              SetOrdProp(DstObj, DstProp, GetOrdProp(SrcObj, SrcProp));
+          tkFloat:
+            if DstProp^.SetProc <> nil then
+              SetFloatProp(DstObj, DstProp, GetFloatProp(SrcObj, SrcProp));
+          tkInt64, tkQWord:
+            if DstProp^.SetProc <> nil then
+              SetInt64Prop(DstObj, DstProp, GetInt64Prop(SrcObj, SrcProp));
+          tkSString, tkLString, tkAString:
+            if DstProp^.SetProc <> nil then
+              SetStrProp(DstObj, DstProp, GetStrProp(SrcObj, SrcProp));
+          tkClass:
+            begin
+              SrcSubObj := GetObjectProp(SrcObj, SrcProp);
+              DstSubObj := GetObjectProp(DstObj, DstProp);
+              if (SrcSubObj <> nil) and (DstSubObj <> nil) and
+                 (SrcSubObj.ClassType = DstSubObj.ClassType) and
+                 ((not (DstSubObj is TComponent)) or
+                  (csSubComponent in TComponent(DstSubObj).ComponentStyle)) then
+                CopyPresetPropsRecursive(SrcSubObj, DstSubObj, KeepPlacement);
+            end;
+        end;
+      end;
+    finally
+      FreeMem(PropList);
+    end;
+  end;
+
+  procedure SaveCurrentClick(Sender: TObject);
+  var
+    Sel: TComponent;
+    PName, JsonStr: String;
+  begin
+    Sel := SelectedComponent;
+    if (Sel = nil) or (csSubComponent in Sel.ComponentStyle) then
+    begin
+      ErrorBox('Select a single component in the design to save as a preset.');
+      Exit;
+    end;
+    PName := Trim(EditName.Text);
+    if PName = '' then
+      PName := Sel.Name + ' Preset';
+    PName := StringReplace(PName, '|', '/', [rfReplaceAll]);
+    JsonStr := ComponentToString(Sel);
+    FComponentPresets.Add(PName + '|' + Sel.ClassName + '|' + JsonStr);
+    RefreshPresetList;
+    ListPresets.ItemIndex := ListPresets.Items.Count - 1;
+  end;
+
+  procedure ApplySelectedClick(Sender: TObject);
+  var
+    Idx, Sep1, Sep2, I, AppliedCount, SelectedCount: Integer;
+    LineStr, PName, JsonStr: String;
+    TempOwner, SrcComp: TComponent;
+    SelectedList: TComponentList;
+  begin
+    Idx := ListPresets.ItemIndex;
+    if (Idx < 0) or (Idx >= FComponentPresets.Count) then
+    begin
+      ErrorBox('Select a saved preset from the list first.');
+      Exit;
+    end;
+    LineStr := FComponentPresets[Idx];
+    Sep1 := Pos('|', LineStr);
+    Sep2 := PosEx('|', LineStr, Sep1 + 1);
+    if (Sep1 <= 0) or (Sep2 <= Sep1) then Exit;
+    PName := Copy(LineStr, 1, Sep1 - 1);
+    JsonStr := Copy(LineStr, Sep2 + 1, MaxInt);
+
+    GetSelected(SelectedList, SelectedCount, false);
+    try
+      if (SelectedList = nil) or (SelectedList.Count = 0) then
+      begin
+        ErrorBox('Select one or more target components in the Hierarchy to apply this preset onto.');
+        Exit;
+      end;
+
+      TempOwner := TComponent.Create(nil);
+      try
+        SrcComp := StringToComponent(JsonStr, TempOwner);
+        AppliedCount := 0;
+        for I := 0 to SelectedList.Count - 1 do
+        begin
+          if (SelectedList[I] = nil) or IsComponentLocked(SelectedList[I]) or
+             (csSubComponent in SelectedList[I].ComponentStyle) then
+            Continue;
+          CopyPresetPropsRecursive(SrcComp, SelectedList[I], CheckKeepPlacement.Checked);
+          Inc(AppliedCount);
+        end;
+
+        if AppliedCount > 0 then
+        begin
+          UpdateDesign;
+          SetSelected(SelectedList);
+          ModifiedOutsideObjectInspector(
+            Format('Apply Component Preset "%s" onto %d Component(s)', [PName, AppliedCount]),
+            ucHigh);
+        end;
+      finally
+        FreeAndNil(TempOwner);
+      end;
+    finally
+      FreeAndNil(SelectedList);
+    end;
+  end;
+
+  procedure DeletePresetClick(Sender: TObject);
+  var
+    Idx: Integer;
+  begin
+    Idx := ListPresets.ItemIndex;
+    if (Idx >= 0) and (Idx < FComponentPresets.Count) then
+    begin
+      FComponentPresets.Delete(Idx);
+      RefreshPresetList;
+    end;
+  end;
+
+begin
+  if DesignOwner = nil then Exit;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Component Property Template / Preset Manager';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsSizeToolWin;
+    Dialog.Width := 560;
+    Dialog.Height := 420;
+    Dialog.ChildSizing.LeftRightSpacing := 12;
+    Dialog.ChildSizing.TopBottomSpacing := 10;
+    Dialog.ChildSizing.VerticalSpacing := 6;
+
+    LblInfo := TLabel.Create(Dialog);
+    LblInfo.Align := alTop;
+    LblInfo.WordWrap := true;
+    LblInfo.Caption :=
+      'Save any selected component''s published properties as a reusable template preset, ' +
+      'and apply saved presets onto one or more selected components.';
+    LblInfo.Parent := Dialog;
+
+    LblName := TLabel.Create(Dialog);
+    LblName.Align := alTop;
+    LblName.Caption := 'New Preset Name (when saving selected component):';
+    LblName.Parent := Dialog;
+
+    EditName := TEdit.Create(Dialog);
+    EditName.Align := alTop;
+    if SelectedComponent <> nil then
+      EditName.Text := SelectedComponent.Name + ' Preset'
+    else
+      EditName.Text := 'My Component Preset';
+    EditName.Parent := Dialog;
+
+    CheckKeepPlacement := TCheckBox.Create(Dialog);
+    CheckKeepPlacement.Align := alTop;
+    CheckKeepPlacement.Caption :=
+      'Preserve Target Position / Rotation / 2D Anchors When Applying Preset';
+    CheckKeepPlacement.Checked := true;
+    CheckKeepPlacement.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnClose := TButton.Create(Dialog);
+    BtnClose.Caption := 'Close';
+    BtnClose.Cancel := true;
+    BtnClose.ModalResult := mrCancel;
+    BtnClose.Align := alRight;
+    BtnClose.BorderSpacing.Around := 4;
+    BtnClose.Parent := BottomPanel;
+
+    ActionPanel := TPanel.Create(Dialog);
+    ActionPanel.Align := alBottom;
+    ActionPanel.AutoSize := true;
+    ActionPanel.BevelOuter := bvNone;
+    ActionPanel.Parent := Dialog;
+
+    BtnSaveCurrent := TButton.Create(Dialog);
+    BtnSaveCurrent.Caption := 'Save Selected as Preset';
+    BtnSaveCurrent.ModalResult := mrYes;
+    BtnSaveCurrent.AutoSize := true;
+    BtnSaveCurrent.Align := alLeft;
+    BtnSaveCurrent.BorderSpacing.Around := 4;
+    BtnSaveCurrent.Parent := ActionPanel;
+
+    BtnApplySelected := TButton.Create(Dialog);
+    BtnApplySelected.Caption := 'Apply Preset to Selection';
+    BtnApplySelected.ModalResult := mrOk;
+    BtnApplySelected.AutoSize := true;
+    BtnApplySelected.Align := alLeft;
+    BtnApplySelected.BorderSpacing.Around := 4;
+    BtnApplySelected.Parent := ActionPanel;
+
+    BtnDeletePreset := TButton.Create(Dialog);
+    BtnDeletePreset.Caption := 'Delete Preset';
+    BtnDeletePreset.ModalResult := mrIgnore;
+    BtnDeletePreset.AutoSize := true;
+    BtnDeletePreset.Align := alLeft;
+    BtnDeletePreset.BorderSpacing.Around := 4;
+    BtnDeletePreset.Parent := ActionPanel;
+
+    ListPresets := TListBox.Create(Dialog);
+    ListPresets.Align := alClient;
+    ListPresets.Parent := Dialog;
+
+    RefreshPresetList;
+    while true do
+    begin
+      case Dialog.ShowModal of
+        mrYes:
+          SaveCurrentClick(nil);
+        mrOk:
+          ApplySelectedClick(nil);
+        mrIgnore:
+          DeletePresetClick(nil);
+        else
+          Break;
+      end;
+    end;
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemComponentPresetsClick(Sender: TObject);
+begin
+  ShowComponentPresetDialog;
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -40091,6 +41799,20 @@ begin
   if MenuTreeViewItemQuickHudElements <> nil then
     MenuTreeViewItemQuickHudElements.Enabled :=
       (SelectedUserInterface <> nil) or (FDesignRoot is TCastleUserInterface);
+  if MenuTreeViewItemQuickTerrainGenerator <> nil then
+    MenuTreeViewItemQuickTerrainGenerator.Enabled :=
+      (CurrentViewport <> nil) or (FDesignRoot is TCastleTransform);
+  if MenuTreeViewItemLivingAiSetup <> nil then
+    MenuTreeViewItemLivingAiSetup.Enabled :=
+      (CurrentTransform <> nil) or ((TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0));
+  if MenuTreeViewItemGameScreenTemplate <> nil then
+    MenuTreeViewItemGameScreenTemplate.Enabled :=
+      (SelectedUserInterface <> nil) or (FDesignRoot is TCastleUserInterface);
+  if MenuTreeViewItemMultiViewportSetup <> nil then
+    MenuTreeViewItemMultiViewportSetup.Enabled :=
+      (CurrentViewport <> nil) and (FDesignRoot is TCastleUserInterface);
+  if MenuTreeViewItemComponentPresets <> nil then
+    MenuTreeViewItemComponentPresets.Enabled := FDesignRoot <> nil;
   if MenuTreeViewItemGroupSelected <> nil then
     MenuTreeViewItemGroupSelected.Enabled := (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0);
   if MenuTreeViewItemUngroupSelected <> nil then

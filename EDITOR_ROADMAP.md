@@ -1375,11 +1375,36 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Implemented `TDesignFrame.ShowQuickHudElementsDialog` and `TDesignFrame.ApplyQuickHudElements` (`MenuTreeViewItemQuickHudElements` in `MenuTreeView`).
   - Spawns 5 ready-to-use 2D game HUD widgets anchored inside the active UI root/container: **Health / Stamina / XP Progress Bar**, **Center Screen Crosshair Reticle (`4 Arms + Center Dot`)**, **Corner Minimap / Radar Frame (`Border + Inner Mask + Cardinal N/E/S/W Labels`)**, **Bottom-Right Ammo / Weapon Counter Card**, and **Bottom Action / Hotbar Slot Row (`Slots 1..N` with Keybind Badges)** (`Shift`-click spawns a Health Bar immediately).
 
+### Phase 222: Quick 3D Procedural & Heightmap Terrain Generator (`ShowQuickTerrainGeneratorDialog` / `ApplyQuickTerrainGenerator`)
+- [x] **222.1. Biome Noise & Heightmap `TCastleTerrain` Wizard (`TDesignFrame.ShowQuickTerrainGeneratorDialog` / `TDesignFrame.ApplyQuickTerrainGenerator`)**
+  - Implemented `TDesignFrame.ShowQuickTerrainGeneratorDialog` and `TDesignFrame.ApplyQuickTerrainGenerator` (`MenuTreeViewItemQuickTerrainGenerator` in `MenuTreeView`).
+  - Spawns or updates a `TCastleTerrain` paired with `TCastleTerrainNoise` (**Gentle Rolling Hills**, **Rugged Alpine Mountains**, **Desert Sand Dunes**, **Volcanic / Alien Crater Badlands**) or `TCastleTerrainImage` (browsable heightmap `Url`), configuring `Size`, `Subdivisions`, `Height1`, `Height2`, `SteepEmphasize`, `Layer1..Layer4` colors, and optional static `TCastleMeshCollider` + `TCastleRigidBody` (`Shift`-click spawns Gentle Rolling Hills immediately).
+
+### Phase 223: Quick 3D Living Creature & AI Combat Behavior Setup (`ShowLivingAiBehaviorDialog` / `ApplyLivingAiBehavior`)
+- [x] **223.1. `TCastleLiving` & `TCastleMoveAttack` NPC Combat Configurator (`TDesignFrame.ShowLivingAiBehaviorDialog` / `TDesignFrame.ApplyLivingAiBehavior`)**
+  - Implemented `TDesignFrame.ShowLivingAiBehaviorDialog` and `TDesignFrame.ApplyLivingAiBehavior` (`MenuTreeViewItemLivingAiSetup` in `MenuTreeView`).
+  - Attaches and configures `TCastleLiving` (`MaxLife`, `Life`) and `TCastleMoveAttack` (`MoveSpeed`, `AttackMaxDistance`, `FireMissileMaxDistance`, `PreferredDistance`, `RunAwayLife`, `SmellDistance`, `AnimationIdle`/`Move`/`Attack`/`Die`) across 5 presets (**Player/Friendly**, **Melee Chaser**, **Ranged/Missile**, **Boss/Heavy Tank**, **Timid/Fleeing Critter**), automatically linking the primary selected transform as `MoveAttack.Enemy` when 2+ transforms are selected (`Shift`-click configures a Melee Chaser Enemy).
+
+### Phase 224: Quick 2D Full-Screen Game Menu & Dialogue Screen Generator (`ShowQuickGameScreenTemplateDialog` / `ApplyQuickGameScreenTemplate`)
+- [x] **224.1. Multi-Screen Game UI Template Factory (`TDesignFrame.ShowQuickGameScreenTemplateDialog` / `TDesignFrame.ApplyQuickGameScreenTemplate`)**
+  - Implemented `TDesignFrame.ShowQuickGameScreenTemplateDialog` and `TDesignFrame.ApplyQuickGameScreenTemplate` (`MenuTreeViewItemGameScreenTemplate` in `MenuTreeView`).
+  - Spawns 5 complete 2D game screens (**Main Title Menu Screen**, **Pause Overlay Modal**, **RPG / Adventure Dialogue Box**, **Settings / Options Screen**, and **4x3 Grid Inventory Window**) across 4 cohesive color themes (**Modern Dark Slate**, **Sci-Fi Cyan**, **Medieval Gold**, **Crimson Dark**) (`Shift`-click spawns a Main Title Menu Screen immediately).
+
+### Phase 225: Multi-Viewport Picture-in-Picture (PiP), 3D Minimap & Split-Screen Camera Rig (`ShowMultiViewportSetupDialog` / `ApplyMultiViewportSetup`)
+- [x] **225.1. Shared-World Secondary `TCastleViewport` & Independent `TCastleCamera` Wizard (`TDesignFrame.ShowMultiViewportSetupDialog` / `TDesignFrame.ApplyMultiViewportSetup`)**
+  - Implemented `TDesignFrame.ShowMultiViewportSetupDialog` and `TDesignFrame.ApplyMultiViewportSetup` (`MenuTreeViewItemMultiViewportSetup` in `MenuTreeView`).
+  - Spawns a secondary `TCastleViewport` sharing `PrimaryViewport.Items` with its own dedicated `TCastleCamera` configured as a **Top-Right 3D Orthographic Minimap**, **Top-Center Rear-View Mirror**, **Bottom-Right PiP Security/Boss Camera**, **2-Player Left/Right Split-Screen (`50%/50%`)**, or **2-Player Top/Bottom Split-Screen (`50%/50%`)**.
+
+### Phase 226: Component Property Template / Preset Manager (`ShowComponentPresetDialog` / `MenuTreeViewItemComponentPresets`)
+- [x] **226.1. Named Component RTTI Template Library (`TDesignFrame.ShowComponentPresetDialog`)**
+  - Implemented `TDesignFrame.ShowComponentPresetDialog` and added **`Component Property Template / Preset Manager...`** (`MenuTreeViewItemComponentPresets`) in `MenuTreeView`.
+  - Saves any selected component's published properties (and subcomponents) as a named preset in `FComponentPresets` and batch-applies saved presets onto 1+ selected components while optionally preserving target 3D `Translation`/`Rotation` and 2D UI anchors.
+
 ---
 
-## Roadmap Completion Status (Phases 1–221)
+## Roadmap Completion Status (Phases 1–226)
 
-All **221 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **226 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 
