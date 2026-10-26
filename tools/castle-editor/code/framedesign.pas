@@ -604,6 +604,11 @@ type
       MenuTreeViewItemGameScreenTemplate: TMenuItem;
       MenuTreeViewItemMultiViewportSetup: TMenuItem;
       MenuTreeViewItemComponentPresets: TMenuItem;
+      MenuTreeViewItemQuickTiledMap: TMenuItem;
+      MenuTreeViewItemQuickFlashEffect: TMenuItem;
+      MenuTreeViewItemQuickNotifications: TMenuItem;
+      MenuTreeViewItemClipPlaneSlicer: TMenuItem;
+      MenuTreeViewItemLevelBoundaryWalls: TMenuItem;
       FComponentPresets: TStringList;
       FComponentNotes: TStringList;
       FCopiedComponentPropsJson: String;
@@ -897,6 +902,11 @@ type
     procedure MenuTreeViewItemGameScreenTemplateClick(Sender: TObject);
     procedure MenuTreeViewItemMultiViewportSetupClick(Sender: TObject);
     procedure MenuTreeViewItemComponentPresetsClick(Sender: TObject);
+    procedure MenuTreeViewItemQuickTiledMapClick(Sender: TObject);
+    procedure MenuTreeViewItemQuickFlashEffectClick(Sender: TObject);
+    procedure MenuTreeViewItemQuickNotificationsClick(Sender: TObject);
+    procedure MenuTreeViewItemClipPlaneSlicerClick(Sender: TObject);
+    procedure MenuTreeViewItemLevelBoundaryWallsClick(Sender: TObject);
     procedure MenuTreeViewItemGroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemUngroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemArrayDuplicateClick(Sender: TObject);
@@ -2161,6 +2171,24 @@ type
       const OverlayWidth, OverlayHeight, CamHeight: Single);
     procedure ShowMultiViewportSetupDialog;
     procedure ShowComponentPresetDialog;
+    procedure ApplyQuickTiledMap(const MapPreset: Integer; const TmxUrl: String;
+      const UniformScale, LayersZDist: Single; const SetupOrtho2DCam: Boolean);
+    procedure ShowQuickTiledMapDialog;
+    procedure ApplyQuickFlashEffect(const FlashPreset: Integer;
+      const DurationSec: Single; const MaskImageUrl: String;
+      const PreviewImmediately: Boolean);
+    procedure ShowQuickFlashEffectDialog;
+    procedure ApplyQuickNotifications(const NotifPreset, MaxMsgs: Integer;
+      const TimeoutSec, FadeSec: Single; const FontSizeVal: Single;
+      const CollectHist, PreviewMessages: Boolean);
+    procedure ShowQuickNotificationsDialog;
+    procedure ApplyClipPlaneSlicer(const SliceMode: Integer;
+      const PlaneOffset: Single; const EntireDesign: Boolean);
+    procedure ShowClipPlaneSlicerDialog;
+    procedure ApplyLevelBoundaryWalls(const WallHeight, WallThickness,
+      MarginPad, KillZDepth: Single; const AddCeiling, AddKillZTrigger,
+      InvisibleAtRuntime: Boolean);
+    procedure ShowLevelBoundaryWallDialog;
     procedure SaveCameraBookmark(const Slot: Integer);
     procedure RecallCameraBookmark(const Slot: Integer);
     procedure AdjustCameraSpeed(const Factor: Single);
@@ -2222,6 +2250,7 @@ uses
   CastleUriUtils, X3DLoad, CastleFilesUtils, CastleInternalPhysicsVisualization,
   CastleInternalUrlUtils, CastleInternalFileMonitor, X3DNodes, CastleSoundEngine,
   CastleBehaviors, CastleThirdPersonNavigation, CastleTerrain, CastleLivingBehaviors,
+  CastleFlashEffect, CastleNotifications,
   { Editor units }
   EditorRegisterAllComponents,
   FormProject, CastleComponentEditorDesigner;
@@ -6909,6 +6938,31 @@ begin
   MenuTreeViewItemComponentPresets.Caption := 'Component Property Template / Preset Manager...';
   MenuTreeViewItemComponentPresets.OnClick := @MenuTreeViewItemComponentPresetsClick;
   MenuTreeView.Items.Add(MenuTreeViewItemComponentPresets);
+
+  MenuTreeViewItemQuickTiledMap := TMenuItem.Create(Self);
+  MenuTreeViewItemQuickTiledMap.Caption := 'Quick 2D/3D Tiled Map (TCastleTiledMap) Setup... (Shift: Pixel-Art Map)';
+  MenuTreeViewItemQuickTiledMap.OnClick := @MenuTreeViewItemQuickTiledMapClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemQuickTiledMap);
+
+  MenuTreeViewItemQuickFlashEffect := TMenuItem.Create(Self);
+  MenuTreeViewItemQuickFlashEffect.Caption := 'Quick 2D Screen Flash, Fade & Damage Vignette (TCastleFlashEffect)... (Shift: Damage Flash)';
+  MenuTreeViewItemQuickFlashEffect.OnClick := @MenuTreeViewItemQuickFlashEffectClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemQuickFlashEffect);
+
+  MenuTreeViewItemQuickNotifications := TMenuItem.Create(Self);
+  MenuTreeViewItemQuickNotifications.Caption := 'Quick 2D In-Game Notifications & Combat Log (TCastleNotifications)... (Shift: Quest Log)';
+  MenuTreeViewItemQuickNotifications.OnClick := @MenuTreeViewItemQuickNotificationsClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemQuickNotifications);
+
+  MenuTreeViewItemClipPlaneSlicer := TMenuItem.Create(Self);
+  MenuTreeViewItemClipPlaneSlicer.Caption := 'Quick 3D Cross-Section Cutaway & ClipPlane Slicer... (Shift: Dollhouse Slice)';
+  MenuTreeViewItemClipPlaneSlicer.OnClick := @MenuTreeViewItemClipPlaneSlicerClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemClipPlaneSlicer);
+
+  MenuTreeViewItemLevelBoundaryWalls := TMenuItem.Create(Self);
+  MenuTreeViewItemLevelBoundaryWalls.Caption := 'Quick 3D Level Bounds, Kill-Z & Invisible Perimeter Walls... (Shift: 4-Wall Enclosure)';
+  MenuTreeViewItemLevelBoundaryWalls.OnClick := @MenuTreeViewItemLevelBoundaryWallsClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemLevelBoundaryWalls);
 
   MenuTreeViewItemGroupSelected := TMenuItem.Create(Self);
   MenuTreeViewItemGroupSelected.Caption := 'Group Selected Under New Transform (Ctrl+G)';
@@ -41212,6 +41266,1180 @@ begin
   ShowComponentPresetDialog;
 end;
 
+procedure TDesignFrame.ApplyQuickTiledMap(const MapPreset: Integer; const TmxUrl: String;
+  const UniformScale, LayersZDist: Single; const SetupOrtho2DCam: Boolean);
+var
+  ParentT: TCastleTransform;
+  TiledComp: TCastleTiledMap;
+  ActualScale: Single;
+  VP: TCastleViewport;
+begin
+  if DesignOwner = nil then Exit;
+
+  TiledComp := nil;
+  ParentT := nil;
+  if CurrentTransform is TCastleTiledMap then
+  begin
+    TiledComp := TCastleTiledMap(CurrentTransform);
+    ParentT := TiledComp.Parent;
+  end else
+  if CurrentTransform <> nil then
+    ParentT := CurrentTransform
+  else
+  if CurrentViewport <> nil then
+    ParentT := CurrentViewport.Items
+  else
+  if FDesignRoot is TCastleTransform then
+    ParentT := TCastleTransform(FDesignRoot);
+
+  if (TiledComp = nil) and (ParentT = nil) then
+  begin
+    ErrorBox('Open a 3D/2D Viewport or Transform design before creating a TCastleTiledMap.');
+    Exit;
+  end;
+
+  if TiledComp = nil then
+  begin
+    TiledComp := TCastleTiledMap.Create(DesignOwner);
+    TiledComp.Name := ProposeComponentName(TCastleTiledMap, DesignOwner);
+    ParentT.Add(TiledComp);
+  end;
+
+  ActualScale := Max(0.001, UniformScale);
+  TiledComp.Scale := Vector3(ActualScale, ActualScale, ActualScale);
+  TiledComp.LayersZDistance := Max(0.1, LayersZDist);
+
+  case MapPreset of
+    0: // Pixel-Art 2D Map (Nearest-Neighbor, Crisp Pixels)
+      begin
+        TiledComp.SmoothScaling := false;
+        TiledComp.SmoothScalingSafeBorder := false;
+        TiledComp.ForceTilesetSpacing := false;
+        TiledComp.Rotation := Vector4(0, 1, 0, 0);
+      end;
+    1: // HD / Hand-Drawn 2D Map (Bilinear + Safe Border)
+      begin
+        TiledComp.SmoothScaling := true;
+        TiledComp.SmoothScalingSafeBorder := true;
+        TiledComp.ForceTilesetSpacing := false;
+        TiledComp.Rotation := Vector4(0, 1, 0, 0);
+      end;
+    2: // HD 2D Map with Forced Tileset Spacing
+      begin
+        TiledComp.SmoothScaling := true;
+        TiledComp.SmoothScalingSafeBorder := false;
+        TiledComp.ForceTilesetSpacing := true;
+        TiledComp.Rotation := Vector4(0, 1, 0, 0);
+      end;
+    else // 3: 3D Floor / Tabletop Map in Perspective World (XZ Plane)
+      begin
+        TiledComp.SmoothScaling := false;
+        TiledComp.SmoothScalingSafeBorder := false;
+        TiledComp.ForceTilesetSpacing := false;
+        TiledComp.Rotation := Vector4(1, 0, 0, -Pi * 0.5);
+      end;
+  end;
+
+  if Trim(TmxUrl) <> '' then
+    TiledComp.Url := Trim(TmxUrl);
+
+  if SetupOrtho2DCam and (CurrentViewport <> nil) then
+  begin
+    VP := CurrentViewport;
+    if VP.Camera <> nil then
+    begin
+      VP.Camera.ProjectionType := ptOrthographic;
+      VP.Camera.Orthographic.Origin := Vector2(0.0, 0.0);
+      VP.Camera.SetView(
+        Vector3(0.0, 0.0, 500.0),
+        Vector3(0.0, 0.0, -1.0),
+        Vector3(0.0, 1.0, 0.0));
+    end;
+  end;
+
+  UpdateDesign;
+  SetSelectedComponent(TiledComp);
+  ModifiedOutsideObjectInspector(
+    Format('Configure TCastleTiledMap (%s)', [TiledComp.Name]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowQuickTiledMapDialog;
+var
+  Dialog: TForm;
+  LblPreset, LblUrl, LblScale, LblZDist: TLabel;
+  ComboPreset: TComboBox;
+  UrlPanel: TPanel;
+  EditUrl: TEdit;
+  BtnBrowse: TButton;
+  SpinScale, SpinZDist: TFloatSpinEdit;
+  CheckOrtho2D: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+  OpenDlg: TCastleOpenDialog;
+begin
+  if DesignOwner = nil then Exit;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 2D/3D Tiled Map (TCastleTiledMap) Setup';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.AutoSize := true;
+    Dialog.ChildSizing.LeftRightSpacing := 14;
+    Dialog.ChildSizing.TopBottomSpacing := 12;
+    Dialog.ChildSizing.VerticalSpacing := 8;
+    Dialog.Constraints.MinWidth := 480;
+
+    LblPreset := TLabel.Create(Dialog);
+    LblPreset.Caption := 'Tiled Map Rendering & Orientation Preset:';
+    LblPreset.Parent := Dialog;
+
+    ComboPreset := TComboBox.Create(Dialog);
+    ComboPreset.Style := csDropDownList;
+    ComboPreset.Items.Add('Pixel-Art 2D Map (SmoothScaling=false, Nearest Filter)');
+    ComboPreset.Items.Add('HD / Hand-Drawn 2D Map (SmoothScaling=true, SafeBorder=true)');
+    ComboPreset.Items.Add('HD 2D Map with Forced Tileset Spacing (ForceTilesetSpacing=true)');
+    ComboPreset.Items.Add('3D Floor / Tabletop Map on Horizontal XZ Plane');
+    ComboPreset.ItemIndex := 0;
+    ComboPreset.Parent := Dialog;
+
+    LblUrl := TLabel.Create(Dialog);
+    LblUrl.Caption := 'Tiled Map (.tmx) File URL:';
+    LblUrl.Parent := Dialog;
+
+    UrlPanel := TPanel.Create(Dialog);
+    UrlPanel.BevelOuter := bvNone;
+    UrlPanel.AutoSize := true;
+    UrlPanel.Parent := Dialog;
+
+    BtnBrowse := TButton.Create(Dialog);
+    BtnBrowse.Caption := 'Browse .tmx...';
+    BtnBrowse.ModalResult := mrRetry;
+    BtnBrowse.AutoSize := true;
+    BtnBrowse.Align := alRight;
+    BtnBrowse.BorderSpacing.Left := 6;
+    BtnBrowse.Parent := UrlPanel;
+
+    EditUrl := TEdit.Create(Dialog);
+    EditUrl.Align := alClient;
+    if CurrentTransform is TCastleTiledMap then
+      EditUrl.Text := TCastleTiledMap(CurrentTransform).Url
+    else
+      EditUrl.Text := '';
+    EditUrl.TextHint := 'castle-data:/maps/level1.tmx';
+    EditUrl.Parent := UrlPanel;
+
+    LblScale := TLabel.Create(Dialog);
+    LblScale.Caption := 'Uniform Map Scale (e.g. 1.0 = 1 Pixel per Unit, 0.05 = 20 Pixels per Meter):';
+    LblScale.Parent := Dialog;
+
+    SpinScale := TFloatSpinEdit.Create(Dialog);
+    SpinScale.MinValue := 0.001;
+    SpinScale.MaxValue := 100.0;
+    SpinScale.Increment := 0.25;
+    SpinScale.DecimalPlaces := 3;
+    SpinScale.Value := 1.0;
+    SpinScale.Parent := Dialog;
+
+    LblZDist := TLabel.Create(Dialog);
+    LblZDist.Caption := 'Layers Z Distance (Separation Between Map Layers):';
+    LblZDist.Parent := Dialog;
+
+    SpinZDist := TFloatSpinEdit.Create(Dialog);
+    SpinZDist.MinValue := 0.1;
+    SpinZDist.MaxValue := 1000.0;
+    SpinZDist.Increment := 1.0;
+    SpinZDist.DecimalPlaces := 1;
+    SpinZDist.Value := 10.0;
+    SpinZDist.Parent := Dialog;
+
+    CheckOrtho2D := TCheckBox.Create(Dialog);
+    CheckOrtho2D.Caption := 'Configure Active Viewport Camera as 2D Orthographic';
+    CheckOrtho2D.Checked := false;
+    CheckOrtho2D.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Apply Tiled Map';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    while true do
+    begin
+      case Dialog.ShowModal of
+        mrRetry:
+          begin
+            OpenDlg := TCastleOpenDialog.Create(Self);
+            try
+              OpenDlg.Title := 'Select Tiled Map (.tmx) File';
+              OpenDlg.Filter := LoadTiledMap_FileFilters;
+              OpenDlg.AdviceDataDirectory := true;
+              if Trim(EditUrl.Text) <> '' then
+                OpenDlg.Url := Trim(EditUrl.Text);
+              if OpenDlg.Execute then
+                EditUrl.Text := OpenDlg.Url;
+            finally
+              FreeAndNil(OpenDlg);
+            end;
+          end;
+        mrOk:
+          begin
+            ApplyQuickTiledMap(
+              ComboPreset.ItemIndex,
+              EditUrl.Text,
+              SpinScale.Value,
+              SpinZDist.Value,
+              CheckOrtho2D.Checked);
+            Break;
+          end;
+        else
+          Break;
+      end;
+    end;
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemQuickTiledMapClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyQuickTiledMap(0, '', 1.0, 10.0, false)
+  else
+    ShowQuickTiledMapDialog;
+end;
+
+procedure TDesignFrame.ApplyQuickFlashEffect(const FlashPreset: Integer;
+  const DurationSec: Single; const MaskImageUrl: String;
+  const PreviewImmediately: Boolean);
+var
+  ParentUI: TCastleUserInterface;
+  FlashComp: TCastleFlashEffect;
+  FlashCol: TCastleColor;
+  IsDark: Boolean;
+begin
+  if DesignOwner = nil then Exit;
+
+  FlashComp := nil;
+  ParentUI := nil;
+  if SelectedUserInterface is TCastleFlashEffect then
+  begin
+    FlashComp := TCastleFlashEffect(SelectedUserInterface);
+    ParentUI := FlashComp.Parent;
+  end else
+  if SelectedUserInterface <> nil then
+    ParentUI := SelectedUserInterface
+  else
+  if FDesignRoot is TCastleUserInterface then
+    ParentUI := TCastleUserInterface(FDesignRoot);
+
+  if (FlashComp = nil) and (ParentUI = nil) then
+  begin
+    ErrorBox('Select a 2D User Interface container (or open a .castle-user-interface design) first.');
+    Exit;
+  end;
+
+  if FlashComp = nil then
+  begin
+    FlashComp := TCastleFlashEffect.Create(DesignOwner);
+    FlashComp.Name := ProposeComponentName(TCastleFlashEffect, DesignOwner);
+    FlashComp.FullSize := true;
+    ParentUI.InsertFront(FlashComp);
+  end;
+
+  FlashComp.Duration := Max(0.05, DurationSec);
+  if Trim(MaskImageUrl) <> '' then
+    FlashComp.Image.Url := Trim(MaskImageUrl);
+
+  IsDark := false;
+  case FlashPreset of
+    0: FlashCol := Vector4(0.95, 0.12, 0.12, 0.78); // Damage Hit Red Flash
+    1: FlashCol := Vector4(0.15, 0.92, 0.42, 0.65); // Heal / Shield Green Pulse
+    2: begin
+         FlashCol := Vector4(0.0, 0.0, 0.0, 1.0);   // Level Transition Black Fade
+         IsDark := true;
+       end;
+    3: FlashCol := Vector4(1.0, 0.98, 0.90, 0.95);  // Explosion / Lightning White Flash
+    else
+       FlashCol := Vector4(0.68, 0.18, 0.95, 0.72); // Poison / Arcane Purple Flash
+  end;
+
+  if PreviewImmediately then
+    FlashComp.Flash(FlashCol, IsDark);
+
+  UpdateDesign;
+  SetSelectedComponent(FlashComp);
+  ModifiedOutsideObjectInspector(
+    Format('Configure TCastleFlashEffect (%s, %.2fs)', [FlashComp.Name, FlashComp.Duration]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowQuickFlashEffectDialog;
+var
+  Dialog: TForm;
+  LblPreset, LblDur, LblUrl: TLabel;
+  ComboPreset: TComboBox;
+  SpinDur: TFloatSpinEdit;
+  UrlPanel: TPanel;
+  EditUrl: TEdit;
+  BtnBrowse: TButton;
+  CheckPreview: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+  OpenDlg: TCastleOpenDialog;
+begin
+  if DesignOwner = nil then Exit;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 2D Screen Flash, Fade & Damage Vignette (TCastleFlashEffect)';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.AutoSize := true;
+    Dialog.ChildSizing.LeftRightSpacing := 14;
+    Dialog.ChildSizing.TopBottomSpacing := 12;
+    Dialog.ChildSizing.VerticalSpacing := 8;
+    Dialog.Constraints.MinWidth := 470;
+
+    LblPreset := TLabel.Create(Dialog);
+    LblPreset.Caption := 'Screen Flash / Fade Effect Preset:';
+    LblPreset.Parent := Dialog;
+
+    ComboPreset := TComboBox.Create(Dialog);
+    ComboPreset.Style := csDropDownList;
+    ComboPreset.Items.Add('Damage Hit Red Flash (RGBA 0.95, 0.12, 0.12, 0.78)');
+    ComboPreset.Items.Add('Heal / Stamina / Shield Green Pulse');
+    ComboPreset.Items.Add('Level Transition / Teleport Black Fade (Dark=true)');
+    ComboPreset.Items.Add('Explosion / Lightning Blind White Flash');
+    ComboPreset.Items.Add('Poison / Arcane Purple Screen Tint');
+    ComboPreset.ItemIndex := 0;
+    ComboPreset.Parent := Dialog;
+
+    LblDur := TLabel.Create(Dialog);
+    LblDur.Caption := 'Flash / Fade Duration (Seconds):';
+    LblDur.Parent := Dialog;
+
+    SpinDur := TFloatSpinEdit.Create(Dialog);
+    SpinDur.MinValue := 0.05;
+    SpinDur.MaxValue := 20.0;
+    SpinDur.Increment := 0.10;
+    SpinDur.DecimalPlaces := 2;
+    SpinDur.Value := 0.50;
+    SpinDur.Parent := Dialog;
+
+    LblUrl := TLabel.Create(Dialog);
+    LblUrl.Caption := 'Optional Vignette / Border Mask Image URL (Image.Url):';
+    LblUrl.Parent := Dialog;
+
+    UrlPanel := TPanel.Create(Dialog);
+    UrlPanel.BevelOuter := bvNone;
+    UrlPanel.AutoSize := true;
+    UrlPanel.Parent := Dialog;
+
+    BtnBrowse := TButton.Create(Dialog);
+    BtnBrowse.Caption := 'Browse...';
+    BtnBrowse.ModalResult := mrRetry;
+    BtnBrowse.AutoSize := true;
+    BtnBrowse.Align := alRight;
+    BtnBrowse.BorderSpacing.Left := 6;
+    BtnBrowse.Parent := UrlPanel;
+
+    EditUrl := TEdit.Create(Dialog);
+    EditUrl.Align := alClient;
+    if SelectedUserInterface is TCastleFlashEffect then
+      EditUrl.Text := TCastleFlashEffect(SelectedUserInterface).Image.Url
+    else
+      EditUrl.Text := '';
+    EditUrl.TextHint := 'Optional vignette mask image (leave empty for full-screen)';
+    EditUrl.Parent := UrlPanel;
+
+    CheckPreview := TCheckBox.Create(Dialog);
+    CheckPreview.Caption := 'Trigger Live Preview Flash Immediately in Viewport';
+    CheckPreview.Checked := true;
+    CheckPreview.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Create & Flash';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    while true do
+    begin
+      case Dialog.ShowModal of
+        mrRetry:
+          begin
+            OpenDlg := TCastleOpenDialog.Create(Self);
+            try
+              OpenDlg.Title := 'Select Vignette Mask Image';
+              OpenDlg.Filter := 'Image Files (*.png;*.jpg;*.jpeg;*.webp)|*.png;*.jpg;*.jpeg;*.webp|All Files (*.*)|*.*';
+              OpenDlg.AdviceDataDirectory := true;
+              if OpenDlg.Execute then
+                EditUrl.Text := OpenDlg.Url;
+            finally
+              FreeAndNil(OpenDlg);
+            end;
+          end;
+        mrOk:
+          begin
+            ApplyQuickFlashEffect(
+              ComboPreset.ItemIndex,
+              SpinDur.Value,
+              EditUrl.Text,
+              CheckPreview.Checked);
+            Break;
+          end;
+        else
+          Break;
+      end;
+    end;
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemQuickFlashEffectClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyQuickFlashEffect(0, 0.50, '', true)
+  else
+    ShowQuickFlashEffectDialog;
+end;
+
+procedure TDesignFrame.ApplyQuickNotifications(const NotifPreset, MaxMsgs: Integer;
+  const TimeoutSec, FadeSec: Single; const FontSizeVal: Single;
+  const CollectHist, PreviewMessages: Boolean);
+var
+  ParentUI: TCastleUserInterface;
+  NotifComp: TCastleNotifications;
+begin
+  if DesignOwner = nil then Exit;
+
+  NotifComp := nil;
+  ParentUI := nil;
+  if SelectedUserInterface is TCastleNotifications then
+  begin
+    NotifComp := TCastleNotifications(SelectedUserInterface);
+    ParentUI := NotifComp.Parent;
+  end else
+  if SelectedUserInterface <> nil then
+    ParentUI := SelectedUserInterface
+  else
+  if FDesignRoot is TCastleUserInterface then
+    ParentUI := TCastleUserInterface(FDesignRoot);
+
+  if (NotifComp = nil) and (ParentUI = nil) then
+  begin
+    ErrorBox('Select a 2D User Interface container (or open a .castle-user-interface design) first.');
+    Exit;
+  end;
+
+  if NotifComp = nil then
+  begin
+    NotifComp := TCastleNotifications.Create(DesignOwner);
+    NotifComp.Name := ProposeComponentName(TCastleNotifications, DesignOwner);
+    ParentUI.InsertFront(NotifComp);
+  end;
+
+  NotifComp.MaxMessages := Max(1, MaxMsgs);
+  NotifComp.Timeout := Max(0.5, TimeoutSec);
+  NotifComp.Fade := Max(0.1, Min(NotifComp.Timeout, FadeSec));
+  NotifComp.FontSize := Max(8.0, FontSizeVal);
+  NotifComp.CollectHistory := CollectHist;
+
+  case NotifPreset of
+    0: // Top-Left Quest / Pickup Log
+      begin
+        NotifComp.Anchor(hpLeft, 18.0);
+        NotifComp.Anchor(vpTop, -18.0);
+        NotifComp.TextAlignment := hpLeft;
+        NotifComp.Color := Vector4(0.98, 0.90, 0.55, 1.0);
+      end;
+    1: // Bottom-Center Subtitle / Toast Feed
+      begin
+        NotifComp.Anchor(hpMiddle, 0.0);
+        NotifComp.Anchor(vpBottom, 42.0);
+        NotifComp.TextAlignment := hpMiddle;
+        NotifComp.Color := Vector4(0.96, 0.98, 1.0, 1.0);
+      end;
+    2: // Top-Right Achievement / Kill Feed
+      begin
+        NotifComp.Anchor(hpRight, -18.0);
+        NotifComp.Anchor(vpTop, -18.0);
+        NotifComp.TextAlignment := hpRight;
+        NotifComp.Color := Vector4(0.35, 0.88, 0.98, 1.0);
+      end;
+    else // 3: Bottom-Left RPG Combat / Loot Log
+      begin
+        NotifComp.Anchor(hpLeft, 18.0);
+        NotifComp.Anchor(vpBottom, 24.0);
+        NotifComp.TextAlignment := hpLeft;
+        NotifComp.Color := Vector4(0.65, 0.96, 0.68, 1.0);
+      end;
+  end;
+
+  if PreviewMessages then
+  begin
+    NotifComp.Clear;
+    NotifComp.Show('[Quest Updated] Explore the Ancient Citadel');
+    NotifComp.Show('Picked up +25 Gold Coins');
+    NotifComp.Show('Checkpoint Reached');
+  end;
+
+  UpdateDesign;
+  SetSelectedComponent(NotifComp);
+  ModifiedOutsideObjectInspector(
+    Format('Configure TCastleNotifications (%s)', [NotifComp.Name]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowQuickNotificationsDialog;
+var
+  Dialog: TForm;
+  LblPreset, LblMax, LblTimeout, LblFade, LblFont: TLabel;
+  ComboPreset: TComboBox;
+  SpinMax: TSpinEdit;
+  SpinTimeout, SpinFade, SpinFont: TFloatSpinEdit;
+  CheckHist, CheckPreview: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if DesignOwner = nil then Exit;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 2D In-Game Notifications & Combat Log (TCastleNotifications)';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.AutoSize := true;
+    Dialog.ChildSizing.LeftRightSpacing := 14;
+    Dialog.ChildSizing.TopBottomSpacing := 12;
+    Dialog.ChildSizing.VerticalSpacing := 8;
+    Dialog.Constraints.MinWidth := 460;
+
+    LblPreset := TLabel.Create(Dialog);
+    LblPreset.Caption := 'Notifications Feed Position & Style Preset:';
+    LblPreset.Parent := Dialog;
+
+    ComboPreset := TComboBox.Create(Dialog);
+    ComboPreset.Style := csDropDownList;
+    ComboPreset.Items.Add('Top-Left Quest & Pickup Feed (Left-Aligned, Warm Gold)');
+    ComboPreset.Items.Add('Bottom-Center Subtitle & Toast Feed (Centered, Crisp White)');
+    ComboPreset.Items.Add('Top-Right Kill & Achievement Feed (Right-Aligned, Sci-Fi Cyan)');
+    ComboPreset.Items.Add('Bottom-Left RPG Combat & Loot Log (Left-Aligned, Emerald Green)');
+    ComboPreset.ItemIndex := 0;
+    ComboPreset.Parent := Dialog;
+
+    LblMax := TLabel.Create(Dialog);
+    LblMax.Caption := 'Max Visible Messages (MaxMessages):';
+    LblMax.Parent := Dialog;
+
+    SpinMax := TSpinEdit.Create(Dialog);
+    SpinMax.MinValue := 1;
+    SpinMax.MaxValue := 32;
+    SpinMax.Value := 5;
+    SpinMax.Parent := Dialog;
+
+    LblTimeout := TLabel.Create(Dialog);
+    LblTimeout.Caption := 'Message Display Timeout (Seconds):';
+    LblTimeout.Parent := Dialog;
+
+    SpinTimeout := TFloatSpinEdit.Create(Dialog);
+    SpinTimeout.MinValue := 0.5;
+    SpinTimeout.MaxValue := 60.0;
+    SpinTimeout.Increment := 0.5;
+    SpinTimeout.DecimalPlaces := 1;
+    SpinTimeout.Value := 5.0;
+    SpinTimeout.Parent := Dialog;
+
+    LblFade := TLabel.Create(Dialog);
+    LblFade.Caption := 'Fade-Out Duration (Seconds):';
+    LblFade.Parent := Dialog;
+
+    SpinFade := TFloatSpinEdit.Create(Dialog);
+    SpinFade.MinValue := 0.1;
+    SpinFade.MaxValue := 10.0;
+    SpinFade.Increment := 0.25;
+    SpinFade.DecimalPlaces := 2;
+    SpinFade.Value := 1.0;
+    SpinFade.Parent := Dialog;
+
+    LblFont := TLabel.Create(Dialog);
+    LblFont.Caption := 'Font Size (Pixels):';
+    LblFont.Parent := Dialog;
+
+    SpinFont := TFloatSpinEdit.Create(Dialog);
+    SpinFont.MinValue := 8.0;
+    SpinFont.MaxValue := 72.0;
+    SpinFont.Increment := 2.0;
+    SpinFont.DecimalPlaces := 0;
+    SpinFont.Value := 20.0;
+    SpinFont.Parent := Dialog;
+
+    CheckHist := TCheckBox.Create(Dialog);
+    CheckHist.Caption := 'Collect Full Message History (CollectHistory := true)';
+    CheckHist.Checked := true;
+    CheckHist.Parent := Dialog;
+
+    CheckPreview := TCheckBox.Create(Dialog);
+    CheckPreview.Caption := 'Emit Sample Game Notifications Immediately in Viewport';
+    CheckPreview.Checked := true;
+    CheckPreview.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Create Notifications';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyQuickNotifications(
+        ComboPreset.ItemIndex,
+        SpinMax.Value,
+        SpinTimeout.Value,
+        SpinFade.Value,
+        SpinFont.Value,
+        CheckHist.Checked,
+        CheckPreview.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemQuickNotificationsClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyQuickNotifications(0, 5, 5.0, 1.0, 20.0, true, true)
+  else
+    ShowQuickNotificationsDialog;
+end;
+
+procedure TDesignFrame.ApplyClipPlaneSlicer(const SliceMode: Integer;
+  const PlaneOffset: Single; const EntireDesign: Boolean);
+const
+  CutawayNodeName = 'EditorCutawayClipPlane';
+var
+  AffectedScenes: Integer;
+  PlaneEq: TVector4;
+
+  procedure ProcessSceneClipPlane(const S: TCastleScene);
+  var
+    I: Integer;
+    ExistingClip: TClipPlaneNode;
+  begin
+    if (S = nil) or (S.RootNode = nil) then Exit;
+
+    ExistingClip := nil;
+    for I := 0 to S.RootNode.FdChildren.Count - 1 do
+      if (S.RootNode.FdChildren[I] is TClipPlaneNode) and
+         (S.RootNode.FdChildren[I].X3DName = CutawayNodeName) then
+      begin
+        ExistingClip := TClipPlaneNode(S.RootNode.FdChildren[I]);
+        Break;
+      end;
+
+    if SliceMode = 6 then
+    begin
+      if ExistingClip <> nil then
+      begin
+        ExistingClip.Enabled := false;
+        S.RootNode.RemoveChildren(ExistingClip);
+        Inc(AffectedScenes);
+      end;
+      Exit;
+    end;
+
+    if ExistingClip = nil then
+    begin
+      ExistingClip := TClipPlaneNode.Create(CutawayNodeName);
+      S.RootNode.AddChildren(ExistingClip);
+    end;
+    ExistingClip.Plane := PlaneEq;
+    ExistingClip.Enabled := true;
+    Inc(AffectedScenes);
+  end;
+
+  procedure TraverseForClipPlane(const C: TComponent);
+  var
+    I: Integer;
+    T: TCastleTransform;
+  begin
+    if C = nil then Exit;
+    if C is TCastleScene then
+      ProcessSceneClipPlane(TCastleScene(C));
+    if C is TCastleTransform then
+    begin
+      T := TCastleTransform(C);
+      for I := 0 to T.Count - 1 do
+        TraverseForClipPlane(T[I]);
+    end else
+    if C is TCastleViewport then
+      TraverseForClipPlane(TCastleViewport(C).Items)
+    else
+    if C is TCastleUserInterface then
+      for I := 0 to TCastleUserInterface(C).ControlsCount - 1 do
+        TraverseForClipPlane(TCastleUserInterface(C).Controls[I]);
+  end;
+
+var
+  SelectedList: TComponentList;
+  SelectedCount, I: Integer;
+begin
+  if FDesignRoot = nil then Exit;
+
+  case SliceMode of
+    0: PlaneEq := Vector4(0.0, -1.0, 0.0, PlaneOffset);  // Keep Y <= Offset (Dollhouse Top-Off)
+    1: PlaneEq := Vector4(0.0, 1.0, 0.0, -PlaneOffset);  // Keep Y >= Offset (Slice Floor Off)
+    2: PlaneEq := Vector4(0.0, 0.0, -1.0, PlaneOffset);  // Keep Z <= Offset (Slice +Z Front Off)
+    3: PlaneEq := Vector4(0.0, 0.0, 1.0, -PlaneOffset);  // Keep Z >= Offset (Slice -Z Back Off)
+    4: PlaneEq := Vector4(-1.0, 0.0, 0.0, PlaneOffset);  // Keep X <= Offset (Slice +X Right Off)
+    5: PlaneEq := Vector4(1.0, 0.0, 0.0, -PlaneOffset);  // Keep X >= Offset (Slice -X Left Off)
+    else
+       PlaneEq := Vector4(0.0, -1.0, 0.0, 0.0);
+  end;
+
+  AffectedScenes := 0;
+  if EntireDesign then
+    TraverseForClipPlane(FDesignRoot)
+  else
+  begin
+    GetSelected(SelectedList, SelectedCount, false);
+    try
+      if (SelectedList <> nil) and (SelectedList.Count > 0) then
+        for I := 0 to SelectedList.Count - 1 do
+          TraverseForClipPlane(SelectedList[I])
+      else
+        TraverseForClipPlane(FDesignRoot);
+    finally
+      FreeAndNil(SelectedList);
+    end;
+  end;
+
+  if CastleControl <> nil then
+    CastleControl.Invalidate;
+  ModifiedOutsideObjectInspector(
+    Format('Apply 3D Cutaway ClipPlane on %d Scene(s)', [AffectedScenes]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowClipPlaneSlicerDialog;
+var
+  Dialog: TForm;
+  LblMode, LblOffset: TLabel;
+  ComboMode: TComboBox;
+  SpinOffset: TFloatSpinEdit;
+  CheckEntire: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnClear, BtnCancel: TButton;
+begin
+  if FDesignRoot = nil then Exit;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 3D Cross-Section Cutaway & ClipPlane Slicer';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.AutoSize := true;
+    Dialog.ChildSizing.LeftRightSpacing := 14;
+    Dialog.ChildSizing.TopBottomSpacing := 12;
+    Dialog.ChildSizing.VerticalSpacing := 8;
+    Dialog.Constraints.MinWidth := 470;
+
+    LblMode := TLabel.Create(Dialog);
+    LblMode.Caption := 'Cross-Section Cutaway Plane Direction:';
+    LblMode.Parent := Dialog;
+
+    ComboMode := TComboBox.Create(Dialog);
+    ComboMode.Style := csDropDownList;
+    ComboMode.Items.Add('Dollhouse Top-Off Cutaway (Keep Y <= Offset, Inspect Rooms From Above)');
+    ComboMode.Items.Add('Bottom-Off Cutaway (Keep Y >= Offset)');
+    ComboMode.Items.Add('Front-Wall (+Z) Cutaway (Keep Z <= Offset)');
+    ComboMode.Items.Add('Back-Wall (-Z) Cutaway (Keep Z >= Offset)');
+    ComboMode.Items.Add('Right-Side (+X) Cross-Section (Keep X <= Offset)');
+    ComboMode.Items.Add('Left-Side (-X) Cross-Section (Keep X >= Offset)');
+    ComboMode.Items.Add('Remove / Clear All Cutaway ClipPlanes');
+    ComboMode.ItemIndex := 0;
+    ComboMode.Parent := Dialog;
+
+    LblOffset := TLabel.Create(Dialog);
+    LblOffset.Caption := 'Cutaway Plane Position / Offset Along Axis (Meters):';
+    LblOffset.Parent := Dialog;
+
+    SpinOffset := TFloatSpinEdit.Create(Dialog);
+    SpinOffset.MinValue := -5000.0;
+    SpinOffset.MaxValue := 5000.0;
+    SpinOffset.Increment := 0.5;
+    SpinOffset.DecimalPlaces := 2;
+    SpinOffset.Value := 2.50;
+    SpinOffset.Parent := Dialog;
+
+    CheckEntire := TCheckBox.Create(Dialog);
+    CheckEntire.Caption := 'Apply Across Entire Design (Unchecked = Selected Subtree Only)';
+    CheckEntire.Checked := true;
+    CheckEntire.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnClear := TButton.Create(Dialog);
+    BtnClear.Caption := 'Clear Cutaways';
+    BtnClear.ModalResult := mrIgnore;
+    BtnClear.AutoSize := true;
+    BtnClear.Align := alRight;
+    BtnClear.BorderSpacing.Around := 6;
+    BtnClear.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Apply Cutaway Slice';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    case Dialog.ShowModal of
+      mrOk:
+        ApplyClipPlaneSlicer(ComboMode.ItemIndex, SpinOffset.Value, CheckEntire.Checked);
+      mrIgnore:
+        ApplyClipPlaneSlicer(6, 0.0, CheckEntire.Checked);
+    end;
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemClipPlaneSlicerClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyClipPlaneSlicer(0, 2.50, true)
+  else
+    ShowClipPlaneSlicerDialog;
+end;
+
+procedure TDesignFrame.ApplyLevelBoundaryWalls(const WallHeight, WallThickness,
+  MarginPad, KillZDepth: Single; const AddCeiling, AddKillZTrigger,
+  InvisibleAtRuntime: Boolean);
+var
+  ParentT, GroupT: TCastleTransform;
+  SelectedList: TComponentList;
+  SelectedCount, I: Integer;
+  CombinedBox, B: TBox3D;
+  MinPt, MaxPt, CenterPt, Span: TVector3;
+  ActualH, ActualThick, ActualPad, BaseY: Single;
+
+  procedure SpawnBoundaryBox(const BaseName: String; const Pos, BoxSz: TVector3;
+    const IsTrigger: Boolean; const Col: TCastleColor);
+  var
+    WallBox: TCastleBox;
+    BoxCol: TCastleBoxCollider;
+    RBody: TCastleRigidBody;
+  begin
+    WallBox := TCastleBox.Create(DesignOwner);
+    WallBox.Name := ProposeComponentName(TCastleBox, DesignOwner, BaseName);
+    WallBox.Translation := Pos;
+    WallBox.Size := BoxSz;
+    WallBox.Material := pmUnlit;
+    WallBox.Color := Col;
+    WallBox.CastShadows := false;
+    WallBox.Visible := not InvisibleAtRuntime;
+    GroupT.Add(WallBox);
+
+    BoxCol := TCastleBoxCollider.Create(DesignOwner);
+    BoxCol.Name := ProposeComponentName(TCastleBoxCollider, DesignOwner);
+    BoxCol.AutoSize := false;
+    BoxCol.Size := BoxSz;
+    WallBox.AddBehavior(BoxCol);
+
+    RBody := TCastleRigidBody.Create(DesignOwner);
+    RBody.Name := ProposeComponentName(TCastleRigidBody, DesignOwner);
+    RBody.Dynamic := false;
+    RBody.Trigger := IsTrigger;
+    WallBox.AddBehavior(RBody);
+  end;
+
+begin
+  if DesignOwner = nil then Exit;
+
+  if CurrentViewport <> nil then
+    ParentT := CurrentViewport.Items
+  else if FDesignRoot is TCastleTransform then
+    ParentT := TCastleTransform(FDesignRoot)
+  else
+  begin
+    ErrorBox('Open a 3D Viewport or Transform design before generating Level Boundary Walls.');
+    Exit;
+  end;
+
+  CombinedBox := TBox3D.Empty;
+  GetSelected(SelectedList, SelectedCount, false);
+  try
+    if (SelectedList <> nil) and (SelectedList.Count > 0) then
+      for I := 0 to SelectedList.Count - 1 do
+        if (SelectedList[I] is TCastleTransform) and (SelectedList[I] <> ParentT) then
+        begin
+          B := TCastleTransform(SelectedList[I]).WorldBoundingBox;
+          if not B.IsEmpty then
+            CombinedBox.Include(B);
+        end;
+  finally
+    FreeAndNil(SelectedList);
+  end;
+
+  if CombinedBox.IsEmpty then
+    CombinedBox := ParentT.WorldBoundingBox;
+  if CombinedBox.IsEmpty then
+    CombinedBox := Box3D(Vector3(-25.0, 0.0, -25.0), Vector3(25.0, 4.0, 25.0));
+
+  ActualPad := Max(0.0, MarginPad);
+  ActualH := Max(1.0, WallHeight);
+  ActualThick := Max(0.1, WallThickness);
+
+  MinPt := CombinedBox.Data[0] - Vector3(ActualPad, 0.0, ActualPad);
+  MaxPt := CombinedBox.Data[1] + Vector3(ActualPad, 0.0, ActualPad);
+  CenterPt := (MinPt + MaxPt) * 0.5;
+  Span := MaxPt - MinPt;
+  Span.X := Max(4.0, Span.X);
+  Span.Z := Max(4.0, Span.Z);
+  BaseY := MinPt.Y;
+
+  GroupT := TCastleTransform.Create(DesignOwner);
+  GroupT.Name := ProposeComponentName(TCastleTransform, DesignOwner, 'LevelBoundaryWalls');
+  ParentT.Add(GroupT);
+
+  // North (-Z), South (+Z), West (-X), East (+X) Perimeter Blocker Walls
+  SpawnBoundaryBox('BoundaryWallNorth',
+    Vector3(CenterPt.X, BaseY + ActualH * 0.5, MinPt.Z - ActualThick * 0.5),
+    Vector3(Span.X + ActualThick * 2.0, ActualH, ActualThick),
+    false, Vector4(0.20, 0.78, 0.96, 0.28));
+
+  SpawnBoundaryBox('BoundaryWallSouth',
+    Vector3(CenterPt.X, BaseY + ActualH * 0.5, MaxPt.Z + ActualThick * 0.5),
+    Vector3(Span.X + ActualThick * 2.0, ActualH, ActualThick),
+    false, Vector4(0.20, 0.78, 0.96, 0.28));
+
+  SpawnBoundaryBox('BoundaryWallWest',
+    Vector3(MinPt.X - ActualThick * 0.5, BaseY + ActualH * 0.5, CenterPt.Z),
+    Vector3(ActualThick, ActualH, Span.Z),
+    false, Vector4(0.20, 0.78, 0.96, 0.28));
+
+  SpawnBoundaryBox('BoundaryWallEast',
+    Vector3(MaxPt.X + ActualThick * 0.5, BaseY + ActualH * 0.5, CenterPt.Z),
+    Vector3(ActualThick, ActualH, Span.Z),
+    false, Vector4(0.20, 0.78, 0.96, 0.28));
+
+  if AddCeiling then
+    SpawnBoundaryBox('BoundaryCeiling',
+      Vector3(CenterPt.X, BaseY + ActualH + ActualThick * 0.5, CenterPt.Z),
+      Vector3(Span.X + ActualThick * 2.0, ActualThick, Span.Z + ActualThick * 2.0),
+      false, Vector4(0.20, 0.78, 0.96, 0.18));
+
+  if AddKillZTrigger then
+    SpawnBoundaryBox('KillZTriggerVolume',
+      Vector3(CenterPt.X, BaseY - Max(1.0, KillZDepth), CenterPt.Z),
+      Vector3(Span.X * 2.5 + 40.0, 2.0, Span.Z * 2.5 + 40.0),
+      true, Vector4(0.96, 0.22, 0.22, 0.30));
+
+  UpdateDesign;
+  SetSelectedComponent(GroupT);
+  ModifiedOutsideObjectInspector(
+    Format('Generate Level Boundary Walls (%s, %.1fx%.1fm)', [GroupT.Name, Span.X, Span.Z]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowLevelBoundaryWallDialog;
+var
+  Dialog: TForm;
+  LblH, LblThick, LblPad, LblKillZ: TLabel;
+  SpinH, SpinThick, SpinPad, SpinKillZ: TFloatSpinEdit;
+  CheckCeiling, CheckKillZ, CheckInvisible: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if DesignOwner = nil then Exit;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 3D Level Bounds, Kill-Z & Invisible Perimeter Walls';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.AutoSize := true;
+    Dialog.ChildSizing.LeftRightSpacing := 14;
+    Dialog.ChildSizing.TopBottomSpacing := 12;
+    Dialog.ChildSizing.VerticalSpacing := 8;
+    Dialog.Constraints.MinWidth := 460;
+
+    LblH := TLabel.Create(Dialog);
+    LblH.Caption := 'Perimeter Blocker Wall Height (Meters):';
+    LblH.Parent := Dialog;
+
+    SpinH := TFloatSpinEdit.Create(Dialog);
+    SpinH.MinValue := 1.0;
+    SpinH.MaxValue := 500.0;
+    SpinH.Increment := 2.0;
+    SpinH.DecimalPlaces := 1;
+    SpinH.Value := 12.0;
+    SpinH.Parent := Dialog;
+
+    LblThick := TLabel.Create(Dialog);
+    LblThick.Caption := 'Wall Collider Thickness (Meters):';
+    LblThick.Parent := Dialog;
+
+    SpinThick := TFloatSpinEdit.Create(Dialog);
+    SpinThick.MinValue := 0.1;
+    SpinThick.MaxValue := 50.0;
+    SpinThick.Increment := 0.25;
+    SpinThick.DecimalPlaces := 2;
+    SpinThick.Value := 1.0;
+    SpinThick.Parent := Dialog;
+
+    LblPad := TLabel.Create(Dialog);
+    LblPad.Caption := 'Outward Margin Padding Around Bounds (Meters):';
+    LblPad.Parent := Dialog;
+
+    SpinPad := TFloatSpinEdit.Create(Dialog);
+    SpinPad.MinValue := 0.0;
+    SpinPad.MaxValue := 500.0;
+    SpinPad.Increment := 1.0;
+    SpinPad.DecimalPlaces := 1;
+    SpinPad.Value := 2.0;
+    SpinPad.Parent := Dialog;
+
+    LblKillZ := TLabel.Create(Dialog);
+    LblKillZ.Caption := 'Kill-Z / Fall-Catcher Depth Below Floor (Meters):';
+    LblKillZ.Parent := Dialog;
+
+    SpinKillZ := TFloatSpinEdit.Create(Dialog);
+    SpinKillZ.MinValue := 1.0;
+    SpinKillZ.MaxValue := 1000.0;
+    SpinKillZ.Increment := 5.0;
+    SpinKillZ.DecimalPlaces := 1;
+    SpinKillZ.Value := 20.0;
+    SpinKillZ.Parent := Dialog;
+
+    CheckCeiling := TCheckBox.Create(Dialog);
+    CheckCeiling.Caption := 'Include Top Ceiling Blocker Collider';
+    CheckCeiling.Checked := false;
+    CheckCeiling.Parent := Dialog;
+
+    CheckKillZ := TCheckBox.Create(Dialog);
+    CheckKillZ.Caption := 'Include Bottom Kill-Z Trigger Volume (RBody.Trigger := true)';
+    CheckKillZ.Checked := true;
+    CheckKillZ.Parent := Dialog;
+
+    CheckInvisible := TCheckBox.Create(Dialog);
+    CheckInvisible.Caption := 'Invisible at Runtime (Visible := false; Uncheck for Translucent Guide)';
+    CheckInvisible.Checked := false;
+    CheckInvisible.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Generate Boundary Walls';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyLevelBoundaryWalls(
+        SpinH.Value,
+        SpinThick.Value,
+        SpinPad.Value,
+        SpinKillZ.Value,
+        CheckCeiling.Checked,
+        CheckKillZ.Checked,
+        CheckInvisible.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemLevelBoundaryWallsClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyLevelBoundaryWalls(12.0, 1.0, 2.0, 20.0, false, true, false)
+  else
+    ShowLevelBoundaryWallDialog;
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -41813,6 +43041,21 @@ begin
       (CurrentViewport <> nil) and (FDesignRoot is TCastleUserInterface);
   if MenuTreeViewItemComponentPresets <> nil then
     MenuTreeViewItemComponentPresets.Enabled := FDesignRoot <> nil;
+  if MenuTreeViewItemQuickTiledMap <> nil then
+    MenuTreeViewItemQuickTiledMap.Enabled :=
+      (CurrentViewport <> nil) or (FDesignRoot is TCastleTransform);
+  if MenuTreeViewItemQuickFlashEffect <> nil then
+    MenuTreeViewItemQuickFlashEffect.Enabled :=
+      (SelectedUserInterface <> nil) or (FDesignRoot is TCastleUserInterface);
+  if MenuTreeViewItemQuickNotifications <> nil then
+    MenuTreeViewItemQuickNotifications.Enabled :=
+      (SelectedUserInterface <> nil) or (FDesignRoot is TCastleUserInterface);
+  if MenuTreeViewItemClipPlaneSlicer <> nil then
+    MenuTreeViewItemClipPlaneSlicer.Enabled :=
+      (CurrentViewport <> nil) or (FDesignRoot is TCastleTransform);
+  if MenuTreeViewItemLevelBoundaryWalls <> nil then
+    MenuTreeViewItemLevelBoundaryWalls.Enabled :=
+      (CurrentViewport <> nil) or (FDesignRoot is TCastleTransform);
   if MenuTreeViewItemGroupSelected <> nil then
     MenuTreeViewItemGroupSelected.Enabled := (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0);
   if MenuTreeViewItemUngroupSelected <> nil then

@@ -1400,11 +1400,36 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Implemented `TDesignFrame.ShowComponentPresetDialog` and added **`Component Property Template / Preset Manager...`** (`MenuTreeViewItemComponentPresets`) in `MenuTreeView`.
   - Saves any selected component's published properties (and subcomponents) as a named preset in `FComponentPresets` and batch-applies saved presets onto 1+ selected components while optionally preserving target 3D `Translation`/`Rotation` and 2D UI anchors.
 
+### Phase 227: Quick 2D/3D Tiled Map (`TCastleTiledMap`) Setup & Layer/Scale Configurator (`ShowQuickTiledMapDialog` / `ApplyQuickTiledMap`)
+- [x] **227.1. Pixel-Art / HD / 3D Tabletop `TCastleTiledMap` Wizard (`TDesignFrame.ShowQuickTiledMapDialog` / `TDesignFrame.ApplyQuickTiledMap`)**
+  - Implemented `TDesignFrame.ShowQuickTiledMapDialog` and `TDesignFrame.ApplyQuickTiledMap` (`MenuTreeViewItemQuickTiledMap` in `MenuTreeView`).
+  - Spawns or configures a `TCastleTiledMap` with browsable `.tmx` `Url`, uniform `Scale`, `LayersZDistance`, `SmoothScaling`, `SmoothScalingSafeBorder`, `ForceTilesetSpacing`, 2D vs 3D XZ-plane orientation, and optional 2D Orthographic `Viewport.Camera` setup (`Shift`-click spawns a Pixel-Art 2D Map).
+
+### Phase 228: Quick 2D Screen Flash, Fade & Damage Vignette (`TCastleFlashEffect`) Setup (`ShowQuickFlashEffectDialog` / `ApplyQuickFlashEffect`)
+- [x] **228.1. Full-Screen Hit Flash, Heal Pulse & Fade-Out Setup (`TDesignFrame.ShowQuickFlashEffectDialog` / `TDesignFrame.ApplyQuickFlashEffect`)**
+  - Implemented `TDesignFrame.ShowQuickFlashEffectDialog` and `TDesignFrame.ApplyQuickFlashEffect` (`MenuTreeViewItemQuickFlashEffect` in `MenuTreeView`).
+  - Spawns or updates a `TCastleFlashEffect` across 5 presets (**Damage Hit Red Flash**, **Heal / Shield Green Pulse**, **Level Transition Black Fade**, **Explosion White Flash**, and **Poison / Arcane Purple Tint**) with `Duration`, optional vignette mask `Image.Url`, and immediate live viewport `Flash(...)` preview (`Shift`-click triggers a Damage Hit Red Flash).
+
+### Phase 229: Quick 2D In-Game Notifications & Combat Log (`TCastleNotifications`) Generator (`ShowQuickNotificationsDialog` / `ApplyQuickNotifications`)
+- [x] **229.1. Quest Feed, Subtitle Toast & RPG Combat Log Generator (`TDesignFrame.ShowQuickNotificationsDialog` / `TDesignFrame.ApplyQuickNotifications`)**
+  - Implemented `TDesignFrame.ShowQuickNotificationsDialog` and `TDesignFrame.ApplyQuickNotifications` (`MenuTreeViewItemQuickNotifications` in `MenuTreeView`).
+  - Spawns or updates a `TCastleNotifications` control across 4 presets (**Top-Left Quest & Pickup Feed**, **Bottom-Center Subtitle & Toast Feed**, **Top-Right Kill & Achievement Feed**, **Bottom-Left RPG Combat & Loot Log**) with `MaxMessages`, `Timeout`, `Fade`, `FontSize`, `CollectHistory`, and live preview messages (`Shift`-click spawns a Quest & Pickup Feed).
+
+### Phase 230: Quick 3D Cross-Section Cutaway & `TClipPlaneNode` Slicer (`ShowClipPlaneSlicerDialog` / `ApplyClipPlaneSlicer`)
+- [x] **230.1. Dollhouse & Architectural Cross-Section X3D `TClipPlaneNode` Slicer (`TDesignFrame.ShowClipPlaneSlicerDialog` / `TDesignFrame.ApplyClipPlaneSlicer`)**
+  - Implemented `TDesignFrame.ShowClipPlaneSlicerDialog` and `TDesignFrame.ApplyClipPlaneSlicer` (`MenuTreeViewItemClipPlaneSlicer` in `MenuTreeView`).
+  - Inserts, updates, or clears an X3D `TClipPlaneNode` (`EditorCutawayClipPlane`) on `TCastleScene.RootNode` across the selected subtree or entire design along 6 cutaway directions (**Dollhouse Top-Off `Y <= Offset`**, **Bottom-Off `Y >= Offset`**, **Front-Wall `+Z`**, **Back-Wall `-Z`**, **Right-Side `+X`**, **Left-Side `-X`**, or **Clear All Cutaways**) (`Shift`-click applies a `2.5m` Dollhouse cutaway).
+
+### Phase 231: Quick 3D Level Bounds, Kill-Z & Invisible Perimeter Wall Enclosure Generator (`ShowLevelBoundaryWallDialog` / `ApplyLevelBoundaryWalls`)
+- [x] **231.1. Automatic World-Bounds Physics Blocker Walls & Kill-Z Trigger Volume (`TDesignFrame.ShowLevelBoundaryWallDialog` / `TDesignFrame.ApplyLevelBoundaryWalls`)**
+  - Implemented `TDesignFrame.ShowLevelBoundaryWallDialog` and `TDesignFrame.ApplyLevelBoundaryWalls` (`MenuTreeViewItemLevelBoundaryWalls` in `MenuTreeView`).
+  - Computes the combined world bounding box of the selection (or level) and spawns a `LevelBoundaryWalls` group with static `TCastleBoxCollider` + `TCastleRigidBody` North/South/West/East blocker walls, optional Ceiling blocker, and optional bottom Kill-Z trigger volume (`Shift`-click spawns a 4-wall + Kill-Z enclosure immediately).
+
 ---
 
-## Roadmap Completion Status (Phases 1–226)
+## Roadmap Completion Status (Phases 1–231)
 
-All **226 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **231 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 
