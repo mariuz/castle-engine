@@ -30,7 +30,7 @@ uses SysUtils, Classes, Generics.Collections,
   CastleGLShaders, CastleGLImages, CastleTimeUtils, CastleControls,
   CastleInputs, CastleRectangles, CastleColors, CastleComponentSerialize,
   CastleProjection, CastleScreenEffects, CastleInternalShapesRenderer,
-  CastleInternalScreenEffects;
+  CastleInternalScreenEffects, CastleInternalRHI;
 
 type
   TCastleViewport = class;
@@ -435,6 +435,8 @@ type
 
     function InternalExtraGetScreenEffects(
       const Index: Integer): TGLSLProgram; override;
+    function InternalExtraGetScreenEffectRHIPipeline(
+      const Index: Integer): TRHIPipeline; override;
     function InternalExtraScreenEffectsCount: Integer; override;
     function InternalExtraScreenEffectsNeedDepth: Boolean; override;
 
@@ -1493,7 +1495,7 @@ uses DOM, Math, TypInfo,
   CastleSoundEngine, CastleGLVersion, CastleTextureImages, X3DFields,
   CastleInternalSettings, CastleXmlUtils, CastleUriUtils, CastleInternalRenderer,
   CastleRenderContext, CastleApplicationProperties, X3DLoad, CastleInternalGLUtils,
-  CastleInternalRHI, CastleInternalShaderRHI, CastleInternalRHI_Vulkan;
+  CastleInternalShaderRHI, CastleInternalRHI_Vulkan;
 
 {$define read_implementation}
 {$I castleviewport_autonavigation.inc}
@@ -3210,6 +3212,24 @@ begin
   else
     { no Index is valid, since ScreenEffectsCount = 0 in this class }
     Result := nil;
+  {$warnings on}
+end;
+
+function TCastleViewport.InternalExtraGetScreenEffectRHIPipeline(const Index: Integer): TRHIPipeline;
+var
+  ExtraOffset: Integer;
+begin
+  Result := nil;
+  if RHIDevice = nil then
+    Exit;
+  ExtraOffset := 0;
+  if ScreenSpaceAmbientOcclusion and (SSAOShader <> nil) then
+    Inc(ExtraOffset);
+  if ScreenSpaceReflections and (SSRShader <> nil) then
+    Inc(ExtraOffset);
+  {$warnings off} // using deprecated MainScene to keep it working
+  if (Index >= ExtraOffset) and (Items.MainScene <> nil) then
+    Result := Items.MainScene.InternalScreenEffectRHIPipeline(Index - ExtraOffset);
   {$warnings on}
 end;
 

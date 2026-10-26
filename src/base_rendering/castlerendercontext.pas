@@ -476,7 +476,7 @@ uses CastleLog, CastleProjection, CastleInternalGLUtils, CastleGLImages,
 function SkipOpenGLStateWhenRHIActive: Boolean; inline;
 begin
   Result := (RHIDevice <> nil) and
-    ((ActiveCommandList <> nil) or (ApplicationProperties = nil) or (not ApplicationProperties.IsGLContextOpen));
+    ((ActiveCommandList <> nil) or (GLFeatures = nil) or (ApplicationProperties = nil) or (not ApplicationProperties.IsGLContextOpen));
 end;
 
 constructor TRenderContext.Create(AOwner: TComponent);

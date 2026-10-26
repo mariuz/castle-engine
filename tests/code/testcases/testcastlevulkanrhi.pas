@@ -267,6 +267,9 @@ type
     procedure TestEnsureBatch2DRendererAndStandaloneDrawableImageDrawRHI;
     procedure TestCastleImageControlAndButtonHeadlessVulkanRenderRHI;
     procedure TestDrawableImageBlendModesAndRotationBatch2DRHI;
+    procedure TestDrawPrimitive2DFanAndLineLoopExpansionAndShadersRHI;
+    procedure TestRenderUnlitMeshShadersPushConstantsAndDepthStateRHI;
+    procedure TestViewportMainSceneScreenEffectRHIPipelineAndRenderRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -13629,6 +13632,271 @@ begin
   finally
     FreeAndNil(DrawB);
     FreeAndNil(DrawA);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestDrawPrimitive2DFanAndLineLoopExpansionAndShadersRHI;
+var
+  SavedDevice: TRHIDevice;
+  SavedCmdList: TRHICommandList;
+  SavedCtx, TestCtx: TRenderContext;
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Pipe: TRHIPipeline;
+begin
+  SavedDevice := RHIDevice;
+  SavedCmdList := ActiveCommandList;
+  SavedCtx := RenderContext;
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($6801)), True, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0, cllPrimary);
+  TestCtx := TRenderContext.Create(nil);
+  try
+    SetRHIDevice(VkDev);
+    RenderContext := TestCtx;
+    TestCtx.Viewport := Rectangle(0, 0, 800, 600);
+    CmdList.BeginRecording;
+    SetActiveCommandList(CmdList);
+    RHIPrimitive2DResetStats;
+
+    { 1. DrawRectangle (pmTriangleFan with 4 input vertices -> expanded to 6 triangle-list vertices) }
+    DrawRectangle(FloatRectangle(10, 20, 100, 50), Red);
+    AssertEquals('DrawRectangle input vertex count is 4', 4, RHIPrimitive2DLastVertexCount);
+    AssertEquals('DrawRectangle submitted vertex count is expanded to 6 (2 triangles)',
+      6, RHIPrimitive2DLastSubmittedVertexCount);
+    Pipe := RHIPrimitive2DPipeline as TRHIPipeline;
+    AssertTrue('DrawRectangle RHI pipeline must be created', Pipe <> nil);
+    AssertTrue('DrawRectangle RHI pipeline must have compiled VertexShader',
+      Pipe.Desc.VertexShader <> nil);
+    AssertTrue('DrawRectangle RHI pipeline must have compiled FragmentShader',
+      Pipe.Desc.FragmentShader <> nil);
+    AssertEquals('DrawRectangle RHI pipeline PushConstantSize must be 32 bytes',
+      32, Pipe.Desc.PushConstantSize);
+    AssertTrue('DrawRectangle RHI pipeline PushConstantStages must include ssVertex and ssFragment',
+      (ssVertex in Pipe.Desc.PushConstantStages) and (ssFragment in Pipe.Desc.PushConstantStages));
+    AssertFalse('Opaque DrawRectangle must have BlendEnable = False',
+      Pipe.Desc.BlendState.BlendEnable);
+
+    { 2. DrawRectangleOutline (pmLineLoop with 4 input vertices -> expanded to 5 line-strip vertices) }
+    DrawRectangleOutline(FloatRectangle(10, 20, 100, 50), Green, 2.0);
+    AssertEquals('DrawRectangleOutline input vertex count is 4', 4, RHIPrimitive2DLastVertexCount);
+    AssertEquals('DrawRectangleOutline submitted vertex count is expanded to 5 to close the loop',
+      5, RHIPrimitive2DLastSubmittedVertexCount);
+
+    { 3. DrawCircle (12 slices -> 36 pre-expanded triangle vertices, must not double-expand) }
+    DrawCircle(Vector2(50, 50), 25, 25, Blue, 12);
+    AssertEquals('DrawCircle input vertex count is 36', 36, RHIPrimitive2DLastVertexCount);
+    AssertEquals('DrawCircle submitted vertex count remains 36 without double-expansion',
+      36, RHIPrimitive2DLastSubmittedVertexCount);
+
+    { 4. DrawCircleOutline (16 slices -> 16 input vertices, 17 submitted line-strip vertices) }
+    DrawCircleOutline(Vector2(50, 50), 25, 25, Yellow, 1.5, 16);
+    AssertEquals('DrawCircleOutline input vertex count is 16', 16, RHIPrimitive2DLastVertexCount);
+    AssertEquals('DrawCircleOutline submitted vertex count is 17 to close the loop',
+      17, RHIPrimitive2DLastSubmittedVertexCount);
+
+    { 5. Multiplicative blend mode via DrawRectangle with ForceBlending (used by GLFadeRectangleDark) }
+    DrawRectangle(Rectangle(0, 0, 800, 600), Vector4(0.5, 0.2, 0.2, 1.0),
+      bsZero, bdSrcColor, True);
+    Pipe := RHIPrimitive2DPipeline as TRHIPipeline;
+    AssertTrue('ForceBlending DrawRectangle must have BlendEnable = True',
+      Pipe.Desc.BlendState.BlendEnable);
+    AssertEquals('SrcColorBlendFactor must map bsZero -> bfZero',
+      Ord(bfZero), Ord(Pipe.Desc.BlendState.SrcColorBlendFactor));
+    AssertEquals('DstColorBlendFactor must map bdSrcColor -> bfSrcColor',
+      Ord(bfSrcColor), Ord(Pipe.Desc.BlendState.DstColorBlendFactor));
+
+    CmdList.EndRecording;
+  finally
+    RHIPrimitive2DResetStats;
+    SetActiveCommandList(SavedCmdList);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedDevice);
+    FreeAndNil(TestCtx);
+    FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRenderUnlitMeshShadersPushConstantsAndDepthStateRHI;
+var
+  SavedDevice: TRHIDevice;
+  SavedCmdList: TRHICommandList;
+  SavedCtx, TestCtx: TRenderContext;
+  VkDev: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  Mesh: TCastleRenderUnlitMesh;
+begin
+  SavedDevice := RHIDevice;
+  SavedCmdList := ActiveCommandList;
+  SavedCtx := RenderContext;
+  VkDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($6802)), True, True, VK_API_VERSION_1_3);
+  CmdList := TVulkanRHICommandList.Create(VkDev, 0, cllPrimary);
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  try
+    SetRHIDevice(VkDev);
+    CmdList.BeginRecording;
+    SetActiveCommandList(CmdList);
+
+    Mesh := TCastleRenderUnlitMesh.Create(True);
+    try
+      Mesh.Color := Vector4(1, 0.5, 0.25, 1);
+      Mesh.ModelViewProjection := TMatrix4.Identity;
+      Mesh.SetVertexes([
+        Vector4(0, 0, 0, 1),
+        Vector4(1, 0, 0, 1),
+        Vector4(0, 1, 0, 1)
+      ], False);
+
+      { 1. Render with DepthTest = True and UseColor = True }
+      TestCtx.DepthTest := True;
+      Mesh.Render(pmTriangles);
+      AssertTrue('UnlitMesh must compile RHIVertShader', Mesh.RHIVertShader <> nil);
+      AssertTrue('UnlitMesh must compile RHIFragShader', Mesh.RHIFragShader <> nil);
+      AssertTrue('UnlitMesh RHIPipeline must bind RHIVertShader',
+        Mesh.RHIPipeline.Desc.VertexShader = Mesh.RHIVertShader);
+      AssertTrue('UnlitMesh RHIPipeline must bind RHIFragShader',
+        Mesh.RHIPipeline.Desc.FragmentShader = Mesh.RHIFragShader);
+      AssertEquals('UnlitMesh PushConstantSize must be 80 bytes (mat4 + vec4)',
+        SizeOf(TMatrix4) + SizeOf(TVector4), Mesh.RHIPipeline.Desc.PushConstantSize);
+      AssertTrue('UnlitMesh DepthTestEnable must be True when RenderContext.DepthTest is True',
+        Mesh.RHIPipeline.Desc.DepthStencil.DepthTestEnable);
+      AssertTrue('UnlitMesh DepthWriteEnable must be True when UseColor is True',
+        Mesh.RHIPipeline.Desc.DepthStencil.DepthWriteEnable);
+      AssertEquals('UnlitMesh ColorWriteMask must be $0F when UseColor is True',
+        $0F, Mesh.RHIPipeline.Desc.BlendState.ColorWriteMask);
+
+      { 2. Render with DepthTest = False (e.g. skybox background pass) }
+      TestCtx.DepthTest := False;
+      Mesh.Render(pmTriangles);
+      AssertFalse('UnlitMesh DepthTestEnable must follow RenderContext.DepthTest = False',
+        Mesh.RHIPipeline.Desc.DepthStencil.DepthTestEnable);
+      AssertFalse('UnlitMesh DepthWriteEnable must be False when DepthTest is False',
+        Mesh.RHIPipeline.Desc.DepthStencil.DepthWriteEnable);
+
+      { 3. Render with UseColor = False (e.g. shadow volume / depth-stencil-only pass) }
+      TestCtx.DepthTest := True;
+      Mesh.UseColor := False;
+      Mesh.Render(pmTriangles);
+      AssertTrue('UnlitMesh DepthTestEnable must be True',
+        Mesh.RHIPipeline.Desc.DepthStencil.DepthTestEnable);
+      AssertFalse('UnlitMesh DepthWriteEnable must be False when UseColor is False',
+        Mesh.RHIPipeline.Desc.DepthStencil.DepthWriteEnable);
+      AssertEquals('UnlitMesh ColorWriteMask must be 0 when UseColor is False',
+        0, Mesh.RHIPipeline.Desc.BlendState.ColorWriteMask);
+    finally
+      FreeAndNil(Mesh);
+    end;
+
+    CmdList.EndRecording;
+  finally
+    SetActiveCommandList(SavedCmdList);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedDevice);
+    FreeAndNil(TestCtx);
+    FreeAndNil(CmdList);
+    FreeAndNil(VkDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportMainSceneScreenEffectRHIPipelineAndRenderRHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  BoxNode: TBoxNode;
+  SeNode: TScreenEffectNode;
+  ShaderNode: TComposedShaderNode;
+  FragPart: TShaderPartNode;
+  SePipe: TRHIPipeline;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($6803)));
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  TestCtx.Viewport := Rectangle(0, 0, 256, 256);
+  Container := nil;
+  try
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := False;
+    Viewport.Width := 256;
+    Viewport.Height := 256;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 10.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Scene := TCastleScene.Create(Viewport);
+    Root := TX3DRootNode.Create;
+
+    ShapeNode := TShapeNode.Create;
+    BoxNode := TBoxNode.Create;
+    ShapeNode.Geometry := BoxNode;
+    Root.AddChildren(ShapeNode);
+
+    SeNode := TScreenEffectNode.Create;
+    ShaderNode := TComposedShaderNode.Create;
+    FragPart := TShaderPartNode.Create;
+    FragPart.ShaderType := stFragment;
+    FragPart.SetUrl(['data:text/plain,' +
+      'void main() {' + LineEnding +
+      '  gl_FragColor = screen_get_color(screen_position());' + LineEnding +
+      '}']);
+    ShaderNode.SetParts([FragPart]);
+    SeNode.SetShaders([ShaderNode]);
+    Root.AddChildren(SeNode);
+
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+    {$warnings off}
+    Viewport.Items.MainScene := Scene;
+    {$warnings on}
+
+    Viewport.EnsureRHIScreenResources(256, 256, False);
+    SePipe := Viewport.GetScreenEffectRHIPipeline(0);
+    AssertTrue('Viewport.GetScreenEffectRHIPipeline(0) must resolve MainScene ScreenEffect RHI pipeline',
+      SePipe <> nil);
+    AssertTrue('Resolved MainScene ScreenEffect RHI pipeline must match Scene.InternalScreenEffectRHIPipeline(0)',
+      SePipe = Scene.InternalScreenEffectRHIPipeline(0));
+
+    Cmd := Device.BeginFrame;
+    SetActiveCommandList(Cmd);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+    finally
+      Device.EndFrameAndPresent;
+    end;
+
+    AssertEquals('Viewport must execute 1 RHI screen effect pass from MainScene',
+      1, Viewport.RHIScreenPassCount);
+    AssertEquals('Viewport must record 1 RHI screen effect fullscreen quad draw from MainScene',
+      1, Viewport.RHIScreenDrawCount);
+  finally
+    FreeAndNil(Container);
     FreeGlobalBatch2DRenderer;
     SetActiveCommandList(SavedCmd);
     RenderContext := SavedCtx;

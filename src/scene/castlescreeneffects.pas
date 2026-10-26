@@ -142,6 +142,9 @@ type
     function InternalExtraGetScreenEffects(
       const Index: Integer): TGLSLProgram; virtual;
     { @exclude }
+    function InternalExtraGetScreenEffectRHIPipeline(
+      const Index: Integer): TRHIPipeline; virtual;
+    { @exclude }
     function InternalExtraScreenEffectsCount: Integer; virtual;
     { @exclude }
     function InternalExtraScreenEffectsNeedDepth: Boolean; virtual;
@@ -357,6 +360,11 @@ begin
   Result := nil; // silence FPC warnings about undefined result
 end;
 
+function TCastleScreenEffects.InternalExtraGetScreenEffectRHIPipeline(const Index: Integer): TRHIPipeline;
+begin
+  Result := nil;
+end;
+
 function TCastleScreenEffects.InternalExtraScreenEffectsCount: Integer;
 begin
   Result := 0;
@@ -418,7 +426,10 @@ begin
     SceneEffects := 0;
 
   if (Index >= 0) and (Index < SceneEffects) then
-    Result := ScreenEffectsScene.InternalScreenEffectRHIPipeline(Index);
+    Result := ScreenEffectsScene.InternalScreenEffectRHIPipeline(Index)
+  else
+  if Index >= SceneEffects then
+    Result := InternalExtraGetScreenEffectRHIPipeline(Index - SceneEffects);
 
   if Result = nil then
   begin

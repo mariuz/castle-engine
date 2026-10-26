@@ -131,6 +131,8 @@ type
       Vao: TVertexArrayObject;
       FRHIVertexBuffer: TRHIBuffer;
       FRHIIndexBuffer: TRHIBuffer;
+      FRHIVertShader: TRHIShaderModule;
+      FRHIFragShader: TRHIShaderModule;
       FRHIPipeline: TRHIPipeline;
       FRHIDrawCallCount: Cardinal;
       FRHILastVertexCount: Cardinal;
@@ -181,6 +183,8 @@ type
       @exclude }
     property RHIVertexBuffer: TRHIBuffer read FRHIVertexBuffer;
     property RHIIndexBuffer: TRHIBuffer read FRHIIndexBuffer;
+    property RHIVertShader: TRHIShaderModule read FRHIVertShader;
+    property RHIFragShader: TRHIShaderModule read FRHIFragShader;
     property RHIPipeline: TRHIPipeline read FRHIPipeline;
     property RHIDrawCallCount: Cardinal read FRHIDrawCallCount;
     property RHILastVertexCount: Cardinal read FRHILastVertexCount;
@@ -228,20 +232,58 @@ begin
   FreeAndNil(FixedFunctionIndexes);
   FreeAndNil(FRHIVertexBuffer);
   FreeAndNil(FRHIIndexBuffer);
+  FreeAndNil(FRHIVertShader);
+  FreeAndNil(FRHIFragShader);
   FRHIPipeline := nil; // owned by RHIDevice pipeline cache
   inherited;
 end;
 
 procedure TCastleRenderUnlitMesh.PrepareRHIPipeline(const ATopology: TRHIPrimitiveTopology);
+const
+  UnlitMeshVertGLSL =
+    '#version 450' + LineEnding +
+    'layout(location = 0) in vec4 castle_Vertex;' + LineEnding +
+    'layout(push_constant) uniform PushConstants {' + LineEnding +
+    '  mat4 u_MVP;' + LineEnding +
+    '  vec4 u_Color;' + LineEnding +
+    '} pc;' + LineEnding +
+    'void main() {' + LineEnding +
+    '  gl_Position = pc.u_MVP * castle_Vertex;' + LineEnding +
+    '}';
+  UnlitMeshFragGLSL =
+    '#version 450' + LineEnding +
+    'layout(push_constant) uniform PushConstants {' + LineEnding +
+    '  mat4 u_MVP;' + LineEnding +
+    '  vec4 u_Color;' + LineEnding +
+    '} pc;' + LineEnding +
+    'layout(location = 0) out vec4 out_Color;' + LineEnding +
+    'void main() {' + LineEnding +
+    '  out_Color = pc.u_Color;' + LineEnding +
+    '}';
 var
   PipeDesc: TRHIGraphicsPipelineDesc;
+  DepthTestActive, ColorWriteActive: Boolean;
 begin
   if RHIDevice = nil then
     Exit;
-  if (FRHIPipeline <> nil) and (FRHILastTopology = ATopology) then
-    Exit;
+
+  if FRHIVertShader = nil then
+    FRHIVertShader := RHIDevice.CreateShaderModuleFromGLSL(
+      ssVertex, UnlitMeshVertGLSL, 'UnlitMesh_VS');
+  if FRHIFragShader = nil then
+    FRHIFragShader := RHIDevice.CreateShaderModuleFromGLSL(
+      ssFragment, UnlitMeshFragGLSL, 'UnlitMesh_FS');
+
+  if RenderContext <> nil then
+    DepthTestActive := RenderContext.DepthTest
+  else
+    DepthTestActive := True;
+  ColorWriteActive := FUseColor and
+    ((RenderContext = nil) or (RenderContext.ColorChannels <> []));
 
   FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+  PipeDesc.VertexShader := FRHIVertShader;
+  PipeDesc.FragmentShader := FRHIFragShader;
   PipeDesc.Topology := ATopology;
   SetLength(PipeDesc.VertexInput.Bindings, 1);
   PipeDesc.VertexInput.Bindings[0].Binding := 0;
@@ -252,15 +294,31 @@ begin
   PipeDesc.VertexInput.Attributes[0].Binding := 0;
   PipeDesc.VertexInput.Attributes[0].Format := vafVector4;
   PipeDesc.VertexInput.Attributes[0].Offset := 0;
-  PipeDesc.Rasterizer.CullMode := cmNone;
-  PipeDesc.Rasterizer.FrontFace := ffCounterClockwise;
+  if (RenderContext <> nil) and RenderContext.CullFace then
+  begin
+    PipeDesc.Rasterizer.CullMode := cmBack;
+    if RenderContext.FrontFaceCcw then
+      PipeDesc.Rasterizer.FrontFace := ffCounterClockwise
+    else
+      PipeDesc.Rasterizer.FrontFace := ffClockwise;
+  end else
+  begin
+    PipeDesc.Rasterizer.CullMode := cmNone;
+    PipeDesc.Rasterizer.FrontFace := ffCounterClockwise;
+  end;
   PipeDesc.Rasterizer.PolygonMode := pmFill;
-  PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
-  PipeDesc.DepthStencil.DepthWriteEnable := FUseColor;
-  if FUseColor then
+  if DepthTestActive then
+  begin
+    PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+    PipeDesc.DepthStencil.DepthWriteEnable := FUseColor;
+  end else
+    PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDisabled;
+  if ColorWriteActive then
     PipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque
   else
     PipeDesc.BlendState := TRHIBlendStateDesc.DefaultColorMaskNone;
+  PipeDesc.PushConstantSize := SizeOf(TMatrix4) + SizeOf(TVector4);
+  PipeDesc.PushConstantStages := [ssVertex, ssFragment];
   SetLength(PipeDesc.ColorAttachmentFormats, 1);
   PipeDesc.ColorAttachmentFormats[0] := pfBGRA8_UNorm;
   PipeDesc.DepthAttachmentFormat := pfD24_UNorm_S8_UInt;
