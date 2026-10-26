@@ -594,6 +594,11 @@ type
       MenuTreeViewItemSceneInstancing: TMenuItem;
       MenuTreeViewItemPhysicsConfigurator: TMenuItem;
       MenuTreeViewItemUiResolutionTester: TMenuItem;
+      MenuTreeViewItemWorldTextCallout: TMenuItem;
+      MenuTreeViewItemQuickImageTransform: TMenuItem;
+      MenuTreeViewItemHierarchySanitizer: TMenuItem;
+      MenuTreeViewItemExportHierarchyReport: TMenuItem;
+      MenuTreeViewItemQuickHudElements: TMenuItem;
       FComponentNotes: TStringList;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
@@ -876,6 +881,11 @@ type
     procedure MenuTreeViewItemSceneInstancingClick(Sender: TObject);
     procedure MenuTreeViewItemPhysicsConfiguratorClick(Sender: TObject);
     procedure MenuTreeViewItemUiResolutionTesterClick(Sender: TObject);
+    procedure MenuTreeViewItemWorldTextCalloutClick(Sender: TObject);
+    procedure MenuTreeViewItemQuickImageTransformClick(Sender: TObject);
+    procedure MenuTreeViewItemHierarchySanitizerClick(Sender: TObject);
+    procedure MenuTreeViewItemExportHierarchyReportClick(Sender: TObject);
+    procedure MenuTreeViewItemQuickHudElementsClick(Sender: TObject);
     procedure MenuTreeViewItemGroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemUngroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemArrayDuplicateClick(Sender: TObject);
@@ -2108,6 +2118,21 @@ type
     procedure ApplyUiResolutionPreset(const ResolutionPreset: Integer;
       const CustomWidth, CustomHeight: Single);
     procedure ShowUiResolutionTesterDialog;
+    procedure ApplyWorldTextCallout(const CustomCaption: String;
+      const UseObjectName: Boolean; const FontSize, VerticalOffset: Single;
+      const ColorPreset: Integer; const AttachBillboard: Boolean);
+    procedure ShowWorldTextCalloutDialog;
+    procedure ApplyQuickImageTransform(const ImagePreset: Integer;
+      const ImageUrl: String; const WidthVal, HeightVal, RepeatX, RepeatY: Single;
+      const AttachBillboard: Boolean);
+    procedure ShowQuickImageTransformDialog;
+    procedure ApplyHierarchySanitizer(const RoundEpsilon, FixZeroScale,
+      NormalizeRot, SnapUiPixels, PruneEmptyLeaves, EntireDesign: Boolean);
+    procedure ShowHierarchySanitizerDialog;
+    procedure ShowExportHierarchyReportDialog;
+    procedure ApplyQuickHudElements(const HudPreset, ColorPreset: Integer;
+      const BarWidth, BarHeight: Single);
+    procedure ShowQuickHudElementsDialog;
     procedure SaveCameraBookmark(const Slot: Integer);
     procedure RecallCameraBookmark(const Slot: Integer);
     procedure AdjustCameraSpeed(const Factor: Single);
@@ -6805,6 +6830,31 @@ begin
   MenuTreeViewItemUiResolutionTester.Caption := '2D UI Responsive Screen Resolution & Aspect Ratio Tester...';
   MenuTreeViewItemUiResolutionTester.OnClick := @MenuTreeViewItemUiResolutionTesterClick;
   MenuTreeView.Items.Add(MenuTreeViewItemUiResolutionTester);
+
+  MenuTreeViewItemWorldTextCallout := TMenuItem.Create(Self);
+  MenuTreeViewItemWorldTextCallout.Caption := 'Quick 3D World-Space Text Callout & Room Sign... (Shift: Object Nameplates)';
+  MenuTreeViewItemWorldTextCallout.OnClick := @MenuTreeViewItemWorldTextCalloutClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemWorldTextCallout);
+
+  MenuTreeViewItemQuickImageTransform := TMenuItem.Create(Self);
+  MenuTreeViewItemQuickImageTransform.Caption := 'Quick 2D/3D Sprite, Decal & Tiled ImageTransform Setup...';
+  MenuTreeViewItemQuickImageTransform.OnClick := @MenuTreeViewItemQuickImageTransformClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemQuickImageTransform);
+
+  MenuTreeViewItemHierarchySanitizer := TMenuItem.Create(Self);
+  MenuTreeViewItemHierarchySanitizer.Caption := 'Hierarchy Transform & UI Pixel Sanitizer / Cleanup...';
+  MenuTreeViewItemHierarchySanitizer.OnClick := @MenuTreeViewItemHierarchySanitizerClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemHierarchySanitizer);
+
+  MenuTreeViewItemExportHierarchyReport := TMenuItem.Create(Self);
+  MenuTreeViewItemExportHierarchyReport.Caption := 'Export Design Hierarchy Tree & Asset Manifest (Markdown / CSV)...';
+  MenuTreeViewItemExportHierarchyReport.OnClick := @MenuTreeViewItemExportHierarchyReportClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemExportHierarchyReport);
+
+  MenuTreeViewItemQuickHudElements := TMenuItem.Create(Self);
+  MenuTreeViewItemQuickHudElements.Caption := 'Quick 2D HUD Bars, Crosshair & Minimap Frame Generator... (Shift: Health Bar)';
+  MenuTreeViewItemQuickHudElements.OnClick := @MenuTreeViewItemQuickHudElementsClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemQuickHudElements);
 
   MenuTreeViewItemGroupSelected := TMenuItem.Create(Self);
   MenuTreeViewItemGroupSelected.Caption := 'Group Selected Under New Transform (Ctrl+G)';
@@ -38039,6 +38089,1421 @@ begin
   ShowUiResolutionTesterDialog;
 end;
 
+procedure TDesignFrame.ApplyWorldTextCallout(const CustomCaption: String;
+  const UseObjectName: Boolean; const FontSize, VerticalOffset: Single;
+  const ColorPreset: Integer; const AttachBillboard: Boolean);
+var
+  Transforms, NewSelection: TComponentList;
+  TargetParent, T: TCastleTransform;
+  TextNode: TCastleText;
+  BB: TCastleBillboard;
+  LocalBox: TBox3D;
+  TextCol: TCastleColor;
+  TopY: Single;
+  I: Integer;
+begin
+  if DesignOwner = nil then Exit;
+
+  case ColorPreset of
+    1: TextCol := Vector4(1.00, 0.84, 0.20, 1.0); // Cyber Gold
+    2: TextCol := Vector4(0.20, 0.95, 0.52, 1.0); // Emerald Alert
+    3: TextCol := Vector4(1.00, 0.30, 0.30, 1.0); // Crimson Warning
+    4: TextCol := Vector4(0.32, 0.86, 1.00, 1.0); // Sky Cyan
+    else TextCol := Vector4(0.98, 0.98, 1.00, 1.0); // Crisp White
+  end;
+
+  Transforms := TComponentList.Create(false);
+  NewSelection := TComponentList.Create(false);
+  try
+    if (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0) then
+    begin
+      for I := 0 to TransformManipulate.SelectedCount - 1 do
+        if (TransformManipulate.Selected[I] <> nil) and
+           (not IsComponentLocked(TransformManipulate.Selected[I])) then
+          Transforms.Add(TransformManipulate.Selected[I]);
+    end else
+    if (CurrentTransform <> nil) and (not IsComponentLocked(CurrentTransform)) and
+       (CurrentTransform <> FDesignRoot) then
+      Transforms.Add(CurrentTransform);
+
+    if Transforms.Count > 0 then
+    begin
+      for I := 0 to Transforms.Count - 1 do
+      begin
+        T := TCastleTransform(Transforms[I]);
+        LocalBox := T.LocalBoundingBox;
+        if not LocalBox.IsEmpty then
+          TopY := LocalBox.Data[1].Y + VerticalOffset
+        else
+          TopY := VerticalOffset;
+
+        TextNode := TCastleText.Create(DesignOwner);
+        TextNode.Name := ProposeComponentName(TCastleText, DesignOwner, T.Name + 'Label');
+        if UseObjectName or (Trim(CustomCaption) = '') then
+          TextNode.Caption := T.Name
+        else
+          TextNode.Caption := CustomCaption;
+        TextNode.Size := Max(0.05, FontSize);
+        TextNode.Alignment := hpMiddle;
+        TextNode.VerticalAlignment := vpBottom;
+        TextNode.Color := TextCol;
+        TextNode.Material := pmUnlit;
+        TextNode.DoubleSided := true;
+        TextNode.CastShadows := false;
+        TextNode.Collides := false;
+        TextNode.Translation := Vector3(0, TopY, 0);
+        T.Add(TextNode);
+
+        if AttachBillboard then
+        begin
+          BB := TCastleBillboard.Create(DesignOwner);
+          BB.Name := ProposeComponentName(TCastleBillboard, DesignOwner, TextNode.Name + 'Billboard');
+          BB.AxisOfRotation := Vector3(0, 1, 0);
+          BB.MatchCameraDirection := true;
+          TextNode.AddBehavior(BB);
+        end;
+
+        NewSelection.Add(TextNode);
+      end;
+    end else
+    begin
+      if FDesignRoot is TCastleTransform then
+        TargetParent := TCastleTransform(FDesignRoot)
+      else if CurrentViewport <> nil then
+        TargetParent := CurrentViewport.Items
+      else
+      begin
+        ErrorBox('Select a 3D transform or viewport before creating a 3D World-Space Text Callout.');
+        Exit;
+      end;
+
+      TextNode := TCastleText.Create(DesignOwner);
+      TextNode.Name := ProposeComponentName(TCastleText, DesignOwner, 'WorldSignText');
+      if Trim(CustomCaption) <> '' then
+        TextNode.Caption := CustomCaption
+      else
+        TextNode.Caption := 'LEVEL ZONE 01';
+      TextNode.Size := Max(0.05, FontSize);
+      TextNode.Alignment := hpMiddle;
+      TextNode.VerticalAlignment := vpBottom;
+      TextNode.Color := TextCol;
+      TextNode.Material := pmUnlit;
+      TextNode.DoubleSided := true;
+      TextNode.CastShadows := false;
+      TextNode.Collides := false;
+      TextNode.Translation := Vector3(0, VerticalOffset, 0);
+      TargetParent.Add(TextNode);
+
+      if AttachBillboard then
+      begin
+        BB := TCastleBillboard.Create(DesignOwner);
+        BB.Name := ProposeComponentName(TCastleBillboard, DesignOwner, TextNode.Name + 'Billboard');
+        BB.AxisOfRotation := Vector3(0, 1, 0);
+        BB.MatchCameraDirection := true;
+        TextNode.AddBehavior(BB);
+      end;
+
+      NewSelection.Add(TextNode);
+    end;
+
+    UpdateDesign;
+    SetSelected(NewSelection);
+    ModifiedOutsideObjectInspector(
+      Format('Create %d 3D World-Space Text Callout(s)', [NewSelection.Count]),
+      ucHigh);
+  finally
+    FreeAndNil(NewSelection);
+    FreeAndNil(Transforms);
+  end;
+end;
+
+procedure TDesignFrame.ShowWorldTextCalloutDialog;
+var
+  Dialog: TForm;
+  LblCaption, LblSize, LblOffset, LblColor: TLabel;
+  EditCaption: TEdit;
+  SpinSize, SpinOffset: TFloatSpinEdit;
+  ComboColor: TComboBox;
+  CheckUseObjName, CheckBillboard: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if (CurrentViewport = nil) and (not (FDesignRoot is TCastleTransform)) then
+  begin
+    ErrorBox('Select a 3D viewport or transform design before creating a 3D Text Callout.');
+    Exit;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 3D World-Space Text Callout & Room Sign Generator';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 470;
+    Dialog.Height := 320;
+
+    LblCaption := TLabel.Create(Dialog);
+    LblCaption.Left := 16;
+    LblCaption.Top := 16;
+    LblCaption.Caption := '3D Sign / Callout Text (or leave blank to use Object Name):';
+    LblCaption.Parent := Dialog;
+
+    EditCaption := TEdit.Create(Dialog);
+    EditCaption.Left := 16;
+    EditCaption.Top := 38;
+    EditCaption.Width := 434;
+    if (CurrentTransform <> nil) and (CurrentTransform <> FDesignRoot) then
+      EditCaption.Text := CurrentTransform.Name
+    else
+      EditCaption.Text := 'SECTOR A - MAIN HALL';
+    EditCaption.Parent := Dialog;
+
+    LblSize := TLabel.Create(Dialog);
+    LblSize.Left := 16;
+    LblSize.Top := 78;
+    LblSize.Caption := '3D Font Line Height / Size (m):';
+    LblSize.Parent := Dialog;
+
+    SpinSize := TFloatSpinEdit.Create(Dialog);
+    SpinSize.Left := 320;
+    SpinSize.Top := 74;
+    SpinSize.Width := 110;
+    SpinSize.MinValue := 0.05;
+    SpinSize.MaxValue := 100.0;
+    SpinSize.Increment := 0.10;
+    SpinSize.DecimalPlaces := 2;
+    SpinSize.Value := 0.45;
+    SpinSize.Parent := Dialog;
+
+    LblOffset := TLabel.Create(Dialog);
+    LblOffset.Left := 16;
+    LblOffset.Top := 114;
+    LblOffset.Caption := 'Vertical Height Offset Above Object Top (m):';
+    LblOffset.Parent := Dialog;
+
+    SpinOffset := TFloatSpinEdit.Create(Dialog);
+    SpinOffset.Left := 320;
+    SpinOffset.Top := 110;
+    SpinOffset.Width := 110;
+    SpinOffset.MinValue := -50.0;
+    SpinOffset.MaxValue := 200.0;
+    SpinOffset.Increment := 0.25;
+    SpinOffset.DecimalPlaces := 2;
+    SpinOffset.Value := 0.50;
+    SpinOffset.Parent := Dialog;
+
+    LblColor := TLabel.Create(Dialog);
+    LblColor.Left := 16;
+    LblColor.Top := 150;
+    LblColor.Caption := '3D Text Color Swatch:';
+    LblColor.Parent := Dialog;
+
+    ComboColor := TComboBox.Create(Dialog);
+    ComboColor.Left := 190;
+    ComboColor.Top := 146;
+    ComboColor.Width := 260;
+    ComboColor.Style := csDropDownList;
+    ComboColor.Items.Add('Crisp White');
+    ComboColor.Items.Add('Cyber Gold / Amber');
+    ComboColor.Items.Add('Emerald Alert Green');
+    ComboColor.Items.Add('Crimson Danger Red');
+    ComboColor.Items.Add('Sky Cyan');
+    ComboColor.ItemIndex := 1;
+    ComboColor.Parent := Dialog;
+
+    CheckUseObjName := TCheckBox.Create(Dialog);
+    CheckUseObjName.Left := 16;
+    CheckUseObjName.Top := 188;
+    CheckUseObjName.Caption := 'Use Each Selected Parent Transform''s Name as Callout Text';
+    CheckUseObjName.Checked := (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 1);
+    CheckUseObjName.Parent := Dialog;
+
+    CheckBillboard := TCheckBox.Create(Dialog);
+    CheckBillboard.Left := 16;
+    CheckBillboard.Top := 214;
+    CheckBillboard.Caption := 'Attach Upright Y-Axis TCastleBillboard (Always Face Camera)';
+    CheckBillboard.Checked := true;
+    CheckBillboard.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Create 3D Text Callout';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyWorldTextCallout(
+        EditCaption.Text,
+        CheckUseObjName.Checked,
+        SpinSize.Value,
+        SpinOffset.Value,
+        ComboColor.ItemIndex,
+        CheckBillboard.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemWorldTextCalloutClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyWorldTextCallout('', true, 0.45, 0.50, 1, true)
+  else
+    ShowWorldTextCalloutDialog;
+end;
+
+procedure TDesignFrame.ApplyQuickImageTransform(const ImagePreset: Integer;
+  const ImageUrl: String; const WidthVal, HeightVal, RepeatX, RepeatY: Single;
+  const AttachBillboard: Boolean);
+var
+  TargetParent: TCastleTransform;
+  ImgT: TCastleImageTransform;
+  BB: TCastleBillboard;
+  FocusCenter: TVector3;
+begin
+  if DesignOwner = nil then Exit;
+
+  if CurrentTransform is TCastleImageTransform then
+    ImgT := TCastleImageTransform(CurrentTransform)
+  else
+  begin
+    if FDesignRoot is TCastleTransform then
+      TargetParent := TCastleTransform(FDesignRoot)
+    else if CurrentViewport <> nil then
+      TargetParent := CurrentViewport.Items
+    else
+    begin
+      ErrorBox('Select a 3D viewport or transform design before creating a TCastleImageTransform.');
+      Exit;
+    end;
+
+    FocusCenter := TVector3.Zero;
+    if (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0) then
+      FocusCenter := TransformManipulate.SelectionWorkingCenter
+    else if CurrentTransform <> nil then
+      FocusCenter := CurrentTransform.WorldTranslation;
+
+    ImgT := TCastleImageTransform.Create(DesignOwner);
+    ImgT.Name := ProposeComponentName(TCastleImageTransform, DesignOwner, 'ImageTransform');
+    ImgT.Translation := FocusCenter;
+    TargetParent.Add(ImgT);
+  end;
+
+  if Trim(ImageUrl) <> '' then
+    ImgT.Url := Trim(ImageUrl);
+  ImgT.Size := Vector2(Max(0.0, WidthVal), Max(0.0, HeightVal));
+  ImgT.RepeatImage := Vector2(Max(0.1, RepeatX), Max(0.1, RepeatY));
+
+  case ImagePreset of
+    0: begin // Pixel-Art 2D Sprite (Feet Pivot, Nearest-Neighbor)
+         ImgT.SmoothScaling := false;
+         ImgT.Mipmaps := false;
+         ImgT.Material := pmUnlit;
+         ImgT.Pivot := Vector2(0.5, 0.0);
+         ImgT.Color := Vector4(1, 1, 1, 1);
+       end;
+    1: begin // High-Res HD Sprite / Billboard Card
+         ImgT.SmoothScaling := true;
+         ImgT.Mipmaps := true;
+         ImgT.Material := pmUnlit;
+         ImgT.Pivot := Vector2(0.5, 0.5);
+         ImgT.Color := Vector4(1, 1, 1, 1);
+       end;
+    2: begin // Tiled Seamless Floor / Ground Plane
+         ImgT.SmoothScaling := true;
+         ImgT.Mipmaps := true;
+         ImgT.Material := pmPhysical;
+         ImgT.Pivot := Vector2(0.5, 0.5);
+         ImgT.Rotation := Vector4(1, 0, 0, -Pi * 0.5);
+         ImgT.Color := Vector4(1, 1, 1, 1);
+       end;
+    3: begin // Level Reference Blueprint / Semi-Transparent Floorplan
+         ImgT.SmoothScaling := true;
+         ImgT.Mipmaps := true;
+         ImgT.Material := pmUnlit;
+         ImgT.Pivot := Vector2(0.5, 0.5);
+         ImgT.Rotation := Vector4(1, 0, 0, -Pi * 0.5);
+         ImgT.Color := Vector4(1.0, 1.0, 1.0, 0.55);
+         ImgT.Pickable := false;
+         ImgT.Collides := false;
+         ImgT.CastShadows := false;
+       end;
+  end;
+
+  if AttachBillboard and (ImgT.FindBehavior(TCastleBillboard) = nil) then
+  begin
+    BB := TCastleBillboard.Create(DesignOwner);
+    BB.Name := ProposeComponentName(TCastleBillboard, DesignOwner, ImgT.Name + 'Billboard');
+    BB.AxisOfRotation := Vector3(0, 1, 0);
+    BB.MatchCameraDirection := true;
+    ImgT.AddBehavior(BB);
+  end;
+
+  UpdateDesign;
+  SetSelectedComponent(ImgT);
+  ModifiedOutsideObjectInspector(
+    Format('Configure TCastleImageTransform (%s)', [ImgT.Name]),
+    ucHigh);
+end;
+
+procedure TDesignFrame.ShowQuickImageTransformDialog;
+var
+  Dialog: TForm;
+  LblPreset, LblUrl, LblSize, LblRepeat: TLabel;
+  ComboPreset: TComboBox;
+  EditUrl: TEdit;
+  SpinW, SpinH, SpinRepX, SpinRepY: TFloatSpinEdit;
+  CheckBillboard: TCheckBox;
+  BottomPanel: TPanel;
+  BtnBrowse, BtnOk, BtnCancel: TButton;
+  OpenDlg: TCastleOpenDialog;
+begin
+  if (CurrentViewport = nil) and (not (FDesignRoot is TCastleTransform)) then
+  begin
+    ErrorBox('Select a 3D viewport or transform design before configuring a TCastleImageTransform.');
+    Exit;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 2D/3D Sprite, Decal & Tiled ImageTransform Setup';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 480;
+    Dialog.Height := 310;
+
+    LblPreset := TLabel.Create(Dialog);
+    LblPreset.Left := 16;
+    LblPreset.Top := 16;
+    LblPreset.Caption := 'TCastleImageTransform Workflow Preset:';
+    LblPreset.Parent := Dialog;
+
+    ComboPreset := TComboBox.Create(Dialog);
+    ComboPreset.Left := 16;
+    ComboPreset.Top := 38;
+    ComboPreset.Width := 444;
+    ComboPreset.Style := csDropDownList;
+    ComboPreset.Items.Add('Pixel-Art 2D Sprite (SmoothScaling=false, Mipmaps=false, Bottom Feet Pivot)');
+    ComboPreset.Items.Add('High-Res HD Sprite / Decal Card (SmoothScaling=true, Center Pivot)');
+    ComboPreset.Items.Add('Tiled Seamless Floor / Ground Plane (Horizontal XZ, pmPhysical)');
+    ComboPreset.Items.Add('Level Reference Blueprint Overlay (Horizontal XZ, 55% Alpha, Non-Pickable)');
+    ComboPreset.ItemIndex := 0;
+    ComboPreset.Parent := Dialog;
+
+    LblUrl := TLabel.Create(Dialog);
+    LblUrl.Left := 16;
+    LblUrl.Top := 78;
+    LblUrl.Caption := 'Image / Texture URL (castle-data:/... .png, .jpg, .webp):';
+    LblUrl.Parent := Dialog;
+
+    EditUrl := TEdit.Create(Dialog);
+    EditUrl.Left := 16;
+    EditUrl.Top := 100;
+    EditUrl.Width := 444;
+    if CurrentTransform is TCastleImageTransform then
+      EditUrl.Text := TCastleImageTransform(CurrentTransform).Url
+    else
+      EditUrl.Text := '';
+    EditUrl.Parent := Dialog;
+
+    LblSize := TLabel.Create(Dialog);
+    LblSize.Left := 16;
+    LblSize.Top := 140;
+    LblSize.Caption := 'Quad Size Width X & Height Y (0 = Native Image Size):';
+    LblSize.Parent := Dialog;
+
+    SpinW := TFloatSpinEdit.Create(Dialog);
+    SpinW.Left := 300;
+    SpinW.Top := 136;
+    SpinW.Width := 75;
+    SpinW.MinValue := 0.0;
+    SpinW.MaxValue := 5000.0;
+    SpinW.Increment := 1.0;
+    SpinW.DecimalPlaces := 2;
+    SpinW.Value := 2.0;
+    SpinW.Parent := Dialog;
+
+    SpinH := TFloatSpinEdit.Create(Dialog);
+    SpinH.Left := 385;
+    SpinH.Top := 136;
+    SpinH.Width := 75;
+    SpinH.MinValue := 0.0;
+    SpinH.MaxValue := 5000.0;
+    SpinH.Increment := 1.0;
+    SpinH.DecimalPlaces := 2;
+    SpinH.Value := 2.0;
+    SpinH.Parent := Dialog;
+
+    LblRepeat := TLabel.Create(Dialog);
+    LblRepeat.Left := 16;
+    LblRepeat.Top := 176;
+    LblRepeat.Caption := 'UV Texture Repeat X & Y (RepeatImage):';
+    LblRepeat.Parent := Dialog;
+
+    SpinRepX := TFloatSpinEdit.Create(Dialog);
+    SpinRepX.Left := 300;
+    SpinRepX.Top := 172;
+    SpinRepX.Width := 75;
+    SpinRepX.MinValue := 0.1;
+    SpinRepX.MaxValue := 500.0;
+    SpinRepX.Increment := 1.0;
+    SpinRepX.DecimalPlaces := 1;
+    SpinRepX.Value := 1.0;
+    SpinRepX.Parent := Dialog;
+
+    SpinRepY := TFloatSpinEdit.Create(Dialog);
+    SpinRepY.Left := 385;
+    SpinRepY.Top := 172;
+    SpinRepY.Width := 75;
+    SpinRepY.MinValue := 0.1;
+    SpinRepY.MaxValue := 500.0;
+    SpinRepY.Increment := 1.0;
+    SpinRepY.DecimalPlaces := 1;
+    SpinRepY.Value := 1.0;
+    SpinRepY.Parent := Dialog;
+
+    CheckBillboard := TCheckBox.Create(Dialog);
+    CheckBillboard.Left := 16;
+    CheckBillboard.Top := 214;
+    CheckBillboard.Caption := 'Attach Upright Y-Axis TCastleBillboard Behavior';
+    CheckBillboard.Checked := false;
+    CheckBillboard.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnBrowse := TButton.Create(Dialog);
+    BtnBrowse.Caption := 'Browse Image...';
+    BtnBrowse.ModalResult := mrRetry;
+    BtnBrowse.AutoSize := true;
+    BtnBrowse.Align := alRight;
+    BtnBrowse.BorderSpacing.Around := 6;
+    BtnBrowse.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Apply ImageTransform';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    while true do
+    begin
+      case Dialog.ShowModal of
+        mrRetry:
+          begin
+            OpenDlg := TCastleOpenDialog.Create(Self);
+            try
+              OpenDlg.Title := 'Select Image File';
+              OpenDlg.Filter := 'Image Files (*.png;*.jpg;*.jpeg;*.webp;*.dds;*.ktx)|*.png;*.jpg;*.jpeg;*.webp;*.dds;*.ktx|All Files (*.*)|*.*';
+              OpenDlg.AdviceDataDirectory := true;
+              if OpenDlg.Execute then
+                EditUrl.Text := OpenDlg.Url;
+            finally
+              FreeAndNil(OpenDlg);
+            end;
+          end;
+        mrOk:
+          begin
+            ApplyQuickImageTransform(
+              ComboPreset.ItemIndex,
+              EditUrl.Text,
+              SpinW.Value,
+              SpinH.Value,
+              SpinRepX.Value,
+              SpinRepY.Value,
+              CheckBillboard.Checked);
+            Break;
+          end;
+        else
+          Break;
+      end;
+    end;
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemQuickImageTransformClick(Sender: TObject);
+begin
+  ShowQuickImageTransformDialog;
+end;
+
+procedure TDesignFrame.ApplyHierarchySanitizer(const RoundEpsilon, FixZeroScale,
+  NormalizeRot, SnapUiPixels, PruneEmptyLeaves, EntireDesign: Boolean);
+var
+  SanitizedCount, PrunedCount: Integer;
+  EmptyLeaves: TComponentList;
+
+  function CleanFloat(const V, TargetVal: Single): Single;
+  begin
+    if Abs(V - TargetVal) < 1e-4 then
+      Result := TargetVal
+    else if Abs(V - Round(V)) < 1e-4 then
+      Result := Round(V)
+    else
+      Result := V;
+  end;
+
+  procedure SanitizeNode(const C: TComponent);
+  var
+    ChildIdx: Integer;
+    T: TCastleTransform;
+    UI: TCastleUserInterface;
+    Pos, Sc, AxisVec: TVector3;
+    Rot: TVector4;
+    NodeChanged: Boolean;
+  begin
+    if (C = nil) or (not Selectable(C)) then Exit;
+
+    if C is TCastleTransform then
+    begin
+      T := TCastleTransform(C);
+      for ChildIdx := 0 to T.Count - 1 do
+        SanitizeNode(T[ChildIdx]);
+
+      if (C <> FDesignRoot) and (not IsComponentLocked(C)) then
+      begin
+        NodeChanged := false;
+        Pos := T.Translation;
+        Sc := T.Scale;
+        Rot := T.Rotation;
+
+        if RoundEpsilon then
+        begin
+          Pos.X := CleanFloat(Pos.X, 0.0);
+          Pos.Y := CleanFloat(Pos.Y, 0.0);
+          Pos.Z := CleanFloat(Pos.Z, 0.0);
+          Sc.X := CleanFloat(Sc.X, 1.0);
+          Sc.Y := CleanFloat(Sc.Y, 1.0);
+          Sc.Z := CleanFloat(Sc.Z, 1.0);
+          if Abs(Rot.W) < 1e-4 then
+            Rot := Vector4(0, 1, 0, 0);
+          NodeChanged := true;
+        end;
+
+        if FixZeroScale then
+        begin
+          if Abs(Sc.X) < 1e-4 then begin Sc.X := 1.0; NodeChanged := true; end;
+          if Abs(Sc.Y) < 1e-4 then begin Sc.Y := 1.0; NodeChanged := true; end;
+          if Abs(Sc.Z) < 1e-4 then begin Sc.Z := 1.0; NodeChanged := true; end;
+        end;
+
+        if NormalizeRot then
+        begin
+          AxisVec := Vector3(Rot.X, Rot.Y, Rot.Z);
+          if AxisVec.LengthSqr < 1e-6 then
+            Rot := Vector4(0, 1, 0, 0)
+          else
+          begin
+            AxisVec := AxisVec.Normalize;
+            Rot := Vector4(AxisVec.X, AxisVec.Y, AxisVec.Z, Rot.W);
+          end;
+          NodeChanged := true;
+        end;
+
+        if NodeChanged then
+        begin
+          T.Translation := Pos;
+          T.Scale := Sc;
+          T.Rotation := Rot;
+          Inc(SanitizedCount);
+        end;
+
+        if PruneEmptyLeaves and (T.ClassType = TCastleTransform) and
+           (T.Count = 0) and (T.BehaviorsCount = 0) and
+           (T.NonVisualComponentsCount = 0) and Deletable(T) then
+          EmptyLeaves.Add(T);
+      end;
+    end else
+    if C is TCastleUserInterface then
+    begin
+      UI := TCastleUserInterface(C);
+      if UI is TCastleViewport then
+        SanitizeNode(TCastleViewport(UI).Items);
+      for ChildIdx := 0 to UI.ControlsCount - 1 do
+        SanitizeNode(UI.Controls[ChildIdx]);
+
+      if SnapUiPixels and (C <> FDesignRoot) and (not IsComponentLocked(C)) then
+      begin
+        UI.Translation := Vector2(Round(UI.Translation.X), Round(UI.Translation.Y));
+        if UI.Width > 0 then
+          UI.Width := Round(UI.Width);
+        if UI.Height > 0 then
+          UI.Height := Round(UI.Height);
+        Inc(SanitizedCount);
+      end;
+    end;
+  end;
+
+var
+  SelectedList: TComponentList;
+  SelectedCount, I: Integer;
+begin
+  if FDesignRoot = nil then Exit;
+
+  SanitizedCount := 0;
+  PrunedCount := 0;
+  EmptyLeaves := TComponentList.Create(false);
+  try
+    GetSelected(SelectedList, SelectedCount, false);
+    try
+      if (not EntireDesign) and (SelectedList <> nil) and (SelectedList.Count > 0) and
+         (not ((SelectedList.Count = 1) and (SelectedList[0] = FDesignRoot))) then
+      begin
+        for I := 0 to SelectedList.Count - 1 do
+          SanitizeNode(SelectedList[I]);
+      end else
+        SanitizeNode(FDesignRoot);
+    finally
+      FreeAndNil(SelectedList);
+    end;
+
+    for I := 0 to EmptyLeaves.Count - 1 do
+      if (EmptyLeaves[I] <> nil) and (EmptyLeaves[I] <> FDesignRoot) then
+      begin
+        FreeComponentRecursively(EmptyLeaves[I]);
+        Inc(PrunedCount);
+      end;
+
+    if (SanitizedCount > 0) or (PrunedCount > 0) then
+    begin
+      UpdateDesign;
+      ModifiedOutsideObjectInspector(
+        Format('Sanitize Hierarchy (%d Sanitized, %d Empty Leaf Node(s) Pruned)',
+          [SanitizedCount, PrunedCount]),
+        ucHigh);
+    end else
+      InfoBox('All transforms and UI controls in the target scope are already clean.');
+  finally
+    FreeAndNil(EmptyLeaves);
+  end;
+end;
+
+procedure TDesignFrame.ShowHierarchySanitizerDialog;
+var
+  Dialog: TForm;
+  CheckEpsilon, CheckZeroScale, CheckNormRot, CheckSnapUi,
+    CheckPruneEmpty, CheckEntireDesign: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if FDesignRoot = nil then Exit;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Hierarchy Transform & UI Pixel Sanitizer / Cleanup';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 480;
+    Dialog.Height := 270;
+
+    CheckEpsilon := TCheckBox.Create(Dialog);
+    CheckEpsilon.Left := 16;
+    CheckEpsilon.Top := 18;
+    CheckEpsilon.Caption := 'Clean Floating-Point Drift (Snap |v| < 0.0001 to exact 0.0 / 1.0 integers)';
+    CheckEpsilon.Checked := true;
+    CheckEpsilon.Parent := Dialog;
+
+    CheckZeroScale := TCheckBox.Create(Dialog);
+    CheckZeroScale.Left := 16;
+    CheckZeroScale.Top := 46;
+    CheckZeroScale.Caption := 'Repair Degenerate Zero Scales (Restore |Scale.X/Y/Z| < 0.0001 to 1.0)';
+    CheckZeroScale.Checked := true;
+    CheckZeroScale.Parent := Dialog;
+
+    CheckNormRot := TCheckBox.Create(Dialog);
+    CheckNormRot.Left := 16;
+    CheckNormRot.Top := 74;
+    CheckNormRot.Caption := 'Normalize 3D Rotation Axis Vectors (Ensure Unit Axis or (0,1,0,0))';
+    CheckNormRot.Checked := true;
+    CheckNormRot.Parent := Dialog;
+
+    CheckSnapUi := TCheckBox.Create(Dialog);
+    CheckSnapUi.Left := 16;
+    CheckSnapUi.Top := 102;
+    CheckSnapUi.Caption := 'Snap 2D UI Controls (Translation, Width, Height) to Whole Pixels';
+    CheckSnapUi.Checked := true;
+    CheckSnapUi.Parent := Dialog;
+
+    CheckPruneEmpty := TCheckBox.Create(Dialog);
+    CheckPruneEmpty.Left := 16;
+    CheckPruneEmpty.Top := 130;
+    CheckPruneEmpty.Caption := 'Prune Empty Leaf TCastleTransform Nodes (0 Children, 0 Behaviors)';
+    CheckPruneEmpty.Checked := false;
+    CheckPruneEmpty.Parent := Dialog;
+
+    CheckEntireDesign := TCheckBox.Create(Dialog);
+    CheckEntireDesign.Left := 16;
+    CheckEntireDesign.Top := 162;
+    CheckEntireDesign.Caption := 'Apply to Entire Design Hierarchy (Uncheck for Selected Subtree Only)';
+    CheckEntireDesign.Checked := (ControlsTree.SelectionCount <= 1);
+    CheckEntireDesign.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Sanitize Hierarchy';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyHierarchySanitizer(
+        CheckEpsilon.Checked,
+        CheckZeroScale.Checked,
+        CheckNormRot.Checked,
+        CheckSnapUi.Checked,
+        CheckPruneEmpty.Checked,
+        CheckEntireDesign.Checked);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemHierarchySanitizerClick(Sender: TObject);
+begin
+  ShowHierarchySanitizerDialog;
+end;
+
+procedure TDesignFrame.ShowExportHierarchyReportDialog;
+var
+  MdLines, CsvLines: TStringList;
+  TotalNodes: Integer;
+
+  procedure WalkReport(const C: TComponent; const Depth: Integer; const ParentPath: String);
+  var
+    ChildIdx: Integer;
+    IndentStr, CurPath, PosOrRectStr, UrlStr, NoteStr: String;
+    T: TCastleTransform;
+    UI: TCastleUserInterface;
+    CC: TCastleComponent;
+    WPos: TVector3;
+  begin
+    if (C = nil) or (not Selectable(C)) then Exit;
+    Inc(TotalNodes);
+
+    IndentStr := DupeString('  ', Depth);
+    if ParentPath = '' then
+      CurPath := C.Name
+    else
+      CurPath := ParentPath + '/' + C.Name;
+
+    PosOrRectStr := '-';
+    if C is TCastleTransform then
+    begin
+      T := TCastleTransform(C);
+      if T.HasWorldTransform then
+        WPos := T.WorldTranslation
+      else
+        WPos := T.Translation;
+      PosOrRectStr := Format('(%.2f, %.2f, %.2f)', [WPos.X, WPos.Y, WPos.Z]);
+    end else
+    if C is TCastleUserInterface then
+    begin
+      UI := TCastleUserInterface(C);
+      PosOrRectStr := Format('%.0fx%.0f @ (%.0f,%.0f)',
+        [UI.EffectiveWidth, UI.EffectiveHeight, UI.Translation.X, UI.Translation.Y]);
+    end;
+
+    UrlStr := GetComponentAssetUrl(C);
+    NoteStr := GetComponentNote(C);
+
+    MdLines.Add(Format('%s- **%s** (`%s`) — %s%s%s',
+      [IndentStr, C.Name, C.ClassName, PosOrRectStr,
+       Iff(UrlStr <> '', ' — `' + UrlStr + '`', ''),
+       Iff(NoteStr <> '', ' — *[#' + NoteStr + ']*', '')]));
+
+    CsvLines.Add(Format('%d,"%s","%s","%s","%s","%s","%s"',
+      [Depth, CurPath, C.Name, C.ClassName, PosOrRectStr, UrlStr, NoteStr]));
+
+    if C is TCastleComponent then
+    begin
+      CC := TCastleComponent(C);
+      for ChildIdx := 0 to CC.NonVisualComponentsCount - 1 do
+        WalkReport(CC.NonVisualComponents[ChildIdx], Depth + 1, CurPath);
+    end;
+    if C is TCastleTransform then
+    begin
+      T := TCastleTransform(C);
+      for ChildIdx := 0 to T.BehaviorsCount - 1 do
+        WalkReport(T.Behaviors[ChildIdx], Depth + 1, CurPath);
+      for ChildIdx := 0 to T.Count - 1 do
+        WalkReport(T[ChildIdx], Depth + 1, CurPath);
+    end else
+    if C is TCastleUserInterface then
+    begin
+      UI := TCastleUserInterface(C);
+      if UI is TCastleViewport then
+        WalkReport(TCastleViewport(UI).Items, Depth + 1, CurPath);
+      for ChildIdx := 0 to UI.ControlsCount - 1 do
+        WalkReport(UI.Controls[ChildIdx], Depth + 1, CurPath);
+    end;
+  end;
+
+var
+  Dialog: TForm;
+  MemoReport: TMemo;
+  BottomPanel: TPanel;
+  BtnToggleCsv, BtnSaveFile, BtnCopy, BtnClose: TButton;
+  SaveDlg: TSaveDialog;
+  ShowingCsv: Boolean;
+  ModalRes: Integer;
+begin
+  if FDesignRoot = nil then Exit;
+
+  MdLines := TStringList.Create;
+  CsvLines := TStringList.Create;
+  Dialog := TForm.CreateNew(Self);
+  try
+    TotalNodes := 0;
+    MdLines.Add('# Castle Game Engine Design Hierarchy & Asset Manifest');
+    MdLines.Add('');
+    CsvLines.Add('Depth,HierarchyPath,Name,ClassName,TransformOrRect,AssetUrl,Note');
+
+    WalkReport(FDesignRoot, 0, '');
+
+    ShowingCsv := false;
+    Dialog.Caption := Format('Design Hierarchy Tree & Asset Manifest (%d Component(s))', [TotalNodes]);
+    Dialog.Position := poMainFormCenter;
+    Dialog.Width := 760;
+    Dialog.Height := 520;
+
+    MemoReport := TMemo.Create(Dialog);
+    MemoReport.Align := alClient;
+    MemoReport.BorderSpacing.Around := 8;
+    MemoReport.ReadOnly := true;
+    MemoReport.ScrollBars := ssAutoBoth;
+    MemoReport.WordWrap := false;
+    MemoReport.Font.Name := 'Monospace';
+    MemoReport.Lines.Assign(MdLines);
+    MemoReport.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnClose := TButton.Create(Dialog);
+    BtnClose.Caption := 'Close';
+    BtnClose.Cancel := true;
+    BtnClose.ModalResult := mrCancel;
+    BtnClose.Align := alRight;
+    BtnClose.BorderSpacing.Around := 6;
+    BtnClose.Parent := BottomPanel;
+
+    BtnSaveFile := TButton.Create(Dialog);
+    BtnSaveFile.Caption := 'Save Report to File...';
+    BtnSaveFile.ModalResult := mrYes;
+    BtnSaveFile.AutoSize := true;
+    BtnSaveFile.Align := alRight;
+    BtnSaveFile.BorderSpacing.Around := 6;
+    BtnSaveFile.Parent := BottomPanel;
+
+    BtnToggleCsv := TButton.Create(Dialog);
+    BtnToggleCsv.Caption := 'Switch Format (Markdown <-> CSV)';
+    BtnToggleCsv.ModalResult := mrRetry;
+    BtnToggleCsv.AutoSize := true;
+    BtnToggleCsv.Align := alRight;
+    BtnToggleCsv.BorderSpacing.Around := 6;
+    BtnToggleCsv.Parent := BottomPanel;
+
+    BtnCopy := TButton.Create(Dialog);
+    BtnCopy.Caption := 'Copy Report to Clipboard';
+    BtnCopy.Default := true;
+    BtnCopy.ModalResult := mrOk;
+    BtnCopy.AutoSize := true;
+    BtnCopy.Align := alRight;
+    BtnCopy.BorderSpacing.Around := 6;
+    BtnCopy.Parent := BottomPanel;
+
+    while true do
+    begin
+      ModalRes := Dialog.ShowModal;
+      case ModalRes of
+        mrRetry:
+          begin
+            ShowingCsv := not ShowingCsv;
+            if ShowingCsv then
+              MemoReport.Lines.Assign(CsvLines)
+            else
+              MemoReport.Lines.Assign(MdLines);
+          end;
+        mrYes:
+          begin
+            SaveDlg := TSaveDialog.Create(Self);
+            try
+              SaveDlg.Title := 'Save Design Hierarchy Report';
+              if ShowingCsv then
+              begin
+                SaveDlg.Filter := 'CSV Spreadsheet (*.csv)|*.csv|All Files (*.*)|*.*';
+                SaveDlg.DefaultExt := 'csv';
+                SaveDlg.FileName := FDesignRoot.Name + '_hierarchy.csv';
+              end else
+              begin
+                SaveDlg.Filter := 'Markdown Document (*.md)|*.md|All Files (*.*)|*.*';
+                SaveDlg.DefaultExt := 'md';
+                SaveDlg.FileName := FDesignRoot.Name + '_hierarchy.md';
+              end;
+              if SaveDlg.Execute then
+                MemoReport.Lines.SaveToFile(SaveDlg.FileName);
+            finally
+              FreeAndNil(SaveDlg);
+            end;
+          end;
+        mrOk:
+          begin
+            Clipboard.AsText := MemoReport.Text;
+            Break;
+          end;
+        else
+          Break;
+      end;
+    end;
+  finally
+    FreeAndNil(Dialog);
+    FreeAndNil(CsvLines);
+    FreeAndNil(MdLines);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemExportHierarchyReportClick(Sender: TObject);
+begin
+  ShowExportHierarchyReportDialog;
+end;
+
+procedure TDesignFrame.ApplyQuickHudElements(const HudPreset, ColorPreset: Integer;
+  const BarWidth, BarHeight: Single);
+var
+  TargetParent, SpawnedRoot: TCastleUserInterface;
+  FrameRect, FillRect, TickRect: TCastleRectangleControl;
+  TitleLbl, ValLbl: TCastleLabel;
+  FillCol, FrameCol: TCastleColor;
+  EffW, EffH: Single;
+begin
+  if DesignOwner = nil then Exit;
+  if SelectedUserInterface <> nil then
+    TargetParent := SelectedUserInterface
+  else if FDesignRoot is TCastleUserInterface then
+    TargetParent := TCastleUserInterface(FDesignRoot)
+  else
+  begin
+    ErrorBox('Select a 2D User Interface container or open a UI design before creating HUD elements.');
+    Exit;
+  end;
+
+  case ColorPreset of
+    1: FillCol := Vector4(0.18, 0.56, 0.96, 1.0); // Stamina / Mana Azure Blue
+    2: FillCol := Vector4(0.95, 0.72, 0.16, 1.0); // XP / Shield Amber Gold
+    3: FillCol := Vector4(0.88, 0.20, 0.24, 1.0); // Crimson Boss / Health Red
+    else FillCol := Vector4(0.20, 0.84, 0.42, 1.0); // Vitality Emerald Green
+  end;
+  FrameCol := Vector4(0.10, 0.12, 0.16, 0.88);
+  EffW := Max(32.0, BarWidth);
+  EffH := Max(12.0, BarHeight);
+  SpawnedRoot := nil;
+
+  case HudPreset of
+    0: begin // Health / Stamina / Mana Progress Bar (Top-Left)
+         FrameRect := TCastleRectangleControl.Create(DesignOwner);
+         FrameRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner, 'HudStatusBarFrame');
+         FrameRect.Width := EffW;
+         FrameRect.Height := EffH;
+         FrameRect.Color := FrameCol;
+         FrameRect.Border.AllSides := 2;
+         FrameRect.BorderColor := Vector4(0.75, 0.80, 0.88, 0.90);
+         FrameRect.HorizontalAnchorSelf := hpLeft;
+         FrameRect.HorizontalAnchorParent := hpLeft;
+         FrameRect.VerticalAnchorSelf := vpTop;
+         FrameRect.VerticalAnchorParent := vpTop;
+         FrameRect.Translation := Vector2(24, -24);
+         TargetParent.InsertFront(FrameRect);
+
+         FillRect := TCastleRectangleControl.Create(DesignOwner);
+         FillRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner, 'HudStatusBarFill');
+         FillRect.Width := Max(8.0, (EffW - 8.0) * 0.75);
+         FillRect.Height := Max(6.0, EffH - 8.0);
+         FillRect.Color := FillCol;
+         FillRect.HorizontalAnchorSelf := hpLeft;
+         FillRect.HorizontalAnchorParent := hpLeft;
+         FillRect.VerticalAnchorSelf := vpMiddle;
+         FillRect.VerticalAnchorParent := vpMiddle;
+         FillRect.Translation := Vector2(4, 0);
+         FrameRect.InsertFront(FillRect);
+
+         ValLbl := TCastleLabel.Create(DesignOwner);
+         ValLbl.Name := ProposeComponentName(TCastleLabel, DesignOwner, 'LabelStatusValue');
+         ValLbl.Caption := '75 / 100';
+         ValLbl.FontSize := Max(12.0, Round(EffH * 0.55));
+         ValLbl.Color := Vector4(1, 1, 1, 1);
+         ValLbl.HorizontalAnchorSelf := hpMiddle;
+         ValLbl.HorizontalAnchorParent := hpMiddle;
+         ValLbl.VerticalAnchorSelf := vpMiddle;
+         ValLbl.VerticalAnchorParent := vpMiddle;
+         FrameRect.InsertFront(ValLbl);
+
+         SpawnedRoot := FrameRect;
+       end;
+    1: begin // Center Reticle / Crosshair
+         SpawnedRoot := TCastleUserInterface.Create(DesignOwner);
+         SpawnedRoot.Name := ProposeComponentName(TCastleUserInterface, DesignOwner, 'HudCrosshairReticle');
+         SpawnedRoot.Width := 48;
+         SpawnedRoot.Height := 48;
+         SpawnedRoot.HorizontalAnchorSelf := hpMiddle;
+         SpawnedRoot.HorizontalAnchorParent := hpMiddle;
+         SpawnedRoot.VerticalAnchorSelf := vpMiddle;
+         SpawnedRoot.VerticalAnchorParent := vpMiddle;
+         TargetParent.InsertFront(SpawnedRoot);
+
+         // Center dot
+         TickRect := TCastleRectangleControl.Create(DesignOwner);
+         TickRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner, 'CrosshairCenterDot');
+         TickRect.Width := 4;
+         TickRect.Height := 4;
+         TickRect.Color := FillCol;
+         TickRect.HorizontalAnchorSelf := hpMiddle;
+         TickRect.HorizontalAnchorParent := hpMiddle;
+         TickRect.VerticalAnchorSelf := vpMiddle;
+         TickRect.VerticalAnchorParent := vpMiddle;
+         SpawnedRoot.InsertFront(TickRect);
+
+         // Left / Right / Top / Bottom ticks
+         TickRect := TCastleRectangleControl.Create(DesignOwner);
+         TickRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner, 'CrosshairTickLeft');
+         TickRect.Width := 10; TickRect.Height := 2; TickRect.Color := FillCol;
+         TickRect.HorizontalAnchorSelf := hpMiddle; TickRect.HorizontalAnchorParent := hpMiddle;
+         TickRect.VerticalAnchorSelf := vpMiddle; TickRect.VerticalAnchorParent := vpMiddle;
+         TickRect.Translation := Vector2(-12, 0);
+         SpawnedRoot.InsertFront(TickRect);
+
+         TickRect := TCastleRectangleControl.Create(DesignOwner);
+         TickRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner, 'CrosshairTickRight');
+         TickRect.Width := 10; TickRect.Height := 2; TickRect.Color := FillCol;
+         TickRect.HorizontalAnchorSelf := hpMiddle; TickRect.HorizontalAnchorParent := hpMiddle;
+         TickRect.VerticalAnchorSelf := vpMiddle; TickRect.VerticalAnchorParent := vpMiddle;
+         TickRect.Translation := Vector2(12, 0);
+         SpawnedRoot.InsertFront(TickRect);
+
+         TickRect := TCastleRectangleControl.Create(DesignOwner);
+         TickRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner, 'CrosshairTickTop');
+         TickRect.Width := 2; TickRect.Height := 10; TickRect.Color := FillCol;
+         TickRect.HorizontalAnchorSelf := hpMiddle; TickRect.HorizontalAnchorParent := hpMiddle;
+         TickRect.VerticalAnchorSelf := vpMiddle; TickRect.VerticalAnchorParent := vpMiddle;
+         TickRect.Translation := Vector2(0, 12);
+         SpawnedRoot.InsertFront(TickRect);
+
+         TickRect := TCastleRectangleControl.Create(DesignOwner);
+         TickRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner, 'CrosshairTickBottom');
+         TickRect.Width := 2; TickRect.Height := 10; TickRect.Color := FillCol;
+         TickRect.HorizontalAnchorSelf := hpMiddle; TickRect.HorizontalAnchorParent := hpMiddle;
+         TickRect.VerticalAnchorSelf := vpMiddle; TickRect.VerticalAnchorParent := vpMiddle;
+         TickRect.Translation := Vector2(0, -12);
+         SpawnedRoot.InsertFront(TickRect);
+       end;
+    2: begin // Top-Right Minimap / Radar Frame
+         FrameRect := TCastleRectangleControl.Create(DesignOwner);
+         FrameRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner, 'HudMinimapFrame');
+         FrameRect.Width := Max(120.0, EffW);
+         FrameRect.Height := Max(120.0, EffW);
+         FrameRect.Color := FrameCol;
+         FrameRect.Border.AllSides := 3;
+         FrameRect.BorderColor := FillCol;
+         FrameRect.HorizontalAnchorSelf := hpRight;
+         FrameRect.HorizontalAnchorParent := hpRight;
+         FrameRect.VerticalAnchorSelf := vpTop;
+         FrameRect.VerticalAnchorParent := vpTop;
+         FrameRect.Translation := Vector2(-24, -24);
+         TargetParent.InsertFront(FrameRect);
+
+         TitleLbl := TCastleLabel.Create(DesignOwner);
+         TitleLbl.Name := ProposeComponentName(TCastleLabel, DesignOwner, 'LabelCompassNorth');
+         TitleLbl.Caption := 'N';
+         TitleLbl.FontSize := 18;
+         TitleLbl.Color := FillCol;
+         TitleLbl.HorizontalAnchorSelf := hpMiddle;
+         TitleLbl.HorizontalAnchorParent := hpMiddle;
+         TitleLbl.VerticalAnchorSelf := vpTop;
+         TitleLbl.VerticalAnchorParent := vpTop;
+         TitleLbl.Translation := Vector2(0, -6);
+         FrameRect.InsertFront(TitleLbl);
+
+         ValLbl := TCastleLabel.Create(DesignOwner);
+         ValLbl.Name := ProposeComponentName(TCastleLabel, DesignOwner, 'LabelRadarCoords');
+         ValLbl.Caption := '004, 128';
+         ValLbl.FontSize := 14;
+         ValLbl.Color := Vector4(0.85, 0.90, 0.95, 1.0);
+         ValLbl.HorizontalAnchorSelf := hpMiddle;
+         ValLbl.HorizontalAnchorParent := hpMiddle;
+         ValLbl.VerticalAnchorSelf := vpBottom;
+         ValLbl.VerticalAnchorParent := vpBottom;
+         ValLbl.Translation := Vector2(0, 6);
+         FrameRect.InsertFront(ValLbl);
+
+         SpawnedRoot := FrameRect;
+       end;
+    3: begin // Top-Center Boss Health Bar Banner
+         FrameRect := TCastleRectangleControl.Create(DesignOwner);
+         FrameRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner, 'HudBossHealthFrame');
+         FrameRect.Width := Max(320.0, EffW * 2.0);
+         FrameRect.Height := EffH;
+         FrameRect.Color := FrameCol;
+         FrameRect.Border.AllSides := 2;
+         FrameRect.BorderColor := Vector4(0.90, 0.72, 0.25, 1.0);
+         FrameRect.HorizontalAnchorSelf := hpMiddle;
+         FrameRect.HorizontalAnchorParent := hpMiddle;
+         FrameRect.VerticalAnchorSelf := vpTop;
+         FrameRect.VerticalAnchorParent := vpTop;
+         FrameRect.Translation := Vector2(0, -48);
+         TargetParent.InsertFront(FrameRect);
+
+         FillRect := TCastleRectangleControl.Create(DesignOwner);
+         FillRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner, 'HudBossHealthFill');
+         FillRect.Width := FrameRect.Width - 8;
+         FillRect.Height := EffH - 8;
+         FillRect.Color := Vector4(0.88, 0.18, 0.22, 1.0);
+         FillRect.HorizontalAnchorSelf := hpLeft;
+         FillRect.HorizontalAnchorParent := hpLeft;
+         FillRect.VerticalAnchorSelf := vpMiddle;
+         FillRect.VerticalAnchorParent := vpMiddle;
+         FillRect.Translation := Vector2(4, 0);
+         FrameRect.InsertFront(FillRect);
+
+         TitleLbl := TCastleLabel.Create(DesignOwner);
+         TitleLbl.Name := ProposeComponentName(TCastleLabel, DesignOwner, 'LabelBossTitle');
+         TitleLbl.Caption := 'GUARDIAN OF THE CITADEL';
+         TitleLbl.FontSize := 20;
+         TitleLbl.Color := Vector4(1.0, 0.92, 0.72, 1.0);
+         TitleLbl.HorizontalAnchorSelf := hpMiddle;
+         TitleLbl.HorizontalAnchorParent := hpMiddle;
+         TitleLbl.VerticalAnchorSelf := vpBottom;
+         TitleLbl.VerticalAnchorParent := vpTop;
+         TitleLbl.Translation := Vector2(0, 6);
+         FrameRect.InsertFront(TitleLbl);
+
+         SpawnedRoot := FrameRect;
+       end;
+    4: begin // Bottom-Center Interaction Prompt Pill
+         FrameRect := TCastleRectangleControl.Create(DesignOwner);
+         FrameRect.Name := ProposeComponentName(TCastleRectangleControl, DesignOwner, 'HudInteractionPrompt');
+         FrameRect.Width := Max(180.0, EffW);
+         FrameRect.Height := Max(36.0, EffH);
+         FrameRect.Color := FrameCol;
+         FrameRect.Border.AllSides := 2;
+         FrameRect.BorderColor := FillCol;
+         FrameRect.HorizontalAnchorSelf := hpMiddle;
+         FrameRect.HorizontalAnchorParent := hpMiddle;
+         FrameRect.VerticalAnchorSelf := vpBottom;
+         FrameRect.VerticalAnchorParent := vpBottom;
+         FrameRect.Translation := Vector2(0, 72);
+         TargetParent.InsertFront(FrameRect);
+
+         ValLbl := TCastleLabel.Create(DesignOwner);
+         ValLbl.Name := ProposeComponentName(TCastleLabel, DesignOwner, 'LabelPromptAction');
+         ValLbl.Caption := '[E] Interact / Examine';
+         ValLbl.FontSize := 18;
+         ValLbl.Color := Vector4(1, 1, 1, 1);
+         ValLbl.HorizontalAnchorSelf := hpMiddle;
+         ValLbl.HorizontalAnchorParent := hpMiddle;
+         ValLbl.VerticalAnchorSelf := vpMiddle;
+         ValLbl.VerticalAnchorParent := vpMiddle;
+         FrameRect.InsertFront(ValLbl);
+
+         SpawnedRoot := FrameRect;
+       end;
+  end;
+
+  if SpawnedRoot <> nil then
+  begin
+    UpdateDesign;
+    SetSelectedComponent(SpawnedRoot);
+    ModifiedOutsideObjectInspector(
+      Format('Create 2D HUD Widget (%s)', [SpawnedRoot.Name]),
+      ucHigh);
+  end;
+end;
+
+procedure TDesignFrame.ShowQuickHudElementsDialog;
+var
+  Dialog: TForm;
+  LblPreset, LblColor, LblW, LblH: TLabel;
+  ComboPreset, ComboColor: TComboBox;
+  SpinW, SpinH: TFloatSpinEdit;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+begin
+  if (SelectedUserInterface = nil) and (not (FDesignRoot is TCastleUserInterface)) then
+  begin
+    ErrorBox('Select a 2D User Interface container or open a UI design first.');
+    Exit;
+  end;
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Quick 2D HUD Bars, Crosshair & Minimap Frame Generator';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 470;
+    Dialog.Height := 290;
+
+    LblPreset := TLabel.Create(Dialog);
+    LblPreset.Left := 16;
+    LblPreset.Top := 16;
+    LblPreset.Caption := 'Gameplay 2D HUD Widget Preset:';
+    LblPreset.Parent := Dialog;
+
+    ComboPreset := TComboBox.Create(Dialog);
+    ComboPreset.Left := 16;
+    ComboPreset.Top := 38;
+    ComboPreset.Width := 434;
+    ComboPreset.Style := csDropDownList;
+    ComboPreset.Items.Add('Player Health / Stamina / Mana Progress Bar (Top-Left)');
+    ComboPreset.Items.Add('Center Screen Crosshair / Aim Reticle (4 Ticks + Dot)');
+    ComboPreset.Items.Add('Corner Minimap / Radar Frame with Compass & Coords (Top-Right)');
+    ComboPreset.Items.Add('Boss Health Bar Banner with Header Title (Top-Center)');
+    ComboPreset.Items.Add('Interaction Prompt Pill "[E] Interact" (Bottom-Center)');
+    ComboPreset.ItemIndex := 0;
+    ComboPreset.Parent := Dialog;
+
+    LblColor := TLabel.Create(Dialog);
+    LblColor.Left := 16;
+    LblColor.Top := 78;
+    LblColor.Caption := 'HUD Accent / Fill Color Swatch:';
+    LblColor.Parent := Dialog;
+
+    ComboColor := TComboBox.Create(Dialog);
+    ComboColor.Left := 16;
+    ComboColor.Top := 100;
+    ComboColor.Width := 434;
+    ComboColor.Style := csDropDownList;
+    ComboColor.Items.Add('Vitality Emerald Green');
+    ComboColor.Items.Add('Stamina / Mana Azure Blue');
+    ComboColor.Items.Add('Shield / XP Amber Gold');
+    ComboColor.Items.Add('Crimson Health Red');
+    ComboColor.ItemIndex := 0;
+    ComboColor.Parent := Dialog;
+
+    LblW := TLabel.Create(Dialog);
+    LblW.Left := 16;
+    LblW.Top := 142;
+    LblW.Caption := 'Widget Width (px):';
+    LblW.Parent := Dialog;
+
+    SpinW := TFloatSpinEdit.Create(Dialog);
+    SpinW.Left := 320;
+    SpinW.Top := 138;
+    SpinW.Width := 110;
+    SpinW.MinValue := 32.0;
+    SpinW.MaxValue := 2048.0;
+    SpinW.Increment := 16.0;
+    SpinW.DecimalPlaces := 0;
+    SpinW.Value := 260.0;
+    SpinW.Parent := Dialog;
+
+    LblH := TLabel.Create(Dialog);
+    LblH.Left := 16;
+    LblH.Top := 178;
+    LblH.Caption := 'Widget Height (px):';
+    LblH.Parent := Dialog;
+
+    SpinH := TFloatSpinEdit.Create(Dialog);
+    SpinH.Left := 320;
+    SpinH.Top := 174;
+    SpinH.Width := 110;
+    SpinH.MinValue := 12.0;
+    SpinH.MaxValue := 1024.0;
+    SpinH.Increment := 4.0;
+    SpinH.DecimalPlaces := 0;
+    SpinH.Value := 32.0;
+    SpinH.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Create HUD Widget';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ApplyQuickHudElements(
+        ComboPreset.ItemIndex,
+        ComboColor.ItemIndex,
+        SpinW.Value,
+        SpinH.Value);
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemQuickHudElementsClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ApplyQuickHudElements(0, 0, 260.0, 32.0)
+  else
+    ShowQuickHudElementsDialog;
+end;
+
 procedure TDesignFrame.ScatterDuplicateSelected(const Count: Integer;
   const Radius, MaxYawDeg, ScaleMin, ScaleMax: Single;
   const SnapToGround, AlignToNormal: Boolean);
@@ -38612,6 +40077,19 @@ begin
       (CurrentViewport <> nil) or (FDesignRoot is TCastleTransform);
   if MenuTreeViewItemUiResolutionTester <> nil then
     MenuTreeViewItemUiResolutionTester.Enabled :=
+      (SelectedUserInterface <> nil) or (FDesignRoot is TCastleUserInterface);
+  if MenuTreeViewItemWorldTextCallout <> nil then
+    MenuTreeViewItemWorldTextCallout.Enabled :=
+      (CurrentViewport <> nil) or (FDesignRoot is TCastleTransform);
+  if MenuTreeViewItemQuickImageTransform <> nil then
+    MenuTreeViewItemQuickImageTransform.Enabled :=
+      (CurrentViewport <> nil) or (FDesignRoot is TCastleTransform);
+  if MenuTreeViewItemHierarchySanitizer <> nil then
+    MenuTreeViewItemHierarchySanitizer.Enabled := FDesignRoot <> nil;
+  if MenuTreeViewItemExportHierarchyReport <> nil then
+    MenuTreeViewItemExportHierarchyReport.Enabled := FDesignRoot <> nil;
+  if MenuTreeViewItemQuickHudElements <> nil then
+    MenuTreeViewItemQuickHudElements.Enabled :=
       (SelectedUserInterface <> nil) or (FDesignRoot is TCastleUserInterface);
   if MenuTreeViewItemGroupSelected <> nil then
     MenuTreeViewItemGroupSelected.Enabled := (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0);

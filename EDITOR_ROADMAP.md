@@ -1350,11 +1350,36 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Implemented `TDesignFrame.ShowUiResolutionTesterDialog` and `TDesignFrame.ApplyUiResolutionPreset` (`MenuTreeViewItemUiResolutionTester` in `MenuTreeView`).
   - Switches the target 2D UI container between **Responsive Full-Viewport Fill (`FullSize := true`)**, **Full HD 1080p (`1920x1080`)**, **HD 720p (`1280x720`)**, **Steam Deck 16:10 (`1280x800`)**, **Ultrawide 21:9 (`2560x1080`)**, **Mobile Portrait 9:16 (`540x960`)**, **Tablet 4:3 (`1024x768`)**, or custom dimensions centered in the design canvas.
 
+### Phase 217: Quick 3D World-Space Text Callout & Room Sign Generator (`ShowWorldTextCalloutDialog` / `ApplyWorldTextCallout`)
+- [x] **217.1. Floating 3D `TCastleText` Label, Framed Signpost & Leader-Line Callout Rig (`TDesignFrame.ShowWorldTextCalloutDialog` / `TDesignFrame.ApplyWorldTextCallout`)**
+  - Implemented `TDesignFrame.ShowWorldTextCalloutDialog` and `TDesignFrame.ApplyWorldTextCallout` (`MenuTreeViewItemWorldTextCallout` in `MenuTreeView`).
+  - Spawns or updates a 3D world-space `TCastleText` (`Caption`, `Size`, `Alignment := hpMiddle`, `VerticalAlignment := vpMiddle`, `DoubleSided`, `Material := pmUnlit`) with optional dark backing plate (`TCastlePlane`), vertical leader stem (`TCastleCylinder`), and upright `TCastleBillboard` behavior (`Shift`-click spawns an instant floating callout).
+
+### Phase 218: Quick 2D/3D Sprite, Decal & Tiled `TCastleImageTransform` Setup (`ShowQuickImageTransformDialog` / `ApplyQuickImageTransform`)
+- [x] **218.1. World-Space Sprite, Floor Decal & Tiled Plane Wizard (`TDesignFrame.ShowQuickImageTransformDialog` / `TDesignFrame.ApplyQuickImageTransform`)**
+  - Implemented `TDesignFrame.ShowQuickImageTransformDialog` and `TDesignFrame.ApplyQuickImageTransform` (`MenuTreeViewItemQuickImageTransform` in `MenuTreeView`).
+  - Spawns or configures a `TCastleImageTransform` with browsable texture `Url`, world `Size`, UV `RepeatImage`, `Pivot` (`(0.5, 0.0)` bottom-standing sprite or `(0.5, 0.5)` centered decal), `SmoothScaling` (bilinear vs crisp pixel-art nearest filtering), `Material`, and optional upright `TCastleBillboard`.
+
+### Phase 219: Hierarchy Transform & UI Pixel Sanitizer / Cleanup Dialog (`ShowHierarchySanitizerDialog` / `ApplyHierarchySanitizer`)
+- [x] **219.1. Sub-Millimeter Float Epsilon, Non-Positive Scale, UI Pixel & Empty Node Sanitizer (`TDesignFrame.ShowHierarchySanitizerDialog` / `TDesignFrame.ApplyHierarchySanitizer`)**
+  - Implemented `TDesignFrame.ShowHierarchySanitizerDialog` and `TDesignFrame.ApplyHierarchySanitizer` (`MenuTreeViewItemHierarchySanitizer` in `MenuTreeView`).
+  - Cleans floating-point drift on 3D `Translation`, `Scale`, and `Rotation` (`0.0001` epsilon), clamps non-positive scales (`<= 0`), rounds 2D UI `Width`, `Height`, `HorizontalAnchorDelta`, `VerticalAnchorDelta`, and `Border.All` to crisp integer pixels, and optionally prunes empty `TCastleTransform` nodes (`Shift`-click runs default cleanup immediately).
+
+### Phase 220: Design Hierarchy Tree & Asset Manifest Exporter (`ShowExportHierarchyReportDialog` / `MenuTreeViewItemExportHierarchyReport`)
+- [x] **220.1. Markdown / Text Design Architecture & Asset Dependency Report (`TDesignFrame.ShowExportHierarchyReportDialog`)**
+  - Implemented `TDesignFrame.ShowExportHierarchyReportDialog` and added **`Export Design Hierarchy Tree & Asset Manifest...`** (`MenuTreeViewItemExportHierarchyReport`) in `MenuTreeView`.
+  - Generates a comprehensive Markdown report containing summary counts, an indented ASCII component hierarchy tree with inline 3D/2D bounds, behaviors, `[★]` favorites, `[●Color]` tags, and `[#Note]` annotations, plus a sorted External Asset URL Manifest (`[OK]` vs `[MISSING]`) with one-click clipboard copy and `.md`/`.txt` export.
+
+### Phase 221: Quick 2D HUD Bars, Crosshair & Minimap Frame Generator (`ShowQuickHudElementsDialog` / `ApplyQuickHudElements`)
+- [x] **221.1. Game HUD Widget Factory (`TDesignFrame.ShowQuickHudElementsDialog` / `ApplyQuickHudElements`)**
+  - Implemented `TDesignFrame.ShowQuickHudElementsDialog` and `TDesignFrame.ApplyQuickHudElements` (`MenuTreeViewItemQuickHudElements` in `MenuTreeView`).
+  - Spawns 5 ready-to-use 2D game HUD widgets anchored inside the active UI root/container: **Health / Stamina / XP Progress Bar**, **Center Screen Crosshair Reticle (`4 Arms + Center Dot`)**, **Corner Minimap / Radar Frame (`Border + Inner Mask + Cardinal N/E/S/W Labels`)**, **Bottom-Right Ammo / Weapon Counter Card**, and **Bottom Action / Hotbar Slot Row (`Slots 1..N` with Keybind Badges)** (`Shift`-click spawns a Health Bar immediately).
+
 ---
 
-## Roadmap Completion Status (Phases 1–216)
+## Roadmap Completion Status (Phases 1–221)
 
-All **216 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **221 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 
