@@ -169,6 +169,9 @@ procedure ChangeAppearance(const Shape: TGLShape; const NewAppearance: TAppearan
 begin
   Shape.Node.FdAppearance.Value := NewAppearance;
   Shape.State.Appearance := NewAppearance;
+  if Shape.OriginalState <> nil then
+    Shape.OriginalState.Appearance := NewAppearance;
+  Shape.RHIBindlessMaterialRegistered := False;
 end;
 
 constructor TBatchShapes.Create;

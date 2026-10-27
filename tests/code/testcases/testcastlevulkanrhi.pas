@@ -34,7 +34,7 @@ uses
   CastleVideos, CastleInternalBackgroundRenderer, CastleInternalGLShadowVolumes,
   CastleGLUtils, CastleRenderPrimitives, CastleShapes, CastleRenderContext,
   CastleShapeInternalShadowVolumes, CastleShapeInternalRenderShadowVolumes,
-  CastleInternalBatchShapes,
+  CastleInternalBatchShapes, CastleInternalShapesRenderer,
   ToolManifest, CastleInternalRenderDoc;
 
 type
@@ -273,6 +273,9 @@ type
     procedure TestViewport3DSkyboxAndImageBackgroundRotationOnlyViewMatrixRHI;
     procedure TestViewportStencilShadowVolumesEndToEndMultiPassAndMeshPSORHI;
     procedure TestSceneUpdateGeneratedTexturesRenderedTextureAndShadowMapRHI;
+    procedure TestViewportOcclusionCullingEndToEndAndBoxUnlitMeshPSORHI;
+    procedure TestViewportDynamicBatchingMergesShapesAndUploadsRHIBuffersRHI;
+    procedure TestShapeExtractRHIMaterialTexturesAllResourceTypesAndOnDemandPrepareRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -14231,6 +14234,325 @@ begin
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportOcclusionCullingEndToEndAndBoxUnlitMeshPSORHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  SceneFront, SceneBack: TCastleScene;
+  Root1, Root2: TX3DRootNode;
+  ShapeNode1, ShapeNode2: TShapeNode;
+  Box1, Box2: TBoxNode;
+  OccRenderer: TOcclusionCullingRenderer;
+  Pool0: TVulkanRHIQueryPool;
+  BoxPso: TRHIPipeline;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7001)));
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.OcclusionCulling := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 10.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    SceneFront := TCastleScene.Create(Viewport);
+    Root1 := TX3DRootNode.Create;
+    ShapeNode1 := TShapeNode.Create;
+    Box1 := TBoxNode.Create;
+    Box1.Size := Vector3(4.0, 4.0, 1.0);
+    ShapeNode1.Geometry := Box1;
+    Root1.AddChildren(ShapeNode1);
+    SceneFront.Load(Root1, True);
+    SceneFront.Translation := Vector3(0.0, 0.0, 2.0);
+    Viewport.Items.Add(SceneFront);
+
+    SceneBack := TCastleScene.Create(Viewport);
+    Root2 := TX3DRootNode.Create;
+    ShapeNode2 := TShapeNode.Create;
+    Box2 := TBoxNode.Create;
+    Box2.Size := Vector3(1.0, 1.0, 1.0);
+    ShapeNode2.Geometry := Box2;
+    Root2.AddChildren(ShapeNode2);
+    SceneBack.Load(Root2, True);
+    SceneBack.Translation := Vector3(0.0, 0.0, -5.0);
+    Viewport.Items.Add(SceneBack);
+
+    OccRenderer := Viewport.InternalShapesRenderer.InternalOcclusionCullingRenderer;
+    AssertTrue('OccRenderer must exist on Viewport.InternalShapesRenderer', OccRenderer <> nil);
+
+    { Frame 1: Both shapes render and issue occlusion queries }
+    Cmd := Device.BeginFrame;
+    SetActiveCommandList(Cmd);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+      AssertEquals('Frame 1 must issue 2 occlusion queries', 2, OccRenderer.RHIQueriesIssuedCount);
+      AssertEquals('Frame 1 must allocate 2 query slots', 2, OccRenderer.AllocatedRHIQuerySlots);
+      AssertEquals('Frame 1 must render both shapes', 2, Viewport.Statistics.ShapesRendered);
+    finally
+      Device.EndFrameAndPresent;
+    end;
+
+    { Simulate Frame 1 query results: slot 0 visible (400 samples), slot 1 occluded (0 samples) }
+    Pool0 := OccRenderer.GetRHIQueryPool(0) as TVulkanRHIQueryPool;
+    AssertTrue('QueryPool page 0 must be created', Pool0 <> nil);
+    Pool0.SetSimulatedResult(0, 400);
+    Pool0.SetSimulatedResult(1, 0);
+
+    { Frame 2: Occluded shape is skipped and its bounding box is drawn with RenderBoxMesh RHI PSO }
+    Cmd := Device.BeginFrame;
+    SetActiveCommandList(Cmd);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+      AssertEquals('Frame 2 must render only 1 visible shape', 1, Viewport.Statistics.ShapesRendered);
+      AssertEquals('Frame 2 must occlusion-query 1 bounding box for the occluded shape',
+        1, Viewport.Statistics.BoxesOcclusionQueriedCount);
+      AssertTrue('OccRenderer.Utils.RenderBoxMesh must be created',
+        OccRenderer.Utils.RenderBoxMesh <> nil);
+      BoxPso := OccRenderer.Utils.RenderBoxMesh.RHIPipeline as TRHIPipeline;
+      AssertTrue('OccRenderer.Utils.RenderBoxMesh.RHIPipeline must be compiled and bound',
+        BoxPso <> nil);
+      AssertFalse('Occlusion box PSO must disable depth writes (DepthWriteEnable = False)',
+        BoxPso.Desc.DepthStencil.DepthWriteEnable);
+      AssertEquals('Occlusion box PSO must disable color writes (ColorWriteMask = 0)',
+        0, BoxPso.Desc.BlendState.ColorWriteMask);
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Container);
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportDynamicBatchingMergesShapesAndUploadsRHIBuffersRHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene1, Scene2: TCastleScene;
+  Root1, Root2: TX3DRootNode;
+  ShapeNode1, ShapeNode2: TShapeNode;
+  App1, App2: TAppearanceNode;
+  Mat1, Mat2: TPhysicalMaterialNode;
+  Ifs1, Ifs2: TIndexedFaceSetNode;
+  Coord1, Coord2: TCoordinateNode;
+  Batching: TBatchShapes;
+  MergedShape: TGLShape;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7002)));
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.DynamicBatching := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 10.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Scene1 := TCastleScene.Create(Viewport);
+    Root1 := TX3DRootNode.Create;
+    ShapeNode1 := TShapeNode.Create;
+    App1 := TAppearanceNode.Create;
+    Mat1 := TPhysicalMaterialNode.Create;
+    Mat1.BaseColor := Vector3(0.8, 0.4, 0.2);
+    App1.Material := Mat1;
+    ShapeNode1.Appearance := App1;
+    Ifs1 := TIndexedFaceSetNode.Create;
+    Coord1 := TCoordinateNode.Create;
+    Coord1.SetPoint([Vector3(-1, -1, 0), Vector3(1, -1, 0), Vector3(1, 1, 0), Vector3(-1, 1, 0)]);
+    Ifs1.Coord := Coord1;
+    Ifs1.SetCoordIndex([0, 1, 2, -1, 0, 2, 3, -1]);
+    ShapeNode1.Geometry := Ifs1;
+    Root1.AddChildren(ShapeNode1);
+    Scene1.Load(Root1, True);
+    Scene1.Translation := Vector3(-2.0, 0.0, 0.0);
+    Viewport.Items.Add(Scene1);
+
+    Scene2 := TCastleScene.Create(Viewport);
+    Root2 := TX3DRootNode.Create;
+    ShapeNode2 := TShapeNode.Create;
+    App2 := TAppearanceNode.Create;
+    Mat2 := TPhysicalMaterialNode.Create;
+    Mat2.BaseColor := Vector3(0.8, 0.4, 0.2);
+    App2.Material := Mat2;
+    ShapeNode2.Appearance := App2;
+    Ifs2 := TIndexedFaceSetNode.Create;
+    Coord2 := TCoordinateNode.Create;
+    Coord2.SetPoint([Vector3(-1, -1, 0), Vector3(1, -1, 0), Vector3(1, 1, 0), Vector3(-1, 1, 0)]);
+    Ifs2.Coord := Coord2;
+    Ifs2.SetCoordIndex([0, 1, 2, -1, 0, 2, 3, -1]);
+    ShapeNode2.Geometry := Ifs2;
+    Root2.AddChildren(ShapeNode2);
+    Scene2.Load(Root2, True);
+    Scene2.Translation := Vector3(2.0, 0.0, 0.0);
+    Viewport.Items.Add(Scene2);
+
+    Cmd := Device.BeginFrame;
+    SetActiveCommandList(Cmd);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+
+      Batching := Viewport.InternalShapesRenderer.InternalBatching;
+      AssertTrue('Batching must exist on Viewport.InternalShapesRenderer', Batching <> nil);
+      AssertEquals('RHICommitBatchCount must be 1 after merging Scene1 and Scene2',
+        1, Batching.RHICommitBatchCount);
+      MergedShape := Batching.RHILastMergedShape;
+      AssertTrue('RHILastMergedShape must be assigned', MergedShape <> nil);
+      AssertTrue('MergedShape.Cache must be allocated', MergedShape.Cache <> nil);
+      AssertTrue('MergedShape.Cache.RHICoordinateBuffer must be uploaded',
+        MergedShape.Cache.RHICoordinateBuffer <> nil);
+      AssertEquals('MergedShape.Cache.RHICoordinateBuffer.Desc.Size must be 288 (12 vertices * 24 bytes)',
+        12 * 24, Integer(MergedShape.Cache.RHICoordinateBuffer.Desc.Size));
+      AssertTrue('MergedShape.Cache.RHIMaterialDescriptorSet must be bound for merged appearance',
+        MergedShape.Cache.RHIMaterialDescriptorSet <> nil);
+      AssertEquals('DynamicBatching must reduce ShapesRendered from 2 to 1 merged shape',
+        1, Viewport.Statistics.ShapesRendered);
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Container);
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestShapeExtractRHIMaterialTexturesAllResourceTypesAndOnDemandPrepareRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  BoxNode: TBoxNode;
+  App: TAppearanceNode;
+  PhysMat: TPhysicalMaterialNode;
+  MultiTex: TMultiTextureNode;
+  PixTex2D: TPixelTextureNode;
+  RenderedTex: TRenderedTextureNode;
+  GenCubeTex: TGeneratedCubeMapTextureNode;
+  PixTex3D: TPixelTexture3DNode;
+  GenShadowTex: TGeneratedShadowMapNode;
+  RShape: TX3DRendererShape;
+  BaseRHI, NormRHI, MRRHI, EmissiveRHI, OccRHI: TRHITexture;
+  TexCount: Cardinal;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7003)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  Scene := TCastleScene.Create(nil);
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    BoxNode := TBoxNode.Create;
+    ShapeNode.Geometry := BoxNode;
+    App := TAppearanceNode.Create;
+    PhysMat := TPhysicalMaterialNode.Create;
+
+    { 1. MultiTexture wrapping an unprepared PixelTexture2D }
+    MultiTex := TMultiTextureNode.Create;
+    PixTex2D := TPixelTextureNode.Create;
+    PixTex2D.FdImage.Value := TRGBImage.Create(4, 4);
+    MultiTex.FdTexture.Add(PixTex2D);
+    PhysMat.FdBaseTexture.Value := MultiTex;
+
+    { 2. Unprepared RenderedTextureNode }
+    RenderedTex := TRenderedTextureNode.Create;
+    RenderedTex.SetDimensions([64, 32, 4, 1, 1]);
+    PhysMat.FdNormalTexture.Value := RenderedTex;
+
+    { 3. Unprepared GeneratedCubeMapTextureNode }
+    GenCubeTex := TGeneratedCubeMapTextureNode.Create;
+    GenCubeTex.Size := 32;
+    PhysMat.MetallicRoughnessTexture := GenCubeTex;
+
+    { 4. Unprepared PixelTexture3DNode (Components=1, Width=2, Height=2, Depth=2 + 8 voxel values) }
+    PixTex3D := TPixelTexture3DNode.Create;
+    PixTex3D.SetImage([1, 2, 2, 2, 255, 255, 255, 255, 255, 255, 255, 255]);
+    PhysMat.EmissiveTexture := PixTex3D;
+
+    { 5. Unprepared GeneratedShadowMapNode }
+    GenShadowTex := TGeneratedShadowMapNode.Create;
+    GenShadowTex.Size := 128;
+    PhysMat.OcclusionTexture := GenShadowTex;
+
+    App.Material := PhysMat;
+    ShapeNode.Appearance := App;
+    Root.AddChildren(ShapeNode);
+    Scene.Load(Root, True);
+
+    { Notice: we do NOT call PrepareResources beforehand; ExtractRHIMaterialTextures must prepare on demand! }
+    RShape := TX3DRendererShape(Scene.Shapes.TraverseList(True)[0]);
+    TexCount := RShape.ExtractRHIMaterialTextures(BaseRHI, NormRHI, MRRHI, EmissiveRHI, OccRHI);
+
+    AssertEquals('ExtractRHIMaterialTextures must resolve all 5 texture slots on demand', 5, TexCount);
+    AssertTrue('BaseRHI (MultiTexture -> PixelTexture2D) must be resolved', BaseRHI <> nil);
+    AssertEquals('BaseRHI dimension must be td2D', Ord(td2D), Ord(BaseRHI.Desc.Dimension));
+    AssertTrue('NormRHI (RenderedTexture) must be resolved', NormRHI <> nil);
+    AssertEquals('NormRHI width must be 64', 64, NormRHI.Desc.Width);
+    AssertTrue('MRRHI (GeneratedCubeMapTexture) must be resolved', MRRHI <> nil);
+    AssertEquals('MRRHI dimension must be tdCube', Ord(tdCube), Ord(MRRHI.Desc.Dimension));
+    AssertTrue('EmissiveRHI (PixelTexture3D) must be resolved', EmissiveRHI <> nil);
+    AssertEquals('EmissiveRHI dimension must be td3D', Ord(td3D), Ord(EmissiveRHI.Desc.Dimension));
+    AssertTrue('OccRHI (GeneratedShadowMap) must be resolved', OccRHI <> nil);
+    AssertEquals('OccRHI format must be pfD32_Float', Ord(pfD32_Float), Ord(OccRHI.Desc.Format));
+  finally
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);
   end;
 end;

@@ -41,6 +41,8 @@ type
     SavedDepthBufferUpdate: Boolean;
     SavedColorChannels: TColorChannels;
     SavedCullFace: Boolean;
+    function GetRHIBoxVertexBuffer: TRHIBuffer;
+    function GetRHIBoxIndexBuffer: TRHIBuffer;
     procedure GLContextOpen;
     procedure OcclusionBoxStateBegin;
   private
@@ -52,8 +54,10 @@ type
     destructor Destroy; override;
     procedure GLContextClose;
     procedure OcclusionBoxStateEnd(const RestoreDefaults: Boolean);
-    property RHIBoxVertexBuffer: TRHIBuffer read FRHIBoxVertexBuffer;
-    property RHIBoxIndexBuffer: TRHIBuffer read FRHIBoxIndexBuffer;
+    property RHIBoxVertexBuffer: TRHIBuffer read GetRHIBoxVertexBuffer;
+    property RHIBoxIndexBuffer: TRHIBuffer read GetRHIBoxIndexBuffer;
+    property RenderBoxMesh: TCastleRenderUnlitMesh read RenderBox;
+
   end;
 
   TOcclusionCullingRenderer = class
@@ -98,6 +102,22 @@ begin
   inherited;
 end;
 
+function TOcclusionCullingUtilsRenderer.GetRHIBoxVertexBuffer: TRHIBuffer;
+begin
+  if (RenderBox <> nil) and (RenderBox.RHIVertexBuffer <> nil) then
+    Result := RenderBox.RHIVertexBuffer
+  else
+    Result := FRHIBoxVertexBuffer;
+end;
+
+function TOcclusionCullingUtilsRenderer.GetRHIBoxIndexBuffer: TRHIBuffer;
+begin
+  if (RenderBox <> nil) and (RenderBox.RHIIndexBuffer <> nil) then
+    Result := RenderBox.RHIIndexBuffer
+  else
+    Result := FRHIBoxIndexBuffer;
+end;
+
 procedure TOcclusionCullingUtilsRenderer.GLContextOpen;
 const
   Indexes: array [0..35] of UInt16 =
@@ -119,8 +139,13 @@ begin
         @Indexes[0]);
     if FRHIBoxVertexBuffer = nil then
       FRHIBoxVertexBuffer := RHIDevice.CreateBuffer(
-        TRHIBufferDesc.Create(8 * SizeOf(TVector4), [buVertex], muCpuToGpu, 'OcclusionBoxVBO'),
-        nil);
+        TRHIBufferDesc.Create(8 * SizeOf(TVector4), [buVertex], muCpuToGpu, 'OcclusionBoxVBO'), nil);
+    if RenderBox = nil then
+    begin
+      RenderBox := TCastleRenderUnlitMesh.Create(false);
+      RenderBox.SetIndexes(Indexes);
+    end;
+
   end else
   begin
     RenderBox := TCastleRenderUnlitMesh.Create(false);
@@ -155,7 +180,7 @@ begin
       SavedColorChannels := RenderContext.ColorChannels;
       SavedCullFace := RenderContext.CullFace;
 
-      if ApplicationProperties.IsGLContextOpen then
+      if (RHIDevice <> nil) or ApplicationProperties.IsGLContextOpen then
       begin
         RenderContext.DepthBufferUpdate := false;
         RenderContext.ColorChannels := [];
@@ -168,7 +193,8 @@ begin
           Note that we don't care to save/restore this state,
           as each state will reenable alpha test by RenderContext.FixedFunctionAlphaTestEnable
           if necessary. }
-        RenderContext.FixedFunctionAlphaTestDisable;
+        if ApplicationProperties.IsGLContextOpen then
+          RenderContext.FixedFunctionAlphaTestDisable;
       end;
     end;
 
@@ -186,7 +212,7 @@ procedure TOcclusionCullingUtilsRenderer.OcclusionBoxStateEnd(const RestoreDefau
 begin
   if OcclusionBoxState then
   begin
-    if (RenderContext <> nil) and ApplicationProperties.IsGLContextOpen then
+    if (RenderContext <> nil) and ((RHIDevice <> nil) or ApplicationProperties.IsGLContextOpen) then
     begin
       if RestoreDefaults then
       begin
@@ -240,6 +266,14 @@ begin
   Verts[5] := Vector4(Box.Data[1], 1); Verts[5].Data[1] := Box.Data[0][1];
   Verts[6] := Vector4(Box.Data[1], 1); Verts[6].Data[0] := Box.Data[0][0];
   Verts[7] := Vector4(Box.Data[1], 1);
+
+  if RenderBox <> nil then
+  begin
+    RenderBox.ModelViewProjection := ProjectionMatrix * CameraMatrix * SceneMatrix;
+    RenderBox.SetVertexes(Verts, true);
+    RenderBox.Render(pmTriangles);
+    Exit;
+  end;
 
   if RHIDevice <> nil then
   begin

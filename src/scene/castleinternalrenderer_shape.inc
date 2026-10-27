@@ -401,17 +401,51 @@ function TX3DRendererShape.ExtractRHIMaterialTextures(
   out ABaseColorTex, ANormalTex, AMetallicRoughnessTex,
       AEmissiveTex, AOcclusionTex: TRHITexture): Cardinal;
 
-  function ResolveNodeRHITexture(const ANode: TAbstractTextureNode): TRHITexture;
+  function ResolveNodeRHITexture(const ARawNode: TX3DNode): TRHITexture;
   var
+    ANode: TAbstractTextureNode;
     Res: TTextureResource;
+    MultiTex: TMultiTextureNode;
+    TempRenderOptions: TCastleRenderOptions;
   begin
     Result := nil;
-    if ANode = nil then Exit;
+    if not (ARawNode is TAbstractTextureNode) then Exit;
+    ANode := TAbstractTextureNode(ARawNode);
+    if ANode is TMultiTextureNode then
+    begin
+      MultiTex := TMultiTextureNode(ANode);
+      if (MultiTex.FdTexture.Count > 0) and (MultiTex.FdTexture[0] is TAbstractTextureNode) then
+        Result := ResolveNodeRHITexture(TAbstractTextureNode(MultiTex.FdTexture[0]));
+      Exit;
+    end;
     Res := TTextureResources.Get(ANode);
+    if (Res = nil) and (RHIDevice <> nil) then
+    begin
+      if (Cache <> nil) and (Cache.RenderOptions <> nil) then
+        TTextureResources.Prepare(Cache.RenderOptions, ANode)
+      else
+      begin
+        TempRenderOptions := TCastleRenderOptions.Create(nil);
+        try
+          TTextureResources.Prepare(TempRenderOptions, ANode);
+        finally
+          FreeAndNil(TempRenderOptions);
+        end;
+      end;
+      Res := TTextureResources.Get(ANode);
+    end;
     if Res is TImageTextureResource then
       Result := TImageTextureResource(Res).RHITexture
     else if Res is TMovieTextureResource then
-      Result := TMovieTextureResource(Res).RHITexture;
+      Result := TMovieTextureResource(Res).RHITexture
+    else if Res is TRenderedTextureResource then
+      Result := TRenderedTextureResource(Res).RHITexture
+    else if Res is TCubeMapTextureResource then
+      Result := TCubeMapTextureResource(Res).RHITexture
+    else if Res is T3DTextureResource then
+      Result := T3DTextureResource(Res).RHITexture
+    else if Res is TGeneratedShadowMapResource then
+      Result := TGeneratedShadowMapResource(Res).RHITexture;
   end;
 
 var
@@ -443,8 +477,8 @@ begin
   if MatNode is TPhysicalMaterialNode then
   begin
     PhysMat := TPhysicalMaterialNode(MatNode);
-    ABaseColorTex := ResolveNodeRHITexture(PhysMat.BaseTexture);
-    ANormalTex := ResolveNodeRHITexture(PhysMat.NormalTexture);
+    ABaseColorTex := ResolveNodeRHITexture(PhysMat.FdBaseTexture.Value);
+    ANormalTex := ResolveNodeRHITexture(PhysMat.FdNormalTexture.Value);
     AMetallicRoughnessTex := ResolveNodeRHITexture(PhysMat.MetallicRoughnessTexture);
     AEmissiveTex := ResolveNodeRHITexture(PhysMat.EmissiveTexture);
     AOcclusionTex := ResolveNodeRHITexture(PhysMat.OcclusionTexture);

@@ -137,6 +137,8 @@ type
     { Shapes can use this to make a "dummy render" to prepare
       for future rendering. }
     property Renderer: TRenderer read FRenderer;
+    property InternalBatching: TBatchShapes read Batching;
+    property InternalOcclusionCullingRenderer: TOcclusionCullingRenderer read FOcclusionCullingRenderer;
 
     { Render all given shapes.
 

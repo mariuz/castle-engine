@@ -1097,6 +1097,9 @@ type
       @exclude }
     function InternalBuildNode(
       const SaveBaseUrl: String; const UrlProcessing: TUrlProcessing): TX3DRootNode;
+
+    { @exclude }
+    property InternalShapesRenderer: TShapesRenderer read ShapesRenderer;
   published
     { Transformations and scenes visible in this viewport.
       You should add here your @link(TCastleTransform) and @link(TCastleScene)
