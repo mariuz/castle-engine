@@ -276,6 +276,9 @@ type
     procedure TestViewportOcclusionCullingEndToEndAndBoxUnlitMeshPSORHI;
     procedure TestViewportDynamicBatchingMergesShapesAndUploadsRHIBuffersRHI;
     procedure TestShapeExtractRHIMaterialTexturesAllResourceTypesAndOnDemandPrepareRHI;
+    procedure TestViewportSkinNodeGPUSkinningEndToEndAndJointUploadRHI;
+    procedure TestCastleMask2DAnd3DStencilMaskingEndToEndRHI;
+    procedure TestTextureSizingHelpersNilSafeInPureRHIModeRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -14553,6 +14556,279 @@ begin
     FreeAndNil(Scene);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportSkinNodeGPUSkinningEndToEndAndJointUploadRHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  SkinNode: TSkinNode;
+  Joint0, Joint1: TTransformNode;
+  ShapeNode: TShapeNode;
+  TriSet: TIndexedTriangleSetNode;
+  CoordNode: TCoordinateNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  RShape: TX3DRendererShape;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7101)));
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Scene := TCastleScene.Create(Viewport);
+    Root := TX3DRootNode.Create;
+
+    Joint0 := TTransformNode.Create;
+    Joint0.X3DName := 'Joint0';
+    Joint1 := TTransformNode.Create;
+    Joint1.X3DName := 'Joint1';
+    Joint1.Translation := Vector3(0, 1, 0);
+    Joint0.AddChildren(Joint1);
+
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    Mat.BaseColor := Vector3(0.8, 0.4, 0.2);
+    App.Material := Mat;
+    ShapeNode.Appearance := App;
+
+    TriSet := TIndexedTriangleSetNode.Create;
+    CoordNode := TCoordinateNode.Create;
+    CoordNode.SetPoint([
+      Vector3(-1, 0, -3),
+      Vector3( 1, 0, -3),
+      Vector3( 0, 2, -3)
+    ]);
+    TriSet.Coord := CoordNode;
+    TriSet.SetIndex([0, 1, 2]);
+    TriSet.SetSkinJoints0([
+      0, 1, 0, 0,
+      0, 1, 0, 0,
+      1, 0, 0, 0
+    ]);
+    TriSet.SetSkinWeights0([
+      Vector4(1.0, 0.0, 0.0, 0.0),
+      Vector4(0.5, 0.5, 0.0, 0.0),
+      Vector4(1.0, 0.0, 0.0, 0.0)
+    ]);
+    ShapeNode.Geometry := TriSet;
+
+    SkinNode := TSkinNode.Create('', '');
+    SkinNode.Skeleton := Joint0;
+    SkinNode.SetJoints([Joint0, Joint1]);
+    SkinNode.SetInverseBindMatrices([TMatrix4.Identity, TMatrix4.Identity]);
+    SkinNode.FdShapes.Add(ShapeNode);
+    Root.AddChildren(SkinNode);
+
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+    Viewport.Camera.SetView(
+      Vector3(0, 0, 5),
+      Vector3(0, 0, -1),
+      Vector3(0, 1, 0)
+    );
+
+    AssertTrue('TSkinNode.InternalMeshCalculation must select GPU skinning in pure Vulkan RHI mode',
+      SkinNode.InternalMeshCalculation <> TSkinNode.TInternalMeshCalculation.mcCpu);
+
+    { Trigger joint animation update }
+    Joint1.Translation := Vector3(1.5, 2.0, -0.5);
+    SkinNode.InternalUpdateSkin;
+    AssertTrue('SkinNode.InternalJointMatrix must be populated', SkinNode.InternalJointMatrix <> nil);
+    AssertEquals('SkinNode.InternalJointMatrix count must match 2 joints', 2, SkinNode.InternalJointMatrix.Count);
+
+    Cmd := Device.BeginFrame;
+    SetActiveCommandList(Cmd);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+    finally
+      Device.EndFrameAndPresent;
+    end;
+
+    RShape := TX3DRendererShape(Scene.Shapes.TraverseList(True)[0]);
+    AssertTrue('Skinned RShape.Cache must be allocated', RShape.Cache <> nil);
+    AssertTrue('Skinned RShape.Cache.RHIJointBuffer must be allocated and uploaded',
+      RShape.Cache.RHIJointBuffer <> nil);
+    AssertEquals('RHIJointBuffer size must equal 2 * SizeOf(TMatrix4) (128 bytes)',
+      2 * SizeOf(TMatrix4), Integer(RShape.Cache.RHIJointBuffer.Desc.Size));
+    AssertTrue('Skinned RShape.Cache.RHISkinningDescriptorSet (Set 2) must be allocated',
+      RShape.Cache.RHISkinningDescriptorSet <> nil);
+    AssertTrue('Skinned RShape.Cache.RHIShaderPermutationMask bit 0 (AHasSkinning) must be set',
+      (RShape.Cache.RHIShaderPermutationMask and $01) <> 0);
+    AssertTrue('Specialized vertex shader must include CastleSkinningBlock',
+      Pos('CastleSkinningBlock', RShape.Cache.RHIVertexShaderSource) > 0);
+  finally
+    FreeAndNil(Container);
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCastleMask2DAnd3DStencilMaskingEndToEndRHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TRHICommandList;
+  Batcher: TCastleBatch2DRenderer;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  Container: TTestHeadlessVulkanContainer;
+  MaskControl: TCastleMask;
+  MaskRect, ChildRect: TCastleRectangleControl;
+  ChildImg: TCastleImageControl;
+  MaskWritePipe, MaskedChildPipe: TRHIPipeline;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7102)));
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SetRHIDevice(Device);
+  ApplicationProperties.RenderBackend := backendVulkan;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  RenderContext.Viewport := Rectangle(0, 0, 400, 300);
+  Batcher := EnsureBatch2DRenderer(Device);
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    MaskControl := TCastleMask.Create(Container);
+    MaskControl.FullSize := True;
+    MaskControl.MaskRendering := mrChildrenWhereMask;
+    Container.Controls.InsertFront(MaskControl);
+
+    MaskRect := TCastleRectangleControl.Create(MaskControl);
+    MaskRect.Width := 200;
+    MaskRect.Height := 150;
+    MaskControl.Mask.InsertFront(MaskRect);
+
+    ChildRect := TCastleRectangleControl.Create(MaskControl);
+    ChildRect.Width := 300;
+    ChildRect.Height := 200;
+    ChildRect.Color := Vector4(0.2, 0.8, 0.4, 1.0);
+    MaskControl.InsertFront(ChildRect);
+
+    ChildImg := TCastleImageControl.Create(MaskControl);
+    ChildImg.Content.Image := TRGBAlphaImage.Create(16, 16);
+    ChildImg.Content.OwnsImage := True;
+    MaskControl.InsertFront(ChildImg);
+
+    Cmd := Device.BeginFrame;
+    SetActiveCommandList(Cmd);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+
+      { Verify that TCastleMask restored RenderContext state after rendering }
+      AssertFalse('RenderContext.StencilTest must be restored to False after TCastleMask',
+        RenderContext.StencilTest);
+      AssertTrue('RenderContext.ColorChannels must be restored to AllColorChannels after TCastleMask',
+        RenderContext.ColorChannels = AllColorChannels);
+      AssertTrue('Batcher.LastPipeline from masked child image must have StencilTestEnable = True and coEqual',
+        (Batcher.LastPipeline <> nil) and
+        Batcher.LastPipeline.Desc.DepthStencil.StencilTestEnable and
+        (Batcher.LastPipeline.Desc.DepthStencil.FrontStencil.CompareOp = coEqual) and
+        (Batcher.LastPipeline.Desc.DepthStencil.FrontStencil.PassOp = soKeep) and
+        (Batcher.LastPipeline.Desc.DepthStencil.FrontStencil.Reference = 1) and
+        (Batcher.LastPipeline.Desc.BlendState.ColorWriteMask = $0F));
+
+      { Also directly verify the mask-write PSO state (ColorChannels = [], coAlways, soReplace) }
+      RenderContext.StencilTest := True;
+      RenderContext.ColorChannels := [];
+      RenderContext.StencilFunc(coAlways, 1, 0);
+      RenderContext.StencilOp(soKeep, soKeep, soReplace, $FF);
+      DrawRectangle(Rectangle(10, 10, 100, 100), Vector4(1, 1, 1, 1), bsSrcAlpha, bdOneMinusSrcAlpha, False);
+      MaskWritePipe := TRHIPipeline(RHIPrimitive2DPipeline);
+      AssertTrue('MaskWritePipe must be created', MaskWritePipe <> nil);
+      AssertEquals('MaskWritePipe ColorWriteMask must be 0', 0, MaskWritePipe.Desc.BlendState.ColorWriteMask);
+      AssertTrue('MaskWritePipe StencilTestEnable must be True', MaskWritePipe.Desc.DepthStencil.StencilTestEnable);
+      AssertEquals('MaskWritePipe CompareOp must be coAlways',
+        Ord(coAlways), Ord(MaskWritePipe.Desc.DepthStencil.FrontStencil.CompareOp));
+      AssertEquals('MaskWritePipe PassOp must be soReplace',
+        Ord(soReplace), Ord(MaskWritePipe.Desc.DepthStencil.FrontStencil.PassOp));
+
+      { And verify mrChildrenWhereNoMask PSO state (coNotEqual) }
+      RenderContext.ColorChannels := AllColorChannels;
+      RenderContext.StencilFunc(coNotEqual, 1, 1);
+      RenderContext.StencilOp(soKeep, soKeep, soKeep, 0);
+      DrawRectangle(Rectangle(10, 10, 100, 100), Vector4(1, 0, 0, 1), bsSrcAlpha, bdOneMinusSrcAlpha, False);
+      MaskedChildPipe := TRHIPipeline(RHIPrimitive2DPipeline);
+      AssertEquals('MaskedChildPipe ColorWriteMask must be $0F', $0F, MaskedChildPipe.Desc.BlendState.ColorWriteMask);
+      AssertEquals('MaskedChildPipe CompareOp must be coNotEqual',
+        Ord(coNotEqual), Ord(MaskedChildPipe.Desc.DepthStencil.FrontStencil.CompareOp));
+      RenderContext.StencilTest := False;
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Container);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestTextureSizingHelpersNilSafeInPureRHIModeRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  ImgCube: TRGBImage;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7103)));
+  SavedRHI := RHIDevice;
+  SetRHIDevice(Device);
+  ImgCube := TRGBImage.Create(16, 16);
+  try
+    AssertEquals('ResizeToTextureSize(300, tsAny) must preserve NPOT size in RHI mode',
+      300, Integer(ResizeToTextureSize(300, tsAny)));
+    AssertEquals('ResizeToTextureSize(300, tsScalablePowerOf2) must round up to 512',
+      512, Integer(ResizeToTextureSize(300, tsScalablePowerOf2)));
+    AssertTrue('IsTextureSized(300, 200, tsAny) must be True in RHI mode',
+      IsTextureSized(300, 200, tsAny));
+    AssertFalse('IsTextureSized(300, 200, tsScalablePowerOf2) must be False',
+      IsTextureSized(300, 200, tsScalablePowerOf2));
+    AssertTrue('IsTextureSized(ImgCube, tsAny) must be True in RHI mode',
+      IsTextureSized(ImgCube, tsAny));
+    AssertTrue('IsCubeMapTextureSized(64) must be True in RHI mode',
+      IsCubeMapTextureSized(64));
+    AssertTrue('IsCubeMapTextureSized(128) must be True in RHI mode',
+      IsCubeMapTextureSized(128));
+    AssertEquals('ResizeToCubeMapTextureSize(100) must round up to 128 in RHI mode',
+      128, Integer(ResizeToCubeMapTextureSize(100)));
+  finally
+    FreeAndNil(ImgCube);
+    SetRHIDevice(SavedRHI);
     FreeAndNil(Device);
   end;
 end;

@@ -1078,6 +1078,7 @@ var
   begin
     SR := RenderRect.Round;
 
+    TDrawableImage.BatchingFlush;
     ScreenEffectRTT.RenderEnd;
 
     if RHIDevice <> nil then

@@ -1117,12 +1117,24 @@ begin
     But let the check InternalDirty remain, for future security. }
   if InternalDirty <> 0 then Exit;
 
-  if (not ApplicationProperties.IsGLContextOpen) and (ApplicationProperties.RenderBackend <> backendVulkan) then
+  if (not ApplicationProperties.IsGLContextOpen) and (ApplicationProperties.RenderBackend <> backendVulkan) and (RHIDevice = nil) then
   begin
     WritelnLog('PrepareResources', 'Rendering context not available, skipping preparing TCastleScene rendering resources for "%s"', [
       UriDisplay(URL)
     ]);
     Exit;
+  end;
+
+  if (RHIDevice <> nil) and (not TSkinNode.InternalFeatures.Shaders) then
+  begin
+    TSkinNode.InternalFeatures.Shaders := True;
+    TSkinNode.InternalFeatures.MaxVertexUniformComponents := 16384;
+    TSkinNode.InternalFeatures.MaxSkinJointsInUniforms := 256;
+    if RHIDevice.Capabilities.MaxTextureSize > 0 then
+      TSkinNode.InternalFeatures.MaxTextureSize := RHIDevice.Capabilities.MaxTextureSize
+    else
+      TSkinNode.InternalFeatures.MaxTextureSize := 16384;
+    TSkinNode.InternalFeatures.TextureFloat := True;
   end;
 
   Inc(InternalDirty);
@@ -2152,11 +2164,25 @@ end;
 
 procedure InitializeSkinInShaders;
 begin
-  TSkinNode.InternalFeatures.Shaders := GLFeatures.Shaders;
-  TSkinNode.InternalFeatures.MaxVertexUniformComponents := GLFeatures.MaxVertexUniformComponents;
-  TSkinNode.InternalFeatures.MaxSkinJointsInUniforms := GLFeatures.MaxSkinJointsInUniforms;
-  TSkinNode.InternalFeatures.MaxTextureSize := GLFeatures.MaxTextureSize;
-  TSkinNode.InternalFeatures.TextureFloat := GLFeatures.TextureFloat;
+  if RHIDevice <> nil then
+  begin
+    TSkinNode.InternalFeatures.Shaders := True;
+    TSkinNode.InternalFeatures.MaxVertexUniformComponents := 16384;
+    TSkinNode.InternalFeatures.MaxSkinJointsInUniforms := 256;
+    if RHIDevice.Capabilities.MaxTextureSize > 0 then
+      TSkinNode.InternalFeatures.MaxTextureSize := RHIDevice.Capabilities.MaxTextureSize
+    else
+      TSkinNode.InternalFeatures.MaxTextureSize := 16384;
+    TSkinNode.InternalFeatures.TextureFloat := True;
+  end else
+  if GLFeatures <> nil then
+  begin
+    TSkinNode.InternalFeatures.Shaders := GLFeatures.Shaders;
+    TSkinNode.InternalFeatures.MaxVertexUniformComponents := GLFeatures.MaxVertexUniformComponents;
+    TSkinNode.InternalFeatures.MaxSkinJointsInUniforms := GLFeatures.MaxSkinJointsInUniforms;
+    TSkinNode.InternalFeatures.MaxTextureSize := GLFeatures.MaxTextureSize;
+    TSkinNode.InternalFeatures.TextureFloat := GLFeatures.TextureFloat;
+  end;
 end;
 
 initialization

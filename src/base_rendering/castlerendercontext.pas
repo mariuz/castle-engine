@@ -23,7 +23,7 @@ interface
 uses SysUtils, Generics.Collections, Classes,
   {$ifdef OpenGLES} CastleGLES, {$else} CastleGL, {$endif}
   CastleUtils, CastleVectors, CastleRectangles, CastleGLShaders, CastleColors,
-  CastleRenderOptions, CastleGLUtils;
+  CastleRenderOptions, CastleGLUtils, CastleInternalRHI;
 
 type
   TClearBuffer = (cbColor, cbDepth, cbStencil);
@@ -146,8 +146,17 @@ type
       FRHILastScissor: TRectangle;
       FRHIScissorActive: Boolean;
       FRHIDepthBiasUpdateCount: Cardinal;
+      FStencilTest: Boolean;
+      FStencilCompareOp: TRHICompareOp;
+      FStencilReference: Byte;
+      FStencilCompareMask: Byte;
+      FStencilWriteMask: Byte;
+      FStencilFailOp: TRHIStencilOp;
+      FStencilDepthFailOp: TRHIStencilOp;
+      FStencilPassOp: TRHIStencilOp;
 
     procedure SetLineWidth(const Value: Single);
+    procedure SetStencilTest(const Value: Boolean);
     procedure SetPointSize(const Value: Single);
     procedure SetGlobalAmbient(const Value: TCastleColorRGB);
     procedure WarnContextNotCurrent;
@@ -435,6 +444,19 @@ type
     property RHILastScissor: TRectangle read FRHILastScissor;
     property RHIScissorActive: Boolean read FRHIScissorActive;
     property RHIDepthBiasUpdateCount: Cardinal read FRHIDepthBiasUpdateCount;
+
+    { Stencil test state and RHI pipeline synchronization (used by TCastleMask). }
+    property StencilTest: Boolean read FStencilTest write SetStencilTest default False;
+    property StencilCompareOp: TRHICompareOp read FStencilCompareOp;
+    property StencilReference: Byte read FStencilReference;
+    property StencilCompareMask: Byte read FStencilCompareMask;
+    property StencilWriteMask: Byte read FStencilWriteMask;
+    property StencilFailOp: TRHIStencilOp read FStencilFailOp;
+    property StencilDepthFailOp: TRHIStencilOp read FStencilDepthFailOp;
+    property StencilPassOp: TRHIStencilOp read FStencilPassOp;
+    procedure StencilFunc(const ACompareOp: TRHICompareOp; const AReference, ACompareMask: Byte);
+    procedure StencilOp(const AFailOp, ADepthFailOp, APassOp: TRHIStencilOp; const AWriteMask: Byte = $FF);
+    procedure ApplyRHIStencilAndColorMask(var ADepthStencil: TRHIDepthStencilStateDesc; var ABlendState: TRHIBlendStateDesc);
   end;
 
 var
@@ -471,7 +493,7 @@ const
 implementation
 
 uses CastleLog, CastleProjection, CastleInternalGLUtils, CastleGLImages,
-  CastleApplicationProperties, CastleInternalRHI;
+  CastleApplicationProperties;
 
 function SkipOpenGLStateWhenRHIActive: Boolean; inline;
 begin
@@ -507,6 +529,14 @@ begin
   FFixedFunctionAlphaCutoff := -1;
   FInternalControlRectIgnore := 0;
   InternalControlRect := TRectangle.Empty;
+  FStencilTest := False;
+  FStencilCompareOp := coAlways;
+  FStencilReference := 0;
+  FStencilCompareMask := $FF;
+  FStencilWriteMask := $FF;
+  FStencilFailOp := soKeep;
+  FStencilDepthFailOp := soKeep;
+  FStencilPassOp := soKeep;
 end;
 
 destructor TRenderContext.Destroy;
@@ -894,8 +924,93 @@ begin
 
   if FColorChannels <> Value then
   begin
+    TDrawableImage.BatchingFlush;
     FColorChannels := Value;
     UpdateColorChannels;
+  end;
+end;
+
+procedure TRenderContext.SetStencilTest(const Value: Boolean);
+begin
+  if Self <> RenderContext then
+    WarnContextNotCurrent;
+
+  if FStencilTest <> Value then
+  begin
+    TDrawableImage.BatchingFlush;
+    FStencilTest := Value;
+    if not SkipOpenGLStateWhenRHIActive then
+      GLSetEnabled(GL_STENCIL_TEST, FStencilTest);
+  end;
+end;
+
+procedure TRenderContext.StencilFunc(const ACompareOp: TRHICompareOp; const AReference, ACompareMask: Byte);
+const
+  CompareOpToGL: array [TRHICompareOp] of TGLenum = (
+    GL_NEVER, GL_LESS, GL_EQUAL, GL_LEQUAL,
+    GL_GREATER, GL_NOTEQUAL, GL_GEQUAL, GL_ALWAYS
+  );
+begin
+  if Self <> RenderContext then
+    WarnContextNotCurrent;
+
+  TDrawableImage.BatchingFlush;
+  FStencilCompareOp := ACompareOp;
+  FStencilReference := AReference;
+  FStencilCompareMask := ACompareMask;
+  if not SkipOpenGLStateWhenRHIActive then
+    glStencilFunc(CompareOpToGL[ACompareOp], AReference, ACompareMask);
+end;
+
+procedure TRenderContext.StencilOp(const AFailOp, ADepthFailOp, APassOp: TRHIStencilOp; const AWriteMask: Byte);
+const
+  StencilOpToGL: array [TRHIStencilOp] of TGLenum = (
+    GL_KEEP, GL_ZERO, GL_REPLACE, GL_INCR,
+    GL_DECR, GL_INVERT, GL_INCR_WRAP, GL_DECR_WRAP
+  );
+begin
+  if Self <> RenderContext then
+    WarnContextNotCurrent;
+
+  TDrawableImage.BatchingFlush;
+  FStencilFailOp := AFailOp;
+  FStencilDepthFailOp := ADepthFailOp;
+  FStencilPassOp := APassOp;
+  FStencilWriteMask := AWriteMask;
+  if not SkipOpenGLStateWhenRHIActive then
+  begin
+    glStencilMask(AWriteMask);
+    glStencilOp(StencilOpToGL[AFailOp], StencilOpToGL[ADepthFailOp], StencilOpToGL[APassOp]);
+  end;
+end;
+
+procedure TRenderContext.ApplyRHIStencilAndColorMask(
+  var ADepthStencil: TRHIDepthStencilStateDesc;
+  var ABlendState: TRHIBlendStateDesc);
+var
+  Mask: Byte;
+begin
+  if FColorChannels <> AllColorChannels then
+  begin
+    Mask := 0;
+    if 0 in FColorChannels then Mask := Mask or $01;
+    if 1 in FColorChannels then Mask := Mask or $02;
+    if 2 in FColorChannels then Mask := Mask or $04;
+    if 3 in FColorChannels then Mask := Mask or $08;
+    ABlendState.ColorWriteMask := Mask;
+  end;
+
+  if FStencilTest then
+  begin
+    ADepthStencil.StencilTestEnable := True;
+    ADepthStencil.FrontStencil.CompareOp := FStencilCompareOp;
+    ADepthStencil.FrontStencil.Reference := FStencilReference;
+    ADepthStencil.FrontStencil.CompareMask := FStencilCompareMask;
+    ADepthStencil.FrontStencil.WriteMask := FStencilWriteMask;
+    ADepthStencil.FrontStencil.FailOp := FStencilFailOp;
+    ADepthStencil.FrontStencil.DepthFailOp := FStencilDepthFailOp;
+    ADepthStencil.FrontStencil.PassOp := FStencilPassOp;
+    ADepthStencil.BackStencil := ADepthStencil.FrontStencil;
   end;
 end;
 

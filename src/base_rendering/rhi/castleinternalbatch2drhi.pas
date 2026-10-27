@@ -65,7 +65,9 @@ type
     FVertShader: TRHIShaderModule;
     FFragShader: TRHIShaderModule;
     FTextureSetLayout: TRHIDescriptorSetLayout;
+    FBasePipeDescs: array[TCastle2DBlendMode] of TRHIGraphicsPipelineDesc;
     FPipelines: array[TCastle2DBlendMode] of TRHIPipeline;
+    FLastPipeline: TRHIPipeline;
     FLinearSampler: TRHISampler;
     FNearestSampler: TRHISampler;
     FWhitePixelTexture: TRHITexture;
@@ -143,6 +145,7 @@ type
     property BatchFlushCount: Cardinal read FBatchFlushCount;
     property TotalQuadsDrawn: Cardinal read FTotalQuadsDrawn;
     property TotalFlushes: Cardinal read FTotalFlushes;
+    property LastPipeline: TRHIPipeline read FLastPipeline;
   end;
 
 { Currently active 2D batch renderer for TDrawableImage / UI rendering. }
@@ -158,6 +161,9 @@ procedure FreeGlobalBatch2DRenderer;
 function PackColorRgba8(const C: TCastleColor): Cardinal; inline;
 
 implementation
+
+uses
+  CastleRenderContext;
 
 var
   FActiveBatch2DRenderer: TCastleBatch2DRenderer = nil;
@@ -393,6 +399,7 @@ begin
         end;
     end;
     PipeDesc.DebugName := 'CastleBatch2D_PSO_' + IntToStr(Ord(BM));
+    FBasePipeDescs[BM] := PipeDesc;
     FPipelines[BM] := FDevice.GetOrCreatePipeline(PipeDesc);
   end;
 end;
@@ -469,6 +476,7 @@ var
   ActiveVBO: TRHIBuffer;
   VertexByteOffset: PtrUInt;
   PushData: TCastle2DPushConstants;
+  PipeDesc: TRHIGraphicsPipelineDesc;
 begin
   QueuedQuads := FFrameQuadCount - FBatchStartQuad;
   if (QueuedQuads = 0) or (FCurrentCmd = nil) or (FCurrentDescriptorSet = nil) then
@@ -476,8 +484,17 @@ begin
 
   ActiveVBO := FFrameVBOs[FDevice.FrameIndex];
 
-  { 1. Bind PSO & Scissor }
-  FCurrentCmd.BindPipeline(FPipelines[FCurrentBlendMode]);
+  { 1. Bind PSO & Scissor (apply RenderContext stencil / color mask when active, e.g. TCastleMask) }
+  if (RenderContext <> nil) and
+     (RenderContext.StencilTest or (RenderContext.ColorChannels <> AllColorChannels)) then
+  begin
+    PipeDesc := FBasePipeDescs[FCurrentBlendMode];
+    RenderContext.ApplyRHIStencilAndColorMask(PipeDesc.DepthStencil, PipeDesc.BlendState);
+    FLastPipeline := FDevice.GetOrCreatePipeline(PipeDesc);
+  end else
+    FLastPipeline := FPipelines[FCurrentBlendMode];
+
+  FCurrentCmd.BindPipeline(FLastPipeline);
   FCurrentCmd.SetScissor(FCurrentScissor);
 
   { 2. Push 2D orthographic scale/bias }

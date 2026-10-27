@@ -1102,9 +1102,7 @@ begin
   begin
     Shader.EnableSkinnedAnimation(State.Skin.InternalJointMatrix);
 
-    if (ApplicationProperties <> nil) and
-       (ApplicationProperties.RenderBackend = backendVulkan) and
-       (RHIDevice <> nil) and
+    if (RHIDevice <> nil) and
        (Shape.Cache <> nil) then
     begin
       Shape.Cache.UploadJointMatrices(

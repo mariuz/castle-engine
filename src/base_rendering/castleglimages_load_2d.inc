@@ -212,9 +212,20 @@ procedure SaveTextureContents(const Image: TCastleImage; const Texture: TGLTextu
   Adjusting image size for 2D texture. }
 
 function ResizeToTextureSize(const Size: Cardinal; const Sizing: TTextureSizing): Cardinal;
+var
+  MaxTexSize: Cardinal;
+  NPOTSupported: Boolean;
 begin
+  NPOTSupported := (RHIDevice <> nil) or (GLFeatures = nil) or GLFeatures.TextureNonPowerOfTwo;
+  if GLFeatures <> nil then
+    MaxTexSize := GLFeatures.MaxTextureSize
+  else if (RHIDevice <> nil) and (RHIDevice.Capabilities.MaxTextureSize > 0) then
+    MaxTexSize := RHIDevice.Capabilities.MaxTextureSize
+  else
+    MaxTexSize := 16384;
+
   { make sure it's power of 2, if necessary }
-  if ((Sizing = tsAny) and GLFeatures.TextureNonPowerOfTwo) or
+  if ((Sizing = tsAny) and NPOTSupported) or
     IsPowerOf2(Size) then
     Result := Size else
     Result := 1 shl (Biggest2Exponent(Size) + 1);
@@ -225,9 +236,9 @@ begin
      (Result > GLTextureMinSize) then
     Result := Max(Result shr (GLTextureScale - 1), GLTextureMinSize);
 
-  { honour GLFeatures.MaxTextureSize }
-  if Result > GLFeatures.MaxTextureSize then
-    Result := GLFeatures.MaxTextureSize;
+  { honour MaxTexSize }
+  if (MaxTexSize > 0) and (Result > MaxTexSize) then
+    Result := MaxTexSize;
 end;
 
 function ResizeToTextureSize(const r: TCastleImage; const Sizing: TTextureSizing): TCastleImage;

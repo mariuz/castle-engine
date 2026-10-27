@@ -969,6 +969,22 @@ Utilize dynamic states (VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_
 **Milestone 70 Status**: Completed. End-to-end hardware occlusion query culling with unlit mesh RHI PSOs, dynamic shape batching with RHI buffer/material synchronization, and universal on-demand material texture resolution verified across **236/236** `TTestCastleVulkanRHI` unit tests (**805/805** total `castle_tester_standalone` tests).
 
 
+### Phase 71: End-to-End GPU Skeletal Skinning (`TSkinNode`, `TSkinnedRenderer`), 2D/3D Stencil Masking (`TCastleMask`, `TRenderContext` Stencil State Synchronization) & Nil-Safe Texture Sizing Helpers in Pure Vulkan RHI Mode (COMPLETED)
+
+* [x] **71.1. End-to-End GPU Skeletal Skinning (`src/scene/castlescene.pas`, `src/scene/x3d/x3dnodes_castle.inc`, `src/scene/castleinternalrenderer_meshrenderer.inc`, `src/scene/castlerendererinternalshader_skin.inc`)**:
+  * Initialize `TSkinNode.InternalFeatures` in `InitializeSkinInShaders`, `TCastleScene.PrepareResources`, and `TSkinNode.InternalMeshCalculation` when `RHIDevice <> nil` / `RenderBackend = rbVulkan` so `TSkinNode.InternalMeshCalculation` selects GPU skinning (`mcGpuTexture` / `mcGpuUniforms`) in pure Vulkan RHI mode (`GLFeatures = nil`).
+  * Upload joint matrices (`Shape.Cache.UploadJointMatrices`) in `TSkinnedRenderer.RenderCoordinateBegin` whenever `RHIDevice <> nil`, populating `RHIJointBuffer` (`TRHIBuffer`), binding `RHISkinningDescriptorSet` (Set 2, Binding 0), and specializing the `SKIN_ANIMATION` vertex shader.
+* [x] **71.2. End-to-End 2D & 3D Stencil Masking (`src/base_rendering/castlerendercontext.pas`, `src/ui/castlecontrols.pas`, `src/ui/castlecontrols_mask.inc`, `src/base_rendering/rhi/castleinternalbatch2drhi.pas`, `src/base_rendering/castleglutils_draw_primitive_2d.inc`, `src/scene/castleinternalrenderer_renderer.inc`)**:
+  * Add `StencilTest`, `StencilFunc`, `StencilOp`, and `ApplyRHIStencilAndColorMask` to `TRenderContext` and flush queued 2D batches (`TDrawableImage.BatchingFlush`) before state changes.
+  * Update `TCastleMask.InternalRenderLoop` to support stencil masking when `RHIDevice <> nil` and route all stencil state transitions through `RenderContext`.
+  * Apply `RenderContext.ApplyRHIStencilAndColorMask` in `TCastleBatch2DRenderer.Flush` (exposing `LastPipeline`), `DrawPrimitive2D`, and `TRenderer.BuildShapePipelineDesc`.
+* [x] **71.3. Nil-Safe Texture Sizing Helpers & `TCastleScreenEffects` 2D Child Flush (`src/base_rendering/castleglimages_load_2d.inc`, `src/base_rendering/castleglimages_load_3d.inc`, `src/base_rendering/castleglimages_load_cubemap.inc`, `src/scene/castleinternalrenderer_cache.inc`, `src/scene/castlescreeneffects.pas`, `tests/code/testcases/testcastlevulkanrhi.pas`)**:
+  * Make `ResizeToTextureSize`, `IsTextureSized`, `IsTexture3DSized`, `IsCubeMapTextureSized`, `ResizeToCubeMapTextureSize`, and `TRendererCache` nil-safe when `GLFeatures = nil`, and flush 2D batches before `ScreenEffectRTT.RenderEnd` in `TCastleScreenEffects.RenderOverChildren`.
+  * Add `TestViewportSkinNodeGPUSkinningEndToEndAndJointUploadRHI`, `TestCastleMask2DAnd3DStencilMaskingEndToEndRHI`, and `TestTextureSizingHelpersNilSafeInPureRHIModeRHI`, reaching **239/239** `TTestCastleVulkanRHI` unit tests (**808/808** total `castle_tester_standalone` tests).
+
+**Milestone 71 Status**: Completed. End-to-end GPU skeletal skinning (`TSkinNode`), 2D/3D stencil masking (`TCastleMask` + `TRenderContext`), and nil-safe texture sizing helpers verified across **239/239** `TTestCastleVulkanRHI` unit tests (**808/808** total `castle_tester_standalone` tests).
+
+
 ## 4.1. Unreal Engine 5 vs. Castle Game Engine Vulkan RHI Feature Parity Matrix
 
 | Unreal Engine 5 Subsystem | Castle Game Engine Vulkan RHI Equivalent | Phase & Status |

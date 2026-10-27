@@ -652,6 +652,8 @@ begin
       RHIPipeDesc.BlendState.DstColorBlendFactor := MapBlendDestFactor(BlendingDestinationFactor);
     end else
       RHIPipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+    if RenderContext <> nil then
+      RenderContext.ApplyRHIStencilAndColorMask(RHIPipeDesc.DepthStencil, RHIPipeDesc.BlendState);
     RHIPipeDesc.PushConstantSize := SizeOf(TPrimitive2DPushConstants);
     RHIPipeDesc.PushConstantStages := [ssVertex, ssFragment];
     SetLength(RHIPipeDesc.ColorAttachmentFormats, 1);

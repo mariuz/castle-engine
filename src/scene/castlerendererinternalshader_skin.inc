@@ -75,7 +75,7 @@ begin
       Defines := '#define CASTLE_JOINT_TEXTURE' + NL
     else
       Defines := Format('#define CASTLE_MAX_SKIN_JOINTS %d', [
-        GLFeatures.MaxSkinJointsInUniforms
+        IfThen(GLFeatures <> nil, Integer(GLFeatures.MaxSkinJointsInUniforms), 256)
       ]) + NL;
 
     Shader.Plug(stVertex, Defines + ShaderSkinAnimation);

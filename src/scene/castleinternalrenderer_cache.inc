@@ -328,7 +328,7 @@ begin
 
   FreeTextureImage := false;
 
-  if IsFloatImage(TextureImage) then
+  if IsFloatImage(TextureImage) and (GLFeatures <> nil) then
   begin
     { If trying to load float texture, but it's not supported,
       replace it with dummy 1x1 non-float texture.

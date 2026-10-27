@@ -639,6 +639,8 @@ begin
   end;
   if (RenderContext <> nil) and (not RenderContext.DepthTest) then
     ADesc.DepthStencil.DepthTestEnable := False;
+  if (RenderContext <> nil) and (FInternalPass = 0) then
+    RenderContext.ApplyRHIStencilAndColorMask(ADesc.DepthStencil, ADesc.BlendState);
 
   Set1Layout := nil;
   Set2Layout := nil;
