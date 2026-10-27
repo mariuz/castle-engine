@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (Phases 1–27), inspired by **Unreal Engine 5.5** and **Blender** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–250**), inspired by **Unreal Engine 5.5** and **Blender** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -64,8 +64,12 @@ This guide provides comprehensive documentation for the **Castle Game Engine (`c
 26. [Phase 25: Project Selected Transforms Along Any Direction / Camera View Ray (`ProjectSelectedAlongDirection` / `Ctrl+Shift+End`)](#26-phase-25-project-selected-transforms-along-any-direction--camera-view-ray-projectselectedalongdirection--ctrlshiftend)
 27. [Phase 26: Hierarchy & Viewport Selection Power Tools (`InvertSelection` / `Ctrl+I`, `SelectChildren` / `Ctrl+]`)](#27-phase-26-hierarchy--viewport-selection-power-tools-invertselection--ctrli-selectchildren--ctrl)
 28. [Phase 27: Bounding-Box Equal-Gap Distribution (`DistributeSelectedGaps`) & Absolute Rotation/Scale Grid Quantization (`SnapSelectedRotationAndScaleToGrid`)](#28-phase-27-bounding-box-equal-gap-distribution-distributeselectedgaps--absolute-rotationscale-grid-quantization-snapselectedrotationandscaletogrid)
-29. [Complete Keyboard Shortcuts & Toolbar Reference](#29-complete-keyboard-shortcuts--toolbar-reference)
-30. [Automated Unit Tests & Verification](#30-automated-unit-tests--verification)
+29. [Phases 28–119: 3D Parametric Arrangements, Spatial Projections, Non-Linear Deformers & 2D UI Layout Operators (Sections 29–62)](#29-phase-28-ground-aware-scatter-duplication-scatterduplicateselected--ctrlalts--hierarchy-select-parent--siblings-ctrl--)
+30. [Phases 120–174: Differential Geometry Minimal Surfaces, Classical Parametric Curves, Spatial Deformers, 2D UI Splitters/Docking & Scene Audit Filters](#63-phases-120174-differential-geometry-minimal-surfaces-classical-parametric-curves-spatial-deformers-2d-ui-splittersdocking--scene-audit-filters)
+31. [Phases 175–210: Batch Asset & Prefab Utilities, 3D Level/Lighting/Physics/Terrain Rigs & 2D HUD/Dialog/Inventory Builders](#64-phases-175210-batch-asset--prefab-utilities-3d-levellightingphysicsterrain-rigs--2d-huddialoginventory-builders)
+32. [Phases 211–250: Advanced 3D Navigation/Joint/Combine Rigs, 2D Font/Mask/ScrollView/Keyboard/Color Generators, Categorized Context Submenus & Final Design Readiness Auditor](#65-phases-211250-advanced-3d-navigationjointcombine-rigs-2d-fontmaskscrollviewkeyboardcolor-generators-categorized-context-submenus--final-design-readiness-auditor)
+33. [Complete Keyboard Shortcuts & Toolbar Reference](#66-complete-keyboard-shortcuts--toolbar-reference)
+34. [Automated Unit Tests & Verification](#67-automated-unit-tests--verification)
 
 ---
 
@@ -84,13 +88,14 @@ Modern 3D level design and UI composition require fast, deterministic spatial ma
 | **Viewport Marquee Box Selection** | Drag selection rectangle in viewport to batch-select actors | Left-Drag in `Select` mode (`moSelect`) or `Ctrl+Alt` + Left-Drag in any mode (`SelectComponentsInMarquee`, `Shift` for additive) | `tools/castle-editor/code/framedesign.pas` |
 | **Surface & Vertex Snapping** | Hold `V` to snap selection onto mesh vertices or surfaces | `SnapSelectedToRay` (`V` = surface snap, `Shift+V` = vertex snap, `Alt+V` = surface + normal, `Shift+Alt+V` = vertex + normal) | `src/scene/castletransformmanipulate.pas`<br>`tools/castle-editor/code/framedesign.pas` |
 | **Snap to Floor, Normal & Grid** | `End` snaps to floor; `Alt+End` aligns to surface normal; `Ctrl+End` snaps to grid | `SnapToFloor(false)` (`End`), `SnapToFloor(true)` (`Alt+End`), & `SnapSelectedToGrid` (`Ctrl+End`) | `src/scene/castletransformmanipulate.pas`<br>`tools/castle-editor/code/framedesign.pas` |
-| **Alt-Drag & Array Duplication** | `Alt` + gizmo drag duplicates actor; Step-and-Repeat array | `GizmoTransformModifyBegin` (`Alt` + Gizmo drag) & `ArrayDuplicateSelected` (`Ctrl+Shift+D` / `Array Dup...`) | `src/scene/castletransformmanipulate.pas`<br>`tools/castle-editor/code/framedesign.pas` |
+| **Alt-Drag & Array Duplication** | `Alt` + gizmo drag duplicates actor; Step-and-Repeat array | `GizmoTransformModifyBegin` (`Alt` + Gizmo drag), `ArrayDuplicateSelected` (`Ctrl+Shift+D`), `RadialDuplicateSelected` (`Ctrl+Alt+D`), `GridDuplicateSelected` (`Ctrl+Alt+G`), & `ScatterDuplicateSelected` (`Ctrl+Alt+S`) | `src/scene/castletransformmanipulate.pas`<br>`tools/castle-editor/code/framedesign.pas` |
 | **Mirror, 90° Step & Randomize** | Mirror Actor X/Y/Z, 90° Quick Rotate, Foliage/Actor Randomizer | `MirrorSelected` (`Mirror X/Y/Z`), `RotateSelected90` (`Rot 90° Y`), `RandomizeSelected` (`Randomize`) | `src/scene/castletransformmanipulate.pas`<br>`tools/castle-editor/code/framedesign.pas` |
-| **Multi-Actor Align, Distribute & Stack** | Actor Align / Distribute / Flush Bounding-Box Stack along X, Y, Z | `AlignSelected` (`Align X/Y/Z`), `DistributeSelected` (`Dist X/Y/Z`), & `StackSelected` (`Stack X/Y/Z`) in `PanelLayoutTransform` | `src/scene/castletransformmanipulate.pas`<br>`tools/castle-editor/code/framedesign.pas` |
+| **Multi-Actor Align, Distribute & Stack** | Actor Align / Distribute / Flush Bounding-Box Stack along X, Y, Z | `AlignSelected` (`Align X/Y/Z`), `DistributeSelected` (`Dist X/Y/Z`), `DistributeSelectedGaps`, & `StackSelected` (`Stack X/Y/Z`) in `PanelLayoutTransform` | `src/scene/castletransformmanipulate.pas`<br>`tools/castle-editor/code/framedesign.pas` |
+| **Parametric 3D Curves, Minimal Surfaces & Spatial Deformers** | Spline/Curve Placement, Modeling Deformers (Bend, Twist, Taper, Spherify, Displace) | **60+ Parametric 3D Curves, Minimal Surfaces & Spatial Deformers** (`ArrangeSelectedInCircle`, `Helix`, `ParabolicArch`, `OnSphere`, `OnTorus`, `Catenary`, `Lissajous`, `TwistSelected`, `TaperSelected`, `BendSelected`, `SpherifySelected`, `RippleSelected`, `VolumeSquashStretchSelected`, `SwirlSelected`, `GyroidDeformSelected`, `ScherkDeformSelected`, `StereographicDeformSelected`, `ArrangeSelectedOnDupinCyclide`, `OnKuenSurface`, `OnPluckerConoid`, `OnSuperellipsoid`, etc.) | `src/scene/castletransformmanipulate.pas`<br>`tools/castle-editor/code/framedesign.pas` |
 | **Camera Bookmarks & Speed** | `Ctrl+0..9` / `0..9` bookmarks; `[` / `]` camera speed | `SaveCameraBookmark`, `RecallCameraBookmark`, & `AdjustCameraSpeed` (`[` / `]` + HUD `Cam Speed`) | `tools/castle-editor/code/framedesign.pas` |
 | **Move Actor to View** | Snap selected actor/light to current camera view | `Move to View` (`ButtonMoveTransformToView` / `ViewportAlignTransformToView`) | `tools/castle-editor/code/framedesign.pas` |
 | **Outliner Live Search** | Top search box (`ActorName` or `+ClassName`) | Always-visible `EditFindInHierarchy` supporting `Name`, `ClassName`, and `+ClassName` with yellow node highlighting | `tools/castle-editor/code/framedesign.pas` |
-| **Outliner Batch Selection & Tree Ops** | Select All of Same Class, Expand/Collapse All, Group (`Ctrl+G`) / Ungroup (`Ctrl+Shift+G`) | `Select All of Same Class`, `Expand/Collapse Subtree`, `Group Selected (Ctrl+G)`, and `Ungroup Selected (Ctrl+Shift+G)` | `tools/castle-editor/code/framedesign.pas` |
+| **Outliner Batch Selection & Tree Ops** | Select All of Same Class, Expand/Collapse All, Group (`Ctrl+G`) / Ungroup (`Ctrl+Shift+G`) | `Select All of Same Class`, `Expand/Collapse Subtree`, `Group Selected (Ctrl+G)`, `Ungroup Selected (Ctrl+Shift+G)`, plus **5 Categorized Context Menu Submenus** | `tools/castle-editor/code/framedesign.pas` |
 | **Actor Visibility, Isolation & Lock** | `H` toggles visibility, `Shift+H` isolates, `Alt+H` un-hides all, `L` locks selection | `H` (`ToggleSelectedVisibility`), `Shift+H` (`IsolateSelected`), `Alt+H` (`ShowAllHidden`), `L` (`ToggleSelectedLock`), `Alt+L` (`UnlockAll`), `[Hidden]` & `[Locked]` badges | `tools/castle-editor/code/framedesign.pas` |
 | **Multi-Actor Duplicate** | `Ctrl+D` / `Ctrl+W` duplicates all selected actors | `Ctrl+D` (`DuplicateComponent`) duplicates all selected `TCastleTransform`, `TCastleUserInterface`, or `TCastleComponent` items | `tools/castle-editor/code/framedesign.pas` |
 | **Outliner Focus Camera** | Double-click actor in Outliner or press `F` | Double-click `TCastleTransform` in `ControlsTree` or press `F` (`ViewportViewSelected`) | `tools/castle-editor/code/framedesign.pas` |
@@ -101,6 +106,9 @@ Modern 3D level design and UI composition require fast, deterministic spatial ma
 | **Content Browser Filtering** | Search bar + Asset Type Filter pills (`Meshes`, `Textures`, `Audio`...) | `EditFileFilter` + 6 Asset Category pills (`All`, `3D/Scenes`, `Designs`, `Images`, `Audio`, `Code`) | `tools/castle-editor/code/formproject.pas` |
 | **Quick-Add Palette** | "Quickly Add to the Project" searchable popup | `+ Add` button (`ButtonQuickAdd`) & `Ctrl+P` shortcut opening `ShowQuickAddPalette` | `tools/castle-editor/code/framedesign.pas` |
 | **Physics Step & Keep Sim** | Single-Step simulation & "Keep Simulation Changes" (`K`) | `Step` (`ButtonSimulationStep`) & `Keep Sim` (`ButtonKeepSimulation`) toolbar buttons during physics simulation | `tools/castle-editor/code/framedesign.pas` |
+| **3D Level, Physics, Terrain & Navigation Rig Generators** | Place Actors / Blueprints for Lighting, Terrain, Water, Joints, Ragdolls, Character Rigs | **30+ 3D Quick Rig Builders** (Studio Lighting, Sky/Fog, Terrain & TerrainCombine, Water Volume, Physics Joints, Ragdolls, Trigger Volumes, Living/Hurt Creatures, Walk/Examine/2D/Third-Person Navigation Rigs) | `tools/castle-editor/code/framedesign.pas` |
+| **2D UI Layouts, HUD, Font, ScrollView & Customizer Builders** | UMG Designer Layouts, RichText, ScrollBox, Virtual Keyboard, Color Picker | **30+ 2D UI Layout Operators** (`PanelLayoutUI`) & **25+ Interactive 2D UI Generators** (HUD, Dialog, Inventory, Minimap, Radial Wheel, Skill Hotbar, FontFamily, BitmapFont, ScrollView, Crosshair, Virtual Keyboard, Color Customizer) | `tools/castle-editor/code/framedesign.pas` |
+| **Batch Asset Utilities & Design Readiness Auditor** | Asset Audit / Map Check / Batch Rename / Prefab Extraction | Batch Rename (`F2`), Batch URL Find/Replace, Extract Subtree to Prefab, Hierarchy Statistics Report, & **Final Pre-Release Design Readiness Auditor** (`ShowDesignReadinessAuditDialog`) | `tools/castle-editor/code/framedesign.pas` |
 
 ---
 
@@ -1249,7 +1257,68 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 
 ---
 
-## 63. Complete Keyboard Shortcuts & Toolbar Reference
+## 63. Phases 120–174: Differential Geometry Minimal Surfaces, Classical Parametric Curves, Spatial Deformers, 2D UI Splitters/Docking & Scene Audit Filters
+
+- **3D Spatial & Minimal-Surface Deformers (`CastleTransformManipulate`):**
+  - **Cylindrify / 3D Capsule Projection (`CylindrifySelected`):** Projects 2+ top-level selected transforms onto a vertical cylinder or hemispherical-capped 3D capsule of radius `TargetRadius` around the selection pivot with blend factor `StrengthFactor` and outward radial/hemispherical normal alignment.
+  - **Barrel Bulge & Pincushion Waist (`BarrelPincushionSelected`):** Applies a quadratic axial profile $s(u) = 1 + k(1 - u^2)$ (`BulgeStrength > 0` barrel, `< 0` pincushion hourglass) along `Axis` with optional transverse scale modulation.
+  - **Linear Directional Sine Wave Deformer (`WaveDeformSelected`):** Displaces selected transforms along `DispAxis` as a sinusoidal function of position along `WaveAxis` with analytical wave tangent and surface normal alignment.
+  - **Hyperbolic Paraboloid Saddle & Dome Deformer (`SaddleDomeDeformSelected`):** Applies a bivariate quadratic height profile $\Delta h = A u^2 + B v^2$ (`B < 0` saddle, `B > 0` dome) along `UpAxis`.
+  - **$\ell_p$ Octahedral / Superquadric Diamond Deformer (`OctahedralDeformSelected`):** Projects selected transforms toward an $\ell_p$ norm shell ($\|\mathbf{d}\|_p = (|x|^p + |y|^p + |z|^p)^{1/p}$, where $p=1$ is an octahedron and $p=2/3$ is a 3D astroid star) with analytical gradient normals.
+  - **Schoen Gyroid & Schwarz P Minimal Surface Deformer (`GyroidDeformSelected`):** Displaces transforms along Y using the triply-periodic Schoen Gyroid ($\sin kx\cos kz + \sin kz\cos ky + \sin ky\cos kx$) or Schwarz P ($\cos kx + \cos kz$) minimal surface.
+  - **Scherk Minimal Surface & Saddle Tower Deformer (`ScherkDeformSelected`):** Displaces transforms along Y using Heinrich Scherk's doubly-periodic First Minimal Surface ($\ln(\cos kz / \cos kx)$) or Saddle Tower ($\sin kx \cdot \sinh kz$).
+  - **Conformal Inverse Stereographic Sphere Projection (`StereographicDeformSelected`):** Conformally maps a planar XZ layout around the pivot onto a 3D Riemann Sphere of radius $R$ from the South or North Pole with analytical sphere normals.
+- **3D Classical Minimal Surfaces, Pseudospheres & Parametric Curves (`CastleTransformManipulate`):**
+  - **Surfaces:** Catenoid (`ArrangeSelectedOnCatenoid`), Helicoid (`ArrangeSelectedOnHelicoid`), Enneper Surface (`ArrangeSelectedOnEnneperSurface`), Figure-8 Klein Bottle (`ArrangeSelectedOnKleinBottle`), Ulisse Dini's Twisted Pseudosphere (`ArrangeSelectedOnDiniSurface`), Jakob Steiner's Roman Surface (`ArrangeSelectedOnRomanSurface`), Werner Boy's Surface (`ArrangeSelectedOnBoysSurface`), Eugène Catalan's Minimal Surface (`ArrangeSelectedOnCatalanSurface`), Charles Dupin's Cyclide (`ArrangeSelectedOnDupinCyclide`), Edmond Bour's Minimal Surface (`ArrangeSelectedOnBourSurface`), Lebrecht Henneberg's Minimal Surface (`ArrangeSelectedOnHennebergSurface`), Baseball / Tennis Spherical Epicycloid (`ArrangeSelectedOnSphericalEpicycloid`), Theodor Kuen's Pseudospherical Surface (`ArrangeSelectedOnKuenSurface`), Herbert Richmond's Planar-End Minimal Surface (`ArrangeSelectedOnRichmondSurface`), Julius Plücker's Ruled Conoid (`ArrangeSelectedOnPluckerConoid`), and Alan Barr's 3D Superellipsoid (`ArrangeSelectedOnSuperellipsoid`).
+  - **Curves:** Cassini Oval (`ArrangeSelectedInCassiniOval`), Spherical Hippopede (`ArrangeSelectedInHippopede`),Involute Gear Wheel (`ArrangeSelectedInGearWheel`), Fermat Parabolic Spiral (`ArrangeSelectedInFermatSpiral`), Fresnel Cornu / Euler Clothoid Spiral (`ArrangeSelectedInCornuSpiral`), Cochleoid Snail Spiral (`ArrangeSelectedInCochleoid`), Bicorn & Piriform Teardrop (`ArrangeSelectedInBicornCurve`), Cylindrical Harmonic Crown Wave (`ArrangeSelectedInCylindricalHarmonic`), Pascal's Limaçon Trisectrix (`ArrangeSelectedInLimaconCurve`), Talbot's Negative-Pedal Curve (`ArrangeSelectedInTalbotCurve`), Cramer's Devil's Curve (`ArrangeSelectedInDevilsCurve`), and Gerono's Figure-Eight Lemniscate (`ArrangeSelectedInGeronoLemniscate`).
+- **2D UI Responsive Docking, Splitters & Card Grids (`PanelLayoutUI` in `framedesign.pas`):**
+  - Added 1-click 2D UI layout operators for **Staggered Brick / Honeycomb Grid**, **Circular Arc / Fan**, **Horizontal / Vertical / 4-Quad Splitters**, **9-Point Parent Anchor Docking**, **Diagonal Cascade**, **Concentric Nested Frames**, **Padded Card Rows**, **Header / Body / Footer App Shell**, **Left / Center / Right 3-Column Holy Grail Layout**, **16:9 / 4:3 / 21:9 Widescreen Aspect Ratio Sizing**, and **2-Column Form Label+Field Pairs**.
+- **Hierarchy Scene Audit & Component Selection Filters (`MenuTreeView` in `framedesign.pas`):**
+  - Added specialized 1-click selection filters for **3D Sound Sources**, **3D Terrains & Water Volumes**, **3D Viewport Navigation & Third-Person Cameras**, **3D Physics Joints**, **3D Text & Billboards**, **Non-Uniformly / Negatively Scaled 3D Transforms**, **Shadow-Casting / Non-Shadow 3D Transforms**, **Empty / Leaf 3D Transforms**, **Missing / Unresolved Asset URLs**, **Duplicate-Named Components**, and **Out-of-Bounds / Far-From-Origin 3D Transforms**.
+
+---
+
+## 64. Phases 175–210: Batch Asset & Prefab Utilities, 3D Level/Lighting/Physics/Terrain Rigs & 2D HUD/Dialog/Inventory Builders
+
+- **Batch Asset, Prefab & Hierarchy Utilities (`framedesign.pas`):**
+  - **Batch Rename Selected Components (`ShowBatchRenameDialog` / `F2`):** Renames multiple selected components with `Prefix`, `BaseName`, `Suffix`, `StartIndex`, `ZeroPadding`, and live regex/substring `Find`/`Replace`.
+  - **Batch Find & Replace Asset URLs (`ShowBatchReplaceUrlsDialog`):** Audits and batch-replaces substrings across all `Url` properties (`TCastleScene`, `TCastleImageControl`, `TCastleSound`, `TCastleDesign`, `TCastleTransformDesign`, fonts, terrains) in the active design.
+  - **Extract Selected Subtree to Reusable Prefab Design (`ExtractSelectedToPrefabDesign`):** Saves the selected `TCastleTransform` or `TCastleUserInterface` subtree to a new `.castle-transform` or `.castle-user-interface` file and optionally replaces the in-place subtree with a linked `TCastleTransformDesign` / `TCastleDesign` instance.
+  - **Hierarchy Statistics & Asset Audit Report (`ShowHierarchyStatsDialog`):** Summarizes total component counts by category, unique/missing asset URLs, vertex/triangle counts, and physics bodies.
+  - **Batch Randomize Material Tint & Opacity (`ShowBatchColorizeDialog`):** Applies uniform or randomized HSV/RGB color tints and opacity across selected 3D primitives, lights, and 2D UI controls.
+- **3D Level, Lighting, Environment & Physics Rig Generators (`framedesign.pas`):**
+  - **3-Point Studio Lighting Rig (`ShowThreePointLightingDialog`):** Spawns a balanced `KeyLight` (`TCastleDirectionalLight` or `TCastleSpotLight`), `FillLight`, and `RimLight` around the selection or origin.
+  - **Sky, Fog & Atmosphere Rig (`ShowQuickEnvironmentDialog`):** Creates and links a `TCastleBackground` skybox/gradient and `TCastleFog` (`ftLinear` / `ftExponential`) onto the active `TCastleViewport`.
+  - **Physics Collider Auto-Fitter (`ShowAutoFitCollidersDialog`):** Inspects selected 3D transforms' local bounding boxes and automatically attaches or updates matching `TCastleBoxCollider`, `TCastleSphereCollider`, `TCastleCapsuleCollider`, or `TCastleMeshCollider` plus `TCastleRigidBody`.
+  - **Procedural 3D Terrain Patch (`ShowQuickTerrainDialog`) & Water Volume (`ShowQuickWaterDialog`):** Spawns a `TCastleTerrain` with `TCastleTerrainNoise` or `TCastleTerrainImage`, or a translucent animated water plane with optional buoyancy trigger collider.
+  - **3D Room / Corridor Greybox Builder (`ShowGreyboxRoomDialog`), Waypoint Patrol Path (`ShowWaypointPatrolDialog`), Billboard & 3D Text Labeler (`ShowQuick3DLabelDialog`), & Turntable / Pendulum / Bobbing Motion Rig (`ShowQuickMotionRigDialog`).**
+- **2D UI HUD, Dialog, Inventory & Minimap Builders (`framedesign.pas`):**
+  - **Quick 2D HUD Bar (`ShowQuickHudGeneratorDialog`), Modal Dialog / Pause Menu (`ShowQuickDialogGenerator`), RPG Inventory Slot Grid (`ShowQuickInventoryGridDialog`), 2D Minimap Viewport Overlay (`ShowQuickMinimapDialog`), Radial Pie Menu Wheel (`ShowQuickRadialMenuDialog`), & Cooldown Skill Hotbar (`ShowQuickSkillHotbarDialog`).**
+
+---
+
+## 65. Phases 211–250: Advanced 3D Navigation/Joint/Combine Rigs, 2D Font/Mask/ScrollView/Keyboard/Color Generators, Categorized Context Submenus & Final Design Readiness Auditor
+
+- **Advanced 3D Physics, AI, Terrain Combine & Navigation Rigs (`MenuTreeViewSubmenu3DTools`):**
+  - **3D Physics Joints (`ShowQuickPhysicsJointDialog`) & Multi-Part Ragdoll Chain (`ShowQuickRagdollChainDialog`):** Connects selected transforms with `TCastleHingeJoint`, `TCastleBallJoint`, `TCastleRopeJoint`, `TCastleDistanceJoint`, or `TCastleFixedJoint`, or generates an articulated capsule/box physics chain.
+  - **3D Trigger Volume (`ShowQuickTriggerVolumeDialog`), Living & Hurt Creature AI (`ShowQuickLivingHurtDialog`), Sound Emitter Zone (`ShowQuickSoundZoneDialog`), Camera Shake / View-Bobbing Rig (`ShowQuickCameraRigDialog`), & Decal / Blob Shadow Projector (`ShowQuickDecalProjectorDialog`).**
+  - **3D Modular Staircase & Ramp (`ShowQuickStairRampDialog`), Portal / Teleporter Pair (`ShowQuickPortalPairDialog`), Collectible Pickup (`ShowQuickCollectibleDialog`), & Multi-Light Kelvin Temperature Tweaker (`ShowMultiLightTweakerDialog`).**
+  - **3D Viewport Navigation Rig (`ShowQuickNavigationRigDialog` — Phase 239):** Configures `TCastleWalkNavigation`, `TCastleExamineNavigation`, or `TCastle2DNavigation` on the active `TCastleViewport` with presets (`FPS Walk + Gravity`, `Fly Walk`, `3D Turntable Examine`, `2D Orthographic Pan/Zoom`).
+  - **3D Combined Multi-Source Terrain Rig (`ShowQuickTerrainCombineDialog` — Phase 246):** Builds a `TCastleTerrain` driven by `TCastleTerrainCombine` (`opAdd`, `opMax`, `opMin`, `opMultiply`) blending a macro `TCastleTerrainNoise` (`Data1`) with a detail `TCastleTerrainNoise` or `TCastleTerrainImage` (`Data2`).
+  - **3D Third-Person Character & Follow-Camera Rig (`ShowQuickThirdPersonRigDialog` — Phase 247):** Spawns or updates a `TCastleThirdPersonNavigation` with `AvatarHierarchy`, `Avatar` (`TCastleScene`), `AimAvatar`, camera follow distance/speed, `CrouchSpeed`/`MoveSpeed`/`RunSpeed`, optional upright dynamic `TCastleCapsuleCollider` + `TCastleRigidBody` (`LockRotation := [0, 1, 2]`), and calls `Init`.
+- **Advanced 2D UI, HUD, Font, Mask, ScrollView, Virtual Keyboard & Color Customizer Builders (`MenuTreeViewSubmenu2DTools`):**
+  - **2D Compass Tape (`ShowQuickCompassBarDialog`), Keycap Input Prompts (`ShowQuickInputPromptDialog`), Notification Toast Stack (`ShowQuickNotificationStackDialog`), Tabbed Page Switcher (`ShowQuickTabControlDialog`), Loading Screen (`ShowQuickLoadingScreenDialog`), Achievement Banner (`ShowQuickAchievementBannerDialog`), Floating Damage Numbers (`ShowQuickDamagePopupDialog`), Settings Sliders (`ShowQuickSliderGroupDialog`), Checkbox / Toggle Pills (`ShowQuickToggleGroupDialog`), & 9-Slice `ProtectedSides` Configurator (`ShowNineSliceSetupDialog`).**
+  - **2D Stencil Mask (`TCastleMask` — Phase 240) & Tiled Image (`TCastleImageTransform` — Phase 241):** Wraps selected UI controls inside a stencil `TCastleMask`, or spawns a 3D `TCastleImageTransform` billboard with UV `RepeatS`/`RepeatT` tiling and `AlphaChannel` presets.
+  - **2D Font Family (`TCastleFontFamily` — Phase 242) & Sprite-Sheet Bitmap Font (`TCastleBitmapFont` — Phase 243):** Creates a 4-variant `TCastleFontFamily` (`Regular`, `Bold`, `Italic`, `BoldItalic`) with `Html := true` rich-text markup, or a grid-based `TCastleBitmapFont` (`ImageUrl`, `ImageColumns`, `ImageRows`, `ImageMargin`, `DisplayMargin`) and binds `CustomFont`.
+  - **2D Scrollable List & Table View (`TCastleScrollView` — Phase 244) & Built-In Crosshair (`TCastleCrosshair` — Phase 245):** Builds a framed `TCastleScrollView` + `TCastleVerticalGroup` of styled row cards (Quest Log, Leaderboard, Credits, Server Browser), or spawns a centered `TCastleCrosshair` (`csCross` / `csCrossRect`).
+  - **2D Virtual On-Screen Keyboard (`ShowQuickVirtualKeyboardDialog` — Phase 248) & Color Swatch / RGBA Customizer (`ShowQuickColorCustomizerDialog` — Phase 249):** Spawns a gamepad/touch-friendly virtual keyboard (`Full QWERTY`, `4x3 PIN Keypad`, `3-Letter Arcade Initials`) with a live `TCastleEdit` display, or an interactive RGBA `TCastleFloatSlider` + 6-swatch color customizer card.
+- **Categorized Context Menu Submenus (Phase 238) & Final Pre-Release Design Readiness Auditor (Phase 250):**
+  - `OrganizeHierarchyContextMenuSubmenus` groups all specialized hierarchy context menu items into 5 clean submenus: **`3D Level, Scene & Physics Tools`**, **`2D UI, HUD & Screen Generators`**, **`Batch, Prefab & Asset Utilities`**, **`Duplicate, Group & Array`**, and **`Select & Scene Audit Filters`**.
+  - **`Final Pre-Release Design Readiness & Asset Integrity Auditor...` (`ShowDesignReadinessAuditDialog` — Phase 250):** Performs a one-click pre-release QA inspection across the entire design hierarchy for missing/broken asset URLs, invalid negative/near-zero 3D scales, dynamic `TCastleRigidBody` nodes missing a `TCastleCollider`, unlinked navigation/behavior references, and zero-sized visible 2D UI controls, with an interactive **`Select All Flagged Components in Hierarchy`** action.
+
+---
+
+## 66. Complete Keyboard Shortcuts & Toolbar Reference
 
 | Shortcut / Control | Context | Action |
 | :--- | :--- | :--- |
@@ -1576,7 +1645,7 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 
 ---
 
-## 64. Automated Unit Tests & Verification
+## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 50 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
 
