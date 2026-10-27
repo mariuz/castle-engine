@@ -325,15 +325,44 @@ begin
   AMatBlock.InitDefaultUnlit;
   AlphaCutoff := 0.0;
 
+  if (Cache <> nil) and (Cache.RenderOptions <> nil) and
+     (Cache.RenderOptions.Mode = rmSolidColor) then
+  begin
+    Result := True;
+    AShadingModel := smUnlit;
+    AMatBlock.BaseColor := Vector4(Cache.RenderOptions.SolidColor, 1.0);
+    AMatBlock.SpecularColor := Vector4(0.0, 0.0, 0.0, -1.0);
+    Exit;
+  end;
+
+  if (Cache <> nil) and (Cache.Arrays <> nil) and Cache.Arrays.ForceUnlit then
+  begin
+    Result := True;
+    AShadingModel := smUnlit;
+    AMatBlock.BaseColor := Cache.Arrays.ForcedUnlitColor;
+    AMatBlock.SpecularColor := Vector4(0.0, 0.0, 0.0, -1.0);
+    if AlphaChannel = acTest then
+      AMatBlock.PBRParams.W := 0.5;
+    Exit;
+  end;
+
   ShapeState := OriginalState;
   if ShapeState = nil then
     ShapeState := State;
   if (ShapeState = nil) or (ShapeState.ShapeNode = nil) then
+  begin
+    if AlphaChannel = acTest then
+      AMatBlock.PBRParams.W := 0.5;
     Exit;
+  end;
 
   App := ShapeState.ShapeNode.Appearance;
   if App = nil then
+  begin
+    if AlphaChannel = acTest then
+      AMatBlock.PBRParams.W := 0.5;
     Exit;
+  end;
 
   if App.AlphaMode = amMask then
     AlphaCutoff := EnsureRange(App.AlphaCutoff, 0.0, 1.0)
@@ -395,6 +424,13 @@ begin
       AlphaCutoff);
   end else
     AMatBlock.PBRParams.W := AlphaCutoff;
+
+  if (Cache <> nil) and (Cache.RenderOptions <> nil) and
+     (not Cache.RenderOptions.Lighting) then
+  begin
+    AShadingModel := smUnlit;
+    AMatBlock.SpecularColor := Vector4(0.0, 0.0, 0.0, -1.0);
+  end;
 end;
 
 function TX3DRendererShape.ExtractRHIMaterialTextures(
@@ -463,43 +499,51 @@ begin
   AEmissiveTex := nil;
   AOcclusionTex := nil;
 
+  if (Cache <> nil) and (Cache.RenderOptions <> nil) and
+     ((Cache.RenderOptions.Mode = rmSolidColor) or (not Cache.RenderOptions.Textures)) then
+    Exit;
+
   ShapeState := OriginalState;
   if ShapeState = nil then
     ShapeState := State;
-  if (ShapeState = nil) or (ShapeState.ShapeNode = nil) then
-    Exit;
+  if (ShapeState <> nil) and (ShapeState.ShapeNode <> nil) then
+  begin
+    App := ShapeState.ShapeNode.Appearance;
+    if App <> nil then
+    begin
+      MatNode := App.Material;
+      if MatNode is TPhysicalMaterialNode then
+      begin
+        PhysMat := TPhysicalMaterialNode(MatNode);
+        ABaseColorTex := ResolveNodeRHITexture(PhysMat.FdBaseTexture.Value);
+        ANormalTex := ResolveNodeRHITexture(PhysMat.FdNormalTexture.Value);
+        AMetallicRoughnessTex := ResolveNodeRHITexture(PhysMat.MetallicRoughnessTexture);
+        AEmissiveTex := ResolveNodeRHITexture(PhysMat.EmissiveTexture);
+        AOcclusionTex := ResolveNodeRHITexture(PhysMat.OcclusionTexture);
+      end else
+      if MatNode is TMaterialNode then
+      begin
+        PhongMat := TMaterialNode(MatNode);
+        ABaseColorTex := ResolveNodeRHITexture(PhongMat.DiffuseTexture);
+        ANormalTex := ResolveNodeRHITexture(PhongMat.NormalTexture);
+        AEmissiveTex := ResolveNodeRHITexture(PhongMat.EmissiveTexture);
+      end else
+      if MatNode is TUnlitMaterialNode then
+      begin
+        UnlitMat := TUnlitMaterialNode(MatNode);
+        ABaseColorTex := ResolveNodeRHITexture(UnlitMat.EmissiveTexture);
+      end;
 
-  App := ShapeState.ShapeNode.Appearance;
-  if App = nil then
-    Exit;
-
-  MatNode := App.Material;
-  if MatNode is TPhysicalMaterialNode then
-  begin
-    PhysMat := TPhysicalMaterialNode(MatNode);
-    ABaseColorTex := ResolveNodeRHITexture(PhysMat.FdBaseTexture.Value);
-    ANormalTex := ResolveNodeRHITexture(PhysMat.FdNormalTexture.Value);
-    AMetallicRoughnessTex := ResolveNodeRHITexture(PhysMat.MetallicRoughnessTexture);
-    AEmissiveTex := ResolveNodeRHITexture(PhysMat.EmissiveTexture);
-    AOcclusionTex := ResolveNodeRHITexture(PhysMat.OcclusionTexture);
-  end else
-  if MatNode is TMaterialNode then
-  begin
-    PhongMat := TMaterialNode(MatNode);
-    ABaseColorTex := ResolveNodeRHITexture(PhongMat.DiffuseTexture);
-    ANormalTex := ResolveNodeRHITexture(PhongMat.NormalTexture);
-    AEmissiveTex := ResolveNodeRHITexture(PhongMat.EmissiveTexture);
-  end else
-  if MatNode is TUnlitMaterialNode then
-  begin
-    UnlitMat := TUnlitMaterialNode(MatNode);
-    ABaseColorTex := ResolveNodeRHITexture(UnlitMat.EmissiveTexture);
+      if ABaseColorTex = nil then
+        ABaseColorTex := ResolveNodeRHITexture(App.Texture);
+      if ANormalTex = nil then
+        ANormalTex := ResolveNodeRHITexture(App.NormalMap);
+    end;
   end;
 
-  if ABaseColorTex = nil then
-    ABaseColorTex := ResolveNodeRHITexture(App.Texture);
-  if ANormalTex = nil then
-    ANormalTex := ResolveNodeRHITexture(App.NormalMap);
+  if (ABaseColorTex = nil) and (OriginalGeometry <> nil) and
+     (OriginalGeometry.FontTextureNode <> nil) then
+    ABaseColorTex := ResolveNodeRHITexture(OriginalGeometry.FontTextureNode);
 
   if ABaseColorTex <> nil then Inc(Result);
   if ANormalTex <> nil then Inc(Result);
@@ -553,7 +597,8 @@ begin
         MetallicRoughnessTex <> nil,
         EmissiveTex <> nil,
         OcclusionTex <> nil,
-        MatBlock.PBRParams.W > 0.0);
+        MatBlock.PBRParams.W > 0.0,
+        (Cache.Arrays <> nil) and (Cache.Arrays.ColorType <> ctNone));
     end;
     if BaseColorTex <> nil then
       BaseColorIdx := RHIDevice.RegisterBindlessTexture(BaseColorTex)

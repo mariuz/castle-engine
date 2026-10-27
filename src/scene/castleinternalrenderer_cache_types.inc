@@ -159,7 +159,8 @@
     procedure EnsureRHIShaders(
       const AHasSkinning, AHasTangents,
             AHasBaseColorTex, AHasNormalTex, AHasMetallicRoughnessTex,
-            AHasEmissiveTex, AHasOcclusionTex, AUseAlphaTest: Boolean);
+            AHasEmissiveTex, AHasOcclusionTex, AUseAlphaTest: Boolean;
+      const AHasColorPerVertex: Boolean = False);
     { Debug description of this shape cache. }
     function ToString: String; override;
 
@@ -429,10 +430,12 @@ end;
 procedure TShapeCache.EnsureRHIShaders(
   const AHasSkinning, AHasTangents,
         AHasBaseColorTex, AHasNormalTex, AHasMetallicRoughnessTex,
-        AHasEmissiveTex, AHasOcclusionTex, AUseAlphaTest: Boolean);
+        AHasEmissiveTex, AHasOcclusionTex, AUseAlphaTest: Boolean;
+  const AHasColorPerVertex: Boolean);
 var
   Mask: Cardinal;
   Gen: TCastleShaderGeneratorRHI;
+  FogSnippet: String;
 begin
   if RHIDevice = nil then
     Exit;
@@ -447,6 +450,7 @@ begin
   if AHasEmissiveTex then Mask := Mask or $20;
   if AHasOcclusionTex then Mask := Mask or $40;
   if AUseAlphaTest then Mask := Mask or $80;
+  if AHasColorPerVertex then Mask := Mask or $100;
 
   if FRHIShadersInitialized and (FRHIShaderPermutationMask = Mask) and
      (FRHIVertexShader <> nil) and (FRHIFragmentShader <> nil) then
@@ -457,9 +461,39 @@ begin
   Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
   try
     FRHIVertexShaderSource := Gen.GenerateDefault3DVertexShader(AHasSkinning, AHasTangents);
+    FRHIVertexShaderSource := StringReplace(
+      FRHIVertexShaderSource,
+      '  gl_Position = ',
+      '  gl_PointSize = 1.0;' + LineEnding + '  gl_Position = ',
+      []);
     FRHIFragmentShaderSource := Gen.GenerateDefault3DFragmentShader(
       AHasBaseColorTex, AHasNormalTex, AHasMetallicRoughnessTex,
       AHasEmissiveTex, AHasOcclusionTex, False, AUseAlphaTest, False, False);
+    if AHasColorPerVertex then
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        '  vec4 baseColor = castle_MaterialBaseColor;',
+        '  vec4 baseColor = castle_MaterialBaseColor * castle_color_per_vertex;',
+        []);
+    FogSnippet :=
+      LineEnding +
+      '  if ((CastleScene.u_FogParams.z > 0.5) && (CastleScene.u_FogParams.y > 1e-5)) {' + LineEnding +
+      '    float fogDist = length(castle_vertex_eye.xyz);' + LineEnding +
+      '    float fogFactor = (CastleScene.u_FogParams.z > 1.5)' + LineEnding +
+      '      ? clamp(1.0 - exp(-CastleScene.u_FogColor.a * fogDist), 0.0, 1.0)' + LineEnding +
+      '      : clamp(fogDist / CastleScene.u_FogParams.y, 0.0, 1.0);' + LineEnding +
+      '    castle_FragColor.rgb = mix(castle_FragColor.rgb, CastleScene.u_FogColor.rgb, fogFactor);' + LineEnding +
+      '  }';
+    FRHIFragmentShaderSource := StringReplace(
+      FRHIFragmentShaderSource,
+      '    castle_FragColor = vec4(unlitColor, baseColor.a);',
+      '    castle_FragColor = vec4(unlitColor, baseColor.a);' + FogSnippet,
+      []);
+    FRHIFragmentShaderSource := StringReplace(
+      FRHIFragmentShaderSource,
+      '  castle_FragColor = vec4(Lo + emissive, baseColor.a);',
+      '  castle_FragColor = vec4(Lo + emissive, baseColor.a);' + FogSnippet,
+      []);
     FRHIVertexShader := RHIDevice.CreateShaderModuleFromGLSL(
       ssVertex, FRHIVertexShaderSource, Format('CastleShapeVert_Perm%.2x', [Mask]));
     FRHIFragmentShader := RHIDevice.CreateShaderModuleFromGLSL(

@@ -621,6 +621,8 @@ begin
       ADesc.Rasterizer.FrontFace := ffCounterClockwise
     else
       ADesc.Rasterizer.FrontFace := ffClockwise;
+
+    ADesc.Rasterizer.DepthBiasEnable := RenderContext.PolygonOffset.Enabled;
   end;
 
   if (RenderContext <> nil) and (not RenderContext.DepthBufferUpdate) then

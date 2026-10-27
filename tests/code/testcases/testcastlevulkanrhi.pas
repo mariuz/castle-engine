@@ -279,6 +279,9 @@ type
     procedure TestViewportSkinNodeGPUSkinningEndToEndAndJointUploadRHI;
     procedure TestCastleMask2DAnd3DStencilMaskingEndToEndRHI;
     procedure TestTextureSizingHelpersNilSafeInPureRHIModeRHI;
+    procedure TestCastleTextAndPrimitivesHeadlessVulkanRenderRHI;
+    procedure TestPointSetLineSetForceUnlitAndPerVertexColorSpecializationRHI;
+    procedure TestSolidWireframeSilhouettePolygonOffsetAndFogShaderRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -12426,7 +12429,10 @@ var
 begin
   SL := TStringList.Create;
   try
-    SL.LoadFromFile('examples/vulkan/vulkan_3d_scene/vulkan_3d_scene.dpr');
+    if FileExists('examples/vulkan/vulkan_3d_scene/vulkan_3d_scene.dpr') then
+      SL.LoadFromFile('examples/vulkan/vulkan_3d_scene/vulkan_3d_scene.dpr')
+    else
+      SL.LoadFromFile('../examples/vulkan/vulkan_3d_scene/vulkan_3d_scene.dpr');
     SourceText := SL.Text;
     AssertTrue('vulkan_3d_scene.dpr must call Viewport.PrepareResources(Scene)',
       Pos('Viewport.PrepareResources(Scene)', SourceText) > 0);
@@ -14829,6 +14835,405 @@ begin
   finally
     FreeAndNil(ImgCube);
     SetRHIDevice(SavedRHI);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCastleTextAndPrimitivesHeadlessVulkanRenderRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedCtx, TestCtx: TRenderContext;
+  SavedBackend: TRenderBackend;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  CastleText: TCastleText;
+  CastleBox: TCastleBox;
+  CastleSphere: TCastleSphere;
+  CastleImgTransform: TCastleImageTransform;
+  TextScene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  TextNode: TTextNode;
+  RShape: TX3DRendererShape;
+  BaseColorTex, NormalTex, MRTex, EmissiveTex, OcclusionTex: TRHITexture;
+  TexCount: Cardinal;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7201)));
+  Device.ResizeSwapchain(256, 256);
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 10.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    CastleText := TCastleText.Create(Viewport);
+    CastleText.Caption := 'Vulkan RHI 3D Text';
+    CastleText.Color := Vector4(1.0, 0.85, 0.2, 1.0);
+    CastleText.Size := 1.0;
+    Viewport.Items.Add(CastleText);
+
+    CastleBox := TCastleBox.Create(Viewport);
+    CastleBox.Size := Vector3(1.5, 1.5, 1.5);
+    CastleBox.Translation := Vector3(-3.0, 0.0, 0.0);
+    Viewport.Items.Add(CastleBox);
+
+    CastleSphere := TCastleSphere.Create(Viewport);
+    CastleSphere.Radius := 0.8;
+    CastleSphere.Translation := Vector3(3.0, 0.0, 0.0);
+    Viewport.Items.Add(CastleSphere);
+
+    CastleImgTransform := TCastleImageTransform.Create(Viewport);
+    CastleImgTransform.LoadFromImage(TRGBAlphaImage.Create(8, 8), True);
+    CastleImgTransform.Translation := Vector3(0.0, -2.5, 0.0);
+    Viewport.Items.Add(CastleImgTransform);
+
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    TextNode := TTextNode.Create;
+    TextNode.SetText(['Direct X3D TextNode']);
+    ShapeNode.Geometry := TextNode;
+    Root.AddChildren(ShapeNode);
+
+    TextScene := TCastleScene.Create(Viewport);
+    TextScene.Load(Root, True);
+    TextScene.Translation := Vector3(0.0, 2.5, 0.0);
+    Viewport.Items.Add(TextScene);
+
+    CmdList := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(CmdList);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+
+      AssertTrue('Viewport must render at least 5 shapes (CastleText, Box, Sphere, ImageTransform, TextScene)',
+        Viewport.Statistics.ShapesRendered >= 5);
+      AssertTrue('Viewport must bind graphics pipelines for rendered shapes',
+        CmdList.PipelineBindCount >= 5);
+      AssertTrue('TextScene must have at least 1 shape', TextScene.Shapes.TraverseList(True).Count >= 1);
+      RShape := TX3DRendererShape(TextScene.Shapes.TraverseList(True)[0]);
+      AssertTrue('TextNode OriginalGeometry.FontTextureNode must be non-nil',
+        (RShape.OriginalGeometry <> nil) and (RShape.OriginalGeometry.FontTextureNode <> nil));
+      TexCount := RShape.ExtractRHIMaterialTextures(
+        BaseColorTex, NormalTex, MRTex, EmissiveTex, OcclusionTex);
+      AssertEquals('TextNode ExtractRHIMaterialTextures must resolve 1 font atlas texture',
+        1, Integer(TexCount));
+      AssertTrue('TextNode BaseColorTex must be resolved from FontTextureNode',
+        BaseColorTex <> nil);
+      AssertTrue('TextNode shape shader permutation mask must include $04 (HasBaseColorTex)',
+        (RShape.Cache <> nil) and ((RShape.Cache.RHIShaderPermutationMask and $04) <> 0));
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Container);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestPointSetLineSetForceUnlitAndPerVertexColorSpecializationRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedCtx, TestCtx: TRenderContext;
+  SavedBackend: TRenderBackend;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  PointScene, LineScene, ColorFaceScene: TCastleScene;
+  Root1, Root2, Root3: TX3DRootNode;
+  Shape1, Shape2, Shape3: TShapeNode;
+  App1, App2: TAppearanceNode;
+  PointSet: TPointSetNode;
+  LineSet: TLineSetNode;
+  FaceSet: TIndexedFaceSetNode;
+  Coord1, Coord2, Coord3: TCoordinateNode;
+  Color1, Color3: TColorNode;
+  PhysMat1, PhysMat2: TPhysicalMaterialNode;
+  RPointShape, RLineShape, RFaceShape: TX3DRendererShape;
+  MatBlock: TCastleMaterialUniformBlock;
+  ShadingModel: TCastleShadingModelRHI;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7202)));
+  Device.ResizeSwapchain(256, 256);
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 5.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    { 1. TPointSetNode with TPhysicalMaterialNode and per-vertex TColorNode }
+    Root1 := TX3DRootNode.Create;
+    Shape1 := TShapeNode.Create;
+    App1 := TAppearanceNode.Create;
+    PhysMat1 := TPhysicalMaterialNode.Create;
+    PhysMat1.BaseColor := Vector3(0.2, 0.9, 0.4);
+    App1.Material := PhysMat1;
+    Shape1.Appearance := App1;
+    PointSet := TPointSetNode.Create;
+    Coord1 := TCoordinateNode.Create;
+    Coord1.SetPoint([Vector3(-0.5, 0.0, 0.0), Vector3(0.5, 0.0, 0.0)]);
+    Color1 := TColorNode.Create;
+    Color1.SetColor([Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0)]);
+    PointSet.Coord := Coord1;
+    PointSet.Color := Color1;
+    Shape1.Geometry := PointSet;
+    Root1.AddChildren(Shape1);
+    PointScene := TCastleScene.Create(Viewport);
+    PointScene.Load(Root1, True);
+    Viewport.Items.Add(PointScene);
+
+    { 2. TLineSetNode with TPhysicalMaterialNode }
+    Root2 := TX3DRootNode.Create;
+    Shape2 := TShapeNode.Create;
+    App2 := TAppearanceNode.Create;
+    PhysMat2 := TPhysicalMaterialNode.Create;
+    PhysMat2.BaseColor := Vector3(0.9, 0.3, 0.1);
+    App2.Material := PhysMat2;
+    Shape2.Appearance := App2;
+    LineSet := TLineSetNode.Create;
+    Coord2 := TCoordinateNode.Create;
+    Coord2.SetPoint([Vector3(-1.0, -1.0, 0.0), Vector3(1.0, -1.0, 0.0)]);
+    LineSet.Coord := Coord2;
+    LineSet.SetVertexCount([2]);
+    Shape2.Geometry := LineSet;
+    Root2.AddChildren(Shape2);
+    LineScene := TCastleScene.Create(Viewport);
+    LineScene.Load(Root2, True);
+    Viewport.Items.Add(LineScene);
+
+    { 3. TIndexedFaceSetNode with per-vertex TColorNode }
+    Root3 := TX3DRootNode.Create;
+    Shape3 := TShapeNode.Create;
+    FaceSet := TIndexedFaceSetNode.Create;
+    Coord3 := TCoordinateNode.Create;
+    Coord3.SetPoint([
+      Vector3(-1.0, 0.0, 0.0),
+      Vector3( 1.0, 0.0, 0.0),
+      Vector3( 0.0, 1.0, 0.0)]);
+    Color3 := TColorNode.Create;
+    Color3.SetColor([
+      Vector3(1.0, 0.0, 0.0),
+      Vector3(0.0, 1.0, 0.0),
+      Vector3(0.0, 0.0, 1.0)]);
+    FaceSet.Coord := Coord3;
+    FaceSet.Color := Color3;
+    FaceSet.SetCoordIndex([0, 1, 2, -1]);
+    Shape3.Geometry := FaceSet;
+    Root3.AddChildren(Shape3);
+    ColorFaceScene := TCastleScene.Create(Viewport);
+    ColorFaceScene.Load(Root3, True);
+    Viewport.Items.Add(ColorFaceScene);
+
+    CmdList := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(CmdList);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+
+      AssertEquals('3 scenes must render 3 shapes', 3, Integer(Viewport.Statistics.ShapesRendered));
+
+      RPointShape := TX3DRendererShape(PointScene.Shapes.TraverseList(True)[0]);
+      AssertTrue('TPointSetNode ExtractRHIMaterialBlock must succeed',
+        RPointShape.ExtractRHIMaterialBlock(MatBlock, ShadingModel));
+      AssertEquals('TPointSetNode ShadingModel must be smUnlit (via Arrays.ForceUnlit)',
+        Ord(smUnlit), Ord(ShadingModel));
+      AssertTrue('TPointSetNode SpecularColor.W must be < 0.0 (unlit)',
+        MatBlock.SpecularColor.W < 0.0);
+      AssertTrue('TPointSetNode vertex shader must write gl_PointSize = 1.0',
+        Pos('gl_PointSize = 1.0;', RPointShape.Cache.RHIVertexShaderSource) > 0);
+      AssertTrue('TPointSetNode with TColorNode must include $100 (HasColorPerVertex) in permutation mask',
+        (RPointShape.Cache.RHIShaderPermutationMask and $100) <> 0);
+
+      RLineShape := TX3DRendererShape(LineScene.Shapes.TraverseList(True)[0]);
+      AssertTrue('TLineSetNode ExtractRHIMaterialBlock must return smUnlit (via Arrays.ForceUnlit)',
+        RLineShape.ExtractRHIMaterialBlock(MatBlock, ShadingModel) and (ShadingModel = smUnlit));
+
+      RFaceShape := TX3DRendererShape(ColorFaceScene.Shapes.TraverseList(True)[0]);
+      AssertTrue('ColorFaceScene permutation mask must include $100 (HasColorPerVertex)',
+        (RFaceShape.Cache <> nil) and ((RFaceShape.Cache.RHIShaderPermutationMask and $100) <> 0));
+      AssertTrue('ColorFaceScene fragment shader must multiply baseColor by castle_color_per_vertex',
+        Pos('vec4 baseColor = castle_MaterialBaseColor * castle_color_per_vertex;',
+          RFaceShape.Cache.RHIFragmentShaderSource) > 0);
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Container);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSolidWireframeSilhouettePolygonOffsetAndFogShaderRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedCtx, TestCtx: TRenderContext;
+  SavedBackend: TRenderBackend;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  BoxNode: TBoxNode;
+  PhysMat: TPhysicalMaterialNode;
+  FogNode: TFogNode;
+  RShape: TX3DRendererShape;
+  MatBlock: TCastleMaterialUniformBlock;
+  ShadingModel: TCastleShadingModelRHI;
+  BaseColorTex, NormalTex, MRTex, EmissiveTex, OcclusionTex: TRHITexture;
+  PSODesc: TRHIGraphicsPipelineDesc;
+  InitialDepthBiasCount: Cardinal;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7203)));
+  Device.ResizeSwapchain(256, 256);
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 5.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    PhysMat := TPhysicalMaterialNode.Create;
+    PhysMat.BaseColor := Vector3(0.2, 0.6, 1.0);
+    App.Material := PhysMat;
+    ShapeNode.Appearance := App;
+    BoxNode := TBoxNode.Create;
+    ShapeNode.Geometry := BoxNode;
+    FogNode := TFogNode.Create;
+    FogNode.Color := Vector3(0.5, 0.6, 0.7);
+    FogNode.VisibilityRange := 25.0;
+    Root.AddChildren(ShapeNode);
+    Root.AddChildren(FogNode);
+
+    Scene := TCastleScene.Create(Viewport);
+    Scene.Load(Root, True);
+    Scene.RenderOptions.WireframeEffect := weSolidWireframe;
+    Scene.RenderOptions.WireframeColor := Vector3(1.0, 0.25, 0.0);
+    Viewport.Items.Add(Scene);
+
+    CmdList := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(CmdList);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+
+      { weSolidWireframe renders 2 passes: solid fill with PolygonOffset + wireframe overlay with rmSolidColor }
+      AssertTrue('weSolidWireframe must bind at least 2 graphics pipelines', CmdList.PipelineBindCount >= 2);
+      AssertTrue('weSolidWireframe must update PolygonOffset depth bias on RenderContext',
+        TestCtx.RHIDepthBiasUpdateCount >= 2);
+
+      RShape := TX3DRendererShape(Scene.Shapes.TraverseList(True)[0]);
+      AssertTrue('Fragment shader must include CastleScene.u_FogParams fog evaluation',
+        (RShape.Cache <> nil) and
+        (Pos('CastleScene.u_FogParams.z > 0.5', RShape.Cache.RHIFragmentShaderSource) > 0));
+
+      { Verify PolygonOffset maps to DepthBiasEnable in BuildShapePipelineDesc and increments RHIDepthBiasUpdateCount }
+      InitialDepthBiasCount := TestCtx.RHIDepthBiasUpdateCount;
+      RenderContext.PolygonOffsetEnable(1.5, 2.5);
+      Viewport.InternalShapesRenderer.Renderer.BuildShapePipelineDesc(
+        RShape, Scene.RenderOptions, PSODesc);
+      AssertTrue('PSODesc.Rasterizer.DepthBiasEnable must be True when PolygonOffset is enabled',
+        PSODesc.Rasterizer.DepthBiasEnable);
+      AssertEquals('PolygonOffsetEnable must increment RHIDepthBiasUpdateCount',
+        Integer(InitialDepthBiasCount + 1), Integer(TestCtx.RHIDepthBiasUpdateCount));
+      RenderContext.PolygonOffsetDisable;
+
+      { Verify rmSolidColor overrides material to unlit WireframeColor and disables textures }
+      Scene.RenderOptions.Mode := rmSolidColor;
+      Scene.RenderOptions.SolidColor := Scene.RenderOptions.WireframeColor;
+      AssertTrue('ExtractRHIMaterialBlock in rmSolidColor must succeed',
+        RShape.ExtractRHIMaterialBlock(MatBlock, ShadingModel));
+      AssertEquals('rmSolidColor must set ShadingModel to smUnlit',
+        Ord(smUnlit), Ord(ShadingModel));
+      AssertSameValue(1.0, MatBlock.BaseColor.X, 1e-5);
+      AssertSameValue(0.25, MatBlock.BaseColor.Y, 1e-5);
+      AssertSameValue(0.0, MatBlock.BaseColor.Z, 1e-5);
+      AssertEquals('rmSolidColor must return 0 textures',
+        0, Integer(RShape.ExtractRHIMaterialTextures(BaseColorTex, NormalTex, MRTex, EmissiveTex, OcclusionTex)));
+
+      { Verify RenderOptions.Lighting = False forces smUnlit while preserving material BaseColor }
+      Scene.RenderOptions.Mode := rmFull;
+      Scene.RenderOptions.Lighting := False;
+      AssertTrue('ExtractRHIMaterialBlock with Lighting = False must succeed',
+        RShape.ExtractRHIMaterialBlock(MatBlock, ShadingModel));
+      AssertEquals('Lighting = False must force ShadingModel to smUnlit',
+        Ord(smUnlit), Ord(ShadingModel));
+      AssertTrue('Lighting = False must set SpecularColor.W < 0.0',
+        MatBlock.SpecularColor.W < 0.0);
+      AssertSameValue(0.2, MatBlock.BaseColor.X, 1e-5);
+      AssertSameValue(0.6, MatBlock.BaseColor.Y, 1e-5);
+      AssertSameValue(1.0, MatBlock.BaseColor.Z, 1e-5);
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Container);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
     FreeAndNil(Device);
   end;
 end;
