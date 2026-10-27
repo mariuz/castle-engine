@@ -19,6 +19,67 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
 | **6. Quick-Add & Command Palette** | • "Quickly Add to the Project" button & searchable palette<br>• Instant keyboard-driven actor/component instantiation | • Deep nested menus (`Add Transform -> ...`, `Add User Interface -> ...`) | **Completed (Phase 6)**:<br>• Added `+ Add` toolbar button (`ButtonQuickAdd`) and `Ctrl+P` viewport shortcut opening `ShowQuickAddPalette`, a searchable modal palette filtering all registered `TCastleTransform`, `TCastleUserInterface`, `TCastleBehavior`, and `TCastleComponent` classes |
 | **7. Play-In-Editor (PIE) & Simulation** | • Simulate-In-Editor (Physics running while camera is free)<br>• Pause & Single-Step physics frame<br>• "Keep Simulation Changes" (`K`) saving simulated transforms back to level design | • Internal Physics Simulation (`ActionSimulationPlayStop`, `ActionSimulationPauseUnpause`), but stopping simulation always discarded simulated positions and no Single-Step existed | **Completed (Phase 7)**:<br>• Added `Step` (`ButtonSimulationStep` / `SimulationSingleStep`) to advance paused physics by exactly 1 frame ($1/60\text{ s}$)<br>• Added `Keep Sim` (`ButtonKeepSimulation` / `KeepSimulationChanges`) to stop simulation and persist simulated `Translation`, `Rotation`, and `Scale` onto the design as a single Undo-able step |
 
+### 1.1. Official Reference Documentation & Visual Screenshots (Castle Game Engine, Unreal Engine 5.5, Godot 4, Blender 4 & Unity)
+
+#### A. Castle Game Engine (`castle-editor` & Runtime Scene/UI Architecture)
+- **Official Documentation:**
+  - [Castle Game Engine — Visual Editor (`castle-editor`) Manual](https://castle-engine.io/manual_editor.php)
+  - [Castle Game Engine — Viewport and 3D Scenes (`TCastleViewport`, `TCastleTransform`, `TCastleScene`)](https://castle-engine.io/viewport_and_scenes)
+  - [Castle Game Engine — Designing User Interface & 2D Controls (`TCastleUserInterface`)](https://castle-engine.io/user_interface)
+  - [Castle Game Engine — Physics, Colliders, Rigid Bodies & Joints](https://castle-engine.io/physics)
+- **Official Screenshots:**
+
+| Castle Game Engine 3D Viewport & Hierarchy Editor | Castle Game Engine UI Designer & Object Inspector | Castle Game Engine Code & Editor Integration |
+| :---: | :---: | :---: |
+| ![CGE 3D Editor](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) | ![CGE UI Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) | ![CGE Code Integration](https://castle-engine.io/images/thumb_const_height_size/custom-code-editor.webp) |
+
+#### B. Unreal Engine 5.5 (Level Editor, World Outliner, Viewport Toolbar & UMG UI Designer)
+- **Official Documentation:**
+  - [Unreal Engine 5.5 — Unreal Editor Interface Overview](https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-editor-interface)
+  - [Unreal Engine 5.5 — Transforming Actors (Translate, Rotate, Scale, Snapping & Pivot)](https://dev.epicgames.com/documentation/en-us/unreal-engine/transforming-actors-in-unreal-engine)
+  - [Unreal Engine 5.5 — World Outliner (Hierarchy Filtering, Visibility & Grouping)](https://dev.epicgames.com/documentation/en-us/unreal-engine/outliner-in-unreal-engine)
+  - [Unreal Engine 5.5 — Viewport Toolbar (View Modes, Camera Speed & Grid Snapping)](https://dev.epicgames.com/documentation/en-us/unreal-engine/viewport-toolbar-in-unreal-engine)
+  - [Unreal Engine 5.5 — UMG UI Designer (2D Widgets, Anchors & Layouts)](https://dev.epicgames.com/documentation/en-us/unreal-engine/umg-ui-designer-for-unreal-engine)
+- **Official Screenshots:**
+
+| Unreal Engine 5 Editor Interface Overview | Unreal Engine 5 World Outliner & Hierarchy |
+| :---: | :---: |
+| ![Unreal Engine 5 Editor Interface](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/90bc2642-1728-47be-9e0f-118c88653e78/interface-thumbnail.jpg) | ![Unreal Engine 5 Outliner](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/a285724d-dc13-455e-aa4a-fd2c4d165130/topic-image.png) |
+
+#### C. Godot Engine 4.x (3D Viewport, `Node3D` Gizmos, `Control` Anchors & GUI Containers)
+- **Official Documentation:**
+  - [Godot Engine 4 — Introduction to 3D & Using the 3D Editor](https://docs.godotengine.org/en/stable/tutorials/3d/introduction_to_3d.html)
+  - [Godot Engine 4 — Using 3D Transforms (`Node3D`, Local vs. Global Space)](https://docs.godotengine.org/en/stable/tutorials/3d/using_transforms.html)
+  - [Godot Engine 4 — 2D UI Size and Anchors (`Control`)](https://docs.godotengine.org/en/stable/tutorials/ui/size_and_anchors.html)
+  - [Godot Engine 4 — 2D GUI Containers (Box, Grid, Split & Margin Containers)](https://docs.godotengine.org/en/stable/tutorials/ui/gui_containers.html)
+- **Official Screenshots:**
+
+| Godot 4 3D Viewport & Transform Gizmo | Godot 4 3D Viewport Toolbar & Snapping | Godot 4 2D UI Anchors & Offsets | Godot 4 2D GUI Layout Containers |
+| :---: | :---: | :---: | :---: |
+| ![Godot 3D Gizmo](https://docs.godotengine.org/en/stable/_images/tuto_3d3.webp) | ![Godot 3D Toolbar](https://docs.godotengine.org/en/stable/_images/3d_toolbar.webp) | ![Godot UI Anchors](https://docs.godotengine.org/en/stable/_images/anchors.png) | ![Godot UI Containers](https://docs.godotengine.org/en/stable/_images/godot_containers.png) |
+
+#### D. Blender 4.x (3D Viewport Gizmos, Surface/Vertex Snapping, Array & Simple Deform Modifiers)
+- **Official Documentation:**
+  - [Blender 4 Manual — 3D Viewport Gizmos (Move, Rotate, Scale & Orientations)](https://docs.blender.org/manual/en/latest/editors/3dview/display/gizmo.html)
+  - [Blender 4 Manual — 3D Snapping (Increment, Vertex, Face & Align Rotation to Target)](https://docs.blender.org/manual/en/latest/editors/3dview/controls/snapping.html)
+  - [Blender 4 Manual — Array Modifier (Linear, Radial & Object-Offset Duplication)](https://docs.blender.org/manual/en/latest/modeling/modifiers/generate/array.html)
+  - [Blender 4 Manual — Simple Deform Modifier (Twist, Bend, Taper & Stretch)](https://docs.blender.org/manual/en/latest/modeling/modifiers/deform/simple_deform.html)
+- **Official Screenshots:**
+
+| Blender 3D Viewport Transform Gizmo | Blender 3D Snapping Element Menu | Blender Simple Deform (Twist, Bend, Taper, Stretch) |
+| :---: | :---: | :---: |
+| ![Blender Transform Gizmo](https://docs.blender.org/manual/en/latest/_images/editors_3dview_display_gizmo_options-translate.png) | ![Blender Snapping Menu](https://docs.blender.org/manual/en/latest/_images/editors_3dview_controls_snapping_element-menu.png) | ![Blender Simple Deform](https://docs.blender.org/manual/en/latest/_images/modeling_modifiers_deform_simple-deform_intro.png) |
+
+#### E. Unity Engine (Scene View Transform Gizmos, Center/Pivot & Global/Local Coordinate Toggles)
+- **Official Documentation:**
+  - [Unity Manual — Positioning GameObjects (Transform Gizmos, Center/Pivot & Global/Local)](https://docs.unity3d.com/Manual/PositioningGameObjects.html)
+  - [Unity Manual — Grid and Snap Overlays](https://docs.unity3d.com/Manual/GridSnapping.html)
+- **Official Screenshots:**
+
+| Unity Scene View Transform Modes | Unity Center/Pivot & Global/Local Handle Toggles |
+| :---: | :---: |
+| ![Unity Transform Modes](https://docs.unity3d.com/uploads/Main/game-objects-transform-modes.png) | ![Unity Pivot and Space Toggles](https://docs.unity3d.com/uploads/Main/gizmo-handle-position-toggles.png) |
+
 ---
 
 ## 2. Prioritized Modernization TODO List (All 250 Phases Completed)
