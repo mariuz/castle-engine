@@ -146,6 +146,8 @@ type
       FRHILastScissor: TRectangle;
       FRHIScissorActive: Boolean;
       FRHIDepthBiasUpdateCount: Cardinal;
+      FRHILastLineWidth: Single;
+      FRHILineWidthUpdateCount: Cardinal;
       FStencilTest: Boolean;
       FStencilCompareOp: TRHICompareOp;
       FStencilReference: Byte;
@@ -444,6 +446,8 @@ type
     property RHILastScissor: TRectangle read FRHILastScissor;
     property RHIScissorActive: Boolean read FRHIScissorActive;
     property RHIDepthBiasUpdateCount: Cardinal read FRHIDepthBiasUpdateCount;
+    property RHILastLineWidth: Single read FRHILastLineWidth;
+    property RHILineWidthUpdateCount: Cardinal read FRHILineWidthUpdateCount;
 
     { Stencil test state and RHI pipeline synchronization (used by TCastleMask). }
     property StencilTest: Boolean read FStencilTest write SetStencilTest default False;
@@ -626,8 +630,15 @@ end;
 
 procedure TRenderContext.UpdateLineWidth;
 begin
-  if SkipOpenGLStateWhenRHIActive then
-    Exit;
+  if RHIDevice <> nil then
+  begin
+    FRHILastLineWidth := FLineWidth;
+    Inc(FRHILineWidthUpdateCount);
+    if ActiveCommandList <> nil then
+      ActiveCommandList.SetLineWidth(FLineWidth);
+    if SkipOpenGLStateWhenRHIActive then
+      Exit;
+  end;
   {$if (not defined(DARWIN)) or defined(OpenGLES)}
   // on desktop macOS, glLineWidth raise GL_INVALID_VALUE for parameters <> 1.0
   glLineWidth(FLineWidth);

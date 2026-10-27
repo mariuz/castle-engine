@@ -151,6 +151,10 @@
     FRHIFragmentEffectCode: String;
     FRHIComposedVertSource: String;
     FRHIComposedFragSource: String;
+    FRHIUserEffectBuffer: TRHIBuffer;
+    FRHIUserEffectUploadCount: Cardinal;
+    FRHIUserEffectTextures: array[0..3] of TRHITexture;
+    FRHIUserEffectSamplers: array[0..3] of TRHISampler;
     FRHISkinningDescriptorLayout: TRHIDescriptorSetLayout;
     FRHISkinningDescriptorSet: TRHIDescriptorSet;
     FRHIVertexShader: TRHIShaderModule;
@@ -169,11 +173,17 @@
     procedure LoadArraysToVbo(const DynamicGeometry: boolean);
     procedure GLContextClose;
     procedure EnsureRHIDeviceMatch;
+    procedure EnsureRHISet2DescriptorSet;
+    function GetRHIUserEffectTexture(const AIndex: Cardinal): TRHITexture;
+    function GetRHIUserEffectSampler(const AIndex: Cardinal): TRHISampler;
   public
     constructor Create;
     destructor Destroy; override;
     procedure InvalidateVertexData(const Changed: TVboTypes);
     procedure UploadJointMatrices(const JointMatrices: Pointer; const Count: Cardinal);
+    procedure UploadUserEffectBlock(const AData: Pointer; const ASize: PtrUInt);
+    procedure BindUserEffectTexture(const ASlotIndex: Cardinal;
+      const ATexture: TRHITexture; const ASampler: TRHISampler = nil);
     procedure UploadMaterialBlock(const AMatBlock: TCastleMaterialUniformBlock);
     procedure BindMaterialTexturesToDescriptorSet(
       const ABaseColorTex, ANormalTex, AMetallicRoughnessTex,
@@ -238,6 +248,10 @@
     property RHIFragmentEffectCode: String read FRHIFragmentEffectCode;
     property RHIComposedVertSource: String read FRHIComposedVertSource;
     property RHIComposedFragSource: String read FRHIComposedFragSource;
+    property RHIUserEffectBuffer: TRHIBuffer read FRHIUserEffectBuffer;
+    property RHIUserEffectUploadCount: Cardinal read FRHIUserEffectUploadCount;
+    property RHIUserEffectTexture[const AIndex: Cardinal]: TRHITexture read GetRHIUserEffectTexture;
+    property RHIUserEffectSampler[const AIndex: Cardinal]: TRHISampler read GetRHIUserEffectSampler;
     property RHISkinningDescriptorLayout: TRHIDescriptorSetLayout read FRHISkinningDescriptorLayout;
     property RHISkinningDescriptorSet: TRHIDescriptorSet read FRHISkinningDescriptorSet;
     property RHIVertexShader: TRHIShaderModule read FRHIVertexShader;
@@ -311,6 +325,7 @@ begin
     FreeAndNil(FRHIAttribBuffer);
     FreeAndNil(FRHIIndexBuffer);
     FreeAndNil(FRHIJointBuffer);
+    FreeAndNil(FRHIUserEffectBuffer);
     FreeAndNil(FRHIMaterialBuffer);
     FreeAndNil(FRHIMaterialDescriptorSet);
     FreeAndNil(FRHIMaterialDescriptorLayout);
@@ -325,6 +340,7 @@ begin
     FRHIAttribBuffer := nil;
     FRHIIndexBuffer := nil;
     FRHIJointBuffer := nil;
+    FRHIUserEffectBuffer := nil;
     FRHIMaterialBuffer := nil;
     FRHIMaterialDescriptorSet := nil;
     FRHIMaterialDescriptorLayout := nil;
@@ -334,6 +350,8 @@ begin
     FRHIVertexShader := nil;
     FRHIFragmentShader := nil;
   end;
+  FillChar(FRHIUserEffectTextures, SizeOf(FRHIUserEffectTextures), 0);
+  FillChar(FRHIUserEffectSamplers, SizeOf(FRHIUserEffectSamplers), 0);
   FRHIBaseColorSampler := nil;
   FRHINormalSampler := nil;
   FRHIMetallicRoughnessSampler := nil;
@@ -355,6 +373,9 @@ begin
     FRHIAttribBuffer := nil;
     FRHIIndexBuffer := nil;
     FRHIJointBuffer := nil;
+    FRHIUserEffectBuffer := nil;
+    FillChar(FRHIUserEffectTextures, SizeOf(FRHIUserEffectTextures), 0);
+    FillChar(FRHIUserEffectSamplers, SizeOf(FRHIUserEffectSamplers), 0);
     FRHIMaterialBuffer := nil;
     FRHIMaterialDescriptorSet := nil;
     FRHIMaterialDescriptorLayout := nil;
@@ -377,6 +398,57 @@ begin
   end;
 end;
 
+procedure TShapeCache.EnsureRHISet2DescriptorSet;
+var
+  Bindings: array[0..5] of TRHIDescriptorBindingDesc;
+  I: Integer;
+begin
+  if RHIDevice = nil then
+    Exit;
+  EnsureRHIDeviceMatch;
+  if FRHISkinningDescriptorLayout = nil then
+  begin
+    FillChar(Bindings, SizeOf(Bindings), 0);
+    { Binding 0: CastleSkinningBlock }
+    Bindings[0].Binding := 0;
+    Bindings[0].DescriptorType := dtUniformBuffer;
+    Bindings[0].Count := 1;
+    Bindings[0].StageFlags := [ssVertex];
+    { Binding 1: CastleUserEffectBlock }
+    Bindings[1].Binding := 1;
+    Bindings[1].DescriptorType := dtUniformBuffer;
+    Bindings[1].Count := 1;
+    Bindings[1].StageFlags := [ssVertex, ssFragment];
+    { Bindings 2..5: Custom User Effect Samplers }
+    for I := 2 to 5 do
+    begin
+      Bindings[I].Binding := Cardinal(I);
+      Bindings[I].DescriptorType := dtCombinedImageSampler;
+      Bindings[I].Count := 1;
+      Bindings[I].StageFlags := [ssVertex, ssFragment];
+    end;
+    FRHISkinningDescriptorLayout := RHIDevice.CreateDescriptorSetLayout(Bindings);
+  end;
+  if (FRHISkinningDescriptorSet = nil) and (FRHISkinningDescriptorLayout <> nil) then
+    FRHISkinningDescriptorSet := RHIDevice.CreateDescriptorSet(FRHISkinningDescriptorLayout);
+end;
+
+function TShapeCache.GetRHIUserEffectTexture(const AIndex: Cardinal): TRHITexture;
+begin
+  if AIndex <= High(FRHIUserEffectTextures) then
+    Result := FRHIUserEffectTextures[AIndex]
+  else
+    Result := nil;
+end;
+
+function TShapeCache.GetRHIUserEffectSampler(const AIndex: Cardinal): TRHISampler;
+begin
+  if AIndex <= High(FRHIUserEffectSamplers) then
+    Result := FRHIUserEffectSamplers[AIndex]
+  else
+    Result := nil;
+end;
+
 procedure TShapeCache.InvalidateVertexData(const Changed: TVboTypes);
 begin
   VboToReload := VboToReload + Changed;
@@ -386,13 +458,12 @@ procedure TShapeCache.UploadJointMatrices(const JointMatrices: Pointer; const Co
 var
   BufDesc: TRHIBufferDesc;
   DataSize: PtrUInt;
-  Bindings: array[0..0] of TRHIDescriptorBindingDesc;
 begin
   if (RHIDevice = nil) or (Count = 0) then
     Exit;
 
   DataSize := Count * SizeOf(TMatrix4);
-  EnsureRHIDeviceMatch;
+  EnsureRHISet2DescriptorSet;
   if (FRHIJointBuffer <> nil) and (FRHIJointBuffer.Desc.Size = DataSize) then
     FRHIJointBuffer.UploadData(JointMatrices^, DataSize)
   else
@@ -401,17 +472,6 @@ begin
     BufDesc := TRHIBufferDesc.Create(DataSize, [buUniform], muCpuToGpu);
     FRHIJointBuffer := RHIDevice.CreateBuffer(BufDesc, JointMatrices);
   end;
-  if FRHISkinningDescriptorLayout = nil then
-  begin
-    FillChar(Bindings, SizeOf(Bindings), 0);
-    Bindings[0].Binding := 0;
-    Bindings[0].DescriptorType := dtUniformBuffer;
-    Bindings[0].Count := 1;
-    Bindings[0].StageFlags := [ssVertex];
-    FRHISkinningDescriptorLayout := RHIDevice.CreateDescriptorSetLayout(Bindings);
-  end;
-  if (FRHISkinningDescriptorSet = nil) and (FRHISkinningDescriptorLayout <> nil) then
-    FRHISkinningDescriptorSet := RHIDevice.CreateDescriptorSet(FRHISkinningDescriptorLayout);
   if (FRHISkinningDescriptorSet <> nil) and (FRHIJointBuffer <> nil) then
   begin
     FRHISkinningDescriptorSet.BindUniformBuffer(0, FRHIJointBuffer);
@@ -419,6 +479,49 @@ begin
   end;
   if FRHIShadersInitialized and ((FRHIShaderPermutationMask and $01) = 0) then
     FRHIShadersInitialized := False;
+end;
+
+procedure TShapeCache.UploadUserEffectBlock(const AData: Pointer; const ASize: PtrUInt);
+var
+  BufDesc: TRHIBufferDesc;
+  AlignedSize: PtrUInt;
+begin
+  if (RHIDevice = nil) or (AData = nil) or (ASize = 0) then
+    Exit;
+
+  AlignedSize := (ASize + 15) and not PtrUInt(15);
+  EnsureRHISet2DescriptorSet;
+  if (FRHIUserEffectBuffer <> nil) and (FRHIUserEffectBuffer.Desc.Size = AlignedSize) then
+    FRHIUserEffectBuffer.UploadData(AData^, ASize)
+  else
+  begin
+    FreeAndNil(FRHIUserEffectBuffer);
+    BufDesc := TRHIBufferDesc.Create(AlignedSize, [buUniform], muCpuToGpu, 'CastleUserEffectUBO');
+    FRHIUserEffectBuffer := RHIDevice.CreateBuffer(BufDesc, nil);
+    FRHIUserEffectBuffer.UploadData(AData^, ASize);
+  end;
+  Inc(FRHIUserEffectUploadCount);
+  if (FRHISkinningDescriptorSet <> nil) and (FRHIUserEffectBuffer <> nil) then
+  begin
+    FRHISkinningDescriptorSet.BindUniformBuffer(1, FRHIUserEffectBuffer);
+    FRHISkinningDescriptorSet.Update;
+  end;
+end;
+
+procedure TShapeCache.BindUserEffectTexture(const ASlotIndex: Cardinal;
+  const ATexture: TRHITexture; const ASampler: TRHISampler);
+begin
+  if (RHIDevice = nil) or (ASlotIndex > High(FRHIUserEffectTextures)) or (ATexture = nil) then
+    Exit;
+
+  EnsureRHISet2DescriptorSet;
+  FRHIUserEffectTextures[ASlotIndex] := ATexture;
+  FRHIUserEffectSamplers[ASlotIndex] := ASampler;
+  if FRHISkinningDescriptorSet <> nil then
+  begin
+    FRHISkinningDescriptorSet.BindTexture(2 + ASlotIndex, ATexture, ASampler);
+    FRHISkinningDescriptorSet.Update;
+  end;
 end;
 
 procedure TShapeCache.UploadMaterialBlock(const AMatBlock: TCastleMaterialUniformBlock);
@@ -892,11 +995,11 @@ begin
     if FRHIComposedVertSource <> '' then
       FRHIVertexShaderSource := Gen.FinalizeVertexShaderSource(
         Gen.GeneratePreamble(ssVertex) +
-        Gen.UpgradeUserEffectUniforms(Gen.UpgradeLegacyGLSLBuiltIns(FRHIComposedVertSource, 'ComposedShader')));
+        Gen.UpgradeUserEffectUniforms(FRHIComposedVertSource));
     if FRHIComposedFragSource <> '' then
       FRHIFragmentShaderSource :=
         Gen.GeneratePreamble(ssFragment) +
-        Gen.UpgradeUserEffectUniforms(Gen.UpgradeLegacyGLSLBuiltIns(FRHIComposedFragSource, 'ComposedShader'));
+        Gen.UpgradeUserEffectUniforms(FRHIComposedFragSource);
     FRHIVertexShader := RHIDevice.CreateShaderModuleFromGLSL(
       ssVertex, FRHIVertexShaderSource, Format('CastleShapeVert_Perm%.2x', [Mask]));
     FRHIFragmentShader := RHIDevice.CreateShaderModuleFromGLSL(

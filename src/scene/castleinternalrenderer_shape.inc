@@ -134,6 +134,12 @@
     function ExtractRHIComposedShader(
       out ACustomVertSource, ACustomFragSource: String): Boolean;
 
+    { Extracts custom X3D uniform fields and texture nodes from active TComposedShaderNode and
+      TEffectNode InterfaceDeclarations, uploads std140 uniform values to Cache.RHIUserEffectBuffer
+      (Set 2, Binding 1), and binds custom texture samplers to Set 2, Bindings 2..5.
+      Returns the total number of custom uniform fields and textures extracted. }
+    function ExtractRHIUserEffectUniforms: Cardinal;
+
     { Builds an 80-byte std430 TCastleBindlessMaterialEntry combining extracted PBR/Phong/Unlit
       material factors with 32-bit bindless texture array indices into castle_BindlessTextures[]. }
     function BuildRHIBindlessMaterialEntry(
@@ -891,6 +897,14 @@ end;
 
 function TX3DRendererShape.ExtractRHIShaderEffects(
   out AVertexEffectCode, AFragmentEffectCode: String): Boolean;
+const
+  EyeWorldSpaceLibraryGLSL =
+    'vec4 position_world_to_eye_space(vec4 position_world) { return castle_CameraMatrix * position_world; }' + LineEnding +
+    'vec4 position_eye_to_world_space(vec4 position_eye) { return castle_CameraInverseMatrix * position_eye; }' + LineEnding +
+    'vec3 direction_world_to_eye_space(vec3 direction_world) { return castle_CameraRotationMatrix * direction_world; }' + LineEnding +
+    'vec3 direction_eye_to_world_space(vec3 direction_eye) { return castle_CameraRotationInverseMatrix * direction_eye; }';
+var
+  UseEyeWorldSpaceLib: Boolean;
 
   procedure AppendEffectList(const Nodes: TX3DNodeList);
   var
@@ -906,6 +920,10 @@ function TX3DRendererShape.ExtractRHIShaderEffects(
       begin
         Effect := TEffectNode(Nodes[I]);
         if Effect.FdEnabled.Value and (Effect.Language in [slDefault, slGLSL]) then
+        begin
+          for J := 0 to Effect.FdShaderLibraries.Count - 1 do
+            if Effect.FdShaderLibraries.Items[J] = 'castle-shader:/EyeWorldSpace.glsl' then
+              UseEyeWorldSpaceLib := True;
           for J := 0 to Effect.FdParts.Count - 1 do
             if Effect.FdParts[J] is TEffectPartNode then
             begin
@@ -926,17 +944,26 @@ function TX3DRendererShape.ExtractRHIShaderEffects(
                   else ;
                 end;
             end;
+        end;
       end;
   end;
 
 begin
   AVertexEffectCode := '';
   AFragmentEffectCode := '';
+  UseEyeWorldSpaceLib := False;
   if State <> nil then
   begin
     if State.Appearance <> nil then
       AppendEffectList(State.Appearance.FdEffects.InternalItems);
     AppendEffectList(State.Effects);
+  end;
+  if UseEyeWorldSpaceLib then
+  begin
+    if AVertexEffectCode <> '' then
+      AVertexEffectCode := EyeWorldSpaceLibraryGLSL + LineEnding + AVertexEffectCode;
+    if AFragmentEffectCode <> '' then
+      AFragmentEffectCode := EyeWorldSpaceLibraryGLSL + LineEnding + AFragmentEffectCode;
   end;
   Result := (AVertexEffectCode <> '') or (AFragmentEffectCode <> '');
 end;
@@ -996,6 +1023,218 @@ begin
       if Result then
         Break;
     end;
+end;
+
+function TX3DRendererShape.ExtractRHIUserEffectUniforms: Cardinal;
+var
+  UBOData: array[0..1023] of Byte;
+  UBOOffset: PtrUInt;
+  TexSlotCount: Cardinal;
+
+  procedure AlignOffset(const AAlignment: PtrUInt);
+  begin
+    UBOOffset := (UBOOffset + AAlignment - 1) and not (AAlignment - 1);
+  end;
+
+  procedure WriteBytes(const ASource; const ASize, AAlignment: PtrUInt);
+  begin
+    AlignOffset(AAlignment);
+    if UBOOffset + ASize <= SizeOf(UBOData) then
+    begin
+      Move(ASource, UBOData[UBOOffset], ASize);
+      Inc(UBOOffset, ASize);
+      Inc(Result);
+    end;
+  end;
+
+  procedure ResolveAndBindTextureNode(const ANode: TX3DNode);
+  var
+    Res: TTextureResource;
+    Tex: TRHITexture;
+    Samp: TRHISampler;
+  begin
+    if (ANode = nil) or (not (ANode is TAbstractTextureNode)) or (TexSlotCount >= 4) then
+      Exit;
+    Res := TTextureResources.Get(TAbstractTextureNode(ANode));
+    if (Res = nil) and (RHIDevice <> nil) then
+    begin
+      if (Cache <> nil) and (Cache.RenderOptions <> nil) then
+        TTextureResources.Prepare(Cache.RenderOptions, TAbstractTextureNode(ANode))
+      else
+        TTextureResources.Prepare(nil, TAbstractTextureNode(ANode));
+      Res := TTextureResources.Get(TAbstractTextureNode(ANode));
+    end;
+    if Res = nil then
+      Exit;
+    Tex := nil;
+    if Res is TImageTextureResource then
+      Tex := TImageTextureResource(Res).RHITexture
+    else if Res is TMovieTextureResource then
+      Tex := TMovieTextureResource(Res).RHITexture
+    else if Res is TRenderedTextureResource then
+      Tex := TRenderedTextureResource(Res).RHITexture
+    else if Res is TCubeMapTextureResource then
+      Tex := TCubeMapTextureResource(Res).RHITexture
+    else if Res is T3DTextureResource then
+      Tex := T3DTextureResource(Res).RHITexture
+    else if Res is TGeneratedShadowMapResource then
+      Tex := TGeneratedShadowMapResource(Res).RHITexture;
+    Samp := Res.RHISampler;
+    if (Tex <> nil) and (Cache <> nil) then
+    begin
+      Cache.BindUserEffectTexture(TexSlotCount, Tex, Samp);
+      Inc(TexSlotCount);
+      Inc(Result);
+    end;
+  end;
+
+  procedure ProcessInterfaceDeclarations(const AIDecls: TX3DInterfaceDeclarationList);
+  var
+    I, J: Integer;
+    Field: TX3DField;
+    FVal: Single;
+    IVal: Int32;
+    V2: TVector2;
+    V3: TVector3;
+    V4: TVector4;
+    M3: TMatrix3;
+    M4: TMatrix4;
+  begin
+    if AIDecls = nil then
+      Exit;
+    for I := 0 to AIDecls.Count - 1 do
+    begin
+      Field := AIDecls[I].Field;
+      if Field = nil then
+        Continue;
+      if Field is TSFNode then
+        ResolveAndBindTextureNode(TSFNode(Field).Value)
+      else if Field is TMFNode then
+      begin
+        for J := 0 to TMFNode(Field).Count - 1 do
+          ResolveAndBindTextureNode(TMFNode(Field)[J]);
+      end else if Field is TSFBool then
+      begin
+        IVal := Ord(TSFBool(Field).Value);
+        WriteBytes(IVal, SizeOf(Int32), 4);
+      end else if Field is TSFLong then
+      begin
+        IVal := TSFLong(Field).Value;
+        WriteBytes(IVal, SizeOf(Int32), 4);
+      end else if Field is TSFFloat then
+      begin
+        FVal := TSFFloat(Field).Value;
+        WriteBytes(FVal, SizeOf(Single), 4);
+      end else if Field is TSFDouble then
+      begin
+        FVal := TSFDouble(Field).Value;
+        WriteBytes(FVal, SizeOf(Single), 4);
+      end else if Field is TSFVec2f then
+      begin
+        V2 := TSFVec2f(Field).Value;
+        WriteBytes(V2, SizeOf(TVector2), 8);
+      end else if Field is TSFVec3f then
+      begin
+        V3 := TSFVec3f(Field).Value;
+        WriteBytes(V3, SizeOf(TVector3), 16);
+      end else if Field is TSFVec4f then
+      begin
+        V4 := TSFVec4f(Field).Value;
+        WriteBytes(V4, SizeOf(TVector4), 16);
+      end else if Field is TSFRotation then
+      begin
+        V4 := TSFRotation(Field).Value;
+        WriteBytes(V4, SizeOf(TVector4), 16);
+      end else if Field is TSFMatrix3f then
+      begin
+        M3 := TSFMatrix3f(Field).Value;
+        for J := 0 to 2 do
+        begin
+          V4 := Vector4(M3.Data[J][0], M3.Data[J][1], M3.Data[J][2], 0.0);
+          WriteBytes(V4, SizeOf(TVector4), 16);
+        end;
+      end else if Field is TSFMatrix4f then
+      begin
+        M4 := TSFMatrix4f(Field).Value;
+        WriteBytes(M4, SizeOf(TMatrix4), 16);
+      end else if Field is TMFFloat then
+      begin
+        for J := 0 to TMFFloat(Field).Count - 1 do
+        begin
+          V4 := Vector4(TMFFloat(Field).Items[J], 0.0, 0.0, 0.0);
+          WriteBytes(V4, SizeOf(TVector4), 16);
+        end;
+      end else if Field is TMFVec3f then
+      begin
+        for J := 0 to TMFVec3f(Field).Count - 1 do
+        begin
+          V4 := Vector4(TMFVec3f(Field).Items[J], 0.0);
+          WriteBytes(V4, SizeOf(TVector4), 16);
+        end;
+      end else if Field is TMFVec4f then
+      begin
+        for J := 0 to TMFVec4f(Field).Count - 1 do
+        begin
+          V4 := TMFVec4f(Field).Items[J];
+          WriteBytes(V4, SizeOf(TVector4), 16);
+        end;
+      end;
+    end;
+  end;
+
+  procedure ProcessEffectList(const ANodes: TX3DNodeList);
+  var
+    I: Integer;
+    Effect: TEffectNode;
+  begin
+    if ANodes = nil then
+      Exit;
+    for I := 0 to ANodes.Count - 1 do
+      if ANodes[I] is TEffectNode then
+      begin
+        Effect := TEffectNode(ANodes[I]);
+        if Effect.FdEnabled.Value and (Effect.Language in [slDefault, slGLSL]) then
+          ProcessInterfaceDeclarations(Effect.InterfaceDeclarations);
+      end;
+  end;
+
+var
+  ShapeState: TX3DGraphTraverseState;
+  App: TAppearanceNode;
+  I: Integer;
+begin
+  Result := 0;
+  UBOOffset := 0;
+  TexSlotCount := 0;
+  FillChar(UBOData, SizeOf(UBOData), 0);
+
+  ShapeState := OriginalState;
+  if ShapeState = nil then
+    ShapeState := State;
+  if ShapeState = nil then
+    Exit;
+
+  if ShapeState.ShapeNode <> nil then
+    App := ShapeState.ShapeNode.Appearance
+  else
+    App := ShapeState.Appearance;
+
+  if App <> nil then
+  begin
+    for I := 0 to App.FdShaders.Count - 1 do
+      if (App.FdShaders[I] is TComposedShaderNode) and
+         (TComposedShaderNode(App.FdShaders[I]).Language in [slDefault, slGLSL]) then
+      begin
+        ProcessInterfaceDeclarations(TComposedShaderNode(App.FdShaders[I]).InterfaceDeclarations);
+        Break;
+      end;
+    ProcessEffectList(App.FdEffects.InternalItems);
+  end;
+  if State <> nil then
+    ProcessEffectList(State.Effects);
+
+  if (UBOOffset > 0) and (Cache <> nil) then
+    Cache.UploadUserEffectBlock(@UBOData[0], UBOOffset);
 end;
 
 function TX3DRendererShape.BuildRHIBindlessMaterialEntry(
@@ -1058,6 +1297,7 @@ begin
       Cache.SetPointSize(PointSize);
       Cache.SetShaderEffects(VertEffectCode, FragEffectCode);
       Cache.SetComposedShader(ComposedVertCode, ComposedFragCode);
+      ExtractRHIUserEffectUniforms;
       Cache.BindMaterialTexturesToDescriptorSet(
         BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex,
         BaseColorSampler, NormalSampler, MetallicRoughnessSampler, EmissiveSampler, OcclusionSampler);

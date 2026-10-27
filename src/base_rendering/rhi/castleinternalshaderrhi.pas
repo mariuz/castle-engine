@@ -1923,6 +1923,10 @@ begin
     '#define castle_ProjectionMatrix CastleScene.u_ProjectionMatrix' + NL +
     '#define castle_ViewMatrix CastleScene.u_ViewMatrix' + NL +
     '#define castle_ViewMatrixInverse CastleScene.u_ViewMatrixInverse' + NL +
+    '#define castle_CameraMatrix CastleScene.u_ViewMatrix' + NL +
+    '#define castle_CameraInverseMatrix CastleScene.u_ViewMatrixInverse' + NL +
+    '#define castle_CameraRotationMatrix mat3(CastleScene.u_ViewMatrix)' + NL +
+    '#define castle_CameraRotationInverseMatrix mat3(CastleScene.u_ViewMatrixInverse)' + NL +
     '#define castle_WorldEyePosition CastleScene.u_CameraPosition.xyz' + NL +
     '#define castle_SceneTime CastleScene.u_CameraPosition.w' + NL +
     NL +
@@ -2267,7 +2271,7 @@ begin
   if FBackend <> rbVulkan then
     Exit(UserEffectSource);
 
-  UpgradedInput := UpgradeLegacyGLSLBuiltIns(UserEffectSource, 'Effect');
+  UpgradedInput := SanitizeVulkanShaderSource(UpgradeLegacyGLSLBuiltIns(UserEffectSource, 'Effect'));
 
   Lines := TStringList.Create;
   UBOMembers := TStringBuilder.Create;
@@ -2362,10 +2366,11 @@ end;
 function TCastleShaderGeneratorRHI.SanitizeVulkanShaderSource(
   const Source: String): String;
 const
-  BuiltInUniformTokens: array[0..9] of String = (
+  BuiltInUniformTokens: array[0..10] of String = (
     'castle_LightSource', 'castle_projector_matrix', 'castle_ModelViewMatrix',
     'castle_ProjectionMatrix', 'castle_NormalMatrix', 'castle_JointMatrix',
-    'castle_Material', 'castle_WorldEyePosition', 'castle_SceneTime', 'castle_Fog'
+    'castle_Material', 'castle_WorldEyePosition', 'castle_SceneTime', 'castle_Fog',
+    'castle_Camera'
   );
 var
   Lines: TStringList;

@@ -723,6 +723,7 @@ type
       const MinDepth: Single = 0.0; const MaxDepth: Single = 1.0); virtual; abstract;
     procedure SetScissor(const ScissorRect: TRectangle); virtual; abstract;
     procedure SetDepthBias(const ConstantFactor, SlopeFactor: Single); virtual; abstract;
+    procedure SetLineWidth(const LineWidth: Single); virtual;
 
     { Extended Dynamic State (VK_EXT_extended_dynamic_state / Vulkan 1.3 Core) }
     procedure SetCullMode(const CullMode: TRHICullMode); virtual;
@@ -1589,6 +1590,10 @@ begin
 end;
 
 procedure TRHICommandList.SetDepthTestEnable(const Enable: Boolean);
+begin
+end;
+
+procedure TRHICommandList.SetLineWidth(const LineWidth: Single);
 begin
 end;
 

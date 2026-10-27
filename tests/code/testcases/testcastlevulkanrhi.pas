@@ -27,7 +27,7 @@ uses
   CastleInternalRHI, CastleInternalVulkan, CastleInternalVulkanMemory,
   CastleInternalVulkanWSI, CastleInternalShaderCompiler, CastleInternalRHI_Vulkan,
   CastleInternalShaderRHI, CastleInternalBatch2DRHI, CastleInternalRenderer,
-  CastleRendererInternalLights, X3DNodes, X3DCameraUtils,
+  CastleRendererInternalLights, X3DNodes, X3DFields, X3DCameraUtils,
   CastleInternalGeometryArrays, CastleSceneInternalShape, CastleInternalOcclusionCulling,
   CastleTransform, CastleScene, CastleProjection, CastleViewport, CastleScreenEffects, CastleRenderOptions, CastleWindow,
   CastleUIControls, CastleControls,
@@ -294,6 +294,9 @@ type
     procedure TestComposedShaderNodeFullCustomShaderAndLegacyUpgradeRHI;
     procedure TestPhongMaterialOcclusionSpecularPureEmissiveAndCommonSurfaceShaderRHI;
     procedure TestTwoSidedGeometryFrontFacingNormalFlipAndNegativeScaleWindingRHI;
+    procedure TestEffectAndComposedShaderCustomUniformUBOAndTextureBindingRHI;
+    procedure TestEffectShaderLibrariesEyeWorldSpaceAndCameraMatrixAliasesRHI;
+    procedure TestLinePropertiesNodeAndRenderContextDynamicLineWidthRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -16638,6 +16641,386 @@ begin
     FreeAndNil(Scene2);
     FreeAndNil(Scene1);
     FreeAndNil(Viewport);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestEffectAndComposedShaderCustomUniformUBOAndTextureBindingRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  Scene1, Scene2: TCastleScene;
+  Root1, Root2: TX3DRootNode;
+  Shape1, Shape2: TShapeNode;
+  App1, App2: TAppearanceNode;
+  Mat1: TPhysicalMaterialNode;
+  Box1, Box2: TBoxNode;
+  Effect1: TEffectNode;
+  FragPart1: TEffectPartNode;
+  CustomTex1: TPixelTextureNode;
+  Composed2: TComposedShaderNode;
+  VertPart2, FragPart2: TShaderPartNode;
+  RShape1, RShape2: TX3DRendererShape;
+  Renderer: TRenderer;
+  Cam: TRenderingCamera;
+  Stats: TRenderStatistics;
+  Desc1, Desc2: TRHIGraphicsPipelineDesc;
+  ShadingModel: TCastleShadingModelRHI;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7701)));
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene1 := TCastleScene.Create(nil);
+  Scene2 := TCastleScene.Create(nil);
+  Renderer := TRenderer.Create(nil);
+  Cam := TRenderingCamera.Create;
+  try
+    { 1. TEffectNode with custom float, vec3, and texture node fields }
+    Root1 := TX3DRootNode.Create;
+    Shape1 := TShapeNode.Create;
+    App1 := TAppearanceNode.Create;
+    Mat1 := TPhysicalMaterialNode.Create;
+    App1.Material := Mat1;
+
+    CustomTex1 := TPixelTextureNode.Create;
+    CustomTex1.FdImage.Value := TRGBAlphaImage.Create(4, 4);
+    TTextureResources.Prepare(Scene1.RenderOptions, CustomTex1);
+
+    Effect1 := TEffectNode.Create;
+    Effect1.Language := slGLSL;
+    Effect1.Enabled := True;
+    Effect1.AddCustomField(TSFFloat.Create(Effect1, True, 'uGain', 2.5));
+    Effect1.AddCustomField(TSFVec3f.Create(Effect1, True, 'uTint', Vector3(0.2, 0.4, 0.8)));
+    Effect1.AddCustomField(TSFNode.Create(Effect1, True, 'uNoiseTex', [TAbstractTextureNode], CustomTex1));
+
+    FragPart1 := TEffectPartNode.Create;
+    FragPart1.ShaderType := stFragment;
+    FragPart1.Contents :=
+      'uniform float uGain;' + LineEnding +
+      'uniform vec3 uTint;' + LineEnding +
+      'uniform sampler2D uNoiseTex;' + LineEnding +
+      'void PLUG_fragment_modify(inout vec4 fragment_color)' + LineEnding +
+      '{' + LineEnding +
+      '  vec4 n = texture2D(uNoiseTex, vec2(0.5, 0.5));' + LineEnding +
+      '  fragment_color.rgb = fragment_color.rgb * uTint * uGain + n.rgb * 0.01;' + LineEnding +
+      '}';
+    Effect1.SetParts([FragPart1]);
+    App1.SetEffects([Effect1]);
+    Shape1.Appearance := App1;
+    Box1 := TBoxNode.Create;
+    Shape1.Geometry := Box1;
+    Root1.AddChildren(Shape1);
+    Scene1.Load(Root1, True);
+
+    { 2. TComposedShaderNode with custom float and vec4 fields }
+    Root2 := TX3DRootNode.Create;
+    Shape2 := TShapeNode.Create;
+    App2 := TAppearanceNode.Create;
+    Composed2 := TComposedShaderNode.Create;
+    Composed2.Language := slGLSL;
+    Composed2.AddCustomField(TSFFloat.Create(Composed2, True, 'uWaveScale', 1.75));
+    Composed2.AddCustomField(TSFVec4f.Create(Composed2, True, 'uCustomColor', Vector4(0.9, 0.1, 0.3, 1.0)));
+
+    VertPart2 := TShaderPartNode.Create;
+    VertPart2.ShaderType := stVertex;
+    VertPart2.Contents :=
+      'uniform mat4 castle_ModelViewMatrix;' + LineEnding +
+      'uniform mat4 castle_ProjectionMatrix;' + LineEnding +
+      'attribute vec4 castle_Vertex;' + LineEnding +
+      'uniform float uWaveScale;' + LineEnding +
+      'void main(void)' + LineEnding +
+      '{' + LineEnding +
+      '  gl_Position = castle_ProjectionMatrix * (castle_ModelViewMatrix * (castle_Vertex * uWaveScale));' + LineEnding +
+      '}';
+
+    FragPart2 := TShaderPartNode.Create;
+    FragPart2.ShaderType := stFragment;
+    FragPart2.Contents :=
+      'uniform vec4 uCustomColor;' + LineEnding +
+      'void main(void)' + LineEnding +
+      '{' + LineEnding +
+      '  gl_FragColor = uCustomColor;' + LineEnding +
+      '}';
+    Composed2.SetParts([VertPart2, FragPart2]);
+    App2.SetShaders([Composed2]);
+    Shape2.Appearance := App2;
+    Box2 := TBoxNode.Create;
+    Shape2.Geometry := Box2;
+    Root2.AddChildren(Shape2);
+    Scene2.Load(Root2, True);
+
+    CmdList := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(CmdList);
+    try
+      RShape1 := TX3DRendererShape(Scene1.Shapes.TraverseList(True)[0]);
+      RShape1.PrepareRHIBuffers(Scene1.RenderOptions, 1);
+      RShape1.UploadRHIMaterialToCache(ShadingModel);
+
+      AssertEquals('Effect1 must extract 3 custom user effect uniforms (2 scalar/vector + 1 texture)',
+        3, RShape1.ExtractRHIUserEffectUniforms);
+      AssertTrue('RShape1.Cache.RHIUserEffectBuffer must be allocated',
+        RShape1.Cache.RHIUserEffectBuffer <> nil);
+      AssertTrue('RShape1.Cache.RHIUserEffectUploadCount must be >= 1',
+        RShape1.Cache.RHIUserEffectUploadCount >= 1);
+      AssertTrue('RShape1.Cache.RHIUserEffectTexture[0] must be bound from CustomTex1',
+        RShape1.Cache.RHIUserEffectTexture[0] <> nil);
+      AssertTrue('RShape1.Cache.RHIUserEffectSampler[0] must be bound from CustomTex1',
+        RShape1.Cache.RHIUserEffectSampler[0] <> nil);
+      AssertTrue('RShape1.Cache.RHISkinningDescriptorSet (Set 2) must be allocated when custom uniforms exist',
+        RShape1.Cache.RHISkinningDescriptorSet <> nil);
+
+      RShape2 := TX3DRendererShape(Scene2.Shapes.TraverseList(True)[0]);
+      RShape2.PrepareRHIBuffers(Scene2.RenderOptions, 1);
+      RShape2.UploadRHIMaterialToCache(ShadingModel);
+
+      AssertEquals('Composed2 must extract 2 custom user effect uniforms',
+        2, RShape2.ExtractRHIUserEffectUniforms);
+      AssertTrue('RShape2.Cache.RHIUserEffectBuffer must be allocated',
+        RShape2.Cache.RHIUserEffectBuffer <> nil);
+
+      Cam.Target := rtScreen;
+      Cam.Matrix := TMatrix4.Identity;
+      FillChar(Stats, SizeOf(Stats), 0);
+      Renderer.RenderBegin(nil, Cam, nil, 0, 0, 0, @Stats);
+      try
+        Renderer.BuildShapePipelineDesc(RShape1, Scene1.RenderOptions, Desc1);
+        AssertEquals('Pipeline descriptor layout count must be 3 (Set 0 + Set 1 + Set 2) when UserEffect uniforms are present',
+          3, Length(Desc1.DescriptorSetLayouts));
+        AssertTrue('Fragment shader must upgrade custom uniforms to CastleUserEffectBlock (set=2, binding=1)',
+          Pos('CASTLE_UBO(2, 1) uniform CastleUserEffectBlock', RShape1.Cache.RHIFragmentShaderSource) > 0);
+        AssertTrue('Fragment shader must upgrade uNoiseTex to CASTLE_SAMPLER(2, 2) uniform sampler2D uNoiseTex',
+          Pos('CASTLE_SAMPLER(2, 2) uniform sampler2D uNoiseTex;', RShape1.Cache.RHIFragmentShaderSource) > 0);
+
+        Renderer.BuildShapePipelineDesc(RShape2, Scene2.RenderOptions, Desc2);
+        AssertEquals('ComposedShader pipeline descriptor layout count must be 3 when custom uniforms are present',
+          3, Length(Desc2.DescriptorSetLayouts));
+        AssertTrue('ComposedShader vertex shader must upgrade uWaveScale into CastleUserEffectBlock',
+          Pos('CASTLE_UBO(2, 1) uniform CastleUserEffectBlock', RShape2.Cache.RHIVertexShaderSource) > 0);
+        AssertTrue('ComposedShader fragment shader must upgrade uCustomColor into CastleUserEffectBlock',
+          Pos('CASTLE_UBO(2, 1) uniform CastleUserEffectBlock', RShape2.Cache.RHIFragmentShaderSource) > 0);
+      finally
+        Renderer.RenderEnd;
+      end;
+    finally
+      Device.EndFrameAndPresent;
+    end;
+
+    TTextureResources.Unprepare(CustomTex1);
+  finally
+    FreeAndNil(Cam);
+    FreeAndNil(Renderer);
+    FreeAndNil(Scene2);
+    FreeAndNil(Scene1);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestEffectShaderLibrariesEyeWorldSpaceAndCameraMatrixAliasesRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  Shape: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  Box: TBoxNode;
+  Effect: TEffectNode;
+  FragPart: TEffectPartNode;
+  RShape: TX3DRendererShape;
+  Renderer: TRenderer;
+  Cam: TRenderingCamera;
+  Stats: TRenderStatistics;
+  Desc: TRHIGraphicsPipelineDesc;
+  ShadingModel: TCastleShadingModelRHI;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7702)));
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := TCastleScene.Create(nil);
+  Renderer := TRenderer.Create(nil);
+  Cam := TRenderingCamera.Create;
+  try
+    Root := TX3DRootNode.Create;
+    Shape := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    App.Material := Mat;
+
+    Effect := TEffectNode.Create;
+    Effect.Language := slGLSL;
+    Effect.Enabled := True;
+    Effect.SetShaderLibraries(['castle-shader:/EyeWorldSpace.glsl']);
+
+    FragPart := TEffectPartNode.Create;
+    FragPart.ShaderType := stFragment;
+    FragPart.Contents :=
+      'uniform mat4 castle_CameraInverseMatrix;' + LineEnding +
+      'void PLUG_fragment_eye_space(const vec4 vertex_eye, inout vec3 normal_eye)' + LineEnding +
+      '{' + LineEnding +
+      '  vec4 vertex_world = position_eye_to_world_space(vertex_eye);' + LineEnding +
+      '  vec3 normal_world = direction_eye_to_world_space(normal_eye);' + LineEnding +
+      '  if (vertex_world.y < -1000.0) normal_eye = normal_world;' + LineEnding +
+      '}';
+    Effect.SetParts([FragPart]);
+    App.SetEffects([Effect]);
+    Shape.Appearance := App;
+    Box := TBoxNode.Create;
+    Shape.Geometry := Box;
+    Root.AddChildren(Shape);
+    Scene.Load(Root, True);
+
+    CmdList := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(CmdList);
+    try
+      RShape := TX3DRendererShape(Scene.Shapes.TraverseList(True)[0]);
+      RShape.PrepareRHIBuffers(Scene.RenderOptions, 1);
+      RShape.UploadRHIMaterialToCache(ShadingModel);
+
+      Cam.Target := rtScreen;
+      Cam.Matrix := TMatrix4.Identity;
+      FillChar(Stats, SizeOf(Stats), 0);
+      Renderer.RenderBegin(nil, Cam, nil, 0, 0, 0, @Stats);
+      try
+        Renderer.BuildShapePipelineDesc(RShape, Scene.RenderOptions, Desc);
+        AssertTrue('Fragment shader must include EyeWorldSpace helper position_eye_to_world_space',
+          Pos('vec4 position_eye_to_world_space(vec4 position_eye)', RShape.Cache.RHIFragmentShaderSource) > 0);
+        AssertTrue('Fragment shader must include EyeWorldSpace helper direction_eye_to_world_space',
+          Pos('vec3 direction_eye_to_world_space(vec3 direction_eye)', RShape.Cache.RHIFragmentShaderSource) > 0);
+        AssertTrue('Fragment shader must define castle_CameraInverseMatrix alias to CastleScene.u_ViewMatrixInverse',
+          Pos('#define castle_CameraInverseMatrix CastleScene.u_ViewMatrixInverse', RShape.Cache.RHIFragmentShaderSource) > 0);
+        AssertTrue('Fragment shader must define castle_CameraRotationInverseMatrix alias to mat3(CastleScene.u_ViewMatrixInverse)',
+          Pos('#define castle_CameraRotationInverseMatrix mat3(CastleScene.u_ViewMatrixInverse)', RShape.Cache.RHIFragmentShaderSource) > 0);
+        AssertTrue('uniform mat4 castle_CameraInverseMatrix; declaration must be sanitized from shader body',
+          Pos('// [Vulkan RHI UBO]: uniform mat4 castle_CameraInverseMatrix;', RShape.Cache.RHIFragmentShaderSource) > 0);
+      finally
+        Renderer.RenderEnd;
+      end;
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Cam);
+    FreeAndNil(Renderer);
+    FreeAndNil(Scene);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestLinePropertiesNodeAndRenderContextDynamicLineWidthRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx: TRenderContext;
+  TestCtx: TRenderContext;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  Shape: TShapeNode;
+  App: TAppearanceNode;
+  LineProps: TLinePropertiesNode;
+  ILS: TIndexedLineSetNode;
+  Coord: TCoordinateNode;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7703)));
+  Device.ResizeSwapchain(256, 256);
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 5.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Root := TX3DRootNode.Create;
+    Shape := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    LineProps := TLinePropertiesNode.Create;
+    LineProps.Applied := True;
+    LineProps.LineWidthScaleFactor := 3.5;
+    App.LineProperties := LineProps;
+    Shape.Appearance := App;
+
+    ILS := TIndexedLineSetNode.Create;
+    Coord := TCoordinateNode.Create;
+    Coord.SetPoint([
+      Vector3(-1, 0, 0),
+      Vector3( 1, 0, 0)]);
+    ILS.Coord := Coord;
+    ILS.SetCoordIndex([0, 1, -1]);
+    Shape.Geometry := ILS;
+    Root.AddChildren(Shape);
+
+    Scene := TCastleScene.Create(Viewport);
+    Scene.Load(Root, True);
+    Scene.RenderOptions.LineWidth := 2.0;
+    Viewport.Items.Add(Scene);
+
+    CmdList := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(CmdList);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+
+      { During RenderShape:
+        1) InitializeFromRenderOptions sets LineWidth := 2.0
+        2) RenderShapeLineProperties sets LineWidth := 2.0 * 3.5 = 7.0
+        3) ClassRenderEnd resets LineWidth := 1.0 }
+      AssertTrue('RenderContext.RHILineWidthUpdateCount must be >= 3 (2.0 -> 7.0 -> 1.0)',
+        TestCtx.RHILineWidthUpdateCount >= 3);
+      AssertTrue('TVulkanRHICommandList.LineWidthUpdateCount must be >= 3',
+        CmdList.LineWidthUpdateCount >= 3);
+      AssertSameValue(1.0, TestCtx.RHILastLineWidth, 0.001);
+      AssertSameValue(1.0, CmdList.DynamicLineWidth, 0.001);
+
+      { Directly invoke RenderContext.LineWidth := 2.0 * 3.5 to verify active 7.0 state }
+      TestCtx.LineWidth := Scene.RenderOptions.LineWidth * LineProps.LineWidthScaleFactor;
+      AssertSameValue(7.0, TestCtx.RHILastLineWidth, 0.001);
+      AssertSameValue(7.0, CmdList.DynamicLineWidth, 0.001);
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Container);
+    FreeGlobalBatch2DRenderer;
+    RenderContext := SavedCtx;
+    FreeAndNil(TestCtx);
     SetActiveCommandList(SavedCmd);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;

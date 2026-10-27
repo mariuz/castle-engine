@@ -259,6 +259,8 @@ type
     FDynamicScissorRect: TRectangle;
     FDynamicDepthBiasConstant: Single;
     FDynamicDepthBiasSlope: Single;
+    FDynamicLineWidth: Single;
+    FLineWidthUpdateCount: Cardinal;
     FBoundDescriptorSets: array[0..3] of TRHIDescriptorSet;
     FDescriptorSetBindCount: Cardinal;
     FPipelineBindCount: Cardinal;
@@ -284,6 +286,7 @@ type
       const MinDepth: Single = 0.0; const MaxDepth: Single = 1.0); override;
     procedure SetScissor(const ScissorRect: TRectangle); override;
     procedure SetDepthBias(const ConstantFactor, SlopeFactor: Single); override;
+    procedure SetLineWidth(const LineWidth: Single); override;
 
     { Extended Dynamic State (VK_EXT_extended_dynamic_state / Vulkan 1.3 Core) }
     procedure SetCullMode(const CullMode: TRHICullMode); override;
@@ -368,6 +371,8 @@ type
     property DynamicScissorRect: TRectangle read FDynamicScissorRect;
     property DynamicDepthBiasConstant: Single read FDynamicDepthBiasConstant;
     property DynamicDepthBiasSlope: Single read FDynamicDepthBiasSlope;
+    property DynamicLineWidth: Single read FDynamicLineWidth;
+    property LineWidthUpdateCount: Cardinal read FLineWidthUpdateCount;
     property BoundDescriptorSets[const ASetIndex: Cardinal]: TRHIDescriptorSet read GetBoundDescriptorSet;
     property DescriptorSetBindCount: Cardinal read FDescriptorSetBindCount;
     property BoundPipeline: TVulkanRHIPipeline read FCurrentPipeline;
@@ -7232,6 +7237,12 @@ begin
   FDynamicDepthBiasSlope := SlopeFactor;
   if (FHandle <> nil) and Assigned(vkCmdSetDepthBias) then
     vkCmdSetDepthBias(FHandle, ConstantFactor, 0.0, SlopeFactor);
+end;
+
+procedure TVulkanRHICommandList.SetLineWidth(const LineWidth: Single);
+begin
+  FDynamicLineWidth := Max(1.0, LineWidth);
+  Inc(FLineWidthUpdateCount);
 end;
 
 procedure TVulkanRHICommandList.SetCullMode(const CullMode: TRHICullMode);
