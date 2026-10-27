@@ -1475,11 +1475,56 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - Implemented `TDesignFrame.OrganizeHierarchyContextMenuSubmenus` in `tools/castle-editor/code/framedesign.pas`.
   - Organizes all specialized hierarchy context menu commands into 5 logical top-level submenus (**`3D Level, Scene & Physics Tools`**, **`2D UI, HUD & Screen Generators`**, **`Batch, Prefab & Asset Utilities`**, **`Duplicate, Group & Array`**, and **`Select & Scene Audit Filters`**) so the right-click hierarchy menu stays compact and fast to navigate.
 
+### Phase 242: Quick 2D Font Family (`TCastleFontFamily`) & HTML Rich-Text (`Html := true`) Styler (`ShowQuickFontFamilyDialog` / `ApplyQuickFontFamily`)
+- [x] **242.1. Multi-Variant `TCastleFontFamily` & Rich-Text HTML Tag Configurator (`TDesignFrame.ShowQuickFontFamilyDialog` / `TDesignFrame.ApplyQuickFontFamily`)**
+  - Implemented `TDesignFrame.ShowQuickFontFamilyDialog` and `TDesignFrame.ApplyQuickFontFamily` (`MenuTreeViewItemQuickFontFamily` in `MenuTreeView`).
+  - Creates or updates a non-visual `TCastleFontFamily` with linked `Regular`, `Bold`, `Italic`, and `BoldItalic` `TCastleFont` variants (`OptimalSize`, `AntiAliased := true`), assigns `CustomFont := FamilyComp` and `FontSize` onto `TCastleUserInterfaceFont` controls, enables `Html := true` on `TCastleLabel` and `TCastleButton`, and optionally wraps plain captions in sample `<b>`/`<i>`/`<font color>` rich-text markup (`Shift`-click enables rich HTML styling immediately).
+
+### Phase 243: Quick 2D Sprite-Sheet Bitmap Font (`TCastleBitmapFont`) Configurator (`ShowQuickBitmapFontDialog` / `ApplyQuickBitmapFont`)
+- [x] **243.1. Retro Pixel-Art ASCII Atlas `TCastleBitmapFont` Wizard (`TDesignFrame.ShowQuickBitmapFontDialog` / `TDesignFrame.ApplyQuickBitmapFont`)**
+  - Implemented `TDesignFrame.ShowQuickBitmapFontDialog` and `TDesignFrame.ApplyQuickBitmapFont` (`MenuTreeViewItemQuickBitmapFont` in `MenuTreeView`).
+  - Creates or updates a non-visual `TCastleBitmapFont` (`ImageUrl`, `ImageColumns`, `ImageRows`, `ImageMargin`, `DisplayMargin`) and binds `CustomFont` onto selected or all `TCastleUserInterfaceFont` controls (`Shift`-click configures a $16\times 6$ ASCII grid immediately).
+
+### Phase 244: Quick 2D Scrollable List & Table View (`TCastleScrollView`) Builder (`ShowQuickScrollViewDialog` / `ApplyQuickScrollView`)
+- [x] **244.1. Framed `TCastleScrollView` + `TCastleVerticalGroup` Row List Generator (`TDesignFrame.ShowQuickScrollViewDialog` / `TDesignFrame.ApplyQuickScrollView`)**
+  - Implemented `TDesignFrame.ShowQuickScrollViewDialog` and `TDesignFrame.ApplyQuickScrollView` (`MenuTreeViewItemQuickScrollView` in `MenuTreeView`).
+  - Spawns a framed 2D card containing a header `TCastleLabel` and a `TCastleScrollView` (`ScrollBarWidth`, `KeyScrollSpeed`, `WheelScrollSpeed`, `EnableDragging`, `TintScrollBarInactive`, `ScrollArea.AutoSizeToChildren := true`) populated with a `TCastleVerticalGroup` of alternating-tint row cards across 4 presets (**Quest / Mission Objectives Log**, **Global High-Score Leaderboard Table**, **Rolling Credits & Contributors List**, **Multiplayer Server Browser Rows**) (`Shift`-click builds an 8-row Quest Log ScrollView immediately).
+
+### Phase 245: Quick 2D Built-In Crosshair (`TCastleCrosshair`) & Aim Reticle Configurator (`ShowQuickCrosshairDialog` / `ApplyQuickCrosshair`)
+- [x] **245.1. Centered `TCastleCrosshair` (`csCross` / `csCrossRect`) HUD Reticle Spawner (`TDesignFrame.ShowQuickCrosshairDialog` / `TDesignFrame.ApplyQuickCrosshair`)**
+  - Implemented `TDesignFrame.ShowQuickCrosshairDialog` and `TDesignFrame.ApplyQuickCrosshair` (`MenuTreeViewItemQuickCrosshair` in `MenuTreeView`).
+  - Spawns or updates a centered `TCastleCrosshair` (`Shape` `csCross` or `csCrossRect`, `Width`, `Height`, `Color` tint across 5 presets) inside the active viewport or 2D UI parent (`Shift`-click spawns a `32px` Tactical Cyan `csCross` reticle immediately).
+
+### Phase 246: Quick 3D Combined Multi-Source Terrain (`TCastleTerrainCombine`) Rig (`ShowQuickTerrainCombineDialog` / `ApplyQuickTerrainCombine`)
+- [x] **246.1. Hybrid Macro+Detail `TCastleTerrainCombine` (`opAdd` / `opMax` / `opMin` / `opMultiply`) Generator (`TDesignFrame.ShowQuickTerrainCombineDialog` / `TDesignFrame.ApplyQuickTerrainCombine`)**
+  - Implemented `TDesignFrame.ShowQuickTerrainCombineDialog` and `TDesignFrame.ApplyQuickTerrainCombine` (`MenuTreeViewItemQuickTerrainCombine` in `MenuTreeView`).
+  - Spawns or upgrades a `TCastleTerrain` driven by a `TCastleTerrainCombine` (`Operation`: `opAdd`, `opMax`, `opMin`, `opMultiply`) combining `Data1` (`TCastleTerrainNoise` macro mountain range) with `Data2` (secondary `TCastleTerrainNoise` high-frequency detail or `TCastleTerrainImage` heightmap `Url`/`MinLevel`/`MaxLevel`) plus an optional static `TCastleMeshCollider` + `TCastleRigidBody` (`Shift`-click spawns a $160\text{m}$ Macro+Detail combined terrain immediately).
+
+### Phase 247: Quick 3D Third-Person Character & Follow-Camera Rig (`TCastleThirdPersonNavigation`) (`ShowQuickThirdPersonRigDialog` / `ApplyQuickThirdPersonRig`)
+- [x] **247.1. Avatar Hierarchy, Dynamic Capsule & `TCastleThirdPersonNavigation` Wizard (`TDesignFrame.ShowQuickThirdPersonRigDialog` / `TDesignFrame.ApplyQuickThirdPersonRig`)**
+  - Implemented `TDesignFrame.ShowQuickThirdPersonRigDialog` and `TDesignFrame.ApplyQuickThirdPersonRig` (`MenuTreeViewItemQuickThirdPersonRig` under `MenuTreeViewSubmenu3DTools`).
+  - Configures or spawns a `TCastleThirdPersonNavigation` inside `CurrentViewport` linked to the selected avatar `TCastleTransform` / `TCastleScene` (`AvatarHierarchy`, `Avatar`, `AimAvatar`: `aaNone` / `aaHorizontal` / `aaFlying`, `DistanceToAvatarTarget`, `InitialHeightAboveTarget`, `MoveSpeed`, `RunSpeed`, `CrouchSpeed`, `JumpSpeed`, `ImmediatelyFixBlockedCamera`, `Init`), and optionally attaches an upright dynamic `TCastleCapsuleCollider` + `TCastleRigidBody` (`LockRotation := [0, 2]`) (`Shift`-click configures an Action RPG 3rd-Person Rig immediately).
+
+### Phase 248: Quick 2D Virtual On-Screen Keyboard & Gamepad/Console Key-Grid Builder (`ShowQuickVirtualKeyboardDialog` / `ApplyQuickVirtualKeyboard`)
+- [x] **248.1. On-Screen QWERTY, Security PIN Keypad & Arcade High-Score Initials Builder (`TDesignFrame.ShowQuickVirtualKeyboardDialog` / `TDesignFrame.ApplyQuickVirtualKeyboard`)**
+  - Implemented `TDesignFrame.ShowQuickVirtualKeyboardDialog` and `TDesignFrame.ApplyQuickVirtualKeyboard` (`MenuTreeViewItemQuickVirtualKeyboard` under `MenuTreeViewSubmenu2DTools`).
+  - Spawns a framed 2D on-screen virtual keyboard card (`PanelVirtualKeyboard`) containing a target `TCastleEdit` input display and a `TCastleVerticalGroup` of `TCastleHorizontalGroup` key rows (`TCastleButton`) across 3 presets (**Full QWERTY Alphanumeric Virtual Keyboard**, **4x3 Numeric Security PIN & Door Code Keypad**, **Arcade 3-Letter High-Score Initials Grid**) (`Shift`-click builds a Full QWERTY Virtual Keyboard immediately).
+
+### Phase 249: Quick 2D Interactive Color Swatch & RGBA Sliders Customizer Card (`ShowQuickColorCustomizerDialog` / `ApplyQuickColorCustomizer`)
+- [x] **249.1. Live Color Preview Swatch, RGBA `TCastleFloatSlider` Channels & Palette Tiles (`TDesignFrame.ShowQuickColorCustomizerDialog` / `TDesignFrame.ApplyQuickColorCustomizer`)**
+  - Implemented `TDesignFrame.ShowQuickColorCustomizerDialog` and `TDesignFrame.ApplyQuickColorCustomizer` (`MenuTreeViewItemQuickColorCustomizer` under `MenuTreeViewSubmenu2DTools`).
+  - Spawns a framed 2D character/vehicle/UI color customization card (`PanelColorCustomizer`) containing a live `TCastleRectangleControl` preview swatch, R/G/B/A `TCastleFloatSlider` rows (`0.0..1.0`), and 6 preset color swatch `TCastleButton` tiles across 3 themes (**Sci-Fi Cyber Armor & Neon Energy**, **Fantasy Heraldry & Cloth Dye**, **Racing Vehicle Livery & Metallic Paint**) (`Shift`-click builds a Sci-Fi Armor Color Customizer Card immediately).
+
+### Phase 250: Final Pre-Release Design Readiness & Asset Integrity Auditor (`ShowDesignReadinessAuditDialog`)
+- [x] **250.1. Comprehensive Design-Wide Asset URL, Physics Collider, Reference & UI Bounds Auditor (`TDesignFrame.ShowDesignReadinessAuditDialog`)**
+  - Implemented `TDesignFrame.ShowDesignReadinessAuditDialog` (`MenuTreeViewItemDesignReadinessAudit` under `MenuTreeViewSubmenuBatchTools`).
+  - Recursively audits the entire active `.castle-user-interface`, `.castle-transform`, or `.castle-component` design for missing/broken asset URLs, `TCastleCollider` behaviors missing a paired `TCastleRigidBody`, unlinked `TCastleTransformReference` / `TCastleThirdPersonNavigation` targets, and zero-sized `TCastleUserInterface` controls, displaying a full readiness report with one-click **Select Flagged Component(s)** and **Copy Audit Report** actions.
+
 ---
 
-## Roadmap Completion Status (Phases 1–241)
+## Roadmap Completion Status (Phases 1–250 — Final Milestone)
 
-All **241 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **250 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 
