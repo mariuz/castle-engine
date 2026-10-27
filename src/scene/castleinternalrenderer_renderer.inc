@@ -89,6 +89,8 @@
     FRHISceneBuffer: TRHIBuffer;
     FRHISceneDescriptorSetLayout: TRHIDescriptorSetLayout;
     FRHISceneDescriptorSet: TRHIDescriptorSet;
+    FRHIShadowMap0Texture: TRHITexture;
+    FRHIShadowMap0Sampler: TRHISampler;
     FRHISceneOwnerDevice: TRHIDevice;
     FRHIDefaultVertexShader: TRHIShaderModule;
     FRHIDefaultFragmentShader: TRHIShaderModule;
@@ -270,6 +272,10 @@
     procedure BuildSceneUniformBlock(out UniformBlock: TCastleSceneUniformBlock);
     procedure UploadSceneUniformBlockToRHI;
     function EnsureRHISceneDescriptorSet: TRHIDescriptorSet;
+    procedure BindShadowMapToSceneDescriptorSet(
+      const ASlot: Cardinal;
+      const AShadowMapTex: TRHITexture;
+      const AShadowMapSampler: TRHISampler = nil);
     procedure EnsureRHIDefaultShaders;
     procedure BuildShapePipelineDesc(const AShape: TX3DRendererShape;
       const ARenderOptions: TCastleRenderOptions;
@@ -280,6 +286,8 @@
     property RHISceneBuffer: TRHIBuffer read FRHISceneBuffer;
     property RHISceneDescriptorSetLayout: TRHIDescriptorSetLayout read FRHISceneDescriptorSetLayout;
     property RHISceneDescriptorSet: TRHIDescriptorSet read FRHISceneDescriptorSet;
+    property RHIShadowMap0Texture: TRHITexture read FRHIShadowMap0Texture;
+    property RHIShadowMap0Sampler: TRHISampler read FRHIShadowMap0Sampler;
     property RHIDefaultVertexShader: TRHIShaderModule read FRHIDefaultVertexShader;
     property RHIDefaultFragmentShader: TRHIShaderModule read FRHIDefaultFragmentShader;
     property SceneUniformBlock: TCastleSceneUniformBlock read FSceneUniformBlock;
@@ -321,6 +329,8 @@ begin
     FRHIDefaultVertexShader := nil;
     FRHIDefaultFragmentShader := nil;
   end;
+  FRHIShadowMap0Texture := nil;
+  FRHIShadowMap0Sampler := nil;
   inherited;
 end;
 
@@ -408,7 +418,8 @@ end;
 
 function TRenderer.EnsureRHISceneDescriptorSet: TRHIDescriptorSet;
 var
-  Bindings: array[0..1] of TRHIDescriptorBindingDesc;
+  Bindings: array[0..5] of TRHIDescriptorBindingDesc;
+  I: Integer;
 begin
   if RHIDevice = nil then
     Exit(nil);
@@ -417,6 +428,8 @@ begin
     FRHISceneDescriptorSet := nil;
     FRHISceneDescriptorSetLayout := nil;
     FRHISceneBuffer := nil;
+    FRHIShadowMap0Texture := nil;
+    FRHIShadowMap0Sampler := nil;
     FRHIDefaultVertexShader := nil;
     FRHIDefaultFragmentShader := nil;
   end;
@@ -433,6 +446,13 @@ begin
     Bindings[1].DescriptorType := dtUniformBuffer;
     Bindings[1].Count := 1;
     Bindings[1].StageFlags := [ssVertex, ssFragment];
+    for I := 2 to 5 do
+    begin
+      Bindings[I].Binding := Cardinal(I);
+      Bindings[I].DescriptorType := dtCombinedImageSampler;
+      Bindings[I].Count := 1;
+      Bindings[I].StageFlags := [ssFragment];
+    end;
     FRHISceneDescriptorSetLayout := RHIDevice.CreateDescriptorSetLayout(Bindings);
   end;
   if (FRHISceneDescriptorSet = nil) and (FRHISceneDescriptorSetLayout <> nil) then
@@ -446,6 +466,26 @@ begin
     FRHISceneDescriptorSet.Update;
   end;
   Result := FRHISceneDescriptorSet;
+end;
+
+procedure TRenderer.BindShadowMapToSceneDescriptorSet(
+  const ASlot: Cardinal;
+  const AShadowMapTex: TRHITexture;
+  const AShadowMapSampler: TRHISampler);
+begin
+  if ASlot = 0 then
+  begin
+    FRHIShadowMap0Texture := AShadowMapTex;
+    FRHIShadowMap0Sampler := AShadowMapSampler;
+  end;
+  if (RHIDevice = nil) or (ASlot > 3) or (AShadowMapTex = nil) then
+    Exit;
+  EnsureRHISceneDescriptorSet;
+  if FRHISceneDescriptorSet <> nil then
+  begin
+    FRHISceneDescriptorSet.BindTexture(2 + ASlot, AShadowMapTex, AShadowMapSampler);
+    FRHISceneDescriptorSet.Update;
+  end;
 end;
 
 procedure TRenderer.EnsureRHIDefaultShaders;
@@ -1811,6 +1851,11 @@ procedure TRenderer.RenderShapeTextures(const Shape: TX3DRendererShape;
 
       // get TTextureResource instance
       Res := TTextureResources.Get(ShadowMapNode);
+      if (Res = nil) and (RHIDevice <> nil) then
+      begin
+        TTextureResources.Prepare(RenderOptions, ShadowMapNode);
+        Res := TTextureResources.Get(ShadowMapNode);
+      end;
       if Res = nil then
       begin
         WritelnWarning('Shadow Map', 'Shadow map "%s" has no renderer texture resource, cannot use it', [
@@ -1818,6 +1863,10 @@ procedure TRenderer.RenderShapeTextures(const Shape: TX3DRendererShape;
         ]);
         Continue;
       end;
+
+      if (RHIDevice <> nil) and (Res is TGeneratedShadowMapResource) and (I < 4) then
+        BindShadowMapToSceneDescriptorSet(Cardinal(I),
+          TGeneratedShadowMapResource(Res).RHITexture, Res.RHISampler);
 
       // bind the texture to the next free texture unit
       Res.Bind(ABoundTextureUnits);

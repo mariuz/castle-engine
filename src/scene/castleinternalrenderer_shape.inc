@@ -97,6 +97,22 @@
       TMultiTextureTransformNode). Returns True if a non-identity texture transform is active. }
     function ExtractRHITextureTransform(out AMatrix: TMatrix4): Boolean;
 
+    { Extracts the first enabled X3D TClipPlaneNode from State.ClipPlanes transformed
+      into scene/world space via PlaneTransform(ClipPlane.Node.FdPlane.Value, ClipPlane.Transform). }
+    function ExtractRHIClipPlane(out ASceneClipPlane: TVector4): Boolean;
+
+    { Resolves an active TEnvironmentLightNode cubemap texture (SpecularTexture or DiffuseTexture)
+      from State.Lights to its underlying TRHITexture and TRHISampler handles. }
+    function ExtractRHIEnvironmentLightTexture(
+      out AEnvCubemapTex: TRHITexture;
+      out AEnvCubemapSampler: TRHISampler): Boolean;
+
+    { Resolves the first TGeneratedShadowMapNode in InternalShadowMaps to its underlying
+      depth/VSM TRHITexture and comparison TRHISampler handles. }
+    function ExtractRHIShadowMap(
+      out AShadowMapTex: TRHITexture;
+      out AShadowMapSampler: TRHISampler): Boolean;
+
     { Builds an 80-byte std430 TCastleBindlessMaterialEntry combining extracted PBR/Phong/Unlit
       material factors with 32-bit bindless texture array indices into castle_BindlessTextures[]. }
     function BuildRHIBindlessMaterialEntry(
@@ -624,6 +640,118 @@ begin
   end;
 end;
 
+function TX3DRendererShape.ExtractRHIClipPlane(out ASceneClipPlane: TVector4): Boolean;
+var
+  ShapeState: TX3DGraphTraverseState;
+  I: Integer;
+  ClipPlane: PClipPlane;
+begin
+  ASceneClipPlane := TVector4.Zero;
+  Result := False;
+  ShapeState := OriginalState;
+  if ShapeState = nil then
+    ShapeState := State;
+  if (ShapeState = nil) or (ShapeState.ClipPlanes = nil) then
+    Exit;
+
+  for I := 0 to ShapeState.ClipPlanes.Count - 1 do
+  begin
+    ClipPlane := PClipPlane(ShapeState.ClipPlanes.Ptr(I));
+    if (ClipPlane^.Node <> nil) and ClipPlane^.Node.FdEnabled.Value then
+    begin
+      ASceneClipPlane := PlaneTransform(ClipPlane^.Node.FdPlane.Value, ClipPlane^.Transform);
+      Exit(True);
+    end;
+  end;
+end;
+
+function TX3DRendererShape.ExtractRHIEnvironmentLightTexture(
+  out AEnvCubemapTex: TRHITexture;
+  out AEnvCubemapSampler: TRHISampler): Boolean;
+var
+  ShapeState: TX3DGraphTraverseState;
+  I: Integer;
+  LightNode: TAbstractLightNode;
+  EnvLight: TEnvironmentLightNode;
+  TexNode: TAbstractSingleTextureNode;
+  Res: TTextureResource;
+begin
+  AEnvCubemapTex := nil;
+  AEnvCubemapSampler := nil;
+  Result := False;
+  if (Cache <> nil) and (Cache.RenderOptions <> nil) and
+     (not Cache.RenderOptions.ReceiveSceneLights) then
+    Exit;
+
+  ShapeState := OriginalState;
+  if ShapeState = nil then
+    ShapeState := State;
+  if (ShapeState = nil) or (ShapeState.Lights = nil) then
+    Exit;
+
+  for I := 0 to ShapeState.Lights.Count - 1 do
+  begin
+    LightNode := ShapeState.Lights.L[I].Node;
+    if (LightNode is TEnvironmentLightNode) and LightNode.FdOn.Value then
+    begin
+      EnvLight := TEnvironmentLightNode(LightNode);
+      TexNode := EnvLight.SpecularTexture;
+      if TexNode = nil then
+        TexNode := EnvLight.DiffuseTexture;
+      if TexNode <> nil then
+      begin
+        Res := TTextureResources.Get(TexNode);
+        if (Res = nil) and (RHIDevice <> nil) and (Cache <> nil) then
+        begin
+          TTextureResources.Prepare(Cache.RenderOptions, TexNode);
+          Res := TTextureResources.Get(TexNode);
+        end;
+        if Res <> nil then
+        begin
+          AEnvCubemapSampler := Res.RHISampler;
+          if Res is TCubeMapTextureResource then
+            AEnvCubemapTex := TCubeMapTextureResource(Res).RHITexture
+          else if Res is TImageTextureResource then
+            AEnvCubemapTex := TImageTextureResource(Res).RHITexture
+          else if Res is TRenderedTextureResource then
+            AEnvCubemapTex := TRenderedTextureResource(Res).RHITexture;
+          if AEnvCubemapTex <> nil then
+            Exit(True);
+        end;
+      end;
+    end;
+  end;
+end;
+
+function TX3DRendererShape.ExtractRHIShadowMap(
+  out AShadowMapTex: TRHITexture;
+  out AShadowMapSampler: TRHISampler): Boolean;
+var
+  ShadowMapNode: TGeneratedShadowMapNode;
+  Res: TTextureResource;
+begin
+  AShadowMapTex := nil;
+  AShadowMapSampler := nil;
+  Result := False;
+  if (InternalShadowMaps = nil) or (InternalShadowMaps.Count = 0) or
+     not (InternalShadowMaps[0] is TGeneratedShadowMapNode) then
+    Exit;
+
+  ShadowMapNode := TGeneratedShadowMapNode(InternalShadowMaps[0]);
+  Res := TTextureResources.Get(ShadowMapNode);
+  if (Res = nil) and (RHIDevice <> nil) and (Cache <> nil) then
+  begin
+    TTextureResources.Prepare(Cache.RenderOptions, ShadowMapNode);
+    Res := TTextureResources.Get(ShadowMapNode);
+  end;
+  if Res is TGeneratedShadowMapResource then
+  begin
+    AShadowMapTex := TGeneratedShadowMapResource(Res).RHITexture;
+    AShadowMapSampler := Res.RHISampler;
+    Result := AShadowMapTex <> nil;
+  end;
+end;
+
 function TX3DRendererShape.BuildRHIBindlessMaterialEntry(
   const ABaseColorTexIdx: Cardinal;
   const ANormalTexIdx: Cardinal;
@@ -649,8 +777,11 @@ var
   MatBlock: TCastleMaterialUniformBlock;
   BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex: TRHITexture;
   BaseColorSampler, NormalSampler, MetallicRoughnessSampler, EmissiveSampler, OcclusionSampler: TRHISampler;
+  EnvCubemapTex, ShadowMapTex: TRHITexture;
+  EnvCubemapSampler, ShadowMapSampler: TRHISampler;
   TexTransformMatrix: TMatrix4;
-  HasTexTransform: Boolean;
+  ClipPlane: TVector4;
+  HasTexTransform, HasClipPlane, HasIBL, HasShadowMap: Boolean;
   BaseColorIdx, NormalIdx, MetallicRoughnessIdx, EmissiveIdx: Cardinal;
   BindlessEntry: TCastleBindlessMaterialEntry;
 begin
@@ -663,12 +794,17 @@ begin
       BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex,
       BaseColorSampler, NormalSampler, MetallicRoughnessSampler, EmissiveSampler, OcclusionSampler);
     HasTexTransform := ExtractRHITextureTransform(TexTransformMatrix);
+    HasClipPlane := ExtractRHIClipPlane(ClipPlane);
+    HasIBL := ExtractRHIEnvironmentLightTexture(EnvCubemapTex, EnvCubemapSampler);
+    HasShadowMap := ExtractRHIShadowMap(ShadowMapTex, ShadowMapSampler);
     if Cache <> nil then
     begin
       Cache.SetTextureTransform(HasTexTransform, TexTransformMatrix);
+      Cache.SetClipPlane(HasClipPlane, ClipPlane);
       Cache.BindMaterialTexturesToDescriptorSet(
         BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex,
         BaseColorSampler, NormalSampler, MetallicRoughnessSampler, EmissiveSampler, OcclusionSampler);
+      Cache.BindEnvironmentTexturesToDescriptorSet(EnvCubemapTex, EnvCubemapSampler);
       Cache.EnsureRHIShaders(
         Cache.RHIJointBuffer <> nil,
         (Cache.Arrays <> nil) and Cache.Arrays.HasTangent,
@@ -679,7 +815,10 @@ begin
         OcclusionTex <> nil,
         MatBlock.PBRParams.W > 0.0,
         (Cache.Arrays <> nil) and (Cache.Arrays.ColorType <> ctNone),
-        HasTexTransform);
+        HasTexTransform,
+        HasClipPlane,
+        HasIBL,
+        HasShadowMap);
     end;
     if BaseColorTex <> nil then
       BaseColorIdx := RHIDevice.RegisterBindlessTexture(BaseColorTex)

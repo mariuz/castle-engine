@@ -1799,7 +1799,10 @@ procedure TCastleLightsUniformBlock.SetProjectorMatrix(const Index: Integer;
   const Matrix: TMatrix4);
 begin
   if (Index >= 0) and (Index < Integer(Count)) then
+  begin
     Lights[Index].ProjectorMatrix := Matrix;
+    Lights[Index].SpotParams.W := 1.0;
+  end;
 end;
 
 { TCastleMaterialUniformBlock }

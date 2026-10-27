@@ -134,8 +134,15 @@
     FRHIMetallicRoughnessSampler: TRHISampler;
     FRHIEmissiveSampler: TRHISampler;
     FRHIOcclusionSampler: TRHISampler;
+    FRHIEnvSpecularTexture: TRHITexture;
+    FRHIEnvSpecularSampler: TRHISampler;
+    FRHIBrdfLutTexture: TRHITexture;
+    FRHIBrdfLutSampler: TRHISampler;
+    FRHIDefaultBrdfLutTexture: TRHITexture;
     FRHITextureTransform: TMatrix4;
     FRHIHasTextureTransform: Boolean;
+    FRHIClipPlane: TVector4;
+    FRHIHasClipPlane: Boolean;
     FRHISkinningDescriptorLayout: TRHIDescriptorSetLayout;
     FRHISkinningDescriptorSet: TRHIDescriptorSet;
     FRHIVertexShader: TRHIShaderModule;
@@ -168,13 +175,22 @@
       const AMetallicRoughnessSampler: TRHISampler = nil;
       const AEmissiveSampler: TRHISampler = nil;
       const AOcclusionSampler: TRHISampler = nil);
+    procedure BindEnvironmentTexturesToDescriptorSet(
+      const AEnvSpecularTex: TRHITexture;
+      const AEnvSpecularSampler: TRHISampler = nil;
+      const ABrdfLutTex: TRHITexture = nil;
+      const ABrdfLutSampler: TRHISampler = nil);
     procedure SetTextureTransform(const AHasTransform: Boolean; const AMatrix: TMatrix4);
+    procedure SetClipPlane(const AHasClipPlane: Boolean; const APlane: TVector4);
     procedure EnsureRHIShaders(
       const AHasSkinning, AHasTangents,
             AHasBaseColorTex, AHasNormalTex, AHasMetallicRoughnessTex,
             AHasEmissiveTex, AHasOcclusionTex, AUseAlphaTest: Boolean;
       const AHasColorPerVertex: Boolean = False;
-      const AHasTextureTransform: Boolean = False);
+      const AHasTextureTransform: Boolean = False;
+      const AHasClipPlane: Boolean = False;
+      const AHasIBL: Boolean = False;
+      const AHasShadowMap: Boolean = False);
     { Debug description of this shape cache. }
     function ToString: String; override;
 
@@ -190,8 +206,14 @@
     property RHIMetallicRoughnessSampler: TRHISampler read FRHIMetallicRoughnessSampler;
     property RHIEmissiveSampler: TRHISampler read FRHIEmissiveSampler;
     property RHIOcclusionSampler: TRHISampler read FRHIOcclusionSampler;
+    property RHIEnvSpecularTexture: TRHITexture read FRHIEnvSpecularTexture;
+    property RHIEnvSpecularSampler: TRHISampler read FRHIEnvSpecularSampler;
+    property RHIBrdfLutTexture: TRHITexture read FRHIBrdfLutTexture;
+    property RHIBrdfLutSampler: TRHISampler read FRHIBrdfLutSampler;
     property RHITextureTransform: TMatrix4 read FRHITextureTransform;
     property RHIHasTextureTransform: Boolean read FRHIHasTextureTransform;
+    property RHIClipPlane: TVector4 read FRHIClipPlane;
+    property RHIHasClipPlane: Boolean read FRHIHasClipPlane;
     property RHISkinningDescriptorLayout: TRHIDescriptorSetLayout read FRHISkinningDescriptorLayout;
     property RHISkinningDescriptorSet: TRHIDescriptorSet read FRHISkinningDescriptorSet;
     property RHIVertexShader: TRHIShaderModule read FRHIVertexShader;
@@ -269,6 +291,7 @@ begin
     FreeAndNil(FRHIMaterialDescriptorLayout);
     FreeAndNil(FRHISkinningDescriptorSet);
     FreeAndNil(FRHISkinningDescriptorLayout);
+    FreeAndNil(FRHIDefaultBrdfLutTexture);
     FreeAndNil(FRHIVertexShader);
     FreeAndNil(FRHIFragmentShader);
   end else
@@ -282,6 +305,7 @@ begin
     FRHIMaterialDescriptorLayout := nil;
     FRHISkinningDescriptorSet := nil;
     FRHISkinningDescriptorLayout := nil;
+    FRHIDefaultBrdfLutTexture := nil;
     FRHIVertexShader := nil;
     FRHIFragmentShader := nil;
   end;
@@ -290,6 +314,10 @@ begin
   FRHIMetallicRoughnessSampler := nil;
   FRHIEmissiveSampler := nil;
   FRHIOcclusionSampler := nil;
+  FRHIEnvSpecularTexture := nil;
+  FRHIEnvSpecularSampler := nil;
+  FRHIBrdfLutTexture := nil;
+  FRHIBrdfLutSampler := nil;
   FRHIShadersInitialized := False;
   FRHIOwnerDevice := nil;
 end;
@@ -310,6 +338,11 @@ begin
     FRHIMetallicRoughnessSampler := nil;
     FRHIEmissiveSampler := nil;
     FRHIOcclusionSampler := nil;
+    FRHIEnvSpecularTexture := nil;
+    FRHIEnvSpecularSampler := nil;
+    FRHIBrdfLutTexture := nil;
+    FRHIBrdfLutSampler := nil;
+    FRHIDefaultBrdfLutTexture := nil;
     FRHISkinningDescriptorSet := nil;
     FRHISkinningDescriptorLayout := nil;
     FRHIVertexShader := nil;
@@ -366,7 +399,7 @@ end;
 procedure TShapeCache.UploadMaterialBlock(const AMatBlock: TCastleMaterialUniformBlock);
 var
   BufDesc: TRHIBufferDesc;
-  Bindings: array[0..5] of TRHIDescriptorBindingDesc;
+  Bindings: array[0..7] of TRHIDescriptorBindingDesc;
   I: Integer;
 begin
   FRHIMaterialBlock := AMatBlock;
@@ -389,7 +422,7 @@ begin
     Bindings[0].DescriptorType := dtUniformBuffer;
     Bindings[0].Count := 1;
     Bindings[0].StageFlags := [ssVertex, ssFragment];
-    for I := 1 to 5 do
+    for I := 1 to 7 do
     begin
       Bindings[I].Binding := Cardinal(I);
       Bindings[I].DescriptorType := dtCombinedImageSampler;
@@ -456,6 +489,41 @@ begin
     FRHIMaterialDescriptorSet.Update;
 end;
 
+procedure TShapeCache.BindEnvironmentTexturesToDescriptorSet(
+  const AEnvSpecularTex: TRHITexture;
+  const AEnvSpecularSampler: TRHISampler;
+  const ABrdfLutTex: TRHITexture;
+  const ABrdfLutSampler: TRHISampler);
+var
+  TexDesc: TRHITextureDesc;
+  EffectiveBrdfLut: TRHITexture;
+begin
+  FRHIEnvSpecularTexture := AEnvSpecularTex;
+  FRHIEnvSpecularSampler := AEnvSpecularSampler;
+  FRHIBrdfLutSampler := ABrdfLutSampler;
+  EffectiveBrdfLut := ABrdfLutTex;
+  if (AEnvSpecularTex <> nil) and (EffectiveBrdfLut = nil) and (RHIDevice <> nil) then
+  begin
+    EnsureRHIDeviceMatch;
+    if FRHIDefaultBrdfLutTexture = nil then
+    begin
+      TexDesc := TRHITextureDesc.Create2D(4, 4, pfRGBA8_UNorm, [tuSampled, tuTransferDst], 1, 1);
+      TexDesc.DebugName := 'DefaultBrdfLut2D';
+      FRHIDefaultBrdfLutTexture := RHIDevice.CreateTexture(TexDesc);
+    end;
+    EffectiveBrdfLut := FRHIDefaultBrdfLutTexture;
+  end;
+  FRHIBrdfLutTexture := EffectiveBrdfLut;
+  if FRHIMaterialDescriptorSet = nil then
+    Exit;
+  if EffectiveBrdfLut <> nil then
+    FRHIMaterialDescriptorSet.BindTexture(6, EffectiveBrdfLut, ABrdfLutSampler);
+  if AEnvSpecularTex <> nil then
+    FRHIMaterialDescriptorSet.BindTexture(7, AEnvSpecularTex, AEnvSpecularSampler);
+  if (EffectiveBrdfLut <> nil) or (AEnvSpecularTex <> nil) then
+    FRHIMaterialDescriptorSet.Update;
+end;
+
 procedure TShapeCache.SetTextureTransform(const AHasTransform: Boolean; const AMatrix: TMatrix4);
 begin
   if (FRHIHasTextureTransform <> AHasTransform) or
@@ -467,16 +535,30 @@ begin
   end;
 end;
 
+procedure TShapeCache.SetClipPlane(const AHasClipPlane: Boolean; const APlane: TVector4);
+begin
+  if (FRHIHasClipPlane <> AHasClipPlane) or
+     (AHasClipPlane and not TVector4.PerfectlyEquals(FRHIClipPlane, APlane)) then
+  begin
+    FRHIHasClipPlane := AHasClipPlane;
+    FRHIClipPlane := APlane;
+    FRHIShadersInitialized := False;
+  end;
+end;
+
 procedure TShapeCache.EnsureRHIShaders(
   const AHasSkinning, AHasTangents,
         AHasBaseColorTex, AHasNormalTex, AHasMetallicRoughnessTex,
         AHasEmissiveTex, AHasOcclusionTex, AUseAlphaTest: Boolean;
   const AHasColorPerVertex: Boolean;
-  const AHasTextureTransform: Boolean);
+  const AHasTextureTransform: Boolean;
+  const AHasClipPlane: Boolean;
+  const AHasIBL: Boolean;
+  const AHasShadowMap: Boolean);
 var
   Mask: Cardinal;
   Gen: TCastleShaderGeneratorRHI;
-  FogSnippet, TexTransformSnippet: String;
+  FogSnippet, TexTransformSnippet, ClipPlaneSnippet, ShadowMapSnippet: String;
 begin
   if RHIDevice = nil then
     Exit;
@@ -493,6 +575,9 @@ begin
   if AUseAlphaTest then Mask := Mask or $80;
   if AHasColorPerVertex then Mask := Mask or $100;
   if AHasTextureTransform then Mask := Mask or $200;
+  if AHasClipPlane then Mask := Mask or $400;
+  if AHasIBL then Mask := Mask or $800;
+  if AHasShadowMap then Mask := Mask or $1000;
 
   if FRHIShadersInitialized and (FRHIShaderPermutationMask = Mask) and
      (FRHIVertexShader <> nil) and (FRHIFragmentShader <> nil) then
@@ -528,13 +613,43 @@ begin
       []);
     FRHIFragmentShaderSource := Gen.GenerateDefault3DFragmentShader(
       AHasBaseColorTex, AHasNormalTex, AHasMetallicRoughnessTex,
-      AHasEmissiveTex, AHasOcclusionTex, False, AUseAlphaTest, False, False);
+      AHasEmissiveTex, AHasOcclusionTex, AHasIBL, AUseAlphaTest, False, False);
+    if AHasClipPlane then
+    begin
+      ClipPlaneSnippet := FormatDot(
+        '  if (dot(vec4(%g, %g, %g, %g), castle_ViewMatrixInverse * vec4(castle_vertex_eye.xyz, 1.0)) < 0.0) discard;' + LineEnding +
+        '  vec4 baseColor = castle_MaterialBaseColor;',
+        [FRHIClipPlane.X, FRHIClipPlane.Y, FRHIClipPlane.Z, FRHIClipPlane.W]);
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        '  vec4 baseColor = castle_MaterialBaseColor;',
+        ClipPlaneSnippet,
+        []);
+    end;
     if AHasColorPerVertex then
       FRHIFragmentShaderSource := StringReplace(
         FRHIFragmentShaderSource,
         '  vec4 baseColor = castle_MaterialBaseColor;',
         '  vec4 baseColor = castle_MaterialBaseColor * castle_color_per_vertex;',
         []);
+    if AHasShadowMap then
+    begin
+      ShadowMapSnippet :=
+        '    float shadowVis = 1.0;' + LineEnding +
+        '    if (light.SpotParams.w > 0.5) {' + LineEnding +
+        '      vec4 shadowClip = light.ProjectorMatrix * vec4(castle_vertex_eye.xyz, 1.0);' + LineEnding +
+        '      if (shadowClip.w > 1e-5) {' + LineEnding +
+        '        vec3 shadowProj = shadowClip.xyz / shadowClip.w;' + LineEnding +
+        '        if (shadowProj.x >= 0.0 && shadowProj.x <= 1.0 && shadowProj.y >= 0.0 && shadowProj.y <= 1.0 && shadowProj.z >= 0.0 && shadowProj.z <= 1.0)' + LineEnding +
+        '          shadowVis = texture(castle_shadow_map_0, vec3(shadowProj.xy, shadowProj.z - 0.002));' + LineEnding +
+        '      }' + LineEnding +
+        '    }';
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        '    float shadowVis = 1.0;',
+        ShadowMapSnippet,
+        []);
+    end;
     FogSnippet :=
       LineEnding +
       '  if ((CastleScene.u_FogParams.z > 0.5) && (CastleScene.u_FogParams.y > 1e-5)) {' + LineEnding +
