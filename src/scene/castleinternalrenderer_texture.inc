@@ -24,6 +24,12 @@
   { OpenGL resource of a texture node. }
   TTextureResource = class(TRendererResource)
   protected
+    FRHISampler: TRHISampler;
+    procedure CreateRHISampler(
+      const AFilter: TTextureFilter;
+      const ABoundaryS, ABoundaryT, ABoundaryR: TGLenum;
+      const AAnisotropy: Single;
+      const AMipLevels: Cardinal);
     { Calculate things from TextureProperties node.
       If TextureProperties = @nil, they are taken from defaults
       (possibly in RenderOptions) and BoundaryModeS/-T are taken
@@ -147,6 +153,7 @@
     { How to query this texture type from shaders.
       @false if this texture type is not supported by simple query in shaders. }
     function ShaderTextureType(out TextureType: TTextureType): Boolean; virtual;
+    property RHISampler: TRHISampler read FRHISampler;
   end;
 
   { Manage TTextureResource connected to X3D nodes.
@@ -447,7 +454,6 @@
     FGLName: TGLTexture;
     WarninigDoneCannotEnable: Boolean;
     FRHITexture: TRHITexture;
-    FRHISampler: TRHISampler;
     FRHIUpdateCount: Cardinal;
   protected
     class function IsClassForTextureNode(ANode: TAbstractTextureNode): boolean; override;
@@ -709,6 +715,60 @@ end;
 function TTextureResource.ShaderTextureType(out TextureType: TTextureType): Boolean;
 begin
   Result := false;
+end;
+
+procedure TTextureResource.CreateRHISampler(
+  const AFilter: TTextureFilter;
+  const ABoundaryS, ABoundaryT, ABoundaryR: TGLenum;
+  const AAnisotropy: Single;
+  const AMipLevels: Cardinal);
+
+  function BoundaryGLToRHI(const ABoundary: TGLenum): TRHISamplerAddressMode;
+  begin
+    if ABoundary = GL_REPEAT then
+      Result := amRepeat
+    else if ABoundary = GL_MIRRORED_REPEAT then
+      Result := amMirroredRepeat
+    else
+      Result := amClampToEdge;
+  end;
+
+var
+  SamplerDesc: TRHISamplerDesc;
+begin
+  FreeAndNil(FRHISampler);
+  if RHIDevice = nil then
+    Exit;
+  FillChar(SamplerDesc, SizeOf(SamplerDesc), 0);
+  case AFilter.Minification of
+    minNearest, minNearestMipmapNearest, minNearestMipmapLinear:
+      SamplerDesc.MinFilter := sfNearest;
+  else
+    SamplerDesc.MinFilter := sfLinear;
+  end;
+  case AFilter.Magnification of
+    magNearest: SamplerDesc.MagFilter := sfNearest;
+  else
+    SamplerDesc.MagFilter := sfLinear;
+  end;
+  case AFilter.Minification of
+    minNearestMipmapLinear, minLinearMipmapLinear:
+      SamplerDesc.MipFilter := sfLinear;
+  else
+    SamplerDesc.MipFilter := sfNearest;
+  end;
+  SamplerDesc.AddressModeU := BoundaryGLToRHI(ABoundaryS);
+  SamplerDesc.AddressModeV := BoundaryGLToRHI(ABoundaryT);
+  SamplerDesc.AddressModeW := BoundaryGLToRHI(ABoundaryR);
+  SamplerDesc.MaxAnisotropy := Max(1.0, AAnisotropy);
+  SamplerDesc.CompareEnable := False;
+  SamplerDesc.CompareOp := coAlways;
+  SamplerDesc.MinLod := 0.0;
+  if AMipLevels > 1 then
+    SamplerDesc.MaxLod := Single(AMipLevels - 1)
+  else
+    SamplerDesc.MaxLod := 0.0;
+  FRHISampler := RHIDevice.CreateSampler(SamplerDesc);
 end;
 
 { TTextureResources ------------------------------------------------------------ }
@@ -1104,6 +1164,7 @@ begin
       TexDesc.DebugName := 'ImageTexture';
       FRHITexture := RHIDevice.CreateTexture(TexDesc);
       FRHITexture.UploadImage(TextureNode.TextureImage, 0, 0);
+      CreateRHISampler(Filter, BoundaryModeS, BoundaryModeT, GL_CLAMP_TO_EDGE, Anisotropy, MipLevels);
     end;
     Exit;
   end;
@@ -1131,6 +1192,7 @@ end;
 procedure TImageTextureResource.UnprepareCore;
 begin
   FreeAndNil(FRHITexture);
+  FreeAndNil(FRHISampler);
   if FGLName <> GLObjectNone then
   begin
     RendererCache.TextureImage_DecReference(FGLName);
@@ -1310,6 +1372,7 @@ begin
         FRHITextureFrames[I] := RHIDevice.CreateTexture(TexDesc);
         FRHITextureFrames[I].UploadImage(FrameImg, 0, 0);
       end;
+      CreateRHISampler(Filter, BoundaryModeS, BoundaryModeT, GL_CLAMP_TO_EDGE, Anisotropy, 1);
     end;
     Exit;
   end;
@@ -1334,6 +1397,7 @@ begin
   for I := 0 to High(FRHITextureFrames) do
     FreeAndNil(FRHITextureFrames[I]);
   SetLength(FRHITextureFrames, 0);
+  FreeAndNil(FRHISampler);
   if GLVideo <> nil then
     RendererCache.TextureVideo_DecReference(GLVideo);
 end;
@@ -1501,6 +1565,7 @@ begin
     RenderToTexture.Buffer := tbColor;
     RenderToTexture.Stencil := true;
     RenderToTexture.GLContextOpen;
+    CreateRHISampler(Filter, BoundaryModeS, BoundaryModeT, GL_CLAMP_TO_EDGE, Anisotropy, MipLevels);
     Exit;
   end;
 
@@ -1590,6 +1655,7 @@ begin
   FreeAndNil(RenderToTexture);
   FreeAndNil(FRHITexture);
   FreeAndNil(FRHIDepthTexture);
+  FreeAndNil(FRHISampler);
 
   if FGLName <> GLObjectNone then
   begin
@@ -1997,6 +2063,7 @@ end;
 procedure TCubeMapTextureResource.UnprepareCore;
 begin
   FreeAndNil(FRHITexture);
+  FreeAndNil(FRHISampler);
   if GLName <> GLObjectNone then
   begin
     RendererCache.TextureCubeMap_DecReference(GLName);
@@ -2094,6 +2161,7 @@ begin
       FRHITexture.UploadImage(BottomImg, 0, 3);
       FRHITexture.UploadImage(BackRot,   0, 4);
       FRHITexture.UploadImage(FrontRot,  0, 5);
+      CreateRHISampler(Filter, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, Anisotropy, MipLevels);
     finally
       FreeAndNil(BackRot);
       FreeAndNil(FrontRot);
@@ -2191,6 +2259,7 @@ begin
       FRHITexture := RHIDevice.CreateTexture(TexDesc);
       for Side := Low(TCubeMapSide) to High(TCubeMapSide) do
         FRHITexture.UploadImage(Composite.CubeMapImage(Side), 0, Ord(Side));
+      CreateRHISampler(Filter, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, Anisotropy, MipLevels);
     finally
       FreeAndNil(Composite);
     end;
@@ -2282,6 +2351,7 @@ begin
     RenderToTexture.SetRHITexture(FRHITexture, nil);
     RenderToTexture.Buffer := tbColor;
     RenderToTexture.GLContextOpen;
+    CreateRHISampler(Filter, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, Anisotropy, MipLevels);
     Exit;
   end;
 
@@ -2451,8 +2521,10 @@ begin
     FreeAndNil(FRHITexture);
     FRHITexture := RHIDevice.CreateTexture(TexDesc);
     FRHITexture.UploadImage(TextureNode.TextureImage, 0, 0);
+    CreateRHISampler(Filter, BoundaryModeS, BoundaryModeT, BoundaryModeR, Anisotropy, MipLevels);
     Exit;
   end;
+{$H+}
 
   if not GLFeatures.Texture3D then
   begin
@@ -2485,6 +2557,7 @@ end;
 procedure T3DTextureResource.UnprepareCore;
 begin
   FreeAndNil(FRHITexture);
+  FreeAndNil(FRHISampler);
   if GLName <> GLObjectNone then
   begin
     RendererCache.Texture3D_DecReference(GLName);

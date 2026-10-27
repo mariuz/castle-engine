@@ -282,6 +282,9 @@ type
     procedure TestCastleTextAndPrimitivesHeadlessVulkanRenderRHI;
     procedure TestPointSetLineSetForceUnlitAndPerVertexColorSpecializationRHI;
     procedure TestSolidWireframeSilhouettePolygonOffsetAndFogShaderRHI;
+    procedure TestTextureResourceRHISamplerFilterWrapAndAnisotropyRHI;
+    procedure TestShapeMaterialDescriptorSetBindsRHISamplersRHI;
+    procedure TestTextureTransformAndImageTransformRepeatShiftSpecializationRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -15223,6 +15226,322 @@ begin
       AssertSameValue(0.2, MatBlock.BaseColor.X, 1e-5);
       AssertSameValue(0.6, MatBlock.BaseColor.Y, 1e-5);
       AssertSameValue(1.0, MatBlock.BaseColor.Z, 1e-5);
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Container);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestTextureResourceRHISamplerFilterWrapAndAnisotropyRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  RenderOptions: TCastleRenderOptions;
+  PixTex: TPixelTextureNode;
+  TexProps: TTexturePropertiesNode;
+  RtNode: TRenderedTextureNode;
+  Tex3D: TPixelTexture3DNode;
+  ResImg, ResRt, Res3D: TTextureResource;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7301)));
+  SavedRHI := RHIDevice;
+  SetRHIDevice(Device);
+  RenderOptions := TCastleRenderOptions.Create(nil);
+  PixTex := TPixelTextureNode.Create;
+  RtNode := TRenderedTextureNode.Create;
+  Tex3D := TPixelTexture3DNode.Create;
+  try
+    PixTex.FdImage.Value := TRGBImage.Create(16, 16);
+    TexProps := TTexturePropertiesNode.Create;
+    TexProps.MinificationFilter := minNearestMipmapLinear;
+    TexProps.MagnificationFilter := magNearest;
+    TexProps.BoundaryModeS := bmMirroredRepeat;
+    TexProps.BoundaryModeT := bmClampToEdge;
+    TexProps.AnisotropicDegree := 8.0;
+    PixTex.TextureProperties := TexProps;
+
+    TTextureResources.Prepare(RenderOptions, PixTex);
+    ResImg := TTextureResources.Get(PixTex);
+    AssertTrue('TImageTextureResource must be prepared', ResImg <> nil);
+    AssertTrue('TImageTextureResource.RHISampler must be created', ResImg.RHISampler <> nil);
+    AssertEquals('RHISampler.Desc.MinFilter must be sfNearest',
+      Ord(sfNearest), Ord(ResImg.RHISampler.Desc.MinFilter));
+    AssertEquals('RHISampler.Desc.MagFilter must be sfNearest',
+      Ord(sfNearest), Ord(ResImg.RHISampler.Desc.MagFilter));
+    AssertEquals('RHISampler.Desc.MipFilter must be sfLinear',
+      Ord(sfLinear), Ord(ResImg.RHISampler.Desc.MipFilter));
+    AssertEquals('RHISampler.Desc.AddressModeU must be amMirroredRepeat',
+      Ord(amMirroredRepeat), Ord(ResImg.RHISampler.Desc.AddressModeU));
+    AssertEquals('RHISampler.Desc.AddressModeV must be amClampToEdge',
+      Ord(amClampToEdge), Ord(ResImg.RHISampler.Desc.AddressModeV));
+    AssertSameValue(8.0, ResImg.RHISampler.Desc.MaxAnisotropy, 1e-5);
+    AssertTrue('RHISampler.Desc.MaxLod must be > 0 for 16x16 mipmapped texture',
+      ResImg.RHISampler.Desc.MaxLod >= 4.0);
+
+    RtNode.FdDimensions.Items.Clear;
+    RtNode.FdDimensions.Items.Add(64);
+    RtNode.FdDimensions.Items.Add(64);
+    RtNode.FdRepeatS.Value := True;
+    RtNode.FdRepeatT.Value := False;
+    TTextureResources.Prepare(RenderOptions, RtNode);
+    ResRt := TTextureResources.Get(RtNode);
+    AssertTrue('TRenderedTextureResource.RHISampler must be created',
+      (ResRt <> nil) and (ResRt.RHISampler <> nil));
+    AssertEquals('TRenderedTextureResource RepeatS=True must map to amRepeat',
+      Ord(amRepeat), Ord(ResRt.RHISampler.Desc.AddressModeU));
+    AssertEquals('TRenderedTextureResource RepeatT=False must map to amClampToEdge',
+      Ord(amClampToEdge), Ord(ResRt.RHISampler.Desc.AddressModeV));
+
+    Tex3D.FdImage.Items.Clear;
+    Tex3D.FdImage.Items.Add(2);
+    Tex3D.FdImage.Items.Add(2);
+    Tex3D.FdImage.Items.Add(2);
+    Tex3D.FdImage.Items.Add(1);
+    while Tex3D.FdImage.Items.Count < 4 + 8 do
+      Tex3D.FdImage.Items.Add(255);
+    Tex3D.FdRepeatS.Value := False;
+    Tex3D.FdRepeatT.Value := True;
+    Tex3D.FdRepeatR.Value := False;
+    TTextureResources.Prepare(RenderOptions, Tex3D);
+    Res3D := TTextureResources.Get(Tex3D);
+    AssertTrue('T3DTextureResource.RHISampler must be created',
+      (Res3D <> nil) and (Res3D.RHISampler <> nil));
+    AssertEquals('T3DTextureResource RepeatS=False must map to amClampToEdge',
+      Ord(amClampToEdge), Ord(Res3D.RHISampler.Desc.AddressModeU));
+    AssertEquals('T3DTextureResource RepeatT=True must map to amRepeat',
+      Ord(amRepeat), Ord(Res3D.RHISampler.Desc.AddressModeV));
+    AssertEquals('T3DTextureResource RepeatR=False must map to amClampToEdge',
+      Ord(amClampToEdge), Ord(Res3D.RHISampler.Desc.AddressModeW));
+
+    TTextureResources.Unprepare(PixTex);
+    TTextureResources.Unprepare(RtNode);
+    TTextureResources.Unprepare(Tex3D);
+  finally
+    FreeAndNil(Tex3D);
+    FreeAndNil(RtNode);
+    FreeAndNil(PixTex);
+    FreeAndNil(RenderOptions);
+    SetRHIDevice(SavedRHI);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestShapeMaterialDescriptorSetBindsRHISamplersRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedCtx, TestCtx: TRenderContext;
+  SavedBackend: TRenderBackend;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  PhysMat: TPhysicalMaterialNode;
+  BaseTex, NormalTex: TPixelTextureNode;
+  NormalProps: TTexturePropertiesNode;
+  BoxNode: TBoxNode;
+  RShape: TX3DRendererShape;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7302)));
+  Device.ResizeSwapchain(256, 256);
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 5.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    PhysMat := TPhysicalMaterialNode.Create;
+
+    BaseTex := TPixelTextureNode.Create;
+    BaseTex.FdImage.Value := TRGBImage.Create(8, 8);
+    BaseTex.RepeatS := True;
+    BaseTex.RepeatT := False;
+    PhysMat.BaseTexture := BaseTex;
+
+    NormalTex := TPixelTextureNode.Create;
+    NormalTex.FdImage.Value := TRGBImage.Create(8, 8);
+    NormalProps := TTexturePropertiesNode.Create;
+    NormalProps.MinificationFilter := minNearest;
+    NormalProps.MagnificationFilter := magNearest;
+    NormalProps.BoundaryModeS := bmMirroredRepeat;
+    NormalProps.AnisotropicDegree := 4.0;
+    NormalTex.TextureProperties := NormalProps;
+    PhysMat.NormalTexture := NormalTex;
+
+    App.Material := PhysMat;
+    ShapeNode.Appearance := App;
+    BoxNode := TBoxNode.Create;
+    ShapeNode.Geometry := BoxNode;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(Viewport);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+
+    CmdList := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(CmdList);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+
+      RShape := TX3DRendererShape(Scene.Shapes.TraverseList(True)[0]);
+      AssertTrue('RShape.Cache must be allocated', RShape.Cache <> nil);
+      AssertTrue('RShape.Cache.RHIBaseColorSampler must be bound',
+        RShape.Cache.RHIBaseColorSampler <> nil);
+      AssertEquals('BaseColorSampler AddressModeU must be amRepeat',
+        Ord(amRepeat), Ord(RShape.Cache.RHIBaseColorSampler.Desc.AddressModeU));
+      AssertEquals('BaseColorSampler AddressModeV must be amClampToEdge',
+        Ord(amClampToEdge), Ord(RShape.Cache.RHIBaseColorSampler.Desc.AddressModeV));
+
+      AssertTrue('RShape.Cache.RHINormalSampler must be bound',
+        RShape.Cache.RHINormalSampler <> nil);
+      AssertEquals('NormalSampler MinFilter must be sfNearest',
+        Ord(sfNearest), Ord(RShape.Cache.RHINormalSampler.Desc.MinFilter));
+      AssertEquals('NormalSampler AddressModeU must be amMirroredRepeat',
+        Ord(amMirroredRepeat), Ord(RShape.Cache.RHINormalSampler.Desc.AddressModeU));
+      AssertSameValue(4.0, RShape.Cache.RHINormalSampler.Desc.MaxAnisotropy, 1e-5);
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Container);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestTextureTransformAndImageTransformRepeatShiftSpecializationRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedCtx, TestCtx: TRenderContext;
+  SavedBackend: TRenderBackend;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  ImgTransform: TCastleImageTransform;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  PhysMat: TPhysicalMaterialNode;
+  BaseTex: TPixelTextureNode;
+  TexTransform: TTextureTransformNode;
+  BoxNode: TBoxNode;
+  RShape: TX3DRendererShape;
+  ExtractedMat: TMatrix4;
+  ShadingModel: TCastleShadingModelRHI;
+  OldVertSource: String;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7303)));
+  Device.ResizeSwapchain(256, 256);
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 5.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    PhysMat := TPhysicalMaterialNode.Create;
+    BaseTex := TPixelTextureNode.Create;
+    BaseTex.FdImage.Value := TRGBImage.Create(8, 8);
+    PhysMat.BaseTexture := BaseTex;
+    App.Material := PhysMat;
+
+    TexTransform := TTextureTransformNode.Create;
+    TexTransform.Scale := Vector2(3.0, 2.0);
+    TexTransform.Translation := Vector2(0.25, 0.5);
+    App.TextureTransform := TexTransform;
+
+    ShapeNode.Appearance := App;
+    BoxNode := TBoxNode.Create;
+    ShapeNode.Geometry := BoxNode;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(Viewport);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+
+    ImgTransform := TCastleImageTransform.Create(Viewport);
+    ImgTransform.LoadFromImage(TRGBAlphaImage.Create(8, 8), True);
+    ImgTransform.SmoothScaling := False;
+    ImgTransform.RepeatImage := Vector2(4.0, 4.0);
+    Viewport.Items.Add(ImgTransform);
+
+    CmdList := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(CmdList);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+
+      RShape := TX3DRendererShape(Scene.Shapes.TraverseList(True)[0]);
+      AssertTrue('ExtractRHITextureTransform must return True for non-identity TextureTransform',
+        RShape.ExtractRHITextureTransform(ExtractedMat));
+      AssertTrue('RShape.Cache.RHIHasTextureTransform must be True',
+        (RShape.Cache <> nil) and RShape.Cache.RHIHasTextureTransform);
+      AssertTrue('Permutation mask must include $200 (AHasTextureTransform)',
+        (RShape.Cache.RHIShaderPermutationMask and $200) <> 0);
+      AssertTrue('Vertex shader source must transform castle_MultiTexCoord0 by mat4',
+        Pos('* vec4(castle_MultiTexCoord0, 0.0, 1.0)).xy;', RShape.Cache.RHIVertexShaderSource) > 0);
+
+      { Updating TexTransform.Scale at runtime must re-specialize the vertex shader }
+      OldVertSource := RShape.Cache.RHIVertexShaderSource;
+      TexTransform.Scale := Vector2(7.0, 9.0);
+      RShape.UploadRHIMaterialToCache(ShadingModel);
+      AssertTrue('Updated TexTransform.Scale must update RHIVertexShaderSource',
+        RShape.Cache.RHIVertexShaderSource <> OldVertSource);
+      AssertTrue('Updated RHIVertexShaderSource must contain new scale factor 7',
+        Pos('vec4(7,', RShape.Cache.RHIVertexShaderSource) > 0);
     finally
       Device.EndFrameAndPresent;
     end;

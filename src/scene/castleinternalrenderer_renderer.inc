@@ -1316,12 +1316,17 @@ var
   TextureTransform: TAbstractTextureTransformNode;
   Child: TX3DNode;
   Transforms: TMFNode;
-  I, FirstTexUnit: Integer;
+  I, FirstTexUnit, MaxTexUnits: Integer;
   State: TX3DGraphTraverseState;
   Matrix: TMatrix4;
 begin
   TextureTransformUnitsUsed := 0;
   TextureTransformUnitsUsedMore.Count := 0;
+
+  if GLFeatures <> nil then
+    MaxTexUnits := Integer(GLFeatures.MaxTextureUnits)
+  else
+    MaxTexUnits := 16;
 
   { in case of FontTextureNode <> nil, 1 less texture unit is available.
     Everything we do, must be shifted by 1 texture unit. }
@@ -1369,7 +1374,7 @@ begin
     if State.ShapeNode = nil then
     begin
       { No multitexturing in VRML 1.0, just always transform first tex unit. }
-      if FirstTexUnit < IfThen(GLFeatures <> nil, GLFeatures.MaxTextureUnits, 16) then
+      if FirstTexUnit < MaxTexUnits then
       begin
         TextureTransformUnitsUsed := 1;
         if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
@@ -1399,7 +1404,7 @@ begin
             MultiTextureTransform.textureTransform.
             Cap by available texture units. }
           TextureTransformUnitsUsed := Min(Transforms.Count,
-            IfThen(GLFeatures <> nil, Integer(GLFeatures.MaxTextureUnits), 16) - FirstTexUnit);
+            MaxTexUnits - FirstTexUnit);
 
           for I := 0 to TextureTransformUnitsUsed - 1 do
           begin
@@ -1444,7 +1449,7 @@ begin
         if (State.MainTexture <> nil) and
            (not (State.MainTexture is TMultiTextureNode)) then
         begin
-          if FirstTexUnit < IfThen(GLFeatures <> nil, GLFeatures.MaxTextureUnits, 16) then
+          if FirstTexUnit < MaxTexUnits then
           begin
             TextureTransformUnitsUsed := 1;
             Matrix := TextureTransform.TransformMatrix;

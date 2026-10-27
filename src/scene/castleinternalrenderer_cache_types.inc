@@ -129,6 +129,13 @@
     FRHIMaterialBuffer: TRHIBuffer;
     FRHIMaterialDescriptorLayout: TRHIDescriptorSetLayout;
     FRHIMaterialDescriptorSet: TRHIDescriptorSet;
+    FRHIBaseColorSampler: TRHISampler;
+    FRHINormalSampler: TRHISampler;
+    FRHIMetallicRoughnessSampler: TRHISampler;
+    FRHIEmissiveSampler: TRHISampler;
+    FRHIOcclusionSampler: TRHISampler;
+    FRHITextureTransform: TMatrix4;
+    FRHIHasTextureTransform: Boolean;
     FRHISkinningDescriptorLayout: TRHIDescriptorSetLayout;
     FRHISkinningDescriptorSet: TRHIDescriptorSet;
     FRHIVertexShader: TRHIShaderModule;
@@ -155,12 +162,19 @@
     procedure UploadMaterialBlock(const AMatBlock: TCastleMaterialUniformBlock);
     procedure BindMaterialTexturesToDescriptorSet(
       const ABaseColorTex, ANormalTex, AMetallicRoughnessTex,
-            AEmissiveTex, AOcclusionTex: TRHITexture);
+            AEmissiveTex, AOcclusionTex: TRHITexture;
+      const ABaseColorSampler: TRHISampler = nil;
+      const ANormalSampler: TRHISampler = nil;
+      const AMetallicRoughnessSampler: TRHISampler = nil;
+      const AEmissiveSampler: TRHISampler = nil;
+      const AOcclusionSampler: TRHISampler = nil);
+    procedure SetTextureTransform(const AHasTransform: Boolean; const AMatrix: TMatrix4);
     procedure EnsureRHIShaders(
       const AHasSkinning, AHasTangents,
             AHasBaseColorTex, AHasNormalTex, AHasMetallicRoughnessTex,
             AHasEmissiveTex, AHasOcclusionTex, AUseAlphaTest: Boolean;
-      const AHasColorPerVertex: Boolean = False);
+      const AHasColorPerVertex: Boolean = False;
+      const AHasTextureTransform: Boolean = False);
     { Debug description of this shape cache. }
     function ToString: String; override;
 
@@ -171,6 +185,13 @@
     property RHIMaterialBuffer: TRHIBuffer read FRHIMaterialBuffer;
     property RHIMaterialDescriptorLayout: TRHIDescriptorSetLayout read FRHIMaterialDescriptorLayout;
     property RHIMaterialDescriptorSet: TRHIDescriptorSet read FRHIMaterialDescriptorSet;
+    property RHIBaseColorSampler: TRHISampler read FRHIBaseColorSampler;
+    property RHINormalSampler: TRHISampler read FRHINormalSampler;
+    property RHIMetallicRoughnessSampler: TRHISampler read FRHIMetallicRoughnessSampler;
+    property RHIEmissiveSampler: TRHISampler read FRHIEmissiveSampler;
+    property RHIOcclusionSampler: TRHISampler read FRHIOcclusionSampler;
+    property RHITextureTransform: TMatrix4 read FRHITextureTransform;
+    property RHIHasTextureTransform: Boolean read FRHIHasTextureTransform;
     property RHISkinningDescriptorLayout: TRHIDescriptorSetLayout read FRHISkinningDescriptorLayout;
     property RHISkinningDescriptorSet: TRHIDescriptorSet read FRHISkinningDescriptorSet;
     property RHIVertexShader: TRHIShaderModule read FRHIVertexShader;
@@ -264,20 +285,13 @@ begin
     FRHIVertexShader := nil;
     FRHIFragmentShader := nil;
   end;
+  FRHIBaseColorSampler := nil;
+  FRHINormalSampler := nil;
+  FRHIMetallicRoughnessSampler := nil;
+  FRHIEmissiveSampler := nil;
+  FRHIOcclusionSampler := nil;
   FRHIShadersInitialized := False;
   FRHIOwnerDevice := nil;
-  if False then
-  begin
-  FreeAndNil(FRHICoordBuffer);
-  FreeAndNil(FRHIAttribBuffer);
-  FreeAndNil(FRHIIndexBuffer);
-  FreeAndNil(FRHIJointBuffer);
-  FreeAndNil(FRHIMaterialBuffer);
-  FreeAndNil(FRHIMaterialDescriptorSet);
-  FreeAndNil(FRHIMaterialDescriptorLayout);
-  FreeAndNil(FRHISkinningDescriptorSet);
-  FreeAndNil(FRHISkinningDescriptorLayout);
-  end;
 end;
 
 procedure TShapeCache.EnsureRHIDeviceMatch;
@@ -291,6 +305,11 @@ begin
     FRHIMaterialBuffer := nil;
     FRHIMaterialDescriptorSet := nil;
     FRHIMaterialDescriptorLayout := nil;
+    FRHIBaseColorSampler := nil;
+    FRHINormalSampler := nil;
+    FRHIMetallicRoughnessSampler := nil;
+    FRHIEmissiveSampler := nil;
+    FRHIOcclusionSampler := nil;
     FRHISkinningDescriptorSet := nil;
     FRHISkinningDescriptorLayout := nil;
     FRHIVertexShader := nil;
@@ -391,51 +410,73 @@ end;
 
 procedure TShapeCache.BindMaterialTexturesToDescriptorSet(
   const ABaseColorTex, ANormalTex, AMetallicRoughnessTex,
-        AEmissiveTex, AOcclusionTex: TRHITexture);
+        AEmissiveTex, AOcclusionTex: TRHITexture;
+  const ABaseColorSampler: TRHISampler;
+  const ANormalSampler: TRHISampler;
+  const AMetallicRoughnessSampler: TRHISampler;
+  const AEmissiveSampler: TRHISampler;
+  const AOcclusionSampler: TRHISampler);
 var
   AnyBound: Boolean;
 begin
+  FRHIBaseColorSampler := ABaseColorSampler;
+  FRHINormalSampler := ANormalSampler;
+  FRHIMetallicRoughnessSampler := AMetallicRoughnessSampler;
+  FRHIEmissiveSampler := AEmissiveSampler;
+  FRHIOcclusionSampler := AOcclusionSampler;
   if FRHIMaterialDescriptorSet = nil then
     Exit;
   AnyBound := False;
   if ABaseColorTex <> nil then
   begin
-    FRHIMaterialDescriptorSet.BindTexture(1, ABaseColorTex, nil);
+    FRHIMaterialDescriptorSet.BindTexture(1, ABaseColorTex, ABaseColorSampler);
     AnyBound := True;
   end;
   if ANormalTex <> nil then
   begin
-    FRHIMaterialDescriptorSet.BindTexture(2, ANormalTex, nil);
+    FRHIMaterialDescriptorSet.BindTexture(2, ANormalTex, ANormalSampler);
     AnyBound := True;
   end;
   if AMetallicRoughnessTex <> nil then
   begin
-    FRHIMaterialDescriptorSet.BindTexture(3, AMetallicRoughnessTex, nil);
+    FRHIMaterialDescriptorSet.BindTexture(3, AMetallicRoughnessTex, AMetallicRoughnessSampler);
     AnyBound := True;
   end;
   if AEmissiveTex <> nil then
   begin
-    FRHIMaterialDescriptorSet.BindTexture(4, AEmissiveTex, nil);
+    FRHIMaterialDescriptorSet.BindTexture(4, AEmissiveTex, AEmissiveSampler);
     AnyBound := True;
   end;
   if AOcclusionTex <> nil then
   begin
-    FRHIMaterialDescriptorSet.BindTexture(5, AOcclusionTex, nil);
+    FRHIMaterialDescriptorSet.BindTexture(5, AOcclusionTex, AOcclusionSampler);
     AnyBound := True;
   end;
   if AnyBound then
     FRHIMaterialDescriptorSet.Update;
 end;
 
+procedure TShapeCache.SetTextureTransform(const AHasTransform: Boolean; const AMatrix: TMatrix4);
+begin
+  if (FRHIHasTextureTransform <> AHasTransform) or
+     (AHasTransform and not TMatrix4.PerfectlyEquals(FRHITextureTransform, AMatrix)) then
+  begin
+    FRHIHasTextureTransform := AHasTransform;
+    FRHITextureTransform := AMatrix;
+    FRHIShadersInitialized := False;
+  end;
+end;
+
 procedure TShapeCache.EnsureRHIShaders(
   const AHasSkinning, AHasTangents,
         AHasBaseColorTex, AHasNormalTex, AHasMetallicRoughnessTex,
         AHasEmissiveTex, AHasOcclusionTex, AUseAlphaTest: Boolean;
-  const AHasColorPerVertex: Boolean);
+  const AHasColorPerVertex: Boolean;
+  const AHasTextureTransform: Boolean);
 var
   Mask: Cardinal;
   Gen: TCastleShaderGeneratorRHI;
-  FogSnippet: String;
+  FogSnippet, TexTransformSnippet: String;
 begin
   if RHIDevice = nil then
     Exit;
@@ -451,6 +492,7 @@ begin
   if AHasOcclusionTex then Mask := Mask or $40;
   if AUseAlphaTest then Mask := Mask or $80;
   if AHasColorPerVertex then Mask := Mask or $100;
+  if AHasTextureTransform then Mask := Mask or $200;
 
   if FRHIShadersInitialized and (FRHIShaderPermutationMask = Mask) and
      (FRHIVertexShader <> nil) and (FRHIFragmentShader <> nil) then
@@ -461,6 +503,24 @@ begin
   Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
   try
     FRHIVertexShaderSource := Gen.GenerateDefault3DVertexShader(AHasSkinning, AHasTangents);
+    if AHasTextureTransform then
+    begin
+      TexTransformSnippet := FormatDot(
+        '  castle_tex_coord0 = (mat4(' +
+        'vec4(%g, %g, %g, %g), ' +
+        'vec4(%g, %g, %g, %g), ' +
+        'vec4(%g, %g, %g, %g), ' +
+        'vec4(%g, %g, %g, %g)) * vec4(castle_MultiTexCoord0, 0.0, 1.0)).xy;',
+        [FRHITextureTransform.Data[0, 0], FRHITextureTransform.Data[0, 1], FRHITextureTransform.Data[0, 2], FRHITextureTransform.Data[0, 3],
+         FRHITextureTransform.Data[1, 0], FRHITextureTransform.Data[1, 1], FRHITextureTransform.Data[1, 2], FRHITextureTransform.Data[1, 3],
+         FRHITextureTransform.Data[2, 0], FRHITextureTransform.Data[2, 1], FRHITextureTransform.Data[2, 2], FRHITextureTransform.Data[2, 3],
+         FRHITextureTransform.Data[3, 0], FRHITextureTransform.Data[3, 1], FRHITextureTransform.Data[3, 2], FRHITextureTransform.Data[3, 3]]);
+      FRHIVertexShaderSource := StringReplace(
+        FRHIVertexShaderSource,
+        '  castle_tex_coord0 = castle_MultiTexCoord0;',
+        TexTransformSnippet,
+        []);
+    end;
     FRHIVertexShaderSource := StringReplace(
       FRHIVertexShaderSource,
       '  gl_Position = ',

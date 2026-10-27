@@ -84,7 +84,18 @@
       Returns the number of non-nil TRHITexture handles extracted. }
     function ExtractRHIMaterialTextures(
       out ABaseColorTex, ANormalTex, AMetallicRoughnessTex,
-          AEmissiveTex, AOcclusionTex: TRHITexture): Cardinal;
+          AEmissiveTex, AOcclusionTex: TRHITexture): Cardinal; overload;
+
+    function ExtractRHIMaterialTextures(
+      out ABaseColorTex, ANormalTex, AMetallicRoughnessTex,
+          AEmissiveTex, AOcclusionTex: TRHITexture;
+      out ABaseColorSampler, ANormalSampler, AMetallicRoughnessSampler,
+          AEmissiveSampler, AOcclusionSampler: TRHISampler): Cardinal; overload;
+
+    { Extracts the 4x4 texture coordinate transformation matrix from Appearance.TextureTransform
+      (TTextureTransformNode, TTextureTransform3DNode, TTextureTransformMatrix3DNode, or
+      TMultiTextureTransformNode). Returns True if a non-identity texture transform is active. }
+    function ExtractRHITextureTransform(out AMatrix: TMatrix4): Boolean;
 
     { Builds an 80-byte std430 TCastleBindlessMaterialEntry combining extracted PBR/Phong/Unlit
       material factors with 32-bit bindless texture array indices into castle_BindlessTextures[]. }
@@ -436,8 +447,23 @@ end;
 function TX3DRendererShape.ExtractRHIMaterialTextures(
   out ABaseColorTex, ANormalTex, AMetallicRoughnessTex,
       AEmissiveTex, AOcclusionTex: TRHITexture): Cardinal;
+var
+  BaseColorSampler, NormalSampler, MetallicRoughnessSampler,
+  EmissiveSampler, OcclusionSampler: TRHISampler;
+begin
+  Result := ExtractRHIMaterialTextures(
+    ABaseColorTex, ANormalTex, AMetallicRoughnessTex, AEmissiveTex, AOcclusionTex,
+    BaseColorSampler, NormalSampler, MetallicRoughnessSampler, EmissiveSampler, OcclusionSampler);
+end;
 
-  function ResolveNodeRHITexture(const ARawNode: TX3DNode): TRHITexture;
+function TX3DRendererShape.ExtractRHIMaterialTextures(
+  out ABaseColorTex, ANormalTex, AMetallicRoughnessTex,
+      AEmissiveTex, AOcclusionTex: TRHITexture;
+  out ABaseColorSampler, ANormalSampler, AMetallicRoughnessSampler,
+      AEmissiveSampler, AOcclusionSampler: TRHISampler): Cardinal;
+
+  function ResolveNodeRHITexture(const ARawNode: TX3DNode;
+    out ASampler: TRHISampler): TRHITexture;
   var
     ANode: TAbstractTextureNode;
     Res: TTextureResource;
@@ -445,13 +471,14 @@ function TX3DRendererShape.ExtractRHIMaterialTextures(
     TempRenderOptions: TCastleRenderOptions;
   begin
     Result := nil;
+    ASampler := nil;
     if not (ARawNode is TAbstractTextureNode) then Exit;
     ANode := TAbstractTextureNode(ARawNode);
     if ANode is TMultiTextureNode then
     begin
       MultiTex := TMultiTextureNode(ANode);
       if (MultiTex.FdTexture.Count > 0) and (MultiTex.FdTexture[0] is TAbstractTextureNode) then
-        Result := ResolveNodeRHITexture(TAbstractTextureNode(MultiTex.FdTexture[0]));
+        Result := ResolveNodeRHITexture(TAbstractTextureNode(MultiTex.FdTexture[0]), ASampler);
       Exit;
     end;
     Res := TTextureResources.Get(ANode);
@@ -470,6 +497,8 @@ function TX3DRendererShape.ExtractRHIMaterialTextures(
       end;
       Res := TTextureResources.Get(ANode);
     end;
+    if Res <> nil then
+      ASampler := Res.RHISampler;
     if Res is TImageTextureResource then
       Result := TImageTextureResource(Res).RHITexture
     else if Res is TMovieTextureResource then
@@ -498,6 +527,11 @@ begin
   AMetallicRoughnessTex := nil;
   AEmissiveTex := nil;
   AOcclusionTex := nil;
+  ABaseColorSampler := nil;
+  ANormalSampler := nil;
+  AMetallicRoughnessSampler := nil;
+  AEmissiveSampler := nil;
+  AOcclusionSampler := nil;
 
   if (Cache <> nil) and (Cache.RenderOptions <> nil) and
      ((Cache.RenderOptions.Mode = rmSolidColor) or (not Cache.RenderOptions.Textures)) then
@@ -515,41 +549,79 @@ begin
       if MatNode is TPhysicalMaterialNode then
       begin
         PhysMat := TPhysicalMaterialNode(MatNode);
-        ABaseColorTex := ResolveNodeRHITexture(PhysMat.FdBaseTexture.Value);
-        ANormalTex := ResolveNodeRHITexture(PhysMat.FdNormalTexture.Value);
-        AMetallicRoughnessTex := ResolveNodeRHITexture(PhysMat.MetallicRoughnessTexture);
-        AEmissiveTex := ResolveNodeRHITexture(PhysMat.EmissiveTexture);
-        AOcclusionTex := ResolveNodeRHITexture(PhysMat.OcclusionTexture);
+        ABaseColorTex := ResolveNodeRHITexture(PhysMat.FdBaseTexture.Value, ABaseColorSampler);
+        ANormalTex := ResolveNodeRHITexture(PhysMat.FdNormalTexture.Value, ANormalSampler);
+        AMetallicRoughnessTex := ResolveNodeRHITexture(PhysMat.MetallicRoughnessTexture, AMetallicRoughnessSampler);
+        AEmissiveTex := ResolveNodeRHITexture(PhysMat.EmissiveTexture, AEmissiveSampler);
+        AOcclusionTex := ResolveNodeRHITexture(PhysMat.OcclusionTexture, AOcclusionSampler);
       end else
       if MatNode is TMaterialNode then
       begin
         PhongMat := TMaterialNode(MatNode);
-        ABaseColorTex := ResolveNodeRHITexture(PhongMat.DiffuseTexture);
-        ANormalTex := ResolveNodeRHITexture(PhongMat.NormalTexture);
-        AEmissiveTex := ResolveNodeRHITexture(PhongMat.EmissiveTexture);
+        ABaseColorTex := ResolveNodeRHITexture(PhongMat.DiffuseTexture, ABaseColorSampler);
+        ANormalTex := ResolveNodeRHITexture(PhongMat.NormalTexture, ANormalSampler);
+        AEmissiveTex := ResolveNodeRHITexture(PhongMat.EmissiveTexture, AEmissiveSampler);
       end else
       if MatNode is TUnlitMaterialNode then
       begin
         UnlitMat := TUnlitMaterialNode(MatNode);
-        ABaseColorTex := ResolveNodeRHITexture(UnlitMat.EmissiveTexture);
+        ABaseColorTex := ResolveNodeRHITexture(UnlitMat.EmissiveTexture, ABaseColorSampler);
       end;
 
       if ABaseColorTex = nil then
-        ABaseColorTex := ResolveNodeRHITexture(App.Texture);
+        ABaseColorTex := ResolveNodeRHITexture(App.Texture, ABaseColorSampler);
       if ANormalTex = nil then
-        ANormalTex := ResolveNodeRHITexture(App.NormalMap);
+        ANormalTex := ResolveNodeRHITexture(App.NormalMap, ANormalSampler);
     end;
   end;
 
   if (ABaseColorTex = nil) and (OriginalGeometry <> nil) and
      (OriginalGeometry.FontTextureNode <> nil) then
-    ABaseColorTex := ResolveNodeRHITexture(OriginalGeometry.FontTextureNode);
+    ABaseColorTex := ResolveNodeRHITexture(OriginalGeometry.FontTextureNode, ABaseColorSampler);
 
   if ABaseColorTex <> nil then Inc(Result);
   if ANormalTex <> nil then Inc(Result);
   if AMetallicRoughnessTex <> nil then Inc(Result);
   if AEmissiveTex <> nil then Inc(Result);
   if AOcclusionTex <> nil then Inc(Result);
+end;
+
+function TX3DRendererShape.ExtractRHITextureTransform(out AMatrix: TMatrix4): Boolean;
+var
+  ShapeState: TX3DGraphTraverseState;
+  App: TAppearanceNode;
+  TexTransform: TAbstractTextureTransformNode;
+  MultiTransform: TMultiTextureTransformNode;
+begin
+  Result := False;
+  AMatrix := TMatrix4.Identity;
+
+  ShapeState := OriginalState;
+  if ShapeState = nil then
+    ShapeState := State;
+  if (ShapeState = nil) or (ShapeState.ShapeNode = nil) then
+    Exit;
+
+  App := ShapeState.ShapeNode.Appearance;
+  if App = nil then
+    Exit;
+
+  TexTransform := App.TextureTransform;
+  if TexTransform is TMultiTextureTransformNode then
+  begin
+    MultiTransform := TMultiTextureTransformNode(TexTransform);
+    if (MultiTransform.FdTextureTransform.Count > 0) and
+       (MultiTransform.FdTextureTransform[0] is TAbstractSingleTextureTransformNode) then
+      TexTransform := TAbstractSingleTextureTransformNode(MultiTransform.FdTextureTransform[0])
+    else
+      TexTransform := nil;
+  end;
+
+  if TexTransform is TAbstractSingleTextureTransformNode then
+  begin
+    AMatrix := TAbstractSingleTextureTransformNode(TexTransform).TransformMatrix;
+    Result := not TMatrix4.PerfectlyEquals(AMatrix, TMatrix4.Identity);
+  end;
 end;
 
 function TX3DRendererShape.BuildRHIBindlessMaterialEntry(
@@ -576,6 +648,9 @@ procedure TX3DRendererShape.UploadRHIMaterialToCache(out AShadingModel: TCastleS
 var
   MatBlock: TCastleMaterialUniformBlock;
   BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex: TRHITexture;
+  BaseColorSampler, NormalSampler, MetallicRoughnessSampler, EmissiveSampler, OcclusionSampler: TRHISampler;
+  TexTransformMatrix: TMatrix4;
+  HasTexTransform: Boolean;
   BaseColorIdx, NormalIdx, MetallicRoughnessIdx, EmissiveIdx: Cardinal;
   BindlessEntry: TCastleBindlessMaterialEntry;
 begin
@@ -584,11 +659,16 @@ begin
     Cache.UploadMaterialBlock(MatBlock);
   if RHIDevice <> nil then
   begin
-    ExtractRHIMaterialTextures(BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex);
+    ExtractRHIMaterialTextures(
+      BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex,
+      BaseColorSampler, NormalSampler, MetallicRoughnessSampler, EmissiveSampler, OcclusionSampler);
+    HasTexTransform := ExtractRHITextureTransform(TexTransformMatrix);
     if Cache <> nil then
     begin
+      Cache.SetTextureTransform(HasTexTransform, TexTransformMatrix);
       Cache.BindMaterialTexturesToDescriptorSet(
-        BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex);
+        BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex,
+        BaseColorSampler, NormalSampler, MetallicRoughnessSampler, EmissiveSampler, OcclusionSampler);
       Cache.EnsureRHIShaders(
         Cache.RHIJointBuffer <> nil,
         (Cache.Arrays <> nil) and Cache.Arrays.HasTangent,
@@ -598,7 +678,8 @@ begin
         EmissiveTex <> nil,
         OcclusionTex <> nil,
         MatBlock.PBRParams.W > 0.0,
-        (Cache.Arrays <> nil) and (Cache.Arrays.ColorType <> ctNone));
+        (Cache.Arrays <> nil) and (Cache.Arrays.ColorType <> ctNone),
+        HasTexTransform);
     end;
     if BaseColorTex <> nil then
       BaseColorIdx := RHIDevice.RegisterBindlessTexture(BaseColorTex)
