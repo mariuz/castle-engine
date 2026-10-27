@@ -291,6 +291,9 @@ type
     procedure TestTextureCoordinateGeneratorAndBounds2DSpecializationRHI;
     procedure TestEffectNodePlugFunctionsAndPointPropertiesSpecializationRHI;
     procedure TestViewportUpdateGeneratedTexturesOffscreenSceneRenderRHI;
+    procedure TestComposedShaderNodeFullCustomShaderAndLegacyUpgradeRHI;
+    procedure TestPhongMaterialOcclusionSpecularPureEmissiveAndCommonSurfaceShaderRHI;
+    procedure TestTwoSidedGeometryFrontFacingNormalFlipAndNegativeScaleWindingRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -16271,6 +16274,373 @@ begin
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestComposedShaderNodeFullCustomShaderAndLegacyUpgradeRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedCtx: TRenderContext;
+  SavedBackend: TRenderBackend;
+  TestCtx: TRenderContext;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  Box: TBoxNode;
+  ComposedShader: TComposedShaderNode;
+  VertPart, FragPart: TShaderPartNode;
+  RShape: TX3DRendererShape;
+  CustomVert, CustomFrag: String;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7601)));
+  Device.ResizeSwapchain(256, 256);
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 5.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    App.Material := Mat;
+
+    ComposedShader := TComposedShaderNode.Create;
+    ComposedShader.Language := slGLSL;
+
+    VertPart := TShaderPartNode.Create;
+    VertPart.ShaderType := stVertex;
+    VertPart.SetUrl(['data:text/plain,' +
+      'void main(void) {' + LineEnding +
+      '  gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;' + LineEnding +
+      '}']);
+
+    FragPart := TShaderPartNode.Create;
+    FragPart.ShaderType := stFragment;
+    FragPart.SetUrl(['data:text/plain,' +
+      'uniform float myCustomGain;' + LineEnding +
+      'void main(void) {' + LineEnding +
+      '  gl_FragColor = vec4(myCustomGain, 0.5, 1.0, 1.0);' + LineEnding +
+      '}']);
+
+    ComposedShader.FdParts.Add(VertPart);
+    ComposedShader.FdParts.Add(FragPart);
+    App.FdShaders.Add(ComposedShader);
+
+    ShapeNode.Appearance := App;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(Viewport);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+
+    CmdList := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(CmdList);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+
+      RShape := TX3DRendererShape(Scene.Shapes.TraverseList(True)[0]);
+      AssertTrue('ExtractRHIComposedShader must return True for valid TComposedShaderNode',
+        RShape.ExtractRHIComposedShader(CustomVert, CustomFrag));
+      AssertTrue('RHIShaderPermutationMask must include ComposedShader bit ($8000)',
+        (RShape.Cache.RHIShaderPermutationMask and $8000) <> 0);
+      AssertTrue('RHIVertexShaderSource must contain legacy gl_ModelViewProjectionMatrix upgrade',
+        Pos('#define gl_ModelViewProjectionMatrix', RShape.Cache.RHIVertexShaderSource) > 0);
+      AssertTrue('RHIVertexShaderSource must contain Vulkan half-Z post-processing',
+        Pos('gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5;', RShape.Cache.RHIVertexShaderSource) > 0);
+      AssertTrue('RHIFragmentShaderSource must upgrade custom uniform into CastleUserEffectBlock UBO',
+        Pos('CASTLE_UBO(2, 1) uniform CastleUserEffectBlock',
+          RShape.Cache.RHIFragmentShaderSource) > 0);
+      AssertTrue('RHIFragmentShaderSource must contain legacy gl_FragColor upgrade',
+        Pos('#define gl_FragColor castle_FragColor', RShape.Cache.RHIFragmentShaderSource) > 0);
+      AssertTrue('RHIVertexShader and RHIFragmentShader must be compiled',
+        (RShape.Cache.RHIVertexShader <> nil) and (RShape.Cache.RHIFragmentShader <> nil));
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Container);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestPhongMaterialOcclusionSpecularPureEmissiveAndCommonSurfaceShaderRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene1, Scene2, Scene3: TCastleScene;
+  Root1, Root2, Root3: TX3DRootNode;
+  Shape1, Shape2, Shape3: TShapeNode;
+  App1, App2, App3: TAppearanceNode;
+  PhongMat, PureEmissiveMat: TMaterialNode;
+  CommonSurf: TCommonSurfaceShaderNode;
+  OccTex, SpecTex, DiffTex, NormTex: TPixelTextureNode;
+  Box1, Box2, Box3: TBoxNode;
+  RShape1, RShape2, RShape3: TX3DRendererShape;
+  MatBlock: TCastleMaterialUniformBlock;
+  ShadingModel: TCastleShadingModelRHI;
+  BaseTex, NormalTexOut, MetRoughTex, EmissiveTex, OcclusionTexOut: TRHITexture;
+  BaseSamp, NormalSamp, MetRoughSamp, EmissiveSamp, OcclusionSamp: TRHISampler;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7602)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene1 := TCastleScene.Create(nil);
+  Scene2 := TCastleScene.Create(nil);
+  Scene3 := TCastleScene.Create(nil);
+  try
+    { 1. TMaterialNode with OcclusionTexture + OcclusionStrength + SpecularTexture }
+    Root1 := TX3DRootNode.Create;
+    Shape1 := TShapeNode.Create;
+    App1 := TAppearanceNode.Create;
+    PhongMat := TMaterialNode.Create;
+    PhongMat.DiffuseColor := Vector3(0.7, 0.3, 0.2);
+    PhongMat.SpecularColor := Vector3(0.9, 0.9, 0.9);
+    PhongMat.OcclusionStrength := 0.65;
+    OccTex := TPixelTextureNode.Create;
+    OccTex.FdImage.Value := TRGBImage.Create(2, 2);
+    PhongMat.OcclusionTexture := OccTex;
+    SpecTex := TPixelTextureNode.Create;
+    SpecTex.FdImage.Value := TRGBImage.Create(2, 2);
+    PhongMat.SpecularTexture := SpecTex;
+    App1.Material := PhongMat;
+    Shape1.Appearance := App1;
+    Box1 := TBoxNode.Create;
+    Shape1.Geometry := Box1;
+    Root1.AddChildren(Shape1);
+    Scene1.Load(Root1, True);
+
+    RShape1 := TX3DRendererShape(Scene1.Shapes.TraverseList(True)[0]);
+    RShape1.ExtractRHIMaterialBlock(MatBlock, ShadingModel);
+    AssertEquals('Phong material must use smPhong', Ord(smPhong), Ord(ShadingModel));
+    AssertSameValue(0.65, MatBlock.PBRParams.Z, 0.001);
+    RShape1.ExtractRHIMaterialTextures(BaseTex, NormalTexOut, MetRoughTex, EmissiveTex, OcclusionTexOut,
+      BaseSamp, NormalSamp, MetRoughSamp, EmissiveSamp, OcclusionSamp);
+    AssertTrue('PhongMat.OcclusionTexture must resolve OcclusionTexOut', OcclusionTexOut <> nil);
+    AssertTrue('PhongMat.SpecularTexture must resolve MetRoughTex', MetRoughTex <> nil);
+
+    { 2. PureEmissive TMaterialNode -> smUnlit optimization }
+    Root2 := TX3DRootNode.Create;
+    Shape2 := TShapeNode.Create;
+    App2 := TAppearanceNode.Create;
+    PureEmissiveMat := TMaterialNode.Create;
+    PureEmissiveMat.DiffuseColor := TVector3.Zero;
+    PureEmissiveMat.SpecularColor := TVector3.Zero;
+    PureEmissiveMat.AmbientIntensity := 0.0;
+    PureEmissiveMat.EmissiveColor := Vector3(0.2, 0.8, 0.4);
+    App2.Material := PureEmissiveMat;
+    Shape2.Appearance := App2;
+    Box2 := TBoxNode.Create;
+    Shape2.Geometry := Box2;
+    Root2.AddChildren(Shape2);
+    Scene2.Load(Root2, True);
+
+    RShape2 := TX3DRendererShape(Scene2.Shapes.TraverseList(True)[0]);
+    RShape2.ExtractRHIMaterialBlock(MatBlock, ShadingModel);
+    AssertEquals('PureEmissive TMaterialNode must optimize to smUnlit', Ord(smUnlit), Ord(ShadingModel));
+    AssertSameValue(0.2, MatBlock.BaseColor.X, 0.001);
+    AssertSameValue(0.8, MatBlock.BaseColor.Y, 0.001);
+    AssertSameValue(0.4, MatBlock.BaseColor.Z, 0.001);
+    AssertSameValue(-1.0, MatBlock.SpecularColor.W, 0.001);
+
+    { 3. TCommonSurfaceShaderNode material & texture extraction }
+    Root3 := TX3DRootNode.Create;
+    Shape3 := TShapeNode.Create;
+    App3 := TAppearanceNode.Create;
+    CommonSurf := TCommonSurfaceShaderNode.Create;
+    CommonSurf.DiffuseFactor := Vector3(0.4, 0.5, 0.6);
+    CommonSurf.AlphaFactor := 0.85;
+    CommonSurf.SpecularFactor := Vector3(0.3, 0.3, 0.3);
+    CommonSurf.ShininessFactor := 0.5;
+    CommonSurf.EmissiveFactor := Vector3(0.1, 0.2, 0.3);
+    DiffTex := TPixelTextureNode.Create;
+    DiffTex.FdImage.Value := TRGBImage.Create(2, 2);
+    CommonSurf.DiffuseTexture := DiffTex;
+    NormTex := TPixelTextureNode.Create;
+    NormTex.FdImage.Value := TRGBImage.Create(2, 2);
+    CommonSurf.NormalTexture := NormTex;
+    App3.FdShaders.Add(CommonSurf);
+    Shape3.Appearance := App3;
+    Box3 := TBoxNode.Create;
+    Shape3.Geometry := Box3;
+    Root3.AddChildren(Shape3);
+    Scene3.Load(Root3, True);
+
+    RShape3 := TX3DRendererShape(Scene3.Shapes.TraverseList(True)[0]);
+    RShape3.ExtractRHIMaterialBlock(MatBlock, ShadingModel);
+    AssertEquals('TCommonSurfaceShaderNode must extract as smPhong', Ord(smPhong), Ord(ShadingModel));
+    AssertSameValue(0.4, MatBlock.BaseColor.X, 0.001);
+    AssertSameValue(0.85, MatBlock.BaseColor.W, 0.001);
+    AssertSameValue(64.0, MatBlock.SpecularColor.W, 0.01);
+    RShape3.ExtractRHIMaterialTextures(BaseTex, NormalTexOut, MetRoughTex, EmissiveTex, OcclusionTexOut,
+      BaseSamp, NormalSamp, MetRoughSamp, EmissiveSamp, OcclusionSamp);
+    AssertTrue('CommonSurfaceShader.DiffuseTexture must resolve BaseTex', BaseTex <> nil);
+    AssertTrue('CommonSurfaceShader.NormalTexture must resolve NormalTexOut', NormalTexOut <> nil);
+
+    TTextureResources.Unprepare(OccTex);
+    TTextureResources.Unprepare(SpecTex);
+    TTextureResources.Unprepare(DiffTex);
+    TTextureResources.Unprepare(NormTex);
+  finally
+    FreeAndNil(Scene3);
+    FreeAndNil(Scene2);
+    FreeAndNil(Scene1);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestTwoSidedGeometryFrontFacingNormalFlipAndNegativeScaleWindingRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  Viewport: TCastleViewport;
+  Scene1, Scene2: TCastleScene;
+  Root1, Root2: TX3DRootNode;
+  Shape1, Shape2: TShapeNode;
+  App1, App2: TAppearanceNode;
+  Mat1, Mat2: TPhysicalMaterialNode;
+  IFS: TIndexedFaceSetNode;
+  Coord: TCoordinateNode;
+  NegTransform: TTransformNode;
+  Box2: TBoxNode;
+  RShape1, RShape2: TX3DRendererShape;
+  Renderer: TRenderer;
+  Cam: TRenderingCamera;
+  Stats: TRenderStatistics;
+  Desc1, Desc2: TRHIGraphicsPipelineDesc;
+  ShadingModel: TCastleShadingModelRHI;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7603)));
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Viewport := TCastleViewport.Create(nil);
+  Scene1 := TCastleScene.Create(nil);
+  Scene2 := TCastleScene.Create(nil);
+  Renderer := TRenderer.Create(nil);
+  Cam := TRenderingCamera.Create;
+  try
+    { 1. Two-sided IndexedFaceSet (Solid := False) }
+    Root1 := TX3DRootNode.Create;
+    Shape1 := TShapeNode.Create;
+    App1 := TAppearanceNode.Create;
+    Mat1 := TPhysicalMaterialNode.Create;
+    App1.Material := Mat1;
+    Shape1.Appearance := App1;
+    IFS := TIndexedFaceSetNode.Create;
+    IFS.Solid := False;
+    Coord := TCoordinateNode.Create;
+    Coord.SetPoint([
+      Vector3(-1, -1, 0),
+      Vector3( 1, -1, 0),
+      Vector3( 0,  1, 0)]);
+    IFS.Coord := Coord;
+    IFS.SetCoordIndex([0, 1, 2, -1]);
+    Shape1.Geometry := IFS;
+    Root1.AddChildren(Shape1);
+    Scene1.Load(Root1, True);
+    Viewport.Items.Add(Scene1);
+
+    { 2. Solid Box under negative X scale (Determinant < 0) }
+    Root2 := TX3DRootNode.Create;
+    NegTransform := TTransformNode.Create;
+    NegTransform.Scale := Vector3(-1.0, 1.0, 1.0);
+    Shape2 := TShapeNode.Create;
+    App2 := TAppearanceNode.Create;
+    Mat2 := TPhysicalMaterialNode.Create;
+    App2.Material := Mat2;
+    Shape2.Appearance := App2;
+    Box2 := TBoxNode.Create;
+    Shape2.Geometry := Box2;
+    NegTransform.AddChildren(Shape2);
+    Root2.AddChildren(NegTransform);
+    Scene2.Load(Root2, True);
+    Scene2.RenderOptions.RobustNegativeScale := True;
+    Viewport.Items.Add(Scene2);
+
+    CmdList := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(CmdList);
+    try
+      RShape1 := TX3DRendererShape(Scene1.Shapes.TraverseList(True)[0]);
+      RShape1.PrepareRHIBuffers(Scene1.RenderOptions, 1);
+      RShape1.UploadRHIMaterialToCache(ShadingModel);
+
+      RShape2 := TX3DRendererShape(Scene2.Shapes.TraverseList(True)[0]);
+      RShape2.PrepareRHIBuffers(Scene2.RenderOptions, 1);
+      RShape2.UploadRHIMaterialToCache(ShadingModel);
+
+      Cam.Target := rtScreen;
+      Cam.Matrix := TMatrix4.Identity;
+      FillChar(Stats, SizeOf(Stats), 0);
+      Renderer.RenderBegin(nil, Cam, nil, 0, 0, 0, @Stats);
+      try
+        Renderer.BuildShapePipelineDesc(RShape1, Scene1.RenderOptions, Desc1);
+        AssertEquals('Two-sided shape (Solid=False) must have CullMode = cmNone',
+          Ord(cmNone), Ord(Desc1.Rasterizer.CullMode));
+        AssertTrue('Two-sided shape fragment shader must flip back-face normals using gl_FrontFacing',
+          Pos('gl_FrontFacing ? 1.0 : -1.0', RShape1.Cache.RHIFragmentShaderSource) > 0);
+
+        Renderer.BuildShapePipelineDesc(RShape2, Scene2.RenderOptions, Desc2);
+        AssertEquals('Solid shape must have CullMode = cmBack',
+          Ord(cmBack), Ord(Desc2.Rasterizer.CullMode));
+        AssertEquals('Negatively scaled shape with RobustNegativeScale=True must flip FrontFace to ffClockwise',
+          Ord(ffClockwise), Ord(Desc2.Rasterizer.FrontFace));
+      finally
+        Renderer.RenderEnd;
+      end;
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Cam);
+    FreeAndNil(Renderer);
+    FreeAndNil(Scene2);
+    FreeAndNil(Scene1);
+    FreeAndNil(Viewport);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);
   end;
 end;

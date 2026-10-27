@@ -149,6 +149,8 @@
     FRHIPointSize: Single;
     FRHIVertexEffectCode: String;
     FRHIFragmentEffectCode: String;
+    FRHIComposedVertSource: String;
+    FRHIComposedFragSource: String;
     FRHISkinningDescriptorLayout: TRHIDescriptorSetLayout;
     FRHISkinningDescriptorSet: TRHIDescriptorSet;
     FRHIVertexShader: TRHIShaderModule;
@@ -192,6 +194,7 @@
       const ABoundsS, ABoundsT: TVector4);
     procedure SetPointSize(const APointSize: Single);
     procedure SetShaderEffects(const AVertexEffectCode, AFragmentEffectCode: String);
+    procedure SetComposedShader(const ACustomVertSource, ACustomFragSource: String);
     procedure EnsureRHIShaders(
       const AHasSkinning, AHasTangents,
             AHasBaseColorTex, AHasNormalTex, AHasMetallicRoughnessTex,
@@ -202,7 +205,8 @@
       const AHasIBL: Boolean = False;
       const AHasShadowMap: Boolean = False;
       const AHasTexCoordGen: Boolean = False;
-      const AHasShaderEffects: Boolean = False);
+      const AHasShaderEffects: Boolean = False;
+      const AHasComposedShader: Boolean = False);
     { Debug description of this shape cache. }
     function ToString: String; override;
 
@@ -232,6 +236,8 @@
     property RHIPointSize: Single read FRHIPointSize;
     property RHIVertexEffectCode: String read FRHIVertexEffectCode;
     property RHIFragmentEffectCode: String read FRHIFragmentEffectCode;
+    property RHIComposedVertSource: String read FRHIComposedVertSource;
+    property RHIComposedFragSource: String read FRHIComposedFragSource;
     property RHISkinningDescriptorLayout: TRHIDescriptorSetLayout read FRHISkinningDescriptorLayout;
     property RHISkinningDescriptorSet: TRHIDescriptorSet read FRHISkinningDescriptorSet;
     property RHIVertexShader: TRHIShaderModule read FRHIVertexShader;
@@ -603,6 +609,17 @@ begin
   end;
 end;
 
+procedure TShapeCache.SetComposedShader(const ACustomVertSource, ACustomFragSource: String);
+begin
+  if (FRHIComposedVertSource <> ACustomVertSource) or
+     (FRHIComposedFragSource <> ACustomFragSource) then
+  begin
+    FRHIComposedVertSource := ACustomVertSource;
+    FRHIComposedFragSource := ACustomFragSource;
+    FRHIShadersInitialized := False;
+  end;
+end;
+
 procedure TShapeCache.EnsureRHIShaders(
   const AHasSkinning, AHasTangents,
         AHasBaseColorTex, AHasNormalTex, AHasMetallicRoughnessTex,
@@ -613,7 +630,8 @@ procedure TShapeCache.EnsureRHIShaders(
   const AHasIBL: Boolean;
   const AHasShadowMap: Boolean;
   const AHasTexCoordGen: Boolean;
-  const AHasShaderEffects: Boolean);
+  const AHasShaderEffects: Boolean;
+  const AHasComposedShader: Boolean);
 var
   Mask: Cardinal;
   Gen: TCastleShaderGeneratorRHI;
@@ -641,6 +659,8 @@ begin
   if AHasTexCoordGen or (FRHITexCoordGen <> tgExplicit) then Mask := Mask or $2000;
   if AHasShaderEffects or (FRHIVertexEffectCode <> '') or (FRHIFragmentEffectCode <> '') or
      (FRHIPointSize > 1.0001) then Mask := Mask or $4000;
+  if AHasComposedShader or (FRHIComposedVertSource <> '') or (FRHIComposedFragSource <> '') then
+    Mask := Mask or $8000;
 
   if FRHIShadersInitialized and (FRHIShaderPermutationMask = Mask) and
      (FRHIVertexShader <> nil) and (FRHIFragmentShader <> nil) then
@@ -863,6 +883,20 @@ begin
             []);
       end;
     end;
+    if (Arrays <> nil) and (not Arrays.CullFace) then
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        '  vec3 N = normalize(castle_normal_eye);',
+        '  vec3 N = normalize(castle_normal_eye) * (gl_FrontFacing ? 1.0 : -1.0);',
+        []);
+    if FRHIComposedVertSource <> '' then
+      FRHIVertexShaderSource := Gen.FinalizeVertexShaderSource(
+        Gen.GeneratePreamble(ssVertex) +
+        Gen.UpgradeUserEffectUniforms(Gen.UpgradeLegacyGLSLBuiltIns(FRHIComposedVertSource, 'ComposedShader')));
+    if FRHIComposedFragSource <> '' then
+      FRHIFragmentShaderSource :=
+        Gen.GeneratePreamble(ssFragment) +
+        Gen.UpgradeUserEffectUniforms(Gen.UpgradeLegacyGLSLBuiltIns(FRHIComposedFragSource, 'ComposedShader'));
     FRHIVertexShader := RHIDevice.CreateShaderModuleFromGLSL(
       ssVertex, FRHIVertexShaderSource, Format('CastleShapeVert_Perm%.2x', [Mask]));
     FRHIFragmentShader := RHIDevice.CreateShaderModuleFromGLSL(

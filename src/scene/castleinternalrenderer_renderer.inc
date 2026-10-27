@@ -650,6 +650,21 @@ begin
   else
     ADesc.Rasterizer.PolygonMode := pmFill;
 
+  if (AShape <> nil) and (AShape.Cache <> nil) and (AShape.Cache.Arrays <> nil) then
+  begin
+    if AShape.Cache.Arrays.CullFace then
+      ADesc.Rasterizer.CullMode := cmBack
+    else
+      ADesc.Rasterizer.CullMode := cmNone;
+
+    if ((ARenderOptions <> nil) and ARenderOptions.RobustNegativeScale and
+        (AShape.State <> nil) and (AShape.State.Transformation.Transform.Determinant < 0)) xor
+       AShape.Cache.Arrays.FrontFaceCcw then
+      ADesc.Rasterizer.FrontFace := ffCounterClockwise
+    else
+      ADesc.Rasterizer.FrontFace := ffClockwise;
+  end;
+
   if RenderContext <> nil then
   begin
     if RenderContext.CullFace then
@@ -904,26 +919,29 @@ begin
     These RenderContext properties are always set before rendering any shape,
     so ClassRenderBegin doesn't care to set them to any value,
     and we just reset them in ClassRenderEnd. }
-  RenderContext.CullFace := false;
-  RenderContext.FrontFaceCcw := true;
-  RenderContext.CurrentProgram := nil;
-  RenderContext.FixedFunctionAlphaTestDisable;
-  RenderContext.FixedFunctionLighting := false;
-  RenderContext.DepthRange := DefaultDepthRange;
+  if RenderContext <> nil then
+  begin
+    RenderContext.CullFace := false;
+    RenderContext.FrontFaceCcw := true;
+    RenderContext.CurrentProgram := nil;
+    RenderContext.FixedFunctionAlphaTestDisable;
+    RenderContext.FixedFunctionLighting := false;
+    RenderContext.DepthRange := DefaultDepthRange;
 
-  { Restore defaults, for other rendering code outside of TRenderer.
+    { Restore defaults, for other rendering code outside of TRenderer.
 
-    These RenderContext properties are always set before rendering any shape, in
-    - InitializeFromRenderOptions,
-    - RenderShapeLineProperties,
-    - RenderShapePointProperties
-    and later they remain constant during shape rendering.
-    So ClassRenderBegin doesn't care to set them to any value,
-    and we just reset them in ClassRenderEnd. }
-  RenderContext.PointSize := 1;
-  RenderContext.LineWidth := 1;
-  RenderContext.DepthTest := false;
-  RenderContext.ColorChannels := AllColorChannels;
+      These RenderContext properties are always set before rendering any shape, in
+      - InitializeFromRenderOptions,
+      - RenderShapeLineProperties,
+      - RenderShapePointProperties
+      and later they remain constant during shape rendering.
+      So ClassRenderBegin doesn't care to set them to any value,
+      and we just reset them in ClassRenderEnd. }
+    RenderContext.PointSize := 1;
+    RenderContext.LineWidth := 1;
+    RenderContext.DepthTest := false;
+    RenderContext.ColorChannels := AllColorChannels;
+  end;
 
   { Restore default fixed-function state, for other rendering code outside of TRenderer.
 
@@ -1010,7 +1028,8 @@ begin
     to any valid texture, causing the glUniform1i setting shader uniform for texture
     to raise OpenGL errors.
     Testcase: 3d_model_viewer template. }
-  RenderContext.CurrentProgram := nil;
+  if RenderContext <> nil then
+    RenderContext.CurrentProgram := nil;
 
   RenderingCamera := nil;
   Statistics := nil;

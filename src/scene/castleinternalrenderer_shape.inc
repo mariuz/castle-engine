@@ -129,6 +129,11 @@
     function ExtractRHIShaderEffects(
       out AVertexEffectCode, AFragmentEffectCode: String): Boolean;
 
+    { Extracts custom X3D TComposedShaderNode / TShaderPartNode GLSL source code for stVertex
+      and stFragment from Appearance.FdShaders and sends X3D isSelected / isValid events. }
+    function ExtractRHIComposedShader(
+      out ACustomVertSource, ACustomFragSource: String): Boolean;
+
     { Builds an 80-byte std430 TCastleBindlessMaterialEntry combining extracted PBR/Phong/Unlit
       material factors with 32-bit bindless texture array indices into castle_BindlessTextures[]. }
     function BuildRHIBindlessMaterialEntry(
@@ -357,6 +362,7 @@ function TX3DRendererShape.ExtractRHIMaterialBlock(
 var
   ShapeState: TX3DGraphTraverseState;
   App: TAppearanceNode;
+  SurfaceShader: TCommonSurfaceShaderNode;
   MatNode: TAbstractMaterialNode;
   PhysMat: TPhysicalMaterialNode;
   PhongMat: TMaterialNode;
@@ -412,61 +418,102 @@ begin
   else if (App.AlphaMode = amAuto) and (AlphaChannel = acTest) then
     AlphaCutoff := EnsureRange(App.AlphaCutoff, 0.0, 1.0);
 
-  MatNode := App.Material;
-  if MatNode is TPhysicalMaterialNode then
+  SurfaceShader := App.InternalCommonSurfaceShader;
+  if SurfaceShader <> nil then
   begin
-    PhysMat := TPhysicalMaterialNode(MatNode);
-    Result := True;
-    AShadingModel := smPBRMetallicRoughness;
-    AMatBlock.BaseColor := Vector4(
-      PhysMat.BaseColor,
-      EnsureRange(1.0 - PhysMat.Transparency, 0.0, 1.0));
-    AMatBlock.SpecularColor := Vector4(0.04, 0.04, 0.04, 0.0); // a = 0.0 -> PBR Metallic-Roughness
-    AMatBlock.EmissiveColor := Vector4(
-      PhysMat.EmissiveColor,
-      EnsureRange(PhysMat.Metallic, 0.0, 1.0));
-    AMatBlock.PBRParams := Vector4(
-      EnsureRange(PhysMat.Roughness, 0.04, 1.0),
-      Max(0.0, PhysMat.NormalScale),
-      EnsureRange(PhysMat.OcclusionStrength, 0.0, 1.0),
-      AlphaCutoff);
-  end else
-  if MatNode is TMaterialNode then
-  begin
-    PhongMat := TMaterialNode(MatNode);
     Result := True;
     AShadingModel := smPhong;
-    Roughness := EnsureRange(1.0 - Sqrt(EnsureRange(PhongMat.Shininess, 0.0, 1.0)), 0.04, 1.0);
+    Roughness := EnsureRange(1.0 - Sqrt(EnsureRange(SurfaceShader.ShininessFactor, 0.0, 1.0)), 0.04, 1.0);
     AMatBlock.BaseColor := Vector4(
-      PhongMat.DiffuseColor,
-      EnsureRange(1.0 - PhongMat.Transparency, 0.0, 1.0));
+      SurfaceShader.DiffuseFactor,
+      EnsureRange(SurfaceShader.AlphaFactor, 0.0, 1.0));
     AMatBlock.SpecularColor := Vector4(
-      PhongMat.SpecularColor,
-      Max(1.0, PhongMat.ShininessExp)); // a > 0.0 -> Phong shininess
-    AMatBlock.EmissiveColor := Vector4(PhongMat.EmissiveColor, 0.0);
+      SurfaceShader.SpecularFactor,
+      Max(1.0, SurfaceShader.ShininessFactor * 128.0));
+    AMatBlock.EmissiveColor := Vector4(SurfaceShader.EmissiveFactor, 0.0);
     AMatBlock.PBRParams := Vector4(
       Roughness,
-      Max(0.0, PhongMat.NormalScale),
+      Max(0.0, SurfaceShader.NormalScale.X),
       1.0,
       AlphaCutoff);
   end else
-  if MatNode is TUnlitMaterialNode then
   begin
-    UnlitMat := TUnlitMaterialNode(MatNode);
-    Result := True;
-    AShadingModel := smUnlit;
-    AMatBlock.BaseColor := Vector4(
-      UnlitMat.EmissiveColor,
-      EnsureRange(1.0 - UnlitMat.Transparency, 0.0, 1.0));
-    AMatBlock.SpecularColor := Vector4(0.0, 0.0, 0.0, -1.0); // a < 0.0 -> Unlit
-    AMatBlock.EmissiveColor := Vector4(0.0, 0.0, 0.0, 0.0);
-    AMatBlock.PBRParams := Vector4(
-      1.0,
-      Max(0.0, UnlitMat.NormalScale),
-      1.0,
-      AlphaCutoff);
-  end else
-    AMatBlock.PBRParams.W := AlphaCutoff;
+    MatNode := App.Material;
+    if MatNode is TPhysicalMaterialNode then
+    begin
+      PhysMat := TPhysicalMaterialNode(MatNode);
+      Result := True;
+      AShadingModel := smPBRMetallicRoughness;
+      AMatBlock.BaseColor := Vector4(
+        PhysMat.BaseColor,
+        EnsureRange(1.0 - PhysMat.Transparency, 0.0, 1.0));
+      AMatBlock.SpecularColor := Vector4(0.04, 0.04, 0.04, 0.0); // a = 0.0 -> PBR Metallic-Roughness
+      AMatBlock.EmissiveColor := Vector4(
+        PhysMat.EmissiveColor,
+        EnsureRange(PhysMat.Metallic, 0.0, 1.0));
+      AMatBlock.PBRParams := Vector4(
+        EnsureRange(PhysMat.Roughness, 0.04, 1.0),
+        Max(0.0, PhysMat.NormalScale),
+        EnsureRange(PhysMat.OcclusionStrength, 0.0, 1.0),
+        AlphaCutoff);
+    end else
+    if MatNode is TMaterialNode then
+    begin
+      PhongMat := TMaterialNode(MatNode);
+      Result := True;
+      {$warnings off}
+      if PhongMat.PureEmissive and
+         ((Geometry = nil) or
+          ((Geometry.InternalColor = nil) and (Geometry.InternalColorRGBA = nil))) then
+      {$warnings on}
+      begin
+        AShadingModel := smUnlit;
+        AMatBlock.BaseColor := Vector4(
+          PhongMat.EmissiveColor,
+          EnsureRange(1.0 - PhongMat.Transparency, 0.0, 1.0));
+        AMatBlock.SpecularColor := Vector4(0.0, 0.0, 0.0, -1.0); // a < 0.0 -> Unlit
+        AMatBlock.EmissiveColor := Vector4(0.0, 0.0, 0.0, 0.0);
+        AMatBlock.PBRParams := Vector4(
+          1.0,
+          Max(0.0, PhongMat.NormalScale),
+          EnsureRange(PhongMat.OcclusionStrength, 0.0, 1.0),
+          AlphaCutoff);
+      end else
+      begin
+        AShadingModel := smPhong;
+        Roughness := EnsureRange(1.0 - Sqrt(EnsureRange(PhongMat.Shininess, 0.0, 1.0)), 0.04, 1.0);
+        AMatBlock.BaseColor := Vector4(
+          PhongMat.DiffuseColor,
+          EnsureRange(1.0 - PhongMat.Transparency, 0.0, 1.0));
+        AMatBlock.SpecularColor := Vector4(
+          PhongMat.SpecularColor,
+          Max(1.0, PhongMat.ShininessExp)); // a > 0.0 -> Phong shininess
+        AMatBlock.EmissiveColor := Vector4(PhongMat.EmissiveColor, 0.0);
+        AMatBlock.PBRParams := Vector4(
+          Roughness,
+          Max(0.0, PhongMat.NormalScale),
+          EnsureRange(PhongMat.OcclusionStrength, 0.0, 1.0),
+          AlphaCutoff);
+      end;
+    end else
+    if MatNode is TUnlitMaterialNode then
+    begin
+      UnlitMat := TUnlitMaterialNode(MatNode);
+      Result := True;
+      AShadingModel := smUnlit;
+      AMatBlock.BaseColor := Vector4(
+        UnlitMat.EmissiveColor,
+        EnsureRange(1.0 - UnlitMat.Transparency, 0.0, 1.0));
+      AMatBlock.SpecularColor := Vector4(0.0, 0.0, 0.0, -1.0); // a < 0.0 -> Unlit
+      AMatBlock.EmissiveColor := Vector4(0.0, 0.0, 0.0, 0.0);
+      AMatBlock.PBRParams := Vector4(
+        1.0,
+        Max(0.0, UnlitMat.NormalScale),
+        1.0,
+        AlphaCutoff);
+    end else
+      AMatBlock.PBRParams.W := AlphaCutoff;
+  end;
 
   if (Cache <> nil) and (Cache.RenderOptions <> nil) and
      (not Cache.RenderOptions.Lighting) then
@@ -548,6 +595,7 @@ function TX3DRendererShape.ExtractRHIMaterialTextures(
 var
   ShapeState: TX3DGraphTraverseState;
   App: TAppearanceNode;
+  SurfaceShader: TCommonSurfaceShaderNode;
   MatNode: TAbstractMaterialNode;
   PhysMat: TPhysicalMaterialNode;
   PhongMat: TMaterialNode;
@@ -577,27 +625,41 @@ begin
     App := ShapeState.ShapeNode.Appearance;
     if App <> nil then
     begin
-      MatNode := App.Material;
-      if MatNode is TPhysicalMaterialNode then
+      SurfaceShader := App.InternalCommonSurfaceShader;
+      if SurfaceShader <> nil then
       begin
-        PhysMat := TPhysicalMaterialNode(MatNode);
-        ABaseColorTex := ResolveNodeRHITexture(PhysMat.FdBaseTexture.Value, ABaseColorSampler);
-        ANormalTex := ResolveNodeRHITexture(PhysMat.FdNormalTexture.Value, ANormalSampler);
-        AMetallicRoughnessTex := ResolveNodeRHITexture(PhysMat.MetallicRoughnessTexture, AMetallicRoughnessSampler);
-        AEmissiveTex := ResolveNodeRHITexture(PhysMat.EmissiveTexture, AEmissiveSampler);
-        AOcclusionTex := ResolveNodeRHITexture(PhysMat.OcclusionTexture, AOcclusionSampler);
+        ABaseColorTex := ResolveNodeRHITexture(SurfaceShader.DiffuseTexture, ABaseColorSampler);
+        if ABaseColorTex = nil then
+          ABaseColorTex := ResolveNodeRHITexture(SurfaceShader.MultiDiffuseAlphaTexture, ABaseColorSampler);
+        ANormalTex := ResolveNodeRHITexture(SurfaceShader.NormalTexture, ANormalSampler);
+        AMetallicRoughnessTex := ResolveNodeRHITexture(SurfaceShader.SpecularTexture, AMetallicRoughnessSampler);
+        AEmissiveTex := ResolveNodeRHITexture(SurfaceShader.EmissiveTexture, AEmissiveSampler);
       end else
-      if MatNode is TMaterialNode then
       begin
-        PhongMat := TMaterialNode(MatNode);
-        ABaseColorTex := ResolveNodeRHITexture(PhongMat.DiffuseTexture, ABaseColorSampler);
-        ANormalTex := ResolveNodeRHITexture(PhongMat.NormalTexture, ANormalSampler);
-        AEmissiveTex := ResolveNodeRHITexture(PhongMat.EmissiveTexture, AEmissiveSampler);
-      end else
-      if MatNode is TUnlitMaterialNode then
-      begin
-        UnlitMat := TUnlitMaterialNode(MatNode);
-        ABaseColorTex := ResolveNodeRHITexture(UnlitMat.EmissiveTexture, ABaseColorSampler);
+        MatNode := App.Material;
+        if MatNode is TPhysicalMaterialNode then
+        begin
+          PhysMat := TPhysicalMaterialNode(MatNode);
+          ABaseColorTex := ResolveNodeRHITexture(PhysMat.FdBaseTexture.Value, ABaseColorSampler);
+          ANormalTex := ResolveNodeRHITexture(PhysMat.FdNormalTexture.Value, ANormalSampler);
+          AMetallicRoughnessTex := ResolveNodeRHITexture(PhysMat.MetallicRoughnessTexture, AMetallicRoughnessSampler);
+          AEmissiveTex := ResolveNodeRHITexture(PhysMat.EmissiveTexture, AEmissiveSampler);
+          AOcclusionTex := ResolveNodeRHITexture(PhysMat.OcclusionTexture, AOcclusionSampler);
+        end else
+        if MatNode is TMaterialNode then
+        begin
+          PhongMat := TMaterialNode(MatNode);
+          ABaseColorTex := ResolveNodeRHITexture(PhongMat.DiffuseTexture, ABaseColorSampler);
+          ANormalTex := ResolveNodeRHITexture(PhongMat.NormalTexture, ANormalSampler);
+          AMetallicRoughnessTex := ResolveNodeRHITexture(PhongMat.SpecularTexture, AMetallicRoughnessSampler);
+          AEmissiveTex := ResolveNodeRHITexture(PhongMat.EmissiveTexture, AEmissiveSampler);
+          AOcclusionTex := ResolveNodeRHITexture(PhongMat.OcclusionTexture, AOcclusionSampler);
+        end else
+        if MatNode is TUnlitMaterialNode then
+        begin
+          UnlitMat := TUnlitMaterialNode(MatNode);
+          ABaseColorTex := ResolveNodeRHITexture(UnlitMat.EmissiveTexture, ABaseColorSampler);
+        end;
       end;
 
       if ABaseColorTex = nil then
@@ -879,6 +941,63 @@ begin
   Result := (AVertexEffectCode <> '') or (AFragmentEffectCode <> '');
 end;
 
+function TX3DRendererShape.ExtractRHIComposedShader(
+  out ACustomVertSource, ACustomFragSource: String): Boolean;
+var
+  ShapeState: TX3DGraphTraverseState;
+  App: TAppearanceNode;
+  I, J: Integer;
+  CompNode: TComposedShaderNode;
+  Part: TShaderPartNode;
+  PartSrc: String;
+begin
+  ACustomVertSource := '';
+  ACustomFragSource := '';
+  Result := False;
+
+  ShapeState := OriginalState;
+  if ShapeState = nil then
+    ShapeState := State;
+  if (ShapeState = nil) or (ShapeState.ShapeNode = nil) then
+    Exit;
+
+  App := ShapeState.ShapeNode.Appearance;
+  if (App = nil) or (App.FdShaders.Count = 0) then
+    Exit;
+
+  for I := 0 to App.FdShaders.Count - 1 do
+    if (App.FdShaders[I] is TComposedShaderNode) and
+       (TComposedShaderNode(App.FdShaders[I]).Language in [slDefault, slGLSL]) then
+    begin
+      CompNode := TComposedShaderNode(App.FdShaders[I]);
+      for J := 0 to CompNode.FdParts.Count - 1 do
+        if CompNode.FdParts[J] is TShaderPartNode then
+        begin
+          Part := TShaderPartNode(CompNode.FdParts[J]);
+          PartSrc := Trim(Part.Contents);
+          if PartSrc <> '' then
+            case Part.ShaderType of
+              stVertex:
+                if ACustomVertSource = '' then
+                  ACustomVertSource := PartSrc
+                else
+                  ACustomVertSource := ACustomVertSource + LineEnding + PartSrc;
+              stFragment:
+                if ACustomFragSource = '' then
+                  ACustomFragSource := PartSrc
+                else
+                  ACustomFragSource := ACustomFragSource + LineEnding + PartSrc;
+              else ;
+            end;
+        end;
+      Result := (ACustomVertSource <> '') or (ACustomFragSource <> '');
+      CompNode.EventIsSelected.Send(Result);
+      CompNode.EventIsValid.Send(Result);
+      if Result then
+        Break;
+    end;
+end;
+
 function TX3DRendererShape.BuildRHIBindlessMaterialEntry(
   const ABaseColorTexIdx: Cardinal;
   const ANormalTexIdx: Cardinal;
@@ -910,8 +1029,8 @@ var
   ClipPlane, TexGenBoundsS, TexGenBoundsT: TVector4;
   TexCoordGen: TTextureCoordinateGeneration;
   PointSize: Single;
-  VertEffectCode, FragEffectCode: String;
-  HasTexTransform, HasClipPlane, HasIBL, HasShadowMap, HasTexCoordGen, HasPointSize, HasShaderEffects: Boolean;
+  VertEffectCode, FragEffectCode, ComposedVertCode, ComposedFragCode: String;
+  HasTexTransform, HasClipPlane, HasIBL, HasShadowMap, HasTexCoordGen, HasPointSize, HasShaderEffects, HasComposedShader: Boolean;
   BaseColorIdx, NormalIdx, MetallicRoughnessIdx, EmissiveIdx: Cardinal;
   BindlessEntry: TCastleBindlessMaterialEntry;
 begin
@@ -930,6 +1049,7 @@ begin
     HasTexCoordGen := ExtractRHITexCoordGen(TexCoordGen, TexGenBoundsS, TexGenBoundsT);
     HasPointSize := ExtractRHIPointSize(PointSize);
     HasShaderEffects := ExtractRHIShaderEffects(VertEffectCode, FragEffectCode);
+    HasComposedShader := ExtractRHIComposedShader(ComposedVertCode, ComposedFragCode);
     if Cache <> nil then
     begin
       Cache.SetTextureTransform(HasTexTransform, TexTransformMatrix);
@@ -937,6 +1057,7 @@ begin
       Cache.SetTexCoordGen(TexCoordGen, TexGenBoundsS, TexGenBoundsT);
       Cache.SetPointSize(PointSize);
       Cache.SetShaderEffects(VertEffectCode, FragEffectCode);
+      Cache.SetComposedShader(ComposedVertCode, ComposedFragCode);
       Cache.BindMaterialTexturesToDescriptorSet(
         BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex,
         BaseColorSampler, NormalSampler, MetallicRoughnessSampler, EmissiveSampler, OcclusionSampler);
@@ -956,7 +1077,8 @@ begin
         HasIBL,
         HasShadowMap,
         HasTexCoordGen,
-        HasShaderEffects or HasPointSize);
+        HasShaderEffects or HasPointSize,
+        HasComposedShader);
     end;
     if BaseColorTex <> nil then
       BaseColorIdx := RHIDevice.RegisterBindlessTexture(BaseColorTex)
