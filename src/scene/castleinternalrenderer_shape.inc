@@ -113,6 +113,22 @@
       out AShadowMapTex: TRHITexture;
       out AShadowMapSampler: TRHISampler): Boolean;
 
+    { Extracts procedural texture coordinate generation mode (TTextureCoordinateGeneratorNode
+      or implicit tgBounds2d/tgBounds3d) and object-space S/T plane vectors from Cache.Arrays
+      or Geometry.InternalTexCoord. }
+    function ExtractRHITexCoordGen(
+      out AGeneration: TTextureCoordinateGeneration;
+      out ABoundsS, ABoundsT: TVector4): Boolean;
+
+    { Extracts effective point size from RenderOptions.PointSize and Appearance.PointProperties
+      (TPointPropertiesNode). Returns True if effective point size > 1.0. }
+    function ExtractRHIPointSize(out APointSize: Single): Boolean;
+
+    { Collects enabled X3D TEffectNode / TEffectPartNode GLSL source code for stVertex and
+      stFragment from Appearance.FdEffects and State.Effects. }
+    function ExtractRHIShaderEffects(
+      out AVertexEffectCode, AFragmentEffectCode: String): Boolean;
+
     { Builds an 80-byte std430 TCastleBindlessMaterialEntry combining extracted PBR/Phong/Unlit
       material factors with 32-bit bindless texture array indices into castle_BindlessTextures[]. }
     function BuildRHIBindlessMaterialEntry(
@@ -752,6 +768,117 @@ begin
   end;
 end;
 
+function TX3DRendererShape.ExtractRHITexCoordGen(
+  out AGeneration: TTextureCoordinateGeneration;
+  out ABoundsS, ABoundsT: TVector4): Boolean;
+var
+  TexCoordNode: TX3DNode;
+  ModeStr: String;
+begin
+  AGeneration := tgExplicit;
+  ABoundsS := Vector4(1, 0, 0, 0);
+  ABoundsT := Vector4(0, 1, 0, 0);
+  Result := False;
+
+  if (Cache <> nil) and (Cache.Arrays <> nil) and (Cache.Arrays.TexCoords.Count > 0) then
+  begin
+    AGeneration := Cache.Arrays.TexCoords[0].Generation;
+    ABoundsS := Cache.Arrays.TexCoords[0].GenerationBoundsVector[0];
+    ABoundsT := Cache.Arrays.TexCoords[0].GenerationBoundsVector[1];
+    Result := AGeneration <> tgExplicit;
+    if Result then
+      Exit;
+  end;
+
+  if (Geometry <> nil) and (State <> nil) and
+     Geometry.InternalTexCoord(State, TexCoordNode) and
+     (TexCoordNode is TTextureCoordinateGeneratorNode) then
+  begin
+    ModeStr := TTextureCoordinateGeneratorNode(TexCoordNode).FdMode.Value;
+    if ModeStr = 'SPHERE' then AGeneration := tgSphereMap
+    else if ModeStr = 'COORD' then AGeneration := tgCoord
+    else if (ModeStr = 'COORD-EYE') or (ModeStr = 'CAMERASPACEPOSITION') then AGeneration := tgCoordEye
+    else if ModeStr = 'CAMERASPACENORMAL' then AGeneration := tgCameraSpaceNormal
+    else if ModeStr = 'WORLDSPACENORMAL' then AGeneration := tgWorldSpaceNormal
+    else if ModeStr = 'CAMERASPACEREFLECTIONVECTOR' then AGeneration := tgCameraSpaceReflectionVector
+    else if ModeStr = 'WORLDSPACEREFLECTIONVECTOR' then AGeneration := tgWorldSpaceReflectionVector
+    else if ModeStr = 'BOUNDS2D' then AGeneration := tgBounds2d
+    else if ModeStr = 'BOUNDS3D' then AGeneration := tgBounds3d;
+    Result := AGeneration <> tgExplicit;
+  end;
+end;
+
+function TX3DRendererShape.ExtractRHIPointSize(out APointSize: Single): Boolean;
+var
+  PP: TPointPropertiesNode;
+begin
+  APointSize := 1.0;
+  if (State <> nil) and (State.Appearance <> nil) then
+  begin
+    PP := State.Appearance.PointProperties;
+    if PP <> nil then
+      APointSize := Clamped(
+        PP.FdPointSizeScaleFactor.Value,
+        PP.FdPointSizeMinValue.Value,
+        PP.FdPointSizeMaxValue.Value);
+  end;
+
+  APointSize := Max(1.0, APointSize);
+  Result := APointSize > 1.0001;
+end;
+
+function TX3DRendererShape.ExtractRHIShaderEffects(
+  out AVertexEffectCode, AFragmentEffectCode: String): Boolean;
+
+  procedure AppendEffectList(const Nodes: TX3DNodeList);
+  var
+    I, J: Integer;
+    Effect: TEffectNode;
+    Part: TEffectPartNode;
+    PartSource: String;
+  begin
+    if Nodes = nil then
+      Exit;
+    for I := 0 to Nodes.Count - 1 do
+      if Nodes[I] is TEffectNode then
+      begin
+        Effect := TEffectNode(Nodes[I]);
+        if Effect.FdEnabled.Value and (Effect.Language in [slDefault, slGLSL]) then
+          for J := 0 to Effect.FdParts.Count - 1 do
+            if Effect.FdParts[J] is TEffectPartNode then
+            begin
+              Part := TEffectPartNode(Effect.FdParts[J]);
+              PartSource := Trim(Part.Contents);
+              if PartSource <> '' then
+                case Part.ShaderType of
+                  stVertex:
+                    if AVertexEffectCode = '' then
+                      AVertexEffectCode := PartSource
+                    else
+                      AVertexEffectCode := AVertexEffectCode + LineEnding + PartSource;
+                  stFragment:
+                    if AFragmentEffectCode = '' then
+                      AFragmentEffectCode := PartSource
+                    else
+                      AFragmentEffectCode := AFragmentEffectCode + LineEnding + PartSource;
+                  else ;
+                end;
+            end;
+      end;
+  end;
+
+begin
+  AVertexEffectCode := '';
+  AFragmentEffectCode := '';
+  if State <> nil then
+  begin
+    if State.Appearance <> nil then
+      AppendEffectList(State.Appearance.FdEffects.InternalItems);
+    AppendEffectList(State.Effects);
+  end;
+  Result := (AVertexEffectCode <> '') or (AFragmentEffectCode <> '');
+end;
+
 function TX3DRendererShape.BuildRHIBindlessMaterialEntry(
   const ABaseColorTexIdx: Cardinal;
   const ANormalTexIdx: Cardinal;
@@ -780,8 +907,11 @@ var
   EnvCubemapTex, ShadowMapTex: TRHITexture;
   EnvCubemapSampler, ShadowMapSampler: TRHISampler;
   TexTransformMatrix: TMatrix4;
-  ClipPlane: TVector4;
-  HasTexTransform, HasClipPlane, HasIBL, HasShadowMap: Boolean;
+  ClipPlane, TexGenBoundsS, TexGenBoundsT: TVector4;
+  TexCoordGen: TTextureCoordinateGeneration;
+  PointSize: Single;
+  VertEffectCode, FragEffectCode: String;
+  HasTexTransform, HasClipPlane, HasIBL, HasShadowMap, HasTexCoordGen, HasPointSize, HasShaderEffects: Boolean;
   BaseColorIdx, NormalIdx, MetallicRoughnessIdx, EmissiveIdx: Cardinal;
   BindlessEntry: TCastleBindlessMaterialEntry;
 begin
@@ -797,10 +927,16 @@ begin
     HasClipPlane := ExtractRHIClipPlane(ClipPlane);
     HasIBL := ExtractRHIEnvironmentLightTexture(EnvCubemapTex, EnvCubemapSampler);
     HasShadowMap := ExtractRHIShadowMap(ShadowMapTex, ShadowMapSampler);
+    HasTexCoordGen := ExtractRHITexCoordGen(TexCoordGen, TexGenBoundsS, TexGenBoundsT);
+    HasPointSize := ExtractRHIPointSize(PointSize);
+    HasShaderEffects := ExtractRHIShaderEffects(VertEffectCode, FragEffectCode);
     if Cache <> nil then
     begin
       Cache.SetTextureTransform(HasTexTransform, TexTransformMatrix);
       Cache.SetClipPlane(HasClipPlane, ClipPlane);
+      Cache.SetTexCoordGen(TexCoordGen, TexGenBoundsS, TexGenBoundsT);
+      Cache.SetPointSize(PointSize);
+      Cache.SetShaderEffects(VertEffectCode, FragEffectCode);
       Cache.BindMaterialTexturesToDescriptorSet(
         BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex,
         BaseColorSampler, NormalSampler, MetallicRoughnessSampler, EmissiveSampler, OcclusionSampler);
@@ -818,7 +954,9 @@ begin
         HasTexTransform,
         HasClipPlane,
         HasIBL,
-        HasShadowMap);
+        HasShadowMap,
+        HasTexCoordGen,
+        HasShaderEffects or HasPointSize);
     end;
     if BaseColorTex <> nil then
       BaseColorIdx := RHIDevice.RegisterBindlessTexture(BaseColorTex)

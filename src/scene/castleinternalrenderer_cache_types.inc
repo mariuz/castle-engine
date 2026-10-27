@@ -143,6 +143,12 @@
     FRHIHasTextureTransform: Boolean;
     FRHIClipPlane: TVector4;
     FRHIHasClipPlane: Boolean;
+    FRHITexCoordGen: TTextureCoordinateGeneration;
+    FRHITexGenBoundsS: TVector4;
+    FRHITexGenBoundsT: TVector4;
+    FRHIPointSize: Single;
+    FRHIVertexEffectCode: String;
+    FRHIFragmentEffectCode: String;
     FRHISkinningDescriptorLayout: TRHIDescriptorSetLayout;
     FRHISkinningDescriptorSet: TRHIDescriptorSet;
     FRHIVertexShader: TRHIShaderModule;
@@ -182,6 +188,10 @@
       const ABrdfLutSampler: TRHISampler = nil);
     procedure SetTextureTransform(const AHasTransform: Boolean; const AMatrix: TMatrix4);
     procedure SetClipPlane(const AHasClipPlane: Boolean; const APlane: TVector4);
+    procedure SetTexCoordGen(const AGeneration: TTextureCoordinateGeneration;
+      const ABoundsS, ABoundsT: TVector4);
+    procedure SetPointSize(const APointSize: Single);
+    procedure SetShaderEffects(const AVertexEffectCode, AFragmentEffectCode: String);
     procedure EnsureRHIShaders(
       const AHasSkinning, AHasTangents,
             AHasBaseColorTex, AHasNormalTex, AHasMetallicRoughnessTex,
@@ -190,7 +200,9 @@
       const AHasTextureTransform: Boolean = False;
       const AHasClipPlane: Boolean = False;
       const AHasIBL: Boolean = False;
-      const AHasShadowMap: Boolean = False);
+      const AHasShadowMap: Boolean = False;
+      const AHasTexCoordGen: Boolean = False;
+      const AHasShaderEffects: Boolean = False);
     { Debug description of this shape cache. }
     function ToString: String; override;
 
@@ -214,6 +226,12 @@
     property RHIHasTextureTransform: Boolean read FRHIHasTextureTransform;
     property RHIClipPlane: TVector4 read FRHIClipPlane;
     property RHIHasClipPlane: Boolean read FRHIHasClipPlane;
+    property RHITexCoordGen: TTextureCoordinateGeneration read FRHITexCoordGen;
+    property RHITexGenBoundsS: TVector4 read FRHITexGenBoundsS;
+    property RHITexGenBoundsT: TVector4 read FRHITexGenBoundsT;
+    property RHIPointSize: Single read FRHIPointSize;
+    property RHIVertexEffectCode: String read FRHIVertexEffectCode;
+    property RHIFragmentEffectCode: String read FRHIFragmentEffectCode;
     property RHISkinningDescriptorLayout: TRHIDescriptorSetLayout read FRHISkinningDescriptorLayout;
     property RHISkinningDescriptorSet: TRHIDescriptorSet read FRHISkinningDescriptorSet;
     property RHIVertexShader: TRHIShaderModule read FRHIVertexShader;
@@ -256,6 +274,7 @@ constructor TShapeCache.Create;
 begin
   inherited;
   VboToReload := AllVboTypes;
+  FRHIPointSize := 1.0;
 end;
 
 destructor TShapeCache.Destroy;
@@ -546,6 +565,44 @@ begin
   end;
 end;
 
+procedure TShapeCache.SetTexCoordGen(const AGeneration: TTextureCoordinateGeneration;
+  const ABoundsS, ABoundsT: TVector4);
+begin
+  if (FRHITexCoordGen <> AGeneration) or
+     ((AGeneration in [tgBounds2d, tgBounds3d]) and
+      (not TVector4.PerfectlyEquals(FRHITexGenBoundsS, ABoundsS) or
+       not TVector4.PerfectlyEquals(FRHITexGenBoundsT, ABoundsT))) then
+  begin
+    FRHITexCoordGen := AGeneration;
+    FRHITexGenBoundsS := ABoundsS;
+    FRHITexGenBoundsT := ABoundsT;
+    FRHIShadersInitialized := False;
+  end;
+end;
+
+procedure TShapeCache.SetPointSize(const APointSize: Single);
+var
+  ClampedSize: Single;
+begin
+  ClampedSize := Max(1.0, APointSize);
+  if not SameValue(FRHIPointSize, ClampedSize, 1e-4) then
+  begin
+    FRHIPointSize := ClampedSize;
+    FRHIShadersInitialized := False;
+  end;
+end;
+
+procedure TShapeCache.SetShaderEffects(const AVertexEffectCode, AFragmentEffectCode: String);
+begin
+  if (FRHIVertexEffectCode <> AVertexEffectCode) or
+     (FRHIFragmentEffectCode <> AFragmentEffectCode) then
+  begin
+    FRHIVertexEffectCode := AVertexEffectCode;
+    FRHIFragmentEffectCode := AFragmentEffectCode;
+    FRHIShadersInitialized := False;
+  end;
+end;
+
 procedure TShapeCache.EnsureRHIShaders(
   const AHasSkinning, AHasTangents,
         AHasBaseColorTex, AHasNormalTex, AHasMetallicRoughnessTex,
@@ -554,11 +611,14 @@ procedure TShapeCache.EnsureRHIShaders(
   const AHasTextureTransform: Boolean;
   const AHasClipPlane: Boolean;
   const AHasIBL: Boolean;
-  const AHasShadowMap: Boolean);
+  const AHasShadowMap: Boolean;
+  const AHasTexCoordGen: Boolean;
+  const AHasShaderEffects: Boolean);
 var
   Mask: Cardinal;
   Gen: TCastleShaderGeneratorRHI;
-  FogSnippet, TexTransformSnippet, ClipPlaneSnippet, ShadowMapSnippet: String;
+  FogSnippet, TexGenSnippet, TexTransformSnippet, ClipPlaneSnippet, ShadowMapSnippet: String;
+  UpgradedVertEffect, UpgradedFragEffect, EffectivePointSizeStr: String;
 begin
   if RHIDevice = nil then
     Exit;
@@ -578,6 +638,9 @@ begin
   if AHasClipPlane then Mask := Mask or $400;
   if AHasIBL then Mask := Mask or $800;
   if AHasShadowMap then Mask := Mask or $1000;
+  if AHasTexCoordGen or (FRHITexCoordGen <> tgExplicit) then Mask := Mask or $2000;
+  if AHasShaderEffects or (FRHIVertexEffectCode <> '') or (FRHIFragmentEffectCode <> '') or
+     (FRHIPointSize > 1.0001) then Mask := Mask or $4000;
 
   if FRHIShadersInitialized and (FRHIShaderPermutationMask = Mask) and
      (FRHIVertexShader <> nil) and (FRHIFragmentShader <> nil) then
@@ -588,6 +651,61 @@ begin
   Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
   try
     FRHIVertexShaderSource := Gen.GenerateDefault3DVertexShader(AHasSkinning, AHasTangents);
+    if AHasTexCoordGen or (FRHITexCoordGen <> tgExplicit) then
+    begin
+      case FRHITexCoordGen of
+        tgBounds2d, tgBounds3d:
+          TexGenSnippet := FormatDot(
+            '  vec2 rawTexCoord0 = vec2(dot(localPos, vec4(%g, %g, %g, %g)), dot(localPos, vec4(%g, %g, %g, %g)));',
+            [FRHITexGenBoundsS.X, FRHITexGenBoundsS.Y, FRHITexGenBoundsS.Z, FRHITexGenBoundsS.W,
+             FRHITexGenBoundsT.X, FRHITexGenBoundsT.Y, FRHITexGenBoundsT.Z, FRHITexGenBoundsT.W]);
+        tgSphereMap:
+          TexGenSnippet :=
+            '  vec3 rSphere = reflect(normalize(castle_vertex_eye.xyz), castle_normal_eye);' + LineEnding +
+            '  float mSphere = 2.0 * sqrt(rSphere.x * rSphere.x + rSphere.y * rSphere.y + (rSphere.z + 1.0) * (rSphere.z + 1.0));' + LineEnding +
+            '  vec2 rawTexCoord0 = rSphere.xy / max(mSphere, 1e-5) + vec2(0.5);';
+        tgCoord:
+          TexGenSnippet := '  vec2 rawTexCoord0 = localPos.xy;';
+        tgCoordEye:
+          TexGenSnippet := '  vec2 rawTexCoord0 = castle_vertex_eye.xy;';
+        tgCameraSpaceNormal:
+          TexGenSnippet := '  vec2 rawTexCoord0 = castle_normal_eye.xy;';
+        tgWorldSpaceNormal:
+          TexGenSnippet := '  vec2 rawTexCoord0 = (mat3(castle_ViewMatrixInverse) * castle_normal_eye).xy;';
+        tgCameraSpaceReflectionVector:
+          TexGenSnippet := '  vec2 rawTexCoord0 = reflect(normalize(castle_vertex_eye.xyz), castle_normal_eye).xy;';
+        tgWorldSpaceReflectionVector:
+          TexGenSnippet := '  vec2 rawTexCoord0 = (mat3(castle_ViewMatrixInverse) * reflect(normalize(castle_vertex_eye.xyz), castle_normal_eye)).xy;';
+        else
+          TexGenSnippet := '  vec2 rawTexCoord0 = castle_MultiTexCoord0;';
+      end;
+      if AHasTextureTransform then
+      begin
+        TexTransformSnippet := FormatDot(
+          TexGenSnippet + LineEnding +
+          '  castle_tex_coord0 = (mat4(' +
+          'vec4(%g, %g, %g, %g), ' +
+          'vec4(%g, %g, %g, %g), ' +
+          'vec4(%g, %g, %g, %g), ' +
+          'vec4(%g, %g, %g, %g)) * vec4(rawTexCoord0, 0.0, 1.0)).xy;',
+          [FRHITextureTransform.Data[0, 0], FRHITextureTransform.Data[0, 1], FRHITextureTransform.Data[0, 2], FRHITextureTransform.Data[0, 3],
+           FRHITextureTransform.Data[1, 0], FRHITextureTransform.Data[1, 1], FRHITextureTransform.Data[1, 2], FRHITextureTransform.Data[1, 3],
+           FRHITextureTransform.Data[2, 0], FRHITextureTransform.Data[2, 1], FRHITextureTransform.Data[2, 2], FRHITextureTransform.Data[2, 3],
+           FRHITextureTransform.Data[3, 0], FRHITextureTransform.Data[3, 1], FRHITextureTransform.Data[3, 2], FRHITextureTransform.Data[3, 3]]);
+        FRHIVertexShaderSource := StringReplace(
+          FRHIVertexShaderSource,
+          '  castle_tex_coord0 = castle_MultiTexCoord0;',
+          TexTransformSnippet,
+          []);
+      end else
+      begin
+        FRHIVertexShaderSource := StringReplace(
+          FRHIVertexShaderSource,
+          '  castle_tex_coord0 = castle_MultiTexCoord0;',
+          TexGenSnippet + LineEnding + '  castle_tex_coord0 = rawTexCoord0;',
+          []);
+      end;
+    end else
     if AHasTextureTransform then
     begin
       TexTransformSnippet := FormatDot(
@@ -597,19 +715,45 @@ begin
         'vec4(%g, %g, %g, %g), ' +
         'vec4(%g, %g, %g, %g)) * vec4(castle_MultiTexCoord0, 0.0, 1.0)).xy;',
         [FRHITextureTransform.Data[0, 0], FRHITextureTransform.Data[0, 1], FRHITextureTransform.Data[0, 2], FRHITextureTransform.Data[0, 3],
-         FRHITextureTransform.Data[1, 0], FRHITextureTransform.Data[1, 1], FRHITextureTransform.Data[1, 2], FRHITextureTransform.Data[1, 3],
-         FRHITextureTransform.Data[2, 0], FRHITextureTransform.Data[2, 1], FRHITextureTransform.Data[2, 2], FRHITextureTransform.Data[2, 3],
-         FRHITextureTransform.Data[3, 0], FRHITextureTransform.Data[3, 1], FRHITextureTransform.Data[3, 2], FRHITextureTransform.Data[3, 3]]);
+          FRHITextureTransform.Data[1, 0], FRHITextureTransform.Data[1, 1], FRHITextureTransform.Data[1, 2], FRHITextureTransform.Data[1, 3],
+          FRHITextureTransform.Data[2, 0], FRHITextureTransform.Data[2, 1], FRHITextureTransform.Data[2, 2], FRHITextureTransform.Data[2, 3],
+          FRHITextureTransform.Data[3, 0], FRHITextureTransform.Data[3, 1], FRHITextureTransform.Data[3, 2], FRHITextureTransform.Data[3, 3]]);
       FRHIVertexShaderSource := StringReplace(
         FRHIVertexShaderSource,
         '  castle_tex_coord0 = castle_MultiTexCoord0;',
         TexTransformSnippet,
         []);
     end;
+    if FRHIVertexEffectCode <> '' then
+    begin
+      UpgradedVertEffect := Gen.UpgradeUserEffectUniforms(FRHIVertexEffectCode);
+      FRHIVertexShaderSource := StringReplace(
+        FRHIVertexShaderSource,
+        'void main() {',
+        UpgradedVertEffect + LineEnding + 'void main() {',
+        []);
+      if Pos('PLUG_vertex_object_space', FRHIVertexEffectCode) > 0 then
+        FRHIVertexShaderSource := StringReplace(
+          FRHIVertexShaderSource,
+          '  vec3 localTangent = castle_Tangent.xyz;',
+          '  vec3 localTangent = castle_Tangent.xyz;' + LineEnding +
+          '  PLUG_vertex_object_space(localPos, localNormal);',
+          []);
+      if Pos('PLUG_vertex_eye_space', FRHIVertexEffectCode) > 0 then
+        FRHIVertexShaderSource := StringReplace(
+          FRHIVertexShaderSource,
+          '  castle_normal_eye = normalize(castle_NormalMatrix * localNormal);',
+          '  castle_normal_eye = normalize(castle_NormalMatrix * localNormal);' + LineEnding +
+          '  PLUG_vertex_eye_space(castle_vertex_eye, castle_normal_eye);',
+          []);
+    end;
+    EffectivePointSizeStr := FormatDot('%g', [Max(1.0, FRHIPointSize)]);
+    if Pos('.', EffectivePointSizeStr) = 0 then
+      EffectivePointSizeStr := EffectivePointSizeStr + '.0';
     FRHIVertexShaderSource := StringReplace(
       FRHIVertexShaderSource,
       '  gl_Position = ',
-      '  gl_PointSize = 1.0;' + LineEnding + '  gl_Position = ',
+      '  gl_PointSize = ' + EffectivePointSizeStr + ';' + LineEnding + '  gl_Position = ',
       []);
     FRHIFragmentShaderSource := Gen.GenerateDefault3DFragmentShader(
       AHasBaseColorTex, AHasNormalTex, AHasMetallicRoughnessTex,
@@ -659,6 +803,8 @@ begin
       '      : clamp(fogDist / CastleScene.u_FogParams.y, 0.0, 1.0);' + LineEnding +
       '    castle_FragColor.rgb = mix(castle_FragColor.rgb, CastleScene.u_FogColor.rgb, fogFactor);' + LineEnding +
       '  }';
+    if (FRHIFragmentEffectCode <> '') and (Pos('PLUG_fragment_modify', FRHIFragmentEffectCode) > 0) then
+      FogSnippet := FogSnippet + LineEnding + '  PLUG_fragment_modify(castle_FragColor);';
     FRHIFragmentShaderSource := StringReplace(
       FRHIFragmentShaderSource,
       '    castle_FragColor = vec4(unlitColor, baseColor.a);',
@@ -669,6 +815,54 @@ begin
       '  castle_FragColor = vec4(Lo + emissive, baseColor.a);',
       '  castle_FragColor = vec4(Lo + emissive, baseColor.a);' + FogSnippet,
       []);
+    if FRHIFragmentEffectCode <> '' then
+    begin
+      UpgradedFragEffect := Gen.UpgradeUserEffectUniforms(FRHIFragmentEffectCode);
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        'void main() {',
+        UpgradedFragEffect + LineEnding + 'void main() {',
+        []);
+      if Pos('PLUG_base_color', FRHIFragmentEffectCode) > 0 then
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          '  vec4 baseColor = castle_MaterialBaseColor',
+          '  vec4 baseColor = castle_MaterialBaseColor',
+          []);
+      if Pos('PLUG_base_color', FRHIFragmentEffectCode) > 0 then
+      begin
+        if AHasColorPerVertex then
+          FRHIFragmentShaderSource := StringReplace(
+            FRHIFragmentShaderSource,
+            '  vec4 baseColor = castle_MaterialBaseColor * castle_color_per_vertex;',
+            '  vec4 baseColor = castle_MaterialBaseColor * castle_color_per_vertex;' + LineEnding +
+            '  PLUG_base_color(baseColor);',
+            [])
+        else
+          FRHIFragmentShaderSource := StringReplace(
+            FRHIFragmentShaderSource,
+            '  vec4 baseColor = castle_MaterialBaseColor;',
+            '  vec4 baseColor = castle_MaterialBaseColor;' + LineEnding +
+            '  PLUG_base_color(baseColor);',
+            []);
+      end;
+      if Pos('PLUG_main_texture_apply', FRHIFragmentEffectCode) > 0 then
+      begin
+        if AHasBaseColorTex then
+          FRHIFragmentShaderSource := StringReplace(
+            FRHIFragmentShaderSource,
+            '  baseColor *= texture(castle_base_color_texture, castle_tex_coord0);',
+            '  baseColor *= texture(castle_base_color_texture, castle_tex_coord0);' + LineEnding +
+            '  PLUG_main_texture_apply(baseColor, castle_normal_eye);',
+            [])
+        else
+          FRHIFragmentShaderSource := StringReplace(
+            FRHIFragmentShaderSource,
+            '  vec4 baseColor = castle_MaterialBaseColor',
+            '  vec4 baseColor = castle_MaterialBaseColor',
+            []);
+      end;
+    end;
     FRHIVertexShader := RHIDevice.CreateShaderModuleFromGLSL(
       ssVertex, FRHIVertexShaderSource, Format('CastleShapeVert_Perm%.2x', [Mask]));
     FRHIFragmentShader := RHIDevice.CreateShaderModuleFromGLSL(

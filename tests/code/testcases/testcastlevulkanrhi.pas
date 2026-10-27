@@ -27,8 +27,8 @@ uses
   CastleInternalRHI, CastleInternalVulkan, CastleInternalVulkanMemory,
   CastleInternalVulkanWSI, CastleInternalShaderCompiler, CastleInternalRHI_Vulkan,
   CastleInternalShaderRHI, CastleInternalBatch2DRHI, CastleInternalRenderer,
-  CastleRendererInternalLights, X3DNodes,
-  CastleSceneInternalShape, CastleInternalOcclusionCulling,
+  CastleRendererInternalLights, X3DNodes, X3DCameraUtils,
+  CastleInternalGeometryArrays, CastleSceneInternalShape, CastleInternalOcclusionCulling,
   CastleTransform, CastleScene, CastleProjection, CastleViewport, CastleScreenEffects, CastleRenderOptions, CastleWindow,
   CastleUIControls, CastleControls,
   CastleVideos, CastleInternalBackgroundRenderer, CastleInternalGLShadowVolumes,
@@ -288,6 +288,9 @@ type
     procedure TestClipPlaneNodeSlicingAndDiscardSpecializationRHI;
     procedure TestEnvironmentLightIBLCubemapAndBrdfLutSpecializationRHI;
     procedure TestShadowMapReceiverProjectorMatrixAndSceneDescriptorBindingRHI;
+    procedure TestTextureCoordinateGeneratorAndBounds2DSpecializationRHI;
+    procedure TestEffectNodePlugFunctionsAndPointPropertiesSpecializationRHI;
+    procedure TestViewportUpdateGeneratedTexturesOffscreenSceneRenderRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -15871,6 +15874,392 @@ begin
       AssertTrue('Fragment shader source must sample castle_shadow_map_0 using light.ProjectorMatrix',
         Pos('texture(castle_shadow_map_0, vec3(shadowProj.xy, shadowProj.z - 0.002))',
           RShape.Cache.RHIFragmentShaderSource) > 0);
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Container);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestTextureCoordinateGeneratorAndBounds2DSpecializationRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedCtx: TRenderContext;
+  SavedBackend: TRenderBackend;
+  TestCtx: TRenderContext;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeBounds, ShapeSphere: TShapeNode;
+  App1, App2: TAppearanceNode;
+  Mat1, Mat2: TPhysicalMaterialNode;
+  PixTex1, PixTex2: TPixelTextureNode;
+  TexTransform: TTextureTransformNode;
+  IFS1, IFS2: TIndexedFaceSetNode;
+  Coord1, Coord2: TCoordinateNode;
+  TexGen: TTextureCoordinateGeneratorNode;
+  RShape1, RShape2: TX3DRendererShape;
+  ExtractedGen: TTextureCoordinateGeneration;
+  BoundsS, BoundsT: TVector4;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7501)));
+  Device.ResizeSwapchain(256, 256);
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 5.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Root := TX3DRootNode.Create;
+
+    { Shape 1: IndexedFaceSet with texture and NO explicit TexCoord -> implicit tgBounds2d }
+    ShapeBounds := TShapeNode.Create;
+    App1 := TAppearanceNode.Create;
+    Mat1 := TPhysicalMaterialNode.Create;
+    PixTex1 := TPixelTextureNode.Create;
+    PixTex1.FdImage.Value := TRGBImage.Create(2, 2);
+    App1.Texture := PixTex1;
+    App1.Material := Mat1;
+    ShapeBounds.Appearance := App1;
+    IFS1 := TIndexedFaceSetNode.Create;
+    Coord1 := TCoordinateNode.Create;
+    Coord1.SetPoint([
+      Vector3(-1.0, -1.0, 0.0),
+      Vector3( 1.0, -1.0, 0.0),
+      Vector3( 1.0,  1.0, 0.0),
+      Vector3(-1.0,  1.0, 0.0)]);
+    IFS1.Coord := Coord1;
+    IFS1.SetCoordIndex([0, 1, 2, 0, 2, 3]);
+    ShapeBounds.Geometry := IFS1;
+    Root.AddChildren(ShapeBounds);
+
+    { Shape 2: IndexedFaceSet with TTextureCoordinateGeneratorNode(SPHERE) + TTextureTransformNode }
+    ShapeSphere := TShapeNode.Create;
+    App2 := TAppearanceNode.Create;
+    Mat2 := TPhysicalMaterialNode.Create;
+    PixTex2 := TPixelTextureNode.Create;
+    PixTex2.FdImage.Value := TRGBImage.Create(2, 2);
+    App2.Texture := PixTex2;
+    App2.Material := Mat2;
+    TexTransform := TTextureTransformNode.Create;
+    TexTransform.Scale := Vector2(2.0, 3.0);
+    App2.TextureTransform := TexTransform;
+    ShapeSphere.Appearance := App2;
+    IFS2 := TIndexedFaceSetNode.Create;
+    Coord2 := TCoordinateNode.Create;
+    Coord2.SetPoint([
+      Vector3(-1.0, -1.0, -1.0),
+      Vector3( 1.0, -1.0, -1.0),
+      Vector3( 0.0,  1.0, -1.0)]);
+    IFS2.Coord := Coord2;
+    TexGen := TTextureCoordinateGeneratorNode.Create;
+    TexGen.FdMode.Value := 'SPHERE';
+    IFS2.TexCoord := TexGen;
+    IFS2.SetCoordIndex([0, 1, 2]);
+    ShapeSphere.Geometry := IFS2;
+    Root.AddChildren(ShapeSphere);
+
+    Scene := TCastleScene.Create(Viewport);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+
+    CmdList := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(CmdList);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+
+      RShape1 := TX3DRendererShape(Scene.Shapes.TraverseList(True)[0]);
+      RShape2 := TX3DRendererShape(Scene.Shapes.TraverseList(True)[1]);
+
+      AssertTrue('Shape 1 ExtractRHITexCoordGen must return True (tgBounds2d)',
+        RShape1.ExtractRHITexCoordGen(ExtractedGen, BoundsS, BoundsT));
+      AssertTrue('Shape 1 generation mode must be tgBounds2d', ExtractedGen = tgBounds2d);
+      AssertTrue('Shape 1 permutation mask must include $2000 (AHasTexCoordGen)',
+        (RShape1.Cache <> nil) and ((RShape1.Cache.RHIShaderPermutationMask and $2000) <> 0));
+      AssertTrue('Shape 1 vertex shader must compute object-linear bounds dot products',
+        Pos('vec2 rawTexCoord0 = vec2(dot(localPos, vec4(', RShape1.Cache.RHIVertexShaderSource) > 0);
+
+      AssertTrue('Shape 2 ExtractRHITexCoordGen must return True (tgSphereMap)',
+        RShape2.ExtractRHITexCoordGen(ExtractedGen, BoundsS, BoundsT));
+      AssertTrue('Shape 2 generation mode must be tgSphereMap', ExtractedGen = tgSphereMap);
+      AssertTrue('Shape 2 permutation mask must include both $2000 (TexCoordGen) and $200 (TextureTransform)',
+        (RShape2.Cache <> nil) and ((RShape2.Cache.RHIShaderPermutationMask and $2200) = $2200));
+      AssertTrue('Shape 2 vertex shader must compute sphere reflection rawTexCoord0 and multiply by TextureTransform matrix',
+        (Pos('vec3 rSphere = reflect(normalize(castle_vertex_eye.xyz), castle_normal_eye);', RShape2.Cache.RHIVertexShaderSource) > 0) and
+        (Pos('* vec4(rawTexCoord0, 0.0, 1.0)).xy;', RShape2.Cache.RHIVertexShaderSource) > 0));
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Container);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestEffectNodePlugFunctionsAndPointPropertiesSpecializationRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedCtx: TRenderContext;
+  SavedBackend: TRenderBackend;
+  TestCtx: TRenderContext;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  PhysMat: TPhysicalMaterialNode;
+  PP: TPointPropertiesNode;
+  Effect: TEffectNode;
+  VertPart, FragPart: TEffectPartNode;
+  BoxNode: TBoxNode;
+  RShape: TX3DRendererShape;
+  ExtractedPointSize: Single;
+  VertCode, FragCode: String;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7502)));
+  Device.ResizeSwapchain(256, 256);
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 5.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    PhysMat := TPhysicalMaterialNode.Create;
+    App.Material := PhysMat;
+
+    PP := TPointPropertiesNode.Create;
+    PP.PointSizeScaleFactor := 4.5;
+    PP.PointSizeMinValue := 1.0;
+    PP.PointSizeMaxValue := 8.0;
+    App.PointProperties := PP;
+
+    Effect := TEffectNode.Create;
+    Effect.Language := slGLSL;
+    Effect.Enabled := True;
+    VertPart := TEffectPartNode.Create;
+    VertPart.ShaderType := stVertex;
+    VertPart.Contents := 'void PLUG_vertex_eye_space(inout vec4 vertex_eye, inout vec3 normal_eye) { vertex_eye.y += 0.25; }';
+    FragPart := TEffectPartNode.Create;
+    FragPart.ShaderType := stFragment;
+    FragPart.Contents := 'void PLUG_fragment_modify(inout vec4 fragment_color) { fragment_color.rgb *= vec3(0.5, 1.0, 0.5); }';
+    Effect.SetParts([VertPart, FragPart]);
+    App.SetEffects([Effect]);
+
+    ShapeNode.Appearance := App;
+    BoxNode := TBoxNode.Create;
+    ShapeNode.Geometry := BoxNode;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(Viewport);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+
+    CmdList := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(CmdList);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+
+      RShape := TX3DRendererShape(Scene.Shapes.TraverseList(True)[0]);
+      AssertTrue('ExtractRHIPointSize must return True for PointSizeScaleFactor = 4.5',
+        RShape.ExtractRHIPointSize(ExtractedPointSize));
+      AssertSameValue(4.5, ExtractedPointSize, 1e-4);
+      AssertTrue('ExtractRHIShaderEffects must extract both vertex and fragment EffectParts',
+        RShape.ExtractRHIShaderEffects(VertCode, FragCode));
+      AssertTrue('Permutation mask must include $4000 (AHasShaderEffects / PointSize)',
+        (RShape.Cache <> nil) and ((RShape.Cache.RHIShaderPermutationMask and $4000) <> 0));
+      AssertTrue('Vertex shader source must invoke PLUG_vertex_eye_space and set gl_PointSize = 4.5',
+        (Pos('PLUG_vertex_eye_space(castle_vertex_eye, castle_normal_eye);', RShape.Cache.RHIVertexShaderSource) > 0) and
+        (Pos('gl_PointSize = 4.5;', RShape.Cache.RHIVertexShaderSource) > 0));
+      AssertTrue('Fragment shader source must invoke PLUG_fragment_modify(castle_FragColor)',
+        Pos('PLUG_fragment_modify(castle_FragColor);', RShape.Cache.RHIFragmentShaderSource) > 0);
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Container);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(TestCtx);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportUpdateGeneratedTexturesOffscreenSceneRenderRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedCtx: TRenderContext;
+  SavedBackend: TRenderBackend;
+  TestCtx: TRenderContext;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  SpotLight: TSpotLightNode;
+  ShadowMapNode: TGeneratedShadowMapNode;
+  RenderedTexNode: TRenderedTextureNode;
+  CubeMapTexNode: TGeneratedCubeMapTextureNode;
+  Shape1, Shape2: TShapeNode;
+  App1, App2: TAppearanceNode;
+  Mat1, Mat2: TPhysicalMaterialNode;
+  Box1, Box2: TBoxNode;
+  ShadowRes: TGeneratedShadowMapResource;
+  RenderedRes: TRenderedTextureResource;
+  CubeRes: TGeneratedCubeMapTextureResource;
+  HandleInput: Boolean;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7503)));
+  Device.ResizeSwapchain(256, 256);
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 5.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Root := TX3DRootNode.Create;
+    SpotLight := TSpotLightNode.Create;
+    SpotLight.Location := Vector3(0.0, 5.0, 5.0);
+    SpotLight.Direction := Vector3(0.0, -1.0, -1.0);
+    SpotLight.Shadows := True;
+    ShadowMapNode := TGeneratedShadowMapNode.Create;
+    ShadowMapNode.Update := upAlways;
+    ShadowMapNode.Size := 64;
+    ShadowMapNode.FdLight.Value := SpotLight;
+    SpotLight.FdDefaultShadowMap.Value := ShadowMapNode;
+    Root.AddChildren(SpotLight);
+
+    Shape1 := TShapeNode.Create;
+    App1 := TAppearanceNode.Create;
+    Mat1 := TPhysicalMaterialNode.Create;
+    RenderedTexNode := TRenderedTextureNode.Create;
+    RenderedTexNode.Update := upAlways;
+    RenderedTexNode.SetDimensions([64, 64, 4, 1, 1]);
+    App1.Texture := RenderedTexNode;
+    App1.Material := Mat1;
+    Shape1.Appearance := App1;
+    Box1 := TBoxNode.Create;
+    Shape1.Geometry := Box1;
+    Root.AddChildren(Shape1);
+
+    Shape2 := TShapeNode.Create;
+    App2 := TAppearanceNode.Create;
+    Mat2 := TPhysicalMaterialNode.Create;
+    CubeMapTexNode := TGeneratedCubeMapTextureNode.Create;
+    CubeMapTexNode.Update := upAlways;
+    CubeMapTexNode.Size := 32;
+    App2.Texture := CubeMapTexNode;
+    App2.Material := Mat2;
+    Shape2.Appearance := App2;
+    Box2 := TBoxNode.Create;
+    Shape2.Geometry := Box2;
+    Root.AddChildren(Shape2);
+
+    Scene := TCastleScene.Create(Viewport);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+
+    CmdList := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(CmdList);
+    try
+      { Trigger full Viewport.Update -> Scene.Update -> UpdateGeneratedTextures
+        which executes offscreen scene rendering into TGeneratedShadowMapNode,
+        TRenderedTextureNode, and TGeneratedCubeMapTextureNode via
+        World.InternalRenderEverythingEvent in pure Vulkan RHI mode }
+      HandleInput := True;
+      Viewport.Update(0.016, HandleInput);
+
+      ShadowRes := TGeneratedShadowMapResource(TTextureResources.Get(ShadowMapNode));
+      RenderedRes := TRenderedTextureResource(TTextureResources.Get(RenderedTexNode));
+      CubeRes := TGeneratedCubeMapTextureResource(TTextureResources.Get(CubeMapTexNode));
+      AssertTrue('On-demand Prepare in UpdateOneGeneratedTexture must create ShadowRes',
+        (ShadowRes <> nil) and (ShadowRes.RHITexture <> nil));
+      AssertEquals('ShadowRes.RHIUpdateCount must be 1 after Viewport.Update',
+        Cardinal(1), ShadowRes.RHIUpdateCount);
+      AssertTrue('On-demand Prepare in UpdateOneGeneratedTexture must create RenderedRes',
+        (RenderedRes <> nil) and (RenderedRes.RHITexture <> nil));
+      AssertEquals('RenderedRes.RHIUpdateCount must be 1 after Viewport.Update',
+        Cardinal(1), RenderedRes.RHIUpdateCount);
+      AssertTrue('On-demand Prepare in UpdateOneGeneratedTexture must create CubeRes',
+        (CubeRes <> nil) and (CubeRes.RHITexture <> nil));
+      AssertEquals('CubeRes.RHIUpdateCount must be 1 after Viewport.Update',
+        Cardinal(1), CubeRes.RHIUpdateCount);
+
+      { Also verify full Container.EventBeforeRender + EventRender renders shapes into viewport }
+      Container.EventBeforeRender;
+      Container.EventRender;
+      AssertTrue('Command list must bind graphics pipelines for offscreen and main passes',
+        CmdList.PipelineBindCount >= 8);
     finally
       Device.EndFrameAndPresent;
     end;

@@ -1579,6 +1579,11 @@ procedure TCastleScene.Update(const SecondsPassed: Single; var RemoveMe: TRemove
         if Shape.BoundingBox.IsEmpty then Exit;
 
         TextureRes := TGeneratedCubeMapTextureResource(TTextureResources.Get(TexNode));
+        if (TextureRes = nil) and (RHIDevice <> nil) then
+        begin
+          TTextureResources.Prepare(RenderOptions, TexNode);
+          TextureRes := TGeneratedCubeMapTextureResource(TTextureResources.Get(TexNode));
+        end;
         if TextureRes <> nil then
         begin
           TextureRes.Update(Render, ProjectionNear, ProjectionFar,
@@ -1601,6 +1606,11 @@ procedure TCastleScene.Update(const SecondsPassed: Single; var RemoveMe: TRemove
         if TexNode.FdLight.Value is TAbstractPunctualLightNode then
         begin
           TextureRes := TGeneratedShadowMapResource(TTextureResources.Get(TexNode));
+          if (TextureRes = nil) and (RHIDevice <> nil) then
+          begin
+            TTextureResources.Prepare(RenderOptions, TexNode);
+            TextureRes := TGeneratedShadowMapResource(TTextureResources.Get(TexNode));
+          end;
           if TextureRes <> nil then
           begin
             TextureRes.Update(Render, ProjectionNear, ProjectionFar,
@@ -1623,6 +1633,11 @@ procedure TCastleScene.Update(const SecondsPassed: Single; var RemoveMe: TRemove
       if TexNode.GenTexFunctionality.NeedsUpdate then
       begin
         TextureRes := TRenderedTextureResource(TTextureResources.Get(TexNode));
+        if (TextureRes = nil) and (RHIDevice <> nil) then
+        begin
+          TTextureResources.Prepare(RenderOptions, TexNode);
+          TextureRes := TRenderedTextureResource(TTextureResources.Get(TexNode));
+        end;
         if TextureRes <> nil then
         begin
           TextureRes.Update(Render, ProjectionNear, ProjectionFar, CurrentViewpoint,
@@ -1727,7 +1742,7 @@ begin
   inherited;
 
   { This will do FrameProfiler.Start/Stop with fmUpdateGeneratedTextures }
-  if World <> nil then
+  if (World <> nil) and Assigned(World.InternalRenderEverythingEvent) then
     UpdateGeneratedTextures(
       World.InternalRenderEverythingEvent,
       World.InternalProjectionNear,

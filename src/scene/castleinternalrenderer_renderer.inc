@@ -733,6 +733,12 @@ begin
     SetLength(ADesc.ColorAttachmentFormats, 0);
     ADesc.DebugName := 'CastleShapeShadowDepthPSO';
   end else
+  if (RenderingCamera <> nil) and (RenderingCamera.Target = rtVarianceShadowMap) then
+  begin
+    ADesc.Rasterizer.DepthBiasEnable := True;
+    ADesc.ColorAttachmentFormats[0] := pfRGBA32_Float;
+    ADesc.DebugName := 'CastleShapeVSMPSO';
+  end else
     ADesc.DebugName := 'CastleShapeForwardPSO';
 end;
 
@@ -2038,6 +2044,11 @@ procedure TRenderer.RenderShapeInside(const Shape: TX3DRendererShape;
 
   procedure SetupShadowMapsGenerationShaders(const MeshRenderer: TMeshRenderer);
   begin
+    if (RHIDevice <> nil) or (GLFeatures = nil) then
+    begin
+      MeshRenderer.CustomShaders := nil;
+      Exit;
+    end;
     case RenderingCamera.Target of
       rtVarianceShadowMap:
         begin

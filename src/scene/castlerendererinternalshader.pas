@@ -2582,7 +2582,7 @@ begin
   {$ifndef OpenGLES}
   case FClipPlaneAlgorithm of
     cpFixedFunction:
-      glDisable(GL_CLIP_PLANE0 + ClipPlaneIndex);
+      if GLFeatures <> nil then glDisable(GL_CLIP_PLANE0 + ClipPlaneIndex);
     cpClipDistance:
       if GLFeatures <> nil then glDisable(GL_CLIP_DISTANCE0 + ClipPlaneIndex);
     else ;

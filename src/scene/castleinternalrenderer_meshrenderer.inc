@@ -1012,7 +1012,7 @@ begin
       { Disable OpenGL GL_TEXTURE_GEN_x, if it was (possibly)
         enabled by RenderCoordinateBegin. }
       Shader.DisableTexGen(I);
-      if GLFeatures.EnableFixedFunction then
+      if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
       begin
         {$ifndef OpenGLES}
         { DisableTexGen already set glActiveTexture }
