@@ -303,6 +303,9 @@ type
     procedure TestBlendModeNodeRenderOptionsBlendFactorsAndDepthFuncPipelineRHI;
     procedure TestColorNodeReplaceModeAndRenderOptionsLightingDisabledUnlitRHI;
     procedure TestProjectedTextureCoordinateAndMirrorPlaneTexGenSpecializationRHI;
+    procedure TestShadowSamplingModesPCFAndVSMSpecializationRHI;
+    procedure TestMultiClipPlanesExtractionAndSpecializationRHI;
+    procedure TestSecondaryUVChannelAndMaterialTextureMappingSpecializationRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -15887,8 +15890,8 @@ begin
       AssertTrue('Permutation mask must include $1000 (AHasShadowMap)',
         (RShape.Cache <> nil) and ((RShape.Cache.RHIShaderPermutationMask and $1000) <> 0));
       AssertTrue('Fragment shader source must sample castle_shadow_map_0 using light.ProjectorMatrix',
-        Pos('texture(castle_shadow_map_0, vec3(shadowProj.xy, shadowProj.z - 0.002))',
-          RShape.Cache.RHIFragmentShaderSource) > 0);
+        (Pos('light.ProjectorMatrix * vec4(castle_vertex_eye.xyz, 1.0)', RShape.Cache.RHIFragmentShaderSource) > 0) and
+        (Pos('texture(castle_shadow_map_0, vec3(shadowProj.xy', RShape.Cache.RHIFragmentShaderSource) > 0));
     finally
       Device.EndFrameAndPresent;
     end;
@@ -17644,6 +17647,306 @@ begin
     AssertTrue('Vertex shader must compute mirror-plane texture coordinates from castle_ProjectionMatrix * castle_vertex_eye',
       Pos('vec4 mirrorClip = castle_ProjectionMatrix * castle_vertex_eye;',
         RendererShape.Cache.RHIVertexShaderSource) > 0);
+  finally
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestShadowSamplingModesPCFAndVSMSpecializationRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  SpotLight: TSpotLightNode;
+  ShadowMapNode: TGeneratedShadowMapNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  Box: TBoxNode;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8001)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  try
+    Root := TX3DRootNode.Create;
+    SpotLight := TSpotLightNode.Create;
+    SpotLight.Location := Vector3(0, 10, 10);
+    SpotLight.Direction := Vector3(0, -1, -1);
+    SpotLight.Shadows := True;
+    ShadowMapNode := TGeneratedShadowMapNode.Create;
+    ShadowMapNode.Size := 512;
+    ShadowMapNode.Update := upAlways;
+    SpotLight.DefaultShadowMap := ShadowMapNode;
+    Root.AddChildren(SpotLight);
+
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    App.Material := Mat;
+    ShapeNode.Appearance := App;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+
+    { 1. ssSimple }
+    Scene.RenderOptions.ShadowSampling := ssSimple;
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertEquals('RHIShadowSampling must be ssSimple', Ord(ssSimple), Ord(RendererShape.Cache.RHIShadowSampling));
+    AssertEquals('RHIShadowMapSize must be 512', 512, Integer(RendererShape.Cache.RHIShadowMapSize));
+    AssertTrue('ssSimple must use single depth comparison lookup',
+      Pos('shadowVis = texture(castle_shadow_map_0, vec3(shadowProj.xy, shadowProj.z - 0.002));',
+        RendererShape.Cache.RHIFragmentShaderSource) > 0);
+
+    { 2. ssPCF4 }
+    Scene.RenderOptions.ShadowSampling := ssPCF4;
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertEquals('RHIShadowSampling must be ssPCF4', Ord(ssPCF4), Ord(RendererShape.Cache.RHIShadowSampling));
+    AssertTrue('ssPCF4 must emit 4-tap 0.25 kernel with offset 1.0 / 1024',
+      (Pos('shadowVis = 0.25 * (', RendererShape.Cache.RHIFragmentShaderSource) > 0) and
+      (Pos('float shadowOff = 1.0 / 1024;', RendererShape.Cache.RHIFragmentShaderSource) > 0));
+
+    { 3. ssPCF4Bilinear }
+    Scene.RenderOptions.ShadowSampling := ssPCF4Bilinear;
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertEquals('RHIShadowSampling must be ssPCF4Bilinear', Ord(ssPCF4Bilinear), Ord(RendererShape.Cache.RHIShadowSampling));
+    AssertTrue('ssPCF4Bilinear must emit bilinear fract(tc_full) interpolation',
+      (Pos('vec2 tc_full = shadowSize * shadowProj.xy;', RendererShape.Cache.RHIFragmentShaderSource) > 0) and
+      (Pos('* f1.x * f1.y +', RendererShape.Cache.RHIFragmentShaderSource) > 0));
+
+    { 4. ssPCF16 }
+    Scene.RenderOptions.ShadowSampling := ssPCF16;
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertEquals('RHIShadowSampling must be ssPCF16', Ord(ssPCF16), Ord(RendererShape.Cache.RHIShadowSampling));
+    AssertTrue('ssPCF16 must emit 4x4 16-tap PCF loop',
+      (Pos('for (int sy = 0; sy < 4; ++sy)', RendererShape.Cache.RHIFragmentShaderSource) > 0) and
+      (Pos('shadowVis = shadowSum * (1.0 / 16.0);', RendererShape.Cache.RHIFragmentShaderSource) > 0));
+
+    { 5. ssVarianceShadowMaps (triggers ReleaseCachedResources -> GLContextClose, so re-prepare Cache) }
+    Scene.RenderOptions.ShadowSampling := ssVarianceShadowMaps;
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertEquals('RHIShadowSampling must be ssVarianceShadowMaps', Ord(ssVarianceShadowMaps), Ord(RendererShape.Cache.RHIShadowSampling));
+    AssertTrue('ssVarianceShadowMaps must declare sampler2D castle_shadow_map_0 and Chebyshev inequality',
+      (Pos('sampler2D castle_shadow_map_0;', RendererShape.Cache.RHIFragmentShaderSource) > 0) and
+      (Pos('vec2 vsmMoments = texture(castle_shadow_map_0, shadowProj.xy).rg;', RendererShape.Cache.RHIFragmentShaderSource) > 0) and
+      (Pos('vsmVariance / (vsmVariance + vsmDelta * vsmDelta)', RendererShape.Cache.RHIFragmentShaderSource) > 0));
+  finally
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestMultiClipPlanesExtractionAndSpecializationRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  Clip1, Clip2, Clip3: TClipPlaneNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  Box: TBoxNode;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  ExtractedPlanes: array[0..3] of TVector4;
+  ExtractedCount: Cardinal;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8002)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  try
+    Root := TX3DRootNode.Create;
+
+    Clip1 := TClipPlaneNode.Create;
+    Clip1.FdEnabled.Value := True;
+    Clip1.FdPlane.Value := Vector4(1, 0, 0, -0.5);
+    Root.AddChildren(Clip1);
+
+    Clip2 := TClipPlaneNode.Create;
+    Clip2.FdEnabled.Value := True;
+    Clip2.FdPlane.Value := Vector4(0, 1, 0, 0.25);
+    Root.AddChildren(Clip2);
+
+    Clip3 := TClipPlaneNode.Create;
+    Clip3.FdEnabled.Value := True;
+    Clip3.FdPlane.Value := Vector4(0, 0, 1, -0.75);
+    Root.AddChildren(Clip3);
+
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    App.Material := Mat;
+    ShapeNode.Appearance := App;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    ExtractedCount := RendererShape.ExtractRHIClipPlanes(ExtractedPlanes);
+    AssertEquals('Must extract 3 enabled TClipPlaneNodes', 3, Integer(ExtractedCount));
+
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+
+    AssertEquals('Cache.RHIClipPlaneCount must be 3', 3, Integer(RendererShape.Cache.RHIClipPlaneCount));
+    AssertSameValue(-0.5, RendererShape.Cache.RHIClipPlanes[0].W, 1e-4);
+    AssertSameValue(0.25, RendererShape.Cache.RHIClipPlanes[1].W, 1e-4);
+    AssertSameValue(-0.75, RendererShape.Cache.RHIClipPlanes[2].W, 1e-4);
+    AssertTrue('Fragment shader must contain discard check for Clip1',
+      Pos('if (dot(vec4(1, 0, 0, -0.5), castle_ViewMatrixInverse * vec4(castle_vertex_eye.xyz, 1.0)) < 0.0) discard;',
+        RendererShape.Cache.RHIFragmentShaderSource) > 0);
+    AssertTrue('Fragment shader must contain discard check for Clip2',
+      Pos('if (dot(vec4(0, 1, 0, 0.25), castle_ViewMatrixInverse * vec4(castle_vertex_eye.xyz, 1.0)) < 0.0) discard;',
+        RendererShape.Cache.RHIFragmentShaderSource) > 0);
+    AssertTrue('Fragment shader must contain discard check for Clip3',
+      Pos('if (dot(vec4(0, 0, 1, -0.75), castle_ViewMatrixInverse * vec4(castle_vertex_eye.xyz, 1.0)) < 0.0) discard;',
+        RendererShape.Cache.RHIFragmentShaderSource) > 0);
+  finally
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSecondaryUVChannelAndMaterialTextureMappingSpecializationRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  BaseTex, OcclusionTex, EmissiveTex: TPixelTextureNode;
+  Img1, Img2, Img3: TRGBAlphaImage;
+  IFS: TIndexedFaceSetNode;
+  Coord: TCoordinateNode;
+  MultiTexCoord: TMultiTextureCoordinateNode;
+  TexCoord0, TexCoord1: TTextureCoordinateNode;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8003)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+
+    BaseTex := TPixelTextureNode.Create;
+    Img1 := TRGBAlphaImage.Create(2, 2);
+    Img1.Clear(Vector4Byte(255, 255, 255, 255));
+    BaseTex.FdImage.Value := Img1;
+    Mat.BaseTexture := BaseTex;
+    Mat.BaseTextureMapping := 'UV0';
+
+    OcclusionTex := TPixelTextureNode.Create;
+    Img2 := TRGBAlphaImage.Create(2, 2);
+    Img2.Clear(Vector4Byte(200, 200, 200, 255));
+    OcclusionTex.FdImage.Value := Img2;
+    Mat.OcclusionTexture := OcclusionTex;
+    Mat.OcclusionTextureMapping := 'LIGHTMAP_UV1';
+
+    EmissiveTex := TPixelTextureNode.Create;
+    Img3 := TRGBAlphaImage.Create(2, 2);
+    Img3.Clear(Vector4Byte(128, 64, 0, 255));
+    EmissiveTex.FdImage.Value := Img3;
+    Mat.EmissiveTexture := EmissiveTex;
+    Mat.EmissiveTextureMapping := 'LIGHTMAP_UV1';
+
+    App.Material := Mat;
+    ShapeNode.Appearance := App;
+
+    IFS := TIndexedFaceSetNode.Create;
+    Coord := TCoordinateNode.Create;
+    Coord.SetPoint([
+      Vector3(-1, -1, 0),
+      Vector3( 1, -1, 0),
+      Vector3( 1,  1, 0),
+      Vector3(-1,  1, 0)]);
+    IFS.Coord := Coord;
+
+    TexCoord0 := TTextureCoordinateNode.Create;
+    TexCoord0.Mapping := 'UV0';
+    TexCoord0.SetPoint([
+      Vector2(0, 0),
+      Vector2(1, 0),
+      Vector2(1, 1),
+      Vector2(0, 1)]);
+
+    TexCoord1 := TTextureCoordinateNode.Create;
+    TexCoord1.Mapping := 'LIGHTMAP_UV1';
+    TexCoord1.SetPoint([
+      Vector2(0.1, 0.1),
+      Vector2(0.9, 0.1),
+      Vector2(0.9, 0.9),
+      Vector2(0.1, 0.9)]);
+
+    MultiTexCoord := TMultiTextureCoordinateNode.Create;
+    MultiTexCoord.FdTexCoord.Add(TexCoord0);
+    MultiTexCoord.FdTexCoord.Add(TexCoord1);
+    IFS.TexCoord := MultiTexCoord;
+    IFS.SetCoordIndex([0, 1, 2, 3, -1]);
+    ShapeNode.Geometry := IFS;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 1);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+
+    AssertEquals('Arrays.TexCoords.Count must be 2 for MultiTextureCoordinate',
+      2, RendererShape.Cache.GeometryArrays.TexCoords.Count);
+    AssertEquals('RHIBaseColorTexCoordIndex must be 0 (UV0)',
+      0, Integer(RendererShape.Cache.RHIBaseColorTexCoordIndex));
+    AssertEquals('RHIOcclusionTexCoordIndex must be 1 (LIGHTMAP_UV1)',
+      1, Integer(RendererShape.Cache.RHIOcclusionTexCoordIndex));
+    AssertEquals('RHIEmissiveTexCoordIndex must be 1 (LIGHTMAP_UV1)',
+      1, Integer(RendererShape.Cache.RHIEmissiveTexCoordIndex));
+    AssertTrue('BaseColor texture must sample castle_tex_coord0',
+      Pos('texture(castle_base_color_texture, castle_tex_coord0)',
+        RendererShape.Cache.RHIFragmentShaderSource) > 0);
+    AssertTrue('Occlusion texture must sample castle_tex_coord1',
+      Pos('texture(castle_occlusion_texture, castle_tex_coord1)',
+        RendererShape.Cache.RHIFragmentShaderSource) > 0);
+    AssertTrue('Emissive texture must sample castle_tex_coord1',
+      Pos('texture(castle_emissive_texture, castle_tex_coord1)',
+        RendererShape.Cache.RHIFragmentShaderSource) > 0);
   finally
     FreeAndNil(Scene);
     SetRHIDevice(SavedRHI);

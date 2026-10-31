@@ -101,6 +101,17 @@
       into scene/world space via PlaneTransform(ClipPlane.Node.FdPlane.Value, ClipPlane.Transform). }
     function ExtractRHIClipPlane(out ASceneClipPlane: TVector4): Boolean;
 
+    { Extracts up to Length(ASceneClipPlanes) enabled X3D TClipPlaneNodes from State.ClipPlanes
+      transformed into scene/world space. Returns the number of active clip planes extracted. }
+    function ExtractRHIClipPlanes(out ASceneClipPlanes: array of TVector4): Cardinal;
+
+    { Extracts per-texture-slot UV channel indices (0 for castle_tex_coord0, 1 for castle_tex_coord1)
+      resolved via Geometry.FindTextureMapping from X3D 4 material *TextureMapping fields or
+      TCommonSurfaceShaderNode.*TextureCoordinatesId. Returns True if any texture slot maps to UV index > 0. }
+    function ExtractRHITextureCoordMappings(
+      out ABaseColorIdx, ANormalIdx, AMetallicRoughnessIdx,
+          AEmissiveIdx, AOcclusionIdx: Cardinal): Boolean;
+
     { Resolves an active TEnvironmentLightNode cubemap texture (SpecularTexture or DiffuseTexture)
       from State.Lights to its underlying TRHITexture and TRHISampler handles. }
     function ExtractRHIEnvironmentLightTexture(
@@ -345,6 +356,8 @@ var
   Generator: TArraysGenerator;
   App: TAppearanceNode;
   HasNormalMap, FogEnabled: Boolean;
+  BaseColorIdx, NormalIdx, MetallicRoughnessIdx, EmissiveIdx, OcclusionIdx, MaxMapIdx: Cardinal;
+  EffectiveTexCoordsNeeded: Cardinal;
 begin
   if Cache = nil then
     Cache := RendererCache.Shape_IncReference(Self, ARenderOptions);
@@ -359,7 +372,18 @@ begin
       begin
         Generator := GeneratorClass.Create(Self);
         try
-          Generator.TexCoordsNeeded := ATexCoordsNeeded;
+          EffectiveTexCoordsNeeded := ATexCoordsNeeded;
+          if ExtractRHITextureCoordMappings(BaseColorIdx, NormalIdx, MetallicRoughnessIdx, EmissiveIdx, OcclusionIdx) then
+          begin
+            MaxMapIdx := Max(Max(Max(BaseColorIdx, NormalIdx), Max(MetallicRoughnessIdx, EmissiveIdx)), OcclusionIdx);
+            EffectiveTexCoordsNeeded := Max(EffectiveTexCoordsNeeded, MaxMapIdx + 1);
+          end else
+            NormalIdx := 0;
+          if (Geometry <> nil) and (Geometry.TexCoordField <> nil) and
+             (Geometry.TexCoordField.Value is TMultiTextureCoordinateNode) then
+            EffectiveTexCoordsNeeded := Max(EffectiveTexCoordsNeeded,
+              Cardinal(TMultiTextureCoordinateNode(Geometry.TexCoordField.Value).FdTexCoord.Count));
+          Generator.TexCoordsNeeded := EffectiveTexCoordsNeeded;
           HasNormalMap := False;
           App := nil;
           if (OriginalState <> nil) and (OriginalState.ShapeNode <> nil) then
@@ -383,10 +407,10 @@ begin
           begin
             BumpMappingAllowed := True;
             BumpMappingUsed := True;
-            BumpMappingTextureCoordinatesId := 0;
+            BumpMappingTextureCoordinatesId := NormalIdx;
             Generator.ShapeBumpMappingUsed := True;
-            Generator.ShapeBumpMappingTextureCoordinatesId := 0;
-            Generator.TexCoordsNeeded := Max(ATexCoordsNeeded, Cardinal(1));
+            Generator.ShapeBumpMappingTextureCoordinatesId := NormalIdx;
+            Generator.TexCoordsNeeded := Max(EffectiveTexCoordsNeeded, NormalIdx + 1);
           end;
           if Fog <> nil then
             TRenderer.GetFog(Fog, ARenderOptions, FogEnabled,
@@ -767,16 +791,28 @@ end;
 
 function TX3DRendererShape.ExtractRHIClipPlane(out ASceneClipPlane: TVector4): Boolean;
 var
+  Planes: array[0..0] of TVector4;
+begin
+  Result := ExtractRHIClipPlanes(Planes) > 0;
+  if Result then
+    ASceneClipPlane := Planes[0]
+  else
+    ASceneClipPlane := TVector4.Zero;
+end;
+
+function TX3DRendererShape.ExtractRHIClipPlanes(out ASceneClipPlanes: array of TVector4): Cardinal;
+var
   ShapeState: TX3DGraphTraverseState;
   I: Integer;
   ClipPlane: PClipPlane;
 begin
-  ASceneClipPlane := TVector4.Zero;
-  Result := False;
+  Result := 0;
+  for I := 0 to High(ASceneClipPlanes) do
+    ASceneClipPlanes[I] := TVector4.Zero;
   ShapeState := OriginalState;
   if ShapeState = nil then
     ShapeState := State;
-  if (ShapeState = nil) or (ShapeState.ClipPlanes = nil) then
+  if (ShapeState = nil) or (ShapeState.ClipPlanes = nil) or (Length(ASceneClipPlanes) = 0) then
     Exit;
 
   for I := 0 to ShapeState.ClipPlanes.Count - 1 do
@@ -784,10 +820,107 @@ begin
     ClipPlane := PClipPlane(ShapeState.ClipPlanes.Ptr(I));
     if (ClipPlane^.Node <> nil) and ClipPlane^.Node.FdEnabled.Value then
     begin
-      ASceneClipPlane := PlaneTransform(ClipPlane^.Node.FdPlane.Value, ClipPlane^.Transform);
-      Exit(True);
+      ASceneClipPlanes[Result] := PlaneTransform(ClipPlane^.Node.FdPlane.Value, ClipPlane^.Transform);
+      Inc(Result);
+      if Result >= Cardinal(Length(ASceneClipPlanes)) then
+        Break;
     end;
   end;
+end;
+
+function TX3DRendererShape.ExtractRHITextureCoordMappings(
+  out ABaseColorIdx, ANormalIdx, AMetallicRoughnessIdx,
+      AEmissiveIdx, AOcclusionIdx: Cardinal): Boolean;
+
+  function ResolveMapping(const AMapping: String): Cardinal;
+  var
+    Idx: Integer;
+  begin
+    Result := 0;
+    if (AMapping <> '') and (Geometry <> nil) then
+    begin
+      Geometry.FindTextureMapping(AMapping, Idx, False);
+      if Idx > 0 then
+        Result := Cardinal(Idx);
+    end;
+  end;
+
+var
+  ShapeState: TX3DGraphTraverseState;
+  App: TAppearanceNode;
+  SurfaceShader: TCommonSurfaceShaderNode;
+  MatNode: TAbstractMaterialNode;
+  PhysMat: TPhysicalMaterialNode;
+  PhongMat: TMaterialNode;
+  UnlitMat: TUnlitMaterialNode;
+begin
+  ABaseColorIdx := 0;
+  ANormalIdx := 0;
+  AMetallicRoughnessIdx := 0;
+  AEmissiveIdx := 0;
+  AOcclusionIdx := 0;
+  Result := False;
+
+  ShapeState := OriginalState;
+  if ShapeState = nil then
+    ShapeState := State;
+  if ShapeState = nil then
+    Exit;
+
+  if ShapeState.ShapeNode <> nil then
+    App := ShapeState.ShapeNode.Appearance
+  else
+    App := ShapeState.Appearance;
+  if App = nil then
+    Exit;
+
+  SurfaceShader := App.InternalCommonSurfaceShader;
+  if SurfaceShader <> nil then
+  begin
+    ABaseColorIdx := Cardinal(Max(0, SurfaceShader.DiffuseTextureCoordinatesId));
+    ANormalIdx := Cardinal(Max(0, SurfaceShader.NormalTextureCoordinatesId));
+    if SurfaceShader.SpecularTexture <> nil then
+      AMetallicRoughnessIdx := Cardinal(Max(0, SurfaceShader.SpecularTextureCoordinatesId))
+    else
+      AMetallicRoughnessIdx := Cardinal(Max(0, SurfaceShader.ShininessTextureCoordinatesId));
+    AEmissiveIdx := Cardinal(Max(0, SurfaceShader.EmissiveTextureCoordinatesId));
+    AOcclusionIdx := Cardinal(Max(0, SurfaceShader.AmbientTextureCoordinatesId));
+  end else
+  begin
+    MatNode := App.Material;
+    if MatNode is TPhysicalMaterialNode then
+    begin
+      PhysMat := TPhysicalMaterialNode(MatNode);
+      ABaseColorIdx := ResolveMapping(PhysMat.BaseTextureMapping);
+      ANormalIdx := ResolveMapping(PhysMat.NormalTextureMapping);
+      AMetallicRoughnessIdx := ResolveMapping(PhysMat.MetallicRoughnessTextureMapping);
+      AEmissiveIdx := ResolveMapping(PhysMat.EmissiveTextureMapping);
+      AOcclusionIdx := ResolveMapping(PhysMat.OcclusionTextureMapping);
+    end else
+    if MatNode is TMaterialNode then
+    begin
+      PhongMat := TMaterialNode(MatNode);
+      ABaseColorIdx := ResolveMapping(PhongMat.DiffuseTextureMapping);
+      ANormalIdx := ResolveMapping(PhongMat.NormalTextureMapping);
+      if PhongMat.SpecularTexture <> nil then
+        AMetallicRoughnessIdx := ResolveMapping(PhongMat.SpecularTextureMapping)
+      else
+        AMetallicRoughnessIdx := ResolveMapping(PhongMat.ShininessTextureMapping);
+      AEmissiveIdx := ResolveMapping(PhongMat.EmissiveTextureMapping);
+      AOcclusionIdx := ResolveMapping(PhongMat.OcclusionTextureMapping);
+    end else
+    if MatNode is TUnlitMaterialNode then
+    begin
+      UnlitMat := TUnlitMaterialNode(MatNode);
+      ABaseColorIdx := ResolveMapping(UnlitMat.EmissiveTextureMapping);
+      ANormalIdx := ResolveMapping(UnlitMat.NormalTextureMapping);
+      AEmissiveIdx := ABaseColorIdx;
+    end;
+  end;
+
+  Result := (ABaseColorIdx > 0) or (ANormalIdx > 0) or
+            (AMetallicRoughnessIdx > 0) or (AEmissiveIdx > 0) or
+            (AOcclusionIdx > 0);
 end;
 
 function TX3DRendererShape.ExtractRHIEnvironmentLightTexture(
@@ -854,6 +987,8 @@ function TX3DRendererShape.ExtractRHIShadowMap(
 var
   ShadowMapNode: TGeneratedShadowMapNode;
   Res: TTextureResource;
+  EffectiveSampling: TShadowSampling;
+  EffectiveSize: Cardinal;
 begin
   AShadowMapTex := nil;
   AShadowMapSampler := nil;
@@ -873,6 +1008,17 @@ begin
   begin
     AShadowMapTex := TGeneratedShadowMapResource(Res).RHITexture;
     AShadowMapSampler := Res.RHISampler;
+    if Cache <> nil then
+    begin
+      if Cache.RenderOptions <> nil then
+        EffectiveSampling := Cache.RenderOptions.ShadowSampling
+      else
+        EffectiveSampling := TCastleRenderOptions.DefaultShadowSampling;
+      EffectiveSize := Max(Cardinal(1), Cardinal(Max(1, ShadowMapNode.FdSize.Value)));
+      if AShadowMapTex <> nil then
+        EffectiveSize := Max(Cardinal(1), AShadowMapTex.Desc.Width);
+      Cache.SetShadowMapParams(EffectiveSampling, EffectiveSize);
+    end;
     Result := AShadowMapTex <> nil;
   end;
 end;
@@ -1400,12 +1546,15 @@ var
   EnvCubemapTex, ShadowMapTex: TRHITexture;
   EnvCubemapSampler, ShadowMapSampler: TRHISampler;
   TexTransformMatrix: TMatrix4;
-  ClipPlane, TexGenBoundsS, TexGenBoundsT: TVector4;
+  ClipPlanes: array[0..3] of TVector4;
+  ClipPlaneCount: Cardinal;
+  TexGenBoundsS, TexGenBoundsT: TVector4;
   TexCoordGen: TTextureCoordinateGeneration;
   PointSize, ParallaxHeight: Single;
   VertEffectCode, FragEffectCode, ComposedVertCode, ComposedFragCode: String;
   HasTexTransform, HasClipPlane, HasIBL, HasShadowMap, HasTexCoordGen, HasPointSize,
     HasParallax, SteepParallax, HasShaderEffects, HasComposedShader: Boolean;
+  BaseColorMapIdx, NormalMapIdx, MetallicRoughnessMapIdx, EmissiveMapIdx, OcclusionMapIdx: Cardinal;
   BaseColorIdx, NormalIdx, MetallicRoughnessIdx, EmissiveIdx: Cardinal;
   BindlessEntry: TCastleBindlessMaterialEntry;
 begin
@@ -1417,8 +1566,11 @@ begin
     ExtractRHIMaterialTextures(
       BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex,
       BaseColorSampler, NormalSampler, MetallicRoughnessSampler, EmissiveSampler, OcclusionSampler);
+    ExtractRHITextureCoordMappings(
+      BaseColorMapIdx, NormalMapIdx, MetallicRoughnessMapIdx, EmissiveMapIdx, OcclusionMapIdx);
     HasTexTransform := ExtractRHITextureTransform(TexTransformMatrix);
-    HasClipPlane := ExtractRHIClipPlane(ClipPlane);
+    ClipPlaneCount := ExtractRHIClipPlanes(ClipPlanes);
+    HasClipPlane := ClipPlaneCount > 0;
     HasIBL := ExtractRHIEnvironmentLightTexture(EnvCubemapTex, EnvCubemapSampler);
     HasShadowMap := ExtractRHIShadowMap(ShadowMapTex, ShadowMapSampler);
     HasTexCoordGen := ExtractRHITexCoordGen(TexCoordGen, TexGenBoundsS, TexGenBoundsT);
@@ -1428,8 +1580,10 @@ begin
     HasComposedShader := ExtractRHIComposedShader(ComposedVertCode, ComposedFragCode);
     if Cache <> nil then
     begin
+      Cache.SetTextureCoordMappings(
+        BaseColorMapIdx, NormalMapIdx, MetallicRoughnessMapIdx, EmissiveMapIdx, OcclusionMapIdx);
       Cache.SetTextureTransform(HasTexTransform, TexTransformMatrix);
-      Cache.SetClipPlane(HasClipPlane, ClipPlane);
+      Cache.SetClipPlanes(ClipPlanes, ClipPlaneCount);
       Cache.SetTexCoordGen(TexCoordGen, TexGenBoundsS, TexGenBoundsT);
       Cache.SetPointSize(PointSize);
       Cache.SetParallaxBumpMapping(HasParallax, SteepParallax, ParallaxHeight);

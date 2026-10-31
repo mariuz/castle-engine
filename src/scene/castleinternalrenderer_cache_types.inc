@@ -143,6 +143,16 @@
     FRHIHasTextureTransform: Boolean;
     FRHIClipPlane: TVector4;
     FRHIHasClipPlane: Boolean;
+    FRHIClipPlanes: array[0..3] of TVector4;
+    FRHIClipPlaneCount: Cardinal;
+    FRHIShadowSampling: TShadowSampling;
+    FRHIShadowSamplingExplicit: Boolean;
+    FRHIShadowMapSize: Cardinal;
+    FRHIBaseColorTexCoordIndex: Cardinal;
+    FRHINormalTexCoordIndex: Cardinal;
+    FRHIMetallicRoughnessTexCoordIndex: Cardinal;
+    FRHIEmissiveTexCoordIndex: Cardinal;
+    FRHIOcclusionTexCoordIndex: Cardinal;
     FRHITexCoordGen: TTextureCoordinateGeneration;
     FRHITexGenBoundsS: TVector4;
     FRHITexGenBoundsT: TVector4;
@@ -180,6 +190,7 @@
     procedure EnsureRHISet2DescriptorSet;
     function GetRHIUserEffectTexture(const AIndex: Cardinal): TRHITexture;
     function GetRHIUserEffectSampler(const AIndex: Cardinal): TRHISampler;
+    function GetRHIClipPlane(const AIndex: Cardinal): TVector4;
   public
     constructor Create;
     destructor Destroy; override;
@@ -204,6 +215,11 @@
       const ABrdfLutSampler: TRHISampler = nil);
     procedure SetTextureTransform(const AHasTransform: Boolean; const AMatrix: TMatrix4);
     procedure SetClipPlane(const AHasClipPlane: Boolean; const APlane: TVector4);
+    procedure SetClipPlanes(const APlanes: array of TVector4; const ACount: Cardinal);
+    procedure SetShadowMapParams(const ASampling: TShadowSampling; const ASize: Cardinal = 128);
+    procedure SetTextureCoordMappings(
+      const ABaseColorIdx, ANormalIdx, AMetallicRoughnessIdx,
+            AEmissiveIdx, AOcclusionIdx: Cardinal);
     procedure SetTexCoordGen(const AGeneration: TTextureCoordinateGeneration;
       const ABoundsS, ABoundsT: TVector4);
     procedure SetTexCoordGenProjectorMatrix(const AMatrix: TMatrix4);
@@ -247,6 +263,15 @@
     property RHIHasTextureTransform: Boolean read FRHIHasTextureTransform;
     property RHIClipPlane: TVector4 read FRHIClipPlane;
     property RHIHasClipPlane: Boolean read FRHIHasClipPlane;
+    property RHIClipPlaneCount: Cardinal read FRHIClipPlaneCount;
+    property RHIClipPlanes[const AIndex: Cardinal]: TVector4 read GetRHIClipPlane;
+    property RHIShadowSampling: TShadowSampling read FRHIShadowSampling;
+    property RHIShadowMapSize: Cardinal read FRHIShadowMapSize;
+    property RHIBaseColorTexCoordIndex: Cardinal read FRHIBaseColorTexCoordIndex;
+    property RHINormalTexCoordIndex: Cardinal read FRHINormalTexCoordIndex;
+    property RHIMetallicRoughnessTexCoordIndex: Cardinal read FRHIMetallicRoughnessTexCoordIndex;
+    property RHIEmissiveTexCoordIndex: Cardinal read FRHIEmissiveTexCoordIndex;
+    property RHIOcclusionTexCoordIndex: Cardinal read FRHIOcclusionTexCoordIndex;
     property RHITexCoordGen: TTextureCoordinateGeneration read FRHITexCoordGen;
     property RHITexGenBoundsS: TVector4 read FRHITexGenBoundsS;
     property RHITexGenBoundsT: TVector4 read FRHITexGenBoundsT;
@@ -308,6 +333,7 @@ begin
   FRHIPointSize := 1.0;
   FRHIParallaxHeight := 0.01;
   FRHITexGenProjectorMatrix := TMatrix4.Identity;
+  FRHIShadowMapSize := 128;
 end;
 
 destructor TShapeCache.Destroy;
@@ -460,6 +486,14 @@ begin
     Result := FRHIUserEffectSamplers[AIndex]
   else
     Result := nil;
+end;
+
+function TShapeCache.GetRHIClipPlane(const AIndex: Cardinal): TVector4;
+begin
+  if AIndex <= High(FRHIClipPlanes) then
+    Result := FRHIClipPlanes[AIndex]
+  else
+    Result := TVector4.Zero;
 end;
 
 procedure TShapeCache.InvalidateVertexData(const Changed: TVboTypes);
@@ -679,10 +713,80 @@ end;
 procedure TShapeCache.SetClipPlane(const AHasClipPlane: Boolean; const APlane: TVector4);
 begin
   if (FRHIHasClipPlane <> AHasClipPlane) or
-     (AHasClipPlane and not TVector4.PerfectlyEquals(FRHIClipPlane, APlane)) then
+     (AHasClipPlane and ((FRHIClipPlaneCount <> 1) or not TVector4.PerfectlyEquals(FRHIClipPlane, APlane))) then
   begin
     FRHIHasClipPlane := AHasClipPlane;
     FRHIClipPlane := APlane;
+    if AHasClipPlane then
+    begin
+      FRHIClipPlanes[0] := APlane;
+      FRHIClipPlaneCount := 1;
+    end else
+      FRHIClipPlaneCount := 0;
+    FRHIShadersInitialized := False;
+  end;
+end;
+
+procedure TShapeCache.SetClipPlanes(const APlanes: array of TVector4; const ACount: Cardinal);
+var
+  EffectiveCount: Cardinal;
+  I: Integer;
+  Changed: Boolean;
+begin
+  EffectiveCount := Min(Min(ACount, Cardinal(Length(APlanes))), Cardinal(Length(FRHIClipPlanes)));
+  Changed := (FRHIClipPlaneCount <> EffectiveCount) or (FRHIHasClipPlane <> (EffectiveCount > 0));
+  if not Changed then
+    for I := 0 to Integer(EffectiveCount) - 1 do
+      if not TVector4.PerfectlyEquals(FRHIClipPlanes[I], APlanes[I]) then
+      begin
+        Changed := True;
+        Break;
+      end;
+  if Changed then
+  begin
+    FRHIClipPlaneCount := EffectiveCount;
+    FRHIHasClipPlane := EffectiveCount > 0;
+    for I := 0 to Integer(EffectiveCount) - 1 do
+      FRHIClipPlanes[I] := APlanes[I];
+    if EffectiveCount > 0 then
+      FRHIClipPlane := FRHIClipPlanes[0]
+    else
+      FRHIClipPlane := TVector4.Zero;
+    FRHIShadersInitialized := False;
+  end;
+end;
+
+procedure TShapeCache.SetShadowMapParams(const ASampling: TShadowSampling; const ASize: Cardinal);
+var
+  EffectiveSize: Cardinal;
+begin
+  EffectiveSize := Max(Cardinal(1), ASize);
+  if (not FRHIShadowSamplingExplicit) or
+     (FRHIShadowSampling <> ASampling) or
+     (FRHIShadowMapSize <> EffectiveSize) then
+  begin
+    FRHIShadowSamplingExplicit := True;
+    FRHIShadowSampling := ASampling;
+    FRHIShadowMapSize := EffectiveSize;
+    FRHIShadersInitialized := False;
+  end;
+end;
+
+procedure TShapeCache.SetTextureCoordMappings(
+  const ABaseColorIdx, ANormalIdx, AMetallicRoughnessIdx,
+        AEmissiveIdx, AOcclusionIdx: Cardinal);
+begin
+  if (FRHIBaseColorTexCoordIndex <> ABaseColorIdx) or
+     (FRHINormalTexCoordIndex <> ANormalIdx) or
+     (FRHIMetallicRoughnessTexCoordIndex <> AMetallicRoughnessIdx) or
+     (FRHIEmissiveTexCoordIndex <> AEmissiveIdx) or
+     (FRHIOcclusionTexCoordIndex <> AOcclusionIdx) then
+  begin
+    FRHIBaseColorTexCoordIndex := ABaseColorIdx;
+    FRHINormalTexCoordIndex := ANormalIdx;
+    FRHIMetallicRoughnessTexCoordIndex := AMetallicRoughnessIdx;
+    FRHIEmissiveTexCoordIndex := AEmissiveIdx;
+    FRHIOcclusionTexCoordIndex := AOcclusionIdx;
     FRHIShadersInitialized := False;
   end;
 end;
@@ -777,6 +881,9 @@ var
   UpgradedVertEffect, UpgradedFragEffect, EffectivePointSizeStr, AttribGLSLType, AttribDecl: String;
   HasLinearColorSpace: Boolean;
   EffectiveToneMapping: TToneMapping;
+  EffectiveShadowSampling: TShadowSampling;
+  EffectiveShadowSize, ClipCount: Cardinal;
+  Plane: TVector4;
   I: Integer;
   LocIdx, AttrLoc: Cardinal;
 begin
@@ -786,6 +893,13 @@ begin
 
   HasLinearColorSpace := CastleRenderOptions.ColorSpace = csLinear;
   EffectiveToneMapping := CastleRenderOptions.ToneMapping;
+  if FRHIShadowSamplingExplicit then
+    EffectiveShadowSampling := FRHIShadowSampling
+  else if RenderOptions <> nil then
+    EffectiveShadowSampling := RenderOptions.ShadowSampling
+  else
+    EffectiveShadowSampling := FRHIShadowSampling;
+  EffectiveShadowSize := Max(Cardinal(1), FRHIShadowMapSize);
 
   Mask := 0;
   if AHasSkinning then Mask := Mask or $01;
@@ -798,9 +912,15 @@ begin
   if AUseAlphaTest then Mask := Mask or $80;
   if AHasColorPerVertex then Mask := Mask or $100;
   if AHasTextureTransform then Mask := Mask or $200;
-  if AHasClipPlane then Mask := Mask or $400;
+  if AHasClipPlane then
+  begin
+    Mask := Mask or $400;
+    if FRHIClipPlaneCount > 1 then
+      Mask := Mask or $08000000;
+  end;
   if AHasIBL then Mask := Mask or $800;
-  if AHasShadowMap then Mask := Mask or $1000;
+  if AHasShadowMap then
+    Mask := Mask or $1000 or ((Cardinal(Ord(EffectiveShadowSampling)) and 7) shl 24);
   if AHasTexCoordGen or (FRHITexCoordGen <> tgExplicit) then Mask := Mask or $2000;
   if AHasShaderEffects or (FRHIVertexEffectCode <> '') or (FRHIFragmentEffectCode <> '') or
      (FRHIPointSize > 1.0001) then Mask := Mask or $4000;
@@ -822,6 +942,14 @@ begin
     Mask := Mask or $400000
   else if FRHITexCoordGen = tgMirrorPlane then
     Mask := Mask or $800000;
+  if FRHIBaseColorTexCoordIndex > 0 then
+    Mask := Mask or $10000000;
+  if FRHINormalTexCoordIndex > 0 then
+    Mask := Mask or $20000000;
+  if (FRHIMetallicRoughnessTexCoordIndex > 0) or
+     (FRHIEmissiveTexCoordIndex > 0) or
+     (FRHIOcclusionTexCoordIndex > 0) then
+    Mask := Mask or $40000000;
 
   if FRHIShadersInitialized and (FRHIShaderPermutationMask = Mask) and
      (FRHIVertexShader <> nil) and (FRHIFragmentShader <> nil) then
@@ -973,10 +1101,19 @@ begin
       AHasEmissiveTex, AHasOcclusionTex, AHasIBL, AUseAlphaTest, False, False);
     if AHasClipPlane then
     begin
-      ClipPlaneSnippet := FormatDot(
-        '  if (dot(vec4(%g, %g, %g, %g), castle_ViewMatrixInverse * vec4(castle_vertex_eye.xyz, 1.0)) < 0.0) discard;' + LineEnding +
-        '  vec4 baseColor = castle_MaterialBaseColor;',
-        [FRHIClipPlane.X, FRHIClipPlane.Y, FRHIClipPlane.Z, FRHIClipPlane.W]);
+      ClipPlaneSnippet := '';
+      ClipCount := Min(Max(Cardinal(1), FRHIClipPlaneCount), Cardinal(4));
+      for I := 0 to Integer(ClipCount) - 1 do
+      begin
+        if FRHIClipPlaneCount > 0 then
+          Plane := FRHIClipPlanes[I]
+        else
+          Plane := FRHIClipPlane;
+        ClipPlaneSnippet := ClipPlaneSnippet + FormatDot(
+          '  if (dot(vec4(%g, %g, %g, %g), castle_ViewMatrixInverse * vec4(castle_vertex_eye.xyz, 1.0)) < 0.0) discard;' + LineEnding,
+          [Plane.X, Plane.Y, Plane.Z, Plane.W]);
+      end;
+      ClipPlaneSnippet := ClipPlaneSnippet + '  vec4 baseColor = castle_MaterialBaseColor;';
       FRHIFragmentShaderSource := StringReplace(
         FRHIFragmentShaderSource,
         '  vec4 baseColor = castle_MaterialBaseColor;',
@@ -1017,16 +1154,102 @@ begin
     end;
     if AHasShadowMap then
     begin
-      ShadowMapSnippet :=
-        '    float shadowVis = 1.0;' + LineEnding +
-        '    if (light.SpotParams.w > 0.5) {' + LineEnding +
-        '      vec4 shadowClip = light.ProjectorMatrix * vec4(castle_vertex_eye.xyz, 1.0);' + LineEnding +
-        '      if (shadowClip.w > 1e-5) {' + LineEnding +
-        '        vec3 shadowProj = shadowClip.xyz / shadowClip.w;' + LineEnding +
-        '        if (shadowProj.x >= 0.0 && shadowProj.x <= 1.0 && shadowProj.y >= 0.0 && shadowProj.y <= 1.0 && shadowProj.z >= 0.0 && shadowProj.z <= 1.0)' + LineEnding +
-        '          shadowVis = texture(castle_shadow_map_0, vec3(shadowProj.xy, shadowProj.z - 0.002));' + LineEnding +
-        '      }' + LineEnding +
-        '    }';
+      case EffectiveShadowSampling of
+        ssPCF4:
+          ShadowMapSnippet := FormatDot(
+            '    float shadowVis = 1.0;' + LineEnding +
+            '    if (light.SpotParams.w > 0.5) {' + LineEnding +
+            '      vec4 shadowClip = light.ProjectorMatrix * vec4(castle_vertex_eye.xyz, 1.0);' + LineEnding +
+            '      if (shadowClip.w > 1e-5) {' + LineEnding +
+            '        vec3 shadowProj = shadowClip.xyz / shadowClip.w;' + LineEnding +
+            '        if (shadowProj.x >= 0.0 && shadowProj.x <= 1.0 && shadowProj.y >= 0.0 && shadowProj.y <= 1.0 && shadowProj.z >= 0.0 && shadowProj.z <= 1.0) {' + LineEnding +
+            '          float shadowZ = shadowProj.z - 0.002;' + LineEnding +
+            '          float shadowOff = 1.0 / %g;' + LineEnding +
+            '          shadowVis = 0.25 * (' + LineEnding +
+            '            texture(castle_shadow_map_0, vec3(shadowProj.x - shadowOff, shadowProj.y - shadowOff, shadowZ)) +' + LineEnding +
+            '            texture(castle_shadow_map_0, vec3(shadowProj.x - shadowOff, shadowProj.y + shadowOff, shadowZ)) +' + LineEnding +
+            '            texture(castle_shadow_map_0, vec3(shadowProj.x + shadowOff, shadowProj.y - shadowOff, shadowZ)) +' + LineEnding +
+            '            texture(castle_shadow_map_0, vec3(shadowProj.x + shadowOff, shadowProj.y + shadowOff, shadowZ)));' + LineEnding +
+            '        }' + LineEnding +
+            '      }' + LineEnding +
+            '    }',
+            [Single(EffectiveShadowSize) * 2.0]);
+        ssPCF4Bilinear:
+          ShadowMapSnippet := FormatDot(
+            '    float shadowVis = 1.0;' + LineEnding +
+            '    if (light.SpotParams.w > 0.5) {' + LineEnding +
+            '      vec4 shadowClip = light.ProjectorMatrix * vec4(castle_vertex_eye.xyz, 1.0);' + LineEnding +
+            '      if (shadowClip.w > 1e-5) {' + LineEnding +
+            '        vec3 shadowProj = shadowClip.xyz / shadowClip.w;' + LineEnding +
+            '        if (shadowProj.x >= 0.0 && shadowProj.x <= 1.0 && shadowProj.y >= 0.0 && shadowProj.y <= 1.0 && shadowProj.z >= 0.0 && shadowProj.z <= 1.0) {' + LineEnding +
+            '          float shadowZ = shadowProj.z - 0.002;' + LineEnding +
+            '          float shadowSize = %g;' + LineEnding +
+            '          vec2 tc_full = shadowSize * shadowProj.xy;' + LineEnding +
+            '          vec2 tc = floor(tc_full);' + LineEnding +
+            '          vec2 f = fract(tc_full);' + LineEnding +
+            '          vec2 f1 = vec2(1.0) - f;' + LineEnding +
+            '          shadowVis =' + LineEnding +
+            '            texture(castle_shadow_map_0, vec3((tc.x) / shadowSize, (tc.y) / shadowSize, shadowZ)) * f1.x * f1.y +' + LineEnding +
+            '            texture(castle_shadow_map_0, vec3((tc.x) / shadowSize, (tc.y + 1.0) / shadowSize, shadowZ)) * f1.x * f.y +' + LineEnding +
+            '            texture(castle_shadow_map_0, vec3((tc.x + 1.0) / shadowSize, (tc.y) / shadowSize, shadowZ)) * f.x * f1.y +' + LineEnding +
+            '            texture(castle_shadow_map_0, vec3((tc.x + 1.0) / shadowSize, (tc.y + 1.0) / shadowSize, shadowZ)) * f.x * f.y;' + LineEnding +
+            '        }' + LineEnding +
+            '      }' + LineEnding +
+            '    }',
+            [Single(EffectiveShadowSize)]);
+        ssPCF16:
+          ShadowMapSnippet := FormatDot(
+            '    float shadowVis = 1.0;' + LineEnding +
+            '    if (light.SpotParams.w > 0.5) {' + LineEnding +
+            '      vec4 shadowClip = light.ProjectorMatrix * vec4(castle_vertex_eye.xyz, 1.0);' + LineEnding +
+            '      if (shadowClip.w > 1e-5) {' + LineEnding +
+            '        vec3 shadowProj = shadowClip.xyz / shadowClip.w;' + LineEnding +
+            '        if (shadowProj.x >= 0.0 && shadowProj.x <= 1.0 && shadowProj.y >= 0.0 && shadowProj.y <= 1.0 && shadowProj.z >= 0.0 && shadowProj.z <= 1.0) {' + LineEnding +
+            '          float shadowZ = shadowProj.z - 0.002;' + LineEnding +
+            '          float shadowOff = 1.0 / %g;' + LineEnding +
+            '          float shadowSum = 0.0;' + LineEnding +
+            '          for (int sy = 0; sy < 4; ++sy)' + LineEnding +
+            '            for (int sx = 0; sx < 4; ++sx)' + LineEnding +
+            '              shadowSum += texture(castle_shadow_map_0, vec3(shadowProj.xy + (vec2(float(sx), float(sy)) - vec2(1.5)) * shadowOff, shadowZ));' + LineEnding +
+            '          shadowVis = shadowSum * (1.0 / 16.0);' + LineEnding +
+            '        }' + LineEnding +
+            '      }' + LineEnding +
+            '    }',
+            [Single(EffectiveShadowSize)]);
+        ssVarianceShadowMaps:
+          begin
+            FRHIFragmentShaderSource := StringReplace(
+              FRHIFragmentShaderSource,
+              'sampler2DShadow castle_shadow_map_0;',
+              'sampler2D castle_shadow_map_0;',
+              []);
+            ShadowMapSnippet :=
+              '    float shadowVis = 1.0;' + LineEnding +
+              '    if (light.SpotParams.w > 0.5) {' + LineEnding +
+              '      vec4 shadowClip = light.ProjectorMatrix * vec4(castle_vertex_eye.xyz, 1.0);' + LineEnding +
+              '      if (shadowClip.w > 1e-5) {' + LineEnding +
+              '        vec3 shadowProj = shadowClip.xyz / shadowClip.w;' + LineEnding +
+              '        if (shadowProj.x >= 0.0 && shadowProj.x <= 1.0 && shadowProj.y >= 0.0 && shadowProj.y <= 1.0 && shadowProj.z >= 0.0 && shadowProj.z <= 1.0) {' + LineEnding +
+              '          vec2 vsmMoments = texture(castle_shadow_map_0, shadowProj.xy).rg;' + LineEnding +
+              '          float vsmVariance = max(vsmMoments.y - vsmMoments.x * vsmMoments.x, 1e-5);' + LineEnding +
+              '          float vsmDelta = vsmMoments.x - shadowProj.z;' + LineEnding +
+              '          shadowVis = (shadowProj.z <= vsmMoments.x) ? 1.0 : (vsmVariance / (vsmVariance + vsmDelta * vsmDelta));' + LineEnding +
+              '        }' + LineEnding +
+              '      }' + LineEnding +
+              '    }';
+          end;
+        else
+          ShadowMapSnippet :=
+            '    float shadowVis = 1.0;' + LineEnding +
+            '    if (light.SpotParams.w > 0.5) {' + LineEnding +
+            '      vec4 shadowClip = light.ProjectorMatrix * vec4(castle_vertex_eye.xyz, 1.0);' + LineEnding +
+            '      if (shadowClip.w > 1e-5) {' + LineEnding +
+            '        vec3 shadowProj = shadowClip.xyz / shadowClip.w;' + LineEnding +
+            '        if (shadowProj.x >= 0.0 && shadowProj.x <= 1.0 && shadowProj.y >= 0.0 && shadowProj.y <= 1.0 && shadowProj.z >= 0.0 && shadowProj.z <= 1.0)' + LineEnding +
+            '          shadowVis = texture(castle_shadow_map_0, vec3(shadowProj.xy, shadowProj.z - 0.002));' + LineEnding +
+            '      }' + LineEnding +
+            '    }';
+      end;
       FRHIFragmentShaderSource := StringReplace(
         FRHIFragmentShaderSource,
         '    float shadowVis = 1.0;',
@@ -1233,6 +1456,43 @@ begin
         'void main() {' + LineEnding + ParallaxSnippet,
         []);
     end;
+    if FRHIBaseColorTexCoordIndex > 0 then
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        'texture(castle_base_color_texture, castle_tex_coord0)',
+        'texture(castle_base_color_texture, castle_tex_coord1)',
+        [rfReplaceAll]);
+    if FRHINormalTexCoordIndex > 0 then
+    begin
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        'texture(castle_normal_texture, castle_tex_coord0)',
+        'texture(castle_normal_texture, castle_tex_coord1)',
+        [rfReplaceAll]);
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        'PerturbNormalCotangent(N, -castle_vertex_eye.xyz, castle_tex_coord0,',
+        'PerturbNormalCotangent(N, -castle_vertex_eye.xyz, castle_tex_coord1,',
+        [rfReplaceAll]);
+    end;
+    if FRHIMetallicRoughnessTexCoordIndex > 0 then
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        'texture(castle_metallic_roughness_texture, castle_tex_coord0)',
+        'texture(castle_metallic_roughness_texture, castle_tex_coord1)',
+        [rfReplaceAll]);
+    if FRHIEmissiveTexCoordIndex > 0 then
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        'texture(castle_emissive_texture, castle_tex_coord0)',
+        'texture(castle_emissive_texture, castle_tex_coord1)',
+        [rfReplaceAll]);
+    if FRHIOcclusionTexCoordIndex > 0 then
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        'texture(castle_occlusion_texture, castle_tex_coord0)',
+        'texture(castle_occlusion_texture, castle_tex_coord1)',
+        [rfReplaceAll]);
     if (Arrays <> nil) and (not Arrays.CullFace) then
       FRHIFragmentShaderSource := StringReplace(
         FRHIFragmentShaderSource,
@@ -1284,9 +1544,9 @@ begin
         Gen.GeneratePreamble(ssFragment) +
         Gen.UpgradeUserEffectUniforms(FRHIComposedFragSource);
     FRHIVertexShader := RHIDevice.CreateShaderModuleFromGLSL(
-      ssVertex, FRHIVertexShaderSource, Format('CastleShapeVert_Perm%.2x', [Mask]));
+      ssVertex, FRHIVertexShaderSource, Format('CastleShapeVert_Perm%.2x', [QWord(Mask)]));
     FRHIFragmentShader := RHIDevice.CreateShaderModuleFromGLSL(
-      ssFragment, FRHIFragmentShaderSource, Format('CastleShapeFrag_Perm%.2x', [Mask]));
+      ssFragment, FRHIFragmentShaderSource, Format('CastleShapeFrag_Perm%.2x', [QWord(Mask)]));
     FRHIShaderPermutationMask := Mask;
     FRHIShadersInitialized := True;
   finally
