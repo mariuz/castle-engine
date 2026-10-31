@@ -555,6 +555,9 @@ var
   LayoutCount, I: Integer;
   AttrLoc: Cardinal;
   AttrOffset: PtrUInt;
+  BlendSrcFactor: TBlendingSourceFactor;
+  BlendDestFactor: TBlendingDestinationFactor;
+  UseBlending: Boolean;
 begin
   FillChar(ADesc, SizeOf(ADesc), 0);
   EnsureRHIDefaultShaders;
@@ -732,10 +735,38 @@ begin
     ADesc.Rasterizer.DepthBiasEnable := RenderContext.PolygonOffset.Enabled;
   end;
 
-  if (RenderContext <> nil) and (not RenderContext.DepthBufferUpdate) then
+  UseBlending := ((RenderContext <> nil) and ((not RenderContext.DepthBufferUpdate) or RenderContext.BlendingEnabled)) or
+    ((AShape <> nil) and ((AShape.AlphaChannel = acBlending) or ((AShape.State <> nil) and (AShape.State.BlendMode <> nil)))) or
+    ((ARenderOptions <> nil) and ((ARenderOptions.BlendingSourceFactor <> TCastleRenderOptions.DefaultBlendingSourceFactor) or
+                                  (ARenderOptions.BlendingDestinationFactor <> TCastleRenderOptions.DefaultBlendingDestinationFactor)));
+
+  if UseBlending then
   begin
     ADesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthReadOnly;
     ADesc.BlendState := TRHIBlendStateDesc.DefaultAlphaBlend;
+    if (AShape <> nil) and (AShape.State <> nil) and (AShape.State.BlendMode <> nil) then
+    begin
+      BlendSrcFactor := AShape.State.BlendMode.SrcFactor;
+      BlendDestFactor := AShape.State.BlendMode.DestFactor;
+    end else
+    if (RenderContext <> nil) and RenderContext.BlendingEnabled then
+    begin
+      BlendSrcFactor := RenderContext.BlendingSourceFactor;
+      BlendDestFactor := RenderContext.BlendingDestinationFactor;
+    end else
+    if ARenderOptions <> nil then
+    begin
+      BlendSrcFactor := ARenderOptions.BlendingSourceFactor;
+      BlendDestFactor := ARenderOptions.BlendingDestinationFactor;
+    end else
+    begin
+      BlendSrcFactor := TCastleRenderOptions.DefaultBlendingSourceFactor;
+      BlendDestFactor := TCastleRenderOptions.DefaultBlendingDestinationFactor;
+    end;
+    ADesc.BlendState.SrcColorBlendFactor := TRenderContext.MapBlendSourceFactorToRHI(BlendSrcFactor);
+    ADesc.BlendState.DstColorBlendFactor := TRenderContext.MapBlendDestFactorToRHI(BlendDestFactor);
+    ADesc.BlendState.SrcAlphaBlendFactor := ADesc.BlendState.SrcColorBlendFactor;
+    ADesc.BlendState.DstAlphaBlendFactor := ADesc.BlendState.DstColorBlendFactor;
   end else
   if FInternalPass = 1 then
   begin
@@ -749,7 +780,17 @@ begin
   if (RenderContext <> nil) and (not RenderContext.DepthTest) then
     ADesc.DepthStencil.DepthTestEnable := False;
   if (RenderContext <> nil) and (FInternalPass = 0) then
+  begin
     RenderContext.ApplyRHIStencilAndColorMask(ADesc.DepthStencil, ADesc.BlendState);
+    if (AShape <> nil) and (AShape.State <> nil) and (AShape.State.BlendMode <> nil) then
+    begin
+      ADesc.BlendState.BlendEnable := True;
+      ADesc.BlendState.SrcColorBlendFactor := TRenderContext.MapBlendSourceFactorToRHI(AShape.State.BlendMode.SrcFactor);
+      ADesc.BlendState.DstColorBlendFactor := TRenderContext.MapBlendDestFactorToRHI(AShape.State.BlendMode.DestFactor);
+      ADesc.BlendState.SrcAlphaBlendFactor := ADesc.BlendState.SrcColorBlendFactor;
+      ADesc.BlendState.DstAlphaBlendFactor := ADesc.BlendState.DstColorBlendFactor;
+    end;
+  end;
 
   Set1Layout := nil;
   Set2Layout := nil;

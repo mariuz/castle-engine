@@ -146,6 +146,7 @@
     FRHITexCoordGen: TTextureCoordinateGeneration;
     FRHITexGenBoundsS: TVector4;
     FRHITexGenBoundsT: TVector4;
+    FRHITexGenProjectorMatrix: TMatrix4;
     FRHIPointSize: Single;
     FRHIHasParallaxBumpMapping: Boolean;
     FRHISteepParallaxBumpMapping: Boolean;
@@ -205,6 +206,7 @@
     procedure SetClipPlane(const AHasClipPlane: Boolean; const APlane: TVector4);
     procedure SetTexCoordGen(const AGeneration: TTextureCoordinateGeneration;
       const ABoundsS, ABoundsT: TVector4);
+    procedure SetTexCoordGenProjectorMatrix(const AMatrix: TMatrix4);
     procedure SetPointSize(const APointSize: Single);
     procedure SetParallaxBumpMapping(const AEnabled, ASteep: Boolean; const AHeight: Single);
     procedure SetShaderEffects(const AVertexEffectCode, AFragmentEffectCode: String);
@@ -248,6 +250,7 @@
     property RHITexCoordGen: TTextureCoordinateGeneration read FRHITexCoordGen;
     property RHITexGenBoundsS: TVector4 read FRHITexGenBoundsS;
     property RHITexGenBoundsT: TVector4 read FRHITexGenBoundsT;
+    property RHITexGenProjectorMatrix: TMatrix4 read FRHITexGenProjectorMatrix;
     property RHIPointSize: Single read FRHIPointSize;
     property RHIHasParallaxBumpMapping: Boolean read FRHIHasParallaxBumpMapping;
     property RHISteepParallaxBumpMapping: Boolean read FRHISteepParallaxBumpMapping;
@@ -304,6 +307,7 @@ begin
   VboToReload := AllVboTypes;
   FRHIPointSize := 1.0;
   FRHIParallaxHeight := 0.01;
+  FRHITexGenProjectorMatrix := TMatrix4.Identity;
 end;
 
 destructor TShapeCache.Destroy;
@@ -698,6 +702,15 @@ begin
   end;
 end;
 
+procedure TShapeCache.SetTexCoordGenProjectorMatrix(const AMatrix: TMatrix4);
+begin
+  if not TMatrix4.PerfectlyEquals(FRHITexGenProjectorMatrix, AMatrix) then
+  begin
+    FRHITexGenProjectorMatrix := AMatrix;
+    FRHIShadersInitialized := False;
+  end;
+end;
+
 procedure TShapeCache.SetPointSize(const APointSize: Single);
 var
   ClampedSize: Single;
@@ -803,6 +816,12 @@ begin
     Mask := Mask or $20000;
   if HasLinearColorSpace or (EffectiveToneMapping <> tmNone) then
     Mask := Mask or $40000 or (Cardinal(Ord(EffectiveToneMapping)) shl 20);
+  if AHasColorPerVertex and (Arrays <> nil) and (Arrays.ColorMode = cmReplace) then
+    Mask := Mask or $100000;
+  if FRHITexCoordGen = tgProjection then
+    Mask := Mask or $400000
+  else if FRHITexCoordGen = tgMirrorPlane then
+    Mask := Mask or $800000;
 
   if FRHIShadersInitialized and (FRHIShaderPermutationMask = Mask) and
      (FRHIVertexShader <> nil) and (FRHIFragmentShader <> nil) then
@@ -838,6 +857,23 @@ begin
           TexGenSnippet := '  vec2 rawTexCoord0 = reflect(normalize(castle_vertex_eye.xyz), castle_normal_eye).xy;';
         tgWorldSpaceReflectionVector:
           TexGenSnippet := '  vec2 rawTexCoord0 = (mat3(castle_ViewMatrixInverse) * reflect(normalize(castle_vertex_eye.xyz), castle_normal_eye)).xy;';
+        tgProjection:
+          TexGenSnippet := FormatDot(
+            '  vec4 worldPosProj = castle_ViewMatrixInverse * castle_vertex_eye;' + LineEnding +
+            '  vec4 projClip = mat4(' +
+            'vec4(%g, %g, %g, %g), ' +
+            'vec4(%g, %g, %g, %g), ' +
+            'vec4(%g, %g, %g, %g), ' +
+            'vec4(%g, %g, %g, %g)) * worldPosProj;' + LineEnding +
+            '  vec2 rawTexCoord0 = projClip.xy / max(projClip.w, 1e-5);',
+            [FRHITexGenProjectorMatrix.Data[0, 0], FRHITexGenProjectorMatrix.Data[0, 1], FRHITexGenProjectorMatrix.Data[0, 2], FRHITexGenProjectorMatrix.Data[0, 3],
+             FRHITexGenProjectorMatrix.Data[1, 0], FRHITexGenProjectorMatrix.Data[1, 1], FRHITexGenProjectorMatrix.Data[1, 2], FRHITexGenProjectorMatrix.Data[1, 3],
+             FRHITexGenProjectorMatrix.Data[2, 0], FRHITexGenProjectorMatrix.Data[2, 1], FRHITexGenProjectorMatrix.Data[2, 2], FRHITexGenProjectorMatrix.Data[2, 3],
+             FRHITexGenProjectorMatrix.Data[3, 0], FRHITexGenProjectorMatrix.Data[3, 1], FRHITexGenProjectorMatrix.Data[3, 2], FRHITexGenProjectorMatrix.Data[3, 3]]);
+        tgMirrorPlane:
+          TexGenSnippet :=
+            '  vec4 mirrorClip = castle_ProjectionMatrix * castle_vertex_eye;' + LineEnding +
+            '  vec2 rawTexCoord0 = (mirrorClip.xy / max(mirrorClip.w, 1e-5)) * 0.5 + vec2(0.5);';
         else
           TexGenSnippet := '  vec2 rawTexCoord0 = castle_MultiTexCoord0;';
       end;
@@ -948,11 +984,37 @@ begin
         []);
     end;
     if AHasColorPerVertex then
-      FRHIFragmentShaderSource := StringReplace(
-        FRHIFragmentShaderSource,
-        '  vec4 baseColor = castle_MaterialBaseColor;',
-        '  vec4 baseColor = castle_MaterialBaseColor * castle_color_per_vertex;',
-        []);
+    begin
+      if (Arrays <> nil) and (Arrays.ColorMode = cmReplace) then
+      begin
+        if Arrays.ColorType = ctRgb then
+          FRHIFragmentShaderSource := StringReplace(
+            FRHIFragmentShaderSource,
+            '  vec4 baseColor = castle_MaterialBaseColor;',
+            '  vec4 baseColor = vec4(castle_color_per_vertex.rgb, castle_MaterialBaseColor.a);',
+            [])
+        else
+          FRHIFragmentShaderSource := StringReplace(
+            FRHIFragmentShaderSource,
+            '  vec4 baseColor = castle_MaterialBaseColor;',
+            '  vec4 baseColor = castle_color_per_vertex;',
+            []);
+      end else
+      begin
+        if (Arrays <> nil) and (Arrays.ColorType = ctRgb) then
+          FRHIFragmentShaderSource := StringReplace(
+            FRHIFragmentShaderSource,
+            '  vec4 baseColor = castle_MaterialBaseColor;',
+            '  vec4 baseColor = vec4(castle_MaterialBaseColor.rgb * castle_color_per_vertex.rgb, castle_MaterialBaseColor.a);',
+            [])
+        else
+          FRHIFragmentShaderSource := StringReplace(
+            FRHIFragmentShaderSource,
+            '  vec4 baseColor = castle_MaterialBaseColor;',
+            '  vec4 baseColor = castle_MaterialBaseColor * castle_color_per_vertex;',
+            []);
+      end;
+    end;
     if AHasShadowMap then
     begin
       ShadowMapSnippet :=
@@ -1046,13 +1108,39 @@ begin
       if Pos('PLUG_base_color', FRHIFragmentEffectCode) > 0 then
       begin
         if AHasColorPerVertex then
-          FRHIFragmentShaderSource := StringReplace(
-            FRHIFragmentShaderSource,
-            '  vec4 baseColor = castle_MaterialBaseColor * castle_color_per_vertex;',
-            '  vec4 baseColor = castle_MaterialBaseColor * castle_color_per_vertex;' + LineEnding +
-            '  PLUG_base_color(baseColor);',
-            [])
-        else
+        begin
+          if (Arrays <> nil) and (Arrays.ColorMode = cmReplace) then
+          begin
+            if Arrays.ColorType = ctRgb then
+              FRHIFragmentShaderSource := StringReplace(
+                FRHIFragmentShaderSource,
+                '  vec4 baseColor = vec4(castle_color_per_vertex.rgb, castle_MaterialBaseColor.a);',
+                '  vec4 baseColor = vec4(castle_color_per_vertex.rgb, castle_MaterialBaseColor.a);' + LineEnding +
+                '  PLUG_base_color(baseColor);',
+                [])
+            else
+              FRHIFragmentShaderSource := StringReplace(
+                FRHIFragmentShaderSource,
+                '  vec4 baseColor = castle_color_per_vertex;',
+                '  vec4 baseColor = castle_color_per_vertex;' + LineEnding +
+                '  PLUG_base_color(baseColor);',
+                []);
+          end else
+          if (Arrays <> nil) and (Arrays.ColorType = ctRgb) then
+            FRHIFragmentShaderSource := StringReplace(
+              FRHIFragmentShaderSource,
+              '  vec4 baseColor = vec4(castle_MaterialBaseColor.rgb * castle_color_per_vertex.rgb, castle_MaterialBaseColor.a);',
+              '  vec4 baseColor = vec4(castle_MaterialBaseColor.rgb * castle_color_per_vertex.rgb, castle_MaterialBaseColor.a);' + LineEnding +
+              '  PLUG_base_color(baseColor);',
+              [])
+          else
+            FRHIFragmentShaderSource := StringReplace(
+              FRHIFragmentShaderSource,
+              '  vec4 baseColor = castle_MaterialBaseColor * castle_color_per_vertex;',
+              '  vec4 baseColor = castle_MaterialBaseColor * castle_color_per_vertex;' + LineEnding +
+              '  PLUG_base_color(baseColor);',
+              []);
+        end else
           FRHIFragmentShaderSource := StringReplace(
             FRHIFragmentShaderSource,
             '  vec4 baseColor = castle_MaterialBaseColor;',

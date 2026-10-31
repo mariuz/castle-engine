@@ -561,11 +561,12 @@ begin
       AMatBlock.PBRParams.W := AlphaCutoff;
   end;
 
-  if (Cache <> nil) and (Cache.RenderOptions <> nil) and
-     (not Cache.RenderOptions.Lighting) then
+  if ((Cache <> nil) and (Cache.RenderOptions <> nil) and (not Cache.RenderOptions.Lighting)) or
+     ((Geometry <> nil) and (ShapeState <> nil) and (not Geometry.Lit(ShapeState))) then
   begin
     AShadingModel := smUnlit;
     AMatBlock.SpecularColor := Vector4(0.0, 0.0, 0.0, -1.0);
+    AMatBlock.EmissiveColor := TVector4.Zero;
   end;
 end;
 
@@ -879,40 +880,78 @@ end;
 function TX3DRendererShape.ExtractRHITexCoordGen(
   out AGeneration: TTextureCoordinateGeneration;
   out ABoundsS, ABoundsT: TVector4): Boolean;
+const
+  ProjectorScalingMatrix: TMatrix4 = (Data:
+  ( (0.5,   0,   0, 0),
+    (  0, 0.5,   0, 0),
+    (  0,   0, 0.5, 0),
+    (0.5, 0.5, 0.5, 1) ));
 var
-  TexCoordNode: TX3DNode;
+  TexCoordNode, ProjectorValue: TX3DNode;
   ModeStr: String;
+  ProjectorMatrix: TMatrix4;
 begin
   AGeneration := tgExplicit;
   ABoundsS := Vector4(1, 0, 0, 0);
   ABoundsT := Vector4(0, 1, 0, 0);
   Result := False;
+  ProjectorMatrix := TMatrix4.Identity;
 
   if (Cache <> nil) and (Cache.Arrays <> nil) and (Cache.Arrays.TexCoords.Count > 0) then
   begin
     AGeneration := Cache.Arrays.TexCoords[0].Generation;
     ABoundsS := Cache.Arrays.TexCoords[0].GenerationBoundsVector[0];
     ABoundsT := Cache.Arrays.TexCoords[0].GenerationBoundsVector[1];
+    if (AGeneration = tgProjection) and
+       Assigned(Cache.Arrays.TexCoords[0].GenerationProjectorMatrix) then
+    begin
+      ProjectorMatrix := ProjectorScalingMatrix * Cache.Arrays.TexCoords[0].GenerationProjectorMatrix();
+      Cache.SetTexCoordGenProjectorMatrix(ProjectorMatrix);
+    end;
     Result := AGeneration <> tgExplicit;
     if Result then
       Exit;
   end;
 
   if (Geometry <> nil) and (State <> nil) and
-     Geometry.InternalTexCoord(State, TexCoordNode) and
-     (TexCoordNode is TTextureCoordinateGeneratorNode) then
+     Geometry.InternalTexCoord(State, TexCoordNode) then
   begin
-    ModeStr := TTextureCoordinateGeneratorNode(TexCoordNode).FdMode.Value;
-    if ModeStr = 'SPHERE' then AGeneration := tgSphereMap
-    else if ModeStr = 'COORD' then AGeneration := tgCoord
-    else if (ModeStr = 'COORD-EYE') or (ModeStr = 'CAMERASPACEPOSITION') then AGeneration := tgCoordEye
-    else if ModeStr = 'CAMERASPACENORMAL' then AGeneration := tgCameraSpaceNormal
-    else if ModeStr = 'WORLDSPACENORMAL' then AGeneration := tgWorldSpaceNormal
-    else if ModeStr = 'CAMERASPACEREFLECTIONVECTOR' then AGeneration := tgCameraSpaceReflectionVector
-    else if ModeStr = 'WORLDSPACEREFLECTIONVECTOR' then AGeneration := tgWorldSpaceReflectionVector
-    else if ModeStr = 'BOUNDS2D' then AGeneration := tgBounds2d
-    else if ModeStr = 'BOUNDS3D' then AGeneration := tgBounds3d;
-    Result := AGeneration <> tgExplicit;
+    if TexCoordNode is TProjectedTextureCoordinateNode then
+    begin
+      AGeneration := tgProjection;
+      ProjectorValue := TProjectedTextureCoordinateNode(TexCoordNode).FdProjector.Value;
+      if ProjectorValue is TAbstractPunctualLightNode then
+        ProjectorMatrix := ProjectorScalingMatrix * TAbstractPunctualLightNode(ProjectorValue).GetProjectorMatrix
+      else if ProjectorValue is TAbstractViewpointNode then
+        ProjectorMatrix := ProjectorScalingMatrix * TAbstractViewpointNode(ProjectorValue).GetProjectorMatrix;
+      if Cache <> nil then
+        Cache.SetTexCoordGenProjectorMatrix(ProjectorMatrix);
+      Result := True;
+    end else
+    if TexCoordNode is TTextureCoordinateGeneratorNode then
+    begin
+      ModeStr := TTextureCoordinateGeneratorNode(TexCoordNode).FdMode.Value;
+      if ModeStr = 'SPHERE' then AGeneration := tgSphereMap
+      else if ModeStr = 'COORD' then AGeneration := tgCoord
+      else if (ModeStr = 'COORD-EYE') or (ModeStr = 'CAMERASPACEPOSITION') then AGeneration := tgCoordEye
+      else if ModeStr = 'CAMERASPACENORMAL' then AGeneration := tgCameraSpaceNormal
+      else if ModeStr = 'WORLDSPACENORMAL' then AGeneration := tgWorldSpaceNormal
+      else if ModeStr = 'CAMERASPACEREFLECTIONVECTOR' then AGeneration := tgCameraSpaceReflectionVector
+      else if ModeStr = 'WORLDSPACEREFLECTIONVECTOR' then AGeneration := tgWorldSpaceReflectionVector
+      else if ModeStr = 'PROJECTION' then
+      begin
+        AGeneration := tgProjection;
+        ProjectorValue := TTextureCoordinateGeneratorNode(TexCoordNode).FdProjectedLight.Value;
+        if ProjectorValue is TAbstractPunctualLightNode then
+          ProjectorMatrix := ProjectorScalingMatrix * TAbstractPunctualLightNode(ProjectorValue).GetProjectorMatrix;
+        if Cache <> nil then
+          Cache.SetTexCoordGenProjectorMatrix(ProjectorMatrix);
+      end
+      else if ModeStr = 'MIRROR-PLANE' then AGeneration := tgMirrorPlane
+      else if ModeStr = 'BOUNDS2D' then AGeneration := tgBounds2d
+      else if ModeStr = 'BOUNDS3D' then AGeneration := tgBounds3d;
+      Result := AGeneration <> tgExplicit;
+    end;
   end;
 end;
 

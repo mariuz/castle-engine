@@ -300,6 +300,9 @@ type
     procedure TestTangentSpaceNormalMappingAndParallaxBumpMappingSpecializationRHI;
     procedure TestFogCoordinateVolumetricFogAndCustomShaderVertexAttributesRHI;
     procedure TestColorSpaceLinearGammaCorrectionAndFilmicToneMappingSpecializationRHI;
+    procedure TestBlendModeNodeRenderOptionsBlendFactorsAndDepthFuncPipelineRHI;
+    procedure TestColorNodeReplaceModeAndRenderOptionsLightingDisabledUnlitRHI;
+    procedure TestProjectedTextureCoordinateAndMirrorPlaneTexGenSpecializationRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -15065,6 +15068,7 @@ begin
       Vector3( 1.0, 0.0, 0.0),
       Vector3( 0.0, 1.0, 0.0)]);
     Color3 := TColorNode.Create;
+    Color3.Mode := cmModulate;
     Color3.SetColor([
       Vector3(1.0, 0.0, 0.0),
       Vector3(0.0, 1.0, 0.0),
@@ -15106,8 +15110,10 @@ begin
       AssertTrue('ColorFaceScene permutation mask must include $100 (HasColorPerVertex)',
         (RFaceShape.Cache <> nil) and ((RFaceShape.Cache.RHIShaderPermutationMask and $100) <> 0));
       AssertTrue('ColorFaceScene fragment shader must multiply baseColor by castle_color_per_vertex',
-        Pos('vec4 baseColor = castle_MaterialBaseColor * castle_color_per_vertex;',
-          RFaceShape.Cache.RHIFragmentShaderSource) > 0);
+        (Pos('vec4 baseColor = castle_MaterialBaseColor * castle_color_per_vertex;',
+          RFaceShape.Cache.RHIFragmentShaderSource) > 0) or
+        (Pos('vec4 baseColor = vec4(castle_MaterialBaseColor.rgb * castle_color_per_vertex.rgb, castle_MaterialBaseColor.a);',
+          RFaceShape.Cache.RHIFragmentShaderSource) > 0));
     finally
       Device.EndFrameAndPresent;
     end;
@@ -17359,6 +17365,286 @@ begin
   finally
     CastleRenderOptions.ColorSpace := SavedColorSpace;
     CastleRenderOptions.ToneMapping := SavedToneMapping;
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestBlendModeNodeRenderOptionsBlendFactorsAndDepthFuncPipelineRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedContext: TRenderContext;
+  Ctx: TRenderContext;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TMaterialNode;
+  BlendMode: TBlendModeNode;
+  Box: TBoxNode;
+  RendererShape: TX3DRendererShape;
+  Renderer: TRenderer;
+  RenderOptions: TCastleRenderOptions;
+  PipeDesc: TRHIGraphicsPipelineDesc;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7901)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedContext := RenderContext;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Ctx := nil;
+  Scene := nil;
+  Renderer := nil;
+  RenderOptions := nil;
+  try
+    Ctx := TRenderContext.Create(nil);
+    RenderContext := Ctx;
+    Ctx.DepthTest := True;
+    Ctx.DepthFunc := dfLessEqual;
+
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TMaterialNode.Create;
+    Mat.Transparency := 0.5;
+    App.Material := Mat;
+    BlendMode := TBlendModeNode.Create;
+    BlendMode.SrcFactor := bsSrcAlpha;
+    BlendMode.DestFactor := bdOne;
+    App.BlendMode := BlendMode;
+    ShapeNode.Appearance := App;
+
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+
+    RenderOptions := TCastleRenderOptions.Create(nil);
+    Renderer := TRenderer.Create(RenderOptions);
+    Renderer.BuildShapePipelineDesc(RendererShape, Scene.RenderOptions, PipeDesc);
+
+    AssertTrue('TBlendModeNode must enable blending in pipeline desc', PipeDesc.BlendState.BlendEnable);
+    AssertEquals('TBlendModeNode SrcFactor=bsSrcAlpha maps to bfSrcAlpha',
+      Ord(bfSrcAlpha), Ord(PipeDesc.BlendState.SrcColorBlendFactor));
+    AssertEquals('TBlendModeNode DestFactor=bdOne maps to bfOne (additive blending)',
+      Ord(bfOne), Ord(PipeDesc.BlendState.DstColorBlendFactor));
+    AssertEquals('RenderContext.DepthFunc=dfLessEqual maps to coLessOrEqual',
+      Ord(coLessOrEqual), Ord(PipeDesc.DepthStencil.DepthCompareOp));
+
+    { Now test RenderOptions.BlendingSourceFactor / BlendingDestinationFactor when BlendMode is nil }
+    App.BlendMode := nil;
+    Scene.ChangedAll;
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+    Scene.RenderOptions.BlendingSourceFactor := bsDstColor;
+    Scene.RenderOptions.BlendingDestinationFactor := bdZero;
+    Ctx.DepthFunc := dfGreater;
+
+    Renderer.BuildShapePipelineDesc(RendererShape, Scene.RenderOptions, PipeDesc);
+    AssertTrue('RenderOptions custom blend factors must enable blending', PipeDesc.BlendState.BlendEnable);
+    AssertEquals('RenderOptions.BlendingSourceFactor=bsDstColor maps to bfDstColor',
+      Ord(bfDstColor), Ord(PipeDesc.BlendState.SrcColorBlendFactor));
+    AssertEquals('RenderOptions.BlendingDestinationFactor=bdZero maps to bfZero',
+      Ord(bfZero), Ord(PipeDesc.BlendState.DstColorBlendFactor));
+    AssertEquals('RenderContext.DepthFunc=dfGreater maps to coGreater',
+      Ord(coGreater), Ord(PipeDesc.DepthStencil.DepthCompareOp));
+  finally
+    RenderContext := SavedContext;
+    FreeAndNil(Ctx);
+    FreeAndNil(Renderer);
+    FreeAndNil(RenderOptions);
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestColorNodeReplaceModeAndRenderOptionsLightingDisabledUnlitRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TMaterialNode;
+  IFS: TIndexedFaceSetNode;
+  Coord: TCoordinateNode;
+  ColorNode: TColorNode;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7902)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TMaterialNode.Create;
+    Mat.DiffuseColor := Vector3(0.8, 0.2, 0.1);
+    Mat.SpecularColor := Vector3(1.0, 1.0, 1.0);
+    Mat.EmissiveColor := Vector3(0.1, 0.1, 0.1);
+    Mat.Transparency := 0.25;
+    App.Material := Mat;
+    ShapeNode.Appearance := App;
+
+    IFS := TIndexedFaceSetNode.Create;
+    Coord := TCoordinateNode.Create;
+    Coord.SetPoint([
+      Vector3(-1, -1, 0),
+      Vector3( 1, -1, 0),
+      Vector3( 0,  1, 0)]);
+    IFS.Coord := Coord;
+    ColorNode := TColorNode.Create;
+    ColorNode.Mode := cmReplace;
+    ColorNode.SetColor([
+      Vector3(1, 0, 0),
+      Vector3(0, 1, 0),
+      Vector3(0, 0, 1)]);
+    IFS.Color := ColorNode;
+    IFS.SetCoordIndex([0, 1, 2, -1]);
+    ShapeNode.Geometry := IFS;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+
+    AssertTrue('Mask must include $100000 for ColorNode.Mode = cmReplace',
+      (RendererShape.Cache.RHIShaderPermutationMask and $100000) <> 0);
+    AssertTrue('cmReplace with TColorNode (RGB) must replace RGB and keep material alpha',
+      Pos('vec4 baseColor = vec4(castle_color_per_vertex.rgb, castle_MaterialBaseColor.a);',
+        RendererShape.Cache.RHIFragmentShaderSource) > 0);
+    AssertEquals('Lit material must default to smPhong', Ord(smPhong), Ord(ShadingModel));
+
+    { Now disable RenderOptions.Lighting -> must force smUnlit with MainColor & Opacity }
+    Scene.RenderOptions.Lighting := False;
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertEquals('RenderOptions.Lighting=False must force smUnlit', Ord(smUnlit), Ord(ShadingModel));
+    AssertSameValue(0.8, RendererShape.Cache.RHIMaterialBlock.BaseColor.X, 1e-4);
+    AssertSameValue(0.75, RendererShape.Cache.RHIMaterialBlock.BaseColor.W, 1e-4);
+    AssertSameValue(-1.0, RendererShape.Cache.RHIMaterialBlock.SpecularColor.W, 1e-4);
+    AssertSameValue(0.0, RendererShape.Cache.RHIMaterialBlock.EmissiveColor.X, 1e-4);
+  finally
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestProjectedTextureCoordinateAndMirrorPlaneTexGenSpecializationRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TMaterialNode;
+  Tex: TPixelTextureNode;
+  Img: TRGBAlphaImage;
+  IFS: TIndexedFaceSetNode;
+  Coord: TCoordinateNode;
+  ProjTexCoord: TProjectedTextureCoordinateNode;
+  SpotLight: TSpotLightNode;
+  TexGenNode: TTextureCoordinateGeneratorNode;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7903)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  try
+    Root := TX3DRootNode.Create;
+    SpotLight := TSpotLightNode.Create;
+    SpotLight.Location := Vector3(0, 5, 5);
+    SpotLight.Direction := Vector3(0, -1, -1);
+    Root.AddChildren(SpotLight);
+
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TMaterialNode.Create;
+    App.Material := Mat;
+    Tex := TPixelTextureNode.Create;
+    Img := TRGBAlphaImage.Create(2, 2);
+    Img.Clear(Vector4Byte(255, 255, 255, 255));
+    Tex.FdImage.Value := Img;
+    App.Texture := Tex;
+    ShapeNode.Appearance := App;
+
+    IFS := TIndexedFaceSetNode.Create;
+    Coord := TCoordinateNode.Create;
+    Coord.SetPoint([
+      Vector3(-1, 0, -1),
+      Vector3( 1, 0, -1),
+      Vector3( 1, 0,  1),
+      Vector3(-1, 0,  1)]);
+    IFS.Coord := Coord;
+    ProjTexCoord := TProjectedTextureCoordinateNode.Create;
+    ProjTexCoord.FdProjector.Value := SpotLight;
+    IFS.TexCoord := ProjTexCoord;
+    IFS.SetCoordIndex([0, 1, 2, 3, -1]);
+    ShapeNode.Geometry := IFS;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 1);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+
+    AssertEquals('TProjectedTextureCoordinateNode must resolve to tgProjection',
+      Ord(tgProjection), Ord(RendererShape.Cache.RHITexCoordGen));
+    AssertTrue('Mask must include $400000 for tgProjection',
+      (RendererShape.Cache.RHIShaderPermutationMask and $400000) <> 0);
+    AssertTrue('Vertex shader must compute projective texture coordinates via projClip.xy / max(projClip.w, 1e-5)',
+      Pos('vec2 rawTexCoord0 = projClip.xy / max(projClip.w, 1e-5);',
+        RendererShape.Cache.RHIVertexShaderSource) > 0);
+
+    { Now switch to TTextureCoordinateGeneratorNode with mode="MIRROR-PLANE" }
+    TexGenNode := TTextureCoordinateGeneratorNode.Create;
+    TexGenNode.FdMode.Value := 'MIRROR-PLANE';
+    IFS.TexCoord := TexGenNode;
+    Scene.ChangedAll;
+
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 1);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+
+    AssertEquals('mode="MIRROR-PLANE" must resolve to tgMirrorPlane',
+      Ord(tgMirrorPlane), Ord(RendererShape.Cache.RHITexCoordGen));
+    AssertTrue('Mask must include $800000 for tgMirrorPlane',
+      (RendererShape.Cache.RHIShaderPermutationMask and $800000) <> 0);
+    AssertTrue('Vertex shader must compute mirror-plane texture coordinates from castle_ProjectionMatrix * castle_vertex_eye',
+      Pos('vec4 mirrorClip = castle_ProjectionMatrix * castle_vertex_eye;',
+        RendererShape.Cache.RHIVertexShaderSource) > 0);
+  finally
     FreeAndNil(Scene);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;

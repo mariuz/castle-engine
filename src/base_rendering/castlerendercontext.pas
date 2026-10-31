@@ -398,6 +398,9 @@ type
     property BlendingEnabled: Boolean read FBlendingEnabled;
     property BlendingSourceFactor: TBlendingSourceFactor read FBlendingSourceFactor;
     property BlendingDestinationFactor: TBlendingDestinationFactor read FBlendingDestinationFactor;
+    class function MapBlendSourceFactorToRHI(const AFactor: TBlendingSourceFactor): TRHIBlendFactor; static;
+    class function MapBlendDestFactorToRHI(const AFactor: TBlendingDestinationFactor): TRHIBlendFactor; static;
+    class function MapDepthFuncToRHI(const ADepthFunc: TDepthFunction): TRHICompareOp; static;
 
     { Enable alpha test with old/buggy OpenGL implementations that use deprecated fixed-function pipeline.
       This is simply ignored on modern GPUs when "not GLFeatures.EnableFixedFunction". }
@@ -995,6 +998,67 @@ begin
   end;
 end;
 
+class function TRenderContext.MapBlendSourceFactorToRHI(
+  const AFactor: TBlendingSourceFactor): TRHIBlendFactor;
+begin
+  case AFactor of
+    bsZero:                   Result := bfZero;
+    bsOne:                    Result := bfOne;
+    bsSrcColor:               Result := bfSrcColor;
+    bsOneMinusSrcColor:       Result := bfOneMinusSrcColor;
+    bsDstColor:               Result := bfDstColor;
+    bsOneMinusDstColor:       Result := bfOneMinusDstColor;
+    bsSrcAlpha,
+    bsSrcAlphaSaturate,
+    bsConstantColor,
+    bsConstantAlpha:          Result := bfSrcAlpha;
+    bsOneMinusSrcAlpha,
+    bsOneMinusConstantColor,
+    bsOneMinusConstantAlpha:  Result := bfOneMinusSrcAlpha;
+    bsDstAlpha:               Result := bfDstAlpha;
+    bsOneMinusDstAlpha:       Result := bfOneMinusDstAlpha;
+    else                      Result := bfSrcAlpha;
+  end;
+end;
+
+class function TRenderContext.MapBlendDestFactorToRHI(
+  const AFactor: TBlendingDestinationFactor): TRHIBlendFactor;
+begin
+  case AFactor of
+    bdZero:                   Result := bfZero;
+    bdOne:                    Result := bfOne;
+    bdSrcColor:               Result := bfSrcColor;
+    bdOneMinusSrcColor:       Result := bfOneMinusSrcColor;
+    bdDstColor:               Result := bfDstColor;
+    bdOneMinusDstColor:       Result := bfOneMinusDstColor;
+    bdSrcAlpha,
+    bdConstantColor,
+    bdConstantAlpha:          Result := bfSrcAlpha;
+    bdOneMinusSrcAlpha,
+    bdOneMinusConstantColor,
+    bdOneMinusConstantAlpha:  Result := bfOneMinusSrcAlpha;
+    bdDstAlpha:               Result := bfDstAlpha;
+    bdOneMinusDstAlpha:       Result := bfOneMinusDstAlpha;
+    else                      Result := bfOneMinusSrcAlpha;
+  end;
+end;
+
+class function TRenderContext.MapDepthFuncToRHI(
+  const ADepthFunc: TDepthFunction): TRHICompareOp;
+begin
+  case ADepthFunc of
+    dfNever:        Result := coNever;
+    dfLess:         Result := coLess;
+    dfEqual:        Result := coEqual;
+    dfLessEqual:    Result := coLessOrEqual;
+    dfGreater:      Result := coGreater;
+    dfNotEqual:     Result := coNotEqual;
+    dfGreaterEqual: Result := coGreaterOrEqual;
+    dfAlways:       Result := coAlways;
+    else            Result := coLess;
+  end;
+end;
+
 procedure TRenderContext.ApplyRHIStencilAndColorMask(
   var ADepthStencil: TRHIDepthStencilStateDesc;
   var ABlendState: TRHIBlendStateDesc);
@@ -1010,6 +1074,18 @@ begin
     if 3 in FColorChannels then Mask := Mask or $08;
     ABlendState.ColorWriteMask := Mask;
   end;
+
+  if FBlendingEnabled then
+  begin
+    ABlendState.BlendEnable := True;
+    ABlendState.SrcColorBlendFactor := MapBlendSourceFactorToRHI(FBlendingSourceFactor);
+    ABlendState.DstColorBlendFactor := MapBlendDestFactorToRHI(FBlendingDestinationFactor);
+    ABlendState.SrcAlphaBlendFactor := ABlendState.SrcColorBlendFactor;
+    ABlendState.DstAlphaBlendFactor := ABlendState.DstColorBlendFactor;
+  end;
+
+  if ADepthStencil.DepthTestEnable then
+    ADepthStencil.DepthCompareOp := MapDepthFuncToRHI(FDepthFunc);
 
   if FStencilTest then
   begin
