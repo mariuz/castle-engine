@@ -176,6 +176,17 @@ Modern 3D level design and UI composition require fast, deterministic spatial ma
 
 ## 2. Phase 1: 3D Viewport Gizmos, Snapping, Coordinate Spaces & Multi-Selection
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [Viewport and 3D Scenes (`TCastleViewport`, `TCastleTransform`)](https://castle-engine.io/viewport_and_scenes) · [`TCastleTransformManipulate` API Reference](https://castle-engine.io/apidoc/html/CastleTransformManipulate.TCastleTransformManipulate.html)
+> - **Unreal Engine 5.5:** [Transforming Actors (Translate, Rotate, Scale, World/Local & Grid Snapping)](https://dev.epicgames.com/documentation/en-us/unreal-engine/transforming-actors-in-unreal-engine)
+> - **Godot Engine 4:** [Introduction to 3D & 3D Transform Gizmos](https://docs.godotengine.org/en/stable/tutorials/3d/introduction_to_3d.html) · [Using 3D Transforms (`Node3D`)](https://docs.godotengine.org/en/stable/tutorials/3d/using_transforms.html)
+> - **Blender 4:** [3D Viewport Gizmos](https://docs.blender.org/manual/en/latest/editors/3dview/display/gizmo.html) · [3D Snapping](https://docs.blender.org/manual/en/latest/editors/3dview/controls/snapping.html)
+> - **Unity:** [Positioning GameObjects & Gizmo Handle Toggles](https://docs.unity3d.com/Manual/PositioningGameObjects.html)
+
+| CGE 3D Viewport & Transform Gizmo | Godot 4 3D Transform Gizmo | Blender 4 Translate / Rotate / Scale Gizmos | Unity Global / Local & Pivot Toggles |
+| :---: | :---: | :---: | :---: |
+| ![CGE 3D Editor](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) | ![Godot 3D Gizmo](https://docs.godotengine.org/en/stable/_images/tuto_3d3.webp) | ![Blender Gizmo](https://docs.blender.org/manual/en/latest/_images/editors_3dview_display_gizmo_options-translate.png) | ![Unity Toggles](https://docs.unity3d.com/uploads/Main/gizmo-handle-position-toggles.png) |
+
 All 3D manipulation features are implemented in `TCastleTransformManipulate` (`src/scene/castletransformmanipulate.pas`), making them available both inside `castle-editor` and in any custom runtime level editor or CAD tool built with Castle Game Engine.
 
 ```mermaid
@@ -280,6 +291,15 @@ end;
 
 ## 3. Phase 2: Scene Outliner (Hierarchy Panel) Modernization
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [Visual Editor Hierarchy & Design Tree](https://castle-engine.io/manual_editor.php)
+> - **Unreal Engine 5.5:** [World Outliner (Filtering by `+Type`, Eye Visibility & Actor Hierarchy)](https://dev.epicgames.com/documentation/en-us/unreal-engine/outliner-in-unreal-engine)
+> - **Blender 4:** [Outliner Interface, Search Filter & Restriction Toggles](https://docs.blender.org/manual/en/latest/editors/outliner/introduction.html)
+
+| CGE Scene Hierarchy & Viewport | Unreal Engine 5 World Outliner | Blender 4 Outliner Tree & Filter |
+| :---: | :---: | :---: |
+| ![CGE Transform Scene](https://castle-engine.io/images/thumb_const_height_size/transform_scene.webp) | ![Unreal Outliner](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/a285724d-dc13-455e-aa4a-fd2c4d165130/topic-image.png) | ![Blender Outliner](https://docs.blender.org/manual/en/latest/_images/editors_outliner_introduction_interface.png) |
+
 The left-hand Hierarchy panel (`ControlsTree` inside `TDesignFrame`) has been upgraded for large scenes with hundreds of components.
 
 ### 3.1. Live Hierarchy Filter by Name and `+ClassName`
@@ -301,13 +321,29 @@ The search bar (`EditFindInHierarchy`) at the top of the Hierarchy panel is now 
 - **Ancestor Deduplication (`IsComponentDescendantOfSelection`):** If both a parent transform/UI and its child are selected during `Ctrl+D`, only the parent subtree is duplicated (which already clones its children), preventing duplicate copies of the child.
 - After duplication, the editor automatically selects all newly created clones so you can immediately move them together with the 3D gizmo.
 
-### 3.4. Double-Click Node to Focus Camera
+### 3.4. Double-Click Node to Focus Camera & Example Workflow
 
 - Double-clicking any `TCastleTransform` node in the Hierarchy tree (`ControlsTreeDblClick`) immediately frames and focuses the active 3D viewport camera onto that transform's bounding box (`ViewportViewSelected`, identical to pressing **`F`** in the viewport).
+
+```text
+Example Editor Workflow (Phase 2):
+1. Press Ctrl+F and type "+PointLight" -> All TCastlePointLight nodes highlight in yellow.
+2. Press F3 repeatedly to cycle through each point light, or Ctrl+Click 3 lights in the tree.
+3. Press H to toggle their visibility ([Hidden] badge appears), or Ctrl+D to duplicate all 3 lights at once.
+4. Double-click any TCastleScene node in the Hierarchy tree to smoothly fly the 3D camera to frame it.
+```
 
 ---
 
 ## 4. Phase 3: Details Panel (Object Inspector) Enhancements
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [Visual Editor Object Inspector & Properties](https://castle-engine.io/manual_editor.php) · [User Interface Layout & Inspector](https://castle-engine.io/user_interface)
+> - **Unreal Engine 5.5:** [Details Panel in Unreal Engine (Property Search, Revert to Default & Copy/Paste Transform)](https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-editor-interface)
+
+| Castle Game Engine Object Inspector (Design Time) | Castle Game Engine Inspector (Runtime Debugging) |
+| :---: | :---: |
+| ![CGE Inspector Design](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) | ![CGE Inspector Running](https://castle-engine.io/images/thumb_const_height_size/inspector_running.webp) |
 
 ### 4.1. Live Property Search Across Inspector Tabs
 
@@ -323,9 +359,25 @@ When one or more `TCastleTransform` instances are selected and the **`Layout`** 
 - **`Copy Transform` (`ButtonCopyTransform`):** Copies the primary selected transform's `Translation`, `Rotation`, and `Scale` vectors to the editor's transform clipboard (`FCopiedTranslation`, `FCopiedRotation`, `FCopiedScale`) and enables the `Paste Transform` button.
 - **`Paste Transform` (`ButtonPasteTransform`):** Pastes the copied `Translation`, `Rotation`, and `Scale` onto the selected transform — or onto **all** selected transforms in a multi-selection — recording a single Undo step.
 
+```text
+Example Editor Workflow (Phase 3):
+1. Select a configured pillar (PillarMaster) -> Open the "Layout" tab -> Click "Copy Transform".
+2. Multi-select 5 unaligned pillars -> Click "Paste Transform" (or "Reset" to return all 5 to Identity).
+3. Type "shadow" in "Search Properties..." at the top of the Inspector to immediately filter ShadowVolumes / CastShadows across all tabs.
+```
+
 ---
 
 ## 5. Phase 4: Viewport Rendering Modes, Colliders Toggle & Real-Time Stats Overlay
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [Viewport and Scenes Rendering](https://castle-engine.io/viewport_and_scenes) · [`TCastleRenderOptions` API](https://castle-engine.io/apidoc/html/CastleRenderOptions.TCastleRenderOptions.html)
+> - **Unreal Engine 5.5:** [Viewport Toolbar & View Modes (Lit, Unlit, Wireframe & Show Collision)](https://dev.epicgames.com/documentation/en-us/unreal-engine/viewport-toolbar-in-unreal-engine)
+> - **Godot Engine 4:** [3D Viewport Toolbar, View Modes & Frame Stats](https://docs.godotengine.org/en/stable/tutorials/3d/introduction_to_3d.html)
+
+| CGE 3D Viewport Rendering | Godot 4 3D Viewport Toolbar | CGE Physics Collider Visualization |
+| :---: | :---: | :---: |
+| ![CGE 3D Viewport](https://castle-engine.io/images/thumb_size/viewport_3d_nice_view.webp) | ![Godot 3D Toolbar](https://docs.godotengine.org/en/stable/_images/3d_toolbar.webp) | ![CGE Physics Colliders](https://castle-engine.io/images/thumb_const_height_size/platformer_physics_components.webp) |
 
 ### 5.1. Lit, Unlit, Wireframe & Solid Wireframe Modes (`InternalForceUnlit` & `ButtonViewMode`)
 
@@ -350,9 +402,24 @@ Clicking the **`Stats`** toggle button (`ButtonShowStats`) on the top toolbar di
 
 Clicking the **`Colliders`** toggle button (`ButtonShowColliders`) on the top toolbar toggles wireframe visualization for all `TCastleCollider` behaviors (`TCastleBoxCollider`, `TCastleSphereCollider`, `TCastleCapsuleCollider`, `TCastleMeshCollider`, etc.) in the current viewport, staying synchronized with the `Physics -> Show Colliders` menu item.
 
+```pascal
+// Runtime / Editor Pascal Example (Phase 4 — Toggles Unlit or Wireframe globally):
+uses CastleRenderOptions;
+
+procedure SetEditorViewMode(const Unlit, Wireframe: Boolean);
+begin
+  InternalForceUnlit := Unlit;
+  InternalForceWireframe := Wireframe;
+end;
+```
+
 ---
 
 ## 6. Phase 5: Content Browser Search, Asset Filter Pills & Grid-Snapped Viewport Drop
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [Visual Editor Project Files & Asset Drag-and-Drop](https://castle-engine.io/manual_editor.php)
+> - **Unreal Engine 5.5:** [Content Browser / Content Drawer Search & Type Filters](https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-editor-interface)
 
 ### 6.1. Content Browser Live Search & Category Filter Pills
 
@@ -373,9 +440,21 @@ When dragging a 3D scene or `.castle-transform` asset from `ShellListView1` dire
 - The editor raycasts into the 3D viewport (`Viewport.Items.WorldRay`) to find the exact surface hit point `DropPos`.
 - If **`3D snap`** (`TransformManipulate.TranslateSnap > 0`) is enabled, `DropPos.X` and `DropPos.Z` are automatically snapped to multiples of `TranslateSnap` while keeping `DropPos.Y` flush with the hit surface elevation.
 
+```text
+Example Editor Workflow (Phase 5):
+1. In the bottom Files panel, click the "3D/Scenes" pill and type "wall" in "Search files in folder...".
+2. Set "3D snap:" on the top toolbar to 2.0.
+3. Drag "dungeon_wall.gltf" from the Files panel onto the 3D Viewport floor -> It instantiates a TCastleScene snapped to the nearest 2.0m XZ grid coordinate and flush with the floor elevation.
+```
+
 ---
 
 ## 7. Phase 6: Quick-Add Component Palette (`Ctrl+P` / `+ Add`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [Visual Editor Component Creation](https://castle-engine.io/manual_editor.php)
+> - **Unreal Engine 5.5:** [Quickly Add to the Project Menu (`+` Toolbar Menu)](https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-editor-interface)
+> - **Godot Engine 4:** [Create New Node Search Dialog (`Ctrl+A`)](https://docs.godotengine.org/en/stable/tutorials/3d/introduction_to_3d.html)
 
 Instead of navigating multi-level context menus (`Add Transform -> ...` or `Add User Interface -> ...`), level and UI designers can press **`Ctrl+P`** while focused in the viewport or click the **`+ Add`** button (`ButtonQuickAdd`) on the top toolbar to open the **Quick-Add Component Palette** (`TDesignFrame.ShowQuickAddPalette`):
 1. Automatically detects which component categories (`[Transform]`, `[UI]`, `[Behavior]`, `[NonVisual]`) are valid for the currently selected parent or active viewport.
@@ -383,9 +462,25 @@ Instead of navigating multi-level context menus (`Add Transform -> ...` or `Add 
 3. Typing in the search box filters the list live by caption, category, or class name (e.g., typing `point` finds `[Transform] Light -> Point (TCastlePointLight)`).
 4. Use `Up`/`Down` arrow keys and press **`Enter`** (or double-click) to instantiate and select the component immediately.
 
+```text
+Example Editor Workflow (Phase 6):
+1. Select Viewport1 in the Hierarchy -> Press Ctrl+P.
+2. Type "capsule" -> Highlights "[Behavior] Collider -> Capsule (TCastleCapsuleCollider)" and "[Transform] Primitive -> Capsule (TCastleCapsule)".
+3. Press Enter to immediately spawn and select the component under Viewport1.
+```
+
 ---
 
 ## 8. Phase 7: Enhanced In-Editor Physics Simulation (`Step` & `Keep Sim`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [Physics Manual (`TCastleRigidBody`, `TCastleCollider`, Simulation in Editor)](https://castle-engine.io/physics)
+> - **Unreal Engine 5.5:** [Play-In-Editor (PIE), Simulate-In-Editor & Keep Simulation Changes (`K`)](https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-editor-interface)
+> - **Godot Engine 4:** [Physics Introduction (`RigidBody3D`, `CollisionShape3D`)](https://docs.godotengine.org/en/stable/tutorials/physics/physics_introduction.html)
+
+| Castle Game Engine Physics Simulation in Editor | Godot 4 Physics Collision Shape Setup |
+| :---: | :---: |
+| ![CGE Physics Simulation](https://castle-engine.io/images/thumb_const_height_size/physics_1.webp) | ![Godot Collision Shape](https://docs.godotengine.org/en/stable/_images/player_coll_shape.webp) |
 
 When Physics Simulation is started (`ButtonSimulationPlayStop`), two additional buttons appear on the top toolbar alongside Pause (`ButtonSimulationPause`):
 
@@ -420,9 +515,26 @@ In Unreal Engine, pressing **`K`** ("Keep Simulation Changes") during Simulate-I
 3. Applies the physically settled `Translation`, `Rotation`, and `Scale` onto all matching `TCastleTransform` components in the restored design.
 4. Calls `ModifiedOutsideObjectInspector('Keep physics simulation changes (...)', ucHigh)`, recording the entire operation as a single Undo-able step (`Ctrl+Z` restores the pre-simulation layout).
 
+```text
+Example Editor Workflow (Phase 7 — Physics-Assisted Set Dressing):
+1. Scatter 15 rocks and crates above uneven terrain with dynamic TCastleRigidBody + TCastleBoxCollider.
+2. Click the Physics "Play" toolbar button -> Watch the crates tumble and settle naturally on the terrain.
+3. Click "Step" to fine-tune the exact resting frame, then click "Keep Sim" to bake their settled positions into the design (with full Ctrl+Z undo support).
+```
+
 ---
 
 ## 9. Phase 8: Multi-Object Alignment, Distribution, Snap-to-Grid (`Ctrl+End`) & Selection Center Pivot
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [`TCastleTransformManipulate` API](https://castle-engine.io/apidoc/html/CastleTransformManipulate.TCastleTransformManipulate.html)
+> - **Unreal Engine 5.5:** [Transforming Actors & Pivot Point Offset](https://dev.epicgames.com/documentation/en-us/unreal-engine/transforming-actors-in-unreal-engine)
+> - **Blender 4:** [Transform Pivot Point (Median Point vs. Active Element) & Align Objects](https://docs.blender.org/manual/en/latest/editors/3dview/controls/snapping.html)
+> - **Unity:** [Gizmo Handle Position Toggles (`Center` vs. `Pivot`)](https://docs.unity3d.com/Manual/PositioningGameObjects.html)
+
+| Unity Center vs. Pivot Mode | Blender Snap & Median Target |
+| :---: | :---: |
+| ![Unity Center vs Pivot](https://docs.unity3d.com/uploads/Main/gizmo-handle-position-toggles-menu.png) | ![Blender Snap Median](https://docs.blender.org/manual/en/latest/_images/editors_3dview_controls_snapping_target-median.png) |
 
 ### 9.1. Selection Center Orbital Pivot Mode (`TManipulatePivotMode`)
 
@@ -489,6 +601,11 @@ Manipulate.RotateSelected(1, DegToRad(45));
 
 ## 10. Phase 9: Viewport Camera Bookmarks (`Ctrl+0..9` / `0..9`) & Move Transform to View
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [Viewport Camera & Navigation (`TCastleCamera`)](https://castle-engine.io/viewport_and_scenes)
+> - **Unreal Engine 5.5:** [Viewport Bookmarks (`Ctrl+0..9` / `0..9`) & Snap Object to View](https://dev.epicgames.com/documentation/en-us/unreal-engine/viewport-toolbar-in-unreal-engine)
+> - **Blender 4:** [Align Active Camera to View (`Ctrl+Alt+Numpad 0`)](https://docs.blender.org/manual/en/latest/editors/3dview/navigate/navigation.html)
+
 ### 10.1. Instant Viewport Camera Bookmarks (`SaveCameraBookmark`, `RecallCameraBookmark`)
 
 Just like Unreal Engine's viewport camera bookmarks (`Ctrl+0..9` to save, `0..9` to recall), `TDesignFrame` maintains 10 camera bookmark slots (`FCameraBookmarks[0..9]`):
@@ -505,15 +622,28 @@ Previously, `castle-editor` only supported aligning a `TCastleCamera` to the vie
   2. Applies `T.SetWorldView(CamPos, CamDir, CamUp)` on the selected `TCastleTransform`.
   3. Records an Undo step (`Move Transform To View: <Name>`).
 
+```text
+Example Editor Workflow (Phase 9):
+1. Fly the 3D camera to overlook the boss arena -> Press Ctrl+1 to bookmark this vantage point.
+2. Fly to the player entrance -> Press Ctrl+2 to bookmark the entrance view.
+3. Select SpotLightKey -> Click "Move to View" in the Layout tab to snap the spotlight directly to your current camera position and aim direction.
+4. Press 1 or 2 at any time to smoothly animate the camera between the boss arena and entrance views.
+```
+
 ---
 
 ## 11. Phase 10: Hierarchy & Object Inspector Productivity Tools
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [Visual Editor Hierarchy & Object Inspector](https://castle-engine.io/manual_editor.php)
+> - **Unreal Engine 5.5:** [World Outliner Select Matching & Details Revert Property](https://dev.epicgames.com/documentation/en-us/unreal-engine/outliner-in-unreal-engine)
+> - **Godot Engine 4:** [Scene Tree Expand/Collapse & Property Revert Icon](https://docs.godotengine.org/en/stable/tutorials/3d/introduction_to_3d.html)
 
 ### 11.1. Select All of Same Class & Expand/Collapse Subtree
 
 Right-clicking any node in the Hierarchy (`ControlsTree`) opens `MenuTreeView` with three new batch productivity actions:
 - **`Select All of Same Class` (`SelectAllOfSameClass`):**
-  Finds every component in the Hierarchy whose exact `ClassType` matches `SelectedComponent.ClassType` (for example, seleccionar one `TCastlePointLight` and clicking `Select All of Same Class` immediately multi-selects all `TCastlePointLight` instances in the level so you can batch-edit their `Color`, `Intensity`, or `Shadows` in the Object Inspector).
+  Finds every component in the Hierarchy whose exact `ClassType` matches `SelectedComponent.ClassType` (for example, selecting one `TCastlePointLight` and clicking `Select All of Same Class` immediately multi-selects all `TCastlePointLight` instances in the level so you can batch-edit their `Color`, `Intensity`, or `Shadows` in the Object Inspector).
 - **`Expand Subtree` (`ExpandSelectedSubtree`):**
   Recursively expands all child nodes under the selected hierarchy node(s), or expands the entire hierarchy tree if nothing is selected.
 - **`Collapse Subtree` (`CollapseSelectedSubtree`):**
@@ -528,6 +658,15 @@ Next to the **`Search Properties...`** filter box (`EditPropertyFilter`) at the 
 ---
 
 ## 12. Phase 11: Surface Normal Alignment (`Alt+End`), Physics-Safe Mirroring, 90° Step Rotation & Transform Randomizer
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [Physics Colliders & Scale Requirements](https://castle-engine.io/physics)
+> - **Unreal Engine 5.5:** [Snap to Floor & Align to Surface Normal (`End` / `Alt+End`)](https://dev.epicgames.com/documentation/en-us/unreal-engine/transforming-actors-in-unreal-engine)
+> - **Blender 4:** [Snap Align Rotation to Target & Randomize Transform](https://docs.blender.org/manual/en/latest/editors/3dview/controls/snapping.html)
+
+| Blender Snap Target & Normal Alignment | Godot 3D Lights & Scene Setup |
+| :---: | :---: |
+| ![Blender Snap Closest](https://docs.blender.org/manual/en/latest/_images/editors_3dview_controls_snapping_target-closest.png) | ![Godot Light Params](https://docs.godotengine.org/en/stable/_images/light_params.png) |
 
 ### 12.1. Snap to Floor with Surface Normal Alignment (`SnapToFloor(true)` / `Alt+End`)
 
@@ -588,9 +727,21 @@ function MirrorSelected(const Axis: T3DAxis): Boolean;
   - Optional XZ position jitter in $[-\text{MaxPositionJitter}, +\text{MaxPositionJitter}]$.
   - Accessible in the `Layout` tab via **`Randomize`** (`ButtonRandomizeTransform`, which applies $\pm 180^\circ$ random yaw and $0.85\times\text{–}1.15\times$ uniform scale with a single Undo step).
 
+```pascal
+// Pascal API Example (Phase 11 — Randomize foliage, then drop & align to sloped terrain):
+Manipulate.SetSelected([PineTree1, PineTree2, Boulder1]);
+Manipulate.RandomizeSelected(Pi, 0.85, 1.20, 0.5); // Random yaw, 85%..120% scale, 0.5m XZ jitter
+Manipulate.SnapToFloor(true);                      // Drop to terrain & align +Y to slope normal
+```
+
 ---
 
 ## 13. Phase 12: Scene Outliner Selection Isolation (`Shift+H` / `Alt+H`) & Group Selected (`Ctrl+G`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [Visual Editor Hierarchy & Grouping (`TCastleTransform`)](https://castle-engine.io/viewport_and_scenes)
+> - **Unreal Engine 5.5:** [World Outliner Visibility & Actor Grouping (`Ctrl+G`)](https://dev.epicgames.com/documentation/en-us/unreal-engine/outliner-in-unreal-engine)
+> - **Blender 4:** [Local View / Isolate (`Numpad /` & `Shift+H` / `Alt+H`)](https://docs.blender.org/manual/en/latest/editors/outliner/introduction.html)
 
 ### 13.1. Isolate Selected (`Shift+H`) & Show All Hidden (`Alt+H`)
 
@@ -613,9 +764,21 @@ Pressing **`Ctrl+G`** in the Viewport or Hierarchy tree (or choosing **`Group Se
 4. Reparents each selected transform into the new group while adjusting its `Translation` so that its world-space position remains unchanged.
 5. Selects the newly created group in the Hierarchy tree and records a single Undo step (`Group Selected`).
 
+```text
+Example Editor Workflow (Phase 12):
+1. Select TableMesh, ChairLeft, ChairRight, and CandleLight in the 3D Viewport.
+2. Press Shift+H to isolate the dining set while hiding the rest of the castle interior.
+3. Press Ctrl+G to group all 4 objects under a new Group1 transform centered at their shared centroid.
+4. Press Alt+H to unhide the rest of the level.
+```
+
 ---
 
 ## 14. Phase 13: Dynamic Viewport Camera Speed Controls (`[` / `]`) & Camera Speed HUD
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [Navigation & Camera MoveSpeed (`TCastleNavigation`)](https://castle-engine.io/navigation)
+> - **Unreal Engine 5.5:** [Viewport Toolbar Camera Speed Controls (`[` / `]` & Mouse Wheel)](https://dev.epicgames.com/documentation/en-us/unreal-engine/viewport-toolbar-in-unreal-engine)
 
 When navigating between macro-scale terrain and micro-scale interior props, level designers need instant keyboard control over camera fly speed without leaving the viewport:
 - **Decrease / Increase Camera Speed (`[` and `]` Keys):**
@@ -624,9 +787,20 @@ When navigating between macro-scale terrain and micro-scale interior props, leve
 - **Live Camera Speed HUD Readout:**
   - When the **`Stats`** HUD overlay (`ButtonShowStats`) is enabled, the overlay now includes a live `Cam Speed: X.XX` readout alongside `FPS`, `Shapes`, `Manipulate`, `Selection`, and `World BBox`.
 
+```text
+Example Editor Workflow (Phase 13):
+1. Press ] three times when flying across a 2 km terrain patch to boost camera speed by 3.375x.
+2. Fly inside a small room and press [ four times to slow camera speed down for fine tabletop prop placement.
+```
+
 ---
 
 ## 15. Phase 14: Alt-Drag 3D Gizmo Duplication & Bounding-Box Flush Stacking (`StackSelected`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [`TCastleTransformManipulate.StackSelected` API](https://castle-engine.io/apidoc/html/CastleTransformManipulate.TCastleTransformManipulate.html)
+> - **Unreal Engine 5.5:** [Alt-Drag Actor Duplication in Viewport](https://dev.epicgames.com/documentation/en-us/unreal-engine/transforming-actors-in-unreal-engine)
+> - **Blender 4:** [Bounding-Box Flush Alignment & Translate Gizmo](https://docs.blender.org/manual/en/latest/editors/3dview/display/gizmo.html)
 
 ### 15.1. Alt-Drag 3D Gizmo Duplication (`OnTransformModifyBegin` / `GizmoTransformModifyBegin`)
 
@@ -645,9 +819,19 @@ While `DistributeSelected` spaces object centers evenly, modular level design (w
   4. Places each subsequent transform `Items[I]` so that its minimum bounding-box face along `Axis` aligns with `CurrentEdge + Spacing`, advancing `CurrentEdge` by `Items[I].BoxSize + Spacing`.
 - **Editor UI (`PanelLayoutTransform`):** Exposed via **`Stack X`**, **`Stack Y`**, and **`Stack Z`** (`ButtonStackX`, `ButtonStackY`, `ButtonStackZ`), enabled whenever 2 or more `TCastleTransform` objects are selected.
 
+```pascal
+// Pascal API Example (Phase 14 — Stack modular wall segments flush along X with 0 gap):
+Manipulate.SetSelected([WallShort, WallDoorway, WallLong, WallCorner]);
+Manipulate.StackSelected(0 {X axis}, 0.0 {flush edge-to-edge});
+```
+
 ---
 
 ## 16. Phase 15: Ungroup Selected Transforms (`Ctrl+Shift+G` / `UngroupSelectedTransforms`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Unreal Engine 5.5:** [World Outliner Ungroup Actors (`Shift+G`)](https://dev.epicgames.com/documentation/en-us/unreal-engine/outliner-in-unreal-engine)
+> - **Blender 4:** [Clear Parent & Keep Transformation (`Alt+P`)](https://docs.blender.org/manual/en/latest/editors/outliner/introduction.html)
 
 Complementing **`Ctrl+G`** (`GroupSelectedTransforms`), pressing **`Ctrl+Shift+G`** in the 3D Viewport or Hierarchy Tree (or choosing **`Ungroup Selected Transform(s) (Ctrl+Shift+G)`** from the Hierarchy context menu) unpacks selected transform groups:
 1. For each selected `TCastleTransform` group with a valid `Parent`, captures the world position and orientation (`GetWorldView`) of every selectable child `TCastleTransform`.
@@ -658,6 +842,11 @@ Complementing **`Ctrl+G`** (`GroupSelectedTransforms`), pressing **`Ctrl+Shift+G
 ---
 
 ## 17. Phase 16: Viewport Marquee / Box Selection (`SelectComponentsInMarquee`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Unreal Engine 5.5:** [Viewport Marquee Selection Rectangle](https://dev.epicgames.com/documentation/en-us/unreal-engine/transforming-actors-in-unreal-engine)
+> - **Blender 4:** [Box Select (`B` / Left-Drag in 3D Viewport)](https://docs.blender.org/manual/en/latest/editors/3dview/display/gizmo.html)
+> - **Godot Engine 4:** [3D & 2D Viewport Box Selection](https://docs.godotengine.org/en/stable/tutorials/3d/introduction_to_3d.html)
 
 Batch-selecting dozens of props or UI widgets one by one is slow in large levels. Phase 16 introduces **Viewport Marquee / Box Selection** for both 3D viewports and 2D UI designs:
 - **Activation:**
@@ -670,9 +859,24 @@ Batch-selecting dozens of props or UI widgets one by one is slow in large levels
   - **2D `TCastleUserInterface`**: Selects all selectable, visible, unlocked `TCastleUserInterface` controls whose `RenderRect` overlaps `MarqueeRect`.
   - **Additive Selection (`Shift`)**: Holding **`Shift`** when releasing the mouse button adds the marquee-enclosed objects to the existing selection instead of replacing it.
 
+```text
+Example Editor Workflow (Phase 16):
+1. While in Translate mode, hold Ctrl+Alt and drag a rectangle around 12 dungeon torches -> All 12 are selected at once.
+2. Hold Shift + Ctrl+Alt and drag a second rectangle around 4 wall sconces to add them to the active selection.
+```
+
 ---
 
 ## 18. Phase 17: Interactive Surface & Vertex Snapping (`SnapSelectedToRay` / `V` Key)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Unreal Engine 5.5:** [Vertex Snapping (`V` Key) & Surface Snapping](https://dev.epicgames.com/documentation/en-us/unreal-engine/transforming-actors-in-unreal-engine)
+> - **Blender 4:** [Snapping Element Menu (Vertex, Face Project & Align Rotation to Target)](https://docs.blender.org/manual/en/latest/editors/3dview/controls/snapping.html)
+> - **Unity:** [Vertex Snapping (`V` Key) in Scene View](https://docs.unity3d.com/Manual/PositioningGameObjects.html)
+
+| Blender Snapping Element Menu (Vertex / Face) | Blender Snap Target Closest |
+| :---: | :---: |
+| ![Blender Snapping Menu](https://docs.blender.org/manual/en/latest/_images/editors_3dview_controls_snapping_element-menu.png) | ![Blender Snap Closest](https://docs.blender.org/manual/en/latest/_images/editors_3dview_controls_snapping_target-closest.png) |
 
 While `SnapToFloor` (`End`) always raycasts along the downward gravity vector, level designers frequently need to snap selected props directly onto walls, ceilings, arbitrary mesh surfaces, or exact corner vertices under the mouse cursor:
 - **`TCastleTransformManipulate.SnapSelectedToRay`:**
@@ -693,9 +897,19 @@ While `SnapToFloor` (`End`) always raycasts along the downward gravity vector, l
   - **`Alt+V`**: Snap selected transform(s) onto the surface under the cursor and align local `+Y` to the surface normal.
   - **`Shift+Alt+V`**: Snap selected transform(s) onto the nearest mesh vertex under the cursor and align local `+Y` to the surface normal.
 
+```pascal
+// Pascal API Example (Phase 17 — Snap selected prop to nearest triangle vertex along a ray):
+Manipulate.SetSelected([CornerPillar]);
+Manipulate.SnapSelectedToRay(CamPos, CamDir, true {SnapToNearestVertex}, false {AlignToNormal});
+```
+
 ---
 
 ## 19. Phase 18: Linear / Step Array Duplication Tool (`ArrayDuplicateSelected` / `Ctrl+Shift+D`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Array Modifier (Constant Offset, Relative Offset & Object Offset)](https://docs.blender.org/manual/en/latest/modeling/modifiers/generate/array.html)
+> - **Unreal Engine 5.5:** [Duplicate & Transform Step-and-Repeat Workflow](https://dev.epicgames.com/documentation/en-us/unreal-engine/transforming-actors-in-unreal-engine)
 
 Constructing stairs, colonnades, fences, streetlamps, or evenly spaced UI grids is automated by the **Array Duplication Tool**:
 - **`TDesignFrame.ArrayDuplicateSelected(Count, StepOffset, StepYawDeg)`:**
@@ -709,9 +923,21 @@ Constructing stairs, colonnades, fences, streetlamps, or evenly spaced UI grids 
   - Triggered via **`Ctrl+Shift+D`** (in the Viewport or Hierarchy Tree), **`Array Dup...`** (`ButtonArrayDuplicate`) in `PanelLayoutTransform`, or **`Array Duplicate... (Ctrl+Shift+D)`** in `MenuTreeView`.
   - Prompts for **Number of Copies (`1..100`)**, **Step Offset X / Y / Z**, and **Step Yaw Rotation (deg, Y axis)**, automatically pre-filling `Step Offset X` from `TranslateSnap` when 3D snapping is active.
 
+```text
+Example Editor Workflow (Phase 18 — Spiral Staircase in 1 Step):
+1. Select a single stair step (StairStep1) -> Press Ctrl+Shift+D.
+2. Set Copies = 16, Step Offset = (0.0, 0.25, 0.0), Step Yaw Rotation = 15.0 deg -> Click OK.
+3. All 16 ascending spiral steps are instantiated and selected as a single Undoable action.
+```
+
 ---
 
 ## 20. Phase 19: Hierarchy Selection Locking (`L` Key / `Alt+L` / `[Locked]` Badge)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Unreal Engine 5.5:** [World Outliner Actor Selection Locking](https://dev.epicgames.com/documentation/en-us/unreal-engine/outliner-in-unreal-engine)
+> - **Blender 4:** [Outliner Selectability Restriction Toggle](https://docs.blender.org/manual/en/latest/editors/outliner/introduction.html)
+> - **Godot Engine 4:** [Lock Selected Node (`Lock` Toolbar Toggle)](https://docs.godotengine.org/en/stable/tutorials/3d/introduction_to_3d.html)
 
 When dressing an interior room or terrain, accidentally clicking the floor, skybox, or surrounding walls in the 3D viewport constantly disrupts selection. **Hierarchy Selection Locking** lets you keep background actors visible while making them unpickable in the viewport:
 - **Lock / Unlock Selected (`L` Key / `ToggleSelectedLock`):**
@@ -729,6 +955,9 @@ When dressing an interior room or terrain, accidentally clicking the floor, skyb
 
 ## 21. Phase 20: Radial / Circular Array Duplication (`RadialDuplicateSelected` / `Ctrl+Alt+D`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Array Modifier (Object Offset Circular Array) & Spin Tool](https://docs.blender.org/manual/en/latest/modeling/modifiers/generate/array.html)
+
 Creating circular pillars, stonehenge rings, chandelier lights, turret emplacements, or curved archways is automated by the **Radial / Circular Array Duplication Tool**:
 - **`TDesignFrame.RadialDuplicateSelected(Count, Radius, TotalAngleDeg, OrientToCenter)`:**
   - Accepts `Count` ($1\dots 360$), `Radius: Single`, `TotalAngleDeg: Single`, and `OrientToCenter: Boolean`.
@@ -741,9 +970,19 @@ Creating circular pillars, stonehenge rings, chandelier lights, turret emplaceme
 - **Modal Dialog (`ShowRadialDuplicateDialog`):**
   - Triggered via **`Ctrl+Alt+D`** (in the Viewport or Hierarchy Tree), **`Radial Dup...`** (`ButtonRadialDuplicate`) in `PanelLayoutTransform`, or **`Radial / Circular Duplicate... (Ctrl+Alt+D)`** in `MenuTreeView`.
 
+```text
+Example Editor Workflow (Phase 20 — 12-Pillar Temple Ring):
+1. Place Pillar1 at (0, 0, 8) -> Press Ctrl+Alt+D.
+2. Set Count = 11 (for 12 total pillars), Radius = 8.0, Total Angle = 360.0, Orient to Center = Checked -> Click OK.
+```
+
 ---
 
 ## 22. Phase 21: Multi-Component Replace With Another Class (`ReplaceSelectedComponents` / `Ctrl+Shift+R`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Unreal Engine 5.5:** [Replace Selected Actors With... (Greybox-to-Final Mesh Workflow)](https://dev.epicgames.com/documentation/en-us/unreal-engine/outliner-in-unreal-engine)
+> - **Godot Engine 4:** [Change Type... on Scene Nodes](https://docs.godotengine.org/en/stable/tutorials/3d/introduction_to_3d.html)
 
 When greyboxing a level with placeholder `TCastleBox` or `TCastleSphere` primitives and later swapping them to `TCastleScene` or `TCastleTransformDesign` instances (or swapping multiple `TCastlePointLight` nodes to `TCastleSpotLight`), **Replace Selected With...** replaces any number of selected components in-place:
 - **`TDesignFrame.ReplaceSelectedComponents(NewClass, ComponentOnCreate)`:**
@@ -761,6 +1000,10 @@ When greyboxing a level with placeholder `TCastleBox` or `TCastleSphere` primiti
 
 ## 23. Phase 22: Selection-Aware Standard Axis Viewport Camera Views (`Numpad 1/3/7/5` & `Alt+1/3/7/5`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Viewpoint Alignment (`Numpad 1/3/7` & Perspective/Orthographic `Numpad 5`)](https://docs.blender.org/manual/en/latest/editors/3dview/navigate/navigation.html)
+> - **Godot Engine 4:** [3D Viewport Orthogonal Axis Views (`Numpad 1/3/7/5`)](https://docs.godotengine.org/en/stable/tutorials/3d/introduction_to_3d.html)
+
 Inspecting alignment from orthogonal directions is streamlined with selection-aware axis views:
 - **Selection-Aware `ViewportViewAxis(Dir, Up)`:**
   - Orbits the camera to view `TransformManipulate.SelectionWorkingCenter` when one or more transforms are selected (or `V.Items.BoundingBox.Center` when nothing is selected, with a safe $(0, 0, 0)$ fallback at distance $10$ when the scene is empty), preserving the camera's distance to the target.
@@ -775,6 +1018,10 @@ Inspecting alignment from orthogonal directions is streamlined with selection-aw
 
 ## 24. Phase 23: 3D Viewport Ruler & Distance Measurement Tool (`M` Key / Multi-Select Ruler HUD)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Unreal Engine 5.5:** [Viewport Measure Tool (Middle-Mouse Drag in Orthographic / Ruler)](https://dev.epicgames.com/documentation/en-us/unreal-engine/viewport-toolbar-in-unreal-engine)
+> - **Blender 4:** [Measure Tool in 3D Viewport](https://docs.blender.org/manual/en/latest/editors/3dview/display/gizmo.html)
+
 Verifying corridor widths, jump gaps, ceiling heights, and prop spacing directly in the 3D viewport is provided by two complementary measurement modes:
 - **Automatic Multi-Selection Ruler (`TCastleTransformManipulate.MeasureSelectedDistance`):**
   - Whenever 2 or more `TCastleTransform` objects are selected and the `Stats` HUD is active, the HUD automatically displays the exact world-space Euclidean distance and axis breakdown $(\Delta X, \Delta Y, \Delta Z)$ between the first two selected transforms (`Ruler (Sel[0]->Sel[1]): Dist (dX=..., dY=..., dZ=...)`).
@@ -783,9 +1030,23 @@ Verifying corridor widths, jump gaps, ceiling heights, and prop spacing directly
   - Automatically enables the `Stats` HUD to display `Measured Ray (M): Dist (dX=..., dY=..., dZ=...)` and renders 2D screen-space start and end crosshair markers over the viewport.
   - Pressing **`Alt+M`** clears the active cursor ray measurement (`ClearViewportMeasurement`).
 
+```pascal
+// Pascal API Example (Phase 23 — Measure distance between two selected platforms):
+var
+  Delta: TVector3;
+  Dist: Single;
+begin
+  Manipulate.SetSelected([PlatformStart, PlatformEnd]);
+  Dist := Manipulate.MeasureSelectedDistance(Delta); // Returns Euclidean distance & World Delta
+end;
+```
+
 ---
 
 ## 25. Phase 24: 2D / 3D Grid Array Duplication (`GridDuplicateSelected` / `Ctrl+Alt+G`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Stacked X/Y/Z Array Modifiers for 2D/3D Lattices](https://docs.blender.org/manual/en/latest/modeling/modifiers/generate/array.html)
 
 Building multi-dimensional tile floors, crate stacks, pillar halls, or 3D voxel lattices is automated by **2D / 3D Grid Array Duplication**:
 - **How It Works (`TDesignFrame.GridDuplicateSelected` & `ShowGridDuplicateDialog`):**
@@ -798,6 +1059,9 @@ Building multi-dimensional tile floors, crate stacks, pillar halls, or 3D voxel 
 ---
 
 ## 26. Phase 25: Project Selected Transforms Along Any Direction / Camera View Ray (`ProjectSelectedAlongDirection` / `Ctrl+Shift+End`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Face Project Snapping Along View Direction](https://docs.blender.org/manual/en/latest/editors/3dview/controls/snapping.html)
 
 While `SnapToFloor` (`End`) always projects downward along `-World.GravityUp`, level designers frequently need to push wall sconces, decals, posters, ceiling lights, or angled props flush against walls, ceilings, or arbitrary surfaces along the camera's line of sight:
 - **Runtime / Editor API (`TCastleTransformManipulate.ProjectSelectedAlongDirection`):**
@@ -812,6 +1076,10 @@ While `SnapToFloor` (`End`) always projects downward along `-World.GravityUp`, l
 
 ## 27. Phase 26: Hierarchy & Viewport Selection Power Tools (`InvertSelection` / `Ctrl+I`, `SelectChildren` / `Ctrl+]`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Select Invert (`Ctrl+I`) & Select Hierarchy Children (`]`)](https://docs.blender.org/manual/en/latest/editors/outliner/introduction.html)
+> - **Unreal Engine 5.5:** [World Outliner Select Immediate Children & Select All Descendants](https://dev.epicgames.com/documentation/en-us/unreal-engine/outliner-in-unreal-engine)
+
 Managing complex component hierarchies is accelerated by three keyboard-driven selection commands:
 - **Invert Selection (`TDesignFrame.InvertSelection` / `Ctrl+I`):**
   - When components are selected inside a parent node, **`Ctrl+I`** inverts the selection among all sibling nodes under that same parent (allowing you to select 1 or 2 exceptions in a group and press `Ctrl+I` to select all other siblings). When at root level, inverts selection across all non-root components in the design.
@@ -823,6 +1091,10 @@ Managing complex component hierarchies is accelerated by three keyboard-driven s
 ---
 
 ## 28. Phase 27: Bounding-Box Equal-Gap Distribution (`DistributeSelectedGaps`) & Absolute Rotation/Scale Grid Quantization (`SnapSelectedRotationAndScaleToGrid`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [`TCastleTransformManipulate.DistributeSelectedGaps` API](https://castle-engine.io/apidoc/html/CastleTransformManipulate.TCastleTransformManipulate.html)
+> - **Unreal Engine 5.5:** [Snap Rotation & Scale to Grid Increments](https://dev.epicgames.com/documentation/en-us/unreal-engine/transforming-actors-in-unreal-engine)
 
 - **Bounding-Box Equal-Gap Distribution (`TCastleTransformManipulate.DistributeSelectedGaps` / `Shift+Dist X/Y/Z`):**
   - Standard `DistributeSelected` spaces object centers evenly, which causes objects of different sizes to have uneven gaps (or overlap).
@@ -837,6 +1109,9 @@ Managing complex component hierarchies is accelerated by three keyboard-driven s
 
 ## 29. Phase 28: Match Size / Scale to Primary Selection (`MatchSelectedSize`) & Swap / Cycle Positions (`SwapSelectedPositions` / `Ctrl+Shift+S`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Copy Scale / Make Links & Swap Object Locations](https://docs.blender.org/manual/en/latest/editors/3dview/display/gizmo.html)
+
 - **Swap / Cycle World Positions (`TCastleTransformManipulate.SwapSelectedPositions` / `Ctrl+Shift+S`):**
   - When 2 `TCastleTransform` objects are selected, swaps their world-space origins ($T_0 \leftrightarrow T_1$).
   - When $N \ge 3$ `TCastleTransform` objects are selected, cyclically rotates their world-space positions ($T_0 \to T_1 \to \dots \to T_{N-1} \to T_0$), converting each target world position back into each transform's parent local space (`Parent.WorldToLocal`).
@@ -849,6 +1124,10 @@ Managing complex component hierarchies is accelerated by three keyboard-driven s
 ---
 
 ## 30. Phase 29: Camera Pilot / "Lock Actor to Viewport Camera" Mode (`TogglePilotTransform` / `Ctrl+Shift+P`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Unreal Engine 5.5:** [Pilot Actor in Viewport (`Ctrl+Shift+P`)](https://dev.epicgames.com/documentation/en-us/unreal-engine/viewport-toolbar-in-unreal-engine)
+> - **Blender 4:** [Lock Camera to View in 3D Viewport](https://docs.blender.org/manual/en/latest/editors/3dview/navigate/navigation.html)
 
 Inspired by Unreal Engine 5.5's **Pilot Actor (`Ctrl+Shift+P`)**, **Camera Pilot Mode** lets you position lights, cameras, spawn points, or props by flying/orbiting through the viewport from the object's own perspective:
 - **Entering Pilot Mode (`TogglePilotTransform` / `Ctrl+Shift+P`):**
@@ -863,6 +1142,10 @@ Inspired by Unreal Engine 5.5's **Pilot Actor (`Ctrl+Shift+P`)**, **Camera Pilot
 
 ## 31. Phase 30: Select By Spatial Proximity (`SelectWithinRadius`) & Select All With Same Asset URL (`SelectAllWithSameUrl`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Unreal Engine 5.5:** [Select All Using Same Static Mesh / Asset](https://dev.epicgames.com/documentation/en-us/unreal-engine/outliner-in-unreal-engine)
+> - **Blender 4:** [Select Linked (`Shift+L` -> Object Data)](https://docs.blender.org/manual/en/latest/editors/outliner/introduction.html)
+
 - **Select All With Same Asset URL (`SelectAllWithSameUrl`):**
   - Uses FreePascal `TypInfo` RTTI (`GetPropInfo(C, 'Url')` / `GetStrProp`) to inspect the published `Url` property of the currently selected component (working across `TCastleScene`, `TCastleDesign`, `TCastleTransformDesign`, `TCastleImageControl`, `TCastleImageTransform`, `TCastleTiledMap`, `TCastleSound`, etc.).
   - Selects every selectable, unlocked component in the design that references the exact same asset `Url`. Available in the Hierarchy context menu (`Select All With Same Asset URL`).
@@ -872,6 +1155,9 @@ Inspired by Unreal Engine 5.5's **Pilot Actor (`Ctrl+Shift+P`)**, **Camera Pilot
 ---
 
 ## 32. Phase 31: Ground-Aware Scatter / Drop-to-Floor Duplication (`ScatterDuplicateSelected` / `Ctrl+Alt+S`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Unreal Engine 5.5:** [Foliage & Ground-Aligned Scatter Placement](https://dev.epicgames.com/documentation/en-us/unreal-engine/transforming-actors-in-unreal-engine)
 
 For foliage, rocks, debris, trees, and natural set-dressing, **Ground-Aware Scatter Duplication** combines uniform-disk sampling, randomized yaw/scale, and raycast floor snapping in a single modal tool:
 - **How It Works (`TDesignFrame.ScatterDuplicateSelected` & `ShowScatterDuplicateDialog`):**
@@ -883,6 +1169,9 @@ For foliage, rocks, debris, trees, and natural set-dressing, **Ground-Aware Scat
 
 ## 33. Phase 32: Look-At / Aim Selected Transforms at Primary or Cursor Target (`LookAtWorldPoint` / `AimSelectedAtPrimary` / `Ctrl+Shift+L`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Track To / Look-At Orientation Alignment](https://docs.blender.org/manual/en/latest/scene_layout/object/editing/transform/align_transform_orientation.html)
+
 Aiming lights, cameras, turrets, or props at a specific target object or 3D surface point is instantaneous with **Aim at Target**:
 - **Multi-Selection Aim at Primary (`TCastleTransformManipulate.AimSelectedAtPrimary`):**
   - When 2 or more `TCastleTransform` objects are selected, rotates all secondary selected transforms (`Selected[1..N-1]`) so their world forward direction (`SetWorldView`) points directly at the primary selected transform (`Selected[0]`), keeping their Up vector orthogonalized around `World.GravityUp` and preserving their existing `Scale`.
@@ -892,6 +1181,9 @@ Aiming lights, cameras, turrets, or props at a specific target object or 3D surf
 ---
 
 ## 34. Phase 33: Bounding-Box Min / Max Face Alignment (`AlignSelectedBounds` / `Ctrl`/`Alt` + `Align X/Y/Z`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Align Objects (Negative Sides / Centers / Positive Sides)](https://docs.blender.org/manual/en/latest/scene_layout/object/editing/transform/align_transform_orientation.html)
 
 While standard `AlignSelected` aligns transform origins, objects of different sizes often need their **outer bounding-box faces** (e.g., bottoms, tops, left/right walls) aligned flush:
 - **World AABB Face Alignment (`TCastleTransformManipulate.AlignSelectedBounds(Axis, UseMaxFace)`):**
@@ -907,6 +1199,15 @@ While standard `AlignSelected` aligns transform origins, objects of different si
 
 ## 35. Phase 34: Interactive 2D UI Layout Alignment, Equal-Gap Distribution & Size Matching (`PanelLayoutUI`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [Designing 2D User Interface & Anchors (`TCastleUserInterface`)](https://castle-engine.io/user_interface)
+> - **Unreal Engine 5.5:** [UMG UI Designer Alignment & Anchors](https://dev.epicgames.com/documentation/en-us/unreal-engine/umg-ui-designer-for-unreal-engine)
+> - **Godot Engine 4:** [2D UI Size and Anchors (`Control`)](https://docs.godotengine.org/en/stable/tutorials/ui/size_and_anchors.html) · [GUI Containers](https://docs.godotengine.org/en/stable/tutorials/ui/gui_containers.html)
+
+| Castle Game Engine 2D UI Designer | Godot 4 2D UI Anchors & Offsets | Godot 4 GUI Layout Containers |
+| :---: | :---: | :---: |
+| ![CGE UI Empty Rect](https://castle-engine.io/images/thumb_const_height_size/ui_empty_rectangle.webp) | ![Godot Anchors](https://docs.godotengine.org/en/stable/_images/anchors.png) | ![Godot Containers](https://docs.godotengine.org/en/stable/_images/godot_containers.png) |
+
 When 2 or more unlocked `TCastleUserInterface` controls are selected, `PanelLayoutUI` automatically appears in the **`Layout`** tab (`PanelLayoutTop`), providing 9 anchor-aware 2D UI layout tools:
 - **6-Way 2D UI Edge & Center Alignment (`AlignSelectedUserInterfaces`):**
   - **`UI Align Left`**, **`UI Center H`**, **`UI Align Right`**, **`UI Align Bottom`**, **`UI Middle V`**, and **`UI Align Top`** align the screen-space `RenderRectWithBorder` edges or centers of all secondary selected UI controls to the primary selected UI control, converting screen pixel deltas via `UI.UIScale` so alignment works seamlessly across any anchor configuration.
@@ -919,6 +1220,10 @@ When 2 or more unlocked `TCastleUserInterface` controls are selected, `PanelLayo
 
 ## 36. Phase 35: Hierarchy Selection Sets (`Ctrl+Shift+0..9` / `Shift+0..9`) & Select By Name / Wildcard Pattern (`SelectByNamePattern`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Unreal Engine 5.5:** [World Outliner Wildcard Search & Actor Selection Sets](https://dev.epicgames.com/documentation/en-us/unreal-engine/outliner-in-unreal-engine)
+> - **Blender 4:** [Select Pattern (`*` and `?` Wildcards) in Outliner & 3D Viewport](https://docs.blender.org/manual/en/latest/editors/outliner/introduction.html)
+
 - **10 Named Selection Set Slots (`SaveSelectionSet` / `RecallSelectionSet`):**
   - Press **`Ctrl+Shift+0..9`** in the Viewport or Hierarchy Tree to save the current multi-selection into Selection Set slot `0..9`.
   - Press **`Shift+0..9`** to restore that saved selection set, or **`Alt+Shift+0..9`** to additively union the saved set with the current selection.
@@ -929,6 +1234,9 @@ When 2 or more unlocked `TCastleUserInterface` controls are selected, `PanelLayo
 ---
 
 ## 37. Phase 36: Match Rotation (`MatchSelectedRotation`) & Match Transform (`MatchSelectedTransform` / `Ctrl+Shift+M`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Copy Rotation / Copy Location / Copy Scale Attributes](https://docs.blender.org/manual/en/latest/scene_layout/object/editing/transform/align_transform_orientation.html)
 
 Aligning orientation, position, and scale of secondary selected `TCastleTransform` objects to the primary selected object (`Selected[0]`) is handled by **`MatchSelectedRotation`** and **`MatchSelectedTransform`**:
 - **World-Space Rotation Matching (`TCastleTransformManipulate.MatchSelectedRotation`):**
@@ -944,6 +1252,10 @@ Aligning orientation, position, and scale of secondary selected `TCastleTransfor
 
 ## 38. Phase 37: Circular / Radial Arrange of Existing Selection (`ArrangeSelectedInCircle` / `Alt+Shift+C`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [`TCastleTransformManipulate.ArrangeSelectedInCircle` API](https://castle-engine.io/apidoc/html/CastleTransformManipulate.TCastleTransformManipulate.html)
+> - **Blender 4:** [To Sphere / Circle Arrangement & Radial Object Offset](https://docs.blender.org/manual/en/latest/modeling/modifiers/generate/array.html)
+
 While **Radial Array Duplicate (`Ctrl+Alt+D`)** clones a single object into a ring of identical copies, level designers frequently have $N$ **distinct** existing objects (e.g., different statues, pillars, spawn points, or waypoint markers) that need to be arranged into a clean circle or arc without duplicating them:
 - **Runtime / Editor API (`TCastleTransformManipulate.ArrangeSelectedInCircle(Radius, TotalAngleDeg, OrientToCenter)`):**
   - Computes the average world position $\mathbf{C}$ of all top-level selected transforms.
@@ -956,9 +1268,19 @@ While **Radial Array Duplicate (`Ctrl+Alt+D`)** clones a single object into a ri
   - **Click `Circle Arrange`** (`ButtonArrangeCircle`) in `PanelLayoutTransform`: Immediately arranges the 2+ selected transforms in a full $360^\circ$ circle using their auto-computed radius and inward orientation.
   - **`Shift` + Click `Circle Arrange`** or press **`Alt+Shift+C`**: Opens the **Arrange Selected Transforms in Circle** dialog (`ShowArrangeInCircleDialog`) to customize **Circle Radius (`0` = auto)**, **Total Arc Angle (deg)**, and **Orient objects toward circle center (+Y yaw)**.
 
+```pascal
+// Pascal API Example (Phase 37 — Arrange 6 distinct hero statues in a 10m circle facing inward):
+Manipulate.SetSelected([Statue1, Statue2, Statue3, Statue4, Statue5, Statue6]);
+Manipulate.ArrangeSelectedInCircle(10.0 {Radius}, 360.0 {Full circle}, true {OrientToCenter});
+```
+
 ---
 
 ## 39. Phase 38: Select Overlapping / Intersecting Transforms (`SelectOverlappingTransforms` / `Ctrl+Shift+O`) & Select By Size Range (`SelectBySizeRange`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [3D Bounding Boxes (`TBox3D.Collision`)](https://castle-engine.io/viewport_and_scenes)
+> - **Unreal Engine 5.5:** [Level Map Check for Overlapping Actors](https://dev.epicgames.com/documentation/en-us/unreal-engine/outliner-in-unreal-engine)
 
 Auditing scenes for accidental overlapping duplicates, colliding geometry, or tiny/huge outlier props is streamlined by two spatial query tools:
 - **Select Overlapping / Intersecting Transforms (`SelectOverlappingTransforms` / `Ctrl+Shift+O`):**
@@ -973,6 +1295,10 @@ Auditing scenes for accidental overlapping duplicates, colliding geometry, or ti
 
 ## 40. Phase 39: World/Local-Aware 3D Transform & 2D UI Layout Attribute Copy / Paste (`CopyTransform` / `PasteTransform`, `Ctrl+Alt+C` / `Ctrl+Alt+V`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Unreal Engine 5.5:** [Copy / Paste Transform in Details Panel & UMG Slot Layout Copy](https://dev.epicgames.com/documentation/en-us/unreal-engine/transforming-actors-in-unreal-engine)
+> - **Godot Engine 4:** [2D Control Size & Anchor Presets](https://docs.godotengine.org/en/stable/tutorials/ui/size_and_anchors.html)
+
 While `Ctrl+C` / `Ctrl+V` duplicates an entire component subtree, designers frequently want to copy just the **spatial placement or sizing attributes** from one 3D transform or 2D UI control and paste them onto one or more existing targets across different hierarchy levels:
 - **3D Transform Attribute Copy / Paste (`CopyTransform` & `PasteTransform`):**
   - Pressing **`Ctrl+Alt+C`** (or clicking **`Copy Xform`** / choosing **`Copy Transform / UI Layout (Ctrl+Alt+C)`**) captures the active `TCastleTransform`'s local `Translation`, `Rotation`, `Scale`, and world view `(Pos, Dir, Up)`.
@@ -985,6 +1311,10 @@ While `Ctrl+C` / `Ctrl+V` duplicates an entire component subtree, designers freq
 ---
 
 ## 41. Phase 40: Arrange Existing Selection in 2D / 3D Grid (`ArrangeSelectedInGrid`, `ButtonArrangeGrid`, `Alt+Shift+G`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Godot Engine 4:** [GridMap & GridContainer Layouts](https://docs.godotengine.org/en/stable/tutorials/ui/gui_containers.html)
+> - **Blender 4:** [Grid Distribution of Selected Objects](https://docs.blender.org/manual/en/latest/modeling/modifiers/generate/array.html)
 
 While **Grid Duplicate** (`Ctrl+Alt+G`) clones a template into a new grid, level designers frequently have $N$ **already-placed, distinct** transforms (different crates, statues, foliage variations, or furniture pieces) that they want to neatly organize into a structured 2D or 3D grid without creating duplicates:
 - **Core Engine API (`TCastleTransformManipulate.ArrangeSelectedInGrid`):**
@@ -1000,6 +1330,9 @@ While **Grid Duplicate** (`Ctrl+Alt+G`) clones a template into a new grid, level
 
 ## 42. Phase 41: Push / Pull (Expand / Contract) Selected Positions From Pivot (`ScaleSelectedPositionsFromPivot`, `Alt+Shift+=` / `Alt+Shift+-`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Push / Pull & Affect Only Locations Transform Mode](https://docs.blender.org/manual/en/latest/editors/3dview/controls/snapping.html)
+
 When dressing a room, clearing a path, or adjusting the spacing of a cluster of lights, pillars, or props, designers often want to **push objects outward** or **pull objects inward** relative to their shared center (or the primary selected object) without changing the `Scale` or `Rotation` of the individual meshes:
 - **Core Engine API (`TCastleTransformManipulate.ScaleSelectedPositionsFromPivot`):**
   - Respects `PivotMode`: uses `Targets[0]`'s world origin when `PivotMode = pmPrimarySelected`, or the arithmetic mean of all top-level selected origins when `PivotMode = pmSelectionCenter`.
@@ -1013,6 +1346,9 @@ When dressing a room, clearing a path, or adjusting the spacing of a cluster of 
 ---
 
 ## 43. Phase 42: Granular Transform Attribute Reset (`ResetSelectedTransform`, `Alt+G` / `Alt+R` / `Alt+S` & `ButtonResetTransform`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Clear Location (`Alt+G`), Clear Rotation (`Alt+R`) & Clear Scale (`Alt+S`)](https://docs.blender.org/manual/en/latest/editors/3dview/display/gizmo.html)
 
 Inspired by Blender's muscle-memory clear-transform shortcuts (`Alt+G`, `Alt+R`, `Alt+S`), designers can immediately zero out specific transform channels across all selected `TCastleTransform` objects (or reset 2D UI anchor deltas):
 - **Core Engine API (`TCastleTransformManipulate.ResetSelectedTransform`):**
@@ -1030,6 +1366,9 @@ Inspired by Blender's muscle-memory clear-transform shortcuts (`Alt+G`, `Alt+R`,
 
 ## 44. Phase 43: Select Transforms At Same Elevation (`SelectAtSameElevation` / `Ctrl+Shift+E`) & 2D UI Position Swap / 2D UI Grid Arrange (`ButtonUISwapPos` & `ButtonUIGridArrange`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Godot Engine 4:** [GUI GridContainer & BoxContainer](https://docs.godotengine.org/en/stable/tutorials/ui/gui_containers.html)
+
 - **Select Transforms At Same Y Elevation (`SelectAtSameElevation` / `Ctrl+Shift+E`):**
   - In multi-story buildings, dungeons, or platformer levels, pressing **`Ctrl+Shift+E`** (or choosing **`Select At Same Y Elevation... (Ctrl+Shift+E)`** in the Hierarchy context menu) opens a tolerance dialog (`ShowSelectAtSameElevationDialog`, default $\pm 0.25$ world units around the active transform's world Y elevation).
   - Selects all visible, unlocked `TCastleTransform` instances in the same world whose world-space origin Y lies within $[Y_0 - \text{Tol},\; Y_0 + \text{Tol}]$, making it effortless to select an entire floor's props, tiles, or lights at once.
@@ -1041,6 +1380,9 @@ Inspired by Blender's muscle-memory clear-transform shortcuts (`Alt+G`, `Alt+R`,
 ---
 
 ## 45. Phase 44: Arrange Existing Selection Along 3D Line Segment (`ArrangeSelectedAlongLine`, `ArrangeSelectedBetweenEndpoints`, `Alt+Shift+L`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Linear Array & Distribute Along Line](https://docs.blender.org/manual/en/latest/modeling/modifiers/generate/array.html)
 
 When placing fence posts, waypoints, bridge planks, streetlights, or columns between two endpoints in 3D space, designers can arrange $N$ already-selected transforms along a straight 3D line segment:
 - **Core Engine API (`TCastleTransformManipulate.ArrangeSelectedAlongLine` & `ArrangeSelectedBetweenEndpoints`):**
@@ -1055,6 +1397,10 @@ When placing fence posts, waypoints, bridge planks, streetlights, or columns bet
 
 ## 46. Phase 45: Automatic Bounding-Box Overlap Separation / Depenetrate (`SeparateOverlappingSelected`, `ButtonSeparateOverlaps`, `Alt+Shift+X`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [Physics Collision Detection & Depenetration](https://castle-engine.io/physics)
+> - **Godot Engine 4:** [Physics Separation & Collision Shapes](https://docs.godotengine.org/en/stable/tutorials/physics/physics_introduction.html)
+
 After scatter-duplicating foliage/rocks or kitbashing props, bounding boxes often accidentally intersect. Designers can automatically push apart overlapping objects without disturbing non-overlapping ones:
 - **Core Engine API (`TCastleTransformManipulate.SeparateOverlappingSelected`):**
   - `SeparateOverlappingSelected(MinPadding, HorizontalOnly, MaxIterations)` iteratively inspects all pairs of top-level selected transforms and computes their `WorldBoundingBox` overlap along X, Y, and Z (including `MinPadding` clearance).
@@ -1067,6 +1413,9 @@ After scatter-duplicating foliage/rocks or kitbashing props, bounding boxes ofte
 
 ## 47. Phase 46: Progressive Scale Taper & Cumulative Rotation Step (`ApplyProgressiveTransformSelected`, `ButtonProgressiveXform`, `Alt+Shift+T`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Simple Deform Modifier (Taper & Twist)](https://docs.blender.org/manual/en/latest/modeling/modifiers/deform/simple_deform.html)
+
 Creating spiral staircases, tapering foliage rows, perspective colonnades, or progressively scaled/rotated prop chains across an existing selection is handled by `ApplyProgressiveTransformSelected`:
 - **Core Engine API (`TCastleTransformManipulate.ApplyProgressiveTransformSelected`):**
   - Interpolates `Scale` linearly from `StartScale` (`Selected[0]`) to `EndScale` (`Selected[N-1]`) at $t = i / (N - 1)$ when `ApplyScaleGradient = true`.
@@ -1078,6 +1427,10 @@ Creating spiral staircases, tapering foliage rows, perspective colonnades, or pr
 
 ## 48. Phase 47: Select Transforms Visible In Camera Frustum (`SelectTransformsInCameraFrustum` / `Ctrl+Shift+F`) & 2D UI Edge-to-Edge Stack (`ButtonUIStackH` & `ButtonUIStackV`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [Viewport Frustum Culling (`TCastleCamera.Frustum`)](https://castle-engine.io/viewport_and_scenes)
+> - **Godot Engine 4:** [`HBoxContainer` & `VBoxContainer` Edge-to-Edge Stacking](https://docs.godotengine.org/en/stable/tutorials/ui/gui_containers.html)
+
 - **Select Transforms Visible In Camera View (`SelectTransformsInCameraFrustum` / `Ctrl+Shift+F`):**
   - Pressing **`Ctrl+Shift+F`** in the Viewport or Hierarchy Tree (or choosing **`Select Visible In Camera View (Ctrl+Shift+F)`** in the Hierarchy context menu) tests all visible, unlocked `TCastleTransform` instances in the active viewport against `CurrentViewport.Camera.Frustum` (`Box3DCollisionPossibleSimple` for non-empty bounding boxes, `SphereCollisionPossibleSimple` for point transforms) and selects every transform currently in the camera's view frustum.
 - **2D UI Edge-to-Edge Horizontal & Vertical Stack (`StackSelectedUserInterfaces` / `ButtonUIStackH` & `ButtonUIStackV`):**
@@ -1086,6 +1439,10 @@ Creating spiral staircases, tapering foliage rows, perspective colonnades, or pr
 ---
 
 ## 49. Phase 48: 3D Polyline / Multi-Waypoint Path Arrangement (`ArrangeSelectedAlongWaypoints`, `ButtonArrangePath`, `Alt+Shift+P`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Godot Engine 4:** [`Path3D` & `PathFollow3D` Curve Placement](https://docs.godotengine.org/en/stable/tutorials/3d/introduction_to_3d.html)
+> - **Blender 4:** [Array Fit Curve & Curve Deform](https://docs.blender.org/manual/en/latest/modeling/modifiers/generate/array.html)
 
 When placing fence posts around a corner, torches along an L-shaped corridor, or props along a multi-segment 3D path, designers can arrange 2+ selected transforms at equal arc-length intervals along a 3D polyline:
 - **Core Engine API (`TCastleTransformManipulate.ArrangeSelectedAlongWaypoints`):**
@@ -1099,6 +1456,9 @@ When placing fence posts around a corner, torches along an L-shaped corridor, or
 
 ## 50. Phase 49: 3D Spiral / Helix Arrangement for Existing Selection (`ArrangeSelectedInHelix`, `ButtonArrangeHelix`, `Alt+Shift+H`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Screw / Helix Modifier & Spiral Curve](https://docs.blender.org/manual/en/latest/modeling/modifiers/generate/array.html)
+
 Building spiral staircases, helical pillars, tornado/vortex prop formations, or ascending/descending ramps from an existing selection of transforms is handled by `ArrangeSelectedInHelix`:
 - **Core Engine API (`TCastleTransformManipulate.ArrangeSelectedInHelix`):**
   - `ArrangeSelectedInHelix(StartRadius, EndRadius, HeightSpan, Turns, OrientToCenter)` distributes 2+ top-level selected transforms at $t = i / (N - 1)$ around the active selection pivot with radius $R(t) = \operatorname{Lerp}(t, R_{\text{start}}, R_{\text{end}})$, angle $\theta(t) = 2\pi \cdot \text{Turns} \cdot t$, and vertical elevation $Y(t) = Y_{\text{base}} + t \cdot \text{HeightSpan}$.
@@ -1109,6 +1469,9 @@ Building spiral staircases, helical pillars, tornado/vortex prop formations, or 
 ---
 
 ## 51. Phase 50: Center / Snap Parent Transform Origin to Children Bounds (`CenterSelectedOriginOnChildren`, `ButtonCenterPivotOnChildren`, `Alt+Shift+O`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Set Origin -> Origin to Geometry / Bottom Bounds (`Alt+Shift+O`)](https://docs.blender.org/manual/en/latest/editors/3dview/controls/snapping.html)
 
 After moving child meshes or props inside a parent `TCastleTransform` group, the parent's origin (`Translation`) often ends up far away from its children, making rotation gizmos and snapping awkward:
 - **Core Engine API (`TCastleTransformManipulate.CenterSelectedOriginOnChildren`):**
@@ -1121,6 +1484,9 @@ After moving child meshes or props inside a parent `TCastleTransform` group, the
 
 ## 52. Phase 51: Select Transforms By World Axis Coordinate Slice (`SelectByAxisRange` / `Ctrl+Shift+B`) & 2D UI Center In Parent (`ButtonUICenterInParent`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Godot Engine 4:** [2D Control Anchor Preset (`Center`)](https://docs.godotengine.org/en/stable/tutorials/ui/size_and_anchors.html)
+
 - **Select Transforms By World Axis Coordinate Slice (`SelectByAxisRange` / `Ctrl+Shift+B`):**
   - Pressing **`Ctrl+Shift+B`** in the Viewport or Hierarchy Tree (or choosing **`Select By Axis Coordinate Slice... (Ctrl+Shift+B)`** in the Hierarchy context menu) opens `ShowSelectByAxisRangeDialog`, allowing designers to choose an axis (`X Axis`, `Y Axis (Elevation)`, or `Z Axis`) and a `[MinCoord, MaxCoord]` world-coordinate interval to select an entire vertical floor slice or horizontal corridor section at once.
 - **2D UI Center In Parent Container (`CenterSelectedUserInterfacesInParent` / `ButtonUICenterInParent`):**
@@ -1129,6 +1495,9 @@ After moving child meshes or props inside a parent `TCastleTransform` group, the
 ---
 
 ## 53. Phase 52: 3D Parabolic / Quadratic Bezier Arch Arrangement (`ArrangeSelectedInBezierArch`, `ButtonArrangeArch`, `Alt+Shift+A`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Bezier Curve Arch & Simple Deform Bend](https://docs.blender.org/manual/en/latest/modeling/modifiers/deform/simple_deform.html)
 
 When constructing arched bridges, doorways, stone gateways, or hanging cable/lantern spans between two anchor points, designers can arrange 2+ selected transforms along a smooth 3D quadratic Bezier curve or parabolic arch:
 - **Core Engine API (`TCastleTransformManipulate.ArrangeSelectedInBezierArch` & `ArrangeSelectedInParabolicArchBetweenEndpoints`):**
@@ -1142,6 +1511,9 @@ When constructing arched bridges, doorways, stone gateways, or hanging cable/lan
 
 ## 54. Phase 53: 3D Spherical / Dome Fibonacci Lattice Arrangement (`ArrangeSelectedOnSphere`, `ButtonArrangeSphere`, `Alt+Shift+S`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Cast Modifier (Sphere Projection)](https://docs.blender.org/manual/en/latest/modeling/modifiers/deform/cast.html)
+
 Distributing lights, emitters, shield nodes, or decorative props evenly over a 3D sphere, hemisphere dome, or latitude band without polar bunching is provided by `ArrangeSelectedOnSphere`:
 - **Core Engine API (`TCastleTransformManipulate.ArrangeSelectedOnSphere`):**
   - `ArrangeSelectedOnSphere(Radius, MinElevationDeg, MaxElevationDeg, OrientOutward)` uses the Fibonacci golden-angle spiral lattice ($\Delta\theta = \pi(3 - \sqrt{5}) \approx 137.508^\circ$) with uniform $\sin(\text{elevation})$ interpolation between `MinElevationDeg` ($0^\circ$ for a dome, $-90^\circ$ for a full sphere) and `MaxElevationDeg` ($+90^\circ$ for the top pole) around the active selection pivot.
@@ -1152,6 +1524,9 @@ Distributing lights, emitters, shield nodes, or decorative props evenly over a 3
 ---
 
 ## 55. Phase 54: Cohesive Group Scaling Around Pivot (`ScaleSelectedGroupAroundPivot`, `ButtonScaleGroupUp`, `ButtonScaleGroupDown`, `Alt+Shift+]` & `Alt+Shift+[`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Unity:** [Scale Around Selection Center vs. Individual Pivot](https://docs.unity3d.com/Manual/PositioningGameObjects.html)
 
 Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expands or contracts only the spacing between selected objects, `ScaleSelectedGroupAroundPivot` scales an entire multi-selection as a **cohesive 3D assembly** around the active pivot (`SelectionWorkingCenter` or `Selected[0]`):
 - **Core Engine API (`TCastleTransformManipulate.ScaleSelectedGroupAroundPivot`):**
@@ -1164,6 +1539,9 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 
 ## 56. Phase 55: Select Empty / Unreferenced Transforms (`SelectEmptyTransforms` / `Ctrl+Shift+U`) & 2D UI Fit Parent Container (`ButtonUIFitParent`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Godot Engine 4:** [2D Control Anchor Preset (`Full Rect`)](https://docs.godotengine.org/en/stable/tutorials/ui/size_and_anchors.html)
+
 - **Select Empty / Unreferenced Transforms (`SelectEmptyTransforms` / `Ctrl+Shift+U`):**
   - Pressing **`Ctrl+Shift+U`** in the Viewport or Hierarchy Tree (or choosing **`Select Empty / Unreferenced Transforms (Ctrl+Shift+U)`** in the Hierarchy context menu) audits the scene and selects all visible, unlocked `TCastleTransform` nodes that have zero child transforms, zero behaviors, and zero non-visual components, and are either plain `TCastleTransform` group placeholders or `TCastleScene` / `TCastleTransformDesign` components with an empty `Url`.
 - **2D UI Fit To Parent Container (`FitSelectedUserInterfacesToParent` / `ButtonUIFitParent`):**
@@ -1172,6 +1550,14 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 ---
 
 ## 57. Phases 56–59: 3D Sine-Wave Arrangement (`Alt+Shift+W`), 3D Elliptical Ring Arrangement (`Alt+Shift+E`), Reverse Selection Order (`Alt+Shift+R`), Non-Uniform Scale Audit (`Ctrl+Shift+N`) & 2D UI Equal-Span Parent Split (`UI Split Row` / `UI Split Col`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Wave Modifier (Linear Sine Wave)](https://docs.blender.org/manual/en/latest/modeling/modifiers/deform/wave.html)
+> - **Godot Engine 4:** [Container Sizing Options (`Expand` / Equal-Span Split)](https://docs.godotengine.org/en/stable/tutorials/ui/gui_containers.html)
+
+| Blender Linear Sine Wave Deformation | Godot 4 Container Equal-Span Sizing Options |
+| :---: | :---: |
+| ![Blender Linear Wave](https://docs.blender.org/manual/en/latest/_images/modeling_modifiers_deform_wave_example-linear.jpg) | ![Godot Container Sizing](https://docs.godotengine.org/en/stable/_images/container_sizing_options.webp) |
 
 - **3D Sine-Wave / Undulating Ribbon Arrangement (`ArrangeSelectedInSineWave` / `Alt+Shift+W`):**
   - `TCastleTransformManipulate.ArrangeSelectedInSineWave(StartWorldPos, EndWorldPos, Amplitude, Cycles, WaveAxis, OrientAlongWave)` and `ArrangeSelectedInSineWaveBetweenEndpoints` place 2+ top-level selected transforms along a 3D line between `StartWorldPos` and `EndWorldPos` with sinusoidal displacement $A \sin(2\pi \cdot \text{Cycles} \cdot t)$ along `WaveAxis` (`X`, `Y`, or `Z`) and optional forward orientation along the instantaneous wave tangent $P'(t)$.
@@ -1191,6 +1577,9 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 
 ## 58. Phases 60–63: 3D Phyllotaxis Disk Arrangement (`Alt+Shift+D`), 3D Staircase Arrangement (`Alt+Shift+Y`), Radial XZ Push-Pull (`Alt+Shift+.` / `Alt+Shift+,`), Select Rotated Transforms (`Ctrl+Shift+T`) & 2D UI Margin Inset In Parent (`UI Inset Parent`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Godot Engine 4:** [`MarginContainer` Uniform Inset Padding](https://docs.godotengine.org/en/stable/tutorials/ui/gui_containers.html)
+
 - **3D Phyllotaxis / Golden-Angle Sunflower Disk Arrangement (`ArrangeSelectedInPhyllotaxisDisk` / `Alt+Shift+D`):**
   - `TCastleTransformManipulate.ArrangeSelectedInPhyllotaxisDisk(OuterRadius, OrientMode)` distributes 2+ top-level selected transforms across a horizontal XZ disk of radius `OuterRadius` centered at the active selection pivot using Vogel's golden-angle spiral ($r_i = R \sqrt{i / (N - 1)}, \; \theta_i = i \cdot \pi(3 - \sqrt{5})$) with `OrientMode` (`0` = keep rotation, `1` = orient inward toward center, `2` = orient outward from center).
   - Accessible via **`Disk Arrange...`** (`ButtonArrangeDisk` in `PanelLayoutTransform`) or **`Alt+Shift+D`** (`ShowArrangeInDiskDialog`).
@@ -1208,6 +1597,9 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 ---
 
 ## 59. Phases 64–67: 3D Torus / Coil Arrangement (`Alt+Shift+U`), 3D Zigzag Corridor Arrangement (`Alt+Shift+Z`), Equalize Bounding-Box Sizes (`Alt+Shift+N`), Select Transforms With Behaviors (`Ctrl+Shift+K`) & 2D UI Make Square (`UI Make Square`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [Behaviors & Physics (`TCastleBehavior`, `TCastleRigidBody`)](https://castle-engine.io/physics)
 
 - **3D Torus / Helical Torus Coil Arrangement (`ArrangeSelectedOnTorus` / `Alt+Shift+U`):**
   - `TCastleTransformManipulate.ArrangeSelectedOnTorus(MajorRadius, MinorRadius, MinorTurns, OrientMode)` distributes 2+ top-level selected transforms around a 3D torus or helical torus coil centered at the active selection pivot ($x = (R + r\cos\phi)\cos\theta, \; y = r\sin\phi, \; z = (R + r\cos\phi)\sin\theta$ where $\theta_i = 2\pi i / N$ and $\phi_i = 2\pi \cdot \text{MinorTurns} \cdot i / N$) with `OrientMode` (`0` = keep rotation, `1` = orient outward along torus tube normal, `2` = orient along helical torus tangent).
@@ -1227,6 +1619,9 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 
 ## 60. Phases 68–71: 3D Figure-8 / Lissajous Arrangement (`Alt+Shift+F`), 3D Catenary / Hanging Cable Arrangement (`Alt+Shift+B`), Orthogonal Line Projection (`Alt+Shift+I`), Select All Lights & Cameras (`Ctrl+Shift+J`) & 2D UI Golden Ratio (`UI Golden Ratio`)
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Godot Engine 4:** [3D Lights and Shadows (`DirectionalLight3D`, `OmniLight3D`, `SpotLight3D`)](https://docs.godotengine.org/en/stable/tutorials/3d/lights_and_shadows.html)
+
 - **3D Figure-8 / Lemniscate & Lissajous Curve Arrangement (`ArrangeSelectedInLissajous` / `Alt+Shift+F`):**
   - `TCastleTransformManipulate.ArrangeSelectedInLissajous(RadiusX, RadiusZ, FreqX, FreqZ, VerticalAmplitude, OrientMode)` distributes 2+ top-level selected transforms along a 3D Lissajous / figure-8 / lemniscate curve around the active selection pivot ($x(\theta) = C_x + R_x \sin(\omega_x \theta), \; y(\theta) = C_y + H_y \cos(\omega_x \theta), \; z(\theta) = C_z + R_z \sin(\omega_z \theta)$ for $\theta_i = 2\pi i / N$) with `OrientMode` (`0` = keep rotation, `1` = orient horizontally inward toward center, `2` = orient forward along 3D curve tangent).
   - Accessible via **`Figure-8 / Lissajous`** (`ButtonArrangeLissajous` in `PanelLayoutTransform`: **Click** arranges in a figure-8 loop; **`Ctrl`-click** also orients along the curve tangent; **`Shift`-click** or **`Alt+Shift+F`** opens `ShowArrangeInLissajousDialog`).
@@ -1244,6 +1639,14 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 ---
 
 ## 61. Phases 96–103: Helical Twist & Linear Taper (`Ctrl+Alt+T`), Spherical Spiral (`Ctrl+Alt+W`), Superellipse / Astroid Star (`Ctrl+Alt+E`), Select Group Transforms (`Ctrl+Alt+N`), 2D UI Tile Mosaic (`UI Tile Mosaic`), 3D Circular Arc Bend (`Ctrl+Alt+A`), Viviani Curve (`Ctrl+Alt+Q`), Spirograph Roulette (`Ctrl+Alt+R`), Select Nested Design Instances (`Ctrl+Alt+I`) & 2D UI Border Ring (`UI Border Ring`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Simple Deform Modifier (Twist, Bend, Taper & Stretch)](https://docs.blender.org/manual/en/latest/modeling/modifiers/deform/simple_deform.html)
+> - **Castle Game Engine:** [Reusing Designs (`TCastleDesign`, `TCastleTransformDesign`)](https://castle-engine.io/manual_editor.php)
+
+| Blender Simple Deform Modes (Twist, Bend, Taper, Stretch) | Blender Helical Twist Mode | Blender Circular Arc Bend Mode |
+| :---: | :---: | :---: |
+| ![Blender Simple Deform Intro](https://docs.blender.org/manual/en/latest/_images/modeling_modifiers_deform_simple-deform_intro.png) | ![Blender Twist](https://docs.blender.org/manual/en/latest/_images/modeling_modifiers_deform_simple-deform_twist.png) | ![Blender Bend](https://docs.blender.org/manual/en/latest/_images/modeling_modifiers_deform_simple-deform_bend.png) |
 
 - **3D Helical Twist & Linear Taper Deformation (`TwistSelected` / `TaperSelected` / `Ctrl+Alt+T`):**
   - `TCastleTransformManipulate.TwistSelected(TwistAxis, TotalAngleRad, RotateOrientations)` helically rotates 2+ selected transforms around `TwistAxis` across $[-\text{TotalAngleRad}/2, +\text{TotalAngleRad}/2]$, and `TaperSelected(TaperAxis, TopScaleFactor, ScaleObjects)` linearly tapers cross-sectional offsets and optional local `Scale` along `TaperAxis`.
@@ -1267,9 +1670,23 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
   - Pressing **`Ctrl+Alt+I`** or choosing **`Select Nested Design / Prefab Instances (Ctrl+Alt+I)`** (`MenuTreeViewItemSelectDesignInstances`) selects all visible, unlocked `TCastleTransformDesign` and `TCastleDesign` instances across the hierarchy (`Shift`-click menu item for 3D `TCastleTransformDesign` instances only).
   - Clicking **`UI Border Ring`** (`ButtonUIBorderRing` in `PanelLayoutUI`) arranges 2+ selected `TCastleUserInterface` controls evenly clockwise around the inner rectangular perimeter border of their parent container (**Click**: $16\text{ px}$ margin; **`Shift`-click**: $0\text{ px}$ flush border; **`Ctrl`-click**: $32\text{ px}$ inset margin).
 
+```pascal
+// Pascal API Example (Phases 96–103 — Twist a vertical tower of blocks by 180 deg, then bend into a 90 deg arch):
+Manipulate.SetSelected([Block1, Block2, Block3, Block4, Block5, Block6]);
+Manipulate.TwistSelected(1 {Y axis}, Pi {180 deg}, true {RotateOrientations});
+Manipulate.BendSelected(1 {Spine Y}, 0 {Bend toward +X}, Pi / 2 {90 deg}, true);
+```
+
 ---
 
 ## 62. Phases 104–119: Spherify / Bulge (`Ctrl+Alt+X`), Möbius Strip (`Ctrl+Alt+Y`), Heart / Cardioid (`Ctrl+Alt+Z`), Select Primitive Shapes (`Ctrl+Alt+J`), 2D UI Pyramid (`UI Pyramid`), 3D Radial Ripple Wave (`Ctrl+Alt+;`), Lemniscate of Bernoulli (`Ctrl+Alt+'`), Toroidal Solenoid Coil (`Ctrl+Alt+[`), Select 3D Scene / Mesh Instances (`Ctrl+Alt+]`), 2D UI Diamond Ring (`UI Diamond`), Volume Squash & Stretch (`Ctrl+Alt+,`), Butterfly Curve (`Ctrl+Alt+.`), Clélie Spherical Rosette (`Ctrl+Alt+/`), Select 2D UI Controls (`Ctrl+Alt+\`), 2D UI Cross (`UI Cross / +`), 3D Swirl Vortex (`Ctrl+Alt+~`), 3D Trefoil / Figure-Eight Knot (`Ctrl+Alt+-`), Geodesic Dome (`Ctrl+Alt+=`), Select 2D UI Containers (`Ctrl+Alt+0`) & 2D UI Zigzag (`UI Zigzag`)
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Blender 4:** [Cast Modifier (Sphere / Cylinder Projection)](https://docs.blender.org/manual/en/latest/modeling/modifiers/deform/cast.html) · [Wave Modifier (Circular Concentric Ripple & Normals)](https://docs.blender.org/manual/en/latest/modeling/modifiers/deform/wave.html)
+
+| Blender Cast / Spherify Deformation | Blender Circular Ripple Wave Deformation | Blender Wave Surface Normal Tilt |
+| :---: | :---: | :---: |
+| ![Blender Cast Spherify](https://docs.blender.org/manual/en/latest/_images/modeling_modifiers_deform_cast_example.jpg) | ![Blender Circular Wave](https://docs.blender.org/manual/en/latest/_images/modeling_modifiers_deform_wave_example-circular.jpg) | ![Blender Wave Normals](https://docs.blender.org/manual/en/latest/_images/modeling_modifiers_deform_wave_example-normals.jpg) |
 
 - **3D Spherical Spherify / Bulge / Pinch Deformation (`SpherifySelected` / `Ctrl+Alt+X`):**
   - `TCastleTransformManipulate.SpherifySelected(TargetRadius, StrengthFactor, OrientRadially)` blends 2+ top-level selected transforms toward (`StrengthFactor > 0`) or away from (`StrengthFactor < 0`) a bounding sphere of radius `TargetRadius` around the active selection pivot, optionally orienting world $+Y$ Up radially outward (`ButtonSpherifySelection` or **`Ctrl+Alt+X`**).
@@ -1321,6 +1738,15 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 
 ## 63. Phases 120–174: Differential Geometry Minimal Surfaces, Classical Parametric Curves, Spatial Deformers, 2D UI Splitters/Docking & Scene Audit Filters
 
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [`TCastleTransformManipulate` Parametric & Deformation API](https://castle-engine.io/apidoc/html/CastleTransformManipulate.TCastleTransformManipulate.html) · [2D User Interface Anchors & Containers](https://castle-engine.io/user_interface)
+> - **Blender 4:** [Cast Modifier (Cylinder / Cuboid)](https://docs.blender.org/manual/en/latest/modeling/modifiers/deform/cast.html) · [Wave Modifier](https://docs.blender.org/manual/en/latest/modeling/modifiers/deform/wave.html)
+> - **Godot Engine 4:** [`SplitContainer`, `GridContainer` & `Anchor` Presets](https://docs.godotengine.org/en/stable/tutorials/ui/gui_containers.html)
+
+| Blender Cast Modifier Panel | Godot 4 Animated Container Layout | Godot 4 Anchor Offset Controls |
+| :---: | :---: | :---: |
+| ![Blender Cast Panel](https://docs.blender.org/manual/en/latest/_images/modeling_modifiers_deform_cast_panel.png) | ![Godot Container Example](https://docs.godotengine.org/en/stable/_images/container_example.gif) | ![Godot Offset End](https://docs.godotengine.org/en/stable/_images/offset_end.webp) |
+
 - **3D Spatial & Minimal-Surface Deformers (`CastleTransformManipulate`):**
   - **Cylindrify / 3D Capsule Projection (`CylindrifySelected`):** Projects 2+ top-level selected transforms onto a vertical cylinder or hemispherical-capped 3D capsule of radius `TargetRadius` around the selection pivot with blend factor `StrengthFactor` and outward radial/hemispherical normal alignment.
   - **Barrel Bulge & Pincushion Waist (`BarrelPincushionSelected`):** Applies a quadratic axial profile $s(u) = 1 + k(1 - u^2)$ (`BulgeStrength > 0` barrel, `< 0` pincushion hourglass) along `Axis` with optional transverse scale modulation.
@@ -1338,9 +1764,28 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 - **Hierarchy Scene Audit & Component Selection Filters (`MenuTreeView` in `framedesign.pas`):**
   - Added specialized 1-click selection filters for **3D Sound Sources**, **3D Terrains & Water Volumes**, **3D Viewport Navigation & Third-Person Cameras**, **3D Physics Joints**, **3D Text & Billboards**, **Non-Uniformly / Negatively Scaled 3D Transforms**, **Shadow-Casting / Non-Shadow 3D Transforms**, **Empty / Leaf 3D Transforms**, **Missing / Unresolved Asset URLs**, **Duplicate-Named Components**, and **Out-of-Bounds / Far-From-Origin 3D Transforms**.
 
+```pascal
+// Pascal API Example (Phases 120–174 — Deform a planar grid of tiles along a Schoen Gyroid minimal surface,
+// or arrange props across Alan Barr's 3D Superellipsoid):
+Manipulate.SetSelected(FloorTiles);
+Manipulate.GyroidDeformSelected(8.0 {Wavelength}, 2.5 {Amplitude}, false {Gyroid}, true {TiltNormals});
+
+Manipulate.SetSelected(ShieldNodes);
+Manipulate.ArrangeSelectedOnSuperellipsoid(Vector3(10, 6, 8), 0.5, 0.5, 1.0, 1 {Outward Normal});
+```
+
 ---
 
 ## 64. Phases 175–210: Batch Asset & Prefab Utilities, 3D Level/Lighting/Physics/Terrain Rigs & 2D HUD/Dialog/Inventory Builders
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [3D Text & Fonts (`TCastleText`, `TCastleLabel`)](https://castle-engine.io/text) · [Physics Colliders & Rigid Bodies](https://castle-engine.io/physics) · [Viewport, Background Sky & Fog](https://castle-engine.io/viewport_and_scenes)
+> - **Unreal Engine 5.5:** [Environment Light Mixer, Actor Merging / Prefabs & UMG HUD Widgets](https://dev.epicgames.com/documentation/en-us/unreal-engine/umg-ui-designer-for-unreal-engine)
+> - **Godot Engine 4:** [3D Lights and Shadows](https://docs.godotengine.org/en/stable/tutorials/3d/lights_and_shadows.html)
+
+| Castle Game Engine 3D Text & Billboards | Godot 4 3D Shadow & Lighting Rig | Castle Game Engine FPS Game & HUD |
+| :---: | :---: | :---: |
+| ![CGE 3D Text](https://castle-engine.io/images/thumb_const_height_size/transform_text.webp) | ![Godot Shadows](https://docs.godotengine.org/en/stable/_images/lights_and_shadows_blur.webp) | ![CGE FPS Game](https://castle-engine.io/images/thumb_const_height_size/fps_game_2.webp) |
 
 - **Batch Asset, Prefab & Hierarchy Utilities (`framedesign.pas`):**
   - **Batch Rename Selected Components (`ShowBatchRenameDialog` / `F2`):** Renames multiple selected components with `Prefix`, `BaseName`, `Suffix`, `StartIndex`, `ZeroPadding`, and live regex/substring `Find`/`Replace`.
@@ -1357,9 +1802,26 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 - **2D UI HUD, Dialog, Inventory & Minimap Builders (`framedesign.pas`):**
   - **Quick 2D HUD Bar (`ShowQuickHudGeneratorDialog`), Modal Dialog / Pause Menu (`ShowQuickDialogGenerator`), RPG Inventory Slot Grid (`ShowQuickInventoryGridDialog`), 2D Minimap Viewport Overlay (`ShowQuickMinimapDialog`), Radial Pie Menu Wheel (`ShowQuickRadialMenuDialog`), & Cooldown Skill Hotbar (`ShowQuickSkillHotbarDialog`).**
 
+```text
+Example Editor Workflow (Phases 175–210 — 1-Minute Playable Level Setup):
+1. Right-click Viewport1 -> "3D Level, Scene & Physics Tools" -> "Quick 3-Point Studio Lighting Rig..." -> Shift-click for Warm Sunset rig.
+2. Right-click Viewport1 -> "3D Level, Scene & Physics Tools" -> "Quick Sky, Fog & Atmosphere Rig..." -> Select "Alpine Day Sky + Distance Fog".
+3. Multi-select 20 imported dungeon props -> "Auto-Fit Physics Colliders & RigidBody..." -> Automatically fits TCastleBoxCollider + static TCastleRigidBody to each mesh's bounding box.
+4. Right-click RootGroup1 -> "2D UI, HUD & Screen Generators" -> "Quick 2D HUD Bar..." and "Quick 2D RPG Inventory Grid..." to generate the player HUD.
+```
+
 ---
 
 ## 65. Phases 211–250: Advanced 3D Navigation/Joint/Combine Rigs, 2D Font/Mask/ScrollView/Keyboard/Color Generators, Categorized Context Submenus & Final Design Readiness Auditor
+
+> **Official Reference Documentation & Visual Inspiration:**
+> - **Castle Game Engine:** [Navigation (`TCastleWalkNavigation`, `TCastleExamineNavigation`, `TCastleThirdPersonNavigation`)](https://castle-engine.io/navigation) · [Text & Custom Fonts (`TCastleFont`, `TCastleFontFamily`, `TCastleBitmapFont`)](https://castle-engine.io/text) · [Physics Joints](https://castle-engine.io/physics)
+> - **Unreal Engine 5.5:** [Third-Person Character Template, UMG ScrollBox / RichTextBlock & Map Check Build Validation](https://dev.epicgames.com/documentation/en-us/unreal-engine/umg-ui-designer-for-unreal-engine)
+> - **Godot Engine 4:** [3D Third-Person Controller Demo & Physics Layers](https://docs.godotengine.org/en/stable/tutorials/3d/introduction_to_3d.html)
+
+| CGE Custom Fonts in Editor (`TCastleFontFamily` / `TCastleBitmapFont`) | CGE Runtime Rich Text & Font Rendering | Godot 4 Third-Person Character Rig Demo |
+| :---: | :---: | :---: |
+| ![CGE Fonts Editor](https://castle-engine.io/images/thumb_const_height_size/fonts_editor.webp) | ![CGE Fonts Runtime](https://castle-engine.io/images/thumb_const_height_size/fonts_runtime.webp) | ![Godot TPS Demo](https://docs.godotengine.org/en/stable/_images/godot-tps-demo.webp) |
 
 - **Advanced 3D Physics, AI, Terrain Combine & Navigation Rigs (`MenuTreeViewSubmenu3DTools`):**
   - **3D Physics Joints (`ShowQuickPhysicsJointDialog`) & Multi-Part Ragdoll Chain (`ShowQuickRagdollChainDialog`):** Connects selected transforms with `TCastleHingeJoint`, `TCastleBallJoint`, `TCastleRopeJoint`, `TCastleDistanceJoint`, or `TCastleFixedJoint`, or generates an articulated capsule/box physics chain.
@@ -1377,6 +1839,14 @@ Whereas `ScaleSelectedPositionsFromPivot` (`Alt+Shift+=` / `Alt+Shift+-`) expand
 - **Categorized Context Menu Submenus (Phase 238) & Final Pre-Release Design Readiness Auditor (Phase 250):**
   - `OrganizeHierarchyContextMenuSubmenus` groups all specialized hierarchy context menu items into 5 clean submenus: **`3D Level, Scene & Physics Tools`**, **`2D UI, HUD & Screen Generators`**, **`Batch, Prefab & Asset Utilities`**, **`Duplicate, Group & Array`**, and **`Select & Scene Audit Filters`**.
   - **`Final Pre-Release Design Readiness & Asset Integrity Auditor...` (`ShowDesignReadinessAuditDialog` — Phase 250):** Performs a one-click pre-release QA inspection across the entire design hierarchy for missing/broken asset URLs, invalid negative/near-zero 3D scales, dynamic `TCastleRigidBody` nodes missing a `TCastleCollider`, unlinked navigation/behavior references, and zero-sized visible 2D UI controls, with an interactive **`Select All Flagged Components in Hierarchy`** action.
+
+```text
+Example Editor Workflow (Phases 246–250 — Complete Third-Person Level & Pre-Release QA Audit):
+1. Right-click Viewport1 -> "3D Level, Scene & Physics Tools" -> "Quick 3D Combined Multi-Source Terrain (TCastleTerrainCombine) Rig..." (Shift-click for instant Macro+Detail ridge terrain).
+2. Right-click Viewport1 -> "3D Level, Scene & Physics Tools" -> "Quick 3D Third-Person Character & Follow-Camera Rig (TCastleThirdPersonNavigation)..." (Shift-click for Action RPG character rig + upright capsule collider + rigid body).
+3. Right-click RootGroup1 -> "2D UI, HUD & Screen Generators" -> Add a Crosshair (TCastleCrosshair), Quest Log ScrollView (TCastleScrollView), Virtual On-Screen Keyboard, and Color Swatch Customizer Card.
+4. Before shipping, right-click in Hierarchy -> "Batch, Prefab & Asset Utilities" -> "Final Pre-Release Design Readiness & Asset Integrity Auditor..." to verify 0 broken asset URLs, 0 collider mismatches, and 0 unlinked references.
+```
 
 ---
 
