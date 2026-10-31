@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–252**), inspired by **Unreal Engine 5.5**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–253**), inspired by **Unreal Engine 5.5**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -1812,7 +1812,7 @@ Example Editor Workflow (Phases 175–210 — 1-Minute Playable Level Setup):
 
 ---
 
-## 65. Phases 211–252: Advanced 3D Navigation/Joint/Combine Rigs, 2D Font/Mask/ScrollView/Keyboard/Color Generators, Categorized Submenus, Pre-Release Auditor, 3D Model Exporter & `Events` Tab Stub Generator
+## 65. Phases 211–253: Advanced 3D Navigation/Joint/Combine Rigs, 2D Font/Mask/ScrollView/Keyboard/Color Generators, Categorized Submenus, Auditor, 3D Model Exporter, `Events` Stub Generator & Multi-Viewport Colliders / UI Scaling HUD
 
 > **Official Reference Documentation & Visual Inspiration:**
 > - **Castle Game Engine:** [Navigation (`TCastleWalkNavigation`, `TCastleExamineNavigation`, `TCastleThirdPersonNavigation`)](https://castle-engine.io/navigation) · [Text & Custom Fonts (`TCastleFont`, `TCastleFontFamily`, `TCastleBitmapFont`)](https://castle-engine.io/text) · [Physics Joints](https://castle-engine.io/physics)
@@ -1841,6 +1841,7 @@ Example Editor Workflow (Phases 175–210 — 1-Minute Playable Level Setup):
   - **`Final Pre-Release Design Readiness & Asset Integrity Auditor...` (`ShowDesignReadinessAuditDialog` — Phase 250):** Performs a one-click pre-release QA inspection across the entire design hierarchy for missing/broken asset URLs, invalid negative/near-zero 3D scales, dynamic `TCastleRigidBody` nodes missing a `TCastleCollider`, unlinked navigation/behavior references, and zero-sized visible 2D UI controls, with an interactive **`Select All Flagged Components in Hierarchy`** action.
   - **`Export 3D Viewport / Selected Subtree to glTF / X3D / STL Model...` (`ShowExportModelDialog` / `ExportToModelWithOptions` — Phase 251):** Resolves the `TUrlProcessing` `TODO` in `TDesignFrame.ExportToModel` by allowing designers to export either the **Entire Active 3D Viewport** (`CurrentViewport.InternalBuildNode`) or **Only the Selected `TCastleTransform` Subtree** (`TargetTransform.InternalBuildNode as TAbstractChildNode`, with optional `(0, 0, 0)` root origin centering) across all 5 `TUrlProcessing` resource packaging modes (`suChangeCastleDataToRelative`, `suChangeAllPathsToRelative`, `suEmbedResources`, `suCopyResourcesToSubdirectory`, and `suNone`).
   - **Object Inspector `Events` Tab Interactive Pascal Event Stub Generator (`CopySelectedEventStubToClipboard` / `ButtonCopyEventStub` / `ButtonOpenPascalCodeGen` — Phase 252):** Resolves the `TabEvents` `TODO` by adding live `EditPropertyFilter` filtering on `Inspector[itEvents]` and one-click **`Copy Event Stub`** and **`View & Event Code...`** buttons in `PanelEventsInfo` that generate signature-accurate `TCastleView` event declarations, `Start` wiring (`{$ifdef FPC}@{$endif}`), and handler bodies for any selected event row (`OnClick`, `OnChange`, `OnTimer`, `OnPress`, `OnRelease`, `OnMotion`, `OnUpdate`, `OnCollisionEnter`, `OnCollisionExit`).
+  - **Design-Wide Multi-Viewport Physics Collider Visualization & Live Container UI Scaling Diagnostics (`UpdateColliders` / `UIScalingStatusToString` — Phase 253):** Resolves the `UpdateColliders` and `UIScaling` `TODO`s by recursively updating `TCastleCollider.InternalDesigningBegin` / `InternalDesigningEnd` across every `TCastleViewport.Items` and `.castle-transform` root in `FDesignRoot`, and displaying the live `UIScaling` policy, calculated scale percentage, actual pixel size, and simulated unscaled surface dimensions in both the Viewport Statistics HUD (`StatisticsToString`) and the Object Inspector `Info` tab (`UpdateSelectedInfo`).
 
 ```text
 Example Editor Workflow (Phases 246–251 — Complete Third-Person Level, Pre-Release QA Audit & glTF/X3D Subtree Export):

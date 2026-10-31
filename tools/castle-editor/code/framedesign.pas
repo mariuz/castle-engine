@@ -1265,9 +1265,10 @@ type
     procedure MenuItemChangeClassClick(Sender: TObject);
     procedure SetShowColliders(const AValue: Boolean);
     { Show / hide colliders following FShowColliders setting.
-      If T = nil, updates everywhere (TODO: for now,
-      only in CurrentViewport). Otherwise updates only in T. }
+      If T = nil, updates across all TCastleViewport.Items and transform roots in FDesignRoot.
+      Otherwise updates only in T. }
     procedure UpdateColliders(T: TCastleTransform = nil);
+    function UIScalingStatusToString(const Detailed: Boolean = false): String;
 
     { Get parent of non-visual component.
 
@@ -4492,7 +4493,8 @@ procedure TDesignFrame.TDesignerLayer.Render;
 
     Result := 'FPS: ' + Container.Fps.ToString + NL +
       Format('Render: %s | Space: %s | Selected: %d%s', [
-        ViewModeStr, SpaceStr, Frame.ControlsTree.SelectionCount, SpeedStr]);
+        ViewModeStr, SpaceStr, Frame.ControlsTree.SelectionCount, SpeedStr]) + NL +
+      Frame.UIScalingStatusToString(false);
 
     if Frame.CurrentViewport <> nil then
       Result := Result + NL +
@@ -8886,9 +8888,6 @@ begin
   begin
     FCurrentViewport := Value;
     FCurrentViewportObserver.Observed := Value;
-    { After changing CurrentViewport, show colliders on new viewport.
-      TODO: It would be better if toggling this checkbox
-      set them already properly on all viewports. }
     if Value <> nil then
       UpdateColliders;
     if Assigned(OnCurrentViewportChanged) then
@@ -9072,48 +9071,56 @@ begin
   Result := C.Name;
 end;
 
-(* TODO: Show UI scaling somewhere?
-
-procedure TDesignFrame.CastleControlResize(Sender: TObject);
+function TDesignFrame.UIScalingStatusToString(const Detailed: Boolean): String;
 var
   CalculatedUIScale: Single;
-  H, CalculatedUIScaleStr: String;
+  ScalePctStr, ModeDesc: String;
 begin
-  // trick to get private TCastleContainer.FCalculatedUIScale
-  CalculatedUIScale :=  (1 / CastleControl.Container.UnscaledWidth) *
-    CastleControl.Container.Width;
-  CalculatedUIScaleStr := IntToStr(Round(CalculatedUIScale * 100)) + '%';
+  if (CastleControl = nil) or (CastleControl.Container = nil) then
+    Exit('UI Scale: 100%');
 
-  LabelUIScaling.Caption := CalculatedUIScaleStr;
+  if CastleControl.Container.UnscaledWidth > 0 then
+    CalculatedUIScale := CastleControl.Container.Width / CastleControl.Container.UnscaledWidth
+  else
+    CalculatedUIScale := 1.0;
+  ScalePctStr := IntToStr(Round(CalculatedUIScale * 100)) + '%';
+
   case CastleControl.Container.UIScaling of
-    usNone                : H := 'No user interface scaling';
-    usEncloseReferenceSize: H := Format('User interface scaling in effect: window must enclose a reference size of %f x %f.' + NL,
-      [CastleControl.Container.UIReferenceWidth,
-       CastleControl.Container.UIReferenceHeight]);
-    usEncloseReferenceSizeAutoOrientation:...
-    usFitReferenceSize    : H := Format('User interface scaling in effect: window must fit inside a reference size of %f x %f.' + NL,
-      [CastleControl.Container.UIReferenceWidth,
-       CastleControl.Container.UIReferenceHeight]);
-    usExplicitScale       : H := Format('User interface scaling in effect: explicit scale %f.' + NL,
-      [CastleControl.Container.UIExplicitScale]);
-    usDpiScale            : H := Format('User interface scaling in effect: scale to follow DPI (pixels per inch). DPI detected now is %f.' + NL,
-      [CastleControl.Container.Dpi]);
-    else raise EInternalError.Create('CastleControl.Container.UIScaling?');
+    usNone:
+      ModeDesc := 'None';
+    usEncloseReferenceSize:
+      ModeDesc := Format('Enclose %.0fx%.0f', [
+        CastleControl.Container.UIReferenceWidth,
+        CastleControl.Container.UIReferenceHeight]);
+    usEncloseReferenceSizeAutoOrientation:
+      ModeDesc := Format('EncloseAuto %.0fx%.0f', [
+        CastleControl.Container.UIReferenceWidth,
+        CastleControl.Container.UIReferenceHeight]);
+    usFitReferenceSize:
+      ModeDesc := Format('Fit %.0fx%.0f', [
+        CastleControl.Container.UIReferenceWidth,
+        CastleControl.Container.UIReferenceHeight]);
+    usExplicitScale:
+      ModeDesc := Format('Explicit %.2fx', [
+        CastleControl.Container.UIExplicitScale]);
+    usDpiScale:
+      ModeDesc := Format('DPI %.0f', [
+        CastleControl.Container.Dpi]);
   end;
-  if CastleControl.Container.UIScaling <> usNone then
-  begin
-    H := Format(H +
-      'Actual window size is %d x %d.' + NL +
-      'Calculated scale is %s, which simulates surface of size %f x %f.',
-      [CastleControl.Container.Width,
-       CastleControl.Container.Height,
-       CalculatedUIScaleStr,
-       CastleControl.Container.UnscaledWidth,
-       CastleControl.Container.UnscaledHeight]);
-  end;
-  LabelUIScaling.Hint := H;
+
+  if Detailed then
+    Result := Format(
+      'Container UI Scaling: %s (%s) — Actual %dx%d px, Unscaled Surface %.0fx%.0f',
+      [ScalePctStr, ModeDesc,
+       CastleControl.Container.Width, CastleControl.Container.Height,
+       CastleControl.Container.UnscaledWidth, CastleControl.Container.UnscaledHeight])
+  else
+    Result := Format(
+      'UI Scale: %s (%s | %dx%d -> %.0fx%.0f)',
+      [ScalePctStr, ModeDesc,
+       CastleControl.Container.Width, CastleControl.Container.Height,
+       CastleControl.Container.UnscaledWidth, CastleControl.Container.UnscaledHeight]);
 end;
-*)
 
 procedure TDesignFrame.CastleControlGLContextOpen(Sender: TObject);
 
@@ -10928,6 +10935,10 @@ begin
 
       TCastleComponent(C).DesignerInfo(SListInfo);
       TCastleComponent(C).DesignerWarnings(SListWarnings);
+      if (C is TCastleUserInterface) and (CastleControl <> nil) and
+         (CastleControl.Container <> nil) and
+         (CastleControl.Container.UIScaling <> usNone) then
+        SListInfo.Add(UIScalingStatusToString(true));
 
       if (SListInfo.Count <> 0) or (SListWarnings.Count <> 0) then
       begin
@@ -48624,26 +48635,49 @@ begin
 end;
 
 procedure TDesignFrame.UpdateColliders(T: TCastleTransform);
-var
-  BehList: TCastleBehaviorList;
-  V: TCastleViewport;
-  B: TCastleBehavior;
-begin
-  if T = nil then
+
+  procedure UpdateCollidersInTransform(const TargetT: TCastleTransform);
+  var
+    BehList: TCastleBehaviorList;
+    B: TCastleBehavior;
   begin
-    V := CurrentViewport;
-    if V = nil then Exit;
-    T := V.Items;
+    if TargetT = nil then Exit;
+    BehList := TargetT.FindAllBehaviors(TCastleCollider);
+    try
+      for B in BehList do
+        if FShowColliders then
+          TCastleCollider(B).InternalDesigningBegin
+        else
+          TCastleCollider(B).InternalDesigningEnd;
+    finally
+      FreeAndNil(BehList);
+    end;
   end;
 
-  BehList := T.FindAllBehaviors(TCastleCollider);
-  try
-    for B in BehList do
-      if FShowColliders then
-        TCastleCollider(B).InternalDesigningBegin
-      else
-        TCastleCollider(B).InternalDesigningEnd;
-  finally FreeAndNil(BehList) end;
+  procedure UpdateCollidersInUI(const UI: TCastleUserInterface);
+  var
+    I: Integer;
+  begin
+    if UI = nil then Exit;
+    if (UI is TCastleViewport) and (TCastleViewport(UI).Items <> nil) then
+      UpdateCollidersInTransform(TCastleViewport(UI).Items);
+    for I := 0 to UI.ControlsCount - 1 do
+      UpdateCollidersInUI(UI.Controls[I]);
+  end;
+
+begin
+  if T <> nil then
+  begin
+    UpdateCollidersInTransform(T);
+    Exit;
+  end;
+
+  if FDesignRoot is TCastleTransform then
+    UpdateCollidersInTransform(TCastleTransform(FDesignRoot))
+  else if FDesignRoot is TCastleUserInterface then
+    UpdateCollidersInUI(TCastleUserInterface(FDesignRoot))
+  else if (CurrentViewport <> nil) and (CurrentViewport.Items <> nil) then
+    UpdateCollidersInTransform(CurrentViewport.Items);
 end;
 
 {
