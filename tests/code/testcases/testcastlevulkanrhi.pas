@@ -297,6 +297,9 @@ type
     procedure TestEffectAndComposedShaderCustomUniformUBOAndTextureBindingRHI;
     procedure TestEffectShaderLibrariesEyeWorldSpaceAndCameraMatrixAliasesRHI;
     procedure TestLinePropertiesNodeAndRenderContextDynamicLineWidthRHI;
+    procedure TestTangentSpaceNormalMappingAndParallaxBumpMappingSpecializationRHI;
+    procedure TestFogCoordinateVolumetricFogAndCustomShaderVertexAttributesRHI;
+    procedure TestColorSpaceLinearGammaCorrectionAndFilmicToneMappingSpecializationRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -17022,6 +17025,341 @@ begin
     RenderContext := SavedCtx;
     FreeAndNil(TestCtx);
     SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestTangentSpaceNormalMappingAndParallaxBumpMappingSpecializationRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  BaseTex, NormalTex: TPixelTextureNode;
+  BaseImg, NormImg: TRGBAlphaImage;
+  IFS: TIndexedFaceSetNode;
+  Coord: TCoordinateNode;
+  TexCoord: TTextureCoordinateNode;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7801)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+
+    BaseTex := TPixelTextureNode.Create;
+    BaseImg := TRGBAlphaImage.Create(2, 2);
+    BaseImg.Clear(Vector4Byte(200, 180, 160, 255));
+    BaseTex.FdImage.Value := BaseImg;
+    Mat.BaseTexture := BaseTex;
+
+    NormalTex := TPixelTextureNode.Create;
+    NormImg := TRGBAlphaImage.Create(2, 2);
+    NormImg.Clear(Vector4Byte(128, 128, 255, 128)); // Alpha = 128 height map channel
+    NormalTex.FdImage.Value := NormImg;
+    Mat.NormalTexture := NormalTex;
+    App.Material := Mat;
+    ShapeNode.Appearance := App;
+
+    IFS := TIndexedFaceSetNode.Create;
+    Coord := TCoordinateNode.Create;
+    Coord.SetPoint([
+      Vector3(-1, -1, 0),
+      Vector3( 1, -1, 0),
+      Vector3( 0,  1, 0)]);
+    IFS.Coord := Coord;
+    TexCoord := TTextureCoordinateNode.Create;
+    TexCoord.SetPoint([
+      Vector2(0, 0),
+      Vector2(1, 0),
+      Vector2(0.5, 1)]);
+    IFS.TexCoord := TexCoord;
+    IFS.SetCoordIndex([0, 1, 2, -1]);
+    ShapeNode.Geometry := IFS;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    Scene.RenderOptions.BumpMapping := bmBasic;
+
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList( False, False )[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 1);
+    AssertTrue('PrepareRHIBuffers must auto-generate tangents when normal map is present',
+      (RendererShape.Cache <> nil) and (RendererShape.Cache.GeometryArrays <> nil) and
+      RendererShape.Cache.GeometryArrays.HasTangent);
+
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertTrue('Basic normal mapping with tangents must use PerturbNormalTBN',
+      Pos('PerturbNormalTBN(castle_tangent_to_eye_space, tangentNormal, castle_MaterialNormalScale)',
+        RendererShape.Cache.RHIFragmentShaderSource) > 0);
+    AssertFalse('Basic normal mapping must not enable parallax',
+      RendererShape.Cache.RHIHasParallaxBumpMapping);
+
+    { Classic Parallax Bump Mapping }
+    Scene.RenderOptions.BumpMapping := bmParallax;
+    Scene.RenderOptions.BumpMappingParallaxHeight := 0.04;
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 1);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertTrue('bmParallax must enable RHIHasParallaxBumpMapping',
+      RendererShape.Cache.RHIHasParallaxBumpMapping);
+    AssertFalse('bmParallax must not set RHISteepParallaxBumpMapping',
+      RendererShape.Cache.RHISteepParallaxBumpMapping);
+    AssertTrue('Mask must include $10000 for parallax bump mapping',
+      (RendererShape.Cache.RHIShaderPermutationMask and $10000) <> 0);
+    AssertTrue('Classic parallax shader must compute castle_parallax_uv',
+      Pos('vec2 castle_parallax_uv = castle_tex_coord0 + castle_parallax_h',
+        RendererShape.Cache.RHIFragmentShaderSource) > 0);
+    AssertTrue('Base color texture must sample at castle_parallax_uv',
+      Pos('texture(castle_base_color_texture, castle_parallax_uv)',
+        RendererShape.Cache.RHIFragmentShaderSource) > 0);
+
+    { Steep Parallax Bump Mapping }
+    Scene.RenderOptions.BumpMapping := bmSteepParallax;
+    Scene.RenderOptions.BumpMappingParallaxHeight := 0.05;
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 1);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertTrue('bmSteepParallax must set RHISteepParallaxBumpMapping',
+      RendererShape.Cache.RHISteepParallaxBumpMapping);
+    AssertTrue('Mask must include $10000 and $80000 for steep parallax',
+      (RendererShape.Cache.RHIShaderPermutationMask and ($10000 or $80000)) = ($10000 or $80000));
+    AssertTrue('Steep parallax shader must emit raymarching loop',
+      Pos('for (int castle_step = 0; castle_step < 32; ++castle_step)',
+        RendererShape.Cache.RHIFragmentShaderSource) > 0);
+  finally
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestFogCoordinateVolumetricFogAndCustomShaderVertexAttributesRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TMaterialNode;
+  IFS: TIndexedFaceSetNode;
+  Coord: TCoordinateNode;
+  FogCoord: TFogCoordinateNode;
+  FloatAttr: TFloatVertexAttributeNode;
+  Mat3Attr: TMatrix3VertexAttributeNode;
+  RendererShape: TX3DRendererShape;
+  Renderer: TRenderer;
+  RenderOptions: TCastleRenderOptions;
+  PipeDesc: TRHIGraphicsPipelineDesc;
+  ShadingModel: TCastleShadingModelRHI;
+  FoundFogAttr, FoundFloatAttr, FoundMat3Col0, FoundMat3Col2: Boolean;
+  I: Integer;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7802)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  Renderer := nil;
+  RenderOptions := nil;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TMaterialNode.Create;
+    App.Material := Mat;
+    ShapeNode.Appearance := App;
+
+    IFS := TIndexedFaceSetNode.Create;
+    Coord := TCoordinateNode.Create;
+    Coord.SetPoint([
+      Vector3(-1, -1, 0),
+      Vector3( 1, -1, 0),
+      Vector3( 0,  1, 0)]);
+    IFS.Coord := Coord;
+
+    FogCoord := TFogCoordinateNode.Create;
+    FogCoord.SetDepth([0.1, 0.5, 0.9]);
+    IFS.FogCoord := FogCoord;
+
+    FloatAttr := TFloatVertexAttributeNode.Create;
+    FloatAttr.NameField := 'customWeight';
+    FloatAttr.NumComponents := 1;
+    FloatAttr.SetValue([0.25, 0.5, 0.75]);
+
+    Mat3Attr := TMatrix3VertexAttributeNode.Create;
+    Mat3Attr.NameField := 'customBasis';
+    Mat3Attr.SetValue([TMatrix3.Identity, TMatrix3.Identity, TMatrix3.Identity]);
+    IFS.SetAttrib([FloatAttr, Mat3Attr]);
+
+    IFS.SetCoordIndex([0, 1, 2, -1]);
+    ShapeNode.Geometry := IFS;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+    AssertTrue('Arrays.HasFogCoord must be True when TFogCoordinateNode is present',
+      RendererShape.Cache.GeometryArrays.HasFogCoord);
+    AssertTrue('Arrays.FogDirectValues must be True for TFogCoordinateNode',
+      RendererShape.Cache.GeometryArrays.FogDirectValues);
+    AssertEquals('Arrays.Attribs.Count must be 2', 2, RendererShape.Cache.GeometryArrays.Attribs.Count);
+
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertTrue('Mask must include $20000 for per-vertex fog/custom attributes',
+      (RendererShape.Cache.RHIShaderPermutationMask and $20000) <> 0);
+    AssertTrue('Vertex shader must declare CASTLE_LOCATION(8) in float castle_FogCoord;',
+      Pos('CASTLE_LOCATION(8) in float castle_FogCoord;',
+        RendererShape.Cache.RHIVertexShaderSource) > 0);
+    AssertTrue('Vertex shader must declare CASTLE_LOCATION(9) in float customWeight;',
+      Pos('CASTLE_LOCATION(9) in float customWeight;',
+        RendererShape.Cache.RHIVertexShaderSource) > 0);
+    AssertTrue('Vertex shader must declare CASTLE_LOCATION(10) in mat3 customBasis;',
+      Pos('CASTLE_LOCATION(10) in mat3 customBasis;',
+        RendererShape.Cache.RHIVertexShaderSource) > 0);
+    AssertTrue('Fragment shader must use direct per-vertex fog coordinate',
+      Pos('float fogFactor = clamp(castle_fog_frag_coord, 0.0, 1.0);',
+        RendererShape.Cache.RHIFragmentShaderSource) > 0);
+
+    RenderOptions := TCastleRenderOptions.Create(nil);
+    Renderer := TRenderer.Create(RenderOptions);
+    Renderer.BuildShapePipelineDesc(RendererShape, Scene.RenderOptions, PipeDesc);
+
+    FoundFogAttr := False;
+    FoundFloatAttr := False;
+    FoundMat3Col0 := False;
+    FoundMat3Col2 := False;
+    for I := 0 to High(PipeDesc.VertexInput.Attributes) do
+    begin
+      if (PipeDesc.VertexInput.Attributes[I].Location = 8) and
+         (PipeDesc.VertexInput.Attributes[I].AttributeName = 'castle_FogCoord') and
+         (PipeDesc.VertexInput.Attributes[I].Format = vafFloat) then
+        FoundFogAttr := True;
+      if (PipeDesc.VertexInput.Attributes[I].Location = 9) and
+         (PipeDesc.VertexInput.Attributes[I].AttributeName = 'customWeight') and
+         (PipeDesc.VertexInput.Attributes[I].Format = vafFloat) then
+        FoundFloatAttr := True;
+      if (PipeDesc.VertexInput.Attributes[I].Location = 10) and
+         (PipeDesc.VertexInput.Attributes[I].AttributeName = 'customBasis') and
+         (PipeDesc.VertexInput.Attributes[I].Format = vafVector3) then
+        FoundMat3Col0 := True;
+      if (PipeDesc.VertexInput.Attributes[I].Location = 12) and
+         (PipeDesc.VertexInput.Attributes[I].AttributeName = 'customBasis_col2') and
+         (PipeDesc.VertexInput.Attributes[I].Format = vafVector3) then
+        FoundMat3Col2 := True;
+    end;
+    AssertTrue('Pipeline must bind castle_FogCoord at Location 8', FoundFogAttr);
+    AssertTrue('Pipeline must bind customWeight at Location 9', FoundFloatAttr);
+    AssertTrue('Pipeline must bind customBasis col0 at Location 10', FoundMat3Col0);
+    AssertTrue('Pipeline must bind customBasis col2 at Location 12', FoundMat3Col2);
+  finally
+    FreeAndNil(Renderer);
+    FreeAndNil(RenderOptions);
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestColorSpaceLinearGammaCorrectionAndFilmicToneMappingSpecializationRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedColorSpace: TColorSpace;
+  SavedToneMapping: TToneMapping;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  BaseTex: TPixelTextureNode;
+  BaseImg: TRGBAlphaImage;
+  Box: TBoxNode;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7803)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedColorSpace := CastleRenderOptions.ColorSpace;
+  SavedToneMapping := CastleRenderOptions.ToneMapping;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+
+    BaseTex := TPixelTextureNode.Create;
+    BaseImg := TRGBAlphaImage.Create(2, 2);
+    BaseImg.Clear(Vector4Byte(220, 120, 60, 255));
+    BaseTex.FdImage.Value := BaseImg;
+    Mat.BaseTexture := BaseTex;
+    App.Material := Mat;
+    ShapeNode.Appearance := App;
+
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    CastleRenderOptions.ColorSpace := csLinear;
+    CastleRenderOptions.ToneMapping := tmUncharted;
+
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 1);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+
+    AssertTrue('Mask must include $40000 for ColorSpace/ToneMapping specialization',
+      (RendererShape.Cache.RHIShaderPermutationMask and $40000) <> 0);
+    AssertTrue('Linear color space must linearize baseColor.rgb with pow(..., vec3(2.2))',
+      Pos('baseColor.rgb = pow(max(baseColor.rgb, vec3(0.0)), vec3(2.2));',
+        RendererShape.Cache.RHIFragmentShaderSource) > 0);
+    AssertTrue('Linear color space must convert final color via LINEARtoSRGB',
+      Pos('castle_FragColor.rgb = LINEARtoSRGB(castle_FragColor.rgb);',
+        RendererShape.Cache.RHIFragmentShaderSource) > 0);
+    AssertTrue('tmUncharted must apply toneMapUncharted',
+      Pos('castle_FragColor.rgb = toneMapUncharted(castle_FragColor.rgb);',
+        RendererShape.Cache.RHIFragmentShaderSource) > 0);
+
+    CastleRenderOptions.ToneMapping := tmHejlRichard;
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertTrue('tmHejlRichard must apply toneMapHejlRichard',
+      Pos('castle_FragColor.rgb = toneMapHejlRichard(castle_FragColor.rgb);',
+        RendererShape.Cache.RHIFragmentShaderSource) > 0);
+
+    CastleRenderOptions.ToneMapping := tmACES;
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertTrue('tmACES must apply toneMapACES',
+      Pos('castle_FragColor.rgb = toneMapACES(castle_FragColor.rgb);',
+        RendererShape.Cache.RHIFragmentShaderSource) > 0);
+  finally
+    CastleRenderOptions.ColorSpace := SavedColorSpace;
+    CastleRenderOptions.ToneMapping := SavedToneMapping;
+    FreeAndNil(Scene);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);

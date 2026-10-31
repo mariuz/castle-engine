@@ -147,6 +147,9 @@
     FRHITexGenBoundsS: TVector4;
     FRHITexGenBoundsT: TVector4;
     FRHIPointSize: Single;
+    FRHIHasParallaxBumpMapping: Boolean;
+    FRHISteepParallaxBumpMapping: Boolean;
+    FRHIParallaxHeight: Single;
     FRHIVertexEffectCode: String;
     FRHIFragmentEffectCode: String;
     FRHIComposedVertSource: String;
@@ -203,6 +206,7 @@
     procedure SetTexCoordGen(const AGeneration: TTextureCoordinateGeneration;
       const ABoundsS, ABoundsT: TVector4);
     procedure SetPointSize(const APointSize: Single);
+    procedure SetParallaxBumpMapping(const AEnabled, ASteep: Boolean; const AHeight: Single);
     procedure SetShaderEffects(const AVertexEffectCode, AFragmentEffectCode: String);
     procedure SetComposedShader(const ACustomVertSource, ACustomFragSource: String);
     procedure EnsureRHIShaders(
@@ -221,6 +225,7 @@
     function ToString: String; override;
 
     property RHICoordinateBuffer: TRHIBuffer read FRHICoordBuffer;
+    property GeometryArrays: TGeometryArrays read Arrays;
     property RHIAttributeBuffer: TRHIBuffer read FRHIAttribBuffer;
     property RHIIndexBuffer: TRHIBuffer read FRHIIndexBuffer;
     property RHIJointBuffer: TRHIBuffer read FRHIJointBuffer;
@@ -244,6 +249,9 @@
     property RHITexGenBoundsS: TVector4 read FRHITexGenBoundsS;
     property RHITexGenBoundsT: TVector4 read FRHITexGenBoundsT;
     property RHIPointSize: Single read FRHIPointSize;
+    property RHIHasParallaxBumpMapping: Boolean read FRHIHasParallaxBumpMapping;
+    property RHISteepParallaxBumpMapping: Boolean read FRHISteepParallaxBumpMapping;
+    property RHIParallaxHeight: Single read FRHIParallaxHeight;
     property RHIVertexEffectCode: String read FRHIVertexEffectCode;
     property RHIFragmentEffectCode: String read FRHIFragmentEffectCode;
     property RHIComposedVertSource: String read FRHIComposedVertSource;
@@ -295,6 +303,7 @@ begin
   inherited;
   VboToReload := AllVboTypes;
   FRHIPointSize := 1.0;
+  FRHIParallaxHeight := 0.01;
 end;
 
 destructor TShapeCache.Destroy;
@@ -701,6 +710,19 @@ begin
   end;
 end;
 
+procedure TShapeCache.SetParallaxBumpMapping(const AEnabled, ASteep: Boolean; const AHeight: Single);
+begin
+  if (FRHIHasParallaxBumpMapping <> AEnabled) or
+     (FRHISteepParallaxBumpMapping <> ASteep) or
+     (not SameValue(FRHIParallaxHeight, AHeight, 1e-6)) then
+  begin
+    FRHIHasParallaxBumpMapping := AEnabled;
+    FRHISteepParallaxBumpMapping := ASteep;
+    FRHIParallaxHeight := AHeight;
+    FRHIShadersInitialized := False;
+  end;
+end;
+
 procedure TShapeCache.SetShaderEffects(const AVertexEffectCode, AFragmentEffectCode: String);
 begin
   if (FRHIVertexEffectCode <> AVertexEffectCode) or
@@ -738,12 +760,19 @@ procedure TShapeCache.EnsureRHIShaders(
 var
   Mask: Cardinal;
   Gen: TCastleShaderGeneratorRHI;
-  FogSnippet, TexGenSnippet, TexTransformSnippet, ClipPlaneSnippet, ShadowMapSnippet: String;
-  UpgradedVertEffect, UpgradedFragEffect, EffectivePointSizeStr: String;
+  FogSnippet, TexGenSnippet, TexTransformSnippet, ClipPlaneSnippet, ShadowMapSnippet, ParallaxSnippet: String;
+  UpgradedVertEffect, UpgradedFragEffect, EffectivePointSizeStr, AttribGLSLType, AttribDecl: String;
+  HasLinearColorSpace: Boolean;
+  EffectiveToneMapping: TToneMapping;
+  I: Integer;
+  LocIdx, AttrLoc: Cardinal;
 begin
   if RHIDevice = nil then
     Exit;
   EnsureRHIDeviceMatch;
+
+  HasLinearColorSpace := CastleRenderOptions.ColorSpace = csLinear;
+  EffectiveToneMapping := CastleRenderOptions.ToneMapping;
 
   Mask := 0;
   if AHasSkinning then Mask := Mask or $01;
@@ -764,6 +793,16 @@ begin
      (FRHIPointSize > 1.0001) then Mask := Mask or $4000;
   if AHasComposedShader or (FRHIComposedVertSource <> '') or (FRHIComposedFragSource <> '') then
     Mask := Mask or $8000;
+  if FRHIHasParallaxBumpMapping and AHasTangents and AHasNormalTex then
+  begin
+    Mask := Mask or $10000;
+    if FRHISteepParallaxBumpMapping then
+      Mask := Mask or $80000;
+  end;
+  if (Arrays <> nil) and (Arrays.HasFogCoord or (Arrays.Attribs.Count > 0)) then
+    Mask := Mask or $20000;
+  if HasLinearColorSpace or (EffectiveToneMapping <> tmNone) then
+    Mask := Mask or $40000 or (Cardinal(Ord(EffectiveToneMapping)) shl 20);
 
   if FRHIShadersInitialized and (FRHIShaderPermutationMask = Mask) and
      (FRHIVertexShader <> nil) and (FRHIFragmentShader <> nil) then
@@ -870,6 +909,21 @@ begin
           '  PLUG_vertex_eye_space(castle_vertex_eye, castle_normal_eye);',
           []);
     end;
+    if (Arrays <> nil) and Arrays.HasFogCoord then
+    begin
+      FRHIVertexShaderSource := StringReplace(
+        FRHIVertexShaderSource,
+        'void main() {',
+        'CASTLE_LOCATION(8) in float castle_FogCoord;' + LineEnding +
+        'CASTLE_LOCATION(8) out float castle_fog_frag_coord;' + LineEnding +
+        'void main() {',
+        []);
+      FRHIVertexShaderSource := StringReplace(
+        FRHIVertexShaderSource,
+        '  gl_Position = ',
+        '  castle_fog_frag_coord = castle_FogCoord;' + LineEnding + '  gl_Position = ',
+        []);
+    end;
     EffectivePointSizeStr := FormatDot('%g', [Max(1.0, FRHIPointSize)]);
     if Pos('.', EffectivePointSizeStr) = 0 then
       EffectivePointSizeStr := EffectivePointSizeStr + '.0';
@@ -917,17 +971,54 @@ begin
         ShadowMapSnippet,
         []);
     end;
-    FogSnippet :=
-      LineEnding +
-      '  if ((CastleScene.u_FogParams.z > 0.5) && (CastleScene.u_FogParams.y > 1e-5)) {' + LineEnding +
-      '    float fogDist = length(castle_vertex_eye.xyz);' + LineEnding +
-      '    float fogFactor = (CastleScene.u_FogParams.z > 1.5)' + LineEnding +
-      '      ? clamp(1.0 - exp(-CastleScene.u_FogColor.a * fogDist), 0.0, 1.0)' + LineEnding +
-      '      : clamp(fogDist / CastleScene.u_FogParams.y, 0.0, 1.0);' + LineEnding +
-      '    castle_FragColor.rgb = mix(castle_FragColor.rgb, CastleScene.u_FogColor.rgb, fogFactor);' + LineEnding +
-      '  }';
+    if (Arrays <> nil) and Arrays.HasFogCoord then
+    begin
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        'void main() {',
+        'CASTLE_LOCATION(8) in float castle_fog_frag_coord;' + LineEnding +
+        'void main() {',
+        []);
+      if Arrays.FogDirectValues then
+        FogSnippet :=
+          LineEnding +
+          '  if (CastleScene.u_FogParams.z > 0.5) {' + LineEnding +
+          '    float fogFactor = clamp(castle_fog_frag_coord, 0.0, 1.0);' + LineEnding +
+          '    castle_FragColor.rgb = mix(castle_FragColor.rgb, CastleScene.u_FogColor.rgb, fogFactor);' + LineEnding +
+          '  }'
+      else
+        FogSnippet :=
+          LineEnding +
+          '  if ((CastleScene.u_FogParams.z > 0.5) && (CastleScene.u_FogParams.y > 1e-5)) {' + LineEnding +
+          '    float fogDist = max(castle_fog_frag_coord, 0.0);' + LineEnding +
+          '    float fogFactor = (CastleScene.u_FogParams.z > 1.5)' + LineEnding +
+          '      ? clamp(1.0 - exp(-CastleScene.u_FogColor.a * fogDist), 0.0, 1.0)' + LineEnding +
+          '      : clamp(fogDist / CastleScene.u_FogParams.y, 0.0, 1.0);' + LineEnding +
+          '    castle_FragColor.rgb = mix(castle_FragColor.rgb, CastleScene.u_FogColor.rgb, fogFactor);' + LineEnding +
+          '  }';
+    end else
+      FogSnippet :=
+        LineEnding +
+        '  if ((CastleScene.u_FogParams.z > 0.5) && (CastleScene.u_FogParams.y > 1e-5)) {' + LineEnding +
+        '    float fogDist = length(castle_vertex_eye.xyz);' + LineEnding +
+        '    float fogFactor = (CastleScene.u_FogParams.z > 1.5)' + LineEnding +
+        '      ? clamp(1.0 - exp(-CastleScene.u_FogColor.a * fogDist), 0.0, 1.0)' + LineEnding +
+        '      : clamp(fogDist / CastleScene.u_FogParams.y, 0.0, 1.0);' + LineEnding +
+        '    castle_FragColor.rgb = mix(castle_FragColor.rgb, CastleScene.u_FogColor.rgb, fogFactor);' + LineEnding +
+        '  }';
     if (FRHIFragmentEffectCode <> '') and (Pos('PLUG_fragment_modify', FRHIFragmentEffectCode) > 0) then
       FogSnippet := FogSnippet + LineEnding + '  PLUG_fragment_modify(castle_FragColor);';
+    case EffectiveToneMapping of
+      tmUncharted:
+        FogSnippet := FogSnippet + LineEnding + '  castle_FragColor.rgb = toneMapUncharted(castle_FragColor.rgb);';
+      tmHejlRichard:
+        FogSnippet := FogSnippet + LineEnding + '  castle_FragColor.rgb = toneMapHejlRichard(castle_FragColor.rgb);';
+      tmACES:
+        FogSnippet := FogSnippet + LineEnding + '  castle_FragColor.rgb = toneMapACES(castle_FragColor.rgb);';
+      else ;
+    end;
+    if HasLinearColorSpace then
+      FogSnippet := FogSnippet + LineEnding + '  castle_FragColor.rgb = LINEARtoSRGB(castle_FragColor.rgb);';
     FRHIFragmentShaderSource := StringReplace(
       FRHIFragmentShaderSource,
       '    castle_FragColor = vec4(unlitColor, baseColor.a);',
@@ -986,6 +1077,74 @@ begin
             []);
       end;
     end;
+    if HasLinearColorSpace and AHasBaseColorTex then
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        '  baseColor *= texture(castle_base_color_texture, castle_tex_coord0);',
+        '  baseColor *= texture(castle_base_color_texture, castle_tex_coord0);' + LineEnding +
+        '  baseColor.rgb = pow(max(baseColor.rgb, vec3(0.0)), vec3(2.2));',
+        []);
+    if AHasTangents and AHasNormalTex then
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        '  N = PerturbNormalCotangent(N, -castle_vertex_eye.xyz, castle_tex_coord0, tangentNormal, castle_MaterialNormalScale);',
+        '  N = PerturbNormalTBN(castle_tangent_to_eye_space, tangentNormal, castle_MaterialNormalScale);',
+        []);
+    if FRHIHasParallaxBumpMapping and AHasTangents and AHasNormalTex then
+    begin
+      if FRHISteepParallaxBumpMapping then
+        ParallaxSnippet := FormatDot(
+          '  vec3 castle_view_ts = normalize(transpose(castle_tangent_to_eye_space) * (-castle_vertex_eye.xyz));' + LineEnding +
+          '  float castle_num_layers = mix(32.0, 8.0, abs(castle_view_ts.z));' + LineEnding +
+          '  float castle_layer_depth = 1.0 / castle_num_layers;' + LineEnding +
+          '  float castle_cur_layer_depth = 0.0;' + LineEnding +
+          '  vec2 castle_delta_uv = castle_view_ts.xy * %g / (max(castle_view_ts.z, 0.1) * castle_num_layers);' + LineEnding +
+          '  vec2 castle_parallax_uv = castle_tex_coord0;' + LineEnding +
+          '  float castle_cur_height = texture(castle_normal_texture, castle_parallax_uv).a;' + LineEnding +
+          '  for (int castle_step = 0; castle_step < 32; ++castle_step) {' + LineEnding +
+          '    if (castle_cur_layer_depth >= castle_cur_height) break;' + LineEnding +
+          '    castle_parallax_uv -= castle_delta_uv;' + LineEnding +
+          '    castle_cur_height = texture(castle_normal_texture, castle_parallax_uv).a;' + LineEnding +
+          '    castle_cur_layer_depth += castle_layer_depth;' + LineEnding +
+          '  }',
+          [Max(0.0, FRHIParallaxHeight)])
+      else
+        ParallaxSnippet := FormatDot(
+          '  vec3 castle_view_ts = normalize(transpose(castle_tangent_to_eye_space) * (-castle_vertex_eye.xyz));' + LineEnding +
+          '  float castle_parallax_h = (texture(castle_normal_texture, castle_tex_coord0).a - 0.5) * %g;' + LineEnding +
+          '  vec2 castle_parallax_uv = castle_tex_coord0 + castle_parallax_h * (castle_view_ts.xy / max(castle_view_ts.z, 0.1));',
+          [Max(0.0, FRHIParallaxHeight)]);
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        'texture(castle_base_color_texture, castle_tex_coord0)',
+        'texture(castle_base_color_texture, castle_parallax_uv)',
+        [rfReplaceAll]);
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        'texture(castle_normal_texture, castle_tex_coord0)',
+        'texture(castle_normal_texture, castle_parallax_uv)',
+        [rfReplaceAll]);
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        'texture(castle_metallic_roughness_texture, castle_tex_coord0)',
+        'texture(castle_metallic_roughness_texture, castle_parallax_uv)',
+        [rfReplaceAll]);
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        'texture(castle_emissive_texture, castle_tex_coord0)',
+        'texture(castle_emissive_texture, castle_parallax_uv)',
+        [rfReplaceAll]);
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        'texture(castle_occlusion_texture, castle_tex_coord0)',
+        'texture(castle_occlusion_texture, castle_parallax_uv)',
+        [rfReplaceAll]);
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        'void main() {',
+        'void main() {' + LineEnding + ParallaxSnippet,
+        []);
+    end;
     if (Arrays <> nil) and (not Arrays.CullFace) then
       FRHIFragmentShaderSource := StringReplace(
         FRHIFragmentShaderSource,
@@ -996,6 +1155,42 @@ begin
       FRHIVertexShaderSource := Gen.FinalizeVertexShaderSource(
         Gen.GeneratePreamble(ssVertex) +
         Gen.UpgradeUserEffectUniforms(FRHIComposedVertSource));
+    if (Arrays <> nil) and (Arrays.Attribs.Count > 0) then
+    begin
+      LocIdx := 9;
+      for I := 0 to Arrays.Attribs.Count - 1 do
+      begin
+        AttrLoc := LocIdx;
+        case Arrays.Attribs[I].AType of
+          atFloat:   begin AttribGLSLType := 'float'; Inc(LocIdx, 1); end;
+          atVector2: begin AttribGLSLType := 'vec2';  Inc(LocIdx, 1); end;
+          atVector3: begin AttribGLSLType := 'vec3';  Inc(LocIdx, 1); end;
+          atVector4: begin AttribGLSLType := 'vec4';  Inc(LocIdx, 1); end;
+          atMatrix3: begin AttribGLSLType := 'mat3';  Inc(LocIdx, 3); end;
+          atMatrix4: begin AttribGLSLType := 'mat4';  Inc(LocIdx, 4); end;
+          else       begin AttribGLSLType := 'vec4';  Inc(LocIdx, 1); end;
+        end;
+        AttribDecl := Format('CASTLE_LOCATION(%d) in %s %s;', [AttrLoc, AttribGLSLType, Arrays.Attribs[I].Name]);
+        if Pos('in ' + AttribGLSLType + ' ' + Arrays.Attribs[I].Name + ';', FRHIVertexShaderSource) > 0 then
+          FRHIVertexShaderSource := StringReplace(
+            FRHIVertexShaderSource,
+            'in ' + AttribGLSLType + ' ' + Arrays.Attribs[I].Name + ';',
+            AttribDecl,
+            [rfReplaceAll])
+        else if Pos('attribute ' + AttribGLSLType + ' ' + Arrays.Attribs[I].Name + ';', FRHIVertexShaderSource) > 0 then
+          FRHIVertexShaderSource := StringReplace(
+            FRHIVertexShaderSource,
+            'attribute ' + AttribGLSLType + ' ' + Arrays.Attribs[I].Name + ';',
+            AttribDecl,
+            [rfReplaceAll])
+        else
+          FRHIVertexShaderSource := StringReplace(
+            FRHIVertexShaderSource,
+            'void main',
+            AttribDecl + LineEnding + 'void main',
+            []);
+      end;
+    end;
     if FRHIComposedFragSource <> '' then
       FRHIFragmentShaderSource :=
         Gen.GeneratePreamble(ssFragment) +

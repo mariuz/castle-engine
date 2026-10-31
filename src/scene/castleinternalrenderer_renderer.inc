@@ -552,7 +552,9 @@ procedure TRenderer.BuildShapePipelineDesc(const AShape: TX3DRendererShape;
 var
   Arrays: TGeometryArrays;
   Set1Layout, Set2Layout: TRHIDescriptorSetLayout;
-  LayoutCount: Integer;
+  LayoutCount, I: Integer;
+  AttrLoc: Cardinal;
+  AttrOffset: PtrUInt;
 begin
   FillChar(ADesc, SizeOf(ADesc), 0);
   EnsureRHIDefaultShaders;
@@ -621,6 +623,56 @@ begin
     begin
       AddVertexAttribute(Ord(vlJoints0), 1, vafVector4, PtrUInt(Arrays.SkinJoints0), 'castle_SkinJoints0');
       AddVertexAttribute(Ord(vlWeights0), 1, vafVector4, PtrUInt(Arrays.SkinWeights0), 'castle_SkinWeights0');
+    end;
+
+    if Arrays.HasFogCoord then
+      AddVertexAttribute(8, 1, vafFloat, PtrUInt(Arrays.FogCoord(0)), 'castle_FogCoord');
+
+    if Arrays.Attribs.Count > 0 then
+    begin
+      AttrLoc := 9;
+      for I := 0 to Arrays.Attribs.Count - 1 do
+      begin
+        AttrOffset := PtrUInt(Arrays.GLSLAttribute(Arrays.Attribs[I]));
+        case Arrays.Attribs[I].AType of
+          atFloat:
+            begin
+              AddVertexAttribute(AttrLoc, 1, vafFloat, AttrOffset, Arrays.Attribs[I].Name);
+              Inc(AttrLoc, 1);
+            end;
+          atVector2:
+            begin
+              AddVertexAttribute(AttrLoc, 1, vafVector2, AttrOffset, Arrays.Attribs[I].Name);
+              Inc(AttrLoc, 1);
+            end;
+          atVector3:
+            begin
+              AddVertexAttribute(AttrLoc, 1, vafVector3, AttrOffset, Arrays.Attribs[I].Name);
+              Inc(AttrLoc, 1);
+            end;
+          atVector4:
+            begin
+              AddVertexAttribute(AttrLoc, 1, vafVector4, AttrOffset, Arrays.Attribs[I].Name);
+              Inc(AttrLoc, 1);
+            end;
+          atMatrix3:
+            begin
+              AddVertexAttribute(AttrLoc,     1, vafVector3, AttrOffset,                          Arrays.Attribs[I].Name);
+              AddVertexAttribute(AttrLoc + 1, 1, vafVector3, AttrOffset + SizeOf(TVector3),       Arrays.Attribs[I].Name + '_col1');
+              AddVertexAttribute(AttrLoc + 2, 1, vafVector3, AttrOffset + SizeOf(TVector3) * 2,   Arrays.Attribs[I].Name + '_col2');
+              Inc(AttrLoc, 3);
+            end;
+          atMatrix4:
+            begin
+              AddVertexAttribute(AttrLoc,     1, vafVector4, AttrOffset,                          Arrays.Attribs[I].Name);
+              AddVertexAttribute(AttrLoc + 1, 1, vafVector4, AttrOffset + SizeOf(TVector4),       Arrays.Attribs[I].Name + '_col1');
+              AddVertexAttribute(AttrLoc + 2, 1, vafVector4, AttrOffset + SizeOf(TVector4) * 2,   Arrays.Attribs[I].Name + '_col2');
+              AddVertexAttribute(AttrLoc + 3, 1, vafVector4, AttrOffset + SizeOf(TVector4) * 3,   Arrays.Attribs[I].Name + '_col3');
+              Inc(AttrLoc, 4);
+            end;
+          else ;
+        end;
+      end;
     end;
 
     case Arrays.Primitive of

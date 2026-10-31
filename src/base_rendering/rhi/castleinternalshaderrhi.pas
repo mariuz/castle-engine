@@ -2699,6 +2699,41 @@ begin
     '  vec3 diffuse = diffuseIrradiance * albedo * kD;' + NL +
     '  vec3 specular = prefilteredEnvColor * (F * brdfLut.x + brdfLut.y);' + NL +
     '  return (diffuse + specular) * ao;' + NL +
+    '}' + NL +
+    NL +
+    'vec3 LINEARtoSRGB(vec3 color) {' + NL +
+    '  return pow(max(color, vec3(0.0)), vec3(1.0 / 2.2));' + NL +
+    '}' + NL +
+    NL +
+    'vec3 toneMapUncharted2Impl(vec3 color) {' + NL +
+    '  const float A = 0.15;' + NL +
+    '  const float B = 0.50;' + NL +
+    '  const float C = 0.10;' + NL +
+    '  const float D = 0.20;' + NL +
+    '  const float E = 0.02;' + NL +
+    '  const float F = 0.30;' + NL +
+    '  return ((color * (A * color + C * B) + D * E) / (color * (A * color + B) + D * F)) - E / F;' + NL +
+    '}' + NL +
+    NL +
+    'vec3 toneMapUncharted(vec3 color) {' + NL +
+    '  const float W = 11.2;' + NL +
+    '  color = toneMapUncharted2Impl(color * 2.0);' + NL +
+    '  vec3 whiteScale = 1.0 / toneMapUncharted2Impl(vec3(W));' + NL +
+    '  return color * whiteScale;' + NL +
+    '}' + NL +
+    NL +
+    'vec3 toneMapHejlRichard(vec3 color) {' + NL +
+    '  color = max(vec3(0.0), color - vec3(0.004));' + NL +
+    '  return (color * (6.2 * color + 0.5)) / (color * (6.2 * color + 1.7) + 0.06);' + NL +
+    '}' + NL +
+    NL +
+    'vec3 toneMapACES(vec3 color) {' + NL +
+    '  const float A = 2.51;' + NL +
+    '  const float B = 0.03;' + NL +
+    '  const float C = 2.43;' + NL +
+    '  const float D = 0.59;' + NL +
+    '  const float E = 0.14;' + NL +
+    '  return clamp((color * (A * color + B)) / (color * (C * color + D) + E), 0.0, 1.0);' + NL +
     '}' + NL;
 end;
 
