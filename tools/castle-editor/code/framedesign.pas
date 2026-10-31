@@ -633,6 +633,9 @@ type
       MenuTreeViewSubmenuBatchTools: TMenuItem;
       MenuTreeViewSubmenuDuplicate: TMenuItem;
       MenuTreeViewSubmenuSelect: TMenuItem;
+      PanelEventsButtons: TPanel;
+      ButtonCopyEventStub: TSpeedButton;
+      ButtonOpenPascalCodeGen: TSpeedButton;
       FComponentPresets: TStringList;
       FComponentNotes: TStringList;
       FCopiedComponentPropsJson: String;
@@ -950,6 +953,8 @@ type
     procedure MenuTreeViewItemQuickColorCustomizerClick(Sender: TObject);
     procedure MenuTreeViewItemDesignReadinessAuditClick(Sender: TObject);
     procedure MenuTreeViewItemExportModelWizardClick(Sender: TObject);
+    procedure ButtonCopyEventStubClick(Sender: TObject);
+    procedure ButtonOpenPascalCodeGenClick(Sender: TObject);
     procedure MenuTreeViewItemGroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemUngroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemArrayDuplicateClick(Sender: TObject);
@@ -2298,6 +2303,7 @@ type
     procedure ShowExportModelDialog;
     procedure ExportToModelWithOptions(const UrlModeIndex: Integer;
       const ExportSelectedSubtreeOnly, ZeroRootOrigin: Boolean);
+    procedure CopySelectedEventStubToClipboard;
     procedure OrganizeHierarchyContextMenuSubmenus;
     procedure SaveCameraBookmark(const Slot: Integer);
     procedure RecallCameraBookmark(const Slot: Integer);
@@ -4680,7 +4686,42 @@ begin
   Inspector[itAll].Parent := TabAll;
   Inspector[itAll].Filter := tkProperties;
 
+  if LabelEventsInfo <> nil then
+    LabelEventsInfo.Caption :=
+      'Assign events in Pascal code (TCastleView.Start). Select an event row below and click "Copy Event Stub", or click "View & Event Code..." for full view boilerplate.';
+
+  if PanelEventsInfo <> nil then
+  begin
+    PanelEventsButtons := TPanel.Create(Self);
+    PanelEventsButtons.Align := alTop;
+    PanelEventsButtons.AutoSize := true;
+    PanelEventsButtons.BevelOuter := bvNone;
+    PanelEventsButtons.ChildSizing.Layout := cclLeftToRightThenTopToBottom;
+    PanelEventsButtons.ChildSizing.ControlsPerLine := 2;
+    PanelEventsButtons.ChildSizing.HorizontalSpacing := 6;
+    PanelEventsButtons.ChildSizing.LeftRightSpacing := 8;
+    PanelEventsButtons.ChildSizing.TopBottomSpacing := 4;
+    PanelEventsButtons.Parent := PanelEventsInfo;
+
+    ButtonCopyEventStub := TSpeedButton.Create(Self);
+    ButtonCopyEventStub.Caption := 'Copy Event Stub';
+    ButtonCopyEventStub.Hint := 'Copy ready-to-paste Pascal method declaration, Start assignment, and handler implementation for the selected event row (or component default event)';
+    ButtonCopyEventStub.ShowHint := true;
+    ButtonCopyEventStub.AutoSize := true;
+    ButtonCopyEventStub.OnClick := @ButtonCopyEventStubClick;
+    ButtonCopyEventStub.Parent := PanelEventsButtons;
+
+    ButtonOpenPascalCodeGen := TSpeedButton.Create(Self);
+    ButtonOpenPascalCodeGen.Caption := 'View & Event Code...';
+    ButtonOpenPascalCodeGen.Hint := 'Open the Pascal TCastleView & Event Handler Code Generator dialog';
+    ButtonOpenPascalCodeGen.ShowHint := true;
+    ButtonOpenPascalCodeGen.AutoSize := true;
+    ButtonOpenPascalCodeGen.OnClick := @ButtonOpenPascalCodeGenClick;
+    ButtonOpenPascalCodeGen.Parent := PanelEventsButtons;
+  end;
+
   Inspector[itEvents] := CommonInspectorCreate;
+  Inspector[itEvents].OnEditorFilter := @InspectorAllFilter;
   Inspector[itEvents].Parent := TabEvents;
   Inspector[itEvents].Filter := tkMethods;
   Inspector[itEvents].AnchorToNeighbour(akTop, 0, PanelEventsInfo);
@@ -35097,7 +35138,29 @@ begin
         EventAssignLines.Add(Format('  %s.OnClick := {$ifdef FPC}@{$endif}Click%s;', [C.Name, C.Name]));
         EventImplLines.Add(Format('procedure TViewMain.Click%s(Sender: TObject);', [C.Name]));
         EventImplLines.Add('begin');
-        EventImplLines.Add(Format('  // TODO: handle %s click', [C.Name]));
+        EventImplLines.Add(Format('  // Handle %s click', [C.Name]));
+        EventImplLines.Add('end;');
+        EventImplLines.Add('');
+      end else
+      if (C is TCastleCheckbox) or (C is TCastleEdit) or
+         (C is TCastleFloatSlider) or (C is TCastleIntegerSlider) or
+         (C is TCastleScrollViewCustom) then
+      begin
+        EventMethodLines.Add(Format('    procedure Change%s(Sender: TObject);', [C.Name]));
+        EventAssignLines.Add(Format('  %s.OnChange := {$ifdef FPC}@{$endif}Change%s;', [C.Name, C.Name]));
+        EventImplLines.Add(Format('procedure TViewMain.Change%s(Sender: TObject);', [C.Name]));
+        EventImplLines.Add('begin');
+        EventImplLines.Add(Format('  // Handle %s value change', [C.Name]));
+        EventImplLines.Add('end;');
+        EventImplLines.Add('');
+      end else
+      if C is TCastleTimer then
+      begin
+        EventMethodLines.Add(Format('    procedure Timer%s(Sender: TObject);', [C.Name]));
+        EventAssignLines.Add(Format('  %s.OnTimer := {$ifdef FPC}@{$endif}Timer%s;', [C.Name, C.Name]));
+        EventImplLines.Add(Format('procedure TViewMain.Timer%s(Sender: TObject);', [C.Name]));
+        EventImplLines.Add('begin');
+        EventImplLines.Add(Format('  // Handle %s periodic timer tick', [C.Name]));
         EventImplLines.Add('end;');
         EventImplLines.Add('');
       end;
@@ -35182,6 +35245,99 @@ begin
 end;
 
 procedure TDesignFrame.MenuTreeViewItemGeneratePascalCodeClick(Sender: TObject);
+begin
+  ShowPascalCodeGeneratorDialog;
+end;
+
+procedure TDesignFrame.CopySelectedEventStubToClipboard;
+var
+  Sel: TComponent;
+  Row: TOIPropertyGridRow;
+  EventName, HandlerName, ParamsSig, CompName: String;
+  Snippet: TStringList;
+begin
+  Sel := GetSelectedComponent(false);
+  if Sel = nil then
+    Sel := FDesignRoot;
+  if Sel = nil then Exit;
+
+  CompName := Sel.Name;
+  if CompName = '' then
+    CompName := 'MyComponent';
+
+  EventName := '';
+  if Inspector[itEvents] <> nil then
+  begin
+    Row := Inspector[itEvents].GetActiveRow;
+    if (Row <> nil) and (Trim(Row.Name) <> '') then
+      EventName := Trim(Row.Name);
+  end;
+
+  if EventName = '' then
+  begin
+    if Sel is TCastleButton then
+      EventName := 'OnClick'
+    else if (Sel is TCastleCheckbox) or (Sel is TCastleEdit) or
+            (Sel is TCastleFloatSlider) or (Sel is TCastleIntegerSlider) or
+            (Sel is TCastleScrollViewCustom) then
+      EventName := 'OnChange'
+    else if Sel is TCastleTimer then
+      EventName := 'OnTimer'
+    else if Sel is TCastleUserInterface then
+      EventName := 'OnPress'
+    else
+      EventName := 'OnUpdate';
+  end;
+
+  if Copy(EventName, 1, 2) = 'On' then
+    HandlerName := Copy(EventName, 3, MaxInt) + CompName
+  else
+    HandlerName := 'Handle' + CompName + EventName;
+
+  if SameText(EventName, 'OnPress') or SameText(EventName, 'OnRelease') then
+    ParamsSig := '(const Sender: TCastleUserInterface; const Event: TInputPressRelease; var Handled: Boolean)'
+  else if SameText(EventName, 'OnMotion') then
+    ParamsSig := '(const Sender: TCastleUserInterface; const Event: TInputMotion; var Handled: Boolean)'
+  else if SameText(EventName, 'OnUpdate') and (Sel is TCastleUserInterface) then
+    ParamsSig := '(const Sender: TCastleUserInterface; const SecondsPassed: Single; var HandleInput: Boolean)'
+  else if SameText(EventName, 'OnCollisionEnter') or SameText(EventName, 'OnCollisionExit') then
+    ParamsSig := '(const CollisionDetails: TPhysicsCollisionDetails)'
+  else
+    ParamsSig := '(Sender: TObject)';
+
+  Snippet := TStringList.Create;
+  try
+    Snippet.Add(Format('{ 1. Published Field & Event Handler Declaration for %s.%s }', [CompName, EventName]));
+    Snippet.Add('  published');
+    Snippet.Add(Format('    %s: %s;', [CompName, Sel.ClassName]));
+    Snippet.Add('  strict private');
+    Snippet.Add(Format('    procedure %s%s;', [HandlerName, ParamsSig]));
+    Snippet.Add('');
+    Snippet.Add('{ 2. Wire Event in TViewMain.Start }');
+    Snippet.Add(Format('  %s.%s := {$ifdef FPC}@{$endif}%s;', [CompName, EventName, HandlerName]));
+    Snippet.Add('');
+    Snippet.Add('{ 3. Event Handler Implementation }');
+    Snippet.Add(Format('procedure TViewMain.%s%s;', [HandlerName, ParamsSig]));
+    Snippet.Add('begin');
+    Snippet.Add(Format('  // Handle %s.%s', [CompName, EventName]));
+    Snippet.Add('end;');
+
+    Clipboard.AsText := Snippet.Text;
+    if LabelEventsInfo <> nil then
+      LabelEventsInfo.Caption := Format(
+        'Copied Pascal event stub for %s.%s (%s) to clipboard! Paste into your TCastleView unit.',
+        [CompName, EventName, HandlerName]);
+  finally
+    FreeAndNil(Snippet);
+  end;
+end;
+
+procedure TDesignFrame.ButtonCopyEventStubClick(Sender: TObject);
+begin
+  CopySelectedEventStubToClipboard;
+end;
+
+procedure TDesignFrame.ButtonOpenPascalCodeGenClick(Sender: TObject);
 begin
   ShowPascalCodeGeneratorDialog;
 end;

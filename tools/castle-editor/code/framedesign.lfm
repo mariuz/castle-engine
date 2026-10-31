@@ -335,7 +335,7 @@ object DesignFrame: TDesignFrame
             Width = 286
             Align = alTop
             BorderSpacing.Around = 8
-            Caption = 'TODO: It''s not possible to assign the events using the CGE editor. For now, you have to assign events using code.'
+            Caption = 'Assign events in Pascal code (TCastleView.Start). Select an event row below and click "Copy Event Stub", or click "View & Event Code..." for full view boilerplate.'
             ParentColor = False
             ParentFont = False
             WordWrap = True
