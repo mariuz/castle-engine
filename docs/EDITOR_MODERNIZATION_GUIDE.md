@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–250**), inspired by **Unreal Engine 5.5**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–251**), inspired by **Unreal Engine 5.5**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -1812,7 +1812,7 @@ Example Editor Workflow (Phases 175–210 — 1-Minute Playable Level Setup):
 
 ---
 
-## 65. Phases 211–250: Advanced 3D Navigation/Joint/Combine Rigs, 2D Font/Mask/ScrollView/Keyboard/Color Generators, Categorized Context Submenus & Final Design Readiness Auditor
+## 65. Phases 211–251: Advanced 3D Navigation/Joint/Combine Rigs, 2D Font/Mask/ScrollView/Keyboard/Color Generators, Categorized Context Submenus, Pre-Release Auditor & 3D Model Exporter (`TUrlProcessing`)
 
 > **Official Reference Documentation & Visual Inspiration:**
 > - **Castle Game Engine:** [Navigation (`TCastleWalkNavigation`, `TCastleExamineNavigation`, `TCastleThirdPersonNavigation`)](https://castle-engine.io/navigation) · [Text & Custom Fonts (`TCastleFont`, `TCastleFontFamily`, `TCastleBitmapFont`)](https://castle-engine.io/text) · [Physics Joints](https://castle-engine.io/physics)
@@ -1839,13 +1839,15 @@ Example Editor Workflow (Phases 175–210 — 1-Minute Playable Level Setup):
 - **Categorized Context Menu Submenus (Phase 238) & Final Pre-Release Design Readiness Auditor (Phase 250):**
   - `OrganizeHierarchyContextMenuSubmenus` groups all specialized hierarchy context menu items into 5 clean submenus: **`3D Level, Scene & Physics Tools`**, **`2D UI, HUD & Screen Generators`**, **`Batch, Prefab & Asset Utilities`**, **`Duplicate, Group & Array`**, and **`Select & Scene Audit Filters`**.
   - **`Final Pre-Release Design Readiness & Asset Integrity Auditor...` (`ShowDesignReadinessAuditDialog` — Phase 250):** Performs a one-click pre-release QA inspection across the entire design hierarchy for missing/broken asset URLs, invalid negative/near-zero 3D scales, dynamic `TCastleRigidBody` nodes missing a `TCastleCollider`, unlinked navigation/behavior references, and zero-sized visible 2D UI controls, with an interactive **`Select All Flagged Components in Hierarchy`** action.
+  - **`Export 3D Viewport / Selected Subtree to glTF / X3D / STL Model...` (`ShowExportModelDialog` / `ExportToModelWithOptions` — Phase 251):** Resolves the `TUrlProcessing` `TODO` in `TDesignFrame.ExportToModel` by allowing designers to export either the **Entire Active 3D Viewport** (`CurrentViewport.InternalBuildNode`) or **Only the Selected `TCastleTransform` Subtree** (`TargetTransform.InternalBuildNode as TAbstractChildNode`, with optional `(0, 0, 0)` root origin centering) across all 5 `TUrlProcessing` resource packaging modes (`suChangeCastleDataToRelative`, `suChangeAllPathsToRelative`, `suEmbedResources`, `suCopyResourcesToSubdirectory`, and `suNone`).
 
 ```text
-Example Editor Workflow (Phases 246–250 — Complete Third-Person Level & Pre-Release QA Audit):
+Example Editor Workflow (Phases 246–251 — Complete Third-Person Level, Pre-Release QA Audit & glTF/X3D Subtree Export):
 1. Right-click Viewport1 -> "3D Level, Scene & Physics Tools" -> "Quick 3D Combined Multi-Source Terrain (TCastleTerrainCombine) Rig..." (Shift-click for instant Macro+Detail ridge terrain).
 2. Right-click Viewport1 -> "3D Level, Scene & Physics Tools" -> "Quick 3D Third-Person Character & Follow-Camera Rig (TCastleThirdPersonNavigation)..." (Shift-click for Action RPG character rig + upright capsule collider + rigid body).
 3. Right-click RootGroup1 -> "2D UI, HUD & Screen Generators" -> Add a Crosshair (TCastleCrosshair), Quest Log ScrollView (TCastleScrollView), Virtual On-Screen Keyboard, and Color Swatch Customizer Card.
 4. Before shipping, right-click in Hierarchy -> "Batch, Prefab & Asset Utilities" -> "Final Pre-Release Design Readiness & Asset Integrity Auditor..." to verify 0 broken asset URLs, 0 collider mismatches, and 0 unlinked references.
+5. Select any kitbashed 3D subtree or procedural terrain -> "Batch, Prefab & Asset Utilities" -> "Export 3D Viewport / Selected Subtree to glTF / X3D / STL Model..." (Shift-click for self-contained embedded data: URI export).
 ```
 
 ---

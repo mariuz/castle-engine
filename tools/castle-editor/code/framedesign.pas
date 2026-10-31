@@ -627,6 +627,7 @@ type
       MenuTreeViewItemQuickVirtualKeyboard: TMenuItem;
       MenuTreeViewItemQuickColorCustomizer: TMenuItem;
       MenuTreeViewItemDesignReadinessAudit: TMenuItem;
+      MenuTreeViewItemExportModelWizard: TMenuItem;
       MenuTreeViewSubmenu3DTools: TMenuItem;
       MenuTreeViewSubmenu2DTools: TMenuItem;
       MenuTreeViewSubmenuBatchTools: TMenuItem;
@@ -948,6 +949,7 @@ type
     procedure MenuTreeViewItemQuickVirtualKeyboardClick(Sender: TObject);
     procedure MenuTreeViewItemQuickColorCustomizerClick(Sender: TObject);
     procedure MenuTreeViewItemDesignReadinessAuditClick(Sender: TObject);
+    procedure MenuTreeViewItemExportModelWizardClick(Sender: TObject);
     procedure MenuTreeViewItemGroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemUngroupSelectedClick(Sender: TObject);
     procedure MenuTreeViewItemArrayDuplicateClick(Sender: TObject);
@@ -2293,6 +2295,9 @@ type
       const DefaultTitle: String);
     procedure ShowQuickColorCustomizerDialog;
     procedure ShowDesignReadinessAuditDialog;
+    procedure ShowExportModelDialog;
+    procedure ExportToModelWithOptions(const UrlModeIndex: Integer;
+      const ExportSelectedSubtreeOnly, ZeroRootOrigin: Boolean);
     procedure OrganizeHierarchyContextMenuSubmenus;
     procedure SaveCameraBookmark(const Slot: Integer);
     procedure RecallCameraBookmark(const Slot: Integer);
@@ -7158,6 +7163,11 @@ begin
   MenuTreeViewItemDesignReadinessAudit.Caption := 'Final Pre-Release Design Readiness & Asset Integrity Auditor...';
   MenuTreeViewItemDesignReadinessAudit.OnClick := @MenuTreeViewItemDesignReadinessAuditClick;
   MenuTreeView.Items.Add(MenuTreeViewItemDesignReadinessAudit);
+
+  MenuTreeViewItemExportModelWizard := TMenuItem.Create(Self);
+  MenuTreeViewItemExportModelWizard.Caption := 'Export 3D Viewport / Selected Subtree to glTF / X3D / STL Model... (Shift: Embedded glTF/X3D)';
+  MenuTreeViewItemExportModelWizard.OnClick := @MenuTreeViewItemExportModelWizardClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemExportModelWizard);
 
   MenuTreeViewItemGroupSelected := TMenuItem.Create(Self);
   MenuTreeViewItemGroupSelected.Caption := 'Group Selected Under New Transform (Ctrl+G)';
@@ -47441,6 +47451,7 @@ begin
 
   // 3. Batch, Prefab & Asset Utilities
   MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemDesignReadinessAudit);
+  MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemExportModelWizard);
   MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemPropertyMatrix);
   MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemSceneStats);
   MoveItemToSubmenu(MenuTreeViewSubmenuBatchTools, MenuTreeViewItemComplexityProfiler);
@@ -48190,6 +48201,9 @@ begin
       (SelectedUserInterface <> nil) or (FDesignRoot is TCastleUserInterface);
   if MenuTreeViewItemDesignReadinessAudit <> nil then
     MenuTreeViewItemDesignReadinessAudit.Enabled := FDesignRoot <> nil;
+  if MenuTreeViewItemExportModelWizard <> nil then
+    MenuTreeViewItemExportModelWizard.Enabled :=
+      (CurrentViewport <> nil) or (CurrentTransform <> nil) or (FDesignRoot is TCastleTransform);
   if MenuTreeViewItemGroupSelected <> nil then
     MenuTreeViewItemGroupSelected.Enabled := (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0);
   if MenuTreeViewItemUngroupSelected <> nil then
@@ -48758,40 +48772,212 @@ begin
   end;
 end;
 
-procedure TDesignFrame.ExportToModel;
+procedure TDesignFrame.ExportToModelWithOptions(const UrlModeIndex: Integer;
+  const ExportSelectedSubtreeOnly, ZeroRootOrigin: Boolean);
 var
   RootNode: TX3DRootNode;
+  ExportedChildNode: TAbstractChildNode;
   SaveUrl: String;
   UrlProcessing: TUrlProcessing;
+  TargetTransform: TCastleTransform;
+  SavedTranslation: TVector3;
 begin
-  if CurrentViewport = nil then
+  case UrlModeIndex of
+    1: UrlProcessing := suChangeAllPathsToRelative;
+    2: UrlProcessing := suEmbedResources;
+    3: UrlProcessing := suCopyResourcesToSubdirectory;
+    4: UrlProcessing := suNone;
+    else UrlProcessing := suChangeCastleDataToRelative;
+  end;
+
+  TargetTransform := nil;
+  if ExportSelectedSubtreeOnly then
   begin
-    ErrorBox('Select a viewport to export first.' + NL + NL +
-      'Do it by selecting any TCastleViewport or a child of it in the hierarchy. Or just hover your mouse over it.');
-    Exit;
+    if CurrentTransform <> nil then
+      TargetTransform := CurrentTransform
+    else if (TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0) then
+      TargetTransform := TransformManipulate.Selected[0]
+    else if FDesignRoot is TCastleTransform then
+      TargetTransform := TCastleTransform(FDesignRoot);
+
+    if TargetTransform = nil then
+    begin
+      ErrorBox('Select a TCastleTransform node or subtree in the hierarchy or 3D viewport to export.');
+      Exit;
+    end;
+  end else
+  begin
+    if (CurrentViewport = nil) and (FDesignRoot is TCastleTransform) then
+      TargetTransform := TCastleTransform(FDesignRoot)
+    else if (CurrentViewport = nil) and (CurrentTransform <> nil) then
+      TargetTransform := CurrentTransform;
+
+    if (CurrentViewport = nil) and (TargetTransform = nil) then
+    begin
+      ErrorBox('Select a viewport or 3D transform to export first.' + NL + NL +
+        'Do it by selecting any TCastleViewport or TCastleTransform in the hierarchy, or hover your mouse over a 3D viewport.');
+      Exit;
+    end;
   end;
 
   if ExportToModelDialog.Execute then
   begin
     SaveUrl := ExportToModelDialog.Url;
-    UrlProcessing := suChangeCastleDataToRelative;
-    { TODO: get UrlProcessing as parameter;
-
-      TODO: FormProject should allow user to choose UrlProcessing --
-      e.g. by selecting a menu item (radio), like
-
-        Data ->
-          Export to Model URL Behavior ->
-            None
-            Change castle-data:/ To Relative // default
-            Embed Resources using data URI (make self-contained X3D file)
-            Copy All Resources to exported-output Subdirectory
-    }
-    RootNode := CurrentViewport.InternalBuildNode(SaveUrl, UrlProcessing);
-    try
-      SaveNode(RootNode, SaveUrl);
-    finally FreeAndNil(RootNode) end;
+    if TargetTransform <> nil then
+    begin
+      RootNode := TX3DRootNode.Create;
+      try
+        SavedTranslation := TargetTransform.Translation;
+        if ZeroRootOrigin then
+          TargetTransform.Translation := TVector3.Zero;
+        try
+          ExportedChildNode := TargetTransform.InternalBuildNode as TAbstractChildNode;
+        finally
+          if ZeroRootOrigin then
+            TargetTransform.Translation := SavedTranslation;
+        end;
+        if ExportedChildNode <> nil then
+          RootNode.AddChildren(ExportedChildNode);
+        ProcessUrls(RootNode, SaveUrl, UrlProcessing);
+        SaveNode(RootNode, SaveUrl);
+      finally
+        FreeAndNil(RootNode);
+      end;
+    end else
+    begin
+      RootNode := CurrentViewport.InternalBuildNode(SaveUrl, UrlProcessing);
+      try
+        SaveNode(RootNode, SaveUrl);
+      finally
+        FreeAndNil(RootNode);
+      end;
+    end;
   end;
+end;
+
+procedure TDesignFrame.ShowExportModelDialog;
+var
+  Dialog: TForm;
+  LblScope, LblUrlMode: TLabel;
+  ComboScope, ComboUrlMode: TComboBox;
+  CheckZeroOrigin: TCheckBox;
+  BottomPanel: TPanel;
+  BtnOk, BtnCancel: TButton;
+  HasSelectedTransform: Boolean;
+begin
+  if (CurrentViewport = nil) and (CurrentTransform = nil) and
+     (not (FDesignRoot is TCastleTransform)) then
+  begin
+    ErrorBox('Select a TCastleViewport or TCastleTransform to export first.');
+    Exit;
+  end;
+
+  HasSelectedTransform := (CurrentTransform <> nil) or
+    ((TransformManipulate <> nil) and (TransformManipulate.SelectedCount > 0));
+
+  Dialog := TForm.CreateNew(Self);
+  try
+    Dialog.Caption := 'Export 3D Viewport / Subtree to Model (glTF / X3D / STL)';
+    Dialog.Position := poMainFormCenter;
+    Dialog.BorderStyle := bsDialog;
+    Dialog.Width := 560;
+    Dialog.Height := 250;
+
+    LblScope := TLabel.Create(Dialog);
+    LblScope.Left := 16;
+    LblScope.Top := 16;
+    LblScope.Caption := '3D Export Scope:';
+    LblScope.Parent := Dialog;
+
+    ComboScope := TComboBox.Create(Dialog);
+    ComboScope.Left := 16;
+    ComboScope.Top := 38;
+    ComboScope.Width := 528;
+    ComboScope.Style := csDropDownList;
+    ComboScope.Items.Add('Entire Active 3D Viewport (Items, Lights, Background, Fog & Navigation)');
+    ComboScope.Items.Add('Selected TCastleTransform Subtree Only (Kitbashed Prop / Terrain / Group)');
+    if (CurrentViewport = nil) and HasSelectedTransform then
+      ComboScope.ItemIndex := 1
+    else
+      ComboScope.ItemIndex := 0;
+    ComboScope.Parent := Dialog;
+
+    LblUrlMode := TLabel.Create(Dialog);
+    LblUrlMode.Left := 16;
+    LblUrlMode.Top := 78;
+    LblUrlMode.Caption := 'Resource & Texture URL Packaging (TUrlProcessing):';
+    LblUrlMode.Parent := Dialog;
+
+    ComboUrlMode := TComboBox.Create(Dialog);
+    ComboUrlMode.Left := 16;
+    ComboUrlMode.Top := 100;
+    ComboUrlMode.Width := 528;
+    ComboUrlMode.Style := csDropDownList;
+    ComboUrlMode.Items.Add('Convert castle-data:/ URLs to Relative Paths (Default — suChangeCastleDataToRelative)');
+    ComboUrlMode.Items.Add('Convert All castle-data:/ & Local File URLs to Relative Paths (suChangeAllPathsToRelative)');
+    ComboUrlMode.Items.Add('Embed All Textures & Resources Using data: URIs (Self-Contained — suEmbedResources)');
+    ComboUrlMode.Items.Add('Copy All Referenced Resources to <name>_resources/ Subdirectory (suCopyResourcesToSubdirectory)');
+    ComboUrlMode.Items.Add('None — Keep Original castle-data:/ URLs Unmodified (suNone)');
+    ComboUrlMode.ItemIndex := 0;
+    ComboUrlMode.Parent := Dialog;
+
+    CheckZeroOrigin := TCheckBox.Create(Dialog);
+    CheckZeroOrigin.Left := 16;
+    CheckZeroOrigin.Top := 142;
+    CheckZeroOrigin.Caption := 'Center / Zero Root Translation at (0, 0, 0) When Exporting Selected Subtree';
+    CheckZeroOrigin.Checked := true;
+    CheckZeroOrigin.Parent := Dialog;
+
+    BottomPanel := TPanel.Create(Dialog);
+    BottomPanel.Align := alBottom;
+    BottomPanel.AutoSize := true;
+    BottomPanel.BevelOuter := bvNone;
+    BottomPanel.Parent := Dialog;
+
+    BtnCancel := TButton.Create(Dialog);
+    BtnCancel.Caption := 'Cancel';
+    BtnCancel.Cancel := true;
+    BtnCancel.ModalResult := mrCancel;
+    BtnCancel.Align := alRight;
+    BtnCancel.BorderSpacing.Around := 6;
+    BtnCancel.Parent := BottomPanel;
+
+    BtnOk := TButton.Create(Dialog);
+    BtnOk.Caption := 'Choose File & Export...';
+    BtnOk.Default := true;
+    BtnOk.ModalResult := mrOk;
+    BtnOk.AutoSize := true;
+    BtnOk.Align := alRight;
+    BtnOk.BorderSpacing.Around := 6;
+    BtnOk.Parent := BottomPanel;
+
+    if Dialog.ShowModal = mrOk then
+      ExportToModelWithOptions(
+        ComboUrlMode.ItemIndex,
+        ComboScope.ItemIndex = 1,
+        CheckZeroOrigin.Checked and (ComboScope.ItemIndex = 1));
+  finally
+    FreeAndNil(Dialog);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemExportModelWizardClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    ExportToModelWithOptions(
+      2 {suEmbedResources},
+      (CurrentTransform <> nil) and (CurrentTransform <> FDesignRoot),
+      true)
+  else
+    ShowExportModelDialog;
+end;
+
+procedure TDesignFrame.ExportToModel;
+begin
+  if ssShift in GetKeyShiftState then
+    ExportToModelWithOptions(0 {suChangeCastleDataToRelative}, false, false)
+  else
+    ShowExportModelDialog;
 end;
 
 initialization
