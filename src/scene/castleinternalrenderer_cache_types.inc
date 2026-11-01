@@ -1154,6 +1154,54 @@ begin
     end;
     if AHasShadowMap then
     begin
+      if EffectiveShadowSampling = ssVarianceShadowMaps then
+      begin
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          'sampler2DShadow castle_shadow_map_0;',
+          'sampler2D castle_shadow_map_0;',
+          []);
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          'sampler2DShadow castle_shadow_map_1;',
+          'sampler2D castle_shadow_map_1;',
+          []);
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          'sampler2DShadow castle_shadow_map_2;',
+          'sampler2D castle_shadow_map_2;',
+          []);
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          'sampler2DShadow castle_shadow_map_3;',
+          'sampler2D castle_shadow_map_3;',
+          []);
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          'void main() {',
+          'vec2 castle_sample_vsm_slot(float slot, vec2 uv) {' + LineEnding +
+          '  if (slot < 1.5) return texture(castle_shadow_map_0, uv).rg;' + LineEnding +
+          '  if (slot < 2.5) return texture(castle_shadow_map_1, uv).rg;' + LineEnding +
+          '  if (slot < 3.5) return texture(castle_shadow_map_2, uv).rg;' + LineEnding +
+          '  return texture(castle_shadow_map_3, uv).rg;' + LineEnding +
+          '}' + LineEnding +
+          'void main() {',
+          []);
+      end else
+      begin
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          'void main() {',
+          'float castle_sample_shadow_slot(float slot, vec3 coord) {' + LineEnding +
+          '  if (slot < 1.5) return texture(castle_shadow_map_0, coord);' + LineEnding +
+          '  if (slot < 2.5) return texture(castle_shadow_map_1, coord);' + LineEnding +
+          '  if (slot < 3.5) return texture(castle_shadow_map_2, coord);' + LineEnding +
+          '  return texture(castle_shadow_map_3, coord);' + LineEnding +
+          '}' + LineEnding +
+          '#define castle_sample_shadow_slot_0(slot, coord) ((slot < 1.5) ? texture(castle_shadow_map_0, coord) : castle_sample_shadow_slot(slot, coord))' + LineEnding +
+          'void main() {',
+          []);
+      end;
       case EffectiveShadowSampling of
         ssPCF4:
           ShadowMapSnippet := FormatDot(
@@ -1166,10 +1214,10 @@ begin
             '          float shadowZ = shadowProj.z - 0.002;' + LineEnding +
             '          float shadowOff = 1.0 / %g;' + LineEnding +
             '          shadowVis = 0.25 * (' + LineEnding +
-            '            texture(castle_shadow_map_0, vec3(shadowProj.x - shadowOff, shadowProj.y - shadowOff, shadowZ)) +' + LineEnding +
-            '            texture(castle_shadow_map_0, vec3(shadowProj.x - shadowOff, shadowProj.y + shadowOff, shadowZ)) +' + LineEnding +
-            '            texture(castle_shadow_map_0, vec3(shadowProj.x + shadowOff, shadowProj.y - shadowOff, shadowZ)) +' + LineEnding +
-            '            texture(castle_shadow_map_0, vec3(shadowProj.x + shadowOff, shadowProj.y + shadowOff, shadowZ)));' + LineEnding +
+            '            castle_sample_shadow_slot(light.SpotParams.w, vec3(shadowProj.x - shadowOff, shadowProj.y - shadowOff, shadowZ)) +' + LineEnding +
+            '            castle_sample_shadow_slot(light.SpotParams.w, vec3(shadowProj.x - shadowOff, shadowProj.y + shadowOff, shadowZ)) +' + LineEnding +
+            '            castle_sample_shadow_slot(light.SpotParams.w, vec3(shadowProj.x + shadowOff, shadowProj.y - shadowOff, shadowZ)) +' + LineEnding +
+            '            castle_sample_shadow_slot(light.SpotParams.w, vec3(shadowProj.x + shadowOff, shadowProj.y + shadowOff, shadowZ)));' + LineEnding +
             '        }' + LineEnding +
             '      }' + LineEnding +
             '    }',
@@ -1189,10 +1237,10 @@ begin
             '          vec2 f = fract(tc_full);' + LineEnding +
             '          vec2 f1 = vec2(1.0) - f;' + LineEnding +
             '          shadowVis =' + LineEnding +
-            '            texture(castle_shadow_map_0, vec3((tc.x) / shadowSize, (tc.y) / shadowSize, shadowZ)) * f1.x * f1.y +' + LineEnding +
-            '            texture(castle_shadow_map_0, vec3((tc.x) / shadowSize, (tc.y + 1.0) / shadowSize, shadowZ)) * f1.x * f.y +' + LineEnding +
-            '            texture(castle_shadow_map_0, vec3((tc.x + 1.0) / shadowSize, (tc.y) / shadowSize, shadowZ)) * f.x * f1.y +' + LineEnding +
-            '            texture(castle_shadow_map_0, vec3((tc.x + 1.0) / shadowSize, (tc.y + 1.0) / shadowSize, shadowZ)) * f.x * f.y;' + LineEnding +
+            '            castle_sample_shadow_slot(light.SpotParams.w, vec3((tc.x) / shadowSize, (tc.y) / shadowSize, shadowZ)) * f1.x * f1.y +' + LineEnding +
+            '            castle_sample_shadow_slot(light.SpotParams.w, vec3((tc.x) / shadowSize, (tc.y + 1.0) / shadowSize, shadowZ)) * f1.x * f.y +' + LineEnding +
+            '            castle_sample_shadow_slot(light.SpotParams.w, vec3((tc.x + 1.0) / shadowSize, (tc.y) / shadowSize, shadowZ)) * f.x * f1.y +' + LineEnding +
+            '            castle_sample_shadow_slot(light.SpotParams.w, vec3((tc.x + 1.0) / shadowSize, (tc.y + 1.0) / shadowSize, shadowZ)) * f.x * f.y;' + LineEnding +
             '        }' + LineEnding +
             '      }' + LineEnding +
             '    }',
@@ -1210,7 +1258,7 @@ begin
             '          float shadowSum = 0.0;' + LineEnding +
             '          for (int sy = 0; sy < 4; ++sy)' + LineEnding +
             '            for (int sx = 0; sx < 4; ++sx)' + LineEnding +
-            '              shadowSum += texture(castle_shadow_map_0, vec3(shadowProj.xy + (vec2(float(sx), float(sy)) - vec2(1.5)) * shadowOff, shadowZ));' + LineEnding +
+            '              shadowSum += ((light.SpotParams.w < 1.5) ? texture(castle_shadow_map_0, vec3(shadowProj.xy + (vec2(float(sx), float(sy)) - vec2(1.5)) * shadowOff, shadowZ)) : castle_sample_shadow_slot(light.SpotParams.w, vec3(shadowProj.xy + (vec2(float(sx), float(sy)) - vec2(1.5)) * shadowOff, shadowZ)));' + LineEnding +
             '          shadowVis = shadowSum * (1.0 / 16.0);' + LineEnding +
             '        }' + LineEnding +
             '      }' + LineEnding +
@@ -1218,11 +1266,6 @@ begin
             [Single(EffectiveShadowSize)]);
         ssVarianceShadowMaps:
           begin
-            FRHIFragmentShaderSource := StringReplace(
-              FRHIFragmentShaderSource,
-              'sampler2DShadow castle_shadow_map_0;',
-              'sampler2D castle_shadow_map_0;',
-              []);
             ShadowMapSnippet :=
               '    float shadowVis = 1.0;' + LineEnding +
               '    if (light.SpotParams.w > 0.5) {' + LineEnding +
@@ -1230,7 +1273,7 @@ begin
               '      if (shadowClip.w > 1e-5) {' + LineEnding +
               '        vec3 shadowProj = shadowClip.xyz / shadowClip.w;' + LineEnding +
               '        if (shadowProj.x >= 0.0 && shadowProj.x <= 1.0 && shadowProj.y >= 0.0 && shadowProj.y <= 1.0 && shadowProj.z >= 0.0 && shadowProj.z <= 1.0) {' + LineEnding +
-              '          vec2 vsmMoments = texture(castle_shadow_map_0, shadowProj.xy).rg;' + LineEnding +
+              '          vec2 vsmMoments = (light.SpotParams.w < 1.5) ? texture(castle_shadow_map_0, shadowProj.xy).rg : castle_sample_vsm_slot(light.SpotParams.w, shadowProj.xy);' + LineEnding +
               '          float vsmVariance = max(vsmMoments.y - vsmMoments.x * vsmMoments.x, 1e-5);' + LineEnding +
               '          float vsmDelta = vsmMoments.x - shadowProj.z;' + LineEnding +
               '          shadowVis = (shadowProj.z <= vsmMoments.x) ? 1.0 : (vsmVariance / (vsmVariance + vsmDelta * vsmDelta));' + LineEnding +
@@ -1246,7 +1289,7 @@ begin
             '      if (shadowClip.w > 1e-5) {' + LineEnding +
             '        vec3 shadowProj = shadowClip.xyz / shadowClip.w;' + LineEnding +
             '        if (shadowProj.x >= 0.0 && shadowProj.x <= 1.0 && shadowProj.y >= 0.0 && shadowProj.y <= 1.0 && shadowProj.z >= 0.0 && shadowProj.z <= 1.0)' + LineEnding +
-            '          shadowVis = texture(castle_shadow_map_0, vec3(shadowProj.xy, shadowProj.z - 0.002));' + LineEnding +
+            '          shadowVis = (light.SpotParams.w < 1.5) ? texture(castle_shadow_map_0, vec3(shadowProj.xy, shadowProj.z - 0.002)) : castle_sample_shadow_slot(light.SpotParams.w, vec3(shadowProj.xy, shadowProj.z - 0.002));' + LineEnding +
             '      }' + LineEnding +
             '    }';
       end;

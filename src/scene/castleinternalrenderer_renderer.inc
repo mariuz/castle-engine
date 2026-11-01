@@ -91,9 +91,12 @@
     FRHISceneDescriptorSet: TRHIDescriptorSet;
     FRHIShadowMap0Texture: TRHITexture;
     FRHIShadowMap0Sampler: TRHISampler;
+    FRHIShadowMapTextures: array[0..3] of TRHITexture;
+    FRHIShadowMapSamplers: array[0..3] of TRHISampler;
     FRHISceneOwnerDevice: TRHIDevice;
     FRHIDefaultVertexShader: TRHIShaderModule;
     FRHIDefaultFragmentShader: TRHIShaderModule;
+    FRHIVSMCasterFragmentShader: TRHIShaderModule;
     FSceneUniformBlock: TCastleSceneUniformBlock;
     FRHISceneBufferUploadCount: Cardinal;
 
@@ -121,6 +124,8 @@
     FWireframePass: TWireframeRenderingPass;
     FUserPass: TUserRenderingPass;
 
+    function GetRHIShadowMapTexture(const ASlot: Cardinal): TRHITexture;
+    function GetRHIShadowMapSampler(const ASlot: Cardinal): TRHISampler;
     procedure SetWireframePass(const Value: TWireframeRenderingPass);
 
     { Calculate FPass based on FInternalPass, FWireframePass, FUserPass. }
@@ -288,8 +293,11 @@
     property RHISceneDescriptorSet: TRHIDescriptorSet read FRHISceneDescriptorSet;
     property RHIShadowMap0Texture: TRHITexture read FRHIShadowMap0Texture;
     property RHIShadowMap0Sampler: TRHISampler read FRHIShadowMap0Sampler;
+    property RHIShadowMapTexture[const ASlot: Cardinal]: TRHITexture read GetRHIShadowMapTexture;
+    property RHIShadowMapSampler[const ASlot: Cardinal]: TRHISampler read GetRHIShadowMapSampler;
     property RHIDefaultVertexShader: TRHIShaderModule read FRHIDefaultVertexShader;
     property RHIDefaultFragmentShader: TRHIShaderModule read FRHIDefaultFragmentShader;
+    property RHIVSMCasterFragmentShader: TRHIShaderModule read FRHIVSMCasterFragmentShader;
     property SceneUniformBlock: TCastleSceneUniformBlock read FSceneUniformBlock;
     property RHISceneBufferUploadCount: Cardinal read FRHISceneBufferUploadCount;
     property ActiveLightsRenderer: TLightsRenderer read LightsRenderer;
@@ -308,12 +316,15 @@ begin
 end;
 
 destructor TRenderer.Destroy;
+var
+  I: Integer;
 begin
   FreeAndNil(TextureTransformUnitsUsedMore);
   FreeAndNil(PreparedShader);
   FreeAndNil(ShadowMapsShaders);
   FreeAndNil(VarianceShadowMapsShaders);
-  if ((FRHISceneBuffer <> nil) or (FRHIDefaultVertexShader <> nil) or (FRHIDefaultFragmentShader <> nil)) and
+  if ((FRHISceneBuffer <> nil) or (FRHIDefaultVertexShader <> nil) or
+      (FRHIDefaultFragmentShader <> nil) or (FRHIVSMCasterFragmentShader <> nil)) and
      (RHIDevice = FRHISceneOwnerDevice) then
   begin
     FreeAndNil(FRHISceneDescriptorSet);
@@ -321,6 +332,7 @@ begin
     FreeAndNil(FRHISceneBuffer);
     FreeAndNil(FRHIDefaultVertexShader);
     FreeAndNil(FRHIDefaultFragmentShader);
+    FreeAndNil(FRHIVSMCasterFragmentShader);
   end else
   begin
     FRHISceneDescriptorSet := nil;
@@ -328,10 +340,32 @@ begin
     FRHISceneBuffer := nil;
     FRHIDefaultVertexShader := nil;
     FRHIDefaultFragmentShader := nil;
+    FRHIVSMCasterFragmentShader := nil;
   end;
   FRHIShadowMap0Texture := nil;
   FRHIShadowMap0Sampler := nil;
+  for I := 0 to High(FRHIShadowMapTextures) do
+  begin
+    FRHIShadowMapTextures[I] := nil;
+    FRHIShadowMapSamplers[I] := nil;
+  end;
   inherited;
+end;
+
+function TRenderer.GetRHIShadowMapTexture(const ASlot: Cardinal): TRHITexture;
+begin
+  if ASlot <= High(FRHIShadowMapTextures) then
+    Result := FRHIShadowMapTextures[ASlot]
+  else
+    Result := nil;
+end;
+
+function TRenderer.GetRHIShadowMapSampler(const ASlot: Cardinal): TRHISampler;
+begin
+  if ASlot <= High(FRHIShadowMapSamplers) then
+    Result := FRHIShadowMapSamplers[ASlot]
+  else
+    Result := nil;
 end;
 
 procedure TRenderer.BuildSceneUniformBlock(out UniformBlock: TCastleSceneUniformBlock);
@@ -430,8 +464,14 @@ begin
     FRHISceneBuffer := nil;
     FRHIShadowMap0Texture := nil;
     FRHIShadowMap0Sampler := nil;
+    for I := 0 to High(FRHIShadowMapTextures) do
+    begin
+      FRHIShadowMapTextures[I] := nil;
+      FRHIShadowMapSamplers[I] := nil;
+    end;
     FRHIDefaultVertexShader := nil;
     FRHIDefaultFragmentShader := nil;
+    FRHIVSMCasterFragmentShader := nil;
   end;
   if FRHISceneBuffer = nil then
     UploadSceneUniformBlockToRHI;
@@ -473,6 +513,13 @@ procedure TRenderer.BindShadowMapToSceneDescriptorSet(
   const AShadowMapTex: TRHITexture;
   const AShadowMapSampler: TRHISampler);
 begin
+  if (RHIDevice <> nil) and (ASlot <= 3) and (AShadowMapTex <> nil) then
+    EnsureRHISceneDescriptorSet;
+  if ASlot <= High(FRHIShadowMapTextures) then
+  begin
+    FRHIShadowMapTextures[ASlot] := AShadowMapTex;
+    FRHIShadowMapSamplers[ASlot] := AShadowMapSampler;
+  end;
   if ASlot = 0 then
   begin
     FRHIShadowMap0Texture := AShadowMapTex;
@@ -480,7 +527,6 @@ begin
   end;
   if (RHIDevice = nil) or (ASlot > 3) or (AShadowMapTex = nil) then
     Exit;
-  EnsureRHISceneDescriptorSet;
   if FRHISceneDescriptorSet <> nil then
   begin
     FRHISceneDescriptorSet.BindTexture(2 + ASlot, AShadowMapTex, AShadowMapSampler);
@@ -491,6 +537,7 @@ end;
 procedure TRenderer.EnsureRHIDefaultShaders;
 var
   Gen: TCastleShaderGeneratorRHI;
+  VSMCasterSrc: String;
 begin
   if RHIDevice = nil then
     Exit;
@@ -501,9 +548,11 @@ begin
     FRHISceneBuffer := nil;
     FRHIDefaultVertexShader := nil;
     FRHIDefaultFragmentShader := nil;
+    FRHIVSMCasterFragmentShader := nil;
     FRHISceneOwnerDevice := RHIDevice;
   end;
-  if (FRHIDefaultVertexShader = nil) or (FRHIDefaultFragmentShader = nil) then
+  if (FRHIDefaultVertexShader = nil) or (FRHIDefaultFragmentShader = nil) or
+     (FRHIVSMCasterFragmentShader = nil) then
   begin
     Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
     try
@@ -513,6 +562,16 @@ begin
       if FRHIDefaultFragmentShader = nil then
         FRHIDefaultFragmentShader := RHIDevice.CreateShaderModuleFromGLSL(
           ssFragment, Gen.GenerateDefault3DFragmentShader(False, False, False, False, False, False, False, False, False), 'CastleDefault3DFrag');
+      if FRHIVSMCasterFragmentShader = nil then
+      begin
+        VSMCasterSrc :=
+          Gen.GeneratePreamble(ssFragment) +
+          'void main() {' + LineEnding +
+          '  castle_FragColor = vec4(gl_FragCoord.z, gl_FragCoord.z * gl_FragCoord.z, 0.0, 1.0);' + LineEnding +
+          '}' + LineEnding;
+        FRHIVSMCasterFragmentShader := RHIDevice.CreateShaderModuleFromGLSL(
+          ssFragment, VSMCasterSrc, 'CastleVSMCasterFrag');
+      end;
     finally
       FreeAndNil(Gen);
     end;
@@ -558,6 +617,7 @@ var
   BlendSrcFactor: TBlendingSourceFactor;
   BlendDestFactor: TBlendingDestinationFactor;
   UseBlending: Boolean;
+  OptColorMask: Byte;
 begin
   FillChar(ADesc, SizeOf(ADesc), 0);
   EnsureRHIDefaultShaders;
@@ -791,6 +851,15 @@ begin
       ADesc.BlendState.DstAlphaBlendFactor := ADesc.BlendState.DstColorBlendFactor;
     end;
   end;
+  if (ARenderOptions <> nil) and (ARenderOptions.InternalColorChannels <> AllColorChannels) then
+  begin
+    OptColorMask := 0;
+    if 0 in ARenderOptions.InternalColorChannels then OptColorMask := OptColorMask or $01;
+    if 1 in ARenderOptions.InternalColorChannels then OptColorMask := OptColorMask or $02;
+    if 2 in ARenderOptions.InternalColorChannels then OptColorMask := OptColorMask or $04;
+    if 3 in ARenderOptions.InternalColorChannels then OptColorMask := OptColorMask or $08;
+    ADesc.BlendState.ColorWriteMask := ADesc.BlendState.ColorWriteMask and OptColorMask;
+  end;
 
   Set1Layout := nil;
   Set2Layout := nil;
@@ -843,7 +912,10 @@ begin
   end else
   if (RenderingCamera <> nil) and (RenderingCamera.Target = rtVarianceShadowMap) then
   begin
+    ADesc.FragmentShader := FRHIVSMCasterFragmentShader;
     ADesc.Rasterizer.DepthBiasEnable := True;
+    ADesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+    ADesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
     ADesc.ColorAttachmentFormats[0] := pfRGBA32_Float;
     ADesc.DebugName := 'CastleShapeVSMPSO';
   end else

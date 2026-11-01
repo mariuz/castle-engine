@@ -85,7 +85,8 @@ type
       const Attenuation: TVector3; const Radius: Single): Integer;
     function AddSpotLight(const Position, Direction, Color, AmbientColor: TVector3;
       const Attenuation: TVector3; const Radius, SpotCosCutoff, SpotCutoff, BeamWidth, SpotExponent: Single): Integer;
-    procedure SetProjectorMatrix(const Index: Integer; const Matrix: TMatrix4);
+    procedure SetProjectorMatrix(const Index: Integer; const Matrix: TMatrix4;
+      const AShadowSlotIndex: Integer = 0);
   end; // Total = 5136 bytes (5136 mod 16 = 0)
 
   { Shading model selector for RHI forward/bindless material pipelines }
@@ -1796,12 +1797,12 @@ begin
 end;
 
 procedure TCastleLightsUniformBlock.SetProjectorMatrix(const Index: Integer;
-  const Matrix: TMatrix4);
+  const Matrix: TMatrix4; const AShadowSlotIndex: Integer);
 begin
   if (Index >= 0) and (Index < Integer(Count)) then
   begin
     Lights[Index].ProjectorMatrix := Matrix;
-    Lights[Index].SpotParams.W := 1.0;
+    Lights[Index].SpotParams.W := Single(EnsureRange(AShadowSlotIndex, 0, 3) + 1);
   end;
 end;
 

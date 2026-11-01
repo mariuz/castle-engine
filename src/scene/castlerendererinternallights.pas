@@ -315,6 +315,9 @@ procedure TLightsRenderer.BuildLightsUniformBlock(const Shape: TShape;
   const Shader: TShader;
   out UniformBlock: TCastleLightsUniformBlock);
 
+  var
+    NextShadowSlotIdx: Integer;
+
   procedure AddList(const Lights: TLightInstancesList; const IsGlobalLight: Boolean);
   const
     ProjectorScalingMatrixVulkan: TMatrix4 = (Data:
@@ -323,7 +326,7 @@ procedure TLightsRenderer.BuildLightsUniformBlock(const Shape: TShape;
       (0.0, 0.0, 1.0, 0.0),
       (0.5, 0.5, 0.0, 1.0) ));
   var
-    I, Idx: Integer;
+    I, Idx, ShadowSlotIdx: Integer;
     LightOn: boolean;
     Light: PLightInstance;
     Node: TAbstractLightNode;
@@ -411,7 +414,17 @@ procedure TLightsRenderer.BuildLightsUniformBlock(const Shape: TShape;
           ProjectorMatrix := (ProjectorScalingMatrixVulkan *
             TAbstractPunctualLightNode(Node).GetProjectorMatrix) *
             RenderingCamera.InverseMatrix;
-          UniformBlock.SetProjectorMatrix(Idx, ProjectorMatrix);
+          ShadowSlotIdx := -1;
+          if (Shape <> nil) and (Shape.InternalShadowMaps <> nil) then
+            ShadowSlotIdx := Shape.InternalShadowMaps.IndexOf(
+              TAbstractPunctualLightNode(Node).DefaultShadowMap);
+          if ShadowSlotIdx < 0 then
+          begin
+            ShadowSlotIdx := NextShadowSlotIdx;
+            if NextShadowSlotIdx < 3 then
+              Inc(NextShadowSlotIdx);
+          end;
+          UniformBlock.SetProjectorMatrix(Idx, ProjectorMatrix, EnsureRange(ShadowSlotIdx, 0, 3));
         end;
 
         if UniformBlock.Count >= CASTLE_MAX_LIGHTS then
@@ -422,6 +435,7 @@ procedure TLightsRenderer.BuildLightsUniformBlock(const Shape: TShape;
 
 begin
   UniformBlock.Clear;
+  NextShadowSlotIdx := 0;
   AddList(GlobalLights, True);
   if UniformBlock.Count < CASTLE_MAX_LIGHTS then
     AddList(SceneLights, False);

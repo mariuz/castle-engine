@@ -306,6 +306,9 @@ type
     procedure TestShadowSamplingModesPCFAndVSMSpecializationRHI;
     procedure TestMultiClipPlanesExtractionAndSpecializationRHI;
     procedure TestSecondaryUVChannelAndMaterialTextureMappingSpecializationRHI;
+    procedure TestMultiShadowMapLightsSlotRoutingAndSceneDescriptorSetRHI;
+    procedure TestRenderOptionsColorChannelsWriteMaskPipelineRHI;
+    procedure TestVarianceShadowMapCasterPassMomentShaderAndPipelineRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -17710,7 +17713,7 @@ begin
     AssertEquals('RHIShadowSampling must be ssSimple', Ord(ssSimple), Ord(RendererShape.Cache.RHIShadowSampling));
     AssertEquals('RHIShadowMapSize must be 512', 512, Integer(RendererShape.Cache.RHIShadowMapSize));
     AssertTrue('ssSimple must use single depth comparison lookup',
-      Pos('shadowVis = texture(castle_shadow_map_0, vec3(shadowProj.xy, shadowProj.z - 0.002));',
+      Pos('texture(castle_shadow_map_0, vec3(shadowProj.xy, shadowProj.z - 0.002))',
         RendererShape.Cache.RHIFragmentShaderSource) > 0);
 
     { 2. ssPCF4 }
@@ -17744,7 +17747,7 @@ begin
     AssertEquals('RHIShadowSampling must be ssVarianceShadowMaps', Ord(ssVarianceShadowMaps), Ord(RendererShape.Cache.RHIShadowSampling));
     AssertTrue('ssVarianceShadowMaps must declare sampler2D castle_shadow_map_0 and Chebyshev inequality',
       (Pos('sampler2D castle_shadow_map_0;', RendererShape.Cache.RHIFragmentShaderSource) > 0) and
-      (Pos('vec2 vsmMoments = texture(castle_shadow_map_0, shadowProj.xy).rg;', RendererShape.Cache.RHIFragmentShaderSource) > 0) and
+      (Pos('castle_sample_vsm_slot(light.SpotParams.w, shadowProj.xy)', RendererShape.Cache.RHIFragmentShaderSource) > 0) and
       (Pos('vsmVariance / (vsmVariance + vsmDelta * vsmDelta)', RendererShape.Cache.RHIFragmentShaderSource) > 0));
   finally
     FreeAndNil(Scene);
@@ -17948,6 +17951,255 @@ begin
       Pos('texture(castle_emissive_texture, castle_tex_coord1)',
         RendererShape.Cache.RHIFragmentShaderSource) > 0);
   finally
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestMultiShadowMapLightsSlotRoutingAndSceneDescriptorSetRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  Spot1, Spot2: TSpotLightNode;
+  ShadowMap1, ShadowMap2: TGeneratedShadowMapNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  Box: TBoxNode;
+  RendererShape: TX3DRendererShape;
+  ExtractedTextures: array[0..3] of TRHITexture;
+  ExtractedSamplers: array[0..3] of TRHISampler;
+  ExtractedCount: Cardinal;
+  ShadingModel: TCastleShadingModelRHI;
+  Renderer: TRenderer;
+  LightsRen: TLightsRenderer;
+  Cam: TRenderingCamera;
+  LightsBlock: TCastleLightsUniformBlock;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8101)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  Renderer := nil;
+  LightsRen := nil;
+  Cam := nil;
+  try
+    Root := TX3DRootNode.Create;
+
+    Spot1 := TSpotLightNode.Create;
+    Spot1.FdOn.Value := True;
+    Spot1.FdLocation.Value := Vector3(-4, 6, 4);
+    Spot1.FdDirection.Value := Vector3(1, -1.5, -1).Normalize;
+    Spot1.Shadows := True;
+    ShadowMap1 := TGeneratedShadowMapNode.Create;
+    ShadowMap1.Update := upAlways;
+    ShadowMap1.FdSize.Value := 256;
+    Spot1.FdDefaultShadowMap.Value := ShadowMap1;
+    Root.AddChildren(Spot1);
+
+    Spot2 := TSpotLightNode.Create;
+    Spot2.FdOn.Value := True;
+    Spot2.FdLocation.Value := Vector3(4, 6, 4);
+    Spot2.FdDirection.Value := Vector3(-1, -1.5, -1).Normalize;
+    Spot2.Shadows := True;
+    ShadowMap2 := TGeneratedShadowMapNode.Create;
+    ShadowMap2.Update := upAlways;
+    ShadowMap2.FdSize.Value := 256;
+    Spot2.FdDefaultShadowMap.Value := ShadowMap2;
+    Root.AddChildren(Spot2);
+
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    App.Material := Mat;
+    ShapeNode.Appearance := App;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+
+    ExtractedCount := RendererShape.ExtractRHIShadowMaps(ExtractedTextures, ExtractedSamplers);
+    AssertEquals('Must extract 2 prepared shadow map textures from Spot1 & Spot2', 2, Integer(ExtractedCount));
+    AssertTrue('Slot 0 shadow map texture must be non-nil', ExtractedTextures[0] <> nil);
+    AssertTrue('Slot 1 shadow map texture must be non-nil', ExtractedTextures[1] <> nil);
+    AssertTrue('Slot 0 and Slot 1 shadow map textures must be distinct', ExtractedTextures[0] <> ExtractedTextures[1]);
+
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertTrue('Fragment shader must include castle_sample_shadow_slot dispatching castle_shadow_map_0..3',
+      (Pos('float castle_sample_shadow_slot(float slot, vec3 coord)', RendererShape.Cache.RHIFragmentShaderSource) > 0) and
+      (Pos('if (slot < 1.5) return texture(castle_shadow_map_0, coord);', RendererShape.Cache.RHIFragmentShaderSource) > 0) and
+      (Pos('if (slot < 2.5) return texture(castle_shadow_map_1, coord);', RendererShape.Cache.RHIFragmentShaderSource) > 0));
+
+    Cam := TRenderingCamera.Create;
+    Cam.Matrix := TMatrix4.Identity;
+    LightsRen := TLightsRenderer.Create;
+    LightsRen.RenderingCamera := Cam;
+    LightsRen.BuildLightsUniformBlock(RendererShape, nil, RendererShape.State.Lights, nil, LightsBlock);
+    AssertEquals('LightsBlock must contain 2 spot lights', 2, Integer(LightsBlock.Count));
+    AssertSameValue(1.0, LightsBlock.Lights[0].SpotParams.W, 1e-4);
+    AssertSameValue(2.0, LightsBlock.Lights[1].SpotParams.W, 1e-4);
+
+    Renderer := TRenderer.Create(nil);
+    Renderer.BindShadowMapToSceneDescriptorSet(0, ExtractedTextures[0], ExtractedSamplers[0]);
+    Renderer.BindShadowMapToSceneDescriptorSet(1, ExtractedTextures[1], ExtractedSamplers[1]);
+    AssertTrue('Renderer.RHIShadowMapTexture[0] must match ExtractedTextures[0]',
+      Renderer.RHIShadowMapTexture[0] = ExtractedTextures[0]);
+    AssertTrue('Renderer.RHIShadowMapTexture[1] must match ExtractedTextures[1]',
+      Renderer.RHIShadowMapTexture[1] = ExtractedTextures[1]);
+  finally
+    FreeAndNil(Renderer);
+    FreeAndNil(LightsRen);
+    FreeAndNil(Cam);
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRenderOptionsColorChannelsWriteMaskPipelineRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  Box: TBoxNode;
+  RendererShape: TX3DRendererShape;
+  Renderer: TRenderer;
+  DescFull, DescRedOnly, DescCyanOnly: TRHIGraphicsPipelineDesc;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8102)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  Renderer := nil;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    App.Material := Mat;
+    ShapeNode.Appearance := App;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+
+    Renderer := TRenderer.Create(nil);
+
+    { 1. Default AllColorChannels ([0..3]) -> $0F }
+    Renderer.BuildShapePipelineDesc(RendererShape, Scene.RenderOptions, DescFull);
+    AssertEquals('Default InternalColorChannels [0..3] must produce ColorWriteMask $0F',
+      $0F, Integer(DescFull.BlendState.ColorWriteMask));
+
+    { 2. Left-eye anaglyph Red-only ([0]) -> $01 }
+    Scene.RenderOptions.InternalColorChannels := [0];
+    Renderer.BuildShapePipelineDesc(RendererShape, Scene.RenderOptions, DescRedOnly);
+    AssertEquals('InternalColorChannels [0] must produce ColorWriteMask $01 (Red only)',
+      $01, Integer(DescRedOnly.BlendState.ColorWriteMask));
+
+    { 3. Right-eye anaglyph Green+Blue ([1, 2]) -> $06 }
+    Scene.RenderOptions.InternalColorChannels := [1, 2];
+    Renderer.BuildShapePipelineDesc(RendererShape, Scene.RenderOptions, DescCyanOnly);
+    AssertEquals('InternalColorChannels [1, 2] must produce ColorWriteMask $06 (Green + Blue)',
+      $06, Integer(DescCyanOnly.BlendState.ColorWriteMask));
+  finally
+    FreeAndNil(Renderer);
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVarianceShadowMapCasterPassMomentShaderAndPipelineRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  Box: TBoxNode;
+  RendererShape: TX3DRendererShape;
+  Renderer: TRenderer;
+  Cam: TRenderingCamera;
+  DescVSM: TRHIGraphicsPipelineDesc;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8103)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  Renderer := nil;
+  Cam := nil;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    App.Material := Mat;
+    ShapeNode.Appearance := App;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+
+    Cam := TRenderingCamera.Create;
+    Cam.Target := rtVarianceShadowMap;
+    Cam.Matrix := TMatrix4.Identity;
+
+    Renderer := TRenderer.Create(nil);
+    Renderer.RenderBegin(nil, Cam, nil, 0, 0, 0, nil);
+    try
+      Renderer.BuildShapePipelineDesc(RendererShape, Scene.RenderOptions, DescVSM);
+      AssertTrue('RHIVSMCasterFragmentShader must be created', Renderer.RHIVSMCasterFragmentShader <> nil);
+      AssertTrue('rtVarianceShadowMap pipeline must bind RHIVSMCasterFragmentShader',
+        DescVSM.FragmentShader = Renderer.RHIVSMCasterFragmentShader);
+      AssertEquals('rtVarianceShadowMap pipeline must have 1 color attachment',
+        1, Length(DescVSM.ColorAttachmentFormats));
+      AssertEquals('rtVarianceShadowMap color attachment must be pfRGBA32_Float',
+        Ord(pfRGBA32_Float), Ord(DescVSM.ColorAttachmentFormats[0]));
+      AssertTrue('rtVarianceShadowMap pipeline must enable DepthBiasEnable',
+        DescVSM.Rasterizer.DepthBiasEnable);
+      AssertFalse('rtVarianceShadowMap pipeline must disable blending',
+        DescVSM.BlendState.BlendEnable);
+      AssertEquals('CastleShapeVSMPSO', DescVSM.DebugName);
+    finally
+      Renderer.RenderEnd;
+    end;
+  finally
+    FreeAndNil(Renderer);
+    FreeAndNil(Cam);
     FreeAndNil(Scene);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;

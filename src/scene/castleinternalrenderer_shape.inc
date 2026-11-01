@@ -124,6 +124,13 @@
       out AShadowMapTex: TRHITexture;
       out AShadowMapSampler: TRHISampler): Boolean;
 
+    { Resolves up to Length(AShadowMapTextures) TGeneratedShadowMapNodes in InternalShadowMaps
+      to their underlying depth/VSM TRHITexture and comparison TRHISampler handles.
+      Returns the number of prepared shadow map textures extracted. }
+    function ExtractRHIShadowMaps(
+      out AShadowMapTextures: array of TRHITexture;
+      out AShadowMapSamplers: array of TRHISampler): Cardinal;
+
     { Extracts procedural texture coordinate generation mode (TTextureCoordinateGeneratorNode
       or implicit tgBounds2d/tgBounds3d) and object-space S/T plane vectors from Cache.Arrays
       or Geometry.InternalTexCoord. }
@@ -985,41 +992,68 @@ function TX3DRendererShape.ExtractRHIShadowMap(
   out AShadowMapTex: TRHITexture;
   out AShadowMapSampler: TRHISampler): Boolean;
 var
+  Texs: array[0..3] of TRHITexture;
+  Samps: array[0..3] of TRHISampler;
+begin
+  Result := ExtractRHIShadowMaps(Texs, Samps) > 0;
+  if Result then
+  begin
+    AShadowMapTex := Texs[0];
+    AShadowMapSampler := Samps[0];
+  end else
+  begin
+    AShadowMapTex := nil;
+    AShadowMapSampler := nil;
+  end;
+end;
+
+function TX3DRendererShape.ExtractRHIShadowMaps(
+  out AShadowMapTextures: array of TRHITexture;
+  out AShadowMapSamplers: array of TRHISampler): Cardinal;
+var
   ShadowMapNode: TGeneratedShadowMapNode;
   Res: TTextureResource;
   EffectiveSampling: TShadowSampling;
-  EffectiveSize: Cardinal;
+  EffectiveSize, MaxSlots: Cardinal;
+  I: Integer;
 begin
-  AShadowMapTex := nil;
-  AShadowMapSampler := nil;
-  Result := False;
-  if (InternalShadowMaps = nil) or (InternalShadowMaps.Count = 0) or
-     not (InternalShadowMaps[0] is TGeneratedShadowMapNode) then
+  Result := 0;
+  for I := 0 to High(AShadowMapTextures) do
+    AShadowMapTextures[I] := nil;
+  for I := 0 to High(AShadowMapSamplers) do
+    AShadowMapSamplers[I] := nil;
+  MaxSlots := Min(Cardinal(Length(AShadowMapTextures)), Cardinal(Length(AShadowMapSamplers)));
+  if (InternalShadowMaps = nil) or (InternalShadowMaps.Count = 0) or (MaxSlots = 0) then
     Exit;
 
-  ShadowMapNode := TGeneratedShadowMapNode(InternalShadowMaps[0]);
-  Res := TTextureResources.Get(ShadowMapNode);
-  if (Res = nil) and (RHIDevice <> nil) and (Cache <> nil) then
+  for I := 0 to InternalShadowMaps.Count - 1 do
   begin
-    TTextureResources.Prepare(Cache.RenderOptions, ShadowMapNode);
+    if not (InternalShadowMaps[I] is TGeneratedShadowMapNode) then
+      Continue;
+    ShadowMapNode := TGeneratedShadowMapNode(InternalShadowMaps[I]);
     Res := TTextureResources.Get(ShadowMapNode);
-  end;
-  if Res is TGeneratedShadowMapResource then
-  begin
-    AShadowMapTex := TGeneratedShadowMapResource(Res).RHITexture;
-    AShadowMapSampler := Res.RHISampler;
-    if Cache <> nil then
+    if (Res = nil) and (RHIDevice <> nil) and (Cache <> nil) then
     begin
-      if Cache.RenderOptions <> nil then
-        EffectiveSampling := Cache.RenderOptions.ShadowSampling
-      else
-        EffectiveSampling := TCastleRenderOptions.DefaultShadowSampling;
-      EffectiveSize := Max(Cardinal(1), Cardinal(Max(1, ShadowMapNode.FdSize.Value)));
-      if AShadowMapTex <> nil then
-        EffectiveSize := Max(Cardinal(1), AShadowMapTex.Desc.Width);
-      Cache.SetShadowMapParams(EffectiveSampling, EffectiveSize);
+      TTextureResources.Prepare(Cache.RenderOptions, ShadowMapNode);
+      Res := TTextureResources.Get(ShadowMapNode);
     end;
-    Result := AShadowMapTex <> nil;
+    if (Res is TGeneratedShadowMapResource) and (TGeneratedShadowMapResource(Res).RHITexture <> nil) then
+    begin
+      AShadowMapTextures[Result] := TGeneratedShadowMapResource(Res).RHITexture;
+      AShadowMapSamplers[Result] := Res.RHISampler;
+      if (Result = 0) and (Cache <> nil) then
+      begin
+        if Cache.RenderOptions <> nil then
+          EffectiveSampling := Cache.RenderOptions.ShadowSampling
+        else
+          EffectiveSampling := TCastleRenderOptions.DefaultShadowSampling;
+        EffectiveSize := Max(Cardinal(1), AShadowMapTextures[0].Desc.Width);
+        Cache.SetShadowMapParams(EffectiveSampling, EffectiveSize);
+      end;
+      Inc(Result);
+      if Result >= MaxSlots then
+        Break;
+    end;
   end;
 end;
 
