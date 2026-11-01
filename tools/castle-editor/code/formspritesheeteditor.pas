@@ -763,6 +763,8 @@ end;
 procedure TSpriteSheetEditorForm.ActionDeleteAnimationUpdate(Sender: TObject);
 begin
   ActionDeleteAnimation.Enabled := (GetCurrentAnimation <> nil);
+  if FloatSpinEditFPS <> nil then
+    FloatSpinEditFPS.Enabled := (GetCurrentAnimation <> nil);
 end;
 
 procedure TSpriteSheetEditorForm.ActionDeleteFrameExecute(Sender: TObject);
@@ -838,7 +840,10 @@ var
 begin
   Animation := GetCurrentAnimation;
   if Animation = nil then
-    Exit; // ignore if no animation (TODO: SpinEditFPS should be disabled then)
+  begin
+    FloatSpinEditFPS.Enabled := false;
+    Exit;
+  end;
   if not SameValue(Animation.FramesPerSecond, FloatSpinEditFPS.Value) then
   begin
     Animation.FramesPerSecond := FloatSpinEditFPS.Value;
@@ -1138,7 +1143,9 @@ end;
 
 procedure TSpriteSheetEditorForm.LoadAnimation(const Animation: TCastleSpriteSheetAnimation);
 begin
-  FloatSpinEditFPS.Value := Animation.FramesPerSecond;
+  FloatSpinEditFPS.Enabled := Animation <> nil;
+  if Animation <> nil then
+    FloatSpinEditFPS.Value := Animation.FramesPerSecond;
   ClearFrames;
   LoadFrames(Animation);
   UpdatePreview(GetCurrentPreviewMode);
@@ -1775,6 +1782,8 @@ end;
 procedure TSpriteSheetEditorForm.ClearAnimations;
 begin
   ListViewAnimations.Items.Clear;
+  if FloatSpinEditFPS <> nil then
+    FloatSpinEditFPS.Enabled := false;
 end;
 
 procedure TSpriteSheetEditorForm.OpenSpriteSheet(const URL: String;

@@ -2347,6 +2347,7 @@ type
     procedure FindToggle;
     { Find next, if find is active. }
     procedure FindNext;
+    property IsFindActive: Boolean read FindActive;
 
     procedure ExportToModel;
 

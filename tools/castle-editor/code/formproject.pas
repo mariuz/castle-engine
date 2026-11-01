@@ -1091,11 +1091,8 @@ end;
 procedure TProjectForm.ActionFindToggleExecute(Sender: TObject);
 begin
   Assert(Design <> nil); // menu item is disabled otherwise
-
-  // TODO: Make it a checked action, toggle checked state,
-  // synchronize with design (also when it's closed).
-
   Design.FindToggle;
+  ActionFindToggle.Checked := Design.IsFindActive;
 end;
 
 procedure TProjectForm.ActionPhysicsHideAllJointsToolsExecute(Sender: TObject);
@@ -2650,6 +2647,7 @@ begin
 
   // disable ActionFindToggle, as cannot focus when edit hidden
   ActionFindToggle.Enabled := (Design <> nil) and (not ActionMaximizePreview.Checked);
+  ActionFindToggle.Checked := (Design <> nil) and Design.IsFindActive;
   // disable ActionFindNext for consistency with ActionFindToggle,
   // and would be confusing when hierarchy not visible
   ActionFindNext.Enabled := (Design <> nil) and (not ActionMaximizePreview.Checked);

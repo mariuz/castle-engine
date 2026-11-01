@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–253**), inspired by **Unreal Engine 5.5**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–254**), inspired by **Unreal Engine 5.5**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -1812,7 +1812,7 @@ Example Editor Workflow (Phases 175–210 — 1-Minute Playable Level Setup):
 
 ---
 
-## 65. Phases 211–253: Advanced 3D Navigation/Joint/Combine Rigs, 2D Font/Mask/ScrollView/Keyboard/Color Generators, Categorized Submenus, Auditor, 3D Model Exporter, `Events` Stub Generator & Multi-Viewport Colliders / UI Scaling HUD
+## 65. Phases 211–254: Advanced 3D/2D Rigs & Generators, Categorized Submenus, Readiness Auditor, 3D Model Exporter, `Events` Stub Generator, Multi-Viewport Colliders / UI Scaling HUD & Sprite Sheet / File Preview Polish
 
 > **Official Reference Documentation & Visual Inspiration:**
 > - **Castle Game Engine:** [Navigation (`TCastleWalkNavigation`, `TCastleExamineNavigation`, `TCastleThirdPersonNavigation`)](https://castle-engine.io/navigation) · [Text & Custom Fonts (`TCastleFont`, `TCastleFontFamily`, `TCastleBitmapFont`)](https://castle-engine.io/text) · [Physics Joints](https://castle-engine.io/physics)
@@ -1847,6 +1847,7 @@ Example Editor Workflow (Phases 175–210 — 1-Minute Playable Level Setup):
 | CGE `CastleSettings.xml` UI Scaling | CGE UI Scaling Component Gallery | CGE Physics Collider Visualization | Animated Movie: `usEncloseReferenceSize` | Animated Movie: `usFitReferenceSize` |
 | :---: | :---: | :---: | :---: | :---: |
 | ![CGE UI Scaling](https://castle-engine.io/images/thumb_const_height_size/ui_scaling.webp) | ![CGE UI Scaling Gallery](https://castle-engine.io/images/thumb_const_height_size/ui_scaling_component_gallery.webp) | ![CGE Physics Colliders](https://castle-engine.io/images/thumb_const_height_size/physics_platformer_collisions.webp) | ![Enclose UI Scaling Movie](https://docs.godotengine.org/en/stable/_images/stretch_2d_expand.gif) | ![Fit UI Scaling Movie](https://docs.godotengine.org/en/stable/_images/stretch_viewport_keep.gif) |
+  - **Sprite Sheet Editor FPS State Sync, 3D File Preview `AssignDefaultCamera` Modernization & Hierarchy Find Checked Action Sync (`formspritesheeteditor.pas`, `frameviewfile.pas`, `formproject.pas` — Phase 254):** Resolves the remaining `TODO`s across `TSpriteSheetEditorForm` (`FloatSpinEditFPS.Enabled := GetCurrentAnimation <> nil`), `TViewFileFrame.LoadScene` (`Viewport.AssignDefaultCamera` replacing deprecated `AutoCamera` / `MainScene`), and `TProjectForm.ActionFindToggle` (`ActionFindToggle.Checked := (Design <> nil) and Design.IsFindActive`).
 
 ```text
 Example Editor Workflow (Phases 246–251 — Complete Third-Person Level, Pre-Release QA Audit & glTF/X3D Subtree Export):
