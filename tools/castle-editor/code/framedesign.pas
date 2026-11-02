@@ -1355,6 +1355,8 @@ type
 
     function AddComponentFromUrl(const AddUrl: String;
       const ParentComponent: TComponent): TComponent;
+    function ImportedTargetParent(const AddUrl: String): TComponent;
+    function CanAddImported(const AddUrl: String): Boolean;
     function AddImported(const AddUrl: String): TComponent;
 
     { Set UIScaling values. }
@@ -7839,19 +7841,41 @@ begin
 end;
 
 procedure TDesignFrame.UpdateObjectInspectorTimer(Sender: TObject);
-//var
-//  InspectorType: TInspectorType;
-begin
-  { In many cases, properties may change but property editor doesn't reflect it.
-    E.g.
-    - TCastleTransform changes by ExposeTransforms mechanism
-    - Caption changes because you modified Name, and they used to match.
-    The only universal solution to make OI up-to-date seems to be to just
-    occasionally refresh it. }
 
-  // TODO: This is not good, it breaks editing within object inspector, resets cursor
-  //for InspectorType in TInspectorType do
-  //  Inspector[InspectorType].RefreshPropertyValues;
+  function IsControlInsideInspector(C: TControl): Boolean;
+  var
+    InspectorType: TInspectorType;
+  begin
+    while C <> nil do
+    begin
+      if C = ControlProperties then
+        Exit(true);
+      for InspectorType in TInspectorType do
+        if C = Inspector[InspectorType] then
+          Exit(true);
+      C := C.Parent;
+    end;
+    Result := false;
+  end;
+
+var
+  ParentForm: TCustomForm;
+  ActiveInspector: TOIPropertyGrid;
+begin
+  { In many cases, properties may change outside the Object Inspector
+    (e.g. TCastleTransform changes by ExposeTransforms mechanism or Physics Simulation,
+    or Caption changes because you modified Name).
+    Refresh only the active inspector tab and only when keyboard focus is NOT inside
+    ControlProperties / Object Inspector, so we never interrupt active typing or reset the edit cursor. }
+  if FDesignRoot = nil then
+    Exit;
+  ParentForm := GetParentForm(Self);
+  if (ParentForm <> nil) and IsControlInsideInspector(ParentForm.ActiveControl) then
+    Exit;
+
+  ActiveInspector := GetInspectorForActiveTab;
+  if ActiveInspector <> nil then
+    ActiveInspector.RefreshPropertyValues;
 end;
 
 procedure TDesignFrame.OpenDesign(const NewDesignRoot, NewDesignOwner: TComponent;
@@ -9754,26 +9778,81 @@ begin
     ));
 end;
 
+function TDesignFrame.ImportedTargetParent(const AddUrl: String): TComponent;
+
+  function FindFirstViewportInUI(const UI: TCastleUserInterface): TCastleViewport;
+  var
+    I: Integer;
+  begin
+    if UI is TCastleViewport then
+      Exit(TCastleViewport(UI));
+    for I := 0 to UI.ControlsCount - 1 do
+    begin
+      Result := FindFirstViewportInUI(UI.Controls[I]);
+      if Result <> nil then
+        Exit;
+    end;
+    Result := nil;
+  end;
+
+var
+  NeedsTransformParent: Boolean;
+  FoundViewport: TCastleViewport;
+begin
+  Result := SelectedComponent;
+  NeedsTransformParent :=
+    (TFileFilterList.Matches(LoadScene_FileFilters, AddUrl) and
+     (not LoadImage_FileFilters.Matches(AddUrl))) or
+    TFileFilterList.Matches(LoadTransformDesign_FileFilters, AddUrl);
+
+  if (Result is TCastleViewport) and NeedsTransformParent then
+    Result := TCastleViewport(Result).Items;
+
+  { If AddUrl makes sense only with parent being TCastleTransform,
+    try to use CurrentViewport.Items, FDesignRoot (if TCastleTransform),
+    or the first TCastleViewport in FDesignRoot as parent. }
+  if (not (Result is TCastleTransform)) and NeedsTransformParent then
+  begin
+    if (CurrentViewport <> nil) and (CurrentViewport.Items <> nil) then
+      Result := CurrentViewport.Items
+    else
+    if FDesignRoot is TCastleTransform then
+      Result := FDesignRoot
+    else
+    if FDesignRoot is TCastleUserInterface then
+    begin
+      FoundViewport := FindFirstViewportInUI(TCastleUserInterface(FDesignRoot));
+      if (FoundViewport <> nil) and (FoundViewport.Items <> nil) then
+        Result := FoundViewport.Items;
+    end;
+  end else
+  if (Result = nil) and (not NeedsTransformParent) and (FDesignRoot <> nil) then
+    Result := FDesignRoot;
+end;
+
+function TDesignFrame.CanAddImported(const AddUrl: String): Boolean;
+var
+  TargetParent: TComponent;
+begin
+  TargetParent := ImportedTargetParent(AddUrl);
+  if TargetParent = nil then
+    Exit(false);
+  if (TFileFilterList.Matches(LoadScene_FileFilters, AddUrl) and
+      (not LoadImage_FileFilters.Matches(AddUrl))) or
+     TFileFilterList.Matches(LoadTransformDesign_FileFilters, AddUrl) then
+    Result := TargetParent is TCastleTransform
+  else
+  if TFileFilterList.Matches(LoadUiDesign_FileFilters, AddUrl) then
+    Result := TargetParent is TCastleUserInterface
+  else
+    Result := (TargetParent is TCastleTransform) or (TargetParent is TCastleUserInterface);
+end;
+
 function TDesignFrame.AddImported(const AddUrl: String): TComponent;
 var
   ParentComponent: TComponent;
 begin
-  ParentComponent := SelectedComponent;
-
-  { If AddUrl makes sense only with parent being TCastleTransform,
-    try to use CurrentViewport.Items as parent.
-    This way we "try harder" to find a parent that allows to drop
-    given item. }
-  if (not (ParentComponent is TCastleTransform)) and
-     (CurrentViewport <> nil) and
-     (
-       // AddUrl can only be loaded to TCastleScene?
-       ( TFileFilterList.Matches(LoadScene_FileFilters, AddUrl) and
-         (not LoadImage_FileFilters.Matches(AddUrl)) ) or
-       // AddUrl can only be loaded to TCastleTransformDesign?
-       (TFileFilterList.Matches(LoadTransformDesign_FileFilters, AddUrl))
-     ) then
-    ParentComponent := CurrentViewport.Items;
+  ParentComponent := ImportedTargetParent(AddUrl);
 
   if ParentComponent = nil then
     raise Exception.CreateFmt('Cannot add imported component "%s".' + NL + NL + 'First select a valid parent in the design, usually a TCastleViewport or TCastleTransform.', [
@@ -12026,7 +12105,8 @@ procedure TDesignFrame.ControlsTreeDragDrop(Sender, Source: TObject; X,
         begin
           Src.Parent.RemoveBehavior(Src);
           Dst.AddBehavior(Src);
-          // TODO: update tree in a simple way for now
+          if (Src is TCastleCollider) and FShowColliders then
+            UpdateColliders;
           UpdateDesign;
         end;
     end;

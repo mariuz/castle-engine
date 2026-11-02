@@ -3887,11 +3887,7 @@ end;
 
 function TProjectForm.CanAddImported(const AddUrl: String): Boolean;
 begin
-  { TODO: Maybe in the future it will query more,
-    e.g. to add glTF we need Design.AddImportedUrl be able to determine
-    parent that is TCastleTransform descendant.
-    For now we let Design.AddImportedUrl to raise exception in such case. }
-  Result := Design <> nil;
+  Result := (Design <> nil) and Design.CanAddImported(AddUrl);
 end;
 
 procedure TProjectForm.AddImported(const AddUrl: String);

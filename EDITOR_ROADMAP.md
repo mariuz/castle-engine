@@ -2405,11 +2405,24 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - **Screenshots:** [CGE Editor Hierarchy & Files Panel](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [UE 5.5 World Outliner Drop Target](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/a285724d-dc13-455e-aa4a-fd2c4d165130/topic-image.png) · [Blender 4 Outliner Drag-and-Drop](https://docs.blender.org/manual/en/latest/_images/editors_outliner_introduction_interface.png)
   - **Example (Phase 256):** Drag any `.gltf`, `.x3d`, `.castle-transform`, `.png`, or `.wav` asset from the bottom **Files** panel directly over any node in the **Hierarchy** tree (even without pre-selecting a node first): `ControlsTree` highlights the hovered target parent node (`Viewport1.Items` or any `TCastleTransform` / `TCastleUserInterface` container) and inserts the new component directly into that parent on drop.
 
+### Phase 257: Non-Intrusive Live Object Inspector Property Refresh (`UpdateObjectInspectorTimer`), Smart Asset Import Parent Resolution (`ImportedTargetParent` / `CanAddImported`), and Drag-Moved Collider Visualization Sync (`MoveBehaviorToTransform`)
+- [x] **257.1. Focus-Safe `UpdateObjectInspectorTimer` Live Refresh, `TDesignFrame.ImportedTargetParent` / `CanAddImported` & Drag-Moved Collider Sync**
+  - Resolved the `UpdateObjectInspectorTimer` `TODO` (`tools/castle-editor/code/framedesign.pas`) by checking `IsControlInsideInspector(ParentForm.ActiveControl)` and refreshing only the active inspector tab (`ActiveInspector.RefreshPropertyValues`) when keyboard focus is outside `ControlProperties`, ensuring live property updates (such as Physics Simulation transforms and `ExposeTransforms` animated bone joints) never interrupt typing or reset the edit cursor inside the Object Inspector.
+  - Resolved the `CanAddImported` `TODO` (`tools/castle-editor/code/formproject.pas` & `framedesign.pas`) by implementing `TDesignFrame.ImportedTargetParent(AddUrl)` and `TDesignFrame.CanAddImported(AddUrl)`, which automatically resolve a valid `TCastleTransform` parent (`SelectedComponent`, `TCastleViewport.Items`, `CurrentViewport.Items`, `FDesignRoot`, or the first `TCastleViewport` found in `FDesignRoot`) for imported 3D scenes (e.g. Sketchfab glTF models) and `.castle-transform` designs.
+  - Updated `MoveBehaviorToTransform` in `ControlsTreeDragDrop` so dragging a `TCastleCollider` behavior onto a different `TCastleTransform` parent immediately refreshes collider visualization (`UpdateColliders`) when `FShowColliders` is enabled.
+  - **Official Docs & Visual References (Phase 257):** [CGE Visual Editor Manual (Object Inspector, ExposeTransforms & Sketchfab Import)](https://castle-engine.io/manual_editor.php) · [CGE Sketchfab Asset Importer](https://castle-engine.io/sketchfab) · [UE 5.5 Details Panel Live Property Sync](https://dev.epicgames.com/documentation/en-us/unreal-engine/level-editor-details-panel-in-unreal-engine) · [Godot 4 Inspector Dock & Remote/Live Scene Sync](https://docs.godotengine.org/en/stable/getting_started/introduction/first_look_at_the_editor.html)
+  - **Official Videos & Movies (Phase 257):**
+    - 🎬 [CGE Official Video — Importing Sketchfab 3D Models & Live Inspector Editing (YouTube)](https://www.youtube.com/watch?v=gwnKMnAGUcg)
+    - 🎬 [CGE Official Video — Physics Simulation & Live Transform Updates in Editor (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+    - 🎞️ [Animated Movie (GIF) — Live Inspector & Split Viewport Workflow](https://docs.godotengine.org/en/stable/_images/containers_split_drag.gif)
+  - **Screenshots:** [CGE Design Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [CGE Physics Colliders in Editor](https://castle-engine.io/images/thumb_const_height_size/physics_platformer_collisions.webp) · [UE 5.5 Details Panel](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/90bc2642-1728-47be-9e0f-118c88653e78/interface-thumbnail.jpg)
+  - **Example (Phase 257):** Start Physics Simulation (or play a `TCastleScene` animation with `ExposeTransforms`) while a `TCastleTransform` is selected to watch `Translation` and `Rotation` update live in the Object Inspector without cursor resets when you click an inspector row to edit, or import a 3D model from `Data -> Import from Sketchfab...` and have it automatically placed into `Viewport1.Items` even when `DesignRoot` (`TCastleUserInterface`) is selected.
+
 ---
 
-## Roadmap Completion Status (Phases 1–256 — Final Milestone)
+## Roadmap Completion Status (Phases 1–257 — Final Milestone)
 
-All **256 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **257 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 
