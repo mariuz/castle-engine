@@ -481,11 +481,11 @@ begin
     Bindings[0].Binding := 0;
     Bindings[0].DescriptorType := dtUniformBuffer;
     Bindings[0].Count := 1;
-    Bindings[0].StageFlags := [ssVertex, ssFragment];
+    Bindings[0].StageFlags := [ssVertex, ssGeometry, ssFragment];
     Bindings[1].Binding := 1;
     Bindings[1].DescriptorType := dtUniformBuffer;
     Bindings[1].Count := 1;
-    Bindings[1].StageFlags := [ssVertex, ssFragment];
+    Bindings[1].StageFlags := [ssVertex, ssGeometry, ssFragment];
     for I := 2 to 5 do
     begin
       Bindings[I].Binding := Cardinal(I);
@@ -628,12 +628,13 @@ begin
   begin
     ADesc.VertexShader := AShape.Cache.RHIVertexShader;
     ADesc.FragmentShader := AShape.Cache.RHIFragmentShader;
+    ADesc.GeometryShader := AShape.Cache.RHIGeometryShader;
   end else
   begin
     ADesc.VertexShader := FRHIDefaultVertexShader;
     ADesc.FragmentShader := FRHIDefaultFragmentShader;
+    ADesc.GeometryShader := nil;
   end;
-  ADesc.GeometryShader := nil;
 
   Arrays := nil;
   if (AShape <> nil) and (AShape.Cache <> nil) then
@@ -887,7 +888,10 @@ begin
     ADesc.DescriptorSetLayouts[2] := Set2Layout;
 
   ADesc.PushConstantSize := SizeOf(TCastlePushConstantsBlock);
-  ADesc.PushConstantStages := [ssVertex, ssFragment];
+  if ADesc.GeometryShader <> nil then
+    ADesc.PushConstantStages := [ssVertex, ssGeometry, ssFragment]
+  else
+    ADesc.PushConstantStages := [ssVertex, ssFragment];
 
   SetLength(ADesc.ColorAttachmentFormats, 1);
   if (RHIDevice <> nil) and (RHIDevice.GetSwapchainColorTexture <> nil) then

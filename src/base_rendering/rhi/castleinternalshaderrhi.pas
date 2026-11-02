@@ -596,6 +596,15 @@ type
       at the end of the vertex shader main() }
     function FinalizeVertexShaderSource(const StitchedSource: String): String;
 
+    { Appends CGE geometry shader helper implementations (geometryVertexSet,
+      geometryVertexZero, geometryVertexAdd with optional PLUG_geometry_vertex_* calls)
+      after the user's geometry shader code and ensures input/output layout qualifiers exist }
+    function FinalizeGeometryShaderSource(
+      const StitchedSource: String;
+      const PlugSetCalls: String = '';
+      const PlugZeroCalls: String = '';
+      const PlugAddCalls: String = ''): String;
+
     { Strips or comments out legacy bare uniform declarations replaced by Set 0..2 UBOs and Push Constants }
     function SanitizeVulkanShaderSource(const Source: String): String;
 
@@ -2047,6 +2056,36 @@ begin
         NL +
         '/* --- Fragment Color Output --- */' + NL +
         'CASTLE_LOCATION(0) out vec4 castle_FragColor;' + NL;
+
+    ssGeometry:
+      Result :=
+        '/* --- Geometry Inputs (Must match Vertex Outputs by Location) --- */' + NL +
+        '#define CASTLE_GEOMETRY_INPUT_SIZE gl_in.length()' + NL +
+        'CASTLE_LOCATION(0) in vec4 castle_vertex_eye[];' + NL +
+        'CASTLE_LOCATION(1) in vec3 castle_normal_eye[];' + NL +
+        'CASTLE_LOCATION(2) in vec2 castle_tex_coord0[];' + NL +
+        'CASTLE_LOCATION(3) in vec2 castle_tex_coord1[];' + NL +
+        'CASTLE_LOCATION(4) in vec4 castle_color_per_vertex[];' + NL +
+        'CASTLE_LOCATION(5) in mat3 castle_tangent_to_eye_space[];' + NL +
+        '#define castle_TexCoord0 castle_tex_coord0' + NL +
+        '#define castle_TexCoord1 castle_tex_coord1' + NL +
+        '#define castle_ColorPerVertex castle_color_per_vertex' + NL +
+        NL +
+        '/* --- Geometry Outputs (Must match Fragment Inputs by Location) --- */' + NL +
+        'CASTLE_LOCATION(0) out vec4 castle_vertex_eye_geoshader;' + NL +
+        'CASTLE_LOCATION(1) out vec3 castle_normal_eye_geoshader;' + NL +
+        'CASTLE_LOCATION(2) out vec2 castle_tex_coord0_geoshader;' + NL +
+        'CASTLE_LOCATION(3) out vec2 castle_tex_coord1_geoshader;' + NL +
+        'CASTLE_LOCATION(4) out vec4 castle_color_per_vertex_geoshader;' + NL +
+        'CASTLE_LOCATION(5) out mat3 castle_tangent_to_eye_space_geoshader;' + NL +
+        '#define castle_TexCoord0_geoshader castle_tex_coord0_geoshader' + NL +
+        '#define castle_TexCoord1_geoshader castle_tex_coord1_geoshader' + NL +
+        '#define castle_ColorPerVertex_geoshader castle_color_per_vertex_geoshader' + NL +
+        NL +
+        '/* --- Geometry Shader Helper Forward Declarations --- */' + NL +
+        'void geometryVertexSet(const int index);' + NL +
+        'void geometryVertexZero();' + NL +
+        'void geometryVertexAdd(const int index, const float scale);' + NL;
   else
     Result := '';
   end;
@@ -2220,10 +2259,27 @@ begin
       end;
     end;
 
+    if ContainsGLSLIdentifier(UserEffectSource, 'gl_PositionIn') then
+    begin
+      Inc(AWarningsCount);
+      WritelnWarning('Shader', Format(
+        'Custom shader "%s" uses deprecated GLSL 1.50 geometry input "gl_PositionIn" which is removed in Vulkan GLSL #version 450. ' +
+        'Auto-upgrading to "gl_in[...].gl_Position".',
+        [EffectDebugName]));
+    end;
+
     Lines.Text := UserEffectSource;
     for Line in Lines do
     begin
       Trimmed := Trim(Line);
+      while Pos('gl_PositionIn[', Trimmed) > 0 do
+      begin
+        I := Pos('gl_PositionIn[', Trimmed);
+        Trimmed := Copy(Trimmed, 1, I - 1) + 'gl_in[' +
+          StringReplace(Copy(Trimmed, I + Length('gl_PositionIn['), MaxInt), ']', '].gl_Position', []);
+      end;
+      if Pos('[CASTLE_GEOMETRY_INPUT_SIZE]', Trimmed) > 0 then
+        Trimmed := StringReplace(Trimmed, '[CASTLE_GEOMETRY_INPUT_SIZE]', '[]', [rfReplaceAll]);
       if IsPrefix('attribute ', Trimmed, False) then
       begin
         Inc(AWarningsCount);
@@ -2232,6 +2288,24 @@ begin
           'Auto-upgrading to "in".',
           [EffectDebugName, Trimmed]));
         UpgradedLines.AppendLine('in ' + Trim(SEnding(Trimmed, Length('attribute ') + 1)));
+      end else
+      if IsPrefix('varying in ', Trimmed, False) then
+      begin
+        Inc(AWarningsCount);
+        WritelnWarning('Shader', Format(
+          'Custom shader "%s" uses deprecated GLSL qualifier "varying in" ("%s") which is removed in #version 450. ' +
+          'Auto-upgrading to "in".',
+          [EffectDebugName, Trimmed]));
+        UpgradedLines.AppendLine('in ' + Trim(SEnding(Trimmed, Length('varying in ') + 1)));
+      end else
+      if IsPrefix('varying out ', Trimmed, False) then
+      begin
+        Inc(AWarningsCount);
+        WritelnWarning('Shader', Format(
+          'Custom shader "%s" uses deprecated GLSL qualifier "varying out" ("%s") which is removed in #version 450. ' +
+          'Auto-upgrading to "out".',
+          [EffectDebugName, Trimmed]));
+        UpgradedLines.AppendLine('out ' + Trim(SEnding(Trimmed, Length('varying out ') + 1)));
       end else
       if IsPrefix('varying ', Trimmed, False) then
       begin
@@ -2242,6 +2316,9 @@ begin
           [EffectDebugName, Trimmed]));
         UpgradedLines.AppendLine('in ' + Trim(SEnding(Trimmed, Length('varying ') + 1)));
       end else
+      if Trimmed <> Trim(Line) then
+        UpgradedLines.AppendLine(Trimmed)
+      else
         UpgradedLines.AppendLine(Line);
     end;
 
@@ -2362,6 +2439,90 @@ begin
       '}' + NL
   else
     Result := StitchedSource;
+end;
+
+function TCastleShaderGeneratorRHI.FinalizeGeometryShaderSource(
+  const StitchedSource: String;
+  const PlugSetCalls: String;
+  const PlugZeroCalls: String;
+  const PlugAddCalls: String): String;
+var
+  HasInputLayout, HasMain: Boolean;
+begin
+  Result := StitchedSource;
+  if FBackend <> rbVulkan then
+    Exit;
+
+  HasInputLayout :=
+    (Pos(') in;', Result) > 0) or
+    (Pos(')in;', Result) > 0);
+  HasMain := Pos('void main', Result) > 0;
+
+  if not HasInputLayout then
+  begin
+    if HasMain then
+      Result := StringReplace(
+        Result,
+        'void main',
+        'layout(triangles) in;' + NL +
+        'layout(triangle_strip, max_vertices = 3) out;' + NL +
+        'void main',
+        [])
+    else
+      Result := Result + NL +
+        'layout(triangles) in;' + NL +
+        'layout(triangle_strip, max_vertices = 3) out;' + NL +
+        'void main()' + NL +
+        '{' + NL +
+        '  for (int i = 0; i < 3; ++i) {' + NL +
+        '    gl_Position = gl_in[i].gl_Position;' + NL +
+        '    geometryVertexSet(i);' + NL +
+        '    EmitVertex();' + NL +
+        '  }' + NL +
+        '  EndPrimitive();' + NL +
+        '}' + NL;
+  end;
+
+  Result := Result + NL +
+    '/* --- CGE Geometry Shader Varying Pass-Through & Blending Implementations --- */' + NL +
+    'void geometryVertexSet(const int index)' + NL +
+    '{' + NL +
+    '  castle_vertex_eye_geoshader = castle_vertex_eye[index];' + NL +
+    '  castle_normal_eye_geoshader = castle_normal_eye[index];' + NL +
+    '  castle_tex_coord0_geoshader = castle_tex_coord0[index];' + NL +
+    '  castle_tex_coord1_geoshader = castle_tex_coord1[index];' + NL +
+    '  castle_color_per_vertex_geoshader = castle_color_per_vertex[index];' + NL +
+    '  castle_tangent_to_eye_space_geoshader = castle_tangent_to_eye_space[index];' + NL;
+  if PlugSetCalls <> '' then
+    Result := Result + PlugSetCalls + NL;
+  Result := Result +
+    '}' + NL +
+    NL +
+    'void geometryVertexZero()' + NL +
+    '{' + NL +
+    '  castle_vertex_eye_geoshader = vec4(0.0);' + NL +
+    '  castle_normal_eye_geoshader = vec3(0.0);' + NL +
+    '  castle_tex_coord0_geoshader = vec2(0.0);' + NL +
+    '  castle_tex_coord1_geoshader = vec2(0.0);' + NL +
+    '  castle_color_per_vertex_geoshader = vec4(0.0);' + NL +
+    '  castle_tangent_to_eye_space_geoshader = mat3(0.0);' + NL;
+  if PlugZeroCalls <> '' then
+    Result := Result + PlugZeroCalls + NL;
+  Result := Result +
+    '}' + NL +
+    NL +
+    'void geometryVertexAdd(const int index, const float scale)' + NL +
+    '{' + NL +
+    '  castle_vertex_eye_geoshader += castle_vertex_eye[index] * scale;' + NL +
+    '  castle_normal_eye_geoshader += castle_normal_eye[index] * scale;' + NL +
+    '  castle_tex_coord0_geoshader += castle_tex_coord0[index] * scale;' + NL +
+    '  castle_tex_coord1_geoshader += castle_tex_coord1[index] * scale;' + NL +
+    '  castle_color_per_vertex_geoshader += castle_color_per_vertex[index] * scale;' + NL +
+    '  castle_tangent_to_eye_space_geoshader += castle_tangent_to_eye_space[index] * scale;' + NL;
+  if PlugAddCalls <> '' then
+    Result := Result + PlugAddCalls + NL;
+  Result := Result +
+    '}' + NL;
 end;
 
 function TCastleShaderGeneratorRHI.SanitizeVulkanShaderSource(

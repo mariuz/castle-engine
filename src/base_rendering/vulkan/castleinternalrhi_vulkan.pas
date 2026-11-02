@@ -19888,6 +19888,7 @@ begin
     begin
       case AStage of
         ssVertex:   ExecModel := 0;
+        ssGeometry: ExecModel := 3;
         ssFragment: ExecModel := 4;
         ssCompute:  ExecModel := 5;
       else

@@ -207,15 +207,19 @@
       out AParallaxHeight: Single;
       out ASteepParallax, ASelfShadowing: Boolean): Boolean; overload;
 
-    { Collects enabled X3D TEffectNode / TEffectPartNode GLSL source code for stVertex and
-      stFragment from Appearance.FdEffects and State.Effects. }
+    { Collects enabled X3D TEffectNode / TEffectPartNode GLSL source code for stVertex,
+      stFragment, and stGeometry from Appearance.FdEffects and State.Effects. }
     function ExtractRHIShaderEffects(
-      out AVertexEffectCode, AFragmentEffectCode: String): Boolean;
+      out AVertexEffectCode, AFragmentEffectCode: String): Boolean; overload;
+    function ExtractRHIShaderEffects(
+      out AVertexEffectCode, AFragmentEffectCode, AGeometryEffectCode: String): Boolean; overload;
 
-    { Extracts custom X3D TComposedShaderNode / TShaderPartNode GLSL source code for stVertex
-      and stFragment from Appearance.FdShaders and sends X3D isSelected / isValid events. }
+    { Extracts custom X3D TComposedShaderNode / TShaderPartNode GLSL source code for stVertex,
+      stFragment, and stGeometry from Appearance.FdShaders and sends X3D isSelected / isValid events. }
     function ExtractRHIComposedShader(
-      out ACustomVertSource, ACustomFragSource: String): Boolean;
+      out ACustomVertSource, ACustomFragSource: String): Boolean; overload;
+    function ExtractRHIComposedShader(
+      out ACustomVertSource, ACustomFragSource, ACustomGeomSource: String): Boolean; overload;
 
     { Extracts custom X3D uniform fields and texture nodes from active TComposedShaderNode and
       TEffectNode InterfaceDeclarations, uploads std140 uniform values to Cache.RHIUserEffectBuffer
@@ -1016,6 +1020,13 @@ begin
   TexNode := App.Texture;
   if TexNode = nil then
   begin
+    if App.InternalCommonSurfaceShader <> nil then
+    begin
+      if App.InternalCommonSurfaceShader.MultiDiffuseAlphaTexture <> nil then
+        TexNode := App.InternalCommonSurfaceShader.MultiDiffuseAlphaTexture
+      else
+        TexNode := App.InternalCommonSurfaceShader.DiffuseTexture;
+    end else
     if App.Material is TPhysicalMaterialNode then
       TexNode := TPhysicalMaterialNode(App.Material).FdBaseTexture.Value
     else if App.Material is TMaterialNode then
@@ -1455,7 +1466,11 @@ begin
        (SurfaceShader.ShininessTexture <> SurfaceShader.SpecularTexture) then
       AShininessTex := ResolveTexNode(SurfaceShader.ShininessTexture, AShininessSampler);
     if SurfaceShader.AlphaTexture <> nil then
-      AAlphaTex := ResolveTexNode(SurfaceShader.AlphaTexture, AAlphaSampler);
+      AAlphaTex := ResolveTexNode(SurfaceShader.AlphaTexture, AAlphaSampler)
+    else if (SurfaceShader.DiffuseTexture <> nil) and
+            (SurfaceShader.MultiDiffuseAlphaTexture <> nil) and
+            (SurfaceShader.MultiDiffuseAlphaTexture <> SurfaceShader.DiffuseTexture) then
+      AAlphaTex := ResolveTexNode(SurfaceShader.MultiDiffuseAlphaTexture, AAlphaSampler);
     Result := (AShininessTex <> nil) or (AAlphaTex <> nil) or AInvertAlpha;
   end else
   begin
@@ -1857,11 +1872,21 @@ begin
     end;
   end;
 
-  Result := (NormalTexNode <> nil) and (AParallaxHeight > 0.0);
+  Result := (NormalTexNode <> nil) and
+            (NormalTexNode.AlphaChannelFinal <> acNone) and
+            (AParallaxHeight > 0.0);
 end;
 
 function TX3DRendererShape.ExtractRHIShaderEffects(
   out AVertexEffectCode, AFragmentEffectCode: String): Boolean;
+var
+  UnusedGeomCode: String;
+begin
+  Result := ExtractRHIShaderEffects(AVertexEffectCode, AFragmentEffectCode, UnusedGeomCode);
+end;
+
+function TX3DRendererShape.ExtractRHIShaderEffects(
+  out AVertexEffectCode, AFragmentEffectCode, AGeometryEffectCode: String): Boolean;
 const
   EyeWorldSpaceLibraryGLSL =
     'vec4 position_world_to_eye_space(vec4 position_world) { return castle_CameraMatrix * position_world; }' + LineEnding +
@@ -1906,6 +1931,11 @@ var
                       AFragmentEffectCode := PartSource
                     else
                       AFragmentEffectCode := AFragmentEffectCode + LineEnding + PartSource;
+                  stGeometry:
+                    if AGeometryEffectCode = '' then
+                      AGeometryEffectCode := PartSource
+                    else
+                      AGeometryEffectCode := AGeometryEffectCode + LineEnding + PartSource;
                   else ;
                 end;
             end;
@@ -1937,6 +1967,7 @@ var
 begin
   AVertexEffectCode := '';
   AFragmentEffectCode := '';
+  AGeometryEffectCode := '';
   UseEyeWorldSpaceLib := False;
   ShapeState := OriginalState;
   if ShapeState = nil then
@@ -1984,12 +2015,22 @@ begin
       AVertexEffectCode := EyeWorldSpaceLibraryGLSL + LineEnding + AVertexEffectCode;
     if AFragmentEffectCode <> '' then
       AFragmentEffectCode := EyeWorldSpaceLibraryGLSL + LineEnding + AFragmentEffectCode;
+    if AGeometryEffectCode <> '' then
+      AGeometryEffectCode := EyeWorldSpaceLibraryGLSL + LineEnding + AGeometryEffectCode;
   end;
-  Result := (AVertexEffectCode <> '') or (AFragmentEffectCode <> '');
+  Result := (AVertexEffectCode <> '') or (AFragmentEffectCode <> '') or (AGeometryEffectCode <> '');
 end;
 
 function TX3DRendererShape.ExtractRHIComposedShader(
   out ACustomVertSource, ACustomFragSource: String): Boolean;
+var
+  UnusedGeomSource: String;
+begin
+  Result := ExtractRHIComposedShader(ACustomVertSource, ACustomFragSource, UnusedGeomSource);
+end;
+
+function TX3DRendererShape.ExtractRHIComposedShader(
+  out ACustomVertSource, ACustomFragSource, ACustomGeomSource: String): Boolean;
 var
   ShapeState: TX3DGraphTraverseState;
   App: TAppearanceNode;
@@ -2000,6 +2041,7 @@ var
 begin
   ACustomVertSource := '';
   ACustomFragSource := '';
+  ACustomGeomSource := '';
   Result := False;
 
   ShapeState := OriginalState;
@@ -2034,10 +2076,15 @@ begin
                   ACustomFragSource := PartSrc
                 else
                   ACustomFragSource := ACustomFragSource + LineEnding + PartSrc;
+              stGeometry:
+                if ACustomGeomSource = '' then
+                  ACustomGeomSource := PartSrc
+                else
+                  ACustomGeomSource := ACustomGeomSource + LineEnding + PartSrc;
               else ;
             end;
         end;
-      Result := (ACustomVertSource <> '') or (ACustomFragSource <> '');
+      Result := (ACustomVertSource <> '') or (ACustomFragSource <> '') or (ACustomGeomSource <> '');
       CompNode.EventIsSelected.Send(Result);
       CompNode.EventIsValid.Send(Result);
       if Result then
@@ -2488,7 +2535,7 @@ var
   TexGenBoundsS, TexGenBoundsT, TexGenBoundsR: TVector4;
   TexCoordGen: TTextureCoordinateGeneration;
   PointSize, ParallaxHeight, PhongAmbIntensity: Single;
-  VertEffectCode, FragEffectCode, ComposedVertCode, ComposedFragCode: String;
+  VertEffectCode, FragEffectCode, GeomEffectCode, ComposedVertCode, ComposedFragCode, ComposedGeomCode: String;
   HasTexTransform, HasTexTransform1, HasSecondTex, HasMultiTex2, HasMultiTex3, HasClipPlane, HasIBL, HasShadowMap, HasTexCoordGen, HasPointSize,
     HasParallax, SteepParallax, SelfShadowParallax, HasShaderEffects, HasComposedShader,
     IsPhongMat, PhongHasSpecTex, PhongHasShinTex, PhongHasAmbTex, InvertAlpha: Boolean;
@@ -2526,8 +2573,8 @@ begin
     HasTexCoordGen := ExtractRHITexCoordGen(TexCoordGen, TexGenBoundsS, TexGenBoundsT, TexGenBoundsR);
     HasPointSize := ExtractRHIPointSize(PointSize);
     HasParallax := ExtractRHIParallaxBumpMapping(ParallaxHeight, SteepParallax, SelfShadowParallax);
-    HasShaderEffects := ExtractRHIShaderEffects(VertEffectCode, FragEffectCode);
-    HasComposedShader := ExtractRHIComposedShader(ComposedVertCode, ComposedFragCode);
+    HasShaderEffects := ExtractRHIShaderEffects(VertEffectCode, FragEffectCode, GeomEffectCode);
+    HasComposedShader := ExtractRHIComposedShader(ComposedVertCode, ComposedFragCode, ComposedGeomCode);
     if Cache <> nil then
     begin
       Cache.SetPhongSurfaceParams(
@@ -2565,8 +2612,8 @@ begin
           False, TVector4.Zero, TVector3.Zero, TVector3.Zero, TVector3.Zero, TVector4.Zero);
       Cache.SetPointSize(PointSize);
       Cache.SetParallaxBumpMapping(HasParallax, SteepParallax, SelfShadowParallax, ParallaxHeight);
-      Cache.SetShaderEffects(VertEffectCode, FragEffectCode);
-      Cache.SetComposedShader(ComposedVertCode, ComposedFragCode);
+      Cache.SetShaderEffects(VertEffectCode, FragEffectCode, GeomEffectCode);
+      Cache.SetComposedShader(ComposedVertCode, ComposedFragCode, ComposedGeomCode);
       UserUniformCount := ExtractRHIUserEffectUniforms;
       if UserUniformCount = 0 then
       begin
@@ -2679,7 +2726,10 @@ begin
     (Cache.RenderOptions = nil) or Cache.RenderOptions.SpecularAntiAliasing,
     I,
     AMaterialIndex);
-  ACmd.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConstants), PushConstants);
+  if Cache.RHIGeometryShader <> nil then
+    ACmd.PushConstants([ssVertex, ssGeometry, ssFragment], 0, SizeOf(PushConstants), PushConstants)
+  else
+    ACmd.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConstants), PushConstants);
   if Cache.RHIMaterialDescriptorSet <> nil then
     ACmd.BindDescriptorSet(1, Cache.RHIMaterialDescriptorSet, [])
   else if (RHIDevice <> nil) and (RHIDevice.GetBindlessDescriptorSet <> nil) then

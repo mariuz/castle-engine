@@ -1140,9 +1140,10 @@ var
   BoundaryModeT: TGLenum;
   TextureWrap: TTextureWrap2D;
   GUITexture, FlipVertically: boolean;
-  MipLevels: Cardinal;
+  MipLevels, MipIdx: Cardinal;
   TexFormat: TRHIPixelFormat;
   TexDesc: TRHITextureDesc;
+  TempFlipped: TCastleImage;
 begin
   { HandledNode already made sure IsTextureImage = @true }
 
@@ -1157,8 +1158,13 @@ begin
       FAllocatedWidth := Max(Cardinal(1), TextureNode.TextureImage.Width);
       FAllocatedHeight := Max(Cardinal(1), TextureNode.TextureImage.Height);
       if Filter.NeedsMipmaps then
-        MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(Max(FAllocatedWidth, FAllocatedHeight)))) + 1)
-      else
+      begin
+        if (TextureNode.TextureComposite <> nil) and TextureNode.TextureComposite.Mipmaps and
+           (TextureNode.TextureComposite.Images.Count > 0) then
+          MipLevels := Max(Cardinal(1), Cardinal(TextureNode.TextureComposite.Images.Count))
+        else
+          MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(Max(FAllocatedWidth, FAllocatedHeight)))) + 1);
+      end else
         MipLevels := 1;
       if TextureNode.TextureImage is TRGBAlphaFloatImage then
         TexFormat := pfRGBA32_Float
@@ -1168,7 +1174,28 @@ begin
         TexFormat, [tuSampled, tuTransferDst, tuTransferSrc], MipLevels, 1);
       TexDesc.DebugName := 'ImageTexture';
       FRHITexture := RHIDevice.CreateTexture(TexDesc);
-      FRHITexture.UploadImage(TextureNode.TextureImage, 0, 0);
+      FlipVertically :=
+        (TextureNode is TImageTextureNode) and
+        TImageTextureNode(TextureNode).FlipVertically;
+      if FlipVertically and (TextureNode.TextureUsedFullUrl = '') and
+         (TextureNode.TextureImage is TCastleImage) then
+      begin
+        TempFlipped := TCastleImage(TextureNode.TextureImage).MakeCopy;
+        try
+          TempFlipped.FlipVertical;
+          FRHITexture.UploadImage(TempFlipped, 0, 0);
+        finally
+          FreeAndNil(TempFlipped);
+        end;
+      end else
+        FRHITexture.UploadImage(TextureNode.TextureImage, 0, 0);
+      if (MipLevels > 1) and (TextureNode.TextureComposite <> nil) and
+         TextureNode.TextureComposite.Mipmaps and
+         (TextureNode.TextureComposite.Images.Count > 1) then
+      begin
+        for MipIdx := 1 to Min(Cardinal(TextureNode.TextureComposite.Images.Count) - 1, MipLevels - 1) do
+          FRHITexture.UploadImage(TextureNode.TextureComposite.Images[MipIdx], MipIdx, 0);
+      end;
       CreateRHISampler(Filter, BoundaryModeS, BoundaryModeT, GL_CLAMP_TO_EDGE, Anisotropy, MipLevels);
     end;
     Exit;
@@ -1351,7 +1378,7 @@ var
   TextureWrap: TTextureWrap2D;
   GUITexture: boolean;
   I: Integer;
-  FrameImg: TCastleImage;
+  FrameImg, TempFlipped: TCastleImage;
   TexDesc: TRHITextureDesc;
 begin
   { HandledNode already made sure IsTextureVideo = @true }
@@ -1375,7 +1402,17 @@ begin
           pfRGBA8_UNorm, [tuSampled, tuTransferDst, tuTransferSrc], 1, 1);
         TexDesc.DebugName := Format('MovieTexture.Frame[%d]', [I]);
         FRHITextureFrames[I] := RHIDevice.CreateTexture(TexDesc);
-        FRHITextureFrames[I].UploadImage(FrameImg, 0, 0);
+        if TextureNode.FlipVertically and (TextureNode.TextureUsedFullUrl = '') then
+        begin
+          TempFlipped := FrameImg.MakeCopy;
+          try
+            TempFlipped.FlipVertical;
+            FRHITextureFrames[I].UploadImage(TempFlipped, 0, 0);
+          finally
+            FreeAndNil(TempFlipped);
+          end;
+        end else
+          FRHITextureFrames[I].UploadImage(FrameImg, 0, 0);
       end;
       CreateRHISampler(Filter, BoundaryModeS, BoundaryModeT, GL_CLAMP_TO_EDGE, Anisotropy, 1);
     end;

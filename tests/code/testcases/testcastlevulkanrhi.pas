@@ -330,6 +330,9 @@ type
     procedure TestScreenEffectFloatLibraryFunctionsAndCustomVertexShaderRHI;
     procedure TestScreenEffectCustomUniformUBOAndTextureBindingRHI;
     procedure TestViewpointMirrorPlaneUniformsAndTexGenSpecializationRHI;
+    procedure TestGeometryShaderComposedAndEffectNodePlugsAndPipelineRHI;
+    procedure TestImageTextureAndMovieTextureFlipVerticallyInMemoryUploadRHI;
+    procedure TestCommonSurfaceShaderMultiDiffuseAlphaAndNormalMapHeightGateRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -20360,6 +20363,385 @@ begin
       (Pos('vec2 mirrorProjected = vec2(dot(vertexOnPlane, castle_CameraSide), dot(vertexOnPlane, castle_CameraUp));', PlanarVS) > 0));
   finally
     FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGeometryShaderComposedAndEffectNodePlugsAndPipelineRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene1, Scene2: TCastleScene;
+  Root1, Root2: TX3DRootNode;
+  ShapeNode1, ShapeNode2: TShapeNode;
+  App1, App2: TAppearanceNode;
+  Mat1, Mat2: TMaterialNode;
+  Box1, Box2: TBoxNode;
+  Composed: TComposedShaderNode;
+  VertPart, GeomPart, FragPart: TShaderPartNode;
+  Eff1, Eff2: TEffectNode;
+  EffGeom1, EffGeom2: TEffectPartNode;
+  RendererShape1, RendererShape2: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  GS1, GS2: String;
+  Renderer: TRenderer;
+  RenderOptions: TCastleRenderOptions;
+  PipeDesc: TRHIGraphicsPipelineDesc;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8901)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+
+  Scene1 := TCastleScene.Create(nil);
+  Scene2 := TCastleScene.Create(nil);
+  RenderOptions := TCastleRenderOptions.Create(nil);
+  Renderer := TRenderer.Create(RenderOptions);
+  try
+    { 1. TComposedShaderNode with stGeometry TShaderPartNode using legacy GLSL geometry built-ins }
+    Root1 := TX3DRootNode.Create;
+    ShapeNode1 := TShapeNode.Create;
+    App1 := TAppearanceNode.Create;
+    Mat1 := TMaterialNode.Create;
+    Box1 := TBoxNode.Create;
+
+    Composed := TComposedShaderNode.Create;
+    Composed.Language := slGLSL;
+
+    VertPart := TShaderPartNode.Create;
+    VertPart.ShaderType := stVertex;
+    VertPart.Contents :=
+      'void main(void) {' + LineEnding +
+      '  castle_vertex_eye = castle_ModelViewMatrix * castle_Vertex;' + LineEnding +
+      '  gl_Position = castle_ProjectionMatrix * castle_vertex_eye;' + LineEnding +
+      '}';
+
+    GeomPart := TShaderPartNode.Create;
+    GeomPart.ShaderType := stGeometry;
+    GeomPart.Contents :=
+      'layout(triangles) in;' + LineEnding +
+      'layout(triangle_strip, max_vertices = 3) out;' + LineEnding +
+      'varying in vec4 customIn[CASTLE_GEOMETRY_INPUT_SIZE];' + LineEnding +
+      'varying out vec4 customOut;' + LineEnding +
+      'void main(void) {' + LineEnding +
+      '  for (int i = 0; i < CASTLE_GEOMETRY_INPUT_SIZE; i++) {' + LineEnding +
+      '    gl_Position = gl_PositionIn[i];' + LineEnding +
+      '    geometryVertexSet(i);' + LineEnding +
+      '    EmitVertex();' + LineEnding +
+      '  }' + LineEnding +
+      '  EndPrimitive();' + LineEnding +
+      '}';
+
+    FragPart := TShaderPartNode.Create;
+    FragPart.ShaderType := stFragment;
+    FragPart.Contents :=
+      'void main(void) {' + LineEnding +
+      '  castle_FragColor = vec4(0.2, 0.8, 0.4, 1.0);' + LineEnding +
+      '}';
+
+    Composed.SetParts([VertPart, GeomPart, FragPart]);
+    App1.Material := Mat1;
+    App1.SetShaders([Composed]);
+    ShapeNode1.Appearance := App1;
+    ShapeNode1.Geometry := Box1;
+    Root1.AddChildren(ShapeNode1);
+    Scene1.Load(Root1, True);
+
+    RendererShape1 := TX3DRendererShape(Scene1.Shapes.TraverseList(True, True)[0]);
+    RendererShape1.PrepareRHIBuffers(Scene1.RenderOptions, 1);
+    RendererShape1.UploadRHIMaterialToCache(ShadingModel);
+
+    AssertTrue('Composed geometry shader module must be compiled',
+      RendererShape1.Cache.RHIGeometryShader <> nil);
+    AssertTrue('Permutation mask bit 48 must be set when geometry shader is active',
+      (RendererShape1.Cache.RHIShaderPermutationMask and (QWord(1) shl 48)) <> 0);
+
+    GS1 := RendererShape1.Cache.RHIGeometryShaderSource;
+    AssertTrue('Geometry stage IO must define CASTLE_GEOMETRY_INPUT_SIZE',
+      Pos('#define CASTLE_GEOMETRY_INPUT_SIZE gl_in.length()', GS1) > 0);
+    AssertTrue('Legacy gl_PositionIn[i] must be upgraded to gl_in[i].gl_Position',
+      Pos('gl_in[i].gl_Position', GS1) > 0);
+    AssertTrue('Legacy varying in/out must be upgraded to in/out',
+      (Pos('in vec4 customIn[];', GS1) > 0) and (Pos('out vec4 customOut;', GS1) > 0));
+    AssertTrue('geometryVertexSet helper must assign *_geoshader outputs from stage inputs',
+      Pos('castle_vertex_eye_geoshader = castle_vertex_eye[index];', GS1) > 0);
+
+    Renderer.BuildShapePipelineDesc(RendererShape1, Scene1.RenderOptions, PipeDesc);
+    AssertTrue('BuildShapePipelineDesc must attach GeometryShader module',
+      PipeDesc.GeometryShader = RendererShape1.Cache.RHIGeometryShader);
+    AssertTrue('BuildShapePipelineDesc must include ssGeometry in PushConstantStages',
+      ssGeometry in PipeDesc.PushConstantStages);
+
+    { 2. Multiple TEffectNode instances with stGeometry TEffectPartNode defining chained
+         PLUG_geometry_vertex_set, PLUG_geometry_vertex_zero, and PLUG_geometry_vertex_add }
+    Root2 := TX3DRootNode.Create;
+    ShapeNode2 := TShapeNode.Create;
+    App2 := TAppearanceNode.Create;
+    Mat2 := TMaterialNode.Create;
+    Box2 := TBoxNode.Create;
+
+    Eff1 := TEffectNode.Create;
+    Eff1.Language := slGLSL;
+    EffGeom1 := TEffectPartNode.Create;
+    EffGeom1.ShaderType := stGeometry;
+    EffGeom1.Contents :=
+      'void PLUG_geometry_vertex_set(const int index) {' + LineEnding +
+      '  castle_normal_eye_geoshader *= 1.0;' + LineEnding +
+      '}' + LineEnding +
+      'void PLUG_geometry_vertex_zero() {' + LineEnding +
+      '  castle_normal_eye_geoshader = vec3(0.0);' + LineEnding +
+      '}';
+    Eff1.SetParts([EffGeom1]);
+
+    Eff2 := TEffectNode.Create;
+    Eff2.Language := slGLSL;
+    EffGeom2 := TEffectPartNode.Create;
+    EffGeom2.ShaderType := stGeometry;
+    EffGeom2.Contents :=
+      'void PLUG_geometry_vertex_set(const int index) {' + LineEnding +
+      '  castle_tex_coord0_geoshader += vec4(0.1, 0.0, 0.0, 0.0);' + LineEnding +
+      '}' + LineEnding +
+      'void PLUG_geometry_vertex_add(const int index, const float scale) {' + LineEnding +
+      '  castle_tex_coord0_geoshader += castle_tex_coord0[index] * (scale * 0.0);' + LineEnding +
+      '}';
+    Eff2.SetParts([EffGeom2]);
+
+    App2.Material := Mat2;
+    App2.SetEffects([Eff1, Eff2]);
+    ShapeNode2.Appearance := App2;
+    ShapeNode2.Geometry := Box2;
+    Root2.AddChildren(ShapeNode2);
+    Scene2.Load(Root2, True);
+
+    RendererShape2 := TX3DRendererShape(Scene2.Shapes.TraverseList(True, True)[0]);
+    RendererShape2.PrepareRHIBuffers(Scene2.RenderOptions, 1);
+    RendererShape2.UploadRHIMaterialToCache(ShadingModel);
+
+    AssertTrue('Effect geometry shader module must be compiled',
+      RendererShape2.Cache.RHIGeometryShader <> nil);
+    GS2 := RendererShape2.Cache.RHIGeometryShaderSource;
+    AssertTrue('Default geometry shader layout and pass-through main() must be injected when effect omits main()',
+      (Pos('layout(triangles) in;', GS2) > 0) and
+      (Pos('layout(triangle_strip, max_vertices = 3) out;', GS2) > 0) and
+      (Pos('EmitVertex();', GS2) > 0));
+    AssertTrue('Chained PLUG_geometry_vertex_set definitions must be deduplicated and both invoked in geometryVertexSet',
+      (Pos('PLUG_geometry_vertex_set(index);', GS2) > 0) and
+      (Pos('PLUG_geometry_vertex_set_2(index);', GS2) > 0));
+    AssertTrue('PLUG_geometry_vertex_zero and PLUG_geometry_vertex_add must be invoked in geometryVertexZero/Add',
+      (Pos('PLUG_geometry_vertex_zero();', GS2) > 0) and
+      (Pos('PLUG_geometry_vertex_add(index, scale);', GS2) > 0));
+  finally
+    FreeAndNil(Renderer);
+    FreeAndNil(RenderOptions);
+    FreeAndNil(Scene2);
+    FreeAndNil(Scene1);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestImageTextureAndMovieTextureFlipVerticallyInMemoryUploadRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  RenderOptions: TCastleRenderOptions;
+  SrcImg, GrabbedImg, Frame0, GrabbedMovieImg: TRGBAlphaImage;
+  ImgTexNormal, ImgTexFlipped: TImageTextureNode;
+  ResNormal, ResFlipped: TImageTextureResource;
+  Vid: TVideo;
+  MovieNode: TMovieTextureNode;
+  MovieRes: TMovieTextureResource;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8902)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+
+  RenderOptions := TCastleRenderOptions.Create(nil);
+  ImgTexNormal := TImageTextureNode.Create;
+  ImgTexFlipped := TImageTextureNode.Create;
+  MovieNode := TMovieTextureNode.Create;
+  try
+    { Create a 2x2 image where bottom row (Y=0) is Red (255,0,0,255) and top row (Y=1) is Blue (0,0,255,255) }
+    SrcImg := TRGBAlphaImage.Create(2, 2);
+    SrcImg.PixelPtr(0, 0)^ := Vector4Byte(255, 0, 0, 255);
+    SrcImg.PixelPtr(1, 0)^ := Vector4Byte(255, 0, 0, 255);
+    SrcImg.PixelPtr(0, 1)^ := Vector4Byte(0, 0, 255, 255);
+    SrcImg.PixelPtr(1, 1)^ := Vector4Byte(0, 0, 255, 255);
+
+    { 1. TImageTextureNode without FlipVertically }
+    ImgTexNormal.FlipVertically := False;
+    ImgTexNormal.LoadFromImage(SrcImg, False, '');
+    TTextureResources.Prepare(RenderOptions, ImgTexNormal);
+    ResNormal := TTextureResources.Get(ImgTexNormal) as TImageTextureResource;
+    AssertTrue('ResNormal.RHITexture must be created', ResNormal.RHITexture <> nil);
+    GrabbedImg := Device.GrabTextureImage(ResNormal.RHITexture, Rectangle(0, 0, 2, 2));
+    try
+      AssertEquals('Unflipped row Y=0 must be Red (R=255)', 255, GrabbedImg.PixelPtr(0, 0)^.X);
+      AssertEquals('Unflipped row Y=0 must be Red (B=0)', 0, GrabbedImg.PixelPtr(0, 0)^.Z);
+      AssertEquals('Unflipped row Y=1 must be Blue (B=255)', 255, GrabbedImg.PixelPtr(0, 1)^.Z);
+    finally
+      FreeAndNil(GrabbedImg);
+    end;
+
+    { 2. TImageTextureNode with FlipVertically = True loaded in-memory via LoadFromImage }
+    ImgTexFlipped.FlipVertically := True;
+    ImgTexFlipped.LoadFromImage(SrcImg, True, '');
+    TTextureResources.Prepare(RenderOptions, ImgTexFlipped);
+    ResFlipped := TTextureResources.Get(ImgTexFlipped) as TImageTextureResource;
+    AssertTrue('ResFlipped.RHITexture must be created', ResFlipped.RHITexture <> nil);
+    GrabbedImg := Device.GrabTextureImage(ResFlipped.RHITexture, Rectangle(0, 0, 2, 2));
+    try
+      AssertEquals('Flipped row Y=0 must now be Blue (R=0)', 0, GrabbedImg.PixelPtr(0, 0)^.X);
+      AssertEquals('Flipped row Y=0 must now be Blue (B=255)', 255, GrabbedImg.PixelPtr(0, 0)^.Z);
+      AssertEquals('Flipped row Y=1 must now be Red (R=255)', 255, GrabbedImg.PixelPtr(0, 1)^.X);
+    finally
+      FreeAndNil(GrabbedImg);
+    end;
+
+    { 3. TMovieTextureNode with FlipVertically = True loaded in-memory via LoadFromVideo }
+    Frame0 := TRGBAlphaImage.Create(2, 2);
+    Frame0.PixelPtr(0, 0)^ := Vector4Byte(0, 255, 0, 255); { Y=0 Green }
+    Frame0.PixelPtr(1, 0)^ := Vector4Byte(0, 255, 0, 255);
+    Frame0.PixelPtr(0, 1)^ := Vector4Byte(255, 255, 0, 255); { Y=1 Yellow }
+    Frame0.PixelPtr(1, 1)^ := Vector4Byte(255, 255, 0, 255);
+    Vid := TVideo.Create;
+    Vid.LoadFromImageArray([Frame0], True, 1.0);
+    MovieNode.FlipVertically := True;
+    MovieNode.LoadFromVideo(Vid, True);
+
+    TTextureResources.Prepare(RenderOptions, MovieNode);
+    MovieRes := TTextureResources.Get(MovieNode) as TMovieTextureResource;
+    AssertTrue('MovieRes.RHITexture must be created', MovieRes.RHITexture <> nil);
+    GrabbedMovieImg := Device.GrabTextureImage(MovieRes.RHITexture, Rectangle(0, 0, 2, 2));
+    try
+      AssertEquals('Flipped MovieTexture row Y=0 must now be Yellow (R=255)', 255, GrabbedMovieImg.PixelPtr(0, 0)^.X);
+      AssertEquals('Flipped MovieTexture row Y=0 must now be Yellow (G=255)', 255, GrabbedMovieImg.PixelPtr(0, 0)^.Y);
+      AssertEquals('Flipped MovieTexture row Y=1 must now be Green (R=0)', 0, GrabbedMovieImg.PixelPtr(0, 1)^.X);
+      AssertEquals('Flipped MovieTexture row Y=1 must now be Green (G=255)', 255, GrabbedMovieImg.PixelPtr(0, 1)^.Y);
+    finally
+      FreeAndNil(GrabbedMovieImg);
+    end;
+  finally
+    FreeAndNil(MovieNode);
+    FreeAndNil(ImgTexFlipped);
+    FreeAndNil(ImgTexNormal);
+    FreeAndNil(RenderOptions);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCommonSurfaceShaderMultiDiffuseAlphaAndNormalMapHeightGateRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene1, Scene2: TCastleScene;
+  Root1, Root2: TX3DRootNode;
+  ShapeNode1, ShapeNode2: TShapeNode;
+  App1, App2: TAppearanceNode;
+  Css1, Css2: TCommonSurfaceShaderNode;
+  MultiTex: TMultiTextureNode;
+  Stage0Tex, Stage1Tex, DiffTex, AlphaTex, NormalRgbTex, NormalRgbaTex: TPixelTextureNode;
+  Box1, Box2: TBoxNode;
+  RendererShape1, RendererShape2: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8903)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+
+  Scene1 := TCastleScene.Create(nil);
+  Scene2 := TCastleScene.Create(nil);
+  try
+    { 1. TCommonSurfaceShaderNode with MultiDiffuseAlphaTexture = TMultiTextureNode
+         and NormalTexture = RGB-only (no alpha height channel -> ParallaxBumpMapping must be False even if ParallaxHeight > 0) }
+    Root1 := TX3DRootNode.Create;
+    ShapeNode1 := TShapeNode.Create;
+    App1 := TAppearanceNode.Create;
+    Css1 := TCommonSurfaceShaderNode.Create;
+    Box1 := TBoxNode.Create;
+
+    Stage0Tex := TPixelTextureNode.Create;
+    Stage0Tex.FdImage.Value := TRGBImage.Create(2, 2);
+    Stage1Tex := TPixelTextureNode.Create;
+    Stage1Tex.FdImage.Value := TRGBImage.Create(2, 2);
+    MultiTex := TMultiTextureNode.Create;
+    MultiTex.SetTexture([Stage0Tex, Stage1Tex]);
+    MultiTex.SetMode(['MODULATE', 'ADD']);
+    Css1.MultiDiffuseAlphaTexture := MultiTex;
+
+    NormalRgbTex := TPixelTextureNode.Create;
+    NormalRgbTex.FdImage.Value := TRGBImage.Create(2, 2); { AlphaChannelFinal = acNone }
+    Css1.NormalTexture := NormalRgbTex;
+    Css1.NormalTextureParallaxHeight := 0.05;
+
+    App1.SetShaders([Css1]);
+    ShapeNode1.Appearance := App1;
+    ShapeNode1.Geometry := Box1;
+    Root1.AddChildren(ShapeNode1);
+    Scene1.RenderOptions.BumpMapping := bmParallax;
+    Scene1.Load(Root1, True);
+
+    RendererShape1 := TX3DRendererShape(Scene1.Shapes.TraverseList(True, True)[0]);
+    RendererShape1.PrepareRHIBuffers(Scene1.RenderOptions, 1);
+    RendererShape1.UploadRHIMaterialToCache(ShadingModel);
+
+    AssertTrue('CommonSurfaceShader MultiDiffuseAlphaTexture with TMultiTextureNode must enable MultiTexture Stage 1',
+      RendererShape1.Cache.RHIHasSecondTexture);
+    AssertFalse('ParallaxBumpMapping must be False when NormalTexture has no alpha channel (AlphaChannelFinal = acNone)',
+      RendererShape1.Cache.RHIHasParallaxBumpMapping);
+
+    { 2. TCommonSurfaceShaderNode with DiffuseTexture + separate single MultiDiffuseAlphaTexture
+         and NormalTexture = TRGBAlphaImage (with alpha height channel -> ParallaxBumpMapping must be True) }
+    Root2 := TX3DRootNode.Create;
+    ShapeNode2 := TShapeNode.Create;
+    App2 := TAppearanceNode.Create;
+    Css2 := TCommonSurfaceShaderNode.Create;
+    Box2 := TBoxNode.Create;
+
+    DiffTex := TPixelTextureNode.Create;
+    DiffTex.FdImage.Value := TRGBImage.Create(2, 2);
+    AlphaTex := TPixelTextureNode.Create;
+    AlphaTex.FdImage.Value := TGrayscaleImage.Create(2, 2);
+    Css2.DiffuseTexture := DiffTex;
+    Css2.MultiDiffuseAlphaTexture := AlphaTex;
+
+    NormalRgbaTex := TPixelTextureNode.Create;
+    NormalRgbaTex.FdImage.Value := TRGBAlphaImage.Create(2, 2);
+    TRGBAlphaImage(NormalRgbaTex.FdImage.Value).PixelPtr(0, 0)^ := Vector4Byte(128, 128, 255, 100); { non-opaque alpha -> AlphaChannelFinal <> acNone }
+    Css2.NormalTexture := NormalRgbaTex;
+    Css2.NormalTextureParallaxHeight := 0.05;
+
+    App2.SetShaders([Css2]);
+    ShapeNode2.Appearance := App2;
+    ShapeNode2.Geometry := Box2;
+    Root2.AddChildren(ShapeNode2);
+    Scene2.RenderOptions.BumpMapping := bmParallax;
+    Scene2.Load(Root2, True);
+
+    RendererShape2 := TX3DRendererShape(Scene2.Shapes.TraverseList(True, True)[0]);
+    RendererShape2.PrepareRHIBuffers(Scene2.RenderOptions, 1);
+    RendererShape2.UploadRHIMaterialToCache(ShadingModel);
+
+    AssertTrue('CommonSurfaceShader separate MultiDiffuseAlphaTexture must set RHIHasAlphaTexture',
+      RendererShape2.Cache.RHIHasAlphaTexture);
+    AssertTrue('ParallaxBumpMapping must be True when NormalTexture has an alpha height channel and NormalMapParallaxHeight > 0',
+      RendererShape2.Cache.RHIHasParallaxBumpMapping);
+  finally
+    FreeAndNil(Scene2);
+    FreeAndNil(Scene1);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);
