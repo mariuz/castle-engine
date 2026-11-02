@@ -2430,11 +2430,24 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - **Screenshots:** [CGE Editor Files & Output Panels](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [UE 5.5 Editor Interface & Content Browser](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/90bc2642-1728-47be-9e0f-118c88653e78/interface-thumbnail.jpg)
   - **Example (Phase 258):** Browse any project directory in the **Files** tab to see the live item & excluded-file count in the search bar (`Search files in folder (18 shown, 2 hidden by ExcludeMask)...`), or click an earlier warning/error line in the **Output** tab during `Compile` (`F9`) to inspect and double-click it without incoming build lines jumping the scroll position away.
 
+### Phase 259: Scrollbar-Preserving & Single-Pass `ModifiedOutsideObjectInspector` Refresh (`UpdateSelectedControlModified`), Unified Physics Simulation Action Sync (`UpdateSimulationActions`), and Safe Modal Download Cleanup (`TProgressForm.WaitFor`)
+- [x] **259.1. Scrollbar-Preserving `ModifiedOutsideObjectInspector`, `UpdateSimulationActions` & `TProgressForm.WaitFor` Modal Lifecycle (`framedesign.pas` & `formprogress.pas`)**
+  - Resolved the `ModifiedOutsideObjectInspector` scrollbar and optimization `TODO`s (`tools/castle-editor/code/framedesign.pas`) by saving and restoring `Inspector[InspectorType].TopY` and `TabLayoutScrollBox.VertScrollBar.Position` across `RefreshPropertyValues`, extracting `TDesignFrame.UpdateSelectedControlModified` (which only updates `LabelControlSelected.Caption` and `SelNode.Text` when their text actually changes), and calling `UpdateSelectedControlModified` directly from `ModifiedOutsideObjectInspector` instead of `PropertyGridModified(nil)` — eliminating a redundant intermediate `DoRecordUndo` full-design serialization on every external modification.
+  - Resolved the `SimulationPlayStop` and `SimulationPauseUnpause` action-update `TODO`s (`tools/castle-editor/code/framedesign.pas`) by introducing `TDesignFrame.UpdateSimulationActions`, which synchronizes `ActionSimulationPlayStop`, `ActionSimulationPauseUnpause`, `ButtonSimulationStep` (visibility, enabled state, and dynamic pause vs. 1/60s step hint), and `ButtonKeepSimulation` across `TDesignFrame.Create`, `SimulationPlayStop`, `SimulationPauseUnpause`, and `SimulationSingleStep`.
+  - Resolved the `TProgressForm.WaitFor` cleanup `TODO` (`tools/castle-editor/code/formprogress.pas`) by disabling `Timer1` and detaching `WaitingFor` before freeing the completed modal form so no background download timer tick fires during teardown.
+  - **Official Docs & Visual References (Phase 259):** [CGE Visual Editor Manual (Object Inspector, Viewport Manipulation & Physics Simulation)](https://castle-engine.io/manual_editor.php) · [CGE Physics Manual](https://castle-engine.io/physics) · [CGE Network & `TCastleDownload` Manual](https://castle-engine.io/url) · [UE 5.5 Details Panel & Simulation Controls](https://dev.epicgames.com/documentation/en-us/unreal-engine/level-editor-details-panel-in-unreal-engine) · [Godot 4 Inspector Dock & Scene Toolbar](https://docs.godotengine.org/en/stable/getting_started/introduction/first_look_at_the_editor.html)
+  - **Official Videos & Movies (Phase 259):**
+    - 🎬 [CGE Official Video — Visual Editor Manipulation, Inspector & Physics Simulation (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+    - 🎬 [CGE Official Video — Importing & Downloading Assets in Editor (YouTube)](https://www.youtube.com/watch?v=gwnKMnAGUcg)
+    - 🎞️ [Animated Movie (GIF) — Interactive Viewport Gizmo & Inspector Scroll Workflow](https://docs.godotengine.org/en/stable/_images/containers_split_drag.gif)
+  - **Screenshots:** [CGE Design Inspector & Layout Tab](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [CGE Physics Simulation Toolbar](https://castle-engine.io/images/thumb_const_height_size/physics_platformer_collisions.webp) · [UE 5.5 Details Panel Scroll & Transform Sync](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/90bc2642-1728-47be-9e0f-118c88653e78/interface-thumbnail.jpg)
+  - **Example (Phase 259):** Scroll down in the **All** or **Layout** Object Inspector tab to inspect lower properties while dragging a `TCastleUserInterface` or `TCastleTransform` in the viewport: the Object Inspector and Layout scrollbars stay locked at their exact vertical scroll offset (`TopY`) without jumping to the top, and non-drag operations record their Undo snapshot in a single serialization pass.
+
 ---
 
-## Roadmap Completion Status (Phases 1–258 — Final Milestone)
+## Roadmap Completion Status (Phases 1–259 — Final Milestone)
 
-All **258 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **259 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 

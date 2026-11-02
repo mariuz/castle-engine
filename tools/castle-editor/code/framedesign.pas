@@ -1160,6 +1160,7 @@ type
       (e.g. a Color picker, TStrings editor, Open File dialogue, etc.)
       then only PropertyEditorModified is called. }
     procedure PropertyGridModified(Sender: TObject);
+    procedure UpdateSelectedControlModified;
     procedure PropertyEditorModified(Sender: TObject);
     procedure PropertyGridCollectionItemClick(Sender: TObject);
     procedure PropertyGridCollectionItemClose(Sender: TObject; var CloseAction: TCloseAction);
@@ -2336,6 +2337,7 @@ type
     procedure SimulationPauseUnpause;
     procedure SimulationSingleStep;
     procedure KeepSimulationChanges;
+    procedure UpdateSimulationActions;
     property ShowColliders: Boolean read FShowColliders write SetShowColliders;
 
     procedure ReleaseAllKeysAndMouse;
@@ -7519,8 +7521,8 @@ begin
   FCurrentViewportObserver := TFreeNotificationObserver.Create(Self);
   FCurrentViewportObserver.OnFreeNotification := {$ifdef FPC}@{$endif} CurrentViewportFreeNotification;
 
-  // needed to set right action state maybe lazarus bug?
-  ActionSimulationPauseUnpause.Update;
+  // Synchronize initial simulation action and toolbar button states
+  UpdateSimulationActions;
 
   (*
   // The TransformDesigning mechanism works, but it unused for now.
@@ -10152,46 +10154,48 @@ begin
     Result := 'Change ' + ModifiedProperty + ToValue;
 end;
 
-procedure TDesignFrame.PropertyGridModified(Sender: TObject);
+procedure TDesignFrame.UpdateSelectedControlModified;
+var
+  Sel: TComponent;
+  SelUI: TCastleUserInterface;
+  SelNode: TTreeNode;
+  NewCaption, NewNodeText: String;
+begin
+  // This checks we have selected *exactly one* component.
+  Sel := SelectedComponent;
 
-  { Do a subset of work that UpdateSelectedControl also does:
-    update UI to reflect the current state of selected object,
-    when the properties of the selected object possibly changed
-    (but the selected object stays the same -- otherwise
-    UpdateSelectedControl would do the full job.)
-
-    It also updates ControlsTree,
-    in case you changed the TComponent.Name. }
-  procedure UpdateSelectedControlModified;
-  var
-    Sel: TComponent;
-    SelUI: TCastleUserInterface;
-    SelNode: TTreeNode;
+  if Sel <> nil then
   begin
-    // This checks we have selected *exactly one* component.
-    Sel := SelectedComponent;
+    { Update LabelControlSelected only when the caption actually changed,
+      avoiding unnecessary LCL auto-size/layout invalidations during viewport dragging. }
+    NewCaption := 'Selected:' + NL + ComponentCaption(Sel);
+    if LabelControlSelected.Caption <> NewCaption then
+      LabelControlSelected.Caption := NewCaption;
 
-    if Sel <> nil then
+    if Sel is TCastleUserInterface then
     begin
-      // update also LabelControlSelected
-      LabelControlSelected.Caption := 'Selected:' + NL + ComponentCaption(Sel);
-
-      if Sel is TCastleUserInterface then
-      begin
-        SelUI := Sel as TCastleUserInterface;
-        UpdateAnchors(SelUI, true);
-      end;
-
-      { Note that we use TreeNodeMap to find SelNode,
-        not just assume that SelNode := ControlsTree.Selected.
-        That is because in case of special tree items "Behaviors" or "Non-Visual Components",
-        the ControlsTree.Selected could be different. }
-      if TreeNodeMap.TryGetValue(Sel, SelNode) then
-        SelNode.Text := TreeNodeCaption(Sel);
+      SelUI := Sel as TCastleUserInterface;
+      UpdateAnchors(SelUI, true);
     end;
 
-    UpdateSelectedInfo;
+    { Note that we use TreeNodeMap to find SelNode,
+      not just assume that SelNode := ControlsTree.Selected.
+      That is because in case of special tree items "Behaviors" or "Non-Visual Components",
+      the ControlsTree.Selected could be different.
+      Only assign SelNode.Text when it changed (e.g. TComponent.Name changed),
+      avoiding redundant TTreeView repaints on every size/transform change. }
+    if TreeNodeMap.TryGetValue(Sel, SelNode) then
+    begin
+      NewNodeText := TreeNodeCaption(Sel);
+      if SelNode.Text <> NewNodeText then
+        SelNode.Text := NewNodeText;
+    end;
   end;
+
+  UpdateSelectedInfo;
+end;
+
+procedure TDesignFrame.PropertyGridModified(Sender: TObject);
 
   procedure DoRecordUndo;
   var
@@ -10220,8 +10224,6 @@ procedure TDesignFrame.PropertyGridModified(Sender: TObject);
             TOICustomPropertyGrid(Sender).CurrentEditValue, SelectedCount),
             ucHigh);
         end else
-        { Sender is nil when PropertyGridModified is called
-          by ModifiedOutsideObjectInspector. }
         if Sel <> nil then // so SelectedCount = 1
           RecordUndo('Change ' + Sel.Name, ucLow)
         else
@@ -12574,9 +12576,7 @@ begin
     RestoreSavedSelection(SavedSelection);
   end;
 
-  // TODO: why is this not called automatically?
-  ActionSimulationPlayStopUpdate(ActionSimulationPlayStop);
-  ActionSimulationPauseUnpauseUpdate(ActionSimulationPauseUnpause);
+  UpdateSimulationActions;
 end;
 
 procedure TDesignFrame.ShowAllJointsTools;
@@ -12603,7 +12603,15 @@ begin
   if InternalCastleApplicationMode = appSimulation then
     InternalCastleApplicationMode := appSimulationPaused;
 
-  // TODO: why is this not called automatically?
+  UpdateSimulationActions;
+end;
+
+procedure TDesignFrame.UpdateSimulationActions;
+begin
+  { LCL TCustomForm.UpdateActions only automatically polls TActionLists owned directly
+    by the form during idle ticks, whereas ActionListDesign is owned by TDesignFrame
+    and TCastleControl renders continuously. Synchronize simulation actions and toolbar
+    controls explicitly whenever the simulation state changes. }
   ActionSimulationPlayStopUpdate(ActionSimulationPlayStop);
   ActionSimulationPauseUnpauseUpdate(ActionSimulationPauseUnpause);
 end;
@@ -12630,9 +12638,19 @@ begin
   ActionSimulationPauseUnpause.Checked := CastleApplicationMode = appSimulationPaused;
   ActionSimulationPauseUnpause.Visible := InSim;
   if ButtonSimulationStep <> nil then
+  begin
     ButtonSimulationStep.Visible := InSim;
+    ButtonSimulationStep.Enabled := InSim;
+    if CastleApplicationMode = appSimulationPaused then
+      ButtonSimulationStep.Hint := 'Advance physics simulation by a single frame (1/60s)'
+    else
+      ButtonSimulationStep.Hint := 'Pause physics simulation (click again to step 1/60s)';
+  end;
   if ButtonKeepSimulation <> nil then
+  begin
     ButtonKeepSimulation.Visible := InSim;
+    ButtonKeepSimulation.Enabled := InSim;
+  end;
 end;
 
 procedure TDesignFrame.ActionSimulationPauseUnpauseExecute(Sender: TObject);
@@ -14199,8 +14217,7 @@ begin
   finally
     InternalCastleApplicationMode := appSimulationPaused;
   end;
-  ActionSimulationPlayStopUpdate(ActionSimulationPlayStop);
-  ActionSimulationPauseUnpauseUpdate(ActionSimulationPauseUnpause);
+  UpdateSimulationActions;
 end;
 
 procedure TDesignFrame.ButtonSimulationStepClick(Sender: TObject);
@@ -48971,23 +48988,39 @@ procedure TDesignFrame.ModifiedOutsideObjectInspector(const UndoComment: String;
   const UndoCommentPriority: TUndoCommentPriority; const UndoOnRelease: Boolean = false);
 var
   InspectorType: TInspectorType;
+  SavedTopY: array [TInspectorType] of Integer;
+  SavedLayoutScrollPos: Integer;
 begin
-  // TODO: this moves UI scrollbar up,
-  // TODO: this is not optimized
-  // (PropertyGridModified does some unnecessary things if we only changed size)
+  SavedLayoutScrollPos := 0;
+  if (TabLayoutScrollBox <> nil) and (TabLayoutScrollBox.VertScrollBar <> nil) then
+    SavedLayoutScrollPos := TabLayoutScrollBox.VertScrollBar.Position;
 
   for InspectorType in TInspectorType do
+  begin
+    SavedTopY[InspectorType] := Inspector[InspectorType].TopY;
     Inspector[InspectorType].RefreshPropertyValues;
-  // do not call PropertyGridModified if nothing selected, e.g. after delete operation
+  end;
+
+  { Update selected component UI/info directly via UpdateSelectedControlModified
+    instead of PropertyGridModified(nil), avoiding a redundant intermediate Undo
+    serialization when UndoOnRelease is false and preserving scrollbar positions. }
   if ControlsTree.SelectionCount <> 0 then
-    PropertyGridModified(nil);
+    UpdateSelectedControlModified;
+
+  for InspectorType in TInspectorType do
+    if Inspector[InspectorType].TopY <> SavedTopY[InspectorType] then
+      Inspector[InspectorType].TopY := SavedTopY[InspectorType];
+
+  if (TabLayoutScrollBox <> nil) and (TabLayoutScrollBox.VertScrollBar <> nil) and
+     (TabLayoutScrollBox.VertScrollBar.Position <> SavedLayoutScrollPos) then
+    TabLayoutScrollBox.VertScrollBar.Position := SavedLayoutScrollPos;
 
   MarkModified;
 
   if UndoOnRelease then
     UndoSystem.ScheduleRecordUndoOnRelease := true
   else
-    RecordUndo(UndoComment, UndoCommentPriority); //it will overwrite Undo recorded in PropertyGridModified with a better comment
+    RecordUndo(UndoComment, UndoCommentPriority);
 end;
 
 procedure TDesignFrame.NewDesign(const ComponentClass: TComponentClass;

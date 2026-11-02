@@ -62,9 +62,9 @@ begin
     it isn't done when TCastleControl installs own idle handler that
     always sets Done:=false. }
 
-  if WaitingFor.Status = dsDownloading then
+  if (WaitingFor <> nil) and (WaitingFor.Status = dsDownloading) then
   begin
-    if WaitingFor.TotalBytes <> -1 then
+    if WaitingFor.TotalBytes > 0 then
       ProgressBar1.Position := Round(ProgressBar1.Max *
         WaitingFor.DownloadedBytes / WaitingFor.TotalBytes);
 
@@ -72,6 +72,7 @@ begin
     ApplicationProperties._Update;
   end else
   begin
+    Timer1.Enabled := false;
     ModalResult := mrOK;
     Close;
   end;
@@ -95,11 +96,14 @@ begin
       else raise EDownloadCancelled.Create('Download cancelled');
     end;
   finally
-    // TODO: closing before freeing necessary?
+    { ShowModal already closes the modal form before returning; disable Timer1
+      and detach WaitingFor before freeing so no timer tick fires during teardown. }
     if Form <> nil then
     begin
+      if Form.Timer1 <> nil then
+        Form.Timer1.Enabled := false;
+      Form.WaitingFor := nil;
       Form.OnCloseQuery := nil;
-      Form.Close;
     end;
     FreeAndNil(Form);
   end;
