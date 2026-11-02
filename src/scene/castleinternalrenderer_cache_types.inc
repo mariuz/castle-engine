@@ -171,6 +171,13 @@
     FRHISteepParallaxBumpMapping: Boolean;
     FRHISteepParallaxSelfShadowing: Boolean;
     FRHIParallaxHeight: Single;
+    FRHIIsPhongMaterial: Boolean;
+    FRHIPhongHasSpecularTex: Boolean;
+    FRHIPhongHasShininessTex: Boolean;
+    FRHIPhongHasAmbientTex: Boolean;
+    FRHIPhongAmbientIntensity: Single;
+    FRHIHasSeparateDiffuseEnvTex: Boolean;
+    FRHIEnvLightColorIntensity: TVector3;
     FRHIVertexEffectCode: String;
     FRHIFragmentEffectCode: String;
     FRHIComposedVertSource: String;
@@ -251,6 +258,12 @@
     procedure SetPointSize(const APointSize: Single);
     procedure SetParallaxBumpMapping(const AEnabled, ASteep: Boolean; const AHeight: Single); overload;
     procedure SetParallaxBumpMapping(const AEnabled, ASteep, ASelfShadowing: Boolean; const AHeight: Single); overload;
+    procedure SetPhongSurfaceParams(
+      const AIsPhong, AHasSpecularTex, AHasShininessTex, AHasAmbientTex: Boolean;
+      const AAmbientIntensity: Single);
+    procedure SetEnvironmentLightParams(
+      const AHasSeparateDiffuse: Boolean;
+      const AColorIntensity: TVector3);
     procedure SetShaderEffects(const AVertexEffectCode, AFragmentEffectCode: String);
     procedure SetComposedShader(const ACustomVertSource, ACustomFragSource: String);
     procedure EnsureRHIShaders(
@@ -316,6 +329,13 @@
     property RHISteepParallaxBumpMapping: Boolean read FRHISteepParallaxBumpMapping;
     property RHISteepParallaxSelfShadowing: Boolean read FRHISteepParallaxSelfShadowing;
     property RHIParallaxHeight: Single read FRHIParallaxHeight;
+    property RHIIsPhongMaterial: Boolean read FRHIIsPhongMaterial;
+    property RHIPhongHasSpecularTex: Boolean read FRHIPhongHasSpecularTex;
+    property RHIPhongHasShininessTex: Boolean read FRHIPhongHasShininessTex;
+    property RHIPhongHasAmbientTex: Boolean read FRHIPhongHasAmbientTex;
+    property RHIPhongAmbientIntensity: Single read FRHIPhongAmbientIntensity;
+    property RHIHasSeparateDiffuseEnvTex: Boolean read FRHIHasSeparateDiffuseEnvTex;
+    property RHIEnvLightColorIntensity: TVector3 read FRHIEnvLightColorIntensity;
     property RHIVertexEffectCode: String read FRHIVertexEffectCode;
     property RHIFragmentEffectCode: String read FRHIFragmentEffectCode;
     property RHIComposedVertSource: String read FRHIComposedVertSource;
@@ -368,6 +388,8 @@ begin
   VboToReload := AllVboTypes;
   FRHIPointSize := 1.0;
   FRHIParallaxHeight := 0.01;
+  FRHIPhongAmbientIntensity := 0.2;
+  FRHIEnvLightColorIntensity := Vector3(1.0, 1.0, 1.0);
   FRHITexGenProjectorMatrix := TMatrix4.Identity;
   FRHIShadowMapSize := 128;
 end;
@@ -959,6 +981,38 @@ begin
   end;
 end;
 
+procedure TShapeCache.SetPhongSurfaceParams(
+  const AIsPhong, AHasSpecularTex, AHasShininessTex, AHasAmbientTex: Boolean;
+  const AAmbientIntensity: Single);
+begin
+  if (FRHIIsPhongMaterial <> AIsPhong) or
+     (FRHIPhongHasSpecularTex <> AHasSpecularTex) or
+     (FRHIPhongHasShininessTex <> AHasShininessTex) or
+     (FRHIPhongHasAmbientTex <> AHasAmbientTex) or
+     (not SameValue(FRHIPhongAmbientIntensity, AAmbientIntensity, 1e-4)) then
+  begin
+    FRHIIsPhongMaterial := AIsPhong;
+    FRHIPhongHasSpecularTex := AHasSpecularTex;
+    FRHIPhongHasShininessTex := AHasShininessTex;
+    FRHIPhongHasAmbientTex := AHasAmbientTex;
+    FRHIPhongAmbientIntensity := AAmbientIntensity;
+    FRHIShadersInitialized := False;
+  end;
+end;
+
+procedure TShapeCache.SetEnvironmentLightParams(
+  const AHasSeparateDiffuse: Boolean;
+  const AColorIntensity: TVector3);
+begin
+  if (FRHIHasSeparateDiffuseEnvTex <> AHasSeparateDiffuse) or
+     (not TVector3.Equals(FRHIEnvLightColorIntensity, AColorIntensity, 1e-4)) then
+  begin
+    FRHIHasSeparateDiffuseEnvTex := AHasSeparateDiffuse;
+    FRHIEnvLightColorIntensity := AColorIntensity;
+    FRHIShadersInitialized := False;
+  end;
+end;
+
 procedure TShapeCache.SetShaderEffects(const AVertexEffectCode, AFragmentEffectCode: String);
 begin
   if (FRHIVertexEffectCode <> AVertexEffectCode) or
@@ -1013,7 +1067,7 @@ procedure TShapeCache.EnsureRHIShaders(
 var
   Mask: QWord;
   Gen: TCastleShaderGeneratorRHI;
-  FogSnippet, TexGenSnippet, TexTransformSnippet, ClipPlaneSnippet, ShadowMapSnippet, ParallaxSnippet, SelfShadowSnippet: String;
+  FogSnippet, TexGenSnippet, TexTransformSnippet, ClipPlaneSnippet, ShadowMapSnippet, ParallaxSnippet, SelfShadowSnippet, PhongSetupSnippet: String;
   SecondTexSnippet, SecondTexUV, Arg2RGB, Arg2Alpha, BlendAlphaExpr, PlugTexColorCall, CubeCoordExpr, Tex3DCoordExpr, Tex3DMatExpr: String;
   UpgradedVertEffect, UpgradedFragEffect, EffectivePointSizeStr, AttribGLSLType, AttribDecl: String;
   HasLinearColorSpace: Boolean;
@@ -1104,6 +1158,16 @@ begin
   Mask := Mask or (QWord(Ord(FRHIBaseColorTextureDimension) and 3) shl 32);
   if TexCoord0Dim <> 2 then
     Mask := Mask or (QWord(TexCoord0Dim and 7) shl 35);
+  if FRHIIsPhongMaterial then
+  begin
+    Mask := Mask or (QWord(1) shl 38);
+    if FRHIPhongHasSpecularTex then Mask := Mask or (QWord(1) shl 39);
+    if FRHIPhongHasShininessTex then Mask := Mask or (QWord(1) shl 40);
+    if FRHIPhongHasAmbientTex then Mask := Mask or (QWord(1) shl 41);
+  end;
+  if AHasIBL and (FRHIHasSeparateDiffuseEnvTex or
+     (not TVector3.Equals(FRHIEnvLightColorIntensity, Vector3(1.0, 1.0, 1.0), 1e-4))) then
+    Mask := Mask or (QWord(1) shl 42);
 
   if FRHIShadersInitialized and (FRHIShaderPermutationMask = Mask) and
      (FRHIVertexShader <> nil) and (FRHIFragmentShader <> nil) then
@@ -1613,6 +1677,85 @@ begin
         '  castle_FragColor = vec4(Lo + emissive, baseColor.a);',
         '  castle_FragColor = vec4(Lo + emissive, baseColor.a);' + FogSnippet,
         []);
+    if FRHIIsPhongMaterial then
+    begin
+      PhongSetupSnippet := FormatDot(
+        '  vec3 castle_specular_color = castle_MaterialSpecular;' + LineEnding +
+        '  float castle_shininess_exp = max(castle_MaterialShininess, 1.0);' + LineEnding +
+        '  vec3 castle_ambient_color = baseColor.rgb * %.4f;',
+        [FRHIPhongAmbientIntensity]);
+      if AHasMetallicRoughnessTex and FRHIPhongHasSpecularTex then
+        PhongSetupSnippet := PhongSetupSnippet + LineEnding +
+          '  castle_specular_color *= mrSample.rgb;';
+      if AHasMetallicRoughnessTex and FRHIPhongHasShininessTex then
+        PhongSetupSnippet := PhongSetupSnippet + LineEnding +
+          '  castle_shininess_exp = max(castle_shininess_exp * mrSample.a, 1.0);';
+      if AHasOcclusionTex and FRHIPhongHasAmbientTex then
+        PhongSetupSnippet := PhongSetupSnippet + LineEnding +
+          '  castle_ambient_color *= texture(castle_occlusion_texture, castle_tex_coord0).rgb;' + LineEnding +
+          '  ao = 1.0;';
+      if (FRHIFragmentEffectCode <> '') and HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_material_specular') then
+        PhongSetupSnippet := PhongSetupSnippet + LineEnding +
+          '  PLUG_material_specular(castle_specular_color);';
+      if (FRHIFragmentEffectCode <> '') and HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_material_ambient') then
+        PhongSetupSnippet := PhongSetupSnippet + LineEnding +
+          '  PLUG_material_ambient(castle_ambient_color);';
+      if (FRHIFragmentEffectCode <> '') and HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_material_shininess') then
+        PhongSetupSnippet := PhongSetupSnippet + LineEnding +
+          '  PLUG_material_shininess(castle_shininess_exp);';
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        '  vec3 N = normalize(castle_normal_eye);',
+        PhongSetupSnippet + LineEnding + '  vec3 N = normalize(castle_normal_eye);',
+        []);
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        '    Lo += EvaluateDirectCookTorranceGGX(N, V, L, radiance, baseColor.rgb, metallic, roughness);' + LineEnding +
+        '    Lo += light.AmbientColor.rgb * baseColor.rgb * (ao * attenuation);',
+        '    float castle_ndotl = max(dot(N, L), 0.0);' + LineEnding +
+        '    vec3 castle_half_vec = normalize(L + V);' + LineEnding +
+        '    float castle_spec_factor = (castle_ndotl > 0.0) ? pow(max(dot(castle_half_vec, N), 0.0), castle_shininess_exp) : 0.0;' + LineEnding +
+        '    Lo += (baseColor.rgb * castle_ndotl + castle_specular_color * castle_spec_factor) * radiance;' + LineEnding +
+        '    Lo += light.AmbientColor.rgb * castle_ambient_color * (ao * attenuation);',
+        []);
+    end;
+    if AHasIBL then
+    begin
+      if FRHIHasSeparateDiffuseEnvTex then
+      begin
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          'void main() {',
+          'CASTLE_SAMPLER(2, 5) uniform samplerCube castle_env_diffuse_texture;' + LineEnding +
+          'void main() {',
+          []);
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          '  vec3 diffuseIrradiance = textureLod(castle_env_specular_texture, mat3(castle_ViewMatrixInverse) * N, 4.0).rgb;',
+          '  vec3 diffuseIrradiance = texture(castle_env_diffuse_texture, mat3(castle_ViewMatrixInverse) * N).rgb;',
+          []);
+      end;
+      if not TVector3.Equals(FRHIEnvLightColorIntensity, Vector3(1.0, 1.0, 1.0), 1e-4) then
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          '  Lo += EvaluateIBLCookTorranceGGX(N, V, baseColor.rgb, metallic, roughness, ao, diffuseIrradiance, prefilteredEnv, brdfLut);',
+          FormatDot('  Lo += EvaluateIBLCookTorranceGGX(N, V, baseColor.rgb, metallic, roughness, ao, diffuseIrradiance, prefilteredEnv, brdfLut) * vec3(%.4f, %.4f, %.4f);',
+            [FRHIEnvLightColorIntensity.X, FRHIEnvLightColorIntensity.Y, FRHIEnvLightColorIntensity.Z]),
+          []);
+    end;
+    if HasLinearColorSpace and AHasEmissiveTex then
+    begin
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        '    unlitColor += texture(castle_emissive_texture, castle_tex_coord0).rgb;',
+        '    unlitColor += pow(max(texture(castle_emissive_texture, castle_tex_coord0).rgb, vec3(0.0)), vec3(2.2));',
+        []);
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        '  emissive += texture(castle_emissive_texture, castle_tex_coord0).rgb;',
+        '  emissive += pow(max(texture(castle_emissive_texture, castle_tex_coord0).rgb, vec3(0.0)), vec3(2.2));',
+        []);
+    end;
     if FRHIFragmentEffectCode <> '' then
     begin
       UpgradedFragEffect := Gen.UpgradeUserEffectUniforms(FRHIFragmentEffectCode);
@@ -1628,6 +1771,13 @@ begin
           '  vec3 V = normalize(-castle_vertex_eye.xyz);' + LineEnding +
           '  PLUG_fragment_eye_space(castle_vertex_eye, N);',
           []);
+      if HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_light_scale') then
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          '    vec3 radiance = light.Color.rgb * (attenuation * shadowVis);',
+          '    PLUG_light_scale(attenuation, N, L);' + LineEnding +
+          '    vec3 radiance = light.Color.rgb * (attenuation * shadowVis);',
+          []);
       if HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_material_metallic_roughness') then
         FRHIFragmentShaderSource := StringReplace(
           FRHIFragmentShaderSource,
@@ -1635,7 +1785,7 @@ begin
           '  PLUG_material_metallic_roughness(metallic, roughness);' + LineEnding +
           '  float ao = 1.0;',
           []);
-      if HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_material_shininess') then
+      if (not FRHIIsPhongMaterial) and HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_material_shininess') then
         FRHIFragmentShaderSource := StringReplace(
           FRHIFragmentShaderSource,
           '  float ao = 1.0;',
@@ -1949,6 +2099,8 @@ begin
       else
         SecondTexUV := 'castle_tex_coord0';
       SecondTexSnippet := '  vec4 multiTex1 = texture(castle_multi_texture_1, ' + SecondTexUV + ');' + LineEnding;
+      if HasLinearColorSpace then
+        SecondTexSnippet := SecondTexSnippet + '  multiTex1.rgb = pow(max(multiTex1.rgb, vec3(0.0)), vec3(2.2));' + LineEnding;
       case FRHISecondTextureEnv.Source[cRGB] of
         csCurrentTexture:  Arg2RGB := 'multiTex1.rgb';
         csMaterial:        Arg2RGB := 'castle_MaterialBaseColor.rgb';

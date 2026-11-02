@@ -3080,7 +3080,13 @@ begin
       '      if (light.Color.w > 0.0 && dist > light.Color.w) attenuation = 0.0;' + NL +
       '      if (light.Position.w > 1.5 && light.SpotDirection.w >= 0.0) {' + NL +
       '        float cosDir = dot(-L, normalize(light.SpotDirection.xyz));' + NL +
-      '        if (cosDir < light.SpotDirection.w) attenuation = 0.0;' + NL +
+      '        if (cosDir < light.SpotDirection.w) {' + NL +
+      '          attenuation = 0.0;' + NL +
+      '        } else if (light.SpotParams.y > 0.0 && light.SpotParams.y < light.SpotParams.x) {' + NL +
+      '          attenuation *= clamp((acos(clamp(cosDir, -1.0, 1.0)) - light.SpotParams.x) / (light.SpotParams.y - light.SpotParams.x), 0.0, 1.0);' + NL +
+      '        } else if (light.SpotParams.z > 0.0) {' + NL +
+      '          attenuation *= pow(max(cosDir, 0.0), light.SpotParams.z);' + NL +
+      '        }' + NL +
       '      }' + NL +
       '    }' + NL +
       '    float shadowVis = 1.0;' + NL;
@@ -3093,7 +3099,7 @@ begin
     Result := Result +
       '    vec3 radiance = light.Color.rgb * (attenuation * shadowVis);' + NL +
       '    Lo += EvaluateDirectCookTorranceGGX(N, V, L, radiance, baseColor.rgb, metallic, roughness);' + NL +
-      '    Lo += light.AmbientColor.rgb * baseColor.rgb * ao;' + NL +
+      '    Lo += light.AmbientColor.rgb * baseColor.rgb * (ao * attenuation);' + NL +
       '  }' + NL;
   end;
 

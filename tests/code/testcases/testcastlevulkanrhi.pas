@@ -318,6 +318,9 @@ type
     procedure TestSteepParallaxSelfShadowingSpecializationRHI;
     procedure TestExtendedEffectNodePlugsVertexMaterialLightingFogAndEndRHI;
     procedure TestTextureCoordinate3D4DAndTextureTransform3DSpecializationRHI;
+    procedure TestSpotLightBeamWidthExponentAndPlugLightScaleRHI;
+    procedure TestPhongSpecularShininessAmbientTexturesAndPlugsRHI;
+    procedure TestEnvironmentLightDualCubemapIntensityAndLinearEmissiveDecodeRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -19098,6 +19101,371 @@ begin
       Pos('vec3 castle_tex3d_coord = castle_tex_coord0_4d.xyz / max(castle_tex_coord0_4d.w, 1e-5);', Frag4D) > 0);
   finally
     FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSpotLightBeamWidthExponentAndPlugLightScaleRHI;
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  Device: TVulkanRHIDevice;
+  Root: TX3DRootNode;
+  SpotX3D: TSpotLightNode;
+  SpotVrml1: TSpotLightNode_1;
+  LightEff: TEffectNode;
+  LightFragPart: TEffectPartNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  Box: TBoxNode;
+  Scene: TCastleScene;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  LightsRenderer: TLightsRenderer;
+  RenderingCam: TRenderingCamera;
+  LightsBlock: TCastleLightsUniformBlock;
+  FragSrc: String;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8501)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  LightsRenderer := nil;
+  RenderingCam := nil;
+  try
+    Root := TX3DRootNode.Create;
+
+    SpotX3D := TSpotLightNode.Create;
+    SpotX3D.Global := True;
+    SpotX3D.Location := Vector3(0.0, 4.0, 2.0);
+    SpotX3D.Direction := Vector3(0.0, -1.0, 0.0);
+    SpotX3D.BeamWidth := 0.25;
+    SpotX3D.CutOffAngle := 0.75;
+    LightEff := TEffectNode.Create;
+    LightEff.Language := slGLSL;
+    LightFragPart := TEffectPartNode.Create;
+    LightFragPart.ShaderType := stFragment;
+    LightFragPart.Contents :=
+      'void PLUG_light_scale(inout float scale, const in vec3 normal_eye, const in vec3 light_dir) {' + LineEnding +
+      '  scale *= max(dot(normal_eye, light_dir), 0.1);' + LineEnding +
+      '}';
+    LightEff.SetParts([LightFragPart]);
+    SpotX3D.SetEffects([LightEff]);
+    Root.AddChildren(SpotX3D);
+
+    SpotVrml1 := TSpotLightNode_1.Create;
+    SpotVrml1.FdLocation.Value := Vector3(1.0, 3.0, 1.0);
+    SpotVrml1.FdDirection.Value := Vector3(0.0, -1.0, 0.0);
+    SpotVrml1.FdCutOffAngle.Value := 0.6;
+    SpotVrml1.FdDropOffRate.Value := 0.5;
+    Root.AddChildren(SpotVrml1);
+
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    App.Material := Mat;
+    ShapeNode.Appearance := App;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+
+    RenderingCam := TRenderingCamera.Create;
+    RenderingCam.Target := rtScreen;
+    RenderingCam.Matrix := TMatrix4.Identity;
+    LightsRenderer := TLightsRenderer.Create;
+    LightsRenderer.RenderingCamera := RenderingCam;
+    LightsRenderer.BuildLightsUniformBlock(
+      RendererShape, nil, RendererShape.State.Lights, nil, LightsBlock);
+
+    AssertEquals('LightsBlock must contain 2 spot lights', 2, Integer(LightsBlock.Count));
+    AssertSameValue(0.75, LightsBlock.Lights[0].SpotParams.X, 1e-4);
+    AssertSameValue(0.25, LightsBlock.Lights[0].SpotParams.Y, 1e-4);
+    AssertSameValue(0.0, LightsBlock.Lights[0].SpotParams.Z, 1e-4);
+    AssertTrue('VRML 1.0 TSpotLightNode_1 must pack positive SpotExponent in SpotParams.z',
+      LightsBlock.Lights[1].SpotParams.Z > 0.0);
+
+    FragSrc := RendererShape.Cache.RHIFragmentShaderSource;
+    AssertTrue('Fragment shader must evaluate X3D linear beamWidth..cutOffAngle falloff',
+      Pos('(acos(clamp(cosDir, -1.0, 1.0)) - light.SpotParams.x) / (light.SpotParams.y - light.SpotParams.x)', FragSrc) > 0);
+    AssertTrue('Fragment shader must evaluate VRML 1.0 spotExponent falloff',
+      Pos('pow(max(cosDir, 0.0), light.SpotParams.z)', FragSrc) > 0);
+    AssertTrue('Fragment shader must scale ambient light term by (ao * attenuation)',
+      Pos('(ao * attenuation)', FragSrc) > 0);
+    AssertTrue('Fragment shader must invoke PLUG_light_scale(attenuation, N, L)',
+      Pos('PLUG_light_scale(attenuation, N, L);', FragSrc) > 0);
+  finally
+    FreeAndNil(LightsRenderer);
+    FreeAndNil(RenderingCam);
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestPhongSpecularShininessAmbientTexturesAndPlugsRHI;
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  Device: TVulkanRHIDevice;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  PhongMat: TMaterialNode;
+  SpecShinTex, AmbTex: TPixelTextureNode;
+  SpecShinImg, AmbImg: TRGBAlphaImage;
+  EffNode: TEffectNode;
+  FragPart: TEffectPartNode;
+  Box: TBoxNode;
+  Scene: TCastleScene;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  IsPhong, HasSpecTex, HasShinTex, HasAmbTex: Boolean;
+  AmbIntensity: Single;
+  FragSrc: String;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8502)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+
+    PhongMat := TMaterialNode.Create;
+    PhongMat.DiffuseColor := Vector3(0.8, 0.2, 0.1);
+    PhongMat.SpecularColor := Vector3(0.9, 0.9, 0.9);
+    PhongMat.Shininess := 0.5;
+    PhongMat.AmbientIntensity := 0.35;
+
+    SpecShinTex := TPixelTextureNode.Create;
+    SpecShinImg := TRGBAlphaImage.Create(2, 2);
+    SpecShinImg.Clear(Vector4Byte(200, 200, 200, 128));
+    SpecShinTex.FdImage.Value := SpecShinImg;
+    PhongMat.SpecularTexture := SpecShinTex;
+    PhongMat.ShininessTexture := SpecShinTex;
+
+    AmbTex := TPixelTextureNode.Create;
+    AmbImg := TRGBAlphaImage.Create(2, 2);
+    AmbImg.Clear(Vector4Byte(128, 128, 128, 255));
+    AmbTex.FdImage.Value := AmbImg;
+    PhongMat.AmbientTexture := AmbTex;
+    App.Material := PhongMat;
+
+    EffNode := TEffectNode.Create;
+    EffNode.Language := slGLSL;
+    FragPart := TEffectPartNode.Create;
+    FragPart.ShaderType := stFragment;
+    FragPart.Contents :=
+      'void PLUG_material_specular(inout vec3 specular_color) { specular_color *= vec3(0.8); }' + LineEnding +
+      'void PLUG_material_ambient(inout vec3 ambient_color) { ambient_color += vec3(0.05); }' + LineEnding +
+      'void PLUG_material_shininess(inout float shininess_exp) { shininess_exp *= 2.0; }';
+    EffNode.SetParts([FragPart]);
+    App.SetEffects([EffNode]);
+
+    ShapeNode.Appearance := App;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+
+    AssertTrue('ExtractRHIPhongSurfaceParams must return True for TMaterialNode',
+      RendererShape.ExtractRHIPhongSurfaceParams(IsPhong, HasSpecTex, HasShinTex, HasAmbTex, AmbIntensity));
+    AssertTrue('IsPhong must be True', IsPhong);
+    AssertTrue('HasSpecTex must be True', HasSpecTex);
+    AssertTrue('HasShinTex must be True when ShininessTexture = SpecularTexture', HasShinTex);
+    AssertTrue('HasAmbTex must be True when AmbientTexture is set', HasAmbTex);
+    AssertSameValue(0.35, AmbIntensity, 1e-4);
+
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertEquals('ShadingModel must be smPhong', Ord(smPhong), Ord(ShadingModel));
+    AssertTrue('Cache.RHIIsPhongMaterial must be True', RendererShape.Cache.RHIIsPhongMaterial);
+    FragSrc := RendererShape.Cache.RHIFragmentShaderSource;
+    AssertTrue('Phong shader must initialize castle_specular_color from castle_MaterialSpecular',
+      Pos('vec3 castle_specular_color = castle_MaterialSpecular;', FragSrc) > 0);
+    AssertTrue('Phong shader must modulate castle_specular_color by SpecularTexture (mrSample.rgb)',
+      Pos('castle_specular_color *= mrSample.rgb;', FragSrc) > 0);
+    AssertTrue('Phong shader must modulate castle_shininess_exp by ShininessTexture (mrSample.a)',
+      Pos('castle_shininess_exp = max(castle_shininess_exp * mrSample.a, 1.0);', FragSrc) > 0);
+    AssertTrue('Phong shader must modulate castle_ambient_color by AmbientTexture',
+      Pos('castle_ambient_color *= texture(castle_occlusion_texture, castle_tex_coord0).rgb;', FragSrc) > 0);
+    AssertTrue('Phong shader must invoke PLUG_material_specular',
+      Pos('PLUG_material_specular(castle_specular_color);', FragSrc) > 0);
+    AssertTrue('Phong shader must invoke PLUG_material_ambient',
+      Pos('PLUG_material_ambient(castle_ambient_color);', FragSrc) > 0);
+    AssertTrue('Phong shader must invoke PLUG_material_shininess on castle_shininess_exp',
+      Pos('PLUG_material_shininess(castle_shininess_exp);', FragSrc) > 0);
+    AssertTrue('Phong shader must evaluate Blinn-Phong specular lobe using castle_shininess_exp',
+      Pos('pow(max(dot(castle_half_vec, N), 0.0), castle_shininess_exp)', FragSrc) > 0);
+  finally
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestEnvironmentLightDualCubemapIntensityAndLinearEmissiveDecodeRHI;
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  SavedColorSpace: TColorSpace;
+  Device: TVulkanRHIDevice;
+  Root: TX3DRootNode;
+  EnvLight: TEnvironmentLightNode;
+  SpecCube, DiffCube: TComposedCubeMapTextureNode;
+  FaceTex: TPixelTextureNode;
+  FaceImg: TRGBImage;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  BaseTex, SecondTex, EmissiveTex: TPixelTextureNode;
+  MultiTex: TMultiTextureNode;
+  Box: TBoxNode;
+  Scene: TCastleScene;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  SpecRHITex, DiffRHITex: TRHITexture;
+  SpecRHISamp, DiffRHISamp: TRHISampler;
+  EnvColorIntensity: TVector3;
+  FragSrc: String;
+  Side: Integer;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8503)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedColorSpace := CastleRenderOptions.ColorSpace;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  CastleRenderOptions.ColorSpace := csLinear;
+  SetRHIDevice(Device);
+  Scene := nil;
+  try
+    Root := TX3DRootNode.Create;
+
+    EnvLight := TEnvironmentLightNode.Create;
+    EnvLight.Global := True;
+    EnvLight.Color := Vector3(0.8, 0.9, 1.0);
+    EnvLight.Intensity := 2.0;
+
+    SpecCube := TComposedCubeMapTextureNode.Create;
+    DiffCube := TComposedCubeMapTextureNode.Create;
+    for Side := 0 to 5 do
+    begin
+      FaceTex := TPixelTextureNode.Create;
+      FaceImg := TRGBImage.Create(4, 4);
+      FaceImg.Clear(Vector4Byte(200, 200, 255, 255));
+      FaceTex.FdImage.Value := FaceImg;
+      case Side of
+        0: SpecCube.Back := FaceTex;
+        1: SpecCube.Front := FaceTex;
+        2: SpecCube.Bottom := FaceTex;
+        3: SpecCube.Top := FaceTex;
+        4: SpecCube.Left := FaceTex;
+        5: SpecCube.Right := FaceTex;
+      end;
+
+      FaceTex := TPixelTextureNode.Create;
+      FaceImg := TRGBImage.Create(4, 4);
+      FaceImg.Clear(Vector4Byte(100, 120, 140, 255));
+      FaceTex.FdImage.Value := FaceImg;
+      case Side of
+        0: DiffCube.Back := FaceTex;
+        1: DiffCube.Front := FaceTex;
+        2: DiffCube.Bottom := FaceTex;
+        3: DiffCube.Top := FaceTex;
+        4: DiffCube.Left := FaceTex;
+        5: DiffCube.Right := FaceTex;
+      end;
+    end;
+    EnvLight.SpecularTexture := SpecCube;
+    EnvLight.DiffuseTexture := DiffCube;
+    Root.AddChildren(EnvLight);
+
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+
+    BaseTex := TPixelTextureNode.Create;
+    FaceImg := TRGBImage.Create(2, 2);
+    FaceImg.Clear(Vector4Byte(255, 255, 255, 255));
+    BaseTex.FdImage.Value := FaceImg;
+
+    SecondTex := TPixelTextureNode.Create;
+    FaceImg := TRGBImage.Create(2, 2);
+    FaceImg.Clear(Vector4Byte(128, 128, 128, 255));
+    SecondTex.FdImage.Value := FaceImg;
+
+    MultiTex := TMultiTextureNode.Create;
+    MultiTex.FdTexture.Add(BaseTex);
+    MultiTex.FdTexture.Add(SecondTex);
+    MultiTex.SetMode(['MODULATE', 'MODULATE']);
+    App.Texture := MultiTex;
+
+    EmissiveTex := TPixelTextureNode.Create;
+    FaceImg := TRGBImage.Create(2, 2);
+    FaceImg.Clear(Vector4Byte(64, 128, 255, 255));
+    EmissiveTex.FdImage.Value := FaceImg;
+    Mat.EmissiveTexture := EmissiveTex;
+    App.Material := Mat;
+
+    ShapeNode.Appearance := App;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+
+    AssertTrue('ExtractRHIEnvironmentLightTexture must extract both SpecularTexture and DiffuseTexture',
+      RendererShape.ExtractRHIEnvironmentLightTexture(
+        SpecRHITex, SpecRHISamp, DiffRHITex, DiffRHISamp, EnvColorIntensity));
+    AssertTrue('SpecRHITex must be non-nil', SpecRHITex <> nil);
+    AssertTrue('DiffRHITex must be non-nil and distinct from SpecRHITex',
+      (DiffRHITex <> nil) and (DiffRHITex <> SpecRHITex));
+    AssertSameValue(1.6, EnvColorIntensity.X, 1e-4);
+    AssertSameValue(1.8, EnvColorIntensity.Y, 1e-4);
+    AssertSameValue(2.0, EnvColorIntensity.Z, 1e-4);
+
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertTrue('Cache.RHIHasSeparateDiffuseEnvTex must be True',
+      RendererShape.Cache.RHIHasSeparateDiffuseEnvTex);
+    AssertTrue('Cache.RHIUserEffectTexture[3] (Set 2 Binding 5) must bind DiffRHITex',
+      RendererShape.Cache.RHIUserEffectTexture[3] = DiffRHITex);
+
+    FragSrc := RendererShape.Cache.RHIFragmentShaderSource;
+    AssertTrue('Fragment shader must declare samplerCube castle_env_diffuse_texture at Set 2 Binding 5',
+      Pos('CASTLE_SAMPLER(2, 5) uniform samplerCube castle_env_diffuse_texture;', FragSrc) > 0);
+    AssertTrue('Fragment shader must sample castle_env_diffuse_texture for diffuseIrradiance',
+      Pos('vec3 diffuseIrradiance = texture(castle_env_diffuse_texture, mat3(castle_ViewMatrixInverse) * N).rgb;', FragSrc) > 0);
+    AssertTrue('Fragment shader must scale IBL evaluation by EnvironmentLight Color * Intensity',
+      Pos('EvaluateIBLCookTorranceGGX(N, V, baseColor.rgb, metallic, roughness, ao, diffuseIrradiance, prefilteredEnv, brdfLut) * vec3(1.6000, 1.8000, 2.0000);', FragSrc) > 0);
+    AssertTrue('Fragment shader must sRGB-decode castle_emissive_texture when ColorSpace = csLinear',
+      Pos('emissive += pow(max(texture(castle_emissive_texture, castle_tex_coord0).rgb, vec3(0.0)), vec3(2.2));', FragSrc) > 0);
+    AssertTrue('Fragment shader must sRGB-decode multiTex1.rgb when ColorSpace = csLinear',
+      Pos('multiTex1.rgb = pow(max(multiTex1.rgb, vec3(0.0)), vec3(2.2));', FragSrc) > 0);
+  finally
+    FreeAndNil(Scene);
+    CastleRenderOptions.ColorSpace := SavedColorSpace;
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);

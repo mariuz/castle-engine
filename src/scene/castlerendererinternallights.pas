@@ -394,7 +394,7 @@ procedure TLightsRenderer.BuildLightsUniformBlock(const Shape: TShape;
             Rad := Approximate3DScale(LightToEyeSpace) * Rad;
           Idx := UniformBlock.AddSpotLight(EyePos.XYZ, Dir, Color3, AmbientColor3,
             Att, Rad, LiSpot.SpotCosCutoff, LiSpot.FdCutOffAngle.Value,
-            LiSpot.FdBeamWidth.Value, LiSpot.SpotExponentApproximate);
+            LiSpot.FdBeamWidth.Value, 0.0);
         end else
         if Node is TAbstractPointLightNode then
         begin
