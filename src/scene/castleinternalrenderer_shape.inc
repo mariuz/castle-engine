@@ -2083,10 +2083,11 @@ var
 
   procedure ProcessInterfaceDeclarations(const AIDecls: TX3DInterfaceDeclarationList);
   var
-    I, J: Integer;
+    I, J, K: Integer;
     Field: TX3DField;
     FVal: Single;
     IVal: Int32;
+    IVec4: array[0..3] of Int32;
     V2: TVector2;
     V3: TVector3;
     V4: TVector4;
@@ -2126,13 +2127,32 @@ var
       begin
         V2 := TSFVec2f(Field).Value;
         WriteBytes(V2, SizeOf(TVector2), 8);
+      end else if Field is TSFVec2d then
+      begin
+        V2 := Vector2(Single(TSFVec2d(Field).Value.X), Single(TSFVec2d(Field).Value.Y));
+        WriteBytes(V2, SizeOf(TVector2), 8);
       end else if Field is TSFVec3f then
       begin
         V3 := TSFVec3f(Field).Value;
         WriteBytes(V3, SizeOf(TVector3), 16);
+      end else if Field is TSFVec3d then
+      begin
+        V3 := Vector3(
+          Single(TSFVec3d(Field).Value.X),
+          Single(TSFVec3d(Field).Value.Y),
+          Single(TSFVec3d(Field).Value.Z));
+        WriteBytes(V3, SizeOf(TVector3), 16);
       end else if Field is TSFVec4f then
       begin
         V4 := TSFVec4f(Field).Value;
+        WriteBytes(V4, SizeOf(TVector4), 16);
+      end else if Field is TSFVec4d then
+      begin
+        V4 := Vector4(
+          Single(TSFVec4d(Field).Value.X),
+          Single(TSFVec4d(Field).Value.Y),
+          Single(TSFVec4d(Field).Value.Z),
+          Single(TSFVec4d(Field).Value.W));
         WriteBytes(V4, SizeOf(TVector4), 16);
       end else if Field is TSFRotation then
       begin
@@ -2146,15 +2166,74 @@ var
           V4 := Vector4(M3.Data[J][0], M3.Data[J][1], M3.Data[J][2], 0.0);
           WriteBytes(V4, SizeOf(TVector4), 16);
         end;
+      end else if Field is TSFMatrix3d then
+      begin
+        for J := 0 to 2 do
+        begin
+          V4 := Vector4(
+            Single(TSFMatrix3d(Field).Value.Data[J][0]),
+            Single(TSFMatrix3d(Field).Value.Data[J][1]),
+            Single(TSFMatrix3d(Field).Value.Data[J][2]),
+            0.0);
+          WriteBytes(V4, SizeOf(TVector4), 16);
+        end;
       end else if Field is TSFMatrix4f then
       begin
         M4 := TSFMatrix4f(Field).Value;
         WriteBytes(M4, SizeOf(TMatrix4), 16);
+      end else if Field is TSFMatrix4d then
+      begin
+        for J := 0 to 3 do
+        begin
+          V4 := Vector4(
+            Single(TSFMatrix4d(Field).Value.Data[J][0]),
+            Single(TSFMatrix4d(Field).Value.Data[J][1]),
+            Single(TSFMatrix4d(Field).Value.Data[J][2]),
+            Single(TSFMatrix4d(Field).Value.Data[J][3]));
+          WriteBytes(V4, SizeOf(TVector4), 16);
+        end;
+      end else if Field is TMFBool then
+      begin
+        for J := 0 to TMFBool(Field).Count - 1 do
+        begin
+          FillChar(IVec4, SizeOf(IVec4), 0);
+          IVec4[0] := Ord(TMFBool(Field).Items[J]);
+          WriteBytes(IVec4, SizeOf(IVec4), 16);
+        end;
+      end else if Field is TMFLong then
+      begin
+        for J := 0 to TMFLong(Field).Count - 1 do
+        begin
+          FillChar(IVec4, SizeOf(IVec4), 0);
+          IVec4[0] := TMFLong(Field).Items[J];
+          WriteBytes(IVec4, SizeOf(IVec4), 16);
+        end;
       end else if Field is TMFFloat then
       begin
         for J := 0 to TMFFloat(Field).Count - 1 do
         begin
           V4 := Vector4(TMFFloat(Field).Items[J], 0.0, 0.0, 0.0);
+          WriteBytes(V4, SizeOf(TVector4), 16);
+        end;
+      end else if Field is TMFDouble then
+      begin
+        for J := 0 to TMFDouble(Field).Count - 1 do
+        begin
+          V4 := Vector4(Single(TMFDouble(Field).Items[J]), 0.0, 0.0, 0.0);
+          WriteBytes(V4, SizeOf(TVector4), 16);
+        end;
+      end else if Field is TMFVec2f then
+      begin
+        for J := 0 to TMFVec2f(Field).Count - 1 do
+        begin
+          V4 := Vector4(TMFVec2f(Field).Items[J].X, TMFVec2f(Field).Items[J].Y, 0.0, 0.0);
+          WriteBytes(V4, SizeOf(TVector4), 16);
+        end;
+      end else if Field is TMFVec2d then
+      begin
+        for J := 0 to TMFVec2d(Field).Count - 1 do
+        begin
+          V4 := Vector4(Single(TMFVec2d(Field).Items[J].X), Single(TMFVec2d(Field).Items[J].Y), 0.0, 0.0);
           WriteBytes(V4, SizeOf(TVector4), 16);
         end;
       end else if Field is TMFVec3f then
@@ -2164,12 +2243,87 @@ var
           V4 := Vector4(TMFVec3f(Field).Items[J], 0.0);
           WriteBytes(V4, SizeOf(TVector4), 16);
         end;
+      end else if Field is TMFVec3d then
+      begin
+        for J := 0 to TMFVec3d(Field).Count - 1 do
+        begin
+          V4 := Vector4(
+            Single(TMFVec3d(Field).Items[J].X),
+            Single(TMFVec3d(Field).Items[J].Y),
+            Single(TMFVec3d(Field).Items[J].Z),
+            0.0);
+          WriteBytes(V4, SizeOf(TVector4), 16);
+        end;
       end else if Field is TMFVec4f then
       begin
         for J := 0 to TMFVec4f(Field).Count - 1 do
         begin
           V4 := TMFVec4f(Field).Items[J];
           WriteBytes(V4, SizeOf(TVector4), 16);
+        end;
+      end else if Field is TMFVec4d then
+      begin
+        for J := 0 to TMFVec4d(Field).Count - 1 do
+        begin
+          V4 := Vector4(
+            Single(TMFVec4d(Field).Items[J].X),
+            Single(TMFVec4d(Field).Items[J].Y),
+            Single(TMFVec4d(Field).Items[J].Z),
+            Single(TMFVec4d(Field).Items[J].W));
+          WriteBytes(V4, SizeOf(TVector4), 16);
+        end;
+      end else if Field is TMFRotation then
+      begin
+        for J := 0 to TMFRotation(Field).Count - 1 do
+        begin
+          V4 := TMFRotation(Field).Items[J];
+          WriteBytes(V4, SizeOf(TVector4), 16);
+        end;
+      end else if Field is TMFMatrix3f then
+      begin
+        for J := 0 to TMFMatrix3f(Field).Count - 1 do
+        begin
+          M3 := TMFMatrix3f(Field).Items[J];
+          for K := 0 to 2 do
+          begin
+            V4 := Vector4(M3.Data[K][0], M3.Data[K][1], M3.Data[K][2], 0.0);
+            WriteBytes(V4, SizeOf(TVector4), 16);
+          end;
+        end;
+      end else if Field is TMFMatrix3d then
+      begin
+        for J := 0 to TMFMatrix3d(Field).Count - 1 do
+        begin
+          for K := 0 to 2 do
+          begin
+            V4 := Vector4(
+              Single(TMFMatrix3d(Field).Items[J].Data[K][0]),
+              Single(TMFMatrix3d(Field).Items[J].Data[K][1]),
+              Single(TMFMatrix3d(Field).Items[J].Data[K][2]),
+              0.0);
+            WriteBytes(V4, SizeOf(TVector4), 16);
+          end;
+        end;
+      end else if Field is TMFMatrix4f then
+      begin
+        for J := 0 to TMFMatrix4f(Field).Count - 1 do
+        begin
+          M4 := TMFMatrix4f(Field).Items[J];
+          WriteBytes(M4, SizeOf(TMatrix4), 16);
+        end;
+      end else if Field is TMFMatrix4d then
+      begin
+        for J := 0 to TMFMatrix4d(Field).Count - 1 do
+        begin
+          for K := 0 to 3 do
+          begin
+            V4 := Vector4(
+              Single(TMFMatrix4d(Field).Items[J].Data[K][0]),
+              Single(TMFMatrix4d(Field).Items[J].Data[K][1]),
+              Single(TMFMatrix4d(Field).Items[J].Data[K][2]),
+              Single(TMFMatrix4d(Field).Items[J].Data[K][3]));
+            WriteBytes(V4, SizeOf(TVector4), 16);
+          end;
         end;
       end;
     end;

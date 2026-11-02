@@ -324,6 +324,9 @@ type
     procedure TestSeparateSpecularShininessTexturesAndCommonSurfaceAlphaTextureRHI;
     procedure TestMultiTextureThreeAndFourStageCombinePipelineRHI;
     procedure TestLightsRendererMaxLightsPerShapeAndGlobalSceneDeduplicationRHI;
+    procedure TestMultiEffectChainedPlugDeduplicationAndInvocationRHI;
+    procedure TestAdditionalShaderPlugsLightAmbientSteepShadowTextureApplyAddLightRHI;
+    procedure TestUserEffectDoublePrecisionAndMultiValueArrayUniformPackingRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -19759,6 +19762,315 @@ begin
     FreeAndNil(GlobalLights);
     FreeAndNil(LightsRenderer);
     FreeAndNil(Cam);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestMultiEffectChainedPlugDeduplicationAndInvocationRHI;
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  Device: TVulkanRHIDevice;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  Box: TBoxNode;
+  Effect1, Effect2: TEffectNode;
+  VertPart1, VertPart2, FragPart1, FragPart2: TEffectPartNode;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  VertSrc, FragSrc: String;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8701)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+
+  Scene := TCastleScene.Create(nil);
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    Box := TBoxNode.Create;
+
+    Effect1 := TEffectNode.Create;
+    Effect1.Language := slGLSL;
+    VertPart1 := TEffectPartNode.Create;
+    VertPart1.ShaderType := stVertex;
+    VertPart1.Contents :=
+      'void PLUG_vertex_object_space(inout vec4 vertex_object, inout vec3 normal_object) {' + LineEnding +
+      '  vertex_object.x += 1.0;' + LineEnding +
+      '}';
+    FragPart1 := TEffectPartNode.Create;
+    FragPart1.ShaderType := stFragment;
+    FragPart1.Contents :=
+      'void PLUG_fragment_modify(inout vec4 fragment_color) {' + LineEnding +
+      '  fragment_color.r *= 0.5;' + LineEnding +
+      '}' + LineEnding +
+      'void PLUG_texture_color(inout vec4 tex_color) {' + LineEnding +
+      '  tex_color.g *= 0.7;' + LineEnding +
+      '}';
+    Effect1.SetParts([VertPart1, FragPart1]);
+
+    Effect2 := TEffectNode.Create;
+    Effect2.Language := slGLSL;
+    VertPart2 := TEffectPartNode.Create;
+    VertPart2.ShaderType := stVertex;
+    VertPart2.Contents :=
+      'void PLUG_vertex_object_space(inout vec4 vertex_object, inout vec3 normal_object) {' + LineEnding +
+      '  vertex_object.y += 2.0;' + LineEnding +
+      '}';
+    FragPart2 := TEffectPartNode.Create;
+    FragPart2.ShaderType := stFragment;
+    FragPart2.Contents :=
+      'void PLUG_fragment_modify(inout vec4 fragment_color) {' + LineEnding +
+      '  fragment_color.b *= 0.25;' + LineEnding +
+      '}' + LineEnding +
+      'void PLUG_texture_color(inout vec4 tex_color, const in vec4 tex_coord) {' + LineEnding +
+      '  tex_color.rgb += tex_coord.xyz * 0.1;' + LineEnding +
+      '}';
+    Effect2.SetParts([VertPart2, FragPart2]);
+
+    App.Material := Mat;
+    App.SetEffects([Effect1, Effect2]);
+    ShapeNode.Appearance := App;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+    Scene.Load(Root, True);
+
+    AssertTrue('Scene must have at least 1 shape', Scene.Shapes.TraverseList(True, True).Count >= 1);
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(True, True)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+
+    VertSrc := RendererShape.Cache.RHIVertexShaderSource;
+    FragSrc := RendererShape.Cache.RHIFragmentShaderSource;
+
+    AssertTrue('Vertex shader must define PLUG_vertex_object_space',
+      Pos('void PLUG_vertex_object_space(', VertSrc) > 0);
+    AssertTrue('Vertex shader must deduplicate 2nd definition to PLUG_vertex_object_space_2',
+      Pos('void PLUG_vertex_object_space_2(', VertSrc) > 0);
+    AssertTrue('Vertex shader must invoke PLUG_vertex_object_space and PLUG_vertex_object_space_2 sequentially',
+      Pos('  PLUG_vertex_object_space(localPos, localNormal);' + LineEnding +
+          '  PLUG_vertex_object_space_2(localPos, localNormal);', VertSrc) > 0);
+
+    AssertTrue('Fragment shader must define PLUG_fragment_modify',
+      Pos('void PLUG_fragment_modify(', FragSrc) > 0);
+    AssertTrue('Fragment shader must deduplicate 2nd definition to PLUG_fragment_modify_2',
+      Pos('void PLUG_fragment_modify_2(', FragSrc) > 0);
+    AssertTrue('Fragment shader must invoke PLUG_fragment_modify and PLUG_fragment_modify_2 sequentially',
+      Pos('  PLUG_fragment_modify(castle_FragColor);' + LineEnding +
+          '  PLUG_fragment_modify_2(castle_FragColor);', FragSrc) > 0);
+
+    AssertTrue('Fragment shader must define PLUG_texture_color_2 and invoke both 1-arg and 2-arg overloads in sequence',
+      Pos('  PLUG_texture_color(baseColor);' + LineEnding +
+          '  PLUG_texture_color_2(baseColor, vec4(castle_tex_coord0, 0.0, 1.0));', FragSrc) > 0);
+  finally
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestAdditionalShaderPlugsLightAmbientSteepShadowTextureApplyAddLightRHI;
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  Device: TVulkanRHIDevice;
+  Cache: TShapeCache;
+  FragSrc: String;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8702)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+
+  Cache := TShapeCache.Create;
+  try
+    Cache.SetShaderEffects('',
+      'void PLUG_material_light_ambient(inout vec3 ambient) { ambient *= 0.6; }' + LineEnding +
+      'void PLUG_steep_parallax_shadow_apply(inout vec4 fragment_color) { fragment_color.rgb *= 0.85; }' + LineEnding +
+      'void PLUG_texture_apply(inout vec4 fragment_color, const in vec3 normal_eye) { fragment_color.rgb += normal_eye * 0.05; }' + LineEnding +
+      'void PLUG_add_light(inout vec4 color, const in vec4 vertex_eye, const in vec3 normal_eye) { color.rgb += vec3(0.1); }');
+
+    { 1. Test PBR material path }
+    Cache.SetPhongSurfaceParams(False, False, False, False, 0.2);
+    Cache.EnsureRHIShaders(False, False, False, False, False, False, False, False, False, False, False, False, False, False, True, False);
+    FragSrc := Cache.RHIFragmentShaderSource;
+    AssertTrue('PBR fragment shader must invoke PLUG_material_light_ambient',
+      Pos('PLUG_material_light_ambient(castle_light_ambient);', FragSrc) > 0);
+    AssertTrue('Fragment shader must invoke PLUG_steep_parallax_shadow_apply',
+      Pos('PLUG_steep_parallax_shadow_apply(castle_FragColor);', FragSrc) > 0);
+    AssertTrue('Fragment shader must invoke PLUG_texture_apply',
+      Pos('PLUG_texture_apply(baseColor, castle_normal_eye);', FragSrc) > 0);
+    AssertTrue('Fragment shader must invoke PLUG_add_light',
+      Pos('PLUG_add_light(castle_add_light_color, castle_vertex_eye, N);', FragSrc) > 0);
+
+    { 2. Test Phong material path for PLUG_material_light_ambient }
+    Cache.SetPhongSurfaceParams(True, False, False, False, 0.25);
+    Cache.EnsureRHIShaders(False, False, False, False, False, False, False, False, False, False, False, False, False, False, True, False);
+    FragSrc := Cache.RHIFragmentShaderSource;
+    AssertTrue('Phong fragment shader must invoke PLUG_material_light_ambient on castle_ambient_color',
+      Pos('PLUG_material_light_ambient(castle_ambient_color);', FragSrc) > 0);
+  finally
+    FreeAndNil(Cache);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestUserEffectDoublePrecisionAndMultiValueArrayUniformPackingRHI;
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  Device: TVulkanRHIDevice;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  Box: TBoxNode;
+  Effect: TEffectNode;
+  FragPart: TEffectPartNode;
+  FdVec2d: TSFVec2d;
+  FdVec3d: TSFVec3d;
+  FdVec4d: TSFVec4d;
+  FdBoolArr: TMFBool;
+  FdLongArr: TMFLong;
+  FdVec2fArr: TMFVec2f;
+  FdMat4fArr: TMFMatrix4f;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  P: PByte;
+  V2: PVector2;
+  V3: PVector3;
+  V4: PVector4;
+  PI32: PInt32;
+  PM4: PMatrix4;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8703)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+
+  Scene := TCastleScene.Create(nil);
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    Box := TBoxNode.Create;
+
+    Effect := TEffectNode.Create;
+    Effect.Language := slGLSL;
+
+    FdVec2d := TSFVec2d.Create(Effect, True, 'u_vec2d', Vector2Double(1.25, 2.5));
+    Effect.AddCustomField(FdVec2d);
+
+    FdVec3d := TSFVec3d.Create(Effect, True, 'u_vec3d', Vector3Double(3.0, 4.0, 5.0));
+    Effect.AddCustomField(FdVec3d);
+
+    FdVec4d := TSFVec4d.Create(Effect, True, 'u_vec4d', Vector4Double(6.0, 7.0, 8.0, 9.0));
+    Effect.AddCustomField(FdVec4d);
+
+    FdBoolArr := TMFBool.Create(Effect, True, 'u_bools', [True, False]);
+    Effect.AddCustomField(FdBoolArr);
+
+    FdLongArr := TMFLong.Create(Effect, True, 'u_ints', [42, -7]);
+    Effect.AddCustomField(FdLongArr);
+
+    FdVec2fArr := TMFVec2f.Create(Effect, True, 'u_vec2arr', [Vector2(11.0, 22.0), Vector2(33.0, 44.0)]);
+    Effect.AddCustomField(FdVec2fArr);
+
+    FdMat4fArr := TMFMatrix4f.Create(Effect, True, 'u_mat4arr', [TranslationMatrix(Vector3(10.0, 20.0, 30.0))]);
+    Effect.AddCustomField(FdMat4fArr);
+
+    FragPart := TEffectPartNode.Create;
+    FragPart.ShaderType := stFragment;
+    FragPart.Contents :=
+      'uniform vec2 u_vec2d;' + LineEnding +
+      'void PLUG_fragment_modify(inout vec4 fragment_color) { fragment_color.rg += u_vec2d; }';
+    Effect.SetParts([FragPart]);
+
+    App.Material := Mat;
+    App.SetEffects([Effect]);
+    ShapeNode.Appearance := App;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+    Scene.Load(Root, True);
+
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(True, True)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+
+    AssertTrue('RHIUserEffectBuffer must be allocated',
+      RendererShape.Cache.RHIUserEffectBuffer <> nil);
+    { Layout in std140:
+      - u_vec2d (offset 0, 8 bytes): (1.25, 2.5)
+      - u_vec3d (offset 16, 12 bytes): (3.0, 4.0, 5.0)
+      - u_vec4d (offset 32, 16 bytes): (6.0, 7.0, 8.0, 9.0)
+      - u_bools[0..1] (offset 48, 32 bytes): 1, 0
+      - u_ints[0..1] (offset 80, 32 bytes): 42, -7
+      - u_vec2arr[0..1] (offset 112, 32 bytes): (11,22,0,0), (33,44,0,0)
+      - u_mat4arr[0] (offset 144, 64 bytes): TranslationMatrix(10, 20, 30)
+      Total = 208 bytes }
+    AssertEquals('Total std140 UBO size must equal 208 bytes',
+      208, Integer(RendererShape.Cache.RHIUserEffectBuffer.Desc.Size));
+
+    P := PByte(RendererShape.Cache.RHIUserEffectBuffer.Map);
+    AssertTrue('Mapped user UBO pointer must be non-nil', P <> nil);
+    try
+      V2 := PVector2(P + 0);
+      AssertSameValue(1.25, V2^.X, 1e-4);
+      AssertSameValue(2.5, V2^.Y, 1e-4);
+
+      V3 := PVector3(P + 16);
+      AssertSameValue(3.0, V3^.X, 1e-4);
+      AssertSameValue(4.0, V3^.Y, 1e-4);
+      AssertSameValue(5.0, V3^.Z, 1e-4);
+
+      V4 := PVector4(P + 32);
+      AssertSameValue(6.0, V4^.X, 1e-4);
+      AssertSameValue(7.0, V4^.Y, 1e-4);
+      AssertSameValue(8.0, V4^.Z, 1e-4);
+      AssertSameValue(9.0, V4^.W, 1e-4);
+
+      PI32 := PInt32(P + 48);
+      AssertEquals(1, PI32^);
+      PI32 := PInt32(P + 64);
+      AssertEquals(0, PI32^);
+
+      PI32 := PInt32(P + 80);
+      AssertEquals(42, PI32^);
+      PI32 := PInt32(P + 96);
+      AssertEquals(-7, PI32^);
+
+      V4 := PVector4(P + 112);
+      AssertSameValue(11.0, V4^.X, 1e-4);
+      AssertSameValue(22.0, V4^.Y, 1e-4);
+      V4 := PVector4(P + 128);
+      AssertSameValue(33.0, V4^.X, 1e-4);
+      AssertSameValue(44.0, V4^.Y, 1e-4);
+
+      PM4 := PMatrix4(P + 144);
+      AssertSameValue(10.0, PM4^.Data[3][0], 1e-4);
+      AssertSameValue(20.0, PM4^.Data[3][1], 1e-4);
+      AssertSameValue(30.0, PM4^.Data[3][2], 1e-4);
+    finally
+      RendererShape.Cache.RHIUserEffectBuffer.Unmap;
+    end;
+  finally
+    FreeAndNil(Scene);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);

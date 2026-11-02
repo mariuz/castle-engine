@@ -1119,10 +1119,59 @@ procedure TShapeCache.EnsureRHIShaders(
     while P > 0 do
     begin
       AfterIdx := P + Length(APlugName);
-      if (AfterIdx <= Length(ASource)) and
+      if ((P = 1) or not (ASource[P - 1] in ['A'..'Z', 'a'..'z', '0'..'9', '_'])) and
+         (AfterIdx <= Length(ASource)) and
          (ASource[AfterIdx] in ['(', ' ', #9, #10, #13]) then
         Exit(True);
       P := Pos(APlugName, ASource, P + 1);
+    end;
+  end;
+
+  procedure DeduplicatePlugDefinitions(var ASource: String; const APlugName: String);
+  var
+    P, AfterIdx, Count: Integer;
+    RenamedPlug: String;
+  begin
+    if ASource = '' then
+      Exit;
+    Count := 0;
+    P := Pos(APlugName, ASource);
+    while P > 0 do
+    begin
+      AfterIdx := P + Length(APlugName);
+      if ((P = 1) or not (ASource[P - 1] in ['A'..'Z', 'a'..'z', '0'..'9', '_'])) and
+         (AfterIdx <= Length(ASource)) and
+         (ASource[AfterIdx] in ['(', ' ', #9, #10, #13]) then
+      begin
+        Inc(Count);
+        if Count >= 2 then
+        begin
+          RenamedPlug := Format('%s_%d', [APlugName, Count]);
+          ASource := Copy(ASource, 1, P - 1) + RenamedPlug + Copy(ASource, AfterIdx, MaxInt);
+          AfterIdx := P + Length(RenamedPlug);
+        end;
+      end;
+      P := Pos(APlugName, ASource, AfterIdx);
+    end;
+  end;
+
+  function BuildChainedPlugCalls(const ASource, APlugName, ACallArgs, AIndent: String): String;
+  var
+    Idx: Integer;
+    CandidateName: String;
+  begin
+    Result := '';
+    if not HasPlugFunction(ASource, APlugName) then
+      Exit;
+    Result := AIndent + APlugName + '(' + ACallArgs + ');';
+    Idx := 2;
+    while True do
+    begin
+      CandidateName := Format('%s_%d', [APlugName, Idx]);
+      if not HasPlugFunction(ASource, CandidateName) then
+        Break;
+      Result := Result + LineEnding + AIndent + CandidateName + '(' + ACallArgs + ');';
+      Inc(Idx);
     end;
   end;
 
@@ -1240,13 +1289,13 @@ var
   Gen: TCastleShaderGeneratorRHI;
   FogSnippet, TexGenSnippet, TexTransformSnippet, ClipPlaneSnippet, ShadowMapSnippet, ParallaxSnippet, SelfShadowSnippet, PhongSetupSnippet: String;
   SecondTexSnippet, SecondTexUV, AlphaTexSnippet, PlugTexColorCall, CubeCoordExpr, Tex3DCoordExpr, Tex3DMatExpr: String;
-  UpgradedVertEffect, UpgradedFragEffect, EffectivePointSizeStr, AttribGLSLType, AttribDecl: String;
+  UpgradedVertEffect, UpgradedFragEffect, DedupVertEffect, DedupFragEffect, PlugCandidate, SingleTexColorCall, EffectivePointSizeStr, AttribGLSLType, AttribDecl: String;
   HasLinearColorSpace: Boolean;
   EffectiveToneMapping: TToneMapping;
   EffectiveShadowSampling: TShadowSampling;
   EffectiveShadowSize, ClipCount, TexCoord0Dim: Cardinal;
   Plane: TVector4;
-  I, PlugPos, ParenPos, CommaCount: Integer;
+  I, PlugPos, ParenPos, CommaCount, PlugIdx: Integer;
   LocIdx, AttrLoc: Cardinal;
 begin
   if RHIDevice = nil then
@@ -1355,6 +1404,38 @@ begin
   FreeAndNil(FRHIFragmentShader);
   Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
   try
+    DedupVertEffect := FRHIVertexEffectCode;
+    if DedupVertEffect <> '' then
+    begin
+      DeduplicatePlugDefinitions(DedupVertEffect, 'PLUG_vertex_object_space');
+      DeduplicatePlugDefinitions(DedupVertEffect, 'PLUG_vertex_object_space_change');
+      DeduplicatePlugDefinitions(DedupVertEffect, 'PLUG_vertex_eye_space_extended');
+      DeduplicatePlugDefinitions(DedupVertEffect, 'PLUG_vertex_eye_space');
+    end;
+    DedupFragEffect := FRHIFragmentEffectCode;
+    if DedupFragEffect <> '' then
+    begin
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_fog_apply');
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_steep_parallax_shadow_apply');
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_fragment_modify');
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_fragment_end');
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_lighting_apply');
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_material_specular');
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_material_ambient');
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_material_light_ambient');
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_material_shininess');
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_fragment_eye_space');
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_light_scale');
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_material_metallic_roughness');
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_add_light');
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_material_occlusion');
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_material_emissive');
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_texture_coord_shift');
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_base_color');
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_main_texture_apply');
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_texture_apply');
+      DeduplicatePlugDefinitions(DedupFragEffect, 'PLUG_texture_color');
+    end;
     FRHIVertexShaderSource := Gen.GenerateDefault3DVertexShader(AHasSkinning, AHasTangents);
     if AHasTexCoordGen or (FRHITexCoordGen <> tgExplicit) then
     begin
@@ -1464,41 +1545,41 @@ begin
         TexTransformSnippet,
         []);
     end;
-    if FRHIVertexEffectCode <> '' then
+    if DedupVertEffect <> '' then
     begin
-      UpgradedVertEffect := Gen.UpgradeUserEffectUniforms(FRHIVertexEffectCode);
+      UpgradedVertEffect := Gen.UpgradeUserEffectUniforms(DedupVertEffect);
       FRHIVertexShaderSource := StringReplace(
         FRHIVertexShaderSource,
         'void main() {',
         UpgradedVertEffect + LineEnding + 'void main() {',
         []);
-      if HasPlugFunction(FRHIVertexEffectCode, 'PLUG_vertex_object_space') then
+      if HasPlugFunction(DedupVertEffect, 'PLUG_vertex_object_space') then
         FRHIVertexShaderSource := StringReplace(
           FRHIVertexShaderSource,
           '  vec3 localTangent = castle_Tangent.xyz;',
           '  vec3 localTangent = castle_Tangent.xyz;' + LineEnding +
-          '  PLUG_vertex_object_space(localPos, localNormal);',
+          BuildChainedPlugCalls(DedupVertEffect, 'PLUG_vertex_object_space', 'localPos, localNormal', '  '),
           []);
-      if HasPlugFunction(FRHIVertexEffectCode, 'PLUG_vertex_object_space_change') then
+      if HasPlugFunction(DedupVertEffect, 'PLUG_vertex_object_space_change') then
         FRHIVertexShaderSource := StringReplace(
           FRHIVertexShaderSource,
           '  vec3 localTangent = castle_Tangent.xyz;',
           '  vec3 localTangent = castle_Tangent.xyz;' + LineEnding +
-          '  PLUG_vertex_object_space_change(localPos, localNormal);',
+          BuildChainedPlugCalls(DedupVertEffect, 'PLUG_vertex_object_space_change', 'localPos, localNormal', '  '),
           []);
-      if HasPlugFunction(FRHIVertexEffectCode, 'PLUG_vertex_eye_space_extended') then
+      if HasPlugFunction(DedupVertEffect, 'PLUG_vertex_eye_space_extended') then
         FRHIVertexShaderSource := StringReplace(
           FRHIVertexShaderSource,
           '  castle_normal_eye = normalize(castle_NormalMatrix * localNormal);',
           '  castle_normal_eye = normalize(castle_NormalMatrix * localNormal);' + LineEnding +
-          '  PLUG_vertex_eye_space_extended(castle_vertex_eye, castle_normal_eye, localNormal);',
+          BuildChainedPlugCalls(DedupVertEffect, 'PLUG_vertex_eye_space_extended', 'castle_vertex_eye, castle_normal_eye, localNormal', '  '),
           []);
-      if HasPlugFunction(FRHIVertexEffectCode, 'PLUG_vertex_eye_space') then
+      if HasPlugFunction(DedupVertEffect, 'PLUG_vertex_eye_space') then
         FRHIVertexShaderSource := StringReplace(
           FRHIVertexShaderSource,
           '  castle_normal_eye = normalize(castle_NormalMatrix * localNormal);',
           '  castle_normal_eye = normalize(castle_NormalMatrix * localNormal);' + LineEnding +
-          '  PLUG_vertex_eye_space(castle_vertex_eye, castle_normal_eye);',
+          BuildChainedPlugCalls(DedupVertEffect, 'PLUG_vertex_eye_space', 'castle_vertex_eye, castle_normal_eye', '  '),
           []);
     end;
     if (TexCoord0Dim in [3, 4]) and (not AHasTexCoordGen) and (FRHITexCoordGen = tgExplicit) then
@@ -1820,10 +1901,15 @@ begin
         '      : clamp(fogDist / CastleScene.u_FogParams.y, 0.0, 1.0);' + LineEnding +
         '    castle_FragColor.rgb = mix(castle_FragColor.rgb, CastleScene.u_FogColor.rgb, fogFactor);' + LineEnding +
         '  }';
-    if (FRHIFragmentEffectCode <> '') and HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_fog_apply') then
-      FogSnippet := FogSnippet + LineEnding + '  PLUG_fog_apply(castle_FragColor, normalize(castle_normal_eye));';
-    if (FRHIFragmentEffectCode <> '') and HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_fragment_modify') then
-      FogSnippet := FogSnippet + LineEnding + '  PLUG_fragment_modify(castle_FragColor);';
+    if (DedupFragEffect <> '') and HasPlugFunction(DedupFragEffect, 'PLUG_fog_apply') then
+      FogSnippet := FogSnippet + LineEnding +
+        BuildChainedPlugCalls(DedupFragEffect, 'PLUG_fog_apply', 'castle_FragColor, normalize(castle_normal_eye)', '  ');
+    if (DedupFragEffect <> '') and HasPlugFunction(DedupFragEffect, 'PLUG_steep_parallax_shadow_apply') then
+      FogSnippet := FogSnippet + LineEnding +
+        BuildChainedPlugCalls(DedupFragEffect, 'PLUG_steep_parallax_shadow_apply', 'castle_FragColor', '  ');
+    if (DedupFragEffect <> '') and HasPlugFunction(DedupFragEffect, 'PLUG_fragment_modify') then
+      FogSnippet := FogSnippet + LineEnding +
+        BuildChainedPlugCalls(DedupFragEffect, 'PLUG_fragment_modify', 'castle_FragColor', '  ');
     case EffectiveToneMapping of
       tmUncharted:
         FogSnippet := FogSnippet + LineEnding + '  castle_FragColor.rgb = toneMapUncharted(castle_FragColor.rgb);';
@@ -1835,19 +1921,20 @@ begin
     end;
     if HasLinearColorSpace then
       FogSnippet := FogSnippet + LineEnding + '  castle_FragColor.rgb = LINEARtoSRGB(castle_FragColor.rgb);';
-    if (FRHIFragmentEffectCode <> '') and HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_fragment_end') then
-      FogSnippet := FogSnippet + LineEnding + '  PLUG_fragment_end(castle_FragColor);';
+    if (DedupFragEffect <> '') and HasPlugFunction(DedupFragEffect, 'PLUG_fragment_end') then
+      FogSnippet := FogSnippet + LineEnding +
+        BuildChainedPlugCalls(DedupFragEffect, 'PLUG_fragment_end', 'castle_FragColor', '  ');
     FRHIFragmentShaderSource := StringReplace(
       FRHIFragmentShaderSource,
       '    castle_FragColor = vec4(unlitColor, baseColor.a);',
       '    castle_FragColor = vec4(unlitColor, baseColor.a);' + FogSnippet,
       []);
-    if (FRHIFragmentEffectCode <> '') and HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_lighting_apply') then
+    if (DedupFragEffect <> '') and HasPlugFunction(DedupFragEffect, 'PLUG_lighting_apply') then
       FRHIFragmentShaderSource := StringReplace(
         FRHIFragmentShaderSource,
         '  castle_FragColor = vec4(Lo + emissive, baseColor.a);',
         '  castle_FragColor = vec4(Lo + emissive, baseColor.a);' + LineEnding +
-        '  PLUG_lighting_apply(castle_FragColor, castle_vertex_eye, N);' + FogSnippet,
+        BuildChainedPlugCalls(DedupFragEffect, 'PLUG_lighting_apply', 'castle_FragColor, castle_vertex_eye, N', '  ') + FogSnippet,
         [])
     else
       FRHIFragmentShaderSource := StringReplace(
@@ -1882,15 +1969,18 @@ begin
         PhongSetupSnippet := PhongSetupSnippet + LineEnding +
           '  castle_ambient_color *= texture(castle_occlusion_texture, castle_tex_coord0).rgb;' + LineEnding +
           '  ao = 1.0;';
-      if (FRHIFragmentEffectCode <> '') and HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_material_specular') then
+      if (DedupFragEffect <> '') and HasPlugFunction(DedupFragEffect, 'PLUG_material_specular') then
         PhongSetupSnippet := PhongSetupSnippet + LineEnding +
-          '  PLUG_material_specular(castle_specular_color);';
-      if (FRHIFragmentEffectCode <> '') and HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_material_ambient') then
+          BuildChainedPlugCalls(DedupFragEffect, 'PLUG_material_specular', 'castle_specular_color', '  ');
+      if (DedupFragEffect <> '') and HasPlugFunction(DedupFragEffect, 'PLUG_material_ambient') then
         PhongSetupSnippet := PhongSetupSnippet + LineEnding +
-          '  PLUG_material_ambient(castle_ambient_color);';
-      if (FRHIFragmentEffectCode <> '') and HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_material_shininess') then
+          BuildChainedPlugCalls(DedupFragEffect, 'PLUG_material_ambient', 'castle_ambient_color', '  ');
+      if (DedupFragEffect <> '') and HasPlugFunction(DedupFragEffect, 'PLUG_material_light_ambient') then
         PhongSetupSnippet := PhongSetupSnippet + LineEnding +
-          '  PLUG_material_shininess(castle_shininess_exp);';
+          BuildChainedPlugCalls(DedupFragEffect, 'PLUG_material_light_ambient', 'castle_ambient_color', '  ');
+      if (DedupFragEffect <> '') and HasPlugFunction(DedupFragEffect, 'PLUG_material_shininess') then
+        PhongSetupSnippet := PhongSetupSnippet + LineEnding +
+          BuildChainedPlugCalls(DedupFragEffect, 'PLUG_material_shininess', 'castle_shininess_exp', '  ');
       FRHIFragmentShaderSource := StringReplace(
         FRHIFragmentShaderSource,
         '  vec3 N = normalize(castle_normal_eye);',
@@ -1944,61 +2034,78 @@ begin
         '  emissive += pow(max(texture(castle_emissive_texture, castle_tex_coord0).rgb, vec3(0.0)), vec3(2.2));',
         []);
     end;
-    if FRHIFragmentEffectCode <> '' then
+    if DedupFragEffect <> '' then
     begin
-      UpgradedFragEffect := Gen.UpgradeUserEffectUniforms(FRHIFragmentEffectCode);
+      UpgradedFragEffect := Gen.UpgradeUserEffectUniforms(DedupFragEffect);
       FRHIFragmentShaderSource := StringReplace(
         FRHIFragmentShaderSource,
         'void main() {',
         UpgradedFragEffect + LineEnding + 'void main() {',
         []);
-      if HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_fragment_eye_space') then
+      if HasPlugFunction(DedupFragEffect, 'PLUG_fragment_eye_space') then
         FRHIFragmentShaderSource := StringReplace(
           FRHIFragmentShaderSource,
           '  vec3 V = normalize(-castle_vertex_eye.xyz);',
           '  vec3 V = normalize(-castle_vertex_eye.xyz);' + LineEnding +
-          '  PLUG_fragment_eye_space(castle_vertex_eye, N);',
+          BuildChainedPlugCalls(DedupFragEffect, 'PLUG_fragment_eye_space', 'castle_vertex_eye, N', '  '),
           []);
-      if HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_light_scale') then
+      if HasPlugFunction(DedupFragEffect, 'PLUG_light_scale') then
         FRHIFragmentShaderSource := StringReplace(
           FRHIFragmentShaderSource,
           '    vec3 radiance = light.Color.rgb * (attenuation * shadowVis);',
-          '    PLUG_light_scale(attenuation, N, L);' + LineEnding +
+          BuildChainedPlugCalls(DedupFragEffect, 'PLUG_light_scale', 'attenuation, N, L', '    ') + LineEnding +
           '    vec3 radiance = light.Color.rgb * (attenuation * shadowVis);',
           []);
-      if HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_material_metallic_roughness') then
+      if (not FRHIIsPhongMaterial) and HasPlugFunction(DedupFragEffect, 'PLUG_material_light_ambient') then
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          '    Lo += light.AmbientColor.rgb * baseColor.rgb * (ao * attenuation);',
+          '    vec3 castle_light_ambient = baseColor.rgb;' + LineEnding +
+          BuildChainedPlugCalls(DedupFragEffect, 'PLUG_material_light_ambient', 'castle_light_ambient', '    ') + LineEnding +
+          '    Lo += light.AmbientColor.rgb * castle_light_ambient * (ao * attenuation);',
+          []);
+      if HasPlugFunction(DedupFragEffect, 'PLUG_material_metallic_roughness') then
         FRHIFragmentShaderSource := StringReplace(
           FRHIFragmentShaderSource,
           '  float ao = 1.0;',
-          '  PLUG_material_metallic_roughness(metallic, roughness);' + LineEnding +
+          BuildChainedPlugCalls(DedupFragEffect, 'PLUG_material_metallic_roughness', 'metallic, roughness', '  ') + LineEnding +
           '  float ao = 1.0;',
           []);
-      if (not FRHIIsPhongMaterial) and HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_material_shininess') then
+      if (not FRHIIsPhongMaterial) and HasPlugFunction(DedupFragEffect, 'PLUG_material_shininess') then
         FRHIFragmentShaderSource := StringReplace(
           FRHIFragmentShaderSource,
           '  float ao = 1.0;',
           '  float castle_shininess = castle_MaterialShininess;' + LineEnding +
-          '  PLUG_material_shininess(castle_shininess);' + LineEnding +
+          BuildChainedPlugCalls(DedupFragEffect, 'PLUG_material_shininess', 'castle_shininess', '  ') + LineEnding +
           '  roughness = clamp(1.0 - sqrt(clamp(castle_shininess / 128.0, 0.0, 1.0)), 0.04, 1.0);' + LineEnding +
           '  float ao = 1.0;',
           []);
-      if HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_material_occlusion') then
+      if HasPlugFunction(DedupFragEffect, 'PLUG_add_light') then
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          '  vec3 emissive = castle_MaterialEmissive;',
+          '  vec4 castle_add_light_color = vec4(Lo, baseColor.a);' + LineEnding +
+          BuildChainedPlugCalls(DedupFragEffect, 'PLUG_add_light', 'castle_add_light_color, castle_vertex_eye, N', '  ') + LineEnding +
+          '  Lo = castle_add_light_color.rgb;' + LineEnding +
+          '  vec3 emissive = castle_MaterialEmissive;',
+          []);
+      if HasPlugFunction(DedupFragEffect, 'PLUG_material_occlusion') then
         FRHIFragmentShaderSource := StringReplace(
           FRHIFragmentShaderSource,
           '  vec3 emissive = castle_MaterialEmissive;',
           '  vec4 castle_occ_result = vec4(Lo, baseColor.a);' + LineEnding +
-          '  PLUG_material_occlusion(castle_occ_result);' + LineEnding +
+          BuildChainedPlugCalls(DedupFragEffect, 'PLUG_material_occlusion', 'castle_occ_result', '  ') + LineEnding +
           '  Lo = castle_occ_result.rgb;' + LineEnding +
           '  vec3 emissive = castle_MaterialEmissive;',
           []);
-      if HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_material_emissive') then
+      if HasPlugFunction(DedupFragEffect, 'PLUG_material_emissive') then
         FRHIFragmentShaderSource := StringReplace(
           FRHIFragmentShaderSource,
           '  castle_FragColor = vec4(Lo + emissive, baseColor.a);',
-          '  PLUG_material_emissive(emissive);' + LineEnding +
+          BuildChainedPlugCalls(DedupFragEffect, 'PLUG_material_emissive', 'emissive', '  ') + LineEnding +
           '  castle_FragColor = vec4(Lo + emissive, baseColor.a);',
           []);
-      if HasPlugFunction(FRHIFragmentEffectCode, 'PLUG_texture_coord_shift') then
+      if HasPlugFunction(DedupFragEffect, 'PLUG_texture_coord_shift') then
       begin
         FRHIFragmentShaderSource := StringReplace(
           FRHIFragmentShaderSource,
@@ -2030,16 +2137,10 @@ begin
           'void main() {',
           'void main() {' + LineEnding +
           '  vec2 castle_shifted_uv = castle_tex_coord0;' + LineEnding +
-          '  PLUG_texture_coord_shift(castle_shifted_uv);',
+          BuildChainedPlugCalls(DedupFragEffect, 'PLUG_texture_coord_shift', 'castle_shifted_uv', '  '),
           []);
       end;
-      if Pos('PLUG_base_color', FRHIFragmentEffectCode) > 0 then
-        FRHIFragmentShaderSource := StringReplace(
-          FRHIFragmentShaderSource,
-          '  vec4 baseColor = castle_MaterialBaseColor',
-          '  vec4 baseColor = castle_MaterialBaseColor',
-          []);
-      if Pos('PLUG_base_color', FRHIFragmentEffectCode) > 0 then
+      if HasPlugFunction(DedupFragEffect, 'PLUG_base_color') then
       begin
         if AHasColorPerVertex then
         begin
@@ -2050,14 +2151,14 @@ begin
                 FRHIFragmentShaderSource,
                 '  vec4 baseColor = vec4(castle_color_per_vertex.rgb, castle_MaterialBaseColor.a);',
                 '  vec4 baseColor = vec4(castle_color_per_vertex.rgb, castle_MaterialBaseColor.a);' + LineEnding +
-                '  PLUG_base_color(baseColor);',
+                BuildChainedPlugCalls(DedupFragEffect, 'PLUG_base_color', 'baseColor', '  '),
                 [])
             else
               FRHIFragmentShaderSource := StringReplace(
                 FRHIFragmentShaderSource,
                 '  vec4 baseColor = castle_color_per_vertex;',
                 '  vec4 baseColor = castle_color_per_vertex;' + LineEnding +
-                '  PLUG_base_color(baseColor);',
+                BuildChainedPlugCalls(DedupFragEffect, 'PLUG_base_color', 'baseColor', '  '),
                 []);
           end else
           if (Arrays <> nil) and (Arrays.ColorType = ctRgb) then
@@ -2065,67 +2166,100 @@ begin
               FRHIFragmentShaderSource,
               '  vec4 baseColor = vec4(castle_MaterialBaseColor.rgb * castle_color_per_vertex.rgb, castle_MaterialBaseColor.a);',
               '  vec4 baseColor = vec4(castle_MaterialBaseColor.rgb * castle_color_per_vertex.rgb, castle_MaterialBaseColor.a);' + LineEnding +
-              '  PLUG_base_color(baseColor);',
+              BuildChainedPlugCalls(DedupFragEffect, 'PLUG_base_color', 'baseColor', '  '),
               [])
           else
             FRHIFragmentShaderSource := StringReplace(
               FRHIFragmentShaderSource,
               '  vec4 baseColor = castle_MaterialBaseColor * castle_color_per_vertex;',
               '  vec4 baseColor = castle_MaterialBaseColor * castle_color_per_vertex;' + LineEnding +
-              '  PLUG_base_color(baseColor);',
+              BuildChainedPlugCalls(DedupFragEffect, 'PLUG_base_color', 'baseColor', '  '),
               []);
         end else
           FRHIFragmentShaderSource := StringReplace(
             FRHIFragmentShaderSource,
             '  vec4 baseColor = castle_MaterialBaseColor;',
             '  vec4 baseColor = castle_MaterialBaseColor;' + LineEnding +
-            '  PLUG_base_color(baseColor);',
+            BuildChainedPlugCalls(DedupFragEffect, 'PLUG_base_color', 'baseColor', '  '),
             []);
       end;
-      if Pos('PLUG_main_texture_apply', FRHIFragmentEffectCode) > 0 then
+      if HasPlugFunction(DedupFragEffect, 'PLUG_main_texture_apply') then
       begin
         if AHasBaseColorTex then
           FRHIFragmentShaderSource := StringReplace(
             FRHIFragmentShaderSource,
             '  baseColor *= texture(castle_base_color_texture, castle_tex_coord0);',
             '  baseColor *= texture(castle_base_color_texture, castle_tex_coord0);' + LineEnding +
-            '  PLUG_main_texture_apply(baseColor, castle_normal_eye);',
+            BuildChainedPlugCalls(DedupFragEffect, 'PLUG_main_texture_apply', 'baseColor, castle_normal_eye', '  '),
             [])
         else
           FRHIFragmentShaderSource := StringReplace(
             FRHIFragmentShaderSource,
             '  vec4 baseColor = castle_MaterialBaseColor;',
             '  vec4 baseColor = castle_MaterialBaseColor;' + LineEnding +
-            '  PLUG_main_texture_apply(baseColor, castle_normal_eye);',
+            BuildChainedPlugCalls(DedupFragEffect, 'PLUG_main_texture_apply', 'baseColor, castle_normal_eye', '  '),
             []);
       end;
-      PlugPos := Pos('PLUG_texture_color', FRHIFragmentEffectCode);
-      if PlugPos > 0 then
+      if HasPlugFunction(DedupFragEffect, 'PLUG_texture_apply') then
       begin
-        CommaCount := 0;
-        ParenPos := PlugPos + Length('PLUG_texture_color');
-        while (ParenPos <= Length(FRHIFragmentEffectCode)) and (FRHIFragmentEffectCode[ParenPos] <> '(') do
-          Inc(ParenPos);
-        if (ParenPos <= Length(FRHIFragmentEffectCode)) and (FRHIFragmentEffectCode[ParenPos] = '(') then
-        begin
-          Inc(ParenPos);
-          while (ParenPos <= Length(FRHIFragmentEffectCode)) and (FRHIFragmentEffectCode[ParenPos] <> ')') do
-          begin
-            if FRHIFragmentEffectCode[ParenPos] = ',' then
-              Inc(CommaCount);
-            Inc(ParenPos);
-          end;
-        end;
-        if CommaCount >= 2 then
-        begin
-          if AHasBaseColorTex then
-            PlugTexColorCall := '  PLUG_texture_color(baseColor, castle_base_color_texture, vec4(castle_tex_coord0, 0.0, 1.0));'
-          else
-            PlugTexColorCall := '  PLUG_texture_color(baseColor, vec4(castle_tex_coord0, 0.0, 1.0));';
-        end else if CommaCount = 1 then
-          PlugTexColorCall := '  PLUG_texture_color(baseColor, vec4(castle_tex_coord0, 0.0, 1.0));'
+        if AHasBaseColorTex then
+          FRHIFragmentShaderSource := StringReplace(
+            FRHIFragmentShaderSource,
+            '  baseColor *= texture(castle_base_color_texture, castle_tex_coord0);',
+            '  baseColor *= texture(castle_base_color_texture, castle_tex_coord0);' + LineEnding +
+            BuildChainedPlugCalls(DedupFragEffect, 'PLUG_texture_apply', 'baseColor, castle_normal_eye', '  '),
+            [])
         else
-          PlugTexColorCall := '  PLUG_texture_color(baseColor);';
+          FRHIFragmentShaderSource := StringReplace(
+            FRHIFragmentShaderSource,
+            '  vec4 baseColor = castle_MaterialBaseColor;',
+            '  vec4 baseColor = castle_MaterialBaseColor;' + LineEnding +
+            BuildChainedPlugCalls(DedupFragEffect, 'PLUG_texture_apply', 'baseColor, castle_normal_eye', '  '),
+            []);
+      end;
+      if HasPlugFunction(DedupFragEffect, 'PLUG_texture_color') then
+      begin
+        PlugTexColorCall := '';
+        PlugIdx := 1;
+        while True do
+        begin
+          if PlugIdx = 1 then
+            PlugCandidate := 'PLUG_texture_color'
+          else
+            PlugCandidate := Format('PLUG_texture_color_%d', [PlugIdx]);
+          if not HasPlugFunction(DedupFragEffect, PlugCandidate) then
+            Break;
+          PlugPos := Pos(PlugCandidate, DedupFragEffect);
+          CommaCount := 0;
+          ParenPos := PlugPos + Length(PlugCandidate);
+          while (ParenPos <= Length(DedupFragEffect)) and (DedupFragEffect[ParenPos] <> '(') do
+            Inc(ParenPos);
+          if (ParenPos <= Length(DedupFragEffect)) and (DedupFragEffect[ParenPos] = '(') then
+          begin
+            Inc(ParenPos);
+            while (ParenPos <= Length(DedupFragEffect)) and (DedupFragEffect[ParenPos] <> ')') do
+            begin
+              if DedupFragEffect[ParenPos] = ',' then
+                Inc(CommaCount);
+              Inc(ParenPos);
+            end;
+          end;
+          if CommaCount >= 2 then
+          begin
+            if AHasBaseColorTex then
+              SingleTexColorCall := '  ' + PlugCandidate + '(baseColor, castle_base_color_texture, vec4(castle_tex_coord0, 0.0, 1.0));'
+            else
+              SingleTexColorCall := '  ' + PlugCandidate + '(baseColor, vec4(castle_tex_coord0, 0.0, 1.0));';
+          end else if CommaCount = 1 then
+            SingleTexColorCall := '  ' + PlugCandidate + '(baseColor, vec4(castle_tex_coord0, 0.0, 1.0));'
+          else
+            SingleTexColorCall := '  ' + PlugCandidate + '(baseColor);';
+          if PlugTexColorCall <> '' then
+            PlugTexColorCall := PlugTexColorCall + LineEnding + SingleTexColorCall
+          else
+            PlugTexColorCall := SingleTexColorCall;
+          Inc(PlugIdx);
+        end;
         if AHasBaseColorTex then
           FRHIFragmentShaderSource := StringReplace(
             FRHIFragmentShaderSource,
