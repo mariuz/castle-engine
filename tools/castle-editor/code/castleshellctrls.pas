@@ -58,6 +58,7 @@ type
     FInitialRoot: String;
     FExcludeMask: String;
     FExcludedCount: Cardinal;
+    FOnExcludedCountChanged: TNotifyEvent;
     { Setters and getters }
     function GetPath: String;
     procedure SetFileSortType(const AValue: TFileSortType);
@@ -102,6 +103,8 @@ type
     property Root: String read FRoot write SetRoot;
     property Path: String read GetPath write SetPath;
     property ExcludeMask: String read FExcludeMask write SetExcludeMask;
+    property ExcludedCount: Cardinal read FExcludedCount;
+    property OnExcludedCountChanged: TNotifyEvent read FOnExcludedCountChanged write FOnExcludedCountChanged;
 
     { Protected properties which users may want to access, see bug 15374 }
     property Items;
@@ -211,6 +214,7 @@ type
     FOnFileAdded: TCSLVFileAddedEvent;
     FFileSortType: TFileSortType;
     FExcludedCount: Cardinal;
+    FOnExcludedCountChanged: TNotifyEvent;
     { Setters and getters }
     procedure SetFileSortType(AValue: TFileSortType);
     procedure SetMask(const AValue: String);
@@ -235,6 +239,8 @@ type
     { Properties }
     property Mask: String read FMask write SetMask;
     property ExcludeMask: String read FExcludeMask write SetExcludeMask;
+    property ExcludedCount: Cardinal read FExcludedCount;
+    property OnExcludedCountChanged: TNotifyEvent read FOnExcludedCountChanged write FOnExcludedCountChanged;
     property ObjectTypes: TObjectTypes read FObjectTypes write FObjectTypes;
     property Root: String read FRoot write SetRoot;
     property ShellTreeView: TCustomCastleShellTreeView read FShellTreeView write SetShellTreeView;
@@ -509,7 +515,8 @@ end;
 
 procedure TCustomCastleShellTreeView.ExcludedCountChanged;
 begin
-  // TODO
+  if Assigned(FOnExcludedCountChanged) then
+    FOnExcludedCountChanged(Self);
 end;
 
 procedure TCustomCastleShellTreeView.DoCreateNodeClass(
@@ -1456,7 +1463,8 @@ end;
 
 procedure TCustomCastleShellListView.ExcludedCountChanged;
 begin
-  // TODO
+  if Assigned(FOnExcludedCountChanged) then
+    FOnExcludedCountChanged(Self);
 end;
 
 constructor TCustomCastleShellListView.Create(AOwner: TComponent);

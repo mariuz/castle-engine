@@ -2418,11 +2418,23 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - **Screenshots:** [CGE Design Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [CGE Physics Colliders in Editor](https://castle-engine.io/images/thumb_const_height_size/physics_platformer_collisions.webp) · [UE 5.5 Details Panel](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/90bc2642-1728-47be-9e0f-118c88653e78/interface-thumbnail.jpg)
   - **Example (Phase 257):** Start Physics Simulation (or play a `TCastleScene` animation with `ExposeTransforms`) while a `TCastleTransform` is selected to watch `Translation` and `Rotation` update live in the Object Inspector without cursor resets when you click an inspector row to edit, or import a 3D model from `Data -> Import from Sketchfab...` and have it automatically placed into `Viewport1.Items` even when `DesignRoot` (`TCastleUserInterface`) is selected.
 
+### Phase 258: Content Browser Excluded-File Counter & Event Hook (`ExcludedCountChanged` / `OnExcludedCountChanged`), Non-Visual Component Hierarchy Visibility (`ShowNonVisualComponents`), and Smart Output Log Auto-Scroll (`TOutputList.AddLine`)
+- [x] **258.1. Content Browser `ExcludedCount` Diagnostics (`castleshellctrls.pas` & `formproject.pas`), `TDesignFrame.ShowNonVisualComponents` & Selection-Preserving `TOutputList.AddLine` Auto-Scroll (`editorutils.pas`)**
+  - Resolved the `ExcludedCountChanged` `TODO`s in `TCustomCastleShellTreeView` and `TCustomCastleShellListView` (`tools/castle-editor/code/castleshellctrls.pas`) by exposing `ExcludedCount: Cardinal` and `OnExcludedCountChanged: TNotifyEvent`, and wiring `TProjectForm.ShellListExcludedCountChanged` (`tools/castle-editor/code/formproject.pas`) so `EditFileFilter.TextHint` live-reports visible and `ExcludeMask`-filtered file counts in the Content Browser (`Search files in folder (14 shown, 3 hidden by ExcludeMask)...`).
+  - Resolved the remaining `GetShowNonVisualComponents` / `SetShowNonVisualComponents` `TODO`s in `TConcreteEditorDesigner` (`tools/castle-editor/code/castlecomponenteditordesigner.pas`) by adding `TDesignFrame.ShowNonVisualComponents` (`FShowNonVisualComponents`, default `true`), controlling whether `'Non-Visual Components'` sections are populated in `ValidateOrUpdateHierarchy` (`AddNonVisualComponentsSection`).
+  - Resolved the `IsBottom` auto-scroll `TODO` in `TOutputList.AddLine` (`tools/castle-editor/code/editorutils.pas`) so `ListOutput` automatically scrolls to newly appended compiler/build lines unless the user has explicitly selected an earlier message line (`(List.ItemIndex >= 0) and (List.ItemIndex < List.Items.Count - 2)`) to inspect an error while output is streaming.
+  - **Official Docs & Visual References (Phase 258):** [CGE Visual Editor Manual (Files Browser, Non-Visual Components & Output Log)](https://castle-engine.io/manual_editor.php) · [UE 5.5 Content Browser Filter & Item Count Bar](https://dev.epicgames.com/documentation/en-us/unreal-engine/content-browser-in-unreal-engine) · [UE 5.5 Output Log Auto-Scroll](https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-editor-interface) · [Godot 4 FileSystem Dock & Output Panel](https://docs.godotengine.org/en/stable/getting_started/introduction/first_look_at_the_editor.html)
+  - **Official Videos & Movies (Phase 258):**
+    - 🎬 [CGE Official Video — Project Files Browser, Compiler Output & Hierarchy (YouTube)](https://www.youtube.com/watch?v=gwnKMnAGUcg)
+    - 🎞️ [Animated Movie (GIF) — Interactive Editor Panels & Content Browser Layout](https://docs.godotengine.org/en/stable/_images/containers_split_drag.gif)
+  - **Screenshots:** [CGE Editor Files & Output Panels](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [UE 5.5 Editor Interface & Content Browser](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/90bc2642-1728-47be-9e0f-118c88653e78/interface-thumbnail.jpg)
+  - **Example (Phase 258):** Browse any project directory in the **Files** tab to see the live item & excluded-file count in the search bar (`Search files in folder (18 shown, 2 hidden by ExcludeMask)...`), or click an earlier warning/error line in the **Output** tab during `Compile` (`F9`) to inspect and double-click it without incoming build lines jumping the scroll position away.
+
 ---
 
-## Roadmap Completion Status (Phases 1–257 — Final Milestone)
+## Roadmap Completion Status (Phases 1–258 — Final Milestone)
 
-All **257 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **258 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 

@@ -776,19 +776,11 @@ procedure TOutputList.AddLine(const S: String; const Kind: TOutputKind);
 var
   IsBottom: Boolean;
 begin
-  {
-  IsBottom :=
-    (List.Items.Count = 0) or
-
-    // TODO: doesn't work reliably
-    // List.ItemFullyVisible(List.Items.Count - 1)
-
-    // TODO: doesn't work reliably
-    // checking is visible "List.Items.Count - 1" is not good enough
-    (List.Items.Count = 1) or
-    List.ItemVisible(List.Items.Count - 2);
-  }
-  IsBottom := true;
+  { Scroll to bottom once a new message is received, unless the user explicitly
+    selected an earlier message line in ListOutput to inspect it while output is streaming. }
+  IsBottom := (List.Items.Count <= 2) or
+    (List.ItemIndex < 0) or
+    (List.ItemIndex >= List.Items.Count - 2);
 
   List.Items.AddObject(S, OutputInfoPerKind[Kind]);
 

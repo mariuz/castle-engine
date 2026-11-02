@@ -285,6 +285,7 @@ type
       // Last selected components (with AutoSelectParents=true)
       LastSelected: TComponentList;
       FShowColliders: Boolean;
+      FShowNonVisualComponents: Boolean;
       FindActive: Boolean;
       FMaximizePreview: Boolean;
       ButtonCoordSpace: TSpeedButton;
@@ -1290,6 +1291,7 @@ type
     function CurrentTransform: TCastleTransform;
 
     procedure SetMaximizePreview(const AValue: Boolean);
+    procedure SetShowNonVisualComponents(const AValue: Boolean);
   protected
     procedure Notification(AComponent: TComponent; Operation: TOperation); override;
   public
@@ -2360,6 +2362,8 @@ type
 
     property MaximizePreview: Boolean
       read FMaximizePreview write SetMaximizePreview default false;
+    property ShowNonVisualComponents: Boolean
+      read FShowNonVisualComponents write SetShowNonVisualComponents default true;
   end;
 
 implementation
@@ -4659,6 +4663,7 @@ begin
   inherited;
 
   LastSelected := TComponentList.Create(false);
+  FShowNonVisualComponents := true;
   FLockedComponents := TComponentList.Create(false);
   FFavoriteComponents := TComponentList.Create(false);
   FComponentNotes := TStringList.Create;
@@ -9673,6 +9678,16 @@ begin
   end;
 end;
 
+procedure TDesignFrame.SetShowNonVisualComponents(const AValue: Boolean);
+begin
+  if FShowNonVisualComponents <> AValue then
+  begin
+    FShowNonVisualComponents := AValue;
+    if FDesignRoot <> nil then
+      UpdateDesign;
+  end;
+end;
+
 function TDesignFrame.AddComponentFromUrl(const AddUrl: String;
   const ParentComponent: TComponent): TComponent;
 var
@@ -10625,7 +10640,7 @@ var
     Child: TComponent;
     ChildrenNodesCount: Integer;
   begin
-    if C.NonVisualComponentsCount <> 0 then
+    if FShowNonVisualComponents and (C.NonVisualComponentsCount <> 0) then
     begin
       Result := EnsureChildNodeIs(Parent, IndexInParent, 'Non-Visual Components', nil);
 

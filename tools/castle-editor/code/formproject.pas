@@ -636,6 +636,7 @@ type
     procedure DesignObserverFreeNotification(const Sender: TFreeNotificationObserver);
     { Based on project (in ProjectPath), update MenuItemDefaultPlatform.Caption. }
     procedure UpdateMenuItemDefaultPlatform;
+    procedure ShellListExcludedCountChanged(Sender: TObject);
   public
     { Open a project, given an absolute path to CastleEngineManifest.xml }
     procedure OpenProject(const ManifestUrl: String);
@@ -1885,6 +1886,7 @@ procedure TProjectForm.FormCreate(Sender: TObject);
     ShellListView1.PopupMenu := ShellListPopupMenu;
     ShellListView1.SmallImages := ShellIcons;
     ShellListView1.DragMode := dmAutomatic;
+    ShellListView1.OnExcludedCountChanged := @ShellListExcludedCountChanged;
 
     ShellTreeView1.ShellListView := ShellListView1;
     ShellListView1.ShellTreeView := ShellTreeView1;
@@ -3888,6 +3890,18 @@ end;
 function TProjectForm.CanAddImported(const AddUrl: String): Boolean;
 begin
   Result := (Design <> nil) and Design.CanAddImported(AddUrl);
+end;
+
+procedure TProjectForm.ShellListExcludedCountChanged(Sender: TObject);
+begin
+  if (EditFileFilter = nil) or (ShellListView1 = nil) then
+    Exit;
+  if ShellListView1.ExcludedCount > 0 then
+    EditFileFilter.TextHint := Format('Search files in folder (%d shown, %d hidden by ExcludeMask)...', [
+      ShellListView1.Items.Count, ShellListView1.ExcludedCount])
+  else
+    EditFileFilter.TextHint := Format('Search files in folder (%d items, name or *.ext)...', [
+      ShellListView1.Items.Count]);
 end;
 
 procedure TProjectForm.AddImported(const AddUrl: String);

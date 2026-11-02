@@ -124,13 +124,13 @@ end;
 
 function TConcreteEditorDesigner.GetShowNonVisualComponents: boolean;
 begin
-  Result := true; // TODO, unused in practice by CGE components
+  Result := FDesignFrame.ShowNonVisualComponents;
 end;
 
 procedure TConcreteEditorDesigner.SetShowNonVisualComponents(
   AValue: boolean);
 begin
-  // TODO, unused in practice by CGE components
+  FDesignFrame.ShowNonVisualComponents := AValue;
 end;
 
 procedure TConcreteEditorDesigner.Modified;
