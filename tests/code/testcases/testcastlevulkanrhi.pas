@@ -321,6 +321,9 @@ type
     procedure TestSpotLightBeamWidthExponentAndPlugLightScaleRHI;
     procedure TestPhongSpecularShininessAmbientTexturesAndPlugsRHI;
     procedure TestEnvironmentLightDualCubemapIntensityAndLinearEmissiveDecodeRHI;
+    procedure TestSeparateSpecularShininessTexturesAndCommonSurfaceAlphaTextureRHI;
+    procedure TestMultiTextureThreeAndFourStageCombinePipelineRHI;
+    procedure TestLightsRendererMaxLightsPerShapeAndGlobalSceneDeduplicationRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -19466,6 +19469,296 @@ begin
   finally
     FreeAndNil(Scene);
     CastleRenderOptions.ColorSpace := SavedColorSpace;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSeparateSpecularShininessTexturesAndCommonSurfaceAlphaTextureRHI;
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  Device: TVulkanRHIDevice;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TMaterialNode;
+  SurfShader: TCommonSurfaceShaderNode;
+  DiffTex, SpecTex, ShinTex, AlphaTex: TPixelTextureNode;
+  Img: TRGBAlphaImage;
+  Box: TBoxNode;
+  Scene: TCastleScene;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  OutShinTex, OutAlphaTex: TRHITexture;
+  OutShinSamp, OutAlphaSamp: TRHISampler;
+  OutInvertAlpha: Boolean;
+  FragSrc: String;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8601)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TMaterialNode.Create;
+
+    DiffTex := TPixelTextureNode.Create;
+    Img := TRGBAlphaImage.Create(2, 2);
+    Img.Clear(Vector4Byte(200, 180, 160, 255));
+    DiffTex.FdImage.Value := Img;
+    Mat.DiffuseTexture := DiffTex;
+
+    SpecTex := TPixelTextureNode.Create;
+    Img := TRGBAlphaImage.Create(2, 2);
+    Img.Clear(Vector4Byte(255, 220, 180, 255));
+    SpecTex.FdImage.Value := Img;
+    Mat.SpecularTexture := SpecTex;
+
+    ShinTex := TPixelTextureNode.Create;
+    Img := TRGBAlphaImage.Create(2, 2);
+    Img.Clear(Vector4Byte(128, 128, 128, 200));
+    ShinTex.FdImage.Value := Img;
+    Mat.ShininessTexture := ShinTex;
+
+    AlphaTex := TPixelTextureNode.Create;
+    Img := TRGBAlphaImage.Create(2, 2);
+    Img.Clear(Vector4Byte(255, 255, 255, 64));
+    AlphaTex.FdImage.Value := Img;
+
+    SurfShader := TCommonSurfaceShaderNode.Create;
+    SurfShader.DiffuseTexture := DiffTex;
+    SurfShader.SpecularTexture := SpecTex;
+    SurfShader.ShininessTexture := ShinTex;
+    SurfShader.AlphaTexture := AlphaTex;
+    SurfShader.InvertAlphaTexture := True;
+
+    App.Material := Mat;
+    App.SetShaders([SurfShader]);
+    App.AlphaMode := amMask;
+    ShapeNode.Appearance := App;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+
+    AssertTrue('ExtractRHISeparateShininessAndAlphaTextures must extract separate ShininessTexture and AlphaTexture',
+      RendererShape.ExtractRHISeparateShininessAndAlphaTextures(
+        OutShinTex, OutShinSamp, OutAlphaTex, OutAlphaSamp, OutInvertAlpha));
+    AssertTrue('OutShinTex must be non-nil', OutShinTex <> nil);
+    AssertTrue('OutAlphaTex must be non-nil', OutAlphaTex <> nil);
+    AssertTrue('OutInvertAlpha must be True', OutInvertAlpha);
+
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertTrue('Cache.RHIPhongHasSeparateShininessTex must be True',
+      RendererShape.Cache.RHIPhongHasSeparateShininessTex);
+    AssertTrue('Cache.RHIHasAlphaTexture must be True',
+      RendererShape.Cache.RHIHasAlphaTexture);
+    AssertTrue('Cache.RHIInvertAlphaTexture must be True',
+      RendererShape.Cache.RHIInvertAlphaTexture);
+    AssertTrue('Cache.RHIUserEffectTexture[1] (Set 2 Binding 3) must bind AlphaTexture',
+      RendererShape.Cache.RHIUserEffectTexture[1] = OutAlphaTex);
+    AssertTrue('Cache.RHIUserEffectTexture[2] (Set 2 Binding 4) must bind separate ShininessTexture',
+      RendererShape.Cache.RHIUserEffectTexture[2] = OutShinTex);
+
+    FragSrc := RendererShape.Cache.RHIFragmentShaderSource;
+    AssertTrue('Fragment shader must declare castle_shininess_texture at Set 2 Binding 4',
+      Pos('CASTLE_SAMPLER(2, 4) uniform sampler2D castle_shininess_texture;', FragSrc) > 0);
+    AssertTrue('Fragment shader must sample castle_shininess_texture.a for castle_shininess_exp',
+      Pos('castle_shininess_exp = max(castle_shininess_exp * texture(castle_shininess_texture, castle_tex_coord0).a, 1.0);', FragSrc) > 0);
+    AssertTrue('Fragment shader must declare castle_alpha_texture at Set 2 Binding 3',
+      Pos('CASTLE_SAMPLER(2, 3) uniform sampler2D castle_alpha_texture;', FragSrc) > 0);
+    AssertTrue('Fragment shader must apply inverted castle_alpha_texture before alpha test',
+      Pos('baseColor.a *= (1.0 - texture(castle_alpha_texture, castle_tex_coord0).a);' + LineEnding +
+          '  if (baseColor.a < castle_AlphaCutoff) discard;', FragSrc) > 0);
+  finally
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestMultiTextureThreeAndFourStageCombinePipelineRHI;
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  Device: TVulkanRHIDevice;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  MultiTex: TMultiTextureNode;
+  StageTex: array[0..3] of TPixelTextureNode;
+  Img: TRGBAlphaImage;
+  Box: TBoxNode;
+  Scene: TCastleScene;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  StageRHITex2, StageRHITex3: TRHITexture;
+  StageSamp: TRHISampler;
+  StageEnv: TTextureEnv;
+  StageConstColor: TVector4;
+  FragSrc: String;
+  I: Integer;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8602)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    App.Material := Mat;
+
+    MultiTex := TMultiTextureNode.Create;
+    for I := 0 to 3 do
+    begin
+      StageTex[I] := TPixelTextureNode.Create;
+      Img := TRGBAlphaImage.Create(2, 2);
+      Img.Clear(Vector4Byte(50 * (I + 1), 40 * (I + 1), 30 * (I + 1), 255));
+      StageTex[I].FdImage.Value := Img;
+      MultiTex.FdTexture.Add(StageTex[I]);
+    end;
+    MultiTex.SetMode(['MODULATE', 'ADD', 'SUBTRACT', 'BLENDDIFFUSEALPHA']);
+    MultiTex.Color := Vector3(0.25, 0.5, 0.75);
+    MultiTex.Alpha := 0.8;
+    App.Texture := MultiTex;
+
+    ShapeNode.Appearance := App;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+
+    AssertTrue('ExtractRHIMultiTextureStage(2) must return True',
+      RendererShape.ExtractRHIMultiTextureStage(2, StageRHITex2, StageSamp, StageEnv, StageConstColor));
+    AssertEquals(Ord(coSubtract), Ord(StageEnv.Combine[cRGB]));
+    AssertTrue('ExtractRHIMultiTextureStage(3) must return True',
+      RendererShape.ExtractRHIMultiTextureStage(3, StageRHITex3, StageSamp, StageEnv, StageConstColor));
+    AssertEquals(Ord(coBlend), Ord(StageEnv.Combine[cRGB]));
+
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertTrue('Cache.RHIHasSecondTexture must be True', RendererShape.Cache.RHIHasSecondTexture);
+    AssertTrue('Cache.RHIHasMultiTextureStage2 must be True', RendererShape.Cache.RHIHasMultiTextureStage2);
+    AssertTrue('Cache.RHIHasMultiTextureStage3 must be True', RendererShape.Cache.RHIHasMultiTextureStage3);
+    AssertTrue('Cache.RHIUserEffectTexture[1] (Set 2 Binding 3) must bind stage 2 texture',
+      RendererShape.Cache.RHIUserEffectTexture[1] = StageRHITex2);
+    AssertTrue('Cache.RHIUserEffectTexture[2] (Set 2 Binding 4) must bind stage 3 texture',
+      RendererShape.Cache.RHIUserEffectTexture[2] = StageRHITex3);
+
+    FragSrc := RendererShape.Cache.RHIFragmentShaderSource;
+    AssertTrue('Fragment shader must declare castle_multi_texture_1 at Set 2 Binding 2',
+      Pos('CASTLE_DESCRIPTOR_SET(2, 2) uniform sampler2D castle_multi_texture_1;', FragSrc) > 0);
+    AssertTrue('Fragment shader must declare castle_multi_texture_2 at Set 2 Binding 3',
+      Pos('CASTLE_DESCRIPTOR_SET(2, 3) uniform sampler2D castle_multi_texture_2;', FragSrc) > 0);
+    AssertTrue('Fragment shader must declare castle_multi_texture_3 at Set 2 Binding 4',
+      Pos('CASTLE_DESCRIPTOR_SET(2, 4) uniform sampler2D castle_multi_texture_3;', FragSrc) > 0);
+    AssertTrue('Fragment shader must evaluate stage 1 ADD',
+      Pos('baseColor.rgb += multiTex1.rgb;', FragSrc) > 0);
+    AssertTrue('Fragment shader must evaluate stage 2 SUBTRACT',
+      Pos('baseColor.rgb = multiTex2.rgb - baseColor.rgb;', FragSrc) > 0);
+    AssertTrue('Fragment shader must evaluate stage 3 BLENDDIFFUSEALPHA',
+      Pos('baseColor.rgb = mix(baseColor.rgb, multiTex3.rgb, castle_MaterialBaseColor.a);', FragSrc) > 0);
+  finally
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestLightsRendererMaxLightsPerShapeAndGlobalSceneDeduplicationRHI;
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  Device: TVulkanRHIDevice;
+  Cam: TRenderingCamera;
+  LightsRenderer: TLightsRenderer;
+  GlobalLights, SceneLights: TLightInstancesList;
+  LightNode1, LightNode2, LightNode3: TDirectionalLightNode;
+  Inst1, Inst2, Inst3: TLightInstance;
+  LightsBlock: TCastleLightsUniformBlock;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8603)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+
+  Cam := TRenderingCamera.Create;
+  LightsRenderer := TLightsRenderer.Create;
+  GlobalLights := TLightInstancesList.Create;
+  SceneLights := TLightInstancesList.Create;
+  LightNode1 := TDirectionalLightNode.Create;
+  LightNode2 := TDirectionalLightNode.Create;
+  LightNode3 := TDirectionalLightNode.Create;
+  try
+    Cam.Target := rtScreen;
+    Cam.Matrix := TMatrix4.Identity;
+    LightsRenderer.RenderingCamera := Cam;
+    AssertEquals('Default MaxLightsPerShape must equal CASTLE_MAX_LIGHTS',
+      Cardinal(CASTLE_MAX_LIGHTS), LightsRenderer.MaxLightsPerShape);
+
+    LightNode1.FdColor.Value := Vector3(1.0, 0.0, 0.0);
+    LightNode2.FdColor.Value := Vector3(0.0, 1.0, 0.0);
+    LightNode3.FdColor.Value := Vector3(0.0, 0.0, 1.0);
+
+    FillChar(Inst1, SizeOf(Inst1), 0);
+    Inst1.Node := LightNode1;
+    Inst1.Transform := TMatrix4.Identity;
+    Inst1.WorldCoordinates := True;
+
+    FillChar(Inst2, SizeOf(Inst2), 0);
+    Inst2.Node := LightNode2;
+    Inst2.Transform := TMatrix4.Identity;
+    Inst2.WorldCoordinates := True;
+
+    FillChar(Inst3, SizeOf(Inst3), 0);
+    Inst3.Node := LightNode3;
+    Inst3.Transform := TMatrix4.Identity;
+    Inst3.WorldCoordinates := True;
+
+    { 1. Test GlobalLights + SceneLights deduplication for identical (Node, Transform) }
+    GlobalLights.Add(Inst1);
+    GlobalLights.Add(Inst2);
+    SceneLights.Add(Inst1); { Duplicate of Inst1 in GlobalLights }
+    SceneLights.Add(Inst3);
+
+    LightsRenderer.BuildLightsUniformBlock(nil, GlobalLights, SceneLights, nil, LightsBlock);
+    AssertEquals('Deduplicated light count must be 3 (Inst1 counted once)',
+      Cardinal(3), LightsBlock.Count);
+
+    { 2. Test MaxLightsPerShape clamping }
+    LightsRenderer.MaxLightsPerShape := 2;
+    LightsRenderer.BuildLightsUniformBlock(nil, GlobalLights, SceneLights, nil, LightsBlock);
+    AssertEquals('MaxLightsPerShape = 2 must clamp LightsBlock.Count to 2',
+      Cardinal(2), LightsBlock.Count);
+  finally
+    FreeAndNil(LightNode3);
+    FreeAndNil(LightNode2);
+    FreeAndNil(LightNode1);
+    FreeAndNil(SceneLights);
+    FreeAndNil(GlobalLights);
+    FreeAndNil(LightsRenderer);
+    FreeAndNil(Cam);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);

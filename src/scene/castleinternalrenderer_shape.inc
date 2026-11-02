@@ -117,6 +117,15 @@
       out AEnv: TTextureEnv;
       out AConstantColor: TVector4): Boolean; overload;
 
+    { Extracts stage AStageIndex (1..3) of a TMultiTextureNode along with its per-stage
+      X3D TTextureEnv combine modes, sources, function, and constant color. }
+    function ExtractRHIMultiTextureStage(
+      const AStageIndex: Cardinal;
+      out AStageTex: TRHITexture;
+      out AStageSampler: TRHISampler;
+      out AEnv: TTextureEnv;
+      out AConstantColor: TVector4): Boolean;
+
     { Extracts the first enabled X3D TClipPlaneNode from State.ClipPlanes transformed
       into scene/world space via PlaneTransform(ClipPlane.Node.FdPlane.Value, ClipPlane.Transform). }
     function ExtractRHIClipPlane(out ASceneClipPlane: TVector4): Boolean;
@@ -150,6 +159,16 @@
     function ExtractRHIPhongSurfaceParams(
       out AIsPhong, AHasSpecularTex, AHasShininessTex, AHasAmbientTex: Boolean;
       out AAmbientIntensity: Single): Boolean;
+
+    { Extracts a separate ShininessTexture (when both SpecularTexture and a distinct
+      ShininessTexture are set on TMaterialNode or TCommonSurfaceShaderNode) and
+      TCommonSurfaceShaderNode.AlphaTexture + InvertAlphaTexture. }
+    function ExtractRHISeparateShininessAndAlphaTextures(
+      out AShininessTex: TRHITexture;
+      out AShininessSampler: TRHISampler;
+      out AAlphaTex: TRHITexture;
+      out AAlphaSampler: TRHISampler;
+      out AInvertAlpha: Boolean): Boolean;
 
     { Resolves the first TGeneratedShadowMapNode in InternalShadowMaps to its underlying
       depth/VSM TRHITexture and comparison TRHISampler handles. }
@@ -906,6 +925,16 @@ function TX3DRendererShape.ExtractRHISecondTexture(
   out ASecondSampler: TRHISampler;
   out AEnv: TTextureEnv;
   out AConstantColor: TVector4): Boolean;
+begin
+  Result := ExtractRHIMultiTextureStage(1, ASecondTex, ASecondSampler, AEnv, AConstantColor);
+end;
+
+function TX3DRendererShape.ExtractRHIMultiTextureStage(
+  const AStageIndex: Cardinal;
+  out AStageTex: TRHITexture;
+  out AStageSampler: TRHISampler;
+  out AEnv: TTextureEnv;
+  out AConstantColor: TVector4): Boolean;
 
   function ResolveSingleRHITexture(const ARawNode: TX3DNode;
     out ASampler: TRHISampler): TRHITexture;
@@ -959,12 +988,16 @@ var
   MultiTex: TMultiTextureNode;
   Env: TTextureEnv;
   ModeStr, SourceStr, FunctionStr: String;
+  StageIdx: Integer;
 begin
-  ASecondTex := nil;
-  ASecondSampler := nil;
+  AStageTex := nil;
+  AStageSampler := nil;
   AEnv.Init('MODULATE', '', '');
   AConstantColor := Vector4(1, 1, 1, 1);
   Result := False;
+  if (AStageIndex < 1) or (AStageIndex > 3) then
+    Exit;
+  StageIdx := Integer(AStageIndex);
 
   if (Cache <> nil) and (Cache.RenderOptions <> nil) and
      ((Cache.RenderOptions.Mode = rmSolidColor) or (not Cache.RenderOptions.Textures)) then
@@ -991,17 +1024,18 @@ begin
       TexNode := TUnlitMaterialNode(App.Material).EmissiveTexture;
   end;
 
-  if (OriginalGeometry <> nil) and (OriginalGeometry.FontTextureNode <> nil) and
+  if (AStageIndex = 1) and (OriginalGeometry <> nil) and
+     (OriginalGeometry.FontTextureNode <> nil) and
      (TexNode <> nil) and (TexNode <> OriginalGeometry.FontTextureNode) then
   begin
     if TexNode is TMultiTextureNode then
     begin
       MultiTex := TMultiTextureNode(TexNode);
       if MultiTex.FdTexture.Count > 0 then
-        ASecondTex := ResolveSingleRHITexture(MultiTex.FdTexture[0], ASecondSampler);
+        AStageTex := ResolveSingleRHITexture(MultiTex.FdTexture[0], AStageSampler);
     end else
-      ASecondTex := ResolveSingleRHITexture(TexNode, ASecondSampler);
-    Result := ASecondTex <> nil;
+      AStageTex := ResolveSingleRHITexture(TexNode, AStageSampler);
+    Result := AStageTex <> nil;
     Exit;
   end;
 
@@ -1009,28 +1043,28 @@ begin
   begin
     MultiTex := TMultiTextureNode(TexNode);
     AConstantColor := Vector4(MultiTex.Color, MultiTex.Alpha);
-    if MultiTex.FdTexture.Count > 1 then
+    if MultiTex.FdTexture.Count > StageIdx then
     begin
-      if MultiTex.FdMode.Count > 1 then
-        ModeStr := MultiTex.FdMode.Items[1]
+      if MultiTex.FdMode.Count > StageIdx then
+        ModeStr := MultiTex.FdMode.Items[StageIdx]
       else if MultiTex.FdMode.Count > 0 then
         ModeStr := MultiTex.FdMode.Items[0]
       else
         ModeStr := '';
-      if MultiTex.FdSource.Count > 1 then
-        SourceStr := MultiTex.FdSource.Items[1]
+      if MultiTex.FdSource.Count > StageIdx then
+        SourceStr := MultiTex.FdSource.Items[StageIdx]
       else
         SourceStr := '';
-      if MultiTex.FdFunction.Count > 1 then
-        FunctionStr := MultiTex.FdFunction.Items[1]
+      if MultiTex.FdFunction.Count > StageIdx then
+        FunctionStr := MultiTex.FdFunction.Items[StageIdx]
       else
         FunctionStr := '';
       Env.Init(ModeStr, SourceStr, FunctionStr);
       if not Env.Disabled then
       begin
         AEnv := Env;
-        ASecondTex := ResolveSingleRHITexture(MultiTex.FdTexture[1], ASecondSampler);
-        Result := ASecondTex <> nil;
+        AStageTex := ResolveSingleRHITexture(MultiTex.FdTexture[StageIdx], AStageSampler);
+        Result := AStageTex <> nil;
       end;
     end;
   end;
@@ -1308,8 +1342,7 @@ begin
     if TexturesEnabled then
     begin
       AHasSpecularTex := SurfaceShader.SpecularTexture <> nil;
-      AHasShininessTex := (SurfaceShader.ShininessTexture <> nil) and
-        ((SurfaceShader.SpecularTexture = nil) or (SurfaceShader.ShininessTexture = SurfaceShader.SpecularTexture));
+      AHasShininessTex := SurfaceShader.ShininessTexture <> nil;
       AHasAmbientTex := SurfaceShader.AmbientTexture <> nil;
     end;
     Result := True;
@@ -1330,11 +1363,113 @@ begin
       if TexturesEnabled then
       begin
         AHasSpecularTex := PhongMat.SpecularTexture <> nil;
-        AHasShininessTex := (PhongMat.ShininessTexture <> nil) and
-          ((PhongMat.SpecularTexture = nil) or (PhongMat.ShininessTexture = PhongMat.SpecularTexture));
+        AHasShininessTex := PhongMat.ShininessTexture <> nil;
         AHasAmbientTex := (PhongMat.AmbientTexture <> nil) and (PhongMat.OcclusionTexture = nil);
       end;
       Result := True;
+    end;
+  end;
+end;
+
+function TX3DRendererShape.ExtractRHISeparateShininessAndAlphaTextures(
+  out AShininessTex: TRHITexture;
+  out AShininessSampler: TRHISampler;
+  out AAlphaTex: TRHITexture;
+  out AAlphaSampler: TRHISampler;
+  out AInvertAlpha: Boolean): Boolean;
+
+  function ResolveTexNode(const ARawNode: TX3DNode; out ASampler: TRHISampler): TRHITexture;
+  var
+    ANode: TAbstractTextureNode;
+    Res: TTextureResource;
+    TempRenderOptions: TCastleRenderOptions;
+  begin
+    Result := nil;
+    ASampler := nil;
+    if (ARawNode = nil) or not (ARawNode is TAbstractTextureNode) then
+      Exit;
+    ANode := TAbstractTextureNode(ARawNode);
+    Res := TTextureResources.Get(ANode);
+    if (Res = nil) and (RHIDevice <> nil) then
+    begin
+      if (Cache <> nil) and (Cache.RenderOptions <> nil) then
+        TTextureResources.Prepare(Cache.RenderOptions, ANode)
+      else
+      begin
+        TempRenderOptions := TCastleRenderOptions.Create(nil);
+        try
+          TTextureResources.Prepare(TempRenderOptions, ANode);
+        finally
+          FreeAndNil(TempRenderOptions);
+        end;
+      end;
+      Res := TTextureResources.Get(ANode);
+    end;
+    if Res <> nil then
+      ASampler := Res.RHISampler;
+    if Res is TImageTextureResource then
+      Result := TImageTextureResource(Res).RHITexture
+    else if Res is TMovieTextureResource then
+      Result := TMovieTextureResource(Res).RHITexture
+    else if Res is TRenderedTextureResource then
+      Result := TRenderedTextureResource(Res).RHITexture;
+  end;
+
+var
+  ShapeState: TX3DGraphTraverseState;
+  App: TAppearanceNode;
+  SurfaceShader: TCommonSurfaceShaderNode;
+  MatNode: TAbstractMaterialNode;
+  PhongMat: TMaterialNode;
+begin
+  AShininessTex := nil;
+  AShininessSampler := nil;
+  AAlphaTex := nil;
+  AAlphaSampler := nil;
+  AInvertAlpha := False;
+  Result := False;
+
+  if (Cache <> nil) and (Cache.RenderOptions <> nil) and
+     ((Cache.RenderOptions.Mode = rmSolidColor) or (not Cache.RenderOptions.Textures)) then
+    Exit;
+
+  ShapeState := OriginalState;
+  if ShapeState = nil then
+    ShapeState := State;
+  if ShapeState = nil then
+    Exit;
+
+  if ShapeState.ShapeNode <> nil then
+    App := ShapeState.ShapeNode.Appearance
+  else
+    App := ShapeState.Appearance;
+  if App = nil then
+    Exit;
+
+  SurfaceShader := App.InternalCommonSurfaceShader;
+  if SurfaceShader <> nil then
+  begin
+    AInvertAlpha := SurfaceShader.InvertAlphaTexture;
+    if (SurfaceShader.SpecularTexture <> nil) and
+       (SurfaceShader.ShininessTexture <> nil) and
+       (SurfaceShader.ShininessTexture <> SurfaceShader.SpecularTexture) then
+      AShininessTex := ResolveTexNode(SurfaceShader.ShininessTexture, AShininessSampler);
+    if SurfaceShader.AlphaTexture <> nil then
+      AAlphaTex := ResolveTexNode(SurfaceShader.AlphaTexture, AAlphaSampler);
+    Result := (AShininessTex <> nil) or (AAlphaTex <> nil) or AInvertAlpha;
+  end else
+  begin
+    MatNode := App.Material;
+    if MatNode is TMaterialNode then
+    begin
+      PhongMat := TMaterialNode(MatNode);
+      if (PhongMat.SpecularTexture <> nil) and
+         (PhongMat.ShininessTexture <> nil) and
+         (PhongMat.ShininessTexture <> PhongMat.SpecularTexture) then
+      begin
+        AShininessTex := ResolveTexNode(PhongMat.ShininessTexture, AShininessSampler);
+        Result := AShininessTex <> nil;
+      end;
     end;
   end;
 end;
@@ -2161,23 +2296,23 @@ var
   MatBlock: TCastleMaterialUniformBlock;
   BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex: TRHITexture;
   BaseColorSampler, NormalSampler, MetallicRoughnessSampler, EmissiveSampler, OcclusionSampler: TRHISampler;
-  EnvCubemapTex, EnvDiffuseTex, ShadowMapTex, SecondTex: TRHITexture;
-  EnvCubemapSampler, EnvDiffuseSampler, ShadowMapSampler, SecondSampler: TRHISampler;
+  EnvCubemapTex, EnvDiffuseTex, ShadowMapTex, SecondTex, MultiTex2, MultiTex3, SepShinTex, AlphaTex: TRHITexture;
+  EnvCubemapSampler, EnvDiffuseSampler, ShadowMapSampler, SecondSampler, MultiSamp2, MultiSamp3, SepShinSamp, AlphaSamp: TRHISampler;
   EnvColorIntensity: TVector3;
   TexTransformMatrix, TexTransform1Matrix: TMatrix4;
-  SecondConstColor: TVector4;
-  SecondEnv: TTextureEnv;
+  SecondConstColor, MultiConst2, MultiConst3: TVector4;
+  SecondEnv, MultiEnv2, MultiEnv3: TTextureEnv;
   ClipPlanes: array[0..3] of TVector4;
   ClipPlaneCount: Cardinal;
   TexGenBoundsS, TexGenBoundsT, TexGenBoundsR: TVector4;
   TexCoordGen: TTextureCoordinateGeneration;
   PointSize, ParallaxHeight, PhongAmbIntensity: Single;
   VertEffectCode, FragEffectCode, ComposedVertCode, ComposedFragCode: String;
-  HasTexTransform, HasTexTransform1, HasSecondTex, HasClipPlane, HasIBL, HasShadowMap, HasTexCoordGen, HasPointSize,
+  HasTexTransform, HasTexTransform1, HasSecondTex, HasMultiTex2, HasMultiTex3, HasClipPlane, HasIBL, HasShadowMap, HasTexCoordGen, HasPointSize,
     HasParallax, SteepParallax, SelfShadowParallax, HasShaderEffects, HasComposedShader,
-    IsPhongMat, PhongHasSpecTex, PhongHasShinTex, PhongHasAmbTex: Boolean;
+    IsPhongMat, PhongHasSpecTex, PhongHasShinTex, PhongHasAmbTex, InvertAlpha: Boolean;
   BaseColorMapIdx, NormalMapIdx, MetallicRoughnessMapIdx, EmissiveMapIdx, OcclusionMapIdx: Cardinal;
-  BaseColorIdx, NormalIdx, MetallicRoughnessIdx, EmissiveIdx: Cardinal;
+  BaseColorIdx, NormalIdx, MetallicRoughnessIdx, EmissiveIdx, UserUniformCount: Cardinal;
   BindlessEntry: TCastleBindlessMaterialEntry;
 begin
   ExtractRHIMaterialBlock(MatBlock, AShadingModel);
@@ -2190,12 +2325,18 @@ begin
       BaseColorSampler, NormalSampler, MetallicRoughnessSampler, EmissiveSampler, OcclusionSampler);
     ExtractRHIPhongSurfaceParams(
       IsPhongMat, PhongHasSpecTex, PhongHasShinTex, PhongHasAmbTex, PhongAmbIntensity);
+    ExtractRHISeparateShininessAndAlphaTextures(
+      SepShinTex, SepShinSamp, AlphaTex, AlphaSamp, InvertAlpha);
     ExtractRHITextureCoordMappings(
       BaseColorMapIdx, NormalMapIdx, MetallicRoughnessMapIdx, EmissiveMapIdx, OcclusionMapIdx);
     HasTexTransform := ExtractRHITextureTransform(TexTransformMatrix);
     HasTexTransform1 := ExtractRHITextureTransform1(TexTransform1Matrix);
     HasSecondTex := ExtractRHISecondTexture(
       SecondTex, SecondSampler, SecondEnv, SecondConstColor);
+    HasMultiTex2 := ExtractRHIMultiTextureStage(
+      2, MultiTex2, MultiSamp2, MultiEnv2, MultiConst2);
+    HasMultiTex3 := ExtractRHIMultiTextureStage(
+      3, MultiTex3, MultiSamp3, MultiEnv3, MultiConst3);
     ClipPlaneCount := ExtractRHIClipPlanes(ClipPlanes);
     HasClipPlane := ClipPlaneCount > 0;
     HasIBL := ExtractRHIEnvironmentLightTexture(
@@ -2211,6 +2352,9 @@ begin
       Cache.SetPhongSurfaceParams(
         IsPhongMat and (AShadingModel = smPhong),
         PhongHasSpecTex, PhongHasShinTex, PhongHasAmbTex, PhongAmbIntensity);
+      Cache.SetPhongExtendedSurfaceParams(
+        IsPhongMat and (AShadingModel = smPhong) and (SepShinTex <> nil),
+        AlphaTex <> nil, InvertAlpha);
       Cache.SetEnvironmentLightParams(
         (EnvDiffuseTex <> nil) and (EnvDiffuseTex <> EnvCubemapTex),
         EnvColorIntensity);
@@ -2219,14 +2363,34 @@ begin
       Cache.SetTextureTransform(HasTexTransform, TexTransformMatrix);
       Cache.SetTextureTransform1(HasTexTransform1, TexTransform1Matrix);
       Cache.SetSecondTextureEnv(HasSecondTex, SecondEnv, SecondConstColor);
+      Cache.SetMultiTextureStageEnv(2, HasMultiTex2, MultiEnv2, MultiConst2);
+      Cache.SetMultiTextureStageEnv(3, HasMultiTex3, MultiEnv3, MultiConst3);
       Cache.SetClipPlanes(ClipPlanes, ClipPlaneCount);
       Cache.SetTexCoordGen(TexCoordGen, TexGenBoundsS, TexGenBoundsT, TexGenBoundsR);
       Cache.SetPointSize(PointSize);
       Cache.SetParallaxBumpMapping(HasParallax, SteepParallax, SelfShadowParallax, ParallaxHeight);
       Cache.SetShaderEffects(VertEffectCode, FragEffectCode);
       Cache.SetComposedShader(ComposedVertCode, ComposedFragCode);
-      if (ExtractRHIUserEffectUniforms = 0) and HasSecondTex and (SecondTex <> nil) then
-        Cache.BindUserEffectTexture(0, SecondTex, SecondSampler);
+      UserUniformCount := ExtractRHIUserEffectUniforms;
+      if UserUniformCount = 0 then
+      begin
+        if HasSecondTex and (SecondTex <> nil) then
+          Cache.BindUserEffectTexture(0, SecondTex, SecondSampler);
+        if HasMultiTex2 and (MultiTex2 <> nil) then
+          Cache.BindUserEffectTexture(1, MultiTex2, MultiSamp2)
+        else if AlphaTex <> nil then
+          Cache.BindUserEffectTexture(1, AlphaTex, AlphaSamp);
+        if HasMultiTex3 and (MultiTex3 <> nil) then
+          Cache.BindUserEffectTexture(2, MultiTex3, MultiSamp3)
+        else if SepShinTex <> nil then
+          Cache.BindUserEffectTexture(2, SepShinTex, SepShinSamp);
+      end else
+      begin
+        if AlphaTex <> nil then
+          Cache.BindUserEffectTexture(1, AlphaTex, AlphaSamp);
+        if SepShinTex <> nil then
+          Cache.BindUserEffectTexture(2, SepShinTex, SepShinSamp);
+      end;
       if (EnvDiffuseTex <> nil) and (EnvDiffuseTex <> EnvCubemapTex) then
         Cache.BindUserEffectTexture(3, EnvDiffuseTex, EnvDiffuseSampler);
       Cache.BindMaterialTexturesToDescriptorSet(

@@ -260,6 +260,8 @@ end;
 constructor TLightsRenderer.Create;
 begin
   inherited Create;
+  FMaxLightsPerShape := CASTLE_MAX_LIGHTS;
+  SetLength(LightsDone, FMaxLightsPerShape);
 end;
 
 destructor TLightsRenderer.Destroy;
@@ -317,6 +319,23 @@ procedure TLightsRenderer.BuildLightsUniformBlock(const Shape: TShape;
 
   var
     NextShadowSlotIdx: Integer;
+    EffectiveMaxLights: Cardinal;
+    AddedLights: array[0..CASTLE_MAX_LIGHTS - 1] of PLightInstance;
+    AddedCount: Cardinal;
+
+  function IsLightAlreadyAdded(const ALight: PLightInstance): Boolean;
+  var
+    J: Integer;
+  begin
+    Result := False;
+    if ALight = nil then
+      Exit;
+    for J := 0 to Integer(AddedCount) - 1 do
+      if (AddedLights[J] <> nil) and
+         (AddedLights[J]^.Node = ALight^.Node) and
+         TMatrix4.PerfectlyEquals(AddedLights[J]^.Transform, ALight^.Transform) then
+        Exit(True);
+  end;
 
   procedure AddList(const Lights: TLightInstancesList; const IsGlobalLight: Boolean);
   const
@@ -340,11 +359,13 @@ procedure TLightsRenderer.BuildLightsUniformBlock(const Shape: TShape;
     LiSpot: TSpotLightNode;
     ProjectorMatrix: TMatrix4;
   begin
-    if Lights = nil then Exit;
+    if (Lights = nil) or (UniformBlock.Count >= EffectiveMaxLights) then Exit;
 
     for I := 0 to Lights.Count - 1 do
     begin
       Light := PLightInstance(Lights.Ptr(I));
+      if IsLightAlreadyAdded(Light) then
+        Continue;
 
       LightOn := Light^.Node.FdOn.Value;
       if Assigned(LightRenderEvent) then
@@ -407,27 +428,36 @@ procedure TLightsRenderer.BuildLightsUniformBlock(const Shape: TShape;
           Idx := UniformBlock.AddPointLight(EyePos.XYZ, Color3, AmbientColor3, Att, Rad);
         end;
 
-        if (Idx >= 0) and (Node is TAbstractPunctualLightNode) and
-           (TAbstractPunctualLightNode(Node).DefaultShadowMap <> nil) then
+        if Idx >= 0 then
         begin
-          RenderingCamera.InverseMatrixNeeded;
-          ProjectorMatrix := (ProjectorScalingMatrixVulkan *
-            TAbstractPunctualLightNode(Node).GetProjectorMatrix) *
-            RenderingCamera.InverseMatrix;
-          ShadowSlotIdx := -1;
-          if (Shape <> nil) and (Shape.InternalShadowMaps <> nil) then
-            ShadowSlotIdx := Shape.InternalShadowMaps.IndexOf(
-              TAbstractPunctualLightNode(Node).DefaultShadowMap);
-          if ShadowSlotIdx < 0 then
+          if AddedCount < CASTLE_MAX_LIGHTS then
           begin
-            ShadowSlotIdx := NextShadowSlotIdx;
-            if NextShadowSlotIdx < 3 then
-              Inc(NextShadowSlotIdx);
+            AddedLights[AddedCount] := Light;
+            Inc(AddedCount);
           end;
-          UniformBlock.SetProjectorMatrix(Idx, ProjectorMatrix, EnsureRange(ShadowSlotIdx, 0, 3));
+
+          if (Node is TAbstractPunctualLightNode) and
+             (TAbstractPunctualLightNode(Node).DefaultShadowMap <> nil) then
+          begin
+            RenderingCamera.InverseMatrixNeeded;
+            ProjectorMatrix := (ProjectorScalingMatrixVulkan *
+              TAbstractPunctualLightNode(Node).GetProjectorMatrix) *
+              RenderingCamera.InverseMatrix;
+            ShadowSlotIdx := -1;
+            if (Shape <> nil) and (Shape.InternalShadowMaps <> nil) then
+              ShadowSlotIdx := Shape.InternalShadowMaps.IndexOf(
+                TAbstractPunctualLightNode(Node).DefaultShadowMap);
+            if ShadowSlotIdx < 0 then
+            begin
+              ShadowSlotIdx := NextShadowSlotIdx;
+              if NextShadowSlotIdx < 3 then
+                Inc(NextShadowSlotIdx);
+            end;
+            UniformBlock.SetProjectorMatrix(Idx, ProjectorMatrix, EnsureRange(ShadowSlotIdx, 0, 3));
+          end;
         end;
 
-        if UniformBlock.Count >= CASTLE_MAX_LIGHTS then
+        if UniformBlock.Count >= EffectiveMaxLights then
           Exit;
       end;
     end;
@@ -436,8 +466,12 @@ procedure TLightsRenderer.BuildLightsUniformBlock(const Shape: TShape;
 begin
   UniformBlock.Clear;
   NextShadowSlotIdx := 0;
+  AddedCount := 0;
+  EffectiveMaxLights := Min(FMaxLightsPerShape, Cardinal(CASTLE_MAX_LIGHTS));
+  if EffectiveMaxLights = 0 then
+    Exit;
   AddList(GlobalLights, True);
-  if UniformBlock.Count < CASTLE_MAX_LIGHTS then
+  if UniformBlock.Count < EffectiveMaxLights then
     AddList(SceneLights, False);
 end;
 

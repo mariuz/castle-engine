@@ -148,6 +148,9 @@
     FRHISecondTextureCombineAlpha: TCombine;
     FRHISecondTextureConstantColor: TVector4;
     FRHISecondTextureEnv: TTextureEnv;
+    FRHIHasMultiTextureStage: array[2..3] of Boolean;
+    FRHIMultiTextureStageEnv: array[2..3] of TTextureEnv;
+    FRHIMultiTextureStageConstantColor: array[2..3] of TVector4;
     FRHIBaseColorTextureDimension: TRHITextureDimension;
     FRHIClipPlane: TVector4;
     FRHIHasClipPlane: Boolean;
@@ -174,8 +177,11 @@
     FRHIIsPhongMaterial: Boolean;
     FRHIPhongHasSpecularTex: Boolean;
     FRHIPhongHasShininessTex: Boolean;
+    FRHIPhongHasSeparateShininessTex: Boolean;
     FRHIPhongHasAmbientTex: Boolean;
     FRHIPhongAmbientIntensity: Single;
+    FRHIHasAlphaTexture: Boolean;
+    FRHIInvertAlphaTexture: Boolean;
     FRHIHasSeparateDiffuseEnvTex: Boolean;
     FRHIEnvLightColorIntensity: TVector3;
     FRHIVertexEffectCode: String;
@@ -244,6 +250,11 @@
       const AHasSecondTex: Boolean;
       const AEnv: TTextureEnv;
       const AConstantColor: TVector4);
+    procedure SetMultiTextureStageEnv(
+      const AStageIndex: Cardinal;
+      const AHasStageTex: Boolean;
+      const AEnv: TTextureEnv;
+      const AConstantColor: TVector4);
     procedure SetClipPlane(const AHasClipPlane: Boolean; const APlane: TVector4);
     procedure SetClipPlanes(const APlanes: array of TVector4; const ACount: Cardinal);
     procedure SetShadowMapParams(const ASampling: TShadowSampling; const ASize: Cardinal = 128);
@@ -261,6 +272,8 @@
     procedure SetPhongSurfaceParams(
       const AIsPhong, AHasSpecularTex, AHasShininessTex, AHasAmbientTex: Boolean;
       const AAmbientIntensity: Single);
+    procedure SetPhongExtendedSurfaceParams(
+      const AHasSeparateShininessTex, AHasAlphaTex, AInvertAlpha: Boolean);
     procedure SetEnvironmentLightParams(
       const AHasSeparateDiffuse: Boolean;
       const AColorIntensity: TVector3);
@@ -332,8 +345,13 @@
     property RHIIsPhongMaterial: Boolean read FRHIIsPhongMaterial;
     property RHIPhongHasSpecularTex: Boolean read FRHIPhongHasSpecularTex;
     property RHIPhongHasShininessTex: Boolean read FRHIPhongHasShininessTex;
+    property RHIPhongHasSeparateShininessTex: Boolean read FRHIPhongHasSeparateShininessTex;
     property RHIPhongHasAmbientTex: Boolean read FRHIPhongHasAmbientTex;
     property RHIPhongAmbientIntensity: Single read FRHIPhongAmbientIntensity;
+    property RHIHasAlphaTexture: Boolean read FRHIHasAlphaTexture;
+    property RHIInvertAlphaTexture: Boolean read FRHIInvertAlphaTexture;
+    property RHIHasMultiTextureStage2: Boolean read FRHIHasMultiTextureStage[2];
+    property RHIHasMultiTextureStage3: Boolean read FRHIHasMultiTextureStage[3];
     property RHIHasSeparateDiffuseEnvTex: Boolean read FRHIHasSeparateDiffuseEnvTex;
     property RHIEnvLightColorIntensity: TVector3 read FRHIEnvLightColorIntensity;
     property RHIVertexEffectCode: String read FRHIVertexEffectCode;
@@ -836,6 +854,36 @@ begin
   end;
 end;
 
+procedure TShapeCache.SetMultiTextureStageEnv(
+  const AStageIndex: Cardinal;
+  const AHasStageTex: Boolean;
+  const AEnv: TTextureEnv;
+  const AConstantColor: TVector4);
+begin
+  if AStageIndex = 1 then
+  begin
+    SetSecondTextureEnv(AHasStageTex, AEnv, AConstantColor);
+    Exit;
+  end;
+  if not (AStageIndex in [2, 3]) then
+    Exit;
+  if (FRHIHasMultiTextureStage[AStageIndex] <> AHasStageTex) or
+     (AHasStageTex and
+      ((FRHIMultiTextureStageEnv[AStageIndex].Hash <> AEnv.Hash) or
+       (FRHIMultiTextureStageEnv[AStageIndex].Combine[cRGB] <> AEnv.Combine[cRGB]) or
+       (FRHIMultiTextureStageEnv[AStageIndex].Combine[cAlpha] <> AEnv.Combine[cAlpha]) or
+       (FRHIMultiTextureStageEnv[AStageIndex].TextureFunction <> AEnv.TextureFunction) or
+       (not SameValue(FRHIMultiTextureStageEnv[AStageIndex].Scale[cRGB], AEnv.Scale[cRGB], 1e-4)) or
+       (not SameValue(FRHIMultiTextureStageEnv[AStageIndex].Scale[cAlpha], AEnv.Scale[cAlpha], 1e-4)) or
+       (not TVector4.PerfectlyEquals(FRHIMultiTextureStageConstantColor[AStageIndex], AConstantColor)))) then
+  begin
+    FRHIHasMultiTextureStage[AStageIndex] := AHasStageTex;
+    FRHIMultiTextureStageEnv[AStageIndex] := AEnv;
+    FRHIMultiTextureStageConstantColor[AStageIndex] := AConstantColor;
+    FRHIShadersInitialized := False;
+  end;
+end;
+
 procedure TShapeCache.SetClipPlane(const AHasClipPlane: Boolean; const APlane: TVector4);
 begin
   if (FRHIHasClipPlane <> AHasClipPlane) or
@@ -1000,6 +1048,20 @@ begin
   end;
 end;
 
+procedure TShapeCache.SetPhongExtendedSurfaceParams(
+  const AHasSeparateShininessTex, AHasAlphaTex, AInvertAlpha: Boolean);
+begin
+  if (FRHIPhongHasSeparateShininessTex <> AHasSeparateShininessTex) or
+     (FRHIHasAlphaTexture <> AHasAlphaTex) or
+     (FRHIInvertAlphaTexture <> AInvertAlpha) then
+  begin
+    FRHIPhongHasSeparateShininessTex := AHasSeparateShininessTex;
+    FRHIHasAlphaTexture := AHasAlphaTex;
+    FRHIInvertAlphaTexture := AInvertAlpha;
+    FRHIShadersInitialized := False;
+  end;
+end;
+
 procedure TShapeCache.SetEnvironmentLightParams(
   const AHasSeparateDiffuse: Boolean;
   const AColorIntensity: TVector3);
@@ -1064,11 +1126,120 @@ procedure TShapeCache.EnsureRHIShaders(
     end;
   end;
 
+  function BuildMultiTexStageSnippet(
+    const AStageIdx: Integer;
+    const AEnv: TTextureEnv;
+    const ACombineRGB, ACombineAlpha: TCombine;
+    const AConstColor: TVector4;
+    const AUVExpr: String;
+    const ALinearColorSpace: Boolean): String;
+  var
+    StageVar, SamplerName, StageArgRGB, StageArgAlpha, StageBlendExpr: String;
+  begin
+    StageVar := Format('multiTex%d', [AStageIdx]);
+    SamplerName := Format('castle_multi_texture_%d', [AStageIdx]);
+    Result := '  vec4 ' + StageVar + ' = texture(' + SamplerName + ', ' + AUVExpr + ');' + LineEnding;
+    if ALinearColorSpace then
+      Result := Result + '  ' + StageVar + '.rgb = pow(max(' + StageVar + '.rgb, vec3(0.0)), vec3(2.2));' + LineEnding;
+    case AEnv.Source[cRGB] of
+      csCurrentTexture: StageArgRGB := StageVar + '.rgb';
+      csMaterial:       StageArgRGB := 'castle_MaterialBaseColor.rgb';
+      csConstant:       StageArgRGB := FormatDot('vec3(%.4f, %.4f, %.4f)',
+        [AConstColor.X, AConstColor.Y, AConstColor.Z]);
+      else              StageArgRGB := 'baseColor.rgb';
+    end;
+    case AEnv.Source[cAlpha] of
+      csCurrentTexture: StageArgAlpha := StageVar + '.a';
+      csMaterial:       StageArgAlpha := 'castle_MaterialBaseColor.a';
+      csConstant:       StageArgAlpha := FormatDot('%.4f', [AConstColor.W]);
+      else              StageArgAlpha := 'baseColor.a';
+    end;
+    case AEnv.BlendAlphaSource of
+      csCurrentTexture:  StageBlendExpr := StageVar + '.a';
+      csPreviousTexture: StageBlendExpr := 'baseColor.a';
+      csMaterial:        StageBlendExpr := 'castle_MaterialBaseColor.a';
+      else               StageBlendExpr := FormatDot('%.4f', [AConstColor.W]);
+    end;
+    case ACombineRGB of
+      coReplace:
+        if AEnv.SourceArgument[cRGB] = ta0 then
+          Result := Result + '  baseColor.rgb = ' + StageArgRGB + ';' + LineEnding
+        else
+          Result := Result + '  baseColor.rgb = ' + StageVar + '.rgb;' + LineEnding;
+      coAdd:
+        if StageArgRGB = 'baseColor.rgb' then
+          Result := Result + '  baseColor.rgb += ' + StageVar + '.rgb;' + LineEnding
+        else
+          Result := Result + '  baseColor.rgb = ' + StageVar + '.rgb + ' + StageArgRGB + ';' + LineEnding;
+      coAddSigned:
+        if StageArgRGB = 'baseColor.rgb' then
+          Result := Result + '  baseColor.rgb += ' + StageVar + '.rgb - vec3(0.5);' + LineEnding
+        else
+          Result := Result + '  baseColor.rgb = ' + StageVar + '.rgb + ' + StageArgRGB + ' - vec3(0.5);' + LineEnding;
+      coSubtract:
+        Result := Result + '  baseColor.rgb = ' + StageVar + '.rgb - ' + StageArgRGB + ';' + LineEnding;
+      coBlend:
+        Result := Result +
+          '  baseColor.rgb = mix(baseColor.rgb, ' + StageVar + '.rgb, ' + StageBlendExpr + ');' + LineEnding;
+      coDot3Rgb, coDot3Rgba:
+        Result := Result +
+          '  baseColor.rgb = vec3(dot(2.0 * (' + StageVar + '.rgb - vec3(0.5)), 2.0 * (' + StageArgRGB + ' - vec3(0.5))));' + LineEnding;
+      else
+        if StageArgRGB = 'baseColor.rgb' then
+          Result := Result + '  baseColor.rgb *= ' + StageVar + '.rgb;' + LineEnding
+        else
+          Result := Result + '  baseColor.rgb = ' + StageVar + '.rgb * ' + StageArgRGB + ';' + LineEnding;
+    end;
+    case ACombineAlpha of
+      coReplace:
+        if AEnv.SourceArgument[cAlpha] = ta0 then
+          Result := Result + '  baseColor.a = ' + StageArgAlpha + ';'
+        else
+          Result := Result + '  baseColor.a = ' + StageVar + '.a;';
+      coAdd:
+        if StageArgAlpha = 'baseColor.a' then
+          Result := Result + '  baseColor.a += ' + StageVar + '.a;'
+        else
+          Result := Result + '  baseColor.a = ' + StageVar + '.a + ' + StageArgAlpha + ';';
+      coAddSigned:
+        if StageArgAlpha = 'baseColor.a' then
+          Result := Result + '  baseColor.a += ' + StageVar + '.a - 0.5;'
+        else
+          Result := Result + '  baseColor.a = ' + StageVar + '.a + ' + StageArgAlpha + ' - 0.5;';
+      coSubtract:
+        Result := Result + '  baseColor.a = ' + StageVar + '.a - ' + StageArgAlpha + ';';
+      coBlend:
+        Result := Result +
+          '  baseColor.a = mix(baseColor.a, ' + StageVar + '.a, ' + StageBlendExpr + ');';
+      coDot3Rgb, coDot3Rgba:
+        Result := Result +
+          '  baseColor.a = dot(2.0 * (' + StageVar + '.rgb - vec3(0.5)), 2.0 * (' + StageArgRGB + ' - vec3(0.5)));';
+      else
+        if StageArgAlpha = 'baseColor.a' then
+          Result := Result + '  baseColor.a *= ' + StageVar + '.a;'
+        else
+          Result := Result + '  baseColor.a = ' + StageVar + '.a * ' + StageArgAlpha + ';';
+    end;
+    if not SameValue(AEnv.Scale[cRGB], 1.0, 1e-4) then
+      Result := Result + LineEnding + FormatDot(
+        '  baseColor.rgb *= %.4f;', [AEnv.Scale[cRGB]]);
+    if not SameValue(AEnv.Scale[cAlpha], 1.0, 1e-4) then
+      Result := Result + LineEnding + FormatDot(
+        '  baseColor.a *= %.4f;', [AEnv.Scale[cAlpha]]);
+    case AEnv.TextureFunction of
+      tfComplement:
+        Result := Result + LineEnding + '  baseColor.rgb = vec3(1.0) - baseColor.rgb;';
+      tfAlphaReplicate:
+        Result := Result + LineEnding + '  baseColor.rgb = vec3(baseColor.a);';
+      else ;
+    end;
+  end;
+
 var
   Mask: QWord;
   Gen: TCastleShaderGeneratorRHI;
   FogSnippet, TexGenSnippet, TexTransformSnippet, ClipPlaneSnippet, ShadowMapSnippet, ParallaxSnippet, SelfShadowSnippet, PhongSetupSnippet: String;
-  SecondTexSnippet, SecondTexUV, Arg2RGB, Arg2Alpha, BlendAlphaExpr, PlugTexColorCall, CubeCoordExpr, Tex3DCoordExpr, Tex3DMatExpr: String;
+  SecondTexSnippet, SecondTexUV, AlphaTexSnippet, PlugTexColorCall, CubeCoordExpr, Tex3DCoordExpr, Tex3DMatExpr: String;
   UpgradedVertEffect, UpgradedFragEffect, EffectivePointSizeStr, AttribGLSLType, AttribDecl: String;
   HasLinearColorSpace: Boolean;
   EffectiveToneMapping: TToneMapping;
@@ -1164,10 +1335,17 @@ begin
     if FRHIPhongHasSpecularTex then Mask := Mask or (QWord(1) shl 39);
     if FRHIPhongHasShininessTex then Mask := Mask or (QWord(1) shl 40);
     if FRHIPhongHasAmbientTex then Mask := Mask or (QWord(1) shl 41);
+    if FRHIPhongHasSeparateShininessTex then Mask := Mask or (QWord(1) shl 43);
   end;
   if AHasIBL and (FRHIHasSeparateDiffuseEnvTex or
      (not TVector3.Equals(FRHIEnvLightColorIntensity, Vector3(1.0, 1.0, 1.0), 1e-4))) then
     Mask := Mask or (QWord(1) shl 42);
+  if FRHIHasAlphaTexture or FRHIInvertAlphaTexture then
+    Mask := Mask or (QWord(1) shl 44);
+  if AHasBaseColorTex and FRHIHasMultiTextureStage[2] then
+    Mask := Mask or (QWord(1) shl 45);
+  if AHasBaseColorTex and FRHIHasMultiTextureStage[3] then
+    Mask := Mask or (QWord(1) shl 46);
 
   if FRHIShadersInitialized and (FRHIShaderPermutationMask = Mask) and
      (FRHIVertexShader <> nil) and (FRHIFragmentShader <> nil) then
@@ -1679,6 +1857,13 @@ begin
         []);
     if FRHIIsPhongMaterial then
     begin
+      if FRHIPhongHasSeparateShininessTex then
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          'void main() {',
+          'CASTLE_SAMPLER(2, 4) uniform sampler2D castle_shininess_texture;' + LineEnding +
+          'void main() {',
+          []);
       PhongSetupSnippet := FormatDot(
         '  vec3 castle_specular_color = castle_MaterialSpecular;' + LineEnding +
         '  float castle_shininess_exp = max(castle_MaterialShininess, 1.0);' + LineEnding +
@@ -1687,7 +1872,10 @@ begin
       if AHasMetallicRoughnessTex and FRHIPhongHasSpecularTex then
         PhongSetupSnippet := PhongSetupSnippet + LineEnding +
           '  castle_specular_color *= mrSample.rgb;';
-      if AHasMetallicRoughnessTex and FRHIPhongHasShininessTex then
+      if FRHIPhongHasSeparateShininessTex then
+        PhongSetupSnippet := PhongSetupSnippet + LineEnding +
+          '  castle_shininess_exp = max(castle_shininess_exp * texture(castle_shininess_texture, castle_tex_coord0).a, 1.0);'
+      else if AHasMetallicRoughnessTex and FRHIPhongHasShininessTex then
         PhongSetupSnippet := PhongSetupSnippet + LineEnding +
           '  castle_shininess_exp = max(castle_shininess_exp * mrSample.a, 1.0);';
       if AHasOcclusionTex and FRHIPhongHasAmbientTex then
@@ -2098,100 +2286,36 @@ begin
         SecondTexUV := 'castle_tex_coord1'
       else
         SecondTexUV := 'castle_tex_coord0';
-      SecondTexSnippet := '  vec4 multiTex1 = texture(castle_multi_texture_1, ' + SecondTexUV + ');' + LineEnding;
-      if HasLinearColorSpace then
-        SecondTexSnippet := SecondTexSnippet + '  multiTex1.rgb = pow(max(multiTex1.rgb, vec3(0.0)), vec3(2.2));' + LineEnding;
-      case FRHISecondTextureEnv.Source[cRGB] of
-        csCurrentTexture:  Arg2RGB := 'multiTex1.rgb';
-        csMaterial:        Arg2RGB := 'castle_MaterialBaseColor.rgb';
-        csConstant:        Arg2RGB := FormatDot('vec3(%.4f, %.4f, %.4f)',
-          [FRHISecondTextureConstantColor.X, FRHISecondTextureConstantColor.Y, FRHISecondTextureConstantColor.Z]);
-        else               Arg2RGB := 'baseColor.rgb';
+      SecondTexSnippet := BuildMultiTexStageSnippet(
+        1, FRHISecondTextureEnv, FRHISecondTextureCombineRGB, FRHISecondTextureCombineAlpha,
+        FRHISecondTextureConstantColor, SecondTexUV, HasLinearColorSpace);
+      if FRHIHasMultiTextureStage[2] then
+      begin
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          'void main() {',
+          'CASTLE_DESCRIPTOR_SET(2, 3) uniform sampler2D castle_multi_texture_2;' + LineEnding +
+          'void main() {',
+          []);
+        SecondTexSnippet := SecondTexSnippet + LineEnding +
+          BuildMultiTexStageSnippet(
+            2, FRHIMultiTextureStageEnv[2],
+            FRHIMultiTextureStageEnv[2].Combine[cRGB], FRHIMultiTextureStageEnv[2].Combine[cAlpha],
+            FRHIMultiTextureStageConstantColor[2], 'castle_tex_coord0', HasLinearColorSpace);
       end;
-      case FRHISecondTextureEnv.Source[cAlpha] of
-        csCurrentTexture:  Arg2Alpha := 'multiTex1.a';
-        csMaterial:        Arg2Alpha := 'castle_MaterialBaseColor.a';
-        csConstant:        Arg2Alpha := FormatDot('%.4f', [FRHISecondTextureConstantColor.W]);
-        else               Arg2Alpha := 'baseColor.a';
-      end;
-      case FRHISecondTextureEnv.BlendAlphaSource of
-        csCurrentTexture:  BlendAlphaExpr := 'multiTex1.a';
-        csPreviousTexture: BlendAlphaExpr := 'baseColor.a';
-        csMaterial:        BlendAlphaExpr := 'castle_MaterialBaseColor.a';
-        else               BlendAlphaExpr := FormatDot('%.4f', [FRHISecondTextureConstantColor.W]);
-      end;
-      case FRHISecondTextureCombineRGB of
-        coReplace:
-          if FRHISecondTextureEnv.SourceArgument[cRGB] = ta0 then
-            SecondTexSnippet := SecondTexSnippet + '  baseColor.rgb = ' + Arg2RGB + ';' + LineEnding
-          else
-            SecondTexSnippet := SecondTexSnippet + '  baseColor.rgb = multiTex1.rgb;' + LineEnding;
-        coAdd:
-          if Arg2RGB = 'baseColor.rgb' then
-            SecondTexSnippet := SecondTexSnippet + '  baseColor.rgb += multiTex1.rgb;' + LineEnding
-          else
-            SecondTexSnippet := SecondTexSnippet + '  baseColor.rgb = multiTex1.rgb + ' + Arg2RGB + ';' + LineEnding;
-        coAddSigned:
-          if Arg2RGB = 'baseColor.rgb' then
-            SecondTexSnippet := SecondTexSnippet + '  baseColor.rgb += multiTex1.rgb - vec3(0.5);' + LineEnding
-          else
-            SecondTexSnippet := SecondTexSnippet + '  baseColor.rgb = multiTex1.rgb + ' + Arg2RGB + ' - vec3(0.5);' + LineEnding;
-        coSubtract:
-          SecondTexSnippet := SecondTexSnippet + '  baseColor.rgb = multiTex1.rgb - ' + Arg2RGB + ';' + LineEnding;
-        coBlend:
-          SecondTexSnippet := SecondTexSnippet +
-            '  baseColor.rgb = mix(baseColor.rgb, multiTex1.rgb, ' + BlendAlphaExpr + ');' + LineEnding;
-        coDot3Rgb, coDot3Rgba:
-          SecondTexSnippet := SecondTexSnippet +
-            '  baseColor.rgb = vec3(dot(2.0 * (multiTex1.rgb - vec3(0.5)), 2.0 * (' + Arg2RGB + ' - vec3(0.5))));' + LineEnding;
-        else
-          if Arg2RGB = 'baseColor.rgb' then
-            SecondTexSnippet := SecondTexSnippet + '  baseColor.rgb *= multiTex1.rgb;' + LineEnding
-          else
-            SecondTexSnippet := SecondTexSnippet + '  baseColor.rgb = multiTex1.rgb * ' + Arg2RGB + ';' + LineEnding;
-      end;
-      case FRHISecondTextureCombineAlpha of
-        coReplace:
-          if FRHISecondTextureEnv.SourceArgument[cAlpha] = ta0 then
-            SecondTexSnippet := SecondTexSnippet + '  baseColor.a = ' + Arg2Alpha + ';'
-          else
-            SecondTexSnippet := SecondTexSnippet + '  baseColor.a = multiTex1.a;';
-        coAdd:
-          if Arg2Alpha = 'baseColor.a' then
-            SecondTexSnippet := SecondTexSnippet + '  baseColor.a += multiTex1.a;'
-          else
-            SecondTexSnippet := SecondTexSnippet + '  baseColor.a = multiTex1.a + ' + Arg2Alpha + ';';
-        coAddSigned:
-          if Arg2Alpha = 'baseColor.a' then
-            SecondTexSnippet := SecondTexSnippet + '  baseColor.a += multiTex1.a - 0.5;'
-          else
-            SecondTexSnippet := SecondTexSnippet + '  baseColor.a = multiTex1.a + ' + Arg2Alpha + ' - 0.5;';
-        coSubtract:
-          SecondTexSnippet := SecondTexSnippet + '  baseColor.a = multiTex1.a - ' + Arg2Alpha + ';';
-        coBlend:
-          SecondTexSnippet := SecondTexSnippet +
-            '  baseColor.a = mix(baseColor.a, multiTex1.a, ' + BlendAlphaExpr + ');';
-        coDot3Rgb, coDot3Rgba:
-          SecondTexSnippet := SecondTexSnippet +
-            '  baseColor.a = dot(2.0 * (multiTex1.rgb - vec3(0.5)), 2.0 * (' + Arg2RGB + ' - vec3(0.5)));';
-        else
-          if Arg2Alpha = 'baseColor.a' then
-            SecondTexSnippet := SecondTexSnippet + '  baseColor.a *= multiTex1.a;'
-          else
-            SecondTexSnippet := SecondTexSnippet + '  baseColor.a = multiTex1.a * ' + Arg2Alpha + ';';
-      end;
-      if not SameValue(FRHISecondTextureEnv.Scale[cRGB], 1.0, 1e-4) then
-        SecondTexSnippet := SecondTexSnippet + LineEnding + FormatDot(
-          '  baseColor.rgb *= %.4f;', [FRHISecondTextureEnv.Scale[cRGB]]);
-      if not SameValue(FRHISecondTextureEnv.Scale[cAlpha], 1.0, 1e-4) then
-        SecondTexSnippet := SecondTexSnippet + LineEnding + FormatDot(
-          '  baseColor.a *= %.4f;', [FRHISecondTextureEnv.Scale[cAlpha]]);
-      case FRHISecondTextureEnv.TextureFunction of
-        tfComplement:
-          SecondTexSnippet := SecondTexSnippet + LineEnding + '  baseColor.rgb = vec3(1.0) - baseColor.rgb;';
-        tfAlphaReplicate:
-          SecondTexSnippet := SecondTexSnippet + LineEnding + '  baseColor.rgb = vec3(baseColor.a);';
-        else ;
+      if FRHIHasMultiTextureStage[3] then
+      begin
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          'void main() {',
+          'CASTLE_DESCRIPTOR_SET(2, 4) uniform sampler2D castle_multi_texture_3;' + LineEnding +
+          'void main() {',
+          []);
+        SecondTexSnippet := SecondTexSnippet + LineEnding +
+          BuildMultiTexStageSnippet(
+            3, FRHIMultiTextureStageEnv[3],
+            FRHIMultiTextureStageEnv[3].Combine[cRGB], FRHIMultiTextureStageEnv[3].Combine[cAlpha],
+            FRHIMultiTextureStageConstantColor[3], 'castle_tex_coord0', HasLinearColorSpace);
       end;
       if Pos('  baseColor *= texture(castle_base_color_texture, castle_tex_coord1);', FRHIFragmentShaderSource) > 0 then
         FRHIFragmentShaderSource := StringReplace(
@@ -2204,6 +2328,35 @@ begin
           FRHIFragmentShaderSource,
           '  baseColor *= texture(castle_base_color_texture, castle_tex_coord0);',
           '  baseColor *= texture(castle_base_color_texture, castle_tex_coord0);' + LineEnding + SecondTexSnippet,
+          []);
+    end;
+    if FRHIHasAlphaTexture or FRHIInvertAlphaTexture then
+    begin
+      if FRHIHasAlphaTexture then
+      begin
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          'void main() {',
+          'CASTLE_SAMPLER(2, 3) uniform sampler2D castle_alpha_texture;' + LineEnding +
+          'void main() {',
+          []);
+        if FRHIInvertAlphaTexture then
+          AlphaTexSnippet := '  baseColor.a *= (1.0 - texture(castle_alpha_texture, castle_tex_coord0).a);'
+        else
+          AlphaTexSnippet := '  baseColor.a *= texture(castle_alpha_texture, castle_tex_coord0).a;';
+      end else
+        AlphaTexSnippet := '  baseColor.a = castle_MaterialBaseColor.a * (1.0 - clamp(baseColor.a / max(castle_MaterialBaseColor.a, 1e-5), 0.0, 1.0));';
+      if AUseAlphaTest then
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          '  if (baseColor.a < castle_AlphaCutoff) discard;',
+          AlphaTexSnippet + LineEnding + '  if (baseColor.a < castle_AlphaCutoff) discard;',
+          [])
+      else
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          '  /* Unlit Material Early Out (SpecularColor.a < 0.0) */',
+          AlphaTexSnippet + LineEnding + '  /* Unlit Material Early Out (SpecularColor.a < 0.0) */',
           []);
     end;
     if (TexCoord0Dim in [3, 4]) and (not AHasTexCoordGen) and (FRHITexCoordGen = tgExplicit) then
