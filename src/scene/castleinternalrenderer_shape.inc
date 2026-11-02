@@ -97,6 +97,20 @@
       TMultiTextureTransformNode). Returns True if a non-identity texture transform is active. }
     function ExtractRHITextureTransform(out AMatrix: TMatrix4): Boolean;
 
+    { Extracts the secondary 4x4 texture coordinate transformation matrix for castle_tex_coord1
+      from TMultiTextureTransformNode.FdTextureTransform[1]. Returns True if a non-identity
+      secondary texture transform is active. }
+    function ExtractRHITextureTransform1(out AMatrix: TMatrix4): Boolean;
+
+    { Extracts a secondary texture (from TMultiTextureNode.FdTexture[1] or Appearance.Texture
+      on a textured TTextNode where FontTextureNode occupies slot 0) along with its X3D
+      combine modes and constant color. }
+    function ExtractRHISecondTexture(
+      out ASecondTex: TRHITexture;
+      out ASecondSampler: TRHISampler;
+      out ACombineRGB, ACombineAlpha: TCombine;
+      out AConstantColor: TVector4): Boolean;
+
     { Extracts the first enabled X3D TClipPlaneNode from State.ClipPlanes transformed
       into scene/world space via PlaneTransform(ClipPlane.Node.FdPlane.Value, ClipPlane.Transform). }
     function ExtractRHIClipPlane(out ASceneClipPlane: TVector4): Boolean;
@@ -401,6 +415,12 @@ begin
             App := State.Appearance;
           if App <> nil then
           begin
+            if App.Texture is TMultiTextureNode then
+            begin
+              EffectiveTexCoordsNeeded := Max(EffectiveTexCoordsNeeded,
+                Cardinal(TMultiTextureNode(App.Texture).FdTexture.Count));
+              Generator.TexCoordsNeeded := EffectiveTexCoordsNeeded;
+            end;
             if App.InternalCommonSurfaceShader <> nil then
               HasNormalMap := App.InternalCommonSurfaceShader.NormalTexture <> nil
             else if (App.Material is TAbstractOneSidedMaterialNode) and
@@ -747,8 +767,7 @@ begin
     end;
   end;
 
-  if (ABaseColorTex = nil) and (OriginalGeometry <> nil) and
-     (OriginalGeometry.FontTextureNode <> nil) then
+  if (OriginalGeometry <> nil) and (OriginalGeometry.FontTextureNode <> nil) then
     ABaseColorTex := ResolveNodeRHITexture(OriginalGeometry.FontTextureNode, ABaseColorSampler);
 
   if ABaseColorTex <> nil then Inc(Result);
@@ -793,6 +812,173 @@ begin
   begin
     AMatrix := TAbstractSingleTextureTransformNode(TexTransform).TransformMatrix;
     Result := not TMatrix4.PerfectlyEquals(AMatrix, TMatrix4.Identity);
+  end;
+end;
+
+function TX3DRendererShape.ExtractRHITextureTransform1(out AMatrix: TMatrix4): Boolean;
+var
+  ShapeState: TX3DGraphTraverseState;
+  App: TAppearanceNode;
+  MultiTransform: TMultiTextureTransformNode;
+  SecondTransform: TAbstractSingleTextureTransformNode;
+begin
+  Result := False;
+  AMatrix := TMatrix4.Identity;
+
+  ShapeState := OriginalState;
+  if ShapeState = nil then
+    ShapeState := State;
+  if (ShapeState = nil) or (ShapeState.ShapeNode = nil) then
+    Exit;
+
+  App := ShapeState.ShapeNode.Appearance;
+  if (App = nil) or not (App.TextureTransform is TMultiTextureTransformNode) then
+    Exit;
+
+  MultiTransform := TMultiTextureTransformNode(App.TextureTransform);
+  if (MultiTransform.FdTextureTransform.Count > 1) and
+     (MultiTransform.FdTextureTransform[1] is TAbstractSingleTextureTransformNode) then
+  begin
+    SecondTransform := TAbstractSingleTextureTransformNode(MultiTransform.FdTextureTransform[1]);
+    AMatrix := SecondTransform.TransformMatrix;
+    Result := not TMatrix4.PerfectlyEquals(AMatrix, TMatrix4.Identity);
+  end;
+end;
+
+function TX3DRendererShape.ExtractRHISecondTexture(
+  out ASecondTex: TRHITexture;
+  out ASecondSampler: TRHISampler;
+  out ACombineRGB, ACombineAlpha: TCombine;
+  out AConstantColor: TVector4): Boolean;
+
+  function ResolveSingleRHITexture(const ARawNode: TX3DNode;
+    out ASampler: TRHISampler): TRHITexture;
+  var
+    ANode: TAbstractTextureNode;
+    Res: TTextureResource;
+    TempRenderOptions: TCastleRenderOptions;
+  begin
+    Result := nil;
+    ASampler := nil;
+    if (ARawNode = nil) or not (ARawNode is TAbstractTextureNode) or
+       (ARawNode is TMultiTextureNode) then
+      Exit;
+    ANode := TAbstractTextureNode(ARawNode);
+    Res := TTextureResources.Get(ANode);
+    if (Res = nil) and (RHIDevice <> nil) then
+    begin
+      if (Cache <> nil) and (Cache.RenderOptions <> nil) then
+        TTextureResources.Prepare(Cache.RenderOptions, ANode)
+      else
+      begin
+        TempRenderOptions := TCastleRenderOptions.Create(nil);
+        try
+          TTextureResources.Prepare(TempRenderOptions, ANode);
+        finally
+          FreeAndNil(TempRenderOptions);
+        end;
+      end;
+      Res := TTextureResources.Get(ANode);
+    end;
+    if Res <> nil then
+      ASampler := Res.RHISampler;
+    if Res is TImageTextureResource then
+      Result := TImageTextureResource(Res).RHITexture
+    else if Res is TMovieTextureResource then
+      Result := TMovieTextureResource(Res).RHITexture
+    else if Res is TRenderedTextureResource then
+      Result := TRenderedTextureResource(Res).RHITexture
+    else if Res is TCubeMapTextureResource then
+      Result := TCubeMapTextureResource(Res).RHITexture
+    else if Res is T3DTextureResource then
+      Result := T3DTextureResource(Res).RHITexture
+    else if Res is TGeneratedShadowMapResource then
+      Result := TGeneratedShadowMapResource(Res).RHITexture;
+  end;
+
+var
+  ShapeState: TX3DGraphTraverseState;
+  App: TAppearanceNode;
+  TexNode: TX3DNode;
+  MultiTex: TMultiTextureNode;
+  Env: TTextureEnv;
+  ModeStr, SourceStr, FunctionStr: String;
+begin
+  ASecondTex := nil;
+  ASecondSampler := nil;
+  ACombineRGB := coModulate;
+  ACombineAlpha := coModulate;
+  AConstantColor := Vector4(1, 1, 1, 1);
+  Result := False;
+
+  if (Cache <> nil) and (Cache.RenderOptions <> nil) and
+     ((Cache.RenderOptions.Mode = rmSolidColor) or (not Cache.RenderOptions.Textures)) then
+    Exit;
+
+  ShapeState := OriginalState;
+  if ShapeState = nil then
+    ShapeState := State;
+  if (ShapeState = nil) or (ShapeState.ShapeNode = nil) then
+    Exit;
+
+  App := ShapeState.ShapeNode.Appearance;
+  if App = nil then
+    Exit;
+
+  TexNode := App.Texture;
+  if TexNode = nil then
+  begin
+    if App.Material is TPhysicalMaterialNode then
+      TexNode := TPhysicalMaterialNode(App.Material).FdBaseTexture.Value
+    else if App.Material is TMaterialNode then
+      TexNode := TMaterialNode(App.Material).DiffuseTexture
+    else if App.Material is TUnlitMaterialNode then
+      TexNode := TUnlitMaterialNode(App.Material).EmissiveTexture;
+  end;
+
+  if (OriginalGeometry <> nil) and (OriginalGeometry.FontTextureNode <> nil) and
+     (TexNode <> nil) and (TexNode <> OriginalGeometry.FontTextureNode) then
+  begin
+    if TexNode is TMultiTextureNode then
+    begin
+      MultiTex := TMultiTextureNode(TexNode);
+      if MultiTex.FdTexture.Count > 0 then
+        ASecondTex := ResolveSingleRHITexture(MultiTex.FdTexture[0], ASecondSampler);
+    end else
+      ASecondTex := ResolveSingleRHITexture(TexNode, ASecondSampler);
+    Result := ASecondTex <> nil;
+    Exit;
+  end;
+
+  if TexNode is TMultiTextureNode then
+  begin
+    MultiTex := TMultiTextureNode(TexNode);
+    AConstantColor := Vector4(MultiTex.Color, MultiTex.Alpha);
+    if MultiTex.FdTexture.Count > 1 then
+    begin
+      if MultiTex.FdMode.Count > 1 then
+        ModeStr := MultiTex.FdMode.Items[1]
+      else if MultiTex.FdMode.Count > 0 then
+        ModeStr := MultiTex.FdMode.Items[0]
+      else
+        ModeStr := '';
+      if MultiTex.FdSource.Count > 1 then
+        SourceStr := MultiTex.FdSource.Items[1]
+      else
+        SourceStr := '';
+      if MultiTex.FdFunction.Count > 1 then
+        FunctionStr := MultiTex.FdFunction.Items[1]
+      else
+        FunctionStr := '';
+      Env.Init(ModeStr, SourceStr, FunctionStr);
+      if not Env.Disabled then
+      begin
+        ACombineRGB := Env.Combine[cRGB];
+        ACombineAlpha := Env.Combine[cAlpha];
+        ASecondTex := ResolveSingleRHITexture(MultiTex.FdTexture[1], ASecondSampler);
+        Result := ASecondTex <> nil;
+      end;
+    end;
   end;
 end;
 
@@ -1577,16 +1763,18 @@ var
   MatBlock: TCastleMaterialUniformBlock;
   BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex: TRHITexture;
   BaseColorSampler, NormalSampler, MetallicRoughnessSampler, EmissiveSampler, OcclusionSampler: TRHISampler;
-  EnvCubemapTex, ShadowMapTex: TRHITexture;
-  EnvCubemapSampler, ShadowMapSampler: TRHISampler;
-  TexTransformMatrix: TMatrix4;
+  EnvCubemapTex, ShadowMapTex, SecondTex: TRHITexture;
+  EnvCubemapSampler, ShadowMapSampler, SecondSampler: TRHISampler;
+  TexTransformMatrix, TexTransform1Matrix: TMatrix4;
+  SecondConstColor: TVector4;
+  SecondCombineRGB, SecondCombineAlpha: TCombine;
   ClipPlanes: array[0..3] of TVector4;
   ClipPlaneCount: Cardinal;
   TexGenBoundsS, TexGenBoundsT: TVector4;
   TexCoordGen: TTextureCoordinateGeneration;
   PointSize, ParallaxHeight: Single;
   VertEffectCode, FragEffectCode, ComposedVertCode, ComposedFragCode: String;
-  HasTexTransform, HasClipPlane, HasIBL, HasShadowMap, HasTexCoordGen, HasPointSize,
+  HasTexTransform, HasTexTransform1, HasSecondTex, HasClipPlane, HasIBL, HasShadowMap, HasTexCoordGen, HasPointSize,
     HasParallax, SteepParallax, HasShaderEffects, HasComposedShader: Boolean;
   BaseColorMapIdx, NormalMapIdx, MetallicRoughnessMapIdx, EmissiveMapIdx, OcclusionMapIdx: Cardinal;
   BaseColorIdx, NormalIdx, MetallicRoughnessIdx, EmissiveIdx: Cardinal;
@@ -1603,6 +1791,9 @@ begin
     ExtractRHITextureCoordMappings(
       BaseColorMapIdx, NormalMapIdx, MetallicRoughnessMapIdx, EmissiveMapIdx, OcclusionMapIdx);
     HasTexTransform := ExtractRHITextureTransform(TexTransformMatrix);
+    HasTexTransform1 := ExtractRHITextureTransform1(TexTransform1Matrix);
+    HasSecondTex := ExtractRHISecondTexture(
+      SecondTex, SecondSampler, SecondCombineRGB, SecondCombineAlpha, SecondConstColor);
     ClipPlaneCount := ExtractRHIClipPlanes(ClipPlanes);
     HasClipPlane := ClipPlaneCount > 0;
     HasIBL := ExtractRHIEnvironmentLightTexture(EnvCubemapTex, EnvCubemapSampler);
@@ -1617,13 +1808,16 @@ begin
       Cache.SetTextureCoordMappings(
         BaseColorMapIdx, NormalMapIdx, MetallicRoughnessMapIdx, EmissiveMapIdx, OcclusionMapIdx);
       Cache.SetTextureTransform(HasTexTransform, TexTransformMatrix);
+      Cache.SetTextureTransform1(HasTexTransform1, TexTransform1Matrix);
+      Cache.SetSecondTexture(HasSecondTex, SecondCombineRGB, SecondCombineAlpha, SecondConstColor);
       Cache.SetClipPlanes(ClipPlanes, ClipPlaneCount);
       Cache.SetTexCoordGen(TexCoordGen, TexGenBoundsS, TexGenBoundsT);
       Cache.SetPointSize(PointSize);
       Cache.SetParallaxBumpMapping(HasParallax, SteepParallax, ParallaxHeight);
       Cache.SetShaderEffects(VertEffectCode, FragEffectCode);
       Cache.SetComposedShader(ComposedVertCode, ComposedFragCode);
-      ExtractRHIUserEffectUniforms;
+      if (ExtractRHIUserEffectUniforms = 0) and HasSecondTex and (SecondTex <> nil) then
+        Cache.BindUserEffectTexture(0, SecondTex, SecondSampler);
       Cache.BindMaterialTexturesToDescriptorSet(
         BaseColorTex, NormalTex, MetallicRoughnessTex, EmissiveTex, OcclusionTex,
         BaseColorSampler, NormalSampler, MetallicRoughnessSampler, EmissiveSampler, OcclusionSampler);

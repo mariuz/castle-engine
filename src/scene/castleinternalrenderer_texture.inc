@@ -391,6 +391,7 @@
   TGeneratedCubeMapTextureResource = class(TCubeMapTextureResource)
   private
     RenderToTexture: TGLRenderToTexture;
+    FRHIDepthTexture: TRHITexture;
     FRHIFacesRenderedCount: Cardinal;
     FRHIUpdateCount: Cardinal;
   protected
@@ -414,6 +415,7 @@
       const ProjectionNear, ProjectionFar: Single;
       const CubeMiddle: TVector3);
 
+    property RHIDepthTexture: TRHITexture read FRHIDepthTexture;
     property RHIRenderToTexture: TGLRenderToTexture read RenderToTexture;
     property RHIFacesRenderedCount: Cardinal read FRHIFacesRenderedCount;
     property RHIUpdateCount: Cardinal read FRHIUpdateCount;
@@ -454,7 +456,9 @@
     FGLName: TGLTexture;
     WarninigDoneCannotEnable: Boolean;
     FRHITexture: TRHITexture;
+    FRHIDepthTexture: TRHITexture;
     FRHIUpdateCount: Cardinal;
+    function GetRHIDepthTexture: TRHITexture;
   protected
     class function IsClassForTextureNode(ANode: TAbstractTextureNode): boolean; override;
     procedure PrepareCore(
@@ -482,6 +486,7 @@
     class function ClassVarianceShadowMaps(RenderOptions: TCastleRenderOptions): boolean;
 
     property RHITexture: TRHITexture read FRHITexture;
+    property RHIDepthTexture: TRHITexture read GetRHIDepthTexture;
     property RHISampler: TRHISampler read FRHISampler;
     property RHIRenderToTexture: TGLRenderToTexture read RenderToTexture;
     property RHIUpdateCount: Cardinal read FRHIUpdateCount;
@@ -2347,8 +2352,13 @@ begin
     TexDesc.DebugName := 'GeneratedCubeMapTexture';
     FRHITexture := RHIDevice.CreateTexture(TexDesc);
 
+    TexDesc := TRHITextureDesc.Create2D(Size, Size, pfD24_UNorm_S8_UInt,
+      [tuDepthStencil, tuSampled, tuTransferSrc], 1, 1);
+    TexDesc.DebugName := 'GeneratedCubeMapTexture.Depth';
+    FRHIDepthTexture := RHIDevice.CreateTexture(TexDesc);
+
     RenderToTexture := TGLRenderToTexture.Create(Size, Size);
-    RenderToTexture.SetRHITexture(FRHITexture, nil);
+    RenderToTexture.SetRHITexture(FRHITexture, FRHIDepthTexture);
     RenderToTexture.Buffer := tbColor;
     RenderToTexture.GLContextOpen;
     CreateRHISampler(Filter, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, Anisotropy, MipLevels);
@@ -2443,6 +2453,7 @@ end;
 procedure TGeneratedCubeMapTextureResource.UnprepareCore;
 begin
   FreeAndNil(RenderToTexture);
+  FreeAndNil(FRHIDepthTexture);
   inherited;
 end;
 
@@ -2650,13 +2661,20 @@ begin
       TexDesc := TRHITextureDesc.Create2D(Size, Size, pfRGBA32_Float,
         [tuColorAttachment, tuSampled, tuTransferSrc, tuTransferDst], MipLevels, 1);
       TexDesc.DebugName := 'GeneratedShadowMap.VSM';
+      FRHITexture := RHIDevice.CreateTexture(TexDesc);
+
+      TexDesc := TRHITextureDesc.Create2D(Size, Size, pfD24_UNorm_S8_UInt,
+        [tuDepthStencil, tuSampled, tuTransferSrc], 1, 1);
+      TexDesc.DebugName := 'GeneratedShadowMap.VSMDepth';
+      FRHIDepthTexture := RHIDevice.CreateTexture(TexDesc);
     end else
     begin
       TexDesc := TRHITextureDesc.Create2D(Size, Size, pfD32_Float,
         [tuDepthStencil, tuSampled, tuTransferSrc], 1, 1);
       TexDesc.DebugName := 'GeneratedShadowMap.Depth';
+      FRHITexture := RHIDevice.CreateTexture(TexDesc);
+      FRHIDepthTexture := nil;
     end;
-    FRHITexture := RHIDevice.CreateTexture(TexDesc);
 
     FillChar(SamplerDesc, SizeOf(SamplerDesc), 0);
     SamplerDesc.MinFilter := sfLinear;
@@ -2679,7 +2697,7 @@ begin
     if VarianceShadowMaps then
     begin
       RenderToTexture.Buffer := tbColor;
-      RenderToTexture.SetRHITexture(FRHITexture, nil);
+      RenderToTexture.SetRHITexture(FRHITexture, FRHIDepthTexture);
     end else
     begin
       RenderToTexture.Buffer := tbDepth;
@@ -2756,10 +2774,19 @@ begin
   RenderToTexture.GLContextOpen;
 end;
 
+function TGeneratedShadowMapResource.GetRHIDepthTexture: TRHITexture;
+begin
+  if FRHIDepthTexture <> nil then
+    Result := FRHIDepthTexture
+  else
+    Result := FRHITexture;
+end;
+
 procedure TGeneratedShadowMapResource.UnprepareCore;
 begin
   FreeAndNil(RenderToTexture);
   FreeAndNil(FRHISampler);
+  FreeAndNil(FRHIDepthTexture);
   FreeAndNil(FRHITexture);
 
   if FGLName <> GLObjectNone then

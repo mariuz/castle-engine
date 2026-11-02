@@ -141,6 +141,12 @@
     FRHIDefaultBrdfLutTexture: TRHITexture;
     FRHITextureTransform: TMatrix4;
     FRHIHasTextureTransform: Boolean;
+    FRHITextureTransform1: TMatrix4;
+    FRHIHasTextureTransform1: Boolean;
+    FRHIHasSecondTexture: Boolean;
+    FRHISecondTextureCombineRGB: TCombine;
+    FRHISecondTextureCombineAlpha: TCombine;
+    FRHISecondTextureConstantColor: TVector4;
     FRHIClipPlane: TVector4;
     FRHIHasClipPlane: Boolean;
     FRHIClipPlanes: array[0..3] of TVector4;
@@ -214,6 +220,15 @@
       const ABrdfLutTex: TRHITexture = nil;
       const ABrdfLutSampler: TRHISampler = nil);
     procedure SetTextureTransform(const AHasTransform: Boolean; const AMatrix: TMatrix4);
+    procedure SetTextureTransform1(const AHasTransform: Boolean; const AMatrix: TMatrix4);
+    procedure SetSecondTexture(
+      const AHasSecondTex: Boolean;
+      const ACombineRGB: TCombine = coModulate;
+      const ACombineAlpha: TCombine = coModulate); overload;
+    procedure SetSecondTexture(
+      const AHasSecondTex: Boolean;
+      const ACombineRGB, ACombineAlpha: TCombine;
+      const AConstantColor: TVector4); overload;
     procedure SetClipPlane(const AHasClipPlane: Boolean; const APlane: TVector4);
     procedure SetClipPlanes(const APlanes: array of TVector4; const ACount: Cardinal);
     procedure SetShadowMapParams(const ASampling: TShadowSampling; const ASize: Cardinal = 128);
@@ -261,6 +276,12 @@
     property RHIBrdfLutSampler: TRHISampler read FRHIBrdfLutSampler;
     property RHITextureTransform: TMatrix4 read FRHITextureTransform;
     property RHIHasTextureTransform: Boolean read FRHIHasTextureTransform;
+    property RHITextureTransform1: TMatrix4 read FRHITextureTransform1;
+    property RHIHasTextureTransform1: Boolean read FRHIHasTextureTransform1;
+    property RHIHasSecondTexture: Boolean read FRHIHasSecondTexture;
+    property RHISecondTextureCombineRGB: TCombine read FRHISecondTextureCombineRGB;
+    property RHISecondTextureCombineAlpha: TCombine read FRHISecondTextureCombineAlpha;
+    property RHISecondTextureConstantColor: TVector4 read FRHISecondTextureConstantColor;
     property RHIClipPlane: TVector4 read FRHIClipPlane;
     property RHIHasClipPlane: Boolean read FRHIHasClipPlane;
     property RHIClipPlaneCount: Cardinal read FRHIClipPlaneCount;
@@ -710,6 +731,44 @@ begin
   end;
 end;
 
+procedure TShapeCache.SetTextureTransform1(const AHasTransform: Boolean; const AMatrix: TMatrix4);
+begin
+  if (FRHIHasTextureTransform1 <> AHasTransform) or
+     (AHasTransform and not TMatrix4.PerfectlyEquals(FRHITextureTransform1, AMatrix)) then
+  begin
+    FRHIHasTextureTransform1 := AHasTransform;
+    FRHITextureTransform1 := AMatrix;
+    FRHIShadersInitialized := False;
+  end;
+end;
+
+procedure TShapeCache.SetSecondTexture(
+  const AHasSecondTex: Boolean;
+  const ACombineRGB: TCombine;
+  const ACombineAlpha: TCombine);
+begin
+  SetSecondTexture(AHasSecondTex, ACombineRGB, ACombineAlpha, Vector4(1, 1, 1, 1));
+end;
+
+procedure TShapeCache.SetSecondTexture(
+  const AHasSecondTex: Boolean;
+  const ACombineRGB, ACombineAlpha: TCombine;
+  const AConstantColor: TVector4);
+begin
+  if (FRHIHasSecondTexture <> AHasSecondTex) or
+     (AHasSecondTex and
+      ((FRHISecondTextureCombineRGB <> ACombineRGB) or
+       (FRHISecondTextureCombineAlpha <> ACombineAlpha) or
+       (not TVector4.PerfectlyEquals(FRHISecondTextureConstantColor, AConstantColor)))) then
+  begin
+    FRHIHasSecondTexture := AHasSecondTex;
+    FRHISecondTextureCombineRGB := ACombineRGB;
+    FRHISecondTextureCombineAlpha := ACombineAlpha;
+    FRHISecondTextureConstantColor := AConstantColor;
+    FRHIShadersInitialized := False;
+  end;
+end;
+
 procedure TShapeCache.SetClipPlane(const AHasClipPlane: Boolean; const APlane: TVector4);
 begin
   if (FRHIHasClipPlane <> AHasClipPlane) or
@@ -878,6 +937,7 @@ var
   Mask: Cardinal;
   Gen: TCastleShaderGeneratorRHI;
   FogSnippet, TexGenSnippet, TexTransformSnippet, ClipPlaneSnippet, ShadowMapSnippet, ParallaxSnippet: String;
+  SecondTexSnippet, SecondTexUV: String;
   UpgradedVertEffect, UpgradedFragEffect, EffectivePointSizeStr, AttribGLSLType, AttribDecl: String;
   HasLinearColorSpace: Boolean;
   EffectiveToneMapping: TToneMapping;
@@ -938,6 +998,8 @@ begin
     Mask := Mask or $40000 or (Cardinal(Ord(EffectiveToneMapping)) shl 20);
   if AHasColorPerVertex and (Arrays <> nil) and (Arrays.ColorMode = cmReplace) then
     Mask := Mask or $100000;
+  if FRHIHasTextureTransform1 then
+    Mask := Mask or $200000;
   if FRHITexCoordGen = tgProjection then
     Mask := Mask or $400000
   else if FRHITexCoordGen = tgMirrorPlane then
@@ -950,6 +1012,8 @@ begin
      (FRHIEmissiveTexCoordIndex > 0) or
      (FRHIOcclusionTexCoordIndex > 0) then
     Mask := Mask or $40000000;
+  if AHasBaseColorTex and FRHIHasSecondTexture then
+    Mask := Mask or $80000000;
 
   if FRHIShadersInitialized and (FRHIShaderPermutationMask = Mask) and
      (FRHIVertexShader <> nil) and (FRHIFragmentShader <> nil) then
@@ -1047,6 +1111,24 @@ begin
       FRHIVertexShaderSource := StringReplace(
         FRHIVertexShaderSource,
         '  castle_tex_coord0 = castle_MultiTexCoord0;',
+        TexTransformSnippet,
+        []);
+    end;
+    if FRHIHasTextureTransform1 then
+    begin
+      TexTransformSnippet := FormatDot(
+        '  castle_tex_coord1 = (mat4(' +
+        'vec4(%g, %g, %g, %g), ' +
+        'vec4(%g, %g, %g, %g), ' +
+        'vec4(%g, %g, %g, %g), ' +
+        'vec4(%g, %g, %g, %g)) * vec4(castle_MultiTexCoord1, 0.0, 1.0)).xy;',
+        [FRHITextureTransform1.Data[0, 0], FRHITextureTransform1.Data[0, 1], FRHITextureTransform1.Data[0, 2], FRHITextureTransform1.Data[0, 3],
+         FRHITextureTransform1.Data[1, 0], FRHITextureTransform1.Data[1, 1], FRHITextureTransform1.Data[1, 2], FRHITextureTransform1.Data[1, 3],
+         FRHITextureTransform1.Data[2, 0], FRHITextureTransform1.Data[2, 1], FRHITextureTransform1.Data[2, 2], FRHITextureTransform1.Data[2, 3],
+         FRHITextureTransform1.Data[3, 0], FRHITextureTransform1.Data[3, 1], FRHITextureTransform1.Data[3, 2], FRHITextureTransform1.Data[3, 3]]);
+      FRHIVertexShaderSource := StringReplace(
+        FRHIVertexShaderSource,
+        '  castle_tex_coord1 = castle_MultiTexCoord1;',
         TexTransformSnippet,
         []);
     end;
@@ -1536,6 +1618,64 @@ begin
         'texture(castle_occlusion_texture, castle_tex_coord0)',
         'texture(castle_occlusion_texture, castle_tex_coord1)',
         [rfReplaceAll]);
+    if AHasBaseColorTex and FRHIHasSecondTexture then
+    begin
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        'void main() {',
+        'CASTLE_DESCRIPTOR_SET(2, 2) uniform sampler2D castle_multi_texture_1;' + LineEnding +
+        'void main() {',
+        []);
+      if (Arrays = nil) or (Arrays.TexCoords.Count >= 2) or FRHIHasTextureTransform1 then
+        SecondTexUV := 'castle_tex_coord1'
+      else
+        SecondTexUV := 'castle_tex_coord0';
+      SecondTexSnippet := '  vec4 multiTex1 = texture(castle_multi_texture_1, ' + SecondTexUV + ');' + LineEnding;
+      case FRHISecondTextureCombineRGB of
+        coReplace:
+          SecondTexSnippet := SecondTexSnippet + '  baseColor.rgb = multiTex1.rgb;' + LineEnding;
+        coAdd:
+          SecondTexSnippet := SecondTexSnippet + '  baseColor.rgb += multiTex1.rgb;' + LineEnding;
+        coAddSigned:
+          SecondTexSnippet := SecondTexSnippet + '  baseColor.rgb += multiTex1.rgb - vec3(0.5);' + LineEnding;
+        coSubtract:
+          SecondTexSnippet := SecondTexSnippet + '  baseColor.rgb = multiTex1.rgb - baseColor.rgb;' + LineEnding;
+        coBlend:
+          SecondTexSnippet := SecondTexSnippet + FormatDot(
+            '  baseColor.rgb = mix(baseColor.rgb, multiTex1.rgb, %.4f);' + LineEnding,
+            [FRHISecondTextureConstantColor.W]);
+        else
+          SecondTexSnippet := SecondTexSnippet + '  baseColor.rgb *= multiTex1.rgb;' + LineEnding;
+      end;
+      case FRHISecondTextureCombineAlpha of
+        coReplace:
+          SecondTexSnippet := SecondTexSnippet + '  baseColor.a = multiTex1.a;';
+        coAdd:
+          SecondTexSnippet := SecondTexSnippet + '  baseColor.a += multiTex1.a;';
+        coAddSigned:
+          SecondTexSnippet := SecondTexSnippet + '  baseColor.a += multiTex1.a - 0.5;';
+        coSubtract:
+          SecondTexSnippet := SecondTexSnippet + '  baseColor.a = multiTex1.a - baseColor.a;';
+        coBlend:
+          SecondTexSnippet := SecondTexSnippet + FormatDot(
+            '  baseColor.a = mix(baseColor.a, multiTex1.a, %.4f);',
+            [FRHISecondTextureConstantColor.W]);
+        else
+          SecondTexSnippet := SecondTexSnippet + '  baseColor.a *= multiTex1.a;';
+      end;
+      if Pos('  baseColor *= texture(castle_base_color_texture, castle_tex_coord1);', FRHIFragmentShaderSource) > 0 then
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          '  baseColor *= texture(castle_base_color_texture, castle_tex_coord1);',
+          '  baseColor *= texture(castle_base_color_texture, castle_tex_coord1);' + LineEnding + SecondTexSnippet,
+          [])
+      else
+        FRHIFragmentShaderSource := StringReplace(
+          FRHIFragmentShaderSource,
+          '  baseColor *= texture(castle_base_color_texture, castle_tex_coord0);',
+          '  baseColor *= texture(castle_base_color_texture, castle_tex_coord0);' + LineEnding + SecondTexSnippet,
+          []);
+    end;
     if (Arrays <> nil) and (not Arrays.CullFace) then
       FRHIFragmentShaderSource := StringReplace(
         FRHIFragmentShaderSource,

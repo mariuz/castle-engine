@@ -27,7 +27,7 @@ uses
   CastleInternalRHI, CastleInternalVulkan, CastleInternalVulkanMemory,
   CastleInternalVulkanWSI, CastleInternalShaderCompiler, CastleInternalRHI_Vulkan,
   CastleInternalShaderRHI, CastleInternalBatch2DRHI, CastleInternalRenderer,
-  CastleRendererInternalLights, X3DNodes, X3DFields, X3DCameraUtils,
+  CastleRendererInternalLights, CastleRendererInternalTextureEnv, X3DNodes, X3DFields, X3DCameraUtils,
   CastleInternalGeometryArrays, CastleSceneInternalShape, CastleInternalOcclusionCulling,
   CastleTransform, CastleScene, CastleProjection, CastleViewport, CastleScreenEffects, CastleRenderOptions, CastleWindow,
   CastleUIControls, CastleControls,
@@ -309,6 +309,9 @@ type
     procedure TestMultiShadowMapLightsSlotRoutingAndSceneDescriptorSetRHI;
     procedure TestRenderOptionsColorChannelsWriteMaskPipelineRHI;
     procedure TestVarianceShadowMapCasterPassMomentShaderAndPipelineRHI;
+    procedure TestMultiTextureCombineModesAndTextured3DTextSpecializationRHI;
+    procedure TestMultiTextureTransformSecondaryUVSpecializationRHI;
+    procedure TestGeneratedShadowMapVSMAndCubeMapDepthAttachmentRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -18201,6 +18204,306 @@ begin
     FreeAndNil(Renderer);
     FreeAndNil(Cam);
     FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestMultiTextureCombineModesAndTextured3DTextSpecializationRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene, TextScene: TCastleScene;
+  Root, TextRoot: TX3DRootNode;
+  ShapeNode, TextShapeNode: TShapeNode;
+  App, TextApp: TAppearanceNode;
+  Mat, TextMat: TMaterialNode;
+  MultiTex: TMultiTextureNode;
+  Tex0, Tex1, TextExtraTex: TPixelTextureNode;
+  Img0, Img1, ImgText: TRGBAlphaImage;
+  Box: TBoxNode;
+  TextNode: TTextNode;
+  RendererShape, TextRendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  FragAdd, FragBlend, FragText: String;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8201)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  TextScene := nil;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TMaterialNode.Create;
+    App.Material := Mat;
+
+    MultiTex := TMultiTextureNode.Create;
+    MultiTex.Color := Vector3(0.5, 0.5, 0.5);
+    MultiTex.Alpha := 0.35;
+
+    Tex0 := TPixelTextureNode.Create;
+    Img0 := TRGBAlphaImage.Create(4, 4);
+    Img0.Clear(Vector4Byte(255, 0, 0, 255));
+    Tex0.FdImage.Value := Img0;
+
+    Tex1 := TPixelTextureNode.Create;
+    Img1 := TRGBAlphaImage.Create(4, 4);
+    Img1.Clear(Vector4Byte(0, 255, 0, 255));
+    Tex1.FdImage.Value := Img1;
+
+    MultiTex.FdTexture.Add(Tex0);
+    MultiTex.FdTexture.Add(Tex1);
+    MultiTex.FdMode.Items.Add('MODULATE');
+    MultiTex.FdMode.Items.Add('ADD');
+    App.Texture := MultiTex;
+
+    ShapeNode.Appearance := App;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+
+    AssertTrue('RHIHasSecondTexture must be True for MultiTexture with 2 children',
+      RendererShape.Cache.RHIHasSecondTexture);
+    AssertEquals('RHISecondTextureCombineRGB must be coAdd',
+      Ord(coAdd), Ord(RendererShape.Cache.RHISecondTextureCombineRGB));
+    AssertTrue('RHIUserEffectTexture[0] must be bound for castle_multi_texture_1',
+      RendererShape.Cache.RHIUserEffectTexture[0] <> nil);
+    FragAdd := RendererShape.Cache.RHIFragmentShaderSource;
+    AssertTrue('MultiTexture ADD shader must declare castle_multi_texture_1 at Set 2 Binding 2',
+      Pos('CASTLE_DESCRIPTOR_SET(2, 2) uniform sampler2D castle_multi_texture_1;', FragAdd) > 0);
+    AssertTrue('MultiTexture ADD shader must add multiTex1.rgb',
+      Pos('baseColor.rgb += multiTex1.rgb;', FragAdd) > 0);
+
+    { Switch MultiTexture slot 1 mode to BLENDFACTORALPHA (coBlend) }
+    MultiTex.FdMode.Items[1] := 'BLENDFACTORALPHA';
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertEquals('RHISecondTextureCombineRGB must be coBlend',
+      Ord(coBlend), Ord(RendererShape.Cache.RHISecondTextureCombineRGB));
+    FragBlend := RendererShape.Cache.RHIFragmentShaderSource;
+    AssertTrue('MultiTexture BLENDFACTORALPHA shader must mix with MultiTexture.Alpha (0.3500)',
+      Pos('baseColor.rgb = mix(baseColor.rgb, multiTex1.rgb, 0.3500);', FragBlend) > 0);
+
+    { Textured 3D Text: TTextNode with FontTextureNode + Appearance.Texture }
+    TextRoot := TX3DRootNode.Create;
+    TextShapeNode := TShapeNode.Create;
+    TextApp := TAppearanceNode.Create;
+    TextMat := TMaterialNode.Create;
+    TextApp.Material := TextMat;
+    TextExtraTex := TPixelTextureNode.Create;
+    ImgText := TRGBAlphaImage.Create(4, 4);
+    ImgText.Clear(Vector4Byte(255, 200, 50, 255));
+    TextExtraTex.FdImage.Value := ImgText;
+    TextApp.Texture := TextExtraTex;
+    TextShapeNode.Appearance := TextApp;
+
+    TextNode := TTextNode.Create;
+    TextNode.SetText(['Vulkan']);
+    TextShapeNode.Geometry := TextNode;
+    TextRoot.AddChildren(TextShapeNode);
+
+    TextScene := TCastleScene.Create(nil);
+    TextScene.Load(TextRoot, True);
+    TextRendererShape := TX3DRendererShape(TextScene.Shapes.TraverseList(False, False)[0]);
+    TextRendererShape.PrepareRHIBuffers(TextScene.RenderOptions, 0);
+    TextRendererShape.UploadRHIMaterialToCache(ShadingModel);
+
+    AssertTrue('Textured 3D Text must enable RHIHasSecondTexture (FontTextureNode + Appearance.Texture)',
+      TextRendererShape.Cache.RHIHasSecondTexture);
+    AssertEquals('Textured 3D Text must combine second texture with coModulate',
+      Ord(coModulate), Ord(TextRendererShape.Cache.RHISecondTextureCombineRGB));
+    FragText := TextRendererShape.Cache.RHIFragmentShaderSource;
+    AssertTrue('Textured 3D Text fragment shader must sample castle_multi_texture_1 at castle_tex_coord1',
+      Pos('vec4 multiTex1 = texture(castle_multi_texture_1, castle_tex_coord1);', FragText) > 0);
+    AssertTrue('Textured 3D Text fragment shader must modulate baseColor.rgb *= multiTex1.rgb',
+      Pos('baseColor.rgb *= multiTex1.rgb;', FragText) > 0);
+  finally
+    FreeAndNil(TextScene);
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestMultiTextureTransformSecondaryUVSpecializationRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  MultiTransform: TMultiTextureTransformNode;
+  Transform0, Transform1: TTextureTransformNode;
+  MultiTexCoord: TMultiTextureCoordinateNode;
+  TC0, TC1: TTextureCoordinateNode;
+  FaceSet: TIndexedFaceSetNode;
+  Coord: TCoordinateNode;
+  Tex0, Tex1: TPixelTextureNode;
+  Img0, Img1: TRGBAlphaImage;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  ExtractedM0, ExtractedM1: TMatrix4;
+  VertSrc: String;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8202)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+
+    Tex0 := TPixelTextureNode.Create;
+    Img0 := TRGBAlphaImage.Create(4, 4);
+    Img0.Clear(Vector4Byte(255, 255, 255, 255));
+    Tex0.FdImage.Value := Img0;
+    Mat.BaseTexture := Tex0;
+    Mat.BaseTextureMapping := 'UV0';
+
+    Tex1 := TPixelTextureNode.Create;
+    Img1 := TRGBAlphaImage.Create(4, 4);
+    Img1.Clear(Vector4Byte(128, 128, 255, 255));
+    Tex1.FdImage.Value := Img1;
+    Mat.EmissiveTexture := Tex1;
+    Mat.EmissiveTextureMapping := 'UV1';
+    App.Material := Mat;
+
+    MultiTransform := TMultiTextureTransformNode.Create;
+    Transform0 := TTextureTransformNode.Create;
+    Transform0.Scale := Vector2(2.0, 3.0);
+    Transform1 := TTextureTransformNode.Create;
+    Transform1.Scale := Vector2(4.0, 5.0);
+    Transform1.Translation := Vector2(0.25, 0.75);
+    MultiTransform.FdTextureTransform.Add(Transform0);
+    MultiTransform.FdTextureTransform.Add(Transform1);
+    App.TextureTransform := MultiTransform;
+    ShapeNode.Appearance := App;
+
+    FaceSet := TIndexedFaceSetNode.Create;
+    Coord := TCoordinateNode.Create;
+    Coord.SetPoint([Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(0, 1, 0)]);
+    FaceSet.Coord := Coord;
+    FaceSet.SetCoordIndex([0, 1, 2, -1]);
+
+    MultiTexCoord := TMultiTextureCoordinateNode.Create;
+    TC0 := TTextureCoordinateNode.Create;
+    TC0.Mapping := 'UV0';
+    TC0.SetPoint([Vector2(0, 0), Vector2(1, 0), Vector2(0, 1)]);
+    TC1 := TTextureCoordinateNode.Create;
+    TC1.Mapping := 'UV1';
+    TC1.SetPoint([Vector2(0, 0), Vector2(1, 0), Vector2(0, 1)]);
+    MultiTexCoord.FdTexCoord.Add(TC0);
+    MultiTexCoord.FdTexCoord.Add(TC1);
+    FaceSet.TexCoord := MultiTexCoord;
+
+    ShapeNode.Geometry := FaceSet;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+
+    AssertTrue('ExtractRHITextureTransform must succeed for slot 0',
+      RendererShape.ExtractRHITextureTransform(ExtractedM0));
+    AssertTrue('ExtractRHITextureTransform1 must succeed for slot 1',
+      RendererShape.ExtractRHITextureTransform1(ExtractedM1));
+    AssertTrue('Cache.RHIHasTextureTransform1 must be True',
+      RendererShape.Cache.RHIHasTextureTransform1);
+    AssertSameValue(4.0, RendererShape.Cache.RHITextureTransform1.Data[0, 0], 1e-4);
+    AssertSameValue(5.0, RendererShape.Cache.RHITextureTransform1.Data[1, 1], 1e-4);
+
+    VertSrc := RendererShape.Cache.RHIVertexShaderSource;
+    AssertTrue('Vertex shader must transform castle_MultiTexCoord1 into castle_tex_coord1',
+      Pos('* vec4(castle_MultiTexCoord1, 0.0, 1.0)).xy;', VertSrc) > 0);
+    AssertTrue('Permutation mask must include $200000 for secondary UV transform',
+      (RendererShape.Cache.RHIShaderPermutationMask and $200000) <> 0);
+  finally
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGeneratedShadowMapVSMAndCubeMapDepthAttachmentRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  RenderOpts: TCastleRenderOptions;
+  ShadowNode: TGeneratedShadowMapNode;
+  CubeNode: TGeneratedCubeMapTextureNode;
+  ShadowRes: TGeneratedShadowMapResource;
+  CubeRes: TGeneratedCubeMapTextureResource;
+  Light: TSpotLightNode;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8203)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  RenderOpts := TCastleRenderOptions.Create(nil);
+  ShadowNode := TGeneratedShadowMapNode.Create;
+  CubeNode := TGeneratedCubeMapTextureNode.Create;
+  Light := TSpotLightNode.Create;
+  try
+    RenderOpts.ShadowSampling := ssVarianceShadowMaps;
+    ShadowNode.FdSize.Value := 256;
+    ShadowNode.Update := upAlways;
+    TTextureResources.Prepare(RenderOpts, ShadowNode);
+    ShadowRes := TGeneratedShadowMapResource(TTextureResources.Get(ShadowNode));
+    AssertTrue('ShadowRes must be prepared', ShadowRes <> nil);
+    AssertTrue('ShadowRes.RHITexture must be pfRGBA32_Float in VSM mode',
+      (ShadowRes.RHITexture <> nil) and (ShadowRes.RHITexture.Desc.Format = pfRGBA32_Float));
+    AssertTrue('ShadowRes.RHIDepthTexture must be allocated as a separate depth buffer in VSM mode',
+      (ShadowRes.RHIDepthTexture <> nil) and (ShadowRes.RHIDepthTexture <> ShadowRes.RHITexture));
+    AssertEquals('ShadowRes.RHIDepthTexture format must be pfD24_UNorm_S8_UInt',
+      Ord(pfD24_UNorm_S8_UInt), Ord(ShadowRes.RHIDepthTexture.Desc.Format));
+
+    FRenderFromViewpointCalls := 0;
+    ShadowRes.Update({$ifdef FPC}@{$endif}DummyRenderFromViewpointCallback, 0.1, 100.0, Light);
+    AssertEquals('VSM ShadowRes.Update must invoke render callback once', 1, FRenderFromViewpointCalls);
+    AssertEquals('VSM ShadowRes.RHIUpdateCount must be 1', 1, ShadowRes.RHIUpdateCount);
+
+    CubeNode.FdSize.Value := 128;
+    CubeNode.Update := upAlways;
+    TTextureResources.Prepare(RenderOpts, CubeNode);
+    CubeRes := TGeneratedCubeMapTextureResource(TTextureResources.Get(CubeNode));
+    AssertTrue('CubeRes must be prepared', CubeRes <> nil);
+    AssertTrue('CubeRes.RHITexture must be tdCube',
+      (CubeRes.RHITexture <> nil) and (CubeRes.RHITexture.Desc.Dimension = tdCube));
+    AssertTrue('CubeRes.RHIDepthTexture must be allocated for cubemap face depth testing',
+      CubeRes.RHIDepthTexture <> nil);
+    AssertEquals('CubeRes.RHIDepthTexture format must be pfD24_UNorm_S8_UInt',
+      Ord(pfD24_UNorm_S8_UInt), Ord(CubeRes.RHIDepthTexture.Desc.Format));
+  finally
+    TTextureResources.Unprepare(CubeNode);
+    TTextureResources.Unprepare(ShadowNode);
+    FreeAndNil(Light);
+    FreeAndNil(CubeNode);
+    FreeAndNil(ShadowNode);
+    FreeAndNil(RenderOpts);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);
