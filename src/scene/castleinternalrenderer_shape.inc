@@ -170,7 +170,10 @@
       and the shape's normal map / height map scale. }
     function ExtractRHIParallaxBumpMapping(
       out AParallaxHeight: Single;
-      out ASteepParallax: Boolean): Boolean;
+      out ASteepParallax: Boolean): Boolean; overload;
+    function ExtractRHIParallaxBumpMapping(
+      out AParallaxHeight: Single;
+      out ASteepParallax, ASelfShadowing: Boolean): Boolean; overload;
 
     { Collects enabled X3D TEffectNode / TEffectPartNode GLSL source code for stVertex and
       stFragment from Appearance.FdEffects and State.Effects. }
@@ -411,9 +414,14 @@ begin
           end else
             NormalIdx := 0;
           if (Geometry <> nil) and (Geometry.TexCoordField <> nil) and
-             (Geometry.TexCoordField.Value is TMultiTextureCoordinateNode) then
-            EffectiveTexCoordsNeeded := Max(EffectiveTexCoordsNeeded,
-              Cardinal(TMultiTextureCoordinateNode(Geometry.TexCoordField.Value).FdTexCoord.Count));
+             (Geometry.TexCoordField.Value <> nil) then
+          begin
+            if Geometry.TexCoordField.Value is TMultiTextureCoordinateNode then
+              EffectiveTexCoordsNeeded := Max(EffectiveTexCoordsNeeded,
+                Cardinal(TMultiTextureCoordinateNode(Geometry.TexCoordField.Value).FdTexCoord.Count))
+            else
+              EffectiveTexCoordsNeeded := Max(EffectiveTexCoordsNeeded, Cardinal(1));
+          end;
           Generator.TexCoordsNeeded := EffectiveTexCoordsNeeded;
           HasNormalMap := False;
           App := nil;
@@ -429,6 +437,11 @@ begin
             begin
               EffectiveTexCoordsNeeded := Max(EffectiveTexCoordsNeeded,
                 Cardinal(TMultiTextureNode(App.Texture).FdTexture.Count));
+              Generator.TexCoordsNeeded := EffectiveTexCoordsNeeded;
+            end else
+            if App.Texture <> nil then
+            begin
+              EffectiveTexCoordsNeeded := Max(EffectiveTexCoordsNeeded, Cardinal(1));
               Generator.TexCoordsNeeded := EffectiveTexCoordsNeeded;
             end;
             if App.InternalCommonSurfaceShader <> nil then
@@ -1491,6 +1504,15 @@ function TX3DRendererShape.ExtractRHIParallaxBumpMapping(
   out AParallaxHeight: Single;
   out ASteepParallax: Boolean): Boolean;
 var
+  SelfShadowing: Boolean;
+begin
+  Result := ExtractRHIParallaxBumpMapping(AParallaxHeight, ASteepParallax, SelfShadowing);
+end;
+
+function TX3DRendererShape.ExtractRHIParallaxBumpMapping(
+  out AParallaxHeight: Single;
+  out ASteepParallax, ASelfShadowing: Boolean): Boolean;
+var
   EffectiveRenderOptions: TCastleRenderOptions;
   ShapeState: TX3DGraphTraverseState;
   App: TAppearanceNode;
@@ -1498,6 +1520,7 @@ var
 begin
   AParallaxHeight := 0.0;
   ASteepParallax := False;
+  ASelfShadowing := False;
   Result := False;
 
   if Cache <> nil then
@@ -1510,6 +1533,7 @@ begin
     Exit;
 
   ASteepParallax := EffectiveRenderOptions.BumpMapping in [bmSteepParallax, bmSteepParallaxShadowing];
+  ASelfShadowing := EffectiveRenderOptions.BumpMapping = bmSteepParallaxShadowing;
   NormalTexNode := nil;
   ShapeState := OriginalState;
   if ShapeState = nil then
@@ -2012,7 +2036,7 @@ var
   PointSize, ParallaxHeight: Single;
   VertEffectCode, FragEffectCode, ComposedVertCode, ComposedFragCode: String;
   HasTexTransform, HasTexTransform1, HasSecondTex, HasClipPlane, HasIBL, HasShadowMap, HasTexCoordGen, HasPointSize,
-    HasParallax, SteepParallax, HasShaderEffects, HasComposedShader: Boolean;
+    HasParallax, SteepParallax, SelfShadowParallax, HasShaderEffects, HasComposedShader: Boolean;
   BaseColorMapIdx, NormalMapIdx, MetallicRoughnessMapIdx, EmissiveMapIdx, OcclusionMapIdx: Cardinal;
   BaseColorIdx, NormalIdx, MetallicRoughnessIdx, EmissiveIdx: Cardinal;
   BindlessEntry: TCastleBindlessMaterialEntry;
@@ -2037,7 +2061,7 @@ begin
     HasShadowMap := ExtractRHIShadowMap(ShadowMapTex, ShadowMapSampler);
     HasTexCoordGen := ExtractRHITexCoordGen(TexCoordGen, TexGenBoundsS, TexGenBoundsT, TexGenBoundsR);
     HasPointSize := ExtractRHIPointSize(PointSize);
-    HasParallax := ExtractRHIParallaxBumpMapping(ParallaxHeight, SteepParallax);
+    HasParallax := ExtractRHIParallaxBumpMapping(ParallaxHeight, SteepParallax, SelfShadowParallax);
     HasShaderEffects := ExtractRHIShaderEffects(VertEffectCode, FragEffectCode);
     HasComposedShader := ExtractRHIComposedShader(ComposedVertCode, ComposedFragCode);
     if Cache <> nil then
@@ -2050,7 +2074,7 @@ begin
       Cache.SetClipPlanes(ClipPlanes, ClipPlaneCount);
       Cache.SetTexCoordGen(TexCoordGen, TexGenBoundsS, TexGenBoundsT, TexGenBoundsR);
       Cache.SetPointSize(PointSize);
-      Cache.SetParallaxBumpMapping(HasParallax, SteepParallax, ParallaxHeight);
+      Cache.SetParallaxBumpMapping(HasParallax, SteepParallax, SelfShadowParallax, ParallaxHeight);
       Cache.SetShaderEffects(VertEffectCode, FragEffectCode);
       Cache.SetComposedShader(ComposedVertCode, ComposedFragCode);
       if (ExtractRHIUserEffectUniforms = 0) and HasSecondTex and (SecondTex <> nil) then

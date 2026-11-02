@@ -315,6 +315,9 @@ type
     procedure TestCubeMapAnd3DTextureBaseColorAndBounds3DSpecializationRHI;
     procedure TestTextureNodeShaderTextureAndLightNodeEffectsSpecializationRHI;
     procedure TestMultiTextureEnvScaleDot3ComplementAndAlphaReplicateRHI;
+    procedure TestSteepParallaxSelfShadowingSpecializationRHI;
+    procedure TestExtendedEffectNodePlugsVertexMaterialLightingFogAndEndRHI;
+    procedure TestTextureCoordinate3D4DAndTextureTransform3DSpecializationRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -18780,6 +18783,319 @@ begin
       Pos('baseColor.rgb = vec3(dot(2.0 * (multiTex1.rgb - vec3(0.5)), 2.0 * (baseColor.rgb - vec3(0.5))));', FragDot3) > 0);
     AssertTrue('ALPHAREPLICATE function must replicate baseColor.a into rgb',
       Pos('baseColor.rgb = vec3(baseColor.a);', FragDot3) > 0);
+  finally
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSteepParallaxSelfShadowingSpecializationRHI;
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  Device: TVulkanRHIDevice;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  NormalTex: TPixelTextureNode;
+  NormalImg: TRGBAlphaImage;
+  Box: TBoxNode;
+  Scene: TCastleScene;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  ParallaxHeight: Single;
+  SteepParallax, SelfShadowing: Boolean;
+  FragSteep, FragShadow: String;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8401)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+
+    NormalTex := TPixelTextureNode.Create;
+    NormalImg := TRGBAlphaImage.Create(4, 4);
+    NormalImg.Clear(Vector4Byte(128, 128, 255, 200));
+    NormalTex.FdImage.Value := NormalImg;
+    Mat.NormalTexture := NormalTex;
+    App.Material := Mat;
+    ShapeNode.Appearance := App;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.RenderOptions.BumpMapping := bmSteepParallax;
+    Scene.RenderOptions.BumpMappingParallaxHeight := 0.04;
+    Scene.Load(Root, True);
+
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 1);
+    AssertTrue('ExtractRHIParallaxBumpMapping must return True for bmSteepParallax',
+      RendererShape.ExtractRHIParallaxBumpMapping(ParallaxHeight, SteepParallax, SelfShadowing));
+    AssertTrue('SteepParallax must be True', SteepParallax);
+    AssertFalse('SelfShadowing must be False for bmSteepParallax', SelfShadowing);
+
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    FragSteep := RendererShape.Cache.RHIFragmentShaderSource;
+    AssertTrue('bmSteepParallax shader must contain view raymarching loop',
+      Pos('for (int castle_step = 0; castle_step < 32; ++castle_step)', FragSteep) > 0);
+    AssertEquals('bmSteepParallax shader must NOT contain light self-shadow raymarching',
+      0, Pos('castle_self_steps', FragSteep));
+
+    { Enable bmSteepParallaxShadowing }
+    Scene.RenderOptions.BumpMapping := bmSteepParallaxShadowing;
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 1);
+    AssertTrue('ExtractRHIParallaxBumpMapping must return True for bmSteepParallaxShadowing',
+      RendererShape.ExtractRHIParallaxBumpMapping(ParallaxHeight, SteepParallax, SelfShadowing));
+    AssertTrue('SteepParallax must be True for bmSteepParallaxShadowing', SteepParallax);
+    AssertTrue('SelfShadowing must be True for bmSteepParallaxShadowing', SelfShadowing);
+
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertTrue('Cache.RHISteepParallaxSelfShadowing must be True',
+      RendererShape.Cache.RHISteepParallaxSelfShadowing);
+    FragShadow := RendererShape.Cache.RHIFragmentShaderSource;
+    AssertTrue('bmSteepParallaxShadowing shader must contain tangent-space light raymarching',
+      Pos('vec3 castle_light_ts = normalize(transpose(castle_tangent_to_eye_space) * L);', FragShadow) > 0);
+    AssertTrue('bmSteepParallaxShadowing shader must attenuate shadowVis on heightfield occlusion',
+      Pos('if (castle_self_map_h >= castle_self_cur_h) shadowVis *= 0.5;', FragShadow) > 0);
+  finally
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestExtendedEffectNodePlugsVertexMaterialLightingFogAndEndRHI;
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  Device: TVulkanRHIDevice;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  BaseTex: TPixelTextureNode;
+  BaseImg: TRGBAlphaImage;
+  EffNode: TEffectNode;
+  VertPart, FragPart: TEffectPartNode;
+  Box: TBoxNode;
+  Scene: TCastleScene;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  VertSrc, FragSrc: String;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8402)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    BaseTex := TPixelTextureNode.Create;
+    BaseImg := TRGBAlphaImage.Create(2, 2);
+    BaseImg.Clear(Vector4Byte(255, 255, 255, 255));
+    BaseTex.FdImage.Value := BaseImg;
+    Mat.BaseTexture := BaseTex;
+    App.Material := Mat;
+
+    EffNode := TEffectNode.Create;
+    EffNode.Language := slGLSL;
+
+    VertPart := TEffectPartNode.Create;
+    VertPart.ShaderType := stVertex;
+    VertPart.Contents :=
+      'void PLUG_vertex_object_space_change(inout vec4 vertex_object, inout vec3 normal_object) {' + LineEnding +
+      '  vertex_object.y += 0.25;' + LineEnding +
+      '}' + LineEnding +
+      'void PLUG_vertex_eye_space_extended(const in vec4 vertex_eye, inout vec3 normal_eye, const in vec3 normal_object) {' + LineEnding +
+      '  normal_eye = normalize(normal_eye + normal_object * 0.01);' + LineEnding +
+      '}';
+
+    FragPart := TEffectPartNode.Create;
+    FragPart.ShaderType := stFragment;
+    FragPart.Contents :=
+      'void PLUG_texture_coord_shift(inout vec2 tex_coord) { tex_coord += vec2(0.1, 0.2); }' + LineEnding +
+      'void PLUG_fragment_eye_space(const in vec4 vertex_eye, inout vec3 normal_eye) { normal_eye = normalize(normal_eye); }' + LineEnding +
+      'void PLUG_material_metallic_roughness(inout float metallic, inout float roughness) { metallic *= 0.5; roughness = max(roughness, 0.2); }' + LineEnding +
+      'void PLUG_material_shininess(inout float shininess) { shininess *= 1.5; }' + LineEnding +
+      'void PLUG_material_occlusion(inout vec4 color) { color.rgb *= 0.8; }' + LineEnding +
+      'void PLUG_material_emissive(inout vec3 emissive) { emissive += vec3(0.05); }' + LineEnding +
+      'void PLUG_lighting_apply(inout vec4 fragment_color, const in vec4 vertex_eye, const in vec3 normal_eye_fragment) { fragment_color.rgb *= 1.1; }' + LineEnding +
+      'void PLUG_fog_apply(inout vec4 fragment_color, const in vec3 normal_eye_fragment) { fragment_color.rgb += vec3(0.01); }' + LineEnding +
+      'void PLUG_fragment_end(inout vec4 fragment_color) { fragment_color.a = clamp(fragment_color.a, 0.0, 1.0); }';
+
+    EffNode.SetParts([VertPart, FragPart]);
+    App.SetEffects([EffNode]);
+
+    ShapeNode.Appearance := App;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+
+    VertSrc := RendererShape.Cache.RHIVertexShaderSource;
+    FragSrc := RendererShape.Cache.RHIFragmentShaderSource;
+
+    AssertTrue('Vertex shader must invoke PLUG_vertex_object_space_change',
+      Pos('PLUG_vertex_object_space_change(localPos, localNormal);', VertSrc) > 0);
+    AssertEquals('Vertex shader must NOT falsely match PLUG_vertex_object_space prefix',
+      0, Pos('PLUG_vertex_object_space(localPos, localNormal);', VertSrc));
+    AssertTrue('Vertex shader must invoke PLUG_vertex_eye_space_extended',
+      Pos('PLUG_vertex_eye_space_extended(castle_vertex_eye, castle_normal_eye, localNormal);', VertSrc) > 0);
+    AssertEquals('Vertex shader must NOT falsely match PLUG_vertex_eye_space prefix',
+      0, Pos('PLUG_vertex_eye_space(castle_vertex_eye, castle_normal_eye);', VertSrc));
+
+    AssertTrue('Fragment shader must invoke PLUG_texture_coord_shift via castle_shifted_uv',
+      Pos('PLUG_texture_coord_shift(castle_shifted_uv);', FragSrc) > 0);
+    AssertTrue('Fragment shader must invoke PLUG_fragment_eye_space',
+      Pos('PLUG_fragment_eye_space(castle_vertex_eye, N);', FragSrc) > 0);
+    AssertTrue('Fragment shader must invoke PLUG_material_metallic_roughness',
+      Pos('PLUG_material_metallic_roughness(metallic, roughness);', FragSrc) > 0);
+    AssertTrue('Fragment shader must invoke PLUG_material_shininess',
+      Pos('PLUG_material_shininess(castle_shininess);', FragSrc) > 0);
+    AssertTrue('Fragment shader must invoke PLUG_material_occlusion',
+      Pos('PLUG_material_occlusion(castle_occ_result);', FragSrc) > 0);
+    AssertTrue('Fragment shader must invoke PLUG_material_emissive',
+      Pos('PLUG_material_emissive(emissive);', FragSrc) > 0);
+    AssertTrue('Fragment shader must invoke PLUG_lighting_apply',
+      Pos('PLUG_lighting_apply(castle_FragColor, castle_vertex_eye, N);', FragSrc) > 0);
+    AssertTrue('Fragment shader must invoke PLUG_fog_apply',
+      Pos('PLUG_fog_apply(castle_FragColor, normalize(castle_normal_eye));', FragSrc) > 0);
+    AssertTrue('Fragment shader must invoke PLUG_fragment_end',
+      Pos('PLUG_fragment_end(castle_FragColor);', FragSrc) > 0);
+  finally
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestTextureCoordinate3D4DAndTextureTransform3DSpecializationRHI;
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  Device: TVulkanRHIDevice;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  VolTex: TPixelTexture3DNode;
+  Transform3D: TTextureTransform3DNode;
+  IFS: TIndexedFaceSetNode;
+  Coord: TCoordinateNode;
+  TexCoord3D: TTextureCoordinate3DNode;
+  TexCoord4D: TTextureCoordinate4DNode;
+  Scene: TCastleScene;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  Vert3D, Frag3D, Vert4D, Frag4D: String;
+  I: Integer;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8403)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+
+    VolTex := TPixelTexture3DNode.Create;
+    VolTex.FdImage.Items.Clear;
+    VolTex.FdImage.Items.Add(3);
+    VolTex.FdImage.Items.Add(2);
+    VolTex.FdImage.Items.Add(2);
+    VolTex.FdImage.Items.Add(2);
+    for I := 0 to 7 do
+      VolTex.FdImage.Items.Add($7F4080C0);
+    App.Texture := VolTex;
+
+    Transform3D := TTextureTransform3DNode.Create;
+    Transform3D.Scale := Vector3(2.0, 3.0, 4.0);
+    Transform3D.Translation := Vector3(0.1, 0.2, 0.3);
+    App.TextureTransform := Transform3D;
+
+    IFS := TIndexedFaceSetNode.Create;
+    Coord := TCoordinateNode.Create;
+    Coord.SetPoint([
+      Vector3(0, 0, 0),
+      Vector3(1, 0, 0),
+      Vector3(1, 1, 0)
+    ]);
+    IFS.Coord := Coord;
+    IFS.SetCoordIndex([0, 1, 2, -1]);
+
+    TexCoord3D := TTextureCoordinate3DNode.Create;
+    TexCoord3D.SetPoint([
+      Vector3(0, 0, 0.25),
+      Vector3(1, 0, 0.50),
+      Vector3(1, 1, 0.75)
+    ]);
+    IFS.TexCoord := TexCoord3D;
+
+    ShapeNode.Appearance := App;
+    ShapeNode.Geometry := IFS;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    Vert3D := RendererShape.Cache.RHIVertexShaderSource;
+    Frag3D := RendererShape.Cache.RHIFragmentShaderSource;
+
+    AssertTrue('Vertex shader must declare in vec3 castle_MultiTexCoord0 for TTextureCoordinate3DNode',
+      Pos('CASTLE_LOCATION(2) in vec3 castle_MultiTexCoord0;', Vert3D) > 0);
+    AssertTrue('Vertex shader must declare out vec4 castle_tex_coord0_4d',
+      Pos('CASTLE_LOCATION(7) out vec4 castle_tex_coord0_4d;', Vert3D) > 0);
+    AssertTrue('Vertex shader must transform 3D texcoord via 4x4 TTextureTransform3DNode matrix',
+      Pos('* rawTexCoord4D;', Vert3D) > 0);
+    AssertTrue('Fragment shader must declare in vec4 castle_tex_coord0_4d and sample sampler3D with projective xyz/w',
+      (Pos('CASTLE_LOCATION(7) in vec4 castle_tex_coord0_4d;', Frag3D) > 0) and
+      (Pos('vec3 castle_tex3d_coord = castle_tex_coord0_4d.xyz / max(castle_tex_coord0_4d.w, 1e-5);', Frag3D) > 0));
+
+    { Switch to TTextureCoordinate4DNode (homogeneous 4D coordinates) }
+    TexCoord4D := TTextureCoordinate4DNode.Create;
+    TexCoord4D.SetPoint([
+      Vector4(0, 0, 0.5, 2.0),
+      Vector4(2, 0, 1.0, 2.0),
+      Vector4(2, 2, 1.5, 2.0)
+    ]);
+    IFS.TexCoord := TexCoord4D;
+    RendererShape.Cache.InvalidateVertexData([vtCoordinate, vtAttribute, vtIndex]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    Vert4D := RendererShape.Cache.RHIVertexShaderSource;
+    Frag4D := RendererShape.Cache.RHIFragmentShaderSource;
+    AssertTrue('Vertex shader must declare in vec4 castle_MultiTexCoord0 for TTextureCoordinate4DNode',
+      Pos('CASTLE_LOCATION(2) in vec4 castle_MultiTexCoord0;', Vert4D) > 0);
+    AssertTrue('Vertex shader must pass 4D homogeneous castle_MultiTexCoord0 directly',
+      Pos('vec4 rawTexCoord4D = castle_MultiTexCoord0;', Vert4D) > 0);
+    AssertTrue('Fragment shader must perform homogeneous division xyz / w for TTextureCoordinate4DNode',
+      Pos('vec3 castle_tex3d_coord = castle_tex_coord0_4d.xyz / max(castle_tex_coord0_4d.w, 1e-5);', Frag4D) > 0);
   finally
     FreeAndNil(Scene);
     SetRHIDevice(SavedRHI);
