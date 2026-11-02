@@ -74,6 +74,9 @@ type
     FAspectMask: VkImageAspectFlags;
     FViewAspectMask: VkImageAspectFlags;
     FHostPixels: array of Byte;
+    FTotalSubresourceUploads: Cardinal;
+    FMaxUploadedMipLevel: Cardinal;
+    FMaxUploadedArrayLayer: Cardinal;
     function VulkanDevice: TVulkanRHIDevice;
   public
     { Standard constructor that allocates a new VkImage and VkImageView }
@@ -96,15 +99,20 @@ type
     property AspectMask: VkImageAspectFlags read FAspectMask;
     { Aspect mask used for VkImageView creation (DEPTH-only when sampled in shaders) }
     property ViewAspectMask: VkImageAspectFlags read FViewAspectMask;
+    property TotalSubresourceUploads: Cardinal read FTotalSubresourceUploads;
+    property MaxUploadedMipLevel: Cardinal read FMaxUploadedMipLevel;
+    property MaxUploadedArrayLayer: Cardinal read FMaxUploadedArrayLayer;
   end;
 
   TVulkanRHISampler = class(TRHISampler)
   private
     FHandle: VkSampler;
+    FCreateInfo: VkSamplerCreateInfo;
   public
     constructor Create(const ADevice: TVulkanRHIDevice; const ADesc: TRHISamplerDesc);
     destructor Destroy; override;
     property Handle: VkSampler read FHandle;
+    property CreateInfo: VkSamplerCreateInfo read FCreateInfo;
   end;
 
   TVulkanRHIShaderModule = class(TRHIShaderModule)
@@ -4074,6 +4082,19 @@ function RHIToVkStencilOp(const AOp: TRHIStencilOp): Integer;
 { Converts TRHIStencilOpStateDesc to VkStencilOpState. }
 function RHIToVkStencilOpState(const AState: TRHIStencilOpStateDesc): VkStencilOpState;
 
+{ Converts TRHISamplerFilter to VkFilter. }
+function RHIToVkFilter(const AFilter: TRHISamplerFilter): VkFilter;
+
+{ Converts TRHISamplerFilter to VkSamplerMipmapMode. }
+function RHIToVkMipmapMode(const AFilter: TRHISamplerFilter): VkSamplerMipmapMode;
+
+{ Converts TRHISamplerAddressMode to VkSamplerAddressMode. }
+function RHIToVkAddressMode(const AMode: TRHISamplerAddressMode): VkSamplerAddressMode;
+
+{ Builds a complete VkSamplerCreateInfo from TRHISamplerDesc, clamping MaxAnisotropy to AMaxDeviceAnisotropy. }
+function BuildVkSamplerCreateInfo(const ADesc: TRHISamplerDesc;
+  const AMaxDeviceAnisotropy: Single = 16.0): VkSamplerCreateInfo;
+
 { Returns the required VkFormatFeatureFlagBits for a given TRHIPixelFormat and TRHITextureUsageFlags set. }
 function GetRequiredVkFormatFeatures(const AFormat: TRHIPixelFormat;
   const AUsage: TRHITextureUsageFlags): VkFlags;
@@ -4891,6 +4912,72 @@ begin
   Result.compareMask := AState.CompareMask;
   Result.writeMask := AState.WriteMask;
   Result.reference := AState.Reference;
+end;
+
+function RHIToVkFilter(const AFilter: TRHISamplerFilter): VkFilter;
+begin
+  case AFilter of
+    sfNearest: Result := VK_FILTER_NEAREST;
+    else       Result := VK_FILTER_LINEAR;
+  end;
+end;
+
+function RHIToVkMipmapMode(const AFilter: TRHISamplerFilter): VkSamplerMipmapMode;
+begin
+  case AFilter of
+    sfNearest: Result := VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    else       Result := VK_SAMPLER_MIPMAP_MODE_LINEAR;
+  end;
+end;
+
+function RHIToVkAddressMode(const AMode: TRHISamplerAddressMode): VkSamplerAddressMode;
+begin
+  case AMode of
+    amRepeat:         Result := VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    amMirroredRepeat: Result := VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+    amClampToEdge:    Result := VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    amClampToBorder:  Result := VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    else              Result := VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  end;
+end;
+
+function BuildVkSamplerCreateInfo(const ADesc: TRHISamplerDesc;
+  const AMaxDeviceAnisotropy: Single): VkSamplerCreateInfo;
+var
+  ClampedMaxAniso: Single;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  Result.sType := VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+  Result.magFilter := RHIToVkFilter(ADesc.MagFilter);
+  Result.minFilter := RHIToVkFilter(ADesc.MinFilter);
+  Result.mipmapMode := RHIToVkMipmapMode(ADesc.MipFilter);
+  Result.addressModeU := RHIToVkAddressMode(ADesc.AddressModeU);
+  Result.addressModeV := RHIToVkAddressMode(ADesc.AddressModeV);
+  Result.addressModeW := RHIToVkAddressMode(ADesc.AddressModeW);
+  Result.mipLodBias := 0.0;
+  ClampedMaxAniso := Max(1.0, AMaxDeviceAnisotropy);
+  if ADesc.MaxAnisotropy > 1.0 then
+  begin
+    Result.anisotropyEnable := VK_TRUE;
+    Result.maxAnisotropy := EnsureRange(ADesc.MaxAnisotropy, 1.0, ClampedMaxAniso);
+  end else
+  begin
+    Result.anisotropyEnable := VK_FALSE;
+    Result.maxAnisotropy := 1.0;
+  end;
+  if ADesc.CompareEnable then
+  begin
+    Result.compareEnable := VK_TRUE;
+    Result.compareOp := RHIToVkCompareOp(ADesc.CompareOp);
+  end else
+  begin
+    Result.compareEnable := VK_FALSE;
+    Result.compareOp := VK_COMPARE_OP_ALWAYS;
+  end;
+  Result.minLod := Max(0.0, ADesc.MinLod);
+  Result.maxLod := Max(Result.minLod, ADesc.MaxLod);
+  Result.borderColor := VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+  Result.unnormalizedCoordinates := VK_FALSE;
 end;
 
 function RHIToVkBlendFactor(const Factor: TRHIBlendFactor): Integer;
@@ -5713,6 +5800,12 @@ begin
     Exit;
 
   try
+    Inc(FTotalSubresourceUploads);
+    if AMipLevel > FMaxUploadedMipLevel then
+      FMaxUploadedMipLevel := AMipLevel;
+    if AArrayLayer > FMaxUploadedArrayLayer then
+      FMaxUploadedArrayLayer := AArrayLayer;
+
     if (RgbaImage <> nil) and (AMipLevel = 0) and (AArrayLayer = 0) and
        (ImgDepth = 1) and ((VulkanDevice = nil) or (VulkanDevice.Handle = nil)) then
     begin
@@ -5808,17 +5901,16 @@ end;
 
 constructor TVulkanRHISampler.Create(const ADevice: TVulkanRHIDevice; const ADesc: TRHISamplerDesc);
 var
-  SamplerInfo: VkSamplerCreateInfo;
+  MaxDevAniso: Single;
 begin
   inherited Create(ADevice, ADesc);
-  FillChar(SamplerInfo, SizeOf(SamplerInfo), 0);
-  SamplerInfo.sType := VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-  SamplerInfo.magFilter := VK_FILTER_LINEAR;
-  SamplerInfo.minFilter := VK_FILTER_LINEAR;
-  SamplerInfo.mipmapMode := VK_SAMPLER_MIPMAP_MODE_LINEAR;
-  SamplerInfo.maxLod := ADesc.MaxLod;
+  if (ADevice <> nil) and (ADevice.Capabilities.MaxAnisotropy > 0.0) then
+    MaxDevAniso := ADevice.Capabilities.MaxAnisotropy
+  else
+    MaxDevAniso := 16.0;
+  FCreateInfo := BuildVkSamplerCreateInfo(ADesc, MaxDevAniso);
   if (ADevice <> nil) and (ADevice.Handle <> nil) and Assigned(vkCreateSampler) then
-    CheckVk(vkCreateSampler(ADevice.Handle, @SamplerInfo, nil, @FHandle), 'vkCreateSampler')
+    CheckVk(vkCreateSampler(ADevice.Handle, @FCreateInfo, nil, @FHandle), 'vkCreateSampler')
   else
     FHandle := VkSampler(PtrUInt(Self));
 end;

@@ -35,6 +35,7 @@ uses
   CastleGLUtils, CastleRenderPrimitives, CastleShapes, CastleRenderContext,
   CastleShapeInternalShadowVolumes, CastleShapeInternalRenderShadowVolumes,
   CastleInternalBatchShapes, CastleInternalShapesRenderer,
+  CastleInternalCompositeImage, CastleFilesUtils, CastleUriUtils,
   ToolManifest, CastleInternalRenderDoc;
 
 type
@@ -333,6 +334,9 @@ type
     procedure TestGeometryShaderComposedAndEffectNodePlugsAndPipelineRHI;
     procedure TestImageTextureAndMovieTextureFlipVerticallyInMemoryUploadRHI;
     procedure TestCommonSurfaceShaderMultiDiffuseAlphaAndNormalMapHeightGateRHI;
+    procedure TestVulkanSamplerCreateInfoTranslationAndTexturePropertiesMipmapControlRHI;
+    procedure TestCompositeCubeMapAnd3DTextureMipmapChainUploadRHI;
+    procedure TestPhongSpecularAndAmbientTextureLinearColorSpaceDecodeRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -20742,6 +20746,319 @@ begin
   finally
     FreeAndNil(Scene2);
     FreeAndNil(Scene1);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanSamplerCreateInfoTranslationAndTexturePropertiesMipmapControlRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SamplerDesc: TRHISamplerDesc;
+  VkSampler: TVulkanRHISampler;
+  RenderOptions: TCastleRenderOptions;
+  PixTexGUI, PixTexNoMip, PixTexMip: TPixelTextureNode;
+  TexPropsGUI, TexPropsNoMip, TexPropsMip: TTexturePropertiesNode;
+  ResGUI, ResNoMip, ResMip: TImageTextureResource;
+  VkSampGUI, VkSampNoMip, VkSampMip: TVulkanRHISampler;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9001)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+
+  RenderOptions := TCastleRenderOptions.Create(nil);
+  PixTexGUI := TPixelTextureNode.Create;
+  PixTexNoMip := TPixelTextureNode.Create;
+  PixTexMip := TPixelTextureNode.Create;
+  try
+    { 1. Direct TVulkanRHISampler / BuildVkSamplerCreateInfo translation verification }
+    FillChar(SamplerDesc, SizeOf(SamplerDesc), 0);
+    SamplerDesc.MinFilter := sfNearest;
+    SamplerDesc.MagFilter := sfLinear;
+    SamplerDesc.MipFilter := sfNearest;
+    SamplerDesc.AddressModeU := amRepeat;
+    SamplerDesc.AddressModeV := amMirroredRepeat;
+    SamplerDesc.AddressModeW := amClampToBorder;
+    SamplerDesc.MaxAnisotropy := 8.0;
+    SamplerDesc.CompareEnable := True;
+    SamplerDesc.CompareOp := coLessOrEqual;
+    SamplerDesc.MinLod := 1.0;
+    SamplerDesc.MaxLod := 6.0;
+
+    VkSampler := Device.CreateSampler(SamplerDesc) as TVulkanRHISampler;
+    try
+      AssertEquals('minFilter must translate sfNearest -> VK_FILTER_NEAREST',
+        VK_FILTER_NEAREST, VkSampler.CreateInfo.minFilter);
+      AssertEquals('magFilter must translate sfLinear -> VK_FILTER_LINEAR',
+        VK_FILTER_LINEAR, VkSampler.CreateInfo.magFilter);
+      AssertEquals('mipmapMode must translate sfNearest -> VK_SAMPLER_MIPMAP_MODE_NEAREST',
+        VK_SAMPLER_MIPMAP_MODE_NEAREST, VkSampler.CreateInfo.mipmapMode);
+      AssertEquals('addressModeU must translate amRepeat -> VK_SAMPLER_ADDRESS_MODE_REPEAT',
+        VK_SAMPLER_ADDRESS_MODE_REPEAT, VkSampler.CreateInfo.addressModeU);
+      AssertEquals('addressModeV must translate amMirroredRepeat -> VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT',
+        VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT, VkSampler.CreateInfo.addressModeV);
+      AssertEquals('addressModeW must translate amClampToBorder -> VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER',
+        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER, VkSampler.CreateInfo.addressModeW);
+      AssertEquals('anisotropyEnable must be VK_TRUE when MaxAnisotropy > 1.0',
+        VK_TRUE, VkSampler.CreateInfo.anisotropyEnable);
+      AssertSameValue(8.0, VkSampler.CreateInfo.maxAnisotropy, 1e-4);
+      AssertEquals('compareEnable must be VK_TRUE when CompareEnable = True',
+        VK_TRUE, VkSampler.CreateInfo.compareEnable);
+      AssertEquals('compareOp must translate coLessOrEqual -> VK_COMPARE_OP_LESS_OR_EQUAL',
+        VK_COMPARE_OP_LESS_OR_EQUAL, VkSampler.CreateInfo.compareOp);
+      AssertSameValue(1.0, VkSampler.CreateInfo.minLod, 1e-4);
+      AssertSameValue(6.0, VkSampler.CreateInfo.maxLod, 1e-4);
+    finally
+      FreeAndNil(VkSampler);
+    end;
+
+    { 2. TTexturePropertiesNode.GUITexture = True -> downgrades mipmapped minFilter and clamps MipLevels = 1 }
+    PixTexGUI.FdImage.Value := TRGBAlphaImage.Create(8, 8);
+    TexPropsGUI := TTexturePropertiesNode.Create;
+    TexPropsGUI.MinificationFilter := minLinearMipmapLinear;
+    TexPropsGUI.MagnificationFilter := magNearest;
+    TexPropsGUI.GUITexture := True;
+    PixTexGUI.TextureProperties := TexPropsGUI;
+    TTextureResources.Prepare(RenderOptions, PixTexGUI);
+    ResGUI := TTextureResources.Get(PixTexGUI) as TImageTextureResource;
+    AssertEquals('GUITexture = True must clamp MipLevels to 1', 1, Integer(ResGUI.RHITexture.Desc.MipLevels));
+    VkSampGUI := ResGUI.RHISampler as TVulkanRHISampler;
+    AssertSameValue(0.0, VkSampGUI.CreateInfo.maxLod, 1e-4);
+    AssertEquals('magNearest must translate to VK_FILTER_NEAREST', VK_FILTER_NEAREST, VkSampGUI.CreateInfo.magFilter);
+
+    { 3. Non-mipmapped TTexturePropertiesNode.MinificationFilter (minNearest) -> clamps MipLevels = 1 and maxLod = 0 }
+    PixTexNoMip.FdImage.Value := TRGBAlphaImage.Create(8, 8);
+    TexPropsNoMip := TTexturePropertiesNode.Create;
+    TexPropsNoMip.MinificationFilter := minNearest;
+    PixTexNoMip.TextureProperties := TexPropsNoMip;
+    TTextureResources.Prepare(RenderOptions, PixTexNoMip);
+    ResNoMip := TTextureResources.Get(PixTexNoMip) as TImageTextureResource;
+    AssertEquals('Non-mipmapped minNearest must clamp MipLevels to 1', 1, Integer(ResNoMip.RHITexture.Desc.MipLevels));
+    VkSampNoMip := ResNoMip.RHISampler as TVulkanRHISampler;
+    AssertEquals('minNearest -> VK_FILTER_NEAREST',
+      VK_FILTER_NEAREST, VkSampNoMip.CreateInfo.minFilter);
+    AssertSameValue(0.0, VkSampNoMip.CreateInfo.maxLod, 1e-4);
+
+    { 4. TTexturePropertiesNode.GenerateMipMaps = True + AnisotropicDegree = 4.0 -> MipLevels = 4 (8x8->4x4->2x2->1x1) }
+    PixTexMip.FdImage.Value := TRGBAlphaImage.Create(8, 8);
+    TexPropsMip := TTexturePropertiesNode.Create;
+    TexPropsMip.MinificationFilter := minLinearMipmapLinear;
+    TexPropsMip.GenerateMipMaps := True;
+    TexPropsMip.AnisotropicDegree := 4.0;
+    TexPropsMip.BoundaryModeS := bmMirroredRepeat;
+    TexPropsMip.BoundaryModeT := bmClampToEdge;
+    PixTexMip.TextureProperties := TexPropsMip;
+    TTextureResources.Prepare(RenderOptions, PixTexMip);
+    ResMip := TTextureResources.Get(PixTexMip) as TImageTextureResource;
+    AssertEquals('GenerateMipMaps = True on 8x8 texture must allocate 4 MipLevels', 4, Integer(ResMip.RHITexture.Desc.MipLevels));
+    VkSampMip := ResMip.RHISampler as TVulkanRHISampler;
+    AssertEquals('AnisotropicDegree = 4.0 must enable sampler anisotropy', VK_TRUE, VkSampMip.CreateInfo.anisotropyEnable);
+    AssertSameValue(4.0, VkSampMip.CreateInfo.maxAnisotropy, 1e-4);
+    AssertSameValue(3.0, VkSampMip.CreateInfo.maxLod, 1e-4);
+    AssertEquals('BoundaryModeS = bmMirroredRepeat -> VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT',
+      VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT, VkSampMip.CreateInfo.addressModeU);
+    AssertEquals('BoundaryModeT = bmClampToEdge -> VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE',
+      VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VkSampMip.CreateInfo.addressModeV);
+  finally
+    FreeAndNil(PixTexMip);
+    FreeAndNil(PixTexNoMip);
+    FreeAndNil(PixTexGUI);
+    FreeAndNil(RenderOptions);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCompositeCubeMapAnd3DTextureMipmapChainUploadRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  RenderOptions: TCastleRenderOptions;
+  CubeComp, VolComp: TCompositeImage;
+  CubeFile, VolFile: String;
+  Side: TCubeMapSide;
+  CubeNode: TImageCubeMapTextureNode;
+  CubeProps: TTexturePropertiesNode;
+  CubeRes: TImageCubeMapTextureResource;
+  CubeVkTex: TVulkanRHITexture;
+  VolNode: TImageTexture3DNode;
+  VolProps: TTexturePropertiesNode;
+  VolRes: T3DTextureResource;
+  VolVkTex: TVulkanRHITexture;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9002)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+
+  RenderOptions := TCastleRenderOptions.Create(nil);
+  CubeComp := TCompositeImage.Create;
+  VolComp := TCompositeImage.Create;
+  CubeNode := TImageCubeMapTextureNode.Create;
+  VolNode := TImageTexture3DNode.Create;
+  CubeFile := GetTempFileNamePrefix + '_cubemap_mips.dds';
+  VolFile := GetTempFileNamePrefix + '_volume_mips.dds';
+  try
+    { 1. Build a 4x4 cubemap DDS with 2 mipmap levels (4x4 and 2x2 across all 6 faces = 12 subresources) }
+    CubeComp.Width := 4;
+    CubeComp.Height := 4;
+    CubeComp.Depth := 1;
+    CubeComp.CompositeType := ctCubeMap;
+    CubeComp.CubeMapSides := AllCubeMapSides;
+    CubeComp.Mipmaps := True;
+    CubeComp.MipmapsCount := 2;
+    for Side := Low(TCubeMapSide) to High(TCubeMapSide) do
+    begin
+      CubeComp.Images.Add(TRGBAlphaImage.Create(4, 4, 1));
+      CubeComp.Images.Add(TRGBAlphaImage.Create(2, 2, 1));
+    end;
+    CubeComp.SaveToFile(FilenameToUriSafe(CubeFile));
+
+    CubeProps := TTexturePropertiesNode.Create;
+    CubeProps.MinificationFilter := minLinearMipmapLinear;
+    CubeProps.GenerateMipMaps := True;
+    CubeNode.TextureProperties := CubeProps;
+    CubeNode.SetUrl([FilenameToUriSafe(CubeFile)]);
+    TTextureResources.Prepare(RenderOptions, CubeNode);
+    CubeRes := TTextureResources.Get(CubeNode) as TImageCubeMapTextureResource;
+    AssertTrue('CubeRes.RHITexture must be created', CubeRes.RHITexture <> nil);
+    CubeVkTex := CubeRes.RHITexture as TVulkanRHITexture;
+    AssertEquals('CubeVkTex.Desc.MipLevels must match Composite.MipmapsCount (2)', 2, Integer(CubeVkTex.Desc.MipLevels));
+    AssertEquals('CubeVkTex must upload all 6 faces * 2 mip levels = 12 subresources',
+      12, Integer(CubeVkTex.TotalSubresourceUploads));
+    AssertEquals('CubeVkTex MaxUploadedMipLevel must be 1', 1, Integer(CubeVkTex.MaxUploadedMipLevel));
+    AssertEquals('CubeVkTex MaxUploadedArrayLayer must be 5', 5, Integer(CubeVkTex.MaxUploadedArrayLayer));
+
+    { 2. Build a 4x4x2 3D volume DDS with 2 mipmap levels (4x4x2 and 2x2x1 = 2 subresources) }
+    VolComp.Width := 4;
+    VolComp.Height := 4;
+    VolComp.Depth := 2;
+    VolComp.CompositeType := ctVolume;
+    VolComp.Mipmaps := True;
+    VolComp.MipmapsCount := 2;
+    VolComp.Images.Add(TRGBAlphaImage.Create(4, 4, 2));
+    VolComp.Images.Add(TRGBAlphaImage.Create(2, 2, 1));
+    VolComp.SaveToFile(FilenameToUriSafe(VolFile));
+
+    VolProps := TTexturePropertiesNode.Create;
+    VolProps.MinificationFilter := minLinearMipmapLinear;
+    VolProps.GenerateMipMaps := True;
+    VolNode.TextureProperties := VolProps;
+    VolNode.SetUrl([FilenameToUriSafe(VolFile)]);
+    TTextureResources.Prepare(RenderOptions, VolNode);
+    VolRes := TTextureResources.Get(VolNode) as T3DTextureResource;
+    AssertTrue('VolRes.RHITexture must be created', VolRes.RHITexture <> nil);
+    VolVkTex := VolRes.RHITexture as TVulkanRHITexture;
+    AssertEquals('VolVkTex.Desc.MipLevels must match Composite.Images.Count (2)', 2, Integer(VolVkTex.Desc.MipLevels));
+    AssertEquals('VolVkTex must upload both 3D mip levels (Mip 0 and Mip 1)',
+      2, Integer(VolVkTex.TotalSubresourceUploads));
+    AssertEquals('VolVkTex MaxUploadedMipLevel must be 1', 1, Integer(VolVkTex.MaxUploadedMipLevel));
+  finally
+    CheckDeleteFile(CubeFile, True);
+    CheckDeleteFile(VolFile, True);
+    FreeAndNil(VolNode);
+    FreeAndNil(CubeNode);
+    FreeAndNil(VolComp);
+    FreeAndNil(CubeComp);
+    FreeAndNil(RenderOptions);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestPhongSpecularAndAmbientTextureLinearColorSpaceDecodeRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedColorSpace: TColorSpace;
+  ScenePhong, SceneUnlit: TCastleScene;
+  RootPhong, RootUnlit: TX3DRootNode;
+  ShapePhong, ShapeUnlit: TShapeNode;
+  AppPhong, AppUnlit: TAppearanceNode;
+  MatPhong: TMaterialNode;
+  MatUnlit: TUnlitMaterialNode;
+  SpecTex, AmbTex, EmissiveTex: TPixelTextureNode;
+  BoxPhong, BoxUnlit: TBoxNode;
+  RendererShapePhong, RendererShapeUnlit: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  FragPhongLinear, FragUnlitLinear: String;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9003)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedColorSpace := CastleRenderOptions.ColorSpace;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+
+  ScenePhong := TCastleScene.Create(nil);
+  SceneUnlit := TCastleScene.Create(nil);
+  try
+    CastleRenderOptions.ColorSpace := csLinear;
+
+    { 1. Phong TMaterialNode with SpecularTexture and AmbientTexture in csLinear color space }
+    RootPhong := TX3DRootNode.Create;
+    ShapePhong := TShapeNode.Create;
+    AppPhong := TAppearanceNode.Create;
+    MatPhong := TMaterialNode.Create;
+    SpecTex := TPixelTextureNode.Create;
+    SpecTex.FdImage.Value := TRGBImage.Create(2, 2);
+    AmbTex := TPixelTextureNode.Create;
+    AmbTex.FdImage.Value := TRGBImage.Create(2, 2);
+    MatPhong.SpecularTexture := SpecTex;
+    MatPhong.AmbientTexture := AmbTex;
+    AppPhong.Material := MatPhong;
+    BoxPhong := TBoxNode.Create;
+    ShapePhong.Appearance := AppPhong;
+    ShapePhong.Geometry := BoxPhong;
+    RootPhong.AddChildren(ShapePhong);
+    ScenePhong.Load(RootPhong, True);
+
+    RendererShapePhong := TX3DRendererShape(ScenePhong.Shapes.TraverseList(True, True)[0]);
+    RendererShapePhong.PrepareRHIBuffers(ScenePhong.RenderOptions, 1);
+    RendererShapePhong.UploadRHIMaterialToCache(ShadingModel);
+    FragPhongLinear := RendererShapePhong.Cache.RHIFragmentShaderSource;
+
+    AssertTrue('Phong SpecularTexture in csLinear must decode sRGB via pow(max(mrSample.rgb, vec3(0.0)), vec3(2.2))',
+      Pos('castle_specular_color *= pow(max(mrSample.rgb, vec3(0.0)), vec3(2.2));', FragPhongLinear) > 0);
+    AssertTrue('Phong AmbientTexture in csLinear must decode sRGB via pow(max(texture(castle_occlusion_texture, castle_tex_coord0).rgb, vec3(0.0)), vec3(2.2))',
+      Pos('castle_ambient_color *= pow(max(texture(castle_occlusion_texture, castle_tex_coord0).rgb, vec3(0.0)), vec3(2.2));', FragPhongLinear) > 0);
+
+    { 2. Unlit material with EmissiveTexture in csLinear color space }
+    RootUnlit := TX3DRootNode.Create;
+    ShapeUnlit := TShapeNode.Create;
+    AppUnlit := TAppearanceNode.Create;
+    MatUnlit := TUnlitMaterialNode.Create;
+    EmissiveTex := TPixelTextureNode.Create;
+    EmissiveTex.FdImage.Value := TRGBImage.Create(2, 2);
+    MatUnlit.EmissiveTexture := EmissiveTex;
+    AppUnlit.Material := MatUnlit;
+    BoxUnlit := TBoxNode.Create;
+    ShapeUnlit.Appearance := AppUnlit;
+    ShapeUnlit.Geometry := BoxUnlit;
+    RootUnlit.AddChildren(ShapeUnlit);
+    SceneUnlit.Load(RootUnlit, True);
+
+    RendererShapeUnlit := TX3DRendererShape(SceneUnlit.Shapes.TraverseList(True, True)[0]);
+    RendererShapeUnlit.PrepareRHIBuffers(SceneUnlit.RenderOptions, 0);
+    RendererShapeUnlit.UploadRHIMaterialToCache(ShadingModel);
+    FragUnlitLinear := RendererShapeUnlit.Cache.RHIFragmentShaderSource;
+
+    AssertTrue('Unlit EmissiveTexture in csLinear must decode sRGB via pow(max(..., vec3(0.0)), vec3(2.2))',
+      Pos('baseColor.rgb = pow(max(baseColor.rgb, vec3(0.0)), vec3(2.2));', FragUnlitLinear) > 0);
+  finally
+    CastleRenderOptions.ColorSpace := SavedColorSpace;
+    FreeAndNil(SceneUnlit);
+    FreeAndNil(ScenePhong);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);

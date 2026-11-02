@@ -626,6 +626,8 @@ begin
   begin
     Filter.Minification := FinalMinificationFilter(TextureProperties.MinificationFilter);
     Filter.Magnification := FinalMagnificationFilter(TextureProperties.MagnificationFilter);
+    if TextureProperties.GUITexture then
+      Filter.DisableMipmaps;
     Anisotropy := TextureProperties.AnisotropicDegree;
     GUITexture := TextureProperties.GUITexture;
 
@@ -2278,7 +2280,7 @@ var
   Anisotropy: TGLfloat;
   GUITexture: boolean;
   Composite: TCompositeImage;
-  CubeSize, MipLevels: Cardinal;
+  CubeSize, MipLevels, MipIdx: Cardinal;
   TexDesc: TRHITextureDesc;
   Side: TCubeMapSide;
 begin
@@ -2291,8 +2293,12 @@ begin
         Filter, Anisotropy, GUITexture);
       CubeSize := Max(1, Composite.Width);
       if Filter.NeedsMipmaps then
-        MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(CubeSize))) + 1)
-      else
+      begin
+        if Composite.Mipmaps and (Composite.MipmapsCount > 0) then
+          MipLevels := Max(Cardinal(1), Composite.MipmapsCount)
+        else
+          MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(CubeSize))) + 1);
+      end else
         MipLevels := 1;
       TexDesc := TRHITextureDesc.CreateCube(CubeSize, pfRGBA8_UNorm,
         [tuSampled, tuTransferDst, tuTransferSrc], MipLevels);
@@ -2300,7 +2306,14 @@ begin
       FreeAndNil(FRHITexture);
       FRHITexture := RHIDevice.CreateTexture(TexDesc);
       for Side := Low(TCubeMapSide) to High(TCubeMapSide) do
-        FRHITexture.UploadImage(Composite.CubeMapImage(Side), 0, Ord(Side));
+      begin
+        FRHITexture.UploadImage(Composite.CubeMapImage(Side, 0), 0, Ord(Side));
+        if (MipLevels > 1) and Composite.Mipmaps and (Composite.MipmapsCount > 1) then
+        begin
+          for MipIdx := 1 to Min(Composite.MipmapsCount - 1, MipLevels - 1) do
+            FRHITexture.UploadImage(Composite.CubeMapImage(Side, MipIdx), MipIdx, Ord(Side));
+        end;
+      end;
       CreateRHISampler(Filter, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, Anisotropy, MipLevels);
     finally
       FreeAndNil(Composite);
@@ -2542,7 +2555,7 @@ var
   GUITexture: boolean;
   TextureWrap: TTextureWrap3D;
   TexDesc: TRHITextureDesc;
-  MaxDim, MipLevels: Cardinal;
+  MaxDim, MipLevels, MipIdx: Cardinal;
 begin
   if RHIDevice <> nil then
   begin
@@ -2556,8 +2569,13 @@ begin
     MaxDim := Max(1, Max(TextureNode.TextureImage.Width,
       Max(TextureNode.TextureImage.Height, TextureNode.TextureImage.Depth)));
     if Filter.NeedsMipmaps then
-      MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(MaxDim))) + 1)
-    else
+    begin
+      if (TextureNode.TextureComposite <> nil) and TextureNode.TextureComposite.Mipmaps and
+         (TextureNode.TextureComposite.Images.Count > 0) then
+        MipLevels := Max(Cardinal(1), Cardinal(TextureNode.TextureComposite.Images.Count))
+      else
+        MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(MaxDim))) + 1);
+    end else
       MipLevels := 1;
 
     TexDesc := TRHITextureDesc.Create3D(
@@ -2569,6 +2587,13 @@ begin
     FreeAndNil(FRHITexture);
     FRHITexture := RHIDevice.CreateTexture(TexDesc);
     FRHITexture.UploadImage(TextureNode.TextureImage, 0, 0);
+    if (MipLevels > 1) and (TextureNode.TextureComposite <> nil) and
+       TextureNode.TextureComposite.Mipmaps and
+       (TextureNode.TextureComposite.Images.Count > 1) then
+    begin
+      for MipIdx := 1 to Min(Cardinal(TextureNode.TextureComposite.Images.Count) - 1, MipLevels - 1) do
+        FRHITexture.UploadImage(TextureNode.TextureComposite.Images[MipIdx], MipIdx, 0);
+    end;
     CreateRHISampler(Filter, BoundaryModeS, BoundaryModeT, BoundaryModeR, Anisotropy, MipLevels);
     Exit;
   end;

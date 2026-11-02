@@ -2053,8 +2053,14 @@ begin
         '  vec3 castle_ambient_color = baseColor.rgb * %.4f;',
         [FRHIPhongAmbientIntensity]);
       if AHasMetallicRoughnessTex and FRHIPhongHasSpecularTex then
-        PhongSetupSnippet := PhongSetupSnippet + LineEnding +
-          '  castle_specular_color *= mrSample.rgb;';
+      begin
+        if HasLinearColorSpace then
+          PhongSetupSnippet := PhongSetupSnippet + LineEnding +
+            '  castle_specular_color *= pow(max(mrSample.rgb, vec3(0.0)), vec3(2.2));'
+        else
+          PhongSetupSnippet := PhongSetupSnippet + LineEnding +
+            '  castle_specular_color *= mrSample.rgb;';
+      end;
       if FRHIPhongHasSeparateShininessTex then
         PhongSetupSnippet := PhongSetupSnippet + LineEnding +
           '  castle_shininess_exp = max(castle_shininess_exp * texture(castle_shininess_texture, castle_tex_coord0).a, 1.0);'
@@ -2062,9 +2068,16 @@ begin
         PhongSetupSnippet := PhongSetupSnippet + LineEnding +
           '  castle_shininess_exp = max(castle_shininess_exp * mrSample.a, 1.0);';
       if AHasOcclusionTex and FRHIPhongHasAmbientTex then
-        PhongSetupSnippet := PhongSetupSnippet + LineEnding +
-          '  castle_ambient_color *= texture(castle_occlusion_texture, castle_tex_coord0).rgb;' + LineEnding +
-          '  ao = 1.0;';
+      begin
+        if HasLinearColorSpace then
+          PhongSetupSnippet := PhongSetupSnippet + LineEnding +
+            '  castle_ambient_color *= pow(max(texture(castle_occlusion_texture, castle_tex_coord0).rgb, vec3(0.0)), vec3(2.2));' + LineEnding +
+            '  ao = 1.0;'
+        else
+          PhongSetupSnippet := PhongSetupSnippet + LineEnding +
+            '  castle_ambient_color *= texture(castle_occlusion_texture, castle_tex_coord0).rgb;' + LineEnding +
+            '  ao = 1.0;';
+      end;
       if (DedupFragEffect <> '') and HasPlugFunction(DedupFragEffect, 'PLUG_material_specular') then
         PhongSetupSnippet := PhongSetupSnippet + LineEnding +
           BuildChainedPlugCalls(DedupFragEffect, 'PLUG_material_specular', 'castle_specular_color', '  ');
@@ -2379,6 +2392,19 @@ begin
         '  baseColor *= texture(castle_base_color_texture, castle_tex_coord0);' + LineEnding +
         '  baseColor.rgb = pow(max(baseColor.rgb, vec3(0.0)), vec3(2.2));',
         []);
+    if HasLinearColorSpace and AHasEmissiveTex then
+    begin
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        '    unlitColor += texture(castle_emissive_texture, castle_tex_coord0).rgb;',
+        '    unlitColor += pow(max(texture(castle_emissive_texture, castle_tex_coord0).rgb, vec3(0.0)), vec3(2.2));',
+        []);
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        '  emissive += texture(castle_emissive_texture, castle_tex_coord0).rgb;',
+        '  emissive += pow(max(texture(castle_emissive_texture, castle_tex_coord0).rgb, vec3(0.0)), vec3(2.2));',
+        []);
+    end;
     if AHasTangents and AHasNormalTex then
       FRHIFragmentShaderSource := StringReplace(
         FRHIFragmentShaderSource,
