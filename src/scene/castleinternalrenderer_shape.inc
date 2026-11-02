@@ -109,7 +109,13 @@
       out ASecondTex: TRHITexture;
       out ASecondSampler: TRHISampler;
       out ACombineRGB, ACombineAlpha: TCombine;
-      out AConstantColor: TVector4): Boolean;
+      out AConstantColor: TVector4): Boolean; overload;
+
+    function ExtractRHISecondTexture(
+      out ASecondTex: TRHITexture;
+      out ASecondSampler: TRHISampler;
+      out AEnv: TTextureEnv;
+      out AConstantColor: TVector4): Boolean; overload;
 
     { Extracts the first enabled X3D TClipPlaneNode from State.ClipPlanes transformed
       into scene/world space via PlaneTransform(ClipPlane.Node.FdPlane.Value, ClipPlane.Transform). }
@@ -146,11 +152,15 @@
       out AShadowMapSamplers: array of TRHISampler): Cardinal;
 
     { Extracts procedural texture coordinate generation mode (TTextureCoordinateGeneratorNode
-      or implicit tgBounds2d/tgBounds3d) and object-space S/T plane vectors from Cache.Arrays
+      or implicit tgBounds2d/tgBounds3d) and object-space S/T/R plane vectors from Cache.Arrays
       or Geometry.InternalTexCoord. }
     function ExtractRHITexCoordGen(
       out AGeneration: TTextureCoordinateGeneration;
-      out ABoundsS, ABoundsT: TVector4): Boolean;
+      out ABoundsS, ABoundsT: TVector4): Boolean; overload;
+
+    function ExtractRHITexCoordGen(
+      out AGeneration: TTextureCoordinateGeneration;
+      out ABoundsS, ABoundsT, ABoundsR: TVector4): Boolean; overload;
 
     { Extracts effective point size from RenderOptions.PointSize and Appearance.PointProperties
       (TPointPropertiesNode). Returns True if effective point size > 1.0. }
@@ -850,6 +860,19 @@ function TX3DRendererShape.ExtractRHISecondTexture(
   out ASecondSampler: TRHISampler;
   out ACombineRGB, ACombineAlpha: TCombine;
   out AConstantColor: TVector4): Boolean;
+var
+  Env: TTextureEnv;
+begin
+  Result := ExtractRHISecondTexture(ASecondTex, ASecondSampler, Env, AConstantColor);
+  ACombineRGB := Env.Combine[cRGB];
+  ACombineAlpha := Env.Combine[cAlpha];
+end;
+
+function TX3DRendererShape.ExtractRHISecondTexture(
+  out ASecondTex: TRHITexture;
+  out ASecondSampler: TRHISampler;
+  out AEnv: TTextureEnv;
+  out AConstantColor: TVector4): Boolean;
 
   function ResolveSingleRHITexture(const ARawNode: TX3DNode;
     out ASampler: TRHISampler): TRHITexture;
@@ -906,8 +929,7 @@ var
 begin
   ASecondTex := nil;
   ASecondSampler := nil;
-  ACombineRGB := coModulate;
-  ACombineAlpha := coModulate;
+  AEnv.Init('MODULATE', '', '');
   AConstantColor := Vector4(1, 1, 1, 1);
   Result := False;
 
@@ -973,8 +995,7 @@ begin
       Env.Init(ModeStr, SourceStr, FunctionStr);
       if not Env.Disabled then
       begin
-        ACombineRGB := Env.Combine[cRGB];
-        ACombineAlpha := Env.Combine[cAlpha];
+        AEnv := Env;
         ASecondTex := ResolveSingleRHITexture(MultiTex.FdTexture[1], ASecondSampler);
         Result := ASecondTex <> nil;
       end;
@@ -1246,20 +1267,114 @@ end;
 function TX3DRendererShape.ExtractRHITexCoordGen(
   out AGeneration: TTextureCoordinateGeneration;
   out ABoundsS, ABoundsT: TVector4): Boolean;
+var
+  BoundsR: TVector4;
+begin
+  Result := ExtractRHITexCoordGen(AGeneration, ABoundsS, ABoundsT, BoundsR);
+end;
+
+function TX3DRendererShape.ExtractRHITexCoordGen(
+  out AGeneration: TTextureCoordinateGeneration;
+  out ABoundsS, ABoundsT, ABoundsR: TVector4): Boolean;
 const
   ProjectorScalingMatrix: TMatrix4 = (Data:
   ( (0.5,   0,   0, 0),
     (  0, 0.5,   0, 0),
     (  0,   0, 0.5, 0),
     (0.5, 0.5, 0.5, 1) ));
+
+  procedure ComputeBoundsVectors(const AIs3D: Boolean);
+  var
+    Box: TBox3D;
+    BoxSize: TVector3;
+    SCoord, TCoord: T3DAxis;
+    XStart, YStart, ZStart, XSize, YSize, ZSize, ScaleT: Single;
+  begin
+    Box := LocalBoundingBox;
+    if Box.IsEmpty then
+      Exit;
+    if AIs3D then
+    begin
+      XStart := Box.Data[0].X;
+      YStart := Box.Data[0].Y;
+      ZStart := Box.Data[1].Z;
+      XSize := Box.Data[1].X - Box.Data[0].X;
+      YSize := Box.Data[1].Y - Box.Data[0].Y;
+      ZSize := Box.Data[0].Z - Box.Data[1].Z;
+      if not IsZero(XSize) then
+        ABoundsS := Vector4(1 / XSize, 0, 0, -XStart / XSize);
+      if not IsZero(YSize) then
+        ABoundsT := Vector4(0, 1 / YSize, 0, -YStart / YSize);
+      if not IsZero(ZSize) then
+        ABoundsR := Vector4(0, 0, 1 / ZSize, -ZStart / ZSize);
+    end else
+    begin
+      BoxSize := Box.Size;
+      if Geometry <> nil then
+        Geometry.GetTextureBounds2DST(BoxSize, SCoord, TCoord)
+      else
+      begin
+        SCoord := 0;
+        TCoord := 1;
+      end;
+      ABoundsS := TVector4.Zero;
+      ABoundsT := TVector4.Zero;
+      if not IsZero(BoxSize[SCoord]) then
+      begin
+        ABoundsS.Data[SCoord] := 1.0 / BoxSize[SCoord];
+        ABoundsS.Data[3] := -Box.Data[0].Data[SCoord] / BoxSize[SCoord];
+      end;
+      if not IsZero(BoxSize[TCoord]) and not IsZero(BoxSize[SCoord]) then
+      begin
+        ScaleT := (BoxSize[TCoord] / BoxSize[SCoord]) / BoxSize[TCoord];
+        ABoundsT.Data[TCoord] := ScaleT;
+        ABoundsT.Data[3] := -Box.Data[0].Data[TCoord] * ScaleT;
+      end;
+    end;
+  end;
+
+  function FindMainSingleTextureNode: TX3DNode;
+  var
+    ShapeState: TX3DGraphTraverseState;
+    App: TAppearanceNode;
+  begin
+    Result := nil;
+    ShapeState := OriginalState;
+    if ShapeState = nil then
+      ShapeState := State;
+    if (ShapeState <> nil) and (ShapeState.ShapeNode <> nil) then
+      App := ShapeState.ShapeNode.Appearance
+    else if ShapeState <> nil then
+      App := ShapeState.Appearance
+    else
+      App := nil;
+    if App <> nil then
+    begin
+      Result := App.Texture;
+      if (Result is TMultiTextureNode) and (TMultiTextureNode(Result).FdTexture.Count > 0) then
+        Result := TMultiTextureNode(Result).FdTexture[0];
+      if Result = nil then
+      begin
+        if App.Material is TPhysicalMaterialNode then
+          Result := TPhysicalMaterialNode(App.Material).FdBaseTexture.Value
+        else if App.Material is TMaterialNode then
+          Result := TMaterialNode(App.Material).DiffuseTexture
+        else if App.Material is TUnlitMaterialNode then
+          Result := TUnlitMaterialNode(App.Material).EmissiveTexture;
+      end;
+    end;
+  end;
+
 var
-  TexCoordNode, ProjectorValue: TX3DNode;
+  TexCoordNode, ProjectorValue, MainTexNode: TX3DNode;
   ModeStr: String;
   ProjectorMatrix: TMatrix4;
+  IsTex3D: Boolean;
 begin
   AGeneration := tgExplicit;
   ABoundsS := Vector4(1, 0, 0, 0);
   ABoundsT := Vector4(0, 1, 0, 0);
+  ABoundsR := Vector4(0, 0, 1, 0);
   Result := False;
   ProjectorMatrix := TMatrix4.Identity;
 
@@ -1268,6 +1383,7 @@ begin
     AGeneration := Cache.Arrays.TexCoords[0].Generation;
     ABoundsS := Cache.Arrays.TexCoords[0].GenerationBoundsVector[0];
     ABoundsT := Cache.Arrays.TexCoords[0].GenerationBoundsVector[1];
+    ABoundsR := Cache.Arrays.TexCoords[0].GenerationBoundsVector[2];
     if (AGeneration = tgProjection) and
        Assigned(Cache.Arrays.TexCoords[0].GenerationProjectorMatrix) then
     begin
@@ -1279,8 +1395,13 @@ begin
       Exit;
   end;
 
+  MainTexNode := FindMainSingleTextureNode;
+  IsTex3D := (MainTexNode is TAbstractTexture3DNode) or
+    ((MainTexNode is TShaderTextureNode) and
+     (TShaderTextureNode(MainTexNode).FdDefaultTexCoord.Value = 'BOUNDS3D'));
+
   if (Geometry <> nil) and (State <> nil) and
-     Geometry.InternalTexCoord(State, TexCoordNode) then
+     Geometry.InternalTexCoord(State, TexCoordNode) and (TexCoordNode <> nil) then
   begin
     if TexCoordNode is TProjectedTextureCoordinateNode then
     begin
@@ -1314,9 +1435,35 @@ begin
           Cache.SetTexCoordGenProjectorMatrix(ProjectorMatrix);
       end
       else if ModeStr = 'MIRROR-PLANE' then AGeneration := tgMirrorPlane
+      else if ModeStr = 'BOUNDS' then
+      begin
+        if IsTex3D then
+          AGeneration := tgBounds3d
+        else
+          AGeneration := tgBounds2d;
+      end
       else if ModeStr = 'BOUNDS2D' then AGeneration := tgBounds2d
       else if ModeStr = 'BOUNDS3D' then AGeneration := tgBounds3d;
+      if AGeneration in [tgBounds2d, tgBounds3d] then
+        ComputeBoundsVectors(AGeneration = tgBounds3d);
       Result := AGeneration <> tgExplicit;
+    end;
+  end;
+
+  if not Result then
+  begin
+    if IsTex3D and (OriginalGeometry <> nil) and OriginalGeometry.AutoGenerate3DTexCoords then
+    begin
+      AGeneration := tgBounds3d;
+      ComputeBoundsVectors(True);
+      Result := True;
+    end else
+    if (MainTexNode is TShaderTextureNode) and
+       (TShaderTextureNode(MainTexNode).FdDefaultTexCoord.Value = 'BOUNDS2D') then
+    begin
+      AGeneration := tgBounds2d;
+      ComputeBoundsVectors(False);
+      Result := True;
     end;
   end;
 end;
@@ -1449,15 +1596,67 @@ var
       end;
   end;
 
+  procedure AppendTextureNodeEffects(const ATexNode: TX3DNode);
+  var
+    I: Integer;
+    MultiTex: TMultiTextureNode;
+  begin
+    if ATexNode = nil then
+      Exit;
+    if ATexNode is TMultiTextureNode then
+    begin
+      MultiTex := TMultiTextureNode(ATexNode);
+      for I := 0 to MultiTex.FdTexture.Count - 1 do
+        AppendTextureNodeEffects(MultiTex.FdTexture[I]);
+    end else
+    if ATexNode is TAbstractSingleTextureNode then
+      AppendEffectList(TAbstractSingleTextureNode(ATexNode).FdEffects.InternalItems);
+  end;
+
+var
+  ShapeState: TX3DGraphTraverseState;
+  App: TAppearanceNode;
+  I: Integer;
 begin
   AVertexEffectCode := '';
   AFragmentEffectCode := '';
   UseEyeWorldSpaceLib := False;
+  ShapeState := OriginalState;
+  if ShapeState = nil then
+    ShapeState := State;
+  if ShapeState <> nil then
+  begin
+    if ShapeState.ShapeNode <> nil then
+      App := ShapeState.ShapeNode.Appearance
+    else
+      App := ShapeState.Appearance;
+    if App <> nil then
+    begin
+      AppendEffectList(App.FdEffects.InternalItems);
+      AppendTextureNodeEffects(App.Texture);
+      if App.Material is TPhysicalMaterialNode then
+      begin
+        AppendTextureNodeEffects(TPhysicalMaterialNode(App.Material).FdBaseTexture.Value);
+        AppendTextureNodeEffects(TPhysicalMaterialNode(App.Material).FdNormalTexture.Value);
+        AppendTextureNodeEffects(TPhysicalMaterialNode(App.Material).EmissiveTexture);
+      end else
+      if App.Material is TMaterialNode then
+      begin
+        AppendTextureNodeEffects(TMaterialNode(App.Material).DiffuseTexture);
+        AppendTextureNodeEffects(TMaterialNode(App.Material).NormalTexture);
+        AppendTextureNodeEffects(TMaterialNode(App.Material).EmissiveTexture);
+      end else
+      if App.Material is TUnlitMaterialNode then
+        AppendTextureNodeEffects(TUnlitMaterialNode(App.Material).EmissiveTexture);
+    end;
+  end;
   if State <> nil then
   begin
-    if State.Appearance <> nil then
-      AppendEffectList(State.Appearance.FdEffects.InternalItems);
     AppendEffectList(State.Effects);
+    if State.Lights <> nil then
+      for I := 0 to State.Lights.Count - 1 do
+        if State.Lights.L[I].Node <> nil then
+          AppendEffectList(State.Lights.L[I].Node.FdEffects.InternalItems);
   end;
   if UseEyeWorldSpaceLib then
   begin
@@ -1699,6 +1898,23 @@ var
       end;
   end;
 
+  procedure ProcessTextureNodeEffects(const ATexNode: TX3DNode);
+  var
+    I: Integer;
+    MultiTex: TMultiTextureNode;
+  begin
+    if ATexNode = nil then
+      Exit;
+    if ATexNode is TMultiTextureNode then
+    begin
+      MultiTex := TMultiTextureNode(ATexNode);
+      for I := 0 to MultiTex.FdTexture.Count - 1 do
+        ProcessTextureNodeEffects(MultiTex.FdTexture[I]);
+    end else
+    if ATexNode is TAbstractSingleTextureNode then
+      ProcessEffectList(TAbstractSingleTextureNode(ATexNode).FdEffects.InternalItems);
+  end;
+
 var
   ShapeState: TX3DGraphTraverseState;
   App: TAppearanceNode;
@@ -1730,9 +1946,30 @@ begin
         Break;
       end;
     ProcessEffectList(App.FdEffects.InternalItems);
+    ProcessTextureNodeEffects(App.Texture);
+    if App.Material is TPhysicalMaterialNode then
+    begin
+      ProcessTextureNodeEffects(TPhysicalMaterialNode(App.Material).FdBaseTexture.Value);
+      ProcessTextureNodeEffects(TPhysicalMaterialNode(App.Material).FdNormalTexture.Value);
+      ProcessTextureNodeEffects(TPhysicalMaterialNode(App.Material).EmissiveTexture);
+    end else
+    if App.Material is TMaterialNode then
+    begin
+      ProcessTextureNodeEffects(TMaterialNode(App.Material).DiffuseTexture);
+      ProcessTextureNodeEffects(TMaterialNode(App.Material).NormalTexture);
+      ProcessTextureNodeEffects(TMaterialNode(App.Material).EmissiveTexture);
+    end else
+    if App.Material is TUnlitMaterialNode then
+      ProcessTextureNodeEffects(TUnlitMaterialNode(App.Material).EmissiveTexture);
   end;
   if State <> nil then
+  begin
     ProcessEffectList(State.Effects);
+    if State.Lights <> nil then
+      for I := 0 to State.Lights.Count - 1 do
+        if State.Lights.L[I].Node <> nil then
+          ProcessEffectList(State.Lights.L[I].Node.FdEffects.InternalItems);
+  end;
 
   if (UBOOffset > 0) and (Cache <> nil) then
     Cache.UploadUserEffectBlock(@UBOData[0], UBOOffset);
@@ -1767,10 +2004,10 @@ var
   EnvCubemapSampler, ShadowMapSampler, SecondSampler: TRHISampler;
   TexTransformMatrix, TexTransform1Matrix: TMatrix4;
   SecondConstColor: TVector4;
-  SecondCombineRGB, SecondCombineAlpha: TCombine;
+  SecondEnv: TTextureEnv;
   ClipPlanes: array[0..3] of TVector4;
   ClipPlaneCount: Cardinal;
-  TexGenBoundsS, TexGenBoundsT: TVector4;
+  TexGenBoundsS, TexGenBoundsT, TexGenBoundsR: TVector4;
   TexCoordGen: TTextureCoordinateGeneration;
   PointSize, ParallaxHeight: Single;
   VertEffectCode, FragEffectCode, ComposedVertCode, ComposedFragCode: String;
@@ -1793,12 +2030,12 @@ begin
     HasTexTransform := ExtractRHITextureTransform(TexTransformMatrix);
     HasTexTransform1 := ExtractRHITextureTransform1(TexTransform1Matrix);
     HasSecondTex := ExtractRHISecondTexture(
-      SecondTex, SecondSampler, SecondCombineRGB, SecondCombineAlpha, SecondConstColor);
+      SecondTex, SecondSampler, SecondEnv, SecondConstColor);
     ClipPlaneCount := ExtractRHIClipPlanes(ClipPlanes);
     HasClipPlane := ClipPlaneCount > 0;
     HasIBL := ExtractRHIEnvironmentLightTexture(EnvCubemapTex, EnvCubemapSampler);
     HasShadowMap := ExtractRHIShadowMap(ShadowMapTex, ShadowMapSampler);
-    HasTexCoordGen := ExtractRHITexCoordGen(TexCoordGen, TexGenBoundsS, TexGenBoundsT);
+    HasTexCoordGen := ExtractRHITexCoordGen(TexCoordGen, TexGenBoundsS, TexGenBoundsT, TexGenBoundsR);
     HasPointSize := ExtractRHIPointSize(PointSize);
     HasParallax := ExtractRHIParallaxBumpMapping(ParallaxHeight, SteepParallax);
     HasShaderEffects := ExtractRHIShaderEffects(VertEffectCode, FragEffectCode);
@@ -1809,9 +2046,9 @@ begin
         BaseColorMapIdx, NormalMapIdx, MetallicRoughnessMapIdx, EmissiveMapIdx, OcclusionMapIdx);
       Cache.SetTextureTransform(HasTexTransform, TexTransformMatrix);
       Cache.SetTextureTransform1(HasTexTransform1, TexTransform1Matrix);
-      Cache.SetSecondTexture(HasSecondTex, SecondCombineRGB, SecondCombineAlpha, SecondConstColor);
+      Cache.SetSecondTextureEnv(HasSecondTex, SecondEnv, SecondConstColor);
       Cache.SetClipPlanes(ClipPlanes, ClipPlaneCount);
-      Cache.SetTexCoordGen(TexCoordGen, TexGenBoundsS, TexGenBoundsT);
+      Cache.SetTexCoordGen(TexCoordGen, TexGenBoundsS, TexGenBoundsT, TexGenBoundsR);
       Cache.SetPointSize(PointSize);
       Cache.SetParallaxBumpMapping(HasParallax, SteepParallax, ParallaxHeight);
       Cache.SetShaderEffects(VertEffectCode, FragEffectCode);

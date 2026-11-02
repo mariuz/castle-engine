@@ -312,6 +312,9 @@ type
     procedure TestMultiTextureCombineModesAndTextured3DTextSpecializationRHI;
     procedure TestMultiTextureTransformSecondaryUVSpecializationRHI;
     procedure TestGeneratedShadowMapVSMAndCubeMapDepthAttachmentRHI;
+    procedure TestCubeMapAnd3DTextureBaseColorAndBounds3DSpecializationRHI;
+    procedure TestTextureNodeShaderTextureAndLightNodeEffectsSpecializationRHI;
+    procedure TestMultiTextureEnvScaleDot3ComplementAndAlphaReplicateRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -18504,6 +18507,281 @@ begin
     FreeAndNil(CubeNode);
     FreeAndNil(ShadowNode);
     FreeAndNil(RenderOpts);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCubeMapAnd3DTextureBaseColorAndBounds3DSpecializationRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  CubeScene, VolScene: TCastleScene;
+  CubeRoot, VolRoot: TX3DRootNode;
+  CubeShapeNode, VolShapeNode: TShapeNode;
+  CubeApp, VolApp: TAppearanceNode;
+  CubeMat, VolMat: TMaterialNode;
+  CubeTex: TGeneratedCubeMapTextureNode;
+  VolTex: TPixelTexture3DNode;
+  CubeSphere: TSphereNode;
+  VolBox: TBoxNode;
+  CubeRendererShape, VolRendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  CubeFrag, VolFrag: String;
+  I: Integer;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8301)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  CubeScene := nil;
+  VolScene := nil;
+  try
+    { 1. Cubemap texture on Appearance.Texture -> samplerCube + reflection lookup }
+    CubeRoot := TX3DRootNode.Create;
+    CubeShapeNode := TShapeNode.Create;
+    CubeApp := TAppearanceNode.Create;
+    CubeMat := TMaterialNode.Create;
+    CubeApp.Material := CubeMat;
+    CubeTex := TGeneratedCubeMapTextureNode.Create;
+    CubeTex.FdSize.Value := 64;
+    CubeApp.Texture := CubeTex;
+    CubeShapeNode.Appearance := CubeApp;
+    CubeSphere := TSphereNode.Create;
+    CubeShapeNode.Geometry := CubeSphere;
+    CubeRoot.AddChildren(CubeShapeNode);
+
+    CubeScene := TCastleScene.Create(nil);
+    CubeScene.Load(CubeRoot, True);
+    CubeRendererShape := TX3DRendererShape(CubeScene.Shapes.TraverseList(False, False)[0]);
+    CubeRendererShape.PrepareRHIBuffers(CubeScene.RenderOptions, 0);
+    CubeRendererShape.UploadRHIMaterialToCache(ShadingModel);
+
+    AssertEquals('RHIBaseColorTextureDimension must be tdCube',
+      Ord(tdCube), Ord(CubeRendererShape.Cache.RHIBaseColorTextureDimension));
+    CubeFrag := CubeRendererShape.Cache.RHIFragmentShaderSource;
+    AssertTrue('Cubemap fragment shader must declare uniform samplerCube castle_base_color_texture',
+      Pos('CASTLE_SAMPLER(1, 1) uniform samplerCube castle_base_color_texture;', CubeFrag) > 0);
+    AssertTrue('Cubemap fragment shader must sample texture(castle_base_color_texture, castle_cube_coord)',
+      Pos('baseColor *= texture(castle_base_color_texture, castle_cube_coord);', CubeFrag) > 0);
+
+    { 2. 3D Volume texture on Appearance.Texture -> sampler3D + tgBounds3d lookup }
+    VolRoot := TX3DRootNode.Create;
+    VolShapeNode := TShapeNode.Create;
+    VolApp := TAppearanceNode.Create;
+    VolMat := TMaterialNode.Create;
+    VolApp.Material := VolMat;
+    VolTex := TPixelTexture3DNode.Create;
+    VolTex.FdImage.Items.Clear;
+    VolTex.FdImage.Items.Add(3); { TexComponents = 3 (RGB) }
+    VolTex.FdImage.Items.Add(2); { Width = 2 }
+    VolTex.FdImage.Items.Add(2); { Height = 2 }
+    VolTex.FdImage.Items.Add(2); { Depth = 2 }
+    for I := 0 to 7 do
+      VolTex.FdImage.Items.Add($FF8040);
+    VolApp.Texture := VolTex;
+    VolShapeNode.Appearance := VolApp;
+    VolBox := TBoxNode.Create;
+    VolBox.Size := Vector3(4.0, 2.0, 8.0);
+    VolShapeNode.Geometry := VolBox;
+    VolRoot.AddChildren(VolShapeNode);
+
+    VolScene := TCastleScene.Create(nil);
+    VolScene.Load(VolRoot, True);
+    VolRendererShape := TX3DRendererShape(VolScene.Shapes.TraverseList(False, False)[0]);
+    VolRendererShape.PrepareRHIBuffers(VolScene.RenderOptions, 0);
+    VolRendererShape.UploadRHIMaterialToCache(ShadingModel);
+
+    AssertEquals('RHIBaseColorTextureDimension must be td3D',
+      Ord(td3D), Ord(VolRendererShape.Cache.RHIBaseColorTextureDimension));
+    AssertEquals('RHITexCoordGen must auto-select tgBounds3d for 3D texture on Box',
+      Ord(tgBounds3d), Ord(VolRendererShape.Cache.RHITexCoordGen));
+    AssertSameValue(-0.125, VolRendererShape.Cache.RHITexGenBoundsR.Z, 1e-4);
+    VolFrag := VolRendererShape.Cache.RHIFragmentShaderSource;
+    AssertTrue('3D texture fragment shader must declare uniform sampler3D castle_base_color_texture',
+      Pos('CASTLE_SAMPLER(1, 1) uniform sampler3D castle_base_color_texture;', VolFrag) > 0);
+    AssertTrue('3D texture fragment shader must sample texture(castle_base_color_texture, castle_tex3d_coord)',
+      Pos('baseColor *= texture(castle_base_color_texture, castle_tex3d_coord);', VolFrag) > 0);
+  finally
+    FreeAndNil(VolScene);
+    FreeAndNil(CubeScene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestTextureNodeShaderTextureAndLightNodeEffectsSpecializationRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TMaterialNode;
+  ShaderTex: TShaderTextureNode;
+  TexEffect, LightEffect: TEffectNode;
+  TexEffectPart, LightEffectPart: TEffectPartNode;
+  ScaleField: TSFFloat;
+  PointLight: TPointLightNode;
+  Box: TBoxNode;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  FragSrc: String;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8302)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  try
+    Root := TX3DRootNode.Create;
+    PointLight := TPointLightNode.Create;
+    LightEffect := TEffectNode.Create;
+    LightEffect.Language := slGLSL;
+    LightEffectPart := TEffectPartNode.Create;
+    LightEffectPart.ShaderType := stFragment;
+    LightEffectPart.Contents :=
+      'void PLUG_fragment_modify(inout vec4 fragment_color) {' + LineEnding +
+      '  fragment_color.rgb += vec3(0.05);' + LineEnding +
+      '}';
+    LightEffect.FdParts.Add(LightEffectPart);
+    PointLight.FdEffects.Add(LightEffect);
+    Root.AddChildren(PointLight);
+
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TMaterialNode.Create;
+    App.Material := Mat;
+
+    ShaderTex := TShaderTextureNode.Create;
+    TexEffect := TEffectNode.Create;
+    TexEffect.Language := slGLSL;
+    ScaleField := TSFFloat.Create(TexEffect, True, 'uProceduralScale', 4.0);
+    TexEffect.AddCustomField(ScaleField);
+    TexEffectPart := TEffectPartNode.Create;
+    TexEffectPart.ShaderType := stFragment;
+    TexEffectPart.Contents :=
+      'uniform float uProceduralScale;' + LineEnding +
+      'void PLUG_texture_color(inout vec4 texture_color, const in vec4 tex_coord) {' + LineEnding +
+      '  texture_color.rgb *= fract(tex_coord.x * uProceduralScale);' + LineEnding +
+      '}';
+    TexEffect.FdParts.Add(TexEffectPart);
+    ShaderTex.FdEffects.Add(TexEffect);
+    App.Texture := ShaderTex;
+
+    ShapeNode.Appearance := App;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+
+    AssertEquals('ShaderTexture default BOUNDS2D texgen must be selected',
+      Ord(tgBounds2d), Ord(RendererShape.Cache.RHITexCoordGen));
+    AssertTrue('Custom uniform uProceduralScale on ShaderTexture.FdEffects must be uploaded to RHIUserEffectBuffer',
+      RendererShape.Cache.RHIUserEffectUploadCount > 0);
+    FragSrc := RendererShape.Cache.RHIFragmentShaderSource;
+    AssertTrue('Fragment shader must include PLUG_texture_color call from ShaderTexture.FdEffects',
+      Pos('PLUG_texture_color(baseColor, vec4(castle_tex_coord0, 0.0, 1.0));', FragSrc) > 0);
+    AssertTrue('Fragment shader must include PLUG_fragment_modify call from PointLight.FdEffects',
+      Pos('PLUG_fragment_modify(castle_FragColor);', FragSrc) > 0);
+  finally
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestMultiTextureEnvScaleDot3ComplementAndAlphaReplicateRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TMaterialNode;
+  MultiTex: TMultiTextureNode;
+  Tex0, Tex1: TPixelTextureNode;
+  Img0, Img1: TRGBAlphaImage;
+  Box: TBoxNode;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  FragMod2X, FragDot3: String;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8303)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Scene := nil;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TMaterialNode.Create;
+    App.Material := Mat;
+
+    MultiTex := TMultiTextureNode.Create;
+    Tex0 := TPixelTextureNode.Create;
+    Img0 := TRGBAlphaImage.Create(4, 4);
+    Img0.Clear(Vector4Byte(200, 100, 50, 255));
+    Tex0.FdImage.Value := Img0;
+
+    Tex1 := TPixelTextureNode.Create;
+    Img1 := TRGBAlphaImage.Create(4, 4);
+    Img1.Clear(Vector4Byte(128, 128, 255, 255));
+    Tex1.FdImage.Value := Img1;
+
+    MultiTex.FdTexture.Add(Tex0);
+    MultiTex.FdTexture.Add(Tex1);
+    MultiTex.FdMode.Items.Add('MODULATE');
+    MultiTex.FdMode.Items.Add('MODULATE2X');
+    MultiTex.FdFunction.Items.Add('');
+    MultiTex.FdFunction.Items.Add('COMPLEMENT');
+    App.Texture := MultiTex;
+
+    ShapeNode.Appearance := App;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 0);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+
+    FragMod2X := RendererShape.Cache.RHIFragmentShaderSource;
+    AssertTrue('MODULATE2X must scale baseColor.rgb by 2.0000',
+      Pos('baseColor.rgb *= 2.0000;', FragMod2X) > 0);
+    AssertTrue('COMPLEMENT function must invert baseColor.rgb',
+      Pos('baseColor.rgb = vec3(1.0) - baseColor.rgb;', FragMod2X) > 0);
+
+    { Switch to DOTPRODUCT3 + ALPHAREPLICATE }
+    MultiTex.FdMode.Items[1] := 'DOTPRODUCT3';
+    MultiTex.FdFunction.Items[1] := 'ALPHAREPLICATE';
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    FragDot3 := RendererShape.Cache.RHIFragmentShaderSource;
+    AssertTrue('DOTPRODUCT3 must compute signed dot product',
+      Pos('baseColor.rgb = vec3(dot(2.0 * (multiTex1.rgb - vec3(0.5)), 2.0 * (baseColor.rgb - vec3(0.5))));', FragDot3) > 0);
+    AssertTrue('ALPHAREPLICATE function must replicate baseColor.a into rgb',
+      Pos('baseColor.rgb = vec3(baseColor.a);', FragDot3) > 0);
+  finally
+    FreeAndNil(Scene);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);
