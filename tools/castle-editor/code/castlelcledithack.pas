@@ -195,8 +195,11 @@ procedure TEditBox.ProcessKey(var Key: Word; const Shift: TShiftState);
     if ReadOnly then
       Beep
     else
-      // TODO: in Overwrite mode, with SelText = '', delete next char first
+    begin
+      if FOverwrite and (SelLength = 0) then
+        SelLength := 1;
       SelText := C;
+    end;
   end;
 
 var

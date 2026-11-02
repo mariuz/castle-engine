@@ -271,8 +271,9 @@ function UseIconsAndColorsForDarkTheme: Boolean;
 type
   { Saved selection state,
     that can be restored even after loading a new version of design from file.
-    We save component by a Name (String) to avoid worrying about references
-    to freed component, and to be able to restore it even on new design file. }
+    We save component(s) by Name (String, newline-separated for multi-selection)
+    to avoid worrying about references to freed component, and to be able to
+    restore single or multi-selection even on new design file. }
   TSavedSelection = record
     SelectedComponent: String;
     CurrentViewport: String;

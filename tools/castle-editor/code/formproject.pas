@@ -739,7 +739,8 @@ begin
   if SaveDesignDialog.Execute then
   begin
     Design.SaveDesign(SaveDesignDialog.Url);
-    // TODO: save DesignUrl somewhere? CastleEditorSettings.xml?
+    UserConfig.SetValue('ProjectForm_LastDesignUrl', Design.DesignUrl);
+    UserConfig.Save;
 
     // make sure to show new file in "Files" in editor
     RefreshFiles(rfFilesInCurrentDir);
@@ -2811,6 +2812,8 @@ begin
   ClearAllWarnings;
   try
     Design.OpenDesign(DesignUrl);
+    UserConfig.SetValue('ProjectForm_LastDesignUrl', Design.DesignUrl);
+    UserConfig.Save;
   except
     { In case Design.OpenDesign raised exception (e.g. file unreadable or invalid),
       do not leave Design in half-uninitialized state (e.g. treeview will not
@@ -2895,7 +2898,9 @@ begin
   if ProposeSaveDesign then
   begin
     if Design <> nil then
-      OpenDesignDialog.Url := Design.DesignUrl;
+      OpenDesignDialog.Url := Design.DesignUrl
+    else
+      OpenDesignDialog.Url := UserConfig.GetValue('ProjectForm_LastDesignUrl', '');
     if OpenDesignDialog.Execute then
     begin
       OpenDesign(OpenDesignDialog.Url);

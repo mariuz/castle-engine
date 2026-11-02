@@ -7692,18 +7692,30 @@ end;
 
 function TDesignFrame.GetSavedSelection: TSavedSelection;
 var
+  SelectedList: TComponentList;
+  SelectedCount, I: Integer;
   SelectedC: TComponent;
   ActiveInspector: TOIPropertyGrid;
 begin
-  SelectedC := GetSelectedComponent;
-  { In case of modifying subcomponent, like TCastleViewport.Items,
-    the currently selected component is not owned by whole design owner,
-    so it will not be later found by name in RestoreSavedSelection. }
-  if (SelectedC <> nil) and
-     (SelectedC.Owner = DesignOwner) then
-    Result.SelectedComponent := SelectedC.Name
-  else
-    Result.SelectedComponent := '';
+  Result.SelectedComponent := '';
+  GetSelected(SelectedList, SelectedCount, true);
+  try
+    { In case of modifying subcomponent, like TCastleViewport.Items,
+      the currently selected component is not owned by whole design owner,
+      so it will not be later found by name in RestoreSavedSelection.
+      Save all DesignOwner-owned selected component names (separated by NL)
+      so multi-selection is preserved across Undo, Redo, and Physics stop. }
+    for I := 0 to SelectedCount - 1 do
+    begin
+      SelectedC := SelectedList[I];
+      if (SelectedC <> nil) and
+         (SelectedC.Owner = DesignOwner) and
+         (SelectedC.Name <> '') then
+        Result.SelectedComponent := SAppendPart(Result.SelectedComponent, NL, SelectedC.Name);
+    end;
+  finally
+    FreeAndNil(SelectedList);
+  end;
 
   if (CurrentViewport <> nil) and
      (CurrentViewport.Owner = DesignOwner) then
@@ -7725,31 +7737,55 @@ var
   C: TComponent;
   V: TCastleViewport;
   ActiveInspector: TOIPropertyGrid;
+  NameList: TStringList;
+  RestoredList: TComponentList;
+  I: Integer;
+  CompName: String;
 begin
   if S.SelectedComponent <> '' then
   begin
-    C := DesignOwner.FindComponent(S.SelectedComponent);
-    if C = nil then
-    begin
-      WritelnLog('Cannot restore selection, as component "%s" no longer exists. This is normal if e.g. stopping physics removes an object added during physics simulation.', [
-        S.SelectedComponent
-      ]);
-    end else
-    begin
-      SetSelectedComponent(C);
-
-      { Restore object inspector state only if we could restore SelectedComponent,
-        as object inspector should show the selected component. }
-      if S.ItemIndex >= 0 then
+    NameList := TStringList.Create;
+    RestoredList := TComponentList.Create(false);
+    try
+      NameList.Text := S.SelectedComponent;
+      for I := 0 to NameList.Count - 1 do
       begin
-        ControlProperties.TabIndex := S.TabIndex;
-
-        ActiveInspector := GetInspectorForActiveTab;
-        if ActiveInspector <> nil then
-          ActiveInspector.SetItemIndexAndFocus(S.ItemIndex)
-        else
-          WritelnWarning('Cannot restore selection inspector ItemIndex, because inspector not found');
+        CompName := Trim(NameList[I]);
+        if CompName = '' then
+          Continue;
+        C := DesignOwner.FindComponent(CompName);
+        if C = nil then
+        begin
+          WritelnLog('Cannot restore selection, as component "%s" no longer exists. This is normal if e.g. stopping physics removes an object added during physics simulation.', [
+            CompName
+          ]);
+        end else
+          RestoredList.Add(C);
       end;
+
+      if RestoredList.Count > 0 then
+      begin
+        if RestoredList.Count = 1 then
+          SetSelectedComponent(RestoredList[0])
+        else
+          SetSelected(RestoredList);
+
+        { Restore object inspector state only if we could restore SelectedComponent,
+          as object inspector should show the selected component. }
+        if S.ItemIndex >= 0 then
+        begin
+          ControlProperties.TabIndex := S.TabIndex;
+
+          ActiveInspector := GetInspectorForActiveTab;
+          if ActiveInspector <> nil then
+            ActiveInspector.SetItemIndexAndFocus(S.ItemIndex)
+          else
+            WritelnWarning('Cannot restore selection inspector ItemIndex, because inspector not found');
+        end;
+      end;
+    finally
+      FreeAndNil(RestoredList);
+      FreeAndNil(NameList);
     end;
   end;
 

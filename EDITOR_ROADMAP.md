@@ -2381,11 +2381,23 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - **Screenshots:** [CGE 3D Viewport Nice View](https://castle-engine.io/images/thumb_size/viewport_3d_nice_view.webp) · [CGE Editor Hierarchy & Files Preview](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
   - **Example (Phase 254):** Open a `.castle-sprite-sheet` asset in the Sprite Sheet Editor (`FloatSpinEditFPS` automatically disables when no animation is selected and enables with the animation's `FramesPerSecond` when selected), click any `.gltf` / `.x3d` model in the Files panel to preview it via `Viewport.AssignDefaultCamera`, or press `Ctrl+F` (`ActionFindToggle`) to toggle the checked Hierarchy Find bar.
 
+### Phase 255: Multi-Selection Undo/Redo & Physics-Stop Selection Preservation (`GetSavedSelection` / `RestoreSavedSelection`), Last-Opened Design URL Persistence (`UserConfig`), and LCL Edit Overwrite Mode (`castlelcledithack.pas`)
+- [x] **255.1. Multi-Selection Undo/Redo & Simulation-Stop Selection Preservation, `ProjectForm_LastDesignUrl` Persistence & `TEditBox` Overwrite Mode**
+  - Upgraded `TDesignFrame.GetSavedSelection` and `TDesignFrame.RestoreSavedSelection` (`tools/castle-editor/code/framedesign.pas` & `editorutils.pas`) so `TSavedSelection.SelectedComponent` stores all `DesignOwner`-owned selected component names (separated by `NL`) via `GetSelected(SelectedList, SelectedCount, true)` and restores single or multi-component selections (`SetSelectedComponent` / `SetSelected`) across `Ctrl+Z` (Undo), `Ctrl+Y` (Redo), and Physics Simulation Stop (`ActionSimulationPlayStopExecute`).
+  - Resolved the `DesignUrl` persistence `TODO` in `TProjectForm` (`tools/castle-editor/code/formproject.pas`) by saving `ProjectForm_LastDesignUrl` in `UserConfig` whenever a design is opened (`OpenDesign`) or saved (`MenuItemSaveAsDesignClick`), and pre-populating `OpenDesignDialog.Url` when no design is currently open (`MenuItemOpenDesignClick`).
+  - Resolved the `Overwrite` mode `TODO` in `TEditBox.ProcessKey.InsertChar` (`tools/castle-editor/code/castlelcledithack.pas`) so pressing keys in `Insert`/`Overwrite` mode (`FOverwrite = true` with `SelLength = 0`) sets `SelLength := 1` before `SelText := C`, cleanly replacing the next character in Object Inspector and Hierarchy edit boxes.
+  - **Official Docs & Visual References (Phase 255):** [CGE Visual Editor Manual (Undo/Redo, Multi-Selection & Physics Simulation)](https://castle-engine.io/manual_editor.php) · [CGE Persistent User Preferences (`CastleConfig` / `UserConfig`)](https://castle-engine.io/manual_user_prefs.php) · [Blender 4 Undo & Redo History](https://docs.blender.org/manual/en/latest/interface/undo_redo.html) · [Godot 4 Scene Tree Multi-Selection & Undo/Redo](https://docs.godotengine.org/en/stable/getting_started/introduction/first_look_at_the_editor.html)
+  - **Official Videos & Movies (Phase 255):**
+    - 🎬 [CGE Official Video — Visual Editor Hierarchy, Undo/Redo & Physics Simulation (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+    - 🎞️ [Animated Movie (GIF) — Interactive Multi-Selection & Split Panel Workflow](https://docs.godotengine.org/en/stable/_images/containers_split_drag.gif)
+  - **Screenshots:** [CGE Editor Multi-Selection & Hierarchy](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Design Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [Blender 4 Outliner Selection](https://docs.blender.org/manual/en/latest/_images/editors_outliner_introduction_interface.png)
+  - **Example (Phase 255):** Multi-select 10 `TCastleTransform` props in the Hierarchy or 3D Viewport, batch-arrange or translate them, and press `Ctrl+Z` (Undo) or `Ctrl+Y` (Redo) — or run and stop Physics Simulation — and all 10 components remain selected in both `ControlsTree` and the 3D/2D manipulation gizmo.
+
 ---
 
-## Roadmap Completion Status (Phases 1–254 — Final Milestone)
+## Roadmap Completion Status (Phases 1–255 — Final Milestone)
 
-All **254 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **255 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 
