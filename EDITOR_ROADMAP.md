@@ -2393,11 +2393,23 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - **Screenshots:** [CGE Editor Multi-Selection & Hierarchy](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Design Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [Blender 4 Outliner Selection](https://docs.blender.org/manual/en/latest/_images/editors_outliner_introduction_interface.png)
   - **Example (Phase 255):** Multi-select 10 `TCastleTransform` props in the Hierarchy or 3D Viewport, batch-arrange or translate them, and press `Ctrl+Z` (Undo) or `Ctrl+Y` (Redo) — or run and stop Physics Simulation — and all 10 components remain selected in both `ControlsTree` and the 3D/2D manipulation gizmo.
 
+### Phase 256: Hover-Aware Hierarchy Tree Asset Drag-and-Drop (`ShellListTargetParent` / `ControlsTreeDragOver` / `ControlsTreeDragDrop`) & `TConcreteEditorDesigner` Component-Editor Bridge Completion (`castlecomponenteditordesigner.pas`)
+- [x] **256.1. Hover-Targeted Files-to-Hierarchy Drag-and-Drop (`TDesignFrame.ShellListTargetParent`) & Full `TConcreteEditorDesigner` Bridge**
+  - Resolved the `DragAndDropFromShellListView` `TODO` in `TDesignFrame` (`tools/castle-editor/code/framedesign.pas`) by implementing `TDesignFrame.ShellListTargetParent(SourceShellList, HoveredNode)` and updating `ControlsTreeDragOver` and `ControlsTreeDragDrop`.
+  - Dragging a file from `TCastleShellListView` (the Files panel) onto `ControlsTree` now inspects the hovered tree node (`ControlsTree.GetNodeAt(X, Y)`), automatically routes 3D scene/transform assets dropped onto a `TCastleViewport` node into `TCastleViewport.Items` (unless `Shift` is held), falls back to `SelectedComponent`, `CurrentViewport.Items`, or `DesignRoot` when hovering empty tree space, and live-highlights the target parent node (`ControlsTreeNodeUnderMouse` with `tnsInside`) during drag-over.
+  - Resolved the `TConcreteEditorDesigner` `TODO`s (`tools/castle-editor/code/castlecomponenteditordesigner.pas` & `framedesign.pas`) by wiring `CopySelection`, `CutSelection`, `CanCopy` (`DesignerCanCopy`), `CanPaste`, `PasteSelection`, `ClearSelection`, `DeleteSelection`, `CanUndo`, `CanRedo`, `Undo`, `Redo`, `AddComponent`, `AddComponentCheckParent`, `CreateUniqueComponentName`, `UniqueName` (`DesignerUniqueName`), `GetShiftState`, and `SelectOnlyThisComponent` (`DesignerSelectOnlyComponent`) directly to `FDesignFrame`.
+  - **Official Docs & Visual References (Phase 256):** [CGE Visual Editor Manual (Files Drag-and-Drop & Hierarchy Tree)](https://castle-engine.io/manual_editor.php) · [CGE Custom Components & Component Editors (`CastlePropEdits`)](https://castle-engine.io/custom_components) · [UE 5.5 Content Browser Drag-and-Drop to Outliner](https://dev.epicgames.com/documentation/en-us/unreal-engine/outliner-in-unreal-engine) · [Godot 4 FileSystem Dock Drag-and-Drop to Scene Tree](https://docs.godotengine.org/en/stable/getting_started/introduction/first_look_at_the_editor.html)
+  - **Official Videos & Movies (Phase 256):**
+    - 🎬 [CGE Official Video — Dragging Assets from Files to Hierarchy & Viewport (YouTube)](https://www.youtube.com/watch?v=gwnKMnAGUcg)
+    - 🎞️ [Animated Movie (GIF) — Interactive Editor Dock & Tree Drag Workflow](https://docs.godotengine.org/en/stable/_images/containers_split_drag.gif)
+  - **Screenshots:** [CGE Editor Hierarchy & Files Panel](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [UE 5.5 World Outliner Drop Target](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/a285724d-dc13-455e-aa4a-fd2c4d165130/topic-image.png) · [Blender 4 Outliner Drag-and-Drop](https://docs.blender.org/manual/en/latest/_images/editors_outliner_introduction_interface.png)
+  - **Example (Phase 256):** Drag any `.gltf`, `.x3d`, `.castle-transform`, `.png`, or `.wav` asset from the bottom **Files** panel directly over any node in the **Hierarchy** tree (even without pre-selecting a node first): `ControlsTree` highlights the hovered target parent node (`Viewport1.Items` or any `TCastleTransform` / `TCastleUserInterface` container) and inserts the new component directly into that parent on drop.
+
 ---
 
-## Roadmap Completion Status (Phases 1–255 — Final Milestone)
+## Roadmap Completion Status (Phases 1–256 — Final Milestone)
 
-All **255 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **256 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 

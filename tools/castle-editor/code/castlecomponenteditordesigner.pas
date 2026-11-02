@@ -141,93 +141,102 @@ end;
 
 function TConcreteEditorDesigner.CopySelection: boolean;
 begin
-  Result := false; // TODO, unused in practice by CGE components
+  FDesignFrame.CopyComponent;
+  Result := true;
 end;
 
 function TConcreteEditorDesigner.CutSelection: boolean;
 begin
-  Result := false; // TODO, unused in practice by CGE components
+  FDesignFrame.CutComponent;
+  Result := true;
 end;
 
 function TConcreteEditorDesigner.CanCopy: Boolean;
 begin
-  Result := false; // TODO, unused in practice by CGE components
+  Result := FDesignFrame.DesignerCanCopy;
 end;
 
 function TConcreteEditorDesigner.CanPaste: Boolean;
 begin
-  Result := false; // TODO, unused in practice by CGE components
+  Result := FDesignFrame.DesignRoot <> nil;
 end;
 
 function TConcreteEditorDesigner.PasteSelection(
   Flags: TComponentPasteSelectionFlags): boolean;
 begin
-  Result := false; // TODO, unused in practice by CGE components
+  FDesignFrame.PasteComponent;
+  Result := true;
 end;
 
 function TConcreteEditorDesigner.ClearSelection: boolean;
 begin
-  Result := false; // TODO, unused in practice by CGE components
+  FDesignFrame.DesignerSelectOnlyComponent(nil);
+  Result := true;
 end;
 
 function TConcreteEditorDesigner.DeleteSelection: boolean;
 begin
-  Result := false; // TODO, unused in practice by CGE components
+  FDesignFrame.DeleteComponent;
+  Result := true;
 end;
 
 function TConcreteEditorDesigner.CopySelectionToStream(s: TStream
   ): boolean;
 begin
-  Result := false; // TODO, unused in practice by CGE components
+  Result := false; // unused by CGE component editors
 end;
 
 function TConcreteEditorDesigner.InsertFromStream(s: TStream;
   Parent: TWinControl; Flags: TComponentPasteSelectionFlags): Boolean;
 begin
-  Result := false; // TODO, unused in practice by CGE components
+  Result := false; // unused by CGE component editors
 end;
 
 function TConcreteEditorDesigner.InvokeComponentEditor(
   AComponent: TComponent): boolean;
 begin
-  Result := false; // TODO, unused in practice by CGE components
+  Result := false; // unused by CGE component editors
 end;
 
 function TConcreteEditorDesigner.ChangeClass: boolean;
 begin
-  Result := false; // TODO, unused in practice by CGE components
+  Result := false; // unused by CGE component editors
 end;
 
 function TConcreteEditorDesigner.CanUndo: Boolean;
 begin
-  Result := false; // TODO, unused in practice by CGE components
+  Result := (FDesignFrame.UndoSystem <> nil) and FDesignFrame.UndoSystem.IsUndoPossible;
 end;
 
 function TConcreteEditorDesigner.CanRedo: Boolean;
 begin
-  Result := false; // TODO, unused in practice by CGE components
+  Result := (FDesignFrame.UndoSystem <> nil) and FDesignFrame.UndoSystem.IsRedoPossible;
 end;
 
 function TConcreteEditorDesigner.Undo: Boolean;
 begin
-  Result := false; // TODO, unused in practice by CGE components
+  Result := CanUndo;
+  if Result then
+    FDesignFrame.PerformUndo;
 end;
 
 function TConcreteEditorDesigner.Redo: Boolean;
 begin
-  Result := false; // TODO, unused in practice by CGE components
+  Result := CanRedo;
+  if Result then
+    FDesignFrame.PerformRedo;
 end;
 
 function TConcreteEditorDesigner.AddUndoAction(
   const aPersistent: TPersistent; aOpType: TUndoOpType; IsSetNewId: boolean;
   aFieldName: string; const aOldVal, aNewVal: variant): boolean;
 begin
-  Result := false; // TODO, unused in practice by CGE components
+  Result := false; // CGE UndoSystem records whole-design snapshots in Modified
 end;
 
 function TConcreteEditorDesigner.IsUndoLocked: boolean;
 begin
-  Result := false; // TODO, unused in practice by CGE components
+  Result := false;
 end;
 
 procedure TConcreteEditorDesigner.AddComponent(
@@ -235,7 +244,13 @@ procedure TConcreteEditorDesigner.AddComponent(
   const NewComponentClass: TComponentClass; const NewParent: TComponent;
   const NewLeft, NewTop, NewWidth, NewHeight: Integer);
 begin
-  // TODO, unused in practice by CGE components
+  if NewComponentClass <> nil then
+  begin
+    if NewParent <> nil then
+      FDesignFrame.AddComponent(NewParent, NewComponentClass, nil)
+    else
+      FDesignFrame.AddComponent(NewComponentClass, nil);
+  end;
 end;
 
 procedure TConcreteEditorDesigner.AddComponentCheckParent(
@@ -243,65 +258,65 @@ procedure TConcreteEditorDesigner.AddComponentCheckParent(
   const OriginWinControl: TWinControl; const NewComponentClass: TComponentClass
   );
 begin
-  // TODO, unused in practice by CGE components
+  if (NewParent = nil) and (OriginComponent <> nil) then
+    NewParent := OriginComponent;
 end;
 
 procedure TConcreteEditorDesigner.DrawDesignerItems(OnlyIfNeeded: boolean
   );
 begin
-  // TODO, unused in practice by CGE components
+  // CGE renders designer overlays inside TCastleControl
 end;
 
 function TConcreteEditorDesigner.CreateUniqueComponentName(
   const AClassName: string): string;
 begin
-  // TODO, unused in practice by CGE components
-  Result := AClassName;
+  Result := FDesignFrame.DesignerUniqueName(AClassName);
 end;
 
 function TConcreteEditorDesigner.IsDesignMsg(Sender: TControl;
   var Message: TLMessage): Boolean;
 begin
-  Result := false; // TODO, unused in practice by CGE components
+  Result := false;
 end;
 
 procedure TConcreteEditorDesigner.UTF8KeyPress(var UTF8Key: TUTF8Char);
 begin
-  // TODO, unused in practice by CGE components
+  // handled by TCastleControl / TDesignFrame
 end;
 
 procedure TConcreteEditorDesigner.Notification(AComponent: TComponent;
   Operation: TOperation);
 begin
-  // TODO, unused in practice by CGE components
+  // handled by TDesignFrame.Notification
 end;
 
 procedure TConcreteEditorDesigner.PaintGrid;
 begin
-  // TODO, unused in practice by CGE components
+  // handled by TCastleViewport grid visualization
 end;
 
 procedure TConcreteEditorDesigner.ValidateRename(AComponent: TComponent;
   const CurName, NewName: string);
 begin
-  // TODO, unused in practice by CGE components
+  // handled by TDesignFrame.ControlsTreeEditingEnd and Object Inspector
 end;
 
 function TConcreteEditorDesigner.GetShiftState: TShiftState;
 begin
-  Result := []; // TODO, unused in practice by CGE components
+  Result := Controls.GetKeyShiftState;
 end;
 
 procedure TConcreteEditorDesigner.SelectOnlyThisComponent(
   AComponent: TComponent);
 begin
-  // TODO, unused in practice by CGE components
+  FDesignFrame.DesignerSelectOnlyComponent(AComponent);
 end;
 
 function TConcreteEditorDesigner.UniqueName(const BaseName: string
   ): string;
 begin
-  Result := BaseName; // TODO, unused in practice by CGE components
+  Result := FDesignFrame.DesignerUniqueName(BaseName);
 end;
 
 procedure TConcreteEditorDesigner.PrepareFreeDesigner(

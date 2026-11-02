@@ -1122,6 +1122,8 @@ type
     { If the selected items all have the same TCastleViewport parent,
       return it. Otherwise return nil. }
     function SelectedViewport: TCastleViewport;
+    function ShellListTargetParent(const SourceShellList: TCastleShellListView;
+      const HoveredNode: TTreeNode): TComponent;
 
     { Look at current selection and hover and possibly change CurrentViewport,
       calling also OnCurrentViewportChanged. }
@@ -2350,6 +2352,9 @@ type
     property IsFindActive: Boolean read FindActive;
 
     procedure ExportToModel;
+    function DesignerCanCopy: Boolean;
+    procedure DesignerSelectOnlyComponent(const AComponent: TComponent);
+    function DesignerUniqueName(const BaseName: String): String;
 
     property MaximizePreview: Boolean
       read FMaximizePreview write SetMaximizePreview default false;
@@ -9586,6 +9591,40 @@ begin
   end;
 end;
 
+function TDesignFrame.ShellListTargetParent(const SourceShellList: TCastleShellListView;
+  const HoveredNode: TTreeNode): TComponent;
+begin
+  Result := nil;
+  if HoveredNode <> nil then
+    Result := SelectedFromNode(HoveredNode, true);
+  if Result = nil then
+    Result := SelectedComponent;
+  if Result = nil then
+    Result := DesignRoot;
+
+  { When hovering or selecting a TCastleViewport (without Shift held down),
+    or when the asset can only be added as a TCastleTransform (e.g. .gltf/.x3d/.castle-transform),
+    target Viewport.Items so 3D scenes/transforms can be dropped directly onto Viewport in Hierarchy. }
+  if (Result is TCastleViewport) and (TCastleViewport(Result).Items <> nil) then
+  begin
+    if (not (ssShift in GetKeyShiftState)) or
+       (ShellListComponentClass(SourceShellList, Result) = nil) then
+    begin
+      if ShellListComponentClass(SourceShellList, TCastleViewport(Result).Items) <> nil then
+        Result := TCastleViewport(Result).Items;
+    end;
+  end else
+  if (Result <> nil) and
+     (ShellListComponentClass(SourceShellList, Result) = nil) and
+     (CurrentViewport <> nil) and
+     (CurrentViewport.Items <> nil) and
+     (HoveredNode = nil) and
+     (ShellListComponentClass(SourceShellList, CurrentViewport.Items) <> nil) then
+  begin
+    Result := CurrentViewport.Items;
+  end;
+end;
+
 function TDesignFrame.ShellListAddComponent(const SourceShellList: TCastleShellListView;
   const ParentComponent: TComponent): TComponent;
 var
@@ -11551,6 +11590,7 @@ var
   SrcComponents: TComponentList;
   IgnoredSrcComponentsCount: Integer;
   Dst: TTreeNode;
+  TargetParent: TComponent;
 begin
   Accept := false;
   if Source = ControlsTree then
@@ -11579,9 +11619,17 @@ begin
   end else
   if Source is TCastleShellListView then
   begin
-    if SelectedComponent <> nil then
-      Accept := ShellListComponentClass(TCastleShellListView(Source),
-        SelectedComponent) <> nil;
+    Dst := ControlsTree.GetNodeAt(X, Y);
+    TargetParent := ShellListTargetParent(TCastleShellListView(Source), Dst);
+    Accept := (TargetParent <> nil) and
+      (ShellListComponentClass(TCastleShellListView(Source), TargetParent) <> nil);
+    if Accept and TreeNodeMap.TryGetValue(TargetParent, Dst) then
+    begin
+      ControlsTreeNodeUnderMouse := Dst;
+      ControlsTreeNodeUnderMouseSide := tnsInside;
+    end else
+      ControlsTreeNodeUnderMouse := nil;
+    ControlsTree.Invalidate;
   end;
 end;
 
@@ -12185,14 +12233,16 @@ procedure TDesignFrame.ControlsTreeDragDrop(Sender, Source: TObject; X,
   end;
 
   procedure DragAndDropFromShellListView(const Source: TCastleShellListView);
+  var
+    TargetParent: TComponent;
   begin
-    if SelectedComponent <> nil then
-      ShellListAddComponent(Source, SelectedComponent)
+    ControlsTreeNodeUnderMouse := nil;
+    ControlsTree.Invalidate;
+    TargetParent := ShellListTargetParent(Source, ControlsTree.GetNodeAt(X, Y));
+    if (TargetParent <> nil) and (ShellListComponentClass(Source, TargetParent) <> nil) then
+      ShellListAddComponent(Source, TargetParent)
     else
-      { TODO: This is never displayed, since Accept=false in this case.
-        But it's a pity -- we should communicate to user better why drag-and-drop
-        is not allowed now. }
-      WritelnWarning('Select a component in hierarchy, to allow to drag-and-drop children into it');
+      WarningBox('Select or hover over a compatible parent component in the Hierarchy (such as TCastleViewport.Items or a TCastleTransform for 3D assets, or a TCastleUserInterface for 2D assets) to drop this file.');
   end;
 
 begin
@@ -49205,6 +49255,27 @@ begin
     ExportToModelWithOptions(0 {suChangeCastleDataToRelative}, false, false)
   else
     ShowExportModelDialog;
+end;
+
+function TDesignFrame.DesignerCanCopy: Boolean;
+var
+  Sel: TComponent;
+begin
+  Sel := GetSelectedComponent(false);
+  Result := (Sel <> nil) and (not (csSubComponent in Sel.ComponentStyle));
+end;
+
+procedure TDesignFrame.DesignerSelectOnlyComponent(const AComponent: TComponent);
+begin
+  SelectedComponent := AComponent;
+end;
+
+function TDesignFrame.DesignerUniqueName(const BaseName: String): String;
+begin
+  if DesignOwner <> nil then
+    Result := ProposeComponentName(TComponent, DesignOwner, StripNumericSuffix(BaseName))
+  else
+    Result := BaseName;
 end;
 
 initialization
