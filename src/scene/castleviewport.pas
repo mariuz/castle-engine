@@ -437,6 +437,8 @@ type
       const Index: Integer): TGLSLProgram; override;
     function InternalExtraGetScreenEffectRHIPipeline(
       const Index: Integer): TRHIPipeline; override;
+    function InternalExtraGetScreenEffectRHIUserDescriptorSet(
+      const Index: Integer): TRHIDescriptorSet; override;
     function InternalExtraScreenEffectsCount: Integer; override;
     function InternalExtraScreenEffectsNeedDepth: Boolean; override;
 
@@ -3235,6 +3237,24 @@ begin
   {$warnings off} // using deprecated MainScene to keep it working
   if (Index >= ExtraOffset) and (Items.MainScene <> nil) then
     Result := Items.MainScene.InternalScreenEffectRHIPipeline(Index - ExtraOffset);
+  {$warnings on}
+end;
+
+function TCastleViewport.InternalExtraGetScreenEffectRHIUserDescriptorSet(const Index: Integer): TRHIDescriptorSet;
+var
+  ExtraOffset: Integer;
+begin
+  Result := nil;
+  if RHIDevice = nil then
+    Exit;
+  ExtraOffset := 0;
+  if ScreenSpaceAmbientOcclusion and (SSAOShader <> nil) then
+    Inc(ExtraOffset);
+  if ScreenSpaceReflections and (SSRShader <> nil) then
+    Inc(ExtraOffset);
+  {$warnings off} // using deprecated MainScene to keep it working
+  if (Index >= ExtraOffset) and (Items.MainScene <> nil) then
+    Result := Items.MainScene.InternalScreenEffectRHIUserDescriptorSet(Index - ExtraOffset);
   {$warnings on}
 end;
 

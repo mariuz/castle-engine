@@ -1668,7 +1668,19 @@ begin
     begin
       ProjectorMatrix := ProjectorScalingMatrix * Cache.Arrays.TexCoords[0].GenerationProjectorMatrix();
       Cache.SetTexCoordGenProjectorMatrix(ProjectorMatrix);
-    end;
+    end else
+    if (AGeneration = tgMirrorPlane) and (MirrorPlaneUniforms <> nil) then
+      Cache.SetMirrorPlaneUniforms(
+        True,
+        MirrorPlaneUniforms.NormalizedPlane,
+        MirrorPlaneUniforms.CameraPositionOnPlane,
+        MirrorPlaneUniforms.CameraSide,
+        MirrorPlaneUniforms.CameraUp,
+        Vector4(
+          MirrorPlaneUniforms.FrustumDimensions.Left,
+          MirrorPlaneUniforms.FrustumDimensions.Bottom,
+          MirrorPlaneUniforms.FrustumDimensions.Width,
+          MirrorPlaneUniforms.FrustumDimensions.Height));
     Result := AGeneration <> tgExplicit;
     if Result then
       Exit;
@@ -1713,7 +1725,22 @@ begin
         if Cache <> nil then
           Cache.SetTexCoordGenProjectorMatrix(ProjectorMatrix);
       end
-      else if ModeStr = 'MIRROR-PLANE' then AGeneration := tgMirrorPlane
+      else if ModeStr = 'MIRROR-PLANE' then
+      begin
+        AGeneration := tgMirrorPlane;
+        if (Cache <> nil) and (MirrorPlaneUniforms <> nil) then
+          Cache.SetMirrorPlaneUniforms(
+            True,
+            MirrorPlaneUniforms.NormalizedPlane,
+            MirrorPlaneUniforms.CameraPositionOnPlane,
+            MirrorPlaneUniforms.CameraSide,
+            MirrorPlaneUniforms.CameraUp,
+            Vector4(
+              MirrorPlaneUniforms.FrustumDimensions.Left,
+              MirrorPlaneUniforms.FrustumDimensions.Bottom,
+              MirrorPlaneUniforms.FrustumDimensions.Width,
+              MirrorPlaneUniforms.FrustumDimensions.Height));
+      end
       else if ModeStr = 'BOUNDS' then
       begin
         if IsTex3D then
@@ -2521,6 +2548,21 @@ begin
       Cache.SetMultiTextureStageEnv(3, HasMultiTex3, MultiEnv3, MultiConst3);
       Cache.SetClipPlanes(ClipPlanes, ClipPlaneCount);
       Cache.SetTexCoordGen(TexCoordGen, TexGenBoundsS, TexGenBoundsT, TexGenBoundsR);
+      if MirrorPlaneUniforms <> nil then
+        Cache.SetMirrorPlaneUniforms(
+          True,
+          MirrorPlaneUniforms.NormalizedPlane,
+          MirrorPlaneUniforms.CameraPositionOnPlane,
+          MirrorPlaneUniforms.CameraSide,
+          MirrorPlaneUniforms.CameraUp,
+          Vector4(
+            MirrorPlaneUniforms.FrustumDimensions.Left,
+            MirrorPlaneUniforms.FrustumDimensions.Bottom,
+            MirrorPlaneUniforms.FrustumDimensions.Width,
+            MirrorPlaneUniforms.FrustumDimensions.Height))
+      else
+        Cache.SetMirrorPlaneUniforms(
+          False, TVector4.Zero, TVector3.Zero, TVector3.Zero, TVector3.Zero, TVector4.Zero);
       Cache.SetPointSize(PointSize);
       Cache.SetParallaxBumpMapping(HasParallax, SteepParallax, SelfShadowParallax, ParallaxHeight);
       Cache.SetShaderEffects(VertEffectCode, FragEffectCode);

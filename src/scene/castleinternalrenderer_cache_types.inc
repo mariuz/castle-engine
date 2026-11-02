@@ -169,6 +169,12 @@
     FRHITexGenBoundsT: TVector4;
     FRHITexGenBoundsR: TVector4;
     FRHITexGenProjectorMatrix: TMatrix4;
+    FRHIHasMirrorPlaneUniforms: Boolean;
+    FRHIMirrorNormalizedPlane: TVector4;
+    FRHIMirrorCameraPositionOnPlane: TVector3;
+    FRHIMirrorCameraSide: TVector3;
+    FRHIMirrorCameraUp: TVector3;
+    FRHIMirrorFrustumDimensions: TVector4;
     FRHIPointSize: Single;
     FRHIHasParallaxBumpMapping: Boolean;
     FRHISteepParallaxBumpMapping: Boolean;
@@ -266,6 +272,11 @@
     procedure SetTexCoordGen(const AGeneration: TTextureCoordinateGeneration;
       const ABoundsS, ABoundsT, ABoundsR: TVector4); overload;
     procedure SetTexCoordGenProjectorMatrix(const AMatrix: TMatrix4);
+    procedure SetMirrorPlaneUniforms(
+      const AHasMirrorUniforms: Boolean;
+      const ANormalizedPlane: TVector4;
+      const ACameraPositionOnPlane, ACameraSide, ACameraUp: TVector3;
+      const AFrustumDimensions: TVector4);
     procedure SetPointSize(const APointSize: Single);
     procedure SetParallaxBumpMapping(const AEnabled, ASteep: Boolean; const AHeight: Single); overload;
     procedure SetParallaxBumpMapping(const AEnabled, ASteep, ASelfShadowing: Boolean; const AHeight: Single); overload;
@@ -337,6 +348,12 @@
     property RHITexGenBoundsT: TVector4 read FRHITexGenBoundsT;
     property RHITexGenBoundsR: TVector4 read FRHITexGenBoundsR;
     property RHITexGenProjectorMatrix: TMatrix4 read FRHITexGenProjectorMatrix;
+    property RHIHasMirrorPlaneUniforms: Boolean read FRHIHasMirrorPlaneUniforms;
+    property RHIMirrorNormalizedPlane: TVector4 read FRHIMirrorNormalizedPlane;
+    property RHIMirrorCameraPositionOnPlane: TVector3 read FRHIMirrorCameraPositionOnPlane;
+    property RHIMirrorCameraSide: TVector3 read FRHIMirrorCameraSide;
+    property RHIMirrorCameraUp: TVector3 read FRHIMirrorCameraUp;
+    property RHIMirrorFrustumDimensions: TVector4 read FRHIMirrorFrustumDimensions;
     property RHIPointSize: Single read FRHIPointSize;
     property RHIHasParallaxBumpMapping: Boolean read FRHIHasParallaxBumpMapping;
     property RHISteepParallaxBumpMapping: Boolean read FRHISteepParallaxBumpMapping;
@@ -997,6 +1014,29 @@ begin
   end;
 end;
 
+procedure TShapeCache.SetMirrorPlaneUniforms(
+  const AHasMirrorUniforms: Boolean;
+  const ANormalizedPlane: TVector4;
+  const ACameraPositionOnPlane, ACameraSide, ACameraUp: TVector3;
+  const AFrustumDimensions: TVector4);
+begin
+  if (FRHIHasMirrorPlaneUniforms <> AHasMirrorUniforms) or
+     (not TVector4.Equals(FRHIMirrorNormalizedPlane, ANormalizedPlane, 1e-5)) or
+     (not TVector3.Equals(FRHIMirrorCameraPositionOnPlane, ACameraPositionOnPlane, 1e-5)) or
+     (not TVector3.Equals(FRHIMirrorCameraSide, ACameraSide, 1e-5)) or
+     (not TVector3.Equals(FRHIMirrorCameraUp, ACameraUp, 1e-5)) or
+     (not TVector4.Equals(FRHIMirrorFrustumDimensions, AFrustumDimensions, 1e-5)) then
+  begin
+    FRHIHasMirrorPlaneUniforms := AHasMirrorUniforms;
+    FRHIMirrorNormalizedPlane := ANormalizedPlane;
+    FRHIMirrorCameraPositionOnPlane := ACameraPositionOnPlane;
+    FRHIMirrorCameraSide := ACameraSide;
+    FRHIMirrorCameraUp := ACameraUp;
+    FRHIMirrorFrustumDimensions := AFrustumDimensions;
+    FRHIShadersInitialized := False;
+  end;
+end;
+
 procedure TShapeCache.SetPointSize(const APointSize: Single);
 var
   ClampedSize: Single;
@@ -1395,6 +1435,8 @@ begin
     Mask := Mask or (QWord(1) shl 45);
   if AHasBaseColorTex and FRHIHasMultiTextureStage[3] then
     Mask := Mask or (QWord(1) shl 46);
+  if (FRHITexCoordGen = tgMirrorPlane) and FRHIHasMirrorPlaneUniforms then
+    Mask := Mask or (QWord(1) shl 47);
 
   if FRHIShadersInitialized and (FRHIShaderPermutationMask = Mask) and
      (FRHIVertexShader <> nil) and (FRHIFragmentShader <> nil) then
@@ -1476,9 +1518,29 @@ begin
              FRHITexGenProjectorMatrix.Data[2, 0], FRHITexGenProjectorMatrix.Data[2, 1], FRHITexGenProjectorMatrix.Data[2, 2], FRHITexGenProjectorMatrix.Data[2, 3],
              FRHITexGenProjectorMatrix.Data[3, 0], FRHITexGenProjectorMatrix.Data[3, 1], FRHITexGenProjectorMatrix.Data[3, 2], FRHITexGenProjectorMatrix.Data[3, 3]]);
         tgMirrorPlane:
-          TexGenSnippet :=
-            '  vec4 mirrorClip = castle_ProjectionMatrix * castle_vertex_eye;' + LineEnding +
-            '  vec2 rawTexCoord0 = (mirrorClip.xy / max(mirrorClip.w, 1e-5)) * 0.5 + vec2(0.5);';
+          if FRHIHasMirrorPlaneUniforms and
+             (Abs(FRHIMirrorFrustumDimensions.Z) > 1e-5) and
+             (Abs(FRHIMirrorFrustumDimensions.W) > 1e-5) then
+            TexGenSnippet := FormatDot(
+              '  vec4 mirrorWorldPos = castle_ViewMatrixInverse * castle_vertex_eye;' + LineEnding +
+              '  vec4 castle_NormalizedPlane = vec4(%g, %g, %g, %g);' + LineEnding +
+              '  vec3 castle_CameraPositionOnPlane = vec3(%g, %g, %g);' + LineEnding +
+              '  vec3 castle_CameraSide = vec3(%g, %g, %g);' + LineEnding +
+              '  vec3 castle_CameraUp = vec3(%g, %g, %g);' + LineEnding +
+              '  vec4 castle_FrustumDimensions = vec4(%g, %g, %g, %g);' + LineEnding +
+              '  float mirrorPlaneD = -dot(castle_NormalizedPlane.xyz, mirrorWorldPos.xyz) - castle_NormalizedPlane.w;' + LineEnding +
+              '  vec3 vertexOnPlane = mirrorWorldPos.xyz + castle_NormalizedPlane.xyz * mirrorPlaneD - castle_CameraPositionOnPlane;' + LineEnding +
+              '  vec2 mirrorProjected = vec2(dot(vertexOnPlane, castle_CameraSide), dot(vertexOnPlane, castle_CameraUp));' + LineEnding +
+              '  vec2 rawTexCoord0 = vec2((mirrorProjected.x - castle_FrustumDimensions.x) / castle_FrustumDimensions.z, (mirrorProjected.y - castle_FrustumDimensions.y) / castle_FrustumDimensions.w);',
+              [FRHIMirrorNormalizedPlane.X, FRHIMirrorNormalizedPlane.Y, FRHIMirrorNormalizedPlane.Z, FRHIMirrorNormalizedPlane.W,
+               FRHIMirrorCameraPositionOnPlane.X, FRHIMirrorCameraPositionOnPlane.Y, FRHIMirrorCameraPositionOnPlane.Z,
+               FRHIMirrorCameraSide.X, FRHIMirrorCameraSide.Y, FRHIMirrorCameraSide.Z,
+               FRHIMirrorCameraUp.X, FRHIMirrorCameraUp.Y, FRHIMirrorCameraUp.Z,
+               FRHIMirrorFrustumDimensions.X, FRHIMirrorFrustumDimensions.Y, FRHIMirrorFrustumDimensions.Z, FRHIMirrorFrustumDimensions.W])
+          else
+            TexGenSnippet :=
+              '  vec4 mirrorClip = castle_ProjectionMatrix * castle_vertex_eye;' + LineEnding +
+              '  vec2 rawTexCoord0 = (mirrorClip.xy / max(mirrorClip.w, 1e-5)) * 0.5 + vec2(0.5);';
         else
           TexGenSnippet := '  vec2 rawTexCoord0 = castle_MultiTexCoord0;';
       end;

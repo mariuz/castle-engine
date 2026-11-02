@@ -145,6 +145,9 @@ type
     function InternalExtraGetScreenEffectRHIPipeline(
       const Index: Integer): TRHIPipeline; virtual;
     { @exclude }
+    function InternalExtraGetScreenEffectRHIUserDescriptorSet(
+      const Index: Integer): TRHIDescriptorSet; virtual;
+    { @exclude }
     function InternalExtraScreenEffectsCount: Integer; virtual;
     { @exclude }
     function InternalExtraScreenEffectsNeedDepth: Boolean; virtual;
@@ -235,6 +238,7 @@ type
     procedure EnsureRHIScreenResources(const AWidth, AHeight: Cardinal;
       const ANeedDepth: Boolean);
     function GetScreenEffectRHIPipeline(const Index: Integer): TRHIPipeline;
+    function GetScreenEffectRHIUserDescriptorSet(const Index: Integer): TRHIDescriptorSet;
     function ExecuteRHIScreenEffectPasses(
       const APassPipelines: array of TRHIPipeline;
       const AWidth, AHeight: Cardinal;
@@ -365,6 +369,11 @@ begin
   Result := nil;
 end;
 
+function TCastleScreenEffects.InternalExtraGetScreenEffectRHIUserDescriptorSet(const Index: Integer): TRHIDescriptorSet;
+begin
+  Result := nil;
+end;
+
 function TCastleScreenEffects.InternalExtraScreenEffectsCount: Integer;
 begin
   Result := 0;
@@ -438,6 +447,26 @@ begin
     else
       Result := FRHIScreenDefaultPipelineColor;
   end;
+end;
+
+function TCastleScreenEffects.GetScreenEffectRHIUserDescriptorSet(const Index: Integer): TRHIDescriptorSet;
+var
+  SceneEffects: Integer;
+begin
+  Result := nil;
+  if RHIDevice = nil then
+    Exit;
+
+  if ScreenEffectsScene <> nil then
+    SceneEffects := ScreenEffectsScene.InternalScreenEffectsCount
+  else
+    SceneEffects := 0;
+
+  if (Index >= 0) and (Index < SceneEffects) then
+    Result := ScreenEffectsScene.InternalScreenEffectRHIUserDescriptorSet(Index)
+  else
+  if Index >= SceneEffects then
+    Result := InternalExtraGetScreenEffectRHIUserDescriptorSet(Index - SceneEffects);
 end;
 
 procedure TCastleScreenEffects.FreeRHIScreenDescriptorSets;
@@ -638,7 +667,7 @@ var
   PassCount, I: Integer;
   TargetTex: TRHITexture;
   Layout: TRHIDescriptorSetLayout;
-  DescSet: TRHIDescriptorSet;
+  DescSet, UserDescSet: TRHIDescriptorSet;
   PushConsts: TCastleScreenPushConstants;
   FinalPassInfo: TRHIRenderingInfo;
   RenderAreaRect: TRectangle;
@@ -705,6 +734,9 @@ begin
     if APassPipelines[I] <> nil then
       Cmd.BindPipeline(APassPipelines[I]);
     Cmd.BindDescriptorSet(0, DescSet, []);
+    UserDescSet := GetScreenEffectRHIUserDescriptorSet(I);
+    if UserDescSet <> nil then
+      Cmd.BindDescriptorSet(2, UserDescSet, []);
 
     { Push 32-byte TCastleScreenPushConstants }
     PushConsts.ScreenSize := Vector2(AWidth, AHeight);

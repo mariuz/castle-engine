@@ -2419,6 +2419,8 @@ begin
   Result :=
     '#version 450' + NL +
     '#extension GL_ARB_separate_shader_objects : enable' + NL +
+    '#define CASTLE_UBO(SetIdx, BindIdx) layout(std140, set = SetIdx, binding = BindIdx)' + NL +
+    '#define CASTLE_SAMPLER(SetIdx, BindIdx) layout(set = SetIdx, binding = BindIdx)' + NL +
     NL +
     '/* --- Screen Effect Push Constants --- */' + NL +
     'layout(push_constant) uniform CastleScreenPushConstants {' + NL +
@@ -2458,7 +2460,8 @@ begin
         '/* --- Fragment Shader Stage IO --- */' + NL +
         'layout(location = 0) in vec2 tex_coord;' + NL +
         'layout(location = 0) out vec4 castle_FragColor;' + NL +
-        '#define gl_FragColor castle_FragColor' + NL;
+        '#define gl_FragColor castle_FragColor' + NL +
+        '#define screenf_01_position tex_coord' + NL;
   end;
 end;
 

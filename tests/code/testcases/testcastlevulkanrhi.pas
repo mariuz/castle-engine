@@ -27,7 +27,7 @@ uses
   CastleInternalRHI, CastleInternalVulkan, CastleInternalVulkanMemory,
   CastleInternalVulkanWSI, CastleInternalShaderCompiler, CastleInternalRHI_Vulkan,
   CastleInternalShaderRHI, CastleInternalBatch2DRHI, CastleInternalRenderer,
-  CastleRendererInternalLights, CastleRendererInternalTextureEnv, X3DNodes, X3DFields, X3DCameraUtils,
+  CastleRendererInternalShader, CastleRendererInternalLights, CastleRendererInternalTextureEnv, X3DNodes, X3DFields, X3DCameraUtils,
   CastleInternalGeometryArrays, CastleSceneInternalShape, CastleInternalOcclusionCulling,
   CastleTransform, CastleScene, CastleProjection, CastleViewport, CastleScreenEffects, CastleRenderOptions, CastleWindow,
   CastleUIControls, CastleControls,
@@ -327,6 +327,9 @@ type
     procedure TestMultiEffectChainedPlugDeduplicationAndInvocationRHI;
     procedure TestAdditionalShaderPlugsLightAmbientSteepShadowTextureApplyAddLightRHI;
     procedure TestUserEffectDoublePrecisionAndMultiValueArrayUniformPackingRHI;
+    procedure TestScreenEffectFloatLibraryFunctionsAndCustomVertexShaderRHI;
+    procedure TestScreenEffectCustomUniformUBOAndTextureBindingRHI;
+    procedure TestViewpointMirrorPlaneUniformsAndTexGenSpecializationRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -20069,6 +20072,292 @@ begin
     finally
       RendererShape.Cache.RHIUserEffectBuffer.Unmap;
     end;
+  finally
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestScreenEffectFloatLibraryFunctionsAndCustomVertexShaderRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  SeNode: TScreenEffectNode;
+  ShaderNode: TComposedShaderNode;
+  VertPart, FragPart: TShaderPartNode;
+  SeRes: TScreenEffectResource;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8801)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+
+  Scene := TCastleScene.Create(nil);
+  try
+    Root := TX3DRootNode.Create;
+    SeNode := TScreenEffectNode.Create;
+    SeNode.NeedsDepth := True;
+    ShaderNode := TComposedShaderNode.Create;
+    ShaderNode.Language := slGLSL;
+
+    VertPart := TShaderPartNode.Create;
+    VertPart.ShaderType := stVertex;
+    VertPart.Contents :=
+      'uniform float u_zoom;' + LineEnding +
+      'void main(void)' + LineEnding +
+      '{' + LineEnding +
+      '  v_tex_coord = tex_coord * u_zoom;' + LineEnding +
+      '  gl_Position = vec4(vertex, 0.0, 1.0);' + LineEnding +
+      '}';
+
+    FragPart := TShaderPartNode.Create;
+    FragPart.ShaderType := stFragment;
+    FragPart.Contents :=
+      'void main(void)' + LineEnding +
+      '{' + LineEnding +
+      '  vec2 pos = screenf_position();' + LineEnding +
+      '  float d0 = screenf_get_original_depth();' + LineEnding +
+      '  float d1 = screenf_get_depth(pos);' + LineEnding +
+      '  float d2 = screenf_01_get_depth(screenf_01_position);' + LineEnding +
+      '  vec4 c0 = screenf_get_original_color();' + LineEnding +
+      '  vec4 c1 = screenf_get_color(pos);' + LineEnding +
+      '  vec4 c2 = screenf_01_get_color(screenf_01_position);' + LineEnding +
+      '  gl_FragColor = mix(c0, c1 + c2, d0 + d1 + d2 + screenf_x() * 0.0 + screenf_y() * 0.0);' + LineEnding +
+      '}';
+
+    ShaderNode.SetParts([VertPart, FragPart]);
+    SeNode.SetShaders([ShaderNode]);
+    Root.AddChildren(SeNode);
+    Scene.Load(Root, True);
+
+    AssertEquals('Scene.InternalScreenEffectsCount must be 1', 1, Scene.InternalScreenEffectsCount);
+    SeRes := TScreenEffectResource(SeNode.InternalRendererResource);
+    AssertTrue('SeRes must be non-nil', SeRes <> nil);
+    AssertTrue('Vertex GLSL must include custom vertex main and upgraded u_zoom uniform',
+      (Pos('v_tex_coord = tex_coord * u_zoom;', SeRes.RHIVertexGLSL) > 0) and
+      (Pos('CastleUserEffectBlock', SeRes.RHIVertexGLSL) > 0));
+    AssertTrue('Fragment GLSL must define screenf_01_position',
+      Pos('#define screenf_01_position tex_coord', SeRes.RHIFragmentGLSL) > 0);
+    AssertTrue('Fragment GLSL must include screenf_position and screenf_get_original_color',
+      (Pos('vec2 screenf_position()', SeRes.RHIFragmentGLSL) > 0) and
+      (Pos('vec4 screenf_get_original_color()', SeRes.RHIFragmentGLSL) > 0) and
+      (Pos('vec4 screenf_01_get_color(vec2 position)', SeRes.RHIFragmentGLSL) > 0));
+    AssertTrue('Fragment GLSL must include float depth functions when NeedsDepth=True',
+      (Pos('float screenf_01_get_depth(vec2 position)', SeRes.RHIFragmentGLSL) > 0) and
+      (Pos('float screenf_get_depth(vec2 position)', SeRes.RHIFragmentGLSL) > 0) and
+      (Pos('float screenf_get_original_depth()', SeRes.RHIFragmentGLSL) > 0) and
+      (Pos('float screenf_get_depth_fast(vec2 position)', SeRes.RHIFragmentGLSL) > 0));
+  finally
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestScreenEffectCustomUniformUBOAndTextureBindingRHI;
+var
+  Device: TVulkanRHIDevice;
+  CmdList: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  ScreenFX: TCastleScreenEffects;
+  SeNode: TScreenEffectNode;
+  ShaderNode: TComposedShaderNode;
+  FragPart: TShaderPartNode;
+  LutTexNode: TPixelTextureNode;
+  LutImg: TRGBAlphaImage;
+  FdTime: TSFFloat;
+  FdTint: TSFVec3f;
+  FdLut: TSFNode;
+  SeRes: TScreenEffectResource;
+  FinalTarget: TRHITexture;
+  P: PByte;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8802)));
+  CmdList := TVulkanRHICommandList.Create(Device, 0, cllPrimary);
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  SetActiveCommandList(CmdList);
+
+  ScreenFX := TCastleScreenEffects.Create(nil);
+  FinalTarget := Device.CreateTexture(TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm,
+    [tuColorAttachment, tuSampled, tuTransferDst, tuTransferSrc]));
+  try
+    SeNode := TScreenEffectNode.Create;
+    ShaderNode := TComposedShaderNode.Create;
+    ShaderNode.Language := slGLSL;
+
+    LutTexNode := TPixelTextureNode.Create;
+    LutImg := TRGBAlphaImage.Create(4, 4);
+    LutImg.Clear(Vector4Byte(255, 128, 64, 255));
+    LutTexNode.FdImage.Value := LutImg;
+
+    FdTime := TSFFloat.Create(ShaderNode, True, 'u_time', 2.5);
+    ShaderNode.AddCustomField(FdTime);
+    FdTint := TSFVec3f.Create(ShaderNode, True, 'u_tint', Vector3(0.25, 0.5, 0.75));
+    ShaderNode.AddCustomField(FdTint);
+    FdLut := TSFNode.Create(ShaderNode, True, 'u_lut_tex', [TAbstractTextureNode], LutTexNode);
+    ShaderNode.AddCustomField(FdLut);
+
+    FragPart := TShaderPartNode.Create;
+    FragPart.ShaderType := stFragment;
+    FragPart.Contents :=
+      'uniform float u_time;' + LineEnding +
+      'uniform vec3 u_tint;' + LineEnding +
+      'uniform sampler2D u_lut_tex;' + LineEnding +
+      'void main(void)' + LineEnding +
+      '{' + LineEnding +
+      '  vec4 c = screenf_get_original_color();' + LineEnding +
+      '  vec4 lut = texture(u_lut_tex, screenf_01_position);' + LineEnding +
+      '  gl_FragColor = vec4(c.rgb * u_tint * u_time + lut.rgb, c.a);' + LineEnding +
+      '}';
+    ShaderNode.SetParts([FragPart]);
+    SeNode.SetShaders([ShaderNode]);
+
+    ScreenFX.AddScreenEffect(SeNode);
+    AssertTrue('GetScreenEffectRHIPipeline(0) must prepare SeNode resource',
+      ScreenFX.GetScreenEffectRHIPipeline(0) <> nil);
+    SeRes := TScreenEffectResource(SeNode.InternalRendererResource);
+    AssertTrue('SeRes must be created', SeRes <> nil);
+    AssertEquals('SeRes.RHIUserEffectUniformCount must be 3 (u_time, u_tint, u_lut_tex)',
+      3, Integer(SeRes.RHIUserEffectUniformCount));
+    AssertTrue('SeRes.RHIUserEffectBuffer must be allocated', SeRes.RHIUserEffectBuffer <> nil);
+    AssertTrue('SeRes.RHIUserEffectDescriptorSet must be allocated', SeRes.RHIUserEffectDescriptorSet <> nil);
+    AssertTrue('SeRes.RHIUserEffectTextures[0] must bind LutTexNode RHI texture',
+      SeRes.RHIUserEffectTextures[0] <> nil);
+    AssertTrue('Fragment GLSL must upgrade u_time/u_tint to CastleUserEffectBlock and u_lut_tex to CASTLE_SAMPLER(2, 2)',
+      (Pos('CASTLE_UBO(2, 1) uniform CastleUserEffectBlock', SeRes.RHIFragmentGLSL) > 0) and
+      (Pos('CASTLE_SAMPLER(2, 2) uniform sampler2D u_lut_tex;', SeRes.RHIFragmentGLSL) > 0));
+
+    { Animate u_time field and verify UpdateRHIUniforms refreshes UBO during GetScreenEffectRHIPipeline }
+    FdTime.Send(7.75);
+    ScreenFX.GetScreenEffectRHIPipeline(0);
+    AssertTrue('RHIUserEffectUploadCount must be >= 2 after refresh',
+      SeRes.RHIUserEffectUploadCount >= 2);
+    P := PByte(SeRes.RHIUserEffectBuffer.Map);
+    try
+      AssertSameValue(7.75, PSingle(P + 0)^, 1e-4);
+      AssertSameValue(0.25, PVector3(P + 16)^.X, 1e-4);
+      AssertSameValue(0.50, PVector3(P + 16)^.Y, 1e-4);
+      AssertSameValue(0.75, PVector3(P + 16)^.Z, 1e-4);
+    finally
+      SeRes.RHIUserEffectBuffer.Unmap;
+    end;
+
+    { Verify ScreenFX.ExecuteRHIScreenEffectPasses binds Set 2 user descriptor set }
+    CmdList.BeginRecording;
+    ScreenFX.EnsureRHIScreenResources(64, 64, False);
+    AssertEquals('ExecuteRHIScreenEffectPasses must execute 1 pass',
+      1, Integer(ScreenFX.ExecuteRHIScreenEffectPasses(
+        [ScreenFX.GetScreenEffectRHIPipeline(0)], 64, 64, False, FinalTarget, 0.1, 100.0)));
+    CmdList.EndRecording;
+    AssertTrue('ScreenFX.GetScreenEffectRHIUserDescriptorSet(0) must return SeRes.RHIUserEffectDescriptorSet',
+      ScreenFX.GetScreenEffectRHIUserDescriptorSet(0) = SeRes.RHIUserEffectDescriptorSet);
+  finally
+    FreeAndNil(FinalTarget);
+    FreeAndNil(ScreenFX);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(CmdList);
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewpointMirrorPlaneUniformsAndTexGenSpecializationRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  Ifs: TIndexedFaceSetNode;
+  CoordNode: TCoordinateNode;
+  TexGen: TTextureCoordinateGeneratorNode;
+  RendererShape: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  FallbackVS, PlanarVS: String;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($8803)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+
+  Scene := TCastleScene.Create(nil);
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    Ifs := TIndexedFaceSetNode.Create;
+    CoordNode := TCoordinateNode.Create;
+    CoordNode.SetPoint([
+      Vector3(-2, 0, -2),
+      Vector3( 2, 0, -2),
+      Vector3( 2, 0,  2),
+      Vector3(-2, 0,  2)
+    ]);
+    Ifs.Coord := CoordNode;
+    Ifs.SetCoordIndex([0, 1, 2, 3, -1]);
+
+    TexGen := TTextureCoordinateGeneratorNode.Create;
+    TexGen.FdMode.Value := 'MIRROR-PLANE';
+    Ifs.TexCoord := TexGen;
+
+    App.Material := Mat;
+    ShapeNode.Appearance := App;
+    ShapeNode.Geometry := Ifs;
+    Root.AddChildren(ShapeNode);
+    Scene.Load(Root, True);
+
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(True, True)[0]);
+    RendererShape.PrepareRHIBuffers(Scene.RenderOptions, 1);
+
+    { 1. Without MirrorPlaneUniforms: falls back to clip-space NDC projection }
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertFalse('RHIHasMirrorPlaneUniforms must be False when MirrorPlaneUniforms = nil',
+      RendererShape.Cache.RHIHasMirrorPlaneUniforms);
+    FallbackVS := RendererShape.Cache.RHIVertexShaderSource;
+    AssertTrue('Fallback MIRROR-PLANE vertex shader must use mirrorClip NDC projection',
+      Pos('vec4 mirrorClip = castle_ProjectionMatrix * castle_vertex_eye;', FallbackVS) > 0);
+
+    { 2. With MirrorPlaneUniforms populated (as done by TRenderedTextureResource.Update for ViewpointMirror):
+         must specialize vertex shader with exact planar mirror projection }
+    RendererShape.MirrorPlaneUniforms := TMirrorPlaneUniforms.Create;
+    RendererShape.MirrorPlaneUniforms.NormalizedPlane := Vector4(0.0, 1.0, 0.0, 0.0);
+    RendererShape.MirrorPlaneUniforms.CameraPositionOnPlane := Vector3(0.0, 0.0, 5.0);
+    RendererShape.MirrorPlaneUniforms.CameraSide := Vector3(1.0, 0.0, 0.0);
+    RendererShape.MirrorPlaneUniforms.CameraUp := Vector3(0.0, 0.0, -1.0);
+    RendererShape.MirrorPlaneUniforms.FrustumDimensions := FloatRectangle(-2.0, -3.0, 4.0, 6.0);
+
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+    AssertTrue('RHIHasMirrorPlaneUniforms must be True when MirrorPlaneUniforms <> nil',
+      RendererShape.Cache.RHIHasMirrorPlaneUniforms);
+    AssertSameValue(1.0, RendererShape.Cache.RHIMirrorNormalizedPlane.Y, 1e-4);
+    AssertSameValue(5.0, RendererShape.Cache.RHIMirrorCameraPositionOnPlane.Z, 1e-4);
+    AssertSameValue(4.0, RendererShape.Cache.RHIMirrorFrustumDimensions.Z, 1e-4);
+    AssertSameValue(6.0, RendererShape.Cache.RHIMirrorFrustumDimensions.W, 1e-4);
+
+    PlanarVS := RendererShape.Cache.RHIVertexShaderSource;
+    AssertTrue('Planar MIRROR-PLANE vertex shader must compute mirrorPlaneD and vertexOnPlane',
+      (Pos('float mirrorPlaneD = -dot(castle_NormalizedPlane.xyz, mirrorWorldPos.xyz) - castle_NormalizedPlane.w;', PlanarVS) > 0) and
+      (Pos('vec3 vertexOnPlane = mirrorWorldPos.xyz + castle_NormalizedPlane.xyz * mirrorPlaneD - castle_CameraPositionOnPlane;', PlanarVS) > 0) and
+      (Pos('vec2 mirrorProjected = vec2(dot(vertexOnPlane, castle_CameraSide), dot(vertexOnPlane, castle_CameraUp));', PlanarVS) > 0));
   finally
     FreeAndNil(Scene);
     SetRHIDevice(SavedRHI);

@@ -481,6 +481,7 @@ type
       @groupBegin }
     function InternalScreenEffects(Index: Integer): TGLSLProgram;
     function InternalScreenEffectRHIPipeline(Index: Integer): TRHIPipeline; //< @exclude
+    function InternalScreenEffectRHIUserDescriptorSet(Index: Integer): TRHIDescriptorSet; //< @exclude
     function InternalScreenEffectsCount: Integer; //< @exclude
     function InternalScreenEffectsNeedDepth: boolean; //< @exclude
     { @groupEnd }
@@ -1960,8 +1961,35 @@ begin
        ((SeNodeRes.RHIPipeline <> nil) or (SeNodeRes.ShaderProgram <> nil)) then
     begin
       if Index = 0 then
-        Exit(SeNodeRes.RHIPipeline)
-      else
+      begin
+        SeNodeRes.UpdateRHIUniforms;
+        Exit(SeNodeRes.RHIPipeline);
+      end else
+        Dec(Index);
+    end;
+  end;
+  Result := nil;
+end;
+
+function TCastleScene.InternalScreenEffectRHIUserDescriptorSet(Index: Integer): TRHIDescriptorSet;
+var
+  I: Integer;
+  SeNode: TScreenEffectNode;
+  SeNodeRes: TScreenEffectResource;
+begin
+  for I := 0 to ScreenEffectNodes.Count - 1 do
+  begin
+    SeNode := TScreenEffectNode(ScreenEffectNodes[I]);
+    TScreenEffectResources.Prepare(RenderOptions, SeNode);
+    SeNodeRes := TScreenEffectResources.Get(SeNode);
+    if (SeNodeRes <> nil) and
+       ((SeNodeRes.RHIPipeline <> nil) or (SeNodeRes.ShaderProgram <> nil)) then
+    begin
+      if Index = 0 then
+      begin
+        SeNodeRes.UpdateRHIUniforms;
+        Exit(SeNodeRes.RHIUserEffectDescriptorSet);
+      end else
         Dec(Index);
     end;
   end;
