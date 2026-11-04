@@ -7641,7 +7641,12 @@ begin
   FSelectionHistoryIndex := -1;
   UpdateSelectionHistoryButtons;
 
-  ControlsTree.ClearSelection; // TODO: for now we reset selection, though maybe we could preserve it in some cases
+  { Clear selection before freeing DesignOwner. Callers that reload or
+    replace the current design in-place (PerformUndoRedo, SimulationStop,
+    ChangeClass, ShowReplaceComponentPalette, or OpenDesign reloading the
+    same FDesignUrl) capture GetSavedSelection prior to OpenDesign and
+    restore it via RestoreSavedSelection after UpdateDesign. }
+  ControlsTree.ClearSelection;
 
   UpdateSelectedControl;
   //CastleControl.Controls.Clear; // don't clear it, leave DesignerLayer
@@ -7982,8 +7987,13 @@ end;
 procedure TDesignFrame.OpenDesign(const NewDesignUrl: String);
 var
   NewDesignRoot, NewDesignOwner: TComponent;
-  Mime: String;
+  Mime, SavedSelection: String;
 begin
+  if (FDesignUrl <> '') and (FDesignUrl = NewDesignUrl) then
+    SavedSelection := GetSavedSelection
+  else
+    SavedSelection := '';
+
   NewDesignOwner := TComponent.Create(Self);
 
   try
@@ -8014,6 +8024,11 @@ begin
   UndoSystem.ClearUndoHistory;
 
   OpenDesign(NewDesignRoot, NewDesignOwner, NewDesignUrl);
+
+  if SavedSelection <> '' then
+    RestoreSavedSelection(SavedSelection);
+  if (ControlsTree.SelectionCount = 0) and (NewDesignRoot <> nil) then
+    SetSelectedComponent(NewDesignRoot);
 
   RecordUndo('Open design', High(TUndoCommentPriority)); // Technically this is impossible to see this Undo comment
 end;
@@ -49059,6 +49074,8 @@ begin
   UndoSystem.ClearUndoHistory;
 
   OpenDesign(NewRoot, NewDesignOwner, '');
+  if (ControlsTree.SelectionCount = 0) and (NewRoot <> nil) then
+    SetSelectedComponent(NewRoot);
 
   RecordUndo('Start new design', High(TUndoCommentPriority)); // This Undo comment is never seen
 end;

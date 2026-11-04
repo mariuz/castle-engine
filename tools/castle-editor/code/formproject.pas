@@ -563,6 +563,7 @@ type
       BtnFilterAudio: TSpeedButton;
       BtnFilterCode: TSpeedButton;
       FCurrentAssetCategoryMask: String;
+      FLastActivateRefreshTick: QWord;
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure UpdateShellListMask;
@@ -1322,13 +1323,17 @@ begin
 end;
 
 procedure TProjectForm.ApplicationProperties1Activate(Sender: TObject);
+var
+  NowTick: QWord;
 begin
-  { TODO: At least on Linux, GTK2 backend, this is *not* reliably
-    run always when we switch back to CGE editor with Alt+Tab.
-    This in turn means we don't always auto-reload scenes, images etc.
-    when their content changed.
-  WritelnLog('TProjectForm.ApplicationProperties1Activate ' + FormatDateTime('yyyy"-"mm"-"dd" "tt', Now));
-  }
+  { On Linux/GTK2, TApplicationProperties.OnActivate is not always fired when
+    switching back to the editor with Alt+Tab, so we also wire TForm.OnActivate
+    on TProjectForm and dockable forms to this handler and debounce duplicate
+    notifications within 250 ms. }
+  NowTick := GetTickCount64;
+  if (FLastActivateRefreshTick <> 0) and (NowTick - FLastActivateRefreshTick < 250) then
+    Exit;
+  FLastActivateRefreshTick := NowTick;
 
   { Refresh contents of selected dir, and tree of subdirectories,
     in case user created some files/directories in other applications. }
@@ -2039,6 +2044,7 @@ begin
   BuildPlatformsMenu;
   BuildPackageFormatsMenu;
   ApplicationProperties.OnWarning.Add(@WarningNotification);
+  OnActivate := @ApplicationProperties1Activate;
   ProjectViews := TProjectViewList.Create;
   if Docking then
   begin
@@ -2048,6 +2054,8 @@ begin
     DesignForm := TForm.CreateNew(nil);
     DesignForm.Name := 'DesignForm';
     DesignForm.Caption := 'Design';
+    DesignForm.DesignTimePPI := DesignTimePPI;
+    DesignForm.OnActivate := @ApplicationProperties1Activate;
     DesignHierarchyForm := TForm.CreateNew(nil);
     DesignHierarchyForm.Name := 'DesignHierarchyForm';
     DesignHierarchyForm.Caption := 'Hierarchy';
@@ -2056,26 +2064,32 @@ begin
       from the initial LoadDockLayout call is not correct (and only calling
       later "Restore Default Docking Layout" helps). }
     DesignHierarchyForm.DesignTimePPI := DesignTimePPI;
+    DesignHierarchyForm.OnActivate := @ApplicationProperties1Activate;
     DesignPropertiesForm := TForm.CreateNew(nil);
     DesignPropertiesForm.Name := 'DesignPropertiesForm';
     DesignPropertiesForm.Caption := 'Properties';
     DesignPropertiesForm.DesignTimePPI := DesignTimePPI;
+    DesignPropertiesForm.OnActivate := @ApplicationProperties1Activate;
     DesignExplorerForm := TForm.CreateNew(nil);
     DesignExplorerForm.Name := 'DesignExplorerForm';
     DesignExplorerForm.Caption := 'Explorer';
     DesignExplorerForm.DesignTimePPI := DesignTimePPI;
+    DesignExplorerForm.OnActivate := @ApplicationProperties1Activate;
     DesignFilesForm := TForm.CreateNew(nil);
     DesignFilesForm.Name := 'DesignFilesForm';
     DesignFilesForm.Caption := 'Files';
     DesignFilesForm.DesignTimePPI := DesignTimePPI;
+    DesignFilesForm.OnActivate := @ApplicationProperties1Activate;
     DesignOutputForm := TForm.CreateNew(nil);
     DesignOutputForm.Name := 'DesignOutputForm';
     DesignOutputForm.Caption := 'Output';
     DesignOutputForm.DesignTimePPI := DesignTimePPI;
+    DesignOutputForm.OnActivate := @ApplicationProperties1Activate;
     DesignWarningsForm := TForm.CreateNew(nil);
     DesignWarningsForm.Name := 'DesignWarningsForm';
     DesignWarningsForm.Caption := 'Warnings';
     DesignWarningsForm.DesignTimePPI := DesignTimePPI;
+    DesignWarningsForm.OnActivate := @ApplicationProperties1Activate;
     DockMaster.MakeDockable(DesignForm, true, true);
     DockMaster.MakeDockable(DesignHierarchyForm, true, true);
     DockMaster.MakeDockable(DesignPropertiesForm, true, true);
@@ -2726,7 +2740,17 @@ begin
   end;
 
   if ProposeSaveDesign then
+  begin
+    if DragManager.IsDragging then
+      DragManager.DragStop(false);
+    SetCaptureControl(nil);
     OpenDesign(DesignUrl);
+    if Design <> nil then
+    begin
+      Design.ReleaseAllKeysAndMouse;
+      Design.FocusDesign;
+    end;
+  end;
 end;
 
 procedure TProjectForm.NeedsDesignFrame;
@@ -3404,9 +3428,9 @@ begin
     ... They will all try to drag-and-drop the design you have just opened onto
     itself.
 
-    TODO: There remains a problem in the above case, even after this fix:
-    First mouse down after such "forceful break of dragging" is not passed to TCastleControl.
-    So you need to click again to actually start e.g. mouse look on a viewport.
+    We also clear SetCaptureControl(nil) here and in ProposeOpenDesign after
+    any modal confirmation dialog so that the very first mouse-down on the newly
+    opened TCastleControl is delivered immediately without requiring an extra click.
   }
   if DragManager.IsDragging then
   begin
@@ -3415,6 +3439,7 @@ begin
       BoolToStr(DragManager.IsDragging, true)
     ]);
   end;
+  SetCaptureControl(nil);
 
   if ShellListView1.Selected <> nil then
   begin
