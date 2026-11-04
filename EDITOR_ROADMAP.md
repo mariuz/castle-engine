@@ -2468,11 +2468,24 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - **Screenshots:** [CGE UI Designer & Views Panel](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [CGE Editor Hierarchy & Files Tree](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [Godot 4 UI Container Layout](https://docs.godotengine.org/en/stable/_images/containers_box.png)
   - **Example (Phase 261):** Drag a child widget inside a `TCastleHorizontalGroup` / `TCastleVerticalGroup` or a `FullSize` background inside a panel to smoothly translate the parent container (while respecting component lock if the parent container is locked), or close the current design to view the **Open Existing View** list with the sort indicator accurately aligned to the active **Name** column.
 
+### Phase 262: Cross-Platform LCL Caps Lock Detection (`LettersUpCase`), Dark-Theme Action SpeedButton Sync (`UpdateButtonForDarkTheme`), Repaint-Safe Hierarchy Invalidations (`UpdateDesign`), and Component Editor Designer Deletion Bridge (`PrepareFreeDesigner`)
+- [x] **262.1. Cross-Platform `LettersUpCase`, `UpdateButtonForDarkTheme` Action Sync, `ControlsTree.Items.BeginUpdate` Guard & `PrepareFreeDesigner` (`castlelcledithack.pas`, `framedesign.pas`, `castlecomponenteditordesigner.pas`)**
+  - Resolved the Windows-only `LettersUpCase` `TODO` in `TEditBox.ProcessKey` (`tools/castle-editor/code/castlelcledithack.pas`) by importing `LCLIntf` and checking `(ssCaps in Shift) or ((LCLIntf.GetKeyState(VK_CAPITAL) and 1) <> 0)`, providing cross-platform Caps Lock detection across Windows, GTK, Qt, and Cocoa widgetsets.
+  - Promoted `TDesignFrame.UpdateButtonForDarkTheme` (`tools/castle-editor/code/framedesign.pas`) to an instance method checking both `Button.Down` and `(Button.Action is TCustomAction) and TCustomAction(Button.Action).Checked`, and wired dark-theme icon updates for `ActionListDesign`, `ButtonPlayStop`, `ButtonSimulationPlayStop`, `ButtonSimulationPause`, and `ButtonApiReferenceForCurrent` in `TDesignFrame.Create`, `ActionSimulationPlayStopUpdate`, `ActionSimulationPauseUnpauseUpdate`, and `ActionPlayStopUpdate`.
+  - Wrapped `ValidateOrUpdateHierarchy(false)` in `ControlsTree.Items.BeginUpdate` / `ControlsTree.Items.EndUpdate` inside `TDesignFrame.UpdateDesign` (`tools/castle-editor/code/framedesign.pas`) and cleared `InternalCastleDesignInvalidate := false` immediately after `ValidateOrUpdateHierarchy(false)` completes, preventing mid-update LCL repaints in `ControlsTreeCustomDrawItem` from dereferencing stale `Node.Data` pointers.
+  - Resolved the `TConcreteEditorDesigner.PrepareFreeDesigner` `TODO` (`tools/castle-editor/code/castlecomponenteditordesigner.pas`) by invoking `FDesignFrame.DeleteComponent` when `AFreeComponent and (FDesignFrame <> nil) and FDesignFrame.DeleteSelectedPossible`.
+  - **Official Docs & Visual References (Phase 262):** [CGE Visual Editor Manual (Dark Theme Toolbar, Physics Simulation & Hierarchy Tree)](https://castle-engine.io/manual_editor.php) · [CGE Custom Components & Property Editors Manual (`TComponentEditorDesigner`)](https://castle-engine.io/custom_components) · [Free Pascal / Lazarus LCL `LCLIntf.GetKeyState` Reference](https://lazarus-ccr.sourceforge.io/docs/lcl/lclintf/getkeystate.html) · [Godot 4 Editor Theme & Toolbar Icons](https://docs.godotengine.org/en/stable/getting_started/introduction/first_look_at_the_editor.html) · [UE 5.5 Level Editor Toolbar & Play/Simulate Controls](https://dev.epicgames.com/documentation/en-us/unreal-engine/level-editor-in-unreal-engine)
+  - **Official Videos & Movies (Phase 262):**
+    - 🎬 [CGE Official Video — Visual Editor Toolbar, Physics Simulation & Hierarchy Workflow (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+    - 🎞️ [Animated Movie (GIF) — Interactive Editor Toolbar & Hierarchy Tree Updates](https://docs.godotengine.org/en/stable/_images/containers_split_drag.gif)
+  - **Screenshots:** [CGE Visual Editor Dark Theme & Toolbar](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE UI Inspector & Toolbar Controls](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [CGE Physics Simulation Toolbar](https://castle-engine.io/images/thumb_const_height_size/physics_platformer_collisions.webp)
+  - **Example (Phase 262):** Toggle **Play/Stop** or **Physics Simulation Play/Pause** in the dark-themed editor toolbar and observe `ButtonPlayStop`, `ButtonSimulationPlayStop`, and `ButtonSimulationPause` immediately switch between `ToolbarIconsDarkActive` and `ToolbarIconsDarkInactive`, or trigger an `InternalCastleDesignInvalidate` rebuild (such as modifying a nested `TCastleDesign` / `TCastleTransformDesign` URL) without transient `ControlsTreeCustomDrawItem` pointer errors.
+
 ---
 
-## Roadmap Completion Status (Phases 1–261 — Final Milestone)
+## Roadmap Completion Status (Phases 1–262 — Final Milestone)
 
-All **261 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **262 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 

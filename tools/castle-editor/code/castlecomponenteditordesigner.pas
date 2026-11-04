@@ -322,7 +322,8 @@ end;
 procedure TConcreteEditorDesigner.PrepareFreeDesigner(
   AFreeComponent: boolean);
 begin
-  // TODO, unused in practice by CGE components
+  if AFreeComponent and (FDesignFrame <> nil) and FDesignFrame.DeleteSelectedPossible then
+    FDesignFrame.DeleteComponent;
 end;
 
 procedure TConcreteEditorDesigner.ProposeOpenDesign(const DesignUrl: String);

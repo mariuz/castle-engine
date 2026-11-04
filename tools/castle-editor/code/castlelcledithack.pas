@@ -165,7 +165,7 @@ procedure ProcessKeyToPerformEdit(const ActiveControl: TComponent;
 
 implementation
 
-uses LCLType, LCLVersion, StrUtils, Clipbrd,
+uses LCLIntf, LCLType, LCLVersion, StrUtils, Clipbrd,
   CastleStringUtils, CastleUnicode;
 
 { TEditBox ------------------------------------------------------------------- }
@@ -178,14 +178,9 @@ procedure TEditBox.ProcessKey(var Key: Word; const Shift: TShiftState);
     so we need to calculate key->char here. }
   function LettersUpCase: Boolean;
   begin
-    Result := false;
-    // TODO: This is Windows-only.
-    {$ifdef MSWINDOWS}
-    { See https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getkeystate .
-      Read low-order bit of VK_CAPITAL (caps lock) state. }
-    if (GetKeyState(VK_CAPITAL) and 1) <> 0 then
-      Result := true;
-    {$endif}
+    { Check both ssCaps in Shift and cross-platform LCLIntf.GetKeyState(VK_CAPITAL)
+      low-order toggle bit so Caps Lock state works across Windows, GTK, Qt, and Cocoa. }
+    Result := (ssCaps in Shift) or ((LCLIntf.GetKeyState(VK_CAPITAL) and 1) <> 0);
     if ssShift in Shift then
       Result := not Result;
   end;

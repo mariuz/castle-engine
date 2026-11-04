@@ -2338,6 +2338,7 @@ type
     procedure SimulationSingleStep;
     procedure KeepSimulationChanges;
     procedure UpdateSimulationActions;
+    procedure UpdateButtonForDarkTheme(const Button: TSpeedButton);
     property ShowColliders: Boolean read FShowColliders write SetShowColliders;
 
     procedure ReleaseAllKeysAndMouse;
@@ -7529,30 +7530,18 @@ begin
   EditFindInHierarchy.ShowHint := true;
   SetEnabledVisible(EditFindInHierarchy, FindActive);
 
-  { TODO: This is unoptimal, we switch all actions buttons to "inactive".
-    We don't really have a place to switch to "active" and "disabled",
-    ActionListDesign has one property for images.
-
-    We should instead pack all images into one long TImageList and set
-    TSpeedButtons index properties accordingly.
-
-    But to make this work, without going insane:), we need to manage TImageList
-    contents by code (not by GUI in Lazarus IDE),
-    and assign the indexes in TSpeedButtons by code.
-    Otherwise (using GUI in Lazarus IDE to manage TImageList contents)
-    this is unmaintainable, we'll constantly need to update
-    indexes for other buttons (or we will have chaos in image list order)
-    esp. with 3 versions for "dark" and possible future changes like
-    variations for "light" as well.
-
-    It also sucks we need all images prepared and loaded, instead of just
-    tweaking the image color at display, like we can with TCastleButton
-    in castle-editor-portable. }
-
-  { TODO: This doesn't seem to work at all at runtime.
+  { Synchronize ActionListDesign and action-backed TSpeedButtons with dark theme
+    icon sets. Note that LCL TSpeedButton caches its own Images reference when
+    loaded from LFM, so each action TSpeedButton is also updated via
+    UpdateButtonForDarkTheme when dark theme is active. }
   if UseIconsAndColorsForDarkTheme then
+  begin
     ActionListDesign.Images := Icons.ToolbarIconsDarkInactive;
-  }
+    UpdateButtonForDarkTheme(ButtonPlayStop);
+    UpdateButtonForDarkTheme(ButtonSimulationPlayStop);
+    UpdateButtonForDarkTheme(ButtonSimulationPause);
+    UpdateButtonForDarkTheme(ButtonApiReferenceForCurrent);
+  end;
 end;
 
 destructor TDesignFrame.Destroy;
@@ -10803,7 +10792,16 @@ begin
 
   TreeNodeMap.Clear; // ValidateOrUpdateHierarchy(false) will fill TreeNodeMap
 
-  ValidateOrUpdateHierarchy(false);
+  { Wrap hierarchy tree update in BeginUpdate/EndUpdate and clear
+    InternalCastleDesignInvalidate immediately once all Node.Data pointers are
+    refreshed, preventing mid-update LCL repaints from seeing stale pointers. }
+  ControlsTree.Items.BeginUpdate;
+  try
+    ValidateOrUpdateHierarchy(false);
+    InternalCastleDesignInvalidate := false;
+  finally
+    ControlsTree.Items.EndUpdate;
+  end;
 
   { Restore selection.
     Without this (if we would clear selection like ControlsTree.ClearSelection),
@@ -10813,8 +10811,6 @@ begin
 
   // restore events
   ControlsTree.OnSelectionChanged := @ControlsTreeSelectionChanged;
-
-  InternalCastleDesignInvalidate := false;
 
   { Note that this sets (maybe changes to nil if unselected) TransformDesigning,
     calling some DesigningBegin / DesigningEnd.
@@ -12501,15 +12497,9 @@ begin
         if Node = ControlsTreeNodeUnderMouse then
           DrawTreeNodeUnderMouse;
 
-        { When InternalCastleDesignInvalidate, don't trust that pointers
-          on Node.Data are valid. This may happen if you freed joint,
-          which also freed associated anchor.
-
-          TODO: understand better why this is possible.
-          After FreeComponentRecursively, we immediately do UpdateDesign
-          and at that point the InternalCastleDesignInvalidate should be already
-          resolved? }
-
+        { Guard against painting Node.Data while InternalCastleDesignInvalidate
+          is set (e.g. if a joint freed an associated anchor before UpdateDesign
+          completed its BeginUpdate/EndUpdate rebuild). }
         if (not InternalCastleDesignInvalidate) and
            (Node.Data <> nil) then
           DrawTreeNodeClassName(TObject(Node.Data));
@@ -12641,6 +12631,8 @@ begin
   else
     ActionSimulationPlayStop.ImageIndex := TImageIndex(iiSimulationStop);
   ActionSimulationPlayStop.Checked := CastleApplicationMode in [appSimulation, appSimulationPaused];
+  if UseIconsAndColorsForDarkTheme then
+    UpdateButtonForDarkTheme(ButtonSimulationPlayStop);
 end;
 
 procedure TDesignFrame.ActionSimulationPauseUnpauseUpdate(Sender: TObject);
@@ -12650,6 +12642,8 @@ begin
   InSim := CastleApplicationMode in [appSimulation, appSimulationPaused];
   ActionSimulationPauseUnpause.Checked := CastleApplicationMode = appSimulationPaused;
   ActionSimulationPauseUnpause.Visible := InSim;
+  if UseIconsAndColorsForDarkTheme then
+    UpdateButtonForDarkTheme(ButtonSimulationPause);
   if ButtonSimulationStep <> nil then
   begin
     ButtonSimulationStep.Visible := InSim;
@@ -12707,6 +12701,8 @@ begin
   else
     ActionPlayStop.ImageIndex := TImageIndex(iiPlay);
   ActionPlayStop.Checked := IsRunning;
+  if UseIconsAndColorsForDarkTheme then
+    UpdateButtonForDarkTheme(ButtonPlayStop);
 end;
 
 procedure TDesignFrame.ButtonResetTransformationClick(Sender: TObject);
@@ -48947,6 +48943,23 @@ begin
   end;
 end;
 
+procedure TDesignFrame.UpdateButtonForDarkTheme(const Button: TSpeedButton);
+var
+  IsActive: Boolean;
+begin
+  if Button = nil then
+    Exit;
+  IsActive := Button.Down or
+    ((Button.Action is TCustomAction) and TCustomAction(Button.Action).Checked);
+  if not Button.Enabled then
+    Button.Images := Icons.ToolbarIconsDarkDisabled
+  else
+  if IsActive then
+    Button.Images := Icons.ToolbarIconsDarkActive
+  else
+    Button.Images := Icons.ToolbarIconsDarkInactive;
+end;
+
 procedure TDesignFrame.ChangeMode(const NewMode: TMode);
 
   { For dark theme: change button colors, and also make them depending on
@@ -48954,19 +48967,6 @@ procedure TDesignFrame.ChangeMode(const NewMode: TMode);
     Note: the disabled state is never used now in practice,
     as these buttons are never disabled (for now). }
   procedure AdjustToolbarButtonsTheme;
-
-    { Change Button.Images to use an image suitable for dark theme. }
-    procedure UpdateButtonForDarkTheme(const Button: TSpeedButton);
-    begin
-      if not Button.Enabled then
-        Button.Images := Icons.ToolbarIconsDarkDisabled
-      else
-      if Button.Down then
-        Button.Images := Icons.ToolbarIconsDarkActive
-      else
-        Button.Images := Icons.ToolbarIconsDarkInactive;
-    end;
-
   begin
     if UseIconsAndColorsForDarkTheme then
     begin
