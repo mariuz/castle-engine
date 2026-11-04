@@ -92,6 +92,8 @@ type
     procedure Update(const SecondsPassed: Single;
       var HandleInput: boolean); override;
     procedure Render; override;
+    procedure EditorAllowResize(
+      out ResizeWidth, ResizeHeight: Boolean; out Reason: String); override;
     function PropertySections(const PropertyName: String): TPropertySections; override;
 
     { Color used to draw subsequent messages. Default value is white. }
@@ -155,7 +157,7 @@ type
 implementation
 
 uses Math,
-  CastleLog, CastleComponentSerialize;
+  CastleLog, CastleComponentSerialize, CastleStringUtils;
 
 { TNotificationList ---------------------------------------------------------- }
 
@@ -274,6 +276,15 @@ begin
   PreferredHeight := Font.Height * Messages.Count;
   for I := 0 to Messages.Count - 1 do
     PreferredWidth := Max(PreferredWidth, Messages[I].Width);
+end;
+
+procedure TCastleNotifications.EditorAllowResize(
+  out ResizeWidth, ResizeHeight: Boolean; out Reason: String);
+begin
+  inherited;
+  ResizeWidth := false;
+  ResizeHeight := false;
+  Reason := SAppendPart(Reason, NL, 'TCastleNotifications always adjusts its size to the currently displayed messages.');
 end;
 
 procedure TCastleNotifications.Render;

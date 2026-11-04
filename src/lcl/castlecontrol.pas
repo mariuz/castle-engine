@@ -284,10 +284,12 @@ type
       with respect to handling input, e.g. mouse move will be processed with
       a small delay). So we use MaxDesiredFPS to cap it. }
     procedure AggressiveUpdate;
+    procedure UpdateSharedControl;
   private
     class function GetMainContainer: TCastleContainer;
     procedure SystemSetMousePosition(const Value: TVector2);
   protected
+    procedure CreateHandle; override;
     procedure DestroyHandle; override;
     procedure DoExit; override;
     procedure Resize; override;
@@ -493,9 +495,6 @@ implementation
 uses Math, Contnrs, LazUTF8, Clipbrd,
   CastleControls, CastleGLUtils, CastleStringUtils, CastleLog, CastleRenderContext,
   CastleUriUtils, CastleComponentSerialize, CastleInternalLclDesign;
-
-// TODO: We never call Fps.InternalSleeping, so Fps.WasSleeping will be always false.
-// This may result in confusing Fps.ToString in case AutoRedisplay was false.
 
 { globals -------------------------------------------------------------------- }
 
@@ -706,14 +705,59 @@ begin
   FContainer.SetSubComponent(true);
   FContainer.Name := 'Container';
 
-  // TODO: what if ControlsList[0] was created but it not active?
-  // Does this maybe explain crash with docked editor?
-  // We should set SharedControl to AnyOtherOpenContext, right before context is created, in CreateParams
-  if ControlsList.Count <> 0 then
-    SharedControl := ControlsList[0] as TCastleControl;
+  UpdateSharedControl;
   ControlsList.Add(Self);
 
   Invalidated := false;
+end;
+
+procedure TCastleControl.UpdateSharedControl;
+var
+  I: Integer;
+  C: TCastleControl;
+begin
+  SharedControl := nil;
+  if ControlsList = nil then
+    Exit;
+
+  { Prefer sharing OpenGL context with a control whose GL context is already
+    initialized and whose handle is allocated (important for docked forms and
+    auxiliary preview windows when ControlsList[0] is not yet active). }
+  for I := 0 to ControlsList.Count - 1 do
+  begin
+    C := ControlsList[I] as TCastleControl;
+    if (C <> Self) and C.GLInitialized and C.HandleAllocated then
+    begin
+      SharedControl := C;
+      Exit;
+    end;
+  end;
+
+  for I := 0 to ControlsList.Count - 1 do
+  begin
+    C := ControlsList[I] as TCastleControl;
+    if (C <> Self) and C.HandleAllocated then
+    begin
+      SharedControl := C;
+      Exit;
+    end;
+  end;
+
+  for I := 0 to ControlsList.Count - 1 do
+  begin
+    C := ControlsList[I] as TCastleControl;
+    if C <> Self then
+    begin
+      SharedControl := C;
+      Exit;
+    end;
+  end;
+end;
+
+procedure TCastleControl.CreateHandle;
+begin
+  UpdateSharedControl;
+  inherited CreateHandle;
 end;
 
 destructor TCastleControl.Destroy;
@@ -781,7 +825,11 @@ begin
   begin
     C := ControlsList[I] as TCastleControl;
     if C.GLInitialized then
+    begin
       C.DoUpdate;
+      if not C.Invalidated then
+        C.Container.Fps.InternalSleeping;
+    end;
   end;
   ApplicationProperties._UpdateEnd;
   DoLimitFPS;
@@ -1149,12 +1197,13 @@ var
   Scroll: Single;
   Vertical: boolean;
 begin
-  { TODO: use MousePos? like this:
-      CastleNewPosition := MousePosToCastle(MousePos.X, MousePos.Y);
-    But check it is in correct (local) coordinate system,
-    as the parameter looks inconsistent with LCL MouseDown/Up/Move
-    (which pass 2x Integer), so maybe it's in different coord space. }
-  CastleNewPosition := Container.MousePosition;
+  { LCL's DeliverMouseWheelMessage converts MousePos via ScreenToClient before
+    calling DoMouseWheel, so MousePos is in local client coordinates when
+    inside ClientRect; fall back to Container.MousePosition otherwise. }
+  if PtInRect(ClientRect, MousePos) then
+    CastleNewPosition := MousePosToCastle(MousePos.X, MousePos.Y)
+  else
+    CastleNewPosition := Container.MousePosition;
 
   { This updates Container.Pressed.
     Do this before using ModifiersDown(Container.Pressed) below. }

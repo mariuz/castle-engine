@@ -36,21 +36,18 @@ procedure FixApplicationDataInIDE;
 implementation
 
 uses // FPC and LCL units
-  SysUtils, Classes, Forms,
+  SysUtils, Classes, Controls, Forms,
   // Lazarus design-time (IDE) units
-  LazIDEIntf, IDEMsgIntf, IDEExternToolIntf,
+  LazIDEIntf, ProjectIntf, IDEMsgIntf, IDEExternToolIntf,
   // CGE units
   CastleUtils, CastleFilesUtils, CastleLclUtils, CastleApplicationProperties;
 
 procedure FixApplicationDataInIDE;
 begin
-  { TODO: This should be somehow registered (in Register) to listen to IDE project change,
-    and adjust ApplicationDataOverride at project change.
-
-    Doing it now, when DesignUrl seems needed (
-    by dialog box that sets DesignUrl,
-    by setting TCastleControl.DesignUrl in deserialization)
-    is not a clean way to do this (because we may miss some situations).
+  { Note: In addition to listening to LazarusIDE.AddHandlerOnProjectOpened and
+    AddHandlerOnProjectClose in TCastleLazarusIDEIntegration, we also allow
+    calling FixApplicationDataInIDE on demand (e.g. when opening the DesignUrl
+    dialog or deserializing TCastleControl.DesignUrl before OnProjectOpened).
 
     Note: We don't check "CastleDesignMode and ..." here now.
     This was preventing FixApplicationDataInIDE from setting path
@@ -75,14 +72,53 @@ type
   TCastleLazarusIDEIntegration = class(TComponent)
   strict private
     procedure WarningToLazarusMessages(const Category, S: string);
+    function ProjectOpened(Sender: TObject; AProject: TLazProject): TModalResult;
+    function ProjectClose(Sender: TObject; AProject: TLazProject): TModalResult;
   public
     constructor Create(AOwner: TComponent); override;
+    destructor Destroy; override;
   end;
 
 constructor TCastleLazarusIDEIntegration.Create(AOwner: TComponent);
 begin
   inherited;
   ApplicationProperties.OnWarning.Add({$ifdef FPC}@{$endif}WarningToLazarusMessages);
+  if LazarusIDE <> nil then
+  begin
+    LazarusIDE.AddHandlerOnProjectOpened({$ifdef FPC}@{$endif}ProjectOpened);
+    LazarusIDE.AddHandlerOnProjectClose({$ifdef FPC}@{$endif}ProjectClose);
+    FixApplicationDataInIDE;
+  end;
+end;
+
+destructor TCastleLazarusIDEIntegration.Destroy;
+begin
+  if ApplicationProperties <> nil then
+    ApplicationProperties.OnWarning.Remove({$ifdef FPC}@{$endif}WarningToLazarusMessages);
+  if LazarusIDE <> nil then
+  begin
+    LazarusIDE.RemoveHandlerOnProjectOpened({$ifdef FPC}@{$endif}ProjectOpened);
+    LazarusIDE.RemoveHandlerOnProjectClose({$ifdef FPC}@{$endif}ProjectClose);
+  end;
+  inherited;
+end;
+
+function TCastleLazarusIDEIntegration.ProjectOpened(Sender: TObject;
+  AProject: TLazProject): TModalResult;
+begin
+  if AProject <> nil then
+    ApplicationDataOverride := FilenameToUriSafeUTF8(
+      InclPathDelim(AProject.Directory) + 'data' + PathDelim)
+  else
+    FixApplicationDataInIDE;
+  Result := mrOk;
+end;
+
+function TCastleLazarusIDEIntegration.ProjectClose(Sender: TObject;
+  AProject: TLazProject): TModalResult;
+begin
+  ApplicationDataOverride := '';
+  Result := mrOk;
 end;
 
 procedure TCastleLazarusIDEIntegration.WarningToLazarusMessages(const Category, S: string);

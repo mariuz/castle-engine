@@ -84,6 +84,8 @@ type
       public
         constructor Create(AOwner: TComponent); override;
         procedure Render; override;
+        procedure EditorAllowResize(
+          out ResizeWidth, ResizeHeight: Boolean; out Reason: String); override;
         function Press(const Event: TInputPressRelease): boolean; override;
         function Release(const Event: TInputPressRelease): boolean; override;
         function Motion(const Event: TInputMotion): boolean; override;
@@ -230,6 +232,15 @@ begin
   // do not apply UIScale here, it is already inside TotalScale
   PreferredWidth  := Theme.ImagesPersistent[tiTouchCtlOuter].Width  * TotalScale;
   PreferredHeight := Theme.ImagesPersistent[tiTouchCtlOuter].Height * TotalScale;
+end;
+
+procedure TCastleTouchNavigation.TCastleTouchControl.EditorAllowResize(
+  out ResizeWidth, ResizeHeight: Boolean; out Reason: String);
+begin
+  inherited;
+  ResizeWidth := false;
+  ResizeHeight := false;
+  Reason := SAppendPart(Reason, NL, 'Touch control size is determined by "TCastleTouchNavigation.Scale".');
 end;
 
 procedure TCastleTouchNavigation.TCastleTouchControl.SetPosition(const Value: TCastleTouchPosition);

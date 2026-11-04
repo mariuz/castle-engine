@@ -4,10 +4,6 @@
 Lower priority:
 OK if after 7.0 release:
 
-* Define EditorAllowResize for
-  castlenotifications.pas
-  TCastleTouchNavigation
-
 * TCastleButton:
   - Simplify property names, just Color and UseColor and BackgroundImage, less usage of "Custom" prefix
   - Test a way to upgrade names in design files while doing above?

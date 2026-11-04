@@ -2493,11 +2493,26 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - **Screenshots:** [CGE Visual Editor Hierarchy & Inspector Root Selection](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [CGE Visual Editor 3D Viewport & Files Panel](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Sprite Sheet & Asset Preview](https://castle-engine.io/images/thumb_const_height_size/sprite_sheet_editor.webp)
   - **Example (Phase 263):** Double-click another `.castle-user-interface` or `.castle-transform` file in the **Files** panel (`ShellListView1`), answer the **Save Design** confirmation dialog, and immediately right-click in the 3D viewport to engage mouse look on the very first click; or edit a texture/glTF asset in an external tool and `Alt+Tab` back to the editor (including on Linux/GTK2 or docked windows) to trigger automatic `FileMonitor.CheckChanges` asset hot-reload.
 
+### Phase 264: Active OpenGL Context Sharing & Idle FPS Tracking (`TCastleControl`), Lazarus IDE Project Change `castle-data:/` Sync (`TCastleLazarusIDEIntegration`), and `EditorAllowResize` Diagnostics (`TCastleNotifications` / `TCastleTouchControl`)
+- [x] **264.1. `TCastleControl.UpdateSharedControl` / `CreateHandle`, `Fps.InternalSleeping`, Client-Coordinate `DoMouseWheel`, `LazarusIDE.AddHandlerOnProjectOpened` & `EditorAllowResize` (`castlecontrol.pas`, `castleinternallcldesign.pas`, `castlenotifications.pas`, `castleviewport_touchnavigation.inc`, `TODO.md`)**
+  - Resolved the `SharedControl`, `Fps.InternalSleeping`, and `DoMouseWheel` `TODO`s in `TCastleControl` (`src/lcl/castlecontrol.pas`):
+    - Added `TCastleControl.UpdateSharedControl` and `CreateHandle` override so new or re-docked `TCastleControl` instances prioritize sharing their OpenGL context with a control in `ControlsList` that already has `GLInitialized and HandleAllocated` (preventing context-sharing failures when `ControlsList[0]` is not yet active or during docked form layout changes).
+    - Called `C.Container.Fps.InternalSleeping` in `TCastleControl.DoUpdateEverything` when `not C.Invalidated` (matching `TCastleWindow`), ensuring `Fps.WasSleeping` and `Fps.ToString` accurately reflect idle frames when `AutoRedisplay = false`.
+    - Updated `TCastleControl.DoMouseWheel` to convert `MousePos` via `MousePosToCastle(MousePos.X, MousePos.Y)` when `PtInRect(ClientRect, MousePos)` holds (falling back to `Container.MousePosition`).
+  - Resolved the `FixApplicationDataInIDE` `TODO` in `TCastleLazarusIDEIntegration` (`src/lcl/castleinternallcldesign.pas`) by registering `LazarusIDE.AddHandlerOnProjectOpened` and `LazarusIDE.AddHandlerOnProjectClose` in `TCastleLazarusIDEIntegration.Create` (and removing them in `Destroy`) so `ApplicationDataOverride` (`castle-data:/`) automatically tracks the active Lazarus IDE project whenever projects are opened or closed.
+  - Implemented `EditorAllowResize` for `TCastleNotifications` (`src/ui/castlenotifications.pas`) and `TCastleTouchNavigation.TCastleTouchControl` (`src/scene/castleviewport_touchnavigation.inc`), providing clear resize-lock explanations in the Visual Designer and completing the item in `tools/castle-editor/TODO.md`.
+  - **Official Docs & Visual References (Phase 264):** [CGE LCL `TCastleControl` & Lazarus Form Designer Manual](https://castle-engine.io/control_on_form) · [CGE UI Custom Components & `EditorAllowResize` Reference](https://castle-engine.io/manual_user_interface.php) · [CGE Touch Navigation & Notifications Manual (`TCastleTouchNavigation`, `TCastleNotifications`)](https://castle-engine.io/touch_navigation) · [Free Pascal / Lazarus `LazIDEIntf` (`TLazIDEInterface`) Reference](https://wiki.lazarus.freepascal.org/Extending_the_IDE) · [Godot 4 Control Sizing & Inspector Tooltip Diagnostics](https://docs.godotengine.org/en/stable/tutorials/ui/size_and_anchors.html)
+  - **Official Videos & Movies (Phase 264):**
+    - 🎬 [CGE Official Video — Using `TCastleControl` in Lazarus LCL Forms & Visual Designer (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+    - 🎞️ [Animated Movie (GIF) — Interactive Multi-Viewport & Docked OpenGL Context Sharing](https://docs.godotengine.org/en/stable/_images/containers_split_drag.gif)
+  - **Screenshots:** [CGE `TCastleControl` in Lazarus IDE Form Designer](https://castle-engine.io/images/thumb_const_height_size/lazarus_control_on_form.webp) · [CGE Visual Editor UI Resize Handles & Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [CGE 3D Viewport & Touch Navigation](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+  - **Example (Phase 264):** Dock and undock editor panels or open the **Sprite Sheet Editor** / **3D File Preview** alongside the main design viewport with reliable OpenGL context sharing via `UpdateSharedControl`; switch between CGE projects inside the Lazarus IDE with `castle-data:/` automatically updated via `AddHandlerOnProjectOpened`; or select a `TCastleNotifications` component in the Visual Designer to see the explicit `EditorAllowResize` diagnostic hint explaining that its size is determined by the displayed messages.
+
 ---
 
-## Roadmap Completion Status (Phases 1–263 — Final Milestone)
+## Roadmap Completion Status (Phases 1–264 — Final Milestone)
 
-All **263 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **264 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 
