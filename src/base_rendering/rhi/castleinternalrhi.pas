@@ -615,6 +615,8 @@ type
     { Uploads a TEncodedImage (TCastleImage or TGPUCompressedImage) into a mip/layer. }
     procedure UploadImage(const AImage: TEncodedImage;
       const AMipLevel: Cardinal = 0; const AArrayLayer: Cardinal = 0); virtual; abstract;
+    { Generates the full mipmap chain from mip level 0 down to Desc.MipLevels - 1. }
+    procedure GenerateMipmaps; virtual;
     property Desc: TRHITextureDesc read FDesc;
     property CurrentState: TRHIResourceState read FCurrentState write FCurrentState;
   end;
@@ -1516,6 +1518,11 @@ begin
   inherited Create(ADevice, ADesc.DebugName);
   FDesc := ADesc;
   FCurrentState := rsUndefined;
+end;
+
+procedure TRHITexture.GenerateMipmaps;
+begin
+  { Subclasses override to record or execute mipmap chain blits. }
 end;
 
 { TRHISampler }

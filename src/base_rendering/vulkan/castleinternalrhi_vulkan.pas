@@ -63,10 +63,17 @@ type
     property MemoryOffset: VkDeviceSize read FMemoryOffset;
   end;
 
+  TVulkanSubresourceViewEntry = record
+    MipLevel: Cardinal;
+    ArrayLayer: Cardinal;
+    View: VkImageView;
+  end;
+
   TVulkanRHITexture = class(TRHITexture)
   private
     FImage: VkImage;
     FImageView: VkImageView;
+    FSubresourceViews: array of TVulkanSubresourceViewEntry;
     FAllocation: TVulkanMemoryAllocation;
     FDeviceMemory: VkDeviceMemory;
     FAllocatedSize: VkDeviceSize;
@@ -77,7 +84,14 @@ type
     FTotalSubresourceUploads: Cardinal;
     FMaxUploadedMipLevel: Cardinal;
     FMaxUploadedArrayLayer: Cardinal;
+    FMipmapGenerationCount: Cardinal;
+    FLastGeneratedMipLevels: Cardinal;
+    FLastRenderedMipLevel: Cardinal;
+    FLastRenderedArrayLayer: Cardinal;
+    FRenderedLayerMask: Cardinal;
     function VulkanDevice: TVulkanRHIDevice;
+    function GetSubresourceViewCount: Cardinal;
+    procedure RecordVkMipmapBlits(const ACmd: VkCommandBuffer);
   public
     { Standard constructor that allocates a new VkImage and VkImageView }
     constructor Create(const ADevice: TVulkanRHIDevice; const ADesc: TRHITextureDesc); overload;
@@ -89,6 +103,8 @@ type
 
     procedure UploadImage(const AImage: TEncodedImage;
       const AMipLevel: Cardinal = 0; const AArrayLayer: Cardinal = 0); override;
+    procedure GenerateMipmaps; override;
+    function GetSubresourceImageView(const AMipLevel, AArrayLayer: Cardinal): VkImageView;
     procedure SetHostClearColor(const AColor: TCastleColor);
     procedure SetHostClearDepth(const ADepth: Single);
 
@@ -102,6 +118,12 @@ type
     property TotalSubresourceUploads: Cardinal read FTotalSubresourceUploads;
     property MaxUploadedMipLevel: Cardinal read FMaxUploadedMipLevel;
     property MaxUploadedArrayLayer: Cardinal read FMaxUploadedArrayLayer;
+    property MipmapGenerationCount: Cardinal read FMipmapGenerationCount;
+    property LastGeneratedMipLevels: Cardinal read FLastGeneratedMipLevels;
+    property SubresourceViewCount: Cardinal read GetSubresourceViewCount;
+    property LastRenderedMipLevel: Cardinal read FLastRenderedMipLevel;
+    property LastRenderedArrayLayer: Cardinal read FLastRenderedArrayLayer;
+    property RenderedLayerMask: Cardinal read FRenderedLayerMask;
   end;
 
   TVulkanRHISampler = class(TRHISampler)
@@ -5693,6 +5715,8 @@ begin
 end;
 
 destructor TVulkanRHITexture.Destroy;
+var
+  I: Integer;
 begin
   if VulkanDevice <> nil then
   begin
@@ -5704,6 +5728,14 @@ begin
       VulkanDevice.BindlessTextureManager.UnregisterTexture(Self);
     if VulkanDevice.StagingUploader <> nil then
       VulkanDevice.StagingUploader.CancelPendingUploadsForTexture(Self);
+    if (VulkanDevice.Handle <> nil) and Assigned(vkDestroyImageView) then
+    begin
+      for I := 0 to High(FSubresourceViews) do
+        if (FSubresourceViews[I].View <> VK_NULL_HANDLE) and
+           (FSubresourceViews[I].View <> FImageView) then
+          vkDestroyImageView(VulkanDevice.Handle, FSubresourceViews[I].View, nil);
+    end;
+    SetLength(FSubresourceViews, 0);
     if FOwnsImage then
       VulkanDevice.DeferOrDestroyTexture(FImage, FImageView, FAllocation, FDeviceMemory, FAllocatedSize)
     else if (VulkanDevice.Handle <> nil) and (FImageView <> VK_NULL_HANDLE) then
@@ -5714,6 +5746,208 @@ begin
     FDeviceMemory := VK_NULL_HANDLE;
   end;
   inherited;
+end;
+
+function TVulkanRHITexture.GetSubresourceViewCount: Cardinal;
+begin
+  Result := Cardinal(Length(FSubresourceViews));
+end;
+
+function TVulkanRHITexture.GetSubresourceImageView(
+  const AMipLevel, AArrayLayer: Cardinal): VkImageView;
+var
+  I, NewIdx: Integer;
+  ViewInfo: VkImageViewCreateInfo;
+  ClampedMip, ClampedLayer: Cardinal;
+begin
+  ClampedMip := Min(AMipLevel, Max(Cardinal(1), FDesc.MipLevels) - 1);
+  if FDesc.Dimension = td3D then
+    ClampedLayer := 0
+  else
+    ClampedLayer := Min(AArrayLayer, Max(Cardinal(1), FDesc.DepthOrArrayLayers) - 1);
+
+  if (FDesc.Dimension = td2D) and (FDesc.MipLevels <= 1) and
+     (FDesc.DepthOrArrayLayers <= 1) and (ClampedMip = 0) and (ClampedLayer = 0) then
+    Exit(FImageView);
+
+  for I := 0 to High(FSubresourceViews) do
+    if (FSubresourceViews[I].MipLevel = ClampedMip) and
+       (FSubresourceViews[I].ArrayLayer = ClampedLayer) then
+      Exit(FSubresourceViews[I].View);
+
+  NewIdx := Length(FSubresourceViews);
+  SetLength(FSubresourceViews, NewIdx + 1);
+  FSubresourceViews[NewIdx].MipLevel := ClampedMip;
+  FSubresourceViews[NewIdx].ArrayLayer := ClampedLayer;
+
+  if (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and Assigned(vkCreateImageView) then
+  begin
+    FillChar(ViewInfo, SizeOf(ViewInfo), 0);
+    ViewInfo.sType := VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    ViewInfo.image := FImage;
+    ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_2D;
+    ViewInfo.format := RHIToVkFormat(FDesc.Format);
+    ViewInfo.subresourceRange.aspectMask := FAspectMask;
+    ViewInfo.subresourceRange.baseMipLevel := ClampedMip;
+    ViewInfo.subresourceRange.levelCount := 1;
+    ViewInfo.subresourceRange.baseArrayLayer := ClampedLayer;
+    ViewInfo.subresourceRange.layerCount := 1;
+    CheckVk(vkCreateImageView(VulkanDevice.Handle, @ViewInfo, nil,
+      @FSubresourceViews[NewIdx].View), 'vkCreateImageView(Subresource)');
+  end else
+    FSubresourceViews[NewIdx].View := VkImageView(
+      PtrUInt(Self) xor ((PtrUInt(ClampedMip + 1) shl 16) or PtrUInt(ClampedLayer + 1)));
+
+  Result := FSubresourceViews[NewIdx].View;
+end;
+
+procedure TVulkanRHITexture.RecordVkMipmapBlits(const ACmd: VkCommandBuffer);
+var
+  Barrier: VkImageMemoryBarrier;
+  Blit: VkImageBlit;
+  MipWidth, MipHeight, MipDepth, NextWidth, NextHeight, NextDepth: Integer;
+  LayerCount, I: Cardinal;
+begin
+  if (ACmd = nil) or (FDesc.MipLevels <= 1) or
+     not Assigned(vkCmdBlitImage) or not Assigned(vkCmdPipelineBarrier) then
+    Exit;
+
+  MipWidth := Max(1, Integer(FDesc.Width));
+  MipHeight := Max(1, Integer(FDesc.Height));
+  if FDesc.Dimension = td3D then
+  begin
+    MipDepth := Max(1, Integer(FDesc.DepthOrArrayLayers));
+    LayerCount := 1;
+  end else
+  begin
+    MipDepth := 1;
+    LayerCount := Max(Cardinal(1), FDesc.DepthOrArrayLayers);
+  end;
+
+  FillChar(Barrier, SizeOf(Barrier), 0);
+  Barrier.sType := VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  Barrier.image := FImage;
+  Barrier.srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+  Barrier.dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+  Barrier.subresourceRange.aspectMask := FAspectMask;
+  Barrier.subresourceRange.baseArrayLayer := 0;
+  Barrier.subresourceRange.layerCount := LayerCount;
+  Barrier.subresourceRange.levelCount := 1;
+
+  for I := 1 to FDesc.MipLevels - 1 do
+  begin
+    { Transition source mip level I - 1 to TRANSFER_SRC_OPTIMAL }
+    Barrier.subresourceRange.baseMipLevel := I - 1;
+    if (I = 1) and (FCurrentState = rsShaderRead) then
+    begin
+      Barrier.oldLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      Barrier.srcAccessMask := VK_ACCESS_SHADER_READ_BIT;
+    end else
+    begin
+      Barrier.oldLayout := VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      Barrier.srcAccessMask := VK_ACCESS_TRANSFER_WRITE_BIT;
+    end;
+    Barrier.newLayout := VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    Barrier.dstAccessMask := VK_ACCESS_TRANSFER_READ_BIT;
+
+    vkCmdPipelineBarrier(ACmd,
+      VK_PIPELINE_STAGE_TRANSFER_BIT or VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+      VK_PIPELINE_STAGE_TRANSFER_BIT,
+      0, 0, nil, 0, nil, 1, @Barrier);
+
+    { Transition destination mip level I from UNDEFINED to TRANSFER_DST_OPTIMAL }
+    Barrier.subresourceRange.baseMipLevel := I;
+    Barrier.oldLayout := VK_IMAGE_LAYOUT_UNDEFINED;
+    Barrier.newLayout := VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    Barrier.srcAccessMask := 0;
+    Barrier.dstAccessMask := VK_ACCESS_TRANSFER_WRITE_BIT;
+
+    vkCmdPipelineBarrier(ACmd,
+      VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+      VK_PIPELINE_STAGE_TRANSFER_BIT,
+      0, 0, nil, 0, nil, 1, @Barrier);
+
+    NextWidth := Max(1, MipWidth div 2);
+    NextHeight := Max(1, MipHeight div 2);
+    NextDepth := Max(1, MipDepth div 2);
+
+    FillChar(Blit, SizeOf(Blit), 0);
+    Blit.srcOffsets[1].x := MipWidth;
+    Blit.srcOffsets[1].y := MipHeight;
+    Blit.srcOffsets[1].z := MipDepth;
+    Blit.srcSubresource.aspectMask := FAspectMask;
+    Blit.srcSubresource.mipLevel := I - 1;
+    Blit.srcSubresource.baseArrayLayer := 0;
+    Blit.srcSubresource.layerCount := LayerCount;
+
+    Blit.dstOffsets[1].x := NextWidth;
+    Blit.dstOffsets[1].y := NextHeight;
+    Blit.dstOffsets[1].z := NextDepth;
+    Blit.dstSubresource.aspectMask := FAspectMask;
+    Blit.dstSubresource.mipLevel := I;
+    Blit.dstSubresource.baseArrayLayer := 0;
+    Blit.dstSubresource.layerCount := LayerCount;
+
+    vkCmdBlitImage(ACmd,
+      FImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+      FImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+      1, @Blit, VK_FILTER_LINEAR);
+
+    { Transition source mip level I - 1 to SHADER_READ_ONLY_OPTIMAL }
+    Barrier.subresourceRange.baseMipLevel := I - 1;
+    Barrier.oldLayout := VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    Barrier.newLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    Barrier.srcAccessMask := VK_ACCESS_TRANSFER_READ_BIT;
+    Barrier.dstAccessMask := VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(ACmd,
+      VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+      0, 0, nil, 0, nil, 1, @Barrier);
+
+    MipWidth := NextWidth;
+    MipHeight := NextHeight;
+    MipDepth := NextDepth;
+  end;
+
+  { Transition final mip level Desc.MipLevels - 1 to SHADER_READ_ONLY_OPTIMAL }
+  Barrier.subresourceRange.baseMipLevel := FDesc.MipLevels - 1;
+  Barrier.oldLayout := VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  Barrier.newLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  Barrier.srcAccessMask := VK_ACCESS_TRANSFER_WRITE_BIT;
+  Barrier.dstAccessMask := VK_ACCESS_SHADER_READ_BIT;
+
+  vkCmdPipelineBarrier(ACmd,
+    VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+    0, 0, nil, 0, nil, 1, @Barrier);
+end;
+
+procedure TVulkanRHITexture.GenerateMipmaps;
+var
+  Cmd: VkCommandBuffer;
+begin
+  if FDesc.MipLevels <= 1 then
+    Exit;
+
+  if ActiveCommandList <> nil then
+  begin
+    ActiveCommandList.GenerateMipmaps(Self);
+    Exit;
+  end;
+
+  Inc(FMipmapGenerationCount);
+  FLastGeneratedMipLevels := FDesc.MipLevels;
+  FMaxUploadedMipLevel := Max(FMaxUploadedMipLevel, FDesc.MipLevels - 1);
+
+  if (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and Assigned(vkCmdBlitImage) then
+  begin
+    if VulkanDevice.StagingUploader <> nil then
+      VulkanDevice.StagingUploader.FlushPendingUploads(nil);
+    Cmd := VulkanDevice.BeginSingleTimeCommands;
+    RecordVkMipmapBlits(Cmd);
+    VulkanDevice.EndSingleTimeCommands(Cmd);
+  end;
+
+  FCurrentState := rsShaderRead;
 end;
 
 procedure TVulkanRHITexture.SetHostClearColor(const AColor: TCastleColor);
@@ -6901,87 +7135,21 @@ end;
 procedure TVulkanRHICommandList.GenerateMipmaps(const Texture: TRHITexture);
 var
   VkTex: TVulkanRHITexture;
-  Barrier: VkImageMemoryBarrier;
-  Blit: VkImageBlit;
-  MipWidth, MipHeight, NextWidth, NextHeight: Integer;
-  I: Cardinal;
 begin
-  if (Texture = nil) or (Texture.Desc.MipLevels <= 1) or not Assigned(vkCmdBlitImage) then
+  if (Texture = nil) or (Texture.Desc.MipLevels <= 1) then
     Exit;
 
   VkTex := Texture as TVulkanRHITexture;
-  MipWidth := Integer(VkTex.Desc.Width);
-  MipHeight := Integer(VkTex.Desc.Height);
+  Inc(VkTex.FMipmapGenerationCount);
+  VkTex.FLastGeneratedMipLevels := VkTex.Desc.MipLevels;
+  VkTex.FMaxUploadedMipLevel := Max(VkTex.FMaxUploadedMipLevel, VkTex.Desc.MipLevels - 1);
 
-  FillChar(Barrier, SizeOf(Barrier), 0);
-  Barrier.sType := VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-  Barrier.image := VkTex.Image;
-  Barrier.srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
-  Barrier.dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
-  Barrier.subresourceRange.aspectMask := VkTex.AspectMask;
-  Barrier.subresourceRange.baseArrayLayer := 0;
-  Barrier.subresourceRange.layerCount := VkTex.Desc.DepthOrArrayLayers;
-  Barrier.subresourceRange.levelCount := 1;
-
-  for I := 1 to VkTex.Desc.MipLevels - 1 do
+  if (FHandle <> nil) and Assigned(vkCmdBlitImage) then
   begin
-    Barrier.subresourceRange.baseMipLevel := I - 1;
-    Barrier.oldLayout := VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    Barrier.newLayout := VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    Barrier.srcAccessMask := VK_ACCESS_TRANSFER_WRITE_BIT;
-    Barrier.dstAccessMask := VK_ACCESS_TRANSFER_READ_BIT;
-
-    vkCmdPipelineBarrier(FHandle,
-      VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-      0, 0, nil, 0, nil, 1, @Barrier);
-
-    NextWidth := Max(1, MipWidth div 2);
-    NextHeight := Max(1, MipHeight div 2);
-
-    FillChar(Blit, SizeOf(Blit), 0);
-    Blit.srcOffsets[1].x := MipWidth;
-    Blit.srcOffsets[1].y := MipHeight;
-    Blit.srcOffsets[1].z := 1;
-    Blit.srcSubresource.aspectMask := VkTex.AspectMask;
-    Blit.srcSubresource.mipLevel := I - 1;
-    Blit.srcSubresource.baseArrayLayer := 0;
-    Blit.srcSubresource.layerCount := VkTex.Desc.DepthOrArrayLayers;
-
-    Blit.dstOffsets[1].x := NextWidth;
-    Blit.dstOffsets[1].y := NextHeight;
-    Blit.dstOffsets[1].z := 1;
-    Blit.dstSubresource.aspectMask := VkTex.AspectMask;
-    Blit.dstSubresource.mipLevel := I;
-    Blit.dstSubresource.baseArrayLayer := 0;
-    Blit.dstSubresource.layerCount := VkTex.Desc.DepthOrArrayLayers;
-
-    vkCmdBlitImage(FHandle,
-      VkTex.Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-      VkTex.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-      1, @Blit, VK_FILTER_LINEAR);
-
-    Barrier.oldLayout := VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    Barrier.newLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    Barrier.srcAccessMask := VK_ACCESS_TRANSFER_READ_BIT;
-    Barrier.dstAccessMask := VK_ACCESS_SHADER_READ_BIT;
-
-    vkCmdPipelineBarrier(FHandle,
-      VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-      0, 0, nil, 0, nil, 1, @Barrier);
-
-    MipWidth := NextWidth;
-    MipHeight := NextHeight;
+    if (FDevice <> nil) and (FDevice.StagingUploader <> nil) and (Level = cllPrimary) then
+      FDevice.StagingUploader.FlushPendingUploads(Self);
+    VkTex.RecordVkMipmapBlits(FHandle);
   end;
-
-  Barrier.subresourceRange.baseMipLevel := VkTex.Desc.MipLevels - 1;
-  Barrier.oldLayout := VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-  Barrier.newLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-  Barrier.srcAccessMask := VK_ACCESS_TRANSFER_WRITE_BIT;
-  Barrier.dstAccessMask := VK_ACCESS_SHADER_READ_BIT;
-
-  vkCmdPipelineBarrier(FHandle,
-    VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-    0, 0, nil, 0, nil, 1, @Barrier);
 
   Texture.CurrentState := rsShaderRead;
 end;
@@ -7072,7 +7240,15 @@ begin
       if Info.ColorAttachments[I].Texture <> nil then
       begin
         FallbackColorFormats[I] := Info.ColorAttachments[I].Texture.Desc.Format;
-        FallbackViews[I] := (Info.ColorAttachments[I].Texture as TVulkanRHITexture).ImageView;
+        with Info.ColorAttachments[I].Texture as TVulkanRHITexture do
+        begin
+          FLastRenderedMipLevel := Info.ColorAttachments[I].MipLevel;
+          FLastRenderedArrayLayer := Info.ColorAttachments[I].ArrayLayer;
+          FRenderedLayerMask := FRenderedLayerMask or (Cardinal(1) shl Min(Cardinal(31), Info.ColorAttachments[I].ArrayLayer));
+          FallbackViews[I] := GetSubresourceImageView(
+            Info.ColorAttachments[I].MipLevel,
+            Info.ColorAttachments[I].ArrayLayer);
+        end;
         FbWidth := Max(FbWidth, Info.ColorAttachments[I].Texture.Desc.Width);
         FbHeight := Max(FbHeight, Info.ColorAttachments[I].Texture.Desc.Height);
       end else
@@ -7092,7 +7268,9 @@ begin
         begin
           TransitionTexture(Info.ColorAttachments[I].ResolveTexture, rsColorAttachment);
           FallbackViews[ResolveBaseIdx + I] :=
-            (Info.ColorAttachments[I].ResolveTexture as TVulkanRHITexture).ImageView;
+            (Info.ColorAttachments[I].ResolveTexture as TVulkanRHITexture).GetSubresourceImageView(
+              Info.ColorAttachments[I].MipLevel,
+              Info.ColorAttachments[I].ArrayLayer);
         end else
           FallbackViews[ResolveBaseIdx + I] := VK_NULL_HANDLE;
         FillChar(FallbackClears[ResolveBaseIdx + I], SizeOf(VkClearValue), 0);
@@ -7102,7 +7280,15 @@ begin
     if Info.HasDepthAttachment and (Info.DepthAttachment.Texture <> nil) then
     begin
       FallbackDepthFormat := Info.DepthAttachment.Texture.Desc.Format;
-      FallbackViews[ResolveBaseIdx - 1] := (Info.DepthAttachment.Texture as TVulkanRHITexture).ImageView;
+      with Info.DepthAttachment.Texture as TVulkanRHITexture do
+      begin
+        FLastRenderedMipLevel := Info.DepthAttachment.MipLevel;
+        FLastRenderedArrayLayer := Info.DepthAttachment.ArrayLayer;
+        FRenderedLayerMask := FRenderedLayerMask or (Cardinal(1) shl Min(Cardinal(31), Info.DepthAttachment.ArrayLayer));
+        FallbackViews[ResolveBaseIdx - 1] := GetSubresourceImageView(
+          Info.DepthAttachment.MipLevel,
+          Info.DepthAttachment.ArrayLayer);
+      end;
       FbWidth := Max(FbWidth, Info.DepthAttachment.Texture.Desc.Width);
       FbHeight := Max(FbHeight, Info.DepthAttachment.Texture.Desc.Height);
       FillChar(FallbackClears[ResolveBaseIdx - 1], SizeOf(VkClearValue), 0);
@@ -7165,7 +7351,17 @@ begin
     FillChar(ColorAttachments[I], SizeOf(VkRenderingAttachmentInfo), 0);
     ColorAttachments[I].sType := VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
     if Info.ColorAttachments[I].Texture <> nil then
-      ColorAttachments[I].imageView := (Info.ColorAttachments[I].Texture as TVulkanRHITexture).ImageView;
+    begin
+      with Info.ColorAttachments[I].Texture as TVulkanRHITexture do
+      begin
+        FLastRenderedMipLevel := Info.ColorAttachments[I].MipLevel;
+        FLastRenderedArrayLayer := Info.ColorAttachments[I].ArrayLayer;
+        FRenderedLayerMask := FRenderedLayerMask or (Cardinal(1) shl Min(Cardinal(31), Info.ColorAttachments[I].ArrayLayer));
+        ColorAttachments[I].imageView := GetSubresourceImageView(
+          Info.ColorAttachments[I].MipLevel,
+          Info.ColorAttachments[I].ArrayLayer);
+      end;
+    end;
     ColorAttachments[I].imageLayout := VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     if Info.ColorAttachments[I].LoadOp = loClear then
       ColorAttachments[I].loadOp := VK_ATTACHMENT_LOAD_OP_CLEAR
@@ -7190,7 +7386,9 @@ begin
         EffResolveMode := rmAverage;
       ColorAttachments[I].resolveMode := RHIToVkResolveMode(EffResolveMode);
       ColorAttachments[I].resolveImageView :=
-        (Info.ColorAttachments[I].ResolveTexture as TVulkanRHITexture).ImageView;
+        (Info.ColorAttachments[I].ResolveTexture as TVulkanRHITexture).GetSubresourceImageView(
+          Info.ColorAttachments[I].MipLevel,
+          Info.ColorAttachments[I].ArrayLayer);
       ColorAttachments[I].resolveImageLayout := VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
       HasAnyResolve := True;
     end;
@@ -7211,7 +7409,15 @@ begin
   begin
     FillChar(DepthAttachment, SizeOf(DepthAttachment), 0);
     DepthAttachment.sType := VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    DepthAttachment.imageView := (Info.DepthAttachment.Texture as TVulkanRHITexture).ImageView;
+    with Info.DepthAttachment.Texture as TVulkanRHITexture do
+    begin
+      FLastRenderedMipLevel := Info.DepthAttachment.MipLevel;
+      FLastRenderedArrayLayer := Info.DepthAttachment.ArrayLayer;
+      FRenderedLayerMask := FRenderedLayerMask or (Cardinal(1) shl Min(Cardinal(31), Info.DepthAttachment.ArrayLayer));
+      DepthAttachment.imageView := GetSubresourceImageView(
+        Info.DepthAttachment.MipLevel,
+        Info.DepthAttachment.ArrayLayer);
+    end;
     DepthAttachment.imageLayout := VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     if Info.DepthAttachment.LoadOp = loClear then
       DepthAttachment.loadOp := VK_ATTACHMENT_LOAD_OP_CLEAR

@@ -339,6 +339,7 @@ var
   var
     RenderingCamera: TRenderingCamera;
   begin
+    RenderToTexture.RHIArrayLayer := Ord(Side);
     RenderToTexture.RenderBegin;
     if RHIDevice = nil then
       RenderToTexture.SetTexture(Tex, GL_TEXTURE_CUBE_MAP_POSITIVE_X + Ord(Side));
@@ -372,6 +373,7 @@ begin
 
   for Side := Low(TCubeMapSide) to High(TCubeMapSide) do
     DrawMap(Side);
+  RenderToTexture.RHIArrayLayer := 0;
 
   if RenderContext <> nil then
   begin

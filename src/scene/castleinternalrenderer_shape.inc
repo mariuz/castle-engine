@@ -523,6 +523,10 @@ var
   PhysMat: TPhysicalMaterialNode;
   PhongMat: TMaterialNode;
   UnlitMat: TUnlitMaterialNode;
+  MatInfo: TMaterialInfo;
+  PhysInfo: TPhysicalMaterialInfo;
+  PhongInfo: TPhongMaterialInfo;
+  UnlitInfo: TUnlitMaterialInfo;
   AlphaCutoff, Roughness: Single;
 begin
   Result := False;
@@ -554,117 +558,197 @@ begin
   ShapeState := OriginalState;
   if ShapeState = nil then
     ShapeState := State;
-  if (ShapeState = nil) or (ShapeState.ShapeNode = nil) then
+  if ShapeState = nil then
   begin
     if AlphaChannel = acTest then
       AMatBlock.PBRParams.W := 0.5;
     Exit;
   end;
 
-  App := ShapeState.ShapeNode.Appearance;
-  if App = nil then
-  begin
-    if AlphaChannel = acTest then
-      AMatBlock.PBRParams.W := 0.5;
-    Exit;
-  end;
+  if ShapeState.ShapeNode <> nil then
+    App := ShapeState.ShapeNode.Appearance
+  else
+    App := ShapeState.Appearance;
 
-  if App.AlphaMode = amMask then
-    AlphaCutoff := EnsureRange(App.AlphaCutoff, 0.0, 1.0)
-  else if (App.AlphaMode = amAuto) and (AlphaChannel = acTest) then
-    AlphaCutoff := EnsureRange(App.AlphaCutoff, 0.0, 1.0);
+  if App <> nil then
+  begin
+    if App.AlphaMode = amMask then
+      AlphaCutoff := EnsureRange(App.AlphaCutoff, 0.0, 1.0)
+    else if (App.AlphaMode = amAuto) and (AlphaChannel = acTest) then
+      AlphaCutoff := EnsureRange(App.AlphaCutoff, 0.0, 1.0);
 
-  SurfaceShader := App.InternalCommonSurfaceShader;
-  if SurfaceShader <> nil then
-  begin
-    Result := True;
-    AShadingModel := smPhong;
-    Roughness := EnsureRange(1.0 - Sqrt(EnsureRange(SurfaceShader.ShininessFactor, 0.0, 1.0)), 0.04, 1.0);
-    AMatBlock.BaseColor := Vector4(
-      SurfaceShader.DiffuseFactor,
-      EnsureRange(SurfaceShader.AlphaFactor, 0.0, 1.0));
-    AMatBlock.SpecularColor := Vector4(
-      SurfaceShader.SpecularFactor,
-      Max(1.0, SurfaceShader.ShininessFactor * 128.0));
-    AMatBlock.EmissiveColor := Vector4(SurfaceShader.EmissiveFactor, 0.0);
-    AMatBlock.PBRParams := Vector4(
-      Roughness,
-      Max(0.0, SurfaceShader.NormalScale.X),
-      1.0,
-      AlphaCutoff);
-  end else
-  begin
-    MatNode := App.Material;
-    if MatNode is TPhysicalMaterialNode then
+    SurfaceShader := App.InternalCommonSurfaceShader;
+    if SurfaceShader <> nil then
     begin
-      PhysMat := TPhysicalMaterialNode(MatNode);
+      Result := True;
+      AShadingModel := smPhong;
+      Roughness := EnsureRange(1.0 - Sqrt(EnsureRange(SurfaceShader.ShininessFactor, 0.0, 1.0)), 0.04, 1.0);
+      AMatBlock.BaseColor := Vector4(
+        SurfaceShader.DiffuseFactor,
+        EnsureRange(SurfaceShader.AlphaFactor, 0.0, 1.0));
+      AMatBlock.SpecularColor := Vector4(
+        SurfaceShader.SpecularFactor,
+        Max(1.0, SurfaceShader.ShininessFactor * 128.0));
+      AMatBlock.EmissiveColor := Vector4(SurfaceShader.EmissiveFactor, 0.0);
+      AMatBlock.PBRParams := Vector4(
+        Roughness,
+        Max(0.0, SurfaceShader.NormalScale.X),
+        1.0,
+        AlphaCutoff);
+    end else
+    begin
+      MatNode := App.Material;
+      if MatNode is TPhysicalMaterialNode then
+      begin
+        PhysMat := TPhysicalMaterialNode(MatNode);
+        Result := True;
+        AShadingModel := smPBRMetallicRoughness;
+        AMatBlock.BaseColor := Vector4(
+          PhysMat.BaseColor,
+          EnsureRange(1.0 - PhysMat.Transparency, 0.0, 1.0));
+        AMatBlock.SpecularColor := Vector4(0.04, 0.04, 0.04, 0.0); // a = 0.0 -> PBR Metallic-Roughness
+        AMatBlock.EmissiveColor := Vector4(
+          PhysMat.EmissiveColor,
+          EnsureRange(PhysMat.Metallic, 0.0, 1.0));
+        AMatBlock.PBRParams := Vector4(
+          EnsureRange(PhysMat.Roughness, 0.04, 1.0),
+          Max(0.0, PhysMat.NormalScale),
+          EnsureRange(PhysMat.OcclusionStrength, 0.0, 1.0),
+          AlphaCutoff);
+      end else
+      if MatNode is TMaterialNode then
+      begin
+        PhongMat := TMaterialNode(MatNode);
+        Result := True;
+        {$warnings off}
+        if PhongMat.PureEmissive and
+           ((Geometry = nil) or
+            ((Geometry.InternalColor = nil) and (Geometry.InternalColorRGBA = nil))) then
+        {$warnings on}
+        begin
+          AShadingModel := smUnlit;
+          AMatBlock.BaseColor := Vector4(
+            PhongMat.EmissiveColor,
+            EnsureRange(1.0 - PhongMat.Transparency, 0.0, 1.0));
+          AMatBlock.SpecularColor := Vector4(0.0, 0.0, 0.0, -1.0); // a < 0.0 -> Unlit
+          AMatBlock.EmissiveColor := Vector4(0.0, 0.0, 0.0, 0.0);
+          AMatBlock.PBRParams := Vector4(
+            1.0,
+            Max(0.0, PhongMat.NormalScale),
+            EnsureRange(PhongMat.OcclusionStrength, 0.0, 1.0),
+            AlphaCutoff);
+        end else
+        begin
+          AShadingModel := smPhong;
+          Roughness := EnsureRange(1.0 - Sqrt(EnsureRange(PhongMat.Shininess, 0.0, 1.0)), 0.04, 1.0);
+          AMatBlock.BaseColor := Vector4(
+            PhongMat.DiffuseColor,
+            EnsureRange(1.0 - PhongMat.Transparency, 0.0, 1.0));
+          AMatBlock.SpecularColor := Vector4(
+            PhongMat.SpecularColor,
+            Max(1.0, PhongMat.ShininessExp)); // a > 0.0 -> Phong shininess
+          AMatBlock.EmissiveColor := Vector4(PhongMat.EmissiveColor, 0.0);
+          AMatBlock.PBRParams := Vector4(
+            Roughness,
+            Max(0.0, PhongMat.NormalScale),
+            EnsureRange(PhongMat.OcclusionStrength, 0.0, 1.0),
+            AlphaCutoff);
+        end;
+      end else
+      if MatNode is TUnlitMaterialNode then
+      begin
+        UnlitMat := TUnlitMaterialNode(MatNode);
+        Result := True;
+        AShadingModel := smUnlit;
+        AMatBlock.BaseColor := Vector4(
+          UnlitMat.EmissiveColor,
+          EnsureRange(1.0 - UnlitMat.Transparency, 0.0, 1.0));
+        AMatBlock.SpecularColor := Vector4(0.0, 0.0, 0.0, -1.0); // a < 0.0 -> Unlit
+        AMatBlock.EmissiveColor := Vector4(0.0, 0.0, 0.0, 0.0);
+        AMatBlock.PBRParams := Vector4(
+          1.0,
+          Max(0.0, UnlitMat.NormalScale),
+          1.0,
+          AlphaCutoff);
+      end;
+    end;
+  end else
+  if AlphaChannel = acTest then
+    AlphaCutoff := 0.5;
+
+  if not Result then
+  begin
+    MatInfo := ShapeState.MaterialInfo;
+    if MatInfo is TPhysicalMaterialInfo then
+    begin
+      PhysInfo := TPhysicalMaterialInfo(MatInfo);
       Result := True;
       AShadingModel := smPBRMetallicRoughness;
       AMatBlock.BaseColor := Vector4(
-        PhysMat.BaseColor,
-        EnsureRange(1.0 - PhysMat.Transparency, 0.0, 1.0));
-      AMatBlock.SpecularColor := Vector4(0.04, 0.04, 0.04, 0.0); // a = 0.0 -> PBR Metallic-Roughness
+        PhysInfo.BaseColor,
+        EnsureRange(1.0 - PhysInfo.Transparency, 0.0, 1.0));
+      AMatBlock.SpecularColor := Vector4(0.04, 0.04, 0.04, 0.0);
       AMatBlock.EmissiveColor := Vector4(
-        PhysMat.EmissiveColor,
-        EnsureRange(PhysMat.Metallic, 0.0, 1.0));
+        PhysInfo.EmissiveColor,
+        EnsureRange(PhysInfo.Metallic, 0.0, 1.0));
       AMatBlock.PBRParams := Vector4(
-        EnsureRange(PhysMat.Roughness, 0.04, 1.0),
-        Max(0.0, PhysMat.NormalScale),
-        EnsureRange(PhysMat.OcclusionStrength, 0.0, 1.0),
+        EnsureRange(PhysInfo.Roughness, 0.04, 1.0),
+        1.0,
+        1.0,
         AlphaCutoff);
     end else
-    if MatNode is TMaterialNode then
+    if MatInfo is TPhongMaterialInfo then
     begin
-      PhongMat := TMaterialNode(MatNode);
+      PhongInfo := TPhongMaterialInfo(MatInfo);
       Result := True;
       {$warnings off}
-      if PhongMat.PureEmissive and
+      if PhongInfo.PureEmissive and
          ((Geometry = nil) or
           ((Geometry.InternalColor = nil) and (Geometry.InternalColorRGBA = nil))) then
       {$warnings on}
       begin
         AShadingModel := smUnlit;
         AMatBlock.BaseColor := Vector4(
-          PhongMat.EmissiveColor,
-          EnsureRange(1.0 - PhongMat.Transparency, 0.0, 1.0));
-        AMatBlock.SpecularColor := Vector4(0.0, 0.0, 0.0, -1.0); // a < 0.0 -> Unlit
+          PhongInfo.EmissiveColor,
+          EnsureRange(1.0 - PhongInfo.Transparency, 0.0, 1.0));
+        AMatBlock.SpecularColor := Vector4(0.0, 0.0, 0.0, -1.0);
         AMatBlock.EmissiveColor := Vector4(0.0, 0.0, 0.0, 0.0);
         AMatBlock.PBRParams := Vector4(
           1.0,
-          Max(0.0, PhongMat.NormalScale),
-          EnsureRange(PhongMat.OcclusionStrength, 0.0, 1.0),
+          1.0,
+          1.0,
           AlphaCutoff);
       end else
       begin
         AShadingModel := smPhong;
-        Roughness := EnsureRange(1.0 - Sqrt(EnsureRange(PhongMat.Shininess, 0.0, 1.0)), 0.04, 1.0);
+        Roughness := EnsureRange(1.0 - Sqrt(EnsureRange(PhongInfo.Shininess, 0.0, 1.0)), 0.04, 1.0);
         AMatBlock.BaseColor := Vector4(
-          PhongMat.DiffuseColor,
-          EnsureRange(1.0 - PhongMat.Transparency, 0.0, 1.0));
+          PhongInfo.DiffuseColor,
+          EnsureRange(1.0 - PhongInfo.Transparency, 0.0, 1.0));
         AMatBlock.SpecularColor := Vector4(
-          PhongMat.SpecularColor,
-          Max(1.0, PhongMat.ShininessExp)); // a > 0.0 -> Phong shininess
-        AMatBlock.EmissiveColor := Vector4(PhongMat.EmissiveColor, 0.0);
+          PhongInfo.SpecularColor,
+          Max(1.0, PhongInfo.ShininessExp));
+        AMatBlock.EmissiveColor := Vector4(PhongInfo.EmissiveColor, 0.0);
         AMatBlock.PBRParams := Vector4(
           Roughness,
-          Max(0.0, PhongMat.NormalScale),
-          EnsureRange(PhongMat.OcclusionStrength, 0.0, 1.0),
+          1.0,
+          1.0,
           AlphaCutoff);
       end;
     end else
-    if MatNode is TUnlitMaterialNode then
+    if MatInfo is TUnlitMaterialInfo then
     begin
-      UnlitMat := TUnlitMaterialNode(MatNode);
+      UnlitInfo := TUnlitMaterialInfo(MatInfo);
       Result := True;
       AShadingModel := smUnlit;
       AMatBlock.BaseColor := Vector4(
-        UnlitMat.EmissiveColor,
-        EnsureRange(1.0 - UnlitMat.Transparency, 0.0, 1.0));
-      AMatBlock.SpecularColor := Vector4(0.0, 0.0, 0.0, -1.0); // a < 0.0 -> Unlit
+        UnlitInfo.EmissiveColor,
+        EnsureRange(1.0 - UnlitInfo.Transparency, 0.0, 1.0));
+      AMatBlock.SpecularColor := Vector4(0.0, 0.0, 0.0, -1.0);
       AMatBlock.EmissiveColor := Vector4(0.0, 0.0, 0.0, 0.0);
       AMatBlock.PBRParams := Vector4(
         1.0,
-        Max(0.0, UnlitMat.NormalScale),
+        1.0,
         1.0,
         AlphaCutoff);
     end else
@@ -777,9 +861,12 @@ begin
   ShapeState := OriginalState;
   if ShapeState = nil then
     ShapeState := State;
-  if (ShapeState <> nil) and (ShapeState.ShapeNode <> nil) then
+  if ShapeState <> nil then
   begin
-    App := ShapeState.ShapeNode.Appearance;
+    if ShapeState.ShapeNode <> nil then
+      App := ShapeState.ShapeNode.Appearance
+    else
+      App := ShapeState.Appearance;
     if App <> nil then
     begin
       SurfaceShader := App.InternalCommonSurfaceShader;
@@ -831,6 +918,8 @@ begin
       if ANormalTex = nil then
         ANormalTex := ResolveNodeRHITexture(App.NormalMap, ANormalSampler);
     end;
+    if ABaseColorTex = nil then
+      ABaseColorTex := ResolveNodeRHITexture(ShapeState.MainTexture, ABaseColorSampler);
   end;
 
   if (OriginalGeometry <> nil) and (OriginalGeometry.FontTextureNode <> nil) then
@@ -856,27 +945,35 @@ begin
   ShapeState := OriginalState;
   if ShapeState = nil then
     ShapeState := State;
-  if (ShapeState = nil) or (ShapeState.ShapeNode = nil) then
+  if ShapeState = nil then
     Exit;
 
-  App := ShapeState.ShapeNode.Appearance;
-  if App = nil then
-    Exit;
+  if ShapeState.ShapeNode <> nil then
+    App := ShapeState.ShapeNode.Appearance
+  else
+    App := ShapeState.Appearance;
 
-  TexTransform := App.TextureTransform;
-  if TexTransform is TMultiTextureTransformNode then
+  if App <> nil then
   begin
-    MultiTransform := TMultiTextureTransformNode(TexTransform);
-    if (MultiTransform.FdTextureTransform.Count > 0) and
-       (MultiTransform.FdTextureTransform[0] is TAbstractSingleTextureTransformNode) then
-      TexTransform := TAbstractSingleTextureTransformNode(MultiTransform.FdTextureTransform[0])
-    else
-      TexTransform := nil;
-  end;
+    TexTransform := App.TextureTransform;
+    if TexTransform is TMultiTextureTransformNode then
+    begin
+      MultiTransform := TMultiTextureTransformNode(TexTransform);
+      if (MultiTransform.FdTextureTransform.Count > 0) and
+         (MultiTransform.FdTextureTransform[0] is TAbstractSingleTextureTransformNode) then
+        TexTransform := TAbstractSingleTextureTransformNode(MultiTransform.FdTextureTransform[0])
+      else
+        TexTransform := nil;
+    end;
 
-  if TexTransform is TAbstractSingleTextureTransformNode then
+    if TexTransform is TAbstractSingleTextureTransformNode then
+    begin
+      AMatrix := TAbstractSingleTextureTransformNode(TexTransform).TransformMatrix;
+      Result := not TMatrix4.PerfectlyEquals(AMatrix, TMatrix4.Identity);
+    end;
+  end else
   begin
-    AMatrix := TAbstractSingleTextureTransformNode(TexTransform).TransformMatrix;
+    AMatrix := ShapeState.Vrml1TextureTransform;
     Result := not TMatrix4.PerfectlyEquals(AMatrix, TMatrix4.Identity);
   end;
 end;
@@ -1342,43 +1439,56 @@ begin
     App := ShapeState.ShapeNode.Appearance
   else
     App := ShapeState.Appearance;
-  if App = nil then
-    Exit;
-
-  SurfaceShader := App.InternalCommonSurfaceShader;
-  if SurfaceShader <> nil then
+  if App <> nil then
   begin
-    AIsPhong := True;
-    AAmbientIntensity := SurfaceShader.AmbientFactor.Average;
-    if TexturesEnabled then
+    SurfaceShader := App.InternalCommonSurfaceShader;
+    if SurfaceShader <> nil then
     begin
-      AHasSpecularTex := SurfaceShader.SpecularTexture <> nil;
-      AHasShininessTex := SurfaceShader.ShininessTexture <> nil;
-      AHasAmbientTex := SurfaceShader.AmbientTexture <> nil;
-    end;
-    Result := True;
-  end else
-  begin
-    MatNode := App.Material;
-    if MatNode is TMaterialNode then
-    begin
-      PhongMat := TMaterialNode(MatNode);
-      {$warnings off}
-      if PhongMat.PureEmissive and
-         ((Geometry = nil) or
-          ((Geometry.InternalColor = nil) and (Geometry.InternalColorRGBA = nil))) then
-        Exit;
-      {$warnings on}
       AIsPhong := True;
-      AAmbientIntensity := EnsureRange(PhongMat.AmbientIntensity, 0.0, 1.0);
+      AAmbientIntensity := SurfaceShader.AmbientFactor.Average;
       if TexturesEnabled then
       begin
-        AHasSpecularTex := PhongMat.SpecularTexture <> nil;
-        AHasShininessTex := PhongMat.ShininessTexture <> nil;
-        AHasAmbientTex := (PhongMat.AmbientTexture <> nil) and (PhongMat.OcclusionTexture = nil);
+        AHasSpecularTex := SurfaceShader.SpecularTexture <> nil;
+        AHasShininessTex := SurfaceShader.ShininessTexture <> nil;
+        AHasAmbientTex := SurfaceShader.AmbientTexture <> nil;
       end;
       Result := True;
+    end else
+    begin
+      MatNode := App.Material;
+      if MatNode is TMaterialNode then
+      begin
+        PhongMat := TMaterialNode(MatNode);
+        {$warnings off}
+        if PhongMat.PureEmissive and
+           ((Geometry = nil) or
+            ((Geometry.InternalColor = nil) and (Geometry.InternalColorRGBA = nil))) then
+          Exit;
+        {$warnings on}
+        AIsPhong := True;
+        AAmbientIntensity := EnsureRange(PhongMat.AmbientIntensity, 0.0, 1.0);
+        if TexturesEnabled then
+        begin
+          AHasSpecularTex := PhongMat.SpecularTexture <> nil;
+          AHasShininessTex := PhongMat.ShininessTexture <> nil;
+          AHasAmbientTex := (PhongMat.AmbientTexture <> nil) and (PhongMat.OcclusionTexture = nil);
+        end;
+        Result := True;
+      end;
     end;
+  end;
+
+  if (not Result) and (ShapeState.MaterialInfo is TPhongMaterialInfo) then
+  begin
+    {$warnings off}
+    if TPhongMaterialInfo(ShapeState.MaterialInfo).PureEmissive and
+       ((Geometry = nil) or
+        ((Geometry.InternalColor = nil) and (Geometry.InternalColorRGBA = nil))) then
+      Exit;
+    {$warnings on}
+    AIsPhong := True;
+    AAmbientIntensity := EnsureRange(TPhongMaterialInfo(ShapeState.MaterialInfo).AmbientColor.Average, 0.0, 1.0);
+    Result := True;
   end;
 end;
 
@@ -1657,6 +1767,8 @@ const
           Result := TUnlitMaterialNode(App.Material).EmissiveTexture;
       end;
     end;
+    if (Result = nil) and (ShapeState <> nil) then
+      Result := ShapeState.MainTexture;
   end;
 
 var

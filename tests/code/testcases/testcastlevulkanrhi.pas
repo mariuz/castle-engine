@@ -337,6 +337,9 @@ type
     procedure TestVulkanSamplerCreateInfoTranslationAndTexturePropertiesMipmapControlRHI;
     procedure TestCompositeCubeMapAnd3DTextureMipmapChainUploadRHI;
     procedure TestPhongSpecularAndAmbientTextureLinearColorSpaceDecodeRHI;
+    procedure TestAutomaticTextureMipmapGeneration2DCubeAnd3DRHI;
+    procedure TestSubresourceImageViewAndGeneratedCubeMapPerFaceLayerRenderRHI;
+    procedure TestVRML1MaterialTextureTransformAndTwoSidedMaterialExtractionRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -21059,6 +21062,315 @@ begin
     CastleRenderOptions.ColorSpace := SavedColorSpace;
     FreeAndNil(SceneUnlit);
     FreeAndNil(ScenePhong);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestAutomaticTextureMipmapGeneration2DCubeAnd3DRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  RenderOptions: TCastleRenderOptions;
+  Tex2D: TPixelTextureNode;
+  ComposedCube: TComposedCubeMapTextureNode;
+  SideRight, SideLeft, SideTop, SideBottom, SideBack, SideFront: TPixelTextureNode;
+  Tex3D: TPixelTexture3DNode;
+  Res2D: TImageTextureResource;
+  ResCube: TComposedCubeMapTextureResource;
+  Res3D: T3DTextureResource;
+  VkTex2D, VkTexCube, VkTex3D: TVulkanRHITexture;
+  I: Integer;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9101)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+
+  RenderOptions := TCastleRenderOptions.Create(nil);
+  Tex2D := TPixelTextureNode.Create;
+  ComposedCube := TComposedCubeMapTextureNode.Create;
+  SideRight := TPixelTextureNode.Create;
+  SideLeft := TPixelTextureNode.Create;
+  SideTop := TPixelTextureNode.Create;
+  SideBottom := TPixelTextureNode.Create;
+  SideBack := TPixelTextureNode.Create;
+  SideFront := TPixelTextureNode.Create;
+  Tex3D := TPixelTexture3DNode.Create;
+  try
+    RenderOptions.MinificationFilter := minLinearMipmapLinear;
+
+    { 1. 2D TPixelTextureNode (8x8) without pre-generated composite mipmaps must auto-generate 4 mip levels }
+    Tex2D.FdImage.Value := TRGBImage.Create(8, 8);
+    TTextureResources.Prepare(RenderOptions, Tex2D);
+    Res2D := TTextureResources.Get(Tex2D) as TImageTextureResource;
+    AssertTrue('Res2D must be TImageTextureResource', Res2D <> nil);
+    VkTex2D := Res2D.RHITexture as TVulkanRHITexture;
+    AssertEquals('8x8 2D texture must allocate 4 mip levels', 4, Integer(VkTex2D.Desc.MipLevels));
+    AssertEquals('2D texture without composite mipmaps must call GenerateMipmaps once',
+      1, Integer(VkTex2D.MipmapGenerationCount));
+    AssertEquals('2D texture LastGeneratedMipLevels must be 4', 4, Integer(VkTex2D.LastGeneratedMipLevels));
+    AssertEquals('2D texture MaxUploadedMipLevel must be updated to 3 after GenerateMipmaps',
+      3, Integer(VkTex2D.MaxUploadedMipLevel));
+    AssertEquals('2D texture CurrentState must be rsShaderRead after GenerateMipmaps',
+      Ord(rsShaderRead), Ord(VkTex2D.CurrentState));
+
+    { 2. TComposedCubeMapTextureNode (8x8 per side) must upload 6 faces at mip 0 and auto-generate mip levels 1..3 }
+    SideRight.FdImage.Value := TRGBImage.Create(8, 8);
+    SideLeft.FdImage.Value := TRGBImage.Create(8, 8);
+    SideTop.FdImage.Value := TRGBImage.Create(8, 8);
+    SideBottom.FdImage.Value := TRGBImage.Create(8, 8);
+    SideBack.FdImage.Value := TRGBImage.Create(8, 8);
+    SideFront.FdImage.Value := TRGBImage.Create(8, 8);
+    ComposedCube.FdRight.Value := SideRight;
+    ComposedCube.FdLeft.Value := SideLeft;
+    ComposedCube.FdTop.Value := SideTop;
+    ComposedCube.FdBottom.Value := SideBottom;
+    ComposedCube.FdBack.Value := SideBack;
+    ComposedCube.FdFront.Value := SideFront;
+
+    TTextureResources.Prepare(RenderOptions, ComposedCube);
+    ResCube := TTextureResources.Get(ComposedCube) as TComposedCubeMapTextureResource;
+    AssertTrue('ResCube must be TComposedCubeMapTextureResource', ResCube <> nil);
+    VkTexCube := ResCube.RHITexture as TVulkanRHITexture;
+    AssertEquals('ComposedCubeMap 8x8 must allocate 4 mip levels', 4, Integer(VkTexCube.Desc.MipLevels));
+    AssertEquals('ComposedCubeMap must upload 6 faces at mip 0', 6, Integer(VkTexCube.TotalSubresourceUploads));
+    AssertEquals('ComposedCubeMap must call GenerateMipmaps once', 1, Integer(VkTexCube.MipmapGenerationCount));
+    AssertEquals('ComposedCubeMap MaxUploadedMipLevel must be 3 after GenerateMipmaps',
+      3, Integer(VkTexCube.MaxUploadedMipLevel));
+
+    { 3. TPixelTexture3DNode (4x4x4) without composite mipmaps must auto-generate 3 mip levels }
+    Tex3D.FdImage.Items.Clear;
+    Tex3D.FdImage.Items.Add(3);
+    Tex3D.FdImage.Items.Add(4);
+    Tex3D.FdImage.Items.Add(4);
+    Tex3D.FdImage.Items.Add(4);
+    for I := 0 to 4 * 4 * 4 - 1 do
+      Tex3D.FdImage.Items.Add($FF00FF);
+    TTextureResources.Prepare(RenderOptions, Tex3D);
+    Res3D := TTextureResources.Get(Tex3D) as T3DTextureResource;
+    AssertTrue('Res3D must be T3DTextureResource', Res3D <> nil);
+    VkTex3D := Res3D.RHITexture as TVulkanRHITexture;
+    AssertEquals('4x4x4 3D texture must allocate 3 mip levels', 3, Integer(VkTex3D.Desc.MipLevels));
+    AssertEquals('3D texture without composite mipmaps must call GenerateMipmaps once',
+      1, Integer(VkTex3D.MipmapGenerationCount));
+    AssertEquals('3D texture LastGeneratedMipLevels must be 3', 3, Integer(VkTex3D.LastGeneratedMipLevels));
+    AssertEquals('3D texture MaxUploadedMipLevel must be 2 after GenerateMipmaps',
+      2, Integer(VkTex3D.MaxUploadedMipLevel));
+
+    TTextureResources.Unprepare(Tex2D);
+    TTextureResources.Unprepare(ComposedCube);
+    TTextureResources.Unprepare(Tex3D);
+  finally
+    FreeAndNil(Tex3D);
+    FreeAndNil(ComposedCube);
+    FreeAndNil(Tex2D);
+    FreeAndNil(RenderOptions);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSubresourceImageViewAndGeneratedCubeMapPerFaceLayerRenderRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCmd: TRHICommandList;
+  Cmd: TRHICommandList;
+  RenderOptions: TCastleRenderOptions;
+  GenCubeNode: TGeneratedCubeMapTextureNode;
+  GenCubeRes: TGeneratedCubeMapTextureResource;
+  VkCubeTex: TVulkanRHITexture;
+  ViewFace0, ViewFace0Cached, ViewFace5, ViewMip1Face2: VkImageView;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9102)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCmd := ActiveCommandList;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+
+  Cmd := TVulkanRHICommandList.Create(Device, 0);
+  RenderOptions := TCastleRenderOptions.Create(nil);
+  GenCubeNode := TGeneratedCubeMapTextureNode.Create;
+  try
+    Cmd.BeginRecording;
+    SetActiveCommandList(Cmd);
+    RenderOptions.MinificationFilter := minLinearMipmapLinear;
+    GenCubeNode.FdSize.Value := 16;
+
+    TTextureResources.Prepare(RenderOptions, GenCubeNode);
+    GenCubeRes := TTextureResources.Get(GenCubeNode) as TGeneratedCubeMapTextureResource;
+    AssertTrue('GenCubeRes must be TGeneratedCubeMapTextureResource', GenCubeRes <> nil);
+    VkCubeTex := GenCubeRes.RHITexture as TVulkanRHITexture;
+    AssertEquals('16x16 GeneratedCubeMapTexture with mipmaps must allocate 5 mip levels',
+      5, Integer(VkCubeTex.Desc.MipLevels));
+
+    { 1. Verify GetSubresourceImageView creates distinct cached 2D views per (MipLevel, ArrayLayer) }
+    ViewFace0 := VkCubeTex.GetSubresourceImageView(0, 0);
+    ViewFace0Cached := VkCubeTex.GetSubresourceImageView(0, 0);
+    ViewFace5 := VkCubeTex.GetSubresourceImageView(0, 5);
+    ViewMip1Face2 := VkCubeTex.GetSubresourceImageView(1, 2);
+
+    AssertTrue('Subresource view for (0,0) must not be null', ViewFace0 <> VK_NULL_HANDLE);
+    AssertTrue('Subresource view for (0,0) must be cached on repeated lookup', ViewFace0 = ViewFace0Cached);
+    AssertTrue('Subresource view for (0,5) must differ from (0,0)', ViewFace5 <> ViewFace0);
+    AssertTrue('Subresource view for (1,2) must differ from (0,0) and (0,5)',
+      (ViewMip1Face2 <> ViewFace0) and (ViewMip1Face2 <> ViewFace5));
+    AssertEquals('SubresourceViewCount must be 3 after 3 unique (mip,layer) requests',
+      3, Integer(VkCubeTex.SubresourceViewCount));
+
+    { 2. Calling GenCubeRes.Update must render all 6 cubemap faces (layers 0..5) and generate mipmaps }
+    FRenderFromViewpointCalls := 0;
+    GenCubeRes.Update(@DummyRenderFromViewpointCallback, 0.1, 100.0, Vector3(0, 0, 0));
+
+    AssertEquals('GenCubeRes.Update must invoke render callback 6 times', 6, Integer(FRenderFromViewpointCalls));
+    AssertEquals('All 6 cubemap faces (layers 0..5) must have been rendered (mask = $3F)',
+      $3F, Integer(VkCubeTex.RenderedLayerMask));
+    AssertEquals('LastRenderedArrayLayer after 6-face capture must be 5 (negative Z)',
+      5, Integer(VkCubeTex.LastRenderedArrayLayer));
+    AssertEquals('SubresourceViewCount must be 7 (6 faces at mip 0 + 1 earlier test at mip 1)',
+      7, Integer(VkCubeTex.SubresourceViewCount));
+    AssertEquals('GeneratedCubeMapTexture.Update with NeedsMipmaps must call GenerateMipmaps',
+      1, Integer(VkCubeTex.MipmapGenerationCount));
+    AssertEquals('RenderToTexture.RHIArrayLayer must be reset to 0 after GLCaptureCubeMapTexture',
+      0, Integer(GenCubeRes.RHIRenderToTexture.RHIArrayLayer));
+
+    Cmd.EndRecording;
+    TTextureResources.Unprepare(GenCubeNode);
+  finally
+    SetActiveCommandList(SavedCmd);
+    FreeAndNil(GenCubeNode);
+    FreeAndNil(RenderOptions);
+    FreeAndNil(Cmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVRML1MaterialTextureTransformAndTwoSidedMaterialExtractionRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SceneVrml1, SceneTwoSided: TCastleScene;
+  RootVrml1, RootTwoSided: TX3DRootNode;
+  Sep1: TSeparatorNode_1;
+  Mat1: TMaterialNode_1;
+  TexTrans1: TTexture2TransformNode_1;
+  Cube1: TCubeNode_1;
+  ShapeTwoSided: TShapeNode;
+  AppTwoSided: TAppearanceNode;
+  TwoSidedMat: TTwoSidedMaterialNode;
+  BoxTwoSided: TBoxNode;
+  RendererShapeVrml1, RendererShapeTwoSided: TX3DRendererShape;
+  MatBlockVrml1, MatBlockTwoSided: TCastleMaterialUniformBlock;
+  ShadingModelVrml1, ShadingModelTwoSided: TCastleShadingModelRHI;
+  TexMatrixVrml1: TMatrix4;
+  IsPhong, HasSpecTex, HasShinTex, HasAmbTex: Boolean;
+  AmbIntensity: Single;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9103)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+
+  SceneVrml1 := TCastleScene.Create(nil);
+  SceneTwoSided := TCastleScene.Create(nil);
+  try
+    { 1. VRML 1.0 scene with TMaterialNode_1, TTexture2TransformNode_1, and TCubeNode_1 }
+    RootVrml1 := TX3DRootNode.Create;
+    RootVrml1.ForceVersion.Major := 1;
+    RootVrml1.ForceVersion.Minor := 0;
+    RootVrml1.HasForceVersion := True;
+    Sep1 := TSeparatorNode_1.Create;
+    Mat1 := TMaterialNode_1.Create;
+    Mat1.FdDiffuseColor.Items.Clear;
+    Mat1.FdDiffuseColor.Items.Add(Vector3(0.8, 0.2, 0.1));
+    Mat1.FdSpecularColor.Items.Clear;
+    Mat1.FdSpecularColor.Items.Add(Vector3(0.9, 0.9, 0.9));
+    Mat1.FdEmissiveColor.Items.Clear;
+    Mat1.FdEmissiveColor.Items.Add(Vector3(0.05, 0.1, 0.15));
+    Mat1.FdShininess.Items.Clear;
+    Mat1.FdShininess.Items.Add(0.25);
+    Mat1.FdTransparency.Items.Clear;
+    Mat1.FdTransparency.Items.Add(0.2);
+
+    TexTrans1 := TTexture2TransformNode_1.Create;
+    TexTrans1.FdScaleFactor.Value := Vector2(2.0, 3.0);
+    TexTrans1.FdTranslation.Value := Vector2(0.25, 0.5);
+
+    Cube1 := TCubeNode_1.Create;
+    Sep1.VRML1ChildAdd(Mat1);
+    Sep1.VRML1ChildAdd(TexTrans1);
+    Sep1.VRML1ChildAdd(Cube1);
+    RootVrml1.AddChildren(Sep1);
+    SceneVrml1.Load(RootVrml1, True);
+    AssertTrue('VRML 1.0 scene must produce at least 1 shape',
+      SceneVrml1.Shapes.TraverseList(True, True).Count >= 1);
+
+    RendererShapeVrml1 := TX3DRendererShape(SceneVrml1.Shapes.TraverseList(True, True)[0]);
+    AssertTrue('VRML 1.0 shape has ShapeNode = nil', RendererShapeVrml1.OriginalState.ShapeNode = nil);
+    AssertTrue('ExtractRHIMaterialBlock must succeed on VRML 1.0 TMaterialNode_1 via MaterialInfo',
+      RendererShapeVrml1.ExtractRHIMaterialBlock(MatBlockVrml1, ShadingModelVrml1));
+    AssertEquals('VRML 1.0 Material shading model must be smPhong',
+      Ord(smPhong), Ord(ShadingModelVrml1));
+    AssertSameValue(0.8, MatBlockVrml1.BaseColor.X, 0.001);
+    AssertSameValue(0.2, MatBlockVrml1.BaseColor.Y, 0.001);
+    AssertSameValue(0.1, MatBlockVrml1.BaseColor.Z, 0.001);
+    AssertSameValue(0.8, MatBlockVrml1.BaseColor.W, 0.001); // 1 - 0.2 transparency
+    AssertSameValue(0.9, MatBlockVrml1.SpecularColor.X, 0.001);
+    AssertSameValue(32.0, MatBlockVrml1.SpecularColor.W, 0.01); // 0.25 * 128
+    AssertSameValue(0.05, MatBlockVrml1.EmissiveColor.X, 0.001);
+
+    AssertTrue('ExtractRHIPhongSurfaceParams must succeed on VRML 1.0 MaterialInfo',
+      RendererShapeVrml1.ExtractRHIPhongSurfaceParams(
+        IsPhong, HasSpecTex, HasShinTex, HasAmbTex, AmbIntensity));
+    AssertTrue('VRML 1.0 material must be recognized as Phong', IsPhong);
+
+    AssertTrue('ExtractRHITextureTransform must extract VRML 1.0 Texture2Transform matrix',
+      RendererShapeVrml1.ExtractRHITextureTransform(TexMatrixVrml1));
+    AssertSameValue(2.0, TexMatrixVrml1.Data[0, 0], 0.001);
+    AssertSameValue(3.0, TexMatrixVrml1.Data[1, 1], 0.001);
+    AssertSameValue(0.25, TexMatrixVrml1.Data[3, 0], 0.001);
+    AssertSameValue(0.5, TexMatrixVrml1.Data[3, 1], 0.001);
+
+    { 2. X3D TTwoSidedMaterialNode extracted via ShapeState.MaterialInfo }
+    RootTwoSided := TX3DRootNode.Create;
+    ShapeTwoSided := TShapeNode.Create;
+    AppTwoSided := TAppearanceNode.Create;
+    TwoSidedMat := TTwoSidedMaterialNode.Create;
+    TwoSidedMat.DiffuseColor := Vector3(0.1, 0.7, 0.3);
+    TwoSidedMat.SpecularColor := Vector3(0.5, 0.5, 0.5);
+    TwoSidedMat.Shininess := 0.5;
+    TwoSidedMat.Transparency := 0.25;
+    AppTwoSided.Material := TwoSidedMat;
+    BoxTwoSided := TBoxNode.Create;
+    ShapeTwoSided.Appearance := AppTwoSided;
+    ShapeTwoSided.Geometry := BoxTwoSided;
+    RootTwoSided.AddChildren(ShapeTwoSided);
+    SceneTwoSided.Load(RootTwoSided, True);
+
+    RendererShapeTwoSided := TX3DRendererShape(SceneTwoSided.Shapes.TraverseList(True, True)[0]);
+    AssertTrue('ExtractRHIMaterialBlock must succeed on TTwoSidedMaterialNode',
+      RendererShapeTwoSided.ExtractRHIMaterialBlock(MatBlockTwoSided, ShadingModelTwoSided));
+    AssertEquals('TTwoSidedMaterialNode shading model must be smPhong',
+      Ord(smPhong), Ord(ShadingModelTwoSided));
+    AssertSameValue(0.1, MatBlockTwoSided.BaseColor.X, 0.001);
+    AssertSameValue(0.7, MatBlockTwoSided.BaseColor.Y, 0.001);
+    AssertSameValue(0.3, MatBlockTwoSided.BaseColor.Z, 0.001);
+    AssertSameValue(0.75, MatBlockTwoSided.BaseColor.W, 0.001);
+    AssertSameValue(64.0, MatBlockTwoSided.SpecularColor.W, 0.01); // 0.5 * 128
+  finally
+    FreeAndNil(SceneTwoSided);
+    FreeAndNil(SceneVrml1);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);

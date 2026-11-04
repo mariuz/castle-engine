@@ -60,6 +60,8 @@
     FRHIInitialized: Boolean;
     FRHIRenderingActive: Boolean;
     FRHIRenderPassCount: Cardinal;
+    FRHIArrayLayer: Cardinal;
+    FRHIMipLevel: Cardinal;
   public
     { Constructor. Doesn't require OpenGL context,
       and doesn't initialize the framebuffer.
@@ -284,6 +286,8 @@
       const ADepthTexture: TRHITexture = nil);
     property RHIInitialized: Boolean read FRHIInitialized;
     property RHIRenderPassCount: Cardinal read FRHIRenderPassCount;
+    property RHIArrayLayer: Cardinal read FRHIArrayLayer write FRHIArrayLayer;
+    property RHIMipLevel: Cardinal read FRHIMipLevel write FRHIMipLevel;
     { @groupEnd }
   end;
 {$endif read_interface_type}
@@ -495,6 +499,10 @@ procedure TGLRenderToTexture.SetTexture(
   const ATexture: TGLTextureId;
   const ATextureTarget: TGLenum);
 begin
+  if (ATextureTarget >= GL_TEXTURE_CUBE_MAP_POSITIVE_X) and
+     (ATextureTarget <= GL_TEXTURE_CUBE_MAP_NEGATIVE_Z) then
+    FRHIArrayLayer := ATextureTarget - GL_TEXTURE_CUBE_MAP_POSITIVE_X;
+
   if (ATexture <> FTexture) or (ATextureTarget <> FTextureTarget) then
   begin
     FTexture := ATexture;
@@ -817,6 +825,8 @@ begin
           ActiveCommandList.TransitionTexture(FRHIDepthTexture, rsDepthStencilWrite);
         RenderingInfo := TRHIRenderingInfo.CreateDepthOnly(
           RenderAreaRect, FRHIDepthTexture, loClear, soStore, 1.0);
+        RenderingInfo.DepthAttachment.ArrayLayer := FRHIArrayLayer;
+        RenderingInfo.DepthAttachment.MipLevel := FRHIMipLevel;
       end else
       begin
         if FRHIColorTexture <> nil then
@@ -847,6 +857,11 @@ begin
             FRHIDepthTexture, loClear, 1.0);
           if (Buffer = tbColorAndDepth) and RenderingInfo.HasDepthAttachment then
             RenderingInfo.DepthAttachment.StoreOp := soStore;
+        end;
+        if Length(RenderingInfo.ColorAttachments) > 0 then
+        begin
+          RenderingInfo.ColorAttachments[0].ArrayLayer := FRHIArrayLayer;
+          RenderingInfo.ColorAttachments[0].MipLevel := FRHIMipLevel;
         end;
       end;
       ActiveCommandList.BeginRendering(RenderingInfo);
@@ -987,8 +1002,13 @@ procedure TGLRenderToTexture.GenerateMipmap;
 begin
   if RHIDevice <> nil then
   begin
-    if (ActiveCommandList <> nil) and (FRHIColorTexture <> nil) then
-      ActiveCommandList.GenerateMipmaps(FRHIColorTexture);
+    if FRHIColorTexture <> nil then
+    begin
+      if ActiveCommandList <> nil then
+        ActiveCommandList.GenerateMipmaps(FRHIColorTexture)
+      else
+        FRHIColorTexture.GenerateMipmaps;
+    end;
     Exit;
   end;
   glBindTexture(CompleteTextureTarget, Texture);

@@ -1197,7 +1197,9 @@ begin
       begin
         for MipIdx := 1 to Min(Cardinal(TextureNode.TextureComposite.Images.Count) - 1, MipLevels - 1) do
           FRHITexture.UploadImage(TextureNode.TextureComposite.Images[MipIdx], MipIdx, 0);
-      end;
+      end else
+      if MipLevels > 1 then
+        FRHITexture.GenerateMipmaps;
       CreateRHISampler(Filter, BoundaryModeS, BoundaryModeT, GL_CLAMP_TO_EDGE, Anisotropy, MipLevels);
     end;
     Exit;
@@ -2205,6 +2207,8 @@ begin
       FRHITexture.UploadImage(BottomImg, 0, 3);
       FRHITexture.UploadImage(BackRot,   0, 4);
       FRHITexture.UploadImage(FrontRot,  0, 5);
+      if MipLevels > 1 then
+        FRHITexture.GenerateMipmaps;
       CreateRHISampler(Filter, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, Anisotropy, MipLevels);
     finally
       FreeAndNil(BackRot);
@@ -2314,6 +2318,8 @@ begin
             FRHITexture.UploadImage(Composite.CubeMapImage(Side, MipIdx), MipIdx, Ord(Side));
         end;
       end;
+      if (MipLevels > 1) and not (Composite.Mipmaps and (Composite.MipmapsCount > 1)) then
+        FRHITexture.GenerateMipmaps;
       CreateRHISampler(Filter, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, Anisotropy, MipLevels);
     finally
       FreeAndNil(Composite);
@@ -2593,7 +2599,9 @@ begin
     begin
       for MipIdx := 1 to Min(Cardinal(TextureNode.TextureComposite.Images.Count) - 1, MipLevels - 1) do
         FRHITexture.UploadImage(TextureNode.TextureComposite.Images[MipIdx], MipIdx, 0);
-    end;
+    end else
+    if MipLevels > 1 then
+      FRHITexture.GenerateMipmaps;
     CreateRHISampler(Filter, BoundaryModeS, BoundaryModeT, BoundaryModeR, Anisotropy, MipLevels);
     Exit;
   end;
