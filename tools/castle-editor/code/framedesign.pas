@@ -4308,53 +4308,43 @@ function TDesignFrame.TDesignerLayer.Motion(const Event: TInputMotion): Boolean;
       Frame.TransformHover.Current := nil;
   end;
 
-  { Sometimes, trying to drag (translate/resize) UI,
-    should actually drag the UI's parent (or parent's parent...).
-    This happens when UI has FullSize,
-    or it is within a group that auto-aligns children.
+  { Determine whether dragging (translating/resizing) UI in the viewport should
+    instead manipulate UI.Parent (recursively). This happens when:
+    - UI has EffectiveFullSize (its bounds are locked to its parent),
+    - UI.Parent uses AutoSizeToChildren on this single child at (0, 0),
+    - UI is being translated inside a TCastlePackedGroup (TCastleHorizontalGroup /
+      TCastleVerticalGroup) which auto-arranges children positions, or
+    - UI is an internal transient ScrollArea inside TCastleScrollViewCustom. }
+  function ShouldDelegateUiDragToParent(const AUI: TCastleUserInterface;
+    const ADragMode: TUiDraggingMode): Boolean;
+  begin
+    Result := false;
+    if (AUI = nil) or (AUI.Parent = nil) then
+      Exit;
 
-    The DragAllowed is such case would block some actions on UI,
-    and it is intuitive to perform them on parent.
+    if (ADragMode in [dmResize, dmTranslate]) and AUI.EffectiveFullSize then
+      Exit(true);
 
-    TODO: This has hardcoded logic for FullSize and group cases.
-    There should be a virtual method instead like
-      TCastleUserInterface.EditorDragParent(UiDraggingMode)
-      TCastleUserInterface.EditorDragMeInsteadOfChild(UiDraggingMode)
-  }
+    if (ADragMode in [dmResize, dmTranslate]) and
+       AUI.Parent.AutoSizeToChildren and
+       (AUI.Parent.ControlsCount = 1) and
+       {$warnings off} // looking at deprecated Left, Bottom to keep them working
+       (AUI.Left = 0) and
+       (AUI.Bottom = 0) and
+       {$warnings on}
+       TVector2.PerfectlyEquals(AUI.Translation, TVector2.Zero) then
+      Exit(true);
+
+    if (ADragMode = dmTranslate) and
+       ( (AUI.Parent is TCastlePackedGroup) or
+         ((csTransient in AUI.ComponentStyle) and (AUI.Parent is TCastleScrollViewCustom)) ) then
+      Exit(true);
+  end;
+
   procedure ChangeDraggedUI(var UI: TCastleUserInterface);
   begin
-    if (UiDraggingMode in [dmResize, dmTranslate]) and
-       UI.EffectiveFullSize and
-       (UI.Parent <> nil) then
-    begin
+    while ShouldDelegateUiDragToParent(UI, UiDraggingMode) do
       UI := UI.Parent;
-      ChangeDraggedUI(UI); // act recursively if necessary, to choose parent's parent...
-    end;
-
-    if (UiDraggingMode in [dmResize, dmTranslate]) and
-       (UI.Parent <> nil) and
-       { When the parent uses AutoSizeToChildren on a single child, then the effect is similar
-         as it child had FullSize. }
-       UI.Parent.AutoSizeToChildren and
-       (UI.Parent.ControlsCount = 1) and
-       {$warnings off} // looking at deprecated Left, Bottom to keep them working
-       (UI.Left = 0) and
-       (UI.Bottom = 0) and
-       {$warnings on}
-       TVector2.PerfectlyEquals(UI.Translation, TVector2.Zero) then
-    begin
-      UI := UI.Parent;
-      ChangeDraggedUI(UI); // act recursively if necessary, to choose parent's parent...
-    end;
-
-    if (UiDraggingMode in [dmTranslate]) and
-       (UI.Parent <> nil) and
-       ( (UI.Parent is TCastleHorizontalGroup) or
-         (UI.Parent is TCastleVerticalGroup) ) then
-    begin
-      UI := UI.Parent;
-      ChangeDraggedUI(UI); // act recursively if necessary, to choose parent's parent...
-    end;
   end;
 
 var
@@ -4397,6 +4387,8 @@ begin
     if (UI <> nil) and (not Frame.IsComponentLocked(UI)) then
     begin
       ChangeDraggedUI(UI);
+      if Frame.IsComponentLocked(UI) then
+        Exit(true);
 
       Move := (Event.Position - Event.OldPosition) / UI.UIScale;
 

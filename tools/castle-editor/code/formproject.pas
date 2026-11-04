@@ -2602,15 +2602,27 @@ var
   ListItem: TListItem;
   MaskSearched: String;
   View: TProjectView;
+  ColIdx, ActiveSortCol: Integer;
 begin
   ProjectViews.ScanProject(ProjectPathUrl, Manifest.ProposedUnitPrefix, MaskSearched);
 
   // update LabelOpenExistingView to show mask used for views
   LabelOpenExistingView.Caption := 'Open Existing View (' + MaskSearched + ') :';
 
-  { TODO: It seems LCL UI always shows as if the "Last Modified" (column 2)
-    was sorted, and setting ListOpenExistingView.SortColumn from code
-    or LFM doesn't change it. }
+  { Synchronize column SortIndicator with ListOpenExistingView.SortColumn
+    (defaulting to column 0 "Name" ascending when SortColumn < 0). }
+  ActiveSortCol := ListOpenExistingView.SortColumn;
+  if ActiveSortCol < 0 then
+    ActiveSortCol := 0;
+  for ColIdx := 0 to ListOpenExistingView.Columns.Count - 1 do
+    if ColIdx = ActiveSortCol then
+    begin
+      if ListOpenExistingView.SortDirection = sdDescending then
+        ListOpenExistingView.Columns[ColIdx].SortIndicator := siDescending
+      else
+        ListOpenExistingView.Columns[ColIdx].SortIndicator := siAscending;
+    end else
+      ListOpenExistingView.Columns[ColIdx].SortIndicator := siNone;
 
   { copy ProjectViews contents -> ListOpenExistingView GUI contents }
   ListOpenExistingView.Items.Clear;

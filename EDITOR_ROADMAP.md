@@ -2456,11 +2456,23 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - **Screenshots:** [CGE Sprite Sheet Editor](https://castle-engine.io/images/thumb_const_height_size/sprite_sheet_editor.webp) · [CGE Visual Editor Hierarchy & Behaviors](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [Godot 4 SpriteFrames Editor](https://docs.godotengine.org/en/stable/_images/2d_animation_spriteframes_done.png)
   - **Example (Phase 260):** Open a sprite sheet with tall or custom-anchored frames (such as `tentacles.castle-sprite-sheet`) in the Sprite Sheet Editor to preview animations and individual frames centered and aspect-fitted in 2D orthographic view without deprecated `MainScene`, or drag a `TCastleBehavior` before/after another behavior in `ControlsTree` to reorder it in-place without collapsing or rebuilding the hierarchy tree.
 
+### Phase 261: Container-Aware UI Drag Delegation (`ShouldDelegateUiDragToParent` / `ChangeDraggedUI` with Lock Guard), Unified Shell Tree Sort Refresh (`SetFileSortType`), and Open-Existing-View Column Sort Indicator Sync (`ListOpenExistingViewRefresh`)
+- [x] **261.1. `ShouldDelegateUiDragToParent` (`TCastlePackedGroup` / `TCastleScrollViewCustom` & Lock Guard), `TCustomCastleShellTreeView.SetFileSortType` & `ListOpenExistingView` Sort Indicator (`framedesign.pas`, `castleshellctrls.pas`, `formproject.pas`, `formproject.lfm`)**
+  - Resolved the `ChangeDraggedUI` `TODO` in `TDesignFrame.TDesignerLayer.Motion` (`tools/castle-editor/code/framedesign.pas`) by introducing `ShouldDelegateUiDragToParent(AUI, ADragMode)` and replacing recursive ad-hoc checks with a clean `while ShouldDelegateUiDragToParent(UI, UiDraggingMode) do UI := UI.Parent` loop that covers `EffectiveFullSize`, `AutoSizeToChildren` single-child containers, all `TCastlePackedGroup` descendants (`TCastleHorizontalGroup`, `TCastleVerticalGroup`), and transient `ScrollArea` children inside `TCastleScrollViewCustom`, plus a post-delegation `Frame.IsComponentLocked(UI)` guard so locked parent containers cannot be moved by dragging their `FullSize` children.
+  - Resolved the `TCustomCastleShellTreeView.SetFileSortType` `ToDo` (`tools/castle-editor/code/castleshellctrls.pas`) by delegating directly to `RefreshContents` (matching `SetObjectTypes` and `SetExcludeMask`), avoiding redundant root node creation without `FFileInfo` and preserving the expanded path inside `BeginUpdate` / `EndUpdate`.
+  - Resolved the `ListOpenExistingView` `SortColumn` / `SortIndicator` `TODO` (`tools/castle-editor/code/formproject.pas` & `formproject.lfm`) by moving the default `SortIndicator = siAscending` to Column 0 (`'Name'`) in `formproject.lfm` and synchronizing all column `SortIndicator` arrows with `ListOpenExistingView.SortColumn` and `SortDirection` in `TProjectForm.ListOpenExistingViewRefresh`.
+  - **Official Docs & Visual References (Phase 261):** [CGE User Interface & Layout Containers Manual (`TCastlePackedGroup`, `TCastleScrollView`, `FullSize`)](https://castle-engine.io/manual_user_interface.php) · [CGE Visual Editor Manual (UI Dragging, Views List & Files Tree)](https://castle-engine.io/manual_editor.php) · [CGE Views (`TCastleView`) Manual](https://castle-engine.io/views) · [Godot 4 Container Layout & Control Dragging](https://docs.godotengine.org/en/stable/tutorials/ui/gui_containers.html) · [UE 5.5 UMG Widget Designer & Hierarchy Lock](https://dev.epicgames.com/documentation/en-us/unreal-engine/umg-ui-designer-for-unreal-engine)
+  - **Official Videos & Movies (Phase 261):**
+    - 🎬 [CGE Official Video — Designing User Interfaces, Containers & Views in Editor (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+    - 🎞️ [Animated Movie (GIF) — Interactive UI Container & Split Panel Dragging](https://docs.godotengine.org/en/stable/_images/containers_split_drag.gif)
+  - **Screenshots:** [CGE UI Designer & Views Panel](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [CGE Editor Hierarchy & Files Tree](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [Godot 4 UI Container Layout](https://docs.godotengine.org/en/stable/_images/containers_box.png)
+  - **Example (Phase 261):** Drag a child widget inside a `TCastleHorizontalGroup` / `TCastleVerticalGroup` or a `FullSize` background inside a panel to smoothly translate the parent container (while respecting component lock if the parent container is locked), or close the current design to view the **Open Existing View** list with the sort indicator accurately aligned to the active **Name** column.
+
 ---
 
-## Roadmap Completion Status (Phases 1–260 — Final Milestone)
+## Roadmap Completion Status (Phases 1–261 — Final Milestone)
 
-All **260 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **261 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 

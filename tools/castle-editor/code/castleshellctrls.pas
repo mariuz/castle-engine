@@ -584,37 +584,11 @@ begin
     ShellListView.Root := FRoot;
 end;
 
-// ToDo: Optimize, now the tree is populated in constructor, SetRoot and SetFileSortType.
-// For some reason it does not show in performance really.
 procedure TCustomCastleShellTreeView.SetFileSortType(const AValue: TFileSortType);
-var
-  RootNode: TTreeNode;
-  CurrPath: String;
 begin
-  if FFileSortType=AValue then exit;
-  FFileSortType:=AValue;
-  if (csLoading in ComponentState) then Exit;
-  CurrPath := GetPath;
-  try
-    BeginUpdate;
-    Items.Clear;
-    if FRoot = '' then
-      PopulateWithBaseFiles()
-    else
-    begin
-      RootNode := Items.AddChild(nil, FRoot);
-      RootNode.HasChildren := True;
-      RootNode.Expand(False);
-      try
-       SetPath(CurrPath);
-      except
-        // CurrPath may have been removed in the mean time by another process, just ignore
-        on E: EInvalidPath do ;//
-      end;
-    end;
-  finally
-    EndUpdate;
-  end;
+  if FFileSortType = AValue then Exit;
+  FFileSortType := AValue;
+  RefreshContents;
 end;
 
 procedure TCustomCastleShellTreeView.SetObjectTypes(AValue: TObjectTypes);

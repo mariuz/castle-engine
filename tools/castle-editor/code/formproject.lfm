@@ -206,6 +206,7 @@ object ProjectForm: TProjectForm
               AutoSize = True
               Caption = 'Name'
               MinWidth = 209
+              SortIndicator = siAscending
               Width = 209
             end          
             item
@@ -215,7 +216,6 @@ object ProjectForm: TProjectForm
             item
               Caption = 'Last Modified'
               Width = 378
-              SortIndicator = siDescending
             end>
           RowSelect = True
           ScrollBars = ssAutoBoth
