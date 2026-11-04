@@ -12134,23 +12134,31 @@ procedure TDesignFrame.ControlsTreeDragDrop(Sender, Source: TObject; X,
   procedure MoveBehavior(const Src: TCastleBehavior; const Dst: TCastleBehavior);
   var
     Index: Integer;
-    DstParent: TCastleTransform;
+    OldParent, DstParent: TCastleTransform;
   begin
     case ControlsTreeNodeUnderMouseSide of
       tnsBottom, tnsTop:
         begin
+          OldParent := Src.Parent;
           DstParent := Dst.Parent;
           if (DstParent <> nil) and (Src <> Dst) then
           begin
-            Src.Parent.RemoveBehavior(Src);
+            if OldParent <> nil then
+              OldParent.RemoveBehavior(Src);
             // Access the index of dst
             Index := DstParent.BehaviorIndex(Dst);
             Assert(Index <> -1);
             if ControlsTreeNodeUnderMouseSide = tnsBottom then
               Inc(Index);
             DstParent.InsertBehavior(Index, Src);
-            // TODO: update tree in a simple way for now
-            UpdateDesign;
+            if (OldParent <> DstParent) and (Src is TCastleCollider) and FShowColliders then
+              UpdateColliders;
+            if (OldParent <> nil) and (OldParent.BehaviorsCount > 0) then
+            begin
+              MoveOnlyTreeNodes(Src, Dst);
+              ValidateHierarchy;
+            end else
+              UpdateDesign;
           end;
         end;
     end;
@@ -12161,15 +12169,28 @@ procedure TDesignFrame.ControlsTreeDragDrop(Sender, Source: TObject; X,
     const Dst: TCastleComponent);
   var
     SrcParentComponent: TCastleComponent;
+    SrcNode, DstNode, DstNonVisualNode: TTreeNode;
   begin
     SrcParentComponent := NonVisualComponentParent(Src);
     case ControlsTreeNodeUnderMouseSide of
       tnsInside:
+        if (SrcParentComponent <> nil) and (SrcParentComponent <> Dst) then
         begin
           SrcParentComponent.RemoveNonVisualComponent(Src);
           Dst.AddNonVisualComponent(Src);
-          // TODO: update tree in a simple way for now
-          UpdateDesign;
+          DstNonVisualNode := nil;
+          if FShowNonVisualComponents and TreeNodeMap.TryGetValue(Dst, DstNode) and
+             (DstNode.Count > 0) and (DstNode[0].Data = nil) and
+             (DstNode[0].Text = 'Non-Visual Components') then
+            DstNonVisualNode := DstNode[0];
+          if (DstNonVisualNode <> nil) and
+             (SrcParentComponent.NonVisualComponentsCount > 0) and
+             TreeNodeMap.TryGetValue(Src, SrcNode) then
+          begin
+            SrcNode.MoveTo(DstNonVisualNode, naAddChild);
+            ValidateHierarchy;
+          end else
+            UpdateDesign;
         end;
       else ;
     end;

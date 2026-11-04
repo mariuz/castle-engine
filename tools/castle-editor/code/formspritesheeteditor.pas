@@ -263,6 +263,8 @@ type
     procedure ShowPreviewControl(const MakeVisible: Boolean);
     { Creates viewport and scene for preview }
     procedure CreatePreviewUIIfNeeded;
+    { Reset 2D orthographic preview camera centered on the current preview scene bounds }
+    procedure ResetPreviewCamera(const OrthoWidth, OrthoHeight: Single);
     { Updates current preview.
 
       If PreviewModesToUpdate is pmAnimation then
@@ -321,7 +323,7 @@ implementation
 {$R *.lfm}
 
 uses GraphType, IntfGraphics, Math, LCLIntf, LCLType, FPImage,
-  CastleImages, CastleLog, CastleUtils, CastleUriUtils, CastleFilesUtils,
+  CastleImages, CastleLog, CastleUtils, CastleUriUtils, CastleFilesUtils, CastleBoxes,
   X3DNodes,
   EditorUtils,
   FormProject, FormImportAtlas, FormImportStarling
@@ -1360,8 +1362,29 @@ begin
     FPreviewScene := TCastleScene.Create(Self);
 
     FViewport.Items.Add(FPreviewScene);
-    FViewport.Items.MainScene := FPreviewScene; // TODO: removing MainScene assignment makes camera not OK, testcase: tentacles
   end;
+end;
+
+procedure TSpriteSheetEditorForm.ResetPreviewCamera(const OrthoWidth, OrthoHeight: Single);
+var
+  Box: TBox3D;
+  Center2D: TVector2;
+begin
+  if (FViewport = nil) or (FViewport.Camera = nil) then
+    Exit;
+  Box := FViewport.ItemsBoundingBox;
+  if not Box.IsEmpty then
+    Center2D := Box.Center.XY
+  else
+    Center2D := TVector2.Zero;
+  FViewport.Setup2D;
+  FViewport.Camera.Translation := Vector3(Center2D.X, Center2D.Y, FViewport.Camera.Translation.Z);
+  FViewport.Camera.Orthographic.Origin := Vector2(0.5, 0.5);
+  {$warnings off} // using experimental Scale to reset 2D navigation zoom
+  FViewport.Camera.Orthographic.Scale := 1.0;
+  {$warnings on}
+  FViewport.Camera.Orthographic.Width := OrthoWidth;
+  FViewport.Camera.Orthographic.Height := OrthoHeight;
 end;
 
 procedure TSpriteSheetEditorForm.UpdatePreview(
@@ -1395,10 +1418,10 @@ procedure TSpriteSheetEditorForm.UpdatePreview(
     end else
     begin
       FPreviewScene.Exists := true;
-      FViewport.AssignDefaultCamera;
-      // set this after AssignDefaultCamera, as AssignDefaultCamera resets it
-      FViewport.Camera.Orthographic.Width := Animation.Frame[0].FrameWidth + PreviewMargin * 2;
       FPreviewScene.PlayAnimation(Animation.Name, true, true);
+      ResetPreviewCamera(
+        Animation.Frame[0].FrameWidth + PreviewMargin * 2,
+        Animation.Frame[0].FrameHeight + PreviewMargin * 2);
     end;
   end;
 
@@ -1438,9 +1461,9 @@ begin
 
     FPreviewScene.Scale := Vector3(1.0, 1.0, 1.0);
     FPreviewScene.Load(FSpriteSheet.ToX3D, true);
-    FViewport.AssignDefaultCamera;
-    // set this after AssignDefaultCamera, as AssignDefaultCamera resets it
-    FViewport.Camera.Orthographic.Width := DefaultFrameIconSize + PreviewMargin * 2;
+    ResetPreviewCamera(
+      DefaultFrameIconSize + PreviewMargin * 2,
+      DefaultFrameIconSize + PreviewMargin * 2);
   except
     on E: Exception do
     begin
@@ -1529,11 +1552,11 @@ begin
   FPreviewScene.Scale := Vector3(1.0, 1.0, 1.0);
   FPreviewScene.Load(Generate3XDWithImage, true);
 
-  FViewport.AssignDefaultCamera;
-  { Always set to the width of the first frame because we want to see the
-    size difference }
-  // set this after AssignDefaultCamera, as AssignDefaultCamera resets it
-  FViewport.Camera.Orthographic.Width := Frame.Animation.Frame[0].FrameWidth;
+  { Always set to the dimensions of the first frame because we want to see the
+    size difference across frames of the same animation }
+  ResetPreviewCamera(
+    Frame.Animation.Frame[0].FrameWidth,
+    Frame.Animation.Frame[0].FrameHeight);
 end;
 
 procedure TSpriteSheetEditorForm.LockUpdatePreview;

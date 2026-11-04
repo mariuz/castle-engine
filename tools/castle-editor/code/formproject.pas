@@ -1527,7 +1527,10 @@ var
 begin
   ViewportActionsAllowed := (Design <> nil) and (Design.CurrentViewport <> nil);
   (Sender as TAction).Enabled := ViewportActionsAllowed;
-  // MenuItemViewport.Enabled := ViewportActionsAllowed; // TODO would disable everything without ability to restore
+  { Note: Do not disable MenuItemViewport here when CurrentViewport = nil,
+    because on some LCL widgetsets disabling a parent top-level menu item stops
+    OnUpdate from firing on its child actions. Top-level MenuItemViewport.Enabled
+    is instead synchronized with Design <> nil in DesignExistenceChanged. }
 end;
 
 procedure TProjectForm.ActionWarningsCleanExecute(Sender: TObject);
@@ -2663,6 +2666,7 @@ begin
   ActionViewportRenderSolidWireframe.Enabled := Design <> nil;
   ActionViewportRenderNext.Enabled := Design <> nil;
   MenuItemWireframe.Enabled := Design <> nil;
+  MenuItemViewport.Enabled := Design <> nil;
 
   UpdateUndo(nil);
   UpdateRenameItem(nil);
