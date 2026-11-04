@@ -294,6 +294,9 @@ type
     FBoundDescriptorSets: array[0..3] of TRHIDescriptorSet;
     FDescriptorSetBindCount: Cardinal;
     FPipelineBindCount: Cardinal;
+    FLastPushConstantStageFlags: TRHIShaderStageFlags;
+    FLastPushConstantSize: Cardinal;
+    FPushConstantCallCount: Cardinal;
     function GetBoundDescriptorSet(const ASetIndex: Cardinal): TRHIDescriptorSet;
   public
     constructor Create(const ADevice: TVulkanRHIDevice; const AQueueFamilyIndex: Cardinal;
@@ -407,6 +410,9 @@ type
     property DescriptorSetBindCount: Cardinal read FDescriptorSetBindCount;
     property BoundPipeline: TVulkanRHIPipeline read FCurrentPipeline;
     property PipelineBindCount: Cardinal read FPipelineBindCount;
+    property LastPushConstantStageFlags: TRHIShaderStageFlags read FLastPushConstantStageFlags;
+    property LastPushConstantSize: Cardinal read FLastPushConstantSize;
+    property PushConstantCallCount: Cardinal read FPushConstantCallCount;
   end;
 
   { -------------------------------------------------------------------------- }
@@ -7007,6 +7013,15 @@ begin
   FillChar(FBoundDescriptorSets, SizeOf(FBoundDescriptorSets), 0);
   FDescriptorSetBindCount := 0;
   FPipelineBindCount := 0;
+  FLastPushConstantStageFlags := [];
+  FLastPushConstantSize := 0;
+  FPushConstantCallCount := 0;
+  FIsRendering := False;
+  FActiveRenderingHasColor := False;
+  FActiveRenderingColorFormat := pfUndefined;
+  FActiveRenderingHasDepth := False;
+  FActiveRenderingDepthFormat := pfUndefined;
+  FActiveRenderingSampleCount := 1;
 end;
 
 procedure TVulkanRHICommandList.EndRecording;
@@ -7177,6 +7192,26 @@ begin
     (VUID-vkCmdCopyBuffer-renderpass / VUID-vkCmdCopyBufferToImage-renderpass) }
   if (FDevice <> nil) and (FDevice.StagingUploader <> nil) and (Level = cllPrimary) then
     FDevice.StagingUploader.FlushPendingUploads(Self);
+
+  FIsRendering := True;
+  FActiveRenderingHasColor := (Length(Info.ColorAttachments) > 0) and (Info.ColorAttachments[0].Texture <> nil);
+  if FActiveRenderingHasColor then
+  begin
+    FActiveRenderingColorFormat := Info.ColorAttachments[0].Texture.Desc.Format;
+    FActiveRenderingSampleCount := Max(Cardinal(1), Info.ColorAttachments[0].Texture.Desc.SampleCount);
+  end else
+  begin
+    FActiveRenderingColorFormat := pfUndefined;
+    FActiveRenderingSampleCount := 1;
+  end;
+  FActiveRenderingHasDepth := Info.HasDepthAttachment and (Info.DepthAttachment.Texture <> nil);
+  if FActiveRenderingHasDepth then
+  begin
+    FActiveRenderingDepthFormat := Info.DepthAttachment.Texture.Desc.Format;
+    if not FActiveRenderingHasColor then
+      FActiveRenderingSampleCount := Max(Cardinal(1), Info.DepthAttachment.Texture.Desc.SampleCount);
+  end else
+    FActiveRenderingDepthFormat := pfUndefined;
 
   if FDevice <> nil then
   begin
@@ -7459,6 +7494,7 @@ end;
 
 procedure TVulkanRHICommandList.EndRendering;
 begin
+  FIsRendering := False;
   if FInFallbackRenderPass then
   begin
     FInFallbackRenderPass := False;
@@ -7645,6 +7681,9 @@ procedure TVulkanRHICommandList.PushConstants(const StageFlags: TRHIShaderStageF
 var
   TargetLayout: VkPipelineLayout;
 begin
+  FLastPushConstantStageFlags := StageFlags;
+  FLastPushConstantSize := Size;
+  Inc(FPushConstantCallCount);
   TargetLayout := VK_NULL_HANDLE;
   if (ssCompute in StageFlags) and (FCurrentComputePipeline <> nil) and
      ((FCurrentPipeline = nil) or (StageFlags = [ssCompute])) then

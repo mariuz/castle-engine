@@ -701,9 +701,21 @@ type
   TRHICommandList = class abstract
   protected
     FLevel: TRHICommandListLevel;
+    FIsRendering: Boolean;
+    FActiveRenderingHasColor: Boolean;
+    FActiveRenderingColorFormat: TRHIPixelFormat;
+    FActiveRenderingHasDepth: Boolean;
+    FActiveRenderingDepthFormat: TRHIPixelFormat;
+    FActiveRenderingSampleCount: Cardinal;
   public
     constructor Create(const ALevel: TRHICommandListLevel = cllPrimary);
     property Level: TRHICommandListLevel read FLevel;
+    property IsRendering: Boolean read FIsRendering;
+    property ActiveRenderingHasColor: Boolean read FActiveRenderingHasColor;
+    property ActiveRenderingColorFormat: TRHIPixelFormat read FActiveRenderingColorFormat;
+    property ActiveRenderingHasDepth: Boolean read FActiveRenderingHasDepth;
+    property ActiveRenderingDepthFormat: TRHIPixelFormat read FActiveRenderingDepthFormat;
+    property ActiveRenderingSampleCount: Cardinal read FActiveRenderingSampleCount;
 
     procedure BeginRecording; virtual; abstract;
     procedure EndRecording; virtual; abstract;
@@ -1580,6 +1592,12 @@ constructor TRHICommandList.Create(const ALevel: TRHICommandListLevel);
 begin
   inherited Create;
   FLevel := ALevel;
+  FIsRendering := False;
+  FActiveRenderingHasColor := False;
+  FActiveRenderingColorFormat := pfUndefined;
+  FActiveRenderingHasDepth := False;
+  FActiveRenderingDepthFormat := pfUndefined;
+  FActiveRenderingSampleCount := 1;
 end;
 
 procedure TRHICommandList.ClearAttachments(const ClearColorBuf: Boolean; const ClearColor: TCastleColor;

@@ -557,7 +557,10 @@ begin
           (RenderOptions = nil) or RenderOptions.SpecularAntiAliasing,
           ShadowModeOrd,
           Shape.RHIBindlessMaterialIndex);
-        ActiveCommandList.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConstants), PushConstants);
+        if (Shape.Cache <> nil) and (Shape.Cache.RHIGeometryShader <> nil) then
+          ActiveCommandList.PushConstants([ssVertex, ssGeometry, ssFragment], 0, SizeOf(PushConstants), PushConstants)
+        else
+          ActiveCommandList.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConstants), PushConstants);
 
         { 1b. Bind Set 0 (Global Scene + Lights UBOs), Set 1 (Material UBO / Bindless Table), and Set 2 (Skinning UBO) }
         if (Renderer <> nil) and (Renderer.EnsureRHISceneDescriptorSet <> nil) then

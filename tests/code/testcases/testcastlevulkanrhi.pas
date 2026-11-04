@@ -340,6 +340,9 @@ type
     procedure TestAutomaticTextureMipmapGeneration2DCubeAnd3DRHI;
     procedure TestSubresourceImageViewAndGeneratedCubeMapPerFaceLayerRenderRHI;
     procedure TestVRML1MaterialTextureTransformAndTwoSidedMaterialExtractionRHI;
+    procedure TestRenderedAndGeneratedCubeMapInitialImageAndMovieTextureMipmapsRHI;
+    procedure TestActiveRenderingAttachmentFormatsAndSampleCountPipelineRHI;
+    procedure TestMeshRendererGeometryShaderPushConstantsAndAnimatedMovieTextureFrameRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -21236,8 +21239,8 @@ begin
       5, Integer(VkCubeTex.LastRenderedArrayLayer));
     AssertEquals('SubresourceViewCount must be 7 (6 faces at mip 0 + 1 earlier test at mip 1)',
       7, Integer(VkCubeTex.SubresourceViewCount));
-    AssertEquals('GeneratedCubeMapTexture.Update with NeedsMipmaps must call GenerateMipmaps',
-      1, Integer(VkCubeTex.MipmapGenerationCount));
+    AssertEquals('GeneratedCubeMapTexture.PrepareCore + Update with NeedsMipmaps must call GenerateMipmaps twice',
+      2, Integer(VkCubeTex.MipmapGenerationCount));
     AssertEquals('RenderToTexture.RHIArrayLayer must be reset to 0 after GLCaptureCubeMapTexture',
       0, Integer(GenCubeRes.RHIRenderToTexture.RHIArrayLayer));
 
@@ -21371,6 +21374,387 @@ begin
   finally
     FreeAndNil(SceneTwoSided);
     FreeAndNil(SceneVrml1);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRenderedAndGeneratedCubeMapInitialImageAndMovieTextureMipmapsRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  RenderOptions: TCastleRenderOptions;
+  RenderedTexNode: TRenderedTextureNode;
+  GenCubeNode: TGeneratedCubeMapTextureNode;
+  MovieNode: TMovieTextureNode;
+  RenderedRes: TRenderedTextureResource;
+  GenCubeRes: TGeneratedCubeMapTextureResource;
+  MovieRes: TMovieTextureResource;
+  VkRenderedTex, VkCubeTex, VkMovieFrame0: TVulkanRHITexture;
+  GrabbedRendered, GrabbedCube: TRGBAlphaImage;
+  Frame0, Frame1: TRGBAlphaImage;
+  Vid: TVideo;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9201)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+
+  RenderOptions := TCastleRenderOptions.Create(nil);
+  RenderOptions.MinificationFilter := minLinearMipmapLinear;
+  RenderedTexNode := TRenderedTextureNode.Create;
+  GenCubeNode := TGeneratedCubeMapTextureNode.Create;
+  MovieNode := TMovieTextureNode.Create;
+  try
+    { 1. TRenderedTextureResource.PrepareCore uploads magenta (255, 0, 255, 255) initial image and generates mipmaps }
+    RenderedTexNode.SetDimensions([32, 32, 4, 1, 1]);
+    TTextureResources.Prepare(RenderOptions, RenderedTexNode);
+    RenderedRes := TTextureResources.Get(RenderedTexNode) as TRenderedTextureResource;
+    AssertTrue('RenderedRes.RHITexture must be created', RenderedRes.RHITexture <> nil);
+    VkRenderedTex := RenderedRes.RHITexture as TVulkanRHITexture;
+    AssertEquals('RenderedTexture must transition to rsShaderRead after initial image upload & mipmaps',
+      Ord(rsShaderRead), Ord(VkRenderedTex.CurrentState));
+    AssertEquals('32x32 RenderedTexture with mipmaps must have 6 mip levels',
+      6, Integer(VkRenderedTex.Desc.MipLevels));
+    AssertEquals('RenderedTexture.PrepareCore must generate mipmap chain once',
+      1, Integer(VkRenderedTex.MipmapGenerationCount));
+    AssertEquals('RenderedTexture MaxUploadedMipLevel must reach 5',
+      5, Integer(VkRenderedTex.MaxUploadedMipLevel));
+    GrabbedRendered := Device.GrabTextureImage(VkRenderedTex, Rectangle(0, 0, 32, 32));
+    try
+      AssertEquals('Initial RenderedTexture R must be 255 (magenta)', 255, GrabbedRendered.PixelPtr(0, 0)^.X);
+      AssertEquals('Initial RenderedTexture G must be 0 (magenta)', 0, GrabbedRendered.PixelPtr(0, 0)^.Y);
+      AssertEquals('Initial RenderedTexture B must be 255 (magenta)', 255, GrabbedRendered.PixelPtr(0, 0)^.Z);
+      AssertEquals('Initial RenderedTexture A must be 255', 255, GrabbedRendered.PixelPtr(0, 0)^.W);
+    finally
+      FreeAndNil(GrabbedRendered);
+    end;
+    TTextureResources.Unprepare(RenderedTexNode);
+
+    { 2. TGeneratedCubeMapTextureResource.PrepareCore uploads magenta initial image to all 6 faces and generates mipmaps }
+    GenCubeNode.FdSize.Value := 16;
+    TTextureResources.Prepare(RenderOptions, GenCubeNode);
+    GenCubeRes := TTextureResources.Get(GenCubeNode) as TGeneratedCubeMapTextureResource;
+    AssertTrue('GenCubeRes.RHITexture must be created', GenCubeRes.RHITexture <> nil);
+    VkCubeTex := GenCubeRes.RHITexture as TVulkanRHITexture;
+    AssertEquals('GeneratedCubeMapTexture must transition to rsShaderRead after initial upload & mipmaps',
+      Ord(rsShaderRead), Ord(VkCubeTex.CurrentState));
+    AssertEquals('16x16 GeneratedCubeMapTexture with mipmaps must have 5 mip levels',
+      5, Integer(VkCubeTex.Desc.MipLevels));
+    AssertEquals('All 6 cube faces must be uploaded in PrepareCore (MaxUploadedArrayLayer = 5)',
+      5, Integer(VkCubeTex.MaxUploadedArrayLayer));
+    AssertEquals('6 face uploads must occur in PrepareCore + mipmap blits',
+      6, Integer(VkCubeTex.TotalSubresourceUploads));
+    AssertEquals('GeneratedCubeMapTexture.PrepareCore must generate mipmap chain once',
+      1, Integer(VkCubeTex.MipmapGenerationCount));
+    GrabbedCube := Device.GrabTextureImage(VkCubeTex, Rectangle(0, 0, 16, 16));
+    try
+      AssertEquals('Initial GeneratedCubeMapTexture R must be 255 (magenta)', 255, GrabbedCube.PixelPtr(0, 0)^.X);
+      AssertEquals('Initial GeneratedCubeMapTexture G must be 0 (magenta)', 0, GrabbedCube.PixelPtr(0, 0)^.Y);
+      AssertEquals('Initial GeneratedCubeMapTexture B must be 255 (magenta)', 255, GrabbedCube.PixelPtr(0, 0)^.Z);
+    finally
+      FreeAndNil(GrabbedCube);
+    end;
+    TTextureResources.Unprepare(GenCubeNode);
+
+    { 3. TMovieTextureResource.PrepareCore creates full mipmap chain for each video frame when Filter.NeedsMipmaps }
+    Frame0 := TRGBAlphaImage.Create(8, 8);
+    Frame0.Clear(Vector4Byte(255, 0, 0, 255));
+    Frame1 := TRGBAlphaImage.Create(8, 8);
+    Frame1.Clear(Vector4Byte(0, 255, 0, 255));
+    Vid := TVideo.Create;
+    Vid.LoadFromImageArray([Frame0, Frame1], True, 1.0);
+    MovieNode.LoadFromVideo(Vid, True);
+
+    TTextureResources.Prepare(RenderOptions, MovieNode);
+    MovieRes := TTextureResources.Get(MovieNode) as TMovieTextureResource;
+    AssertEquals('MovieRes must have 2 RHI frames', 2, Integer(MovieRes.RHIFrameCount));
+    VkMovieFrame0 := MovieRes.RHITexture as TVulkanRHITexture;
+    AssertEquals('8x8 MovieTexture frame 0 with mipmaps must have 4 mip levels',
+      4, Integer(VkMovieFrame0.Desc.MipLevels));
+    AssertEquals('MovieTexture frame 0 must call GenerateMipmaps',
+      1, Integer(VkMovieFrame0.MipmapGenerationCount));
+    AssertEquals('MovieTexture frame 0 MaxUploadedMipLevel must be 3',
+      3, Integer(VkMovieFrame0.MaxUploadedMipLevel));
+    AssertTrue('MovieRes.RHISampler MaxLod must be > 0 for mipmapped video',
+      MovieRes.RHISampler.Desc.MaxLod > 1.0);
+    TTextureResources.Unprepare(MovieNode);
+  finally
+    FreeAndNil(MovieNode);
+    FreeAndNil(GenCubeNode);
+    FreeAndNil(RenderedTexNode);
+    FreeAndNil(RenderOptions);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestActiveRenderingAttachmentFormatsAndSampleCountPipelineRHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TMaterialNode;
+  Box: TBoxNode;
+  RendererShape: TX3DRendererShape;
+  Renderer: TRenderer;
+  RenderOptions: TCastleRenderOptions;
+  ShadingModel: TCastleShadingModelRHI;
+  OffscreenColor, OffscreenDepth, MSAAColor, MSAADepth: TRHITexture;
+  PassInfo: TRHIRenderingInfo;
+  PipelineSwapchain, PipelineOffscreen, PipelineMSAA: TRHIPipeline;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9202)));
+  Cmd := TVulkanRHICommandList.Create(Device, 0);
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  SetActiveCommandList(Cmd);
+
+  Scene := TCastleScene.Create(nil);
+  RenderOptions := TCastleRenderOptions.Create(nil);
+  Renderer := TRenderer.Create(RenderOptions);
+  OffscreenColor := nil;
+  OffscreenDepth := nil;
+  MSAAColor := nil;
+  MSAADepth := nil;
+  try
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TMaterialNode.Create;
+    Box := TBoxNode.Create;
+    App.Material := Mat;
+    ShapeNode.Appearance := App;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+    Scene.Load(Root, True);
+
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(True, True)[0]);
+    RendererShape.PrepareRHIBuffers(RenderOptions, 1);
+    RendererShape.UploadRHIMaterialToCache(ShadingModel);
+
+    Cmd.BeginRecording;
+    AssertFalse('Cmd.IsRendering must be False before BeginRendering', Cmd.IsRendering);
+
+    { 1. Outside a rendering pass, GetOrCreateShapePipeline falls back to swapchain formats (pfBGRA8_UNorm / pfD32_Float, SampleCount=1) }
+    PipelineSwapchain := Renderer.GetOrCreateShapePipeline(RendererShape, RenderOptions);
+    AssertTrue('PipelineSwapchain must be created', PipelineSwapchain <> nil);
+    AssertEquals('Swapchain fallback ColorAttachmentFormats[0] must be pfBGRA8_UNorm',
+      Ord(pfBGRA8_UNorm), Ord(PipelineSwapchain.Desc.ColorAttachmentFormats[0]));
+    AssertEquals('Swapchain fallback DepthAttachmentFormat must be pfD32_Float',
+      Ord(pfD32_Float), Ord(PipelineSwapchain.Desc.DepthAttachmentFormat));
+    AssertEquals('Swapchain fallback SampleCount must be 1',
+      1, Integer(PipelineSwapchain.Desc.SampleCount));
+
+    { 2. Inside an offscreen RenderToTexture pass (pfRGBA8_UNorm + pfD24_UNorm_S8_UInt), pipeline matches active attachments }
+    OffscreenColor := Device.CreateTexture(TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled]));
+    OffscreenDepth := Device.CreateTexture(TRHITextureDesc.Create2D(64, 64, pfD24_UNorm_S8_UInt,
+      [tuDepthStencil]));
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(Rectangle(0, 0, 64, 64),
+      OffscreenColor, loClear, Vector4(0, 0, 0, 1), OffscreenDepth, loClear, 1.0);
+    Cmd.BeginRendering(PassInfo);
+    AssertTrue('Cmd.IsRendering must be True inside BeginRendering', Cmd.IsRendering);
+    AssertEquals('Cmd.ActiveRenderingColorFormat must be pfRGBA8_UNorm',
+      Ord(pfRGBA8_UNorm), Ord(Cmd.ActiveRenderingColorFormat));
+    AssertEquals('Cmd.ActiveRenderingDepthFormat must be pfD24_UNorm_S8_UInt',
+      Ord(pfD24_UNorm_S8_UInt), Ord(Cmd.ActiveRenderingDepthFormat));
+
+    PipelineOffscreen := Renderer.GetOrCreateShapePipeline(RendererShape, RenderOptions);
+    AssertTrue('PipelineOffscreen must be distinct from PipelineSwapchain',
+      PipelineOffscreen <> PipelineSwapchain);
+    AssertEquals('Offscreen PSO ColorAttachmentFormats[0] must match active pass (pfRGBA8_UNorm)',
+      Ord(pfRGBA8_UNorm), Ord(PipelineOffscreen.Desc.ColorAttachmentFormats[0]));
+    AssertEquals('Offscreen PSO DepthAttachmentFormat must match active pass (pfD24_UNorm_S8_UInt)',
+      Ord(pfD24_UNorm_S8_UInt), Ord(PipelineOffscreen.Desc.DepthAttachmentFormat));
+    Cmd.EndRendering;
+    AssertFalse('Cmd.IsRendering must be False after EndRendering', Cmd.IsRendering);
+
+    { 3. Inside a 4x MSAA offscreen pass, pipeline SampleCount matches active attachment SampleCount (4) }
+    MSAAColor := Device.CreateTexture(TRHITextureDesc.Create2D(64, 64, pfRGBA16_Float,
+      [tuColorAttachment], 1, 4));
+    MSAADepth := Device.CreateTexture(TRHITextureDesc.Create2D(64, 64, pfD32_Float,
+      [tuDepthStencil], 1, 4));
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(Rectangle(0, 0, 64, 64),
+      MSAAColor, loClear, Vector4(0, 0, 0, 1), MSAADepth, loClear, 1.0);
+    Cmd.BeginRendering(PassInfo);
+    AssertEquals('Cmd.ActiveRenderingSampleCount must be 4',
+      4, Integer(Cmd.ActiveRenderingSampleCount));
+
+    PipelineMSAA := Renderer.GetOrCreateShapePipeline(RendererShape, RenderOptions);
+    AssertTrue('PipelineMSAA must be distinct from 1x pipelines',
+      (PipelineMSAA <> PipelineOffscreen) and (PipelineMSAA <> PipelineSwapchain));
+    AssertEquals('MSAA PSO ColorAttachmentFormats[0] must be pfRGBA16_Float',
+      Ord(pfRGBA16_Float), Ord(PipelineMSAA.Desc.ColorAttachmentFormats[0]));
+    AssertEquals('MSAA PSO SampleCount must be 4',
+      4, Integer(PipelineMSAA.Desc.SampleCount));
+    Cmd.EndRendering;
+    Cmd.EndRecording;
+  finally
+    SetActiveCommandList(SavedCmd);
+    FreeAndNil(MSAADepth);
+    FreeAndNil(MSAAColor);
+    FreeAndNil(OffscreenDepth);
+    FreeAndNil(OffscreenColor);
+    FreeAndNil(Renderer);
+    FreeAndNil(RenderOptions);
+    FreeAndNil(Scene);
+    FreeAndNil(Cmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestMeshRendererGeometryShaderPushConstantsAndAnimatedMovieTextureFrameRHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SceneGeom, SceneMovie: TCastleScene;
+  RootGeom, RootMovie: TX3DRootNode;
+  ShapeGeom, ShapeMovie: TShapeNode;
+  AppGeom, AppMovie: TAppearanceNode;
+  MatGeom, MatMovie: TMaterialNode;
+  EffectGeom: TEffectNode;
+  PartGeom: TEffectPartNode;
+  MovieNode: TMovieTextureNode;
+  Frame0, Frame1: TRGBAlphaImage;
+  Vid: TVideo;
+  MovieRes: TMovieTextureResource;
+  BoxGeom, BoxMovie: TBoxNode;
+  RendererShapeGeom, RendererShapeMovie: TX3DRendererShape;
+  ShadingModel: TCastleShadingModelRHI;
+  PassInfo: TRHIRenderingInfo;
+  MatDescSet: TVulkanRHIDescriptorSet;
+  BoundTexFrame0, BoundTexFrame1: TRHITexture;
+  UpdateCount0: Cardinal;
+  BindlessEntry0, BindlessEntry1: TCastleBindlessMaterialEntry;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9203)));
+  Cmd := TVulkanRHICommandList.Create(Device, 0);
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  SetActiveCommandList(Cmd);
+
+  SceneGeom := TCastleScene.Create(nil);
+  SceneMovie := TCastleScene.Create(nil);
+  try
+    { 1. Geometry shader shape recorded via RecordRHIDraw pushes constants with [ssVertex, ssGeometry, ssFragment] }
+    RootGeom := TX3DRootNode.Create;
+    ShapeGeom := TShapeNode.Create;
+    AppGeom := TAppearanceNode.Create;
+    MatGeom := TMaterialNode.Create;
+    EffectGeom := TEffectNode.Create;
+    EffectGeom.Language := slGLSL;
+    PartGeom := TEffectPartNode.Create;
+    PartGeom.ShaderType := stGeometry;
+    PartGeom.Contents :=
+      'void PLUG_geometry_vertex_set(const int index) {}';
+    EffectGeom.SetParts([PartGeom]);
+    AppGeom.Material := MatGeom;
+    AppGeom.SetEffects([EffectGeom]);
+    BoxGeom := TBoxNode.Create;
+    ShapeGeom.Appearance := AppGeom;
+    ShapeGeom.Geometry := BoxGeom;
+    RootGeom.AddChildren(ShapeGeom);
+    SceneGeom.Load(RootGeom, True);
+
+    RendererShapeGeom := TX3DRendererShape(SceneGeom.Shapes.TraverseList(True, True)[0]);
+    RendererShapeGeom.PrepareRHIBuffers(SceneGeom.RenderOptions, 1);
+    RendererShapeGeom.UploadRHIMaterialToCache(ShadingModel);
+    AssertTrue('Geometry shader module must be compiled',
+      RendererShapeGeom.Cache.RHIGeometryShader <> nil);
+
+    Cmd.BeginRecording;
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(Rectangle(0, 0, 64, 64),
+      Device.GetSwapchainColorTexture, loClear, Vector4(0, 0, 0, 1),
+      Device.GetSwapchainDepthTexture, loClear, 1.0);
+    Cmd.BeginRendering(PassInfo);
+    RendererShapeGeom.RecordRHIDraw(Cmd, TMatrix4.Identity, RendererShapeGeom.RHIBindlessMaterialIndex);
+    Cmd.EndRendering;
+    Cmd.EndRecording;
+
+    AssertTrue('PushConstants must have been called for geometry-shader shape',
+      Cmd.PushConstantCallCount >= 1);
+    AssertTrue('LastPushConstantStageFlags must include ssGeometry when RHIGeometryShader <> nil',
+      Cmd.LastPushConstantStageFlags = [ssVertex, ssGeometry, ssFragment]);
+
+    { 2. Animated TMovieTextureNode advances frame when scene time increases and UploadRHIMaterialToCache rebinds the new frame }
+    RootMovie := TX3DRootNode.Create;
+    ShapeMovie := TShapeNode.Create;
+    AppMovie := TAppearanceNode.Create;
+    MatMovie := TMaterialNode.Create;
+    MovieNode := TMovieTextureNode.Create;
+    MovieNode.Loop := True;
+    Frame0 := TRGBAlphaImage.Create(4, 4);
+    Frame0.Clear(Vector4Byte(255, 0, 0, 255));
+    Frame1 := TRGBAlphaImage.Create(4, 4);
+    Frame1.Clear(Vector4Byte(0, 0, 255, 255));
+    Vid := TVideo.Create;
+    Vid.LoadFromImageArray([Frame0, Frame1], True, 1.0); // 1 fps -> 2s duration, Frame 0 at t=0.0, Frame 1 at t=1.2
+    MovieNode.LoadFromVideo(Vid, True);
+
+    AppMovie.Material := MatMovie;
+    AppMovie.Texture := MovieNode;
+    BoxMovie := TBoxNode.Create;
+    ShapeMovie.Appearance := AppMovie;
+    ShapeMovie.Geometry := BoxMovie;
+    RootMovie.AddChildren(ShapeMovie);
+    SceneMovie.AnimateOnlyWhenVisible := False;
+    SceneMovie.ProcessEvents := True;
+    SceneMovie.Load(RootMovie, True);
+
+    RendererShapeMovie := TX3DRendererShape(SceneMovie.Shapes.TraverseList(True, True)[0]);
+    RendererShapeMovie.PrepareRHIBuffers(SceneMovie.RenderOptions, 1);
+    RendererShapeMovie.UploadRHIMaterialToCache(ShadingModel);
+
+    MovieRes := TTextureResources.Get(MovieNode) as TMovieTextureResource;
+    AssertTrue('MovieRes must be prepared', MovieRes <> nil);
+    AssertEquals('MovieRes must have 2 frames', 2, Integer(MovieRes.RHIFrameCount));
+
+    MatDescSet := RendererShapeMovie.Cache.RHIMaterialDescriptorSet as TVulkanRHIDescriptorSet;
+    BoundTexFrame0 := MovieRes.RHITexture;
+    AssertTrue('BoundTexFrame0 at t=0 must be non-nil', BoundTexFrame0 <> nil);
+    UpdateCount0 := MatDescSet.UpdateCount;
+    BindlessEntry0 := Device.BindlessTextureManager.GetMaterialEntry(RendererShapeMovie.RHIBindlessMaterialIndex);
+
+    { Advance scene time by 1.2s so MovieNode advances to Frame 1 }
+    SceneMovie.IncreaseTime(1.2);
+    RendererShapeMovie.UploadRHIMaterialToCache(ShadingModel);
+
+    BoundTexFrame1 := MovieRes.RHITexture;
+    AssertTrue('BoundTexFrame1 at t=1.2s must be non-nil', BoundTexFrame1 <> nil);
+    AssertTrue('BoundTexFrame1 must be the second video frame texture (distinct from Frame 0)',
+      BoundTexFrame1 <> BoundTexFrame0);
+    AssertTrue('RHIMaterialDescriptorSet must be updated when MovieTexture advances frame',
+      MatDescSet.UpdateCount > UpdateCount0);
+    BindlessEntry1 := Device.BindlessTextureManager.GetMaterialEntry(RendererShapeMovie.RHIBindlessMaterialIndex);
+    AssertTrue('Bindless material BaseColorTexIndex must update when MovieTexture advances frame',
+      BindlessEntry1.BaseColorTexIndex <> BindlessEntry0.BaseColorTexIndex);
+  finally
+    SetActiveCommandList(SavedCmd);
+    FreeAndNil(SceneMovie);
+    FreeAndNil(SceneGeom);
+    FreeAndNil(Cmd);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);

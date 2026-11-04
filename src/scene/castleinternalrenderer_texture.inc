@@ -1382,6 +1382,7 @@ var
   TextureWrap: TTextureWrap2D;
   GUITexture: boolean;
   I: Integer;
+  MipLevels: Cardinal;
   FrameImg, TempFlipped: TCastleImage;
   TexDesc: TRHITextureDesc;
 begin
@@ -1396,14 +1397,19 @@ begin
     if (TextureNode.TextureVideo <> nil) and TextureNode.TextureVideo.Loaded and
        (TextureNode.TextureVideo.Count > 0) then
     begin
+      MipLevels := 1;
       SetLength(FRHITextureFrames, TextureNode.TextureVideo.Count);
       for I := 0 to TextureNode.TextureVideo.Count - 1 do
       begin
         FrameImg := TextureNode.TextureVideo.Items[I];
+        if Filter.NeedsMipmaps then
+          MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(Max(Max(Cardinal(1), FrameImg.Width), Max(Cardinal(1), FrameImg.Height))))) + 1)
+        else
+          MipLevels := 1;
         TexDesc := TRHITextureDesc.Create2D(
           Max(Cardinal(1), FrameImg.Width),
           Max(Cardinal(1), FrameImg.Height),
-          pfRGBA8_UNorm, [tuSampled, tuTransferDst, tuTransferSrc], 1, 1);
+          pfRGBA8_UNorm, [tuSampled, tuTransferDst, tuTransferSrc], MipLevels, 1);
         TexDesc.DebugName := Format('MovieTexture.Frame[%d]', [I]);
         FRHITextureFrames[I] := RHIDevice.CreateTexture(TexDesc);
         if TextureNode.FlipVertically and (TextureNode.TextureUsedFullUrl = '') then
@@ -1417,8 +1423,10 @@ begin
           end;
         end else
           FRHITextureFrames[I].UploadImage(FrameImg, 0, 0);
+        if MipLevels > 1 then
+          FRHITextureFrames[I].GenerateMipmaps;
       end;
-      CreateRHISampler(Filter, BoundaryModeS, BoundaryModeT, GL_CLAMP_TO_EDGE, Anisotropy, 1);
+      CreateRHISampler(Filter, BoundaryModeS, BoundaryModeT, GL_CLAMP_TO_EDGE, Anisotropy, MipLevels);
     end;
     Exit;
   end;
@@ -1600,6 +1608,17 @@ begin
       [tuColorAttachment, tuSampled, tuTransferSrc, tuTransferDst], MipLevels, 1);
     TexDesc.DebugName := 'RenderedTexture.Color';
     FRHITexture := RHIDevice.CreateTexture(TexDesc);
+
+    InitialImage := TRGBImage.Create(Width, Height);
+    try
+      InitialImage.URL := 'generated:/' + TextureNode.NiceName;
+      InitialImage.Clear(Vector4Byte(255, 0, 255, 255));
+      FRHITexture.UploadImage(InitialImage, 0, 0);
+      if MipLevels > 1 then
+        FRHITexture.GenerateMipmaps;
+    finally
+      FreeAndNil(InitialImage);
+    end;
 
     TexDesc := TRHITextureDesc.Create2D(Width, Height, pfD24_UNorm_S8_UInt,
       [tuDepthStencil, tuSampled, tuTransferSrc], 1, 1);
@@ -2385,7 +2404,7 @@ var
   Anisotropy: TGLfloat;
   GUITexture: boolean;
   InitialImage: TCastleImage;
-  MipLevels: Cardinal;
+  MipLevels, FaceIdx: Cardinal;
   TexDesc: TRHITextureDesc;
 begin
   if RHIDevice <> nil then
@@ -2407,6 +2426,18 @@ begin
       [tuColorAttachment, tuSampled, tuTransferSrc, tuTransferDst], MipLevels);
     TexDesc.DebugName := 'GeneratedCubeMapTexture';
     FRHITexture := RHIDevice.CreateTexture(TexDesc);
+
+    InitialImage := TRGBImage.Create(Size, Size);
+    try
+      InitialImage.URL := 'generated:/' + TextureNode.NiceName;
+      InitialImage.Clear(Vector4Byte(255, 0, 255, 255));
+      for FaceIdx := 0 to 5 do
+        FRHITexture.UploadImage(InitialImage, 0, FaceIdx);
+      if MipLevels > 1 then
+        FRHITexture.GenerateMipmaps;
+    finally
+      FreeAndNil(InitialImage);
+    end;
 
     TexDesc := TRHITextureDesc.Create2D(Size, Size, pfD24_UNorm_S8_UInt,
       [tuDepthStencil, tuSampled, tuTransferSrc], 1, 1);

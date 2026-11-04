@@ -893,18 +893,35 @@ begin
   else
     ADesc.PushConstantStages := [ssVertex, ssFragment];
 
-  SetLength(ADesc.ColorAttachmentFormats, 1);
-  if (RHIDevice <> nil) and (RHIDevice.GetSwapchainColorTexture <> nil) then
-    ADesc.ColorAttachmentFormats[0] := RHIDevice.GetSwapchainColorTexture.Desc.Format
-  else
-    ADesc.ColorAttachmentFormats[0] := pfBGRA8_UNorm;
+  if (ActiveCommandList <> nil) and ActiveCommandList.IsRendering then
+  begin
+    if ActiveCommandList.ActiveRenderingHasColor then
+    begin
+      SetLength(ADesc.ColorAttachmentFormats, 1);
+      ADesc.ColorAttachmentFormats[0] := ActiveCommandList.ActiveRenderingColorFormat;
+    end else
+      SetLength(ADesc.ColorAttachmentFormats, 0);
+    if ActiveCommandList.ActiveRenderingHasDepth then
+      ADesc.DepthAttachmentFormat := ActiveCommandList.ActiveRenderingDepthFormat
+    else
+      ADesc.DepthAttachmentFormat := pfUndefined;
+    ADesc.SampleCount := Max(Cardinal(1), ActiveCommandList.ActiveRenderingSampleCount);
+  end else
+  begin
+    SetLength(ADesc.ColorAttachmentFormats, 1);
+    if (RHIDevice <> nil) and (RHIDevice.GetSwapchainColorTexture <> nil) then
+      ADesc.ColorAttachmentFormats[0] := RHIDevice.GetSwapchainColorTexture.Desc.Format
+    else
+      ADesc.ColorAttachmentFormats[0] := pfBGRA8_UNorm;
 
-  if (RHIDevice <> nil) and (RHIDevice.GetSwapchainDepthTexture <> nil) then
-    ADesc.DepthAttachmentFormat := RHIDevice.GetSwapchainDepthTexture.Desc.Format
-  else
-    ADesc.DepthAttachmentFormat := pfD32_Float;
+    if (RHIDevice <> nil) and (RHIDevice.GetSwapchainDepthTexture <> nil) then
+      ADesc.DepthAttachmentFormat := RHIDevice.GetSwapchainDepthTexture.Desc.Format
+    else
+      ADesc.DepthAttachmentFormat := pfD32_Float;
 
-  ADesc.SampleCount := 1;
+    ADesc.SampleCount := 1;
+  end;
+
   if ((RenderingCamera <> nil) and (RenderingCamera.Target = rtShadowMap)) or
      ((ARenderOptions <> nil) and (ARenderOptions.Mode = rmDepth)) then
   begin
@@ -920,6 +937,7 @@ begin
     ADesc.Rasterizer.DepthBiasEnable := True;
     ADesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
     ADesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+    SetLength(ADesc.ColorAttachmentFormats, 1);
     ADesc.ColorAttachmentFormats[0] := pfRGBA32_Float;
     ADesc.DebugName := 'CastleShapeVSMPSO';
   end else
