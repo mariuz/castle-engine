@@ -6003,13 +6003,15 @@ procedure TVulkanRHITexture.UploadImage(const AImage: TEncodedImage;
   const AMipLevel: Cardinal; const AArrayLayer: Cardinal);
 var
   RgbaImage: TRGBAlphaImage;
-  NeedsFreeRgba: Boolean;
+  FloatImage: TRGBAlphaFloatImage;
+  DecompressedImg: TCastleImage;
+  NeedsFreeRgba, NeedsFreeFloat: Boolean;
   StagingDesc: TRHIBufferDesc;
   StagingBuf: TVulkanRHIBuffer;
   Cmd: VkCommandBuffer;
   Region: VkBufferImageCopy;
   Barrier: VkImageMemoryBarrier;
-  DataSize: PtrUInt;
+  DataSize, CopyBytes: PtrUInt;
   PixelsPtr: Pointer;
   ImgWidth, ImgHeight, ImgDepth: Cardinal;
 begin
@@ -6017,15 +6019,67 @@ begin
   if FImage = VK_NULL_HANDLE then Exit;
 
   NeedsFreeRgba := False;
+  NeedsFreeFloat := False;
   RgbaImage := nil;
+  FloatImage := nil;
   ImgWidth := Max(Cardinal(1), AImage.Width);
   ImgHeight := Max(Cardinal(1), AImage.Height);
   ImgDepth := Max(Cardinal(1), AImage.Depth);
 
-  if (FDesc.Format = pfRGBA32_Float) and (AImage is TRGBAlphaFloatImage) then
+  if FDesc.Format = pfRGBA32_Float then
   begin
-    DataSize := PtrUInt(ImgWidth) * PtrUInt(ImgHeight) * PtrUInt(ImgDepth) * 16;
-    PixelsPtr := TRGBAlphaFloatImage(AImage).RawPixels;
+    if AImage is TRGBAlphaFloatImage then
+    begin
+      FloatImage := TRGBAlphaFloatImage(AImage);
+      DataSize := PtrUInt(ImgWidth) * PtrUInt(ImgHeight) * PtrUInt(ImgDepth) * 16;
+      PixelsPtr := FloatImage.RawPixels;
+    end else
+    if AImage is TCastleImage then
+    begin
+      FloatImage := TRGBAlphaFloatImage.Create(ImgWidth, ImgHeight, ImgDepth);
+      FloatImage.Assign(TCastleImage(AImage));
+      NeedsFreeFloat := True;
+      DataSize := PtrUInt(ImgWidth) * PtrUInt(ImgHeight) * PtrUInt(ImgDepth) * 16;
+      PixelsPtr := FloatImage.RawPixels;
+    end else
+      Exit;
+  end else
+  if AImage is TGPUCompressedImage then
+  begin
+    if FDesc.Format in [pfBC1_RGBA_UNorm, pfBC1_RGBA_sRGB,
+                        pfBC3_RGBA_UNorm, pfBC3_RGBA_sRGB,
+                        pfBC5_RG_UNorm, pfBC7_RGBA_UNorm, pfBC7_RGBA_sRGB,
+                        pfASTC_4x4_UNorm, pfASTC_4x4_sRGB,
+                        pfETC2_RGB8_UNorm, pfETC2_RGBA8_UNorm] then
+    begin
+      DataSize := TGPUCompressedImage(AImage).Size;
+      PixelsPtr := TGPUCompressedImage(AImage).RawPixels;
+    end else
+    begin
+      RgbaImage := TRGBAlphaImage.Create(ImgWidth, ImgHeight, ImgDepth);
+      NeedsFreeRgba := True;
+      DataSize := PtrUInt(ImgWidth) * PtrUInt(ImgHeight) * PtrUInt(ImgDepth) * 4;
+      FillChar(RgbaImage.RawPixels^, DataSize, 0);
+      if Assigned(DecompressTexture) then
+      begin
+        try
+          DecompressedImg := TGPUCompressedImage(AImage).Decompress;
+          try
+            RgbaImage.Assign(DecompressedImg);
+          finally
+            FreeAndNil(DecompressedImg);
+          end;
+        except
+          on ECannotDecompressTexture do ;
+        end;
+      end else
+      if (TGPUCompressedImage(AImage).RawPixels <> nil) and (TGPUCompressedImage(AImage).Size > 0) then
+      begin
+        CopyBytes := Min(DataSize, PtrUInt(TGPUCompressedImage(AImage).Size));
+        Move(TGPUCompressedImage(AImage).RawPixels^, RgbaImage.RawPixels^, CopyBytes);
+      end;
+      PixelsPtr := RgbaImage.RawPixels;
+    end;
   end else
   if AImage is TRGBAlphaImage then
   begin
@@ -6050,8 +6104,8 @@ begin
     if AArrayLayer > FMaxUploadedArrayLayer then
       FMaxUploadedArrayLayer := AArrayLayer;
 
-    if (RgbaImage <> nil) and (AMipLevel = 0) and (AArrayLayer = 0) and
-       (ImgDepth = 1) and ((VulkanDevice = nil) or (VulkanDevice.Handle = nil)) then
+    if (PixelsPtr <> nil) and (AMipLevel = 0) and (AArrayLayer = 0) and
+       ((VulkanDevice = nil) or (VulkanDevice.Handle = nil)) then
     begin
       SetLength(FHostPixels, DataSize);
       if DataSize > 0 then
@@ -6136,6 +6190,8 @@ begin
   finally
     if NeedsFreeRgba then
       FreeAndNil(RgbaImage);
+    if NeedsFreeFloat then
+      FreeAndNil(FloatImage);
   end;
 end;
 

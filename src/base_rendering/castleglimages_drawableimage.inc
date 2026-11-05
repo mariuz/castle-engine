@@ -960,6 +960,8 @@ end;
 procedure TDrawableImage.RHIContextOpen(const AImage: TEncodedImage);
 var
   TexDesc: TRHITextureDesc;
+  TexFormat: TRHIPixelFormat;
+  TexUsages: TRHITextureUsageFlags;
 begin
   if (AImage <> nil) and (RHIDevice <> nil) then
   begin
@@ -970,12 +972,15 @@ begin
       FreeAndNil(FRHITexture);
     end;
 
-    TexDesc := TRHITextureDesc.Create2D(AImage.Width, AImage.Height, pfRGBA8_UNorm,
-      [tuSampled, tuColorAttachment, tuTransferSrc, tuTransferDst]);
+    TexFormat := EncodedImageToRHIPixelFormat(AImage);
+    TexUsages := [tuSampled, tuTransferSrc, tuTransferDst];
+    if not (AImage is TGPUCompressedImage) then
+      Include(TexUsages, tuColorAttachment);
+    TexDesc := TRHITextureDesc.Create2D(AImage.Width, AImage.Height, TexFormat, TexUsages);
     FRHITexture := RHIDevice.CreateTexture(TexDesc);
     FRHITexture.UploadImage(AImage);
     TextureMemoryProfiler.AllocateRHI(FRHITexture, AImage.URL,
-      AImage.ClassName, Int64(AImage.Width) * Int64(AImage.Height) * 4,
+      AImage.ClassName, EncodedImageToRHIGpuBytes(AImage, FRHITexture.Desc.Format),
       False, AImage.Width, AImage.Height, 1);
 
     UpdateRHIDescriptorSet;

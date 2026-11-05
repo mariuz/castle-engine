@@ -1127,6 +1127,15 @@ function ClampSampleCountToCapabilities(const ARequestedSamples, AMaxSupportedSa
 function CompareImagesPerceptualDiff(const ImageA, ImageB: TCastleImage;
   const MaxNormalizedRMSE: Single; out OutNormalizedRMSE: Single): Boolean;
 
+{ Maps any TEncodedImage (including floating-point images TRGBAlphaFloatImage,
+  TRGBFloatImage, TGrayscaleFloatImage, TGrayscaleAlphaFloatImage and GPU-compressed
+  images TGPUCompressedImage) to the corresponding TRHIPixelFormat. }
+function EncodedImageToRHIPixelFormat(const AImage: TEncodedImage): TRHIPixelFormat;
+
+{ Returns the GPU texture memory size in bytes for AImage uploaded with AFormat. }
+function EncodedImageToRHIGpuBytes(const AImage: TEncodedImage;
+  const AFormat: TRHIPixelFormat): Int64;
+
 implementation
 
 var
@@ -2591,6 +2600,72 @@ begin
     Result := FCompiledPasses[AOrderIndex]
   else
     Result := nil;
+end;
+
+function EncodedImageToRHIPixelFormat(const AImage: TEncodedImage): TRHIPixelFormat;
+begin
+  if AImage = nil then
+    Exit(pfRGBA8_UNorm);
+
+  if (AImage is TRGBAlphaFloatImage) or
+     (AImage is TRGBFloatImage) or
+     (AImage is TGrayscaleFloatImage) or
+     (AImage is TGrayscaleAlphaFloatImage) then
+    Exit(pfRGBA32_Float);
+
+  if AImage is TGPUCompressedImage then
+  begin
+    case TGPUCompressedImage(AImage).Compression of
+      tcDxt1_RGB, tcDxt1_RGBA:
+        Result := pfBC1_RGBA_UNorm;
+      tcDxt3, tcDxt5:
+        Result := pfBC3_RGBA_UNorm;
+      tcETC1:
+        Result := pfETC2_RGB8_UNorm;
+      tcASTC_4x4_RGBA .. tcASTC_12x12_RGBA:
+        Result := pfASTC_4x4_UNorm;
+      tcASTC_4x4_SRGB8_ALPHA8 .. tcASTC_12x12_SRGB8_ALPHA8:
+        Result := pfASTC_4x4_sRGB;
+    else
+      Result := pfRGBA8_UNorm;
+    end;
+    Exit;
+  end;
+
+  Result := pfRGBA8_UNorm;
+end;
+
+function EncodedImageToRHIGpuBytes(const AImage: TEncodedImage;
+  const AFormat: TRHIPixelFormat): Int64;
+var
+  W, H, D: Int64;
+begin
+  if AImage = nil then
+    Exit(0);
+
+  if (AImage is TGPUCompressedImage) and
+     (AFormat in [pfBC1_RGBA_UNorm, pfBC1_RGBA_sRGB,
+                  pfBC3_RGBA_UNorm, pfBC3_RGBA_sRGB,
+                  pfBC5_RG_UNorm, pfBC7_RGBA_UNorm, pfBC7_RGBA_sRGB,
+                  pfASTC_4x4_UNorm, pfASTC_4x4_sRGB,
+                  pfETC2_RGB8_UNorm, pfETC2_RGBA8_UNorm]) then
+    Exit(Int64(TGPUCompressedImage(AImage).Size));
+
+  W := Int64(AImage.Width);
+  if W < 1 then W := 1;
+  H := Int64(AImage.Height);
+  if H < 1 then H := 1;
+  D := Int64(AImage.Depth);
+  if D < 1 then D := 1;
+
+  case AFormat of
+    pfRGBA32_Float:
+      Result := W * H * D * 16;
+    pfRGBA16_Float:
+      Result := W * H * D * 8;
+  else
+    Result := W * H * D * 4;
+  end;
 end;
 
 end.

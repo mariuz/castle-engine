@@ -132,6 +132,8 @@ procedure SHVectorGLCapture(
 var
   ShapesCollector: TShapesCollector;
   ShapesRenderer: TShapesRenderer;
+  RenderToTexture: TGLRenderToTexture;
+  CubeProjectionMatrix: TMatrix4;
 
   procedure DrawMap(Side: TCubeMapSide);
   var
@@ -139,11 +141,35 @@ var
     I, SHBasis, ScreenX, ScreenY: Integer;
     RenderParams: TRenderParams;
     PassParams: TRenderOnePassParams;
+    CaptureRect: TRectangle;
   begin
-    ScreenX := CubeMapInfo[Side].ScreenX * CubeMapSize + MapScreenX;
-    ScreenY := CubeMapInfo[Side].ScreenY * CubeMapSize + MapScreenY;
-
-    RenderContext.Viewport := Rectangle(ScreenX, ScreenY, CubeMapSize, CubeMapSize);
+    if RenderToTexture <> nil then
+    begin
+      RenderToTexture.RenderBegin;
+      CaptureRect := Rectangle(0, 0, CubeMapSize, CubeMapSize);
+      if RenderContext <> nil then
+        RenderContext.Viewport := CaptureRect;
+    end else
+    begin
+      ScreenX := CubeMapInfo[Side].ScreenX * CubeMapSize + MapScreenX;
+      ScreenY := CubeMapInfo[Side].ScreenY * CubeMapSize + MapScreenY;
+      if (RHIDevice <> nil) and (RHIDevice.GetSwapchainColorTexture <> nil) and
+         ((ScreenX < 0) or (ScreenY < 0) or
+          (Cardinal(ScreenX + CubeMapSize) > RHIDevice.GetSwapchainColorTexture.Desc.Width) or
+          (Cardinal(ScreenY + CubeMapSize) > RHIDevice.GetSwapchainColorTexture.Desc.Height)) then
+      begin
+        ScreenX := 0;
+        ScreenY := 0;
+      end;
+      CaptureRect := Rectangle(ScreenX, ScreenY, CubeMapSize, CubeMapSize);
+      if RenderContext <> nil then
+        RenderContext.Viewport := CaptureRect;
+      if (RHIDevice <> nil) and (ActiveCommandList <> nil) then
+      begin
+        ActiveCommandList.SetViewport(FloatRectangle(CaptureRect));
+        ActiveCommandList.SetScissor(CaptureRect);
+      end;
+    end;
 
     RenderParams := TBasicRenderParams.Create;
     try
@@ -151,7 +177,7 @@ var
       try
         RenderParams.RenderingCamera.FromViewVectors(
           CapturePoint, CubeMapInfo[Side].Dir, CubeMapInfo[Side].Up,
-          RenderContext.ProjectionMatrix
+          CubeProjectionMatrix
         );
         RenderParams.RenderingCamera.Target := rtCubeMapEnvironment;
         RenderParams.Frustum := @RenderParams.RenderingCamera.Frustum;
@@ -164,8 +190,10 @@ var
       finally FreeAndNil(RenderParams.RenderingCamera) end;
     finally FreeAndNil(RenderParams) end;
 
-    Map := SaveScreen_noflush(TGrayscaleImage,
-      Rectangle(ScreenX, ScreenY, CubeMapSize, CubeMapSize), cbBack) as TGrayscaleImage;
+    if (RenderToTexture <> nil) and (RHIDevice <> nil) then
+      Map := RenderToTexture.SaveScreen(TGrayscaleImage, CaptureRect) as TGrayscaleImage
+    else
+      Map := SaveScreen_noflush(TGrayscaleImage, CaptureRect, cbBack) as TGrayscaleImage;
     try
       { Use the Map to calculate SHVector[SHBasis] (this is the actual
         purpose of drawing the Render). SHVector[SHBasis] is just a dot product
@@ -178,6 +206,9 @@ var
             ScaleColor *
             SHBasisMap[SHBasis, Side, I]);
     finally FreeAndNil(Map) end;
+
+    if RenderToTexture <> nil then
+      RenderToTexture.RenderEnd(Side < High(Side));
   end;
 
 var
@@ -189,35 +220,50 @@ begin
 
   ShapesCollector := TShapesCollector.Create(true);
   ShapesRenderer := TShapesRenderer.Create;
+  RenderToTexture := nil;
+  try
+    if (RHIDevice <> nil) and (RHIDevice.GetSwapchainColorTexture = nil) then
+    begin
+      RenderToTexture := TGLRenderToTexture.Create(CubeMapSize, CubeMapSize);
+      RenderToTexture.Buffer := tbNone;
+      RenderToTexture.GLContextOpen;
+    end;
 
-  { Call all DrawMap. This wil draw maps, get them,
-    and calculate SHVector describing them. }
+    { Call all DrawMap. This wil draw maps, get them,
+      and calculate SHVector describing them. }
 
-  for SHBasis := 0 to High(SHVector) do
-    SHVector[SHBasis] := 0;
+    for SHBasis := 0 to High(SHVector) do
+      SHVector[SHBasis] := 0;
 
-  SavedProjectionMatrix := RenderContext.ProjectionMatrix;
-  PerspectiveProjection(90, 1, 0.01, 100);
+    CubeProjectionMatrix := PerspectiveProjectionMatrixDeg(90, 1, 0.01, 100);
+    if RenderContext <> nil then
+    begin
+      SavedProjectionMatrix := RenderContext.ProjectionMatrix;
+      RenderContext.ProjectionMatrix := CubeProjectionMatrix;
+    end;
 
-  for Side := Low(TCubeMapSide) to High(TCubeMapSide) do
-    DrawMap(Side);
+    for Side := Low(TCubeMapSide) to High(TCubeMapSide) do
+      DrawMap(Side);
 
-  RenderContext.ProjectionMatrix := SavedProjectionMatrix;
+    if RenderContext <> nil then
+      RenderContext.ProjectionMatrix := SavedProjectionMatrix;
 
-  for SHBasis := 0 to High(SHVector) do
-  begin
-    { Each SHVector[SHBasis] is now calculated for all sphere points.
-      We want this to be integral over a sphere, so normalize now.
+    for SHBasis := 0 to High(SHVector) do
+    begin
+      { Each SHVector[SHBasis] is now calculated for all sphere points.
+        We want this to be integral over a sphere, so normalize now.
 
-      Since SHBasisMap contains result of SH function * solid angle of pixel
-      (on cube map, pixels have different solid angles),
-      so below we divide by 4*Pi (sphere area, sum of solid angles for every
-      pixel). }
-    SHVector[SHBasis] := SHVector[SHBasis] / (4 * Pi);
+        Since SHBasisMap contains result of SH function * solid angle of pixel
+        (on cube map, pixels have different solid angles),
+        so below we divide by 4*Pi (sphere area, sum of solid angles for every
+        pixel). }
+      SHVector[SHBasis] := SHVector[SHBasis] / (4 * Pi);
+    end;
+  finally
+    FreeAndNil(RenderToTexture);
+    FreeAndNil(ShapesCollector);
+    FreeAndNil(ShapesRenderer);
   end;
-
-  FreeAndNil(ShapesCollector);
-  FreeAndNil(ShapesRenderer);
 end;
 
 procedure SetRenderingCamera(const RenderingCamera: TRenderingCamera;

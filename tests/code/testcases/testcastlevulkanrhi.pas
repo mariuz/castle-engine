@@ -37,6 +37,7 @@ uses
   CastleShapeInternalShadowVolumes, CastleShapeInternalRenderShadowVolumes,
   CastleInternalBatchShapes, CastleInternalShapesRenderer,
   CastleInternalCompositeImage, CastleFilesUtils, CastleUriUtils,
+  CastleInternalGLCubeMaps, CastleInternalSphericalHarmonics,
   ToolManifest, CastleInternalRenderDoc;
 
 type
@@ -359,6 +360,9 @@ type
     procedure TestRenderControlToImageAndOffscreenClearAttachmentsRHI;
     procedure TestGLTextureScaleDownscalingAndComposedCubeMapResizeRHI;
     procedure TestSkinNodeGpuTextureJointResourceAndAutoUploadRHI;
+    procedure TestFloatAndGPUCompressedTextureUploadRHI;
+    procedure TestRenderedGeneratedCubeAndShadowMapMemoryProfilerRHI;
+    procedure TestSHVectorGLCaptureOffscreenRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -366,6 +370,7 @@ type
     FShadowVolumeOnePassCalls: Cardinal;
     FShadowVolumeCasterCalls: Cardinal;
     FRenderGraphPassExecCount: Cardinal;
+    FSHCaptureRenderCalls: Cardinal;
     procedure CaptureWarning(const Category, S: String);
     procedure DummyRenderShapeCallback(const Shape: TCollectedShape;
       const Params: TRenderParams; const PassParams: TRenderOnePassParams);
@@ -375,6 +380,7 @@ type
     procedure DummyShadowVolumeCasterCallback(const Params: TRenderParams);
     procedure DummyRenderGraphPassCallback(const AGraph: TRHIRenderGraph;
       const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+    procedure DummySHCaptureRenderCallback(const RenderParams: TRenderParams);
   end;
 
 implementation
@@ -23418,6 +23424,308 @@ begin
   finally
     FreeAndNil(Container);
     TextureMemoryProfiler.Enabled := SavedProfilerEnabled;
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    FreeAndNil(TestCtx);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.DummySHCaptureRenderCallback(
+  const RenderParams: TRenderParams);
+begin
+  Inc(FSHCaptureRenderCalls);
+  if RenderContext <> nil then
+    RenderContext.Clear([cbColor], Vector4(1.0, 1.0, 1.0, 1.0));
+end;
+
+procedure TTestCastleVulkanRHI.TestFloatAndGPUCompressedTextureUploadRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedProfilerEnabled: Boolean;
+  BaseMemory: Int64;
+  RgbFloatImg: TRGBFloatImage;
+  GrayFloatImg: TGrayscaleFloatImage;
+  GrayAlphaFloatImg: TGrayscaleAlphaFloatImage;
+  RgbaFloatImg: TRGBAlphaFloatImage;
+  Dxt1Img, Dxt5Img, AstcImg, EtcImg: TGPUCompressedImage;
+  ImgNode: TPixelTextureNode;
+  CompTexNode: TImageTextureNode;
+  TexRes: TImageTextureResource;
+  RenderOpts: TCastleRenderOptions;
+  DrawImg: TDrawableImage;
+  FloatPtr: PVector4;
+begin
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedProfilerEnabled := TextureMemoryProfiler.Enabled;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9801)));
+  RenderOpts := TCastleRenderOptions.Create(nil);
+  RgbFloatImg := TRGBFloatImage.Create(4, 4);
+  GrayFloatImg := TGrayscaleFloatImage.Create(4, 4);
+  GrayAlphaFloatImg := TGrayscaleAlphaFloatImage.Create(4, 4);
+  RgbaFloatImg := TRGBAlphaFloatImage.Create(4, 4);
+  Dxt1Img := TGPUCompressedImage.Create(8, 8, 1, tcDxt1_RGB);
+  Dxt5Img := TGPUCompressedImage.Create(8, 8, 1, tcDxt5);
+  AstcImg := TGPUCompressedImage.Create(8, 8, 1, tcASTC_4x4_RGBA);
+  EtcImg := TGPUCompressedImage.Create(8, 8, 1, tcETC1);
+  ImgNode := TPixelTextureNode.Create;
+  CompTexNode := TImageTextureNode.Create;
+  DrawImg := nil;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+    TextureMemoryProfiler.Enabled := True;
+    BaseMemory := TextureMemoryProfiler.TotalAllocatedBytes;
+
+    { 1. Verify EncodedImageToRHIPixelFormat and EncodedImageToRHIGpuBytes }
+    AssertEquals('TRGBFloatImage format must be pfRGBA32_Float',
+      Ord(pfRGBA32_Float), Ord(EncodedImageToRHIPixelFormat(RgbFloatImg)));
+    AssertEquals('TGrayscaleFloatImage format must be pfRGBA32_Float',
+      Ord(pfRGBA32_Float), Ord(EncodedImageToRHIPixelFormat(GrayFloatImg)));
+    AssertEquals('TGrayscaleAlphaFloatImage format must be pfRGBA32_Float',
+      Ord(pfRGBA32_Float), Ord(EncodedImageToRHIPixelFormat(GrayAlphaFloatImg)));
+    AssertEquals('TRGBAlphaFloatImage format must be pfRGBA32_Float',
+      Ord(pfRGBA32_Float), Ord(EncodedImageToRHIPixelFormat(RgbaFloatImg)));
+    AssertEquals('tcDxt1_RGB format must be pfBC1_RGBA_UNorm',
+      Ord(pfBC1_RGBA_UNorm), Ord(EncodedImageToRHIPixelFormat(Dxt1Img)));
+    AssertEquals('tcDxt5 format must be pfBC3_RGBA_UNorm',
+      Ord(pfBC3_RGBA_UNorm), Ord(EncodedImageToRHIPixelFormat(Dxt5Img)));
+    AssertEquals('tcASTC_4x4_RGBA format must be pfASTC_4x4_UNorm',
+      Ord(pfASTC_4x4_UNorm), Ord(EncodedImageToRHIPixelFormat(AstcImg)));
+    AssertEquals('tcETC1 format must be pfETC2_RGB8_UNorm',
+      Ord(pfETC2_RGB8_UNorm), Ord(EncodedImageToRHIPixelFormat(EtcImg)));
+
+    AssertEquals('4x4 pfRGBA32_Float GPU bytes must be 256',
+      256, EncodedImageToRHIGpuBytes(RgbFloatImg, pfRGBA32_Float));
+    AssertEquals('8x8 DXT1 GPU bytes must equal Dxt1Img.Size (32)',
+      Int64(Dxt1Img.Size), EncodedImageToRHIGpuBytes(Dxt1Img, pfBC1_RGBA_UNorm));
+    AssertEquals('8x8 DXT5 GPU bytes must equal Dxt5Img.Size (64)',
+      Int64(Dxt5Img.Size), EncodedImageToRHIGpuBytes(Dxt5Img, pfBC3_RGBA_UNorm));
+
+    { 2. Verify TImageTextureResource with TRGBFloatImage converts to 16-byte/pixel float RHI texture }
+    RgbFloatImg.PixelPtr(0, 0)^ := Vector3(2.5, 4.0, 8.0);
+    ImgNode.FdImage.Value := RgbFloatImg.MakeCopy;
+    ImgNode.RepeatS := False;
+    ImgNode.RepeatT := False;
+    TTextureResources.Prepare(RenderOpts, ImgNode);
+    TexRes := TTextureResources.Get(ImgNode) as TImageTextureResource;
+    AssertTrue('TImageTextureResource for TRGBFloatImage must create RHITexture',
+      (TexRes <> nil) and (TexRes.RHITexture <> nil));
+    AssertEquals('TImageTextureResource format for TRGBFloatImage must be pfRGBA32_Float',
+      Ord(pfRGBA32_Float), Ord(TexRes.RHITexture.Desc.Format));
+    AssertEquals('RHIJointFloatSize for 4x4 TRGBFloatImage must be 256 bytes',
+      256, Integer(TexRes.RHIJointFloatSize));
+    FloatPtr := PVector4(TexRes.RHIJointFloatData);
+    AssertTrue('RHIJointFloatData must be non-nil for TRGBFloatImage', FloatPtr <> nil);
+    AssertSameValue(2.5, FloatPtr^.X, 0.001);
+    AssertSameValue(4.0, FloatPtr^.Y, 0.001);
+    AssertSameValue(8.0, FloatPtr^.Z, 0.001);
+    AssertSameValue(1.0, FloatPtr^.W, 0.001);
+    TTextureResources.Unprepare(ImgNode);
+    AssertEquals('Memory profiler must return to BaseMemory after unpreparing TRGBFloatImage',
+      BaseMemory, TextureMemoryProfiler.TotalAllocatedBytes);
+
+    { 3. Verify TImageTextureResource with TGPUCompressedImage (tcDxt5) }
+    FillChar(Dxt5Img.RawPixels^, Dxt5Img.Size, $AB);
+    CompTexNode.LoadFromImage(Dxt5Img, False, 'generated:/dxt5.dds');
+    TTextureResources.Prepare(RenderOpts, CompTexNode);
+    TexRes := TTextureResources.Get(CompTexNode) as TImageTextureResource;
+    AssertTrue('TImageTextureResource for TGPUCompressedImage must create RHITexture',
+      (TexRes <> nil) and (TexRes.RHITexture <> nil));
+    AssertEquals('TGPUCompressedImage without composite mipmaps must use MipLevels = 1',
+      1, Integer(TexRes.RHITexture.Desc.MipLevels));
+    AssertEquals('TGPUCompressedImage upload must increment TotalSubresourceUploads',
+      1, Integer(TVulkanRHITexture(TexRes.RHITexture).TotalSubresourceUploads));
+    TTextureResources.Unprepare(CompTexNode);
+    AssertEquals('Memory profiler must return to BaseMemory after unpreparing TGPUCompressedImage',
+      BaseMemory, TextureMemoryProfiler.TotalAllocatedBytes);
+
+    { 4. Verify TDrawableImage with TGPUCompressedImage and TGrayscaleFloatImage }
+    DrawImg := TDrawableImage.Create(Dxt1Img, True, False);
+    AssertTrue('TDrawableImage with DXT1 must create RHITexture', DrawImg.RHITexture <> nil);
+    AssertEquals('TDrawableImage DXT1 upload count must be 1',
+      1, Integer(TVulkanRHITexture(DrawImg.RHITexture).TotalSubresourceUploads));
+    FreeAndNil(DrawImg);
+
+    DrawImg := TDrawableImage.Create(GrayFloatImg, True, False);
+    AssertTrue('TDrawableImage with TGrayscaleFloatImage must create RHITexture', DrawImg.RHITexture <> nil);
+    AssertEquals('TDrawableImage with TGrayscaleFloatImage must use pfRGBA32_Float',
+      Ord(pfRGBA32_Float), Ord(DrawImg.RHITexture.Desc.Format));
+    FreeAndNil(DrawImg);
+    AssertEquals('Memory profiler must return to BaseMemory after freeing TDrawableImages',
+      BaseMemory, TextureMemoryProfiler.TotalAllocatedBytes);
+  finally
+    FreeAndNil(DrawImg);
+    FreeAndNil(CompTexNode);
+    FreeAndNil(ImgNode);
+    FreeAndNil(EtcImg);
+    FreeAndNil(AstcImg);
+    FreeAndNil(Dxt5Img);
+    FreeAndNil(Dxt1Img);
+    FreeAndNil(RgbaFloatImg);
+    FreeAndNil(GrayAlphaFloatImg);
+    FreeAndNil(GrayFloatImg);
+    FreeAndNil(RgbFloatImg);
+    FreeAndNil(RenderOpts);
+    TextureMemoryProfiler.Enabled := SavedProfilerEnabled;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRenderedGeneratedCubeAndShadowMapMemoryProfilerRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedProfilerEnabled: Boolean;
+  SavedScale: Cardinal;
+  BaseMemory: Int64;
+  RenderOpts: TCastleRenderOptions;
+  RenderedNode: TRenderedTextureNode;
+  GenCubeNode: TGeneratedCubeMapTextureNode;
+  GenCubeRes: TGeneratedCubeMapTextureResource;
+  ShadowNode: TGeneratedShadowMapNode;
+  Tex3DNode: TComposedTexture3DNode;
+  Slice0, Slice1: TPixelTextureNode;
+begin
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedProfilerEnabled := TextureMemoryProfiler.Enabled;
+  SavedScale := GLTextureScale;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9802)));
+  RenderOpts := TCastleRenderOptions.Create(nil);
+  RenderedNode := TRenderedTextureNode.Create;
+  GenCubeNode := TGeneratedCubeMapTextureNode.Create;
+  ShadowNode := TGeneratedShadowMapNode.Create;
+  Tex3DNode := TComposedTexture3DNode.Create;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+    TextureMemoryProfiler.Enabled := True;
+    GLTextureScale := 1;
+    BaseMemory := TextureMemoryProfiler.TotalAllocatedBytes;
+
+    { 1. TRenderedTextureResource memory profiler balance }
+    RenderedNode.SetDimensions([32, 16, 4, 1, 1]);
+    RenderedNode.RepeatS := False;
+    RenderedNode.RepeatT := False;
+    TTextureResources.Prepare(RenderOpts, RenderedNode);
+    AssertTrue('TRenderedTextureResource must increase TextureMemoryProfiler summary',
+      TextureMemoryProfiler.TotalAllocatedBytes >= BaseMemory + 32 * 16 * 4);
+    TTextureResources.Unprepare(RenderedNode);
+    AssertEquals('TRenderedTextureResource unprepare must restore BaseMemory',
+      BaseMemory, TextureMemoryProfiler.TotalAllocatedBytes);
+
+    { 2. TGeneratedCubeMapTextureResource memory profiler balance + GLTextureScale downscaling }
+    GLTextureScale := 2;
+    GenCubeNode.Size := 64;
+    TTextureResources.Prepare(RenderOpts, GenCubeNode);
+    GenCubeRes := TTextureResources.Get(GenCubeNode) as TGeneratedCubeMapTextureResource;
+    AssertTrue('TGeneratedCubeMapTextureResource must be prepared',
+      (GenCubeRes <> nil) and (GenCubeRes.RHITexture <> nil));
+    AssertEquals('TGeneratedCubeMapTextureResource Size must downscale from 64 to 32 when GLTextureScale = 2',
+      32, Integer(GenCubeRes.RHITexture.Desc.Width));
+    AssertTrue('TGeneratedCubeMapTextureResource must increase TextureMemoryProfiler summary',
+      TextureMemoryProfiler.TotalAllocatedBytes >= BaseMemory + 32 * 32 * 4 * 6);
+    TTextureResources.Unprepare(GenCubeNode);
+    AssertEquals('TGeneratedCubeMapTextureResource unprepare must restore BaseMemory',
+      BaseMemory, TextureMemoryProfiler.TotalAllocatedBytes);
+    GLTextureScale := 1;
+
+    { 3. TGeneratedShadowMapResource memory profiler balance (depth and VSM) }
+    ShadowNode.Size := 64;
+    RenderOpts.ShadowSampling := ssSimple;
+    TTextureResources.Prepare(RenderOpts, ShadowNode);
+    AssertEquals('TGeneratedShadowMapResource (depth) must allocate 64*64*4 bytes in TextureMemoryProfiler',
+      BaseMemory + 64 * 64 * 4, TextureMemoryProfiler.TotalAllocatedBytes);
+    TTextureResources.Unprepare(ShadowNode);
+    AssertEquals('TGeneratedShadowMapResource (depth) unprepare must restore BaseMemory',
+      BaseMemory, TextureMemoryProfiler.TotalAllocatedBytes);
+
+    RenderOpts.ShadowSampling := ssVarianceShadowMaps;
+    TTextureResources.Prepare(RenderOpts, ShadowNode);
+    AssertTrue('TGeneratedShadowMapResource (VSM float) must allocate >= 64*64*16 bytes in TextureMemoryProfiler',
+      TextureMemoryProfiler.TotalAllocatedBytes >= BaseMemory + 64 * 64 * 16);
+    TTextureResources.Unprepare(ShadowNode);
+    AssertEquals('TGeneratedShadowMapResource (VSM float) unprepare must restore BaseMemory',
+      BaseMemory, TextureMemoryProfiler.TotalAllocatedBytes);
+
+    { 4. T3DTextureResource with TRGBFloatImage slices (pfRGBA32_Float) }
+    Slice0 := TPixelTextureNode.Create;
+    Slice0.FdImage.Value := TRGBFloatImage.Create(4, 4);
+    Slice1 := TPixelTextureNode.Create;
+    Slice1.FdImage.Value := TRGBFloatImage.Create(4, 4);
+    Tex3DNode.SetTexture([Slice0, Slice1]);
+    TTextureResources.Prepare(RenderOpts, Tex3DNode);
+    AssertTrue('T3DTextureResource with TRGBFloatImage must allocate >= 4*4*2*16 bytes in TextureMemoryProfiler',
+      TextureMemoryProfiler.TotalAllocatedBytes >= BaseMemory + 4 * 4 * 2 * 16);
+    TTextureResources.Unprepare(Tex3DNode);
+    AssertEquals('T3DTextureResource unprepare must restore BaseMemory',
+      BaseMemory, TextureMemoryProfiler.TotalAllocatedBytes);
+  finally
+    GLTextureScale := SavedScale;
+    FreeAndNil(Tex3DNode);
+    FreeAndNil(ShadowNode);
+    FreeAndNil(GenCubeNode);
+    FreeAndNil(RenderedNode);
+    FreeAndNil(RenderOpts);
+    TextureMemoryProfiler.Enabled := SavedProfilerEnabled;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSHVectorGLCaptureOffscreenRHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  SHVector: array[0..8] of Single;
+begin
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9803)));
+  TestCtx := TRenderContext.Create(nil);
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+    RenderContext := TestCtx;
+    Cmd := Device.BeginFrame;
+    SetActiveCommandList(Cmd);
+    try
+      FSHCaptureRenderCalls := 0;
+      SHVectorGLCapture(
+        SHVector,
+        Vector3(0, 0, 0),
+        {$ifdef FPC}@{$endif}DummySHCaptureRenderCallback,
+        0, 0, 1.0);
+
+      AssertEquals('SHVectorGLCapture must invoke Render callback 6 times (once per cube face)',
+        6, Integer(FSHCaptureRenderCalls));
+      { For a uniform unit white environment (intensity = 1.0), Y_0^0 = 1/(2*sqrt(Pi)) ~ 0.282095 }
+      AssertTrue('SHVector[0] (L=0, M=0 isotropic basis) must be positive (~0.282) for white environment',
+        SHVector[0] > 0.25);
+      { Higher-order dipole components (L=1) must cancel out to ~0 by symmetry }
+      AssertSameValue(0.0, SHVector[1], 0.01);
+      AssertSameValue(0.0, SHVector[2], 0.01);
+      AssertSameValue(0.0, SHVector[3], 0.01);
+    finally
+      Device.EndFrameAndPresent;
+    end;
+  finally
     SetActiveCommandList(SavedCmd);
     RenderContext := SavedCtx;
     FreeAndNil(TestCtx);
