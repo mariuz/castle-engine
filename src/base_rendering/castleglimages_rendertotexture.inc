@@ -62,6 +62,8 @@
     FRHIRenderPassCount: Cardinal;
     FRHIArrayLayer: Cardinal;
     FRHIMipLevel: Cardinal;
+    FRHISuspendedOuterPass: Boolean;
+    FRHISuspendedRenderingInfo: TRHIRenderingInfo;
   public
     { Constructor. Doesn't require OpenGL context,
       and doesn't initialize the framebuffer.
@@ -808,6 +810,7 @@ procedure TGLRenderToTexture.RenderBegin;
 var
   RenderAreaRect: TRectangle;
   RenderingInfo: TRHIRenderingInfo;
+  I: Integer;
 begin
   Inc(FOffscreenRendering);
 
@@ -818,6 +821,19 @@ begin
     FramebufferBound := True;
     if (ActiveCommandList <> nil) and (not FRHIRenderingActive) then
     begin
+      if ActiveCommandList.IsRendering then
+      begin
+        FRHISuspendedOuterPass := True;
+        FRHISuspendedRenderingInfo := ActiveCommandList.ActiveRenderingInfo;
+        FRHISuspendedRenderingInfo.ColorAttachments := Copy(ActiveCommandList.ActiveRenderingInfo.ColorAttachments);
+        for I := 0 to High(FRHISuspendedRenderingInfo.ColorAttachments) do
+          FRHISuspendedRenderingInfo.ColorAttachments[I].LoadOp := loLoad;
+        if FRHISuspendedRenderingInfo.HasDepthAttachment then
+          FRHISuspendedRenderingInfo.DepthAttachment.LoadOp := loLoad;
+        ActiveCommandList.EndRendering;
+      end else
+        FRHISuspendedOuterPass := False;
+
       RenderAreaRect := Rectangle(0, 0, Width, Height);
       if Buffer = tbDepth then
       begin
@@ -950,6 +966,13 @@ begin
           ActiveCommandList.TransitionTexture(FRHIColorTexture, rsShaderRead);
         if (Buffer in [tbDepth, tbColorAndDepth]) and (FRHIDepthTexture <> nil) then
           ActiveCommandList.TransitionTexture(FRHIDepthTexture, rsShaderRead);
+        if FRHISuspendedOuterPass then
+        begin
+          FRHISuspendedOuterPass := False;
+          ActiveCommandList.BeginRendering(FRHISuspendedRenderingInfo);
+          ActiveCommandList.SetViewport(FloatRectangle(FRHISuspendedRenderingInfo.RenderArea), 0.0, 1.0);
+          ActiveCommandList.SetScissor(FRHISuspendedRenderingInfo.RenderArea);
+        end;
       end;
       FramebufferBound := False;
     end;

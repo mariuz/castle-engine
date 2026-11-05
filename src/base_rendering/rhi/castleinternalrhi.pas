@@ -702,6 +702,7 @@ type
   protected
     FLevel: TRHICommandListLevel;
     FIsRendering: Boolean;
+    FActiveRenderingInfo: TRHIRenderingInfo;
     FActiveRenderingHasColor: Boolean;
     FActiveRenderingColorFormat: TRHIPixelFormat;
     FActiveRenderingHasDepth: Boolean;
@@ -711,6 +712,7 @@ type
     constructor Create(const ALevel: TRHICommandListLevel = cllPrimary);
     property Level: TRHICommandListLevel read FLevel;
     property IsRendering: Boolean read FIsRendering;
+    property ActiveRenderingInfo: TRHIRenderingInfo read FActiveRenderingInfo;
     property ActiveRenderingHasColor: Boolean read FActiveRenderingHasColor;
     property ActiveRenderingColorFormat: TRHIPixelFormat read FActiveRenderingColorFormat;
     property ActiveRenderingHasDepth: Boolean read FActiveRenderingHasDepth;

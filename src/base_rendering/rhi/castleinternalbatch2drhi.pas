@@ -68,6 +68,7 @@ type
     FBasePipeDescs: array[TCastle2DBlendMode] of TRHIGraphicsPipelineDesc;
     FPipelines: array[TCastle2DBlendMode] of TRHIPipeline;
     FLastPipeline: TRHIPipeline;
+    FSamplers: array[Boolean, Boolean, Boolean] of TRHISampler;
     FLinearSampler: TRHISampler;
     FNearestSampler: TRHISampler;
     FWhitePixelTexture: TRHITexture;
@@ -137,8 +138,12 @@ type
 
     property Device: TRHIDevice read FDevice;
     property In2DPass: Boolean read FIn2DPass;
+    property ViewportWidth: Single read FViewportWidth write FViewportWidth;
+    property ViewportHeight: Single read FViewportHeight write FViewportHeight;
     property LinearSampler: TRHISampler read FLinearSampler;
     property NearestSampler: TRHISampler read FNearestSampler;
+    function GetSampler(const ASmoothScaling: Boolean;
+      const ARepeatS: Boolean = False; const ARepeatT: Boolean = False): TRHISampler;
     property TextureSetLayout: TRHIDescriptorSetLayout read FTextureSetLayout;
     property WhitePixelTexture: TRHITexture read FWhitePixelTexture;
     property FrameQuadCount: Cardinal read FFrameQuadCount;
@@ -224,24 +229,41 @@ end;
 constructor TCastleBatch2DRenderer.Create(const ADevice: TRHIDevice);
 var
   SamplerDesc: TRHISamplerDesc;
+  Smooth, RepS, RepT: Boolean;
 begin
   inherited Create;
   FDevice := ADevice;
 
-  FillChar(SamplerDesc, SizeOf(SamplerDesc), 0);
-  SamplerDesc.MinFilter := sfLinear;
-  SamplerDesc.MagFilter := sfLinear;
-  SamplerDesc.MipFilter := sfLinear;
-  SamplerDesc.AddressModeU := amClampToEdge;
-  SamplerDesc.AddressModeV := amClampToEdge;
-  SamplerDesc.AddressModeW := amClampToEdge;
-  SamplerDesc.MaxLod := 1000.0;
-  FLinearSampler := FDevice.CreateSampler(SamplerDesc);
-
-  SamplerDesc.MinFilter := sfNearest;
-  SamplerDesc.MagFilter := sfNearest;
-  SamplerDesc.MipFilter := sfNearest;
-  FNearestSampler := FDevice.CreateSampler(SamplerDesc);
+  for Smooth := Low(Boolean) to High(Boolean) do
+    for RepS := Low(Boolean) to High(Boolean) do
+      for RepT := Low(Boolean) to High(Boolean) do
+      begin
+        FillChar(SamplerDesc, SizeOf(SamplerDesc), 0);
+        if Smooth then
+        begin
+          SamplerDesc.MinFilter := sfLinear;
+          SamplerDesc.MagFilter := sfLinear;
+          SamplerDesc.MipFilter := sfLinear;
+        end else
+        begin
+          SamplerDesc.MinFilter := sfNearest;
+          SamplerDesc.MagFilter := sfNearest;
+          SamplerDesc.MipFilter := sfNearest;
+        end;
+        if RepS then
+          SamplerDesc.AddressModeU := amRepeat
+        else
+          SamplerDesc.AddressModeU := amClampToEdge;
+        if RepT then
+          SamplerDesc.AddressModeV := amRepeat
+        else
+          SamplerDesc.AddressModeV := amClampToEdge;
+        SamplerDesc.AddressModeW := amClampToEdge;
+        SamplerDesc.MaxLod := 1000.0;
+        FSamplers[Smooth, RepS, RepT] := FDevice.CreateSampler(SamplerDesc);
+      end;
+  FLinearSampler := FSamplers[True, False, False];
+  FNearestSampler := FSamplers[False, False, False];
 
   CreateFallbackWhiteTexture;
   CreateShadersAndPipelines;
@@ -252,6 +274,7 @@ end;
 destructor TCastleBatch2DRenderer.Destroy;
 var
   I: Integer;
+  Smooth, RepS, RepT: Boolean;
 begin
   for I := 0 to MaxFramesInFlight - 1 do
     FreeAndNil(FFrameVBOs[I]);
@@ -260,13 +283,22 @@ begin
   FreeAndNil(FVertShader);
   FreeAndNil(FFragShader);
   FreeAndNil(FWhitePixelTexture);
-  FreeAndNil(FLinearSampler);
-  FreeAndNil(FNearestSampler);
+  FLinearSampler := nil;
+  FNearestSampler := nil;
+  for Smooth := Low(Boolean) to High(Boolean) do
+    for RepS := Low(Boolean) to High(Boolean) do
+      for RepT := Low(Boolean) to High(Boolean) do
+        FreeAndNil(FSamplers[Smooth, RepS, RepT]);
   if FActiveBatch2DRenderer = Self then
     FActiveBatch2DRenderer := nil;
   if GAutoBatch2DRenderer = Self then
     GAutoBatch2DRenderer := nil;
   inherited;
+end;
+
+function TCastleBatch2DRenderer.GetSampler(const ASmoothScaling, ARepeatS, ARepeatT: Boolean): TRHISampler;
+begin
+  Result := FSamplers[ASmoothScaling, ARepeatS, ARepeatT];
 end;
 
 procedure TCastleBatch2DRenderer.CreateFallbackWhiteTexture;
@@ -484,12 +516,29 @@ begin
 
   ActiveVBO := FFrameVBOs[FDevice.FrameIndex];
 
-  { 1. Bind PSO & Scissor (apply RenderContext stencil / color mask when active, e.g. TCastleMask) }
-  if (RenderContext <> nil) and
-     (RenderContext.StencilTest or (RenderContext.ColorChannels <> AllColorChannels)) then
+  { 1. Bind PSO & Scissor (apply active rendering attachment formats and RenderContext stencil / color mask) }
+  if FCurrentCmd.IsRendering or
+     ((RenderContext <> nil) and
+      (RenderContext.StencilTest or (RenderContext.ColorChannels <> AllColorChannels))) then
   begin
     PipeDesc := FBasePipeDescs[FCurrentBlendMode];
-    RenderContext.ApplyRHIStencilAndColorMask(PipeDesc.DepthStencil, PipeDesc.BlendState);
+    if FCurrentCmd.IsRendering then
+    begin
+      if FCurrentCmd.ActiveRenderingHasColor then
+      begin
+        SetLength(PipeDesc.ColorAttachmentFormats, 1);
+        PipeDesc.ColorAttachmentFormats[0] := FCurrentCmd.ActiveRenderingColorFormat;
+      end else
+        SetLength(PipeDesc.ColorAttachmentFormats, 0);
+      if FCurrentCmd.ActiveRenderingHasDepth then
+        PipeDesc.DepthAttachmentFormat := FCurrentCmd.ActiveRenderingDepthFormat
+      else
+        PipeDesc.DepthAttachmentFormat := pfUndefined;
+      PipeDesc.SampleCount := Max(Cardinal(1), FCurrentCmd.ActiveRenderingSampleCount);
+    end;
+    if (RenderContext <> nil) and
+       (RenderContext.StencilTest or (RenderContext.ColorChannels <> AllColorChannels)) then
+      RenderContext.ApplyRHIStencilAndColorMask(PipeDesc.DepthStencil, PipeDesc.BlendState);
     FLastPipeline := FDevice.GetOrCreatePipeline(PipeDesc);
   end else
     FLastPipeline := FPipelines[FCurrentBlendMode];
@@ -579,6 +628,7 @@ begin
 
   { Flush current batch if state changes or batch limit is reached }
   if (FCurrentTexture <> ATexture) or
+     (FCurrentDescriptorSet <> ADescriptorSet) or
      (FCurrentBlendMode <> BlendMode) or
      (FCurrentSmoothScaling <> SmoothScaling) or
      (not FCurrentScissor.Equals(ScissorRect)) or

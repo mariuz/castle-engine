@@ -343,6 +343,9 @@ type
     procedure TestRenderedAndGeneratedCubeMapInitialImageAndMovieTextureMipmapsRHI;
     procedure TestActiveRenderingAttachmentFormatsAndSampleCountPipelineRHI;
     procedure TestMeshRendererGeometryShaderPushConstantsAndAnimatedMovieTextureFrameRHI;
+    procedure TestDrawableImageRenderToImageAndDrawFromRHI;
+    procedure TestDrawableImageRepeatWrapSamplersAndBatch2DOffscreenFormatsRHI;
+    procedure TestDrawPrimitive2DLineWidthPointSizeAndActiveRenderingFormatsRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -21710,7 +21713,8 @@ begin
     Frame1 := TRGBAlphaImage.Create(4, 4);
     Frame1.Clear(Vector4Byte(0, 0, 255, 255));
     Vid := TVideo.Create;
-    Vid.LoadFromImageArray([Frame0, Frame1], True, 1.0); // 1 fps -> 2s duration, Frame 0 at t=0.0, Frame 1 at t=1.2
+    Vid.LoadFromImageArray([Frame0, Frame1], True, 1.0); // 1 fps -> 2s duration, Frame 0 at t=0.0, Frame 1 at t=1.0
+    Vid.TimeLoop := True;
     MovieNode.LoadFromVideo(Vid, True);
 
     AppMovie.Material := MatMovie;
@@ -21722,6 +21726,7 @@ begin
     SceneMovie.AnimateOnlyWhenVisible := False;
     SceneMovie.ProcessEvents := True;
     SceneMovie.Load(RootMovie, True);
+    SceneMovie.ResetTime(0.0);
 
     RendererShapeMovie := TX3DRendererShape(SceneMovie.Shapes.TraverseList(True, True)[0]);
     RendererShapeMovie.PrepareRHIBuffers(SceneMovie.RenderOptions, 1);
@@ -21737,8 +21742,8 @@ begin
     UpdateCount0 := MatDescSet.UpdateCount;
     BindlessEntry0 := Device.BindlessTextureManager.GetMaterialEntry(RendererShapeMovie.RHIBindlessMaterialIndex);
 
-    { Advance scene time by 1.2s so MovieNode advances to Frame 1 }
-    SceneMovie.IncreaseTime(1.2);
+    { Advance scene time by 1.0s so MovieNode advances to Frame 1 }
+    SceneMovie.IncreaseTime(1.0);
     RendererShapeMovie.UploadRHIMaterialToCache(ShadingModel);
 
     BoundTexFrame1 := MovieRes.RHITexture;
@@ -21755,6 +21760,323 @@ begin
     FreeAndNil(SceneMovie);
     FreeAndNil(SceneGeom);
     FreeAndNil(Cmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestDrawableImageRenderToImageAndDrawFromRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCmd: TRHICommandList;
+  SavedCtx, TestCtx: TRenderContext;
+  Cmd: TVulkanRHICommandList;
+  Batcher: TCastleBatch2DRenderer;
+  SwapColor, SwapDepth: TRHITexture;
+  OuterPass: TRHIRenderingInfo;
+  SourceImgData, TargetImgData: TRGBAlphaImage;
+  SourceDrawable, TargetDrawable: TDrawableImage;
+  ReadbackImg: TCastleImage;
+  OffscreenPipe: TVulkanRHIPipeline;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9301)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Cmd := TVulkanRHICommandList.Create(Device, 0);
+  SetActiveCommandList(Cmd);
+  Batcher := EnsureBatch2DRenderer(Device);
+  SwapColor := nil;
+  SwapDepth := nil;
+  SourceDrawable := nil;
+  TargetDrawable := nil;
+  ReadbackImg := nil;
+  try
+    SwapColor := Device.CreateTexture(TRHITextureDesc.Create2D(800, 600, pfBGRA8_UNorm,
+      [tuColorAttachment, tuTransferSrc, tuTransferDst]));
+    SwapDepth := Device.CreateTexture(TRHITextureDesc.Create2D(800, 600, pfD32_Float,
+      [tuDepthStencil]));
+
+    SourceImgData := TRGBAlphaImage.Create(32, 32);
+    SourceImgData.Clear(Vector4Byte(255, 64, 32, 255));
+    SourceDrawable := TDrawableImage.Create(SourceImgData, True, True);
+
+    TargetImgData := TRGBAlphaImage.Create(64, 64);
+    TargetImgData.Clear(Vector4Byte(0, 0, 0, 255));
+    TargetDrawable := TDrawableImage.Create(TargetImgData, True, True);
+
+    AssertTrue('TDrawableImage.RHITexture must be created in pure Vulkan RHI mode',
+      TargetDrawable.RHITexture <> nil);
+    AssertTrue('TDrawableImage.RHITexture usage must include tuColorAttachment',
+      tuColorAttachment in TargetDrawable.RHITexture.Desc.Usage);
+    AssertTrue('TDrawableImage.RHITexture usage must include tuTransferSrc',
+      tuTransferSrc in TargetDrawable.RHITexture.Desc.Usage);
+
+    { Start an outer window rendering pass (pfBGRA8_UNorm + pfD32_Float, 800x600) and a 2D pass }
+    RenderContext.Viewport := Rectangle(0, 0, 800, 600);
+    Cmd.BeginRecording;
+    OuterPass := TRHIRenderingInfo.CreateColorDepth(Rectangle(0, 0, 800, 600),
+      SwapColor, loClear, Vector4(0.1, 0.1, 0.1, 1.0),
+      SwapDepth, loClear, 1.0);
+    Cmd.BeginRendering(OuterPass);
+    Batcher.Begin2DPass(Cmd, 800, 600);
+
+    { Queue a sprite draw on the outer pass before DrawFrom }
+    SourceDrawable.Draw(FloatRectangle(10, 10, 32, 32));
+    AssertEquals('Outer pass quad queued before DrawFrom', 1, Integer(Batcher.FrameQuadCount));
+
+    { Call TargetDrawable.DrawFrom while the outer pass is active }
+    TargetDrawable.DrawFrom(SourceDrawable,
+      FloatRectangle(0, 0, 64, 64),
+      FloatRectangle(0, 0, 32, 32));
+
+    AssertTrue('TargetDrawable.RenderToImage must be created', TargetDrawable.RenderToImage <> nil);
+    AssertEquals('TargetDrawable.RenderToImage must have executed 1 offscreen pass',
+      1, Integer(TargetDrawable.RenderToImage.RHIRenderPassCount));
+    AssertEquals('TargetDrawable.RHITexture must be transitioned back to rsShaderRead after RenderToImageEnd',
+      Ord(rsShaderRead), Ord(TargetDrawable.RHITexture.CurrentState));
+
+    OffscreenPipe := Batcher.LastPipeline as TVulkanRHIPipeline;
+    AssertTrue('Offscreen 2D pipeline must be non-nil', OffscreenPipe <> nil);
+    AssertEquals('Offscreen 2D pipeline ColorAttachmentFormat must match TargetDrawable.RHITexture (pfRGBA8_UNorm)',
+      Ord(pfRGBA8_UNorm), Ord(OffscreenPipe.Desc.ColorAttachmentFormats[0]));
+    AssertEquals('Offscreen 2D pipeline DepthAttachmentFormat must match TGLRenderToTexture stencil depth (pfD24_UNorm_S8_UInt)',
+      Ord(pfD24_UNorm_S8_UInt), Ord(OffscreenPipe.Desc.DepthAttachmentFormat));
+
+    { Verify that the outer pass was automatically resumed after RenderToImageEnd }
+    AssertTrue('Outer rendering pass must be resumed after TargetDrawable.DrawFrom',
+      Cmd.IsRendering);
+    AssertEquals('Resumed outer pass color format must be SwapColor format (pfBGRA8_UNorm)',
+      Ord(pfBGRA8_UNorm), Ord(Cmd.ActiveRenderingColorFormat));
+    AssertEquals('Resumed outer pass depth format must be SwapDepth format (pfD32_Float)',
+      Ord(pfD32_Float), Ord(Cmd.ActiveRenderingDepthFormat));
+    AssertEquals('RenderContext.Viewport width must be restored to 800',
+      800, RenderContext.Viewport.Width);
+    AssertEquals('RenderContext.Viewport height must be restored to 600',
+      600, RenderContext.Viewport.Height);
+    AssertSameValue(800.0, Batcher.ViewportWidth, 0.001);
+    AssertSameValue(600.0, Batcher.ViewportHeight, 0.001);
+
+    { Draw TargetDrawable onto the resumed outer pass and end the 2D pass }
+    TargetDrawable.Draw(FloatRectangle(100, 100, 64, 64));
+    Batcher.End2DPass;
+    Cmd.EndRendering;
+
+    { Also test RenderToImageBegin + RenderContext.Clear + RenderToImageEnd + GetContents }
+    TargetDrawable.RenderToImageBegin;
+    RenderContext.Clear([cbColor], Vector4(0.0, 1.0, 0.0, 1.0));
+    TargetDrawable.RenderToImageEnd;
+    Cmd.EndRecording;
+
+    ReadbackImg := TargetDrawable.GetContents(TRGBAlphaImage);
+    AssertTrue('GetContents must return a valid TRGBAlphaImage', ReadbackImg is TRGBAlphaImage);
+    AssertEquals('GetContents pixel must reflect the offscreen clear color (green = 255)',
+      255, Integer(TRGBAlphaImage(ReadbackImg).PixelPtr(0, 0)^.Y));
+  finally
+    FreeAndNil(ReadbackImg);
+    FreeAndNil(TargetDrawable);
+    FreeAndNil(SourceDrawable);
+    FreeAndNil(SwapDepth);
+    FreeAndNil(SwapColor);
+    SetActiveCommandList(SavedCmd);
+    FreeAndNil(Cmd);
+    FreeGlobalBatch2DRenderer;
+    RenderContext := SavedCtx;
+    FreeAndNil(TestCtx);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestDrawableImageRepeatWrapSamplersAndBatch2DOffscreenFormatsRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCmd: TRHICommandList;
+  Cmd: TVulkanRHICommandList;
+  Batcher: TCastleBatch2DRenderer;
+  ImgData: TRGBAlphaImage;
+  Drawable: TDrawableImage;
+  DescSet: TVulkanRHIDescriptorSet;
+  BoundSampler: TVulkanRHISampler;
+  MSAAColor, ResolveColor: TRHITexture;
+  MSAAPass: TRHIRenderingInfo;
+  MSAAPipe: TVulkanRHIPipeline;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9302)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCmd := ActiveCommandList;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Cmd := TVulkanRHICommandList.Create(Device, 0);
+  SetActiveCommandList(Cmd);
+  Batcher := EnsureBatch2DRenderer(Device);
+  Drawable := nil;
+  MSAAColor := nil;
+  ResolveColor := nil;
+  try
+    ImgData := TRGBAlphaImage.Create(16, 16);
+    ImgData.Clear(Vector4Byte(200, 100, 50, 255));
+    Drawable := TDrawableImage.Create(ImgData, True, True);
+
+    DescSet := Drawable.RHIDescriptorSet as TVulkanRHIDescriptorSet;
+    AssertTrue('Drawable.RHIDescriptorSet must be created', DescSet <> nil);
+    BoundSampler := DescSet.LastBoundSampler as TVulkanRHISampler;
+    AssertTrue('Initial bound sampler must be LinearClamp', BoundSampler = Batcher.GetSampler(True, False, False));
+    AssertEquals('Initial AddressModeU must be CLAMP_TO_EDGE',
+      Integer(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE), Integer(BoundSampler.CreateInfo.addressModeU));
+    AssertEquals('Initial AddressModeV must be CLAMP_TO_EDGE',
+      Integer(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE), Integer(BoundSampler.CreateInfo.addressModeV));
+
+    { Enable RepeatS and RepeatT and switch SmoothScaling to False }
+    Drawable.RepeatS := True;
+    BoundSampler := DescSet.LastBoundSampler as TVulkanRHISampler;
+    AssertTrue('RepeatS=True must bind (Smooth=True, RepeatS=True, RepeatT=False) sampler',
+      BoundSampler = Batcher.GetSampler(True, True, False));
+    AssertEquals('RepeatS=True AddressModeU must be VK_SAMPLER_ADDRESS_MODE_REPEAT',
+      Integer(VK_SAMPLER_ADDRESS_MODE_REPEAT), Integer(BoundSampler.CreateInfo.addressModeU));
+    AssertEquals('RepeatT=False AddressModeV must remain VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE',
+      Integer(VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE), Integer(BoundSampler.CreateInfo.addressModeV));
+
+    Drawable.RepeatT := True;
+    Drawable.SmoothScaling := False;
+    BoundSampler := DescSet.LastBoundSampler as TVulkanRHISampler;
+    AssertTrue('Smooth=False, RepeatS=True, RepeatT=True must bind matching sampler',
+      BoundSampler = Batcher.GetSampler(False, True, True));
+    AssertEquals('AddressModeU must be VK_SAMPLER_ADDRESS_MODE_REPEAT',
+      Integer(VK_SAMPLER_ADDRESS_MODE_REPEAT), Integer(BoundSampler.CreateInfo.addressModeU));
+    AssertEquals('AddressModeV must be VK_SAMPLER_ADDRESS_MODE_REPEAT',
+      Integer(VK_SAMPLER_ADDRESS_MODE_REPEAT), Integer(BoundSampler.CreateInfo.addressModeV));
+    AssertEquals('Smooth=False magFilter must be VK_FILTER_NEAREST',
+      Integer(VK_FILTER_NEAREST), Integer(BoundSampler.CreateInfo.magFilter));
+
+    { Verify TCastleBatch2DRenderer.Flush inside a 4x MSAA pfRGBA16_Float pass }
+    MSAAColor := Device.CreateTexture(TRHITextureDesc.Create2D(128, 128, pfRGBA16_Float,
+      [tuColorAttachment], 1, 4));
+    ResolveColor := Device.CreateTexture(TRHITextureDesc.Create2D(128, 128, pfRGBA16_Float,
+      [tuColorAttachment, tuSampled], 1, 1));
+
+    Cmd.BeginRecording;
+    MSAAPass := TRHIRenderingInfo.CreateColorDepthMSAA(Rectangle(0, 0, 128, 128),
+      MSAAColor, ResolveColor, loClear, Vector4(0, 0, 0, 1),
+      nil, loDontCare, 1.0, nil);
+    Cmd.BeginRendering(MSAAPass);
+    Batcher.Begin2DPass(Cmd, 128, 128);
+    Drawable.Draw(FloatRectangle(0, 0, 64, 64));
+    Batcher.End2DPass;
+    Cmd.EndRendering;
+    Cmd.EndRecording;
+
+    MSAAPipe := Batcher.LastPipeline as TVulkanRHIPipeline;
+    AssertTrue('MSAAPipe must be non-nil', MSAAPipe <> nil);
+    AssertEquals('Batch2D PSO ColorAttachmentFormat must match active pass (pfRGBA16_Float)',
+      Ord(pfRGBA16_Float), Ord(MSAAPipe.Desc.ColorAttachmentFormats[0]));
+    AssertEquals('Batch2D PSO DepthAttachmentFormat must be pfUndefined when pass has no depth attachment',
+      Ord(pfUndefined), Ord(MSAAPipe.Desc.DepthAttachmentFormat));
+    AssertEquals('Batch2D PSO SampleCount must match active pass (4x MSAA)',
+      4, Integer(MSAAPipe.Desc.SampleCount));
+  finally
+    FreeAndNil(ResolveColor);
+    FreeAndNil(MSAAColor);
+    FreeAndNil(Drawable);
+    SetActiveCommandList(SavedCmd);
+    FreeAndNil(Cmd);
+    FreeGlobalBatch2DRenderer;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestDrawPrimitive2DLineWidthPointSizeAndActiveRenderingFormatsRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCmd: TRHICommandList;
+  SavedCtx, TestCtx: TRenderContext;
+  Cmd: TVulkanRHICommandList;
+  OffscreenColor: TRHITexture;
+  PassInfo: TRHIRenderingInfo;
+  PipeLine, PipePoint: TVulkanRHIPipeline;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9303)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Cmd := TVulkanRHICommandList.Create(Device, 0);
+  SetActiveCommandList(Cmd);
+  OffscreenColor := nil;
+  try
+    RHIPrimitive2DResetStats;
+    OffscreenColor := Device.CreateTexture(TRHITextureDesc.Create2D(256, 256, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled]));
+
+    RenderContext.Viewport := Rectangle(0, 0, 256, 256);
+    Cmd.BeginRecording;
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(Rectangle(0, 0, 256, 256),
+      OffscreenColor, loClear, Vector4(0, 0, 0, 1),
+      nil, loDontCare, 1.0);
+    Cmd.BeginRendering(PassInfo);
+
+    { 1. Draw 2D lines with LineWidth = 4.5 }
+    DrawPrimitive2D(pmLines,
+      [Vector2(10, 10), Vector2(200, 100)],
+      Vector4(1, 0, 0, 1),
+      bsSrcAlpha, bdOneMinusSrcAlpha, False,
+      4.5, 1);
+
+    AssertSameValue(4.5, RHIPrimitive2DLastLineWidth, 0.001);
+    AssertSameValue(4.5, RenderContext.LineWidth, 0.001);
+    AssertSameValue(4.5, Cmd.DynamicLineWidth, 0.001);
+
+    PipeLine := RHIPrimitive2DPipeline as TVulkanRHIPipeline;
+    AssertTrue('PipeLine must be non-nil', PipeLine <> nil);
+    AssertEquals('DrawPrimitive2D PSO ColorAttachmentFormat must match active pass (pfRGBA8_UNorm)',
+      Ord(pfRGBA8_UNorm), Ord(PipeLine.Desc.ColorAttachmentFormats[0]));
+    AssertEquals('DrawPrimitive2D PSO DepthAttachmentFormat must be pfUndefined for color-only pass',
+      Ord(pfUndefined), Ord(PipeLine.Desc.DepthAttachmentFormat));
+
+    { 2. Draw 2D points with PointSize = 9 }
+    DrawPrimitive2D(pmPoints,
+      [Vector2(50, 50), Vector2(100, 100), Vector2(150, 150)],
+      Vector4(0, 1, 0, 1),
+      bsSrcAlpha, bdOneMinusSrcAlpha, False,
+      1.0, 9);
+
+    AssertEquals('RHIPrimitive2DLastPointSize must record 9',
+      9, Integer(RHIPrimitive2DLastPointSize));
+    AssertSameValue(9.0, RenderContext.PointSize, 0.001);
+    PipePoint := RHIPrimitive2DPipeline as TVulkanRHIPipeline;
+    AssertTrue('PipePoint must be non-nil', PipePoint <> nil);
+    AssertEquals('PipePoint topology must be ptPointList',
+      Ord(ptPointList), Ord(PipePoint.Desc.Topology));
+
+    Cmd.EndRendering;
+    Cmd.EndRecording;
+  finally
+    RHIPrimitive2DResetStats;
+    FreeAndNil(OffscreenColor);
+    SetActiveCommandList(SavedCmd);
+    FreeAndNil(Cmd);
+    RenderContext := SavedCtx;
+    FreeAndNil(TestCtx);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);

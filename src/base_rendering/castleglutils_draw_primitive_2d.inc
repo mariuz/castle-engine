@@ -241,6 +241,8 @@ function RHIPrimitive2DLastVertexCount: Cardinal;
 function RHIPrimitive2DLastSubmittedVertexCount: Cardinal;
 function RHIPrimitive2DLastMode: TPrimitiveMode;
 function RHIPrimitive2DLastColor: TCastleColor;
+function RHIPrimitive2DLastLineWidth: Single;
+function RHIPrimitive2DLastPointSize: Cardinal;
 function RHIPrimitive2DBuffer: TObject;
 function RHIPrimitive2DPipeline: TObject;
 procedure RHIPrimitive2DResetStats;
@@ -332,6 +334,8 @@ type
     RHILastSubmittedVertexCount: Cardinal;
     RHILastMode: TPrimitiveMode;
     RHILastColor: TCastleColor;
+    RHILastLineWidth: Single;
+    RHILastPointSize: Cardinal;
     destructor Destroy; override;
   end;
 
@@ -393,6 +397,22 @@ begin
     Result := TVector4.Zero;
 end;
 
+function RHIPrimitive2DLastLineWidth: Single;
+begin
+  if Primitive2DRes <> nil then
+    Result := Primitive2DRes.RHILastLineWidth
+  else
+    Result := 1.0;
+end;
+
+function RHIPrimitive2DLastPointSize: Cardinal;
+begin
+  if Primitive2DRes <> nil then
+    Result := Primitive2DRes.RHILastPointSize
+  else
+    Result := 1;
+end;
+
 function RHIPrimitive2DBuffer: TObject;
 begin
   if Primitive2DRes <> nil then
@@ -423,6 +443,8 @@ begin
     Primitive2DRes.RHILastSubmittedVertexCount := 0;
     Primitive2DRes.RHILastMode := pmPoints;
     Primitive2DRes.RHILastColor := TVector4.Zero;
+    Primitive2DRes.RHILastLineWidth := 1.0;
+    Primitive2DRes.RHILastPointSize := 1;
   end;
 end;
 
@@ -457,7 +479,8 @@ procedure DrawPrimitive2D(const Mode: TPrimitiveMode;
 type
   TPrimitive2DPushConstants = packed record
     ViewportSize: TVector2;
-    Padding: TVector2;
+    PointSize: Single;
+    Padding: Single;
     Color: TVector4;
   end;
 const
@@ -475,17 +498,20 @@ const
     'layout(location = 0) in vec2 vertex;' + LineEnding +
     'layout(push_constant) uniform PushConstants {' + LineEnding +
     '  vec2 viewport_size;' + LineEnding +
-    '  vec2 padding;' + LineEnding +
+    '  float point_size;' + LineEnding +
+    '  float padding;' + LineEnding +
     '  vec4 color;' + LineEnding +
     '} pc;' + LineEnding +
     'void main() {' + LineEnding +
     '  gl_Position = vec4(vertex * 2.0 / pc.viewport_size - vec2(1.0), 0.0, 1.0);' + LineEnding +
+    '  gl_PointSize = pc.point_size;' + LineEnding +
     '}';
   Primitive2DFragGLSL =
     '#version 450' + LineEnding +
     'layout(push_constant) uniform PushConstants {' + LineEnding +
     '  vec2 viewport_size;' + LineEnding +
-    '  vec2 padding;' + LineEnding +
+    '  float point_size;' + LineEnding +
+    '  float padding;' + LineEnding +
     '  vec4 color;' + LineEnding +
     '} pc;' + LineEnding +
     'layout(location = 0) out vec4 out_Color;' + LineEnding +
@@ -653,13 +679,39 @@ begin
     end else
       RHIPipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
     if RenderContext <> nil then
+    begin
+      RenderContext.LineWidth := LineWidth;
+      RenderContext.PointSize := PointSize;
       RenderContext.ApplyRHIStencilAndColorMask(RHIPipeDesc.DepthStencil, RHIPipeDesc.BlendState);
+    end;
     RHIPipeDesc.PushConstantSize := SizeOf(TPrimitive2DPushConstants);
     RHIPipeDesc.PushConstantStages := [ssVertex, ssFragment];
-    SetLength(RHIPipeDesc.ColorAttachmentFormats, 1);
-    RHIPipeDesc.ColorAttachmentFormats[0] := pfBGRA8_UNorm;
-    RHIPipeDesc.DepthAttachmentFormat := pfD24_UNorm_S8_UInt;
-    RHIPipeDesc.SampleCount := 1;
+    if (ActiveCommandList <> nil) and ActiveCommandList.IsRendering then
+    begin
+      if ActiveCommandList.ActiveRenderingHasColor then
+      begin
+        SetLength(RHIPipeDesc.ColorAttachmentFormats, 1);
+        RHIPipeDesc.ColorAttachmentFormats[0] := ActiveCommandList.ActiveRenderingColorFormat;
+      end else
+        SetLength(RHIPipeDesc.ColorAttachmentFormats, 0);
+      if ActiveCommandList.ActiveRenderingHasDepth then
+        RHIPipeDesc.DepthAttachmentFormat := ActiveCommandList.ActiveRenderingDepthFormat
+      else
+        RHIPipeDesc.DepthAttachmentFormat := pfUndefined;
+      RHIPipeDesc.SampleCount := Max(Cardinal(1), ActiveCommandList.ActiveRenderingSampleCount);
+    end else
+    begin
+      SetLength(RHIPipeDesc.ColorAttachmentFormats, 1);
+      if RHIDevice.GetSwapchainColorTexture <> nil then
+        RHIPipeDesc.ColorAttachmentFormats[0] := RHIDevice.GetSwapchainColorTexture.Desc.Format
+      else
+        RHIPipeDesc.ColorAttachmentFormats[0] := pfBGRA8_UNorm;
+      if RHIDevice.GetSwapchainDepthTexture <> nil then
+        RHIPipeDesc.DepthAttachmentFormat := RHIDevice.GetSwapchainDepthTexture.Desc.Format
+      else
+        RHIPipeDesc.DepthAttachmentFormat := pfD24_UNorm_S8_UInt;
+      RHIPipeDesc.SampleCount := 1;
+    end;
     Primitive2DRes.RHIPipeline := RHIDevice.GetOrCreatePipeline(RHIPipeDesc);
     Primitive2DRes.RHIPipelineTopology := RHITopology;
 
@@ -668,17 +720,21 @@ begin
     Primitive2DRes.RHILastSubmittedVertexCount := SubmittedVertexCount;
     Primitive2DRes.RHILastMode := Mode;
     Primitive2DRes.RHILastColor := Color;
+    Primitive2DRes.RHILastLineWidth := LineWidth;
+    Primitive2DRes.RHILastPointSize := PointSize;
 
     if ActiveCommandList <> nil then
     begin
       ActiveCommandList.BindPipeline(Primitive2DRes.RHIPipeline);
+      ActiveCommandList.SetLineWidth(LineWidth);
       if (RenderContext <> nil) and RenderContext.FinalScissor(ScissorR) then
         ActiveCommandList.SetScissor(ScissorR);
       if (RenderContext <> nil) and (RenderContext.Viewport.Width > 0) and (RenderContext.Viewport.Height > 0) then
         PushConsts.ViewportSize := Vector2(RenderContext.Viewport.Width, RenderContext.Viewport.Height)
       else
         PushConsts.ViewportSize := Vector2(1920, 1080);
-      PushConsts.Padding := TVector2.Zero;
+      PushConsts.PointSize := Max(1.0, Single(PointSize));
+      PushConsts.Padding := 0.0;
       PushConsts.Color := Color;
       ActiveCommandList.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConsts), PushConsts);
       ActiveCommandList.BindVertexBuffers(0, [Primitive2DRes.RHIVbo], [0]);

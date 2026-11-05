@@ -177,6 +177,8 @@ type
     FBufferInfos: array of VkDescriptorBufferInfo;
     FImageInfos: array of VkDescriptorImageInfo;
     FUpdateCount: Cardinal;
+    FLastBoundTexture: TRHITexture;
+    FLastBoundSampler: TRHISampler;
     function VulkanDevice: TVulkanRHIDevice;
   public
     constructor Create(const ADevice: TVulkanRHIDevice;
@@ -198,6 +200,8 @@ type
     property OwnerPool: VkDescriptorPool read FOwnerPool;
     property IsTransient: Boolean read FIsTransient;
     property UpdateCount: Cardinal read FUpdateCount;
+    property LastBoundTexture: TRHITexture read FLastBoundTexture;
+    property LastBoundSampler: TRHISampler read FLastBoundSampler;
   end;
 
   TVulkanRHIPipeline = class(TRHIPipeline)
@@ -6408,6 +6412,8 @@ var
   Idx, WriteIdx: Integer;
 begin
   if Texture = nil then Exit;
+  FLastBoundTexture := Texture;
+  FLastBoundSampler := Sampler;
   Idx := Length(FImageInfos);
   SetLength(FImageInfos, Idx + 1);
   FillChar(FImageInfos[Idx], SizeOf(VkDescriptorImageInfo), 0);
@@ -7194,6 +7200,8 @@ begin
     FDevice.StagingUploader.FlushPendingUploads(Self);
 
   FIsRendering := True;
+  FActiveRenderingInfo := Info;
+  FActiveRenderingInfo.ColorAttachments := Copy(Info.ColorAttachments);
   FActiveRenderingHasColor := (Length(Info.ColorAttachments) > 0) and (Info.ColorAttachments[0].Texture <> nil);
   if FActiveRenderingHasColor then
   begin

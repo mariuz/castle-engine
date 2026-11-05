@@ -165,6 +165,8 @@
       FRenderToImage: TGLRenderToTexture;
       HasViewportToRestore: boolean;
       ViewportToRestore: TRectangle;
+      HasBatcherViewportToRestore: Boolean;
+      BatcherViewportToRestore: TVector2;
 
     function FinalAlpha: TAlphaChannel;
     procedure SetSmoothScaling(const Value: boolean);
@@ -176,6 +178,7 @@
     procedure GLContextClose;
     procedure RHIContextOpen(const AImage: TEncodedImage);
     procedure RHIContextClose;
+    procedure UpdateRHIDescriptorSet;
     function GetCenterX: Single;
     function GetCenterY: Single;
     procedure SetCenterX(const Value: Single);
@@ -766,6 +769,7 @@
     procedure RenderToImageBegin(const SetAndRestoreViewport: boolean = true);
     procedure RenderToImageEnd;
     procedure RenderToImageFree;
+    property RenderToImage: TGLRenderToTexture read FRenderToImage;
 
     { Draw a SourceImage over this image.
 
@@ -955,7 +959,6 @@ end;
 procedure TDrawableImage.RHIContextOpen(const AImage: TEncodedImage);
 var
   TexDesc: TRHITextureDesc;
-  Batcher: TCastleBatch2DRenderer;
 begin
   if (AImage <> nil) and (RHIDevice <> nil) then
   begin
@@ -963,29 +966,40 @@ begin
     FreeAndNil(FRHITexture);
 
     TexDesc := TRHITextureDesc.Create2D(AImage.Width, AImage.Height, pfRGBA8_UNorm,
-      [tuSampled, tuTransferDst]);
+      [tuSampled, tuColorAttachment, tuTransferSrc, tuTransferDst]);
     FRHITexture := RHIDevice.CreateTexture(TexDesc);
     FRHITexture.UploadImage(AImage);
 
-    Batcher := ActiveBatch2DRenderer;
-    if (Batcher = nil) and (RHIDevice <> nil) then
-      Batcher := EnsureBatch2DRenderer(RHIDevice);
-    if Batcher <> nil then
-    begin
-      FRHIDescriptorSet := RHIDevice.CreateDescriptorSet(Batcher.TextureSetLayout);
-      if SmoothScaling then
-        FRHIDescriptorSet.BindTexture(0, FRHITexture, Batcher.LinearSampler)
-      else
-        FRHIDescriptorSet.BindTexture(0, FRHITexture, Batcher.NearestSampler);
-      FRHIDescriptorSet.Update;
-    end;
+    UpdateRHIDescriptorSet;
   end;
 end;
 
 procedure TDrawableImage.RHIContextClose;
 begin
+  RenderToImageFree;
   FreeAndNil(FRHIDescriptorSet);
   FreeAndNil(FRHITexture);
+end;
+
+procedure TDrawableImage.UpdateRHIDescriptorSet;
+var
+  Batcher: TCastleBatch2DRenderer;
+begin
+  if (FRHITexture = nil) or (FRHITexture.Device = nil) then
+    Exit;
+  Batcher := ActiveBatch2DRenderer;
+  if Batcher = nil then
+    Batcher := EnsureBatch2DRenderer(FRHITexture.Device);
+  if Batcher <> nil then
+  begin
+    if (FRHIDescriptorSet <> nil) and (FRHIDescriptorSet.Device <> Batcher.Device) then
+      FreeAndNil(FRHIDescriptorSet);
+    if FRHIDescriptorSet = nil then
+      FRHIDescriptorSet := Batcher.Device.CreateDescriptorSet(Batcher.TextureSetLayout);
+    FRHIDescriptorSet.BindTexture(0, FRHITexture,
+      Batcher.GetSampler(SmoothScaling, RepeatS, RepeatT));
+    FRHIDescriptorSet.Update;
+  end;
 end;
 
 procedure TDrawableImage.Load(const AImage: TEncodedImage);
@@ -1365,14 +1379,7 @@ begin
       if (FRHIDescriptorSet <> nil) and (FRHIDescriptorSet.Device <> Batcher.Device) then
         FreeAndNil(FRHIDescriptorSet);
       if (FRHITexture <> nil) and (FRHIDescriptorSet = nil) and (Batcher.Device <> nil) then
-      begin
-        FRHIDescriptorSet := Batcher.Device.CreateDescriptorSet(Batcher.TextureSetLayout);
-        if SmoothScaling then
-          FRHIDescriptorSet.BindTexture(0, FRHITexture, Batcher.LinearSampler)
-        else
-          FRHIDescriptorSet.BindTexture(0, FRHITexture, Batcher.NearestSampler);
-        FRHIDescriptorSet.Update;
-      end;
+        UpdateRHIDescriptorSet;
 
       if FRHITexture <> nil then
       begin
@@ -1390,10 +1397,17 @@ begin
             BatchBlendMode := bmAlphaBlend;
         end;
 
-        if not RenderContext.FinalScissor(ScissorR) then
-          ScissorR := Rectangle(0, 0,
-            Max(1, Round(RenderContext.Viewport.Width)),
-            Max(1, Round(RenderContext.Viewport.Height)));
+        if (RenderContext = nil) or (not RenderContext.FinalScissor(ScissorR)) then
+        begin
+          if RenderContext <> nil then
+            ScissorR := Rectangle(0, 0,
+              Max(1, Round(RenderContext.Viewport.Width)),
+              Max(1, Round(RenderContext.Viewport.Height)))
+          else
+            ScissorR := Rectangle(0, 0,
+              Max(1, Round(Batcher.ViewportWidth)),
+              Max(1, Round(Batcher.ViewportHeight)));
+        end;
 
         if UseScreenRotationCenter then
           EffRotCenter := ScreenRotationCenter
@@ -1403,9 +1417,14 @@ begin
         AutoStarted2DPass := False;
         if (not Batcher.In2DPass) and (ActiveCommandList <> nil) then
         begin
-          Batcher.Begin2DPass(ActiveCommandList,
-            Max(1, RenderContext.Viewport.Width),
-            Max(1, RenderContext.Viewport.Height));
+          if RenderContext <> nil then
+            Batcher.Begin2DPass(ActiveCommandList,
+              Max(1, RenderContext.Viewport.Width),
+              Max(1, RenderContext.Viewport.Height))
+          else
+            Batcher.Begin2DPass(ActiveCommandList,
+              Max(1, Round(Batcher.ViewportWidth)),
+              Max(1, Round(Batcher.ViewportHeight)));
           AutoStarted2DPass := True;
         end;
         try
@@ -1847,7 +1866,10 @@ function TDrawableImage.CurrentWrap: TTextureWrap2D;
     if IsRepeat then
       Result := GL_REPEAT
     else
-      Result := GLFeatures.CLAMP_TO_EDGE;
+    if GLFeatures <> nil then
+      Result := GLFeatures.CLAMP_TO_EDGE
+    else
+      Result := GL_CLAMP_TO_EDGE;
   end;
 
 begin
@@ -1856,8 +1878,6 @@ begin
 end;
 
 procedure TDrawableImage.SetSmoothScaling(const Value: boolean);
-var
-  Batcher: TCastleBatch2DRenderer;
 begin
   if FSmoothScaling <> Value then
   begin
@@ -1868,21 +1888,7 @@ begin
       glBindTexture(GL_TEXTURE_2D, FTexture);
       SetTextureFilter(GL_TEXTURE_2D, CurrentFilter);
     end;
-    if (FRHIDescriptorSet <> nil) and (FRHITexture <> nil) and
-       (FRHITexture.Device <> nil) then
-    begin
-      Batcher := ActiveBatch2DRenderer;
-      if Batcher = nil then
-        Batcher := EnsureBatch2DRenderer(FRHITexture.Device);
-      if Batcher <> nil then
-      begin
-        if Value then
-          FRHIDescriptorSet.BindTexture(0, FRHITexture, Batcher.LinearSampler)
-        else
-          FRHIDescriptorSet.BindTexture(0, FRHITexture, Batcher.NearestSampler);
-        FRHIDescriptorSet.Update;
-      end;
-    end;
+    UpdateRHIDescriptorSet;
   end;
 end;
 
@@ -1946,13 +1952,17 @@ procedure TDrawableImage.RenderToImageBegin(const SetAndRestoreViewport: boolean
   begin
     FRenderToImage := TGLRenderToTexture.Create(Width, Height);
     FRenderToImage.Buffer := tbColor;
-    FRenderToImage.SetTexture(FTexture, GL_TEXTURE_2D);
+    if FRHITexture <> nil then
+      FRenderToImage.SetRHITexture(FRHITexture);
+    if FTexture <> GLObjectNone then
+      FRenderToImage.SetTexture(FTexture, GL_TEXTURE_2D);
     FRenderToImage.GLContextOpen;
   end;
 
 begin
+  BatchingFlush;
   PrepareResources;
-  Assert(FTexture <> GLObjectNone);
+  Assert((FTexture <> GLObjectNone) or (FRHITexture <> nil));
 
   if (FRenderToImage = nil) or
      (FRenderToImage.Width <> Width) or
@@ -1960,26 +1970,51 @@ begin
   begin
     RenderToImageFree;
     RenderToImageCreate;
-  end;
+  end else
+  if FRHITexture <> nil then
+    FRenderToImage.SetRHITexture(FRHITexture);
 
   FRenderToImage.RenderBegin;
 
   if SetAndRestoreViewport then
   begin
-    HasViewportToRestore := true;
-    ViewportToRestore := RenderContext.Viewport;
-    RenderContext.Viewport := Rectangle(0, 0, Width, Height);
+    if RenderContext <> nil then
+    begin
+      HasViewportToRestore := true;
+      ViewportToRestore := RenderContext.Viewport;
+      RenderContext.Viewport := Rectangle(0, 0, Width, Height);
+    end;
+    if ActiveBatch2DRenderer <> nil then
+    begin
+      HasBatcherViewportToRestore := True;
+      BatcherViewportToRestore := Vector2(
+        ActiveBatch2DRenderer.ViewportWidth,
+        ActiveBatch2DRenderer.ViewportHeight);
+      ActiveBatch2DRenderer.ViewportWidth := Max(1.0, Single(Width));
+      ActiveBatch2DRenderer.ViewportHeight := Max(1.0, Single(Height));
+    end;
   end;
 end;
 
 procedure TDrawableImage.RenderToImageEnd;
 begin
+  BatchingFlush;
   FRenderToImage.RenderEnd;
 
   if HasViewportToRestore then
   begin
-    RenderContext.Viewport := ViewportToRestore;
+    if RenderContext <> nil then
+      RenderContext.Viewport := ViewportToRestore;
     HasViewportToRestore := false;
+  end;
+  if HasBatcherViewportToRestore then
+  begin
+    if ActiveBatch2DRenderer <> nil then
+    begin
+      ActiveBatch2DRenderer.ViewportWidth := BatcherViewportToRestore.X;
+      ActiveBatch2DRenderer.ViewportHeight := BatcherViewportToRestore.Y;
+    end;
+    HasBatcherViewportToRestore := False;
   end;
 end;
 
@@ -2027,6 +2062,7 @@ begin
       glBindTexture(GL_TEXTURE_2D, FTexture);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, CurrentWrap.Data[0]);
     end;
+    UpdateRHIDescriptorSet;
   end;
 end;
 
@@ -2041,6 +2077,7 @@ begin
       glBindTexture(GL_TEXTURE_2D, FTexture);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, CurrentWrap.Data[1]);
     end;
+    UpdateRHIDescriptorSet;
   end;
 end;
 
@@ -2159,7 +2196,10 @@ end;
 procedure TDrawableImage.BatchingFlushIfNeeded;
 begin
   if (BatchingLevel <> 0) and (BatchingLastImage = Self) then
-    BatchingFlush;
+    BatchingFlush
+  else
+  if (ActiveBatch2DRenderer <> nil) and ActiveBatch2DRenderer.In2DPass then
+    ActiveBatch2DRenderer.Flush;
 end;
 
 class procedure TDrawableImage.BatchingBegin;
