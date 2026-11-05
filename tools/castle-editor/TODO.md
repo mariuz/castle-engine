@@ -27,14 +27,9 @@ OK if after 7.0 release:
     * on audio files, you can open them with `examples/audio/audio_player/` (should this be moved to tools directory? probably!)
 
 * build tool integration:
-    * For "run", colorized CastleLog warnings
-    * For "compile", colorize FPC warnings, errors
     * Shorter compile output:
-        * lines "compiling..", "writing resource string table...", are displayed, but then replaced by a next AddLine. This way they serve as "progress indicator" but do not eat so much output space.
         * also do not show FPC "logo", do not repeat information about FPC version, Os/CPU 2 times, debug mode,...
         * remove the "separator" lines. The bold lines already separate them nicely?
-        * "command finished with status 0" -> "Command finished successfully."
-    * show count of warnings/errors if non-zero on tab header, allow to filter by them
     * rerun generate-program each time? (mark them as some *DO NOT MODIFY THIS, THIS IS ONLY FOR LAZARUS* comment)
         Not really OK, in case we open program with hand-crafted program file.
         Maybe only auto-generate in castle-engine-output,
@@ -59,17 +54,12 @@ OK if after 7.0 release:
 
 * small GUI stuff:
     * on NewProject form AutoSize?
-    * allow switching list/icon/etc. view on "Files"
     * allow configuring command output "word wrap"
     * Output ListBox has some width (and horiz scrollbar) on Windows, unrelated to anything?
 
 * Project options:
     * Allow to configure project qualified name from "Project Options" in editor
     * Icon, other stuff from CastleEngineManifest.xml could be configuirable in editor
-
-* For editor on Lazarus at design-time:
-    * TCastleControl (or sthg else) in designer mode should set ApplicationDataOverride,
-        to allow our dialogs to replace URL with castle-data:/ nicely.
 
 * at scene loading show something "wait, loading..."
 

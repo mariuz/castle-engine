@@ -562,10 +562,13 @@ type
       BtnFilterImages: TSpeedButton;
       BtnFilterAudio: TSpeedButton;
       BtnFilterCode: TSpeedButton;
+      BtnFilesViewStyle: TSpeedButton;
       FCurrentAssetCategoryMask: String;
       FLastActivateRefreshTick: QWord;
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
+    procedure BtnFilesViewStyleClick(Sender: TObject);
+    procedure OutputCountsChanged(Sender: TObject);
     procedure UpdateShellListMask;
     procedure BuildToolCall(const Commands: array of String;
       const RestartOnSuccess: Boolean = false);
@@ -893,7 +896,10 @@ end;
 
 procedure TProjectForm.ActionOutputCleanExecute(Sender: TObject);
 begin
-  ListOutput.Clear;
+  if OutputList <> nil then
+    OutputList.Clear
+  else
+    ListOutput.Clear;
 end;
 
 procedure TProjectForm.ActionSystemInformationExecute(Sender: TObject);
@@ -1861,6 +1867,20 @@ procedure TProjectForm.FormCreate(Sender: TObject);
     BtnFilterAll := CreateFilterButton('All', 'Show all files in folder', 0);
     BtnFilterAll.Down := true;
 
+    BtnFilesViewStyle := TSpeedButton.Create(Self);
+    BtnFilesViewStyle.Caption := 'View: Details';
+    BtnFilesViewStyle.Hint := 'Cycle Files panel view style: Details (vsReport) -> List (vsList) -> Icons (vsIcon) -> Small Icons (vsSmallIcon)';
+    BtnFilesViewStyle.ShowHint := true;
+    BtnFilesViewStyle.AutoSize := true;
+    BtnFilesViewStyle.Constraints.MinHeight := 26;
+    BtnFilesViewStyle.Constraints.MinWidth := 74;
+    BtnFilesViewStyle.Align := alRight;
+    BtnFilesViewStyle.BorderSpacing.Right := 2;
+    BtnFilesViewStyle.BorderSpacing.Top := 2;
+    BtnFilesViewStyle.BorderSpacing.Bottom := 2;
+    BtnFilesViewStyle.OnClick := @BtnFilesViewStyleClick;
+    BtnFilesViewStyle.Parent := PanelFilesTop;
+
     EditFileFilter := TEdit.Create(Self);
     EditFileFilter.Parent := PanelFilesTop;
     EditFileFilter.Align := alClient;
@@ -1893,6 +1913,7 @@ procedure TProjectForm.FormCreate(Sender: TObject);
       '- Other files open in OS default applications.';
     ShellListView1.PopupMenu := ShellListPopupMenu;
     ShellListView1.SmallImages := ShellIcons;
+    ShellListView1.LargeImages := ShellIcons;
     ShellListView1.DragMode := dmAutomatic;
     ShellListView1.OnExcludedCountChanged := @ShellListExcludedCountChanged;
 
@@ -2028,6 +2049,7 @@ begin
   MenuItemWindow.SetEnabledVisible(EnableDocking);
   Docking := EnableDocking and UserConfig.GetValue('ProjectForm_Docking', false);
   OutputList := TOutputList.Create(ListOutput);
+  OutputList.OnCountsChanged := @OutputCountsChanged;
   BuildComponentsMenu(
     MenuItemDesignNewUserInterfaceCustomRoot,
     MenuItemDesignNewTransformCustomRoot,
@@ -2899,6 +2921,61 @@ procedure TProjectForm.ClearAllWarnings;
 begin
   ListWarnings.Clear;
   TabWarnings.TabVisible := false;
+end;
+
+procedure TProjectForm.OutputCountsChanged(Sender: TObject);
+var
+  NewCaption: String;
+begin
+  if OutputList = nil then
+    Exit;
+  if (OutputList.ErrorsCount > 0) and (OutputList.WarningsCount > 0) then
+    NewCaption := Format('Output (%d errors, %d warnings)', [
+      OutputList.ErrorsCount, OutputList.WarningsCount])
+  else
+  if OutputList.ErrorsCount > 0 then
+    NewCaption := Format('Output (%d errors)', [OutputList.ErrorsCount])
+  else
+  if OutputList.WarningsCount > 0 then
+    NewCaption := Format('Output (%d warnings)', [OutputList.WarningsCount])
+  else
+    NewCaption := 'Output';
+
+  TabOutput.Caption := NewCaption;
+  if DesignOutputForm <> nil then
+    DesignOutputForm.Caption := NewCaption;
+end;
+
+procedure TProjectForm.BtnFilesViewStyleClick(Sender: TObject);
+begin
+  if ShellListView1 = nil then
+    Exit;
+  case ShellListView1.ViewStyle of
+    vsReport:
+      begin
+        ShellListView1.ViewStyle := vsList;
+        if BtnFilesViewStyle <> nil then
+          BtnFilesViewStyle.Caption := 'View: List';
+      end;
+    vsList:
+      begin
+        ShellListView1.ViewStyle := vsIcon;
+        if BtnFilesViewStyle <> nil then
+          BtnFilesViewStyle.Caption := 'View: Icons';
+      end;
+    vsIcon:
+      begin
+        ShellListView1.ViewStyle := vsSmallIcon;
+        if BtnFilesViewStyle <> nil then
+          BtnFilesViewStyle.Caption := 'View: Small';
+      end;
+    else
+      begin
+        ShellListView1.ViewStyle := vsReport;
+        if BtnFilesViewStyle <> nil then
+          BtnFilesViewStyle.Caption := 'View: Details';
+      end;
+  end;
 end;
 
 procedure TProjectForm.MenuItemDesignNewUserInterfaceRectClick(Sender: TObject);

@@ -49,12 +49,19 @@ type
     var
       OutputInfoPerKind: array [TOutputKind] of TOutputInfo;
       FList: TListBox;
+      FWarningsCount: Integer;
+      FErrorsCount: Integer;
+      FReplaceLastProgressLine: Boolean;
+      FOnCountsChanged: TNotifyEvent;
     procedure DrawItem(Control: TWinControl; Index: Integer;
       ARect: TRect; State: TOwnerDrawState);
   public
     constructor Create(const AList: TListBox);
     destructor Destroy; override;
     property List: TListBox read FList;
+    property WarningsCount: Integer read FWarningsCount;
+    property ErrorsCount: Integer read FErrorsCount;
+    property OnCountsChanged: TNotifyEvent read FOnCountsChanged write FOnCountsChanged;
 
     procedure AddLine(const S: String; const Kind: TOutputKind);
     { Split S into multiple lines.
@@ -393,8 +400,11 @@ begin
         SuccessfullyFinishedAll := FQueuePosition = Queue.Count;
       end;
       OutputList.AddSeparator;
-      OutputList.AddLine('Command finished with status ' + IntToStr(AsyncProcess.ExitStatus) + '.',
-        LastLineKind);
+      if AsyncProcess.ExitStatus = 0 then
+        OutputList.AddLine('Command finished successfully.', LastLineKind)
+      else
+        OutputList.AddLine('Command finished with status ' + IntToStr(AsyncProcess.ExitStatus) + '.',
+          LastLineKind);
       FreeAndNil(AsyncProcess);
 
       // create next process in queue
@@ -525,12 +535,23 @@ procedure TAsynchronousProcess.Update;
   end;
 
   function LineOutputKind(const Line: String): TOutputKind;
+  var
+    Trimmed: String;
   begin
+    Trimmed := TrimLeft(Line);
     if (Pos(') Error', Line) <> 0) or
-       (Pos(') Fatal', Line) <> 0) then
+       (Pos(') Fatal', Line) <> 0) or
+       (Pos(': Error:', Line) <> 0) or
+       (Pos(': Fatal:', Line) <> 0) or
+       IsPrefix('Error:', Trimmed, true) or
+       IsPrefix('Fatal:', Trimmed, true) or
+       IsPrefix('castle-engine: Error:', Trimmed, true) then
       Result := okError
     else
-    if (Pos(') Warning', Line) <> 0) then
+    if (Pos(') Warning', Line) <> 0) or
+       (Pos(': Warning:', Line) <> 0) or
+       IsPrefix('Warning:', Trimmed, true) or
+       IsPrefix('castle-engine: Warning:', Trimmed, true) then
       Result := okWarning
     else
       Result := okInfo;
@@ -773,6 +794,18 @@ begin
 end;
 
 procedure TOutputList.AddLine(const S: String; const Kind: TOutputKind);
+
+  function IsTransientProgressLine(const ALine: String; const AKind: TOutputKind): Boolean;
+  var
+    Trimmed: String;
+  begin
+    if AKind <> okInfo then
+      Exit(false);
+    Trimmed := TrimLeft(ALine);
+    Result := IsPrefix('Compiling ', Trimmed, true) or
+      IsPrefix('Writing Resource String Table file:', Trimmed, true);
+  end;
+
 var
   IsBottom: Boolean;
 begin
@@ -782,7 +815,27 @@ begin
     (List.ItemIndex < 0) or
     (List.ItemIndex >= List.Items.Count - 2);
 
-  List.Items.AddObject(S, OutputInfoPerKind[Kind]);
+  if FReplaceLastProgressLine and (List.Items.Count > 0) then
+  begin
+    List.Items[List.Items.Count - 1] := S;
+    List.Items.Objects[List.Items.Count - 1] := OutputInfoPerKind[Kind];
+  end else
+    List.Items.AddObject(S, OutputInfoPerKind[Kind]);
+
+  FReplaceLastProgressLine := IsTransientProgressLine(S, Kind);
+
+  if Kind = okWarning then
+  begin
+    Inc(FWarningsCount);
+    if Assigned(FOnCountsChanged) then
+      FOnCountsChanged(Self);
+  end else
+  if Kind = okError then
+  begin
+    Inc(FErrorsCount);
+    if Assigned(FOnCountsChanged) then
+      FOnCountsChanged(Self);
+  end;
 
   { scroll to bottom once new message received,
     but only if already looking at bottom (otherwise we would prevent
@@ -816,8 +869,16 @@ begin
 end;
 
 procedure TOutputList.Clear;
+var
+  HadCounts: Boolean;
 begin
+  HadCounts := (FWarningsCount <> 0) or (FErrorsCount <> 0);
+  FWarningsCount := 0;
+  FErrorsCount := 0;
+  FReplaceLastProgressLine := false;
   List.Items.Clear;
+  if HadCounts and Assigned(FOnCountsChanged) then
+    FOnCountsChanged(Self);
 end;
 
 { global routines ------------------------------------------------------------ }
