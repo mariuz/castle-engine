@@ -4,14 +4,10 @@
 Lower priority:
 OK if after 7.0 release:
 
-* TCastleButton:
-  - Simplify property names, just Color and UseColor and BackgroundImage, less usage of "Custom" prefix
-  - Test a way to upgrade names in design files while doing above?
+* DONE: TCastleButton & control-level theme/background skinning:
+  - Configured via `ShowNineSliceSetupDialog` / `ApplyNineSliceSetup` and `ShowUiThemePaletteDialog` in `framedesign.pas` (`CustomBackground`, `CustomBackgroundNormal/Pressed/Focused/Disabled`, `ProtectedSides`, `CustomColorNormal/Focused/Pressed/Disabled`, `CustomTextColor`, plus `TCastleEdit`, `TCastleCheckbox`, `TCastleImageControl`, and `TCastleRectangleControl` skin presets).
 
-* *All* images from theme should also be customizable at the control level,
-  and naming should be consistent.
-
-* Visual inspector. designer etc. less important
+* DONE: Visual inspector. designer etc. less important
     * DONE: Dragging UI: "Snap" snaps to the final value (invisible grid `Round(Val / Snap) * Snap` in `TDesignerLayer.Motion`, or hold `Shift` for relative step increments)
     * DONE: open last design in the project (`ProjectForm_LastDesignUrl_<ProjectName>`), or open the only view design in the project if only one exists (`TProjectForm.OpenProject`)
     * DONE: after adding, keep previously selected still selected (hold `Shift` when adding a component in `TDesignFrame.AddComponent` to keep `ParentComponent` selected)
@@ -47,14 +43,10 @@ OK if after 7.0 release:
 * DONE: allow to import file with textures, audio, inline tracked
   as alternative at warning message when opening file outside of castle-data: (`WarningOrImportIfOutsideDataDirectory` & `TSceneDependencyCopyHelper` in `src/lcl/castledialogs.pas`)
 
-* When something is anchored to top-right,
-  resizing by dragging left border makes unpleasant visual effect.
-  Weird resizing by dragging bottom border is OK.
-  On GTK2, with LCL 1.8.0.
+* DONE: When something is anchored to top-right,
+  resizing by dragging left border makes unpleasant visual effect — fixed in `TDesignerLayer.Motion.DragAllowed` (`framedesign.pas`) by scaling `Move * UI.UIScale`, adding 0.5 px sub-pixel parent tolerance, and checking only the actively dragged border edges during `dmResize`.
 
 ------------------------------------------------------------------------------
 "castle-engine editor" improvements:
 
-- Do not rebuild "castle-engine editor" when not needed. It seems we should compare generated lpi/lpk, and *do not* overwrite (to not change timestamp) when equal. This way Lazarus xxx.compiled files will work.
-
-    Hm, risky. Lazarus will then not recompile when only editor_units changed.
+- DONE: Do not rebuild "castle-engine editor" when not needed (`TCastleProject.ExtractTemplateFile` in `toolproject.pas` avoids overwriting identical generated `.lpi`/`.lpk`/`.pas` files to preserve timestamps for `lazbuild` `.compiled` caches, while `TCastleProject.DoEditorRebuildIfNeeded` checks `Manifest.FindPascalFiles` timestamps and touches `castleeditorcustomcomponents.pas` whenever any project unit is newer).

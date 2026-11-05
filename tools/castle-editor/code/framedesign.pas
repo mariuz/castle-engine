@@ -2283,7 +2283,8 @@ type
     procedure ShowQuickToggleGroupDialog;
     procedure ApplyNineSliceSetup(const MarginLeft, MarginRight, MarginTop,
       MarginBottom: Single; const TargetW, TargetH: Single;
-      const ImageUrl: String; const SmoothScale: Boolean);
+      const ImageUrl: String; const SmoothScale: Boolean;
+      const SkinPreset: Integer = 0);
     procedure ShowNineSliceSetupDialog;
     procedure ApplyMultiLightTweaker(const TempPreset: Integer;
       const IntensityMult: Single; const ShadowPolicy: Integer;
@@ -4153,23 +4154,33 @@ function TDesignFrame.TDesignerLayer.Motion(const Event: TInputMotion): Boolean;
   function DragAllowed(const UI: TCastleUserInterface; const Move: TVector2): Boolean;
   var
     CurrentRect, ResultingRect, ParentR: TFloatRectangle;
+    ScaledMove: TVector2;
   begin
     CurrentRect := UI.RenderRectWithBorder;
+    ScaledMove := Move * UI.UIScale;
     case UiDraggingMode of
-      dmTranslate: ResultingRect := CurrentRect.Translate(Move);
-      dmResize   : ResultingRect := ResizeRect(CurrentRect, Move);
+      dmTranslate: ResultingRect := CurrentRect.Translate(ScaledMove);
+      dmResize   : ResultingRect := ResizeRect(CurrentRect, ScaledMove);
     end;
-    ParentR := ParentRenderRect(UI);
-    { Only allow movement/resize if control will not go outside of parent,
-      unless it was already outside.
-
-      Note that we limit to the parent rect *without border*,
-      that is: we don't allow to move control over a border of the parent.
-      This makes sense, since FullSize and WidthFraction = 1 keep the control
-      within the parent rect *without border* too.
-    }
-    Result := (not ParentR.Contains(CurrentRect)) or
-      ParentR.Contains(ResultingRect);
+    { Expand ParentR by 0.5 px to avoid IEEE-754 ULP rounding rejections when a
+      control is anchored flush to the top-right/bottom-right border of its parent
+      and resized by dragging the opposite (left/bottom) border. }
+    ParentR := ParentRenderRect(UI).Grow(0.5);
+    if not ParentR.Contains(CurrentRect) then
+      Exit(true);
+    if UiDraggingMode = dmResize then
+    begin
+      Result := true;
+      if (ResizingHorizontal = hpLeft) and (ResultingRect.Left < ParentR.Left) then
+        Result := false;
+      if (ResizingHorizontal = hpRight) and (ResultingRect.Right > ParentR.Right) then
+        Result := false;
+      if (ResizingVertical = vpBottom) and (ResultingRect.Bottom < ParentR.Bottom) then
+        Result := false;
+      if (ResizingVertical = vpTop) and (ResultingRect.Top > ParentR.Top) then
+        Result := false;
+    end else
+      Result := ParentR.Contains(ResultingRect);
   end;
 
   procedure ApplyDrag(const UI: TCastleUserInterface; X, Y: Single);
@@ -45164,12 +45175,14 @@ end;
 
 procedure TDesignFrame.ApplyNineSliceSetup(const MarginLeft, MarginRight,
   MarginTop, MarginBottom: Single; const TargetW, TargetH: Single;
-  const ImageUrl: String; const SmoothScale: Boolean);
+  const ImageUrl: String; const SmoothScale: Boolean;
+  const SkinPreset: Integer = 0);
 var
   SelectedList: TComponentList;
   SelectedCount, I, ConfiguredCount: Integer;
   ParentUI: TCastleUserInterface;
   NewImg: TCastleImageControl;
+  ColNormal, ColFocused, ColPressed, ColDisabled, ColText: TCastleColor;
 
   procedure ConfigureBorderSides(const B: TBorder);
   begin
@@ -45181,10 +45194,59 @@ var
     B.Bottom := Max(0.0, MarginBottom);
   end;
 
+  procedure ResolveSkinColors;
+  begin
+    case SkinPreset of
+      1: // Dark Slate Cyber Skin
+        begin
+          ColNormal   := Vector4(0.14, 0.18, 0.26, 0.95);
+          ColFocused  := Vector4(0.20, 0.28, 0.42, 0.98);
+          ColPressed  := Vector4(0.10, 0.42, 0.68, 1.00);
+          ColDisabled := Vector4(0.12, 0.14, 0.18, 0.55);
+          ColText     := Vector4(0.92, 0.96, 1.00, 1.00);
+        end;
+      2: // Royal Gold RPG Skin
+        begin
+          ColNormal   := Vector4(0.24, 0.18, 0.10, 0.95);
+          ColFocused  := Vector4(0.36, 0.27, 0.14, 0.98);
+          ColPressed  := Vector4(0.52, 0.38, 0.16, 1.00);
+          ColDisabled := Vector4(0.18, 0.15, 0.12, 0.55);
+          ColText     := Vector4(1.00, 0.92, 0.68, 1.00);
+        end;
+      3: // Emerald Tactical HUD Skin
+        begin
+          ColNormal   := Vector4(0.08, 0.22, 0.16, 0.94);
+          ColFocused  := Vector4(0.12, 0.34, 0.24, 0.98);
+          ColPressed  := Vector4(0.16, 0.48, 0.32, 1.00);
+          ColDisabled := Vector4(0.08, 0.14, 0.12, 0.55);
+          ColText     := Vector4(0.82, 1.00, 0.90, 1.00);
+        end;
+      4: // Crimson Action Skin
+        begin
+          ColNormal   := Vector4(0.32, 0.10, 0.12, 0.95);
+          ColFocused  := Vector4(0.46, 0.14, 0.16, 0.98);
+          ColPressed  := Vector4(0.64, 0.18, 0.20, 1.00);
+          ColDisabled := Vector4(0.20, 0.12, 0.12, 0.55);
+          ColText     := Vector4(1.00, 0.92, 0.92, 1.00);
+        end;
+      else
+        begin
+          ColNormal   := Vector4(0.20, 0.22, 0.26, 0.95);
+          ColFocused  := Vector4(0.28, 0.32, 0.38, 0.98);
+          ColPressed  := Vector4(0.16, 0.18, 0.22, 1.00);
+          ColDisabled := Vector4(0.15, 0.15, 0.15, 0.50);
+          ColText     := White;
+        end;
+    end;
+  end;
+
   procedure ProcessUIForNineSlice(const C: TComponent);
   var
     ImgCtrl: TCastleImageControl;
     BtnCtrl: TCastleButton;
+    EditCtrl: TCastleEdit;
+    CheckCtrl: TCastleCheckbox;
+    RectCtrl: TCastleRectangleControl;
   begin
     if C is TCastleImageControl then
     begin
@@ -45197,12 +45259,16 @@ var
       if TargetW > 0 then ImgCtrl.Width := TargetW;
       if TargetH > 0 then ImgCtrl.Height := TargetH;
       ConfigureBorderSides(ImgCtrl.ProtectedSides);
+      if SkinPreset in [1..4] then
+        ImgCtrl.Color := ColNormal
+      else if SkinPreset = 5 then
+        ImgCtrl.Color := White;
       Inc(ConfiguredCount);
     end else
     if C is TCastleButton then
     begin
       BtnCtrl := TCastleButton(C);
-      BtnCtrl.CustomBackground := true;
+      BtnCtrl.CustomBackground := SkinPreset <> 5;
       if Trim(ImageUrl) <> '' then
         BtnCtrl.CustomBackgroundNormal.Url := Trim(ImageUrl);
       BtnCtrl.CustomBackgroundNormal.SmoothScaling := SmoothScale;
@@ -45210,6 +45276,17 @@ var
       ConfigureBorderSides(BtnCtrl.CustomBackgroundPressed.ProtectedSides);
       ConfigureBorderSides(BtnCtrl.CustomBackgroundFocused.ProtectedSides);
       ConfigureBorderSides(BtnCtrl.CustomBackgroundDisabled.ProtectedSides);
+      if SkinPreset in [1..4] then
+      begin
+        BtnCtrl.CustomColorNormal := ColNormal;
+        BtnCtrl.CustomColorFocused := ColFocused;
+        BtnCtrl.CustomColorPressed := ColPressed;
+        BtnCtrl.CustomColorDisabled := ColDisabled;
+        BtnCtrl.CustomTextColorUse := true;
+        BtnCtrl.CustomTextColor := ColText;
+      end else
+      if SkinPreset = 5 then
+        BtnCtrl.CustomTextColorUse := false;
       if (TargetW > 0) and (TargetH > 0) then
       begin
         BtnCtrl.AutoSize := false;
@@ -45217,11 +45294,42 @@ var
         BtnCtrl.Height := TargetH;
       end;
       Inc(ConfiguredCount);
+    end else
+    if C is TCastleEdit then
+    begin
+      EditCtrl := TCastleEdit(C);
+      if SkinPreset in [1..4] then
+      begin
+        EditCtrl.BackgroundColor := ColNormal;
+        EditCtrl.FocusedColor := ColText;
+        EditCtrl.UnfocusedColor := ColText;
+      end;
+      Inc(ConfiguredCount);
+    end else
+    if C is TCastleCheckbox then
+    begin
+      CheckCtrl := TCastleCheckbox(C);
+      if SkinPreset in [1..4] then
+      begin
+        CheckCtrl.TextColor := ColText;
+        CheckCtrl.CheckboxColor := ColFocused;
+      end;
+      Inc(ConfiguredCount);
+    end else
+    if C is TCastleRectangleControl then
+    begin
+      RectCtrl := TCastleRectangleControl(C);
+      if SkinPreset in [1..4] then
+        RectCtrl.Color := ColNormal;
+      if TargetW > 0 then RectCtrl.Width := TargetW;
+      if TargetH > 0 then RectCtrl.Height := TargetH;
+      Inc(ConfiguredCount);
     end;
   end;
 
 begin
   if DesignOwner = nil then Exit;
+  ResolveSkinColors;
 
   ConfiguredCount := 0;
   GetSelected(SelectedList, SelectedCount, false);
@@ -45263,11 +45371,12 @@ end;
 procedure TDesignFrame.ShowNineSliceSetupDialog;
 var
   Dialog: TForm;
-  LblMargins, LblSize, LblUrl: TLabel;
+  LblMargins, LblSize, LblUrl, LblSkin: TLabel;
   MarginPanel, SizePanel, UrlPanel: TPanel;
   SpinL, SpinR, SpinT, SpinB, SpinW, SpinH: TFloatSpinEdit;
   EditUrl: TEdit;
   BtnBrowse: TButton;
+  ComboSkinPreset: TComboBox;
   CheckSmooth: TCheckBox;
   BottomPanel: TPanel;
   BtnOk, BtnCancel: TButton;
@@ -45277,7 +45386,7 @@ begin
 
   Dialog := TForm.CreateNew(Self);
   try
-    Dialog.Caption := 'Quick 2D Nine-Slice (ProtectedSides) Scalable Frame & Button Configurator';
+    Dialog.Caption := 'Quick 2D Nine-Slice (ProtectedSides) & Control Theme/Color Skin Configurator';
     Dialog.Position := poMainFormCenter;
     Dialog.BorderStyle := bsDialog;
     Dialog.AutoSize := true;
@@ -45378,6 +45487,21 @@ begin
     EditUrl.TextHint := 'castle-data:/ui/panel_frame_9slice.png';
     EditUrl.Parent := UrlPanel;
 
+    LblSkin := TLabel.Create(Dialog);
+    LblSkin.Caption := 'Control-Level Button & UI Color/Theme Skin Preset:';
+    LblSkin.Parent := Dialog;
+
+    ComboSkinPreset := TComboBox.Create(Dialog);
+    ComboSkinPreset.Style := csDropDownList;
+    ComboSkinPreset.Items.Add('Keep Existing Control Colors (Configure 9-Slice & Background Image Only)');
+    ComboSkinPreset.Items.Add('Dark Slate Cyber Skin (CustomColorNormal/Focused/Pressed & TextColor)');
+    ComboSkinPreset.Items.Add('Royal Gold RPG Skin (Warm Bronze/Gold States & Parchment Text)');
+    ComboSkinPreset.Items.Add('Emerald Tactical HUD Skin (Night-Vision Green States & Mint Text)');
+    ComboSkinPreset.Items.Add('Crimson Action Skin (Ruby/Crimson States & Crisp White Text)');
+    ComboSkinPreset.Items.Add('Reset to Default Engine Theme (CustomBackground := false)');
+    ComboSkinPreset.ItemIndex := 0;
+    ComboSkinPreset.Parent := Dialog;
+
     CheckSmooth := TCheckBox.Create(Dialog);
     CheckSmooth.Caption := 'Smooth Bilinear Filtering (Uncheck for Crisp Pixel-Art 9-Slice Borders)';
     CheckSmooth.Checked := true;
@@ -45398,7 +45522,7 @@ begin
     BtnCancel.Parent := BottomPanel;
 
     BtnOk := TButton.Create(Dialog);
-    BtnOk.Caption := 'Apply 9-Slice';
+    BtnOk.Caption := 'Apply 9-Slice & Skin';
     BtnOk.Default := true;
     BtnOk.ModalResult := mrOk;
     BtnOk.AutoSize := true;
@@ -45432,7 +45556,8 @@ begin
               SpinW.Value,
               SpinH.Value,
               EditUrl.Text,
-              CheckSmooth.Checked);
+              CheckSmooth.Checked,
+              ComboSkinPreset.ItemIndex);
             Break;
           end;
         else

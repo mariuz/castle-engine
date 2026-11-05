@@ -1593,7 +1593,9 @@ end;
 
 procedure TCastleProject.DoEditorRebuildIfNeeded;
 var
-  CgePath, EditorPath: String;
+  CgePath, EditorPath, CustomComponentsPas, PascalFile, FullPasFile: String;
+  PascalFiles: TStringList;
+  CustomComponentsAge: LongInt;
 begin
   if Trim(Manifest.EditorUnits) <> '' then
   begin
@@ -1609,6 +1611,31 @@ begin
       allows to reuse previous lazbuild compilation results.
       Just silence ExtractTemplate warnings when overriding. }
     ExtractTemplate('custom_editor_template/', EditorPath, true);
+
+    { If any project Pascal unit is newer than castleeditorcustomcomponents.pas,
+      rewrite castleeditorcustomcomponents.pas to bump its timestamp so lazbuild
+      knows to recompile castle_editor_automatic_package.lpk even when editor_units
+      list itself did not change. }
+    CustomComponentsPas := EditorPath + 'castleeditorcustomcomponents.pas';
+    if RegularFileExists(CustomComponentsPas) then
+    begin
+      CustomComponentsAge := FileAge(CustomComponentsPas);
+      PascalFiles := Manifest.FindPascalFiles;
+      try
+        for PascalFile in PascalFiles do
+        begin
+          FullPasFile := CombinePaths(Path, PascalFile);
+          if RegularFileExists(FullPasFile) and (FileAge(FullPasFile) > CustomComponentsAge) then
+          begin
+            StringToFile(FilenameToUriSafe(CustomComponentsPas),
+              FileToString(FilenameToUriSafe(CustomComponentsPas)));
+            Break;
+          end;
+        end;
+      finally
+        FreeAndNil(PascalFiles);
+      end;
+    end;
 
     // use lazbuild to compile CGE packages and CGE editor
     RunLazbuild(Path, [CgePath + 'packages/lazarus/castle_engine_base.lpk']);
@@ -2767,7 +2794,11 @@ begin
     begin
       Contents := FileToString(FilenameToUriSafe(SourceFileName));
       Contents := ReplaceMacros(Contents);
-      StringToFile(FilenameToUriSafe(DestinationFileName), Contents);
+      { Avoid overwriting existing destination file when contents are identical,
+        preserving file timestamps so lazbuild .compiled caches remain valid. }
+      if (not RegularFileExists(DestinationFileName)) or
+         (FileToString(FilenameToUriSafe(DestinationFileName)) <> Contents) then
+        StringToFile(FilenameToUriSafe(DestinationFileName), Contents);
     end;
   except
     on E: EFOpenError do
