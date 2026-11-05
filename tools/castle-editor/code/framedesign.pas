@@ -476,6 +476,8 @@ type
       ButtonUISidebars: TButton;
       ButtonUIPipOverlay: TButton;
       ButtonUIBentoGrid: TButton;
+      ButtonUIImageNativeSize: TButton;
+      ButtonUIScaling: TSpeedButton;
       PanelPropertyFilter: TPanel;
       EditPropertyFilter: TEdit;
       ButtonResetProperty: TSpeedButton;
@@ -1273,6 +1275,11 @@ type
       Otherwise updates only in T. }
     procedure UpdateColliders(T: TCastleTransform = nil);
     function UIScalingStatusToString(const Detailed: Boolean = false): String;
+    procedure UpdateUIScalingButton;
+    procedure ButtonUIScalingClick(Sender: TObject);
+    procedure ShowConfigureUIScalingDialog;
+    procedure ButtonUIImageNativeSizeClick(Sender: TObject);
+    procedure SetSelectedUIImageNativeSize(const ScaleMultiplier: Single);
 
     { Get parent of non-visual component.
 
@@ -4933,6 +4940,18 @@ begin
   ButtonQuickAdd.OnClick := @ButtonQuickAddClick;
   ButtonQuickAdd.Parent := PanelMiddleTop;
 
+  ButtonUIScaling := TSpeedButton.Create(Self);
+  ButtonUIScaling.Caption := 'UI: 100%';
+  ButtonUIScaling.Hint := 'Configure User Interface Scaling (Click: Open UI Scaling dialog | Shift-click: Cycle Enclose / Fit / None)';
+  ButtonUIScaling.ShowHint := true;
+  ButtonUIScaling.AutoSize := true;
+  ButtonUIScaling.Constraints.MinHeight := 33;
+  ButtonUIScaling.Constraints.MinWidth := 62;
+  ButtonUIScaling.BorderSpacing.Left := 4;
+  ButtonUIScaling.OnClick := @ButtonUIScalingClick;
+  ButtonUIScaling.Parent := PanelMiddleTop;
+  UpdateUIScalingButton;
+
   ButtonSimulationStep := TSpeedButton.Create(Self);
   ButtonSimulationStep.Caption := 'Step';
   ButtonSimulationStep.Hint := 'Advance physics simulation by a single frame (1/60s)';
@@ -6731,6 +6750,14 @@ begin
   ButtonUIBentoGrid.OnClick := @ButtonUIBentoGridClick;
   ButtonUIBentoGrid.Parent := PanelLayoutUI;
 
+  ButtonUIImageNativeSize := TButton.Create(Self);
+  ButtonUIImageNativeSize.AutoSize := true;
+  ButtonUIImageNativeSize.Caption := 'Size From Image';
+  ButtonUIImageNativeSize.Hint := 'Set explicit Width and Height of selected TCastleImageControl / TCastleButton from its currently loaded Image dimensions (Click: 1x native pixel size | Shift-click: 0.5x HiDPI @2x half-size | Ctrl-click: 2x pixel-art double-size)';
+  ButtonUIImageNativeSize.ShowHint := true;
+  ButtonUIImageNativeSize.OnClick := @ButtonUIImageNativeSizeClick;
+  ButtonUIImageNativeSize.Parent := PanelLayoutUI;
+
   ButtonViewTop := TButton.Create(Self);
   ButtonViewTop.Align := alTop;
   ButtonViewTop.AutoSize := true;
@@ -8365,8 +8392,9 @@ procedure TDesignFrame.DeleteComponent(const AutoSelectParents: Boolean = false)
 var
   Selected: TComponentList;
   SelectedCount: Integer;
-  C: TComponent;
-  UndoSummary: String;
+  C, CandidateComp, FallbackComponent: TComponent;
+  FirstSelNode, CandidateNode: TTreeNode;
+  UndoSummary, FallbackComponentName: String;
 begin
   GetSelected(Selected, SelectedCount, AutoSelectParents);
   try
@@ -8385,6 +8413,50 @@ begin
         Exit;
       end;
 
+      { Determine fallback selection before deleting: prefer the previous
+        unselected sibling ("keep selected above"), then the next unselected
+        sibling, and finally the nearest unselected ancestor/parent component. }
+      FallbackComponentName := '';
+      if ControlsTree.SelectionCount > 0 then
+      begin
+        FirstSelNode := ControlsTree.Selections[0];
+        if FirstSelNode <> nil then
+        begin
+          CandidateNode := FirstSelNode.GetPrevSibling;
+          while (CandidateNode <> nil) and (FallbackComponentName = '') do
+          begin
+            CandidateComp := SelectedFromNode(CandidateNode, true);
+            if (CandidateComp <> nil) and (Selected.IndexOf(CandidateComp) = -1) then
+              FallbackComponentName := CandidateComp.Name
+            else
+              CandidateNode := CandidateNode.GetPrevSibling;
+          end;
+
+          if FallbackComponentName = '' then
+          begin
+            CandidateNode := FirstSelNode.GetNextSibling;
+            while (CandidateNode <> nil) and (FallbackComponentName = '') do
+            begin
+              CandidateComp := SelectedFromNode(CandidateNode, true);
+              if (CandidateComp <> nil) and (Selected.IndexOf(CandidateComp) = -1) then
+                FallbackComponentName := CandidateComp.Name
+              else
+                CandidateNode := CandidateNode.GetNextSibling;
+            end;
+          end;
+
+          CandidateNode := FirstSelNode.Parent;
+          while (CandidateNode <> nil) and (FallbackComponentName = '') do
+          begin
+            CandidateComp := SelectedFromNode(CandidateNode, true);
+            if (CandidateComp <> nil) and (Selected.IndexOf(CandidateComp) = -1) then
+              FallbackComponentName := CandidateComp.Name
+            else
+              CandidateNode := CandidateNode.Parent;
+          end;
+        end;
+      end;
+
       { We depend on the fact TComponentList observes freed items,
         and removes them automatically.
         This way also freeing something that frees something else
@@ -8398,6 +8470,19 @@ begin
         else
           Break;
       until false;
+
+      if (ControlsTree.SelectionCount = 0) and (FallbackComponentName <> '') then
+      begin
+        if (FDesignRoot <> nil) and (FDesignRoot.Name = FallbackComponentName) then
+          FallbackComponent := FDesignRoot
+        else
+        if DesignOwner <> nil then
+          FallbackComponent := DesignOwner.FindComponent(FallbackComponentName)
+        else
+          FallbackComponent := nil;
+        if FallbackComponent <> nil then
+          SetSelectedComponent(FallbackComponent);
+      end;
 
       { call this after UpdateDesign, otherwise tree is not ready,
         and events caused by ModifiedOutsideObjectInspector may expect it is. }
@@ -9373,6 +9458,8 @@ begin
   LabelViewport.Visible := FCurrentViewport <> nil;
   if FCurrentViewport <> nil then
     LabelViewport.Caption := ViewportDebugInfo(FCurrentViewport);
+
+  UpdateUIScalingButton;
 
   FDesignerLayer.LayerPhysicsSimulation.Exists := CastleApplicationMode in [appSimulation, appSimulationPaused];
   FDesignerLayer.LabelPhysicsSimulationRunning.Exists := CastleApplicationMode = appSimulation;
@@ -11371,6 +11458,8 @@ begin
         ButtonUIPipOverlay.Enabled := SelectedUICount >= 2;
       if ButtonUIBentoGrid <> nil then
         ButtonUIBentoGrid.Enabled := SelectedUICount >= 2;
+      if ButtonUIImageNativeSize <> nil then
+        ButtonUIImageNativeSize.Enabled := SelectedUICount >= 1;
     end;
     SetEnabledVisible(PanelLayoutTransform, (T <> nil) or (TransformManipulate.SelectedCount > 0));
     if ButtonAlignX <> nil then
@@ -49434,6 +49523,270 @@ begin
     Result := ProposeComponentName(TComponent, DesignOwner, StripNumericSuffix(BaseName))
   else
     Result := BaseName;
+end;
+
+procedure TDesignFrame.UpdateUIScalingButton;
+var
+  CalculatedUIScale: Single;
+  NewCaption, NewHint: String;
+begin
+  if (ButtonUIScaling = nil) or (CastleControl = nil) or (CastleControl.Container = nil) then
+    Exit;
+  if CastleControl.Container.UnscaledWidth > 0 then
+    CalculatedUIScale := CastleControl.Container.Width / CastleControl.Container.UnscaledWidth
+  else
+    CalculatedUIScale := 1.0;
+  NewCaption := 'UI: ' + IntToStr(Round(CalculatedUIScale * 100)) + '%';
+  NewHint := UIScalingStatusToString(true) + NL +
+    'Click: Open Configure User Interface Scaling dialog' + NL +
+    'Shift-click: Cycle UI Scaling mode (Enclose -> Fit -> None)';
+  if ButtonUIScaling.Caption <> NewCaption then
+    ButtonUIScaling.Caption := NewCaption;
+  if ButtonUIScaling.Hint <> NewHint then
+    ButtonUIScaling.Hint := NewHint;
+end;
+
+procedure TDesignFrame.ButtonUIScalingClick(Sender: TObject);
+begin
+  if (CastleControl = nil) or (CastleControl.Container = nil) then
+    Exit;
+  if ssShift in GetKeyShiftState then
+  begin
+    if CastleControl.Container.UIReferenceWidth <= 0 then
+      CastleControl.Container.UIReferenceWidth := 1600;
+    if CastleControl.Container.UIReferenceHeight <= 0 then
+      CastleControl.Container.UIReferenceHeight := 900;
+    case CastleControl.Container.UIScaling of
+      usEncloseReferenceSize:
+        CastleControl.Container.UIScaling := usFitReferenceSize;
+      usFitReferenceSize:
+        CastleControl.Container.UIScaling := usNone;
+      else
+        CastleControl.Container.UIScaling := usEncloseReferenceSize;
+    end;
+    UpdateUIScalingButton;
+    CastleControl.Invalidate;
+  end else
+    ShowConfigureUIScalingDialog;
+end;
+
+procedure TDesignFrame.ShowConfigureUIScalingDialog;
+var
+  Dlg: TForm;
+  LblDesc, LblRefW, LblRefH, LblExpScale, LblNote: TLabel;
+  RadioMode: TRadioGroup;
+  SpinRefW, SpinRefH, SpinExpScale: TFloatSpinEdit;
+  BtnPanel: TButtonPanel;
+begin
+  if (CastleControl = nil) or (CastleControl.Container = nil) then
+    Exit;
+
+  Dlg := TForm.CreateNew(Self);
+  try
+    Dlg.Caption := 'Configure User Interface Scaling';
+    Dlg.Position := poMainFormCenter;
+    Dlg.BorderStyle := bsDialog;
+    Dlg.ClientWidth := 500;
+    Dlg.ClientHeight := 420;
+
+    LblDesc := TLabel.Create(Dlg);
+    LblDesc.Parent := Dlg;
+    LblDesc.Left := 14;
+    LblDesc.Top := 12;
+    LblDesc.Width := 472;
+    LblDesc.WordWrap := true;
+    LblDesc.AutoSize := true;
+    LblDesc.Caption :=
+      'User interface scaling simulates a window of a particular size by adjusting the ' +
+      'coordinates internally used by the UI controls. In effect, you can set hardcoded ' +
+      'values for controls sizes, and they will take the same portion of the final window. ' +
+      'You should still carefully set the anchors of your UI controls, as the final window ' +
+      'may have various aspect ratios.';
+
+    RadioMode := TRadioGroup.Create(Dlg);
+    RadioMode.Parent := Dlg;
+    RadioMode.Left := 14;
+    RadioMode.Top := 92;
+    RadioMode.Width := 472;
+    RadioMode.Height := 168;
+    RadioMode.Caption := 'UI Scaling Mode';
+    RadioMode.Items.Add('No user interface scaling (usNone)');
+    RadioMode.Items.Add('Window fits inside the simulated area size (usFitReferenceSize)');
+    RadioMode.Items.Add('Window encloses simulated area size — Recommended (usEncloseReferenceSize)');
+    RadioMode.Items.Add('Window encloses simulated area size, auto-orientation (usEncloseReferenceSizeAutoOrientation)');
+    RadioMode.Items.Add('Explicit scale multiplier (usExplicitScale)');
+    RadioMode.Items.Add('DPI-based physical scale (usDpiScale)');
+    case CastleControl.Container.UIScaling of
+      usNone: RadioMode.ItemIndex := 0;
+      usFitReferenceSize: RadioMode.ItemIndex := 1;
+      usEncloseReferenceSize: RadioMode.ItemIndex := 2;
+      usEncloseReferenceSizeAutoOrientation: RadioMode.ItemIndex := 3;
+      usExplicitScale: RadioMode.ItemIndex := 4;
+      usDpiScale: RadioMode.ItemIndex := 5;
+      else RadioMode.ItemIndex := 2;
+    end;
+
+    LblRefW := TLabel.Create(Dlg);
+    LblRefW.Parent := Dlg;
+    LblRefW.Left := 14;
+    LblRefW.Top := 274;
+    LblRefW.Caption := 'Reference Width (px):';
+
+    SpinRefW := TFloatSpinEdit.Create(Dlg);
+    SpinRefW.Parent := Dlg;
+    SpinRefW.Left := 156;
+    SpinRefW.Top := 270;
+    SpinRefW.Width := 90;
+    SpinRefW.DecimalPlaces := 0;
+    SpinRefW.Increment := 80;
+    SpinRefW.MinValue := 64;
+    SpinRefW.MaxValue := 16384;
+    if CastleControl.Container.UIReferenceWidth > 0 then
+      SpinRefW.Value := CastleControl.Container.UIReferenceWidth
+    else
+      SpinRefW.Value := 1600;
+
+    LblRefH := TLabel.Create(Dlg);
+    LblRefH.Parent := Dlg;
+    LblRefH.Left := 264;
+    LblRefH.Top := 274;
+    LblRefH.Caption := 'Reference Height (px):';
+
+    SpinRefH := TFloatSpinEdit.Create(Dlg);
+    SpinRefH.Parent := Dlg;
+    SpinRefH.Left := 396;
+    SpinRefH.Top := 270;
+    SpinRefH.Width := 90;
+    SpinRefH.DecimalPlaces := 0;
+    SpinRefH.Increment := 60;
+    SpinRefH.MinValue := 64;
+    SpinRefH.MaxValue := 16384;
+    if CastleControl.Container.UIReferenceHeight > 0 then
+      SpinRefH.Value := CastleControl.Container.UIReferenceHeight
+    else
+      SpinRefH.Value := 900;
+
+    LblExpScale := TLabel.Create(Dlg);
+    LblExpScale.Parent := Dlg;
+    LblExpScale.Left := 14;
+    LblExpScale.Top := 310;
+    LblExpScale.Caption := 'Explicit Scale (usExplicitScale):';
+
+    SpinExpScale := TFloatSpinEdit.Create(Dlg);
+    SpinExpScale.Parent := Dlg;
+    SpinExpScale.Left := 210;
+    SpinExpScale.Top := 306;
+    SpinExpScale.Width := 90;
+    SpinExpScale.DecimalPlaces := 2;
+    SpinExpScale.Increment := 0.25;
+    SpinExpScale.MinValue := 0.10;
+    SpinExpScale.MaxValue := 10.0;
+    if CastleControl.Container.UIExplicitScale > 0 then
+      SpinExpScale.Value := CastleControl.Container.UIExplicitScale
+    else
+      SpinExpScale.Value := 1.0;
+
+    LblNote := TLabel.Create(Dlg);
+    LblNote.Parent := Dlg;
+    LblNote.Left := 14;
+    LblNote.Top := 344;
+    LblNote.Width := 472;
+    LblNote.WordWrap := true;
+    LblNote.Caption :=
+      '(From code, you can control this using Window.Container.UIScalingXxx properties or data/CastleSettings.xml.)';
+
+    BtnPanel := TButtonPanel.Create(Dlg);
+    BtnPanel.Parent := Dlg;
+    BtnPanel.ShowButtons := [pbOK, pbCancel];
+
+    if Dlg.ShowModal = mrOk then
+    begin
+      CastleControl.Container.UIReferenceWidth := SpinRefW.Value;
+      CastleControl.Container.UIReferenceHeight := SpinRefH.Value;
+      CastleControl.Container.UIExplicitScale := SpinExpScale.Value;
+      case RadioMode.ItemIndex of
+        0: CastleControl.Container.UIScaling := usNone;
+        1: CastleControl.Container.UIScaling := usFitReferenceSize;
+        2: CastleControl.Container.UIScaling := usEncloseReferenceSize;
+        3: CastleControl.Container.UIScaling := usEncloseReferenceSizeAutoOrientation;
+        4: CastleControl.Container.UIScaling := usExplicitScale;
+        5: CastleControl.Container.UIScaling := usDpiScale;
+      end;
+      UpdateUIScalingButton;
+      CastleControl.Invalidate;
+    end;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonUIImageNativeSizeClick(Sender: TObject);
+var
+  Mult: Single;
+begin
+  if ssShift in GetKeyShiftState then
+    Mult := 0.5
+  else
+  if ssCtrl in GetKeyShiftState then
+    Mult := 2.0
+  else
+    Mult := 1.0;
+  SetSelectedUIImageNativeSize(Mult);
+end;
+
+procedure TDesignFrame.SetSelectedUIImageNativeSize(const ScaleMultiplier: Single);
+var
+  Selected: TComponentList;
+  SelectedCount, I, UpdatedCount: Integer;
+  ImgCtrl: TCastleImageControl;
+  BtnCtrl: TCastleButton;
+  Img: TEncodedImage;
+begin
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount = 0 then
+      Exit;
+    UpdatedCount := 0;
+    for I := 0 to SelectedCount - 1 do
+    begin
+      if IsComponentLocked(Selected[I]) then
+        Continue;
+      if Selected[I] is TCastleImageControl then
+      begin
+        ImgCtrl := TCastleImageControl(Selected[I]);
+        Img := ImgCtrl.Content.Image;
+        if (Img <> nil) and (Img.Width > 0) and (Img.Height > 0) then
+        begin
+          ImgCtrl.FullSize := false;
+          ImgCtrl.WidthFraction := 0;
+          ImgCtrl.HeightFraction := 0;
+          ImgCtrl.Stretch := true;
+          ImgCtrl.Width := Max(1, Round(Img.Width * ScaleMultiplier));
+          ImgCtrl.Height := Max(1, Round(Img.Height * ScaleMultiplier));
+          Inc(UpdatedCount);
+        end;
+      end else
+      if Selected[I] is TCastleButton then
+      begin
+        BtnCtrl := TCastleButton(Selected[I]);
+        Img := BtnCtrl.CustomBackgroundNormal.Image;
+        if (Img <> nil) and (Img.Width > 0) and (Img.Height > 0) then
+        begin
+          BtnCtrl.FullSize := false;
+          BtnCtrl.AutoSize := false;
+          BtnCtrl.WidthFraction := 0;
+          BtnCtrl.HeightFraction := 0;
+          BtnCtrl.Width := Max(1, Round(Img.Width * ScaleMultiplier));
+          BtnCtrl.Height := Max(1, Round(Img.Height * ScaleMultiplier));
+          Inc(UpdatedCount);
+        end;
+      end;
+    end;
+    if UpdatedCount > 0 then
+      ModifiedOutsideObjectInspector('Set Size From Current Image', ucHigh);
+  finally
+    FreeAndNil(Selected);
+  end;
 end;
 
 initialization

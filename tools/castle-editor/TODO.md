@@ -11,10 +11,6 @@ OK if after 7.0 release:
 * *All* images from theme should also be customizable at the control level,
   and naming should be consistent.
 
-* ? on Layout tab, new button for TCastleImageControl
-  "Set Size Explicitly From Current Image"
-  Unsure how much use-case.
-
 * Visual inspector. designer etc. less important
     * Dragging UI: should "Snap" snap to the final value (like an invisible grid?)
       Would be more like Delphi/Lazarus, probably.
@@ -23,23 +19,8 @@ OK if after 7.0 release:
       ? open the only scene in the project, if only one exists
       for now, list of views is good solution.
     * after adding, keep previously selected still selected
-    * removing - keep selected above?
 
 * Add components tab at the bottom, with large icon for each component
-
-* allow to control auto-scaling
-
-    when clicking on 44% (currently shows a hint about UI scaling) a dialog:
-
-    Configure user interface scaling
-
-    User interface scaling simulates a window of a particular size by adjusting the coordinates internally used by the UI controls. In effect, you can set hardcoded values for controls sizes, and they will take the same portion of the final window. You should still carefully set the anchors of your UI controls, as the final window may have various aspect ratios.
-
-    - No user interface scaling
-    - Window fits inside the simulated area size
-    - Window encloses simulated area size (Recommended)
-
-    (From code, you can control this using Window.Container.UIScalingXxx properties.)
 
 * Make files browser with features as planned.
     * allow dropping scenes/images on UI design - done, but show preview when dropping
