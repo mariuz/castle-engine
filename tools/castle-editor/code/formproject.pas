@@ -1394,6 +1394,27 @@ begin
 end;
 
 procedure TProjectForm.ActionOpenProjectCodeExecute(Sender: TObject);
+
+  procedure AutoGenerateProgramIfMissing(const TargetFile: String);
+  var
+    BuildToolExe: String;
+  begin
+    if (TargetFile <> '') and (not RegularFileExists(TargetFile)) then
+    begin
+      BuildToolExe := FindExeCastleTool('castle-engine');
+      if BuildToolExe <> '' then
+      begin
+        try
+          ExecuteCommandSimple(ProjectPath, BuildToolExe, ['generate-program']);
+          RefreshFiles(rfFilesInCurrentDir);
+        except
+          on E: Exception do
+            WritelnWarning('Failed to auto-generate program files before opening IDE: ' + E.Message);
+        end;
+      end;
+    end;
+  end;
+
 var
   Exe, DelphiExe: String;
   IgnoredFoundDelphiVersion: TDelphiVersion;
@@ -1423,10 +1444,12 @@ begin
       begin
         Exe := FindExeLazarusIDE;
 
-        { Open through LPI to change the project. }
+        { Open through LPI to change the project. Auto-generate if LPI/LPR is missing. }
         if ProjectLazarus <> '' then
-          ExecuteCommandNoWait(CreateTemporaryDir, Exe, [ProjectLazarus])
-        else
+        begin
+          AutoGenerateProgramIfMissing(ProjectLazarus);
+          ExecuteCommandNoWait(CreateTemporaryDir, Exe, [ProjectLazarus]);
+        end else
           ErrorBox('Lazarus project not defined (neither "standalone_source" nor "lazarus_project" were specified in CastleEngineManifest.xml).' + NL +
             NL +
             'Create Lazarus project (e.g. by "castle-engine generate-program") and update CastleEngineManifest.xml.');
@@ -1443,6 +1466,7 @@ begin
             'Create Delphi project (e.g. by "castle-engine generate-program") and update CastleEngineManifest.xml.');
           Exit;
         end;
+        AutoGenerateProgramIfMissing(ProjectDelphi);
         if not RegularFileExists(ProjectDelphi) then
         begin
           ErrorBox(Format('Delphi project file does not exist: %s.' + NL +
@@ -4096,6 +4120,19 @@ begin
     begin
       OpenWithCastleTool('castle-model-viewer', SelectedURL,
         ['--project', ProjectPathUrl, SelectedURL]);
+      Exit;
+    end;
+
+    if TFileFilterList.Matches(LoadSound_FileFilters, SelectedURL) then
+    begin
+      if FindExeCastleTool('castle-audio-player') <> '' then
+        OpenWithCastleTool('castle-audio-player', SelectedURL, [SelectedURL])
+      else
+      begin
+        ViewFileFrameUpdate;
+        if ViewFileFrame <> nil then
+          ViewFileFrame.TogglePlaySound;
+      end;
       Exit;
     end;
 

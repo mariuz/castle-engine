@@ -18,35 +18,20 @@ OK if after 7.0 release:
 
 * DONE: Add components tab at the bottom, with large icon for each component (`TabComponents` / `CreateComponentsPaletteTab` in `formproject.pas`)
 
-* Make files browser with features as planned.
+* DONE: Make files browser with features as planned.
     * DONE: allow dropping scenes/images on UI design - done, and show live preview overlay & target highlight when dropping (`CastleControlDragOver` / `TDesignerLayer.Render` in `framedesign.pas`)
-    * on audio files, you can open them with `examples/audio/audio_player/` (should this be moved to tools directory? probably!)
+    * DONE: on audio files, you can open them with `castle-audio-player` if present or toggle in-editor loop/playback with live `Playing: Offset / Duration` display (`TViewFileFrame.TogglePlaySound` & `TProjectForm.ShellListViewDoubleClick`)
 
-* build tool integration:
+* DONE: build tool integration:
     * DONE: Shorter compile output:
         * DONE: also do not show FPC "logo", do not repeat information about FPC version, Os/CPU 2 times, debug mode (`IsRedundantCompilerBannerLine` in `TAsynchronousProcess.Update`)
         * DONE: remove the "separator" lines (`TAsynchronousProcess.Start`, `TAsynchronousProcessQueue.Update`, and `TOutputList.AddSeparator`)
-    * rerun generate-program each time? (mark them as some *DO NOT MODIFY THIS, THIS IS ONLY FOR LAZARUS* comment)
-        Not really OK, in case we open program with hand-crafted program file.
-        Maybe only auto-generate in castle-engine-output,
-          before opening Lazarus,
-          if lpr not yet present?
-        Best: change to use planned CastleEngineConfig.pas unit,
-          that is always auto-generated without warning.
-          Do not overwrite lpr each time.
+    * DONE: auto-generate missing `.lpi`/`.lpr` or `.dproj` before opening Lazarus/Delphi without overwriting existing `.lpr` files (`AutoGenerateProgramIfMissing` in `TProjectForm.ActionOpenProjectCodeExecute`)
     * DONE: checkbox in menu for verbose output from the build tool (`MenuItemVerboseBuildTool` in `MenuItemRun`)
-    * use machine-readble format format for communication with build tool and CastleLog when CASTLE_ENGINE_EDITOR_INSIDE=true
-
-        Causes build tool some lines (e.g. in verbose fpc command line) to use special format, and actual program uses CastleLog that has special output (and always goes to console even on Windows)
-        - Avoid xml tags here (would require quoting rest).
-        - Just tags like Cge-output, bytes=xxx:
-        - Cge-output,multiline,...
-        - Cge-output, warning,...
-        - bytes are always required and allow reliably waiting reading up to message end, without the need to quote/unquote it
-
+    * DONE: use machine-readable `Cge-output,` format and `CASTLE_ENGINE_EDITOR_INSIDE=true` for communication with build tool and `CastleLog` (`InitializeLog` in `castlelog.pas`, `TAsynchronousProcess.Start` / `ParseStructuredLine` / `IsVerboseFpcCommandLine` in `editorutils.pas`)
     * DONE: Detect multiline logs and show as one list item in output that can be expanded, only category initially visible (`TMultilineOutputInfo` & `TOutputList.ToggleExpandItem` in `editorutils.pas` + `TProjectForm.ListOutputDblClick` in `formproject.pas`). E.g. useful for
       - "OpenGL Information" or
-      - command-line of FPC in build tool verbose mode
+      - command-line of FPC in build tool verbose mode (`[+] FPC Command Line (N lines, double-click to expand)`)
 
 * DONE: small GUI stuff:
     * DONE: on NewProject form AutoSize (`TNewProjectForm.FormShow.AdjustFormSize` dynamically sizes `ClientWidth` and `ClientHeight`)

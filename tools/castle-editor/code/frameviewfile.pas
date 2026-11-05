@@ -67,8 +67,11 @@ type
     Sound: TCastleSound;
     PlayingSound: TCastlePlayingSound;
     SoundButton: TCastleButton;
+    SoundLoopButton: TCastleButton;
+    FPlayLoop: Boolean;
     LabelVolume: TCastleLabel;
     procedure ClickSoundButton(Sender: TObject);
+    procedure ClickSoundLoopButton(Sender: TObject);
     procedure SoundStop(Sender: TObject);
     procedure FinishLoading(const AURL: String);
     procedure UpdateLabelVolume(const Sender: TCastleUserInterface;
@@ -83,6 +86,7 @@ type
     procedure LoadScene(const AURL: String);
     procedure LoadImage(const AURL: String);
     procedure LoadSound(const AURL: String);
+    procedure TogglePlaySound;
     procedure ClearLoaded;
   end;
 
@@ -110,6 +114,7 @@ begin
   FreeAndNil(Scene);
   FreeAndNil(Image);
   FreeAndNil(SoundButton);
+  FreeAndNil(SoundLoopButton);
   FreeAndNil(LabelVolume);
   FreeAndNil(PlayingSound);
   FreeAndNil(Sound);
@@ -134,12 +139,33 @@ begin
     SoundButton.Caption := 'STOP';
     PlayingSound := TCastlePlayingSound.Create(Self);
     PlayingSound.Sound := Sound;
+    PlayingSound.Loop := FPlayLoop;
     PlayingSound.FreeOnStop := true;
     PlayingSound.OnStop := @SoundStop;
     { Note: In special cases, if we don't have enough audio sources, the Play immediately
       stops the sound (calling OnStop (changing SoundButton.Caption) and applying FreeOnStop). }
     SoundEngine.Play(PlayingSound);
   end;
+end;
+
+procedure TViewFileFrame.ClickSoundLoopButton(Sender: TObject);
+begin
+  FPlayLoop := not FPlayLoop;
+  if SoundLoopButton <> nil then
+  begin
+    if FPlayLoop then
+      SoundLoopButton.Caption := 'LOOP: ON'
+    else
+      SoundLoopButton.Caption := 'LOOP: OFF';
+  end;
+  if PlayingSound <> nil then
+    PlayingSound.Loop := FPlayLoop;
+end;
+
+procedure TViewFileFrame.TogglePlaySound;
+begin
+  if (SoundButton <> nil) and SoundButton.Enabled then
+    ClickSoundButton(SoundButton);
 end;
 
 procedure TViewFileFrame.SoundStop(Sender: TObject);
@@ -307,17 +333,28 @@ begin
   SoundButton.Caption := 'PLAY';
   SoundButton.OnClick := @ClickSoundButton;
   SoundButton.Anchor(hpMiddle);
-  SoundButton.Anchor(vpMiddle);
+  SoundButton.Anchor(vpMiddle, 14);
   SoundButton.Enabled := false;
   SoundButton.MinWidth := 100;
-  SoundButton.MinHeight := 100;
+  SoundButton.MinHeight := 80;
   PreviewLayer.InsertFront(SoundButton);
 
+  SoundLoopButton := TCastleButton.Create(Self);
+  if FPlayLoop then
+    SoundLoopButton.Caption := 'LOOP: ON'
+  else
+    SoundLoopButton.Caption := 'LOOP: OFF';
+  SoundLoopButton.OnClick := @ClickSoundLoopButton;
+  SoundLoopButton.Anchor(hpMiddle);
+  SoundLoopButton.Anchor(vpTop, vpBottom, -6);
+  SoundLoopButton.MinWidth := 100;
+  SoundButton.InsertFront(SoundLoopButton);
+
   LabelVolume := TCastleLabel.Create(Self);
-  LabelVolume.FontSize := 20;
+  LabelVolume.FontSize := 16;
   LabelVolume.Color := Gray;
   LabelVolume.Anchor(hpMiddle);
-  LabelVolume.Anchor(vpTop, vpBottom, -5);
+  LabelVolume.Anchor(vpTop, vpBottom, -36);
   LabelVolume.OnUpdate := @UpdateLabelVolume;
   SoundButton.InsertFront(LabelVolume);
 
@@ -363,6 +400,8 @@ begin
       S := S + ' (application running)';
   end else
     S := FormatDot('Volume: %f', [SoundEngine.Volume]);
+  if (PlayingSound <> nil) and (Sound <> nil) then
+    S := S + NL + FormatDot('Playing: %.2fs / %.2fs', [PlayingSound.Offset, Sound.Duration]);
   LabelVolume.Caption := S;
 end;
 

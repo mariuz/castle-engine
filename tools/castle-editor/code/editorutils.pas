@@ -503,6 +503,12 @@ begin
   if JavaHome <> '' then
     Environment.Values['JAVA_HOME'] := JavaHome;
 
+  { Tell build tool and child CastleLog applications that they are running inside
+    the CGE editor so logs always stream to stdout (even on Windows GUI targets)
+    and structured Cge-output tags can be parsed. }
+  Environment.Values['CASTLE_ENGINE_EDITOR_INSIDE'] := 'true';
+  Environment.Values['CASTLE_LOG'] := 'stdout';
+
   { create Process and call Process.Execute }
   Process := TCastleProcess.Create(nil);
   Process.Executable := ExeName;
@@ -565,10 +571,49 @@ procedure TAsynchronousProcess.Update;
       IsPrefix('Target OS: ', Trimmed, true);
   end;
 
-  function LineOutputKind(const Line: String): TOutputKind;
+  function ParseStructuredLine(var ALine: String; out AKind: TOutputKind): Boolean;
+  const
+    CgePrefix = 'Cge-output,';
+  var
+    Rest: String;
+  begin
+    Result := false;
+    AKind := okInfo;
+    if not IsPrefix(CgePrefix, ALine, false) then
+      Exit;
+    Rest := PrefixRemove(CgePrefix, ALine, false);
+    if IsPrefix('error:', Rest, false) then
+    begin
+      ALine := PrefixRemove('error:', Rest, false);
+      AKind := okError;
+      Result := true;
+    end else
+    if IsPrefix('warning:', Rest, false) then
+    begin
+      ALine := PrefixRemove('warning:', Rest, false);
+      AKind := okWarning;
+      Result := true;
+    end else
+    if IsPrefix('important:', Rest, false) then
+    begin
+      ALine := PrefixRemove('important:', Rest, false);
+      AKind := okImportantInfo;
+      Result := true;
+    end else
+    if IsPrefix('info:', Rest, false) then
+    begin
+      ALine := PrefixRemove('info:', Rest, false);
+      AKind := okInfo;
+      Result := true;
+    end;
+  end;
+
+  function LineOutputKind(var Line: String): TOutputKind;
   var
     Trimmed: String;
   begin
+    if ParseStructuredLine(Line, Result) then
+      Exit;
     Trimmed := TrimLeft(Line);
     if (Pos(') Error', Line) <> 0) or
        (Pos(') Fatal', Line) <> 0) or
@@ -595,6 +640,7 @@ var
   ReadBytes: LongInt;
   NewLinePos, OldPendingLinesLen, ProcessedLength: Integer;
   Line: String;
+  LineKind: TOutputKind;
 begin
   { In case Process.Running=false, set our own FRunning and FExitStatus.
     Note that we don't make a method like TAsynchronousProcess.Running that
@@ -622,7 +668,10 @@ begin
     begin
       if (not LineProcessInternalInfo(PendingLines)) and
          (not IsRedundantCompilerBannerLine(PendingLines)) then
-        OutputList.AddLine(PendingLines, LineOutputKind(PendingLines));
+      begin
+        LineKind := LineOutputKind(PendingLines);
+        OutputList.AddLine(PendingLines, LineKind);
+      end;
       PendingLines := '';
     end;
     Exit;
@@ -659,7 +708,10 @@ begin
       Line := Copy(PendingLines, 1, NewLinePos - 1);
       if (not LineProcessInternalInfo(Line)) and
          (not IsRedundantCompilerBannerLine(Line)) then
-        OutputList.AddLine(Line, LineOutputKind(Line));
+      begin
+        LineKind := LineOutputKind(Line);
+        OutputList.AddLine(Line, LineKind);
+      end;
 
       PendingLines := SEnding(PendingLines, ProcessedLength + 1);
     end else
@@ -864,10 +916,16 @@ procedure TOutputList.AddLine(const S: String; const Kind: TOutputKind);
   const
     Prefix = '-------------------- ';
     Suffix = ' begin';
+    CgeBeginPrefix = 'Cge-output,multiline-begin:';
   var
     Trimmed: String;
   begin
     Trimmed := Trim(ALine);
+    if IsPrefix(CgeBeginPrefix, Trimmed, false) then
+    begin
+      ACategory := Trim(PrefixRemove(CgeBeginPrefix, Trimmed, false));
+      Exit(ACategory <> '');
+    end;
     Result := IsPrefix(Prefix, Trimmed, false) and IsSuffix(Suffix, Trimmed, false) and
       (Length(Trimmed) > Length(Prefix) + Length(Suffix));
     if Result then
@@ -878,8 +936,19 @@ procedure TOutputList.AddLine(const S: String; const Kind: TOutputKind);
   end;
 
   function IsMultilineEnd(const ALine, ACategory: String): Boolean;
+  var
+    Trimmed: String;
   begin
-    Result := Trim(ALine) = '-------------------- ' + ACategory + ' end';
+    Trimmed := Trim(ALine);
+    Result := (Trimmed = '-------------------- ' + ACategory + ' end') or
+      (Trimmed = 'Cge-output,multiline-end:' + ACategory) or
+      (Trimmed = 'Cge-output,multiline-end');
+  end;
+
+  function IsVerboseFpcCommandLine(const ALine: String): Boolean;
+  begin
+    Result := (Length(ALine) > 180) and
+      ((Pos(' -Fu', ALine) <> 0) or (Pos(' -Fi', ALine) <> 0) or (Pos(' -FE', ALine) <> 0));
   end;
 
   function IsTransientProgressLine(const ALine: String; const AKind: TOutputKind): Boolean;
@@ -929,9 +998,10 @@ procedure TOutputList.AddLine(const S: String; const Kind: TOutputKind);
 
 var
   IsBottom: Boolean;
-  Remaining, Chunk, MultilineCategory, SummaryCaption: String;
-  AvailWidth, SplitLen, SpacePos: Integer;
+  Remaining, Chunk, MultilineCategory, SummaryCaption, ArgToken: String;
+  AvailWidth, SplitLen, SpacePos, SeekPos: Integer;
   FirstChunk: Boolean;
+  CmdMultiline: TMultilineOutputInfo;
 begin
   { Scroll to bottom once a new message is received, unless the user explicitly
     selected an earlier message line in ListOutput to inspect it while output is streaming. }
@@ -994,6 +1064,29 @@ begin
     FMultilineInfos.Add(FCurrentMultiline);
     SummaryCaption := Format('[+] %s (0 lines, double-click to expand)', [MultilineCategory]);
     FCurrentMultilineIndex := List.Items.AddObject(SummaryCaption, FCurrentMultiline);
+    UpdateMaxWidthForLine(SummaryCaption, Kind);
+    if IsBottom then
+      List.TopIndex := List.Items.Count - 1;
+    Exit;
+  end else
+  if IsVerboseFpcCommandLine(S) then
+  begin
+    FReplaceLastProgressLine := false;
+    CmdMultiline := TMultilineOutputInfo.Create;
+    CmdMultiline.Kind := Kind;
+    CmdMultiline.Category := 'FPC Command Line';
+    CmdMultiline.Expanded := false;
+    SeekPos := 1;
+    repeat
+      ArgToken := NextToken(S, SeekPos, [' ', #9]);
+      if ArgToken = '' then
+        Break;
+      CmdMultiline.Lines.AddObject(ArgToken, OutputInfoPerKind[Kind]);
+    until false;
+    FMultilineInfos.Add(CmdMultiline);
+    SummaryCaption := Format('[+] %s (%d lines, double-click to expand)',
+      [CmdMultiline.Category, CmdMultiline.Lines.Count]);
+    List.Items.AddObject(SummaryCaption, CmdMultiline);
     UpdateMaxWidthForLine(SummaryCaption, Kind);
     if IsBottom then
       List.TopIndex := List.Items.Count - 1;

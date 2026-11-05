@@ -300,7 +300,8 @@ begin
   LogStreamOwned := false;
   FLogOutput := '';
 
-  WantsLogToStandardOutput := GetEnvironmentVariable('CASTLE_LOG') = 'stdout';
+  WantsLogToStandardOutput := (GetEnvironmentVariable('CASTLE_LOG') = 'stdout') or
+    (GetEnvironmentVariable('CASTLE_ENGINE_EDITOR_INSIDE') = 'true');
   EnableStandardOutput := LogEnableStandardOutput and (not IsLibrary);
 
   if ALogStream <> nil then
