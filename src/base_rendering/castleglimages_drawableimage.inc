@@ -195,6 +195,7 @@
     procedure SetBlendingConstantColor(const Value: TVector4);
     procedure SetClip(const Value: Boolean);
     procedure SetClipLine(const Value: TVector3);
+    procedure SetCustomShader(const Value: TGLSLProgram);
     { If this image state affects current batching operation, flush batching. }
     procedure BatchingFlushIfNeeded;
     procedure DrawNoBatch(
@@ -742,7 +743,7 @@
       for many TDrawableImage and TCastleImageControl instances
       (as TDrawableImage.CustomShader and TCastleImageControl.CustomShader).
       You can also use your own uniforms in your shader code, of course. }
-    property CustomShader: TGLSLProgram read FCustomShader write FCustomShader;
+    property CustomShader: TGLSLProgram read FCustomShader write SetCustomShader;
 
     property Image: TEncodedImage read FImage write SetImage;
     property OwnsImage: boolean read FOwnsImage write FOwnsImage;
@@ -963,12 +964,19 @@ begin
   if (AImage <> nil) and (RHIDevice <> nil) then
   begin
     FreeAndNil(FRHIDescriptorSet);
-    FreeAndNil(FRHITexture);
+    if FRHITexture <> nil then
+    begin
+      TextureMemoryProfiler.DeallocateRHI(FRHITexture);
+      FreeAndNil(FRHITexture);
+    end;
 
     TexDesc := TRHITextureDesc.Create2D(AImage.Width, AImage.Height, pfRGBA8_UNorm,
       [tuSampled, tuColorAttachment, tuTransferSrc, tuTransferDst]);
     FRHITexture := RHIDevice.CreateTexture(TexDesc);
     FRHITexture.UploadImage(AImage);
+    TextureMemoryProfiler.AllocateRHI(FRHITexture, AImage.URL,
+      AImage.ClassName, Int64(AImage.Width) * Int64(AImage.Height) * 4,
+      False, AImage.Width, AImage.Height, 1);
 
     UpdateRHIDescriptorSet;
   end;
@@ -978,7 +986,11 @@ procedure TDrawableImage.RHIContextClose;
 begin
   RenderToImageFree;
   FreeAndNil(FRHIDescriptorSet);
-  FreeAndNil(FRHITexture);
+  if FRHITexture <> nil then
+  begin
+    TextureMemoryProfiler.DeallocateRHI(FRHITexture);
+    FreeAndNil(FRHITexture);
+  end;
 end;
 
 procedure TDrawableImage.UpdateRHIDescriptorSet;
@@ -1358,6 +1370,8 @@ var
   BatchAlphaCutoff: Single;
   BatchCustomBlend: Boolean;
   BatchSrcBlend, BatchDstBlend: TRHIBlendFactor;
+  BatchCustomFragShader: TRHIShaderModule;
+  BatchCustomParams, BatchColorTint, CustomShaderColor: TVector4;
   ScissorR: TRectangle;
   EffRotCenter: TVector2;
   AutoStarted2DPass: Boolean;
@@ -1435,6 +1449,19 @@ begin
         else
           EffRotCenter := RotationCenter;
 
+        BatchCustomFragShader := nil;
+        BatchCustomParams := TVector4.Zero;
+        BatchColorTint := Color;
+        if (FCustomShader <> nil) and (Batcher.Device <> nil) then
+        begin
+          BatchCustomFragShader := FCustomShader.GetOrCreateRHI2DFragmentShader(Batcher.Device);
+          BatchCustomParams := FCustomShader.BuildRHI2DCustomParams;
+          if TCastleColor.PerfectlyEquals(Color, White) and
+             (not TextureHasOnlyAlpha) and
+             FCustomShader.GetRHIUniformValue('color', CustomShaderColor) then
+            BatchColorTint := CustomShaderColor;
+        end;
+
         AutoStarted2DPass := False;
         if (not Batcher.In2DPass) and (ActiveCommandList <> nil) then
         begin
@@ -1455,7 +1482,7 @@ begin
             ScreenRects,
             ImageRects,
             Count,
-            Color,
+            BatchColorTint,
             BatchBlendMode,
             SmoothScaling,
             ScissorR,
@@ -1467,7 +1494,10 @@ begin
             BatchAlphaCutoff,
             BatchCustomBlend,
             BatchSrcBlend,
-            BatchDstBlend
+            BatchDstBlend,
+            TextureHasOnlyAlpha,
+            BatchCustomFragShader,
+            BatchCustomParams
           );
         finally
           if AutoStarted2DPass then
@@ -2217,6 +2247,15 @@ begin
   begin
     BatchingFlushIfNeeded;
     FClipLine := Value;
+  end;
+end;
+
+procedure TDrawableImage.SetCustomShader(const Value: TGLSLProgram);
+begin
+  if FCustomShader <> Value then
+  begin
+    BatchingFlushIfNeeded;
+    FCustomShader := Value;
   end;
 end;
 

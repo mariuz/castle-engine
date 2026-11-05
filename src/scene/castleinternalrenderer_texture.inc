@@ -1200,6 +1200,12 @@ begin
       end else
       if MipLevels > 1 then
         FRHITexture.GenerateMipmaps;
+      TextureMemoryProfiler.AllocateRHI(FRHITexture,
+        Iff(TextureNode.TextureUsedFullUrl <> '', TextureNode.TextureUsedFullUrl, TextureNode.TextureImage.URL),
+        TextureNode.TextureImage.ClassName,
+        Int64(FAllocatedWidth) * Int64(FAllocatedHeight) * Iff(TexFormat = pfRGBA32_Float, 16, 4) +
+        Iff(MipLevels > 1, TTextureMemoryProfiler.MipmapsSize(TextureNode.TextureImage), 0),
+        MipLevels > 1, FAllocatedWidth, FAllocatedHeight, 1);
       CreateRHISampler(Filter, BoundaryModeS, BoundaryModeT, GL_CLAMP_TO_EDGE, Anisotropy, MipLevels);
     end;
     Exit;
@@ -1227,7 +1233,11 @@ end;
 
 procedure TImageTextureResource.UnprepareCore;
 begin
-  FreeAndNil(FRHITexture);
+  if FRHITexture <> nil then
+  begin
+    TextureMemoryProfiler.DeallocateRHI(FRHITexture);
+    FreeAndNil(FRHITexture);
+  end;
   FreeAndNil(FRHISampler);
   if FGLName <> GLObjectNone then
   begin
@@ -1425,6 +1435,12 @@ begin
           FRHITextureFrames[I].UploadImage(FrameImg, 0, 0);
         if MipLevels > 1 then
           FRHITextureFrames[I].GenerateMipmaps;
+        TextureMemoryProfiler.AllocateRHI(FRHITextureFrames[I],
+          Iff(TextureNode.TextureUsedFullUrl <> '', TextureNode.TextureUsedFullUrl, FrameImg.URL),
+          FrameImg.ClassName,
+          Int64(TexDesc.Width) * Int64(TexDesc.Height) * 4 +
+          Iff(MipLevels > 1, TTextureMemoryProfiler.MipmapsSize(FrameImg), 0),
+          MipLevels > 1, TexDesc.Width, TexDesc.Height, 1);
       end;
       CreateRHISampler(Filter, BoundaryModeS, BoundaryModeT, GL_CLAMP_TO_EDGE, Anisotropy, MipLevels);
     end;
@@ -1449,7 +1465,11 @@ var
   I: Integer;
 begin
   for I := 0 to High(FRHITextureFrames) do
-    FreeAndNil(FRHITextureFrames[I]);
+    if FRHITextureFrames[I] <> nil then
+    begin
+      TextureMemoryProfiler.DeallocateRHI(FRHITextureFrames[I]);
+      FreeAndNil(FRHITextureFrames[I]);
+    end;
   SetLength(FRHITextureFrames, 0);
   FreeAndNil(FRHISampler);
   if GLVideo <> nil then
@@ -2127,7 +2147,11 @@ end;
 
 procedure TCubeMapTextureResource.UnprepareCore;
 begin
-  FreeAndNil(FRHITexture);
+  if FRHITexture <> nil then
+  begin
+    TextureMemoryProfiler.DeallocateRHI(FRHITexture);
+    FreeAndNil(FRHITexture);
+  end;
   FreeAndNil(FRHISampler);
   if GLName <> GLObjectNone then
   begin
@@ -2228,6 +2252,10 @@ begin
       FRHITexture.UploadImage(FrontRot,  0, 5);
       if MipLevels > 1 then
         FRHITexture.GenerateMipmaps;
+      TextureMemoryProfiler.AllocateRHI(FRHITexture, RightRot.URL,
+        RightRot.ClassName,
+        Int64(CubeSize) * Int64(CubeSize) * 4 * 6,
+        MipLevels > 1, CubeSize, CubeSize, 6);
       CreateRHISampler(Filter, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, Anisotropy, MipLevels);
     finally
       FreeAndNil(BackRot);
@@ -2339,6 +2367,11 @@ begin
       end;
       if (MipLevels > 1) and not (Composite.Mipmaps and (Composite.MipmapsCount > 1)) then
         FRHITexture.GenerateMipmaps;
+      TextureMemoryProfiler.AllocateRHI(FRHITexture,
+        Composite.CubeMapImage(csPositiveX).URL,
+        Composite.CubeMapImage(csPositiveX).ClassName,
+        Int64(CubeSize) * Int64(CubeSize) * 4 * 6,
+        MipLevels > 1, CubeSize, CubeSize, 6);
       CreateRHISampler(Filter, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, Anisotropy, MipLevels);
     finally
       FreeAndNil(Composite);
@@ -2633,6 +2666,11 @@ begin
     end else
     if MipLevels > 1 then
       FRHITexture.GenerateMipmaps;
+    TextureMemoryProfiler.AllocateRHI(FRHITexture,
+      TextureNode.TextureImage.URL,
+      TextureNode.TextureImage.ClassName,
+      Int64(TexDesc.Width) * Int64(TexDesc.Height) * Int64(TexDesc.DepthOrArrayLayers) * 4,
+      MipLevels > 1, TexDesc.Width, TexDesc.Height, TexDesc.DepthOrArrayLayers);
     CreateRHISampler(Filter, BoundaryModeS, BoundaryModeT, BoundaryModeR, Anisotropy, MipLevels);
     Exit;
   end;
@@ -2668,7 +2706,11 @@ end;
 
 procedure T3DTextureResource.UnprepareCore;
 begin
-  FreeAndNil(FRHITexture);
+  if FRHITexture <> nil then
+  begin
+    TextureMemoryProfiler.DeallocateRHI(FRHITexture);
+    FreeAndNil(FRHITexture);
+  end;
   FreeAndNil(FRHISampler);
   if GLName <> GLObjectNone then
   begin

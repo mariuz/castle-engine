@@ -186,6 +186,11 @@ begin
         FRHITextures[I].UploadImage(Video.Items[I]);
         if MipCount > 1 then
           FRHITextures[I].GenerateMipmaps;
+        TextureMemoryProfiler.AllocateRHI(FRHITextures[I], Video.Items[I].URL,
+          Video.Items[I].ClassName,
+          Int64(TexDesc.Width) * Int64(TexDesc.Height) * 4 +
+          Iff(MipCount > 1, TTextureMemoryProfiler.MipmapsSize(Video.Items[I]), 0),
+          MipCount > 1, TexDesc.Width, TexDesc.Height, 1);
       end;
     end;
 
@@ -228,7 +233,11 @@ var
   I: Integer;
 begin
   for I := 0 to High(FRHITextures) do
-    FreeAndNil(FRHITextures[I]);
+    if FRHITextures[I] <> nil then
+    begin
+      TextureMemoryProfiler.DeallocateRHI(FRHITextures[I]);
+      FreeAndNil(FRHITextures[I]);
+    end;
   FreeAndNil(FRHISampler);
   for I := 0 to High(FItems) do
     if FItems[I] <> GLObjectNone then

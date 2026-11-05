@@ -32,7 +32,7 @@ uses
   CastleTransform, CastleScene, CastleProjection, CastleViewport, CastleScreenEffects, CastleRenderOptions, CastleWindow,
   CastleUIControls, CastleControls,
   CastleVideos, CastleInternalBackgroundRenderer, CastleInternalGLShadowVolumes,
-  CastleGLUtils, CastleRenderPrimitives, CastleShapes, CastleRenderContext,
+  CastleGLShaders, CastleGLUtils, CastleRenderPrimitives, CastleShapes, CastleRenderContext,
   CastleShapeInternalShadowVolumes, CastleShapeInternalRenderShadowVolumes,
   CastleInternalBatchShapes, CastleInternalShapesRenderer,
   CastleInternalCompositeImage, CastleFilesUtils, CastleUriUtils,
@@ -349,6 +349,9 @@ type
     procedure TestDrawableImageClipLineAlphaTestAndCustomBlendFactorsRHI;
     procedure TestSaveScreenActiveOffscreenAttachmentAndBatchFlushRHI;
     procedure TestGLVideo3DAndGLVideo2DAndTexture2DClampToEdgeRHI;
+    procedure TestGLSLProgramAndDrawableImageCustomShaderAndUniformsRHI;
+    procedure TestCastleFontDistanceFieldBitmapFontAndGrayscaleTreatAsAlphaRHI;
+    procedure TestTextureMemoryProfilerRHIAndImageGLFormatNilSafeRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -22356,6 +22359,343 @@ begin
     SetActiveCommandList(SavedCmd);
     FreeAndNil(Cmd);
     FreeGlobalBatch2DRenderer;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGLSLProgramAndDrawableImageCustomShaderAndUniformsRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCmd: TRHICommandList;
+  Cmd: TVulkanRHICommandList;
+  Batcher: TCastleBatch2DRenderer;
+  CustomShader: TGLSLProgram;
+  Img: TRGBAlphaImage;
+  Drawable: TDrawableImage;
+  ImgCtrl: TCastleImageControl;
+  FragShader: TRHIShaderModule;
+  AdaptedSrc: String;
+  PackedParams, StoredColor: TVector4;
+  PushData: TCastle2DPushConstants;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9501)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCmd := ActiveCommandList;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Cmd := TVulkanRHICommandList.Create(Device, 0);
+  SetActiveCommandList(Cmd);
+  Batcher := EnsureBatch2DRenderer(Device);
+  CustomShader := nil;
+  Drawable := nil;
+  ImgCtrl := nil;
+  try
+    CustomShader := TGLSLProgram.Create;
+    CustomShader.Name := 'TestCustom2DShader';
+    CustomShader.AttachVertexShader(
+      'uniform vec2 viewport_size;' + LineEnding +
+      'attribute vec2 vertex;' + LineEnding +
+      'attribute vec2 tex_coord;' + LineEnding +
+      'varying vec2 tex_coord_frag;' + LineEnding +
+      'void main(void) {' + LineEnding +
+      '  gl_Position = vec4(vertex * 2.0 / viewport_size - vec2(1.0), 0.0, 1.0);' + LineEnding +
+      '  tex_coord_frag = tex_coord;' + LineEnding +
+      '}');
+    CustomShader.AttachFragmentShader(
+      'varying vec2 tex_coord_frag;' + LineEnding +
+      'uniform sampler2D image_texture;' + LineEnding +
+      'uniform vec4 color;' + LineEnding +
+      'uniform float brightness;' + LineEnding +
+      'uniform vec2 offset_uv;' + LineEnding +
+      'void main(void) {' + LineEnding +
+      '  gl_FragColor = texture2D(image_texture, tex_coord_frag + offset_uv) * color * brightness;' + LineEnding +
+      '}');
+    CustomShader.Link;
+    CustomShader.Enable;
+    CustomShader.SetUniform('color', Vector4(0.25, 0.5, 0.75, 0.9));
+    CustomShader.SetUniform('brightness', 1.75);
+    CustomShader.SetUniform('offset_uv', Vector2(0.125, -0.25));
+    CustomShader.Disable;
+
+    AssertTrue('CustomShader.Source(stFragment) must retain attached GLSL source in pure RHI mode',
+      Pos('uniform float brightness;', CustomShader.Source(stFragment)) > 0);
+    AssertTrue('CustomShader.GetRHIUniformValue(color) must return stored vec4 uniform',
+      CustomShader.GetRHIUniformValue('color', StoredColor));
+    AssertVectorEquals(Vector4(0.25, 0.5, 0.75, 0.9), StoredColor, 0.001);
+
+    FragShader := CustomShader.GetOrCreateRHI2DFragmentShader(Device);
+    AssertTrue('GetOrCreateRHI2DFragmentShader must compile TRHIShader', FragShader <> nil);
+    AdaptedSrc := CustomShader.RHI2DAdaptedFragmentSource;
+    AssertTrue('Adapted 2D fragment shader must emit #version 450',
+      Pos('#version 450', AdaptedSrc) > 0);
+    AssertTrue('Adapted 2D fragment shader must map color to castle_color_per_vertex',
+      Pos('#define color castle_color_per_vertex', AdaptedSrc) > 0);
+    AssertTrue('Adapted 2D fragment shader must map brightness to CastleDraw.u_ModelViewMatrix[3].x',
+      Pos('#define brightness (CastleDraw.u_ModelViewMatrix[3].x)', AdaptedSrc) > 0);
+    AssertTrue('Adapted 2D fragment shader must map offset_uv to CastleDraw.u_ModelViewMatrix[3].yz',
+      Pos('#define offset_uv (CastleDraw.u_ModelViewMatrix[3].yz)', AdaptedSrc) > 0);
+
+    PackedParams := CustomShader.BuildRHI2DCustomParams;
+    AssertSameValue(1.75, PackedParams.X, 0.001);
+    AssertSameValue(0.125, PackedParams.Y, 0.001);
+    AssertSameValue(-0.25, PackedParams.Z, 0.001);
+
+    Img := TRGBAlphaImage.Create(16, 16);
+    Img.Clear(Vector4Byte(255, 255, 255, 255));
+    Drawable := TDrawableImage.Create(Img, True, True);
+    Drawable.CustomShader := CustomShader;
+
+    Cmd.BeginRecording;
+    Batcher.Begin2DPass(Cmd, 320, 200);
+    Drawable.Draw(FloatRectangle(10, 20, 64, 32));
+    Batcher.End2DPass;
+    Cmd.EndRecording;
+
+    AssertEquals('CustomShader draw must record 1 batch flush',
+      1, Integer(Batcher.TotalFlushes));
+    AssertTrue('Batcher.LastCustomFragShader must match CustomShader RHI fragment shader',
+      Batcher.LastCustomFragShader = FragShader);
+    AssertEquals('Push constants size must be 64 bytes (4x4 matrix)',
+      64, Integer(SizeOf(TCastle2DPushConstants)));
+    PushData := Batcher.LastPushConstants;
+    AssertSameValue(1.75, PushData.CustomParams.X, 0.001);
+    AssertSameValue(0.125, PushData.CustomParams.Y, 0.001);
+    AssertSameValue(-0.25, PushData.CustomParams.Z, 0.001);
+
+    { TCastleImageControl.CustomShader forwarding }
+    ImgCtrl := TCastleImageControl.Create(nil);
+    ImgCtrl.Content.Image := TRGBAlphaImage.Create(8, 8);
+    ImgCtrl.Content.OwnsImage := True;
+    ImgCtrl.CustomShader := CustomShader;
+    AssertTrue('TCastleImageControl.CustomShader must forward to Content.CustomShader',
+      ImgCtrl.Content.CustomShader = CustomShader);
+    Cmd.BeginRecording;
+    Batcher.Begin2DPass(Cmd, 320, 200);
+    ImgCtrl.Content.Draw(FloatRectangle(0, 0, 8, 8));
+    Batcher.End2DPass;
+    Cmd.EndRecording;
+    AssertTrue('TCastleImagePersistent.Draw must apply CustomShader to DrawableImage.CustomShader',
+      ImgCtrl.Content.DrawableImage.CustomShader = CustomShader);
+  finally
+    FreeAndNil(ImgCtrl);
+    FreeAndNil(Drawable);
+    FreeAndNil(CustomShader);
+    SetActiveCommandList(SavedCmd);
+    FreeAndNil(Cmd);
+    FreeGlobalBatch2DRenderer;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCastleFontDistanceFieldBitmapFontAndGrayscaleTreatAsAlphaRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCmd: TRHICommandList;
+  Cmd: TVulkanRHICommandList;
+  Batcher: TCastleBatch2DRenderer;
+  GrayImg: TGrayscaleImage;
+  AlphaDrawable: TDrawableImage;
+  PushData: TCastle2DPushConstants;
+  DistFont: TCastleFont;
+  BmpImg: TRGBAlphaImage;
+  BmpFont: TCastleBitmapFont;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9502)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCmd := ActiveCommandList;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Cmd := TVulkanRHICommandList.Create(Device, 0);
+  SetActiveCommandList(Cmd);
+  Batcher := EnsureBatch2DRenderer(Device);
+  AlphaDrawable := nil;
+  DistFont := nil;
+  BmpFont := nil;
+  try
+    { 1. TGrayscaleImage with TreatAsAlpha = True }
+    GrayImg := TGrayscaleImage.Create(16, 16);
+    GrayImg.TreatAsAlpha := True;
+    GrayImg.Clear(200);
+    AlphaDrawable := TDrawableImage.Create(GrayImg, True, True);
+    AlphaDrawable.Color := Vector4(1.0, 0.5, 0.25, 1.0);
+
+    Cmd.BeginRecording;
+    Batcher.Begin2DPass(Cmd, 320, 240);
+    AlphaDrawable.Draw(FloatRectangle(0, 0, 16, 16));
+    Batcher.End2DPass;
+    Cmd.EndRecording;
+
+    PushData := Batcher.LastPushConstants;
+    AssertSameValue(1.0, PushData.AlphaParams.Y, 0.001);
+
+    { 2. TCastleFont with DistanceField = True }
+    DistFont := TCastleFont.Create(nil);
+    DistFont.Load(Font_Default3d_Sans, False);
+    DistFont.DistanceField := True;
+    DistFont.PrepareResources;
+    AssertTrue('DistanceField TCastleFont must create InternalDrawableImage in RHI mode',
+      DistFont.InternalDrawableImage <> nil);
+    AssertTrue('DistanceField TCastleFont must attach DistanceFieldShader on InternalDrawableImage.CustomShader in RHI mode',
+      DistFont.InternalDrawableImage.CustomShader <> nil);
+
+    Cmd.BeginRecording;
+    Batcher.Begin2DPass(Cmd, 320, 240);
+    DistFont.Print(10, 20, Yellow, 'Vulkan');
+    Batcher.End2DPass;
+    Cmd.EndRecording;
+
+    AssertTrue('DistanceField font print must bind compiled RHI custom fragment shader',
+      Batcher.LastCustomFragShader <> nil);
+    AssertTrue('Adapted distance_field_font.fs must contain alpha_from_distance_texture',
+      Pos('alpha_from_distance_texture', DistFont.InternalDrawableImage.CustomShader.RHI2DAdaptedFragmentSource) > 0);
+    AssertTrue('Adapted distance_field_font.fs must map color uniform to castle_color_per_vertex',
+      Pos('#define color castle_color_per_vertex', DistFont.InternalDrawableImage.CustomShader.RHI2DAdaptedFragmentSource) > 0);
+
+    { 3. TCastleBitmapFont rendering in pure Vulkan RHI mode }
+    BmpImg := TRGBAlphaImage.Create(64, 64);
+    BmpImg.Clear(Vector4Byte(255, 255, 255, 255));
+    BmpFont := TCastleBitmapFont.Create(nil);
+    {$warnings off}
+    BmpFont.Load(BmpImg, 8, 8, 0, 2);
+    {$warnings on}
+    BmpFont.PrepareResources;
+
+    Cmd.BeginRecording;
+    Batcher.Begin2DPass(Cmd, 320, 240);
+    BmpFont.Print(20, 40, White, 'AB');
+    Batcher.End2DPass;
+    Cmd.EndRecording;
+
+    AssertEquals('TCastleBitmapFont.Print must flush 3rd cumulative batch in 2D pass',
+      3, Integer(Batcher.TotalFlushes));
+    AssertTrue('TCastleBitmapFont.Print must use default fragment shader (LastCustomFragShader = nil)',
+      Batcher.LastCustomFragShader = nil);
+  finally
+    FreeAndNil(BmpFont);
+    FreeAndNil(DistFont);
+    FreeAndNil(AlphaDrawable);
+    SetActiveCommandList(SavedCmd);
+    FreeAndNil(Cmd);
+    FreeGlobalBatch2DRenderer;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestTextureMemoryProfilerRHIAndImageGLFormatNilSafeRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedProfilerEnabled: Boolean;
+  BaseAllocatedCount: Integer;
+  BaseAllocatedBytes: Int64;
+  RgbImg: TRGBImage;
+  RgbaImg: TRGBAlphaImage;
+  FloatImg: TRGBAlphaFloatImage;
+  Drawable: TDrawableImage;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  PixTex: TPixelTextureNode;
+  TexImg: TRGBAlphaImage;
+  SummaryStr: String;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9503)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedProfilerEnabled := TextureMemoryProfiler.Enabled;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  TextureMemoryProfiler.Enabled := True;
+  BaseAllocatedCount := TextureMemoryProfiler.AllocatedCount;
+  BaseAllocatedBytes := TextureMemoryProfiler.TotalAllocatedBytes;
+  RgbImg := nil;
+  RgbaImg := nil;
+  FloatImg := nil;
+  Drawable := nil;
+  Scene := nil;
+  try
+    { 1. Verify ImageGLFormat, ImageGLInternalFormat, ImageGLType, TexParameterMaxAnisotropy when GLFeatures = nil }
+    RgbImg := TRGBImage.Create(8, 8);
+    RgbaImg := TRGBAlphaImage.Create(16, 16);
+    RgbaImg.URL := 'castle-data:/textures/test_profiler_2d.png';
+    FloatImg := TRGBAlphaFloatImage.Create(4, 4);
+
+    AssertTrue('ImageGLFormat(TRGBImage) must return non-zero enum when GLFeatures = nil',
+      ImageGLFormat(RgbImg) <> 0);
+    AssertTrue('ImageGLInternalFormat(TRGBAlphaImage) must return non-zero enum when GLFeatures = nil',
+      ImageGLInternalFormat(RgbaImg) <> 0);
+    AssertTrue('ImageGLInternalFormat(TRGBAlphaFloatImage) must return non-zero enum when GLFeatures = nil',
+      ImageGLInternalFormat(FloatImg) <> 0);
+    AssertTrue('ImageGLType(TRGBAlphaFloatImage) must return non-zero enum',
+      ImageGLType(FloatImg) <> 0);
+    TexParameterMaxAnisotropy(0, 8.0);
+
+    { 2. Verify TextureMemoryProfiler tracks TDrawableImage RHI texture allocation }
+    Drawable := TDrawableImage.Create(RgbaImg, True, False);
+    AssertEquals('TDrawableImage creation must increment TextureMemoryProfiler.AllocatedCount by 1',
+      BaseAllocatedCount + 1, TextureMemoryProfiler.AllocatedCount);
+    AssertEquals('TDrawableImage 16x16 RGBA8 must add 1024 bytes to TextureMemoryProfiler',
+      BaseAllocatedBytes + 1024, TextureMemoryProfiler.TotalAllocatedBytes);
+
+    { 3. Verify TextureMemoryProfiler tracks TImageTextureResource RHI texture allocation }
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    PixTex := TPixelTextureNode.Create;
+    TexImg := TRGBAlphaImage.Create(32, 32);
+    TexImg.URL := 'castle-data:/textures/test_profiler_3d.png';
+    PixTex.FdImage.Value := TexImg;
+    App.Texture := PixTex;
+    ShapeNode.Appearance := App;
+    ShapeNode.Geometry := TBoxNode.Create;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    TTextureResources.Prepare(Scene.RenderOptions, PixTex);
+
+    AssertEquals('Preparing TPixelTextureNode must increment TextureMemoryProfiler.AllocatedCount by 1',
+      BaseAllocatedCount + 2, TextureMemoryProfiler.AllocatedCount);
+    AssertTrue('TotalAllocatedBytes must exceed BaseAllocatedBytes + 1024 + 4096',
+      TextureMemoryProfiler.TotalAllocatedBytes >= BaseAllocatedBytes + 1024 + 4096);
+
+    SummaryStr := TextureMemoryProfiler.Summary;
+    AssertTrue('Summary must list test_profiler_2d.png',
+      Pos('test_profiler_2d.png', SummaryStr) > 0);
+    AssertTrue('Summary must list test_profiler_3d.png',
+      Pos('test_profiler_3d.png', SummaryStr) > 0);
+
+    { 4. Verify deallocation when resources are freed }
+    TTextureResources.Unprepare(PixTex);
+    AssertEquals('Unpreparing TPixelTextureNode must decrement AllocatedCount',
+      BaseAllocatedCount + 1, TextureMemoryProfiler.AllocatedCount);
+
+    FreeAndNil(Drawable);
+    AssertEquals('Freeing TDrawableImage must restore BaseAllocatedCount',
+      BaseAllocatedCount, TextureMemoryProfiler.AllocatedCount);
+    AssertEquals('Freeing TDrawableImage must restore BaseAllocatedBytes',
+      BaseAllocatedBytes, TextureMemoryProfiler.TotalAllocatedBytes);
+  finally
+    FreeAndNil(Scene);
+    FreeAndNil(Drawable);
+    FreeAndNil(FloatImg);
+    FreeAndNil(RgbaImg);
+    FreeAndNil(RgbImg);
+    TextureMemoryProfiler.Enabled := SavedProfilerEnabled;
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);
