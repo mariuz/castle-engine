@@ -566,11 +566,27 @@ type
       MenuItemVerboseBuildTool: TMenuItem;
       MenuItemOutputWordWrap: TMenuItem;
       MenuItemProjectOptions: TMenuItem;
+      TabComponents: TTabSheet;
+      PanelComponentsTop: TPanel;
+      EditComponentPaletteFilter: TEdit;
+      BtnCompAll: TSpeedButton;
+      BtnCompUI: TSpeedButton;
+      BtnCompTransform: TSpeedButton;
+      BtnCompBehavior: TSpeedButton;
+      BtnCompNonVisual: TSpeedButton;
+      ListViewComponents: TListView;
+      ComponentPaletteIcons: TImageList;
+      FCurrentComponentPaletteCategory: Integer;
       FCurrentAssetCategoryMask: String;
       FLastActivateRefreshTick: QWord;
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
+    procedure CreateComponentsPaletteTab;
+    procedure RefreshComponentsPalette;
+    procedure EditComponentPaletteFilterChange(Sender: TObject);
+    procedure BtnComponentCategoryClick(Sender: TObject);
+    procedure ListViewComponentsDblClick(Sender: TObject);
     procedure MenuItemVerboseBuildToolClick(Sender: TObject);
     procedure MenuItemOutputWordWrapClick(Sender: TObject);
     procedure MenuItemProjectOptionsClick(Sender: TObject);
@@ -2102,6 +2118,7 @@ begin
     MenuItemDesignAddNonVisual,
     @MenuItemAddComponentClick);
   CreateShellViews;
+  CreateComponentsPaletteTab;
   BuildPlatformsMenu;
   BuildPackageFormatsMenu;
   ApplicationProperties.OnWarning.Add(@WarningNotification);
@@ -2645,6 +2662,8 @@ begin
     UserConfig.SetValue('ProjectForm_Design.PanelRight.Width', Design.PanelRight.Width);
     UserConfig.SetValue('ProjectForm_Design.PanelLeft.Width', Design.PanelLeft.Width);
     UserConfig.SetValue('ProjectForm_DesignSaved', true);
+    if ProjectName <> '' then
+      UserConfig.SetValue('ProjectForm_LastDesignUrl_' + ProjectName, '');
     UserConfig.Save;
     FreeAndNil(Design);
     DesignExistenceChanged;
@@ -2918,6 +2937,8 @@ begin
   try
     Design.OpenDesign(DesignUrl);
     UserConfig.SetValue('ProjectForm_LastDesignUrl', Design.DesignUrl);
+    if ProjectName <> '' then
+      UserConfig.SetValue('ProjectForm_LastDesignUrl_' + ProjectName, Design.DesignUrl);
     UserConfig.Save;
   except
     { In case Design.OpenDesign raised exception (e.g. file unreadable or invalid),
@@ -3017,6 +3038,188 @@ begin
           BtnFilesViewStyle.Caption := 'View: Details';
       end;
   end;
+end;
+
+procedure TProjectForm.CreateComponentsPaletteTab;
+
+  procedure AddCategoryBadgeIcon(const BgColor, BorderColor: TColor; const BadgeText: String);
+  var
+    Bmp: TBitmap;
+    TW, TH: Integer;
+  begin
+    Bmp := TBitmap.Create;
+    try
+      Bmp.SetSize(48, 48);
+      Bmp.Canvas.Brush.Color := BgColor;
+      Bmp.Canvas.Pen.Color := BorderColor;
+      Bmp.Canvas.Pen.Width := 2;
+      Bmp.Canvas.RoundRect(2, 2, 46, 46, 10, 10);
+      Bmp.Canvas.Font.Color := clWhite;
+      Bmp.Canvas.Font.Bold := true;
+      Bmp.Canvas.Font.Size := 13;
+      TW := Bmp.Canvas.TextWidth(BadgeText);
+      TH := Bmp.Canvas.TextHeight(BadgeText);
+      Bmp.Canvas.Brush.Style := bsClear;
+      Bmp.Canvas.TextOut((48 - TW) div 2, (48 - TH) div 2, BadgeText);
+      ComponentPaletteIcons.Add(Bmp, nil);
+    finally
+      FreeAndNil(Bmp);
+    end;
+  end;
+
+  function CreateCompCategoryBtn(const ACaption, AHint: String; const ATag: Integer): TSpeedButton;
+  begin
+    Result := TSpeedButton.Create(Self);
+    Result.Caption := ACaption;
+    Result.Hint := AHint;
+    Result.ShowHint := true;
+    Result.GroupIndex := 191;
+    Result.Tag := ATag;
+    Result.AutoSize := true;
+    Result.Constraints.MinHeight := 26;
+    Result.Constraints.MinWidth := 56;
+    Result.Align := alRight;
+    Result.BorderSpacing.Right := 2;
+    Result.BorderSpacing.Top := 2;
+    Result.BorderSpacing.Bottom := 2;
+    Result.OnClick := @BtnComponentCategoryClick;
+    Result.Parent := PanelComponentsTop;
+  end;
+
+begin
+  TabComponents := TTabSheet.Create(Self);
+  TabComponents.Parent := PageControlBottom;
+  TabComponents.Caption := 'Components';
+
+  ComponentPaletteIcons := TImageList.Create(Self);
+  ComponentPaletteIcons.Width := 48;
+  ComponentPaletteIcons.Height := 48;
+  AddCategoryBadgeIcon($00A8581E, $00E89040, 'UI'); // 0: 2D User Interface
+  AddCategoryBadgeIcon($0044881E, $0070C840, '3D'); // 1: 3D Transform
+  AddCategoryBadgeIcon($001E78C8, $0040A8F8, 'BH'); // 2: Behavior
+  AddCategoryBadgeIcon($00883878, $00C868B8, 'NV'); // 3: Non-Visual
+
+  PanelComponentsTop := TPanel.Create(Self);
+  PanelComponentsTop.Parent := TabComponents;
+  PanelComponentsTop.Align := alTop;
+  PanelComponentsTop.AutoSize := true;
+  PanelComponentsTop.BevelOuter := bvNone;
+
+  BtnCompNonVisual := CreateCompCategoryBtn('Non-Visual', 'Show non-visual components (TCastleSound, TCastleFont, TCastleComponentFactory...)', 4);
+  BtnCompBehavior := CreateCompCategoryBtn('Behavior', 'Show 3D/2D behaviors (TCastleBillboard, TCastleSoundSource, colliders, RigidBody...)', 3);
+  BtnCompTransform := CreateCompCategoryBtn('3D Transform', 'Show 3D transforms and scenes (TCastleScene, TCastleBox, lights, cameras...)', 2);
+  BtnCompUI := CreateCompCategoryBtn('2D UI', 'Show 2D User Interface controls (TCastleButton, TCastleLabel, TCastleImageControl, groups...)', 1);
+  BtnCompAll := CreateCompCategoryBtn('All', 'Show all registered serializable CGE components', 0);
+  BtnCompAll.Down := true;
+  FCurrentComponentPaletteCategory := 0;
+
+  EditComponentPaletteFilter := TEdit.Create(Self);
+  EditComponentPaletteFilter.Parent := PanelComponentsTop;
+  EditComponentPaletteFilter.Align := alClient;
+  EditComponentPaletteFilter.BorderSpacing.Around := 2;
+  EditComponentPaletteFilter.TextHint := 'Search components by name or class (double-click to add to selected parent, Shift+double-click keeps parent selected)...';
+  EditComponentPaletteFilter.Hint := 'Filter registered CGE components by caption or class name';
+  EditComponentPaletteFilter.ShowHint := true;
+  EditComponentPaletteFilter.OnChange := @EditComponentPaletteFilterChange;
+
+  ListViewComponents := TListView.Create(Self);
+  ListViewComponents.Parent := TabComponents;
+  ListViewComponents.Align := alClient;
+  ListViewComponents.ViewStyle := vsIcon;
+  ListViewComponents.ReadOnly := true;
+  ListViewComponents.LargeImages := ComponentPaletteIcons;
+  ListViewComponents.SmallImages := ComponentPaletteIcons;
+  ListViewComponents.ShowHint := true;
+  ListViewComponents.Hint := 'Double-click a component icon to add it to the currently selected parent in the open design (hold Shift to keep parent selected).';
+  ListViewComponents.OnDblClick := @ListViewComponentsDblClick;
+
+  RefreshComponentsPalette;
+end;
+
+procedure TProjectForm.RefreshComponentsPalette;
+var
+  R: TRegisteredComponent;
+  CatIndex: Integer;
+  DispCaption, Query: String;
+  Item: TListItem;
+begin
+  if ListViewComponents = nil then
+    Exit;
+
+  if EditComponentPaletteFilter <> nil then
+    Query := LowerCase(Trim(EditComponentPaletteFilter.Text))
+  else
+    Query := '';
+
+  ListViewComponents.Items.BeginUpdate;
+  try
+    ListViewComponents.Items.Clear;
+    for R in RegisteredComponents do
+      if not R.IsDeprecated then
+      begin
+        if R.ComponentClass.InheritsFrom(TCastleUserInterface) then
+          CatIndex := 1
+        else
+        if R.ComponentClass.InheritsFrom(TCastleTransform) then
+          CatIndex := 2
+        else
+        if R.ComponentClass.InheritsFrom(TCastleBehavior) then
+          CatIndex := 3
+        else
+          CatIndex := 4;
+
+        if (FCurrentComponentPaletteCategory <> 0) and
+           (FCurrentComponentPaletteCategory <> CatIndex) then
+          Continue;
+
+        if Length(R.Caption) > 0 then
+          DispCaption := R.Caption[High(R.Caption)] + ' (' + R.ComponentClass.ClassName + ')'
+        else
+          DispCaption := R.ComponentClass.ClassName;
+
+        if (Query <> '') and
+           (Pos(Query, LowerCase(DispCaption)) = 0) then
+          Continue;
+
+        Item := ListViewComponents.Items.Add;
+        Item.Caption := DispCaption;
+        Item.ImageIndex := CatIndex - 1;
+        Item.Data := Pointer(R);
+      end;
+  finally
+    ListViewComponents.Items.EndUpdate;
+  end;
+end;
+
+procedure TProjectForm.EditComponentPaletteFilterChange(Sender: TObject);
+begin
+  RefreshComponentsPalette;
+end;
+
+procedure TProjectForm.BtnComponentCategoryClick(Sender: TObject);
+begin
+  if Sender is TComponent then
+    FCurrentComponentPaletteCategory := TComponent(Sender).Tag
+  else
+    FCurrentComponentPaletteCategory := 0;
+  RefreshComponentsPalette;
+end;
+
+procedure TProjectForm.ListViewComponentsDblClick(Sender: TObject);
+var
+  R: TRegisteredComponent;
+begin
+  if (ListViewComponents = nil) or (ListViewComponents.Selected = nil) then
+    Exit;
+  R := TRegisteredComponent(ListViewComponents.Selected.Data);
+  if R = nil then
+    Exit;
+  if Design = nil then
+  begin
+    InfoBox('Open or create a design first before adding components from the Components palette.');
+    Exit;
+  end;
+  Design.AddComponent(R.ComponentClass, R.OnCreate);
 end;
 
 procedure TProjectForm.MenuItemVerboseBuildToolClick(Sender: TObject);
@@ -4251,6 +4454,33 @@ begin
   DesignExistenceChanged;
   UpdateFormCaption(nil); // make form Caption reflect project name (although this is now done also by DesignExistenceChanged)
   UpdateMenuItemDefaultPlatform;
+
+  { Auto-open the last opened design in this project, or the only existing view
+    design in the project when only one exists. }
+  if Design = nil then
+  begin
+    if (ProjectName <> '') and
+       (UserConfig.GetValue('ProjectForm_LastDesignUrl_' + ProjectName, '') <> '') and
+       UriFileExists(UserConfig.GetValue('ProjectForm_LastDesignUrl_' + ProjectName, '')) then
+    begin
+      try
+        OpenDesign(UserConfig.GetValue('ProjectForm_LastDesignUrl_' + ProjectName, ''));
+      except
+        on E: Exception do
+          WritelnWarning('Could not auto-open last project design: ' + E.Message);
+      end;
+    end else
+    if (ProjectViews <> nil) and (ProjectViews.Count = 1) and
+       UriFileExists(ProjectViews[0].Url) then
+    begin
+      try
+        OpenDesign(ProjectViews[0].Url);
+      except
+        on E: Exception do
+          WritelnWarning('Could not auto-open single project view design: ' + E.Message);
+      end;
+    end;
+  end;
 
   if (Manifest.EditorUnits <> '') and
      (ProjectName <> InternalCustomComponentsForProject) then

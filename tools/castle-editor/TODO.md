@@ -13,15 +13,13 @@ OK if after 7.0 release:
 
 * Visual inspector. designer etc. less important
     * DONE: Dragging UI: "Snap" snaps to the final value (invisible grid `Round(Val / Snap) * Snap` in `TDesignerLayer.Motion`, or hold `Shift` for relative step increments)
-    * ? open last design in the project,
-      ? open the only scene in the project, if only one exists
-      for now, list of views is good solution.
+    * DONE: open last design in the project (`ProjectForm_LastDesignUrl_<ProjectName>`), or open the only view design in the project if only one exists (`TProjectForm.OpenProject`)
     * DONE: after adding, keep previously selected still selected (hold `Shift` when adding a component in `TDesignFrame.AddComponent` to keep `ParentComponent` selected)
 
-* Add components tab at the bottom, with large icon for each component
+* DONE: Add components tab at the bottom, with large icon for each component (`TabComponents` / `CreateComponentsPaletteTab` in `formproject.pas`)
 
 * Make files browser with features as planned.
-    * allow dropping scenes/images on UI design - done, but show preview when dropping
+    * DONE: allow dropping scenes/images on UI design - done, and show live preview overlay & target highlight when dropping (`CastleControlDragOver` / `TDesignerLayer.Render` in `framedesign.pas`)
     * on audio files, you can open them with `examples/audio/audio_player/` (should this be moved to tools directory? probably!)
 
 * build tool integration:

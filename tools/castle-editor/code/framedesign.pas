@@ -193,8 +193,8 @@ type
           ResizingVertical: TVerticalPosition; //< Defined only when UiDraggingMode=dmResize
           MarqueeStartPos, MarqueeCurrentPos: TVector2;
           MarqueeActive: Boolean;
-          LabelHover, LabelSelected, LabelStatistics: TCastleLabel;
-          RectHover, RectSelected, RectStatistics: TCastleRectangleControl;
+          LabelHover, LabelSelected, LabelStatistics, LabelDragPreview: TCastleLabel;
+          RectHover, RectSelected, RectStatistics, RectDragPreview: TCastleRectangleControl;
         { Should clicking inside UI rectangle start resizing (not only moving?). }
         function IsResizing(const UI: TCastleUserInterface; const Position: TVector2;
           out Horizontal: THorizontalPosition;
@@ -288,6 +288,10 @@ type
       FShowNonVisualComponents: Boolean;
       FindActive: Boolean;
       FMaximizePreview: Boolean;
+      FDragOverActive: Boolean;
+      FDragOverPosition: TVector2;
+      FDragOverCaption: String;
+      FDragOverTargetUI: TCastleUserInterface;
       ButtonCoordSpace: TSpeedButton;
       ButtonPivotMode: TSpeedButton;
       LabelHeader3DSnap: TLabel;
@@ -2480,7 +2484,22 @@ begin
   LabelStatistics.Alignment := hpRight;
   RectStatistics.InsertFront(LabelStatistics);
 
+  RectDragPreview := TCastleRectangleControl.Create(Self);
+  RectDragPreview.Color := Vector4(0.05, 0.25, 0.15, 0.85);
+  RectDragPreview.Exists := false;
+  RectDragPreview.EnableUIScaling := false;
+  InsertFront(RectDragPreview);
+
+  LabelDragPreview := TCastleLabel.Create(Self);
+  LabelDragPreview.Anchor(hpMiddle);
+  LabelDragPreview.Anchor(vpMiddle);
+  LabelDragPreview.FontSize := 15;
+  LabelDragPreview.Color := Vector4(0.4, 1.0, 0.7, 1.0);
+  LabelDragPreview.EnableUIScaling := false;
+  RectDragPreview.InsertFront(LabelDragPreview);
+
   ForceFallbackLook(RectStatistics);
+  ForceFallbackLook(RectDragPreview);
 end;
 
 procedure TDesignFrame.TDesignerLayer.GLContextOpen;
@@ -4681,6 +4700,38 @@ begin
         Vector4(1.0, 0.85, 0.1, 0.95));
     end;
   end;
+
+  if Frame.FDragOverActive then
+  begin
+    if (Frame.FDragOverTargetUI <> nil) and Frame.FDragOverTargetUI.Exists then
+    begin
+      DrawRectangleOutline(Frame.FDragOverTargetUI.RenderRectWithBorder,
+        Vector4(0.2, 0.95, 0.5, 0.95));
+      DrawRectangleOutline(Frame.FDragOverTargetUI.RenderRectWithBorder.Grow(-1),
+        Vector4(0.1, 0.5, 0.25, 0.95));
+    end;
+    MarqueeRect := FloatRectangle(
+      Frame.FDragOverPosition.X - 48,
+      Frame.FDragOverPosition.Y - 24,
+      96, 48);
+    DrawRectangle(MarqueeRect, Vector4(0.15, 0.9, 0.5, 0.22));
+    DrawRectangleOutline(MarqueeRect, Vector4(0.25, 1.0, 0.65, 0.95));
+    if Frame.FDragOverCaption <> '' then
+    begin
+      LabelDragPreview.Caption := Frame.FDragOverCaption;
+      RectDragPreview.Exists := true;
+      RectDragPreview.Width := LabelDragPreview.EffectiveWidth + 10;
+      RectDragPreview.Height := LabelDragPreview.EffectiveHeight + 8;
+      RectDragPreview.Anchor(hpLeft,
+        Clamped(Round(Frame.FDragOverPosition.X - RectDragPreview.Width / 2),
+          0, Max(0, Container.PixelsWidth - Round(RectDragPreview.Width))));
+      RectDragPreview.Anchor(vpBottom,
+        Clamped(Round(Frame.FDragOverPosition.Y + 28),
+          0, Max(0, Container.PixelsHeight - Round(RectDragPreview.Height))));
+    end else
+      RectDragPreview.Exists := false;
+  end else
+    RectDragPreview.Exists := false;
 
   RectStatistics.Exists := Frame.EffectiveShowStatistics;
   if RectStatistics.Exists then
@@ -9532,20 +9583,71 @@ var
   SourceShellList: TCastleShellListView;
   UI: TCastleUserInterface;
   ParentComponent: TComponent;
+  DragCompClass: TComponentClass;
+  DragFileName: String;
 begin
   Accept := false;
+  if State = dsDragLeave then
+  begin
+    if FDragOverActive then
+    begin
+      FDragOverActive := false;
+      FDragOverTargetUI := nil;
+      FDragOverCaption := '';
+      CastleControl.Invalidate;
+    end;
+    Exit;
+  end;
+
   if Source is TCastleShellListView then
   begin
     SourceShellList := TCastleShellListView(Source);
-    UI := FDesignerLayer.HoverUserInterface(Vector2(X, CastleControl.Height - Y));
-    if (UI is TCastleViewport) and not (ssShift in GetKeyShiftState) then
-      ParentComponent := TCastleViewport(UI).Items
-    else
-      ParentComponent := UI;
+    FDragOverPosition := Vector2(X, CastleControl.Height - Y);
+    if DesignRoot is TCastleTransform then
+    begin
+      ParentComponent := DesignRoot;
+      UI := FDesignViewportForTransforms;
+    end else
+    begin
+      UI := FDesignerLayer.HoverUserInterface(FDragOverPosition);
+      if (UI is TCastleViewport) and not (ssShift in GetKeyShiftState) then
+        ParentComponent := TCastleViewport(UI).Items
+      else
+        ParentComponent := UI;
+    end;
     if ParentComponent = nil then // may happen because UI was nil
+    begin
+      if FDragOverActive then
+      begin
+        FDragOverActive := false;
+        FDragOverTargetUI := nil;
+        FDragOverCaption := '';
+        CastleControl.Invalidate;
+      end;
       Exit;
+    end;
 
-    Accept := ShellListComponentClass(SourceShellList, ParentComponent) <> nil;
+    DragCompClass := ShellListComponentClass(SourceShellList, ParentComponent);
+    Accept := DragCompClass <> nil;
+    if Accept then
+    begin
+      FDragOverActive := true;
+      FDragOverTargetUI := UI;
+      if SourceShellList.Selected <> nil then
+        DragFileName := ExtractFileName(SourceShellList.GetPathFromItem(SourceShellList.Selected))
+      else
+        DragFileName := '';
+      FDragOverCaption := Format('+ %s ("%s") -> %s', [
+        DragCompClass.ClassName, DragFileName, ParentComponent.Name]);
+      CastleControl.Invalidate;
+    end else
+    if FDragOverActive then
+    begin
+      FDragOverActive := false;
+      FDragOverTargetUI := nil;
+      FDragOverCaption := '';
+      CastleControl.Invalidate;
+    end;
   end;
 end;
 
@@ -9621,10 +9723,19 @@ var
   NewComponentClass: TComponentClass;
   UI: TCastleUserInterface;
   Viewport: TCastleViewport;
-  DropPosition2D: TVector2;
+  DropPosition2D, LocalDropPos2D: TVector2;
   DropPos: TVector3;
   Transform: TCastleTransform;
+  Snap2D: Single;
 begin
+  if FDragOverActive then
+  begin
+    FDragOverActive := false;
+    FDragOverTargetUI := nil;
+    FDragOverCaption := '';
+    CastleControl.Invalidate;
+  end;
+
   if Source is TCastleShellListView then
   begin
     SourceShellList := TCastleShellListView(Source);
@@ -9698,8 +9809,14 @@ begin
       if (NewComponent is TCastleUserInterface) and
          (ParentComponent is TCastleUserInterface) then
       begin
-        TCastleUserInterface(NewComponent).Translation :=
-          TCastleUserInterface(ParentComponent).ContainerToLocalPosition(DropPosition2D, true);
+        LocalDropPos2D := TCastleUserInterface(ParentComponent).ContainerToLocalPosition(DropPosition2D, true);
+        Snap2D := SpinEditSnap.Value;
+        if (Snap2D <> 0) and not (ssShift in GetKeyShiftState) then
+        begin
+          LocalDropPos2D.X := Round(LocalDropPos2D.X / Snap2D) * Snap2D;
+          LocalDropPos2D.Y := Round(LocalDropPos2D.Y / Snap2D) * Snap2D;
+        end;
+        TCastleUserInterface(NewComponent).Translation := LocalDropPos2D;
       end;
     end else
     begin

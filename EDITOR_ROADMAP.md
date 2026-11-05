@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization Roadmap & Unreal Engine 5.5 Comparison
 
-This document compares the **Castle Game Engine (CGE 7.0-alpha.3)** editor (`tools/castle-editor`) and runtime scene/UI manipulation architecture against **Unreal Engine 5.5 (Current Release)**, identifies the highest-impact workflow gaps, and tracks the phased engineering roadmap across all **269 completed phases**.
+This document compares the **Castle Game Engine (CGE 7.0-alpha.3)** editor (`tools/castle-editor`) and runtime scene/UI manipulation architecture against **Unreal Engine 5.5 (Current Release)**, identifies the highest-impact workflow gaps, and tracks the phased engineering roadmap across all **270 completed phases**.
 
 For complete user workflows, mathematical foundations, Pascal API reference, architecture diagrams, and keyboard shortcuts, see the companion reference guide:
 - **[`docs/EDITOR_MODERNIZATION_GUIDE.md`](docs/EDITOR_MODERNIZATION_GUIDE.md)**
@@ -2572,11 +2572,23 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - **Screenshots:** [CGE Visual Editor 2D UI Designer & Snap Controls](https://castle-engine.io/images/thumb_const_height_size/ui_empty_rectangle.webp) · [CGE Visual Editor Hierarchy & Output Panel](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [Godot 4 2D UI Anchors & Grid Snapping](https://docs.godotengine.org/en/stable/_images/anchors.png)
   - **Example (Phase 269):** Run a project (`F9`) to see multiline log blocks such as **`[+] OpenGL Information (42 lines, double-click to expand)`** collapsed cleanly into a single row in **Output** and double-click the row to expand (`[-]`) or collapse (`[+]`) its lines in-place; set **`2D snap`** (`SpinEditSnap`) to `10` and drag or resize a `TCastleButton` at `(13, 27)` to watch its position/size snap directly onto exact grid multiples `(20, 30)` (or hold `Shift` for relative `+10` steps); or hold `Shift` while clicking **Add User Interface -> Button** to keep the parent `TCastleVerticalGroup` selected and add several sibling buttons in a row.
 
+### Phase 270: Bottom `Components` Palette Tab with Large Icons (`TabComponents` / `CreateComponentsPaletteTab`), Live Drag-and-Drop Asset Preview Overlay in Viewport (`CastleControlDragOver` / `TDesignerLayer.Render`), and Auto-Open Last Project Design or Single View (`TProjectForm.OpenProject`)
+- [x] **270.1. Bottom `Components` Large-Icon Palette Tab, Viewport Drag-and-Drop Preview Overlay & Auto-Open Last Design (`formproject.pas`, `framedesign.pas`, `TODO.md`)**
+  - Added the **`Components`** palette tab (`TabComponents` / `CreateComponentsPaletteTab` / `RefreshComponentsPalette` in `tools/castle-editor/code/formproject.pas`) inside `PageControlBottom`, displaying all registered non-deprecated CGE components (`RegisteredComponents`) with $48 \times 48$ color-coded category badge icons (`UI`, `3D`, `BH`, `NV` in `ComponentPaletteIcons`), category filter buttons (`All`, `2D UI`, `3D Transform`, `Behavior`, `Non-Visual`), a live search filter box (`EditComponentPaletteFilter`), and double-click insertion (`ListViewComponentsDblClick`) into the currently selected parent component.
+  - Implemented a live **Drag-and-Drop Asset Preview Overlay** in `TDesignFrame.CastleControlDragOver` and `TDesignerLayer.Render` (`tools/castle-editor/code/framedesign.pas`) that highlights the target `TCastleUserInterface` or `TCastleViewport` in bright green, renders a translucent preview drop frame at the cursor, and displays a floating badge (`RectDragPreview` / `LabelDragPreview`) showing `+ <ComponentClass> ("<FileName>") -> <TargetParent>`, plus 2D grid snapping on drop when `SpinEditSnap.Value <> 0`.
+  - Upgraded `TProjectForm.OpenProject`, `TProjectForm.OpenDesign`, and `TProjectForm.MenuItemDesignCloseClick` (`tools/castle-editor/code/formproject.pas`) to persist the per-project last opened design URL (`ProjectForm_LastDesignUrl_<ProjectName>`) and automatically reopen it (or open the project's single view design when `ProjectViews.Count = 1`) when opening a project.
+  - **Official Docs & Visual References (Phase 270):** [CGE Visual Editor Manual (Adding Components, Files Drag-and-Drop & Views)](https://castle-engine.io/manual_editor.php) · [CGE Custom Components & `RegisterSerializableComponent` Manual](https://castle-engine.io/custom_components) · [CGE UI & Transform Serialization Manual](https://castle-engine.io/views) · [UE 5.5 Place Actors Panel & Content Browser Drag-and-Drop Preview](https://dev.epicgames.com/documentation/en-us/unreal-engine/placing-actors-in-unreal-engine) · [Godot 4 Create New Node Palette & Scene Dock Drag-and-Drop](https://docs.godotengine.org/en/stable/getting_started/step_by_step/nodes_and_scenes.html)
+  - **Official Videos & Movies (Phase 270):**
+    - 🎬 [CGE Official Video — Dragging Assets, Adding Components & Designing Views in CGE Editor (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+    - 🎞️ [Animated Movie (GIF) — Interactive Component Palette, Drag-and-Drop Preview & Editor Docks](https://docs.godotengine.org/en/stable/_images/containers_split_drag.gif)
+  - **Screenshots:** [CGE Visual Editor Component Hierarchy & Bottom Panel](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Visual Editor 2D UI & Drag-and-Drop Designer](https://castle-engine.io/images/thumb_const_height_size/ui_empty_rectangle.webp) · [CGE Visual Editor Inspector & Views](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+  - **Example (Phase 270):** Switch to the **`Components`** tab at the bottom of the editor, filter by **`2D UI`** or **`3D Transform`** (or type `Button` / `Scene`), and double-click a large component icon to add it to the selected parent (holding `Shift` to keep the parent selected); drag an image or `.gltf` scene from the **`Files`** tab over the design viewport to see the live green drop-target highlight and `+ TCastleImageControl ("icon.png") -> Group1` preview badge before releasing the mouse; or reopen a project to automatically resume editing your last open design.
+
 ---
 
-## Roadmap Completion Status (Phases 1–269 — Final Milestone)
+## Roadmap Completion Status (Phases 1–270 — Final Milestone)
 
-All **269 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **270 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 
