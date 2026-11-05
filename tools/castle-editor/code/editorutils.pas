@@ -46,8 +46,19 @@ type
       TOutputInfo = class
         Kind: TOutputKind;
       end;
+      TMultilineOutputInfo = class(TOutputInfo)
+        Category: String;
+        Lines: TStringList;
+        Expanded: Boolean;
+        constructor Create;
+        destructor Destroy; override;
+      end;
+      TMultilineOutputInfoList = specialize TObjectList<TMultilineOutputInfo>;
     var
       OutputInfoPerKind: array [TOutputKind] of TOutputInfo;
+      FMultilineInfos: TMultilineOutputInfoList;
+      FCurrentMultiline: TMultilineOutputInfo;
+      FCurrentMultilineIndex: Integer;
       FList: TListBox;
       FWarningsCount: Integer;
       FErrorsCount: Integer;
@@ -68,6 +79,9 @@ type
     property OnCountsChanged: TNotifyEvent read FOnCountsChanged write FOnCountsChanged;
 
     procedure AddLine(const S: String; const Kind: TOutputKind);
+    { Expand or collapse a multiline log block at Index (if Index points to a
+      collapsible TMultilineOutputInfo header row). Returns @true if handled. }
+    function ToggleExpandItem(const Index: Integer): Boolean;
     { Split S into multiple lines.
       Add each of them as separate line.
       Avoids adding empty lines at the very end (since they would
@@ -773,6 +787,18 @@ begin
   InternalDrawItem(List, C, ARect, List.Items[Index]);
 end;
 
+constructor TOutputList.TMultilineOutputInfo.Create;
+begin
+  inherited Create;
+  Lines := TStringList.Create;
+end;
+
+destructor TOutputList.TMultilineOutputInfo.Destroy;
+begin
+  FreeAndNil(Lines);
+  inherited;
+end;
+
 constructor TOutputList.Create(const AList: TListBox);
 
   { Measure font height in pixels. }
@@ -793,6 +819,9 @@ begin
   FList.ItemHeight := GetRowHeight + 4;
   FList.ScrollWidth := 0;
   FMaxLineWidth := 0;
+  FMultilineInfos := TMultilineOutputInfoList.Create(true);
+  FCurrentMultiline := nil;
+  FCurrentMultilineIndex := -1;
 
   { Create OutputInfoPerKind instances.
     The idea is that every AddLine call should not construct new
@@ -823,12 +852,35 @@ destructor TOutputList.Destroy;
 var
   Kind: TOutputKind;
 begin
+  FreeAndNil(FMultilineInfos);
   for Kind in TOutputKind do
     FreeAndNil(OutputInfoPerKind[Kind]);
   inherited;
 end;
 
 procedure TOutputList.AddLine(const S: String; const Kind: TOutputKind);
+
+  function IsMultilineBegin(const ALine: String; out ACategory: String): Boolean;
+  const
+    Prefix = '-------------------- ';
+    Suffix = ' begin';
+  var
+    Trimmed: String;
+  begin
+    Trimmed := Trim(ALine);
+    Result := IsPrefix(Prefix, Trimmed, false) and IsSuffix(Suffix, Trimmed, false) and
+      (Length(Trimmed) > Length(Prefix) + Length(Suffix));
+    if Result then
+      ACategory := Copy(Trimmed, Length(Prefix) + 1,
+        Length(Trimmed) - Length(Prefix) - Length(Suffix))
+    else
+      ACategory := '';
+  end;
+
+  function IsMultilineEnd(const ALine, ACategory: String): Boolean;
+  begin
+    Result := Trim(ALine) = '-------------------- ' + ACategory + ' end';
+  end;
 
   function IsTransientProgressLine(const ALine: String; const AKind: TOutputKind): Boolean;
   var
@@ -841,21 +893,14 @@ procedure TOutputList.AddLine(const S: String; const Kind: TOutputKind);
       IsPrefix('Writing Resource String Table file:', Trimmed, true);
   end;
 
-  procedure AppendPhysicalLine(const ALine: String; const AllowReplace: Boolean);
+  procedure UpdateMaxWidthForLine(const ALine: String; const AKind: TOutputKind);
   var
     LineWidth: Integer;
   begin
-    if AllowReplace and FReplaceLastProgressLine and (List.Items.Count > 0) then
-    begin
-      List.Items[List.Items.Count - 1] := ALine;
-      List.Items.Objects[List.Items.Count - 1] := OutputInfoPerKind[Kind];
-    end else
-      List.Items.AddObject(ALine, OutputInfoPerKind[Kind]);
-
     if ALine <> '' then
     begin
       FList.Canvas.Font := FList.Font;
-      if Kind = okImportantInfo then
+      if AKind = okImportantInfo then
         FList.Canvas.Font.Bold := true;
       LineWidth := FList.Canvas.TextWidth(ALine) + 16;
       if LineWidth > FMaxLineWidth then
@@ -870,9 +915,21 @@ procedure TOutputList.AddLine(const S: String; const Kind: TOutputKind);
     end;
   end;
 
+  procedure AppendPhysicalLine(const ALine: String; const AllowReplace: Boolean);
+  begin
+    if AllowReplace and FReplaceLastProgressLine and (List.Items.Count > 0) then
+    begin
+      List.Items[List.Items.Count - 1] := ALine;
+      List.Items.Objects[List.Items.Count - 1] := OutputInfoPerKind[Kind];
+    end else
+      List.Items.AddObject(ALine, OutputInfoPerKind[Kind]);
+
+    UpdateMaxWidthForLine(ALine, Kind);
+  end;
+
 var
   IsBottom: Boolean;
-  Remaining, Chunk: String;
+  Remaining, Chunk, MultilineCategory, SummaryCaption: String;
   AvailWidth, SplitLen, SpacePos: Integer;
   FirstChunk: Boolean;
 begin
@@ -881,6 +938,67 @@ begin
   IsBottom := (List.Items.Count <= 2) or
     (List.ItemIndex < 0) or
     (List.ItemIndex >= List.Items.Count - 2);
+
+  { Handle inside or start of a collapsible multiline log block
+    ('-------------------- <Category> begin' ... '-------------------- <Category> end'). }
+  if FCurrentMultiline <> nil then
+  begin
+    if IsMultilineEnd(S, FCurrentMultiline.Category) then
+    begin
+      if (FCurrentMultilineIndex >= 0) and (FCurrentMultilineIndex < List.Items.Count) then
+      begin
+        SummaryCaption := Format('[+] %s (%d lines, double-click to expand)',
+          [FCurrentMultiline.Category, FCurrentMultiline.Lines.Count]);
+        List.Items[FCurrentMultilineIndex] := SummaryCaption;
+        UpdateMaxWidthForLine(SummaryCaption, FCurrentMultiline.Kind);
+      end;
+      FCurrentMultiline := nil;
+      FCurrentMultilineIndex := -1;
+      Exit;
+    end else
+    begin
+      FCurrentMultiline.Lines.AddObject(S, OutputInfoPerKind[Kind]);
+      if Ord(Kind) > Ord(FCurrentMultiline.Kind) then
+        FCurrentMultiline.Kind := Kind;
+      if (FCurrentMultilineIndex >= 0) and (FCurrentMultilineIndex < List.Items.Count) then
+      begin
+        SummaryCaption := Format('[+] %s (%d lines, double-click to expand)',
+          [FCurrentMultiline.Category, FCurrentMultiline.Lines.Count]);
+        List.Items[FCurrentMultilineIndex] := SummaryCaption;
+        UpdateMaxWidthForLine(SummaryCaption, FCurrentMultiline.Kind);
+      end;
+      if Kind = okWarning then
+      begin
+        Inc(FWarningsCount);
+        if Assigned(FOnCountsChanged) then
+          FOnCountsChanged(Self);
+      end else
+      if Kind = okError then
+      begin
+        Inc(FErrorsCount);
+        if Assigned(FOnCountsChanged) then
+          FOnCountsChanged(Self);
+      end;
+      if IsBottom then
+        List.TopIndex := List.Items.Count - 1;
+      Exit;
+    end;
+  end else
+  if IsMultilineBegin(S, MultilineCategory) then
+  begin
+    FReplaceLastProgressLine := false;
+    FCurrentMultiline := TMultilineOutputInfo.Create;
+    FCurrentMultiline.Kind := Kind;
+    FCurrentMultiline.Category := MultilineCategory;
+    FCurrentMultiline.Expanded := false;
+    FMultilineInfos.Add(FCurrentMultiline);
+    SummaryCaption := Format('[+] %s (0 lines, double-click to expand)', [MultilineCategory]);
+    FCurrentMultilineIndex := List.Items.AddObject(SummaryCaption, FCurrentMultiline);
+    UpdateMaxWidthForLine(SummaryCaption, Kind);
+    if IsBottom then
+      List.TopIndex := List.Items.Count - 1;
+    Exit;
+  end;
 
   if FWordWrap and (FList.ClientWidth > 64) and (S <> '') and
      (not IsTransientProgressLine(S, Kind)) then
@@ -946,6 +1064,57 @@ begin
     List.TopIndex := List.Items.Count - 1;
 end;
 
+function TOutputList.ToggleExpandItem(const Index: Integer): Boolean;
+var
+  Info: TMultilineOutputInfo;
+  I: Integer;
+  ExpandedLine: String;
+  LineInfo: TOutputInfo;
+begin
+  Result := false;
+  if (Index < 0) or (Index >= List.Items.Count) then
+    Exit;
+  if not (List.Items.Objects[Index] is TMultilineOutputInfo) then
+    Exit;
+
+  Info := TMultilineOutputInfo(List.Items.Objects[Index]);
+  Result := true;
+
+  List.Items.BeginUpdate;
+  try
+    if not Info.Expanded then
+    begin
+      Info.Expanded := true;
+      List.Items[Index] := Format('[-] %s (%d lines, double-click to collapse)',
+        [Info.Category, Info.Lines.Count]);
+      for I := 0 to Info.Lines.Count - 1 do
+      begin
+        ExpandedLine := '  ' + Info.Lines[I];
+        if Info.Lines.Objects[I] is TOutputInfo then
+          LineInfo := TOutputInfo(Info.Lines.Objects[I])
+        else
+          LineInfo := OutputInfoPerKind[okInfo];
+        List.Items.InsertObject(Index + 1 + I, ExpandedLine, LineInfo);
+      end;
+      if (FCurrentMultilineIndex > Index) then
+        Inc(FCurrentMultilineIndex, Info.Lines.Count);
+    end else
+    begin
+      Info.Expanded := false;
+      List.Items[Index] := Format('[+] %s (%d lines, double-click to expand)',
+        [Info.Category, Info.Lines.Count]);
+      for I := 1 to Info.Lines.Count do
+        if (Index + 1 < List.Items.Count) and
+           (not (List.Items.Objects[Index + 1] is TMultilineOutputInfo)) then
+          List.Items.Delete(Index + 1);
+      if (FCurrentMultilineIndex > Index) then
+        Dec(FCurrentMultilineIndex, Info.Lines.Count);
+    end;
+  finally
+    List.Items.EndUpdate;
+  end;
+end;
+
 (* Unused:
 
 procedure TOutputList.SplitAddLines(const S: String; const Kind: TOutputKind);
@@ -980,6 +1149,9 @@ begin
   FErrorsCount := 0;
   FMaxLineWidth := 0;
   FReplaceLastProgressLine := false;
+  FCurrentMultiline := nil;
+  FCurrentMultilineIndex := -1;
+  FMultilineInfos.Clear;
   List.Items.Clear;
   List.ScrollWidth := 0;
   if HadCounts and Assigned(FOnCountsChanged) then

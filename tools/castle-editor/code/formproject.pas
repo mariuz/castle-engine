@@ -2378,11 +2378,13 @@ var
   R: TRegExpr;
   Line: String;
 begin
-  // jump to source code line in case of error message here
+  // jump to source code line in case of error message, or expand/collapse multiline log section
 
   if ListOutput.ItemIndex = -1 then
     Exit;
-  Line := ListOutput.Items[ListOutput.ItemIndex];
+  if (OutputList <> nil) and OutputList.ToggleExpandItem(ListOutput.ItemIndex) then
+    Exit;
+  Line := TrimLeft(ListOutput.Items[ListOutput.ItemIndex]);
 
   R := TRegExpr.Create;
   try

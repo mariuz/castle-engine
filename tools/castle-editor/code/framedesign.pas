@@ -4358,7 +4358,7 @@ function TDesignFrame.TDesignerLayer.Motion(const Event: TInputMotion): Boolean;
 var
   UI: TCastleUserInterface;
   Move: TVector2;
-  Snap: Single;
+  Snap, StepX, StepY, TargetVal, SnapDeltaX, SnapDeltaY: Single;
 begin
   Result := inherited Motion(Event);
   if Result then Exit;
@@ -4406,13 +4406,67 @@ begin
         UiPendingMove += Move;
         while Abs(UiPendingMove.X) >= Snap do
         begin
-          ApplyDrag(UI, Sign(UiPendingMove.X) * Snap, 0);
-          UiPendingMove.X := UiPendingMove.X - Sign(UiPendingMove.X) * Snap;
+          StepX := Sign(UiPendingMove.X) * Snap;
+          SnapDeltaX := StepX;
+          { By default, snap resulting Translation.X / Width to exact multiples of Snap
+            (invisible grid); hold Shift for relative step increments. }
+          if not (mkShift in Event.ModifiersDown) then
+          begin
+            if UiDraggingMode = dmTranslate then
+            begin
+              TargetVal := Round((UI.Translation.X + StepX) / Snap) * Snap;
+              SnapDeltaX := TargetVal - UI.Translation.X;
+            end else
+            if UiDraggingMode = dmResize then
+            begin
+              case ResizingHorizontal of
+                hpRight:
+                  begin
+                    TargetVal := Round((UI.Width + StepX) / Snap) * Snap;
+                    SnapDeltaX := TargetVal - UI.Width;
+                  end;
+                hpLeft:
+                  begin
+                    TargetVal := Round((UI.Width - StepX) / Snap) * Snap;
+                    SnapDeltaX := UI.Width - TargetVal;
+                  end;
+                else ;
+              end;
+            end;
+          end;
+          ApplyDrag(UI, SnapDeltaX, 0);
+          UiPendingMove.X := UiPendingMove.X - StepX;
         end;
         while Abs(UiPendingMove.Y) >= Snap do
         begin
-          ApplyDrag(UI, 0, Sign(UiPendingMove.Y) * Snap);
-          UiPendingMove.Y := UiPendingMove.Y - Sign(UiPendingMove.Y) * Snap;
+          StepY := Sign(UiPendingMove.Y) * Snap;
+          SnapDeltaY := StepY;
+          if not (mkShift in Event.ModifiersDown) then
+          begin
+            if UiDraggingMode = dmTranslate then
+            begin
+              TargetVal := Round((UI.Translation.Y + StepY) / Snap) * Snap;
+              SnapDeltaY := TargetVal - UI.Translation.Y;
+            end else
+            if UiDraggingMode = dmResize then
+            begin
+              case ResizingVertical of
+                vpTop:
+                  begin
+                    TargetVal := Round((UI.Height + StepY) / Snap) * Snap;
+                    SnapDeltaY := TargetVal - UI.Height;
+                  end;
+                vpBottom:
+                  begin
+                    TargetVal := Round((UI.Height - StepY) / Snap) * Snap;
+                    SnapDeltaY := UI.Height - TargetVal;
+                  end;
+                else ;
+              end;
+            end;
+          end;
+          ApplyDrag(UI, 0, SnapDeltaY);
+          UiPendingMove.Y := UiPendingMove.Y - StepY;
         end;
       end else
       begin
@@ -8131,7 +8185,13 @@ function TDesignFrame.AddComponent(const ParentComponent: TComponent;
   procedure FinishAddingComponent(const NewComponent: TComponent);
   begin
     UpdateDesign;
-    SelectedComponent := NewComponent; // select after adding, makes it natural to edit
+    { Holding Shift when adding a component keeps the parent component selected,
+      allowing users to rapidly add multiple sibling children under the same container
+      without re-selecting the parent each time. }
+    if (ssShift in GetKeyShiftState) or (mkShift in CastleControl.Container.Pressed.Modifiers) then
+      SelectedComponent := ParentComponent
+    else
+      SelectedComponent := NewComponent; // select after adding, makes it natural to edit
     ModifiedOutsideObjectInspector('Add ' + NewComponent.Name + ' to ' + ParentComponent.Name, ucHigh);
   end;
 

@@ -12,13 +12,11 @@ OK if after 7.0 release:
   and naming should be consistent.
 
 * Visual inspector. designer etc. less important
-    * Dragging UI: should "Snap" snap to the final value (like an invisible grid?)
-      Would be more like Delphi/Lazarus, probably.
-      Right now we are more like Blender, only movement amount is snapped.
+    * DONE: Dragging UI: "Snap" snaps to the final value (invisible grid `Round(Val / Snap) * Snap` in `TDesignerLayer.Motion`, or hold `Shift` for relative step increments)
     * ? open last design in the project,
       ? open the only scene in the project, if only one exists
       for now, list of views is good solution.
-    * after adding, keep previously selected still selected
+    * DONE: after adding, keep previously selected still selected (hold `Shift` when adding a component in `TDesignFrame.AddComponent` to keep `ParentComponent` selected)
 
 * Add components tab at the bottom, with large icon for each component
 
@@ -48,7 +46,7 @@ OK if after 7.0 release:
         - Cge-output, warning,...
         - bytes are always required and allow reliably waiting reading up to message end, without the need to quote/unquote it
 
-    * Detect multilibe logs and show as one list item in output that can be expanded,, only category initially visible. E.g. useful for
+    * DONE: Detect multiline logs and show as one list item in output that can be expanded, only category initially visible (`TMultilineOutputInfo` & `TOutputList.ToggleExpandItem` in `editorutils.pas` + `TProjectForm.ListOutputDblClick` in `formproject.pas`). E.g. useful for
       - "OpenGL Information" or
       - command-line of FPC in build tool verbose mode
 

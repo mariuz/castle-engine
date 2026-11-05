@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization Roadmap & Unreal Engine 5.5 Comparison
 
-This document compares the **Castle Game Engine (CGE 7.0-alpha.3)** editor (`tools/castle-editor`) and runtime scene/UI manipulation architecture against **Unreal Engine 5.5 (Current Release)**, identifies the highest-impact workflow gaps, and tracks the phased engineering roadmap across all **254 completed phases**.
+This document compares the **Castle Game Engine (CGE 7.0-alpha.3)** editor (`tools/castle-editor`) and runtime scene/UI manipulation architecture against **Unreal Engine 5.5 (Current Release)**, identifies the highest-impact workflow gaps, and tracks the phased engineering roadmap across all **269 completed phases**.
 
 For complete user workflows, mathematical foundations, Pascal API reference, architecture diagrams, and keyboard shortcuts, see the companion reference guide:
 - **[`docs/EDITOR_MODERNIZATION_GUIDE.md`](docs/EDITOR_MODERNIZATION_GUIDE.md)**
@@ -2560,11 +2560,23 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - **Screenshots:** [CGE New Project Template Dialog](https://castle-engine.io/images/thumb_const_height_size/new_project.webp) · [CGE Visual Editor 3D Scene Preview & Files Browser](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector URL Property Editor](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
   - **Example (Phase 268):** Select a `.gltf` or `.x3d` model located outside the project's `data/` folder in `TCastleOpenSceneDialog` and click **Import to `"data"` Directory** in the confirmation dialog to automatically copy the model, its `.bin` buffer, and its referenced texture/audio/inline files into `castle-data:/`; select a heavy 3D asset in the **Files** panel to see `"Wait, loading..."` and the hourglass cursor during preview initialization; or press `F9` to enjoy a compact, banner-free compiler output log.
 
+### Phase 269: Collapsible Multiline Log Sections (`TMultilineOutputInfo` / `TOutputList.ToggleExpandItem`), Invisible-Grid Snapping for 2D UI Dragging & Resizing (`TDesignerLayer.Motion`), and Keep Parent Selected When `Shift`-Adding Components (`TDesignFrame.AddComponent`)
+- [x] **269.1. Collapsible Multiline Log Sections in `ListOutput`, 2D UI Invisible-Grid Snapping & `Shift`-Add Component Parent Selection (`editorutils.pas`, `formproject.pas`, `framedesign.pas`, `TODO.md`)**
+  - Implemented collapsible/expandable multiline log sections in `TOutputList` (`TMultilineOutputInfo` and `TOutputList.ToggleExpandItem` in `tools/castle-editor/code/editorutils.pas`, wired to `TProjectForm.ListOutputDblClick` in `tools/castle-editor/code/formproject.pas`), automatically collapsing `WritelnLogMultiline` blocks delimited by `'-------------------- <Category> begin'` and `'-------------------- <Category> end'` (such as `"OpenGL Information"`, `"Sound"`, and shader/build diagnostics) into a single `[+] <Category> (N lines, double-click to expand)` summary row that expands (`[-]`) or collapses (`[+]`) in-place on double-click while preserving warning/error severity counters and source-line jump support on expanded lines.
+  - Upgraded 2D UI dragging and resizing in `TDesignerLayer.Motion` (`tools/castle-editor/code/framedesign.pas`) so `SpinEditSnap` snaps the resulting `UI.Translation.X` / `UI.Translation.Y` (during `dmTranslate`) or `UI.Width` / `UI.Height` (during `dmResize`) to exact multiples of `Snap` (`Round(Val / Snap) * Snap`, acting like an invisible Delphi/Lazarus grid across all anchor modes), while holding `Shift` preserves relative increment step snapping.
+  - Updated `TDesignFrame.AddComponent` (`FinishAddingComponent` in `tools/castle-editor/code/framedesign.pas`) so holding `Shift` (`ssShift in GetKeyShiftState` or `mkShift in CastleControl.Container.Pressed.Modifiers`) when adding a component keeps `ParentComponent` selected instead of switching selection to the newly added child, enabling rapid insertion of multiple sibling components under the same container.
+  - **Official Docs & Visual References (Phase 269):** [CGE Logging (`CastleLog` & `WritelnLogMultiline`) Manual](https://castle-engine.io/manual_log.php) · [CGE Visual Editor Manual (2D UI Designer, Snapping & Hierarchy)](https://castle-engine.io/manual_editor.php) · [CGE User Interface & Anchors Manual](https://castle-engine.io/user_interface) · [Godot 4 2D Editor Grid Snapping & Node Creation Workflow](https://docs.godotengine.org/en/stable/tutorials/ui/size_and_anchors.html) · [UE 5.5 UMG Designer Grid Snapping & Output Log Filtering](https://dev.epicgames.com/documentation/en-us/unreal-engine/umg-ui-designer-for-unreal-engine)
+  - **Official Videos & Movies (Phase 269):**
+    - 🎬 [CGE Official Video — Designing 2D UI, Snapping Controls & Inspecting Logs in CGE Editor (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+    - 🎞️ [Animated Movie (GIF) — Interactive 2D UI Snapping, Container Layout & Output Log](https://docs.godotengine.org/en/stable/_images/containers_split_drag.gif)
+  - **Screenshots:** [CGE Visual Editor 2D UI Designer & Snap Controls](https://castle-engine.io/images/thumb_const_height_size/ui_empty_rectangle.webp) · [CGE Visual Editor Hierarchy & Output Panel](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [Godot 4 2D UI Anchors & Grid Snapping](https://docs.godotengine.org/en/stable/_images/anchors.png)
+  - **Example (Phase 269):** Run a project (`F9`) to see multiline log blocks such as **`[+] OpenGL Information (42 lines, double-click to expand)`** collapsed cleanly into a single row in **Output** and double-click the row to expand (`[-]`) or collapse (`[+]`) its lines in-place; set **`2D snap`** (`SpinEditSnap`) to `10` and drag or resize a `TCastleButton` at `(13, 27)` to watch its position/size snap directly onto exact grid multiples `(20, 30)` (or hold `Shift` for relative `+10` steps); or hold `Shift` while clicking **Add User Interface -> Button** to keep the parent `TCastleVerticalGroup` selected and add several sibling buttons in a row.
+
 ---
 
-## Roadmap Completion Status (Phases 1–268 — Final Milestone)
+## Roadmap Completion Status (Phases 1–269 — Final Milestone)
 
-All **268 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **269 Phases** of the Castle Game Engine Editor Modernization Roadmap are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 
