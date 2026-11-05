@@ -346,6 +346,9 @@ type
     procedure TestDrawableImageRenderToImageAndDrawFromRHI;
     procedure TestDrawableImageRepeatWrapSamplersAndBatch2DOffscreenFormatsRHI;
     procedure TestDrawPrimitive2DLineWidthPointSizeAndActiveRenderingFormatsRHI;
+    procedure TestDrawableImageClipLineAlphaTestAndCustomBlendFactorsRHI;
+    procedure TestSaveScreenActiveOffscreenAttachmentAndBatchFlushRHI;
+    procedure TestGLVideo3DAndGLVideo2DAndTexture2DClampToEdgeRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -22077,6 +22080,282 @@ begin
     FreeAndNil(Cmd);
     RenderContext := SavedCtx;
     FreeAndNil(TestCtx);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestDrawableImageClipLineAlphaTestAndCustomBlendFactorsRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCmd: TRHICommandList;
+  SavedCtx, TestCtx: TRenderContext;
+  Cmd: TVulkanRHICommandList;
+  Batcher: TCastleBatch2DRenderer;
+  ImgData: TRGBAlphaImage;
+  Drawable: TDrawableImage;
+  Pipe: TVulkanRHIPipeline;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9401)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Cmd := TVulkanRHICommandList.Create(Device, 0);
+  SetActiveCommandList(Cmd);
+  Batcher := EnsureBatch2DRenderer(Device);
+  Drawable := nil;
+  try
+    ImgData := TRGBAlphaImage.Create(32, 32);
+    ImgData.Clear(Vector4Byte(255, 128, 64, 200));
+    Drawable := TDrawableImage.Create(ImgData, True, True);
+
+    RenderContext.Viewport := Rectangle(0, 0, 800, 600);
+    Cmd.BeginRecording;
+    Batcher.Begin2DPass(Cmd, 800, 600);
+
+    { 1. Test Clip and ClipLine }
+    Drawable.Clip := True;
+    Drawable.ClipLine := Vector3(1.0, -0.5, -0.25);
+    Drawable.Draw(FloatRectangle(0, 0, 64, 64));
+    Batcher.Flush;
+
+    AssertSameValue(1.0, Batcher.LastPushConstants.ClipLineAndEnable.X, 0.001);
+    AssertSameValue(-0.5, Batcher.LastPushConstants.ClipLineAndEnable.Y, 0.001);
+    AssertSameValue(-0.25, Batcher.LastPushConstants.ClipLineAndEnable.Z, 0.001);
+    AssertSameValue(1.0, Batcher.LastPushConstants.ClipLineAndEnable.W, 0.001);
+
+    { 2. Test Alpha = acTest (AlphaTest cutoff = 0.5 with opaque blend state) }
+    Drawable.Clip := False;
+    Drawable.Alpha := acTest;
+    Drawable.Draw(FloatRectangle(64, 0, 64, 64));
+    Batcher.Flush;
+
+    AssertSameValue(0.0, Batcher.LastPushConstants.ClipLineAndEnable.W, 0.001);
+    AssertSameValue(0.5, Batcher.LastPushConstants.AlphaParams.X, 0.001);
+    Pipe := Batcher.LastPipeline as TVulkanRHIPipeline;
+    AssertTrue('Alpha=acTest pipeline must be non-nil', Pipe <> nil);
+    AssertFalse('Alpha=acTest pipeline must disable alpha blending (opaque discard)',
+      Pipe.Desc.BlendState.BlendEnable);
+
+    { 3. Test custom BlendingSourceFactor (bsOne) and BlendingDestinationFactor (bdOneMinusSrcAlpha) }
+    Drawable.Alpha := acBlending;
+    Drawable.BlendingSourceFactor := bsOne;
+    Drawable.BlendingDestinationFactor := bdOneMinusSrcAlpha;
+    Drawable.Draw(FloatRectangle(128, 0, 64, 64));
+    Batcher.Flush;
+
+    Pipe := Batcher.LastPipeline as TVulkanRHIPipeline;
+    AssertTrue('Custom blend pipeline must enable blending', Pipe.Desc.BlendState.BlendEnable);
+    AssertEquals('Custom SrcColorBlendFactor must be bfOne',
+      Ord(bfOne), Ord(Pipe.Desc.BlendState.SrcColorBlendFactor));
+    AssertEquals('Custom DstColorBlendFactor must be bfOneMinusSrcAlpha',
+      Ord(bfOneMinusSrcAlpha), Ord(Pipe.Desc.BlendState.DstColorBlendFactor));
+
+    { 4. Test multiply preset (bsDstColor, bdZero) }
+    Drawable.BlendingSourceFactor := bsDstColor;
+    Drawable.BlendingDestinationFactor := bdZero;
+    Drawable.Draw(FloatRectangle(192, 0, 64, 64));
+    Batcher.End2DPass;
+    Cmd.EndRecording;
+
+    Pipe := Batcher.LastPipeline as TVulkanRHIPipeline;
+    AssertEquals('Multiply SrcColorBlendFactor must be bfDstColor',
+      Ord(bfDstColor), Ord(Pipe.Desc.BlendState.SrcColorBlendFactor));
+    AssertEquals('Multiply DstColorBlendFactor must be bfZero',
+      Ord(bfZero), Ord(Pipe.Desc.BlendState.DstColorBlendFactor));
+  finally
+    FreeAndNil(Drawable);
+    SetActiveCommandList(SavedCmd);
+    FreeAndNil(Cmd);
+    FreeGlobalBatch2DRenderer;
+    RenderContext := SavedCtx;
+    FreeAndNil(TestCtx);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSaveScreenActiveOffscreenAttachmentAndBatchFlushRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCmd: TRHICommandList;
+  SavedCtx, TestCtx: TRenderContext;
+  Cmd: TVulkanRHICommandList;
+  Batcher: TCastleBatch2DRenderer;
+  Rtt: TGLRenderToTexture;
+  SpriteData: TRGBAlphaImage;
+  Sprite: TDrawableImage;
+  GrabbedColor: TCastleImage;
+  GrabbedDepth: TGrayscaleImage;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9402)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Cmd := TVulkanRHICommandList.Create(Device, 0);
+  SetActiveCommandList(Cmd);
+  Batcher := EnsureBatch2DRenderer(Device);
+  Rtt := nil;
+  Sprite := nil;
+  GrabbedColor := nil;
+  GrabbedDepth := nil;
+  try
+    Rtt := TGLRenderToTexture.Create(128, 128);
+    Rtt.Buffer := tbColorAndDepth;
+    Rtt.GLContextOpen;
+
+    SpriteData := TRGBAlphaImage.Create(16, 16);
+    SpriteData.Clear(Vector4Byte(255, 255, 255, 255));
+    Sprite := TDrawableImage.Create(SpriteData, True, True);
+
+    RenderContext.Viewport := Rectangle(0, 0, 128, 128);
+    Cmd.BeginRecording;
+    Rtt.RenderBegin;
+    Cmd.ClearAttachments(True, Vector4(0.2, 0.8, 0.4, 1.0), True, 0.75, False, 0);
+
+    { Queue a sprite in Batcher without manually flushing before SaveScreen_NoFlush }
+    Batcher.Begin2DPass(Cmd, 128, 128);
+    Sprite.Draw(FloatRectangle(0, 0, 16, 16));
+    AssertEquals('BatchFlushCount must be 0 before SaveScreen_NoFlush',
+      0, Integer(Batcher.BatchFlushCount));
+
+    GrabbedColor := SaveScreen_NoFlush(TRGBAlphaImage, Rectangle(0, 0, 128, 128), Rtt.ColorBuffer);
+    AssertEquals('SaveScreen_NoFlush must automatically flush ActiveBatch2DRenderer',
+      1, Integer(Batcher.BatchFlushCount));
+    AssertTrue('GrabbedColor must be TRGBAlphaImage', GrabbedColor is TRGBAlphaImage);
+    AssertEquals('GrabbedColor pixel G channel must match offscreen attachment clear (Round(0.8*255)=204)',
+      204, Integer(TRGBAlphaImage(GrabbedColor).PixelPtr(0, 0)^.Y));
+
+    GrabbedDepth := SaveScreenDepth_NoFlush(Rectangle(0, 0, 128, 128));
+    AssertTrue('GrabbedDepth must be non-nil', GrabbedDepth <> nil);
+    AssertEquals('GrabbedDepth pixel must match offscreen depth clear (Round(0.75*255)=191)',
+      191, Integer(GrabbedDepth.PixelPtr(0, 0)^));
+
+    Batcher.End2DPass;
+    Rtt.RenderEnd;
+    Cmd.EndRecording;
+  finally
+    FreeAndNil(GrabbedDepth);
+    FreeAndNil(GrabbedColor);
+    FreeAndNil(Sprite);
+    FreeAndNil(Rtt);
+    SetActiveCommandList(SavedCmd);
+    FreeAndNil(Cmd);
+    FreeGlobalBatch2DRenderer;
+    RenderContext := SavedCtx;
+    FreeAndNil(TestCtx);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGLVideo3DAndGLVideo2DAndTexture2DClampToEdgeRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCmd: TRHICommandList;
+  Cmd: TVulkanRHICommandList;
+  Batcher: TCastleBatch2DRenderer;
+  ClampWrap: TTextureWrap2D;
+  F0, F1, F2: TRGBAlphaImage;
+  Vid: TVideo;
+  Vid3D: TGLVideo3D;
+  Vid2D: TGLVideo2D;
+  VkSampler: TVulkanRHISampler;
+  FrameDrawable: TDrawableImage;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9403)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCmd := ActiveCommandList;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Cmd := TVulkanRHICommandList.Create(Device, 0);
+  SetActiveCommandList(Cmd);
+  Batcher := EnsureBatch2DRenderer(Device);
+  Vid := nil;
+  Vid3D := nil;
+  Vid2D := nil;
+  try
+    { 1. Verify Texture2DClampToEdge is nil-safe when GLFeatures = nil }
+    ClampWrap := Texture2DClampToEdge;
+    AssertTrue('Texture2DClampToEdge must return non-zero wrap enum in pure RHI mode',
+      (ClampWrap.Data[0] <> 0) and (ClampWrap.Data[0] = ClampWrap.Data[1]));
+
+    { 2. Create 3-frame TVideo (16x16, 2 fps -> 1.5s cycle) }
+    F0 := TRGBAlphaImage.Create(16, 16);
+    F0.Clear(Vector4Byte(255, 0, 0, 255));
+    F1 := TRGBAlphaImage.Create(16, 16);
+    F1.Clear(Vector4Byte(0, 255, 0, 255));
+    F2 := TRGBAlphaImage.Create(16, 16);
+    F2.Clear(Vector4Byte(0, 0, 255, 255));
+
+    Vid := TVideo.Create;
+    Vid.LoadFromImageArray([F0, F1, F2], True, 2.0);
+    Vid.TimeLoop := True;
+
+    { 3. Test TGLVideo3D in pure Vulkan RHI mode }
+    Vid3D := TGLVideo3D.Create(Vid,
+      TextureFilter(minLinearMipmapLinear, magLinear),
+      4.0, Texture2DRepeat, False);
+    AssertEquals('Vid3D.Count must be 3', 3, Vid3D.Count);
+    AssertTrue('Vid3D.RHITexture(0) must be created', Vid3D.RHITexture(0) <> nil);
+    AssertEquals('Vid3D.RHITexture(0) must have 5 mip levels for 16x16 mipmapped video',
+      5, Integer(Vid3D.RHITexture(0).Desc.MipLevels));
+    AssertEquals('Vid3D.RHITexture(0) must have generated mipmaps',
+      1, Integer((Vid3D.RHITexture(0) as TVulkanRHITexture).MipmapGenerationCount));
+
+    VkSampler := Vid3D.RHISampler as TVulkanRHISampler;
+    AssertTrue('Vid3D.RHISampler must be created', VkSampler <> nil);
+    AssertSameValue(4.0, VkSampler.CreateInfo.maxAnisotropy, 0.001);
+    AssertEquals('Vid3D.RHISampler addressModeU must be REPEAT',
+      Integer(VK_SAMPLER_ADDRESS_MODE_REPEAT), Integer(VkSampler.CreateInfo.addressModeU));
+
+    AssertTrue('RHITextureFromTime(0.0) must return Frame 0',
+      Vid3D.RHITextureFromTime(0.0) = Vid3D.RHITexture(0));
+    AssertTrue('RHITextureFromTime(0.6) must return Frame 1',
+      Vid3D.RHITextureFromTime(0.6) = Vid3D.RHITexture(1));
+    AssertTrue('RHITextureFromTime(1.1) must return Frame 2',
+      Vid3D.RHITextureFromTime(1.1) = Vid3D.RHITexture(2));
+
+    { 4. Test TGLVideo2D in pure Vulkan RHI mode }
+    Vid2D := TGLVideo2D.Create(Vid, True);
+    FrameDrawable := Vid2D.DrawableImageFromTime(0.6);
+    AssertTrue('Vid2D.DrawableImageFromTime(0.6) must be non-nil', FrameDrawable <> nil);
+    AssertTrue('Vid2D frame RHITexture must be created', FrameDrawable.RHITexture <> nil);
+
+    Cmd.BeginRecording;
+    Batcher.Begin2DPass(Cmd, 256, 256);
+    FrameDrawable.Draw(FloatRectangle(0, 0, 16, 16));
+    Batcher.End2DPass;
+    Cmd.EndRecording;
+    AssertEquals('Vid2D frame draw must record 1 batch flush',
+      1, Integer(Batcher.BatchFlushCount));
+  finally
+    FreeAndNil(Vid2D);
+    FreeAndNil(Vid3D);
+    FreeAndNil(Vid);
+    SetActiveCommandList(SavedCmd);
+    FreeAndNil(Cmd);
+    FreeGlobalBatch2DRenderer;
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);

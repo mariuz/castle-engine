@@ -732,6 +732,13 @@ begin
       if (RenderContext <> nil) and (RenderContext.Viewport.Width > 0) and (RenderContext.Viewport.Height > 0) then
         PushConsts.ViewportSize := Vector2(RenderContext.Viewport.Width, RenderContext.Viewport.Height)
       else
+      if ActiveCommandList.IsRendering and
+         (ActiveCommandList.ActiveRenderingInfo.RenderArea.Width > 0) and
+         (ActiveCommandList.ActiveRenderingInfo.RenderArea.Height > 0) then
+        PushConsts.ViewportSize := Vector2(
+          ActiveCommandList.ActiveRenderingInfo.RenderArea.Width,
+          ActiveCommandList.ActiveRenderingInfo.RenderArea.Height)
+      else
         PushConsts.ViewportSize := Vector2(1920, 1080);
       PushConsts.PointSize := Max(1.0, Single(PointSize));
       PushConsts.Padding := 0.0;

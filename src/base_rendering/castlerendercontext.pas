@@ -572,6 +572,8 @@ begin
   if Self <> RenderContext then
     WarnContextNotCurrent;
 
+  TDrawableImage.BatchingFlush;
+
   if RHIDevice <> nil then
   begin
     Inc(FRHIClearCount);

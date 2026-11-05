@@ -42,10 +42,14 @@ type
     ColorRgba8: Cardinal;     // 4 bytes (Packed R8G8B8A8 UNorm tint)
   end;
 
-  { Push Constant payload for 2D rendering (16 bytes) }
+  { Push Constant payload for 2D rendering (48 bytes = 3 x vec4 in CastleDraw.u_ModelViewMatrix[0..2]) }
   TCastle2DPushConstants = packed record
     { (2.0 / ViewportWidth, 2.0 / ViewportHeight, -1.0, -1.0) }
     ViewportScaleBias: TVector4;
+    { xyz = ClipLine (A, B, C), w = 1.0 when Clip is enabled else 0.0 }
+    ClipLineAndEnable: TVector4;
+    { x = AlphaCutoff (0.5 when FinalAlpha = acTest else 0.0), yzw = reserved }
+    AlphaParams: TVector4;
   end;
 
   { Blend preset for fast 2D PSO lookup }
@@ -91,6 +95,13 @@ type
     FCurrentBlendMode: TCastle2DBlendMode;
     FCurrentSmoothScaling: Boolean;
     FCurrentScissor: TRectangle;
+    FCurrentClip: Boolean;
+    FCurrentClipLine: TVector3;
+    FCurrentAlphaCutoff: Single;
+    FCurrentCustomBlendFactors: Boolean;
+    FCurrentSrcBlend: TRHIBlendFactor;
+    FCurrentDstBlend: TRHIBlendFactor;
+    FLastPushConstants: TCastle2DPushConstants;
     FTotalQuadsDrawn: Cardinal;
     FTotalFlushes: Cardinal;
 
@@ -113,6 +124,25 @@ type
     procedure End2DPass;
 
     { Queues a list of screen/image rectangle pairs (used by TDrawableImage.Draw) }
+    procedure DrawQuads(
+      const ATexture: TRHITexture;
+      const ADescriptorSet: TRHIDescriptorSet;
+      const ScreenRects, ImageRects: PFloatRectangleArray;
+      const Count: Integer;
+      const ColorTint: TCastleColor;
+      const BlendMode: TCastle2DBlendMode;
+      const SmoothScaling: Boolean;
+      const ScissorRect: TRectangle;
+      const RotationRad: Single;
+      const RotationCenter: TVector2;
+      const RotationCenterInScreenCoords: Boolean;
+      const AClip: Boolean;
+      const AClipLine: TVector3;
+      const AAlphaCutoff: Single = 0.0;
+      const ACustomBlendFactors: Boolean = False;
+      const ASrcBlend: TRHIBlendFactor = bfSrcAlpha;
+      const ADstBlend: TRHIBlendFactor = bfOneMinusSrcAlpha); overload;
+
     procedure DrawQuads(
       const ATexture: TRHITexture;
       const ADescriptorSet: TRHIDescriptorSet;
@@ -151,6 +181,7 @@ type
     property TotalQuadsDrawn: Cardinal read FTotalQuadsDrawn;
     property TotalFlushes: Cardinal read FTotalFlushes;
     property LastPipeline: TRHIPipeline read FLastPipeline;
+    property LastPushConstants: TCastle2DPushConstants read FLastPushConstants;
   end;
 
 { Currently active 2D batch renderer for TDrawableImage / UI rendering. }
@@ -343,7 +374,13 @@ begin
       Gen.GeneratePreamble(ssFragment) +
       'CASTLE_SAMPLER(0, 0) uniform sampler2D u_SpriteTexture;' + NL +
       'void main() {' + NL +
-      '  castle_FragColor = texture(u_SpriteTexture, castle_tex_coord0) * castle_color_per_vertex;' + NL +
+      '  if (CastleDraw.u_ModelViewMatrix[1].w > 0.5 &&' + NL +
+      '      (dot(CastleDraw.u_ModelViewMatrix[1].xy, castle_tex_coord0) + CastleDraw.u_ModelViewMatrix[1].z < 0.0))' + NL +
+      '    discard;' + NL +
+      '  vec4 fragCol = texture(u_SpriteTexture, castle_tex_coord0) * castle_color_per_vertex;' + NL +
+      '  if (CastleDraw.u_ModelViewMatrix[2].x > 0.0 && fragCol.a < CastleDraw.u_ModelViewMatrix[2].x)' + NL +
+      '    discard;' + NL +
+      '  castle_FragColor = fragCol;' + NL +
       '}';
 
     FVertShader := FDevice.CreateShaderModuleFromGLSL(ssVertex, VertSrc, 'CastleBatch2D.vert');
@@ -397,7 +434,7 @@ begin
   SetLength(PipeDesc.DescriptorSetLayouts, 1);
   PipeDesc.DescriptorSetLayouts[0] := FTextureSetLayout;
   PipeDesc.PushConstantSize := SizeOf(TCastle2DPushConstants);
-  PipeDesc.PushConstantStages := [ssVertex];
+  PipeDesc.PushConstantStages := [ssVertex, ssFragment];
 
   SetLength(PipeDesc.ColorAttachmentFormats, 1);
   if FDevice.GetSwapchainColorTexture <> nil then
@@ -427,7 +464,7 @@ begin
         begin
           PipeDesc.BlendState := TRHIBlendStateDesc.DefaultAlphaBlend;
           PipeDesc.BlendState.SrcColorBlendFactor := bfDstColor;
-          PipeDesc.BlendState.DstColorBlendFactor := bfOneMinusSrcAlpha;
+          PipeDesc.BlendState.DstColorBlendFactor := bfZero;
         end;
     end;
     PipeDesc.DebugName := 'CastleBatch2D_PSO_' + IntToStr(Ord(BM));
@@ -495,6 +532,12 @@ begin
   FBatchFlushCount := 0;
   FCurrentTexture := nil;
   FCurrentDescriptorSet := nil;
+  FCurrentClip := False;
+  FCurrentClipLine := TVector3.Zero;
+  FCurrentAlphaCutoff := 0.0;
+  FCurrentCustomBlendFactors := False;
+  FCurrentSrcBlend := bfSrcAlpha;
+  FCurrentDstBlend := bfOneMinusSrcAlpha;
   FCurrentScissor := Rectangle(0, 0, Round(FViewportWidth), Round(FViewportHeight));
 
   { Map the streaming VBO for the current frame-in-flight }
@@ -509,6 +552,7 @@ var
   VertexByteOffset: PtrUInt;
   PushData: TCastle2DPushConstants;
   PipeDesc: TRHIGraphicsPipelineDesc;
+  ClipFlag: Single;
 begin
   QueuedQuads := FFrameQuadCount - FBatchStartQuad;
   if (QueuedQuads = 0) or (FCurrentCmd = nil) or (FCurrentDescriptorSet = nil) then
@@ -516,12 +560,19 @@ begin
 
   ActiveVBO := FFrameVBOs[FDevice.FrameIndex];
 
-  { 1. Bind PSO & Scissor (apply active rendering attachment formats and RenderContext stencil / color mask) }
+  { 1. Bind PSO & Scissor (apply active rendering attachment formats, custom blend factors, and RenderContext stencil / color mask) }
   if FCurrentCmd.IsRendering or
+     FCurrentCustomBlendFactors or
      ((RenderContext <> nil) and
       (RenderContext.StencilTest or (RenderContext.ColorChannels <> AllColorChannels))) then
   begin
     PipeDesc := FBasePipeDescs[FCurrentBlendMode];
+    if FCurrentCustomBlendFactors then
+    begin
+      PipeDesc.BlendState := TRHIBlendStateDesc.DefaultAlphaBlend;
+      PipeDesc.BlendState.SrcColorBlendFactor := FCurrentSrcBlend;
+      PipeDesc.BlendState.DstColorBlendFactor := FCurrentDstBlend;
+    end;
     if FCurrentCmd.IsRendering then
     begin
       if FCurrentCmd.ActiveRenderingHasColor then
@@ -546,13 +597,24 @@ begin
   FCurrentCmd.BindPipeline(FLastPipeline);
   FCurrentCmd.SetScissor(FCurrentScissor);
 
-  { 2. Push 2D orthographic scale/bias }
+  { 2. Push 2D orthographic scale/bias, ClipLine, and AlphaTest cutoff }
   PushData.ViewportScaleBias := Vector4(
     2.0 / FViewportWidth,
     2.0 / FViewportHeight,
     -1.0,
     -1.0);
-  FCurrentCmd.PushConstants([ssVertex], 0, SizeOf(PushData), PushData);
+  if FCurrentClip then
+    ClipFlag := 1.0
+  else
+    ClipFlag := 0.0;
+  PushData.ClipLineAndEnable := Vector4(
+    FCurrentClipLine.X,
+    FCurrentClipLine.Y,
+    FCurrentClipLine.Z,
+    ClipFlag);
+  PushData.AlphaParams := Vector4(FCurrentAlphaCutoff, 0.0, 0.0, 0.0);
+  FLastPushConstants := PushData;
+  FCurrentCmd.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushData), PushData);
 
   { 3. Bind Sprite Texture Descriptor Set }
   FCurrentCmd.BindDescriptorSet(0, FCurrentDescriptorSet, []);
@@ -593,7 +655,13 @@ procedure TCastleBatch2DRenderer.DrawQuads(
   const ScissorRect: TRectangle;
   const RotationRad: Single;
   const RotationCenter: TVector2;
-  const RotationCenterInScreenCoords: Boolean);
+  const RotationCenterInScreenCoords: Boolean;
+  const AClip: Boolean;
+  const AClipLine: TVector3;
+  const AAlphaCutoff: Single;
+  const ACustomBlendFactors: Boolean;
+  const ASrcBlend: TRHIBlendFactor;
+  const ADstBlend: TRHIBlendFactor);
 var
   I: Integer;
   SR, IR: TFloatRectangle;
@@ -632,6 +700,11 @@ begin
      (FCurrentBlendMode <> BlendMode) or
      (FCurrentSmoothScaling <> SmoothScaling) or
      (not FCurrentScissor.Equals(ScissorRect)) or
+     (FCurrentClip <> AClip) or
+     (AClip and (not TVector3.PerfectlyEquals(FCurrentClipLine, AClipLine))) or
+     (FCurrentAlphaCutoff <> AAlphaCutoff) or
+     (FCurrentCustomBlendFactors <> ACustomBlendFactors) or
+     (ACustomBlendFactors and ((FCurrentSrcBlend <> ASrcBlend) or (FCurrentDstBlend <> ADstBlend))) or
      ((FFrameQuadCount - FBatchStartQuad) + Cardinal(Count) > MaxQuadsPerBatch) then
   begin
     Flush;
@@ -640,6 +713,12 @@ begin
     FCurrentBlendMode := BlendMode;
     FCurrentSmoothScaling := SmoothScaling;
     FCurrentScissor := ScissorRect;
+    FCurrentClip := AClip;
+    FCurrentClipLine := AClipLine;
+    FCurrentAlphaCutoff := AAlphaCutoff;
+    FCurrentCustomBlendFactors := ACustomBlendFactors;
+    FCurrentSrcBlend := ASrcBlend;
+    FCurrentDstBlend := ADstBlend;
   end;
 
   if FFrameQuadCount + Cardinal(Count) > MaxQuadsPerFrame then
@@ -701,10 +780,29 @@ procedure TCastleBatch2DRenderer.DrawQuads(
   const ColorTint: TCastleColor;
   const BlendMode: TCastle2DBlendMode;
   const SmoothScaling: Boolean;
+  const ScissorRect: TRectangle;
+  const RotationRad: Single;
+  const RotationCenter: TVector2;
+  const RotationCenterInScreenCoords: Boolean);
+begin
+  DrawQuads(ATexture, ADescriptorSet, ScreenRects, ImageRects, Count,
+    ColorTint, BlendMode, SmoothScaling, ScissorRect, RotationRad, RotationCenter,
+    RotationCenterInScreenCoords, False, TVector3.Zero, 0.0, False, bfSrcAlpha, bfOneMinusSrcAlpha);
+end;
+
+procedure TCastleBatch2DRenderer.DrawQuads(
+  const ATexture: TRHITexture;
+  const ADescriptorSet: TRHIDescriptorSet;
+  const ScreenRects, ImageRects: PFloatRectangleArray;
+  const Count: Integer;
+  const ColorTint: TCastleColor;
+  const BlendMode: TCastle2DBlendMode;
+  const SmoothScaling: Boolean;
   const ScissorRect: TRectangle);
 begin
   DrawQuads(ATexture, ADescriptorSet, ScreenRects, ImageRects, Count,
-    ColorTint, BlendMode, SmoothScaling, ScissorRect, 0.0, Vector2(0, 0), False);
+    ColorTint, BlendMode, SmoothScaling, ScissorRect, 0.0, Vector2(0, 0), False,
+    False, TVector3.Zero, 0.0, False, bfSrcAlpha, bfOneMinusSrcAlpha);
 end;
 
 initialization

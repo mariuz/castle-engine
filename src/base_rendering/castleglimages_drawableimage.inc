@@ -1355,6 +1355,9 @@ var
   UseIndex: Boolean;
   Batcher: TCastleBatch2DRenderer;
   BatchBlendMode: TCastle2DBlendMode;
+  BatchAlphaCutoff: Single;
+  BatchCustomBlend: Boolean;
+  BatchSrcBlend, BatchDstBlend: TRHIBlendFactor;
   ScissorR: TRectangle;
   EffRotCenter: TVector2;
   AutoStarted2DPass: Boolean;
@@ -1383,16 +1386,34 @@ begin
 
       if FRHITexture <> nil then
       begin
+        BatchAlphaCutoff := 0.0;
+        BatchCustomBlend := False;
+        BatchSrcBlend := bfSrcAlpha;
+        BatchDstBlend := bfOneMinusSrcAlpha;
         case FinalAlpha of
-          acNone: BatchBlendMode := bmNone;
-          acTest, acBlending:
+          acNone:
+            BatchBlendMode := bmNone;
+          acTest:
+            begin
+              BatchBlendMode := bmNone;
+              BatchAlphaCutoff := 0.5;
+            end;
+          acBlending:
+            if (BlendingSourceFactor = bsSrcAlpha) and (BlendingDestinationFactor = bdOneMinusSrcAlpha) then
+              BatchBlendMode := bmAlphaBlend
+            else
             if (BlendingSourceFactor = bsSrcAlpha) and (BlendingDestinationFactor = bdOne) then
               BatchBlendMode := bmAdditive
             else
             if (BlendingSourceFactor = bsDstColor) and (BlendingDestinationFactor = bdZero) then
               BatchBlendMode := bmMultiply
             else
+            begin
               BatchBlendMode := bmAlphaBlend;
+              BatchCustomBlend := True;
+              BatchSrcBlend := TRenderContext.MapBlendSourceFactorToRHI(BlendingSourceFactor);
+              BatchDstBlend := TRenderContext.MapBlendDestFactorToRHI(BlendingDestinationFactor);
+            end;
           else
             BatchBlendMode := bmAlphaBlend;
         end;
@@ -1440,7 +1461,13 @@ begin
             ScissorR,
             Rotation,
             EffRotCenter,
-            UseScreenRotationCenter
+            UseScreenRotationCenter,
+            Clip,
+            ClipLine,
+            BatchAlphaCutoff,
+            BatchCustomBlend,
+            BatchSrcBlend,
+            BatchDstBlend
           );
         finally
           if AutoStarted2DPass then
