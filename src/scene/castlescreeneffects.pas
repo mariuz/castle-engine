@@ -266,7 +266,7 @@ implementation
 
 uses
   {$ifdef WASI} Job.Js, {$endif}
-  CastleUtils, CastleLog, CastleColors, CastleRenderContext, CastleInternalGLUtils,
+  Math, CastleUtils, CastleLog, CastleColors, CastleRenderContext, CastleInternalGLUtils,
   CastleApplicationProperties, CastleInternalScreenEffects;
 
 procedure SwapValues(var A, B: TGLTexture);
@@ -684,7 +684,12 @@ var
   DescSet, UserDescSet: TRHIDescriptorSet;
   PushConsts: TCastleScreenPushConstants;
   FinalPassInfo: TRHIRenderingInfo;
-  RenderAreaRect: TRectangle;
+  RenderAreaRect, FinalAreaRect: TRectangle;
+  OuterPassActive: Boolean;
+  PassPipeline: TRHIPipeline;
+  AdaptedDesc: TRHIGraphicsPipelineDesc;
+  PassColorFormat, PassDepthFormat: TRHIPixelFormat;
+  PassSampleCount: Cardinal;
 begin
   Result := 0;
   Cmd := ActiveCommandList;
@@ -708,6 +713,18 @@ begin
 
   for I := 0 to PassCount - 1 do
   begin
+    { Ensure source textures are in rsShaderRead state before entering a render pass }
+    if (FRHIScreenTextureSrc <> nil) and (FRHIScreenTextureSrc.CurrentState <> rsShaderRead) then
+      Cmd.TransitionTexture(FRHIScreenTextureSrc, rsShaderRead);
+    if ANeedDepth and (FRHIScreenTextureDepth <> nil) and
+       (FRHIScreenTextureDepth.CurrentState <> rsShaderRead) then
+      Cmd.TransitionTexture(FRHIScreenTextureDepth, rsShaderRead);
+
+    OuterPassActive := False;
+    PassColorFormat := pfRGBA8_UNorm;
+    PassDepthFormat := pfUndefined;
+    PassSampleCount := 1;
+
     if I < PassCount - 1 then
     begin
       { Intermediate ping-pong pass: render from FRHIScreenTextureSrc into FRHIScreenTextureDest }
@@ -716,26 +733,51 @@ begin
       ScreenEffectRTT.RenderBegin;
     end else
     begin
-      { Final pass: render from FRHIScreenTextureSrc into AFinalTargetTexture (or swapchain / dest) }
-      TargetTex := AFinalTargetTexture;
-      if TargetTex = nil then
-        TargetTex := RHIDevice.GetSwapchainColorTexture;
-      if TargetTex = nil then
-        TargetTex := FRHIScreenTextureDest;
+      OuterPassActive := (AFinalTargetTexture = nil) and Cmd.IsRendering;
+      if OuterPassActive then
+      begin
+        { Render directly into the already-active outer pass (resumed by ScreenEffectRTT.RenderEnd)
+          at the control's sub-rectangle without clobbering or ending the outer pass. }
+        if (RenderContext <> nil) and
+           (RenderContext.Viewport.Width = Integer(AWidth)) and
+           (RenderContext.Viewport.Height = Integer(AHeight)) then
+          FinalAreaRect := RenderContext.EffectiveViewportRect
+        else
+          FinalAreaRect := RenderAreaRect;
 
-      Cmd.TransitionTexture(TargetTex, rsColorAttachment);
-      FinalPassInfo := TRHIRenderingInfo.CreateColorDepth(
-        RenderAreaRect, TargetTex, loClear, Vector4(0, 0, 0, 1), nil, loDontCare, 1.0);
-      Cmd.BeginRendering(FinalPassInfo);
-      Cmd.SetViewport(FloatRectangle(0, 0, AWidth, AHeight), 0.0, 1.0);
-      Cmd.SetScissor(RenderAreaRect);
+        Cmd.SetViewport(FloatRectangle(FinalAreaRect), 0.0, 1.0);
+        Cmd.SetScissor(FinalAreaRect);
+
+        if Cmd.ActiveRenderingHasColor then
+          PassColorFormat := Cmd.ActiveRenderingColorFormat
+        else
+          PassColorFormat := pfBGRA8_UNorm;
+        if Cmd.ActiveRenderingHasDepth then
+          PassDepthFormat := Cmd.ActiveRenderingDepthFormat
+        else
+          PassDepthFormat := pfUndefined;
+        PassSampleCount := Max(1, Cmd.ActiveRenderingSampleCount);
+      end else
+      begin
+        { Final pass: render from FRHIScreenTextureSrc into AFinalTargetTexture (or swapchain / dest) }
+        TargetTex := AFinalTargetTexture;
+        if TargetTex = nil then
+          TargetTex := RHIDevice.GetSwapchainColorTexture;
+        if TargetTex = nil then
+          TargetTex := FRHIScreenTextureDest;
+
+        PassColorFormat := TargetTex.Desc.Format;
+        PassDepthFormat := pfUndefined;
+        PassSampleCount := Max(1, TargetTex.Desc.SampleCount);
+
+        Cmd.TransitionTexture(TargetTex, rsColorAttachment);
+        FinalPassInfo := TRHIRenderingInfo.CreateColorDepth(
+          RenderAreaRect, TargetTex, loClear, Vector4(0, 0, 0, 1), nil, loDontCare, 1.0);
+        Cmd.BeginRendering(FinalPassInfo);
+        Cmd.SetViewport(FloatRectangle(0, 0, AWidth, AHeight), 0.0, 1.0);
+        Cmd.SetScissor(RenderAreaRect);
+      end;
     end;
-
-    { Ensure source textures are in rsShaderRead state }
-    if FRHIScreenTextureSrc <> nil then
-      Cmd.TransitionTexture(FRHIScreenTextureSrc, rsShaderRead);
-    if ANeedDepth and (FRHIScreenTextureDepth <> nil) then
-      Cmd.TransitionTexture(FRHIScreenTextureDepth, rsShaderRead);
 
     { Allocate and bind Set 0 descriptor set (Binding 0 = screen, Binding 1 = screen_depth) }
     DescSet := RHIDevice.CreateDescriptorSet(Layout);
@@ -745,8 +787,23 @@ begin
       DescSet.BindTexture(1, FRHIScreenTextureDepth, FRHIScreenSampler);
     DescSet.Update;
 
-    if APassPipelines[I] <> nil then
-      Cmd.BindPipeline(APassPipelines[I]);
+    PassPipeline := APassPipelines[I];
+    if (PassPipeline <> nil) and
+       ((Length(PassPipeline.Desc.ColorAttachmentFormats) <> 1) or
+        (PassPipeline.Desc.ColorAttachmentFormats[0] <> PassColorFormat) or
+        (PassPipeline.Desc.DepthAttachmentFormat <> PassDepthFormat) or
+        (Max(1, PassPipeline.Desc.SampleCount) <> PassSampleCount)) then
+    begin
+      AdaptedDesc := PassPipeline.Desc;
+      SetLength(AdaptedDesc.ColorAttachmentFormats, 1);
+      AdaptedDesc.ColorAttachmentFormats[0] := PassColorFormat;
+      AdaptedDesc.DepthAttachmentFormat := PassDepthFormat;
+      AdaptedDesc.SampleCount := PassSampleCount;
+      PassPipeline := RHIDevice.GetOrCreatePipeline(AdaptedDesc);
+    end;
+
+    if PassPipeline <> nil then
+      Cmd.BindPipeline(PassPipeline);
     Cmd.BindDescriptorSet(0, DescSet, []);
     UserDescSet := GetScreenEffectRHIUserDescriptorSet(I);
     if UserDescSet <> nil then
@@ -768,6 +825,7 @@ begin
       ScreenEffectRTT.RenderEnd;
       SwapRHIValues(FRHIScreenTextureDest, FRHIScreenTextureSrc);
     end else
+    if not OuterPassActive then
     begin
       Cmd.EndRendering;
     end;
@@ -920,6 +978,11 @@ var
       else
         ScreenEffectRTT.Buffer := tbColor;
       ScreenEffectRTT.SetRHITexture(FRHIScreenTextureDest, FRHIScreenTextureDepth);
+      if RenderContext <> nil then
+      begin
+        RenderContext.Viewport := SR;
+        RenderContext.ViewportDelta := -SR.LeftBottom;
+      end;
       ScreenEffectRTT.RenderBegin;
       Exit;
     end;
@@ -1129,6 +1192,11 @@ var
 
     if RHIDevice <> nil then
     begin
+      if RenderContext <> nil then
+      begin
+        RenderContext.ViewportDelta := TVector2Integer.Zero;
+        RenderContext.Viewport := SR;
+      end;
       SwapRHIValues(FRHIScreenTextureDest, FRHIScreenTextureSrc);
       SetLength(PassPipelines, CurrentScreenEffectsCount);
       for I := 0 to CurrentScreenEffectsCount - 1 do

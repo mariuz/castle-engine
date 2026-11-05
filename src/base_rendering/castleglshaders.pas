@@ -966,8 +966,6 @@ procedure TGLSLUniform.SetValue(const Value: TBooleanList);
 var
   Ints: TInt32List;
 begin
-  if Location = GLUniformLocationNone then Exit; // ignore non-existing uniform here
-
   { We cannot pass Value.List, as Pascal booleans do not have 4 bytes
     (well, actually I could change this by compiler directive or
     by using LongBool for TBooleanList --- but for TBooleanList
@@ -983,7 +981,21 @@ begin
 end;
 
 procedure TGLSLUniform.SetValue(const Value: TInt32List);
+var
+  I: Integer;
+  PackedVec: TVector4;
 begin
+  if (Owner <> nil) and (Name <> '') and (Value <> nil) then
+  begin
+    PackedVec := TVector4.Zero;
+    for I := 0 to Value.Count - 1 do
+    begin
+      if I < 4 then
+        PackedVec.Data[I] := Value[I];
+      Owner.SetRHIUniformValue(Name + '[' + IntToStr(I) + ']', Vector4(Value[I], 0, 0, 0));
+    end;
+    Owner.SetRHIUniformValue(Name, PackedVec);
+  end;
   if Location = GLUniformLocationNone then Exit; // ignore non-existing uniform here
   if (GLFeatures = nil) or (not GLFeatures.Shaders) then Exit;
   Assert(SizeOf(Int32) = SizeOf(TGLint));
@@ -997,7 +1009,21 @@ begin
 end;
 
 procedure TGLSLUniform.SetValue(const Value: TSingleList);
+var
+  I: Integer;
+  PackedVec: TVector4;
 begin
+  if (Owner <> nil) and (Name <> '') and (Value <> nil) then
+  begin
+    PackedVec := TVector4.Zero;
+    for I := 0 to Value.Count - 1 do
+    begin
+      if I < 4 then
+        PackedVec.Data[I] := Value[I];
+      Owner.SetRHIUniformValue(Name + '[' + IntToStr(I) + ']', Vector4(Value[I], 0, 0, 0));
+    end;
+    Owner.SetRHIUniformValue(Name, PackedVec);
+  end;
   if Location = GLUniformLocationNone then Exit; // ignore non-existing uniform here
   if (GLFeatures = nil) or (not GLFeatures.Shaders) then Exit;
   Owner.Enable;
@@ -1010,7 +1036,15 @@ begin
 end;
 
 procedure TGLSLUniform.SetValue(const Value: TVector2List);
+var
+  I: Integer;
 begin
+  if (Owner <> nil) and (Name <> '') and (Value <> nil) and (Value.Count > 0) then
+  begin
+    Owner.SetRHIUniformValue(Name, Vector4(Value[0].X, Value[0].Y, 0, 0));
+    for I := 0 to Value.Count - 1 do
+      Owner.SetRHIUniformValue(Name + '[' + IntToStr(I) + ']', Vector4(Value[I].X, Value[I].Y, 0, 0));
+  end;
   if Location = GLUniformLocationNone then Exit; // ignore non-existing uniform here
   if (GLFeatures = nil) or (not GLFeatures.Shaders) then Exit;
   Owner.Enable;
@@ -1023,7 +1057,15 @@ begin
 end;
 
 procedure TGLSLUniform.SetValue(const Value: TVector3List);
+var
+  I: Integer;
 begin
+  if (Owner <> nil) and (Name <> '') and (Value <> nil) and (Value.Count > 0) then
+  begin
+    Owner.SetRHIUniformValue(Name, Vector4(Value[0].X, Value[0].Y, Value[0].Z, 0));
+    for I := 0 to Value.Count - 1 do
+      Owner.SetRHIUniformValue(Name + '[' + IntToStr(I) + ']', Vector4(Value[I].X, Value[I].Y, Value[I].Z, 0));
+  end;
   if Location = GLUniformLocationNone then Exit; // ignore non-existing uniform here
   if (GLFeatures = nil) or (not GLFeatures.Shaders) then Exit;
   Owner.Enable;
@@ -1036,7 +1078,15 @@ begin
 end;
 
 procedure TGLSLUniform.SetValue(const Value: TVector4List);
+var
+  I: Integer;
 begin
+  if (Owner <> nil) and (Name <> '') and (Value <> nil) and (Value.Count > 0) then
+  begin
+    Owner.SetRHIUniformValue(Name, Value[0]);
+    for I := 0 to Value.Count - 1 do
+      Owner.SetRHIUniformValue(Name + '[' + IntToStr(I) + ']', Value[I]);
+  end;
   if Location = GLUniformLocationNone then Exit; // ignore non-existing uniform here
   if (GLFeatures = nil) or (not GLFeatures.Shaders) then Exit;
   Owner.Enable;

@@ -184,7 +184,6 @@ type
     function GetBoundBuffer(const Target: TBufferTarget): TGLBuffer;
     procedure SetBoundBuffer(const Target: TBufferTarget; const Value: TGLBuffer);
     procedure SetInternalControlRectIgnore(const Value: Cardinal);
-    function EffectiveViewportRect: TRectangle;
     procedure GetEffectiveDepthRange(out AMinDepth, AMaxDepth: Single);
 
     { Update OpenGL(ES) state to match the fields of this class.
@@ -252,6 +251,10 @@ type
 
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
+
+    { Effective viewport rectangle after applying @link(ViewportDelta)
+      and @link(InternalControlRect) (when @link(InternalControlRectIgnore) = 0). }
+    function EffectiveViewportRect: TRectangle;
 
     { Clear the whole buffer contents.
 

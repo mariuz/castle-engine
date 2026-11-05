@@ -30,7 +30,7 @@ uses
   CastleRendererInternalShader, CastleRendererInternalLights, CastleRendererInternalTextureEnv, X3DNodes, X3DFields, X3DCameraUtils,
   CastleInternalGeometryArrays, CastleSceneInternalShape, CastleInternalOcclusionCulling,
   CastleTransform, CastleSceneCore, CastleScene, CastleProjection, CastleViewport, CastleScreenEffects, CastleRenderOptions, CastleWindow,
-  CastleUIControls, CastleControls,
+  CastleUIControls, CastleControls, CastleInternalInspector,
   CastleVideos, CastleInternalBackgroundRenderer, CastleInternalGLShadowVolumes,
   CastleInternalScreenEffects,
   CastleGLShaders, CastleGLUtils, CastleRenderPrimitives, CastleShapes, CastleRenderContext,
@@ -366,6 +366,9 @@ type
     procedure TestRendererCacheTextureSharingAndRefCountRHI;
     procedure TestSceneFreeResourcesAndMovieTexturePostUnloadPlaybackRHI;
     procedure TestSceneAndViewportPrepareResourcesPipelinePrebakeRHI;
+    procedure TestViewportSubRectScreenEffectsAndOuterPassRHI;
+    procedure TestX3DGLSLProgramSetupUniformsTextureFieldsRHI;
+    procedure TestCastleInspectorAndGLInformationStringRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -24142,6 +24145,437 @@ begin
   finally
     FreeAndNil(Viewport);
     FreeAndNil(Scene);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportSubRectScreenEffectsAndOuterPassRHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedCtx: TRenderContext;
+  SavedBackend: TRenderBackend;
+  Ctx: TRenderContext;
+  OuterColorTex, OuterDepthTex: TRHITexture;
+  OuterPassInfo: TRHIRenderingInfo;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  Box: TBoxNode;
+  ScFx1, ScFx2: TScreenEffectNode;
+  ScShader1, ScShader2: TComposedShaderNode;
+  ScPart1, ScPart2: TShaderPartNode;
+  OverlayImg: TDrawableImage;
+  SrcImg: TRGBAlphaImage;
+begin
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1001)));
+  Cmd := nil;
+  Ctx := nil;
+  OuterColorTex := nil;
+  OuterDepthTex := nil;
+  Container := nil;
+  Viewport := nil;
+  Scene := nil;
+  OverlayImg := nil;
+  SrcImg := nil;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+    Ctx := TRenderContext.Create(nil);
+    RenderContext := Ctx;
+
+    { Create an outer pass with pfBGRA8_UNorm color and pfD32_Float depth (256x256) }
+    OuterColorTex := Device.CreateTexture(TRHITextureDesc.Create2D(256, 256, pfBGRA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc]));
+    OuterDepthTex := Device.CreateTexture(TRHITextureDesc.Create2D(256, 256, pfD32_Float,
+      [tuDepthStencil, tuSampled]));
+
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    Mat.BaseColor := Vector3(0.2, 0.7, 0.9);
+    App.Material := Mat;
+    ShapeNode.Appearance := App;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    { Add 2 chained TScreenEffectNode passes to exercise ping-pong + outer pass resume }
+    ScFx1 := TScreenEffectNode.Create;
+    ScShader1 := TComposedShaderNode.Create;
+    ScPart1 := TShaderPartNode.Create;
+    ScPart1.ShaderType := stFragment;
+    ScPart1.Contents :=
+      'void main (void) {' + LineEnding +
+      '  gl_FragColor = screen_get_color(screen_position());' + LineEnding +
+      '}';
+    ScShader1.FdParts.Add(ScPart1);
+    ScFx1.FdShaders.Add(ScShader1);
+
+    ScFx2 := TScreenEffectNode.Create;
+    ScShader2 := TComposedShaderNode.Create;
+    ScPart2 := TShaderPartNode.Create;
+    ScPart2.ShaderType := stFragment;
+    ScPart2.Contents :=
+      'void main (void) {' + LineEnding +
+      '  gl_FragColor = screen_get_color(screen_position());' + LineEnding +
+      '}';
+    ScShader2.FdParts.Add(ScPart2);
+    ScFx2.FdShaders.Add(ScShader2);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+
+    { Place Viewport at a non-zero sub-rectangle (Left=40, Bottom=30, Width=120, Height=90) }
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := False;
+    Viewport.Translation := Vector2(40, 30);
+    Viewport.Width := 120;
+    Viewport.Height := 90;
+    Viewport.Items.Add(Scene);
+    Viewport.AddScreenEffect(ScFx1);
+    Viewport.AddScreenEffect(ScFx2);
+    Container.Controls.InsertFront(Viewport);
+    Viewport.GLContextOpen;
+    Viewport.BeforeRender;
+
+    SrcImg := TRGBAlphaImage.Create(16, 16);
+    SrcImg.Clear(Vector4Byte(255, 128, 64, 255));
+    OverlayImg := TDrawableImage.Create(SrcImg, True, False);
+
+    Cmd := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(Cmd);
+
+    OuterPassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 256, 256),
+      OuterColorTex, loClear, Vector4(0.1, 0.1, 0.1, 1.0),
+      OuterDepthTex, loClear, 1.0);
+    Cmd.BeginRendering(OuterPassInfo);
+
+    { 1. Viewport.Render begins rendering to FRHIScreenTextureDest and translates ViewportDelta }
+    Viewport.Render;
+    AssertEquals('During screen effects offscreen pass, ViewportDelta.X must be -40',
+      -40, RenderContext.ViewportDelta.X);
+    AssertEquals('During screen effects offscreen pass, ViewportDelta.Y must be -30',
+      -30, RenderContext.ViewportDelta.Y);
+    AssertEquals('During screen effects offscreen pass, EffectiveViewportRect.Left must be 0',
+      0, RenderContext.EffectiveViewportRect.Left);
+    AssertEquals('During screen effects offscreen pass, EffectiveViewportRect.Bottom must be 0',
+      0, RenderContext.EffectiveViewportRect.Bottom);
+    AssertEquals('During screen effects offscreen pass, EffectiveViewportRect.Width must be 120',
+      120, RenderContext.EffectiveViewportRect.Width);
+    AssertEquals('During screen effects offscreen pass, EffectiveViewportRect.Height must be 90',
+      90, RenderContext.EffectiveViewportRect.Height);
+
+    { 2. Viewport.RenderOverChildren ends RTT, resets ViewportDelta, runs 2 screen effect passes,
+      and renders the final pass directly into the resumed outer pass at (40, 30, 120, 90) }
+    Viewport.RenderOverChildren;
+
+    AssertEquals('After RenderOverChildren, ViewportDelta.X must be reset to 0',
+      0, RenderContext.ViewportDelta.X);
+    AssertEquals('After RenderOverChildren, ViewportDelta.Y must be reset to 0',
+      0, RenderContext.ViewportDelta.Y);
+    AssertTrue('Outer render pass must remain active after Viewport.RenderOverChildren',
+      Cmd.IsRendering);
+    AssertEquals('2 screen effect passes must have executed',
+      2, Integer(Viewport.RHIScreenPassCount));
+    AssertEquals('2 screen effect fullscreen quad draws must have executed',
+      2, Integer(Viewport.RHIScreenDrawCount));
+    AssertEquals('Final screen effect pass must set dynamic viewport Left to 40',
+      40, Round(Cmd.DynamicViewportRect.Left));
+    AssertEquals('Final screen effect pass must set dynamic viewport Bottom to 30',
+      30, Round(Cmd.DynamicViewportRect.Bottom));
+    AssertEquals('Final screen effect pass must set dynamic viewport Width to 120',
+      120, Round(Cmd.DynamicViewportRect.Width));
+    AssertEquals('Final screen effect pass must set dynamic viewport Height to 90',
+      90, Round(Cmd.DynamicViewportRect.Height));
+    AssertEquals('Final screen effect pass pipeline must adapt to outer pass pfBGRA8_UNorm color format',
+      Ord(pfBGRA8_UNorm), Ord(Cmd.BoundPipeline.Desc.ColorAttachmentFormats[0]));
+    AssertEquals('Final screen effect pass pipeline must adapt to outer pass pfD32_Float depth format',
+      Ord(pfD32_Float), Ord(Cmd.BoundPipeline.Desc.DepthAttachmentFormat));
+
+    { 3. Subsequent UI draws in the outer pass continue without losing the pass }
+    OverlayImg.Draw(10, 10);
+    TDrawableImage.BatchingFlush;
+    AssertTrue('Outer render pass remains active after subsequent UI draw', Cmd.IsRendering);
+
+    Cmd.EndRendering;
+    Device.EndFrameAndPresent;
+  finally
+    FreeAndNil(OverlayImg);
+    FreeAndNil(SrcImg);
+    FreeAndNil(Viewport);
+    FreeAndNil(Container);
+    FreeAndNil(Scene);
+    FreeAndNil(OuterDepthTex);
+    FreeAndNil(OuterColorTex);
+    RenderContext := SavedCtx;
+    FreeAndNil(Ctx);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestX3DGLSLProgramSetupUniformsTextureFieldsRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  ShaderNode: TComposedShaderNode;
+  FieldSingleTex: TSFNode;
+  FieldMultiTex: TMFNode;
+  FieldScale: TSFFloat;
+  FieldTint: TSFVec3f;
+  DeclSingleTex, DeclMultiTex, DeclScale, DeclTint: TX3DInterfaceDeclaration;
+  TexNode1, TexNode2, TexNode3: TPixelTextureNode;
+  Prog: TX3DGLSLProgram;
+  BoundUnits: Cardinal;
+  StoredVal: TVector4;
+begin
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1002)));
+  Scene := nil;
+  Prog := nil;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+    AssertTrue('GLFeatures must be nil in pure headless Vulkan RHI mode', GLFeatures = nil);
+
+    TexNode1 := TPixelTextureNode.Create;
+    TexNode1.FdImage.Value := TRGBAlphaImage.Create(4, 4);
+    TRGBAlphaImage(TexNode1.FdImage.Value).Clear(Vector4Byte(255, 0, 0, 255));
+
+    TexNode2 := TPixelTextureNode.Create;
+    TexNode2.FdImage.Value := TRGBAlphaImage.Create(4, 4);
+    TRGBAlphaImage(TexNode2.FdImage.Value).Clear(Vector4Byte(0, 255, 0, 255));
+
+    TexNode3 := TPixelTextureNode.Create;
+    TexNode3.FdImage.Value := TRGBAlphaImage.Create(4, 4);
+    TRGBAlphaImage(TexNode3.FdImage.Value).Clear(Vector4Byte(0, 0, 255, 255));
+
+    ShaderNode := TComposedShaderNode.Create;
+
+    FieldSingleTex := TSFNode.Create(ShaderNode, True, 'myMainTex', [TAbstractTextureNode], TexNode1);
+    DeclSingleTex := TX3DInterfaceDeclaration.Create(ShaderNode);
+    DeclSingleTex.FieldOrEvent := FieldSingleTex;
+    ShaderNode.InterfaceDeclarations.Add(DeclSingleTex);
+
+    FieldMultiTex := TMFNode.Create(ShaderNode, True, 'myLayerTexs', [TAbstractTextureNode]);
+    FieldMultiTex.Add(TexNode2);
+    FieldMultiTex.Add(TexNode3);
+    DeclMultiTex := TX3DInterfaceDeclaration.Create(ShaderNode);
+    DeclMultiTex.FieldOrEvent := FieldMultiTex;
+    ShaderNode.InterfaceDeclarations.Add(DeclMultiTex);
+
+    FieldScale := TSFFloat.Create(ShaderNode, True, 'myScale', 2.5);
+    DeclScale := TX3DInterfaceDeclaration.Create(ShaderNode);
+    DeclScale.FieldOrEvent := FieldScale;
+    ShaderNode.InterfaceDeclarations.Add(DeclScale);
+
+    FieldTint := TSFVec3f.Create(ShaderNode, True, 'myTint', Vector3(0.25, 0.5, 0.75));
+    DeclTint := TX3DInterfaceDeclaration.Create(ShaderNode);
+    DeclTint.FieldOrEvent := FieldTint;
+    ShaderNode.InterfaceDeclarations.Add(DeclTint);
+
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    App.FdShaders.Add(ShaderNode);
+    ShapeNode.Appearance := App;
+    ShapeNode.Geometry := TBoxNode.Create;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    Scene.ProcessEvents := True;
+
+    Prog := TX3DGLSLProgram.Create;
+    Prog.AttachVertexShader(
+      'void main(void) { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); }');
+    Prog.AttachFragmentShader(
+      'uniform sampler2D myMainTex;' + LineEnding +
+      'uniform sampler2D myLayerTexs[2];' + LineEnding +
+      'uniform float myScale;' + LineEnding +
+      'uniform vec3 myTint;' + LineEnding +
+      'void main(void) { gl_FragColor = vec4(myTint * myScale, 1.0); }');
+    Prog.Link;
+
+    { BindUniforms registers TSFNode/TMFNode in UniformsTextures and immediately sets non-texture fields }
+    Prog.BindUniforms(ShaderNode, True);
+    AssertTrue('myScale uniform must be recorded', Prog.GetRHIUniformValue('myScale', StoredVal));
+    AssertSameValue(2.5, StoredVal.X, 0.001);
+    AssertTrue('myTint uniform must be recorded', Prog.GetRHIUniformValue('myTint', StoredVal));
+    AssertSameValue(0.25, StoredVal.X, 0.001);
+    AssertSameValue(0.50, StoredVal.Y, 0.001);
+    AssertSameValue(0.75, StoredVal.Z, 0.001);
+
+    { SetupUniforms prepares and binds TSFNode (unit 1) and TMFNode (units 2, 3) when BoundUnits starts at 1 }
+    BoundUnits := 1;
+    AssertTrue('SetupUniforms must succeed in pure Vulkan RHI mode with GLFeatures = nil',
+      Prog.SetupUniforms(BoundUnits));
+    AssertEquals('BoundTextureUnits must advance from 1 to 4 (1 single + 2 array textures)',
+      4, Integer(BoundUnits));
+    AssertTrue('TexNode1 RHI texture resource must be prepared automatically',
+      TTextureResources.Get(TexNode1) <> nil);
+    AssertTrue('TexNode2 RHI texture resource must be prepared automatically',
+      TTextureResources.Get(TexNode2) <> nil);
+    AssertTrue('TexNode3 RHI texture resource must be prepared automatically',
+      TTextureResources.Get(TexNode3) <> nil);
+    AssertTrue('myMainTex uniform must be bound to texture unit 1',
+      Prog.GetRHIUniformValue('myMainTex', StoredVal));
+    AssertSameValue(1.0, StoredVal.X, 0.001);
+    AssertTrue('myLayerTexs array uniform must be bound to texture units [2, 3]',
+      Prog.GetRHIUniformValue('myLayerTexs', StoredVal));
+    AssertSameValue(2.0, StoredVal.X, 0.001);
+    AssertSameValue(3.0, StoredVal.Y, 0.001);
+    AssertTrue('myLayerTexs[0] must be 2',
+      Prog.GetRHIUniformValue('myLayerTexs[0]', StoredVal));
+    AssertSameValue(2.0, StoredVal.X, 0.001);
+    AssertTrue('myLayerTexs[1] must be 3',
+      Prog.GetRHIUniformValue('myLayerTexs[1]', StoredVal));
+    AssertSameValue(3.0, StoredVal.X, 0.001);
+
+    { Dynamically changing an exposed field fires EventReceive and updates RHI uniform }
+    FieldScale.Send(5.0);
+    AssertTrue(Prog.GetRHIUniformValue('myScale', StoredVal));
+    AssertSameValue(5.0, StoredVal.X, 0.001);
+  finally
+    FreeAndNil(Prog);
+    TTextureResources.Unprepare(TexNode1);
+    TTextureResources.Unprepare(TexNode2);
+    TTextureResources.Unprepare(TexNode3);
+    FreeAndNil(Scene);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCastleInspectorAndGLInformationStringRHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedCtx: TRenderContext;
+  SavedBackend: TRenderBackend;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Box: TBoxNode;
+  ShapeNode: TShapeNode;
+  Root: TX3DRootNode;
+  Inspector: TCastleInspector;
+  HandleInput: Boolean;
+  InfoStr, SummaryStr: String;
+  TargetTex: TRHITexture;
+  TargetPassInfo: TRHIRenderingInfo;
+  Batch2D: TCastleBatch2DRenderer;
+  QuadsBefore: Cardinal;
+begin
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1003)));
+  Container := nil;
+  Viewport := nil;
+  Scene := nil;
+  Inspector := nil;
+  TargetTex := nil;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+
+    { 1. Verify GLInformationString and GLInformationStringSummary in pure Vulkan RHI mode }
+    InfoStr := GLInformationString;
+    SummaryStr := GLInformationStringSummary;
+    AssertTrue('GLInformationString must report Vulkan / RHI info when RHIDevice <> nil',
+      Pos('Vulkan', InfoStr) > 0);
+    AssertTrue('GLInformationStringSummary must be non-empty in Vulkan RHI mode',
+      SummaryStr <> '');
+
+    { 2. Create a container with a Viewport and Scene, and attach TCastleInspector }
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    RenderContext := Container.Context;
+
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Name := 'InspectorTestScene';
+    Scene.Load(Root, True);
+
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.Name := 'InspectorTestViewport';
+    Viewport.FullSize := True;
+    Viewport.Items.Add(Scene);
+    Container.Controls.InsertFront(Viewport);
+
+    Inspector := TCastleInspector.Create(nil);
+    Container.Controls.InsertFront(Inspector);
+
+    { Select Viewport and test SelectedComponent persistence + Update }
+    Inspector.SelectedComponent := Viewport;
+    AssertTrue('Inspector.SelectedComponent must persist Viewport selection',
+      Inspector.SelectedComponent = Viewport);
+
+    HandleInput := True;
+    Inspector.Update(0.016, HandleInput);
+
+    { Render TCastleInspector (hierarchy/properties/profiler/log) into an offscreen RHI texture
+      via Container.RenderControl }
+    TargetTex := Device.CreateTexture(TRHITextureDesc.Create2D(800, 600, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc]));
+    Cmd := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(Cmd);
+
+    TargetPassInfo := TRHIRenderingInfo.CreateColorDepth(Rectangle(0, 0, 800, 600),
+      TargetTex, loClear, Vector4(0, 0, 0, 1), nil, loDontCare, 1.0);
+    Cmd.BeginRendering(TargetPassInfo);
+
+    Batch2D := EnsureBatch2DRenderer(Device);
+    QuadsBefore := Batch2D.TotalQuadsDrawn;
+    Container.RenderControl(Inspector, Rectangle(0, 0, 800, 600));
+    TDrawableImage.BatchingFlush;
+    AssertTrue('Rendering TCastleInspector must issue 2D RHI quad draws',
+      Batch2D.TotalQuadsDrawn > QuadsBefore);
+
+    Cmd.EndRendering;
+    Device.EndFrameAndPresent;
+  finally
+    RenderContext := SavedCtx;
+    FreeAndNil(Inspector);
+    FreeAndNil(Viewport);
+    FreeAndNil(Scene);
+    FreeAndNil(Container);
+    FreeAndNil(TargetTex);
+    FreeGlobalBatch2DRenderer;
     SetActiveCommandList(SavedCmd);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;

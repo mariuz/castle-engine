@@ -583,6 +583,9 @@ procedure TTextureResource.HandleTextureProperties(
   begin
     case FilterAuto of
       minDefault:
+        if RenderOptions = nil then
+          Result := TCastleRenderOptions.DefaultMinificationFilter
+        else
         case RenderOptions.MinificationFilter of
           minDefault: Result := TCastleRenderOptions.DefaultMinificationFilter;
           minFastest: Result := minNearest;
@@ -601,6 +604,9 @@ procedure TTextureResource.HandleTextureProperties(
   begin
     case FilterAuto of
       magDefault:
+        if RenderOptions = nil then
+          Result := TCastleRenderOptions.DefaultMagnificationFilter
+        else
         case RenderOptions.MagnificationFilter of
           magDefault: Result := TCastleRenderOptions.DefaultMagnificationFilter;
           magFastest: Result := magNearest;
@@ -615,6 +621,13 @@ procedure TTextureResource.HandleTextureProperties(
 
   function TextureFilter(const RenderOptions: TCastleRenderOptions): TTextureFilter;
   begin
+    if RenderOptions = nil then
+    begin
+      Result.Minification := TCastleRenderOptions.DefaultMinificationFilter;
+      Result.Magnification := TCastleRenderOptions.DefaultMagnificationFilter;
+      Exit;
+    end;
+
     case RenderOptions.MinificationFilter of
       minDefault: Result.Minification := TCastleRenderOptions.DefaultMinificationFilter;
       minFastest: Result.Minification := minNearest;
