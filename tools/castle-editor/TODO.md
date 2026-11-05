@@ -54,12 +54,12 @@ OK if after 7.0 release:
 
 * small GUI stuff:
     * on NewProject form AutoSize?
-    * allow configuring command output "word wrap"
-    * Output ListBox has some width (and horiz scrollbar) on Windows, unrelated to anything?
+    * DONE: allow configuring command output "word wrap" (`TOutputList.WordWrap` & `MenuItemOutputWordWrap` in `OutputPopup`)
+    * DONE: Output ListBox has some width (and horiz scrollbar) on Windows (`ScrollWidth = 0` in `formproject.lfm` + dynamic `FMaxLineWidth` tracking in `TOutputList`)
 
-* Project options:
-    * Allow to configure project qualified name from "Project Options" in editor
-    * Icon, other stuff from CastleEngineManifest.xml could be configuirable in editor
+* DONE: Project options:
+    * DONE: Allow to configure project qualified name from "Project Options" in editor (`Project -> Project Options (CastleEngineManifest.xml)...`)
+    * DONE: Icon, other stuff (`caption`, `author`, `version`, `screen_orientation`, `fullscreen_immersive`, `<icons><icon path="..."/></icons>`) from `CastleEngineManifest.xml` configurable in editor (`TProjectForm.ShowProjectOptionsDialog`)
 
 * at scene loading show something "wait, loading..."
 

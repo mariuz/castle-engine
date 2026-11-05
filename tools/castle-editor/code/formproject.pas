@@ -563,11 +563,18 @@ type
       BtnFilterAudio: TSpeedButton;
       BtnFilterCode: TSpeedButton;
       BtnFilesViewStyle: TSpeedButton;
+      MenuItemVerboseBuildTool: TMenuItem;
+      MenuItemOutputWordWrap: TMenuItem;
+      MenuItemProjectOptions: TMenuItem;
       FCurrentAssetCategoryMask: String;
       FLastActivateRefreshTick: QWord;
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
+    procedure MenuItemVerboseBuildToolClick(Sender: TObject);
+    procedure MenuItemOutputWordWrapClick(Sender: TObject);
+    procedure MenuItemProjectOptionsClick(Sender: TObject);
+    procedure ShowProjectOptionsDialog;
     procedure OutputCountsChanged(Sender: TObject);
     procedure UpdateShellListMask;
     procedure BuildToolCall(const Commands: array of String;
@@ -2042,6 +2049,7 @@ procedure TProjectForm.FormCreate(Sender: TObject);
 
 var
   EnableDocking: Boolean;
+  MiSep: TMenuItem;
 begin
   DesignObserver := TFreeNotificationObserver.Create(Self);
   DesignObserver.OnFreeNotification := {$ifdef FPC}@{$endif} DesignObserverFreeNotification;
@@ -2050,6 +2058,37 @@ begin
   Docking := EnableDocking and UserConfig.GetValue('ProjectForm_Docking', false);
   OutputList := TOutputList.Create(ListOutput);
   OutputList.OnCountsChanged := @OutputCountsChanged;
+  OutputList.WordWrap := UserConfig.GetValue('ProjectForm_OutputWordWrap', false);
+
+  MiSep := TMenuItem.Create(OutputPopup);
+  MiSep.Caption := '-';
+  OutputPopup.Items.Add(MiSep);
+  MenuItemOutputWordWrap := TMenuItem.Create(OutputPopup);
+  MenuItemOutputWordWrap.Caption := 'Word Wrap Output';
+  MenuItemOutputWordWrap.AutoCheck := true;
+  MenuItemOutputWordWrap.ShowAlwaysCheckable := true;
+  MenuItemOutputWordWrap.Checked := OutputList.WordWrap;
+  MenuItemOutputWordWrap.OnClick := @MenuItemOutputWordWrapClick;
+  OutputPopup.Items.Add(MenuItemOutputWordWrap);
+
+  MiSep := TMenuItem.Create(MenuItemRun);
+  MiSep.Caption := '-';
+  MenuItemRun.Add(MiSep);
+  MenuItemVerboseBuildTool := TMenuItem.Create(MenuItemRun);
+  MenuItemVerboseBuildTool.Caption := 'Verbose Build Tool Output (--verbose)';
+  MenuItemVerboseBuildTool.AutoCheck := true;
+  MenuItemVerboseBuildTool.ShowAlwaysCheckable := true;
+  MenuItemVerboseBuildTool.Checked := UserConfig.GetValue('ProjectForm_VerboseBuildTool', false);
+  MenuItemVerboseBuildTool.OnClick := @MenuItemVerboseBuildToolClick;
+  MenuItemRun.Add(MenuItemVerboseBuildTool);
+
+  MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
+  MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
+  MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
+  MenuItemFile.Insert(0, MenuItemProjectOptions);
+  MiSep := TMenuItem.Create(MenuItemFile);
+  MiSep.Caption := '-';
+  MenuItemFile.Insert(1, MiSep);
   BuildComponentsMenu(
     MenuItemDesignNewUserInterfaceCustomRoot,
     MenuItemDesignNewTransformCustomRoot,
@@ -2978,6 +3017,307 @@ begin
   end;
 end;
 
+procedure TProjectForm.MenuItemVerboseBuildToolClick(Sender: TObject);
+begin
+  if MenuItemVerboseBuildTool = nil then
+    Exit;
+  UserConfig.SetValue('ProjectForm_VerboseBuildTool', MenuItemVerboseBuildTool.Checked);
+  UserConfig.Save;
+end;
+
+procedure TProjectForm.MenuItemOutputWordWrapClick(Sender: TObject);
+begin
+  if (MenuItemOutputWordWrap = nil) or (OutputList = nil) then
+    Exit;
+  OutputList.WordWrap := MenuItemOutputWordWrap.Checked;
+  UserConfig.SetValue('ProjectForm_OutputWordWrap', MenuItemOutputWordWrap.Checked);
+  UserConfig.Save;
+end;
+
+procedure TProjectForm.MenuItemProjectOptionsClick(Sender: TObject);
+begin
+  ShowProjectOptionsDialog;
+end;
+
+procedure TProjectForm.ShowProjectOptionsDialog;
+const
+  OrientationValues: array [0..5] of String = (
+    '',
+    'any',
+    'landscape',
+    'sensor_landscape',
+    'portrait',
+    'sensor_portrait'
+  );
+var
+  ManifestFile, ManifestUrl, CurOrientation, CurIconPath: String;
+  Doc: TXMLDocument;
+  RootEl, VersionEl, IconsEl, IconEl: TDOMElement;
+  I, OrientationIdx: Integer;
+  DialogForm: TForm;
+  LblCaption, LblQualifiedName, LblAuthor, LblVersion, LblVersionCode,
+    LblOrientation, LblIconPath: TLabel;
+  EditCaption, EditQualifiedName, EditAuthor, EditVersionValue,
+    EditVersionCode, EditIconPath: TEdit;
+  ComboOrientation: TComboBox;
+  CheckFullscreenImmersive: TCheckBox;
+  BtnOpenXml, BtnOk, BtnCancel: TButton;
+  ParsedVersionCode: Cardinal;
+begin
+  ManifestFile := CombinePaths(ProjectPath, 'CastleEngineManifest.xml');
+  if not RegularFileExists(ManifestFile) then
+  begin
+    ErrorBox(Format('Project manifest file "%s" does not exist.', [ManifestFile]));
+    Exit;
+  end;
+
+  ManifestUrl := FilenameToUriSafe(ManifestFile);
+  URLReadXML(Doc, ManifestUrl);
+  try
+    RootEl := Doc.DocumentElement;
+    if (RootEl = nil) or (RootEl.TagName <> 'project') then
+    begin
+      ErrorBox('Invalid CastleEngineManifest.xml: root element must be <project>.');
+      Exit;
+    end;
+
+    DialogForm := TForm.CreateNew(Self);
+    try
+      DialogForm.Caption := 'Project Options (CastleEngineManifest.xml)';
+      DialogForm.Position := poMainFormCenter;
+      DialogForm.BorderStyle := bsDialog;
+      DialogForm.ClientWidth := 480;
+      DialogForm.ClientHeight := 346;
+      DialogForm.DesignTimePPI := 96;
+
+      LblCaption := TLabel.Create(DialogForm);
+      LblCaption.Parent := DialogForm;
+      LblCaption.Left := 14;
+      LblCaption.Top := 18;
+      LblCaption.Caption := 'Project Caption:';
+
+      EditCaption := TEdit.Create(DialogForm);
+      EditCaption.Parent := DialogForm;
+      EditCaption.Left := 170;
+      EditCaption.Top := 14;
+      EditCaption.Width := 294;
+      EditCaption.Text := RootEl.AttributeStringDef('caption', '');
+
+      LblQualifiedName := TLabel.Create(DialogForm);
+      LblQualifiedName.Parent := DialogForm;
+      LblQualifiedName.Left := 14;
+      LblQualifiedName.Top := 54;
+      LblQualifiedName.Caption := 'Qualified Name:';
+
+      EditQualifiedName := TEdit.Create(DialogForm);
+      EditQualifiedName.Parent := DialogForm;
+      EditQualifiedName.Left := 170;
+      EditQualifiedName.Top := 50;
+      EditQualifiedName.Width := 294;
+      EditQualifiedName.TextHint := 'e.g. com.mycompany.myproject';
+      EditQualifiedName.Text := RootEl.AttributeStringDef('qualified_name', '');
+
+      LblAuthor := TLabel.Create(DialogForm);
+      LblAuthor.Parent := DialogForm;
+      LblAuthor.Left := 14;
+      LblAuthor.Top := 90;
+      LblAuthor.Caption := 'Author:';
+
+      EditAuthor := TEdit.Create(DialogForm);
+      EditAuthor.Parent := DialogForm;
+      EditAuthor.Left := 170;
+      EditAuthor.Top := 86;
+      EditAuthor.Width := 294;
+      EditAuthor.Text := RootEl.AttributeStringDef('author', '');
+
+      VersionEl := RootEl.ChildElement('version', false);
+
+      LblVersion := TLabel.Create(DialogForm);
+      LblVersion.Parent := DialogForm;
+      LblVersion.Left := 14;
+      LblVersion.Top := 126;
+      LblVersion.Caption := 'Version Value:';
+
+      EditVersionValue := TEdit.Create(DialogForm);
+      EditVersionValue.Parent := DialogForm;
+      EditVersionValue.Left := 170;
+      EditVersionValue.Top := 122;
+      EditVersionValue.Width := 130;
+      if VersionEl <> nil then
+        EditVersionValue.Text := VersionEl.AttributeStringDef('value', '0.1')
+      else
+        EditVersionValue.Text := '0.1';
+
+      LblVersionCode := TLabel.Create(DialogForm);
+      LblVersionCode.Parent := DialogForm;
+      LblVersionCode.Left := 314;
+      LblVersionCode.Top := 126;
+      LblVersionCode.Caption := 'Code:';
+
+      EditVersionCode := TEdit.Create(DialogForm);
+      EditVersionCode.Parent := DialogForm;
+      EditVersionCode.Left := 364;
+      EditVersionCode.Top := 122;
+      EditVersionCode.Width := 100;
+      if VersionEl <> nil then
+        EditVersionCode.Text := IntToStr(VersionEl.AttributeCardinalDef('code', 1))
+      else
+        EditVersionCode.Text := '1';
+
+      LblOrientation := TLabel.Create(DialogForm);
+      LblOrientation.Parent := DialogForm;
+      LblOrientation.Left := 14;
+      LblOrientation.Top := 162;
+      LblOrientation.Caption := 'Screen Orientation:';
+
+      ComboOrientation := TComboBox.Create(DialogForm);
+      ComboOrientation.Parent := DialogForm;
+      ComboOrientation.Left := 170;
+      ComboOrientation.Top := 158;
+      ComboOrientation.Width := 294;
+      ComboOrientation.Style := csDropDownList;
+      ComboOrientation.Items.Add('(Default / Unspecified)');
+      ComboOrientation.Items.Add('any');
+      ComboOrientation.Items.Add('landscape');
+      ComboOrientation.Items.Add('sensor_landscape');
+      ComboOrientation.Items.Add('portrait');
+      ComboOrientation.Items.Add('sensor_portrait');
+      CurOrientation := RootEl.AttributeStringDef('screen_orientation', '');
+      OrientationIdx := 0;
+      for I := 0 to High(OrientationValues) do
+        if SameText(CurOrientation, OrientationValues[I]) then
+        begin
+          OrientationIdx := I;
+          Break;
+        end;
+      ComboOrientation.ItemIndex := OrientationIdx;
+
+      CheckFullscreenImmersive := TCheckBox.Create(DialogForm);
+      CheckFullscreenImmersive.Parent := DialogForm;
+      CheckFullscreenImmersive.Left := 170;
+      CheckFullscreenImmersive.Top := 196;
+      CheckFullscreenImmersive.Caption := 'Android Fullscreen Immersive (fullscreen_immersive)';
+      CheckFullscreenImmersive.Checked := RootEl.AttributeBooleanDef('fullscreen_immersive', true);
+
+      CurIconPath := '';
+      IconsEl := RootEl.ChildElement('icons', false);
+      if IconsEl <> nil then
+      begin
+        IconEl := IconsEl.ChildElement('icon', false);
+        if IconEl <> nil then
+          CurIconPath := IconEl.AttributeStringDef('path', '');
+      end;
+
+      LblIconPath := TLabel.Create(DialogForm);
+      LblIconPath.Parent := DialogForm;
+      LblIconPath.Left := 14;
+      LblIconPath.Top := 234;
+      LblIconPath.Caption := 'Primary Icon Path:';
+
+      EditIconPath := TEdit.Create(DialogForm);
+      EditIconPath.Parent := DialogForm;
+      EditIconPath.Left := 170;
+      EditIconPath.Top := 230;
+      EditIconPath.Width := 294;
+      EditIconPath.TextHint := 'e.g. icon.png (relative to project root)';
+      EditIconPath.Text := CurIconPath;
+
+      BtnOpenXml := TButton.Create(DialogForm);
+      BtnOpenXml.Parent := DialogForm;
+      BtnOpenXml.Left := 14;
+      BtnOpenXml.Top := 294;
+      BtnOpenXml.Width := 180;
+      BtnOpenXml.Height := 32;
+      BtnOpenXml.Caption := 'Open Manifest XML...';
+      BtnOpenXml.ModalResult := mrRetry;
+
+      BtnOk := TButton.Create(DialogForm);
+      BtnOk.Parent := DialogForm;
+      BtnOk.Left := 284;
+      BtnOk.Top := 294;
+      BtnOk.Width := 86;
+      BtnOk.Height := 32;
+      BtnOk.Caption := 'OK';
+      BtnOk.Default := true;
+      BtnOk.ModalResult := mrOk;
+
+      BtnCancel := TButton.Create(DialogForm);
+      BtnCancel.Parent := DialogForm;
+      BtnCancel.Left := 378;
+      BtnCancel.Top := 294;
+      BtnCancel.Width := 86;
+      BtnCancel.Height := 32;
+      BtnCancel.Caption := 'Cancel';
+      BtnCancel.Cancel := true;
+      BtnCancel.ModalResult := mrCancel;
+
+      case DialogForm.ShowModal of
+        mrRetry:
+          OpenDocument(ManifestFile);
+        mrOk:
+          begin
+            if Trim(EditCaption.Text) <> '' then
+              RootEl.AttributeSet('caption', Trim(EditCaption.Text))
+            else
+              RootEl.RemoveAttribute('caption');
+
+            if Trim(EditQualifiedName.Text) <> '' then
+              RootEl.AttributeSet('qualified_name', Trim(EditQualifiedName.Text))
+            else
+              RootEl.RemoveAttribute('qualified_name');
+
+            if Trim(EditAuthor.Text) <> '' then
+              RootEl.AttributeSet('author', Trim(EditAuthor.Text))
+            else
+              RootEl.RemoveAttribute('author');
+
+            if (ComboOrientation.ItemIndex > 0) and
+               (ComboOrientation.ItemIndex <= High(OrientationValues)) then
+              RootEl.AttributeSet('screen_orientation', OrientationValues[ComboOrientation.ItemIndex])
+            else
+              RootEl.RemoveAttribute('screen_orientation');
+
+            if not CheckFullscreenImmersive.Checked then
+              RootEl.AttributeSet('fullscreen_immersive', false)
+            else
+              RootEl.RemoveAttribute('fullscreen_immersive');
+
+            if Trim(EditVersionValue.Text) <> '' then
+            begin
+              if VersionEl = nil then
+                VersionEl := RootEl.CreateChild('version');
+              VersionEl.AttributeSet('value', Trim(EditVersionValue.Text));
+              if TryStrToUInt(Trim(EditVersionCode.Text), ParsedVersionCode) and
+                 ((ParsedVersionCode > 1) or VersionEl.HasAttribute('code')) then
+                VersionEl.AttributeSet('code', ParsedVersionCode);
+            end;
+
+            if Trim(EditIconPath.Text) <> '' then
+            begin
+              if IconsEl = nil then
+                IconsEl := RootEl.CreateChild('icons');
+              IconEl := IconsEl.ChildElement('icon', false);
+              if IconEl = nil then
+                IconEl := IconsEl.CreateChild('icon');
+              IconEl.AttributeSet('path', Trim(EditIconPath.Text));
+            end;
+
+            URLWriteXML(Doc, ManifestUrl);
+
+            FreeAndNil(Manifest);
+            Manifest := TCastleManifest.CreateFromUrl(ManifestUrl);
+            ProjectName := Manifest.Name;
+            UpdateFormCaption(nil);
+          end;
+      end;
+    finally
+      FreeAndNil(DialogForm);
+    end;
+  finally
+    FreeAndNil(Doc);
+  end;
+end;
+
 procedure TProjectForm.MenuItemDesignNewUserInterfaceRectClick(Sender: TObject);
 begin
   if not IsCreatingNewDesignAvailable then
@@ -3677,6 +4017,8 @@ begin
     QueueItem.ExeName := BuildToolExe;
     QueueItem.CurrentDirectory := ProjectPath;
     QueueItem.Parameters.Add(Command);
+    if (MenuItemVerboseBuildTool <> nil) and MenuItemVerboseBuildTool.Checked then
+      QueueItem.Parameters.Add('--verbose');
     // add --mode=xxx parameter
     if not (
         // we list the few commands that ignore --mode below

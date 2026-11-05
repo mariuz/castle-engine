@@ -51,16 +51,20 @@ type
       FList: TListBox;
       FWarningsCount: Integer;
       FErrorsCount: Integer;
+      FMaxLineWidth: Integer;
+      FWordWrap: Boolean;
       FReplaceLastProgressLine: Boolean;
       FOnCountsChanged: TNotifyEvent;
     procedure DrawItem(Control: TWinControl; Index: Integer;
       ARect: TRect; State: TOwnerDrawState);
+    procedure SetWordWrap(const Value: Boolean);
   public
     constructor Create(const AList: TListBox);
     destructor Destroy; override;
     property List: TListBox read FList;
     property WarningsCount: Integer read FWarningsCount;
     property ErrorsCount: Integer read FErrorsCount;
+    property WordWrap: Boolean read FWordWrap write SetWordWrap;
     property OnCountsChanged: TNotifyEvent read FOnCountsChanged write FOnCountsChanged;
 
     procedure AddLine(const S: String; const Kind: TOutputKind);
@@ -772,6 +776,8 @@ begin
   FList.Style := lbOwnerDrawFixed;
   FList.OnDrawItem := @DrawItem;
   FList.ItemHeight := GetRowHeight + 4;
+  FList.ScrollWidth := 0;
+  FMaxLineWidth := 0;
 
   { Create OutputInfoPerKind instances.
     The idea is that every AddLine call should not construct new
@@ -782,6 +788,20 @@ begin
     OutputInfoPerKind[Kind] := TOutputInfo.Create;
     OutputInfoPerKind[Kind].Kind := Kind;
   end;
+end;
+
+procedure TOutputList.SetWordWrap(const Value: Boolean);
+begin
+  if FWordWrap = Value then
+    Exit;
+  FWordWrap := Value;
+  if FWordWrap then
+    FList.ScrollWidth := 0
+  else
+  if FMaxLineWidth > FList.ClientWidth then
+    FList.ScrollWidth := FMaxLineWidth
+  else
+    FList.ScrollWidth := 0;
 end;
 
 destructor TOutputList.Destroy;
@@ -806,8 +826,40 @@ procedure TOutputList.AddLine(const S: String; const Kind: TOutputKind);
       IsPrefix('Writing Resource String Table file:', Trimmed, true);
   end;
 
+  procedure AppendPhysicalLine(const ALine: String; const AllowReplace: Boolean);
+  var
+    LineWidth: Integer;
+  begin
+    if AllowReplace and FReplaceLastProgressLine and (List.Items.Count > 0) then
+    begin
+      List.Items[List.Items.Count - 1] := ALine;
+      List.Items.Objects[List.Items.Count - 1] := OutputInfoPerKind[Kind];
+    end else
+      List.Items.AddObject(ALine, OutputInfoPerKind[Kind]);
+
+    if ALine <> '' then
+    begin
+      FList.Canvas.Font := FList.Font;
+      if Kind = okImportantInfo then
+        FList.Canvas.Font.Bold := true;
+      LineWidth := FList.Canvas.TextWidth(ALine) + 16;
+      if LineWidth > FMaxLineWidth then
+        FMaxLineWidth := LineWidth;
+      if FWordWrap then
+        FList.ScrollWidth := 0
+      else
+      if FMaxLineWidth > FList.ClientWidth then
+        FList.ScrollWidth := FMaxLineWidth
+      else
+        FList.ScrollWidth := 0;
+    end;
+  end;
+
 var
   IsBottom: Boolean;
+  Remaining, Chunk: String;
+  AvailWidth, SplitLen, SpacePos: Integer;
+  FirstChunk: Boolean;
 begin
   { Scroll to bottom once a new message is received, unless the user explicitly
     selected an earlier message line in ListOutput to inspect it while output is streaming. }
@@ -815,14 +867,49 @@ begin
     (List.ItemIndex < 0) or
     (List.ItemIndex >= List.Items.Count - 2);
 
-  if FReplaceLastProgressLine and (List.Items.Count > 0) then
+  if FWordWrap and (FList.ClientWidth > 64) and (S <> '') and
+     (not IsTransientProgressLine(S, Kind)) then
   begin
-    List.Items[List.Items.Count - 1] := S;
-    List.Items.Objects[List.Items.Count - 1] := OutputInfoPerKind[Kind];
+    FList.Canvas.Font := FList.Font;
+    if Kind = okImportantInfo then
+      FList.Canvas.Font.Bold := true;
+    AvailWidth := Max(48, FList.ClientWidth - 16);
+    if FList.Canvas.TextWidth(S) <= AvailWidth then
+      AppendPhysicalLine(S, true)
+    else
+    begin
+      Remaining := S;
+      FirstChunk := true;
+      while Remaining <> '' do
+      begin
+        if FList.Canvas.TextWidth(Remaining) <= AvailWidth then
+        begin
+          AppendPhysicalLine(Remaining, FirstChunk);
+          Break;
+        end;
+        SplitLen := Length(Remaining);
+        while (SplitLen > 1) and (FList.Canvas.TextWidth(Copy(Remaining, 1, SplitLen)) > AvailWidth) do
+          Dec(SplitLen);
+        SpacePos := SplitLen;
+        while (SpacePos > SplitLen div 2) and (not (Remaining[SpacePos] in [' ', '/', '\'])) do
+          Dec(SpacePos);
+        if SpacePos > SplitLen div 2 then
+          SplitLen := SpacePos;
+        Chunk := Copy(Remaining, 1, SplitLen);
+        Delete(Remaining, 1, SplitLen);
+        if FirstChunk then
+          AppendPhysicalLine(Chunk, true)
+        else
+          AppendPhysicalLine('  ' + TrimLeft(Chunk), false);
+        FirstChunk := false;
+      end;
+    end;
+    FReplaceLastProgressLine := false;
   end else
-    List.Items.AddObject(S, OutputInfoPerKind[Kind]);
-
-  FReplaceLastProgressLine := IsTransientProgressLine(S, Kind);
+  begin
+    AppendPhysicalLine(S, true);
+    FReplaceLastProgressLine := IsTransientProgressLine(S, Kind);
+  end;
 
   if Kind = okWarning then
   begin
@@ -875,8 +962,10 @@ begin
   HadCounts := (FWarningsCount <> 0) or (FErrorsCount <> 0);
   FWarningsCount := 0;
   FErrorsCount := 0;
+  FMaxLineWidth := 0;
   FReplaceLastProgressLine := false;
   List.Items.Clear;
+  List.ScrollWidth := 0;
   if HadCounts and Assigned(FOnCountsChanged) then
     FOnCountsChanged(Self);
 end;
