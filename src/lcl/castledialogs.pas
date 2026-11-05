@@ -174,9 +174,47 @@ procedure Register;
 
 implementation
 
-uses SysUtils,
-  CastleUriUtils, CastleLCLUtils, X3DLoad, CastleImages, CastleFilesUtils,
-  CastleStringUtils, CastleUtils;
+uses SysUtils, Controls,
+  CastleUriUtils, CastleLCLUtils, X3DLoad, X3DNodes, X3DFields,
+  CastleImages, CastleFilesUtils, CastleStringUtils, CastleUtils;
+
+type
+  TSceneDependencyCopyHelper = class
+    SourceDir: String;
+    DataDir: String;
+    procedure HandleNode(Node: TX3DNode);
+  end;
+
+procedure TSceneDependencyCopyHelper.HandleNode(Node: TX3DNode);
+var
+  I: Integer;
+  MFField: TMFString;
+  RelUrl, FullDepUrl, SourceDepFile, RelFilePath, DestDepFile: String;
+begin
+  for I := 0 to Node.FieldsCount - 1 do
+    if (Node.Fields[I] is TMFString) and
+       (SameText(Node.Fields[I].X3DName, 'url') or
+        IsSuffix('Url', Node.Fields[I].X3DName, true)) then
+    begin
+      MFField := TMFString(Node.Fields[I]);
+      for RelUrl in MFField.Items do
+      begin
+        if (RelUrl = '') or (Pos('data:', RelUrl) = 1) or (Pos('ecmascript:', RelUrl) = 1) then
+          Continue;
+        FullDepUrl := CombineURI(Node.BaseUrl, RelUrl);
+        SourceDepFile := UriToFilenameSafeUTF8(FullDepUrl);
+        if (SourceDepFile <> '') and RegularFileExists(SourceDepFile) and
+           IsPrefix(SourceDir, SourceDepFile, FileNameCaseSensitive) then
+        begin
+          RelFilePath := PrefixRemove(SourceDir, SourceDepFile, FileNameCaseSensitive);
+          DestDepFile := CombinePaths(DataDir, RelFilePath);
+          ForceDirectories(ExtractFileDir(DestDepFile));
+          if not SameFileName(SourceDepFile, DestDepFile) then
+            CheckCopyFile(SourceDepFile, DestDepFile);
+        end;
+      end;
+    end;
+end;
 
 procedure Register;
 begin
@@ -204,6 +242,80 @@ begin
       '- The file will not be packaged with your distributed application automatically.' + NL +
       'Unless you really know what you''re doing, we advice to instead open or save inside the project "data" directory.',
       mtWarning, [mbOK], 0);
+end;
+
+procedure WarningOrImportIfOutsideDataDirectory(var AFileName: String;
+  const Url: String; const TrackSceneDependencies: Boolean);
+var
+  DataDir, SourceFile, SourceDir, DestFile, SidecarFile: String;
+  RootNode: TX3DRootNode;
+  CopyHelper: TSceneDependencyCopyHelper;
+begin
+  if URIProtocol(Url) = 'castle-data' then
+    Exit;
+
+  DataDir := UriToFilenameSafeUTF8(ResolveCastleDataUrl('castle-data:/'));
+  SourceFile := CleanupFileName(AFileName);
+  if (DataDir = '') or (not DirectoryExists(DataDir)) or
+     (SourceFile = '') or (not RegularFileExists(SourceFile)) then
+  begin
+    WarningIfOutsideDataDirectory(Url);
+    Exit;
+  end;
+
+  if QuestionDlg('File outside data',
+    'You are opening a file outside of the project''s "data" directory.' + NL +
+    NL +
+    'The file is: ' + Url + NL +
+    NL +
+    'The "data" directory is: ' + ResolveCastleDataUrl('castle-data:/') + NL +
+    NL +
+    'While it is allowed, it is not encouraged for cross-platform applications:' + NL +
+    '- You will not be able to open this file using castle-data:/ URL (or ApplicationData function).' + NL +
+    '- The file will not be packaged with your distributed application automatically.' + NL +
+    NL +
+    'Would you like to import (copy) this file' +
+    Iff(TrackSceneDependencies, ' and its referenced textures, audio, and inline assets', '') +
+    ' into the project "data" directory now?',
+    mtWarning,
+    [mrYes, 'Import to "data" Directory', 'IsDefault',
+     mrNo, 'Use External File Anyway'], 0) = mrYes then
+  begin
+    DestFile := CombinePaths(DataDir, ExtractFileName(SourceFile));
+    ForceDirectories(ExtractFileDir(DestFile));
+    if not SameFileName(SourceFile, DestFile) then
+      CheckCopyFile(SourceFile, DestFile);
+
+    if TrackSceneDependencies then
+    begin
+      SourceDir := InclPathDelim(ExtractFileDir(SourceFile));
+      for SidecarFile in [ChangeFileExt(SourceFile, '.bin'), ChangeFileExt(SourceFile, '.mtl')] do
+        if RegularFileExists(SidecarFile) and
+           (not SameFileName(SidecarFile, CombinePaths(DataDir, ExtractFileName(SidecarFile)))) then
+          CheckCopyFile(SidecarFile, CombinePaths(DataDir, ExtractFileName(SidecarFile)));
+
+      try
+        RootNode := LoadNode(FilenameToUriSafeUTF8(SourceFile));
+        try
+          CopyHelper := TSceneDependencyCopyHelper.Create;
+          try
+            CopyHelper.SourceDir := SourceDir;
+            CopyHelper.DataDir := DataDir;
+            RootNode.EnumerateNodes(TX3DNode, @CopyHelper.HandleNode, false);
+          finally
+            FreeAndNil(CopyHelper);
+          end;
+        finally
+          FreeAndNil(RootNode);
+        end;
+      except
+        { Ignore scene parse errors during optional dependency tracking;
+          the primary file has already been copied into DataDir. }
+      end;
+    end;
+
+    AFileName := DestFile;
+  end;
 end;
 
 function CleanupFileName(const FileName: String): String;
@@ -243,10 +355,16 @@ begin
 end;
 
 function TCastleOpenSceneDialog.DoExecute: boolean;
+var
+  NewFileName: String;
 begin
   Result := inherited DoExecute;
   if Result and AdviceDataDirectory then
-    WarningIfOutsideDataDirectory(Url);
+  begin
+    NewFileName := FileName;
+    WarningOrImportIfOutsideDataDirectory(NewFileName, Url, true);
+    FileName := NewFileName;
+  end;
 end;
 
 constructor TCastleOpenSceneDialog.Create(AOwner: TComponent);
@@ -325,10 +443,16 @@ begin
 end;
 
 function TCastleOpenImageDialog.DoExecute: boolean;
+var
+  NewFileName: String;
 begin
   Result := inherited DoExecute;
   if Result and AdviceDataDirectory then
-    WarningIfOutsideDataDirectory(Url);
+  begin
+    NewFileName := FileName;
+    WarningOrImportIfOutsideDataDirectory(NewFileName, Url, false);
+    FileName := NewFileName;
+  end;
 end;
 
 constructor TCastleOpenImageDialog.Create(AOwner: TComponent);
@@ -389,10 +513,16 @@ begin
 end;
 
 function TCastleOpenDialog.DoExecute: boolean;
+var
+  NewFileName: String;
 begin
   Result := inherited DoExecute;
   if Result and AdviceDataDirectory then
-    WarningIfOutsideDataDirectory(Url);
+  begin
+    NewFileName := FileName;
+    WarningOrImportIfOutsideDataDirectory(NewFileName, Url, false);
+    FileName := NewFileName;
+  end;
 end;
 
 constructor TCastleOpenDialog.Create(AOwner: TComponent);

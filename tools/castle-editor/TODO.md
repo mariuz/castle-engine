@@ -27,9 +27,9 @@ OK if after 7.0 release:
     * on audio files, you can open them with `examples/audio/audio_player/` (should this be moved to tools directory? probably!)
 
 * build tool integration:
-    * Shorter compile output:
-        * also do not show FPC "logo", do not repeat information about FPC version, Os/CPU 2 times, debug mode,...
-        * remove the "separator" lines. The bold lines already separate them nicely?
+    * DONE: Shorter compile output:
+        * DONE: also do not show FPC "logo", do not repeat information about FPC version, Os/CPU 2 times, debug mode (`IsRedundantCompilerBannerLine` in `TAsynchronousProcess.Update`)
+        * DONE: remove the "separator" lines (`TAsynchronousProcess.Start`, `TAsynchronousProcessQueue.Update`, and `TOutputList.AddSeparator`)
     * rerun generate-program each time? (mark them as some *DO NOT MODIFY THIS, THIS IS ONLY FOR LAZARUS* comment)
         Not really OK, in case we open program with hand-crafted program file.
         Maybe only auto-generate in castle-engine-output,
@@ -38,7 +38,7 @@ OK if after 7.0 release:
         Best: change to use planned CastleEngineConfig.pas unit,
           that is always auto-generated without warning.
           Do not overwrite lpr each time.
-    * checkbox in menu for verbose output from the build tool
+    * DONE: checkbox in menu for verbose output from the build tool (`MenuItemVerboseBuildTool` in `MenuItemRun`)
     * use machine-readble format format for communication with build tool and CastleLog when CASTLE_ENGINE_EDITOR_INSIDE=true
 
         Causes build tool some lines (e.g. in verbose fpc command line) to use special format, and actual program uses CastleLog that has special output (and always goes to console even on Windows)
@@ -52,8 +52,8 @@ OK if after 7.0 release:
       - "OpenGL Information" or
       - command-line of FPC in build tool verbose mode
 
-* small GUI stuff:
-    * on NewProject form AutoSize?
+* DONE: small GUI stuff:
+    * DONE: on NewProject form AutoSize (`TNewProjectForm.FormShow.AdjustFormSize` dynamically sizes `ClientWidth` and `ClientHeight`)
     * DONE: allow configuring command output "word wrap" (`TOutputList.WordWrap` & `MenuItemOutputWordWrap` in `OutputPopup`)
     * DONE: Output ListBox has some width (and horiz scrollbar) on Windows (`ScrollWidth = 0` in `formproject.lfm` + dynamic `FMaxLineWidth` tracking in `TOutputList`)
 
@@ -61,10 +61,10 @@ OK if after 7.0 release:
     * DONE: Allow to configure project qualified name from "Project Options" in editor (`Project -> Project Options (CastleEngineManifest.xml)...`)
     * DONE: Icon, other stuff (`caption`, `author`, `version`, `screen_orientation`, `fullscreen_immersive`, `<icons><icon path="..."/></icons>`) from `CastleEngineManifest.xml` configurable in editor (`TProjectForm.ShowProjectOptionsDialog`)
 
-* at scene loading show something "wait, loading..."
+* DONE: at scene loading show something "wait, loading..." (`TViewFileFrame.LoadScene` sets `LabelInformation.Caption := 'Wait, loading...'` and `Screen.Cursor := crHourGlass`)
 
-* allow to import file with textures, audio, inline tracked
-  as alternative at warning message when opening file outside of castle-data:
+* DONE: allow to import file with textures, audio, inline tracked
+  as alternative at warning message when opening file outside of castle-data: (`WarningOrImportIfOutsideDataDirectory` & `TSceneDependencyCopyHelper` in `src/lcl/castledialogs.pas`)
 
 * When something is anchored to top-right,
   resizing by dragging left border makes unpleasant visual effect.

@@ -214,29 +214,38 @@ begin
   Scene := TCastleScene.Create(Self);
   Viewport.Items.Add(Scene);
 
+  LabelURL.Caption := UriDisplay(AURL, true);
+  LabelInformation.Caption := 'Wait, loading...';
+  LabelInformation.Color := White;
+  Screen.Cursor := crHourGlass;
   try
-    Scene.URL := AURL;
-    FSuccessMessage := Format(
-      'Vertexes: %d' + NL +
-      'Triangles: %d' + NL +
-      'Bounding Box: %s', [
-      Scene.VerticesCount,
-      Scene.TrianglesCount,
-      Scene.BoundingBox.ToString
-    ]);
+    Control.Repaint;
+    try
+      Scene.URL := AURL;
+      FSuccessMessage := Format(
+        'Vertexes: %d' + NL +
+        'Triangles: %d' + NL +
+        'Bounding Box: %s', [
+        Scene.VerticesCount,
+        Scene.TrianglesCount,
+        Scene.BoundingBox.ToString
+      ]);
 
-    Viewport.AssignDefaultCamera;
-    CameraViewpointForWholeScene(Viewport.Items.BoundingBox,
-      2, 1, false, true, Pos, Dir, Up, GravityUp);
-    Viewport.NavigationType := ntExamine;
-    Viewport.Camera.SetWorldView(Pos, Dir, Up);
-    Viewport.Camera.GravityUp := GravityUp;
-  except
-    on E: Exception do
-    begin
-      FErrorMessage := ExceptMessage(E);
-      // continue the rest, to show URL and error message
+      Viewport.AssignDefaultCamera;
+      CameraViewpointForWholeScene(Viewport.Items.BoundingBox,
+        2, 1, false, true, Pos, Dir, Up, GravityUp);
+      Viewport.NavigationType := ntExamine;
+      Viewport.Camera.SetWorldView(Pos, Dir, Up);
+      Viewport.Camera.GravityUp := GravityUp;
+    except
+      on E: Exception do
+      begin
+        FErrorMessage := ExceptMessage(E);
+        // continue the rest, to show URL and error message
+      end;
     end;
+  finally
+    Screen.Cursor := crDefault;
   end;
 
   FinishLoading(AURL);

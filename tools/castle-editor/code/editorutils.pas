@@ -403,7 +403,6 @@ begin
         // if we just finished the last queue item, then success
         SuccessfullyFinishedAll := FQueuePosition = Queue.Count;
       end;
-      OutputList.AddSeparator;
       if AsyncProcess.ExitStatus = 0 then
         OutputList.AddLine('Command finished successfully.', LastLineKind)
       else
@@ -516,7 +515,6 @@ begin
     LogLine += ' ' + S;
   LogLine += '"';
   OutputList.AddLine(LogLine, okImportantInfo);
-  OutputList.AddSeparator;
 
   FRunning := true;
 end;
@@ -536,6 +534,21 @@ procedure TAsynchronousProcess.Update;
       ChildProcessId := ParsedProcessId;
       Result := true;
     end;
+  end;
+
+  { Filter repetitive FPC logo/copyright/target banner lines when not in verbose mode. }
+  function IsRedundantCompilerBannerLine(const Line: String): Boolean;
+  var
+    Trimmed: String;
+  begin
+    if (Parameters <> nil) and
+       ((Parameters.IndexOf('--verbose') <> -1) or (Parameters.IndexOf('-v') <> -1)) then
+      Exit(false);
+    Trimmed := TrimLeft(Line);
+    Result :=
+      IsPrefix('Free Pascal Compiler version ', Trimmed, true) or
+      IsPrefix('Copyright (c) 1993-', Trimmed, true) or
+      IsPrefix('Target OS: ', Trimmed, true);
   end;
 
   function LineOutputKind(const Line: String): TOutputKind;
@@ -593,7 +606,8 @@ begin
       dump the remaining PendingLines as last line. }
     if (not Process.Running) and (Length(PendingLines) <> 0) then
     begin
-      if not LineProcessInternalInfo(Line) then
+      if (not LineProcessInternalInfo(PendingLines)) and
+         (not IsRedundantCompilerBannerLine(PendingLines)) then
         OutputList.AddLine(PendingLines, LineOutputKind(PendingLines));
       PendingLines := '';
     end;
@@ -629,7 +643,8 @@ begin
       if SCharIs(PendingLines, NewLinePos - 1, #13) then
         Dec(NewLinePos);
       Line := Copy(PendingLines, 1, NewLinePos - 1);
-      if not LineProcessInternalInfo(Line) then
+      if (not LineProcessInternalInfo(Line)) and
+         (not IsRedundantCompilerBannerLine(Line)) then
         OutputList.AddLine(Line, LineOutputKind(Line));
 
       PendingLines := SEnding(PendingLines, ProcessedLength + 1);
@@ -952,7 +967,8 @@ end;
 
 procedure TOutputList.AddSeparator;
 begin
-  AddLine('', okInfo);
+  if (List.Items.Count > 0) and (List.Items[List.Items.Count - 1] <> '') then
+    AddLine('', okInfo);
 end;
 
 procedure TOutputList.Clear;

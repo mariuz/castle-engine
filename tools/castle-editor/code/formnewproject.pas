@@ -61,7 +61,7 @@ implementation
 {$R *.lfm}
 
 uses {$ifdef MSWINDOWS} WinDirs, {$endif}
-  LazFileUtils,
+  Math, LazFileUtils,
   CastleUriUtils, CastleConfig, CastleUtils, CastleStringUtils,
   EditorUtils;
 
@@ -90,10 +90,18 @@ procedure TNewProjectForm.FormShow(Sender: TObject);
     Now we keep form height constant during operation,
     and when EditViewName is not available - we explain it. }
   procedure AdjustFormSize;
-  const
-    ButtonsMargin = 8;
+  var
+    ButtonsMargin, RightMargin, ContentRight: Integer;
   begin
-    ClientHeight := EditViewName.Top + EditViewName.Height + ButtonsMargin + ButtonPanel1.Height;
+    ButtonsMargin := MulDiv(8, PixelsPerInch, 96);
+    RightMargin := Max(GroupProjectTemplate.Left, MulDiv(15, PixelsPerInch, 96));
+    ContentRight := Max(
+      GroupProjectTemplate.Left + GroupProjectTemplate.Width,
+      Max(EditLocation.Left + EditLocation.Width, LabelViewName.Left + LabelViewName.Width)
+    );
+    ClientWidth := ContentRight + RightMargin;
+    ClientHeight := EditViewName.Top + EditViewName.Height + ButtonsMargin +
+      ButtonPanel1.Height + ButtonPanel1.BorderSpacing.Around * 2;
   end;
 
 var
