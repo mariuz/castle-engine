@@ -2113,12 +2113,24 @@ procedure TRenderer.RenderShapeTextures(const Shape: TX3DRendererShape;
       end;
 
       Res := TTextureResources.Get(JointTextureNode);
+      if (Res = nil) and (RHIDevice <> nil) then
+      begin
+        TTextureResources.Prepare(RenderOptions, JointTextureNode);
+        Res := TTextureResources.Get(JointTextureNode);
+      end;
       if Res = nil then
       begin
         WritelnWarning('Skin', 'Skin "%s" has no renderer texture resource for joint texture, cannot use it', [
           Skin.NiceName
         ]);
         Exit;
+      end;
+      if (RHIDevice <> nil) and (Res is TImageTextureResource) and
+         ((TImageTextureResource(Res).AllocatedWidth <> 4) or
+          (TImageTextureResource(Res).AllocatedHeight <> Cardinal(Skin.InternalJointMatrix.Count))) then
+      begin
+        TImageTextureResource(Res).UpdateTextureContentsRgbaFloat(
+          4, Skin.InternalJointMatrix.Count, Skin.InternalJointMatrix.L);
       end;
 
       Shader.SkinJointTextureUnit := ABoundTextureUnits;

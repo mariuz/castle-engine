@@ -2774,6 +2774,9 @@ procedure TCastleContainer.RenderControl(const Control: TCastleUserInterface;
 var
   NeedsContainerSet, NeedsGLOpen: Boolean;
   OldContainer: TCastleContainer;
+  Batch2D: TCastleBatch2DRenderer;
+  AutoStartedBatch2D, SavedBatchViewport: Boolean;
+  SavedBatchW, SavedBatchH: Single;
 begin
   NeedsContainerSet := Control.Container <> Self;
   NeedsGLOpen := not Control.GLInitialized;
@@ -2790,7 +2793,41 @@ begin
     Control.GLContextOpen;
   Control.CheckResize;
   Control.BeforeRender;
-  Control.InternalRecursiveRender(ViewportRect);
+
+  Batch2D := nil;
+  AutoStartedBatch2D := False;
+  SavedBatchViewport := False;
+  SavedBatchW := 1;
+  SavedBatchH := 1;
+  if (RHIDevice <> nil) and (ActiveCommandList <> nil) then
+  begin
+    Batch2D := EnsureBatch2DRenderer(RHIDevice);
+    if Batch2D <> nil then
+    begin
+      if not Batch2D.In2DPass then
+      begin
+        Batch2D.Begin2DPass(ActiveCommandList, Max(1, ViewportRect.Width), Max(1, ViewportRect.Height));
+        AutoStartedBatch2D := True;
+      end else
+      begin
+        SavedBatchViewport := True;
+        SavedBatchW := Batch2D.ViewportWidth;
+        SavedBatchH := Batch2D.ViewportHeight;
+        Batch2D.SetViewportSize(Max(1, ViewportRect.Width), Max(1, ViewportRect.Height));
+      end;
+    end;
+  end;
+  try
+    Control.InternalRecursiveRender(ViewportRect);
+    if SavedBatchViewport and (Batch2D <> nil) then
+      Batch2D.Flush;
+  finally
+    if AutoStartedBatch2D and (Batch2D <> nil) then
+      Batch2D.End2DPass
+    else
+    if SavedBatchViewport and (Batch2D <> nil) then
+      Batch2D.SetViewportSize(SavedBatchW, SavedBatchH);
+  end;
 
   { TODO: calling the methods below is not recursive,
     it will not unprepare the children correctly. }

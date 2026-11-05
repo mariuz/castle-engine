@@ -7519,23 +7519,52 @@ procedure TVulkanRHICommandList.ClearAttachments(const ClearColorBuf: Boolean; c
   const ClearStencilBuf: Boolean; const ClearStencil: Byte);
 var
   ColorTarget, DepthTarget: TRHITexture;
+  I: Integer;
 begin
   if FDevice = nil then
     Exit;
 
   if (FDevice.Handle = nil) then
   begin
-    if ClearColorBuf then
+    if FIsRendering then
     begin
-      ColorTarget := FDevice.GetSwapchainColorTexture;
-      if ColorTarget is TVulkanRHITexture then
-        TVulkanRHITexture(ColorTarget).SetHostClearColor(ClearColor);
-    end;
-    if ClearDepthBuf then
+      if ClearColorBuf then
+      begin
+        for I := 0 to High(FActiveRenderingInfo.ColorAttachments) do
+        begin
+          FActiveRenderingInfo.ColorAttachments[I].ClearColor := ClearColor;
+          ColorTarget := FActiveRenderingInfo.ColorAttachments[I].Texture;
+          if ColorTarget is TVulkanRHITexture then
+            TVulkanRHITexture(ColorTarget).SetHostClearColor(ClearColor);
+          ColorTarget := FActiveRenderingInfo.ColorAttachments[I].ResolveTexture;
+          if ColorTarget is TVulkanRHITexture then
+            TVulkanRHITexture(ColorTarget).SetHostClearColor(ClearColor);
+        end;
+      end;
+      if ClearDepthBuf and FActiveRenderingInfo.HasDepthAttachment then
+      begin
+        FActiveRenderingInfo.DepthAttachment.ClearDepth := ClearDepth;
+        DepthTarget := FActiveRenderingInfo.DepthAttachment.Texture;
+        if DepthTarget is TVulkanRHITexture then
+          TVulkanRHITexture(DepthTarget).SetHostClearDepth(ClearDepth);
+        DepthTarget := FActiveRenderingInfo.DepthAttachment.ResolveTexture;
+        if DepthTarget is TVulkanRHITexture then
+          TVulkanRHITexture(DepthTarget).SetHostClearDepth(ClearDepth);
+      end;
+    end else
     begin
-      DepthTarget := FDevice.GetSwapchainDepthTexture;
-      if DepthTarget is TVulkanRHITexture then
-        TVulkanRHITexture(DepthTarget).SetHostClearDepth(ClearDepth);
+      if ClearColorBuf then
+      begin
+        ColorTarget := FDevice.GetSwapchainColorTexture;
+        if ColorTarget is TVulkanRHITexture then
+          TVulkanRHITexture(ColorTarget).SetHostClearColor(ClearColor);
+      end;
+      if ClearDepthBuf then
+      begin
+        DepthTarget := FDevice.GetSwapchainDepthTexture;
+        if DepthTarget is TVulkanRHITexture then
+          TVulkanRHITexture(DepthTarget).SetHostClearDepth(ClearDepth);
+      end;
     end;
   end;
 end;

@@ -1092,6 +1092,8 @@ procedure TSkinnedRenderer.RenderCoordinateBegin;
 var
   Weights0: TVector4List;
   Joints0: TInt32List;
+  SkinTexRes: TTextureResource;
+  SkinImgRes: TImageTextureResource;
 begin
   inherited;
 
@@ -1108,9 +1110,39 @@ begin
     if (RHIDevice <> nil) and
        (Shape.Cache <> nil) then
     begin
-      Shape.Cache.UploadJointMatrices(
-        State.Skin.InternalJointMatrix.L,
-        State.Skin.InternalJointMatrix.Count);
+      if (State.Skin.InternalMeshCalculation = mcGpuTexture) and
+         (State.Skin.InternalJointTexture <> nil) then
+      begin
+        SkinTexRes := TTextureResources.Get(State.Skin.InternalJointTexture);
+        if SkinTexRes = nil then
+        begin
+          TTextureResources.Prepare(RenderOptions, State.Skin.InternalJointTexture);
+          SkinTexRes := TTextureResources.Get(State.Skin.InternalJointTexture);
+        end;
+        if SkinTexRes is TImageTextureResource then
+        begin
+          SkinImgRes := TImageTextureResource(SkinTexRes);
+          if (SkinImgRes.AllocatedWidth <> 4) or
+             (SkinImgRes.AllocatedHeight <> Cardinal(State.Skin.InternalJointMatrix.Count)) then
+            SkinImgRes.UpdateTextureContentsRgbaFloat(
+              4, State.Skin.InternalJointMatrix.Count, State.Skin.InternalJointMatrix.L);
+          if (SkinImgRes.RHIJointFloatData <> nil) and
+             (SkinImgRes.RHIJointFloatSize = PtrUInt(State.Skin.InternalJointMatrix.Count) * SizeOf(TMatrix4)) then
+            Shape.Cache.UploadJointMatrices(
+              SkinImgRes.RHIJointFloatData,
+              State.Skin.InternalJointMatrix.Count)
+          else
+            Shape.Cache.UploadJointMatrices(
+              State.Skin.InternalJointMatrix.L,
+              State.Skin.InternalJointMatrix.Count);
+        end else
+          Shape.Cache.UploadJointMatrices(
+            State.Skin.InternalJointMatrix.L,
+            State.Skin.InternalJointMatrix.Count);
+      end else
+        Shape.Cache.UploadJointMatrices(
+          State.Skin.InternalJointMatrix.L,
+          State.Skin.InternalJointMatrix.Count);
     end;
   end;
 end;

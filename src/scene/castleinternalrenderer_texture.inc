@@ -248,6 +248,9 @@
     FGLName: TGLTexture;
     FAllocatedWidth, FAllocatedHeight: Cardinal;
     FRHITexture: TRHITexture;
+    FLastFloatBytes: array of Byte;
+    function GetRHIJointFloatData: Pointer;
+    function GetRHIJointFloatSize: PtrUInt;
   protected
     class function IsClassForTextureNode(ANode: TAbstractTextureNode): boolean; override;
     procedure PrepareCore(
@@ -271,7 +274,11 @@
     procedure UpdateTextureContentsRgbaFloat(
       const Width, Height: Cardinal; const Data: Pointer); override;
 
+    property AllocatedWidth: Cardinal read FAllocatedWidth;
+    property AllocatedHeight: Cardinal read FAllocatedHeight;
     property RHITexture: TRHITexture read FRHITexture;
+    property RHIJointFloatData: Pointer read GetRHIJointFloatData;
+    property RHIJointFloatSize: PtrUInt read GetRHIJointFloatSize;
   end;
 
   { Renderer resource for TMovieTextureNode. }
@@ -1159,6 +1166,16 @@ begin
     begin
       FAllocatedWidth := Max(Cardinal(1), TextureNode.TextureImage.Width);
       FAllocatedHeight := Max(Cardinal(1), TextureNode.TextureImage.Height);
+      if (not GUITexture) and (GLTextureScale > 1) and
+         (TextureNode.TextureImage is TCastleImage) and
+         (not (TextureNode.TextureImage is TRGBAlphaFloatImage)) and
+         ((TextureNode.TextureComposite = nil) or (not TextureNode.TextureComposite.Mipmaps)) then
+      begin
+        if FAllocatedWidth > GLTextureMinSize then
+          FAllocatedWidth := Max(FAllocatedWidth shr (GLTextureScale - 1), GLTextureMinSize);
+        if FAllocatedHeight > GLTextureMinSize then
+          FAllocatedHeight := Max(FAllocatedHeight shr (GLTextureScale - 1), GLTextureMinSize);
+      end;
       if Filter.NeedsMipmaps then
       begin
         if (TextureNode.TextureComposite <> nil) and TextureNode.TextureComposite.Mipmaps and
@@ -1179,18 +1196,32 @@ begin
       FlipVertically :=
         (TextureNode is TImageTextureNode) and
         TImageTextureNode(TextureNode).FlipVertically;
-      if FlipVertically and (TextureNode.TextureUsedFullUrl = '') and
+      if ((FlipVertically and (TextureNode.TextureUsedFullUrl = '')) or
+          (FAllocatedWidth <> TextureNode.TextureImage.Width) or
+          (FAllocatedHeight <> TextureNode.TextureImage.Height)) and
          (TextureNode.TextureImage is TCastleImage) then
       begin
         TempFlipped := TCastleImage(TextureNode.TextureImage).MakeCopy;
         try
-          TempFlipped.FlipVertical;
+          if FlipVertically and (TextureNode.TextureUsedFullUrl = '') then
+            TempFlipped.FlipVertical;
+          if (FAllocatedWidth <> TempFlipped.Width) or
+             (FAllocatedHeight <> TempFlipped.Height) then
+            TempFlipped.Resize(FAllocatedWidth, FAllocatedHeight, riBilinear);
           FRHITexture.UploadImage(TempFlipped, 0, 0);
         finally
           FreeAndNil(TempFlipped);
         end;
       end else
         FRHITexture.UploadImage(TextureNode.TextureImage, 0, 0);
+      if (TextureNode.TextureImage is TRGBAlphaFloatImage) and
+         (TextureNode.TextureImage.RawPixels <> nil) then
+      begin
+        SetLength(FLastFloatBytes, PtrUInt(FAllocatedWidth) * PtrUInt(FAllocatedHeight) * SizeOf(TVector4));
+        if Length(FLastFloatBytes) > 0 then
+          Move(TextureNode.TextureImage.RawPixels^, FLastFloatBytes[0], Length(FLastFloatBytes));
+      end else
+        SetLength(FLastFloatBytes, 0);
       if (MipLevels > 1) and (TextureNode.TextureComposite <> nil) and
          TextureNode.TextureComposite.Mipmaps and
          (TextureNode.TextureComposite.Images.Count > 1) then
@@ -1233,6 +1264,7 @@ end;
 
 procedure TImageTextureResource.UnprepareCore;
 begin
+  SetLength(FLastFloatBytes, 0);
   if FRHITexture <> nil then
   begin
     TextureMemoryProfiler.DeallocateRHI(FRHITexture);
@@ -1244,6 +1276,19 @@ begin
     RendererCache.TextureImage_DecReference(FGLName);
     FGLName := GLObjectNone;
   end;
+end;
+
+function TImageTextureResource.GetRHIJointFloatData: Pointer;
+begin
+  if Length(FLastFloatBytes) > 0 then
+    Result := @FLastFloatBytes[0]
+  else
+    Result := nil;
+end;
+
+function TImageTextureResource.GetRHIJointFloatSize: PtrUInt;
+begin
+  Result := Length(FLastFloatBytes);
 end;
 
 function TImageTextureResource.Bind(const TextureUnit: Cardinal): boolean;
@@ -1297,16 +1342,29 @@ begin
        (FAllocatedHeight <> Height) or
        (FRHITexture.Desc.Format <> pfRGBA32_Float) then
     begin
-      FreeAndNil(FRHITexture);
+      if FRHITexture <> nil then
+      begin
+        TextureMemoryProfiler.DeallocateRHI(FRHITexture);
+        FreeAndNil(FRHITexture);
+      end;
       FAllocatedWidth := Max(Cardinal(1), Width);
       FAllocatedHeight := Max(Cardinal(1), Height);
       TexDesc := TRHITextureDesc.Create2D(FAllocatedWidth, FAllocatedHeight,
         pfRGBA32_Float, [tuSampled, tuTransferDst, tuTransferSrc], 1, 1);
       TexDesc.DebugName := 'ImageTexture.RgbaFloat';
       FRHITexture := RHIDevice.CreateTexture(TexDesc);
+      TextureMemoryProfiler.AllocateRHI(FRHITexture,
+        Iff((TextureNode <> nil) and (TextureNode.TextureUsedFullUrl <> ''),
+          TextureNode.TextureUsedFullUrl, 'generated:/ImageTexture.RgbaFloat'),
+        'TRGBAlphaFloatImage',
+        Int64(FAllocatedWidth) * Int64(FAllocatedHeight) * 16,
+        False, FAllocatedWidth, FAllocatedHeight, 1);
     end;
     if (Data <> nil) and (Width > 0) and (Height > 0) and (FRHITexture <> nil) then
     begin
+      SetLength(FLastFloatBytes, PtrUInt(Width) * PtrUInt(Height) * SizeOf(TVector4));
+      if Length(FLastFloatBytes) > 0 then
+        Move(Data^, FLastFloatBytes[0], Length(FLastFloatBytes));
       TempFloatImg := TRGBAlphaFloatImage.Create(Width, Height);
       try
         Move(Data^, TempFloatImg.RawPixels^, PtrUInt(Width) * PtrUInt(Height) * SizeOf(TVector4));
@@ -1392,7 +1450,7 @@ var
   TextureWrap: TTextureWrap2D;
   GUITexture: boolean;
   I: Integer;
-  MipLevels: Cardinal;
+  MipLevels, FrameW, FrameH: Cardinal;
   FrameImg, TempFlipped: TCastleImage;
   TexDesc: TRHITextureDesc;
 begin
@@ -1412,21 +1470,35 @@ begin
       for I := 0 to TextureNode.TextureVideo.Count - 1 do
       begin
         FrameImg := TextureNode.TextureVideo.Items[I];
+        FrameW := Max(Cardinal(1), FrameImg.Width);
+        FrameH := Max(Cardinal(1), FrameImg.Height);
+        if (not GUITexture) and (GLTextureScale > 1) then
+        begin
+          if FrameW > GLTextureMinSize then
+            FrameW := Max(FrameW shr (GLTextureScale - 1), GLTextureMinSize);
+          if FrameH > GLTextureMinSize then
+            FrameH := Max(FrameH shr (GLTextureScale - 1), GLTextureMinSize);
+        end;
         if Filter.NeedsMipmaps then
-          MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(Max(Max(Cardinal(1), FrameImg.Width), Max(Cardinal(1), FrameImg.Height))))) + 1)
+          MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(Max(FrameW, FrameH)))) + 1)
         else
           MipLevels := 1;
         TexDesc := TRHITextureDesc.Create2D(
-          Max(Cardinal(1), FrameImg.Width),
-          Max(Cardinal(1), FrameImg.Height),
+          FrameW,
+          FrameH,
           pfRGBA8_UNorm, [tuSampled, tuTransferDst, tuTransferSrc], MipLevels, 1);
         TexDesc.DebugName := Format('MovieTexture.Frame[%d]', [I]);
         FRHITextureFrames[I] := RHIDevice.CreateTexture(TexDesc);
-        if TextureNode.FlipVertically and (TextureNode.TextureUsedFullUrl = '') then
+        if (TextureNode.FlipVertically and (TextureNode.TextureUsedFullUrl = '')) or
+           (FrameW <> FrameImg.Width) or
+           (FrameH <> FrameImg.Height) then
         begin
           TempFlipped := FrameImg.MakeCopy;
           try
-            TempFlipped.FlipVertical;
+            if TextureNode.FlipVertically and (TextureNode.TextureUsedFullUrl = '') then
+              TempFlipped.FlipVertical;
+            if (FrameW <> TempFlipped.Width) or (FrameH <> TempFlipped.Height) then
+              TempFlipped.Resize(FrameW, FrameH, riBilinear);
             FRHITextureFrames[I].UploadImage(TempFlipped, 0, 0);
           finally
             FreeAndNil(TempFlipped);
@@ -1606,6 +1678,13 @@ begin
       NodeHeight := DefaultRenderedTextureHeight;
     Width := NodeWidth;
     Height := NodeHeight;
+    if (not GUITexture) and (GLTextureScale > 1) then
+    begin
+      if Width > GLTextureMinSize then
+        Width := Max(Width shr (GLTextureScale - 1), GLTextureMinSize);
+      if Height > GLTextureMinSize then
+        Height := Max(Height shr (GLTextureScale - 1), GLTextureMinSize);
+    end;
     if RHIDevice.Capabilities.MaxTextureSize > 0 then
     begin
       Width := Min(Width, RHIDevice.Capabilities.MaxTextureSize);
@@ -2205,7 +2284,7 @@ procedure TComposedCubeMapTextureResource.PrepareCore(
 var
   Filter: TTextureFilter;
   Anisotropy: TGLfloat;
-  BackRot, FrontRot, LeftRot, RightRot, TopImg, BottomImg: TCastleImage;
+  BackRot, FrontRot, LeftRot, RightRot, TopImg, BottomImg, TopResized, BottomResized: TCastleImage;
   GUITexture: boolean;
   CubeSize, MipLevels: Cardinal;
   TexDesc: TRHITextureDesc;
@@ -2221,10 +2300,12 @@ begin
     HandleTextureProperties(TextureNode.TextureProperties, RenderOptions,
       Filter, Anisotropy, GUITexture);
 
-    BackRot  := nil;
-    FrontRot := nil;
-    LeftRot  := nil;
-    RightRot := nil;
+    BackRot       := nil;
+    FrontRot      := nil;
+    LeftRot       := nil;
+    RightRot      := nil;
+    TopResized    := nil;
+    BottomResized := nil;
     try
       BackRot   := (TAbstractTexture2DNode(TextureNode.FdBack  .Value).TextureImage as TCastleImage).MakeRotated(2);
       FrontRot  := (TAbstractTexture2DNode(TextureNode.FdFront .Value).TextureImage as TCastleImage).MakeRotated(2);
@@ -2233,7 +2314,36 @@ begin
       TopImg    :=  TAbstractTexture2DNode(TextureNode.FdTop   .Value).TextureImage as TCastleImage;
       BottomImg :=  TAbstractTexture2DNode(TextureNode.FdBottom.Value).TextureImage as TCastleImage;
 
-      CubeSize := Max(1, RightRot.Width);
+      CubeSize := Max(1, Max(Max(RightRot.Width, RightRot.Height),
+        Max(Max(LeftRot.Width, LeftRot.Height),
+        Max(Max(TopImg.Width, TopImg.Height),
+        Max(Max(BottomImg.Width, BottomImg.Height),
+        Max(Max(BackRot.Width, BackRot.Height),
+            Max(FrontRot.Width, FrontRot.Height)))))));
+      if (not GUITexture) and (GLTextureScale > 1) and (CubeSize > GLTextureMinSize) then
+        CubeSize := Max(CubeSize shr (GLTextureScale - 1), GLTextureMinSize);
+      if RHIDevice.Capabilities.MaxTextureSize > 0 then
+        CubeSize := Min(CubeSize, RHIDevice.Capabilities.MaxTextureSize);
+
+      if (RightRot.Width <> CubeSize) or (RightRot.Height <> CubeSize) then
+        RightRot.Resize(CubeSize, CubeSize, riBilinear);
+      if (LeftRot.Width <> CubeSize) or (LeftRot.Height <> CubeSize) then
+        LeftRot.Resize(CubeSize, CubeSize, riBilinear);
+      if (BackRot.Width <> CubeSize) or (BackRot.Height <> CubeSize) then
+        BackRot.Resize(CubeSize, CubeSize, riBilinear);
+      if (FrontRot.Width <> CubeSize) or (FrontRot.Height <> CubeSize) then
+        FrontRot.Resize(CubeSize, CubeSize, riBilinear);
+      if (TopImg.Width <> CubeSize) or (TopImg.Height <> CubeSize) then
+      begin
+        TopResized := TopImg.MakeResized(CubeSize, CubeSize, riBilinear);
+        TopImg := TopResized;
+      end;
+      if (BottomImg.Width <> CubeSize) or (BottomImg.Height <> CubeSize) then
+      begin
+        BottomResized := BottomImg.MakeResized(CubeSize, CubeSize, riBilinear);
+        BottomImg := BottomResized;
+      end;
+
       if Filter.NeedsMipmaps then
         MipLevels := Max(Cardinal(1), Cardinal(Floor(Log2(CubeSize))) + 1)
       else
@@ -2242,7 +2352,11 @@ begin
       TexDesc := TRHITextureDesc.CreateCube(CubeSize, pfRGBA8_UNorm,
         [tuSampled, tuTransferDst, tuTransferSrc], MipLevels);
       TexDesc.DebugName := 'ComposedCubeMapTexture';
-      FreeAndNil(FRHITexture);
+      if FRHITexture <> nil then
+      begin
+        TextureMemoryProfiler.DeallocateRHI(FRHITexture);
+        FreeAndNil(FRHITexture);
+      end;
       FRHITexture := RHIDevice.CreateTexture(TexDesc);
       FRHITexture.UploadImage(RightRot,  0, 0);
       FRHITexture.UploadImage(LeftRot,   0, 1);
@@ -2262,6 +2376,8 @@ begin
       FreeAndNil(FrontRot);
       FreeAndNil(LeftRot);
       FreeAndNil(RightRot);
+      FreeAndNil(TopResized);
+      FreeAndNil(BottomResized);
     end;
     Exit;
   end;

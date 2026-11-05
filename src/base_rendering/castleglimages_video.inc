@@ -156,9 +156,10 @@ constructor TGLVideo3D.Create(Video: TVideo;
 
 var
   I: Integer;
-  MipCount: Cardinal;
+  MipCount, FrameW, FrameH: Cardinal;
   TexDesc: TRHITextureDesc;
   SamplerDesc: TRHISamplerDesc;
+  ResizedFrame: TCastleImage;
 begin
   inherited Create(Video);
 
@@ -167,23 +168,41 @@ begin
 
   if RHIDevice <> nil then
   begin
-    if (not GUITexture) and Filter.NeedsMipmaps then
-      MipCount := Floor(Log2(Max(1, Max(Width, Height)))) + 1
-    else
-      MipCount := 1;
-
     for I := 0 to High(FRHITextures) do
     begin
       if Video.Items[I] <> nil then
       begin
+        FrameW := Max(1, Video.Items[I].Width);
+        FrameH := Max(1, Video.Items[I].Height);
+        if (not GUITexture) and (GLTextureScale > 1) then
+        begin
+          if FrameW > GLTextureMinSize then
+            FrameW := Max(FrameW shr (GLTextureScale - 1), GLTextureMinSize);
+          if FrameH > GLTextureMinSize then
+            FrameH := Max(FrameH shr (GLTextureScale - 1), GLTextureMinSize);
+        end;
+        if (not GUITexture) and Filter.NeedsMipmaps then
+          MipCount := Floor(Log2(Max(1, Max(FrameW, FrameH)))) + 1
+        else
+          MipCount := 1;
         TexDesc := TRHITextureDesc.Create2D(
-          Max(1, Video.Items[I].Width),
-          Max(1, Video.Items[I].Height),
+          FrameW,
+          FrameH,
           pfRGBA8_UNorm,
           [tuSampled, tuTransferSrc, tuTransferDst],
           MipCount);
         FRHITextures[I] := RHIDevice.CreateTexture(TexDesc);
-        FRHITextures[I].UploadImage(Video.Items[I]);
+        if ((FrameW <> Video.Items[I].Width) or (FrameH <> Video.Items[I].Height)) and
+           (Video.Items[I] is TCastleImage) then
+        begin
+          ResizedFrame := TCastleImage(Video.Items[I]).MakeResized(FrameW, FrameH, riBilinear);
+          try
+            FRHITextures[I].UploadImage(ResizedFrame);
+          finally
+            FreeAndNil(ResizedFrame);
+          end;
+        end else
+          FRHITextures[I].UploadImage(Video.Items[I]);
         if MipCount > 1 then
           FRHITextures[I].GenerateMipmaps;
         TextureMemoryProfiler.AllocateRHI(FRHITextures[I], Video.Items[I].URL,

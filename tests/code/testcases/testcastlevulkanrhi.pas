@@ -356,6 +356,9 @@ type
     procedure TestGLSLScreenEffectAndViewportSSAOSSRPostProcessingRHI;
     procedure TestCastleMaskAndInternalClearColorsByDrawStencilRHI;
     procedure TestRenderToTextureRenderBeginFollowsAndInternalControlRectIgnoreRHI;
+    procedure TestRenderControlToImageAndOffscreenClearAttachmentsRHI;
+    procedure TestGLTextureScaleDownscalingAndComposedCubeMapResizeRHI;
+    procedure TestSkinNodeGpuTextureJointResourceAndAutoUploadRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -23037,6 +23040,387 @@ begin
     FreeAndNil(Cmd);
     RenderContext := SavedCtx;
     FreeAndNil(Ctx);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRenderControlToImageAndOffscreenClearAttachmentsRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCmd: TRHICommandList;
+  SavedCtx: TRenderContext;
+  Ctx: TRenderContext;
+  Cmd: TVulkanRHICommandList;
+  Container: TTestHeadlessVulkanContainer;
+  RectCtrl: TCastleRectangleControl;
+  ImgCtrl: TCastleImageControl;
+  CapturedImg, CapturedNoCmdImg: TRGBAlphaImage;
+  Batch2D: TCastleBatch2DRenderer;
+  OuterColorTex: TRHITexture;
+  OuterPassInfo: TRHIRenderingInfo;
+  ClearCol: TCastleColor;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9701)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Ctx := TRenderContext.Create(nil);
+  RenderContext := Ctx;
+  Cmd := TVulkanRHICommandList.Create(Device, 0);
+  SetActiveCommandList(Cmd);
+  Container := nil;
+  RectCtrl := nil;
+  CapturedImg := nil;
+  CapturedNoCmdImg := nil;
+  OuterColorTex := nil;
+  try
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+
+    RectCtrl := TCastleRectangleControl.Create(nil);
+    RectCtrl.Width := 120;
+    RectCtrl.Height := 80;
+    RectCtrl.Color := Vector4(0.9, 0.2, 0.1, 1.0);
+
+    ImgCtrl := TCastleImageControl.Create(RectCtrl);
+    ImgCtrl.Content.Image := TRGBAlphaImage.Create(16, 16);
+    ImgCtrl.Content.OwnsImage := True;
+    RectCtrl.InsertFront(ImgCtrl);
+
+    OuterColorTex := Device.CreateTexture(TRHITextureDesc.Create2D(800, 600, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc]));
+    Cmd.BeginRecording;
+    OuterPassInfo := TRHIRenderingInfo.CreateColorDepth(Rectangle(0, 0, 800, 600),
+      OuterColorTex, loClear, Vector4(0, 0, 0, 1), nil, loDontCare, 1.0);
+    Cmd.BeginRendering(OuterPassInfo);
+
+    Batch2D := EnsureBatch2DRenderer(Device);
+    Batch2D.Begin2DPass(Cmd, 800, 600);
+
+    ClearCol := Vector4(0.125, 0.25, 0.75, 1.0);
+    CapturedImg := RenderControlToImage(Container, RectCtrl, Rectangle(0, 0, 120, 80), ClearCol);
+    AssertTrue('RenderControlToImage must return a non-nil TRGBAlphaImage', CapturedImg <> nil);
+    AssertEquals('Captured image width must match ViewportRect.Width', 120, Integer(CapturedImg.Width));
+    AssertEquals('Captured image height must match ViewportRect.Height', 80, Integer(CapturedImg.Height));
+    { Verify ClearAttachments updated the offscreen render target's host clear color }
+    AssertEquals('Captured image pixel R must match BackgroundColor R',
+      Round(ClearCol.X * 255), Integer(CapturedImg.PixelPtr(0, 0)^.X));
+    AssertEquals('Captured image pixel G must match BackgroundColor G',
+      Round(ClearCol.Y * 255), Integer(CapturedImg.PixelPtr(0, 0)^.Y));
+    AssertEquals('Captured image pixel B must match BackgroundColor B',
+      Round(ClearCol.Z * 255), Integer(CapturedImg.PixelPtr(0, 0)^.Z));
+
+    { Verify Batch2D viewport dimensions were restored to 800x600 after RenderControl }
+    AssertSameValue(800.0, Batch2D.ViewportWidth, 0.001);
+    AssertSameValue(600.0, Batch2D.ViewportHeight, 0.001);
+    AssertTrue('Batch2D must have flushed the TCastleRectangleControl quad during RenderControlToImage',
+      Batch2D.TotalQuadsDrawn >= 1);
+
+    Batch2D.End2DPass;
+    Cmd.EndRendering;
+    Cmd.EndRecording;
+
+    { Also test RenderControlToImage when ActiveCommandList = nil (auto-created temporary command list) }
+    SetActiveCommandList(nil);
+    CapturedNoCmdImg := RenderControlToImage(Container, RectCtrl, Rectangle(0, 0, 64, 48), Vector4(0.5, 0.75, 0.25, 1.0));
+    AssertTrue('RenderControlToImage with ActiveCommandList = nil must return non-nil TRGBAlphaImage',
+      CapturedNoCmdImg <> nil);
+    AssertEquals('CapturedNoCmdImg width must be 64', 64, Integer(CapturedNoCmdImg.Width));
+    AssertEquals('CapturedNoCmdImg height must be 48', 48, Integer(CapturedNoCmdImg.Height));
+    AssertEquals('CapturedNoCmdImg pixel G must match BackgroundColor G',
+      Round(0.75 * 255), Integer(CapturedNoCmdImg.PixelPtr(0, 0)^.Y));
+  finally
+    FreeAndNil(CapturedNoCmdImg);
+    FreeAndNil(CapturedImg);
+    FreeAndNil(RectCtrl);
+    FreeAndNil(Container);
+    FreeAndNil(OuterColorTex);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    FreeAndNil(Cmd);
+    RenderContext := SavedCtx;
+    FreeAndNil(Ctx);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGLTextureScaleDownscalingAndComposedCubeMapResizeRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedScale: Cardinal;
+  RenderOpts: TCastleRenderOptions;
+  PixTexNode, GuiPixTexNode: TPixelTextureNode;
+  PixRes, GuiPixRes: TImageTextureResource;
+  RendTexNode: TRenderedTextureNode;
+  RendRes: TRenderedTextureResource;
+  CubeNode: TComposedCubeMapTextureNode;
+  CubeRes: TComposedCubeMapTextureResource;
+  FaceNode: TPixelTextureNode;
+  SideImg: TRGBImage;
+  Video: TVideo;
+  GLVid: TGLVideo3D;
+  Filter: TTextureFilter;
+  Wrap: TTextureWrap2D;
+  I: Integer;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9702)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedScale := GLTextureScale;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  RenderOpts := TCastleRenderOptions.Create(nil);
+  PixTexNode := nil;
+  GuiPixTexNode := nil;
+  RendTexNode := nil;
+  CubeNode := nil;
+  Video := nil;
+  GLVid := nil;
+  try
+    GLTextureScale := 2; // Downscale non-GUI 3D textures by 2^(2-1) = 2x
+
+    { 1. TImageTextureResource downscales 128x64 -> 64x32 when GLTextureScale = 2 }
+    PixTexNode := TPixelTextureNode.Create;
+    PixTexNode.FdImage.Value := TRGBImage.Create(128, 64);
+    TTextureResources.Prepare(RenderOpts, PixTexNode);
+    PixRes := TTextureResources.Get(PixTexNode) as TImageTextureResource;
+    AssertTrue('PixRes.RHITexture must be created', (PixRes <> nil) and (PixRes.RHITexture <> nil));
+    AssertEquals('Non-GUI TImageTextureResource width must be downscaled 128 -> 64 when GLTextureScale=2',
+      64, Integer(PixRes.RHITexture.Desc.Width));
+    AssertEquals('Non-GUI TImageTextureResource height must be downscaled 64 -> 32 when GLTextureScale=2',
+      32, Integer(PixRes.RHITexture.Desc.Height));
+
+    { 2. GUI texture ignores GLTextureScale and keeps exact 128x64 size }
+    GuiPixTexNode := TPixelTextureNode.Create;
+    GuiPixTexNode.FdImage.Value := TRGBImage.Create(128, 64);
+    GuiPixTexNode.TextureProperties := TTexturePropertiesNode.Create;
+    GuiPixTexNode.TextureProperties.GuiTexture := True;
+    TTextureResources.Prepare(RenderOpts, GuiPixTexNode);
+    GuiPixRes := TTextureResources.Get(GuiPixTexNode) as TImageTextureResource;
+    AssertEquals('GUI TImageTextureResource width must remain 128 when GLTextureScale=2',
+      128, Integer(GuiPixRes.RHITexture.Desc.Width));
+    AssertEquals('GUI TImageTextureResource height must remain 64 when GLTextureScale=2',
+      64, Integer(GuiPixRes.RHITexture.Desc.Height));
+
+    { 3. TRenderedTextureResource downscales 256x128 -> 128x64 when GLTextureScale = 2 }
+    RendTexNode := TRenderedTextureNode.Create;
+    RendTexNode.SetDimensions([256, 128, 4, 1, 1]);
+    TTextureResources.Prepare(RenderOpts, RendTexNode);
+    RendRes := TTextureResources.Get(RendTexNode) as TRenderedTextureResource;
+    AssertEquals('TRenderedTextureResource Width must be downscaled 256 -> 128 when GLTextureScale=2',
+      128, Integer(RendRes.Width));
+    AssertEquals('TRenderedTextureResource Height must be downscaled 128 -> 64 when GLTextureScale=2',
+      64, Integer(RendRes.Height));
+
+    { 4. TComposedCubeMapTextureResource resizes non-square/mismatched faces and applies GLTextureScale=2 (64 -> 32) }
+    CubeNode := TComposedCubeMapTextureNode.Create;
+    for I := 0 to 5 do
+    begin
+      FaceNode := TPixelTextureNode.Create;
+      if I = 0 then
+        SideImg := TRGBImage.Create(64, 64)
+      else
+        SideImg := TRGBImage.Create(48, 32); // Non-square / smaller face
+      SideImg.Clear(Vector4Byte(I * 30, 100, 200, 255));
+      FaceNode.FdImage.Value := SideImg;
+      case I of
+        0: CubeNode.FdBack.Value := FaceNode;
+        1: CubeNode.FdFront.Value := FaceNode;
+        2: CubeNode.FdLeft.Value := FaceNode;
+        3: CubeNode.FdRight.Value := FaceNode;
+        4: CubeNode.FdTop.Value := FaceNode;
+        5: CubeNode.FdBottom.Value := FaceNode;
+      end;
+    end;
+    TTextureResources.Prepare(RenderOpts, CubeNode);
+    CubeRes := TTextureResources.Get(CubeNode) as TComposedCubeMapTextureResource;
+    AssertTrue('CubeRes.RHITexture must be created', (CubeRes <> nil) and (CubeRes.RHITexture <> nil));
+    AssertEquals('ComposedCubeMapTexture size must be scaled 64 -> 32 when GLTextureScale=2',
+      32, Integer(CubeRes.RHITexture.Desc.Width));
+    AssertEquals('ComposedCubeMapTexture height must be 32',
+      32, Integer(CubeRes.RHITexture.Desc.Height));
+
+    { 5. TGLVideo3D downscales non-GUI video frames when GLTextureScale = 2 }
+    Video := TVideo.Create;
+    Video.LoadFromImageArray([TRGBImage.Create(64, 32)], True, 2.0);
+    Filter.Minification := minLinear;
+    Filter.Magnification := magLinear;
+    Wrap.Data[0] := 0;
+    Wrap.Data[1] := 0;
+    GLVid := TGLVideo3D.Create(Video, Filter, 1.0, Wrap, False);
+    AssertEquals('TGLVideo3D RHI frame texture width must be scaled 64 -> 32 when GLTextureScale=2',
+      32, Integer(GLVid.RHITexture(0).Desc.Width));
+    AssertEquals('TGLVideo3D RHI frame texture height must be scaled 32 -> 16 when GLTextureScale=2',
+      16, Integer(GLVid.RHITexture(0).Desc.Height));
+  finally
+    FreeAndNil(GLVid);
+    FreeAndNil(Video);
+    if CubeNode <> nil then
+    begin
+      TTextureResources.Unprepare(CubeNode);
+      FreeAndNil(CubeNode);
+    end;
+    if RendTexNode <> nil then
+    begin
+      TTextureResources.Unprepare(RendTexNode);
+      FreeAndNil(RendTexNode);
+    end;
+    if GuiPixTexNode <> nil then
+    begin
+      TTextureResources.Unprepare(GuiPixTexNode);
+      FreeAndNil(GuiPixTexNode);
+    end;
+    if PixTexNode <> nil then
+    begin
+      TTextureResources.Unprepare(PixTexNode);
+      FreeAndNil(PixTexNode);
+    end;
+    FreeAndNil(RenderOpts);
+    GLTextureScale := SavedScale;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSkinNodeGpuTextureJointResourceAndAutoUploadRHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx, TestCtx: TRenderContext;
+  SavedProfilerEnabled: Boolean;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Root: TX3DRootNode;
+  Skin: TSkinNode;
+  Joint0, Joint1: TTransformNode;
+  ShapeNode: TShapeNode;
+  TriSet: TIndexedTriangleSetNode;
+  Coord: TCoordinateNode;
+  Scene: TCastleScene;
+  RShape: TX3DRendererShape;
+  SkinTexRes: TImageTextureResource;
+  CustomMatrices: array[0..1] of TMatrix4;
+  MappedJoints: PMatrix4;
+  ShadingModel: TCastleShadingModelRHI;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9703)));
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SavedProfilerEnabled := TextureMemoryProfiler.Enabled;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  TestCtx := TRenderContext.Create(nil);
+  RenderContext := TestCtx;
+  TextureMemoryProfiler.Enabled := True;
+  Container := TTestHeadlessVulkanContainer.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(Container);
+    Viewport.FullSize := True;
+    Viewport.GLContextOpen;
+    Container.Controls.InsertFront(Viewport);
+
+    Root := TX3DRootNode.Create;
+    Joint0 := TTransformNode.Create;
+    Joint0.Translation := Vector3(1, 2, 3);
+    Joint1 := TTransformNode.Create;
+    Joint1.Translation := Vector3(4, 5, 6);
+    Joint0.AddChildren(Joint1);
+
+    ShapeNode := TShapeNode.Create;
+    ShapeNode.Appearance := TAppearanceNode.Create;
+    ShapeNode.Appearance.Material := TPhysicalMaterialNode.Create;
+    TriSet := TIndexedTriangleSetNode.Create;
+    Coord := TCoordinateNode.Create;
+    Coord.SetPoint([Vector3(0, 0, -3), Vector3(1, 0, -3), Vector3(0, 1, -3)]);
+    TriSet.Coord := Coord;
+    TriSet.SetIndex([0, 1, 2]);
+    TriSet.SetSkinWeights0([Vector4(1, 0, 0, 0), Vector4(0.5, 0.5, 0, 0), Vector4(0, 1, 0, 0)]);
+    TriSet.SetSkinJoints0([0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0]);
+    ShapeNode.Geometry := TriSet;
+
+    Skin := TSkinNode.Create('', '');
+    Skin.Skeleton := Joint0;
+    Skin.SetJoints([Joint0, Joint1]);
+    Skin.SetInverseBindMatrices([TMatrix4.Identity, TMatrix4.Identity]);
+    Skin.FdShapes.Add(ShapeNode);
+    Root.AddChildren(Skin);
+
+    Scene := TCastleScene.Create(Viewport);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+    Viewport.Camera.SetView(
+      Vector3(0, 0, 5),
+      Vector3(0, 0, -1),
+      Vector3(0, 1, 0));
+
+    { Verify TSkinNode selects mcGpuTexture in Vulkan mode and populates InternalJointTexture (4 x 2) }
+    Skin.InternalUpdateSkin;
+    AssertEquals('TSkinNode.InternalMeshCalculation must be mcGpuTexture in Vulkan RHI mode',
+      Ord(TSkinNode.TInternalMeshCalculation.mcGpuTexture), Ord(Skin.InternalMeshCalculation));
+    AssertTrue('Skin.InternalJointMatrix must have 2 matrices',
+      (Skin.InternalJointMatrix <> nil) and (Skin.InternalJointMatrix.Count = 2));
+    AssertTrue('Skin.InternalJointTexture must be non-nil', Skin.InternalJointTexture <> nil);
+
+    Cmd := Device.BeginFrame;
+    SetActiveCommandList(Cmd);
+    try
+      Container.EventBeforeRender;
+      Container.EventRender;
+    finally
+      Device.EndFrameAndPresent;
+    end;
+
+    RShape := TX3DRendererShape(Scene.Shapes.TraverseList(True)[0]);
+    { Verify Skin.InternalJointTexture was auto-prepared as a 4x2 pfRGBA32_Float texture }
+    SkinTexRes := TTextureResources.Get(Skin.InternalJointTexture) as TImageTextureResource;
+    AssertTrue('Skin.InternalJointTexture must have a prepared TImageTextureResource',
+      (SkinTexRes <> nil) and (SkinTexRes.RHITexture <> nil));
+    AssertEquals('Skin joint RHI texture width must be 4', 4, Integer(SkinTexRes.AllocatedWidth));
+    AssertEquals('Skin joint RHI texture height must be 2 (2 joints)', 2, Integer(SkinTexRes.AllocatedHeight));
+    AssertEquals('Skin joint RHI texture format must be pfRGBA32_Float',
+      Ord(pfRGBA32_Float), Ord(SkinTexRes.RHITexture.Desc.Format));
+    AssertTrue('RShape.Cache.RHIJointBuffer must be allocated after rendering',
+      RShape.Cache.RHIJointBuffer <> nil);
+    AssertEquals('RShape.Cache.RHIJointBuffer size must be 2 * SizeOf(TMatrix4)',
+      2 * SizeOf(TMatrix4), Integer(RShape.Cache.RHIJointBuffer.Desc.Size));
+
+    { Verify custom UpdateTextureContentsRgbaFloat updates both the RHI float texture and syncs to Cache.RHIJointBuffer }
+    CustomMatrices[0] := TranslationMatrix(10, 20, 30);
+    CustomMatrices[1] := TranslationMatrix(40, 50, 60);
+    SkinTexRes.UpdateTextureContentsRgbaFloat(4, 2, @CustomMatrices[0]);
+    RShape.UploadRHIMaterialToCache(ShadingModel);
+
+    MappedJoints := PMatrix4(RShape.Cache.RHIJointBuffer.Map);
+    try
+      AssertSameValue(10.0, MappedJoints[0].Data[3, 0], 0.001);
+      AssertSameValue(60.0, MappedJoints[1].Data[3, 2], 0.001);
+    finally
+      RShape.Cache.RHIJointBuffer.Unmap;
+    end;
+
+    TTextureResources.Unprepare(Skin.InternalJointTexture);
+  finally
+    FreeAndNil(Container);
+    TextureMemoryProfiler.Enabled := SavedProfilerEnabled;
+    SetActiveCommandList(SavedCmd);
+    RenderContext := SavedCtx;
+    FreeAndNil(TestCtx);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);

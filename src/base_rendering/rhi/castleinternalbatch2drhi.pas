@@ -200,6 +200,7 @@ type
     property In2DPass: Boolean read FIn2DPass;
     property ViewportWidth: Single read FViewportWidth write FViewportWidth;
     property ViewportHeight: Single read FViewportHeight write FViewportHeight;
+    procedure SetViewportSize(const AViewportWidth, AViewportHeight: Single);
     property LinearSampler: TRHISampler read FLinearSampler;
     property NearestSampler: TRHISampler read FNearestSampler;
     function GetSampler(const ASmoothScaling: Boolean;
@@ -581,6 +582,19 @@ begin
   { Map the streaming VBO for the current frame-in-flight }
   if (FDevice <> nil) and (FFrameVBOs[FDevice.FrameIndex] <> nil) then
     FMappedVertices := PCastle2DVertex(FFrameVBOs[FDevice.FrameIndex].Map);
+end;
+
+procedure TCastleBatch2DRenderer.SetViewportSize(const AViewportWidth, AViewportHeight: Single);
+var
+  NewW, NewH: Single;
+begin
+  NewW := Max(1.0, AViewportWidth);
+  NewH := Max(1.0, AViewportHeight);
+  if FIn2DPass and ((NewW <> FViewportWidth) or (NewH <> FViewportHeight)) then
+    Flush;
+  FViewportWidth := NewW;
+  FViewportHeight := NewH;
+  FCurrentScissor := Rectangle(0, 0, Round(FViewportWidth), Round(FViewportHeight));
 end;
 
 procedure TCastleBatch2DRenderer.Flush;
