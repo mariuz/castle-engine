@@ -379,7 +379,15 @@ begin
 
   RenderCoordinateBegin;
   try
-    if not PrepareRenderShape then
+    if PrepareRenderShape then
+    begin
+      if RHIDevice <> nil then
+      begin
+        Shape.UploadRHIMaterialToCache(ShadingModel);
+        if Renderer <> nil then
+          Renderer.GetOrCreateShapePipeline(Shape, RenderOptions);
+      end;
+    end else
     begin
       { Initialize vertex arrays that we we will use with indexed nodes. }
       if Vbo[vtCoordinate] <> GLObjectNone then
@@ -661,6 +669,8 @@ end;
 
 procedure TBaseCoordinateRenderer.RenderCoordinateBegin;
 begin
+  if RenderContext = nil then
+    Exit;
   RenderContext.CullFace := Arrays.CullFace;
   { Following glTF on what to do with negative scale transformations:
 
@@ -1248,7 +1258,8 @@ begin
       CurrentMeshShader := nil;
   end;
 
-  RenderContext.CurrentProgram := CurrentMeshShader; // enable the CurrentMeshShader for OpenGL
+  if RenderContext <> nil then
+    RenderContext.CurrentProgram := CurrentMeshShader; // enable the CurrentMeshShader for OpenGL
 
   if CurrentMeshShader <> nil then
     CurrentMeshShader.SetupUniforms(BoundTextureUnits);

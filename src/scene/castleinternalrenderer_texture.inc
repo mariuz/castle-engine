@@ -285,6 +285,8 @@
   TMovieTextureResource = class(T2DTextureResource)
   strict private
     FRHITextureFrames: array of TRHITexture;
+    FFramesPerSecond: Single;
+    FTimeLoop, FTimeBackwards: Boolean;
   protected
     class function IsClassForTextureNode(ANode: TAbstractTextureNode): boolean; override;
     procedure PrepareCore(
@@ -1154,6 +1156,7 @@ var
   TexDesc: TRHITextureDesc;
   TempFlipped: TCastleImage;
   TempFloat: TRGBAlphaFloatImage;
+  CacheFullUrl: String;
 begin
   { HandledNode already made sure IsTextureImage = @true }
 
@@ -1166,13 +1169,28 @@ begin
     if TextureNode.TextureImage <> nil then
     begin
       if FRHITexture <> nil then
+        RendererCache.RHITextureImage_DecReference(FRHITexture);
+      FlipVertically :=
+        (TextureNode is TImageTextureNode) and
+        TImageTextureNode(TextureNode).FlipVertically;
+      CacheFullUrl := Iff(TextureNode.TextureUsedFullUrl <> '',
+        TextureNode.TextureUsedFullUrl, TextureNode.TextureImage.URL);
+      TexFormat := EncodedImageToRHIPixelFormat(TextureNode.TextureImage);
+      if (CacheFullUrl <> '') and (TexFormat <> pfRGBA32_Float) then
       begin
-        TextureMemoryProfiler.DeallocateRHI(FRHITexture);
-        FreeAndNil(FRHITexture);
+        FRHITexture := RendererCache.FindRHITextureImage(
+          CacheFullUrl, FlipVertically, Filter, GUITexture, GLTextureScale,
+          FAllocatedWidth, FAllocatedHeight);
+        if FRHITexture <> nil then
+        begin
+          SetLength(FLastFloatBytes, 0);
+          CreateRHISampler(Filter, BoundaryModeS, BoundaryModeT, GL_CLAMP_TO_EDGE,
+            Anisotropy, Max(Cardinal(1), FRHITexture.Desc.MipLevels));
+          Exit;
+        end;
       end;
       FAllocatedWidth := Max(Cardinal(1), TextureNode.TextureImage.Width);
       FAllocatedHeight := Max(Cardinal(1), TextureNode.TextureImage.Height);
-      TexFormat := EncodedImageToRHIPixelFormat(TextureNode.TextureImage);
       if (not GUITexture) and (GLTextureScale > 1) and
          (TextureNode.TextureImage is TCastleImage) and
          (TexFormat <> pfRGBA32_Float) and
@@ -1198,9 +1216,6 @@ begin
         TexFormat, [tuSampled, tuTransferDst, tuTransferSrc], MipLevels, 1);
       TexDesc.DebugName := 'ImageTexture';
       FRHITexture := RHIDevice.CreateTexture(TexDesc);
-      FlipVertically :=
-        (TextureNode is TImageTextureNode) and
-        TImageTextureNode(TextureNode).FlipVertically;
       if ((FlipVertically and (TextureNode.TextureUsedFullUrl = '')) or
           (FAllocatedWidth <> TextureNode.TextureImage.Width) or
           (FAllocatedHeight <> TextureNode.TextureImage.Height)) and
@@ -1250,13 +1265,17 @@ begin
       if MipLevels > 1 then
         FRHITexture.GenerateMipmaps;
       TextureMemoryProfiler.AllocateRHI(FRHITexture,
-        Iff(TextureNode.TextureUsedFullUrl <> '', TextureNode.TextureUsedFullUrl, TextureNode.TextureImage.URL),
+        CacheFullUrl,
         TextureNode.TextureImage.ClassName,
         EncodedImageToRHIGpuBytes(TextureNode.TextureImage, FRHITexture.Desc.Format) *
           Int64(FAllocatedWidth) * Int64(FAllocatedHeight) div
           Max(Int64(1), Int64(TextureNode.TextureImage.Width) * Int64(TextureNode.TextureImage.Height)) +
         Iff(MipLevels > 1, TTextureMemoryProfiler.MipmapsSize(TextureNode.TextureImage), 0),
         MipLevels > 1, FAllocatedWidth, FAllocatedHeight, 1);
+      if (CacheFullUrl <> '') and (TexFormat <> pfRGBA32_Float) then
+        RendererCache.AddRHITextureImage(
+          CacheFullUrl, FlipVertically, Filter, GUITexture, GLTextureScale,
+          FAllocatedWidth, FAllocatedHeight, FRHITexture);
       CreateRHISampler(Filter, BoundaryModeS, BoundaryModeT, GL_CLAMP_TO_EDGE, Anisotropy, MipLevels);
     end;
     Exit;
@@ -1286,10 +1305,7 @@ procedure TImageTextureResource.UnprepareCore;
 begin
   SetLength(FLastFloatBytes, 0);
   if FRHITexture <> nil then
-  begin
-    TextureMemoryProfiler.DeallocateRHI(FRHITexture);
-    FreeAndNil(FRHITexture);
-  end;
+    RendererCache.RHITextureImage_DecReference(FRHITexture);
   FreeAndNil(FRHISampler);
   if FGLName <> GLObjectNone then
   begin
@@ -1363,10 +1379,7 @@ begin
        (FRHITexture.Desc.Format <> pfRGBA32_Float) then
     begin
       if FRHITexture <> nil then
-      begin
-        TextureMemoryProfiler.DeallocateRHI(FRHITexture);
-        FreeAndNil(FRHITexture);
-      end;
+        RendererCache.RHITextureImage_DecReference(FRHITexture);
       FAllocatedWidth := Max(Cardinal(1), Width);
       FAllocatedHeight := Max(Cardinal(1), Height);
       TexDesc := TRHITextureDesc.Create2D(FAllocatedWidth, FAllocatedHeight,
@@ -1485,6 +1498,9 @@ begin
     if (TextureNode.TextureVideo <> nil) and TextureNode.TextureVideo.Loaded and
        (TextureNode.TextureVideo.Count > 0) then
     begin
+      FFramesPerSecond := TextureNode.TextureVideo.FramesPerSecond;
+      FTimeLoop := TextureNode.TextureVideo.TimeLoop;
+      FTimeBackwards := TextureNode.TextureVideo.TimeBackwards;
       MipLevels := 1;
       SetLength(FRHITextureFrames, TextureNode.TextureVideo.Count);
       for I := 0 to TextureNode.TextureVideo.Count - 1 do
@@ -1563,9 +1579,15 @@ begin
       FreeAndNil(FRHITextureFrames[I]);
     end;
   SetLength(FRHITextureFrames, 0);
+  FFramesPerSecond := 0;
+  FTimeLoop := False;
+  FTimeBackwards := False;
   FreeAndNil(FRHISampler);
   if GLVideo <> nil then
+  begin
     RendererCache.TextureVideo_DecReference(GLVideo);
+    GLVideo := nil;
+  end;
 end;
 
 function TMovieTextureResource.RHITexture: TRHITexture;
@@ -1573,11 +1595,13 @@ var
   VideoUnscaledTime: TFloatTime;
   FrameIdx: Integer;
 begin
+  { Note: do not access TextureNode.TextureVideo or IsTextureVideo here ---
+    doing so would reload the video from disk after
+    TCastleSceneCore.FreeResources([frTextureDataInNodes]) unloaded CPU frames. }
   Result := nil;
   if Length(FRHITextureFrames) > 0 then
   begin
-    if (TextureNode <> nil) and (TextureNode.TextureVideo <> nil) and
-       TextureNode.TextureVideo.Loaded then
+    if (TextureNode <> nil) and (FFramesPerSecond > 0) then
     begin
       VideoUnscaledTime :=
         TextureNode.TimeFunctionality.ElapsedTimeInCycle *
@@ -1585,7 +1609,8 @@ begin
       if TextureNode.Speed < 0 then
         VideoUnscaledTime := TextureNode.Duration + VideoUnscaledTime;
       FrameIdx := EnsureRange(
-        TextureNode.TextureVideo.IndexFromTime(VideoUnscaledTime),
+        TVideo.FrameIndexFromTime(VideoUnscaledTime, Length(FRHITextureFrames),
+          FFramesPerSecond, FTimeLoop, FTimeBackwards),
         0, High(FRHITextureFrames));
       Result := FRHITextureFrames[FrameIdx];
     end else
@@ -2263,10 +2288,7 @@ end;
 procedure TCubeMapTextureResource.UnprepareCore;
 begin
   if FRHITexture <> nil then
-  begin
-    TextureMemoryProfiler.DeallocateRHI(FRHITexture);
-    FreeAndNil(FRHITexture);
-  end;
+    RendererCache.RHITextureCubeMap_DecReference(FRHITexture);
   FreeAndNil(FRHISampler);
   if GLName <> GLObjectNone then
   begin
@@ -2317,6 +2339,38 @@ end;
 
 procedure TComposedCubeMapTextureResource.PrepareCore(
   const RenderOptions: TCastleRenderOptions);
+
+  function SideUrl(const SideField: TSFNode): String;
+  var
+    SideNode: TAbstractTexture2DNode;
+  begin
+    if (SideField.Value <> nil) and (SideField.Value is TAbstractTexture2DNode) then
+    begin
+      SideNode := TAbstractTexture2DNode(SideField.Value);
+      Result := SideNode.TextureUsedFullUrl;
+      if (Result = '') and (SideNode.TextureImage <> nil) then
+        Result := SideNode.TextureImage.URL;
+    end else
+      Result := '';
+  end;
+
+  function ComposedCubeMapFullUrl: String;
+  var
+    U0, U1, U2, U3, U4, U5: String;
+  begin
+    U0 := SideUrl(TextureNode.FdBack);
+    U1 := SideUrl(TextureNode.FdFront);
+    U2 := SideUrl(TextureNode.FdLeft);
+    U3 := SideUrl(TextureNode.FdRight);
+    U4 := SideUrl(TextureNode.FdTop);
+    U5 := SideUrl(TextureNode.FdBottom);
+    if (U0 <> '') and (U1 <> '') and (U2 <> '') and
+       (U3 <> '') and (U4 <> '') and (U5 <> '') then
+      Result := U0 + '|' + U1 + '|' + U2 + '|' + U3 + '|' + U4 + '|' + U5
+    else
+      Result := '';
+  end;
+
 var
   Filter: TTextureFilter;
   Anisotropy: TGLfloat;
@@ -2325,6 +2379,7 @@ var
   CubeSize, MipLevels: Cardinal;
   TexFormat: TRHIPixelFormat;
   TexDesc: TRHITextureDesc;
+  CacheFullUrl: String;
 begin
   if RHIDevice <> nil then
   begin
@@ -2336,6 +2391,21 @@ begin
 
     HandleTextureProperties(TextureNode.TextureProperties, RenderOptions,
       Filter, Anisotropy, GUITexture);
+
+    if FRHITexture <> nil then
+      RendererCache.RHITextureCubeMap_DecReference(FRHITexture);
+    CacheFullUrl := ComposedCubeMapFullUrl;
+    if CacheFullUrl <> '' then
+    begin
+      FRHITexture := RendererCache.FindRHITextureCubeMap(
+        CacheFullUrl, Filter, GUITexture, GLTextureScale);
+      if FRHITexture <> nil then
+      begin
+        CreateRHISampler(Filter, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE,
+          Anisotropy, Max(Cardinal(1), FRHITexture.Desc.MipLevels));
+        Exit;
+      end;
+    end;
 
     BackRot       := nil;
     FrontRot      := nil;
@@ -2390,11 +2460,6 @@ begin
       TexDesc := TRHITextureDesc.CreateCube(CubeSize, TexFormat,
         [tuSampled, tuTransferDst, tuTransferSrc], MipLevels);
       TexDesc.DebugName := 'ComposedCubeMapTexture';
-      if FRHITexture <> nil then
-      begin
-        TextureMemoryProfiler.DeallocateRHI(FRHITexture);
-        FreeAndNil(FRHITexture);
-      end;
       FRHITexture := RHIDevice.CreateTexture(TexDesc);
       FRHITexture.UploadImage(RightRot,  0, 0);
       FRHITexture.UploadImage(LeftRot,   0, 1);
@@ -2404,10 +2469,14 @@ begin
       FRHITexture.UploadImage(FrontRot,  0, 5);
       if MipLevels > 1 then
         FRHITexture.GenerateMipmaps;
-      TextureMemoryProfiler.AllocateRHI(FRHITexture, RightRot.URL,
+      TextureMemoryProfiler.AllocateRHI(FRHITexture,
+        Iff(CacheFullUrl <> '', CacheFullUrl, RightRot.URL),
         RightRot.ClassName,
         EncodedImageToRHIGpuBytes(RightRot, FRHITexture.Desc.Format) * 6,
         MipLevels > 1, CubeSize, CubeSize, 6);
+      if CacheFullUrl <> '' then
+        RendererCache.AddRHITextureCubeMap(
+          CacheFullUrl, Filter, GUITexture, GLTextureScale, FRHITexture);
       CreateRHISampler(Filter, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, Anisotropy, MipLevels);
     finally
       FreeAndNil(BackRot);
@@ -2491,6 +2560,7 @@ var
   Side: TCubeMapSide;
   SideImg: TEncodedImage;
   ResizedSide: TCastleImage;
+  CacheFullUrl: String;
 begin
   if RHIDevice <> nil then
   begin
@@ -2500,6 +2570,20 @@ begin
       HandleTextureProperties(TextureNode.TextureProperties, RenderOptions,
         Filter, Anisotropy, GUITexture);
       SideImg := Composite.CubeMapImage(csPositiveX);
+      CacheFullUrl := SideImg.URL;
+      if FRHITexture <> nil then
+        RendererCache.RHITextureCubeMap_DecReference(FRHITexture);
+      if CacheFullUrl <> '' then
+      begin
+        FRHITexture := RendererCache.FindRHITextureCubeMap(
+          CacheFullUrl, Filter, GUITexture, GLTextureScale);
+        if FRHITexture <> nil then
+        begin
+          CreateRHISampler(Filter, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE,
+            Anisotropy, Max(Cardinal(1), FRHITexture.Desc.MipLevels));
+          Exit;
+        end;
+      end;
       TexFormat := EncodedImageToRHIPixelFormat(SideImg);
       CubeSize := Max(1, Composite.Width);
       if (not GUITexture) and (GLTextureScale > 1) and (CubeSize > GLTextureMinSize) and
@@ -2521,11 +2605,6 @@ begin
       TexDesc := TRHITextureDesc.CreateCube(CubeSize, TexFormat,
         [tuSampled, tuTransferDst, tuTransferSrc], MipLevels);
       TexDesc.DebugName := 'ImageCubeMapTexture';
-      if FRHITexture <> nil then
-      begin
-        TextureMemoryProfiler.DeallocateRHI(FRHITexture);
-        FreeAndNil(FRHITexture);
-      end;
       FRHITexture := RHIDevice.CreateTexture(TexDesc);
       for Side := Low(TCubeMapSide) to High(TCubeMapSide) do
       begin
@@ -2551,12 +2630,15 @@ begin
         FRHITexture.GenerateMipmaps;
       SideImg := Composite.CubeMapImage(csPositiveX);
       TextureMemoryProfiler.AllocateRHI(FRHITexture,
-        SideImg.URL,
+        CacheFullUrl,
         SideImg.ClassName,
         EncodedImageToRHIGpuBytes(SideImg, FRHITexture.Desc.Format) *
           Int64(CubeSize) * Int64(CubeSize) div
           Max(Int64(1), Int64(SideImg.Width) * Int64(SideImg.Height)) * 6,
         MipLevels > 1, CubeSize, CubeSize, 6);
+      if CacheFullUrl <> '' then
+        RendererCache.AddRHITextureCubeMap(
+          CacheFullUrl, Filter, GUITexture, GLTextureScale, FRHITexture);
       CreateRHISampler(Filter, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE, Anisotropy, MipLevels);
     finally
       FreeAndNil(Composite);
@@ -2826,6 +2908,7 @@ var
   TexFormat: TRHIPixelFormat;
   TexDesc: TRHITextureDesc;
   MaxDim, MipLevels, MipIdx: Cardinal;
+  CacheFullUrl: String;
 begin
   if RHIDevice <> nil then
   begin
@@ -2835,6 +2918,20 @@ begin
     HandleTextureProperties(TextureNode.TextureProperties, RenderOptions,
       TextureRepeatToGL(TextureNode.FdRepeatS.Value), TextureRepeatToGL(TextureNode.FdRepeatT.Value),
       TextureRepeatToGL(TextureNode.FdRepeatR.Value), Filter, BoundaryModeS, BoundaryModeT, BoundaryModeR, Anisotropy, GUITexture);
+
+    if FRHITexture <> nil then
+      RendererCache.RHITexture3D_DecReference(FRHITexture);
+    CacheFullUrl := TextureNode.TextureImage.URL;
+    if CacheFullUrl <> '' then
+    begin
+      FRHITexture := RendererCache.FindRHITexture3D(CacheFullUrl, Filter);
+      if FRHITexture <> nil then
+      begin
+        CreateRHISampler(Filter, BoundaryModeS, BoundaryModeT, BoundaryModeR,
+          Anisotropy, Max(Cardinal(1), FRHITexture.Desc.MipLevels));
+        Exit;
+      end;
+    end;
 
     MaxDim := Max(1, Max(TextureNode.TextureImage.Width,
       Max(TextureNode.TextureImage.Height, TextureNode.TextureImage.Depth)));
@@ -2857,11 +2954,6 @@ begin
       Max(1, TextureNode.TextureImage.Depth),
       TexFormat, [tuSampled, tuTransferDst, tuTransferSrc], MipLevels);
     TexDesc.DebugName := 'Texture3D';
-    if FRHITexture <> nil then
-    begin
-      TextureMemoryProfiler.DeallocateRHI(FRHITexture);
-      FreeAndNil(FRHITexture);
-    end;
     FRHITexture := RHIDevice.CreateTexture(TexDesc);
     FRHITexture.UploadImage(TextureNode.TextureImage, 0, 0);
     if (MipLevels > 1) and (TextureNode.TextureComposite <> nil) and
@@ -2874,10 +2966,12 @@ begin
     if MipLevels > 1 then
       FRHITexture.GenerateMipmaps;
     TextureMemoryProfiler.AllocateRHI(FRHITexture,
-      TextureNode.TextureImage.URL,
+      CacheFullUrl,
       TextureNode.TextureImage.ClassName,
       EncodedImageToRHIGpuBytes(TextureNode.TextureImage, FRHITexture.Desc.Format),
       MipLevels > 1, TexDesc.Width, TexDesc.Height, TexDesc.DepthOrArrayLayers);
+    if CacheFullUrl <> '' then
+      RendererCache.AddRHITexture3D(CacheFullUrl, Filter, FRHITexture);
     CreateRHISampler(Filter, BoundaryModeS, BoundaryModeT, BoundaryModeR, Anisotropy, MipLevels);
     Exit;
   end;
@@ -2914,10 +3008,7 @@ end;
 procedure T3DTextureResource.UnprepareCore;
 begin
   if FRHITexture <> nil then
-  begin
-    TextureMemoryProfiler.DeallocateRHI(FRHITexture);
-    FreeAndNil(FRHITexture);
-  end;
+    RendererCache.RHITexture3D_DecReference(FRHITexture);
   FreeAndNil(FRHISampler);
   if GLName <> GLObjectNone then
   begin

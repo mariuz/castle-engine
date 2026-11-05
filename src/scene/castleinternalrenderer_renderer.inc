@@ -1248,10 +1248,13 @@ procedure TRenderer.RenderShape(const Shape: TX3DRendererShape;
 
       ClassRenderEnd resets these things, so that this state does not "leak"
       for stuff rendered outside of TCastleViewport. }
-    RenderContext.PointSize := RenderOptions.PointSize;
-    RenderContext.LineWidth := RenderOptions.LineWidth;
-    RenderContext.DepthTest := RenderOptions.DepthTest;
-    RenderContext.ColorChannels := RenderOptions.InternalColorChannels;
+    if RenderContext <> nil then
+    begin
+      RenderContext.PointSize := RenderOptions.PointSize;
+      RenderContext.LineWidth := RenderOptions.LineWidth;
+      RenderContext.DepthTest := RenderOptions.DepthTest;
+      RenderContext.ColorChannels := RenderOptions.InternalColorChannels;
+    end;
 
     LightsRenderer.MaxLightsPerShape := RenderOptions.MaxLightsPerShape;
   end;
@@ -1369,7 +1372,8 @@ var
 begin
   InitializeFromRenderOptions;
 
-  RenderContext.DepthRange := DepthRange;
+  if RenderContext <> nil then
+    RenderContext.DepthRange := DepthRange;
 
   Shader := InitializeShader;
   FixedFunctionBegin(Shader.SceneModelView);
@@ -1390,14 +1394,17 @@ begin
   else
     LP := nil;
 
-  if (LP <> nil) and LP.FdApplied.Value then
+  if RenderContext <> nil then
   begin
-    RenderContext.LineWidth := Max(1.0, RenderOptions.LineWidth * LP.FdLineWidthScaleFactor.Value);
-    RenderContext.LineType := LP.LineType;
-  end else
-  begin
-    RenderContext.LineWidth := RenderOptions.LineWidth;
-    RenderContext.LineType := ltSolid;
+    if (LP <> nil) and LP.FdApplied.Value then
+    begin
+      RenderContext.LineWidth := Max(1.0, RenderOptions.LineWidth * LP.FdLineWidthScaleFactor.Value);
+      RenderContext.LineType := LP.LineType;
+    end else
+    begin
+      RenderContext.LineWidth := RenderOptions.LineWidth;
+      RenderContext.LineType := ltSolid;
+    end;
   end;
 
   RenderShapePointProperties(Shape, RenderOptions, Shader);
@@ -1427,7 +1434,8 @@ begin
     Do this once PointSize is fully calculated, as this changes GL state
     (if RenderContext.PointSize changes) so avoid changing RenderContext.PointSize
     multiple times. }
-  RenderContext.PointSize := PointSize;
+  if RenderContext <> nil then
+    RenderContext.PointSize := PointSize;
 
   RenderShapeMaterials(Shape, RenderOptions, Shader);
 end;
@@ -2165,7 +2173,8 @@ procedure TRenderer.RenderShapeTextures(const Shape: TX3DRendererShape;
       { Make sure each shape sets fixed-function alpha test,
         regardless of RenderOptions.Mode (code for other RenderOptions.Mode values
         is lower in this routine), otherwise it is undefined. }
-      RenderContext.FixedFunctionAlphaTestDisable;
+      if RenderContext <> nil then
+        RenderContext.FixedFunctionAlphaTestDisable;
       Exit;
     end;
 
@@ -2222,9 +2231,11 @@ procedure TRenderer.RenderShapeTextures(const Shape: TX3DRendererShape;
     begin
       { only calculate AlphaCutoff when AlphaTest, otherwise it is useless }
       AlphaCutoff := GetAlphaCutoff(Shape);
-      RenderContext.FixedFunctionAlphaTestEnable(AlphaCutoff);
+      if RenderContext <> nil then
+        RenderContext.FixedFunctionAlphaTestEnable(AlphaCutoff);
       Shader.EnableAlphaTest(AlphaCutoff);
     end else
+    if RenderContext <> nil then
       RenderContext.FixedFunctionAlphaTestDisable;
 
     { Make active texture 0. This is helpful for rendering code of

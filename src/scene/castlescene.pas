@@ -1099,6 +1099,7 @@ var
   I: Integer;
   PossiblyTimeConsuming: Boolean;
   TimeStart: TCastleProfilerTime;
+  OwnedRenderer: TRenderer;
 begin
   inherited;
 
@@ -1146,33 +1147,51 @@ begin
       TimeStart := Profiler.Start('Prepare Scene Resources ' + URL);
 
     Assert(Params <> nil);
-    Renderer := Params.RendererToPrepareShapes as TRenderer;
-    Assert(Renderer <> nil);
-
-    if not PreparedShapesResources then
+    OwnedRenderer := nil;
+    if Params.RendererToPrepareShapes = nil then
     begin
-      { Use PreparedShapesResources to avoid expensive (for large scenes)
-        iteration over all shapes in every TCastleScene.PrepareResources call. }
-      PreparedShapesResources := true;
-      PrepareShapesResources;
+      OwnedRenderer := TRenderer.Create(nil);
+      Params.RendererToPrepareShapes := OwnedRenderer;
     end;
+    try
+      Renderer := Params.RendererToPrepareShapes as TRenderer;
+      Assert(Renderer <> nil);
 
-    if ([prRenderSelf, prRenderClones] * Options <> []) and not PreparedRender then
-    begin
-      { We use PreparedRender to avoid potentially expensive iteration
-        over shapes and expensive Renderer.RenderBegin/End. }
-      PreparedRender := true;
-      PrepareRenderShapes;
-    end;
+      if not PreparedShapesResources then
+      begin
+        { Use PreparedShapesResources to avoid expensive (for large scenes)
+          iteration over all shapes in every TCastleScene.PrepareResources call. }
+        PreparedShapesResources := true;
+        PrepareShapesResources;
+      end;
 
-    if prBackground in Options then
-      PrepareBackground;
+      if ([prRenderSelf, prRenderClones] * Options <> []) and not PreparedRender then
+      begin
+        { We use PreparedRender to avoid potentially expensive iteration
+          over shapes and expensive Renderer.RenderBegin/End. }
+        PreparedRender := true;
+        PrepareRenderShapes;
+      end;
 
-    if prScreenEffects in Options then
-    begin
-      for I := 0 to ScreenEffectNodes.Count - 1 do
-        TScreenEffectResources.Prepare(RenderOptions,
-          ScreenEffectNodes[I] as TScreenEffectNode);
+      if prBackground in Options then
+      begin
+        PrepareBackground;
+        if FBackgroundRenderer <> nil then
+          FBackgroundRenderer.PrepareResources(Options, Params);
+      end;
+
+      if prScreenEffects in Options then
+      begin
+        for I := 0 to ScreenEffectNodes.Count - 1 do
+          TScreenEffectResources.Prepare(RenderOptions,
+            ScreenEffectNodes[I] as TScreenEffectNode);
+      end;
+    finally
+      if OwnedRenderer <> nil then
+      begin
+        Params.RendererToPrepareShapes := nil;
+        FreeAndNil(OwnedRenderer);
+      end;
     end;
 
     if PossiblyTimeConsuming then

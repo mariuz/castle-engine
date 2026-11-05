@@ -29,7 +29,7 @@ uses
   CastleInternalShaderRHI, CastleInternalBatch2DRHI, CastleInternalRenderer,
   CastleRendererInternalShader, CastleRendererInternalLights, CastleRendererInternalTextureEnv, X3DNodes, X3DFields, X3DCameraUtils,
   CastleInternalGeometryArrays, CastleSceneInternalShape, CastleInternalOcclusionCulling,
-  CastleTransform, CastleScene, CastleProjection, CastleViewport, CastleScreenEffects, CastleRenderOptions, CastleWindow,
+  CastleTransform, CastleSceneCore, CastleScene, CastleProjection, CastleViewport, CastleScreenEffects, CastleRenderOptions, CastleWindow,
   CastleUIControls, CastleControls,
   CastleVideos, CastleInternalBackgroundRenderer, CastleInternalGLShadowVolumes,
   CastleInternalScreenEffects,
@@ -363,6 +363,9 @@ type
     procedure TestFloatAndGPUCompressedTextureUploadRHI;
     procedure TestRenderedGeneratedCubeAndShadowMapMemoryProfilerRHI;
     procedure TestSHVectorGLCaptureOffscreenRHI;
+    procedure TestRendererCacheTextureSharingAndRefCountRHI;
+    procedure TestSceneFreeResourcesAndMovieTexturePostUnloadPlaybackRHI;
+    procedure TestSceneAndViewportPrepareResourcesPipelinePrebakeRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -23729,6 +23732,417 @@ begin
     SetActiveCommandList(SavedCmd);
     RenderContext := SavedCtx;
     FreeAndNil(TestCtx);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRendererCacheTextureSharingAndRefCountRHI;
+
+  function CreateCubeMapWithSharedUrls(const UrlPrefix: String): TComposedCubeMapTextureNode;
+  const
+    SideNames: array[0..5] of String = ('back', 'front', 'left', 'right', 'top', 'bottom');
+  var
+    Sides: array[0..5] of TPixelTextureNode;
+    Img: TRGBAlphaImage;
+    I: Integer;
+  begin
+    Result := TComposedCubeMapTextureNode.Create;
+    for I := 0 to 5 do
+    begin
+      Sides[I] := TPixelTextureNode.Create;
+      Img := TRGBAlphaImage.Create(8, 8);
+      Img.URL := UrlPrefix + '_' + SideNames[I] + '.png';
+      Img.Clear(Vector4Byte(40 * I, 100, 200, 255));
+      Sides[I].FdImage.Value := Img;
+    end;
+    Result.FdBack.Value := Sides[0];
+    Result.FdFront.Value := Sides[1];
+    Result.FdLeft.Value := Sides[2];
+    Result.FdRight.Value := Sides[3];
+    Result.FdTop.Value := Sides[4];
+    Result.FdBottom.Value := Sides[5];
+  end;
+
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedProfilerEnabled: Boolean;
+  Opts: TCastleRenderOptions;
+  BaseCount: Cardinal;
+  Tex2DA, Tex2DB: TImageTextureNode;
+  Img2DA, Img2DB: TRGBAlphaImage;
+  Res2DA, Res2DB: TImageTextureResource;
+  SharedRHITex2D: TRHITexture;
+  CubeA, CubeB: TComposedCubeMapTextureNode;
+  ResCubeA, ResCubeB: TComposedCubeMapTextureResource;
+  SharedRHICube: TRHITexture;
+  VolComp: TCompositeImage;
+  VolFile: String;
+  Tex3DA, Tex3DB: TImageTexture3DNode;
+  Res3DA, Res3DB: T3DTextureResource;
+  SharedRHI3D: TRHITexture;
+begin
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedProfilerEnabled := TextureMemoryProfiler.Enabled;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9901)));
+  Opts := TCastleRenderOptions.Create(nil);
+  Tex2DA := nil;
+  Tex2DB := nil;
+  CubeA := nil;
+  CubeB := nil;
+  VolComp := nil;
+  Tex3DA := nil;
+  Tex3DB := nil;
+  VolFile := GetTempFileNamePrefix + '_shared_phase99_3d.dds';
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+    TextureMemoryProfiler.Enabled := True;
+    BaseCount := TextureMemoryProfiler.AllocatedCount;
+
+    { 1. 2D TImageTextureNode sharing via RendererCache }
+    Tex2DA := TImageTextureNode.Create;
+    Img2DA := TRGBAlphaImage.Create(16, 16);
+    Img2DA.Clear(Vector4Byte(255, 64, 32, 255));
+    Tex2DA.LoadFromImage(Img2DA, True, 'castle-data:/shared_phase99_2d.png');
+
+    Tex2DB := TImageTextureNode.Create;
+    Img2DB := TRGBAlphaImage.Create(16, 16);
+    Img2DB.Clear(Vector4Byte(255, 64, 32, 255));
+    Tex2DB.LoadFromImage(Img2DB, True, 'castle-data:/shared_phase99_2d.png');
+
+    TTextureResources.Prepare(Opts, Tex2DA);
+    TTextureResources.Prepare(Opts, Tex2DB);
+
+    Res2DA := TImageTextureResource(Tex2DA.InternalRendererResource);
+    Res2DB := TImageTextureResource(Tex2DB.InternalRendererResource);
+    AssertTrue('Res2DA and Res2DB must be assigned', (Res2DA <> nil) and (Res2DB <> nil));
+    AssertTrue('Res2DA.RHITexture must be non-nil', Res2DA.RHITexture <> nil);
+    AssertTrue('Res2DA and Res2DB with identical URL must share the same TRHITexture instance',
+      Res2DA.RHITexture = Res2DB.RHITexture);
+    AssertEquals('Res2DB.AllocatedWidth must be populated on cache hit', 16, Integer(Res2DB.AllocatedWidth));
+    AssertEquals('Res2DB.AllocatedHeight must be populated on cache hit', 16, Integer(Res2DB.AllocatedHeight));
+    AssertEquals('Shared 2D texture must be counted once in TextureMemoryProfiler',
+      Integer(BaseCount + 1), Integer(TextureMemoryProfiler.AllocatedCount));
+
+    SharedRHITex2D := Res2DB.RHITexture;
+    TTextureResources.Unprepare(Tex2DA);
+    AssertEquals('Unpreparing first reference must keep shared 2D texture allocated',
+      Integer(BaseCount + 1), Integer(TextureMemoryProfiler.AllocatedCount));
+    AssertTrue('Second resource must still point to live shared TRHITexture',
+      Res2DB.RHITexture = SharedRHITex2D);
+
+    TTextureResources.Unprepare(Tex2DB);
+    AssertEquals('Unpreparing last reference must deallocate shared 2D texture',
+      Integer(BaseCount), Integer(TextureMemoryProfiler.AllocatedCount));
+
+    { 2. Cubemap sharing via RendererCache }
+    CubeA := CreateCubeMapWithSharedUrls('castle-data:/shared_phase99_cube');
+    CubeB := CreateCubeMapWithSharedUrls('castle-data:/shared_phase99_cube');
+    TTextureResources.Prepare(Opts, CubeA);
+    TTextureResources.Prepare(Opts, CubeB);
+
+    ResCubeA := TComposedCubeMapTextureResource(CubeA.InternalRendererResource);
+    ResCubeB := TComposedCubeMapTextureResource(CubeB.InternalRendererResource);
+    AssertTrue('ResCubeA and ResCubeB must share the same cubemap TRHITexture',
+      (ResCubeA <> nil) and (ResCubeB <> nil) and (ResCubeA.RHITexture <> nil) and
+      (ResCubeA.RHITexture = ResCubeB.RHITexture));
+    AssertEquals('Shared cubemap texture must be counted once in TextureMemoryProfiler',
+      Integer(BaseCount + 1), Integer(TextureMemoryProfiler.AllocatedCount));
+
+    SharedRHICube := ResCubeB.RHITexture;
+    TTextureResources.Unprepare(CubeA);
+    AssertEquals('Unpreparing first cubemap reference must keep shared cubemap allocated',
+      Integer(BaseCount + 1), Integer(TextureMemoryProfiler.AllocatedCount));
+    AssertTrue('Second cubemap resource must still hold live TRHITexture',
+      ResCubeB.RHITexture = SharedRHICube);
+    TTextureResources.Unprepare(CubeB);
+    AssertEquals('Unpreparing last cubemap reference must deallocate shared cubemap',
+      Integer(BaseCount), Integer(TextureMemoryProfiler.AllocatedCount));
+
+    { 3. 3D texture sharing via RendererCache }
+    VolComp := TCompositeImage.Create;
+    VolComp.Width := 4;
+    VolComp.Height := 4;
+    VolComp.Depth := 2;
+    VolComp.CompositeType := ctVolume;
+    VolComp.Mipmaps := False;
+    VolComp.Images.Add(TRGBAlphaImage.Create(4, 4, 2));
+    VolComp.SaveToFile(FilenameToUriSafe(VolFile));
+
+    Tex3DA := TImageTexture3DNode.Create;
+    Tex3DA.SetUrl([FilenameToUriSafe(VolFile)]);
+    Tex3DB := TImageTexture3DNode.Create;
+    Tex3DB.SetUrl([FilenameToUriSafe(VolFile)]);
+
+    TTextureResources.Prepare(Opts, Tex3DA);
+    TTextureResources.Prepare(Opts, Tex3DB);
+
+    Res3DA := T3DTextureResource(Tex3DA.InternalRendererResource);
+    Res3DB := T3DTextureResource(Tex3DB.InternalRendererResource);
+    AssertTrue('Res3DA and Res3DB must share the same 3D TRHITexture',
+      (Res3DA <> nil) and (Res3DB <> nil) and (Res3DA.RHITexture <> nil) and
+      (Res3DA.RHITexture = Res3DB.RHITexture));
+    AssertEquals('Shared 3D texture must be counted once in TextureMemoryProfiler',
+      Integer(BaseCount + 1), Integer(TextureMemoryProfiler.AllocatedCount));
+
+    SharedRHI3D := Res3DB.RHITexture;
+    TTextureResources.Unprepare(Tex3DA);
+    AssertEquals('Unpreparing first 3D texture reference must keep shared 3D texture allocated',
+      Integer(BaseCount + 1), Integer(TextureMemoryProfiler.AllocatedCount));
+    AssertTrue('Second 3D resource must still hold live TRHITexture',
+      Res3DB.RHITexture = SharedRHI3D);
+    TTextureResources.Unprepare(Tex3DB);
+    AssertEquals('Unpreparing last 3D texture reference must deallocate shared 3D texture',
+      Integer(BaseCount), Integer(TextureMemoryProfiler.AllocatedCount));
+  finally
+    CheckDeleteFile(VolFile, True);
+    FreeAndNil(Tex3DB);
+    FreeAndNil(Tex3DA);
+    FreeAndNil(VolComp);
+    FreeAndNil(CubeB);
+    FreeAndNil(CubeA);
+    FreeAndNil(Tex2DB);
+    FreeAndNil(Tex2DA);
+    FreeAndNil(Opts);
+    TextureMemoryProfiler.Enabled := SavedProfilerEnabled;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSceneFreeResourcesAndMovieTexturePostUnloadPlaybackRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  Scene, BgInternalScene: TCastleScene;
+  Root: TX3DRootNode;
+  Shape2D, ShapeMovie: TShapeNode;
+  App2D, AppMovie: TAppearanceNode;
+  Mat2D, MatMovie: TUnlitMaterialNode;
+  ImgTex: TImageTextureNode;
+  Img2D, BgFrontImg: TRGBAlphaImage;
+  Frames: array[0..3] of TCastleImage;
+  MovieTex: TMovieTextureNode;
+  Vid: TVideo;
+  BgNode: TTextureBackgroundNode;
+  BgFrontTex: TImageTextureNode;
+  PrepareParams: TPrepareParams;
+  ImgRes: TImageTextureResource;
+  MovieRes: TMovieTextureResource;
+  BgRes: TImageTextureResource;
+  Frame0Tex, FrameLaterTex: TRHITexture;
+  RemoveType: TRemoveType;
+  I: Integer;
+begin
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9902)));
+  Scene := nil;
+  Vid := nil;
+  PrepareParams := TPrepareParams.Create;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+
+    Root := TX3DRootNode.Create;
+
+    { 1. Shape with 2D TImageTextureNode }
+    ImgTex := TImageTextureNode.Create;
+    Img2D := TRGBAlphaImage.Create(8, 8);
+    Img2D.Clear(Vector4Byte(120, 200, 80, 255));
+    ImgTex.LoadFromImage(Img2D, True, '');
+    Mat2D := TUnlitMaterialNode.Create;
+    App2D := TAppearanceNode.Create;
+    App2D.Material := Mat2D;
+    App2D.Texture := ImgTex;
+    Shape2D := TShapeNode.Create;
+    Shape2D.Appearance := App2D;
+    Shape2D.Geometry := TBoxNode.Create;
+    Root.AddChildren(Shape2D);
+
+    { 2. Shape with TMovieTextureNode (4 frames at 4 FPS, Loop = True) }
+    Vid := TVideo.Create;
+    for I := 0 to 3 do
+    begin
+      Frames[I] := TRGBAlphaImage.Create(8, 8);
+      TRGBAlphaImage(Frames[I]).Clear(Vector4Byte(Byte(I * 60), 50, 150, 255));
+    end;
+    Vid.LoadFromImageArray(Frames, True, 4.0);
+    Vid.TimeLoop := True;
+
+    MovieTex := TMovieTextureNode.Create;
+    MovieTex.Loop := True;
+    MovieTex.Speed := 1.0;
+    MovieTex.LoadFromVideo(Vid, False);
+    MatMovie := TUnlitMaterialNode.Create;
+    AppMovie := TAppearanceNode.Create;
+    AppMovie.Material := MatMovie;
+    AppMovie.Texture := MovieTex;
+    ShapeMovie := TShapeNode.Create;
+    ShapeMovie.Appearance := AppMovie;
+    ShapeMovie.Geometry := TBoxNode.Create;
+    Root.AddChildren(ShapeMovie);
+
+    { 3. TTextureBackgroundNode with front skybox texture }
+    BgNode := TTextureBackgroundNode.Create;
+    BgFrontTex := TImageTextureNode.Create;
+    BgFrontImg := TRGBAlphaImage.Create(8, 8);
+    BgFrontImg.Clear(Vector4Byte(20, 40, 90, 255));
+    BgFrontTex.LoadFromImage(BgFrontImg, True, '');
+    BgNode.FdFrontTexture.Value := BgFrontTex;
+    Root.AddChildren(BgNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.ProcessEvents := True;
+    Scene.Load(Root, True);
+
+    {$warnings off}
+    Scene.PrepareResources([prRenderSelf, prBackground], PrepareParams);
+    {$warnings on}
+
+    ImgRes := TImageTextureResource(ImgTex.InternalRendererResource);
+    MovieRes := TMovieTextureResource(MovieTex.InternalRendererResource);
+    BgRes := TImageTextureResource(BgFrontTex.InternalRendererResource);
+    AssertTrue('ImgRes.RHITexture must be prepared before FreeResources',
+      (ImgRes <> nil) and (ImgRes.RHITexture <> nil));
+    AssertTrue('MovieRes must have 4 RHI texture frames prepared',
+      (MovieRes <> nil) and (MovieRes.RHIFrameCount = 4));
+    AssertTrue('Background renderer and its front texture must be prepared by PrepareResources([prBackground])',
+      (Scene.InternalBackgroundRenderer <> nil) and (BgRes <> nil) and (BgRes.RHITexture <> nil));
+    BgInternalScene := TCastleScene(Scene.InternalBackgroundRenderer.RHIScene);
+    AssertTrue('Background internal TCastleScene must exist', BgInternalScene <> nil);
+
+    Frame0Tex := MovieRes.RHITexture;
+    AssertTrue('Initial MovieRes.RHITexture must be non-nil', Frame0Tex <> nil);
+
+    { Free CPU texture and video data in both scene nodes and background nodes }
+    Scene.FreeResources([frTextureDataInNodes, frBackgroundImageInNodes]);
+    AssertFalse('ImgTex.IsTextureLoaded must be False after Scene.FreeResources([frTextureDataInNodes])',
+      ImgTex.IsTextureLoaded);
+    AssertFalse('MovieTex.IsTextureLoaded must be False after Scene.FreeResources([frTextureDataInNodes])',
+      MovieTex.IsTextureLoaded);
+    AssertFalse('BgFrontTex.IsTextureLoaded must be False after Scene.FreeResources([frBackgroundImageInNodes])',
+      BgFrontTex.IsTextureLoaded);
+
+    { Advance time by 0.5s (at 4 FPS -> frame index 2) and verify MovieRes.RHITexture
+      animates on the GPU without reloading TextureNode.TextureVideo }
+    RemoveType := rtNone;
+    Scene.Update(0.5, RemoveType);
+    FrameLaterTex := MovieRes.RHITexture;
+    AssertTrue('MovieRes.RHITexture must remain non-nil after FreeResources', FrameLaterTex <> nil);
+    AssertTrue('MovieRes.RHITexture must advance to a later GPU frame after Scene.Update(0.5)',
+      FrameLaterTex <> Frame0Tex);
+    AssertFalse('MovieRes.RHITexture must NOT access TextureNode.TextureVideo (IsTextureLoaded must stay False)',
+      MovieTex.IsTextureLoaded);
+    AssertTrue('2D texture resource must remain on GPU after FreeResources([frTextureDataInNodes])',
+      ImgRes.RHITexture <> nil);
+    AssertTrue('Background texture resource must remain on GPU after FreeResources([frBackgroundImageInNodes])',
+      BgRes.RHITexture <> nil);
+  finally
+    FreeAndNil(PrepareParams);
+    FreeAndNil(Scene);
+    FreeAndNil(Vid);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestSceneAndViewportPrepareResourcesPipelinePrebakeRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  Box: TBoxNode;
+  ScFx: TScreenEffectNode;
+  ScShader: TComposedShaderNode;
+  ScPart: TShaderPartNode;
+  RendererShape: TX3DRendererShape;
+  PipelinesAfterPrebake: Cardinal;
+begin
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9903)));
+  Viewport := nil;
+  Scene := nil;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+    SetActiveCommandList(nil);
+
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    Mat.BaseColor := Vector3(0.8, 0.3, 0.2);
+    App.Material := Mat;
+    ShapeNode.Appearance := App;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    ScFx := TScreenEffectNode.Create;
+    ScShader := TComposedShaderNode.Create;
+    ScPart := TShaderPartNode.Create;
+    ScPart.ShaderType := stFragment;
+    ScPart.Contents :=
+      'void main (void) {' + LineEnding +
+      '  gl_FragColor = screen_get_color(screen_position());' + LineEnding +
+      '}';
+    ScShader.FdParts.Add(ScPart);
+    ScFx.FdShaders.Add(ScShader);
+    Root.AddChildren(ScFx);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := False;
+    Viewport.Width := 128;
+    Viewport.Height := 128;
+    Viewport.Items.Add(Scene);
+
+    AssertEquals('No pipelines created before Viewport.PrepareResources',
+      0, Integer(Device.PipelineCount));
+
+    { Call Viewport.PrepareResources(Scene) outside any render pass (ActiveCommandList = nil) }
+    Viewport.PrepareResources(Scene);
+
+    RendererShape := TX3DRendererShape(Scene.Shapes.TraverseList(False, False)[0]);
+    AssertTrue('Shape.Cache must be allocated by PrepareResources',
+      RendererShape.Cache <> nil);
+    AssertTrue('Shape.Cache.RHICoordinateBuffer must be uploaded by PrepareResources',
+      RendererShape.Cache.RHICoordinateBuffer <> nil);
+    AssertTrue('Shape.Cache.RHIMaterialBuffer must be uploaded by PrepareResources',
+      RendererShape.Cache.RHIMaterialBuffer <> nil);
+    AssertTrue('Shape.Cache.RHIMaterialDescriptorSet must be created by PrepareResources',
+      RendererShape.Cache.RHIMaterialDescriptorSet <> nil);
+    AssertTrue('Shape.Cache.RHIVertexShader must be compiled by PrepareResources',
+      RendererShape.Cache.RHIVertexShader <> nil);
+    AssertTrue('Shape.Cache.RHIFragmentShader must be compiled by PrepareResources',
+      RendererShape.Cache.RHIFragmentShader <> nil);
+    PipelinesAfterPrebake := Device.PipelineCount;
+    AssertTrue('Viewport.PrepareResources must pre-bake graphics TRHIPipeline PSOs',
+      PipelinesAfterPrebake >= 2);
+  finally
+    FreeAndNil(Viewport);
+    FreeAndNil(Scene);
+    SetActiveCommandList(SavedCmd);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);

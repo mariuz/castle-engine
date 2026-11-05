@@ -127,7 +127,8 @@ begin
   // calculate Lighting ("whether anything requires lighting calculation")
   Lighting := RenderOptions.Lighting and MaterialAndShapeLit and
     (RenderOptions.Mode = rmFull);
-  RenderContext.FixedFunctionLighting := Lighting;
+  if RenderContext <> nil then
+    RenderContext.FixedFunctionLighting := Lighting;
   if Lighting then
     Shader.EnableLighting;
 

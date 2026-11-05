@@ -29,6 +29,9 @@
     GUITexture: boolean;
     References: Cardinal;
     GLName: TGLTexture;
+    RHITexture: TRHITexture;
+    RHIOwnerDevice: TRHIDevice;
+    AllocatedWidth, AllocatedHeight, TextureScale: Cardinal;
   end;
   TTextureImageCacheList = {$ifdef FPC}specialize{$endif} TObjectList<TTextureImageCache>;
 
@@ -52,8 +55,12 @@
     FullUrl: String;
     Filter: TTextureFilter;
     Anisotropy: TGLfloat;
+    GUITexture: Boolean;
     References: Cardinal;
     GLName: TGLTexture;
+    RHITexture: TRHITexture;
+    RHIOwnerDevice: TRHIDevice;
+    TextureScale: Cardinal;
   end;
   TTextureCubeMapCacheList = {$ifdef FPC}specialize{$endif} TObjectList<TTextureCubeMapCache>;
 
@@ -66,6 +73,8 @@
     Wrap: TTextureWrap3D;
     References: Cardinal;
     GLName: TGLTexture;
+    RHITexture: TRHITexture;
+    RHIOwnerDevice: TRHIDevice;
   end;
   TTexture3DCacheList = {$ifdef FPC}specialize{$endif} TObjectList<TTexture3DCache>;
 

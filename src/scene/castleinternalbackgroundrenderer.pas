@@ -72,6 +72,8 @@ type
       Initially rotation is taken from TBackgroundNode.TransformRotation
       (corresponds to the rotation of Background in the X3D file transformation). }
     procedure UpdateRotation(const Rotation: TVector4); virtual;
+    procedure PrepareResources(const Options: TPrepareResourcesOptions;
+      const AParams: TPrepareParams); virtual;
     procedure FreeResources; virtual;
     procedure Update(const SecondsPassed: Single); virtual;
 
@@ -152,6 +154,11 @@ procedure TBackgroundRenderer.UpdateRotation(const Rotation: TVector4);
 begin
 end;
 
+procedure TBackgroundRenderer.PrepareResources(const Options: TPrepareResourcesOptions;
+  const AParams: TPrepareParams);
+begin
+end;
+
 procedure TBackgroundRenderer.FreeResources;
 begin
 end;
@@ -183,6 +190,8 @@ type
       const CurrentProjection: TProjection;
       const AllShapesCollector, FilteredShapesCollector: TShapesCollector;
       const ShapesRenderer: TShapesRenderer); override;
+    procedure PrepareResources(const Options: TPrepareResourcesOptions;
+      const AParams: TPrepareParams); override;
     procedure FreeResources; override;
     procedure Update(const SecondsPassed: Single); override;
   end;
@@ -308,6 +317,18 @@ begin
   begin
     ShapesCollect;
     ShapesRender;
+  end;
+end;
+
+procedure TBackgroundScene.PrepareResources(const Options: TPrepareResourcesOptions;
+  const AParams: TPrepareParams);
+begin
+  inherited;
+  if Scene <> nil then
+  begin
+    {$warnings off}
+    Scene.PrepareResources(Options - [prBackground, prScreenEffects], AParams);
+    {$warnings on}
   end;
 end;
 
