@@ -441,6 +441,8 @@ type
       const Index: Integer): TRHIDescriptorSet; override;
     function InternalExtraScreenEffectsCount: Integer; override;
     function InternalExtraScreenEffectsNeedDepth: Boolean; override;
+    function GetScreenEffectsNear: Single; override;
+    function GetScreenEffectsFar: Single; override;
 
     { Called when PointingDevicePress was not handled by any TCastleTransform object.
       You can override this to make a message / sound signal to notify user
@@ -1563,6 +1565,7 @@ function TCastleViewport.TSSRScreenEffect.SetupUniforms(var BoundTextureUnits: C
 var
   ViewProjectionMatrix,
   ViewProjectionMatrixInverse: TMatrix4;
+  CamPos: TVector3;
 begin
   Result := inherited;
 
@@ -1573,13 +1576,21 @@ begin
 
   Uniform('near').SetValue(0.1);
   Uniform('far').SetValue(1000.0);
-  ViewProjectionMatrix := Viewport.InternalCamera.ProjectionMatrix * Viewport.InternalCamera.Matrix;
+  if Viewport.InternalCamera <> nil then
+  begin
+    ViewProjectionMatrix := Viewport.InternalCamera.ProjectionMatrix * Viewport.InternalCamera.Matrix;
+    CamPos := Viewport.InternalCamera.WorldTranslation;
+  end else
+  begin
+    ViewProjectionMatrix := TMatrix4.Identity;
+    CamPos := TVector3.Zero;
+  end;
   if not ViewProjectionMatrix.TryInverse(ViewProjectionMatrixInverse) then
     ViewProjectionMatrixInverse := TMatrix4.Identity;
   Uniform('defaultSurfaceGlossiness').SetValue(Viewport.ScreenSpaceReflectionsSurfaceGlossiness);
   Uniform('castle_ViewProjectionMatrix').SetValue(ViewProjectionMatrix);
   Uniform('castle_ViewProjectionMatrixInverse').SetValue(ViewProjectionMatrixInverse);
-  Uniform('castle_CameraPosition').SetValue(Viewport.InternalCamera.WorldTranslation);
+  Uniform('castle_CameraPosition').SetValue(CamPos);
 end;
 
 { TCastleViewport ------------------------------------------------------- }
@@ -3225,15 +3236,37 @@ end;
 function TCastleViewport.InternalExtraGetScreenEffectRHIPipeline(const Index: Integer): TRHIPipeline;
 var
   ExtraOffset: Integer;
+  BoundUnits: Cardinal;
 begin
   Result := nil;
   if RHIDevice = nil then
     Exit;
+
+  if ScreenSpaceAmbientOcclusion then
+    SSAOShaderInitialize;
+  if ScreenSpaceReflections then
+    SSRShaderInitialize;
+
+  BoundUnits := 0;
   ExtraOffset := 0;
   if ScreenSpaceAmbientOcclusion and (SSAOShader <> nil) then
+  begin
+    if Index = ExtraOffset then
+    begin
+      SSAOShader.SetupUniforms(BoundUnits);
+      Exit(SSAOShader.GetOrCreateRHIPipeline(RHIDevice));
+    end;
     Inc(ExtraOffset);
+  end;
   if ScreenSpaceReflections and (SSRShader <> nil) then
+  begin
+    if Index = ExtraOffset then
+    begin
+      SSRShader.SetupUniforms(BoundUnits);
+      Exit(SSRShader.GetOrCreateRHIPipeline(RHIDevice));
+    end;
     Inc(ExtraOffset);
+  end;
   {$warnings off} // using deprecated MainScene to keep it working
   if (Index >= ExtraOffset) and (Items.MainScene <> nil) then
     Result := Items.MainScene.InternalScreenEffectRHIPipeline(Index - ExtraOffset);
@@ -3297,6 +3330,22 @@ begin
     Result := false;
 end;
 
+function TCastleViewport.GetScreenEffectsNear: Single;
+begin
+  if FProjection.ProjectionNear > 0 then
+    Result := FProjection.ProjectionNear
+  else
+    Result := inherited;
+end;
+
+function TCastleViewport.GetScreenEffectsFar: Single;
+begin
+  if (FProjection.ProjectionFar > 0) and (FProjection.ProjectionFar <> ZFarInfinity) then
+    Result := FProjection.ProjectionFar
+  else
+    Result := inherited;
+end;
+
 procedure TCastleViewport.SSAOShaderInitialize;
 begin
   { Do not retry creating SSAOShader if SSAOShaderInitialize was already called.
@@ -3307,10 +3356,11 @@ begin
   // SSAOShaderInitialized = false implies SSAOShader = nil
   Assert(SSAOShader = nil);
 
-  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.Shaders then
+  if (RHIDevice <> nil) or ((GLFeatures <> nil) and GLFeatures.Shaders) then
   begin
     try
       SSAOShader := TSSAOScreenEffect.Create;
+      SSAOShader.Name := 'TSSAOScreenEffect';
       SSAOShader.Viewport := Self;
       SSAOShader.NeedsDepth := true;
       SSAOShader.ScreenEffectShader := {$I ssao.glsl.inc};
@@ -3336,10 +3386,11 @@ begin
 
   // SSAOShaderInitialized = false implies SSRShader = nil
   Assert(SSRShader = nil);
-  if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.Shaders then
+  if (RHIDevice <> nil) or ((GLFeatures <> nil) and GLFeatures.Shaders) then
   begin
     try
       SSRShader := TSSRScreenEffect.Create;
+      SSRShader.Name := 'TSSRScreenEffect';
       SSRShader.Viewport := Self;
       SSRShader.NeedsDepth := True;
       SSRShader.ScreenEffectShader := {$I ssr.glsl.inc};
@@ -3367,6 +3418,9 @@ begin
 
   FreeAndNil(SSAOShader);
   SSAOShaderInitialized := false;
+
+  FreeAndNil(SSRShader);
+  SSRShaderInitialized := false;
 
   if ShapesRenderer <> nil then
     ShapesRenderer.GLContextClose;

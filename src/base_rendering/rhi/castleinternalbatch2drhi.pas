@@ -75,6 +75,7 @@ type
     FBasePipeDescs: array[TCastle2DBlendMode] of TRHIGraphicsPipelineDesc;
     FPipelines: array[TCastle2DBlendMode] of TRHIPipeline;
     FLastPipeline: TRHIPipeline;
+    FLastBoundPipelineDesc: TRHIGraphicsPipelineDesc;
     FSamplers: array[Boolean, Boolean, Boolean] of TRHISampler;
     FLinearSampler: TRHISampler;
     FNearestSampler: TRHISampler;
@@ -210,6 +211,7 @@ type
     property TotalQuadsDrawn: Cardinal read FTotalQuadsDrawn;
     property TotalFlushes: Cardinal read FTotalFlushes;
     property LastPipeline: TRHIPipeline read FLastPipeline;
+    property LastBoundPipelineDesc: TRHIGraphicsPipelineDesc read FLastBoundPipelineDesc;
     property LastCustomFragShader: TRHIShaderModule read FLastCustomFragShader;
     property LastPushConstants: TCastle2DPushConstants read FLastPushConstants;
   end;
@@ -628,10 +630,19 @@ begin
     end;
     if (RenderContext <> nil) and
        (RenderContext.StencilTest or (RenderContext.ColorChannels <> AllColorChannels)) then
+    begin
       RenderContext.ApplyRHIStencilAndColorMask(PipeDesc.DepthStencil, PipeDesc.BlendState);
+      if PipeDesc.DepthStencil.StencilTestEnable and
+         not (PipeDesc.DepthAttachmentFormat in [pfD24_UNorm_S8_UInt, pfD32_Float_S8_UInt]) then
+        PipeDesc.DepthAttachmentFormat := pfD24_UNorm_S8_UInt;
+    end;
+    FLastBoundPipelineDesc := PipeDesc;
     FLastPipeline := FDevice.GetOrCreatePipeline(PipeDesc);
   end else
+  begin
+    FLastBoundPipelineDesc := FBasePipeDescs[FCurrentBlendMode];
     FLastPipeline := FPipelines[FCurrentBlendMode];
+  end;
 
   FLastCustomFragShader := FCurrentCustomFragShader;
   FCurrentCmd.BindPipeline(FLastPipeline);

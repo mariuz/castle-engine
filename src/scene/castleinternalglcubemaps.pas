@@ -270,7 +270,7 @@ var
       end else
         SaveScreen_NoFlush(Images[Side], 0, 0, RenderToTexture.ColorBuffer);
 
-    RenderToTexture.RenderEnd((RHIDevice = nil) and (Side < High(Side)));
+    RenderToTexture.RenderEnd(Side < High(Side));
   end;
 
 var
@@ -351,7 +351,7 @@ var
         Render(RenderingCamera);
       finally FreeAndNil(RenderingCamera) end;
 
-    RenderToTexture.RenderEnd((RHIDevice = nil) and (Side < High(Side)));
+    RenderToTexture.RenderEnd(Side < High(Side));
   end;
 
 var

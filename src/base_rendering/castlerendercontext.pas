@@ -574,7 +574,17 @@ begin
 
   TDrawableImage.BatchingFlush;
 
-  if RHIDevice <> nil then
+  if InternalClearColorsByDraw and (cbColor in Buffers) then
+  begin
+    DrawRectangle(Viewport, ClearColor,
+      { Using these blending factors means that ClearColor overrides screen,
+        just like glClear does. So we don't do blending, in case ClearColor.W is <> 1,
+        which is consistent with our behavior when InternalClearColorsByDraw = false. }
+      bsOne, bdZero, false);
+    Exclude(Buffers, cbColor);
+  end;
+
+  if (RHIDevice <> nil) and (Buffers <> []) then
   begin
     Inc(FRHIClearCount);
     FRHILastClearBuffers := Buffers;
@@ -585,16 +595,6 @@ begin
         cbColor in Buffers, ClearColor,
         cbDepth in Buffers, 1.0,
         cbStencil in Buffers, 0);
-  end;
-
-  if InternalClearColorsByDraw and (cbColor in Buffers) then
-  begin
-    DrawRectangle(Viewport, ClearColor,
-      { Using these blending factors means that ClearColor overrides screen,
-        just like glClear does. So we don't do blending, in case ClearColor.W is <> 1,
-        which is consistent with our behavior when InternalClearColorsByDraw = false. }
-      bsOne, bdZero, false);
-    Exclude(Buffers, cbColor);
   end;
 
   if (cbColor in Buffers) and

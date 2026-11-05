@@ -32,6 +32,7 @@ uses
   CastleTransform, CastleScene, CastleProjection, CastleViewport, CastleScreenEffects, CastleRenderOptions, CastleWindow,
   CastleUIControls, CastleControls,
   CastleVideos, CastleInternalBackgroundRenderer, CastleInternalGLShadowVolumes,
+  CastleInternalScreenEffects,
   CastleGLShaders, CastleGLUtils, CastleRenderPrimitives, CastleShapes, CastleRenderContext,
   CastleShapeInternalShadowVolumes, CastleShapeInternalRenderShadowVolumes,
   CastleInternalBatchShapes, CastleInternalShapesRenderer,
@@ -352,6 +353,9 @@ type
     procedure TestGLSLProgramAndDrawableImageCustomShaderAndUniformsRHI;
     procedure TestCastleFontDistanceFieldBitmapFontAndGrayscaleTreatAsAlphaRHI;
     procedure TestTextureMemoryProfilerRHIAndImageGLFormatNilSafeRHI;
+    procedure TestGLSLScreenEffectAndViewportSSAOSSRPostProcessingRHI;
+    procedure TestCastleMaskAndInternalClearColorsByDrawStencilRHI;
+    procedure TestRenderToTextureRenderBeginFollowsAndInternalControlRectIgnoreRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -22696,6 +22700,343 @@ begin
     FreeAndNil(RgbaImg);
     FreeAndNil(RgbImg);
     TextureMemoryProfiler.Enabled := SavedProfilerEnabled;
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGLSLScreenEffectAndViewportSSAOSSRPostProcessingRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCmd: TRHICommandList;
+  SavedCtx: TRenderContext;
+  Ctx: TRenderContext;
+  Cmd: TVulkanRHICommandList;
+  LibStr: String;
+  CustomSE: TGLSLScreenEffect;
+  CustomPipe, SSAOPipe, SSRPipe: TRHIPipeline;
+  Container: TTestHeadlessVulkanContainer;
+  Vp: TCastleViewport;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9601)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Ctx := TRenderContext.Create(nil);
+  RenderContext := Ctx;
+  Ctx.Viewport := Rectangle(0, 0, 160, 120);
+  Cmd := TVulkanRHICommandList.Create(Device, 0);
+  SetActiveCommandList(Cmd);
+  CustomSE := nil;
+  Container := nil;
+  Vp := nil;
+  try
+    { 1. Verify ScreenEffectFragment is nil-safe when GLFeatures = nil }
+    LibStr := ScreenEffectFragment(True);
+    AssertTrue('ScreenEffectFragment(True) must include #define DEPTH when GLFeatures = nil',
+      Pos('#define DEPTH', LibStr) > 0);
+    AssertTrue('ScreenEffectFragment(True) must include screen_get_color library code',
+      Pos('screen_get_color', LibStr) > 0);
+
+    { 2. Verify standalone TGLSLScreenEffect compiles GLSL 450 VS/FS and creates TRHIPipeline }
+    CustomSE := TGLSLScreenEffect.Create;
+    CustomSE.Name := 'TestCustomScreenEffect';
+    CustomSE.NeedsDepth := True;
+    CustomSE.ScreenEffectShader :=
+      'uniform float custom_tint;' + LineEnding +
+      'void main(void) {' + LineEnding +
+      '  float d = screen_get_depth_fast(screen_position());' + LineEnding +
+      '  gl_FragColor = vec4(screenf_get_original_color().rgb * d * custom_tint, 1.0);' + LineEnding +
+      '}';
+    CustomSE.Link;
+
+    AssertTrue('TGLSLScreenEffect.Link must generate #version 450 RHIVertexGLSL in RHI mode',
+      Pos('#version 450', CustomSE.RHIVertexGLSL) > 0);
+    AssertTrue('TGLSLScreenEffect.Link must generate #version 450 RHIFragmentGLSL in RHI mode',
+      Pos('#version 450', CustomSE.RHIFragmentGLSL) > 0);
+    AssertTrue('TGLSLScreenEffect.RHIFragmentGLSL must include screen_depth sampler when NeedsDepth=True',
+      Pos('uniform sampler2D screen_depth', CustomSE.RHIFragmentGLSL) > 0);
+    AssertTrue('TGLSLScreenEffect.RHIFragmentGLSL must upgrade custom_tint uniform to CastleUserEffectBlock',
+      Pos('u_user_custom_tint', CustomSE.RHIFragmentGLSL) > 0);
+    CustomPipe := CustomSE.GetOrCreateRHIPipeline(Device);
+    AssertTrue('TGLSLScreenEffect.GetOrCreateRHIPipeline must return non-nil TRHIPipeline',
+      CustomPipe <> nil);
+    AssertTrue('TGLSLScreenEffect.RHIVertexShader must be created',
+      CustomSE.RHIVertexShader <> nil);
+    AssertTrue('TGLSLScreenEffect.RHIFragmentShader must be created',
+      CustomSE.RHIFragmentShader <> nil);
+
+    { 3. Verify TCastleViewport built-in SSAO and SSR post-processing in pure Vulkan RHI mode }
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    Vp := TCastleViewport.Create(Container);
+    Vp.FullSize := False;
+    Vp.Width := 160;
+    Vp.Height := 120;
+    Vp.GLContextOpen;
+    Container.Controls.InsertFront(Vp);
+
+    AssertTrue('ScreenSpaceAmbientOcclusionAvailable must be True in pure Vulkan RHI mode',
+      Vp.ScreenSpaceAmbientOcclusionAvailable);
+    AssertTrue('ScreenSpaceReflectionsAvailable must be True in pure Vulkan RHI mode',
+      Vp.ScreenSpaceReflectionsAvailable);
+
+    Vp.ScreenSpaceAmbientOcclusion := True;
+    Vp.ScreenSpaceReflections := True;
+
+    SSAOPipe := Vp.GetScreenEffectRHIPipeline(0);
+    SSRPipe := Vp.GetScreenEffectRHIPipeline(1);
+    AssertTrue('Viewport SSAO RHI pipeline must be non-nil', SSAOPipe <> nil);
+    AssertTrue('Viewport SSR RHI pipeline must be non-nil', SSRPipe <> nil);
+    AssertTrue('Viewport SSAO and SSR must have distinct RHI pipelines', SSAOPipe <> SSRPipe);
+
+    Cmd.BeginRecording;
+    Vp.InternalRecursiveRender(Rectangle(0, 0, 160, 120));
+    Cmd.EndRecording;
+
+    AssertEquals('Viewport with SSAO + SSR must execute 2 RHI screen effect passes',
+      2, Integer(Vp.RHIScreenPassCount));
+    AssertEquals('Viewport with SSAO + SSR must execute 2 RHI screen effect quad draws',
+      2, Integer(Vp.RHIScreenDrawCount));
+    AssertTrue('Viewport must allocate RHIScreenTextureDepth when SSAO/SSR are enabled',
+      Vp.RHIScreenTextureDepth <> nil);
+  finally
+    FreeAndNil(Container);
+    FreeAndNil(CustomSE);
+    SetActiveCommandList(SavedCmd);
+    FreeAndNil(Cmd);
+    RenderContext := SavedCtx;
+    FreeAndNil(Ctx);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCastleMaskAndInternalClearColorsByDrawStencilRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCmd: TRHICommandList;
+  SavedCtx: TRenderContext;
+  Ctx: TRenderContext;
+  Cmd: TVulkanRHICommandList;
+  Batcher: TCastleBatch2DRenderer;
+  ColorTex, DepthStencilTex: TRHITexture;
+  PassInfo: TRHIRenderingInfo;
+  Container: TTestHeadlessVulkanContainer;
+  MaskControl: TCastleMask;
+  MaskImgCtrl, ChildImgCtrl: TCastleImageControl;
+  MaskImg, ChildImg: TRGBAlphaImage;
+  BaseClearCount: Cardinal;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9602)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Ctx := TRenderContext.Create(nil);
+  RenderContext := Ctx;
+  Cmd := TVulkanRHICommandList.Create(Device, 0);
+  SetActiveCommandList(Cmd);
+  Batcher := EnsureBatch2DRenderer(Device);
+  ColorTex := nil;
+  DepthStencilTex := nil;
+  Container := nil;
+  MaskControl := nil;
+  try
+    ColorTex := Device.CreateTexture(TRHITextureDesc.Create2D(128, 128, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc]));
+    DepthStencilTex := Device.CreateTexture(TRHITextureDesc.Create2D(128, 128, pfD24_UNorm_S8_UInt,
+      [tuDepthStencil, tuSampled]));
+
+    RHIPrimitive2DResetStats;
+    Ctx.Viewport := Rectangle(0, 0, 128, 128);
+
+    { 1. Verify TRenderContext.Clear with InternalClearColorsByDraw = True draws stencil-tested quad
+         instead of calling ClearAttachments on color }
+    Cmd.BeginRecording;
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(Rectangle(0, 0, 128, 128),
+      ColorTex, loClear, Vector4(0, 0, 0, 1), DepthStencilTex, loClear, 1.0);
+    Cmd.BeginRendering(PassInfo);
+
+    Ctx.StencilTest := True;
+    Ctx.StencilFunc(coEqual, 1, 1);
+    Ctx.StencilOp(soKeep, soKeep, soKeep, 0);
+    Ctx.InternalClearColorsByDraw := True;
+    BaseClearCount := Ctx.RHIClearCount;
+
+    { Calling Clear([cbColor, cbDepth], ...) must draw a stencil-tested rectangle for cbColor
+      and only pass [cbDepth] to ClearAttachments }
+    Ctx.Clear([cbColor, cbDepth], Vector4(0.2, 0.4, 0.8, 1.0));
+
+    AssertEquals('DrawRectangle must be invoked once for InternalClearColorsByDraw',
+      1, Integer(RHIPrimitive2DDrawCallCount));
+    AssertTrue('DrawRectangle PSO must have StencilTestEnable = True when StencilTest is active',
+      RHIPrimitive2DLastStencilTestEnable);
+    AssertEquals('RHIClearCount must increment by 1 for remaining [cbDepth]',
+      BaseClearCount + 1, Ctx.RHIClearCount);
+    AssertTrue('RHILastClearBuffers must NOT contain cbColor when InternalClearColorsByDraw=True',
+      not (cbColor in Ctx.RHILastClearBuffers));
+    AssertTrue('RHILastClearBuffers must still contain cbDepth',
+      cbDepth in Ctx.RHILastClearBuffers);
+
+    { Calling Clear([cbColor], ...) when only cbColor is requested must not call ClearAttachments at all }
+    BaseClearCount := Ctx.RHIClearCount;
+    Ctx.Clear([cbColor], Vector4(1.0, 0.0, 0.0, 1.0));
+    AssertEquals('DrawRectangle must be invoked a 2nd time for Clear([cbColor])',
+      2, Integer(RHIPrimitive2DDrawCallCount));
+    AssertEquals('RHIClearCount must not increment when only cbColor was cleared by draw',
+      BaseClearCount, Ctx.RHIClearCount);
+
+    Ctx.InternalClearColorsByDraw := False;
+    Ctx.StencilTest := False;
+
+    { 2. Verify TCastleMask.InternalRenderLoop in pure Vulkan RHI mode }
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    MaskControl := TCastleMask.Create(Container);
+    MaskControl.FullSize := False;
+    MaskControl.Width := 128;
+    MaskControl.Height := 128;
+    MaskControl.MaskRendering := mrChildrenWhereMask;
+
+    MaskImg := TRGBAlphaImage.Create(32, 32);
+    MaskImg.Clear(Vector4Byte(255, 255, 255, 255));
+    MaskImgCtrl := TCastleImageControl.Create(MaskControl);
+    MaskImgCtrl.Content.OwnsImage := True;
+    MaskImgCtrl.Content.Image := MaskImg;
+    MaskImgCtrl.AlphaChannel := acTest;
+    MaskControl.Mask.InsertFront(MaskImgCtrl);
+
+    ChildImg := TRGBAlphaImage.Create(64, 64);
+    ChildImg.Clear(Vector4Byte(0, 255, 128, 255));
+    ChildImgCtrl := TCastleImageControl.Create(MaskControl);
+    ChildImgCtrl.Content.OwnsImage := True;
+    ChildImgCtrl.Content.Image := ChildImg;
+    MaskControl.InsertFront(ChildImgCtrl);
+
+    Container.Controls.InsertFront(MaskControl);
+
+    Batcher.Begin2DPass(Cmd, 128, 128);
+    MaskControl.InternalRecursiveRender(Rectangle(0, 0, 128, 128));
+    Batcher.End2DPass;
+
+    Cmd.EndRendering;
+    Cmd.EndRecording;
+
+    AssertTrue('TCastleMask child batch flush must enable StencilTestEnable in 2D batcher PSO',
+      Batcher.LastBoundPipelineDesc.DepthStencil.StencilTestEnable);
+    AssertEquals('TCastleMask mrChildrenWhereMask child PSO must use coEqual stencil compare op',
+      Ord(coEqual), Ord(Batcher.LastBoundPipelineDesc.DepthStencil.FrontStencil.CompareOp));
+    AssertEquals('TCastleMask child PSO must set DepthAttachmentFormat to pfD24_UNorm_S8_UInt',
+      Ord(pfD24_UNorm_S8_UInt), Ord(Batcher.LastBoundPipelineDesc.DepthAttachmentFormat));
+    AssertFalse('TCastleMask must restore RenderContext.StencilTest to False after InternalRenderLoop',
+      Ctx.StencilTest);
+    AssertFalse('TCastleMask must restore RenderContext.InternalClearColorsByDraw to False',
+      Ctx.InternalClearColorsByDraw);
+  finally
+    FreeAndNil(Container);
+    FreeAndNil(DepthStencilTex);
+    FreeAndNil(ColorTex);
+    SetActiveCommandList(SavedCmd);
+    FreeAndNil(Cmd);
+    FreeGlobalBatch2DRenderer;
+    RenderContext := SavedCtx;
+    FreeAndNil(Ctx);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRenderToTextureRenderBeginFollowsAndInternalControlRectIgnoreRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCmd: TRHICommandList;
+  SavedCtx: TRenderContext;
+  Ctx: TRenderContext;
+  Cmd: TVulkanRHICommandList;
+  OuterColorTex, CubeTex: TRHITexture;
+  OuterPassInfo: TRHIRenderingInfo;
+  RTT: TGLRenderToTexture;
+  Side: Integer;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($9603)));
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  ApplicationProperties.RenderBackend := backendVulkan;
+  SetRHIDevice(Device);
+  Ctx := TRenderContext.Create(nil);
+  RenderContext := Ctx;
+  Cmd := TVulkanRHICommandList.Create(Device, 0);
+  SetActiveCommandList(Cmd);
+  OuterColorTex := nil;
+  CubeTex := nil;
+  RTT := nil;
+  try
+    OuterColorTex := Device.CreateTexture(TRHITextureDesc.Create2D(256, 256, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled]));
+    CubeTex := Device.CreateTexture(TRHITextureDesc.CreateCube(64, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc], 1));
+
+    RTT := TGLRenderToTexture.Create(64, 64);
+    RTT.Buffer := tbColor;
+    RTT.SetRHITexture(CubeTex, nil);
+    RTT.GLContextOpen;
+
+    Cmd.BeginRecording;
+    OuterPassInfo := TRHIRenderingInfo.CreateColorDepth(Rectangle(0, 0, 256, 256),
+      OuterColorTex, loClear, Vector4(0, 0, 0, 1), nil, loDontCare, 1.0);
+    Cmd.BeginRendering(OuterPassInfo);
+
+    AssertEquals('Before RTT.RenderBegin, InternalControlRectIgnore must be 0',
+      0, Integer(Ctx.InternalControlRectIgnore));
+
+    { Render 6 cubemap faces using RenderEnd(Side < 5) (RenderBeginFollows = True for sides 0..4) }
+    for Side := 0 to 5 do
+    begin
+      RTT.RHIArrayLayer := Side;
+      RTT.RenderBegin;
+      AssertTrue('OffscreenRendering must be True inside RTT pass', OffscreenRendering);
+      AssertEquals('RenderContext.InternalControlRectIgnore must be 1 inside RTT pass',
+        1, Integer(Ctx.InternalControlRectIgnore));
+      AssertEquals('Active rendering color attachment ArrayLayer must match current cubemap Side',
+        Side, Integer(Cmd.ActiveRenderingInfo.ColorAttachments[0].ArrayLayer));
+      RTT.RenderEnd(Side < 5);
+    end;
+
+    AssertEquals('6 cubemap face passes with RenderEnd(Side < 5) must execute 6 RHI render passes',
+      6, Integer(RTT.RHIRenderPassCount));
+    AssertFalse('OffscreenRendering must be False after final RenderEnd(False)', OffscreenRendering);
+    AssertEquals('RenderContext.InternalControlRectIgnore must be restored to 0 after final RenderEnd(False)',
+      0, Integer(Ctx.InternalControlRectIgnore));
+    AssertTrue('Outer rendering pass must be resumed after final RenderEnd(False)',
+      Cmd.IsRendering);
+    AssertEquals('Resumed outer rendering pass must have 256x256 render area',
+      256, Cmd.ActiveRenderingInfo.RenderArea.Width);
+
+    Cmd.EndRendering;
+    Cmd.EndRecording;
+  finally
+    FreeAndNil(RTT);
+    FreeAndNil(CubeTex);
+    FreeAndNil(OuterColorTex);
+    SetActiveCommandList(SavedCmd);
+    FreeAndNil(Cmd);
+    RenderContext := SavedCtx;
+    FreeAndNil(Ctx);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);

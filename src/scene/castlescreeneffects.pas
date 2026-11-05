@@ -151,6 +151,10 @@ type
     function InternalExtraScreenEffectsCount: Integer; virtual;
     { @exclude }
     function InternalExtraScreenEffectsNeedDepth: Boolean; virtual;
+    { @exclude }
+    function GetScreenEffectsNear: Single; virtual;
+    { @exclude }
+    function GetScreenEffectsFar: Single; virtual;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -382,6 +386,16 @@ end;
 function TCastleScreenEffects.InternalExtraScreenEffectsNeedDepth: Boolean;
 begin
   Result := false;
+end;
+
+function TCastleScreenEffects.GetScreenEffectsNear: Single;
+begin
+  Result := 0.1;
+end;
+
+function TCastleScreenEffects.GetScreenEffectsFar: Single;
+begin
+  Result := 100.0;
 end;
 
 function TCastleScreenEffects.GetScreenEffectsCount: Cardinal;
@@ -1120,7 +1134,8 @@ var
       for I := 0 to CurrentScreenEffectsCount - 1 do
         PassPipelines[I] := GetScreenEffectRHIPipeline(I);
       ExecuteRHIScreenEffectPasses(PassPipelines, SR.Width, SR.Height,
-        CurrentScreenEffectsNeedDepth);
+        CurrentScreenEffectsNeedDepth, nil,
+        GetScreenEffectsNear, GetScreenEffectsFar);
       Exit;
     end;
 

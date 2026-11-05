@@ -245,6 +245,7 @@ function RHIPrimitive2DLastLineWidth: Single;
 function RHIPrimitive2DLastPointSize: Cardinal;
 function RHIPrimitive2DBuffer: TObject;
 function RHIPrimitive2DPipeline: TObject;
+function RHIPrimitive2DLastStencilTestEnable: Boolean;
 procedure RHIPrimitive2DResetStats;
 
 {$endif read_interface}
@@ -336,6 +337,7 @@ type
     RHILastColor: TCastleColor;
     RHILastLineWidth: Single;
     RHILastPointSize: Cardinal;
+    RHILastStencilTestEnable: Boolean;
     destructor Destroy; override;
   end;
 
@@ -429,6 +431,14 @@ begin
     Result := nil;
 end;
 
+function RHIPrimitive2DLastStencilTestEnable: Boolean;
+begin
+  if Primitive2DRes <> nil then
+    Result := Primitive2DRes.RHILastStencilTestEnable
+  else
+    Result := False;
+end;
+
 procedure RHIPrimitive2DResetStats;
 begin
   if Primitive2DRes <> nil then
@@ -445,6 +455,7 @@ begin
     Primitive2DRes.RHILastColor := TVector4.Zero;
     Primitive2DRes.RHILastLineWidth := 1.0;
     Primitive2DRes.RHILastPointSize := 1;
+    Primitive2DRes.RHILastStencilTestEnable := False;
   end;
 end;
 
@@ -712,6 +723,9 @@ begin
         RHIPipeDesc.DepthAttachmentFormat := pfD24_UNorm_S8_UInt;
       RHIPipeDesc.SampleCount := 1;
     end;
+    if RHIPipeDesc.DepthStencil.StencilTestEnable and
+       not (RHIPipeDesc.DepthAttachmentFormat in [pfD24_UNorm_S8_UInt, pfD32_Float_S8_UInt]) then
+      RHIPipeDesc.DepthAttachmentFormat := pfD24_UNorm_S8_UInt;
     Primitive2DRes.RHIPipeline := RHIDevice.GetOrCreatePipeline(RHIPipeDesc);
     Primitive2DRes.RHIPipelineTopology := RHITopology;
 
@@ -722,6 +736,7 @@ begin
     Primitive2DRes.RHILastColor := Color;
     Primitive2DRes.RHILastLineWidth := LineWidth;
     Primitive2DRes.RHILastPointSize := PointSize;
+    Primitive2DRes.RHILastStencilTestEnable := RHIPipeDesc.DepthStencil.StencilTestEnable;
 
     if ActiveCommandList <> nil then
     begin

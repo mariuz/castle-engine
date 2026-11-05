@@ -812,27 +812,32 @@ var
   RenderingInfo: TRHIRenderingInfo;
   I: Integer;
 begin
+  TDrawableImage.BatchingFlush;
   Inc(FOffscreenRendering);
 
   if RHIDevice <> nil then
   begin
     if not FRHIInitialized then
       GLContextOpen;
-    FramebufferBound := True;
+    if RenderContext <> nil then
+      RenderContext.InternalControlRectIgnore := FOffscreenRendering;
     if (ActiveCommandList <> nil) and (not FRHIRenderingActive) then
     begin
-      if ActiveCommandList.IsRendering then
+      if not FramebufferBound then
       begin
-        FRHISuspendedOuterPass := True;
-        FRHISuspendedRenderingInfo := ActiveCommandList.ActiveRenderingInfo;
-        FRHISuspendedRenderingInfo.ColorAttachments := Copy(ActiveCommandList.ActiveRenderingInfo.ColorAttachments);
-        for I := 0 to High(FRHISuspendedRenderingInfo.ColorAttachments) do
-          FRHISuspendedRenderingInfo.ColorAttachments[I].LoadOp := loLoad;
-        if FRHISuspendedRenderingInfo.HasDepthAttachment then
-          FRHISuspendedRenderingInfo.DepthAttachment.LoadOp := loLoad;
-        ActiveCommandList.EndRendering;
-      end else
-        FRHISuspendedOuterPass := False;
+        if ActiveCommandList.IsRendering then
+        begin
+          FRHISuspendedOuterPass := True;
+          FRHISuspendedRenderingInfo := ActiveCommandList.ActiveRenderingInfo;
+          FRHISuspendedRenderingInfo.ColorAttachments := Copy(ActiveCommandList.ActiveRenderingInfo.ColorAttachments);
+          for I := 0 to High(FRHISuspendedRenderingInfo.ColorAttachments) do
+            FRHISuspendedRenderingInfo.ColorAttachments[I].LoadOp := loLoad;
+          if FRHISuspendedRenderingInfo.HasDepthAttachment then
+            FRHISuspendedRenderingInfo.DepthAttachment.LoadOp := loLoad;
+          ActiveCommandList.EndRendering;
+        end else
+          FRHISuspendedOuterPass := False;
+      end;
 
       RenderAreaRect := Rectangle(0, 0, Width, Height);
       if Buffer = tbDepth then
@@ -886,6 +891,7 @@ begin
       FRHIRenderingActive := True;
       Inc(FRHIRenderPassCount);
     end;
+    FramebufferBound := True;
     Exit;
   end;
 
@@ -953,30 +959,34 @@ procedure TGLRenderToTexture.RenderEnd(const RenderBeginFollows: boolean);
 var
   PreviousFboDefaultBuffer: TGLenum;
 begin
+  TDrawableImage.BatchingFlush;
+
   if RHIDevice <> nil then
   begin
     Assert(FramebufferBound);
+    if (ActiveCommandList <> nil) and FRHIRenderingActive then
+    begin
+      ActiveCommandList.EndRendering;
+      FRHIRenderingActive := False;
+      if (Buffer in [tbColor, tbColorAndDepth, tbNone]) and (FRHIColorTexture <> nil) then
+        ActiveCommandList.TransitionTexture(FRHIColorTexture, rsShaderRead);
+      if (Buffer in [tbDepth, tbColorAndDepth]) and (FRHIDepthTexture <> nil) then
+        ActiveCommandList.TransitionTexture(FRHIDepthTexture, rsShaderRead);
+    end;
     if not RenderBeginFollows then
     begin
-      if (ActiveCommandList <> nil) and FRHIRenderingActive then
+      if (ActiveCommandList <> nil) and FRHISuspendedOuterPass then
       begin
-        ActiveCommandList.EndRendering;
-        FRHIRenderingActive := False;
-        if (Buffer in [tbColor, tbColorAndDepth, tbNone]) and (FRHIColorTexture <> nil) then
-          ActiveCommandList.TransitionTexture(FRHIColorTexture, rsShaderRead);
-        if (Buffer in [tbDepth, tbColorAndDepth]) and (FRHIDepthTexture <> nil) then
-          ActiveCommandList.TransitionTexture(FRHIDepthTexture, rsShaderRead);
-        if FRHISuspendedOuterPass then
-        begin
-          FRHISuspendedOuterPass := False;
-          ActiveCommandList.BeginRendering(FRHISuspendedRenderingInfo);
-          ActiveCommandList.SetViewport(FloatRectangle(FRHISuspendedRenderingInfo.RenderArea), 0.0, 1.0);
-          ActiveCommandList.SetScissor(FRHISuspendedRenderingInfo.RenderArea);
-        end;
+        FRHISuspendedOuterPass := False;
+        ActiveCommandList.BeginRendering(FRHISuspendedRenderingInfo);
+        ActiveCommandList.SetViewport(FloatRectangle(FRHISuspendedRenderingInfo.RenderArea), 0.0, 1.0);
+        ActiveCommandList.SetScissor(FRHISuspendedRenderingInfo.RenderArea);
       end;
       FramebufferBound := False;
     end;
     Dec(FOffscreenRendering);
+    if RenderContext <> nil then
+      RenderContext.InternalControlRectIgnore := FOffscreenRendering;
     Exit;
   end;
 
@@ -1055,6 +1065,7 @@ var
   TargetTex: TRHITexture;
 begin
   Assert(FramebufferBound);
+  TDrawableImage.BatchingFlush;
 
   if RHIDevice <> nil then
   begin
