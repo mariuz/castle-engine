@@ -23,6 +23,7 @@
     By default, LightOn is the value of Light.LightNode.FdOn field.
     This is useful to filter lights. }
   TLightRenderEvent = CastleRendererInternalLights.TLightRenderEvent;
+  TLightZeroEvent = CastleRendererInternalLights.TLightZeroEvent;
 
   TRenderer = class;
 {$endif read_interface}

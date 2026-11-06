@@ -32,10 +32,16 @@ type
     const Light: TLightInstance;
     const IsGlobalLight: Boolean; var LightOn: boolean) of object;
 
+  { Callback type for @link(TLightsRenderer.LightZeroEvent).
+    Return @true to keep the light in the shader, but with zero contribution
+    (its color and ambient color uniforms are zero). }
+  TLightZeroEvent = function (const Light: TLightInstance): Boolean of object;
+
   { Render lights. }
   TLightsRenderer = class
   private
     FLightRenderEvent: TLightRenderEvent;
+    FLightZeroEvent: TLightZeroEvent;
     LightsDone: array of PLightInstance;
     FMaxLightsPerShape: Cardinal;
     { This avoids configuring the same light many times in case of fixed-function.
@@ -99,6 +105,17 @@ type
       for the same Light values, LightRenderEvent will set LightOn the same. }
     property LightRenderEvent: TLightRenderEvent
       read FLightRenderEvent write FLightRenderEvent;
+
+    { Lights that are on (after LightRenderEvent) for which this returns @true
+      are passed to the shader with zero contribution, instead of being left out.
+      The shader code is then the same as when the light contributes,
+      so both passes of shadow volumes (the shadowed pass without
+      the shadow casting lights and the lit pass) share shader programs,
+      and changing which lights cast shadows makes no new shader programs.
+      Must be deterministic, like LightRenderEvent.
+      With the fixed-function pipeline these lights are left out. }
+    property LightZeroEvent: TLightZeroEvent
+      read FLightZeroEvent write FLightZeroEvent;
   end;
 
 implementation
@@ -426,7 +443,7 @@ var
   procedure AddList(const Lights: TLightInstancesList; const IsGlobalLight: Boolean);
   var
     I: Integer;
-    LightOn: boolean;
+    LightOn, Zero: boolean;
     Light: PLightInstance;
   begin
     for I := 0 to Lights.Count - 1 do
@@ -437,11 +454,25 @@ var
       if Assigned(LightRenderEvent) then
         LightRenderEvent(Shape, Light^, IsGlobalLight, LightOn);
 
+      { lights restricted to some scenes
+        (TAbstractLightNode.InternalGlobalLightsMaskIndex) }
+      if LightOn and IsGlobalLight and
+         (Light^.Node.InternalGlobalLightsMaskIndex > 0) and
+         (Shape.ParentScene <> nil) and
+         (Length(Shape.ParentScene.InternalGlobalLightsMask) <> 0) then
+        LightOn :=
+          (Light^.Node.InternalGlobalLightsMaskIndex <= Length(Shape.ParentScene.InternalGlobalLightsMask)) and
+          Shape.ParentScene.InternalGlobalLightsMask[Light^.Node.InternalGlobalLightsMaskIndex - 1];
+
+      Zero := LightOn and Assigned(LightZeroEvent) and LightZeroEvent(Light^);
+      if Zero and GLFeatures.EnableFixedFunction then
+        LightOn := false;
+
       if LightOn and InsideLightRadius(Light^) and ProbeUsed(Light) then
       begin
         if NeedRenderLight(LightsEnabled, Light) then
           glLightFromX3DLight(LightsEnabled, Light^, RenderingCamera);
-        Shader.EnableLight(LightsEnabled, Light);
+        Shader.EnableLight(LightsEnabled, Light, Zero);
         Inc(LightsEnabled);
         if LightsEnabled >= FMaxLightsPerShape then Exit;
       end;

@@ -1087,6 +1087,7 @@ var
     ReceivedGlobalLights: TLightInstancesList;
     DummyCamera: TRenderingCamera;
     DummyStatistics: TRenderStatistics;
+    PrepareTransform: TMatrix4;
   begin
     if LogRenderer then
       WritelnLog('Renderer', 'Preparing rendering of all shapes');
@@ -1125,6 +1126,14 @@ var
       Renderer.RenderBegin(ReceivedGlobalLights, DummyCamera, nil, 0, 0, 0,
         @DummyStatistics);
 
+      { The scene's world transformation, like when rendering: the lights
+        reaching each shape (light radius) depend on where it is,
+        and they decide the shader program prepared. }
+      if HasWorldTransform then
+        PrepareTransform := WorldTransform
+      else
+        PrepareTransform := TMatrix4.Identity;
+
       for Shape in ShapeList do
       begin
         TGLShape(Shape).Fog := ShapeFog(Shape, Params.GlobalFog as TFogNode);
@@ -1134,7 +1143,7 @@ var
             PlaneTransform(Plane, SceneModelView) should not fail,
             so matrix should be sensible for homegeneous coordinate transformation
             (so identity is OK, zero is not OK). }
-          TMatrix4.Identity,
+          PrepareTransform,
           false, drFull);
       end;
 

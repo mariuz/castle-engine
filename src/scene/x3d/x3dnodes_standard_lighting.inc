@@ -60,6 +60,18 @@
       @exclude }
     InternalHeadlight: Boolean;
 
+    { When > 0, the global light (TCastleScene.CastGlobalLights) lights only
+      the scenes whose TX3DEventsEngine.InternalGlobalLightsMask has
+      @true at index InternalGlobalLightsMaskIndex - 1
+      (scenes with an empty mask get all global lights).
+      0 (default): lights every scene.
+      Lets an application restrict lights to the parts of a world they can
+      reach (areas of a portal engine): fewer lights per shape, and each
+      shape's set of lights (which decides its shader program) stays the same
+      when lights elsewhere go on and off.
+      @exclude }
+    InternalGlobalLightsMaskIndex: Integer;
+
     { Transformation of the light (from the TCastleScene root to this light node).
       Used only when we are forced to assume that this light node occurs
       only once within the scene, which right now is assumed by the shadow maps.

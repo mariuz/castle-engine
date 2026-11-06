@@ -57,6 +57,12 @@
     procedure InternalChangedField(const Field: TX3DField); overload;
     { @exclude }
     function InternalCastingShadowVolumesNow: Boolean; virtual; abstract;
+  public
+    { Global lights with TAbstractLightNode.InternalGlobalLightsMaskIndex > 0
+      light this scene's shapes only when this has @true at their index - 1.
+      Empty (default): all global lights reach this scene.
+      @exclude }
+    InternalGlobalLightsMask: array of Boolean;
   end;
 
   TX3DEventsEngineList = class({$ifdef FPC}specialize{$endif} TObjectList<TX3DEventsEngine>)

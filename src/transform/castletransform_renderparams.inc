@@ -239,6 +239,15 @@
       should be turned off. }
     DisableShadowVolumeCastingLights: Boolean;
 
+    { With DisableShadowVolumeCastingLights, keep the shadow casting lights
+      in the shaders with zero contribution (their color uniforms zero)
+      instead of leaving them out. The result looks the same, but the shaders
+      are the same as in the lit pass, so the shapes don't need another
+      shader program for the shadowed pass, and changing which lights cast
+      shadows doesn't make new shader programs (compiling them stalls).
+      See InternalShadowVolumesZeroLights. }
+    ZeroShadowVolumeCastingLights: Boolean;
+
     { Lights (TAbstractPunctualLightNode instances) that cast shadow volumes
       when rendering shadow volumes from several lights
       (TCastleViewport.ShadowVolumesMaxLights > 1).

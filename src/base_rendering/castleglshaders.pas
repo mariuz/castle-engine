@@ -628,6 +628,11 @@ type
 var
   LogShaders: boolean;
 
+  { Number of GLSL programs linked (since the start).
+    To count the programs a scene or a view needs.
+    @exclude }
+  InternalProgramsLinked: Cardinal;
+
 {$ifdef FPC}
 function GetCurrentProgram: TGLSLProgram;
   deprecated 'use RenderContext.CurrentProgram';
@@ -2044,6 +2049,7 @@ begin
       raise EGLSLProgramLinkError.Create('Fragment shader not attached');
 
     glLinkProgram(ProgramId);
+    Inc(InternalProgramsLinked);
 
     {$ifdef CASTLE_WEBGL}
     Linked := glGetProgramParameter(ProgramId, GL_LINK_STATUS);
