@@ -99,6 +99,9 @@
   TLightShader = class
   private
     Number: Cardinal;
+    { The light's color uniforms are zero (the code is unchanged,
+      so it doesn't change the shader code hash). }
+    ZeroContribution: Boolean;
     Node: TAbstractLightNode;
     Light: PLightInstance;
     Shader: TShader;
@@ -459,6 +462,12 @@ begin
 
   { calculate AmbientColor3 = light color * light ambient intensity }
   AmbientColor3 := Node.FdColor.Value * Node.FdAmbientIntensity.Value;
+
+  if ZeroContribution then
+  begin
+    Color3 := TVector3.Zero;
+    AmbientColor3 := TVector3.Zero;
+  end;
 
   if Node is TAbstractPunctualLightNode then
   begin

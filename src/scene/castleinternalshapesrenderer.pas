@@ -127,6 +127,12 @@ type
       const Light: TLightInstance;
       const IsGlobalLight: Boolean; var LightOn: Boolean);
 
+    { For TRenderOnePassParams.ZeroShadowVolumeCastingLights:
+      the lights that LightRenderDisableShadowVolumeCastingLights
+      and LightRenderDisableListedLights turn off. }
+    function LightZeroShadowVolumeCastingLights(const Light: TLightInstance): Boolean;
+    function LightZeroListedLights(const Light: TLightInstance): Boolean;
+
     { Turn off global lights that are duplicated in current scene.
       This way we render our own lights through SceneLights at each shape,
       not through GlobalLights,
@@ -430,6 +436,16 @@ begin
   LightRender(Shape, Light, IsGlobalLight, LightOn);
 end;
 
+function TShapesRenderer.LightZeroShadowVolumeCastingLights(const Light: TLightInstance): Boolean;
+begin
+  Result := Light.Node.FdShadowVolumes.Value;
+end;
+
+function TShapesRenderer.LightZeroListedLights(const Light: TLightInstance): Boolean;
+begin
+  Result := FShadowVolumesLights.IndexOf(Light.Node) <> -1;
+end;
+
 procedure TShapesRenderer.LightRenderSingleLight(const Shape: TShape;
   const Light: TLightInstance;
   const IsGlobalLight: Boolean; var LightOn: Boolean);
@@ -695,6 +711,7 @@ procedure TShapesRenderer.Render(const Shapes: TShapesCollector;
 
 var
   LightRenderEvent: TLightRenderEvent;
+  LightZeroEvent: TLightZeroEvent;
   CollectedShape: TCollectedShape;
 begin
   if Shapes.FRenderEvents <> nil then
@@ -706,9 +723,21 @@ begin
 
   FShadowVolumesLights := PassParams.ShadowVolumesLights;
   FLightContributionOnly := PassParams.LightContributionOnly;
+  LightZeroEvent := nil;
   if PassParams.LightContributionOnly <> nil then
     LightRenderEvent := {$ifdef FPC}@{$endif}LightRenderSingleLight
   else
+  if PassParams.DisableShadowVolumeCastingLights and
+     PassParams.ZeroShadowVolumeCastingLights then
+  begin
+    { keep the lights in the shaders, with zero contribution:
+      the shaders are then the same as in the lit pass }
+    LightRenderEvent := {$ifdef FPC}@{$endif}LightRender;
+    if PassParams.ShadowVolumesLights <> nil then
+      LightZeroEvent := {$ifdef FPC}@{$endif}LightZeroListedLights
+    else
+      LightZeroEvent := {$ifdef FPC}@{$endif}LightZeroShadowVolumeCastingLights;
+  end else
   if PassParams.DisableShadowVolumeCastingLights and
      (PassParams.ShadowVolumesLights <> nil) then
     LightRenderEvent := {$ifdef FPC}@{$endif}LightRenderDisableListedLights
@@ -766,6 +795,7 @@ begin
   FrameProfiler.Stop(fmRenderCollectedShapesSort);
 
   Renderer.LightContributionOnly := PassParams.LightContributionOnly <> nil;
+  Renderer.LightZeroEvent := LightZeroEvent;
   Renderer.HighDynamicRange := Params.InternalHighDynamicRange;
   Renderer.RenderBegin(Params.GlobalLights as TLightInstancesList,
     Params.RenderingCamera,

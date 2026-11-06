@@ -232,6 +232,11 @@
         Set before RenderBegin. }
       LightContributionOnly: Boolean;
 
+      { Lights kept in the shaders with zero contribution,
+        see TLightsRenderer.LightZeroEvent.
+        Set before RenderBegin. }
+      LightZeroEvent: TLightZeroEvent;
+
       { Output linear colors to a float color buffer,
         see TRenderParams.InternalHighDynamicRange.
         Set before RenderBegin. }
@@ -528,6 +533,7 @@ begin
 
   LightsRenderer := TLightsRenderer.Create;
   LightsRenderer.LightRenderEvent := LightRenderEvent;
+  LightsRenderer.LightZeroEvent := LightZeroEvent;
   LightsRenderer.RenderingCamera := RenderingCamera;
 
   FInternalPass := AInternalPass;

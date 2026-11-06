@@ -187,6 +187,9 @@ type
       ShapesRenderer: TShapesRenderer;
 
     procedure CommonCreate(const AOwner: TComponent; const ADesignManipulation: Boolean);
+    { Add the lights of the scenes with TCastleScene.CastGlobalLights
+      (and the deprecated MainScene), in world coordinates. }
+    procedure AddScenesGlobalLights(const GlobalLights: TLightInstancesList);
     function FillsWholeContainer: boolean;
     procedure SetScreenSpaceAmbientOcclusion(const Value: boolean);
     procedure SetScreenSpaceReflections(const Value: Boolean);
@@ -1596,6 +1599,12 @@ var
     @exclude }
   InternalShadowVolumesLightDepthBounds: Boolean = true;
 
+  { Prepare the shapes (TCastleViewport.PrepareResources) with the lights
+    of the TCastleScene.CastGlobalLights scenes, like they are rendered.
+    Only to compare and test.
+    @exclude }
+  InternalPrepareGlobalLights: Boolean = true;
+
 implementation
 
 uses DOM, Math, TypInfo,
@@ -2963,6 +2972,43 @@ begin
   end;
 end;
 
+procedure TCastleViewport.AddScenesGlobalLights(const GlobalLights: TLightInstancesList);
+
+  procedure AddGlobalLightsFromScene(const SceneCastingLights: TCastleScene);
+  var
+    J: Integer;
+    NewGlobalLight: PLightInstance;
+  begin
+    if not SceneCastingLights.ExistsInRoot then
+      Exit;
+
+    for J := 0 to SceneCastingLights.InternalGlobalLights.Count - 1 do
+    begin
+      NewGlobalLight := PLightInstance(GlobalLights.Add);
+      NewGlobalLight^ := SceneCastingLights.InternalGlobalLights.L[J];
+      { make NewGlobalLight^ in world coordinates }
+      NewGlobalLight^.Transform := SceneCastingLights.WorldTransform * NewGlobalLight^.Transform;
+      NewGlobalLight^.TransformScale := Approximate3DScale(SceneCastingLights.WorldTransform) * NewGlobalLight^.TransformScale;
+      NewGlobalLight^.WorldCoordinates := true;
+      NewGlobalLight^.Node.UpdateLightInstance(NewGlobalLight^);
+    end;
+  end;
+
+var
+  SceneCastingLights: TCastleScene;
+begin
+  { Add lights from MainScene  }
+  {$warnings off} // using deprecated MainScene to keep it working
+  if Items.MainScene <> nil then
+    AddGlobalLightsFromScene(Items.MainScene);
+  { Add lights from all scenes with CastGlobalLights }
+  if Items.InternalScenesCastGlobalLights <> nil then
+    for SceneCastingLights in Items.InternalScenesCastGlobalLights do
+      if Items.MainScene <> SceneCastingLights then // MainScene is already accounted for above
+        AddGlobalLightsFromScene(SceneCastingLights);
+  {$warnings on}
+end;
+
 function TCastleViewport.PrepareParams: TPrepareParams;
 { Note: you cannot refer to PrepareParams inside
   the TCastleTransform.PrepareResources or TCastleTransform.Render implementation,
@@ -2972,9 +3018,14 @@ begin
   { We just reuse FRenderParams.FGlobalLights below as a temporary
     TLightInstancesList that we already have created. }
 
-  { initialize FPrepareParams.GlobalLights }
+  { initialize FPrepareParams.GlobalLights: the same lights as when rendering,
+    so the shapes prepare the shader programs they will render with
+    (without the lights of the CastGlobalLights scenes, every shape lit by them
+    compiled its shaders again when first rendered) }
   FRenderParams.FGlobalLights.Clear;
   InitializeGlobalLights(FRenderParams.FGlobalLights);
+  if InternalPrepareGlobalLights then
+    AddScenesGlobalLights(FRenderParams.FGlobalLights);
   FPrepareParams.GlobalLights := FRenderParams.FGlobalLights;
 
   { initialize FPrepareParams.GlobalFog }
@@ -3212,28 +3263,6 @@ procedure TCastleViewport.RenderFromViewEverything(const RenderingCamera: TRende
     end;
   end;
 
-  procedure AddGlobalLightsFromScene(const SceneCastingLights: TCastleScene);
-  var
-    J: Integer;
-    NewGlobalLight: PLightInstance;
-  begin
-    if not SceneCastingLights.ExistsInRoot then
-      Exit;
-
-    for J := 0 to SceneCastingLights.InternalGlobalLights.Count - 1 do
-    begin
-      NewGlobalLight := PLightInstance(FRenderParams.FGlobalLights.Add);
-      NewGlobalLight^ := SceneCastingLights.InternalGlobalLights.L[J];
-      { make NewGlobalLight^ in world coordinates }
-      NewGlobalLight^.Transform := SceneCastingLights.WorldTransform * NewGlobalLight^.Transform;
-      NewGlobalLight^.TransformScale := Approximate3DScale(SceneCastingLights.WorldTransform) * NewGlobalLight^.TransformScale;
-      NewGlobalLight^.WorldCoordinates := true;
-      NewGlobalLight^.Node.UpdateLightInstance(NewGlobalLight^);
-    end;
-  end;
-
-var
-  SceneCastingLights: TCastleScene;
 begin
   { Only the world rendered on the screen is in high dynamic range,
     not e.g. generated cube map textures. }
@@ -3270,16 +3299,7 @@ begin
   FRenderParams.FGlobalLights.Clear;
   { Add headlight }
   InitializeGlobalLights(FRenderParams.FGlobalLights);
-  { Add lights from MainScene  }
-  {$warnings off} // using deprecated MainScene to keep it working
-  if Items.MainScene <> nil then
-    AddGlobalLightsFromScene(Items.MainScene);
-  { Add lights from all scenes with CastGlobalLights }
-  if Items.InternalScenesCastGlobalLights <> nil then
-    for SceneCastingLights in Items.InternalScenesCastGlobalLights do
-      if Items.MainScene <> SceneCastingLights then // MainScene is already accounted for above
-        AddGlobalLightsFromScene(SceneCastingLights);
-  {$warnings on}
+  AddScenesGlobalLights(FRenderParams.FGlobalLights);
 
   { calculate FRenderParams.GlobalFog }
   if Fog <> nil then

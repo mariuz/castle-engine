@@ -271,6 +271,14 @@ function ShadowVolumeLightScissor(const ProjectionViewMatrix: TMatrix4;
 function ShadowVolumeLightDepthBounds(const ProjectionMatrix, CameraMatrix: TMatrix4;
   const LightPosition: TVector4; const LightRadius: Single): TVector2;
 
+var
+  { In the shadowed pass of shadow volumes, keep the shadow casting lights
+    in the shaders with zero contribution, instead of leaving them out
+    (TRenderOnePassParams.ZeroShadowVolumeCastingLights).
+    Only to compare and test, the result looks the same.
+    @exclude }
+  InternalShadowVolumesZeroLights: Boolean = true;
+
 implementation
 
 uses SysUtils, Math,
@@ -739,6 +747,7 @@ begin
   PassParams.Init;
   PassParams.UsingBlending := false;
   PassParams.DisableShadowVolumeCastingLights := true;
+  PassParams.ZeroShadowVolumeCastingLights := InternalShadowVolumesZeroLights;
   PassParams.FilterShadowVolumesReceivers := [true];
   RenderOnePass(Params, PassParams);
 
@@ -916,6 +925,7 @@ begin
   PassParams.Init;
   PassParams.UsingBlending := false;
   PassParams.DisableShadowVolumeCastingLights := true;
+  PassParams.ZeroShadowVolumeCastingLights := InternalShadowVolumesZeroLights;
   PassParams.ShadowVolumesLights := Lights;
   PassParams.FilterShadowVolumesReceivers := [true];
   RenderOnePass(Params, PassParams);

@@ -589,8 +589,11 @@ type
       const TextureType: TTextureTypeSample;
       const TextureUnit, TextureCoordinatesId: Cardinal;
       const UniformTextureName: String);
-    { Enable light source. Remember to set MaterialXxx before calling this. }
-    procedure EnableLight(const Number: Cardinal; Light: PLightInstance);
+    { Enable light source. Remember to set MaterialXxx before calling this.
+      ZeroContribution: the light is in the shader code, but its color
+      uniforms are zero (see TLightsRenderer.LightZeroEvent). }
+    procedure EnableLight(const Number: Cardinal; Light: PLightInstance;
+      const ZeroContribution: Boolean = false);
     procedure EnableFog(const FogType: TFogType;
       const FogCoordinateSource: TFogCoordinateSource;
       const FogColor: TVector3; const FogVisibilityRange: Single);
@@ -2693,12 +2696,14 @@ begin
   FSurfaceTextureShaders.Items[SurfaceTexture].PrepareHash(FCodeHash);
 end;
 
-procedure TShader.EnableLight(const Number: Cardinal; Light: PLightInstance);
+procedure TShader.EnableLight(const Number: Cardinal; Light: PLightInstance;
+  const ZeroContribution: Boolean);
 var
   LightShader: TLightShader;
 begin
   LightShader := TLightShader.Create;
   LightShader.Number := Number;
+  LightShader.ZeroContribution := ZeroContribution;
   LightShader.Light := Light;
   LightShader.Node := Light^.Node;
   LightShader.Shader := Self;
