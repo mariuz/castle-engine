@@ -59,6 +59,8 @@ type
     CodingTheme: TCastleSound;
     CodingThemePlaying: TCastlePlayingSound;
     procedure MenuItemRecentClick(Sender: TObject);
+    procedure MenuItemRemoveMissingRecentClick(Sender: TObject);
+    procedure MenuItemClearRecentClick(Sender: TObject);
     procedure OpenProjectFromCommandLine;
     procedure UpdateWarning;
     { Open ProjectForm.
@@ -94,6 +96,9 @@ begin
     raise Exception.CreateFmt('Cannot find CastleEngineManifest.xml at this location: "%s". Invalid project opened.',
       [ManifestUrl]);
 
+  {$ifndef LCLGTK2}
+  FreeAndNil(ProjectForm);
+  {$endif}
   ProjectForm := TProjectForm.Create(Application);
   ProjectForm.OpenProject(ManifestUrl);
   ProjectForm.Show;
@@ -230,6 +235,24 @@ begin
     MenuItem.OnClick := @MenuItemRecentClick;
     PopupMenuRecentProjects.Items.Add(MenuItem);
   end;
+
+  if RecentProjects.URLs.Count > 0 then
+  begin
+    MenuItem := TMenuItem.Create(Self);
+    MenuItem.Caption := '-';
+    PopupMenuRecentProjects.Items.Add(MenuItem);
+
+    MenuItem := TMenuItem.Create(Self);
+    MenuItem.Caption := 'Remove Missing Projects from List';
+    MenuItem.OnClick := @MenuItemRemoveMissingRecentClick;
+    PopupMenuRecentProjects.Items.Add(MenuItem);
+
+    MenuItem := TMenuItem.Create(Self);
+    MenuItem.Caption := 'Clear Recent Projects List';
+    MenuItem.OnClick := @MenuItemClearRecentClick;
+    PopupMenuRecentProjects.Items.Add(MenuItem);
+  end;
+
   PopupMenuRecentProjects.PopupComponent := ButtonOpenRecent;
   PopupMenuRecentProjects.Popup;
 end;
@@ -409,6 +432,33 @@ begin
   except
     Show;
     raise;
+  end;
+end;
+
+procedure TChooseProjectForm.MenuItemRemoveMissingRecentClick(Sender: TObject);
+var
+  I: Integer;
+  Url: String;
+begin
+  for I := RecentProjects.URLs.Count - 1 downto 0 do
+  begin
+    Url := RecentProjects.URLs[I];
+    if not (URIExists(Url) in [ueFile, ueUnknown]) then
+      RecentProjects.Remove(Url);
+  end;
+  RecentProjects.SaveToConfig(UserConfig);
+  UserConfig.Save;
+  ButtonOpenRecent.Enabled := RecentProjects.URLs.Count <> 0;
+end;
+
+procedure TChooseProjectForm.MenuItemClearRecentClick(Sender: TObject);
+begin
+  if YesNoBox('Clear Recent Projects', 'Clear all entries from the Recent Projects list?') then
+  begin
+    RecentProjects.URLs.Clear;
+    RecentProjects.SaveToConfig(UserConfig);
+    UserConfig.Save;
+    ButtonOpenRecent.Enabled := false;
   end;
 end;
 

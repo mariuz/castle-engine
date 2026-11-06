@@ -566,6 +566,7 @@ type
       MenuItemVerboseBuildTool: TMenuItem;
       MenuItemOutputWordWrap: TMenuItem;
       MenuItemProjectOptions: TMenuItem;
+      MenuItemSwitchProject: TMenuItem;
       TabComponents: TTabSheet;
       PanelComponentsTop: TPanel;
       EditComponentPaletteFilter: TEdit;
@@ -590,6 +591,7 @@ type
     procedure MenuItemVerboseBuildToolClick(Sender: TObject);
     procedure MenuItemOutputWordWrapClick(Sender: TObject);
     procedure MenuItemProjectOptionsClick(Sender: TObject);
+    procedure MenuItemSwitchProjectClick(Sender: TObject);
     procedure ShowProjectOptionsDialog;
     procedure OutputCountsChanged(Sender: TObject);
     procedure UpdateShellListMask;
@@ -723,6 +725,29 @@ begin
     Application.Terminate;
     {$endif}
   end;
+end;
+
+procedure TProjectForm.MenuItemSwitchProjectClick(Sender: TObject);
+begin
+  if CastleApplicationMode in [appSimulation, appSimulationPaused] then
+  begin
+    InfoBox('Stop the physics simulation to be able to switch project.');
+    Exit;
+  end;
+
+  if not ProposeSaveDesign then
+    Exit;
+
+  if RunningProcess <> nil then
+  begin
+    RunningProcess.TerminateChildrenHarder;
+    FreeProcess;
+  end;
+
+  SaveDockLayout;
+  Hide;
+  if ChooseProjectForm <> nil then
+    ChooseProjectForm.Show;
 end;
 
 procedure TProjectForm.MenuItemReferenceClick(Sender: TObject);
@@ -2126,9 +2151,13 @@ begin
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
   MenuItemFile.Insert(0, MenuItemProjectOptions);
+  MenuItemSwitchProject := TMenuItem.Create(MenuItemFile);
+  MenuItemSwitchProject.Caption := 'Switch Project (Choose Project Screen)...';
+  MenuItemSwitchProject.OnClick := @MenuItemSwitchProjectClick;
+  MenuItemFile.Insert(1, MenuItemSwitchProject);
   MiSep := TMenuItem.Create(MenuItemFile);
   MiSep.Caption := '-';
-  MenuItemFile.Insert(1, MiSep);
+  MenuItemFile.Insert(2, MiSep);
   BuildComponentsMenu(
     MenuItemDesignNewUserInterfaceCustomRoot,
     MenuItemDesignNewTransformCustomRoot,

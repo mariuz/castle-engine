@@ -48,8 +48,11 @@ type
       end;
     var
       Info: array [TInfoType] of String;
+      ButtonCopyClipboard: TButton;
     procedure GLContextOpen;
     procedure SoundEngineOpenClose(Sender: TObject);
+    procedure ButtonCopyClipboardClick(Sender: TObject);
+    function FullReportText: String;
   public
 
   end;
@@ -61,9 +64,11 @@ implementation
 
 {$R *.lfm}
 
-uses CastleGLUtils, CastleSoundEngine, CastleUtils, CastleFilesUtils,
+uses Clipbrd,
+  CastleGLUtils, CastleSoundEngine, CastleUtils, CastleFilesUtils,
   CastleUriUtils,
-  ProjectUtils;
+  ToolCompilerInfo, ToolFpcVersion, ToolCommonUtils,
+  EditorUtils, ProjectUtils;
 
 procedure TSystemInformationForm.TContextNotification.GLContextOpen;
 begin
@@ -113,6 +118,7 @@ const
     {$endif};
 var
   EditorApplicationData: TEditorApplicationData;
+  FpcInfo, LazInfo, DelphiInfo, VSCodeInfo: String;
 begin
   EditorApplicationData := TEditorApplicationData.Create;
   try
@@ -124,12 +130,34 @@ begin
     (when this form was shown previous time)
     so we just may have valid Info[itRendering] already. }
 
+  try
+    FpcInfo := FindExeFpcCompiler + ' (' + FpcVersion.ToString + ')';
+  except
+    FpcInfo := 'Not found';
+  end;
+  try
+    LazInfo := FindExeLazarusIDE + ' (' + LazarusVersion.ToString + ')';
+  except
+    LazInfo := 'Not found';
+  end;
+  DelphiInfo := FindDelphiPath(false);
+  if DelphiInfo = '' then
+    DelphiInfo := 'Not found';
+  VSCodeInfo := FindExeVSCode(false);
+  if VSCodeInfo = '' then
+    VSCodeInfo := 'Not found';
+
   Info[itAudio] := SoundEngine.Information;
   Info[itOther] :=
     'Castle Game Engine version: ' + CastleEngineVersion + '.' + NL +
+    'Castle Game Engine path: ' + CastleEnginePath + NL +
     'Editor compiled with ' + SCompilerDescription + '.' + NL +
     'Editor platform: ' + SPlatformDescription + '.' + NL +
-    'Editor widgetset: ' + SCurrentWidgetset + '.' + NL;
+    'Editor widgetset: ' + SCurrentWidgetset + '.' + NL +
+    'Detected FPC: ' + FpcInfo + NL +
+    'Detected Lazarus: ' + LazInfo + NL +
+    'Detected Delphi: ' + DelphiInfo + NL +
+    'Detected VS Code: ' + VSCodeInfo + NL;
 
   SoundEngine.OnOpenClose.Add(@SoundEngineOpenClose);
 
@@ -149,6 +177,13 @@ end;
 procedure TSystemInformationForm.FormCreate(Sender: TObject);
 begin
   CastleControl1.Container.Controls.Add(TContextNotification.Create(Self));
+  ButtonCopyClipboard := TButton.Create(Self);
+  ButtonCopyClipboard.Parent := ButtonPanel1;
+  ButtonCopyClipboard.Caption := 'Copy All to Clipboard';
+  ButtonCopyClipboard.AutoSize := true;
+  ButtonCopyClipboard.Align := alLeft;
+  ButtonCopyClipboard.BorderSpacing.Around := 6;
+  ButtonCopyClipboard.OnClick := @ButtonCopyClipboardClick;
 end;
 
 procedure TSystemInformationForm.FormHide(Sender: TObject);
@@ -172,16 +207,23 @@ begin
   SoundEngine.OnOpenClose.Remove(@SoundEngineOpenClose);
 end;
 
+function TSystemInformationForm.FullReportText: String;
+begin
+  Result :=
+    'Rendering:' + NL + Info[itRendering] + NL + NL +
+    'Audio:' + NL + Info[itAudio] + NL + NL +
+    'Other:' + NL + Info[itOther];
+end;
+
+procedure TSystemInformationForm.ButtonCopyClipboardClick(Sender: TObject);
+begin
+  Clipboard.AsText := FullReportText;
+end;
+
 procedure TSystemInformationForm.HelpButtonClick(Sender: TObject);
 begin
   if SaveDialogText.Execute then
-  begin
-    StringToFile(FilenameToUriSafe(SaveDialogText.FileName),
-      'Rendering:' + NL + Info[itRendering] + NL + NL +
-      'Audio:' + NL + Info[itAudio] + NL + NL +
-      'Other:' + NL + Info[itOther]// + NL + NL +
-    );
-  end;
+    StringToFile(FilenameToUriSafe(SaveDialogText.FileName), FullReportText);
 end;
 
 end.
