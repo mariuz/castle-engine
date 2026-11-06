@@ -21,6 +21,12 @@ interface
 uses CastleGLShaders, CastleRenderOptions, CastleInternalRHI;
 
 type
+  TRHIScreenEffectUniformDecl = record
+    Name: String;
+    VarType: String;
+    ArrayCount: Integer;
+  end;
+
   { GLSL shader program specialized for rendering screen effects.
     See https://castle-engine.io/x3d_extensions_screen_effects.php
     about screen effects.
@@ -42,7 +48,14 @@ type
     FRHIFragmentShader: TRHIShaderModule;
     FRHIDescriptorLayout: TRHIDescriptorSetLayout;
     FRHIPipeline: TRHIPipeline;
+    FRHIUserEffectDecls: array of TRHIScreenEffectUniformDecl;
+    FRHIUserEffectBuffer: TRHIBuffer;
+    FRHIUserEffectDescriptorLayout: TRHIDescriptorSetLayout;
+    FRHIUserEffectDescriptorSet: TRHIDescriptorSet;
+    FRHIUserEffectUniformCount: Cardinal;
+    FRHIUserEffectUploadCount: Cardinal;
     procedure FreeRHIResources;
+    procedure ParseRHIUserEffectUniforms(const ASource: String);
   public
     constructor Create;
     destructor Destroy; override;
@@ -59,6 +72,13 @@ type
 
     procedure Link; override;
 
+    { Packs any custom uniform values set via @code(Uniform('...').SetValue(...))
+      into the std140 @code(CastleUserEffectBlock) UBO (Set 2, Binding 1) and
+      updates @link(RHIUserEffectDescriptorSet). Returns the number of declared
+      user uniforms packed.
+      @exclude }
+    function UpdateRHIUniforms: Cardinal;
+
     { Lazily compiles or retrieves the RHI post-processing graphics pipeline for
       this screen effect on @code(ADevice), generating Vulkan GLSL 450 vertex and
       fragment shader sources with @code(screen_effect_library) helpers.
@@ -70,6 +90,11 @@ type
     property RHIFragmentShader: TRHIShaderModule read FRHIFragmentShader;
     property RHIDescriptorLayout: TRHIDescriptorSetLayout read FRHIDescriptorLayout;
     property RHIPipeline: TRHIPipeline read FRHIPipeline;
+    property RHIUserEffectBuffer: TRHIBuffer read FRHIUserEffectBuffer;
+    property RHIUserEffectDescriptorLayout: TRHIDescriptorSetLayout read FRHIUserEffectDescriptorLayout;
+    property RHIUserEffectDescriptorSet: TRHIDescriptorSet read FRHIUserEffectDescriptorSet;
+    property RHIUserEffectUniformCount: Cardinal read FRHIUserEffectUniformCount;
+    property RHIUserEffectUploadCount: Cardinal read FRHIUserEffectUploadCount;
   end;
 
 { Standard GLSL vertex shader for screen effect. }
@@ -102,8 +127,8 @@ function ScreenEffectFragment(const Depth: boolean): string;
 
 implementation
 
-uses SysUtils,
-  CastleGLUtils, CastleUtils, CastleLog, CastleVectors, CastleInternalShaderRHI;
+uses SysUtils, Classes,
+  CastleGLUtils, CastleUtils, CastleStringUtils, CastleLog, CastleVectors, CastleInternalShaderRHI;
 
 { routines ------------------------------------------------------------------- }
 
@@ -147,6 +172,12 @@ end;
 
 procedure TGLSLScreenEffect.FreeRHIResources;
 begin
+  FreeAndNil(FRHIUserEffectDescriptorSet);
+  FreeAndNil(FRHIUserEffectDescriptorLayout);
+  FreeAndNil(FRHIUserEffectBuffer);
+  SetLength(FRHIUserEffectDecls, 0);
+  FRHIUserEffectUniformCount := 0;
+  FRHIUserEffectUploadCount := 0;
   FreeAndNil(FRHIDescriptorLayout);
   FreeAndNil(FRHIFragmentShader);
   FreeAndNil(FRHIVertexShader);
@@ -154,6 +185,251 @@ begin
   FRHIOwnerDevice := nil;
   FRHIVertexGLSL := '';
   FRHIFragmentGLSL := '';
+end;
+
+procedure TGLSLScreenEffect.ParseRHIUserEffectUniforms(const ASource: String);
+const
+  PrecisionQualifiers: array[0..2] of String = ('lowp ', 'mediump ', 'highp ');
+var
+  Lines: TStringList;
+  Line, Trimmed, DeclBody, VarType, VarName, BaseName, ArrStr, Qual: String;
+  SpacePos, SemiPos, BracketPos, CloseBracketPos, ArrCount, Idx: Integer;
+begin
+  SetLength(FRHIUserEffectDecls, 0);
+  if Trim(ASource) = '' then
+    Exit;
+
+  Lines := TStringList.Create;
+  try
+    Lines.Text := ASource;
+    for Line in Lines do
+    begin
+      Trimmed := Trim(Line);
+      if IsPrefix('uniform ', Trimmed, False) and (Pos('{', Trimmed) = 0) then
+      begin
+        DeclBody := Trim(SEnding(Trimmed, Length('uniform ') + 1));
+        SemiPos := Pos(';', DeclBody);
+        if SemiPos > 0 then
+          DeclBody := Copy(DeclBody, 1, SemiPos - 1);
+
+        for Qual in PrecisionQualifiers do
+          if IsPrefix(Qual, DeclBody, False) then
+          begin
+            DeclBody := Trim(SEnding(DeclBody, Length(Qual) + 1));
+            Break;
+          end;
+
+        SpacePos := Pos(' ', DeclBody);
+        if SpacePos > 0 then
+        begin
+          VarType := Trim(Copy(DeclBody, 1, SpacePos - 1));
+          VarName := Trim(Copy(DeclBody, SpacePos + 1, MaxInt));
+          if not IsPrefix('sampler', VarType, False) then
+          begin
+            ArrCount := 0;
+            BracketPos := Pos('[', VarName);
+            if BracketPos > 0 then
+            begin
+              BaseName := Trim(Copy(VarName, 1, BracketPos - 1));
+              CloseBracketPos := Pos(']', VarName);
+              if CloseBracketPos > BracketPos + 1 then
+              begin
+                ArrStr := Trim(Copy(VarName, BracketPos + 1, CloseBracketPos - BracketPos - 1));
+                ArrCount := StrToIntDef(ArrStr, 1);
+              end;
+            end else
+              BaseName := VarName;
+
+            Idx := Length(FRHIUserEffectDecls);
+            SetLength(FRHIUserEffectDecls, Idx + 1);
+            FRHIUserEffectDecls[Idx].Name := BaseName;
+            FRHIUserEffectDecls[Idx].VarType := VarType;
+            FRHIUserEffectDecls[Idx].ArrayCount := ArrCount;
+          end;
+        end;
+      end;
+    end;
+  finally
+    FreeAndNil(Lines);
+  end;
+end;
+
+function TGLSLScreenEffect.UpdateRHIUniforms: Cardinal;
+var
+  UBOData: array[0..1023] of Byte;
+  UBOOffset: PtrUInt;
+
+  procedure AlignOffset(const AAlignment: PtrUInt);
+  begin
+    UBOOffset := (UBOOffset + AAlignment - 1) and not (AAlignment - 1);
+  end;
+
+  procedure WriteBytes(const ASource; const ASize, AAlignment: PtrUInt);
+  begin
+    AlignOffset(AAlignment);
+    if UBOOffset + ASize <= SizeOf(UBOData) then
+    begin
+      Move(ASource, UBOData[UBOOffset], ASize);
+      Inc(UBOOffset, ASize);
+    end;
+  end;
+
+var
+  Dev: TRHIDevice;
+  I, J: Integer;
+  Decl: TRHIScreenEffectUniformDecl;
+  Found: Boolean;
+  FVal: Single;
+  IVal: Int32;
+  V2: TVector2;
+  IV2: TVector2Integer;
+  V3: TVector3;
+  IV3: TVector3Integer;
+  V4: TVector4;
+  IV4: TVector4Integer;
+  AlignedSize: PtrUInt;
+  BufDesc: TRHIBufferDesc;
+  Mapped: Pointer;
+  Set2Bindings: array[0..4] of TRHIDescriptorBindingDesc;
+  DebugPrefix: String;
+begin
+  Result := 0;
+  Dev := FRHIOwnerDevice;
+  if Dev = nil then
+    Dev := RHIDevice;
+  if Dev = nil then
+    Exit;
+
+  if (Length(FRHIUserEffectDecls) = 0) and (Trim(FScreenEffectShader) <> '') then
+    ParseRHIUserEffectUniforms(FScreenEffectShader);
+  if Length(FRHIUserEffectDecls) = 0 then
+    Exit;
+
+  UBOOffset := 0;
+  FillChar(UBOData, SizeOf(UBOData), 0);
+
+  for I := 0 to High(FRHIUserEffectDecls) do
+  begin
+    Decl := FRHIUserEffectDecls[I];
+    Found := GetRHIUniformValue(Decl.Name, V4);
+    if not Found then
+      V4 := TVector4.Zero
+    else
+      Inc(Result);
+
+    if Decl.VarType = 'float' then
+    begin
+      FVal := V4.X;
+      WriteBytes(FVal, SizeOf(Single), 4);
+    end else
+    if (Decl.VarType = 'int') or (Decl.VarType = 'bool') then
+    begin
+      IVal := Round(V4.X);
+      WriteBytes(IVal, SizeOf(Int32), 4);
+    end else
+    if Decl.VarType = 'vec2' then
+    begin
+      V2 := Vector2(V4.X, V4.Y);
+      WriteBytes(V2, SizeOf(TVector2), 8);
+    end else
+    if Decl.VarType = 'ivec2' then
+    begin
+      IV2 := Vector2Integer(Round(V4.X), Round(V4.Y));
+      WriteBytes(IV2, SizeOf(TVector2Integer), 8);
+    end else
+    if Decl.VarType = 'vec3' then
+    begin
+      V3 := Vector3(V4.X, V4.Y, V4.Z);
+      WriteBytes(V3, SizeOf(TVector3), 16);
+    end else
+    if Decl.VarType = 'ivec3' then
+    begin
+      IV3 := Vector3Integer(Round(V4.X), Round(V4.Y), Round(V4.Z));
+      WriteBytes(IV3, SizeOf(TVector3Integer), 16);
+    end else
+    if Decl.VarType = 'vec4' then
+    begin
+      WriteBytes(V4, SizeOf(TVector4), 16);
+    end else
+    if Decl.VarType = 'ivec4' then
+    begin
+      IV4 := Vector4Integer(Round(V4.X), Round(V4.Y), Round(V4.Z), Round(V4.W));
+      WriteBytes(IV4, SizeOf(TVector4Integer), 16);
+    end else
+    if Decl.VarType = 'mat3' then
+    begin
+      for J := 0 to 2 do
+      begin
+        if not GetRHIUniformValue(Decl.Name + '[' + IntToStr(J) + ']', V4) then
+          if (J <> 0) or (not GetRHIUniformValue(Decl.Name, V4)) then
+            V4 := TVector4.Zero;
+        WriteBytes(V4, SizeOf(TVector4), 16);
+      end;
+    end else
+    if Decl.VarType = 'mat4' then
+    begin
+      for J := 0 to 3 do
+      begin
+        if not GetRHIUniformValue(Decl.Name + '[' + IntToStr(J) + ']', V4) then
+          if (J <> 0) or (not GetRHIUniformValue(Decl.Name, V4)) then
+            V4 := TVector4.Zero;
+        WriteBytes(V4, SizeOf(TVector4), 16);
+      end;
+    end;
+  end;
+
+  FRHIUserEffectUniformCount := Length(FRHIUserEffectDecls);
+  if UBOOffset = 0 then
+    Exit;
+
+  if Name <> '' then
+    DebugPrefix := Name
+  else
+    DebugPrefix := 'TGLSLScreenEffect';
+
+  AlignedSize := (UBOOffset + 15) and not PtrUInt(15);
+  if AlignedSize = 0 then
+    AlignedSize := 16;
+  if (FRHIUserEffectBuffer = nil) or (FRHIUserEffectBuffer.Desc.Size < AlignedSize) then
+  begin
+    FreeAndNil(FRHIUserEffectBuffer);
+    BufDesc := TRHIBufferDesc.Create(AlignedSize, [buUniform], muCpuToGpu,
+      DebugPrefix + '.UserEffectUBO');
+    FRHIUserEffectBuffer := Dev.CreateBuffer(BufDesc, nil);
+  end;
+  Mapped := FRHIUserEffectBuffer.Map;
+  if Mapped <> nil then
+  try
+    FillChar(Mapped^, AlignedSize, 0);
+    Move(UBOData[0], Mapped^, UBOOffset);
+  finally
+    FRHIUserEffectBuffer.Unmap;
+  end;
+  Inc(FRHIUserEffectUploadCount);
+
+  if FRHIUserEffectDescriptorLayout = nil then
+  begin
+    FillChar(Set2Bindings, SizeOf(Set2Bindings), 0);
+    Set2Bindings[0].Binding := 1;
+    Set2Bindings[0].DescriptorType := dtUniformBuffer;
+    Set2Bindings[0].Count := 1;
+    Set2Bindings[0].StageFlags := [ssVertex, ssFragment];
+    for I := 0 to 3 do
+    begin
+      Set2Bindings[I + 1].Binding := 2 + I;
+      Set2Bindings[I + 1].DescriptorType := dtCombinedImageSampler;
+      Set2Bindings[I + 1].Count := 1;
+      Set2Bindings[I + 1].StageFlags := [ssVertex, ssFragment];
+    end;
+    FRHIUserEffectDescriptorLayout := Dev.CreateDescriptorSetLayout(Set2Bindings);
+  end;
+
+  if FRHIUserEffectDescriptorSet = nil then
+    FRHIUserEffectDescriptorSet := Dev.CreateDescriptorSet(FRHIUserEffectDescriptorLayout);
+
+  if FRHIUserEffectBuffer <> nil then
+    FRHIUserEffectDescriptorSet.BindUniformBuffer(1, FRHIUserEffectBuffer, 0, FRHIUserEffectBuffer.Desc.Size);
+  FRHIUserEffectDescriptorSet.Update;
 end;
 
 procedure TGLSLScreenEffect.Link;
@@ -239,6 +515,9 @@ begin
   FRHIFragmentShader := ADevice.CreateShaderModuleFromGLSL(
     ssFragment, FRHIFragmentGLSL, DebugPrefix + '.FS');
 
+  ParseRHIUserEffectUniforms(FScreenEffectShader);
+  UpdateRHIUniforms;
+
   if NeedsDepth then
     SetLength(Bindings, 2)
   else
@@ -281,8 +560,17 @@ begin
   SetLength(PipeDesc.ColorAttachmentFormats, 1);
   PipeDesc.ColorAttachmentFormats[0] := pfRGBA8_UNorm;
   PipeDesc.SampleCount := 1;
-  SetLength(PipeDesc.DescriptorSetLayouts, 1);
-  PipeDesc.DescriptorSetLayouts[0] := FRHIDescriptorLayout;
+  if FRHIUserEffectDescriptorLayout <> nil then
+  begin
+    SetLength(PipeDesc.DescriptorSetLayouts, 3);
+    PipeDesc.DescriptorSetLayouts[0] := FRHIDescriptorLayout;
+    PipeDesc.DescriptorSetLayouts[1] := nil;
+    PipeDesc.DescriptorSetLayouts[2] := FRHIUserEffectDescriptorLayout;
+  end else
+  begin
+    SetLength(PipeDesc.DescriptorSetLayouts, 1);
+    PipeDesc.DescriptorSetLayouts[0] := FRHIDescriptorLayout;
+  end;
   PipeDesc.PushConstantSize := SizeOf(TCastleScreenPushConstants);
   PipeDesc.PushConstantStages := [ssVertex, ssFragment];
   PipeDesc.DebugName := DebugPrefix + '.PSO';

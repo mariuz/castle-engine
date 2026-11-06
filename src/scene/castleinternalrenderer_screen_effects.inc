@@ -118,6 +118,12 @@ begin
     RendererResource := TScreenEffectResource.Create(Node);
     RendererResource.Prepare(RenderOptions);
     Node.InternalRendererResource := RendererResource;
+  end else
+  if Node.FdEnabled.Value then
+  begin
+    RendererResource := TScreenEffectResource(Node.InternalRendererResource);
+    if (RendererResource.RHIPipeline = nil) and (RendererResource.ShaderProgram = nil) then
+      RendererResource.Prepare(RenderOptions);
   end;
 end;
 
@@ -758,17 +764,16 @@ begin
   if not ShaderLoaded then
   begin
     Assert(ShaderProgram = nil);
-    ShaderLoaded := true;
     FRenderOptions := RenderOptions;
+    if not Node.FdEnabled.Value then
+      Exit;
+    ShaderLoaded := true;
 
     if RHIDevice <> nil then
     begin
-      if Node.FdEnabled.Value then
-      begin
-        PrepareIDecls(Node.InterfaceDeclarations);
-        PrepareIDeclsList(Node.FdShaders);
-        PrepareRHIScreenEffect;
-      end;
+      PrepareIDecls(Node.InterfaceDeclarations);
+      PrepareIDeclsList(Node.FdShaders);
+      PrepareRHIScreenEffect;
       Exit;
     end;
 

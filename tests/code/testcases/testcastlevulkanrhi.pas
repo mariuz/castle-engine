@@ -369,6 +369,9 @@ type
     procedure TestViewportSubRectScreenEffectsAndOuterPassRHI;
     procedure TestX3DGLSLProgramSetupUniformsTextureFieldsRHI;
     procedure TestCastleInspectorAndGLInformationStringRHI;
+    procedure TestGLSLScreenEffectAndViewportSSAOSSRUniformsRHI;
+    procedure TestViewportChildSceneScreenEffectsAndDynamicToggleRHI;
+    procedure TestViewportPrepareShadowVolumesAnd2DUIControlsRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -24571,6 +24574,401 @@ begin
   finally
     RenderContext := SavedCtx;
     FreeAndNil(Inspector);
+    FreeAndNil(Viewport);
+    FreeAndNil(Scene);
+    FreeAndNil(Container);
+    FreeAndNil(TargetTex);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+type
+  TTestViewportScreenEffectAccess = class(TCastleViewport);
+
+procedure TTestCastleVulkanRHI.TestGLSLScreenEffectAndViewportSSAOSSRUniformsRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  CustomSE: TGLSLScreenEffect;
+  Pipe: TRHIPipeline;
+  Mapped: PByte;
+  FVal: Single;
+  V3Val: TVector3;
+  M4Val: TMatrix4;
+  Viewport: TCastleViewport;
+  DS0, DS1: TRHIDescriptorSet;
+begin
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1011)));
+  CustomSE := nil;
+  Viewport := nil;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+
+    { 1. Verify TGLSLScreenEffect custom uniform parsing, std140 UBO upload, and Set 2 descriptor set }
+    CustomSE := TGLSLScreenEffect.Create;
+    CustomSE.Name := 'CustomTestScreenEffect';
+    CustomSE.NeedsDepth := True;
+    CustomSE.ScreenEffectShader :=
+      'uniform float near;' + LineEnding +
+      'uniform float far;' + LineEnding +
+      'uniform vec3 castle_CameraPosition;' + LineEnding +
+      'uniform mat4 castle_ViewProjectionMatrix;' + LineEnding +
+      'void main(void) { gl_FragColor = vec4(castle_CameraPosition * near, 1.0); }';
+    CustomSE.Link;
+
+    CustomSE.Uniform('near').SetValue(0.25);
+    CustomSE.Uniform('far').SetValue(500.0);
+    CustomSE.Uniform('castle_CameraPosition').SetValue(Vector3(10.0, 20.0, 30.0));
+    CustomSE.Uniform('castle_ViewProjectionMatrix').SetValue(TranslationMatrix(Vector3(1.0, 2.0, 3.0)));
+
+    Pipe := CustomSE.GetOrCreateRHIPipeline(Device);
+    AssertTrue('Custom TGLSLScreenEffect RHI pipeline must be created', Pipe <> nil);
+    AssertEquals('Custom TGLSLScreenEffect must declare 4 user uniforms', 4, CustomSE.RHIUserEffectUniformCount);
+    AssertTrue('Custom TGLSLScreenEffect RHIFragmentGLSL must preserve castle_CameraPosition in CastleUserEffectBlock',
+      Pos('u_user_castle_CameraPosition', CustomSE.RHIFragmentGLSL) > 0);
+    AssertTrue('Custom TGLSLScreenEffect RHIFragmentGLSL must emit #undef near before #define near',
+      Pos('#undef near', CustomSE.RHIFragmentGLSL) > 0);
+    AssertTrue('Custom TGLSLScreenEffect must allocate RHIUserEffectBuffer', CustomSE.RHIUserEffectBuffer <> nil);
+    AssertTrue('Custom TGLSLScreenEffect must allocate RHIUserEffectDescriptorSet', CustomSE.RHIUserEffectDescriptorSet <> nil);
+    AssertEquals('Custom TGLSLScreenEffect pipeline layout must have 3 descriptor set layouts (Set 0 + Set 2)',
+      3, Length(Pipe.Desc.DescriptorSetLayouts));
+
+    AssertEquals('UpdateRHIUniforms must pack 4 set uniform values', 4, CustomSE.UpdateRHIUniforms);
+    Mapped := PByte(CustomSE.RHIUserEffectBuffer.Map);
+    AssertTrue('RHIUserEffectBuffer must map non-nil', Mapped <> nil);
+    try
+      Move(Mapped[0], FVal, 4);
+      AssertSameValue(0.25, FVal, 0.001);
+      Move(Mapped[4], FVal, 4);
+      AssertSameValue(500.0, FVal, 0.001);
+      { vec3 castle_CameraPosition is 16-byte aligned at offset 16 }
+      Move(Mapped[16], V3Val, 12);
+      AssertVectorEquals(Vector3(10.0, 20.0, 30.0), V3Val, 0.001);
+      { mat4 castle_ViewProjectionMatrix is 16-byte aligned at offset 32 }
+      Move(Mapped[32], M4Val, 64);
+      AssertSameValue(1.0, M4Val.Data[3][0], 0.001);
+      AssertSameValue(2.0, M4Val.Data[3][1], 0.001);
+      AssertSameValue(3.0, M4Val.Data[3][2], 0.001);
+    finally
+      CustomSE.RHIUserEffectBuffer.Unmap;
+    end;
+
+    { 2. Verify TCastleViewport SSAO + SSR built-in screen effects bind Set 2 user descriptor sets }
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := False;
+    Viewport.Width := 320;
+    Viewport.Height := 240;
+    Viewport.ScreenSpaceAmbientOcclusion := True;
+    Viewport.ScreenSpaceReflections := True;
+    Viewport.ScreenSpaceReflectionsSurfaceGlossiness := 0.75;
+    Viewport.Camera.SetWorldView(Vector3(4.0, 5.0, 6.0), Vector3(0.0, 0.0, -1.0), Vector3(0.0, 1.0, 0.0));
+
+    AssertEquals('Viewport must have 2 extra screen effects (SSAO + SSR)',
+      2, TTestViewportScreenEffectAccess(Viewport).InternalExtraScreenEffectsCount);
+    Pipe := TTestViewportScreenEffectAccess(Viewport).InternalExtraGetScreenEffectRHIPipeline(0);
+    AssertTrue('SSAO RHI pipeline must be non-nil', Pipe <> nil);
+    DS0 := TTestViewportScreenEffectAccess(Viewport).InternalExtraGetScreenEffectRHIUserDescriptorSet(0);
+    AssertTrue('SSAO Set 2 user descriptor set must be non-nil', DS0 <> nil);
+
+    Pipe := TTestViewportScreenEffectAccess(Viewport).InternalExtraGetScreenEffectRHIPipeline(1);
+    AssertTrue('SSR RHI pipeline must be non-nil', Pipe <> nil);
+    DS1 := TTestViewportScreenEffectAccess(Viewport).InternalExtraGetScreenEffectRHIUserDescriptorSet(1);
+    AssertTrue('SSR Set 2 user descriptor set must be non-nil', DS1 <> nil);
+    AssertTrue('SSR and SSAO Set 2 user descriptor sets must be distinct', DS0 <> DS1);
+  finally
+    FreeAndNil(Viewport);
+    FreeAndNil(CustomSE);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportChildSceneScreenEffectsAndDynamicToggleRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  Viewport: TCastleViewport;
+  ChildScene1, ChildScene2: TCastleScene;
+  Root1, Root2: TX3DRootNode;
+  SENode1, SENode2: TScreenEffectNode;
+  Shader1, Shader2: TComposedShaderNode;
+  Part1, Part2: TShaderPartNode;
+  IntensityField: TSFFloat;
+begin
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1012)));
+  Viewport := nil;
+  ChildScene1 := nil;
+  ChildScene2 := nil;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+
+    { 1. Build ChildScene1 with an enabled ScreenEffectNode (NeedsDepth = False) and a custom uniform }
+    Root1 := TX3DRootNode.Create;
+    SENode1 := TScreenEffectNode.Create;
+    SENode1.NeedsDepth := False;
+    Shader1 := TComposedShaderNode.Create;
+    IntensityField := TSFFloat.Create(Shader1, True, 'u_intensity', 0.8);
+    Shader1.AddCustomField(IntensityField);
+    Part1 := TShaderPartNode.Create;
+    Part1.ShaderType := stFragment;
+    Part1.Contents :=
+      'uniform float u_intensity;' + LineEnding +
+      'void main(void) { gl_FragColor = screenf_get_original_color() * u_intensity; }';
+    Shader1.SetParts([Part1]);
+    SENode1.SetShaders([Shader1]);
+    Root1.AddChildren(SENode1);
+
+    ChildScene1 := TCastleScene.Create(nil);
+    ChildScene1.Load(Root1, True);
+
+    { 2. Build ChildScene2 with a ScreenEffectNode initially disabled (Enabled = False, NeedsDepth = True) }
+    Root2 := TX3DRootNode.Create;
+    SENode2 := TScreenEffectNode.Create;
+    SENode2.Enabled := False;
+    SENode2.NeedsDepth := True;
+    Shader2 := TComposedShaderNode.Create;
+    Part2 := TShaderPartNode.Create;
+    Part2.ShaderType := stFragment;
+    Part2.Contents := 'void main(void) { gl_FragColor = vec4(screenf_get_original_depth()); }';
+    Shader2.SetParts([Part2]);
+    SENode2.SetShaders([Shader2]);
+    Root2.AddChildren(SENode2);
+
+    ChildScene2 := TCastleScene.Create(nil);
+    ChildScene2.Load(Root2, True);
+
+    { 3. Add both scenes to Viewport.Items WITHOUT setting deprecated Items.MainScene }
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.Items.Add(ChildScene1);
+    Viewport.Items.Add(ChildScene2);
+
+    AssertEquals('Viewport must discover 1 enabled screen effect in child scenes (ChildScene1)',
+      1, TTestViewportScreenEffectAccess(Viewport).InternalExtraScreenEffectsCount);
+    AssertFalse('NeedsDepth must be False while ChildScene2 screen effect is disabled',
+      TTestViewportScreenEffectAccess(Viewport).InternalExtraScreenEffectsNeedDepth);
+    AssertTrue('ChildScene1 RHI screen effect pipeline must be returned at index 0',
+      TTestViewportScreenEffectAccess(Viewport).InternalExtraGetScreenEffectRHIPipeline(0) <> nil);
+    AssertTrue('ChildScene1 Set 2 user descriptor set must be returned at index 0',
+      TTestViewportScreenEffectAccess(Viewport).InternalExtraGetScreenEffectRHIUserDescriptorSet(0) <> nil);
+
+    { 4. Dynamically enable SENode2 at runtime -> lazy RHI pipeline compilation + NeedsDepth = True }
+    SENode2.FdEnabled.Value := True;
+    AssertEquals('Viewport must now discover 2 enabled screen effects across child scenes',
+      2, TTestViewportScreenEffectAccess(Viewport).InternalExtraScreenEffectsCount);
+    AssertTrue('NeedsDepth must now be True because SENode2 is enabled and requires depth',
+      TTestViewportScreenEffectAccess(Viewport).InternalExtraScreenEffectsNeedDepth);
+    AssertTrue('ChildScene2 RHI screen effect pipeline must be lazily compiled and returned at index 1',
+      TTestViewportScreenEffectAccess(Viewport).InternalExtraGetScreenEffectRHIPipeline(1) <> nil);
+
+    { 5. Verify assigning deprecated Items.MainScene := ChildScene1 does not double-count ChildScene1 }
+    {$warnings off}
+    Viewport.Items.MainScene := ChildScene1;
+    {$warnings on}
+    AssertEquals('Setting MainScene := ChildScene1 must not double-count ChildScene1 screen effects',
+      2, TTestViewportScreenEffectAccess(Viewport).InternalExtraScreenEffectsCount);
+
+    { 6. Dynamically disable SENode1 at runtime -> only SENode2 remains active }
+    SENode1.FdEnabled.Value := False;
+    AssertEquals('Disabling SENode1 must leave 1 active screen effect (SENode2)',
+      1, TTestViewportScreenEffectAccess(Viewport).InternalExtraScreenEffectsCount);
+    AssertTrue('Remaining screen effect at index 0 must be SENode2 pipeline',
+      TTestViewportScreenEffectAccess(Viewport).InternalExtraGetScreenEffectRHIPipeline(0) <> nil);
+  finally
+    FreeAndNil(Viewport);
+    FreeAndNil(ChildScene2);
+    FreeAndNil(ChildScene1);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportPrepareShadowVolumesAnd2DUIControlsRHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedCtx: TRenderContext;
+  SavedBackend: TRenderBackend;
+  SavedGLFeatures: TGLFeatures;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  LightNode: TDirectionalLightNode;
+  ShapeNode: TShapeNode;
+  Box: TBoxNode;
+  TargetTex: TRHITexture;
+  TargetPassInfo: TRHIRenderingInfo;
+  ShapeCtrl: TCastleShape;
+  Crosshair: TCastleCrosshair;
+  ScrollView: TCastleScrollView;
+  FloatSlider: TCastleFloatSlider;
+  IntSlider: TCastleIntegerSlider;
+  ST: TShapeType;
+  HandleInput: Boolean;
+  PrimDrawsBefore: Cardinal;
+  Batch2D: TCastleBatch2DRenderer;
+  QuadsBefore: Cardinal;
+begin
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedGLFeatures := GLFeatures;
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1013)));
+  Container := nil;
+  Viewport := nil;
+  Scene := nil;
+  ShapeCtrl := nil;
+  Crosshair := nil;
+  ScrollView := nil;
+  FloatSlider := nil;
+  IntSlider := nil;
+  TargetTex := nil;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    GLFeatures := nil; // Pure Vulkan RHI mode without GLFeatures
+    SetRHIDevice(Device);
+
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    RenderContext := Container.Context;
+
+    { 1. Build a scene with a shadow-volume main light and a 2-manifold box }
+    Root := TX3DRootNode.Create;
+    LightNode := TDirectionalLightNode.Create;
+    LightNode.FdShadowVolumes.Value := True;
+    LightNode.FdShadowVolumesMain.Value := True;
+    Root.AddChildren(LightNode);
+
+    ShapeNode := TShapeNode.Create;
+    Box := TBoxNode.Create;
+    ShapeNode.Geometry := Box;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    Scene.CastGlobalLights := True;
+
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := True;
+    Viewport.ShadowVolumes := True;
+    Viewport.Items.Add(Scene);
+    Container.Controls.InsertFront(Viewport);
+
+    AssertTrue('InternalShadowVolumeRenderer must be nil before PrepareResources',
+      Viewport.InternalShadowVolumeRenderer = nil);
+
+    { Call Viewport.PrepareResources in pure Vulkan RHI mode (GLFeatures = nil) }
+    Viewport.PrepareResources;
+    AssertTrue('Viewport.PrepareResources must initialize InternalShadowVolumeRenderer in pure RHI mode when ShadowVolumes = True',
+      Viewport.InternalShadowVolumeRenderer <> nil);
+
+    { 2. Render 2D UI controls (TCastleShape, TCastleCrosshair, TCastleScrollView, TCastleFloatSlider, TCastleIntegerSlider)
+      in pure Vulkan RHI mode (GLFeatures = nil) }
+    ShapeCtrl := TCastleShape.Create(nil);
+    ShapeCtrl.Width := 80;
+    ShapeCtrl.Height := 60;
+    ShapeCtrl.Color := Vector4(0.2, 0.6, 0.9, 1.0);
+    ShapeCtrl.OutlineColor := Vector4(1.0, 1.0, 1.0, 1.0);
+    ShapeCtrl.OutlineWidth := 2.0;
+    Container.Controls.InsertFront(ShapeCtrl);
+
+    Crosshair := TCastleCrosshair.Create(nil);
+    Container.Controls.InsertFront(Crosshair);
+
+    ScrollView := TCastleScrollView.Create(nil);
+    ScrollView.Width := 200;
+    ScrollView.Height := 150;
+    ScrollView.ScrollArea.Height := 400;
+    HandleInput := True;
+    ScrollView.Update(0.016, HandleInput);
+    Container.Controls.InsertFront(ScrollView);
+
+    FloatSlider := TCastleFloatSlider.Create(nil);
+    FloatSlider.Min := 0.0;
+    FloatSlider.Max := 10.0;
+    FloatSlider.Value := 4.5;
+    FloatSlider.Caption := 'Exposure';
+    Container.Controls.InsertFront(FloatSlider);
+
+    IntSlider := TCastleIntegerSlider.Create(nil);
+    IntSlider.Min := 1;
+    IntSlider.Max := 8;
+    IntSlider.Value := 4;
+    IntSlider.Caption := 'Cascades';
+    Container.Controls.InsertFront(IntSlider);
+
+    TargetTex := Device.CreateTexture(TRHITextureDesc.Create2D(800, 600, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc]));
+    Cmd := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(Cmd);
+
+    TargetPassInfo := TRHIRenderingInfo.CreateColorDepth(Rectangle(0, 0, 800, 600),
+      TargetTex, loClear, Vector4(0, 0, 0, 1), nil, loDontCare, 1.0);
+    Cmd.BeginRendering(TargetPassInfo);
+
+    { Exercise all 6 TShapeType variants in both Outline (thin) and OutlineThick modes }
+    RHIPrimitive2DResetStats;
+    PrimDrawsBefore := RHIPrimitive2DDrawCallCount;
+    for ST := Low(TShapeType) to High(TShapeType) do
+    begin
+      ShapeCtrl.ShapeType := ST;
+      ShapeCtrl.Filled := True;
+      ShapeCtrl.Outline := True;
+      ShapeCtrl.OutlineThick := False;
+      Container.RenderControl(ShapeCtrl, Rectangle(0, 0, 800, 600));
+
+      ShapeCtrl.OutlineThick := True;
+      Container.RenderControl(ShapeCtrl, Rectangle(0, 0, 800, 600));
+    end;
+    AssertTrue('Rendering all 6 TCastleShape types (thin + thick outline) must issue RHI 2D primitive draws',
+      RHIPrimitive2DDrawCallCount >= PrimDrawsBefore + 24);
+
+    { Exercise Crosshair, ScrollView, FloatSlider, and IntegerSlider }
+    Batch2D := EnsureBatch2DRenderer(Device);
+    QuadsBefore := Batch2D.TotalQuadsDrawn;
+    Crosshair.Shape := csCross;
+    Container.RenderControl(Crosshair, Rectangle(0, 0, 800, 600));
+    Crosshair.Shape := csCrossRect;
+    Container.RenderControl(Crosshair, Rectangle(0, 0, 800, 600));
+    Container.RenderControl(ScrollView, Rectangle(0, 0, 800, 600));
+    Container.RenderControl(FloatSlider, Rectangle(0, 0, 800, 600));
+    Container.RenderControl(IntSlider, Rectangle(0, 0, 800, 600));
+    TDrawableImage.BatchingFlush;
+    AssertTrue('Rendering Crosshair, ScrollView, FloatSlider, and IntegerSlider must issue RHI 2D quad draws',
+      Batch2D.TotalQuadsDrawn > QuadsBefore);
+
+    Cmd.EndRendering;
+    Device.EndFrameAndPresent;
+  finally
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    FreeAndNil(IntSlider);
+    FreeAndNil(FloatSlider);
+    FreeAndNil(ScrollView);
+    FreeAndNil(Crosshair);
+    FreeAndNil(ShapeCtrl);
     FreeAndNil(Viewport);
     FreeAndNil(Scene);
     FreeAndNil(Container);

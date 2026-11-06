@@ -925,6 +925,12 @@ end;
 
 procedure TGLSLUniform.SetValue(const Value: TMatrix2);
 begin
+  if (Owner <> nil) and (Name <> '') then
+  begin
+    Owner.SetRHIUniformValue(Name, Vector4(Value.Data[0][0], Value.Data[0][1], Value.Data[1][0], Value.Data[1][1]));
+    Owner.SetRHIUniformValue(Name + '[0]', Vector4(Value.Data[0][0], Value.Data[0][1], 0, 0));
+    Owner.SetRHIUniformValue(Name + '[1]', Vector4(Value.Data[1][0], Value.Data[1][1], 0, 0));
+  end;
   if Location = GLUniformLocationNone then Exit; // ignore non-existing uniform here
   if (GLFeatures = nil) or (not GLFeatures.Shaders) then Exit;
   Owner.Enable;
@@ -937,7 +943,16 @@ begin
 end;
 
 procedure TGLSLUniform.SetValue(const Value: TMatrix3);
+var
+  J: Integer;
 begin
+  if (Owner <> nil) and (Name <> '') then
+  begin
+    Owner.SetRHIUniformValue(Name, Vector4(Value.Data[0][0], Value.Data[0][1], Value.Data[0][2], 0));
+    for J := 0 to 2 do
+      Owner.SetRHIUniformValue(Name + '[' + IntToStr(J) + ']',
+        Vector4(Value.Data[J][0], Value.Data[J][1], Value.Data[J][2], 0));
+  end;
   if Location = GLUniformLocationNone then Exit; // ignore non-existing uniform here
   if (GLFeatures = nil) or (not GLFeatures.Shaders) then Exit;
   Owner.Enable;
@@ -950,7 +965,15 @@ begin
 end;
 
 procedure TGLSLUniform.SetValue(const Value: TMatrix4);
+var
+  J: Integer;
 begin
+  if (Owner <> nil) and (Name <> '') then
+  begin
+    Owner.SetRHIUniformValue(Name, Value.Columns[0]);
+    for J := 0 to 3 do
+      Owner.SetRHIUniformValue(Name + '[' + IntToStr(J) + ']', Value.Columns[J]);
+  end;
   if Location = GLUniformLocationNone then Exit; // ignore non-existing uniform here
   if (GLFeatures = nil) or (not GLFeatures.Shaders) then Exit;
   Owner.Enable;

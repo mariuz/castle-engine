@@ -3194,49 +3194,103 @@ begin
 end;
 
 function TCastleViewport.InternalExtraGetScreenEffects(const Index: Integer): TGLSLProgram;
+var
+  ExtraOffset, RemainingIndex: Integer;
+  MainSc: TCastleScene;
+
+  function FindSceneScreenEffect(const ATransform: TCastleTransform): TGLSLProgram;
+  var
+    I, ScCount: Integer;
+    Sc: TCastleScene;
+  begin
+    Result := nil;
+    if (ATransform = nil) or (not ATransform.Exists) then
+      Exit;
+    if (ATransform is TCastleScene) and (ATransform <> MainSc) then
+    begin
+      Sc := TCastleScene(ATransform);
+      ScCount := Sc.InternalScreenEffectsCount;
+      if RemainingIndex < ScCount then
+        Exit(Sc.InternalScreenEffects(RemainingIndex))
+      else
+        Dec(RemainingIndex, ScCount);
+    end;
+    for I := 0 to ATransform.Count - 1 do
+    begin
+      Result := FindSceneScreenEffect(ATransform[I]);
+      if Result <> nil then
+        Exit;
+    end;
+  end;
+
 begin
+  Result := nil;
   if ScreenSpaceAmbientOcclusion then
     SSAOShaderInitialize;
   if ScreenSpaceReflections then
     SSRShaderInitialize;
 
-  {$warnings off} // using deprecated MainScene to keep it working
-  if ScreenSpaceAmbientOcclusion and (SSAOShader <> nil) and ScreenSpaceReflections and (SSRShader <> nil) then
-  begin
-    if Index = 0 then
-      Result := SSAOShader
-    else
-    if Index = 1 then
-      Result := SSRShader
-    else
-      Result := Items.MainScene.InternalScreenEffects(Index - 2);
-  end else
+  ExtraOffset := 0;
   if ScreenSpaceAmbientOcclusion and (SSAOShader <> nil) then
   begin
-    if Index = 0 then
-      Result := SSAOShader
-    else
-      Result := Items.MainScene.InternalScreenEffects(Index - 1);
-  end else
+    if Index = ExtraOffset then
+      Exit(SSAOShader);
+    Inc(ExtraOffset);
+  end;
   if ScreenSpaceReflections and (SSRShader <> nil) then
   begin
-    if Index = 0 then
-      Result := SSRShader
-    else
-      Result := Items.MainScene.InternalScreenEffects(Index - 1);
-  end else
-  if Items.MainScene <> nil then
-    Result := Items.MainScene.InternalScreenEffects(Index)
-  else
-    { no Index is valid, since ScreenEffectsCount = 0 in this class }
-    Result := nil;
+    if Index = ExtraOffset then
+      Exit(SSRShader);
+    Inc(ExtraOffset);
+  end;
+  if Index < ExtraOffset then
+    Exit;
+
+  RemainingIndex := Index - ExtraOffset;
+  {$warnings off} // using deprecated MainScene to keep it working
+  MainSc := Items.MainScene;
   {$warnings on}
+  if MainSc <> nil then
+  begin
+    if RemainingIndex < MainSc.InternalScreenEffectsCount then
+      Exit(MainSc.InternalScreenEffects(RemainingIndex))
+    else
+      Dec(RemainingIndex, MainSc.InternalScreenEffectsCount);
+  end;
+  Result := FindSceneScreenEffect(Items);
 end;
 
 function TCastleViewport.InternalExtraGetScreenEffectRHIPipeline(const Index: Integer): TRHIPipeline;
 var
-  ExtraOffset: Integer;
+  ExtraOffset, RemainingIndex: Integer;
   BoundUnits: Cardinal;
+  MainSc: TCastleScene;
+
+  function FindSceneScreenEffectPipeline(const ATransform: TCastleTransform): TRHIPipeline;
+  var
+    I, ScCount: Integer;
+    Sc: TCastleScene;
+  begin
+    Result := nil;
+    if (ATransform = nil) or (not ATransform.Exists) then
+      Exit;
+    if (ATransform is TCastleScene) and (ATransform <> MainSc) then
+    begin
+      Sc := TCastleScene(ATransform);
+      ScCount := Sc.InternalScreenEffectsCount;
+      if RemainingIndex < ScCount then
+        Exit(Sc.InternalScreenEffectRHIPipeline(RemainingIndex))
+      else
+        Dec(RemainingIndex, ScCount);
+    end;
+    for I := 0 to ATransform.Count - 1 do
+    begin
+      Result := FindSceneScreenEffectPipeline(ATransform[I]);
+      if Result <> nil then
+        Exit;
+    end;
+  end;
+
 begin
   Result := nil;
   if RHIDevice = nil then
@@ -3254,7 +3308,9 @@ begin
     if Index = ExtraOffset then
     begin
       SSAOShader.SetupUniforms(BoundUnits);
-      Exit(SSAOShader.GetOrCreateRHIPipeline(RHIDevice));
+      Result := SSAOShader.GetOrCreateRHIPipeline(RHIDevice);
+      SSAOShader.UpdateRHIUniforms;
+      Exit;
     end;
     Inc(ExtraOffset);
   end;
@@ -3263,35 +3319,132 @@ begin
     if Index = ExtraOffset then
     begin
       SSRShader.SetupUniforms(BoundUnits);
-      Exit(SSRShader.GetOrCreateRHIPipeline(RHIDevice));
+      Result := SSRShader.GetOrCreateRHIPipeline(RHIDevice);
+      SSRShader.UpdateRHIUniforms;
+      Exit;
     end;
     Inc(ExtraOffset);
   end;
+  if Index < ExtraOffset then
+    Exit;
+
+  RemainingIndex := Index - ExtraOffset;
   {$warnings off} // using deprecated MainScene to keep it working
-  if (Index >= ExtraOffset) and (Items.MainScene <> nil) then
-    Result := Items.MainScene.InternalScreenEffectRHIPipeline(Index - ExtraOffset);
+  MainSc := Items.MainScene;
   {$warnings on}
+  if MainSc <> nil then
+  begin
+    if RemainingIndex < MainSc.InternalScreenEffectsCount then
+      Exit(MainSc.InternalScreenEffectRHIPipeline(RemainingIndex))
+    else
+      Dec(RemainingIndex, MainSc.InternalScreenEffectsCount);
+  end;
+  Result := FindSceneScreenEffectPipeline(Items);
 end;
 
 function TCastleViewport.InternalExtraGetScreenEffectRHIUserDescriptorSet(const Index: Integer): TRHIDescriptorSet;
 var
-  ExtraOffset: Integer;
+  ExtraOffset, RemainingIndex: Integer;
+  BoundUnits: Cardinal;
+  MainSc: TCastleScene;
+  Handled: Boolean;
+
+  function FindSceneScreenEffectDescriptorSet(const ATransform: TCastleTransform; out AHandled: Boolean): TRHIDescriptorSet;
+  var
+    I, ScCount: Integer;
+    Sc: TCastleScene;
+  begin
+    Result := nil;
+    AHandled := False;
+    if (ATransform = nil) or (not ATransform.Exists) then
+      Exit;
+    if (ATransform is TCastleScene) and (ATransform <> MainSc) then
+    begin
+      Sc := TCastleScene(ATransform);
+      ScCount := Sc.InternalScreenEffectsCount;
+      if RemainingIndex < ScCount then
+      begin
+        AHandled := True;
+        Exit(Sc.InternalScreenEffectRHIUserDescriptorSet(RemainingIndex));
+      end else
+        Dec(RemainingIndex, ScCount);
+    end;
+    for I := 0 to ATransform.Count - 1 do
+    begin
+      Result := FindSceneScreenEffectDescriptorSet(ATransform[I], AHandled);
+      if AHandled then
+        Exit;
+    end;
+  end;
+
 begin
   Result := nil;
   if RHIDevice = nil then
     Exit;
+
+  if ScreenSpaceAmbientOcclusion then
+    SSAOShaderInitialize;
+  if ScreenSpaceReflections then
+    SSRShaderInitialize;
+
+  BoundUnits := 0;
   ExtraOffset := 0;
   if ScreenSpaceAmbientOcclusion and (SSAOShader <> nil) then
+  begin
+    if Index = ExtraOffset then
+    begin
+      SSAOShader.SetupUniforms(BoundUnits);
+      SSAOShader.GetOrCreateRHIPipeline(RHIDevice);
+      SSAOShader.UpdateRHIUniforms;
+      Exit(SSAOShader.RHIUserEffectDescriptorSet);
+    end;
     Inc(ExtraOffset);
+  end;
   if ScreenSpaceReflections and (SSRShader <> nil) then
+  begin
+    if Index = ExtraOffset then
+    begin
+      SSRShader.SetupUniforms(BoundUnits);
+      SSRShader.GetOrCreateRHIPipeline(RHIDevice);
+      SSRShader.UpdateRHIUniforms;
+      Exit(SSRShader.RHIUserEffectDescriptorSet);
+    end;
     Inc(ExtraOffset);
+  end;
+  if Index < ExtraOffset then
+    Exit;
+
+  RemainingIndex := Index - ExtraOffset;
   {$warnings off} // using deprecated MainScene to keep it working
-  if (Index >= ExtraOffset) and (Items.MainScene <> nil) then
-    Result := Items.MainScene.InternalScreenEffectRHIUserDescriptorSet(Index - ExtraOffset);
+  MainSc := Items.MainScene;
   {$warnings on}
+  if MainSc <> nil then
+  begin
+    if RemainingIndex < MainSc.InternalScreenEffectsCount then
+      Exit(MainSc.InternalScreenEffectRHIUserDescriptorSet(RemainingIndex))
+    else
+      Dec(RemainingIndex, MainSc.InternalScreenEffectsCount);
+  end;
+  Result := FindSceneScreenEffectDescriptorSet(Items, Handled);
 end;
 
 function TCastleViewport.InternalExtraScreenEffectsCount: Integer;
+var
+  MainSc: TCastleScene;
+
+  function CountSceneScreenEffects(const ATransform: TCastleTransform): Integer;
+  var
+    I: Integer;
+  begin
+    Result := 0;
+    if (ATransform = nil) or (not ATransform.Exists) then
+      Exit;
+    if (ATransform is TCastleScene) and (ATransform <> MainSc) then
+      Inc(Result, TCastleScene(ATransform).InternalScreenEffectsCount);
+    for I := 0 to ATransform.Count - 1 do
+      Inc(Result, CountSceneScreenEffects(ATransform[I]));
+  end;
+
 begin
   if ScreenSpaceAmbientOcclusion then
     SSAOShaderInitialize;
@@ -3299,11 +3452,14 @@ begin
     SSRShaderInitialize;
 
   {$warnings off} // using deprecated MainScene to keep it working
-  if Items.MainScene <> nil then
-    Result := Items.MainScene.InternalScreenEffectsCount
+  MainSc := Items.MainScene;
+  {$warnings on}
+  if MainSc <> nil then
+    Result := MainSc.InternalScreenEffectsCount
   else
     Result := 0;
-  {$warnings off}
+
+  Inc(Result, CountSceneScreenEffects(Items));
 
   if ScreenSpaceAmbientOcclusion and (SSAOShader <> nil) then
     Inc(Result);
@@ -3312,6 +3468,24 @@ begin
 end;
 
 function TCastleViewport.InternalExtraScreenEffectsNeedDepth: Boolean;
+var
+  MainSc: TCastleScene;
+
+  function CheckSceneScreenEffectsNeedDepth(const ATransform: TCastleTransform): Boolean;
+  var
+    I: Integer;
+  begin
+    Result := False;
+    if (ATransform = nil) or (not ATransform.Exists) then
+      Exit;
+    if (ATransform is TCastleScene) and (ATransform <> MainSc) and
+       TCastleScene(ATransform).InternalScreenEffectsNeedDepth then
+      Exit(True);
+    for I := 0 to ATransform.Count - 1 do
+      if CheckSceneScreenEffectsNeedDepth(ATransform[I]) then
+        Exit(True);
+  end;
+
 begin
   if ScreenSpaceAmbientOcclusion then
     SSAOShaderInitialize;
@@ -3323,11 +3497,11 @@ begin
   if ScreenSpaceReflections and (SSRShader <> nil) then
     Exit(true);
   {$warnings off} // using deprecated MainScene to keep it working
-  if Items.MainScene <> nil then
-    Result := Items.MainScene.InternalScreenEffectsNeedDepth
-  else
+  MainSc := Items.MainScene;
   {$warnings on}
-    Result := false;
+  if (MainSc <> nil) and MainSc.InternalScreenEffectsNeedDepth then
+    Exit(true);
+  Result := CheckSceneScreenEffectsNeedDepth(Items);
 end;
 
 function TCastleViewport.GetScreenEffectsNear: Single;
@@ -4185,11 +4359,17 @@ begin
     // despite the warning, allow PrepareResources to run, to make it easy for users
   end;
 
-  if (GLFeatures <> nil) and
-     ((RHIDevice <> nil) or ((GLFeatures <> nil) and GLFeatures.ShadowVolumesPossible)) and
+  if ((RHIDevice <> nil) or ((GLFeatures <> nil) and GLFeatures.ShadowVolumesPossible)) and
      ShadowVolumes and
      MainLightForShadowVolumes(MainLightPosition) then
     Include(Options, prShadowVolume);
+
+  if (prShadowVolume in Options) and (FShadowVolumeRenderer = nil) and
+     ((RHIDevice <> nil) or ((GLFeatures <> nil) and GLFeatures.ShadowVolumesPossible)) then
+  begin
+    FShadowVolumeRenderer := TGLShadowVolumeRenderer.Create;
+    FShadowVolumeRenderer.PrepareRenderingResources;
+  end;
 
   { call TCastleScreenEffects.PrepareResources. }
   inherited PrepareResources;

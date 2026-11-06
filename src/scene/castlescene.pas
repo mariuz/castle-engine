@@ -1932,6 +1932,8 @@ begin
   for I := 0 to ScreenEffectNodes.Count - 1 do
   begin
     SE := TScreenEffectNode(ScreenEffectNodes[I]);
+    if not SE.FdEnabled.Value then
+      Continue;
     // Note: TScreenEffectResources.Prepare exits fast if already was done on this shape
     TScreenEffectResources.Prepare(RenderOptions, SE);
     SeNodeRes := TScreenEffectResources.Get(SE);
@@ -1954,6 +1956,8 @@ begin
   for I := 0 to ScreenEffectNodes.Count - 1 do
   begin
     SeNode := TScreenEffectNode(ScreenEffectNodes[I]);
+    if not SeNode.FdEnabled.Value then
+      Continue;
     SeNodeRes := TScreenEffectResources.Get(SeNode);
     if (SeNodeRes <> nil) and (SeNodeRes.ShaderProgram <> nil) then
       if Index = 0 then
@@ -1974,6 +1978,8 @@ begin
   for I := 0 to ScreenEffectNodes.Count - 1 do
   begin
     SeNode := TScreenEffectNode(ScreenEffectNodes[I]);
+    if not SeNode.FdEnabled.Value then
+      Continue;
     TScreenEffectResources.Prepare(RenderOptions, SeNode);
     SeNodeRes := TScreenEffectResources.Get(SeNode);
     if (SeNodeRes <> nil) and
@@ -1999,6 +2005,8 @@ begin
   for I := 0 to ScreenEffectNodes.Count - 1 do
   begin
     SeNode := TScreenEffectNode(ScreenEffectNodes[I]);
+    if not SeNode.FdEnabled.Value then
+      Continue;
     TScreenEffectResources.Prepare(RenderOptions, SeNode);
     SeNodeRes := TScreenEffectResources.Get(SeNode);
     if (SeNodeRes <> nil) and
@@ -2021,13 +2029,12 @@ var
   SeNode: TScreenEffectNode;
   SeNodeRes: TScreenEffectResource;
 begin
-  { For now: No need for TScreenEffectResources.Prepare here, ScreenEffectsCount
-    is always called first. But actually for some scenarios we should do
-    here TScreenEffectResources.Prepare? }
-
   for I := 0 to ScreenEffectNodes.Count - 1 do
   begin
     SeNode := TScreenEffectNode(ScreenEffectNodes[I]);
+    if not SeNode.FdEnabled.Value then
+      Continue;
+    TScreenEffectResources.Prepare(RenderOptions, SeNode);
     SeNodeRes := TScreenEffectResources.Get(SeNode);
     if (SeNodeRes <> nil) and
        ((SeNodeRes.ShaderProgram <> nil) or (SeNodeRes.RHIPipeline <> nil)) and

@@ -2395,6 +2395,7 @@ begin
             else
               BaseName := VarName;
             UBOMembers.AppendLine(Format('  %s u_user_%s;', [VarType, VarName]));
+            AliasDefines.AppendLine(Format('#undef %s', [BaseName]));
             AliasDefines.AppendLine(Format('#define %s CastleUserEffect.u_user_%s',
               [BaseName, BaseName]));
           end;
@@ -2528,11 +2529,12 @@ end;
 function TCastleShaderGeneratorRHI.SanitizeVulkanShaderSource(
   const Source: String): String;
 const
-  BuiltInUniformTokens: array[0..10] of String = (
+  BuiltInUniformTokens: array[0..13] of String = (
     'castle_LightSource', 'castle_projector_matrix', 'castle_ModelViewMatrix',
     'castle_ProjectionMatrix', 'castle_NormalMatrix', 'castle_JointMatrix',
     'castle_Material', 'castle_WorldEyePosition', 'castle_SceneTime', 'castle_Fog',
-    'castle_Camera'
+    'castle_CameraMatrix', 'castle_CameraInverseMatrix',
+    'castle_CameraRotationMatrix', 'castle_CameraRotationInverseMatrix'
   );
 var
   Lines: TStringList;
