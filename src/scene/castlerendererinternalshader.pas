@@ -168,6 +168,13 @@ type
     procedure BindUniforms(const Node: TX3DNode; const EnableDisable: boolean); overload;
     procedure BindUniforms(const Nodes: TX3DNodeList; const EnableDisable: boolean); overload;
     { @groupEnd }
+
+    { Does this program observe fields or events of X3D nodes
+      (BindUniforms), or hold their texture fields.
+      Such a program must not outlive its shapes
+      (InternalKeepUnusedShaderPrograms doesn't keep it): the nodes may be
+      freed, and new nodes at the same addresses would match its hash. }
+    function BoundToNodes: Boolean;
   end;
 
   TShaderSource = class
@@ -948,6 +955,13 @@ begin
   FreeAndNil(UniformsTexturesNames);
   FreeAndNil(FLightUniformsList);
   inherited;
+end;
+
+function TX3DShaderProgram.BoundToNodes: Boolean;
+begin
+  Result :=
+    ((EventsObserved <> nil) and (EventsObserved.Count <> 0)) or
+    ((UniformsTextures <> nil) and (UniformsTextures.Count <> 0));
 end;
 
 procedure TX3DShaderProgram.AddUniformTexture(const Field: TX3DField;

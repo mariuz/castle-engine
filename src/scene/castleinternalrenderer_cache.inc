@@ -172,6 +172,11 @@
       After this procedure, any Xxx_DecReference call also may free
       the cache instance. }
     procedure FreeWhenEmpty(const InstanceToNil: PObject);
+
+    { Free the programs kept by InternalKeepUnusedShaderPrograms.
+      Called when the last OpenGL context closes: they must not outlive it
+      (freed in the finalization they would use OpenGL without a context). }
+    procedure FreeUnusedPrograms;
   end;
 {$endif read_interface}
 
@@ -1062,7 +1067,9 @@ begin
         WritelnLog('--', 'Shader program (hash %s): %d', [ProgramCache.Hash.ToString, ProgramCache.References]);
       if ProgramCache.References = 0 then
       begin
-        if InternalKeepUnusedShaderPrograms > 0 then
+        if (InternalKeepUnusedShaderPrograms > 0) and
+           not ((ProgramCache.ShaderProgram <> nil) and
+                ProgramCache.ShaderProgram.BoundToNodes) then
         begin
           UnusedPrograms.Add(ProgramCache);
           if Cardinal(UnusedPrograms.Count) > InternalKeepUnusedShaderPrograms then
@@ -1094,6 +1101,16 @@ begin
     (ShapeCaches[false].Count = 0) and
     (ShapeCaches[true].Count = 0) and
     (ProgramCaches.Count = UnusedPrograms.Count);
+end;
+
+procedure TRendererCache.FreeUnusedPrograms;
+var
+  P: TShaderProgramCache;
+begin
+  for P in UnusedPrograms do
+    ProgramCaches.Remove(P); // frees P
+  UnusedPrograms.Clear;
+  CheckFreeWhenEmpty;
 end;
 
 procedure TRendererCache.CheckFreeWhenEmpty;
