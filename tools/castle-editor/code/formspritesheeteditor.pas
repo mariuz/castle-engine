@@ -255,6 +255,9 @@ type
     function FrameTitle(const FrameNo: Integer;
       const Frame: TCastleSpriteSheetFrame): String;
     procedure UpdateFrameTitles;
+    procedure DuplicateAnimationClick(Sender: TObject);
+    procedure DuplicateSelectedFramesClick(Sender: TObject);
+    procedure ReverseFramesOrderClick(Sender: TObject);
 
     { Returns current preview mode }
     function GetCurrentPreviewMode: TPreviewMode;
@@ -885,10 +888,65 @@ procedure TSpriteSheetEditorForm.FormCreate(Sender: TObject);
   {$endif}
 
 
+  procedure CreateExtraSpriteSheetMenuItems;
+  var
+    Mi: TMenuItem;
+  begin
+    if PopupMenuAnimations <> nil then
+    begin
+      Mi := TMenuItem.Create(PopupMenuAnimations);
+      Mi.Caption := '-';
+      PopupMenuAnimations.Items.Add(Mi);
+      Mi := TMenuItem.Create(PopupMenuAnimations);
+      Mi.Caption := 'Duplicate Animation';
+      Mi.OnClick := @DuplicateAnimationClick;
+      PopupMenuAnimations.Items.Add(Mi);
+    end;
+    if MenuItemAnimationMenu <> nil then
+    begin
+      Mi := TMenuItem.Create(MenuItemAnimationMenu);
+      Mi.Caption := '-';
+      MenuItemAnimationMenu.Add(Mi);
+      Mi := TMenuItem.Create(MenuItemAnimationMenu);
+      Mi.Caption := 'Duplicate Animation';
+      Mi.OnClick := @DuplicateAnimationClick;
+      MenuItemAnimationMenu.Add(Mi);
+    end;
+    if PopupMenuFrames <> nil then
+    begin
+      Mi := TMenuItem.Create(PopupMenuFrames);
+      Mi.Caption := '-';
+      PopupMenuFrames.Items.Add(Mi);
+      Mi := TMenuItem.Create(PopupMenuFrames);
+      Mi.Caption := 'Duplicate Selected Frames';
+      Mi.OnClick := @DuplicateSelectedFramesClick;
+      PopupMenuFrames.Items.Add(Mi);
+      Mi := TMenuItem.Create(PopupMenuFrames);
+      Mi.Caption := 'Reverse Frames Order';
+      Mi.OnClick := @ReverseFramesOrderClick;
+      PopupMenuFrames.Items.Add(Mi);
+    end;
+    if MenuItemFrameMenu <> nil then
+    begin
+      Mi := TMenuItem.Create(MenuItemFrameMenu);
+      Mi.Caption := '-';
+      MenuItemFrameMenu.Add(Mi);
+      Mi := TMenuItem.Create(MenuItemFrameMenu);
+      Mi.Caption := 'Duplicate Selected Frames';
+      Mi.OnClick := @DuplicateSelectedFramesClick;
+      MenuItemFrameMenu.Add(Mi);
+      Mi := TMenuItem.Create(MenuItemFrameMenu);
+      Mi.Caption := 'Reverse Frames Order';
+      Mi.OnClick := @ReverseFramesOrderClick;
+      MenuItemFrameMenu.Add(Mi);
+    end;
+  end;
+
 begin
   {$ifdef LCLCocoa}
   FixCocoa;
   {$endif}
+  CreateExtraSpriteSheetMenuItems;
   FSelectNewAnimation := true;
   FSpriteSheet := nil;
   FWindowTitle := Caption;
@@ -1328,6 +1386,121 @@ begin
       AListItem.Caption := FrameTitle(I,
         TCastleSpriteSheetFrame(AListItem.Data));
     end;
+  end;
+end;
+
+procedure TSpriteSheetEditorForm.DuplicateAnimationClick(Sender: TObject);
+var
+  Animation, NewAnimation: TCastleSpriteSheetAnimation;
+  NewName: String;
+  SuffixIdx, I: Integer;
+begin
+  Animation := GetCurrentAnimation;
+  if (FSpriteSheet = nil) or (Animation = nil) then
+    Exit;
+
+  NewName := Animation.Name + '_copy';
+  SuffixIdx := 2;
+  while FSpriteSheet.HasAnimation(NewName) do
+  begin
+    NewName := Animation.Name + '_copy' + IntToStr(SuffixIdx);
+    Inc(SuffixIdx);
+  end;
+
+  LockUpdatePreview;
+  try
+    NewAnimation := FSpriteSheet.AddAnimation(NewName);
+    NewAnimation.FramesPerSecond := Animation.FramesPerSecond;
+    for I := 0 to Animation.FrameCount - 1 do
+      NewAnimation.AddFrameCopy(Animation.Frame[I]);
+  finally
+    UnlockUpdatePreview;
+  end;
+  LoadAnimation(GetCurrentAnimation);
+end;
+
+procedure TSpriteSheetEditorForm.DuplicateSelectedFramesClick(Sender: TObject);
+var
+  Animation: TCastleSpriteSheetAnimation;
+  SelectedFrames: TSelectedFrames;
+  I, SrcIdx: Integer;
+  NewFrame: TCastleSpriteSheetFrame;
+begin
+  Animation := GetCurrentAnimation;
+  if Animation = nil then
+    Exit;
+
+  SelectedFrames := TSelectedFrames.Create(ListViewFrames);
+  try
+    SelectedFrames.GetCurrentSelection;
+    if SelectedFrames.FrameCount = 0 then
+      Exit;
+
+    LockUpdatePreview;
+    try
+      for I := SelectedFrames.FrameCount - 1 downto 0 do
+      begin
+        SrcIdx := Animation.FrameIndex(SelectedFrames.Frame[I]);
+        NewFrame := Animation.AddFrameCopy(SelectedFrames.Frame[I]);
+        if (SrcIdx >= 0) and (Animation.FrameIndex(NewFrame) > SrcIdx + 1) then
+          Animation.MoveFrame(Animation.FrameIndex(NewFrame), SrcIdx + 1);
+      end;
+    finally
+      UnlockUpdatePreview;
+    end;
+  finally
+    FreeAndNil(SelectedFrames);
+  end;
+end;
+
+procedure TSpriteSheetEditorForm.ReverseFramesOrderClick(Sender: TObject);
+var
+  Animation: TCastleSpriteSheetAnimation;
+  SelectedFrames: TSelectedFrames;
+  I, Count, IdxA, IdxB: Integer;
+  FrameA, FrameB: TCastleSpriteSheetFrame;
+begin
+  Animation := GetCurrentAnimation;
+  if (Animation = nil) or (Animation.FrameCount < 2) then
+    Exit;
+
+  SelectedFrames := TSelectedFrames.Create(ListViewFrames);
+  try
+    SelectedFrames.GetCurrentSelection;
+    LockUpdatePreview;
+    try
+      if SelectedFrames.FrameCount >= 2 then
+      begin
+        Count := SelectedFrames.FrameCount;
+        for I := 0 to (Count div 2) - 1 do
+        begin
+          FrameA := SelectedFrames.Frame[I];
+          FrameB := SelectedFrames.Frame[Count - 1 - I];
+          IdxA := Animation.FrameIndex(FrameA);
+          IdxB := Animation.FrameIndex(FrameB);
+          if (IdxA >= 0) and (IdxB >= 0) and (IdxA <> IdxB) then
+          begin
+            Animation.MoveFrame(IdxB, IdxA);
+            Animation.MoveFrame(Animation.FrameIndex(FrameA), IdxB);
+          end;
+        end;
+      end else
+      begin
+        Count := Animation.FrameCount;
+        for I := 0 to (Count div 2) - 1 do
+        begin
+          IdxA := I;
+          IdxB := Count - 1 - I;
+          FrameA := Animation.Frame[IdxA];
+          Animation.MoveFrame(IdxB, IdxA);
+          Animation.MoveFrame(Animation.FrameIndex(FrameA), IdxB);
+        end;
+      end;
+    finally
+      UnlockUpdatePreview;
+    end;
+  finally
+    FreeAndNil(SelectedFrames);
   end;
 end;
 

@@ -69,6 +69,7 @@ type
     procedure LabelDocsClick(Sender: TObject);
     procedure ListModelsSelectItem(Sender: TObject; Item: TListItem;
       Selected: Boolean);
+    procedure ListModelsDblClick(Sender: TObject);
     procedure Timer1Timer(Sender: TObject);
   private
     Models: TSketchfabModelList;
@@ -147,6 +148,7 @@ procedure TImportSketchfabForm.FormCreate(Sender: TObject);
 begin
   ImageListModelThumbnails.Width := ThumbnailOptimalWidth;
   ImageListModelThumbnails.Height := ThumbnailOptimalHeight;
+  ListModels.OnDblClick := @ListModelsDblClick;
 end;
 
 procedure TImportSketchfabForm.FormDestroy(Sender: TObject);
@@ -189,6 +191,20 @@ procedure TImportSketchfabForm.ListModelsSelectItem(Sender: TObject;
   Item: TListItem; Selected: Boolean);
 begin
   UpdateEnabled;
+end;
+
+procedure TImportSketchfabForm.ListModelsDblClick(Sender: TObject);
+begin
+  if ListModels.Selected = nil then
+    Exit;
+  if ButtonDownloadAndAddViewport.Enabled then
+    ButtonDownloadAndAddViewportClick(Sender)
+  else
+  if (Trim(EditApiToken.Text) <> '') and ButtonDownloadOnly.Enabled then
+    ButtonDownloadOnlyClick(Sender)
+  else
+  if ButtonViewSketchfab.Enabled then
+    ButtonViewSketchfabClick(Sender);
 end;
 
 procedure TImportSketchfabForm.Timer1Timer(Sender: TObject);
@@ -253,18 +269,25 @@ procedure TImportSketchfabForm.ThumbnailDownloaded(const Model: TSketchfabModel)
     {$endif}
     RawImage.CreateData(True);
 
-    IntfImage := TLazIntfImage.Create(0, 0);
-    IntfImage.SetRawImage(RawImage);
-    CustomFPImage := Image.ToFpImage;
+    IntfImage := nil;
+    Bitmap := nil;
     try
-      IntfImage.CopyPixels(CustomFPImage);
-    finally
-      FreeAndNil(CustomFPImage);
-    end;
+      IntfImage := TLazIntfImage.Create(0, 0);
+      IntfImage.SetRawImage(RawImage);
+      CustomFPImage := Image.ToFpImage;
+      try
+        IntfImage.CopyPixels(CustomFPImage);
+      finally
+        FreeAndNil(CustomFPImage);
+      end;
 
-    Bitmap := TBitmap.Create;
-    Bitmap.LoadFromIntfImage(IntfImage);
-    Result := ImageListModelThumbnails.Add(Bitmap, nil);
+      Bitmap := TBitmap.Create;
+      Bitmap.LoadFromIntfImage(IntfImage);
+      Result := ImageListModelThumbnails.Add(Bitmap, nil);
+    finally
+      FreeAndNil(Bitmap);
+      FreeAndNil(IntfImage);
+    end;
   end;
 
 var
@@ -321,20 +344,27 @@ procedure TImportSketchfabForm.ButtonSearchClick(Sender: TObject);
 var
   M: TSketchfabModel;
   ListItem: TListItem;
+  SavedCursor: TCursor;
 begin
   ListModels.Items.Clear;
   FreeAndNil(Models);
   ImageListModelThumbnails.Clear;
 
-  Models := TSketchfabModel.Search(EditQuery.Text, CheckBoxAnimated.Checked);
-  for M in Models do
-  begin
-    ListItem := ListModels.Items.Add;
-    ListItem.Data := M;
-    ListItem.Caption := M.Name;
-    ListItem.SubItems.Append(IntToStr(M.FaceCount));
-    ListItem.SubItems.Append(M.License);
-    ListItem.SubItems.Append(DescriptionCut(M.Description));
+  SavedCursor := Screen.Cursor;
+  Screen.Cursor := crHourGlass;
+  try
+    Models := TSketchfabModel.Search(EditQuery.Text, CheckBoxAnimated.Checked);
+    for M in Models do
+    begin
+      ListItem := ListModels.Items.Add;
+      ListItem.Data := M;
+      ListItem.Caption := M.Name;
+      ListItem.SubItems.Append(IntToStr(M.FaceCount));
+      ListItem.SubItems.Append(M.License);
+      ListItem.SubItems.Append(DescriptionCut(M.Description));
+    end;
+  finally
+    Screen.Cursor := SavedCursor;
   end;
 
   UpdateEnabled;
@@ -344,24 +374,31 @@ function TImportSketchfabForm.DownloadSelectedModel: String;
 var
   Model: TSketchfabModel;
   BasePath, ZipFileName, ZipUnpackDir, ModelFileName: String;
+  SavedCursor: TCursor;
 begin
   if Trim(EditApiToken.Text) = '' then
     raise Exception.Create('You must provide Sketchfab API token to download');
 
-  Model := TObject(ListModels.Selected.Data) as TSketchfabModel;
-  Model.StartDownload(EditApiToken.Text);
+  SavedCursor := Screen.Cursor;
+  Screen.Cursor := crHourGlass;
+  try
+    Model := TObject(ListModels.Selected.Data) as TSketchfabModel;
+    Model.StartDownload(EditApiToken.Text);
 
-  BasePath := ProjectPath + 'data' + PathDelim + 'sketchfab' + PathDelim;
-  ForceDirectories(BasePath);
-  ZipFileName := BasePath + Model.ModelPrettyId + '.zip';
-  ZipUnpackDir := BasePath + Model.ModelPrettyId;
-  Model.DownloadZip(ZipFileName);
-  Model.ExtractZip(ZipFileName, ZipUnpackDir);
+    BasePath := ProjectPath + 'data' + PathDelim + 'sketchfab' + PathDelim;
+    ForceDirectories(BasePath);
+    ZipFileName := BasePath + Model.ModelPrettyId + '.zip';
+    ZipUnpackDir := BasePath + Model.ModelPrettyId;
+    Model.DownloadZip(ZipFileName);
+    Model.ExtractZip(ZipFileName, ZipUnpackDir);
 
-  OnRefreshFiles(Self);
+    OnRefreshFiles(Self);
 
-  ModelFileName := InclPathDelim(ZipUnpackDir) + 'scene.gltf';
-  Result := MaybeUseDataProtocol(FilenameToUriSafe(ModelFileName));
+    ModelFileName := InclPathDelim(ZipUnpackDir) + 'scene.gltf';
+    Result := MaybeUseDataProtocol(FilenameToUriSafe(ModelFileName));
+  finally
+    Screen.Cursor := SavedCursor;
+  end;
 end;
 
 procedure TImportSketchfabForm.ButtonDownloadOnlyClick(Sender: TObject);

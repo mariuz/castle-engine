@@ -156,6 +156,8 @@ begin
     along with EditorVolume, but it is natural to also modify the audible
     volume immediately. }
   SoundEngineSetVolume(TrackVolume.Position / TrackVolume.Max);
+  if TrackVolume.Max > 0 then
+    LabelVolume.Caption := Format('Volume (%d%%):', [Round(TrackVolume.Position * 100 / TrackVolume.Max)]);
 end;
 
 procedure TPreferencesForm.UpdateAutoDetectedLabels;
@@ -321,6 +323,8 @@ begin
 
   // sound tab
   TrackVolume.Position := Round(EditorVolume * TrackVolume.Max);
+  if TrackVolume.Max > 0 then
+    LabelVolume.Caption := Format('Volume (%d%%):', [Round(TrackVolume.Position * 100 / TrackVolume.Max)]);
   CheckBoxMuteOnRun.Checked := MuteOnRun;
 end;
 

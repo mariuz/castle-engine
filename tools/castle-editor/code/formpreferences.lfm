@@ -677,7 +677,6 @@ object PreferencesForm: TPreferencesForm
       MaxLength = 0
       ParentFont = False
       TabOrder = 0
-      OnChange = DirectoryEditCgePathChange
     end
     object LabelAndroidHomeHint: TLabel
       AnchorSideTop.Control = DirectoryEditAndroidHome
@@ -717,7 +716,6 @@ object PreferencesForm: TPreferencesForm
       MaxLength = 0
       ParentFont = False
       TabOrder = 1
-      OnChange = DirectoryEditCgePathChange
     end
     object LabelJavaHomeHint: TLabel
       AnchorSideLeft.Control = LabelJavaHome
