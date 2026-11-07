@@ -43,6 +43,9 @@ type
     FLightRenderEvent: TLightRenderEvent;
     FLightZeroEvent: TLightZeroEvent;
     LightsDone: array of PLightInstance;
+    { a shape's lights (shader pipeline) before they are sorted and enabled }
+    Pending: array of PLightInstance;
+    PendingZero: array of Boolean;
     FMaxLightsPerShape: Cardinal;
     { This avoids configuring the same light many times in case of fixed-function.
 
@@ -274,6 +277,8 @@ begin
       new items with @nil, which is what we want, so that NeedsRenderLight
       treats it OK. }
     SetLength(LightsDone, FMaxLightsPerShape);
+    SetLength(Pending, FMaxLightsPerShape);
+    SetLength(PendingZero, FMaxLightsPerShape);
   end;
 end;
 
@@ -440,6 +445,72 @@ var
       Result := ChosenProbe = nil;
   end;
 
+  var
+    { number of Pending lights }
+    PendingCount: Cardinal;
+
+  { What decides a light's shader code: the effects plugged into it,
+    its node class and the defines of TLightShader.Prepare. }
+  function LightKind(const Light: PLightInstance; out Effects, Cls: PtrUInt): Integer;
+  var
+    Pos: TAbstractPositionalLightNode;
+  begin
+    Effects := 0;
+    if Light^.Node.FdEffects.Count > 0 then
+      Effects := PtrUInt(Light^.Node.FdEffects[0]);
+    Cls := PtrUInt(Light^.Node.ClassType);
+    Result := Ord(Light^.Node.FdAmbientIntensity.Value <> 0);
+    if Light^.Node is TAbstractPositionalLightNode then
+    begin
+      Pos := TAbstractPositionalLightNode(Light^.Node);
+      Result := Result + 2 * Ord(Pos.HasAttenuation) + 4 * Ord(Pos.HasRadius) +
+        8 * Ord(Pos.HasRadius and Pos.HasRadiusFalloff);
+    end;
+  end;
+
+  function LightKindLess(const A, B: PLightInstance): Boolean;
+  var
+    EA, CA, EB, CB: PtrUInt;
+    KA, KB: Integer;
+  begin
+    KA := LightKind(A, EA, CA);
+    KB := LightKind(B, EB, CB);
+    if EA <> EB then
+      Exit(EA < EB);
+    if CA <> CB then
+      Exit(CA < CB);
+    Result := KA < KB;
+  end;
+
+  { Enable the pending lights ordered by their kind: a shader program
+    depends on the kind of light at each light number, so the same set of
+    kinds in another order (a shape moving among the lights) would
+    otherwise need another program. Lights add up, so the order doesn't
+    change the result. }
+  procedure EnablePending;
+  var
+    I, J: Integer;
+    L: PLightInstance;
+    Z: Boolean;
+  begin
+    for I := 1 to Integer(PendingCount) - 1 do
+    begin
+      L := Pending[I];
+      Z := PendingZero[I];
+      J := I - 1;
+      while (J >= 0) and LightKindLess(L, Pending[J]) do
+      begin
+        Pending[J + 1] := Pending[J];
+        PendingZero[J + 1] := PendingZero[J];
+        Dec(J);
+      end;
+      Pending[J + 1] := L;
+      PendingZero[J + 1] := Z;
+    end;
+    for I := 0 to Integer(PendingCount) - 1 do
+      Shader.EnableLight(I, Pending[I], PendingZero[I]);
+  end;
+
   procedure AddList(const Lights: TLightInstancesList; const IsGlobalLight: Boolean);
   var
     I: Integer;
@@ -470,9 +541,17 @@ var
 
       if LightOn and InsideLightRadius(Light^) and ProbeUsed(Light) then
       begin
-        if NeedRenderLight(LightsEnabled, Light) then
-          glLightFromX3DLight(LightsEnabled, Light^, RenderingCamera);
-        Shader.EnableLight(LightsEnabled, Light, Zero);
+        if GLFeatures.EnableFixedFunction then
+        begin
+          if NeedRenderLight(LightsEnabled, Light) then
+            glLightFromX3DLight(LightsEnabled, Light^, RenderingCamera);
+          Shader.EnableLight(LightsEnabled, Light, Zero);
+        end else
+        begin
+          Pending[PendingCount] := Light;
+          PendingZero[PendingCount] := Zero;
+          Inc(PendingCount);
+        end;
         Inc(LightsEnabled);
         if LightsEnabled >= FMaxLightsPerShape then Exit;
       end;
@@ -489,24 +568,29 @@ begin
 
   LightsEnabled := 0;
   if LightsEnabled >= FMaxLightsPerShape then Exit;
+  PendingCount := 0;
+  try
+    ChosenProbe := nil;
+    BestProbeVolume := 0;
+    if GlobalLights <> nil then
+      ChooseProbe(GlobalLights, true, BestProbeVolume);
+    if SceneLights <> nil then
+      ChooseProbe(SceneLights, false, BestProbeVolume);
 
-  ChosenProbe := nil;
-  BestProbeVolume := 0;
-  if GlobalLights <> nil then
-    ChooseProbe(GlobalLights, true, BestProbeVolume);
-  if SceneLights <> nil then
-    ChooseProbe(SceneLights, false, BestProbeVolume);
+    if GlobalLights <> nil then
+    begin
+      AddList(GlobalLights, true);
+      if LightsEnabled >= FMaxLightsPerShape then Exit;
+    end;
 
-  if GlobalLights <> nil then
-  begin
-    AddList(GlobalLights, true);
-    if LightsEnabled >= FMaxLightsPerShape then Exit;
-  end;
-
-  if SceneLights <> nil then
-  begin
-    AddList(SceneLights, false);
-    if LightsEnabled >= FMaxLightsPerShape then Exit;
+    if SceneLights <> nil then
+    begin
+      AddList(SceneLights, false);
+      if LightsEnabled >= FMaxLightsPerShape then Exit;
+    end;
+  finally
+    if PendingCount > 0 then
+      EnablePending;
   end;
 
   if GLFeatures.EnableFixedFunction then

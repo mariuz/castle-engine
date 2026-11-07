@@ -48,6 +48,9 @@
     TextureDepthOrFloatCaches: TTextureDepthOrFloatCacheList;
     ShapeCaches: array [{ DisableSharedCache } Boolean] of TShapeCacheList;
     ProgramCaches: TShaderProgramCacheList;
+    { programs with References = 0 kept (InternalKeepUnusedShaderPrograms),
+      the least recently released first }
+    UnusedPrograms: TShaderProgramCacheList;
 
     function Empty: Boolean;
 
@@ -189,6 +192,7 @@ begin
   for B := Low(Boolean) to High(Boolean) do
     ShapeCaches[B] := TShapeCacheList.Create;
   ProgramCaches := TShaderProgramCacheList.Create;
+  UnusedPrograms := TShaderProgramCacheList.Create(false);
 end;
 
 destructor TRendererCache.Destroy;
@@ -254,8 +258,9 @@ begin
 
   if ProgramCaches <> nil then
   begin
-    Assert(ProgramCaches.Count = 0, 'Some references to GLSL programs still exist' +
+    Assert(ProgramCaches.Count = UnusedPrograms.Count, 'Some references to GLSL programs still exist' +
       ' when freeing TRendererCache');
+    FreeAndNil(UnusedPrograms);
     FreeAndNil(ProgramCaches);
   end;
 
@@ -992,6 +997,8 @@ begin
     Result := ProgramCaches[I];
     if Result.Hash = Shader.CodeHash then
     begin
+      if Result.References = 0 then
+        UnusedPrograms.Remove(Result);
       Inc(Result.References);
       if LogRendererCache then
         WritelnLog('++', 'Shader program (hash %s): %d', [Result.Hash.ToString, Result.References]);
@@ -1054,7 +1061,18 @@ begin
       if LogRendererCache then
         WritelnLog('--', 'Shader program (hash %s): %d', [ProgramCache.Hash.ToString, ProgramCache.References]);
       if ProgramCache.References = 0 then
-        ProgramCaches.Delete(I);
+      begin
+        if InternalKeepUnusedShaderPrograms > 0 then
+        begin
+          UnusedPrograms.Add(ProgramCache);
+          if Cardinal(UnusedPrograms.Count) > InternalKeepUnusedShaderPrograms then
+          begin
+            ProgramCaches.Remove(UnusedPrograms[0]);
+            UnusedPrograms.Delete(0);
+          end;
+        end else
+          ProgramCaches.Delete(I);
+      end;
       ProgramCache := nil;
       CheckFreeWhenEmpty;
       Exit;
@@ -1075,7 +1093,7 @@ begin
     (TextureDepthOrFloatCaches.Count = 0) and
     (ShapeCaches[false].Count = 0) and
     (ShapeCaches[true].Count = 0) and
-    (ProgramCaches.Count = 0);
+    (ProgramCaches.Count = UnusedPrograms.Count);
 end;
 
 procedure TRendererCache.CheckFreeWhenEmpty;
