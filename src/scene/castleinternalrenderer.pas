@@ -227,6 +227,7 @@ initialization
 
   RendererCache := TRendererCache.Create;
   ApplicationProperties.OnGLContextClose.Add(@ShadowMapAtlasContextClose);
+  ApplicationProperties.OnGLContextClose.Add(@RendererCacheContextClose);
 finalization
   RendererCache.FreeWhenEmpty(@RendererCache);
 end.

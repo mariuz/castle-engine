@@ -2256,6 +2256,12 @@ begin
   FreeAndNil(ShadowMapAtlas);
 end;
 
+procedure RendererCacheContextClose;
+begin
+  if RendererCache <> nil then
+    RendererCache.FreeUnusedPrograms;
+end;
+
 constructor TShadowMapAtlas.Create(const ASize: Cardinal);
 var
   Levels, I: Integer;

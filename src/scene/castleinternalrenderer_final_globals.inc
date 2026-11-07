@@ -57,6 +57,15 @@ var
     Meaningful only if you initialized log (see CastleLog unit) by InitializeLog first. }
   LogRendererCache: boolean = false;
 
+  { How many shader programs no shape uses any more are kept (linked)
+    for shapes that need them again, instead of being freed at once.
+    A shape's program depends on its lights, so a moving shape switches
+    between programs as it moves among the lights, and shapes created
+    again and again (projectiles, debris) need the same programs each time:
+    with 0 (default) every switch back links its program again
+    (a compile stall). The least recently released ones go first. }
+  InternalKeepUnusedShaderPrograms: Cardinal = 0;
+
   { Log various renderer information.
 
     Meaningful only if you initialized log (see CastleLog unit) by InitializeLog first. }
