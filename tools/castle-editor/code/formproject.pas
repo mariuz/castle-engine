@@ -598,6 +598,7 @@ type
       MenuItemDrop3DReviewPin: TMenuItem;
       FWasmPreviewServer: TWasmPreviewHttpServer;
       MenuItemWasmPreview: TMenuItem;
+      MenuItemPrefabOverrides: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -616,6 +617,7 @@ type
     procedure MenuItemWasmPreviewClick(Sender: TObject);
     procedure WasmPreviewServerLog(const Msg: String);
     procedure CompileWebTargetFromPreviewDialog;
+    procedure MenuItemPrefabOverridesClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2231,6 +2233,11 @@ begin
   MenuItemDrop3DReviewPin.OnClick := @MenuItemDrop3DReviewPinClick;
   MenuItemDesign.Add(MenuItemDrop3DReviewPin);
 
+  MenuItemPrefabOverrides := TMenuItem.Create(MenuItemDesign);
+  MenuItemPrefabOverrides.Caption := 'Prefab Property Overrides (Set / Revert / Apply to Source)...';
+  MenuItemPrefabOverrides.OnClick := @MenuItemPrefabOverridesClick;
+  MenuItemDesign.Add(MenuItemPrefabOverrides);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -2889,6 +2896,8 @@ begin
     MenuItemReviewPins.Enabled := Design <> nil;
   if MenuItemDrop3DReviewPin <> nil then
     MenuItemDrop3DReviewPin.Enabled := Design <> nil;
+  if MenuItemPrefabOverrides <> nil then
+    MenuItemPrefabOverrides.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5144,6 +5153,12 @@ begin
   finally
     FreeAndNil(Dlg);
   end;
+end;
+
+procedure TProjectForm.MenuItemPrefabOverridesClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowPrefabOverridesDialog;
 end;
 
 initialization

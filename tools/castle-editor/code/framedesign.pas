@@ -36,10 +36,12 @@ uses
   CastleCameras, CastleBoxes, CastleTransform, CastleDebugTransform,
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
+  CastlePrefabOverrides,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
-  DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations;
+  DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
+  ToolPrefabOverrides;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -717,6 +719,8 @@ type
       MenuTreeViewItemDrop3DReviewPin: TMenuItem;
       ButtonReviewPins: TSpeedButton;
       FShowAnnotationPinsOverlay: Boolean;
+      MenuTreeViewItemPrefabOverrides: TMenuItem;
+      ButtonPrefabOverrides: TSpeedButton;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
       FCopiedComponentPropsClassName: String;
@@ -1137,6 +1141,8 @@ type
     procedure MenuTreeViewItemDrop3DReviewPinClick(Sender: TObject);
     procedure ButtonReviewPinsClick(Sender: TObject);
     procedure ReviewPinsToggleOverlayCallback(const AVisible: Boolean);
+    procedure MenuTreeViewItemPrefabOverridesClick(Sender: TObject);
+    procedure ButtonPrefabOverridesClick(Sender: TObject);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
     function NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
@@ -2544,6 +2550,9 @@ type
     procedure ShowDesignAnnotationsDialog;
     procedure Drop3DAnnotationPinAtCamera(const ACategory: TDesignAnnotationCategory = dacTodo);
     procedure ToggleAnnotationPinsOverlay;
+
+    { Scene-Graph Non-Destructive Prefab Property Overrides (Phase 285). }
+    procedure ShowPrefabOverridesDialog;
   end;
 
 implementation
@@ -2563,7 +2572,7 @@ uses
   { Editor units }
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
-  CastleComponentEditorDesigner;
+  FormPrefabOverrides, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -5766,6 +5775,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonReviewPins,
       PanelMiddleTop.GetControlIndex(ButtonNprShaderStudio) + 1);
 
+  ButtonPrefabOverrides := TSpeedButton.Create(Self);
+  ButtonPrefabOverrides.Caption := 'Overrides';
+  ButtonPrefabOverrides.Hint := 'Open Scene-Graph Non-Destructive Prefab Property Overrides Studio.' + NL +
+    'Override child properties inside TCastleTransformDesign & TCastleDesign instances without unlinking Url, revert individual properties, or apply overrides back to the source prefab.';
+  ButtonPrefabOverrides.ShowHint := true;
+  ButtonPrefabOverrides.AutoSize := true;
+  ButtonPrefabOverrides.Constraints.MinHeight := 33;
+  ButtonPrefabOverrides.Constraints.MinWidth := 62;
+  ButtonPrefabOverrides.BorderSpacing.Left := 2;
+  ButtonPrefabOverrides.OnClick := @ButtonPrefabOverridesClick;
+  ButtonPrefabOverrides.Parent := PanelMiddleTop;
+  if ButtonReviewPins.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonPrefabOverrides,
+      PanelMiddleTop.GetControlIndex(ButtonReviewPins) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -8555,6 +8579,11 @@ begin
   MenuTreeViewItemDrop3DReviewPin.Caption := 'Drop 3D Spatial Review Pin at Current Camera';
   MenuTreeViewItemDrop3DReviewPin.OnClick := @MenuTreeViewItemDrop3DReviewPinClick;
   MenuTreeView.Items.Add(MenuTreeViewItemDrop3DReviewPin);
+
+  MenuTreeViewItemPrefabOverrides := TMenuItem.Create(Self);
+  MenuTreeViewItemPrefabOverrides.Caption := 'Prefab Property Overrides (Set / Revert / Apply to Source)...';
+  MenuTreeViewItemPrefabOverrides.OnClick := @MenuTreeViewItemPrefabOverridesClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemPrefabOverrides);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -13726,6 +13755,10 @@ var
         Suffix := Suffix + ' ' + TCastleDesignAnnotation(NodeObj).PinSummaryBadge
       else if NodeObj is TCastleDesignAnnotationUi then
         Suffix := Suffix + ' ' + TCastleDesignAnnotationUi(NodeObj).PinSummaryBadge
+      else if (NodeObj is TComponent) and
+              (TPrefabOverrideManager.ActiveOverrideCount(TComponent(NodeObj)) > 0) then
+        Suffix := Suffix + Format(' [Overrides:%d]',
+          [TPrefabOverrideManager.ActiveOverrideCount(TComponent(NodeObj))])
       else if TComponent(NodeObj).Tag <> 0 then
         Suffix := Suffix + ' [Tag:' + IntToStr(TComponent(NodeObj).Tag) + ']';
     end;
@@ -52459,6 +52492,45 @@ begin
     Drop3DAnnotationPinAtCamera(dacTodo)
   else
     ShowDesignAnnotationsDialog;
+end;
+
+{ Scene-Graph Non-Destructive Prefab Property Overrides (Phase 285) ---------- }
+
+procedure TDesignFrame.ShowPrefabOverridesDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  InitComp: TComponent;
+  Dlg: TPrefabOverridesForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  InitComp := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount > 0 then
+      InitComp := Selected[0];
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  Dlg := TPrefabOverridesForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    InitComp, @NprStudioModifiedCallback);
+  try
+    Dlg.ShowModal;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemPrefabOverridesClick(Sender: TObject);
+begin
+  ShowPrefabOverridesDialog;
+end;
+
+procedure TDesignFrame.ButtonPrefabOverridesClick(Sender: TObject);
+begin
+  ShowPrefabOverridesDialog;
 end;
 
 initialization

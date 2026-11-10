@@ -109,7 +109,8 @@ uses
   TestCastleTerrain,
   TestToolNprShaderStudio,
   TestToolDesignAnnotations,
-  { defined(FPC) and (not defined(WASI))}TestToolWasmPreviewServer,{}
+  {$if defined(FPC) and (not defined(WASI))}TestToolWasmPreviewServer,{$endif}
+  TestToolPrefabOverrides,
   TestCastleVulkanRHI;
 
 implementation

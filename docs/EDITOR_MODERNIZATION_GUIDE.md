@@ -2521,6 +2521,39 @@ end;
 
 ---
 
+## 66J. Horizon 2 — Scene-Graph Style Non-Destructive Prefab Property Overrides (Phase 285 / UE 6.0 Scene Graph Parity)
+
+Inspired by **Unreal Engine 6.0's Scene Graph Prefab System and Unity's Per-Instance Prefab Overrides**, `TCastlePrefabOverride` (`src/scene/castleprefaboverrides.pas`), `TPrefabOverrideManager` (`tools/common-code/toolprefaboverrides.pas`), and `TPrefabOverridesForm` (`tools/castle-editor/code/formprefaboverrides.pas`) allow designers to customize child transforms, lights, labels, buttons, colors, and visibility inside referenced `TCastleTransformDesign` and `TCastleDesign` instances without unlinking `Url`.
+
+### Key Capabilities
+1. **Zero-Unlink Runtime & Editor Override Persistence (`TCastlePrefabOverride`)**:
+   - Attaches inside `$NonVisualComponents` on any `TCastleTransformDesign` or `TCastleDesign` instance (`[Overrides:N]` badge in the Hierarchy tree).
+   - Walks arbitrary scalar and dotted persistent sub-component RTTI paths (`ApplyRttiPropertyPathJson` / `ReadRttiPropertyPathJson`, e.g. `TranslationPersistent.Y`, `ScalePersistent.X`, `ColorPersistent.Red`, `Caption`, `FontSize`, `Intensity`, `Exists`) and automatically re-applies overrides whenever the parent design loads (`Loaded`) or reloads (`ReloadTargetAndReapply`).
+2. **Live Diff Capture, Selective Revert & Promote to Source (`TPrefabOverrideManager`)**:
+   - `CaptureLiveEditsFromInstance` compares the live `DesignRoot` against a clean load of `Url`, automatically recording only modified child properties.
+   - `RevertSingleOverride` and `RevertAllOverrides` restore clean source prefab defaults and automatically prune empty `TCastlePrefabOverride` nodes.
+   - `ApplyOverridesToSourcePrefab` writes instance overrides permanently into the `.castle-transform` or `.castle-user-interface` file on disk so sibling instances inherit the promoted values.
+3. **Interactive Prefab Overrides Studio (`TPrefabOverridesForm`)**:
+   - Open via the top-bar **`Overrides`** button, **`Design -> Prefab Property Overrides (Set / Revert / Apply to Source)...`**, or the Hierarchy context menu.
+
+### Example Usage (Pascal API)
+```pascal
+// Override child label caption & font size on a single UI card prefab instance:
+TPrefabOverrideManager.SetOverrideFromString(CardA, DesignOwner, 'CardTitle', 'Caption', 'Boss Key');
+TPrefabOverrideManager.SetOverrideFromString(CardA, DesignOwner, 'CardTitle', 'FontSize', '28');
+
+// Revert just FontSize back to the prefab default, or promote remaining overrides to disk:
+TPrefabOverrideManager.RevertSingleOverride(CardA, 'CardTitle', 'FontSize');
+TPrefabOverrideManager.ApplyOverridesToSourcePrefab(CardA, SavedUrl);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Reusable Designs (`TCastleTransformDesign` / `TCastleDesign`)](https://castle-engine.io/manual_editor.php) · [CGE Custom Components & Serialization](https://castle-engine.io/custom_components) · [UE Level Instancing & Prefab Workflows](https://dev.epicgames.com/documentation/en-us/unreal-engine/level-instancing-in-unreal-engine) · [Unity Prefab Instance Overrides](https://docs.unity3d.com/Manual/PrefabInstanceOverrides.html)
+- **Videos & Movies:** 🎬 [CGE Official Video — Reusable Sub-Designs in CGE Editor (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [Animated Prefab Override & Revert Workflow](https://docs.godotengine.org/en/stable/_images/containers_split_drag.gif)
+- **Screenshots:** [CGE Visual Editor Hierarchy](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector Properties](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2593,4 +2626,5 @@ In addition, Horizon 2 editor subsystems include dedicated automated test suites
 - **[`tests/code/testcases/testtoolnprshaderstudio.pas`](../tests/code/testcases/testtoolnprshaderstudio.pas) (`TTestToolNprShaderStudio` — 2 tests)**: Verifies all 5 `TCastleStylizedShaderPreset` GLSL generators (`PLUG_lighting_apply`, `PLUG_material_light_diffuse`, `PLUG_fragment_modify`), X3D `TEffectNode` attach/enable/disable/remove lifecycle on `TCastleScene`, `.castle-transform` JSON serialization roundtrip, and `TLightShadowBudgetAuditor` multi-light overlap hotspot scoring, multi-shadow-volume conflict detection, `EnsureSingleShadowVolumeLight`, and `ClampUnboundedLightRadii` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldesignannotations.pas`](../tests/code/testcases/testtooldesignannotations.pas) (`TTestToolDesignAnnotations` — 2 tests)**: Verifies `TCastleDesignAnnotation` and `TCastleDesignAnnotationUi` zero runtime bounding-box footprint (`appRunning` vs. `appDesign`), world-space camera viewpoint bookmark capture/restore, JSON serialization roundtrip, `TDesignAnnotationManager.ScanDesign` priority sorting and blocker warnings, category/status/text filtering, Markdown checklist export, `MarkAllResolved`, and `DeleteResolvedPins` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolwasmpreviewserver.pas`](../tests/code/testcases/testtoolwasmpreviewserver.pas) (`TTestToolWasmPreviewServer` — 2 tests)**: Verifies `.wasm`/`.js`/`.zip` MIME mapping, `ResolveSafeFilePath` directory-traversal rejection, `InjectAutoReloadScript`, `TWasmBundleProfiler.ProfileWebBundle` category byte totals, 3G/4G/Broadband download estimates, and `.wav` optimization hints, plus live multithreaded localhost HTTP roundtrips verifying `application/wasm`, `COOP`/`COEP` headers, and `/__cge_live_reload` build-stamp updates (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolprefaboverrides.pas`](../tests/code/testcases/testtoolprefaboverrides.pas) (`TTestToolPrefabOverrides` — 2 tests)**: Verifies 3D `TCastleTransformDesign` and 2D `TCastleDesign` per-instance child RTTI property & sub-component overrides (`TranslationPersistent.Y`, `Exists`, `Intensity`, `Caption`, `FontSize`), `CaptureLiveEditsFromInstance`, parent design JSON serialization roundtrip with automatic override re-application, sibling prefab isolation, `RevertSingleOverride`, and `ApplyOverridesToSourcePrefab` (`0 unfreed memory blocks`).
 

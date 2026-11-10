@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="41">
+    <Units Count="43">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -287,6 +287,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormWasmPreview"/>
       </Unit40>
+      <Unit41>
+        <Filename Value="../common-code/toolprefaboverrides.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolPrefabOverrides"/>
+      </Unit41>
+      <Unit42>
+        <Filename Value="code/formprefaboverrides.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormPrefabOverrides"/>
+      </Unit42>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
