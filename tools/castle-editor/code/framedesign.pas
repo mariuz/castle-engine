@@ -35,7 +35,7 @@ uses
   CastleViewport, CastleClassUtils, CastleControls, CastleTiledMap,
   CastleCameras, CastleBoxes, CastleTransform, CastleDebugTransform,
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
-  CastleUtils,
+  CastleImages, CastleUtils,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
@@ -2388,6 +2388,15 @@ type
       read FMaximizePreview write SetMaximizePreview default false;
     property ShowNonVisualComponents: Boolean
       read FShowNonVisualComponents write SetShowNonVisualComponents default true;
+
+    { MCP host integration helpers used by TEditorMcpBridge. }
+    function CurrentDesignOwner: TComponent;
+    procedure RefreshAfterMcpModify(const UndoComment: String);
+    function McpDeleteComponent(const TargetComp: TComponent;
+      out ErrorReason: String): Boolean;
+    function McpUndoRedo(const IsRedo: Boolean;
+      out ExecutedComment: String): Boolean;
+    function McpCaptureViewportImage: TRGBImage;
   end;
 
 implementation
@@ -2398,7 +2407,7 @@ uses
   {$ifdef VER3_0} {$ifdef MSWINDOWS} Windows, {$endif} {$endif}
   TypInfo, StrUtils, Math, Graphics, Types, Dialogs, LCLType, ObjInspStrConsts,
   { CGE units }
-  CastleComponentSerialize, CastleFileFilters, CastleFrustum, CastleGLUtils, CastleImages,
+  CastleComponentSerialize, CastleFileFilters, CastleFrustum, CastleGLUtils,
   CastleLog, CastleProjection, CastleQuaternions, CastleStringUtils, CastleTimeUtils,
   CastleUriUtils, X3DLoad, CastleFilesUtils, CastleInternalPhysicsVisualization,
   CastleInternalUrlUtils, CastleInternalFileMonitor, X3DNodes, CastleSoundEngine,
@@ -50263,6 +50272,73 @@ begin
   finally
     FreeAndNil(Selected);
   end;
+end;
+
+function TDesignFrame.CurrentDesignOwner: TComponent;
+begin
+  Result := DesignOwner;
+end;
+
+procedure TDesignFrame.RefreshAfterMcpModify(const UndoComment: String);
+begin
+  if FDesignRoot = nil then
+    Exit;
+  UpdateDesign;
+  UpdateSelectedControl;
+  ModifiedOutsideObjectInspector(UndoComment, ucHigh);
+end;
+
+function TDesignFrame.McpDeleteComponent(const TargetComp: TComponent;
+  out ErrorReason: String): Boolean;
+begin
+  ErrorReason := '';
+  if TargetComp = nil then
+  begin
+    ErrorReason := 'Target component is nil.';
+    Exit(false);
+  end;
+  if not Deletable(TargetComp) then
+  begin
+    ErrorReason := Format('Component "%s" cannot be deleted.', [TargetComp.Name]);
+    Exit(false);
+  end;
+  ControlsTree.ClearSelection;
+  FreeComponentRecursively(TargetComp);
+  UpdateDesign;
+  UpdateSelectedControl;
+  Result := true;
+end;
+
+function TDesignFrame.McpUndoRedo(const IsRedo: Boolean;
+  out ExecutedComment: String): Boolean;
+begin
+  ExecutedComment := '';
+  if UndoSystem = nil then
+    Exit(false);
+  if IsRedo then
+  begin
+    if not UndoSystem.IsRedoPossible then
+      Exit(false);
+    ExecutedComment := UndoSystem.RedoComment;
+    PerformRedo;
+    Result := true;
+  end else
+  begin
+    if not UndoSystem.IsUndoPossible then
+      Exit(false);
+    ExecutedComment := UndoSystem.UndoComment;
+    PerformUndo;
+    Result := true;
+  end;
+end;
+
+function TDesignFrame.McpCaptureViewportImage: TRGBImage;
+begin
+  if (CastleControl <> nil) and (CastleControl.Container <> nil) and
+     CastleControl.Container.GLInitialized then
+    Result := CastleControl.Container.SaveScreen
+  else
+    Result := nil;
 end;
 
 initialization

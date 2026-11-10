@@ -2266,6 +2266,39 @@ Manipulate.ScaleSelectedPlanar(1 {XZ footprint scale}, 1.5);
 
 ---
 
+## 66C. Horizon 2 — Embedded Model Context Protocol (MCP) Server & Agentic Editor Automation Bridge (Phase 278 / UE 5.8–5.9 Parity)
+
+Inspired by **Unreal Engine 5.8/5.9's Official Editor MCP Server & Developer Assistant**, `castle-editor` embeds an opt-in localhost JSON-RPC 2.0 **Model Context Protocol (`2025-03-26`)** server (`TCastleMcpServer` in `tools/common-code/toolmcpserver.pas` + `TEditorMcpBridge` in `tools/castle-editor/code/editormcpserver.pas`) so external AI coding assistants (Claude Code, Cursor, VS Code, Antigravity) and automation scripts can inspect and edit live `.castle-user-interface` / `.castle-transform` scenes safely on the main LCL thread.
+
+### Autonomy Modes & Security
+- **Loopback-Only Binding**: Rejects non-loopback HTTP requests (`403 Forbidden`), accepting only `127.0.0.1` / `::1` connections (`default port 8765`).
+- **Optional Bearer Token Authentication**: Configure an `Authorization: Bearer <token>` secret via **Run -> MCP Server (AI Agent Bridge) -> Configure Bearer Auth Token...**.
+- **4 Granular Autonomy Tiers (`TMcpAutonomyMode`)**:
+  1. `mamDisabled` (*Default*): Listener stopped; all JSON-RPC calls rejected.
+  2. `mamReadOnly`: Allows `cge_get_editor_status`, `cge_list_registered_components`, `cge_get_hierarchy`, `cge_get_component_properties`, `cge_capture_viewport_screenshot`, and `cge_get_build_output`.
+  3. `mamEditWithUndo`: Adds live scene/UI editing (`cge_add_component`, `cge_delete_component`, `cge_set_component_properties`, `cge_execute_layout_action`, `cge_undo_redo`) with every mutation recorded into `TUndoSystem` (`Ctrl+Z`).
+  4. `mamFullControl`: Adds disk persistence (`cge_save_design`) and project build actions (`cge_run_build_command`: `compile`, `build`, `clean`).
+
+### Example MCP Client Configuration (`mcp.json`)
+Click **Run -> MCP Server (AI Agent Bridge) -> Copy MCP Client Config JSON to Clipboard** to generate:
+```json
+{
+  "mcpServers": {
+    "castle-editor": {
+      "type": "http",
+      "url": "http://127.0.0.1:8765/mcp"
+    }
+  }
+}
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [Model Context Protocol Specification (`2025-03-26`)](https://modelcontextprotocol.io/specification/2025-03-26) · [CGE Visual Editor Manual](https://castle-engine.io/manual_editor.php) · [CGE Custom Components & Serialization](https://castle-engine.io/custom_components) · [Unreal Engine Editor Scripting & Automation](https://dev.epicgames.com/documentation/en-us/unreal-engine/scripting-the-unreal-editor-using-python)
+- **Videos & Movies:** 🎬 [CGE Official Editor Workflows Video (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [Animated Hierarchy & Inspector Automation Preview](https://docs.godotengine.org/en/stable/_images/containers_split_drag.gif)
+- **Screenshots:** [CGE 3D Editor & Hierarchy](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Object Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 51 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2329,4 +2362,7 @@ fpc -Mobjfpc -Sh -Ci -Cr -Co -gl -gh -dTEXT_RUNNER @castle-fpc.cfg \
   -FE'tests' tests/castle_tester_standalone.dpr
 ./tests/castle_tester_standalone --console --filter=TTestCastleTransformManipulate*
 ```
+
+In addition, Horizon 2 editor subsystems include dedicated automated test suites:
+- **[`tests/code/testcases/testtoolmcpserver.pas`](../tests/code/testcases/testtoolmcpserver.pas) (`TTestToolMcpServer` — 3 tests)**: Verifies JSON-RPC 2.0 `initialize`, `ping`, `tools/list` (all 12 MCP tools), Bearer token authentication, all 4 `TMcpAutonomyMode` tiers (`Disabled`, `ReadOnly`, `EditWithUndo`, `FullControl`), live RTTI property inspection/mutation, layout actions (`align_y`, `snap_to_grid`), Base64 PNG viewport screenshot encoding, and live localhost multithreaded HTTP roundtrip (`GET /health` + `POST /mcp` with `CheckSynchronize` and `0 unfreed memory blocks`).
 

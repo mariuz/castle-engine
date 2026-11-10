@@ -104,6 +104,7 @@ uses
   TestCastleInternalUrlUtils,
   TestCastleTransformManipulate,
   TestCastleSteam,
+  {$if defined(FPC) and (not defined(WASI))}TestToolMcpServer,{$endif}
   TestCastleVulkanRHI;
 
 implementation

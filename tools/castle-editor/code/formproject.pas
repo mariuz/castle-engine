@@ -34,7 +34,7 @@ uses
   CastlePropEdits, CastleDialogs, X3DNodes, CastleFindFiles,
   DataModuleIcons, CastleClassUtils,
   EditorUtils, FrameDesign, FrameViewFile, FormNewUnit, ToolManifest,
-  ToolPackageFormat, ToolEditorUtils;
+  ToolPackageFormat, ToolEditorUtils, ToolMcpServer, EditorMcpServer;
 
 const
   DockLayoutFileName = 'layout.dock-layout';
@@ -581,6 +581,20 @@ type
       FCurrentComponentPaletteCategory: Integer;
       FCurrentAssetCategoryMask: String;
       FLastActivateRefreshTick: QWord;
+      FMcpBridge: TEditorMcpBridge;
+      MenuItemMcpRoot: TMenuItem;
+      MenuItemMcpStatus: TMenuItem;
+      MenuItemMcpModes: array [TMcpAutonomyMode] of TMenuItem;
+      MenuItemMcpPort: TMenuItem;
+      MenuItemMcpAuthToken: TMenuItem;
+      MenuItemMcpCopyConfig: TMenuItem;
+    procedure CreateMcpServerMenu;
+    procedure UpdateMcpMenuState;
+    procedure MenuItemMcpRootClick(Sender: TObject);
+    procedure MenuItemMcpModeClick(Sender: TObject);
+    procedure MenuItemMcpPortClick(Sender: TObject);
+    procedure MenuItemMcpAuthTokenClick(Sender: TObject);
+    procedure MenuItemMcpCopyConfigClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -675,6 +689,13 @@ type
 
     { Import URL (to instantiate it in design) now. }
     procedure AddImported(const AddUrl: String);
+
+    { MCP host integration helpers used by TEditorMcpBridge. }
+    function McpGetDesignFrame: TDesignFrame;
+    function McpGetOutputList: TOutputList;
+    function McpSaveCurrentDesign(out ErrorReason: String): Boolean;
+    function McpRunBuildCommand(const CommandName: String;
+      out StatusMessage: String): Boolean;
   end;
 
 var
@@ -2130,6 +2151,11 @@ begin
   MenuItemVerboseBuildTool.OnClick := @MenuItemVerboseBuildToolClick;
   MenuItemRun.Add(MenuItemVerboseBuildTool);
 
+  FMcpBridge := TEditorMcpBridge.CreateForProjectForm(Self);
+  CreateMcpServerMenu;
+  FMcpBridge.LoadFromConfig;
+  UpdateMcpMenuState;
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -2242,6 +2268,7 @@ begin
   FormHide(Self); //to save config properly
   ApplicationProperties.OnWarning.Remove(@WarningNotification);
   FreeProcess;
+  FreeAndNil(FMcpBridge);
   FreeAndNil(OutputList);
   FreeAndNil(Manifest);
   FreeAndNil(DesignForm);
@@ -4709,6 +4736,217 @@ begin
   end;
 
   UpdateShellListMask;
+end;
+
+function TProjectForm.McpGetDesignFrame: TDesignFrame;
+begin
+  Result := Design;
+end;
+
+function TProjectForm.McpGetOutputList: TOutputList;
+begin
+  Result := OutputList;
+end;
+
+function TProjectForm.McpSaveCurrentDesign(out ErrorReason: String): Boolean;
+begin
+  ErrorReason := '';
+  if Design = nil then
+  begin
+    ErrorReason := 'No design is currently open.';
+    Exit(false);
+  end;
+  if CastleApplicationMode in [appSimulation, appSimulationPaused] then
+  begin
+    ErrorReason := 'Cannot save design while physics simulation is active.';
+    Exit(false);
+  end;
+  if Design.DesignUrl = '' then
+  begin
+    ErrorReason := 'Current design has not been saved to a file URL yet; save it once in the editor first.';
+    Exit(false);
+  end;
+  try
+    Design.SaveDesign(Design.DesignUrl);
+    Result := true;
+  except
+    on E: Exception do
+    begin
+      ErrorReason := 'SaveDesign failed: ' + E.Message;
+      Result := false;
+    end;
+  end;
+end;
+
+function TProjectForm.McpRunBuildCommand(const CommandName: String;
+  out StatusMessage: String): Boolean;
+begin
+  StatusMessage := '';
+  if IsRunning then
+  begin
+    StatusMessage := 'Another build or run process is already active.';
+    Exit(false);
+  end;
+  if CommandName = 'compile' then
+  begin
+    BuildToolCall(['compile']);
+    StatusMessage := 'Started asynchronous castle-engine compile.';
+    Result := true;
+  end else
+  if CommandName = 'clean' then
+  begin
+    BuildToolCall(['clean']);
+    StatusMessage := 'Started asynchronous castle-engine clean.';
+    Result := true;
+  end else
+  begin
+    StatusMessage := 'Unsupported build command "' + CommandName + '" (expected "compile" or "clean").';
+    Result := false;
+  end;
+end;
+
+procedure TProjectForm.CreateMcpServerMenu;
+const
+  ModeCaptions: array [TMcpAutonomyMode] of String = (
+    'Disabled (Reject All Requests)',
+    'Read-Only (Inspect Hierarchy, Properties, Screenshot & Logs)',
+    'Edit With Undo (Add / Modify / Layout / Delete + Undo)',
+    'Full Control (Allow Saving Designs & Compiling Project)'
+  );
+var
+  MiSep: TMenuItem;
+  M: TMcpAutonomyMode;
+begin
+  MenuItemMcpRoot := TMenuItem.Create(MenuItemRun);
+  MenuItemMcpRoot.Caption := 'MCP Server (AI Agent Bridge)';
+  MenuItemMcpRoot.OnClick := @MenuItemMcpRootClick;
+  MenuItemRun.Add(MenuItemMcpRoot);
+
+  MenuItemMcpStatus := TMenuItem.Create(MenuItemMcpRoot);
+  MenuItemMcpStatus.Caption := 'Status: Stopped';
+  MenuItemMcpStatus.Enabled := false;
+  MenuItemMcpRoot.Add(MenuItemMcpStatus);
+
+  MiSep := TMenuItem.Create(MenuItemMcpRoot);
+  MiSep.Caption := '-';
+  MenuItemMcpRoot.Add(MiSep);
+
+  for M in TMcpAutonomyMode do
+  begin
+    MenuItemMcpModes[M] := TMenuItem.Create(MenuItemMcpRoot);
+    MenuItemMcpModes[M].Caption := ModeCaptions[M];
+    MenuItemMcpModes[M].Tag := Ord(M);
+    MenuItemMcpModes[M].GroupIndex := 245;
+    MenuItemMcpModes[M].RadioItem := true;
+    MenuItemMcpModes[M].ShowAlwaysCheckable := true;
+    MenuItemMcpModes[M].OnClick := @MenuItemMcpModeClick;
+    MenuItemMcpRoot.Add(MenuItemMcpModes[M]);
+  end;
+
+  MiSep := TMenuItem.Create(MenuItemMcpRoot);
+  MiSep.Caption := '-';
+  MenuItemMcpRoot.Add(MiSep);
+
+  MenuItemMcpPort := TMenuItem.Create(MenuItemMcpRoot);
+  MenuItemMcpPort.Caption := 'Configure Localhost Port...';
+  MenuItemMcpPort.OnClick := @MenuItemMcpPortClick;
+  MenuItemMcpRoot.Add(MenuItemMcpPort);
+
+  MenuItemMcpAuthToken := TMenuItem.Create(MenuItemMcpRoot);
+  MenuItemMcpAuthToken.Caption := 'Configure Bearer Auth Token...';
+  MenuItemMcpAuthToken.OnClick := @MenuItemMcpAuthTokenClick;
+  MenuItemMcpRoot.Add(MenuItemMcpAuthToken);
+
+  MenuItemMcpCopyConfig := TMenuItem.Create(MenuItemMcpRoot);
+  MenuItemMcpCopyConfig.Caption := 'Copy MCP Client Config JSON (Claude / Cursor / VS Code / Antigravity)';
+  MenuItemMcpCopyConfig.OnClick := @MenuItemMcpCopyConfigClick;
+  MenuItemMcpRoot.Add(MenuItemMcpCopyConfig);
+end;
+
+procedure TProjectForm.UpdateMcpMenuState;
+var
+  M: TMcpAutonomyMode;
+begin
+  if (FMcpBridge = nil) or (MenuItemMcpStatus = nil) then
+    Exit;
+  MenuItemMcpStatus.Caption := 'Status: ' + FMcpBridge.StatusSummary;
+  for M in TMcpAutonomyMode do
+    if MenuItemMcpModes[M] <> nil then
+      MenuItemMcpModes[M].Checked := FMcpBridge.Server.AutonomyMode = M;
+  if MenuItemMcpPort <> nil then
+    MenuItemMcpPort.Caption := Format('Configure Localhost Port (Current: %d)...',
+      [FMcpBridge.Server.Port]);
+  if MenuItemMcpAuthToken <> nil then
+  begin
+    if FMcpBridge.Server.AuthToken <> '' then
+      MenuItemMcpAuthToken.Caption := 'Configure Bearer Auth Token (Set)...'
+    else
+      MenuItemMcpAuthToken.Caption := 'Configure Bearer Auth Token (None)...';
+  end;
+end;
+
+procedure TProjectForm.MenuItemMcpRootClick(Sender: TObject);
+begin
+  UpdateMcpMenuState;
+end;
+
+procedure TProjectForm.MenuItemMcpModeClick(Sender: TObject);
+var
+  NewMode: TMcpAutonomyMode;
+begin
+  if (FMcpBridge = nil) or not (Sender is TComponent) then
+    Exit;
+  NewMode := TMcpAutonomyMode(Clamped(TComponent(Sender).Tag,
+    Ord(Low(TMcpAutonomyMode)), Ord(High(TMcpAutonomyMode))));
+  FMcpBridge.ApplyAutonomyMode(NewMode, true);
+  UpdateMcpMenuState;
+end;
+
+procedure TProjectForm.MenuItemMcpPortClick(Sender: TObject);
+var
+  PortStr: String;
+  ParsedPort: Integer;
+begin
+  if FMcpBridge = nil then
+    Exit;
+  PortStr := IntToStr(FMcpBridge.Server.Port);
+  if InputQuery('MCP Server Port',
+       'Localhost (127.0.0.1) TCP port for Castle Game Engine MCP server (1024..65535):',
+       PortStr) then
+  begin
+    if TryStrToInt(Trim(PortStr), ParsedPort) and (ParsedPort >= 1024) and (ParsedPort <= 65535) then
+    begin
+      FMcpBridge.ApplyPort(Word(ParsedPort), true);
+      UpdateMcpMenuState;
+    end else
+      ErrorBox('Please enter a valid unprivileged TCP port between 1024 and 65535.');
+  end;
+end;
+
+procedure TProjectForm.MenuItemMcpAuthTokenClick(Sender: TObject);
+var
+  TokenStr: String;
+begin
+  if FMcpBridge = nil then
+    Exit;
+  TokenStr := FMcpBridge.Server.AuthToken;
+  if InputQuery('MCP Bearer Auth Token',
+       'Optional Bearer token required in HTTP Authorization header (leave empty to allow any local client):',
+       TokenStr) then
+  begin
+    FMcpBridge.ApplyAuthToken(TokenStr, true);
+    UpdateMcpMenuState;
+  end;
+end;
+
+procedure TProjectForm.MenuItemMcpCopyConfigClick(Sender: TObject);
+begin
+  if FMcpBridge = nil then
+    Exit;
+  Clipboard.AsText := FMcpBridge.Server.ClientConfigJson;
+  if OutputList <> nil then
+    OutputList.AddLine('[MCP] Copied mcpServers client configuration JSON to clipboard (' +
+      FMcpBridge.Server.EndpointUrl + ').', okImportantInfo);
 end;
 
 initialization
