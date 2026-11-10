@@ -295,6 +295,11 @@ const
   VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA = 7;
   VK_BLEND_FACTOR_DST_ALPHA = 8;
   VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA = 9;
+  VK_BLEND_FACTOR_CONSTANT_COLOR = 10;
+  VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR = 11;
+  VK_BLEND_FACTOR_CONSTANT_ALPHA = 12;
+  VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA = 13;
+  VK_BLEND_FACTOR_SRC_ALPHA_SATURATE = 14;
   VK_BLEND_OP_ADD = 0;
   VK_BLEND_OP_SUBTRACT = 1;
   VK_BLEND_OP_REVERSE_SUBTRACT = 2;
@@ -2117,6 +2122,7 @@ type
   PFN_vkCmdDrawIndirectCount = procedure(commandBuffer: VkCommandBuffer; buffer: VkBuffer; offset: VkDeviceSize; countBuffer: VkBuffer; countBufferOffset: VkDeviceSize; maxDrawCount: Cardinal; stride: Cardinal); VKAPI_CALL;
   PFN_vkCmdDrawIndexedIndirectCount = procedure(commandBuffer: VkCommandBuffer; buffer: VkBuffer; offset: VkDeviceSize; countBuffer: VkBuffer; countBufferOffset: VkDeviceSize; maxDrawCount: Cardinal; stride: Cardinal); VKAPI_CALL;
   PFN_vkCmdSetDepthBias = procedure(commandBuffer: VkCommandBuffer; depthBiasConstantFactor: Single; depthBiasClamp: Single; depthBiasSlopeFactor: Single); VKAPI_CALL;
+  PFN_vkCmdSetBlendConstants = procedure(commandBuffer: VkCommandBuffer; const blendConstants: PSingle); VKAPI_CALL;
   PFN_vkCreatePipelineCache = function(device: VkDevice; const pCreateInfo: PVkPipelineCacheCreateInfo; const pAllocator: PVkAllocationCallbacks; pPipelineCache: PVkPipelineCache): VkResult; VKAPI_CALL;
   PFN_vkDestroyPipelineCache = procedure(device: VkDevice; pipelineCache: VkPipelineCache; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
   PFN_vkGetPipelineCacheData = function(device: VkDevice; pipelineCache: VkPipelineCache; pDataSize: PPtrUInt; pData: Pointer): VkResult; VKAPI_CALL;
@@ -2253,6 +2259,7 @@ var
   vkCmdDrawIndirectCount: PFN_vkCmdDrawIndirectCount;
   vkCmdDrawIndexedIndirectCount: PFN_vkCmdDrawIndexedIndirectCount;
   vkCmdSetDepthBias: PFN_vkCmdSetDepthBias;
+  vkCmdSetBlendConstants: PFN_vkCmdSetBlendConstants;
   vkCreatePipelineCache: PFN_vkCreatePipelineCache;
   vkDestroyPipelineCache: PFN_vkDestroyPipelineCache;
   vkGetPipelineCacheData: PFN_vkGetPipelineCacheData;
@@ -2544,6 +2551,7 @@ begin
   if not Assigned(vkCmdDrawIndexedIndirectCount) then
     Pointer(vkCmdDrawIndexedIndirectCount) := GetDevProc('vkCmdDrawIndexedIndirectCountKHR');
   Pointer(vkCmdSetDepthBias) := GetDevProc('vkCmdSetDepthBias');
+  Pointer(vkCmdSetBlendConstants) := GetDevProc('vkCmdSetBlendConstants');
   Pointer(vkCreatePipelineCache) := GetDevProc('vkCreatePipelineCache');
   Pointer(vkDestroyPipelineCache) := GetDevProc('vkDestroyPipelineCache');
   Pointer(vkGetPipelineCacheData) := GetDevProc('vkGetPipelineCacheData');

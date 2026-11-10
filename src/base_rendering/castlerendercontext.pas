@@ -151,6 +151,9 @@ type
       FRHILastLineType: TLineType;
       FRHILastLineStipplePattern: Word;
       FRHILineTypeUpdateCount: Cardinal;
+      FBlendingConstantColor: TCastleColor;
+      FRHILastBlendConstantColor: TCastleColor;
+      FRHIBlendConstantColorUpdateCount: Cardinal;
       FStencilTest: Boolean;
       FStencilCompareOp: TRHICompareOp;
       FStencilReference: Byte;
@@ -161,6 +164,7 @@ type
       FStencilPassOp: TRHIStencilOp;
 
     procedure SetLineWidth(const Value: Single);
+    procedure SetBlendingConstantColor(const Value: TCastleColor);
     procedure SetStencilTest(const Value: Boolean);
     procedure SetPointSize(const Value: Single);
     procedure SetGlobalAmbient(const Value: TCastleColorRGB);
@@ -207,6 +211,7 @@ type
     procedure UpdateCurrentVao;
     procedure UpdateBlendingEnabled;
     procedure UpdateBlendingFunction;
+    procedure UpdateBlendingConstantColor;
     procedure UpdateFixedFunctionAlphaTest;
     procedure UpdateFixedFunctionAlphaCutoff;
     procedure UpdateFixedFunctionLighting;
@@ -404,6 +409,7 @@ type
     property BlendingEnabled: Boolean read FBlendingEnabled;
     property BlendingSourceFactor: TBlendingSourceFactor read FBlendingSourceFactor;
     property BlendingDestinationFactor: TBlendingDestinationFactor read FBlendingDestinationFactor;
+    property BlendingConstantColor: TCastleColor read FBlendingConstantColor write SetBlendingConstantColor;
     class function MapBlendSourceFactorToRHI(const AFactor: TBlendingSourceFactor): TRHIBlendFactor; static;
     class function MapBlendDestFactorToRHI(const AFactor: TBlendingDestinationFactor): TRHIBlendFactor; static;
     class function MapDepthFuncToRHI(const ADepthFunc: TDepthFunction): TRHICompareOp; static;
@@ -461,6 +467,8 @@ type
     property RHILastLineType: TLineType read FRHILastLineType;
     property RHILastLineStipplePattern: Word read FRHILastLineStipplePattern;
     property RHILineTypeUpdateCount: Cardinal read FRHILineTypeUpdateCount;
+    property RHILastBlendConstantColor: TCastleColor read FRHILastBlendConstantColor;
+    property RHIBlendConstantColorUpdateCount: Cardinal read FRHIBlendConstantColorUpdateCount;
 
     { Stencil test state and RHI pipeline synchronization (used by TCastleMask). }
     property StencilTest: Boolean read FStencilTest write SetStencilTest default False;
@@ -556,6 +564,8 @@ begin
   FStencilPassOp := soKeep;
   FRHILastLineType := ltSolid;
   FRHILastLineStipplePattern := $FFFF;
+  FBlendingConstantColor := Vector4(0, 0, 0, 0);
+  FRHILastBlendConstantColor := Vector4(0, 0, 0, 0);
 end;
 
 destructor TRenderContext.Destroy;
@@ -1022,15 +1032,15 @@ begin
     bsOneMinusSrcColor:       Result := bfOneMinusSrcColor;
     bsDstColor:               Result := bfDstColor;
     bsOneMinusDstColor:       Result := bfOneMinusDstColor;
-    bsSrcAlpha,
-    bsSrcAlphaSaturate,
-    bsConstantColor,
-    bsConstantAlpha:          Result := bfSrcAlpha;
-    bsOneMinusSrcAlpha,
-    bsOneMinusConstantColor,
-    bsOneMinusConstantAlpha:  Result := bfOneMinusSrcAlpha;
+    bsSrcAlpha:               Result := bfSrcAlpha;
+    bsOneMinusSrcAlpha:       Result := bfOneMinusSrcAlpha;
     bsDstAlpha:               Result := bfDstAlpha;
     bsOneMinusDstAlpha:       Result := bfOneMinusDstAlpha;
+    bsConstantColor:          Result := bfConstantColor;
+    bsOneMinusConstantColor:  Result := bfOneMinusConstantColor;
+    bsConstantAlpha:          Result := bfConstantAlpha;
+    bsOneMinusConstantAlpha:  Result := bfOneMinusConstantAlpha;
+    bsSrcAlphaSaturate:       Result := bfSrcAlphaSaturate;
     else                      Result := bfSrcAlpha;
   end;
 end;
@@ -1045,14 +1055,14 @@ begin
     bdOneMinusSrcColor:       Result := bfOneMinusSrcColor;
     bdDstColor:               Result := bfDstColor;
     bdOneMinusDstColor:       Result := bfOneMinusDstColor;
-    bdSrcAlpha,
-    bdConstantColor,
-    bdConstantAlpha:          Result := bfSrcAlpha;
-    bdOneMinusSrcAlpha,
-    bdOneMinusConstantColor,
-    bdOneMinusConstantAlpha:  Result := bfOneMinusSrcAlpha;
+    bdSrcAlpha:               Result := bfSrcAlpha;
+    bdOneMinusSrcAlpha:       Result := bfOneMinusSrcAlpha;
     bdDstAlpha:               Result := bfDstAlpha;
     bdOneMinusDstAlpha:       Result := bfOneMinusDstAlpha;
+    bdConstantColor:          Result := bfConstantColor;
+    bdOneMinusConstantColor:  Result := bfOneMinusConstantColor;
+    bdConstantAlpha:          Result := bfConstantAlpha;
+    bdOneMinusConstantAlpha:  Result := bfOneMinusConstantAlpha;
     else                      Result := bfOneMinusSrcAlpha;
   end;
 end;
@@ -1335,6 +1345,31 @@ begin
   {$warnings on}
 end;
 
+procedure TRenderContext.SetBlendingConstantColor(const Value: TCastleColor);
+begin
+  if Self <> RenderContext then
+    WarnContextNotCurrent;
+
+  FBlendingConstantColor := Value;
+  UpdateBlendingConstantColor;
+end;
+
+procedure TRenderContext.UpdateBlendingConstantColor;
+begin
+  if RHIDevice <> nil then
+  begin
+    FRHILastBlendConstantColor := FBlendingConstantColor;
+    Inc(FRHIBlendConstantColorUpdateCount);
+    if ActiveCommandList <> nil then
+      ActiveCommandList.SetBlendConstants(FBlendingConstantColor);
+    if SkipOpenGLStateWhenRHIActive then
+      Exit;
+  end;
+  if (GLFeatures <> nil) and GLFeatures.BlendConstant then
+    glBlendColor(FBlendingConstantColor.X, FBlendingConstantColor.Y,
+      FBlendingConstantColor.Z, FBlendingConstantColor.W);
+end;
+
 procedure TRenderContext.FixedFunctionAlphaTestEnable(const AlphaCutoff: Single = 0.5);
 begin
   if (RHIDevice = nil) and (GLFeatures <> nil) and GLFeatures.EnableFixedFunction then
@@ -1574,6 +1609,7 @@ begin
   UpdateCurrentVao;
   UpdateBlendingEnabled;
   UpdateBlendingFunction;
+  UpdateBlendingConstantColor;
   UpdateFixedFunctionAlphaTest;
   UpdateFixedFunctionAlphaCutoff;
   UpdateFixedFunctionLighting;

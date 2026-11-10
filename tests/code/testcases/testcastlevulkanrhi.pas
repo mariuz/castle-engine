@@ -376,6 +376,9 @@ type
     procedure TestWireframeEffectsAndDualSlotShaderCacheRHI;
     procedure TestPointSizeScalingAndLinePropertiesStippleRHI;
     procedure TestTransformManipulateDebugGizmosAndColliderWireframeRHI;
+    procedure TestConstantBlendFactorsAndBlendConstantsDynamicStateRHI;
+    procedure TestInputOnlyShaderEventsAndLiveRouteUniformsRHI;
+    procedure TestLitPointSetLineSetWithNormalsAndDynamicUnlitEmissiveRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -25532,6 +25535,573 @@ begin
     FreeAndNil(HingeJoint);
     FreeAndNil(Collider);
     FreeAndNil(Box);
+    FreeAndNil(Viewport);
+    FreeAndNil(Container);
+    FreeAndNil(DepthTex);
+    FreeAndNil(TargetTex);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestConstantBlendFactorsAndBlendConstantsDynamicStateRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  Cmd: TVulkanRHICommandList;
+  TargetTex, DepthTex: TRHITexture;
+  PassInfo: TRHIRenderingInfo;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  AppNode: TAppearanceNode;
+  MatNode: TMaterialNode;
+  BlendNode: TBlendModeNode;
+  BoxNode: TBoxNode;
+  DrawImg: TDrawableImage;
+  SrcImage: TRGBAlphaImage;
+  UpdatesBefore: Cardinal;
+begin
+  { 1. Verify TRenderContext.MapBlendSourceFactorToRHI and MapBlendDestFactorToRHI }
+  AssertEquals('bsConstantColor -> bfConstantColor',
+    Ord(bfConstantColor), Ord(TRenderContext.MapBlendSourceFactorToRHI(bsConstantColor)));
+  AssertEquals('bsOneMinusConstantColor -> bfOneMinusConstantColor',
+    Ord(bfOneMinusConstantColor), Ord(TRenderContext.MapBlendSourceFactorToRHI(bsOneMinusConstantColor)));
+  AssertEquals('bsConstantAlpha -> bfConstantAlpha',
+    Ord(bfConstantAlpha), Ord(TRenderContext.MapBlendSourceFactorToRHI(bsConstantAlpha)));
+  AssertEquals('bsOneMinusConstantAlpha -> bfOneMinusConstantAlpha',
+    Ord(bfOneMinusConstantAlpha), Ord(TRenderContext.MapBlendSourceFactorToRHI(bsOneMinusConstantAlpha)));
+  AssertEquals('bsSrcAlphaSaturate -> bfSrcAlphaSaturate',
+    Ord(bfSrcAlphaSaturate), Ord(TRenderContext.MapBlendSourceFactorToRHI(bsSrcAlphaSaturate)));
+
+  AssertEquals('bdConstantColor -> bfConstantColor',
+    Ord(bfConstantColor), Ord(TRenderContext.MapBlendDestFactorToRHI(bdConstantColor)));
+  AssertEquals('bdOneMinusConstantColor -> bfOneMinusConstantColor',
+    Ord(bfOneMinusConstantColor), Ord(TRenderContext.MapBlendDestFactorToRHI(bdOneMinusConstantColor)));
+  AssertEquals('bdConstantAlpha -> bfConstantAlpha',
+    Ord(bfConstantAlpha), Ord(TRenderContext.MapBlendDestFactorToRHI(bdConstantAlpha)));
+  AssertEquals('bdOneMinusConstantAlpha -> bfOneMinusConstantAlpha',
+    Ord(bfOneMinusConstantAlpha), Ord(TRenderContext.MapBlendDestFactorToRHI(bdOneMinusConstantAlpha)));
+
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1017)));
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+  TargetTex := nil;
+  DepthTex := nil;
+  Container := nil;
+  Viewport := nil;
+  Scene := nil;
+  DrawImg := nil;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+    GLFeatures := nil;
+
+    TargetTex := Device.CreateTexture(TRHITextureDesc.Create2D(256, 256, pfRGBA8_UNorm, [tuColorAttachment, tuSampled]));
+    DepthTex := Device.CreateTexture(TRHITextureDesc.Create2D(256, 256, pfD24_UNorm_S8_UInt, [tuDepthStencil]));
+
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    RenderContext := Container.Context;
+    RenderContext.Viewport := Rectangle(0, 0, 256, 256);
+
+    Cmd := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(Cmd);
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 256, 256),
+      TargetTex, loClear, Vector4(0, 0, 0, 1),
+      DepthTex, loClear, 1.0);
+    Cmd.BeginRendering(PassInfo);
+
+    { 2. Verify RenderContext.BlendingConstantColor dynamic state propagation }
+    UpdatesBefore := Cmd.BlendConstantsUpdateCount;
+    RenderContext.BlendingConstantColor := Vector4(0.2, 0.4, 0.6, 0.8);
+    AssertEquals('BlendingConstantColor must increment Cmd.BlendConstantsUpdateCount',
+      UpdatesBefore + 1, Cmd.BlendConstantsUpdateCount);
+    AssertVectorEquals(Vector4(0.2, 0.4, 0.6, 0.8), Cmd.DynamicBlendConstants, 0.0001);
+    AssertVectorEquals(Vector4(0.2, 0.4, 0.6, 0.8), RenderContext.RHILastBlendConstantColor, 0.0001);
+
+    { 3. Verify TBlendModeNode constant color/transparency in TCastleScene }
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := False;
+    Viewport.Width := 256;
+    Viewport.Height := 256;
+    Container.Controls.InsertFront(Viewport);
+    Viewport.Camera.SetView(Vector3(0, 0, 5), Vector3(0, 0, -1), Vector3(0, 1, 0));
+
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    AppNode := TAppearanceNode.Create;
+    MatNode := TMaterialNode.Create;
+    MatNode.DiffuseColor := Vector3(1, 1, 1);
+    MatNode.Transparency := 0.3;
+    AppNode.Material := MatNode;
+
+    BlendNode := TBlendModeNode.Create;
+    BlendNode.SrcFactor := bsConstantColor;
+    BlendNode.DestFactor := bdOneMinusConstantAlpha;
+    BlendNode.FdColor.Value := Vector3(0.25, 0.5, 0.75);
+    BlendNode.FdColorTransparency.Value := 0.2;
+    AppNode.BlendMode := BlendNode;
+
+    ShapeNode.Appearance := AppNode;
+    BoxNode := TBoxNode.Create;
+    ShapeNode.Geometry := BoxNode;
+    Root.AddChildren(ShapeNode);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+
+    UpdatesBefore := Cmd.BlendConstantsUpdateCount;
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+    AssertTrue('TBlendModeNode rendering must update VkCmd.BlendConstantsUpdateCount',
+      Cmd.BlendConstantsUpdateCount > UpdatesBefore);
+    AssertVectorEquals(Vector4(0.25, 0.5, 0.75, 0.8), Cmd.DynamicBlendConstants, 0.0001);
+
+    { 4. Verify TDrawableImage with constant blend factors and BlendingConstantColor }
+    SrcImage := TRGBAlphaImage.Create(16, 16);
+    SrcImage.Clear(Vector4Byte(255, 128, 64, 200));
+    DrawImg := TDrawableImage.Create(SrcImage, True, True);
+    DrawImg.Alpha := acBlending;
+    DrawImg.BlendingSourceFactor := bsConstantAlpha;
+    DrawImg.BlendingDestinationFactor := bdOneMinusConstantAlpha;
+    DrawImg.BlendingConstantColor := Vector4(0.1, 0.3, 0.5, 0.7);
+
+    UpdatesBefore := Cmd.BlendConstantsUpdateCount;
+    DrawImg.Draw(10, 10);
+    AssertTrue('TDrawableImage with constant blend factor must update VkCmd.BlendConstantsUpdateCount',
+      Cmd.BlendConstantsUpdateCount > UpdatesBefore);
+    AssertVectorEquals(Vector4(0.1, 0.3, 0.5, 0.7), Cmd.DynamicBlendConstants, 0.0001);
+
+    Cmd.EndRendering;
+    Device.EndFrameAndPresent;
+  finally
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    FreeAndNil(DrawImg);
+    FreeAndNil(Scene);
+    FreeAndNil(Viewport);
+    FreeAndNil(Container);
+    FreeAndNil(DepthTex);
+    FreeAndNil(TargetTex);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestInputOnlyShaderEventsAndLiveRouteUniformsRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  Cmd: TVulkanRHICommandList;
+  TargetTex, DepthTex: TRHITexture;
+  PassInfo: TRHIRenderingInfo;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  AppNode: TAppearanceNode;
+  MatNode: TMaterialNode;
+  EffectNode: TEffectNode;
+  EffectPart: TEffectPartNode;
+  IDeclFloat: TX3DInterfaceDeclaration;
+  IDeclVec3: TX3DInterfaceDeclaration;
+  EventFloat: TSFFloatEvent;
+  EventVec3: TSFVec3fEvent;
+  ScalarInterp: TScalarInterpolatorNode;
+  PosInterp: TPositionInterpolatorNode;
+  RouteFloat, RouteVec3: TX3DRoute;
+  GLSLShape: TX3DRendererShape;
+  MappedPtr: Pointer;
+  FloatPtr: PSingle;
+const
+  NL = LineEnding;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1018)));
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+  TargetTex := nil;
+  DepthTex := nil;
+  Container := nil;
+  Viewport := nil;
+  Scene := nil;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+    GLFeatures := nil;
+
+    TargetTex := Device.CreateTexture(TRHITextureDesc.Create2D(256, 256, pfRGBA8_UNorm, [tuColorAttachment, tuSampled]));
+    DepthTex := Device.CreateTexture(TRHITextureDesc.Create2D(256, 256, pfD24_UNorm_S8_UInt, [tuDepthStencil]));
+
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := False;
+    Viewport.Width := 256;
+    Viewport.Height := 256;
+    Container.Controls.InsertFront(Viewport);
+    Viewport.Camera.SetView(Vector3(0, 0, 5), Vector3(0, 0, -1), Vector3(0, 1, 0));
+
+    Root := TX3DRootNode.Create;
+
+    { Create TEffectNode with two inputOnly (eventIn) interface declarations:
+      inputOnly SFFloat u_pulse
+      inputOnly SFVec3f u_tint }
+    EffectNode := TEffectNode.Create;
+    EffectNode.Language := slGLSL;
+
+    IDeclFloat := TX3DInterfaceDeclaration.Create(EffectNode);
+    EventFloat := TSFFloatEvent.Create(EffectNode, 'u_pulse', True);
+    IDeclFloat.FieldOrEvent := EventFloat;
+    EffectNode.InterfaceDeclarations.Add(IDeclFloat);
+    IDeclFloat.AddFieldOrEvent(EffectNode);
+
+    IDeclVec3 := TX3DInterfaceDeclaration.Create(EffectNode);
+    EventVec3 := TSFVec3fEvent.Create(EffectNode, 'u_tint', True);
+    IDeclVec3.FieldOrEvent := EventVec3;
+    EffectNode.InterfaceDeclarations.Add(IDeclVec3);
+    IDeclVec3.AddFieldOrEvent(EffectNode);
+
+    EffectPart := TEffectPartNode.Create;
+    EffectPart.ShaderType := stFragment;
+    EffectPart.Contents :=
+      'uniform float u_pulse;' + NL +
+      'uniform vec3 u_tint;' + NL +
+      'void PLUG_fragment_modify(inout vec4 fragment_color) {' + NL +
+      '  fragment_color.rgb = fragment_color.rgb * u_tint + vec3(u_pulse);' + NL +
+      '}';
+    EffectNode.FdParts.Add(EffectPart);
+
+    { Verify inputOnly TX3DEvent.SendNeeded is True in headless RHI mode (GLFeatures = nil) }
+    AssertTrue('inputOnly shader interface event must report SendNeeded = True even when GLFeatures = nil',
+      EventFloat.SendNeeded);
+    AssertTrue('IDeclFloat.FieldOrLastEventValue must return default TSFFloat before any event arrives',
+      IDeclFloat.FieldOrLastEventValue is TSFFloat);
+    AssertSameValue(0.0, (IDeclFloat.FieldOrLastEventValue as TSFFloat).Value, 0.0001);
+
+    { Set up X3D ROUTEs from ScalarInterpolator and ColorInterpolator into inputOnly shader events }
+    ScalarInterp := TScalarInterpolatorNode.Create;
+    ScalarInterp.FdKey.Items.AddRange([0.0, 1.0]);
+    ScalarInterp.FdKeyValue.Items.AddRange([0.0, 0.8]);
+    Root.AddChildren(ScalarInterp);
+
+    PosInterp := TPositionInterpolatorNode.Create;
+    PosInterp.FdKey.Items.AddRange([0.0, 1.0]);
+    PosInterp.FdKeyValue.Items.AddRange([Vector3(0.0, 0.0, 0.0), Vector3(0.2, 0.6, 1.0)]);
+    Root.AddChildren(PosInterp);
+
+    ShapeNode := TShapeNode.Create;
+    AppNode := TAppearanceNode.Create;
+    MatNode := TMaterialNode.Create;
+    MatNode.DiffuseColor := Vector3(1, 1, 1);
+    AppNode.Material := MatNode;
+    AppNode.FdEffects.Add(EffectNode);
+    ShapeNode.Appearance := AppNode;
+    ShapeNode.Geometry := TBoxNode.Create;
+    Root.AddChildren(ShapeNode);
+
+    RouteFloat := TX3DRoute.Create;
+    RouteFloat.SetSourceDirectly(ScalarInterp.EventValue_Changed);
+    RouteFloat.SetDestinationDirectly(EventFloat);
+    Root.AddRoute(RouteFloat);
+
+    RouteVec3 := TX3DRoute.Create;
+    RouteVec3.SetSourceDirectly(PosInterp.EventValue_Changed);
+    RouteVec3.SetDestinationDirectly(EventVec3);
+    Root.AddRoute(RouteVec3);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    Scene.ProcessEvents := True;
+    Viewport.Items.Add(Scene);
+
+    RenderContext := Container.Context;
+    RenderContext.Viewport := Rectangle(0, 0, 256, 256);
+
+    Cmd := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(Cmd);
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 256, 256),
+      TargetTex, loClear, Vector4(0, 0, 0, 1),
+      DepthTex, loClear, 1.0);
+    Cmd.BeginRendering(PassInfo);
+
+    { 1. Render initial frame (default inputOnly values = 0.0 and (0, 0, 0)) }
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+    GLSLShape := TX3DRendererShape(Scene.Shapes.TraverseList(True)[0]);
+    AssertTrue('Shape must allocate RHIUserEffectBuffer for inputOnly shader uniforms',
+      GLSLShape.Cache.RHIUserEffectBuffer <> nil);
+
+    { 2. Trigger X3D ROUTE at fraction = 0.5 -> u_pulse = 0.4, u_tint = (0.1, 0.3, 0.5) }
+    ScalarInterp.EventSet_Fraction.Send(0.5, Scene.NextEventTime);
+    PosInterp.EventSet_Fraction.Send(0.5, Scene.NextEventTime);
+
+    AssertSameValue(0.4, (IDeclFloat.FieldOrLastEventValue as TSFFloat).Value, 0.0001);
+    AssertVectorEquals(Vector3(0.1, 0.3, 0.5), (IDeclVec3.FieldOrLastEventValue as TSFVec3f).Value, 0.0001);
+
+    { 3. Render second frame and verify mapped RHIUserEffectBuffer std140 contents }
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+    MappedPtr := GLSLShape.Cache.RHIUserEffectBuffer.Map;
+    try
+      { std140 layout:
+        float u_pulse at offset 0 (4 bytes)
+        padding at 4..15
+        vec3 u_tint at offset 16 (12 bytes) }
+      FloatPtr := PSingle(MappedPtr);
+      AssertSameValue(0.4, FloatPtr^, 0.0001);
+      FloatPtr := PSingle(PtrUInt(MappedPtr) + 16);
+      AssertSameValue(0.1, FloatPtr^, 0.0001);
+      Inc(FloatPtr);
+      AssertSameValue(0.3, FloatPtr^, 0.0001);
+      Inc(FloatPtr);
+      AssertSameValue(0.5, FloatPtr^, 0.0001);
+    finally
+      GLSLShape.Cache.RHIUserEffectBuffer.Unmap;
+    end;
+
+    Cmd.EndRendering;
+    Device.EndFrameAndPresent;
+  finally
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    FreeAndNil(Scene);
+    FreeAndNil(Viewport);
+    FreeAndNil(Container);
+    FreeAndNil(DepthTex);
+    FreeAndNil(TargetTex);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestLitPointSetLineSetWithNormalsAndDynamicUnlitEmissiveRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  Cmd: TVulkanRHICommandList;
+  TargetTex, DepthTex: TRHITexture;
+  PassInfo: TRHIRenderingInfo;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  ShapePointsLit, ShapeLinesLit, ShapeLinesUnlit: TShapeNode;
+  AppPointsLit, AppLinesLit, AppLinesUnlit: TAppearanceNode;
+  MatPointsLit, MatLinesUnlit: TMaterialNode;
+  PhysMatLinesLit: TPhysicalMaterialNode;
+  PointSetLit: TPointSetNode;
+  LineSetLit, LineSetUnlit: TLineSetNode;
+  CoordPoints, CoordLines1, CoordLines2: TCoordinateNode;
+  NormPoints, NormLines: TNormalNode;
+  ShapesList: TShapeList;
+  GLSLPointsLit, GLSLLinesLit, GLSLLinesUnlit: TX3DRendererShape;
+  MappedMat: PCastleMaterialUniformBlock;
+  MatBlock: TCastleMaterialUniformBlock;
+  ShadingModel: TCastleShadingModelRHI;
+  ArraysPoints: TGeometryArrays;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1019)));
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+  TargetTex := nil;
+  DepthTex := nil;
+  Container := nil;
+  Viewport := nil;
+  Scene := nil;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+    GLFeatures := nil;
+
+    TargetTex := Device.CreateTexture(TRHITextureDesc.Create2D(256, 256, pfRGBA8_UNorm, [tuColorAttachment, tuSampled]));
+    DepthTex := Device.CreateTexture(TRHITextureDesc.Create2D(256, 256, pfD24_UNorm_S8_UInt, [tuDepthStencil]));
+
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := False;
+    Viewport.Width := 256;
+    Viewport.Height := 256;
+    Container.Controls.InsertFront(Viewport);
+    Viewport.Camera.SetView(Vector3(0, 0, 5), Vector3(0, 0, -1), Vector3(0, 1, 0));
+
+    Root := TX3DRootNode.Create;
+
+    { 1. Lit TPointSetNode with explicit TNormalNode and TMaterialNode (Phong) }
+    ShapePointsLit := TShapeNode.Create;
+    AppPointsLit := TAppearanceNode.Create;
+    MatPointsLit := TMaterialNode.Create;
+    MatPointsLit.DiffuseColor := Vector3(0.2, 0.6, 0.9);
+    AppPointsLit.Material := MatPointsLit;
+    ShapePointsLit.Appearance := AppPointsLit;
+
+    PointSetLit := TPointSetNode.Create;
+    CoordPoints := TCoordinateNode.Create;
+    CoordPoints.SetPoint([Vector3(-1, 0, 0), Vector3(1, 0, 0)]);
+    PointSetLit.Coord := CoordPoints;
+    NormPoints := TNormalNode.Create;
+    NormPoints.SetVector([Vector3(0, 0, 1), Vector3(0, 1, 0)]);
+    PointSetLit.Normal := NormPoints;
+    ShapePointsLit.Geometry := PointSetLit;
+    Root.AddChildren(ShapePointsLit);
+
+    { 2. Lit TLineSetNode with explicit TNormalNode and TPhysicalMaterialNode (PBR) }
+    ShapeLinesLit := TShapeNode.Create;
+    AppLinesLit := TAppearanceNode.Create;
+    PhysMatLinesLit := TPhysicalMaterialNode.Create;
+    PhysMatLinesLit.BaseColor := Vector3(0.8, 0.4, 0.1);
+    AppLinesLit.Material := PhysMatLinesLit;
+    ShapeLinesLit.Appearance := AppLinesLit;
+
+    LineSetLit := TLineSetNode.Create;
+    CoordLines1 := TCoordinateNode.Create;
+    CoordLines1.SetPoint([Vector3(-1, 1, 0), Vector3(1, 1, 0)]);
+    LineSetLit.Coord := CoordLines1;
+    LineSetLit.SetVertexCount([2]);
+    NormLines := TNormalNode.Create;
+    NormLines.SetVector([Vector3(0, 0, 1), Vector3(0, 0, 1)]);
+    LineSetLit.Normal := NormLines;
+    ShapeLinesLit.Geometry := LineSetLit;
+    Root.AddChildren(ShapeLinesLit);
+
+    { 3. Unlit TLineSetNode (no Normal node) with TMaterialNode whose EmissiveColor changes dynamically }
+    ShapeLinesUnlit := TShapeNode.Create;
+    AppLinesUnlit := TAppearanceNode.Create;
+    MatLinesUnlit := TMaterialNode.Create;
+    MatLinesUnlit.EmissiveColor := Vector3(1.0, 0.0, 0.0);
+    MatLinesUnlit.Transparency := 0.0;
+    AppLinesUnlit.Material := MatLinesUnlit;
+    ShapeLinesUnlit.Appearance := AppLinesUnlit;
+
+    LineSetUnlit := TLineSetNode.Create;
+    CoordLines2 := TCoordinateNode.Create;
+    CoordLines2.SetPoint([Vector3(-1, -1, 0), Vector3(1, -1, 0)]);
+    LineSetUnlit.Coord := CoordLines2;
+    LineSetUnlit.SetVertexCount([2]);
+    ShapeLinesUnlit.Geometry := LineSetUnlit;
+    Root.AddChildren(ShapeLinesUnlit);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+
+    RenderContext := Container.Context;
+    RenderContext.Viewport := Rectangle(0, 0, 256, 256);
+
+    Cmd := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(Cmd);
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 256, 256),
+      TargetTex, loClear, Vector4(0, 0, 0, 1),
+      DepthTex, loClear, 1.0);
+    Cmd.BeginRendering(PassInfo);
+
+    { Render Frame 1 }
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+
+    ShapesList := Scene.Shapes.TraverseList(True);
+    AssertEquals('Scene must have 3 active shapes', 3, ShapesList.Count);
+    GLSLPointsLit := TX3DRendererShape(ShapesList[0]);
+    GLSLLinesLit := TX3DRendererShape(ShapesList[1]);
+    GLSLLinesUnlit := TX3DRendererShape(ShapesList[2]);
+
+    { Verify Shape 0: Lit PointSet with explicit normals }
+    AssertTrue('PointSet with explicit Normal node must have Lit = True',
+      GLSLPointsLit.Node.Geometry.Lit(GLSLPointsLit.State));
+    GLSLPointsLit.ExtractRHIMaterialBlock(MatBlock, ShadingModel);
+    AssertEquals('PointSet with explicit Normal node and Material must use smPhong (not smUnlit)',
+      Ord(smPhong), Ord(ShadingModel));
+    ArraysPoints := GLSLPointsLit.GeometryArrays;
+    try
+      AssertFalse('PointSet with explicit Normal node must have ForceUnlit = False',
+        ArraysPoints.ForceUnlit);
+      AssertVectorEquals(Vector3(0, 0, 1), ArraysPoints.Normal(0)^, 0.0001);
+      AssertVectorEquals(Vector3(0, 1, 0), ArraysPoints.Normal(1)^, 0.0001);
+    finally
+      FreeAndNil(ArraysPoints);
+    end;
+    MappedMat := PCastleMaterialUniformBlock(GLSLPointsLit.Cache.RHIMaterialBuffer.Map);
+    try
+      AssertVectorEquals(Vector4(0.2, 0.6, 0.9, 1.0), MappedMat^.BaseColor, 0.0001);
+    finally
+      GLSLPointsLit.Cache.RHIMaterialBuffer.Unmap;
+    end;
+
+    { Verify Shape 1: Lit LineSet with explicit normals and PhysicalMaterial }
+    AssertTrue('LineSet with explicit Normal node must have Lit = True',
+      GLSLLinesLit.Node.Geometry.Lit(GLSLLinesLit.State));
+    GLSLLinesLit.ExtractRHIMaterialBlock(MatBlock, ShadingModel);
+    AssertEquals('LineSet with explicit Normal node and PhysicalMaterial must use smPBRMetallicRoughness (not smUnlit)',
+      Ord(smPBRMetallicRoughness), Ord(ShadingModel));
+    MappedMat := PCastleMaterialUniformBlock(GLSLLinesLit.Cache.RHIMaterialBuffer.Map);
+    try
+      AssertVectorEquals(Vector4(0.8, 0.4, 0.1, 1.0), MappedMat^.BaseColor, 0.0001);
+    finally
+      GLSLLinesLit.Cache.RHIMaterialBuffer.Unmap;
+    end;
+
+    { Verify Shape 2: Unlit LineSet initial ForcedUnlitColor = (1, 0, 0, 1) }
+    AssertFalse('LineSet without Normal node must have Lit = False',
+      GLSLLinesUnlit.Node.Geometry.Lit(GLSLLinesUnlit.State));
+    GLSLLinesUnlit.ExtractRHIMaterialBlock(MatBlock, ShadingModel);
+    AssertEquals('LineSet without Normal node must use smUnlit',
+      Ord(smUnlit), Ord(ShadingModel));
+    MappedMat := PCastleMaterialUniformBlock(GLSLLinesUnlit.Cache.RHIMaterialBuffer.Map);
+    try
+      AssertVectorEquals(Vector4(1.0, 0.0, 0.0, 1.0), MappedMat^.BaseColor, 0.0001);
+    finally
+      GLSLLinesUnlit.Cache.RHIMaterialBuffer.Unmap;
+    end;
+
+    { Dynamically mutate MatLinesUnlit.EmissiveColor and Transparency without regenerating arrays }
+    MatLinesUnlit.EmissiveColor := Vector3(0.0, 1.0, 0.0);
+    MatLinesUnlit.Transparency := 0.4;
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+
+    MappedMat := PCastleMaterialUniformBlock(GLSLLinesUnlit.Cache.RHIMaterialBuffer.Map);
+    try
+      AssertVectorEquals(Vector4(0.0, 1.0, 0.0, 0.6), MappedMat^.BaseColor, 0.0001);
+    finally
+      GLSLLinesUnlit.Cache.RHIMaterialBuffer.Unmap;
+    end;
+
+    Cmd.EndRendering;
+    Device.EndFrameAndPresent;
+  finally
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    FreeAndNil(Scene);
     FreeAndNil(Viewport);
     FreeAndNil(Container);
     FreeAndNil(DepthTex);

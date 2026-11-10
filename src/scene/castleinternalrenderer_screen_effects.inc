@@ -229,7 +229,7 @@ var
       Exit;
     for I := 0 to AIDecls.Count - 1 do
     begin
-      Field := AIDecls[I].Field;
+      Field := AIDecls[I].FieldOrLastEventValue;
       if Field = nil then
         Continue;
       if Field is TSFNode then
@@ -573,7 +573,7 @@ const
 
     for I := 0 to IDecls.Count - 1 do
     begin
-      UniformField := IDecls.Items[I].Field;
+      UniformField := IDecls.Items[I].FieldOrLastEventValue;
 
       if UniformField <> nil then
       begin

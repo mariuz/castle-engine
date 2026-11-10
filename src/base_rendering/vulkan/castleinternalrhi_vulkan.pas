@@ -295,6 +295,8 @@ type
     FDynamicDepthBiasSlope: Single;
     FDynamicLineWidth: Single;
     FLineWidthUpdateCount: Cardinal;
+    FDynamicBlendConstants: TVector4;
+    FBlendConstantsUpdateCount: Cardinal;
     FBoundDescriptorSets: array[0..3] of TRHIDescriptorSet;
     FDescriptorSetBindCount: Cardinal;
     FPipelineBindCount: Cardinal;
@@ -324,6 +326,7 @@ type
     procedure SetScissor(const ScissorRect: TRectangle); override;
     procedure SetDepthBias(const ConstantFactor, SlopeFactor: Single); override;
     procedure SetLineWidth(const LineWidth: Single); override;
+    procedure SetBlendConstants(const ABlendConstants: TVector4); override;
 
     { Extended Dynamic State (VK_EXT_extended_dynamic_state / Vulkan 1.3 Core) }
     procedure SetCullMode(const CullMode: TRHICullMode); override;
@@ -410,6 +413,8 @@ type
     property DynamicDepthBiasSlope: Single read FDynamicDepthBiasSlope;
     property DynamicLineWidth: Single read FDynamicLineWidth;
     property LineWidthUpdateCount: Cardinal read FLineWidthUpdateCount;
+    property DynamicBlendConstants: TVector4 read FDynamicBlendConstants;
+    property BlendConstantsUpdateCount: Cardinal read FBlendConstantsUpdateCount;
     property BoundDescriptorSets[const ASetIndex: Cardinal]: TRHIDescriptorSet read GetBoundDescriptorSet;
     property DescriptorSetBindCount: Cardinal read FDescriptorSetBindCount;
     property BoundPipeline: TVulkanRHIPipeline read FCurrentPipeline;
@@ -5015,17 +5020,22 @@ end;
 function RHIToVkBlendFactor(const Factor: TRHIBlendFactor): Integer;
 begin
   case Factor of
-    bfZero:             Result := VK_BLEND_FACTOR_ZERO;
-    bfOne:              Result := VK_BLEND_FACTOR_ONE;
-    bfSrcColor:         Result := VK_BLEND_FACTOR_SRC_COLOR;
-    bfOneMinusSrcColor: Result := VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
-    bfDstColor:         Result := VK_BLEND_FACTOR_DST_COLOR;
-    bfOneMinusDstColor: Result := VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
-    bfSrcAlpha:         Result := VK_BLEND_FACTOR_SRC_ALPHA;
-    bfOneMinusSrcAlpha: Result := VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    bfDstAlpha:         Result := VK_BLEND_FACTOR_DST_ALPHA;
-    bfOneMinusDstAlpha: Result := VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
-    else                Result := VK_BLEND_FACTOR_ONE;
+    bfZero:                  Result := VK_BLEND_FACTOR_ZERO;
+    bfOne:                   Result := VK_BLEND_FACTOR_ONE;
+    bfSrcColor:              Result := VK_BLEND_FACTOR_SRC_COLOR;
+    bfOneMinusSrcColor:      Result := VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+    bfDstColor:              Result := VK_BLEND_FACTOR_DST_COLOR;
+    bfOneMinusDstColor:      Result := VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
+    bfSrcAlpha:              Result := VK_BLEND_FACTOR_SRC_ALPHA;
+    bfOneMinusSrcAlpha:      Result := VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    bfDstAlpha:              Result := VK_BLEND_FACTOR_DST_ALPHA;
+    bfOneMinusDstAlpha:      Result := VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+    bfConstantColor:         Result := VK_BLEND_FACTOR_CONSTANT_COLOR;
+    bfOneMinusConstantColor: Result := VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;
+    bfConstantAlpha:         Result := VK_BLEND_FACTOR_CONSTANT_ALPHA;
+    bfOneMinusConstantAlpha: Result := VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA;
+    bfSrcAlphaSaturate:      Result := VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;
+    else                     Result := VK_BLEND_FACTOR_ONE;
   end;
 end;
 
@@ -6535,7 +6545,7 @@ var
   DepthStencil: VkPipelineDepthStencilStateCreateInfo;
   BlendAttachments: array of VkPipelineColorBlendAttachmentState;
   ColorBlending: VkPipelineColorBlendStateCreateInfo;
-  DynamicStates: array[0..8] of VkDynamicState;
+  DynamicStates: array[0..9] of VkDynamicState;
   DynamicStateCount: Cardinal;
   DynamicStateInfo: VkPipelineDynamicStateCreateInfo;
   ColorFormats: array of VkFormat;
@@ -6747,6 +6757,10 @@ begin
   ColorBlending.attachmentCount := Length(BlendAttachments);
   if Length(BlendAttachments) > 0 then
     ColorBlending.pAttachments := @BlendAttachments[0];
+  ColorBlending.blendConstants[0] := 1.0;
+  ColorBlending.blendConstants[1] := 1.0;
+  ColorBlending.blendConstants[2] := 1.0;
+  ColorBlending.blendConstants[3] := 1.0;
 
   DynamicStates[0] := VK_DYNAMIC_STATE_VIEWPORT;
   DynamicStates[1] := VK_DYNAMIC_STATE_SCISSOR;
@@ -6754,6 +6768,11 @@ begin
   if ADesc.Rasterizer.DepthBiasEnable then
   begin
     DynamicStates[DynamicStateCount] := VK_DYNAMIC_STATE_DEPTH_BIAS;
+    Inc(DynamicStateCount);
+  end;
+  if ADesc.BlendState.BlendEnable then
+  begin
+    DynamicStates[DynamicStateCount] := VK_DYNAMIC_STATE_BLEND_CONSTANTS;
     Inc(DynamicStateCount);
   end;
   if ADevice.SupportsExtendedDynamicState then
@@ -7078,6 +7097,8 @@ begin
   FLastPushConstantStageFlags := [];
   FLastPushConstantSize := 0;
   FPushConstantCallCount := 0;
+  FDynamicBlendConstants := Vector4(1.0, 1.0, 1.0, 1.0);
+  FBlendConstantsUpdateCount := 0;
   FIsRendering := False;
   FActiveRenderingHasColor := False;
   FActiveRenderingColorFormat := pfUndefined;
@@ -7670,6 +7691,15 @@ procedure TVulkanRHICommandList.SetLineWidth(const LineWidth: Single);
 begin
   FDynamicLineWidth := Max(1.0, LineWidth);
   Inc(FLineWidthUpdateCount);
+end;
+
+procedure TVulkanRHICommandList.SetBlendConstants(const ABlendConstants: TVector4);
+begin
+  FDynamicBlendConstants := ABlendConstants;
+  Inc(FBlendConstantsUpdateCount);
+  Inc(FDynamicStateChangeCount);
+  if (FHandle <> nil) and Assigned(vkCmdSetBlendConstants) then
+    vkCmdSetBlendConstants(FHandle, @ABlendConstants.Data[0]);
 end;
 
 procedure TVulkanRHICommandList.SetCullMode(const CullMode: TRHICullMode);
@@ -19552,6 +19582,8 @@ var
   KeyHash: UInt64;
   BlendAttachments: array of VkPipelineColorBlendAttachmentState;
   ColorBlending: VkPipelineColorBlendStateCreateInfo;
+  DynamicStates: array[0..0] of VkDynamicState;
+  DynamicStateInfo: VkPipelineDynamicStateCreateInfo;
   Multisampling: VkPipelineMultisampleStateCreateInfo;
   ColorFormats: array of VkFormat;
   RenderingInfo: VkPipelineRenderingCreateInfoKHR;
@@ -19591,6 +19623,19 @@ begin
   ColorBlending.attachmentCount := Length(BlendAttachments);
   if Length(BlendAttachments) > 0 then
     ColorBlending.pAttachments := @BlendAttachments[0];
+  ColorBlending.blendConstants[0] := 1.0;
+  ColorBlending.blendConstants[1] := 1.0;
+  ColorBlending.blendConstants[2] := 1.0;
+  ColorBlending.blendConstants[3] := 1.0;
+
+  DynamicStates[0] := VK_DYNAMIC_STATE_BLEND_CONSTANTS;
+  FillChar(DynamicStateInfo, SizeOf(DynamicStateInfo), 0);
+  DynamicStateInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+  if ADesc.BlendState.BlendEnable then
+    DynamicStateInfo.dynamicStateCount := 1
+  else
+    DynamicStateInfo.dynamicStateCount := 0;
+  DynamicStateInfo.pDynamicStates := @DynamicStates[0];
 
   FillChar(Multisampling, SizeOf(Multisampling), 0);
   Multisampling.sType := VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -19623,6 +19668,7 @@ begin
     VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT;
   PipelineInfo.pColorBlendState := @ColorBlending;
   PipelineInfo.pMultisampleState := @Multisampling;
+  PipelineInfo.pDynamicState := @DynamicStateInfo;
   if not FSupportsDynamicRendering then
     PipelineInfo.renderPass := ARenderPass;
 

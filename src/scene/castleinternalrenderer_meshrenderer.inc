@@ -558,6 +558,19 @@ begin
           ShapePipeline := Renderer.GetOrCreateShapePipeline(Shape, RenderOptions);
           if ShapePipeline <> nil then
             ActiveCommandList.BindPipeline(ShapePipeline);
+          if (Shape.State <> nil) and (Shape.State.BlendMode <> nil) and
+             ((Shape.State.BlendMode.SrcFactor in [bsConstantColor, bsOneMinusConstantColor, bsConstantAlpha, bsOneMinusConstantAlpha]) or
+              (Shape.State.BlendMode.DestFactor in [bdConstantColor, bdOneMinusConstantColor, bdConstantAlpha, bdOneMinusConstantAlpha])) then
+          begin
+            if RenderContext <> nil then
+              RenderContext.BlendingConstantColor := Vector4(
+                Shape.State.BlendMode.FdColor.Value,
+                1.0 - Shape.State.BlendMode.FdColorTransparency.Value)
+            else
+              ActiveCommandList.SetBlendConstants(Vector4(
+                Shape.State.BlendMode.FdColor.Value,
+                1.0 - Shape.State.BlendMode.FdColorTransparency.Value));
+          end;
         end;
         if RenderOptions <> nil then ShadowModeOrd := Ord(RenderOptions.ShadowMapSystemMode) else ShadowModeOrd := 0;
         NormalMat := ModelViewToNormalMatrix(ShapeModelView);

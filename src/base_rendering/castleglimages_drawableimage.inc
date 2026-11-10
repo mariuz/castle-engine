@@ -1258,20 +1258,13 @@ procedure TDrawableImage.DrawNoBatch(
       acTest: RenderContext.FixedFunctionAlphaTestEnable;
       acBlending:
         begin
-          if GLFeatures.BlendConstant and
-            ( (BlendingSourceFactor in
-               [bsConstantColor, bsOneMinusConstantColor,
-                bsConstantAlpha, bsOneMinusConstantAlpha]) or
-              (BlendingDestinationFactor in
-               [bdConstantColor, bdOneMinusConstantColor,
-                bdConstantAlpha, bdOneMinusConstantAlpha]) ) then
-          begin
-            glBlendColor(
-              BlendingConstantColor[0],
-              BlendingConstantColor[1],
-              BlendingConstantColor[2],
-              BlendingConstantColor[3]);
-          end;
+          if (BlendingSourceFactor in
+              [bsConstantColor, bsOneMinusConstantColor,
+               bsConstantAlpha, bsOneMinusConstantAlpha]) or
+             (BlendingDestinationFactor in
+              [bdConstantColor, bdOneMinusConstantColor,
+               bdConstantAlpha, bdOneMinusConstantAlpha]) then
+            RenderContext.BlendingConstantColor := BlendingConstantColor;
 
           RenderContext.BlendingEnable(BlendingSourceFactor, BlendingDestinationFactor);
         end;
@@ -1375,6 +1368,7 @@ var
   BatchAlphaCutoff: Single;
   BatchCustomBlend: Boolean;
   BatchSrcBlend, BatchDstBlend: TRHIBlendFactor;
+  BatchUsesConstantBlend: Boolean;
   BatchCustomFragShader: TRHIShaderModule;
   BatchCustomParams, BatchColorTint, CustomShaderColor: TVector4;
   ScissorR: TRectangle;
@@ -1409,6 +1403,9 @@ begin
         BatchCustomBlend := False;
         BatchSrcBlend := bfSrcAlpha;
         BatchDstBlend := bfOneMinusSrcAlpha;
+        BatchUsesConstantBlend := (FinalAlpha = acBlending) and
+          ((BlendingSourceFactor in [bsConstantColor, bsOneMinusConstantColor, bsConstantAlpha, bsOneMinusConstantAlpha]) or
+           (BlendingDestinationFactor in [bdConstantColor, bdOneMinusConstantColor, bdConstantAlpha, bdOneMinusConstantAlpha]));
         case FinalAlpha of
           acNone:
             BatchBlendMode := bmNone;
@@ -1481,6 +1478,14 @@ begin
           AutoStarted2DPass := True;
         end;
         try
+          if BatchUsesConstantBlend then
+          begin
+            Batcher.Flush;
+            if RenderContext <> nil then
+              RenderContext.BlendingConstantColor := BlendingConstantColor
+            else if ActiveCommandList <> nil then
+              ActiveCommandList.SetBlendConstants(BlendingConstantColor);
+          end;
           Batcher.DrawQuads(
             FRHITexture,
             FRHIDescriptorSet,
@@ -1504,6 +1509,8 @@ begin
             BatchCustomFragShader,
             BatchCustomParams
           );
+          if BatchUsesConstantBlend then
+            Batcher.Flush;
         finally
           if AutoStarted2DPass then
             Batcher.End2DPass;

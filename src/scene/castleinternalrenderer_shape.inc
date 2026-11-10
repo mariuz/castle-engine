@@ -550,6 +550,16 @@ begin
 
   if (Cache <> nil) and (Cache.Arrays <> nil) and Cache.Arrays.ForceUnlit then
   begin
+    ShapeState := OriginalState;
+    if ShapeState = nil then
+      ShapeState := State;
+    if (ShapeState <> nil) and
+       ((ShapeState.MaterialInfo is TPhongMaterialInfo) or
+        (ShapeState.MaterialInfo is TUnlitMaterialInfo)) and
+       not (Geometry is TPointSetNode_1) then
+      Cache.Arrays.ForcedUnlitColor := Vector4(
+        ShapeState.MaterialInfo.EmissiveColor,
+        ShapeState.MaterialInfo.Opacity);
     Result := True;
     AShadingModel := smUnlit;
     AMatBlock.BaseColor := Cache.Arrays.ForcedUnlitColor;
@@ -2339,7 +2349,7 @@ var
       Exit;
     for I := 0 to AIDecls.Count - 1 do
     begin
-      Field := AIDecls[I].Field;
+      Field := AIDecls[I].FieldOrLastEventValue;
       if Field = nil then
         Continue;
       if Field is TSFNode then

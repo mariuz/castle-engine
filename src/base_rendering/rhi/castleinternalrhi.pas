@@ -215,7 +215,12 @@ type
     bfSrcAlpha,
     bfOneMinusSrcAlpha,
     bfDstAlpha,
-    bfOneMinusDstAlpha
+    bfOneMinusDstAlpha,
+    bfConstantColor,
+    bfOneMinusConstantColor,
+    bfConstantAlpha,
+    bfOneMinusConstantAlpha,
+    bfSrcAlphaSaturate
   );
 
   TRHIBlendOp = (
@@ -740,6 +745,7 @@ type
     procedure SetScissor(const ScissorRect: TRectangle); virtual; abstract;
     procedure SetDepthBias(const ConstantFactor, SlopeFactor: Single); virtual; abstract;
     procedure SetLineWidth(const LineWidth: Single); virtual;
+    procedure SetBlendConstants(const ABlendConstants: TVector4); virtual;
 
     { Extended Dynamic State (VK_EXT_extended_dynamic_state / Vulkan 1.3 Core) }
     procedure SetCullMode(const CullMode: TRHICullMode); virtual;
@@ -1630,6 +1636,10 @@ begin
 end;
 
 procedure TRHICommandList.SetLineWidth(const LineWidth: Single);
+begin
+end;
+
+procedure TRHICommandList.SetBlendConstants(const ABlendConstants: TVector4);
 begin
 end;
 

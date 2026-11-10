@@ -185,6 +185,7 @@ type
       const MinDepth: Single = 0.0; const MaxDepth: Single = 1.0); override;
     procedure SetScissor(const ScissorRect: TRectangle); override;
     procedure SetDepthBias(const ConstantFactor, SlopeFactor: Single); override;
+    procedure SetBlendConstants(const ABlendConstants: TVector4); override;
 
     procedure BindPipeline(const Pipeline: TRHIPipeline); override;
     procedure BindDescriptorSet(const SetIndex: Cardinal;
@@ -333,6 +334,11 @@ begin
     bfOneMinusSrcAlpha: Result := GL_ONE_MINUS_SRC_ALPHA;
     bfDstAlpha:         Result := GL_DST_ALPHA;
     bfOneMinusDstAlpha: Result := GL_ONE_MINUS_DST_ALPHA;
+    bfConstantColor:         Result := GL_CONSTANT_COLOR;
+    bfOneMinusConstantColor: Result := GL_ONE_MINUS_CONSTANT_COLOR;
+    bfConstantAlpha:         Result := GL_CONSTANT_ALPHA;
+    bfOneMinusConstantAlpha: Result := GL_ONE_MINUS_CONSTANT_ALPHA;
+    bfSrcAlphaSaturate:      Result := GL_SRC_ALPHA_SATURATE;
   end;
 end;
 
@@ -891,6 +897,14 @@ end;
 procedure TOpenGLRHICommandList.SetDepthBias(const ConstantFactor, SlopeFactor: Single);
 begin
   glPolygonOffset(SlopeFactor, ConstantFactor);
+end;
+
+procedure TOpenGLRHICommandList.SetBlendConstants(const ABlendConstants: TVector4);
+begin
+  if GLFeatures.BlendConstant then
+    glBlendColor(ABlendConstants.X, ABlendConstants.Y, ABlendConstants.Z, ABlendConstants.W);
+  //
+
 end;
 
 procedure TOpenGLRHICommandList.ApplyPipelineState(const NewPipeline: TOpenGLRHIPipeline);
