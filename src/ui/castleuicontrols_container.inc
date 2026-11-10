@@ -176,6 +176,8 @@
     { Called when the control C is destroyed or just removed from Controls list. }
     procedure DetachNotification(const C: TCastleUserInterface);
     procedure FlushCollectedMotion;
+    function CaptureRHIContainerScreen(const ImageClass: TCastleImageClass;
+      const SaveRect: TRectangle): TCastleImage;
   protected
     procedure Notification(AComponent: TComponent; Operation: TOperation); override;
 
@@ -3043,8 +3045,86 @@ begin
   Result := SafeBorder.Top;
 end;
 
+function TCastleContainer.CaptureRHIContainerScreen(
+  const ImageClass: TCastleImageClass; const SaveRect: TRectangle): TCastleImage;
+var
+  SavedCtx: TRenderContext;
+  ColorDesc, DepthDesc: TRHITextureDesc;
+  OffscreenColorTex, OffscreenDepthTex: TRHITexture;
+  Cmd: TRHICommandList;
+  TargetW, TargetH: Cardinal;
+  PassArea: TRectangle;
+  ClearCol: TCastleColor;
+  PassInfo: TRHIRenderingInfo;
+begin
+  Result := nil;
+  SavedCtx := RenderContext;
+  OffscreenColorTex := nil;
+  OffscreenDepthTex := nil;
+  try
+    if RenderContext = nil then
+      RenderContext := Context;
+
+    TargetW := Cardinal(Max(1, Max(PixelsWidth, Max(0, SaveRect.Left) + Max(1, SaveRect.Width))));
+    TargetH := Cardinal(Max(1, Max(PixelsHeight, Max(0, SaveRect.Bottom) + Max(1, SaveRect.Height))));
+
+    ColorDesc := TRHITextureDesc.Create2D(TargetW, TargetH, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc, tuTransferDst], 1);
+    ColorDesc.DebugName := 'ContainerSaveScreenColor';
+    OffscreenColorTex := RHIDevice.CreateTexture(ColorDesc);
+
+    DepthDesc := TRHITextureDesc.Create2D(TargetW, TargetH, pfD24_UNorm_S8_UInt,
+      [tuDepthStencil], 1);
+    DepthDesc.DebugName := 'ContainerSaveScreenDepth';
+    OffscreenDepthTex := RHIDevice.CreateTexture(DepthDesc);
+
+    EventBeforeRender;
+
+    Cmd := RHIDevice.BeginOffscreenFrame;
+    if Cmd <> nil then
+    begin
+      try
+        PassArea := Rectangle(0, 0, Integer(TargetW), Integer(TargetH));
+        if BackgroundEnable then
+          ClearCol := BackgroundColor
+        else
+          ClearCol := Vector4(0.0, 0.0, 0.0, 1.0);
+        PassInfo := TRHIRenderingInfo.CreateColorDepth(
+          PassArea, OffscreenColorTex, loClear, ClearCol,
+          OffscreenDepthTex, loClear, 1.0);
+        Cmd.BeginRendering(PassInfo);
+        Cmd.SetViewport(FloatRectangle(PassArea), 0.0, 1.0);
+        Cmd.SetScissor(PassArea);
+        if RenderContext <> nil then
+          RenderContext.Viewport := PassArea;
+
+        EventRender;
+        TDrawableImage.BatchingFlush;
+        if (ActiveCommandList <> nil) and ActiveCommandList.IsRendering then
+          ActiveCommandList.EndRendering;
+      finally
+        RHIDevice.EndOffscreenFrame;
+      end;
+    end;
+
+    Result := ImageClass.Create(Max(1, SaveRect.Width), Max(1, SaveRect.Height));
+    try
+      RHIDevice.GrabTextureImage(OffscreenColorTex, SaveRect, Result);
+    except
+      FreeAndNil(Result);
+      raise;
+    end;
+  finally
+    FreeAndNil(OffscreenDepthTex);
+    FreeAndNil(OffscreenColorTex);
+    RenderContext := SavedCtx;
+  end;
+end;
+
 function TCastleContainer.SaveScreen(const SaveRect: TRectangle): TRGBImage;
 begin
+  if (RHIDevice <> nil) and (ActiveCommandList = nil) then
+    Exit(CaptureRHIContainerScreen(TRGBImage, SaveRect) as TRGBImage);
   EventBeforeRender;
   EventRender;
   { This is correct if we use double-buffer. }
@@ -3088,6 +3168,8 @@ end;
 
 function TCastleContainer.SaveScreenRgba(const SaveRect: TRectangle): TRGBAlphaImage;
 begin
+  if (RHIDevice <> nil) and (ActiveCommandList = nil) then
+    Exit(CaptureRHIContainerScreen(TRGBAlphaImage, SaveRect) as TRGBAlphaImage);
   EventBeforeRender;
   EventRender;
   { This is correct if we use double-buffer. }

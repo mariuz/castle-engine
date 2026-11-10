@@ -382,6 +382,9 @@ type
     procedure TestViewportShadowVolumesMultiPassSet0SlotsAndRealLavapipeStencilRHI;
     procedure TestViewportOcclusionCullingInPassHostQueryResetRHI;
     procedure TestGPUCompressedImageDecompressDXT1DXT3DXT5AndFlipVerticalRHI;
+    procedure TestRealLavapipeSubViewportScissorClearAndBottomUpGrabTextureRHI;
+    procedure TestCastleWindowVulkanSwapchainPassSurfaceNegotiationAndStencilDepthRHI;
+    procedure TestContainerSaveScreenAndSaveScreenRgbaOutOfFrameRealLavapipeRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -27052,6 +27055,610 @@ begin
     SupportedTextureCompression := SavedCompression;
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);
+  end;
+end;
+
+type
+  TTestSizedVulkanContainer = class(TTestHeadlessVulkanContainer)
+  public
+    TestWidth: Integer;
+    TestHeight: Integer;
+    function PixelsWidth: Integer; override;
+    function PixelsHeight: Integer; override;
+  end;
+
+  TLavapipeScissorClearUIControl = class(TCastleUserInterface)
+  public
+    ClearRect: TRectangle;
+    ClearColor: TCastleColor;
+    procedure Render; override;
+  end;
+
+function TTestSizedVulkanContainer.PixelsWidth: Integer;
+begin
+  Result := Max(1, TestWidth);
+end;
+
+function TTestSizedVulkanContainer.PixelsHeight: Integer;
+begin
+  Result := Max(1, TestHeight);
+end;
+
+procedure TLavapipeScissorClearUIControl.Render;
+begin
+  inherited;
+  if (ActiveCommandList <> nil) and ActiveCommandList.IsRendering then
+  begin
+    ActiveCommandList.SetScissor(ClearRect);
+    ActiveCommandList.ClearAttachments(True, ClearColor, False, 1.0, False, 0);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipeSubViewportScissorClearAndBottomUpGrabTextureRHI;
+const
+  MinimalVertSPIRV: array[0..92] of Cardinal = (
+    $07230203, $00010000, $00000000, $00000011, $00000000,
+    $00020011, 1,
+    $0003000E, 0, 1,
+    $0007000F, 0, 1, $6E69616D, $00000000, 8, 11,
+    $00050048, 6, 0, 11, 0,
+    $00030047, 6, 2,
+    $00040047, 11, 30, 0,
+    $00020013, 2,
+    $00030021, 3, 2,
+    $00030016, 4, 32,
+    $00040017, 5, 4, 4,
+    $0003001E, 6, 5,
+    $00040020, 7, 3, 6,
+    $0004003B, 7, 8, 3,
+    $00040015, 9, 32, 1,
+    $0004002B, 9, 10, 0,
+    $00040020, 12, 1, 5,
+    $0004003B, 12, 11, 1,
+    $00040020, 13, 3, 5,
+    $00050036, 2, 1, 0, 3,
+    $000200F8, 14,
+    $0004003D, 5, 15, 11,
+    $00050041, 13, 16, 8, 10,
+    $0003003E, 16, 15,
+    $000100FD,
+    $00010038
+  );
+  MinimalPushColorFragSPIRV: array[0..94] of Cardinal = (
+    $07230203, $00010000, $00000000, $00000011, $00000000,
+    $00020011, 1,
+    $0003000E, 0, 1,
+    $0006000F, 4, 1, $6E69616D, $00000000, 7,
+    $00030010, 1, 7,
+    $00040047, 7, 30, 0,
+    $00050048, 8, 0, 35, 0,
+    $00030047, 8, 2,
+    $00020013, 2,
+    $00030021, 3, 2,
+    $00030016, 4, 32,
+    $00040017, 5, 4, 4,
+    $00040020, 6, 3, 5,
+    $0004003B, 6, 7, 3,
+    $0003001E, 8, 5,
+    $00040020, 9, 9, 8,
+    $0004003B, 9, 10, 9,
+    $00040015, 11, 32, 1,
+    $0004002B, 11, 12, 0,
+    $00040020, 13, 9, 5,
+    $00050036, 2, 1, 0, 3,
+    $000200F8, 14,
+    $00050041, 13, 15, 10, 12,
+    $0004003D, 5, 16, 15,
+    $0003003E, 7, 16,
+    $000100FD,
+    $00010038
+  );
+var
+  HeadlessDev, RealDev: TVulkanRHIDevice;
+  HeadlessCmd, RealCmd: TVulkanRHICommandList;
+  TexDesc: TRHITextureDesc;
+  HeadlessTex, RealColorTex, RealDepthTex, CpuUploadTex: TRHITexture;
+  RenderInfo: TRHIRenderingInfo;
+  FullQuadZ25, FullQuadZ50, UpperHalfQuadZ15: array[0..5] of TVector4;
+  VBOZ25, VBOZ50, VBOUpperHalf: TRHIBuffer;
+  VBODesc: TRHIBufferDesc;
+  VertMod, FragMod: TRHIShaderModule;
+  PipeDesc: TRHIGraphicsPipelineDesc;
+  Pipe: TRHIPipeline;
+  PushColor: TVector4;
+  HeadlessReadback, FullColorImg, SubBottomLeftImg, SubTopRightImg, FullDepthImg,
+    CpuSrcImg, CpuReadbackImg: TRGBAlphaImage;
+  X: Integer;
+begin
+  { Part 1: Headless deferred viewport/scissor reapply + bottom-up ClearAttachments rect }
+  HeadlessDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($A107)), True, True);
+  HeadlessTex := nil;
+  HeadlessReadback := nil;
+  try
+    TexDesc := TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuColorAttachment, tuTransferSrc]);
+    HeadlessTex := HeadlessDev.CreateTexture(TexDesc);
+
+    HeadlessCmd := HeadlessDev.BeginFrame as TVulkanRHICommandList;
+    { Call SetViewport and SetScissor BEFORE BeginRendering: must defer and reapply with 64px height! }
+    HeadlessCmd.SetViewport(FloatRectangle(0, 0, 32, 16), 0.0, 1.0);
+    HeadlessCmd.SetScissor(Rectangle(0, 0, 32, 16));
+
+    RenderInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 64, 64), HeadlessTex, loClear, Vector4(0.0, 0.0, 0.0, 1.0),
+      nil, loDontCare, 1.0);
+    HeadlessCmd.BeginRendering(RenderInfo);
+    AssertEquals('ActiveRenderingWidth must be 64', 64, Integer(HeadlessCmd.ActiveRenderingWidth));
+    AssertEquals('ActiveRenderingHeight must be 64', 64, Integer(HeadlessCmd.ActiveRenderingHeight));
+    AssertSameValue(64.0, HeadlessCmd.LastVkViewportY, 0.001);
+    AssertEquals('Bottom-left 32x16 scissor in 64x64 pass must map to top-down offset.y = 48',
+      48, HeadlessCmd.LastVkScissorOffsetY);
+
+    HeadlessCmd.ClearAttachments(True, Vector4(0.0, 1.0, 0.0, 1.0), False, 1.0, False, 0);
+    HeadlessCmd.EndRendering;
+    HeadlessDev.EndFrameAndPresent;
+
+    HeadlessReadback := HeadlessDev.GrabTextureImage(HeadlessTex, Rectangle(0, 0, 64, 64));
+    AssertEquals('Headless bottom-left (8,8) must be cleared to Green',
+      255, Integer(HeadlessReadback.PixelPtr(8, 8)^.Y));
+    AssertEquals('Headless top-left (8,56) outside scissor must remain 0',
+      0, Integer(HeadlessReadback.PixelPtr(8, 56)^.Y));
+    AssertEquals('Headless bottom-right (48,8) outside scissor must remain 0',
+      0, Integer(HeadlessReadback.PixelPtr(48, 8)^.Y));
+  finally
+    FreeAndNil(HeadlessReadback);
+    FreeAndNil(HeadlessTex);
+    FreeAndNil(HeadlessDev);
+  end;
+
+  { Part 2: Live Offscreen Vulkan GPU (Mesa Lavapipe) sub-viewport, sub-scissor, ClearAttachments & GrabTextureImage }
+  if TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+  begin
+    RealColorTex := nil;
+    RealDepthTex := nil;
+    CpuUploadTex := nil;
+    VBOZ25 := nil;
+    VBOZ50 := nil;
+    VBOUpperHalf := nil;
+    VertMod := nil;
+    FragMod := nil;
+    FullColorImg := nil;
+    SubBottomLeftImg := nil;
+    SubTopRightImg := nil;
+    FullDepthImg := nil;
+    CpuSrcImg := nil;
+    CpuReadbackImg := nil;
+    try
+      TexDesc := TRHITextureDesc.Create2D(64, 64, pfBGRA8_UNorm,
+        [tuColorAttachment, tuTransferSrc, tuTransferDst]);
+      RealColorTex := RealDev.CreateTexture(TexDesc);
+
+      TexDesc := TRHITextureDesc.Create2D(64, 64, RealDev.SwapchainDepthFormat,
+        [tuDepthStencil, tuTransferSrc]);
+      RealDepthTex := RealDev.CreateTexture(TexDesc);
+
+      FullQuadZ25[0] := Vector4(-1.0, -1.0, 0.25, 1.0);
+      FullQuadZ25[1] := Vector4( 1.0, -1.0, 0.25, 1.0);
+      FullQuadZ25[2] := Vector4( 1.0,  1.0, 0.25, 1.0);
+      FullQuadZ25[3] := Vector4(-1.0, -1.0, 0.25, 1.0);
+      FullQuadZ25[4] := Vector4( 1.0,  1.0, 0.25, 1.0);
+      FullQuadZ25[5] := Vector4(-1.0,  1.0, 0.25, 1.0);
+      VBODesc := TRHIBufferDesc.Create(SizeOf(FullQuadZ25), [buVertex], muCpuToGpu, 'FullQuadZ25');
+      VBOZ25 := RealDev.CreateBuffer(VBODesc, @FullQuadZ25[0]);
+
+      FullQuadZ50[0] := Vector4(-1.0, -1.0, 0.50, 1.0);
+      FullQuadZ50[1] := Vector4( 1.0, -1.0, 0.50, 1.0);
+      FullQuadZ50[2] := Vector4( 1.0,  1.0, 0.50, 1.0);
+      FullQuadZ50[3] := Vector4(-1.0, -1.0, 0.50, 1.0);
+      FullQuadZ50[4] := Vector4( 1.0,  1.0, 0.50, 1.0);
+      FullQuadZ50[5] := Vector4(-1.0,  1.0, 0.50, 1.0);
+      VBODesc := TRHIBufferDesc.Create(SizeOf(FullQuadZ50), [buVertex], muCpuToGpu, 'FullQuadZ50');
+      VBOZ50 := RealDev.CreateBuffer(VBODesc, @FullQuadZ50[0]);
+
+      { Asymmetric NDC quad covering only Y in [0..1] (upper half of viewport!) }
+      UpperHalfQuadZ15[0] := Vector4(-1.0, 0.0, 0.15, 1.0);
+      UpperHalfQuadZ15[1] := Vector4( 1.0, 0.0, 0.15, 1.0);
+      UpperHalfQuadZ15[2] := Vector4( 1.0, 1.0, 0.15, 1.0);
+      UpperHalfQuadZ15[3] := Vector4(-1.0, 0.0, 0.15, 1.0);
+      UpperHalfQuadZ15[4] := Vector4( 1.0, 1.0, 0.15, 1.0);
+      UpperHalfQuadZ15[5] := Vector4(-1.0, 1.0, 0.15, 1.0);
+      VBODesc := TRHIBufferDesc.Create(SizeOf(UpperHalfQuadZ15), [buVertex], muCpuToGpu, 'UpperHalfQuadZ15');
+      VBOUpperHalf := RealDev.CreateBuffer(VBODesc, @UpperHalfQuadZ15[0]);
+
+      VertMod := RealDev.CreateShaderModuleFromSPIRV(
+        ssVertex, @MinimalVertSPIRV[0], SizeOf(MinimalVertSPIRV), 'SubVpVert');
+      FragMod := RealDev.CreateShaderModuleFromSPIRV(
+        ssFragment, @MinimalPushColorFragSPIRV[0], SizeOf(MinimalPushColorFragSPIRV), 'SubVpFrag');
+
+      FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+      PipeDesc.VertexShader := VertMod;
+      PipeDesc.FragmentShader := FragMod;
+      PipeDesc.Topology := ptTriangleList;
+      SetLength(PipeDesc.VertexInput.Bindings, 1);
+      PipeDesc.VertexInput.Bindings[0].Binding := 0;
+      PipeDesc.VertexInput.Bindings[0].Stride := SizeOf(TVector4);
+      SetLength(PipeDesc.VertexInput.Attributes, 1);
+      PipeDesc.VertexInput.Attributes[0].Location := 0;
+      PipeDesc.VertexInput.Attributes[0].Binding := 0;
+      PipeDesc.VertexInput.Attributes[0].Format := vafVector4;
+      PipeDesc.VertexInput.Attributes[0].Offset := 0;
+      PipeDesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+      PipeDesc.Rasterizer.CullMode := cmNone;
+      PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+      PipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+      PipeDesc.PushConstantSize := SizeOf(TVector4);
+      PipeDesc.PushConstantStages := [ssFragment];
+      SetLength(PipeDesc.ColorAttachmentFormats, 1);
+      PipeDesc.ColorAttachmentFormats[0] := pfBGRA8_UNorm;
+      PipeDesc.DepthAttachmentFormat := RealDepthTex.Desc.Format;
+      PipeDesc.SampleCount := 1;
+      Pipe := RealDev.GetOrCreatePipeline(PipeDesc);
+
+      RealCmd := RealDev.BeginFrame as TVulkanRHICommandList;
+      RenderInfo := TRHIRenderingInfo.CreateColorDepth(
+        Rectangle(0, 0, 64, 64),
+        RealColorTex, loClear, Vector4(0.0, 0.0, 0.5, 1.0),
+        RealDepthTex, loClear, 1.0);
+      RealCmd.BeginRendering(RenderInfo);
+      RealCmd.BindPipeline(Pipe);
+
+      { 1. Bottom-left sub-viewport (0, 0, 32, 16) -> Red at Z = 0.25 }
+      RealCmd.SetViewport(FloatRectangle(0, 0, 32, 16), 0.0, 1.0);
+      RealCmd.SetScissor(Rectangle(0, 0, 32, 16));
+      PushColor := Vector4(1.0, 0.0, 0.0, 1.0);
+      RealCmd.PushConstants([ssFragment], 0, SizeOf(PushColor), PushColor);
+      RealCmd.BindVertexBuffers(0, [VBOZ25], [0]);
+      RealCmd.Draw(6, 1, 0, 0);
+
+      { 2. Top-right sub-viewport (32, 48, 32, 16) -> Green at Z = 0.50 }
+      RealCmd.SetViewport(FloatRectangle(32, 48, 32, 16), 0.0, 1.0);
+      RealCmd.SetScissor(Rectangle(32, 48, 32, 16));
+      PushColor := Vector4(0.0, 1.0, 0.0, 1.0);
+      RealCmd.PushConstants([ssFragment], 0, SizeOf(PushColor), PushColor);
+      RealCmd.BindVertexBuffers(0, [VBOZ50], [0]);
+      RealCmd.Draw(6, 1, 0, 0);
+
+      { 3. Top-left sub-viewport (0, 32, 32, 32) upper NDC half Y in [0..1] -> Yellow in CGE rows 48..63 }
+      RealCmd.SetViewport(FloatRectangle(0, 32, 32, 32), 0.0, 1.0);
+      RealCmd.SetScissor(Rectangle(0, 32, 32, 32));
+      PushColor := Vector4(1.0, 1.0, 0.0, 1.0);
+      RealCmd.PushConstants([ssFragment], 0, SizeOf(PushColor), PushColor);
+      RealCmd.BindVertexBuffers(0, [VBOUpperHalf], [0]);
+      RealCmd.Draw(6, 1, 0, 0);
+
+      { 4. Bottom-right sub-scissor (32, 0, 32, 16) ClearAttachments -> Cyan + Depth 0.75 }
+      RealCmd.SetScissor(Rectangle(32, 0, 32, 16));
+      RealCmd.ClearAttachments(True, Vector4(0.0, 1.0, 1.0, 1.0), True, 0.75, False, 0);
+
+      RealCmd.EndRendering;
+      RealDev.EndFrameAndPresent;
+
+      { Verify full 64x64 bottom-up BGRA8 color readback }
+      FullColorImg := RealDev.GrabTextureImage(RealColorTex, Rectangle(0, 0, 64, 64));
+      AssertEquals('Bottom-left (8,8) R must be 255 (Red)', 255, Integer(FullColorImg.PixelPtr(8, 8)^.X));
+      AssertEquals('Bottom-left (8,8) G must be 0',           0, Integer(FullColorImg.PixelPtr(8, 8)^.Y));
+      AssertEquals('Bottom-left (8,8) B must be 0',           0, Integer(FullColorImg.PixelPtr(8, 8)^.Z));
+
+      AssertEquals('Top-right (48,56) R must be 0',           0, Integer(FullColorImg.PixelPtr(48, 56)^.X));
+      AssertEquals('Top-right (48,56) G must be 255 (Green)', 255, Integer(FullColorImg.PixelPtr(48, 56)^.Y));
+      AssertEquals('Top-right (48,56) B must be 0',           0, Integer(FullColorImg.PixelPtr(48, 56)^.Z));
+
+      AssertEquals('Bottom-right (48,8) R must be 0',          0, Integer(FullColorImg.PixelPtr(48, 8)^.X));
+      AssertEquals('Bottom-right (48,8) G must be 255 (Cyan)', 255, Integer(FullColorImg.PixelPtr(48, 8)^.Y));
+      AssertEquals('Bottom-right (48,8) B must be 255 (Cyan)', 255, Integer(FullColorImg.PixelPtr(48, 8)^.Z));
+
+      AssertEquals('Top-left upper half (8,56) R must be 255 (Yellow)', 255, Integer(FullColorImg.PixelPtr(8, 56)^.X));
+      AssertEquals('Top-left upper half (8,56) G must be 255 (Yellow)', 255, Integer(FullColorImg.PixelPtr(8, 56)^.Y));
+      AssertEquals('Top-left lower half (8,40) R must remain 0 (Dark Blue)', 0, Integer(FullColorImg.PixelPtr(8, 40)^.X));
+      AssertTrue('Top-left lower half (8,40) B must remain ~128 (Dark Blue)',
+        Abs(Integer(FullColorImg.PixelPtr(8, 40)^.Z) - 128) <= 2);
+
+      { Verify sub-rectangle GrabTextureImage in CGE bottom-up coordinates }
+      SubBottomLeftImg := RealDev.GrabTextureImage(RealColorTex, Rectangle(0, 0, 32, 16));
+      AssertEquals('Sub-rect bottom-left (4,4) must be Red', 255, Integer(SubBottomLeftImg.PixelPtr(4, 4)^.X));
+      AssertEquals('Sub-rect bottom-left (4,4) G must be 0',   0, Integer(SubBottomLeftImg.PixelPtr(4, 4)^.Y));
+
+      SubTopRightImg := RealDev.GrabTextureImage(RealColorTex, Rectangle(32, 48, 32, 16));
+      AssertEquals('Sub-rect top-right (4,4) must be Green', 255, Integer(SubTopRightImg.PixelPtr(4, 4)^.Y));
+      AssertEquals('Sub-rect top-right (4,4) R must be 0',     0, Integer(SubTopRightImg.PixelPtr(4, 4)^.X));
+
+      { Verify D24S8 / depth bottom-up GrabTextureImage }
+      FullDepthImg := RealDev.GrabTextureImage(RealDepthTex, Rectangle(0, 0, 64, 64));
+      AssertTrue('Bottom-left depth (Z=0.25) must unpack to ~64',
+        Abs(Integer(FullDepthImg.PixelPtr(8, 8)^.X) - 64) <= 2);
+      AssertTrue('Top-right depth (Z=0.50) must unpack to ~128',
+        Abs(Integer(FullDepthImg.PixelPtr(48, 56)^.X) - 128) <= 2);
+      AssertTrue('Bottom-right cleared depth (Z=0.75) must unpack to ~191',
+        Abs(Integer(FullDepthImg.PixelPtr(48, 8)^.X) - 191) <= 2);
+      AssertEquals('Untouched depth (Z=1.0) must unpack to 255',
+        255, Integer(FullDepthImg.PixelPtr(8, 40)^.X));
+
+      { Verify CPU-uploaded texture (RenderedLayerMask = 0) round-trips WITHOUT vertical flip }
+      CpuSrcImg := TRGBAlphaImage.Create(4, 4);
+      CpuSrcImg.Clear(Vector4Byte(0, 255, 0, 255));
+      for X := 0 to 3 do
+      begin
+        CpuSrcImg.PixelPtr(X, 0)^ := Vector4Byte(255, 0, 0, 255); { Row 0 = Red }
+        CpuSrcImg.PixelPtr(X, 3)^ := Vector4Byte(0, 0, 255, 255); { Row 3 = Blue }
+      end;
+      TexDesc := TRHITextureDesc.Create2D(4, 4, pfRGBA8_UNorm, [tuSampled, tuTransferSrc, tuTransferDst]);
+      CpuUploadTex := RealDev.CreateTexture(TexDesc);
+      CpuUploadTex.UploadImage(CpuSrcImg, 0, 0);
+      AssertEquals('CPU-uploaded texture must have RenderedLayerMask = 0',
+        0, Integer((CpuUploadTex as TVulkanRHITexture).RenderedLayerMask));
+      CpuReadbackImg := RealDev.GrabTextureImage(CpuUploadTex, Rectangle(0, 0, 4, 4));
+      AssertEquals('CPU-uploaded Row 0 must remain Red after GrabTextureImage',
+        255, Integer(CpuReadbackImg.PixelPtr(1, 0)^.X));
+      AssertEquals('CPU-uploaded Row 3 must remain Blue after GrabTextureImage',
+        255, Integer(CpuReadbackImg.PixelPtr(1, 3)^.Z));
+    finally
+      FreeAndNil(CpuReadbackImg);
+      FreeAndNil(CpuSrcImg);
+      FreeAndNil(FullDepthImg);
+      FreeAndNil(SubTopRightImg);
+      FreeAndNil(SubBottomLeftImg);
+      FreeAndNil(FullColorImg);
+      FreeAndNil(FragMod);
+      FreeAndNil(VertMod);
+      FreeAndNil(VBOUpperHalf);
+      FreeAndNil(VBOZ50);
+      FreeAndNil(VBOZ25);
+      FreeAndNil(CpuUploadTex);
+      FreeAndNil(RealDepthTex);
+      FreeAndNil(RealColorTex);
+      FreeAndNil(RealDev);
+    end;
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestCastleWindowVulkanSwapchainPassSurfaceNegotiationAndStencilDepthRHI;
+var
+  Formats: array of VkSurfaceFormatKHR;
+  Modes: array of VkPresentModeKHR;
+  ChosenSurfFmt: VkSurfaceFormatKHR;
+  ChosenRHIFmt: TRHIPixelFormat;
+  Device: TVulkanRHIDevice;
+  Window: TCastleWindow;
+  OffscreenFBOTex: TRHITexture;
+  OffscreenPassInfo: TRHIRenderingInfo;
+  Tex0, Tex1: TRHITexture;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+begin
+  { 1. Surface format & present mode negotiation helpers }
+  SetLength(Formats, 2);
+  Formats[0].format := VK_FORMAT_R16G16B16A16_SFLOAT;
+  Formats[0].colorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+  Formats[1].format := VK_FORMAT_B8G8R8A8_UNORM;
+  Formats[1].colorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+  ChosenSurfFmt := SelectVulkanSurfaceFormat(Formats, ChosenRHIFmt);
+  AssertEquals('SelectVulkanSurfaceFormat must prefer VK_FORMAT_B8G8R8A8_UNORM',
+    Ord(VK_FORMAT_B8G8R8A8_UNORM), Ord(ChosenSurfFmt.format));
+  AssertEquals('ChosenRHIFmt must map to pfBGRA8_UNorm', Ord(pfBGRA8_UNorm), Ord(ChosenRHIFmt));
+
+  SetLength(Formats, 1);
+  Formats[0].format := VK_FORMAT_R8G8B8A8_UNORM;
+  Formats[0].colorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+  ChosenSurfFmt := SelectVulkanSurfaceFormat(Formats, ChosenRHIFmt);
+  AssertEquals('SelectVulkanSurfaceFormat must fall back to VK_FORMAT_R8G8B8A8_UNORM when BGRA8 unavailable',
+    Ord(VK_FORMAT_R8G8B8A8_UNORM), Ord(ChosenSurfFmt.format));
+  AssertEquals('ChosenRHIFmt must map to pfRGBA8_UNorm', Ord(pfRGBA8_UNorm), Ord(ChosenRHIFmt));
+
+  Formats[0].format := VK_FORMAT_UNDEFINED;
+  ChosenSurfFmt := SelectVulkanSurfaceFormat(Formats, ChosenRHIFmt);
+  AssertEquals('VK_FORMAT_UNDEFINED wildcard must select pfBGRA8_UNorm', Ord(pfBGRA8_UNorm), Ord(ChosenRHIFmt));
+
+  SetLength(Modes, 2);
+  Modes[0] := VK_PRESENT_MODE_FIFO_KHR;
+  Modes[1] := VK_PRESENT_MODE_MAILBOX_KHR;
+  AssertEquals('SelectVulkanPresentMode(APreferLowLatencyNoTear=False) must select FIFO',
+    Ord(VK_PRESENT_MODE_FIFO_KHR), Ord(SelectVulkanPresentMode(Modes, False)));
+  AssertEquals('SelectVulkanPresentMode(APreferLowLatencyNoTear=True) must prefer MAILBOX',
+    Ord(VK_PRESENT_MODE_MAILBOX_KHR), Ord(SelectVulkanPresentMode(Modes, True)));
+
+  { 2. TCastleWindow swapchain pass lifecycle, multi-image cycling, active FBO override & 4x MSAA resolve }
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($A108)), True, True);
+  Window := TCastleWindow.Create(nil);
+  OffscreenFBOTex := nil;
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+    Device.SimulateSwapchainForTesting(160, 120, 2, pfBGRA8_UNorm, pfD24_UNorm_S8_UInt);
+    Window.Width := 160;
+    Window.Height := 120;
+
+    OffscreenFBOTex := Device.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuColorAttachment, tuSampled]));
+
+    { Frame 0: image index 0, swapchain pass automatically opened with D24S8 depth-stencil }
+    AssertTrue('BeginVulkanFrameIfNeeded must start Frame 0', Window.BeginVulkanFrameIfNeeded);
+    AssertEquals('Frame 0 must acquire swapchain image 0', 0, Integer(Device.CurrentSwapchainImageIndex));
+    AssertTrue('BeginVulkanFrameIfNeeded must open active swapchain rendering pass',
+      (ActiveCommandList <> nil) and ActiveCommandList.IsRendering);
+    AssertTrue('Swapchain rendering pass must have HasDepthAttachment = True',
+      ActiveCommandList.ActiveRenderingHasDepth);
+    AssertEquals('Swapchain depth attachment format must be pfD24_UNorm_S8_UInt',
+      Ord(pfD24_UNorm_S8_UInt), Ord(ActiveCommandList.ActiveRenderingDepthFormat));
+
+    Tex0 := Device.GetSwapchainColorTexture;
+    AssertTrue('Swapchain image 0 must be non-nil', Tex0 <> nil);
+
+    { Simulate inner offscreen FBO pass mid-frame: GetSwapchainColorTexture must reflect active pass format! }
+    ActiveCommandList.EndRendering;
+    OffscreenPassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 64, 64), OffscreenFBOTex, loClear, Vector4(0, 0, 0, 1),
+      nil, loDontCare, 1.0);
+    ActiveCommandList.BeginRendering(OffscreenPassInfo);
+    AssertTrue('During offscreen FBO pass, GetSwapchainColorTexture must return OffscreenFBOTex',
+      Device.GetSwapchainColorTexture = OffscreenFBOTex);
+    ActiveCommandList.EndRendering;
+    AssertTrue('After offscreen FBO pass ends, GetSwapchainColorTexture must return swapchain image 0 again',
+      Device.GetSwapchainColorTexture = Tex0);
+
+    Window.EndVulkanFrameIfNeeded;
+    AssertEquals('Frame 0 must transition swapchain image 0 to rsPresent',
+      Ord(rsPresent), Ord(Tex0.CurrentState));
+    AssertEquals('VulkanFramesRenderedCount must be 1', 1, Integer(Window.VulkanFramesRenderedCount));
+
+    { Frame 1: must cycle to swapchain image 1 (NOT stale image 0!) }
+    AssertTrue('BeginVulkanFrameIfNeeded must start Frame 1', Window.BeginVulkanFrameIfNeeded);
+    AssertEquals('Frame 1 must acquire swapchain image 1', 1, Integer(Device.CurrentSwapchainImageIndex));
+    Tex1 := Device.GetSwapchainColorTexture;
+    AssertTrue('Swapchain image 1 must be distinct from image 0', (Tex1 <> nil) and (Tex1 <> Tex0));
+    Window.EndVulkanFrameIfNeeded;
+    AssertEquals('Frame 1 must transition swapchain image 1 to rsPresent',
+      Ord(rsPresent), Ord(Tex1.CurrentState));
+    AssertEquals('VulkanFramesRenderedCount must be 2', 2, Integer(Window.VulkanFramesRenderedCount));
+
+    { Frame 2 with Window.AntiAliasing := aa4SamplesFaster -> 4x MSAA resolve into image 0 }
+    Window.AntiAliasing := aa4SamplesFaster;
+    AssertTrue('BeginVulkanFrameIfNeeded must start Frame 2 with 4x MSAA', Window.BeginVulkanFrameIfNeeded);
+    AssertEquals('Device.SampleCount must sync to 4', 4, Integer(Device.SampleCount));
+    AssertTrue('SwapchainMSAAColorTexture must be allocated', Device.SwapchainMSAAColorTexture <> nil);
+    AssertTrue('SwapchainMSAADepthTexture must be allocated', Device.SwapchainMSAADepthTexture <> nil);
+    AssertEquals('SwapchainMSAADepthTexture format must match SwapchainDepthFormat (pfD24_UNorm_S8_UInt)',
+      Ord(pfD24_UNorm_S8_UInt), Ord(Device.SwapchainMSAADepthTexture.Desc.Format));
+    AssertEquals('MSAAResolvePassCount must be 1', 1, Integer(Device.MSAAResolvePassCount));
+    AssertTrue('GetSwapchainColorTexture must return 1x ResolveTexture (Tex0)',
+      Device.GetSwapchainColorTexture = Tex0);
+    Window.EndVulkanFrameIfNeeded;
+    AssertEquals('Resolved swapchain image 0 must transition to rsPresent',
+      Ord(rsPresent), Ord(Tex0.CurrentState));
+  finally
+    FreeAndNil(OffscreenFBOTex);
+    FreeGlobalBatch2DRenderer;
+    FreeAndNil(Window);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestContainerSaveScreenAndSaveScreenRgbaOutOfFrameRealLavapipeRHI;
+var
+  HeadlessDev, RealDev: TVulkanRHIDevice;
+  Container: TTestSizedVulkanContainer;
+  RectCtrl: TCastleRectangleControl;
+  LavapipeCtrl: TLavapipeScissorClearUIControl;
+  RGBImg: TRGBImage;
+  RGBAImg: TRGBAlphaImage;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx: TRenderContext;
+begin
+  { Part 1: Headless out-of-frame SaveScreen / SaveScreenRgba must not disturb simulated swapchain state }
+  HeadlessDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($A109)), True, True);
+  Container := TTestSizedVulkanContainer.Create(nil);
+  RGBImg := nil;
+  RGBAImg := nil;
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  try
+    Container.TestWidth := 128;
+    Container.TestHeight := 96;
+    Container.BackgroundEnable := True;
+    Container.BackgroundColor := Vector4(0.0, 0.0, 1.0, 1.0);
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(HeadlessDev);
+    SetActiveCommandList(nil);
+    HeadlessDev.SimulateSwapchainForTesting(128, 96, 2);
+
+    RectCtrl := TCastleRectangleControl.Create(Container);
+    RectCtrl.Width := 64;
+    RectCtrl.Height := 48;
+    RectCtrl.Color := Vector4(1.0, 0.0, 0.0, 1.0);
+    Container.Controls.InsertFront(RectCtrl);
+
+    RGBImg := Container.SaveScreen;
+    AssertTrue('ActiveCommandList must return to nil after out-of-frame SaveScreen',
+      ActiveCommandList = nil);
+    AssertEquals('SaveScreen must match Container.PixelsWidth', 128, Integer(RGBImg.Width));
+    AssertEquals('SaveScreen must match Container.PixelsHeight', 96, Integer(RGBImg.Height));
+    AssertEquals('BeginOffscreenFrame must not advance CurrentSwapchainImageIndex',
+      0, Integer(HeadlessDev.CurrentSwapchainImageIndex));
+
+    RGBAImg := Container.SaveScreenRgba(Rectangle(0, 0, 64, 48));
+    AssertEquals('SaveScreenRgba sub-rect width must be 64', 64, Integer(RGBAImg.Width));
+    AssertEquals('SaveScreenRgba sub-rect height must be 48', 48, Integer(RGBAImg.Height));
+  finally
+    FreeAndNil(RGBAImg);
+    FreeAndNil(RGBImg);
+    FreeGlobalBatch2DRenderer;
+    FreeAndNil(Container);
+    RenderContext := SavedCtx;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(HeadlessDev);
+  end;
+
+  { Part 2: Live Offscreen Vulkan GPU (Mesa Lavapipe) out-of-frame Container.SaveScreen & SaveScreenRgba }
+  if TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+  begin
+    Container := TTestSizedVulkanContainer.Create(nil);
+    RGBImg := nil;
+    RGBAImg := nil;
+    SavedRHI := RHIDevice;
+    SavedCmd := ActiveCommandList;
+    SavedBackend := ApplicationProperties.RenderBackend;
+    SavedCtx := RenderContext;
+    try
+      Container.TestWidth := 64;
+      Container.TestHeight := 48;
+      Container.BackgroundEnable := True;
+      Container.BackgroundColor := Vector4(0.0, 0.5, 1.0, 1.0); { Sky Blue }
+      ApplicationProperties.RenderBackend := backendVulkan;
+      SetRHIDevice(RealDev);
+      SetActiveCommandList(nil);
+
+      LavapipeCtrl := TLavapipeScissorClearUIControl.Create(Container);
+      LavapipeCtrl.ClearRect := Rectangle(0, 0, 32, 24); { Bottom-left quadrant }
+      LavapipeCtrl.ClearColor := Vector4(1.0, 0.25, 0.0, 0.5); { Orange with Alpha = 0.5 }
+      Container.Controls.InsertFront(LavapipeCtrl);
+
+      RGBImg := Container.SaveScreen;
+      AssertEquals(64, Integer(RGBImg.Width));
+      AssertEquals(48, Integer(RGBImg.Height));
+      { Bottom-left (8,8) = Orange (255, ~64, 0) }
+      AssertEquals('Lavapipe SaveScreen bottom-left (8,8) R must be 255',
+        255, Integer(RGBImg.PixelPtr(8, 8)^.X));
+      AssertTrue('Lavapipe SaveScreen bottom-left (8,8) G must be ~64',
+        Abs(Integer(RGBImg.PixelPtr(8, 8)^.Y) - 64) <= 2);
+      AssertEquals('Lavapipe SaveScreen bottom-left (8,8) B must be 0',
+        0, Integer(RGBImg.PixelPtr(8, 8)^.Z));
+      { Top-right (48,36) = Sky Blue (0, ~128, 255) }
+      AssertEquals('Lavapipe SaveScreen top-right (48,36) R must be 0',
+        0, Integer(RGBImg.PixelPtr(48, 36)^.X));
+      AssertTrue('Lavapipe SaveScreen top-right (48,36) G must be ~128',
+        Abs(Integer(RGBImg.PixelPtr(48, 36)^.Y) - 128) <= 2);
+      AssertEquals('Lavapipe SaveScreen top-right (48,36) B must be 255',
+        255, Integer(RGBImg.PixelPtr(48, 36)^.Z));
+
+      RGBAImg := Container.SaveScreenRgba(Rectangle(0, 0, 32, 24));
+      AssertEquals(32, Integer(RGBAImg.Width));
+      AssertEquals(24, Integer(RGBAImg.Height));
+      AssertEquals('Lavapipe SaveScreenRgba (8,8) R must be 255',
+        255, Integer(RGBAImg.PixelPtr(8, 8)^.X));
+      AssertTrue('Lavapipe SaveScreenRgba (8,8) A must preserve rendered alpha ~128',
+        Abs(Integer(RGBAImg.PixelPtr(8, 8)^.W) - 128) <= 2);
+    finally
+      FreeAndNil(RGBAImg);
+      FreeAndNil(RGBImg);
+      FreeGlobalBatch2DRenderer;
+      FreeAndNil(Container);
+      RenderContext := SavedCtx;
+      SetActiveCommandList(SavedCmd);
+      SetRHIDevice(SavedRHI);
+      ApplicationProperties.RenderBackend := SavedBackend;
+      FreeAndNil(RealDev);
+    end;
   end;
 end;
 

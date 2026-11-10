@@ -106,6 +106,7 @@ type
     procedure GenerateMipmaps; override;
     function GetSubresourceImageView(const AMipLevel, AArrayLayer: Cardinal): VkImageView;
     procedure SetHostClearColor(const AColor: TCastleColor);
+    procedure SetHostClearColorRect(const AColor: TCastleColor; const ARect: TRectangle);
     procedure SetHostClearDepth(const ADepth: Single);
 
     property Image: VkImage read FImage;
@@ -306,7 +307,14 @@ type
     FLastPushConstantStageFlags: TRHIShaderStageFlags;
     FLastPushConstantSize: Cardinal;
     FPushConstantCallCount: Cardinal;
+    FActiveRenderingWidth: Cardinal;
+    FActiveRenderingHeight: Cardinal;
+    FLastVkViewportY: Single;
+    FLastVkScissorOffsetY: Integer;
+    FViewportPendingReapply: Boolean;
+    FScissorPendingReapply: Boolean;
     function GetBoundDescriptorSet(const ASetIndex: Cardinal): TRHIDescriptorSet;
+    procedure ComputeVkScissorRect(const ARect: TRectangle; out AVkRect: VkRect2D);
   public
     constructor Create(const ADevice: TVulkanRHIDevice; const AQueueFamilyIndex: Cardinal;
       const ALevel: TRHICommandListLevel = cllPrimary);
@@ -426,6 +434,10 @@ type
     property LastPushConstantSize: Cardinal read FLastPushConstantSize;
     property PushConstantCallCount: Cardinal read FPushConstantCallCount;
     property ClearAttachmentCallCount: Cardinal read FClearAttachmentCallCount;
+    property ActiveRenderingWidth: Cardinal read FActiveRenderingWidth;
+    property ActiveRenderingHeight: Cardinal read FActiveRenderingHeight;
+    property LastVkViewportY: Single read FLastVkViewportY;
+    property LastVkScissorOffsetY: Integer read FLastVkScissorOffsetY;
   end;
 
   { -------------------------------------------------------------------------- }
@@ -3614,6 +3626,10 @@ type
     { Swapchain & MSAA state }
     FSwapchain: VkSwapchainKHR;
     FSwapchainFormat: TRHIPixelFormat;
+    FSwapchainDepthFormat: TRHIPixelFormat;
+    FSwapchainColorSpace: VkColorSpaceKHR;
+    FSwapchainPresentMode: VkPresentModeKHR;
+    FSwapchainRecreateCount: Cardinal;
     FSwapchainExtent: VkExtent2D;
     FSwapchainColorTextures: array of TVulkanRHITexture;
     FSwapchainDepthTexture: TVulkanRHITexture;
@@ -3941,7 +3957,13 @@ type
     { TRHIDevice overrides }
     function BeginFrame: TRHICommandList; override;
     procedure EndFrameAndPresent; override;
+    function BeginOffscreenFrame: TRHICommandList; override;
+    procedure EndOffscreenFrame; override;
     procedure ResizeSwapchain(const NewWidth, NewHeight: Cardinal); override;
+    procedure SimulateSwapchainForTesting(const AWidth, AHeight: Cardinal;
+      const AImageCount: Cardinal = 2;
+      const AColorFormat: TRHIPixelFormat = pfBGRA8_UNorm;
+      const ADepthFormat: TRHIPixelFormat = pfD24_UNorm_S8_UInt);
     procedure WaitIdle; override;
     function CreateSecondaryCommandList: TRHICommandList; override;
 
@@ -3994,6 +4016,12 @@ type
     property SampleCount: Cardinal read FSampleCount write SetSampleCount;
     property ActiveColorTarget: TRHITexture read FActiveColorTarget write FActiveColorTarget;
     property ActiveDepthTarget: TRHITexture read FActiveDepthTarget write FActiveDepthTarget;
+    property SwapchainFormat: TRHIPixelFormat read FSwapchainFormat;
+    property SwapchainDepthFormat: TRHIPixelFormat read FSwapchainDepthFormat;
+    property SwapchainColorSpace: VkColorSpaceKHR read FSwapchainColorSpace;
+    property SwapchainPresentMode: VkPresentModeKHR read FSwapchainPresentMode;
+    property SwapchainRecreateCount: Cardinal read FSwapchainRecreateCount;
+    property CurrentSwapchainImageIndex: Cardinal read FCurrentSwapchainImageIndex;
     property SwapchainMSAAColorTexture: TVulkanRHITexture read FSwapchainMSAAColorTexture;
     property SwapchainMSAADepthTexture: TVulkanRHITexture read FSwapchainMSAADepthTexture;
     property MSAAResolvePassCount: Cardinal read FMSAAResolvePassCount;
@@ -4165,6 +4193,17 @@ function GetFormatViewAspectMask(const AFormat: TRHIPixelFormat;
 function NegotiateOptimalPixelFormat(const ARequestedFormat: TRHIPixelFormat;
   const AUsage: TRHITextureUsageFlags;
   const APhysicalDevice: VkPhysicalDevice = nil): TRHIPixelFormat;
+
+{ Negotiates the optimal VkSurfaceFormatKHR and matching TRHIPixelFormat from AAvailableFormats,
+  preferring B8G8R8A8_UNORM / R8G8B8A8_UNORM with VK_COLOR_SPACE_SRGB_NONLINEAR_KHR so 2D UI and
+  standard gamma-encoded scene output match OpenGL's default window backbuffer without double-gamma. }
+function SelectVulkanSurfaceFormat(const AAvailableFormats: array of VkSurfaceFormatKHR;
+  out ARHIFormat: TRHIPixelFormat): VkSurfaceFormatKHR;
+
+{ Negotiates the VkPresentModeKHR from AAvailableModes, preferring VK_PRESENT_MODE_MAILBOX_KHR
+  when APreferLowLatencyNoTear = True and otherwise guaranteed tear-free VK_PRESENT_MODE_FIFO_KHR. }
+function SelectVulkanPresentMode(const AAvailableModes: array of VkPresentModeKHR;
+  const APreferLowLatencyNoTear: Boolean = False): VkPresentModeKHR;
 
 { Negotiates the highest supported VkApplicationInfo.apiVersion (1.3, 1.2, 1.1, or 1.0)
   for a given loader version reported by vkEnumerateInstanceVersion. }
@@ -5214,6 +5253,71 @@ begin
   end;
 end;
 
+function SelectVulkanSurfaceFormat(const AAvailableFormats: array of VkSurfaceFormatKHR;
+  out ARHIFormat: TRHIPixelFormat): VkSurfaceFormatKHR;
+
+  function TryMatch(const AVkFmt: VkFormat; const AColorSpace: VkColorSpaceKHR;
+    const AMappedFmt: TRHIPixelFormat): Boolean;
+  var
+    J: Integer;
+  begin
+    for J := Low(AAvailableFormats) to High(AAvailableFormats) do
+      if (AAvailableFormats[J].format = AVkFmt) and
+         (AAvailableFormats[J].colorSpace = AColorSpace) then
+      begin
+        Result := True;
+        SelectVulkanSurfaceFormat := AAvailableFormats[J];
+        ARHIFormat := AMappedFmt;
+        Exit;
+      end;
+    Result := False;
+  end;
+
+begin
+  Result.format := VK_FORMAT_B8G8R8A8_UNORM;
+  Result.colorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+  ARHIFormat := pfBGRA8_UNorm;
+
+  if Length(AAvailableFormats) = 0 then
+    Exit;
+  if (Length(AAvailableFormats) = 1) and (AAvailableFormats[0].format = VK_FORMAT_UNDEFINED) then
+    Exit;
+
+  if TryMatch(VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR, pfBGRA8_UNorm) then Exit;
+  if TryMatch(VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR, pfRGBA8_UNorm) then Exit;
+  if TryMatch(VK_FORMAT_B8G8R8A8_SRGB,  VK_COLOR_SPACE_SRGB_NONLINEAR_KHR, pfBGRA8_sRGB) then Exit;
+  if TryMatch(VK_FORMAT_R8G8B8A8_SRGB,  VK_COLOR_SPACE_SRGB_NONLINEAR_KHR, pfRGBA8_sRGB) then Exit;
+
+  Result := AAvailableFormats[0];
+  case Result.format of
+    VK_FORMAT_R8G8B8A8_UNORM: ARHIFormat := pfRGBA8_UNorm;
+    VK_FORMAT_B8G8R8A8_SRGB:  ARHIFormat := pfBGRA8_sRGB;
+    VK_FORMAT_R8G8B8A8_SRGB:  ARHIFormat := pfRGBA8_sRGB;
+    else                      ARHIFormat := pfBGRA8_UNorm;
+  end;
+end;
+
+function SelectVulkanPresentMode(const AAvailableModes: array of VkPresentModeKHR;
+  const APreferLowLatencyNoTear: Boolean): VkPresentModeKHR;
+var
+  I: Integer;
+begin
+  Result := VK_PRESENT_MODE_FIFO_KHR;
+  if Length(AAvailableModes) = 0 then
+    Exit;
+
+  if APreferLowLatencyNoTear then
+    for I := Low(AAvailableModes) to High(AAvailableModes) do
+      if AAvailableModes[I] = VK_PRESENT_MODE_MAILBOX_KHR then
+        Exit(VK_PRESENT_MODE_MAILBOX_KHR);
+
+  for I := Low(AAvailableModes) to High(AAvailableModes) do
+    if AAvailableModes[I] = VK_PRESENT_MODE_FIFO_KHR then
+      Exit(VK_PRESENT_MODE_FIFO_KHR);
+
+  Result := AAvailableModes[0];
+end;
+
 procedure RHIStateToVkLayoutAndAccess(const State: TRHIResourceState;
   out Layout: VkImageLayout; out Access: VkAccessFlags; out Stage: VkPipelineStageFlags);
 begin
@@ -6009,6 +6113,41 @@ begin
     end;
 end;
 
+procedure TVulkanRHITexture.SetHostClearColorRect(const AColor: TCastleColor;
+  const ARect: TRectangle);
+var
+  TexW, TexH, X0, Y0, X1, Y1, X, Y: Integer;
+  TotalPixels, Idx: PtrUInt;
+  RByte, GByte, BByte, AByte: Byte;
+begin
+  TexW := Max(1, Integer(FDesc.Width));
+  TexH := Max(1, Integer(FDesc.Height));
+  TotalPixels := PtrUInt(TexW) * PtrUInt(TexH);
+  if PtrUInt(Length(FHostPixels)) < TotalPixels * 4 then
+    SetLength(FHostPixels, TotalPixels * 4);
+
+  X0 := Max(0, ARect.Left);
+  Y0 := Max(0, ARect.Bottom);
+  X1 := Min(TexW, ARect.Left + Max(0, ARect.Width));
+  Y1 := Min(TexH, ARect.Bottom + Max(0, ARect.Height));
+  if (X0 >= X1) or (Y0 >= Y1) then
+    Exit;
+
+  RByte := Byte(Round(EnsureRange(AColor.X, 0.0, 1.0) * 255.0));
+  GByte := Byte(Round(EnsureRange(AColor.Y, 0.0, 1.0) * 255.0));
+  BByte := Byte(Round(EnsureRange(AColor.Z, 0.0, 1.0) * 255.0));
+  AByte := Byte(Round(EnsureRange(AColor.W, 0.0, 1.0) * 255.0));
+  for Y := Y0 to Y1 - 1 do
+    for X := X0 to X1 - 1 do
+    begin
+      Idx := (PtrUInt(Y) * PtrUInt(TexW) + PtrUInt(X)) * 4;
+      FHostPixels[Idx + 0] := RByte;
+      FHostPixels[Idx + 1] := GByte;
+      FHostPixels[Idx + 2] := BByte;
+      FHostPixels[Idx + 3] := AByte;
+    end;
+end;
+
 procedure TVulkanRHITexture.SetHostClearDepth(const ADepth: Single);
 var
   TotalPixels, I: PtrUInt;
@@ -6127,6 +6266,8 @@ begin
 
   try
     Inc(FTotalSubresourceUploads);
+    if (AMipLevel = 0) and (AArrayLayer = 0) then
+      FRenderedLayerMask := 0;
     if AMipLevel > FMaxUploadedMipLevel then
       FMaxUploadedMipLevel := AMipLevel;
     if AArrayLayer > FMaxUploadedArrayLayer then
@@ -7093,6 +7234,10 @@ var
   BeginInfo: VkCommandBufferBeginInfo;
   InheritanceInfo: VkCommandBufferInheritanceInfo;
 begin
+  FActiveRenderingWidth := 0;
+  FActiveRenderingHeight := 0;
+  FViewportPendingReapply := False;
+  FScissorPendingReapply := False;
   if (FHandle <> nil) and Assigned(vkResetCommandBuffer) then
     CheckVk(vkResetCommandBuffer(FHandle, 0), 'vkResetCommandBuffer');
   FillChar(BeginInfo, SizeOf(BeginInfo), 0);
@@ -7295,6 +7440,7 @@ var
   ColorStoreOp, DepthStoreOp: TRHIAttachmentStoreOp;
   HasColorResolve, HasAnyResolve: Boolean;
   EffResolveMode: TRHIResolveMode;
+  VkRenderAreaRect: VkRect2D;
   AttCount, ResolveBaseIdx, I: Integer;
 begin
   { Flush any pending staged buffer/image uploads outside the render pass instance
@@ -7318,27 +7464,63 @@ begin
   FIsRendering := True;
   FActiveRenderingInfo := Info;
   FActiveRenderingInfo.ColorAttachments := Copy(Info.ColorAttachments);
-  FDynamicScissorRect := Info.RenderArea;
+  if FViewportPendingReapply and
+     ((FDynamicViewportRect.Left < Info.RenderArea.Left - 0.5) or
+      (FDynamicViewportRect.Bottom < Info.RenderArea.Bottom - 0.5) or
+      (FDynamicViewportRect.Left + FDynamicViewportRect.Width > Info.RenderArea.Left + Info.RenderArea.Width + 0.5) or
+      (FDynamicViewportRect.Bottom + FDynamicViewportRect.Height > Info.RenderArea.Bottom + Info.RenderArea.Height + 0.5)) then
+    FViewportPendingReapply := False;
+  if FScissorPendingReapply and
+     ((FDynamicScissorRect.Left < Info.RenderArea.Left) or
+      (FDynamicScissorRect.Bottom < Info.RenderArea.Bottom) or
+      (FDynamicScissorRect.Left + FDynamicScissorRect.Width > Info.RenderArea.Left + Info.RenderArea.Width) or
+      (FDynamicScissorRect.Bottom + FDynamicScissorRect.Height > Info.RenderArea.Bottom + Info.RenderArea.Height)) then
+    FScissorPendingReapply := False;
+  if not FScissorPendingReapply then
+    FDynamicScissorRect := Info.RenderArea;
   FActiveRenderingHasColor := (Length(Info.ColorAttachments) > 0) and (Info.ColorAttachments[0].Texture <> nil);
   if FActiveRenderingHasColor then
   begin
     FActiveRenderingColorFormat := Info.ColorAttachments[0].Texture.Desc.Format;
     FActiveRenderingSampleCount := Max(Cardinal(1), Info.ColorAttachments[0].Texture.Desc.SampleCount);
+    FActiveRenderingWidth := Max(Cardinal(1),
+      Info.ColorAttachments[0].Texture.Desc.Width shr Info.ColorAttachments[0].MipLevel);
+    FActiveRenderingHeight := Max(Cardinal(1),
+      Info.ColorAttachments[0].Texture.Desc.Height shr Info.ColorAttachments[0].MipLevel);
   end else
   begin
     FActiveRenderingColorFormat := pfUndefined;
     FActiveRenderingSampleCount := 1;
+    FActiveRenderingWidth := 0;
+    FActiveRenderingHeight := 0;
   end;
   FActiveRenderingHasDepth := Info.HasDepthAttachment and (Info.DepthAttachment.Texture <> nil);
   if FActiveRenderingHasDepth then
   begin
     FActiveRenderingDepthFormat := Info.DepthAttachment.Texture.Desc.Format;
     if not FActiveRenderingHasColor then
+    begin
       FActiveRenderingSampleCount := Max(Cardinal(1), Info.DepthAttachment.Texture.Desc.SampleCount);
+      FActiveRenderingWidth := Max(Cardinal(1),
+        Info.DepthAttachment.Texture.Desc.Width shr Info.DepthAttachment.MipLevel);
+      FActiveRenderingHeight := Max(Cardinal(1),
+        Info.DepthAttachment.Texture.Desc.Height shr Info.DepthAttachment.MipLevel);
+    end;
   end else
     FActiveRenderingDepthFormat := pfUndefined;
 
-  if FDevice <> nil then
+  if FActiveRenderingWidth = 0 then
+    FActiveRenderingWidth := Cardinal(Max(1, Max(0, Info.RenderArea.Left) + Max(1, Info.RenderArea.Width)));
+  if FActiveRenderingHeight = 0 then
+    FActiveRenderingHeight := Cardinal(Max(1, Max(0, Info.RenderArea.Bottom) + Max(1, Info.RenderArea.Height)));
+
+  ComputeVkScissorRect(Info.RenderArea, VkRenderAreaRect);
+  if VkRenderAreaRect.extent.width = 0 then
+    VkRenderAreaRect.extent.width := Max(Cardinal(1), Cardinal(Max(1, Info.RenderArea.Width)));
+  if VkRenderAreaRect.extent.height = 0 then
+    VkRenderAreaRect.extent.height := Max(Cardinal(1), Cardinal(Max(1, Info.RenderArea.Height)));
+
+  if (FDevice <> nil) and (Length(FDevice.FSwapchainColorTextures) = 0) then
   begin
     if Length(Info.ColorAttachments) > 0 then
     begin
@@ -7427,10 +7609,15 @@ begin
         if Info.ColorAttachments[I].ResolveTexture <> nil then
         begin
           TransitionTexture(Info.ColorAttachments[I].ResolveTexture, rsColorAttachment);
-          FallbackViews[ResolveBaseIdx + I] :=
-            (Info.ColorAttachments[I].ResolveTexture as TVulkanRHITexture).GetSubresourceImageView(
+          with Info.ColorAttachments[I].ResolveTexture as TVulkanRHITexture do
+          begin
+            FLastRenderedMipLevel := Info.ColorAttachments[I].MipLevel;
+            FLastRenderedArrayLayer := Info.ColorAttachments[I].ArrayLayer;
+            FRenderedLayerMask := FRenderedLayerMask or (Cardinal(1) shl Min(Cardinal(31), Info.ColorAttachments[I].ArrayLayer));
+            FallbackViews[ResolveBaseIdx + I] := GetSubresourceImageView(
               Info.ColorAttachments[I].MipLevel,
               Info.ColorAttachments[I].ArrayLayer);
+          end;
         end else
           FallbackViews[ResolveBaseIdx + I] := VK_NULL_HANDLE;
         FillChar(FallbackClears[ResolveBaseIdx + I], SizeOf(VkClearValue), 0);
@@ -7487,10 +7674,7 @@ begin
     RpBeginInfo.sType := VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     RpBeginInfo.renderPass := FallbackRP;
     RpBeginInfo.framebuffer := FallbackFB;
-    RpBeginInfo.renderArea.offset.x := Max(0, Info.RenderArea.Left);
-    RpBeginInfo.renderArea.offset.y := Max(0, Info.RenderArea.Bottom);
-    RpBeginInfo.renderArea.extent.width := Max(1, Info.RenderArea.Width);
-    RpBeginInfo.renderArea.extent.height := Max(1, Info.RenderArea.Height);
+    RpBeginInfo.renderArea := VkRenderAreaRect;
     RpBeginInfo.clearValueCount := Length(FallbackClears);
     if Length(FallbackClears) > 0 then
       RpBeginInfo.pClearValues := @FallbackClears[0];
@@ -7501,6 +7685,10 @@ begin
       Inc(FDevice.FMSAAResolvePassCount);
     if (FHandle <> nil) and Assigned(vkCmdBeginRenderPass) then
       vkCmdBeginRenderPass(FHandle, @RpBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+    if FViewportPendingReapply then
+      SetViewport(FDynamicViewportRect, FDynamicMinDepth, FDynamicMaxDepth);
+    if FScissorPendingReapply then
+      SetScissor(FDynamicScissorRect);
     Exit;
   end;
 
@@ -7545,10 +7733,15 @@ begin
       if EffResolveMode = rmNone then
         EffResolveMode := rmAverage;
       ColorAttachments[I].resolveMode := RHIToVkResolveMode(EffResolveMode);
-      ColorAttachments[I].resolveImageView :=
-        (Info.ColorAttachments[I].ResolveTexture as TVulkanRHITexture).GetSubresourceImageView(
+      with Info.ColorAttachments[I].ResolveTexture as TVulkanRHITexture do
+      begin
+        FLastRenderedMipLevel := Info.ColorAttachments[I].MipLevel;
+        FLastRenderedArrayLayer := Info.ColorAttachments[I].ArrayLayer;
+        FRenderedLayerMask := FRenderedLayerMask or (Cardinal(1) shl Min(Cardinal(31), Info.ColorAttachments[I].ArrayLayer));
+        ColorAttachments[I].resolveImageView := GetSubresourceImageView(
           Info.ColorAttachments[I].MipLevel,
           Info.ColorAttachments[I].ArrayLayer);
+      end;
       ColorAttachments[I].resolveImageLayout := VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
       HasAnyResolve := True;
     end;
@@ -7556,10 +7749,7 @@ begin
 
   FillChar(RenderInfo, SizeOf(RenderInfo), 0);
   RenderInfo.sType := VK_STRUCTURE_TYPE_RENDERING_INFO;
-  RenderInfo.renderArea.offset.x := Info.RenderArea.Left;
-  RenderInfo.renderArea.offset.y := Info.RenderArea.Bottom;
-  RenderInfo.renderArea.extent.width := Info.RenderArea.Width;
-  RenderInfo.renderArea.extent.height := Info.RenderArea.Height;
+  RenderInfo.renderArea := VkRenderAreaRect;
   RenderInfo.layerCount := 1;
   RenderInfo.colorAttachmentCount := Length(ColorAttachments);
   if Length(ColorAttachments) > 0 then
@@ -7601,8 +7791,13 @@ begin
       if EffResolveMode = rmNone then
         EffResolveMode := rmSampleZero;
       DepthAttachment.resolveMode := RHIToVkResolveMode(EffResolveMode);
-      DepthAttachment.resolveImageView :=
-        (Info.DepthAttachment.ResolveTexture as TVulkanRHITexture).ImageView;
+      with Info.DepthAttachment.ResolveTexture as TVulkanRHITexture do
+      begin
+        FLastRenderedMipLevel := Info.DepthAttachment.MipLevel;
+        FLastRenderedArrayLayer := Info.DepthAttachment.ArrayLayer;
+        FRenderedLayerMask := FRenderedLayerMask or (Cardinal(1) shl Min(Cardinal(31), Info.DepthAttachment.ArrayLayer));
+        DepthAttachment.resolveImageView := ImageView;
+      end;
       DepthAttachment.resolveImageLayout := VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
       HasAnyResolve := True;
     end;
@@ -7617,11 +7812,17 @@ begin
 
   if (FHandle <> nil) and Assigned(vkCmdBeginRendering) then
     vkCmdBeginRendering(FHandle, @RenderInfo);
+  if FViewportPendingReapply then
+    SetViewport(FDynamicViewportRect, FDynamicMinDepth, FDynamicMaxDepth);
+  if FScissorPendingReapply then
+    SetScissor(FDynamicScissorRect);
 end;
 
 procedure TVulkanRHICommandList.EndRendering;
 begin
   FIsRendering := False;
+  FViewportPendingReapply := False;
+  FScissorPendingReapply := False;
   if FInFallbackRenderPass then
   begin
     FInFallbackRenderPass := False;
@@ -7631,6 +7832,34 @@ begin
   end;
   if (FHandle <> nil) and Assigned(vkCmdEndRendering) then
     vkCmdEndRendering(FHandle);
+end;
+
+procedure TVulkanRHICommandList.ComputeVkScissorRect(const ARect: TRectangle;
+  out AVkRect: VkRect2D);
+var
+  LeftX, RightX, TopY, BotY: Integer;
+begin
+  FillChar(AVkRect, SizeOf(AVkRect), 0);
+  if FIsRendering and (FActiveRenderingHeight > 0) then
+  begin
+    LeftX := Max(0, ARect.Left);
+    if FActiveRenderingWidth > 0 then
+      RightX := Min(Integer(FActiveRenderingWidth), ARect.Left + Max(0, ARect.Width))
+    else
+      RightX := LeftX + Max(0, ARect.Width);
+    TopY := Max(0, Integer(FActiveRenderingHeight) - (ARect.Bottom + Max(0, ARect.Height)));
+    BotY := Min(Integer(FActiveRenderingHeight), Integer(FActiveRenderingHeight) - ARect.Bottom);
+    AVkRect.offset.x := LeftX;
+    AVkRect.offset.y := TopY;
+    AVkRect.extent.width := Cardinal(Max(0, RightX - LeftX));
+    AVkRect.extent.height := Cardinal(Max(0, BotY - TopY));
+  end else
+  begin
+    AVkRect.offset.x := Max(0, ARect.Left);
+    AVkRect.offset.y := Max(0, ARect.Bottom);
+    AVkRect.extent.width := Cardinal(Max(0, ARect.Width));
+    AVkRect.extent.height := Cardinal(Max(0, ARect.Height));
+  end;
 end;
 
 procedure TVulkanRHICommandList.ClearAttachments(const ClearColorBuf: Boolean; const ClearColor: TCastleColor;
@@ -7684,13 +7913,11 @@ begin
       if ClearAttCount > 0 then
       begin
         FillChar(ClearRect, SizeOf(ClearRect), 0);
-        ClearRect.rect.offset.x := Max(0, FDynamicScissorRect.Left);
-        ClearRect.rect.offset.y := Max(0, FDynamicScissorRect.Bottom);
-        ClearRect.rect.extent.width := Max(1, FDynamicScissorRect.Width);
-        ClearRect.rect.extent.height := Max(1, FDynamicScissorRect.Height);
+        ComputeVkScissorRect(FDynamicScissorRect, ClearRect.rect);
         ClearRect.baseArrayLayer := 0;
         ClearRect.layerCount := 1;
-        vkCmdClearAttachments(FHandle, ClearAttCount, @ClearAtts[0], 1, @ClearRect);
+        if (ClearRect.rect.extent.width > 0) and (ClearRect.rect.extent.height > 0) then
+          vkCmdClearAttachments(FHandle, ClearAttCount, @ClearAtts[0], 1, @ClearRect);
       end;
     end;
   end;
@@ -7706,10 +7933,10 @@ begin
           FActiveRenderingInfo.ColorAttachments[I].ClearColor := ClearColor;
           ColorTarget := FActiveRenderingInfo.ColorAttachments[I].Texture;
           if ColorTarget is TVulkanRHITexture then
-            TVulkanRHITexture(ColorTarget).SetHostClearColor(ClearColor);
+            TVulkanRHITexture(ColorTarget).SetHostClearColorRect(ClearColor, FDynamicScissorRect);
           ColorTarget := FActiveRenderingInfo.ColorAttachments[I].ResolveTexture;
           if ColorTarget is TVulkanRHITexture then
-            TVulkanRHITexture(ColorTarget).SetHostClearColor(ClearColor);
+            TVulkanRHITexture(ColorTarget).SetHostClearColorRect(ClearColor, FDynamicScissorRect);
         end;
       end;
       if ClearDepthBuf and FActiveRenderingInfo.HasDepthAttachment then
@@ -7748,10 +7975,20 @@ begin
   FDynamicViewportRect := ViewportRect;
   FDynamicMinDepth := MinDepth;
   FDynamicMaxDepth := MaxDepth;
-  { Flip Y-axis using VK_KHR_maintenance1 negative height so CGE camera matrices
-    and counter-clockwise winding orders work identically to OpenGL }
+  { Flip Y-axis using VK_KHR_maintenance1 negative height so CGE camera matrices,
+    counter-clockwise winding orders, and bottom-up sub-viewport rectangles (Bottom = 0
+    at attachment bottom) map cleanly to Vulkan's top-down framebuffer space. }
   VkVP.x := ViewportRect.Left;
-  VkVP.y := ViewportRect.Bottom + ViewportRect.Height;
+  if FIsRendering and (FActiveRenderingHeight > 0) then
+  begin
+    VkVP.y := Single(FActiveRenderingHeight) - ViewportRect.Bottom;
+    FViewportPendingReapply := False;
+  end else
+  begin
+    VkVP.y := ViewportRect.Bottom + ViewportRect.Height;
+    FViewportPendingReapply := True;
+  end;
+  FLastVkViewportY := VkVP.y;
   VkVP.width := ViewportRect.Width;
   VkVP.height := -ViewportRect.Height;
   VkVP.minDepth := MinDepth;
@@ -7765,10 +8002,9 @@ var
   VkRect: VkRect2D;
 begin
   FDynamicScissorRect := ScissorRect;
-  VkRect.offset.x := Max(0, ScissorRect.Left);
-  VkRect.offset.y := Max(0, ScissorRect.Bottom);
-  VkRect.extent.width := ScissorRect.Width;
-  VkRect.extent.height := ScissorRect.Height;
+  ComputeVkScissorRect(ScissorRect, VkRect);
+  FLastVkScissorOffsetY := VkRect.offset.y;
+  FScissorPendingReapply := not FIsRendering;
   if (FHandle <> nil) and Assigned(vkCmdSetScissor) then
     vkCmdSetScissor(FHandle, 0, 1, @VkRect);
 end;
@@ -17985,6 +18221,10 @@ begin
   FSupportsDynamicRendering := True;
   FAntiAliasing := aaNone;
   FSampleCount := 1;
+  FSwapchainFormat := pfBGRA8_UNorm;
+  FSwapchainDepthFormat := pfD24_UNorm_S8_UInt;
+  FSwapchainColorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+  FSwapchainPresentMode := VK_PRESENT_MODE_FIFO_KHR;
 
   LoadVulkan;
   CreateInstance(EnableValidation);
@@ -18021,10 +18261,15 @@ begin
   FSupportsDynamicRendering := True;
   FAntiAliasing := aaNone;
   FSampleCount := 1;
+  FSwapchainFormat := pfBGRA8_UNorm;
+  FSwapchainDepthFormat := pfD24_UNorm_S8_UInt;
+  FSwapchainColorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+  FSwapchainPresentMode := VK_PRESENT_MODE_FIFO_KHR;
 
   LoadVulkan;
   CreateInstance(EnableValidation, False);
   PickPhysicalDevice;
+  FSwapchainDepthFormat := NegotiateOptimalPixelFormat(pfD24_UNorm_S8_UInt, [tuDepthStencil], FPhysicalDevice);
   CreateLogicalDevice;
   FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice);
   FMemoryAllocator.SupportsMemoryBudgetExt := FSupportsMemoryBudgetExt;
@@ -18077,6 +18322,10 @@ begin
   FFramebufferMap := TVulkanFramebufferMap.Create;
   FAntiAliasing := aaNone;
   FSampleCount := 1;
+  FSwapchainFormat := pfBGRA8_UNorm;
+  FSwapchainDepthFormat := pfD24_UNorm_S8_UInt;
+  FSwapchainColorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+  FSwapchainPresentMode := VK_PRESENT_MODE_FIFO_KHR;
   FCapabilities.Backend := rbVulkan;
   FCapabilities.DeviceName := 'Headless Vulkan RHI Device';
   FCapabilities.MaxTextureSize := 16384;
@@ -20174,7 +20423,12 @@ begin
     FreeAndNil(FSwapchainMSAADepthTexture);
   end else
   if (FSwapchainExtent.width > 0) and (FSwapchainExtent.height > 0) then
-    EnsureMSAATargets(FSwapchainExtent.width, FSwapchainExtent.height, FSwapchainFormat, pfD32_Float);
+  begin
+    if FSwapchainDepthFormat <> pfUndefined then
+      EnsureMSAATargets(FSwapchainExtent.width, FSwapchainExtent.height, FSwapchainFormat, FSwapchainDepthFormat)
+    else
+      EnsureMSAATargets(FSwapchainExtent.width, FSwapchainExtent.height, FSwapchainFormat, pfD24_UNorm_S8_UInt);
+  end;
 end;
 
 procedure TVulkanRHIDevice.SetSupportsExtendedDynamicState(const AValue: Boolean);
@@ -20217,8 +20471,10 @@ begin
     ColorFmt := FSwapchainFormat;
   if AResolveDepthTarget <> nil then
     DepthFmt := AResolveDepthTarget.Desc.Format
+  else if FSwapchainDepthFormat <> pfUndefined then
+    DepthFmt := FSwapchainDepthFormat
   else
-    DepthFmt := pfD32_Float;
+    DepthFmt := pfD24_UNorm_S8_UInt;
 
   if (FSampleCount > 1) and (AResolveColorTarget <> nil) then
   begin
@@ -20256,12 +20512,16 @@ begin
     Result.DepthAttachment.StoreOp := soStore;
     Result.DepthAttachment.ClearDepth := AClearDepth;
   end;
+  Result.HasDepthAttachment := Result.DepthAttachment.Texture <> nil;
 end;
 
 procedure TVulkanRHIDevice.CreateSwapchain(const Width, Height: Cardinal);
 var
   Caps: VkSurfaceCapabilitiesKHR;
-  ImageCount, I: Cardinal;
+  SurfaceFormatCount, PresentModeCount, ImageCount, I: Cardinal;
+  SurfaceFormats: array of VkSurfaceFormatKHR;
+  PresentModes: array of VkPresentModeKHR;
+  SurfFmt: VkSurfaceFormatKHR;
   CreateInfo: VkSwapchainCreateInfoKHR;
   Images: array of VkImage;
   ViewInfo: VkImageViewCreateInfo;
@@ -20274,11 +20534,40 @@ begin
   CheckVk(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(FPhysicalDevice, FSurface, @Caps),
     'vkGetPhysicalDeviceSurfaceCapabilitiesKHR');
 
-  FSwapchainFormat := pfBGRA8_UNorm;
+  SurfaceFormatCount := 0;
+  SurfaceFormats := nil;
+  if Assigned(vkGetPhysicalDeviceSurfaceFormatsKHR) and
+     (vkGetPhysicalDeviceSurfaceFormatsKHR(FPhysicalDevice, FSurface, @SurfaceFormatCount, nil) = VK_SUCCESS) and
+     (SurfaceFormatCount > 0) then
+  begin
+    SetLength(SurfaceFormats, SurfaceFormatCount);
+    vkGetPhysicalDeviceSurfaceFormatsKHR(FPhysicalDevice, FSurface, @SurfaceFormatCount, @SurfaceFormats[0]);
+  end;
+  SurfFmt := SelectVulkanSurfaceFormat(SurfaceFormats, FSwapchainFormat);
+  FSwapchainColorSpace := SurfFmt.colorSpace;
+
+  PresentModeCount := 0;
+  PresentModes := nil;
+  if Assigned(vkGetPhysicalDeviceSurfacePresentModesKHR) and
+     (vkGetPhysicalDeviceSurfacePresentModesKHR(FPhysicalDevice, FSurface, @PresentModeCount, nil) = VK_SUCCESS) and
+     (PresentModeCount > 0) then
+  begin
+    SetLength(PresentModes, PresentModeCount);
+    vkGetPhysicalDeviceSurfacePresentModesKHR(FPhysicalDevice, FSurface, @PresentModeCount, @PresentModes[0]);
+  end;
+  FSwapchainPresentMode := SelectVulkanPresentMode(PresentModes, False);
+
   FSwapchainExtent.width := Max(1, Width);
   FSwapchainExtent.height := Max(1, Height);
   if Caps.currentExtent.width <> High(Cardinal) then
-    FSwapchainExtent := Caps.currentExtent;
+    FSwapchainExtent := Caps.currentExtent
+  else if (Caps.maxImageExtent.width > 0) and (Caps.maxImageExtent.height > 0) then
+  begin
+    FSwapchainExtent.width := EnsureRange(FSwapchainExtent.width,
+      Max(Cardinal(1), Caps.minImageExtent.width), Caps.maxImageExtent.width);
+    FSwapchainExtent.height := EnsureRange(FSwapchainExtent.height,
+      Max(Cardinal(1), Caps.minImageExtent.height), Caps.maxImageExtent.height);
+  end;
 
   ImageCount := Max(2, Caps.minImageCount);
   if (Caps.maxImageCount > 0) and (ImageCount > Caps.maxImageCount) then
@@ -20288,15 +20577,15 @@ begin
   CreateInfo.sType := VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
   CreateInfo.surface := FSurface;
   CreateInfo.minImageCount := ImageCount;
-  CreateInfo.imageFormat := RHIToVkFormat(FSwapchainFormat);
-  CreateInfo.imageColorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+  CreateInfo.imageFormat := SurfFmt.format;
+  CreateInfo.imageColorSpace := FSwapchainColorSpace;
   CreateInfo.imageExtent := FSwapchainExtent;
   CreateInfo.imageArrayLayers := 1;
   CreateInfo.imageUsage := VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT or VK_IMAGE_USAGE_TRANSFER_SRC_BIT or VK_IMAGE_USAGE_TRANSFER_DST_BIT;
   CreateInfo.imageSharingMode := VK_SHARING_MODE_EXCLUSIVE;
   CreateInfo.preTransform := Caps.currentTransform;
   CreateInfo.compositeAlpha := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-  CreateInfo.presentMode := VK_PRESENT_MODE_FIFO_KHR;
+  CreateInfo.presentMode := FSwapchainPresentMode;
   CreateInfo.clipped := VK_TRUE;
 
   CheckVk(vkCreateSwapchainKHR(FDevice, @CreateInfo, nil, @FSwapchain), 'vkCreateSwapchainKHR');
@@ -20325,12 +20614,51 @@ begin
     FSwapchainColorTextures[I] := TVulkanRHITexture.CreateSwapchainWrapper(Self, ColorDesc, Images[I], ImgView);
   end;
 
+  FSwapchainDepthFormat := NegotiateOptimalPixelFormat(pfD24_UNorm_S8_UInt, [tuDepthStencil], FPhysicalDevice);
   DepthDesc := TRHITextureDesc.Create2D(FSwapchainExtent.width, FSwapchainExtent.height,
-    pfD32_Float, [tuDepthStencil], 1);
+    FSwapchainDepthFormat, [tuDepthStencil], 1);
   FSwapchainDepthTexture := TVulkanRHITexture.Create(Self, DepthDesc);
 
   if FSampleCount > 1 then
-    EnsureMSAATargets(FSwapchainExtent.width, FSwapchainExtent.height, FSwapchainFormat, pfD32_Float);
+    EnsureMSAATargets(FSwapchainExtent.width, FSwapchainExtent.height, FSwapchainFormat, FSwapchainDepthFormat);
+end;
+
+procedure TVulkanRHIDevice.SimulateSwapchainForTesting(const AWidth, AHeight: Cardinal;
+  const AImageCount: Cardinal;
+  const AColorFormat: TRHIPixelFormat;
+  const ADepthFormat: TRHIPixelFormat);
+var
+  ImgCount, I: Cardinal;
+  ColorDesc, DepthDesc: TRHITextureDesc;
+begin
+  DestroySwapchain;
+  FSwapchainFormat := AColorFormat;
+  if FDevice <> nil then
+    FSwapchainDepthFormat := NegotiateOptimalPixelFormat(ADepthFormat, [tuDepthStencil], FPhysicalDevice)
+  else
+    FSwapchainDepthFormat := ADepthFormat;
+  FSwapchainExtent.width := Max(Cardinal(1), AWidth);
+  FSwapchainExtent.height := Max(Cardinal(1), AHeight);
+  FCurrentSwapchainImageIndex := 0;
+
+  ImgCount := Max(Cardinal(1), AImageCount);
+  ColorDesc := TRHITextureDesc.Create2D(FSwapchainExtent.width, FSwapchainExtent.height,
+    FSwapchainFormat, [tuColorAttachment, tuTransferSrc, tuTransferDst], 1);
+  ColorDesc.DebugName := 'SimulatedSwapchainColor';
+  SetLength(FSwapchainColorTextures, ImgCount);
+  for I := 0 to ImgCount - 1 do
+    FSwapchainColorTextures[I] := TVulkanRHITexture.Create(Self, ColorDesc);
+
+  if FSwapchainDepthFormat <> pfUndefined then
+  begin
+    DepthDesc := TRHITextureDesc.Create2D(FSwapchainExtent.width, FSwapchainExtent.height,
+      FSwapchainDepthFormat, [tuDepthStencil], 1);
+    DepthDesc.DebugName := 'SimulatedSwapchainDepth';
+    FSwapchainDepthTexture := TVulkanRHITexture.Create(Self, DepthDesc);
+  end;
+
+  if FSampleCount > 1 then
+    EnsureMSAATargets(FSwapchainExtent.width, FSwapchainExtent.height, FSwapchainFormat, FSwapchainDepthFormat);
 end;
 
 procedure TVulkanRHIDevice.DestroySwapchain;
@@ -20409,7 +20737,13 @@ begin
     Frame.TransientDescriptorAllocator.ResetPools;
   FDeferResourceDestruction := True;
 
-  { 2. Acquire next swapchain image when bound to a native swapchain }
+  if Length(FSwapchainColorTextures) > 0 then
+  begin
+    FActiveColorTarget := nil;
+    FActiveDepthTarget := nil;
+  end;
+
+  { 2. Acquire next swapchain image when bound to a native swapchain (or cycle simulated swapchain) }
   if (FDevice <> nil) and (FSwapchain <> VK_NULL_HANDLE) and Assigned(vkAcquireNextImageKHR) then
   begin
     AcquireRes := vkAcquireNextImageKHR(FDevice, FSwapchain, High(UInt64),
@@ -20417,10 +20751,13 @@ begin
 
     if AcquireRes = VK_ERROR_OUT_OF_DATE_KHR then
     begin
+      Inc(FSwapchainRecreateCount);
       ResizeSwapchain(FSwapchainExtent.width, FSwapchainExtent.height);
       Exit(nil);
     end;
-  end;
+  end else
+  if Length(FSwapchainColorTextures) > 0 then
+    FCurrentSwapchainImageIndex := FTotalFramesPresented mod Cardinal(Length(FSwapchainColorTextures));
 
   if (FDevice <> nil) and (Frame.InFlightFence <> VK_NULL_HANDLE) and Assigned(vkResetFences) then
     CheckVk(vkResetFences(FDevice, 1, @Frame.InFlightFence), 'vkResetFences');
@@ -20443,10 +20780,14 @@ var
   SubmitInfo: VkSubmitInfo;
   WaitStages: VkPipelineStageFlags;
   PresentInfo: VkPresentInfoKHR;
+  PresentRes: VkResult;
   CmdHandle: VkCommandBuffer;
 begin
-  SetActiveCommandList(nil);
   Frame := FFrames[FFrameIndex];
+  if (Frame.CommandList <> nil) and Frame.CommandList.IsRendering then
+    Frame.CommandList.EndRendering;
+
+  SetActiveCommandList(nil);
   if Frame.CommandList = nil then
     Exit;
 
@@ -20455,10 +20796,11 @@ begin
   if FBindlessTextureManager <> nil then
     FBindlessTextureManager.FlushPendingUpdates;
 
-  { Ensure swapchain backbuffer is transitioned to VK_IMAGE_LAYOUT_PRESENT_SRC_KHR }
-  if (FSwapchain <> VK_NULL_HANDLE) and (FActiveColorTarget = nil) and
-     (GetSwapchainColorTexture <> nil) then
-    Frame.CommandList.TransitionTexture(GetSwapchainColorTexture, rsPresent);
+  { Ensure active swapchain backbuffer is transitioned to VK_IMAGE_LAYOUT_PRESENT_SRC_KHR }
+  if (FCurrentSwapchainImageIndex < Cardinal(Length(FSwapchainColorTextures))) and
+     (FSwapchainColorTextures[FCurrentSwapchainImageIndex] <> nil) and
+     ((FSwapchain <> VK_NULL_HANDLE) or (FDevice = nil)) then
+    Frame.CommandList.TransitionTexture(FSwapchainColorTextures[FCurrentSwapchainImageIndex], rsPresent);
   Frame.CommandList.EndRecording;
 
   if (FDevice <> nil) and (FSwapchain <> VK_NULL_HANDLE) and Assigned(vkQueueSubmit) then
@@ -20488,7 +20830,12 @@ begin
       PresentInfo.pSwapchains := @FSwapchain;
       PresentInfo.pImageIndices := @FCurrentSwapchainImageIndex;
 
-      vkQueuePresentKHR(FPresentQueue, @PresentInfo);
+      PresentRes := vkQueuePresentKHR(FPresentQueue, @PresentInfo);
+      if (PresentRes = VK_ERROR_OUT_OF_DATE_KHR) or (PresentRes = VK_SUBOPTIMAL_KHR) then
+      begin
+        Inc(FSwapchainRecreateCount);
+        ResizeSwapchain(FSwapchainExtent.width, FSwapchainExtent.height);
+      end;
     end;
   end else
   if (FDevice <> nil) and (FSwapchain = VK_NULL_HANDLE) and Assigned(vkQueueSubmit) then
@@ -20505,12 +20852,105 @@ begin
   Inc(FTotalFramesPresented);
 end;
 
+function TVulkanRHIDevice.BeginOffscreenFrame: TRHICommandList;
+var
+  Frame: TVulkanFrameContext;
+begin
+  if FFrames[FFrameIndex].CommandList = nil then
+    FFrames[FFrameIndex].CommandList := TVulkanRHICommandList.Create(Self, FGraphicsQueueFamily);
+  if FFrames[FFrameIndex].TransientDescriptorAllocator = nil then
+    FFrames[FFrameIndex].TransientDescriptorAllocator := TVulkanDescriptorPoolAllocator.Create(FDevice, 512, False, 4096);
+
+  Frame := FFrames[FFrameIndex];
+
+  if (FDevice <> nil) and (Frame.InFlightFence <> VK_NULL_HANDLE) and Assigned(vkWaitForFences) then
+    CheckVk(vkWaitForFences(FDevice, 1, @Frame.InFlightFence, VK_TRUE, High(UInt64)), 'vkWaitForFences(Offscreen)');
+
+  FlushDeferredDeletions(FFrameIndex);
+  if FMemoryAllocator <> nil then
+    FMemoryAllocator.GetFrameRingBuffer(FFrameIndex).Reset;
+  if FStagingUploader <> nil then
+    FStagingUploader.ReclaimFrameSlot(FFrameIndex);
+  if Frame.TransientDescriptorAllocator <> nil then
+    Frame.TransientDescriptorAllocator.ResetPools;
+  FDeferResourceDestruction := True;
+
+  if (FDevice <> nil) and (Frame.InFlightFence <> VK_NULL_HANDLE) and Assigned(vkResetFences) then
+    CheckVk(vkResetFences(FDevice, 1, @Frame.InFlightFence), 'vkResetFences(Offscreen)');
+
+  Frame.CommandList.BeginRecording;
+  if FTimestampProfiler <> nil then
+    FTimestampProfiler.BeginFrame(Frame.CommandList, FFrameIndex);
+  if FStagingUploader <> nil then
+    FStagingUploader.FlushPendingUploads(Frame.CommandList);
+  if FBindlessTextureManager <> nil then
+    FBindlessTextureManager.FlushPendingUpdates;
+  Result := Frame.CommandList;
+  SetActiveCommandList(Result);
+end;
+
+procedure TVulkanRHIDevice.EndOffscreenFrame;
+var
+  Frame: TVulkanFrameContext;
+  SubmitInfo: VkSubmitInfo;
+  CmdHandle: VkCommandBuffer;
+begin
+  Frame := FFrames[FFrameIndex];
+  if (Frame.CommandList <> nil) and Frame.CommandList.IsRendering then
+    Frame.CommandList.EndRendering;
+
+  SetActiveCommandList(nil);
+  if Frame.CommandList = nil then
+    Exit;
+
+  if FStagingUploader <> nil then
+    FStagingUploader.FlushPendingUploads(Frame.CommandList);
+  if FBindlessTextureManager <> nil then
+    FBindlessTextureManager.FlushPendingUpdates;
+
+  Frame.CommandList.EndRecording;
+
+  if (FDevice <> nil) and Assigned(vkQueueSubmit) then
+  begin
+    CmdHandle := Frame.CommandList.Handle;
+    FillChar(SubmitInfo, SizeOf(SubmitInfo), 0);
+    SubmitInfo.sType := VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    SubmitInfo.commandBufferCount := 1;
+    SubmitInfo.pCommandBuffers := @CmdHandle;
+    CheckVk(vkQueueSubmit(FGraphicsQueue, 1, @SubmitInfo, Frame.InFlightFence), 'vkQueueSubmit(OffscreenFrame)');
+  end;
+
+  FFrameIndex := (FFrameIndex + 1) mod MaxFramesInFlight;
+end;
+
 procedure TVulkanRHIDevice.ResizeSwapchain(const NewWidth, NewHeight: Cardinal);
+var
+  SimCount: Cardinal;
 begin
   if (NewWidth = 0) or (NewHeight = 0) then Exit;
   WaitIdle;
-  DestroySwapchain;
-  CreateSwapchain(NewWidth, NewHeight);
+  if (FSurface = VK_NULL_HANDLE) and (Length(FSwapchainColorTextures) > 0) then
+  begin
+    SimCount := Cardinal(Length(FSwapchainColorTextures));
+    SimulateSwapchainForTesting(NewWidth, NewHeight, SimCount, FSwapchainFormat, FSwapchainDepthFormat);
+  end else
+  begin
+    DestroySwapchain;
+    if FSurface <> VK_NULL_HANDLE then
+      CreateSwapchain(NewWidth, NewHeight)
+    else
+    begin
+      FSwapchainExtent.width := NewWidth;
+      FSwapchainExtent.height := NewHeight;
+      if FSampleCount > 1 then
+      begin
+        if FSwapchainDepthFormat <> pfUndefined then
+          EnsureMSAATargets(NewWidth, NewHeight, FSwapchainFormat, FSwapchainDepthFormat)
+        else
+          EnsureMSAATargets(NewWidth, NewHeight, FSwapchainFormat, pfD24_UNorm_S8_UInt);
+      end;
+    end;
+  end;
 end;
 
 procedure TVulkanRHIDevice.WaitIdle;
@@ -20529,20 +20969,36 @@ end;
 
 function TVulkanRHIDevice.GetSwapchainColorTexture: TRHITexture;
 begin
-  if FActiveColorTarget <> nil then
-    Result := FActiveColorTarget
-  else if FCurrentSwapchainImageIndex < Cardinal(Length(FSwapchainColorTextures)) then
+  if (ActiveCommandList <> nil) and ActiveCommandList.IsRendering and
+     ActiveCommandList.ActiveRenderingHasColor and
+     (Length(ActiveCommandList.ActiveRenderingInfo.ColorAttachments) > 0) then
+  begin
+    if ActiveCommandList.ActiveRenderingInfo.ColorAttachments[0].ResolveTexture <> nil then
+      Result := ActiveCommandList.ActiveRenderingInfo.ColorAttachments[0].ResolveTexture
+    else
+      Result := ActiveCommandList.ActiveRenderingInfo.ColorAttachments[0].Texture;
+  end else
+  if FCurrentSwapchainImageIndex < Cardinal(Length(FSwapchainColorTextures)) then
     Result := FSwapchainColorTextures[FCurrentSwapchainImageIndex]
   else
-    Result := nil;
+    Result := FActiveColorTarget;
 end;
 
 function TVulkanRHIDevice.GetSwapchainDepthTexture: TRHITexture;
 begin
-  if FActiveDepthTarget <> nil then
-    Result := FActiveDepthTarget
+  if (ActiveCommandList <> nil) and ActiveCommandList.IsRendering and
+     ActiveCommandList.ActiveRenderingHasDepth and
+     (ActiveCommandList.ActiveRenderingInfo.DepthAttachment.Texture <> nil) then
+  begin
+    if ActiveCommandList.ActiveRenderingInfo.DepthAttachment.ResolveTexture <> nil then
+      Result := ActiveCommandList.ActiveRenderingInfo.DepthAttachment.ResolveTexture
+    else
+      Result := ActiveCommandList.ActiveRenderingInfo.DepthAttachment.Texture;
+  end else
+  if FSwapchainDepthTexture <> nil then
+    Result := FSwapchainDepthTexture
   else
-    Result := FSwapchainDepthTexture;
+    Result := FActiveDepthTarget;
 end;
 
 function TVulkanRHIDevice.CreateBuffer(const ADesc: TRHIBufferDesc;
@@ -20914,16 +21370,16 @@ var
   Region: VkBufferImageCopy;
   Barrier: VkImageMemoryBarrier;
   SrcStage: VkPipelineStageFlags;
-  ByteSize: PtrUInt;
+  ByteSize, RowBytes: PtrUInt;
   MappedPixels: Pointer;
-  RowY, ColX, SrcX, SrcY, SrcW, SrcH: Integer;
-  SrcIndex, DstIndex, PixelIndex, TotalPixels: PtrUInt;
+  RowY, ColX, SrcX, SrcY, SrcW, SrcH, CopyW, CopyH: Integer;
+  SrcIndex, DstIndex, TotalPixels: PtrUInt;
   SrcBytePtr, DstPtr: PByte;
   DepthFloatPtr: PSingle;
   DepthU16Ptr: PWord;
   DepthU32Ptr: PCardinal;
   DByte: Byte;
-  IsDepth: Boolean;
+  IsDepth, FlipVertical: Boolean;
 begin
   if (SourceTexture = nil) or (ReadArea.Width <= 0) or (ReadArea.Height <= 0) then
     Exit(nil);
@@ -20956,7 +21412,12 @@ begin
     vkDeviceWaitIdle(FDevice);
   FlushStagingUploads;
   IsDepth := (VkTex.AspectMask and VK_IMAGE_ASPECT_DEPTH_BIT) <> 0;
-  TotalPixels := PtrUInt(ReadArea.Width) * PtrUInt(ReadArea.Height);
+  FlipVertical := VkTex.RenderedLayerMask <> 0;
+  SrcW := Max(1, Integer(VkTex.Desc.Width));
+  SrcH := Max(1, Integer(VkTex.Desc.Height));
+  CopyW := EnsureRange(ReadArea.Width, 1, Max(1, SrcW - Max(0, ReadArea.Left)));
+  CopyH := EnsureRange(ReadArea.Height, 1, Max(1, SrcH - Max(0, ReadArea.Bottom)));
+  TotalPixels := PtrUInt(CopyW) * PtrUInt(CopyH);
   if IsDepth and (VkTex.Desc.Format = pfD16_UNorm) then
     ByteSize := TotalPixels * 2
   else
@@ -20989,10 +21450,13 @@ begin
     else
       Region.imageSubresource.aspectMask := VK_IMAGE_ASPECT_COLOR_BIT;
     Region.imageSubresource.layerCount := 1;
-    Region.imageOffset.x := Max(0, ReadArea.Left);
-    Region.imageOffset.y := Max(0, ReadArea.Bottom);
-    Region.imageExtent.width := ReadArea.Width;
-    Region.imageExtent.height := ReadArea.Height;
+    Region.imageOffset.x := EnsureRange(ReadArea.Left, 0, SrcW - CopyW);
+    if FlipVertical then
+      Region.imageOffset.y := EnsureRange(SrcH - (Max(0, ReadArea.Bottom) + CopyH), 0, SrcH - CopyH)
+    else
+      Region.imageOffset.y := EnsureRange(ReadArea.Bottom, 0, SrcH - CopyH);
+    Region.imageExtent.width := Cardinal(CopyW);
+    Region.imageExtent.height := Cardinal(CopyH);
     Region.imageExtent.depth := 1;
 
     vkCmdCopyImageToBuffer(Cmd, VkTex.Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -21001,58 +21465,93 @@ begin
 
     MappedPixels := StagingBuf.Map;
     try
+      DstPtr := PByte(Result.RawPixels);
       if IsDepth then
       begin
-        DstPtr := PByte(Result.RawPixels);
         if VkTex.Desc.Format = pfD16_UNorm then
         begin
           DepthU16Ptr := PWord(MappedPixels);
-          for PixelIndex := 0 to TotalPixels - 1 do
+          for RowY := 0 to CopyH - 1 do
           begin
-            DByte := Byte(DepthU16Ptr[PixelIndex] shr 8);
-            DstPtr[PixelIndex * 4 + 0] := DByte;
-            DstPtr[PixelIndex * 4 + 1] := DByte;
-            DstPtr[PixelIndex * 4 + 2] := DByte;
-            DstPtr[PixelIndex * 4 + 3] := 255;
+            if FlipVertical then SrcY := (CopyH - 1) - RowY else SrcY := RowY;
+            for ColX := 0 to CopyW - 1 do
+            begin
+              SrcIndex := PtrUInt(SrcY) * PtrUInt(CopyW) + PtrUInt(ColX);
+              DstIndex := (PtrUInt(RowY) * PtrUInt(ReadArea.Width) + PtrUInt(ColX)) * 4;
+              DByte := Byte(DepthU16Ptr[SrcIndex] shr 8);
+              DstPtr[DstIndex + 0] := DByte;
+              DstPtr[DstIndex + 1] := DByte;
+              DstPtr[DstIndex + 2] := DByte;
+              DstPtr[DstIndex + 3] := 255;
+            end;
           end;
         end else
         if VkTex.Desc.Format = pfD24_UNorm_S8_UInt then
         begin
           DepthU32Ptr := PCardinal(MappedPixels);
-          for PixelIndex := 0 to TotalPixels - 1 do
+          for RowY := 0 to CopyH - 1 do
           begin
-            DByte := Byte((DepthU32Ptr[PixelIndex] shr 16) and $FF);
-            DstPtr[PixelIndex * 4 + 0] := DByte;
-            DstPtr[PixelIndex * 4 + 1] := DByte;
-            DstPtr[PixelIndex * 4 + 2] := DByte;
-            DstPtr[PixelIndex * 4 + 3] := 255;
+            if FlipVertical then SrcY := (CopyH - 1) - RowY else SrcY := RowY;
+            for ColX := 0 to CopyW - 1 do
+            begin
+              SrcIndex := PtrUInt(SrcY) * PtrUInt(CopyW) + PtrUInt(ColX);
+              DstIndex := (PtrUInt(RowY) * PtrUInt(ReadArea.Width) + PtrUInt(ColX)) * 4;
+              DByte := Byte((DepthU32Ptr[SrcIndex] shr 16) and $FF);
+              DstPtr[DstIndex + 0] := DByte;
+              DstPtr[DstIndex + 1] := DByte;
+              DstPtr[DstIndex + 2] := DByte;
+              DstPtr[DstIndex + 3] := 255;
+            end;
           end;
         end else
         begin
           DepthFloatPtr := PSingle(MappedPixels);
-          for PixelIndex := 0 to TotalPixels - 1 do
+          for RowY := 0 to CopyH - 1 do
           begin
-            DByte := Byte(Round(EnsureRange(DepthFloatPtr[PixelIndex], 0.0, 1.0) * 255.0));
-            DstPtr[PixelIndex * 4 + 0] := DByte;
-            DstPtr[PixelIndex * 4 + 1] := DByte;
-            DstPtr[PixelIndex * 4 + 2] := DByte;
-            DstPtr[PixelIndex * 4 + 3] := 255;
+            if FlipVertical then SrcY := (CopyH - 1) - RowY else SrcY := RowY;
+            for ColX := 0 to CopyW - 1 do
+            begin
+              SrcIndex := PtrUInt(SrcY) * PtrUInt(CopyW) + PtrUInt(ColX);
+              DstIndex := (PtrUInt(RowY) * PtrUInt(ReadArea.Width) + PtrUInt(ColX)) * 4;
+              DByte := Byte(Round(EnsureRange(DepthFloatPtr[SrcIndex], 0.0, 1.0) * 255.0));
+              DstPtr[DstIndex + 0] := DByte;
+              DstPtr[DstIndex + 1] := DByte;
+              DstPtr[DstIndex + 2] := DByte;
+              DstPtr[DstIndex + 3] := 255;
+            end;
           end;
         end;
       end else
       if VkTex.Desc.Format in [pfBGRA8_UNorm, pfBGRA8_sRGB] then
       begin
         SrcBytePtr := PByte(MappedPixels);
-        DstPtr := PByte(Result.RawPixels);
-        for PixelIndex := 0 to TotalPixels - 1 do
+        for RowY := 0 to CopyH - 1 do
         begin
-          DstPtr[PixelIndex * 4 + 0] := SrcBytePtr[PixelIndex * 4 + 2];
-          DstPtr[PixelIndex * 4 + 1] := SrcBytePtr[PixelIndex * 4 + 1];
-          DstPtr[PixelIndex * 4 + 2] := SrcBytePtr[PixelIndex * 4 + 0];
-          DstPtr[PixelIndex * 4 + 3] := SrcBytePtr[PixelIndex * 4 + 3];
+          if FlipVertical then SrcY := (CopyH - 1) - RowY else SrcY := RowY;
+          for ColX := 0 to CopyW - 1 do
+          begin
+            SrcIndex := (PtrUInt(SrcY) * PtrUInt(CopyW) + PtrUInt(ColX)) * 4;
+            DstIndex := (PtrUInt(RowY) * PtrUInt(ReadArea.Width) + PtrUInt(ColX)) * 4;
+            DstPtr[DstIndex + 0] := SrcBytePtr[SrcIndex + 2];
+            DstPtr[DstIndex + 1] := SrcBytePtr[SrcIndex + 1];
+            DstPtr[DstIndex + 2] := SrcBytePtr[SrcIndex + 0];
+            DstPtr[DstIndex + 3] := SrcBytePtr[SrcIndex + 3];
+          end;
         end;
       end else
-        Move(MappedPixels^, Result.RawPixels^, ByteSize);
+      if (not FlipVertical) and (CopyW = ReadArea.Width) and (CopyH = ReadArea.Height) then
+        Move(MappedPixels^, Result.RawPixels^, ByteSize)
+      else
+      begin
+        SrcBytePtr := PByte(MappedPixels);
+        RowBytes := PtrUInt(CopyW) * 4;
+        for RowY := 0 to CopyH - 1 do
+        begin
+          if FlipVertical then SrcY := (CopyH - 1) - RowY else SrcY := RowY;
+          Move(SrcBytePtr[PtrUInt(SrcY) * RowBytes],
+            DstPtr[PtrUInt(RowY) * PtrUInt(ReadArea.Width) * 4], RowBytes);
+        end;
+      end;
     finally
       StagingBuf.Unmap;
     end;

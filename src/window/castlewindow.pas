@@ -2815,30 +2815,40 @@ const
   var
     WindowRect, TextRect: TRectangle;
     UIScale: Single;
+    VulkanLoadingFrame: Boolean;
   begin
     WindowRect := Rect;
 
-    RenderContext.Viewport := WindowRect;
-    OrthoProjection(FloatRectangle(WindowRect));
+    VulkanLoadingFrame := BeginVulkanFrameIfNeeded;
+    try
+      RenderContext.Viewport := WindowRect;
+      OrthoProjection(FloatRectangle(WindowRect));
 
-    { Not only is RenderContext.Clear faster than DrawRectangle(WindowRect,...).
-      In this case, it is also more reliable: in case of Android immersive
-      mode, we may not have yet our desired size (our width or height is smaller
-      than device screen). For some reason, RenderContext.Clear manages to clear
-      the whole screen area anyway. }
-    RenderContext.Clear([cbColor], Theme.LoadingBackgroundColor);
+      { Not only is RenderContext.Clear faster than DrawRectangle(WindowRect,...).
+        In this case, it is also more reliable: in case of Android immersive
+        mode, we may not have yet our desired size (our width or height is smaller
+        than device screen). For some reason, RenderContext.Clear manages to clear
+        the whole screen area anyway. }
+      RenderContext.Clear([cbColor], Theme.LoadingBackgroundColor);
 
-    UIScale := TCastleContainer.InternalCalculateUIScale(
-      Theme.LoadingUIScaling, Theme.LoadingUIReferenceWidth, Theme.LoadingUIReferenceHeight, Theme.LoadingUIExplicitScale,
-      Container.Dpi, FRealWidth, FRealHeight);
-    TextRect := Theme.ImagesPersistent[tiLoading].Image.Rect.
-      ScaleAroundCenter(UIScale).
-      Align(hpMiddle, WindowRect, hpMiddle).
-      Align(vpMiddle, WindowRect, vpMiddle);
-    Theme.Draw(TextRect, tiLoading, UIScale, Theme.LoadingColor);
+      UIScale := TCastleContainer.InternalCalculateUIScale(
+        Theme.LoadingUIScaling, Theme.LoadingUIReferenceWidth, Theme.LoadingUIReferenceHeight, Theme.LoadingUIExplicitScale,
+        Container.Dpi, FRealWidth, FRealHeight);
+      TextRect := Theme.ImagesPersistent[tiLoading].Image.Rect.
+        ScaleAroundCenter(UIScale).
+        Align(hpMiddle, WindowRect, hpMiddle).
+        Align(vpMiddle, WindowRect, vpMiddle);
+      Theme.Draw(TextRect, tiLoading, UIScale, Theme.LoadingColor);
+    finally
+      if VulkanLoadingFrame then
+        EndVulkanFrameIfNeeded;
+    end;
 
     // just like TCastleWindow.DoRender
-    if HasDoubleBuffer then SwapBuffers else glFlush;
+    if not VulkanLoadingFrame then
+    begin
+      if HasDoubleBuffer then SwapBuffers else glFlush;
+    end;
 
     {$IFDEF android}
     { Workaround an ARM64 Android-specific bug which manifests on some devices
@@ -2930,9 +2940,10 @@ const
 
     GLInformationInitialize;
 
-    if GLVersion.BuggyDepth32 and
-      (glGetInteger(GL_DEPTH_BITS) >= 32) and
-      (StencilBits = 0) then
+    if (not IsVulkanBackendRequested) and
+       (GLVersion <> nil) and GLVersion.BuggyDepth32 and
+       (glGetInteger(GL_DEPTH_BITS) >= 32) and
+       (StencilBits = 0) then
     begin
       WritelnLog('Rendering Context Initialization',
         'Got >= 32-bit depth buffer, unfortunately it is known to be buggy on this OpenGL implementation. We will try to force 24-bit depth buffer by forcing stencil buffer.');
@@ -2955,7 +2966,9 @@ const
       InitializeVulkanRHIDeviceIfNeeded;
 
     {$ifndef OpenGLES}
-    if AntiAliasingNicest[AntiAliasing] and
+    if (RHIDevice = nil) and
+       AntiAliasingNicest[AntiAliasing] and
+       (GLFeatures <> nil) and
        GLFeatures.NV_multisample_filter_hint then
       glHint(GL_MULTISAMPLE_FILTER_HINT_NV, GL_NICEST);
     {$endif}
@@ -3305,19 +3318,59 @@ begin
 end;
 
 function TCastleWindow.BeginVulkanFrameIfNeeded: Boolean;
+var
+  VkDev: TVulkanRHIDevice;
+  Cmd: TRHICommandList;
+  ColorTex, DepthTex: TRHITexture;
+  ClearCol: TCastleColor;
+  TargetW, TargetH: Integer;
+  PassArea: TRectangle;
+  PassInfo: TRHIRenderingInfo;
 begin
   Result := False;
   if not IsVulkanBackendRequested then
     Exit;
   if not (RHIDevice is TVulkanRHIDevice) then
     Exit;
-  Result := RHIDevice.BeginFrame <> nil;
+  VkDev := TVulkanRHIDevice(RHIDevice);
+  if VkDev.AntiAliasing <> FAntiAliasing then
+    VkDev.AntiAliasing := FAntiAliasing;
+  Cmd := VkDev.BeginFrame;
+  if Cmd = nil then
+    Exit;
+  Result := True;
+  ColorTex := VkDev.GetSwapchainColorTexture;
+  DepthTex := VkDev.GetSwapchainDepthTexture;
+  if (ColorTex <> nil) and (not Cmd.IsRendering) then
+  begin
+    if FWidth > 0 then
+      TargetW := Min(Integer(ColorTex.Desc.Width), FWidth)
+    else
+      TargetW := Max(1, Integer(ColorTex.Desc.Width));
+    if FHeight > 0 then
+      TargetH := Min(Integer(ColorTex.Desc.Height), FHeight)
+    else
+      TargetH := Max(1, Integer(ColorTex.Desc.Height));
+    PassArea := Rectangle(0, 0, Max(1, TargetW), Max(1, TargetH));
+    if (Container <> nil) and Container.BackgroundEnable then
+      ClearCol := Container.BackgroundColor
+    else
+      ClearCol := Vector4(0.0, 0.0, 0.0, 1.0);
+    PassInfo := VkDev.BuildSwapchainRenderingInfo(
+      PassArea, ColorTex, DepthTex, ClearCol, loClear, loClear, 1.0);
+    Cmd.BeginRendering(PassInfo);
+    Cmd.SetViewport(FloatRectangle(PassArea), 0.0, 1.0);
+    Cmd.SetScissor(PassArea);
+  end;
 end;
 
 procedure TCastleWindow.EndVulkanFrameIfNeeded;
 begin
   if not (RHIDevice is TVulkanRHIDevice) then
     Exit;
+  TDrawableImage.BatchingFlush;
+  if (ActiveCommandList <> nil) and ActiveCommandList.IsRendering then
+    ActiveCommandList.EndRendering;
   RHIDevice.EndFrameAndPresent;
   Inc(FVulkanFramesRenderedCount);
 end;
@@ -3425,42 +3478,45 @@ begin
     end;
     if Closed then Exit; { check, in case window got closed in the event }
 
-    if GLVersion.BuggySwapNonStandardViewport then
-      RenderContext.Viewport := Rect;
+    if not VulkanFrameStarted then
+    begin
+      if (GLVersion <> nil) and GLVersion.BuggySwapNonStandardViewport then
+        RenderContext.Viewport := Rect;
 
-    FrameProfiler.Start(fmRenderSwapFlush);
-    if HasDoubleBuffer then SwapBuffers else glFlush;
+      FrameProfiler.Start(fmRenderSwapFlush);
+      if HasDoubleBuffer then SwapBuffers else glFlush;
 
-    { Keep this check inside fmRenderSwapFlush measurement.
+      { Keep this check inside fmRenderSwapFlush measurement.
 
-      Naive explanation (seems wrong, see below):
-      On Windows, SwapBuffers may execute immediately,
-      but then the next OpenGL call actually waits for it to finish
-      (see https://www.freelists.org/post/visionegg/swap-buffers-returns-immediately-for-2D-Textures-in-OpenGL-20,1 ).
-      So if this is outside fmRenderSwapFlush, fmRenderSwapFlush would be usually
-      zero, and most of the frame time would not be covered by anything we measure
-      in FrameProfiler.
+        Naive explanation (seems wrong, see below):
+        On Windows, SwapBuffers may execute immediately,
+        but then the next OpenGL call actually waits for it to finish
+        (see https://www.freelists.org/post/visionegg/swap-buffers-returns-immediately-for-2D-Textures-in-OpenGL-20,1 ).
+        So if this is outside fmRenderSwapFlush, fmRenderSwapFlush would be usually
+        zero, and most of the frame time would not be covered by anything we measure
+        in FrameProfiler.
 
-      The above explanation is however proven wrong by:
+        The above explanation is however proven wrong by:
 
-      in -dRELEASE builds, without CheckGLErrors call at all,
-      fmRenderSwapFlush times are OK, nicely non-zero reasonable.
-      I.e. we don't have the problem of fmRenderSwapFlush = zero in -dRELEASE
-      builds, and we should -> if the above explanation was all that happens.
-      If the above explanation was right, then we should also measure
-      the next GL command (like RenderContext.Clear at the start
-      of TCastleContainer.EventRender), but we don't need to.
+        in -dRELEASE builds, without CheckGLErrors call at all,
+        fmRenderSwapFlush times are OK, nicely non-zero reasonable.
+        I.e. we don't have the problem of fmRenderSwapFlush = zero in -dRELEASE
+        builds, and we should -> if the above explanation was all that happens.
+        If the above explanation was right, then we should also measure
+        the next GL command (like RenderContext.Clear at the start
+        of TCastleContainer.EventRender), but we don't need to.
 
-      Tested (both debug and release observations above) on
-        Version string: 4.6.0 NVIDIA 425.46
-        Vendor: NVIDIA Corporation
-        Renderer: GeForce GTX 1050 Ti/PCIe/SSE2
-    }
-    {$ifdef CASTLE_WINDOW_CHECK_GL_ERRORS_AFTER_DRAW}
-    CheckGLErrors('End of TCastleWindow.DoRender');
-    {$endif}
+        Tested (both debug and release observations above) on
+          Version string: 4.6.0 NVIDIA 425.46
+          Vendor: NVIDIA Corporation
+          Renderer: GeForce GTX 1050 Ti/PCIe/SSE2
+      }
+      {$ifdef CASTLE_WINDOW_CHECK_GL_ERRORS_AFTER_DRAW}
+      CheckGLErrors('End of TCastleWindow.DoRender');
+      {$endif}
 
-    FrameProfiler.Stop(fmRenderSwapFlush);
+      FrameProfiler.Stop(fmRenderSwapFlush);
+    end;
 
     if AutoRedisplay then Invalidate;
   finally
@@ -3754,9 +3810,16 @@ end;
 function TCastleWindow.SaveScreenToGL(
   const SaveRect: TRectangle;
   const SmoothScaling: boolean): TDrawableImage;
+var
+  CapturedImg: TRGBAlphaImage;
 begin
   if Closed then
     raise Exception.Create('Cannot save the screen when the TCastleWindow is closed');
+  if (RHIDevice <> nil) and (ActiveCommandList = nil) then
+  begin
+    CapturedImg := Container.SaveScreenRgba(SaveRect);
+    Exit(TDrawableImage.Create(CapturedImg, SmoothScaling, True));
+  end;
   Container.EventBeforeRender;
   Container.EventRender;
   Result := SaveScreenToGL_NoFlush(SaveRect, SaveScreenBuffer, SmoothScaling);

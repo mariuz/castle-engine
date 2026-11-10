@@ -834,6 +834,10 @@ type
     { Frame Lifecycle & Swapchain }
     function BeginFrame: TRHICommandList; virtual; abstract;
     procedure EndFrameAndPresent; virtual; abstract;
+    { Records and submits an offscreen command list without acquiring or presenting
+      a window swapchain image (used e.g. by out-of-frame TCastleContainer.SaveScreen). }
+    function BeginOffscreenFrame: TRHICommandList; virtual;
+    procedure EndOffscreenFrame; virtual;
     procedure ResizeSwapchain(const NewWidth, NewHeight: Cardinal); virtual; abstract;
     procedure WaitIdle; virtual; abstract;
 
@@ -1788,6 +1792,16 @@ begin
   if FRHIDevice = Self then
     FRHIDevice := nil;
   inherited;
+end;
+
+function TRHIDevice.BeginOffscreenFrame: TRHICommandList;
+begin
+  Result := BeginFrame;
+end;
+
+procedure TRHIDevice.EndOffscreenFrame;
+begin
+  EndFrameAndPresent;
 end;
 
 function TRHIDevice.CreateComputePipeline(const ADesc: TRHIComputePipelineDesc): TRHIComputePipeline;

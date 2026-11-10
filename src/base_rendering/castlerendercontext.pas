@@ -613,10 +613,26 @@ begin
     if cbColor in Buffers then
       FRHILastClearColor := ClearColor;
     if ActiveCommandList <> nil then
-      ActiveCommandList.ClearAttachments(
-        cbColor in Buffers, ClearColor,
-        cbDepth in Buffers, 1.0,
-        cbStencil in Buffers, 0);
+    begin
+      if ActiveCommandList.IsRendering and (not FRHIScissorActive) then
+      begin
+        ActiveCommandList.SetScissor(ActiveCommandList.ActiveRenderingInfo.RenderArea);
+        try
+          ActiveCommandList.ClearAttachments(
+            cbColor in Buffers, ClearColor,
+            cbDepth in Buffers, 1.0,
+            cbStencil in Buffers, 0);
+        finally
+          if (not EffectiveViewportRect.IsEmpty) and
+             ActiveCommandList.ActiveRenderingInfo.RenderArea.Collides(EffectiveViewportRect) then
+            ActiveCommandList.SetScissor(EffectiveViewportRect);
+        end;
+      end else
+        ActiveCommandList.ClearAttachments(
+          cbColor in Buffers, ClearColor,
+          cbDepth in Buffers, 1.0,
+          cbStencil in Buffers, 0);
+    end;
   end;
 
   if (cbColor in Buffers) and
