@@ -2224,12 +2224,51 @@ Example Editor Workflow (Phases 246–251 — Complete Third-Person Level, Pre-R
 | **`Ctrl+F`** | Anywhere in Design Frame | Focus the Hierarchy live filter box (`Filter by name or +Class`). |
 | **`F3`** | Anywhere in Design Frame | Jump selection to the next component matching the Hierarchy filter (`FindNext`). |
 | **`Delete`** | Viewport or Hierarchy Tree | Delete all selected components (`DeleteComponent`). |
+| **`Alt+6`** | Anywhere in Editor | Switch to **Universal Combined Gizmo (`moUniversal` / `mmUniversal`)** combining Translate, 2-Axis Planar Quads, Rotate Arcs, and Scale Cubes. |
+| **`Space`** | Viewport (non-Fly) | Cycle active 3D gizmo mode: `Translate -> Rotate -> Scale -> Universal (TRS) -> Translate`. |
+| **`Alt+-` / `Alt+=`** | Viewport | Decrease (`0.8x`) or increase (`1.25x`) 3D gizmo screen size & hit-target scale (`GizmoSizeScale` in `[0.25 .. 4.0]`). |
+
+---
+
+## 66B. Horizon 2 — Unified Combined Gizmo (`mmUniversal`), 2-Axis Planar Handles (`XY`/`XZ`/`YZ`), `GizmoSizeScale` & Live Drag Delta HUD (Phase 277 / UE 5.8 Parity)
+
+Inspired by **Unreal Engine 5.8's New Combined Gizmo**, `CastleTransformManipulate` and `TDesignFrame` provide a unified multi-operation 3D gizmo, 2-axis planar drag handles across Translate/Scale/Universal modes, configurable screen-space gizmo sizing, and live floating drag telemetry:
+
+### Architecture & Capabilities
+1. **Unified Combined Gizmo (`mmUniversal` / `moUniversal` / `TRS` Toolbar Button / `Alt+6`)**:
+   - Combines X/Y/Z translation arrows (`MaterialX`, `MaterialY`, `MaterialZ`), semi-transparent 2-axis planar quads (`MaterialPlaneXY`, `MaterialPlaneXZ`, `MaterialPlaneYZ`), 3D quarter-circle rotation arc tubes (`MaterialRotateX`, `MaterialRotateY`, `MaterialRotateZ`), axis scale cube tips (`MaterialScaleX`, `MaterialScaleY`, `MaterialScaleZ`), and a central uniform scale cube (`MaterialScaleCenter`) in a single interactive gizmo.
+   - Press **`Space`** in the viewport (when not holding right-mouse camera fly) to cycle `Translate -> Rotate -> Scale -> Universal (TRS) -> Translate`.
+2. **2-Axis Planar Handles (`XY`, `XZ`, `YZ`)**:
+   - Available in **`mmTranslate`**, **`mmScale`**, and **`mmUniversal`**.
+   - In translation drags, ray-plane intersection (`TrySimplePlaneRayIntersection`) constrains movement strictly to the chosen coordinate plane (`XY`, `XZ`, or `YZ`) in either `csLocal` or `csWorld` coordinate space while honoring `TranslateSnap`.
+   - In scale drags, radial in-plane distance (`Hypot(C1, C2)`) scales both in-plane axes proportionally while keeping the perpendicular axis untouched and honoring `ScaleSnap`.
+   - Programmatic APIs: `TranslateSelectedPlanar(PlaneNormalAxis, PlanarDelta)` and `ScaleSelectedPlanar(PlaneNormalAxis, PlanarFactor)`.
+3. **Configurable Gizmo Screen & Hit-Target Scale (`GizmoSizeScale`)**:
+   - `TCastleTransformManipulate.GizmoSizeScale` (clamped to `[0.25 .. 4.0]`, default `1.0`) scales both orthographic and perspective gizmo visual size and raycast hit volume.
+   - Accessible via the **`Gizmo: 100%`** toolbar button (`Click` cycles `50% / 75% / 100% / 125% / 150% / 200%`; `Shift`-click resets to `100%`) or **`Alt+-` / `Alt+=`**.
+4. **Live Floating Drag Delta HUD (`IsDraggingGizmo`, `CurrentDragSummary`)**:
+   - While dragging any gizmo handle, `TDesignerLayer.Render` displays a floating badge (`RectGizmoDragHud` / `LabelGizmoDragHud`) directly above the cursor showing cumulative world delta and Euclidean distance (`Move: dX=+3.00  dY=+0.00  dZ=-2.00  (|d|=3.61)`), rotation angle (`Rotate Y: +45.0 deg`), or scale factor (`Scale Uniform: 2.00x (200%)`).
+
+### Example Usage (Pascal API)
+```pascal
+Manipulate.Mode := mmUniversal;
+Manipulate.CoordSpace := csWorld;
+Manipulate.GizmoSizeScale := 1.25; // 125% screen size for high-DPI viewports
+Manipulate.TranslateSnap := 0.5;
+Manipulate.TranslateSelectedPlanar(1 {XZ horizontal plane}, Vector3(2.5, 0.0, -1.5));
+Manipulate.ScaleSelectedPlanar(1 {XZ footprint scale}, 1.5);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Visual Editor Manual](https://castle-engine.io/manual_editor.php) · [CGE Viewport & Transforms (`TCastleTransformManipulate`)](https://castle-engine.io/viewport_and_scenes) · [Unreal Engine Transforming Actors & Combined Gizmos](https://dev.epicgames.com/documentation/en-us/unreal-engine/transforming-actors-in-unreal-engine) · [Blender 4 3D Gizmos & Planar Handles](https://docs.blender.org/manual/en/latest/editors/3dview/display/gizmo.html)
+- **Videos & Movies:** 🎬 [CGE Official Editor Workflows Video (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [Animated Gizmo & Viewport Manipulation Preview](https://docs.godotengine.org/en/stable/_images/containers_split_drag.gif)
+- **Screenshots:** [CGE 3D Viewport & Gizmos](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [Blender 3D Combined Gizmo Options](https://docs.blender.org/manual/en/latest/_images/editors_3dview_display_gizmo_options-translate.png)
 
 ---
 
 ## 67. Automated Unit Tests & Verification
 
-All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 50 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
+All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 51 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
 
 1. **`TestSelectedCountAndFree`**: Verifies single/multi-selection filtering, freeing a selected transform while selected, and translating the remaining selection.
 2. **`TestTranslateSnapAndCoordSpace`**: Verifies grid snapping (`TranslateSnap := 2.0`) and `csLocal` vs. `csWorld` translation on a $90^\circ$-rotated transform.
@@ -2281,6 +2320,7 @@ All core 3D manipulation algorithms in `CastleTransformManipulate` are covered b
 48. **`TestHennebergSphericalEpicycloidAndTalbotCurve`**: Verifies `ArrangeSelectedOnHennebergSurface(3.0, 1.0, 1)` distributes 3 transforms on Lebrecht Henneberg's minimal surface starting at $(0, 6, 0)$, verifies `ArrangeSelectedOnSphericalEpicycloid(10.0, 2, 60.0, 2)` distributes 4 transforms on a 2-lobe spherical epicycloid seam curve at $(5, 5\sqrt{3}, 0)$ with outward sphere normal $(0.5, \sqrt{3}/2, 0)$, $(0, -5\sqrt{3}, 5)$, $(-5, 5\sqrt{3}, 0)$, and $(0, -5\sqrt{3}, -5)$, and verifies `ArrangeSelectedInTalbotCurve(10.0, 0.5, 3.0, 1)` distributes 4 transforms around Henry Fox Talbot's negative-pedal curve at $(10, 0, 0)$ with analytical tangent $(0, 6, 5)$ normalized, $(0, 0, 10)$, $(-10, 0, 0)$, and $(0, 0, -10)$.
 49. **`TestKuenRichmondAndDevilsCurve`**: Verifies `ArrangeSelectedOnKuenSurface(5.0, 1.0, 1)` distributes 3 transforms on Theodor Kuen's pseudospherical surface with `B2` ($t=0.5, \; u=0, \; v=0$) at $(10, 0, 0)$, verifies `ArrangeSelectedOnRichmondSurface(10.0, 2, 1.0, 2)` distributes 3 transforms on Herbert Richmond's planar-end minimal surface with `B3` ($t=1.0, \; r=1.0, \; \theta=2\pi$) at $(-6, 5, 0)$ oriented along the exact Weierstrass–Enneper Gauss-map normal $(1, 0, 0)$, and verifies `ArrangeSelectedInDevilsCurve(10.0, 0.44, 3.0, 1)` distributes 4 transforms around Gabriel Cramer's Devil's Curve / Maltese Cross lemniscate ($\sqrt{1 + 0.44} = 1.2 \implies r = 12$) at $(12, 0, 0)$ with analytical tangent $(0, 6, 12)$ normalized, $(0, 0, 12)$, $(-12, 0, 0)$, and $(0, 0, -12)$.
 50. **`TestPluckerSuperellipsoidAndGeronoLemniscate`**: Verifies `ArrangeSelectedOnPluckerConoid(8.0, 2, 3.0, 1.0, 2)` distributes 3 transforms on Julius Plücker's ruled conoid surface at $(2, 0, 0), (-5, 0, 0), (8, 0, 0)$ with exact ruled surface normal $(0, 0.8, -0.6)$ at `B3`, verifies `ArrangeSelectedOnSuperellipsoid(Vector3(10, 6, 8), 0.5, 0.5, 1.0, 1)` distributes 3 transforms on Alan Barr's 3D Superellipsoid at South Pole $(0, -6, 0)$, Equator $(-10, 0, 0)$ with outward normal $(-1, 0, 0)$, and North Pole $(0, 6, 0)$ with outward normal $(0, 1, 0)$, and verifies `ArrangeSelectedInGeronoLemniscate(10.0, 8.0, 3.0, 1)` distributes 4 transforms around Camillo-Christophe Gerono's Figure-Eight Lemniscate / Besace Saddle Curve at $(10, 3, 0)$ with analytical tangent $(0, 0, 1)$, $(0, -3, 0)$ with tangent $(-10, 0, -8)$ normalized, $(-10, 3, 0)$, and $(0, -3, 0)$.
+51. **`TestUniversalGizmoPlanarHandlesScaleAndDragSummary`**: Verifies `GizmoSizeScale` clamping (`[0.25 .. 4.0]`) and $2\times$ orthographic gizmo child scaling, verifies `TranslateSelectedPlanar(1, ...)` and `ScaleSelectedPlanar(1, ...)` with `TranslateSnap` and `ScaleSnap` on the horizontal XZ plane, and verifies end-to-end 3D raycast picking and interactive dragging (`PointingDevicePress` / `PointingDeviceMove` / `PointingDeviceRelease`) on `mmUniversal`'s `MaterialPlaneXZ` quad, `MaterialRotateY` 3D arc tube, and `MaterialScaleCenter` uniform scale cube alongside live `IsDraggingGizmo` and `CurrentDragSummary` telemetry.
 
 To run this test suite from the command line:
 ```bash

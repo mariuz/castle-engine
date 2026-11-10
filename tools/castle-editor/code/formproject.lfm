@@ -403,6 +403,9 @@ object ProjectForm: TProjectForm
         object MenuItem32: TMenuItem
           Action = ActionModeScale
         end
+        object MenuItemModeUniversal: TMenuItem
+          Action = ActionModeUniversal
+        end
       end
       object MenuItem41: TMenuItem
         Action = ActionShowStatistics
@@ -1274,6 +1277,12 @@ object ProjectForm: TProjectForm
       Caption = 'Scale'
       OnExecute = ActionModeScaleExecute
       ShortCut = 32821
+    end
+    object ActionModeUniversal: TAction
+      Category = 'Edit'
+      Caption = 'Universal (Translate + Rotate + Scale)'
+      OnExecute = ActionModeUniversalExecute
+      ShortCut = 32822
     end
     object ActionViewportRenderNormal: TAction
       Category = 'Viewport'

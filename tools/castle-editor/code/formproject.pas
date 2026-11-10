@@ -75,6 +75,7 @@ type
     ActionModeTranslate: TAction;
     ActionModeRotate: TAction;
     ActionModeScale: TAction;
+    ActionModeUniversal: TAction;
     ActionModeInteract: TAction;
     ActionFocusDesign: TAction;
     ActionWarningsCopyAll: TAction;
@@ -364,6 +365,7 @@ type
     procedure ActionModeInteractExecute(Sender: TObject);
     procedure ActionModeRotateExecute(Sender: TObject);
     procedure ActionModeScaleExecute(Sender: TObject);
+    procedure ActionModeUniversalExecute(Sender: TObject);
     procedure ActionModeSelectExecute(Sender: TObject);
     procedure ActionModeTranslateExecute(Sender: TObject);
     procedure ActionPlayStopExecute(Sender: TObject);
@@ -566,7 +568,6 @@ type
       MenuItemVerboseBuildTool: TMenuItem;
       MenuItemOutputWordWrap: TMenuItem;
       MenuItemProjectOptions: TMenuItem;
-      MenuItemSwitchProject: TMenuItem;
       TabComponents: TTabSheet;
       PanelComponentsTop: TPanel;
       EditComponentPaletteFilter: TEdit;
@@ -591,7 +592,6 @@ type
     procedure MenuItemVerboseBuildToolClick(Sender: TObject);
     procedure MenuItemOutputWordWrapClick(Sender: TObject);
     procedure MenuItemProjectOptionsClick(Sender: TObject);
-    procedure MenuItemSwitchProjectClick(Sender: TObject);
     procedure ShowProjectOptionsDialog;
     procedure OutputCountsChanged(Sender: TObject);
     procedure UpdateShellListMask;
@@ -725,29 +725,6 @@ begin
     Application.Terminate;
     {$endif}
   end;
-end;
-
-procedure TProjectForm.MenuItemSwitchProjectClick(Sender: TObject);
-begin
-  if CastleApplicationMode in [appSimulation, appSimulationPaused] then
-  begin
-    InfoBox('Stop the physics simulation to be able to switch project.');
-    Exit;
-  end;
-
-  if not ProposeSaveDesign then
-    Exit;
-
-  if RunningProcess <> nil then
-  begin
-    RunningProcess.TerminateChildrenHarder;
-    FreeProcess;
-  end;
-
-  SaveDockLayout;
-  Hide;
-  if ChooseProjectForm <> nil then
-    ChooseProjectForm.Show;
 end;
 
 procedure TProjectForm.MenuItemReferenceClick(Sender: TObject);
@@ -1180,6 +1157,12 @@ procedure TProjectForm.ActionModeScaleExecute(Sender: TObject);
 begin
   Assert(Design <> nil); // menu item is disabled otherwise
   Design.ChangeMode(moScale);
+end;
+
+procedure TProjectForm.ActionModeUniversalExecute(Sender: TObject);
+begin
+  Assert(Design <> nil); // menu item is disabled otherwise
+  Design.ChangeMode(moUniversal);
 end;
 
 procedure TProjectForm.ActionModeSelectExecute(Sender: TObject);
@@ -2151,13 +2134,9 @@ begin
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
   MenuItemFile.Insert(0, MenuItemProjectOptions);
-  MenuItemSwitchProject := TMenuItem.Create(MenuItemFile);
-  MenuItemSwitchProject.Caption := 'Switch Project (Choose Project Screen)...';
-  MenuItemSwitchProject.OnClick := @MenuItemSwitchProjectClick;
-  MenuItemFile.Insert(1, MenuItemSwitchProject);
   MiSep := TMenuItem.Create(MenuItemFile);
   MiSep.Caption := '-';
-  MenuItemFile.Insert(2, MiSep);
+  MenuItemFile.Insert(1, MiSep);
   BuildComponentsMenu(
     MenuItemDesignNewUserInterfaceCustomRoot,
     MenuItemDesignNewTransformCustomRoot,
@@ -2809,6 +2788,7 @@ begin
   ActionModeTranslate.Enabled := Design <> nil;
   ActionModeRotate.Enabled := Design <> nil;
   ActionModeScale.Enabled := Design <> nil;
+  ActionModeUniversal.Enabled := Design <> nil;
   ActionShowStatistics.Enabled := Design <> nil;
   ActionExportToModel.Enabled := Design <> nil;
 

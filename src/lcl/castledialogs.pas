@@ -255,7 +255,7 @@ begin
     Exit;
 
   DataDir := UriToFilenameSafeUTF8(ResolveCastleDataUrl('castle-data:/'));
-  SourceFile := CleanupFileName(AFileName);
+  SourceFile := ExpandFileName(AFileName);
   if (DataDir = '') or (not DirectoryExists(DataDir)) or
      (SourceFile = '') or (not RegularFileExists(SourceFile)) then
   begin

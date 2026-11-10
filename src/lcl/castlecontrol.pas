@@ -22,7 +22,7 @@ unit CastleControl;
 interface
 
 uses
-  Classes, SysUtils,
+  Classes, SysUtils, Types,
   StdCtrls, OpenGLContext, Controls, Forms, LCLVersion, LCLType, CustomTimer,
   CastleRectangles, CastleVectors, CastleKeysMouse, CastleUtils, CastleTimeUtils,
   CastleUIControls, CastleRenderOptions,

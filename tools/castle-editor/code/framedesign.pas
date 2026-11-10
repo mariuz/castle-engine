@@ -23,7 +23,7 @@ interface
 
 uses
   Classes, SysUtils, FileUtil, Forms, Controls, ExtCtrls, StdCtrls, ComCtrls,
-  Spin, Buttons, Menus, ActnList, Contnrs, Generics.Collections,
+  Spin, Buttons, ButtonPanel, Menus, ActnList, Contnrs, Generics.Collections,
   // for icons
   DataModuleIcons, ImgList,
   // for TOIPropertyGrid usage
@@ -51,7 +51,8 @@ type
     moSelect,
     moTranslate,
     moRotate,
-    moScale
+    moScale,
+    moUniversal
   );
 
   { Frame to visually design component hierarchy. }
@@ -193,8 +194,8 @@ type
           ResizingVertical: TVerticalPosition; //< Defined only when UiDraggingMode=dmResize
           MarqueeStartPos, MarqueeCurrentPos: TVector2;
           MarqueeActive: Boolean;
-          LabelHover, LabelSelected, LabelStatistics, LabelDragPreview: TCastleLabel;
-          RectHover, RectSelected, RectStatistics, RectDragPreview: TCastleRectangleControl;
+          LabelHover, LabelSelected, LabelStatistics, LabelDragPreview, LabelGizmoDragHud: TCastleLabel;
+          RectHover, RectSelected, RectStatistics, RectDragPreview, RectGizmoDragHud: TCastleRectangleControl;
         { Should clicking inside UI rectangle start resizing (not only moving?). }
         function IsResizing(const UI: TCastleUserInterface; const Position: TVector2;
           out Horizontal: THorizontalPosition;
@@ -691,9 +692,16 @@ type
       ButtonQuickAdd: TSpeedButton;
       ButtonSimulationStep: TSpeedButton;
       ButtonKeepSimulation: TSpeedButton;
+      ButtonUniversalMode: TSpeedButton;
+      ButtonGizmoSize: TSpeedButton;
       FQuickAddEdit: TEdit;
       FQuickAddList: TListBox;
 
+    procedure ButtonUniversalModeClick(Sender: TObject);
+    procedure ButtonGizmoSizeClick(Sender: TObject);
+    procedure UpdateGizmoSizeButtonCaption;
+    procedure AdjustGizmoSizeScale(const Factor: Single);
+    procedure CycleGizmoMode;
     procedure ButtonCoordSpaceClick(Sender: TObject);
     procedure ButtonPivotModeClick(Sender: TObject);
     procedure SpinEditSnap3DChange(Sender: TObject);
@@ -1350,6 +1358,7 @@ type
       const BaseNewComponentName: String = '';
       const InsertIndex: Integer = -1): TComponent;
     procedure DeleteComponent(const AutoSelectParents: Boolean = false);
+    function DeleteSelectedPossible: Boolean;
     { Free component C (which should be part of this designed, owned by DesignOwner)
       and all children.
 
@@ -2499,8 +2508,23 @@ begin
   LabelDragPreview.EnableUIScaling := false;
   RectDragPreview.InsertFront(LabelDragPreview);
 
+  RectGizmoDragHud := TCastleRectangleControl.Create(Self);
+  RectGizmoDragHud.Color := Vector4(0.08, 0.12, 0.22, 0.90);
+  RectGizmoDragHud.Exists := false;
+  RectGizmoDragHud.EnableUIScaling := false;
+  InsertFront(RectGizmoDragHud);
+
+  LabelGizmoDragHud := TCastleLabel.Create(Self);
+  LabelGizmoDragHud.Anchor(hpMiddle);
+  LabelGizmoDragHud.Anchor(vpMiddle);
+  LabelGizmoDragHud.FontSize := 15;
+  LabelGizmoDragHud.Color := Vector4(1.0, 0.92, 0.45, 1.0);
+  LabelGizmoDragHud.EnableUIScaling := false;
+  RectGizmoDragHud.InsertFront(LabelGizmoDragHud);
+
   ForceFallbackLook(RectStatistics);
   ForceFallbackLook(RectDragPreview);
+  ForceFallbackLook(RectGizmoDragHud);
 end;
 
 procedure TDesignFrame.TDesignerLayer.GLContextOpen;
@@ -4020,6 +4044,26 @@ begin
     begin
       Frame.AdjustCameraSpeed(1.5);
       Exit(true);
+    end else
+    if Event.IsKey(keySpace) and
+       (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+    begin
+      Frame.CycleGizmoMode;
+      Exit(true);
+    end;
+  end;
+
+  if (Frame.Mode <> moInteract) and (Event.ModifiersDown = [mkAlt]) then
+  begin
+    if Event.IsKey(keyMinus) or Event.IsKey(keyNumpadMinus) then
+    begin
+      Frame.AdjustGizmoSizeScale(0.8);
+      Exit(true);
+    end else
+    if Event.IsKey(keyEqual) or Event.IsKey(keyPlus) or Event.IsKey(keyNumpadPlus) then
+    begin
+      Frame.AdjustGizmoSizeScale(1.25);
+      Exit(true);
     end;
   end;
 
@@ -4440,7 +4484,7 @@ begin
           SnapDeltaX := StepX;
           { By default, snap resulting Translation.X / Width to exact multiples of Snap
             (invisible grid); hold Shift for relative step increments. }
-          if not (mkShift in Event.ModifiersDown) then
+          if not Frame.CastleControl.Container.Pressed[keyShift] then
           begin
             if UiDraggingMode = dmTranslate then
             begin
@@ -4471,7 +4515,7 @@ begin
         begin
           StepY := Sign(UiPendingMove.Y) * Snap;
           SnapDeltaY := StepY;
-          if not (mkShift in Event.ModifiersDown) then
+          if not Frame.CastleControl.Container.Pressed[keyShift] then
           begin
             if UiDraggingMode = dmTranslate then
             begin
@@ -4744,6 +4788,23 @@ begin
   end else
     RectDragPreview.Exists := false;
 
+  if (Frame.TransformManipulate <> nil) and
+     Frame.TransformManipulate.IsDraggingGizmo and
+     (Frame.TransformManipulate.CurrentDragSummary <> '') then
+  begin
+    LabelGizmoDragHud.Caption := Frame.TransformManipulate.CurrentDragSummary;
+    RectGizmoDragHud.Exists := true;
+    RectGizmoDragHud.Width := LabelGizmoDragHud.EffectiveWidth + 14;
+    RectGizmoDragHud.Height := LabelGizmoDragHud.EffectiveHeight + 8;
+    RectGizmoDragHud.Anchor(hpLeft,
+      Clamped(Round(Container.MousePosition.X - RectGizmoDragHud.Width / 2),
+        4, Max(4, Container.PixelsWidth - Round(RectGizmoDragHud.Width) - 4)));
+    RectGizmoDragHud.Anchor(vpBottom,
+      Clamped(Round(Container.MousePosition.Y + 26),
+        4, Max(4, Container.PixelsHeight - Round(RectGizmoDragHud.Height) - 4)));
+  end else
+    RectGizmoDragHud.Exists := false;
+
   RectStatistics.Exists := Frame.EffectiveShowStatistics;
   if RectStatistics.Exists then
   begin
@@ -4890,6 +4951,24 @@ begin
   TransformManipulate.OnTransformModified := @GizmoTransformModified;
   TransformManipulate.OnTransformModifyEnd := @GizmoTransformModifyEnd;
 
+  ButtonUniversalMode := TSpeedButton.Create(Self);
+  ButtonUniversalMode.Caption := 'TRS';
+  ButtonUniversalMode.Hint := 'Universal Combined Gizmo: Move, 2-Axis Planar Drag, Rotate & Scale in one gizmo.' + NL +
+    'Hold "Shift" to transform without changing selection. Press "Space" to cycle gizmo modes.' + NL + NL +
+    '(Alt+6)';
+  ButtonUniversalMode.ShowHint := true;
+  ButtonUniversalMode.AllowAllUp := true;
+  ButtonUniversalMode.GroupIndex := 7;
+  ButtonUniversalMode.AutoSize := true;
+  ButtonUniversalMode.Constraints.MinHeight := 33;
+  ButtonUniversalMode.Constraints.MinWidth := 40;
+  ButtonUniversalMode.BorderSpacing.Left := 2;
+  ButtonUniversalMode.OnClick := @ButtonUniversalModeClick;
+  ButtonUniversalMode.Parent := PanelMiddleTop;
+  if ButtonScaleMode.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonUniversalMode,
+      PanelMiddleTop.GetControlIndex(ButtonScaleMode) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -4911,6 +4990,18 @@ begin
   ButtonPivotMode.BorderSpacing.Left := 4;
   ButtonPivotMode.OnClick := @ButtonPivotModeClick;
   ButtonPivotMode.Parent := PanelMiddleTop;
+
+  ButtonGizmoSize := TSpeedButton.Create(Self);
+  ButtonGizmoSize.Caption := 'Gizmo: 100%';
+  ButtonGizmoSize.Hint := 'Cycle 3D Gizmo Screen Size & Hit-Target Scale (Click: 75% / 100% / 125% / 150% / 200% / 50% | Shift-click: Reset 100% | Shortcuts: Alt+- / Alt+=)';
+  ButtonGizmoSize.ShowHint := true;
+  ButtonGizmoSize.AutoSize := true;
+  ButtonGizmoSize.Constraints.MinHeight := 33;
+  ButtonGizmoSize.Constraints.MinWidth := 74;
+  ButtonGizmoSize.BorderSpacing.Left := 4;
+  ButtonGizmoSize.OnClick := @ButtonGizmoSizeClick;
+  ButtonGizmoSize.Parent := PanelMiddleTop;
+  UpdateGizmoSizeButtonCaption;
 
   LabelHeader3DSnap := TLabel.Create(Self);
   LabelHeader3DSnap.Caption := '3D snap:';
@@ -8130,12 +8221,15 @@ end;
 procedure TDesignFrame.OpenDesign(const NewDesignUrl: String);
 var
   NewDesignRoot, NewDesignOwner: TComponent;
-  Mime, SavedSelection: String;
+  Mime: String;
+  SavedSelection: TSavedSelection;
+  HasSavedSelection: Boolean;
 begin
-  if (FDesignUrl <> '') and (FDesignUrl = NewDesignUrl) then
+  HasSavedSelection := (FDesignUrl <> '') and (FDesignUrl = NewDesignUrl);
+  if HasSavedSelection then
     SavedSelection := GetSavedSelection
   else
-    SavedSelection := '';
+    SavedSelection := Default(TSavedSelection);
 
   NewDesignOwner := TComponent.Create(Self);
 
@@ -8168,7 +8262,7 @@ begin
 
   OpenDesign(NewDesignRoot, NewDesignOwner, NewDesignUrl);
 
-  if SavedSelection <> '' then
+  if HasSavedSelection then
     RestoreSavedSelection(SavedSelection);
   if (ControlsTree.SelectionCount = 0) and (NewDesignRoot <> nil) then
     SetSelectedComponent(NewDesignRoot);
@@ -8475,6 +8569,23 @@ begin
   C.Free;
 
   UpdateDesign;
+end;
+
+function TDesignFrame.DeleteSelectedPossible: Boolean;
+var
+  Selected: TComponentList;
+  SelectedCount, I: Integer;
+begin
+  Result := false;
+  GetSelected(Selected, SelectedCount, false);
+  try
+    if SelectedCount <> 0 then
+      for I := 0 to Selected.Count - 1 do
+        if Deletable(Selected[I]) then
+          Exit(true);
+  finally
+    FreeAndNil(Selected);
+  end;
 end;
 
 procedure TDesignFrame.DeleteComponent(const AutoSelectParents: Boolean = false);
@@ -48633,6 +48744,64 @@ begin
   InsideToggleModeClick := false;
 end;
 
+procedure TDesignFrame.ButtonUniversalModeClick(Sender: TObject);
+begin
+  if InsideToggleModeClick then Exit;
+  InsideToggleModeClick := true;
+  ChangeMode(moUniversal);
+  InsideToggleModeClick := false;
+end;
+
+procedure TDesignFrame.UpdateGizmoSizeButtonCaption;
+begin
+  if (ButtonGizmoSize <> nil) and (TransformManipulate <> nil) then
+    ButtonGizmoSize.Caption := Format('Gizmo: %d%%', [
+      Round(TransformManipulate.GizmoSizeScale * 100.0)]);
+end;
+
+procedure TDesignFrame.AdjustGizmoSizeScale(const Factor: Single);
+begin
+  if TransformManipulate = nil then Exit;
+  TransformManipulate.GizmoSizeScale := TransformManipulate.GizmoSizeScale * Factor;
+  UpdateGizmoSizeButtonCaption;
+end;
+
+procedure TDesignFrame.ButtonGizmoSizeClick(Sender: TObject);
+const
+  Presets: array [0..5] of Single = (0.50, 0.75, 1.00, 1.25, 1.50, 2.00);
+var
+  I, NextIdx: Integer;
+  Cur: Single;
+begin
+  if TransformManipulate = nil then Exit;
+  if ssShift in GetKeyShiftState then
+    TransformManipulate.GizmoSizeScale := 1.0
+  else
+  begin
+    Cur := TransformManipulate.GizmoSizeScale;
+    NextIdx := 0;
+    for I := 0 to High(Presets) do
+      if Cur < Presets[I] - 0.02 then
+      begin
+        NextIdx := I;
+        Break;
+      end;
+    TransformManipulate.GizmoSizeScale := Presets[NextIdx];
+  end;
+  UpdateGizmoSizeButtonCaption;
+end;
+
+procedure TDesignFrame.CycleGizmoMode;
+begin
+  case Mode of
+    moTranslate: ChangeMode(moRotate);
+    moRotate: ChangeMode(moScale);
+    moScale: ChangeMode(moUniversal);
+    moUniversal: ChangeMode(moTranslate);
+    else ChangeMode(moTranslate);
+  end;
+end;
+
 procedure TDesignFrame.FrameResize(Sender: TObject);
 
   { Buttons on top panel are resized by LCL to have height equal panel height,
@@ -49381,6 +49550,8 @@ procedure TDesignFrame.ChangeMode(const NewMode: TMode);
       UpdateButtonForDarkTheme(ButtonTranslateMode);
       UpdateButtonForDarkTheme(ButtonRotateMode);
       UpdateButtonForDarkTheme(ButtonScaleMode);
+      if ButtonUniversalMode <> nil then
+        UpdateButtonForDarkTheme(ButtonUniversalMode);
     end;
   end;
 
@@ -49392,6 +49563,8 @@ begin
   ButtonTranslateMode.Down := Mode = moTranslate;
   ButtonRotateMode.Down := Mode = moRotate;
   ButtonScaleMode.Down := Mode = moScale;
+  if ButtonUniversalMode <> nil then
+    ButtonUniversalMode.Down := Mode = moUniversal;
 
   AdjustToolbarButtonsTheme;
 
@@ -49399,6 +49572,7 @@ begin
     moTranslate: TransformManipulate.Mode := mmTranslate;
     moRotate: TransformManipulate.Mode := mmRotate;
     moScale: TransformManipulate.Mode := mmScale;
+    moUniversal: TransformManipulate.Mode := mmUniversal;
     else TransformManipulate.Mode := mmSelect;
   end;
 end;

@@ -1545,7 +1545,7 @@ var
 begin
   if (FViewport = nil) or (FViewport.Camera = nil) then
     Exit;
-  Box := FViewport.ItemsBoundingBox;
+  Box := FViewport.Items.BoundingBox;
   if not Box.IsEmpty then
     Center2D := Box.Center.XY
   else

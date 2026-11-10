@@ -1,6 +1,6 @@
-# Castle Game Engine — Editor Modernization Roadmap & Unreal Engine 5.5 Comparison
+# Castle Game Engine — Editor Modernization Roadmap (UE 5.5 Baseline + Horizon 2: UE 5.8 / 5.9 / 6.0)
 
-This document compares the **Castle Game Engine (CGE 7.0-alpha.3)** editor (`tools/castle-editor`) and runtime scene/UI manipulation architecture against **Unreal Engine 5.5 (Current Release)**, identifies the highest-impact workflow gaps, and tracks the phased engineering roadmap across all **270 completed phases**.
+This document compares the **Castle Game Engine (CGE 7.0-alpha.3)** editor (`tools/castle-editor`) and runtime scene/UI manipulation architecture against **Unreal Engine 5.5** (Horizon 1: Phases 1–276) and **Unreal Engine 5.8, 5.9 & 6.0** (Horizon 2: Phases 277–286), identifies the highest-impact next-generation workflow opportunities, and tracks the phased engineering roadmap.
 
 For complete user workflows, mathematical foundations, Pascal API reference, architecture diagrams, and keyboard shortcuts, see the companion reference guide:
 - **[`docs/EDITOR_MODERNIZATION_GUIDE.md`](docs/EDITOR_MODERNIZATION_GUIDE.md)**
@@ -2662,9 +2662,86 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
 
 ---
 
-## Roadmap Completion Status (Phases 1–276 — Final Milestone)
+## Roadmap Completion Status (Horizon 1: Phases 1–276 — Completed)
 
-All **276 Phases** of the Castle Game Engine Editor Modernization Roadmap (and 100% of `tools/castle-editor/TODO.md`) are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **276 Phases** of Horizon 1 (Unreal Engine 5.5 Baseline & 100% of `tools/castle-editor/TODO.md`) are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+
+---
+
+## 3. Horizon 2 Modernization Roadmap: Unreal Engine 5.8, 5.9 & 6.0 Comparison & Phases 277–286
+
+While Horizon 1 (Phases 1–276) brought `castle-editor` to full workflow parity with **Unreal Engine 5.5**, Epic's **Unreal Engine 5.8**, **Unreal Engine 5.9 (Preview / Late 2026)**, and **Unreal Engine 6.0 (Scene Graph & Composable Entity Architecture)** introduce a major generational leap centered around **Unified Combined Gizmos**, **Agentic AI / Model Context Protocol (MCP) Editor Control**, **Non-Destructive Design Sandboxes & Visual Diffing**, **Interactive Viewport Terrain & Scatter Brushes**, **Spatial Review Annotations**, **WebAssembly (`targetWeb`) Live Dev Servers**, and **Scene-Graph Prefab Property Overrides**.
+
+### 3.1. Architectural Comparison Matrix: UE 5.8 / UE 5.9 / UE 6.0 vs. CGE Horizon 2
+
+| Era & Domain | Unreal Engine 5.8 / 5.9 / 6.0 Reference Feature | Castle Game Engine Baseline (Post-Phase 276) | Horizon 2 Modernization Target (Phases 277–286) |
+| :--- | :--- | :--- | :--- |
+| **UE 5.8 — Unified Viewport Manipulation** | • **New Combined / Universal Gizmo** (simultaneous Translate + Rotate + Scale + 2-axis planar quads)<br>• Configurable gizmo screen size & hit-target scale<br>• Live on-gizmo numeric drag delta readout (`+Δ m`, `Δ°`, `×Scale`) | • Separate `mmTranslate`, `mmRotate`, `mmScale` modes only (`Alt+3/4/5`)<br>• Single-axis arrows (`X`, `Y`, `Z`) without 2-axis planar (`XY`, `XZ`, `YZ`) drag quads in 3D perspective<br>• Fixed screen-space gizmo scale and no live drag delta HUD readout | **Phase 277**:<br>• `mmUniversal` Unified Combined Gizmo (`Alt+6` / toolbar button)<br>• 2-axis planar handles (`MaterialPlaneXY`, `MaterialPlaneXZ`, `MaterialPlaneYZ`) on Translate, Scale & Universal gizmos<br>• Configurable `GizmoSizeScale` & live viewport drag-delta badge (`CurrentDragSummary`) |
+| **UE 5.8 / 5.9 — Agentic AI & MCP Integration** | • **Developer Assistant & Official Editor MCP Server**<br>• Autonomy levels (Read-Only, Edit with Undo, Full Control)<br>• External AI IDEs (Claude Code, Cursor, VS Code, Antigravity) inspect/modify live scenes & capture viewport screenshots | • No external automation socket or MCP endpoint inside `castle-editor`; external agents can only edit raw JSON files on disk while the design is closed | **Phase 278**:<br>• Embedded localhost **CGE Editor MCP Server** (`editormcpserver.pas`) with autonomy levels (`Disabled`, `ReadOnly`, `EditWithUndo`, `FullControl`)<br>• Tools for hierarchy inspection, RTTI property get/set with `TUndoSystem`, component creation, viewport screenshot capture, and build/log queries |
+| **UE 5.8 / 5.9 — Safe Experimentation & Visual Diff** | • **Content Sandboxes** (lightweight non-destructive experimental variants)<br>• **Visual Asset / Scene Diff & Merge** inside the editor | • Linear in-memory `TUndoSystem` only; comparing a modified `.castle-user-interface` / `.castle-transform` against disk or testing a lighting/layout branch requires manual file copies | **Phase 279**:<br>• **Design Sandboxes** (save/switch/promote lightweight named design snapshots)<br>• **Visual Design Diff & Selective Merge Dialog** comparing hierarchy additions, removals, and modified RTTI properties side-by-side |
+| **UE 5.8 — Interactive Terrain Authoring** | • **Next-Gen Landscape Non-Destructive Edit Layers**<br>• Interactive height sculpting (Raise, Lower, Smooth, Flatten) & RGBA splatmap layer weight painting | • `TCastleTerrain`, `TCastleTerrainNoise`, `TCastleTerrainImage`, and `TCastleTerrainCombine` exist, but heightmaps/splatmaps cannot be sculpted or painted directly in the 3D viewport | **Phase 280**:<br>• **3D Viewport Terrain Sculpt & Splatmap Paint Mode** painting directly into `TCastleTerrainImage` heightmaps (non-destructively layered over `TCastleTerrainNoise` via `TCastleTerrainCombine`) and RGBA splatmaps with live brush falloff ring |
+| **UE 5.8 — Interactive PCG & Foliage Brushes** | • **PCG Editor Mode Interactive Viewport Brushes** (paint/erase procedural scatter splines & volumes)<br>• Manual per-instance artist overrides preserved across regeneration | • Dialog-driven `ScatterDuplicate` (`Ctrl+Alt+S`); no continuous viewport paint/erase scatter brush or `[Pinned]` manual-override preservation | **Phase 281**:<br>• **Interactive 3D Scatter Paint & Erase Brush** with Poisson minimum-spacing, surface-normal alignment, slope/elevation masks, and `[Pinned]` manual-override retention |
+| **UE 5.8 — Stylized Rendering & Lighting Audit** | • **Substrate NPR / Stylized Shading** (toon, cel-outline, hatching, rim-glow)<br>• **MegaLights / Shadow Budget Complexity View** | • Powerful X3D `TEffectNode` / `TEffectPartNode` shader pipeline requires hand-writing GLSL; no viewport light/shadow overlap heat visualization | **Phase 282**:<br>• **Visual Shader Effect Studio (NPR & Stylized Presets)** generating non-destructive `TEffectNode` cel/outline/rim/dissolve shaders<br>• **Light & Shadow Budget Audit Visualizer** |
+| **UE 5.9 — Spatial Design Review** | • **Spatial Annotations / Canvas Review Pins** anchored in 3D/2D space with saved camera viewpoints, status tags, and Outliner jump | • Plain string `FComponentNotes` dictionary without 3D world-space pin coordinates, camera bookmarks, or review status workflow | **Phase 283**:<br>• **`TCastleDesignAnnotation` Spatial Viewport Pins** (`Note`, `TODO`, `Bug`, `AI Prompt`) with 3D billboard markers, saved camera pose, and Outliner/Auditor integration |
+| **UE 5.9 — WebAssembly / Browser Workflows** | • **Unreal Engine on the Web (WebAssembly / WebGPU)** streamlined browser preview & payload size profiling | • `CastleEngineManifest.xml` supports `web` (`targetWeb`), but `castle-editor` lacks a built-in localhost WASM preview server with COOP/COEP headers and bundle size telemetry | **Phase 284**:<br>• **Built-In `targetWeb` Live Preview HTTP Server & WASM Bundle Diagnostics** inside `castle-editor` with one-click browser launch & asset payload breakdown |
+| **UE 6.0 — Scene Graph Prefab Overrides** | • **Scene Graph Non-Destructive Prefab Overrides** (per-instance child property overrides on referenced prefabs with `Apply` / `Revert`) | • `TCastleTransformDesign` & `TCastleDesign` are either read-only black boxes or permanently unlinked/inlined into copies | **Phase 285**:<br>• **Non-Destructive Prefab Property Overrides** on `TCastleTransformDesign` & `TCastleDesign` instances with bold override badges, `Revert Override`, and `Apply to Source Prefab` |
+| **UE 6.0 — Entity-Behavior Composition & Streaming** | • **Inline Component/Behavior Cards** directly on selected entities<br>• **World Partition Spatial Streaming Zones & 2D Minimap** | • `TCastleBehavior` children must be selected separately in `ControlsTree` to inspect properties; no built-in distance-based `TCastleStreamingZone` + 2D World Partition Minimap | **Phase 286**:<br>• **Inline `TCastleBehavior` Inspector Cards & `+ Add Behavior` Button** when selecting a `TCastleTransform`<br>• **`TCastleStreamingZone` & 2D World Partition Minimap** |
+
+---
+
+### Phase 277: Unified Combined Gizmo (`mmUniversal`), 2-Axis Planar Handles (`XY` / `XZ` / `YZ`), Configurable Gizmo Scale & Live On-Gizmo Drag Delta Readout (UE 5.8 Parity)
+- [x] **277.1. Unified Combined Gizmo (`mmUniversal`), 2-Axis Planar Translation/Scale Quads, `GizmoSizeScale` & Live Drag Delta HUD (`castletransformmanipulate.pas`, `framedesign.pas`, `formproject.pas`, `formproject.lfm`, `testcastletransformmanipulate.pas`)**
+  - Extended `TManipulateMode` (`mmSelect`, `mmTranslate`, `mmRotate`, `mmScale`, `mmUniversal`) in `src/scene/castletransformmanipulate.pas`, procedurally building the unified 3D gizmo (`Gizmo[mmUniversal]`) combining X/Y/Z translation arrows (`MaterialX`/`Y`/`Z`), double-sided 2-axis planar quads (`MaterialPlaneXY`, `MaterialPlaneXZ`, `MaterialPlaneYZ`), quarter-circle 3D rotation arc tubes (`MaterialRotateX`/`Y`/`Z` at `0.64 * AxisLen`), axis scale tip cubes (`MaterialScaleX`/`Y`/`Z` at `1.16 * AxisLen`), and a center uniform scale cube (`MaterialScaleCenter`).
+  - Added 2-axis planar drag handles (`MaterialPlaneXY`, `MaterialPlaneXZ`, `MaterialPlaneYZ`) to `Gizmo[mmTranslate]`, `Gizmo[mmScale]`, and `Gizmo[mmUniversal]`, plus programmatic `TranslateSelectedPlanar(PlaneNormalCoord, WorldOrLocalDelta)` and `ScaleSelectedPlanar(PlaneNormalCoord, ScaleMultiplier)` APIs with full `TranslateSnap`/`ScaleSnap` and `csWorld`/`csLocal` support.
+  - Added configurable `GizmoSizeScale: Single` (`[0.25 .. 4.0]`, with pre-render orthographic `EffectiveRect.Height` fallback) and live gizmo drag telemetry (`IsDraggingGizmo`, `ActiveDragSubMode`, `CurrentDragTranslateDelta`, `CurrentDragRotateAngleRad`, `CurrentDragScaleFactor`, `CurrentDragSummary`).
+  - Updated `tools/castle-editor/code/framedesign.pas`, `formproject.pas`, and `formproject.lfm` with **`TRS`** (`ButtonUniversalMode`, **`Alt+6`**, `ActionModeUniversal` / `MenuItemModeUniversal`), **`Space`** mode cycling (`moTranslate -> moRotate -> moScale -> moUniversal`), **`Gizmo: 100%`** (`ButtonGizmoSize`, **`Alt+-`** / **`Alt+=`**), and a floating near-cursor live drag-delta HUD badge (`RectGizmoDragHud` / `LabelGizmoDragHud`).
+  - Added automated unit test #51 `TestUniversalGizmoPlanarHandlesScaleAndDragSummary` in `tests/code/testcases/testcastletransformmanipulate.pas`.
+  - **Official Docs & Visual References (Phase 277):** [CGE Visual Editor Manual](https://castle-engine.io/manual_editor.php) · [CGE Viewport & 3D Transform Manipulation (`TCastleTransform`)](https://castle-engine.io/viewport_and_scenes) · [Unreal Engine Transforming Actors & Combined TRS Gizmo](https://dev.epicgames.com/documentation/en-us/unreal-engine/transforming-actors-in-unreal-engine) · [Blender 4 3D Transform Gizmos (Move / Rotate / Scale / Combined)](https://docs.blender.org/manual/en/latest/editors/3dview/controls/gizmo.html) · [Godot 4 Using 3D Transforms & Gizmos](https://docs.godotengine.org/en/stable/tutorials/3d/using_transforms.html)
+  - **Official Videos & Movies (Phase 277):**
+    - 🎬 [CGE Official Video — Visual 3D & 2D Viewport Manipulation in Castle Game Engine Editor (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+    - 🎞️ [Animated Movie (GIF) — Interactive Multi-Axis Gizmo & Snapping Workflow](https://docs.godotengine.org/en/stable/_images/containers_split_drag.gif)
+  - **Screenshots:** [CGE 3D Editor Viewport & Gizmo](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [Blender Combined Transform Gizmo](https://docs.blender.org/manual/en/latest/_images/editors_3dview_display_gizmo_options-translate.png) · [Unity Transform Gizmo Handles](https://docs.unity3d.com/uploads/Main/gizmo-handle-position-toggles.png)
+  - **Example (Phase 277):** Select any `TCastleTransform` in `castle-editor` and press **`Alt+6`** (or click **`TRS`** in the top toolbar, or press **`Space`** to cycle gizmo modes) to activate the Unified Combined Gizmo: drag the green `XZ` planar square to slide across the floor while watching the live `Move: dPos (...) |d|=...` badge beside the cursor, drag the green `Y` arc to yaw-rotate in place, drag the center cube for uniform scaling, or press **`Alt+=`** / **`Alt+-`** (or click **`Gizmo: 100%`**) to resize the 3D gizmo handles.
+
+### Phase 278: Embedded Model Context Protocol (MCP) Server & Agentic Editor Automation Bridge (UE 5.8 / 5.9 Parity)
+- [ ] **278.1. Localhost JSON-RPC MCP Server with Autonomy Levels & Undo-Safe Scene/UI Tools (`editormcpserver.pas`, `formproject.pas`, `formpreferences.pas`)**
+  - Embed an opt-in localhost HTTP/JSON-RPC MCP server inside `castle-editor` with configurable autonomy modes (`Disabled`, `ReadOnly`, `EditWithUndo`, `FullControl`).
+  - Expose structured MCP tools (`cge_get_hierarchy`, `cge_get_component_properties`, `cge_set_component_properties`, `cge_add_component`, `cge_delete_component`, `cge_execute_layout_action`, `cge_capture_viewport_screenshot`, `cge_get_build_output`) integrated with `TUndoSystem`.
+
+### Phase 279: Non-Destructive Design Sandboxes & Visual Scene/UI Diff & Merge Tool (UE 5.8 / 5.9 Parity)
+- [ ] **279.1. Named Design Sandboxes & Side-by-Side Hierarchy/Property Diff Dialog (`designsandboxdiff.pas`, `framedesign.pas`, `formproject.pas`)**
+  - Add lightweight in-editor **Design Sandboxes** allowing designers to snapshot, switch between, and promote experimental scene/UI branches without duplicating project files.
+  - Add **Visual Design Diff & Selective Merge** (`Compare with Saved File / Sandbox...`) highlighting `[+ Added]`, `[- Removed]`, and `[~ Modified]` components and RTTI properties with per-component/property revert or accept.
+
+### Phase 280: Interactive 3D Viewport Terrain Sculpting & Splatmap Layer Brush Mode (UE 5.8 Landscape Edit Layers Parity)
+- [ ] **280.1. Real-Time Heightmap Sculpting (Raise, Lower, Smooth, Flatten) & RGBA Splatmap Weight Painting (`castleterrain.pas`, `framedesign.pas`)**
+  - Add interactive 3D viewport brush tools for `TCastleTerrain` / `TCastleTerrainImage` (including automatic non-destructive conversion/layering over `TCastleTerrainNoise` via `TCastleTerrainCombine`) supporting Raise, Lower, Smooth, and Flatten height brushes plus 4-channel RGBA splatmap painting with live 3D brush radius/falloff preview and `TUndoSystem` integration.
+
+### Phase 281: Interactive PCG / Foliage Scatter Brush Mode with Manual Artist Overrides (UE 5.8 PCG Editor Mode Parity)
+- [ ] **281.1. Continuous Viewport Foliage/Prop Paint & Erase Brush with Poisson Spacing & `[Pinned]` Instance Preservation (`framedesign.pas`, `castletransformmanipulate.pas`)**
+  - Add an interactive viewport **Scatter Paint / Erase Brush** that raycasts onto scene/terrain geometry, enforces Poisson minimum-distance spacing, aligns to surface normals with slope/altitude masks and random yaw/scale jitter, and preserves `[Pinned]` hand-tweaked instances during re-scatter operations.
+
+### Phase 282: Stylized / NPR Shader Effect Studio & Viewport Light/Shadow Budget Visualizer (UE 5.8 Substrate NPR & MegaLights Parity)
+- [ ] **282.1. Visual X3D `TEffectNode` Stylized Shader Generator & Light/Shadow Overlap Audit View (`framedesign.pas`)**
+  - Add a visual **Stylized & NPR Shader Effect Studio** that attaches non-destructive `TEffectNode` / `TEffectPartNode` shaders (Cel/Toon Stepped Lighting, Fresnel Rim Highlight, Procedural Dissolve, Gooch Warm/Cool Technical Shading, Screen-Space/Normal Outline) to selected `TCastleScene` / `TCastleTransform` nodes without hand-writing GLSL.
+  - Add a **Light & Shadow Budget Audit** mode visualizing active light radii, shadow-caster cost, and multi-light overlap hotspots.
+
+### Phase 283: Spatial Viewport Annotations ("Canvas Pins") & Design Review Bookmarks (UE 5.9 Spatial Review Parity)
+- [ ] **283.1. 3D/2D `TCastleDesignAnnotation` Review Pins with Camera Viewpoints & Auditor Integration (`framedesign.pas`)**
+  - Introduce `TCastleDesignAnnotation` components (`Note`, `TODO`, `Bug`, `AI Prompt`) that render crisp viewport callout badges in 3D/2D design mode (hidden at game runtime), store author/status/camera viewpoint bookmarks, and integrate with the Hierarchy filter and Pre-Release Readiness Auditor.
+
+### Phase 284: Built-In WebAssembly (`targetWeb`) Live Preview Server & Bundle Size Diagnostics (UE 5.9 Web Parity)
+- [ ] **284.1. Localhost HTTP `targetWeb` Dev Server with COOP/COEP Headers & Asset Payload Profiler (`editorwebserver.pas`, `formproject.pas`)**
+  - Add a built-in localhost HTTP dev server for `targetWeb` builds inside `castle-editor` with one-click browser launch, proper `application/wasm` MIME + COOP/COEP headers, optional auto-reload, and a `data/` + `.wasm` bundle size breakdown chart for web download optimization.
+
+### Phase 285: Scene-Graph Style Non-Destructive Prefab Property Overrides (UE 6.0 Scene Graph Parity)
+- [ ] **285.1. Per-Instance Child Property Overrides on `TCastleTransformDesign` & `TCastleDesign` (`castletransform.pas`, `castlecontrols.pas`, `framedesign.pas`)**
+  - Allow overriding child transforms, materials, captions, or visibility on referenced `TCastleTransformDesign` and `TCastleDesign` prefab instances without unlinking `Url`, storing compact override patches with Inspector override indicators, `Revert Override to Prefab`, and `Apply Override to Source Prefab`.
+
+### Phase 286: Inline `TCastleBehavior` Inspector Cards & `TCastleStreamingZone` World Partition Minimap (UE 6.0 Composable Entities & Streaming Parity)
+- [ ] **286.1. Inline Attached Behavior Inspector Section & Distance-Based `TCastleStreamingZone` + 2D World Minimap (`framedesign.pas`, `designobjectinspector.pas`, `castletransform.pas`)**
+  - Display collapsible inline cards for all attached `TCastleBehavior` instances (plus a `+ Add Behavior` button) directly inside the Object Inspector panel whenever a `TCastleTransform` is selected.
+  - Add `TCastleStreamingZone` (distance-based `TCastleTransformDesign` load/unload streaming bounds) and a 2D top-down **World Partition Minimap** dock for large open-world scenes.
 
 
 

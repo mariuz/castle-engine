@@ -69,7 +69,7 @@ type
 implementation
 
 uses Math,
-  CastleCameras, CastleColors, CastleUtils;
+  CastleCameras, CastleProjection, CastleColors, CastleUtils;
 
 { TCameraPreview.TMyViewport ------------------------------------------------- }
 

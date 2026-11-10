@@ -83,6 +83,8 @@ uses {$ifdef MSWINDOWS} { for GetKeyState } Windows, {$endif}
 type
   { Abstact class to wrap capabilities of TEdit and (editable) TComboBox. }
   TEditBox = class
+  private
+    FOverwrite: Boolean;
   protected
     function GetSelLength: Integer; virtual; abstract;
     function GetSelStart: Integer; virtual; abstract;
@@ -276,6 +278,11 @@ begin
           CutToClipboard
       end else
         Exit; // resign from special handling
+    VK_INSERT:
+      if Shift = [] then
+        FOverwrite := not FOverwrite
+      else
+        Exit;
     VK_DELETE:
       if ReadOnly then
         Beep

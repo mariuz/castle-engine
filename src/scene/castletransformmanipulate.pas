@@ -48,7 +48,7 @@ type
   end;
 
   { Mode of operation for @link(TCastleTransformManipulate.Mode). }
-  TManipulateMode = (mmSelect, mmTranslate, mmRotate, mmScale);
+  TManipulateMode = (mmSelect, mmTranslate, mmRotate, mmScale, mmUniversal);
 
   { Coordinate space used by @link(TCastleTransformManipulate) when translating
     or rotating selected transformations. }
@@ -166,6 +166,7 @@ type
           const TrianglesToIgnoreFunc: TTriangleIgnoreFunc): TRayCollision; override;
       public
         Mode: TManipulateMode;
+        ActiveDragMode: TManipulateMode;
         OnTransformModifyBegin: TNotifyEvent;
         OnTransformModified: TNotifyEvent;
         OnTransformModifyEnd: TNotifyEvent;
@@ -188,6 +189,13 @@ type
       FTranslateSnap: Single;
       FRotateSnap: Single;
       FScaleSnap: Single;
+      FGizmoSizeScale: Single;
+      FIsDraggingGizmo: Boolean;
+      FActiveDragSubMode: TManipulateMode;
+      FCumulativeTranslateDelta: TVector3;
+      FCumulativeRotateAngleRad: Single;
+      FCumulativeRotateAxis: Integer;
+      FCumulativeScaleFactor: TVector3;
       FMainSelected: TCastleTransform;
       FMainSelectedObserver: TFreeNotificationObserver;
       FPickable: Boolean;
@@ -204,6 +212,7 @@ type
     procedure SetMode(const AValue: TManipulateMode);
     procedure SetCoordSpace(const AValue: TManipulateCoordSpace);
     procedure SetPivotMode(const AValue: TManipulatePivotMode);
+    procedure SetGizmoSizeScale(const AValue: Single);
     procedure SetMainSelected(const AValue: TCastleTransform);
     procedure UpdateMainSelected;
     procedure SetPickable(const Value: Boolean);
@@ -283,6 +292,36 @@ type
     property ScaleSnap: Single
       read FScaleSnap write FScaleSnap {$ifdef FPC}default 0{$endif};
 
+    { Visual and hit-target screen size multiplier for interactive 3D gizmos
+      (clamped to @code([0.25 .. 4.0]), default @code(1.0)). }
+    property GizmoSizeScale: Single
+      read FGizmoSizeScale write SetGizmoSizeScale;
+
+    { @true while the user is actively dragging an interactive 3D gizmo handle. }
+    property IsDraggingGizmo: Boolean read FIsDraggingGizmo;
+
+    { Active sub-operation (@link(mmTranslate), @link(mmRotate), or @link(mmScale))
+      during an interactive gizmo drag (especially useful when @link(Mode) = @link(mmUniversal)). }
+    property ActiveDragSubMode: TManipulateMode read FActiveDragSubMode;
+
+    { Cumulative world-space translation delta accumulated since the start of the
+      current interactive gizmo drag. }
+    property CurrentDragTranslateDelta: TVector3 read FCumulativeTranslateDelta;
+
+    { Cumulative rotation angle (in radians) accumulated since the start of the
+      current interactive gizmo drag. }
+    property CurrentDragRotateAngleRad: Single read FCumulativeRotateAngleRad;
+
+    { Cumulative scale multiplier accumulated since the start of the current
+      interactive gizmo drag (@code((1, 1, 1)) at drag start). }
+    property CurrentDragScaleFactor: TVector3 read FCumulativeScaleFactor;
+
+    { Concise human-readable summary of the active gizmo drag delta
+      (e.g. @code('Move: dX=+2.50  dY=+0.00  dZ=-1.00  (|d|=2.69)'),
+      @code('Rotate Y: +45.0 deg'), or @code('Scale Uniform: 1.50x (150%)')).
+      Returns @code('') when @link(IsDraggingGizmo) is @false. }
+    function CurrentDragSummary: String;
+
     { Pass a list of TCastleTransform instances to visualize them as selected
       and to manipulate them (move/rotate/scale).
       One or multiple transform instances can be selected and manipulated at once.
@@ -329,6 +368,26 @@ type
       scale, applying @link(ScaleSnap) if > 0 and skipping selected transforms
       whose ancestor is also selected. }
     procedure ScaleSelected(const RawScaleDelta: TVector3);
+
+    { Translate all currently selected transforms on the 2-axis plane perpendicular
+      to @code(PlaneNormalAxis) (@code(0)=YZ plane, @code(1)=XZ plane, @code(2)=XY plane)
+      in the active @link(CoordSpace), applying @link(TranslateSnap) when > 0.
+      @code(DeltaAxis1) and @code(DeltaAxis2) correspond to the cyclic remaining
+      axes (@code(RestOf3DCoordsCycle(PlaneNormalAxis, C1, C2)):
+      for YZ (@code(0)) -> (Y, Z); for XZ (@code(1)) -> (Z, X) or use
+      @code(PlanarDelta: TVector3) whose @code(PlaneNormalAxis) component is zeroed).
+      Returns @true if at least one selected transform was modified. }
+    function TranslateSelectedPlanar(const PlaneNormalAxis: T3DAxis;
+      const PlanarDelta: TVector3): Boolean;
+
+    { Scale all currently selected transforms uniformly on the 2-axis plane
+      perpendicular to @code(PlaneNormalAxis) (@code(0)=YZ, @code(1)=XZ, @code(2)=XY)
+      by multiplying the two in-plane scale components by @code(PlanarFactor) while
+      keeping the @code(PlaneNormalAxis) scale component unchanged (applying
+      @link(ScaleSnap) when > 0).
+      Returns @true if at least one selected transform was modified. }
+    function ScaleSelectedPlanar(const PlaneNormalAxis: T3DAxis;
+      const PlanarFactor: Single): Boolean;
 
     { Align all top-level selected transforms along @code(Axis) (0=X, 1=Y, 2=Z)
       to the target coordinate specified by @code(Target) (@link(atPrimary),
@@ -2345,7 +2404,9 @@ var
 begin
   Manip := ManipulateOwner;
   Result := (Manip <> nil) and (Manip.CoordSpace = csWorld) and
-    (Mode in [mmTranslate, mmRotate]) and (Parent <> nil);
+    (Mode in [mmTranslate, mmRotate, mmUniversal]) and
+    (not (GizmoDragging and (ActiveDragMode = mmScale))) and
+    (Parent <> nil);
 end;
 
 procedure TCastleTransformManipulate.TGizmoScene.GetEffectiveRay(
@@ -2353,8 +2414,15 @@ procedure TCastleTransformManipulate.TGizmoScene.GetEffectiveRay(
 begin
   if UseWorldCoordSpace then
   begin
-    RayOrigin := RotatePointAroundAxis(Parent.Rotation, Pick.RayOrigin * Parent.Scale);
-    RayDirection := RotatePointAroundAxis(Parent.Rotation, Pick.RayDirection * Parent.Scale);
+    if GizmoScalingAssumeScale then
+    begin
+      RayOrigin := RotatePointAroundAxis(Parent.Rotation, Pick.RayOrigin * GizmoScalingAssumeScaleValue);
+      RayDirection := RotatePointAroundAxis(Parent.Rotation, Pick.RayDirection * GizmoScalingAssumeScaleValue);
+    end else
+    begin
+      RayOrigin := RotatePointAroundAxis(Parent.Rotation, Pick.RayOrigin * Parent.Scale);
+      RayDirection := RotatePointAroundAxis(Parent.Rotation, Pick.RayDirection * Parent.Scale);
+    end;
   end else
   begin
     RayOrigin := Pick.RayOrigin;
@@ -2365,9 +2433,13 @@ end;
 function TCastleTransformManipulate.TGizmoScene.PointOnAxis(
   out Intersection: TVector3; const Pick: TRayCollisionNode;
   const Axis: Integer): Boolean;
+const
+  DragCoordPlaneXY = -10;
+  DragCoordPlaneYZ = -12;
 var
-  IntersectionScalar: Single;
+  IntersectionScalar, PlanarDist: Single;
   IntersectionOneAxis, RayOrigin, RayDirection: TVector3;
+  PlaneNormalCoord, C1, C2: T3DAxis;
 begin
   GetEffectiveRay(Pick, RayOrigin, RayDirection);
 
@@ -2376,6 +2448,32 @@ begin
     Result := true;
     IntersectionScalar := Sqrt(PointToLineDistanceSqr(TVector3.Zero, RayOrigin, RayDirection));
     Intersection := Vector3(IntersectionScalar, IntersectionScalar, IntersectionScalar);
+  end else
+  if (Axis >= DragCoordPlaneYZ) and (Axis <= DragCoordPlaneXY) then
+  begin
+    { 2-axis planar handle:
+      -10 -> XY plane (normal Z = 2)
+      -11 -> XZ plane (normal Y = 1)
+      -12 -> YZ plane (normal X = 0) }
+    PlaneNormalCoord := T3DAxis(-10 - Axis);
+    if RayDirection.IsZero or
+       (Abs(RayDirection.Normalize[PlaneNormalCoord]) < 1e-3) then
+      Exit(false);
+    if not TrySimplePlaneRayIntersection(Intersection, PlaneNormalCoord, 0,
+      RayOrigin, RayDirection) then
+      Exit(false);
+    Intersection.Data[PlaneNormalCoord] := 0;
+    if ActiveDragMode = mmScale then
+    begin
+      RestOf3DCoordsCycle(PlaneNormalCoord, C1, C2);
+      PlanarDist := Hypot(Intersection[C1], Intersection[C2]);
+      if IsZero(PlanarDist) then
+        Exit(false);
+      Intersection.Data[C1] := PlanarDist;
+      Intersection.Data[C2] := PlanarDist;
+      Intersection.Data[PlaneNormalCoord] := 0;
+    end;
+    Result := true;
   end else
   if Axis = -2 then
   begin
@@ -2613,7 +2711,8 @@ const
   BaseGizmoScalePerspective = 0.25 * 0.5;
 var
   Camera: TCastleCamera;
-  GizmoScale, ScaleUniform: Single;
+  GizmoScale, ScaleUniform, UserSizeFactor, OrthoHeight: Single;
+  Manip: TCastleTransformManipulate;
 begin
   { UpdateSize changes our transformation, and ChangedTransform in turn
     calls InternalCameraChanged, which means we can get into infinite
@@ -2633,15 +2732,27 @@ begin
        (World.MainCamera <> nil) then
     begin
       Camera := World.MainCamera;
+      Manip := ManipulateOwner;
+      if Manip <> nil then
+        UserSizeFactor := Manip.GizmoSizeScale
+      else
+        UserSizeFactor := 1.0;
 
       if Camera.ProjectionType = ptOrthographic then
       begin
+        OrthoHeight := Camera.Orthographic.EffectiveRect.Height;
+        if OrthoHeight <= 0 then
+          OrthoHeight := Camera.Orthographic.Height;
+        if OrthoHeight <= 0 then
+          OrthoHeight := Camera.Orthographic.Width;
+        if OrthoHeight <= 0 then
+          OrthoHeight := 10.0;
         { We just want gizmo is about 15% of effective height }
-        GizmoScale := BaseGizmoScaleOrtho * Camera.Orthographic.EffectiveRect.Height;
+        GizmoScale := BaseGizmoScaleOrtho * UserSizeFactor * OrthoHeight;
         ScaleUniform := Parent.WorldToLocalDistance(GizmoScale);
       end else
       begin
-        GizmoScale := BaseGizmoScalePerspective {TODO:* Camera.Perspective.EffectiveFieldOfViewVertical};
+        GizmoScale := BaseGizmoScalePerspective * UserSizeFactor {TODO:* Camera.Perspective.EffectiveFieldOfViewVertical};
         ScaleUniform := GetPerspectiveGizmoScale(Camera, GizmoScale);
       end;
 
@@ -2654,6 +2765,10 @@ end;
 
 function TCastleTransformManipulate.TGizmoScene.PointingDevicePress(
   const Pick: TRayCollisionNode; const Distance: Single): Boolean;
+const
+  DragCoordPlaneXY = -10;
+  DragCoordPlaneXZ = -11;
+  DragCoordPlaneYZ = -12;
 var
   AppearanceName: String;
   CanDrag: Boolean;
@@ -2661,7 +2776,7 @@ var
   function IsOrthographicTranslation: Boolean;
   begin
     Result := (
-      (Mode = mmTranslate) and
+      (Mode in [mmTranslate, mmUniversal]) and
       HasWorldTransform and
       (World <> nil) and
       (World.MainCamera <> nil) and
@@ -2669,6 +2784,14 @@ var
       // TODO: should check world-space direction
       (TVector3.Equals(World.MainCamera.Direction, Vector3(0, 0, -1)))
     );
+  end;
+
+  function DefaultAxisSubMode: TManipulateMode;
+  begin
+    if Mode = mmUniversal then
+      Result := mmTranslate
+    else
+      Result := Mode;
   end;
 
 begin
@@ -2683,40 +2806,101 @@ begin
     AppearanceName := Pick.Triangle^.ShapeNode.Appearance.X3DName;
     if AppearanceName = 'MaterialX' then
     begin
+      ActiveDragMode := DefaultAxisSubMode;
       DraggingCoord := 0;
     end else
     if AppearanceName = 'MaterialY' then
     begin
+      ActiveDragMode := DefaultAxisSubMode;
       DraggingCoord := 1;
     end else
     if AppearanceName = 'MaterialZ' then
     begin
+      ActiveDragMode := DefaultAxisSubMode;
       { In 2D mode dragging Z axis means translate in X and Y. }
       if IsOrthographicTranslation then
         DraggingCoord := -2
       else
         DraggingCoord := 2;
     end else
-    if AppearanceName = 'MaterialCenter' then
+    if AppearanceName = 'MaterialPlaneXY' then
+    begin
+      if Mode = mmScale then ActiveDragMode := mmScale else ActiveDragMode := mmTranslate;
+      DraggingCoord := DragCoordPlaneXY;
+    end else
+    if AppearanceName = 'MaterialPlaneXZ' then
+    begin
+      if Mode = mmScale then ActiveDragMode := mmScale else ActiveDragMode := mmTranslate;
+      DraggingCoord := DragCoordPlaneXZ;
+    end else
+    if AppearanceName = 'MaterialPlaneYZ' then
+    begin
+      if Mode = mmScale then ActiveDragMode := mmScale else ActiveDragMode := mmTranslate;
+      DraggingCoord := DragCoordPlaneYZ;
+    end else
+    if AppearanceName = 'MaterialRotateX' then
+    begin
+      ActiveDragMode := mmRotate;
+      DraggingCoord := 0;
+    end else
+    if AppearanceName = 'MaterialRotateY' then
+    begin
+      ActiveDragMode := mmRotate;
+      DraggingCoord := 1;
+    end else
+    if AppearanceName = 'MaterialRotateZ' then
+    begin
+      ActiveDragMode := mmRotate;
+      DraggingCoord := 2;
+    end else
+    if AppearanceName = 'MaterialScaleX' then
+    begin
+      ActiveDragMode := mmScale;
+      DraggingCoord := 0;
+    end else
+    if AppearanceName = 'MaterialScaleY' then
+    begin
+      ActiveDragMode := mmScale;
+      DraggingCoord := 1;
+    end else
+    if AppearanceName = 'MaterialScaleZ' then
+    begin
+      ActiveDragMode := mmScale;
+      DraggingCoord := 2;
+    end else
+    if (AppearanceName = 'MaterialCenter') or
+       (AppearanceName = 'MaterialScaleCenter') then
     begin
       { In 2D mode dragging center square means translate in X and Y. }
-      if IsOrthographicTranslation then
-        DraggingCoord := -2
-      else
-      if Mode = mmScale then
+      if IsOrthographicTranslation and (AppearanceName = 'MaterialCenter') then
+      begin
+        ActiveDragMode := mmTranslate;
+        DraggingCoord := -2;
+      end else
+      if Mode in [mmScale, mmUniversal] then
+      begin
+        ActiveDragMode := mmScale;
         DraggingCoord := -1;
+      end else
+        Exit;
     end else
-      Exit; // ignore draging on other material names
+      Exit; // ignore dragging on other material names
 
-    if Mode = mmRotate then
+    if ActiveDragMode = mmRotate then
       CanDrag := AngleOnPlane(LastPickAngle, Pick, DraggingCoord)
     else
       CanDrag := PointOnAxis(LastPick, Pick, DraggingCoord);
 
     if CanDrag then
     begin
+      if ManipulateOwner <> nil then
+      begin
+        ManipulateOwner.FActiveDragSubMode := ActiveDragMode;
+        if ActiveDragMode = mmRotate then
+          ManipulateOwner.FCumulativeRotateAxis := DraggingCoord;
+      end;
       DoTransformModifyBegin;
-      if Mode = mmScale then
+      if ActiveDragMode = mmScale then
       begin
         { In CameraChanged, we adjust gizmo scale to make it fit within
           the screen nicely. This way, we actually "nullify" the effect
@@ -2751,7 +2935,7 @@ begin
 
   if GizmoDragging then
   begin
-    if Mode = mmRotate then
+    if ActiveDragMode = mmRotate then
       DragSuccess := AngleOnPlane(NewPickAngle, Pick, DraggingCoord)
     else
       DragSuccess := PointOnAxis(NewPick, Pick, DraggingCoord);
@@ -2763,7 +2947,7 @@ begin
       {$ifdef DEBUG_GIZMO_PICK}
       if TCastleControl.MainControl.Pressed[keyShift] then
       {$endif DEBUG_GIZMO_PICK}
-      case Mode of
+      case ActiveDragMode of
         mmTranslate:
           begin
             Diff := NewPick - LastPick;
@@ -2851,8 +3035,8 @@ begin
             else
               Parent.Scale := Parent.Scale * Diff;
           end;
-        mmSelect:
-          raise EInternalError.Create('TGizmoScene shall never be created with mmSelect, ');
+        mmSelect, mmUniversal:
+          raise EInternalError.Create('TGizmoScene ActiveDragMode shall be mmTranslate, mmRotate, or mmScale');
       end;
 
       // update our gizmo size and rotation, as we moved/rotated ourselves
@@ -2865,10 +3049,13 @@ end;
 function TCastleTransformManipulate.TGizmoScene.PointingDeviceRelease(
   const Pick: TRayCollisionNode; const Distance: Single;
   const CancelAction: Boolean): Boolean;
+var
+  WasDragging: Boolean;
 begin
   Result := inherited;
   if Result then Exit;
 
+  WasDragging := GizmoDragging;
   GizmoDragging := false;
 
   if GizmoScalingAssumeScale then
@@ -2876,7 +3063,8 @@ begin
     GizmoScalingAssumeScale := false;
     UpdateSize;
   end;
-  DoTransformModifyEnd;
+  if WasDragging then
+    DoTransformModifyEnd;
 end;
 
 procedure TCastleTransformManipulate.TGizmoScene.LocalRender(const Params: TRenderParams);
@@ -2943,10 +3131,198 @@ constructor TCastleTransformManipulate.Create(AOwner: TComponent);
     Result.OnTransformModifyEnd := {$ifdef FPC}@{$endif} GizmoHasTransformModifyEnd;
   end;
 
+  function CreateUnlitAppearance(const MaterialName: String;
+    const EmissiveRGB: TVector3; const AlphaTransparency: Single): TAppearanceNode;
+  var
+    Mat: TUnlitMaterialNode;
+  begin
+    Result := TAppearanceNode.Create;
+    Result.X3DName := MaterialName;
+    Mat := TUnlitMaterialNode.Create;
+    Mat.EmissiveColor := EmissiveRGB;
+    Mat.Transparency := AlphaTransparency;
+    Result.Material := Mat;
+  end;
+
+  function CreatePlanarQuadShape(const MaterialName: String;
+    const P0, P1, P2, P3, ColorRGB: TVector3): TShapeNode;
+  var
+    IFS: TIndexedFaceSetNode;
+    Coord: TCoordinateNode;
+  begin
+    Coord := TCoordinateNode.Create;
+    Coord.SetPoint([P0, P1, P2, P3]);
+    IFS := TIndexedFaceSetNode.Create;
+    IFS.Coord := Coord;
+    IFS.Solid := false;
+    IFS.SetCoordIndex([0, 1, 2, 3, -1]);
+    Result := TShapeNode.Create;
+    Result.Appearance := CreateUnlitAppearance(MaterialName, ColorRGB, 0.30);
+    Result.Geometry := IFS;
+  end;
+
+  procedure AppendPlanarGizmoHandles(const Scene: TGizmoScene;
+    const InnerOffset, OuterOffset: Single);
+  var
+    Group: TGroupNode;
+  begin
+    if (Scene = nil) or (Scene.RootNode = nil) then Exit;
+    Group := TGroupNode.Create;
+    { XY plane (normal Z): Blue accent }
+    Group.AddChildren(CreatePlanarQuadShape('MaterialPlaneXY',
+      Vector3(InnerOffset, InnerOffset, 0),
+      Vector3(OuterOffset, InnerOffset, 0),
+      Vector3(OuterOffset, OuterOffset, 0),
+      Vector3(InnerOffset, OuterOffset, 0),
+      Vector3(0.25, 0.55, 1.00)));
+    { XZ plane (normal Y): Green accent }
+    Group.AddChildren(CreatePlanarQuadShape('MaterialPlaneXZ',
+      Vector3(InnerOffset, 0, InnerOffset),
+      Vector3(OuterOffset, 0, InnerOffset),
+      Vector3(OuterOffset, 0, OuterOffset),
+      Vector3(InnerOffset, 0, OuterOffset),
+      Vector3(0.25, 0.90, 0.35)));
+    { YZ plane (normal X): Red accent }
+    Group.AddChildren(CreatePlanarQuadShape('MaterialPlaneYZ',
+      Vector3(0, InnerOffset, InnerOffset),
+      Vector3(0, OuterOffset, InnerOffset),
+      Vector3(0, OuterOffset, OuterOffset),
+      Vector3(0, InnerOffset, OuterOffset),
+      Vector3(1.00, 0.30, 0.30)));
+    Scene.RootNode.AddChildren(Group);
+    Scene.ChangedAll;
+  end;
+
+  function CreateRotateArcTubeShape(const MaterialName: String;
+    const AxisCoord: T3DAxis; const MajorR, TubeHalfWidth: Single;
+    const ColorRGB: TVector3): TShapeNode;
+  const
+    SegCount = 10;
+  var
+    C1, C2: T3DAxis;
+    Points: array of TVector3;
+    Indices: array of Int32;
+    S, K, Base, NextBase, IdxPos: Integer;
+    Theta, ThetaStart, ThetaEnd: Single;
+    RadDir, NormDir, RingCenter: TVector3;
+    IFS: TIndexedFaceSetNode;
+    Coord: TCoordinateNode;
+  begin
+    RestOf3DCoordsCycle(AxisCoord, C1, C2);
+    ThetaStart := DegToRad(14.0);
+    ThetaEnd := DegToRad(76.0);
+    SetLength(Points, (SegCount + 1) * 4);
+    NormDir := TVector3.Zero;
+    NormDir.Data[AxisCoord] := 1.0;
+
+    for S := 0 to SegCount do
+    begin
+      Theta := ThetaStart + (ThetaEnd - ThetaStart) * (Single(S) / Single(SegCount));
+      RadDir := TVector3.Zero;
+      RadDir.Data[C1] := Cos(Theta);
+      RadDir.Data[C2] := Sin(Theta);
+      RingCenter := RadDir * MajorR;
+      Base := S * 4;
+      Points[Base + 0] := RingCenter - RadDir * TubeHalfWidth - NormDir * TubeHalfWidth;
+      Points[Base + 1] := RingCenter + RadDir * TubeHalfWidth - NormDir * TubeHalfWidth;
+      Points[Base + 2] := RingCenter + RadDir * TubeHalfWidth + NormDir * TubeHalfWidth;
+      Points[Base + 3] := RingCenter - RadDir * TubeHalfWidth + NormDir * TubeHalfWidth;
+    end;
+
+    { 4 side quads per segment (5 ints each) + 2 end-cap quads (5 ints each) }
+    SetLength(Indices, SegCount * 4 * 5 + 2 * 5);
+    IdxPos := 0;
+    for S := 0 to SegCount - 1 do
+    begin
+      Base := S * 4;
+      NextBase := (S + 1) * 4;
+      for K := 0 to 3 do
+      begin
+        Indices[IdxPos + 0] := Base + K;
+        Indices[IdxPos + 1] := Base + ((K + 1) mod 4);
+        Indices[IdxPos + 2] := NextBase + ((K + 1) mod 4);
+        Indices[IdxPos + 3] := NextBase + K;
+        Indices[IdxPos + 4] := -1;
+        Inc(IdxPos, 5);
+      end;
+    end;
+    { Start cap }
+    Indices[IdxPos + 0] := 0;
+    Indices[IdxPos + 1] := 3;
+    Indices[IdxPos + 2] := 2;
+    Indices[IdxPos + 3] := 1;
+    Indices[IdxPos + 4] := -1;
+    Inc(IdxPos, 5);
+    { End cap }
+    Base := SegCount * 4;
+    Indices[IdxPos + 0] := Base + 0;
+    Indices[IdxPos + 1] := Base + 1;
+    Indices[IdxPos + 2] := Base + 2;
+    Indices[IdxPos + 3] := Base + 3;
+    Indices[IdxPos + 4] := -1;
+
+    Coord := TCoordinateNode.Create;
+    Coord.SetPoint(Points);
+    IFS := TIndexedFaceSetNode.Create;
+    IFS.Coord := Coord;
+    IFS.Solid := false;
+    IFS.SetCoordIndex(Indices);
+
+    Result := TShapeNode.Create;
+    Result.Appearance := CreateUnlitAppearance(MaterialName, ColorRGB, 0.05);
+    Result.Geometry := IFS;
+  end;
+
+  function CreateScaleBoxTransform(const MaterialName: String;
+    const CenterPos: TVector3; const BoxEdge: Single;
+    const ColorRGB: TVector3): TTransformNode;
+  var
+    BoxGeom: TBoxNode;
+    Shape: TShapeNode;
+  begin
+    BoxGeom := TBoxNode.CreateWithShape(Shape);
+    BoxGeom.Size := Vector3(BoxEdge, BoxEdge, BoxEdge);
+    Shape.Appearance := CreateUnlitAppearance(MaterialName, ColorRGB, 0.0);
+    Result := TTransformNode.Create;
+    Result.Translation := CenterPos;
+    Result.AddChildren(Shape);
+  end;
+
+  procedure AppendUniversalRotateAndScaleHandles(const Scene: TGizmoScene;
+    const AxisLen: Single);
+  var
+    Group: TGroupNode;
+  begin
+    if (Scene = nil) or (Scene.RootNode = nil) then Exit;
+    Group := TGroupNode.Create;
+    { Quarter-circle 3D rotation arc tubes around X, Y, Z }
+    Group.AddChildren(CreateRotateArcTubeShape('MaterialRotateX', 0,
+      0.64 * AxisLen, 0.032 * AxisLen, Vector3(1.00, 0.25, 0.25)));
+    Group.AddChildren(CreateRotateArcTubeShape('MaterialRotateY', 1,
+      0.64 * AxisLen, 0.032 * AxisLen, Vector3(0.25, 0.92, 0.32)));
+    Group.AddChildren(CreateRotateArcTubeShape('MaterialRotateZ', 2,
+      0.64 * AxisLen, 0.032 * AxisLen, Vector3(0.25, 0.52, 1.00)));
+    { Axis scale cube tips beyond translate arrow tips + uniform center cube }
+    Group.AddChildren(CreateScaleBoxTransform('MaterialScaleX',
+      Vector3(1.16 * AxisLen, 0, 0), 0.16 * AxisLen, Vector3(1.00, 0.45, 0.25)));
+    Group.AddChildren(CreateScaleBoxTransform('MaterialScaleY',
+      Vector3(0, 1.16 * AxisLen, 0), 0.16 * AxisLen, Vector3(0.40, 1.00, 0.35)));
+    Group.AddChildren(CreateScaleBoxTransform('MaterialScaleZ',
+      Vector3(0, 0, 1.16 * AxisLen), 0.16 * AxisLen, Vector3(0.35, 0.68, 1.00)));
+    Group.AddChildren(CreateScaleBoxTransform('MaterialScaleCenter',
+      TVector3.Zero, 0.22 * AxisLen, Vector3(0.96, 0.92, 0.72)));
+    Scene.RootNode.AddChildren(Group);
+    Scene.ChangedAll;
+  end;
+
+var
+  AxisLen: Single;
 begin
   inherited;
   FPickable := true;
   FCoordSpace := csLocal;
+  FGizmoSizeScale := 1.0;
+  FCumulativeScaleFactor := Vector3(1, 1, 1);
 
   FMainSelectedObserver := TFreeNotificationObserver.Create(Self);
   FMainSelectedObserver.OnFreeNotification := {$ifdef FPC}@{$endif} MainSelectedFreeNotification;
@@ -2960,12 +3336,26 @@ begin
   Gizmo[mmTranslate] := CreateGizmoScene;
   Gizmo[mmTranslate].Load('castle-internal-embedded-data:/translate_final.x3dv');
   Gizmo[mmTranslate].Mode := mmTranslate;
+  if not Gizmo[mmTranslate].LocalBoundingBox.IsEmpty then
+    AxisLen := Max(0.5, Gizmo[mmTranslate].LocalBoundingBox.Max.Max)
+  else
+    AxisLen := 1.0;
+  AppendPlanarGizmoHandles(Gizmo[mmTranslate], 0.22 * AxisLen, 0.44 * AxisLen);
+
   Gizmo[mmRotate] := CreateGizmoScene;
   Gizmo[mmRotate].Load('castle-internal-embedded-data:/rotate_final.x3dv');
   Gizmo[mmRotate].Mode := mmRotate;
+
   Gizmo[mmScale] := CreateGizmoScene;
   Gizmo[mmScale].Load('castle-internal-embedded-data:/scale_final.x3dv');
   Gizmo[mmScale].Mode := mmScale;
+  AppendPlanarGizmoHandles(Gizmo[mmScale], 0.22 * AxisLen, 0.44 * AxisLen);
+
+  Gizmo[mmUniversal] := CreateGizmoScene;
+  Gizmo[mmUniversal].Load('castle-internal-embedded-data:/translate_final.x3dv');
+  Gizmo[mmUniversal].Mode := mmUniversal;
+  AppendPlanarGizmoHandles(Gizmo[mmUniversal], 0.22 * AxisLen, 0.40 * AxisLen);
+  AppendUniversalRotateAndScaleHandles(Gizmo[mmUniversal], AxisLen);
 end;
 
 destructor TCastleTransformManipulate.Destroy;
@@ -3094,6 +3484,17 @@ end;
 
 procedure TCastleTransformManipulate.GizmoHasTransformModifyBegin(Sender: TObject);
 begin
+  FIsDraggingGizmo := true;
+  if (Sender is TGizmoScene) and (TGizmoScene(Sender).ActiveDragMode <> mmSelect) then
+    FActiveDragSubMode := TGizmoScene(Sender).ActiveDragMode
+  else
+  if FMode = mmUniversal then
+    FActiveDragSubMode := mmTranslate
+  else
+    FActiveDragSubMode := FMode;
+  FCumulativeTranslateDelta := TVector3.Zero;
+  FCumulativeRotateAngleRad := 0;
+  FCumulativeScaleFactor := Vector3(1, 1, 1);
   if Assigned(OnTransformModifyBegin) then
     OnTransformModifyBegin(Self);
 end;
@@ -3106,8 +3507,61 @@ end;
 
 procedure TCastleTransformManipulate.GizmoHasTransformModifyEnd(Sender: TObject);
 begin
+  FIsDraggingGizmo := false;
   if Assigned(OnTransformModifyEnd) then
     OnTransformModifyEnd(Self);
+end;
+
+procedure TCastleTransformManipulate.SetGizmoSizeScale(const AValue: Single);
+var
+  ClampedVal: Single;
+begin
+  ClampedVal := Clamped(AValue, 0.25, 4.0);
+  if SameValue(FGizmoSizeScale, ClampedVal, 1e-5) then Exit;
+  FGizmoSizeScale := ClampedVal;
+  if (FMainSelected <> nil) and (Gizmo[Mode] <> nil) then
+    Gizmo[Mode].UpdateSize;
+end;
+
+function TCastleTransformManipulate.CurrentDragSummary: String;
+const
+  AxisNames: array [0..2] of String = ('X', 'Y', 'Z');
+var
+  AxisLabel: String;
+begin
+  if not FIsDraggingGizmo then
+    Exit('');
+  case FActiveDragSubMode of
+    mmTranslate:
+      Result := Format('Move: dX=%+.2f  dY=%+.2f  dZ=%+.2f  (|d|=%.2f)', [
+        FCumulativeTranslateDelta.X,
+        FCumulativeTranslateDelta.Y,
+        FCumulativeTranslateDelta.Z,
+        FCumulativeTranslateDelta.Length]);
+    mmRotate:
+      begin
+        if (FCumulativeRotateAxis >= 0) and (FCumulativeRotateAxis <= 2) then
+          AxisLabel := AxisNames[FCumulativeRotateAxis]
+        else
+          AxisLabel := '';
+        Result := Format('Rotate %s: %+.1f deg', [
+          AxisLabel, RadToDeg(FCumulativeRotateAngleRad)]);
+      end;
+    mmScale:
+      begin
+        if SameValue(FCumulativeScaleFactor.X, FCumulativeScaleFactor.Y, 1e-3) and
+           SameValue(FCumulativeScaleFactor.Y, FCumulativeScaleFactor.Z, 1e-3) then
+          Result := Format('Scale Uniform: %.2fx (%.0f%%)', [
+            FCumulativeScaleFactor.X, FCumulativeScaleFactor.X * 100.0])
+        else
+          Result := Format('Scale: X=%.2fx  Y=%.2fx  Z=%.2fx', [
+            FCumulativeScaleFactor.X,
+            FCumulativeScaleFactor.Y,
+            FCumulativeScaleFactor.Z]);
+      end;
+    else
+      Result := '';
+  end;
 end;
 
 procedure TCastleTransformManipulate.SetMode(const AValue: TManipulateMode);
@@ -3226,6 +3680,7 @@ begin
     WorldDelta := FMainSelected.Parent.LocalToWorldDirection(DeltaInMainParent)
   else
     WorldDelta := DeltaInMainParent;
+  FCumulativeTranslateDelta := FCumulativeTranslateDelta + WorldDelta;
 
   for I := 0 to Integer(FMaxSelectedCount) - 1 do
   begin
@@ -3251,6 +3706,8 @@ var
   T: TCastleTransform;
   AxisVec, OrbitAxisVec, PivotPos, RelPos: TVector3;
 begin
+  FCumulativeRotateAxis := AxisCoord;
+  FCumulativeRotateAngleRad := FCumulativeRotateAngleRad + DiffAngle;
   AxisVec := TVector3.One[AxisCoord];
 
   TopLevelCount := 0;
@@ -3305,6 +3762,7 @@ var
   I: Integer;
   T: TCastleTransform;
 begin
+  FCumulativeScaleFactor := FCumulativeScaleFactor * ScaleMultiplier;
   for I := 0 to Integer(FMaxSelectedCount) - 1 do
   begin
     T := Boxes[I].Parent;
@@ -3388,6 +3846,80 @@ begin
   end;
 
   if ModifiedAny then
+  begin
+    if Gizmo[Mode] <> nil then
+      Gizmo[Mode].UpdateSize;
+    GizmoHasTransformModified(Self);
+  end;
+end;
+
+function TCastleTransformManipulate.TranslateSelectedPlanar(
+  const PlaneNormalAxis: T3DAxis; const PlanarDelta: TVector3): Boolean;
+var
+  Delta: TVector3;
+  I: Integer;
+begin
+  Result := false;
+  if FMainSelected = nil then Exit;
+
+  Delta := PlanarDelta;
+  Delta.Data[PlaneNormalAxis] := 0;
+  if FTranslateSnap > 0 then
+    for I := 0 to 2 do
+      if I <> PlaneNormalAxis then
+        Delta.Data[I] := Round(Delta.Data[I] / FTranslateSnap) * FTranslateSnap;
+
+  if Delta.IsPerfectlyZero then Exit;
+
+  if FCoordSpace = csLocal then
+    Delta := RotatePointAroundAxis(FMainSelected.Rotation, Delta);
+
+  ApplyTranslateDelta(Delta);
+  if Gizmo[Mode] <> nil then
+    Gizmo[Mode].UpdateSize;
+  GizmoHasTransformModified(Self);
+  Result := true;
+end;
+
+function TCastleTransformManipulate.ScaleSelectedPlanar(
+  const PlaneNormalAxis: T3DAxis; const PlanarFactor: Single): Boolean;
+var
+  I: Integer;
+  C1, C2: T3DAxis;
+  T: TCastleTransform;
+  NewScale: TVector3;
+begin
+  Result := false;
+  if (FMainSelected = nil) or (Abs(PlanarFactor) < 1e-4) or
+     SameValue(PlanarFactor, 1.0, 1e-5) then
+    Exit;
+
+  RestOf3DCoordsCycle(PlaneNormalAxis, C1, C2);
+  for I := 0 to Integer(FMaxSelectedCount) - 1 do
+  begin
+    T := Boxes[I].Parent;
+    if (T <> nil) and (not IsDescendantOfAnySelected(T)) then
+    begin
+      NewScale := T.Scale;
+      NewScale.Data[C1] := NewScale.Data[C1] * PlanarFactor;
+      NewScale.Data[C2] := NewScale.Data[C2] * PlanarFactor;
+      if FScaleSnap > 0 then
+      begin
+        NewScale.Data[C1] := Round(NewScale.Data[C1] / FScaleSnap) * FScaleSnap;
+        NewScale.Data[C2] := Round(NewScale.Data[C2] / FScaleSnap) * FScaleSnap;
+      end;
+      if (Abs(NewScale.X) >= 1e-4) and
+         (Abs(NewScale.Y) >= 1e-4) and
+         (Abs(NewScale.Z) >= 1e-4) and
+         (not TVector3.Equals(NewScale, T.Scale)) then
+      begin
+        T.Scale := NewScale;
+        Result := true;
+      end;
+    end;
+  end;
+
+  if Result then
   begin
     if Gizmo[Mode] <> nil then
       Gizmo[Mode].UpdateSize;

@@ -79,13 +79,14 @@ type
     procedure TestHennebergSphericalEpicycloidAndTalbotCurve;
     procedure TestKuenRichmondAndDevilsCurve;
     procedure TestPluckerSuperellipsoidAndGeronoLemniscate;
+    procedure TestUniversalGizmoPlanarHandlesScaleAndDragSummary;
   end;
 
 implementation
 
 uses Math,
   CastleTransformManipulate, CastleTransform, CastleControls, CastleVectors,
-  CastleViewport, CastleScene;
+  CastleViewport, CastleScene, CastleCameras, CastleProjection, CastleTriangles;
 
 procedure TTestCastleTransformManipulate.HandleTransformModified(Sender: TObject);
 begin
@@ -3990,6 +3991,191 @@ begin
     AssertVectorEquals(Vector3(0.0, 0.0, 1.0), WorldDir.Normalize, 1e-3);
     B2.GetWorldView(WorldPos, WorldDir, WorldUp);
     AssertVectorEquals(Vector3(-10.0, 0.0, -8.0).Normalize, WorldDir.Normalize, 1e-3);
+  finally
+    FreeAndNil(Manipulate);
+    FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestUniversalGizmoPlanarHandlesScaleAndDragSummary;
+
+  function FindGizmoRayNode(const RayHit: TRayCollision;
+    const TargetGizmo: TCastleTransform; out Node: TRayCollisionNode): Boolean;
+  var
+    I: Integer;
+  begin
+    Result := false;
+    if RayHit = nil then Exit;
+    for I := 0 to RayHit.Count - 1 do
+      if (RayHit[I].Triangle <> nil) and
+         (RayHit[I].Item = TargetGizmo) then
+      begin
+        Node := RayHit[I];
+        Exit(true);
+      end;
+  end;
+
+  function MakeMoveNode(const Item: TCastleTransform;
+    const RayOriginWorld, RayDirWorld: TVector3): TRayCollisionNode;
+  begin
+    FillChar(Result, SizeOf(Result), #0);
+    Result.Item := Item;
+    Result.RayOrigin := Item.Parent.WorldToLocal(RayOriginWorld);
+    Result.RayDirection := Item.Parent.WorldToLocalDirection(RayDirWorld);
+  end;
+
+var
+  Viewport: TCastleViewport;
+  B1: TCastleBox;
+  Manipulate: TCastleTransformManipulate;
+  GizmoChild: TCastleTransform;
+  ScaleAt1x, ScaleAt2x, BaseAxisLen, AxisLen, MidPlanar, RotateRad: Single;
+  RayHit: TRayCollision;
+  HitNode, MoveNode: TRayCollisionNode;
+begin
+  Viewport := TCastleViewport.Create(nil);
+  Manipulate := TCastleTransformManipulate.Create(nil);
+  try
+    Viewport.Camera.ProjectionType := ptOrthographic;
+    Viewport.Camera.Orthographic.Height := 20.0;
+    Viewport.Camera.SetWorldView(Vector3(0, 15, 15), Vector3(0, -1, -1).Normalize, Vector3(0, 1, 0));
+
+    B1 := TCastleBox.Create(Viewport);
+    B1.Size := Vector3(1, 1, 1);
+    B1.Translation := TVector3.Zero;
+    Viewport.Items.Add(B1);
+
+    { 1. Test GizmoSizeScale clamping & actual gizmo uniform scale multiplier }
+    Manipulate.Mode := mmUniversal;
+    Manipulate.SetSelected([B1]);
+    AssertSameValue(1.0, Manipulate.GizmoSizeScale, 1e-5);
+    Manipulate.GizmoSizeScale := 0.05; // clamps to 0.25
+    AssertSameValue(0.25, Manipulate.GizmoSizeScale, 1e-5);
+    Manipulate.GizmoSizeScale := 9.0; // clamps to 4.0
+    AssertSameValue(4.0, Manipulate.GizmoSizeScale, 1e-5);
+
+    Manipulate.GizmoSizeScale := 1.0;
+    GizmoChild := nil;
+    if B1.Count > 0 then
+      GizmoChild := B1[B1.Count - 1];
+    AssertTrue(GizmoChild <> nil);
+    ScaleAt1x := GizmoChild.Scale.X;
+    AssertTrue(ScaleAt1x > 0.1);
+    Manipulate.GizmoSizeScale := 2.0;
+    ScaleAt2x := GizmoChild.Scale.X;
+    AssertSameValue(ScaleAt1x * 2.0, ScaleAt2x, 1e-4);
+    Manipulate.GizmoSizeScale := 1.0;
+
+    { 2. Test programmatic TranslateSelectedPlanar & ScaleSelectedPlanar }
+    Manipulate.CoordSpace := csWorld;
+    Manipulate.TranslateSnap := 0.5;
+    AssertTrue(Manipulate.TranslateSelectedPlanar(1 {XZ plane}, Vector3(2.24, 9.9, -1.49)));
+    AssertVectorEquals(Vector3(2.0, 0.0, -1.5), B1.Translation, 1e-4);
+    Manipulate.TranslateSnap := 0.0;
+
+    Manipulate.ScaleSnap := 0.25;
+    AssertTrue(Manipulate.ScaleSelectedPlanar(1 {XZ plane}, 1.48));
+    AssertVectorEquals(Vector3(1.5, 1.0, 1.5), B1.Scale, 1e-4);
+    Manipulate.ScaleSnap := 0.0;
+
+    { 3. Test interactive raycast dragging on mmUniversal:
+      3a) Planar XZ quad ('MaterialPlaneXZ' spans [0.20..0.38] * AxisLen * GizmoScale) }
+    B1.Translation := TVector3.Zero;
+    B1.Rotation := Vector4(0, 1, 0, 0);
+    B1.Scale := Vector3(1, 1, 1);
+    Manipulate.Mode := mmTranslate;
+    Manipulate.SetSelected([B1]);
+    BaseAxisLen := Max(0.5, (B1[B1.Count - 1] as TCastleScene).LocalBoundingBox.Max.Max);
+    Manipulate.Mode := mmUniversal;
+    GizmoChild := B1[B1.Count - 1];
+    AxisLen := BaseAxisLen * GizmoChild.Scale.X;
+    MidPlanar := 0.31 * AxisLen;
+
+    RayHit := Viewport.Items.WorldRay(Vector3(MidPlanar, 20.0, MidPlanar), Vector3(0, -1, 0));
+    try
+      AssertTrue(FindGizmoRayNode(RayHit, GizmoChild, HitNode));
+      AssertFalse(Manipulate.IsDraggingGizmo);
+      AssertEquals('', Manipulate.CurrentDragSummary);
+      AssertTrue(HitNode.Item.PointingDevicePress(HitNode, RayHit.Distance));
+      AssertTrue(Manipulate.IsDraggingGizmo);
+      AssertTrue(Manipulate.ActiveDragSubMode = mmTranslate);
+
+      MoveNode := MakeMoveNode(HitNode.Item,
+        Vector3(MidPlanar + 3.0, 20.0, MidPlanar - 2.0), Vector3(0, -1, 0));
+      HitNode.Item.PointingDeviceMove(MoveNode, RayHit.Distance);
+      AssertVectorEquals(Vector3(3.0, 0.0, -2.0), B1.Translation, 1e-3);
+      AssertVectorEquals(Vector3(3.0, 0.0, -2.0), Manipulate.CurrentDragTranslateDelta, 1e-3);
+      AssertTrue(Pos('Move:', Manipulate.CurrentDragSummary) = 1);
+
+      HitNode.Item.PointingDeviceRelease(MoveNode, RayHit.Distance, false);
+      AssertFalse(Manipulate.IsDraggingGizmo);
+      AssertEquals('', Manipulate.CurrentDragSummary);
+    finally
+      FreeAndNil(RayHit);
+    end;
+
+    { 3b) Universal Rotate Y arc tube ('MaterialRotateY' at radius 0.64 * AxisLen, angle 45 deg in XZ) }
+    B1.Translation := TVector3.Zero;
+    RotateRad := 0.64 * AxisLen;
+    RayHit := Viewport.Items.WorldRay(
+      Vector3(RotateRad * Cos(Pi / 4), 20.0, RotateRad * Sin(Pi / 4)),
+      Vector3(0, -1, 0));
+    try
+      AssertTrue(FindGizmoRayNode(RayHit, GizmoChild, HitNode));
+      AssertTrue(HitNode.Item.PointingDevicePress(HitNode, RayHit.Distance));
+      AssertTrue(Manipulate.ActiveDragSubMode = mmRotate);
+
+      { Note: RestOf3DCoordsCycle(1, C1=2(Z), C2=0(X)): moving from (Z>0, X>0) [45 deg]
+        to (Z=0, X>0) [90 deg] rotates by +45 deg (Pi/4) around +Y }
+      MoveNode := MakeMoveNode(HitNode.Item,
+        Vector3(RotateRad, 20.0, 0.0), Vector3(0, -1, 0));
+      HitNode.Item.PointingDeviceMove(MoveNode, RayHit.Distance);
+      AssertSameValue(Pi / 4, Manipulate.CurrentDragRotateAngleRad, 1e-2);
+      AssertTrue(Pos('Rotate Y:', Manipulate.CurrentDragSummary) = 1);
+      HitNode.Item.PointingDeviceRelease(MoveNode, RayHit.Distance, false);
+    finally
+      FreeAndNil(RayHit);
+    end;
+
+    { 3c) Universal Center Uniform Scale Cube ('MaterialScaleCenter' / 'MaterialCenter' at origin)
+          and X-Axis Scale Tip Cube ('MaterialScaleX' at 1.16 * AxisLen) }
+    B1.Translation := TVector3.Zero;
+    B1.Rotation := Vector4(0, 1, 0, 0);
+    B1.Scale := Vector3(1, 1, 1);
+    RayHit := Viewport.Items.WorldRay(Vector3(-0.14 * AxisLen, 20.0, -0.14 * AxisLen), Vector3(0, -1, 0));
+    try
+      AssertTrue(FindGizmoRayNode(RayHit, GizmoChild, HitNode));
+      AssertTrue(HitNode.Item.PointingDevicePress(HitNode, RayHit.Distance));
+      AssertTrue(Manipulate.ActiveDragSubMode = mmScale);
+
+      MoveNode := MakeMoveNode(HitNode.Item, Vector3(-0.28 * AxisLen, 20.0, -0.28 * AxisLen), Vector3(0, -1, 0));
+      HitNode.Item.PointingDeviceMove(MoveNode, RayHit.Distance);
+      AssertVectorEquals(Vector3(2.0, 2.0, 2.0), B1.Scale, 1e-2);
+      AssertTrue(Pos('Scale Uniform:', Manipulate.CurrentDragSummary) = 1);
+      HitNode.Item.PointingDeviceRelease(MoveNode, RayHit.Distance, false);
+    finally
+      FreeAndNil(RayHit);
+    end;
+
+    B1.Scale := Vector3(1, 1, 1);
+    Manipulate.SetSelected(nil);
+    Manipulate.SetSelected([B1]);
+    GizmoChild := B1[B1.Count - 1];
+    AxisLen := BaseAxisLen * GizmoChild.Scale.X;
+    RayHit := Viewport.Items.WorldRay(Vector3(1.16 * AxisLen, 20.0, 0.0), Vector3(0, -1, 0));
+    try
+      AssertTrue(FindGizmoRayNode(RayHit, GizmoChild, HitNode));
+      AssertTrue(HitNode.Item.PointingDevicePress(HitNode, RayHit.Distance));
+      AssertTrue(Manipulate.ActiveDragSubMode = mmScale);
+
+      MoveNode := MakeMoveNode(HitNode.Item, Vector3(1.74 * AxisLen, 20.0, 0.0), Vector3(0, -1, 0));
+      HitNode.Item.PointingDeviceMove(MoveNode, RayHit.Distance);
+      AssertVectorEquals(Vector3(1.5, 1.0, 1.0), B1.Scale, 1e-2);
+      AssertTrue(Pos('Scale:', Manipulate.CurrentDragSummary) = 1);
+      HitNode.Item.PointingDeviceRelease(MoveNode, RayHit.Distance, false);
+    finally
+      FreeAndNil(RayHit);
+    end;
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);

@@ -157,7 +157,7 @@ type
 implementation
 
 uses Math,
-  CastleLog, CastleComponentSerialize, CastleStringUtils;
+  CastleLog, CastleComponentSerialize;
 
 { TNotificationList ---------------------------------------------------------- }
 
