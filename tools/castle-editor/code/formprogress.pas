@@ -37,6 +37,7 @@ type
     procedure ButtonCancelClick(Sender: TObject);
     procedure Timer1Timer(Sender: TObject);
   private
+    BaseDescription: String;
   public
     WaitingFor: TCastleDownload;
     { Show progress of download, waiting for download to finish.
@@ -46,7 +47,7 @@ type
 
 implementation
 
-uses CastleApplicationProperties;
+uses CastleApplicationProperties, CastleStringUtils;
 
 {$R *.lfm}
 
@@ -57,6 +58,8 @@ begin
 end;
 
 procedure TProgressForm.Timer1Timer(Sender: TObject);
+var
+  Pct: Integer;
 begin
   { We don't do this in ApplicationProperties1Idle because
     it isn't done when TCastleControl installs own idle handler that
@@ -65,8 +68,22 @@ begin
   if (WaitingFor <> nil) and (WaitingFor.Status = dsDownloading) then
   begin
     if WaitingFor.TotalBytes > 0 then
-      ProgressBar1.Position := Round(ProgressBar1.Max *
+    begin
+      Pct := Round(ProgressBar1.Max *
         WaitingFor.DownloadedBytes / WaitingFor.TotalBytes);
+      ProgressBar1.Position := Pct;
+      LabelInfo.Caption := Format('%s (%s / %s, %d%%)', [
+        BaseDescription,
+        SizeToStr(WaitingFor.DownloadedBytes),
+        SizeToStr(WaitingFor.TotalBytes),
+        Pct
+      ]);
+    end else
+    if WaitingFor.DownloadedBytes > 0 then
+      LabelInfo.Caption := Format('%s (%s)', [
+        BaseDescription,
+        SizeToStr(WaitingFor.DownloadedBytes)
+      ]);
 
     // to process downloading
     ApplicationProperties._Update;
@@ -84,6 +101,7 @@ var
 begin
   Form := TProgressForm.Create(Application);
   try
+    Form.BaseDescription := Description;
     Form.LabelInfo.Caption := Description;
     Form.ProgressBar1.Max := 100;
     Form.ProgressBar1.Position := 0;

@@ -39,11 +39,12 @@ type
       Viewport: TMyViewport;
       LabelCaption: TCastleLabel;
       Rect: TCastleRectangleControl;
-      ButtonLarger, ButtonSmaller, ButtonPin, ButtonClose: TCastleButton;
+      ButtonMakeActive, ButtonLarger, ButtonSmaller, ButtonPin, ButtonClose: TCastleButton;
       Pinned: Boolean;
       Size: Integer;
       SelectedCameraObserver: TFreeNotificationObserver;
       SelectedViewportObserver: TFreeNotificationObserver;
+    procedure ClickMakeActive(Sender: TObject);
     procedure ClickLarger(Sender: TObject);
     procedure ClickSmaller(Sender: TObject);
     procedure ClickPin(Sender: TObject);
@@ -68,7 +69,7 @@ type
 implementation
 
 uses Math,
-  CastleColors, CastleUtils;
+  CastleCameras, CastleColors, CastleUtils;
 
 { TCameraPreview.TMyViewport ------------------------------------------------- }
 
@@ -167,6 +168,13 @@ begin
   //ButtonsLayout.Spacing := 4;
   Rect.InsertFront(ButtonsLayout);
 
+  ButtonMakeActive := TCastleButton.Create(DesignOwner);
+  ButtonMakeActive.Caption := 'use';
+  ButtonMakeActive.Tooltip := 'Set this camera as the active Viewport.Camera';
+  ButtonMakeActive.OnClick := @ClickMakeActive;
+  ButtonMakeActive.FontSize := ButtonsFontSize;
+  ButtonsLayout.InsertFront(ButtonMakeActive);
+
   ButtonLarger := TCastleButton.Create(DesignOwner);
   ButtonLarger.Caption := '+';
   ButtonLarger.OnClick := @ClickLarger;
@@ -224,6 +232,15 @@ procedure TCameraPreview.SelectedViewportFreeNotification(
   const Sender: TFreeNotificationObserver);
 begin
   Show(nil, nil);
+end;
+
+procedure TCameraPreview.ClickMakeActive(Sender: TObject);
+begin
+  if (Viewport.SelectedViewport <> nil) and (SelectedCamera <> nil) then
+  begin
+    Viewport.SelectedViewport.Camera := SelectedCamera;
+    Show(nil, nil);
+  end;
 end;
 
 procedure TCameraPreview.ClickLarger(Sender: TObject);
@@ -304,11 +321,17 @@ begin
 end;
 
 procedure TCameraPreview.SynchronizeSelectedProperties;
+var
+  ProjStr: String;
 begin
   if Viewport.SelectedViewport <> nil then
   begin
     Assert(SelectedCamera <> nil);
-    LabelCaption.Caption := SelectedCamera.Name;
+    if SelectedCamera.ProjectionType = ptOrthographic then
+      ProjStr := ' [Ortho]'
+    else
+      ProjStr := ' [Persp]';
+    LabelCaption.Caption := SelectedCamera.Name + ProjStr;
 
     Viewport.Background := Viewport.SelectedViewport.Background;
     Viewport.BackgroundColor := Viewport.SelectedViewport.BackgroundColor;

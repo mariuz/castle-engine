@@ -75,17 +75,21 @@ begin
     invokes build tool in local bin (like ~/bin)
     and the build tool uses the same <cge> as detected by editor. }
   NewEnvironment := nil;
-  if CastleEnginePath <> '' then
-  begin
-    NewEnvironment := EnvironmentStrings;
-    NewEnvironment.Values['CASTLE_ENGINE_PATH'] := CastleEnginePath;
-  end;
+  try
+    if CastleEnginePath <> '' then
+    begin
+      NewEnvironment := EnvironmentStrings;
+      NewEnvironment.Values['CASTLE_ENGINE_PATH'] := CastleEnginePath;
+    end;
 
-  ExecuteCommandCapture(UriToFilenameSafe(ProjectDirUrl), BuildToolExe,
-    ['generate-program'], BuildToolOutput, BuildToolStatus, nil, nil,
-    // prevent from blinking console on Windows
-    [ecNoConsole],
-    NewEnvironment);
+    ExecuteCommandCapture(UriToFilenameSafe(ProjectDirUrl), BuildToolExe,
+      ['generate-program'], BuildToolOutput, BuildToolStatus, nil, nil,
+      // prevent from blinking console on Windows
+      [ecNoConsole],
+      NewEnvironment);
+  finally
+    FreeAndNil(NewEnvironment);
+  end;
   if BuildToolStatus <> 0 then
   begin
     WarningBox(Format('Generating program with the build tool failed with status code %d and output: "%s"',

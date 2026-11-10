@@ -2634,11 +2634,24 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - **Screenshots:** [CGE Sprite Sheet Editor](https://castle-engine.io/images/thumb_const_height_size/sprite_sheet_editor.webp) · [CGE Sketchfab Importer](https://castle-engine.io/images/thumb_const_height_size/sketchfab_import.webp) · [CGE Editor Preferences](https://castle-engine.io/images/thumb_const_height_size/preferences.webp)
   - **Example (Phase 274):** In the **Sprite Sheet Editor**, right-click an animation and select **Duplicate Animation** to create a `<name>_copy` variant with all frames and FPS preserved, or select frames and choose **Duplicate Selected Frames** / **Reverse Frames Order**; in **Data -> Import from Sketchfab...**, double-click a search result to immediately download and instantiate it in the active viewport; or drag the **Volume** slider in **Edit -> Preferences -> Sound** to see the live `Volume (75%):` readout.
 
+### Phase 275: Camera Preview (`TCameraPreview`) One-Click `use` Active Camera Assignment & Projection Badge, Live Frame Resolution & Divisibility Preview in `TImportAtlasForm`, Live Byte/Percentage Progress in `TProgressForm`, and `NewEnvironment` Leak Fix in `GenerateProgramWithBuildTool` (`ProjectUtils`)
+- [x] **275.1. Camera Preview `use` Active Camera Button & Projection Badge, Atlas Importer Live Frame Dimensions, Download Progress Byte Readout & `GenerateProgramWithBuildTool` Leak Fix (`designcamerapreview.pas`, `formimportatlas.pas`, `formprogress.pas`, `projectutils.pas`)**
+  - Enhanced `TCameraPreview` (`tools/castle-editor/code/designcamerapreview.pas`) with a **`use`** button (`ButtonMakeActive` / `ClickMakeActive`, `Tooltip := 'Set this camera as the active Viewport.Camera'`) in the floating camera preview header that assigns `Viewport.SelectedViewport.Camera := SelectedCamera` in one click, and updated `SynchronizeSelectedProperties` to append `[Persp]` or `[Ortho]` next to `SelectedCamera.Name` on `LabelCaption`.
+  - Upgraded `TImportAtlasForm` (`tools/castle-editor/code/formimportatlas.pas`) to inspect the loaded atlas image dimensions (`FAtlasWidth`, `FAtlasHeight`) in `Initialize` and dynamically update the dialog caption (`UpdateAtlasFrameSummary`) as `SpinEditCols` / `SpinEditRows` change (e.g. `Import Atlas — 512x256 px -> 8 frames (128x128 px each)` or `[uneven grid!]` when the atlas dimensions are not evenly divisible by the column/row count).
+  - Enhanced `TProgressForm.Timer1Timer` (`tools/castle-editor/code/formprogress.pas`) to display live downloaded byte/total byte and percentage progress (`SizeToStr(WaitingFor.DownloadedBytes)` / `SizeToStr(WaitingFor.TotalBytes)`, `Pct%`) on `LabelInfo.Caption` during network downloads.
+  - Fixed a `TStringList` (`NewEnvironment`) memory leak in `GenerateProgramWithBuildTool` (`tools/castle-editor/code/projectutils.pas`) using a `try..finally FreeAndNil(NewEnvironment); end;` guard.
+  - **Official Docs & Visual References (Phase 275):** [CGE Viewport & Cameras (`TCastleViewport.Camera`, `TCastleCamera`) Manual](https://castle-engine.io/viewport_and_scenes) · [CGE Sprite Sheets & Atlas Import Manual](https://castle-engine.io/sprite_sheets) · [CGE Network Downloading (`TCastleDownload`) Manual](https://castle-engine.io/url) · [Unity Scene View Camera Preview & Active Camera Switching](https://docs.unity3d.com/Manual/SceneViewCamera.html)
+  - **Official Videos & Movies (Phase 275):**
+    - 🎬 [CGE Official Video — Cameras, Viewports & Sprite Atlas Workflows in CGE Editor (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+    - 🎞️ [Animated Movie (GIF) — Interactive Camera Preview, Atlas Slicing & Asset Downloads](https://docs.godotengine.org/en/stable/_images/containers_split_drag.gif)
+  - **Screenshots:** [CGE Visual Editor 3D Viewport & Camera Preview](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Sprite Sheet Editor & Atlas Import](https://castle-engine.io/images/thumb_const_height_size/sprite_sheet_editor.webp) · [CGE Sketchfab Download Progress](https://castle-engine.io/images/thumb_const_height_size/sketchfab_import.webp)
+  - **Example (Phase 275):** Select a secondary `TCastleCamera` in the hierarchy to open the floating **Camera Preview** (`Camera2 [Persp]`) and click **`use`** to promote it to `Viewport.Camera`; click **Edit -> Import Atlas...** in the **Sprite Sheet Editor** and adjust **Number of columns / rows** to see `Import Atlas — 512x256 px -> 8 frames (128x128 px each)` update live in the title bar; or download a Sketchfab asset to watch real-time `2.4 MB / 6.0 MB, 40%` progress in `TProgressForm`.
+
 ---
 
-## Roadmap Completion Status (Phases 1–274 — Final Milestone)
+## Roadmap Completion Status (Phases 1–275 — Final Milestone)
 
-All **274 Phases** of the Castle Game Engine Editor Modernization Roadmap (and 100% of `tools/castle-editor/TODO.md`) are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **275 Phases** of the Castle Game Engine Editor Modernization Roadmap (and 100% of `tools/castle-editor/TODO.md`) are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 
