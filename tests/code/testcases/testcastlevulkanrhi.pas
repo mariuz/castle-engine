@@ -379,6 +379,9 @@ type
     procedure TestConstantBlendFactorsAndBlendConstantsDynamicStateRHI;
     procedure TestInputOnlyShaderEventsAndLiveRouteUniformsRHI;
     procedure TestLitPointSetLineSetWithNormalsAndDynamicUnlitEmissiveRHI;
+    procedure TestViewportShadowVolumesMultiPassSet0SlotsAndRealLavapipeStencilRHI;
+    procedure TestViewportOcclusionCullingInPassHostQueryResetRHI;
+    procedure TestGPUCompressedImageDecompressDXT1DXT3DXT5AndFlipVerticalRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -26109,6 +26112,944 @@ begin
     FreeGlobalBatch2DRenderer;
     SetActiveCommandList(SavedCmd);
     SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportShadowVolumesMultiPassSet0SlotsAndRealLavapipeStencilRHI;
+const
+  // Valid SPIR-V 1.0 Vertex Shader: layout(location = 0) in vec4 inPos -> gl_Position = inPos
+  MinimalVertSPIRV: array[0..92] of Cardinal = (
+    $07230203, $00010000, $00000000, $00000011, $00000000,
+    $00020011, 1,
+    $0003000E, 0, 1,
+    $0007000F, 0, 1, $6E69616D, $00000000, 8, 11,
+    $00050048, 6, 0, 11, 0,
+    $00030047, 6, 2,
+    $00040047, 11, 30, 0,
+    $00020013, 2,
+    $00030021, 3, 2,
+    $00030016, 4, 32,
+    $00040017, 5, 4, 4,
+    $0003001E, 6, 5,
+    $00040020, 7, 3, 6,
+    $0004003B, 7, 8, 3,
+    $00040015, 9, 32, 1,
+    $0004002B, 9, 10, 0,
+    $00040020, 12, 1, 5,
+    $0004003B, 12, 11, 1,
+    $00040020, 13, 3, 5,
+    $00050036, 2, 1, 0, 3,
+    $000200F8, 14,
+    $0004003D, 5, 15, 11,
+    $00050041, 13, 16, 8, 10,
+    $0003003E, 16, 15,
+    $000100FD,
+    $00010038
+  );
+  // Valid SPIR-V 1.0 Fragment Shader: PushConstant vec4 color -> location 0 out vec4 outColor
+  MinimalPushColorFragSPIRV: array[0..94] of Cardinal = (
+    $07230203, $00010000, $00000000, $00000011, $00000000,
+    $00020011, 1,
+    $0003000E, 0, 1,
+    $0006000F, 4, 1, $6E69616D, $00000000, 7,
+    $00030010, 1, 7,
+    $00040047, 7, 30, 0,
+    $00050048, 8, 0, 35, 0,
+    $00030047, 8, 2,
+    $00020013, 2,
+    $00030021, 3, 2,
+    $00030016, 4, 32,
+    $00040017, 5, 4, 4,
+    $00040020, 6, 3, 5,
+    $0004003B, 6, 7, 3,
+    $0003001E, 8, 5,
+    $00040020, 9, 9, 8,
+    $0004003B, 9, 10, 9,
+    $00040015, 11, 32, 1,
+    $0004002B, 11, 12, 0,
+    $00040020, 13, 9, 5,
+    $00050036, 2, 1, 0, 3,
+    $000200F8, 14,
+    $00050041, 13, 15, 10, 12,
+    $0004003D, 5, 16, 15,
+    $0003003E, 7, 16,
+    $000100FD,
+    $00010038
+  );
+var
+  Device, RealDev: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCmd, Cmd, RealCmd: TRHICommandList;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  PointLight: TCastlePointLight;
+  CasterScene, ReceiverScene: TCastleScene;
+  CasterRoot, ReceiverRoot: TX3DRootNode;
+  CasterShape, ReceiverShape: TShapeNode;
+  CasterApp, ReceiverApp: TAppearanceNode;
+  CasterMat, ReceiverMat: TMaterialNode;
+  TargetTex, DepthTex, RealColorTex, RealDepthStencilTex: TRHITexture;
+  TexDesc: TRHITextureDesc;
+  RenderInfo: TRHIRenderingInfo;
+  Renderer: TRenderer;
+  HasLitSlot, HasShadowAmbientSlot: Boolean;
+  SlotIdx: Cardinal;
+  SlotBlock: TCastleSceneUniformBlock;
+  FullQuadVerts, LeftShadowQuadVerts: array[0..5] of TVector4;
+  FullVBO, LeftVBO: TRHIBuffer;
+  VBODesc: TRHIBufferDesc;
+  VertMod, FragMod: TRHIShaderModule;
+  BasePipeDesc, StencilVolPipeDesc, LitPipeDesc: TRHIGraphicsPipelineDesc;
+  BasePipe, StencilVolPipe, LitPipe: TRHIPipeline;
+  PushColor: TVector4;
+  ReadImg: TRGBAlphaImage;
+  ShadowPix, LitPix, ScissorPix: TVector4Byte;
+begin
+  { Part 1: Headless viewport Stencil Shadow Volumes multi-pass Set 0 UBO slot preservation }
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($A104)), True, True);
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+  Container := nil;
+  Viewport := nil;
+  PointLight := nil;
+  CasterScene := nil;
+  ReceiverScene := nil;
+  TargetTex := nil;
+  DepthTex := nil;
+  try
+    GLFeatures := nil;
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+
+    FillChar(TexDesc, SizeOf(TexDesc), 0);
+    TexDesc.Dimension := td2D;
+    TexDesc.Width := 256;
+    TexDesc.Height := 256;
+    TexDesc.DepthOrArrayLayers := 1;
+    TexDesc.MipLevels := 1;
+    TexDesc.SampleCount := 1;
+    TexDesc.Format := pfRGBA8_UNorm;
+    TexDesc.Usage := [tuColorAttachment, tuSampled, tuTransferSrc];
+    TargetTex := Device.CreateTexture(TexDesc);
+
+    TexDesc.Format := pfD24_UNorm_S8_UInt;
+    TexDesc.Usage := [tuDepthStencil];
+    DepthTex := Device.CreateTexture(TexDesc);
+
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    RenderContext := Container.Context;
+    RenderContext.Viewport := Rectangle(0, 0, 256, 256);
+
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := False;
+    Viewport.Width := 256;
+    Viewport.Height := 256;
+    Viewport.ShadowVolumes := True;
+    Viewport.ShadowVolumesRender := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 2.0, 8.0),
+      Vector3(0.0, -0.2, -1.0).Normalize,
+      Vector3(0.0, 1.0, 0.0));
+    Container.Controls.InsertFront(Viewport);
+
+    PointLight := TCastlePointLight.Create(Viewport);
+    PointLight.Translation := Vector3(0.0, 6.0, 2.0);
+    PointLight.Shadows := True;
+    Viewport.Items.Add(PointLight);
+
+    CasterRoot := TX3DRootNode.Create;
+    CasterApp := TAppearanceNode.Create;
+    CasterMat := TMaterialNode.Create;
+    CasterMat.DiffuseColor := Vector3(0.8, 0.2, 0.2);
+    CasterApp.Material := CasterMat;
+    CasterShape := TShapeNode.Create;
+    CasterShape.Appearance := CasterApp;
+    CasterShape.Geometry := TBoxNode.Create;
+    TBoxNode(CasterShape.Geometry).Size := Vector3(1.5, 1.5, 1.5);
+    CasterRoot.AddChildren(CasterShape);
+
+    CasterScene := TCastleScene.Create(Viewport);
+    CasterScene.Load(CasterRoot, True);
+    CasterScene.Translation := Vector3(0.0, 1.5, 0.0);
+    CasterScene.CastShadows := True;
+    CasterScene.ReceiveShadowVolumes := False;
+    Viewport.Items.Add(CasterScene);
+
+    ReceiverRoot := TX3DRootNode.Create;
+    ReceiverApp := TAppearanceNode.Create;
+    ReceiverMat := TMaterialNode.Create;
+    ReceiverMat.DiffuseColor := Vector3(0.7, 0.7, 0.7);
+    ReceiverApp.Material := ReceiverMat;
+    ReceiverShape := TShapeNode.Create;
+    ReceiverShape.Appearance := ReceiverApp;
+    ReceiverShape.Geometry := TBoxNode.Create;
+    TBoxNode(ReceiverShape.Geometry).Size := Vector3(8.0, 0.5, 8.0);
+    ReceiverRoot.AddChildren(ReceiverShape);
+
+    ReceiverScene := TCastleScene.Create(Viewport);
+    ReceiverScene.Load(ReceiverRoot, True);
+    ReceiverScene.Translation := Vector3(0.0, -1.0, 0.0);
+    ReceiverScene.CastShadows := False;
+    ReceiverScene.ReceiveShadowVolumes := True;
+    Viewport.Items.Add(ReceiverScene);
+
+    Cmd := Device.BeginFrame;
+    SetActiveCommandList(Cmd);
+
+    RenderInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 256, 256),
+      TargetTex, loClear, Vector4(0.0, 0.0, 0.0, 1.0),
+      DepthTex, loClear, 1.0);
+    RenderInfo.DepthAttachment.ClearStencil := 0;
+    Cmd.BeginRendering(RenderInfo);
+
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+
+    Cmd.EndRendering;
+    Device.EndFrameAndPresent;
+
+    AssertEquals('ShadowVolumes + ShadowVolumesRender must execute all 6 shadow-volume stages (Pass 1, Pass 2, Pass 3, Pass 4, Debug Pass, Pass 5)',
+      6, Integer(Viewport.InternalShadowVolumeRenderer.RHIRenderPassCount));
+    AssertTrue('Pass 3 stencil depth state must keep StencilTestEnable = True even when ShadowVolumesRender (DebugRender) = True',
+      Viewport.InternalShadowVolumeRenderer.RHIStencilDepthState.StencilTestEnable);
+    AssertEquals('Pass 4 lit pass stencil compare op must be coEqual against stencil == 0',
+      Ord(coEqual), Ord(Viewport.InternalShadowVolumeRenderer.RHILitPassStencilDepthState.FrontStencil.CompareOp));
+    AssertEquals('Pass 4 lit pass depth compare op must be coLessOrEqual',
+      Ord(coLessOrEqual), Ord(Viewport.InternalShadowVolumeRenderer.RHILitPassStencilDepthState.DepthCompareOp));
+    AssertTrue('ShadowVolumeRenderer debug mesh must initialize yellow 0.3 alpha color in PrepareRenderingResources',
+      SameValue(Viewport.InternalShadowVolumeRenderer.Mesh.Color.W, 0.3, 1e-4));
+
+    Renderer := Viewport.InternalShapesRenderer.Renderer;
+    AssertTrue('Multi-pass shadow volume rendering must allocate at least 2 distinct Set 0 UBO slots so Pass 2 (LightCount=0) is not clobbered by Pass 4 (LightCount=1)',
+      Renderer.RHISceneSlotCount >= 2);
+    HasLitSlot := False;
+    HasShadowAmbientSlot := False;
+    for SlotIdx := 0 to Renderer.RHISceneSlotCount - 1 do
+    begin
+      SlotBlock := Renderer.GetRHISceneSlotSceneBlock(SlotIdx);
+      if SlotBlock.LightCount = 0 then
+        HasShadowAmbientSlot := True
+      else if SlotBlock.LightCount >= 1 then
+        HasLitSlot := True;
+    end;
+    AssertTrue('Set 0 slot pool must preserve Pass 2 dark ambient UBO (LightCount = 0)', HasShadowAmbientSlot);
+    AssertTrue('Set 0 slot pool must preserve Pass 1/Pass 4 lit UBO (LightCount >= 1)', HasLitSlot);
+  finally
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    FreeAndNil(ReceiverScene);
+    FreeAndNil(CasterScene);
+    FreeAndNil(PointLight);
+    FreeAndNil(Viewport);
+    FreeAndNil(Container);
+    FreeAndNil(DepthTex);
+    FreeAndNil(TargetTex);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+
+  { Part 2: Real Offscreen Vulkan GPU Execution (Mesa Lavapipe / Hardware ICD) }
+  if TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+  begin
+    RealColorTex := nil;
+    RealDepthStencilTex := nil;
+    FullVBO := nil;
+    LeftVBO := nil;
+    VertMod := nil;
+    FragMod := nil;
+    ReadImg := nil;
+    try
+      FillChar(TexDesc, SizeOf(TexDesc), 0);
+      TexDesc.Dimension := td2D;
+      TexDesc.Width := 64;
+      TexDesc.Height := 64;
+      TexDesc.DepthOrArrayLayers := 1;
+      TexDesc.MipLevels := 1;
+      TexDesc.SampleCount := 1;
+      TexDesc.Format := pfRGBA8_UNorm;
+      TexDesc.Usage := [tuColorAttachment, tuTransferSrc, tuSampled];
+      RealColorTex := RealDev.CreateTexture(TexDesc);
+
+      TexDesc.Format := pfD24_UNorm_S8_UInt;
+      TexDesc.Usage := [tuDepthStencil];
+      RealDepthStencilTex := RealDev.CreateTexture(TexDesc);
+
+      { Fullscreen CCW quad at Z = 0.5 }
+      FullQuadVerts[0] := Vector4(-1.0, -1.0, 0.5, 1.0);
+      FullQuadVerts[1] := Vector4( 1.0, -1.0, 0.5, 1.0);
+      FullQuadVerts[2] := Vector4( 1.0,  1.0, 0.5, 1.0);
+      FullQuadVerts[3] := Vector4(-1.0, -1.0, 0.5, 1.0);
+      FullQuadVerts[4] := Vector4( 1.0,  1.0, 0.5, 1.0);
+      FullQuadVerts[5] := Vector4(-1.0,  1.0, 0.5, 1.0);
+      VBODesc := TRHIBufferDesc.Create(SizeOf(FullQuadVerts), [buVertex], muCpuToGpu, 'FullQuadVBO');
+      FullVBO := RealDev.CreateBuffer(VBODesc, @FullQuadVerts[0]);
+
+      { Left-half CCW shadow volume front cap at Z = 0.25 (passes depth < 0.5, increments stencil on X in [-1..0]) }
+      LeftShadowQuadVerts[0] := Vector4(-1.0, -1.0, 0.25, 1.0);
+      LeftShadowQuadVerts[1] := Vector4( 0.0, -1.0, 0.25, 1.0);
+      LeftShadowQuadVerts[2] := Vector4( 0.0,  1.0, 0.25, 1.0);
+      LeftShadowQuadVerts[3] := Vector4(-1.0, -1.0, 0.25, 1.0);
+      LeftShadowQuadVerts[4] := Vector4( 0.0,  1.0, 0.25, 1.0);
+      LeftShadowQuadVerts[5] := Vector4(-1.0,  1.0, 0.25, 1.0);
+      VBODesc := TRHIBufferDesc.Create(SizeOf(LeftShadowQuadVerts), [buVertex], muCpuToGpu, 'LeftShadowVBO');
+      LeftVBO := RealDev.CreateBuffer(VBODesc, @LeftShadowQuadVerts[0]);
+
+      VertMod := RealDev.CreateShaderModuleFromSPIRV(
+        ssVertex, @MinimalVertSPIRV[0], SizeOf(MinimalVertSPIRV), 'StencilTestVert');
+      FragMod := RealDev.CreateShaderModuleFromSPIRV(
+        ssFragment, @MinimalPushColorFragSPIRV[0], SizeOf(MinimalPushColorFragSPIRV), 'StencilTestFrag');
+
+      FillChar(BasePipeDesc, SizeOf(BasePipeDesc), 0);
+      BasePipeDesc.VertexShader := VertMod;
+      BasePipeDesc.FragmentShader := FragMod;
+      BasePipeDesc.Topology := ptTriangleList;
+      SetLength(BasePipeDesc.VertexInput.Bindings, 1);
+      BasePipeDesc.VertexInput.Bindings[0].Binding := 0;
+      BasePipeDesc.VertexInput.Bindings[0].Stride := SizeOf(TVector4);
+      SetLength(BasePipeDesc.VertexInput.Attributes, 1);
+      BasePipeDesc.VertexInput.Attributes[0].Location := 0;
+      BasePipeDesc.VertexInput.Attributes[0].Binding := 0;
+      BasePipeDesc.VertexInput.Attributes[0].Format := vafVector4;
+      BasePipeDesc.VertexInput.Attributes[0].Offset := 0;
+      BasePipeDesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+      BasePipeDesc.Rasterizer.CullMode := cmNone;
+      BasePipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+      BasePipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+      BasePipeDesc.PushConstantSize := SizeOf(TVector4);
+      BasePipeDesc.PushConstantStages := [ssFragment];
+      SetLength(BasePipeDesc.ColorAttachmentFormats, 1);
+      BasePipeDesc.ColorAttachmentFormats[0] := pfRGBA8_UNorm;
+      BasePipeDesc.DepthAttachmentFormat := pfD24_UNorm_S8_UInt;
+      BasePipeDesc.SampleCount := 1;
+      BasePipe := RealDev.GetOrCreatePipeline(BasePipeDesc);
+
+      StencilVolPipeDesc := BasePipeDesc;
+      StencilVolPipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultStencilShadowVolumeZPass;
+      StencilVolPipeDesc.BlendState := TRHIBlendStateDesc.DefaultColorMaskNone;
+      StencilVolPipe := RealDev.GetOrCreatePipeline(StencilVolPipeDesc);
+
+      LitPipeDesc := BasePipeDesc;
+      LitPipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultStencilLitPass(0, $FF);
+      LitPipe := RealDev.GetOrCreatePipeline(LitPipeDesc);
+
+      RealCmd := RealDev.BeginFrame;
+      RenderInfo := TRHIRenderingInfo.CreateColorDepth(
+        Rectangle(0, 0, 64, 64),
+        RealColorTex, loClear, Vector4(0.0, 0.0, 0.0, 1.0),
+        RealDepthStencilTex, loClear, 1.0);
+      RenderInfo.DepthAttachment.ClearStencil := 0;
+      RealCmd.BeginRendering(RenderInfo);
+      RealCmd.SetViewport(FloatRectangle(0, 0, 64, 64), 0.0, 1.0);
+      RealCmd.SetScissor(Rectangle(0, 0, 64, 64));
+
+      { Stage 1 (Pass 2 Ambient): Draw full receiver quad in dark gray (0.2, 0.2, 0.2, 1.0) at Z = 0.5 }
+      RealCmd.BindPipeline(BasePipe);
+      PushColor := Vector4(0.2, 0.2, 0.2, 1.0);
+      RealCmd.PushConstants([ssFragment], 0, SizeOf(PushColor), PushColor);
+      RealCmd.BindVertexBuffers(0, [FullVBO], [0]);
+      RealCmd.Draw(6, 1, 0, 0);
+
+      { Stage 2 (Pass 3 Stencil Volume): Increment stencil on left half (X in [0..31]) with color writes disabled }
+      RealCmd.BindPipeline(StencilVolPipe);
+      RealCmd.BindVertexBuffers(0, [LeftVBO], [0]);
+      RealCmd.Draw(6, 1, 0, 0);
+
+      { Stage 3 (Pass 4 Lit Pass): Overdraw bright green (0, 1, 0, 1) where stencil == 0 and depth <= 0.5 }
+      RealCmd.BindPipeline(LitPipe);
+      PushColor := Vector4(0.0, 1.0, 0.0, 1.0);
+      RealCmd.PushConstants([ssFragment], 0, SizeOf(PushColor), PushColor);
+      RealCmd.BindVertexBuffers(0, [FullVBO], [0]);
+      RealCmd.Draw(6, 1, 0, 0);
+
+      { Stage 4: Sub-rect vkCmdClearAttachments on columns [48..63] to pure blue (0, 0, 1, 1) }
+      RealCmd.SetScissor(Rectangle(48, 0, 16, 64));
+      RealCmd.ClearAttachments(True, Vector4(0.0, 0.0, 1.0, 1.0), False, 1.0, False, 0);
+
+      RealCmd.EndRendering;
+      RealDev.EndFrameAndPresent;
+
+      AssertEquals('ClearAttachments must invoke vkCmdClearAttachments once',
+        1, Integer((RealCmd as TVulkanRHICommandList).ClearAttachmentCallCount));
+
+      ReadImg := RealDev.GrabTextureImage(RealColorTex, Rectangle(0, 0, 64, 64));
+      AssertTrue('GrabTextureImage on real Vulkan offscreen device must return non-nil image', ReadImg <> nil);
+
+      ShadowPix := ReadImg.PixelPtr(16, 32)^;
+      LitPix := ReadImg.PixelPtr(40, 32)^;
+      ScissorPix := ReadImg.PixelPtr(56, 32)^;
+
+      { Left half (X=16): stencil incremented to 1 -> Pass 4 rejected -> remains dark gray (~51, 51, 51, 255) }
+      AssertTrue('Shadowed left-half pixel must retain dark ambient R (~51)', Abs(Integer(ShadowPix.X) - 51) <= 2);
+      AssertTrue('Shadowed left-half pixel must retain dark ambient G (~51)', Abs(Integer(ShadowPix.Y) - 51) <= 2);
+      AssertTrue('Shadowed left-half pixel must retain dark ambient B (~51)', Abs(Integer(ShadowPix.Z) - 51) <= 2);
+
+      { Middle-right zone (X=40): stencil == 0 -> Pass 4 lit green (0, 255, 0, 255) }
+      AssertEquals('Lit unshadowed pixel R must be 0', 0, Integer(LitPix.X));
+      AssertEquals('Lit unshadowed pixel G must be 255', 255, Integer(LitPix.Y));
+      AssertEquals('Lit unshadowed pixel B must be 0', 0, Integer(LitPix.Z));
+
+      { Far-right zone (X=56): cleared by vkCmdClearAttachments to blue (0, 0, 255, 255) }
+      AssertEquals('Scissor ClearAttachments pixel R must be 0', 0, Integer(ScissorPix.X));
+      AssertEquals('Scissor ClearAttachments pixel G must be 0', 0, Integer(ScissorPix.Y));
+      AssertEquals('Scissor ClearAttachments pixel B must be 255', 255, Integer(ScissorPix.Z));
+    finally
+      FreeAndNil(ReadImg);
+      FreeAndNil(FragMod);
+      FreeAndNil(VertMod);
+      FreeAndNil(LeftVBO);
+      FreeAndNil(FullVBO);
+      FreeAndNil(RealDepthStencilTex);
+      FreeAndNil(RealColorTex);
+      FreeAndNil(RealDev);
+    end;
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestViewportOcclusionCullingInPassHostQueryResetRHI;
+const
+  MinimalVertSPIRV: array[0..92] of Cardinal = (
+    $07230203, $00010000, $00000000, $00000011, $00000000,
+    $00020011, 1,
+    $0003000E, 0, 1,
+    $0007000F, 0, 1, $6E69616D, $00000000, 8, 11,
+    $00050048, 6, 0, 11, 0,
+    $00030047, 6, 2,
+    $00040047, 11, 30, 0,
+    $00020013, 2,
+    $00030021, 3, 2,
+    $00030016, 4, 32,
+    $00040017, 5, 4, 4,
+    $0003001E, 6, 5,
+    $00040020, 7, 3, 6,
+    $0004003B, 7, 8, 3,
+    $00040015, 9, 32, 1,
+    $0004002B, 9, 10, 0,
+    $00040020, 12, 1, 5,
+    $0004003B, 12, 11, 1,
+    $00040020, 13, 3, 5,
+    $00050036, 2, 1, 0, 3,
+    $000200F8, 14,
+    $0004003D, 5, 15, 11,
+    $00050041, 13, 16, 8, 10,
+    $0003003E, 16, 15,
+    $000100FD,
+    $00010038
+  );
+  MinimalPushColorFragSPIRV: array[0..94] of Cardinal = (
+    $07230203, $00010000, $00000000, $00000011, $00000000,
+    $00020011, 1,
+    $0003000E, 0, 1,
+    $0006000F, 4, 1, $6E69616D, $00000000, 7,
+    $00030010, 1, 7,
+    $00040047, 7, 30, 0,
+    $00050048, 8, 0, 35, 0,
+    $00030047, 8, 2,
+    $00020013, 2,
+    $00030021, 3, 2,
+    $00030016, 4, 32,
+    $00040017, 5, 4, 4,
+    $00040020, 6, 3, 5,
+    $0004003B, 6, 7, 3,
+    $0003001E, 8, 5,
+    $00040020, 9, 9, 8,
+    $0004003B, 9, 10, 9,
+    $00040015, 11, 32, 1,
+    $0004002B, 11, 12, 0,
+    $00040020, 13, 9, 5,
+    $00050036, 2, 1, 0, 3,
+    $000200F8, 14,
+    $00050041, 13, 15, 10, 12,
+    $0004003D, 5, 16, 15,
+    $0003003E, 7, 16,
+    $000100FD,
+    $00010038
+  );
+var
+  Device, RealDev: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedCmd, Cmd, RealCmd: TRHICommandList;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  FrontScene, BackScene: TCastleScene;
+  FrontRoot, BackRoot: TX3DRootNode;
+  FrontShape, BackShape: TShapeNode;
+  TargetTex, DepthTex, RealColorTex, RealDepthTex: TRHITexture;
+  TexDesc: TRHITextureDesc;
+  RenderInfo: TRHIRenderingInfo;
+  QueryPool: TRHIQueryPool;
+  VkQueryPool: TVulkanRHIQueryPool;
+  OccluderVerts, VisibleVerts, OccludedVerts: array[0..5] of TVector4;
+  OccluderVBO, VisibleVBO, OccludedVBO: TRHIBuffer;
+  VBODesc: TRHIBufferDesc;
+  VertMod, FragMod: TRHIShaderModule;
+  PipeDesc: TRHIGraphicsPipelineDesc;
+  Pipe: TRHIPipeline;
+  PushColor: TVector4;
+  Samples: array[0..1] of UInt64;
+begin
+  { Part 1: Headless viewport OcclusionCulling across 2 active-pass frames uses HostResetCount (never illegal vkCmdResetQueryPool inside render pass) }
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($A105)), True, True);
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+  Container := nil;
+  Viewport := nil;
+  FrontScene := nil;
+  BackScene := nil;
+  TargetTex := nil;
+  DepthTex := nil;
+  try
+    GLFeatures := nil;
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+
+    FillChar(TexDesc, SizeOf(TexDesc), 0);
+    TexDesc.Dimension := td2D;
+    TexDesc.Width := 256;
+    TexDesc.Height := 256;
+    TexDesc.DepthOrArrayLayers := 1;
+    TexDesc.MipLevels := 1;
+    TexDesc.SampleCount := 1;
+    TexDesc.Format := pfRGBA8_UNorm;
+    TexDesc.Usage := [tuColorAttachment, tuSampled];
+    TargetTex := Device.CreateTexture(TexDesc);
+
+    TexDesc.Format := pfD32_Float;
+    TexDesc.Usage := [tuDepthStencil];
+    DepthTex := Device.CreateTexture(TexDesc);
+
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    RenderContext := Container.Context;
+    RenderContext.Viewport := Rectangle(0, 0, 256, 256);
+
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := False;
+    Viewport.Width := 256;
+    Viewport.Height := 256;
+    Viewport.OcclusionCulling := True;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 8.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Container.Controls.InsertFront(Viewport);
+
+    FrontRoot := TX3DRootNode.Create;
+    FrontShape := TShapeNode.Create;
+    FrontShape.Geometry := TBoxNode.Create;
+    TBoxNode(FrontShape.Geometry).Size := Vector3(3.0, 3.0, 1.0);
+    FrontRoot.AddChildren(FrontShape);
+    FrontScene := TCastleScene.Create(Viewport);
+    FrontScene.Load(FrontRoot, True);
+    FrontScene.Translation := Vector3(0.0, 0.0, 2.0);
+    Viewport.Items.Add(FrontScene);
+
+    BackRoot := TX3DRootNode.Create;
+    BackShape := TShapeNode.Create;
+    BackShape.Geometry := TBoxNode.Create;
+    TBoxNode(BackShape.Geometry).Size := Vector3(1.0, 1.0, 1.0);
+    BackRoot.AddChildren(BackShape);
+    BackScene := TCastleScene.Create(Viewport);
+    BackScene.Load(BackRoot, True);
+    BackScene.Translation := Vector3(0.0, 0.0, -3.0);
+    Viewport.Items.Add(BackScene);
+
+    { Frame 1 inside active render pass }
+    Cmd := Device.BeginFrame;
+    SetActiveCommandList(Cmd);
+    RenderInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 256, 256),
+      TargetTex, loClear, Vector4(0.0, 0.0, 0.0, 1.0),
+      DepthTex, loClear, 1.0);
+    Cmd.BeginRendering(RenderInfo);
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+    Cmd.EndRendering;
+    Device.EndFrameAndPresent;
+
+    { Frame 2 inside active render pass }
+    Cmd := Device.BeginFrame;
+    SetActiveCommandList(Cmd);
+    Cmd.BeginRendering(RenderInfo);
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+    Cmd.EndRendering;
+    Device.EndFrameAndPresent;
+
+    AssertTrue('Headless TVulkanRHIDevice must enable SupportsHostQueryReset',
+      Device.SupportsHostQueryReset);
+  finally
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    FreeAndNil(BackScene);
+    FreeAndNil(FrontScene);
+    FreeAndNil(Viewport);
+    FreeAndNil(Container);
+    FreeAndNil(DepthTex);
+    FreeAndNil(TargetTex);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+
+  { Part 2: Real Offscreen Vulkan GPU Hardware Occlusion Queries + In-Pass Host Query Reset (Mesa Lavapipe) }
+  if TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+  begin
+    RealColorTex := nil;
+    RealDepthTex := nil;
+    QueryPool := nil;
+    OccluderVBO := nil;
+    VisibleVBO := nil;
+    OccludedVBO := nil;
+    VertMod := nil;
+    FragMod := nil;
+    try
+      AssertTrue('Real offscreen Vulkan device must support hostQueryReset on Vulkan 1.2+ / VK_EXT_host_query_reset',
+        RealDev.SupportsHostQueryReset);
+
+      FillChar(TexDesc, SizeOf(TexDesc), 0);
+      TexDesc.Dimension := td2D;
+      TexDesc.Width := 64;
+      TexDesc.Height := 64;
+      TexDesc.DepthOrArrayLayers := 1;
+      TexDesc.MipLevels := 1;
+      TexDesc.SampleCount := 1;
+      TexDesc.Format := pfRGBA8_UNorm;
+      TexDesc.Usage := [tuColorAttachment];
+      RealColorTex := RealDev.CreateTexture(TexDesc);
+
+      TexDesc.Format := pfD32_Float;
+      TexDesc.Usage := [tuDepthStencil];
+      RealDepthTex := RealDev.CreateTexture(TexDesc);
+
+      QueryPool := RealDev.CreateQueryPool(TRHIQueryPoolDesc.Create(qtOcclusion, 2, 'TestOcclusionPool'));
+      VkQueryPool := QueryPool as TVulkanRHIQueryPool;
+
+      { Occluder quad covering [-1..1]x[-1..1] at Z = 0.25 }
+      OccluderVerts[0] := Vector4(-1.0, -1.0, 0.25, 1.0);
+      OccluderVerts[1] := Vector4( 1.0, -1.0, 0.25, 1.0);
+      OccluderVerts[2] := Vector4( 1.0,  1.0, 0.25, 1.0);
+      OccluderVerts[3] := Vector4(-1.0, -1.0, 0.25, 1.0);
+      OccluderVerts[4] := Vector4( 1.0,  1.0, 0.25, 1.0);
+      OccluderVerts[5] := Vector4(-1.0,  1.0, 0.25, 1.0);
+      VBODesc := TRHIBufferDesc.Create(SizeOf(OccluderVerts), [buVertex], muCpuToGpu, 'OccluderVBO');
+      OccluderVBO := RealDev.CreateBuffer(VBODesc, @OccluderVerts[0]);
+
+      { Visible quad in front of occluder covering [-0.5..0.5]x[-0.5..0.5] (32x32 = 1024 px) at Z = 0.10 }
+      VisibleVerts[0] := Vector4(-0.5, -0.5, 0.10, 1.0);
+      VisibleVerts[1] := Vector4( 0.5, -0.5, 0.10, 1.0);
+      VisibleVerts[2] := Vector4( 0.5,  0.5, 0.10, 1.0);
+      VisibleVerts[3] := Vector4(-0.5, -0.5, 0.10, 1.0);
+      VisibleVerts[4] := Vector4( 0.5,  0.5, 0.10, 1.0);
+      VisibleVerts[5] := Vector4(-0.5,  0.5, 0.10, 1.0);
+      VBODesc := TRHIBufferDesc.Create(SizeOf(VisibleVerts), [buVertex], muCpuToGpu, 'VisibleVBO');
+      VisibleVBO := RealDev.CreateBuffer(VBODesc, @VisibleVerts[0]);
+
+      { Occluded quad behind occluder at Z = 0.75 (fails coLess against 0.25) }
+      OccludedVerts[0] := Vector4(-0.5, -0.5, 0.75, 1.0);
+      OccludedVerts[1] := Vector4( 0.5, -0.5, 0.75, 1.0);
+      OccludedVerts[2] := Vector4( 0.5,  0.5, 0.75, 1.0);
+      OccludedVerts[3] := Vector4(-0.5, -0.5, 0.75, 1.0);
+      OccludedVerts[4] := Vector4( 0.5,  0.5, 0.75, 1.0);
+      OccludedVerts[5] := Vector4(-0.5,  0.5, 0.75, 1.0);
+      VBODesc := TRHIBufferDesc.Create(SizeOf(OccludedVerts), [buVertex], muCpuToGpu, 'OccludedVBO');
+      OccludedVBO := RealDev.CreateBuffer(VBODesc, @OccludedVerts[0]);
+
+      VertMod := RealDev.CreateShaderModuleFromSPIRV(
+        ssVertex, @MinimalVertSPIRV[0], SizeOf(MinimalVertSPIRV), 'OccVert');
+      FragMod := RealDev.CreateShaderModuleFromSPIRV(
+        ssFragment, @MinimalPushColorFragSPIRV[0], SizeOf(MinimalPushColorFragSPIRV), 'OccFrag');
+
+      FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+      PipeDesc.VertexShader := VertMod;
+      PipeDesc.FragmentShader := FragMod;
+      PipeDesc.Topology := ptTriangleList;
+      SetLength(PipeDesc.VertexInput.Bindings, 1);
+      PipeDesc.VertexInput.Bindings[0].Binding := 0;
+      PipeDesc.VertexInput.Bindings[0].Stride := SizeOf(TVector4);
+      SetLength(PipeDesc.VertexInput.Attributes, 1);
+      PipeDesc.VertexInput.Attributes[0].Location := 0;
+      PipeDesc.VertexInput.Attributes[0].Binding := 0;
+      PipeDesc.VertexInput.Attributes[0].Format := vafVector4;
+      PipeDesc.VertexInput.Attributes[0].Offset := 0;
+      PipeDesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+      PipeDesc.Rasterizer.CullMode := cmNone;
+      PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+      PipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+      PipeDesc.PushConstantSize := SizeOf(TVector4);
+      PipeDesc.PushConstantStages := [ssFragment];
+      SetLength(PipeDesc.ColorAttachmentFormats, 1);
+      PipeDesc.ColorAttachmentFormats[0] := pfRGBA8_UNorm;
+      PipeDesc.DepthAttachmentFormat := pfD32_Float;
+      PipeDesc.SampleCount := 1;
+      Pipe := RealDev.GetOrCreatePipeline(PipeDesc);
+
+      RealCmd := RealDev.BeginFrame;
+      RenderInfo := TRHIRenderingInfo.CreateColorDepth(
+        Rectangle(0, 0, 64, 64),
+        RealColorTex, loClear, Vector4(0.0, 0.0, 0.0, 1.0),
+        RealDepthTex, loClear, 1.0);
+      RealCmd.BeginRendering(RenderInfo);
+      RealCmd.SetViewport(FloatRectangle(0, 0, 64, 64), 0.0, 1.0);
+      RealCmd.SetScissor(Rectangle(0, 0, 64, 64));
+
+      { Reset queries WHILE inside active render pass using vkResetQueryPool! }
+      RealCmd.ResetQueryPool(QueryPool, 0, 2);
+      AssertTrue('ResetQueryPool inside active render pass must use vkResetQueryPool (HostResetCount >= 1)',
+        VkQueryPool.HostResetCount >= 1);
+
+      RealCmd.BindPipeline(Pipe);
+      PushColor := Vector4(1.0, 1.0, 1.0, 1.0);
+      RealCmd.PushConstants([ssFragment], 0, SizeOf(PushColor), PushColor);
+
+      { 1. Draw occluder at Z = 0.25 }
+      RealCmd.BindVertexBuffers(0, [OccluderVBO], [0]);
+      RealCmd.Draw(6, 1, 0, 0);
+
+      { 2. Query 0: Visible geometry at Z = 0.10 }
+      RealCmd.BeginQuery(QueryPool, 0);
+      RealCmd.BindVertexBuffers(0, [VisibleVBO], [0]);
+      RealCmd.Draw(6, 1, 0, 0);
+      RealCmd.EndQuery(QueryPool, 0);
+
+      { 3. Query 1: Depth-occluded geometry at Z = 0.75 }
+      RealCmd.BeginQuery(QueryPool, 1);
+      RealCmd.BindVertexBuffers(0, [OccludedVBO], [0]);
+      RealCmd.Draw(6, 1, 0, 0);
+      RealCmd.EndQuery(QueryPool, 1);
+
+      RealCmd.EndRendering;
+      RealDev.EndFrameAndPresent;
+
+      Samples[0] := 0;
+      Samples[1] := High(UInt64);
+      AssertTrue('GetResults with Wait=True must succeed on real Vulkan occlusion query pool',
+        QueryPool.GetResults(0, 2, Samples, True));
+      AssertEquals('Visible 32x32 quad occlusion query must report 1024 passed samples',
+        1024, Integer(Samples[0]));
+      AssertEquals('Depth-occluded quad behind occluder must report 0 passed samples',
+        0, Integer(Samples[1]));
+    finally
+      FreeAndNil(FragMod);
+      FreeAndNil(VertMod);
+      FreeAndNil(OccludedVBO);
+      FreeAndNil(VisibleVBO);
+      FreeAndNil(OccluderVBO);
+      FreeAndNil(QueryPool);
+      FreeAndNil(RealDepthTex);
+      FreeAndNil(RealColorTex);
+      FreeAndNil(RealDev);
+    end;
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestGPUCompressedImageDecompressDXT1DXT3DXT5AndFlipVerticalRHI;
+var
+  Device: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedBackend: TRenderBackend;
+  SavedKnown: Boolean;
+  SavedCompression: TTextureCompressions;
+  CompImg: TGPUCompressedImage;
+  DecompImg, FlippedDecompImg: TCastleImage;
+  RGBImg: TRGBImage;
+  RGBAImg, FlippedRGBAImg: TRGBAlphaImage;
+  BlockBytes: PByte;
+  TexDesc: TRHITextureDesc;
+  FallbackTex: TRHITexture;
+begin
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($A106)), True, True);
+  SavedRHI := RHIDevice;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedKnown := SupportedTextureCompressionKnown;
+  SavedCompression := SupportedTextureCompression;
+  CompImg := nil;
+  DecompImg := nil;
+  FlippedDecompImg := nil;
+  FallbackTex := nil;
+  try
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(Device);
+
+    AssertTrue('SetRHIDevice must populate SupportedTextureCompressionKnown = True',
+      SupportedTextureCompressionKnown);
+    AssertTrue('Headless Vulkan BC capability must populate tcDxt1_RGB..tcDxt5 in SupportedTextureCompression',
+      (tcDxt1_RGB in SupportedTextureCompression) and
+      (tcDxt1_RGBA in SupportedTextureCompression) and
+      (tcDxt3 in SupportedTextureCompression) and
+      (tcDxt5 in SupportedTextureCompression));
+    AssertTrue('SetRHIDevice must register DecompressTexture handler via CastleGLImages',
+      Assigned(DecompressTexture));
+
+    { 1. DXT1_RGB (4x4): Color0 = Pure Red ($F800) > Color1 = Pure Green ($07E0) }
+    CompImg := TGPUCompressedImage.Create(4, 4, 1, tcDxt1_RGB);
+    BlockBytes := PByte(CompImg.RawPixels);
+    FillChar(BlockBytes^, CompImg.Size, 0);
+    BlockBytes[0] := $00; BlockBytes[1] := $F8; { Color0 = $F800 -> (255, 0, 0) }
+    BlockBytes[2] := $E0; BlockBytes[3] := $07; { Color1 = $07E0 -> (0, 255, 0) }
+    BlockBytes[4] := $00; { Row 0: all idx 0 -> Red }
+    BlockBytes[5] := $55; { Row 1: all idx 1 -> Green }
+    BlockBytes[6] := $AA; { Row 2: all idx 2 -> 2/3 Red + 1/3 Green = (170, 85, 0) }
+    BlockBytes[7] := $FF; { Row 3: all idx 3 -> 1/3 Red + 2/3 Green = (85, 170, 0) }
+
+    DecompImg := CompImg.Decompress;
+    AssertTrue('tcDxt1_RGB Decompress must return TRGBImage', DecompImg is TRGBImage);
+    RGBImg := DecompImg as TRGBImage;
+    AssertEquals(255, Integer(RGBImg.PixelPtr(0, 0)^.X));
+    AssertEquals(0,   Integer(RGBImg.PixelPtr(0, 0)^.Y));
+    AssertEquals(0,   Integer(RGBImg.PixelPtr(1, 1)^.X));
+    AssertEquals(255, Integer(RGBImg.PixelPtr(1, 1)^.Y));
+    AssertEquals(170, Integer(RGBImg.PixelPtr(2, 2)^.X));
+    AssertEquals(85,  Integer(RGBImg.PixelPtr(2, 2)^.Y));
+    AssertEquals(85,  Integer(RGBImg.PixelPtr(3, 3)^.X));
+    AssertEquals(170, Integer(RGBImg.PixelPtr(3, 3)^.Y));
+    FreeAndNil(DecompImg);
+    FreeAndNil(CompImg);
+
+    { 2. DXT1_RGBA (4x4) with 1-bit transparency: Color0 = Blue ($001F) <= Color1 = Red ($F800) -> idx 3 = (0,0,0,0) }
+    CompImg := TGPUCompressedImage.Create(4, 4, 1, tcDxt1_RGBA);
+    BlockBytes := PByte(CompImg.RawPixels);
+    FillChar(BlockBytes^, CompImg.Size, 0);
+    BlockBytes[0] := $1F; BlockBytes[1] := $00; { Color0 = $001F -> (0, 0, 255) }
+    BlockBytes[2] := $00; BlockBytes[3] := $F8; { Color1 = $F800 -> (255, 0, 0) }
+    BlockBytes[4] := $00; { Row 0: idx 0 -> (0, 0, 255, 255) }
+    BlockBytes[5] := $AA; { Row 1: idx 2 -> 1/2 (Blue + Red) = (127, 0, 127, 255) }
+    BlockBytes[6] := $FF; { Row 2: idx 3 -> transparent black (0, 0, 0, 0) }
+    BlockBytes[7] := $55; { Row 3: idx 1 -> (255, 0, 0, 255) }
+
+    DecompImg := CompImg.Decompress;
+    AssertTrue('tcDxt1_RGBA Decompress must return TRGBAlphaImage', DecompImg is TRGBAlphaImage);
+    RGBAImg := DecompImg as TRGBAlphaImage;
+    AssertEquals(255, Integer(RGBAImg.PixelPtr(0, 0)^.Z));
+    AssertEquals(255, Integer(RGBAImg.PixelPtr(0, 0)^.W));
+    AssertEquals(127, Integer(RGBAImg.PixelPtr(0, 1)^.X));
+    AssertEquals(127, Integer(RGBAImg.PixelPtr(0, 1)^.Z));
+    AssertEquals(255, Integer(RGBAImg.PixelPtr(0, 1)^.W));
+    AssertEquals(0,   Integer(RGBAImg.PixelPtr(0, 2)^.X));
+    AssertEquals(0,   Integer(RGBAImg.PixelPtr(0, 2)^.W));
+    AssertEquals(255, Integer(RGBAImg.PixelPtr(0, 3)^.X));
+    AssertEquals(255, Integer(RGBAImg.PixelPtr(0, 3)^.W));
+    FreeAndNil(DecompImg);
+    FreeAndNil(CompImg);
+
+    { 3. DXT3 (4x4): 4-bit explicit alpha + FlipVertical agreement }
+    CompImg := TGPUCompressedImage.Create(4, 4, 1, tcDxt3);
+    BlockBytes := PByte(CompImg.RawPixels);
+    FillChar(BlockBytes^, CompImg.Size, 0);
+    { Alpha Row 0 = $0000 (alpha 0), Row 1 = $5555 (alpha 85), Row 2 = $AAAA (alpha 170), Row 3 = $FFFF (alpha 255) }
+    BlockBytes[0] := $00; BlockBytes[1] := $00;
+    BlockBytes[2] := $55; BlockBytes[3] := $55;
+    BlockBytes[4] := $AA; BlockBytes[5] := $AA;
+    BlockBytes[6] := $FF; BlockBytes[7] := $FF;
+    { Note Color0 ($001F) < Color1 ($F800): DXT3 MUST still use 4-color mode (never transparent black)! }
+    BlockBytes[8]  := $1F; BlockBytes[9]  := $00;
+    BlockBytes[10] := $00; BlockBytes[11] := $F8;
+    BlockBytes[12] := $00; { Row 0: Blue }
+    BlockBytes[13] := $55; { Row 1: Red }
+    BlockBytes[14] := $AA; { Row 2: 2/3 Blue + 1/3 Red = (85, 0, 170) }
+    BlockBytes[15] := $FF; { Row 3: 1/3 Blue + 2/3 Red = (170, 0, 85) }
+
+    DecompImg := CompImg.Decompress;
+    RGBAImg := DecompImg as TRGBAlphaImage;
+    AssertEquals(0,   Integer(RGBAImg.PixelPtr(0, 0)^.W));
+    AssertEquals(85,  Integer(RGBAImg.PixelPtr(0, 1)^.W));
+    AssertEquals(170, Integer(RGBAImg.PixelPtr(0, 2)^.W));
+    AssertEquals(255, Integer(RGBAImg.PixelPtr(0, 3)^.W));
+    AssertEquals(170, Integer(RGBAImg.PixelPtr(0, 3)^.X));
+    AssertEquals(85,  Integer(RGBAImg.PixelPtr(0, 3)^.Z));
+
+    CompImg.FlipVertical;
+    FlippedDecompImg := CompImg.Decompress;
+    FlippedRGBAImg := FlippedDecompImg as TRGBAlphaImage;
+    AssertEquals('DXT3 FlipVertical must move Row 3 alpha 255 to Row 0',
+      255, Integer(FlippedRGBAImg.PixelPtr(0, 0)^.W));
+    AssertEquals('DXT3 FlipVertical must move Row 0 alpha 0 to Row 3',
+      0, Integer(FlippedRGBAImg.PixelPtr(0, 3)^.W));
+    FreeAndNil(FlippedDecompImg);
+    FreeAndNil(DecompImg);
+    FreeAndNil(CompImg);
+
+    { 4. DXT5 (4x4): Interpolated 3-bit alpha + FlipVertical agreement + UploadImage RGBA8 fallback }
+    CompImg := TGPUCompressedImage.Create(4, 4, 1, tcDxt5);
+    BlockBytes := PByte(CompImg.RawPixels);
+    FillChar(BlockBytes^, CompImg.Size, 0);
+    BlockBytes[0] := 200; { Alpha0 }
+    BlockBytes[1] := 60;  { Alpha1 -> Alpha0 > Alpha1: idx 0 = 200, idx 1 = 60, idx 2 = (1200+60+3) div 7 = 180 }
+    { Row 0 (bits 0..11): all idx 0 (000) -> 0
+      Row 1 (bits 12..23): all idx 1 (001_001_001_001 = $249)
+      Row 2 (bits 24..35): all idx 2 (010_010_010_010 = $492)
+      Row 3 (bits 36..47): all idx 1 ($249) -> 48-bit = $249492249000 }
+    BlockBytes[2] := $00;
+    BlockBytes[3] := $90;
+    BlockBytes[4] := $24;
+    BlockBytes[5] := $92;
+    BlockBytes[6] := $94;
+    BlockBytes[7] := $24;
+    BlockBytes[8]  := $FF; BlockBytes[9]  := $FF; { White }
+    BlockBytes[10] := $00; BlockBytes[11] := $00; { Black }
+    BlockBytes[12] := $00;
+    BlockBytes[13] := $00;
+    BlockBytes[14] := $00;
+    BlockBytes[15] := $00;
+
+    DecompImg := CompImg.Decompress;
+    RGBAImg := DecompImg as TRGBAlphaImage;
+    AssertEquals(200, Integer(RGBAImg.PixelPtr(0, 0)^.W));
+    AssertEquals(60,  Integer(RGBAImg.PixelPtr(0, 1)^.W));
+    AssertEquals(180, Integer(RGBAImg.PixelPtr(0, 2)^.W));
+    AssertEquals(60,  Integer(RGBAImg.PixelPtr(0, 3)^.W));
+
+    CompImg.FlipVertical;
+    FlippedDecompImg := CompImg.Decompress;
+    FlippedRGBAImg := FlippedDecompImg as TRGBAlphaImage;
+    AssertEquals('DXT5 FlipVertical must move Row 3 (alpha 60) to Row 0',
+      60, Integer(FlippedRGBAImg.PixelPtr(0, 0)^.W));
+    AssertEquals('DXT5 FlipVertical must move Row 2 (alpha 180) to Row 1',
+      180, Integer(FlippedRGBAImg.PixelPtr(0, 1)^.W));
+    AssertEquals('DXT5 FlipVertical must move Row 0 (alpha 200) to Row 3',
+      200, Integer(FlippedRGBAImg.PixelPtr(0, 3)^.W));
+
+    { Verify TVulkanRHITexture.UploadImage fallback decompression into pfRGBA8_UNorm texture }
+    FillChar(TexDesc, SizeOf(TexDesc), 0);
+    TexDesc.Dimension := td2D;
+    TexDesc.Width := 4;
+    TexDesc.Height := 4;
+    TexDesc.DepthOrArrayLayers := 1;
+    TexDesc.MipLevels := 1;
+    TexDesc.SampleCount := 1;
+    TexDesc.Format := pfRGBA8_UNorm;
+    TexDesc.Usage := [tuSampled, tuTransferDst];
+    FallbackTex := Device.CreateTexture(TexDesc);
+    FallbackTex.UploadImage(CompImg, 0, 0);
+    AssertEquals('UploadImage on pfRGBA8_UNorm texture must decompress DXT5 block via DecompressTexture',
+      1, Integer((FallbackTex as TVulkanRHITexture).TotalSubresourceUploads));
+
+    SetRHIDevice(nil);
+    AssertFalse('SetRHIDevice(nil) without open GL context must clear DecompressTexture back to nil',
+      Assigned(DecompressTexture));
+  finally
+    FreeAndNil(FallbackTex);
+    FreeAndNil(FlippedDecompImg);
+    FreeAndNil(DecompImg);
+    FreeAndNil(CompImg);
+    SetRHIDevice(SavedRHI);
+    SupportedTextureCompressionKnown := SavedKnown;
+    SupportedTextureCompression := SavedCompression;
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(Device);
   end;

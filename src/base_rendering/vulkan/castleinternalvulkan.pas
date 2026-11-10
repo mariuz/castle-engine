@@ -131,6 +131,8 @@ const
   VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2 = 1000059006;
   VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2_KHR = 1000059006;
   VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT = 1000237000;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES = 1000261000;
+  VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME = 'VK_EXT_host_query_reset';
   VK_FORMAT_UNDEFINED = 0;
   VK_FORMAT_R8_UNORM = 9;
   VK_FORMAT_R8G8_UNORM = 16;
@@ -728,6 +730,20 @@ type
       1: (depthStencil: VkClearDepthStencilValue);
   end;
   PVkClearValue = ^VkClearValue;
+
+  VkClearAttachment = record
+    aspectMask: VkImageAspectFlags;
+    colorAttachment: Cardinal;
+    clearValue: VkClearValue;
+  end;
+  PVkClearAttachment = ^VkClearAttachment;
+
+  VkClearRect = record
+    rect: VkRect2D;
+    baseArrayLayer: Cardinal;
+    layerCount: Cardinal;
+  end;
+  PVkClearRect = ^VkClearRect;
 
   VkPhysicalDeviceLimits = record
     maxImageDimension1D: Cardinal;
@@ -1999,6 +2015,13 @@ type
   end;
   PVkQueryPoolCreateInfo = ^VkQueryPoolCreateInfo;
 
+  VkPhysicalDeviceHostQueryResetFeatures = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    hostQueryReset: VkBool32;
+  end;
+  PVkPhysicalDeviceHostQueryResetFeatures = ^VkPhysicalDeviceHostQueryResetFeatures;
+
   { KHR Type Aliases }
   VkRenderingAttachmentInfoKHR = VkRenderingAttachmentInfo;
   PVkRenderingAttachmentInfoKHR = ^VkRenderingAttachmentInfoKHR;
@@ -2150,10 +2173,12 @@ type
   PFN_vkCreateQueryPool = function(device: VkDevice; const pCreateInfo: PVkQueryPoolCreateInfo; const pAllocator: PVkAllocationCallbacks; pQueryPool: PVkQueryPool): VkResult; VKAPI_CALL;
   PFN_vkDestroyQueryPool = procedure(device: VkDevice; queryPool: VkQueryPool; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
   PFN_vkGetQueryPoolResults = function(device: VkDevice; queryPool: VkQueryPool; firstQuery: Cardinal; queryCount: Cardinal; dataSize: PtrUInt; pData: Pointer; stride: VkDeviceSize; flags: VkQueryResultFlags): VkResult; VKAPI_CALL;
+  PFN_vkResetQueryPool = procedure(device: VkDevice; queryPool: VkQueryPool; firstQuery: Cardinal; queryCount: Cardinal); VKAPI_CALL;
   PFN_vkCmdResetQueryPool = procedure(commandBuffer: VkCommandBuffer; queryPool: VkQueryPool; firstQuery: Cardinal; queryCount: Cardinal); VKAPI_CALL;
   PFN_vkCmdBeginQuery = procedure(commandBuffer: VkCommandBuffer; queryPool: VkQueryPool; query: Cardinal; flags: VkQueryControlFlags); VKAPI_CALL;
   PFN_vkCmdEndQuery = procedure(commandBuffer: VkCommandBuffer; queryPool: VkQueryPool; query: Cardinal); VKAPI_CALL;
   PFN_vkCmdWriteTimestamp = procedure(commandBuffer: VkCommandBuffer; pipelineStage: Integer; queryPool: VkQueryPool; query: Cardinal); VKAPI_CALL;
+  PFN_vkCmdClearAttachments = procedure(commandBuffer: VkCommandBuffer; attachmentCount: Cardinal; const pAttachments: PVkClearAttachment; rectCount: Cardinal; const pRects: PVkClearRect); VKAPI_CALL;
 
 var
   { Global Function Pointers }
@@ -2287,10 +2312,12 @@ var
   vkCreateQueryPool: PFN_vkCreateQueryPool;
   vkDestroyQueryPool: PFN_vkDestroyQueryPool;
   vkGetQueryPoolResults: PFN_vkGetQueryPoolResults;
+  vkResetQueryPool: PFN_vkResetQueryPool;
   vkCmdResetQueryPool: PFN_vkCmdResetQueryPool;
   vkCmdBeginQuery: PFN_vkCmdBeginQuery;
   vkCmdEndQuery: PFN_vkCmdEndQuery;
   vkCmdWriteTimestamp: PFN_vkCmdWriteTimestamp;
+  vkCmdClearAttachments: PFN_vkCmdClearAttachments;
 
 function VK_MAKE_VERSION(const Major, Minor, Patch: Cardinal): Cardinal; inline;
 function VK_VERSION_MAJOR(const Version: Cardinal): Cardinal; inline;
@@ -2303,10 +2330,14 @@ function LoadVulkan: Boolean;
 procedure LoadVulkanInstance(const Instance: VkInstance);
 { Populates device-level function pointers using vkGetDeviceProcAddr. }
 procedure LoadVulkanDevice(const Device: VkDevice);
+{ Unloads instance- and device-scoped function pointers when Instance is destroyed. }
+procedure UnloadVulkanInstance(const Instance: VkInstance);
 { Unloads the Vulkan library. }
 procedure FreeVulkan;
 { Returns True if Vulkan library is currently loaded. }
 function IsVulkanLoaded: Boolean;
+{ Returns True if a live VkInstance dispatch table is currently loaded. }
+function IsVulkanInstanceLoaded: Boolean;
 
 implementation
 
@@ -2337,6 +2368,11 @@ end;
 function IsVulkanLoaded: Boolean;
 begin
   Result := VulkanLibrary <> nil;
+end;
+
+function IsVulkanInstanceLoaded: Boolean;
+begin
+  Result := LoadedVulkanInstance <> nil;
 end;
 
 function LoadVulkan: Boolean;
@@ -2604,22 +2640,163 @@ begin
   Pointer(vkCreateQueryPool) := GetDevProc('vkCreateQueryPool');
   Pointer(vkDestroyQueryPool) := GetDevProc('vkDestroyQueryPool');
   Pointer(vkGetQueryPoolResults) := GetDevProc('vkGetQueryPoolResults');
+  Pointer(vkResetQueryPool) := GetDevProc('vkResetQueryPool');
+  if not Assigned(vkResetQueryPool) then
+    Pointer(vkResetQueryPool) := GetDevProc('vkResetQueryPoolEXT');
   Pointer(vkCmdResetQueryPool) := GetDevProc('vkCmdResetQueryPool');
   Pointer(vkCmdBeginQuery) := GetDevProc('vkCmdBeginQuery');
   Pointer(vkCmdEndQuery) := GetDevProc('vkCmdEndQuery');
   Pointer(vkCmdWriteTimestamp) := GetDevProc('vkCmdWriteTimestamp');
+  Pointer(vkCmdClearAttachments) := GetDevProc('vkCmdClearAttachments');
+end;
+
+procedure UnloadVulkanInstance(const Instance: VkInstance);
+begin
+  if (Instance <> nil) and (LoadedVulkanInstance <> Instance) then
+    Exit;
+  LoadedVulkanInstance := nil;
+  vkGetDeviceProcAddr := nil;
+  vkDestroyInstance := nil;
+  vkEnumeratePhysicalDevices := nil;
+  vkGetPhysicalDeviceFeatures := nil;
+  vkGetPhysicalDeviceFeatures2 := nil;
+  vkGetPhysicalDeviceProperties := nil;
+  vkGetPhysicalDeviceProperties2 := nil;
+  vkGetPhysicalDeviceFormatProperties := nil;
+  vkGetPhysicalDeviceQueueFamilyProperties := nil;
+  vkGetPhysicalDeviceMemoryProperties := nil;
+  vkGetPhysicalDeviceMemoryProperties2 := nil;
+  vkCreateDevice := nil;
+  vkDestroyDevice := nil;
+  vkEnumerateDeviceExtensionProperties := nil;
+  vkDestroySurfaceKHR := nil;
+  vkGetPhysicalDeviceSurfaceSupportKHR := nil;
+  vkGetPhysicalDeviceSurfaceCapabilitiesKHR := nil;
+  vkGetPhysicalDeviceSurfaceFormatsKHR := nil;
+  vkGetPhysicalDeviceSurfacePresentModesKHR := nil;
+  vkGetDeviceQueue := nil;
+  vkQueueSubmit := nil;
+  vkQueueWaitIdle := nil;
+  vkDeviceWaitIdle := nil;
+  vkCreateFence := nil;
+  vkDestroyFence := nil;
+  vkResetFences := nil;
+  vkWaitForFences := nil;
+  vkCreateSemaphore := nil;
+  vkDestroySemaphore := nil;
+  vkAllocateMemory := nil;
+  vkFreeMemory := nil;
+  vkMapMemory := nil;
+  vkUnmapMemory := nil;
+  vkBindBufferMemory := nil;
+  vkBindImageMemory := nil;
+  vkGetBufferMemoryRequirements := nil;
+  vkGetBufferMemoryRequirements2 := nil;
+  vkGetImageMemoryRequirements := nil;
+  vkGetImageMemoryRequirements2 := nil;
+  vkFlushMappedMemoryRanges := nil;
+  vkInvalidateMappedMemoryRanges := nil;
+  vkCreateBuffer := nil;
+  vkDestroyBuffer := nil;
+  vkCreateImage := nil;
+  vkDestroyImage := nil;
+  vkCreateImageView := nil;
+  vkDestroyImageView := nil;
+  vkCreateSampler := nil;
+  vkDestroySampler := nil;
+  vkCreateShaderModule := nil;
+  vkDestroyShaderModule := nil;
+  vkCreatePipelineLayout := nil;
+  vkDestroyPipelineLayout := nil;
+  vkCreateGraphicsPipelines := nil;
+  vkCreateComputePipelines := nil;
+  vkDestroyPipeline := nil;
+  vkCreatePipelineCache := nil;
+  vkDestroyPipelineCache := nil;
+  vkGetPipelineCacheData := nil;
+  vkCreateDescriptorSetLayout := nil;
+  vkDestroyDescriptorSetLayout := nil;
+  vkCreateDescriptorPool := nil;
+  vkDestroyDescriptorPool := nil;
+  vkResetDescriptorPool := nil;
+  vkAllocateDescriptorSets := nil;
+  vkFreeDescriptorSets := nil;
+  vkUpdateDescriptorSets := nil;
+  vkCreateCommandPool := nil;
+  vkDestroyCommandPool := nil;
+  vkResetCommandPool := nil;
+  vkAllocateCommandBuffers := nil;
+  vkFreeCommandBuffers := nil;
+  vkBeginCommandBuffer := nil;
+  vkEndCommandBuffer := nil;
+  vkResetCommandBuffer := nil;
+  vkCmdExecuteCommands := nil;
+  vkCmdBindPipeline := nil;
+  vkCmdSetViewport := nil;
+  vkCmdSetScissor := nil;
+  vkCmdSetDepthBias := nil;
+  vkCmdSetBlendConstants := nil;
+  vkCmdBindDescriptorSets := nil;
+  vkCmdBindIndexBuffer := nil;
+  vkCmdBindVertexBuffers := nil;
+  vkCmdDraw := nil;
+  vkCmdDrawIndexed := nil;
+  vkCmdDrawIndirect := nil;
+  vkCmdDrawIndexedIndirect := nil;
+  vkCmdDrawIndirectCount := nil;
+  vkCmdDrawIndexedIndirectCount := nil;
+  vkCmdDispatch := nil;
+  vkCmdDispatchIndirect := nil;
+  vkCmdPushConstants := nil;
+  vkCmdPipelineBarrier := nil;
+  vkCmdPipelineBarrier2 := nil;
+  vkCmdCopyBuffer := nil;
+  vkCmdCopyBufferToImage := nil;
+  vkCmdCopyImageToBuffer := nil;
+  vkCmdBlitImage := nil;
+  vkCmdBeginRendering := nil;
+  vkCmdEndRendering := nil;
+  vkCreateRenderPass := nil;
+  vkDestroyRenderPass := nil;
+  vkCreateFramebuffer := nil;
+  vkDestroyFramebuffer := nil;
+  vkCmdBeginRenderPass := nil;
+  vkCmdEndRenderPass := nil;
+  vkCreateSwapchainKHR := nil;
+  vkDestroySwapchainKHR := nil;
+  vkGetSwapchainImagesKHR := nil;
+  vkAcquireNextImageKHR := nil;
+  vkQueuePresentKHR := nil;
+  vkCmdBeginDebugUtilsLabelEXT := nil;
+  vkCmdEndDebugUtilsLabelEXT := nil;
+  vkCmdSetCullMode := nil;
+  vkCmdSetFrontFace := nil;
+  vkCmdSetPrimitiveTopology := nil;
+  vkCmdSetDepthTestEnable := nil;
+  vkCmdSetDepthWriteEnable := nil;
+  vkCmdSetDepthCompareOp := nil;
+  vkWaitSemaphores := nil;
+  vkSignalSemaphore := nil;
+  vkGetSemaphoreCounterValue := nil;
+  vkCreateQueryPool := nil;
+  vkDestroyQueryPool := nil;
+  vkGetQueryPoolResults := nil;
+  vkResetQueryPool := nil;
+  vkCmdResetQueryPool := nil;
+  vkCmdBeginQuery := nil;
+  vkCmdEndQuery := nil;
+  vkCmdWriteTimestamp := nil;
+  vkCmdClearAttachments := nil;
 end;
 
 procedure FreeVulkan;
 begin
+  UnloadVulkanInstance(nil);
   FreeAndNil(VulkanLibrary);
-  LoadedVulkanInstance := nil;
   vkGetInstanceProcAddr := nil;
-  vkGetDeviceProcAddr := nil;
   vkCreateInstance := nil;
-  vkDestroyInstance := nil;
-  vkCreateDevice := nil;
-  vkDestroyDevice := nil;
+  vkEnumerateInstanceExtensionProperties := nil;
+  vkEnumerateInstanceVersion := nil;
 end;
 
 finalization

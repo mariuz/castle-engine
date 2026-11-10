@@ -309,37 +309,69 @@ begin
     PipeDesc.Rasterizer.FrontFace := ffCounterClockwise;
   end;
   PipeDesc.Rasterizer.PolygonMode := pmFill;
-  if DepthTestActive then
-  begin
-    PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
-    PipeDesc.DepthStencil.DepthWriteEnable := FUseColor;
-  end else
-    PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDisabled;
   if UseCustomDepthStencilState then
-    PipeDesc.DepthStencil := CustomDepthStencilState;
-  if RenderContext <> nil then
+    PipeDesc.DepthStencil := CustomDepthStencilState
+  else
   begin
-    case RenderContext.DepthFunc of
-      dfNever:        PipeDesc.DepthStencil.DepthCompareOp := coNever;
-      dfLess:         PipeDesc.DepthStencil.DepthCompareOp := coLess;
-      dfEqual:        PipeDesc.DepthStencil.DepthCompareOp := coEqual;
-      dfLessEqual:    PipeDesc.DepthStencil.DepthCompareOp := coLessOrEqual;
-      dfGreater:      PipeDesc.DepthStencil.DepthCompareOp := coGreater;
-      dfNotEqual:     PipeDesc.DepthStencil.DepthCompareOp := coNotEqual;
-      dfGreaterEqual: PipeDesc.DepthStencil.DepthCompareOp := coGreaterOrEqual;
-      dfAlways:       PipeDesc.DepthStencil.DepthCompareOp := coAlways;
+    if DepthTestActive then
+    begin
+      PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+      PipeDesc.DepthStencil.DepthWriteEnable := FUseColor and
+        ((RenderContext = nil) or RenderContext.DepthBufferUpdate);
+    end else
+      PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDisabled;
+    if RenderContext <> nil then
+    begin
+      case RenderContext.DepthFunc of
+        dfNever:        PipeDesc.DepthStencil.DepthCompareOp := coNever;
+        dfLess:         PipeDesc.DepthStencil.DepthCompareOp := coLess;
+        dfEqual:        PipeDesc.DepthStencil.DepthCompareOp := coEqual;
+        dfLessEqual:    PipeDesc.DepthStencil.DepthCompareOp := coLessOrEqual;
+        dfGreater:      PipeDesc.DepthStencil.DepthCompareOp := coGreater;
+        dfNotEqual:     PipeDesc.DepthStencil.DepthCompareOp := coNotEqual;
+        dfGreaterEqual: PipeDesc.DepthStencil.DepthCompareOp := coGreaterOrEqual;
+        dfAlways:       PipeDesc.DepthStencil.DepthCompareOp := coAlways;
+      end;
     end;
   end;
   if ColorWriteActive then
-    PipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque
-  else
+  begin
+    if (RenderContext <> nil) and RenderContext.BlendingEnabled then
+    begin
+      PipeDesc.BlendState := TRHIBlendStateDesc.DefaultAlphaBlend;
+      PipeDesc.BlendState.SrcColorBlendFactor := TRenderContext.MapBlendSourceFactorToRHI(RenderContext.BlendingSourceFactor);
+      PipeDesc.BlendState.DstColorBlendFactor := TRenderContext.MapBlendDestFactorToRHI(RenderContext.BlendingDestinationFactor);
+      PipeDesc.BlendState.SrcAlphaBlendFactor := PipeDesc.BlendState.SrcColorBlendFactor;
+      PipeDesc.BlendState.DstAlphaBlendFactor := PipeDesc.BlendState.DstColorBlendFactor;
+    end else
+      PipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+  end else
     PipeDesc.BlendState := TRHIBlendStateDesc.DefaultColorMaskNone;
   PipeDesc.PushConstantSize := SizeOf(TMatrix4) + SizeOf(TVector4);
   PipeDesc.PushConstantStages := [ssVertex, ssFragment];
-  SetLength(PipeDesc.ColorAttachmentFormats, 1);
-  PipeDesc.ColorAttachmentFormats[0] := pfBGRA8_UNorm;
-  PipeDesc.DepthAttachmentFormat := pfD24_UNorm_S8_UInt;
-  PipeDesc.SampleCount := 1;
+  if (ActiveCommandList <> nil) and ActiveCommandList.IsRendering then
+  begin
+    if ActiveCommandList.ActiveRenderingHasColor then
+    begin
+      SetLength(PipeDesc.ColorAttachmentFormats, 1);
+      PipeDesc.ColorAttachmentFormats[0] := ActiveCommandList.ActiveRenderingColorFormat;
+    end else
+      SetLength(PipeDesc.ColorAttachmentFormats, 0);
+    if ActiveCommandList.ActiveRenderingHasDepth then
+      PipeDesc.DepthAttachmentFormat := ActiveCommandList.ActiveRenderingDepthFormat
+    else
+      PipeDesc.DepthAttachmentFormat := pfUndefined;
+    if ActiveCommandList.ActiveRenderingSampleCount > 0 then
+      PipeDesc.SampleCount := ActiveCommandList.ActiveRenderingSampleCount
+    else
+      PipeDesc.SampleCount := 1;
+  end else
+  begin
+    SetLength(PipeDesc.ColorAttachmentFormats, 1);
+    PipeDesc.ColorAttachmentFormats[0] := pfBGRA8_UNorm;
+    PipeDesc.DepthAttachmentFormat := pfD24_UNorm_S8_UInt;
+    PipeDesc.SampleCount := 1;
+  end;
   FRHIPipeline := RHIDevice.GetOrCreatePipeline(PipeDesc);
 end;
 

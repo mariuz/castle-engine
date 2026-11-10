@@ -248,6 +248,7 @@ type
     FSimulatedResults: array of UInt64;
     FQueryWritten: array of Boolean;
     FResetCount: Cardinal;
+    FHostResetCount: Cardinal;
   public
     constructor Create(const ADevice: TVulkanRHIDevice;
       const ADesc: TRHIQueryPoolDesc);
@@ -260,6 +261,7 @@ type
 
     property Handle: VkQueryPool read FHandle;
     property ResetCount: Cardinal read FResetCount;
+    property HostResetCount: Cardinal read FHostResetCount;
   end;
 
   { -------------------------------------------------------------------------- }
@@ -281,6 +283,7 @@ type
     FIndirectDrawCallCount: Cardinal;
     FIndirectCountDrawCallCount: Cardinal;
     FLastEffectiveIndirectDrawCount: Cardinal;
+    FClearAttachmentCallCount: Cardinal;
     FDynamicCullMode: TRHICullMode;
     FDynamicFrontFace: TRHIFrontFace;
     FDynamicDepthTestEnable: Boolean;
@@ -422,6 +425,7 @@ type
     property LastPushConstantStageFlags: TRHIShaderStageFlags read FLastPushConstantStageFlags;
     property LastPushConstantSize: Cardinal read FLastPushConstantSize;
     property PushConstantCallCount: Cardinal read FPushConstantCallCount;
+    property ClearAttachmentCallCount: Cardinal read FClearAttachmentCallCount;
   end;
 
   { -------------------------------------------------------------------------- }
@@ -3717,6 +3721,7 @@ type
     FSupportsExtendedDynamicState: Boolean;
     FSupportsSynchronization2: Boolean;
     FSupportsTimelineSemaphores: Boolean;
+    FSupportsHostQueryReset: Boolean;
     FMaxBindlessTextures: Cardinal;
     FPipelineCacheHits: Cardinal;
     FPipelineCacheMisses: Cardinal;
@@ -3732,7 +3737,8 @@ type
     FSync2BarrierCount: Cardinal;
     FAllocatedMemoryBytes: Int64;
 
-    procedure CreateInstance(const EnableValidation: Boolean);
+    procedure CreateInstance(const EnableValidation: Boolean;
+      const ARequireSurfaceExtensions: Boolean = True);
     procedure PickPhysicalDevice;
     procedure CreateLogicalDevice;
     procedure CreateSwapchain(const Width, Height: Cardinal);
@@ -3820,6 +3826,11 @@ type
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
       const EnableValidation: Boolean = True); reintroduce; overload;
+    { Creates a real offscreen Vulkan RHI device backed by a physical GPU or
+      software rasterizer (e.g. Mesa Lavapipe) without requiring a window surface. }
+    constructor CreateOffscreen(const EnableValidation: Boolean = False); overload;
+    class function TryCreateOffscreen(out ADevice: TVulkanRHIDevice;
+      const EnableValidation: Boolean = False): Boolean;
     { Creates a headless Vulkan RHI device instance (for offscreen/unit testing). }
     constructor CreateHeadless(const APhysicalDevice: VkPhysicalDevice;
       const ASupportsMemoryBudgetExt: Boolean = True;
@@ -4001,6 +4012,7 @@ type
     property SupportsExtendedDynamicState: Boolean read FSupportsExtendedDynamicState write SetSupportsExtendedDynamicState;
     property SupportsSynchronization2: Boolean read FSupportsSynchronization2 write SetSupportsSynchronization2;
     property SupportsTimelineSemaphores: Boolean read FSupportsTimelineSemaphores write SetSupportsTimelineSemaphores;
+    property SupportsHostQueryReset: Boolean read FSupportsHostQueryReset write FSupportsHostQueryReset;
     property MaxBindlessTextures: Cardinal read FMaxBindlessTextures write FMaxBindlessTextures;
     property BindlessTextureManager: TCastleVulkanBindlessTextureManager read FBindlessTextureManager;
     property TimestampProfiler: TCastleVulkanTimestampProfiler read FTimestampProfiler;
@@ -4620,6 +4632,7 @@ begin
   Result := FNV1aOffsetBasis64;
   HashUInt64FNV1a(Result, PtrUInt(ADesc.FragmentShader));
   HashBytesFNV1a(Result, ADesc.DepthStencil, SizeOf(ADesc.DepthStencil));
+  HashBytesFNV1a(Result, ADesc.DepthAttachmentFormat, SizeOf(ADesc.DepthAttachmentFormat));
   HashBytesFNV1a(Result, ADesc.SampleCount, SizeOf(ADesc.SampleCount));
   HashBytesFNV1a(Result, ADesc.PushConstantSize, SizeOf(ADesc.PushConstantSize));
   HashBytesFNV1a(Result, ADesc.PushConstantStages, SizeOf(ADesc.PushConstantStages));
@@ -5600,8 +5613,12 @@ begin
     NegotiatedDesc.SampleCount := 1;
   if ADevice <> nil then
   begin
-    NegotiatedDesc.Format := NegotiateOptimalPixelFormat(
-      ADesc.Format, ADesc.Usage, ADevice.PhysicalDevice);
+    if (ADevice.Handle <> nil) or (not IsVulkanInstanceLoaded) then
+      NegotiatedDesc.Format := NegotiateOptimalPixelFormat(
+        ADesc.Format, ADesc.Usage, ADevice.PhysicalDevice)
+    else
+      NegotiatedDesc.Format := NegotiateOptimalPixelFormat(
+        ADesc.Format, ADesc.Usage, nil);
     if ADevice.Capabilities.MaxFramebufferSampleCount > 0 then
       NegotiatedDesc.SampleCount := ClampSampleCountToCapabilities(
         NegotiatedDesc.SampleCount, ADevice.Capabilities.MaxFramebufferSampleCount);
@@ -5737,6 +5754,7 @@ end;
 destructor TVulkanRHITexture.Destroy;
 var
   I: Integer;
+  SubDummyAlloc: TVulkanMemoryAllocation;
 begin
   if VulkanDevice <> nil then
   begin
@@ -5748,13 +5766,12 @@ begin
       VulkanDevice.BindlessTextureManager.UnregisterTexture(Self);
     if VulkanDevice.StagingUploader <> nil then
       VulkanDevice.StagingUploader.CancelPendingUploadsForTexture(Self);
-    if (VulkanDevice.Handle <> nil) and Assigned(vkDestroyImageView) then
-    begin
-      for I := 0 to High(FSubresourceViews) do
-        if (FSubresourceViews[I].View <> VK_NULL_HANDLE) and
-           (FSubresourceViews[I].View <> FImageView) then
-          vkDestroyImageView(VulkanDevice.Handle, FSubresourceViews[I].View, nil);
-    end;
+    FillChar(SubDummyAlloc, SizeOf(SubDummyAlloc), 0);
+    for I := 0 to High(FSubresourceViews) do
+      if (FSubresourceViews[I].View <> VK_NULL_HANDLE) and
+         (FSubresourceViews[I].View <> FImageView) then
+        VulkanDevice.DeferOrDestroyTexture(
+          VK_NULL_HANDLE, FSubresourceViews[I].View, SubDummyAlloc, VK_NULL_HANDLE, 0);
     SetLength(FSubresourceViews, 0);
     if FOwnsImage then
       VulkanDevice.DeferOrDestroyTexture(FImage, FImageView, FAllocation, FDeviceMemory, FAllocatedSize)
@@ -5787,7 +5804,8 @@ begin
     ClampedLayer := Min(AArrayLayer, Max(Cardinal(1), FDesc.DepthOrArrayLayers) - 1);
 
   if (FDesc.Dimension = td2D) and (FDesc.MipLevels <= 1) and
-     (FDesc.DepthOrArrayLayers <= 1) and (ClampedMip = 0) and (ClampedLayer = 0) then
+     (FDesc.DepthOrArrayLayers <= 1) and (ClampedMip = 0) and (ClampedLayer = 0) and
+     (FViewAspectMask = FAspectMask) then
     Exit(FImageView);
 
   for I := 0 to High(FSubresourceViews) do
@@ -6802,6 +6820,8 @@ begin
   if Length(ColorFormats) > 0 then
     RenderingInfo.pColorAttachmentFormats := @ColorFormats[0];
   RenderingInfo.depthAttachmentFormat := RHIToVkFormat(ADesc.DepthAttachmentFormat);
+  if ADesc.DepthAttachmentFormat in [pfD24_UNorm_S8_UInt, pfD32_Float_S8_UInt] then
+    RenderingInfo.stencilAttachmentFormat := RenderingInfo.depthAttachmentFormat;
 
   { 6. Create Graphics Pipeline }
   FillChar(PipelineInfo, SizeOf(PipelineInfo), 0);
@@ -6952,6 +6972,11 @@ begin
       PoolInfo.queryType := VK_QUERY_TYPE_OCCLUSION;
     PoolInfo.queryCount := Count;
     CheckVk(vkCreateQueryPool(ADevice.Handle, @PoolInfo, nil, @FHandle), 'vkCreateQueryPool');
+    if ADevice.SupportsHostQueryReset and Assigned(vkResetQueryPool) then
+    begin
+      vkResetQueryPool(ADevice.Handle, FHandle, 0, Count);
+      Inc(FHostResetCount);
+    end;
   end else
     FHandle := VkQueryPool(PtrUInt(Self));
 end;
@@ -7097,6 +7122,7 @@ begin
   FLastPushConstantStageFlags := [];
   FLastPushConstantSize := 0;
   FPushConstantCallCount := 0;
+  FClearAttachmentCallCount := 0;
   FDynamicBlendConstants := Vector4(1.0, 1.0, 1.0, 1.0);
   FBlendConstantsUpdateCount := 0;
   FIsRendering := False;
@@ -7276,9 +7302,23 @@ begin
   if (FDevice <> nil) and (FDevice.StagingUploader <> nil) and (Level = cllPrimary) then
     FDevice.StagingUploader.FlushPendingUploads(Self);
 
+  { On real Vulkan devices, ensure attachment images are transitioned into attachment-optimal layouts
+    before beginning the render pass instance }
+  if FHandle <> nil then
+  begin
+    for I := 0 to High(Info.ColorAttachments) do
+      if (Info.ColorAttachments[I].Texture <> nil) and
+         (Info.ColorAttachments[I].Texture.CurrentState <> rsColorAttachment) then
+        TransitionTexture(Info.ColorAttachments[I].Texture, rsColorAttachment);
+    if Info.HasDepthAttachment and (Info.DepthAttachment.Texture <> nil) and
+       (Info.DepthAttachment.Texture.CurrentState <> rsDepthStencilWrite) then
+      TransitionTexture(Info.DepthAttachment.Texture, rsDepthStencilWrite);
+  end;
+
   FIsRendering := True;
   FActiveRenderingInfo := Info;
   FActiveRenderingInfo.ColorAttachments := Copy(Info.ColorAttachments);
+  FDynamicScissorRect := Info.RenderArea;
   FActiveRenderingHasColor := (Length(Info.ColorAttachments) > 0) and (Info.ColorAttachments[0].Texture <> nil);
   if FActiveRenderingHasColor then
   begin
@@ -7568,6 +7608,8 @@ begin
     end;
 
     RenderInfo.pDepthAttachment := @DepthAttachment;
+    if Info.DepthAttachment.Texture.Desc.Format in [pfD24_UNorm_S8_UInt, pfD32_Float_S8_UInt] then
+      RenderInfo.pStencilAttachment := @DepthAttachment;
   end;
 
   if HasAnyResolve and (FDevice <> nil) then
@@ -7596,10 +7638,62 @@ procedure TVulkanRHICommandList.ClearAttachments(const ClearColorBuf: Boolean; c
   const ClearStencilBuf: Boolean; const ClearStencil: Byte);
 var
   ColorTarget, DepthTarget: TRHITexture;
+  ClearAtts: array[0..8] of VkClearAttachment;
+  ClearRect: VkClearRect;
+  ClearAttCount: Cardinal;
+  DepthStencilAspect: VkImageAspectFlags;
   I: Integer;
 begin
   if FDevice = nil then
     Exit;
+
+  if FIsRendering then
+  begin
+    Inc(FClearAttachmentCallCount);
+    if (FHandle <> nil) and Assigned(vkCmdClearAttachments) then
+    begin
+      ClearAttCount := 0;
+      FillChar(ClearAtts, SizeOf(ClearAtts), 0);
+      if ClearColorBuf then
+      begin
+        for I := 0 to Min(7, High(FActiveRenderingInfo.ColorAttachments)) do
+          if FActiveRenderingInfo.ColorAttachments[I].Texture <> nil then
+          begin
+            ClearAtts[ClearAttCount].aspectMask := VK_IMAGE_ASPECT_COLOR_BIT;
+            ClearAtts[ClearAttCount].colorAttachment := Cardinal(I);
+            Move(ClearColor.Data, ClearAtts[ClearAttCount].clearValue.color.float32, SizeOf(Single) * 4);
+            Inc(ClearAttCount);
+          end;
+      end;
+      if (ClearDepthBuf or ClearStencilBuf) and FActiveRenderingHasDepth then
+      begin
+        DepthStencilAspect := 0;
+        if ClearDepthBuf then
+          DepthStencilAspect := DepthStencilAspect or VK_IMAGE_ASPECT_DEPTH_BIT;
+        if ClearStencilBuf and
+           (FActiveRenderingDepthFormat in [pfD24_UNorm_S8_UInt, pfD32_Float_S8_UInt]) then
+          DepthStencilAspect := DepthStencilAspect or VK_IMAGE_ASPECT_STENCIL_BIT;
+        if DepthStencilAspect <> 0 then
+        begin
+          ClearAtts[ClearAttCount].aspectMask := DepthStencilAspect;
+          ClearAtts[ClearAttCount].clearValue.depthStencil.depth := ClearDepth;
+          ClearAtts[ClearAttCount].clearValue.depthStencil.stencil := ClearStencil;
+          Inc(ClearAttCount);
+        end;
+      end;
+      if ClearAttCount > 0 then
+      begin
+        FillChar(ClearRect, SizeOf(ClearRect), 0);
+        ClearRect.rect.offset.x := Max(0, FDynamicScissorRect.Left);
+        ClearRect.rect.offset.y := Max(0, FDynamicScissorRect.Bottom);
+        ClearRect.rect.extent.width := Max(1, FDynamicScissorRect.Width);
+        ClearRect.rect.extent.height := Max(1, FDynamicScissorRect.Height);
+        ClearRect.baseArrayLayer := 0;
+        ClearRect.layerCount := 1;
+        vkCmdClearAttachments(FHandle, ClearAttCount, @ClearAtts[0], 1, @ClearRect);
+      end;
+    end;
+  end;
 
   if (FDevice.Handle = nil) then
   begin
@@ -7880,6 +7974,19 @@ begin
   begin
     VkPool.FQueryWritten[I] := False;
     VkPool.FSimulatedResults[I] := 0;
+  end;
+  { VUID-vkCmdResetQueryPool-renderpass: vkCmdResetQueryPool is illegal inside an active
+    render pass instance. When called mid-pass (e.g. TShape.OcclusionQueryId lazy init
+    inside TCastleViewport), use VK_EXT_host_query_reset / Vulkan 1.2 vkResetQueryPool. }
+  if FIsRendering then
+  begin
+    if (FDevice <> nil) and FDevice.SupportsHostQueryReset then
+    begin
+      if (FDevice.Handle <> nil) and (VkPool.Handle <> VK_NULL_HANDLE) and Assigned(vkResetQueryPool) then
+        vkResetQueryPool(FDevice.Handle, VkPool.Handle, FirstQuery, QueryCount);
+      Inc(VkPool.FHostResetCount);
+    end;
+    Exit;
   end;
   if (FHandle <> nil) and Assigned(vkCmdResetQueryPool) then
     vkCmdResetQueryPool(FHandle, VkPool.Handle, FirstQuery, QueryCount);
@@ -17900,6 +18007,54 @@ begin
   CreateSwapchain(InitialWidth, InitialHeight);
 end;
 
+constructor TVulkanRHIDevice.CreateOffscreen(const EnableValidation: Boolean);
+begin
+  inherited Create;
+  FPipelineMap := TVulkanPipelineMap.Create([doOwnsValues]);
+  FComputePipelineMap := TVulkanComputePipelineMap.Create([doOwnsValues]);
+  FVertexInputLibMap := TVulkanPipelineLibraryMap.Create;
+  FPreRasterLibMap := TVulkanPipelineLibraryMap.Create;
+  FFragmentShaderLibMap := TVulkanPipelineLibraryMap.Create;
+  FFragmentOutputLibMap := TVulkanPipelineLibraryMap.Create;
+  FRenderPassMap := TVulkanRenderPassMap.Create;
+  FFramebufferMap := TVulkanFramebufferMap.Create;
+  FSupportsDynamicRendering := True;
+  FAntiAliasing := aaNone;
+  FSampleCount := 1;
+
+  LoadVulkan;
+  CreateInstance(EnableValidation, False);
+  PickPhysicalDevice;
+  CreateLogicalDevice;
+  FMemoryAllocator := TCastleVulkanMemoryAllocator.Create(FPhysicalDevice, FDevice);
+  FMemoryAllocator.SupportsMemoryBudgetExt := FSupportsMemoryBudgetExt;
+  FStagingUploader := TCastleVulkanStagingUploader.Create(Self);
+  CreateDescriptorPool;
+  if FSupportsBindlessTextures and (FMaxBindlessTextures > 0) then
+    FBindlessTextureManager := TCastleVulkanBindlessTextureManager.Create(
+      Self, FMaxBindlessTextures, FSupportsBindlessUpdateAfterBind);
+  FTimestampProfiler := TCastleVulkanTimestampProfiler.Create(Self);
+  CreateFrameContexts;
+end;
+
+class function TVulkanRHIDevice.TryCreateOffscreen(out ADevice: TVulkanRHIDevice;
+  const EnableValidation: Boolean): Boolean;
+begin
+  ADevice := nil;
+  try
+    ADevice := TVulkanRHIDevice.CreateOffscreen(EnableValidation);
+    Result := (ADevice <> nil) and (ADevice.Handle <> nil);
+    if not Result then
+      FreeAndNil(ADevice);
+  except
+    on Exception do
+    begin
+      FreeAndNil(ADevice);
+      Result := False;
+    end;
+  end;
+end;
+
 constructor TVulkanRHIDevice.CreateHeadless(const APhysicalDevice: VkPhysicalDevice;
   const ASupportsMemoryBudgetExt: Boolean;
   const ASupportsDynamicRendering: Boolean;
@@ -17930,6 +18085,7 @@ begin
   FCapabilities.SupportsComputeShaders := True;
   FCapabilities.SupportsMultiDrawIndirect := True;
   FCapabilities.SupportsDrawIndirectCount := ADeviceApiVersion >= VK_API_VERSION_1_2;
+  FCapabilities.SupportsBCCompression := True;
   FCapabilities.TimestampPeriodNanoseconds := 1.0;
   FPhysicalDevice := APhysicalDevice;
   FInstanceApiVersion := ADeviceApiVersion;
@@ -17943,6 +18099,7 @@ begin
   FSupportsExtendedDynamicState := ASupportsExtendedDynamicState;
   FSupportsSynchronization2 := ADeviceApiVersion >= VK_API_VERSION_1_3;
   FSupportsTimelineSemaphores := ADeviceApiVersion >= VK_API_VERSION_1_2;
+  FSupportsHostQueryReset := ADeviceApiVersion >= VK_API_VERSION_1_2;
   FCapabilities.SupportsExtendedDynamicState := FSupportsExtendedDynamicState;
   FCapabilities.SupportsSynchronization2 := FSupportsSynchronization2;
   FCapabilities.SupportsTimelineSemaphores := FSupportsTimelineSemaphores;
@@ -18737,12 +18894,16 @@ begin
   if (FInstance <> nil) and (FSurface <> VK_NULL_HANDLE) then
     vkDestroySurfaceKHR(FInstance, FSurface, nil);
   if FInstance <> nil then
+  begin
     vkDestroyInstance(FInstance, nil);
+    UnloadVulkanInstance(FInstance);
+  end;
 
   inherited;
 end;
 
-procedure TVulkanRHIDevice.CreateInstance(const EnableValidation: Boolean);
+procedure TVulkanRHIDevice.CreateInstance(const EnableValidation: Boolean;
+  const ARequireSurfaceExtensions: Boolean);
 const
   FallbackVersions: array[0..3] of Cardinal = (
     VK_API_VERSION_1_3,
@@ -18778,7 +18939,10 @@ begin
   AppInfo.engineVersion := FInstanceApiVersion;
   AppInfo.apiVersion := FInstanceApiVersion;
 
-  ExtNames := GetRequiredVulkanInstanceExtensions;
+  if ARequireSurfaceExtensions then
+    ExtNames := GetRequiredVulkanInstanceExtensions
+  else
+    SetLength(ExtNames, 0);
   SetLength(ExtPtrs, Length(ExtNames));
   for I := 0 to High(ExtNames) do
     ExtPtrs[I] := PAnsiChar(ExtNames[I]);
@@ -18835,6 +18999,7 @@ var
   ExtDynFeatures: VkPhysicalDeviceExtendedDynamicStateFeaturesEXT;
   Sync2Features: VkPhysicalDeviceSynchronization2Features;
   TimelineFeatures: VkPhysicalDeviceTimelineSemaphoreFeatures;
+  HostQueryResetFeatures: VkPhysicalDeviceHostQueryResetFeatures;
   Props2: VkPhysicalDeviceProperties2;
   GplProps: VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT;
   DescIdxProps: VkPhysicalDeviceDescriptorIndexingProperties;
@@ -18981,6 +19146,16 @@ begin
       vkGetPhysicalDeviceFeatures2(FPhysicalDevice, @Features2);
       HasTimelineFeature := TimelineFeatures.timelineSemaphore = VK_TRUE;
     end;
+    if (FDeviceApiVersion >= VK_API_VERSION_1_2) or IsDeviceExtensionSupported(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME) then
+    begin
+      FillChar(HostQueryResetFeatures, SizeOf(HostQueryResetFeatures), 0);
+      HostQueryResetFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES;
+      FillChar(Features2, SizeOf(Features2), 0);
+      Features2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      Features2.pNext := @HostQueryResetFeatures;
+      vkGetPhysicalDeviceFeatures2(FPhysicalDevice, @Features2);
+      FSupportsHostQueryReset := HostQueryResetFeatures.hostQueryReset = VK_TRUE;
+    end;
   end;
 
   ResolveExtendedDynamicStateAndSync2Config(
@@ -19044,7 +19219,7 @@ var
   ExtStr: AnsiString;
 begin
   Result := False;
-  if (FPhysicalDevice = nil) or not Assigned(vkEnumerateDeviceExtensionProperties) then
+  if (FInstance = nil) or (FPhysicalDevice = nil) or not Assigned(vkEnumerateDeviceExtensionProperties) then
     Exit;
   ExtCount := 0;
   if vkEnumerateDeviceExtensionProperties(FPhysicalDevice, nil, @ExtCount, nil) <> VK_SUCCESS then
@@ -19077,6 +19252,7 @@ var
   ExtDynFeatures: VkPhysicalDeviceExtendedDynamicStateFeaturesEXT;
   Sync2Features: VkPhysicalDeviceSynchronization2Features;
   TimelineFeatures: VkPhysicalDeviceTimelineSemaphoreFeatures;
+  HostQueryResetFeatures: VkPhysicalDeviceHostQueryResetFeatures;
   ReqDynRenderExts, ReqGplExts, ReqBindlessExts, ReqExtDynSync2Exts: TAnsiStringArray;
   DeviceExts: array[0..23] of PAnsiChar;
   CreateInfo: VkDeviceCreateInfo;
@@ -19148,8 +19324,22 @@ begin
   TimelineFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
   TimelineFeatures.timelineSemaphore := VK_TRUE;
 
-  DeviceExts[0] := VK_KHR_swapchain;
-  ExtCount := 1;
+  FillChar(HostQueryResetFeatures, SizeOf(HostQueryResetFeatures), 0);
+  HostQueryResetFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES;
+  HostQueryResetFeatures.hostQueryReset := VK_TRUE;
+
+  ExtCount := 0;
+  if (FSurface <> VK_NULL_HANDLE) or IsDeviceExtensionSupported(VK_KHR_swapchain) then
+  begin
+    DeviceExts[ExtCount] := VK_KHR_swapchain;
+    Inc(ExtCount);
+  end;
+  if FSupportsHostQueryReset and (FDeviceApiVersion < VK_API_VERSION_1_2) and
+     IsDeviceExtensionSupported(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME) then
+  begin
+    DeviceExts[ExtCount] := VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME;
+    Inc(ExtCount);
+  end;
   FSupportsMemoryBudgetExt := IsDeviceExtensionSupported(VK_EXT_memory_budget);
   if FSupportsMemoryBudgetExt then
   begin
@@ -19229,6 +19419,11 @@ begin
   end;
 
   NextChainHead := nil;
+  if FSupportsHostQueryReset then
+  begin
+    HostQueryResetFeatures.pNext := NextChainHead;
+    NextChainHead := @HostQueryResetFeatures;
+  end;
   if FSupportsTimelineSemaphores then
   begin
     TimelineFeatures.pNext := NextChainHead;
@@ -19541,6 +19736,8 @@ begin
   FillChar(RenderingInfo, SizeOf(RenderingInfo), 0);
   RenderingInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
   RenderingInfo.depthAttachmentFormat := RHIToVkFormat(ADesc.DepthAttachmentFormat);
+  if ADesc.DepthAttachmentFormat in [pfD24_UNorm_S8_UInt, pfD32_Float_S8_UInt] then
+    RenderingInfo.stencilAttachmentFormat := RenderingInfo.depthAttachmentFormat;
 
   FillChar(GplInfo, SizeOf(GplInfo), 0);
   GplInfo.sType := VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT;
@@ -19654,6 +19851,8 @@ begin
   if Length(ColorFormats) > 0 then
     RenderingInfo.pColorAttachmentFormats := @ColorFormats[0];
   RenderingInfo.depthAttachmentFormat := RHIToVkFormat(ADesc.DepthAttachmentFormat);
+  if ADesc.DepthAttachmentFormat in [pfD24_UNorm_S8_UInt, pfD32_Float_S8_UInt] then
+    RenderingInfo.stencilAttachmentFormat := RenderingInfo.depthAttachmentFormat;
 
   FillChar(GplInfo, SizeOf(GplInfo), 0);
   GplInfo.sType := VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT;
@@ -19772,8 +19971,15 @@ begin
     Attachments[DepthIdx].samples := SampleBits;
     Attachments[DepthIdx].loadOp := MapLoadOp(ADepthLoadOp);
     Attachments[DepthIdx].storeOp := MapStoreOp(ADepthStoreOp);
-    Attachments[DepthIdx].stencilLoadOp := VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    Attachments[DepthIdx].stencilStoreOp := VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    if ADepthFormat in [pfD24_UNorm_S8_UInt, pfD32_Float_S8_UInt] then
+    begin
+      Attachments[DepthIdx].stencilLoadOp := MapLoadOp(ADepthLoadOp);
+      Attachments[DepthIdx].stencilStoreOp := MapStoreOp(ADepthStoreOp);
+    end else
+    begin
+      Attachments[DepthIdx].stencilLoadOp := VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+      Attachments[DepthIdx].stencilStoreOp := VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    end;
     Attachments[DepthIdx].initialLayout := VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     Attachments[DepthIdx].finalLayout := VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
@@ -19873,9 +20079,15 @@ end;
 
 function TVulkanRHIDevice.QueryMemoryBudget(out AUsedBytes, ABudgetBytes: UInt64;
   out AUsedMB, ABudgetMB: Cardinal): Boolean;
+var
+  PhysDev: VkPhysicalDevice;
 begin
+  if (FDevice <> nil) or (not IsVulkanInstanceLoaded) then
+    PhysDev := FPhysicalDevice
+  else
+    PhysDev := nil;
   Result := QueryPhysicalDeviceMemoryBudget(
-    FPhysicalDevice, FSupportsMemoryBudgetExt,
+    PhysDev, FSupportsMemoryBudgetExt,
     UInt64(Max(Int64(0), FAllocatedMemoryBytes)),
     AUsedBytes, ABudgetBytes, AUsedMB, ABudgetMB);
 end;
@@ -20244,7 +20456,8 @@ begin
     FBindlessTextureManager.FlushPendingUpdates;
 
   { Ensure swapchain backbuffer is transitioned to VK_IMAGE_LAYOUT_PRESENT_SRC_KHR }
-  if GetSwapchainColorTexture <> nil then
+  if (FSwapchain <> VK_NULL_HANDLE) and (FActiveColorTarget = nil) and
+     (GetSwapchainColorTexture <> nil) then
     Frame.CommandList.TransitionTexture(GetSwapchainColorTexture, rsPresent);
   Frame.CommandList.EndRecording;
 
@@ -20277,6 +20490,15 @@ begin
 
       vkQueuePresentKHR(FPresentQueue, @PresentInfo);
     end;
+  end else
+  if (FDevice <> nil) and (FSwapchain = VK_NULL_HANDLE) and Assigned(vkQueueSubmit) then
+  begin
+    CmdHandle := Frame.CommandList.Handle;
+    FillChar(SubmitInfo, SizeOf(SubmitInfo), 0);
+    SubmitInfo.sType := VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    SubmitInfo.commandBufferCount := 1;
+    SubmitInfo.pCommandBuffers := @CmdHandle;
+    CheckVk(vkQueueSubmit(FGraphicsQueue, 1, @SubmitInfo, Frame.InFlightFence), 'vkQueueSubmit(Offscreen)');
   end;
 
   FFrameIndex := (FFrameIndex + 1) mod MaxFramesInFlight;
@@ -20437,6 +20659,8 @@ begin
   if FPipelineMap.TryGetValue(HashKey, FoundPipeline) then
   begin
     Inc(FPipelineCacheHits);
+    if FSupportsExtendedDynamicState then
+      FoundPipeline.UpdateDynamicStateDesc(ADesc);
   end else
   begin
     Inc(FPipelineCacheMisses);
@@ -20688,11 +20912,13 @@ var
   StagingBuf: TVulkanRHIBuffer;
   Cmd: VkCommandBuffer;
   Region: VkBufferImageCopy;
+  Barrier: VkImageMemoryBarrier;
+  SrcStage: VkPipelineStageFlags;
   ByteSize: PtrUInt;
   MappedPixels: Pointer;
   RowY, ColX, SrcX, SrcY, SrcW, SrcH: Integer;
   SrcIndex, DstIndex, PixelIndex, TotalPixels: PtrUInt;
-  DstPtr: PByte;
+  SrcBytePtr, DstPtr: PByte;
   DepthFloatPtr: PSingle;
   DepthU16Ptr: PWord;
   DepthU32Ptr: PCardinal;
@@ -20726,6 +20952,8 @@ begin
     Exit;
   end;
 
+  if Assigned(vkDeviceWaitIdle) then
+    vkDeviceWaitIdle(FDevice);
   FlushStagingUploads;
   IsDepth := (VkTex.AspectMask and VK_IMAGE_ASPECT_DEPTH_BIT) <> 0;
   TotalPixels := PtrUInt(ReadArea.Width) * PtrUInt(ReadArea.Height);
@@ -20737,6 +20965,24 @@ begin
   StagingBuf := TVulkanRHIBuffer.Create(Self, StagingDesc, nil);
   try
     Cmd := BeginSingleTimeCommands;
+    if (VkTex.CurrentState <> rsTransferSrc) and Assigned(vkCmdPipelineBarrier) then
+    begin
+      FillChar(Barrier, SizeOf(Barrier), 0);
+      Barrier.sType := VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      RHIStateToVkLayoutAndAccess(VkTex.CurrentState, Barrier.oldLayout, Barrier.srcAccessMask, SrcStage);
+      Barrier.newLayout := VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      Barrier.dstAccessMask := VK_ACCESS_TRANSFER_READ_BIT;
+      Barrier.srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+      Barrier.dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+      Barrier.image := VkTex.Image;
+      Barrier.subresourceRange.aspectMask := VkTex.AspectMask;
+      Barrier.subresourceRange.baseMipLevel := 0;
+      Barrier.subresourceRange.levelCount := Max(Cardinal(1), VkTex.Desc.MipLevels);
+      Barrier.subresourceRange.baseArrayLayer := 0;
+      Barrier.subresourceRange.layerCount := Max(Cardinal(1), VkTex.Desc.DepthOrArrayLayers);
+      vkCmdPipelineBarrier(Cmd, SrcStage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nil, 0, nil, 1, @Barrier);
+      VkTex.CurrentState := rsTransferSrc;
+    end;
     FillChar(Region, SizeOf(Region), 0);
     if IsDepth then
       Region.imageSubresource.aspectMask := VK_IMAGE_ASPECT_DEPTH_BIT
@@ -20792,6 +21038,18 @@ begin
             DstPtr[PixelIndex * 4 + 2] := DByte;
             DstPtr[PixelIndex * 4 + 3] := 255;
           end;
+        end;
+      end else
+      if VkTex.Desc.Format in [pfBGRA8_UNorm, pfBGRA8_sRGB] then
+      begin
+        SrcBytePtr := PByte(MappedPixels);
+        DstPtr := PByte(Result.RawPixels);
+        for PixelIndex := 0 to TotalPixels - 1 do
+        begin
+          DstPtr[PixelIndex * 4 + 0] := SrcBytePtr[PixelIndex * 4 + 2];
+          DstPtr[PixelIndex * 4 + 1] := SrcBytePtr[PixelIndex * 4 + 1];
+          DstPtr[PixelIndex * 4 + 2] := SrcBytePtr[PixelIndex * 4 + 0];
+          DstPtr[PixelIndex * 4 + 3] := SrcBytePtr[PixelIndex * 4 + 3];
         end;
       end else
         Move(MappedPixels^, Result.RawPixels^, ByteSize);

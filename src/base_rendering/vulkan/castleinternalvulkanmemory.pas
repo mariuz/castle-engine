@@ -698,7 +698,8 @@ begin
   if FMaxMemoryAllocationCount = 0 then
     FMaxMemoryAllocationCount := WINDOWS_DEFAULT_MAX_MEMORY_ALLOCATIONS;
 
-  if (FPhysicalDevice <> nil) and Assigned(vkGetPhysicalDeviceMemoryProperties) and
+  if ((FDevice <> nil) or (not IsVulkanInstanceLoaded)) and (FPhysicalDevice <> nil) and
+     Assigned(vkGetPhysicalDeviceMemoryProperties) and
      Assigned(vkGetPhysicalDeviceProperties) then
   begin
     vkGetPhysicalDeviceMemoryProperties(FPhysicalDevice, @FMemProperties);
@@ -1360,6 +1361,7 @@ var
   I, J: Integer;
   IsLinear: Boolean;
   Pool: TCastleVulkanBlockList;
+  DummyBudget: VkPhysicalDeviceMemoryBudgetPropertiesEXT;
 begin
   FillChar(Result, SizeOf(Result), 0);
   FLock.Acquire;
@@ -1388,10 +1390,20 @@ begin
         end;
       end;
 
-    Result.SupportsMemoryBudgetExtension := QueryPhysicalDeviceMemoryBudget(
-      FPhysicalDevice, FSupportsMemoryBudgetExt, Result.TotalUsedBytes,
-      Result.DeviceMemoryUsedBytes, Result.DeviceMemoryBudgetBytes,
-      Result.DeviceMemoryUsedMB, Result.DeviceMemoryBudgetMB);
+    if (FDevice <> nil) or (not IsVulkanInstanceLoaded) then
+      Result.SupportsMemoryBudgetExtension := QueryPhysicalDeviceMemoryBudget(
+        FPhysicalDevice, FSupportsMemoryBudgetExt, Result.TotalUsedBytes,
+        Result.DeviceMemoryUsedBytes, Result.DeviceMemoryBudgetBytes,
+        Result.DeviceMemoryUsedMB, Result.DeviceMemoryBudgetMB)
+    else
+    begin
+      FillChar(DummyBudget, SizeOf(DummyBudget), 0);
+      AggregateDeviceLocalMemoryBudget(
+        FMemProperties, DummyBudget, False, Result.TotalUsedBytes,
+        Result.DeviceMemoryUsedBytes, Result.DeviceMemoryBudgetBytes,
+        Result.DeviceMemoryUsedMB, Result.DeviceMemoryBudgetMB);
+      Result.SupportsMemoryBudgetExtension := False;
+    end;
   finally
     FLock.Release;
   end;

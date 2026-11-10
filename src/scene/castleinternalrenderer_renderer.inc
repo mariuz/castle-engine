@@ -82,6 +82,17 @@
 
     {$I castleinternalrenderer_surfacetextures.inc}
   private
+    type
+      TRHISceneStateSlot = record
+        SceneBlock: TCastleSceneUniformBlock;
+        LightsBlock: TCastleLightsUniformBlock;
+        ShadowMapTextures: array[0..3] of TRHITexture;
+        ShadowMapSamplers: array[0..3] of TRHISampler;
+        SceneBuffer: TRHIBuffer;
+        LightsBuffer: TRHIBuffer;
+        DescriptorSet: TRHIDescriptorSet;
+      end;
+  private
     { ----------------------------------------------------------------- }
 
     { Available between RenderBegin / RenderEnd. }
@@ -89,6 +100,11 @@
     FRHISceneBuffer: TRHIBuffer;
     FRHISceneDescriptorSetLayout: TRHIDescriptorSetLayout;
     FRHISceneDescriptorSet: TRHIDescriptorSet;
+    FRHISceneSlots: array of TRHISceneStateSlot;
+    FRHIActiveSceneSlot: Integer;
+    FNextRHISceneSlotEvict: Cardinal;
+    FSceneUniformBlockInitialized: Boolean;
+    FCurrentShapeLighting: Boolean;
     FRHIShadowMap0Texture: TRHITexture;
     FRHIShadowMap0Sampler: TRHISampler;
     FRHIShadowMapTextures: array[0..3] of TRHITexture;
@@ -124,6 +140,8 @@
     FWireframePass: TWireframeRenderingPass;
     FUserPass: TUserRenderingPass;
 
+    procedure FreeRHISceneSlots(const ACanDestroyHandles: Boolean);
+    function GetRHISceneSlotCount: Cardinal;
     function GetRHIShadowMapTexture(const ASlot: Cardinal): TRHITexture;
     function GetRHIShadowMapSampler(const ASlot: Cardinal): TRHISampler;
     procedure SetWireframePass(const Value: TWireframeRenderingPass);
@@ -288,9 +306,14 @@
     function GetOrCreateShapePipeline(const AShape: TX3DRendererShape;
       const ARenderOptions: TCastleRenderOptions): TRHIPipeline;
 
+    function GetRHISceneSlotSceneBlock(const AIndex: Cardinal): TCastleSceneUniformBlock;
+    function GetRHISceneSlotLightsBlock(const AIndex: Cardinal): TCastleLightsUniformBlock;
+    function GetRHISceneSlotDescriptorSet(const AIndex: Cardinal): TRHIDescriptorSet;
+
     property RHISceneBuffer: TRHIBuffer read FRHISceneBuffer;
     property RHISceneDescriptorSetLayout: TRHIDescriptorSetLayout read FRHISceneDescriptorSetLayout;
     property RHISceneDescriptorSet: TRHIDescriptorSet read FRHISceneDescriptorSet;
+    property RHISceneSlotCount: Cardinal read GetRHISceneSlotCount;
     property RHIShadowMap0Texture: TRHITexture read FRHIShadowMap0Texture;
     property RHIShadowMap0Sampler: TRHISampler read FRHIShadowMap0Sampler;
     property RHIShadowMapTexture[const ASlot: Cardinal]: TRHITexture read GetRHIShadowMapTexture;
@@ -313,31 +336,84 @@ begin
   inherited;
   TextureTransformUnitsUsedMore := TInt32List.Create;
   PreparedShader := TShader.Create;
+  FRHIActiveSceneSlot := -1;
+  FCurrentShapeLighting := True;
+end;
+
+procedure TRenderer.FreeRHISceneSlots(const ACanDestroyHandles: Boolean);
+var
+  I: Integer;
+begin
+  FRHISceneBuffer := nil;
+  FRHISceneDescriptorSet := nil;
+  FRHIActiveSceneSlot := -1;
+  FNextRHISceneSlotEvict := 0;
+  for I := 0 to High(FRHISceneSlots) do
+  begin
+    if ACanDestroyHandles then
+    begin
+      FreeAndNil(FRHISceneSlots[I].DescriptorSet);
+      FreeAndNil(FRHISceneSlots[I].SceneBuffer);
+      FreeAndNil(FRHISceneSlots[I].LightsBuffer);
+    end else
+    begin
+      FRHISceneSlots[I].DescriptorSet := nil;
+      FRHISceneSlots[I].SceneBuffer := nil;
+      FRHISceneSlots[I].LightsBuffer := nil;
+    end;
+  end;
+  SetLength(FRHISceneSlots, 0);
+end;
+
+function TRenderer.GetRHISceneSlotCount: Cardinal;
+begin
+  Result := Length(FRHISceneSlots);
+end;
+
+function TRenderer.GetRHISceneSlotSceneBlock(const AIndex: Cardinal): TCastleSceneUniformBlock;
+begin
+  if AIndex < Cardinal(Length(FRHISceneSlots)) then
+    Result := FRHISceneSlots[AIndex].SceneBlock
+  else
+    FillChar(Result, SizeOf(Result), 0);
+end;
+
+function TRenderer.GetRHISceneSlotLightsBlock(const AIndex: Cardinal): TCastleLightsUniformBlock;
+begin
+  if AIndex < Cardinal(Length(FRHISceneSlots)) then
+    Result := FRHISceneSlots[AIndex].LightsBlock
+  else
+    FillChar(Result, SizeOf(Result), 0);
+end;
+
+function TRenderer.GetRHISceneSlotDescriptorSet(const AIndex: Cardinal): TRHIDescriptorSet;
+begin
+  if AIndex < Cardinal(Length(FRHISceneSlots)) then
+    Result := FRHISceneSlots[AIndex].DescriptorSet
+  else
+    Result := nil;
 end;
 
 destructor TRenderer.Destroy;
 var
   I: Integer;
+  CanDestroyHandles: Boolean;
 begin
   FreeAndNil(TextureTransformUnitsUsedMore);
   FreeAndNil(PreparedShader);
   FreeAndNil(ShadowMapsShaders);
   FreeAndNil(VarianceShadowMapsShaders);
-  if ((FRHISceneBuffer <> nil) or (FRHIDefaultVertexShader <> nil) or
-      (FRHIDefaultFragmentShader <> nil) or (FRHIVSMCasterFragmentShader <> nil)) and
-     (RHIDevice = FRHISceneOwnerDevice) then
+  CanDestroyHandles := (FRHISceneOwnerDevice <> nil) and (RHIDevice = FRHISceneOwnerDevice);
+  FreeRHISceneSlots(CanDestroyHandles);
+  if CanDestroyHandles then
   begin
-    FreeAndNil(FRHISceneDescriptorSet);
     FreeAndNil(FRHISceneDescriptorSetLayout);
-    FreeAndNil(FRHISceneBuffer);
     FreeAndNil(FRHIDefaultVertexShader);
     FreeAndNil(FRHIDefaultFragmentShader);
     FreeAndNil(FRHIVSMCasterFragmentShader);
   end else
   begin
-    FRHISceneDescriptorSet := nil;
     FRHISceneDescriptorSetLayout := nil;
-    FRHISceneBuffer := nil;
     FRHIDefaultVertexShader := nil;
     FRHIDefaultFragmentShader := nil;
     FRHIVSMCasterFragmentShader := nil;
@@ -420,48 +496,37 @@ begin
     UniformBlock.FogParams := Vector4(0.0, 0.0, 0.0, 0.0);
   end;
 
-  if LightsRenderer <> nil then
+  if (LightsRenderer <> nil) and FCurrentShapeLighting then
     UniformBlock.LightCount := LightsRenderer.LightsUniformBlock.Count;
 end;
 
 procedure TRenderer.UploadSceneUniformBlockToRHI;
-var
-  BufDesc: TRHIBufferDesc;
 begin
   BuildSceneUniformBlock(FSceneUniformBlock);
+  FSceneUniformBlockInitialized := True;
   if RHIDevice = nil then
     Exit;
 
-  if (FRHISceneBuffer <> nil) and (FRHISceneOwnerDevice <> RHIDevice) then
-  begin
-    FRHISceneDescriptorSet := nil;
-    FRHISceneDescriptorSetLayout := nil;
-    FRHISceneBuffer := nil;
-  end;
-
-  if FRHISceneBuffer = nil then
-  begin
-    BufDesc := TRHIBufferDesc.Create(SizeOf(TCastleSceneUniformBlock), [buUniform], muCpuToGpu, 'CastleSceneUBO');
-    FRHISceneBuffer := RHIDevice.CreateBuffer(BufDesc, @FSceneUniformBlock);
-    FRHISceneOwnerDevice := RHIDevice;
-  end else
-    FRHISceneBuffer.UploadData(FSceneUniformBlock, SizeOf(TCastleSceneUniformBlock));
   Inc(FRHISceneBufferUploadCount);
   EnsureRHISceneDescriptorSet;
 end;
 
 function TRenderer.EnsureRHISceneDescriptorSet: TRHIDescriptorSet;
+const
+  MaxRHISceneSlots = 64;
 var
   Bindings: array[0..5] of TRHIDescriptorBindingDesc;
-  I: Integer;
+  SceneBufDesc, LightsBufDesc: TRHIBufferDesc;
+  DesiredSceneBlock: TCastleSceneUniformBlock;
+  CurrentLightsBlock: TCastleLightsUniformBlock;
+  FoundSlot, SlotIdx, I: Integer;
 begin
   if RHIDevice = nil then
     Exit(nil);
-  if (FRHISceneOwnerDevice <> RHIDevice) then
+  if FRHISceneOwnerDevice <> RHIDevice then
   begin
-    FRHISceneDescriptorSet := nil;
+    FreeRHISceneSlots(False);
     FRHISceneDescriptorSetLayout := nil;
-    FRHISceneBuffer := nil;
     FRHIShadowMap0Texture := nil;
     FRHIShadowMap0Sampler := nil;
     for I := 0 to High(FRHIShadowMapTextures) do
@@ -472,9 +537,13 @@ begin
     FRHIDefaultVertexShader := nil;
     FRHIDefaultFragmentShader := nil;
     FRHIVSMCasterFragmentShader := nil;
+    FRHISceneOwnerDevice := RHIDevice;
   end;
-  if FRHISceneBuffer = nil then
+  if not FSceneUniformBlockInitialized then
+  begin
     UploadSceneUniformBlockToRHI;
+    Exit(FRHISceneDescriptorSet);
+  end;
   if FRHISceneDescriptorSetLayout = nil then
   begin
     FillChar(Bindings, SizeOf(Bindings), 0);
@@ -495,16 +564,93 @@ begin
     end;
     FRHISceneDescriptorSetLayout := RHIDevice.CreateDescriptorSetLayout(Bindings);
   end;
-  if (FRHISceneDescriptorSet = nil) and (FRHISceneDescriptorSetLayout <> nil) then
-    FRHISceneDescriptorSet := RHIDevice.CreateDescriptorSet(FRHISceneDescriptorSetLayout);
-  if FRHISceneDescriptorSet <> nil then
+
+  if (LightsRenderer <> nil) and FCurrentShapeLighting then
   begin
-    if FRHISceneBuffer <> nil then
-      FRHISceneDescriptorSet.BindUniformBuffer(0, FRHISceneBuffer);
-    if (LightsRenderer <> nil) and (LightsRenderer.RHILightsBuffer <> nil) then
-      FRHISceneDescriptorSet.BindUniformBuffer(1, LightsRenderer.RHILightsBuffer);
-    FRHISceneDescriptorSet.Update;
+    CurrentLightsBlock := LightsRenderer.LightsUniformBlock;
+    if LightsRenderer.RHILightsBuffer = nil then
+      LightsRenderer.UploadLightsToRHI;
+  end else
+    FillChar(CurrentLightsBlock, SizeOf(CurrentLightsBlock), 0);
+
+  DesiredSceneBlock := FSceneUniformBlock;
+  if (LightsRenderer <> nil) and FCurrentShapeLighting then
+  begin
+    DesiredSceneBlock.LightCount := CurrentLightsBlock.Count;
+    FSceneUniformBlock.LightCount := CurrentLightsBlock.Count;
+  end else
+  if not FCurrentShapeLighting then
+  begin
+    DesiredSceneBlock.LightCount := 0;
+    FSceneUniformBlock.LightCount := 0;
   end;
+
+  FoundSlot := -1;
+  for I := 0 to High(FRHISceneSlots) do
+  begin
+    if CompareMem(@FRHISceneSlots[I].SceneBlock, @DesiredSceneBlock, SizeOf(TCastleSceneUniformBlock)) and
+       CompareMem(@FRHISceneSlots[I].LightsBlock, @CurrentLightsBlock, SizeOf(TCastleLightsUniformBlock)) and
+       CompareMem(@FRHISceneSlots[I].ShadowMapTextures[0], @FRHIShadowMapTextures[0], SizeOf(FRHIShadowMapTextures)) and
+       CompareMem(@FRHISceneSlots[I].ShadowMapSamplers[0], @FRHIShadowMapSamplers[0], SizeOf(FRHIShadowMapSamplers)) then
+    begin
+      FoundSlot := I;
+      Break;
+    end;
+  end;
+
+  if FoundSlot >= 0 then
+  begin
+    FRHIActiveSceneSlot := FoundSlot;
+    FRHISceneBuffer := FRHISceneSlots[FoundSlot].SceneBuffer;
+    FRHISceneDescriptorSet := FRHISceneSlots[FoundSlot].DescriptorSet;
+    Exit(FRHISceneDescriptorSet);
+  end;
+
+  if Length(FRHISceneSlots) < MaxRHISceneSlots then
+  begin
+    SlotIdx := Length(FRHISceneSlots);
+    SetLength(FRHISceneSlots, SlotIdx + 1);
+    FillChar(FRHISceneSlots[SlotIdx], SizeOf(TRHISceneStateSlot), 0);
+    SceneBufDesc := TRHIBufferDesc.Create(SizeOf(TCastleSceneUniformBlock), [buUniform], muCpuToGpu, 'CastleSceneUBO');
+    FRHISceneSlots[SlotIdx].SceneBuffer := RHIDevice.CreateBuffer(SceneBufDesc, @DesiredSceneBlock);
+    LightsBufDesc := TRHIBufferDesc.Create(SizeOf(TCastleLightsUniformBlock), [buUniform], muCpuToGpu, 'CastleLightsUBO');
+    FRHISceneSlots[SlotIdx].LightsBuffer := RHIDevice.CreateBuffer(LightsBufDesc, @CurrentLightsBlock);
+    if FRHISceneDescriptorSetLayout <> nil then
+      FRHISceneSlots[SlotIdx].DescriptorSet := RHIDevice.CreateDescriptorSet(FRHISceneDescriptorSetLayout);
+  end else
+  begin
+    SlotIdx := Integer(FNextRHISceneSlotEvict mod MaxRHISceneSlots);
+    Inc(FNextRHISceneSlotEvict);
+    if FRHISceneSlots[SlotIdx].SceneBuffer <> nil then
+      FRHISceneSlots[SlotIdx].SceneBuffer.UploadData(DesiredSceneBlock, SizeOf(TCastleSceneUniformBlock));
+    if FRHISceneSlots[SlotIdx].LightsBuffer <> nil then
+      FRHISceneSlots[SlotIdx].LightsBuffer.UploadData(CurrentLightsBlock, SizeOf(TCastleLightsUniformBlock));
+  end;
+
+  FRHISceneSlots[SlotIdx].SceneBlock := DesiredSceneBlock;
+  FRHISceneSlots[SlotIdx].LightsBlock := CurrentLightsBlock;
+  for I := 0 to High(FRHIShadowMapTextures) do
+  begin
+    FRHISceneSlots[SlotIdx].ShadowMapTextures[I] := FRHIShadowMapTextures[I];
+    FRHISceneSlots[SlotIdx].ShadowMapSamplers[I] := FRHIShadowMapSamplers[I];
+  end;
+
+  if FRHISceneSlots[SlotIdx].DescriptorSet <> nil then
+  begin
+    if FRHISceneSlots[SlotIdx].SceneBuffer <> nil then
+      FRHISceneSlots[SlotIdx].DescriptorSet.BindUniformBuffer(0, FRHISceneSlots[SlotIdx].SceneBuffer);
+    if FRHISceneSlots[SlotIdx].LightsBuffer <> nil then
+      FRHISceneSlots[SlotIdx].DescriptorSet.BindUniformBuffer(1, FRHISceneSlots[SlotIdx].LightsBuffer);
+    for I := 0 to High(FRHIShadowMapTextures) do
+      if FRHIShadowMapTextures[I] <> nil then
+        FRHISceneSlots[SlotIdx].DescriptorSet.BindTexture(2 + Cardinal(I),
+          FRHIShadowMapTextures[I], FRHIShadowMapSamplers[I]);
+    FRHISceneSlots[SlotIdx].DescriptorSet.Update;
+  end;
+
+  FRHIActiveSceneSlot := SlotIdx;
+  FRHISceneBuffer := FRHISceneSlots[SlotIdx].SceneBuffer;
+  FRHISceneDescriptorSet := FRHISceneSlots[SlotIdx].DescriptorSet;
   Result := FRHISceneDescriptorSet;
 end;
 
@@ -513,7 +659,7 @@ procedure TRenderer.BindShadowMapToSceneDescriptorSet(
   const AShadowMapTex: TRHITexture;
   const AShadowMapSampler: TRHISampler);
 begin
-  if (RHIDevice <> nil) and (ASlot <= 3) and (AShadowMapTex <> nil) then
+  if (RHIDevice <> nil) and (FRHISceneOwnerDevice <> RHIDevice) then
     EnsureRHISceneDescriptorSet;
   if ASlot <= High(FRHIShadowMapTextures) then
   begin
@@ -527,11 +673,7 @@ begin
   end;
   if (RHIDevice = nil) or (ASlot > 3) or (AShadowMapTex = nil) then
     Exit;
-  if FRHISceneDescriptorSet <> nil then
-  begin
-    FRHISceneDescriptorSet.BindTexture(2 + ASlot, AShadowMapTex, AShadowMapSampler);
-    FRHISceneDescriptorSet.Update;
-  end;
+  EnsureRHISceneDescriptorSet;
 end;
 
 procedure TRenderer.EnsureRHIDefaultShaders;
@@ -543,9 +685,8 @@ begin
     Exit;
   if FRHISceneOwnerDevice <> RHIDevice then
   begin
-    FRHISceneDescriptorSet := nil;
+    FreeRHISceneSlots(False);
     FRHISceneDescriptorSetLayout := nil;
-    FRHISceneBuffer := nil;
     FRHIDefaultVertexShader := nil;
     FRHIDefaultFragmentShader := nil;
     FRHIVSMCasterFragmentShader := nil;
@@ -1191,6 +1332,7 @@ begin
   LightsRenderer := TLightsRenderer.Create;
   LightsRenderer.LightRenderEvent := LightRenderEvent;
   LightsRenderer.RenderingCamera := RenderingCamera;
+  FCurrentShapeLighting := True;
 
   FInternalPass := AInternalPass;
   FWireframePass := AWireframePass;
@@ -1464,6 +1606,7 @@ begin
 
   { When lighting is off (for either shaders or fixed-function),
     there is no point in setting up lights. }
+  FCurrentShapeLighting := Lighting;
   if Lighting then
   begin
     if RenderOptions.ReceiveGlobalLights then

@@ -672,6 +672,7 @@ type
     FDesc: TRHIGraphicsPipelineDesc;
   public
     constructor Create(const ADevice: TRHIDevice; const ADesc: TRHIGraphicsPipelineDesc);
+    procedure UpdateDynamicStateDesc(const ADesc: TRHIGraphicsPipelineDesc);
     property Desc: TRHIGraphicsPipelineDesc read FDesc;
   end;
 
@@ -1112,9 +1113,13 @@ const
   { Maximum number of frames simultaneously processed by CPU and GPU. }
   MaxFramesInFlight = 2;
 
+type
+  TRHIDeviceChangeCallback = procedure(const ADevice: TRHIDevice);
+
 { Global active RHI device instance managed by CastleWindow / TCastleViewport. }
 function RHIDevice: TRHIDevice;
 procedure SetRHIDevice(const ADevice: TRHIDevice);
+procedure RegisterRHIDeviceChangeCallback(const ACallback: TRHIDeviceChangeCallback);
 
 { Global active RHI command list being recorded for current frame/pass. }
 function ActiveCommandList: TRHICommandList;
@@ -1147,15 +1152,57 @@ implementation
 var
   FRHIDevice: TRHIDevice = nil;
   FActiveCommandList: TRHICommandList = nil;
+  FRHIDeviceChangeCallbacks: array of TRHIDeviceChangeCallback;
 
 function RHIDevice: TRHIDevice;
 begin
   Result := FRHIDevice;
 end;
 
+procedure RegisterRHIDeviceChangeCallback(const ACallback: TRHIDeviceChangeCallback);
+var
+  I, L: Integer;
+begin
+  if not Assigned(ACallback) then Exit;
+  for I := 0 to High(FRHIDeviceChangeCallbacks) do
+    if {$ifndef FPC}@{$endif} FRHIDeviceChangeCallbacks[I] = {$ifndef FPC}@{$endif} ACallback then
+      Exit;
+  L := Length(FRHIDeviceChangeCallbacks);
+  SetLength(FRHIDeviceChangeCallbacks, L + 1);
+  FRHIDeviceChangeCallbacks[L] := ACallback;
+end;
+
 procedure SetRHIDevice(const ADevice: TRHIDevice);
+var
+  Comps: TTextureCompressions;
+  I: Integer;
 begin
   FRHIDevice := ADevice;
+  if ADevice <> nil then
+  begin
+    Comps := [];
+    if ADevice.Capabilities.SupportsBCCompression then
+      Comps := Comps + [tcDxt1_RGB, tcDxt1_RGBA, tcDxt3, tcDxt5];
+    if ADevice.Capabilities.SupportsETC2Compression then
+      Comps := Comps + [tcETC1];
+    if ADevice.Capabilities.SupportsASTCCompression then
+      Comps := Comps + [
+        tcASTC_4x4_RGBA, tcASTC_5x4_RGBA, tcASTC_5x5_RGBA,
+        tcASTC_6x5_RGBA, tcASTC_6x6_RGBA, tcASTC_8x5_RGBA,
+        tcASTC_8x6_RGBA, tcASTC_8x8_RGBA, tcASTC_10x5_RGBA,
+        tcASTC_10x6_RGBA, tcASTC_10x8_RGBA, tcASTC_10x10_RGBA,
+        tcASTC_12x10_RGBA, tcASTC_12x12_RGBA,
+        tcASTC_4x4_SRGB8_ALPHA8, tcASTC_5x4_SRGB8_ALPHA8, tcASTC_5x5_SRGB8_ALPHA8,
+        tcASTC_6x5_SRGB8_ALPHA8, tcASTC_6x6_SRGB8_ALPHA8, tcASTC_8x5_SRGB8_ALPHA8,
+        tcASTC_8x6_SRGB8_ALPHA8, tcASTC_8x8_SRGB8_ALPHA8, tcASTC_10x5_SRGB8_ALPHA8,
+        tcASTC_10x6_SRGB8_ALPHA8, tcASTC_10x8_SRGB8_ALPHA8, tcASTC_10x10_SRGB8_ALPHA8,
+        tcASTC_12x10_SRGB8_ALPHA8, tcASTC_12x12_SRGB8_ALPHA8];
+    SupportedTextureCompression := Comps;
+    SupportedTextureCompressionKnown := True;
+  end;
+  for I := 0 to High(FRHIDeviceChangeCallbacks) do
+    if Assigned(FRHIDeviceChangeCallbacks[I]) then
+      FRHIDeviceChangeCallbacks[I](ADevice);
 end;
 
 function ActiveCommandList: TRHICommandList;
@@ -1585,6 +1632,16 @@ constructor TRHIPipeline.Create(const ADevice: TRHIDevice; const ADesc: TRHIGrap
 begin
   inherited Create(ADevice, ADesc.DebugName);
   FDesc := ADesc;
+end;
+
+procedure TRHIPipeline.UpdateDynamicStateDesc(const ADesc: TRHIGraphicsPipelineDesc);
+begin
+  FDesc.Topology := ADesc.Topology;
+  FDesc.Rasterizer.CullMode := ADesc.Rasterizer.CullMode;
+  FDesc.Rasterizer.FrontFace := ADesc.Rasterizer.FrontFace;
+  FDesc.DepthStencil.DepthTestEnable := ADesc.DepthStencil.DepthTestEnable;
+  FDesc.DepthStencil.DepthWriteEnable := ADesc.DepthStencil.DepthWriteEnable;
+  FDesc.DepthStencil.DepthCompareOp := ADesc.DepthStencil.DepthCompareOp;
 end;
 
 { TRHIComputePipeline }

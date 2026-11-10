@@ -65,6 +65,7 @@ type
 
     FMesh: TCastleRenderUnlitMesh;
     FDebugRender: Boolean;
+    FInDebugPass: Boolean;
     FRHIStencilDepthState: TRHIDepthStencilStateDesc;
     FRHILitPassStencilDepthState: TRHIDepthStencilStateDesc;
     FRHIBlendState: TRHIBlendStateDesc;
@@ -191,6 +192,7 @@ procedure TGLShadowVolumeRenderer.PrepareRenderingResources;
 begin
   Assert(FMesh = nil, 'Call TGLShadowVolumeRenderer.PrepareRenderingResources only once');
   FMesh := TCastleRenderUnlitMesh.Create(DebugRender);
+  FMesh.Color := Vector4(1, 1, 0, 0.3);
 end;
 
 destructor TGLShadowVolumeRenderer.Destroy;
@@ -459,7 +461,7 @@ procedure TGLShadowVolumeRenderer.InitCaster(const CasterBox: TBox3D);
       if FMesh <> nil then
       begin
         FMesh.CustomDepthStencilState := FRHIStencilDepthState;
-        FMesh.UseCustomDepthStencilState := not DebugRender;
+        FMesh.UseCustomDepthStencilState := not FInDebugPass;
       end;
 
       if RHIDevice <> nil then
@@ -601,25 +603,63 @@ begin
       Assert(Params.InternalPass = 0);
       Inc(Params.InternalPass);
     end;
-    FRHILitPassStencilDepthState := TRHIDepthStencilStateDesc.DefaultStencilLitPass(0, StencilShadowBits);
-    PassParams.Init;
-    PassParams.UsingBlending := false;
-    PassParams.FilterShadowVolumesReceivers := [true];
-    PassParams.DisableShadowVolumeCastingLights := false;
-    PassParams.InsideStencilTest := true;
-    if Assigned(RenderOnePass) then
-      RenderOnePass(Params, PassParams);
-    Inc(FRHIRenderPassCount);
+    if RenderContext <> nil then
+    begin
+      SavedDepthFunc := RenderContext.DepthFunc;
+      RenderContext.DepthFunc := dfLessEqual;
+    end else
+      SavedDepthFunc := dfLess;
+    try
+      FRHILitPassStencilDepthState := TRHIDepthStencilStateDesc.DefaultStencilLitPass(0, StencilShadowBits);
+      PassParams.Init;
+      PassParams.UsingBlending := false;
+      PassParams.FilterShadowVolumesReceivers := [true];
+      PassParams.DisableShadowVolumeCastingLights := false;
+      PassParams.InsideStencilTest := true;
+      if Assigned(RenderOnePass) then
+        RenderOnePass(Params, PassParams);
+      Inc(FRHIRenderPassCount);
+    finally
+      if RenderContext <> nil then
+        RenderContext.DepthFunc := SavedDepthFunc;
+    end;
 
     if DebugRender then
     begin
       SavedCount := Count;
       Count := false;
-      FRHIBlendState := TRHIBlendStateDesc.DefaultAlphaBlend;
-      if Assigned(RenderShadowVolumes) then
-        RenderShadowVolumes(Params);
-      Inc(FRHIRenderPassCount);
-      Count := SavedCount;
+      FInDebugPass := true;
+      StencilConfigurationKnown := false;
+      if FMesh <> nil then
+        FMesh.UseCustomDepthStencilState := false;
+      if RenderContext <> nil then
+      begin
+        SavedDepthBufferUpdate := RenderContext.DepthBufferUpdate;
+        SavedDepthTest := RenderContext.DepthTest;
+        RenderContext.DepthBufferUpdate := false;
+        RenderContext.DepthTest := true;
+        RenderContext.BlendingEnable;
+      end else
+      begin
+        SavedDepthBufferUpdate := true;
+        SavedDepthTest := true;
+      end;
+      try
+        FRHIBlendState := TRHIBlendStateDesc.DefaultAlphaBlend;
+        if Assigned(RenderShadowVolumes) then
+          RenderShadowVolumes(Params);
+        Inc(FRHIRenderPassCount);
+      finally
+        if RenderContext <> nil then
+        begin
+          RenderContext.BlendingDisable;
+          RenderContext.DepthBufferUpdate := SavedDepthBufferUpdate;
+          RenderContext.DepthTest := SavedDepthTest;
+        end;
+        FInDebugPass := false;
+        StencilConfigurationKnown := false;
+        Count := SavedCount;
+      end;
     end;
 
     // Pass 5: render all transparent stuff
