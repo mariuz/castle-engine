@@ -2440,6 +2440,47 @@ end;
 
 ---
 
+## 66H. Horizon 2 — Spatial Viewport Annotations ("Canvas Pins") & Design Review Bookmarks (Phase 283 / UE 5.9 Spatial Review Parity)
+
+Inspired by **Unreal Engine 5.9's Spatial Canvas Review Pins and Camera Viewpoint Bookmarks**, `TCastleDesignAnnotation` and `TCastleDesignAnnotationUi` (`src/scene/castledesignannotations.pas`), `TDesignAnnotationManager` (`tools/common-code/tooldesignannotations.pas`), and `TDesignAnnotationsForm` (`tools/castle-editor/code/formdesignannotations.pas`) bring collaborative 3D/2D design review pins, camera bookmark teleportation, Markdown checklist export, and Pre-Release Readiness Auditor checks directly into `.castle-transform` and `.castle-user-interface` files.
+
+### Key Capabilities
+1. **Zero-Runtime-Overhead 3D & 2D Spatial Review Pins (`TCastleDesignAnnotation` & `TCastleDesignAnnotationUi`)**:
+   - Supports semantic categories (`dacNote`, `dacTodo`, `dacBug`, `dacAiPrompt`), workflow states (`dasOpen`, `dasInProgress`, `dasResolved`), `Priority` (`1..5`), `Title`, `Author`, and `Comment`.
+   - `TCastleDesignAnnotation` stores optional world-space camera poses (`HasCameraBookmark`, `CameraPositionPersistent`, `CameraDirectionPersistent`, `CameraUpPersistent`, `CaptureCameraFrom`, `ApplyCameraTo`).
+   - Strictly gated on `CastleDesignMode`: at game runtime (`appRunning`), `LocalBoundingBox` returns `TBox3D.Empty` and `LocalRender` / `Render` exit immediately with zero GPU, raycast, or collision overhead.
+2. **3D Viewport Callout Badges, Hierarchy Integration & Pre-Release Auditor**:
+   - `TDesignerLayer.Render` (`RenderAnnotationPinsOverlay`) projects visible 3D pins into screen space with category/status-colored callout pills, vertical leader stems, and `[Cam]` indicators.
+   - `ShowDesignReadinessAuditDialog` automatically flags unresolved `dacBug` and `dacTodo` pins as pre-release blockers.
+3. **Interactive Review Pins Manager & Markdown Checklist Export (`TDesignAnnotationsForm`)**:
+   - Open via the top-bar **`Pins`** button (`Shift`-click instantly drops a 3D pin ahead of the active camera) or **`Design -> Spatial Review Pins ("Canvas Pins") & Camera Bookmarks...`**.
+   - Filter by category, status (`Unresolved Only`), or text search; double-click any pin to select it and teleport the 3D camera to its saved viewpoint; or click **`Copy Markdown Checklist`** for GitHub PRs and issue trackers.
+
+### Example Usage (Pascal API)
+```pascal
+// Drop a P5 Bug pin 6m ahead of the active viewport camera and save its viewpoint:
+Pin := TDesignAnnotationManager.Create3DPinInViewport(
+  Viewport, DesignOwner, dacBug, 'Floating boulder near gate', true, 6.0);
+Pin.Priority := 5;
+Pin.Author := 'level_qa';
+
+// Later, jump the viewport camera back to the saved viewpoint and export Markdown:
+TDesignAnnotationManager.JumpViewportTo3DPin(Viewport, Pin);
+Report := TDesignAnnotationManager.ScanDesign(DesignRoot);
+try
+  Clipboard.AsText := Report.FormatMarkdownChecklist('CastleCourtyard');
+finally
+  FreeAndNil(Report);
+end;
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Custom Components (`CastleDesignMode`)](https://castle-engine.io/custom_components) · [CGE Visual Editor Manual](https://castle-engine.io/manual_editor.php) · [UE Viewport Controls & Bookmarks](https://dev.epicgames.com/documentation/en-us/unreal-engine/viewport-controls-in-unreal-engine) · [Blender Annotations Tool](https://docs.blender.org/manual/en/latest/interface/annotate_tool.html)
+- **Videos & Movies:** 🎬 [CGE Official Video — Level Design & Editor Workflows (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [Animated 3D Viewport Bookmark & Pin Navigation](https://docs.godotengine.org/en/stable/_images/3d_viewport_navigation.gif)
+- **Screenshots:** [CGE Visual Editor 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE 2D UI Designer](https://castle-engine.io/images/thumb_const_height_size/ui_empty_rectangle.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2510,4 +2551,5 @@ In addition, Horizon 2 editor subsystems include dedicated automated test suites
 - **[`tests/code/testcases/testtooldesignsandboxdiff.pas`](../tests/code/testcases/testtooldesignsandboxdiff.pas) (`TTestToolDesignSandboxDiff` — 3 tests)**: Verifies `TDesignSandboxManager` creation, filtering, renaming, JSON persistence, and live instantiation, `TDesignDiffEngine` detection of `[+ Added]`, `[- Removed]`, and `[~ Modified]` components + subcomponent properties (`TranslationPersistent.X/Y/Z`, `SizePersistent.X/Y/Z`, `Caption`, `FontSize`), and `RevertSelectedToBase` selective restoration/deletion of individual properties and components (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testcastleterrain.pas`](../tests/code/testcases/testcastleterrain.pas) (`TTestCastleTerrain` — 4 tests)**: Verifies `TCastleTerrainImage` Raise/Lower/Smooth/Flatten sculpting with dynamic `MinLevel`/`MaxLevel` expansion + renormalization, `RayCastWorld`, non-destructive `EnsureEditableHeightLayer` `TCastleTerrainCombine` (`opAdd`) wrapping over `TCastleTerrainNoise`, `GenerateSplatmapFromProceduralLayers`, `PaintSplatmapAtWorldPoint` $R+G+B+A = 255$ partition-of-unity normalization, and PNG heightmap/splatmap save & reload roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolnprshaderstudio.pas`](../tests/code/testcases/testtoolnprshaderstudio.pas) (`TTestToolNprShaderStudio` — 2 tests)**: Verifies all 5 `TCastleStylizedShaderPreset` GLSL generators (`PLUG_lighting_apply`, `PLUG_material_light_diffuse`, `PLUG_fragment_modify`), X3D `TEffectNode` attach/enable/disable/remove lifecycle on `TCastleScene`, `.castle-transform` JSON serialization roundtrip, and `TLightShadowBudgetAuditor` multi-light overlap hotspot scoring, multi-shadow-volume conflict detection, `EnsureSingleShadowVolumeLight`, and `ClampUnboundedLightRadii` (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtooldesignannotations.pas`](../tests/code/testcases/testtooldesignannotations.pas) (`TTestToolDesignAnnotations` — 2 tests)**: Verifies `TCastleDesignAnnotation` and `TCastleDesignAnnotationUi` zero runtime bounding-box footprint (`appRunning` vs. `appDesign`), world-space camera viewpoint bookmark capture/restore, JSON serialization roundtrip, `TDesignAnnotationManager.ScanDesign` priority sorting and blocker warnings, category/status/text filtering, Markdown checklist export, `MarkAllResolved`, and `DeleteResolvedPins` (`0 unfreed memory blocks`).
 

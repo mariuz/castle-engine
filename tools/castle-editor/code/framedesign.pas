@@ -35,11 +35,11 @@ uses
   CastleViewport, CastleClassUtils, CastleControls, CastleTiledMap,
   CastleCameras, CastleBoxes, CastleTransform, CastleDebugTransform,
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
-  CastleImages, CastleUtils, CastleTerrain, CastleNprShader,
+  CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
-  DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio;
+  DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -713,6 +713,10 @@ type
       MenuTreeViewItemLightBudgetOverlay: TMenuItem;
       ButtonNprShaderStudio: TSpeedButton;
       FShowLightBudgetOverlay: Boolean;
+      MenuTreeViewItemReviewPins: TMenuItem;
+      MenuTreeViewItemDrop3DReviewPin: TMenuItem;
+      ButtonReviewPins: TSpeedButton;
+      FShowAnnotationPinsOverlay: Boolean;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
       FCopiedComponentPropsClassName: String;
@@ -1129,6 +1133,10 @@ type
     procedure NprStudioModifiedCallback(const UndoComment: String);
     procedure NprStudioSelectComponentCallback(const C: TComponent);
     procedure NprStudioToggleOverlayCallback(const AEnabled: Boolean);
+    procedure MenuTreeViewItemReviewPinsClick(Sender: TObject);
+    procedure MenuTreeViewItemDrop3DReviewPinClick(Sender: TObject);
+    procedure ButtonReviewPinsClick(Sender: TObject);
+    procedure ReviewPinsToggleOverlayCallback(const AVisible: Boolean);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
     function NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
@@ -2531,6 +2539,11 @@ type
     procedure ShowNprShaderStudioDialog(const OpenLightAuditTab: Boolean = false);
     procedure SetLightBudgetOverlayActive(const AEnabled: Boolean);
     procedure ToggleLightBudgetOverlay;
+
+    { Spatial Viewport Annotations ("Canvas Pins") & Review Bookmarks (Phase 283). }
+    procedure ShowDesignAnnotationsDialog;
+    procedure Drop3DAnnotationPinAtCamera(const ACategory: TDesignAnnotationCategory = dacTodo);
+    procedure ToggleAnnotationPinsOverlay;
   end;
 
 implementation
@@ -2549,7 +2562,8 @@ uses
   CastleFlashEffect, CastleNotifications, CastleFonts,
   { Editor units }
   EditorRegisterAllComponents,
-  FormProject, FormDesignSandboxDiff, FormNprShaderStudio, CastleComponentEditorDesigner;
+  FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
+  CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -5179,6 +5193,61 @@ procedure TDesignFrame.TDesignerLayer.Render;
     end;
   end;
 
+  procedure RenderAnnotationPinsOverlay(const AVp: TCastleViewport);
+  var
+    PinReport: TDesignAnnotationAuditReport;
+    CamP, CamD, CamU, WorldPt: TVector3;
+    AnchorScreen, BoxBottomLeft: TVector2;
+    StemPts: array [0..1] of TVector2;
+    PinCol: TCastleColor;
+    BadgeText: String;
+    BoxW: Single;
+    I: Integer;
+  begin
+    if Frame.FDesignRoot = nil then
+      Exit;
+    AVp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    PinReport := TDesignAnnotationManager.ScanDesign(Frame.FDesignRoot);
+    try
+      for I := 0 to High(PinReport.Items) do
+      begin
+        if (not PinReport.Items[I].Is3D) or (not PinReport.Items[I].ShowPinInViewport) then
+          Continue;
+        if (PinReport.Items[I].Component is TCastleTransform) and
+           (not TCastleTransform(PinReport.Items[I].Component).Exists) then
+          Continue;
+
+        WorldPt := PinReport.Items[I].WorldOrUiPos;
+        if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+           (TVector3.DotProduct(WorldPt - CamP, CamD) > 0.08) then
+        begin
+          AnchorScreen := AVp.LocalToContainerPosition(AVp.PositionFromWorld(WorldPt));
+          PinCol := DesignAnnotationPinColor(PinReport.Items[I].Category, PinReport.Items[I].Status);
+          BadgeText := PinReport.Items[I].SummaryBadge;
+          BoxW := Max(86.0, Length(BadgeText) * 7.2 + 14.0);
+          BoxBottomLeft := Vector2(AnchorScreen.X - BoxW * 0.5, AnchorScreen.Y + 18.0);
+
+          { Vertical leader stem & world anchor dot }
+          StemPts[0] := AnchorScreen;
+          StemPts[1] := Vector2(AnchorScreen.X, BoxBottomLeft.Y);
+          DrawPrimitive2D(pmLines, StemPts, PinCol,
+            bsSrcAlpha, bdOneMinusSrcAlpha, false, 2.0);
+          DrawRectangle(FloatRectangle(AnchorScreen.X - 3, AnchorScreen.Y - 3, 6, 6), PinCol);
+
+          { Callout pill }
+          DrawRectangle(FloatRectangle(BoxBottomLeft.X, BoxBottomLeft.Y, BoxW, 22),
+            Vector4(0.05, 0.07, 0.12, 0.88));
+          DrawRectangle(FloatRectangle(BoxBottomLeft.X, BoxBottomLeft.Y, 5, 22), PinCol);
+          DrawRectangleOutline(FloatRectangle(BoxBottomLeft.X, BoxBottomLeft.Y, BoxW, 22), PinCol);
+          if LabelGizmoDragHud.Font <> nil then
+            LabelGizmoDragHud.Font.Print(BoxBottomLeft.X + 9, BoxBottomLeft.Y + 5, PinCol, BadgeText);
+        end;
+      end;
+    finally
+      FreeAndNil(PinReport);
+    end;
+  end;
+
   procedure UpdateAttachedLabel(const UI: TCastleUserInterface;
     const UIRect: TFloatRectangle;
     const Lab: TCastleLabel; const Rect: TCastleRectangleControl;
@@ -5423,6 +5492,12 @@ begin
     RenderLightBudgetOverlay(Frame.CurrentViewport);
   end;
 
+  if Frame.FShowAnnotationPinsOverlay and
+     (Frame.CurrentViewport <> nil) and (Frame.CurrentViewport.InternalCamera <> nil) then
+  begin
+    RenderAnnotationPinsOverlay(Frame.CurrentViewport);
+  end;
+
   if (Frame.TransformManipulate <> nil) and
      Frame.TransformManipulate.IsDraggingGizmo and
      (Frame.TransformManipulate.CurrentDragSummary <> '') then
@@ -5500,6 +5575,7 @@ begin
   FScatterBrushMouseDown := false;
   FScatterStrokeMutated := false;
   FShowLightBudgetOverlay := false;
+  FShowAnnotationPinsOverlay := true;
   for I := 1 to 5 do
     FComponentColorTags[I] := TComponentList.Create(false);
   for I := 0 to 9 do
@@ -5674,6 +5750,21 @@ begin
   if ButtonScatterBrushMode.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonNprShaderStudio,
       PanelMiddleTop.GetControlIndex(ButtonScatterBrushMode) + 1);
+
+  ButtonReviewPins := TSpeedButton.Create(Self);
+  ButtonReviewPins.Caption := 'Pins';
+  ButtonReviewPins.Hint := 'Open Spatial Viewport Annotations ("Canvas Pins") & Review Bookmarks Manager.' + NL +
+    'Shift+Click drops a new 3D Review Pin ahead of the current camera and saves a camera viewpoint bookmark.';
+  ButtonReviewPins.ShowHint := true;
+  ButtonReviewPins.AutoSize := true;
+  ButtonReviewPins.Constraints.MinHeight := 33;
+  ButtonReviewPins.Constraints.MinWidth := 44;
+  ButtonReviewPins.BorderSpacing.Left := 2;
+  ButtonReviewPins.OnClick := @ButtonReviewPinsClick;
+  ButtonReviewPins.Parent := PanelMiddleTop;
+  if ButtonNprShaderStudio.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonReviewPins,
+      PanelMiddleTop.GetControlIndex(ButtonNprShaderStudio) + 1);
 
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
@@ -8454,6 +8545,16 @@ begin
   MenuTreeViewItemLightBudgetOverlay.Caption := 'Toggle 3D Light && Shadow Budget Complexity Overlay';
   MenuTreeViewItemLightBudgetOverlay.OnClick := @MenuTreeViewItemLightBudgetOverlayClick;
   MenuTreeView.Items.Add(MenuTreeViewItemLightBudgetOverlay);
+
+  MenuTreeViewItemReviewPins := TMenuItem.Create(Self);
+  MenuTreeViewItemReviewPins.Caption := 'Spatial Review Pins ("Canvas Pins") && Camera Bookmarks...';
+  MenuTreeViewItemReviewPins.OnClick := @MenuTreeViewItemReviewPinsClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemReviewPins);
+
+  MenuTreeViewItemDrop3DReviewPin := TMenuItem.Create(Self);
+  MenuTreeViewItemDrop3DReviewPin.Caption := 'Drop 3D Spatial Review Pin at Current Camera';
+  MenuTreeViewItemDrop3DReviewPin.OnClick := @MenuTreeViewItemDrop3DReviewPinClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemDrop3DReviewPin);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -13621,6 +13722,10 @@ var
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStylizedShaderBehavior) <> nil) then
         Suffix := Suffix + ' [NPR]'
+      else if NodeObj is TCastleDesignAnnotation then
+        Suffix := Suffix + ' ' + TCastleDesignAnnotation(NodeObj).PinSummaryBadge
+      else if NodeObj is TCastleDesignAnnotationUi then
+        Suffix := Suffix + ' ' + TCastleDesignAnnotationUi(NodeObj).PinSummaryBadge
       else if TComponent(NodeObj).Tag <> 0 then
         Suffix := Suffix + ' [Tag:' + IntToStr(TComponent(NodeObj).Tag) + ']';
     end;
@@ -48786,7 +48891,7 @@ end;
 procedure TDesignFrame.ShowDesignReadinessAuditDialog;
 var
   TotalUICount, TotalTransformCount, TotalBehaviorCount, TotalNonVisualCount: Integer;
-  BrokenUrlCount, PhysicsMismatchCount, UnlinkedRefCount, DegenerateUiCount, HiddenCount: Integer;
+  BrokenUrlCount, PhysicsMismatchCount, UnlinkedRefCount, DegenerateUiCount, HiddenCount, UnresolvedReviewPinCount: Integer;
   FlaggedList: TComponentList;
   ReportLines: TStringList;
   Dialog: TForm;
@@ -48827,6 +48932,14 @@ var
         Inc(DegenerateUiCount);
         FlagComponent(UI, 'Zero effective Width/Height (invisible at runtime)');
       end;
+      if (UI is TCastleDesignAnnotationUi) and TCastleDesignAnnotationUi(UI).IsUnresolvedActionable then
+      begin
+        Inc(UnresolvedReviewPinCount);
+        FlagComponent(UI, Format('Unresolved [%s] UI Review Pin (P%d): %s',
+          [DesignAnnotationCategoryTag(TCastleDesignAnnotationUi(UI).Category),
+           TCastleDesignAnnotationUi(UI).Priority,
+           TCastleDesignAnnotationUi(UI).Title]));
+      end;
     end else
     if C is TCastleTransform then
     begin
@@ -48843,6 +48956,14 @@ var
       begin
         Inc(UnlinkedRefCount);
         FlagComponent(T, 'TCastleTransformReference.Reference is nil');
+      end;
+      if (T is TCastleDesignAnnotation) and TCastleDesignAnnotation(T).IsUnresolvedActionable then
+      begin
+        Inc(UnresolvedReviewPinCount);
+        FlagComponent(T, Format('Unresolved [%s] 3D Review Pin (P%d): %s',
+          [DesignAnnotationCategoryTag(TCastleDesignAnnotation(T).Category),
+           TCastleDesignAnnotation(T).Priority,
+           TCastleDesignAnnotation(T).Title]));
       end;
     end else
     if C is TCastleBehavior then
@@ -48906,6 +49027,7 @@ begin
   UnlinkedRefCount := 0;
   DegenerateUiCount := 0;
   HiddenCount := 0;
+  UnresolvedReviewPinCount := 0;
 
   FlaggedList := TComponentList.Create(false);
   ReportLines := TStringList.Create;
@@ -48937,6 +49059,7 @@ begin
     ReportLines.Add(Format('  Collider Without RigidBody Mismatches:  %d', [PhysicsMismatchCount]));
     ReportLines.Add(Format('  Unlinked References / Navigations:      %d', [UnlinkedRefCount]));
     ReportLines.Add(Format('  Zero-Sized 2D UI Controls:              %d', [DegenerateUiCount]));
+    ReportLines.Add(Format('  Unresolved Bug/TODO Review Pins:        %d', [UnresolvedReviewPinCount]));
     ReportLines.Add(Format('  Total Flagged Components:               %d', [FlaggedList.Count]));
 
     Dialog := TForm.CreateNew(Self);
@@ -52257,6 +52380,85 @@ end;
 procedure TDesignFrame.ButtonNprShaderStudioClick(Sender: TObject);
 begin
   ShowNprShaderStudioDialog(ssShift in GetKeyShiftState);
+end;
+
+{ Spatial Viewport Annotations ("Canvas Pins") & Bookmarks (Phase 283) ------- }
+
+procedure TDesignFrame.ReviewPinsToggleOverlayCallback(const AVisible: Boolean);
+begin
+  FShowAnnotationPinsOverlay := AVisible;
+end;
+
+procedure TDesignFrame.ToggleAnnotationPinsOverlay;
+begin
+  FShowAnnotationPinsOverlay := not FShowAnnotationPinsOverlay;
+end;
+
+procedure TDesignFrame.Drop3DAnnotationPinAtCamera(
+  const ACategory: TDesignAnnotationCategory);
+var
+  V: TCastleViewport;
+  NewPin: TCastleDesignAnnotation;
+begin
+  V := CurrentViewport;
+  if (V = nil) or (DesignOwner = nil) then
+    Exit;
+  NewPin := TDesignAnnotationManager.Create3DPinInViewport(
+    V, DesignOwner, ACategory, '', true, 5.0);
+  if NewPin <> nil then
+  begin
+    UpdateDesign;
+    DesignerSelectOnlyComponent(NewPin);
+    ModifiedOutsideObjectInspector('Drop 3D Spatial Review Pin ' + NewPin.Name, ucHigh);
+  end;
+end;
+
+procedure TDesignFrame.ShowDesignAnnotationsDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  InitComp: TComponent;
+  Dlg: TDesignAnnotationsForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  InitComp := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount > 0 then
+      InitComp := Selected[0];
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  Dlg := TDesignAnnotationsForm.CreateManager(Self, FDesignRoot, DesignOwner,
+    CurrentViewport, FDesignUrl, InitComp, FShowAnnotationPinsOverlay,
+    @NprStudioModifiedCallback,
+    @NprStudioSelectComponentCallback,
+    @ReviewPinsToggleOverlayCallback);
+  try
+    Dlg.ShowModal;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemReviewPinsClick(Sender: TObject);
+begin
+  ShowDesignAnnotationsDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemDrop3DReviewPinClick(Sender: TObject);
+begin
+  Drop3DAnnotationPinAtCamera(dacTodo);
+end;
+
+procedure TDesignFrame.ButtonReviewPinsClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    Drop3DAnnotationPinAtCamera(dacTodo)
+  else
+    ShowDesignAnnotationsDialog;
 end;
 
 initialization

@@ -594,6 +594,8 @@ type
       MenuItemPinScatterInstances: TMenuItem;
       MenuItemNprShaderStudio: TMenuItem;
       MenuItemLightBudgetOverlay: TMenuItem;
+      MenuItemReviewPins: TMenuItem;
+      MenuItemDrop3DReviewPin: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -607,6 +609,8 @@ type
     procedure MenuItemPinScatterInstancesClick(Sender: TObject);
     procedure MenuItemNprShaderStudioClick(Sender: TObject);
     procedure MenuItemLightBudgetOverlayClick(Sender: TObject);
+    procedure MenuItemReviewPinsClick(Sender: TObject);
+    procedure MenuItemDrop3DReviewPinClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2201,6 +2205,16 @@ begin
   MenuItemLightBudgetOverlay.OnClick := @MenuItemLightBudgetOverlayClick;
   MenuItemDesign.Add(MenuItemLightBudgetOverlay);
 
+  MenuItemReviewPins := TMenuItem.Create(MenuItemDesign);
+  MenuItemReviewPins.Caption := 'Spatial Review Pins ("Canvas Pins") && Camera Bookmarks...';
+  MenuItemReviewPins.OnClick := @MenuItemReviewPinsClick;
+  MenuItemDesign.Add(MenuItemReviewPins);
+
+  MenuItemDrop3DReviewPin := TMenuItem.Create(MenuItemDesign);
+  MenuItemDrop3DReviewPin.Caption := 'Drop 3D Spatial Review Pin at Current Camera';
+  MenuItemDrop3DReviewPin.OnClick := @MenuItemDrop3DReviewPinClick;
+  MenuItemDesign.Add(MenuItemDrop3DReviewPin);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -2854,6 +2868,10 @@ begin
     MenuItemNprShaderStudio.Enabled := Design <> nil;
   if MenuItemLightBudgetOverlay <> nil then
     MenuItemLightBudgetOverlay.Enabled := Design <> nil;
+  if MenuItemReviewPins <> nil then
+    MenuItemReviewPins.Enabled := Design <> nil;
+  if MenuItemDrop3DReviewPin <> nil then
+    MenuItemDrop3DReviewPin.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5040,6 +5058,18 @@ procedure TProjectForm.MenuItemLightBudgetOverlayClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ToggleLightBudgetOverlay;
+end;
+
+procedure TProjectForm.MenuItemReviewPinsClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowDesignAnnotationsDialog;
+end;
+
+procedure TProjectForm.MenuItemDrop3DReviewPinClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.Drop3DAnnotationPinAtCamera;
 end;
 
 initialization

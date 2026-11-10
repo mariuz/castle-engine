@@ -108,6 +108,7 @@ uses
   TestToolDesignSandboxDiff,
   TestCastleTerrain,
   TestToolNprShaderStudio,
+  TestToolDesignAnnotations,
   TestCastleVulkanRHI;
 
 implementation

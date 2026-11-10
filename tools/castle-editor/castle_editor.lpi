@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="37">
+    <Units Count="39">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -267,6 +267,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormNprShaderStudio"/>
       </Unit36>
+      <Unit37>
+        <Filename Value="../common-code/tooldesignannotations.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolDesignAnnotations"/>
+      </Unit37>
+      <Unit38>
+        <Filename Value="code/formdesignannotations.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormDesignAnnotations"/>
+      </Unit38>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
