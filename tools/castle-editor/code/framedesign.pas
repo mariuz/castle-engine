@@ -66,6 +66,11 @@ type
     tebtSplat4
   );
 
+  TPCGScatterEditorBrushTool = (
+    sebtPaint,
+    sebtErase
+  );
+
   { Frame to visually design component hierarchy. }
   TDesignFrame = class(TFrame)
     ActionApiReferenceOfCurrent: TAction;
@@ -678,6 +683,32 @@ type
       FTerrainBrushMouseDown: Boolean;
       FTerrainBrushLastStampWorld: TVector3;
       FTerrainFlattenTargetY: Single;
+      MenuTreeViewItemScatterBrushMode: TMenuItem;
+      MenuTreeViewItemPinScatterInstance: TMenuItem;
+      ButtonScatterBrushMode: TSpeedButton;
+      PanelScatterBrush: TPanel;
+      ButtonScatterUseSelected: TSpeedButton;
+      ButtonScatterPaint: TSpeedButton;
+      ButtonScatterErase: TSpeedButton;
+      SpinScatterRadius: TFloatSpinEdit;
+      SpinScatterMinSpacing: TFloatSpinEdit;
+      SpinScatterCount: TSpinEdit;
+      SpinScatterMaxSlope: TFloatSpinEdit;
+      CheckScatterAlignNormal: TCheckBox;
+      ButtonScatterPinSelected: TSpeedButton;
+      ButtonScatterRescatter: TSpeedButton;
+      LabelScatterBrushStatus: TLabel;
+      FScatterBrushActive: Boolean;
+      FScatterBrushTool: TPCGScatterEditorBrushTool;
+      FScatterSettings: TPCGScatterBrushSettings;
+      FScatterPrototype: TCastleTransform;
+      FScatterTargetGroup: TCastleTransform;
+      FScatterBrushHasHover: Boolean;
+      FScatterBrushHoverWorld: TVector3;
+      FScatterBrushHoverNormal: TVector3;
+      FScatterBrushMouseDown: Boolean;
+      FScatterBrushLastStampWorld: TVector3;
+      FScatterStrokeMutated: Boolean;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
       FCopiedComponentPropsClassName: String;
@@ -1069,6 +1100,25 @@ type
     procedure ApplyTerrainBrushAtWorldPoint(const HitWorldPt: TVector3;
       const Modifiers: TModifierKeys);
     procedure FlushTerrainBrushStrokePersistence(const Terrain: TCastleTerrain);
+    procedure MenuTreeViewItemScatterBrushModeClick(Sender: TObject);
+    procedure MenuTreeViewItemPinScatterInstanceClick(Sender: TObject);
+    procedure ButtonScatterBrushModeClick(Sender: TObject);
+    procedure ButtonScatterUseSelectedClick(Sender: TObject);
+    procedure ButtonScatterToolClick(Sender: TObject);
+    procedure SpinScatterRadiusChange(Sender: TObject);
+    procedure SpinScatterMinSpacingChange(Sender: TObject);
+    procedure SpinScatterCountChange(Sender: TObject);
+    procedure SpinScatterMaxSlopeChange(Sender: TObject);
+    procedure CheckScatterAlignNormalChange(Sender: TObject);
+    procedure ButtonScatterPinSelectedClick(Sender: TObject);
+    procedure ButtonScatterRescatterClick(Sender: TObject);
+    procedure CreateScatterBrushToolbar;
+    procedure UpdateScatterBrushToolbarUI;
+    function EnsureScatterTargetGroup: TCastleTransform;
+    function RayCastScatterBrushSurface(const RayOrigin, RayDirection: TVector3;
+      out HitWorldPt, HitWorldNormal: TVector3): Boolean;
+    function ApplyScatterBrushAtWorldPoint(const HitWorldPt: TVector3;
+      const Modifiers: TModifierKeys): Boolean;
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
     function NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
@@ -2457,6 +2507,15 @@ type
     procedure SelectTerrainBrushTool(const ATool: TTerrainEditorBrushTool);
     procedure AdjustTerrainBrushRadius(const Factor: Single);
     procedure SaveActiveTerrainMapsToProjectData;
+
+    { Interactive PCG / Foliage Scatter Brush Mode with Manual Artist Overrides (Phase 281). }
+    procedure ToggleScatterBrushMode;
+    procedure SetScatterBrushActive(const AActive: Boolean);
+    procedure SelectScatterBrushTool(const ATool: TPCGScatterEditorBrushTool);
+    procedure SetScatterPrototype(const AProto: TCastleTransform);
+    procedure AdjustScatterBrushRadius(const Factor: Single);
+    procedure TogglePinSelectedScatterInstances;
+    procedure RegenerateUnpinnedScatterAction;
   end;
 
 implementation
@@ -3511,6 +3570,11 @@ begin
   if (Frame.Mode <> moInteract) and Event.IsKey(keyP) and
      (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
   begin
+    if Event.ModifiersDown = [mkAlt] then
+    begin
+      Frame.ToggleScatterBrushMode;
+      Exit(true);
+    end else
     if Event.ModifiersDown = [mkCtrl, mkShift] then
     begin
       Frame.TogglePilotTransform;
@@ -4169,6 +4233,32 @@ begin
     end;
   end;
 
+  if Frame.FScatterBrushActive and (Frame.Mode <> moInteract) and
+     (Event.EventType = itKey) and (Event.ModifiersDown = []) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    if Event.IsKey(keyLeftBracket) then
+    begin
+      Frame.AdjustScatterBrushRadius(0.8);
+      Exit(true);
+    end else
+    if Event.IsKey(keyRightBracket) then
+    begin
+      Frame.AdjustScatterBrushRadius(1.25);
+      Exit(true);
+    end else
+    if Event.IsKey(key1) then
+    begin
+      Frame.SelectScatterBrushTool(sebtPaint);
+      Exit(true);
+    end else
+    if Event.IsKey(key2) then
+    begin
+      Frame.SelectScatterBrushTool(sebtErase);
+      Exit(true);
+    end;
+  end;
+
   { Avoid handling mouse events over CameraPreview, to avoid messing with clicking
     on CameraPreview buttons, and using gizmos in CameraPreview viewport. }
   if Frame.CameraPreview.UiRoot.Exists and
@@ -4189,6 +4279,29 @@ begin
         Frame.FTerrainBrushLastStampWorld := Frame.FTerrainBrushHoverWorld;
         Frame.ApplyTerrainBrushAtWorldPoint(Frame.FTerrainBrushHoverWorld, Event.ModifiersDown);
         Frame.ModifiedOutsideObjectInspector('Terrain Brush Stroke', ucHigh, true);
+        Exit(true);
+      end;
+    end;
+  end;
+
+  if Frame.FScatterBrushActive and (Frame.Mode <> moInteract) and
+     Event.IsMouseButton(buttonLeft) then
+  begin
+    if Frame.CurrentViewport <> nil then
+    begin
+      Frame.CurrentViewport.PositionToRay(Event.Position, true, RayOrigin, RayDirection);
+      if Frame.RayCastScatterBrushSurface(RayOrigin, RayDirection,
+           Frame.FScatterBrushHoverWorld, Frame.FScatterBrushHoverNormal) then
+      begin
+        Frame.FScatterBrushHasHover := true;
+        Frame.FScatterBrushMouseDown := true;
+        Frame.FScatterStrokeMutated := false;
+        Frame.FScatterBrushLastStampWorld := Frame.FScatterBrushHoverWorld;
+        if Frame.ApplyScatterBrushAtWorldPoint(Frame.FScatterBrushHoverWorld, Event.ModifiersDown) then
+        begin
+          Frame.FScatterStrokeMutated := true;
+          Frame.ModifiedOutsideObjectInspector('PCG Scatter Brush Stroke', ucHigh, true);
+        end;
         Exit(true);
       end;
     end;
@@ -4276,6 +4389,20 @@ begin
           Frame.RecordUndo('Terrain Brush Stroke', ucHigh);
       end;
       Frame.UpdateSelectedControl;
+      Exit(true);
+    end;
+
+    if Frame.FScatterBrushMouseDown then
+    begin
+      Frame.FScatterBrushMouseDown := false;
+      if Frame.FScatterStrokeMutated then
+      begin
+        Frame.UpdateDesign;
+        Frame.UpdateScatterBrushToolbarUI;
+      end;
+      if Frame.UndoSystem.ScheduleRecordUndoOnRelease then
+        Frame.RecordUndo('PCG Scatter Brush Stroke', ucHigh);
+      Frame.FScatterStrokeMutated := false;
       Exit(true);
     end;
 
@@ -4565,7 +4692,7 @@ var
   Move: TVector2;
   Snap, StepX, StepY, TargetVal, SnapDeltaX, SnapDeltaY: Single;
   BrushTerrain: TCastleTerrain;
-  RayOrigin, RayDirection, HitWorld: TVector3;
+  RayOrigin, RayDirection, HitWorld, HitNorm: TVector3;
 begin
   Result := inherited Motion(Event);
   if Result then Exit;
@@ -4615,6 +4742,50 @@ begin
       Frame.FTerrainBrushHasHover := false;
   end else
     Frame.FTerrainBrushHasHover := false;
+
+  if Frame.FScatterBrushActive and (Frame.Mode <> moInteract) then
+  begin
+    if Frame.FScatterBrushMouseDown and (not (buttonLeft in Event.Pressed)) then
+    begin
+      Frame.FScatterBrushMouseDown := false;
+      if Frame.FScatterStrokeMutated then
+      begin
+        Frame.UpdateDesign;
+        Frame.UpdateScatterBrushToolbarUI;
+      end;
+      if Frame.UndoSystem.ScheduleRecordUndoOnRelease then
+        Frame.RecordUndo('PCG Scatter Brush Stroke', ucHigh);
+      Frame.FScatterStrokeMutated := false;
+    end;
+
+    if Frame.CurrentViewport <> nil then
+    begin
+      Frame.CurrentViewport.PositionToRay(Event.Position, true, RayOrigin, RayDirection);
+      Frame.FScatterBrushHasHover := Frame.RayCastScatterBrushSurface(
+        RayOrigin, RayDirection, HitWorld, HitNorm);
+      if Frame.FScatterBrushHasHover then
+      begin
+        Frame.FScatterBrushHoverWorld := HitWorld;
+        Frame.FScatterBrushHoverNormal := HitNorm;
+        if Frame.FScatterBrushMouseDown and (buttonLeft in Event.Pressed) then
+        begin
+          if PointsDistance(HitWorld, Frame.FScatterBrushLastStampWorld) >=
+             Max(0.5, Frame.FScatterSettings.Radius * 0.30) then
+          begin
+            Frame.FScatterBrushLastStampWorld := HitWorld;
+            if Frame.ApplyScatterBrushAtWorldPoint(HitWorld, ModifiersDown(Container.Pressed)) then
+            begin
+              Frame.FScatterStrokeMutated := true;
+              Frame.ModifiedOutsideObjectInspector('PCG Scatter Brush Stroke', ucHigh, true);
+            end;
+          end;
+          Exit(true);
+        end;
+      end;
+    end else
+      Frame.FScatterBrushHasHover := false;
+  end else
+    Frame.FScatterBrushHasHover := false;
 
   if (UiDraggingMode <> dmNone) and
      (not (buttonLeft in Event.Pressed)) then
@@ -4811,6 +4982,81 @@ procedure TDesignFrame.TDesignerLayer.Render;
       CenterScreen := AVp.LocalToContainerPosition(
         AVp.PositionFromWorld(Frame.FTerrainBrushHoverWorld));
       DrawRectangle(FloatRectangle(CenterScreen.X - 3, CenterScreen.Y - 3, 6, 6), RingColor);
+    end;
+  end;
+
+  procedure RenderScatterBrushOverlay(const AVp: TCastleViewport);
+  const
+    RingSegments = 32;
+  var
+    RingOuter, RingInner: array [0..RingSegments] of TVector2;
+    NormalTick: array [0..1] of TVector2;
+    OuterCount, InnerCount, Seg: Integer;
+    Angle, S, C, Rad, InnerRad: Single;
+    CamP, CamD, CamU, Nrm, TanA, TanB, WorldPt, TipWorld: TVector3;
+    RingColor, InnerColor: TCastleColor;
+    IsErase: Boolean;
+  begin
+    AVp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    IsErase := (Frame.FScatterBrushTool = sebtErase) xor (mkCtrl in ModifiersDown(Container.Pressed));
+    if IsErase then
+      RingColor := Vector4(1.00, 0.35, 0.30, 0.95)
+    else
+      RingColor := Vector4(0.25, 0.95, 0.45, 0.95);
+    InnerColor := Vector4(0.35, 0.85, 1.00, 0.65);
+
+    Nrm := Frame.FScatterBrushHoverNormal;
+    if Nrm.IsZero then
+      Nrm := Vector3(0, 1, 0)
+    else
+      Nrm := Nrm.Normalize;
+    TanA := AnyOrthogonalVector(Nrm).Normalize;
+    TanB := TVector3.CrossProduct(Nrm, TanA).Normalize;
+
+    Rad := Max(0.1, Frame.FScatterSettings.Radius);
+    InnerRad := Clamped(Frame.FScatterSettings.MinSpacing, 0.05, Rad);
+    OuterCount := 0;
+    InnerCount := 0;
+    for Seg := 0 to RingSegments do
+    begin
+      Angle := (Seg / RingSegments) * 2.0 * Pi;
+      SinCos(Angle, S, C);
+
+      WorldPt := Frame.FScatterBrushHoverWorld + Nrm * 0.06 +
+        TanA * (C * Rad) + TanB * (S * Rad);
+      if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+         (TVector3.DotProduct(WorldPt - CamP, CamD) > 0.05) then
+      begin
+        RingOuter[OuterCount] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(WorldPt));
+        Inc(OuterCount);
+      end;
+
+      WorldPt := Frame.FScatterBrushHoverWorld + Nrm * 0.06 +
+        TanA * (C * InnerRad) + TanB * (S * InnerRad);
+      if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+         (TVector3.DotProduct(WorldPt - CamP, CamD) > 0.05) then
+      begin
+        RingInner[InnerCount] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(WorldPt));
+        Inc(InnerCount);
+      end;
+    end;
+
+    if OuterCount >= 2 then
+      DrawPrimitive2D(pmLineStrip, Slice(RingOuter, OuterCount), RingColor,
+        bsSrcAlpha, bdOneMinusSrcAlpha, false, 2.0);
+    if (not IsErase) and (InnerCount >= 2) then
+      DrawPrimitive2D(pmLineStrip, Slice(RingInner, InnerCount), InnerColor,
+        bsSrcAlpha, bdOneMinusSrcAlpha, false, 1.2);
+
+    TipWorld := Frame.FScatterBrushHoverWorld + Nrm * Max(0.6, Rad * 0.22);
+    if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+       ((TVector3.DotProduct(Frame.FScatterBrushHoverWorld - CamP, CamD) > 0.05) and
+        (TVector3.DotProduct(TipWorld - CamP, CamD) > 0.05)) then
+    begin
+      NormalTick[0] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(Frame.FScatterBrushHoverWorld));
+      NormalTick[1] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(TipWorld));
+      DrawPrimitive2D(pmLines, NormalTick, RingColor,
+        bsSrcAlpha, bdOneMinusSrcAlpha, false, 2.0);
     end;
   end;
 
@@ -5046,6 +5292,12 @@ begin
     RenderTerrainBrushOverlay(Frame.CurrentViewport, Frame.ActiveBrushTerrain);
   end;
 
+  if Frame.FScatterBrushActive and Frame.FScatterBrushHasHover and
+     (Frame.CurrentViewport <> nil) and (Frame.CurrentViewport.InternalCamera <> nil) then
+  begin
+    RenderScatterBrushOverlay(Frame.CurrentViewport);
+  end;
+
   if (Frame.TransformManipulate <> nil) and
      Frame.TransformManipulate.IsDraggingGizmo and
      (Frame.TransformManipulate.CurrentDragSummary <> '') then
@@ -5113,6 +5365,15 @@ begin
   FTerrainBrushStrength := 0.60;
   FTerrainBrushHasHover := false;
   FTerrainBrushMouseDown := false;
+  FScatterBrushActive := false;
+  FScatterBrushTool := sebtPaint;
+  FScatterSettings := TPCGScatterBrushSettings.Default;
+  FScatterPrototype := nil;
+  FScatterTargetGroup := nil;
+  FScatterBrushHasHover := false;
+  FScatterBrushHoverNormal := Vector3(0, 1, 0);
+  FScatterBrushMouseDown := false;
+  FScatterStrokeMutated := false;
   for I := 1 to 5 do
     FComponentColorTags[I] := TComponentList.Create(false);
   for I := 0 to 9 do
@@ -5253,6 +5514,25 @@ begin
       PanelMiddleTop.GetControlIndex(ButtonUniversalMode) + 1);
 
   CreateTerrainBrushToolbar;
+
+  ButtonScatterBrushMode := TSpeedButton.Create(Self);
+  ButtonScatterBrushMode.Caption := 'Scatter';
+  ButtonScatterBrushMode.Hint := 'Toggle Interactive 3D PCG / Foliage Scatter Brush Mode (Alt+P).' + NL +
+    'Paint surface-aligned Poisson-spaced prop/foliage instances across terrain & meshes, pin manual hero overrides ([Pinned]), and non-destructively re-scatter unpinned instances.';
+  ButtonScatterBrushMode.ShowHint := true;
+  ButtonScatterBrushMode.AllowAllUp := true;
+  ButtonScatterBrushMode.GroupIndex := 905;
+  ButtonScatterBrushMode.AutoSize := true;
+  ButtonScatterBrushMode.Constraints.MinHeight := 33;
+  ButtonScatterBrushMode.Constraints.MinWidth := 56;
+  ButtonScatterBrushMode.BorderSpacing.Left := 2;
+  ButtonScatterBrushMode.OnClick := @ButtonScatterBrushModeClick;
+  ButtonScatterBrushMode.Parent := PanelMiddleTop;
+  if ButtonTerrainBrushMode.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonScatterBrushMode,
+      PanelMiddleTop.GetControlIndex(ButtonTerrainBrushMode) + 1);
+
+  CreateScatterBrushToolbar;
 
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
@@ -8014,6 +8294,16 @@ begin
   MenuTreeViewItemTerrainBrushMode.OnClick := @MenuTreeViewItemTerrainBrushModeClick;
   MenuTreeView.Items.Add(MenuTreeViewItemTerrainBrushMode);
 
+  MenuTreeViewItemScatterBrushMode := TMenuItem.Create(Self);
+  MenuTreeViewItemScatterBrushMode.Caption := 'Toggle 3D PCG / Foliage Scatter Brush Mode (Alt+P)';
+  MenuTreeViewItemScatterBrushMode.OnClick := @MenuTreeViewItemScatterBrushModeClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemScatterBrushMode);
+
+  MenuTreeViewItemPinScatterInstance := TMenuItem.Create(Self);
+  MenuTreeViewItemPinScatterInstance.Caption := 'Pin / Unpin Selected Scatter Instance(s) ([Pinned])';
+  MenuTreeViewItemPinScatterInstance.OnClick := @MenuTreeViewItemPinScatterInstanceClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemPinScatterInstance);
+
   OrganizeHierarchyContextMenuSubmenus;
 
   ControlsTree.OnDblClick := @ControlsTreeDblClick;
@@ -8123,8 +8413,21 @@ end;
 procedure TDesignFrame.Notification(AComponent: TComponent; Operation: TOperation);
 begin
   inherited;
-  if (Operation = opRemove) and (AComponent = CollectionPropertyEditorForm) then
-    CollectionPropertyEditorFormUnassign;
+  if Operation = opRemove then
+  begin
+    if AComponent = CollectionPropertyEditorForm then
+      CollectionPropertyEditorFormUnassign;
+    if AComponent = FScatterPrototype then
+    begin
+      FScatterPrototype := nil;
+      UpdateScatterBrushToolbarUI;
+    end;
+    if AComponent = FScatterTargetGroup then
+    begin
+      FScatterTargetGroup := nil;
+      UpdateScatterBrushToolbarUI;
+    end;
+  end;
 end;
 
 procedure TDesignFrame.SaveDesign(const Url: String);
@@ -13161,6 +13464,9 @@ var
     begin
       if GetComponentNote(TComponent(NodeObj)) <> '' then
         Suffix := Suffix + ' [#' + GetComponentNote(TComponent(NodeObj)) + ']'
+      else if (NodeObj is TCastleTransform) and
+              TCastleTransformManipulate.IsScatterInstancePinned(TCastleTransform(NodeObj)) then
+        Suffix := Suffix + ' [Pinned]'
       else if TComponent(NodeObj).Tag <> 0 then
         Suffix := Suffix + ' [Tag:' + IntToStr(TComponent(NodeObj).Tag) + ']';
     end;
@@ -50941,6 +51247,8 @@ begin
 
   if FTerrainBrushActive then
   begin
+    if FScatterBrushActive then
+      SetScatterBrushActive(false);
     if Mode = moInteract then
       Mode := moSelect;
     if TransformManipulate <> nil then
@@ -51217,6 +51525,515 @@ end;
 procedure TDesignFrame.ButtonTerrainSaveMapsClick(Sender: TObject);
 begin
   SaveActiveTerrainMapsToProjectData;
+end;
+
+{ PCG / Foliage Scatter Brush Mode (Phase 281) ------------------------------- }
+
+procedure TDesignFrame.CreateScatterBrushToolbar;
+var
+  LblRad, LblSpace, LblCount, LblSlope: TLabel;
+begin
+  PanelScatterBrush := TPanel.Create(Self);
+  PanelScatterBrush.Align := alTop;
+  PanelScatterBrush.AutoSize := true;
+  PanelScatterBrush.BevelOuter := bvNone;
+  PanelScatterBrush.ChildSizing.Layout := cclLeftToRightThenTopToBottom;
+  PanelScatterBrush.ChildSizing.ControlsPerLine := 22;
+  PanelScatterBrush.ChildSizing.HorizontalSpacing := 4;
+  PanelScatterBrush.ChildSizing.LeftRightSpacing := 6;
+  PanelScatterBrush.ChildSizing.TopBottomSpacing := 3;
+  PanelScatterBrush.Visible := false;
+  PanelScatterBrush.Parent := PanelMiddle;
+  if PanelMiddleTop.Parent = PanelMiddle then
+    PanelMiddle.SetControlIndex(PanelScatterBrush,
+      PanelMiddle.GetControlIndex(PanelMiddleTop) + 1);
+
+  ButtonScatterUseSelected := TSpeedButton.Create(Self);
+  ButtonScatterUseSelected.Caption := 'Set Source';
+  ButtonScatterUseSelected.Hint := 'Use the currently selected TCastleTransform as the scatter prototype asset';
+  ButtonScatterUseSelected.ShowHint := true;
+  ButtonScatterUseSelected.AutoSize := true;
+  ButtonScatterUseSelected.Constraints.MinHeight := 28;
+  ButtonScatterUseSelected.OnClick := @ButtonScatterUseSelectedClick;
+  ButtonScatterUseSelected.Parent := PanelScatterBrush;
+
+  ButtonScatterPaint := TSpeedButton.Create(Self);
+  ButtonScatterPaint.Caption := 'Paint';
+  ButtonScatterPaint.Hint := 'Paint Poisson-spaced scatter instances onto 3D surfaces (Hotkey: 1 | Hold Ctrl to Erase)';
+  ButtonScatterPaint.ShowHint := true;
+  ButtonScatterPaint.GroupIndex := 906;
+  ButtonScatterPaint.AllowAllUp := false;
+  ButtonScatterPaint.Tag := Ord(sebtPaint);
+  ButtonScatterPaint.Down := true;
+  ButtonScatterPaint.AutoSize := true;
+  ButtonScatterPaint.Constraints.MinHeight := 28;
+  ButtonScatterPaint.Constraints.MinWidth := 48;
+  ButtonScatterPaint.OnClick := @ButtonScatterToolClick;
+  ButtonScatterPaint.Parent := PanelScatterBrush;
+
+  ButtonScatterErase := TSpeedButton.Create(Self);
+  ButtonScatterErase.Caption := 'Erase';
+  ButtonScatterErase.Hint := 'Erase unpinned scatter instances inside brush radius while preserving [Pinned] hero overrides (Hotkey: 2)';
+  ButtonScatterErase.ShowHint := true;
+  ButtonScatterErase.GroupIndex := 906;
+  ButtonScatterErase.AllowAllUp := false;
+  ButtonScatterErase.Tag := Ord(sebtErase);
+  ButtonScatterErase.AutoSize := true;
+  ButtonScatterErase.Constraints.MinHeight := 28;
+  ButtonScatterErase.Constraints.MinWidth := 48;
+  ButtonScatterErase.OnClick := @ButtonScatterToolClick;
+  ButtonScatterErase.Parent := PanelScatterBrush;
+
+  LblRad := TLabel.Create(Self);
+  LblRad.Caption := 'Radius:';
+  LblRad.Layout := tlCenter;
+  LblRad.BorderSpacing.Left := 6;
+  LblRad.Parent := PanelScatterBrush;
+
+  SpinScatterRadius := TFloatSpinEdit.Create(Self);
+  SpinScatterRadius.DecimalPlaces := 1;
+  SpinScatterRadius.MinValue := 0.5;
+  SpinScatterRadius.MaxValue := 500.0;
+  SpinScatterRadius.Increment := 1.0;
+  SpinScatterRadius.Value := FScatterSettings.Radius;
+  SpinScatterRadius.Width := 60;
+  SpinScatterRadius.Hint := 'Scatter brush radius in world units (Shortcuts: [ / ])';
+  SpinScatterRadius.ShowHint := true;
+  SpinScatterRadius.OnChange := @SpinScatterRadiusChange;
+  SpinScatterRadius.Parent := PanelScatterBrush;
+
+  LblSpace := TLabel.Create(Self);
+  LblSpace.Caption := 'Spacing:';
+  LblSpace.Layout := tlCenter;
+  LblSpace.BorderSpacing.Left := 4;
+  LblSpace.Parent := PanelScatterBrush;
+
+  SpinScatterMinSpacing := TFloatSpinEdit.Create(Self);
+  SpinScatterMinSpacing.DecimalPlaces := 1;
+  SpinScatterMinSpacing.MinValue := 0.1;
+  SpinScatterMinSpacing.MaxValue := 200.0;
+  SpinScatterMinSpacing.Increment := 0.5;
+  SpinScatterMinSpacing.Value := FScatterSettings.MinSpacing;
+  SpinScatterMinSpacing.Width := 56;
+  SpinScatterMinSpacing.Hint := 'Minimum Poisson clearance distance between scattered instances (shown as cyan inner ring)';
+  SpinScatterMinSpacing.ShowHint := true;
+  SpinScatterMinSpacing.OnChange := @SpinScatterMinSpacingChange;
+  SpinScatterMinSpacing.Parent := PanelScatterBrush;
+
+  LblCount := TLabel.Create(Self);
+  LblCount.Caption := 'Count:';
+  LblCount.Layout := tlCenter;
+  LblCount.BorderSpacing.Left := 4;
+  LblCount.Parent := PanelScatterBrush;
+
+  SpinScatterCount := TSpinEdit.Create(Self);
+  SpinScatterCount.MinValue := 1;
+  SpinScatterCount.MaxValue := 64;
+  SpinScatterCount.Value := FScatterSettings.CountPerStamp;
+  SpinScatterCount.Width := 48;
+  SpinScatterCount.Hint := 'Maximum candidate instances spawned per brush stamp';
+  SpinScatterCount.ShowHint := true;
+  SpinScatterCount.OnChange := @SpinScatterCountChange;
+  SpinScatterCount.Parent := PanelScatterBrush;
+
+  LblSlope := TLabel.Create(Self);
+  LblSlope.Caption := 'Max Slope°:';
+  LblSlope.Layout := tlCenter;
+  LblSlope.BorderSpacing.Left := 4;
+  LblSlope.Parent := PanelScatterBrush;
+
+  SpinScatterMaxSlope := TFloatSpinEdit.Create(Self);
+  SpinScatterMaxSlope.DecimalPlaces := 0;
+  SpinScatterMaxSlope.MinValue := 0.0;
+  SpinScatterMaxSlope.MaxValue := 90.0;
+  SpinScatterMaxSlope.Increment := 5.0;
+  SpinScatterMaxSlope.Value := FScatterSettings.MaxSlopeDeg;
+  SpinScatterMaxSlope.Width := 52;
+  SpinScatterMaxSlope.Hint := 'Maximum allowed surface slope angle in degrees (rejects steeper cliffs/walls)';
+  SpinScatterMaxSlope.ShowHint := true;
+  SpinScatterMaxSlope.OnChange := @SpinScatterMaxSlopeChange;
+  SpinScatterMaxSlope.Parent := PanelScatterBrush;
+
+  CheckScatterAlignNormal := TCheckBox.Create(Self);
+  CheckScatterAlignNormal.Caption := 'Align Normal';
+  CheckScatterAlignNormal.Checked := FScatterSettings.AlignToNormal;
+  CheckScatterAlignNormal.Hint := 'Orient scattered instances along the hit surface normal with random yaw jitter';
+  CheckScatterAlignNormal.ShowHint := true;
+  CheckScatterAlignNormal.BorderSpacing.Left := 4;
+  CheckScatterAlignNormal.OnChange := @CheckScatterAlignNormalChange;
+  CheckScatterAlignNormal.Parent := PanelScatterBrush;
+
+  ButtonScatterPinSelected := TSpeedButton.Create(Self);
+  ButtonScatterPinSelected.Caption := 'Pin / Unpin';
+  ButtonScatterPinSelected.Hint := 'Mark or unmark selected instance(s) as [Pinned] hero artist overrides so Erase and Re-Scatter preserve them untouched';
+  ButtonScatterPinSelected.ShowHint := true;
+  ButtonScatterPinSelected.AutoSize := true;
+  ButtonScatterPinSelected.Constraints.MinHeight := 28;
+  ButtonScatterPinSelected.BorderSpacing.Left := 6;
+  ButtonScatterPinSelected.OnClick := @ButtonScatterPinSelectedClick;
+  ButtonScatterPinSelected.Parent := PanelScatterBrush;
+
+  ButtonScatterRescatter := TSpeedButton.Create(Self);
+  ButtonScatterRescatter.Caption := 'Re-Scatter Unpinned';
+  ButtonScatterRescatter.Hint := 'Regenerate all unpinned scatter instances while preserving [Pinned] manual overrides and Poisson spacing around them';
+  ButtonScatterRescatter.ShowHint := true;
+  ButtonScatterRescatter.AutoSize := true;
+  ButtonScatterRescatter.Constraints.MinHeight := 28;
+  ButtonScatterRescatter.OnClick := @ButtonScatterRescatterClick;
+  ButtonScatterRescatter.Parent := PanelScatterBrush;
+
+  LabelScatterBrushStatus := TLabel.Create(Self);
+  LabelScatterBrushStatus.Caption := 'Select a prop & click Set Source | LMB: Paint | Ctrl: Erase | [ / ]: Radius';
+  LabelScatterBrushStatus.Layout := tlCenter;
+  LabelScatterBrushStatus.BorderSpacing.Left := 8;
+  LabelScatterBrushStatus.Parent := PanelScatterBrush;
+end;
+
+procedure TDesignFrame.SetScatterPrototype(const AProto: TCastleTransform);
+begin
+  if FScatterPrototype = AProto then
+    Exit;
+  if FScatterPrototype <> nil then
+    FScatterPrototype.RemoveFreeNotification(Self);
+  FScatterPrototype := AProto;
+  if FScatterPrototype <> nil then
+    FScatterPrototype.FreeNotification(Self);
+  UpdateScatterBrushToolbarUI;
+end;
+
+function TDesignFrame.EnsureScatterTargetGroup: TCastleTransform;
+var
+  ExistingComp: TComponent;
+begin
+  if (FScatterTargetGroup <> nil) and (FScatterTargetGroup.Parent <> nil) then
+    Exit(FScatterTargetGroup);
+
+  Result := nil;
+  if (CurrentViewport = nil) or (DesignOwner = nil) then
+    Exit;
+
+  ExistingComp := DesignOwner.FindComponent('PCGScatterGroup');
+  if ExistingComp is TCastleTransform then
+  begin
+    FScatterTargetGroup := TCastleTransform(ExistingComp);
+    FScatterTargetGroup.FreeNotification(Self);
+    Exit(FScatterTargetGroup);
+  end;
+
+  FScatterTargetGroup := TCastleTransform.Create(DesignOwner);
+  FScatterTargetGroup.Name := 'PCGScatterGroup';
+  FScatterTargetGroup.FreeNotification(Self);
+  CurrentViewport.Items.Add(FScatterTargetGroup);
+  Result := FScatterTargetGroup;
+end;
+
+procedure TDesignFrame.UpdateScatterBrushToolbarUI;
+var
+  TotalCount, PinnedCount, I: Integer;
+  SrcName: String;
+begin
+  if ButtonScatterBrushMode <> nil then
+    ButtonScatterBrushMode.Down := FScatterBrushActive;
+  if PanelScatterBrush <> nil then
+    PanelScatterBrush.Visible := FScatterBrushActive;
+  if ButtonScatterPaint <> nil then
+    ButtonScatterPaint.Down := FScatterBrushTool = sebtPaint;
+  if ButtonScatterErase <> nil then
+    ButtonScatterErase.Down := FScatterBrushTool = sebtErase;
+
+  if LabelScatterBrushStatus <> nil then
+  begin
+    if FScatterPrototype <> nil then
+      SrcName := FScatterPrototype.Name
+    else
+      SrcName := '<None — select a prop & click Set Source>';
+
+    TotalCount := 0;
+    PinnedCount := 0;
+    if FScatterTargetGroup <> nil then
+      for I := 0 to FScatterTargetGroup.Count - 1 do
+        if not (csTransient in FScatterTargetGroup[I].ComponentStyle) then
+        begin
+          Inc(TotalCount);
+          if TCastleTransformManipulate.IsScatterInstancePinned(FScatterTargetGroup[I]) then
+            Inc(PinnedCount);
+        end;
+
+    LabelScatterBrushStatus.Caption := Format(
+      'Source: %s | Group: %d (%d [Pinned]) | LMB: Paint | Ctrl: Erase | [ / ]: Radius',
+      [SrcName, TotalCount, PinnedCount]);
+  end;
+end;
+
+procedure TDesignFrame.SetScatterBrushActive(const AActive: Boolean);
+var
+  Cand: TCastleTransform;
+begin
+  if FScatterBrushActive = AActive then
+    Exit;
+  FScatterBrushActive := AActive;
+  FScatterBrushMouseDown := false;
+  FScatterBrushHasHover := false;
+  FScatterStrokeMutated := false;
+
+  if FScatterBrushActive then
+  begin
+    if FTerrainBrushActive then
+      SetTerrainBrushActive(false);
+    if Mode = moInteract then
+      Mode := moSelect;
+    if TransformManipulate <> nil then
+      TransformManipulate.Mode := mmSelect;
+    if FScatterPrototype = nil then
+    begin
+      Cand := CurrentTransform;
+      if (Cand <> nil) and (not (Cand is TCastleTerrain)) and
+         ((CurrentViewport = nil) or (Cand <> CurrentViewport.Items)) and
+         (Cand.Name <> 'PCGScatterGroup') then
+        SetScatterPrototype(Cand);
+    end;
+    if (FScatterTargetGroup = nil) and (DesignOwner <> nil) and
+       (DesignOwner.FindComponent('PCGScatterGroup') is TCastleTransform) then
+    begin
+      FScatterTargetGroup := TCastleTransform(DesignOwner.FindComponent('PCGScatterGroup'));
+      FScatterTargetGroup.FreeNotification(Self);
+    end;
+  end else
+  begin
+    if TransformManipulate <> nil then
+    begin
+      case Mode of
+        moTranslate: TransformManipulate.Mode := mmTranslate;
+        moRotate: TransformManipulate.Mode := mmRotate;
+        moScale: TransformManipulate.Mode := mmScale;
+        moUniversal: TransformManipulate.Mode := mmUniversal;
+        else TransformManipulate.Mode := mmSelect;
+      end;
+    end;
+  end;
+  UpdateScatterBrushToolbarUI;
+end;
+
+procedure TDesignFrame.ToggleScatterBrushMode;
+begin
+  SetScatterBrushActive(not FScatterBrushActive);
+end;
+
+procedure TDesignFrame.SelectScatterBrushTool(const ATool: TPCGScatterEditorBrushTool);
+begin
+  FScatterBrushTool := ATool;
+  UpdateScatterBrushToolbarUI;
+end;
+
+procedure TDesignFrame.AdjustScatterBrushRadius(const Factor: Single);
+begin
+  FScatterSettings.Radius := Clamped(FScatterSettings.Radius * Factor, 0.5, 500.0);
+  if SpinScatterRadius <> nil then
+    SpinScatterRadius.Value := FScatterSettings.Radius;
+end;
+
+function TDesignFrame.RayCastScatterBrushSurface(const RayOrigin, RayDirection: TVector3;
+  out HitWorldPt, HitWorldNormal: TVector3): Boolean;
+begin
+  HitWorldPt := TVector3.Zero;
+  HitWorldNormal := Vector3(0, 1, 0);
+  Result := (CurrentViewport <> nil) and (TransformManipulate <> nil) and
+    TransformManipulate.RayCastScatterSurface(CurrentViewport.Items,
+      FScatterTargetGroup, FScatterPrototype, RayOrigin, RayDirection,
+      HitWorldPt, HitWorldNormal);
+end;
+
+function TDesignFrame.ApplyScatterBrushAtWorldPoint(const HitWorldPt: TVector3;
+  const Modifiers: TModifierKeys): Boolean;
+var
+  IsErase: Boolean;
+  TargetGrp: TCastleTransform;
+begin
+  Result := false;
+  if (CurrentViewport = nil) or (TransformManipulate = nil) or (DesignOwner = nil) then
+    Exit;
+
+  IsErase := (FScatterBrushTool = sebtErase) xor (mkCtrl in Modifiers);
+  if IsErase then
+  begin
+    if FScatterTargetGroup <> nil then
+      Result := TransformManipulate.ScatterEraseStamp(
+        FScatterTargetGroup, HitWorldPt, FScatterSettings.Radius, true) > 0;
+  end else
+  begin
+    if FScatterPrototype = nil then
+      Exit;
+    TargetGrp := EnsureScatterTargetGroup;
+    if TargetGrp <> nil then
+      Result := TransformManipulate.ScatterPaintStamp(
+        CurrentViewport.Items, FScatterPrototype, TargetGrp, DesignOwner,
+        HitWorldPt, FScatterSettings) > 0;
+  end;
+end;
+
+procedure TDesignFrame.TogglePinSelectedScatterInstances;
+var
+  Selected: TComponentList;
+  SelectedCount, I, ChangedCount: Integer;
+  AnyUnpinned: Boolean;
+  T: TCastleTransform;
+begin
+  GetSelected(Selected, SelectedCount);
+  try
+    AnyUnpinned := false;
+    for I := 0 to SelectedCount - 1 do
+      if (Selected[I] is TCastleTransform) and
+         (not TCastleTransformManipulate.IsScatterInstancePinned(TCastleTransform(Selected[I]))) then
+      begin
+        AnyUnpinned := true;
+        Break;
+      end;
+
+    ChangedCount := 0;
+    for I := 0 to SelectedCount - 1 do
+      if Selected[I] is TCastleTransform then
+      begin
+        T := TCastleTransform(Selected[I]);
+        TCastleTransformManipulate.SetScatterInstancePinned(T, AnyUnpinned, true);
+        Inc(ChangedCount);
+      end;
+
+    if ChangedCount = 0 then
+    begin
+      InfoBox('Select one or more TCastleTransform scatter instances first to toggle [Pinned] status.');
+      Exit;
+    end;
+
+    UpdateDesign;
+    UpdateScatterBrushToolbarUI;
+    ControlsTree.Invalidate;
+    if AnyUnpinned then
+      ModifiedOutsideObjectInspector('Pin Scatter Instance(s)', ucHigh)
+    else
+      ModifiedOutsideObjectInspector('Unpin Scatter Instance(s)', ucHigh);
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.RegenerateUnpinnedScatterAction;
+var
+  TargetGrp: TCastleTransform;
+  GroupBox: TBox3D;
+  RegenSettings: TPCGScatterBrushSettings;
+  CenterWorld: TVector3;
+  ExistingUnpinned, Spawned, I: Integer;
+begin
+  if FScatterPrototype = nil then
+  begin
+    InfoBox('Select a TCastleTransform prop and click "Set Source" first.');
+    Exit;
+  end;
+  TargetGrp := EnsureScatterTargetGroup;
+  if (TargetGrp = nil) or (CurrentViewport = nil) or (TransformManipulate = nil) then
+    Exit;
+
+  ExistingUnpinned := 0;
+  for I := 0 to TargetGrp.Count - 1 do
+    if (not (csTransient in TargetGrp[I].ComponentStyle)) and
+       (not TCastleTransformManipulate.IsScatterInstancePinned(TargetGrp[I])) then
+      Inc(ExistingUnpinned);
+
+  GroupBox := TargetGrp.WorldBoundingBox;
+  RegenSettings := FScatterSettings;
+  if not GroupBox.IsEmpty then
+  begin
+    CenterWorld := GroupBox.Center;
+    RegenSettings.Radius := Max(FScatterSettings.Radius,
+      Max(GroupBox.SizeX, GroupBox.SizeZ) * 0.55);
+  end else
+    CenterWorld := TVector3.Zero;
+
+  RegenSettings.CountPerStamp := Max(ExistingUnpinned, FScatterSettings.CountPerStamp * 3);
+  Spawned := TransformManipulate.RegenerateUnpinnedScatter(
+    CurrentViewport.Items, FScatterPrototype, TargetGrp, DesignOwner,
+    CenterWorld, RegenSettings);
+  UpdateDesign;
+  UpdateScatterBrushToolbarUI;
+  ModifiedOutsideObjectInspector(
+    Format('Re-Scatter Unpinned (%d spawned)', [Spawned]), ucHigh);
+end;
+
+procedure TDesignFrame.MenuTreeViewItemScatterBrushModeClick(Sender: TObject);
+begin
+  ToggleScatterBrushMode;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemPinScatterInstanceClick(Sender: TObject);
+begin
+  TogglePinSelectedScatterInstances;
+end;
+
+procedure TDesignFrame.ButtonScatterBrushModeClick(Sender: TObject);
+begin
+  ToggleScatterBrushMode;
+end;
+
+procedure TDesignFrame.ButtonScatterUseSelectedClick(Sender: TObject);
+var
+  Cand: TCastleTransform;
+begin
+  Cand := CurrentTransform;
+  if (Cand = nil) or (Cand is TCastleTerrain) or
+     ((CurrentViewport <> nil) and (Cand = CurrentViewport.Items)) or
+     (Cand = FScatterTargetGroup) then
+  begin
+    InfoBox('Select a prop/foliage TCastleTransform (such as a TCastleScene or primitive) in the Hierarchy first, then click "Set Source".');
+    Exit;
+  end;
+  SetScatterPrototype(Cand);
+end;
+
+procedure TDesignFrame.ButtonScatterToolClick(Sender: TObject);
+begin
+  if Sender is TComponent then
+    SelectScatterBrushTool(TPCGScatterEditorBrushTool(
+      Clamped(TComponent(Sender).Tag, 0, Ord(High(TPCGScatterEditorBrushTool)))));
+end;
+
+procedure TDesignFrame.SpinScatterRadiusChange(Sender: TObject);
+begin
+  if SpinScatterRadius <> nil then
+    FScatterSettings.Radius := Max(0.5, SpinScatterRadius.Value);
+end;
+
+procedure TDesignFrame.SpinScatterMinSpacingChange(Sender: TObject);
+begin
+  if SpinScatterMinSpacing <> nil then
+    FScatterSettings.MinSpacing := Max(0.1, SpinScatterMinSpacing.Value);
+end;
+
+procedure TDesignFrame.SpinScatterCountChange(Sender: TObject);
+begin
+  if SpinScatterCount <> nil then
+    FScatterSettings.CountPerStamp := Max(1, SpinScatterCount.Value);
+end;
+
+procedure TDesignFrame.SpinScatterMaxSlopeChange(Sender: TObject);
+begin
+  if SpinScatterMaxSlope <> nil then
+    FScatterSettings.MaxSlopeDeg := Clamped(SpinScatterMaxSlope.Value, 0.0, 90.0);
+end;
+
+procedure TDesignFrame.CheckScatterAlignNormalChange(Sender: TObject);
+begin
+  if CheckScatterAlignNormal <> nil then
+    FScatterSettings.AlignToNormal := CheckScatterAlignNormal.Checked;
+end;
+
+procedure TDesignFrame.ButtonScatterPinSelectedClick(Sender: TObject);
+begin
+  TogglePinSelectedScatterInstances;
+end;
+
+procedure TDesignFrame.ButtonScatterRescatterClick(Sender: TObject);
+begin
+  RegenerateUnpinnedScatterAction;
 end;
 
 initialization

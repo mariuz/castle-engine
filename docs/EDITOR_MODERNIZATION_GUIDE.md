@@ -2360,9 +2360,44 @@ Terrain.SaveSplatmap('castle-data:/terrains/courtyard_splat.png');
 
 ---
 
+## 66F. Horizon 2 — Interactive PCG / Foliage Scatter Brush Mode with Manual Artist Overrides (Phase 281 / UE 5.8 PCG Editor Mode Parity)
+
+Inspired by **Unreal Engine 5.8's Interactive PCG Editor Mode and Foliage Paint/Erase Workflows**, `TCastleTransformManipulate` (`src/scene/castletransformmanipulate.pas`) and `TDesignFrame` (`tools/castle-editor/code/framedesign.pas`) provide real-time 3D surface raycast scattering with Poisson minimum-spacing, slope/altitude filtering, and non-destructive `[Pinned]` hero-instance preservation.
+
+### Key Capabilities
+1. **Surface-Raycast Poisson Scatter & Erase Engine (`TCastleTransformManipulate`)**:
+   - `RayCastScatterSurface` casts world-space rays against scene and `TCastleTerrain` geometry while ignoring gizmos, the prototype asset, and `PCGScatterGroup` so newly painted foliage never self-stacks on top of earlier tree canopies.
+   - `ScatterPaintStamp` enforces horizontal/3D Poisson clearance (`TPCGScatterBrushSettings.MinSpacing`), maximum surface slope (`MaxSlopeDeg`), optional altitude bounds (`MinAltitudeY..MaxAltitudeY`), surface-normal alignment (`AlignToNormal`, `NormalBlend`), random yaw (`RandomYawDeg`), and uniform scale jitter (`ScaleMin..ScaleMax`), seating each clone's bounding-box bottom flush with the hit surface.
+2. **Manual Artist Overrides (`[Pinned]`) & Non-Destructive Re-Scatter**:
+   - `SetScatterInstancePinned(T, true)` tags hero instances (`Tag = ScatterInstancePinnedTag = 7701`, `_Pinned` name suffix, and **`[Pinned]`** Hierarchy badge) after an artist hand-tweaks their placement, rotation, or scale.
+   - Both `ScatterEraseStamp(..., RespectPinned = true)` and `RegenerateUnpinnedScatter` preserve every `[Pinned]` instance untouched while treating `[Pinned]` positions as active Poisson spacing obstacles for newly generated instances.
+3. **Interactive Viewport Scatter Toolbar & Dual-Ring Cursor (`Alt+P`)**:
+   - Toggle via **`Alt+P`**, the top **`Scatter`** mode button, or **`Design -> PCG / Foliage Scatter Brush Mode (Alt+P)`** (mutually exclusive with `Alt+T` Terrain Brush Mode).
+   - Provides **`Set Source`**, **`Paint` (`1`)**, **`Erase` (`2` or hold `Ctrl`)**, **`Radius` (`[` / `]`)**, **`Spacing`**, **`Count`**, **`Max Slope°`**, **`Align Normal`**, **`Pin / Unpin`**, and **`Re-Scatter Unpinned`**, plus a 32-segment surface-tangent outer radius ring, inner cyan `MinSpacing` ring, surface-normal tick, and single-step `TUndoSystem` stroke history.
+
+### Example Usage (Pascal API)
+```pascal
+Settings := TPCGScatterBrushSettings.Default;
+Settings.Radius := 12.0;
+Settings.MinSpacing := 3.0;
+Settings.MaxSlopeDeg := 35.0;
+Manipulate.ScatterPaintStamp(Viewport.Items, PineTreeProto, ScatterGroup, DesignOwner, HitWorldPt, Settings);
+
+// Pin a hand-placed hero tree, then re-scatter all surrounding unpinned instances:
+TCastleTransformManipulate.SetScatterInstancePinned(ScatterGroup[0], true, true);
+Manipulate.RegenerateUnpinnedScatter(Viewport.Items, PineTreeProto, ScatterGroup, DesignOwner, HitWorldPt, Settings);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CastleTransformManipulate API Reference](https://castle-engine.io/apidoc/html/CastleTransformManipulate.html) · [CGE Visual Editor Manual](https://castle-engine.io/manual_editor.php) · [UE Procedural Content Generation (PCG) Overview](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-overview) · [UE Foliage Mode](https://dev.epicgames.com/documentation/en-us/unreal-engine/foliage-mode-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — 3D Worlds & Level Design (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [Animated 3D Viewport Brush & Scene Editing](https://docs.godotengine.org/en/stable/_images/3d_viewport_navigation.gif)
+- **Screenshots:** [CGE Visual Editor 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Terrain & Foliage Scene](https://castle-engine.io/images/thumb_const_height_size/terrain.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
-All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 51 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
+All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
 
 1. **`TestSelectedCountAndFree`**: Verifies single/multi-selection filtering, freeing a selected transform while selected, and translating the remaining selection.
 2. **`TestTranslateSnapAndCoordSpace`**: Verifies grid snapping (`TranslateSnap := 2.0`) and `csLocal` vs. `csWorld` translation on a $90^\circ$-rotated transform.
@@ -2415,6 +2450,7 @@ All core 3D manipulation algorithms in `CastleTransformManipulate` are covered b
 49. **`TestKuenRichmondAndDevilsCurve`**: Verifies `ArrangeSelectedOnKuenSurface(5.0, 1.0, 1)` distributes 3 transforms on Theodor Kuen's pseudospherical surface with `B2` ($t=0.5, \; u=0, \; v=0$) at $(10, 0, 0)$, verifies `ArrangeSelectedOnRichmondSurface(10.0, 2, 1.0, 2)` distributes 3 transforms on Herbert Richmond's planar-end minimal surface with `B3` ($t=1.0, \; r=1.0, \; \theta=2\pi$) at $(-6, 5, 0)$ oriented along the exact Weierstrass–Enneper Gauss-map normal $(1, 0, 0)$, and verifies `ArrangeSelectedInDevilsCurve(10.0, 0.44, 3.0, 1)` distributes 4 transforms around Gabriel Cramer's Devil's Curve / Maltese Cross lemniscate ($\sqrt{1 + 0.44} = 1.2 \implies r = 12$) at $(12, 0, 0)$ with analytical tangent $(0, 6, 12)$ normalized, $(0, 0, 12)$, $(-12, 0, 0)$, and $(0, 0, -12)$.
 50. **`TestPluckerSuperellipsoidAndGeronoLemniscate`**: Verifies `ArrangeSelectedOnPluckerConoid(8.0, 2, 3.0, 1.0, 2)` distributes 3 transforms on Julius Plücker's ruled conoid surface at $(2, 0, 0), (-5, 0, 0), (8, 0, 0)$ with exact ruled surface normal $(0, 0.8, -0.6)$ at `B3`, verifies `ArrangeSelectedOnSuperellipsoid(Vector3(10, 6, 8), 0.5, 0.5, 1.0, 1)` distributes 3 transforms on Alan Barr's 3D Superellipsoid at South Pole $(0, -6, 0)$, Equator $(-10, 0, 0)$ with outward normal $(-1, 0, 0)$, and North Pole $(0, 6, 0)$ with outward normal $(0, 1, 0)$, and verifies `ArrangeSelectedInGeronoLemniscate(10.0, 8.0, 3.0, 1)` distributes 4 transforms around Camillo-Christophe Gerono's Figure-Eight Lemniscate / Besace Saddle Curve at $(10, 3, 0)$ with analytical tangent $(0, 0, 1)$, $(0, -3, 0)$ with tangent $(-10, 0, -8)$ normalized, $(-10, 3, 0)$, and $(0, -3, 0)$.
 51. **`TestUniversalGizmoPlanarHandlesScaleAndDragSummary`**: Verifies `GizmoSizeScale` clamping (`[0.25 .. 4.0]`) and $2\times$ orthographic gizmo child scaling, verifies `TranslateSelectedPlanar(1, ...)` and `ScaleSelectedPlanar(1, ...)` with `TranslateSnap` and `ScaleSnap` on the horizontal XZ plane, and verifies end-to-end 3D raycast picking and interactive dragging (`PointingDevicePress` / `PointingDeviceMove` / `PointingDeviceRelease`) on `mmUniversal`'s `MaterialPlaneXZ` quad, `MaterialRotateY` 3D arc tube, and `MaterialScaleCenter` uniform scale cube alongside live `IsDraggingGizmo` and `CurrentDragSummary` telemetry.
+52. **`TestPCGScatterBrushPoissonSlopeAndPinnedPreservation`**: Verifies `ScatterPaintStamp` across a flat floor ($Y = 0$) and $65^\circ$ cliff rejects cliff hits exceeding `MaxSlopeDeg := 30.0`, seats accepted clones flush at $Y = 1.0$, and enforces pairwise Poisson spacing $\ge 3.0$; verifies `SetScatterInstancePinned` (`[Pinned]` / `Tag = 7701`) preserves hero artist overrides untouched across both `ScatterEraseStamp` and `RegenerateUnpinnedScatter` while maintaining `MinSpacing` clearance around the pinned hero; and verifies `AlignToNormal` on a $25^\circ$ tilted ramp orients scattered instances to $(-\sin 25^\circ, \cos 25^\circ, 0)$.
 
 To run this test suite from the command line:
 ```bash

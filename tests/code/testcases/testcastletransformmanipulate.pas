@@ -80,6 +80,7 @@ type
     procedure TestKuenRichmondAndDevilsCurve;
     procedure TestPluckerSuperellipsoidAndGeronoLemniscate;
     procedure TestUniversalGizmoPlanarHandlesScaleAndDragSummary;
+    procedure TestPCGScatterBrushPoissonSlopeAndPinnedPreservation;
   end;
 
 implementation
@@ -4179,6 +4180,140 @@ begin
   finally
     FreeAndNil(Manipulate);
     FreeAndNil(Viewport);
+  end;
+end;
+
+procedure TTestCastleTransformManipulate.TestPCGScatterBrushPoissonSlopeAndPinnedPreservation;
+var
+  OwnerComp: TComponent;
+  Viewport: TCastleViewport;
+  Manipulate: TCastleTransformManipulate;
+  FlatFloor, SteepCliff, TiltedRamp: TCastleBox;
+  TreeProto, ScatterGroup, PinnedHero, ChildA, ChildB: TCastleTransform;
+  ProtoBox: TCastleBox;
+  Settings: TPCGScatterBrushSettings;
+  Spawned, Erased, RegenSpawned, I, J: Integer;
+  PosA, PosB, UpWorld, ExpectedRampNormal: TVector3;
+begin
+  OwnerComp := TComponent.Create(nil);
+  try
+    Viewport := TCastleViewport.Create(OwnerComp);
+    Manipulate := TCastleTransformManipulate.Create(OwnerComp);
+
+    { Flat ground at Y = 0 spanning X in [-30..0], Z in [-20..20] }
+    FlatFloor := TCastleBox.Create(OwnerComp);
+    FlatFloor.Size := Vector3(30, 2, 40);
+    FlatFloor.Translation := Vector3(-15, -1, 0);
+    Viewport.Items.Add(FlatFloor);
+
+    { Steep 65-degree cliff on X > 0 side so MaxSlopeDeg=30 rejects X > 0 }
+    SteepCliff := TCastleBox.Create(OwnerComp);
+    SteepCliff.Size := Vector3(30, 2, 40);
+    SteepCliff.Translation := Vector3(15, 5, 0);
+    SteepCliff.Rotation := Vector4(0, 0, 1, DegToRad(65));
+    Viewport.Items.Add(SteepCliff);
+
+    { Prototype prop (2x4x2 box) }
+    ProtoBox := TCastleBox.Create(OwnerComp);
+    ProtoBox.Name := 'PineTree';
+    ProtoBox.Size := Vector3(1, 2, 1);
+    ProtoBox.Translation := Vector3(-100, 0, 0);
+    Viewport.Items.Add(ProtoBox);
+    TreeProto := ProtoBox;
+
+    ScatterGroup := TCastleTransform.Create(OwnerComp);
+    ScatterGroup.Name := 'PCGScatterGroup';
+    Viewport.Items.Add(ScatterGroup);
+
+    Settings := TPCGScatterBrushSettings.Default;
+    Settings.Radius := 12.0;
+    Settings.MinSpacing := 3.0;
+    Settings.CountPerStamp := 8;
+    Settings.MaxSlopeDeg := 30.0;
+    Settings.ScaleMin := 1.0;
+    Settings.ScaleMax := 1.0;
+    Settings.AlignToNormal := true;
+    Settings.Seed := 4242;
+
+    { 1. Paint across X in [-12..+12]: X > 0 hits 65-deg cliff (rejected by MaxSlopeDeg=30),
+         X < 0 hits FlatFloor (accepted with Poisson MinSpacing >= 3.0) }
+    Spawned := Manipulate.ScatterPaintStamp(
+      Viewport.Items, TreeProto, ScatterGroup, OwnerComp, Vector3(0, 0, 0), Settings);
+    AssertTrue(Spawned >= 3);
+    AssertEquals(Spawned, ScatterGroup.Count);
+
+    for I := 0 to ScatterGroup.Count - 1 do
+    begin
+      ChildA := ScatterGroup[I];
+      PosA := ScatterGroup.LocalToWorld(ChildA.Translation);
+      { All accepted hits must be on FlatFloor (X <= 0.1) and bottom sitting flush at Y=0 -> center Y=1.0 }
+      AssertTrue(PosA.X <= 0.1);
+      AssertSameValue(1.0, PosA.Y, 0.05);
+      for J := I + 1 to ScatterGroup.Count - 1 do
+      begin
+        ChildB := ScatterGroup[J];
+        PosB := ScatterGroup.LocalToWorld(ChildB.Translation);
+        AssertTrue(PointsDistance(
+          Vector3(PosA.X, 0, PosA.Z),
+          Vector3(PosB.X, 0, PosB.Z)) >= Settings.MinSpacing - 0.02);
+      end;
+    end;
+
+    { 2. Pin the first instance as a manual artist hero override and tweak its position }
+    PinnedHero := ScatterGroup[0];
+    TCastleTransformManipulate.SetScatterInstancePinned(PinnedHero, true, true);
+    AssertTrue(TCastleTransformManipulate.IsScatterInstancePinned(PinnedHero));
+    AssertTrue(Pos('_Pinned', PinnedHero.Name) > 0);
+    PinnedHero.Translation := Vector3(-6.0, 1.0, -2.0);
+
+    { 3. Erase across entire radius: unpinned instances are removed, PinnedHero survives! }
+    Erased := Manipulate.ScatterEraseStamp(ScatterGroup, Vector3(-6, 0, 0), 30.0, true);
+    AssertEquals(Spawned - 1, Erased);
+    AssertEquals(1, ScatterGroup.Count);
+    AssertTrue(ScatterGroup[0] = PinnedHero);
+    AssertVectorEquals(Vector3(-6.0, 1.0, -2.0), PinnedHero.Translation, 1e-4);
+
+    { 4. RegenerateUnpinnedScatter: keeps PinnedHero AND respects MinSpacing around PinnedHero! }
+    Settings.Seed := 9876;
+    Settings.CountPerStamp := 6;
+    RegenSpawned := Manipulate.RegenerateUnpinnedScatter(
+      Viewport.Items, TreeProto, ScatterGroup, OwnerComp, Vector3(-12, 0, 0), Settings);
+    AssertTrue(RegenSpawned >= 3);
+    AssertEquals(1 + RegenSpawned, ScatterGroup.Count);
+    AssertTrue(ScatterGroup[0] = PinnedHero);
+    for I := 1 to ScatterGroup.Count - 1 do
+    begin
+      PosA := ScatterGroup[I].Translation;
+      AssertTrue(PointsDistance(
+        Vector3(PosA.X, 0, PosA.Z),
+        Vector3(PinnedHero.Translation.X, 0, PinnedHero.Translation.Z)) >= Settings.MinSpacing - 0.02);
+    end;
+
+    { 5. Verify AlignToNormal on a 25-degree tilted ramp }
+    FlatFloor.Exists := false;
+    SteepCliff.Exists := false;
+    TiltedRamp := TCastleBox.Create(OwnerComp);
+    TiltedRamp.Size := Vector3(30, 2, 30);
+    TiltedRamp.Rotation := Vector4(0, 0, 1, DegToRad(25));
+    Viewport.Items.Add(TiltedRamp);
+
+    TCastleTransformManipulate.SetScatterInstancePinned(PinnedHero, false, true);
+    AssertTrue(not TCastleTransformManipulate.IsScatterInstancePinned(PinnedHero));
+    Manipulate.ScatterEraseStamp(ScatterGroup, Vector3(-10, 0, 0), 50.0, true);
+    AssertEquals(0, ScatterGroup.Count);
+
+    Settings.MaxSlopeDeg := 40.0;
+    Settings.CountPerStamp := 2;
+    Settings.Radius := 4.0;
+    Settings.MinSpacing := 1.0;
+    Spawned := Manipulate.ScatterPaintStamp(
+      Viewport.Items, TreeProto, ScatterGroup, OwnerComp, Vector3(0, 2, 0), Settings);
+    AssertTrue(Spawned >= 1);
+    ExpectedRampNormal := Vector3(-Sin(DegToRad(25)), Cos(DegToRad(25)), 0);
+    UpWorld := ScatterGroup[0].LocalToWorldDirection(Vector3(0, 1, 0)).Normalize;
+    AssertVectorEquals(ExpectedRampNormal, UpWorld, 1e-3);
+  finally
+    FreeAndNil(OwnerComp);
   end;
 end;
 

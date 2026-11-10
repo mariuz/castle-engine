@@ -590,6 +590,8 @@ type
       MenuItemMcpCopyConfig: TMenuItem;
       MenuItemDesignSandboxesDiff: TMenuItem;
       MenuItemTerrainBrushMode: TMenuItem;
+      MenuItemScatterBrushMode: TMenuItem;
+      MenuItemPinScatterInstances: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -599,6 +601,8 @@ type
     procedure MenuItemMcpCopyConfigClick(Sender: TObject);
     procedure MenuItemDesignSandboxesDiffClick(Sender: TObject);
     procedure MenuItemTerrainBrushModeClick(Sender: TObject);
+    procedure MenuItemScatterBrushModeClick(Sender: TObject);
+    procedure MenuItemPinScatterInstancesClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2173,6 +2177,16 @@ begin
   MenuItemTerrainBrushMode.OnClick := @MenuItemTerrainBrushModeClick;
   MenuItemDesign.Add(MenuItemTerrainBrushMode);
 
+  MenuItemScatterBrushMode := TMenuItem.Create(MenuItemDesign);
+  MenuItemScatterBrushMode.Caption := 'PCG / Foliage Scatter Brush Mode (Alt+P)';
+  MenuItemScatterBrushMode.OnClick := @MenuItemScatterBrushModeClick;
+  MenuItemDesign.Add(MenuItemScatterBrushMode);
+
+  MenuItemPinScatterInstances := TMenuItem.Create(MenuItemDesign);
+  MenuItemPinScatterInstances.Caption := 'Pin / Unpin Selected Scatter Instance(s) ([Pinned])';
+  MenuItemPinScatterInstances.OnClick := @MenuItemPinScatterInstancesClick;
+  MenuItemDesign.Add(MenuItemPinScatterInstances);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -2818,6 +2832,10 @@ begin
     MenuItemDesignSandboxesDiff.Enabled := Design <> nil;
   if MenuItemTerrainBrushMode <> nil then
     MenuItemTerrainBrushMode.Enabled := Design <> nil;
+  if MenuItemScatterBrushMode <> nil then
+    MenuItemScatterBrushMode.Enabled := Design <> nil;
+  if MenuItemPinScatterInstances <> nil then
+    MenuItemPinScatterInstances.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -4980,6 +4998,18 @@ procedure TProjectForm.MenuItemTerrainBrushModeClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ToggleTerrainBrushMode;
+end;
+
+procedure TProjectForm.MenuItemScatterBrushModeClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ToggleScatterBrushMode;
+end;
+
+procedure TProjectForm.MenuItemPinScatterInstancesClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.TogglePinSelectedScatterInstances;
 end;
 
 initialization

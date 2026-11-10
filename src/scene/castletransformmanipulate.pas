@@ -83,6 +83,31 @@ type
     atMax
   );
 
+const
+  { Component.Tag value marking a scattered TCastleTransform instance as
+    artist-pinned ([Pinned]) so Erase and Re-Scatter preserve it untouched. }
+  ScatterInstancePinnedTag = 7701;
+
+type
+  { Parameters controlling interactive PCG / foliage scatter brush stamps,
+    erasing, and non-destructive unpinned re-scatter passes. }
+  TPCGScatterBrushSettings = record
+    Radius: Single;
+    MinSpacing: Single;
+    CountPerStamp: Integer;
+    MaxSlopeDeg: Single;
+    UseAltitudeRange: Boolean;
+    MinAltitudeY: Single;
+    MaxAltitudeY: Single;
+    AlignToNormal: Boolean;
+    NormalBlend: Single;
+    RandomYawDeg: Single;
+    ScaleMin: Single;
+    ScaleMax: Single;
+    Seed: Integer;
+    class function Default: TPCGScatterBrushSettings; static;
+  end;
+
   { Allow to select, move, rotate, scale a group of TCastleTransform instances.
 
     This component implements common 3D editing operations:
@@ -2340,6 +2365,60 @@ type
       const LobeWidthB: Single = 0.0;
       const SaddleHeight: Single = 0.0;
       const OrientMode: Integer = 1): Boolean;
+
+    { Return @true if @code(T) is marked as a manually pinned scatter override
+      (@code(T.Tag = ScatterInstancePinnedTag) or @code('_Pinned') name suffix). }
+    class function IsScatterInstancePinned(const T: TCastleTransform): Boolean; static;
+
+    { Mark or unmark @code(T) as an artist-pinned scatter instance (@code([Pinned])).
+      Pinned instances are preserved untouched by @link(ScatterEraseStamp) and
+      @link(RegenerateUnpinnedScatter), and act as Poisson spacing obstacles for
+      subsequent scatter passes. }
+    class procedure SetScatterInstancePinned(const T: TCastleTransform;
+      const APinned: Boolean; const UpdateNameSuffix: Boolean = true); static;
+
+    { Cast a world-space ray onto scene/terrain geometry in @code(WorldRoot),
+      ignoring gizmos, @code(IgnoreContainer) (the scatter group), and
+      @code(IgnorePrototype), returning @code(HitWorldPoint) and outward
+      @code(HitWorldNormal). }
+    function RayCastScatterSurface(
+      const WorldRoot: TCastleAbstractRootTransform;
+      const IgnoreContainer, IgnorePrototype: TCastleTransform;
+      const RayOrigin, RayDirection: TVector3;
+      out HitWorldPoint, HitWorldNormal: TVector3): Boolean;
+
+    { Paint a stamp of scattered clones of @code(Prototype) into @code(TargetContainer)
+      around @code(BrushCenterWorld) enforcing Poisson @code(Settings.MinSpacing),
+      surface @code(Settings.MaxSlopeDeg), optional altitude bounds, surface-normal
+      alignment, and random yaw/scale jitter. Returns the number of spawned instances. }
+    function ScatterPaintStamp(
+      const WorldRoot: TCastleAbstractRootTransform;
+      const Prototype, TargetContainer: TCastleTransform;
+      const OwnerForClones: TComponent;
+      const BrushCenterWorld: TVector3;
+      const Settings: TPCGScatterBrushSettings): Integer;
+
+    { Erase scattered child transforms inside @code(TargetContainer) within horizontal
+      radius @code(Radius) of @code(BrushCenterWorld). When @code(RespectPinned = true),
+      artist-pinned (@link(IsScatterInstancePinned)) instances are preserved untouched.
+      Returns the number of erased instances. }
+    function ScatterEraseStamp(
+      const TargetContainer: TCastleTransform;
+      const BrushCenterWorld: TVector3;
+      const Radius: Single;
+      const RespectPinned: Boolean = true): Integer;
+
+    { Remove all unpinned child transforms in @code(TargetContainer) while keeping
+      every @code([Pinned]) artist-overridden child intact, then re-scatter fresh
+      clones of @code(Prototype) around @code(AreaCenterWorld) respecting Poisson
+      @code(MinSpacing) clearance from the preserved @code([Pinned]) instances.
+      Returns the number of newly spawned instances. }
+    function RegenerateUnpinnedScatter(
+      const WorldRoot: TCastleAbstractRootTransform;
+      const Prototype, TargetContainer: TCastleTransform;
+      const OwnerForClones: TComponent;
+      const AreaCenterWorld: TVector3;
+      const Settings: TPCGScatterBrushSettings): Integer;
   end;
 
 var
@@ -2353,6 +2432,7 @@ uses Math,
   CastleLog, CastleShapes, CastleViewport, CastleProjection, CastleBoxes,
   CastleQuaternions, X3DNodes, CastleGLUtils, CastleRenderContext,
   CastleKeysMouse, CastleRenderOptions,
+  CastleComponentSerialize, CastleStringUtils,
   CastleInternalTransformData;
 
 { TCastleTransformHover ------------------------------------------------------ }
@@ -17919,6 +17999,412 @@ begin
   raise EListError.CreateFmt('Index %d out of bounds (TCastleTransformManipulate.Selected)', [
     Index
   ]);
+end;
+
+{ TPCGScatterBrushSettings & PCG Scatter Brush Methods ----------------------- }
+
+class function TPCGScatterBrushSettings.Default: TPCGScatterBrushSettings;
+begin
+  Result.Radius := 10.0;
+  Result.MinSpacing := 2.5;
+  Result.CountPerStamp := 5;
+  Result.MaxSlopeDeg := 45.0;
+  Result.UseAltitudeRange := false;
+  Result.MinAltitudeY := -1000.0;
+  Result.MaxAltitudeY := 1000.0;
+  Result.AlignToNormal := true;
+  Result.NormalBlend := 1.0;
+  Result.RandomYawDeg := 180.0;
+  Result.ScaleMin := 0.85;
+  Result.ScaleMax := 1.20;
+  Result.Seed := 0;
+end;
+
+class function TCastleTransformManipulate.IsScatterInstancePinned(
+  const T: TCastleTransform): Boolean;
+begin
+  Result := (T <> nil) and
+    ((T.Tag = ScatterInstancePinnedTag) or IsSuffix('_Pinned', T.Name, true));
+end;
+
+function MakeUniqueScatterCompName(const AOwner: TComponent; const BaseName: String): String;
+var
+  CleanBase: String;
+  Idx: Integer;
+begin
+  CleanBase := BaseName;
+  if CleanBase = '' then
+    CleanBase := 'ScatterItem';
+  if (AOwner = nil) or (AOwner.FindComponent(CleanBase) = nil) then
+    Exit(CleanBase);
+  Idx := 1;
+  repeat
+    Result := CleanBase + '_' + IntToStr(Idx);
+    Inc(Idx);
+  until AOwner.FindComponent(Result) = nil;
+end;
+
+class procedure TCastleTransformManipulate.SetScatterInstancePinned(
+  const T: TCastleTransform; const APinned: Boolean;
+  const UpdateNameSuffix: Boolean);
+var
+  BaseName: String;
+begin
+  if T = nil then
+    Exit;
+  if APinned then
+  begin
+    T.Tag := ScatterInstancePinnedTag;
+    if UpdateNameSuffix and (T.Name <> '') and (not IsSuffix('_Pinned', T.Name, true)) then
+      T.Name := MakeUniqueScatterCompName(T.Owner, T.Name + '_Pinned');
+  end else
+  begin
+    if T.Tag = ScatterInstancePinnedTag then
+      T.Tag := 0;
+    if UpdateNameSuffix and IsSuffix('_Pinned', T.Name, true) then
+    begin
+      BaseName := Copy(T.Name, 1, Length(T.Name) - Length('_Pinned'));
+      if BaseName = '' then
+        BaseName := 'ScatterItem';
+      T.Name := MakeUniqueScatterCompName(T.Owner, BaseName);
+    end;
+  end;
+end;
+
+function TCastleTransformManipulate.RayCastScatterSurface(
+  const WorldRoot: TCastleAbstractRootTransform;
+  const IgnoreContainer, IgnorePrototype: TCastleTransform;
+  const RayOrigin, RayDirection: TVector3;
+  out HitWorldPoint, HitWorldNormal: TVector3): Boolean;
+var
+  SavedGizmoPickable, SavedContPickable, SavedProtoPickable: Boolean;
+  NormDir: TVector3;
+  RayHit: TRayCollision;
+begin
+  HitWorldPoint := TVector3.Zero;
+  HitWorldNormal := Vector3(0, 1, 0);
+  Result := false;
+  if (WorldRoot = nil) or RayDirection.IsZero then
+    Exit;
+
+  NormDir := RayDirection.Normalize;
+  SavedGizmoPickable := Pickable;
+  SavedContPickable := true;
+  SavedProtoPickable := true;
+  if IgnoreContainer <> nil then
+  begin
+    SavedContPickable := IgnoreContainer.Pickable;
+    IgnoreContainer.Pickable := false;
+  end;
+  if IgnorePrototype <> nil then
+  begin
+    SavedProtoPickable := IgnorePrototype.Pickable;
+    IgnorePrototype.Pickable := false;
+  end;
+  Pickable := false;
+  try
+    RayHit := WorldRoot.WorldRay(RayOrigin, NormDir);
+    if RayHit <> nil then
+    try
+      if RayHit.Transform <> nil then
+      begin
+        HitWorldPoint := RayOrigin + NormDir * RayHit.Distance;
+        if (RayHit.Count > 0) and (RayHit.First.Triangle <> nil) and
+           (RayHit.First.Item <> nil) and RayHit.First.Item.HasWorldTransform then
+          HitWorldNormal := RayHit.First.Item.LocalToWorldDirection(
+            RayHit.First.Triangle^.SceneSpace.Normal)
+        else
+        if (RayHit.Count > 0) and (RayHit.First.Item <> nil) and
+           RayHit.First.Item.HasWorldTransform then
+          HitWorldNormal := RayHit.First.Item.LocalToWorldDirection(Vector3(0, 1, 0))
+        else
+          HitWorldNormal := Vector3(0, 1, 0);
+
+        if HitWorldNormal.IsZero then
+          HitWorldNormal := Vector3(0, 1, 0)
+        else
+        begin
+          HitWorldNormal := HitWorldNormal.Normalize;
+          if TVector3.DotProduct(HitWorldNormal, NormDir) > 0 then
+            HitWorldNormal := -HitWorldNormal;
+        end;
+        Result := true;
+      end;
+    finally
+      FreeAndNil(RayHit);
+    end;
+  finally
+    Pickable := SavedGizmoPickable;
+    if IgnorePrototype <> nil then
+      IgnorePrototype.Pickable := SavedProtoPickable;
+    if IgnoreContainer <> nil then
+      IgnoreContainer.Pickable := SavedContPickable;
+  end;
+end;
+
+function TCastleTransformManipulate.ScatterPaintStamp(
+  const WorldRoot: TCastleAbstractRootTransform;
+  const Prototype, TargetContainer: TCastleTransform;
+  const OwnerForClones: TComponent;
+  const BrushCenterWorld: TVector3;
+  const Settings: TPCGScatterBrushSettings): Integer;
+var
+  RngState: Cardinal;
+
+  function NextFloat01: Single;
+  begin
+    RngState := RngState xor (RngState shl 13);
+    RngState := RngState xor (RngState shr 17);
+    RngState := RngState xor (RngState shl 5);
+    if RngState = 0 then
+      RngState := 2463534242;
+    Result := (RngState and $00FFFFFF) / 16777216.0;
+  end;
+
+var
+  EffectiveOwner: TComponent;
+  ProtoJson, BaseProtoName: String;
+  ExistingPts: array of TVector3;
+  ExistingCount, I, J, Attempts, MaxAttempts, TargetCount: Integer;
+  ChildT, Clone: TCastleTransform;
+  ProtoLocalBBox: TBox3D;
+  BaseBottomOffset, MinSpacingSqr, ActualScaleMin, ActualScaleMax: Single;
+  Angle, Dist, S, C, CastHeight, SlopeDeg, ScaleFactor, YawRad, RotAngle: Single;
+  RayOrig, HitPt, HitNormal, BlendedWorldUp, TargetUpInParent, CurrentUpInParent, RotAxis, FinalWorldPos: TVector3;
+  TooClose: Boolean;
+  Q: TQuaternion;
+begin
+  Result := 0;
+  if (WorldRoot = nil) or (Prototype = nil) or (TargetContainer = nil) or
+     (Settings.CountPerStamp <= 0) then
+    Exit;
+
+  if OwnerForClones <> nil then
+    EffectiveOwner := OwnerForClones
+  else
+    EffectiveOwner := TargetContainer.Owner;
+
+  if Settings.Seed <> 0 then
+    RngState := Cardinal(Settings.Seed)
+  else
+  begin
+    RngState := Cardinal(Random(MaxInt)) xor $9E3779B9;
+    if RngState = 0 then
+      RngState := 1337;
+  end;
+
+  BaseProtoName := Prototype.Name;
+  if IsSuffix('_Pinned', BaseProtoName, true) then
+    BaseProtoName := Copy(BaseProtoName, 1, Length(BaseProtoName) - Length('_Pinned'));
+  if BaseProtoName = '' then
+    BaseProtoName := 'ScatterItem';
+
+  ProtoLocalBBox := Prototype.LocalBoundingBox;
+  if (not ProtoLocalBBox.IsEmpty) and (ProtoLocalBBox.Data[0].Y < -1e-3) then
+    BaseBottomOffset := -ProtoLocalBBox.Data[0].Y
+  else
+    BaseBottomOffset := 0.0;
+
+  ProtoJson := ComponentToString(Prototype);
+
+  ExistingCount := 0;
+  SetLength(ExistingPts, TargetContainer.Count + Settings.CountPerStamp + 4);
+  for I := 0 to TargetContainer.Count - 1 do
+  begin
+    ChildT := TargetContainer[I];
+    if not (csTransient in ChildT.ComponentStyle) then
+    begin
+      if TargetContainer.HasWorldTransform then
+        ExistingPts[ExistingCount] := TargetContainer.LocalToWorld(ChildT.Translation)
+      else
+        ExistingPts[ExistingCount] := ChildT.Translation;
+      Inc(ExistingCount);
+    end;
+  end;
+
+  MinSpacingSqr := Sqr(Max(0.0, Settings.MinSpacing));
+  ActualScaleMin := Max(0.01, Min(Settings.ScaleMin, Settings.ScaleMax));
+  ActualScaleMax := Max(ActualScaleMin, Max(Settings.ScaleMin, Settings.ScaleMax));
+  CastHeight := Max(Max(Settings.Radius * 3.0, 50.0), 10.0);
+  TargetCount := Settings.CountPerStamp;
+  MaxAttempts := Max(TargetCount * 10, 24);
+  Attempts := 0;
+
+  while (Result < TargetCount) and (Attempts < MaxAttempts) do
+  begin
+    Inc(Attempts);
+    if Settings.Radius > 0 then
+    begin
+      Angle := NextFloat01 * 2.0 * Pi;
+      Dist := Sqrt(NextFloat01) * Settings.Radius;
+      SinCos(Angle, S, C);
+      RayOrig := Vector3(
+        BrushCenterWorld.X + C * Dist,
+        BrushCenterWorld.Y + CastHeight,
+        BrushCenterWorld.Z + S * Dist);
+    end else
+      RayOrig := Vector3(BrushCenterWorld.X, BrushCenterWorld.Y + CastHeight, BrushCenterWorld.Z);
+
+    if not RayCastScatterSurface(WorldRoot, TargetContainer, Prototype,
+         RayOrig, Vector3(0, -1, 0), HitPt, HitNormal) then
+      Continue;
+
+    if Settings.UseAltitudeRange and
+       ((HitPt.Y < Settings.MinAltitudeY) or (HitPt.Y > Settings.MaxAltitudeY)) then
+      Continue;
+
+    if Settings.MaxSlopeDeg < 89.99 then
+    begin
+      SlopeDeg := RadToDeg(ArcCos(Clamped(HitNormal.Y, -1.0, 1.0)));
+      if SlopeDeg > Max(0.0, Settings.MaxSlopeDeg) then
+        Continue;
+    end;
+
+    if MinSpacingSqr > 0 then
+    begin
+      TooClose := false;
+      for J := 0 to ExistingCount - 1 do
+        if (Abs(HitPt.Y - ExistingPts[J].Y) <= Max(Settings.MinSpacing * 3.0, 10.0)) and
+           ((Sqr(HitPt.X - ExistingPts[J].X) + Sqr(HitPt.Z - ExistingPts[J].Z)) < MinSpacingSqr) then
+        begin
+          TooClose := true;
+          Break;
+        end;
+      if TooClose then
+        Continue;
+    end;
+
+    Clone := StringToComponent(ProtoJson, EffectiveOwner) as TCastleTransform;
+    Clone.Tag := 0;
+    Clone.Name := MakeUniqueScatterCompName(EffectiveOwner, BaseProtoName);
+
+    if not SameValue(ActualScaleMin, ActualScaleMax) then
+      ScaleFactor := Lerp(NextFloat01, ActualScaleMin, ActualScaleMax)
+    else
+      ScaleFactor := ActualScaleMin;
+    Clone.Scale := Prototype.Scale * ScaleFactor;
+
+    Clone.Rotation := Prototype.Rotation;
+    if Settings.RandomYawDeg > 0 then
+    begin
+      YawRad := (NextFloat01 * 2.0 - 1.0) * DegToRad(Settings.RandomYawDeg);
+      Q := QuatFromAxisAngle(Vector4(0, 1, 0, YawRad)) *
+           QuatFromAxisAngle(Clone.Rotation);
+      Clone.Rotation := Q.ToAxisAngle;
+    end;
+
+    BlendedWorldUp := Vector3(0, 1, 0);
+    if Settings.AlignToNormal then
+    begin
+      BlendedWorldUp := Lerp(Clamped(Settings.NormalBlend, 0.0, 1.0),
+        Vector3(0, 1, 0), HitNormal);
+      if BlendedWorldUp.IsZero then
+        BlendedWorldUp := Vector3(0, 1, 0)
+      else
+        BlendedWorldUp := BlendedWorldUp.Normalize;
+
+      if TargetContainer.HasWorldTransform then
+        TargetUpInParent := TargetContainer.WorldToLocalDirection(BlendedWorldUp).Normalize
+      else
+        TargetUpInParent := BlendedWorldUp;
+
+      CurrentUpInParent := RotatePointAroundAxis(Clone.Rotation, Vector3(0, 1, 0)).Normalize;
+      RotAngle := RotationAngleRadBetweenVectors(CurrentUpInParent, TargetUpInParent);
+      if Abs(RotAngle) > 1e-4 then
+      begin
+        RotAxis := TVector3.CrossProduct(CurrentUpInParent, TargetUpInParent);
+        if RotAxis.IsZero then
+          RotAxis := AnyOrthogonalVector(CurrentUpInParent);
+        Clone.Rotation := (QuatFromAxisAngle(RotAxis, RotAngle, true) *
+          QuatFromAxisAngle(Clone.Rotation, true)).ToAxisAngle;
+      end;
+    end;
+
+    FinalWorldPos := HitPt + BlendedWorldUp * (BaseBottomOffset * ScaleFactor);
+    if TargetContainer.HasWorldTransform then
+      Clone.Translation := TargetContainer.WorldToLocal(FinalWorldPos)
+    else
+      Clone.Translation := FinalWorldPos;
+
+    TargetContainer.Add(Clone);
+
+    if ExistingCount >= Length(ExistingPts) then
+      SetLength(ExistingPts, Length(ExistingPts) * 2 + 8);
+    ExistingPts[ExistingCount] := HitPt;
+    Inc(ExistingCount);
+    Inc(Result);
+  end;
+end;
+
+function TCastleTransformManipulate.ScatterEraseStamp(
+  const TargetContainer: TCastleTransform;
+  const BrushCenterWorld: TVector3;
+  const Radius: Single;
+  const RespectPinned: Boolean): Integer;
+var
+  I: Integer;
+  ChildT: TCastleTransform;
+  WorldPos: TVector3;
+  HorizDistSqr, RadSqr, MaxVertSpan: Single;
+begin
+  Result := 0;
+  if (TargetContainer = nil) or (Radius <= 0) then
+    Exit;
+
+  RadSqr := Sqr(Radius);
+  MaxVertSpan := Max(Radius * 3.0, 25.0);
+  for I := TargetContainer.Count - 1 downto 0 do
+  begin
+    ChildT := TargetContainer[I];
+    if csTransient in ChildT.ComponentStyle then
+      Continue;
+    if RespectPinned and IsScatterInstancePinned(ChildT) then
+      Continue;
+
+    if TargetContainer.HasWorldTransform then
+      WorldPos := TargetContainer.LocalToWorld(ChildT.Translation)
+    else
+      WorldPos := ChildT.Translation;
+
+    HorizDistSqr := Sqr(WorldPos.X - BrushCenterWorld.X) +
+                    Sqr(WorldPos.Z - BrushCenterWorld.Z);
+    if (HorizDistSqr <= RadSqr) and
+       (Abs(WorldPos.Y - BrushCenterWorld.Y) <= MaxVertSpan) then
+    begin
+      TargetContainer.Remove(ChildT);
+      FreeAndNil(ChildT);
+      Inc(Result);
+    end;
+  end;
+end;
+
+function TCastleTransformManipulate.RegenerateUnpinnedScatter(
+  const WorldRoot: TCastleAbstractRootTransform;
+  const Prototype, TargetContainer: TCastleTransform;
+  const OwnerForClones: TComponent;
+  const AreaCenterWorld: TVector3;
+  const Settings: TPCGScatterBrushSettings): Integer;
+var
+  I: Integer;
+  ChildT: TCastleTransform;
+begin
+  Result := 0;
+  if (WorldRoot = nil) or (Prototype = nil) or (TargetContainer = nil) then
+    Exit;
+
+  for I := TargetContainer.Count - 1 downto 0 do
+  begin
+    ChildT := TargetContainer[I];
+    if csTransient in ChildT.ComponentStyle then
+      Continue;
+    if IsScatterInstancePinned(ChildT) then
+      Continue;
+    TargetContainer.Remove(ChildT);
+    FreeAndNil(ChildT);
+  end;
+
+  Result := ScatterPaintStamp(WorldRoot, Prototype, TargetContainer,
+    OwnerForClones, AreaCenterWorld, Settings);
 end;
 
 initialization
