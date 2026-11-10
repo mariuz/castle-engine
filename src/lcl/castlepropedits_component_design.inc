@@ -16,7 +16,7 @@
 
 type
   { Editor for TCastleDesign. }
-  TCastleDesignComponentEditor = class(TComponentEditor)
+  TCastleDesignComponentEditor = class(TCastleUserInterfaceComponentEditor)
   public
     function GetVerbCount: Integer; override;
     function GetVerb(Index: Integer): string; override;

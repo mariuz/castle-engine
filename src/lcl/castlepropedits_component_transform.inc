@@ -25,7 +25,7 @@ type
 
 function TCastleTransformComponentEditor.GetVerbCount: Integer;
 begin
-  Result := (inherited GetVerbCount) + 1;
+  Result := (inherited GetVerbCount) + 3;
 end;
 
 function TCastleTransformComponentEditor.GetVerb(Index: Integer): string;
@@ -33,14 +33,12 @@ var
   InheritedCount: Integer;
 begin
   InheritedCount := inherited GetVerbCount;
-  if Index < InheritedCount then
-    Result := inherited GetVerb(Index)
-  else
-  if Index = InheritedCount then
-  begin
-    Result := 'Reset Transformation';
-  end else
-    Result := '';
+  case Index - InheritedCount of
+    0: Result := 'Reset Transformation';
+    1: Result := 'Reset Rotation to Zero';
+    2: Result := 'Reset Scale to (1, 1, 1)';
+    else Result := inherited GetVerb(Index);
+  end;
 end;
 
 procedure TCastleTransformComponentEditor.ExecuteVerb(Index: Integer);
@@ -48,13 +46,22 @@ var
   InheritedCount: Integer;
 begin
   InheritedCount := inherited GetVerbCount;
-  if Index < InheritedCount then
-    inherited ExecuteVerb(Index)
-  else
-  if Index = InheritedCount then
-  begin
-    (Component as TCastleTransform).Identity;
-    GetDesigner.Modified;
-  end else
-    WritelnWarning('TCastleTransformComponentEditor.ExecuteVerb invalid verb index: %d', [Index]);
+  case Index - InheritedCount of
+    0:
+      begin
+        (Component as TCastleTransform).Identity;
+        GetDesigner.Modified;
+      end;
+    1:
+      begin
+        (Component as TCastleTransform).Rotation := Vector4(0, 1, 0, 0);
+        GetDesigner.Modified;
+      end;
+    2:
+      begin
+        (Component as TCastleTransform).Scale := Vector3(1, 1, 1);
+        GetDesigner.Modified;
+      end;
+    else inherited ExecuteVerb(Index);
+  end;
 end;

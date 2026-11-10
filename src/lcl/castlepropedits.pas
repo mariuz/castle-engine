@@ -255,6 +255,7 @@ begin
     TThirdPersonAnimationPropertyEditor);
 
   // various RegisterComponentEditor
+  RegisterComponentEditor(TCastleUserInterface, TCastleUserInterfaceComponentEditor);
   RegisterComponentEditor(TCastleTransform, TCastleTransformComponentEditor);
   RegisterComponentEditor(TCastleTransformReference, TCastleTransformReferenceComponentEditor);
   RegisterComponentEditor(TCastleScene, TCastleSceneComponentEditor);

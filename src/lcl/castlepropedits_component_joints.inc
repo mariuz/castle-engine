@@ -33,7 +33,7 @@ var
   InheritedCount: Integer;
 begin
   InheritedCount := inherited GetVerbCount;
-  if Index < InheritedCount - 1 then
+  if Index < InheritedCount then
     Result := inherited GetVerb(Index)
   else
   if Index = InheritedCount then

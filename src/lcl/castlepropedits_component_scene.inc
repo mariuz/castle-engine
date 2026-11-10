@@ -25,7 +25,7 @@ type
 
 function TCastleSceneComponentEditor.GetVerbCount: Integer;
 begin
-  Result := (inherited GetVerbCount) + 1;
+  Result := (inherited GetVerbCount) + 2;
 end;
 
 function TCastleSceneComponentEditor.GetVerb(Index: Integer): string;
@@ -33,14 +33,11 @@ var
   InheritedCount: Integer;
 begin
   InheritedCount := inherited GetVerbCount;
-  if Index < InheritedCount then
-    Result := inherited GetVerb(Index)
-  else
-  if Index = InheritedCount then
-  begin
-    Result := 'Reload URL';
-  end else
-    Result := '';
+  case Index - InheritedCount of
+    0: Result := 'Reload URL';
+    1: Result := 'Reset Animation State';
+    else Result := inherited GetVerb(Index);
+  end;
 end;
 
 procedure TCastleSceneComponentEditor.ExecuteVerb(Index: Integer);
@@ -48,12 +45,13 @@ var
   InheritedCount: Integer;
 begin
   InheritedCount := inherited GetVerbCount;
-  if Index < InheritedCount then
-    inherited ExecuteVerb(Index)
-  else
-  if Index = InheritedCount then
-  begin
-    (Component as TCastleScene).ReloadUrl;
-  end else
-    WritelnWarning('TCastleSceneComponentEditor.ExecuteVerb invalid verb index: %d', [Index]);
+  case Index - InheritedCount of
+    0: (Component as TCastleScene).ReloadUrl;
+    1:
+      begin
+        (Component as TCastleScene).ResetAnimationState;
+        GetDesigner.Modified;
+      end;
+    else inherited ExecuteVerb(Index);
+  end;
 end;

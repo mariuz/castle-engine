@@ -2647,11 +2647,24 @@ For complete user workflows, mathematical foundations, Pascal API reference, arc
   - **Screenshots:** [CGE Visual Editor 3D Viewport & Camera Preview](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Sprite Sheet Editor & Atlas Import](https://castle-engine.io/images/thumb_const_height_size/sprite_sheet_editor.webp) · [CGE Sketchfab Download Progress](https://castle-engine.io/images/thumb_const_height_size/sketchfab_import.webp)
   - **Example (Phase 275):** Select a secondary `TCastleCamera` in the hierarchy to open the floating **Camera Preview** (`Camera2 [Persp]`) and click **`use`** to promote it to `Viewport.Camera`; click **Edit -> Import Atlas...** in the **Sprite Sheet Editor** and adjust **Number of columns / rows** to see `Import Atlas — 512x256 px -> 8 frames (128x128 px each)` update live in the title bar; or download a Sketchfab asset to watch real-time `2.4 MB / 6.0 MB, 40%` progress in `TProgressForm`.
 
+### Phase 276: Component Editor Context Verbs for `TCastleUserInterface`, `TCastleImageControl`, `TCastleTransform`, `TCastleScene` & `TCastleAbstractJoint` (`CastlePropEdits` in Both CGE Editor & Lazarus IDE)
+- [x] **276.1. `TCastleUserInterfaceComponentEditor`, Expanded `TCastleImageControl` / `TCastleTransform` / `TCastleScene` Verbs & `TCastleJointsComponentEditor.GetVerb` Off-By-One Fix (`castlepropedits.pas`, `castlepropedits_component_imagecontrol.inc`, `castlepropedits_component_design.inc`, `castlepropedits_component_transform.inc`, `castlepropedits_component_scene.inc`, `castlepropedits_component_joints.inc`)**
+  - Introduced and registered `TCastleUserInterfaceComponentEditor` (`src/lcl/castlepropedits_component_imagecontrol.inc` and `src/lcl/castlepropedits.pas`) for all `TCastleUserInterface` descendants (and made `TCastleImageControlComponentEditor` and `TCastleDesignComponentEditor` inherit from it), providing **`Reset Anchors and Translation (Bottom-Left)`** (`UI.Anchor(hpLeft, 0); UI.Anchor(vpBottom, 0);`) and **`Center in Parent (Middle Anchors)`** (`UI.Anchor(hpMiddle, 0); UI.Anchor(vpMiddle, 0);`) in both the CGE Editor and Lazarus IDE design-time menus.
+  - Added **`Size From Underlying Image (Set Explicit Width & Height)`** to `TCastleImageControlComponentEditor` (`src/lcl/castlepropedits_component_imagecontrol.inc`), setting `Stretch := true`, `ProportionalScaling := psNone`, and `Width`/`Height` from `ImgCtrl.Content.Image.Width`/`Height`.
+  - Expanded `TCastleTransformComponentEditor` (`src/lcl/castlepropedits_component_transform.inc`) with **`Reset Rotation to Zero`** and **`Reset Scale to (1, 1, 1)`** alongside **`Reset Transformation`**, and expanded `TCastleSceneComponentEditor` (`src/lcl/castlepropedits_component_scene.inc`) with **`Reset Animation State`** (`Scene.ResetAnimationState`) alongside **`Reload URL`**.
+  - Fixed an off-by-one boundary condition (`Index < InheritedCount - 1` -> `Index < InheritedCount`) in `TCastleJointsComponentEditor.GetVerb` (`src/lcl/castlepropedits_component_joints.inc`).
+  - **Official Docs & Visual References (Phase 276):** [CGE Custom Components & Design-Time Component Editors (`CastlePropEdits`) Manual](https://castle-engine.io/custom_components) · [CGE LCL Controls & Lazarus IDE Integration Manual](https://castle-engine.io/control_on_form) · [CGE Visual Editor Manual](https://castle-engine.io/manual_editor.php) · [Lazarus IDE `TComponentEditor` & `RegisterComponentEditor` Reference](https://wiki.freepascal.org/How_To_Write_Lazarus_Component#Component_editors)
+  - **Official Videos & Movies (Phase 276):**
+    - 🎬 [CGE Official Video — Component Context Actions, UI Anchors & Transform Workflows in CGE Editor (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+    - 🎞️ [Animated Movie (GIF) — Interactive Component Context Verbs & Anchor Alignment](https://docs.godotengine.org/en/stable/_images/containers_split_drag.gif)
+  - **Screenshots:** [CGE Visual Editor Component Context Menu & Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [CGE 2D UI Designer & Image Control Sizing](https://castle-engine.io/images/thumb_const_height_size/ui_empty_rectangle.webp) · [CGE 3D Scene & Transform Hierarchy](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+  - **Example (Phase 276):** Right-click any `TCastleImageControl` in the hierarchy (or on a Lazarus LCL `TCastleControl` form) and choose **Size From Underlying Image (Set Explicit Width & Height)** or **Center in Parent (Middle Anchors)**; or right-click a `TCastleScene` and select **Reset Scale to (1, 1, 1)**, **Reset Rotation to Zero**, or **Reset Animation State**.
+
 ---
 
-## Roadmap Completion Status (Phases 1–275 — Final Milestone)
+## Roadmap Completion Status (Phases 1–276 — Final Milestone)
 
-All **275 Phases** of the Castle Game Engine Editor Modernization Roadmap (and 100% of `tools/castle-editor/TODO.md`) are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
+All **276 Phases** of the Castle Game Engine Editor Modernization Roadmap (and 100% of `tools/castle-editor/TODO.md`) are **100% completed, verified by 50 automated unit tests (`0 unfreed memory blocks`), and documented**.
 
 
 
