@@ -111,6 +111,7 @@ uses
   TestToolDesignAnnotations,
   {$if defined(FPC) and (not defined(WASI))}TestToolWasmPreviewServer,{$endif}
   TestToolPrefabOverrides,
+  TestToolWorldStreaming,
   TestCastleVulkanRHI;
 
 implementation

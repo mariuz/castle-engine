@@ -36,12 +36,12 @@ uses
   CastleCameras, CastleBoxes, CastleTransform, CastleDebugTransform,
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
-  CastlePrefabOverrides,
+  CastlePrefabOverrides, CastleStreamingZone,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
-  ToolPrefabOverrides;
+  ToolPrefabOverrides, ToolWorldStreaming;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -721,6 +721,21 @@ type
       FShowAnnotationPinsOverlay: Boolean;
       MenuTreeViewItemPrefabOverrides: TMenuItem;
       ButtonPrefabOverrides: TSpeedButton;
+      { Phase 286: Inline TCastleBehavior Inspector Cards & World Partition Minimap }
+      PanelAttachedBehaviors: TPanel;
+      PanelAttachedBehaviorsHeader: TPanel;
+      PanelAttachedBehaviorCards: TPanel;
+      ButtonToggleBehaviorCards: TSpeedButton;
+      ButtonBackToParentTransform: TSpeedButton;
+      ButtonQuickAddBehavior: TSpeedButton;
+      PopupQuickAddBehavior: TPopupMenu;
+      FAttachedBehaviorCardsExpanded: Boolean;
+      FAttachedBehaviorTargetTransform: TCastleTransform;
+      FQuickBehaviorClasses: TRegisteredBehaviorEntryArray;
+      FAttachedBehaviorCardObjects: array of TCastleBehavior;
+      ButtonWorldMinimap: TSpeedButton;
+      MenuTreeViewItemWorldMinimap: TMenuItem;
+      FShowStreamingZonesOverlay: Boolean;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
       FCopiedComponentPropsClassName: String;
@@ -1143,6 +1158,16 @@ type
     procedure ReviewPinsToggleOverlayCallback(const AVisible: Boolean);
     procedure MenuTreeViewItemPrefabOverridesClick(Sender: TObject);
     procedure ButtonPrefabOverridesClick(Sender: TObject);
+    procedure RefreshAttachedBehaviorCards(const Selected: TComponentList; const SelectedCount: Integer);
+    procedure RebuildQuickAddBehaviorPopup;
+    procedure ButtonToggleBehaviorCardsClick(Sender: TObject);
+    procedure ButtonBackToParentTransformClick(Sender: TObject);
+    procedure ButtonQuickAddBehaviorClick(Sender: TObject);
+    procedure MenuQuickAddBehaviorItemClick(Sender: TObject);
+    procedure ButtonInspectBehaviorCardClick(Sender: TObject);
+    procedure ButtonRemoveBehaviorCardClick(Sender: TObject);
+    procedure ButtonWorldMinimapClick(Sender: TObject);
+    procedure MenuTreeViewItemWorldMinimapClick(Sender: TObject);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
     function NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
@@ -2553,6 +2578,10 @@ type
 
     { Scene-Graph Non-Destructive Prefab Property Overrides (Phase 285). }
     procedure ShowPrefabOverridesDialog;
+
+    { Inline TCastleBehavior Inspector Cards & World Partition Minimap (Phase 286). }
+    procedure ShowWorldMinimapDialog;
+    procedure SimulateStreamingAtCurrentCamera;
   end;
 
 implementation
@@ -2572,7 +2601,7 @@ uses
   { Editor units }
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
-  FormPrefabOverrides, CastleComponentEditorDesigner;
+  FormPrefabOverrides, FormWorldMinimap, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -5202,6 +5231,92 @@ procedure TDesignFrame.TDesignerLayer.Render;
     end;
   end;
 
+  procedure RenderStreamingZonesOverlay(const AVp: TCastleViewport);
+  const
+    RingSegs = 32;
+  var
+    StreamReport: TWorldStreamingReport;
+    CamP, CamD, CamU, CenterW, PtW1, PtW2: TVector3;
+    SegPts: array [0..1] of TVector2;
+    AnchorScreen, BoxBL: TVector2;
+    RingCol, UnloadCol: TCastleColor;
+    BadgeStr: String;
+    BoxW, A1, A2, RLoad, RUnload: Single;
+    I, S: Integer;
+  begin
+    if Frame.FDesignRoot = nil then
+      Exit;
+    AVp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    StreamReport := TWorldStreamingInspector.ScanWorld(Frame.FDesignRoot, CamP, true);
+    try
+      for I := 0 to High(StreamReport.Zones) do
+      begin
+        if (StreamReport.Zones[I].Zone = nil) or
+           (not StreamReport.Zones[I].Zone.Exists) or
+           (not StreamReport.Zones[I].Zone.ShowBoundsInViewport) then
+          Continue;
+
+        CenterW := StreamReport.Zones[I].WorldPos;
+        RLoad := StreamReport.Zones[I].LoadRadius;
+        RUnload := StreamReport.Zones[I].UnloadRadius;
+        if StreamReport.Zones[I].IsLoaded then
+          RingCol := Vector4(0.18, 0.92, 0.62, 0.88)
+        else
+          RingCol := Vector4(0.95, 0.68, 0.22, 0.86);
+        UnloadCol := Vector4(0.45, 0.62, 0.85, 0.55);
+
+        for S := 0 to RingSegs - 1 do
+        begin
+          A1 := (2 * Pi * S) / RingSegs;
+          A2 := (2 * Pi * (S + 1)) / RingSegs;
+
+          { Inner LoadRadius ring }
+          PtW1 := Vector3(CenterW.X + Cos(A1) * RLoad, CenterW.Y, CenterW.Z + Sin(A1) * RLoad);
+          PtW2 := Vector3(CenterW.X + Cos(A2) * RLoad, CenterW.Y, CenterW.Z + Sin(A2) * RLoad);
+          if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+             ((TVector3.DotProduct(PtW1 - CamP, CamD) > 0.1) and
+              (TVector3.DotProduct(PtW2 - CamP, CamD) > 0.1)) then
+          begin
+            SegPts[0] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(PtW1));
+            SegPts[1] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(PtW2));
+            DrawPrimitive2D(pmLines, SegPts, RingCol, bsSrcAlpha, bdOneMinusSrcAlpha, false, 2.0);
+          end;
+
+          { Outer UnloadRadius hysteresis dashed ring (every even segment) }
+          if ((S and 1) = 0) and (RUnload > RLoad + 0.05) then
+          begin
+            PtW1 := Vector3(CenterW.X + Cos(A1) * RUnload, CenterW.Y, CenterW.Z + Sin(A1) * RUnload);
+            PtW2 := Vector3(CenterW.X + Cos(A2) * RUnload, CenterW.Y, CenterW.Z + Sin(A2) * RUnload);
+            if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+               ((TVector3.DotProduct(PtW1 - CamP, CamD) > 0.1) and
+                (TVector3.DotProduct(PtW2 - CamP, CamD) > 0.1)) then
+            begin
+              SegPts[0] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(PtW1));
+              SegPts[1] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(PtW2));
+              DrawPrimitive2D(pmLines, SegPts, UnloadCol, bsSrcAlpha, bdOneMinusSrcAlpha, false, 1.5);
+            end;
+          end;
+        end;
+
+        { Center zone pill }
+        if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+           (TVector3.DotProduct(CenterW - CamP, CamD) > 0.1) then
+        begin
+          AnchorScreen := AVp.LocalToContainerPosition(AVp.PositionFromWorld(CenterW));
+          BadgeStr := StreamReport.Zones[I].Zone.ZoneSummaryBadge;
+          BoxW := Max(92.0, Length(BadgeStr) * 7.0 + 14.0);
+          BoxBL := Vector2(AnchorScreen.X - BoxW * 0.5, AnchorScreen.Y + 10.0);
+          DrawRectangle(FloatRectangle(BoxBL.X, BoxBL.Y, BoxW, 20), Vector4(0.05, 0.08, 0.13, 0.86));
+          DrawRectangleOutline(FloatRectangle(BoxBL.X, BoxBL.Y, BoxW, 20), RingCol);
+          if LabelGizmoDragHud.Font <> nil then
+            LabelGizmoDragHud.Font.Print(BoxBL.X + 7, BoxBL.Y + 4, RingCol, BadgeStr);
+        end;
+      end;
+    finally
+      FreeAndNil(StreamReport);
+    end;
+  end;
+
   procedure RenderAnnotationPinsOverlay(const AVp: TCastleViewport);
   var
     PinReport: TDesignAnnotationAuditReport;
@@ -5507,6 +5622,12 @@ begin
     RenderAnnotationPinsOverlay(Frame.CurrentViewport);
   end;
 
+  if Frame.FShowStreamingZonesOverlay and
+     (Frame.CurrentViewport <> nil) and (Frame.CurrentViewport.InternalCamera <> nil) then
+  begin
+    RenderStreamingZonesOverlay(Frame.CurrentViewport);
+  end;
+
   if (Frame.TransformManipulate <> nil) and
      Frame.TransformManipulate.IsDraggingGizmo and
      (Frame.TransformManipulate.CurrentDragSummary <> '') then
@@ -5789,6 +5910,24 @@ begin
   if ButtonReviewPins.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonPrefabOverrides,
       PanelMiddleTop.GetControlIndex(ButtonReviewPins) + 1);
+
+  FShowStreamingZonesOverlay := true;
+  FAttachedBehaviorCardsExpanded := true;
+
+  ButtonWorldMinimap := TSpeedButton.Create(Self);
+  ButtonWorldMinimap.Caption := 'Minimap';
+  ButtonWorldMinimap.Hint := 'Open World Partition 2D Minimap & Streaming Zones Studio.' + NL +
+    'Shift+Click: Immediately simulate TCastleStreamingZone load/unload hysteresis at current 3D camera.';
+  ButtonWorldMinimap.ShowHint := true;
+  ButtonWorldMinimap.AutoSize := true;
+  ButtonWorldMinimap.Constraints.MinHeight := 33;
+  ButtonWorldMinimap.Constraints.MinWidth := 58;
+  ButtonWorldMinimap.BorderSpacing.Left := 2;
+  ButtonWorldMinimap.OnClick := @ButtonWorldMinimapClick;
+  ButtonWorldMinimap.Parent := PanelMiddleTop;
+  if ButtonPrefabOverrides.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonWorldMinimap,
+      PanelMiddleTop.GetControlIndex(ButtonPrefabOverrides) + 1);
 
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
@@ -7819,12 +7958,67 @@ begin
   ButtonViewRight.OnClick := @ButtonAxisViewClick;
   ButtonViewRight.Parent := PanelLayoutTransform;
 
+  PopupQuickAddBehavior := TPopupMenu.Create(Self);
+
+  PanelAttachedBehaviors := TPanel.Create(Self);
+  PanelAttachedBehaviors.Align := alTop;
+  PanelAttachedBehaviors.AutoSize := true;
+  PanelAttachedBehaviors.BevelOuter := bvLowered;
+  PanelAttachedBehaviors.BorderSpacing.Around := 3;
+  PanelAttachedBehaviors.Visible := false;
+  PanelAttachedBehaviors.Parent := PanelRight;
+  PanelAttachedBehaviors.Top := LabelControlSelected.Top + LabelControlSelected.Height + 1;
+
+  PanelAttachedBehaviorsHeader := TPanel.Create(Self);
+  PanelAttachedBehaviorsHeader.Align := alTop;
+  PanelAttachedBehaviorsHeader.AutoSize := true;
+  PanelAttachedBehaviorsHeader.BevelOuter := bvNone;
+  PanelAttachedBehaviorsHeader.Parent := PanelAttachedBehaviors;
+
+  ButtonQuickAddBehavior := TSpeedButton.Create(Self);
+  ButtonQuickAddBehavior.Align := alRight;
+  ButtonQuickAddBehavior.AutoSize := true;
+  ButtonQuickAddBehavior.Caption := '+ Add Behavior';
+  ButtonQuickAddBehavior.Hint := 'Attach a composable TCastleBehavior (Billboard, SoundSource, StylizedShader, Living, etc.) to this TCastleTransform';
+  ButtonQuickAddBehavior.ShowHint := true;
+  ButtonQuickAddBehavior.BorderSpacing.Around := 2;
+  ButtonQuickAddBehavior.OnClick := @ButtonQuickAddBehaviorClick;
+  ButtonQuickAddBehavior.Parent := PanelAttachedBehaviorsHeader;
+
+  ButtonBackToParentTransform := TSpeedButton.Create(Self);
+  ButtonBackToParentTransform.Align := alRight;
+  ButtonBackToParentTransform.AutoSize := true;
+  ButtonBackToParentTransform.Caption := '<- Transform';
+  ButtonBackToParentTransform.Hint := 'Return Object Inspector focus to the parent TCastleTransform';
+  ButtonBackToParentTransform.ShowHint := true;
+  ButtonBackToParentTransform.BorderSpacing.Around := 2;
+  ButtonBackToParentTransform.Visible := false;
+  ButtonBackToParentTransform.OnClick := @ButtonBackToParentTransformClick;
+  ButtonBackToParentTransform.Parent := PanelAttachedBehaviorsHeader;
+
+  ButtonToggleBehaviorCards := TSpeedButton.Create(Self);
+  ButtonToggleBehaviorCards.Align := alClient;
+  ButtonToggleBehaviorCards.AutoSize := true;
+  ButtonToggleBehaviorCards.Flat := true;
+  ButtonToggleBehaviorCards.Caption := 'v Behaviors (0)';
+  ButtonToggleBehaviorCards.Hint := 'Expand or collapse inline TCastleBehavior Inspector cards';
+  ButtonToggleBehaviorCards.ShowHint := true;
+  ButtonToggleBehaviorCards.BorderSpacing.Around := 2;
+  ButtonToggleBehaviorCards.OnClick := @ButtonToggleBehaviorCardsClick;
+  ButtonToggleBehaviorCards.Parent := PanelAttachedBehaviorsHeader;
+
+  PanelAttachedBehaviorCards := TPanel.Create(Self);
+  PanelAttachedBehaviorCards.Align := alTop;
+  PanelAttachedBehaviorCards.AutoSize := true;
+  PanelAttachedBehaviorCards.BevelOuter := bvNone;
+  PanelAttachedBehaviorCards.Parent := PanelAttachedBehaviors;
+
   PanelPropertyFilter := TPanel.Create(Self);
   PanelPropertyFilter.Align := alTop;
   PanelPropertyFilter.AutoSize := true;
   PanelPropertyFilter.BevelOuter := bvNone;
   PanelPropertyFilter.Parent := PanelRight;
-  PanelPropertyFilter.Top := LabelControlSelected.Top + LabelControlSelected.Height + 1;
+  PanelPropertyFilter.Top := PanelAttachedBehaviors.Top + PanelAttachedBehaviors.Height + 2;
 
   ButtonResetProperty := TSpeedButton.Create(Self);
   ButtonResetProperty.Align := alRight;
@@ -8584,6 +8778,11 @@ begin
   MenuTreeViewItemPrefabOverrides.Caption := 'Prefab Property Overrides (Set / Revert / Apply to Source)...';
   MenuTreeViewItemPrefabOverrides.OnClick := @MenuTreeViewItemPrefabOverridesClick;
   MenuTreeView.Items.Add(MenuTreeViewItemPrefabOverrides);
+
+  MenuTreeViewItemWorldMinimap := TMenuItem.Create(Self);
+  MenuTreeViewItemWorldMinimap.Caption := 'World Partition 2D Minimap && Streaming Zones...';
+  MenuTreeViewItemWorldMinimap.OnClick := @MenuTreeViewItemWorldMinimapClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemWorldMinimap);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -12504,6 +12703,7 @@ begin
     if not FNavigatingSelectionHistory then
       RecordSelectionHistory(Selected);
     UpdateSelectionHistoryButtons;
+    RefreshAttachedBehaviorCards(Selected, SelectedCount);
 
     SelectionForOI := TPersistentSelectionList.Create;
     try
@@ -13759,6 +13959,8 @@ var
               (TPrefabOverrideManager.ActiveOverrideCount(TComponent(NodeObj)) > 0) then
         Suffix := Suffix + Format(' [Overrides:%d]',
           [TPrefabOverrideManager.ActiveOverrideCount(TComponent(NodeObj))])
+      else if NodeObj is TCastleStreamingZone then
+        Suffix := Suffix + ' ' + TCastleStreamingZone(NodeObj).ZoneSummaryBadge
       else if TComponent(NodeObj).Tag <> 0 then
         Suffix := Suffix + ' [Tag:' + IntToStr(TComponent(NodeObj).Tag) + ']';
     end;
@@ -52531,6 +52733,270 @@ end;
 procedure TDesignFrame.ButtonPrefabOverridesClick(Sender: TObject);
 begin
   ShowPrefabOverridesDialog;
+end;
+
+{ Inline TCastleBehavior Inspector Cards & World Partition Minimap (Phase 286) }
+
+procedure TDesignFrame.RefreshAttachedBehaviorCards(
+  const Selected: TComponentList; const SelectedCount: Integer);
+var
+  InspectingB: TCastleBehavior;
+  TargetT: TCastleTransform;
+  Cards: TBehaviorCardSummaryArray;
+  CardRow: TPanel;
+  BtnInspect, BtnRemove: TSpeedButton;
+  ArrowPrefix, CardText: String;
+  I: Integer;
+begin
+  if PanelAttachedBehaviors = nil then
+    Exit;
+
+  TargetT := nil;
+  InspectingB := nil;
+  if (SelectedCount = 1) and (Selected <> nil) and (Selected.Count = 1) then
+    TargetT := TBehaviorCompositionHelper.ResolveSelectedTransformForBehaviors(
+      Selected[0], InspectingB);
+
+  FAttachedBehaviorTargetTransform := TargetT;
+  if TargetT = nil then
+  begin
+    PanelAttachedBehaviors.Visible := false;
+    FAttachedBehaviorCardObjects := nil;
+    Exit;
+  end;
+
+  Cards := TBehaviorCompositionHelper.DescribeAttachedBehaviors(TargetT);
+  SetLength(FAttachedBehaviorCardObjects, Length(Cards));
+
+  if FAttachedBehaviorCardsExpanded then
+    ArrowPrefix := 'v'
+  else
+    ArrowPrefix := '>';
+  ButtonToggleBehaviorCards.Caption := Format('%s Behaviors (%d)',
+    [ArrowPrefix, Length(Cards)]);
+  ButtonBackToParentTransform.Visible := InspectingB <> nil;
+
+  PanelAttachedBehaviorCards.DisableAutoSizing;
+  try
+    while PanelAttachedBehaviorCards.ControlCount > 0 do
+      PanelAttachedBehaviorCards.Controls[PanelAttachedBehaviorCards.ControlCount - 1].Free;
+
+    PanelAttachedBehaviorCards.Visible := FAttachedBehaviorCardsExpanded and (Length(Cards) > 0);
+    if PanelAttachedBehaviorCards.Visible then
+    begin
+      for I := High(Cards) downto 0 do
+      begin
+        FAttachedBehaviorCardObjects[I] := Cards[I].Behavior;
+
+        CardRow := TPanel.Create(PanelAttachedBehaviorCards);
+        CardRow.Align := alTop;
+        CardRow.AutoSize := true;
+        CardRow.BevelOuter := bvNone;
+        CardRow.BorderSpacing.Around := 1;
+        CardRow.Parent := PanelAttachedBehaviorCards;
+
+        BtnRemove := TSpeedButton.Create(CardRow);
+        BtnRemove.Align := alRight;
+        BtnRemove.Width := 24;
+        BtnRemove.Caption := 'x';
+        BtnRemove.Hint := 'Detach and remove behavior ' + Cards[I].DisplayCaption;
+        BtnRemove.ShowHint := true;
+        BtnRemove.Tag := I;
+        BtnRemove.OnClick := @ButtonRemoveBehaviorCardClick;
+        BtnRemove.Parent := CardRow;
+
+        BtnInspect := TSpeedButton.Create(CardRow);
+        BtnInspect.Align := alClient;
+        BtnInspect.AutoSize := true;
+        BtnInspect.Flat := Cards[I].Behavior <> InspectingB;
+        if Cards[I].PropertyPreview <> '' then
+          CardText := Cards[I].BehaviorName + ': ' + Cards[I].PropertyPreview
+        else
+          CardText := Cards[I].DisplayCaption;
+        if Length(CardText) > 42 then
+          CardText := Copy(CardText, 1, 39) + '...';
+        BtnInspect.Caption := CardText;
+        BtnInspect.Hint := 'Click to inspect ' + Cards[I].DisplayCaption +
+          NL + Cards[I].PropertyPreview;
+        BtnInspect.ShowHint := true;
+        if Cards[I].Behavior = InspectingB then
+          BtnInspect.Font.Style := [Graphics.fsBold];
+        BtnInspect.Tag := I;
+        BtnInspect.OnClick := @ButtonInspectBehaviorCardClick;
+        BtnInspect.Parent := CardRow;
+      end;
+    end;
+  finally
+    PanelAttachedBehaviorCards.EnableAutoSizing;
+  end;
+
+  PanelAttachedBehaviors.Visible := true;
+end;
+
+procedure TDesignFrame.RebuildQuickAddBehaviorPopup;
+var
+  Item: TMenuItem;
+  I: Integer;
+begin
+  PopupQuickAddBehavior.Items.Clear;
+  FQuickBehaviorClasses := TBehaviorCompositionHelper.ListRegisteredBehaviorClasses;
+  for I := 0 to High(FQuickBehaviorClasses) do
+  begin
+    Item := TMenuItem.Create(PopupQuickAddBehavior);
+    Item.Caption := FQuickBehaviorClasses[I].Caption;
+    Item.Tag := I;
+    Item.OnClick := @MenuQuickAddBehaviorItemClick;
+    PopupQuickAddBehavior.Items.Add(Item);
+  end;
+end;
+
+procedure TDesignFrame.ButtonToggleBehaviorCardsClick(Sender: TObject);
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+begin
+  FAttachedBehaviorCardsExpanded := not FAttachedBehaviorCardsExpanded;
+  GetSelected(Selected, SelectedCount);
+  try
+    RefreshAttachedBehaviorCards(Selected, SelectedCount);
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.ButtonBackToParentTransformClick(Sender: TObject);
+begin
+  if FAttachedBehaviorTargetTransform <> nil then
+    DesignerSelectOnlyComponent(FAttachedBehaviorTargetTransform);
+end;
+
+procedure TDesignFrame.ButtonQuickAddBehaviorClick(Sender: TObject);
+var
+  Pt: TPoint;
+begin
+  if FAttachedBehaviorTargetTransform = nil then
+    Exit;
+  RebuildQuickAddBehaviorPopup;
+  Pt := ButtonQuickAddBehavior.ClientToScreen(Point(0, ButtonQuickAddBehavior.Height));
+  PopupQuickAddBehavior.PopUp(Pt.X, Pt.Y);
+end;
+
+procedure TDesignFrame.MenuQuickAddBehaviorItemClick(Sender: TObject);
+var
+  Idx: Integer;
+  NewB: TCastleBehavior;
+begin
+  if not (Sender is TMenuItem) then
+    Exit;
+  Idx := TMenuItem(Sender).Tag;
+  if (FAttachedBehaviorTargetTransform = nil) or (DesignOwner = nil) or
+     (Idx < 0) or (Idx > High(FQuickBehaviorClasses)) then
+    Exit;
+
+  NewB := TBehaviorCompositionHelper.AttachNewBehavior(
+    FAttachedBehaviorTargetTransform, DesignOwner,
+    FQuickBehaviorClasses[Idx].BehaviorClass);
+  if NewB <> nil then
+  begin
+    FAttachedBehaviorCardsExpanded := true;
+    UpdateDesign;
+    DesignerSelectOnlyComponent(NewB);
+    ModifiedOutsideObjectInspector('Add Behavior ' + NewB.ClassName, ucHigh);
+  end;
+end;
+
+procedure TDesignFrame.ButtonInspectBehaviorCardClick(Sender: TObject);
+var
+  Idx: Integer;
+begin
+  if not (Sender is TComponent) then
+    Exit;
+  Idx := TComponent(Sender).Tag;
+  if (Idx >= 0) and (Idx <= High(FAttachedBehaviorCardObjects)) and
+     (FAttachedBehaviorCardObjects[Idx] <> nil) then
+    DesignerSelectOnlyComponent(FAttachedBehaviorCardObjects[Idx]);
+end;
+
+procedure TDesignFrame.ButtonRemoveBehaviorCardClick(Sender: TObject);
+var
+  Idx: Integer;
+  TargetT: TCastleTransform;
+  B: TCastleBehavior;
+  BName: String;
+begin
+  if not (Sender is TComponent) then
+    Exit;
+  Idx := TComponent(Sender).Tag;
+  TargetT := FAttachedBehaviorTargetTransform;
+  if (TargetT = nil) or (Idx < 0) or (Idx > High(FAttachedBehaviorCardObjects)) then
+    Exit;
+  B := FAttachedBehaviorCardObjects[Idx];
+  if B = nil then
+    Exit;
+  BName := B.ClassName;
+  if TBehaviorCompositionHelper.DetachAndFreeBehavior(TargetT, B) then
+  begin
+    UpdateDesign;
+    DesignerSelectOnlyComponent(TargetT);
+    ModifiedOutsideObjectInspector('Remove Behavior ' + BName, ucHigh);
+  end;
+end;
+
+procedure TDesignFrame.SimulateStreamingAtCurrentCamera;
+var
+  V: TCastleViewport;
+  CamP, CamD, CamU: TVector3;
+begin
+  V := CurrentViewport;
+  if (FDesignRoot = nil) or (V = nil) or (V.InternalCamera = nil) then
+    Exit;
+  V.InternalCamera.GetWorldView(CamP, CamD, CamU);
+  TWorldStreamingInspector.SimulateObserverAcrossWorld(FDesignRoot, CamP);
+  UpdateDesign;
+end;
+
+procedure TDesignFrame.ShowWorldMinimapDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  InitComp: TComponent;
+  Dlg: TWorldMinimapForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  InitComp := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount > 0 then
+      InitComp := Selected[0];
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  Dlg := TWorldMinimapForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    CurrentViewport, InitComp, FShowStreamingZonesOverlay,
+    @NprStudioModifiedCallback,
+    @NprStudioSelectComponentCallback);
+  try
+    Dlg.ShowModal;
+    FShowStreamingZonesOverlay := Dlg.ShowStreamingRingsIn3D;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonWorldMinimapClick(Sender: TObject);
+begin
+  if ssShift in GetKeyShiftState then
+    SimulateStreamingAtCurrentCamera
+  else
+    ShowWorldMinimapDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemWorldMinimapClick(Sender: TObject);
+begin
+  ShowWorldMinimapDialog;
 end;
 
 initialization

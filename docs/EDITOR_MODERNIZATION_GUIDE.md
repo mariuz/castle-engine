@@ -2554,6 +2554,40 @@ TPrefabOverrideManager.ApplyOverridesToSourcePrefab(CardA, SavedUrl);
 
 ---
 
+## 66K. Horizon 2 — Inline `TCastleBehavior` Inspector Cards & `TCastleStreamingZone` World Partition Minimap (Phase 286 / UE 6.0 Composable Entities & Streaming Parity)
+
+Inspired by **Unreal Engine 6.0's Composable Entity Architecture and World Partition Streaming Minimap**, Phase 286 introduces inline `TCastleBehavior` composition cards directly inside the Object Inspector alongside `TCastleStreamingZone` (`src/scene/castlestreamingzone.pas`), `TWorldStreamingInspector` / `TBehaviorCompositionHelper` (`tools/common-code/toolworldstreaming.pas`), and `TWorldMinimapForm` (`tools/castle-editor/code/formworldminimap.pas`).
+
+### Key Capabilities
+1. **Inline Composable `TCastleBehavior` Inspector Cards (`PanelAttachedBehaviors`)**:
+   - Appears automatically at the top of `PanelRight` whenever a `TCastleTransform` (or one of its attached `TCastleBehavior` instances) is selected.
+   - Displays each attached behavior as a compact clickable card with non-default-prioritized RTTI property summaries (e.g. `Preset=sspGoochTechnical`), one-click `x` removal with `TUndoSystem` recording, a `<- Transform` parent jump button when inspecting a behavior, and a **`+ Add Behavior`** popup menu listing all registered `TCastleBehavior` classes.
+2. **Distance-Based Sub-Design Streaming with Hysteresis (`TCastleStreamingZone`)**:
+   - Streams `.castle-transform` or 3D model URLs (`DesignUrl`) into an internal `csTransient` child container when observer distance `<= LoadRadius` and unloads when distance `> UnloadRadius` (`EffectiveUnloadRadius >= LoadRadius`), preventing boundary thrashing and ensuring streamed sub-trees are never duplicated into parent `.castle-user-interface` / `.castle-transform` files.
+   - Evaluates `World.MainCamera` automatically at runtime (`AutoStreamInRuntime`) and supports in-editor preview (`PreviewLoadedInEditor`) plus 3D viewport concentric `LoadRadius` / `UnloadRadius` wireframe rings.
+3. **Interactive 2D Top-Down World Partition Minimap (`TWorldMinimapForm`)**:
+   - Open via the top-bar **`Minimap`** button (`Shift`-click simulates streaming at the current 3D camera), **`Design -> World Partition 2D Minimap & Streaming Zones...`**, or the Hierarchy context menu.
+   - Renders world XZ transform footprints, concentric `LoadRadius` (emerald = loaded, amber = unloaded) and dashed `UnloadRadius` rings, and the live 3D camera frustum cone — supporting left-click/drag 3D camera teleportation, right-drag panning, mouse-wheel zoom, and one-click Markdown world report export.
+
+### Example Usage (Pascal API)
+```pascal
+// Create a World Partition streaming sector with 60m load / 85m unload hysteresis:
+Zone := TWorldStreamingInspector.CreateStreamingZoneAtPosition(
+  ViewportMain.Items, Self, Vector3(120, 0, -240),
+  'castle-data:/sectors/harbor_district.castle-transform', 60.0, 85.0);
+Zone.ZoneLabel := 'Harbor District';
+
+// Attach composable behaviors to a TCastleTransform:
+TBehaviorCompositionHelper.AttachNewBehavior(GuardScene, Self, TCastleBillboard);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Behaviors (`TCastleBehavior`) Manual](https://castle-engine.io/behaviors) · [CGE Viewport & Scenes](https://castle-engine.io/viewport_and_scenes) · [UE World Partition Streaming](https://dev.epicgames.com/documentation/en-us/unreal-engine/world-partition-in-unreal-engine) · [UE Components & Composable Entities](https://dev.epicgames.com/documentation/en-us/unreal-engine/components-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Composing Worlds & Behaviors in CGE Editor (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [Animated 3D World Navigation & Sector Streaming](https://docs.godotengine.org/en/stable/_images/3d_viewport_navigation.gif)
+- **Screenshots:** [CGE 3D Open-World Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Object Inspector & Behaviors](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2627,4 +2661,5 @@ In addition, Horizon 2 editor subsystems include dedicated automated test suites
 - **[`tests/code/testcases/testtooldesignannotations.pas`](../tests/code/testcases/testtooldesignannotations.pas) (`TTestToolDesignAnnotations` — 2 tests)**: Verifies `TCastleDesignAnnotation` and `TCastleDesignAnnotationUi` zero runtime bounding-box footprint (`appRunning` vs. `appDesign`), world-space camera viewpoint bookmark capture/restore, JSON serialization roundtrip, `TDesignAnnotationManager.ScanDesign` priority sorting and blocker warnings, category/status/text filtering, Markdown checklist export, `MarkAllResolved`, and `DeleteResolvedPins` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolwasmpreviewserver.pas`](../tests/code/testcases/testtoolwasmpreviewserver.pas) (`TTestToolWasmPreviewServer` — 2 tests)**: Verifies `.wasm`/`.js`/`.zip` MIME mapping, `ResolveSafeFilePath` directory-traversal rejection, `InjectAutoReloadScript`, `TWasmBundleProfiler.ProfileWebBundle` category byte totals, 3G/4G/Broadband download estimates, and `.wav` optimization hints, plus live multithreaded localhost HTTP roundtrips verifying `application/wasm`, `COOP`/`COEP` headers, and `/__cge_live_reload` build-stamp updates (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolprefaboverrides.pas`](../tests/code/testcases/testtoolprefaboverrides.pas) (`TTestToolPrefabOverrides` — 2 tests)**: Verifies 3D `TCastleTransformDesign` and 2D `TCastleDesign` per-instance child RTTI property & sub-component overrides (`TranslationPersistent.Y`, `Exists`, `Intensity`, `Caption`, `FontSize`), `CaptureLiveEditsFromInstance`, parent design JSON serialization roundtrip with automatic override re-application, sibling prefab isolation, `RevertSingleOverride`, and `ApplyOverridesToSourcePrefab` (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolworldstreaming.pas`](../tests/code/testcases/testtoolworldstreaming.pas) (`TTestToolWorldStreaming` — 2 tests)**: Verifies `TCastleStreamingZone` `LoadRadius`/`UnloadRadius` hysteresis transitions without boundary thrashing, `csTransient` child non-duplication across `ComponentToString`/`StringToComponent` JSON roundtrips, `TWorldStreamingInspector.ScanWorld` & Markdown reporting, and `TBehaviorCompositionHelper` registered behavior discovery, attach, non-default RTTI card summary, parent transform resolution, and detach (`0 unfreed memory blocks`).
 

@@ -599,6 +599,7 @@ type
       FWasmPreviewServer: TWasmPreviewHttpServer;
       MenuItemWasmPreview: TMenuItem;
       MenuItemPrefabOverrides: TMenuItem;
+      MenuItemWorldMinimap: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -618,6 +619,7 @@ type
     procedure WasmPreviewServerLog(const Msg: String);
     procedure CompileWebTargetFromPreviewDialog;
     procedure MenuItemPrefabOverridesClick(Sender: TObject);
+    procedure MenuItemWorldMinimapClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2238,6 +2240,11 @@ begin
   MenuItemPrefabOverrides.OnClick := @MenuItemPrefabOverridesClick;
   MenuItemDesign.Add(MenuItemPrefabOverrides);
 
+  MenuItemWorldMinimap := TMenuItem.Create(MenuItemDesign);
+  MenuItemWorldMinimap.Caption := 'World Partition 2D Minimap & Streaming Zones...';
+  MenuItemWorldMinimap.OnClick := @MenuItemWorldMinimapClick;
+  MenuItemDesign.Add(MenuItemWorldMinimap);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -2898,6 +2905,8 @@ begin
     MenuItemDrop3DReviewPin.Enabled := Design <> nil;
   if MenuItemPrefabOverrides <> nil then
     MenuItemPrefabOverrides.Enabled := Design <> nil;
+  if MenuItemWorldMinimap <> nil then
+    MenuItemWorldMinimap.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5159,6 +5168,12 @@ procedure TProjectForm.MenuItemPrefabOverridesClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowPrefabOverridesDialog;
+end;
+
+procedure TProjectForm.MenuItemWorldMinimapClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowWorldMinimapDialog;
 end;
 
 initialization
