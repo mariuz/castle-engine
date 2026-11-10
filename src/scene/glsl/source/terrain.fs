@@ -1,12 +1,14 @@
 /* Shader effect (used to enhance the Castle Game Engine shaders,
    see https://castle-engine.io/shaders ), applied over terrain.
 
-   This adjusts terrain color, mixing textures, based on current height. */
+   This adjusts terrain color, mixing textures, based on current height
+   and/or a painted 4-channel RGBA splatmap. */
 
 uniform sampler2D tex_1;
 uniform sampler2D tex_2;
 uniform sampler2D tex_3;
 uniform sampler2D tex_4;
+uniform sampler2D splatmap_tex;
 
 uniform vec3 color_1;
 uniform vec3 color_2;
@@ -23,6 +25,8 @@ uniform float height_2;
 
 uniform float layers_influence;
 uniform float steep_emphasize;
+uniform float splatmap_influence;
+uniform vec2 terrain_size;
 
 // We declare this "highp" for consistency with uv, calculated in PLUG_main_texture_apply.
 varying highp vec3 terrain_position;
@@ -33,6 +37,21 @@ varying vec3 terrain_normal;
 #ifndef GL_ES
 vec4 castle_texture_color_to_linear(const in vec4 srgbIn);
 #endif
+
+vec4 terrain_splat_weights()
+{
+  highp vec2 safe_size = max(terrain_size, vec2(0.001, 0.001));
+  highp vec2 splat_uv = clamp(vec2(
+    terrain_position.x / safe_size.x,
+    1.0 - (terrain_position.z / safe_size.y)), 0.0, 1.0);
+  vec4 w = texture2D(splatmap_tex, splat_uv);
+  float sum_w = w.x + w.y + w.z + w.w;
+  if (sum_w > 0.0001)
+    w /= sum_w;
+  else
+    w = vec4(1.0, 0.0, 0.0, 0.0);
+  return w;
+}
 
 void PLUG_main_texture_apply(inout vec4 fragment_color, const in vec3 normal)
 {
@@ -56,7 +75,7 @@ void PLUG_main_texture_apply(inout vec4 fragment_color, const in vec3 normal)
      = 0 means a vertical face
      = 1 means a horizontal face
   */
-  float normal_slope = normalize(terrain_normal).y;
+  float normal_slope = max(normalize(terrain_normal).y, 0.0);
 
   vec3 c1 = color_1 * castle_texture_color_to_linear(texture2D(tex_1, uv * uv_scale.x)).rgb;
   vec3 c2 = color_2 * castle_texture_color_to_linear(texture2D(tex_2, uv * uv_scale.y)).rgb;
@@ -66,7 +85,13 @@ void PLUG_main_texture_apply(inout vec4 fragment_color, const in vec3 normal)
   float height_mix = smoothstep(height_1, height_2, h);
   vec3 flat_color = mix(c1, c3, height_mix);
   vec3 steep_color = mix(c2, c4, height_mix);
-  vec3 modified_color = mix(steep_color, flat_color, pow(normal_slope, steep_emphasize));
+  vec3 procedural_color = mix(steep_color, flat_color, pow(normal_slope, steep_emphasize));
+  vec3 modified_color = procedural_color;
+  if (splatmap_influence > 0.0) {
+    vec4 sw = terrain_splat_weights();
+    vec3 splat_color = c1 * sw.x + c2 * sw.y + c3 * sw.z + c4 * sw.w;
+    modified_color = mix(procedural_color, splat_color, clamp(splatmap_influence, 0.0, 1.0));
+  }
 
   fragment_color.rgb = mix(fragment_color.rgb, modified_color, layers_influence);
 }
@@ -74,16 +99,26 @@ void PLUG_main_texture_apply(inout vec4 fragment_color, const in vec3 normal)
 void PLUG_material_metallic_roughness(inout float metallic_final, inout float roughness_final)
 {
   float h = terrain_position.y;
-  float normal_slope = normalize(terrain_normal).y;
+  float normal_slope = max(normalize(terrain_normal).y, 0.0);
   float height_mix = smoothstep(height_1, height_2, h);
 
   float flat_metallic = mix(metallic.x, metallic.z, height_mix);
   float steep_metallic = mix(metallic.y, metallic.w, height_mix);
-  float modified_metallic = mix(steep_metallic, flat_metallic, pow(normal_slope, steep_emphasize));
-  metallic_final = mix(metallic_final, modified_metallic, layers_influence);
+  float procedural_metallic = mix(steep_metallic, flat_metallic, pow(normal_slope, steep_emphasize));
 
   float flat_roughness = mix(roughness.x, roughness.z, height_mix);
   float steep_roughness = mix(roughness.y, roughness.w, height_mix);
-  float modified_roughness = mix(steep_roughness, flat_roughness, pow(normal_slope, steep_emphasize));
+  float procedural_roughness = mix(steep_roughness, flat_roughness, pow(normal_slope, steep_emphasize));
+
+  float modified_metallic = procedural_metallic;
+  float modified_roughness = procedural_roughness;
+  if (splatmap_influence > 0.0) {
+    vec4 sw = terrain_splat_weights();
+    float splat_clamp = clamp(splatmap_influence, 0.0, 1.0);
+    modified_metallic = mix(procedural_metallic, dot(metallic, sw), splat_clamp);
+    modified_roughness = mix(procedural_roughness, dot(roughness, sw), splat_clamp);
+  }
+
+  metallic_final = mix(metallic_final, modified_metallic, layers_influence);
   roughness_final = mix(roughness_final, modified_roughness, layers_influence);
 }

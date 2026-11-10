@@ -589,6 +589,7 @@ type
       MenuItemMcpAuthToken: TMenuItem;
       MenuItemMcpCopyConfig: TMenuItem;
       MenuItemDesignSandboxesDiff: TMenuItem;
+      MenuItemTerrainBrushMode: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -597,6 +598,7 @@ type
     procedure MenuItemMcpAuthTokenClick(Sender: TObject);
     procedure MenuItemMcpCopyConfigClick(Sender: TObject);
     procedure MenuItemDesignSandboxesDiffClick(Sender: TObject);
+    procedure MenuItemTerrainBrushModeClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2166,6 +2168,11 @@ begin
   MenuItemDesignSandboxesDiff.OnClick := @MenuItemDesignSandboxesDiffClick;
   MenuItemDesign.Add(MenuItemDesignSandboxesDiff);
 
+  MenuItemTerrainBrushMode := TMenuItem.Create(MenuItemDesign);
+  MenuItemTerrainBrushMode.Caption := 'Terrain Sculpt && Splatmap Brush Mode (Alt+T)';
+  MenuItemTerrainBrushMode.OnClick := @MenuItemTerrainBrushModeClick;
+  MenuItemDesign.Add(MenuItemTerrainBrushMode);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -2809,6 +2816,8 @@ begin
   MenuItemDesignClose.Enabled := Design <> nil;
   if MenuItemDesignSandboxesDiff <> nil then
     MenuItemDesignSandboxesDiff.Enabled := Design <> nil;
+  if MenuItemTerrainBrushMode <> nil then
+    MenuItemTerrainBrushMode.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -4965,6 +4974,12 @@ procedure TProjectForm.MenuItemDesignSandboxesDiffClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowDesignSandboxesAndDiffDialog;
+end;
+
+procedure TProjectForm.MenuItemTerrainBrushModeClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ToggleTerrainBrushMode;
 end;
 
 initialization

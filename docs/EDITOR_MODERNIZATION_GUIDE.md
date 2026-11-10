@@ -2330,6 +2330,36 @@ end;
 
 ---
 
+## 66E. Horizon 2 — Interactive 3D Viewport Terrain Sculpting & RGBA Splatmap Layer Brush Mode (Phase 280 / UE 5.8 Landscape Edit Layers Parity)
+
+Inspired by **Unreal Engine 5.8's Next-Gen Landscape Non-Destructive Edit Layers and Splatmap Paint Mode**, `CastleTerrain` (`src/scene/castleterrain.pas` + `src/scene/glsl/source/terrain.fs`) and `TDesignFrame` (`tools/castle-editor/code/framedesign.pas`) support real-time 3D heightmap sculpting and 4-channel RGBA splatmap painting directly inside the viewport.
+
+### Key Capabilities
+1. **Non-Destructive Edit Layers over Procedural Noise (`TCastleTerrain.EnsureEditableHeightLayer`)**:
+   - Sculpting a `TCastleTerrain` driven by procedural `TCastleTerrainNoise` automatically wraps the noise source in a `TCastleTerrainCombine` (`Operation = opAdd`) paired with a zero-initialized `TCastleTerrainImage` delta layer—preserving live procedural `Seed`/`Frequency`/`Amplitude` adjustments underneath artist-carved roads, valleys, and plateaus.
+   - `TCastleTerrainImage.ApplySculptBrush` supports `tsbmRaise`, `tsbmLower`, `tsbmSmooth`, and `tsbmFlatten` with smooth $(1 - d^2)^2$ radial falloff, bilinear height sampling (`SmoothInterpolation = true`), and automatic `MinLevel`/`MaxLevel` expansion + texel renormalization so sculpted peaks and trenches never clip.
+2. **4-Channel RGBA Splatmap Layer Painting & Auto-Generation**:
+   - `TCastleTerrain` exposes `SplatmapUrl`, `SplatmapInfluence` (`0..1`), `GenerateSplatmapFromProceduralLayers` (evaluating `Height1`, `Height2`, and `SteepEmphasize` slope rules into initial RGBA weights), and `PaintSplatmapAtWorldPoint` (maintaining a strict $R+G+B+A = 255$ partition of unity across `Layer1..Layer4` base color, metallic, and roughness in `terrain.fs`).
+3. **Interactive Viewport Brush Toolbar & 3D Terrain-Conforming Ring (`Alt+T`)**:
+   - Toggle via **`Alt+T`**, the top **`Terrain`** mode button, or **`Design -> Terrain Sculpt & Splatmap Brush Mode (Alt+T)`**.
+   - Includes tool buttons **`Raise` (`1`)**, **`Lower` (`2`)**, **`Smooth` (`3`)**, **`Flatten` (`4`)**, **`L1 (R)`..`L4 (A)` (`5`..`8`)**, **`Radius` (`[` / `]`)**, **`Strength`**, **`Auto-Splat`**, and **`Save Maps`** (`castle-data:/terrains/<Name>_height.png` & `_splat.png`), plus `Shift`-to-Smooth, `Ctrl`-to-Invert, a 32-segment 3D terrain-hugging outer + inner falloff brush ring, and `TUndoSystem` (`Ctrl+Z` / `Ctrl+Y`) integration.
+
+### Example Usage (Pascal API)
+```pascal
+// Carve a flat plateau at Y = 2.0 non-destructively over procedural noise, then paint Layer 2 road:
+Terrain.SculptHeightAtWorldPoint(Vector3(0, 0, 0), 18.0, tsbmFlatten, 1.0, 2.0, DesignOwner, 128);
+Terrain.GenerateSplatmapFromProceduralLayers(128, 128);
+Terrain.PaintSplatmapAtWorldPoint(Vector3(0, 2, 0), 8.0, 2, 1.0, 128);
+Terrain.SaveSplatmap('castle-data:/terrains/courtyard_splat.png');
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CastleTerrain API Reference](https://castle-engine.io/apidoc/html/CastleTerrain.html) · [CGE Shader Effects](https://castle-engine.io/shaders) · [UE Landscape Edit Layers](https://dev.epicgames.com/documentation/en-us/unreal-engine/landscape-edit-layers-in-unreal-engine) · [UE Landscape Paint Mode](https://dev.epicgames.com/documentation/en-us/unreal-engine/landscape-paint-mode-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — 3D Worlds & Terrain (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [Animated 3D Viewport Editing Workflow](https://docs.godotengine.org/en/stable/_images/3d_viewport_navigation.gif)
+- **Screenshots:** [CGE Terrain Demo](https://castle-engine.io/images/thumb_const_height_size/terrain.webp) · [CGE Visual Editor 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 51 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2397,4 +2427,5 @@ fpc -Mobjfpc -Sh -Ci -Cr -Co -gl -gh -dTEXT_RUNNER @castle-fpc.cfg \
 In addition, Horizon 2 editor subsystems include dedicated automated test suites:
 - **[`tests/code/testcases/testtoolmcpserver.pas`](../tests/code/testcases/testtoolmcpserver.pas) (`TTestToolMcpServer` — 3 tests)**: Verifies JSON-RPC 2.0 `initialize`, `ping`, `tools/list` (all 12 MCP tools), Bearer token authentication, all 4 `TMcpAutonomyMode` tiers (`Disabled`, `ReadOnly`, `EditWithUndo`, `FullControl`), live RTTI property inspection/mutation, layout actions (`align_y`, `snap_to_grid`), Base64 PNG viewport screenshot encoding, and live localhost multithreaded HTTP roundtrip (`GET /health` + `POST /mcp` with `CheckSynchronize` and `0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldesignsandboxdiff.pas`](../tests/code/testcases/testtooldesignsandboxdiff.pas) (`TTestToolDesignSandboxDiff` — 3 tests)**: Verifies `TDesignSandboxManager` creation, filtering, renaming, JSON persistence, and live instantiation, `TDesignDiffEngine` detection of `[+ Added]`, `[- Removed]`, and `[~ Modified]` components + subcomponent properties (`TranslationPersistent.X/Y/Z`, `SizePersistent.X/Y/Z`, `Caption`, `FontSize`), and `RevertSelectedToBase` selective restoration/deletion of individual properties and components (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testcastleterrain.pas`](../tests/code/testcases/testcastleterrain.pas) (`TTestCastleTerrain` — 4 tests)**: Verifies `TCastleTerrainImage` Raise/Lower/Smooth/Flatten sculpting with dynamic `MinLevel`/`MaxLevel` expansion + renormalization, `RayCastWorld`, non-destructive `EnsureEditableHeightLayer` `TCastleTerrainCombine` (`opAdd`) wrapping over `TCastleTerrainNoise`, `GenerateSplatmapFromProceduralLayers`, `PaintSplatmapAtWorldPoint` $R+G+B+A = 255$ partition-of-unity normalization, and PNG heightmap/splatmap save & reload roundtrips (`0 unfreed memory blocks`).
 

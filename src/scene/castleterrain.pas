@@ -175,20 +175,70 @@ type
     that is: both MinLevel<MaxLevel and MinLevel>MaxLevel are valid.
 
     When image is not loaded, it behaves like all the image intensities are 0.5. }
+  { Brush operation used when interactively sculpting @link(TCastleTerrainImage)
+    or @link(TCastleTerrain). }
+  TTerrainSculptBrushMode = (
+    tsbmRaise,
+    tsbmLower,
+    tsbmSmooth,
+    tsbmFlatten
+  );
+
   TCastleTerrainImage = class(TCastleTerrainData)
   strict private
     { FImage = nil and FUrl = '' when not loaded. }
     FImage: TGrayscaleFloatImage;
     FUrl: String;
     FMinLevel, FMaxLevel: Single;
+    FSmoothInterpolation: Boolean;
     procedure SetUrl(const Value: String);
     procedure SetMinLevel(const Value: Single);
     procedure SetMaxLevel(const Value: Single);
+    procedure SetSmoothInterpolation(const Value: Boolean);
   public
+    const
+      DefaultSmoothInterpolation = true;
+
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
     function Height(const Coord, TexCoord: TVector2): Single; override;
     function PropertySections(const PropertyName: String): TPropertySections; override;
+
+    { Direct access to the underlying floating-point heightmap image
+      (@nil if neither loaded from @link(Url) nor created via @link(CreateBlankImage)). }
+    property Image: TGrayscaleFloatImage read FImage;
+
+    { Allocate an in-memory floating-point heightmap of size @code(AWidth x AHeight)
+      initialized uniformly to @code(InitialHeight) (adjusting @link(MinLevel)
+      and @link(MaxLevel) if needed so @code(InitialHeight) is representable). }
+    procedure CreateBlankImage(const AWidth, AHeight: Cardinal;
+      const InitialHeight: Single = 0.0);
+
+    { Sample @code(SourceData) across @code(InputRange) into an in-memory
+      @code(AWidth x AHeight) floating-point heightmap. }
+    procedure BakeFromTerrainData(const SourceData: TCastleTerrainData;
+      const AWidth, AHeight: Cardinal; const InputRange: TFloatRectangle);
+
+    { Apply a circular/elliptical sculpt brush centered at @code(CenterTexCoord)
+      (in @code([0..1]) terrain texture coordinates) with UV radius @code(RadiusUV).
+      Automatically expands @link(MinLevel) and @link(MaxLevel) and renormalizes
+      existing texels so sculpted heights never clip to @code([0..1]).
+      When @code(BaseLayerData <> nil) (for example when this image acts as an
+      @code(opAdd) edit layer over @link(TCastleTerrainNoise)), @code(tsbmSmooth)
+      and @code(tsbmFlatten) operate on the composite surface height
+      (@code(BaseLayerData + Self)) over @code(BaseInputRange). }
+    procedure ApplySculptBrush(const CenterTexCoord, RadiusUV: TVector2;
+      const Mode: TTerrainSculptBrushMode; const Strength: Single;
+      const FlattenTargetHeight: Single = 0.0); overload;
+    procedure ApplySculptBrush(const CenterTexCoord, RadiusUV: TVector2;
+      const Mode: TTerrainSculptBrushMode; const Strength: Single;
+      const FlattenTargetHeight: Single;
+      const BaseLayerData: TCastleTerrainData;
+      const BaseInputRange: TFloatRectangle); overload;
+
+    { Save the current in-memory heightmap image to @code(SaveUrl) (8-bit grayscale
+      for PNG/JPG/BMP or floating-point where supported) and update @link(Url). }
+    procedure SaveImage(const SaveUrl: String);
   published
     { Image URL. Empty string means that no image is loaded. }
     property Url: String read FUrl write SetUrl;
@@ -196,6 +246,9 @@ type
     property MinLevel: Single read FMinLevel write SetMinLevel {$ifdef FPC}default -0.5{$endif};
     { Height when the image has maximum intensity (white). }
     property MaxLevel: Single read FMaxLevel write SetMaxLevel {$ifdef FPC}default  0.5{$endif};
+    { Bilinearly interpolate texels when sampling heights (smooth slopes instead of stair-steps). }
+    property SmoothInterpolation: Boolean
+      read FSmoothInterpolation write SetSmoothInterpolation default DefaultSmoothInterpolation;
   end;
 
   { Terrain (height for each X, Y) data calculated from CastleScript
@@ -570,6 +623,11 @@ type
     FSubdivisions: TVector2;
     FPreciseCollisions: Boolean;
     FUpdateGeometryWhenLoaded: Boolean;
+    SplatmapNode: TPixelTextureNode;
+    SplatmapInfluenceField: TSFFloat;
+    TerrainSizeField: TSFVec2f;
+    FSplatmapInfluence: Single;
+    FSplatmapUrl: String;
     function GetRenderOptions: TCastleRenderOptions;
     function GetLayer(const Index: Integer): TCastleTerrainLayer;
     procedure DataFreeNotification(const Sender: TFreeNotificationObserver);
@@ -589,6 +647,8 @@ type
     procedure SetLayersInfluence(const Value: Single);
     procedure SetSteepEmphasize(const Value: Single);
     procedure SetPreciseCollisions(const Value: Boolean);
+    procedure SetSplatmapInfluence(const Value: Single);
+    procedure SetSplatmapUrl(const Value: String);
   private
     Scene: TCastleScene;
     UvScaleField, MetallicField, RoughnessField: TSFVec4f;
@@ -614,6 +674,7 @@ type
       );
       DefaultLayersInfluence = 1.0;
       DefaultSteepEmphasize = 2.0;
+      DefaultSplatmapInfluence = 0.0;
       DefaultTriangulationIgnoreHeights = false;
 
     constructor Create(AOwner: TComponent); override;
@@ -621,6 +682,68 @@ type
     function PropertySections(const PropertyName: String): TPropertySections; override;
     function HasColliderMesh: Boolean; override;
     procedure ColliderMesh(const TriangleEvent: TTriangleEvent); override;
+
+    { Convert a point in local @link(TCastleTerrain) coordinates to @code([0..1])
+      terrain texture coordinates matching @link(TCastleTerrainData.Height) and splatmaps. }
+    function LocalPointToTexCoord(const LocalPt: TVector3): TVector2;
+
+    { Convert a point in world coordinates to @code([0..1]) terrain texture coordinates. }
+    function WorldPointToTexCoord(const WorldPt: TVector3): TVector2;
+
+    { Query current terrain height in local @link(TCastleTerrain) space at @code((LocalX, LocalZ)). }
+    function SampleHeightAtLocalXZ(const LocalX, LocalZ: Single): Single;
+
+    { Cast a world-space ray directly against this terrain's mesh (ignoring props/gizmos)
+      and return @true with @code(HitWorldPoint) when the ray hits the terrain surface. }
+    function RayCastWorld(const WorldRayOrigin, WorldRayDirection: TVector3;
+      out HitWorldPoint: TVector3): Boolean;
+
+    { Ensure @link(Data) has a writable @link(TCastleTerrainImage) edit layer and return it.
+      - If @link(Data) is already @link(TCastleTerrainImage), ensures its @code(Image) is allocated.
+      - If @link(Data) is @link(TCastleTerrainCombine) with @code(opAdd) and an image child, returns that image child.
+      - If @link(Data) is procedural (e.g. @link(TCastleTerrainNoise)), non-destructively wraps it in
+        a @link(TCastleTerrainCombine) (@code(opAdd)) + zero-initialized @link(TCastleTerrainImage) delta layer.
+      - If @link(Data) is @nil, creates and assigns a new @link(TCastleTerrainImage). }
+    function EnsureEditableHeightLayer(const OwnerForNewComponents: TComponent = nil;
+      const DefaultResolution: Cardinal = 128): TCastleTerrainImage;
+
+    { Interactively sculpt terrain height around @code(WorldPt) with world-space brush radius
+      @code(WorldRadius). Automatically creates or reuses a non-destructive edit layer via
+      @link(EnsureEditableHeightLayer). }
+    function SculptHeightAtWorldPoint(const WorldPt: TVector3;
+      const WorldRadius: Single; const Mode: TTerrainSculptBrushMode;
+      const Strength: Single; const FlattenTargetWorldY: Single = 0.0;
+      const OwnerForNewComponents: TComponent = nil;
+      const DefaultResolution: Cardinal = 128): TCastleTerrainImage;
+
+    { Current in-memory RGBA splatmap image (@code(R=Layer1, G=Layer2, B=Layer3, A=Layer4)). }
+    function SplatmapImage: TRGBAlphaImage;
+
+    { Initialize a uniform RGBA splatmap of size @code(AWidth x AHeight) filled with
+      100% weight on @code(DefaultLayer) (@code(1..4)) and set @link(SplatmapInfluence) to @code(1.0). }
+    procedure CreateBlankSplatmap(const AWidth: Cardinal = 128;
+      const AHeight: Cardinal = 128; const DefaultLayer: Integer = 1);
+
+    { Auto-populate the 4-channel RGBA splatmap from the terrain's current heights and surface
+      normals using @link(Height1), @link(Height2), and @link(SteepEmphasize), and set
+      @link(SplatmapInfluence) to @code(1.0) for further manual brush painting. }
+    procedure GenerateSplatmapFromProceduralLayers(const AWidth: Cardinal = 128;
+      const AHeight: Cardinal = 128);
+
+    { Paint RGBA splatmap weight for @code(LayerIndex) (@code(1..4)) around @code(CenterTexCoord)
+      with UV radius @code(RadiusUV), maintaining a normalized partition of unity across R+G+B+A. }
+    procedure PaintSplatmapBrush(const CenterTexCoord, RadiusUV: TVector2;
+      const LayerIndex: Integer; const Strength: Single;
+      const DefaultResolution: Cardinal = 128);
+
+    { Paint RGBA splatmap weight for @code(LayerIndex) (@code(1..4)) around @code(WorldPt)
+      with world-space brush radius @code(WorldRadius). }
+    procedure PaintSplatmapAtWorldPoint(const WorldPt: TVector3;
+      const WorldRadius: Single; const LayerIndex: Integer;
+      const Strength: Single; const DefaultResolution: Cardinal = 128);
+
+    { Save the current RGBA splatmap image to @code(SaveUrl) (e.g. PNG) and update @link(SplatmapUrl). }
+    procedure SaveSplatmap(const SaveUrl: String);
 
     { How dense is the mesh.
       By default this is (DefaultSubdivisions,DefaultSubdivisions).
@@ -729,6 +852,17 @@ type
       (TODO: and normals in the future). }
     property LayersInfluence: Single read FLayersInfluence write SetLayersInfluence
       {$ifdef FPC}default DefaultLayersInfluence{$endif};
+
+    { How much the 4-channel RGBA splatmap (@link(SplatmapUrl) or painted in-editor)
+      overrides procedural slope/height layer mixing.
+      @code(0.0) (default) uses procedural @link(Height1)/@link(Height2)/@link(SteepEmphasize) mixing;
+      @code(1.0) uses 100% RGBA splatmap weights for @link(Layer1)..@link(Layer4). }
+    property SplatmapInfluence: Single read FSplatmapInfluence write SetSplatmapInfluence
+      {$ifdef FPC}default DefaultSplatmapInfluence{$endif};
+
+    { Optional URL to a 4-channel RGBA splatmap texture whose R, G, B, A channels store
+      blend weights for @link(Layer1), @link(Layer2), @link(Layer3), @link(Layer4). }
+    property SplatmapUrl: String read FSplatmapUrl write SetSplatmapUrl;
 
     { Resolve collisions precisely with the terrain geometry.
       When this is @false we will only consider the terrain bounding box for collisions,
@@ -955,6 +1089,7 @@ begin
   inherited;
   FMinLevel := -0.5;
   FMaxLevel := 0.5;
+  FSmoothInterpolation := DefaultSmoothInterpolation;
 end;
 
 destructor TCastleTerrainImage.Destroy;
@@ -1013,16 +1148,36 @@ end;
 
 function TCastleTerrainImage.Height(const Coord, TexCoord: TVector2): Single;
 var
-  PX, PY: Integer;
-  Intensity: Single;
+  PX, PY, X0, Y0, X1, Y1: Integer;
+  FX, FY, FracX, FracY, I00, I10, I01, I11, Intensity: Single;
 begin
   if FImage <> nil then
   begin
-    PX := Floor(TexCoord.X * FImage.Width );
-    PY := Floor(TexCoord.Y * FImage.Height);
-    ClampVar(PX, 0, FImage.Width  - 1);
-    ClampVar(PY, 0, FImage.Height - 1);
-    Intensity := FImage.PixelPtr(PX, PY)^;
+    if FSmoothInterpolation and ((FImage.Width > 1) or (FImage.Height > 1)) then
+    begin
+      FX := Clamped(TexCoord.X, 0.0, 1.0) * Max(0, Integer(FImage.Width) - 1);
+      FY := Clamped(TexCoord.Y, 0.0, 1.0) * Max(0, Integer(FImage.Height) - 1);
+      X0 := Floor(FX);
+      Y0 := Floor(FY);
+      ClampVar(X0, 0, Integer(FImage.Width) - 1);
+      ClampVar(Y0, 0, Integer(FImage.Height) - 1);
+      X1 := Min(X0 + 1, Integer(FImage.Width) - 1);
+      Y1 := Min(Y0 + 1, Integer(FImage.Height) - 1);
+      FracX := FX - X0;
+      FracY := FY - Y0;
+      I00 := FImage.PixelPtr(X0, Y0)^;
+      I10 := FImage.PixelPtr(X1, Y0)^;
+      I01 := FImage.PixelPtr(X0, Y1)^;
+      I11 := FImage.PixelPtr(X1, Y1)^;
+      Intensity := Lerp(FracY, Lerp(FracX, I00, I10), Lerp(FracX, I01, I11));
+    end else
+    begin
+      PX := Floor(TexCoord.X * FImage.Width );
+      PY := Floor(TexCoord.Y * FImage.Height);
+      ClampVar(PX, 0, FImage.Width  - 1);
+      ClampVar(PY, 0, FImage.Height - 1);
+      Intensity := FImage.PixelPtr(PX, PY)^;
+    end;
   end else
     Intensity := 0.5;
   Result := Lerp(Intensity, MinLevel, MaxLevel);
@@ -1046,10 +1201,301 @@ begin
   end;
 end;
 
+procedure TCastleTerrainImage.SetSmoothInterpolation(const Value: Boolean);
+begin
+  if FSmoothInterpolation <> Value then
+  begin
+    FSmoothInterpolation := Value;
+    DoChange;
+  end;
+end;
+
+procedure TCastleTerrainImage.CreateBlankImage(const AWidth, AHeight: Cardinal;
+  const InitialHeight: Single);
+var
+  W, H, I, Count: Cardinal;
+  NormVal: Single;
+  P: PSingle;
+begin
+  W := Max(2, AWidth);
+  H := Max(2, AHeight);
+  if InitialHeight < FMinLevel then
+    FMinLevel := InitialHeight - 1.0;
+  if InitialHeight > FMaxLevel then
+    FMaxLevel := InitialHeight + 1.0;
+  if Abs(FMaxLevel - FMinLevel) < 1e-4 then
+  begin
+    FMinLevel := InitialHeight - 0.5;
+    FMaxLevel := InitialHeight + 0.5;
+  end;
+  NormVal := Clamped((InitialHeight - FMinLevel) / (FMaxLevel - FMinLevel), 0.0, 1.0);
+
+  FreeAndNil(FImage);
+  FImage := TGrayscaleFloatImage.Create(W, H);
+  Count := W * H;
+  P := PSingle(FImage.RawPixels);
+  for I := 0 to Count - 1 do
+  begin
+    P^ := NormVal;
+    Inc(P);
+  end;
+  DoChange;
+end;
+
+procedure TCastleTerrainImage.BakeFromTerrainData(const SourceData: TCastleTerrainData;
+  const AWidth, AHeight: Cardinal; const InputRange: TFloatRectangle);
+var
+  W, H, X, Y: Integer;
+  Samples: array of Single;
+  TexC, InputC: TVector2;
+  SampleH, MinH, MaxH, Span: Single;
+begin
+  W := Max(2, Integer(AWidth));
+  H := Max(2, Integer(AHeight));
+  if SourceData = nil then
+  begin
+    CreateBlankImage(W, H, 0.0);
+    Exit;
+  end;
+
+  SetLength(Samples, W * H);
+  MinH := MaxSingle;
+  MaxH := -MaxSingle;
+  for Y := 0 to H - 1 do
+    for X := 0 to W - 1 do
+    begin
+      TexC := Vector2(X / (W - 1), Y / (H - 1));
+      InputC := Vector2(
+        Lerp(TexC.X, InputRange.Left, InputRange.Right),
+        Lerp(1.0 - TexC.Y, InputRange.Bottom, InputRange.Top));
+      SampleH := SourceData.Height(InputC, TexC);
+      Samples[X + Y * W] := SampleH;
+      if SampleH < MinH then MinH := SampleH;
+      if SampleH > MaxH then MaxH := SampleH;
+    end;
+
+  if MaxH - MinH < 1.0 then
+  begin
+    MinH := MinH - 0.5;
+    MaxH := MaxH + 0.5;
+  end;
+  FMinLevel := MinH;
+  FMaxLevel := MaxH;
+  Span := FMaxLevel - FMinLevel;
+
+  FreeAndNil(FImage);
+  FImage := TGrayscaleFloatImage.Create(W, H);
+  for Y := 0 to H - 1 do
+    for X := 0 to W - 1 do
+      FImage.PixelPtr(X, Y)^ := Clamped((Samples[X + Y * W] - FMinLevel) / Span, 0.0, 1.0);
+  DoChange;
+end;
+
+procedure TCastleTerrainImage.ApplySculptBrush(const CenterTexCoord, RadiusUV: TVector2;
+  const Mode: TTerrainSculptBrushMode; const Strength: Single;
+  const FlattenTargetHeight: Single);
+begin
+  ApplySculptBrush(CenterTexCoord, RadiusUV, Mode, Strength, FlattenTargetHeight,
+    nil, TFloatRectangle.Empty);
+end;
+
+procedure TCastleTerrainImage.ApplySculptBrush(const CenterTexCoord, RadiusUV: TVector2;
+  const Mode: TTerrainSculptBrushMode; const Strength: Single;
+  const FlattenTargetHeight: Single;
+  const BaseLayerData: TCastleTerrainData;
+  const BaseInputRange: TFloatRectangle);
+var
+  W, H: Integer;
+  SafeRadX, SafeRadY: Single;
+  XMin, XMax, YMin, YMax, SnapXMin, SnapXMax, SnapYMin, SnapYMax: Integer;
+  SnapW, SnapH, BoxW, BoxH: Integer;
+  PX, PY, NX, NY, AvgCount: Integer;
+  U, V, DistSq, Falloff, Alpha, OldDeltaH, BaseH, OldTotalH, NewTotalH, NewDeltaH, AvgSum: Single;
+  MinModifiedDelta, MaxModifiedDelta, OldMin, OldMax, NewMin, NewMax, Span: Single;
+  SnapshotTotal, SnapshotBase, NewBoxDelta: array of Single;
+  BoxMask: array of Boolean;
+  HasAnyModified: Boolean;
+  P: PSingle;
+  I, TotalPixels: Integer;
+
+  function SampleBaseAtPixel(const IX, IY: Integer): Single;
+  var
+    TC, IC: TVector2;
+  begin
+    if BaseLayerData = nil then
+      Exit(0.0);
+    TC := Vector2(IX / Max(1, W - 1), IY / Max(1, H - 1));
+    IC := Vector2(
+      Lerp(TC.X, BaseInputRange.Left, BaseInputRange.Right),
+      Lerp(1.0 - TC.Y, BaseInputRange.Bottom, BaseInputRange.Top));
+    Result := BaseLayerData.Height(IC, TC);
+  end;
+
+begin
+  if FImage = nil then
+    CreateBlankImage(128, 128, Lerp(0.5, FMinLevel, FMaxLevel));
+
+  W := FImage.Width;
+  H := FImage.Height;
+  if (W <= 0) or (H <= 0) then
+    Exit;
+
+  SafeRadX := Max(RadiusUV.X, 1.0 / Max(1, W));
+  SafeRadY := Max(RadiusUV.Y, 1.0 / Max(1, H));
+
+  XMin := Clamped(Floor((CenterTexCoord.X - SafeRadX) * Max(1, W - 1)), 0, W - 1);
+  XMax := Clamped(Ceil ((CenterTexCoord.X + SafeRadX) * Max(1, W - 1)), 0, W - 1);
+  YMin := Clamped(Floor((CenterTexCoord.Y - SafeRadY) * Max(1, H - 1)), 0, H - 1);
+  YMax := Clamped(Ceil ((CenterTexCoord.Y + SafeRadY) * Max(1, H - 1)), 0, H - 1);
+
+  if (XMin > XMax) or (YMin > YMax) then
+    Exit;
+
+  SnapXMin := Max(0, XMin - 1);
+  SnapXMax := Min(W - 1, XMax + 1);
+  SnapYMin := Max(0, YMin - 1);
+  SnapYMax := Min(H - 1, YMax + 1);
+  SnapW := SnapXMax - SnapXMin + 1;
+  SnapH := SnapYMax - SnapYMin + 1;
+
+  SetLength(SnapshotTotal, SnapW * SnapH);
+  SetLength(SnapshotBase, SnapW * SnapH);
+  for PY := SnapYMin to SnapYMax do
+    for PX := SnapXMin to SnapXMax do
+    begin
+      OldDeltaH := Lerp(FImage.PixelPtr(PX, PY)^, FMinLevel, FMaxLevel);
+      if (BaseLayerData <> nil) and (Mode in [tsbmSmooth, tsbmFlatten]) then
+        BaseH := SampleBaseAtPixel(PX, PY)
+      else
+        BaseH := 0.0;
+      SnapshotBase[(PX - SnapXMin) + (PY - SnapYMin) * SnapW] := BaseH;
+      SnapshotTotal[(PX - SnapXMin) + (PY - SnapYMin) * SnapW] := BaseH + OldDeltaH;
+    end;
+
+  BoxW := XMax - XMin + 1;
+  BoxH := YMax - YMin + 1;
+  SetLength(NewBoxDelta, BoxW * BoxH);
+  SetLength(BoxMask, BoxW * BoxH);
+  HasAnyModified := false;
+  MinModifiedDelta := MaxSingle;
+  MaxModifiedDelta := -MaxSingle;
+
+  for PY := YMin to YMax do
+    for PX := XMin to XMax do
+    begin
+      if W > 1 then U := PX / (W - 1) else U := 0.5;
+      if H > 1 then V := PY / (H - 1) else V := 0.5;
+      DistSq := Sqr((U - CenterTexCoord.X) / SafeRadX) +
+                Sqr((V - CenterTexCoord.Y) / SafeRadY);
+      if DistSq < 1.0 then
+      begin
+        Falloff := Sqr(1.0 - DistSq);
+        BaseH := SnapshotBase[(PX - SnapXMin) + (PY - SnapYMin) * SnapW];
+        OldTotalH := SnapshotTotal[(PX - SnapXMin) + (PY - SnapYMin) * SnapW];
+        OldDeltaH := OldTotalH - BaseH;
+
+        case Mode of
+          tsbmRaise:
+            NewDeltaH := OldDeltaH + Strength * Falloff;
+          tsbmLower:
+            NewDeltaH := OldDeltaH - Strength * Falloff;
+          tsbmSmooth:
+            begin
+              AvgSum := 0.0;
+              AvgCount := 0;
+              for NY := Max(SnapYMin, PY - 1) to Min(SnapYMax, PY + 1) do
+                for NX := Max(SnapXMin, PX - 1) to Min(SnapXMax, PX + 1) do
+                begin
+                  AvgSum := AvgSum + SnapshotTotal[(NX - SnapXMin) + (NY - SnapYMin) * SnapW];
+                  Inc(AvgCount);
+                end;
+              Alpha := Clamped(Strength * Falloff, 0.0, 1.0);
+              if AvgCount > 0 then
+                NewTotalH := Lerp(Alpha, OldTotalH, AvgSum / AvgCount)
+              else
+                NewTotalH := OldTotalH;
+              NewDeltaH := NewTotalH - BaseH;
+            end;
+          tsbmFlatten:
+            begin
+              Alpha := Clamped(Strength * Falloff, 0.0, 1.0);
+              NewTotalH := Lerp(Alpha, OldTotalH, FlattenTargetHeight);
+              NewDeltaH := NewTotalH - BaseH;
+            end;
+        end;
+
+        BoxMask[(PX - XMin) + (PY - YMin) * BoxW] := true;
+        NewBoxDelta[(PX - XMin) + (PY - YMin) * BoxW] := NewDeltaH;
+        HasAnyModified := true;
+        if NewDeltaH < MinModifiedDelta then MinModifiedDelta := NewDeltaH;
+        if NewDeltaH > MaxModifiedDelta then MaxModifiedDelta := NewDeltaH;
+      end else
+        BoxMask[(PX - XMin) + (PY - YMin) * BoxW] := false;
+    end;
+
+  if not HasAnyModified then
+    Exit;
+
+  OldMin := FMinLevel;
+  OldMax := FMaxLevel;
+  NewMin := Min(OldMin, MinModifiedDelta);
+  NewMax := Max(OldMax, MaxModifiedDelta);
+  if NewMax - NewMin < 1e-4 then
+  begin
+    NewMin := NewMin - 0.5;
+    NewMax := NewMax + 0.5;
+  end;
+
+  if (NewMin < OldMin) or (NewMax > OldMax) or (Abs(OldMax - OldMin) < 1e-4) then
+  begin
+    Span := NewMax - NewMin;
+    TotalPixels := W * H;
+    P := PSingle(FImage.RawPixels);
+    for I := 0 to TotalPixels - 1 do
+    begin
+      P^ := Clamped((Lerp(P^, OldMin, OldMax) - NewMin) / Span, 0.0, 1.0);
+      Inc(P);
+    end;
+    FMinLevel := NewMin;
+    FMaxLevel := NewMax;
+  end;
+
+  Span := FMaxLevel - FMinLevel;
+  for PY := YMin to YMax do
+    for PX := XMin to XMax do
+      if BoxMask[(PX - XMin) + (PY - YMin) * BoxW] then
+        FImage.PixelPtr(PX, PY)^ := Clamped(
+          (NewBoxDelta[(PX - XMin) + (PY - YMin) * BoxW] - FMinLevel) / Span, 0.0, 1.0);
+
+  DoChange;
+end;
+
+procedure TCastleTerrainImage.SaveImage(const SaveUrl: String);
+var
+  GrayByteImg: TGrayscaleImage;
+  X, Y: Integer;
+begin
+  if SaveUrl = '' then
+    raise Exception.Create('TCastleTerrainImage.SaveImage requires a non-empty URL');
+  if FImage = nil then
+    CreateBlankImage(128, 128, Lerp(0.5, FMinLevel, FMaxLevel));
+
+  GrayByteImg := TGrayscaleImage.Create(FImage.Width, FImage.Height);
+  try
+    for Y := 0 to Integer(FImage.Height) - 1 do
+      for X := 0 to Integer(FImage.Width) - 1 do
+        GrayByteImg.PixelPtr(X, Y)^ := Round(Clamped(FImage.PixelPtr(X, Y)^, 0.0, 1.0) * 255.0);
+    CastleImages.SaveImage(GrayByteImg, SaveUrl);
+  finally
+    FreeAndNil(GrayByteImg);
+  end;
+  FUrl := SaveUrl;
+end;
+
 function TCastleTerrainImage.PropertySections(const PropertyName: String): TPropertySections;
 begin
   if ArrayContainsString(PropertyName, [
-       'Url', 'MinLevel', 'MaxLevel'
+       'Url', 'MinLevel', 'MaxLevel', 'SmoothInterpolation'
      ]) then
     Result := [psBasic]
   else
@@ -1644,6 +2090,19 @@ constructor TCastleTerrain.Create(AOwner: TComponent);
     Effect.AddCustomField(TSFFloat.Create(Effect, true, 'layers_influence', FLayersInfluence));
     Effect.AddCustomField(TSFFloat.Create(Effect, true, 'steep_emphasize', FSteepEmphasize));
 
+    SplatmapNode := TPixelTextureNode.Create;
+    SplatmapNode.RepeatS := false;
+    SplatmapNode.RepeatT := false;
+    SplatmapNode.FdImage.Value := TRGBAlphaImage.Create(1, 1);
+    TRGBAlphaImage(SplatmapNode.FdImage.Value).PixelPtr(0, 0)^ := Vector4Byte(255, 0, 0, 0);
+    Effect.AddCustomField(TSFNode.Create(Effect, false, 'splatmap_tex', [], SplatmapNode));
+
+    SplatmapInfluenceField := TSFFloat.Create(Effect, true, 'splatmap_influence', FSplatmapInfluence);
+    Effect.AddCustomField(SplatmapInfluenceField);
+
+    TerrainSizeField := TSFVec2f.Create(Effect, true, 'terrain_size', FSize);
+    Effect.AddCustomField(TerrainSizeField);
+
     { initialize 2 EffectPart nodes (one for vertex shader, one for fragment shader) }
     FragmentPart := TEffectPartNode.Create;
     FragmentPart.ShaderType := stFragment;
@@ -1669,6 +2128,7 @@ begin
   FSize := Vector2(DefaultSize, DefaultSize);
   FLayersInfluence := DefaultLayersInfluence;
   FSteepEmphasize := DefaultSteepEmphasize;
+  FSplatmapInfluence := DefaultSplatmapInfluence;
   FPreciseCollisions := true;
 
   Scene := TCastleScene.Create(Self);
@@ -1892,6 +2352,8 @@ begin
   if not TVector2.PerfectlyEquals(FSize, Value) then
   begin
     FSize := Value;
+    if TerrainSizeField <> nil then
+      TerrainSizeField.Send(FSize);
     UpdateGeometry;
   end;
 end;
@@ -1942,6 +2404,505 @@ begin
   end;
 end;
 
+procedure TCastleTerrain.SetSplatmapInfluence(const Value: Single);
+begin
+  if FSplatmapInfluence <> Value then
+  begin
+    FSplatmapInfluence := Value;
+    if SplatmapInfluenceField <> nil then
+      SplatmapInfluenceField.Send(Value);
+  end;
+end;
+
+procedure TCastleTerrain.SetSplatmapUrl(const Value: String);
+var
+  NewImg: TRGBAlphaImage;
+begin
+  if FSplatmapUrl <> Value then
+  begin
+    if Value = '' then
+    begin
+      FSplatmapUrl := '';
+      NewImg := TRGBAlphaImage.Create(1, 1);
+      NewImg.PixelPtr(0, 0)^ := Vector4Byte(255, 0, 0, 0);
+      SplatmapNode.FdImage.Value := NewImg;
+      SplatmapNode.FdImage.Changed;
+      Scene.ChangedAll;
+    end else
+    begin
+      try
+        NewImg := CastleImages.LoadImage(Value, [TRGBAlphaImage]) as TRGBAlphaImage;
+        SplatmapNode.FdImage.Value := NewImg;
+        SplatmapNode.FdImage.Changed;
+        FSplatmapUrl := Value;
+        Scene.ChangedAll;
+      except
+        on E: Exception do
+        begin
+          if CastleDesignMode then
+            WritelnWarning('TCastleTerrain', 'Failed to load SplatmapUrl "%s": %s', [
+              UriDisplay(Value),
+              ExceptMessage(E)
+            ])
+          else
+            raise;
+        end;
+      end;
+    end;
+  end;
+end;
+
+function TCastleTerrain.LocalPointToTexCoord(const LocalPt: TVector3): TVector2;
+var
+  SafeX, SafeY: Single;
+begin
+  SafeX := Max(FSize.X, 0.001);
+  SafeY := Max(FSize.Y, 0.001);
+  Result := Vector2(
+    Clamped((LocalPt.X / SafeX) + 0.5, 0.0, 1.0),
+    Clamped(0.5 - (LocalPt.Z / SafeY), 0.0, 1.0));
+end;
+
+function TCastleTerrain.WorldPointToTexCoord(const WorldPt: TVector3): TVector2;
+begin
+  if HasWorldTransform then
+    Result := LocalPointToTexCoord(WorldToLocal(WorldPt))
+  else
+    Result := LocalPointToTexCoord(WorldPt - Translation);
+end;
+
+function TCastleTerrain.SampleHeightAtLocalXZ(const LocalX, LocalZ: Single): Single;
+var
+  TexC, InputC: TVector2;
+begin
+  if Data = nil then
+    Exit(0.0);
+  TexC := LocalPointToTexCoord(Vector3(LocalX, 0, LocalZ));
+  InputC := Vector2(LocalX + FQueryOffset.X, LocalZ + FQueryOffset.Y);
+  Result := Data.Height(InputC, TexC);
+end;
+
+function TCastleTerrain.RayCastWorld(const WorldRayOrigin, WorldRayDirection: TVector3;
+  out HitWorldPoint: TVector3): Boolean;
+var
+  LocalOrigin, LocalDir: TVector3;
+  RayHit: TRayCollision;
+  SavedPrecise, SavedPickable: Boolean;
+begin
+  HitWorldPoint := TVector3.Zero;
+  Result := false;
+  if (Scene = nil) or WorldRayDirection.IsZero then
+    Exit;
+
+  if HasWorldTransform then
+  begin
+    LocalOrigin := WorldToLocal(WorldRayOrigin);
+    LocalDir := WorldToLocalDirection(WorldRayDirection);
+  end else
+  begin
+    LocalOrigin := WorldRayOrigin - Translation;
+    LocalDir := WorldRayDirection;
+  end;
+  if LocalDir.IsZero then
+    Exit;
+  LocalDir := LocalDir.Normalize;
+
+  SavedPrecise := Scene.PreciseCollisions;
+  SavedPickable := Scene.Pickable;
+  Scene.PreciseCollisions := true;
+  Scene.Pickable := true;
+  try
+    RayHit := LocalRayCollision(LocalOrigin, LocalDir, nil);
+    if RayHit <> nil then
+    try
+      if RayHit.Count > 0 then
+      begin
+        if HasWorldTransform then
+          HitWorldPoint := LocalToWorld(RayHit[RayHit.Count - 1].Point)
+        else
+          HitWorldPoint := RayHit[RayHit.Count - 1].Point + Translation;
+        Result := true;
+      end;
+    finally
+      FreeAndNil(RayHit);
+    end;
+  finally
+    Scene.PreciseCollisions := SavedPrecise;
+    Scene.Pickable := SavedPickable;
+  end;
+end;
+
+function UniqueTerrainComponentName(const AOwner: TComponent; const BaseName: String): String;
+var
+  Idx: Integer;
+begin
+  if (AOwner = nil) or (AOwner.FindComponent(BaseName) = nil) then
+    Exit(BaseName);
+  Idx := 1;
+  repeat
+    Result := BaseName + IntToStr(Idx);
+    Inc(Idx);
+  until AOwner.FindComponent(Result) = nil;
+end;
+
+function TCastleTerrain.EnsureEditableHeightLayer(const OwnerForNewComponents: TComponent;
+  const DefaultResolution: Cardinal): TCastleTerrainImage;
+var
+  EffectiveOwner: TComponent;
+  CombineData: TCastleTerrainCombine;
+  OldData: TCastleTerrainData;
+begin
+  if OwnerForNewComponents <> nil then
+    EffectiveOwner := OwnerForNewComponents
+  else
+    EffectiveOwner := Owner;
+
+  if FData is TCastleTerrainImage then
+  begin
+    Result := TCastleTerrainImage(FData);
+    if Result.Image = nil then
+      Result.CreateBlankImage(DefaultResolution, DefaultResolution,
+        Lerp(0.5, Result.MinLevel, Result.MaxLevel));
+    Exit;
+  end;
+
+  if (FData is TCastleTerrainCombine) and
+     (TCastleTerrainCombine(FData).Operation = opAdd) then
+  begin
+    CombineData := TCastleTerrainCombine(FData);
+    if CombineData.Data2 is TCastleTerrainImage then
+    begin
+      Result := TCastleTerrainImage(CombineData.Data2);
+      if Result.Image = nil then
+        Result.CreateBlankImage(DefaultResolution, DefaultResolution, 0.0);
+      Exit;
+    end;
+    if CombineData.Data1 is TCastleTerrainImage then
+    begin
+      Result := TCastleTerrainImage(CombineData.Data1);
+      if Result.Image = nil then
+        Result.CreateBlankImage(DefaultResolution, DefaultResolution, 0.0);
+      Exit;
+    end;
+  end;
+
+  if FData = nil then
+  begin
+    Result := TCastleTerrainImage.Create(EffectiveOwner);
+    Result.Name := UniqueTerrainComponentName(EffectiveOwner, 'TerrainHeightImage');
+    Result.MinLevel := -5.0;
+    Result.MaxLevel := 5.0;
+    Result.CreateBlankImage(DefaultResolution, DefaultResolution, 0.0);
+    Data := Result;
+  end else
+  begin
+    OldData := FData;
+    Result := TCastleTerrainImage.Create(EffectiveOwner);
+    Result.Name := UniqueTerrainComponentName(EffectiveOwner, 'TerrainSculptLayer');
+    Result.MinLevel := -1.0;
+    Result.MaxLevel := 1.0;
+    Result.CreateBlankImage(DefaultResolution, DefaultResolution, 0.0);
+
+    CombineData := TCastleTerrainCombine.Create(EffectiveOwner);
+    CombineData.Name := UniqueTerrainComponentName(EffectiveOwner, 'TerrainEditCombine');
+    CombineData.Operation := opAdd;
+    CombineData.Data1 := OldData;
+    CombineData.Data2 := Result;
+    Data := CombineData;
+  end;
+end;
+
+function TCastleTerrain.SculptHeightAtWorldPoint(const WorldPt: TVector3;
+  const WorldRadius: Single; const Mode: TTerrainSculptBrushMode;
+  const Strength: Single; const FlattenTargetWorldY: Single;
+  const OwnerForNewComponents: TComponent;
+  const DefaultResolution: Cardinal): TCastleTerrainImage;
+var
+  LocalPt, FlattenLocalPt, LocalRadVecX, LocalRadVecZ: TVector3;
+  CenterUV, RadiusUV: TVector2;
+  LocalRadiusX, LocalRadiusZ: Single;
+  BaseLayer: TCastleTerrainData;
+  InputRange: TFloatRectangle;
+begin
+  Result := EnsureEditableHeightLayer(OwnerForNewComponents, DefaultResolution);
+  if HasWorldTransform then
+  begin
+    LocalPt := WorldToLocal(WorldPt);
+    LocalRadVecX := WorldToLocalDirection(Vector3(Max(WorldRadius, 0.01), 0, 0));
+    LocalRadVecZ := WorldToLocalDirection(Vector3(0, 0, Max(WorldRadius, 0.01)));
+    FlattenLocalPt := WorldToLocal(Vector3(WorldPt.X, FlattenTargetWorldY, WorldPt.Z));
+  end else
+  begin
+    LocalPt := WorldPt - Translation;
+    LocalRadVecX := Vector3(Max(WorldRadius, 0.01), 0, 0);
+    LocalRadVecZ := Vector3(0, 0, Max(WorldRadius, 0.01));
+    FlattenLocalPt := Vector3(WorldPt.X, FlattenTargetWorldY, WorldPt.Z) - Translation;
+  end;
+  CenterUV := LocalPointToTexCoord(LocalPt);
+  LocalRadiusX := Max(LocalRadVecX.Length, 0.01);
+  LocalRadiusZ := Max(LocalRadVecZ.Length, 0.01);
+
+  RadiusUV := Vector2(
+    LocalRadiusX / Max(FSize.X, 0.001),
+    LocalRadiusZ / Max(FSize.Y, 0.001));
+
+  BaseLayer := nil;
+  if (FData is TCastleTerrainCombine) and
+     (TCastleTerrainCombine(FData).Operation = opAdd) then
+  begin
+    if TCastleTerrainCombine(FData).Data2 = Result then
+      BaseLayer := TCastleTerrainCombine(FData).Data1
+    else if TCastleTerrainCombine(FData).Data1 = Result then
+      BaseLayer := TCastleTerrainCombine(FData).Data2;
+  end;
+
+  InputRange := FloatRectangle(
+    -FSize.X / 2 + FQueryOffset.X,
+    -FSize.Y / 2 + FQueryOffset.Y,
+    FSize.X, FSize.Y);
+
+  Result.ApplySculptBrush(CenterUV, RadiusUV, Mode, Strength, FlattenLocalPt.Y,
+    BaseLayer, InputRange);
+end;
+
+function TCastleTerrain.SplatmapImage: TRGBAlphaImage;
+begin
+  if (SplatmapNode <> nil) and (SplatmapNode.FdImage.Value is TRGBAlphaImage) then
+    Result := TRGBAlphaImage(SplatmapNode.FdImage.Value)
+  else
+    Result := nil;
+end;
+
+procedure TCastleTerrain.CreateBlankSplatmap(const AWidth, AHeight: Cardinal;
+  const DefaultLayer: Integer);
+var
+  W, H, I, Total: Cardinal;
+  ClampedLayer: Integer;
+  FillPixel: TVector4Byte;
+  NewImg: TRGBAlphaImage;
+  P: PVector4Byte;
+begin
+  W := Max(2, AWidth);
+  H := Max(2, AHeight);
+  ClampedLayer := Clamped(DefaultLayer, 1, LayersCount);
+  FillPixel := Vector4Byte(0, 0, 0, 0);
+  FillPixel.Data[ClampedLayer - 1] := 255;
+
+  NewImg := TRGBAlphaImage.Create(W, H);
+  Total := W * H;
+  P := PVector4Byte(NewImg.RawPixels);
+  for I := 0 to Total - 1 do
+  begin
+    P^ := FillPixel;
+    Inc(P);
+  end;
+
+  SplatmapNode.FdImage.Value := NewImg;
+  SplatmapNode.FdImage.Changed;
+  SplatmapInfluence := 1.0;
+end;
+
+function TerrainSmoothStep(const Edge0, Edge1, X: Single): Single;
+var
+  T: Single;
+begin
+  if Abs(Edge1 - Edge0) < 1e-6 then
+  begin
+    if X >= Edge1 then Exit(1.0) else Exit(0.0);
+  end;
+  T := Clamped((X - Edge0) / (Edge1 - Edge0), 0.0, 1.0);
+  Result := T * T * (3.0 - 2.0 * T);
+end;
+
+function NormalizeWeightsToBytes(const W0, W1, W2, W3: Single): TVector4Byte;
+var
+  SumW: Single;
+  NW: array [0..3] of Single;
+  B: array [0..3] of Integer;
+  C, MaxIdx, SumB: Integer;
+begin
+  NW[0] := Max(0.0, W0);
+  NW[1] := Max(0.0, W1);
+  NW[2] := Max(0.0, W2);
+  NW[3] := Max(0.0, W3);
+  SumW := NW[0] + NW[1] + NW[2] + NW[3];
+  if SumW < 1e-5 then
+    Exit(Vector4Byte(255, 0, 0, 0));
+
+  MaxIdx := 0;
+  SumB := 0;
+  for C := 0 to 3 do
+  begin
+    NW[C] := NW[C] / SumW;
+    B[C] := Clamped(Round(NW[C] * 255.0), 0, 255);
+    SumB := SumB + B[C];
+    if NW[C] > NW[MaxIdx] then
+      MaxIdx := C;
+  end;
+  B[MaxIdx] := Clamped(B[MaxIdx] + (255 - SumB), 0, 255);
+  Result := Vector4Byte(B[0], B[1], B[2], B[3]);
+end;
+
+procedure TCastleTerrain.GenerateSplatmapFromProceduralLayers(const AWidth, AHeight: Cardinal);
+var
+  W, H, X, Y: Integer;
+  NewImg: TRGBAlphaImage;
+  StepX, StepZ, LocalX, LocalZ, CenterH, HX0, HX1, HZ0, HZ1: Single;
+  NormalVec: TVector3;
+  NormalSlope, HeightMix, FlatFactor, SteepFactor: Single;
+begin
+  W := Max(2, Integer(AWidth));
+  H := Max(2, Integer(AHeight));
+  NewImg := TRGBAlphaImage.Create(W, H);
+  StepX := Max(FSize.X / Max(1, W - 1), 0.01);
+  StepZ := Max(FSize.Y / Max(1, H - 1), 0.01);
+
+  for Y := 0 to H - 1 do
+    for X := 0 to W - 1 do
+    begin
+      LocalX := (X / (W - 1) - 0.5) * FSize.X;
+      LocalZ := (0.5 - Y / (H - 1)) * FSize.Y;
+      CenterH := SampleHeightAtLocalXZ(LocalX, LocalZ);
+      HX0 := SampleHeightAtLocalXZ(LocalX - StepX * 0.5, LocalZ);
+      HX1 := SampleHeightAtLocalXZ(LocalX + StepX * 0.5, LocalZ);
+      HZ0 := SampleHeightAtLocalXZ(LocalX, LocalZ - StepZ * 0.5);
+      HZ1 := SampleHeightAtLocalXZ(LocalX, LocalZ + StepZ * 0.5);
+
+      NormalVec := TVector3.CrossProduct(
+        Vector3(0, HZ1 - HZ0, StepZ),
+        Vector3(StepX, HX1 - HX0, 0)).Normalize;
+      NormalSlope := Clamped(NormalVec.Y, 0.0, 1.0);
+      HeightMix := TerrainSmoothStep(Height1, Height2, CenterH);
+      FlatFactor := Clamped(Power(NormalSlope, Max(0.0, FSteepEmphasize)), 0.0, 1.0);
+      SteepFactor := 1.0 - FlatFactor;
+
+      NewImg.PixelPtr(X, Y)^ := NormalizeWeightsToBytes(
+        FlatFactor  * (1.0 - HeightMix),
+        SteepFactor * (1.0 - HeightMix),
+        FlatFactor  * HeightMix,
+        SteepFactor * HeightMix);
+    end;
+
+  SplatmapNode.FdImage.Value := NewImg;
+  SplatmapNode.FdImage.Changed;
+  SplatmapInfluence := 1.0;
+end;
+
+procedure TCastleTerrain.PaintSplatmapBrush(const CenterTexCoord, RadiusUV: TVector2;
+  const LayerIndex: Integer; const Strength: Single;
+  const DefaultResolution: Cardinal);
+var
+  Img, UpgradedImg: TRGBAlphaImage;
+  InitColor: TVector4Byte;
+  W, H, PX, PY, XMin, XMax, YMin, YMax, TargetChan, C: Integer;
+  SafeRadX, SafeRadY, U, V, DistSq, Falloff, Alpha: Single;
+  Weights: array [0..3] of Single;
+  CurPx: TVector4Byte;
+  I, Total: Cardinal;
+  P: PVector4Byte;
+  ModifiedAny: Boolean;
+begin
+  TargetChan := Clamped(LayerIndex, 1, LayersCount) - 1;
+  Img := SplatmapImage;
+  if (Img = nil) or ((Img.Width <= 1) and (Img.Height <= 1)) then
+  begin
+    if (Img <> nil) and (Img.Width = 1) and (Img.Height = 1) then
+      InitColor := Img.PixelPtr(0, 0)^
+    else
+      InitColor := Vector4Byte(255, 0, 0, 0);
+    UpgradedImg := TRGBAlphaImage.Create(Max(2, DefaultResolution), Max(2, DefaultResolution));
+    Total := UpgradedImg.Width * UpgradedImg.Height;
+    P := PVector4Byte(UpgradedImg.RawPixels);
+    for I := 0 to Total - 1 do
+    begin
+      P^ := InitColor;
+      Inc(P);
+    end;
+    SplatmapNode.FdImage.Value := UpgradedImg;
+    Img := UpgradedImg;
+  end;
+
+  W := Img.Width;
+  H := Img.Height;
+  SafeRadX := Max(RadiusUV.X, 1.0 / Max(1, W));
+  SafeRadY := Max(RadiusUV.Y, 1.0 / Max(1, H));
+
+  XMin := Clamped(Floor((CenterTexCoord.X - SafeRadX) * Max(1, W - 1)), 0, W - 1);
+  XMax := Clamped(Ceil ((CenterTexCoord.X + SafeRadX) * Max(1, W - 1)), 0, W - 1);
+  YMin := Clamped(Floor((CenterTexCoord.Y - SafeRadY) * Max(1, H - 1)), 0, H - 1);
+  YMax := Clamped(Ceil ((CenterTexCoord.Y + SafeRadY) * Max(1, H - 1)), 0, H - 1);
+
+  ModifiedAny := false;
+  for PY := YMin to YMax do
+    for PX := XMin to XMax do
+    begin
+      if W > 1 then U := PX / (W - 1) else U := 0.5;
+      if H > 1 then V := PY / (H - 1) else V := 0.5;
+      DistSq := Sqr((U - CenterTexCoord.X) / SafeRadX) +
+                Sqr((V - CenterTexCoord.Y) / SafeRadY);
+      if DistSq < 1.0 then
+      begin
+        Falloff := Sqr(1.0 - DistSq);
+        Alpha := Clamped(Strength * Falloff, 0.0, 1.0);
+        CurPx := Img.PixelPtr(PX, PY)^;
+        for C := 0 to 3 do
+        begin
+          Weights[C] := CurPx.Data[C] / 255.0;
+          if C = TargetChan then
+            Weights[C] := Lerp(Alpha, Weights[C], 1.0)
+          else
+            Weights[C] := Lerp(Alpha, Weights[C], 0.0);
+        end;
+        Img.PixelPtr(PX, PY)^ := NormalizeWeightsToBytes(
+          Weights[0], Weights[1], Weights[2], Weights[3]);
+        ModifiedAny := true;
+      end;
+    end;
+
+  if ModifiedAny then
+  begin
+    SplatmapNode.FdImage.Changed;
+    if FSplatmapInfluence <= 0.0 then
+      SplatmapInfluence := 1.0;
+  end;
+end;
+
+procedure TCastleTerrain.PaintSplatmapAtWorldPoint(const WorldPt: TVector3;
+  const WorldRadius: Single; const LayerIndex: Integer;
+  const Strength: Single; const DefaultResolution: Cardinal);
+var
+  LocalRadVecX, LocalRadVecZ: TVector3;
+  RadiusUV: TVector2;
+begin
+  if HasWorldTransform then
+  begin
+    LocalRadVecX := WorldToLocalDirection(Vector3(Max(WorldRadius, 0.01), 0, 0));
+    LocalRadVecZ := WorldToLocalDirection(Vector3(0, 0, Max(WorldRadius, 0.01)));
+  end else
+  begin
+    LocalRadVecX := Vector3(Max(WorldRadius, 0.01), 0, 0);
+    LocalRadVecZ := Vector3(0, 0, Max(WorldRadius, 0.01));
+  end;
+  RadiusUV := Vector2(
+    Max(LocalRadVecX.Length, 0.01) / Max(FSize.X, 0.001),
+    Max(LocalRadVecZ.Length, 0.01) / Max(FSize.Y, 0.001));
+  PaintSplatmapBrush(WorldPointToTexCoord(WorldPt), RadiusUV, LayerIndex,
+    Strength, DefaultResolution);
+end;
+
+procedure TCastleTerrain.SaveSplatmap(const SaveUrl: String);
+var
+  Img: TRGBAlphaImage;
+begin
+  if SaveUrl = '' then
+    raise Exception.Create('TCastleTerrain.SaveSplatmap requires a non-empty URL');
+  Img := SplatmapImage;
+  if (Img = nil) or ((Img.Width <= 1) and (Img.Height <= 1)) then
+    CreateBlankSplatmap(128, 128, 1);
+  CastleImages.SaveImage(SplatmapImage, SaveUrl);
+  FSplatmapUrl := SaveUrl;
+end;
+
 function TCastleTerrain.PropertySections(const PropertyName: String): TPropertySections;
 begin
   if ArrayContainsString(PropertyName, [
@@ -1949,7 +2910,9 @@ begin
        'SizePersistent', 'PreciseCollisions',
        'Height1', 'Height2',
        'Layer1', 'Layer2', 'Layer3', 'Layer4',
-       'LayersInfluence', 'SteepEmphasize', 'QueryOffsetPersistent'
+       'LayersInfluence', 'SteepEmphasize',
+       'SplatmapInfluence', 'SplatmapUrl',
+       'QueryOffsetPersistent'
      ]) then
     Result := [psBasic]
   else

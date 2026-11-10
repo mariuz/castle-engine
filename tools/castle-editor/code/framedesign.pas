@@ -35,7 +35,7 @@ uses
   CastleViewport, CastleClassUtils, CastleControls, CastleTiledMap,
   CastleCameras, CastleBoxes, CastleTransform, CastleDebugTransform,
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
-  CastleImages, CastleUtils,
+  CastleImages, CastleUtils, CastleTerrain,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
@@ -53,6 +53,17 @@ type
     moRotate,
     moScale,
     moUniversal
+  );
+
+  TTerrainEditorBrushTool = (
+    tebtRaise,
+    tebtLower,
+    tebtSmooth,
+    tebtFlatten,
+    tebtSplat1,
+    tebtSplat2,
+    tebtSplat3,
+    tebtSplat4
   );
 
   { Frame to visually design component hierarchy. }
@@ -649,6 +660,24 @@ type
       FSandboxManager: TDesignSandboxManager;
       FSandboxesLoadedFile: String;
       MenuTreeViewItemSandboxesDiff: TMenuItem;
+      MenuTreeViewItemTerrainBrushMode: TMenuItem;
+      ButtonTerrainBrushMode: TSpeedButton;
+      PanelTerrainBrush: TPanel;
+      ButtonTerrainTools: array [TTerrainEditorBrushTool] of TSpeedButton;
+      SpinTerrainRadius: TFloatSpinEdit;
+      SpinTerrainStrength: TFloatSpinEdit;
+      ButtonTerrainAutoSplat: TSpeedButton;
+      ButtonTerrainSaveMaps: TSpeedButton;
+      LabelTerrainBrushStatus: TLabel;
+      FTerrainBrushActive: Boolean;
+      FTerrainBrushTool: TTerrainEditorBrushTool;
+      FTerrainBrushRadius: Single;
+      FTerrainBrushStrength: Single;
+      FTerrainBrushHasHover: Boolean;
+      FTerrainBrushHoverWorld: TVector3;
+      FTerrainBrushMouseDown: Boolean;
+      FTerrainBrushLastStampWorld: TVector3;
+      FTerrainFlattenTargetY: Single;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
       FCopiedComponentPropsClassName: String;
@@ -1027,6 +1056,19 @@ type
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
     procedure MenuTreeViewItemCollapseAllClick(Sender: TObject);
     procedure MenuTreeViewItemSandboxesDiffClick(Sender: TObject);
+    procedure MenuTreeViewItemTerrainBrushModeClick(Sender: TObject);
+    procedure ButtonTerrainBrushModeClick(Sender: TObject);
+    procedure ButtonTerrainToolClick(Sender: TObject);
+    procedure SpinTerrainRadiusChange(Sender: TObject);
+    procedure SpinTerrainStrengthChange(Sender: TObject);
+    procedure ButtonTerrainAutoSplatClick(Sender: TObject);
+    procedure ButtonTerrainSaveMapsClick(Sender: TObject);
+    procedure CreateTerrainBrushToolbar;
+    procedure UpdateTerrainBrushToolbarUI;
+    function ActiveBrushTerrain: TCastleTerrain;
+    procedure ApplyTerrainBrushAtWorldPoint(const HitWorldPt: TVector3;
+      const Modifiers: TModifierKeys);
+    procedure FlushTerrainBrushStrokePersistence(const Terrain: TCastleTerrain);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
     function NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
@@ -2408,6 +2450,13 @@ type
     function SandboxesStorageFileName: String;
     procedure ApplySerializedDesignJson(const NewSerializedJson, UndoComment: String);
     procedure ShowDesignSandboxesAndDiffDialog;
+
+    { Interactive 3D Viewport Terrain Sculpting & Splatmap Brush Mode (Phase 280). }
+    procedure ToggleTerrainBrushMode;
+    procedure SetTerrainBrushActive(const AActive: Boolean);
+    procedure SelectTerrainBrushTool(const ATool: TTerrainEditorBrushTool);
+    procedure AdjustTerrainBrushRadius(const Factor: Single);
+    procedure SaveActiveTerrainMapsToProjectData;
   end;
 
 implementation
@@ -2416,13 +2465,13 @@ uses
   { Standard FPC/Lazarus units }
   // use Windows unit with FPC 3.0.x, to get TSplitRectType enums
   {$ifdef VER3_0} {$ifdef MSWINDOWS} Windows, {$endif} {$endif}
-  TypInfo, StrUtils, Math, Graphics, Types, Dialogs, LCLType, ObjInspStrConsts,
+  TypInfo, StrUtils, Math, Graphics, Types, Dialogs, LCLType, ObjInspStrConsts, Base64,
   { CGE units }
   CastleComponentSerialize, CastleFileFilters, CastleFrustum, CastleGLUtils,
   CastleLog, CastleProjection, CastleQuaternions, CastleStringUtils, CastleTimeUtils,
   CastleUriUtils, X3DLoad, CastleFilesUtils, CastleInternalPhysicsVisualization,
   CastleInternalUrlUtils, CastleInternalFileMonitor, X3DNodes, CastleSoundEngine,
-  CastleBehaviors, CastleThirdPersonNavigation, CastleTerrain, CastleLivingBehaviors,
+  CastleBehaviors, CastleThirdPersonNavigation, CastleLivingBehaviors,
   CastleFlashEffect, CastleNotifications, CastleFonts,
   { Editor units }
   EditorRegisterAllComponents,
@@ -2899,6 +2948,7 @@ function TDesignFrame.TDesignerLayer.Press(
 var
   UI: TCastleUserInterface;
   BookmarkSlot: Integer;
+  RayOrigin, RayDirection: TVector3;
 begin
   Result := inherited Press(Event);
   if Result then Exit;
@@ -3041,6 +3091,11 @@ begin
   if (Frame.Mode <> moInteract) and Event.IsKey(keyT) and
      (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
   begin
+    if Event.ModifiersDown = [mkAlt] then
+    begin
+      Frame.ToggleTerrainBrushMode;
+      Exit(true);
+    end else
     if Event.ModifiersDown = [mkAlt, mkShift] then
     begin
       Frame.ShowProgressiveTransformDialog;
@@ -4093,11 +4148,51 @@ begin
     Exit(true);
   end;
 
+  if Frame.FTerrainBrushActive and (Frame.Mode <> moInteract) and
+     (Event.EventType = itKey) and (Event.ModifiersDown = []) and
+     (not (buttonRight in Frame.CastleControl.Container.MousePressed)) then
+  begin
+    if Event.IsKey(keyLeftBracket) then
+    begin
+      Frame.AdjustTerrainBrushRadius(0.8);
+      Exit(true);
+    end else
+    if Event.IsKey(keyRightBracket) then
+    begin
+      Frame.AdjustTerrainBrushRadius(1.25);
+      Exit(true);
+    end else
+    if Event.Key in [key1..key8] then
+    begin
+      Frame.SelectTerrainBrushTool(TTerrainEditorBrushTool(Ord(Event.Key) - Ord(key1)));
+      Exit(true);
+    end;
+  end;
+
   { Avoid handling mouse events over CameraPreview, to avoid messing with clicking
     on CameraPreview buttons, and using gizmos in CameraPreview viewport. }
   if Frame.CameraPreview.UiRoot.Exists and
      Frame.CameraPreview.UiRoot.RenderRectWithBorder.Contains(Event.Position) then
     Exit;
+
+  if Frame.FTerrainBrushActive and (Frame.Mode <> moInteract) and
+     Event.IsMouseButton(buttonLeft) then
+  begin
+    if (Frame.CurrentViewport <> nil) and (Frame.ActiveBrushTerrain <> nil) then
+    begin
+      Frame.CurrentViewport.PositionToRay(Event.Position, true, RayOrigin, RayDirection);
+      if Frame.ActiveBrushTerrain.RayCastWorld(RayOrigin, RayDirection, Frame.FTerrainBrushHoverWorld) then
+      begin
+        Frame.FTerrainBrushHasHover := true;
+        Frame.FTerrainFlattenTargetY := Frame.FTerrainBrushHoverWorld.Y;
+        Frame.FTerrainBrushMouseDown := true;
+        Frame.FTerrainBrushLastStampWorld := Frame.FTerrainBrushHoverWorld;
+        Frame.ApplyTerrainBrushAtWorldPoint(Frame.FTerrainBrushHoverWorld, Event.ModifiersDown);
+        Frame.ModifiedOutsideObjectInspector('Terrain Brush Stroke', ucHigh, true);
+        Exit(true);
+      end;
+    end;
+  end;
 
   if Event.IsMouseButton(buttonLeft) then
   begin
@@ -4168,6 +4263,22 @@ begin
 
   if Event.IsMouseButton(buttonLeft) then
   begin
+    if Frame.FTerrainBrushMouseDown then
+    begin
+      Frame.FTerrainBrushMouseDown := false;
+      if Frame.ActiveBrushTerrain <> nil then
+        Frame.FlushTerrainBrushStrokePersistence(Frame.ActiveBrushTerrain);
+      if Frame.UndoSystem.ScheduleRecordUndoOnRelease then
+      begin
+        if Frame.ActiveBrushTerrain <> nil then
+          Frame.RecordUndo('Terrain Brush Stroke on ' + Frame.ActiveBrushTerrain.Name, ucHigh)
+        else
+          Frame.RecordUndo('Terrain Brush Stroke', ucHigh);
+      end;
+      Frame.UpdateSelectedControl;
+      Exit(true);
+    end;
+
     if (UiDraggingMode = dmMarquee) and MarqueeActive then
     begin
       MarqueeRect := FloatRectangle(
@@ -4453,6 +4564,8 @@ var
   UI: TCastleUserInterface;
   Move: TVector2;
   Snap, StepX, StepY, TargetVal, SnapDeltaX, SnapDeltaY: Single;
+  BrushTerrain: TCastleTerrain;
+  RayOrigin, RayDirection, HitWorld: TVector3;
 begin
   Result := inherited Motion(Event);
   if Result then Exit;
@@ -4466,6 +4579,43 @@ begin
   { in case user released mouse button, but the event didn't reach us for some reason
     (maybe can happen e.g. if you Alt+Tab during dragging?),
     reset UiDraggingMode. }
+  if Frame.FTerrainBrushActive and (Frame.Mode <> moInteract) then
+  begin
+    if Frame.FTerrainBrushMouseDown and (not (buttonLeft in Event.Pressed)) then
+    begin
+      Frame.FTerrainBrushMouseDown := false;
+      BrushTerrain := Frame.ActiveBrushTerrain;
+      if BrushTerrain <> nil then
+        Frame.FlushTerrainBrushStrokePersistence(BrushTerrain);
+      if Frame.UndoSystem.ScheduleRecordUndoOnRelease then
+        Frame.RecordUndo('Terrain Brush Stroke', ucHigh);
+    end;
+
+    BrushTerrain := Frame.ActiveBrushTerrain;
+    if (Frame.CurrentViewport <> nil) and (BrushTerrain <> nil) then
+    begin
+      Frame.CurrentViewport.PositionToRay(Event.Position, true, RayOrigin, RayDirection);
+      Frame.FTerrainBrushHasHover := BrushTerrain.RayCastWorld(RayOrigin, RayDirection, HitWorld);
+      if Frame.FTerrainBrushHasHover then
+      begin
+        Frame.FTerrainBrushHoverWorld := HitWorld;
+        if Frame.FTerrainBrushMouseDown and (buttonLeft in Event.Pressed) then
+        begin
+          if PointsDistance(HitWorld, Frame.FTerrainBrushLastStampWorld) >=
+             Max(0.15, Frame.FTerrainBrushRadius * 0.12) then
+          begin
+            Frame.FTerrainBrushLastStampWorld := HitWorld;
+            Frame.ApplyTerrainBrushAtWorldPoint(HitWorld, ModifiersDown(Container.Pressed));
+            Frame.ModifiedOutsideObjectInspector('Terrain Brush Stroke', ucHigh, true);
+          end;
+          Exit(true);
+        end;
+      end;
+    end else
+      Frame.FTerrainBrushHasHover := false;
+  end else
+    Frame.FTerrainBrushHasHover := false;
+
   if (UiDraggingMode <> dmNone) and
      (not (buttonLeft in Event.Pressed)) then
   begin
@@ -4582,6 +4732,87 @@ begin
 end;
 
 procedure TDesignFrame.TDesignerLayer.Render;
+
+  procedure RenderTerrainBrushOverlay(const AVp: TCastleViewport;
+    const ATerrain: TCastleTerrain);
+  const
+    RingSegments = 32;
+  var
+    RingOuter, RingInner: array [0..RingSegments] of TVector2;
+    OuterCount, InnerCount, Seg: Integer;
+    Angle, S, C, Rad: Single;
+    CamP, CamD, CamU, LocalCenter, LocalPt, WorldPt: TVector3;
+    RingColor, InnerColor: TCastleColor;
+    CenterScreen: TVector2;
+  begin
+    AVp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    case Frame.FTerrainBrushTool of
+      tebtRaise:   RingColor := Vector4(0.20, 1.00, 0.55, 0.95);
+      tebtLower:   RingColor := Vector4(1.00, 0.45, 0.25, 0.95);
+      tebtSmooth:  RingColor := Vector4(0.35, 0.80, 1.00, 0.95);
+      tebtFlatten: RingColor := Vector4(1.00, 0.85, 0.20, 0.95);
+      tebtSplat1:  RingColor := Vector4(1.00, 0.25, 0.25, 0.95);
+      tebtSplat2:  RingColor := Vector4(0.25, 1.00, 0.35, 0.95);
+      tebtSplat3:  RingColor := Vector4(0.30, 0.55, 1.00, 0.95);
+      tebtSplat4:  RingColor := Vector4(0.95, 0.35, 1.00, 0.95);
+    end;
+    InnerColor := Vector4(RingColor.X, RingColor.Y, RingColor.Z, 0.45);
+
+    if ATerrain.HasWorldTransform then
+      LocalCenter := ATerrain.WorldToLocal(Frame.FTerrainBrushHoverWorld)
+    else
+      LocalCenter := Frame.FTerrainBrushHoverWorld - ATerrain.Translation;
+    Rad := Max(0.1, Frame.FTerrainBrushRadius);
+
+    OuterCount := 0;
+    InnerCount := 0;
+    for Seg := 0 to RingSegments do
+    begin
+      Angle := (Seg / RingSegments) * 2.0 * Pi;
+      SinCos(Angle, S, C);
+
+      LocalPt := Vector3(LocalCenter.X + C * Rad, 0, LocalCenter.Z + S * Rad);
+      LocalPt.Y := ATerrain.SampleHeightAtLocalXZ(LocalPt.X, LocalPt.Z) + 0.08;
+      if ATerrain.HasWorldTransform then
+        WorldPt := ATerrain.LocalToWorld(LocalPt)
+      else
+        WorldPt := LocalPt + ATerrain.Translation;
+      if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+         (TVector3.DotProduct(WorldPt - CamP, CamD) > 0.05) then
+      begin
+        RingOuter[OuterCount] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(WorldPt));
+        Inc(OuterCount);
+      end;
+
+      LocalPt := Vector3(LocalCenter.X + C * Rad * 0.5, 0, LocalCenter.Z + S * Rad * 0.5);
+      LocalPt.Y := ATerrain.SampleHeightAtLocalXZ(LocalPt.X, LocalPt.Z) + 0.08;
+      if ATerrain.HasWorldTransform then
+        WorldPt := ATerrain.LocalToWorld(LocalPt)
+      else
+        WorldPt := LocalPt + ATerrain.Translation;
+      if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+         (TVector3.DotProduct(WorldPt - CamP, CamD) > 0.05) then
+      begin
+        RingInner[InnerCount] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(WorldPt));
+        Inc(InnerCount);
+      end;
+    end;
+
+    if OuterCount >= 2 then
+      DrawPrimitive2D(pmLineStrip, Slice(RingOuter, OuterCount), RingColor,
+        bsSrcAlpha, bdOneMinusSrcAlpha, false, 2.0);
+    if InnerCount >= 2 then
+      DrawPrimitive2D(pmLineStrip, Slice(RingInner, InnerCount), InnerColor,
+        bsSrcAlpha, bdOneMinusSrcAlpha, false, 1.0);
+
+    if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+       (TVector3.DotProduct(Frame.FTerrainBrushHoverWorld - CamP, CamD) > 0.05) then
+    begin
+      CenterScreen := AVp.LocalToContainerPosition(
+        AVp.PositionFromWorld(Frame.FTerrainBrushHoverWorld));
+      DrawRectangle(FloatRectangle(CenterScreen.X - 3, CenterScreen.Y - 3, 6, 6), RingColor);
+    end;
+  end;
 
   procedure UpdateAttachedLabel(const UI: TCastleUserInterface;
     const UIRect: TFloatRectangle;
@@ -4808,6 +5039,13 @@ begin
   end else
     RectDragPreview.Exists := false;
 
+  if Frame.FTerrainBrushActive and Frame.FTerrainBrushHasHover and
+     (Frame.CurrentViewport <> nil) and (Frame.CurrentViewport.InternalCamera <> nil) and
+     (Frame.ActiveBrushTerrain <> nil) then
+  begin
+    RenderTerrainBrushOverlay(Frame.CurrentViewport, Frame.ActiveBrushTerrain);
+  end;
+
   if (Frame.TransformManipulate <> nil) and
      Frame.TransformManipulate.IsDraggingGizmo and
      (Frame.TransformManipulate.CurrentDragSummary <> '') then
@@ -4869,6 +5107,12 @@ begin
   FComponentPresets := TStringList.Create;
   FSandboxManager := TDesignSandboxManager.Create;
   FSandboxesLoadedFile := '';
+  FTerrainBrushActive := false;
+  FTerrainBrushTool := tebtRaise;
+  FTerrainBrushRadius := 12.0;
+  FTerrainBrushStrength := 0.60;
+  FTerrainBrushHasHover := false;
+  FTerrainBrushMouseDown := false;
   for I := 1 to 5 do
     FComponentColorTags[I] := TComponentList.Create(false);
   for I := 0 to 9 do
@@ -4990,6 +5234,25 @@ begin
   if ButtonScaleMode.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonUniversalMode,
       PanelMiddleTop.GetControlIndex(ButtonScaleMode) + 1);
+
+  ButtonTerrainBrushMode := TSpeedButton.Create(Self);
+  ButtonTerrainBrushMode.Caption := 'Terrain';
+  ButtonTerrainBrushMode.Hint := 'Toggle Interactive 3D Viewport Terrain Sculpt & Splatmap Layer Brush Mode (Alt+T).' + NL +
+    'Sculpt Raise/Lower/Smooth/Flatten non-destructively or paint 4-channel RGBA Splatmap weights directly on TCastleTerrain.';
+  ButtonTerrainBrushMode.ShowHint := true;
+  ButtonTerrainBrushMode.AllowAllUp := true;
+  ButtonTerrainBrushMode.GroupIndex := 903;
+  ButtonTerrainBrushMode.AutoSize := true;
+  ButtonTerrainBrushMode.Constraints.MinHeight := 33;
+  ButtonTerrainBrushMode.Constraints.MinWidth := 56;
+  ButtonTerrainBrushMode.BorderSpacing.Left := 4;
+  ButtonTerrainBrushMode.OnClick := @ButtonTerrainBrushModeClick;
+  ButtonTerrainBrushMode.Parent := PanelMiddleTop;
+  if ButtonUniversalMode.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonTerrainBrushMode,
+      PanelMiddleTop.GetControlIndex(ButtonUniversalMode) + 1);
+
+  CreateTerrainBrushToolbar;
 
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
@@ -7745,6 +8008,11 @@ begin
   MenuTreeViewItemSandboxesDiff.Caption := 'Design Sandboxes & Visual Diff / Merge...';
   MenuTreeViewItemSandboxesDiff.OnClick := @MenuTreeViewItemSandboxesDiffClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSandboxesDiff);
+
+  MenuTreeViewItemTerrainBrushMode := TMenuItem.Create(Self);
+  MenuTreeViewItemTerrainBrushMode.Caption := 'Toggle 3D Terrain Sculpt & Splatmap Brush Mode (Alt+T)';
+  MenuTreeViewItemTerrainBrushMode.OnClick := @MenuTreeViewItemTerrainBrushModeClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemTerrainBrushMode);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -49596,6 +49864,9 @@ begin
 
   AdjustToolbarButtonsTheme;
 
+  if FTerrainBrushActive then
+    SetTerrainBrushActive(false);
+
   case Mode of
     moTranslate: TransformManipulate.Mode := mmTranslate;
     moRotate: TransformManipulate.Mode := mmRotate;
@@ -50463,6 +50734,489 @@ end;
 procedure TDesignFrame.MenuTreeViewItemSandboxesDiffClick(Sender: TObject);
 begin
   ShowDesignSandboxesAndDiffDialog;
+end;
+
+procedure TDesignFrame.CreateTerrainBrushToolbar;
+const
+  ToolCaptions: array [TTerrainEditorBrushTool] of String = (
+    'Raise', 'Lower', 'Smooth', 'Flatten',
+    'L1 (R)', 'L2 (G)', 'L3 (B)', 'L4 (A)'
+  );
+  ToolHints: array [TTerrainEditorBrushTool] of String = (
+    'Sculpt Raise Height (Hotkey: 1 | Hold Shift to Smooth, Ctrl to Lower)',
+    'Sculpt Lower Height (Hotkey: 2 | Hold Shift to Smooth, Ctrl to Raise)',
+    'Smooth Composite Terrain Surface (Hotkey: 3)',
+    'Flatten Terrain Surface to Initial Click Elevation (Hotkey: 4)',
+    'Paint Layer 1 Weight — Splatmap Red Channel (Hotkey: 5)',
+    'Paint Layer 2 Weight — Splatmap Green Channel (Hotkey: 6)',
+    'Paint Layer 3 Weight — Splatmap Blue Channel (Hotkey: 7)',
+    'Paint Layer 4 Weight — Splatmap Alpha Channel (Hotkey: 8)'
+  );
+var
+  T: TTerrainEditorBrushTool;
+  LblRad, LblStr: TLabel;
+begin
+  PanelTerrainBrush := TPanel.Create(Self);
+  PanelTerrainBrush.Align := alTop;
+  PanelTerrainBrush.AutoSize := true;
+  PanelTerrainBrush.BevelOuter := bvNone;
+  PanelTerrainBrush.ChildSizing.Layout := cclLeftToRightThenTopToBottom;
+  PanelTerrainBrush.ChildSizing.ControlsPerLine := 20;
+  PanelTerrainBrush.ChildSizing.HorizontalSpacing := 4;
+  PanelTerrainBrush.ChildSizing.LeftRightSpacing := 6;
+  PanelTerrainBrush.ChildSizing.TopBottomSpacing := 3;
+  PanelTerrainBrush.Visible := false;
+  PanelTerrainBrush.Parent := PanelMiddle;
+  if PanelMiddleTop.Parent = PanelMiddle then
+    PanelMiddle.SetControlIndex(PanelTerrainBrush,
+      PanelMiddle.GetControlIndex(PanelMiddleTop) + 1);
+
+  for T := Low(TTerrainEditorBrushTool) to High(TTerrainEditorBrushTool) do
+  begin
+    ButtonTerrainTools[T] := TSpeedButton.Create(Self);
+    ButtonTerrainTools[T].Caption := ToolCaptions[T];
+    ButtonTerrainTools[T].Hint := ToolHints[T];
+    ButtonTerrainTools[T].ShowHint := true;
+    ButtonTerrainTools[T].GroupIndex := 904;
+    ButtonTerrainTools[T].AllowAllUp := false;
+    ButtonTerrainTools[T].Tag := Ord(T);
+    ButtonTerrainTools[T].AutoSize := true;
+    ButtonTerrainTools[T].Constraints.MinHeight := 28;
+    ButtonTerrainTools[T].Constraints.MinWidth := 48;
+    ButtonTerrainTools[T].Down := T = FTerrainBrushTool;
+    ButtonTerrainTools[T].OnClick := @ButtonTerrainToolClick;
+    ButtonTerrainTools[T].Parent := PanelTerrainBrush;
+  end;
+
+  LblRad := TLabel.Create(Self);
+  LblRad.Caption := 'Radius:';
+  LblRad.Layout := tlCenter;
+  LblRad.BorderSpacing.Left := 6;
+  LblRad.Parent := PanelTerrainBrush;
+
+  SpinTerrainRadius := TFloatSpinEdit.Create(Self);
+  SpinTerrainRadius.DecimalPlaces := 1;
+  SpinTerrainRadius.MinValue := 0.5;
+  SpinTerrainRadius.MaxValue := 500.0;
+  SpinTerrainRadius.Increment := 1.0;
+  SpinTerrainRadius.Value := FTerrainBrushRadius;
+  SpinTerrainRadius.Width := 64;
+  SpinTerrainRadius.Hint := '3D world-space brush radius (Shortcuts: [ / ] when Terrain Brush is active)';
+  SpinTerrainRadius.ShowHint := true;
+  SpinTerrainRadius.OnChange := @SpinTerrainRadiusChange;
+  SpinTerrainRadius.Parent := PanelTerrainBrush;
+
+  LblStr := TLabel.Create(Self);
+  LblStr.Caption := 'Strength:';
+  LblStr.Layout := tlCenter;
+  LblStr.BorderSpacing.Left := 4;
+  LblStr.Parent := PanelTerrainBrush;
+
+  SpinTerrainStrength := TFloatSpinEdit.Create(Self);
+  SpinTerrainStrength.DecimalPlaces := 2;
+  SpinTerrainStrength.MinValue := 0.05;
+  SpinTerrainStrength.MaxValue := 20.0;
+  SpinTerrainStrength.Increment := 0.10;
+  SpinTerrainStrength.Value := FTerrainBrushStrength;
+  SpinTerrainStrength.Width := 64;
+  SpinTerrainStrength.Hint := 'Height sculpt step (units) or Splatmap paint opacity (0..1) per brush stamp';
+  SpinTerrainStrength.ShowHint := true;
+  SpinTerrainStrength.OnChange := @SpinTerrainStrengthChange;
+  SpinTerrainStrength.Parent := PanelTerrainBrush;
+
+  ButtonTerrainAutoSplat := TSpeedButton.Create(Self);
+  ButtonTerrainAutoSplat.Caption := 'Auto-Splat';
+  ButtonTerrainAutoSplat.Hint := 'Populate initial 4-channel RGBA splatmap from current procedural Height1/Height2 & SteepEmphasize slope weights';
+  ButtonTerrainAutoSplat.ShowHint := true;
+  ButtonTerrainAutoSplat.AutoSize := true;
+  ButtonTerrainAutoSplat.Constraints.MinHeight := 28;
+  ButtonTerrainAutoSplat.BorderSpacing.Left := 6;
+  ButtonTerrainAutoSplat.OnClick := @ButtonTerrainAutoSplatClick;
+  ButtonTerrainAutoSplat.Parent := PanelTerrainBrush;
+
+  ButtonTerrainSaveMaps := TSpeedButton.Create(Self);
+  ButtonTerrainSaveMaps.Caption := 'Save Maps';
+  ButtonTerrainSaveMaps.Hint := 'Export sculpted Heightmap PNG and painted RGBA Splatmap PNG into castle-data:/terrains/ and assign Url / SplatmapUrl';
+  ButtonTerrainSaveMaps.ShowHint := true;
+  ButtonTerrainSaveMaps.AutoSize := true;
+  ButtonTerrainSaveMaps.Constraints.MinHeight := 28;
+  ButtonTerrainSaveMaps.OnClick := @ButtonTerrainSaveMapsClick;
+  ButtonTerrainSaveMaps.Parent := PanelTerrainBrush;
+
+  LabelTerrainBrushStatus := TLabel.Create(Self);
+  LabelTerrainBrushStatus.Caption := 'LMB: Paint | Shift: Smooth | Ctrl: Invert | [ / ]: Radius';
+  LabelTerrainBrushStatus.Layout := tlCenter;
+  LabelTerrainBrushStatus.BorderSpacing.Left := 8;
+  LabelTerrainBrushStatus.Parent := PanelTerrainBrush;
+end;
+
+function FindFirstTerrainRecursive(const RootComp: TComponent): TCastleTerrain;
+var
+  I: Integer;
+  T: TCastleTransform;
+begin
+  Result := nil;
+  if RootComp = nil then
+    Exit;
+  if RootComp is TCastleTerrain then
+    Exit(TCastleTerrain(RootComp));
+  if RootComp is TCastleViewport then
+  begin
+    Result := FindFirstTerrainRecursive(TCastleViewport(RootComp).Items);
+    if Result <> nil then
+      Exit;
+  end;
+  if RootComp is TCastleTransform then
+  begin
+    T := TCastleTransform(RootComp);
+    for I := 0 to T.Count - 1 do
+      if not (csTransient in T[I].ComponentStyle) then
+      begin
+        Result := FindFirstTerrainRecursive(T[I]);
+        if Result <> nil then
+          Exit;
+      end;
+  end;
+  if RootComp is TCastleUserInterface then
+  begin
+    for I := 0 to TCastleUserInterface(RootComp).ControlsCount - 1 do
+      if not (csTransient in TCastleUserInterface(RootComp).Controls[I].ComponentStyle) then
+      begin
+        Result := FindFirstTerrainRecursive(TCastleUserInterface(RootComp).Controls[I]);
+        if Result <> nil then
+          Exit;
+      end;
+  end;
+end;
+
+function TDesignFrame.ActiveBrushTerrain: TCastleTerrain;
+var
+  WalkT: TCastleTransform;
+begin
+  Result := nil;
+  WalkT := CurrentTransform;
+  while WalkT <> nil do
+  begin
+    if WalkT is TCastleTerrain then
+      Exit(TCastleTerrain(WalkT));
+    WalkT := WalkT.Parent;
+  end;
+  Result := FindFirstTerrainRecursive(FDesignRoot);
+end;
+
+procedure TDesignFrame.UpdateTerrainBrushToolbarUI;
+var
+  T: TTerrainEditorBrushTool;
+  TargetTerrain: TCastleTerrain;
+begin
+  if ButtonTerrainBrushMode <> nil then
+    ButtonTerrainBrushMode.Down := FTerrainBrushActive;
+  if PanelTerrainBrush <> nil then
+    PanelTerrainBrush.Visible := FTerrainBrushActive;
+  for T := Low(TTerrainEditorBrushTool) to High(TTerrainEditorBrushTool) do
+    if ButtonTerrainTools[T] <> nil then
+      ButtonTerrainTools[T].Down := T = FTerrainBrushTool;
+  if LabelTerrainBrushStatus <> nil then
+  begin
+    TargetTerrain := ActiveBrushTerrain;
+    if TargetTerrain <> nil then
+      LabelTerrainBrushStatus.Caption := Format(
+        'Target: %s | LMB: Paint | Shift: Smooth | Ctrl: Invert | [ / ]: Radius',
+        [TargetTerrain.Name])
+    else
+      LabelTerrainBrushStatus.Caption :=
+        'No TCastleTerrain in design — add Terrain (Experimental) first';
+  end;
+end;
+
+procedure TDesignFrame.SetTerrainBrushActive(const AActive: Boolean);
+var
+  TargetTerrain: TCastleTerrain;
+begin
+  if FTerrainBrushActive = AActive then
+    Exit;
+  FTerrainBrushActive := AActive;
+  FTerrainBrushMouseDown := false;
+  FTerrainBrushHasHover := false;
+
+  if FTerrainBrushActive then
+  begin
+    if Mode = moInteract then
+      Mode := moSelect;
+    if TransformManipulate <> nil then
+      TransformManipulate.Mode := mmSelect;
+    TargetTerrain := ActiveBrushTerrain;
+    if (TargetTerrain <> nil) and (CurrentTransform <> TargetTerrain) then
+      DesignerSelectOnlyComponent(TargetTerrain);
+  end else
+  begin
+    if TransformManipulate <> nil then
+    begin
+      case Mode of
+        moTranslate: TransformManipulate.Mode := mmTranslate;
+        moRotate: TransformManipulate.Mode := mmRotate;
+        moScale: TransformManipulate.Mode := mmScale;
+        moUniversal: TransformManipulate.Mode := mmUniversal;
+        else TransformManipulate.Mode := mmSelect;
+      end;
+    end;
+  end;
+  UpdateTerrainBrushToolbarUI;
+end;
+
+procedure TDesignFrame.ToggleTerrainBrushMode;
+begin
+  SetTerrainBrushActive(not FTerrainBrushActive);
+end;
+
+procedure TDesignFrame.SelectTerrainBrushTool(const ATool: TTerrainEditorBrushTool);
+begin
+  FTerrainBrushTool := ATool;
+  UpdateTerrainBrushToolbarUI;
+end;
+
+procedure TDesignFrame.AdjustTerrainBrushRadius(const Factor: Single);
+begin
+  FTerrainBrushRadius := Clamped(FTerrainBrushRadius * Factor, 0.5, 500.0);
+  if SpinTerrainRadius <> nil then
+    SpinTerrainRadius.Value := FTerrainBrushRadius;
+end;
+
+procedure TDesignFrame.ApplyTerrainBrushAtWorldPoint(const HitWorldPt: TVector3;
+  const Modifiers: TModifierKeys);
+var
+  Terrain: TCastleTerrain;
+  SculptMode: TTerrainSculptBrushMode;
+  OldData: TCastleTerrainData;
+  SplatLayerIdx: Integer;
+begin
+  Terrain := ActiveBrushTerrain;
+  if (Terrain = nil) or (DesignOwner = nil) then
+    Exit;
+
+  if FTerrainBrushTool in [tebtRaise, tebtLower, tebtSmooth, tebtFlatten] then
+  begin
+    case FTerrainBrushTool of
+      tebtRaise:   SculptMode := tsbmRaise;
+      tebtLower:   SculptMode := tsbmLower;
+      tebtSmooth:  SculptMode := tsbmSmooth;
+      tebtFlatten: SculptMode := tsbmFlatten;
+      else         SculptMode := tsbmRaise;
+    end;
+    if mkShift in Modifiers then
+      SculptMode := tsbmSmooth
+    else if mkCtrl in Modifiers then
+    begin
+      if SculptMode = tsbmRaise then
+        SculptMode := tsbmLower
+      else if SculptMode = tsbmLower then
+        SculptMode := tsbmRaise;
+    end;
+
+    OldData := Terrain.Data;
+    Terrain.SculptHeightAtWorldPoint(HitWorldPt, FTerrainBrushRadius,
+      SculptMode, FTerrainBrushStrength, FTerrainFlattenTargetY, DesignOwner, 128);
+    if Terrain.Data <> OldData then
+      UpdateDesign;
+  end else
+  begin
+    SplatLayerIdx := (Ord(FTerrainBrushTool) - Ord(tebtSplat1)) + 1;
+    if (mkShift in Modifiers) and (SplatLayerIdx > 1) then
+      SplatLayerIdx := 1;
+    Terrain.PaintSplatmapAtWorldPoint(HitWorldPt, FTerrainBrushRadius,
+      SplatLayerIdx, Clamped(FTerrainBrushStrength, 0.05, 1.0), 128);
+  end;
+end;
+
+function EncodeImageToPngDataUri(const Img: TEncodedImage): String;
+var
+  PngStream: TMemoryStream;
+  B64Out: TStringStream;
+  B64Stream: TBase64EncodingStream;
+begin
+  Result := '';
+  if Img = nil then
+    Exit;
+  PngStream := TMemoryStream.Create;
+  try
+    CastleImages.SaveImage(Img, 'image/png', PngStream);
+    PngStream.Position := 0;
+    B64Out := TStringStream.Create('');
+    try
+      B64Stream := TBase64EncodingStream.Create(B64Out);
+      try
+        if PngStream.Size > 0 then
+          B64Stream.CopyFrom(PngStream, PngStream.Size);
+        B64Stream.Flush;
+      finally
+        FreeAndNil(B64Stream);
+      end;
+      Result := 'data:image/png;base64,' + B64Out.DataString;
+    finally
+      FreeAndNil(B64Out);
+    end;
+  finally
+    FreeAndNil(PngStream);
+  end;
+end;
+
+function FindActiveEditableTerrainImage(const DataNode: TCastleTerrainData): TCastleTerrainImage;
+begin
+  Result := nil;
+  if DataNode is TCastleTerrainImage then
+    Exit(TCastleTerrainImage(DataNode));
+  if DataNode is TCastleTerrainCombine then
+  begin
+    if TCastleTerrainCombine(DataNode).Data2 is TCastleTerrainImage then
+      Exit(TCastleTerrainImage(TCastleTerrainCombine(DataNode).Data2));
+    if TCastleTerrainCombine(DataNode).Data1 is TCastleTerrainImage then
+      Exit(TCastleTerrainImage(TCastleTerrainCombine(DataNode).Data1));
+  end;
+end;
+
+procedure TDesignFrame.FlushTerrainBrushStrokePersistence(const Terrain: TCastleTerrain);
+var
+  ImgLayer: TCastleTerrainImage;
+  GrayByte: TGrayscaleImage;
+  SplatImg: TRGBAlphaImage;
+  X, Y: Integer;
+begin
+  if Terrain = nil then
+    Exit;
+
+  ImgLayer := FindActiveEditableTerrainImage(Terrain.Data);
+  if (ImgLayer <> nil) and (ImgLayer.Image <> nil) then
+  begin
+    if (ImgLayer.Url <> '') and (Pos('data:', ImgLayer.Url) <> 1) then
+      ImgLayer.SaveImage(ImgLayer.Url)
+    else
+    begin
+      GrayByte := TGrayscaleImage.Create(ImgLayer.Image.Width, ImgLayer.Image.Height);
+      try
+        for Y := 0 to Integer(ImgLayer.Image.Height) - 1 do
+          for X := 0 to Integer(ImgLayer.Image.Width) - 1 do
+            GrayByte.PixelPtr(X, Y)^ := Round(
+              Clamped(ImgLayer.Image.PixelPtr(X, Y)^, 0.0, 1.0) * 255.0);
+        ImgLayer.Url := EncodeImageToPngDataUri(GrayByte);
+      finally
+        FreeAndNil(GrayByte);
+      end;
+    end;
+  end;
+
+  SplatImg := Terrain.SplatmapImage;
+  if (SplatImg <> nil) and ((SplatImg.Width > 1) or (SplatImg.Height > 1)) then
+  begin
+    if (Terrain.SplatmapUrl <> '') and (Pos('data:', Terrain.SplatmapUrl) <> 1) then
+      Terrain.SaveSplatmap(Terrain.SplatmapUrl)
+    else
+      Terrain.SplatmapUrl := EncodeImageToPngDataUri(SplatImg);
+  end;
+end;
+
+procedure TDesignFrame.SaveActiveTerrainMapsToProjectData;
+var
+  Terrain: TCastleTerrain;
+  ImgLayer: TCastleTerrainImage;
+  SplatImg: TRGBAlphaImage;
+  DataDirPath, TerrainsDirPath, BaseTerrainName, HeightUrl, SplatUrl, SavedMsg: String;
+begin
+  Terrain := ActiveBrushTerrain;
+  if Terrain = nil then
+  begin
+    InfoBox('Select or add a TCastleTerrain component first.');
+    Exit;
+  end;
+
+  if ApplicationDataOverride = '' then
+  begin
+    InfoBox('Open a Castle Game Engine project first so maps can be saved into castle-data:/terrains/.');
+    Exit;
+  end;
+
+  DataDirPath := ExcludeTrailingPathDelimiter(UriToFilenameSafe(ApplicationDataOverride));
+  TerrainsDirPath := IncludeTrailingPathDelimiter(DataDirPath) + 'terrains';
+  ForceDirectories(TerrainsDirPath);
+
+  if Terrain.Name <> '' then
+    BaseTerrainName := Terrain.Name
+  else
+    BaseTerrainName := 'terrain';
+
+  SavedMsg := '';
+  ImgLayer := FindActiveEditableTerrainImage(Terrain.Data);
+  if (ImgLayer <> nil) and (ImgLayer.Image <> nil) then
+  begin
+    HeightUrl := 'castle-data:/terrains/' + BaseTerrainName + '_height.png';
+    ImgLayer.SaveImage(HeightUrl);
+    SavedMsg := SavedMsg + '  - Heightmap: ' + HeightUrl + NL;
+  end;
+
+  SplatImg := Terrain.SplatmapImage;
+  if (SplatImg <> nil) and ((SplatImg.Width > 1) or (SplatImg.Height > 1)) then
+  begin
+    SplatUrl := 'castle-data:/terrains/' + BaseTerrainName + '_splat.png';
+    Terrain.SaveSplatmap(SplatUrl);
+    SavedMsg := SavedMsg + '  - Splatmap: ' + SplatUrl + NL;
+  end;
+
+  if SavedMsg = '' then
+  begin
+    InfoBox('Sculpt height or paint splatmap layers (or click Auto-Splat) first to generate terrain maps.');
+    Exit;
+  end;
+
+  ModifiedOutsideObjectInspector('Save Terrain Maps for ' + BaseTerrainName, ucHigh);
+  InfoBox('Saved terrain textures to project data:' + NL + SavedMsg);
+end;
+
+procedure TDesignFrame.MenuTreeViewItemTerrainBrushModeClick(Sender: TObject);
+begin
+  ToggleTerrainBrushMode;
+end;
+
+procedure TDesignFrame.ButtonTerrainBrushModeClick(Sender: TObject);
+begin
+  ToggleTerrainBrushMode;
+end;
+
+procedure TDesignFrame.ButtonTerrainToolClick(Sender: TObject);
+begin
+  if Sender is TComponent then
+    SelectTerrainBrushTool(TTerrainEditorBrushTool(
+      Clamped(TComponent(Sender).Tag, 0, Ord(High(TTerrainEditorBrushTool)))));
+end;
+
+procedure TDesignFrame.SpinTerrainRadiusChange(Sender: TObject);
+begin
+  if SpinTerrainRadius <> nil then
+    FTerrainBrushRadius := Max(0.5, SpinTerrainRadius.Value);
+end;
+
+procedure TDesignFrame.SpinTerrainStrengthChange(Sender: TObject);
+begin
+  if SpinTerrainStrength <> nil then
+    FTerrainBrushStrength := Max(0.05, SpinTerrainStrength.Value);
+end;
+
+procedure TDesignFrame.ButtonTerrainAutoSplatClick(Sender: TObject);
+var
+  Terrain: TCastleTerrain;
+begin
+  Terrain := ActiveBrushTerrain;
+  if Terrain = nil then
+  begin
+    InfoBox('Select or add a TCastleTerrain component first.');
+    Exit;
+  end;
+  Terrain.GenerateSplatmapFromProceduralLayers(128, 128);
+  FlushTerrainBrushStrokePersistence(Terrain);
+  ModifiedOutsideObjectInspector('Auto-Generate Splatmap on ' + Terrain.Name, ucHigh);
+end;
+
+procedure TDesignFrame.ButtonTerrainSaveMapsClick(Sender: TObject);
+begin
+  SaveActiveTerrainMapsToProjectData;
 end;
 
 initialization

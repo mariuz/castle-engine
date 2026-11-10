@@ -3,12 +3,14 @@
 '/* Shader effect (used to enhance the Castle Game Engine shaders,' + LineEnding +
 '   see https://castle-engine.io/shaders ), applied over terrain.' + LineEnding +
 '' + LineEnding +
-'   This adjusts terrain color, mixing textures, based on current height. */' + LineEnding +
+'   This adjusts terrain color, mixing textures, based on current height' + LineEnding +
+'   and/or a painted 4-channel RGBA splatmap. */' + LineEnding +
 '' + LineEnding +
 'uniform sampler2D tex_1;' + LineEnding +
 'uniform sampler2D tex_2;' + LineEnding +
 'uniform sampler2D tex_3;' + LineEnding +
 'uniform sampler2D tex_4;' + LineEnding +
+'uniform sampler2D splatmap_tex;' + LineEnding +
 '' + LineEnding +
 'uniform vec3 color_1;' + LineEnding +
 'uniform vec3 color_2;' + LineEnding +
@@ -25,6 +27,8 @@
 '' + LineEnding +
 'uniform float layers_influence;' + LineEnding +
 'uniform float steep_emphasize;' + LineEnding +
+'uniform float splatmap_influence;' + LineEnding +
+'uniform vec2 terrain_size;' + LineEnding +
 '' + LineEnding +
 '// We declare this "highp" for consistency with uv, calculated in PLUG_main_texture_apply.' + LineEnding +
 'varying highp vec3 terrain_position;' + LineEnding +
@@ -35,6 +39,21 @@
 '#ifndef GL_ES' + LineEnding +
 'vec4 castle_texture_color_to_linear(const in vec4 srgbIn);' + LineEnding +
 '#endif' + LineEnding +
+'' + LineEnding +
+'vec4 terrain_splat_weights()' + LineEnding +
+'{' + LineEnding +
+'  highp vec2 safe_size = max(terrain_size, vec2(0.001, 0.001));' + LineEnding +
+'  highp vec2 splat_uv = clamp(vec2(' + LineEnding +
+'    terrain_position.x / safe_size.x,' + LineEnding +
+'    1.0 - (terrain_position.z / safe_size.y)), 0.0, 1.0);' + LineEnding +
+'  vec4 w = texture2D(splatmap_tex, splat_uv);' + LineEnding +
+'  float sum_w = w.x + w.y + w.z + w.w;' + LineEnding +
+'  if (sum_w > 0.0001)' + LineEnding +
+'    w /= sum_w;' + LineEnding +
+'  else' + LineEnding +
+'    w = vec4(1.0, 0.0, 0.0, 0.0);' + LineEnding +
+'  return w;' + LineEnding +
+'}' + LineEnding +
 '' + LineEnding +
 'void PLUG_main_texture_apply(inout vec4 fragment_color, const in vec3 normal)' + LineEnding +
 '{' + LineEnding +
@@ -58,7 +77,7 @@
 '     = 0 means a vertical face' + LineEnding +
 '     = 1 means a horizontal face' + LineEnding +
 '  */' + LineEnding +
-'  float normal_slope = normalize(terrain_normal).y;' + LineEnding +
+'  float normal_slope = max(normalize(terrain_normal).y, 0.0);' + LineEnding +
 '' + LineEnding +
 '  vec3 c1 = color_1 * castle_texture_color_to_linear(texture2D(tex_1, uv * uv_scale.x)).rgb;' + LineEnding +
 '  vec3 c2 = color_2 * castle_texture_color_to_linear(texture2D(tex_2, uv * uv_scale.y)).rgb;' + LineEnding +
@@ -68,7 +87,13 @@
 '  float height_mix = smoothstep(height_1, height_2, h);' + LineEnding +
 '  vec3 flat_color = mix(c1, c3, height_mix);' + LineEnding +
 '  vec3 steep_color = mix(c2, c4, height_mix);' + LineEnding +
-'  vec3 modified_color = mix(steep_color, flat_color, pow(normal_slope, steep_emphasize));' + LineEnding +
+'  vec3 procedural_color = mix(steep_color, flat_color, pow(normal_slope, steep_emphasize));' + LineEnding +
+'  vec3 modified_color = procedural_color;' + LineEnding +
+'  if (splatmap_influence > 0.0) {' + LineEnding +
+'    vec4 sw = terrain_splat_weights();' + LineEnding +
+'    vec3 splat_color = c1 * sw.x + c2 * sw.y + c3 * sw.z + c4 * sw.w;' + LineEnding +
+'    modified_color = mix(procedural_color, splat_color, clamp(splatmap_influence, 0.0, 1.0));' + LineEnding +
+'  }' + LineEnding +
 '' + LineEnding +
 '  fragment_color.rgb = mix(fragment_color.rgb, modified_color, layers_influence);' + LineEnding +
 '}' + LineEnding +
@@ -76,17 +101,27 @@
 'void PLUG_material_metallic_roughness(inout float metallic_final, inout float roughness_final)' + LineEnding +
 '{' + LineEnding +
 '  float h = terrain_position.y;' + LineEnding +
-'  float normal_slope = normalize(terrain_normal).y;' + LineEnding +
+'  float normal_slope = max(normalize(terrain_normal).y, 0.0);' + LineEnding +
 '  float height_mix = smoothstep(height_1, height_2, h);' + LineEnding +
 '' + LineEnding +
 '  float flat_metallic = mix(metallic.x, metallic.z, height_mix);' + LineEnding +
 '  float steep_metallic = mix(metallic.y, metallic.w, height_mix);' + LineEnding +
-'  float modified_metallic = mix(steep_metallic, flat_metallic, pow(normal_slope, steep_emphasize));' + LineEnding +
-'  metallic_final = mix(metallic_final, modified_metallic, layers_influence);' + LineEnding +
+'  float procedural_metallic = mix(steep_metallic, flat_metallic, pow(normal_slope, steep_emphasize));' + LineEnding +
 '' + LineEnding +
 '  float flat_roughness = mix(roughness.x, roughness.z, height_mix);' + LineEnding +
 '  float steep_roughness = mix(roughness.y, roughness.w, height_mix);' + LineEnding +
-'  float modified_roughness = mix(steep_roughness, flat_roughness, pow(normal_slope, steep_emphasize));' + LineEnding +
+'  float procedural_roughness = mix(steep_roughness, flat_roughness, pow(normal_slope, steep_emphasize));' + LineEnding +
+'' + LineEnding +
+'  float modified_metallic = procedural_metallic;' + LineEnding +
+'  float modified_roughness = procedural_roughness;' + LineEnding +
+'  if (splatmap_influence > 0.0) {' + LineEnding +
+'    vec4 sw = terrain_splat_weights();' + LineEnding +
+'    float splat_clamp = clamp(splatmap_influence, 0.0, 1.0);' + LineEnding +
+'    modified_metallic = mix(procedural_metallic, dot(metallic, sw), splat_clamp);' + LineEnding +
+'    modified_roughness = mix(procedural_roughness, dot(roughness, sw), splat_clamp);' + LineEnding +
+'  }' + LineEnding +
+'' + LineEnding +
+'  metallic_final = mix(metallic_final, modified_metallic, layers_influence);' + LineEnding +
 '  roughness_final = mix(roughness_final, modified_roughness, layers_influence);' + LineEnding +
 '}' + LineEnding +
 ''
