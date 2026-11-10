@@ -35,11 +35,11 @@ uses
   CastleViewport, CastleClassUtils, CastleControls, CastleTiledMap,
   CastleCameras, CastleBoxes, CastleTransform, CastleDebugTransform,
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
-  CastleImages, CastleUtils, CastleTerrain,
+  CastleImages, CastleUtils, CastleTerrain, CastleNprShader,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
-  DesignObjectInspector, ToolDesignSandboxDiff;
+  DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -709,6 +709,10 @@ type
       FScatterBrushMouseDown: Boolean;
       FScatterBrushLastStampWorld: TVector3;
       FScatterStrokeMutated: Boolean;
+      MenuTreeViewItemNprShaderStudio: TMenuItem;
+      MenuTreeViewItemLightBudgetOverlay: TMenuItem;
+      ButtonNprShaderStudio: TSpeedButton;
+      FShowLightBudgetOverlay: Boolean;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
       FCopiedComponentPropsClassName: String;
@@ -1119,6 +1123,12 @@ type
       out HitWorldPt, HitWorldNormal: TVector3): Boolean;
     function ApplyScatterBrushAtWorldPoint(const HitWorldPt: TVector3;
       const Modifiers: TModifierKeys): Boolean;
+    procedure MenuTreeViewItemNprShaderStudioClick(Sender: TObject);
+    procedure MenuTreeViewItemLightBudgetOverlayClick(Sender: TObject);
+    procedure ButtonNprShaderStudioClick(Sender: TObject);
+    procedure NprStudioModifiedCallback(const UndoComment: String);
+    procedure NprStudioSelectComponentCallback(const C: TComponent);
+    procedure NprStudioToggleOverlayCallback(const AEnabled: Boolean);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
     function NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
@@ -2516,6 +2526,11 @@ type
     procedure AdjustScatterBrushRadius(const Factor: Single);
     procedure TogglePinSelectedScatterInstances;
     procedure RegenerateUnpinnedScatterAction;
+
+    { Stylized / NPR Shader Effect Studio & Light/Shadow Budget Visualizer (Phase 282). }
+    procedure ShowNprShaderStudioDialog(const OpenLightAuditTab: Boolean = false);
+    procedure SetLightBudgetOverlayActive(const AEnabled: Boolean);
+    procedure ToggleLightBudgetOverlay;
   end;
 
 implementation
@@ -2534,7 +2549,7 @@ uses
   CastleFlashEffect, CastleNotifications, CastleFonts,
   { Editor units }
   EditorRegisterAllComponents,
-  FormProject, FormDesignSandboxDiff, CastleComponentEditorDesigner;
+  FormProject, FormDesignSandboxDiff, FormNprShaderStudio, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -5060,6 +5075,110 @@ procedure TDesignFrame.TDesignerLayer.Render;
     end;
   end;
 
+  procedure RenderLightBudgetOverlay(const AVp: TCastleViewport);
+  const
+    RingSegments = 28;
+  var
+    Audit: TLightShadowBudgetReport;
+    RingXZ, RingXY: array [0..RingSegments] of TVector2;
+    CountXZ, CountXY, I, Seg: Integer;
+    Angle, S, C, Rad: Single;
+    CamP, CamD, CamU, CenterW, PtW: TVector3;
+    LightCol, PillCol: TCastleColor;
+    ScreenPt: TVector2;
+    BadgeStr: String;
+  begin
+    AVp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    Audit := TLightShadowBudgetAuditor.AnalyzeRoot(AVp);
+    try
+      { 1. Draw 3D wireframe attenuation spheres around bounded Point/Spot lights }
+      for I := 0 to High(Audit.Lights) do
+      begin
+        CenterW := Audit.Lights[I].WorldPos;
+        if Audit.Lights[I].CastsShadows then
+          LightCol := Vector4(1.00, 0.82, 0.20, 0.90)
+        else if Audit.Lights[I].IsInfiniteReach then
+          LightCol := Vector4(1.00, 0.30, 0.85, 0.90)
+        else
+          LightCol := Vector4(0.35, 0.85, 1.00, 0.78);
+
+        if (not Audit.Lights[I].IsInfiniteReach) and (Audit.Lights[I].EffectiveRadius > 0.05) then
+        begin
+          Rad := Audit.Lights[I].EffectiveRadius;
+          CountXZ := 0;
+          CountXY := 0;
+          for Seg := 0 to RingSegments do
+          begin
+            Angle := (Seg / RingSegments) * 2.0 * Pi;
+            SinCos(Angle, S, C);
+
+            PtW := Vector3(CenterW.X + C * Rad, CenterW.Y, CenterW.Z + S * Rad);
+            if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+               (TVector3.DotProduct(PtW - CamP, CamD) > 0.05) then
+            begin
+              RingXZ[CountXZ] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(PtW));
+              Inc(CountXZ);
+            end;
+
+            PtW := Vector3(CenterW.X + C * Rad, CenterW.Y + S * Rad, CenterW.Z);
+            if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+               (TVector3.DotProduct(PtW - CamP, CamD) > 0.05) then
+            begin
+              RingXY[CountXY] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(PtW));
+              Inc(CountXY);
+            end;
+          end;
+          if CountXZ >= 2 then
+            DrawPrimitive2D(pmLineStrip, Slice(RingXZ, CountXZ), LightCol,
+              bsSrcAlpha, bdOneMinusSrcAlpha, false, 1.5);
+          if CountXY >= 2 then
+            DrawPrimitive2D(pmLineStrip, Slice(RingXY, CountXY), LightCol,
+              bsSrcAlpha, bdOneMinusSrcAlpha, false, 1.0);
+        end;
+      end;
+
+      { 2. Draw receiver multi-light overlap heat pills }
+      for I := 0 to High(Audit.Hotspots) do
+      begin
+        CenterW := Audit.Hotspots[I].WorldCenter;
+        if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+           (TVector3.DotProduct(CenterW - CamP, CamD) > 0.05) then
+        begin
+          ScreenPt := AVp.LocalToContainerPosition(AVp.PositionFromWorld(CenterW));
+          PillCol := TLightShadowBudgetAuditor.HeatTierColor(Audit.Hotspots[I].HeatTier);
+          DrawRectangle(FloatRectangle(ScreenPt.X - 24, ScreenPt.Y - 9, 48, 18),
+            Vector4(0.06, 0.08, 0.12, 0.82));
+          DrawRectangleOutline(FloatRectangle(ScreenPt.X - 24, ScreenPt.Y - 9, 48, 18), PillCol);
+          if LabelGizmoDragHud.Font <> nil then
+          begin
+            BadgeStr := Format('%dL', [Audit.Hotspots[I].OverlappingLightCount]);
+            if Audit.Hotspots[I].ShadowLightCount > 0 then
+              BadgeStr := BadgeStr + Format(' %dS', [Audit.Hotspots[I].ShadowLightCount]);
+            LabelGizmoDragHud.Font.Print(ScreenPt.X - 18, ScreenPt.Y - 5, PillCol, BadgeStr);
+          end;
+        end;
+      end;
+
+      { 3. Top-left viewport complexity banner }
+      if LabelGizmoDragHud.Font <> nil then
+      begin
+        BadgeStr := Format(
+          'LIGHT BUDGET OVERLAY | Lights: %d (Shadow: %d, Unbounded: %d) | Peak Overlap: %dL | Score: %.1f',
+          [Audit.TotalLights, Audit.ShadowCastingLights, Audit.UnboundedPunctualLights,
+           Audit.MaxLightsOnSingleReceiver, Audit.OverallComplexityScore]);
+        DrawRectangle(FloatRectangle(12, Container.PixelsHeight - 34,
+          Max(420, Length(BadgeStr) * 7.2), 24), Vector4(0.05, 0.07, 0.11, 0.85));
+        if Audit.HasMultipleShadowVolumeConflict then
+          PillCol := Vector4(1.00, 0.30, 0.30, 1.0)
+        else
+          PillCol := Vector4(0.45, 0.95, 0.65, 1.0);
+        LabelGizmoDragHud.Font.Print(18, Container.PixelsHeight - 28, PillCol, BadgeStr);
+      end;
+    finally
+      FreeAndNil(Audit);
+    end;
+  end;
+
   procedure UpdateAttachedLabel(const UI: TCastleUserInterface;
     const UIRect: TFloatRectangle;
     const Lab: TCastleLabel; const Rect: TCastleRectangleControl;
@@ -5298,6 +5417,12 @@ begin
     RenderScatterBrushOverlay(Frame.CurrentViewport);
   end;
 
+  if Frame.FShowLightBudgetOverlay and
+     (Frame.CurrentViewport <> nil) and (Frame.CurrentViewport.InternalCamera <> nil) then
+  begin
+    RenderLightBudgetOverlay(Frame.CurrentViewport);
+  end;
+
   if (Frame.TransformManipulate <> nil) and
      Frame.TransformManipulate.IsDraggingGizmo and
      (Frame.TransformManipulate.CurrentDragSummary <> '') then
@@ -5374,6 +5499,7 @@ begin
   FScatterBrushHoverNormal := Vector3(0, 1, 0);
   FScatterBrushMouseDown := false;
   FScatterStrokeMutated := false;
+  FShowLightBudgetOverlay := false;
   for I := 1 to 5 do
     FComponentColorTags[I] := TComponentList.Create(false);
   for I := 0 to 9 do
@@ -5533,6 +5659,21 @@ begin
       PanelMiddleTop.GetControlIndex(ButtonTerrainBrushMode) + 1);
 
   CreateScatterBrushToolbar;
+
+  ButtonNprShaderStudio := TSpeedButton.Create(Self);
+  ButtonNprShaderStudio.Caption := 'NPR / Lights';
+  ButtonNprShaderStudio.Hint := 'Open Stylized / NPR Shader Effect Studio & Light/Shadow Budget Complexity Visualizer.' + NL +
+    'Attach non-destructive Cel/Toon, Fresnel Rim, Dissolve, Gooch, or Ink Outline shaders, and inspect 3D multi-light overlap hotspots.';
+  ButtonNprShaderStudio.ShowHint := true;
+  ButtonNprShaderStudio.AutoSize := true;
+  ButtonNprShaderStudio.Constraints.MinHeight := 33;
+  ButtonNprShaderStudio.Constraints.MinWidth := 68;
+  ButtonNprShaderStudio.BorderSpacing.Left := 2;
+  ButtonNprShaderStudio.OnClick := @ButtonNprShaderStudioClick;
+  ButtonNprShaderStudio.Parent := PanelMiddleTop;
+  if ButtonScatterBrushMode.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonNprShaderStudio,
+      PanelMiddleTop.GetControlIndex(ButtonScatterBrushMode) + 1);
 
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
@@ -8303,6 +8444,16 @@ begin
   MenuTreeViewItemPinScatterInstance.Caption := 'Pin / Unpin Selected Scatter Instance(s) ([Pinned])';
   MenuTreeViewItemPinScatterInstance.OnClick := @MenuTreeViewItemPinScatterInstanceClick;
   MenuTreeView.Items.Add(MenuTreeViewItemPinScatterInstance);
+
+  MenuTreeViewItemNprShaderStudio := TMenuItem.Create(Self);
+  MenuTreeViewItemNprShaderStudio.Caption := 'Stylized / NPR Shader Studio && Light Budget Audit...';
+  MenuTreeViewItemNprShaderStudio.OnClick := @MenuTreeViewItemNprShaderStudioClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemNprShaderStudio);
+
+  MenuTreeViewItemLightBudgetOverlay := TMenuItem.Create(Self);
+  MenuTreeViewItemLightBudgetOverlay.Caption := 'Toggle 3D Light && Shadow Budget Complexity Overlay';
+  MenuTreeViewItemLightBudgetOverlay.OnClick := @MenuTreeViewItemLightBudgetOverlayClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemLightBudgetOverlay);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -13467,6 +13618,9 @@ var
       else if (NodeObj is TCastleTransform) and
               TCastleTransformManipulate.IsScatterInstancePinned(TCastleTransform(NodeObj)) then
         Suffix := Suffix + ' [Pinned]'
+      else if (NodeObj is TCastleTransform) and
+              (TCastleTransform(NodeObj).FindBehavior(TCastleStylizedShaderBehavior) <> nil) then
+        Suffix := Suffix + ' [NPR]'
       else if TComponent(NodeObj).Tag <> 0 then
         Suffix := Suffix + ' [Tag:' + IntToStr(TComponent(NodeObj).Tag) + ']';
     end;
@@ -52034,6 +52188,75 @@ end;
 procedure TDesignFrame.ButtonScatterRescatterClick(Sender: TObject);
 begin
   RegenerateUnpinnedScatterAction;
+end;
+
+{ Stylized / NPR Shader Studio & Light/Shadow Budget Visualizer (Phase 282) -- }
+
+procedure TDesignFrame.SetLightBudgetOverlayActive(const AEnabled: Boolean);
+begin
+  FShowLightBudgetOverlay := AEnabled;
+end;
+
+procedure TDesignFrame.ToggleLightBudgetOverlay;
+begin
+  SetLightBudgetOverlayActive(not FShowLightBudgetOverlay);
+end;
+
+procedure TDesignFrame.NprStudioModifiedCallback(const UndoComment: String);
+begin
+  UpdateDesign;
+  UpdateSelectedControl;
+  ControlsTree.Invalidate;
+  ModifiedOutsideObjectInspector(UndoComment, ucHigh);
+end;
+
+procedure TDesignFrame.NprStudioSelectComponentCallback(const C: TComponent);
+begin
+  if C <> nil then
+    DesignerSelectOnlyComponent(C);
+end;
+
+procedure TDesignFrame.NprStudioToggleOverlayCallback(const AEnabled: Boolean);
+begin
+  SetLightBudgetOverlayActive(AEnabled);
+end;
+
+procedure TDesignFrame.ShowNprShaderStudioDialog(const OpenLightAuditTab: Boolean);
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  Dlg: TNprShaderStudioForm;
+begin
+  GetSelected(Selected, SelectedCount);
+  try
+    Dlg := TNprShaderStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+      Selected, FShowLightBudgetOverlay, OpenLightAuditTab,
+      @NprStudioModifiedCallback,
+      @NprStudioSelectComponentCallback,
+      @NprStudioToggleOverlayCallback);
+    try
+      Dlg.ShowModal;
+    finally
+      FreeAndNil(Dlg);
+    end;
+  finally
+    FreeAndNil(Selected);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemNprShaderStudioClick(Sender: TObject);
+begin
+  ShowNprShaderStudioDialog(false);
+end;
+
+procedure TDesignFrame.MenuTreeViewItemLightBudgetOverlayClick(Sender: TObject);
+begin
+  ToggleLightBudgetOverlay;
+end;
+
+procedure TDesignFrame.ButtonNprShaderStudioClick(Sender: TObject);
+begin
+  ShowNprShaderStudioDialog(ssShift in GetKeyShiftState);
 end;
 
 initialization

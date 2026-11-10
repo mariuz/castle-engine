@@ -2395,6 +2395,51 @@ Manipulate.RegenerateUnpinnedScatter(Viewport.Items, PineTreeProto, ScatterGroup
 
 ---
 
+## 66G. Horizon 2 — Stylized / NPR Shader Effect Studio & Viewport Light/Shadow Budget Visualizer (Phase 282 / UE 5.8 Substrate NPR & MegaLights Parity)
+
+Inspired by **Unreal Engine 5.8's Substrate Stylized/NPR Shading Workflows and MegaLights / Light Complexity View Modes**, `TCastleStylizedShaderBehavior` (`src/scene/castlenprshader.pas`), `TLightShadowBudgetAuditor` (`tools/common-code/toolnprshaderstudio.pas`), and `TNprShaderStudioForm` (`tools/castle-editor/code/formnprshaderstudio.pas`) bring zero-boilerplate GLSL stylized shading and real-time light/shadow overlap diagnostics directly into `castle-editor`.
+
+### Key Capabilities
+1. **Non-Destructive X3D `TEffectNode` Stylized Shader Presets (`TCastleStylizedShaderBehavior`)**:
+   - Attaches as a standard serializable `TCastleBehavior` to any `TCastleScene` (`[NPR]` badge in the Hierarchy tree) without modifying source `.gltf` / `.x3d` assets on disk.
+   - Generates self-contained GLSL fragment plugs across 5 artist-tunable presets (`TCastleStylizedShaderPreset`):
+     - **`sspCelToon`**: Quantized discrete luminance bands (`CelBands`, `ShadowFloor`) + subtle view-angle rim highlight (`PLUG_lighting_apply`).
+     - **`sspFresnelRim`**: View-dependent grazing-angle rim glow (`RimPower`, `Intensity`, `AccentColor` via `PLUG_fragment_modify`).
+     - **`sspDissolve`**: Procedural 3D spatial hash noise burn-away (`DissolveProgress`, `DissolveScale`, `EdgeWidth`, glowing `AccentColor` ember border + `discard` via `PLUG_fragment_modify`).
+     - **`sspGoochTechnical`**: Cool-to-warm hemispherical Gooch CAD/illustrative diffuse shading (`SecondaryColor` -> `AccentColor` via `PLUG_material_light_diffuse`).
+     - **`sspSilhouetteOutline`**: Grazing-angle comic/manga ink silhouette darkening (`EdgeWidth`, `RimPower`, `AccentColor` via `PLUG_fragment_modify`).
+2. **Light & Shadow Budget Complexity Auditor (`TLightShadowBudgetAuditor`)**:
+   - Inspects `TCastleDirectionalLight`, `TCastlePointLight`, and `TCastleSpotLight` sources against visual receivers (`TCastleSceneCore`, `TCastleAbstractPrimitive`, `TCastleImageTransform`, `TCastleText`, `TCastleTerrain`), classifying each receiver into `lhtUnlit`, `lhtCool`, `lhtModerate`, `lhtHot`, or `lhtCritical` heat tiers.
+   - Detects CGE multi-shadow-volume conflicts (`ShadowCastingLights > 1`) and unbounded punctual lights (`Radius < 0`) with one-click auto-fixes (`EnsureSingleShadowVolumeLight`, `ClampUnboundedLightRadii`).
+3. **Interactive Studio Dialog & 3D Viewport Complexity Overlay (`TNprShaderStudioForm` / `RenderLightBudgetOverlay`)**:
+   - Open via the top-bar **`NPR / Lights`** button (`Shift`-click opens the Light Budget Audit tab directly) or **`Design -> Stylized / NPR Shader Studio & Light Budget Audit...`**.
+   - Live 3D viewport overlay draws wireframe attenuation spheres around bounded lights, `NL MS` overlap heat pills on receivers, and a top-left complexity summary banner.
+
+### Example Usage (Pascal API)
+```pascal
+// Attach a 4-band Cel/Toon shader behavior to a TCastleScene:
+Npr := TLightShadowBudgetAuditor.AttachOrUpdateNprPreset(KnightScene, DesignOwner, sspCelToon);
+Npr.CelBands := 4;
+Npr.AccentColor := Vector3(0.35, 0.85, 1.0);
+
+// Audit viewport lighting complexity and auto-fix unbounded radii:
+Report := TLightShadowBudgetAuditor.AnalyzeRoot(Viewport);
+try
+  if Report.HasMultipleShadowVolumeConflict then
+    TLightShadowBudgetAuditor.EnsureSingleShadowVolumeLight(Viewport);
+  TLightShadowBudgetAuditor.ClampUnboundedLightRadii(Viewport, 25.0);
+finally
+  FreeAndNil(Report);
+end;
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Shader Effects (`PLUG_*`, `TEffectNode`)](https://castle-engine.io/shaders) · [CGE Shadow Volumes](https://castle-engine.io/shadow_volumes) · [UE Substrate Materials](https://dev.epicgames.com/documentation/en-us/unreal-engine/substrate-materials-overview-in-unreal-engine) · [UE Light Complexity View Modes](https://dev.epicgames.com/documentation/en-us/unreal-engine/viewport-modes-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Shaders & Lighting in CGE (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [Animated 3D Viewport Shader & Lighting Workflow](https://docs.godotengine.org/en/stable/_images/3d_viewport_navigation.gif)
+- **Screenshots:** [CGE Shader Effects Demo](https://castle-engine.io/images/thumb_const_height_size/shader_effects_simple.webp) · [CGE Visual Editor 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2464,4 +2509,5 @@ In addition, Horizon 2 editor subsystems include dedicated automated test suites
 - **[`tests/code/testcases/testtoolmcpserver.pas`](../tests/code/testcases/testtoolmcpserver.pas) (`TTestToolMcpServer` — 3 tests)**: Verifies JSON-RPC 2.0 `initialize`, `ping`, `tools/list` (all 12 MCP tools), Bearer token authentication, all 4 `TMcpAutonomyMode` tiers (`Disabled`, `ReadOnly`, `EditWithUndo`, `FullControl`), live RTTI property inspection/mutation, layout actions (`align_y`, `snap_to_grid`), Base64 PNG viewport screenshot encoding, and live localhost multithreaded HTTP roundtrip (`GET /health` + `POST /mcp` with `CheckSynchronize` and `0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldesignsandboxdiff.pas`](../tests/code/testcases/testtooldesignsandboxdiff.pas) (`TTestToolDesignSandboxDiff` — 3 tests)**: Verifies `TDesignSandboxManager` creation, filtering, renaming, JSON persistence, and live instantiation, `TDesignDiffEngine` detection of `[+ Added]`, `[- Removed]`, and `[~ Modified]` components + subcomponent properties (`TranslationPersistent.X/Y/Z`, `SizePersistent.X/Y/Z`, `Caption`, `FontSize`), and `RevertSelectedToBase` selective restoration/deletion of individual properties and components (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testcastleterrain.pas`](../tests/code/testcases/testcastleterrain.pas) (`TTestCastleTerrain` — 4 tests)**: Verifies `TCastleTerrainImage` Raise/Lower/Smooth/Flatten sculpting with dynamic `MinLevel`/`MaxLevel` expansion + renormalization, `RayCastWorld`, non-destructive `EnsureEditableHeightLayer` `TCastleTerrainCombine` (`opAdd`) wrapping over `TCastleTerrainNoise`, `GenerateSplatmapFromProceduralLayers`, `PaintSplatmapAtWorldPoint` $R+G+B+A = 255$ partition-of-unity normalization, and PNG heightmap/splatmap save & reload roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolnprshaderstudio.pas`](../tests/code/testcases/testtoolnprshaderstudio.pas) (`TTestToolNprShaderStudio` — 2 tests)**: Verifies all 5 `TCastleStylizedShaderPreset` GLSL generators (`PLUG_lighting_apply`, `PLUG_material_light_diffuse`, `PLUG_fragment_modify`), X3D `TEffectNode` attach/enable/disable/remove lifecycle on `TCastleScene`, `.castle-transform` JSON serialization roundtrip, and `TLightShadowBudgetAuditor` multi-light overlap hotspot scoring, multi-shadow-volume conflict detection, `EnsureSingleShadowVolumeLight`, and `ClampUnboundedLightRadii` (`0 unfreed memory blocks`).
 

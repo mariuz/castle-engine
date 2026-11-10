@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="35">
+    <Units Count="37">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -257,6 +257,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormDesignSandboxDiff"/>
       </Unit34>
+      <Unit35>
+        <Filename Value="../common-code/toolnprshaderstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolNprShaderStudio"/>
+      </Unit35>
+      <Unit36>
+        <Filename Value="code/formnprshaderstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormNprShaderStudio"/>
+      </Unit36>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

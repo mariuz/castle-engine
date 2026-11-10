@@ -107,6 +107,7 @@ uses
   {$if defined(FPC) and (not defined(WASI))}TestToolMcpServer,{$endif}
   TestToolDesignSandboxDiff,
   TestCastleTerrain,
+  TestToolNprShaderStudio,
   TestCastleVulkanRHI;
 
 implementation

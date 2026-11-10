@@ -592,6 +592,8 @@ type
       MenuItemTerrainBrushMode: TMenuItem;
       MenuItemScatterBrushMode: TMenuItem;
       MenuItemPinScatterInstances: TMenuItem;
+      MenuItemNprShaderStudio: TMenuItem;
+      MenuItemLightBudgetOverlay: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -603,6 +605,8 @@ type
     procedure MenuItemTerrainBrushModeClick(Sender: TObject);
     procedure MenuItemScatterBrushModeClick(Sender: TObject);
     procedure MenuItemPinScatterInstancesClick(Sender: TObject);
+    procedure MenuItemNprShaderStudioClick(Sender: TObject);
+    procedure MenuItemLightBudgetOverlayClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2187,6 +2191,16 @@ begin
   MenuItemPinScatterInstances.OnClick := @MenuItemPinScatterInstancesClick;
   MenuItemDesign.Add(MenuItemPinScatterInstances);
 
+  MenuItemNprShaderStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemNprShaderStudio.Caption := 'Stylized / NPR Shader Studio && Light Budget Audit...';
+  MenuItemNprShaderStudio.OnClick := @MenuItemNprShaderStudioClick;
+  MenuItemDesign.Add(MenuItemNprShaderStudio);
+
+  MenuItemLightBudgetOverlay := TMenuItem.Create(MenuItemDesign);
+  MenuItemLightBudgetOverlay.Caption := 'Toggle 3D Light && Shadow Budget Complexity Overlay';
+  MenuItemLightBudgetOverlay.OnClick := @MenuItemLightBudgetOverlayClick;
+  MenuItemDesign.Add(MenuItemLightBudgetOverlay);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -2836,6 +2850,10 @@ begin
     MenuItemScatterBrushMode.Enabled := Design <> nil;
   if MenuItemPinScatterInstances <> nil then
     MenuItemPinScatterInstances.Enabled := Design <> nil;
+  if MenuItemNprShaderStudio <> nil then
+    MenuItemNprShaderStudio.Enabled := Design <> nil;
+  if MenuItemLightBudgetOverlay <> nil then
+    MenuItemLightBudgetOverlay.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5010,6 +5028,18 @@ procedure TProjectForm.MenuItemPinScatterInstancesClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.TogglePinSelectedScatterInstances;
+end;
+
+procedure TProjectForm.MenuItemNprShaderStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowNprShaderStudioDialog(false);
+end;
+
+procedure TProjectForm.MenuItemLightBudgetOverlayClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ToggleLightBudgetOverlay;
 end;
 
 initialization
