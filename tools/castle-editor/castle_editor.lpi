@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="39">
+    <Units Count="41">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -277,6 +277,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormDesignAnnotations"/>
       </Unit38>
+      <Unit39>
+        <Filename Value="../common-code/toolwasmpreviewserver.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolWasmPreviewServer"/>
+      </Unit39>
+      <Unit40>
+        <Filename Value="code/formwasmpreview.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormWasmPreview"/>
+      </Unit40>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

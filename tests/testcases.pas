@@ -109,6 +109,7 @@ uses
   TestCastleTerrain,
   TestToolNprShaderStudio,
   TestToolDesignAnnotations,
+  { defined(FPC) and (not defined(WASI))}TestToolWasmPreviewServer,{}
   TestCastleVulkanRHI;
 
 implementation

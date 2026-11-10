@@ -2481,6 +2481,46 @@ end;
 
 ---
 
+## 66I. Horizon 2 — Built-In WebAssembly (`targetWeb`) Live Preview Server & Bundle Size Diagnostics (Phase 284 / UE 5.9 Web Parity)
+
+Inspired by **Unreal Engine 5.9's Browser / WebAssembly Workflow Enhancements**, `TWasmPreviewHttpServer` and `TWasmBundleProfiler` (`tools/common-code/toolwasmpreviewserver.pas`) together with `TWasmPreviewForm` (`tools/castle-editor/code/formwasmpreview.pas`) eliminate external `compileserver` setup friction by embedding a COOP/COEP-enabled WebAssembly dev server and visual payload size profiler directly inside `castle-editor`.
+
+### Key Capabilities
+1. **Embedded Loopback `targetWeb` HTTP Server (`TWasmPreviewHttpServer`)**:
+   - Serves `castle-engine-output/web/dist` on `http://127.0.0.1:8090/index.html` with strict loopback (`127.0.0.1` / `::1`) and directory-traversal (`ResolveSafeFilePath`) security checks.
+   - Emits `Content-Type: application/wasm`, `Cache-Control: no-store, no-cache, must-revalidate`, and optional Cross-Origin Isolation headers (`Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`, `Cross-Origin-Resource-Policy: same-origin`) required by modern browsers for `SharedArrayBuffer`, WASM threads, and high-resolution timers.
+   - Injects a lightweight `/__cge_live_reload` polling snippet into HTML responses (`EnableAutoReload = true`) so open browser tabs automatically reload as soon as a new `targetWeb` build lands in `dist/`.
+2. **WebAssembly & `data/` Payload Size Profiler (`TWasmBundleProfiler`)**:
+   - Breaks down both `castle-engine-output/web/dist` and source `data/` assets across 8 categories (`.wasm` Code, `.js`/`.html` Shell, Packed `.zip`/`.data`, Textures, 3D Models & Sprite Sheets, Audio, Designs/Fonts/Shaders, Other).
+   - Computes cold-cache download times across **Slow 3G (`1.5 Mbps`)**, **Fast 4G (`10 Mbps`)**, and **Broadband (`50 Mbps`)** and generates actionable optimization recommendations (e.g. flagging debug `.wasm` > `15 MB` for `--mode=release` `wasm-opt`, or uncompressed `.wav` > `1 MB` for `.ogg` Vorbis conversion).
+3. **Interactive Control Center & Stacked Bar Chart (`TWasmPreviewForm`)**:
+   - Open via **`Run -> WebAssembly (targetWeb) Live Preview Server & Bundle Profiler...`** to start/stop the background server, trigger **`Compile Web Target`**, launch the default browser, view the proportional stacked payload bar chart, or export a Markdown diagnostics report.
+
+### Example Usage (Pascal API)
+```pascal
+// Start localhost COOP/COEP WebAssembly preview server and profile bundle size:
+Server := TWasmPreviewHttpServer.Create(Self);
+Server.DocumentRoot := TWasmBundleProfiler.DefaultDistDirectoryForProject(ProjectPath);
+Server.Port := 8090;
+Server.EnableCrossOriginIsolation := true;
+Server.StartServer;
+
+Report := TWasmBundleProfiler.ProfileWebBundle(
+  Server.DocumentRoot, TWasmBundleProfiler.DefaultDataDirectoryForProject(ProjectPath));
+try
+  Writeln(Report.FormatMarkdownReport);
+finally
+  FreeAndNil(Report);
+end;
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Web Target (`targetWeb`) Manual](https://castle-engine.io/web) · [MDN `crossOriginIsolated` (`COOP` / `COEP`)](https://developer.mozilla.org/en-US/docs/Web/API/Window/crossOriginIsolated) · [WebAssembly Official Site](https://webassembly.org/) · [CGE Build Tool Manual](https://castle-engine.io/build_tool)
+- **Videos & Movies:** 🎬 [CGE Official Video — Cross-Platform Building & Web Export (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [Animated Editor Build & Diagnostics Workflow](https://docs.godotengine.org/en/stable/_images/containers_split_drag.gif)
+- **Screenshots:** [CGE Visual Editor](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Project & Build Configuration](https://castle-engine.io/images/thumb_const_height_size/choose_project.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2552,4 +2592,5 @@ In addition, Horizon 2 editor subsystems include dedicated automated test suites
 - **[`tests/code/testcases/testcastleterrain.pas`](../tests/code/testcases/testcastleterrain.pas) (`TTestCastleTerrain` — 4 tests)**: Verifies `TCastleTerrainImage` Raise/Lower/Smooth/Flatten sculpting with dynamic `MinLevel`/`MaxLevel` expansion + renormalization, `RayCastWorld`, non-destructive `EnsureEditableHeightLayer` `TCastleTerrainCombine` (`opAdd`) wrapping over `TCastleTerrainNoise`, `GenerateSplatmapFromProceduralLayers`, `PaintSplatmapAtWorldPoint` $R+G+B+A = 255$ partition-of-unity normalization, and PNG heightmap/splatmap save & reload roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolnprshaderstudio.pas`](../tests/code/testcases/testtoolnprshaderstudio.pas) (`TTestToolNprShaderStudio` — 2 tests)**: Verifies all 5 `TCastleStylizedShaderPreset` GLSL generators (`PLUG_lighting_apply`, `PLUG_material_light_diffuse`, `PLUG_fragment_modify`), X3D `TEffectNode` attach/enable/disable/remove lifecycle on `TCastleScene`, `.castle-transform` JSON serialization roundtrip, and `TLightShadowBudgetAuditor` multi-light overlap hotspot scoring, multi-shadow-volume conflict detection, `EnsureSingleShadowVolumeLight`, and `ClampUnboundedLightRadii` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldesignannotations.pas`](../tests/code/testcases/testtooldesignannotations.pas) (`TTestToolDesignAnnotations` — 2 tests)**: Verifies `TCastleDesignAnnotation` and `TCastleDesignAnnotationUi` zero runtime bounding-box footprint (`appRunning` vs. `appDesign`), world-space camera viewpoint bookmark capture/restore, JSON serialization roundtrip, `TDesignAnnotationManager.ScanDesign` priority sorting and blocker warnings, category/status/text filtering, Markdown checklist export, `MarkAllResolved`, and `DeleteResolvedPins` (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolwasmpreviewserver.pas`](../tests/code/testcases/testtoolwasmpreviewserver.pas) (`TTestToolWasmPreviewServer` — 2 tests)**: Verifies `.wasm`/`.js`/`.zip` MIME mapping, `ResolveSafeFilePath` directory-traversal rejection, `InjectAutoReloadScript`, `TWasmBundleProfiler.ProfileWebBundle` category byte totals, 3G/4G/Broadband download estimates, and `.wav` optimization hints, plus live multithreaded localhost HTTP roundtrips verifying `application/wasm`, `COOP`/`COEP` headers, and `/__cge_live_reload` build-stamp updates (`0 unfreed memory blocks`).
 

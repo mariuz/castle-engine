@@ -34,7 +34,7 @@ uses
   CastlePropEdits, CastleDialogs, X3DNodes, CastleFindFiles,
   DataModuleIcons, CastleClassUtils,
   EditorUtils, FrameDesign, FrameViewFile, FormNewUnit, ToolManifest,
-  ToolPackageFormat, ToolEditorUtils, ToolMcpServer, EditorMcpServer;
+  ToolPackageFormat, ToolEditorUtils, ToolMcpServer, EditorMcpServer, ToolWasmPreviewServer, FormWasmPreview;
 
 const
   DockLayoutFileName = 'layout.dock-layout';
@@ -596,6 +596,8 @@ type
       MenuItemLightBudgetOverlay: TMenuItem;
       MenuItemReviewPins: TMenuItem;
       MenuItemDrop3DReviewPin: TMenuItem;
+      FWasmPreviewServer: TWasmPreviewHttpServer;
+      MenuItemWasmPreview: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -611,6 +613,9 @@ type
     procedure MenuItemLightBudgetOverlayClick(Sender: TObject);
     procedure MenuItemReviewPinsClick(Sender: TObject);
     procedure MenuItemDrop3DReviewPinClick(Sender: TObject);
+    procedure MenuItemWasmPreviewClick(Sender: TObject);
+    procedure WasmPreviewServerLog(const Msg: String);
+    procedure CompileWebTargetFromPreviewDialog;
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2172,6 +2177,17 @@ begin
   FMcpBridge.LoadFromConfig;
   UpdateMcpMenuState;
 
+  FWasmPreviewServer := TWasmPreviewHttpServer.Create(Self);
+  FWasmPreviewServer.Port := Word(Clamped(
+    UserConfig.GetValue('ProjectForm_WasmPreviewPort', TWasmPreviewHttpServer.DefaultWasmPreviewPort),
+    1024, 65535));
+  FWasmPreviewServer.OnLog := @WasmPreviewServerLog;
+
+  MenuItemWasmPreview := TMenuItem.Create(MenuItemRun);
+  MenuItemWasmPreview.Caption := 'WebAssembly (targetWeb) Live Preview Server && Bundle Profiler...';
+  MenuItemWasmPreview.OnClick := @MenuItemWasmPreviewClick;
+  MenuItemRun.Add(MenuItemWasmPreview);
+
   MiSep := TMenuItem.Create(MenuItemDesign);
   MiSep.Caption := '-';
   MenuItemDesign.Add(MiSep);
@@ -2327,6 +2343,7 @@ begin
   FormHide(Self); //to save config properly
   ApplicationProperties.OnWarning.Remove(@WarningNotification);
   FreeProcess;
+  FreeAndNil(FWasmPreviewServer);
   FreeAndNil(FMcpBridge);
   FreeAndNil(OutputList);
   FreeAndNil(Manifest);
@@ -5070,6 +5087,63 @@ procedure TProjectForm.MenuItemDrop3DReviewPinClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.Drop3DAnnotationPinAtCamera;
+end;
+
+procedure TProjectForm.WasmPreviewServerLog(const Msg: String);
+begin
+  if OutputList <> nil then
+    OutputList.AddLine(Msg, okInfo);
+end;
+
+procedure TProjectForm.CompileWebTargetFromPreviewDialog;
+var
+  I, WebIdx, SavedIdx: Integer;
+begin
+  if IsRunning then
+  begin
+    InfoBox('Another build or run process is currently active.');
+    Exit;
+  end;
+  WebIdx := -1;
+  if PlatformsInfo <> nil then
+    for I := 0 to PlatformsInfo.Count - 1 do
+      if (not PlatformsInfo[I].UseDefault) and (PlatformsInfo[I].Target = targetWeb) then
+      begin
+        WebIdx := I;
+        Break;
+      end;
+
+  if WebIdx >= 0 then
+  begin
+    SavedIdx := CurrentPlatformInfo;
+    try
+      CurrentPlatformInfo := WebIdx;
+      BuildToolCall(['compile']);
+    finally
+      CurrentPlatformInfo := SavedIdx;
+    end;
+  end else
+    BuildToolCall(['compile']);
+end;
+
+procedure TProjectForm.MenuItemWasmPreviewClick(Sender: TObject);
+var
+  Dlg: TWasmPreviewForm;
+begin
+  if FWasmPreviewServer = nil then
+    Exit;
+  if FWasmPreviewServer.DocumentRoot = '' then
+    FWasmPreviewServer.DocumentRoot := TWasmBundleProfiler.DefaultDistDirectoryForProject(ProjectPath);
+  Dlg := TWasmPreviewForm.CreateDialog(Self, FWasmPreviewServer,
+    TWasmBundleProfiler.DefaultDataDirectoryForProject(ProjectPath),
+    @CompileWebTargetFromPreviewDialog);
+  try
+    Dlg.ShowModal;
+    UserConfig.SetValue('ProjectForm_WasmPreviewPort', FWasmPreviewServer.Port);
+    UserConfig.Save;
+  finally
+    FreeAndNil(Dlg);
+  end;
 end;
 
 initialization
