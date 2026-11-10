@@ -39,7 +39,7 @@ uses
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
-  DesignObjectInspector;
+  DesignObjectInspector, ToolDesignSandboxDiff;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -646,6 +646,9 @@ type
       ButtonOpenPascalCodeGen: TSpeedButton;
       FComponentPresets: TStringList;
       FComponentNotes: TStringList;
+      FSandboxManager: TDesignSandboxManager;
+      FSandboxesLoadedFile: String;
+      MenuTreeViewItemSandboxesDiff: TMenuItem;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
       FCopiedComponentPropsClassName: String;
@@ -1023,6 +1026,9 @@ type
     procedure MenuTreeViewItemPasteTransformClick(Sender: TObject);
     procedure MenuTreeViewItemExpandAllClick(Sender: TObject);
     procedure MenuTreeViewItemCollapseAllClick(Sender: TObject);
+    procedure MenuTreeViewItemSandboxesDiffClick(Sender: TObject);
+    function LiveDesignSerializedJson: String;
+    procedure SaveSandboxesCallback(Sender: TObject);
     function NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
     function IsComponentDescendantOfSelection(const C: TComponent; const List: TComponentList): Boolean;
     procedure ButtonViewModeClick(Sender: TObject);
@@ -2397,6 +2403,11 @@ type
     function McpUndoRedo(const IsRedo: Boolean;
       out ExecutedComment: String): Boolean;
     function McpCaptureViewportImage: TRGBImage;
+
+    { Design Sandboxes & Visual Diff / Selective Merge (Phase 279). }
+    function SandboxesStorageFileName: String;
+    procedure ApplySerializedDesignJson(const NewSerializedJson, UndoComment: String);
+    procedure ShowDesignSandboxesAndDiffDialog;
   end;
 
 implementation
@@ -2415,7 +2426,7 @@ uses
   CastleFlashEffect, CastleNotifications, CastleFonts,
   { Editor units }
   EditorRegisterAllComponents,
-  FormProject, CastleComponentEditorDesigner;
+  FormProject, FormDesignSandboxDiff, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -4856,6 +4867,8 @@ begin
   FFavoriteComponents := TComponentList.Create(false);
   FComponentNotes := TStringList.Create;
   FComponentPresets := TStringList.Create;
+  FSandboxManager := TDesignSandboxManager.Create;
+  FSandboxesLoadedFile := '';
   for I := 1 to 5 do
     FComponentColorTags[I] := TComponentList.Create(false);
   for I := 0 to 9 do
@@ -7728,6 +7741,11 @@ begin
   MenuTreeViewItemCollapseAll.OnClick := @MenuTreeViewItemCollapseAllClick;
   MenuTreeView.Items.Add(MenuTreeViewItemCollapseAll);
 
+  MenuTreeViewItemSandboxesDiff := TMenuItem.Create(Self);
+  MenuTreeViewItemSandboxesDiff.Caption := 'Design Sandboxes & Visual Diff / Merge...';
+  MenuTreeViewItemSandboxesDiff.OnClick := @MenuTreeViewItemSandboxesDiffClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSandboxesDiff);
+
   OrganizeHierarchyContextMenuSubmenus;
 
   ControlsTree.OnDblClick := @ControlsTreeDblClick;
@@ -7806,6 +7824,7 @@ begin
   FreeAndNil(FFavoriteComponents);
   FreeAndNil(FComponentNotes);
   FreeAndNil(FComponentPresets);
+  FreeAndNil(FSandboxManager);
 
   if CollectionPropertyEditorForm <> nil then
   begin
@@ -50339,6 +50358,111 @@ begin
     Result := CastleControl.Container.SaveScreen
   else
     Result := nil;
+end;
+
+function TDesignFrame.SandboxesStorageFileName: String;
+var
+  DataDirPath, ProjDirPath: String;
+begin
+  Result := '';
+  if ApplicationDataOverride <> '' then
+  begin
+    DataDirPath := ExcludeTrailingPathDelimiter(UriToFilenameSafe(ApplicationDataOverride));
+    ProjDirPath := ExtractFileDir(DataDirPath);
+    if ProjDirPath <> '' then
+      Result := InclPathDelim(ProjDirPath) +
+        'castle-engine-output' + PathDelim + 'editor-sandboxes.json';
+  end;
+end;
+
+function TDesignFrame.LiveDesignSerializedJson: String;
+var
+  InspectorType: TInspectorType;
+begin
+  if FDesignRoot = nil then
+    Exit('');
+  for InspectorType in TInspectorType do
+    Inspector[InspectorType].SaveChanges;
+  Result := ComponentToString(FDesignRoot);
+end;
+
+procedure TDesignFrame.SaveSandboxesCallback(Sender: TObject);
+var
+  StorageFile: String;
+begin
+  StorageFile := SandboxesStorageFileName;
+  if (FSandboxManager <> nil) and (StorageFile <> '') then
+  begin
+    FSandboxManager.SaveToFile(StorageFile);
+    FSandboxesLoadedFile := StorageFile;
+  end;
+end;
+
+procedure TDesignFrame.ApplySerializedDesignJson(
+  const NewSerializedJson, UndoComment: String);
+var
+  InspectorType: TInspectorType;
+  SavedSel: TSavedSelection;
+  LoadInfo: TInternalComponentLoadInfo;
+  NewDesignOwner, NewDesignRoot: TComponent;
+begin
+  if Trim(NewSerializedJson) = '' then
+    Exit;
+
+  for InspectorType in TInspectorType do
+    Inspector[InspectorType].SaveChanges;
+
+  SavedSel := GetSavedSelection;
+  LoadInfo := TInternalComponentLoadInfo.Create;
+  try
+    LoadInfo.PreserveDataAcrossUndo := DesignOwner;
+    NewDesignOwner := TComponent.Create(Self);
+    NewDesignRoot := InternalStringToComponent(NewSerializedJson, NewDesignOwner, LoadInfo);
+    OpenDesign(NewDesignRoot, NewDesignOwner, FDesignUrl);
+  finally
+    FreeAndNil(LoadInfo);
+  end;
+
+  RestoreSavedSelection(SavedSel);
+  ModifiedOutsideObjectInspector(UndoComment, ucHigh);
+end;
+
+procedure TDesignFrame.ShowDesignSandboxesAndDiffDialog;
+var
+  StorageFile: String;
+  Dlg: TDesignSandboxDiffForm;
+begin
+  if FDesignRoot = nil then
+  begin
+    InfoBox('Open or create a design first to manage Design Sandboxes and inspect Visual Diffs.');
+    Exit;
+  end;
+
+  StorageFile := SandboxesStorageFileName;
+  if (StorageFile <> '') and (FSandboxesLoadedFile <> StorageFile) then
+  begin
+    FSandboxManager.LoadFromFile(StorageFile);
+    FSandboxesLoadedFile := StorageFile;
+  end;
+
+  Dlg := TDesignSandboxDiffForm.CreateDialog(
+    Self,
+    FSandboxManager,
+    FDesignUrl,
+    FDesignRoot,
+    @LiveDesignSerializedJson,
+    @SaveSandboxesCallback,
+    @ApplySerializedDesignJson);
+  try
+    Dlg.ShowModal;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSandboxesDiffClick(Sender: TObject);
+begin
+  ShowDesignSandboxesAndDiffDialog;
 end;
 
 initialization

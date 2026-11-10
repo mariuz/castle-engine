@@ -2299,6 +2299,37 @@ Click **Run -> MCP Server (AI Agent Bridge) -> Copy MCP Client Config JSON to Cl
 
 ---
 
+## 66D. Horizon 2 — Non-Destructive Design Sandboxes & Visual Scene/UI Diff & Selective Merge (Phase 279 / UE 5.8–5.9 Parity)
+
+Inspired by **Unreal Engine 5.8/5.9's Content Sandboxes and Visual Asset Diff/Merge**, `ToolDesignSandboxDiff` (`tools/common-code/tooldesignsandboxdiff.pas`) and `TDesignSandboxDiffForm` (`tools/castle-editor/code/formdesignsandboxdiff.pas`) let designers branch experimental scene/UI variants in seconds and selectively diff or revert individual components and RTTI properties.
+
+### Key Capabilities
+1. **Non-Destructive Design Sandboxes (`TDesignSandboxManager`)**:
+   - Snapshot the live `.castle-user-interface`, `.castle-transform`, or `.castle-component` hierarchy into named sandboxes stored in `castle-engine-output/editor-sandboxes.json` (never cluttering shipped `data/` assets).
+   - Switch/activate any sandbox non-destructively while keeping the 3D design-time camera pose (`PreserveDataAcrossUndo`) and full `TUndoSystem` (`Ctrl+Z`) history.
+2. **Visual Hierarchy & RTTI Property Diff (`TDesignDiffEngine.CompareJson` / `CompareComponents`)**:
+   - Compares the live design against either the **Saved File on Disk** or any **Design Sandbox**.
+   - Reports `[+ Added]`, `[- Removed]`, and `[~ Modified]` components across `$Children`, `$Behaviors`, `$NonVisualComponents`, and `Items.$Children`, plus granular subcomponent property diffs (e.g. `TranslationPersistent.X/Y/Z`, `SizePersistent.X/Y/Z`, `Caption`, `FontSize`, `<default>` vs. overridden values).
+3. **Selective Revert & Merge (`TDesignDiffEngine.RevertSelectedToBase`)**:
+   - Check any subset of added components (to delete), removed components (to restore into their original parent container), modified components (to revert all properties while keeping live children), or individual `CompName::PropertyPath` rows, and apply in one Undo-able step.
+
+### Example Usage (Pascal API)
+```pascal
+Report := TDesignDiffEngine.CompareComponents(SavedRoot, LiveRoot, 'Saved Disk', 'Live Scene');
+try
+  Writeln(Report.FormatUnifiedSummary);
+finally
+  FreeAndNil(Report);
+end;
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Component Serialization (`CastleComponentSerialize`)](https://castle-engine.io/custom_components) · [CGE Visual Editor Manual](https://castle-engine.io/manual_editor.php) · [Unreal Engine Diffing Assets](https://dev.epicgames.com/documentation/en-us/unreal-engine/diffing-unreal-assets)
+- **Videos & Movies:** 🎬 [CGE Official Editor Workflows Video (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [Animated Hierarchy & Property Diff Workflow](https://docs.godotengine.org/en/stable/_images/containers_split_drag.gif)
+- **Screenshots:** [CGE Visual Editor Hierarchy](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Object Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 51 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2365,4 +2396,5 @@ fpc -Mobjfpc -Sh -Ci -Cr -Co -gl -gh -dTEXT_RUNNER @castle-fpc.cfg \
 
 In addition, Horizon 2 editor subsystems include dedicated automated test suites:
 - **[`tests/code/testcases/testtoolmcpserver.pas`](../tests/code/testcases/testtoolmcpserver.pas) (`TTestToolMcpServer` — 3 tests)**: Verifies JSON-RPC 2.0 `initialize`, `ping`, `tools/list` (all 12 MCP tools), Bearer token authentication, all 4 `TMcpAutonomyMode` tiers (`Disabled`, `ReadOnly`, `EditWithUndo`, `FullControl`), live RTTI property inspection/mutation, layout actions (`align_y`, `snap_to_grid`), Base64 PNG viewport screenshot encoding, and live localhost multithreaded HTTP roundtrip (`GET /health` + `POST /mcp` with `CheckSynchronize` and `0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtooldesignsandboxdiff.pas`](../tests/code/testcases/testtooldesignsandboxdiff.pas) (`TTestToolDesignSandboxDiff` — 3 tests)**: Verifies `TDesignSandboxManager` creation, filtering, renaming, JSON persistence, and live instantiation, `TDesignDiffEngine` detection of `[+ Added]`, `[- Removed]`, and `[~ Modified]` components + subcomponent properties (`TranslationPersistent.X/Y/Z`, `SizePersistent.X/Y/Z`, `Caption`, `FontSize`), and `RevertSelectedToBase` selective restoration/deletion of individual properties and components (`0 unfreed memory blocks`).
 

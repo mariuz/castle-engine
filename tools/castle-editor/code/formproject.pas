@@ -588,6 +588,7 @@ type
       MenuItemMcpPort: TMenuItem;
       MenuItemMcpAuthToken: TMenuItem;
       MenuItemMcpCopyConfig: TMenuItem;
+      MenuItemDesignSandboxesDiff: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -595,6 +596,7 @@ type
     procedure MenuItemMcpPortClick(Sender: TObject);
     procedure MenuItemMcpAuthTokenClick(Sender: TObject);
     procedure MenuItemMcpCopyConfigClick(Sender: TObject);
+    procedure MenuItemDesignSandboxesDiffClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2156,6 +2158,14 @@ begin
   FMcpBridge.LoadFromConfig;
   UpdateMcpMenuState;
 
+  MiSep := TMenuItem.Create(MenuItemDesign);
+  MiSep.Caption := '-';
+  MenuItemDesign.Add(MiSep);
+  MenuItemDesignSandboxesDiff := TMenuItem.Create(MenuItemDesign);
+  MenuItemDesignSandboxesDiff.Caption := 'Design Sandboxes && Visual Diff / Merge...';
+  MenuItemDesignSandboxesDiff.OnClick := @MenuItemDesignSandboxesDiffClick;
+  MenuItemDesign.Add(MenuItemDesignSandboxesDiff);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -2797,6 +2807,8 @@ begin
   MenuItemSaveAsDesign.Enabled := Design <> nil;
   MenuItemSaveDesign.Enabled := Design <> nil;
   MenuItemDesignClose.Enabled := Design <> nil;
+  if MenuItemDesignSandboxesDiff <> nil then
+    MenuItemDesignSandboxesDiff.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -4947,6 +4959,12 @@ begin
   if OutputList <> nil then
     OutputList.AddLine('[MCP] Copied mcpServers client configuration JSON to clipboard (' +
       FMcpBridge.Server.EndpointUrl + ').', okImportantInfo);
+end;
+
+procedure TProjectForm.MenuItemDesignSandboxesDiffClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowDesignSandboxesAndDiffDialog;
 end;
 
 initialization
