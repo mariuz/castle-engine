@@ -185,6 +185,8 @@
     FRHIMirrorCameraUp: TVector3;
     FRHIMirrorFrustumDimensions: TVector4;
     FRHIPointSize: Single;
+    FRHILineType: TLineType;
+    FRHILineStipplePattern: Word;
     FRHIHasParallaxBumpMapping: Boolean;
     FRHISteepParallaxBumpMapping: Boolean;
     FRHISteepParallaxSelfShadowing: Boolean;
@@ -219,6 +221,15 @@
     FRHIGeometryShaderSource: String;
     FRHIShaderPermutationMask: QWord;
     FRHIShadersInitialized: Boolean;
+    FRHIAltVertexShader: TRHIShaderModule;
+    FRHIAltFragmentShader: TRHIShaderModule;
+    FRHIAltGeometryShader: TRHIShaderModule;
+    FRHIAltVertexShaderSource: String;
+    FRHIAltFragmentShaderSource: String;
+    FRHIAltGeometryShaderSource: String;
+    FRHIAltShaderPermutationMask: QWord;
+    FRHIAltShadersInitialized: Boolean;
+    FRHIShaderCompileCount: Cardinal;
     FRHIOwnerDevice: TRHIDevice;
     FRHIMaterialBlock: TCastleMaterialUniformBlock;
     FRHIMaterialUploadCount: Cardinal;
@@ -291,6 +302,7 @@
       const ACameraPositionOnPlane, ACameraSide, ACameraUp: TVector3;
       const AFrustumDimensions: TVector4);
     procedure SetPointSize(const APointSize: Single);
+    procedure SetLineType(const ALineType: TLineType);
     procedure SetParallaxBumpMapping(const AEnabled, ASteep: Boolean; const AHeight: Single); overload;
     procedure SetParallaxBumpMapping(const AEnabled, ASteep, ASelfShadowing: Boolean; const AHeight: Single); overload;
     procedure SetPhongSurfaceParams(
@@ -321,6 +333,7 @@
     function ToString: String; override;
 
     property RHICoordinateBuffer: TRHIBuffer read FRHICoordBuffer;
+    property RHIRenderOptions: TCastleRenderOptions read RenderOptions write RenderOptions;
     property GeometryArrays: TGeometryArrays read Arrays;
     property RHIAttributeBuffer: TRHIBuffer read FRHIAttribBuffer;
     property RHIIndexBuffer: TRHIBuffer read FRHIIndexBuffer;
@@ -370,6 +383,8 @@
     property RHIMirrorCameraUp: TVector3 read FRHIMirrorCameraUp;
     property RHIMirrorFrustumDimensions: TVector4 read FRHIMirrorFrustumDimensions;
     property RHIPointSize: Single read FRHIPointSize;
+    property RHILineType: TLineType read FRHILineType;
+    property RHILineStipplePattern: Word read FRHILineStipplePattern;
     property RHIHasParallaxBumpMapping: Boolean read FRHIHasParallaxBumpMapping;
     property RHISteepParallaxBumpMapping: Boolean read FRHISteepParallaxBumpMapping;
     property RHISteepParallaxSelfShadowing: Boolean read FRHISteepParallaxSelfShadowing;
@@ -405,6 +420,7 @@
     property RHIFragmentShaderSource: String read FRHIFragmentShaderSource;
     property RHIGeometryShaderSource: String read FRHIGeometryShaderSource;
     property RHIShaderPermutationMask: QWord read FRHIShaderPermutationMask;
+    property RHIShaderCompileCount: Cardinal read FRHIShaderCompileCount;
     property RHIMaterialBlock: TCastleMaterialUniformBlock read FRHIMaterialBlock;
     property RHIMaterialUploadCount: Cardinal read FRHIMaterialUploadCount;
     property RHIUploadCount: Cardinal read FRHIUploadCount;
@@ -441,6 +457,8 @@ begin
   inherited;
   VboToReload := AllVboTypes;
   FRHIPointSize := 1.0;
+  FRHILineType := ltSolid;
+  FRHILineStipplePattern := $FFFF;
   FRHIParallaxHeight := 0.01;
   FRHIPhongAmbientIntensity := 0.2;
   FRHIEnvLightColorIntensity := Vector3(1.0, 1.0, 1.0);
@@ -486,6 +504,9 @@ begin
     FreeAndNil(FRHIVertexShader);
     FreeAndNil(FRHIFragmentShader);
     FreeAndNil(FRHIGeometryShader);
+    FreeAndNil(FRHIAltVertexShader);
+    FreeAndNil(FRHIAltFragmentShader);
+    FreeAndNil(FRHIAltGeometryShader);
   end else
   begin
     FRHICoordBuffer := nil;
@@ -502,6 +523,9 @@ begin
     FRHIVertexShader := nil;
     FRHIFragmentShader := nil;
     FRHIGeometryShader := nil;
+    FRHIAltVertexShader := nil;
+    FRHIAltFragmentShader := nil;
+    FRHIAltGeometryShader := nil;
   end;
   FillChar(FRHIUserEffectTextures, SizeOf(FRHIUserEffectTextures), 0);
   FillChar(FRHIUserEffectSamplers, SizeOf(FRHIUserEffectSamplers), 0);
@@ -515,6 +539,7 @@ begin
   FRHIBrdfLutTexture := nil;
   FRHIBrdfLutSampler := nil;
   FRHIShadersInitialized := False;
+  FRHIAltShadersInitialized := False;
   FRHIOwnerDevice := nil;
 end;
 
@@ -547,7 +572,11 @@ begin
     FRHIVertexShader := nil;
     FRHIFragmentShader := nil;
     FRHIGeometryShader := nil;
+    FRHIAltVertexShader := nil;
+    FRHIAltFragmentShader := nil;
+    FRHIAltGeometryShader := nil;
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
     FRHIOwnerDevice := RHIDevice;
   end;
 end;
@@ -640,7 +669,10 @@ begin
     FRHISkinningDescriptorSet.Update;
   end;
   if FRHIShadersInitialized and ((FRHIShaderPermutationMask and $01) = 0) then
+  begin
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
+  end;
 end;
 
 procedure TShapeCache.UploadUserEffectBlock(const AData: Pointer; const ASize: PtrUInt);
@@ -751,6 +783,7 @@ begin
   begin
     FRHIBaseColorTextureDimension := NewBaseDim;
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
   end;
   FRHIBaseColorSampler := ABaseColorSampler;
   FRHINormalSampler := ANormalSampler;
@@ -832,6 +865,7 @@ begin
     FRHIHasTextureTransform := AHasTransform;
     FRHITextureTransform := AMatrix;
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
   end;
 end;
 
@@ -843,6 +877,7 @@ begin
     FRHIHasTextureTransform1 := AHasTransform;
     FRHITextureTransform1 := AMatrix;
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
   end;
 end;
 
@@ -890,6 +925,7 @@ begin
     FRHISecondTextureCombineAlpha := AEnv.Combine[cAlpha];
     FRHISecondTextureConstantColor := AConstantColor;
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
   end;
 end;
 
@@ -920,6 +956,7 @@ begin
     FRHIMultiTextureStageEnv[AStageIndex] := AEnv;
     FRHIMultiTextureStageConstantColor[AStageIndex] := AConstantColor;
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
   end;
 end;
 
@@ -937,6 +974,7 @@ begin
     end else
       FRHIClipPlaneCount := 0;
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
   end;
 end;
 
@@ -966,6 +1004,7 @@ begin
     else
       FRHIClipPlane := TVector4.Zero;
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
   end;
 end;
 
@@ -982,6 +1021,7 @@ begin
     FRHIShadowSampling := ASampling;
     FRHIShadowMapSize := EffectiveSize;
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
   end;
 end;
 
@@ -1001,6 +1041,7 @@ begin
     FRHIEmissiveTexCoordIndex := AEmissiveIdx;
     FRHIOcclusionTexCoordIndex := AOcclusionIdx;
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
   end;
 end;
 
@@ -1024,6 +1065,7 @@ begin
     FRHITexGenBoundsT := ABoundsT;
     FRHITexGenBoundsR := ABoundsR;
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
   end;
 end;
 
@@ -1033,6 +1075,7 @@ begin
   begin
     FRHITexGenProjectorMatrix := AMatrix;
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
   end;
 end;
 
@@ -1056,6 +1099,7 @@ begin
     FRHIMirrorCameraUp := ACameraUp;
     FRHIMirrorFrustumDimensions := AFrustumDimensions;
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
   end;
 end;
 
@@ -1068,7 +1112,17 @@ begin
   begin
     FRHIPointSize := ClampedSize;
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
   end;
+end;
+
+procedure TShapeCache.SetLineType(const ALineType: TLineType);
+var
+  NewPattern: Word;
+begin
+  NewPattern := TRenderContext.LineTypeToStipplePattern(ALineType);
+  FRHILineType := ALineType;
+  FRHILineStipplePattern := NewPattern;
 end;
 
 procedure TShapeCache.SetParallaxBumpMapping(const AEnabled, ASteep: Boolean; const AHeight: Single);
@@ -1088,6 +1142,7 @@ begin
     FRHISteepParallaxSelfShadowing := ASelfShadowing;
     FRHIParallaxHeight := AHeight;
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
   end;
 end;
 
@@ -1095,33 +1150,24 @@ procedure TShapeCache.SetPhongSurfaceParams(
   const AIsPhong, AHasSpecularTex, AHasShininessTex, AHasAmbientTex: Boolean;
   const AAmbientIntensity: Single);
 begin
-  if (FRHIIsPhongMaterial <> AIsPhong) or
-     (FRHIPhongHasSpecularTex <> AHasSpecularTex) or
-     (FRHIPhongHasShininessTex <> AHasShininessTex) or
-     (FRHIPhongHasAmbientTex <> AHasAmbientTex) or
-     (not SameValue(FRHIPhongAmbientIntensity, AAmbientIntensity, 1e-4)) then
+  if not SameValue(FRHIPhongAmbientIntensity, AAmbientIntensity, 1e-4) then
   begin
-    FRHIIsPhongMaterial := AIsPhong;
-    FRHIPhongHasSpecularTex := AHasSpecularTex;
-    FRHIPhongHasShininessTex := AHasShininessTex;
-    FRHIPhongHasAmbientTex := AHasAmbientTex;
     FRHIPhongAmbientIntensity := AAmbientIntensity;
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
   end;
+  FRHIIsPhongMaterial := AIsPhong;
+  FRHIPhongHasSpecularTex := AHasSpecularTex;
+  FRHIPhongHasShininessTex := AHasShininessTex;
+  FRHIPhongHasAmbientTex := AHasAmbientTex;
 end;
 
 procedure TShapeCache.SetPhongExtendedSurfaceParams(
   const AHasSeparateShininessTex, AHasAlphaTex, AInvertAlpha: Boolean);
 begin
-  if (FRHIPhongHasSeparateShininessTex <> AHasSeparateShininessTex) or
-     (FRHIHasAlphaTexture <> AHasAlphaTex) or
-     (FRHIInvertAlphaTexture <> AInvertAlpha) then
-  begin
-    FRHIPhongHasSeparateShininessTex := AHasSeparateShininessTex;
-    FRHIHasAlphaTexture := AHasAlphaTex;
-    FRHIInvertAlphaTexture := AInvertAlpha;
-    FRHIShadersInitialized := False;
-  end;
+  FRHIPhongHasSeparateShininessTex := AHasSeparateShininessTex;
+  FRHIHasAlphaTexture := AHasAlphaTex;
+  FRHIInvertAlphaTexture := AInvertAlpha;
 end;
 
 procedure TShapeCache.SetEnvironmentLightParams(
@@ -1134,6 +1180,7 @@ begin
     FRHIHasSeparateDiffuseEnvTex := AHasSeparateDiffuse;
     FRHIEnvLightColorIntensity := AColorIntensity;
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
   end;
 end;
 
@@ -1152,6 +1199,7 @@ begin
     FRHIFragmentEffectCode := AFragmentEffectCode;
     FRHIGeometryEffectCode := AGeometryEffectCode;
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
   end;
 end;
 
@@ -1170,6 +1218,7 @@ begin
     FRHIComposedFragSource := ACustomFragSource;
     FRHIComposedGeomSource := ACustomGeomSource;
     FRHIShadersInitialized := False;
+    FRHIAltShadersInitialized := False;
   end;
 end;
 
@@ -1361,9 +1410,11 @@ procedure TShapeCache.EnsureRHIShaders(
   end;
 
 var
-  Mask: QWord;
+  Mask, TempMask: QWord;
+  TempShader: TRHIShaderModule;
+  TempSource: String;
   Gen: TCastleShaderGeneratorRHI;
-  FogSnippet, TexGenSnippet, TexTransformSnippet, ClipPlaneSnippet, ShadowMapSnippet, ParallaxSnippet, SelfShadowSnippet, PhongSetupSnippet: String;
+  FogSnippet, TexGenSnippet, TexTransformSnippet, ClipPlaneSnippet, LineStippleSnippet, ShadowMapSnippet, ParallaxSnippet, SelfShadowSnippet, PhongSetupSnippet: String;
   SecondTexSnippet, SecondTexUV, AlphaTexSnippet, PlugTexColorCall, CubeCoordExpr, Tex3DCoordExpr, Tex3DMatExpr: String;
   UpgradedVertEffect, UpgradedFragEffect, DedupVertEffect, DedupFragEffect, DedupGeomEffect, PlugGeomSetCall, PlugGeomZeroCall, PlugGeomAddCall, PlugCandidate, SingleTexColorCall, EffectivePointSizeStr, AttribGLSLType, AttribDecl: String;
   HasLinearColorSpace, HasGeomStage: Boolean;
@@ -1466,8 +1517,10 @@ begin
   if AHasIBL and (FRHIHasSeparateDiffuseEnvTex or
      (not TVector3.Equals(FRHIEnvLightColorIntensity, Vector3(1.0, 1.0, 1.0), 1e-4))) then
     Mask := Mask or (QWord(1) shl 42);
-  if FRHIHasAlphaTexture or FRHIInvertAlphaTexture then
+  if FRHIHasAlphaTexture then
     Mask := Mask or (QWord(1) shl 44);
+  if FRHIInvertAlphaTexture then
+    Mask := Mask or (QWord(1) shl 52);
   if AHasBaseColorTex and FRHIHasMultiTextureStage[2] then
     Mask := Mask or (QWord(1) shl 45);
   if AHasBaseColorTex and FRHIHasMultiTextureStage[3] then
@@ -1477,15 +1530,52 @@ begin
   HasGeomStage := (FRHIGeometryEffectCode <> '') or (FRHIComposedGeomSource <> '');
   if HasGeomStage then
     Mask := Mask or (QWord(1) shl 48);
+  if FRHILineType <> ltSolid then
+    Mask := Mask or (QWord(Ord(FRHILineType) and 7) shl 49);
 
   if FRHIShadersInitialized and (FRHIShaderPermutationMask = Mask) and
      (FRHIVertexShader <> nil) and (FRHIFragmentShader <> nil) and
      ((not HasGeomStage) or (FRHIGeometryShader <> nil)) then
     Exit;
 
-  FreeAndNil(FRHIVertexShader);
-  FreeAndNil(FRHIFragmentShader);
-  FreeAndNil(FRHIGeometryShader);
+  if FRHIAltShadersInitialized and (FRHIAltShaderPermutationMask = Mask) and
+     (FRHIAltVertexShader <> nil) and (FRHIAltFragmentShader <> nil) and
+     ((not HasGeomStage) or (FRHIAltGeometryShader <> nil)) then
+  begin
+    TempShader := FRHIVertexShader; FRHIVertexShader := FRHIAltVertexShader; FRHIAltVertexShader := TempShader;
+    TempShader := FRHIFragmentShader; FRHIFragmentShader := FRHIAltFragmentShader; FRHIAltFragmentShader := TempShader;
+    TempShader := FRHIGeometryShader; FRHIGeometryShader := FRHIAltGeometryShader; FRHIAltGeometryShader := TempShader;
+    TempSource := FRHIVertexShaderSource; FRHIVertexShaderSource := FRHIAltVertexShaderSource; FRHIAltVertexShaderSource := TempSource;
+    TempSource := FRHIFragmentShaderSource; FRHIFragmentShaderSource := FRHIAltFragmentShaderSource; FRHIAltFragmentShaderSource := TempSource;
+    TempSource := FRHIGeometryShaderSource; FRHIGeometryShaderSource := FRHIAltGeometryShaderSource; FRHIAltGeometryShaderSource := TempSource;
+    TempMask := FRHIShaderPermutationMask; FRHIShaderPermutationMask := FRHIAltShaderPermutationMask; FRHIAltShaderPermutationMask := TempMask;
+    FRHIAltShadersInitialized := FRHIShadersInitialized;
+    FRHIShadersInitialized := True;
+    Exit;
+  end;
+
+  if FRHIShadersInitialized and (FRHIVertexShader <> nil) and (FRHIFragmentShader <> nil) then
+  begin
+    FreeAndNil(FRHIAltVertexShader);
+    FreeAndNil(FRHIAltFragmentShader);
+    FreeAndNil(FRHIAltGeometryShader);
+    FRHIAltVertexShader := FRHIVertexShader;
+    FRHIAltFragmentShader := FRHIFragmentShader;
+    FRHIAltGeometryShader := FRHIGeometryShader;
+    FRHIAltVertexShaderSource := FRHIVertexShaderSource;
+    FRHIAltFragmentShaderSource := FRHIFragmentShaderSource;
+    FRHIAltGeometryShaderSource := FRHIGeometryShaderSource;
+    FRHIAltShaderPermutationMask := FRHIShaderPermutationMask;
+    FRHIAltShadersInitialized := True;
+    FRHIVertexShader := nil;
+    FRHIFragmentShader := nil;
+    FRHIGeometryShader := nil;
+  end else
+  begin
+    FreeAndNil(FRHIVertexShader);
+    FreeAndNil(FRHIFragmentShader);
+    FreeAndNil(FRHIGeometryShader);
+  end;
   FRHIGeometryShaderSource := '';
   Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
   try
@@ -1771,6 +1861,18 @@ begin
     FRHIFragmentShaderSource := Gen.GenerateDefault3DFragmentShader(
       AHasBaseColorTex, AHasNormalTex, AHasMetallicRoughnessTex,
       AHasEmissiveTex, AHasOcclusionTex, AHasIBL, AUseAlphaTest, False, False);
+    if (FRHILineType <> ltSolid) and (FRHILineStipplePattern <> $FFFF) then
+    begin
+      LineStippleSnippet := Format(
+        '  if (((%du >> (uint(floor(gl_FragCoord.x + gl_FragCoord.y)) & 15u)) & 1u) == 0u) discard;' + LineEnding +
+        '  vec4 baseColor = castle_MaterialBaseColor;',
+        [Cardinal(FRHILineStipplePattern)]);
+      FRHIFragmentShaderSource := StringReplace(
+        FRHIFragmentShaderSource,
+        '  vec4 baseColor = castle_MaterialBaseColor;',
+        LineStippleSnippet,
+        []);
+    end;
     if AHasClipPlane then
     begin
       ClipPlaneSnippet := '';
@@ -2785,6 +2887,7 @@ begin
         ssGeometry, FRHIGeometryShaderSource, Format('CastleShapeGeom_Perm%.2x', [QWord(Mask)]));
     FRHIShaderPermutationMask := Mask;
     FRHIShadersInitialized := True;
+    Inc(FRHIShaderCompileCount);
   finally
     FreeAndNil(Gen);
   end;

@@ -148,6 +148,9 @@ type
       FRHIDepthBiasUpdateCount: Cardinal;
       FRHILastLineWidth: Single;
       FRHILineWidthUpdateCount: Cardinal;
+      FRHILastLineType: TLineType;
+      FRHILastLineStipplePattern: Word;
+      FRHILineTypeUpdateCount: Cardinal;
       FStencilTest: Boolean;
       FStencilCompareOp: TRHICompareOp;
       FStencilReference: Byte;
@@ -404,6 +407,7 @@ type
     class function MapBlendSourceFactorToRHI(const AFactor: TBlendingSourceFactor): TRHIBlendFactor; static;
     class function MapBlendDestFactorToRHI(const AFactor: TBlendingDestinationFactor): TRHIBlendFactor; static;
     class function MapDepthFuncToRHI(const ADepthFunc: TDepthFunction): TRHICompareOp; static;
+    class function LineTypeToStipplePattern(const ALineType: TLineType): Word; static;
 
     { Enable alpha test with old/buggy OpenGL implementations that use deprecated fixed-function pipeline.
       This is simply ignored on modern GPUs when "not GLFeatures.EnableFixedFunction". }
@@ -454,6 +458,9 @@ type
     property RHIDepthBiasUpdateCount: Cardinal read FRHIDepthBiasUpdateCount;
     property RHILastLineWidth: Single read FRHILastLineWidth;
     property RHILineWidthUpdateCount: Cardinal read FRHILineWidthUpdateCount;
+    property RHILastLineType: TLineType read FRHILastLineType;
+    property RHILastLineStipplePattern: Word read FRHILastLineStipplePattern;
+    property RHILineTypeUpdateCount: Cardinal read FRHILineTypeUpdateCount;
 
     { Stencil test state and RHI pipeline synchronization (used by TCastleMask). }
     property StencilTest: Boolean read FStencilTest write SetStencilTest default False;
@@ -547,6 +554,8 @@ begin
   FStencilFailOp := soKeep;
   FStencilDepthFailOp := soKeep;
   FStencilPassOp := soKeep;
+  FRHILastLineType := ltSolid;
+  FRHILastLineStipplePattern := $FFFF;
 end;
 
 destructor TRenderContext.Destroy;
@@ -1389,6 +1398,20 @@ begin
   {$endif}
 end;
 
+class function TRenderContext.LineTypeToStipplePattern(const ALineType: TLineType): Word;
+begin
+  case ALineType of
+    ltSolid       : Result := $FFFF;
+    ltDashed      : Result := $00FF;
+    ltDotted      : Result := $CCCC;
+    ltDashedDotted: Result := $FFCC;
+    ltDashDotDot  : Result := $FCCC;
+    {$ifndef COMPILER_CASE_ANALYSIS}
+    else Result := $FFFF;
+    {$endif}
+  end;
+end;
+
 procedure TRenderContext.SetLineType(const Value: TLineType);
 begin
   if FLineType <> Value then
@@ -1400,8 +1423,14 @@ end;
 
 procedure TRenderContext.UpdateLineType;
 begin
-  if SkipOpenGLStateWhenRHIActive then
-    Exit;
+  if RHIDevice <> nil then
+  begin
+    FRHILastLineType := FLineType;
+    FRHILastLineStipplePattern := LineTypeToStipplePattern(FLineType);
+    Inc(FRHILineTypeUpdateCount);
+    if SkipOpenGLStateWhenRHIActive then
+      Exit;
+  end;
   {$ifndef OpenGLES}
   case FLineType of
     ltSolid: glDisable(GL_LINE_STIPPLE);

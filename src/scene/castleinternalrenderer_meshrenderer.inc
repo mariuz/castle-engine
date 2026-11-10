@@ -383,6 +383,8 @@ begin
     begin
       if RHIDevice <> nil then
       begin
+        if (Shape.Cache <> nil) and (RenderOptions <> nil) then
+          Shape.Cache.RenderOptions := RenderOptions;
         Shape.UploadRHIMaterialToCache(ShadingModel);
         if Renderer <> nil then
           Renderer.GetOrCreateShapePipeline(Shape, RenderOptions);
@@ -548,6 +550,8 @@ begin
          (ActiveCommandList <> nil) then
       begin
         { 1. Upload per-shape RHI Material UBO and push constants for ModelView, Normal, and RenderOptions }
+        if (Shape.Cache <> nil) and (RenderOptions <> nil) then
+          Shape.Cache.RenderOptions := RenderOptions;
         Shape.UploadRHIMaterialToCache(ShadingModel);
         if Renderer <> nil then
         begin

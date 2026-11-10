@@ -20,7 +20,7 @@ interface
 
 uses
   Classes, SysUtils, Math,
-  CastleTester, CastleVectors, CastleColors, CastleRectangles,
+  CastleTester, CastleUtils, CastleVectors, CastleColors, CastleRectangles,
   CastleBoxes, CastleFrustum, CastleTimeUtils,
   CastleApplicationProperties, CastleImages, CastleGLImages, CastleFonts,
   CastleTextureFont_Default3d_Sans,
@@ -36,6 +36,7 @@ uses
   CastleGLShaders, CastleGLUtils, CastleRenderPrimitives, CastleShapes, CastleRenderContext,
   CastleShapeInternalShadowVolumes, CastleShapeInternalRenderShadowVolumes,
   CastleInternalBatchShapes, CastleInternalShapesRenderer,
+  CastleTransformManipulate, CastleDebugTransform, CastleInternalPhysicsVisualization,
   CastleInternalCompositeImage, CastleFilesUtils, CastleUriUtils,
   CastleInternalGLCubeMaps, CastleInternalSphericalHarmonics,
   ToolManifest, CastleInternalRenderDoc;
@@ -372,6 +373,9 @@ type
     procedure TestGLSLScreenEffectAndViewportSSAOSSRUniformsRHI;
     procedure TestViewportChildSceneScreenEffectsAndDynamicToggleRHI;
     procedure TestViewportPrepareShadowVolumesAnd2DUIControlsRHI;
+    procedure TestWireframeEffectsAndDualSlotShaderCacheRHI;
+    procedure TestPointSizeScalingAndLinePropertiesStippleRHI;
+    procedure TestTransformManipulateDebugGizmosAndColliderWireframeRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -24972,6 +24976,565 @@ begin
     FreeAndNil(Viewport);
     FreeAndNil(Scene);
     FreeAndNil(Container);
+    FreeAndNil(TargetTex);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestWireframeEffectsAndDualSlotShaderCacheRHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  SavedForceWireframe: TWireframeEffect;
+  TargetTex, DepthTex: TRHITexture;
+  TexDesc: TRHITextureDesc;
+  PassInfo: TRHIRenderingInfo;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene1: TCastleScene;
+  Ref2: TCastleTransformReference;
+  AltOptions: TCastleRenderOptions;
+  Root: TX3DRootNode;
+  ShapeNode: TShapeNode;
+  AppNode: TAppearanceNode;
+  BoxNode: TBoxNode;
+  MatNode: TMaterialNode;
+  PixTexNode: TPixelTextureNode;
+  PixImg: TRGBImage;
+  Light: TCastleDirectionalLight;
+  Shape1: TX3DRendererShape;
+  CompilesAfterSolidWireframe1, CompilesAfterSolidWireframe2: Cardinal;
+  CompilesAfterSilhouette1, CompilesAfterSilhouette2: Cardinal;
+  DrawCountBefore: Cardinal;
+  ShadingModel: TCastleShadingModelRHI;
+begin
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+  SavedForceWireframe := InternalForceWireframe;
+
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1014)));
+  TargetTex := nil;
+  DepthTex := nil;
+  Container := nil;
+  Viewport := nil;
+  Scene1 := nil;
+  Ref2 := nil;
+  AltOptions := nil;
+  Light := nil;
+  try
+    SetRHIDevice(Device);
+    ApplicationProperties.RenderBackend := backendVulkan;
+    GLFeatures := nil;
+
+    TexDesc := TRHITextureDesc.Create2D(256, 256, pfBGRA8_UNorm, [tuColorAttachment, tuTransferSrc]);
+    TargetTex := Device.CreateTexture(TexDesc);
+    TexDesc := TRHITextureDesc.Create2D(256, 256, pfD24_UNorm_S8_UInt, [tuDepthStencil]);
+    DepthTex := Device.CreateTexture(TexDesc);
+
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := False;
+    Viewport.Width := 256;
+    Viewport.Height := 256;
+    Container.Controls.InsertFront(Viewport);
+
+    Light := TCastleDirectionalLight.Create(nil);
+    Light.Direction := Vector3(0, 0, -1);
+    Viewport.Items.Add(Light);
+
+    { Build a textured Phong-shaded scene so Pass 0 (rmFull, textured + Phong)
+      and Pass 1 (rmSolidColor, unlit + untextured) have distinct RHI shader permutation masks }
+    Root := TX3DRootNode.Create;
+    ShapeNode := TShapeNode.Create;
+    BoxNode := TBoxNode.Create;
+    ShapeNode.Geometry := BoxNode;
+    AppNode := TAppearanceNode.Create;
+    MatNode := TMaterialNode.Create;
+    MatNode.DiffuseColor := Vector3(0.8, 0.4, 0.2);
+    MatNode.SpecularColor := Vector3(0.5, 0.5, 0.5);
+    AppNode.Material := MatNode;
+    PixTexNode := TPixelTextureNode.Create;
+    PixImg := TRGBImage.Create(2, 2);
+    PixImg.Clear(Vector4Byte(255, 128, 64, 255));
+    PixTexNode.FdImage.Value := PixImg;
+    AppNode.Texture := PixTexNode;
+    ShapeNode.Appearance := AppNode;
+    Root.AddChildren(ShapeNode);
+
+    Scene1 := TCastleScene.Create(nil);
+    Scene1.Load(Root, True);
+    Scene1.Translation := Vector3(0, 0, -6);
+    Viewport.Items.Add(Scene1);
+
+    { Reference Scene1 via TCastleTransformReference so both instances share Scene1's TShapeCache }
+    Ref2 := TCastleTransformReference.Create(nil);
+    Ref2.Reference := Scene1;
+    Ref2.Translation := Vector3(0, 0.5, -5);
+    Viewport.Items.Add(Ref2);
+
+    RenderContext := Container.Context;
+    RenderContext.Viewport := Rectangle(0, 0, 256, 256);
+
+    Cmd := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(Cmd);
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 256, 256),
+      TargetTex, loClear, Vector4(0, 0, 0, 1),
+      DepthTex, loClear, 1.0);
+    Cmd.BeginRendering(PassInfo);
+
+    { 1. Verify TShapeCache.RenderOptions synchronization across alternate TCastleRenderOptions }
+    Scene1.RenderOptions.Mode := rmFull;
+    DrawCountBefore := Cmd.PushConstantCallCount;
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+    AssertEquals('Scene1 + Ref2 must record 2 shape push-constant draws',
+      DrawCountBefore + 2, Cmd.PushConstantCallCount);
+
+    Shape1 := TX3DRendererShape(Scene1.Shapes.TraverseList(True)[0]);
+    AssertTrue('Shape1.Cache must be allocated', Shape1.Cache <> nil);
+
+    AltOptions := TCastleRenderOptions.Create(nil);
+    AltOptions.Mode := rmSolidColor;
+    AltOptions.SolidColor := Vector3(0.1, 0.9, 0.2);
+    Shape1.Cache.RHIRenderOptions := AltOptions;
+    Shape1.UploadRHIMaterialToCache(ShadingModel);
+    AssertVectorEquals(Vector3(0.1, 0.9, 0.2), Shape1.Cache.RHIMaterialBlock.BaseColor.XYZ, 1e-4);
+    Shape1.Cache.RHIRenderOptions := Scene1.RenderOptions;
+
+    { 2. Remove Ref2 to test Scene1 wireframe modes and 2-slot shader cache }
+    Viewport.Items.Remove(Ref2);
+    Scene1.RenderOptions.Mode := rmFull;
+    Scene1.RenderOptions.WireframeColor := Vector3(1.0, 1.0, 0.0);
+
+    { 2a. weWireframeOnly }
+    Scene1.RenderOptions.WireframeEffect := weWireframeOnly;
+    DrawCountBefore := Cmd.PipelineBindCount;
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+    AssertEquals('weWireframeOnly must bind 1 shape pipeline',
+      DrawCountBefore + 1, Cmd.PipelineBindCount);
+
+    { 2b. weSolidWireframe (2 passes per frame: Pass 0 fill + Pass 1 wireframe line) }
+    Scene1.RenderOptions.WireframeEffect := weSolidWireframe;
+    Scene1.RenderOptions.LineWidth := 2.0;
+    DrawCountBefore := Cmd.PipelineBindCount;
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+    AssertEquals('weSolidWireframe must bind 2 shape pipelines (Pass 0 solid + Pass 1 wireframe)',
+      DrawCountBefore + 2, Cmd.PipelineBindCount);
+    CompilesAfterSolidWireframe1 := Shape1.Cache.RHIShaderCompileCount;
+
+    { Render a second frame of weSolidWireframe -> dual-slot shader cache must hit in O(1) with 0 new shader compilations! }
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+    CompilesAfterSolidWireframe2 := Shape1.Cache.RHIShaderCompileCount;
+    AssertEquals('Dual-slot TShapeCache shader cache must avoid any shader recompilation on subsequent weSolidWireframe frames',
+      CompilesAfterSolidWireframe1, CompilesAfterSolidWireframe2);
+
+    { 2c. weSilhouette (2 passes per frame) }
+    Scene1.RenderOptions.WireframeEffect := weSilhouette;
+    Scene1.RenderOptions.SilhouetteScale := 5.0;
+    Scene1.RenderOptions.SilhouetteBias := 2.0;
+    DrawCountBefore := Cmd.PipelineBindCount;
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+    AssertEquals('weSilhouette must bind 2 shape pipelines (Pass 0 solid + Pass 1 silhouette)',
+      DrawCountBefore + 2, Cmd.PipelineBindCount);
+    CompilesAfterSilhouette1 := Shape1.Cache.RHIShaderCompileCount;
+
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+    CompilesAfterSilhouette2 := Shape1.Cache.RHIShaderCompileCount;
+    AssertEquals('Dual-slot TShapeCache shader cache must avoid any shader recompilation on subsequent weSilhouette frames',
+      CompilesAfterSilhouette1, CompilesAfterSilhouette2);
+
+    { 2d. InternalForceWireframe }
+    Scene1.RenderOptions.WireframeEffect := weNormal;
+    InternalForceWireframe := weWireframeOnly;
+    DrawCountBefore := Cmd.PipelineBindCount;
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+    AssertEquals('InternalForceWireframe must render wireframe in 1 pass',
+      DrawCountBefore + 1, Cmd.PipelineBindCount);
+    InternalForceWireframe := weNormal;
+
+    Cmd.EndRendering;
+    Device.EndFrameAndPresent;
+  finally
+    InternalForceWireframe := SavedForceWireframe;
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    FreeAndNil(AltOptions);
+    FreeAndNil(Ref2);
+    FreeAndNil(Scene1);
+    FreeAndNil(Light);
+    FreeAndNil(Viewport);
+    FreeAndNil(Container);
+    FreeAndNil(DepthTex);
+    FreeAndNil(TargetTex);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestPointSizeScalingAndLinePropertiesStippleRHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  TargetTex, DepthTex: TRHITexture;
+  TexDesc: TRHITextureDesc;
+  PassInfo: TRHIRenderingInfo;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  PointScene, LineScene: TCastleScene;
+  PointRoot, LineRoot: TX3DRootNode;
+  PointShapeNode, LineShapeNode: TShapeNode;
+  PointSet: TPointSetNode;
+  PointCoord, LineCoord: TCoordinateNode;
+  PointApp, LineApp: TAppearanceNode;
+  PP: TPointPropertiesNode;
+  LP: TLinePropertiesNode;
+  LineSet: TLineSetNode;
+  PointRendererShape, LineRendererShape: TX3DRendererShape;
+  ExtractedPointSize: Single;
+  ExtractedLineType: TLineType;
+  ExtractedStipple: Word;
+  LineTypeUpdatesBefore: Cardinal;
+begin
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1015)));
+  TargetTex := nil;
+  DepthTex := nil;
+  Container := nil;
+  Viewport := nil;
+  PointScene := nil;
+  LineScene := nil;
+  try
+    SetRHIDevice(Device);
+    ApplicationProperties.RenderBackend := backendVulkan;
+    GLFeatures := nil;
+
+    TexDesc := TRHITextureDesc.Create2D(256, 256, pfBGRA8_UNorm, [tuColorAttachment, tuTransferSrc]);
+    TargetTex := Device.CreateTexture(TexDesc);
+    TexDesc := TRHITextureDesc.Create2D(256, 256, pfD24_UNorm_S8_UInt, [tuDepthStencil]);
+    DepthTex := Device.CreateTexture(TexDesc);
+
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := False;
+    Viewport.Width := 256;
+    Viewport.Height := 256;
+    Container.Controls.InsertFront(Viewport);
+
+    RenderContext := Container.Context;
+    RenderContext.Viewport := Rectangle(0, 0, 256, 256);
+
+    { 1. Verify TRenderContext.LineType & LineTypeToStipplePattern }
+    AssertEquals('ltSolid stipple pattern', $FFFF, TRenderContext.LineTypeToStipplePattern(ltSolid));
+    AssertEquals('ltDashed stipple pattern', $00FF, TRenderContext.LineTypeToStipplePattern(ltDashed));
+    AssertEquals('ltDotted stipple pattern', $CCCC, TRenderContext.LineTypeToStipplePattern(ltDotted));
+    AssertEquals('ltDashedDotted stipple pattern', $FFCC, TRenderContext.LineTypeToStipplePattern(ltDashedDotted));
+    AssertEquals('ltDashDotDot stipple pattern', $FCCC, TRenderContext.LineTypeToStipplePattern(ltDashDotDot));
+
+    LineTypeUpdatesBefore := RenderContext.RHILineTypeUpdateCount;
+    RenderContext.LineType := ltDashed;
+    AssertEquals('RenderContext.RHILastLineType must update to ltDashed', Ord(ltDashed), Ord(RenderContext.RHILastLineType));
+    AssertEquals('RenderContext.RHILastLineStipplePattern must update to $00FF', $00FF, RenderContext.RHILastLineStipplePattern);
+    AssertEquals('RenderContext.RHILineTypeUpdateCount must increment', LineTypeUpdatesBefore + 1, RenderContext.RHILineTypeUpdateCount);
+    RenderContext.LineType := ltSolid;
+
+    { 2. PointSet scene with RenderOptions.PointSize * TPointPropertiesNode }
+    PointRoot := TX3DRootNode.Create;
+    PointShapeNode := TShapeNode.Create;
+    PointSet := TPointSetNode.Create;
+    PointCoord := TCoordinateNode.Create;
+    PointCoord.SetPoint([Vector3(0, 0, 0), Vector3(1, 0, 0), Vector3(0, 1, 0)]);
+    PointSet.Coord := PointCoord;
+    PointShapeNode.Geometry := PointSet;
+    PointApp := TAppearanceNode.Create;
+    PP := TPointPropertiesNode.Create;
+    PP.PointSizeScaleFactor := 2.5;
+    PP.PointSizeMinValue := 1.0;
+    PP.PointSizeMaxValue := 5.0;
+    PointApp.PointProperties := PP;
+    PointShapeNode.Appearance := PointApp;
+    PointRoot.AddChildren(PointShapeNode);
+
+    PointScene := TCastleScene.Create(nil);
+    PointScene.Load(PointRoot, True);
+    PointScene.RenderOptions.PointSize := 4.0;
+    PointScene.Translation := Vector3(0, 0, -5);
+    Viewport.Items.Add(PointScene);
+
+    { 3. LineSet scene with TLinePropertiesNode (LineType = ltDashed -> ltDotted -> ltDashedDotted -> ltDashDotDot) }
+    LineRoot := TX3DRootNode.Create;
+    LineShapeNode := TShapeNode.Create;
+    LineSet := TLineSetNode.Create;
+    LineCoord := TCoordinateNode.Create;
+    LineCoord.SetPoint([Vector3(-1, 0, 0), Vector3(1, 0, 0)]);
+    LineSet.Coord := LineCoord;
+    LineSet.SetVertexCount([2]);
+    LineShapeNode.Geometry := LineSet;
+    LineApp := TAppearanceNode.Create;
+    LP := TLinePropertiesNode.Create;
+    LP.Applied := True;
+    LP.LinewidthScaleFactor := 3.0;
+    LP.LineType := ltDashed;
+    LineApp.LineProperties := LP;
+    LineShapeNode.Appearance := LineApp;
+    LineRoot.AddChildren(LineShapeNode);
+
+    LineScene := TCastleScene.Create(nil);
+    LineScene.Load(LineRoot, True);
+    LineScene.Translation := Vector3(0, -1, -5);
+    Viewport.Items.Add(LineScene);
+
+    Cmd := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(Cmd);
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 256, 256),
+      TargetTex, loClear, Vector4(0, 0, 0, 1),
+      DepthTex, loClear, 1.0);
+    Cmd.BeginRendering(PassInfo);
+
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+
+    PointRendererShape := TX3DRendererShape(PointScene.Shapes.TraverseList(True)[0]);
+    AssertTrue('ExtractRHIPointSize must return True when combined point size > 1.0',
+      PointRendererShape.ExtractRHIPointSize(ExtractedPointSize));
+    AssertSameValue(10.0, ExtractedPointSize, 1e-4);
+    AssertSameValue(10.0, PointRendererShape.Cache.RHIPointSize, 1e-4);
+    AssertTrue('Generated vertex shader must set gl_PointSize = 10.0;',
+      Pos('gl_PointSize = 10.0;', PointRendererShape.Cache.RHIVertexShaderSource) > 0);
+
+    LineRendererShape := TX3DRendererShape(LineScene.Shapes.TraverseList(True)[0]);
+    AssertTrue('ExtractRHILineType must return True for ltDashed',
+      LineRendererShape.ExtractRHILineType(ExtractedLineType, ExtractedStipple));
+    AssertEquals('ExtractedLineType must be ltDashed', Ord(ltDashed), Ord(ExtractedLineType));
+    AssertEquals('ExtractedStipple must be $00FF (255)', $00FF, ExtractedStipple);
+    AssertEquals('LineRendererShape.Cache.RHILineType must be ltDashed',
+      Ord(ltDashed), Ord(LineRendererShape.Cache.RHILineType));
+    AssertTrue('Generated fragment shader for ltDashed must contain 255u stipple discard',
+      Pos('255u >> (uint(floor(gl_FragCoord.x + gl_FragCoord.y)) & 15u)', LineRendererShape.Cache.RHIFragmentShaderSource) > 0);
+
+    { Switch LineType to ltDotted ($CCCC = 52428) and re-render }
+    LP.LineType := ltDotted;
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+    AssertEquals('LineRendererShape.Cache.RHILineStipplePattern must be $CCCC (52428)',
+      $CCCC, LineRendererShape.Cache.RHILineStipplePattern);
+    AssertTrue('Generated fragment shader for ltDotted must contain 52428u stipple discard',
+      Pos('52428u >> (uint(floor(gl_FragCoord.x + gl_FragCoord.y)) & 15u)', LineRendererShape.Cache.RHIFragmentShaderSource) > 0);
+
+    { Switch LineType to ltDashedDotted ($FFCC = 65484) and re-render }
+    LP.LineType := ltDashedDotted;
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+    AssertTrue('Generated fragment shader for ltDashedDotted must contain 65484u stipple discard',
+      Pos('65484u >> (uint(floor(gl_FragCoord.x + gl_FragCoord.y)) & 15u)', LineRendererShape.Cache.RHIFragmentShaderSource) > 0);
+
+    { Switch LineType to ltDashDotDot ($FCCC = 64716) and re-render }
+    LP.LineType := ltDashDotDot;
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+    AssertTrue('Generated fragment shader for ltDashDotDot must contain 64716u stipple discard',
+      Pos('64716u >> (uint(floor(gl_FragCoord.x + gl_FragCoord.y)) & 15u)', LineRendererShape.Cache.RHIFragmentShaderSource) > 0);
+
+    Cmd.EndRendering;
+    Device.EndFrameAndPresent;
+  finally
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    FreeAndNil(LineScene);
+    FreeAndNil(PointScene);
+    FreeAndNil(Viewport);
+    FreeAndNil(Container);
+    FreeAndNil(DepthTex);
+    FreeAndNil(TargetTex);
+    FreeGlobalBatch2DRenderer;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(Device);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestTransformManipulateDebugGizmosAndColliderWireframeRHI;
+var
+  Device: TVulkanRHIDevice;
+  Cmd: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  SavedAppMode: TCastleApplicationMode;
+  TargetTex, DepthTex: TRHITexture;
+  TexDesc: TRHITextureDesc;
+  PassInfo: TRHIRenderingInfo;
+  Container: TTestHeadlessVulkanContainer;
+  Viewport: TCastleViewport;
+  Box: TCastleBox;
+  Collider: TCastleBoxCollider;
+  Hover: TCastleTransformHover;
+  Manipulate: TCastleTransformManipulate;
+  DebugTrans: TDebugTransform;
+  HingeJoint: TCastleHingeJoint;
+  PointLight: TCastlePointLight;
+  DrawsBefore, ViewportUpdatesBefore: Cardinal;
+begin
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+  SavedAppMode := InternalCastleApplicationMode;
+
+  Device := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($1016)));
+  TargetTex := nil;
+  DepthTex := nil;
+  Container := nil;
+  Viewport := nil;
+  Box := nil;
+  Collider := nil;
+  Hover := nil;
+  Manipulate := nil;
+  DebugTrans := nil;
+  HingeJoint := nil;
+  PointLight := nil;
+  try
+    SetRHIDevice(Device);
+    ApplicationProperties.RenderBackend := backendVulkan;
+    GLFeatures := nil;
+
+    TexDesc := TRHITextureDesc.Create2D(256, 256, pfBGRA8_UNorm, [tuColorAttachment, tuTransferSrc]);
+    TargetTex := Device.CreateTexture(TexDesc);
+    TexDesc := TRHITextureDesc.Create2D(256, 256, pfD24_UNorm_S8_UInt, [tuDepthStencil]);
+    DepthTex := Device.CreateTexture(TexDesc);
+
+    InternalCastleApplicationMode := appDesign;
+
+    Container := TTestHeadlessVulkanContainer.Create(nil);
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := False;
+    Viewport.Width := 256;
+    Viewport.Height := 256;
+    Container.Controls.InsertFront(Viewport);
+
+    Box := TCastleBox.Create(nil);
+    Box.Translation := Vector3(0, 0, -5);
+    Viewport.Items.Add(Box);
+
+    { Attach TCastleBoxCollider and activate design-time wireframe collider visualization }
+    Collider := TCastleBoxCollider.Create(nil);
+    Collider.AutoSize := False;
+    Collider.Size := Vector3(2, 2, 2);
+    Box.AddBehavior(Collider);
+    Collider.InternalDesigningBegin;
+
+    { Attach TDebugTransform (bounding box + middle axis + sphere + direction arrow) }
+    DebugTrans := TDebugTransform.Create(nil);
+    DebugTrans.Parent := Box;
+    DebugTrans.Exists := True;
+
+    { Attach TCastleTransformHover }
+    Hover := TCastleTransformHover.Create(nil);
+    Hover.Current := Box;
+
+    { Attach TCastleHingeJoint and create its TCastleJointTool (rlFront sphere gizmo) }
+    HingeJoint := TCastleHingeJoint.Create(nil);
+    HingeJoint.Anchor := Vector3(0.5, 0.5, 0);
+    Box.AddBehavior(HingeJoint);
+    HingeJoint.InternalCreateGizmos;
+
+    { Attach TCastlePointLight in CastleDesignMode (creates TInternalCastleEditorGizmo with billboard icon + lines) }
+    PointLight := TCastlePointLight.Create(nil);
+    PointLight.Translation := Vector3(-1, 1, -4);
+    Viewport.Items.Add(PointLight);
+
+    { Create TCastleTransformManipulate and select Box }
+    Manipulate := TCastleTransformManipulate.Create(nil);
+    Manipulate.SetSelected([Box]);
+
+    RenderContext := Container.Context;
+    RenderContext.Viewport := Rectangle(0, 0, 256, 256);
+
+    Cmd := Device.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(Cmd);
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 256, 256),
+      TargetTex, loClear, Vector4(0, 0, 0, 1),
+      DepthTex, loClear, 1.0);
+    Cmd.BeginRendering(PassInfo);
+
+    { 1. Render with mmSelect }
+    Manipulate.Mode := mmSelect;
+    DrawsBefore := Cmd.PushConstantCallCount;
+    ViewportUpdatesBefore := RenderContext.RHIViewportUpdateCount;
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+    AssertTrue('Rendering Box + Collider wireframe + TDebugTransform + Hover + JointTool + PointLight gizmo must record RHI shape draws',
+      Cmd.PushConstantCallCount >= DrawsBefore + 6);
+    AssertTrue('rlFront gizmos must trigger RenderContext DepthRange (drNear -> drFull) RHI viewport updates',
+      RenderContext.RHIViewportUpdateCount > ViewportUpdatesBefore);
+
+    { 2. Render with mmTranslate gizmo }
+    Manipulate.Mode := mmTranslate;
+    DrawsBefore := Cmd.PushConstantCallCount;
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+    AssertTrue('Manipulate.Mode = mmTranslate must record gizmo RHI shape draws',
+      Cmd.PushConstantCallCount > DrawsBefore + 6);
+
+    { 3. Render with mmRotate gizmo }
+    Manipulate.Mode := mmRotate;
+    DrawsBefore := Cmd.PushConstantCallCount;
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+    AssertTrue('Manipulate.Mode = mmRotate must record gizmo RHI shape draws',
+      Cmd.PushConstantCallCount > DrawsBefore + 6);
+
+    { 4. Render with mmScale gizmo }
+    Manipulate.Mode := mmScale;
+    DrawsBefore := Cmd.PushConstantCallCount;
+    Container.RenderControl(Viewport, Rectangle(0, 0, 256, 256));
+    AssertTrue('Manipulate.Mode = mmScale must record gizmo RHI shape draws',
+      Cmd.PushConstantCallCount > DrawsBefore + 6);
+
+    HingeJoint.InternalDestroyGizmos;
+    Collider.InternalDesigningEnd;
+    Manipulate.SetSelected([]);
+    Hover.Current := nil;
+
+    Cmd.EndRendering;
+    Device.EndFrameAndPresent;
+  finally
+    InternalCastleApplicationMode := SavedAppMode;
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    FreeAndNil(Manipulate);
+    FreeAndNil(Hover);
+    FreeAndNil(DebugTrans);
+    FreeAndNil(PointLight);
+    FreeAndNil(HingeJoint);
+    FreeAndNil(Collider);
+    FreeAndNil(Box);
+    FreeAndNil(Viewport);
+    FreeAndNil(Container);
+    FreeAndNil(DepthTex);
     FreeAndNil(TargetTex);
     FreeGlobalBatch2DRenderer;
     SetActiveCommandList(SavedCmd);

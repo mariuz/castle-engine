@@ -198,6 +198,10 @@
       (TPointPropertiesNode). Returns True if effective point size > 1.0. }
     function ExtractRHIPointSize(out APointSize: Single): Boolean;
 
+    { Extracts X3D LineProperties.lineType (TLinePropertiesNode) and 16-bit stipple pattern
+      when LineProperties.applied is True. Returns True if lineType <> ltSolid. }
+    function ExtractRHILineType(out ALineType: TLineType; out ALineStipplePattern: Word): Boolean;
+
     { Extracts parallax / steep parallax bump mapping settings from RenderOptions.BumpMapping
       and the shape's normal map / height map scale. }
     function ExtractRHIParallaxBumpMapping(
@@ -1903,21 +1907,72 @@ end;
 
 function TX3DRendererShape.ExtractRHIPointSize(out APointSize: Single): Boolean;
 var
+  ShapeState: TX3DGraphTraverseState;
+  App: TAppearanceNode;
   PP: TPointPropertiesNode;
 begin
-  APointSize := 1.0;
-  if (State <> nil) and (State.Appearance <> nil) then
+  if (Cache <> nil) and (Cache.RenderOptions <> nil) and
+     (not SameValue(Cache.RenderOptions.PointSize, TCastleRenderOptions.DefaultPointSize, 1e-4)) then
+    APointSize := Cache.RenderOptions.PointSize
+  else
+    APointSize := 1.0;
+
+  ShapeState := OriginalState;
+  if ShapeState = nil then
+    ShapeState := State;
+  if ShapeState <> nil then
   begin
-    PP := State.Appearance.PointProperties;
-    if PP <> nil then
-      APointSize := Clamped(
-        PP.FdPointSizeScaleFactor.Value,
-        PP.FdPointSizeMinValue.Value,
-        PP.FdPointSizeMaxValue.Value);
+    if ShapeState.ShapeNode <> nil then
+      App := ShapeState.ShapeNode.Appearance
+    else
+      App := ShapeState.Appearance;
+    if App <> nil then
+    begin
+      PP := App.PointProperties;
+      if PP <> nil then
+        APointSize := APointSize * Clamped(
+          PP.FdPointSizeScaleFactor.Value,
+          PP.FdPointSizeMinValue.Value,
+          PP.FdPointSizeMaxValue.Value);
+    end;
   end;
 
   APointSize := Max(1.0, APointSize);
   Result := APointSize > 1.0001;
+end;
+
+function TX3DRendererShape.ExtractRHILineType(
+  out ALineType: TLineType;
+  out ALineStipplePattern: Word): Boolean;
+var
+  ShapeState: TX3DGraphTraverseState;
+  App: TAppearanceNode;
+  LP: TLinePropertiesNode;
+begin
+  ALineType := ltSolid;
+  ALineStipplePattern := $FFFF;
+  Result := False;
+
+  ShapeState := OriginalState;
+  if ShapeState = nil then
+    ShapeState := State;
+  if ShapeState = nil then
+    Exit;
+
+  if ShapeState.ShapeNode <> nil then
+    App := ShapeState.ShapeNode.Appearance
+  else
+    App := ShapeState.Appearance;
+  if App <> nil then
+  begin
+    LP := App.LineProperties;
+    if (LP <> nil) and LP.FdApplied.Value then
+    begin
+      ALineType := LP.LineType;
+      ALineStipplePattern := TRenderContext.LineTypeToStipplePattern(ALineType);
+      Result := ALineType <> ltSolid;
+    end;
+  end;
 end;
 
 function TX3DRendererShape.ExtractRHIParallaxBumpMapping(
@@ -2647,8 +2702,10 @@ var
   TexGenBoundsS, TexGenBoundsT, TexGenBoundsR: TVector4;
   TexCoordGen: TTextureCoordinateGeneration;
   PointSize, ParallaxHeight, PhongAmbIntensity: Single;
+  LineType: TLineType;
+  LineStipplePattern: Word;
   VertEffectCode, FragEffectCode, GeomEffectCode, ComposedVertCode, ComposedFragCode, ComposedGeomCode: String;
-  HasTexTransform, HasTexTransform1, HasSecondTex, HasMultiTex2, HasMultiTex3, HasClipPlane, HasIBL, HasShadowMap, HasTexCoordGen, HasPointSize,
+  HasTexTransform, HasTexTransform1, HasSecondTex, HasMultiTex2, HasMultiTex3, HasClipPlane, HasIBL, HasShadowMap, HasTexCoordGen, HasPointSize, HasLineStipple,
     HasParallax, SteepParallax, SelfShadowParallax, HasShaderEffects, HasComposedShader,
     IsPhongMat, PhongHasSpecTex, PhongHasShinTex, PhongHasAmbTex, InvertAlpha: Boolean;
   BaseColorMapIdx, NormalMapIdx, MetallicRoughnessMapIdx, EmissiveMapIdx, OcclusionMapIdx: Cardinal;
@@ -2740,6 +2797,7 @@ begin
     HasShadowMap := ExtractRHIShadowMap(ShadowMapTex, ShadowMapSampler);
     HasTexCoordGen := ExtractRHITexCoordGen(TexCoordGen, TexGenBoundsS, TexGenBoundsT, TexGenBoundsR);
     HasPointSize := ExtractRHIPointSize(PointSize);
+    HasLineStipple := ExtractRHILineType(LineType, LineStipplePattern);
     HasParallax := ExtractRHIParallaxBumpMapping(ParallaxHeight, SteepParallax, SelfShadowParallax);
     HasShaderEffects := ExtractRHIShaderEffects(VertEffectCode, FragEffectCode, GeomEffectCode);
     HasComposedShader := ExtractRHIComposedShader(ComposedVertCode, ComposedFragCode, ComposedGeomCode);
@@ -2779,6 +2837,7 @@ begin
         Cache.SetMirrorPlaneUniforms(
           False, TVector4.Zero, TVector3.Zero, TVector3.Zero, TVector3.Zero, TVector4.Zero);
       Cache.SetPointSize(PointSize);
+      Cache.SetLineType(LineType);
       Cache.SetParallaxBumpMapping(HasParallax, SteepParallax, SelfShadowParallax, ParallaxHeight);
       Cache.SetShaderEffects(VertEffectCode, FragEffectCode, GeomEffectCode);
       Cache.SetComposedShader(ComposedVertCode, ComposedFragCode, ComposedGeomCode);
@@ -2823,7 +2882,7 @@ begin
         HasIBL,
         HasShadowMap,
         HasTexCoordGen,
-        HasShaderEffects or HasPointSize,
+        HasShaderEffects or HasPointSize or HasLineStipple,
         HasComposedShader);
     end;
     if BaseColorTex <> nil then
