@@ -37,14 +37,22 @@ const
   VK_KHR_ANDROID_SURFACE_EXTENSION_NAME         = 'VK_KHR_android_surface';
   VK_EXT_METAL_SURFACE_EXTENSION_NAME           = 'VK_EXT_metal_surface';
   VK_NN_VI_SURFACE_EXTENSION_NAME               = 'VK_NN_vi_surface';
+  VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME        = 'VK_EXT_headless_surface';
   VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME = 'VK_KHR_portability_enumeration';
 
-  VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR   = 1000009000;
-  VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR    = 1000004000;
-  VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR = 1000006000;
-  VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR = 1000008000;
-  VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN       = 1000062000;
-  VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT   = 1000217000;
+  VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR    = 1000009000;
+  VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR     = 1000004000;
+  VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR  = 1000006000;
+  VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR  = 1000008000;
+  VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN        = 1000062000;
+  VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT    = 1000217000;
+  VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT = 1000256000;
+
+  VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR   = $00000001;
+
+  VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR  = $00000002;
+  VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR = $00000004;
+  VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR         = $00000008;
 
 type
   TAnsiStringArray = array of AnsiString;
@@ -179,6 +187,21 @@ type
     const pAllocator: PVkAllocationCallbacks;
     pSurface: PVkSurfaceKHR): VkResult; {$ifdef MSWINDOWS}stdcall{$else}cdecl{$endif};
 
+  { Headless WSI (VK_EXT_headless_surface) }
+  VkHeadlessSurfaceCreateFlagsEXT = VkFlags;
+  PVkHeadlessSurfaceCreateInfoEXT = ^VkHeadlessSurfaceCreateInfoEXT;
+  VkHeadlessSurfaceCreateInfoEXT = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    flags: VkHeadlessSurfaceCreateFlagsEXT;
+  end;
+
+  PFN_vkCreateHeadlessSurfaceEXT = function(
+    instance: VkInstance;
+    const pCreateInfo: PVkHeadlessSurfaceCreateInfoEXT;
+    const pAllocator: PVkAllocationCallbacks;
+    pSurface: PVkSurfaceKHR): VkResult; {$ifdef MSWINDOWS}stdcall{$else}cdecl{$endif};
+
   { Unified cross-platform native window surface descriptor populated by TCastleWindow }
   TVulkanNativeSurfaceDesc = record
     Platform: TVulkanWSIPlatform;
@@ -200,6 +223,7 @@ type
     class function CreateAndroid(const ANativeWindow: PANativeWindow): TVulkanNativeSurfaceDesc; static;
     class function CreateMetal(const AMetalLayer: PCAMetalLayer): TVulkanNativeSurfaceDesc; static;
     class function CreateViSwitch(const AViWindow: PViWindowHandleNN): TVulkanNativeSurfaceDesc; static;
+    class function CreateHeadless: TVulkanNativeSurfaceDesc; static;
   end;
 
 function CreateVulkanWin32Surface(const AInstance: VkInstance;
@@ -220,6 +244,8 @@ function CreateVulkanMetalSurface(const AInstance: VkInstance;
 function CreateVulkanViSurface(const AInstance: VkInstance;
   const AViWindow: PViWindowHandleNN): VkSurfaceKHR;
 
+function CreateVulkanHeadlessSurface(const AInstance: VkInstance): VkSurfaceKHR;
+
 { Returns the default WSI platform for the compiled target OS }
 function GetDefaultVulkanWSIPlatform: TVulkanWSIPlatform;
 
@@ -232,12 +258,30 @@ function ValidateVulkanNativeSurfaceDesc(const ADesc: TVulkanNativeSurfaceDesc):
 
 { Dispatches VkSurfaceKHR creation to the appropriate OS WSI extension function
   (vkCreateWin32SurfaceKHR, vkCreateXlibSurfaceKHR, vkCreateWaylandSurfaceKHR,
-  vkCreateAndroidSurfaceKHR, vkCreateMetalSurfaceEXT, or vkCreateViSurfaceNN) }
+  vkCreateAndroidSurfaceKHR, vkCreateMetalSurfaceEXT, vkCreateViSurfaceNN,
+  or vkCreateHeadlessSurfaceEXT) }
 function CreateVulkanSurfaceFromNativeDesc(const AInstance: VkInstance;
   const ADesc: TVulkanNativeSurfaceDesc): VkSurfaceKHR;
 
 { Returns the required VkInstance surface extensions for the current OS }
 function GetRequiredVulkanInstanceExtensions: TAnsiStringArray;
+
+{ Enumerates all VkInstance extension names supported by the active Vulkan loader }
+function QuerySupportedVulkanInstanceExtensions: TAnsiStringArray;
+
+{ Returns True when AExtensionName is advertised by vkEnumerateInstanceExtensionProperties }
+function IsVulkanInstanceExtensionSupported(const AExtensionName: AnsiString): Boolean;
+
+{ Filters known WSI instance extensions (VK_KHR_surface, Xlib, Wayland, Win32,
+  Android, Metal, Switch Vi, VK_EXT_headless_surface, VK_KHR_portability_enumeration)
+  against AAvailableExtensions, setting AEnablePortabilityBit when portability enumeration is included }
+function BuildAvailableVulkanWSIInstanceExtensions(
+  const AAvailableExtensions: array of AnsiString;
+  out AEnablePortabilityBit: Boolean): TAnsiStringArray;
+
+{ Queries the live Vulkan loader and returns all supported WSI instance extensions }
+function GetAvailableVulkanWSIInstanceExtensions(
+  out AEnablePortabilityBit: Boolean): TAnsiStringArray;
 
 { Resolves the active render backend given hardware capabilities.
   Enforces the Vulkan 1.1+ minimum baseline and falls back to OpenGLES 3.0 on
@@ -300,6 +344,12 @@ begin
   Result.ViWindowHandle := AViWindow;
 end;
 
+class function TVulkanNativeSurfaceDesc.CreateHeadless: TVulkanNativeSurfaceDesc;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  Result.Platform := vwsiHeadless;
+end;
+
 function ResolveSurfaceProc(const AInstance: VkInstance; const AProcName: PAnsiChar): Pointer;
 begin
   Result := nil;
@@ -355,6 +405,8 @@ begin
                  VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME];
     vwsiViSwitch:
       Result := [VK_KHR_SURFACE_EXTENSION_NAME, VK_NN_VI_SURFACE_EXTENSION_NAME];
+    vwsiHeadless:
+      Result := [VK_KHR_SURFACE_EXTENSION_NAME, VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME];
   else
     Result := [VK_KHR_SURFACE_EXTENSION_NAME];
   end;
@@ -363,6 +415,106 @@ end;
 function GetRequiredVulkanInstanceExtensions: TAnsiStringArray;
 begin
   Result := GetRequiredVulkanInstanceExtensionsForPlatform(vwsiAuto);
+end;
+
+function QuerySupportedVulkanInstanceExtensions: TAnsiStringArray;
+var
+  ExtCount, I: Cardinal;
+  Exts: array of VkExtensionProperties;
+begin
+  SetLength(Result, 0);
+  if not IsVulkanLoaded then
+  begin
+    if not LoadVulkan then
+      Exit;
+  end;
+  if not Assigned(vkEnumerateInstanceExtensionProperties) then
+    Exit;
+  ExtCount := 0;
+  if vkEnumerateInstanceExtensionProperties(nil, @ExtCount, nil) <> VK_SUCCESS then
+    Exit;
+  if ExtCount = 0 then
+    Exit;
+  SetLength(Exts, ExtCount);
+  if vkEnumerateInstanceExtensionProperties(nil, @ExtCount, @Exts[0]) <> VK_SUCCESS then
+    Exit;
+  SetLength(Result, ExtCount);
+  for I := 0 to ExtCount - 1 do
+    Result[I] := PAnsiChar(@Exts[I].extensionName[0]);
+end;
+
+function IsVulkanInstanceExtensionSupported(const AExtensionName: AnsiString): Boolean;
+var
+  Supported: TAnsiStringArray;
+  I: Integer;
+begin
+  Supported := QuerySupportedVulkanInstanceExtensions;
+  for I := 0 to High(Supported) do
+    if Supported[I] = AExtensionName then
+      Exit(True);
+  Result := False;
+end;
+
+function BuildAvailableVulkanWSIInstanceExtensions(
+  const AAvailableExtensions: array of AnsiString;
+  out AEnablePortabilityBit: Boolean): TAnsiStringArray;
+const
+  CandidateExts: array[0..8] of AnsiString = (
+    VK_KHR_SURFACE_EXTENSION_NAME,
+    VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+    VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
+    VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
+    VK_KHR_ANDROID_SURFACE_EXTENSION_NAME,
+    VK_EXT_METAL_SURFACE_EXTENSION_NAME,
+    VK_NN_VI_SURFACE_EXTENSION_NAME,
+    VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME,
+    VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME
+  );
+
+  function HasAvailable(const AExt: AnsiString): Boolean;
+  var
+    J: Integer;
+  begin
+    for J := Low(AAvailableExtensions) to High(AAvailableExtensions) do
+      if AAvailableExtensions[J] = AExt then
+        Exit(True);
+    Result := False;
+  end;
+
+var
+  I, OutCount: Integer;
+begin
+  AEnablePortabilityBit := False;
+  SetLength(Result, 0);
+  if Length(AAvailableExtensions) = 0 then
+  begin
+    Result := GetRequiredVulkanInstanceExtensions;
+    for I := 0 to High(Result) do
+      if Result[I] = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME then
+        AEnablePortabilityBit := True;
+    Exit;
+  end;
+
+  OutCount := 0;
+  SetLength(Result, Length(CandidateExts));
+  for I := Low(CandidateExts) to High(CandidateExts) do
+    if HasAvailable(CandidateExts[I]) then
+    begin
+      Result[OutCount] := CandidateExts[I];
+      if CandidateExts[I] = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME then
+        AEnablePortabilityBit := True;
+      Inc(OutCount);
+    end;
+  SetLength(Result, OutCount);
+end;
+
+function GetAvailableVulkanWSIInstanceExtensions(
+  out AEnablePortabilityBit: Boolean): TAnsiStringArray;
+var
+  Supported: TAnsiStringArray;
+begin
+  Supported := QuerySupportedVulkanInstanceExtensions;
+  Result := BuildAvailableVulkanWSIInstanceExtensions(Supported, AEnablePortabilityBit);
 end;
 
 function ValidateVulkanNativeSurfaceDesc(const ADesc: TVulkanNativeSurfaceDesc): Boolean;
@@ -386,6 +538,8 @@ begin
       Result := ADesc.MetalLayer <> nil;
     vwsiViSwitch:
       Result := ADesc.ViWindowHandle <> nil;
+    vwsiHeadless:
+      Result := ADesc.Platform = vwsiHeadless;
   else
     Result := False;
   end;
@@ -418,6 +572,8 @@ begin
       Result := CreateVulkanMetalSurface(AInstance, ADesc.MetalLayer);
     vwsiViSwitch:
       Result := CreateVulkanViSurface(AInstance, ADesc.ViWindowHandle);
+    vwsiHeadless:
+      Result := CreateVulkanHeadlessSurface(AInstance);
   else
     raise ERHIError.CreateFmt('Unsupported Vulkan WSI platform %d', [Ord(ResolvedPlatform)]);
   end;
@@ -546,6 +702,18 @@ begin
   CreateInfo.sType := VK_STRUCTURE_TYPE_VI_SURFACE_CREATE_INFO_NN;
   CreateInfo.window := AViWindow;
   CheckSurfaceResult(CreateFn(AInstance, @CreateInfo, nil, @Result), 'vkCreateViSurfaceNN');
+end;
+
+function CreateVulkanHeadlessSurface(const AInstance: VkInstance): VkSurfaceKHR;
+var
+  CreateFn: PFN_vkCreateHeadlessSurfaceEXT;
+  CreateInfo: VkHeadlessSurfaceCreateInfoEXT;
+begin
+  Result := VK_NULL_HANDLE;
+  Pointer(CreateFn) := ResolveSurfaceProc(AInstance, 'vkCreateHeadlessSurfaceEXT');
+  FillChar(CreateInfo, SizeOf(CreateInfo), 0);
+  CreateInfo.sType := VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT;
+  CheckSurfaceResult(CreateFn(AInstance, @CreateInfo, nil, @Result), 'vkCreateHeadlessSurfaceEXT');
 end;
 
 end.

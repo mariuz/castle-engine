@@ -3629,9 +3629,15 @@ type
     FSwapchainDepthFormat: TRHIPixelFormat;
     FSwapchainColorSpace: VkColorSpaceKHR;
     FSwapchainPresentMode: VkPresentModeKHR;
+    FSwapchainCompositeAlpha: Integer;
     FSwapchainRecreateCount: Cardinal;
     FSwapchainExtent: VkExtent2D;
+    FRequestedSwapchainWidth: Cardinal;
+    FRequestedSwapchainHeight: Cardinal;
+    FSwapchainMinimized: Boolean;
+    FSwapchainSuboptimal: Boolean;
     FSwapchainColorTextures: array of TVulkanRHITexture;
+    FSwapchainRenderFinishedSemaphores: array of VkSemaphore;
     FSwapchainDepthTexture: TVulkanRHITexture;
     FSwapchainMSAAColorTexture: TVulkanRHITexture;
     FSwapchainMSAADepthTexture: TVulkanRHITexture;
@@ -3759,7 +3765,9 @@ type
     procedure PickPhysicalDevice;
     procedure CreateLogicalDevice;
     procedure CreateSwapchain(const Width, Height: Cardinal);
+    procedure DestroySwapchainResources(const ADestroySwapchainHandle: Boolean = True);
     procedure DestroySwapchain;
+    function GetSwapchainImageCount: Cardinal;
     procedure EnsureMSAATargets(const AWidth, AHeight: Cardinal;
       const AColorFormat, ADepthFormat: TRHIPixelFormat);
     procedure CreateFrameContexts;
@@ -4012,6 +4020,10 @@ type
 
     property Handle: VkDevice read FDevice;
     property PhysicalDevice: VkPhysicalDevice read FPhysicalDevice;
+    property SurfaceHandle: VkSurfaceKHR read FSurface;
+    property SwapchainHandle: VkSwapchainKHR read FSwapchain;
+    property SwapchainImageCount: Cardinal read GetSwapchainImageCount;
+    property SwapchainExtent: VkExtent2D read FSwapchainExtent;
     property InstanceApiVersion: Cardinal read FInstanceApiVersion;
     property DeviceApiVersion: Cardinal read FDeviceApiVersion write FDeviceApiVersion;
     property AntiAliasing: TAntiAliasing read FAntiAliasing write SetAntiAliasing;
@@ -4022,6 +4034,9 @@ type
     property SwapchainDepthFormat: TRHIPixelFormat read FSwapchainDepthFormat;
     property SwapchainColorSpace: VkColorSpaceKHR read FSwapchainColorSpace;
     property SwapchainPresentMode: VkPresentModeKHR read FSwapchainPresentMode;
+    property SwapchainCompositeAlpha: Integer read FSwapchainCompositeAlpha;
+    property SwapchainMinimized: Boolean read FSwapchainMinimized;
+    property SwapchainSuboptimal: Boolean read FSwapchainSuboptimal;
     property SwapchainRecreateCount: Cardinal read FSwapchainRecreateCount;
     property CurrentSwapchainImageIndex: Cardinal read FCurrentSwapchainImageIndex;
     property SwapchainMSAAColorTexture: TVulkanRHITexture read FSwapchainMSAAColorTexture;
@@ -4123,6 +4138,7 @@ type
     property MemoryAllocator: TCastleVulkanMemoryAllocator read FMemoryAllocator;
     property StagingUploader: TCastleVulkanStagingUploader read FStagingUploader;
     property GraphicsQueueFamily: Cardinal read FGraphicsQueueFamily;
+    property PresentQueueFamily: Cardinal read FPresentQueueFamily;
     property TransferQueueFamily: Cardinal read FTransferQueueFamily;
     property HasDedicatedTransferQueue: Boolean read FHasDedicatedTransferQueue;
     property DeferResourceDestruction: Boolean read FDeferResourceDestruction write FDeferResourceDestruction;
@@ -4206,6 +4222,10 @@ function SelectVulkanSurfaceFormat(const AAvailableFormats: array of VkSurfaceFo
   when APreferLowLatencyNoTear = True and otherwise guaranteed tear-free VK_PRESENT_MODE_FIFO_KHR. }
 function SelectVulkanPresentMode(const AAvailableModes: array of VkPresentModeKHR;
   const APreferLowLatencyNoTear: Boolean = False): VkPresentModeKHR;
+
+{ Negotiates a supported VkCompositeAlphaFlagBitsKHR value from ASupportedCompositeAlpha,
+  preferring VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, then PRE_MULTIPLIED, POST_MULTIPLIED, and INHERIT. }
+function SelectVulkanCompositeAlpha(const ASupportedCompositeAlpha: VkFlags): Integer;
 
 { Negotiates the highest supported VkApplicationInfo.apiVersion (1.3, 1.2, 1.1, or 1.0)
   for a given loader version reported by vkEnumerateInstanceVersion. }
@@ -5318,6 +5338,21 @@ begin
       Exit(VK_PRESENT_MODE_FIFO_KHR);
 
   Result := AAvailableModes[0];
+end;
+
+function SelectVulkanCompositeAlpha(const ASupportedCompositeAlpha: VkFlags): Integer;
+begin
+  if (ASupportedCompositeAlpha = 0) or
+     ((ASupportedCompositeAlpha and VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) <> 0) then
+    Result := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+  else if (ASupportedCompositeAlpha and VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR) <> 0 then
+    Result := VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR
+  else if (ASupportedCompositeAlpha and VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR) <> 0 then
+    Result := VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR
+  else if (ASupportedCompositeAlpha and VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR) <> 0 then
+    Result := VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR
+  else
+    Result := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 end;
 
 procedure RHIStateToVkLayoutAndAccess(const State: TRHIResourceState;
@@ -18244,6 +18279,9 @@ begin
   FSwapchainDepthFormat := pfD24_UNorm_S8_UInt;
   FSwapchainColorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
   FSwapchainPresentMode := VK_PRESENT_MODE_FIFO_KHR;
+  FSwapchainCompositeAlpha := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  FRequestedSwapchainWidth := InitialWidth;
+  FRequestedSwapchainHeight := InitialHeight;
 
   LoadVulkan;
   CreateInstance(EnableValidation);
@@ -18284,6 +18322,7 @@ begin
   FSwapchainDepthFormat := pfD24_UNorm_S8_UInt;
   FSwapchainColorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
   FSwapchainPresentMode := VK_PRESENT_MODE_FIFO_KHR;
+  FSwapchainCompositeAlpha := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 
   LoadVulkan;
   CreateInstance(EnableValidation, False);
@@ -18345,6 +18384,7 @@ begin
   FSwapchainDepthFormat := pfD24_UNorm_S8_UInt;
   FSwapchainColorSpace := VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
   FSwapchainPresentMode := VK_PRESENT_MODE_FIFO_KHR;
+  FSwapchainCompositeAlpha := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
   FCapabilities.Backend := rbVulkan;
   FCapabilities.DeviceName := 'Headless Vulkan RHI Device';
   FCapabilities.MaxTextureSize := 16384;
@@ -19207,6 +19247,7 @@ var
   ExtPtrs: array of PAnsiChar;
   LayerName: PAnsiChar;
   LoaderVer: Cardinal;
+  EnablePortabilityBit: Boolean;
   I: Integer;
   Res: VkResult;
 begin
@@ -19228,8 +19269,9 @@ begin
   AppInfo.engineVersion := FInstanceApiVersion;
   AppInfo.apiVersion := FInstanceApiVersion;
 
+  EnablePortabilityBit := False;
   if ARequireSurfaceExtensions then
-    ExtNames := GetRequiredVulkanInstanceExtensions
+    ExtNames := GetAvailableVulkanWSIInstanceExtensions(EnablePortabilityBit)
   else
     SetLength(ExtNames, 0);
   SetLength(ExtPtrs, Length(ExtNames));
@@ -19238,6 +19280,8 @@ begin
 
   FillChar(CreateInfo, SizeOf(CreateInfo), 0);
   CreateInfo.sType := VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+  if EnablePortabilityBit then
+    CreateInfo.flags := CreateInfo.flags or VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
   CreateInfo.pApplicationInfo := @AppInfo;
   CreateInfo.enabledExtensionCount := Length(ExtPtrs);
   if Length(ExtPtrs) > 0 then
@@ -19293,7 +19337,54 @@ var
   GplProps: VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT;
   DescIdxProps: VkPhysicalDeviceDescriptorIndexingProperties;
   HasGplFeature, HasExtDynFeature, HasSync2Feature, HasTimelineFeature: Boolean;
+  FoundPresentDevice: Boolean;
   ReqDynRenderExts, ReqGplExts, ReqBindlessExts, ReqExtDynSync2Exts: TAnsiStringArray;
+
+  function DeviceSupportsSurface(const ADev: VkPhysicalDevice): Boolean;
+  var
+    ExtCount, QCount, J: Cardinal;
+    Exts: array of VkExtensionProperties;
+    HasSwapchainExt: Boolean;
+    PresentSupport: VkBool32;
+  begin
+    if FSurface = VK_NULL_HANDLE then
+      Exit(True);
+    HasSwapchainExt := False;
+    if Assigned(vkEnumerateDeviceExtensionProperties) then
+    begin
+      ExtCount := 0;
+      if (vkEnumerateDeviceExtensionProperties(ADev, nil, @ExtCount, nil) = VK_SUCCESS) and
+         (ExtCount > 0) then
+      begin
+        SetLength(Exts, ExtCount);
+        if vkEnumerateDeviceExtensionProperties(ADev, nil, @ExtCount, @Exts[0]) = VK_SUCCESS then
+          for J := 0 to ExtCount - 1 do
+            if AnsiString(PAnsiChar(@Exts[J].extensionName[0])) = VK_KHR_swapchain then
+            begin
+              HasSwapchainExt := True;
+              Break;
+            end;
+      end;
+    end else
+      HasSwapchainExt := True;
+
+    if not HasSwapchainExt then
+      Exit(False);
+    if not Assigned(vkGetPhysicalDeviceSurfaceSupportKHR) then
+      Exit(True);
+
+    QCount := 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(ADev, @QCount, nil);
+    for J := 0 to QCount - 1 do
+    begin
+      PresentSupport := VK_FALSE;
+      if (vkGetPhysicalDeviceSurfaceSupportKHR(ADev, J, FSurface, @PresentSupport) = VK_SUCCESS) and
+         (PresentSupport = VK_TRUE) then
+        Exit(True);
+    end;
+    Result := False;
+  end;
+
 begin
   DeviceCount := 0;
   CheckVk(vkEnumeratePhysicalDevices(FInstance, @DeviceCount, nil), 'vkEnumeratePhysicalDevices(count)');
@@ -19303,18 +19394,29 @@ begin
   SetLength(Devices, DeviceCount);
   CheckVk(vkEnumeratePhysicalDevices(FInstance, @DeviceCount, @Devices[0]), 'vkEnumeratePhysicalDevices');
 
-  { Prefer discrete GPU meeting Vulkan 1.1+ baseline, otherwise any Vulkan 1.1+ GPU }
+  { Prefer present-capable discrete GPU meeting Vulkan 1.1+ baseline, otherwise any present-capable Vulkan 1.1+ GPU }
   FPhysicalDevice := Devices[0];
+  FoundPresentDevice := False;
   for I := 0 to DeviceCount - 1 do
   begin
     vkGetPhysicalDeviceProperties(Devices[I], @Props);
-    if (Props.deviceType = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) and
-       (Props.apiVersion >= VK_API_VERSION_1_1) then
+    if DeviceSupportsSurface(Devices[I]) then
     begin
-      FPhysicalDevice := Devices[I];
-      Break;
-    end;
-    if Props.apiVersion >= VK_API_VERSION_1_1 then
+      if not FoundPresentDevice then
+      begin
+        FPhysicalDevice := Devices[I];
+        FoundPresentDevice := True;
+      end;
+      if (Props.deviceType = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) and
+         (Props.apiVersion >= VK_API_VERSION_1_1) then
+      begin
+        FPhysicalDevice := Devices[I];
+        Break;
+      end;
+      if Props.apiVersion >= VK_API_VERSION_1_1 then
+        FPhysicalDevice := Devices[I];
+    end else
+    if (not FoundPresentDevice) and (Props.apiVersion >= VK_API_VERSION_1_1) then
       FPhysicalDevice := Devices[I];
   end;
 
@@ -19532,6 +19634,7 @@ var
   I: Integer;
   QueueProps: array of VkQueueFamilyProperties;
   PresentSupport: VkBool32;
+  HasGraphics, HasPresent, FoundGraphicsQueue, FoundPresentQueue: Boolean;
   QueueInfos: array[0..2] of VkDeviceQueueCreateInfo;
   QueuePriority: Single;
   DynRenderFeatures: VkPhysicalDeviceDynamicRenderingFeatures;
@@ -19556,19 +19659,40 @@ begin
 
   FGraphicsQueueFamily := 0;
   FPresentQueueFamily := 0;
+  FoundGraphicsQueue := False;
+  FoundPresentQueue := False;
   for I := 0 to Integer(QueueCount) - 1 do
   begin
-    if (QueueProps[I].queueFlags and VK_QUEUE_GRAPHICS_BIT) <> 0 then
-      FGraphicsQueueFamily := Cardinal(I);
+    HasGraphics := (QueueProps[I].queueFlags and VK_QUEUE_GRAPHICS_BIT) <> 0;
     if (FSurface <> VK_NULL_HANDLE) and Assigned(vkGetPhysicalDeviceSurfaceSupportKHR) then
     begin
       PresentSupport := VK_FALSE;
-      if vkGetPhysicalDeviceSurfaceSupportKHR(FPhysicalDevice, Cardinal(I), FSurface, @PresentSupport) = VK_SUCCESS then
-        if PresentSupport = VK_TRUE then
-          FPresentQueueFamily := Cardinal(I);
+      HasPresent := (vkGetPhysicalDeviceSurfaceSupportKHR(FPhysicalDevice, Cardinal(I), FSurface, @PresentSupport) = VK_SUCCESS) and
+                    (PresentSupport = VK_TRUE);
     end else
-      FPresentQueueFamily := FGraphicsQueueFamily;
+      HasPresent := HasGraphics;
+
+    if HasGraphics and HasPresent then
+    begin
+      FGraphicsQueueFamily := Cardinal(I);
+      FPresentQueueFamily := Cardinal(I);
+      FoundGraphicsQueue := True;
+      FoundPresentQueue := True;
+      Break;
+    end;
+    if HasGraphics and (not FoundGraphicsQueue) then
+    begin
+      FGraphicsQueueFamily := Cardinal(I);
+      FoundGraphicsQueue := True;
+    end;
+    if HasPresent and (not FoundPresentQueue) then
+    begin
+      FPresentQueueFamily := Cardinal(I);
+      FoundPresentQueue := True;
+    end;
   end;
+  if not FoundPresentQueue then
+    FPresentQueueFamily := FGraphicsQueueFamily;
   FTransferQueueFamily := SelectTransferQueueFamilyIndex(QueueProps, FGraphicsQueueFamily, FHasDedicatedTransferQueue);
 
   QueuePriority := 1.0;
@@ -20586,81 +20710,149 @@ var
   PresentModes: array of VkPresentModeKHR;
   SurfFmt: VkSurfaceFormatKHR;
   CreateInfo: VkSwapchainCreateInfoKHR;
+  QueueFamilyIndices: array[0..1] of Cardinal;
+  ImageUsage: VkImageUsageFlags;
+  ColorUsage: TRHITextureUsageFlags;
+  OldSwapchain: VkSwapchainKHR;
   Images: array of VkImage;
   ViewInfo: VkImageViewCreateInfo;
+  SemInfo: VkSemaphoreCreateInfo;
   ImgView: VkImageView;
   ColorDesc, DepthDesc: TRHITextureDesc;
 begin
+  if (Width > 0) and (Height > 0) then
+  begin
+    FRequestedSwapchainWidth := Width;
+    FRequestedSwapchainHeight := Height;
+  end;
   if (FSurface = VK_NULL_HANDLE) or (FDevice = nil) then Exit;
 
   FillChar(Caps, SizeOf(Caps), 0);
   CheckVk(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(FPhysicalDevice, FSurface, @Caps),
     'vkGetPhysicalDeviceSurfaceCapabilitiesKHR');
 
-  SurfaceFormatCount := 0;
-  SurfaceFormats := nil;
-  if Assigned(vkGetPhysicalDeviceSurfaceFormatsKHR) and
-     (vkGetPhysicalDeviceSurfaceFormatsKHR(FPhysicalDevice, FSurface, @SurfaceFormatCount, nil) = VK_SUCCESS) and
-     (SurfaceFormatCount > 0) then
+  { Handle minimized (0x0) window surfaces gracefully without invoking vkCreateSwapchainKHR }
+  if ((Caps.currentExtent.width = 0) and (Caps.currentExtent.height = 0)) or
+     (((Width = 0) or (Height = 0)) and (Caps.currentExtent.width = High(Cardinal))) then
   begin
-    SetLength(SurfaceFormats, SurfaceFormatCount);
-    vkGetPhysicalDeviceSurfaceFormatsKHR(FPhysicalDevice, FSurface, @SurfaceFormatCount, @SurfaceFormats[0]);
-  end;
-  SurfFmt := SelectVulkanSurfaceFormat(SurfaceFormats, FSwapchainFormat);
-  FSwapchainColorSpace := SurfFmt.colorSpace;
-
-  PresentModeCount := 0;
-  PresentModes := nil;
-  if Assigned(vkGetPhysicalDeviceSurfacePresentModesKHR) and
-     (vkGetPhysicalDeviceSurfacePresentModesKHR(FPhysicalDevice, FSurface, @PresentModeCount, nil) = VK_SUCCESS) and
-     (PresentModeCount > 0) then
-  begin
-    SetLength(PresentModes, PresentModeCount);
-    vkGetPhysicalDeviceSurfacePresentModesKHR(FPhysicalDevice, FSurface, @PresentModeCount, @PresentModes[0]);
-  end;
-  FSwapchainPresentMode := SelectVulkanPresentMode(PresentModes, False);
-
-  FSwapchainExtent.width := Max(1, Width);
-  FSwapchainExtent.height := Max(1, Height);
-  if Caps.currentExtent.width <> High(Cardinal) then
-    FSwapchainExtent := Caps.currentExtent
-  else if (Caps.maxImageExtent.width > 0) and (Caps.maxImageExtent.height > 0) then
-  begin
-    FSwapchainExtent.width := EnsureRange(FSwapchainExtent.width,
-      Max(Cardinal(1), Caps.minImageExtent.width), Caps.maxImageExtent.width);
-    FSwapchainExtent.height := EnsureRange(FSwapchainExtent.height,
-      Max(Cardinal(1), Caps.minImageExtent.height), Caps.maxImageExtent.height);
+    DestroySwapchainResources(True);
+    FSwapchainExtent.width := 0;
+    FSwapchainExtent.height := 0;
+    FSwapchainMinimized := True;
+    FSwapchainSuboptimal := False;
+    Exit;
   end;
 
-  ImageCount := Max(2, Caps.minImageCount);
-  if (Caps.maxImageCount > 0) and (ImageCount > Caps.maxImageCount) then
-    ImageCount := Caps.maxImageCount;
+  OldSwapchain := FSwapchain;
+  FSwapchain := VK_NULL_HANDLE;
+  DestroySwapchainResources(False);
+  FSwapchainMinimized := False;
+  FSwapchainSuboptimal := False;
+  FCurrentSwapchainImageIndex := 0;
 
-  FillChar(CreateInfo, SizeOf(CreateInfo), 0);
-  CreateInfo.sType := VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-  CreateInfo.surface := FSurface;
-  CreateInfo.minImageCount := ImageCount;
-  CreateInfo.imageFormat := SurfFmt.format;
-  CreateInfo.imageColorSpace := FSwapchainColorSpace;
-  CreateInfo.imageExtent := FSwapchainExtent;
-  CreateInfo.imageArrayLayers := 1;
-  CreateInfo.imageUsage := VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT or VK_IMAGE_USAGE_TRANSFER_SRC_BIT or VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-  CreateInfo.imageSharingMode := VK_SHARING_MODE_EXCLUSIVE;
-  CreateInfo.preTransform := Caps.currentTransform;
-  CreateInfo.compositeAlpha := VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-  CreateInfo.presentMode := FSwapchainPresentMode;
-  CreateInfo.clipped := VK_TRUE;
+  try
+    SurfaceFormatCount := 0;
+    SurfaceFormats := nil;
+    if Assigned(vkGetPhysicalDeviceSurfaceFormatsKHR) and
+       (vkGetPhysicalDeviceSurfaceFormatsKHR(FPhysicalDevice, FSurface, @SurfaceFormatCount, nil) = VK_SUCCESS) and
+       (SurfaceFormatCount > 0) then
+    begin
+      SetLength(SurfaceFormats, SurfaceFormatCount);
+      vkGetPhysicalDeviceSurfaceFormatsKHR(FPhysicalDevice, FSurface, @SurfaceFormatCount, @SurfaceFormats[0]);
+    end;
+    SurfFmt := SelectVulkanSurfaceFormat(SurfaceFormats, FSwapchainFormat);
+    FSwapchainColorSpace := SurfFmt.colorSpace;
 
-  CheckVk(vkCreateSwapchainKHR(FDevice, @CreateInfo, nil, @FSwapchain), 'vkCreateSwapchainKHR');
+    PresentModeCount := 0;
+    PresentModes := nil;
+    if Assigned(vkGetPhysicalDeviceSurfacePresentModesKHR) and
+       (vkGetPhysicalDeviceSurfacePresentModesKHR(FPhysicalDevice, FSurface, @PresentModeCount, nil) = VK_SUCCESS) and
+       (PresentModeCount > 0) then
+    begin
+      SetLength(PresentModes, PresentModeCount);
+      vkGetPhysicalDeviceSurfacePresentModesKHR(FPhysicalDevice, FSurface, @PresentModeCount, @PresentModes[0]);
+    end;
+    FSwapchainPresentMode := SelectVulkanPresentMode(PresentModes, False);
+    FSwapchainCompositeAlpha := SelectVulkanCompositeAlpha(Caps.supportedCompositeAlpha);
+
+    FSwapchainExtent.width := Max(Cardinal(1), Width);
+    FSwapchainExtent.height := Max(Cardinal(1), Height);
+    if Caps.currentExtent.width <> High(Cardinal) then
+      FSwapchainExtent := Caps.currentExtent
+    else if (Caps.maxImageExtent.width > 0) and (Caps.maxImageExtent.height > 0) then
+    begin
+      FSwapchainExtent.width := EnsureRange(FSwapchainExtent.width,
+        Max(Cardinal(1), Caps.minImageExtent.width), Caps.maxImageExtent.width);
+      FSwapchainExtent.height := EnsureRange(FSwapchainExtent.height,
+        Max(Cardinal(1), Caps.minImageExtent.height), Caps.maxImageExtent.height);
+    end;
+
+    ImageCount := Max(Cardinal(2), Caps.minImageCount);
+    if (Caps.maxImageCount > 0) and (ImageCount > Caps.maxImageCount) then
+      ImageCount := Caps.maxImageCount;
+
+    ImageUsage := VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    ColorUsage := [tuColorAttachment];
+    if Caps.supportedUsageFlags = 0 then
+    begin
+      ImageUsage := ImageUsage or VK_IMAGE_USAGE_TRANSFER_SRC_BIT or VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+      ColorUsage := ColorUsage + [tuTransferSrc, tuTransferDst];
+    end else
+    begin
+      if (Caps.supportedUsageFlags and VK_IMAGE_USAGE_TRANSFER_SRC_BIT) <> 0 then
+      begin
+        ImageUsage := ImageUsage or VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        Include(ColorUsage, tuTransferSrc);
+      end;
+      if (Caps.supportedUsageFlags and VK_IMAGE_USAGE_TRANSFER_DST_BIT) <> 0 then
+      begin
+        ImageUsage := ImageUsage or VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        Include(ColorUsage, tuTransferDst);
+      end;
+    end;
+
+    FillChar(CreateInfo, SizeOf(CreateInfo), 0);
+    CreateInfo.sType := VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    CreateInfo.surface := FSurface;
+    CreateInfo.minImageCount := ImageCount;
+    CreateInfo.imageFormat := SurfFmt.format;
+    CreateInfo.imageColorSpace := FSwapchainColorSpace;
+    CreateInfo.imageExtent := FSwapchainExtent;
+    CreateInfo.imageArrayLayers := 1;
+    CreateInfo.imageUsage := ImageUsage;
+    if FGraphicsQueueFamily <> FPresentQueueFamily then
+    begin
+      QueueFamilyIndices[0] := FGraphicsQueueFamily;
+      QueueFamilyIndices[1] := FPresentQueueFamily;
+      CreateInfo.imageSharingMode := VK_SHARING_MODE_CONCURRENT;
+      CreateInfo.queueFamilyIndexCount := 2;
+      CreateInfo.pQueueFamilyIndices := @QueueFamilyIndices[0];
+    end else
+      CreateInfo.imageSharingMode := VK_SHARING_MODE_EXCLUSIVE;
+    CreateInfo.preTransform := Caps.currentTransform;
+    CreateInfo.compositeAlpha := FSwapchainCompositeAlpha;
+    CreateInfo.presentMode := FSwapchainPresentMode;
+    CreateInfo.clipped := VK_TRUE;
+    CreateInfo.oldSwapchain := OldSwapchain;
+
+    CheckVk(vkCreateSwapchainKHR(FDevice, @CreateInfo, nil, @FSwapchain), 'vkCreateSwapchainKHR');
+  finally
+    if (OldSwapchain <> VK_NULL_HANDLE) and (FDevice <> nil) and Assigned(vkDestroySwapchainKHR) then
+      vkDestroySwapchainKHR(FDevice, OldSwapchain, nil);
+  end;
 
   CheckVk(vkGetSwapchainImagesKHR(FDevice, FSwapchain, @ImageCount, nil), 'vkGetSwapchainImagesKHR(count)');
   SetLength(Images, ImageCount);
   CheckVk(vkGetSwapchainImagesKHR(FDevice, FSwapchain, @ImageCount, @Images[0]), 'vkGetSwapchainImagesKHR');
 
   ColorDesc := TRHITextureDesc.Create2D(FSwapchainExtent.width, FSwapchainExtent.height,
-    FSwapchainFormat, [tuColorAttachment, tuTransferSrc, tuTransferDst], 1);
+    FSwapchainFormat, ColorUsage, 1);
+
+  FillChar(SemInfo, SizeOf(SemInfo), 0);
+  SemInfo.sType := VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
   SetLength(FSwapchainColorTextures, ImageCount);
+  SetLength(FSwapchainRenderFinishedSemaphores, ImageCount);
   for I := 0 to ImageCount - 1 do
   begin
     FillChar(ViewInfo, SizeOf(ViewInfo), 0);
@@ -20675,6 +20867,10 @@ begin
     ViewInfo.subresourceRange.layerCount := 1;
     CheckVk(vkCreateImageView(FDevice, @ViewInfo, nil, @ImgView), 'vkCreateImageView(Swapchain)');
     FSwapchainColorTextures[I] := TVulkanRHITexture.CreateSwapchainWrapper(Self, ColorDesc, Images[I], ImgView);
+    FSwapchainRenderFinishedSemaphores[I] := VK_NULL_HANDLE;
+    if Assigned(vkCreateSemaphore) then
+      CheckVk(vkCreateSemaphore(FDevice, @SemInfo, nil, @FSwapchainRenderFinishedSemaphores[I]),
+        'vkCreateSemaphore(SwapchainRenderFinished)');
   end;
 
   FSwapchainDepthFormat := NegotiateOptimalPixelFormat(pfD24_UNorm_S8_UInt, [tuDepthStencil], FPhysicalDevice);
@@ -20702,6 +20898,10 @@ begin
     FSwapchainDepthFormat := ADepthFormat;
   FSwapchainExtent.width := Max(Cardinal(1), AWidth);
   FSwapchainExtent.height := Max(Cardinal(1), AHeight);
+  FRequestedSwapchainWidth := FSwapchainExtent.width;
+  FRequestedSwapchainHeight := FSwapchainExtent.height;
+  FSwapchainMinimized := False;
+  FSwapchainSuboptimal := False;
   FCurrentSwapchainImageIndex := 0;
 
   ImgCount := Max(Cardinal(1), AImageCount);
@@ -20724,7 +20924,7 @@ begin
     EnsureMSAATargets(FSwapchainExtent.width, FSwapchainExtent.height, FSwapchainFormat, FSwapchainDepthFormat);
 end;
 
-procedure TVulkanRHIDevice.DestroySwapchain;
+procedure TVulkanRHIDevice.DestroySwapchainResources(const ADestroySwapchainHandle: Boolean);
 var
   I: Integer;
 begin
@@ -20736,11 +20936,28 @@ begin
     FreeAndNil(FSwapchainColorTextures[I]);
   SetLength(FSwapchainColorTextures, 0);
 
-  if FSwapchain <> VK_NULL_HANDLE then
+  for I := 0 to High(FSwapchainRenderFinishedSemaphores) do
+    if (FDevice <> nil) and (FSwapchainRenderFinishedSemaphores[I] <> VK_NULL_HANDLE) and
+       Assigned(vkDestroySemaphore) then
+      vkDestroySemaphore(FDevice, FSwapchainRenderFinishedSemaphores[I], nil);
+  SetLength(FSwapchainRenderFinishedSemaphores, 0);
+
+  if ADestroySwapchainHandle and (FSwapchain <> VK_NULL_HANDLE) then
   begin
-    vkDestroySwapchainKHR(FDevice, FSwapchain, nil);
+    if (FDevice <> nil) and Assigned(vkDestroySwapchainKHR) then
+      vkDestroySwapchainKHR(FDevice, FSwapchain, nil);
     FSwapchain := VK_NULL_HANDLE;
   end;
+end;
+
+procedure TVulkanRHIDevice.DestroySwapchain;
+begin
+  DestroySwapchainResources(True);
+end;
+
+function TVulkanRHIDevice.GetSwapchainImageCount: Cardinal;
+begin
+  Result := Cardinal(Length(FSwapchainColorTextures));
 end;
 
 procedure TVulkanRHIDevice.CreateFrameContexts;
@@ -20801,6 +21018,17 @@ begin
     Frame.TransientDescriptorAllocator.ResetPools;
   FDeferResourceDestruction := True;
 
+  if FSwapchainMinimized then
+  begin
+    if (FSurface <> VK_NULL_HANDLE) and (FDevice <> nil) and (FSwapchain = VK_NULL_HANDLE) then
+      CreateSwapchain(Max(Cardinal(1), FRequestedSwapchainWidth), Max(Cardinal(1), FRequestedSwapchainHeight));
+    if FSwapchainMinimized then
+    begin
+      FDeferResourceDestruction := False;
+      Exit(nil);
+    end;
+  end;
+
   if Length(FSwapchainColorTextures) > 0 then
   begin
     FActiveColorTarget := nil;
@@ -20816,7 +21044,25 @@ begin
     if AcquireRes = VK_ERROR_OUT_OF_DATE_KHR then
     begin
       Inc(FSwapchainRecreateCount);
-      ResizeSwapchain(FSwapchainExtent.width, FSwapchainExtent.height);
+      ResizeSwapchain(
+        Max(Cardinal(1), Max(FRequestedSwapchainWidth, FSwapchainExtent.width)),
+        Max(Cardinal(1), Max(FRequestedSwapchainHeight, FSwapchainExtent.height)));
+      if FSwapchainMinimized or (FSwapchain = VK_NULL_HANDLE) then
+      begin
+        FDeferResourceDestruction := False;
+        Exit(nil);
+      end;
+      { Per Vulkan spec, when vkAcquireNextImageKHR returns VK_ERROR_OUT_OF_DATE_KHR,
+        ImageAvailableSemaphore was not signaled and is safe to reuse on retry. }
+      AcquireRes := vkAcquireNextImageKHR(FDevice, FSwapchain, High(UInt64),
+        Frame.ImageAvailableSemaphore, VK_NULL_HANDLE, @FCurrentSwapchainImageIndex);
+    end;
+
+    if AcquireRes = VK_SUBOPTIMAL_KHR then
+      FSwapchainSuboptimal := True
+    else if AcquireRes <> VK_SUCCESS then
+    begin
+      FDeferResourceDestruction := False;
       Exit(nil);
     end;
   end else
@@ -20846,6 +21092,7 @@ var
   PresentInfo: VkPresentInfoKHR;
   PresentRes: VkResult;
   CmdHandle: VkCommandBuffer;
+  SignalSem: VkSemaphore;
 begin
   Frame := FFrames[FFrameIndex];
   if (Frame.CommandList <> nil) and Frame.CommandList.IsRendering then
@@ -20871,6 +21118,13 @@ begin
   begin
     WaitStages := VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     CmdHandle := Frame.CommandList.Handle;
+    { Index RenderFinishedSemaphore by acquired swapchain image index (not frame-in-flight slot)
+      per VUID-vkQueueSubmit-pSignalSemaphores-00067 when SwapchainImageCount > MaxFramesInFlight. }
+    if (FCurrentSwapchainImageIndex < Cardinal(Length(FSwapchainRenderFinishedSemaphores))) and
+       (FSwapchainRenderFinishedSemaphores[FCurrentSwapchainImageIndex] <> VK_NULL_HANDLE) then
+      SignalSem := FSwapchainRenderFinishedSemaphores[FCurrentSwapchainImageIndex]
+    else
+      SignalSem := Frame.RenderFinishedSemaphore;
 
     FillChar(SubmitInfo, SizeOf(SubmitInfo), 0);
     SubmitInfo.sType := VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -20880,7 +21134,7 @@ begin
     SubmitInfo.commandBufferCount := 1;
     SubmitInfo.pCommandBuffers := @CmdHandle;
     SubmitInfo.signalSemaphoreCount := 1;
-    SubmitInfo.pSignalSemaphores := @Frame.RenderFinishedSemaphore;
+    SubmitInfo.pSignalSemaphores := @SignalSem;
 
     CheckVk(vkQueueSubmit(FGraphicsQueue, 1, @SubmitInfo, Frame.InFlightFence), 'vkQueueSubmit');
 
@@ -20889,17 +21143,22 @@ begin
       FillChar(PresentInfo, SizeOf(PresentInfo), 0);
       PresentInfo.sType := VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
       PresentInfo.waitSemaphoreCount := 1;
-      PresentInfo.pWaitSemaphores := @Frame.RenderFinishedSemaphore;
+      PresentInfo.pWaitSemaphores := @SignalSem;
       PresentInfo.swapchainCount := 1;
       PresentInfo.pSwapchains := @FSwapchain;
       PresentInfo.pImageIndices := @FCurrentSwapchainImageIndex;
 
       PresentRes := vkQueuePresentKHR(FPresentQueue, @PresentInfo);
-      if (PresentRes = VK_ERROR_OUT_OF_DATE_KHR) or (PresentRes = VK_SUBOPTIMAL_KHR) then
+      if (PresentRes = VK_ERROR_OUT_OF_DATE_KHR) or (PresentRes = VK_SUBOPTIMAL_KHR) or
+         FSwapchainSuboptimal then
       begin
+        FSwapchainSuboptimal := False;
         Inc(FSwapchainRecreateCount);
-        ResizeSwapchain(FSwapchainExtent.width, FSwapchainExtent.height);
-      end;
+        ResizeSwapchain(
+          Max(Cardinal(1), Max(FRequestedSwapchainWidth, FSwapchainExtent.width)),
+          Max(Cardinal(1), Max(FRequestedSwapchainHeight, FSwapchainExtent.height)));
+      end else
+        CheckVk(PresentRes, 'vkQueuePresentKHR');
     end;
   end else
   if (FDevice <> nil) and (FSwapchain = VK_NULL_HANDLE) and Assigned(vkQueueSubmit) then
@@ -20992,28 +21251,35 @@ procedure TVulkanRHIDevice.ResizeSwapchain(const NewWidth, NewHeight: Cardinal);
 var
   SimCount: Cardinal;
 begin
-  if (NewWidth = 0) or (NewHeight = 0) then Exit;
+  if (NewWidth = 0) or (NewHeight = 0) then
+  begin
+    FSwapchainMinimized := True;
+    Exit;
+  end;
+  FRequestedSwapchainWidth := NewWidth;
+  FRequestedSwapchainHeight := NewHeight;
+  FSwapchainMinimized := False;
   WaitIdle;
   if (FSurface = VK_NULL_HANDLE) and (Length(FSwapchainColorTextures) > 0) then
   begin
     SimCount := Cardinal(Length(FSwapchainColorTextures));
     SimulateSwapchainForTesting(NewWidth, NewHeight, SimCount, FSwapchainFormat, FSwapchainDepthFormat);
   end else
+  if FSurface <> VK_NULL_HANDLE then
+  begin
+    { CreateSwapchain retires the existing FSwapchain via CreateInfo.oldSwapchain handoff }
+    CreateSwapchain(NewWidth, NewHeight);
+  end else
   begin
     DestroySwapchain;
-    if FSurface <> VK_NULL_HANDLE then
-      CreateSwapchain(NewWidth, NewHeight)
-    else
+    FSwapchainExtent.width := NewWidth;
+    FSwapchainExtent.height := NewHeight;
+    if FSampleCount > 1 then
     begin
-      FSwapchainExtent.width := NewWidth;
-      FSwapchainExtent.height := NewHeight;
-      if FSampleCount > 1 then
-      begin
-        if FSwapchainDepthFormat <> pfUndefined then
-          EnsureMSAATargets(NewWidth, NewHeight, FSwapchainFormat, FSwapchainDepthFormat)
-        else
-          EnsureMSAATargets(NewWidth, NewHeight, FSwapchainFormat, pfD24_UNorm_S8_UInt);
-      end;
+      if FSwapchainDepthFormat <> pfUndefined then
+        EnsureMSAATargets(NewWidth, NewHeight, FSwapchainFormat, FSwapchainDepthFormat)
+      else
+        EnsureMSAATargets(NewWidth, NewHeight, FSwapchainFormat, pfD24_UNorm_S8_UInt);
     end;
   end;
 end;

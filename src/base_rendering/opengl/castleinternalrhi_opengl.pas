@@ -322,6 +322,10 @@ begin
 end;
 
 function RHIToGLBlendFactor(const Factor: TRHIBlendFactor): TGLenum;
+const
+  { USE_DGL}
+  GL_CONSTANT_COLOR = GL_CONSTANT_COLOR_ARB;
+  {}
 begin
   case Factor of
     bfZero:             Result := GL_ZERO;
@@ -901,7 +905,7 @@ end;
 
 procedure TOpenGLRHICommandList.SetBlendConstants(const ABlendConstants: TVector4);
 begin
-  if GLFeatures.BlendConstant then
+  if (GLFeatures <> nil) and GLFeatures.BlendConstant then
     glBlendColor(ABlendConstants.X, ABlendConstants.Y, ABlendConstants.Z, ABlendConstants.W);
   //
 

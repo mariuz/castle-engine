@@ -33,7 +33,7 @@ uses
   CastleUIControls, CastleControls, CastleInternalInspector,
   CastleVideos, CastleInternalBackgroundRenderer, CastleInternalGLShadowVolumes,
   CastleInternalScreenEffects,
-  CastleGLShaders, CastleGLUtils, CastleRenderPrimitives, CastleShapes, CastleRenderContext,
+  CastleGLShaders, CastleGLUtils, CastleGLVersion, CastleRenderPrimitives, CastleShapes, CastleRenderContext,
   CastleShapeInternalShadowVolumes, CastleShapeInternalRenderShadowVolumes,
   CastleInternalBatchShapes, CastleInternalShapesRenderer,
   CastleTransformManipulate, CastleDebugTransform, CastleInternalPhysicsVisualization,
@@ -391,6 +391,9 @@ type
     procedure TestRealLavapipe3DViewportUnlitAndLitMeshSceneRHI;
     procedure TestRealLavapipe3DViewportTexturedMeshAndAlphaCutoffRHI;
     procedure TestRealLavapipeViewportScreenEffectPostProcessingRHI;
+    procedure TestVulkanSwapchainCompositeAlphaAndWSIExtensionDiscoveryRHI;
+    procedure TestRealVulkanHeadlessSurfaceLiveSwapchainPresentAndResizeRHI;
+    procedure TestRealCastleWindowPureVulkanOpenRenderResizeSaveScreenRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -409,6 +412,7 @@ type
     procedure DummyRenderGraphPassCallback(const AGraph: TRHIRenderGraph;
       const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
     procedure DummySHCaptureRenderCallback(const RenderParams: TRenderParams);
+    function CreateHeadlessSurfaceForTest(const AInstance: VkInstance): VkSurfaceKHR;
   end;
 
 implementation
@@ -28699,6 +28703,455 @@ begin
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
     FreeAndNil(RealDev);
+  end;
+end;
+
+function TTestCastleVulkanRHI.CreateHeadlessSurfaceForTest(const AInstance: VkInstance): VkSurfaceKHR;
+begin
+  Result := CreateVulkanHeadlessSurface(AInstance);
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanSwapchainCompositeAlphaAndWSIExtensionDiscoveryRHI;
+var
+  HeadlessDesc: TVulkanNativeSurfaceDesc;
+  HeadlessExts, FilteredExts: TAnsiStringArray;
+  EnablePortability: Boolean;
+  Dev: TVulkanRHIDevice;
+  Cmd: TRHICommandList;
+begin
+  { 1. SelectVulkanCompositeAlpha preference chain }
+  AssertEquals('Empty mask defaults to OPAQUE_BIT_KHR',
+    VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+    SelectVulkanCompositeAlpha(0));
+  AssertEquals('OPAQUE + INHERIT prefers OPAQUE_BIT_KHR',
+    VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+    SelectVulkanCompositeAlpha(VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR or VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR));
+  AssertEquals('PRE_MULTIPLIED + INHERIT prefers PRE_MULTIPLIED_BIT_KHR',
+    VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
+    SelectVulkanCompositeAlpha(VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR or VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR));
+  AssertEquals('POST_MULTIPLIED + INHERIT prefers POST_MULTIPLIED_BIT_KHR',
+    VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
+    SelectVulkanCompositeAlpha(VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR or VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR));
+  AssertEquals('INHERIT-only surface (e.g. Android/Wayland) selects INHERIT_BIT_KHR',
+    VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR,
+    SelectVulkanCompositeAlpha(VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR));
+
+  { 2. VK_EXT_headless_surface descriptor & extension table }
+  HeadlessDesc := TVulkanNativeSurfaceDesc.CreateHeadless;
+  AssertEquals('Headless WSI platform enum', Ord(vwsiHeadless), Ord(HeadlessDesc.Platform));
+  AssertTrue('Headless surface descriptor must validate without OS window handles',
+    ValidateVulkanNativeSurfaceDesc(HeadlessDesc));
+  HeadlessExts := GetRequiredVulkanInstanceExtensionsForPlatform(vwsiHeadless);
+  AssertEquals('vwsiHeadless requires 2 instance extensions', 2, Length(HeadlessExts));
+  AssertEquals('vwsiHeadless ext[0] = VK_KHR_surface',
+    String(VK_KHR_SURFACE_EXTENSION_NAME), String(HeadlessExts[0]));
+  AssertEquals('vwsiHeadless ext[1] = VK_EXT_headless_surface',
+    String(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME), String(HeadlessExts[1]));
+
+  { 3. Loader-aware WSI extension filtering + VK_KHR_portability_enumeration }
+  FilteredExts := BuildAvailableVulkanWSIInstanceExtensions(
+    ['VK_KHR_surface', 'VK_EXT_headless_surface', 'VK_KHR_xlib_surface', 'VK_EXT_debug_utils'],
+    EnablePortability);
+  AssertFalse('Linux/Windows WSI list without portability extension keeps EnablePortability=False',
+    EnablePortability);
+  AssertEquals('Filtered WSI extensions count', 3, Length(FilteredExts));
+  AssertEquals('FilteredExts[0]', 'VK_KHR_surface', String(FilteredExts[0]));
+  AssertEquals('FilteredExts[1]', 'VK_KHR_xlib_surface', String(FilteredExts[1]));
+  AssertEquals('FilteredExts[2]', 'VK_EXT_headless_surface', String(FilteredExts[2]));
+
+  FilteredExts := BuildAvailableVulkanWSIInstanceExtensions(
+    ['VK_KHR_surface', 'VK_EXT_metal_surface', 'VK_KHR_portability_enumeration'],
+    EnablePortability);
+  AssertTrue('MoltenVK portability enumeration enables VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR',
+    EnablePortability);
+  AssertEquals('MoltenVK filtered WSI extensions count', 3, Length(FilteredExts));
+
+  FilteredExts := BuildAvailableVulkanWSIInstanceExtensions(
+    ['VK_EXT_debug_utils'],
+    EnablePortability);
+  AssertFalse('Non-WSI loader keeps EnablePortability=False', EnablePortability);
+  AssertEquals('Non-WSI loader returns 0 WSI extensions', 0, Length(FilteredExts));
+
+  { 4. Minimized (0x0) swapchain lifecycle pause and unminimize recovery }
+  Dev := TVulkanRHIDevice.CreateHeadless(nil);
+  try
+    Dev.SimulateSwapchainForTesting(128, 96, 3, pfBGRA8_UNorm, pfD24_UNorm_S8_UInt);
+    AssertEquals('Initial simulated swapchain image count = 3', Cardinal(3), Dev.SwapchainImageCount);
+    AssertFalse('Initial swapchain is not minimized', Dev.SwapchainMinimized);
+
+    Dev.ResizeSwapchain(0, 0);
+    AssertTrue('ResizeSwapchain(0, 0) marks swapchain minimized', Dev.SwapchainMinimized);
+    Cmd := Dev.BeginFrame;
+    AssertTrue('BeginFrame returns nil cleanly while swapchain is minimized', Cmd = nil);
+    AssertFalse('Minimized BeginFrame leaves DeferResourceDestruction=False', Dev.DeferResourceDestruction);
+
+    Dev.ResizeSwapchain(160, 120);
+    AssertFalse('ResizeSwapchain(160, 120) clears minimized state', Dev.SwapchainMinimized);
+    AssertEquals('Unminimized swapchain width', Cardinal(160), Dev.SwapchainExtent.width);
+    AssertEquals('Unminimized swapchain height', Cardinal(120), Dev.SwapchainExtent.height);
+    Cmd := Dev.BeginFrame;
+    AssertTrue('BeginFrame succeeds after unminimize', Cmd <> nil);
+    Dev.EndFrameAndPresent;
+  finally
+    FreeAndNil(Dev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealVulkanHeadlessSurfaceLiveSwapchainPresentAndResizeRHI;
+var
+  RealDev: TVulkanRHIDevice;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  Container: TTestSizedVulkanContainer;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  Shape: TShapeNode;
+  Box: TBoxNode;
+  App: TAppearanceNode;
+  Mat: TUnlitMaterialNode;
+  RealCmd: TVulkanRHICommandList;
+  ColorTex, DepthTex: TRHITexture;
+  PassInfo: TRHIRenderingInfo;
+  Readback1, Readback2: TRGBAlphaImage;
+  FrameIdx: Integer;
+begin
+  try
+    LoadVulkan;
+  except
+    on Exception do
+      Exit;
+  end;
+  if not IsVulkanInstanceExtensionSupported(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME) then
+    Exit;
+
+  RealDev := nil;
+  try
+    RealDev := TVulkanRHIDevice.Create(
+      {$ifdef FPC}@{$endif}CreateHeadlessSurfaceForTest, 128, 96, False);
+  except
+    on Exception do
+    begin
+      FreeAndNil(RealDev);
+      Exit;
+    end;
+  end;
+
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+  Container := nil;
+  Viewport := nil;
+  Scene := nil;
+  Readback1 := nil;
+  Readback2 := nil;
+  try
+    AssertTrue('Live VK_EXT_headless_surface handle must be non-null',
+      RealDev.SurfaceHandle <> VK_NULL_HANDLE);
+    AssertTrue('Live VkSwapchainKHR handle must be non-null',
+      RealDev.SwapchainHandle <> VK_NULL_HANDLE);
+    AssertTrue('Live VkSwapchainKHR must allocate >= 2 swapchain images',
+      RealDev.SwapchainImageCount >= 2);
+    AssertEquals('Initial live swapchain width = 128', Cardinal(128), RealDev.SwapchainExtent.width);
+    AssertEquals('Initial live swapchain height = 96', Cardinal(96), RealDev.SwapchainExtent.height);
+
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(RealDev);
+    GLFeatures := nil;
+
+    Container := TTestSizedVulkanContainer.Create(nil);
+    Container.TestWidth := 128;
+    Container.TestHeight := 96;
+    RenderContext := Container.Context;
+
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := True;
+    Viewport.BackgroundColor := Vector4(0.0, 0.0, 0.5, 1.0);
+    Container.Controls.InsertFront(Viewport);
+    Viewport.Camera.SetWorldView(
+      Vector3(0.0, 0.0, 5.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+
+    Root := TX3DRootNode.Create;
+    Shape := TShapeNode.Create;
+    Box := TBoxNode.Create;
+    Box.Size := Vector3(2.5, 2.5, 0.5);
+    Shape.Geometry := Box;
+    App := TAppearanceNode.Create;
+    Mat := TUnlitMaterialNode.Create;
+    Mat.EmissiveColor := Vector3(0.0, 1.0, 0.0);
+    App.Material := Mat;
+    Shape.Appearance := App;
+    Root.AddChildren(Shape);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    {$warnings off}
+    Viewport.Items.MainScene := Scene;
+    {$warnings on}
+    Viewport.Items.Add(Scene);
+
+    { Present 4 consecutive frames (exceeding MaxFramesInFlight=2 and cycling per-image semaphores) }
+    for FrameIdx := 0 to 3 do
+    begin
+      RealCmd := RealDev.BeginFrame as TVulkanRHICommandList;
+      AssertTrue('BeginFrame must acquire live swapchain image', RealCmd <> nil);
+      SetActiveCommandList(RealCmd);
+
+      Viewport.BeforeRender;
+      ColorTex := RealDev.GetSwapchainColorTexture;
+      DepthTex := RealDev.GetSwapchainDepthTexture;
+      AssertTrue('Swapchain color texture must be non-nil', ColorTex <> nil);
+      AssertTrue('Swapchain depth texture must be non-nil', DepthTex <> nil);
+
+      PassInfo := RealDev.BuildSwapchainRenderingInfo(
+        Rectangle(0, 0, 128, 96), ColorTex, DepthTex,
+        Vector4(0.0, 0.0, 0.5, 1.0), loClear, loClear, 1.0);
+      RealCmd.BeginRendering(PassInfo);
+      RealCmd.SetViewport(FloatRectangle(0, 0, 128, 96), 0.0, 1.0);
+      RealCmd.SetScissor(Rectangle(0, 0, 128, 96));
+
+      Viewport.Render;
+      Viewport.RenderOverChildren;
+      RealCmd.EndRendering;
+
+      if FrameIdx = 2 then
+      begin
+        { Read back frame 2 swapchain image before EndFrameAndPresent transitions it to PRESENT_SRC_KHR }
+        RealDev.EndFrameAndPresent;
+        Readback1 := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 128, 96));
+      end else
+        RealDev.EndFrameAndPresent;
+    end;
+
+    AssertEquals('4 frames presented before resize', Cardinal(4), RealDev.TotalFramesPresented);
+    AssertTrue('Swapchain readback1 must succeed', Readback1 <> nil);
+    AssertTrue('Center (64,48) green 3D box G > 200', Readback1.PixelPtr(64, 48)^.Y > 200);
+    AssertEquals('Center (64,48) green 3D box R = 0', 0, Integer(Readback1.PixelPtr(64, 48)^.X));
+    AssertTrue('Corner (4,4) navy background B > 100', Readback1.PixelPtr(4, 4)^.Z > 100);
+    AssertEquals('Corner (4,4) navy background G = 0', 0, Integer(Readback1.PixelPtr(4, 4)^.Y));
+
+    { Live swapchain resize (128x96 -> 192x144) exercising CreateInfo.oldSwapchain handoff }
+    RealDev.ResizeSwapchain(192, 144);
+    Container.TestWidth := 192;
+    Container.TestHeight := 144;
+    AssertTrue('Resized SwapchainHandle must remain valid', RealDev.SwapchainHandle <> VK_NULL_HANDLE);
+    AssertEquals('Resized swapchain width = 192', Cardinal(192), RealDev.SwapchainExtent.width);
+    AssertEquals('Resized swapchain height = 144', Cardinal(144), RealDev.SwapchainExtent.height);
+
+    for FrameIdx := 0 to 1 do
+    begin
+      RealCmd := RealDev.BeginFrame as TVulkanRHICommandList;
+      AssertTrue('Post-resize BeginFrame must acquire swapchain image', RealCmd <> nil);
+      SetActiveCommandList(RealCmd);
+
+      Viewport.BeforeRender;
+      ColorTex := RealDev.GetSwapchainColorTexture;
+      DepthTex := RealDev.GetSwapchainDepthTexture;
+      PassInfo := RealDev.BuildSwapchainRenderingInfo(
+        Rectangle(0, 0, 192, 144), ColorTex, DepthTex,
+        Vector4(0.0, 0.0, 0.5, 1.0), loClear, loClear, 1.0);
+      RealCmd.BeginRendering(PassInfo);
+      RealCmd.SetViewport(FloatRectangle(0, 0, 192, 144), 0.0, 1.0);
+      RealCmd.SetScissor(Rectangle(0, 0, 192, 144));
+
+      Viewport.Render;
+      Viewport.RenderOverChildren;
+      RealCmd.EndRendering;
+      RealDev.EndFrameAndPresent;
+      if FrameIdx = 1 then
+        Readback2 := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 192, 144));
+    end;
+
+    AssertEquals('6 total frames presented after resize', Cardinal(6), RealDev.TotalFramesPresented);
+    AssertTrue('Post-resize readback2 must succeed', Readback2 <> nil);
+    AssertEquals('Post-resize readback2 width = 192', 192, Readback2.Width);
+    AssertEquals('Post-resize readback2 height = 144', 144, Readback2.Height);
+    AssertTrue('Post-resize center (96,72) green 3D box G > 200', Readback2.PixelPtr(96, 72)^.Y > 200);
+    AssertTrue('Post-resize corner (8,8) navy background B > 100', Readback2.PixelPtr(8, 8)^.Z > 100);
+  finally
+    FreeAndNil(Readback2);
+    FreeAndNil(Readback1);
+    FreeAndNil(Scene);
+    FreeAndNil(Viewport);
+    FreeAndNil(Container);
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(RealDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealCastleWindowPureVulkanOpenRenderResizeSaveScreenRHI;
+var
+  Window: TCastleWindow;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedOnInit: TProcedure;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  Shape: TShapeNode;
+  Box: TBoxNode;
+  App: TAppearanceNode;
+  Mat: TPhysicalMaterialNode;
+  DirLight: TDirectionalLightNode;
+  VkDev: TVulkanRHIDevice;
+  ShotRgb: TRGBImage;
+  ShotRgba, ShotResized: TRGBAlphaImage;
+  { defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  HasDisplay: Boolean;
+  {}
+  I: Integer;
+begin
+  if not CanCreateWindowForTest then
+  begin
+    AbortTest;
+    Exit;
+  end;
+
+  {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  HasDisplay := (GetEnvironmentVariable('DISPLAY') <> '') or
+                (GetEnvironmentVariable('WAYLAND_DISPLAY') <> '');
+  if not HasDisplay then
+    Exit;
+  {$endif}
+
+  try
+    LoadVulkan;
+  except
+    on Exception do
+      Exit;
+  end;
+
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedOnInit := Application.OnInitialize;
+  Window := nil;
+  ShotRgb := nil;
+  ShotRgba := nil;
+  ShotResized := nil;
+  try
+    SetActiveCommandList(nil);
+    SetRHIDevice(nil);
+    ApplicationProperties.RenderBackend := backendVulkan;
+    Application.OnInitialize := nil;
+    Application.Initialize;
+
+    Window := CreateWindowForTest;
+    Window.ResizeAllowed := raAllowed;
+    Window.Width := 160;
+    Window.Height := 120;
+
+    Viewport := TCastleViewport.Create(Window);
+    Viewport.FullSize := True;
+    Viewport.BackgroundColor := Vector4(0.0, 0.0, 0.6, 1.0);
+    Window.Controls.InsertFront(Viewport);
+    Viewport.Camera.SetWorldView(
+      Vector3(0.0, 0.0, 4.5),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+
+    Root := TX3DRootNode.Create;
+    DirLight := TDirectionalLightNode.Create;
+    DirLight.Direction := Vector3(0.0, 0.0, -1.0);
+    DirLight.Intensity := 2.0;
+    Root.AddChildren(DirLight);
+
+    Shape := TShapeNode.Create;
+    Box := TBoxNode.Create;
+    Box.Size := Vector3(2.2, 2.2, 0.5);
+    Shape.Geometry := Box;
+    App := TAppearanceNode.Create;
+    Mat := TPhysicalMaterialNode.Create;
+    Mat.BaseColor := Vector3(1.0, 0.25, 0.0);
+    Mat.Roughness := 0.5;
+    Mat.Metallic := 0.0;
+    App.Material := Mat;
+    Shape.Appearance := App;
+    Root.AddChildren(Shape);
+
+    Scene := TCastleScene.Create(Window);
+    Scene.Load(Root, True);
+    {$warnings off}
+    Viewport.Items.MainScene := Scene;
+    {$warnings on}
+    Viewport.Items.Add(Scene);
+
+    Window.Open;
+    if not (RHIDevice is TVulkanRHIDevice) then
+    begin
+      Window.Close(False);
+      Exit;
+    end;
+
+    VkDev := TVulkanRHIDevice(RHIDevice);
+    AssertTrue('Pure-Vulkan TCastleWindow must NOT initialize GLFeatures', GLFeatures = nil);
+    AssertTrue('Pure-Vulkan TCastleWindow must NOT initialize GLVersion', GLVersion = nil);
+    AssertTrue('Window.VulkanSurfaceHandle must be non-null',
+      Window.VulkanSurfaceHandle <> VK_NULL_HANDLE);
+    AssertTrue('TVulkanRHIDevice.SwapchainHandle must be non-null',
+      VkDev.SwapchainHandle <> VK_NULL_HANDLE);
+
+    for I := 0 to 2 do
+    begin
+      Window.Invalidate;
+      Application.ProcessAllMessages;
+    end;
+    AssertTrue('Window must render >= 2 Vulkan frames (loading + ProcessAllMessages)',
+      Window.VulkanFramesRenderedCount >= 2);
+
+    { Test both TWindowContainer.SaveScreen (TRGBImage) and SaveScreenRgba }
+    ShotRgb := Window.SaveScreen;
+    AssertTrue('Window.SaveScreen must return non-nil TRGBImage', ShotRgb <> nil);
+    AssertTrue('Center lit PBR box R channel must dominate B channel in Window.SaveScreen',
+      ShotRgb.PixelPtr(ShotRgb.Width div 2, ShotRgb.Height div 2)^.X >
+      ShotRgb.PixelPtr(ShotRgb.Width div 2, ShotRgb.Height div 2)^.Z + 50);
+    AssertTrue('Corner (4,4) blue viewport background B > 80 in Window.SaveScreen',
+      ShotRgb.PixelPtr(4, 4)^.Z > 80);
+
+    ShotRgba := Window.Container.SaveScreenRgba;
+    AssertTrue('Container.SaveScreenRgba must return non-nil TRGBAlphaImage', ShotRgba <> nil);
+    AssertTrue('Center lit PBR box R > 120 in SaveScreenRgba',
+      ShotRgba.PixelPtr(ShotRgba.Width div 2, ShotRgba.Height div 2)^.X > 120);
+
+    { Trigger live swapchain resize + ProcessAllMessages redraw + SaveScreenRgba }
+    VkDev.ResizeSwapchain(200, 150);
+    Window.Invalidate;
+    Application.ProcessAllMessages;
+    ShotResized := Window.Container.SaveScreenRgba;
+    AssertTrue('Post-resize SaveScreenRgba must succeed', ShotResized <> nil);
+    AssertTrue('Post-resize center lit PBR box R > 120',
+      ShotResized.PixelPtr(ShotResized.Width div 2, ShotResized.Height div 2)^.X > 120);
+
+    Window.Close(False);
+    AssertTrue('Window.Close must release owned TVulkanRHIDevice', RHIDevice = nil);
+    AssertTrue('Window.Close must clear VulkanSurfaceHandle',
+      Window.VulkanSurfaceHandle = VK_NULL_HANDLE);
+  finally
+    FreeAndNil(ShotResized);
+    FreeAndNil(ShotRgba);
+    FreeAndNil(ShotRgb);
+    if Window <> nil then
+    begin
+      if not Window.Closed then
+        Window.Close(False);
+      DestroyWindowForTest(Window);
+    end;
+    Application.OnInitialize := SavedOnInit;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
   end;
 end;
 

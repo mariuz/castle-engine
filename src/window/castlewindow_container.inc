@@ -84,6 +84,9 @@ end;
 
 function TWindowContainer.SaveScreen(const SaveRect: TRectangle): TRGBImage;
 begin
+  if (RHIDevice <> nil) and (ActiveCommandList = nil) then
+    Exit(inherited SaveScreen(SaveRect));
+
   { In theory, the single-buffer
     case could be optimized (do not redraw if not needed, that is:
     if not invalidated), but it's not worth the complication since noone uses

@@ -558,6 +558,7 @@ type
     FOnCreateVulkanSurface: TVulkanCreateSurfaceEvent;
     FVulkanSurfaceHandle: VkSurfaceKHR;
     FOwnsVulkanRHIDevice: Boolean;
+    FDisableVulkanForCurrentOpen: Boolean;
     FVulkanFramesRenderedCount: Cardinal;
     function GetColorBits: Cardinal;
     procedure SetColorBits(const Value: Cardinal);
@@ -2938,32 +2939,53 @@ const
     { Do MakeCurrent before setting RenderContext.Viewport and EventOpen. }
     MakeCurrent;
 
-    GLInformationInitialize;
-
-    if (not IsVulkanBackendRequested) and
-       (GLVersion <> nil) and GLVersion.BuggyDepth32 and
-       (glGetInteger(GL_DEPTH_BITS) >= 32) and
-       (StencilBits = 0) then
-    begin
-      WritelnLog('Rendering Context Initialization',
-        'Got >= 32-bit depth buffer, unfortunately it is known to be buggy on this OpenGL implementation. We will try to force 24-bit depth buffer by forcing stencil buffer.');
-      { Close the window, increase StencilBits to try to force 24-bit
-        depth buffer, and call ourselves again.
-        Checking "StencilBits = 0" above prevents from getting into
-        an infinite loop here. }
-      Close({ QuitWhenLastWindowClosed } false);
-      StencilBits := 8;
-      OpenCore;
-      Exit;
-    end;
-
-    { synchronize RenderContext.Viewport with our Width/Height (note that, because
-      of ResizeAllowed and MinWidth etc. that can be different than actual window
-      sizes). }
-    RenderContext.Viewport := Rect;
-
     if IsVulkanBackendRequested then
+    begin
       InitializeVulkanRHIDeviceIfNeeded;
+      if RHIDevice <> nil then
+      begin
+        { Pure Vulkan backend mode: zero OpenGL context or GLVersion/GLFeatures state }
+        FreeAndNil(GLVersion);
+        FreeAndNil(GLFeatures);
+        RenderContext.Viewport := Rect;
+        WritelnLog('Rendering Initialized', GLInformationStringSummary);
+      end else
+      begin
+        { Vulkan driver/loader unavailable: reopen window cleanly with standard OpenGL context }
+        FDisableVulkanForCurrentOpen := True;
+        try
+          Close({ QuitWhenLastWindowClosed } false);
+          OpenCore;
+        finally
+          FDisableVulkanForCurrentOpen := False;
+        end;
+        Exit;
+      end;
+    end else
+    begin
+      GLInformationInitialize;
+
+      if (GLVersion <> nil) and GLVersion.BuggyDepth32 and
+         (glGetInteger(GL_DEPTH_BITS) >= 32) and
+         (StencilBits = 0) then
+      begin
+        WritelnLog('Rendering Context Initialization',
+          'Got >= 32-bit depth buffer, unfortunately it is known to be buggy on this OpenGL implementation. We will try to force 24-bit depth buffer by forcing stencil buffer.');
+        { Close the window, increase StencilBits to try to force 24-bit
+          depth buffer, and call ourselves again.
+          Checking "StencilBits = 0" above prevents from getting into
+          an infinite loop here. }
+        Close({ QuitWhenLastWindowClosed } false);
+        StencilBits := 8;
+        OpenCore;
+        Exit;
+      end;
+
+      { synchronize RenderContext.Viewport with our Width/Height (note that, because
+        of ResizeAllowed and MinWidth etc. that can be different than actual window
+        sizes). }
+      RenderContext.Viewport := Rect;
+    end;
 
     {$ifndef OpenGLES}
     if (RHIDevice = nil) and
@@ -3089,6 +3111,11 @@ begin
   if FClosed then Exit;
 
   try
+    if FOwnsVulkanRHIDevice and (RHIDevice is TVulkanRHIDevice) then
+    begin
+      RHIDevice.WaitIdle;
+      TVulkanRHIDevice(RHIDevice).DeferResourceDestruction := False;
+    end;
     if EventOpenCalled then
     begin
       MakeCurrent;
@@ -3276,7 +3303,8 @@ end;
 
 function TCastleWindow.IsVulkanBackendRequested: Boolean;
 begin
-  Result := ApplicationProperties.RenderBackend = backendVulkan;
+  Result := (ApplicationProperties.RenderBackend = backendVulkan) and
+            (not FDisableVulkanForCurrentOpen);
 end;
 
 procedure TCastleWindow.InitializeVulkanRHIDeviceIfNeeded;
@@ -3439,7 +3467,14 @@ begin
 
   MakeCurrent;
   if (RHIDevice <> nil) and (RHIDevice is TVulkanRHIDevice) then
-    RHIDevice.ResizeSwapchain(Cardinal(Max(1, FWidth)), Cardinal(Max(1, FHeight)));
+  begin
+    if (AWidth <= 0) or (AHeight <= 0) then
+      RHIDevice.ResizeSwapchain(0, 0)
+    else if (not FirstResizeAfterOpen) or
+            (TVulkanRHIDevice(RHIDevice).SwapchainExtent.width <> Cardinal(Max(1, FWidth))) or
+            (TVulkanRHIDevice(RHIDevice).SwapchainExtent.height <> Cardinal(Max(1, FHeight))) then
+      RHIDevice.ResizeSwapchain(Cardinal(Max(1, FWidth)), Cardinal(Max(1, FHeight)));
+  end;
   Container.EventResize;
 end;
 
