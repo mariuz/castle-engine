@@ -37,11 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
+  CastleNavNetwork,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
-  ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio;
+  ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
+  ToolNavNetwork;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -742,6 +744,8 @@ type
       MenuTreeViewItemStateGraph: TMenuItem;
       ButtonParticleStudio: TSpeedButton;
       MenuTreeViewItemParticleStudio: TMenuItem;
+      ButtonNavNetwork: TSpeedButton;
+      MenuTreeViewItemNavNetwork: TMenuItem;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
       FCopiedComponentPropsClassName: String;
@@ -1181,6 +1185,8 @@ type
     procedure MenuTreeViewItemStateGraphClick(Sender: TObject);
     procedure ButtonParticleStudioClick(Sender: TObject);
     procedure MenuTreeViewItemParticleStudioClick(Sender: TObject);
+    procedure ButtonNavNetworkClick(Sender: TObject);
+    procedure MenuTreeViewItemNavNetworkClick(Sender: TObject);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
     function NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
@@ -2604,6 +2610,9 @@ type
 
     { Real-Time 3D VFX Particle Emitter & Preset Studio (Phase 289). }
     procedure ShowParticleStudioDialog;
+
+    { AI Waypoint Patrol Networks, A* NavGrid & Perception Studio (Phase 290). }
+    procedure ShowNavNetworkDialog;
   end;
 
 implementation
@@ -2623,7 +2632,8 @@ uses
   { Editor units }
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
-  FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio, CastleComponentEditorDesigner;
+  FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
+  FormNavNetwork, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -5339,6 +5349,125 @@ procedure TDesignFrame.TDesignerLayer.Render;
     end;
   end;
 
+  procedure RenderNavNetworkOverlay(const AVp: TCastleViewport);
+  const
+    ConeSegs = 12;
+    RingSegs = 24;
+  var
+    NavSum: TNavNetworkSummary;
+    CamP, CamD, CamU, P1, P2, AgentP, AgentD, AgentU, FwdXZ, RightXZ, RayL, RayR: TVector3;
+    SegPts: array [0..1] of TVector2;
+    NextWP: TCastleWaypointNode;
+    Ag: TCastlePatrolAgentBehavior;
+    HalfRad, Ang1, Ang2, RSight, RHear: Single;
+    I, S: Integer;
+  begin
+    if Frame.FDesignRoot = nil then
+      Exit;
+    AVp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    NavSum := TNavNetworkHelper.ScanNavNetwork(Frame.FDesignRoot);
+
+    { 1. Linked waypoint arrows in gold }
+    for I := 0 to High(NavSum.Waypoints) do
+    begin
+      if (NavSum.Waypoints[I] = nil) or (not NavSum.Waypoints[I].Exists) or
+         (not NavSum.Waypoints[I].ShowLinkInViewport) then
+        Continue;
+      NextWP := NavSum.Waypoints[I].ResolveNextWaypoint(Frame.FDesignRoot);
+      if (NextWP = nil) or (not NextWP.Exists) then
+        Continue;
+      P1 := NavSum.Waypoints[I].WorldTranslation + Vector3(0, 0.2, 0);
+      P2 := NextWP.WorldTranslation + Vector3(0, 0.2, 0);
+      if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+         ((TVector3.DotProduct(P1 - CamP, CamD) > 0.1) and
+          (TVector3.DotProduct(P2 - CamP, CamD) > 0.1)) then
+      begin
+        SegPts[0] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(P1));
+        SegPts[1] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(P2));
+        DrawPrimitive2D(pmLines, SegPts, Vector4(0.95, 0.80, 0.22, 0.90),
+          bsSrcAlpha, bdOneMinusSrcAlpha, false, 2.5);
+      end;
+    end;
+
+    { 2. AI FOV sight cones (emerald) + 360-degree hearing rings (amber) }
+    for I := 0 to High(NavSum.Agents) do
+    begin
+      Ag := NavSum.Agents[I];
+      if (Ag = nil) or (Ag.Parent = nil) or (not Ag.Parent.Exists) or
+         (not Ag.ShowPerceptionInViewport) then
+        Continue;
+      Ag.Parent.GetWorldView(AgentP, AgentD, AgentU);
+      FwdXZ := Vector3(AgentD.X, 0.0, AgentD.Z);
+      if FwdXZ.IsZero then
+        FwdXZ := Vector3(0, 0, -1)
+      else
+        FwdXZ := FwdXZ.Normalize;
+      RightXZ := Vector3(-FwdXZ.Z, 0.0, FwdXZ.X);
+
+      RSight := Ag.SightRadius;
+      HalfRad := DegToRad(Ag.SightHalfAngleDeg);
+      if RSight > 0.05 then
+      begin
+        RayL := AgentP + (FwdXZ * Cos(-HalfRad) + RightXZ * Sin(-HalfRad)) * RSight;
+        RayR := AgentP + (FwdXZ * Cos(HalfRad) + RightXZ * Sin(HalfRad)) * RSight;
+        if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+           ((TVector3.DotProduct(AgentP - CamP, CamD) > 0.1) and
+            (TVector3.DotProduct(RayL - CamP, CamD) > 0.1)) then
+        begin
+          SegPts[0] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(AgentP));
+          SegPts[1] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(RayL));
+          DrawPrimitive2D(pmLines, SegPts, Vector4(0.25, 0.95, 0.48, 0.85),
+            bsSrcAlpha, bdOneMinusSrcAlpha, false, 2.0);
+        end;
+        if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+           ((TVector3.DotProduct(AgentP - CamP, CamD) > 0.1) and
+            (TVector3.DotProduct(RayR - CamP, CamD) > 0.1)) then
+        begin
+          SegPts[0] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(AgentP));
+          SegPts[1] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(RayR));
+          DrawPrimitive2D(pmLines, SegPts, Vector4(0.25, 0.95, 0.48, 0.85),
+            bsSrcAlpha, bdOneMinusSrcAlpha, false, 2.0);
+        end;
+        for S := 0 to ConeSegs - 1 do
+        begin
+          Ang1 := -HalfRad + (2.0 * HalfRad * S) / ConeSegs;
+          Ang2 := -HalfRad + (2.0 * HalfRad * (S + 1)) / ConeSegs;
+          P1 := AgentP + (FwdXZ * Cos(Ang1) + RightXZ * Sin(Ang1)) * RSight;
+          P2 := AgentP + (FwdXZ * Cos(Ang2) + RightXZ * Sin(Ang2)) * RSight;
+          if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+             ((TVector3.DotProduct(P1 - CamP, CamD) > 0.1) and
+              (TVector3.DotProduct(P2 - CamP, CamD) > 0.1)) then
+          begin
+            SegPts[0] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(P1));
+            SegPts[1] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(P2));
+            DrawPrimitive2D(pmLines, SegPts, Vector4(0.25, 0.95, 0.48, 0.85),
+              bsSrcAlpha, bdOneMinusSrcAlpha, false, 2.0);
+          end;
+        end;
+      end;
+
+      RHear := Ag.HearingRadius;
+      if RHear > 0.05 then
+        for S := 0 to RingSegs - 1 do
+          if (S and 1) = 0 then
+          begin
+            Ang1 := (2.0 * Pi * S) / RingSegs;
+            Ang2 := (2.0 * Pi * (S + 1)) / RingSegs;
+            P1 := Vector3(AgentP.X + Cos(Ang1) * RHear, AgentP.Y, AgentP.Z + Sin(Ang1) * RHear);
+            P2 := Vector3(AgentP.X + Cos(Ang2) * RHear, AgentP.Y, AgentP.Z + Sin(Ang2) * RHear);
+            if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+               ((TVector3.DotProduct(P1 - CamP, CamD) > 0.1) and
+                (TVector3.DotProduct(P2 - CamP, CamD) > 0.1)) then
+            begin
+              SegPts[0] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(P1));
+              SegPts[1] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(P2));
+              DrawPrimitive2D(pmLines, SegPts, Vector4(0.95, 0.62, 0.20, 0.65),
+                bsSrcAlpha, bdOneMinusSrcAlpha, false, 1.5);
+            end;
+          end;
+    end;
+  end;
+
   procedure RenderAnnotationPinsOverlay(const AVp: TCastleViewport);
   var
     PinReport: TDesignAnnotationAuditReport;
@@ -5648,6 +5777,7 @@ begin
      (Frame.CurrentViewport <> nil) and (Frame.CurrentViewport.InternalCamera <> nil) then
   begin
     RenderStreamingZonesOverlay(Frame.CurrentViewport);
+    RenderNavNetworkOverlay(Frame.CurrentViewport);
   end;
 
   if (Frame.TransformManipulate <> nil) and
@@ -5995,6 +6125,21 @@ begin
   if ButtonStateGraph.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonParticleStudio,
       PanelMiddleTop.GetControlIndex(ButtonStateGraph) + 1);
+
+  ButtonNavNetwork := TSpeedButton.Create(Self);
+  ButtonNavNetwork.Caption := 'AI Nav';
+  ButtonNavNetwork.Hint := 'Open AI Waypoint Patrol Networks, A* NavGrid & Perception Studio.' + NL +
+    'Bake 3D world obstacles into an A* grid, link patrol waypoints, and visualize AI sight/hearing cones.';
+  ButtonNavNetwork.ShowHint := true;
+  ButtonNavNetwork.AutoSize := true;
+  ButtonNavNetwork.Constraints.MinHeight := 33;
+  ButtonNavNetwork.Constraints.MinWidth := 56;
+  ButtonNavNetwork.BorderSpacing.Left := 2;
+  ButtonNavNetwork.OnClick := @ButtonNavNetworkClick;
+  ButtonNavNetwork.Parent := PanelMiddleTop;
+  if ButtonParticleStudio.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonNavNetwork,
+      PanelMiddleTop.GetControlIndex(ButtonParticleStudio) + 1);
 
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
@@ -8865,6 +9010,11 @@ begin
   MenuTreeViewItemParticleStudio.Caption := '3D VFX Particle Emitter && Preset Studio...';
   MenuTreeViewItemParticleStudio.OnClick := @MenuTreeViewItemParticleStudioClick;
   MenuTreeView.Items.Add(MenuTreeViewItemParticleStudio);
+
+  MenuTreeViewItemNavNetwork := TMenuItem.Create(Self);
+  MenuTreeViewItemNavNetwork.Caption := 'AI Waypoints, A* NavGrid && Perception Studio...';
+  MenuTreeViewItemNavNetwork.OnClick := @MenuTreeViewItemNavNetworkClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemNavNetwork);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -14049,6 +14199,12 @@ var
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(NodeObj).GraphSummaryBadge
       else if NodeObj is TCastleParticleEmitter then
         Suffix := Suffix + ' ' + TCastleParticleEmitter(NodeObj).EmitterSummaryBadge
+      else if NodeObj is TCastleWaypointNode then
+        Suffix := Suffix + ' ' + TCastleWaypointNode(NodeObj).WaypointSummaryBadge
+      else if NodeObj is TCastleNavGrid then
+        Suffix := Suffix + ' ' + TCastleNavGrid(NodeObj).NavGridSummaryBadge
+      else if NodeObj is TCastlePatrolAgentBehavior then
+        Suffix := Suffix + ' ' + TCastlePatrolAgentBehavior(NodeObj).AgentSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -53223,6 +53379,47 @@ end;
 procedure TDesignFrame.MenuTreeViewItemParticleStudioClick(Sender: TObject);
 begin
   ShowParticleStudioDialog;
+end;
+
+{ AI Waypoint Patrol Networks, A* NavGrid & Perception Studio (Phase 290) ---- }
+
+procedure TDesignFrame.ShowNavNetworkDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  InitComp: TComponent;
+  Dlg: TNavNetworkForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  InitComp := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount > 0 then
+      InitComp := Selected[0];
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  Dlg := TNavNetworkForm.CreateStudio(Self, FDesignRoot, DesignOwner, InitComp,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonNavNetworkClick(Sender: TObject);
+begin
+  ShowNavNetworkDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemNavNetworkClick(Sender: TObject);
+begin
+  ShowNavNetworkDialog;
 end;
 
 initialization

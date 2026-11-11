@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="51">
+    <Units Count="53">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -337,6 +337,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormParticleStudio"/>
       </Unit50>
+      <Unit51>
+        <Filename Value="../common-code/toolnavnetwork.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolNavNetwork"/>
+      </Unit51>
+      <Unit52>
+        <Filename Value="code/formnavnetwork.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormNavNetwork"/>
+      </Unit52>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

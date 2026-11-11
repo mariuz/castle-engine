@@ -2670,6 +2670,33 @@ TorchVfx.EmitBurst(32);
 
 ---
 
+## 66O. Horizon 3 — AI Waypoint Patrol Networks, A* NavGrid Pathfinding & Perception Cones (Phase 290 / UE 5.9 & 6.0 MassAI Parity)
+
+Inspired by **Unreal Engine's Navigation System, Patrol Splines & AI Perception**, `CastleNavNetwork` (`src/scene/castlenavnetwork.pas`), `ToolNavNetwork` (`tools/common-code/toolnavnetwork.pas`), and `TNavNetworkForm` (`tools/castle-editor/code/formnavnetwork.pas`) bring obstacle-aware 3D A* pathfinding, linked patrol waypoints, and FOV sight/hearing cones to `castle-editor`.
+
+### Key Capabilities
+1. **`TCastleWaypointNode`, `TCastleNavGrid` & `TCastlePatrolAgentBehavior`**:
+   - `TCastleNavGrid` bakes 3D obstacle bounding boxes (inflated by `AgentRadius`, ignoring `NavWalkableIgnoreTag` floors) into a serializable 2D XZ grid and computes octile 8-way A* shortest paths (`FindPathWorld`) with corner-cutting guards.
+   - `TCastlePatrolAgentBehavior` steers parent transforms along `TCastleWaypointNode` chains (directly or via `NavGridName`), honors `WaitTimeSec` dwell timers, and evaluates `CanSeeWorldPoint`, `CanHearWorldPoint`, and `CanPerceiveTarget`.
+2. **AI Nav Studio & 3D Viewport Overlays (`TNavNetworkForm`)**:
+   - Open via the top-bar **`AI Nav`** button or **`Design -> AI Waypoints, A* NavGrid & Perception Studio...`**.
+   - Features an interactive 2D NavGrid painter & live A* Goal tester (`LMB` toggles obstacle cells, `RMB` moves A* goal), plus 3D viewport waypoint arrows, emerald FOV sight cones, and amber hearing rings.
+
+### Example Usage (Pascal API)
+```pascal
+Grid := TNavNetworkHelper.CreateOrBakeNavGrid(ViewportMain, Self, 32, 32, 1.0);
+FirstWP := TNavNetworkHelper.CreatePatrolLoop(ViewportMain, Self, Vector3(0, 0, 0), 8.0, 4);
+Agent := TNavNetworkHelper.AttachPatrolAgent(GuardScene, Self, FirstWP.Name, Grid.Name);
+if Agent.CanPerceiveTarget(PlayerTransform, Seen, Heard) then ...
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Behaviors Manual](https://castle-engine.io/behaviors) · [CGE 3D Viewport & Scenes](https://castle-engine.io/viewport_and_scenes) · [UE AI & Navigation System](https://dev.epicgames.com/documentation/en-us/unreal-engine/artificial-intelligence-in-unreal-engine) · [Godot 4 3D Navigation](https://docs.godotengine.org/en/stable/tutorials/navigation/navigation_introduction_3d.html)
+- **Videos & Movies:** 🎬 [CGE Official Video — AI Behaviors & 3D Worlds (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [Animated 3D Pathfinding & Obstacle Avoidance](https://docs.godotengine.org/en/stable/_images/nav_meshes_mini.gif)
+- **Screenshots:** [CGE 3D AI Level Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Behavior Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2747,4 +2774,5 @@ In addition, Horizon 2 editor subsystems include dedicated automated test suites
 - **[`tests/code/testcases/testtoolsequencer.pas`](../tests/code/testcases/testtoolsequencer.pas) (`TTestToolSequencer` — 2 tests)**: Verifies multi-track `Vector3`/`Float`/`Bool`/`String` interpolation (`seLinear`, `seSmoothStep`, `seStep`), `stkCameraCut` viewport camera switching, `ComponentToString` JSON roundtrip persistence, `CaptureLivePropertyKey`, `spmOnce`/`spmLoop`/`spmPingPong` playback modes, and `OnCueEvent` marker callbacks (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolstategraph.pas`](../tests/code/testcases/testtoolstategraph.pas) (`TTestToolStateGraph` — 2 tests)**: Verifies `TCastleStateGraphBehavior` blackboard comparisons, `MinStateElapsedSec` timer gates, `'*'` Any-State priority interrupts, entry/exit RTTI/animation/blackboard/cue actions, `ComponentToString` JSON roundtrips, gameplay templates (`AI Patrol/Chase/Attack`, `Interactive Door`, `UI Menu Flow`), `ValidateGraph` unreachable-state & undeclared-variable detection, and Mermaid `stateDiagram-v2` export (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolparticlestudio.pas`](../tests/code/testcases/testtoolparticlestudio.pas) (`TTestToolParticleStudio` — 2 tests)**: Verifies `TCastleParticleEmitter` `pesCircleRing` radial emission, gravity/drag integration, lifetime expiration, continuous `SpawnRate` accumulation, `csTransient` child non-serialization across `ComponentToString` roundtrips, all 6 VFX presets, `MaxParticles` burst capping, and `TParticleStudioHelper` over-budget diagnostics & Markdown export (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolnavnetwork.pas`](../tests/code/testcases/testtoolnavnetwork.pas) (`TTestToolNavNetwork` — 2 tests)**: Verifies `TCastleNavGrid.BakeObstaclesFromWorld` (`NavWalkableIgnoreTag` floor exclusion + `AgentRadius` wall inflation), octile A* `FindPathWorld` obstacle routing around solid barriers, `BlockedCellsData` JSON roundtrips, `TCastleWaypointNode` circular patrol loops with `WaitTimeSec` dwell timers, and `TCastlePatrolAgentBehavior` FOV sight cone vs. 360° hearing sphere `CanPerceiveTarget` queries (`0 unfreed memory blocks`).
 

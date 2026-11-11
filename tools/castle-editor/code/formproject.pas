@@ -603,6 +603,7 @@ type
       MenuItemSequencer: TMenuItem;
       MenuItemStateGraph: TMenuItem;
       MenuItemParticleStudio: TMenuItem;
+      MenuItemNavNetwork: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -626,6 +627,7 @@ type
     procedure MenuItemSequencerClick(Sender: TObject);
     procedure MenuItemStateGraphClick(Sender: TObject);
     procedure MenuItemParticleStudioClick(Sender: TObject);
+    procedure MenuItemNavNetworkClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2266,6 +2268,11 @@ begin
   MenuItemParticleStudio.OnClick := @MenuItemParticleStudioClick;
   MenuItemDesign.Add(MenuItemParticleStudio);
 
+  MenuItemNavNetwork := TMenuItem.Create(MenuItemDesign);
+  MenuItemNavNetwork.Caption := 'AI Waypoints, A* NavGrid & Perception Studio...';
+  MenuItemNavNetwork.OnClick := @MenuItemNavNetworkClick;
+  MenuItemDesign.Add(MenuItemNavNetwork);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -2934,6 +2941,8 @@ begin
     MenuItemStateGraph.Enabled := Design <> nil;
   if MenuItemParticleStudio <> nil then
     MenuItemParticleStudio.Enabled := Design <> nil;
+  if MenuItemNavNetwork <> nil then
+    MenuItemNavNetwork.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5219,6 +5228,12 @@ procedure TProjectForm.MenuItemParticleStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowParticleStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemNavNetworkClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowNavNetworkDialog;
 end;
 
 initialization

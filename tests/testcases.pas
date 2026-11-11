@@ -115,6 +115,7 @@ uses
   TestToolSequencer,
   TestToolStateGraph,
   TestToolParticleStudio,
+  TestToolNavNetwork,
   TestCastleVulkanRHI;
 
 implementation
