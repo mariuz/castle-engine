@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -752,6 +752,8 @@ type
       MenuTreeViewItemAssetGraph: TMenuItem;
       ButtonPostProcess: TSpeedButton;
       MenuTreeViewItemPostProcess: TMenuItem;
+      ButtonLocalization: TSpeedButton;
+      MenuTreeViewItemLocalization: TMenuItem;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
       FCopiedComponentPropsClassName: String;
@@ -1199,6 +1201,8 @@ type
     procedure MenuTreeViewItemAssetGraphClick(Sender: TObject);
     procedure ButtonPostProcessClick(Sender: TObject);
     procedure MenuTreeViewItemPostProcessClick(Sender: TObject);
+    procedure ButtonLocalizationClick(Sender: TObject);
+    procedure MenuTreeViewItemLocalizationClick(Sender: TObject);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
     function NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
@@ -2634,6 +2638,9 @@ type
 
     { Priority-Blended Post-Processing Volumes & Cinematic Look-Dev Studio (Phase 293). }
     procedure ShowPostProcessStudioDialog;
+
+    { Localization (i18n) String Extractor, Live Locale Switcher & Pseudo-L10n Auditor (Phase 294). }
+    procedure ShowLocalizationDialog;
   end;
 
 implementation
@@ -2654,7 +2661,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -6333,6 +6340,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonPostProcess,
       PanelMiddleTop.GetControlIndex(ButtonAssetGraph) + 1);
 
+  ButtonLocalization := TSpeedButton.Create(Self);
+  ButtonLocalization.Caption := 'i18n';
+  ButtonLocalization.Hint := 'Open Localization (i18n) String Extractor, Live Viewport Locale Switcher & Pseudo-L10n Auditor.' + NL +
+    'Extract UI/3D strings, switch live viewport locales (en/de/ja/es/pseudo), export/import CSV, and audit fixed-width overflows.';
+  ButtonLocalization.ShowHint := true;
+  ButtonLocalization.AutoSize := true;
+  ButtonLocalization.Constraints.MinHeight := 33;
+  ButtonLocalization.Constraints.MinWidth := 56;
+  ButtonLocalization.BorderSpacing.Left := 2;
+  ButtonLocalization.OnClick := @ButtonLocalizationClick;
+  ButtonLocalization.Parent := PanelMiddleTop;
+  if ButtonPostProcess.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonLocalization,
+      PanelMiddleTop.GetControlIndex(ButtonPostProcess) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -9222,6 +9244,11 @@ begin
   MenuTreeViewItemPostProcess.Caption := 'Post-Processing Volumes && Look-Dev Studio...';
   MenuTreeViewItemPostProcess.OnClick := @MenuTreeViewItemPostProcessClick;
   MenuTreeView.Items.Add(MenuTreeViewItemPostProcess);
+
+  MenuTreeViewItemLocalization := TMenuItem.Create(Self);
+  MenuTreeViewItemLocalization.Caption := 'Localization (i18n) Extractor && Pseudo-L10n Auditor...';
+  MenuTreeViewItemLocalization.OnClick := @MenuTreeViewItemLocalizationClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemLocalization);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -14422,6 +14449,10 @@ var
         Suffix := Suffix + ' ' + TCastlePostProcessVolume(NodeObj).VolumeSummaryBadge
       else if NodeObj is TCastlePostProcessStack then
         Suffix := Suffix + ' ' + TCastlePostProcessStack(NodeObj).StackSummaryBadge
+      else if NodeObj is TCastleLocalizationManager then
+        Suffix := Suffix + ' ' + TCastleLocalizationManager(NodeObj).LocalizationSummaryBadge
+      else if NodeObj is TCastleLocalizedBehavior then
+        Suffix := Suffix + ' ' + TCastleLocalizedBehavior(NodeObj).LocalizedSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -53748,6 +53779,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemPostProcessClick(Sender: TObject);
 begin
   ShowPostProcessStudioDialog;
+end;
+
+procedure TDesignFrame.ShowLocalizationDialog;
+var
+  Dlg: TLocalizationForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TLocalizationForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonLocalizationClick(Sender: TObject);
+begin
+  ShowLocalizationDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemLocalizationClick(Sender: TObject);
+begin
+  ShowLocalizationDialog;
 end;
 
 initialization

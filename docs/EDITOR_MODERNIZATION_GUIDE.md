@@ -2776,6 +2776,33 @@ Stack.ApplyToViewport(DesignRoot, MyViewport, MyViewport.Camera.WorldTranslation
 
 ---
 
+## 66S. Localization (`i18n`) String Extractor, Live Locale Switcher & Pseudo-L10n Auditor (Phase 294)
+
+Castle Game Engine provides an integrated multi-locale string-table manager, 1-click UI/3D string extractor, live viewport locale switcher, and `[!! Pseudo-L10n !!]` fixed-width overflow auditor matching Unreal Engine 5.9/6.0's Localization Dashboard:
+
+1. **Multi-Locale String Table & 3D Property Binder (`src/scene/castlelocalizationtable.pas`)**:
+   - `TCastleLocalizationManager` (`TCastleComponent`) stores multi-locale translations serialized in diff-friendly JSON (`TableDataJson`), exports/imports RFC-4180 CSV (`ExportCsv` / `ImportCsv`), resolves missing translations via `FallbackLocale` (`'en'`), applies locales live across hierarchies via CGE's `TranslateProperties` + RTTI (`ApplyLocaleToHierarchy`), and generates accented + 35%-expanded `[!! Pseudo-L10n !!]` strings (`GeneratePseudoLocalizedText`) while preserving `{player}` and `%d`/`%s` format placeholders.
+   - `TCastleLocalizedBehavior` (`TCastleBehavior`) binds any 3D `TCastleTransform` property (such as `TCastleText.Caption`) to a localization key.
+2. **Localization Dashboard & Overflow Auditor (`TLocalizationForm` & `TLocalizationHelper`)**:
+   - Open via the top-bar **`i18n`** button, Hierarchy context menu, or **`Design -> Localization (i18n) Extractor & Pseudo-L10n Auditor...`**.
+   - Extracts translatable strings in 1 click, switches the live viewport between `en`, `de`, `ja`, `es`, and `pseudo`, flags missing translations and fixed-width (`AutoSize = false`) button/label overflows, and exports CSV/Markdown reports.
+
+### Example Usage (Pascal API)
+```pascal
+Mgr := TLocalizationHelper.EnsureManagerInDesign(DesignRoot, DesignOwner);
+TLocalizationHelper.ExtractTranslatableStringsFromHierarchy(DesignRoot, Mgr);
+Mgr.SetTranslation('ui.ButtonPlay.Caption', 'de', 'Abenteuer starten', 'ButtonPlay', 'Caption');
+Mgr.ApplyLocaleToHierarchy(DesignRoot, 'pseudo');
+Audit := TLocalizationHelper.AuditHierarchyLocalization(DesignRoot, ['de', 'pseudo']);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Localization Manual](https://castle-engine.io/localization) · [CGE Text & Fonts Manual](https://castle-engine.io/manual_text.php) · [UE Localization Dashboard](https://dev.epicgames.com/documentation/en-us/unreal-engine/localization-dashboard-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — UI & Localization (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [UE Localization Dashboard Overview](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/6563b814-3545-4c07-a29f-65b7fd8c7b6a/loc-dashboard.png)
+- **Screenshots:** [CGE UI Editor](https://castle-engine.io/images/thumb_const_height_size/ui_editor.webp) · [Localization Dashboard](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/6563b814-3545-4c07-a29f-65b7fd8c7b6a/loc-dashboard.png)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2857,4 +2884,5 @@ In addition, Horizon 2 editor subsystems include dedicated automated test suites
 - **[`tests/code/testcases/testtoolaudiomixer.pas`](../tests/code/testcases/testtoolaudiomixer.pas) (`TTestToolAudioMixer` — 2 tests)**: Verifies `TCastleAudioBusMixer` 5-bus gain routing, `Solo`/`Mute` isolation, sidechain `Voice` -> `Music`/`Ambient` ducking, `ComponentToString` JSON roundtrips, `TCastleAudioZone` Hermite `InnerRadius`/`OuterRadius` crossfades, underwater pitch muffling, unrouted `TCastleSoundSource` warnings, and Markdown export (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolassetgraph.pas`](../tests/code/testcases/testtoolassetgraph.pas) (`TTestToolAssetGraph` — 2 tests)**: Verifies multi-hop bidirectional `Referencers <-> Dependencies` indexing across `.castle-user-interface -> .castle-transform -> .gltf -> .png`, orphan asset & byte-size detection, Mermaid `flowchart LR` export, moved-asset broken `castle-data:/` URL auto-repair (`RepairBrokenUrls`), and non-destructive `.castle-orphan-trash/` quarantine (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolpostprocessstudio.pas`](../tests/code/testcases/testtoolpostprocessstudio.pas) (`TTestToolPostProcessStudio` — 2 tests)**: Verifies `TCastlePostProcessVolume` global vs. bounded Hermite `CoreRadius`/`BlendRadius` falloff, `Priority` override sorting, `ComponentToString` JSON roundtrips, all 6 `TCastlePostProcessPreset` look presets, `TCastlePostProcessStack` live X3D `TScreenEffectNode` attachment/enablement on `TCastleViewport`, `EvaluateColorGradeCpuPreview`, and GLSL/Markdown export (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoollocalization.pas`](../tests/code/testcases/testtoollocalization.pas) (`TTestToolLocalization` — 2 tests)**: Verifies 2D `TranslateProperties` + 3D `TCastleLocalizedBehavior` string extraction, live `ApplyLocaleToHierarchy` switching with `'en'` fallback, RFC-4180 CSV export/import roundtrips, `ComponentToString` JSON roundtrips, `GeneratePseudoLocalizedText` `{player}`/`%d`/`%s` token preservation, and fixed-width vs. `AutoSize` UI overflow auditing (`0 unfreed memory blocks`).
 

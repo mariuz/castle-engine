@@ -607,6 +607,7 @@ type
       MenuItemAudioMixer: TMenuItem;
       MenuItemAssetGraph: TMenuItem;
       MenuItemPostProcess: TMenuItem;
+      MenuItemLocalization: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -634,6 +635,7 @@ type
     procedure MenuItemAudioMixerClick(Sender: TObject);
     procedure MenuItemAssetGraphClick(Sender: TObject);
     procedure MenuItemPostProcessClick(Sender: TObject);
+    procedure MenuItemLocalizationClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2294,6 +2296,11 @@ begin
   MenuItemPostProcess.OnClick := @MenuItemPostProcessClick;
   MenuItemDesign.Add(MenuItemPostProcess);
 
+  MenuItemLocalization := TMenuItem.Create(MenuItemDesign);
+  MenuItemLocalization.Caption := 'Localization (i18n) Extractor & Pseudo-L10n Auditor...';
+  MenuItemLocalization.OnClick := @MenuItemLocalizationClick;
+  MenuItemDesign.Add(MenuItemLocalization);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -2970,6 +2977,8 @@ begin
     MenuItemAssetGraph.Enabled := (Design <> nil) or (ProjectPath <> '');
   if MenuItemPostProcess <> nil then
     MenuItemPostProcess.Enabled := Design <> nil;
+  if MenuItemLocalization <> nil then
+    MenuItemLocalization.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5290,6 +5299,12 @@ procedure TProjectForm.MenuItemPostProcessClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowPostProcessStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemLocalizationClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowLocalizationDialog;
 end;
 
 initialization
