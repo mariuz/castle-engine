@@ -113,6 +113,7 @@ uses
   TestToolPrefabOverrides,
   TestToolWorldStreaming,
   TestToolSequencer,
+  TestToolStateGraph,
   TestCastleVulkanRHI;
 
 implementation

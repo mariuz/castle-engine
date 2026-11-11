@@ -36,12 +36,12 @@ uses
   CastleCameras, CastleBoxes, CastleTransform, CastleDebugTransform,
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
-  CastlePrefabOverrides, CastleStreamingZone, CastleSequencer,
+  CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
-  ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer;
+  ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -738,6 +738,8 @@ type
       FShowStreamingZonesOverlay: Boolean;
       ButtonSequencer: TSpeedButton;
       MenuTreeViewItemSequencer: TMenuItem;
+      ButtonStateGraph: TSpeedButton;
+      MenuTreeViewItemStateGraph: TMenuItem;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
       FCopiedComponentPropsClassName: String;
@@ -1173,6 +1175,8 @@ type
     procedure ButtonSequencerClick(Sender: TObject);
     procedure MenuTreeViewItemSequencerClick(Sender: TObject);
     procedure SequencerRefreshViewportCallback;
+    procedure ButtonStateGraphClick(Sender: TObject);
+    procedure MenuTreeViewItemStateGraphClick(Sender: TObject);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
     function NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
@@ -2590,6 +2594,9 @@ type
 
     { Non-Linear Cinematic Sequencer & Multi-Track Timeline (Phase 287). }
     procedure ShowSequencerDialog;
+
+    { Visual State Machine & Behavior Tree Graph Studio (Phase 288). }
+    procedure ShowStateGraphDialog;
   end;
 
 implementation
@@ -2609,7 +2616,7 @@ uses
   { Editor units }
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
-  FormPrefabOverrides, FormWorldMinimap, FormSequencer, CastleComponentEditorDesigner;
+  FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -5952,6 +5959,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonSequencer,
       PanelMiddleTop.GetControlIndex(ButtonWorldMinimap) + 1);
 
+  ButtonStateGraph := TSpeedButton.Create(Self);
+  ButtonStateGraph.Caption := 'StateGraph';
+  ButtonStateGraph.Hint := 'Open Visual State Machine & Behavior Tree Graph Studio (StateTree).' + NL +
+    'Author 2D Bézier state graphs, blackboard variables, timer/condition transitions, and gameplay templates.';
+  ButtonStateGraph.ShowHint := true;
+  ButtonStateGraph.AutoSize := true;
+  ButtonStateGraph.Constraints.MinHeight := 33;
+  ButtonStateGraph.Constraints.MinWidth := 68;
+  ButtonStateGraph.BorderSpacing.Left := 2;
+  ButtonStateGraph.OnClick := @ButtonStateGraphClick;
+  ButtonStateGraph.Parent := PanelMiddleTop;
+  if ButtonSequencer.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonStateGraph,
+      PanelMiddleTop.GetControlIndex(ButtonSequencer) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -8811,6 +8833,11 @@ begin
   MenuTreeViewItemSequencer.Caption := 'Cinematic Sequencer && Multi-Track Timeline...';
   MenuTreeViewItemSequencer.OnClick := @MenuTreeViewItemSequencerClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSequencer);
+
+  MenuTreeViewItemStateGraph := TMenuItem.Create(Self);
+  MenuTreeViewItemStateGraph.Caption := 'Visual State Machine && Behavior Graph (StateTree)...';
+  MenuTreeViewItemStateGraph.OnClick := @MenuTreeViewItemStateGraphClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemStateGraph);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -13991,6 +14018,12 @@ var
         Suffix := Suffix + ' ' + TCastleStreamingZone(NodeObj).ZoneSummaryBadge
       else if NodeObj is TCastleSequencePlayer then
         Suffix := Suffix + ' ' + TCastleSequencePlayer(NodeObj).SequenceSummaryBadge
+      else if NodeObj is TCastleStateGraphBehavior then
+        Suffix := Suffix + ' ' + TCastleStateGraphBehavior(NodeObj).GraphSummaryBadge
+      else if (NodeObj is TCastleTransform) and
+              (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
+        Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
+          TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior)).GraphSummaryBadge
       else if TComponent(NodeObj).Tag <> 0 then
         Suffix := Suffix + ' [Tag:' + IntToStr(TComponent(NodeObj).Tag) + ']';
     end;
@@ -53079,6 +53112,47 @@ end;
 procedure TDesignFrame.MenuTreeViewItemSequencerClick(Sender: TObject);
 begin
   ShowSequencerDialog;
+end;
+
+{ Visual State Machine & Behavior Tree Graph Studio (Phase 288) -------------- }
+
+procedure TDesignFrame.ShowStateGraphDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  InitComp: TComponent;
+  Dlg: TStateGraphForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  InitComp := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount > 0 then
+      InitComp := Selected[0];
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  Dlg := TStateGraphForm.CreateStudio(Self, FDesignRoot, DesignOwner, InitComp,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonStateGraphClick(Sender: TObject);
+begin
+  ShowStateGraphDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemStateGraphClick(Sender: TObject);
+begin
+  ShowStateGraphDialog;
 end;
 
 initialization

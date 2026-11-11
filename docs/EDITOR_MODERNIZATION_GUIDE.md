@@ -2616,6 +2616,34 @@ Seq.AddEventCue(1.5, 'PlayHornSfx', 'castle_horn');
 
 ---
 
+## 66M. Horizon 3 — Visual State Machine & Behavior Tree Graph Studio (Phase 288 / UE 5.9 & 6.0 StateTree Parity)
+
+Inspired by **Unreal Engine's StateTree** visual AI/gameplay logic framework, `TCastleStateGraphBehavior` (`src/scene/castlestategraph.pas`), `TStateGraphHelper` (`tools/common-code/toolstategraph.pas`), and `TStateGraphForm` (`tools/castle-editor/code/formstategraph.pas`) bring data-driven finite state machines, typed blackboard parameters, wildcard priority interrupts, and an interactive 2D Bézier node canvas to `castle-editor`.
+
+### Key Capabilities
+1. **Data-Driven `TCastleStateGraphBehavior` Engine Component**:
+   - Attachable to any `TCastleTransform` (and automatically surfaced inside Phase 286's inline `TCastleBehavior` Inspector cards).
+   - Evaluates typed blackboard variables (`sbkFloat`, `sbkInt`, `sbkBool`, `sbkString`), comparison operators (`==`, `!=`, `<`, `<=`, `>`, `>=`), `MinStateElapsedSec` timer gates, and wildcard `'*'` Any-State priority interrupts.
+   - Executes `sakSetProperty` (modifying `$Parent` or named sibling/UI RTTI properties), `sakSetBlackboardVar`, `sakPlayAnimation`, and `sakFireCue` (`OnStateCue`) on state entry and exit.
+2. **Interactive 2D Bézier Node Canvas & Templates (`TStateGraphForm`)**:
+   - Open via the top-bar **`StateGraph`** button or **`Design -> Visual State Machine & Behavior Graph (StateTree)...`**.
+   - Includes draggable 2D state nodes, cubic Bézier directed wires with live condition badges, emerald active-state telemetry, 1-click gameplay templates (`AI Patrol/Chase/Attack`, `Interactive Door`, `UI Menu Flow`), reachability validation (`ValidateGraph`), and Mermaid `stateDiagram-v2` export.
+
+### Example Usage (Pascal API)
+```pascal
+Graph := TStateGraphHelper.AttachStateGraphToTransform(GuardScene, Self, 'GuardFSM');
+TStateGraphHelper.ApplyGameplayTemplate(Graph, sgtAiPatrolChaseAttack);
+Graph.StartGraph;
+Graph.SetFloat('PlayerDistance', 7.5); // Transitions Patrol -> Chase on next update
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Behaviors (`TCastleBehavior`) Manual](https://castle-engine.io/behaviors) · [CGE Animations Manual](https://castle-engine.io/animations) · [UE StateTree Overview](https://dev.epicgames.com/documentation/en-us/unreal-engine/overview-of-state-tree-in-unreal-engine) · [Godot 4 AnimationTree StateMachine](https://docs.godotengine.org/en/stable/tutorials/animation/animation_tree.html)
+- **Videos & Movies:** 🎬 [CGE Official Video — AI Behaviors & Visual Editor (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [Animated State Machine Graph Transitions](https://docs.godotengine.org/en/stable/_images/animtree_statemachine2.gif)
+- **Screenshots:** [CGE 3D AI Scene Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Behavior Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2691,4 +2719,5 @@ In addition, Horizon 2 editor subsystems include dedicated automated test suites
 - **[`tests/code/testcases/testtoolprefaboverrides.pas`](../tests/code/testcases/testtoolprefaboverrides.pas) (`TTestToolPrefabOverrides` — 2 tests)**: Verifies 3D `TCastleTransformDesign` and 2D `TCastleDesign` per-instance child RTTI property & sub-component overrides (`TranslationPersistent.Y`, `Exists`, `Intensity`, `Caption`, `FontSize`), `CaptureLiveEditsFromInstance`, parent design JSON serialization roundtrip with automatic override re-application, sibling prefab isolation, `RevertSingleOverride`, and `ApplyOverridesToSourcePrefab` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolworldstreaming.pas`](../tests/code/testcases/testtoolworldstreaming.pas) (`TTestToolWorldStreaming` — 2 tests)**: Verifies `TCastleStreamingZone` `LoadRadius`/`UnloadRadius` hysteresis transitions without boundary thrashing, `csTransient` child non-duplication across `ComponentToString`/`StringToComponent` JSON roundtrips, `TWorldStreamingInspector.ScanWorld` & Markdown reporting, and `TBehaviorCompositionHelper` registered behavior discovery, attach, non-default RTTI card summary, parent transform resolution, and detach (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolsequencer.pas`](../tests/code/testcases/testtoolsequencer.pas) (`TTestToolSequencer` — 2 tests)**: Verifies multi-track `Vector3`/`Float`/`Bool`/`String` interpolation (`seLinear`, `seSmoothStep`, `seStep`), `stkCameraCut` viewport camera switching, `ComponentToString` JSON roundtrip persistence, `CaptureLivePropertyKey`, `spmOnce`/`spmLoop`/`spmPingPong` playback modes, and `OnCueEvent` marker callbacks (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolstategraph.pas`](../tests/code/testcases/testtoolstategraph.pas) (`TTestToolStateGraph` — 2 tests)**: Verifies `TCastleStateGraphBehavior` blackboard comparisons, `MinStateElapsedSec` timer gates, `'*'` Any-State priority interrupts, entry/exit RTTI/animation/blackboard/cue actions, `ComponentToString` JSON roundtrips, gameplay templates (`AI Patrol/Chase/Attack`, `Interactive Door`, `UI Menu Flow`), `ValidateGraph` unreachable-state & undeclared-variable detection, and Mermaid `stateDiagram-v2` export (`0 unfreed memory blocks`).
 

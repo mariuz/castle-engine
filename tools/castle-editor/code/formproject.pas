@@ -601,6 +601,7 @@ type
       MenuItemPrefabOverrides: TMenuItem;
       MenuItemWorldMinimap: TMenuItem;
       MenuItemSequencer: TMenuItem;
+      MenuItemStateGraph: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -622,6 +623,7 @@ type
     procedure MenuItemPrefabOverridesClick(Sender: TObject);
     procedure MenuItemWorldMinimapClick(Sender: TObject);
     procedure MenuItemSequencerClick(Sender: TObject);
+    procedure MenuItemStateGraphClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2252,6 +2254,11 @@ begin
   MenuItemSequencer.OnClick := @MenuItemSequencerClick;
   MenuItemDesign.Add(MenuItemSequencer);
 
+  MenuItemStateGraph := TMenuItem.Create(MenuItemDesign);
+  MenuItemStateGraph.Caption := 'Visual State Machine & Behavior Graph (StateTree)...';
+  MenuItemStateGraph.OnClick := @MenuItemStateGraphClick;
+  MenuItemDesign.Add(MenuItemStateGraph);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -2916,6 +2923,8 @@ begin
     MenuItemWorldMinimap.Enabled := Design <> nil;
   if MenuItemSequencer <> nil then
     MenuItemSequencer.Enabled := Design <> nil;
+  if MenuItemStateGraph <> nil then
+    MenuItemStateGraph.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5189,6 +5198,12 @@ procedure TProjectForm.MenuItemSequencerClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowSequencerDialog;
+end;
+
+procedure TProjectForm.MenuItemStateGraphClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowStateGraphDialog;
 end;
 
 initialization

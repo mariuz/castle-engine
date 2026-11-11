@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="47">
+    <Units Count="49">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -317,6 +317,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormSequencer"/>
       </Unit46>
+      <Unit47>
+        <Filename Value="../common-code/toolstategraph.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolStateGraph"/>
+      </Unit47>
+      <Unit48>
+        <Filename Value="code/formstategraph.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormStateGraph"/>
+      </Unit48>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
