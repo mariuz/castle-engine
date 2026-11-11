@@ -1,6 +1,6 @@
-# Castle Game Engine — Editor Modernization Roadmap (UE 5.5 Baseline + Horizon 2: UE 5.8 / 5.9 / 6.0)
+# Castle Game Engine — Editor Modernization Roadmap (Horizon 1: UE 5.5 + Horizon 2 & 3: UE 5.8 / 5.9 / 6.0)
 
-This document compares the **Castle Game Engine (CGE 7.0-alpha.3)** editor (`tools/castle-editor`) and runtime scene/UI manipulation architecture against **Unreal Engine 5.5** (Horizon 1: Phases 1–276) and **Unreal Engine 5.8, 5.9 & 6.0** (Horizon 2: Phases 277–286), identifies the highest-impact next-generation workflow opportunities, and tracks the phased engineering roadmap.
+This document compares the **Castle Game Engine (CGE 7.0-alpha.3)** editor (`tools/castle-editor`) and runtime scene/UI manipulation architecture against **Unreal Engine 5.5** (Horizon 1: Phases 1–276), **Unreal Engine 5.8, 5.9 & 6.0 Core Workflows** (Horizon 2: Phases 277–286), and **Unreal Engine 5.9 & 6.0 Deep Production Studios** (Horizon 3: Phases 287–296), identifies the highest-impact next-generation workflow opportunities, and tracks the phased engineering roadmap.
 
 For complete user workflows, mathematical foundations, Pascal API reference, architecture diagrams, and keyboard shortcuts, see the companion reference guide:
 - **[`docs/EDITOR_MODERNIZATION_GUIDE.md`](docs/EDITOR_MODERNIZATION_GUIDE.md)**
@@ -2821,7 +2821,84 @@ While Horizon 1 (Phases 1–276) brought `castle-editor` to full workflow parity
 
 > **Horizon 2 Milestone Complete (`10 / 10` Phases Implemented & Verified — Phases 277–286):** All 10 Unreal Engine 5.8, 5.9 & 6.0 next-generation modernization phases are implemented, covered by automated FPC `CastleTester` suites with **`0 unfreed memory blocks`** under `heaptrc`, and integrated into `castle-editor`.
 
+---
 
+## 4. Horizon 3 Modernization Roadmap: Unreal Engine 5.9 & 6.0 Deep Production Studios (Phases 287–296)
 
+With Horizon 1 (`Phases 1–276`) and Horizon 2 (`Phases 277–286`) complete, **Horizon 3 (`Phases 287–296`)** delivers dedicated, visual, non-destructive authoring studios and runtime components for **Cinematics & Keyframe Sequencing**, **Visual State/Behavior Logic Graphs**, **Real-Time 3D VFX Particle Systems**, **AI Waypoint & A* Navigation Networks**, **Spatial Audio Bus Mixing**, **Bidirectional Asset Dependency Graphs**, **Blended Post-Processing Volumes**, **Localization (`i18n`) Dashboards**, **Multi-Resolution Safe-Area Simulation**, and **Scene Variant Configuration Sets**.
 
+### 4.1. Architectural Comparison Matrix: UE 5.9 / UE 6.0 Production Studios vs. CGE Horizon 3
+
+| Era & Studio Domain | Unreal Engine 5.9 / 6.0 Reference Feature | Castle Game Engine Baseline (Post-Phase 286) | Horizon 3 Modernization Target (Phases 287–296) |
+| :--- | :--- | :--- | :--- |
+| **UE 5.9 / 6.0 — Sequencer & Cinematics** | • **Multi-Track Level Sequencer** (keyframe transforms, camera cuts, lights, UI & arbitrary properties with curve tangents & event triggers) | • Individual glTF/X3D `TCastleScene.PlayAnimation` clips; no cross-component multi-track timeline or interactive viewport dope-sheet scrubber | **Phase 287**:<br>• `TCastleSequencePlayer` multi-track keyframe & camera-cut engine component<br>• Interactive **Sequencer & Dope-Sheet Studio** (`formsequencer.pas`) with live scrubbing, auto-keying & easing curves |
+| **UE 5.9 / 6.0 — StateTree & Visual Logic** | • **StateTree & Verse State Graphs** (hierarchical states, blackboard variables, parameter conditions, timer transitions & visual active-state debugging) | • Hand-written Pascal `Update` state enums or basic `TCastleMoveAttack`; no visual state-machine graph canvas or data-driven blackboard transitions | **Phase 288**:<br>• `TCastleStateGraphBehavior` data-driven FSM / StateTree behavior with blackboard conditions & property/animation actions<br>• **Visual StateGraph Node Canvas** (`formstategraph.pas`) |
+| **UE 5.9 / 6.0 — Niagara VFX Particles** | • **Niagara VFX System & Preset Gallery** (real-time 3D emitters, burst/rate spawning, shape volumes, drag/turbulence, size & color over life) | • External 2D sprite/X3D particle tricks; no built-in 3D serializable `TCastleParticleEmitter` component with live preset studio in `castle-editor` | **Phase 289**:<br>• Native 3D `TCastleParticleEmitter` (`castleparticles.pas`) with Sphere/Cone/Box/Ring shapes, physics forces & 6 presets<br>• **VFX Particle Studio** (`formparticlestudio.pas`) |
+| **UE 5.9 / 6.0 — MassAI, NavGrid & Perception** | • **NavMesh / Grid Pathfinding, Patrol Splines & AI Perception Sight/Hearing Cones** | • No built-in A* obstacle NavGrid, linked patrol waypoint graph, or viewport sight/hearing perception cone visualizer | **Phase 290**:<br>• `TCastleWaypointNode`, `TCastlePatrolAgentBehavior` & `TCastleNavGrid` (A* 3D pathfinding + sight/hearing cones)<br>• **AI Navigation & Waypoint Studio** (`formnavnetwork.pas`) |
+| **UE 5.9 / 6.0 — MetaSounds & Bus Mixing** | • **Audio Modulation Buses, Submix Faders, Ducking & Spatial Reverb/Ambient Zones** | • Flat `SoundEngine.Volume` & per-source `TCastleSoundSource`; no named audio bus routing (`Master`/`Music`/`SFX`/`Voice`/`Ambient`) or crossfaded acoustic zones | **Phase 291**:<br>• `TCastleAudioBusMixer` & `TCastleAudioZone` with distance crossfade & bus ducking<br>• **Audio Mixer & Soundscape Studio** (`formaudiomixer.pas`) |
+| **UE 5.9 / 6.0 — Reference Viewer & Asset Audit** | • **Bidirectional Reference Viewer, Size Map, Orphan Asset Sweeper & Redirector Repair** | • Single-design broken URL checks; no project-wide bidirectional `Referencers <-> Dependencies` graph or moved-file URL auto-repair | **Phase 292**:<br>• `TAssetDependencyAnalyzer` project-wide reference graph, orphan asset detector & fuzzy broken-URL repairer<br>• **Asset Reference Graph Studio** (`formassetgraph.pas`) |
+| **UE 5.9 / 6.0 — Post-Process Volumes & Look-Dev** | • **Priority-Blended `APostProcessVolume`** (unbound or radius-blended exposure, tonemapping, bloom, vignette, chromatic aberration & color grading) | • Low-level X3D `TScreenEffectNode` GLSL snippets requiring manual shader authoring | **Phase 293**:<br>• `TCastlePostProcessVolume` with priority/distance blending & generated `TScreenEffectNode` GLSL stack<br>• **Post-Process & Look-Dev Studio** (`formpostprocessstudio.pas`) |
+| **UE 5.9 / 6.0 — Localization (`i18n`) Dashboard** | • **Localization Dashboard, String Table Extraction, Live Locale Preview & Pseudo-Localization** | • Manual `CastleLocalizationGetText` code wiring; no 1-click design string extractor, live editor locale switcher, or text-overflow pseudo-locale | **Phase 294**:<br>• `TCastleLocalizationManager` & `TCastleLocalizedBehavior` + CSV/JSON string catalog<br>• **Localization & Pseudo-L10n Studio** (`formlocalization.pas`) |
+| **UE 5.9 / 6.0 — CommonUI & Device Safe-Areas** | • **Multi-Resolution Device Simulator, Notch/Safe-Area Overlays & Touch-Target Accessibility Audit** | • Single editor window aspect ratio; no mobile notch safe-area simulation or batch multi-aspect (`16:9`/`21:9`/`19.5:9`/`4:3`) overflow audit | **Phase 295**:<br>• `TResponsiveUiSimulator` multi-device layout & safe-area overflow/overlap/touch-size auditor<br>• **Responsive UI & Safe-Area Simulator** (`formresponsivesim.pas`) |
+| **UE 5.9 / 6.0 — Variant Manager & Config Sets** | • **Variant Manager** (named scene configuration sets switching visibility, transforms, lights, materials & gameplay tuning presets in 1 click) | • Design sandboxes switch entire files, but no lightweight runtime/editor `TCastleVariantSetManager` for in-game/in-editor configuration sets | **Phase 296**:<br>• `TCastleVariantSetManager` serializable variant sets & atomic runtime/editor switching<br>• **Variant Manager Studio** (`formvariantmanager.pas`) |
+
+---
+
+### Phase 287: Non-Linear Cinematic Sequencer & Multi-Track Property/Camera Timeline (UE 5.9 / 6.0 Sequencer Parity)
+- [x] **287.1. `TCastleSequencePlayer` Multi-Track Keyframe/Camera-Cut Engine Component & Interactive Dope-Sheet Timeline Studio (`castlesequencer.pas`, `toolsequencer.pas`, `formsequencer.pas`, `framedesign.pas`, `formproject.pas`, `testtoolsequencer.pas`)**
+  - Implemented `TCastleSequencePlayer` and `TCastleSequenceRunnerBehavior` (`src/scene/castlesequencer.pas`, registered in `castle_engine_base.lpk` and `editorregisterallcomponents.pas`), storing multi-track keyframe timelines (`stkVector3Property`, `stkFloatProperty`, `stkBoolProperty`, `stkStringProperty`, `stkCameraCut`) and timestamped event cues (`OnCueEvent`) as diff-friendly JSON (`TracksJson`) with `seLinear`, `seSmoothStep`, `seEaseInCubic`, `seEaseOutCubic`, and `seStep` interpolation, `spmOnce`/`spmLoop`/`spmPingPong` playback modes, `TimeScale`, and deterministic `EvaluateAtTime`.
+  - Implemented `TSequencerHelper` (`tools/common-code/toolsequencer.pas`) for hierarchy discovery, 1-click sequence + runner setup (`CreateSequencePlayerInDesign`), live RTTI & vector property keyframe sampling (`CaptureLivePropertyKey`), camera-cut enumeration, and Markdown summary generation (`FormatSequenceMarkdown`).
+  - Added `TSequencerForm` (`tools/castle-editor/code/formsequencer.pas`), top-bar **`Sequencer`** button, **`Design -> Cinematic Sequencer & Multi-Track Timeline...`**, and `[Seq:...]` Hierarchy badges, featuring an interactive `TPaintBox` multi-track dope-sheet with diamond keyframe markers, live 30 FPS transport playback, click/drag playhead scrubbing that updates the 3D/2D viewport in real time, live keyframe capture, camera-cut insertion, and event cue authoring.
+  - Added 2 comprehensive unit tests in `tests/code/testcases/testtoolsequencer.pas` (`TestMultiTrackInterpolationCameraCutsAndJsonRoundtrip`, `TestLiveCapturePlaybackModesAndEventCues`) verified with `0 unfreed memory blocks`.
+  - **Official Docs & Visual References (Phase 287):** [CGE Animations & Cutscenes Manual](https://castle-engine.io/animations) · [CGE Viewport & Multiple Cameras](https://castle-engine.io/viewport_and_scenes) · [Unreal Engine Sequencer Cinematic Editor](https://dev.epicgames.com/documentation/en-us/unreal-engine/cinematics-and-movie-making-in-unreal-engine) · [Godot 4 AnimationPlayer & Track Editor](https://docs.godotengine.org/en/stable/tutorials/animation/introduction.html)
+  - **Official Videos & Movies (Phase 287):**
+    - 🎬 [CGE Official Video — Animations, Cameras & Cutscenes in Castle Game Engine (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+    - 🎞️ [Animated Movie (GIF) — Multi-Track Timeline Keyframing & Scrubbing](https://docs.godotengine.org/en/stable/_images/animation_introduction_timeline.webp)
+  - **Screenshots:** [CGE 3D Cutscene Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE UI & Property Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+  - **Example (Phase 287):** Click **`Sequencer`** in the top viewport bar, click **`+ New Sequence`**, scrub the red playhead to `t = 0.0s`, key `GateMesh.Translation`, `TorchLight.Intensity`, and `Camera Cut -> WideCam`, then scrub to `t = 2.5s`, raise `GateMesh` in the 3D viewport, click **`+ Key Live Property`**, add `Camera Cut -> CloseupCam` and an event cue `PlaySfx` — scrubbing or pressing **`Play`** animates the gate, cross-interpolates torch brightness, switches active cameras, and runs automatically at game runtime.
+
+### Phase 288: Visual State Machine & Behavior Tree Graph Studio (UE 5.9 / 6.0 StateTree Parity)
+- [ ] **288.1. `TCastleStateGraphBehavior` Data-Driven FSM / StateTree & Interactive Visual Node Canvas (`castlestategraph.pas`, `toolstategraph.pas`, `formstategraph.pas`, `framedesign.pas`, `formproject.pas`, `testtoolstategraph.pas`)**
+  - Implement `TCastleStateGraphBehavior` (`src/scene/castlestategraph.pas`) with named states, typed blackboard parameters, comparison & timer transition rules, entry/exit property & animation actions, and runtime active-state telemetry.
+  - Add `TStateGraphForm` (`tools/castle-editor/code/formstategraph.pas`) featuring an interactive 2D Bézier-wire state node canvas, blackboard live tester, and 1-click gameplay state templates.
+
+### Phase 289: Real-Time 3D VFX Particle Emitter & Preset Studio (UE 5.9 / 6.0 Niagara VFX Parity)
+- [ ] **289.1. Native 3D `TCastleParticleEmitter` Component, Physics Forces & Live VFX Preset Studio (`castleparticles.pas`, `toolparticlestudio.pas`, `formparticlestudio.pas`, `framedesign.pas`, `formproject.pas`, `testtoolparticlestudio.pas`)**
+  - Implement `TCastleParticleEmitter` (`src/scene/castleparticles.pas`) supporting Point/Sphere/Cone/Box/Ring emission volumes, continuous & burst spawning, size/color/alpha over lifetime, gravity/drag/turbulence, and built-in presets (`Fire`, `Smoke`, `Sparks`, `MagicPortal`, `SnowRain`, `ExplosionBurst`).
+  - Add `TParticleStudioForm` (`tools/castle-editor/code/formparticlestudio.pas`) for live emitter authoring, burst testing, and viewport particle budget inspection.
+
+### Phase 290: AI Waypoint Patrol Networks, A* NavGrid Pathfinding & Perception Cones (UE 5.9 / 6.0 MassAI Parity)
+- [ ] **290.1. `TCastleWaypointNode`, `TCastlePatrolAgentBehavior`, `TCastleNavGrid` A* Pathfinding & Viewport Perception Overlays (`castlenavnetwork.pas`, `toolnavnetwork.pas`, `formnavnetwork.pas`, `framedesign.pas`, `formproject.pas`, `testtoolnavnetwork.pas`)**
+  - Implement `TCastleWaypointNode`, `TCastlePatrolAgentBehavior`, and obstacle-aware A* `TCastleNavGrid` (`src/scene/castlenavnetwork.pas`) with sight FOV cone & hearing radius perception queries.
+  - Add `TNavNetworkForm` (`tools/castle-editor/code/formnavnetwork.pas`) and 3D viewport waypoint link arrows + AI sight/hearing cone overlays.
+
+### Phase 291: Spatial Audio Soundscape Mixer, Bus Routing & Reverb/Attenuation Zones (UE 5.9 / 6.0 MetaSounds Parity)
+- [ ] **291.1. `TCastleAudioBusMixer`, `TCastleAudioZone` Crossfade Volumes & Multi-Bus Fader Studio (`castleaudiomixer.pas`, `toolaudiomixer.pas`, `formaudiomixer.pas`, `framedesign.pas`, `formproject.pas`, `testtoolaudiomixer.pas`)**
+  - Implement `TCastleAudioBusMixer` (`Master`, `Music`, `SFX`, `Voice`, `Ambient` buses with mute/solo/ducking) and `TCastleAudioZone` (`InnerRadius`/`OuterRadius` spatial crossfade) in `src/scene/castleaudiomixer.pas`.
+  - Add `TAudioMixerForm` (`tools/castle-editor/code/formaudiomixer.pas`) with channel faders, bus routing, and 3D attenuation sphere visualization.
+
+### Phase 292: Bidirectional Asset Reference Graph, Orphan Asset Sweeper & Broken-URL Auto-Repair (UE 5.9 / 6.0 Reference Viewer Parity)
+- [ ] **292.1. Project-Wide `TAssetDependencyAnalyzer` & Interactive Reference Graph / Orphan Sweeper Studio (`toolassetgraph.pas`, `formassetgraph.pas`, `formproject.pas`, `testtoolassetgraph.pas`)**
+  - Implement `TAssetDependencyAnalyzer` (`tools/common-code/toolassetgraph.pas`) indexing bidirectional `Referencers <-> Dependencies` across designs, models, textures, audio, and sprite sheets, identifying unreferenced data bloat, and batch-repairing broken `castle-data:/` URLs via filename/hash matching.
+  - Add `TAssetGraphForm` (`tools/castle-editor/code/formassetgraph.pas`) with an interactive 3-column dependency graph canvas and safe orphan cleanup.
+
+### Phase 293: Priority-Blended Post-Processing Volumes & Cinematic Look-Dev Studio (UE 5.9 / 6.0 PostProcessVolume Parity)
+- [ ] **293.1. `TCastlePostProcessVolume` Screen-Effect Stack & Cinematic Color-Grading Studio (`castlepostprocessvolume.pas`, `toolpostprocessstudio.pas`, `formpostprocessstudio.pas`, `framedesign.pas`, `formproject.pas`, `testtoolpostprocessstudio.pas`)**
+  - Implement `TCastlePostProcessVolume` (`src/scene/castlepostprocessvolume.pas`) with global/bounded `Priority` + `BlendRadius` interpolation and generated GLSL screen effects (Exposure, Tonemap, Contrast/Saturation, Vignette, Chromatic Aberration, Tint).
+  - Add `TPostProcessStudioForm` (`tools/castle-editor/code/formpostprocessstudio.pas`) with 1-click cinematic look-dev presets.
+
+### Phase 294: Localization (`i18n`) String Extractor, Live Viewport Locale Switcher & Pseudo-Localization Auditor (UE 5.9 / 6.0 Localization Dashboard Parity)
+- [ ] **294.1. `TCastleLocalizationManager`, `TCastleLocalizedBehavior` & Editor Localization Dashboard (`castlelocalization.pas`, `toollocalization.pas`, `formlocalization.pas`, `framedesign.pas`, `formproject.pas`, `testtoollocalization.pas`)**
+  - Implement `TCastleLocalizationManager` and `TCastleLocalizedBehavior` (`src/scene/castlelocalization.pas`) supporting JSON/CSV string tables, fallback locales, and accented/expanded `[!! Pseudo-L10n !!]` stress-testing.
+  - Add `TLocalizationForm` (`tools/castle-editor/code/formlocalization.pas`) for 1-click UI caption extraction, live viewport locale switching, and label overflow auditing.
+
+### Phase 295: Multi-Resolution Responsive UI Safe-Area, Notch & Touch-Target Simulator (UE 5.9 / 6.0 CommonUI Parity)
+- [ ] **295.1. `TResponsiveUiSimulator` Multi-Aspect Layout Auditor & Viewport Safe-Area Overlay Studio (`toolresponsivesim.pas`, `formresponsivesim.pas`, `framedesign.pas`, `formproject.pas`, `testtoolresponsivesim.pas`)**
+  - Implement `TResponsiveUiSimulator` (`tools/common-code/toolresponsivesim.pas`) evaluating 2D UI hierarchies across Desktop `16:9`, Ultrawide `21:9`, Handheld `16:10`, Mobile `19.5:9` (with notch/home-bar safe insets), and Tablet `4:3` to detect off-screen clipping, sibling overlaps, and undersized touch targets.
+  - Add `TResponsiveSimForm` (`tools/castle-editor/code/formresponsivesim.pas`) and viewport safe-area frame guides.
+
+### Phase 296: Variant Manager / Scene Configuration Sets & Live Preset Switcher (UE 5.9 / 6.0 Variant Manager Parity)
+- [ ] **296.1. `TCastleVariantSetManager` Atomic Multi-Component Configuration Sets & Variant Studio (`castlevariantset.pas`, `toolvariantmanager.pas`, `formvariantmanager.pas`, `framedesign.pas`, `formproject.pas`, `testtoolvariantmanager.pas`)**
+  - Implement `TCastleVariantSetManager` (`src/scene/castlevariantset.pas`) storing named variant sets (e.g. `Lighting: Day / Sunset / Night`, `Quality: Mobile / Desktop`, `Props: Intact / Ruined`) that atomically apply multi-component RTTI property snapshots at runtime or design time.
+  - Add `TVariantManagerForm` (`tools/castle-editor/code/formvariantmanager.pas`) for capturing live differences into named variants and 1-click viewport variant switching.
 

@@ -112,6 +112,7 @@ uses
   {$if defined(FPC) and (not defined(WASI))}TestToolWasmPreviewServer,{$endif}
   TestToolPrefabOverrides,
   TestToolWorldStreaming,
+  TestToolSequencer,
   TestCastleVulkanRHI;
 
 implementation

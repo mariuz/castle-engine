@@ -2588,6 +2588,34 @@ TBehaviorCompositionHelper.AttachNewBehavior(GuardScene, Self, TCastleBillboard)
 
 ---
 
+## 66L. Horizon 3 — Non-Linear Cinematic Sequencer & Multi-Track Property/Camera Timeline (Phase 287 / UE 5.9 & 6.0 Sequencer Parity)
+
+Inspired by **Unreal Engine's Multi-Track Level Sequencer**, `TCastleSequencePlayer` / `TCastleSequenceRunnerBehavior` (`src/scene/castlesequencer.pas`), `TSequencerHelper` (`tools/common-code/toolsequencer.pas`), and `TSequencerForm` (`tools/castle-editor/code/formsequencer.pas`) bring non-linear multi-component keyframe animation, camera cuts, and event cues to both 3D viewports and 2D UI screens.
+
+### Key Capabilities
+1. **Multi-Track Keyframe, Camera-Cut & Event-Cue Engine (`TCastleSequencePlayer`)**:
+   - Animates `stkVector3Property` (`Translation`, `Scale`, `ColorPersistent`), `stkFloatProperty` (`Intensity`, `FontSize`, `RotationPersistent.W`, shader uniforms), `stkBoolProperty` (`Exists`, `Enabled`), `stkStringProperty` (`Caption`, `Url`), and `stkCameraCut` (`TCastleViewport.Camera` switching).
+   - Supports `seLinear`, `seSmoothStep`, `seEaseInCubic`, `seEaseOutCubic`, and `seStep` curves, `spmOnce` / `spmLoop` / `spmPingPong` playback modes, `OnCueEvent` callbacks, and deterministic `EvaluateAtTime(TimeSec)` scrubbing.
+2. **Interactive Dope-Sheet Timeline Studio (`TSequencerForm`)**:
+   - Open via the top-bar **`Sequencer`** button or **`Design -> Cinematic Sequencer & Multi-Track Timeline...`**.
+   - Features a color-coded multi-track dope-sheet with diamond keyframe markers, event cue flags, 30 FPS real-time preview transport, live viewport scrubbing, and 1-click **`+ Key Live Property`** / **`+ Add Camera Cut`** capture.
+
+### Example Usage (Pascal API)
+```pascal
+Seq := TSequencerHelper.CreateSequencePlayerInDesign(RootUi, Self, 'IntroCutscene', 4.0);
+Seq.AddOrUpdateVector3Key('HeroGate', 'Translation', 0.0, Vector3(0, 0, 0), seSmoothStep);
+Seq.AddOrUpdateVector3Key('HeroGate', 'Translation', 4.0, Vector3(0, 8, 0), seSmoothStep);
+Seq.AddOrUpdateCameraCutKey('ViewportMain', 2.0, 'BossCloseupCamera');
+Seq.AddEventCue(1.5, 'PlayHornSfx', 'castle_horn');
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Animations Manual](https://castle-engine.io/animations) · [CGE Viewport & Cameras](https://castle-engine.io/viewport_and_scenes) · [UE Sequencer Cinematic Editor](https://dev.epicgames.com/documentation/en-us/unreal-engine/cinematics-and-movie-making-in-unreal-engine) · [Godot 4 Animation Track Editor](https://docs.godotengine.org/en/stable/tutorials/animation/introduction.html)
+- **Videos & Movies:** 🎬 [CGE Official Video — Animations & Cutscenes in CGE (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [Animated Multi-Track Timeline Workflow](https://docs.godotengine.org/en/stable/_images/animation_introduction_timeline.webp)
+- **Screenshots:** [CGE 3D Cutscene Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Property Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2662,4 +2690,5 @@ In addition, Horizon 2 editor subsystems include dedicated automated test suites
 - **[`tests/code/testcases/testtoolwasmpreviewserver.pas`](../tests/code/testcases/testtoolwasmpreviewserver.pas) (`TTestToolWasmPreviewServer` — 2 tests)**: Verifies `.wasm`/`.js`/`.zip` MIME mapping, `ResolveSafeFilePath` directory-traversal rejection, `InjectAutoReloadScript`, `TWasmBundleProfiler.ProfileWebBundle` category byte totals, 3G/4G/Broadband download estimates, and `.wav` optimization hints, plus live multithreaded localhost HTTP roundtrips verifying `application/wasm`, `COOP`/`COEP` headers, and `/__cge_live_reload` build-stamp updates (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolprefaboverrides.pas`](../tests/code/testcases/testtoolprefaboverrides.pas) (`TTestToolPrefabOverrides` — 2 tests)**: Verifies 3D `TCastleTransformDesign` and 2D `TCastleDesign` per-instance child RTTI property & sub-component overrides (`TranslationPersistent.Y`, `Exists`, `Intensity`, `Caption`, `FontSize`), `CaptureLiveEditsFromInstance`, parent design JSON serialization roundtrip with automatic override re-application, sibling prefab isolation, `RevertSingleOverride`, and `ApplyOverridesToSourcePrefab` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolworldstreaming.pas`](../tests/code/testcases/testtoolworldstreaming.pas) (`TTestToolWorldStreaming` — 2 tests)**: Verifies `TCastleStreamingZone` `LoadRadius`/`UnloadRadius` hysteresis transitions without boundary thrashing, `csTransient` child non-duplication across `ComponentToString`/`StringToComponent` JSON roundtrips, `TWorldStreamingInspector.ScanWorld` & Markdown reporting, and `TBehaviorCompositionHelper` registered behavior discovery, attach, non-default RTTI card summary, parent transform resolution, and detach (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolsequencer.pas`](../tests/code/testcases/testtoolsequencer.pas) (`TTestToolSequencer` — 2 tests)**: Verifies multi-track `Vector3`/`Float`/`Bool`/`String` interpolation (`seLinear`, `seSmoothStep`, `seStep`), `stkCameraCut` viewport camera switching, `ComponentToString` JSON roundtrip persistence, `CaptureLivePropertyKey`, `spmOnce`/`spmLoop`/`spmPingPong` playback modes, and `OnCueEvent` marker callbacks (`0 unfreed memory blocks`).
 

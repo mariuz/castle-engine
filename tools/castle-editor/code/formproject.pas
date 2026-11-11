@@ -600,6 +600,7 @@ type
       MenuItemWasmPreview: TMenuItem;
       MenuItemPrefabOverrides: TMenuItem;
       MenuItemWorldMinimap: TMenuItem;
+      MenuItemSequencer: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -620,6 +621,7 @@ type
     procedure CompileWebTargetFromPreviewDialog;
     procedure MenuItemPrefabOverridesClick(Sender: TObject);
     procedure MenuItemWorldMinimapClick(Sender: TObject);
+    procedure MenuItemSequencerClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2245,6 +2247,11 @@ begin
   MenuItemWorldMinimap.OnClick := @MenuItemWorldMinimapClick;
   MenuItemDesign.Add(MenuItemWorldMinimap);
 
+  MenuItemSequencer := TMenuItem.Create(MenuItemDesign);
+  MenuItemSequencer.Caption := 'Cinematic Sequencer & Multi-Track Timeline...';
+  MenuItemSequencer.OnClick := @MenuItemSequencerClick;
+  MenuItemDesign.Add(MenuItemSequencer);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -2907,6 +2914,8 @@ begin
     MenuItemPrefabOverrides.Enabled := Design <> nil;
   if MenuItemWorldMinimap <> nil then
     MenuItemWorldMinimap.Enabled := Design <> nil;
+  if MenuItemSequencer <> nil then
+    MenuItemSequencer.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5174,6 +5183,12 @@ procedure TProjectForm.MenuItemWorldMinimapClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowWorldMinimapDialog;
+end;
+
+procedure TProjectForm.MenuItemSequencerClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowSequencerDialog;
 end;
 
 initialization

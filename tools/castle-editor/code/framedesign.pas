@@ -36,12 +36,12 @@ uses
   CastleCameras, CastleBoxes, CastleTransform, CastleDebugTransform,
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
-  CastlePrefabOverrides, CastleStreamingZone,
+  CastlePrefabOverrides, CastleStreamingZone, CastleSequencer,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
-  ToolPrefabOverrides, ToolWorldStreaming;
+  ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -736,6 +736,8 @@ type
       ButtonWorldMinimap: TSpeedButton;
       MenuTreeViewItemWorldMinimap: TMenuItem;
       FShowStreamingZonesOverlay: Boolean;
+      ButtonSequencer: TSpeedButton;
+      MenuTreeViewItemSequencer: TMenuItem;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
       FCopiedComponentPropsClassName: String;
@@ -1168,6 +1170,9 @@ type
     procedure ButtonRemoveBehaviorCardClick(Sender: TObject);
     procedure ButtonWorldMinimapClick(Sender: TObject);
     procedure MenuTreeViewItemWorldMinimapClick(Sender: TObject);
+    procedure ButtonSequencerClick(Sender: TObject);
+    procedure MenuTreeViewItemSequencerClick(Sender: TObject);
+    procedure SequencerRefreshViewportCallback;
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
     function NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
@@ -2582,6 +2587,9 @@ type
     { Inline TCastleBehavior Inspector Cards & World Partition Minimap (Phase 286). }
     procedure ShowWorldMinimapDialog;
     procedure SimulateStreamingAtCurrentCamera;
+
+    { Non-Linear Cinematic Sequencer & Multi-Track Timeline (Phase 287). }
+    procedure ShowSequencerDialog;
   end;
 
 implementation
@@ -2601,7 +2609,7 @@ uses
   { Editor units }
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
-  FormPrefabOverrides, FormWorldMinimap, CastleComponentEditorDesigner;
+  FormPrefabOverrides, FormWorldMinimap, FormSequencer, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -5929,6 +5937,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonWorldMinimap,
       PanelMiddleTop.GetControlIndex(ButtonPrefabOverrides) + 1);
 
+  ButtonSequencer := TSpeedButton.Create(Self);
+  ButtonSequencer.Caption := 'Sequencer';
+  ButtonSequencer.Hint := 'Open Non-Linear Cinematic Sequencer & Multi-Track Dope-Sheet Studio.' + NL +
+    'Scrub and keyframe 3D transforms, lights, UI properties, camera cuts, and event cues.';
+  ButtonSequencer.ShowHint := true;
+  ButtonSequencer.AutoSize := true;
+  ButtonSequencer.Constraints.MinHeight := 33;
+  ButtonSequencer.Constraints.MinWidth := 64;
+  ButtonSequencer.BorderSpacing.Left := 2;
+  ButtonSequencer.OnClick := @ButtonSequencerClick;
+  ButtonSequencer.Parent := PanelMiddleTop;
+  if ButtonWorldMinimap.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonSequencer,
+      PanelMiddleTop.GetControlIndex(ButtonWorldMinimap) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -8783,6 +8806,11 @@ begin
   MenuTreeViewItemWorldMinimap.Caption := 'World Partition 2D Minimap && Streaming Zones...';
   MenuTreeViewItemWorldMinimap.OnClick := @MenuTreeViewItemWorldMinimapClick;
   MenuTreeView.Items.Add(MenuTreeViewItemWorldMinimap);
+
+  MenuTreeViewItemSequencer := TMenuItem.Create(Self);
+  MenuTreeViewItemSequencer.Caption := 'Cinematic Sequencer && Multi-Track Timeline...';
+  MenuTreeViewItemSequencer.OnClick := @MenuTreeViewItemSequencerClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSequencer);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -13961,6 +13989,8 @@ var
           [TPrefabOverrideManager.ActiveOverrideCount(TComponent(NodeObj))])
       else if NodeObj is TCastleStreamingZone then
         Suffix := Suffix + ' ' + TCastleStreamingZone(NodeObj).ZoneSummaryBadge
+      else if NodeObj is TCastleSequencePlayer then
+        Suffix := Suffix + ' ' + TCastleSequencePlayer(NodeObj).SequenceSummaryBadge
       else if TComponent(NodeObj).Tag <> 0 then
         Suffix := Suffix + ' [Tag:' + IntToStr(TComponent(NodeObj).Tag) + ']';
     end;
@@ -52997,6 +53027,58 @@ end;
 procedure TDesignFrame.MenuTreeViewItemWorldMinimapClick(Sender: TObject);
 begin
   ShowWorldMinimapDialog;
+end;
+
+{ Non-Linear Cinematic Sequencer & Multi-Track Timeline (Phase 287) ---------- }
+
+procedure TDesignFrame.SequencerRefreshViewportCallback;
+var
+  InspectorType: TInspectorType;
+begin
+  if CastleControl <> nil then
+    CastleControl.Invalidate;
+  for InspectorType in TInspectorType do
+    if Inspector[InspectorType] <> nil then
+      Inspector[InspectorType].RefreshPropertyValues;
+end;
+
+procedure TDesignFrame.ShowSequencerDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  InitComp: TComponent;
+  Dlg: TSequencerForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  InitComp := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount > 0 then
+      InitComp := Selected[0];
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  Dlg := TSequencerForm.CreateStudio(Self, FDesignRoot, DesignOwner, InitComp,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonSequencerClick(Sender: TObject);
+begin
+  ShowSequencerDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSequencerClick(Sender: TObject);
+begin
+  ShowSequencerDialog;
 end;
 
 initialization
