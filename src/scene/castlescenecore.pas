@@ -4275,6 +4275,12 @@ begin
     FreeAndNil(FShapes);
     FShapes := TShapeTreeGroup.Create(Self);
     ShapeLODs.Clear;
+    { The shape tree was freed: transformations scheduled for it (by
+      Transform node changes before this ChangedAll, e.g. when a node was
+      added to an animated scene) would be applied to freed
+      TShapeTreeTransform instances in FinishTransformationChanges.
+      The new tree is made with the current transformations anyway. }
+    TransformationDirty.Clear;
     InternalGlobalLights.Clear;
     FViewpointsArray.Clear;
     FAnimationsList.Clear;
