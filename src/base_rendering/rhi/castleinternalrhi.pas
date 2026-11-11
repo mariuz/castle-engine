@@ -827,6 +827,7 @@ type
   protected
     FCapabilities: TRHIDeviceCapabilities;
     FFrameIndex: Cardinal;
+    FTotalFramesStarted: Cardinal;
   public
     constructor Create; virtual;
     destructor Destroy; override;
@@ -907,6 +908,8 @@ type
     property Capabilities: TRHIDeviceCapabilities read FCapabilities;
     { Current frame-in-flight index (0 .. MaxFramesInFlight - 1) }
     property FrameIndex: Cardinal read FFrameIndex;
+    { Monotonically increasing count of frames started via BeginFrame / BeginOffscreenFrame }
+    property TotalFramesStarted: Cardinal read FTotalFramesStarted;
   end;
 
   { -------------------------------------------------------------------------- }

@@ -3289,7 +3289,7 @@ type
     destructor Destroy; override;
 
     { CPU reference: Sorts 3D Gaussian splats front-to-back (ascending Depth) and composites
-      them with Beer-Lambert transmittance T_i = prod_{j<i}(1 - alpha_j) and early termination. }
+      them with Beer-Lambert transmittance T_i = prod_(j<i)(1 - alpha_j) and early termination. }
     class function SortAndCompositeSplatsFrontToBack(
       const ASplats: array of TGaussianSplatNode;
       const ABackgroundRGB: TVector3): TVector3; static;
@@ -5667,14 +5667,15 @@ begin
       VulkanDevice.MemoryAllocator.FlushAllocation(FAllocation, Offset, Size);
     Unmap;
   end else
-  if (VulkanDevice <> nil) and (VulkanDevice.StagingUploader <> nil) then
+  if (VulkanDevice <> nil) and (VulkanDevice.StagingUploader <> nil) and
+     not ((VulkanDevice.Handle <> nil) and (ActiveCommandList <> nil) and ActiveCommandList.IsRendering) then
   begin
     { Stage into persistent per-frame staging ring buffer for non-blocking batched upload }
     VulkanDevice.StagingUploader.EnqueueBufferUpload(Self, Data, Size, Offset);
   end else
   if (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and Assigned(vkCmdCopyBuffer) then
   begin
-    { Fallback one-shot upload when StagingUploader is absent }
+    { Immediate one-shot upload when StagingUploader is absent or when uploading mid-render-pass on a real GPU }
     FillChar(StagingDesc, SizeOf(StagingDesc), 0);
     StagingDesc.Size := Size;
     StagingDesc.Usage := [buTransferSrc];
@@ -6281,7 +6282,8 @@ begin
         Move(PixelsPtr^, FHostPixels[0], DataSize);
     end;
 
-    if (VulkanDevice <> nil) and (VulkanDevice.StagingUploader <> nil) then
+    if (VulkanDevice <> nil) and (VulkanDevice.StagingUploader <> nil) and
+       not ((VulkanDevice.Handle <> nil) and (ActiveCommandList <> nil) and ActiveCommandList.IsRendering) then
     begin
       VulkanDevice.StagingUploader.EnqueueImageUpload(
         Self, PixelsPtr, DataSize,
@@ -7686,8 +7688,14 @@ begin
     if (FHandle <> nil) and Assigned(vkCmdBeginRenderPass) then
       vkCmdBeginRenderPass(FHandle, @RpBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
     if FViewportPendingReapply then
-      SetViewport(FDynamicViewportRect, FDynamicMinDepth, FDynamicMaxDepth);
+      SetViewport(FDynamicViewportRect, FDynamicMinDepth, FDynamicMaxDepth)
+    else
+    if FHandle <> nil then
+      SetViewport(FloatRectangle(Info.RenderArea), 0.0, 1.0);
     if FScissorPendingReapply then
+      SetScissor(FDynamicScissorRect)
+    else
+    if FHandle <> nil then
       SetScissor(FDynamicScissorRect);
     Exit;
   end;
@@ -7813,8 +7821,14 @@ begin
   if (FHandle <> nil) and Assigned(vkCmdBeginRendering) then
     vkCmdBeginRendering(FHandle, @RenderInfo);
   if FViewportPendingReapply then
-    SetViewport(FDynamicViewportRect, FDynamicMinDepth, FDynamicMaxDepth);
+    SetViewport(FDynamicViewportRect, FDynamicMinDepth, FDynamicMaxDepth)
+  else
+  if FHandle <> nil then
+    SetViewport(FloatRectangle(Info.RenderArea), 0.0, 1.0);
   if FScissorPendingReapply then
+    SetScissor(FDynamicScissorRect)
+  else
+  if FHandle <> nil then
     SetScissor(FDynamicScissorRect);
 end;
 
@@ -20716,6 +20730,7 @@ var
   Frame: TVulkanFrameContext;
   AcquireRes: VkResult;
 begin
+  Inc(FTotalFramesStarted);
   if FFrames[FFrameIndex].CommandList = nil then
     FFrames[FFrameIndex].CommandList := TVulkanRHICommandList.Create(Self, FGraphicsQueueFamily);
   if FFrames[FFrameIndex].TransientDescriptorAllocator = nil then
@@ -20856,6 +20871,7 @@ function TVulkanRHIDevice.BeginOffscreenFrame: TRHICommandList;
 var
   Frame: TVulkanFrameContext;
 begin
+  Inc(FTotalFramesStarted);
   if FFrames[FFrameIndex].CommandList = nil then
     FFrames[FFrameIndex].CommandList := TVulkanRHICommandList.Create(Self, FGraphicsQueueFamily);
   if FFrames[FFrameIndex].TransientDescriptorAllocator = nil then
@@ -21021,8 +21037,6 @@ function TVulkanRHIDevice.CreateShaderModuleFromGLSL(const AStage: TRHIShaderSta
   const AGLSLSource: String; const ADebugName: String): TRHIShaderModule;
 var
   SPIRV: TSPIRVBytecode;
-  FallbackWords: array[0..9] of UInt32;
-  ExecModel: UInt32;
 begin
   SPIRV := nil;
   try
@@ -21040,25 +21054,11 @@ begin
     if (AGLSLSource <> '') and
        not TCastleShaderCompiler.Instance.IsRuntimeCompilationAvailable then
     begin
-      case AStage of
-        ssVertex:   ExecModel := 0;
-        ssGeometry: ExecModel := 3;
-        ssFragment: ExecModel := 4;
-        ssCompute:  ExecModel := 5;
-      else
-        ExecModel := 0;
-      end;
-      FallbackWords[0] := $07230203; // SPIR-V Magic
-      FallbackWords[1] := $00010000; // Version 1.0
-      FallbackWords[2] := 0;         // Generator
-      FallbackWords[3] := 8;         // Bound
-      FallbackWords[4] := 0;         // Schema
-      FallbackWords[5] := ($00050000 or 15); // OpEntryPoint
-      FallbackWords[6] := ExecModel;
-      FallbackWords[7] := 1;
-      FallbackWords[8] := $6E69616D; // "main"
-      FallbackWords[9] := 0;
-      Exit(CreateShaderModuleFromSPIRV(AStage, @FallbackWords[0], SizeOf(FallbackWords), ADebugName));
+      if not TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(
+           AStage, AGLSLSource, ADebugName, SPIRV) then
+        SPIRV := TCastleShaderCompiler.Instance.GetMinimalValidSPIRVFallback(AStage);
+      if Length(SPIRV) > 0 then
+        Exit(CreateShaderModuleFromSPIRV(AStage, @SPIRV[0], Length(SPIRV), ADebugName));
     end;
     Exit(nil);
   end;

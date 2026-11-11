@@ -131,6 +131,12 @@ type
       Vao: TVertexArrayObject;
       FRHIVertexBuffer: TRHIBuffer;
       FRHIIndexBuffer: TRHIBuffer;
+      FRHIVertexWriteOffset: PtrUInt;
+      FRHIVertexCurrentOffset: PtrUInt;
+      FRHIVertexDrawnSinceUpload: Boolean;
+      FRHILastFrameIndex: Cardinal;
+      FRHILastFramesPresented: Cardinal;
+      FRHILastCmdList: TRHICommandList;
       FRHIVertShader: TRHIShaderModule;
       FRHIFragShader: TRHIShaderModule;
       FRHIPipeline: TRHIPipeline;
@@ -251,6 +257,7 @@ const
     '} pc;' + LineEnding +
     'void main() {' + LineEnding +
     '  gl_Position = pc.u_MVP * castle_Vertex;' + LineEnding +
+    '  gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5;' + LineEnding +
     '}';
   UnlitMeshFragGLSL =
     '#version 450' + LineEnding +
@@ -546,13 +553,14 @@ begin
       PushConsts.ModelViewProjection := ModelViewProjection;
       PushConsts.Color := FColor;
       ActiveCommandList.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConsts), PushConsts);
-      ActiveCommandList.BindVertexBuffers(0, [FRHIVertexBuffer], [0]);
+      ActiveCommandList.BindVertexBuffers(0, [FRHIVertexBuffer], [FRHIVertexCurrentOffset]);
       if (IndexAllocatedItems <> 0) and (FRHIIndexBuffer <> nil) then
       begin
         ActiveCommandList.BindIndexBuffer(FRHIIndexBuffer, 0, itUInt16);
         ActiveCommandList.DrawIndexed(IndexAllocatedItems, 1, 0, 0, 0);
       end else
         ActiveCommandList.Draw(VertexAllocatedItems, 1, 0, 0);
+      FRHIVertexDrawnSinceUpload := True;
     end;
     Exit;
   end;
@@ -631,6 +639,7 @@ procedure TCastleRenderUnlitMesh.SetVertexes(const Vertexes: PVector4; const Ver
 var
   NewVbo: Boolean;
   NewSize: Cardinal;
+  NewCapacity: PtrUInt;
   DataUsage: TGLEnum;
   BufDesc: TRHIBufferDesc;
 begin
@@ -639,17 +648,51 @@ begin
     NewSize := VertexesCount * SizeOf(TVector4);
     if NewSize > 0 then
     begin
-      if (FRHIVertexBuffer = nil) or (FRHIVertexBuffer.Desc.Size < NewSize) then
+      if (FRHILastFrameIndex <> RHIDevice.FrameIndex) or
+         (FRHILastFramesPresented <> RHIDevice.TotalFramesStarted) or
+         (FRHILastCmdList <> ActiveCommandList) then
+      begin
+        FRHIVertexWriteOffset := 0;
+        FRHIVertexCurrentOffset := 0;
+        FRHIVertexDrawnSinceUpload := False;
+        FRHILastFrameIndex := RHIDevice.FrameIndex;
+        FRHILastFramesPresented := RHIDevice.TotalFramesStarted;
+        FRHILastCmdList := ActiveCommandList;
+      end;
+
+      if UsageDynamic and FRHIVertexDrawnSinceUpload then
+        FRHIVertexCurrentOffset := FRHIVertexWriteOffset
+      else
+      if not UsageDynamic then
+        FRHIVertexCurrentOffset := 0;
+
+      if (FRHIVertexBuffer = nil) or
+         (FRHIVertexBuffer.Desc.Size < FRHIVertexCurrentOffset + PtrUInt(NewSize)) then
       begin
         FreeAndNil(FRHIVertexBuffer);
-        if UsageDynamic then
-          BufDesc := TRHIBufferDesc.Create(NewSize, [buVertex, buTransferDst], muCpuToGpu)
+        if FRHIVertexCurrentOffset > 0 then
+          NewCapacity := 4096 + (FRHIVertexCurrentOffset + PtrUInt(NewSize)) * 2
         else
-          BufDesc := TRHIBufferDesc.Create(NewSize, [buVertex, buTransferDst], muGpuOnly);
-        FRHIVertexBuffer := RHIDevice.CreateBuffer(BufDesc, Vertexes);
+          NewCapacity := NewSize;
+        if UsageDynamic then
+          BufDesc := TRHIBufferDesc.Create(NewCapacity, [buVertex, buTransferDst], muCpuToGpu)
+        else
+          BufDesc := TRHIBufferDesc.Create(NewCapacity, [buVertex, buTransferDst], muGpuOnly);
+        FRHIVertexCurrentOffset := 0;
+        if NewCapacity = NewSize then
+          FRHIVertexBuffer := RHIDevice.CreateBuffer(BufDesc, Vertexes)
+        else
+        begin
+          FRHIVertexBuffer := RHIDevice.CreateBuffer(BufDesc, nil);
+          if Vertexes <> nil then
+            FRHIVertexBuffer.UploadData(Vertexes^, NewSize, 0);
+        end;
       end else
       if Vertexes <> nil then
-        FRHIVertexBuffer.UploadData(Vertexes^, NewSize, 0);
+        FRHIVertexBuffer.UploadData(Vertexes^, NewSize, FRHIVertexCurrentOffset);
+
+      FRHIVertexWriteOffset := (FRHIVertexCurrentOffset + PtrUInt(NewSize) + 15) and not PtrUInt(15);
+      FRHIVertexDrawnSinceUpload := False;
     end;
     VertexAllocatedItems := VertexesCount;
     VertexAllocatedBytes := NewSize;

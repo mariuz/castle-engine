@@ -87,6 +87,8 @@ type
     FShadercLib: TDynLib;
     FCompilerHandle: Pointer;
     FOptionsHandle: Pointer;
+    FExternalCompilerPath: String;
+    FExternalCompilerIsGlslc: Boolean;
     FLock: TCriticalSection;
     FMemoryCache: {$ifdef FPC}specialize{$endif} TDictionary<UInt64, TSPIRVBytecode>;
     FDiskCacheEnabled: Boolean;
@@ -94,12 +96,15 @@ type
 
     procedure LoadShadercLibrary;
     procedure UnloadShadercLibrary;
+    procedure DetectExternalCompiler;
     function GetCacheFileUrl(const AHash: UInt64; const AStage: TRHIShaderStage): String;
     function TryLoadFromDiskCache(const AHash: UInt64; const AStage: TRHIShaderStage;
       out ASPIRV: TSPIRVBytecode): Boolean;
     procedure SaveToDiskCache(const AHash: UInt64; const AStage: TRHIShaderStage;
       const ASPIRV: TSPIRVBytecode);
     function CompileGLSLToSPIRVInternal(const AStage: TRHIShaderStage;
+      const AGLSLSource, ADebugName: String): TSPIRVBytecode;
+    function CompileGLSLWithExternalCLI(const AStage: TRHIShaderStage;
       const AGLSLSource, ADebugName: String): TSPIRVBytecode;
   public
     constructor Create;
@@ -109,6 +114,17 @@ type
       it immediately from memory/disk cache if the FNV-1a hash matches. }
     function GetOrCompileSPIRV(const AStage: TRHIShaderStage;
       const AGLSLSource: String; const ADebugName: String = 'castle_shader'): TSPIRVBytecode;
+
+    { Resolves built-in, zero-dependency SPIR-V 1.0 bytecode for core CGE RHI
+      shaders (DrawPrimitive2D, TCastleBatch2DRenderer, TCastleRenderUnlitMesh)
+      so real Vulkan GPUs (including Mesa Lavapipe) can execute 2D UI, fonts,
+      sprites, unlit meshes, stencil shadow volumes, and occlusion culling boxes
+      even when neither libshaderc_shared nor external CLI compilers are installed. }
+    function TryGetBuiltInSPIRV(const AStage: TRHIShaderStage;
+      const AGLSLSource, ADebugName: String; out ASPIRV: TSPIRVBytecode): Boolean;
+
+    { Returns a complete, spec-valid minimal SPIR-V 1.0 no-op shader module for AStage. }
+    function GetMinimalValidSPIRVFallback(const AStage: TRHIShaderStage): TSPIRVBytecode;
 
     { Pre-warms a single GLSL 450 shader stage (compiles and caches to disk if
       libshaderc is available) and returns its deterministic 64-bit FNV-1a hash. }
@@ -123,10 +139,12 @@ type
     { Clears all cached SPIR-V binaries from memory (and optionally disk). }
     procedure ClearCache(const AlsoClearDisk: Boolean = False);
 
-    { True if libshaderc_shared was found and initialized.
-      Even if False, pre-cached .spv files from disk/package can still be loaded! }
+    { True if libshaderc_shared or an external CLI compiler (glslangValidator/glslc) was found.
+      Even if False, pre-cached .spv files and built-in core SPIR-V shaders can still be loaded! }
     function IsRuntimeCompilationAvailable: Boolean;
+    function HasExternalCLICompiler: Boolean;
 
+    property ExternalCompilerPath: String read FExternalCompilerPath;
     property DiskCacheEnabled: Boolean read FDiskCacheEnabled write FDiskCacheEnabled default True;
 
     class function Instance: TCastleShaderCompiler;
@@ -150,6 +168,373 @@ function ValidateSPIRVDescriptorBindings(const AInfo: TSPIRVReflectionInfo;
   out ADiagnosticMessage: String): Boolean;
 
 implementation
+
+{$if defined(FPC) and (defined(UNIX) or defined(MSWINDOWS))}
+uses
+  Process;
+{$endif}
+
+{ ---------------------------------------------------------------------------- }
+{ Built-In Zero-Dependency SPIR-V 1.0 Core Shaders                             }
+{ ---------------------------------------------------------------------------- }
+
+const
+  { 1. DrawPrimitive2D Vertex Shader (Primitive2D_VS):
+       layout(location = 0) in vec2 vertex;
+       PushConstants(vec2 viewport_size; float point_size; float padding; vec4 color) pc;
+       gl_Position = vec4(vertex * 2.0 / pc.viewport_size - vec2(1.0), 0.0, 1.0);
+       gl_PointSize = pc.point_size; }
+  BuiltInPrimitive2DVertSPIRV: array[0..230] of UInt32 = (
+    $07230203, $00010000, $00000000, $00000028, $00000000,
+    $00020011, 1,
+    $0003000E, 0, 1,
+    $0007000F, 0, 1, $6E69616D, $00000000, 8, 12,
+    $00050048, 6, 0, 11, 0,
+    $00050048, 6, 1, 11, 1,
+    $00030047, 6, 2,
+    $00040047, 12, 30, 0,
+    $00050048, 13, 0, 35, 0,
+    $00050048, 13, 1, 35, 8,
+    $00050048, 13, 2, 35, 12,
+    $00050048, 13, 3, 35, 16,
+    $00030047, 13, 2,
+    $00020013, 2,
+    $00030021, 3, 2,
+    $00030016, 4, 32,
+    $00040017, 5, 4, 4,
+    $0004001E, 6, 5, 4,
+    $00040020, 7, 3, 6,
+    $0004003B, 7, 8, 3,
+    $00040015, 9, 32, 1,
+    $00040017, 10, 4, 2,
+    $00040020, 11, 1, 10,
+    $0004003B, 11, 12, 1,
+    $0006001E, 13, 10, 4, 4, 5,
+    $00040020, 14, 9, 13,
+    $0004003B, 14, 15, 9,
+    $00040020, 16, 9, 10,
+    $00040020, 17, 9, 4,
+    $00040020, 18, 3, 5,
+    $00040020, 19, 3, 4,
+    $0004002B, 9, 20, 0,
+    $0004002B, 9, 21, 1,
+    $0004002B, 4, 22, $00000000,
+    $0004002B, 4, 23, $3F800000,
+    $0004002B, 4, 24, $40000000,
+    $0005002C, 10, 25, 23, 23,
+    $00050036, 2, 1, 0, 3,
+    $000200F8, 26,
+    $0004003D, 10, 27, 12,
+    $0005008E, 10, 28, 27, 24,
+    $00050041, 16, 29, 15, 20,
+    $0004003D, 10, 30, 29,
+    $00050088, 10, 31, 28, 30,
+    $00050083, 10, 32, 31, 25,
+    $00050051, 4, 33, 32, 0,
+    $00050051, 4, 34, 32, 1,
+    $00070050, 5, 35, 33, 34, 22, 23,
+    $00050041, 18, 36, 8, 20,
+    $0003003E, 36, 35,
+    $00050041, 17, 37, 15, 21,
+    $0004003D, 4, 38, 37,
+    $00050041, 19, 39, 8, 21,
+    $0003003E, 39, 38,
+    $000100FD,
+    $00010038
+  );
+
+  { 2. DrawPrimitive2D Fragment Shader (Primitive2D_FS):
+       PushConstants(vec2 viewport_size; float point_size; float padding; vec4 color) pc;
+       layout(location = 0) out vec4 out_Color;
+       out_Color = pc.color; }
+  BuiltInPrimitive2DFragSPIRV: array[0..116] of UInt32 = (
+    $07230203, $00010000, $00000000, $00000012, $00000000,
+    $00020011, 1,
+    $0003000E, 0, 1,
+    $0006000F, 4, 1, $6E69616D, $00000000, 7,
+    $00030010, 1, 7,
+    $00040047, 7, 30, 0,
+    $00050048, 9, 0, 35, 0,
+    $00050048, 9, 1, 35, 8,
+    $00050048, 9, 2, 35, 12,
+    $00050048, 9, 3, 35, 16,
+    $00030047, 9, 2,
+    $00020013, 2,
+    $00030021, 3, 2,
+    $00030016, 4, 32,
+    $00040017, 5, 4, 4,
+    $00040020, 6, 3, 5,
+    $0004003B, 6, 7, 3,
+    $00040017, 8, 4, 2,
+    $0006001E, 9, 8, 4, 4, 5,
+    $00040020, 10, 9, 9,
+    $0004003B, 10, 11, 9,
+    $00040015, 12, 32, 1,
+    $0004002B, 12, 13, 3,
+    $00040020, 14, 9, 5,
+    $00050036, 2, 1, 0, 3,
+    $000200F8, 15,
+    $00050041, 14, 16, 11, 13,
+    $0004003D, 5, 17, 16,
+    $0003003E, 7, 17,
+    $000100FD,
+    $00010038
+  );
+
+  { 3. TCastleRenderUnlitMesh Vertex Shader (UnlitMesh_VS):
+       layout(location = 0) in vec4 castle_Vertex;
+       PushConstants(mat4 u_MVP; vec4 u_Color) pc;
+       gl_Position = pc.u_MVP * castle_Vertex;
+       gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5; }
+  BuiltInUnlitMeshVertSPIRV: array[0..178] of UInt32 = (
+    $07230203, $00010000, $00000000, $0000001F, $00000000,
+    $00020011, 1,
+    $0003000E, 0, 1,
+    $0007000F, 0, 1, $6E69616D, $00000000, 8, 12,
+    $00050048, 6, 0, 11, 0,
+    $00030047, 6, 2,
+    $00040047, 12, 30, 0,
+    $00040048, 14, 0, 5,
+    $00050048, 14, 0, 35, 0,
+    $00050048, 14, 0, 7, 16,
+    $00050048, 14, 1, 35, 64,
+    $00030047, 14, 2,
+    $00020013, 2,
+    $00030021, 3, 2,
+    $00030016, 4, 32,
+    $00040017, 5, 4, 4,
+    $0003001E, 6, 5,
+    $00040020, 7, 3, 6,
+    $0004003B, 7, 8, 3,
+    $00040015, 9, 32, 1,
+    $0004002B, 9, 10, 0,
+    $00040020, 11, 1, 5,
+    $0004003B, 11, 12, 1,
+    $00040018, 13, 5, 4,
+    $0004001E, 14, 13, 5,
+    $00040020, 15, 9, 14,
+    $0004003B, 15, 16, 9,
+    $00040020, 17, 9, 13,
+    $00040020, 18, 3, 5,
+    $0004002B, 4, 19, $3F000000,
+    $00050036, 2, 1, 0, 3,
+    $000200F8, 20,
+    $00050041, 17, 21, 16, 10,
+    $0004003D, 13, 22, 21,
+    $0004003D, 5, 23, 12,
+    $00050091, 5, 24, 22, 23,
+    $00050051, 4, 25, 24, 2,
+    $00050051, 4, 26, 24, 3,
+    $00050081, 4, 27, 25, 26,
+    $00050085, 4, 28, 27, 19,
+    $00060052, 5, 29, 28, 24, 2,
+    $00050041, 18, 30, 8, 10,
+    $0003003E, 30, 29,
+    $000100FD,
+    $00010038
+  );
+
+  { 4. TCastleRenderUnlitMesh Fragment Shader (UnlitMesh_FS):
+       PushConstants(mat4 u_MVP; vec4 u_Color) pc;
+       layout(location = 0) out vec4 out_Color;
+       out_Color = pc.u_Color; }
+  BuiltInUnlitMeshFragSPIRV: array[0..113] of UInt32 = (
+    $07230203, $00010000, $00000000, $00000012, $00000000,
+    $00020011, 1,
+    $0003000E, 0, 1,
+    $0006000F, 4, 1, $6E69616D, $00000000, 7,
+    $00030010, 1, 7,
+    $00040047, 7, 30, 0,
+    $00040048, 9, 0, 5,
+    $00050048, 9, 0, 35, 0,
+    $00050048, 9, 0, 7, 16,
+    $00050048, 9, 1, 35, 64,
+    $00030047, 9, 2,
+    $00020013, 2,
+    $00030021, 3, 2,
+    $00030016, 4, 32,
+    $00040017, 5, 4, 4,
+    $00040020, 6, 3, 5,
+    $0004003B, 6, 7, 3,
+    $00040018, 8, 5, 4,
+    $0004001E, 9, 8, 5,
+    $00040020, 10, 9, 9,
+    $0004003B, 10, 11, 9,
+    $00040015, 12, 32, 1,
+    $0004002B, 12, 13, 1,
+    $00040020, 14, 9, 5,
+    $00050036, 2, 1, 0, 3,
+    $000200F8, 15,
+    $00050041, 14, 16, 11, 13,
+    $0004003D, 5, 17, 16,
+    $0003003E, 7, 17,
+    $000100FD,
+    $00010038
+  );
+
+  { 5. TCastleBatch2DRenderer Vertex Shader (CastleBatch2D.vert):
+       layout(location = 0) in vec2 castle_Vertex;
+       layout(location = 2) in vec2 castle_MultiTexCoord0;
+       layout(location = 4) in vec4 castle_ColorPerVertex;
+       layout(location = 0) out vec2 castle_tex_coord0;
+       layout(location = 1) out vec4 castle_color_per_vertex;
+       PushConstants(vec4 m0; vec4 m1; vec4 m2; vec4 m3) pc;
+       gl_Position = vec4(castle_Vertex * pc.m0.xy + pc.m0.zw, 0.0, 1.0); }
+  BuiltInBatch2DVertSPIRV: array[0..253] of UInt32 = (
+    $07230203, $00010000, $00000000, $00000029, $00000000,
+    $00020011, 1,
+    $0003000E, 0, 1,
+    $000B000F, 0, 1, $6E69616D, $00000000, 8, 12, 14, 16, 18, 20,
+    $00050048, 6, 0, 11, 0,
+    $00030047, 6, 2,
+    $00040047, 12, 30, 0,
+    $00040047, 14, 30, 2,
+    $00040047, 16, 30, 4,
+    $00040047, 18, 30, 0,
+    $00040047, 20, 30, 1,
+    $00050048, 21, 0, 35, 0,
+    $00050048, 21, 1, 35, 16,
+    $00050048, 21, 2, 35, 32,
+    $00050048, 21, 3, 35, 48,
+    $00030047, 21, 2,
+    $00020013, 2,
+    $00030021, 3, 2,
+    $00030016, 4, 32,
+    $00040017, 5, 4, 4,
+    $0003001E, 6, 5,
+    $00040020, 7, 3, 6,
+    $0004003B, 7, 8, 3,
+    $00040015, 9, 32, 1,
+    $00040017, 10, 4, 2,
+    $00040020, 11, 1, 10,
+    $0004003B, 11, 12, 1,
+    $0004003B, 11, 14, 1,
+    $00040020, 15, 1, 5,
+    $0004003B, 15, 16, 1,
+    $00040020, 17, 3, 10,
+    $0004003B, 17, 18, 3,
+    $00040020, 19, 3, 5,
+    $0004003B, 19, 20, 3,
+    $0006001E, 21, 5, 5, 5, 5,
+    $00040020, 22, 9, 21,
+    $0004003B, 22, 23, 9,
+    $00040020, 24, 9, 5,
+    $0004002B, 9, 13, 0,
+    $0004002B, 4, 25, $00000000,
+    $0004002B, 4, 26, $3F800000,
+    $00050036, 2, 1, 0, 3,
+    $000200F8, 27,
+    $0004003D, 10, 28, 14,
+    $0003003E, 18, 28,
+    $0004003D, 5, 29, 16,
+    $0003003E, 20, 29,
+    $0004003D, 10, 30, 12,
+    $00050041, 24, 31, 23, 13,
+    $0004003D, 5, 32, 31,
+    $0007004F, 10, 33, 32, 32, 0, 1,
+    $0007004F, 10, 34, 32, 32, 2, 3,
+    $00050085, 10, 35, 30, 33,
+    $00050081, 10, 36, 35, 34,
+    $00050051, 4, 37, 36, 0,
+    $00050051, 4, 38, 36, 1,
+    $00070050, 5, 39, 37, 38, 25, 26,
+    $00050041, 19, 40, 8, 13,
+    $0003003E, 40, 39,
+    $000100FD,
+    $00010038
+  );
+
+  { 6. TCastleBatch2DRenderer Fragment Shader (CastleBatch2D.frag):
+       layout(set = 0, binding = 0) uniform sampler2D u_SpriteTexture;
+       layout(location = 0) in vec2 castle_tex_coord0;
+       layout(location = 1) in vec4 castle_color_per_vertex;
+       layout(location = 0) out vec4 castle_FragColor;
+       PushConstants(vec4 ViewportScaleBias; vec4 ClipLineAndEnable; vec4 AlphaParams; vec4 CustomParams) pc;
+       Supports RGBA texture sampling, vertex RGBA8 tint modulation,
+       TextureHasOnlyAlpha font glyph alpha mode, AlphaCutoff discard, and ClipLine half-plane discard. }
+  BuiltInBatch2DFragSPIRV: array[0..340] of UInt32 = (
+    $07230203, $00010000, $00000000, $0000003D, $00000000,
+    $00020011, 1,
+    $0003000E, 0, 1,
+    $0008000F, 4, 1, $6E69616D, $00000000, 7, 10, 12,
+    $00030010, 1, 7,
+    $00040047, 7, 30, 0,
+    $00040047, 10, 30, 0,
+    $00040047, 12, 30, 1,
+    $00040047, 16, 34, 0,
+    $00040047, 16, 33, 0,
+    $00050048, 17, 0, 35, 0,
+    $00050048, 17, 1, 35, 16,
+    $00050048, 17, 2, 35, 32,
+    $00050048, 17, 3, 35, 48,
+    $00030047, 17, 2,
+    $00020013, 2,
+    $00030021, 3, 2,
+    $00030016, 4, 32,
+    $00040017, 5, 4, 4,
+    $00040020, 6, 3, 5,
+    $0004003B, 6, 7, 3,
+    $00040017, 8, 4, 2,
+    $00040020, 9, 1, 8,
+    $0004003B, 9, 10, 1,
+    $00040020, 11, 1, 5,
+    $0004003B, 11, 12, 1,
+    $00090019, 13, 4, 1, 0, 0, 0, 1, 0,
+    $0003001B, 14, 13,
+    $00040020, 15, 0, 14,
+    $0004003B, 15, 16, 0,
+    $0006001E, 17, 5, 5, 5, 5,
+    $00040020, 18, 9, 17,
+    $0004003B, 18, 19, 9,
+    $00040020, 20, 9, 5,
+    $00040015, 21, 32, 1,
+    $0004002B, 21, 22, 1,
+    $0004002B, 21, 23, 2,
+    $00020014, 24,
+    $00040017, 25, 24, 4,
+    $0003002A, 24, 26,
+    $0004002B, 4, 27, $00000000,
+    $0004002B, 4, 28, $3F000000,
+    $0004002B, 4, 29, $3F800000,
+    $0007002C, 5, 30, 29, 29, 29, 29,
+    $00050036, 2, 1, 0, 3,
+    $000200F8, 31,
+    $0004003D, 8, 32, 10,
+    $0004003D, 5, 33, 12,
+    $0004003D, 14, 34, 16,
+    $00050057, 5, 35, 34, 32,
+    $00050041, 20, 36, 19, 22,
+    $0004003D, 5, 37, 36,
+    $00050051, 4, 38, 37, 3,
+    $000500BA, 24, 39, 38, 28,
+    $0007004F, 8, 40, 37, 37, 0, 1,
+    $00050094, 4, 41, 40, 32,
+    $00050051, 4, 42, 37, 2,
+    $00050081, 4, 43, 41, 42,
+    $000500B8, 24, 44, 43, 27,
+    $000500A7, 24, 45, 39, 44,
+    $00050041, 20, 46, 19, 23,
+    $0004003D, 5, 47, 46,
+    $00050051, 4, 48, 47, 1,
+    $000500BA, 24, 49, 48, 28,
+    $00070050, 25, 50, 49, 49, 49, 26,
+    $000600A9, 5, 51, 50, 30, 35,
+    $00050085, 5, 52, 51, 33,
+    $00050051, 4, 53, 47, 0,
+    $000500BA, 24, 54, 53, 27,
+    $00050051, 4, 55, 52, 3,
+    $000500B8, 24, 56, 55, 53,
+    $000500A7, 24, 57, 54, 56,
+    $000500A6, 24, 58, 45, 57,
+    $000300F7, 60, 0,
+    $000400FA, 58, 59, 60,
+    $000200F8, 59,
+    $000100FC,
+    $000200F8, 60,
+    $0003003E, 7, 52,
+    $000100FD,
+    $00010038
+  );
 
 { ---------------------------------------------------------------------------- }
 { Flat C-ABI Bindings for Google libshaderc_shared                             }
@@ -247,6 +632,8 @@ begin
   FDiskCacheBaseUrl := 'castle-config:/shader_cache/';
 
   LoadShadercLibrary;
+  if FShadercLib = nil then
+    DetectExternalCompiler;
 end;
 
 destructor TCastleShaderCompiler.Destroy;
@@ -339,9 +726,37 @@ begin
   FreeAndNil(FShadercLib);
 end;
 
+procedure TCastleShaderCompiler.DetectExternalCompiler;
+var
+  Candidate: String;
+begin
+  FExternalCompilerPath := '';
+  FExternalCompilerIsGlslc := False;
+  Candidate := FindExe('glslangValidator');
+  if Candidate <> '' then
+  begin
+    FExternalCompilerPath := Candidate;
+    FExternalCompilerIsGlslc := False;
+    WritelnLog('RHI/ShaderCompiler', 'Found external SPIR-V compiler: %s', [FExternalCompilerPath]);
+    Exit;
+  end;
+  Candidate := FindExe('glslc');
+  if Candidate <> '' then
+  begin
+    FExternalCompilerPath := Candidate;
+    FExternalCompilerIsGlslc := True;
+    WritelnLog('RHI/ShaderCompiler', 'Found external SPIR-V compiler: %s', [FExternalCompilerPath]);
+  end;
+end;
+
+function TCastleShaderCompiler.HasExternalCLICompiler: Boolean;
+begin
+  Result := FExternalCompilerPath <> '';
+end;
+
 function TCastleShaderCompiler.IsRuntimeCompilationAvailable: Boolean;
 begin
-  Result := (FShadercLib <> nil) and (FCompilerHandle <> nil);
+  Result := ((FShadercLib <> nil) and (FCompilerHandle <> nil)) or (FExternalCompilerPath <> '');
 end;
 
 function TCastleShaderCompiler.GetCacheFileUrl(const AHash: UInt64;
@@ -444,6 +859,102 @@ begin
   end;
 end;
 
+function TCastleShaderCompiler.CompileGLSLWithExternalCLI(
+  const AStage: TRHIShaderStage; const AGLSLSource, ADebugName: String): TSPIRVBytecode;
+{$if defined(FPC) and (defined(UNIX) or defined(MSWINDOWS))}
+const
+  StageNames: array[TRHIShaderStage] of String = ('vert', 'frag', 'geom', 'comp');
+var
+  SourceHash: UInt64;
+  TempDir, InFile, OutFile: String;
+  SrcStream, OutStream: TFileStream;
+  AnsiSrc: AnsiString;
+  Proc: TProcess;
+  CmdOutput: AnsiString;
+  ExitCode: Integer;
+begin
+  Result := nil;
+  if FExternalCompilerPath = '' then
+    raise ERHIShaderCompilationError.CreateFmt(
+      'Cannot compile shader "%s": external CLI SPIR-V compiler is not available.',
+      [ADebugName]);
+
+  SourceHash := TCastleShaderGeneratorRHI.ComputeSourceHash(AGLSLSource);
+  TempDir := GetTempDir(False);
+  InFile := IncludeTrailingPathDelimiter(TempDir) + 'cge_spv_' + IntToHex(SourceHash, 16) + '.' + StageNames[AStage];
+  OutFile := InFile + '.spv';
+
+  SrcStream := TFileStream.Create(InFile, fmCreate);
+  try
+    AnsiSrc := AnsiString(AGLSLSource);
+    if Length(AnsiSrc) > 0 then
+      SrcStream.WriteBuffer(AnsiSrc[1], Length(AnsiSrc));
+  finally
+    FreeAndNil(SrcStream);
+  end;
+
+  try
+    Proc := TProcess.Create(nil);
+    try
+      Proc.Executable := FExternalCompilerPath;
+      Proc.Options := [poWaitOnExit, poUsePipes, poStderrToOutPut, poNoConsole];
+      if FExternalCompilerIsGlslc then
+      begin
+        Proc.Parameters.Add('-fshader-stage=' + StageNames[AStage]);
+        Proc.Parameters.Add('--target-env=vulkan1.0');
+        Proc.Parameters.Add('-o');
+        Proc.Parameters.Add(OutFile);
+        Proc.Parameters.Add(InFile);
+      end else
+      begin
+        Proc.Parameters.Add('-V');
+        Proc.Parameters.Add('-S');
+        Proc.Parameters.Add(StageNames[AStage]);
+        Proc.Parameters.Add('-o');
+        Proc.Parameters.Add(OutFile);
+        Proc.Parameters.Add(InFile);
+      end;
+      Proc.Execute;
+      CmdOutput := '';
+      if (Proc.Output <> nil) and (Proc.Output.NumBytesAvailable > 0) then
+      begin
+        SetLength(CmdOutput, Proc.Output.NumBytesAvailable);
+        Proc.Output.Read(CmdOutput[1], Length(CmdOutput));
+      end;
+      ExitCode := Proc.ExitStatus;
+    finally
+      FreeAndNil(Proc);
+    end;
+
+    if (ExitCode <> 0) or (not FileExists(OutFile)) then
+      raise ERHIShaderCompilationError.CreateFmt(
+        'External SPIR-V compilation failed for "%s" (exit %d):%s%s',
+        [ADebugName, ExitCode, LineEnding, String(CmdOutput)]);
+
+    OutStream := TFileStream.Create(OutFile, fmOpenRead or fmShareDenyWrite);
+    try
+      SetLength(Result, OutStream.Size);
+      if OutStream.Size > 0 then
+        OutStream.ReadBuffer(Result[0], OutStream.Size);
+    finally
+      FreeAndNil(OutStream);
+    end;
+  finally
+    if FileExists(InFile) then
+      DeleteFile(InFile);
+    if FileExists(OutFile) then
+      DeleteFile(OutFile);
+  end;
+end;
+{$else}
+begin
+  Result := nil;
+  raise ERHIShaderCompilationError.CreateFmt(
+    'Cannot compile shader "%s": external CLI SPIR-V compiler is not supported on this platform.',
+    [ADebugName]);
+end;
+{$endif}
+
 function TCastleShaderCompiler.CompileGLSLToSPIRVInternal(
   const AStage: TRHIShaderStage; const AGLSLSource, ADebugName: String): TSPIRVBytecode;
 var
@@ -455,10 +966,14 @@ var
   BytePtr: PByte;
   ErrMsg: String;
 begin
-  if not IsRuntimeCompilationAvailable then
+  if (FShadercLib = nil) or (FCompilerHandle = nil) then
+  begin
+    if FExternalCompilerPath <> '' then
+      Exit(CompileGLSLWithExternalCLI(AStage, AGLSLSource, ADebugName));
     raise ERHIShaderCompilationError.CreateFmt(
       'Cannot compile shader "%s": libshaderc_shared is not loaded and shader was not found in disk cache.',
       [ADebugName]);
+  end;
 
   case AStage of
     ssVertex:   Kind := shaderc_vertex_shader;
@@ -507,6 +1022,153 @@ begin
       Move(BytePtr^, Result[0], ByteLen);
   finally
     shaderc_result_release(CompRes);
+  end;
+end;
+
+function TCastleShaderCompiler.TryGetBuiltInSPIRV(const AStage: TRHIShaderStage;
+  const AGLSLSource, ADebugName: String; out ASPIRV: TSPIRVBytecode): Boolean;
+
+  procedure CopyWords(const AWords: array of UInt32);
+  var
+    ByteSize: PtrInt;
+  begin
+    ByteSize := Length(AWords) * SizeOf(UInt32);
+    SetLength(ASPIRV, ByteSize);
+    if ByteSize > 0 then
+      Move(AWords[0], ASPIRV[0], ByteSize);
+    Result := True;
+  end;
+
+begin
+  ASPIRV := nil;
+  Result := False;
+
+  case AStage of
+    ssVertex:
+      begin
+        if (ADebugName = 'Primitive2D_VS') or
+           ((Pos('viewport_size', AGLSLSource) > 0) and (Pos('point_size', AGLSLSource) > 0)) then
+        begin
+          CopyWords(BuiltInPrimitive2DVertSPIRV);
+          Exit;
+        end;
+        if (ADebugName = 'UnlitMesh_VS') or
+           ((Pos('u_MVP', AGLSLSource) > 0) and (Pos('castle_Vertex', AGLSLSource) > 0)) then
+        begin
+          CopyWords(BuiltInUnlitMeshVertSPIRV);
+          Exit;
+        end;
+        if (ADebugName = 'CastleBatch2D.vert') or
+           (Pos('CastleDraw.u_ModelViewMatrix[0].xy', AGLSLSource) > 0) then
+        begin
+          CopyWords(BuiltInBatch2DVertSPIRV);
+          Exit;
+        end;
+      end;
+
+    ssFragment:
+      begin
+        if (ADebugName = 'Primitive2D_FS') or
+           ((Pos('viewport_size', AGLSLSource) > 0) and (Pos('out_Color = pc.color', AGLSLSource) > 0)) then
+        begin
+          CopyWords(BuiltInPrimitive2DFragSPIRV);
+          Exit;
+        end;
+        if (ADebugName = 'UnlitMesh_FS') or
+           ((Pos('u_MVP', AGLSLSource) > 0) and (Pos('out_Color = pc.u_Color', AGLSLSource) > 0)) then
+        begin
+          CopyWords(BuiltInUnlitMeshFragSPIRV);
+          Exit;
+        end;
+        if (ADebugName = 'CastleBatch2D.frag') or
+           ((Pos('u_SpriteTexture', AGLSLSource) > 0) and (Pos('CastleDraw.u_ModelViewMatrix[1]', AGLSLSource) > 0)) then
+        begin
+          CopyWords(BuiltInBatch2DFragSPIRV);
+          Exit;
+        end;
+      end;
+  end;
+end;
+
+function TCastleShaderCompiler.GetMinimalValidSPIRVFallback(
+  const AStage: TRHIShaderStage): TSPIRVBytecode;
+const
+  MinimalVertWords: array[0..28] of UInt32 = (
+    $07230203, $00010000, $00000000, $00000005, $00000000,
+    $00020011, 1,
+    $0003000E, 0, 1,
+    $0005000F, 0, 1, $6E69616D, $00000000,
+    $00020013, 2,
+    $00030021, 3, 2,
+    $00050036, 2, 1, 0, 3,
+    $000200F8, 4,
+    $000100FD,
+    $00010038
+  );
+  MinimalFragWords: array[0..31] of UInt32 = (
+    $07230203, $00010000, $00000000, $00000005, $00000000,
+    $00020011, 1,
+    $0003000E, 0, 1,
+    $0005000F, 4, 1, $6E69616D, $00000000,
+    $00030010, 1, 7,
+    $00020013, 2,
+    $00030021, 3, 2,
+    $00050036, 2, 1, 0, 3,
+    $000200F8, 4,
+    $000100FD,
+    $00010038
+  );
+  MinimalCompWords: array[0..34] of UInt32 = (
+    $07230203, $00010000, $00000000, $00000005, $00000000,
+    $00020011, 1,
+    $0003000E, 0, 1,
+    $0005000F, 5, 1, $6E69616D, $00000000,
+    $00060010, 1, 17, 1, 1, 1,
+    $00020013, 2,
+    $00030021, 3, 2,
+    $00050036, 2, 1, 0, 3,
+    $000200F8, 4,
+    $000100FD,
+    $00010038
+  );
+  MinimalGeomWords: array[0..38] of UInt32 = (
+    $07230203, $00010000, $00000000, $00000005, $00000000,
+    $00020011, 2,
+    $0003000E, 0, 1,
+    $0005000F, 3, 1, $6E69616D, $00000000,
+    $00030010, 1, 22,
+    $00040010, 1, 26, 3,
+    $00030010, 1, 29,
+    $00020013, 2,
+    $00030021, 3, 2,
+    $00050036, 2, 1, 0, 3,
+    $000200F8, 4,
+    $000100FD,
+    $00010038
+  );
+begin
+  Result := nil;
+  case AStage of
+    ssFragment:
+      begin
+        SetLength(Result, SizeOf(MinimalFragWords));
+        Move(MinimalFragWords[0], Result[0], SizeOf(MinimalFragWords));
+      end;
+    ssCompute:
+      begin
+        SetLength(Result, SizeOf(MinimalCompWords));
+        Move(MinimalCompWords[0], Result[0], SizeOf(MinimalCompWords));
+      end;
+    ssGeometry:
+      begin
+        SetLength(Result, SizeOf(MinimalGeomWords));
+        Move(MinimalGeomWords[0], Result[0], SizeOf(MinimalGeomWords));
+      end;
+  else
+    begin
+      SetLength(Result, SizeOf(MinimalVertWords));
+      Move(MinimalVertWords[0], Result[0], SizeOf(MinimalVertWords));
+    end;
   end;
 end;
 

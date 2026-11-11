@@ -326,6 +326,11 @@ type
     { RHI resources and diagnostic counters }
     RHIOwnerDevice: TRHIDevice;
     RHIVbo: TRHIBuffer;
+    RHIVboWriteOffset: PtrUInt;
+    RHILastVertexByteOffset: PtrUInt;
+    RHILastFrameIndex: Cardinal;
+    RHILastFramesPresented: Cardinal;
+    RHILastCmdList: TRHICommandList;
     RHIVertShader: TRHIShaderModule;
     RHIFragShader: TRHIShaderModule;
     RHIPipeline: TRHIPipeline;
@@ -444,6 +449,11 @@ begin
   if Primitive2DRes <> nil then
   begin
     FreeAndNil(Primitive2DRes.RHIVbo);
+    Primitive2DRes.RHIVboWriteOffset := 0;
+    Primitive2DRes.RHILastVertexByteOffset := 0;
+    Primitive2DRes.RHILastFrameIndex := 0;
+    Primitive2DRes.RHILastFramesPresented := 0;
+    Primitive2DRes.RHILastCmdList := nil;
     FreeAndNil(Primitive2DRes.RHIVertShader);
     FreeAndNil(Primitive2DRes.RHIFragShader);
     Primitive2DRes.RHIPipeline := nil;
@@ -575,6 +585,7 @@ var
   RHITopology: TRHIPrimitiveTopology;
   PushConsts: TPrimitive2DPushConstants;
   ScissorR: TRectangle;
+  CurrentVboOffset, NewVboCapacity: PtrUInt;
 begin
   if High(Points) = -1 then Exit;
 
@@ -641,9 +652,16 @@ begin
 
   if RHIDevice <> nil then
   begin
-    if Primitive2DRes.RHIOwnerDevice <> RHIDevice then
+    if (Primitive2DRes.RHIOwnerDevice <> RHIDevice) or
+       ((Primitive2DRes.RHIVbo <> nil) and (Primitive2DRes.RHIVbo.Device <> RHIDevice)) or
+       ((Primitive2DRes.RHIVertShader <> nil) and (Primitive2DRes.RHIVertShader.Device <> RHIDevice)) then
     begin
       FreeAndNil(Primitive2DRes.RHIVbo);
+      Primitive2DRes.RHIVboWriteOffset := 0;
+      Primitive2DRes.RHILastVertexByteOffset := 0;
+      Primitive2DRes.RHILastFrameIndex := 0;
+      Primitive2DRes.RHILastFramesPresented := 0;
+      Primitive2DRes.RHILastCmdList := nil;
       FreeAndNil(Primitive2DRes.RHIVertShader);
       FreeAndNil(Primitive2DRes.RHIFragShader);
       Primitive2DRes.RHIPipeline := nil;
@@ -656,13 +674,31 @@ begin
       Primitive2DRes.RHIFragShader := RHIDevice.CreateShaderModuleFromGLSL(
         ssFragment, Primitive2DFragGLSL, 'Primitive2D_FS');
 
-    if (Primitive2DRes.RHIVbo = nil) or (Primitive2DRes.RHIVbo.Desc.Size < Cardinal(RequiredPointPtrSize)) then
+    if (Primitive2DRes.RHILastFrameIndex <> RHIDevice.FrameIndex) or
+       (Primitive2DRes.RHILastFramesPresented <> RHIDevice.TotalFramesStarted) or
+       (Primitive2DRes.RHILastCmdList <> ActiveCommandList) then
+    begin
+      Primitive2DRes.RHIVboWriteOffset := 0;
+      Primitive2DRes.RHILastFrameIndex := RHIDevice.FrameIndex;
+      Primitive2DRes.RHILastFramesPresented := RHIDevice.TotalFramesStarted;
+      Primitive2DRes.RHILastCmdList := ActiveCommandList;
+    end;
+
+    CurrentVboOffset := Primitive2DRes.RHIVboWriteOffset;
+    if (Primitive2DRes.RHIVbo = nil) or
+       (Primitive2DRes.RHIVbo.Desc.Size < CurrentVboOffset + PtrUInt(RequiredPointPtrSize)) then
     begin
       FreeAndNil(Primitive2DRes.RHIVbo);
-      RHIBufDesc := TRHIBufferDesc.Create(RequiredPointPtrSize, [buVertex, buTransferDst], muCpuToGpu);
-      Primitive2DRes.RHIVbo := RHIDevice.CreateBuffer(RHIBufDesc, Primitive2DRes.PointPtr);
-    end else
+      NewVboCapacity := Max(PtrUInt(65536), (CurrentVboOffset + PtrUInt(RequiredPointPtrSize)) * 2);
+      RHIBufDesc := TRHIBufferDesc.Create(NewVboCapacity, [buVertex, buTransferDst], muCpuToGpu);
+      Primitive2DRes.RHIVbo := RHIDevice.CreateBuffer(RHIBufDesc, nil);
+      CurrentVboOffset := 0;
       Primitive2DRes.RHIVbo.UploadData(Primitive2DRes.PointPtr^, RequiredPointPtrSize, 0);
+    end else
+      Primitive2DRes.RHIVbo.UploadData(Primitive2DRes.PointPtr^, RequiredPointPtrSize, CurrentVboOffset);
+
+    Primitive2DRes.RHILastVertexByteOffset := CurrentVboOffset;
+    Primitive2DRes.RHIVboWriteOffset := (CurrentVboOffset + PtrUInt(RequiredPointPtrSize) + 15) and not PtrUInt(15);
 
     RHITopology := PrimitiveModeToRHI[Mode];
     FillChar(RHIPipeDesc, SizeOf(RHIPipeDesc), 0);
@@ -759,7 +795,7 @@ begin
       PushConsts.Padding := 0.0;
       PushConsts.Color := Color;
       ActiveCommandList.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConsts), PushConsts);
-      ActiveCommandList.BindVertexBuffers(0, [Primitive2DRes.RHIVbo], [0]);
+      ActiveCommandList.BindVertexBuffers(0, [Primitive2DRes.RHIVbo], [CurrentVboOffset]);
       ActiveCommandList.Draw(SubmittedVertexCount, 1, 0, 0);
     end;
 

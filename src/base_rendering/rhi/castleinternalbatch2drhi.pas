@@ -85,6 +85,11 @@ type
     FStaticQuadIBO: TRHIBuffer;
     FFrameVBOs: array[0 .. MaxFramesInFlight - 1] of TRHIBuffer;
     FMappedVertices: PCastle2DVertex;
+    FFramePassBaseQuad: Cardinal;
+    FFrameWriteQuadOffset: Cardinal;
+    FLastMappedFrameIndex: Cardinal;
+    FLastMappedFramesPresented: Cardinal;
+    FLastMappedCmd: TRHICommandList;
     FFrameQuadCount: Cardinal;
     FBatchStartQuad: Cardinal;
     FBatchFlushCount: Cardinal;
@@ -207,6 +212,8 @@ type
       const ARepeatS: Boolean = False; const ARepeatT: Boolean = False): TRHISampler;
     property TextureSetLayout: TRHIDescriptorSetLayout read FTextureSetLayout;
     property WhitePixelTexture: TRHITexture read FWhitePixelTexture;
+    property FramePassBaseQuad: Cardinal read FFramePassBaseQuad;
+    property FrameWriteQuadOffset: Cardinal read FFrameWriteQuadOffset;
     property FrameQuadCount: Cardinal read FFrameQuadCount;
     property BatchFlushCount: Cardinal read FBatchFlushCount;
     property TotalQuadsDrawn: Cardinal read FTotalQuadsDrawn;
@@ -563,6 +570,20 @@ begin
   FViewportWidth := Max(1.0, AViewportWidth);
   FViewportHeight := Max(1.0, AViewportHeight);
 
+  if (FDevice <> nil) and
+     ((FLastMappedFrameIndex <> FDevice.FrameIndex) or
+      (FLastMappedFramesPresented <> FDevice.TotalFramesStarted) or
+      (FLastMappedCmd <> ACmd)) then
+  begin
+    FFrameWriteQuadOffset := 0;
+    FLastMappedFrameIndex := FDevice.FrameIndex;
+    FLastMappedFramesPresented := FDevice.TotalFramesStarted;
+    FLastMappedCmd := ACmd;
+  end;
+  if FFrameWriteQuadOffset >= MaxQuadsPerFrame then
+    FFrameWriteQuadOffset := 0;
+
+  FFramePassBaseQuad := FFrameWriteQuadOffset;
   FFrameQuadCount := 0;
   FBatchStartQuad := 0;
   FBatchFlushCount := 0;
@@ -689,7 +710,7 @@ begin
   FCurrentCmd.BindDescriptorSet(0, FCurrentDescriptorSet, []);
 
   { 4. Bind Streaming VBO at the current batch offset & Static Quad IBO }
-  VertexByteOffset := FBatchStartQuad * 4 * SizeOf(TCastle2DVertex);
+  VertexByteOffset := PtrUInt(FFramePassBaseQuad + FBatchStartQuad) * 4 * SizeOf(TCastle2DVertex);
   FCurrentCmd.BindVertexBuffers(0, [ActiveVBO], [VertexByteOffset]);
   FCurrentCmd.BindIndexBuffer(FStaticQuadIBO, 0, itUInt16);
 
@@ -699,6 +720,7 @@ begin
   Inc(FTotalFlushes);
 
   FBatchStartQuad := FFrameQuadCount;
+  FFrameWriteQuadOffset := FFramePassBaseQuad + FFrameQuadCount;
 end;
 
 procedure TCastleBatch2DRenderer.End2DPass;
@@ -799,7 +821,7 @@ begin
     FCurrentCustomParams := ACustomParams;
   end;
 
-  if FFrameQuadCount + Cardinal(Count) > MaxQuadsPerFrame then
+  if FFramePassBaseQuad + FFrameQuadCount + Cardinal(Count) > MaxQuadsPerFrame then
     Exit; // Guard against buffer overflow
 
   InvTexW := 1.0 / Max(1, ATexture.Desc.Width);
@@ -810,7 +832,7 @@ begin
     SinCos(RotationRad, SinA, CosA);
 
   VPtr := FMappedVertices;
-  Inc(VPtr, FFrameQuadCount * 4);
+  Inc(VPtr, (FFramePassBaseQuad + FFrameQuadCount) * 4);
 
   for I := 0 to Count - 1 do
   begin

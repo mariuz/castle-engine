@@ -385,6 +385,9 @@ type
     procedure TestRealLavapipeSubViewportScissorClearAndBottomUpGrabTextureRHI;
     procedure TestCastleWindowVulkanSwapchainPassSurfaceNegotiationAndStencilDepthRHI;
     procedure TestContainerSaveScreenAndSaveScreenRgbaOutOfFrameRealLavapipeRHI;
+    procedure TestBuiltInSPIRVCoreShadersAndRealLavapipeDrawPrimitive2DRHI;
+    procedure TestRealLavapipeBatch2DDrawableImageFontAlphaClipAndMultiPassRHI;
+    procedure TestRealLavapipeRenderUnlitMeshDepthAndOcclusionCullingRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -27659,6 +27662,529 @@ begin
       ApplicationProperties.RenderBackend := SavedBackend;
       FreeAndNil(RealDev);
     end;
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestBuiltInSPIRVCoreShadersAndRealLavapipeDrawPrimitive2DRHI;
+var
+  SPIRV: TSPIRVBytecode;
+  Refl: TSPIRVReflectionInfo;
+  FoundBinding: TSPIRVReflectedBinding;
+  FoundIO: TSPIRVReflectedStageIO;
+  RealDev: TVulkanRHIDevice;
+  RealCmd: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  Container: TTestSizedVulkanContainer;
+  RectCtrl: TCastleRectangleControl;
+  ColorTex: TRHITexture;
+  PassInfo: TRHIRenderingInfo;
+  Readback: TRGBAlphaImage;
+begin
+  { Part 1: Verify built-in SPIR-V 1.0 core shaders & pure-Pascal SPIR-V reflection }
+  AssertTrue('TryGetBuiltInSPIRV must resolve Primitive2D_VS',
+    TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssVertex, '', 'Primitive2D_VS', SPIRV));
+  AssertTrue('InspectSPIRVBytecode must validate Primitive2D_VS',
+    InspectSPIRVBytecode(SPIRV, Refl) and Refl.IsValid);
+  AssertEquals(Ord(ssVertex), Ord(Refl.Stage));
+  AssertTrue(Refl.HasPushConstants);
+  AssertEquals('Primitive2D_VS push constants size must be 32 bytes', 32, Integer(Refl.PushConstantSize));
+  AssertTrue('Primitive2D_VS must declare location 0 input vec2',
+    Refl.FindStageInput(0, FoundIO) and (FoundIO.ComponentCount = 2));
+
+  AssertTrue('TryGetBuiltInSPIRV must resolve Primitive2D_FS',
+    TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssFragment, '', 'Primitive2D_FS', SPIRV));
+  AssertTrue('InspectSPIRVBytecode must validate Primitive2D_FS',
+    InspectSPIRVBytecode(SPIRV, Refl) and Refl.IsValid);
+  AssertEquals(Ord(ssFragment), Ord(Refl.Stage));
+  AssertTrue(Refl.HasPushConstants);
+  AssertEquals('Primitive2D_FS push constants size must be 32 bytes', 32, Integer(Refl.PushConstantSize));
+  AssertTrue('Primitive2D_FS must declare location 0 output vec4',
+    Refl.FindStageOutput(0, FoundIO) and (FoundIO.ComponentCount = 4));
+
+  AssertTrue('TryGetBuiltInSPIRV must resolve UnlitMesh_VS',
+    TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssVertex, '', 'UnlitMesh_VS', SPIRV));
+  AssertTrue('InspectSPIRVBytecode must validate UnlitMesh_VS',
+    InspectSPIRVBytecode(SPIRV, Refl) and Refl.IsValid);
+  AssertEquals('UnlitMesh_VS push constants size must be 80 bytes (mat4 + vec4)',
+    80, Integer(Refl.PushConstantSize));
+  AssertTrue('UnlitMesh_VS must declare location 0 input vec4',
+    Refl.FindStageInput(0, FoundIO) and (FoundIO.ComponentCount = 4));
+
+  AssertTrue('TryGetBuiltInSPIRV must resolve UnlitMesh_FS',
+    TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssFragment, '', 'UnlitMesh_FS', SPIRV));
+  AssertTrue('InspectSPIRVBytecode must validate UnlitMesh_FS',
+    InspectSPIRVBytecode(SPIRV, Refl) and Refl.IsValid);
+  AssertEquals('UnlitMesh_FS push constants size must be 80 bytes',
+    80, Integer(Refl.PushConstantSize));
+
+  AssertTrue('TryGetBuiltInSPIRV must resolve CastleBatch2D.vert',
+    TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssVertex, '', 'CastleBatch2D.vert', SPIRV));
+  AssertTrue('InspectSPIRVBytecode must validate CastleBatch2D.vert',
+    InspectSPIRVBytecode(SPIRV, Refl) and Refl.IsValid);
+  AssertEquals('CastleBatch2D.vert push constants size must be 64 bytes (4 x vec4)',
+    64, Integer(Refl.PushConstantSize));
+  AssertTrue('CastleBatch2D.vert must declare location 0, 2, 4 inputs',
+    Refl.FindStageInput(0, FoundIO) and
+    Refl.FindStageInput(2, FoundIO) and
+    Refl.FindStageInput(4, FoundIO));
+
+  AssertTrue('TryGetBuiltInSPIRV must resolve CastleBatch2D.frag',
+    TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssFragment, '', 'CastleBatch2D.frag', SPIRV));
+  AssertTrue('InspectSPIRVBytecode must validate CastleBatch2D.frag',
+    InspectSPIRVBytecode(SPIRV, Refl) and Refl.IsValid);
+  AssertEquals('CastleBatch2D.frag push constants size must be 64 bytes',
+    64, Integer(Refl.PushConstantSize));
+  AssertTrue('CastleBatch2D.frag must declare set=0, binding=0 dtCombinedImageSampler',
+    Refl.FindBinding(0, 0, FoundBinding) and
+    (FoundBinding.DescriptorType = dtCombinedImageSampler));
+
+  { Also verify GetMinimalValidSPIRVFallback for all 4 shader stages }
+  SPIRV := TCastleShaderCompiler.Instance.GetMinimalValidSPIRVFallback(ssVertex);
+  AssertTrue(InspectSPIRVBytecode(SPIRV, Refl) and (Refl.Stage = ssVertex));
+  SPIRV := TCastleShaderCompiler.Instance.GetMinimalValidSPIRVFallback(ssFragment);
+  AssertTrue(InspectSPIRVBytecode(SPIRV, Refl) and (Refl.Stage = ssFragment));
+  SPIRV := TCastleShaderCompiler.Instance.GetMinimalValidSPIRVFallback(ssGeometry);
+  AssertTrue(InspectSPIRVBytecode(SPIRV, Refl) and (Refl.Stage = ssGeometry));
+  SPIRV := TCastleShaderCompiler.Instance.GetMinimalValidSPIRVFallback(ssCompute);
+  AssertTrue(InspectSPIRVBytecode(SPIRV, Refl) and (Refl.Stage = ssCompute));
+
+  { Part 2: Live Offscreen Vulkan GPU (Mesa Lavapipe) multi-draw in-frame DrawPrimitive2D,
+    DrawRectangle, DrawCircle, and TCastleRectangleControl execution }
+  if TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+  begin
+    SavedRHI := RHIDevice;
+    SavedCmd := ActiveCommandList;
+    SavedBackend := ApplicationProperties.RenderBackend;
+    SavedCtx := RenderContext;
+    SavedGLFeatures := GLFeatures;
+    Container := TTestSizedVulkanContainer.Create(nil);
+    RectCtrl := nil;
+    ColorTex := nil;
+    Readback := nil;
+    try
+      GLFeatures := nil;
+      ApplicationProperties.RenderBackend := backendVulkan;
+      SetRHIDevice(RealDev);
+      RHIPrimitive2DResetStats;
+
+      Container.TestWidth := 64;
+      Container.TestHeight := 64;
+      RenderContext := Container.Context;
+      RenderContext.Viewport := Rectangle(0, 0, 64, 64);
+
+      ColorTex := RealDev.CreateTexture(TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm,
+        [tuColorAttachment, tuTransferSrc]));
+      RealCmd := RealDev.BeginFrame as TVulkanRHICommandList;
+      SetActiveCommandList(RealCmd);
+
+      PassInfo := TRHIRenderingInfo.CreateColorDepth(
+        Rectangle(0, 0, 64, 64),
+        ColorTex, loClear, Vector4(0.0, 0.0, 0.0, 1.0),
+        nil, loDontCare, 1.0);
+      RealCmd.BeginRendering(PassInfo);
+
+      { Draw 1: Opaque Red rectangle at bottom-left [4..28] x [4..28] }
+      DrawRectangle(Rectangle(4, 4, 24, 24), Vector4(1.0, 0.0, 0.0, 1.0));
+
+      { Draw 2: Opaque Green rectangle at bottom-right [36..60] x [4..28]
+        (Tests that in-frame multi-draw vertex streaming in DrawPrimitive2D does NOT overwrite Draw 1!) }
+      DrawRectangle(Rectangle(36, 4, 24, 24), Vector4(0.0, 1.0, 0.0, 1.0));
+
+      { Draw 3: Alpha-blended 50% Blue rectangle over the right half of Green [48..60] x [4..28] }
+      DrawRectangle(Rectangle(48, 4, 12, 24), Vector4(0.0, 0.0, 1.0, 0.5));
+
+      { Draw 4: Filled Yellow circle centered at (16, 48) with radius 10 }
+      DrawCircle(Vector2Integer(16, 48), 10, 10, Vector4(1.0, 1.0, 0.0, 1.0));
+
+      { Draw 5: TCastleRectangleControl at top-right [36..60] x [36..60] with Magenta fill }
+      RectCtrl := TCastleRectangleControl.Create(nil);
+      RectCtrl.Translation := Vector2(36, 36);
+      RectCtrl.Width := 24;
+      RectCtrl.Height := 24;
+      RectCtrl.Color := Vector4(1.0, 0.0, 1.0, 1.0);
+      Container.Controls.InsertFront(RectCtrl);
+      Container.RenderControl(RectCtrl, Rectangle(0, 0, 64, 64));
+
+      RealCmd.EndRendering;
+      RealDev.EndFrameAndPresent;
+
+      Readback := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 64, 64));
+
+      { Verify Draw 1 (bottom-left Red at (16, 16)) was NOT overwritten by subsequent draws }
+      AssertEquals('Draw 1 Red (16,16) R must be 255', 255, Integer(Readback.PixelPtr(16, 16)^.X));
+      AssertEquals('Draw 1 Red (16,16) G must be 0', 0, Integer(Readback.PixelPtr(16, 16)^.Y));
+      AssertEquals('Draw 1 Red (16,16) B must be 0', 0, Integer(Readback.PixelPtr(16, 16)^.Z));
+
+      { Verify Draw 2 (unblended Green at (42, 16)) }
+      AssertEquals('Draw 2 Green (42,16) R must be 0', 0, Integer(Readback.PixelPtr(42, 16)^.X));
+      AssertEquals('Draw 2 Green (42,16) G must be 255', 255, Integer(Readback.PixelPtr(42, 16)^.Y));
+      AssertEquals('Draw 2 Green (42,16) B must be 0', 0, Integer(Readback.PixelPtr(42, 16)^.Z));
+
+      { Verify Draw 3 (50% Blue blended over Green at (54, 16) -> (0, ~127, ~128)) }
+      AssertEquals('Draw 3 Blended (54,16) R must be 0', 0, Integer(Readback.PixelPtr(54, 16)^.X));
+      AssertTrue('Draw 3 Blended (54,16) G must be ~127', Abs(Integer(Readback.PixelPtr(54, 16)^.Y) - 127) <= 3);
+      AssertTrue('Draw 3 Blended (54,16) B must be ~128', Abs(Integer(Readback.PixelPtr(54, 16)^.Z) - 128) <= 3);
+
+      { Verify Draw 4 (Yellow Circle center at (16, 48)) }
+      AssertEquals('Draw 4 Yellow Circle (16,48) R must be 255', 255, Integer(Readback.PixelPtr(16, 48)^.X));
+      AssertEquals('Draw 4 Yellow Circle (16,48) G must be 255', 255, Integer(Readback.PixelPtr(16, 48)^.Y));
+      AssertEquals('Draw 4 Yellow Circle (16,48) B must be 0', 0, Integer(Readback.PixelPtr(16, 48)^.Z));
+
+      { Verify Draw 5 (TCastleRectangleControl Magenta at (48, 48)) }
+      AssertEquals('Draw 5 TCastleRectangleControl (48,48) R must be 255', 255, Integer(Readback.PixelPtr(48, 48)^.X));
+      AssertEquals('Draw 5 TCastleRectangleControl (48,48) G must be 0', 0, Integer(Readback.PixelPtr(48, 48)^.Y));
+      AssertEquals('Draw 5 TCastleRectangleControl (48,48) B must be 255', 255, Integer(Readback.PixelPtr(48, 48)^.Z));
+    finally
+      RHIPrimitive2DResetStats;
+      FreeAndNil(Readback);
+      FreeAndNil(ColorTex);
+      FreeAndNil(RectCtrl);
+      FreeAndNil(Container);
+      GLFeatures := SavedGLFeatures;
+      RenderContext := SavedCtx;
+      SetActiveCommandList(SavedCmd);
+      SetRHIDevice(SavedRHI);
+      ApplicationProperties.RenderBackend := SavedBackend;
+      FreeAndNil(RealDev);
+    end;
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipeBatch2DDrawableImageFontAlphaClipAndMultiPassRHI;
+var
+  RealDev: TVulkanRHIDevice;
+  RealCmd: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  Container: TTestSizedVulkanContainer;
+  ColorTex: TRHITexture;
+  PassInfo: TRHIRenderingInfo;
+  SrcImg, FontAlphaImg, Readback: TRGBAlphaImage;
+  DrawImg, FontDrawImg: TDrawableImage;
+  Batch2D: TCastleBatch2DRenderer;
+  SR, IR: TFloatRectangle;
+  X, Y: Integer;
+begin
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+    Exit;
+
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+  Container := TTestSizedVulkanContainer.Create(nil);
+  ColorTex := nil;
+  DrawImg := nil;
+  FontDrawImg := nil;
+  Readback := nil;
+  try
+    GLFeatures := nil;
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(RealDev);
+    FreeGlobalBatch2DRenderer;
+
+    Container.TestWidth := 64;
+    Container.TestHeight := 64;
+    RenderContext := Container.Context;
+    RenderContext.Viewport := Rectangle(0, 0, 64, 64);
+
+    { Create 16x16 sprite image:
+      - Left half (X < 8): Opaque Red (255, 0, 0, 255)
+      - Right half (X >= 8): Low-alpha Green (0, 255, 0, 64) }
+    SrcImg := TRGBAlphaImage.Create(16, 16);
+    for Y := 0 to 15 do
+      for X := 0 to 15 do
+        if X < 8 then
+          SrcImg.PixelPtr(X, Y)^ := Vector4Byte(255, 0, 0, 255)
+        else
+          SrcImg.PixelPtr(X, Y)^ := Vector4Byte(0, 255, 0, 64);
+    DrawImg := TDrawableImage.Create(SrcImg, False, True);
+
+    { Create 16x16 font-glyph alpha image:
+      - Left half (X < 8): Alpha = 255 (RGB = 0 to prove TextureHasOnlyAlpha uses vertex RGB!)
+      - Right half (X >= 8): Alpha = 0 }
+    FontAlphaImg := TRGBAlphaImage.Create(16, 16);
+    for Y := 0 to 15 do
+      for X := 0 to 15 do
+        if X < 8 then
+          FontAlphaImg.PixelPtr(X, Y)^ := Vector4Byte(0, 0, 0, 255)
+        else
+          FontAlphaImg.PixelPtr(X, Y)^ := Vector4Byte(0, 0, 0, 0);
+    FontDrawImg := TDrawableImage.Create(FontAlphaImg, False, True);
+
+    ColorTex := RealDev.CreateTexture(TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm,
+      [tuColorAttachment, tuTransferSrc]));
+    RealCmd := RealDev.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(RealCmd);
+
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 64, 64),
+      ColorTex, loClear, Vector4(0.0, 0.0, 0.5, 1.0), { Clear to Navy Blue (0, 0, 128) }
+      nil, loDontCare, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+
+    { Pass 1 (standalone DrawNoBatch -> Begin2DPass..End2DPass #1 at FFramePassBaseQuad = 0):
+      Opaque sprite at (4, 4, 16, 16) with Alpha = acNone -> Left = Red (255,0,0), Right = Green (0,255,0) }
+    DrawImg.Alpha := acNone;
+    DrawImg.Color := Vector4(1.0, 1.0, 1.0, 1.0);
+    DrawImg.Clip := False;
+    DrawImg.Draw(4, 4, 16, 16, 0, 0, 16, 16);
+
+    { Pass 2 (standalone DrawNoBatch -> Begin2DPass..End2DPass #2 at FFramePassBaseQuad = 1):
+      Alpha-tested sprite at (24, 4, 16, 16) with Alpha = acTest (cutoff = 0.5):
+      Left half (alpha = 1.0 >= 0.5) draws Red; Right half (alpha = 64/255 < 0.5) is discarded (remains Navy Blue)! }
+    DrawImg.Alpha := acTest;
+    DrawImg.Draw(24, 4, 16, 16, 0, 0, 16, 16);
+
+    { Pass 3 (standalone DrawNoBatch -> Begin2DPass..End2DPass #3 at FFramePassBaseQuad = 2):
+      Clipped sprite at (44, 4, 16, 16) with Clip = True and ClipLine = (1.0, 0.0, -0.5):
+      dot((1,0), UV) - 0.5 = U - 0.5 < 0 is discarded -> Left half (U < 0.5) is discarded (Navy Blue),
+      Right half (U > 0.5) is kept (Green)! }
+    DrawImg.Alpha := acNone;
+    DrawImg.Clip := True;
+    DrawImg.ClipLine := Vector3(1.0, 0.0, -0.5);
+    DrawImg.Draw(44, 4, 16, 16, 0, 0, 16, 16);
+    DrawImg.Clip := False;
+
+    { Pass 4 (explicit Begin2DPass..End2DPass #4 at FFramePassBaseQuad = 3):
+      Font glyph mode (ATextureHasOnlyAlpha = True) at (4, 28, 16, 16) with Yellow ColorTint (1, 1, 0, 1):
+      Even though FontAlphaImg has RGB=(0,0,0), TextureHasOnlyAlpha outputs vec4(ColorTint.rgb, ColorTint.a * tex.a)! }
+    FontDrawImg.PrepareResources;
+    Batch2D := EnsureBatch2DRenderer(RealDev);
+    AssertEquals('After 3 single-quad 2D passes in same frame, FrameWriteQuadOffset must be 3',
+      3, Integer(Batch2D.FrameWriteQuadOffset));
+    Batch2D.Begin2DPass(RealCmd, 64, 64);
+    SR := FloatRectangle(4, 28, 16, 16);
+    IR := FloatRectangle(0, 0, 16, 16);
+    Batch2D.DrawQuads(
+      FontDrawImg.RHITexture, FontDrawImg.RHIDescriptorSet,
+      @SR, @IR, 1,
+      Vector4(1.0, 1.0, 0.0, 1.0),
+      CastleInternalBatch2DRHI.bmAlphaBlend,
+      False,
+      Rectangle(0, 0, 64, 64),
+      0.0, TVector2.Zero, False,
+      False, TVector3.Zero, 0.0,
+      False, bfSrcAlpha, bfOneMinusSrcAlpha,
+      True, nil, TVector4.Zero);
+    Batch2D.End2DPass;
+
+    RealCmd.EndRendering;
+    RealDev.EndFrameAndPresent;
+
+    Readback := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 64, 64));
+
+    { 1. Verify Pass 1 at (4..20, 4..20): Left (6,10) = Red, Right (16,10) = Green }
+    AssertEquals('Pass 1 Left (6,10) R must be 255', 255, Integer(Readback.PixelPtr(6, 10)^.X));
+    AssertEquals('Pass 1 Left (6,10) G must be 0', 0, Integer(Readback.PixelPtr(6, 10)^.Y));
+    AssertEquals('Pass 1 Right (16,10) R must be 0', 0, Integer(Readback.PixelPtr(16, 10)^.X));
+    AssertEquals('Pass 1 Right (16,10) G must be 255', 255, Integer(Readback.PixelPtr(16, 10)^.Y));
+
+    { 2. Verify Pass 2 (AlphaTest) at (24..40, 4..20): Left (26,10) = Red, Right (36,10) = Discarded (Navy Blue) }
+    AssertEquals('Pass 2 AlphaTest Left (26,10) R must be 255', 255, Integer(Readback.PixelPtr(26, 10)^.X));
+    AssertEquals('Pass 2 AlphaTest Right (36,10) G must be 0 (discarded)', 0, Integer(Readback.PixelPtr(36, 10)^.Y));
+    AssertTrue('Pass 2 AlphaTest Right (36,10) B must remain Navy ~128',
+      Abs(Integer(Readback.PixelPtr(36, 10)^.Z) - 128) <= 2);
+
+    { 3. Verify Pass 3 (ClipLine U >= 0.5) at (44..60, 4..20): Left (46,10) = Discarded (Navy), Right (56,10) = Green }
+    AssertEquals('Pass 3 ClipLine Left (46,10) R must be 0 (discarded)', 0, Integer(Readback.PixelPtr(46, 10)^.X));
+    AssertTrue('Pass 3 ClipLine Left (46,10) B must remain Navy ~128',
+      Abs(Integer(Readback.PixelPtr(46, 10)^.Z) - 128) <= 2);
+    AssertEquals('Pass 3 ClipLine Right (56,10) G must be 255 (kept)', 255, Integer(Readback.PixelPtr(56, 10)^.Y));
+
+    { 4. Verify Pass 4 (Font TextureHasOnlyAlpha) at (4..20, 28..44): Left (6,34) = Yellow (255,255,0), Right (16,34) = Navy }
+    AssertEquals('Pass 4 Font Glyph Left (6,34) R must be 255', 255, Integer(Readback.PixelPtr(6, 34)^.X));
+    AssertEquals('Pass 4 Font Glyph Left (6,34) G must be 255', 255, Integer(Readback.PixelPtr(6, 34)^.Y));
+    AssertEquals('Pass 4 Font Glyph Left (6,34) B must be 0', 0, Integer(Readback.PixelPtr(6, 34)^.Z));
+    AssertEquals('Pass 4 Font Glyph Right (16,34) R must be 0 (alpha 0)', 0, Integer(Readback.PixelPtr(16, 34)^.X));
+    AssertTrue('Pass 4 Font Glyph Right (16,34) B must remain Navy ~128',
+      Abs(Integer(Readback.PixelPtr(16, 34)^.Z) - 128) <= 2);
+  finally
+    FreeAndNil(Readback);
+    FreeAndNil(FontDrawImg);
+    FreeAndNil(DrawImg);
+    FreeAndNil(ColorTex);
+    FreeGlobalBatch2DRenderer;
+    FreeAndNil(Container);
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(RealDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipeRenderUnlitMeshDepthAndOcclusionCullingRHI;
+var
+  RealDev: TVulkanRHIDevice;
+  RealCmd: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  Container: TTestSizedVulkanContainer;
+  ColorTex, DepthTex: TRHITexture;
+  PassInfo: TRHIRenderingInfo;
+  UnlitMesh: TCastleRenderUnlitMesh;
+  OccUtils: TOcclusionCullingUtilsRenderer;
+  QueryPool: TRHIQueryPool;
+  Samples: array[0..1] of UInt64;
+  OrthoMVP: TMatrix4;
+  Readback: TRGBAlphaImage;
+begin
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+    Exit;
+
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+  Container := TTestSizedVulkanContainer.Create(nil);
+  ColorTex := nil;
+  DepthTex := nil;
+  UnlitMesh := nil;
+  OccUtils := nil;
+  QueryPool := nil;
+  Readback := nil;
+  try
+    GLFeatures := nil;
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(RealDev);
+
+    Container.TestWidth := 64;
+    Container.TestHeight := 64;
+    RenderContext := Container.Context;
+    RenderContext.Viewport := Rectangle(0, 0, 64, 64);
+    RenderContext.DepthTest := True;
+
+    ColorTex := RealDev.CreateTexture(TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm,
+      [tuColorAttachment, tuTransferSrc]));
+    DepthTex := RealDev.CreateTexture(TRHITextureDesc.Create2D(64, 64, pfD32_Float,
+      [tuDepthStencil]));
+    QueryPool := RealDev.CreateQueryPool(TRHIQueryPoolDesc.Create(qtOcclusion, 2, 'UnlitOccPool'));
+
+    OrthoMVP := OrthoProjection(FloatRectangle(0, 0, 64, 64), -10.0, 10.0);
+
+    UnlitMesh := TCastleRenderUnlitMesh.Create(True);
+    UnlitMesh.ModelViewProjection := OrthoMVP;
+    UnlitMesh.SetIndexes([0, 1, 2, 0, 2, 3]);
+
+    OccUtils := TOcclusionCullingUtilsRenderer.Create;
+    OccUtils.ProjectionMatrix := OrthoMVP;
+    OccUtils.CameraMatrix := TMatrix4.Identity;
+    OccUtils.SceneMatrix := TMatrix4.Identity;
+
+    RealCmd := RealDev.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(RealCmd);
+
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 64, 64),
+      ColorTex, loClear, Vector4(0.0, 0.0, 0.0, 1.0),
+      DepthTex, loClear, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+    RealCmd.ResetQueryPool(QueryPool, 0, 2);
+
+    { Draw 1 on UnlitMesh: Near Red quad at Z = -2.0 covering [8..40] x [8..40] }
+    UnlitMesh.Color := Vector4(1.0, 0.0, 0.0, 1.0);
+    UnlitMesh.SetVertexes([
+      Vector4( 8,  8, -2.0, 1.0),
+      Vector4(40,  8, -2.0, 1.0),
+      Vector4(40, 40, -2.0, 1.0),
+      Vector4( 8, 40, -2.0, 1.0)
+    ], True);
+    UnlitMesh.Render(pmTriangles);
+
+    { Draw 2 on the SAME UnlitMesh in the SAME frame: Far Green quad at Z = -5.0 covering [24..56] x [8..40]
+      - Proves dynamic vertex streaming on TCastleRenderUnlitMesh does NOT overwrite Draw 1's vertices!
+      - Proves 3D depth test (with Vulkan [0,1] depth remap): overlap [24..40] stays Red, [40..56] is Green! }
+    UnlitMesh.Color := Vector4(0.0, 1.0, 0.0, 1.0);
+    UnlitMesh.SetVertexes([
+      Vector4(24,  8, -5.0, 1.0),
+      Vector4(56,  8, -5.0, 1.0),
+      Vector4(56, 40, -5.0, 1.0),
+      Vector4(24, 40, -5.0, 1.0)
+    ], True);
+    UnlitMesh.Render(pmTriangles);
+
+    { Occlusion Query 0: Quad in front of Red quad (Z = -1.0 > -2.0, closer to camera) -> visible (Samples[0] > 0) }
+    RenderContext.ColorChannels := [];
+    RenderContext.DepthBufferUpdate := False;
+    RealCmd.BeginQuery(QueryPool, 0);
+    UnlitMesh.SetVertexes([
+      Vector4(12, 12, -1.0, 1.0),
+      Vector4(28, 12, -1.0, 1.0),
+      Vector4(28, 28, -1.0, 1.0),
+      Vector4(12, 28, -1.0, 1.0)
+    ], True);
+    UnlitMesh.Render(pmTriangles);
+    RealCmd.EndQuery(QueryPool, 0);
+
+    { Occlusion Query 1: Quad behind Red quad (Z = -8.0 < -2.0, further from camera) -> occluded (Samples[1] = 0) }
+    RealCmd.BeginQuery(QueryPool, 1);
+    UnlitMesh.SetVertexes([
+      Vector4(12, 12, -8.0, 1.0),
+      Vector4(28, 12, -8.0, 1.0),
+      Vector4(28, 28, -8.0, 1.0),
+      Vector4(12, 28, -8.0, 1.0)
+    ], True);
+    UnlitMesh.Render(pmTriangles);
+    RealCmd.EndQuery(QueryPool, 1);
+
+    RenderContext.ColorChannels := [0..3];
+    RenderContext.DepthBufferUpdate := True;
+
+    RealCmd.EndRendering;
+    RealDev.EndFrameAndPresent;
+
+    Samples[0] := 0;
+    Samples[1] := High(UInt64);
+    AssertTrue('Occlusion query GetResults must succeed',
+      QueryPool.GetResults(0, 2, Samples, True));
+    AssertEquals('Front 16x16 unlit mesh occlusion query must pass 256 samples',
+      256, Integer(Samples[0]));
+    AssertEquals('Occluded 16x16 unlit mesh behind Z=-2.0 quad must pass 0 samples',
+      0, Integer(Samples[1]));
+
+    Readback := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 64, 64));
+
+    { Non-overlapping left part of Red quad (16, 24) -> Red (255, 0, 0) }
+    AssertEquals('Left Red quad (16,24) R must be 255', 255, Integer(Readback.PixelPtr(16, 24)^.X));
+    AssertEquals('Left Red quad (16,24) G must be 0', 0, Integer(Readback.PixelPtr(16, 24)^.Y));
+
+    { Overlapping region [24..40] at (32, 24): Near Red (Z=-2) must occlude Far Green (Z=-5)! }
+    AssertEquals('Overlap (32,24) R must remain 255 (Near Red occludes Far Green)',
+      255, Integer(Readback.PixelPtr(32, 24)^.X));
+    AssertEquals('Overlap (32,24) G must be 0',
+      0, Integer(Readback.PixelPtr(32, 24)^.Y));
+
+    { Non-overlapping right part of Green quad (48, 24) -> Green (0, 255, 0) }
+    AssertEquals('Right Green quad (48,24) R must be 0', 0, Integer(Readback.PixelPtr(48, 24)^.X));
+    AssertEquals('Right Green quad (48,24) G must be 255', 255, Integer(Readback.PixelPtr(48, 24)^.Y));
+  finally
+    FreeAndNil(Readback);
+    FreeAndNil(OccUtils);
+    FreeAndNil(UnlitMesh);
+    FreeAndNil(QueryPool);
+    FreeAndNil(DepthTex);
+    FreeAndNil(ColorTex);
+    FreeAndNil(Container);
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(RealDev);
   end;
 end;
 
