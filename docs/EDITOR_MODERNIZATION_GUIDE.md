@@ -2933,6 +2933,31 @@ Tod.DayLengthRealSeconds := 600.0;
 
 ---
 
+## 66Y. DataTables, Hierarchical Gameplay Tags & Progression Curve Studio (Phase 300)
+
+Castle Game Engine provides schema-typed gameplay spreadsheets, strict dot-segmented hierarchical Gameplay Tags, and mathematical progression curves matching Unreal Engine 6.0's `UDataTable`, `FGameplayTag`, and `UCurveTable`:
+
+1. **Typed DataTables & Gameplay Tags (`src/scene/castledatatable.pas`)**:
+   - `TCastleDataTable` (`TCastleComponent`) stores typed columns (`dctFloat`, `dctInt`, `dctBool`, `dctString`, `dctTag`) and named rows in diff-friendly `TableJson`, supports RFC-4180 CSV import/export (`ExportCsv` / `ImportCsv`), evaluates 4 progression curves (`bckLinear`, `bckExponential`, `bckPolynomial`, `bckDiminishingReturns`), validates cell types (`ValidateSchemaCells`), and applies rows directly onto component RTTI properties (`ApplyRowToComponent`).
+   - `TCastleGameplayTagBehavior` (`TCastleBehavior`) attaches hierarchical tags (`Enemy.Boss.Dragon, Element.Fire`) to transforms with strict dot-prefix / wildcard matching (`HasTag('Enemy.Boss.*')`, `HasAllTags`, `HasAnyTags`).
+2. **DataTable & Balance Studio (`TDataTableStudioForm` & `TDataTableStudioHelper`)**:
+   - Open via the top-bar **`DataTables`** button, Hierarchy context menu, or **`Design -> DataTables, Gameplay Tags & Balance Curve Studio...`**.
+   - Provides inline `TStringGrid` editing, 1-click RPG Enemy / Weapon / XP starter templates, live `TPaintBox` progression curve plotting, tag queries, and CSV/Markdown export.
+
+### Example Usage (Pascal API)
+```pascal
+DT := TDataTableStudioHelper.CreateDataTableInDesign(DesignRoot, DesignOwner, 0);
+BossKeys := DT.FindRowsMatchingTag('GameplayTag', 'Enemy.Boss.*');
+DT.ApplyRowToComponent('Elder_Dragon', BossLiving, DesignOwner);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Custom Components & Serialization](https://castle-engine.io/custom_components) · [UE Data Driven Gameplay Elements](https://dev.epicgames.com/documentation/en-us/unreal-engine/data-driven-gameplay-elements-in-unreal-engine) · [UE Gameplay Tags](https://dev.epicgames.com/documentation/en-us/unreal-engine/using-gameplay-tags-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Data-Driven Entities & Behaviors (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Component Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [CGE Visual Editor](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3020,4 +3045,5 @@ In addition, Horizon 2 & Horizon 3 editor subsystems include dedicated automated
 - **[`tests/code/testcases/testtoolsplinestudio.pas`](../tests/code/testcases/testtoolsplinestudio.pas) (`TTestToolSplineStudio` — 2 tests)**: Verifies `TCastleSplinePath` uneven-knot arc-length LUT reparameterization (`EvaluateLocalAtDistance`), banked `RollDeg` & `WidthScale` Hermite interpolation, `smRoadRibbon`/`smCableTube` `csTransient` mesh generation & non-baking across `ComponentToString` JSON roundtrips, `ProjectControlPointsToWorld` downward floor raycast snapping, `PopulateInstancesAlongSpline` idempotent post instancing, and `TCastleSplineFollowerBehavior` `sflmPingPong` bounce motion (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldecalstudio.pas`](../tests/code/testcases/testtooldecalstudio.pas) (`TTestToolDecalStudio` — 2 tests)**: Verifies `TDecalStudioHelper.StampDecalAlongRay` floor alignment & `128`-triangle conformal projection, `NormalAngleCutoffDeg` `45°` vs. `80°` grazing cliff rejection/acceptance on a `70°` slope, `ComponentToString` JSON roundtrips without `csTransient` bloat, procedural preset RGBA evaluation (`dpPuddleWet`, `dpHazardStripe`, `dpMagicRune`), `SortOrder` sorting, and sky-floating empty-projection warnings (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooltimeofdaystudio.pas`](../tests/code/testcases/testtooltimeofdaystudio.pas) (`TTestToolTimeOfDayStudio` — 2 tests)**: Verifies `TTimeOfDayStudioHelper.EnsureTimeOfDayRigInDesign` automatic `SunLight`/`SkyBackground`/`AtmosphereFog`/`TCastleViewport` wiring, exact summer-solstice solar noon (`78.44°`, `180°` South) / dawn / dusk / lunar midnight ephemeris, `AdvanceTimeSeconds` 24h wraparound, `ComponentToString` JSON roundtrips, `wpRainStorm` cloud/fog/wind attenuation, and `wpBloodMoon` crimson lunar lighting (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtooldatatablestudio.pas`](../tests/code/testcases/testtooldatatablestudio.pas) (`TTestToolDataTableStudio` — 2 tests)**: Verifies `TCastleDataTable` typed cell accessors, strict dot-boundary `Enemy.Boss.*` Gameplay Tag queries (rejecting `Enemy.Bossy`), quoted RFC-4180 CSV & `ComponentToString` JSON roundtrips, all 4 `TBalanceCurveKind` progression formulas, `ApplyRowToComponent` RTTI binding onto `TCastleLiving`, and `ValidateSchemaCells` type diagnostics (`0 unfreed memory blocks`).
 

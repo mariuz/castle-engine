@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -764,6 +764,8 @@ type
       MenuTreeViewItemDecalStudio: TMenuItem;
       ButtonTimeOfDayStudio: TSpeedButton;
       MenuTreeViewItemTimeOfDayStudio: TMenuItem;
+      ButtonDataTableStudio: TSpeedButton;
+      MenuTreeViewItemDataTableStudio: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1225,6 +1227,8 @@ type
     procedure MenuTreeViewItemDecalStudioClick(Sender: TObject);
     procedure ButtonTimeOfDayStudioClick(Sender: TObject);
     procedure MenuTreeViewItemTimeOfDayStudioClick(Sender: TObject);
+    procedure ButtonDataTableStudioClick(Sender: TObject);
+    procedure MenuTreeViewItemDataTableStudioClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2675,6 +2679,7 @@ type
     procedure ShowSplineStudioDialog;
     procedure ShowDecalStudioDialog;
     procedure ShowTimeOfDayStudioDialog;
+    procedure ShowDataTableStudioDialog;
   end;
 
 implementation
@@ -2695,7 +2700,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -6681,6 +6686,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonTimeOfDayStudio,
       PanelMiddleTop.GetControlIndex(ButtonDecalStudio) + 1);
 
+  ButtonDataTableStudio := TSpeedButton.Create(Self);
+  ButtonDataTableStudio.Caption := 'DataTables';
+  ButtonDataTableStudio.Hint := 'Open DataTables, Hierarchical Gameplay Tags & Progression Curve Studio.' + NL +
+    'Edit typed balance spreadsheets, import/export RFC-4180 CSV, query Enemy.Boss.* tags, and plot progression curves.';
+  ButtonDataTableStudio.ShowHint := true;
+  ButtonDataTableStudio.AutoSize := true;
+  ButtonDataTableStudio.Constraints.MinHeight := 33;
+  ButtonDataTableStudio.Constraints.MinWidth := 74;
+  ButtonDataTableStudio.BorderSpacing.Left := 2;
+  ButtonDataTableStudio.OnClick := @ButtonDataTableStudioClick;
+  ButtonDataTableStudio.Parent := PanelMiddleTop;
+  if ButtonTimeOfDayStudio.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonDataTableStudio,
+      PanelMiddleTop.GetControlIndex(ButtonTimeOfDayStudio) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -9600,6 +9620,11 @@ begin
   MenuTreeViewItemTimeOfDayStudio.Caption := 'Dynamic Time-of-Day, Solar Ephemeris && Weather Studio...';
   MenuTreeViewItemTimeOfDayStudio.OnClick := @MenuTreeViewItemTimeOfDayStudioClick;
   MenuTreeView.Items.Add(MenuTreeViewItemTimeOfDayStudio);
+
+  MenuTreeViewItemDataTableStudio := TMenuItem.Create(Self);
+  MenuTreeViewItemDataTableStudio.Caption := 'DataTables, Gameplay Tags && Balance Curve Studio...';
+  MenuTreeViewItemDataTableStudio.OnClick := @MenuTreeViewItemDataTableStudioClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemDataTableStudio);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -14814,6 +14839,10 @@ var
         Suffix := Suffix + ' ' + TCastleDecalProjector(NodeObj).DecalSummaryBadge
       else if NodeObj is TCastleTimeOfDayWeather then
         Suffix := Suffix + ' ' + TCastleTimeOfDayWeather(NodeObj).TimeOfDaySummaryBadge
+      else if NodeObj is TCastleDataTable then
+        Suffix := Suffix + ' ' + TCastleDataTable(NodeObj).DataTableSummaryBadge
+      else if NodeObj is TCastleGameplayTagBehavior then
+        Suffix := Suffix + ' ' + TCastleGameplayTagBehavior(NodeObj).TagSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -54374,6 +54403,45 @@ end;
 procedure TDesignFrame.MenuTreeViewItemTimeOfDayStudioClick(Sender: TObject);
 begin
   ShowTimeOfDayStudioDialog;
+end;
+
+procedure TDesignFrame.ShowDataTableStudioDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  InitComp: TComponent;
+  Dlg: TDataTableStudioForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  InitComp := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount > 0 then
+      InitComp := Selected[0];
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  Dlg := TDataTableStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner, InitComp,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonDataTableStudioClick(Sender: TObject);
+begin
+  ShowDataTableStudioDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemDataTableStudioClick(Sender: TObject);
+begin
+  ShowDataTableStudioDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

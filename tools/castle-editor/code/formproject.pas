@@ -613,6 +613,7 @@ type
       MenuItemSplineStudio: TMenuItem;
       MenuItemDecalStudio: TMenuItem;
       MenuItemTimeOfDayStudio: TMenuItem;
+      MenuItemDataTableStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -646,6 +647,7 @@ type
     procedure MenuItemSplineStudioClick(Sender: TObject);
     procedure MenuItemDecalStudioClick(Sender: TObject);
     procedure MenuItemTimeOfDayStudioClick(Sender: TObject);
+    procedure MenuItemDataTableStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2336,6 +2338,11 @@ begin
   MenuItemTimeOfDayStudio.OnClick := @MenuItemTimeOfDayStudioClick;
   MenuItemDesign.Add(MenuItemTimeOfDayStudio);
 
+  MenuItemDataTableStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemDataTableStudio.Caption := 'DataTables, Gameplay Tags & Balance Curve Studio...';
+  MenuItemDataTableStudio.OnClick := @MenuItemDataTableStudioClick;
+  MenuItemDesign.Add(MenuItemDataTableStudio);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -3024,6 +3031,8 @@ begin
     MenuItemDecalStudio.Enabled := Design <> nil;
   if MenuItemTimeOfDayStudio <> nil then
     MenuItemTimeOfDayStudio.Enabled := Design <> nil;
+  if MenuItemDataTableStudio <> nil then
+    MenuItemDataTableStudio.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5385,6 +5394,12 @@ procedure TProjectForm.MenuItemTimeOfDayStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowTimeOfDayStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemDataTableStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowDataTableStudioDialog;
 end;
 
 initialization
