@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -756,6 +756,8 @@ type
       MenuTreeViewItemLocalization: TMenuItem;
       ButtonResponsiveSim: TSpeedButton;
       MenuTreeViewItemResponsiveSim: TMenuItem;
+      ButtonVariantManager: TSpeedButton;
+      MenuTreeViewItemVariantManager: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1209,6 +1211,8 @@ type
     procedure MenuTreeViewItemLocalizationClick(Sender: TObject);
     procedure ButtonResponsiveSimClick(Sender: TObject);
     procedure MenuTreeViewItemResponsiveSimClick(Sender: TObject);
+    procedure ButtonVariantManagerClick(Sender: TObject);
+    procedure MenuTreeViewItemVariantManagerClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2651,6 +2655,9 @@ type
 
     { Multi-Resolution Responsive UI Safe-Area, Notch & Touch-Target Simulator (Phase 295). }
     procedure ShowResponsiveSimDialog;
+
+    { Variant Manager / Scene Configuration Sets & Live Preset Switcher (Phase 296). }
+    procedure ShowVariantManagerDialog;
   end;
 
 implementation
@@ -2671,7 +2678,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -6405,6 +6412,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonResponsiveSim,
       PanelMiddleTop.GetControlIndex(ButtonLocalization) + 1);
 
+  ButtonVariantManager := TSpeedButton.Create(Self);
+  ButtonVariantManager.Caption := 'Variants';
+  ButtonVariantManager.Hint := 'Open Variant Manager / Scene Configuration Sets & Live Preset Switcher.' + NL +
+    'Capture live property differences into named Variant Sets (Lighting, Quality, Props) and switch atomically in 1 click.';
+  ButtonVariantManager.ShowHint := true;
+  ButtonVariantManager.AutoSize := true;
+  ButtonVariantManager.Constraints.MinHeight := 33;
+  ButtonVariantManager.Constraints.MinWidth := 66;
+  ButtonVariantManager.BorderSpacing.Left := 2;
+  ButtonVariantManager.OnClick := @ButtonVariantManagerClick;
+  ButtonVariantManager.Parent := PanelMiddleTop;
+  if ButtonResponsiveSim.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonVariantManager,
+      PanelMiddleTop.GetControlIndex(ButtonResponsiveSim) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -9304,6 +9326,11 @@ begin
   MenuTreeViewItemResponsiveSim.Caption := 'Multi-Resolution Responsive UI && Safe-Area Simulator...';
   MenuTreeViewItemResponsiveSim.OnClick := @MenuTreeViewItemResponsiveSimClick;
   MenuTreeView.Items.Add(MenuTreeViewItemResponsiveSim);
+
+  MenuTreeViewItemVariantManager := TMenuItem.Create(Self);
+  MenuTreeViewItemVariantManager.Caption := 'Variant Manager && Scene Configuration Sets...';
+  MenuTreeViewItemVariantManager.OnClick := @MenuTreeViewItemVariantManagerClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemVariantManager);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -14508,6 +14535,8 @@ var
         Suffix := Suffix + ' ' + TCastleLocalizationManager(NodeObj).LocalizationSummaryBadge
       else if NodeObj is TCastleLocalizedBehavior then
         Suffix := Suffix + ' ' + TCastleLocalizedBehavior(NodeObj).LocalizedSummaryBadge
+      else if NodeObj is TCastleVariantSetManager then
+        Suffix := Suffix + ' ' + TCastleVariantSetManager(NodeObj).VariantManagerSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -53895,6 +53924,45 @@ end;
 procedure TDesignFrame.MenuTreeViewItemResponsiveSimClick(Sender: TObject);
 begin
   ShowResponsiveSimDialog;
+end;
+
+procedure TDesignFrame.ShowVariantManagerDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  InitComp: TComponent;
+  Dlg: TVariantManagerForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  InitComp := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount > 0 then
+      InitComp := Selected[0];
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  Dlg := TVariantManagerForm.CreateStudio(Self, FDesignRoot, DesignOwner, InitComp,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonVariantManagerClick(Sender: TObject);
+begin
+  ShowVariantManagerDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemVariantManagerClick(Sender: TObject);
+begin
+  ShowVariantManagerDialog;
 end;
 
 initialization

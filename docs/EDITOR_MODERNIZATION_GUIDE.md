@@ -2827,6 +2827,33 @@ Markdown := TResponsiveUiSimulator.FormatResponsiveAuditMarkdown(DesignRoot);
 
 ---
 
+## 66U. Variant Manager / Scene Configuration Sets & Live Preset Switcher (Phase 296)
+
+Castle Game Engine provides an atomic multi-component scene configuration manager and live baseline-vs-edited diff capturer matching Unreal Engine 5.9/6.0's Variant Manager:
+
+1. **Runtime & Design-Time Variant Set Manager (`src/scene/castlevariantset.pas`)**:
+   - `TCastleVariantSetManager` (`TCastleComponent`) stores named `TVariantSetGroup` collections (`Lighting: Day / Sunset / Night`, `Props: Intact / Ruined`, `Quality: Mobile / Desktop`) serialized in diff-friendly JSON (`VariantSetsJson`).
+   - Atomically applies multi-component dotted RTTI & persistent-vector property bindings (`Exists`, `TranslationPersistent.X/Y/Z`, `ScalePersistent.X/Y/Z`, `Intensity`, `ColorPersistent.Red/Green/Blue`, `Caption`, `Url`, `ExposureEV`) via `ApplyVariant` and `ApplyAllActiveVariants`.
+2. **Variant Manager Studio & Auto-Diff Capture (`TVariantManagerForm` & `TVariantManagerHelper`)**:
+   - Open via the top-bar **`Variants`** button, Hierarchy context menu, or **`Design -> Variant Manager & Scene Configuration Sets...`**.
+   - Supports 2-step **`1. Snapshot Baseline` -> `2. Capture Diff -> Variant`** auto-recording (`CaptureHierarchyDifferenceIntoVariant`), 1-click component snapshotting, live viewport variant switching, and Markdown configuration matrix export.
+
+### Example Usage (Pascal API)
+```pascal
+Mgr := TVariantManagerHelper.EnsureManagerInDesign(DesignRoot, DesignOwner);
+BaselineJson := ComponentToString(DesignRoot);
+SunLight.Intensity := 0.18;
+TVariantManagerHelper.CaptureHierarchyDifferenceIntoVariant(BaselineJson, DesignRoot, Mgr, 'Lighting', 'Night');
+Mgr.ApplyVariant(DesignRoot, 'Lighting', 'Night');
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Custom Components & Serialization](https://castle-engine.io/custom_components) · [CGE Visual Editor Manual](https://castle-engine.io/manual_editor.php) · [UE Variant Manager](https://dev.epicgames.com/documentation/en-us/unreal-engine/variant-manager-overview-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Configurable Scenes & UIs (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [UE Variant Manager Overview](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/9988d310-63cc-49cd-8347-609ef7f2cc2a/variant-manager-ui.png)
+- **Screenshots:** [CGE Inspector & Scene Hierarchy](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [Variant Manager Studio](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/9988d310-63cc-49cd-8347-609ef7f2cc2a/variant-manager-ui.png)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2892,7 +2919,7 @@ fpc -Mobjfpc -Sh -Ci -Cr -Co -gl -gh -dTEXT_RUNNER @castle-fpc.cfg \
 ./tests/castle_tester_standalone --console --filter=TTestCastleTransformManipulate*
 ```
 
-In addition, Horizon 2 editor subsystems include dedicated automated test suites:
+In addition, Horizon 2 & Horizon 3 editor subsystems include dedicated automated test suites:
 - **[`tests/code/testcases/testtoolmcpserver.pas`](../tests/code/testcases/testtoolmcpserver.pas) (`TTestToolMcpServer` — 3 tests)**: Verifies JSON-RPC 2.0 `initialize`, `ping`, `tools/list` (all 12 MCP tools), Bearer token authentication, all 4 `TMcpAutonomyMode` tiers (`Disabled`, `ReadOnly`, `EditWithUndo`, `FullControl`), live RTTI property inspection/mutation, layout actions (`align_y`, `snap_to_grid`), Base64 PNG viewport screenshot encoding, and live localhost multithreaded HTTP roundtrip (`GET /health` + `POST /mcp` with `CheckSynchronize` and `0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldesignsandboxdiff.pas`](../tests/code/testcases/testtooldesignsandboxdiff.pas) (`TTestToolDesignSandboxDiff` — 3 tests)**: Verifies `TDesignSandboxManager` creation, filtering, renaming, JSON persistence, and live instantiation, `TDesignDiffEngine` detection of `[+ Added]`, `[- Removed]`, and `[~ Modified]` components + subcomponent properties (`TranslationPersistent.X/Y/Z`, `SizePersistent.X/Y/Z`, `Caption`, `FontSize`), and `RevertSelectedToBase` selective restoration/deletion of individual properties and components (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testcastleterrain.pas`](../tests/code/testcases/testcastleterrain.pas) (`TTestCastleTerrain` — 4 tests)**: Verifies `TCastleTerrainImage` Raise/Lower/Smooth/Flatten sculpting with dynamic `MinLevel`/`MaxLevel` expansion + renormalization, `RayCastWorld`, non-destructive `EnsureEditableHeightLayer` `TCastleTerrainCombine` (`opAdd`) wrapping over `TCastleTerrainNoise`, `GenerateSplatmapFromProceduralLayers`, `PaintSplatmapAtWorldPoint` $R+G+B+A = 255$ partition-of-unity normalization, and PNG heightmap/splatmap save & reload roundtrips (`0 unfreed memory blocks`).
@@ -2910,4 +2937,5 @@ In addition, Horizon 2 editor subsystems include dedicated automated test suites
 - **[`tests/code/testcases/testtoolpostprocessstudio.pas`](../tests/code/testcases/testtoolpostprocessstudio.pas) (`TTestToolPostProcessStudio` — 2 tests)**: Verifies `TCastlePostProcessVolume` global vs. bounded Hermite `CoreRadius`/`BlendRadius` falloff, `Priority` override sorting, `ComponentToString` JSON roundtrips, all 6 `TCastlePostProcessPreset` look presets, `TCastlePostProcessStack` live X3D `TScreenEffectNode` attachment/enablement on `TCastleViewport`, `EvaluateColorGradeCpuPreview`, and GLSL/Markdown export (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoollocalization.pas`](../tests/code/testcases/testtoollocalization.pas) (`TTestToolLocalization` — 2 tests)**: Verifies 2D `TranslateProperties` + 3D `TCastleLocalizedBehavior` string extraction, live `ApplyLocaleToHierarchy` switching with `'en'` fallback, RFC-4180 CSV export/import roundtrips, `ComponentToString` JSON roundtrips, `GeneratePseudoLocalizedText` `{player}`/`%d`/`%s` token preservation, and fixed-width vs. `AutoSize` UI overflow auditing (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolresponsivesim.pas`](../tests/code/testcases/testtoolresponsivesim.pas) (`TTestToolResponsiveSim` — 2 tests)**: Verifies clean anchored HUD layouts across all 5 device aspect/notch profiles (`16:9`, `21:9`, `16:10`, `19.5:9` Mobile Notch, `4:3` Tablet) and detects `rikOffScreenClipped`, `rikUnsafeNotchOrHomeBar` (`132 px` notch intrusion), `rikSiblingOverlap`, and `rikUndersizedTouchTarget` (`< 44 px`) violations (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolvariantmanager.pas`](../tests/code/testcases/testtoolvariantmanager.pas) (`TTestToolVariantManager` — 2 tests)**: Verifies `TCastleVariantSetManager` atomic multi-component dotted RTTI & persistent-vector (`ColorPersistent`, `TranslationPersistent`, `ScalePersistent`, `Exists`, `Intensity`, `Caption`) variant switching across `Lighting` and `Props` sets, `ComponentToString` JSON roundtrips, `CaptureHierarchyDifferenceIntoVariant` auto-diff recording, and Markdown matrix export (`0 unfreed memory blocks`).
 

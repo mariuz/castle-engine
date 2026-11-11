@@ -609,6 +609,7 @@ type
       MenuItemPostProcess: TMenuItem;
       MenuItemLocalization: TMenuItem;
       MenuItemResponsiveSim: TMenuItem;
+      MenuItemVariantManager: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -638,6 +639,7 @@ type
     procedure MenuItemPostProcessClick(Sender: TObject);
     procedure MenuItemLocalizationClick(Sender: TObject);
     procedure MenuItemResponsiveSimClick(Sender: TObject);
+    procedure MenuItemVariantManagerClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2308,6 +2310,11 @@ begin
   MenuItemResponsiveSim.OnClick := @MenuItemResponsiveSimClick;
   MenuItemDesign.Add(MenuItemResponsiveSim);
 
+  MenuItemVariantManager := TMenuItem.Create(MenuItemDesign);
+  MenuItemVariantManager.Caption := 'Variant Manager & Scene Configuration Sets...';
+  MenuItemVariantManager.OnClick := @MenuItemVariantManagerClick;
+  MenuItemDesign.Add(MenuItemVariantManager);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -2988,6 +2995,8 @@ begin
     MenuItemLocalization.Enabled := Design <> nil;
   if MenuItemResponsiveSim <> nil then
     MenuItemResponsiveSim.Enabled := Design <> nil;
+  if MenuItemVariantManager <> nil then
+    MenuItemVariantManager.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5320,6 +5329,12 @@ procedure TProjectForm.MenuItemResponsiveSimClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowResponsiveSimDialog;
+end;
+
+procedure TProjectForm.MenuItemVariantManagerClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowVariantManagerDialog;
 end;
 
 initialization

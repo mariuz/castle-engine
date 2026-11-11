@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="63">
+    <Units Count="65">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -397,6 +397,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormResponsiveSim"/>
       </Unit62>
+      <Unit63>
+        <Filename Value="../common-code/toolvariantmanager.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolVariantManager"/>
+      </Unit63>
+      <Unit64>
+        <Filename Value="code/formvariantmanager.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormVariantManager"/>
+      </Unit64>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

@@ -121,6 +121,7 @@ uses
   TestToolPostProcessStudio,
   TestToolLocalization,
   TestToolResponsiveSim,
+  TestToolVariantManager,
   TestCastleVulkanRHI;
 
 implementation
