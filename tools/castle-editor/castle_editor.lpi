@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="57">
+    <Units Count="59">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -367,6 +367,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormAssetGraph"/>
       </Unit56>
+      <Unit57>
+        <Filename Value="../common-code/toolpostprocessstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolPostProcessStudio"/>
+      </Unit57>
+      <Unit58>
+        <Filename Value="code/formpostprocessstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormPostProcessStudio"/>
+      </Unit58>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

@@ -118,6 +118,7 @@ uses
   TestToolNavNetwork,
   TestToolAudioMixer,
   TestToolAssetGraph,
+  TestToolPostProcessStudio,
   TestCastleVulkanRHI;
 
 implementation

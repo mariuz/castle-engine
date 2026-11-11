@@ -2749,6 +2749,33 @@ Markdown := TAssetDependencyAnalyzer.FormatAssetGraphMarkdown(Report);
 
 ---
 
+## 66R. Priority-Blended Post-Processing Volumes & Cinematic Look-Dev Studio (Phase 293)
+
+Castle Game Engine provides priority-sorted global and spatially bounded 3D post-processing volumes driving a live X3D `TScreenEffectNode` GLSL pipeline, matching Unreal Engine 5.9/6.0's `APostProcessVolume`:
+
+1. **Runtime Post-Process Volume & ScreenEffect Stack (`src/scene/castlepostprocessvolume.pas`)**:
+   - `TCastlePostProcessVolume` (`TCastleTransform`) supports global (`IsUnbound = true`) and bounded (`CoreRadius` + Hermite `BlendRadius` falloff) observer weighting, integer `Priority` ordering, 6 built-in presets (`pppNeutral`, `pppWarmSunset`, `pppSciFiCold`, `pppNoirHighContrast`, `pppHorrorVignette`, `pppVintageSepia`), and full color-grading controls (`ExposureEV`, Narkowicz `AcesTonemapMix`, `Contrast`, `Saturation`, `VignetteIntensity`, radial `ChromaticAberrationPx`, and RGB `Tint`).
+   - `TCastlePostProcessStack` (`TCastleComponent`) evaluates priority-sorted volumes via `EvaluateBlendedWorldSettings` and updates custom `TSFFloat`/`TSFVec3f` uniforms on a `TScreenEffectNode` attached to `TCastleViewport` in $O(1)$ without recompiling GLSL.
+2. **Cinematic Look-Dev Studio (`TPostProcessStudioForm` & `TPostProcessStudioHelper`)**:
+   - Open via the top-bar **`Look-Dev`** button, Hierarchy context menu, or **`Design -> Post-Processing Volumes & Look-Dev Studio...`**.
+   - Provides 1-click preset buttons, a split-screen **`BEFORE / AFTER`** HDR color-grading preview canvas, 3D viewport gold/magenta blend-radius rings, and Markdown + GLSL export.
+
+### Example Usage (Pascal API)
+```pascal
+Stack := TPostProcessStudioHelper.EnsureStackInDesign(DesignRoot, DesignOwner);
+GlobalVol := TPostProcessStudioHelper.CreateVolumeInDesign(DesignRoot, DesignOwner, pppWarmSunset, true, TVector3.Zero);
+CaveVol := TPostProcessStudioHelper.CreateVolumeInDesign(DesignRoot, DesignOwner, pppHorrorVignette, false, Vector3(20, 0, 0));
+CaveVol.Priority := 10;
+Stack.ApplyToViewport(DesignRoot, MyViewport, MyViewport.Camera.WorldTranslation);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Screen Effects Manual](https://castle-engine.io/x3d_extensions_screen_effects.php) · [CGE Shaders Manual](https://castle-engine.io/shaders) · [UE Post Process Effects](https://dev.epicgames.com/documentation/en-us/unreal-engine/post-process-effects-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Shaders & Screen Effects (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [UE Post-Process Volume Overview](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/eb11555c-8854-4f6c-9d9c-00ef453118b0/post-process-effects.png)
+- **Screenshots:** [CGE Screen Effects Showcase](https://castle-engine.io/images/original_size/screen_effects_edge_detect.png) · [Priority-Blended Post-Process Volumes](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/eb11555c-8854-4f6c-9d9c-00ef453118b0/post-process-effects.png)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2829,4 +2856,5 @@ In addition, Horizon 2 editor subsystems include dedicated automated test suites
 - **[`tests/code/testcases/testtoolnavnetwork.pas`](../tests/code/testcases/testtoolnavnetwork.pas) (`TTestToolNavNetwork` — 2 tests)**: Verifies `TCastleNavGrid.BakeObstaclesFromWorld` (`NavWalkableIgnoreTag` floor exclusion + `AgentRadius` wall inflation), octile A* `FindPathWorld` obstacle routing around solid barriers, `BlockedCellsData` JSON roundtrips, `TCastleWaypointNode` circular patrol loops with `WaitTimeSec` dwell timers, and `TCastlePatrolAgentBehavior` FOV sight cone vs. 360° hearing sphere `CanPerceiveTarget` queries (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolaudiomixer.pas`](../tests/code/testcases/testtoolaudiomixer.pas) (`TTestToolAudioMixer` — 2 tests)**: Verifies `TCastleAudioBusMixer` 5-bus gain routing, `Solo`/`Mute` isolation, sidechain `Voice` -> `Music`/`Ambient` ducking, `ComponentToString` JSON roundtrips, `TCastleAudioZone` Hermite `InnerRadius`/`OuterRadius` crossfades, underwater pitch muffling, unrouted `TCastleSoundSource` warnings, and Markdown export (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolassetgraph.pas`](../tests/code/testcases/testtoolassetgraph.pas) (`TTestToolAssetGraph` — 2 tests)**: Verifies multi-hop bidirectional `Referencers <-> Dependencies` indexing across `.castle-user-interface -> .castle-transform -> .gltf -> .png`, orphan asset & byte-size detection, Mermaid `flowchart LR` export, moved-asset broken `castle-data:/` URL auto-repair (`RepairBrokenUrls`), and non-destructive `.castle-orphan-trash/` quarantine (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolpostprocessstudio.pas`](../tests/code/testcases/testtoolpostprocessstudio.pas) (`TTestToolPostProcessStudio` — 2 tests)**: Verifies `TCastlePostProcessVolume` global vs. bounded Hermite `CoreRadius`/`BlendRadius` falloff, `Priority` override sorting, `ComponentToString` JSON roundtrips, all 6 `TCastlePostProcessPreset` look presets, `TCastlePostProcessStack` live X3D `TScreenEffectNode` attachment/enablement on `TCastleViewport`, `EvaluateColorGradeCpuPreview`, and GLSL/Markdown export (`0 unfreed memory blocks`).
 

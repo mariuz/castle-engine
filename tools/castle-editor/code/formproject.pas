@@ -606,6 +606,7 @@ type
       MenuItemNavNetwork: TMenuItem;
       MenuItemAudioMixer: TMenuItem;
       MenuItemAssetGraph: TMenuItem;
+      MenuItemPostProcess: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -632,6 +633,7 @@ type
     procedure MenuItemNavNetworkClick(Sender: TObject);
     procedure MenuItemAudioMixerClick(Sender: TObject);
     procedure MenuItemAssetGraphClick(Sender: TObject);
+    procedure MenuItemPostProcessClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2287,6 +2289,11 @@ begin
   MenuItemAssetGraph.OnClick := @MenuItemAssetGraphClick;
   MenuItemDesign.Add(MenuItemAssetGraph);
 
+  MenuItemPostProcess := TMenuItem.Create(MenuItemDesign);
+  MenuItemPostProcess.Caption := 'Post-Processing Volumes & Look-Dev Studio...';
+  MenuItemPostProcess.OnClick := @MenuItemPostProcessClick;
+  MenuItemDesign.Add(MenuItemPostProcess);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -2961,6 +2968,8 @@ begin
     MenuItemAudioMixer.Enabled := Design <> nil;
   if MenuItemAssetGraph <> nil then
     MenuItemAssetGraph.Enabled := (Design <> nil) or (ProjectPath <> '');
+  if MenuItemPostProcess <> nil then
+    MenuItemPostProcess.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5275,6 +5284,12 @@ begin
       FreeAndNil(Dlg);
     end;
   end;
+end;
+
+procedure TProjectForm.MenuItemPostProcessClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowPostProcessStudioDialog;
 end;
 
 initialization

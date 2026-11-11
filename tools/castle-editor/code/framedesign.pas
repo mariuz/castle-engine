@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -750,6 +750,8 @@ type
       MenuTreeViewItemAudioMixer: TMenuItem;
       ButtonAssetGraph: TSpeedButton;
       MenuTreeViewItemAssetGraph: TMenuItem;
+      ButtonPostProcess: TSpeedButton;
+      MenuTreeViewItemPostProcess: TMenuItem;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
       FCopiedComponentPropsClassName: String;
@@ -1195,6 +1197,8 @@ type
     procedure MenuTreeViewItemAudioMixerClick(Sender: TObject);
     procedure ButtonAssetGraphClick(Sender: TObject);
     procedure MenuTreeViewItemAssetGraphClick(Sender: TObject);
+    procedure ButtonPostProcessClick(Sender: TObject);
+    procedure MenuTreeViewItemPostProcessClick(Sender: TObject);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
     function NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
@@ -2627,6 +2631,9 @@ type
 
     { Bidirectional Asset Reference Graph, Orphan Sweeper & Broken-URL Auto-Repair (Phase 292). }
     procedure ShowAssetGraphDialog;
+
+    { Priority-Blended Post-Processing Volumes & Cinematic Look-Dev Studio (Phase 293). }
+    procedure ShowPostProcessStudioDialog;
   end;
 
 implementation
@@ -2647,7 +2654,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -5544,6 +5551,68 @@ procedure TDesignFrame.TDesignerLayer.Render;
     end;
   end;
 
+  procedure RenderPostProcessVolumesOverlay(const AVp: TCastleViewport);
+  const
+    RingSegs = 28;
+  var
+    PpSum: TPostProcessStudioSummary;
+    CamP, CamD, CamU, VCenter, P1, P2: TVector3;
+    SegPts: array [0..1] of TVector2;
+    V: TCastlePostProcessVolume;
+    Ang1, Ang2, RCore, ROuter: Single;
+    I, S: Integer;
+  begin
+    if Frame.FDesignRoot = nil then
+      Exit;
+    AVp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    PpSum := TPostProcessStudioHelper.ScanVolumesAndBlend(Frame.FDesignRoot, CamP);
+    for I := 0 to High(PpSum.Volumes) do
+    begin
+      V := PpSum.Volumes[I];
+      if (V = nil) or V.IsUnbound or (not V.Exists) or (not V.VolumeEnabled) or
+         (not V.ShowVolumeInViewport) then
+        Continue;
+      VCenter := V.WorldTranslation;
+      RCore := V.CoreRadius;
+      ROuter := V.CoreRadius + V.BlendRadius;
+      if RCore > 0.05 then
+        for S := 0 to RingSegs - 1 do
+        begin
+          Ang1 := (2.0 * Pi * S) / RingSegs;
+          Ang2 := (2.0 * Pi * (S + 1)) / RingSegs;
+          P1 := Vector3(VCenter.X + Cos(Ang1) * RCore, VCenter.Y, VCenter.Z + Sin(Ang1) * RCore);
+          P2 := Vector3(VCenter.X + Cos(Ang2) * RCore, VCenter.Y, VCenter.Z + Sin(Ang2) * RCore);
+          if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+             ((TVector3.DotProduct(P1 - CamP, CamD) > 0.1) and
+              (TVector3.DotProduct(P2 - CamP, CamD) > 0.1)) then
+          begin
+            SegPts[0] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(P1));
+            SegPts[1] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(P2));
+            DrawPrimitive2D(pmLines, SegPts, Vector4(0.98, 0.78, 0.24, 0.90),
+              bsSrcAlpha, bdOneMinusSrcAlpha, false, 2.0);
+          end;
+        end;
+      if ROuter > RCore + 0.05 then
+        for S := 0 to RingSegs - 1 do
+          if (S and 1) = 0 then
+          begin
+            Ang1 := (2.0 * Pi * S) / RingSegs;
+            Ang2 := (2.0 * Pi * (S + 1)) / RingSegs;
+            P1 := Vector3(VCenter.X + Cos(Ang1) * ROuter, VCenter.Y, VCenter.Z + Sin(Ang1) * ROuter);
+            P2 := Vector3(VCenter.X + Cos(Ang2) * ROuter, VCenter.Y, VCenter.Z + Sin(Ang2) * ROuter);
+            if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+               ((TVector3.DotProduct(P1 - CamP, CamD) > 0.1) and
+                (TVector3.DotProduct(P2 - CamP, CamD) > 0.1)) then
+            begin
+              SegPts[0] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(P1));
+              SegPts[1] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(P2));
+              DrawPrimitive2D(pmLines, SegPts, Vector4(0.96, 0.36, 0.78, 0.74),
+                bsSrcAlpha, bdOneMinusSrcAlpha, false, 1.6);
+            end;
+          end;
+    end;
+  end;
+
   procedure RenderAnnotationPinsOverlay(const AVp: TCastleViewport);
   var
     PinReport: TDesignAnnotationAuditReport;
@@ -5855,6 +5924,7 @@ begin
     RenderStreamingZonesOverlay(Frame.CurrentViewport);
     RenderNavNetworkOverlay(Frame.CurrentViewport);
     RenderAudioZonesOverlay(Frame.CurrentViewport);
+    RenderPostProcessVolumesOverlay(Frame.CurrentViewport);
   end;
 
   if (Frame.TransformManipulate <> nil) and
@@ -6247,6 +6317,21 @@ begin
   if ButtonAudioMixer.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonAssetGraph,
       PanelMiddleTop.GetControlIndex(ButtonAudioMixer) + 1);
+
+  ButtonPostProcess := TSpeedButton.Create(Self);
+  ButtonPostProcess.Caption := 'Look-Dev';
+  ButtonPostProcess.Hint := 'Open Priority-Blended Post-Processing Volumes & Cinematic Look-Dev Studio.' + NL +
+    'Author global/bounded post-process volumes, apply 6 filmic presets, and drive live X3D ScreenEffect GLSL shaders.';
+  ButtonPostProcess.ShowHint := true;
+  ButtonPostProcess.AutoSize := true;
+  ButtonPostProcess.Constraints.MinHeight := 33;
+  ButtonPostProcess.Constraints.MinWidth := 68;
+  ButtonPostProcess.BorderSpacing.Left := 2;
+  ButtonPostProcess.OnClick := @ButtonPostProcessClick;
+  ButtonPostProcess.Parent := PanelMiddleTop;
+  if ButtonAssetGraph.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonPostProcess,
+      PanelMiddleTop.GetControlIndex(ButtonAssetGraph) + 1);
 
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
@@ -9132,6 +9217,11 @@ begin
   MenuTreeViewItemAssetGraph.Caption := 'Bidirectional Asset Reference Graph && Orphan Sweeper...';
   MenuTreeViewItemAssetGraph.OnClick := @MenuTreeViewItemAssetGraphClick;
   MenuTreeView.Items.Add(MenuTreeViewItemAssetGraph);
+
+  MenuTreeViewItemPostProcess := TMenuItem.Create(Self);
+  MenuTreeViewItemPostProcess.Caption := 'Post-Processing Volumes && Look-Dev Studio...';
+  MenuTreeViewItemPostProcess.OnClick := @MenuTreeViewItemPostProcessClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemPostProcess);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -14328,6 +14418,10 @@ var
         Suffix := Suffix + ' ' + TCastleAudioZone(NodeObj).ZoneSummaryBadge
       else if NodeObj is TCastleAudioBusRouterBehavior then
         Suffix := Suffix + ' ' + TCastleAudioBusRouterBehavior(NodeObj).RouterSummaryBadge
+      else if NodeObj is TCastlePostProcessVolume then
+        Suffix := Suffix + ' ' + TCastlePostProcessVolume(NodeObj).VolumeSummaryBadge
+      else if NodeObj is TCastlePostProcessStack then
+        Suffix := Suffix + ' ' + TCastlePostProcessStack(NodeObj).StackSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -53615,6 +53709,45 @@ end;
 procedure TDesignFrame.MenuTreeViewItemAssetGraphClick(Sender: TObject);
 begin
   ShowAssetGraphDialog;
+end;
+
+procedure TDesignFrame.ShowPostProcessStudioDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  InitComp: TComponent;
+  Dlg: TPostProcessStudioForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  InitComp := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount > 0 then
+      InitComp := Selected[0];
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  Dlg := TPostProcessStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner, InitComp,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonPostProcessClick(Sender: TObject);
+begin
+  ShowPostProcessStudioDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemPostProcessClick(Sender: TObject);
+begin
+  ShowPostProcessStudioDialog;
 end;
 
 initialization
