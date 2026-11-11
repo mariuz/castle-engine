@@ -496,14 +496,6 @@ procedure TCastleScreenEffects.EnsureRHIScreenResources(const AWidth, AHeight: C
   const ANeedDepth: Boolean);
 const
   QuadIndices: packed array[0..5] of UInt16 = (0, 1, 2, 0, 2, 3);
-  FallbackScreenVS: array[0..9] of UInt32 = (
-    $07230203, $00010500, $00000000, $00000008, $00000000,
-    ($00050000 or 15), 0, 1, $6E69616D, $00000000
-  );
-  FallbackScreenFS: array[0..9] of UInt32 = (
-    $07230203, $00010500, $00000000, $00000008, $00000000,
-    ($00050000 or 15), 4, 1, $6E69616D, $00000000
-  );
 var
   TexDesc: TRHITextureDesc;
   SampDesc: TRHISamplerDesc;
@@ -618,11 +610,11 @@ begin
   end;
 
   if FRHIScreenDefaultVS = nil then
-    FRHIScreenDefaultVS := RHIDevice.CreateShaderModuleFromSPIRV(ssVertex,
-      @FallbackScreenVS[0], SizeOf(FallbackScreenVS), 'ScreenDefaultVS');
+    FRHIScreenDefaultVS := RHIDevice.CreateShaderModuleFromGLSL(ssVertex,
+      'void main() { v_tex_coord = tex_coord; gl_Position = vec4(vertex, 0.0, 1.0); }', 'ScreenDefaultVS');
   if FRHIScreenDefaultFS = nil then
-    FRHIScreenDefaultFS := RHIDevice.CreateShaderModuleFromSPIRV(ssFragment,
-      @FallbackScreenFS[0], SizeOf(FallbackScreenFS), 'ScreenDefaultFS');
+    FRHIScreenDefaultFS := RHIDevice.CreateShaderModuleFromGLSL(ssFragment,
+      'void main() { castle_FragColor = texture(screen, tex_coord); }', 'ScreenDefaultFS');
 
   if (FRHIScreenDefaultPipelineColor = nil) or (FRHIScreenDefaultPipelineDepth = nil) then
   begin

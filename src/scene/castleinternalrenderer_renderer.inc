@@ -808,7 +808,9 @@ begin
        (Arrays.TexCoords[0].Generation = tgExplicit) then
       AddVertexAttribute(Ord(vlTexCoord0), 1,
         TexCoordDimToFormat(Arrays.TexCoords[0].Dimensions),
-        PtrUInt(Arrays.TexCoord(0, 0)), 'castle_MultiTexCoord0');
+        PtrUInt(Arrays.TexCoord(0, 0)), 'castle_MultiTexCoord0')
+    else
+      AddVertexAttribute(Ord(vlTexCoord0), 0, vafVector2, 0, 'castle_MultiTexCoord0');
 
     if (Arrays.TexCoords.Count > 1) and (Arrays.TexCoords[1] <> nil) and
        (Arrays.TexCoords[1].Generation = tgExplicit) then
@@ -897,6 +899,7 @@ begin
     ADesc.VertexInput.Bindings[0].PerInstance := False;
     AddVertexAttribute(Ord(vlPosition), 0, vafVector3, 0, 'castle_Vertex');
     AddVertexAttribute(Ord(vlNormal), 0, vafVector3, 12, 'castle_Normal');
+    AddVertexAttribute(Ord(vlTexCoord0), 0, vafVector2, 0, 'castle_MultiTexCoord0');
     ADesc.Topology := ptTriangleList;
   end;
 

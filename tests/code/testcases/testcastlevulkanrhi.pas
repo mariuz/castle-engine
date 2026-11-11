@@ -388,6 +388,9 @@ type
     procedure TestBuiltInSPIRVCoreShadersAndRealLavapipeDrawPrimitive2DRHI;
     procedure TestRealLavapipeBatch2DDrawableImageFontAlphaClipAndMultiPassRHI;
     procedure TestRealLavapipeRenderUnlitMeshDepthAndOcclusionCullingRHI;
+    procedure TestRealLavapipe3DViewportUnlitAndLitMeshSceneRHI;
+    procedure TestRealLavapipe3DViewportTexturedMeshAndAlphaCutoffRHI;
+    procedure TestRealLavapipeViewportScreenEffectPostProcessingRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -28176,6 +28179,517 @@ begin
     FreeAndNil(OccUtils);
     FreeAndNil(UnlitMesh);
     FreeAndNil(QueryPool);
+    FreeAndNil(DepthTex);
+    FreeAndNil(ColorTex);
+    FreeAndNil(Container);
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(RealDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipe3DViewportUnlitAndLitMeshSceneRHI;
+var
+  Compiler: TCastleShaderCompiler;
+  Spv3DVS, Spv3DFS, Spv3DTexFS, SpvVSMFS, SpvScreenVS, SpvScreenFS, SpvScreenInvFS: TSPIRVBytecode;
+  RealDev: TVulkanRHIDevice;
+  RealCmd: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  Container: TTestSizedVulkanContainer;
+  ColorTex, DepthTex: TRHITexture;
+  PassInfo: TRHIRenderingInfo;
+  Viewport: TCastleViewport;
+  SceneNearUnlit, SceneFarLit: TCastleScene;
+  RootNear, RootFar: TX3DRootNode;
+  TransNear, TransFar: TTransformNode;
+  ShapeNear, ShapeFar: TShapeNode;
+  BoxNear, BoxFar: TBoxNode;
+  AppNear, AppFar: TAppearanceNode;
+  UnlitMat: TUnlitMaterialNode;
+  PhysMat: TPhysicalMaterialNode;
+  DirLight: TDirectionalLightNode;
+  Readback: TRGBAlphaImage;
+begin
+  { 1. Verify built-in SPIR-V compilation for 3D forward, textured, VSM & screen-effect shaders }
+  Compiler := TCastleShaderCompiler.Create;
+  try
+    AssertTrue('TryGetBuiltInSPIRV CastleDefault3DVert',
+      Compiler.TryGetBuiltInSPIRV(ssVertex, 'uniform CastleSceneBlock { mat4 u_ProjectionMatrix; };', 'CastleDefault3DVert', Spv3DVS));
+    AssertTrue('TryGetBuiltInSPIRV CastleDefault3DFrag',
+      Compiler.TryGetBuiltInSPIRV(ssFragment, 'uniform CastleMaterialBlock { vec4 u_BaseColor; };', 'CastleDefault3DFrag', Spv3DFS));
+    AssertTrue('TryGetBuiltInSPIRV CastleShapeFrag_1 textured',
+      Compiler.TryGetBuiltInSPIRV(ssFragment,
+        'uniform CastleMaterialBlock { vec4 u_BaseColor; }; void main() { vec4 c = texture(castle_base_color_texture, uv); }',
+        'CastleShapeFrag_1', Spv3DTexFS));
+    AssertTrue('TryGetBuiltInSPIRV CastleVSMCasterFrag',
+      Compiler.TryGetBuiltInSPIRV(ssFragment, 'void main() { out_Moments = vec4(depth, moment2, 0.0, 1.0); }', 'CastleVSMCasterFrag', SpvVSMFS));
+    AssertTrue('TryGetBuiltInSPIRV ScreenDefaultVS',
+      Compiler.TryGetBuiltInSPIRV(ssVertex, 'void main() { v_tex_coord = tex_coord; }', 'ScreenDefaultVS', SpvScreenVS));
+    AssertTrue('TryGetBuiltInSPIRV ScreenDefaultFS',
+      Compiler.TryGetBuiltInSPIRV(ssFragment, 'uniform sampler2D screen;', 'ScreenDefaultFS', SpvScreenFS));
+    AssertTrue('TryGetBuiltInSPIRV ScreenEffectFS invert',
+      Compiler.TryGetBuiltInSPIRV(ssFragment, 'uniform sampler2D screen; void main() { c = 1.0 - c; }', 'ScreenEffectFS', SpvScreenInvFS));
+
+    AssertTrue('BuiltIn3DPosNormUVVertSPIRV must be > 400 bytes', Length(Spv3DVS) > 400);
+    AssertTrue('BuiltIn3DForwardFragSPIRV must be > 500 bytes', Length(Spv3DFS) > 500);
+    AssertTrue('BuiltIn3DForwardTexturedFragSPIRV must be > 500 bytes', Length(Spv3DTexFS) > 500);
+    AssertTrue('BuiltInVSMCasterFragSPIRV must be > 80 bytes', Length(SpvVSMFS) > 80);
+    AssertTrue('BuiltInScreenEffectVertSPIRV must be > 100 bytes', Length(SpvScreenVS) > 100);
+    AssertTrue('BuiltInScreenEffectPassthroughFragSPIRV must be > 100 bytes', Length(SpvScreenFS) > 100);
+    AssertTrue('BuiltInScreenEffectInvertFragSPIRV must be > 120 bytes', Length(SpvScreenInvFS) > 120);
+  finally
+    FreeAndNil(Compiler);
+  end;
+
+  { 2. Live 3D TCastleViewport / TCastleScene execution on Mesa Lavapipe }
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+    Exit;
+
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+
+  Container := TTestSizedVulkanContainer.Create(nil);
+  ColorTex := nil;
+  DepthTex := nil;
+  Viewport := nil;
+  SceneNearUnlit := nil;
+  SceneFarLit := nil;
+  Readback := nil;
+  try
+    GLFeatures := nil;
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(RealDev);
+
+    Container.TestWidth := 64;
+    Container.TestHeight := 64;
+    RenderContext := Container.Context;
+    RenderContext.Viewport := Rectangle(0, 0, 64, 64);
+
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := True;
+    Viewport.Transparent := True;
+    Viewport.Camera.ProjectionType := ptOrthographic;
+    Viewport.Camera.Orthographic.Width := 4.0;
+    Viewport.Camera.Orthographic.Height := 4.0;
+    Viewport.Camera.Orthographic.Origin := Vector2(0.5, 0.5);
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 5.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Container.Controls.InsertFront(Viewport);
+
+    { Scene 1: Near Unlit Red Box at X = -0.6, Z = 0.0 (covers X in [-1.35, +0.15]) }
+    RootNear := TX3DRootNode.Create;
+    TransNear := TTransformNode.Create;
+    TransNear.Translation := Vector3(-0.6, 0.0, 0.0);
+    ShapeNear := TShapeNode.Create;
+    BoxNear := TBoxNode.Create;
+    BoxNear.Size := Vector3(1.5, 1.5, 0.2);
+    ShapeNear.Geometry := BoxNear;
+    AppNear := TAppearanceNode.Create;
+    UnlitMat := TUnlitMaterialNode.Create;
+    UnlitMat.EmissiveColor := Vector3(1.0, 0.0, 0.0);
+    AppNear.Material := UnlitMat;
+    ShapeNear.Appearance := AppNear;
+    TransNear.AddChildren(ShapeNear);
+    RootNear.AddChildren(TransNear);
+    SceneNearUnlit := TCastleScene.Create(nil);
+    SceneNearUnlit.Load(RootNear, True);
+    Viewport.Items.Add(SceneNearUnlit);
+
+    { Scene 2: Far Lit Green Box at X = +0.6, Z = -2.0 (covers X in [-0.15, +1.35]) + DirectionalLight }
+    RootFar := TX3DRootNode.Create;
+    DirLight := TDirectionalLightNode.Create;
+    DirLight.Direction := Vector3(0.0, 0.0, -1.0);
+    DirLight.Color := Vector3(1.0, 1.0, 1.0);
+    DirLight.Intensity := 1.0;
+    DirLight.Global := True;
+    RootFar.AddChildren(DirLight);
+
+    TransFar := TTransformNode.Create;
+    TransFar.Translation := Vector3(0.6, 0.0, -2.0);
+    ShapeFar := TShapeNode.Create;
+    BoxFar := TBoxNode.Create;
+    BoxFar.Size := Vector3(1.5, 1.5, 0.2);
+    ShapeFar.Geometry := BoxFar;
+    AppFar := TAppearanceNode.Create;
+    PhysMat := TPhysicalMaterialNode.Create;
+    PhysMat.BaseColor := Vector3(0.0, 1.0, 0.0);
+    AppFar.Material := PhysMat;
+    ShapeFar.Appearance := AppFar;
+    TransFar.AddChildren(ShapeFar);
+    RootFar.AddChildren(TransFar);
+    SceneFarLit := TCastleScene.Create(nil);
+    SceneFarLit.Load(RootFar, True);
+    {$warnings off}
+    Viewport.Items.MainScene := SceneFarLit;
+    {$warnings on}
+    Viewport.Items.Add(SceneFarLit);
+
+    ColorTex := RealDev.CreateTexture(TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc]));
+    DepthTex := RealDev.CreateTexture(TRHITextureDesc.Create2D(64, 64, pfD32_Float,
+      [tuDepthStencil]));
+
+    RealCmd := RealDev.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(RealCmd);
+
+    Viewport.BeforeRender;
+
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 64, 64),
+      ColorTex, loClear, Vector4(10 / 255.0, 20 / 255.0, 30 / 255.0, 1.0),
+      DepthTex, loClear, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+
+    Viewport.Render;
+    Viewport.RenderOverChildren;
+
+    RealCmd.EndRendering;
+    RealDev.EndFrameAndPresent;
+
+    Readback := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 64, 64));
+
+    { Corner (2, 2): Cleared background (10, 20, 30, 255) }
+    AssertEquals('Corner (2,2) R must be 10', 10, Integer(Readback.PixelPtr(2, 2)^.X));
+    AssertEquals('Corner (2,2) G must be 20', 20, Integer(Readback.PixelPtr(2, 2)^.Y));
+    AssertEquals('Corner (2,2) B must be 30', 30, Integer(Readback.PixelPtr(2, 2)^.Z));
+
+    { Left box (16, 32): Near Unlit Red box (255, 0, 0) }
+    AssertEquals('Left Near Unlit Box (16,32) R must be 255', 255, Integer(Readback.PixelPtr(16, 32)^.X));
+    AssertEquals('Left Near Unlit Box (16,32) G must be 0', 0, Integer(Readback.PixelPtr(16, 32)^.Y));
+    AssertEquals('Left Near Unlit Box (16,32) B must be 0', 0, Integer(Readback.PixelPtr(16, 32)^.Z));
+
+    { Center overlap (32, 32): Near Red box (Z=0) occludes Far Green box (Z=-2) via hardware depth buffer }
+    AssertEquals('Center Overlap (32,32) R must be 255 (Near Red occludes Far Green)',
+      255, Integer(Readback.PixelPtr(32, 32)^.X));
+    AssertEquals('Center Overlap (32,32) G must be 0',
+      0, Integer(Readback.PixelPtr(32, 32)^.Y));
+
+    { Right box (48, 32): Far Lit Green box illuminated by DirectionalLight (0, 255, 0) }
+    AssertEquals('Right Far Lit Box (48,32) R must be 0', 0, Integer(Readback.PixelPtr(48, 32)^.X));
+    AssertEquals('Right Far Lit Box (48,32) G must be 255', 255, Integer(Readback.PixelPtr(48, 32)^.Y));
+    AssertEquals('Right Far Lit Box (48,32) B must be 0', 0, Integer(Readback.PixelPtr(48, 32)^.Z));
+  finally
+    FreeAndNil(Readback);
+    FreeAndNil(SceneFarLit);
+    FreeAndNil(SceneNearUnlit);
+    FreeAndNil(Viewport);
+    FreeAndNil(DepthTex);
+    FreeAndNil(ColorTex);
+    FreeAndNil(Container);
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(RealDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipe3DViewportTexturedMeshAndAlphaCutoffRHI;
+var
+  RealDev: TVulkanRHIDevice;
+  RealCmd: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  Container: TTestSizedVulkanContainer;
+  ColorTex, DepthTex: TRHITexture;
+  PassInfo: TRHIRenderingInfo;
+  Viewport: TCastleViewport;
+  SceneBackBlue, SceneFrontMask: TCastleScene;
+  RootBack, RootFront: TX3DRootNode;
+  TransBack, TransFront: TTransformNode;
+  ShapeBack, ShapeFront: TShapeNode;
+  BoxBack, BoxFront: TBoxNode;
+  AppBack, AppFront: TAppearanceNode;
+  MatBack, MatFront: TUnlitMaterialNode;
+  PixTex: TPixelTextureNode;
+  TexImg: TRGBAlphaImage;
+  X, Y: Integer;
+  Readback: TRGBAlphaImage;
+begin
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+    Exit;
+
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+
+  Container := TTestSizedVulkanContainer.Create(nil);
+  ColorTex := nil;
+  DepthTex := nil;
+  Viewport := nil;
+  SceneBackBlue := nil;
+  SceneFrontMask := nil;
+  Readback := nil;
+  try
+    GLFeatures := nil;
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(RealDev);
+
+    Container.TestWidth := 64;
+    Container.TestHeight := 64;
+    RenderContext := Container.Context;
+    RenderContext.Viewport := Rectangle(0, 0, 64, 64);
+
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := True;
+    Viewport.Transparent := True;
+    Viewport.Camera.ProjectionType := ptOrthographic;
+    Viewport.Camera.Orthographic.Width := 4.0;
+    Viewport.Camera.Orthographic.Height := 4.0;
+    Viewport.Camera.Orthographic.Origin := Vector2(0.5, 0.5);
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 5.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Container.Controls.InsertFront(Viewport);
+
+    { Far background scene at Z = -2.0: Solid Blue box }
+    RootBack := TX3DRootNode.Create;
+    TransBack := TTransformNode.Create;
+    TransBack.Translation := Vector3(0.0, 0.0, -2.0);
+    ShapeBack := TShapeNode.Create;
+    BoxBack := TBoxNode.Create;
+    BoxBack.Size := Vector3(3.0, 3.0, 0.2);
+    ShapeBack.Geometry := BoxBack;
+    AppBack := TAppearanceNode.Create;
+    MatBack := TUnlitMaterialNode.Create;
+    MatBack.EmissiveColor := Vector3(0.0, 0.0, 1.0);
+    AppBack.Material := MatBack;
+    ShapeBack.Appearance := AppBack;
+    TransBack.AddChildren(ShapeBack);
+    RootBack.AddChildren(TransBack);
+    SceneBackBlue := TCastleScene.Create(nil);
+    SceneBackBlue.Load(RootBack, True);
+    Viewport.Items.Add(SceneBackBlue);
+
+    { Near foreground scene at Z = 0.0: Textured Alpha-Cutoff box (left half opaque yellow, right half alpha=0) }
+    RootFront := TX3DRootNode.Create;
+    TransFront := TTransformNode.Create;
+    TransFront.Translation := Vector3(0.0, 0.0, 0.0);
+    ShapeFront := TShapeNode.Create;
+    BoxFront := TBoxNode.Create;
+    BoxFront.Size := Vector3(2.0, 2.0, 0.2);
+    ShapeFront.Geometry := BoxFront;
+    AppFront := TAppearanceNode.Create;
+    AppFront.AlphaMode := amMask;
+    AppFront.AlphaCutoff := 0.5;
+    MatFront := TUnlitMaterialNode.Create;
+    MatFront.EmissiveColor := Vector3(1.0, 1.0, 1.0);
+
+    PixTex := TPixelTextureNode.Create;
+    PixTex.RepeatS := False;
+    PixTex.RepeatT := False;
+    TexImg := TRGBAlphaImage.Create(64, 64);
+    for Y := 0 to 63 do
+      for X := 0 to 63 do
+        if X < 32 then
+          TexImg.PixelPtr(X, Y)^ := Vector4Byte(255, 255, 0, 255) { Opaque Yellow }
+        else
+          TexImg.PixelPtr(X, Y)^ := Vector4Byte(255, 0, 255, 0);  { Transparent (Alpha=0 < 0.5 -> OpKill) }
+    PixTex.FdImage.Value := TexImg;
+    MatFront.EmissiveTexture := PixTex;
+    AppFront.Material := MatFront;
+    ShapeFront.Appearance := AppFront;
+    TransFront.AddChildren(ShapeFront);
+    RootFront.AddChildren(TransFront);
+    SceneFrontMask := TCastleScene.Create(nil);
+    SceneFrontMask.Load(RootFront, True);
+    Viewport.Items.Add(SceneFrontMask);
+
+    ColorTex := RealDev.CreateTexture(TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc]));
+    DepthTex := RealDev.CreateTexture(TRHITextureDesc.Create2D(64, 64, pfD32_Float,
+      [tuDepthStencil]));
+
+    RealCmd := RealDev.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(RealCmd);
+
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 64, 64),
+      ColorTex, loClear, Vector4(0.0, 0.0, 0.0, 1.0),
+      DepthTex, loClear, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+
+    Viewport.Render;
+
+    RealCmd.EndRendering;
+    RealDev.EndFrameAndPresent;
+
+    Readback := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 64, 64));
+
+    { Left half of front box at (24, 32): Opaque Yellow from texture (255, 255, 0) }
+    AssertEquals('Left textured box (24,32) R must be 255', 255, Integer(Readback.PixelPtr(24, 32)^.X));
+    AssertEquals('Left textured box (24,32) G must be 255', 255, Integer(Readback.PixelPtr(24, 32)^.Y));
+    AssertEquals('Left textured box (24,32) B must be 0', 0, Integer(Readback.PixelPtr(24, 32)^.Z));
+
+    { Right half of front box at (40, 32): Discarded by OpKill (alpha=0 < 0.5), revealing Far Blue box (0, 0, 255) }
+    AssertEquals('Right alpha-discarded region (40,32) R must be 0', 0, Integer(Readback.PixelPtr(40, 32)^.X));
+    AssertEquals('Right alpha-discarded region (40,32) G must be 0', 0, Integer(Readback.PixelPtr(40, 32)^.Y));
+    AssertEquals('Right alpha-discarded region (40,32) B must be 255 (Far Blue box visible)',
+      255, Integer(Readback.PixelPtr(40, 32)^.Z));
+  finally
+    FreeAndNil(Readback);
+    FreeAndNil(SceneFrontMask);
+    FreeAndNil(SceneBackBlue);
+    FreeAndNil(Viewport);
+    FreeAndNil(DepthTex);
+    FreeAndNil(ColorTex);
+    FreeAndNil(Container);
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(RealDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipeViewportScreenEffectPostProcessingRHI;
+var
+  RealDev: TVulkanRHIDevice;
+  RealCmd: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  Container: TTestSizedVulkanContainer;
+  ColorTex, DepthTex: TRHITexture;
+  PassInfo: TRHIRenderingInfo;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  Shape: TShapeNode;
+  Box: TBoxNode;
+  App: TAppearanceNode;
+  Mat: TUnlitMaterialNode;
+  ScreenEffect: TScreenEffectNode;
+  CompShader: TComposedShaderNode;
+  FragPart: TShaderPartNode;
+  Readback: TRGBAlphaImage;
+begin
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+    Exit;
+
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+
+  Container := TTestSizedVulkanContainer.Create(nil);
+  ColorTex := nil;
+  DepthTex := nil;
+  Viewport := nil;
+  Scene := nil;
+  Readback := nil;
+  try
+    GLFeatures := nil;
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(RealDev);
+
+    Container.TestWidth := 64;
+    Container.TestHeight := 64;
+    RenderContext := Container.Context;
+    RenderContext.Viewport := Rectangle(0, 0, 64, 64);
+
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := True;
+    Viewport.BackgroundColor := Vector4(1.0, 0.0, 0.0, 1.0); { Red background -> inverted to Cyan (0, 255, 255) }
+    Viewport.Camera.ProjectionType := ptOrthographic;
+    Viewport.Camera.Orthographic.Width := 4.0;
+    Viewport.Camera.Orthographic.Height := 4.0;
+    Viewport.Camera.Orthographic.Origin := Vector2(0.5, 0.5);
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 5.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Container.Controls.InsertFront(Viewport);
+
+    { Scene with Blue Unlit Box in center (inverted to Yellow (255, 255, 0)) + TScreenEffectNode color inversion }
+    Root := TX3DRootNode.Create;
+    Shape := TShapeNode.Create;
+    Box := TBoxNode.Create;
+    Box.Size := Vector3(2.0, 2.0, 0.2);
+    Shape.Geometry := Box;
+    App := TAppearanceNode.Create;
+    Mat := TUnlitMaterialNode.Create;
+    Mat.EmissiveColor := Vector3(0.0, 0.0, 1.0); { Blue -> inverted to Yellow (255, 255, 0) }
+    App.Material := Mat;
+    Shape.Appearance := App;
+    Root.AddChildren(Shape);
+
+    ScreenEffect := TScreenEffectNode.Create;
+    CompShader := TComposedShaderNode.Create;
+    FragPart := TShaderPartNode.Create;
+    FragPart.ShaderType := stFragment;
+    FragPart.Contents := 'void main() { gl_FragColor = vec4(1.0 - screen_get_color(screen_position()).rgb, 1.0); }';
+    CompShader.SetParts([FragPart]);
+    ScreenEffect.SetShaders([CompShader]);
+    Root.AddChildren(ScreenEffect);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    {$warnings off}
+    Viewport.Items.MainScene := Scene;
+    {$warnings on}
+    Viewport.Items.Add(Scene);
+
+    ColorTex := RealDev.CreateTexture(TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc]));
+    DepthTex := RealDev.CreateTexture(TRHITextureDesc.Create2D(64, 64, pfD32_Float,
+      [tuDepthStencil]));
+
+    RealCmd := RealDev.BeginFrame as TVulkanRHICommandList;
+    SetActiveCommandList(RealCmd);
+
+    Viewport.BeforeRender;
+
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 64, 64),
+      ColorTex, loClear, Vector4(0.0, 0.0, 0.0, 1.0),
+      DepthTex, loClear, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+
+    Viewport.Render;
+    Viewport.RenderOverChildren;
+
+    RealCmd.EndRendering;
+    RealDev.EndFrameAndPresent;
+
+    Readback := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 64, 64));
+
+    { Corner (4, 4): Viewport Red background (1, 0, 0) inverted by TScreenEffectNode -> Cyan (0, 255, 255) }
+    AssertEquals('Inverted background (4,4) R must be 0', 0, Integer(Readback.PixelPtr(4, 4)^.X));
+    AssertEquals('Inverted background (4,4) G must be 255', 255, Integer(Readback.PixelPtr(4, 4)^.Y));
+    AssertEquals('Inverted background (4,4) B must be 255', 255, Integer(Readback.PixelPtr(4, 4)^.Z));
+
+    { Center (32, 32): Blue 3D box (0, 0, 1) inverted by TScreenEffectNode -> Yellow (255, 255, 0) }
+    AssertEquals('Inverted 3D Blue box (32,32) R must be 255', 255, Integer(Readback.PixelPtr(32, 32)^.X));
+    AssertEquals('Inverted 3D Blue box (32,32) G must be 255', 255, Integer(Readback.PixelPtr(32, 32)^.Y));
+    AssertEquals('Inverted 3D Blue box (32,32) B must be 0', 0, Integer(Readback.PixelPtr(32, 32)^.Z));
+  finally
+    FreeAndNil(Readback);
+    FreeAndNil(Scene);
+    FreeAndNil(Viewport);
     FreeAndNil(DepthTex);
     FreeAndNil(ColorTex);
     FreeAndNil(Container);

@@ -3724,6 +3724,7 @@ type
     FPrewarm3DFragmentShader: TRHIShaderModule;
     FPrewarm2DVertexShader: TRHIShaderModule;
     FPrewarm2DFragmentShader: TRHIShaderModule;
+    FDefaultSampler: TVulkanRHISampler;
 
     { Diagnostics, VK_EXT_memory_budget, VK_EXT_graphics_pipeline_library, Bindless, Extended Dynamic State, Sync2 & Fallback tracking }
     FInstanceApiVersion: Cardinal;
@@ -3784,6 +3785,7 @@ type
     function GetFallbackFramebufferCount: Cardinal;
     function GetPendingDeferredDeletionCount: Cardinal;
     function GetDescriptorPoolHandle: VkDescriptorPool;
+    function GetDefaultSampler: TVulkanRHISampler;
     function GetComputeCuller: TCastleVulkanComputeCuller;
     function GetIBLGenerator: TCastleVulkanIBLGenerator;
     function GetClusteredLightCuller: TCastleVulkanClusteredLightCuller;
@@ -6646,6 +6648,9 @@ begin
   FillChar(FImageInfos[Idx], SizeOf(VkDescriptorImageInfo), 0);
   if Sampler <> nil then
     FImageInfos[Idx].sampler := (Sampler as TVulkanRHISampler).Handle
+  else
+  if VulkanDevice <> nil then
+    FImageInfos[Idx].sampler := VulkanDevice.GetDefaultSampler.Handle
   else
     FImageInfos[Idx].sampler := VK_NULL_HANDLE;
   FImageInfos[Idx].imageView := (Texture as TVulkanRHITexture).ImageView;
@@ -18675,6 +18680,26 @@ begin
     Result := FDescriptorPool;
 end;
 
+function TVulkanRHIDevice.GetDefaultSampler: TVulkanRHISampler;
+var
+  SampDesc: TRHISamplerDesc;
+begin
+  if FDefaultSampler = nil then
+  begin
+    FillChar(SampDesc, SizeOf(SampDesc), 0);
+    SampDesc.MinFilter := sfLinear;
+    SampDesc.MagFilter := sfLinear;
+    SampDesc.MipFilter := sfLinear;
+    SampDesc.AddressModeU := amRepeat;
+    SampDesc.AddressModeV := amRepeat;
+    SampDesc.AddressModeW := amRepeat;
+    SampDesc.MaxAnisotropy := 1.0;
+    SampDesc.MaxLod := 1000.0;
+    FDefaultSampler := CreateSampler(SampDesc) as TVulkanRHISampler;
+  end;
+  Result := FDefaultSampler;
+end;
+
 function TVulkanRHIDevice.GetComputeCuller: TCastleVulkanComputeCuller;
 begin
   if FComputeCuller = nil then
@@ -19133,6 +19158,7 @@ begin
   FreeAndNil(FPrewarm3DFragmentShader);
   FreeAndNil(FPrewarm2DVertexShader);
   FreeAndNil(FPrewarm2DFragmentShader);
+  FreeAndNil(FDefaultSampler);
 
   for I := 0 to MaxFramesInFlight - 1 do
   begin
@@ -19852,7 +19878,8 @@ var
   StageCount: Cardinal;
   ViewportState: VkPipelineViewportStateCreateInfo;
   Rasterizer: VkPipelineRasterizationStateCreateInfo;
-  DynamicStates: array[0..2] of VkDynamicState;
+  DynamicStates: array[0..5] of VkDynamicState;
+  DynamicStateCount: Cardinal;
   DynamicStateInfo: VkPipelineDynamicStateCreateInfo;
   RenderingInfo: VkPipelineRenderingCreateInfoKHR;
   GplInfo: VkGraphicsPipelineLibraryCreateInfoEXT;
@@ -19902,13 +19929,22 @@ begin
 
   DynamicStates[0] := VK_DYNAMIC_STATE_VIEWPORT;
   DynamicStates[1] := VK_DYNAMIC_STATE_SCISSOR;
-  DynamicStates[2] := VK_DYNAMIC_STATE_DEPTH_BIAS;
+  DynamicStateCount := 2;
+  if ADesc.Rasterizer.DepthBiasEnable then
+  begin
+    DynamicStates[DynamicStateCount] := VK_DYNAMIC_STATE_DEPTH_BIAS;
+    Inc(DynamicStateCount);
+  end;
+  if FSupportsExtendedDynamicState then
+  begin
+    DynamicStates[DynamicStateCount] := VK_DYNAMIC_STATE_CULL_MODE;
+    DynamicStates[DynamicStateCount + 1] := VK_DYNAMIC_STATE_FRONT_FACE;
+    DynamicStates[DynamicStateCount + 2] := VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY;
+    Inc(DynamicStateCount, 3);
+  end;
   FillChar(DynamicStateInfo, SizeOf(DynamicStateInfo), 0);
   DynamicStateInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-  if ADesc.Rasterizer.DepthBiasEnable then
-    DynamicStateInfo.dynamicStateCount := 3
-  else
-    DynamicStateInfo.dynamicStateCount := 2;
+  DynamicStateInfo.dynamicStateCount := DynamicStateCount;
   DynamicStateInfo.pDynamicStates := @DynamicStates[0];
 
   FillChar(RenderingInfo, SizeOf(RenderingInfo), 0);
@@ -19957,6 +19993,8 @@ var
   StageCount: Cardinal;
   DepthStencil: VkPipelineDepthStencilStateCreateInfo;
   Multisampling: VkPipelineMultisampleStateCreateInfo;
+  DynamicStates: array[0..2] of VkDynamicState;
+  DynamicStateInfo: VkPipelineDynamicStateCreateInfo;
   RenderingInfo: VkPipelineRenderingCreateInfoKHR;
   GplInfo: VkGraphicsPipelineLibraryCreateInfoEXT;
   PipelineInfo: VkGraphicsPipelineCreateInfo;
@@ -20018,6 +20056,17 @@ begin
     PipelineInfo.pStages := @Stage;
   PipelineInfo.pDepthStencilState := @DepthStencil;
   PipelineInfo.pMultisampleState := @Multisampling;
+  if FSupportsExtendedDynamicState then
+  begin
+    DynamicStates[0] := VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE;
+    DynamicStates[1] := VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE;
+    DynamicStates[2] := VK_DYNAMIC_STATE_DEPTH_COMPARE_OP;
+    FillChar(DynamicStateInfo, SizeOf(DynamicStateInfo), 0);
+    DynamicStateInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    DynamicStateInfo.dynamicStateCount := 3;
+    DynamicStateInfo.pDynamicStates := @DynamicStates[0];
+    PipelineInfo.pDynamicState := @DynamicStateInfo;
+  end;
   PipelineInfo.layout := ALayout;
   if not FSupportsDynamicRendering then
     PipelineInfo.renderPass := ARenderPass;

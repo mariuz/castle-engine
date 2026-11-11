@@ -545,15 +545,6 @@ begin
 end;
 
 procedure TScreenEffectResource.PrepareCore(const RenderOptions: TCastleRenderOptions);
-const
-  FallbackScreenVS: array[0..9] of UInt32 = (
-    $07230203, $00010500, $00000000, $00000008, $00000000,
-    ($00050000 or 15), 0, 1, $6E69616D, $00000000
-  );
-  FallbackScreenFS: array[0..9] of UInt32 = (
-    $07230203, $00010500, $00000000, $00000008, $00000000,
-    ($00050000 or 15), 4, 1, $6E69616D, $00000000
-  );
 
   procedure PrepareIDecls(const IDecls: TX3DInterfaceDeclarationList);
 
@@ -692,10 +683,10 @@ const
     CompShader.EventIsSelected.Send(True);
     CompShader.EventIsValid.Send(True);
 
-    FRHIVertexShader := RHIDevice.CreateShaderModuleFromSPIRV(ssVertex,
-      @FallbackScreenVS[0], SizeOf(FallbackScreenVS), 'ScreenEffectVS');
-    FRHIFragmentShader := RHIDevice.CreateShaderModuleFromSPIRV(ssFragment,
-      @FallbackScreenFS[0], SizeOf(FallbackScreenFS), 'ScreenEffectFS');
+    FRHIVertexShader := RHIDevice.CreateShaderModuleFromGLSL(ssVertex,
+      FRHIVertexGLSL, 'ScreenEffectVS');
+    FRHIFragmentShader := RHIDevice.CreateShaderModuleFromGLSL(ssFragment,
+      FRHIFragmentGLSL, 'ScreenEffectFS');
 
     if NeedsDepth then
       SetLength(Bindings, 2)
