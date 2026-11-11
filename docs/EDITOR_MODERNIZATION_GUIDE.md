@@ -2697,6 +2697,33 @@ if Agent.CanPerceiveTarget(PlayerTransform, Seen, Heard) then ...
 
 ---
 
+## 66P. Spatial Audio Soundscape Mixer, Bus Routing & Reverb/Attenuation Zones (Phase 291)
+
+Castle Game Engine provides named submix bus routing, sidechain dialogue ducking, and smooth 3D acoustic crossfade zones matching Unreal Engine 5.9/6.0 MetaSounds & Submix workflows:
+
+1. **Runtime Submix & Acoustic Zone Components (`src/scene/castleaudiomixer.pas`)**:
+   - `TCastleAudioBusMixer` manages 5 buses (`Master`, `Music`, `SFX`, `Voice`, `Ambient`) with linear `[0..200%]` fader gain, dB conversion, `Mute`, `Solo`, and sidechain `Voice` -> `Music`/`Ambient` ducking (`VoiceDuckFactor`, `StepDucking`).
+   - `TCastleAudioBusRouterBehavior` attaches alongside `TCastleSoundSource` on any `TCastleTransform` to route playback onto a target bus.
+   - `TCastleAudioZone` defines a 3D spherical acoustic volume (`aapCaveReverb`, `aapCathedralHall`, `aapUnderwaterMuffled`, etc.) with Hermite `SmoothStep` falloff between `InnerRadius` (`100%` weight) and `OuterRadius` (`0%` weight).
+2. **Spatial Audio Studio & 3D Attenuation Rings (`TAudioMixerForm`)**:
+   - Open via the top-bar **`Audio Mix`** button or **`Design -> Spatial Audio Mixer, Buses & Reverb Zones...`**.
+   - Includes a 5-strip vertical DAW fader console, live effective level meters, 4 soundscape presets, and 3D viewport cyan inner / violet outer zone rings.
+
+### Example Usage (Pascal API)
+```pascal
+Mixer := TAudioMixerHelper.EnsureMixerInDesign(ViewportMain, Self);
+Zone := TAudioMixerHelper.CreateAudioZoneInDesign(ViewportMain, Self, Vector3(0, 0, 0), aapCaveReverb);
+TAudioMixerHelper.AttachBusRouter(MusicTransform, Self, abkMusic, Mixer.Name);
+Mixer.EvaluateWorldSoundscape(ViewportMain, ViewportMain.Camera.WorldTranslation, SecondsPassed, Preset, Weight);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Sound Manual](https://castle-engine.io/sound) · [CGE Behaviors Manual](https://castle-engine.io/behaviors) · [UE Audio Modulation & Submixes](https://dev.epicgames.com/documentation/en-us/unreal-engine/audio-modulation-overview-in-unreal-engine) · [Godot 4 Audio Buses](https://docs.godotengine.org/en/stable/tutorials/audio/audio_buses.html)
+- **Videos & Movies:** 🎬 [CGE Official Video — Spatial 3D Sound & Worlds (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [Multi-Bus Audio Submix Console](https://docs.godotengine.org/en/stable/_images/audio_buses1.webp)
+- **Screenshots:** [CGE Sound Components in Editor](https://castle-engine.io/images/thumb_const_height_size/sound_components_design.webp) · [Audio Bus Fader Console](https://docs.godotengine.org/en/stable/_images/audio_buses1.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2775,4 +2802,5 @@ In addition, Horizon 2 editor subsystems include dedicated automated test suites
 - **[`tests/code/testcases/testtoolstategraph.pas`](../tests/code/testcases/testtoolstategraph.pas) (`TTestToolStateGraph` — 2 tests)**: Verifies `TCastleStateGraphBehavior` blackboard comparisons, `MinStateElapsedSec` timer gates, `'*'` Any-State priority interrupts, entry/exit RTTI/animation/blackboard/cue actions, `ComponentToString` JSON roundtrips, gameplay templates (`AI Patrol/Chase/Attack`, `Interactive Door`, `UI Menu Flow`), `ValidateGraph` unreachable-state & undeclared-variable detection, and Mermaid `stateDiagram-v2` export (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolparticlestudio.pas`](../tests/code/testcases/testtoolparticlestudio.pas) (`TTestToolParticleStudio` — 2 tests)**: Verifies `TCastleParticleEmitter` `pesCircleRing` radial emission, gravity/drag integration, lifetime expiration, continuous `SpawnRate` accumulation, `csTransient` child non-serialization across `ComponentToString` roundtrips, all 6 VFX presets, `MaxParticles` burst capping, and `TParticleStudioHelper` over-budget diagnostics & Markdown export (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolnavnetwork.pas`](../tests/code/testcases/testtoolnavnetwork.pas) (`TTestToolNavNetwork` — 2 tests)**: Verifies `TCastleNavGrid.BakeObstaclesFromWorld` (`NavWalkableIgnoreTag` floor exclusion + `AgentRadius` wall inflation), octile A* `FindPathWorld` obstacle routing around solid barriers, `BlockedCellsData` JSON roundtrips, `TCastleWaypointNode` circular patrol loops with `WaitTimeSec` dwell timers, and `TCastlePatrolAgentBehavior` FOV sight cone vs. 360° hearing sphere `CanPerceiveTarget` queries (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolaudiomixer.pas`](../tests/code/testcases/testtoolaudiomixer.pas) (`TTestToolAudioMixer` — 2 tests)**: Verifies `TCastleAudioBusMixer` 5-bus gain routing, `Solo`/`Mute` isolation, sidechain `Voice` -> `Music`/`Ambient` ducking, `ComponentToString` JSON roundtrips, `TCastleAudioZone` Hermite `InnerRadius`/`OuterRadius` crossfades, underwater pitch muffling, unrouted `TCastleSoundSource` warnings, and Markdown export (`0 unfreed memory blocks`).
 

@@ -604,6 +604,7 @@ type
       MenuItemStateGraph: TMenuItem;
       MenuItemParticleStudio: TMenuItem;
       MenuItemNavNetwork: TMenuItem;
+      MenuItemAudioMixer: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -628,6 +629,7 @@ type
     procedure MenuItemStateGraphClick(Sender: TObject);
     procedure MenuItemParticleStudioClick(Sender: TObject);
     procedure MenuItemNavNetworkClick(Sender: TObject);
+    procedure MenuItemAudioMixerClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2273,6 +2275,11 @@ begin
   MenuItemNavNetwork.OnClick := @MenuItemNavNetworkClick;
   MenuItemDesign.Add(MenuItemNavNetwork);
 
+  MenuItemAudioMixer := TMenuItem.Create(MenuItemDesign);
+  MenuItemAudioMixer.Caption := 'Spatial Audio Mixer, Buses & Reverb Zones...';
+  MenuItemAudioMixer.OnClick := @MenuItemAudioMixerClick;
+  MenuItemDesign.Add(MenuItemAudioMixer);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -2943,6 +2950,8 @@ begin
     MenuItemParticleStudio.Enabled := Design <> nil;
   if MenuItemNavNetwork <> nil then
     MenuItemNavNetwork.Enabled := Design <> nil;
+  if MenuItemAudioMixer <> nil then
+    MenuItemAudioMixer.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5234,6 +5243,12 @@ procedure TProjectForm.MenuItemNavNetworkClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowNavNetworkDialog;
+end;
+
+procedure TProjectForm.MenuItemAudioMixerClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowAudioMixerDialog;
 end;
 
 initialization

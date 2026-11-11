@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork,
+  CastleNavNetwork, CastleAudioMixer,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork;
+  ToolNavNetwork, ToolAudioMixer;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -746,6 +746,8 @@ type
       MenuTreeViewItemParticleStudio: TMenuItem;
       ButtonNavNetwork: TSpeedButton;
       MenuTreeViewItemNavNetwork: TMenuItem;
+      ButtonAudioMixer: TSpeedButton;
+      MenuTreeViewItemAudioMixer: TMenuItem;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
       FCopiedComponentPropsClassName: String;
@@ -1187,6 +1189,8 @@ type
     procedure MenuTreeViewItemParticleStudioClick(Sender: TObject);
     procedure ButtonNavNetworkClick(Sender: TObject);
     procedure MenuTreeViewItemNavNetworkClick(Sender: TObject);
+    procedure ButtonAudioMixerClick(Sender: TObject);
+    procedure MenuTreeViewItemAudioMixerClick(Sender: TObject);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
     function NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
@@ -2613,6 +2617,9 @@ type
 
     { AI Waypoint Patrol Networks, A* NavGrid & Perception Studio (Phase 290). }
     procedure ShowNavNetworkDialog;
+
+    { Spatial Audio Soundscape Mixer, Buses & Reverb Zones Studio (Phase 291). }
+    procedure ShowAudioMixerDialog;
   end;
 
 implementation
@@ -2633,7 +2640,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -5468,6 +5475,68 @@ procedure TDesignFrame.TDesignerLayer.Render;
     end;
   end;
 
+  procedure RenderAudioZonesOverlay(const AVp: TCastleViewport);
+  const
+    RingSegs = 28;
+  var
+    AudSum: TAudioMixerSummary;
+    CamP, CamD, CamU, ZCenter, P1, P2: TVector3;
+    SegPts: array [0..1] of TVector2;
+    Z: TCastleAudioZone;
+    Ang1, Ang2, RIn, ROut: Single;
+    I, S: Integer;
+  begin
+    if Frame.FDesignRoot = nil then
+      Exit;
+    AVp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    AudSum := TAudioMixerHelper.ScanAudioSoundscape(Frame.FDesignRoot, CamP);
+    for I := 0 to High(AudSum.Zones) do
+    begin
+      Z := AudSum.Zones[I];
+      if (Z = nil) or (not Z.Exists) or (not Z.ZoneEnabled) or
+         (not Z.ShowZoneInViewport) then
+        Continue;
+      ZCenter := Z.WorldTranslation;
+      RIn := Z.InnerRadius;
+      ROut := Z.OuterRadius;
+      if RIn > 0.05 then
+        for S := 0 to RingSegs - 1 do
+        begin
+          Ang1 := (2.0 * Pi * S) / RingSegs;
+          Ang2 := (2.0 * Pi * (S + 1)) / RingSegs;
+          P1 := Vector3(ZCenter.X + Cos(Ang1) * RIn, ZCenter.Y, ZCenter.Z + Sin(Ang1) * RIn);
+          P2 := Vector3(ZCenter.X + Cos(Ang2) * RIn, ZCenter.Y, ZCenter.Z + Sin(Ang2) * RIn);
+          if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+             ((TVector3.DotProduct(P1 - CamP, CamD) > 0.1) and
+              (TVector3.DotProduct(P2 - CamP, CamD) > 0.1)) then
+          begin
+            SegPts[0] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(P1));
+            SegPts[1] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(P2));
+            DrawPrimitive2D(pmLines, SegPts, Vector4(0.22, 0.86, 0.96, 0.88),
+              bsSrcAlpha, bdOneMinusSrcAlpha, false, 2.0);
+          end;
+        end;
+      if ROut > RIn + 0.05 then
+        for S := 0 to RingSegs - 1 do
+          if (S and 1) = 0 then
+          begin
+            Ang1 := (2.0 * Pi * S) / RingSegs;
+            Ang2 := (2.0 * Pi * (S + 1)) / RingSegs;
+            P1 := Vector3(ZCenter.X + Cos(Ang1) * ROut, ZCenter.Y, ZCenter.Z + Sin(Ang1) * ROut);
+            P2 := Vector3(ZCenter.X + Cos(Ang2) * ROut, ZCenter.Y, ZCenter.Z + Sin(Ang2) * ROut);
+            if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+               ((TVector3.DotProduct(P1 - CamP, CamD) > 0.1) and
+                (TVector3.DotProduct(P2 - CamP, CamD) > 0.1)) then
+            begin
+              SegPts[0] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(P1));
+              SegPts[1] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(P2));
+              DrawPrimitive2D(pmLines, SegPts, Vector4(0.68, 0.44, 0.98, 0.72),
+                bsSrcAlpha, bdOneMinusSrcAlpha, false, 1.6);
+            end;
+          end;
+    end;
+  end;
+
   procedure RenderAnnotationPinsOverlay(const AVp: TCastleViewport);
   var
     PinReport: TDesignAnnotationAuditReport;
@@ -5778,6 +5847,7 @@ begin
   begin
     RenderStreamingZonesOverlay(Frame.CurrentViewport);
     RenderNavNetworkOverlay(Frame.CurrentViewport);
+    RenderAudioZonesOverlay(Frame.CurrentViewport);
   end;
 
   if (Frame.TransformManipulate <> nil) and
@@ -6140,6 +6210,21 @@ begin
   if ButtonParticleStudio.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonNavNetwork,
       PanelMiddleTop.GetControlIndex(ButtonParticleStudio) + 1);
+
+  ButtonAudioMixer := TSpeedButton.Create(Self);
+  ButtonAudioMixer.Caption := 'Audio Mix';
+  ButtonAudioMixer.Hint := 'Open Spatial Audio Soundscape Mixer, Buses & Reverb Zones Studio.' + NL +
+    'Route SoundSources onto Master/Music/SFX/Voice/Ambient buses, configure voice ducking, and edit 3D acoustic zones.';
+  ButtonAudioMixer.ShowHint := true;
+  ButtonAudioMixer.AutoSize := true;
+  ButtonAudioMixer.Constraints.MinHeight := 33;
+  ButtonAudioMixer.Constraints.MinWidth := 68;
+  ButtonAudioMixer.BorderSpacing.Left := 2;
+  ButtonAudioMixer.OnClick := @ButtonAudioMixerClick;
+  ButtonAudioMixer.Parent := PanelMiddleTop;
+  if ButtonNavNetwork.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonAudioMixer,
+      PanelMiddleTop.GetControlIndex(ButtonNavNetwork) + 1);
 
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
@@ -9015,6 +9100,11 @@ begin
   MenuTreeViewItemNavNetwork.Caption := 'AI Waypoints, A* NavGrid && Perception Studio...';
   MenuTreeViewItemNavNetwork.OnClick := @MenuTreeViewItemNavNetworkClick;
   MenuTreeView.Items.Add(MenuTreeViewItemNavNetwork);
+
+  MenuTreeViewItemAudioMixer := TMenuItem.Create(Self);
+  MenuTreeViewItemAudioMixer.Caption := 'Spatial Audio Mixer, Buses && Reverb Zones...';
+  MenuTreeViewItemAudioMixer.OnClick := @MenuTreeViewItemAudioMixerClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemAudioMixer);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -14205,6 +14295,12 @@ var
         Suffix := Suffix + ' ' + TCastleNavGrid(NodeObj).NavGridSummaryBadge
       else if NodeObj is TCastlePatrolAgentBehavior then
         Suffix := Suffix + ' ' + TCastlePatrolAgentBehavior(NodeObj).AgentSummaryBadge
+      else if NodeObj is TCastleAudioBusMixer then
+        Suffix := Suffix + ' ' + TCastleAudioBusMixer(NodeObj).MixerSummaryBadge
+      else if NodeObj is TCastleAudioZone then
+        Suffix := Suffix + ' ' + TCastleAudioZone(NodeObj).ZoneSummaryBadge
+      else if NodeObj is TCastleAudioBusRouterBehavior then
+        Suffix := Suffix + ' ' + TCastleAudioBusRouterBehavior(NodeObj).RouterSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -53420,6 +53516,45 @@ end;
 procedure TDesignFrame.MenuTreeViewItemNavNetworkClick(Sender: TObject);
 begin
   ShowNavNetworkDialog;
+end;
+
+procedure TDesignFrame.ShowAudioMixerDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  InitComp: TComponent;
+  Dlg: TAudioMixerForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  InitComp := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount > 0 then
+      InitComp := Selected[0];
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  Dlg := TAudioMixerForm.CreateStudio(Self, FDesignRoot, DesignOwner, InitComp,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonAudioMixerClick(Sender: TObject);
+begin
+  ShowAudioMixerDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemAudioMixerClick(Sender: TObject);
+begin
+  ShowAudioMixerDialog;
 end;
 
 initialization
