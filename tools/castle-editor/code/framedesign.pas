@@ -36,12 +36,12 @@ uses
   CastleCameras, CastleBoxes, CastleTransform, CastleDebugTransform,
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
-  CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph,
+  CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
-  ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph;
+  ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -740,6 +740,8 @@ type
       MenuTreeViewItemSequencer: TMenuItem;
       ButtonStateGraph: TSpeedButton;
       MenuTreeViewItemStateGraph: TMenuItem;
+      ButtonParticleStudio: TSpeedButton;
+      MenuTreeViewItemParticleStudio: TMenuItem;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
       FCopiedComponentPropsClassName: String;
@@ -1177,6 +1179,8 @@ type
     procedure SequencerRefreshViewportCallback;
     procedure ButtonStateGraphClick(Sender: TObject);
     procedure MenuTreeViewItemStateGraphClick(Sender: TObject);
+    procedure ButtonParticleStudioClick(Sender: TObject);
+    procedure MenuTreeViewItemParticleStudioClick(Sender: TObject);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
     function NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
@@ -2597,6 +2601,9 @@ type
 
     { Visual State Machine & Behavior Tree Graph Studio (Phase 288). }
     procedure ShowStateGraphDialog;
+
+    { Real-Time 3D VFX Particle Emitter & Preset Studio (Phase 289). }
+    procedure ShowParticleStudioDialog;
   end;
 
 implementation
@@ -2616,7 +2623,7 @@ uses
   { Editor units }
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
-  FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, CastleComponentEditorDesigner;
+  FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -5974,6 +5981,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonStateGraph,
       PanelMiddleTop.GetControlIndex(ButtonSequencer) + 1);
 
+  ButtonParticleStudio := TSpeedButton.Create(Self);
+  ButtonParticleStudio.Caption := 'Particles';
+  ButtonParticleStudio.Hint := 'Open Real-Time 3D VFX Particle Emitter & Preset Studio (Niagara Parity).' + NL +
+    'Spawn Fire, Smoke, Sparks, Magic Portal, Snow/Rain & Explosion emitters and inspect particle budgets.';
+  ButtonParticleStudio.ShowHint := true;
+  ButtonParticleStudio.AutoSize := true;
+  ButtonParticleStudio.Constraints.MinHeight := 33;
+  ButtonParticleStudio.Constraints.MinWidth := 64;
+  ButtonParticleStudio.BorderSpacing.Left := 2;
+  ButtonParticleStudio.OnClick := @ButtonParticleStudioClick;
+  ButtonParticleStudio.Parent := PanelMiddleTop;
+  if ButtonStateGraph.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonParticleStudio,
+      PanelMiddleTop.GetControlIndex(ButtonStateGraph) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -8838,6 +8860,11 @@ begin
   MenuTreeViewItemStateGraph.Caption := 'Visual State Machine && Behavior Graph (StateTree)...';
   MenuTreeViewItemStateGraph.OnClick := @MenuTreeViewItemStateGraphClick;
   MenuTreeView.Items.Add(MenuTreeViewItemStateGraph);
+
+  MenuTreeViewItemParticleStudio := TMenuItem.Create(Self);
+  MenuTreeViewItemParticleStudio.Caption := '3D VFX Particle Emitter && Preset Studio...';
+  MenuTreeViewItemParticleStudio.OnClick := @MenuTreeViewItemParticleStudioClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemParticleStudio);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -14020,6 +14047,8 @@ var
         Suffix := Suffix + ' ' + TCastleSequencePlayer(NodeObj).SequenceSummaryBadge
       else if NodeObj is TCastleStateGraphBehavior then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(NodeObj).GraphSummaryBadge
+      else if NodeObj is TCastleParticleEmitter then
+        Suffix := Suffix + ' ' + TCastleParticleEmitter(NodeObj).EmitterSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -53153,6 +53182,47 @@ end;
 procedure TDesignFrame.MenuTreeViewItemStateGraphClick(Sender: TObject);
 begin
   ShowStateGraphDialog;
+end;
+
+{ Real-Time 3D VFX Particle Emitter & Preset Studio (Phase 289) -------------- }
+
+procedure TDesignFrame.ShowParticleStudioDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  InitComp: TComponent;
+  Dlg: TParticleStudioForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  InitComp := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount > 0 then
+      InitComp := Selected[0];
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  Dlg := TParticleStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner, InitComp,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonParticleStudioClick(Sender: TObject);
+begin
+  ShowParticleStudioDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemParticleStudioClick(Sender: TObject);
+begin
+  ShowParticleStudioDialog;
 end;
 
 initialization

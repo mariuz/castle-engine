@@ -2644,6 +2644,32 @@ Graph.SetFloat('PlayerDistance', 7.5); // Transitions Patrol -> Chase on next up
 
 ---
 
+## 66N. Horizon 3 — Real-Time 3D VFX Particle Emitter & Preset Studio (Phase 289 / UE 5.9 & 6.0 Niagara VFX Parity)
+
+Inspired by **Unreal Engine's Niagara VFX System & Preset Gallery**, `TCastleParticleEmitter` (`src/scene/castleparticles.pas`), `TParticleStudioHelper` (`tools/common-code/toolparticlestudio.pas`), and `TParticleStudioForm` (`tools/castle-editor/code/formparticlestudio.pas`) deliver native, serializable 3D particle emitters with live editor preview and scene budget telemetry.
+
+### Key Capabilities
+1. **Native 3D `TCastleParticleEmitter` Component**:
+   - Supports 5 spawn volumes (`pesPoint`, `pesSphere`, `pesCone`, `pesBox`, `pesCircleRing`), alpha & additive blending (`pbmAlphaBlend`, `pbmAdditive`), continuous `SpawnRate` + `EmitBurst(Count)` bursts, `SizeStart -> SizeEnd` & `ColorStart -> ColorEnd` RGBA lifetime curves, `GravityFactor`, `Drag`, and 3D `Turbulence`.
+   - Renders crossed-quad geometry inside an internal `csTransient` `TCastleScene` (`TTriangleSetNode` + `TColorRGBANode` + `TBlendModeNode`) so saved `.castle-transform` files remain compact and diff-clean.
+2. **VFX Preset Gallery & Budget Studio (`TParticleStudioForm`)**:
+   - Open via the top-bar **`Particles`** button or **`Design -> 3D VFX Particle Emitter & Preset Studio...`**.
+   - Includes 6 1-click presets (`Fire`, `Smoke`, `Sparks`, `Magic Portal`, `Snow / Rain`, `Explosion Burst`), a live RGBA checkerboard + size-envelope preview strip, 30 FPS viewport preview, and scene-wide particle/triangle budget warnings (`> 2,000` peak particles).
+
+### Example Usage (Pascal API)
+```pascal
+TorchVfx := TParticleStudioHelper.CreateEmitterInDesign(
+  ViewportMain, Self, vfxFire, Vector3(0, 2.2, -4.0));
+TorchVfx.EmitBurst(32);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE X3D Rendering Nodes](https://castle-engine.io/x3d_implementation_rendering.php) · [CGE Alpha Blending Manual](https://castle-engine.io/blending) · [UE Niagara VFX Overview](https://dev.epicgames.com/documentation/en-us/unreal-engine/creating-visual-effects-in-niagara-for-unreal-engine) · [Godot 4 3D Particles](https://docs.godotengine.org/en/stable/tutorials/3d/particles/index.html)
+- **Videos & Movies:** 🎬 [CGE Official Video — Visual Effects & 3D Worlds (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [Animated 3D Ring Particle Emission](https://docs.godotengine.org/en/stable/_images/particles_ring_anim.webp)
+- **Screenshots:** [CGE 3D Editor Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Blending & Shader Effects](https://castle-engine.io/images/thumb_const_height_size/shader_effects_simple.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2720,4 +2746,5 @@ In addition, Horizon 2 editor subsystems include dedicated automated test suites
 - **[`tests/code/testcases/testtoolworldstreaming.pas`](../tests/code/testcases/testtoolworldstreaming.pas) (`TTestToolWorldStreaming` — 2 tests)**: Verifies `TCastleStreamingZone` `LoadRadius`/`UnloadRadius` hysteresis transitions without boundary thrashing, `csTransient` child non-duplication across `ComponentToString`/`StringToComponent` JSON roundtrips, `TWorldStreamingInspector.ScanWorld` & Markdown reporting, and `TBehaviorCompositionHelper` registered behavior discovery, attach, non-default RTTI card summary, parent transform resolution, and detach (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolsequencer.pas`](../tests/code/testcases/testtoolsequencer.pas) (`TTestToolSequencer` — 2 tests)**: Verifies multi-track `Vector3`/`Float`/`Bool`/`String` interpolation (`seLinear`, `seSmoothStep`, `seStep`), `stkCameraCut` viewport camera switching, `ComponentToString` JSON roundtrip persistence, `CaptureLivePropertyKey`, `spmOnce`/`spmLoop`/`spmPingPong` playback modes, and `OnCueEvent` marker callbacks (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolstategraph.pas`](../tests/code/testcases/testtoolstategraph.pas) (`TTestToolStateGraph` — 2 tests)**: Verifies `TCastleStateGraphBehavior` blackboard comparisons, `MinStateElapsedSec` timer gates, `'*'` Any-State priority interrupts, entry/exit RTTI/animation/blackboard/cue actions, `ComponentToString` JSON roundtrips, gameplay templates (`AI Patrol/Chase/Attack`, `Interactive Door`, `UI Menu Flow`), `ValidateGraph` unreachable-state & undeclared-variable detection, and Mermaid `stateDiagram-v2` export (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolparticlestudio.pas`](../tests/code/testcases/testtoolparticlestudio.pas) (`TTestToolParticleStudio` — 2 tests)**: Verifies `TCastleParticleEmitter` `pesCircleRing` radial emission, gravity/drag integration, lifetime expiration, continuous `SpawnRate` accumulation, `csTransient` child non-serialization across `ComponentToString` roundtrips, all 6 VFX presets, `MaxParticles` burst capping, and `TParticleStudioHelper` over-budget diagnostics & Markdown export (`0 unfreed memory blocks`).
 

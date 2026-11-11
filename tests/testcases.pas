@@ -114,6 +114,7 @@ uses
   TestToolWorldStreaming,
   TestToolSequencer,
   TestToolStateGraph,
+  TestToolParticleStudio,
   TestCastleVulkanRHI;
 
 implementation

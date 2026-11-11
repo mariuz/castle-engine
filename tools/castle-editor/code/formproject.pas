@@ -602,6 +602,7 @@ type
       MenuItemWorldMinimap: TMenuItem;
       MenuItemSequencer: TMenuItem;
       MenuItemStateGraph: TMenuItem;
+      MenuItemParticleStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -624,6 +625,7 @@ type
     procedure MenuItemWorldMinimapClick(Sender: TObject);
     procedure MenuItemSequencerClick(Sender: TObject);
     procedure MenuItemStateGraphClick(Sender: TObject);
+    procedure MenuItemParticleStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2259,6 +2261,11 @@ begin
   MenuItemStateGraph.OnClick := @MenuItemStateGraphClick;
   MenuItemDesign.Add(MenuItemStateGraph);
 
+  MenuItemParticleStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemParticleStudio.Caption := '3D VFX Particle Emitter & Preset Studio...';
+  MenuItemParticleStudio.OnClick := @MenuItemParticleStudioClick;
+  MenuItemDesign.Add(MenuItemParticleStudio);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -2925,6 +2932,8 @@ begin
     MenuItemSequencer.Enabled := Design <> nil;
   if MenuItemStateGraph <> nil then
     MenuItemStateGraph.Enabled := Design <> nil;
+  if MenuItemParticleStudio <> nil then
+    MenuItemParticleStudio.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5204,6 +5213,12 @@ procedure TProjectForm.MenuItemStateGraphClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowStateGraphDialog;
+end;
+
+procedure TProjectForm.MenuItemParticleStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowParticleStudioDialog;
 end;
 
 initialization

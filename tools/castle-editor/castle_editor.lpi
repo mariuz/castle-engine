@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="49">
+    <Units Count="51">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -327,6 +327,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormStateGraph"/>
       </Unit48>
+      <Unit49>
+        <Filename Value="../common-code/toolparticlestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolParticleStudio"/>
+      </Unit49>
+      <Unit50>
+        <Filename Value="code/formparticlestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormParticleStudio"/>
+      </Unit50>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
