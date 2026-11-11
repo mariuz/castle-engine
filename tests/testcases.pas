@@ -123,6 +123,7 @@ uses
   TestToolLocalization,
   TestToolResponsiveSim,
   TestToolVariantManager,
+  TestToolSplineStudio,
   TestCastleVulkanRHI;
 
 implementation

@@ -610,6 +610,7 @@ type
       MenuItemLocalization: TMenuItem;
       MenuItemResponsiveSim: TMenuItem;
       MenuItemVariantManager: TMenuItem;
+      MenuItemSplineStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -640,6 +641,7 @@ type
     procedure MenuItemLocalizationClick(Sender: TObject);
     procedure MenuItemResponsiveSimClick(Sender: TObject);
     procedure MenuItemVariantManagerClick(Sender: TObject);
+    procedure MenuItemSplineStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2315,6 +2317,11 @@ begin
   MenuItemVariantManager.OnClick := @MenuItemVariantManagerClick;
   MenuItemDesign.Add(MenuItemVariantManager);
 
+  MenuItemSplineStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemSplineStudio.Caption := '3D Spline Paths, Road/River Extruder & Scatter Studio...';
+  MenuItemSplineStudio.OnClick := @MenuItemSplineStudioClick;
+  MenuItemDesign.Add(MenuItemSplineStudio);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -2997,6 +3004,8 @@ begin
     MenuItemResponsiveSim.Enabled := Design <> nil;
   if MenuItemVariantManager <> nil then
     MenuItemVariantManager.Enabled := Design <> nil;
+  if MenuItemSplineStudio <> nil then
+    MenuItemSplineStudio.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5340,6 +5349,12 @@ procedure TProjectForm.MenuItemVariantManagerClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowVariantManagerDialog;
+end;
+
+procedure TProjectForm.MenuItemSplineStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowSplineStudioDialog;
 end;
 
 initialization

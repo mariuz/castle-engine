@@ -2854,6 +2854,32 @@ Mgr.ApplyVariant(DesignRoot, 'Lighting', 'Night');
 
 ---
 
+## 66V. 3D Catmull-Rom Spline Paths, Ribbon Road/River Extruder & Scatter Studio (Phase 297)
+
+Castle Game Engine provides a persistent, arc-length-parameterized 3D Catmull-Rom / Cardinal spline path component, non-destructive PBR ribbon/tube extruder, terrain raycast knot projector, guardrail/prop scatterer, and spline follower behavior matching Unreal Engine 6.0's `USplineComponent` & Landscape Splines:
+
+1. **Runtime & Design-Time Spline Path & Follower (`src/scene/castlesplinepath.pas`)**:
+   - `TCastleSplinePath` (`TCastleTransform`) stores open or closed (`ClosedLoop`) cubic knots (`Position`, banked `RollDeg`, `WidthScale`) in diff-friendly JSON (`ControlPointsJson`), builds a binary-searched arc-length lookup table (`EvaluateLocalAtDistance`, `EvaluateWorldAtDistance`), projects knots onto underlying world geometry (`ProjectControlPointsToWorld`), and extrudes `csTransient` PBR `TPhysicalMaterialNode` + `TTriangleSetNode` geometry (`smRoadRibbon`, alpha-blended `smRiverRibbon`, cylindrical `smCableTube`).
+   - `TCastleSplineFollowerBehavior` (`TCastleBehavior`) glides and banks its parent `TCastleTransform` smoothly along any named spline (`sflmOnce`, `sflmLoop`, `sflmPingPong`).
+2. **Interactive XZ Spline Canvas & Scatter Studio (`TSplineStudioForm` & `TSplineStudioHelper`)**:
+   - Open via the top-bar **`Splines`** button, Hierarchy context menu, or **`Design -> 3D Spline Paths, Road/River Extruder & Scatter Studio...`**.
+   - Provides 1-click **`+ Winding Road`**, **`+ Meandering River`**, **`+ Hanging Cable`**, and **`+ Closed Track`** presets, interactive XZ knot dragging (`LMB`) & appending (`RMB`), **`Populate Along Spline`** arc-length instancing (`PopulateInstancesAlongSpline`), live 30 FPS follower simulation, and Markdown budget reports.
+
+### Example Usage (Pascal API)
+```pascal
+Spline := TSplineStudioHelper.CreateSplineInDesign(DesignRoot, DesignOwner, spWindingRoad, Vector3(0, 8, 0));
+Spline.ProjectControlPointsToWorld(50.0, 0.04);
+TSplineStudioHelper.PopulateInstancesAlongSpline(Spline, DesignOwner, '', 4.0, 2.2, true);
+Follower := TSplineStudioHelper.AttachFollowerToTransform(PatrolCart, DesignOwner, Spline.Name, 6.0);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE X3D Rendering & `TPhysicalMaterialNode`](https://castle-engine.io/x3d_implementation_rendering.php) · [CGE Viewport & Scenes](https://castle-engine.io/viewport_and_scenes) · [UE Blueprint & Landscape Splines](https://dev.epicgames.com/documentation/en-us/unreal-engine/blueprint-splines-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — 3D Worlds & Level Authoring (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Editor Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE PBR Shader Showcase](https://castle-engine.io/images/thumb_const_height_size/shader_effects_simple.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2938,4 +2964,5 @@ In addition, Horizon 2 & Horizon 3 editor subsystems include dedicated automated
 - **[`tests/code/testcases/testtoollocalization.pas`](../tests/code/testcases/testtoollocalization.pas) (`TTestToolLocalization` — 2 tests)**: Verifies 2D `TranslateProperties` + 3D `TCastleLocalizedBehavior` string extraction, live `ApplyLocaleToHierarchy` switching with `'en'` fallback, RFC-4180 CSV export/import roundtrips, `ComponentToString` JSON roundtrips, `GeneratePseudoLocalizedText` `{player}`/`%d`/`%s` token preservation, and fixed-width vs. `AutoSize` UI overflow auditing (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolresponsivesim.pas`](../tests/code/testcases/testtoolresponsivesim.pas) (`TTestToolResponsiveSim` — 2 tests)**: Verifies clean anchored HUD layouts across all 5 device aspect/notch profiles (`16:9`, `21:9`, `16:10`, `19.5:9` Mobile Notch, `4:3` Tablet) and detects `rikOffScreenClipped`, `rikUnsafeNotchOrHomeBar` (`132 px` notch intrusion), `rikSiblingOverlap`, and `rikUndersizedTouchTarget` (`< 44 px`) violations (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolvariantmanager.pas`](../tests/code/testcases/testtoolvariantmanager.pas) (`TTestToolVariantManager` — 2 tests)**: Verifies `TCastleVariantSetManager` atomic multi-component dotted RTTI & persistent-vector (`ColorPersistent`, `TranslationPersistent`, `ScalePersistent`, `Exists`, `Intensity`, `Caption`) variant switching across `Lighting` and `Props` sets, `ComponentToString` JSON roundtrips, `CaptureHierarchyDifferenceIntoVariant` auto-diff recording, and Markdown matrix export (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolsplinestudio.pas`](../tests/code/testcases/testtoolsplinestudio.pas) (`TTestToolSplineStudio` — 2 tests)**: Verifies `TCastleSplinePath` uneven-knot arc-length LUT reparameterization (`EvaluateLocalAtDistance`), banked `RollDeg` & `WidthScale` Hermite interpolation, `smRoadRibbon`/`smCableTube` `csTransient` mesh generation & non-baking across `ComponentToString` JSON roundtrips, `ProjectControlPointsToWorld` downward floor raycast snapping, `PopulateInstancesAlongSpline` idempotent post instancing, and `TCastleSplineFollowerBehavior` `sflmPingPong` bounce motion (`0 unfreed memory blocks`).
 

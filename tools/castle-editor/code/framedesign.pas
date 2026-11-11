@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -758,6 +758,8 @@ type
       MenuTreeViewItemResponsiveSim: TMenuItem;
       ButtonVariantManager: TSpeedButton;
       MenuTreeViewItemVariantManager: TMenuItem;
+      ButtonSplineStudio: TSpeedButton;
+      MenuTreeViewItemSplineStudio: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1213,6 +1215,8 @@ type
     procedure MenuTreeViewItemResponsiveSimClick(Sender: TObject);
     procedure ButtonVariantManagerClick(Sender: TObject);
     procedure MenuTreeViewItemVariantManagerClick(Sender: TObject);
+    procedure ButtonSplineStudioClick(Sender: TObject);
+    procedure MenuTreeViewItemSplineStudioClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2658,6 +2662,9 @@ type
 
     { Variant Manager / Scene Configuration Sets & Live Preset Switcher (Phase 296). }
     procedure ShowVariantManagerDialog;
+
+    { 3D Catmull-Rom Spline Paths, Ribbon Road/River Extruder & Scatter Studio (Phase 297). }
+    procedure ShowSplineStudioDialog;
   end;
 
 implementation
@@ -2678,7 +2685,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -5637,6 +5644,74 @@ procedure TDesignFrame.TDesignerLayer.Render;
     end;
   end;
 
+  procedure RenderSplinePathsOverlay(const AVp: TCastleViewport);
+  const
+    CurveSegs = 48;
+  var
+    SpSum: TSplineStudioSummary;
+    CamP, CamD, CamU, P1, P2, KnotW: TVector3;
+    SegPts: array [0..1] of TVector2;
+    CrossPts: array [0..1] of TVector2;
+    ScreenPt: TVector2;
+    Sp: TCastleSplinePath;
+    S0, S1: TSplineSample;
+    I, S, K: Integer;
+  begin
+    if Frame.FDesignRoot = nil then
+      Exit;
+    AVp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    SpSum := TSplineStudioHelper.ScanSplines(Frame.FDesignRoot);
+    for I := 0 to High(SpSum.Splines) do
+    begin
+      Sp := SpSum.Splines[I];
+      if (Sp = nil) or (not Sp.Exists) or (not Sp.ShowSplineInViewport) or
+         (Sp.ControlPointCount < 2) then
+        Continue;
+      for S := 0 to CurveSegs - 1 do
+      begin
+        S0 := Sp.EvaluateLocalAtNormalizedT(S / CurveSegs);
+        S1 := Sp.EvaluateLocalAtNormalizedT((S + 1) / CurveSegs);
+        if Sp.HasWorldTransform then
+        begin
+          P1 := Sp.LocalToWorld(S0.Position + S0.Up * 0.06);
+          P2 := Sp.LocalToWorld(S1.Position + S1.Up * 0.06);
+        end else
+        begin
+          P1 := S0.Position + S0.Up * 0.06;
+          P2 := S1.Position + S1.Up * 0.06;
+        end;
+        if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+           ((TVector3.DotProduct(P1 - CamP, CamD) > 0.1) and
+            (TVector3.DotProduct(P2 - CamP, CamD) > 0.1)) then
+        begin
+          SegPts[0] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(P1));
+          SegPts[1] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(P2));
+          DrawPrimitive2D(pmLines, SegPts, Vector4(0.28, 0.86, 1.0, 0.92),
+            bsSrcAlpha, bdOneMinusSrcAlpha, false, 2.2);
+        end;
+      end;
+      for K := 0 to Sp.ControlPointCount - 1 do
+      begin
+        KnotW := Sp.GetControlPoint(K).Position + Vector3(0.0, 0.08, 0.0);
+        if Sp.HasWorldTransform then
+          KnotW := Sp.LocalToWorld(KnotW);
+        if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+           (TVector3.DotProduct(KnotW - CamP, CamD) > 0.1) then
+        begin
+          ScreenPt := AVp.LocalToContainerPosition(AVp.PositionFromWorld(KnotW));
+          CrossPts[0] := ScreenPt - Vector2(5.0, 0.0);
+          CrossPts[1] := ScreenPt + Vector2(5.0, 0.0);
+          DrawPrimitive2D(pmLines, CrossPts, Vector4(1.0, 0.88, 0.30, 0.95),
+            bsSrcAlpha, bdOneMinusSrcAlpha, false, 2.0);
+          CrossPts[0] := ScreenPt - Vector2(0.0, 5.0);
+          CrossPts[1] := ScreenPt + Vector2(0.0, 5.0);
+          DrawPrimitive2D(pmLines, CrossPts, Vector4(1.0, 0.88, 0.30, 0.95),
+            bsSrcAlpha, bdOneMinusSrcAlpha, false, 2.0);
+        end;
+      end;
+    end;
+  end;
+
   procedure RenderAnnotationPinsOverlay(const AVp: TCastleViewport);
   var
     PinReport: TDesignAnnotationAuditReport;
@@ -5973,6 +6048,7 @@ begin
     RenderNavNetworkOverlay(Frame.CurrentViewport);
     RenderAudioZonesOverlay(Frame.CurrentViewport);
     RenderPostProcessVolumesOverlay(Frame.CurrentViewport);
+    RenderSplinePathsOverlay(Frame.CurrentViewport);
   end;
 
   if (Frame.TransformManipulate <> nil) and
@@ -6426,6 +6502,21 @@ begin
   if ButtonResponsiveSim.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonVariantManager,
       PanelMiddleTop.GetControlIndex(ButtonResponsiveSim) + 1);
+
+  ButtonSplineStudio := TSpeedButton.Create(Self);
+  ButtonSplineStudio.Caption := 'Splines';
+  ButtonSplineStudio.Hint := 'Open 3D Catmull-Rom Spline Paths, Ribbon Road/River Extruder & Scatter Studio.' + NL +
+    'Author roads, rivers, cables, closed race tracks, terrain-snapped knots, fence/prop scatter, and spline followers.';
+  ButtonSplineStudio.ShowHint := true;
+  ButtonSplineStudio.AutoSize := true;
+  ButtonSplineStudio.Constraints.MinHeight := 33;
+  ButtonSplineStudio.Constraints.MinWidth := 62;
+  ButtonSplineStudio.BorderSpacing.Left := 2;
+  ButtonSplineStudio.OnClick := @ButtonSplineStudioClick;
+  ButtonSplineStudio.Parent := PanelMiddleTop;
+  if ButtonVariantManager.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonSplineStudio,
+      PanelMiddleTop.GetControlIndex(ButtonVariantManager) + 1);
 
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
@@ -9331,6 +9422,11 @@ begin
   MenuTreeViewItemVariantManager.Caption := 'Variant Manager && Scene Configuration Sets...';
   MenuTreeViewItemVariantManager.OnClick := @MenuTreeViewItemVariantManagerClick;
   MenuTreeView.Items.Add(MenuTreeViewItemVariantManager);
+
+  MenuTreeViewItemSplineStudio := TMenuItem.Create(Self);
+  MenuTreeViewItemSplineStudio.Caption := '3D Spline Paths, Road/River Extruder && Scatter Studio...';
+  MenuTreeViewItemSplineStudio.OnClick := @MenuTreeViewItemSplineStudioClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSplineStudio);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -14537,6 +14633,10 @@ var
         Suffix := Suffix + ' ' + TCastleLocalizedBehavior(NodeObj).LocalizedSummaryBadge
       else if NodeObj is TCastleVariantSetManager then
         Suffix := Suffix + ' ' + TCastleVariantSetManager(NodeObj).VariantManagerSummaryBadge
+      else if NodeObj is TCastleSplinePath then
+        Suffix := Suffix + ' ' + TCastleSplinePath(NodeObj).SplineSummaryBadge
+      else if NodeObj is TCastleSplineFollowerBehavior then
+        Suffix := Suffix + ' ' + TCastleSplineFollowerBehavior(NodeObj).FollowerSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -53963,6 +54063,57 @@ end;
 procedure TDesignFrame.MenuTreeViewItemVariantManagerClick(Sender: TObject);
 begin
   ShowVariantManagerDialog;
+end;
+
+procedure TDesignFrame.ShowSplineStudioDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  InitComp: TComponent;
+  SpawnPos, CamPos, CamDir, CamUp: TVector3;
+  Vp: TCastleViewport;
+  Dlg: TSplineStudioForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  InitComp := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount > 0 then
+      InitComp := Selected[0];
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  SpawnPos := TVector3.Zero;
+  Vp := CurrentViewport;
+  if (Vp <> nil) and (Vp.InternalCamera <> nil) then
+  begin
+    Vp.InternalCamera.GetWorldView(CamPos, CamDir, CamUp);
+    SpawnPos := CamPos + CamDir * 6.0;
+    SpawnPos.Y := Max(0.0, SpawnPos.Y - 1.5);
+  end;
+
+  Dlg := TSplineStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner, InitComp,
+    SpawnPos,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);
+begin
+  ShowSplineStudioDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSplineStudioClick(Sender: TObject);
+begin
+  ShowSplineStudioDialog;
 end;
 
 initialization

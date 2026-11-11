@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="65">
+    <Units Count="67">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -407,6 +407,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormVariantManager"/>
       </Unit64>
+      <Unit65>
+        <Filename Value="../common-code/toolsplinestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolSplineStudio"/>
+      </Unit65>
+      <Unit66>
+        <Filename Value="code/formsplinestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormSplineStudio"/>
+      </Unit66>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
