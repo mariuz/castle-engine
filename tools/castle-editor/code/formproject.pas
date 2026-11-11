@@ -614,6 +614,7 @@ type
       MenuItemDecalStudio: TMenuItem;
       MenuItemTimeOfDayStudio: TMenuItem;
       MenuItemDataTableStudio: TMenuItem;
+      MenuItemModularSnap: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -648,6 +649,7 @@ type
     procedure MenuItemDecalStudioClick(Sender: TObject);
     procedure MenuItemTimeOfDayStudioClick(Sender: TObject);
     procedure MenuItemDataTableStudioClick(Sender: TObject);
+    procedure MenuItemModularSnapClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2343,6 +2345,11 @@ begin
   MenuItemDataTableStudio.OnClick := @MenuItemDataTableStudioClick;
   MenuItemDesign.Add(MenuItemDataTableStudio);
 
+  MenuItemModularSnap := TMenuItem.Create(MenuItemDesign);
+  MenuItemModularSnap.Caption := 'Modular Socket Snapping & Dungeon Grammar Studio...';
+  MenuItemModularSnap.OnClick := @MenuItemModularSnapClick;
+  MenuItemDesign.Add(MenuItemModularSnap);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -3033,6 +3040,8 @@ begin
     MenuItemTimeOfDayStudio.Enabled := Design <> nil;
   if MenuItemDataTableStudio <> nil then
     MenuItemDataTableStudio.Enabled := Design <> nil;
+  if MenuItemModularSnap <> nil then
+    MenuItemModularSnap.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5400,6 +5409,12 @@ procedure TProjectForm.MenuItemDataTableStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowDataTableStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemModularSnapClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowModularSnapDialog;
 end;
 
 initialization

@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -766,6 +766,8 @@ type
       MenuTreeViewItemTimeOfDayStudio: TMenuItem;
       ButtonDataTableStudio: TSpeedButton;
       MenuTreeViewItemDataTableStudio: TMenuItem;
+      ButtonModularSnap: TSpeedButton;
+      MenuTreeViewItemModularSnap: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1229,6 +1231,8 @@ type
     procedure MenuTreeViewItemTimeOfDayStudioClick(Sender: TObject);
     procedure ButtonDataTableStudioClick(Sender: TObject);
     procedure MenuTreeViewItemDataTableStudioClick(Sender: TObject);
+    procedure ButtonModularSnapClick(Sender: TObject);
+    procedure MenuTreeViewItemModularSnapClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2680,6 +2684,7 @@ type
     procedure ShowDecalStudioDialog;
     procedure ShowTimeOfDayStudioDialog;
     procedure ShowDataTableStudioDialog;
+    procedure ShowModularSnapDialog;
   end;
 
 implementation
@@ -2700,7 +2705,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -5848,6 +5853,52 @@ procedure TDesignFrame.TDesignerLayer.Render;
     end;
   end;
 
+  procedure RenderSnapSocketsOverlay(const AVp: TCastleViewport);
+  var
+    ModSum: TModularSnapSummary;
+    CamP, CamD, CamU, SPos, SDir, SUp, TipW, BarL, BarR, RightV: TVector3;
+    SegPts: array [0..1] of TVector2;
+    Col: TCastleColor;
+    I: Integer;
+    S: TCastleSnapSocket;
+
+    procedure DrawSeg3D(const A, B: TVector3; const CCol: TCastleColor; const W: Single);
+    begin
+      if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+         ((TVector3.DotProduct(A - CamP, CamD) > 0.1) and
+          (TVector3.DotProduct(B - CamP, CamD) > 0.1)) then
+      begin
+        SegPts[0] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(A));
+        SegPts[1] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(B));
+        DrawPrimitive2D(pmLines, SegPts, CCol,
+          bsSrcAlpha, bdOneMinusSrcAlpha, false, W);
+      end;
+    end;
+
+  begin
+    if Frame.FDesignRoot = nil then
+      Exit;
+    AVp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    ModSum := TModularSnapHelper.ScanModularPiecesAndSockets(Frame.FDesignRoot);
+    for I := 0 to High(ModSum.Sockets) do
+    begin
+      S := ModSum.Sockets[I];
+      if (S = nil) or (not S.Exists) or (not S.ShowSocketInViewport) then
+        Continue;
+      S.GetHierarchyWorldFrame(SPos, SDir, SUp);
+      if S.Occupied then
+        Col := Vector4(1.0, 0.80, 0.25, 0.90)
+      else
+        Col := Vector4(0.25, 0.95, 0.62, 0.92);
+      RightV := TVector3.CrossProduct(SDir, SUp).Normalize;
+      BarL := SPos - RightV * 0.9 + SUp * 0.15;
+      BarR := SPos + RightV * 0.9 + SUp * 0.15;
+      TipW := SPos + SDir * 1.15 + SUp * 0.15;
+      DrawSeg3D(BarL, BarR, Col, 2.0);
+      DrawSeg3D(SPos + SUp * 0.15, TipW, Col, 2.4);
+    end;
+  end;
+
   procedure RenderAnnotationPinsOverlay(const AVp: TCastleViewport);
   var
     PinReport: TDesignAnnotationAuditReport;
@@ -6187,6 +6238,7 @@ begin
     RenderSplinePathsOverlay(Frame.CurrentViewport);
     RenderDecalProjectorsOverlay(Frame.CurrentViewport);
     RenderTimeOfDayCompassOverlay(Frame.CurrentViewport);
+    RenderSnapSocketsOverlay(Frame.CurrentViewport);
   end;
 
   if (Frame.TransformManipulate <> nil) and
@@ -6700,6 +6752,21 @@ begin
   if ButtonTimeOfDayStudio.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonDataTableStudio,
       PanelMiddleTop.GetControlIndex(ButtonTimeOfDayStudio) + 1);
+
+  ButtonModularSnap := TSpeedButton.Create(Self);
+  ButtonModularSnap.Caption := 'Mod Snap';
+  ButtonModularSnap.Hint := 'Open Modular Socket Snapping, Room/Dungeon Grammar & Kitbash Studio.' + NL +
+    'Snap modular doorways/corridors with 180-deg opposing sockets or generate seeded zero-overlap dungeons.';
+  ButtonModularSnap.ShowHint := true;
+  ButtonModularSnap.AutoSize := true;
+  ButtonModularSnap.Constraints.MinHeight := 33;
+  ButtonModularSnap.Constraints.MinWidth := 68;
+  ButtonModularSnap.BorderSpacing.Left := 2;
+  ButtonModularSnap.OnClick := @ButtonModularSnapClick;
+  ButtonModularSnap.Parent := PanelMiddleTop;
+  if ButtonDataTableStudio.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonModularSnap,
+      PanelMiddleTop.GetControlIndex(ButtonDataTableStudio) + 1);
 
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
@@ -9625,6 +9692,11 @@ begin
   MenuTreeViewItemDataTableStudio.Caption := 'DataTables, Gameplay Tags && Balance Curve Studio...';
   MenuTreeViewItemDataTableStudio.OnClick := @MenuTreeViewItemDataTableStudioClick;
   MenuTreeView.Items.Add(MenuTreeViewItemDataTableStudio);
+
+  MenuTreeViewItemModularSnap := TMenuItem.Create(Self);
+  MenuTreeViewItemModularSnap.Caption := 'Modular Socket Snapping && Dungeon Grammar Studio...';
+  MenuTreeViewItemModularSnap.OnClick := @MenuTreeViewItemModularSnapClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemModularSnap);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -14843,6 +14915,10 @@ var
         Suffix := Suffix + ' ' + TCastleDataTable(NodeObj).DataTableSummaryBadge
       else if NodeObj is TCastleGameplayTagBehavior then
         Suffix := Suffix + ' ' + TCastleGameplayTagBehavior(NodeObj).TagSummaryBadge
+      else if NodeObj is TCastleSnapSocket then
+        Suffix := Suffix + ' ' + TCastleSnapSocket(NodeObj).SocketSummaryBadge
+      else if NodeObj is TCastleModularPieceBehavior then
+        Suffix := Suffix + ' ' + TCastleModularPieceBehavior(NodeObj).PieceSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -54442,6 +54518,56 @@ end;
 procedure TDesignFrame.MenuTreeViewItemDataTableStudioClick(Sender: TObject);
 begin
   ShowDataTableStudioDialog;
+end;
+
+procedure TDesignFrame.ShowModularSnapDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  InitComp: TComponent;
+  SpawnPos, CamP, CamD, CamU: TVector3;
+  Vp: TCastleViewport;
+  Dlg: TModularSnapForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  InitComp := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount > 0 then
+      InitComp := Selected[0];
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  SpawnPos := TVector3.Zero;
+  Vp := CurrentViewport;
+  if (Vp <> nil) and (Vp.InternalCamera <> nil) then
+  begin
+    Vp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    SpawnPos := Vector3(CamP.X + CamD.X * 8.0, 0.0, CamP.Z + CamD.Z * 8.0);
+  end;
+
+  Dlg := TModularSnapForm.CreateStudio(Self, FDesignRoot, DesignOwner, InitComp,
+    SpawnPos,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonModularSnapClick(Sender: TObject);
+begin
+  ShowModularSnapDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemModularSnapClick(Sender: TObject);
+begin
+  ShowModularSnapDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

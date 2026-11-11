@@ -127,6 +127,7 @@ uses
   TestToolDecalStudio,
   TestToolTimeOfDayStudio,
   TestToolDataTableStudio,
+  TestToolModularSnap,
   TestCastleVulkanRHI;
 
 implementation

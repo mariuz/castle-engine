@@ -2958,6 +2958,32 @@ DT.ApplyRowToComponent('Elder_Dragon', BossLiving, DesignOwner);
 
 ---
 
+## 66Z. Modular Socket Snapping, Room/Dungeon Grammar & Kitbash Studio (Phase 301)
+
+Castle Game Engine provides typed 3D connector sockets, closed-form $180^\circ$ opposing-doorway snapping, and seeded zero-overlap PCG dungeon assembly matching Unreal Engine 6.0's Modular Socket Snapping & PCG Grammar:
+
+1. **Typed Snap Sockets & Modular Pieces (`src/scene/castlemodularsnap.pas`)**:
+   - `TCastleSnapSocket` (`TCastleTransform`) defines a typed connector (`SocketCategory = 'Doorway_3m'`, `Occupied`, `ConnectedSocketName`) whose local `+Z` points outward from the doorway/flange.
+   - `SnapModularPieceToTargetSocket` computes the exact orthonormal 3x3 world rotation and offset so the moving socket meets the target socket flush with $180^\circ$ opposing normals, while `CheckModularPieceWorldOverlap` rejects interior room AABB collisions.
+2. **Modular Snap & Dungeon Grammar Studio (`TModularSnapForm` & `TModularSnapHelper`)**:
+   - Open via the top-bar **`Mod Snap`** button, Hierarchy context menu, or **`Design -> Modular Socket Snapping & Dungeon Grammar Studio...`**.
+   - Provides 1-click modular room kitbash spawners (`Entry Hall`, `Corridor`, `Corner L`, `4-Way Cross`, `Chamber`), **`Snap Piece -> Nearest Socket`**, deterministic **`Generate Seeded Dungeon`**, 3D socket T-arrows, and a 2D XZ blueprint preview.
+
+### Example Usage (Pascal API)
+```pascal
+Placed := TModularSnapHelper.GenerateSeededDungeonLayout(DesignRoot, DesignOwner, 9, 4242);
+ExtraRoom := TModularSnapHelper.CreateModularPieceInDesign(
+  DesignRoot, DesignOwner, mpkTreasureChamber, Vector3(0, 0, 0));
+TModularSnapHelper.SnapPieceToNearestOpenSocket(ExtraRoom, DesignRoot, 80.0);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE 3D Transforms & Viewports](https://castle-engine.io/viewport_and_scenes) · [UE PCG Overview](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-content-generation-overview) · [Godot 4 Modular 3D Levels](https://docs.godotengine.org/en/stable/tutorials/3d/using_gridmaps.html)
+- **Videos & Movies:** 🎬 [CGE Official Video — Modular 3D Level Building (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Level Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Transform Scene](https://castle-engine.io/images/thumb_const_height_size/transform_scene.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3046,4 +3072,5 @@ In addition, Horizon 2 & Horizon 3 editor subsystems include dedicated automated
 - **[`tests/code/testcases/testtooldecalstudio.pas`](../tests/code/testcases/testtooldecalstudio.pas) (`TTestToolDecalStudio` — 2 tests)**: Verifies `TDecalStudioHelper.StampDecalAlongRay` floor alignment & `128`-triangle conformal projection, `NormalAngleCutoffDeg` `45°` vs. `80°` grazing cliff rejection/acceptance on a `70°` slope, `ComponentToString` JSON roundtrips without `csTransient` bloat, procedural preset RGBA evaluation (`dpPuddleWet`, `dpHazardStripe`, `dpMagicRune`), `SortOrder` sorting, and sky-floating empty-projection warnings (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooltimeofdaystudio.pas`](../tests/code/testcases/testtooltimeofdaystudio.pas) (`TTestToolTimeOfDayStudio` — 2 tests)**: Verifies `TTimeOfDayStudioHelper.EnsureTimeOfDayRigInDesign` automatic `SunLight`/`SkyBackground`/`AtmosphereFog`/`TCastleViewport` wiring, exact summer-solstice solar noon (`78.44°`, `180°` South) / dawn / dusk / lunar midnight ephemeris, `AdvanceTimeSeconds` 24h wraparound, `ComponentToString` JSON roundtrips, `wpRainStorm` cloud/fog/wind attenuation, and `wpBloodMoon` crimson lunar lighting (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldatatablestudio.pas`](../tests/code/testcases/testtooldatatablestudio.pas) (`TTestToolDataTableStudio` — 2 tests)**: Verifies `TCastleDataTable` typed cell accessors, strict dot-boundary `Enemy.Boss.*` Gameplay Tag queries (rejecting `Enemy.Bossy`), quoted RFC-4180 CSV & `ComponentToString` JSON roundtrips, all 4 `TBalanceCurveKind` progression formulas, `ApplyRowToComponent` RTTI binding onto `TCastleLiving`, and `ValidateSchemaCells` type diagnostics (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolmodularsnap.pas`](../tests/code/testcases/testtoolmodularsnap.pas) (`TTestToolModularSnap` — 2 tests)**: Verifies closed-form $180^\circ$ opposing socket snapping onto a $90^\circ$-rotated `EntryHall`, `SocketCategory` mismatch rejection (`Pipe_Flange` vs. `Doorway_3m`), `csTransient` greybox non-baking across JSON roundtrips, deterministic seeded zero-overlap `GenerateSeededDungeonLayout` (`9` rooms, `OverlappingPairsCount = 0`), overlap warning detection, and `ClearGeneratedDungeonPieces` (`0 unfreed memory blocks`).
 

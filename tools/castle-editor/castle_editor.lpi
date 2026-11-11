@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="73">
+    <Units Count="75">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -447,6 +447,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormDataTableStudio"/>
       </Unit72>
+      <Unit73>
+        <Filename Value="../common-code/toolmodularsnap.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolModularSnap"/>
+      </Unit73>
+      <Unit74>
+        <Filename Value="code/formmodularsnap.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormModularSnap"/>
+      </Unit74>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
