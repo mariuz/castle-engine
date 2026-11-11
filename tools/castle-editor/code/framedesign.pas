@@ -43,7 +43,7 @@ uses
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -754,6 +754,10 @@ type
       MenuTreeViewItemPostProcess: TMenuItem;
       ButtonLocalization: TSpeedButton;
       MenuTreeViewItemLocalization: TMenuItem;
+      ButtonResponsiveSim: TSpeedButton;
+      MenuTreeViewItemResponsiveSim: TMenuItem;
+      FShowResponsiveSafeAreaGuides: Boolean;
+      FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
       FCopiedComponentPropsClassName: String;
@@ -1203,6 +1207,9 @@ type
     procedure MenuTreeViewItemPostProcessClick(Sender: TObject);
     procedure ButtonLocalizationClick(Sender: TObject);
     procedure MenuTreeViewItemLocalizationClick(Sender: TObject);
+    procedure ButtonResponsiveSimClick(Sender: TObject);
+    procedure MenuTreeViewItemResponsiveSimClick(Sender: TObject);
+    procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
     function NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
@@ -2641,6 +2648,9 @@ type
 
     { Localization (i18n) String Extractor, Live Locale Switcher & Pseudo-L10n Auditor (Phase 294). }
     procedure ShowLocalizationDialog;
+
+    { Multi-Resolution Responsive UI Safe-Area, Notch & Touch-Target Simulator (Phase 295). }
+    procedure ShowResponsiveSimDialog;
   end;
 
 implementation
@@ -2661,7 +2671,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -5919,6 +5929,30 @@ begin
     RenderLightBudgetOverlay(Frame.CurrentViewport);
   end;
 
+  if Frame.FShowResponsiveSafeAreaGuides and
+     (Container.PixelsWidth > 16) and (Container.PixelsHeight > 16) then
+  begin
+    with TResponsiveUiSimulator.GetProfileSpec(Frame.FActiveResponsiveProfile) do
+    begin
+      DrawRectangleOutline(FloatRectangle(
+        Container.PixelsWidth * (InsetLeftPx / Max(1, WidthPx)),
+        Container.PixelsHeight * (InsetBottomPx / Max(1, HeightPx)),
+        Container.PixelsWidth * (1.0 - (InsetLeftPx + InsetRightPx) / Max(1, WidthPx)),
+        Container.PixelsHeight * (1.0 - (InsetTopPx + InsetBottomPx) / Max(1, HeightPx))),
+        Vector4(0.22, 0.92, 0.60, 0.90));
+      if InsetLeftPx > 0 then
+        DrawRectangle(FloatRectangle(0, Container.PixelsHeight * 0.28,
+          Container.PixelsWidth * (InsetLeftPx * 0.72 / Max(1, WidthPx)),
+          Container.PixelsHeight * 0.44),
+          Vector4(0.95, 0.25, 0.28, 0.30));
+      if InsetBottomPx > 0 then
+        DrawRectangle(FloatRectangle(Container.PixelsWidth * 0.34, 4,
+          Container.PixelsWidth * 0.32,
+          Max(6.0, Container.PixelsHeight * (InsetBottomPx * 0.28 / Max(1, HeightPx)))),
+          Vector4(0.92, 0.95, 1.0, 0.55));
+    end;
+  end;
+
   if Frame.FShowAnnotationPinsOverlay and
      (Frame.CurrentViewport <> nil) and (Frame.CurrentViewport.InternalCamera <> nil) then
   begin
@@ -6354,6 +6388,22 @@ begin
   if ButtonPostProcess.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonLocalization,
       PanelMiddleTop.GetControlIndex(ButtonPostProcess) + 1);
+
+  FActiveResponsiveProfile := rdpMobileNotch195x9;
+  ButtonResponsiveSim := TSpeedButton.Create(Self);
+  ButtonResponsiveSim.Caption := 'Safe Area';
+  ButtonResponsiveSim.Hint := 'Open Multi-Resolution Responsive UI Safe-Area, Notch & Touch-Target Simulator.' + NL +
+    'Audit 2D UI layouts across 16:9, 21:9, 16:10, 19.5:9 Mobile Notch, and 4:3 Tablet for clipping, overlaps, and < 44px touch targets.';
+  ButtonResponsiveSim.ShowHint := true;
+  ButtonResponsiveSim.AutoSize := true;
+  ButtonResponsiveSim.Constraints.MinHeight := 33;
+  ButtonResponsiveSim.Constraints.MinWidth := 68;
+  ButtonResponsiveSim.BorderSpacing.Left := 2;
+  ButtonResponsiveSim.OnClick := @ButtonResponsiveSimClick;
+  ButtonResponsiveSim.Parent := PanelMiddleTop;
+  if ButtonLocalization.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonResponsiveSim,
+      PanelMiddleTop.GetControlIndex(ButtonLocalization) + 1);
 
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
@@ -9249,6 +9299,11 @@ begin
   MenuTreeViewItemLocalization.Caption := 'Localization (i18n) Extractor && Pseudo-L10n Auditor...';
   MenuTreeViewItemLocalization.OnClick := @MenuTreeViewItemLocalizationClick;
   MenuTreeView.Items.Add(MenuTreeViewItemLocalization);
+
+  MenuTreeViewItemResponsiveSim := TMenuItem.Create(Self);
+  MenuTreeViewItemResponsiveSim.Caption := 'Multi-Resolution Responsive UI && Safe-Area Simulator...';
+  MenuTreeViewItemResponsiveSim.OnClick := @MenuTreeViewItemResponsiveSimClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemResponsiveSim);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -53806,6 +53861,40 @@ end;
 procedure TDesignFrame.MenuTreeViewItemLocalizationClick(Sender: TObject);
 begin
   ShowLocalizationDialog;
+end;
+
+procedure TDesignFrame.ResponsiveToggleGuidesCallback(const AEnabled: Boolean;
+  const AProfile: TResponsiveDeviceProfileKind);
+begin
+  FShowResponsiveSafeAreaGuides := AEnabled;
+  FActiveResponsiveProfile := AProfile;
+  CastleControl.Invalidate;
+end;
+
+procedure TDesignFrame.ShowResponsiveSimDialog;
+var
+  Dlg: TResponsiveSimForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TResponsiveSimForm.CreateStudio(Self, FDesignRoot,
+    FShowResponsiveSafeAreaGuides, FActiveResponsiveProfile,
+    @ResponsiveToggleGuidesCallback);
+  try
+    Dlg.ShowModal;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonResponsiveSimClick(Sender: TObject);
+begin
+  ShowResponsiveSimDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemResponsiveSimClick(Sender: TObject);
+begin
+  ShowResponsiveSimDialog;
 end;
 
 initialization

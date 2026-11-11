@@ -608,6 +608,7 @@ type
       MenuItemAssetGraph: TMenuItem;
       MenuItemPostProcess: TMenuItem;
       MenuItemLocalization: TMenuItem;
+      MenuItemResponsiveSim: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -636,6 +637,7 @@ type
     procedure MenuItemAssetGraphClick(Sender: TObject);
     procedure MenuItemPostProcessClick(Sender: TObject);
     procedure MenuItemLocalizationClick(Sender: TObject);
+    procedure MenuItemResponsiveSimClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2301,6 +2303,11 @@ begin
   MenuItemLocalization.OnClick := @MenuItemLocalizationClick;
   MenuItemDesign.Add(MenuItemLocalization);
 
+  MenuItemResponsiveSim := TMenuItem.Create(MenuItemDesign);
+  MenuItemResponsiveSim.Caption := 'Multi-Resolution Responsive UI & Safe-Area Simulator...';
+  MenuItemResponsiveSim.OnClick := @MenuItemResponsiveSimClick;
+  MenuItemDesign.Add(MenuItemResponsiveSim);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -2979,6 +2986,8 @@ begin
     MenuItemPostProcess.Enabled := Design <> nil;
   if MenuItemLocalization <> nil then
     MenuItemLocalization.Enabled := Design <> nil;
+  if MenuItemResponsiveSim <> nil then
+    MenuItemResponsiveSim.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5305,6 +5314,12 @@ procedure TProjectForm.MenuItemLocalizationClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowLocalizationDialog;
+end;
+
+procedure TProjectForm.MenuItemResponsiveSimClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowResponsiveSimDialog;
 end;
 
 initialization

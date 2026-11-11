@@ -120,6 +120,7 @@ uses
   TestToolAssetGraph,
   TestToolPostProcessStudio,
   TestToolLocalization,
+  TestToolResponsiveSim,
   TestCastleVulkanRHI;
 
 implementation

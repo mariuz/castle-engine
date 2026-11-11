@@ -2803,6 +2803,30 @@ Audit := TLocalizationHelper.AuditHierarchyLocalization(DesignRoot, ['de', 'pseu
 
 ---
 
+## 66T. Multi-Resolution Responsive UI Safe-Area, Notch & Touch-Target Simulator (Phase 295)
+
+Castle Game Engine provides a 5-profile cross-platform 2D UI layout simulator, notch/home-bar safe-area auditor, sibling collision detector, and `44 px` touch-target validator matching Unreal Engine 5.9/6.0's CommonUI & UMG Safe Zone tools:
+
+1. **Multi-Aspect Layout & Safe-Area Simulator (`tools/common-code/toolresponsivesim.pas`)**:
+   - `TResponsiveUiSimulator.SimulateProfile` and `AuditAllProfiles` evaluate CGE `usEncloseReferenceSize` scaling, `HorizontalAnchorParent`/`Self`, `VerticalAnchorParent`/`Self`, `WidthFraction`/`HeightFraction`, `FullSize`, and `AutoSize` across `Desktop 16:9` (`1920x1080`), `Ultrawide 21:9` (`2560x1080`), `Handheld 16:10` (`1280x800`), `Mobile Notch 19.5:9` (`2532x1170` with `132 px` notch & `63 px` home-bar insets), and `Tablet 4:3` (`2048x1536`).
+   - Flags `rikOffScreenClipped`, `rikUnsafeNotchOrHomeBar`, `rikSiblingOverlap`, and `rikUndersizedTouchTarget` (`< 44x44 px` on touch profiles).
+2. **Interactive Device Preview & Viewport Guides (`TResponsiveSimForm`)**:
+   - Open via the top-bar **`Safe Area`** button, Hierarchy context menu, or **`Design -> Multi-Resolution Responsive UI & Safe-Area Simulator...`**.
+   - Renders scaled device bezels, camera notches, home-indicator bars, emerald safe-area frames, and color-coded UI boxes, plus live 2D viewport safe-area overlay guides (`Show Safe-Area in Viewport`).
+
+### Example Usage (Pascal API)
+```pascal
+Summary := TResponsiveUiSimulator.AuditAllProfiles(DesignRoot, 1920, 1080);
+Markdown := TResponsiveUiSimulator.FormatResponsiveAuditMarkdown(DesignRoot);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE 2D UI & Anchors Manual](https://castle-engine.io/manual_2d_user_interface.php) · [UE CommonUI Plugin](https://dev.epicgames.com/documentation/en-us/unreal-engine/common-ui-plugin-for-advanced-user-interfaces-in-unreal-engine) · [Godot 4 Multiple Resolutions](https://docs.godotengine.org/en/stable/tutorials/rendering/multiple_resolutions.html)
+- **Videos & Movies:** 🎬 [CGE Official Video — Responsive 2D UI & Anchors (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [UE CommonUI Multi-Device Preview](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/b82f9d34-61e0-45ec-93f8-8267f03923eb/common-ui-overview.png)
+- **Screenshots:** [CGE UI Anchor Designer](https://castle-engine.io/images/thumb_const_height_size/ui_editor.webp) · [Responsive Safe-Zone Simulator](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/b82f9d34-61e0-45ec-93f8-8267f03923eb/common-ui-overview.png)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2885,4 +2909,5 @@ In addition, Horizon 2 editor subsystems include dedicated automated test suites
 - **[`tests/code/testcases/testtoolassetgraph.pas`](../tests/code/testcases/testtoolassetgraph.pas) (`TTestToolAssetGraph` — 2 tests)**: Verifies multi-hop bidirectional `Referencers <-> Dependencies` indexing across `.castle-user-interface -> .castle-transform -> .gltf -> .png`, orphan asset & byte-size detection, Mermaid `flowchart LR` export, moved-asset broken `castle-data:/` URL auto-repair (`RepairBrokenUrls`), and non-destructive `.castle-orphan-trash/` quarantine (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolpostprocessstudio.pas`](../tests/code/testcases/testtoolpostprocessstudio.pas) (`TTestToolPostProcessStudio` — 2 tests)**: Verifies `TCastlePostProcessVolume` global vs. bounded Hermite `CoreRadius`/`BlendRadius` falloff, `Priority` override sorting, `ComponentToString` JSON roundtrips, all 6 `TCastlePostProcessPreset` look presets, `TCastlePostProcessStack` live X3D `TScreenEffectNode` attachment/enablement on `TCastleViewport`, `EvaluateColorGradeCpuPreview`, and GLSL/Markdown export (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoollocalization.pas`](../tests/code/testcases/testtoollocalization.pas) (`TTestToolLocalization` — 2 tests)**: Verifies 2D `TranslateProperties` + 3D `TCastleLocalizedBehavior` string extraction, live `ApplyLocaleToHierarchy` switching with `'en'` fallback, RFC-4180 CSV export/import roundtrips, `ComponentToString` JSON roundtrips, `GeneratePseudoLocalizedText` `{player}`/`%d`/`%s` token preservation, and fixed-width vs. `AutoSize` UI overflow auditing (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolresponsivesim.pas`](../tests/code/testcases/testtoolresponsivesim.pas) (`TTestToolResponsiveSim` — 2 tests)**: Verifies clean anchored HUD layouts across all 5 device aspect/notch profiles (`16:9`, `21:9`, `16:10`, `19.5:9` Mobile Notch, `4:3` Tablet) and detects `rikOffScreenClipped`, `rikUnsafeNotchOrHomeBar` (`132 px` notch intrusion), `rikSiblingOverlap`, and `rikUndersizedTouchTarget` (`< 44 px`) violations (`0 unfreed memory blocks`).
 
