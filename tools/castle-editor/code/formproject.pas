@@ -612,6 +612,7 @@ type
       MenuItemVariantManager: TMenuItem;
       MenuItemSplineStudio: TMenuItem;
       MenuItemDecalStudio: TMenuItem;
+      MenuItemTimeOfDayStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -644,6 +645,7 @@ type
     procedure MenuItemVariantManagerClick(Sender: TObject);
     procedure MenuItemSplineStudioClick(Sender: TObject);
     procedure MenuItemDecalStudioClick(Sender: TObject);
+    procedure MenuItemTimeOfDayStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2329,6 +2331,11 @@ begin
   MenuItemDecalStudio.OnClick := @MenuItemDecalStudioClick;
   MenuItemDesign.Add(MenuItemDecalStudio);
 
+  MenuItemTimeOfDayStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemTimeOfDayStudio.Caption := 'Dynamic Time-of-Day, Solar Ephemeris & Weather Studio...';
+  MenuItemTimeOfDayStudio.OnClick := @MenuItemTimeOfDayStudioClick;
+  MenuItemDesign.Add(MenuItemTimeOfDayStudio);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -3015,6 +3022,8 @@ begin
     MenuItemSplineStudio.Enabled := Design <> nil;
   if MenuItemDecalStudio <> nil then
     MenuItemDecalStudio.Enabled := Design <> nil;
+  if MenuItemTimeOfDayStudio <> nil then
+    MenuItemTimeOfDayStudio.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5370,6 +5379,12 @@ procedure TProjectForm.MenuItemDecalStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowDecalStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemTimeOfDayStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowTimeOfDayStudioDialog;
 end;
 
 initialization

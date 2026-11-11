@@ -2907,6 +2907,32 @@ Decal.ConformAndRebuildMesh;
 
 ---
 
+## 66X. Dynamic Time-of-Day Solar Ephemeris, Sky/Atmosphere & Weather Studio (Phase 299)
+
+Castle Game Engine provides a unified 24-hour solar/lunar ephemeris solver, sky/fog synchronizer, and weather preset studio matching Unreal Engine 6.0's `SkyAtmosphere` & Volumetric Weather:
+
+1. **24-Hour Solar Ephemeris & Weather Controller (`src/scene/castletimeofdayweather.pas`)**:
+   - `TCastleTimeOfDayWeather` (`TCastleTransform`) computes spherical solar elevation/azimuth from `LatitudeDeg`, `DayOfYear`, and `TimeOfDayHours` (`0..24`), transitions smoothly between daytime sun, golden twilight, and opposite-dome lunar night (`IsNightLunarMode`), applies 6 weather presets (`wpClearSunny`, `wpGoldenDusk`, `wpOvercastFog`, `wpRainStorm`, `wpBlizzardSnow`, `wpBloodMoon`), and synchronizes `TCastleDirectionalLight`, `TCastleBackground`, `TCastleFog`, and `TCastleViewport`.
+2. **Time-of-Day & Weather Studio (`TTimeOfDayStudioForm` & `TTimeOfDayStudioHelper`)**:
+   - Open via the top-bar **`Sky / ToD`** button, Hierarchy context menu, or **`Design -> Dynamic Time-of-Day, Solar Ephemeris & Weather Studio...`**.
+   - Provides 1-click **`+ Ensure Sky/Sun/Fog Rig`** (`EnsureTimeOfDayRigInDesign`), interactive `00:00..24:00` sky-gradient + solar-elevation arc scrubbing, live 24h cycle playback, 3D solar compass + wind overlays, and Markdown ephemeris reports.
+
+### Example Usage (Pascal API)
+```pascal
+Tod := TTimeOfDayStudioHelper.EnsureTimeOfDayRigInDesign(
+  DesignRoot, DesignOwner, wpGoldenDusk);
+Tod.LatitudeDeg := 35.0;
+Tod.AutoAdvanceInRuntime := true;
+Tod.DayLengthRealSeconds := 600.0;
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Viewport, Lights, Background & Fog](https://castle-engine.io/viewport_and_scenes) · [CGE X3D Environmental Effects](https://castle-engine.io/x3d_implementation_environmental_effects.php) · [UE Sky Atmosphere](https://dev.epicgames.com/documentation/en-us/unreal-engine/sky-atmosphere-component-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Outdoor Worlds, Lighting & Atmosphere (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Viewport Lighting](https://castle-engine.io/images/thumb_size/viewport_3d_nice_view.webp) · [CGE Outdoor Editor](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2993,4 +3019,5 @@ In addition, Horizon 2 & Horizon 3 editor subsystems include dedicated automated
 - **[`tests/code/testcases/testtoolvariantmanager.pas`](../tests/code/testcases/testtoolvariantmanager.pas) (`TTestToolVariantManager` — 2 tests)**: Verifies `TCastleVariantSetManager` atomic multi-component dotted RTTI & persistent-vector (`ColorPersistent`, `TranslationPersistent`, `ScalePersistent`, `Exists`, `Intensity`, `Caption`) variant switching across `Lighting` and `Props` sets, `ComponentToString` JSON roundtrips, `CaptureHierarchyDifferenceIntoVariant` auto-diff recording, and Markdown matrix export (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolsplinestudio.pas`](../tests/code/testcases/testtoolsplinestudio.pas) (`TTestToolSplineStudio` — 2 tests)**: Verifies `TCastleSplinePath` uneven-knot arc-length LUT reparameterization (`EvaluateLocalAtDistance`), banked `RollDeg` & `WidthScale` Hermite interpolation, `smRoadRibbon`/`smCableTube` `csTransient` mesh generation & non-baking across `ComponentToString` JSON roundtrips, `ProjectControlPointsToWorld` downward floor raycast snapping, `PopulateInstancesAlongSpline` idempotent post instancing, and `TCastleSplineFollowerBehavior` `sflmPingPong` bounce motion (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldecalstudio.pas`](../tests/code/testcases/testtooldecalstudio.pas) (`TTestToolDecalStudio` — 2 tests)**: Verifies `TDecalStudioHelper.StampDecalAlongRay` floor alignment & `128`-triangle conformal projection, `NormalAngleCutoffDeg` `45°` vs. `80°` grazing cliff rejection/acceptance on a `70°` slope, `ComponentToString` JSON roundtrips without `csTransient` bloat, procedural preset RGBA evaluation (`dpPuddleWet`, `dpHazardStripe`, `dpMagicRune`), `SortOrder` sorting, and sky-floating empty-projection warnings (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtooltimeofdaystudio.pas`](../tests/code/testcases/testtooltimeofdaystudio.pas) (`TTestToolTimeOfDayStudio` — 2 tests)**: Verifies `TTimeOfDayStudioHelper.EnsureTimeOfDayRigInDesign` automatic `SunLight`/`SkyBackground`/`AtmosphereFog`/`TCastleViewport` wiring, exact summer-solstice solar noon (`78.44°`, `180°` South) / dawn / dusk / lunar midnight ephemeris, `AdvanceTimeSeconds` 24h wraparound, `ComponentToString` JSON roundtrips, `wpRainStorm` cloud/fog/wind attenuation, and `wpBloodMoon` crimson lunar lighting (`0 unfreed memory blocks`).
 

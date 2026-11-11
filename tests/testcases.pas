@@ -125,6 +125,7 @@ uses
   TestToolVariantManager,
   TestToolSplineStudio,
   TestToolDecalStudio,
+  TestToolTimeOfDayStudio,
   TestCastleVulkanRHI;
 
 implementation

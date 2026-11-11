@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -762,6 +762,8 @@ type
       MenuTreeViewItemSplineStudio: TMenuItem;
       ButtonDecalStudio: TSpeedButton;
       MenuTreeViewItemDecalStudio: TMenuItem;
+      ButtonTimeOfDayStudio: TSpeedButton;
+      MenuTreeViewItemTimeOfDayStudio: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1221,6 +1223,8 @@ type
     procedure MenuTreeViewItemSplineStudioClick(Sender: TObject);
     procedure ButtonDecalStudioClick(Sender: TObject);
     procedure MenuTreeViewItemDecalStudioClick(Sender: TObject);
+    procedure ButtonTimeOfDayStudioClick(Sender: TObject);
+    procedure MenuTreeViewItemTimeOfDayStudioClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2670,6 +2674,7 @@ type
     { 3D Catmull-Rom Spline Paths, Ribbon Road/River Extruder & Scatter Studio (Phase 297). }
     procedure ShowSplineStudioDialog;
     procedure ShowDecalStudioDialog;
+    procedure ShowTimeOfDayStudioDialog;
   end;
 
 implementation
@@ -2690,7 +2695,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -5782,6 +5787,62 @@ procedure TDesignFrame.TDesignerLayer.Render;
     end;
   end;
 
+  procedure RenderTimeOfDayCompassOverlay(const AVp: TCastleViewport);
+  var
+    TodSum: TTimeOfDayStudioSummary;
+    CamP, CamD, CamU, CenterW, PtA, PtB, SunTip, WindTip: TVector3;
+    SegPts: array [0..1] of TVector2;
+    C: TCastleTimeOfDayWeather;
+    S: TTimeOfDayAtmosphereState;
+    I, Seg: Integer;
+    Ang0, Ang1: Single;
+
+    procedure DrawSeg3D(const A, B: TVector3; const Col: TCastleColor; const W: Single);
+    begin
+      if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+         ((TVector3.DotProduct(A - CamP, CamD) > 0.1) and
+          (TVector3.DotProduct(B - CamP, CamD) > 0.1)) then
+      begin
+        SegPts[0] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(A));
+        SegPts[1] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(B));
+        DrawPrimitive2D(pmLines, SegPts, Col,
+          bsSrcAlpha, bdOneMinusSrcAlpha, false, W);
+      end;
+    end;
+
+  begin
+    if Frame.FDesignRoot = nil then
+      Exit;
+    AVp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    TodSum := TTimeOfDayStudioHelper.ScanTimeOfDayControllers(Frame.FDesignRoot);
+    for I := 0 to High(TodSum.Controllers) do
+    begin
+      C := TodSum.Controllers[I];
+      if (C = nil) or (not C.Exists) or (not C.ShowSolarCompassInViewport) then
+        Continue;
+      if C.HasWorldTransform then
+        CenterW := C.LocalToWorld(TVector3.Zero)
+      else
+        CenterW := C.Translation;
+      for Seg := 0 to 23 do
+      begin
+        Ang0 := (Seg / 24.0) * 2.0 * Pi;
+        Ang1 := ((Seg + 1) / 24.0) * 2.0 * Pi;
+        PtA := CenterW + Vector3(Cos(Ang0) * 2.5, 0.0, Sin(Ang0) * 2.5);
+        PtB := CenterW + Vector3(Cos(Ang1) * 2.5, 0.0, Sin(Ang1) * 2.5);
+        DrawSeg3D(PtA, PtB, Vector4(0.96, 0.78, 0.24, 0.75), 1.6);
+      end;
+      S := C.CurrentAtmosphere;
+      SunTip := CenterW - S.ActiveLightDirection * 3.2;
+      DrawSeg3D(CenterW, SunTip, Vector4(1.0, 0.88, 0.30, 0.95), 2.5);
+      if S.WindSpeed > 0.05 then
+      begin
+        WindTip := CenterW + S.WindVelocityWorld.Normalize * 2.2;
+        DrawSeg3D(CenterW, WindTip, Vector4(0.35, 0.82, 1.0, 0.88), 2.0);
+      end;
+    end;
+  end;
+
   procedure RenderAnnotationPinsOverlay(const AVp: TCastleViewport);
   var
     PinReport: TDesignAnnotationAuditReport;
@@ -6120,6 +6181,7 @@ begin
     RenderPostProcessVolumesOverlay(Frame.CurrentViewport);
     RenderSplinePathsOverlay(Frame.CurrentViewport);
     RenderDecalProjectorsOverlay(Frame.CurrentViewport);
+    RenderTimeOfDayCompassOverlay(Frame.CurrentViewport);
   end;
 
   if (Frame.TransformManipulate <> nil) and
@@ -6603,6 +6665,21 @@ begin
   if ButtonSplineStudio.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonDecalStudio,
       PanelMiddleTop.GetControlIndex(ButtonSplineStudio) + 1);
+
+  ButtonTimeOfDayStudio := TSpeedButton.Create(Self);
+  ButtonTimeOfDayStudio.Caption := 'Sky / ToD';
+  ButtonTimeOfDayStudio.Hint := 'Open Dynamic Time-of-Day, Solar Ephemeris & Weather Studio.' + NL +
+    'Scrub 24-hour sun/moon elevation & azimuth, sky dome gradients, fog range, wind, and weather presets.';
+  ButtonTimeOfDayStudio.ShowHint := true;
+  ButtonTimeOfDayStudio.AutoSize := true;
+  ButtonTimeOfDayStudio.Constraints.MinHeight := 33;
+  ButtonTimeOfDayStudio.Constraints.MinWidth := 68;
+  ButtonTimeOfDayStudio.BorderSpacing.Left := 2;
+  ButtonTimeOfDayStudio.OnClick := @ButtonTimeOfDayStudioClick;
+  ButtonTimeOfDayStudio.Parent := PanelMiddleTop;
+  if ButtonDecalStudio.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonTimeOfDayStudio,
+      PanelMiddleTop.GetControlIndex(ButtonDecalStudio) + 1);
 
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
@@ -9518,6 +9595,11 @@ begin
   MenuTreeViewItemDecalStudio.Caption := 'Projected Surface Decals && Weathering Studio...';
   MenuTreeViewItemDecalStudio.OnClick := @MenuTreeViewItemDecalStudioClick;
   MenuTreeView.Items.Add(MenuTreeViewItemDecalStudio);
+
+  MenuTreeViewItemTimeOfDayStudio := TMenuItem.Create(Self);
+  MenuTreeViewItemTimeOfDayStudio.Caption := 'Dynamic Time-of-Day, Solar Ephemeris && Weather Studio...';
+  MenuTreeViewItemTimeOfDayStudio.OnClick := @MenuTreeViewItemTimeOfDayStudioClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemTimeOfDayStudio);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -14730,6 +14812,8 @@ var
         Suffix := Suffix + ' ' + TCastleSplineFollowerBehavior(NodeObj).FollowerSummaryBadge
       else if NodeObj is TCastleDecalProjector then
         Suffix := Suffix + ' ' + TCastleDecalProjector(NodeObj).DecalSummaryBadge
+      else if NodeObj is TCastleTimeOfDayWeather then
+        Suffix := Suffix + ' ' + TCastleTimeOfDayWeather(NodeObj).TimeOfDaySummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -54251,6 +54335,45 @@ end;
 procedure TDesignFrame.MenuTreeViewItemDecalStudioClick(Sender: TObject);
 begin
   ShowDecalStudioDialog;
+end;
+
+procedure TDesignFrame.ShowTimeOfDayStudioDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  InitComp: TComponent;
+  Dlg: TTimeOfDayStudioForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  InitComp := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount > 0 then
+      InitComp := Selected[0];
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  Dlg := TTimeOfDayStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner, InitComp,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonTimeOfDayStudioClick(Sender: TObject);
+begin
+  ShowTimeOfDayStudioDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemTimeOfDayStudioClick(Sender: TObject);
+begin
+  ShowTimeOfDayStudioDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

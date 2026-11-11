@@ -25,7 +25,7 @@ implementation
 uses CastleViewport, CastleScene, CastleUiControls, CastleControls,
   Castle2DSceneManager, CastleNotifications, CastleThirdPersonNavigation,
   CastleSoundEngine, CastleBehaviors, CastleLivingBehaviors,
-  CastleFlashEffect, CastleTiledMap, CastleNprShader, CastleDesignAnnotations, CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles, CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector;
+  CastleFlashEffect, CastleTiledMap, CastleNprShader, CastleDesignAnnotations, CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles, CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather;
 
 {$warnings on}
 

@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="69">
+    <Units Count="71">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -427,6 +427,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormDecalStudio"/>
       </Unit68>
+      <Unit69>
+        <Filename Value="../common-code/tooltimeofdaystudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolTimeOfDayStudio"/>
+      </Unit69>
+      <Unit70>
+        <Filename Value="code/formtimeofdaystudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormTimeOfDayStudio"/>
+      </Unit70>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
