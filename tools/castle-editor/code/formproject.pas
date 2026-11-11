@@ -611,6 +611,7 @@ type
       MenuItemResponsiveSim: TMenuItem;
       MenuItemVariantManager: TMenuItem;
       MenuItemSplineStudio: TMenuItem;
+      MenuItemDecalStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -642,6 +643,7 @@ type
     procedure MenuItemResponsiveSimClick(Sender: TObject);
     procedure MenuItemVariantManagerClick(Sender: TObject);
     procedure MenuItemSplineStudioClick(Sender: TObject);
+    procedure MenuItemDecalStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2322,6 +2324,11 @@ begin
   MenuItemSplineStudio.OnClick := @MenuItemSplineStudioClick;
   MenuItemDesign.Add(MenuItemSplineStudio);
 
+  MenuItemDecalStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemDecalStudio.Caption := 'Projected Surface Decals & Weathering Studio...';
+  MenuItemDecalStudio.OnClick := @MenuItemDecalStudioClick;
+  MenuItemDesign.Add(MenuItemDecalStudio);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -3006,6 +3013,8 @@ begin
     MenuItemVariantManager.Enabled := Design <> nil;
   if MenuItemSplineStudio <> nil then
     MenuItemSplineStudio.Enabled := Design <> nil;
+  if MenuItemDecalStudio <> nil then
+    MenuItemDecalStudio.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5355,6 +5364,12 @@ procedure TProjectForm.MenuItemSplineStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowSplineStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemDecalStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowDecalStudioDialog;
 end;
 
 initialization

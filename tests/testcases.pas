@@ -124,6 +124,7 @@ uses
   TestToolResponsiveSim,
   TestToolVariantManager,
   TestToolSplineStudio,
+  TestToolDecalStudio,
   TestCastleVulkanRHI;
 
 implementation

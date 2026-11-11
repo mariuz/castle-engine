@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -760,6 +760,8 @@ type
       MenuTreeViewItemVariantManager: TMenuItem;
       ButtonSplineStudio: TSpeedButton;
       MenuTreeViewItemSplineStudio: TMenuItem;
+      ButtonDecalStudio: TSpeedButton;
+      MenuTreeViewItemDecalStudio: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1217,6 +1219,8 @@ type
     procedure MenuTreeViewItemVariantManagerClick(Sender: TObject);
     procedure ButtonSplineStudioClick(Sender: TObject);
     procedure MenuTreeViewItemSplineStudioClick(Sender: TObject);
+    procedure ButtonDecalStudioClick(Sender: TObject);
+    procedure MenuTreeViewItemDecalStudioClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2665,6 +2669,7 @@ type
 
     { 3D Catmull-Rom Spline Paths, Ribbon Road/River Extruder & Scatter Studio (Phase 297). }
     procedure ShowSplineStudioDialog;
+    procedure ShowDecalStudioDialog;
   end;
 
 implementation
@@ -2685,7 +2690,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -5712,6 +5717,71 @@ procedure TDesignFrame.TDesignerLayer.Render;
     end;
   end;
 
+  procedure RenderDecalProjectorsOverlay(const AVp: TCastleViewport);
+  const
+    BoxEdges: array [0..11, 0..1] of Integer = (
+      (0, 1), (1, 2), (2, 3), (3, 0),
+      (4, 5), (5, 6), (6, 7), (7, 4),
+      (0, 4), (1, 5), (2, 6), (3, 7)
+    );
+  var
+    DecSum: TDecalStudioSummary;
+    CamP, CamD, CamU, HalfE, ArrowTop, ArrowBot: TVector3;
+    CornersW: array [0..7] of TVector3;
+    SegPts: array [0..1] of TVector2;
+    D: TCastleDecalProjector;
+    I, E: Integer;
+
+    procedure DrawLine3D(const A, B: TVector3; const Col: TCastleColor; const W: Single);
+    begin
+      if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+         ((TVector3.DotProduct(A - CamP, CamD) > 0.1) and
+          (TVector3.DotProduct(B - CamP, CamD) > 0.1)) then
+      begin
+        SegPts[0] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(A));
+        SegPts[1] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(B));
+        DrawPrimitive2D(pmLines, SegPts, Col,
+          bsSrcAlpha, bdOneMinusSrcAlpha, false, W);
+      end;
+    end;
+
+  begin
+    if Frame.FDesignRoot = nil then
+      Exit;
+    AVp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    DecSum := TDecalStudioHelper.ScanDecals(Frame.FDesignRoot);
+    for I := 0 to High(DecSum.Decals) do
+    begin
+      D := DecSum.Decals[I];
+      if (D = nil) or (not D.Exists) or (not D.ShowProjectorBoxInViewport) then
+        Continue;
+      HalfE := D.BoxExtents * 0.5;
+      CornersW[0] := Vector3(-HalfE.X, -HalfE.Y, -HalfE.Z);
+      CornersW[1] := Vector3( HalfE.X, -HalfE.Y, -HalfE.Z);
+      CornersW[2] := Vector3( HalfE.X, -HalfE.Y,  HalfE.Z);
+      CornersW[3] := Vector3(-HalfE.X, -HalfE.Y,  HalfE.Z);
+      CornersW[4] := Vector3(-HalfE.X,  HalfE.Y, -HalfE.Z);
+      CornersW[5] := Vector3( HalfE.X,  HalfE.Y, -HalfE.Z);
+      CornersW[6] := Vector3( HalfE.X,  HalfE.Y,  HalfE.Z);
+      CornersW[7] := Vector3(-HalfE.X,  HalfE.Y,  HalfE.Z);
+      if D.HasWorldTransform then
+        for E := 0 to 7 do
+          CornersW[E] := D.LocalToWorld(CornersW[E]);
+      for E := 0 to 11 do
+        DrawLine3D(CornersW[BoxEdges[E, 0]], CornersW[BoxEdges[E, 1]],
+          Vector4(0.32, 0.94, 0.72, 0.80), 1.6);
+
+      ArrowTop := Vector3(0.0, HalfE.Y * 0.85, 0.0);
+      ArrowBot := Vector3(0.0, -HalfE.Y * 0.85, 0.0);
+      if D.HasWorldTransform then
+      begin
+        ArrowTop := D.LocalToWorld(ArrowTop);
+        ArrowBot := D.LocalToWorld(ArrowBot);
+      end;
+      DrawLine3D(ArrowTop, ArrowBot, Vector4(1.0, 0.76, 0.22, 0.95), 2.4);
+    end;
+  end;
+
   procedure RenderAnnotationPinsOverlay(const AVp: TCastleViewport);
   var
     PinReport: TDesignAnnotationAuditReport;
@@ -6049,6 +6119,7 @@ begin
     RenderAudioZonesOverlay(Frame.CurrentViewport);
     RenderPostProcessVolumesOverlay(Frame.CurrentViewport);
     RenderSplinePathsOverlay(Frame.CurrentViewport);
+    RenderDecalProjectorsOverlay(Frame.CurrentViewport);
   end;
 
   if (Frame.TransformManipulate <> nil) and
@@ -6517,6 +6588,21 @@ begin
   if ButtonVariantManager.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonSplineStudio,
       PanelMiddleTop.GetControlIndex(ButtonVariantManager) + 1);
+
+  ButtonDecalStudio := TSpeedButton.Create(Self);
+  ButtonDecalStudio.Caption := 'Decals';
+  ButtonDecalStudio.Hint := 'Open Projected Surface Decals & Weathering Stamp Studio.' + NL +
+    'Stamp conformal puddles, scorch marks, bullet impacts, moss, hazard stripes, and glowing runes onto world geometry.';
+  ButtonDecalStudio.ShowHint := true;
+  ButtonDecalStudio.AutoSize := true;
+  ButtonDecalStudio.Constraints.MinHeight := 33;
+  ButtonDecalStudio.Constraints.MinWidth := 58;
+  ButtonDecalStudio.BorderSpacing.Left := 2;
+  ButtonDecalStudio.OnClick := @ButtonDecalStudioClick;
+  ButtonDecalStudio.Parent := PanelMiddleTop;
+  if ButtonSplineStudio.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonDecalStudio,
+      PanelMiddleTop.GetControlIndex(ButtonSplineStudio) + 1);
 
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
@@ -9427,6 +9513,11 @@ begin
   MenuTreeViewItemSplineStudio.Caption := '3D Spline Paths, Road/River Extruder && Scatter Studio...';
   MenuTreeViewItemSplineStudio.OnClick := @MenuTreeViewItemSplineStudioClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSplineStudio);
+
+  MenuTreeViewItemDecalStudio := TMenuItem.Create(Self);
+  MenuTreeViewItemDecalStudio.Caption := 'Projected Surface Decals && Weathering Studio...';
+  MenuTreeViewItemDecalStudio.OnClick := @MenuTreeViewItemDecalStudioClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemDecalStudio);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -14637,6 +14728,8 @@ var
         Suffix := Suffix + ' ' + TCastleSplinePath(NodeObj).SplineSummaryBadge
       else if NodeObj is TCastleSplineFollowerBehavior then
         Suffix := Suffix + ' ' + TCastleSplineFollowerBehavior(NodeObj).FollowerSummaryBadge
+      else if NodeObj is TCastleDecalProjector then
+        Suffix := Suffix + ' ' + TCastleDecalProjector(NodeObj).DecalSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -54104,6 +54197,60 @@ begin
   finally
     FreeAndNil(Dlg);
   end;
+end;
+
+procedure TDesignFrame.ShowDecalStudioDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  InitComp: TComponent;
+  CamPos, CamDir, CamUp: TVector3;
+  Vp: TCastleViewport;
+  WorldRef: TCastleAbstractRootTransform;
+  Dlg: TDecalStudioForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  InitComp := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount > 0 then
+      InitComp := Selected[0];
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  CamPos := Vector3(0.0, 5.0, 8.0);
+  CamDir := Vector3(0.0, -0.5, -0.86).Normalize;
+  WorldRef := nil;
+  Vp := CurrentViewport;
+  if Vp <> nil then
+  begin
+    WorldRef := Vp.Items;
+    if Vp.InternalCamera <> nil then
+      Vp.InternalCamera.GetWorldView(CamPos, CamDir, CamUp);
+  end;
+
+  Dlg := TDecalStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner, InitComp,
+    WorldRef, CamPos, CamDir,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonDecalStudioClick(Sender: TObject);
+begin
+  ShowDecalStudioDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemDecalStudioClick(Sender: TObject);
+begin
+  ShowDecalStudioDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

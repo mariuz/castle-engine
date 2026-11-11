@@ -2880,6 +2880,33 @@ Follower := TSplineStudioHelper.AttachFollowerToTransform(PatrolCart, DesignOwne
 
 ---
 
+## 66W. Projected Surface Decals & Weathering Stamp Studio (Phase 298)
+
+Castle Game Engine provides an oriented 3D conformal surface decal projector and camera-ray weathering stamp studio matching Unreal Engine 6.0's `UDecalComponent` & Mesh Decals:
+
+1. **Conformal Surface Decal Projector (`src/scene/castledecalprojector.pas`)**:
+   - `TCastleDecalProjector` (`TCastleTransform`) casts an `(N+1) x (N+1)` ray grid along local `-Y` (`BoxExtents`, `GridResolution`) onto `World` geometry, draping `csTransient` PBR `TPhysicalMaterialNode` + `TBlendModeNode` triangles (`dbsAlphaBlend`, `dbsAdditiveGlow`, `dbsMultiplyStain`) offset by `SurfaceOffset + SortOrder * 0.0005` along the hit normal while rejecting grazing faces steeper than `NormalAngleCutoffDeg`.
+   - Includes 6 built-in weathering presets (`dpPuddleWet`, `dpScorchMark`, `dpBulletImpact`, `dpMossGrowth`, `dpHazardStripe`, `dpMagicRune`) plus optional custom `TextureUrl`.
+2. **Surface Decal & Weathering Studio (`TDecalStudioForm` & `TDecalStudioHelper`)**:
+   - Open via the top-bar **`Decals`** button, Hierarchy context menu, or **`Design -> Projected Surface Decals & Weathering Studio...`**.
+   - Provides 1-click camera-ray stamping (`StampDecalAlongRay`), batch `ConformAllDecalsInHierarchy`, live checkerboard RGBA + cutoff-cone preview, 3D viewport oriented projection-box + `-Y` arrow overlays, and Markdown diagnostics.
+
+### Example Usage (Pascal API)
+```pascal
+Decal := TDecalStudioHelper.StampDecalAlongRay(
+  DesignRoot, DesignOwner, Viewport.Items, CamPos, CamDir, dpScorchMark);
+Decal.NormalAngleCutoffDeg := 60.0;
+Decal.SortOrder := 10;
+Decal.ConformAndRebuildMesh;
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Blending Manual](https://castle-engine.io/blending) · [CGE PBR Lighting & Materials](https://castle-engine.io/x3d_implementation_lighting.php) · [UE Decal Actors](https://dev.epicgames.com/documentation/en-us/unreal-engine/decal-actors-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — PBR Materials & Blending (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Shader & Blending Showcase](https://castle-engine.io/images/thumb_const_height_size/shader_effects_simple.webp) · [CGE 3D Editor](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2965,4 +2992,5 @@ In addition, Horizon 2 & Horizon 3 editor subsystems include dedicated automated
 - **[`tests/code/testcases/testtoolresponsivesim.pas`](../tests/code/testcases/testtoolresponsivesim.pas) (`TTestToolResponsiveSim` — 2 tests)**: Verifies clean anchored HUD layouts across all 5 device aspect/notch profiles (`16:9`, `21:9`, `16:10`, `19.5:9` Mobile Notch, `4:3` Tablet) and detects `rikOffScreenClipped`, `rikUnsafeNotchOrHomeBar` (`132 px` notch intrusion), `rikSiblingOverlap`, and `rikUndersizedTouchTarget` (`< 44 px`) violations (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolvariantmanager.pas`](../tests/code/testcases/testtoolvariantmanager.pas) (`TTestToolVariantManager` — 2 tests)**: Verifies `TCastleVariantSetManager` atomic multi-component dotted RTTI & persistent-vector (`ColorPersistent`, `TranslationPersistent`, `ScalePersistent`, `Exists`, `Intensity`, `Caption`) variant switching across `Lighting` and `Props` sets, `ComponentToString` JSON roundtrips, `CaptureHierarchyDifferenceIntoVariant` auto-diff recording, and Markdown matrix export (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolsplinestudio.pas`](../tests/code/testcases/testtoolsplinestudio.pas) (`TTestToolSplineStudio` — 2 tests)**: Verifies `TCastleSplinePath` uneven-knot arc-length LUT reparameterization (`EvaluateLocalAtDistance`), banked `RollDeg` & `WidthScale` Hermite interpolation, `smRoadRibbon`/`smCableTube` `csTransient` mesh generation & non-baking across `ComponentToString` JSON roundtrips, `ProjectControlPointsToWorld` downward floor raycast snapping, `PopulateInstancesAlongSpline` idempotent post instancing, and `TCastleSplineFollowerBehavior` `sflmPingPong` bounce motion (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtooldecalstudio.pas`](../tests/code/testcases/testtooldecalstudio.pas) (`TTestToolDecalStudio` — 2 tests)**: Verifies `TDecalStudioHelper.StampDecalAlongRay` floor alignment & `128`-triangle conformal projection, `NormalAngleCutoffDeg` `45°` vs. `80°` grazing cliff rejection/acceptance on a `70°` slope, `ComponentToString` JSON roundtrips without `csTransient` bloat, procedural preset RGBA evaluation (`dpPuddleWet`, `dpHazardStripe`, `dpMagicRune`), `SortOrder` sorting, and sky-floating empty-projection warnings (`0 unfreed memory blocks`).
 

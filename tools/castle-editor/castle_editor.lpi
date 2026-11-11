@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="67">
+    <Units Count="69">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -417,6 +417,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormSplineStudio"/>
       </Unit66>
+      <Unit67>
+        <Filename Value="../common-code/tooldecalstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolDecalStudio"/>
+      </Unit67>
+      <Unit68>
+        <Filename Value="code/formdecalstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormDecalStudio"/>
+      </Unit68>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
