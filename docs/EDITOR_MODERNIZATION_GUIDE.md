@@ -2984,6 +2984,31 @@ TModularSnapHelper.SnapPieceToNearestOpenSocket(ExtraRoom, DesignRoot, 80.0);
 
 ---
 
+## 66AA. Branching Dialogue, Quest Objectives & Narrative Graph Studio (Phase 302)
+
+Castle Game Engine provides directed branching dialogue trees, multi-stage quest objective & blackboard trackers, and an in-editor conversation playthrough simulator matching Unreal Engine 6.0's Narrative / Parley workflow:
+
+1. **Dialogue Graphs, Quest Trackers & 3D NPCs (`src/scene/castledialoguequest.pas`)**:
+   - `TCastleDialogueTree` stores speaker nodes (`NodeId`, `SpeakerName`, `DialogueText`, `LocalizationKey`, `CanvasX`/`CanvasY`) and conditional player choices (`dcoVarGte`/`Lte`/`Eq`, `dcoHasTag` dot-wildcard Gameplay Tags, `dcoQuestState`) with consequence actions (`dakSetVar`/`AddVar`, `dakGrantTag`, `dakStartQuest`, `dakAdvanceObjective`, `dakCompleteQuest`, `dakFailQuest`) and BFS `ValidateGraph`.
+   - `TCastleQuestTracker` manages multi-objective quests (`qsLocked`, `qsActive`, `qsCompleted`, `qsFailed`) with automatic completion, XP + `RewardTag` payouts, and a typed narrative blackboard, while `TCastleNpcDialogueBehavior` binds 3D NPC transforms to dialogue assets.
+2. **Narrative Graph Studio & Playthrough Simulator (`TDialogueQuestForm` & `TDialogueQuestHelper`)**:
+   - Open via the top-bar **`Dialogue`** button, Hierarchy context menu, or **`Design -> Branching Dialogue, Quest Objectives & Narrative Studio...`**.
+   - Features a draggable 2D directed speaker-node canvas, live **Interactive Conversation Playthrough Simulator**, 1-click RPG sample dialogue + quest rig, and RFC-4180 Localization CSV export (`ExportLocalizationCsv`).
+
+### Example Usage (Pascal API)
+```pascal
+Dlg := TDialogueQuestHelper.CreateSampleRpgQuestDialogueRig(DesignRoot, DesignOwner);
+Dlg.StepConversation('Greeting', 1, NextNodeId); // Activates Quest_SunfireRelic
+Dlg.QuestTracker.GrantGameplayTag('Item.SunfireRelic');
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Text & Localization](https://castle-engine.io/manual_text.php) · [CGE Behaviors](https://castle-engine.io/behaviors) · [UE StateTree Overview](https://dev.epicgames.com/documentation/en-us/unreal-engine/state-tree-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — RPG UI, Text & Gameplay Logic (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE UI & Dialogue Editor](https://castle-engine.io/images/thumb_const_height_size/ui_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3073,4 +3098,5 @@ In addition, Horizon 2 & Horizon 3 editor subsystems include dedicated automated
 - **[`tests/code/testcases/testtooltimeofdaystudio.pas`](../tests/code/testcases/testtooltimeofdaystudio.pas) (`TTestToolTimeOfDayStudio` — 2 tests)**: Verifies `TTimeOfDayStudioHelper.EnsureTimeOfDayRigInDesign` automatic `SunLight`/`SkyBackground`/`AtmosphereFog`/`TCastleViewport` wiring, exact summer-solstice solar noon (`78.44°`, `180°` South) / dawn / dusk / lunar midnight ephemeris, `AdvanceTimeSeconds` 24h wraparound, `ComponentToString` JSON roundtrips, `wpRainStorm` cloud/fog/wind attenuation, and `wpBloodMoon` crimson lunar lighting (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldatatablestudio.pas`](../tests/code/testcases/testtooldatatablestudio.pas) (`TTestToolDataTableStudio` — 2 tests)**: Verifies `TCastleDataTable` typed cell accessors, strict dot-boundary `Enemy.Boss.*` Gameplay Tag queries (rejecting `Enemy.Bossy`), quoted RFC-4180 CSV & `ComponentToString` JSON roundtrips, all 4 `TBalanceCurveKind` progression formulas, `ApplyRowToComponent` RTTI binding onto `TCastleLiving`, and `ValidateSchemaCells` type diagnostics (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmodularsnap.pas`](../tests/code/testcases/testtoolmodularsnap.pas) (`TTestToolModularSnap` — 2 tests)**: Verifies closed-form $180^\circ$ opposing socket snapping onto a $90^\circ$-rotated `EntryHall`, `SocketCategory` mismatch rejection (`Pipe_Flange` vs. `Doorway_3m`), `csTransient` greybox non-baking across JSON roundtrips, deterministic seeded zero-overlap `GenerateSeededDungeonLayout` (`9` rooms, `OverlappingPairsCount = 0`), overlap warning detection, and `ClearGeneratedDungeonPieces` (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtooldialoguequest.pas`](../tests/code/testcases/testtooldialoguequest.pas) (`TTestToolDialogueQuest` — 2 tests)**: Verifies `TCastleDialogueTree` variable/tag/quest-state choice gating (`Charisma >= 10`, `Item.SunfireRelic`), `StepConversation` objective progression & automatic `qsCompleted` `500 XP` + `Achievement.*` payout, BFS `ValidateGraph` orphan/broken-link detection, RFC-4180 `ExportLocalizationCsv`, and `ComponentToString` JSON roundtrip (`0 unfreed memory blocks`).
 

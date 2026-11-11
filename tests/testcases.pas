@@ -128,6 +128,7 @@ uses
   TestToolTimeOfDayStudio,
   TestToolDataTableStudio,
   TestToolModularSnap,
+  TestToolDialogueQuest,
   TestCastleVulkanRHI;
 
 implementation

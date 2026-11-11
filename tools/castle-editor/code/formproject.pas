@@ -615,6 +615,7 @@ type
       MenuItemTimeOfDayStudio: TMenuItem;
       MenuItemDataTableStudio: TMenuItem;
       MenuItemModularSnap: TMenuItem;
+      MenuItemDialogueQuest: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -650,6 +651,7 @@ type
     procedure MenuItemTimeOfDayStudioClick(Sender: TObject);
     procedure MenuItemDataTableStudioClick(Sender: TObject);
     procedure MenuItemModularSnapClick(Sender: TObject);
+    procedure MenuItemDialogueQuestClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2350,6 +2352,11 @@ begin
   MenuItemModularSnap.OnClick := @MenuItemModularSnapClick;
   MenuItemDesign.Add(MenuItemModularSnap);
 
+  MenuItemDialogueQuest := TMenuItem.Create(MenuItemDesign);
+  MenuItemDialogueQuest.Caption := 'Branching Dialogue, Quest Objectives & Narrative Studio...';
+  MenuItemDialogueQuest.OnClick := @MenuItemDialogueQuestClick;
+  MenuItemDesign.Add(MenuItemDialogueQuest);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -3042,6 +3049,8 @@ begin
     MenuItemDataTableStudio.Enabled := Design <> nil;
   if MenuItemModularSnap <> nil then
     MenuItemModularSnap.Enabled := Design <> nil;
+  if MenuItemDialogueQuest <> nil then
+    MenuItemDialogueQuest.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5415,6 +5424,12 @@ procedure TProjectForm.MenuItemModularSnapClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowModularSnapDialog;
+end;
+
+procedure TProjectForm.MenuItemDialogueQuestClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowDialogueQuestDialog;
 end;
 
 initialization
