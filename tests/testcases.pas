@@ -117,6 +117,7 @@ uses
   TestToolParticleStudio,
   TestToolNavNetwork,
   TestToolAudioMixer,
+  TestToolAssetGraph,
   TestCastleVulkanRHI;
 
 implementation

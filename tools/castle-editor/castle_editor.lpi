@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="55">
+    <Units Count="57">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -357,6 +357,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormAudioMixer"/>
       </Unit54>
+      <Unit55>
+        <Filename Value="../common-code/toolassetgraph.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolAssetGraph"/>
+      </Unit55>
+      <Unit56>
+        <Filename Value="code/formassetgraph.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormAssetGraph"/>
+      </Unit56>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

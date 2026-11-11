@@ -605,6 +605,7 @@ type
       MenuItemParticleStudio: TMenuItem;
       MenuItemNavNetwork: TMenuItem;
       MenuItemAudioMixer: TMenuItem;
+      MenuItemAssetGraph: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -630,6 +631,7 @@ type
     procedure MenuItemParticleStudioClick(Sender: TObject);
     procedure MenuItemNavNetworkClick(Sender: TObject);
     procedure MenuItemAudioMixerClick(Sender: TObject);
+    procedure MenuItemAssetGraphClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -751,7 +753,7 @@ uses TypInfo, LCLType, RegExpr, StrUtils, LCLVersion,
   CastleInternalFileMonitor, CastleInternalProjectLocalSettings,
   CastleInternalArchitectures, CastleInternalProcess,
   FormAbout, FormChooseProject, FormPreferences, FormSpriteSheetEditor,
-  FormSystemInformation, FormRestartCustomEditor, FormImportSketchfab,
+  FormSystemInformation, FormRestartCustomEditor, FormImportSketchfab, FormAssetGraph,
   ToolCompilerInfo, ToolCommonUtils, ToolProcess, ToolFpcVersion, ToolProcessRun;
 
 {$ifdef LCLGTK2}
@@ -2280,6 +2282,11 @@ begin
   MenuItemAudioMixer.OnClick := @MenuItemAudioMixerClick;
   MenuItemDesign.Add(MenuItemAudioMixer);
 
+  MenuItemAssetGraph := TMenuItem.Create(MenuItemDesign);
+  MenuItemAssetGraph.Caption := 'Bidirectional Asset Reference Graph & Orphan Sweeper...';
+  MenuItemAssetGraph.OnClick := @MenuItemAssetGraphClick;
+  MenuItemDesign.Add(MenuItemAssetGraph);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -2952,6 +2959,8 @@ begin
     MenuItemNavNetwork.Enabled := Design <> nil;
   if MenuItemAudioMixer <> nil then
     MenuItemAudioMixer.Enabled := Design <> nil;
+  if MenuItemAssetGraph <> nil then
+    MenuItemAssetGraph.Enabled := (Design <> nil) or (ProjectPath <> '');
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5249,6 +5258,23 @@ procedure TProjectForm.MenuItemAudioMixerClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowAudioMixerDialog;
+end;
+
+procedure TProjectForm.MenuItemAssetGraphClick(Sender: TObject);
+var
+  Dlg: TAssetGraphForm;
+begin
+  if Design <> nil then
+    Design.ShowAssetGraphDialog
+  else if DirectoryExists(CombinePaths(ProjectPath, 'data')) then
+  begin
+    Dlg := TAssetGraphForm.CreateStudio(Self, CombinePaths(ProjectPath, 'data'), '');
+    try
+      Dlg.ShowModal;
+    finally
+      FreeAndNil(Dlg);
+    end;
+  end;
 end;
 
 initialization

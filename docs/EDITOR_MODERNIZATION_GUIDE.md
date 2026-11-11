@@ -2724,6 +2724,31 @@ Mixer.EvaluateWorldSoundscape(ViewportMain, ViewportMain.Camera.WorldTranslation
 
 ---
 
+## 66Q. Bidirectional Asset Reference Graph, Orphan Sweeper & Broken-URL Auto-Repair (Phase 292)
+
+Castle Game Engine provides a project-wide bidirectional `data/` reference graph, moved-asset URL auto-repairer, and non-destructive orphan sweeper matching Unreal Engine 5.9/6.0's Reference Viewer:
+
+1. **Project-Wide Dependency & Orphan Engine (`tools/common-code/toolassetgraph.pas`)**:
+   - `TAssetDependencyAnalyzer.AnalyzeDataDirectory` indexes every file inside `data/` (`acDesign`, `acModel3D`, `acSpriteSheet`, `acTextureImage`, `acAudio`, `acFont`, `acShaderOrConfig`), parses `castle-data:/` URLs and relative `.gltf`/`.castle-sprite-sheet`/`.xml` URIs, builds bidirectional `Referencers <-> Dependencies` edges, flags unreferenced orphans (`IsOrphan`), and proposes exact/fuzzy moved-folder repairs (`RepairBrokenUrls`).
+   - `SweepOrphanAssetsToTrash` safely quarantines unreferenced assets into `<ProjectRoot>/.castle-orphan-trash/` while preserving subfolder paths.
+2. **Interactive 3-Column Reference Viewer (`TAssetGraphForm`)**:
+   - Open via the top-bar **`Asset Graph`** button or **`Design -> Bidirectional Asset Reference Graph & Orphan Sweeper...`**.
+   - Renders clickable `Referencers -> Selected Asset -> Dependencies` cards with cubic-Bézier wires, red broken-URL badges, 1-click URL auto-repair, Orphan quarantine, and Markdown + Mermaid `flowchart LR` export.
+
+### Example Usage (Pascal API)
+```pascal
+Report := TAssetDependencyAnalyzer.AnalyzeDataDirectory(CombinePaths(ProjectPath, 'data'));
+Fixed := TAssetDependencyAnalyzer.RepairBrokenUrls(Report.DataDirPath, Report.Repairs);
+Markdown := TAssetDependencyAnalyzer.FormatAssetGraphMarkdown(Report);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Data Directory & `castle-data:/` URLs](https://castle-engine.io/data) · [CGE Visual Editor Manual](https://castle-engine.io/manual_editor.php) · [UE Reference Viewer](https://dev.epicgames.com/documentation/en-us/unreal-engine/reference-viewer-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Assets & `data/` Pipeline (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA) · 🎞️ [UE Reference Viewer Graph](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/6a066789-676f-413b-99c0-d124c0052328/reference-viewer.png)
+- **Screenshots:** [CGE Editor Asset Browser](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [Bidirectional Reference Viewer](https://d1iv7db44yhgxn.cloudfront.net/documentation/images/6a066789-676f-413b-99c0-d124c0052328/reference-viewer.png)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -2803,4 +2828,5 @@ In addition, Horizon 2 editor subsystems include dedicated automated test suites
 - **[`tests/code/testcases/testtoolparticlestudio.pas`](../tests/code/testcases/testtoolparticlestudio.pas) (`TTestToolParticleStudio` — 2 tests)**: Verifies `TCastleParticleEmitter` `pesCircleRing` radial emission, gravity/drag integration, lifetime expiration, continuous `SpawnRate` accumulation, `csTransient` child non-serialization across `ComponentToString` roundtrips, all 6 VFX presets, `MaxParticles` burst capping, and `TParticleStudioHelper` over-budget diagnostics & Markdown export (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolnavnetwork.pas`](../tests/code/testcases/testtoolnavnetwork.pas) (`TTestToolNavNetwork` — 2 tests)**: Verifies `TCastleNavGrid.BakeObstaclesFromWorld` (`NavWalkableIgnoreTag` floor exclusion + `AgentRadius` wall inflation), octile A* `FindPathWorld` obstacle routing around solid barriers, `BlockedCellsData` JSON roundtrips, `TCastleWaypointNode` circular patrol loops with `WaitTimeSec` dwell timers, and `TCastlePatrolAgentBehavior` FOV sight cone vs. 360° hearing sphere `CanPerceiveTarget` queries (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolaudiomixer.pas`](../tests/code/testcases/testtoolaudiomixer.pas) (`TTestToolAudioMixer` — 2 tests)**: Verifies `TCastleAudioBusMixer` 5-bus gain routing, `Solo`/`Mute` isolation, sidechain `Voice` -> `Music`/`Ambient` ducking, `ComponentToString` JSON roundtrips, `TCastleAudioZone` Hermite `InnerRadius`/`OuterRadius` crossfades, underwater pitch muffling, unrouted `TCastleSoundSource` warnings, and Markdown export (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolassetgraph.pas`](../tests/code/testcases/testtoolassetgraph.pas) (`TTestToolAssetGraph` — 2 tests)**: Verifies multi-hop bidirectional `Referencers <-> Dependencies` indexing across `.castle-user-interface -> .castle-transform -> .gltf -> .png`, orphan asset & byte-size detection, Mermaid `flowchart LR` export, moved-asset broken `castle-data:/` URL auto-repair (`RepairBrokenUrls`), and non-destructive `.castle-orphan-trash/` quarantine (`0 unfreed memory blocks`).
 

@@ -43,7 +43,7 @@ uses
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -748,6 +748,8 @@ type
       MenuTreeViewItemNavNetwork: TMenuItem;
       ButtonAudioMixer: TSpeedButton;
       MenuTreeViewItemAudioMixer: TMenuItem;
+      ButtonAssetGraph: TSpeedButton;
+      MenuTreeViewItemAssetGraph: TMenuItem;
       FCopiedComponentPropsJson: String;
       FCopiedComponentPropsSourceName: String;
       FCopiedComponentPropsClassName: String;
@@ -1191,6 +1193,8 @@ type
     procedure MenuTreeViewItemNavNetworkClick(Sender: TObject);
     procedure ButtonAudioMixerClick(Sender: TObject);
     procedure MenuTreeViewItemAudioMixerClick(Sender: TObject);
+    procedure ButtonAssetGraphClick(Sender: TObject);
+    procedure MenuTreeViewItemAssetGraphClick(Sender: TObject);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
     function NodeMatchesHierarchyFilter(const C: TComponent): Boolean;
@@ -2620,6 +2624,9 @@ type
 
     { Spatial Audio Soundscape Mixer, Buses & Reverb Zones Studio (Phase 291). }
     procedure ShowAudioMixerDialog;
+
+    { Bidirectional Asset Reference Graph, Orphan Sweeper & Broken-URL Auto-Repair (Phase 292). }
+    procedure ShowAssetGraphDialog;
   end;
 
 implementation
@@ -2640,7 +2647,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -6226,6 +6233,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonAudioMixer,
       PanelMiddleTop.GetControlIndex(ButtonNavNetwork) + 1);
 
+  ButtonAssetGraph := TSpeedButton.Create(Self);
+  ButtonAssetGraph.Caption := 'Asset Graph';
+  ButtonAssetGraph.Hint := 'Open Bidirectional Asset Reference Graph, Orphan Sweeper & Broken-URL Auto-Repair Studio.' + NL +
+    'Inspect Referencers <-> Dependencies across data/, repair moved castle-data:/ URLs, and quarantine orphans.';
+  ButtonAssetGraph.ShowHint := true;
+  ButtonAssetGraph.AutoSize := true;
+  ButtonAssetGraph.Constraints.MinHeight := 33;
+  ButtonAssetGraph.Constraints.MinWidth := 76;
+  ButtonAssetGraph.BorderSpacing.Left := 2;
+  ButtonAssetGraph.OnClick := @ButtonAssetGraphClick;
+  ButtonAssetGraph.Parent := PanelMiddleTop;
+  if ButtonAudioMixer.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonAssetGraph,
+      PanelMiddleTop.GetControlIndex(ButtonAudioMixer) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -9105,6 +9127,11 @@ begin
   MenuTreeViewItemAudioMixer.Caption := 'Spatial Audio Mixer, Buses && Reverb Zones...';
   MenuTreeViewItemAudioMixer.OnClick := @MenuTreeViewItemAudioMixerClick;
   MenuTreeView.Items.Add(MenuTreeViewItemAudioMixer);
+
+  MenuTreeViewItemAssetGraph := TMenuItem.Create(Self);
+  MenuTreeViewItemAssetGraph.Caption := 'Bidirectional Asset Reference Graph && Orphan Sweeper...';
+  MenuTreeViewItemAssetGraph.OnClick := @MenuTreeViewItemAssetGraphClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemAssetGraph);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -53555,6 +53582,39 @@ end;
 procedure TDesignFrame.MenuTreeViewItemAudioMixerClick(Sender: TObject);
 begin
   ShowAudioMixerDialog;
+end;
+
+procedure TDesignFrame.ShowAssetGraphDialog;
+var
+  DataDir, RelDesign: String;
+  Dlg: TAssetGraphForm;
+begin
+  DataDir := UriToFilenameSafe(ApplicationDataOverride);
+  if (DataDir = '') or (not DirectoryExists(DataDir)) then
+  begin
+    MessageDlg('No active project data/ directory found.', mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  RelDesign := '';
+  if StartsText('castle-data:/', DesignUrl) then
+    RelDesign := Copy(DesignUrl, Length('castle-data:/') + 1, MaxInt);
+
+  Dlg := TAssetGraphForm.CreateStudio(Self, DataDir, RelDesign);
+  try
+    Dlg.ShowModal;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonAssetGraphClick(Sender: TObject);
+begin
+  ShowAssetGraphDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemAssetGraphClick(Sender: TObject);
+begin
+  ShowAssetGraphDialog;
 end;
 
 initialization
