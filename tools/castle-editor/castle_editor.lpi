@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="99">
+    <Units Count="101">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -577,6 +577,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormClothStudio"/>
       </Unit98>
+      <Unit99>
+        <Filename Value="../common-code/toolutilityai.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolUtilityAi"/>
+      </Unit99>
+      <Unit100>
+        <Filename Value="code/formutilityai.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormUtilityAi"/>
+      </Unit100>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

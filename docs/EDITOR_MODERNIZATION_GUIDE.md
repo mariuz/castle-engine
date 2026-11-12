@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–313** across Horizons 1–5), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–314** across Horizons 1–5), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3283,6 +3283,29 @@ Rope := TClothStudioHelper.SpawnVerletRopeInDesign(Viewport, DesignOwner, rpmBot
 
 ---
 
+## 66AM. Smart Objects, RVO Crowd Separation & Response-Curve Utility AI Studio (Phase 314)
+
+Castle Game Engine provides claimable Smart Object interaction stations, response-curve Utility AI action scoring, and RVO-style local crowd avoidance matching Unreal Engine 6.0+'s SmartObjects and Utility AI workflows:
+
+1. **Smart Objects & Utility AI Runtime (`src/scene/castleutilityai.pas`)**:
+   - `TCastleSmartObject` advertises `MaxUsers` ring interaction slots (`TryClaimSlot`, `ReleaseSlot`, `GetSlotWorldPos`) and need-restoration rates (`RestoresNeedName`, `RestoreRatePerSec`) across 4 presets (`sopCampfireRestBench`, `sopTavernMealTable`, `sopBlacksmithWorkAnvil`, `sopWatchtowerPost`).
+   - `TCastleUtilityAiBehavior` tracks `[0..1]` homeostatic `Needs`, evaluates `EvaluateUtilityCurve` (`urcLinearDeficit`, `urcQuadraticUrgency`, `urcLogisticSigmoid`, `urcInverseAbundance`) with `DecisionHysteresisBonus`, claims free SmartObject slots, and steers agents with neighbor crowd separation (`SeparationRadius`, `SeparationWeight`).
+2. **Utility AI Studio (`TUtilityAiForm` & `TUtilityAiHelper`)**:
+   - Open via the top-bar **`UtilAI`** button, Hierarchy context menu, or **`Design -> Smart Objects, RVO Crowd Separation & Utility AI Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TUtilityAiHelper.SpawnVillageSimulationDemo(Viewport, DesignOwner);
+TUtilityAiHelper.StepAllUtilityAgents(Viewport, DesignOwner, 0.25);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Behaviors](https://castle-engine.io/behaviors) · [UE Smart Objects](https://dev.epicgames.com/documentation/en-us/unreal-engine/smart-objects-in-unreal-engine-overview)
+- **Videos & Movies:** 🎬 [CGE Official Video — NPC Behaviors & Living Worlds (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Behavior Cards & Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [CGE 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3384,4 +3407,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems inclu
 - **[`tests/code/testcases/testtoolinputstudio.pas`](../tests/code/testcases/testtoolinputstudio.pas) (`TTestToolInputStudio` — 2 tests)**: Verifies diagonal WASD unit normalization, `itkTap` (`<= 0.22s`) vs. long-press rejection, single-fire `itkHold` (`>= 0.45s`), `LeftShift + KeyQ` `itkChord` gating, `DialogueOverlay` (`Prio 50`) `KeyE` consumption over `GameplayDefault` (`Prio 0`), `EvaluateRadialDeadzone2D` power curves, `ExportUserRebindsJson`/`ImportUserRebindsJson`, and `DetectBindingConflicts` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolvirtualcamera.pas`](../tests/code/testcases/testtoolvirtualcamera.pas) (`TTestToolVirtualCamera` — 2 tests)**: Verifies `Priority` rig arbitration (`VCamWide` `Prio 10` -> `VCamDolly` `Prio 30`), `vcbcSmoothStep` world pose & `TCastleCamera.Perspective.FieldOfView` (`60° -> 50° -> 40°`) blending, `vcbSplineDollyRail` tracking along `TCastleSplinePath`, `vcaDeadzoneComposer` inner-deadzone stillness (`5° < 10°`) vs. outer-deadzone tracking (`25° > 10°`), `Trauma^2` Perlin 3D shake & decay, and `ComponentToString` JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolclothstudio.pas`](../tests/code/testcases/testtoolclothstudio.pas) (`TTestToolClothStudio` — 2 tests)**: Verifies `TCastleClothSurface` top-edge vertex pinning, aerodynamic `+Z` wind deflection, `0.60m` sphere collider world repulsion across every unpinned particle, `TCastleTimeOfDayWeather` storm wind coupling, `csTransient`-clean JSON roundtrips, and `TCastleVerletRope` `rpmBothEndsCatenary` equilibrium sag (`LowestSagLocalY < -1.10m`) + `rpmStartOnlyPendulum` wind swing (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolutilityai.pas`](../tests/code/testcases/testtoolutilityai.pas) (`TTestToolUtilityAi` — 2 tests)**: Verifies `EvaluateUtilityCurve` (`LinearDeficit`, `QuadraticUrgency`, `LogisticSigmoid`, `InverseAbundance`), single-slot `Campfire` contention (`AgentA` claims `Campfire`, `AgentB` falls back to `Tavern`), need restoration & slot release, `ConfigJson` & `csTransient`-clean JSON roundtrips, and RVO-style neighbor crowd separation (`0 unfreed memory blocks`).
 

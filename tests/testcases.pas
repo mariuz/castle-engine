@@ -140,6 +140,7 @@ uses
   TestToolInputStudio,
   TestToolVirtualCamera,
   TestToolClothStudio,
+  TestToolUtilityAi,
   TestCastleVulkanRHI;
 
 implementation
