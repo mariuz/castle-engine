@@ -3009,6 +3009,31 @@ Dlg.QuestTracker.GrantGameplayTag('Item.SunfireRelic');
 
 ---
 
+## 66AB. Procedural Foliage Ecosystems, Biome Masks & Multi-LOD Proxy Studio (Phase 303)
+
+Castle Game Engine provides seeded Halton/Poisson procedural foliage volumes, oriented 3D exclusion masks, and hysteresis distance LOD proxies matching Unreal Engine 6.0's Procedural Foliage Volumes & HLOD workflow:
+
+1. **Biome Volumes, Exclusion Masks & Hysteresis LOD (`src/scene/castlefoliagebiome.pas`)**:
+   - `TCastleFoliageBiomeVolume` scatters weighted multi-species ecosystems (`faPineTree`, `faBroadleafOak`, `faBushShrub`, `faBoulderRock`, `faWildGrass`, `faCustomUrl`) filtered by elevation bands (`MinAltitude`/`MaxAltitude`), terrain slope (`MaxSlopeDeg`), Poisson `MinRadiusSpacing`, and `TCastleFoliageExclusionVolume` road/building clearings.
+   - `TCastleLodProxyBehavior` switches across `fllHigh`, `fllMedium`, `fllLow`, and `fllCulled` using bidirectional `HysteresisMargin` thresholds to prevent boundary LOD popping.
+2. **Foliage Ecosystem Studio (`TFoliageBiomeForm` & `TFoliageBiomeHelper`)**:
+   - Open via the top-bar **`Foliage`** button, Hierarchy context menu, or **`Design -> Procedural Foliage Ecosystems & Multi-LOD Proxy Studio...`**.
+   - Features 1-click **`Alpine Forest`**, **`Oak Meadow`**, and **`Canyon Scrub`** presets, **`+ Exclusion Zone`**, a top-down XZ scatter + exclusion map, and an interactive hysteresis LOD distance slider.
+
+### Example Usage (Pascal API)
+```pascal
+Biome := TFoliageBiomeHelper.CreateBiomeVolumeInDesign(DesignRoot, DesignOwner, 0, Vector3(0, 10, 0));
+TFoliageBiomeHelper.CreateExclusionVolumeInDesign(DesignRoot, DesignOwner, Vector3(8, 0, 0), Vector3(6, 10, 40));
+Spawned := TFoliageBiomeHelper.PopulateBiomeWithSceneExclusions(DesignRoot, DesignOwner, Biome);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Terrain](https://castle-engine.io/terrain) · [CGE Optimization](https://castle-engine.io/optimization) · [UE Procedural Foliage Tool](https://dev.epicgames.com/documentation/en-us/unreal-engine/procedural-foliage-tool-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Terrain & Forest Worlds (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Terrain Mountains](https://castle-engine.io/images/thumb_const_height_size/terrain_mountains.webp) · [CGE Visual Editor](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3099,4 +3124,5 @@ In addition, Horizon 2 & Horizon 3 editor subsystems include dedicated automated
 - **[`tests/code/testcases/testtooldatatablestudio.pas`](../tests/code/testcases/testtooldatatablestudio.pas) (`TTestToolDataTableStudio` — 2 tests)**: Verifies `TCastleDataTable` typed cell accessors, strict dot-boundary `Enemy.Boss.*` Gameplay Tag queries (rejecting `Enemy.Bossy`), quoted RFC-4180 CSV & `ComponentToString` JSON roundtrips, all 4 `TBalanceCurveKind` progression formulas, `ApplyRowToComponent` RTTI binding onto `TCastleLiving`, and `ValidateSchemaCells` type diagnostics (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmodularsnap.pas`](../tests/code/testcases/testtoolmodularsnap.pas) (`TTestToolModularSnap` — 2 tests)**: Verifies closed-form $180^\circ$ opposing socket snapping onto a $90^\circ$-rotated `EntryHall`, `SocketCategory` mismatch rejection (`Pipe_Flange` vs. `Doorway_3m`), `csTransient` greybox non-baking across JSON roundtrips, deterministic seeded zero-overlap `GenerateSeededDungeonLayout` (`9` rooms, `OverlappingPairsCount = 0`), overlap warning detection, and `ClearGeneratedDungeonPieces` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldialoguequest.pas`](../tests/code/testcases/testtooldialoguequest.pas) (`TTestToolDialogueQuest` — 2 tests)**: Verifies `TCastleDialogueTree` variable/tag/quest-state choice gating (`Charisma >= 10`, `Item.SunfireRelic`), `StepConversation` objective progression & automatic `qsCompleted` `500 XP` + `Achievement.*` payout, BFS `ValidateGraph` orphan/broken-link detection, RFC-4180 `ExportLocalizationCsv`, and `ComponentToString` JSON roundtrip (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolfoliagebiome.pas`](../tests/code/testcases/testtoolfoliagebiome.pas) (`TTestToolFoliageBiome` — 2 tests)**: Verifies seeded Halton/Poisson `PopulateBiomeWithSceneExclusions` rejecting `HighSnowPeak` (`Y = 18 > MaxAltitude 10`) and `RoadExcl` road clearings while enforcing pairwise `MinRadiusSpacing >= 2.5m`, `TCastleLodProxyBehavior` `±3.0m` hysteresis band stability across `High`/`Medium`/`Low`/`Culled`, and `ComponentToString` JSON roundtrips without `csTransient` mesh bloat (`0 unfreed memory blocks`).
 

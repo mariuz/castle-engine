@@ -129,6 +129,7 @@ uses
   TestToolDataTableStudio,
   TestToolModularSnap,
   TestToolDialogueQuest,
+  TestToolFoliageBiome,
   TestCastleVulkanRHI;
 
 implementation

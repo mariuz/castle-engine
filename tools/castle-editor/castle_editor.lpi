@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="77">
+    <Units Count="79">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -467,6 +467,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormDialogueQuest"/>
       </Unit76>
+      <Unit77>
+        <Filename Value="../common-code/toolfoliagebiome.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolFoliageBiome"/>
+      </Unit77>
+      <Unit78>
+        <Filename Value="code/formfoliagebiome.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormFoliageBiome"/>
+      </Unit78>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

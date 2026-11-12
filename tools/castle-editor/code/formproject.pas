@@ -616,6 +616,7 @@ type
       MenuItemDataTableStudio: TMenuItem;
       MenuItemModularSnap: TMenuItem;
       MenuItemDialogueQuest: TMenuItem;
+      MenuItemFoliageBiome: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -652,6 +653,7 @@ type
     procedure MenuItemDataTableStudioClick(Sender: TObject);
     procedure MenuItemModularSnapClick(Sender: TObject);
     procedure MenuItemDialogueQuestClick(Sender: TObject);
+    procedure MenuItemFoliageBiomeClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2357,6 +2359,11 @@ begin
   MenuItemDialogueQuest.OnClick := @MenuItemDialogueQuestClick;
   MenuItemDesign.Add(MenuItemDialogueQuest);
 
+  MenuItemFoliageBiome := TMenuItem.Create(MenuItemDesign);
+  MenuItemFoliageBiome.Caption := 'Procedural Foliage Ecosystems & Multi-LOD Proxy Studio...';
+  MenuItemFoliageBiome.OnClick := @MenuItemFoliageBiomeClick;
+  MenuItemDesign.Add(MenuItemFoliageBiome);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -3051,6 +3058,8 @@ begin
     MenuItemModularSnap.Enabled := Design <> nil;
   if MenuItemDialogueQuest <> nil then
     MenuItemDialogueQuest.Enabled := Design <> nil;
+  if MenuItemFoliageBiome <> nil then
+    MenuItemFoliageBiome.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5430,6 +5439,12 @@ procedure TProjectForm.MenuItemDialogueQuestClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowDialogueQuestDialog;
+end;
+
+procedure TProjectForm.MenuItemFoliageBiomeClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowFoliageBiomeDialog;
 end;
 
 initialization

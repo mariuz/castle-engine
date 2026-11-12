@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -770,6 +770,8 @@ type
       MenuTreeViewItemModularSnap: TMenuItem;
       ButtonDialogueQuest: TSpeedButton;
       MenuTreeViewItemDialogueQuest: TMenuItem;
+      ButtonFoliageBiome: TSpeedButton;
+      MenuTreeViewItemFoliageBiome: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1237,6 +1239,8 @@ type
     procedure MenuTreeViewItemModularSnapClick(Sender: TObject);
     procedure ButtonDialogueQuestClick(Sender: TObject);
     procedure MenuTreeViewItemDialogueQuestClick(Sender: TObject);
+    procedure ButtonFoliageBiomeClick(Sender: TObject);
+    procedure MenuTreeViewItemFoliageBiomeClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2690,6 +2694,7 @@ type
     procedure ShowDataTableStudioDialog;
     procedure ShowModularSnapDialog;
     procedure ShowDialogueQuestDialog;
+    procedure ShowFoliageBiomeDialog;
   end;
 
 implementation
@@ -2710,7 +2715,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -5949,6 +5954,50 @@ procedure TDesignFrame.TDesignerLayer.Render;
     end;
   end;
 
+  procedure RenderFoliageBiomesOverlay(const AVp: TCastleViewport);
+  var
+    EcoSum: TFoliageBiomeSummary;
+    CamP, CamD, CamU: TVector3;
+    SegPts: array [0..1] of TVector2;
+    I: Integer;
+
+    procedure DrawWorldRectXZ(const ACenter, ASize: TVector3; const ACol: TCastleColor);
+    var
+      C0, C1, C2, C3: TVector3;
+      procedure Seg(const A, B: TVector3);
+      begin
+        if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+           ((TVector3.DotProduct(A - CamP, CamD) > 0.1) and
+            (TVector3.DotProduct(B - CamP, CamD) > 0.1)) then
+        begin
+          SegPts[0] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(A));
+          SegPts[1] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(B));
+          DrawPrimitive2D(pmLines, SegPts, ACol, bsSrcAlpha, bdOneMinusSrcAlpha, false, 2.0);
+        end;
+      end;
+    begin
+      C0 := ACenter + Vector3(-ASize.X * 0.5, 0.12, -ASize.Z * 0.5);
+      C1 := ACenter + Vector3( ASize.X * 0.5, 0.12, -ASize.Z * 0.5);
+      C2 := ACenter + Vector3( ASize.X * 0.5, 0.12,  ASize.Z * 0.5);
+      C3 := ACenter + Vector3(-ASize.X * 0.5, 0.12,  ASize.Z * 0.5);
+      Seg(C0, C1); Seg(C1, C2); Seg(C2, C3); Seg(C3, C0);
+    end;
+
+  begin
+    if Frame.FDesignRoot = nil then
+      Exit;
+    AVp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    EcoSum := TFoliageBiomeHelper.ScanFoliageEcosystem(Frame.FDesignRoot);
+    for I := 0 to High(EcoSum.Biomes) do
+      if EcoSum.Biomes[I].Exists and EcoSum.Biomes[I].ShowVolumeInViewport then
+        DrawWorldRectXZ(EcoSum.Biomes[I].WorldTranslation,
+          EcoSum.Biomes[I].VolumeSize, Vector4(0.28, 0.90, 0.45, 0.85));
+    for I := 0 to High(EcoSum.Exclusions) do
+      if EcoSum.Exclusions[I].Exists and EcoSum.Exclusions[I].ShowVolumeInViewport then
+        DrawWorldRectXZ(EcoSum.Exclusions[I].WorldTranslation,
+          EcoSum.Exclusions[I].ExclusionSize, Vector4(0.95, 0.35, 0.32, 0.88));
+  end;
+
   procedure RenderAnnotationPinsOverlay(const AVp: TCastleViewport);
   var
     PinReport: TDesignAnnotationAuditReport;
@@ -6290,6 +6339,7 @@ begin
     RenderTimeOfDayCompassOverlay(Frame.CurrentViewport);
     RenderSnapSocketsOverlay(Frame.CurrentViewport);
     RenderNpcDialogueOverlay(Frame.CurrentViewport);
+    RenderFoliageBiomesOverlay(Frame.CurrentViewport);
   end;
 
   if (Frame.TransformManipulate <> nil) and
@@ -6833,6 +6883,21 @@ begin
   if ButtonModularSnap.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonDialogueQuest,
       PanelMiddleTop.GetControlIndex(ButtonModularSnap) + 1);
+
+  ButtonFoliageBiome := TSpeedButton.Create(Self);
+  ButtonFoliageBiome.Caption := 'Foliage';
+  ButtonFoliageBiome.Hint := 'Open Procedural Foliage Ecosystems, Biome Masks & Multi-LOD Proxy Studio.' + NL +
+    'Scatter seeded Halton/Poisson forests with elevation, slope, and road exclusion masks.';
+  ButtonFoliageBiome.ShowHint := true;
+  ButtonFoliageBiome.AutoSize := true;
+  ButtonFoliageBiome.Constraints.MinHeight := 33;
+  ButtonFoliageBiome.Constraints.MinWidth := 62;
+  ButtonFoliageBiome.BorderSpacing.Left := 2;
+  ButtonFoliageBiome.OnClick := @ButtonFoliageBiomeClick;
+  ButtonFoliageBiome.Parent := PanelMiddleTop;
+  if ButtonDialogueQuest.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonFoliageBiome,
+      PanelMiddleTop.GetControlIndex(ButtonDialogueQuest) + 1);
 
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
@@ -9768,6 +9833,11 @@ begin
   MenuTreeViewItemDialogueQuest.Caption := 'Branching Dialogue && Quest Objectives Studio...';
   MenuTreeViewItemDialogueQuest.OnClick := @MenuTreeViewItemDialogueQuestClick;
   MenuTreeView.Items.Add(MenuTreeViewItemDialogueQuest);
+
+  MenuTreeViewItemFoliageBiome := TMenuItem.Create(Self);
+  MenuTreeViewItemFoliageBiome.Caption := 'Procedural Foliage Ecosystems && Multi-LOD Proxy Studio...';
+  MenuTreeViewItemFoliageBiome.OnClick := @MenuTreeViewItemFoliageBiomeClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemFoliageBiome);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -14996,6 +15066,12 @@ var
         Suffix := Suffix + ' ' + TCastleQuestTracker(NodeObj).QuestSummaryBadge
       else if NodeObj is TCastleNpcDialogueBehavior then
         Suffix := Suffix + ' ' + TCastleNpcDialogueBehavior(NodeObj).NpcDialogueBadge
+      else if NodeObj is TCastleFoliageBiomeVolume then
+        Suffix := Suffix + ' ' + TCastleFoliageBiomeVolume(NodeObj).BiomeSummaryBadge
+      else if NodeObj is TCastleFoliageExclusionVolume then
+        Suffix := Suffix + ' ' + TCastleFoliageExclusionVolume(NodeObj).ExclusionSummaryBadge
+      else if NodeObj is TCastleLodProxyBehavior then
+        Suffix := Suffix + ' ' + TCastleLodProxyBehavior(NodeObj).LodSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -54684,6 +54760,56 @@ end;
 procedure TDesignFrame.MenuTreeViewItemDialogueQuestClick(Sender: TObject);
 begin
   ShowDialogueQuestDialog;
+end;
+
+procedure TDesignFrame.ShowFoliageBiomeDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  InitComp: TComponent;
+  SpawnPos, CamP, CamD, CamU: TVector3;
+  Vp: TCastleViewport;
+  Dlg: TFoliageBiomeForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  InitComp := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount > 0 then
+      InitComp := Selected[0];
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  SpawnPos := TVector3.Zero;
+  Vp := CurrentViewport;
+  if (Vp <> nil) and (Vp.InternalCamera <> nil) then
+  begin
+    Vp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    SpawnPos := Vector3(CamP.X + CamD.X * 12.0, 4.0, CamP.Z + CamD.Z * 12.0);
+  end;
+
+  Dlg := TFoliageBiomeForm.CreateStudio(Self, FDesignRoot, DesignOwner, InitComp,
+    SpawnPos,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonFoliageBiomeClick(Sender: TObject);
+begin
+  ShowFoliageBiomeDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemFoliageBiomeClick(Sender: TObject);
+begin
+  ShowFoliageBiomeDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);
