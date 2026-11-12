@@ -133,6 +133,7 @@ uses
   TestToolIkRig,
   TestToolDestructible,
   TestToolFrameProfiler,
+  TestToolMaterialGraph,
   TestCastleVulkanRHI;
 
 implementation

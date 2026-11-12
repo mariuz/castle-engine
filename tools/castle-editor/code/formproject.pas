@@ -620,6 +620,7 @@ type
       MenuItemIkRig: TMenuItem;
       MenuItemDestructible: TMenuItem;
       MenuItemFrameProfiler: TMenuItem;
+      MenuItemMaterialGraph: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -660,6 +661,7 @@ type
     procedure MenuItemIkRigClick(Sender: TObject);
     procedure MenuItemDestructibleClick(Sender: TObject);
     procedure MenuItemFrameProfilerClick(Sender: TObject);
+    procedure MenuItemMaterialGraphClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2385,6 +2387,11 @@ begin
   MenuItemFrameProfiler.OnClick := @MenuItemFrameProfilerClick;
   MenuItemDesign.Add(MenuItemFrameProfiler);
 
+  MenuItemMaterialGraph := TMenuItem.Create(MenuItemDesign);
+  MenuItemMaterialGraph.Caption := 'Node-Based PBR Material & Shader Effect Graph Studio...';
+  MenuItemMaterialGraph.OnClick := @MenuItemMaterialGraphClick;
+  MenuItemDesign.Add(MenuItemMaterialGraph);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -3087,6 +3094,8 @@ begin
     MenuItemDestructible.Enabled := Design <> nil;
   if MenuItemFrameProfiler <> nil then
     MenuItemFrameProfiler.Enabled := Design <> nil;
+  if MenuItemMaterialGraph <> nil then
+    MenuItemMaterialGraph.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5466,6 +5475,12 @@ procedure TProjectForm.MenuItemDialogueQuestClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowDialogueQuestDialog;
+end;
+
+procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowMaterialGraphDialog;
 end;
 
 procedure TProjectForm.MenuItemFrameProfilerClick(Sender: TObject);

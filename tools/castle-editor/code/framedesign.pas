@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -778,6 +778,8 @@ type
       MenuTreeViewItemDestructible: TMenuItem;
       ButtonFrameProfiler: TSpeedButton;
       MenuTreeViewItemFrameProfiler: TMenuItem;
+      ButtonMaterialGraph: TSpeedButton;
+      MenuTreeViewItemMaterialGraph: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1253,6 +1255,8 @@ type
     procedure MenuTreeViewItemDestructibleClick(Sender: TObject);
     procedure ButtonFrameProfilerClick(Sender: TObject);
     procedure MenuTreeViewItemFrameProfilerClick(Sender: TObject);
+    procedure ButtonMaterialGraphClick(Sender: TObject);
+    procedure MenuTreeViewItemMaterialGraphClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2710,6 +2714,7 @@ type
     procedure ShowIkRigDialog;
     procedure ShowDestructibleDialog;
     procedure ShowFrameProfilerDialog;
+    procedure ShowMaterialGraphDialog;
   end;
 
 implementation
@@ -2730,7 +2735,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7059,6 +7064,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonFrameProfiler,
       PanelMiddleTop.GetControlIndex(ButtonDestructible) + 1);
 
+  ButtonMaterialGraph := TSpeedButton.Create(Self);
+  ButtonMaterialGraph.Caption := 'MatGraph';
+  ButtonMaterialGraph.Hint := 'Open Visual Node-Based PBR Material & X3D Shader Effect Graph Studio.' + NL +
+    'Compile directed acyclic shader graphs into CGE PLUG_* GLSL Vertex & Fragment shaders.';
+  ButtonMaterialGraph.ShowHint := true;
+  ButtonMaterialGraph.AutoSize := true;
+  ButtonMaterialGraph.Constraints.MinHeight := 33;
+  ButtonMaterialGraph.Constraints.MinWidth := 68;
+  ButtonMaterialGraph.BorderSpacing.Left := 2;
+  ButtonMaterialGraph.OnClick := @ButtonMaterialGraphClick;
+  ButtonMaterialGraph.Parent := PanelMiddleTop;
+  if ButtonFrameProfiler.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonMaterialGraph,
+      PanelMiddleTop.GetControlIndex(ButtonFrameProfiler) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10013,6 +10033,11 @@ begin
   MenuTreeViewItemFrameProfiler.Caption := 'Frame Budget Profiler && 5-Tier Scalability Studio...';
   MenuTreeViewItemFrameProfiler.OnClick := @MenuTreeViewItemFrameProfilerClick;
   MenuTreeView.Items.Add(MenuTreeViewItemFrameProfiler);
+
+  MenuTreeViewItemMaterialGraph := TMenuItem.Create(Self);
+  MenuTreeViewItemMaterialGraph.Caption := 'Node-Based PBR Material && Shader Graph Studio...';
+  MenuTreeViewItemMaterialGraph.OnClick := @MenuTreeViewItemMaterialGraphClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemMaterialGraph);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -15255,6 +15280,10 @@ var
         Suffix := Suffix + ' ' + TCastleDestructibleBehavior(NodeObj).DestructibleSummaryBadge
       else if NodeObj is TCastleScalabilityManager then
         Suffix := Suffix + ' ' + TCastleScalabilityManager(NodeObj).ScalabilitySummaryBadge
+      else if NodeObj is TCastleMaterialGraph then
+        Suffix := Suffix + ' ' + TCastleMaterialGraph(NodeObj).GraphSummaryBadge
+      else if NodeObj is TCastleMaterialGraphBehavior then
+        Suffix := Suffix + ' ' + TCastleMaterialGraphBehavior(NodeObj).BehaviorSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -55120,6 +55149,45 @@ end;
 procedure TDesignFrame.MenuTreeViewItemFrameProfilerClick(Sender: TObject);
 begin
   ShowFrameProfilerDialog;
+end;
+
+procedure TDesignFrame.ShowMaterialGraphDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  SelTrans: TCastleTransform;
+  Dlg: TMaterialGraphForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  SelTrans := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if (SelectedCount > 0) and (Selected[0] is TCastleTransform) then
+      SelTrans := TCastleTransform(Selected[0]);
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  Dlg := TMaterialGraphForm.CreateStudio(Self, FDesignRoot, DesignOwner, SelTrans,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonMaterialGraphClick(Sender: TObject);
+begin
+  ShowMaterialGraphDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemMaterialGraphClick(Sender: TObject);
+begin
+  ShowMaterialGraphDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

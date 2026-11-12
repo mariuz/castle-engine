@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="85">
+    <Units Count="87">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -507,6 +507,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormFrameProfiler"/>
       </Unit84>
+      <Unit85>
+        <Filename Value="../common-code/toolmaterialgraph.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMaterialGraph"/>
+      </Unit85>
+      <Unit86>
+        <Filename Value="code/formmaterialgraph.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMaterialGraph"/>
+      </Unit86>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

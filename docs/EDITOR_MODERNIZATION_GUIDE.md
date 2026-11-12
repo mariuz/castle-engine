@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–306** across Horizons 1–4), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–307** across Horizons 1–5), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3109,6 +3109,31 @@ if not Audit.OverallPassBudget then
 
 ---
 
+## 66AF. Visual Node-Based PBR Material & X3D Shader Effect Graph Studio (Phase 307)
+
+Castle Game Engine provides a directed acyclic PBR shader graph asset and live X3D `TEffectNode` compiler matching Unreal Engine 6.0+'s Substrate & Material Editor workflow:
+
+1. **PBR Material Graph & Shader Effect Behavior (`src/scene/castlematerialgraph.pas`)**:
+   - `TCastleMaterialGraph` serializes typed shader nodes (`mnkTime`, `mnkObjectPos`, `mnkWorldNormal`, `mnkFresnel`, `mnkConstantFloat`, `mnkConstantColor`, `mnkNoise3D`, `mnkVoronoi3D`, `mnkChecker3D`, `mnkSineWave`, `mnkAdd`, `mnkMultiply`, `mnkMixColor`, `mnkRemapSmoothstep`, `mnkVertexWaveOffset`, `mnkPbrOutput`) inside `GraphJson`, validates DAG cycle/pin integrity via 3-color DFS (`ValidateGraph`), evaluates a software-raytraced PBR preview sphere (`EvaluatePreviewPixel`), and compiles topologically sorted SSA GLSL for `PLUG_vertex_object_space_change`, `PLUG_main_texture_apply`, `PLUG_material_metallic_roughness`, and `PLUG_lighting_apply`.
+   - `TCastleMaterialGraphBehavior` binds any `TCastleMaterialGraph` (or fallback `TMaterialGraphPreset`) onto `TCastleScene`, `TCastleAbstractPrimitive`, or `TCastleImageTransform` with a live `TSFFloat` `cge_mat_time` uniform updated each frame.
+2. **Material Graph Studio (`TMaterialGraphForm` & `TMaterialGraphHelper`)**:
+   - Open via the top-bar **`MatGraph`** button, Hierarchy context menu, or **`Design -> Node-Based PBR Material & Shader Effect Graph Studio...`**.
+   - Features 5 one-click presets (`Triplanar Mossy Rock`, `Sci-Fi Hologram Scanline`, `Molten Lava Cracks`, `Brushed Gold Metal`, `Animated Wind-Wave Foliage`), a draggable Bezier-wired 2D DAG canvas, live PBR sphere preview with time stepping, pin/parameter inspector, and live compiled GLSL viewer.
+
+### Example Usage (Pascal API)
+```pascal
+Graph := TMaterialGraphHelper.CreateMaterialGraphInDesign(
+  DesignRoot, DesignOwner, mgpMoltenLavaCracks, 'LavaMaterial');
+Sphere := TMaterialGraphHelper.SpawnPreviewSphereWithGraph(DesignRoot, DesignOwner, Graph);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Compositing Shaders (`PLUG_*` Manual)](https://castle-engine.io/shaders) · [UE Materials & Substrate](https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-engine-materials) · [Godot 4 `VisualShader`](https://docs.godotengine.org/en/stable/tutorials/shaders/visual_shaders.html)
+- **Videos & Movies:** 🎬 [CGE Official Video — Custom GLSL Shader Effects & PBR Materials (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Shader Effects](https://castle-engine.io/images/thumb_const_height_size/shader_effects_simple.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3174,7 +3199,7 @@ fpc -Mobjfpc -Sh -Ci -Cr -Co -gl -gh -dTEXT_RUNNER @castle-fpc.cfg \
 ./tests/castle_tester_standalone --console --filter=TTestCastleTransformManipulate*
 ```
 
-In addition, Horizon 2, Horizon 3 & Horizon 4 editor subsystems include dedicated automated test suites:
+In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems include dedicated automated test suites:
 - **[`tests/code/testcases/testtoolmcpserver.pas`](../tests/code/testcases/testtoolmcpserver.pas) (`TTestToolMcpServer` — 3 tests)**: Verifies JSON-RPC 2.0 `initialize`, `ping`, `tools/list` (all 12 MCP tools), Bearer token authentication, all 4 `TMcpAutonomyMode` tiers (`Disabled`, `ReadOnly`, `EditWithUndo`, `FullControl`), live RTTI property inspection/mutation, layout actions (`align_y`, `snap_to_grid`), Base64 PNG viewport screenshot encoding, and live localhost multithreaded HTTP roundtrip (`GET /health` + `POST /mcp` with `CheckSynchronize` and `0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldesignsandboxdiff.pas`](../tests/code/testcases/testtooldesignsandboxdiff.pas) (`TTestToolDesignSandboxDiff` — 3 tests)**: Verifies `TDesignSandboxManager` creation, filtering, renaming, JSON persistence, and live instantiation, `TDesignDiffEngine` detection of `[+ Added]`, `[- Removed]`, and `[~ Modified]` components + subcomponent properties (`TranslationPersistent.X/Y/Z`, `SizePersistent.X/Y/Z`, `Caption`, `FontSize`), and `RevertSelectedToBase` selective restoration/deletion of individual properties and components (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testcastleterrain.pas`](../tests/code/testcases/testcastleterrain.pas) (`TTestCastleTerrain` — 4 tests)**: Verifies `TCastleTerrainImage` Raise/Lower/Smooth/Flatten sculpting with dynamic `MinLevel`/`MaxLevel` expansion + renormalization, `RayCastWorld`, non-destructive `EnsureEditableHeightLayer` `TCastleTerrainCombine` (`opAdd`) wrapping over `TCastleTerrainNoise`, `GenerateSplatmapFromProceduralLayers`, `PaintSplatmapAtWorldPoint` $R+G+B+A = 255$ partition-of-unity normalization, and PNG heightmap/splatmap save & reload roundtrips (`0 unfreed memory blocks`).
@@ -3203,4 +3228,5 @@ In addition, Horizon 2, Horizon 3 & Horizon 4 editor subsystems include dedicate
 - **[`tests/code/testcases/testtoolikrig.pas`](../tests/code/testcases/testtoolikrig.pas) (`TTestToolIkRig` — 2 tests)**: Verifies exact law-of-cosines `UpperBoneLength` & `LowerBoneLength` preservation (`0.55m + 0.55m`) on nested `LegHip -> LegKnee -> LegFoot` chains, `+Z` vs. `-Z` `PoleTransform` knee plane flipping, `SoftReachMargin` hyperextension damping, downward `EnableGroundFootPlant` raycast lifting onto a stepped platform (`Y = 0.48`), `TCastleLookAtConstraintBehavior` `±60°/±35°` cone clamping & exponential `DampingSpeed` convergence, and `ComponentToString` JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldestructible.pas`](../tests/code/testcases/testtooldestructible.pas) (`TTestToolDestructible` — 2 tests)**: Verifies exact 3D convex Voronoi polyhedral volume partition (`14` cells summing to `2.0 x 3.0 x 1.5 = 9.0 m^3`), `ApplyDamage` threshold shattering, radial blast outward dispersion & ground floor restitution clamping, timed `DebrisLifetimeSec` expiration cleanup, `TriggerRadialBlastInHierarchy` distance attenuation, `ResetAllDestructiblesInHierarchy` intact restoration, and `csTransient`-clean `ComponentToString` JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolframeprofiler.pas`](../tests/code/testcases/testtoolframeprofiler.pas) (`TTestToolFrameProfiler` — 2 tests)**: Verifies `TFrameBudgetProfiler.AuditHierarchy` `pbpMobile60Hz` shadow-light & particle over-budget detection, `TopOffenders` cost ranking, `stLow` scalability remediation (`DynamicBatching = true`, `ShadowVolumes = false`, `25%` particle cap, post-process disable), idempotent reversible `Low -> Low -> Cinematic -> High` LOD & particle scaling via `TCastleScalabilityManager`, and `ComponentToString` JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolmaterialgraph.pas`](../tests/code/testcases/testtoolmaterialgraph.pas) (`TTestToolMaterialGraph` — 2 tests)**: Verifies topological SSA GLSL compilation (`PLUG_vertex_object_space_change`, `PLUG_main_texture_apply`, `PLUG_material_metallic_roughness`, `PLUG_lighting_apply`), 3-color DFS `ValidateGraph` cycle rejection, `ComponentToString` JSON roundtrips, all 5 `TMaterialGraphPreset` live `TEffectNode` + `cge_mat_time` `TSFFloat` uniform updates, and CPU raytraced PBR sphere `EvaluatePreviewPixel` alpha-clip scanlines (`0 unfreed memory blocks`).
 
