@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -794,6 +794,8 @@ type
       MenuTreeViewItemClothStudio: TMenuItem;
       ButtonUtilityAi: TSpeedButton;
       MenuTreeViewItemUtilityAi: TMenuItem;
+      ButtonSaveReplay: TSpeedButton;
+      MenuTreeViewItemSaveReplay: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1285,6 +1287,8 @@ type
     procedure MenuTreeViewItemClothStudioClick(Sender: TObject);
     procedure ButtonUtilityAiClick(Sender: TObject);
     procedure MenuTreeViewItemUtilityAiClick(Sender: TObject);
+    procedure ButtonSaveReplayClick(Sender: TObject);
+    procedure MenuTreeViewItemSaveReplayClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2750,6 +2754,7 @@ type
     procedure ShowVirtualCameraDialog;
     procedure ShowClothStudioDialog;
     procedure ShowUtilityAiDialog;
+    procedure ShowSaveReplayDialog;
   end;
 
 implementation
@@ -2770,7 +2775,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7219,6 +7224,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonUtilityAi,
       PanelMiddleTop.GetControlIndex(ButtonClothStudio) + 1);
 
+  ButtonSaveReplay := TSpeedButton.Create(Self);
+  ButtonSaveReplay.Caption := 'Replay';
+  ButtonSaveReplay.Hint := 'Open SaveGame Slot Manager, Versioned Checkpoint & Deterministic Replay Studio.' + NL +
+    'Capture/restore multi-system world snapshots and scrub deterministic transform/cue timelines.';
+  ButtonSaveReplay.ShowHint := true;
+  ButtonSaveReplay.AutoSize := true;
+  ButtonSaveReplay.Constraints.MinHeight := 33;
+  ButtonSaveReplay.Constraints.MinWidth := 54;
+  ButtonSaveReplay.BorderSpacing.Left := 2;
+  ButtonSaveReplay.OnClick := @ButtonSaveReplayClick;
+  ButtonSaveReplay.Parent := PanelMiddleTop;
+  if ButtonUtilityAi.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonSaveReplay,
+      PanelMiddleTop.GetControlIndex(ButtonUtilityAi) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10213,6 +10233,11 @@ begin
   MenuTreeViewItemUtilityAi.Caption := 'Smart Objects, RVO Crowd Separation && Utility AI Studio...';
   MenuTreeViewItemUtilityAi.OnClick := @MenuTreeViewItemUtilityAiClick;
   MenuTreeView.Items.Add(MenuTreeViewItemUtilityAi);
+
+  MenuTreeViewItemSaveReplay := TMenuItem.Create(Self);
+  MenuTreeViewItemSaveReplay.Caption := 'SaveGame Slot Manager && Deterministic Replay Studio...';
+  MenuTreeViewItemSaveReplay.OnClick := @MenuTreeViewItemSaveReplayClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemSaveReplay);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -15481,6 +15506,10 @@ var
         Suffix := Suffix + ' ' + TCastleSmartObject(NodeObj).SmartObjectSummaryBadge
       else if NodeObj is TCastleUtilityAiBehavior then
         Suffix := Suffix + ' ' + TCastleUtilityAiBehavior(NodeObj).UtilitySummaryBadge
+      else if NodeObj is TCastleSaveSlotManager then
+        Suffix := Suffix + ' ' + TCastleSaveSlotManager(NodeObj).SaveSummaryBadge
+      else if NodeObj is TCastleReplayRecorder then
+        Suffix := Suffix + ' ' + TCastleReplayRecorder(NodeObj).ReplaySummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -55643,6 +55672,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemUtilityAiClick(Sender: TObject);
 begin
   ShowUtilityAiDialog;
+end;
+
+procedure TDesignFrame.ShowSaveReplayDialog;
+var
+  Dlg: TSaveReplayForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TSaveReplayForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonSaveReplayClick(Sender: TObject);
+begin
+  ShowSaveReplayDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemSaveReplayClick(Sender: TObject);
+begin
+  ShowSaveReplayDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

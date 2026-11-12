@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–314** across Horizons 1–5), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–315** across Horizons 1–5), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3306,6 +3306,32 @@ TUtilityAiHelper.StepAllUtilityAgents(Viewport, DesignOwner, 0.25);
 
 ---
 
+## 66AN. SaveGame Slot Manager, Versioned World-State Snapshot & Deterministic Replay Recorder Studio (Phase 315)
+
+Castle Game Engine provides schema-versioned multi-system SaveGame checkpoints and deterministic world-pose/cue replay scrubbing matching Unreal Engine 6.0+'s `USaveGame` and Replay System workflows:
+
+1. **SaveGame & Deterministic Replay Runtime (`src/scene/castlesavereplay.pas`)**:
+   - `TCastleSaveSlotManager` captures and restores named `TCastleTransform` poses & visibility, `TCastleAbilitySystemBehavior` base attributes / tags / cooldowns, `TCastleQuestTracker` quest progression, and `WorldVariables`, automatically migrating older `SchemaVersion` snapshots via built-in upgrades and `OnMigrateSchema`.
+   - `TCastleReplayRecorder` records deterministic transform keyframes (`RecordFrame`) and gameplay cue markers (`RecordCue`), interpolating world poses via linear `Translation`/`Scale` + quaternion `SLerp` `Rotation` at any timestamp in `ScrubToTime`.
+2. **SaveGame & Replay Studio (`TSaveReplayForm` & `TSaveReplayHelper`)**:
+   - Open via the top-bar **`Replay`** button, Hierarchy context menu, or **`Design -> SaveGame Slot Manager, World Checkpoints & Replay Scrub Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+SaveMgr := TSaveReplayHelper.EnsureSaveSlotManagerInDesign(Viewport, DesignOwner);
+SaveMgr.SaveSlot('QuickSave0', 'Shrine Checkpoint', Viewport, DesignOwner);
+Replay := TSaveReplayHelper.EnsureReplayRecorderInDesign(Viewport, DesignOwner);
+Replay.RecordFrame(Viewport, 0.25, DesignOwner);
+Replay.ScrubToTime(Viewport, 0.125, DesignOwner);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Component Serialization](https://castle-engine.io/manual_component_serialize.php) · [UE Saving & Loading (`USaveGame`)](https://dev.epicgames.com/documentation/en-us/unreal-engine/saving-and-loading-your-game-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Component Serialization & Game State (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Non-Visual Managers & Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [CGE 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3408,4 +3434,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems inclu
 - **[`tests/code/testcases/testtoolvirtualcamera.pas`](../tests/code/testcases/testtoolvirtualcamera.pas) (`TTestToolVirtualCamera` — 2 tests)**: Verifies `Priority` rig arbitration (`VCamWide` `Prio 10` -> `VCamDolly` `Prio 30`), `vcbcSmoothStep` world pose & `TCastleCamera.Perspective.FieldOfView` (`60° -> 50° -> 40°`) blending, `vcbSplineDollyRail` tracking along `TCastleSplinePath`, `vcaDeadzoneComposer` inner-deadzone stillness (`5° < 10°`) vs. outer-deadzone tracking (`25° > 10°`), `Trauma^2` Perlin 3D shake & decay, and `ComponentToString` JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolclothstudio.pas`](../tests/code/testcases/testtoolclothstudio.pas) (`TTestToolClothStudio` — 2 tests)**: Verifies `TCastleClothSurface` top-edge vertex pinning, aerodynamic `+Z` wind deflection, `0.60m` sphere collider world repulsion across every unpinned particle, `TCastleTimeOfDayWeather` storm wind coupling, `csTransient`-clean JSON roundtrips, and `TCastleVerletRope` `rpmBothEndsCatenary` equilibrium sag (`LowestSagLocalY < -1.10m`) + `rpmStartOnlyPendulum` wind swing (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolutilityai.pas`](../tests/code/testcases/testtoolutilityai.pas) (`TTestToolUtilityAi` — 2 tests)**: Verifies `EvaluateUtilityCurve` (`LinearDeficit`, `QuadraticUrgency`, `LogisticSigmoid`, `InverseAbundance`), single-slot `Campfire` contention (`AgentA` claims `Campfire`, `AgentB` falls back to `Tavern`), need restoration & slot release, `ConfigJson` & `csTransient`-clean JSON roundtrips, and RVO-style neighbor crowd separation (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolsavereplay.pas`](../tests/code/testcases/testtoolsavereplay.pas) (`TTestToolSaveReplay` — 2 tests)**: Verifies `TCastleSaveSlotManager` multi-system world snapshot capture & restoration across `TCastleTransform` poses/visibility, `TCastleAbilitySystemBehavior` HP/Mana/tags/cooldowns, and `TCastleQuestTracker` state + `v1 -> v2` schema migration (`PlayerGold -> Economy.Gold`), and verifies `TCastleReplayRecorder` keyframe/cue recording, `ExportReplayJson`/`ImportReplayJson`, midpoint quaternion `SLerp` pose scrubbing, and `OnCueFired` event playback (`0 unfreed memory blocks`).
 

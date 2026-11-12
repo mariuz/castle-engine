@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="101">
+    <Units Count="103">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -587,6 +587,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormUtilityAi"/>
       </Unit100>
+      <Unit101>
+        <Filename Value="../common-code/toolsavereplay.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolSaveReplay"/>
+      </Unit101>
+      <Unit102>
+        <Filename Value="code/formsavereplay.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormSaveReplay"/>
+      </Unit102>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

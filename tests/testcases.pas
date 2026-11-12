@@ -141,6 +141,7 @@ uses
   TestToolVirtualCamera,
   TestToolClothStudio,
   TestToolUtilityAi,
+  TestToolSaveReplay,
   TestCastleVulkanRHI;
 
 implementation

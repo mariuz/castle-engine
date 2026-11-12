@@ -628,6 +628,7 @@ type
       MenuItemVirtualCamera: TMenuItem;
       MenuItemClothStudio: TMenuItem;
       MenuItemUtilityAi: TMenuItem;
+      MenuItemSaveReplay: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -676,6 +677,7 @@ type
     procedure MenuItemVirtualCameraClick(Sender: TObject);
     procedure MenuItemClothStudioClick(Sender: TObject);
     procedure MenuItemUtilityAiClick(Sender: TObject);
+    procedure MenuItemSaveReplayClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2441,6 +2443,11 @@ begin
   MenuItemUtilityAi.OnClick := @MenuItemUtilityAiClick;
   MenuItemDesign.Add(MenuItemUtilityAi);
 
+  MenuItemSaveReplay := TMenuItem.Create(MenuItemDesign);
+  MenuItemSaveReplay.Caption := 'SaveGame Slot Manager, World Checkpoints & Replay Scrub Studio...';
+  MenuItemSaveReplay.OnClick := @MenuItemSaveReplayClick;
+  MenuItemDesign.Add(MenuItemSaveReplay);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -3159,6 +3166,8 @@ begin
     MenuItemClothStudio.Enabled := Design <> nil;
   if MenuItemUtilityAi <> nil then
     MenuItemUtilityAi.Enabled := Design <> nil;
+  if MenuItemSaveReplay <> nil then
+    MenuItemSaveReplay.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5580,6 +5589,12 @@ procedure TProjectForm.MenuItemUtilityAiClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowUtilityAiDialog;
+end;
+
+procedure TProjectForm.MenuItemSaveReplayClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowSaveReplayDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
