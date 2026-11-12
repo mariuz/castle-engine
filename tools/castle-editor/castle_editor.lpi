@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="95">
+    <Units Count="97">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -557,6 +557,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormInputStudio"/>
       </Unit94>
+      <Unit95>
+        <Filename Value="../common-code/toolvirtualcamera.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolVirtualCamera"/>
+      </Unit95>
+      <Unit96>
+        <Filename Value="code/formvirtualcamera.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormVirtualCamera"/>
+      </Unit96>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

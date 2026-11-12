@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -788,6 +788,8 @@ type
       MenuTreeViewItemAbilityStudio: TMenuItem;
       ButtonInputStudio: TSpeedButton;
       MenuTreeViewItemInputStudio: TMenuItem;
+      ButtonVirtualCamera: TSpeedButton;
+      MenuTreeViewItemVirtualCamera: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1273,6 +1275,8 @@ type
     procedure MenuTreeViewItemAbilityStudioClick(Sender: TObject);
     procedure ButtonInputStudioClick(Sender: TObject);
     procedure MenuTreeViewItemInputStudioClick(Sender: TObject);
+    procedure ButtonVirtualCameraClick(Sender: TObject);
+    procedure MenuTreeViewItemVirtualCameraClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2735,6 +2739,7 @@ type
     procedure ShowCsgStudioDialog;
     procedure ShowAbilityStudioDialog;
     procedure ShowInputStudioDialog;
+    procedure ShowVirtualCameraDialog;
   end;
 
 implementation
@@ -2755,7 +2760,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7159,6 +7164,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonInputStudio,
       PanelMiddleTop.GetControlIndex(ButtonAbilityStudio) + 1);
 
+  ButtonVirtualCamera := TSpeedButton.Create(Self);
+  ButtonVirtualCamera.Caption := 'VCam';
+  ButtonVirtualCamera.Hint := 'Open Virtual Camera Priority Blending, Dolly Rail, Deadzone & Trauma Shake Studio.' + NL +
+    'Arbitrate priority rigs, SmoothStep FOV/pose blends, spline dolly rails & Perlin trauma shake.';
+  ButtonVirtualCamera.ShowHint := true;
+  ButtonVirtualCamera.AutoSize := true;
+  ButtonVirtualCamera.Constraints.MinHeight := 33;
+  ButtonVirtualCamera.Constraints.MinWidth := 54;
+  ButtonVirtualCamera.BorderSpacing.Left := 2;
+  ButtonVirtualCamera.OnClick := @ButtonVirtualCameraClick;
+  ButtonVirtualCamera.Parent := PanelMiddleTop;
+  if ButtonInputStudio.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonVirtualCamera,
+      PanelMiddleTop.GetControlIndex(ButtonInputStudio) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10138,6 +10158,11 @@ begin
   MenuTreeViewItemInputStudio.Caption := 'Enhanced Input Action Mapping && Rebinding Studio...';
   MenuTreeViewItemInputStudio.OnClick := @MenuTreeViewItemInputStudioClick;
   MenuTreeView.Items.Add(MenuTreeViewItemInputStudio);
+
+  MenuTreeViewItemVirtualCamera := TMenuItem.Create(Self);
+  MenuTreeViewItemVirtualCamera.Caption := 'Virtual Camera Priority Blending, Dolly Rail && Shake Studio...';
+  MenuTreeViewItemVirtualCamera.OnClick := @MenuTreeViewItemVirtualCameraClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemVirtualCamera);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -15394,6 +15419,10 @@ var
         Suffix := Suffix + ' ' + TCastleAbilitySystemBehavior(NodeObj).GasSummaryBadge
       else if NodeObj is TCastleInputMapManager then
         Suffix := Suffix + ' ' + TCastleInputMapManager(NodeObj).InputSummaryBadge
+      else if NodeObj is TCastleVirtualCamera then
+        Suffix := Suffix + ' ' + TCastleVirtualCamera(NodeObj).VCamSummaryBadge
+      else if NodeObj is TCastleVirtualCameraBrain then
+        Suffix := Suffix + ' ' + TCastleVirtualCameraBrain(NodeObj).BrainSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -55475,6 +55504,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemInputStudioClick(Sender: TObject);
 begin
   ShowInputStudioDialog;
+end;
+
+procedure TDesignFrame.ShowVirtualCameraDialog;
+var
+  Dlg: TVirtualCameraForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TVirtualCameraForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonVirtualCameraClick(Sender: TObject);
+begin
+  ShowVirtualCameraDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemVirtualCameraClick(Sender: TObject);
+begin
+  ShowVirtualCameraDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

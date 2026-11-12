@@ -138,6 +138,7 @@ uses
   TestToolCsgStudio,
   TestToolAbilityStudio,
   TestToolInputStudio,
+  TestToolVirtualCamera,
   TestCastleVulkanRHI;
 
 implementation

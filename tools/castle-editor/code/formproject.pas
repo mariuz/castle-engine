@@ -625,6 +625,7 @@ type
       MenuItemCsgStudio: TMenuItem;
       MenuItemAbilityStudio: TMenuItem;
       MenuItemInputStudio: TMenuItem;
+      MenuItemVirtualCamera: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -670,6 +671,7 @@ type
     procedure MenuItemCsgStudioClick(Sender: TObject);
     procedure MenuItemAbilityStudioClick(Sender: TObject);
     procedure MenuItemInputStudioClick(Sender: TObject);
+    procedure MenuItemVirtualCameraClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2420,6 +2422,11 @@ begin
   MenuItemInputStudio.OnClick := @MenuItemInputStudioClick;
   MenuItemDesign.Add(MenuItemInputStudio);
 
+  MenuItemVirtualCamera := TMenuItem.Create(MenuItemDesign);
+  MenuItemVirtualCamera.Caption := 'Virtual Camera Priority Blending, Dolly Rail & Trauma Shake Studio...';
+  MenuItemVirtualCamera.OnClick := @MenuItemVirtualCameraClick;
+  MenuItemDesign.Add(MenuItemVirtualCamera);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -3132,6 +3139,8 @@ begin
     MenuItemAbilityStudio.Enabled := Design <> nil;
   if MenuItemInputStudio <> nil then
     MenuItemInputStudio.Enabled := Design <> nil;
+  if MenuItemVirtualCamera <> nil then
+    MenuItemVirtualCamera.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5535,6 +5544,12 @@ procedure TProjectForm.MenuItemInputStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowInputStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemVirtualCameraClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowVirtualCameraDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
