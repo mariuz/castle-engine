@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="97">
+    <Units Count="99">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -567,6 +567,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormVirtualCamera"/>
       </Unit96>
+      <Unit97>
+        <Filename Value="../common-code/toolclothstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolClothStudio"/>
+      </Unit97>
+      <Unit98>
+        <Filename Value="code/formclothstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormClothStudio"/>
+      </Unit98>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

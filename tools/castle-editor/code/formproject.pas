@@ -626,6 +626,7 @@ type
       MenuItemAbilityStudio: TMenuItem;
       MenuItemInputStudio: TMenuItem;
       MenuItemVirtualCamera: TMenuItem;
+      MenuItemClothStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -672,6 +673,7 @@ type
     procedure MenuItemAbilityStudioClick(Sender: TObject);
     procedure MenuItemInputStudioClick(Sender: TObject);
     procedure MenuItemVirtualCameraClick(Sender: TObject);
+    procedure MenuItemClothStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2427,6 +2429,11 @@ begin
   MenuItemVirtualCamera.OnClick := @MenuItemVirtualCameraClick;
   MenuItemDesign.Add(MenuItemVirtualCamera);
 
+  MenuItemClothStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemClothStudio.Caption := 'Verlet Cloth / Cape / Banner & Catenary Rope Wind Studio...';
+  MenuItemClothStudio.OnClick := @MenuItemClothStudioClick;
+  MenuItemDesign.Add(MenuItemClothStudio);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -3141,6 +3148,8 @@ begin
     MenuItemInputStudio.Enabled := Design <> nil;
   if MenuItemVirtualCamera <> nil then
     MenuItemVirtualCamera.Enabled := Design <> nil;
+  if MenuItemClothStudio <> nil then
+    MenuItemClothStudio.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5550,6 +5559,12 @@ procedure TProjectForm.MenuItemVirtualCameraClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowVirtualCameraDialog;
+end;
+
+procedure TProjectForm.MenuItemClothStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowClothStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

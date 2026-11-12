@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–312** across Horizons 1–5), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–313** across Horizons 1–5), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3259,6 +3259,30 @@ Brain.AddTrauma(0.65);
 
 ---
 
+## 66AL. Verlet Cloth / Cape / Banner & Rope Soft-Body Wind Simulation Studio (Phase 313)
+
+Castle Game Engine provides real-time Verlet soft-body cloth grids and catenary/pendulum ropes matching Unreal Engine 6.0+'s Chaos Cloth and `UCableComponent` workflows:
+
+1. **Verlet Cloth & Catenary Rope Components (`src/scene/castleclothrope.pas`)**:
+   - `TCastleClothSurface` solves structural, diagonal shear, and 2-hop bending distance constraints across pinned particle grids (`cpmTopEdge`, `cpmTopTwoCorners`, `cpmLeftPoleEdge`, `cpmFourCorners`) with face-normal wind drag, optional `TCastleTimeOfDayWeather` (`SyncWithWeather`) wind synchronization, world-space `ColliderTransform` sphere repulsion, and double-sided PBR `TTriangleSetNode` rendering.
+   - `TCastleVerletRope` simulates `rpmBothEndsCatenary` and `rpmStartOnlyPendulum` cables extruded as cylindrical PBR tubes.
+2. **Cloth & Rope Studio (`TClothStudioForm` & `TClothStudioHelper`)**:
+   - Open via the top-bar **`Cloth`** button, Hierarchy context menu, or **`Design -> Verlet Cloth / Cape / Banner & Catenary Rope Wind Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+Cape := TClothStudioHelper.SpawnClothInDesign(Viewport, DesignOwner, cpHeroShoulderCape, Vector3(0, 2.8, 0));
+TClothStudioHelper.SpawnColliderSphereForCloth(Viewport, DesignOwner, Cape, Vector3(0, 1.9, 0.35), 0.55);
+Rope := TClothStudioHelper.SpawnVerletRopeInDesign(Viewport, DesignOwner, rpmBothEndsCatenary, Vector3(-2, 3, 0), Vector3(4, 0, 0), 5.2);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Procedural X3D Geometry](https://castle-engine.io/x3d_implementation_rendering.php) · [UE Chaos Cloth](https://dev.epicgames.com/documentation/en-us/unreal-engine/cloth-simulation-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Procedural Meshes & Outdoor Worlds (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE PBR Rendering Showcase](https://castle-engine.io/images/thumb_const_height_size/shader_effects_simple.webp) · [CGE 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3359,4 +3383,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems inclu
 - **[`tests/code/testcases/testtoolabilitystudio.pas`](../tests/code/testcases/testtoolabilitystudio.pas) (`TTestToolAbilityStudio` — 2 tests)**: Verifies `(Base + Flat) * (1 + Pct) * Mul` attribute aggregation (`45 -> 108.0`), `Fireball` mana cost / cooldown / direct damage / periodic `IgniteBurnDoT` ticking with `TCastleLiving` mirroring, `ConfigJson` roundtrips, `FireImmunityWard` active-burn purging & application immunity, `Status.CrowdControl.Stun` cast blocking, and missing-attribute audit warnings (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolinputstudio.pas`](../tests/code/testcases/testtoolinputstudio.pas) (`TTestToolInputStudio` — 2 tests)**: Verifies diagonal WASD unit normalization, `itkTap` (`<= 0.22s`) vs. long-press rejection, single-fire `itkHold` (`>= 0.45s`), `LeftShift + KeyQ` `itkChord` gating, `DialogueOverlay` (`Prio 50`) `KeyE` consumption over `GameplayDefault` (`Prio 0`), `EvaluateRadialDeadzone2D` power curves, `ExportUserRebindsJson`/`ImportUserRebindsJson`, and `DetectBindingConflicts` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolvirtualcamera.pas`](../tests/code/testcases/testtoolvirtualcamera.pas) (`TTestToolVirtualCamera` — 2 tests)**: Verifies `Priority` rig arbitration (`VCamWide` `Prio 10` -> `VCamDolly` `Prio 30`), `vcbcSmoothStep` world pose & `TCastleCamera.Perspective.FieldOfView` (`60° -> 50° -> 40°`) blending, `vcbSplineDollyRail` tracking along `TCastleSplinePath`, `vcaDeadzoneComposer` inner-deadzone stillness (`5° < 10°`) vs. outer-deadzone tracking (`25° > 10°`), `Trauma^2` Perlin 3D shake & decay, and `ComponentToString` JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolclothstudio.pas`](../tests/code/testcases/testtoolclothstudio.pas) (`TTestToolClothStudio` — 2 tests)**: Verifies `TCastleClothSurface` top-edge vertex pinning, aerodynamic `+Z` wind deflection, `0.60m` sphere collider world repulsion across every unpinned particle, `TCastleTimeOfDayWeather` storm wind coupling, `csTransient`-clean JSON roundtrips, and `TCastleVerletRope` `rpmBothEndsCatenary` equilibrium sag (`LowestSagLocalY < -1.10m`) + `rpmStartOnlyPendulum` wind swing (`0 unfreed memory blocks`).
 

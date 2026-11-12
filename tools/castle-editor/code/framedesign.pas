@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -790,6 +790,8 @@ type
       MenuTreeViewItemInputStudio: TMenuItem;
       ButtonVirtualCamera: TSpeedButton;
       MenuTreeViewItemVirtualCamera: TMenuItem;
+      ButtonClothStudio: TSpeedButton;
+      MenuTreeViewItemClothStudio: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1277,6 +1279,8 @@ type
     procedure MenuTreeViewItemInputStudioClick(Sender: TObject);
     procedure ButtonVirtualCameraClick(Sender: TObject);
     procedure MenuTreeViewItemVirtualCameraClick(Sender: TObject);
+    procedure ButtonClothStudioClick(Sender: TObject);
+    procedure MenuTreeViewItemClothStudioClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2740,6 +2744,7 @@ type
     procedure ShowAbilityStudioDialog;
     procedure ShowInputStudioDialog;
     procedure ShowVirtualCameraDialog;
+    procedure ShowClothStudioDialog;
   end;
 
 implementation
@@ -2760,7 +2765,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7179,6 +7184,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonVirtualCamera,
       PanelMiddleTop.GetControlIndex(ButtonInputStudio) + 1);
 
+  ButtonClothStudio := TSpeedButton.Create(Self);
+  ButtonClothStudio.Caption := 'Cloth';
+  ButtonClothStudio.Hint := 'Open Verlet Cloth / Cape / Banner & Catenary Rope Soft-Body Wind Studio.' + NL +
+    'Author pinned banners, hero capes, wind flags, catenary ropes & sphere collider repulsion.';
+  ButtonClothStudio.ShowHint := true;
+  ButtonClothStudio.AutoSize := true;
+  ButtonClothStudio.Constraints.MinHeight := 33;
+  ButtonClothStudio.Constraints.MinWidth := 54;
+  ButtonClothStudio.BorderSpacing.Left := 2;
+  ButtonClothStudio.OnClick := @ButtonClothStudioClick;
+  ButtonClothStudio.Parent := PanelMiddleTop;
+  if ButtonVirtualCamera.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonClothStudio,
+      PanelMiddleTop.GetControlIndex(ButtonVirtualCamera) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10163,6 +10183,11 @@ begin
   MenuTreeViewItemVirtualCamera.Caption := 'Virtual Camera Priority Blending, Dolly Rail && Shake Studio...';
   MenuTreeViewItemVirtualCamera.OnClick := @MenuTreeViewItemVirtualCameraClick;
   MenuTreeView.Items.Add(MenuTreeViewItemVirtualCamera);
+
+  MenuTreeViewItemClothStudio := TMenuItem.Create(Self);
+  MenuTreeViewItemClothStudio.Caption := 'Verlet Cloth / Cape / Banner && Rope Wind Studio...';
+  MenuTreeViewItemClothStudio.OnClick := @MenuTreeViewItemClothStudioClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemClothStudio);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -15423,6 +15448,10 @@ var
         Suffix := Suffix + ' ' + TCastleVirtualCamera(NodeObj).VCamSummaryBadge
       else if NodeObj is TCastleVirtualCameraBrain then
         Suffix := Suffix + ' ' + TCastleVirtualCameraBrain(NodeObj).BrainSummaryBadge
+      else if NodeObj is TCastleClothSurface then
+        Suffix := Suffix + ' ' + TCastleClothSurface(NodeObj).ClothSummaryBadge
+      else if NodeObj is TCastleVerletRope then
+        Suffix := Suffix + ' ' + TCastleVerletRope(NodeObj).RopeSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -55531,6 +55560,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemVirtualCameraClick(Sender: TObject);
 begin
   ShowVirtualCameraDialog;
+end;
+
+procedure TDesignFrame.ShowClothStudioDialog;
+var
+  Dlg: TClothStudioForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TClothStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonClothStudioClick(Sender: TObject);
+begin
+  ShowClothStudioDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemClothStudioClick(Sender: TObject);
+begin
+  ShowClothStudioDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

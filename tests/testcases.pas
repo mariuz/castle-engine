@@ -139,6 +139,7 @@ uses
   TestToolAbilityStudio,
   TestToolInputStudio,
   TestToolVirtualCamera,
+  TestToolClothStudio,
   TestCastleVulkanRHI;
 
 implementation
