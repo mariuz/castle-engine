@@ -134,6 +134,7 @@ uses
   TestToolDestructible,
   TestToolFrameProfiler,
   TestToolMaterialGraph,
+  TestToolWaterStudio,
   TestCastleVulkanRHI;
 
 implementation

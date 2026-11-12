@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="87">
+    <Units Count="89">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -517,6 +517,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormMaterialGraph"/>
       </Unit86>
+      <Unit87>
+        <Filename Value="../common-code/toolwaterstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolWaterStudio"/>
+      </Unit87>
+      <Unit88>
+        <Filename Value="code/formwaterstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormWaterStudio"/>
+      </Unit88>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

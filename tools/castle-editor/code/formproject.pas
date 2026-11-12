@@ -621,6 +621,7 @@ type
       MenuItemDestructible: TMenuItem;
       MenuItemFrameProfiler: TMenuItem;
       MenuItemMaterialGraph: TMenuItem;
+      MenuItemWaterStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -662,6 +663,7 @@ type
     procedure MenuItemDestructibleClick(Sender: TObject);
     procedure MenuItemFrameProfilerClick(Sender: TObject);
     procedure MenuItemMaterialGraphClick(Sender: TObject);
+    procedure MenuItemWaterStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2392,6 +2394,11 @@ begin
   MenuItemMaterialGraph.OnClick := @MenuItemMaterialGraphClick;
   MenuItemDesign.Add(MenuItemMaterialGraph);
 
+  MenuItemWaterStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemWaterStudio.Caption := 'Gerstner Ocean / River Water & 4-Pontoon Buoyancy Studio...';
+  MenuItemWaterStudio.OnClick := @MenuItemWaterStudioClick;
+  MenuItemDesign.Add(MenuItemWaterStudio);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -3096,6 +3103,8 @@ begin
     MenuItemFrameProfiler.Enabled := Design <> nil;
   if MenuItemMaterialGraph <> nil then
     MenuItemMaterialGraph.Enabled := Design <> nil;
+  if MenuItemWaterStudio <> nil then
+    MenuItemWaterStudio.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5475,6 +5484,12 @@ procedure TProjectForm.MenuItemDialogueQuestClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowDialogueQuestDialog;
+end;
+
+procedure TProjectForm.MenuItemWaterStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowWaterStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

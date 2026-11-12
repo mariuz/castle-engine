@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–307** across Horizons 1–5), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–308** across Horizons 1–5), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3134,6 +3134,30 @@ Sphere := TMaterialGraphHelper.SpawnPreviewSphereWithGraph(DesignRoot, DesignOwn
 
 ---
 
+## 66AG. Gerstner Ocean / River Water System, Shoreline Foam & Multi-Pontoon Buoyancy Studio (Phase 308)
+
+Castle Game Engine provides analytical 4-octave Gerstner wave volumes, directional river currents, and 4-pontoon Archimedes floating hull buoyancy matching Unreal Engine 6.0+'s Water System & Chaos Buoyancy workflow:
+
+1. **Gerstner Water Volume & 4-Pontoon Buoyancy (`src/scene/castlewatersystem.pas`)**:
+   - `TCastleWaterVolume` evaluates a 4-octave directional deep-water Gerstner spectrum ($\omega_i = \sqrt{9.81 \cdot k_i} \cdot \text{WaveSpeed}$) with trochoidal horizontal pinch, exact partial-derivative normals, crest `FoamFactor`, directional `FlowSpeedX`/`FlowSpeedZ` drift, `csTransient` glossy `amBlend` PBR surface meshes, and 5 presets (`wbpCalmLake`, `wbpOpenOceanSwell`, `wbpFlowingRiver`, `wbpStormyHighSeas`, `wbpToxicSwamp`).
+   - `TCastleBuoyancyBehavior` samples 4 corner hull pontoons (`HullWidth`, `HullLength`, `HullDraft`) against `TCastleWaterVolume.SampleSurfaceWorld`, integrating Archimedes lift, hydrodynamic damping, river drift, and smooth Gerstner normal pitch/roll alignment.
+2. **Water & Buoyancy Studio (`TWaterStudioForm` & `TWaterStudioHelper`)**:
+   - Open via the top-bar **`Water`** button, Hierarchy context menu, or **`Design -> Gerstner Ocean / River Water & 4-Pontoon Buoyancy Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+River := TWaterStudioHelper.SpawnWaterVolume(DesignRoot, DesignOwner, wbpFlowingRiver, TVector3.Zero);
+Crate := TWaterStudioHelper.SpawnFloatingCrate(DesignRoot, DesignOwner, River, Vector3(0, 1.5, 0));
+TWaterStudioHelper.StepAllWaterAndBuoyancy(DesignRoot, DesignOwner, 0.1);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Physics & Behaviors](https://castle-engine.io/physics) · [UE Water System](https://dev.epicgames.com/documentation/en-us/unreal-engine/water-system-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Terrains, Water & Outdoor Worlds (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Outdoor Terrain](https://castle-engine.io/images/thumb_const_height_size/terrain_mountains.webp) · [CGE Physics](https://castle-engine.io/images/thumb_const_height_size/platformer_physics_components.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3229,4 +3253,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems inclu
 - **[`tests/code/testcases/testtooldestructible.pas`](../tests/code/testcases/testtooldestructible.pas) (`TTestToolDestructible` — 2 tests)**: Verifies exact 3D convex Voronoi polyhedral volume partition (`14` cells summing to `2.0 x 3.0 x 1.5 = 9.0 m^3`), `ApplyDamage` threshold shattering, radial blast outward dispersion & ground floor restitution clamping, timed `DebrisLifetimeSec` expiration cleanup, `TriggerRadialBlastInHierarchy` distance attenuation, `ResetAllDestructiblesInHierarchy` intact restoration, and `csTransient`-clean `ComponentToString` JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolframeprofiler.pas`](../tests/code/testcases/testtoolframeprofiler.pas) (`TTestToolFrameProfiler` — 2 tests)**: Verifies `TFrameBudgetProfiler.AuditHierarchy` `pbpMobile60Hz` shadow-light & particle over-budget detection, `TopOffenders` cost ranking, `stLow` scalability remediation (`DynamicBatching = true`, `ShadowVolumes = false`, `25%` particle cap, post-process disable), idempotent reversible `Low -> Low -> Cinematic -> High` LOD & particle scaling via `TCastleScalabilityManager`, and `ComponentToString` JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmaterialgraph.pas`](../tests/code/testcases/testtoolmaterialgraph.pas) (`TTestToolMaterialGraph` — 2 tests)**: Verifies topological SSA GLSL compilation (`PLUG_vertex_object_space_change`, `PLUG_main_texture_apply`, `PLUG_material_metallic_roughness`, `PLUG_lighting_apply`), 3-color DFS `ValidateGraph` cycle rejection, `ComponentToString` JSON roundtrips, all 5 `TMaterialGraphPreset` live `TEffectNode` + `cge_mat_time` `TSFFloat` uniform updates, and CPU raytraced PBR sphere `EvaluatePreviewPixel` alpha-clip scanlines (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolwaterstudio.pas`](../tests/code/testcases/testtoolwaterstudio.pas) (`TTestToolWaterStudio` — 2 tests)**: Verifies 4-octave Gerstner wave dispersion, unit-length surface normals, crest `FoamFactor`, footprint vs. `InfiniteOcean` bounds, `csTransient`-clean JSON roundtrips, and 4-pontoon `TCastleBuoyancyBehavior` Archimedes surface equilibrium, downstream river flow drift, and steep ocean swell pitch/roll alignment (`0 unfreed memory blocks`).
 
