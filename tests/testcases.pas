@@ -132,6 +132,7 @@ uses
   TestToolFoliageBiome,
   TestToolIkRig,
   TestToolDestructible,
+  TestToolFrameProfiler,
   TestCastleVulkanRHI;
 
 implementation

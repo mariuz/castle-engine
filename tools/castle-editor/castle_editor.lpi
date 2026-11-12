@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="83">
+    <Units Count="85">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -497,6 +497,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormDestructible"/>
       </Unit82>
+      <Unit83>
+        <Filename Value="../common-code/toolframeprofiler.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolFrameProfiler"/>
+      </Unit83>
+      <Unit84>
+        <Filename Value="code/formframeprofiler.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormFrameProfiler"/>
+      </Unit84>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

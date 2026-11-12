@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -776,6 +776,8 @@ type
       MenuTreeViewItemIkRig: TMenuItem;
       ButtonDestructible: TSpeedButton;
       MenuTreeViewItemDestructible: TMenuItem;
+      ButtonFrameProfiler: TSpeedButton;
+      MenuTreeViewItemFrameProfiler: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1249,6 +1251,8 @@ type
     procedure MenuTreeViewItemIkRigClick(Sender: TObject);
     procedure ButtonDestructibleClick(Sender: TObject);
     procedure MenuTreeViewItemDestructibleClick(Sender: TObject);
+    procedure ButtonFrameProfilerClick(Sender: TObject);
+    procedure MenuTreeViewItemFrameProfilerClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2705,6 +2709,7 @@ type
     procedure ShowFoliageBiomeDialog;
     procedure ShowIkRigDialog;
     procedure ShowDestructibleDialog;
+    procedure ShowFrameProfilerDialog;
   end;
 
 implementation
@@ -2725,7 +2730,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7039,6 +7044,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonDestructible,
       PanelMiddleTop.GetControlIndex(ButtonIkRig) + 1);
 
+  ButtonFrameProfiler := TSpeedButton.Create(Self);
+  ButtonFrameProfiler.Caption := 'Profiler';
+  ButtonFrameProfiler.Hint := 'Open Real-Time Frame Budget Profiler, Draw-Call / VRAM Analyzer & 5-Tier Scalability Studio.' + NL +
+    'Audit 60 Hz Mobile/Handheld/Desktop/WebAssembly budgets and switch Low..Cinematic tiers.';
+  ButtonFrameProfiler.ShowHint := true;
+  ButtonFrameProfiler.AutoSize := true;
+  ButtonFrameProfiler.Constraints.MinHeight := 33;
+  ButtonFrameProfiler.Constraints.MinWidth := 62;
+  ButtonFrameProfiler.BorderSpacing.Left := 2;
+  ButtonFrameProfiler.OnClick := @ButtonFrameProfilerClick;
+  ButtonFrameProfiler.Parent := PanelMiddleTop;
+  if ButtonDestructible.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonFrameProfiler,
+      PanelMiddleTop.GetControlIndex(ButtonDestructible) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -9988,6 +10008,11 @@ begin
   MenuTreeViewItemDestructible.Caption := 'Destructible Voronoi Fracture && Debris Lifecycle Studio...';
   MenuTreeViewItemDestructible.OnClick := @MenuTreeViewItemDestructibleClick;
   MenuTreeView.Items.Add(MenuTreeViewItemDestructible);
+
+  MenuTreeViewItemFrameProfiler := TMenuItem.Create(Self);
+  MenuTreeViewItemFrameProfiler.Caption := 'Frame Budget Profiler && 5-Tier Scalability Studio...';
+  MenuTreeViewItemFrameProfiler.OnClick := @MenuTreeViewItemFrameProfilerClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemFrameProfiler);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -15228,6 +15253,8 @@ var
         Suffix := Suffix + ' ' + TCastleLookAtConstraintBehavior(NodeObj).LookAtSummaryBadge
       else if NodeObj is TCastleDestructibleBehavior then
         Suffix := Suffix + ' ' + TCastleDestructibleBehavior(NodeObj).DestructibleSummaryBadge
+      else if NodeObj is TCastleScalabilityManager then
+        Suffix := Suffix + ' ' + TCastleScalabilityManager(NodeObj).ScalabilitySummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -55066,6 +55093,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemDestructibleClick(Sender: TObject);
 begin
   ShowDestructibleDialog;
+end;
+
+procedure TDesignFrame.ShowFrameProfilerDialog;
+var
+  Dlg: TFrameProfilerForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TFrameProfilerForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonFrameProfilerClick(Sender: TObject);
+begin
+  ShowFrameProfilerDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemFrameProfilerClick(Sender: TObject);
+begin
+  ShowFrameProfilerDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

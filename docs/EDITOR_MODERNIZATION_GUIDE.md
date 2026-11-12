@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–254**), inspired by **Unreal Engine 5.5**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–306** across Horizons 1–4), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3085,6 +3085,30 @@ TDestructibleHelper.TriggerRadialBlastInHierarchy(DesignRoot, Vector3(0, 0.5, 0.
 
 ---
 
+## 66AE. Real-Time Frame Budget Profiler, Draw-Call / VRAM Analyzer & 5-Tier Scalability Studio (Phase 306)
+
+Castle Game Engine provides 60 Hz multi-platform hardware frame-budget auditing and idempotent 5-tier quality scalability matching Unreal Engine 6.0's Scalability Groups & Unreal Insights workflow:
+
+1. **5-Tier Scalability Manager (`src/scene/castlescalability.pas`)**:
+   - `TCastleScalabilityManager` (`TScalabilityTier = stLow..stCinematic`, `TPlatformBudgetProfile = pbpMobile60Hz..pbpWebAssembly60Hz`) snapshots baseline `stHigh` (`1.0x`) component settings on first touch so repeated switching across `Low`, `Medium`, `High`, `Epic`, and `Cinematic` reversibly scales `TCastleViewport.ShadowVolumes` / `DynamicBatching`, punctual light `Shadows` caps (`0..8`), `TCastleLodProxyBehavior` distances (`0.50x..2.00x`), `TCastleParticleEmitter` budgets (`0.25x..2.00x`), `TCastleDecalProjector` grid resolution, and `TCastlePostProcessVolume` passes.
+2. **Frame Budget Profiler Studio (`TFrameProfilerForm` & `TFrameBudgetProfiler`)**:
+   - Open via the top-bar **`Profiler`** button, Hierarchy context menu, or **`Design -> Frame Budget Profiler, Draw-Call / VRAM & Scalability Studio...`**.
+   - Audits draw calls, triangles, texture VRAM, shadow-casting lights, active particles, foliage instances, and audio sources against `16.67 ms` budgets with emerald/amber/crimson utilization gauges, ranked **`Top Heavy Scene Offenders`**, and 1-click **`Auto-Apply Recommended Tier for Target`**.
+
+### Example Usage (Pascal API)
+```pascal
+Audit := TFrameBudgetProfiler.AuditHierarchy(DesignRoot, pbpMobile60Hz);
+if not Audit.OverallPassBudget then
+  TFrameBudgetProfiler.ApplyScalabilityTierToDesign(DesignRoot, DesignOwner, Audit.RecommendedTier);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Optimization Guide](https://castle-engine.io/optimization) · [UE Scalability Reference](https://dev.epicgames.com/documentation/en-us/unreal-engine/scalability-reference-for-unreal-engine) · [Unreal Insights](https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-insights-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Rendering Optimization & Batching (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Viewport Stats](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3150,7 +3174,7 @@ fpc -Mobjfpc -Sh -Ci -Cr -Co -gl -gh -dTEXT_RUNNER @castle-fpc.cfg \
 ./tests/castle_tester_standalone --console --filter=TTestCastleTransformManipulate*
 ```
 
-In addition, Horizon 2 & Horizon 3 editor subsystems include dedicated automated test suites:
+In addition, Horizon 2, Horizon 3 & Horizon 4 editor subsystems include dedicated automated test suites:
 - **[`tests/code/testcases/testtoolmcpserver.pas`](../tests/code/testcases/testtoolmcpserver.pas) (`TTestToolMcpServer` — 3 tests)**: Verifies JSON-RPC 2.0 `initialize`, `ping`, `tools/list` (all 12 MCP tools), Bearer token authentication, all 4 `TMcpAutonomyMode` tiers (`Disabled`, `ReadOnly`, `EditWithUndo`, `FullControl`), live RTTI property inspection/mutation, layout actions (`align_y`, `snap_to_grid`), Base64 PNG viewport screenshot encoding, and live localhost multithreaded HTTP roundtrip (`GET /health` + `POST /mcp` with `CheckSynchronize` and `0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldesignsandboxdiff.pas`](../tests/code/testcases/testtooldesignsandboxdiff.pas) (`TTestToolDesignSandboxDiff` — 3 tests)**: Verifies `TDesignSandboxManager` creation, filtering, renaming, JSON persistence, and live instantiation, `TDesignDiffEngine` detection of `[+ Added]`, `[- Removed]`, and `[~ Modified]` components + subcomponent properties (`TranslationPersistent.X/Y/Z`, `SizePersistent.X/Y/Z`, `Caption`, `FontSize`), and `RevertSelectedToBase` selective restoration/deletion of individual properties and components (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testcastleterrain.pas`](../tests/code/testcases/testcastleterrain.pas) (`TTestCastleTerrain` — 4 tests)**: Verifies `TCastleTerrainImage` Raise/Lower/Smooth/Flatten sculpting with dynamic `MinLevel`/`MaxLevel` expansion + renormalization, `RayCastWorld`, non-destructive `EnsureEditableHeightLayer` `TCastleTerrainCombine` (`opAdd`) wrapping over `TCastleTerrainNoise`, `GenerateSplatmapFromProceduralLayers`, `PaintSplatmapAtWorldPoint` $R+G+B+A = 255$ partition-of-unity normalization, and PNG heightmap/splatmap save & reload roundtrips (`0 unfreed memory blocks`).
@@ -3178,4 +3202,5 @@ In addition, Horizon 2 & Horizon 3 editor subsystems include dedicated automated
 - **[`tests/code/testcases/testtoolfoliagebiome.pas`](../tests/code/testcases/testtoolfoliagebiome.pas) (`TTestToolFoliageBiome` — 2 tests)**: Verifies seeded Halton/Poisson `PopulateBiomeWithSceneExclusions` rejecting `HighSnowPeak` (`Y = 18 > MaxAltitude 10`) and `RoadExcl` road clearings while enforcing pairwise `MinRadiusSpacing >= 2.5m`, `TCastleLodProxyBehavior` `±3.0m` hysteresis band stability across `High`/`Medium`/`Low`/`Culled`, and `ComponentToString` JSON roundtrips without `csTransient` mesh bloat (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolikrig.pas`](../tests/code/testcases/testtoolikrig.pas) (`TTestToolIkRig` — 2 tests)**: Verifies exact law-of-cosines `UpperBoneLength` & `LowerBoneLength` preservation (`0.55m + 0.55m`) on nested `LegHip -> LegKnee -> LegFoot` chains, `+Z` vs. `-Z` `PoleTransform` knee plane flipping, `SoftReachMargin` hyperextension damping, downward `EnableGroundFootPlant` raycast lifting onto a stepped platform (`Y = 0.48`), `TCastleLookAtConstraintBehavior` `±60°/±35°` cone clamping & exponential `DampingSpeed` convergence, and `ComponentToString` JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldestructible.pas`](../tests/code/testcases/testtooldestructible.pas) (`TTestToolDestructible` — 2 tests)**: Verifies exact 3D convex Voronoi polyhedral volume partition (`14` cells summing to `2.0 x 3.0 x 1.5 = 9.0 m^3`), `ApplyDamage` threshold shattering, radial blast outward dispersion & ground floor restitution clamping, timed `DebrisLifetimeSec` expiration cleanup, `TriggerRadialBlastInHierarchy` distance attenuation, `ResetAllDestructiblesInHierarchy` intact restoration, and `csTransient`-clean `ComponentToString` JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolframeprofiler.pas`](../tests/code/testcases/testtoolframeprofiler.pas) (`TTestToolFrameProfiler` — 2 tests)**: Verifies `TFrameBudgetProfiler.AuditHierarchy` `pbpMobile60Hz` shadow-light & particle over-budget detection, `TopOffenders` cost ranking, `stLow` scalability remediation (`DynamicBatching = true`, `ShadowVolumes = false`, `25%` particle cap, post-process disable), idempotent reversible `Low -> Low -> Cinematic -> High` LOD & particle scaling via `TCastleScalabilityManager`, and `ComponentToString` JSON roundtrips (`0 unfreed memory blocks`).
 

@@ -619,6 +619,7 @@ type
       MenuItemFoliageBiome: TMenuItem;
       MenuItemIkRig: TMenuItem;
       MenuItemDestructible: TMenuItem;
+      MenuItemFrameProfiler: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -658,6 +659,7 @@ type
     procedure MenuItemFoliageBiomeClick(Sender: TObject);
     procedure MenuItemIkRigClick(Sender: TObject);
     procedure MenuItemDestructibleClick(Sender: TObject);
+    procedure MenuItemFrameProfilerClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2378,6 +2380,11 @@ begin
   MenuItemDestructible.OnClick := @MenuItemDestructibleClick;
   MenuItemDesign.Add(MenuItemDestructible);
 
+  MenuItemFrameProfiler := TMenuItem.Create(MenuItemDesign);
+  MenuItemFrameProfiler.Caption := 'Frame Budget Profiler, Draw-Call / VRAM & Scalability Studio...';
+  MenuItemFrameProfiler.OnClick := @MenuItemFrameProfilerClick;
+  MenuItemDesign.Add(MenuItemFrameProfiler);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -3078,6 +3085,8 @@ begin
     MenuItemIkRig.Enabled := Design <> nil;
   if MenuItemDestructible <> nil then
     MenuItemDestructible.Enabled := Design <> nil;
+  if MenuItemFrameProfiler <> nil then
+    MenuItemFrameProfiler.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5457,6 +5466,12 @@ procedure TProjectForm.MenuItemDialogueQuestClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowDialogueQuestDialog;
+end;
+
+procedure TProjectForm.MenuItemFrameProfilerClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowFrameProfilerDialog;
 end;
 
 procedure TProjectForm.MenuItemDestructibleClick(Sender: TObject);
