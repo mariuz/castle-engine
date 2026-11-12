@@ -136,6 +136,7 @@ uses
   TestToolMaterialGraph,
   TestToolWaterStudio,
   TestToolCsgStudio,
+  TestToolAbilityStudio,
   TestCastleVulkanRHI;
 
 implementation

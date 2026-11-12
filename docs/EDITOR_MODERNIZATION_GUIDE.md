@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–309** across Horizons 1–5), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–310** across Horizons 1–5), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3184,6 +3184,33 @@ TCsgStudioHelper.AddArchitecturalBrush(
 
 ---
 
+## 66AI. Gameplay Ability, Cooldown, Status Buff/Debuff & Attribute System (GAS) Studio (Phase 310)
+
+Castle Game Engine provides a composable Gameplay Ability System (`TCastleAbilitySystemBehavior`) matching Unreal Engine 6.0+'s `UAbilitySystemComponent`, `UAttributeSet`, and `UGameplayEffect` architecture:
+
+1. **GAS Attribute Aggregator, Cooldowns & Tag Immunity (`src/scene/castlegameplayability.pas`)**:
+   - Evaluates derived attributes via `(Base + FlatAdd) * (1 + PercentAdd) * Multiply` with dynamic `MaxAttrName` caps (`Health <= MaxHealth`, `Mana <= MaxMana`) and optional `TCastleLiving` mirroring.
+   - Executes cooldown & resource-cost abilities (`TryActivateAbility`), ticks stacking periodic DoT/HoT effects (`StepSimulation`), and enforces dot-boundary Gameplay Tag gates (`BlockedByTagPattern`, `GrantsImmunityPattern` with automatic active-debuff purging).
+2. **GAS Combat Studio (`TAbilityStudioForm` & `TAbilityStudioHelper`)**:
+   - Open via the top-bar **`Abilities`** button, Hierarchy context menu, or **`Design -> Gameplay Ability, Status Buff/Debuff & Attribute (GAS) Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+Mage := TAbilityStudioHelper.SpawnCombatActorWithGas(
+  DesignRoot, DesignOwner, 'HeroMage', gapArcaneMage, Vector3(-2, 0, 0));
+Boss := TAbilityStudioHelper.SpawnCombatActorWithGas(
+  DesignRoot, DesignOwner, 'BossKnight', gapVanguardPaladin, Vector3(2, 0, 0));
+Mage.TryActivateAbility('Fireball', Boss);
+TAbilityStudioHelper.StepAllGasSystems(DesignRoot, DesignOwner, 1.0);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Behaviors (`TCastleBehavior`)](https://castle-engine.io/behaviors) · [UE Gameplay Ability System](https://dev.epicgames.com/documentation/en-us/unreal-engine/gameplay-ability-system-for-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — RPG Combat & Living Entities (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Behavior Cards](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [CGE 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3281,4 +3308,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems inclu
 - **[`tests/code/testcases/testtoolmaterialgraph.pas`](../tests/code/testcases/testtoolmaterialgraph.pas) (`TTestToolMaterialGraph` — 2 tests)**: Verifies topological SSA GLSL compilation (`PLUG_vertex_object_space_change`, `PLUG_main_texture_apply`, `PLUG_material_metallic_roughness`, `PLUG_lighting_apply`), 3-color DFS `ValidateGraph` cycle rejection, `ComponentToString` JSON roundtrips, all 5 `TMaterialGraphPreset` live `TEffectNode` + `cge_mat_time` `TSFFloat` uniform updates, and CPU raytraced PBR sphere `EvaluatePreviewPixel` alpha-clip scanlines (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolwaterstudio.pas`](../tests/code/testcases/testtoolwaterstudio.pas) (`TTestToolWaterStudio` — 2 tests)**: Verifies 4-octave Gerstner wave dispersion, unit-length surface normals, crest `FoamFactor`, footprint vs. `InfiniteOcean` bounds, `csTransient`-clean JSON roundtrips, and 4-pontoon `TCastleBuoyancyBehavior` Archimedes surface equilibrium, downstream river flow drift, and steep ocean swell pitch/roll alignment (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolcsgstudio.pas`](../tests/code/testcases/testtoolcsgstudio.pas) (`TTestToolCsgStudio` — 2 tests)**: Verifies exact 3D BSP `Union` (`64 m^3`), `Subtract` (`48 m^3`), and `Intersect` (`24 m^3`) polyhedral volumes, real-meter `ComputeTriplanarUv` projection, `csTransient`-clean `BrushesJson` roundtrips, walkthrough `WorldRay` raycasting straight through a carved Roman arched doorway (`Dist = 12.4m` back wall vs. `3.0m` solid front wall), and `Stairwell`/`RampWedge`/`Cylinder` presets (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolabilitystudio.pas`](../tests/code/testcases/testtoolabilitystudio.pas) (`TTestToolAbilityStudio` — 2 tests)**: Verifies `(Base + Flat) * (1 + Pct) * Mul` attribute aggregation (`45 -> 108.0`), `Fireball` mana cost / cooldown / direct damage / periodic `IgniteBurnDoT` ticking with `TCastleLiving` mirroring, `ConfigJson` roundtrips, `FireImmunityWard` active-burn purging & application immunity, `Status.CrowdControl.Stun` cast blocking, and missing-attribute audit warnings (`0 unfreed memory blocks`).
 

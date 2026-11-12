@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="91">
+    <Units Count="93">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -537,6 +537,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormCsgStudio"/>
       </Unit90>
+      <Unit91>
+        <Filename Value="../common-code/toolabilitystudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolAbilityStudio"/>
+      </Unit91>
+      <Unit92>
+        <Filename Value="code/formabilitystudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormAbilityStudio"/>
+      </Unit92>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

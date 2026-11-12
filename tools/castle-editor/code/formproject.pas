@@ -623,6 +623,7 @@ type
       MenuItemMaterialGraph: TMenuItem;
       MenuItemWaterStudio: TMenuItem;
       MenuItemCsgStudio: TMenuItem;
+      MenuItemAbilityStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -666,6 +667,7 @@ type
     procedure MenuItemMaterialGraphClick(Sender: TObject);
     procedure MenuItemWaterStudioClick(Sender: TObject);
     procedure MenuItemCsgStudioClick(Sender: TObject);
+    procedure MenuItemAbilityStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2406,6 +2408,11 @@ begin
   MenuItemCsgStudio.OnClick := @MenuItemCsgStudioClick;
   MenuItemDesign.Add(MenuItemCsgStudio);
 
+  MenuItemAbilityStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemAbilityStudio.Caption := 'Gameplay Ability, Status Buff/Debuff & Attribute (GAS) Studio...';
+  MenuItemAbilityStudio.OnClick := @MenuItemAbilityStudioClick;
+  MenuItemDesign.Add(MenuItemAbilityStudio);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -3114,6 +3121,8 @@ begin
     MenuItemWaterStudio.Enabled := Design <> nil;
   if MenuItemCsgStudio <> nil then
     MenuItemCsgStudio.Enabled := Design <> nil;
+  if MenuItemAbilityStudio <> nil then
+    MenuItemAbilityStudio.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5505,6 +5514,12 @@ procedure TProjectForm.MenuItemCsgStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowCsgStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemAbilityStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowAbilityStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
