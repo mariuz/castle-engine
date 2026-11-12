@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -786,6 +786,8 @@ type
       MenuTreeViewItemCsgStudio: TMenuItem;
       ButtonAbilityStudio: TSpeedButton;
       MenuTreeViewItemAbilityStudio: TMenuItem;
+      ButtonInputStudio: TSpeedButton;
+      MenuTreeViewItemInputStudio: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1269,6 +1271,8 @@ type
     procedure MenuTreeViewItemCsgStudioClick(Sender: TObject);
     procedure ButtonAbilityStudioClick(Sender: TObject);
     procedure MenuTreeViewItemAbilityStudioClick(Sender: TObject);
+    procedure ButtonInputStudioClick(Sender: TObject);
+    procedure MenuTreeViewItemInputStudioClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2730,6 +2734,7 @@ type
     procedure ShowWaterStudioDialog;
     procedure ShowCsgStudioDialog;
     procedure ShowAbilityStudioDialog;
+    procedure ShowInputStudioDialog;
   end;
 
 implementation
@@ -2750,7 +2755,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7139,6 +7144,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonAbilityStudio,
       PanelMiddleTop.GetControlIndex(ButtonCsgStudio) + 1);
 
+  ButtonInputStudio := TSpeedButton.Create(Self);
+  ButtonInputStudio.Caption := 'Input';
+  ButtonInputStudio.Hint := 'Open Enhanced Input Action Mapping, Chord/Combo Triggers & Rebinding Studio.' + NL +
+    'Author priority-layered contexts, Tap/Hold/Chord triggers, radial 2D deadzones & JSON player rebinds.';
+  ButtonInputStudio.ShowHint := true;
+  ButtonInputStudio.AutoSize := true;
+  ButtonInputStudio.Constraints.MinHeight := 33;
+  ButtonInputStudio.Constraints.MinWidth := 54;
+  ButtonInputStudio.BorderSpacing.Left := 2;
+  ButtonInputStudio.OnClick := @ButtonInputStudioClick;
+  ButtonInputStudio.Parent := PanelMiddleTop;
+  if ButtonAbilityStudio.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonInputStudio,
+      PanelMiddleTop.GetControlIndex(ButtonAbilityStudio) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10113,6 +10133,11 @@ begin
   MenuTreeViewItemAbilityStudio.Caption := 'Gameplay Ability, Status Buff/Debuff && Attribute (GAS) Studio...';
   MenuTreeViewItemAbilityStudio.OnClick := @MenuTreeViewItemAbilityStudioClick;
   MenuTreeView.Items.Add(MenuTreeViewItemAbilityStudio);
+
+  MenuTreeViewItemInputStudio := TMenuItem.Create(Self);
+  MenuTreeViewItemInputStudio.Caption := 'Enhanced Input Action Mapping && Rebinding Studio...';
+  MenuTreeViewItemInputStudio.OnClick := @MenuTreeViewItemInputStudioClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemInputStudio);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -15367,6 +15392,8 @@ var
         Suffix := Suffix + ' ' + TCastleCsgModeler(NodeObj).CsgSummaryBadge
       else if NodeObj is TCastleAbilitySystemBehavior then
         Suffix := Suffix + ' ' + TCastleAbilitySystemBehavior(NodeObj).GasSummaryBadge
+      else if NodeObj is TCastleInputMapManager then
+        Suffix := Suffix + ' ' + TCastleInputMapManager(NodeObj).InputSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -55421,6 +55448,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemAbilityStudioClick(Sender: TObject);
 begin
   ShowAbilityStudioDialog;
+end;
+
+procedure TDesignFrame.ShowInputStudioDialog;
+var
+  Dlg: TInputStudioForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TInputStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonInputStudioClick(Sender: TObject);
+begin
+  ShowInputStudioDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemInputStudioClick(Sender: TObject);
+begin
+  ShowInputStudioDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

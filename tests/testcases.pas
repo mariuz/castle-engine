@@ -137,6 +137,7 @@ uses
   TestToolWaterStudio,
   TestToolCsgStudio,
   TestToolAbilityStudio,
+  TestToolInputStudio,
   TestCastleVulkanRHI;
 
 implementation

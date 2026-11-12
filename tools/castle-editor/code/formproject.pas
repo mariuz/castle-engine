@@ -624,6 +624,7 @@ type
       MenuItemWaterStudio: TMenuItem;
       MenuItemCsgStudio: TMenuItem;
       MenuItemAbilityStudio: TMenuItem;
+      MenuItemInputStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -668,6 +669,7 @@ type
     procedure MenuItemWaterStudioClick(Sender: TObject);
     procedure MenuItemCsgStudioClick(Sender: TObject);
     procedure MenuItemAbilityStudioClick(Sender: TObject);
+    procedure MenuItemInputStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2413,6 +2415,11 @@ begin
   MenuItemAbilityStudio.OnClick := @MenuItemAbilityStudioClick;
   MenuItemDesign.Add(MenuItemAbilityStudio);
 
+  MenuItemInputStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemInputStudio.Caption := 'Enhanced Input Action Mapping, Chord Triggers & Rebinding Studio...';
+  MenuItemInputStudio.OnClick := @MenuItemInputStudioClick;
+  MenuItemDesign.Add(MenuItemInputStudio);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -3123,6 +3130,8 @@ begin
     MenuItemCsgStudio.Enabled := Design <> nil;
   if MenuItemAbilityStudio <> nil then
     MenuItemAbilityStudio.Enabled := Design <> nil;
+  if MenuItemInputStudio <> nil then
+    MenuItemInputStudio.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5520,6 +5529,12 @@ procedure TProjectForm.MenuItemAbilityStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowAbilityStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemInputStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowInputStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
