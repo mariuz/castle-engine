@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–308** across Horizons 1–5), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–309** across Horizons 1–5), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3158,6 +3158,32 @@ TWaterStudioHelper.StepAllWaterAndBuoyancy(DesignRoot, DesignOwner, 0.1);
 
 ---
 
+## 66AH. CSG / Boolean Greybox Architecture & Procedural Room/Arch/Stair Mesh Modeler Studio (Phase 309)
+
+Castle Game Engine provides non-destructive 3D BSP Constructive Solid Geometry (CSG) greybox level prototyping matching Unreal Engine 6.0+'s Modeling Mode & CubeGrid workflow:
+
+1. **3D Polygon-Splitting BSP Modeler (`src/scene/castlecsgmodeler.pas`)**:
+   - `TCastleCsgModeler` evaluates an ordered `BrushesJson` stack of `cboUnion`, `cboSubtract`, and `cboIntersect` brushes across 5 architectural shapes (`cbsBox`, `cbsCylinder`, `cbsArchCorridor`, `cbsRampWedge`, `cbsStairwell`), generating real-meter triplanar UVs (`ComputeTriplanarUv`), exact signed polyhedral solid volume (`OutputVolumeCubicMeters`), a `csTransient` PBR greybox `TCastleScene`, and triangle-accurate octree collisions (`GenerateCollider` -> `PreciseCollisions`).
+2. **CSG Boolean Studio (`TCsgStudioForm` & `TCsgStudioHelper`)**:
+   - Open via the top-bar **`CSG`** button, Hierarchy context menu, or **`Design -> CSG / Boolean Greybox Architecture & Mesh Modeler Studio...`**.
+   - Includes 4 architectural presets (`Hollow Room + Arch`, `Vaulted Cross Hall`, `Mezzanine + Stairs`, `Courtyard Cloister`), interactive brush stack ordering, and a dual Top-Down XZ + Side Z-Y blueprint cross-section canvas.
+
+### Example Usage (Pascal API)
+```pascal
+Room := TCsgStudioHelper.SpawnCsgModeler(
+  DesignRoot, DesignOwner, capHollowRoomWithArchDoorway, TVector3.Zero);
+TCsgStudioHelper.AddArchitecturalBrush(
+  Room, 'InteriorStairs', cboUnion, cbsStairwell,
+  Vector3(-2.5, 1.0, -1.0), Vector3(2.2, 2.0, 3.6), 0.0, 8);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Procedural X3D Geometry](https://castle-engine.io/x3d_implementation_rendering.php) · [UE Modeling Mode](https://dev.epicgames.com/documentation/en-us/unreal-engine/modeling-mode-in-unreal-engine) · [Godot 4 CSG Tools](https://docs.godotengine.org/en/stable/tutorials/3d/csg_tools.html)
+- **Videos & Movies:** 🎬 [CGE Official Video — 3D Level Greyboxing & Collisions (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Level Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Physics](https://castle-engine.io/images/thumb_const_height_size/platformer_physics_components.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3254,4 +3280,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems inclu
 - **[`tests/code/testcases/testtoolframeprofiler.pas`](../tests/code/testcases/testtoolframeprofiler.pas) (`TTestToolFrameProfiler` — 2 tests)**: Verifies `TFrameBudgetProfiler.AuditHierarchy` `pbpMobile60Hz` shadow-light & particle over-budget detection, `TopOffenders` cost ranking, `stLow` scalability remediation (`DynamicBatching = true`, `ShadowVolumes = false`, `25%` particle cap, post-process disable), idempotent reversible `Low -> Low -> Cinematic -> High` LOD & particle scaling via `TCastleScalabilityManager`, and `ComponentToString` JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmaterialgraph.pas`](../tests/code/testcases/testtoolmaterialgraph.pas) (`TTestToolMaterialGraph` — 2 tests)**: Verifies topological SSA GLSL compilation (`PLUG_vertex_object_space_change`, `PLUG_main_texture_apply`, `PLUG_material_metallic_roughness`, `PLUG_lighting_apply`), 3-color DFS `ValidateGraph` cycle rejection, `ComponentToString` JSON roundtrips, all 5 `TMaterialGraphPreset` live `TEffectNode` + `cge_mat_time` `TSFFloat` uniform updates, and CPU raytraced PBR sphere `EvaluatePreviewPixel` alpha-clip scanlines (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolwaterstudio.pas`](../tests/code/testcases/testtoolwaterstudio.pas) (`TTestToolWaterStudio` — 2 tests)**: Verifies 4-octave Gerstner wave dispersion, unit-length surface normals, crest `FoamFactor`, footprint vs. `InfiniteOcean` bounds, `csTransient`-clean JSON roundtrips, and 4-pontoon `TCastleBuoyancyBehavior` Archimedes surface equilibrium, downstream river flow drift, and steep ocean swell pitch/roll alignment (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolcsgstudio.pas`](../tests/code/testcases/testtoolcsgstudio.pas) (`TTestToolCsgStudio` — 2 tests)**: Verifies exact 3D BSP `Union` (`64 m^3`), `Subtract` (`48 m^3`), and `Intersect` (`24 m^3`) polyhedral volumes, real-meter `ComputeTriplanarUv` projection, `csTransient`-clean `BrushesJson` roundtrips, walkthrough `WorldRay` raycasting straight through a carved Roman arched doorway (`Dist = 12.4m` back wall vs. `3.0m` solid front wall), and `Stairwell`/`RampWedge`/`Cylinder` presets (`0 unfreed memory blocks`).
 

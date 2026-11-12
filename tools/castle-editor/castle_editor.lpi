@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="89">
+    <Units Count="91">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -527,6 +527,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormWaterStudio"/>
       </Unit88>
+      <Unit89>
+        <Filename Value="../common-code/toolcsgstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolCsgStudio"/>
+      </Unit89>
+      <Unit90>
+        <Filename Value="code/formcsgstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormCsgStudio"/>
+      </Unit90>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

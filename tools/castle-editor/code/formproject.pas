@@ -622,6 +622,7 @@ type
       MenuItemFrameProfiler: TMenuItem;
       MenuItemMaterialGraph: TMenuItem;
       MenuItemWaterStudio: TMenuItem;
+      MenuItemCsgStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -664,6 +665,7 @@ type
     procedure MenuItemFrameProfilerClick(Sender: TObject);
     procedure MenuItemMaterialGraphClick(Sender: TObject);
     procedure MenuItemWaterStudioClick(Sender: TObject);
+    procedure MenuItemCsgStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2399,6 +2401,11 @@ begin
   MenuItemWaterStudio.OnClick := @MenuItemWaterStudioClick;
   MenuItemDesign.Add(MenuItemWaterStudio);
 
+  MenuItemCsgStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemCsgStudio.Caption := 'CSG / Boolean Greybox Architecture & Mesh Modeler Studio...';
+  MenuItemCsgStudio.OnClick := @MenuItemCsgStudioClick;
+  MenuItemDesign.Add(MenuItemCsgStudio);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -3105,6 +3112,8 @@ begin
     MenuItemMaterialGraph.Enabled := Design <> nil;
   if MenuItemWaterStudio <> nil then
     MenuItemWaterStudio.Enabled := Design <> nil;
+  if MenuItemCsgStudio <> nil then
+    MenuItemCsgStudio.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5490,6 +5499,12 @@ procedure TProjectForm.MenuItemWaterStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowWaterStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemCsgStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowCsgStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

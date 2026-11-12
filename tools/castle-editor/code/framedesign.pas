@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -782,6 +782,8 @@ type
       MenuTreeViewItemMaterialGraph: TMenuItem;
       ButtonWaterStudio: TSpeedButton;
       MenuTreeViewItemWaterStudio: TMenuItem;
+      ButtonCsgStudio: TSpeedButton;
+      MenuTreeViewItemCsgStudio: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1261,6 +1263,8 @@ type
     procedure MenuTreeViewItemMaterialGraphClick(Sender: TObject);
     procedure ButtonWaterStudioClick(Sender: TObject);
     procedure MenuTreeViewItemWaterStudioClick(Sender: TObject);
+    procedure ButtonCsgStudioClick(Sender: TObject);
+    procedure MenuTreeViewItemCsgStudioClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2720,6 +2724,7 @@ type
     procedure ShowFrameProfilerDialog;
     procedure ShowMaterialGraphDialog;
     procedure ShowWaterStudioDialog;
+    procedure ShowCsgStudioDialog;
   end;
 
 implementation
@@ -2740,7 +2745,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7099,6 +7104,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonWaterStudio,
       PanelMiddleTop.GetControlIndex(ButtonMaterialGraph) + 1);
 
+  ButtonCsgStudio := TSpeedButton.Create(Self);
+  ButtonCsgStudio.Caption := 'CSG';
+  ButtonCsgStudio.Hint := 'Open CSG / Boolean Greybox Architecture & Procedural Mesh Modeler Studio.' + NL +
+    'Stack additive/subtractive Box, Cylinder, ArchCorridor, RampWedge & Stairwell brushes with triplanar UVs.';
+  ButtonCsgStudio.ShowHint := true;
+  ButtonCsgStudio.AutoSize := true;
+  ButtonCsgStudio.Constraints.MinHeight := 33;
+  ButtonCsgStudio.Constraints.MinWidth := 50;
+  ButtonCsgStudio.BorderSpacing.Left := 2;
+  ButtonCsgStudio.OnClick := @ButtonCsgStudioClick;
+  ButtonCsgStudio.Parent := PanelMiddleTop;
+  if ButtonWaterStudio.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonCsgStudio,
+      PanelMiddleTop.GetControlIndex(ButtonWaterStudio) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10063,6 +10083,11 @@ begin
   MenuTreeViewItemWaterStudio.Caption := 'Gerstner Ocean / River Water && Buoyancy Studio...';
   MenuTreeViewItemWaterStudio.OnClick := @MenuTreeViewItemWaterStudioClick;
   MenuTreeView.Items.Add(MenuTreeViewItemWaterStudio);
+
+  MenuTreeViewItemCsgStudio := TMenuItem.Create(Self);
+  MenuTreeViewItemCsgStudio.Caption := 'CSG / Boolean Greybox Architecture && Mesh Modeler Studio...';
+  MenuTreeViewItemCsgStudio.OnClick := @MenuTreeViewItemCsgStudioClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemCsgStudio);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -15313,6 +15338,8 @@ var
         Suffix := Suffix + ' ' + TCastleWaterVolume(NodeObj).WaterSummaryBadge
       else if NodeObj is TCastleBuoyancyBehavior then
         Suffix := Suffix + ' ' + TCastleBuoyancyBehavior(NodeObj).BuoyancySummaryBadge
+      else if NodeObj is TCastleCsgModeler then
+        Suffix := Suffix + ' ' + TCastleCsgModeler(NodeObj).CsgSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -55267,6 +55294,56 @@ end;
 procedure TDesignFrame.MenuTreeViewItemWaterStudioClick(Sender: TObject);
 begin
   ShowWaterStudioDialog;
+end;
+
+procedure TDesignFrame.ShowCsgStudioDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  SelTrans: TCastleTransform;
+  Vp: TCastleViewport;
+  CamP, CamD, CamU, SpawnPos: TVector3;
+  Dlg: TCsgStudioForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  SelTrans := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if (SelectedCount > 0) and (Selected[0] is TCastleTransform) then
+      SelTrans := TCastleTransform(Selected[0]);
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  SpawnPos := TVector3.Zero;
+  Vp := CurrentViewport;
+  if (Vp <> nil) and (Vp.InternalCamera <> nil) then
+  begin
+    Vp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    SpawnPos := Vector3(CamP.X + CamD.X * 10.0, 0.0, CamP.Z + CamD.Z * 10.0);
+  end;
+
+  Dlg := TCsgStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner, SelTrans,
+    SpawnPos,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonCsgStudioClick(Sender: TObject);
+begin
+  ShowCsgStudioDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemCsgStudioClick(Sender: TObject);
+begin
+  ShowCsgStudioDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);
