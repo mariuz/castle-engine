@@ -23,6 +23,9 @@ program vulkan_3d_scene;
 {$I castleconf.inc}
 
 uses
+  {$if defined(FPC) and defined(UNIX) and (not defined(CASTLE_DISABLE_THREADS))}
+  CThreads,
+  {$endif}
   SysUtils, Classes,
   CastleVectors, CastleColors, CastleRectangles, CastleLog,
   CastleApplicationProperties, CastleRenderOptions, CastleViewport, CastleScene,

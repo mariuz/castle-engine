@@ -23,7 +23,7 @@ unit CastleInternalRHI;
 interface
 
 uses
-  SysUtils, Classes, Generics.Collections,
+  SysUtils, Classes, Math, Generics.Collections,
   CastleVectors, CastleColors, CastleRectangles, CastleImages, CastleRenderOptions;
 
 type
@@ -538,6 +538,7 @@ type
     ColorAttachments: array of TRHIRenderingAttachment;
     HasDepthAttachment: Boolean;
     DepthAttachment: TRHIRenderingAttachment;
+    ContentsSecondaryCommandBuffers: Boolean;
     class function CreateColorDepth(const ARenderArea: TRectangle;
       const AColorTexture: TRHITexture; const AColorLoadOp: TRHIAttachmentLoadOp;
       const AClearColor: TCastleColor; const ADepthTexture: TRHITexture;
@@ -807,8 +808,14 @@ type
       const Offset: PtrUInt; const CountBuffer: TRHIBuffer;
       const CountBufferOffset: PtrUInt; const MaxDrawCount, Stride: Cardinal); virtual;
 
-    { Secondary Command List Execution (Multi-threaded recording) }
+    { Secondary Command List Recording & Execution (Multi-threaded recording) }
+    procedure BeginSecondaryRecording(const AInheritedInfo: TRHIRenderingInfo); overload; virtual;
+    procedure BeginSecondaryRecording(const AInheritedInfo: TRHIRenderingInfo;
+      const AViewportRect: TFloatRectangle; const AScissorRect: TRectangle;
+      const AMinDepth: Single = 0.0; const AMaxDepth: Single = 1.0); overload; virtual;
     procedure ExecuteCommands(const SecondaryCommandLists: array of TRHICommandList); virtual; abstract;
+    procedure ExecuteSecondaryCommandsInPass(
+      const SecondaryCommandLists: array of TRHICommandList); virtual;
 
     { Debug Markers (RenderDoc / NSight integration) }
     procedure PushDebugGroup(const LabelName: String; const Color: TCastleColor); virtual; abstract;
@@ -1771,6 +1778,55 @@ procedure TRHICommandList.DrawIndexedIndirectCount(const IndirectBuffer: TRHIBuf
   const CountBufferOffset: PtrUInt; const MaxDrawCount, Stride: Cardinal);
 begin
   DrawIndexedIndirect(IndirectBuffer, Offset, MaxDrawCount, Stride);
+end;
+
+procedure TRHICommandList.BeginSecondaryRecording(const AInheritedInfo: TRHIRenderingInfo);
+begin
+  BeginSecondaryRecording(
+    AInheritedInfo,
+    FloatRectangle(AInheritedInfo.RenderArea),
+    AInheritedInfo.RenderArea,
+    0.0, 1.0);
+end;
+
+procedure TRHICommandList.BeginSecondaryRecording(const AInheritedInfo: TRHIRenderingInfo;
+  const AViewportRect: TFloatRectangle; const AScissorRect: TRectangle;
+  const AMinDepth, AMaxDepth: Single);
+begin
+  BeginRecording;
+  FIsRendering := True;
+  FActiveRenderingInfo := AInheritedInfo;
+  FActiveRenderingInfo.ColorAttachments := Copy(AInheritedInfo.ColorAttachments);
+  FActiveRenderingHasColor := (Length(AInheritedInfo.ColorAttachments) > 0) and
+    (AInheritedInfo.ColorAttachments[0].Texture <> nil);
+  if FActiveRenderingHasColor then
+  begin
+    FActiveRenderingColorFormat := AInheritedInfo.ColorAttachments[0].Texture.Desc.Format;
+    FActiveRenderingSampleCount := Max(Cardinal(1),
+      AInheritedInfo.ColorAttachments[0].Texture.Desc.SampleCount);
+  end else
+  begin
+    FActiveRenderingColorFormat := pfUndefined;
+    FActiveRenderingSampleCount := 1;
+  end;
+  FActiveRenderingHasDepth := AInheritedInfo.HasDepthAttachment and
+    (AInheritedInfo.DepthAttachment.Texture <> nil);
+  if FActiveRenderingHasDepth then
+  begin
+    FActiveRenderingDepthFormat := AInheritedInfo.DepthAttachment.Texture.Desc.Format;
+    if not FActiveRenderingHasColor then
+      FActiveRenderingSampleCount := Max(Cardinal(1),
+        AInheritedInfo.DepthAttachment.Texture.Desc.SampleCount);
+  end else
+    FActiveRenderingDepthFormat := pfUndefined;
+  SetViewport(AViewportRect, AMinDepth, AMaxDepth);
+  SetScissor(AScissorRect);
+end;
+
+procedure TRHICommandList.ExecuteSecondaryCommandsInPass(
+  const SecondaryCommandLists: array of TRHICommandList);
+begin
+  ExecuteCommands(SecondaryCommandLists);
 end;
 
 { TRHIDevice }

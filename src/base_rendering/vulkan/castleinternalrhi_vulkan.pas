@@ -31,6 +31,8 @@ uses
 
 type
   TVulkanRHIDevice = class;
+  TCastleVulkanTimelineSemaphore = class;
+  TCastleVulkanWorkerCommandPoolManager = class;
 
   { Callback provided by TCastleWindow to create the platform-specific VkSurfaceKHR }
   TVulkanCreateSurfaceEvent = function(const Instance: VkInstance): VkSurfaceKHR of object;
@@ -313,14 +315,25 @@ type
     FLastVkScissorOffsetY: Integer;
     FViewportPendingReapply: Boolean;
     FScissorPendingReapply: Boolean;
+    FOwnsCommandPool: Boolean;
+    FResetIndividualBuffer: Boolean;
+    FSecondaryExecuteCount: Cardinal;
+    procedure ResetCommandTrackingState;
     function GetBoundDescriptorSet(const ASetIndex: Cardinal): TRHIDescriptorSet;
     procedure ComputeVkScissorRect(const ARect: TRectangle; out AVkRect: VkRect2D);
   public
     constructor Create(const ADevice: TVulkanRHIDevice; const AQueueFamilyIndex: Cardinal;
-      const ALevel: TRHICommandListLevel = cllPrimary);
+      const ALevel: TRHICommandListLevel = cllPrimary); overload;
+    constructor CreateFromPool(const ADevice: TVulkanRHIDevice;
+      const ACommandPool: VkCommandPool;
+      const ALevel: TRHICommandListLevel = cllSecondary;
+      const AResetIndividualBuffer: Boolean = False); overload;
     destructor Destroy; override;
 
     procedure BeginRecording; override;
+    procedure BeginSecondaryRecording(const AInheritedInfo: TRHIRenderingInfo;
+      const AViewportRect: TFloatRectangle; const AScissorRect: TRectangle;
+      const AMinDepth: Single = 0.0; const AMaxDepth: Single = 1.0); overload; override;
     procedure EndRecording; override;
 
     procedure TransitionTexture(const Texture: TRHITexture;
@@ -394,6 +407,8 @@ type
       const CountBufferOffset: PtrUInt; const MaxDrawCount, Stride: Cardinal); override;
 
     procedure ExecuteCommands(const SecondaryCommandLists: array of TRHICommandList); override;
+    procedure ExecuteSecondaryCommandsInPass(
+      const SecondaryCommandLists: array of TRHICommandList); override;
 
     procedure PushDebugGroup(const LabelName: String; const Color: TCastleColor); override;
     procedure PopDebugGroup; override;
@@ -402,6 +417,8 @@ type
       const ClearStencilBuf: Boolean = False; const ClearStencil: Byte = 0); override;
 
     property Handle: VkCommandBuffer read FHandle;
+    property CommandPool: VkCommandPool read FCommandPool;
+    property SecondaryExecuteCount: Cardinal read FSecondaryExecuteCount;
     property InFallbackRenderPass: Boolean read FInFallbackRenderPass;
     property BarrierCount: Cardinal read FBarrierCount;
     property Sync2BarrierCount: Cardinal read FSync2BarrierCount;
@@ -670,6 +687,19 @@ type
     FGraphicsQueueFamily: Cardinal;
     FTransferQueueFamily: Cardinal;
     FUseDedicatedTransferQueue: Boolean;
+    FTransferPools: array[0 .. MaxFramesInFlight - 1] of VkCommandPool;
+    FTransferPoolCmdBuffers: array[0 .. MaxFramesInFlight - 1] of array of VkCommandBuffer;
+    FTransferPoolUsedCounts: array[0 .. MaxFramesInFlight - 1] of Cardinal;
+    FTransferBinarySemaphores: array[0 .. MaxFramesInFlight - 1] of VkSemaphore;
+    FTransferTimelineSemaphore: TCastleVulkanTimelineSemaphore;
+    FPendingBinaryWaitSemaphore: VkSemaphore;
+    FLastSubmittedTimelineValue: UInt64;
+    FPendingGraphicsWaitTimelineValue: UInt64;
+    FPendingAcquireBuffers: array of TVulkanStagedBufferCopy;
+    FPendingAcquireImages: array of TVulkanStagedImageCopy;
+    FPendingPostTransferMipmaps: array of TVulkanRHITexture;
+    FTotalAsyncSubmissions: Cardinal;
+    FAsyncTransferEnabled: Boolean;
     FTotalBufferUploads: Cardinal;
     FTotalImageUploads: Cardinal;
     FTotalBatchedFlushes: Cardinal;
@@ -678,6 +708,9 @@ type
     FOverflowChunkCount: Cardinal;
 
     function EnsureRingBufferForSlot(const AFrameSlot: Cardinal): Boolean;
+    function AcquireTransferCommandBuffer(const AFrameSlot: Cardinal): VkCommandBuffer;
+    function EnsureTransferBinarySemaphore(const AFrameSlot: Cardinal): VkSemaphore;
+    function GetTransferTimelineSemaphore: TCastleVulkanTimelineSemaphore;
     function AllocateStagingSlice(const ASize, AAlignment: VkDeviceSize;
       out ASrcBuffer: VkBuffer; out ASrcOffset: VkDeviceSize;
       out AAllocation: TVulkanMemoryAllocation): Pointer;
@@ -717,7 +750,32 @@ type
       Returns total number of copy operations flushed. }
     function FlushPendingUploads(const ACommandList: TVulkanRHICommandList = nil): Cardinal;
 
+    { Submits all pending buffer-to-buffer and buffer-to-image copies asynchronously onto
+      FDevice.TransferQueue without stalling CPU or Graphics Queue execution, signaling
+      TransferTimelineSemaphore (VkTimelineSemaphoreSubmitInfo) with the returned 64-bit
+      counter value and queueing post-transfer queue-ownership acquire barriers + mipmap
+      blits for the next Graphics command buffer submission. }
+    function SubmitAsyncUploads: UInt64;
+
+    { Records any pending post-transfer queue-family ownership acquire barriers and
+      graphics-only mipmap blits onto ACommandList. Returns number of barriers/mipmaps applied. }
+    function ApplyPendingGraphicsAcquireBarriers(
+      const ACommandList: TVulkanRHICommandList): Cardinal;
+
+    { Consumes any pending timeline/binary semaphore wait required by the next Graphics Queue
+      vkQueueSubmit so GPU vertex/fragment stages wait for in-flight Transfer Queue copies. }
+    function ConsumePendingGraphicsWait(out ATimelineSemaphore: VkSemaphore;
+      out AWaitValue: UInt64; out ABinarySemaphore: VkSemaphore): Boolean;
+
+    { Waits on the host for all submitted asynchronous Transfer Queue uploads to finish. }
+    procedure WaitForAsyncUploads(const ATimeoutNs: UInt64 = High(UInt64));
+
     property RingCapacityPerFrame: VkDeviceSize read FRingCapacityPerFrame write FRingCapacityPerFrame;
+    property AsyncTransferEnabled: Boolean read FAsyncTransferEnabled write FAsyncTransferEnabled;
+    property TransferTimelineSemaphore: TCastleVulkanTimelineSemaphore read GetTransferTimelineSemaphore;
+    property LastSubmittedTimelineValue: UInt64 read FLastSubmittedTimelineValue;
+    property PendingGraphicsWaitTimelineValue: UInt64 read FPendingGraphicsWaitTimelineValue;
+    property TotalAsyncSubmissions: Cardinal read FTotalAsyncSubmissions;
     property CurrentFrameWriteOffset: VkDeviceSize read GetCurrentFrameWriteOffset;
     property PendingBufferCopyCount: Cardinal read GetPendingBufferCopyCount;
     property PendingImageCopyCount: Cardinal read GetPendingImageCopyCount;
@@ -730,6 +788,76 @@ type
     property TotalStagedBytes: UInt64 read FTotalStagedBytes;
     property QueueOwnershipTransferCount: Cardinal read FQueueOwnershipTransferCount;
     property OverflowChunkCount: Cardinal read FOverflowChunkCount;
+  end;
+
+  { -------------------------------------------------------------------------- }
+  { Multi-Threaded Secondary Command Recording Pool (VkCommandPool per Worker) }
+  { -------------------------------------------------------------------------- }
+
+  TVulkanCommandListArray = array of TRHICommandList;
+
+  TVulkanParallelWorkerTaskProc = procedure(const AWorkerIndex: Cardinal;
+    const ACommandList: TVulkanRHICommandList) of object;
+
+  TVulkanWorkerFrameSlot = record
+    CommandPool: VkCommandPool;
+    CommandLists: array of TVulkanRHICommandList;
+    UsedCount: Cardinal;
+  end;
+
+  { Manages per-worker-thread, per-frame-in-flight VkCommandPool instances and a
+    reusable OS worker thread pool so multiple CPU threads can record secondary
+    TVulkanRHICommandList instances in parallel with zero lock contention and O(1)
+    vkResetCommandPool bulk reclamation per frame slot. }
+  TCastleVulkanWorkerCommandPoolManager = class
+  private
+    FDevice: TVulkanRHIDevice;
+    FWorkerCount: Cardinal;
+    FUseWorkerThreads: Boolean;
+    FThreadsSpawned: Boolean;
+    FWorkerSlots: array of array[0 .. MaxFramesInFlight - 1] of TVulkanWorkerFrameSlot;
+    FWorkerThreads: array of TThread;
+    FLastWorkerThreadIds: array of TThreadID;
+    FTotalPoolResets: Cardinal;
+    FTotalParallelDispatches: Cardinal;
+    FTotalSecondaryListsRecorded: Cardinal;
+
+    procedure EnsureWorkerPoolsAllocated;
+    function EnsureWorkerThreadsSpawned: Boolean;
+    procedure ShutdownWorkerThreads;
+    procedure DestroyWorkerPools;
+    procedure SetWorkerCount(const AValue: Cardinal);
+  public
+    constructor Create(const ADevice: TVulkanRHIDevice;
+      const AWorkerCount: Cardinal = 4);
+    destructor Destroy; override;
+
+    { Bulk-resets all worker VkCommandPools for AFrameSlot in O(1) once that frame's
+      VkFence has signaled completion, making all secondary command lists reusable. }
+    procedure ResetFrameSlot(const AFrameSlot: Cardinal);
+
+    { Acquires a secondary TVulkanRHICommandList owned by AWorkerIndex for the current
+      frame-in-flight slot, allocating from that worker's dedicated VkCommandPool. }
+    function AcquireWorkerSecondaryCommandList(
+      const AWorkerIndex: Cardinal): TVulkanRHICommandList;
+
+    { Dispatches ATaskCount parallel recording tasks across up to WorkerCount threads,
+      each receiving its own dedicated-pool secondary TVulkanRHICommandList, and returns
+      the ordered ARecordedLists array ready for PrimaryCmd.ExecuteSecondaryCommandsInPass. }
+    function ExecuteParallelRecording(const ATaskCount: Cardinal;
+      const ATaskProc: TVulkanParallelWorkerTaskProc;
+      out ARecordedLists: TVulkanCommandListArray): Cardinal;
+
+    function GetWorkerCommandPool(const AWorkerIndex, AFrameSlot: Cardinal): VkCommandPool;
+    function GetWorkerLastThreadId(const AWorkerIndex: Cardinal): TThreadID;
+
+    property Device: TVulkanRHIDevice read FDevice;
+    property WorkerCount: Cardinal read FWorkerCount write SetWorkerCount;
+    property UseWorkerThreads: Boolean read FUseWorkerThreads write FUseWorkerThreads;
+    property ThreadsSpawned: Boolean read FThreadsSpawned;
+    property TotalPoolResets: Cardinal read FTotalPoolResets;
+    property TotalParallelDispatches: Cardinal read FTotalParallelDispatches;
+    property TotalSecondaryListsRecorded: Cardinal read FTotalSecondaryListsRecorded;
   end;
 
   { -------------------------------------------------------------------------- }
@@ -3712,6 +3840,7 @@ type
     FIndirectComputeDispatcher: TCastleVulkanIndirectComputeDispatcher;
     FBCnCompressor: TCastleVulkanBCnCompressor;
     FPipelineBinaryManager: TCastleVulkanPipelineBinaryManager;
+    FWorkerCommandPoolManager: TCastleVulkanWorkerCommandPoolManager;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -3848,6 +3977,7 @@ type
     function GetIndirectComputeDispatcher: TCastleVulkanIndirectComputeDispatcher;
     function GetBCnCompressor: TCastleVulkanBCnCompressor;
     function GetPipelineBinaryManager: TCastleVulkanPipelineBinaryManager;
+    function GetWorkerCommandPoolManager: TCastleVulkanWorkerCommandPoolManager;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -4116,6 +4246,7 @@ type
     property IndirectComputeDispatcher: TCastleVulkanIndirectComputeDispatcher read GetIndirectComputeDispatcher;
     property BCnCompressor: TCastleVulkanBCnCompressor read GetBCnCompressor;
     property PipelineBinaryManager: TCastleVulkanPipelineBinaryManager read GetPipelineBinaryManager;
+    property WorkerCommandPoolManager: TCastleVulkanWorkerCommandPoolManager read GetWorkerCommandPoolManager;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -4137,6 +4268,9 @@ type
     property AllocatedMemoryBytes: Int64 read FAllocatedMemoryBytes;
     property MemoryAllocator: TCastleVulkanMemoryAllocator read FMemoryAllocator;
     property StagingUploader: TCastleVulkanStagingUploader read FStagingUploader;
+    property GraphicsQueue: VkQueue read FGraphicsQueue;
+    property PresentQueue: VkQueue read FPresentQueue;
+    property TransferQueue: VkQueue read FTransferQueue;
     property GraphicsQueueFamily: Cardinal read FGraphicsQueueFamily;
     property PresentQueueFamily: Cardinal read FPresentQueueFamily;
     property TransferQueueFamily: Cardinal read FTransferQueueFamily;
@@ -4326,6 +4460,7 @@ function LoadPipelineCacheBlobFromStream(const AStream: TStream;
 implementation
 
 uses
+  {$ifndef CASTLE_DISABLE_THREADS} SyncObjs, {$endif}
   CastleDownload, CastleFilesUtils, CastleUriUtils;
 
 const
@@ -7244,6 +7379,8 @@ var
 begin
   inherited Create(ALevel);
   FDevice := ADevice;
+  FOwnsCommandPool := True;
+  FResetIndividualBuffer := True;
   if (FDevice = nil) or (FDevice.Handle = nil) then
     Exit;
 
@@ -7264,36 +7401,46 @@ begin
   CheckVk(vkAllocateCommandBuffers(FDevice.Handle, @AllocInfo, @FHandle), 'vkAllocateCommandBuffers');
 end;
 
+constructor TVulkanRHICommandList.CreateFromPool(const ADevice: TVulkanRHIDevice;
+  const ACommandPool: VkCommandPool; const ALevel: TRHICommandListLevel;
+  const AResetIndividualBuffer: Boolean);
+var
+  AllocInfo: VkCommandBufferAllocateInfo;
+begin
+  inherited Create(ALevel);
+  FDevice := ADevice;
+  FCommandPool := ACommandPool;
+  FOwnsCommandPool := False;
+  FResetIndividualBuffer := AResetIndividualBuffer;
+  if (FDevice = nil) or (FDevice.Handle = nil) or (FCommandPool = VK_NULL_HANDLE) then
+    Exit;
+
+  FillChar(AllocInfo, SizeOf(AllocInfo), 0);
+  AllocInfo.sType := VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  AllocInfo.commandPool := FCommandPool;
+  if ALevel = cllSecondary then
+    AllocInfo.level := VK_COMMAND_BUFFER_LEVEL_SECONDARY
+  else
+    AllocInfo.level := VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  AllocInfo.commandBufferCount := 1;
+  CheckVk(vkAllocateCommandBuffers(FDevice.Handle, @AllocInfo, @FHandle),
+    'vkAllocateCommandBuffers(WorkerPool)');
+end;
+
 destructor TVulkanRHICommandList.Destroy;
 begin
-  if (FDevice <> nil) and (FDevice.Handle <> nil) and (FCommandPool <> VK_NULL_HANDLE) then
+  if FOwnsCommandPool and (FDevice <> nil) and (FDevice.Handle <> nil) and
+     (FCommandPool <> VK_NULL_HANDLE) then
     vkDestroyCommandPool(FDevice.Handle, FCommandPool, nil);
   inherited;
 end;
 
-procedure TVulkanRHICommandList.BeginRecording;
-var
-  BeginInfo: VkCommandBufferBeginInfo;
-  InheritanceInfo: VkCommandBufferInheritanceInfo;
+procedure TVulkanRHICommandList.ResetCommandTrackingState;
 begin
   FActiveRenderingWidth := 0;
   FActiveRenderingHeight := 0;
   FViewportPendingReapply := False;
   FScissorPendingReapply := False;
-  if (FHandle <> nil) and Assigned(vkResetCommandBuffer) then
-    CheckVk(vkResetCommandBuffer(FHandle, 0), 'vkResetCommandBuffer');
-  FillChar(BeginInfo, SizeOf(BeginInfo), 0);
-  BeginInfo.sType := VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  BeginInfo.flags := VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  if FLevel = cllSecondary then
-  begin
-    BeginInfo.flags := BeginInfo.flags or VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
-    FillChar(InheritanceInfo, SizeOf(InheritanceInfo), 0);
-    InheritanceInfo.sType := VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
-    BeginInfo.pInheritanceInfo := @InheritanceInfo;
-  end;
-  if (FHandle <> nil) and Assigned(vkBeginCommandBuffer) then
-    CheckVk(vkBeginCommandBuffer(FHandle, @BeginInfo), 'vkBeginCommandBuffer');
   FCurrentPipeline := nil;
   FCurrentComputePipeline := nil;
   FBarrierCount := 0;
@@ -7312,6 +7459,7 @@ begin
   FClearAttachmentCallCount := 0;
   FDynamicBlendConstants := Vector4(1.0, 1.0, 1.0, 1.0);
   FBlendConstantsUpdateCount := 0;
+  FSecondaryExecuteCount := 0;
   FIsRendering := False;
   FActiveRenderingHasColor := False;
   FActiveRenderingColorFormat := pfUndefined;
@@ -7320,8 +7468,177 @@ begin
   FActiveRenderingSampleCount := 1;
 end;
 
+procedure TVulkanRHICommandList.BeginRecording;
+var
+  BeginInfo: VkCommandBufferBeginInfo;
+  InheritanceInfo: VkCommandBufferInheritanceInfo;
+  InheritanceRendering: VkCommandBufferInheritanceRenderingInfo;
+begin
+  ResetCommandTrackingState;
+  if FResetIndividualBuffer and (FHandle <> nil) and Assigned(vkResetCommandBuffer) then
+    CheckVk(vkResetCommandBuffer(FHandle, 0), 'vkResetCommandBuffer');
+  FillChar(BeginInfo, SizeOf(BeginInfo), 0);
+  BeginInfo.sType := VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  BeginInfo.flags := VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  if FLevel = cllSecondary then
+  begin
+    BeginInfo.flags := BeginInfo.flags or VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
+    FillChar(InheritanceInfo, SizeOf(InheritanceInfo), 0);
+    InheritanceInfo.sType := VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
+    if (FDevice <> nil) and FDevice.SupportsDynamicRendering then
+    begin
+      FillChar(InheritanceRendering, SizeOf(InheritanceRendering), 0);
+      InheritanceRendering.sType := VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO;
+      InheritanceRendering.flags := VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT;
+      InheritanceRendering.rasterizationSamples := VK_SAMPLE_COUNT_1_BIT;
+      InheritanceInfo.pNext := @InheritanceRendering;
+    end;
+    BeginInfo.pInheritanceInfo := @InheritanceInfo;
+  end;
+  if (FHandle <> nil) and Assigned(vkBeginCommandBuffer) then
+    CheckVk(vkBeginCommandBuffer(FHandle, @BeginInfo), 'vkBeginCommandBuffer');
+end;
+
+procedure TVulkanRHICommandList.BeginSecondaryRecording(const AInheritedInfo: TRHIRenderingInfo;
+  const AViewportRect: TFloatRectangle; const AScissorRect: TRectangle;
+  const AMinDepth, AMaxDepth: Single);
+var
+  BeginInfo: VkCommandBufferBeginInfo;
+  InheritanceInfo: VkCommandBufferInheritanceInfo;
+  InheritanceRendering: VkCommandBufferInheritanceRenderingInfo;
+  VkColorFormats: array of VkFormat;
+  FallbackColorFormats: array of TRHIPixelFormat;
+  ColorLoadOp, DepthLoadOp: TRHIAttachmentLoadOp;
+  ColorStoreOp, DepthStoreOp: TRHIAttachmentStoreOp;
+  HasColorResolve: Boolean;
+  I: Integer;
+begin
+  ResetCommandTrackingState;
+  if FResetIndividualBuffer and (FHandle <> nil) and Assigned(vkResetCommandBuffer) then
+    CheckVk(vkResetCommandBuffer(FHandle, 0), 'vkResetCommandBuffer(Secondary)');
+
+  FIsRendering := True;
+  FActiveRenderingInfo := AInheritedInfo;
+  FActiveRenderingInfo.ColorAttachments := Copy(AInheritedInfo.ColorAttachments);
+
+  FActiveRenderingHasColor := (Length(AInheritedInfo.ColorAttachments) > 0) and
+    (AInheritedInfo.ColorAttachments[0].Texture <> nil);
+  if FActiveRenderingHasColor then
+  begin
+    FActiveRenderingColorFormat := AInheritedInfo.ColorAttachments[0].Texture.Desc.Format;
+    FActiveRenderingSampleCount := Max(Cardinal(1),
+      AInheritedInfo.ColorAttachments[0].Texture.Desc.SampleCount);
+    FActiveRenderingWidth := Max(Cardinal(1),
+      AInheritedInfo.ColorAttachments[0].Texture.Desc.Width shr AInheritedInfo.ColorAttachments[0].MipLevel);
+    FActiveRenderingHeight := Max(Cardinal(1),
+      AInheritedInfo.ColorAttachments[0].Texture.Desc.Height shr AInheritedInfo.ColorAttachments[0].MipLevel);
+  end else
+  begin
+    FActiveRenderingColorFormat := pfUndefined;
+    FActiveRenderingSampleCount := 1;
+    FActiveRenderingWidth := 0;
+    FActiveRenderingHeight := 0;
+  end;
+
+  FActiveRenderingHasDepth := AInheritedInfo.HasDepthAttachment and
+    (AInheritedInfo.DepthAttachment.Texture <> nil);
+  if FActiveRenderingHasDepth then
+  begin
+    FActiveRenderingDepthFormat := AInheritedInfo.DepthAttachment.Texture.Desc.Format;
+    if not FActiveRenderingHasColor then
+    begin
+      FActiveRenderingSampleCount := Max(Cardinal(1),
+        AInheritedInfo.DepthAttachment.Texture.Desc.SampleCount);
+      FActiveRenderingWidth := Max(Cardinal(1),
+        AInheritedInfo.DepthAttachment.Texture.Desc.Width shr AInheritedInfo.DepthAttachment.MipLevel);
+      FActiveRenderingHeight := Max(Cardinal(1),
+        AInheritedInfo.DepthAttachment.Texture.Desc.Height shr AInheritedInfo.DepthAttachment.MipLevel);
+    end;
+  end else
+    FActiveRenderingDepthFormat := pfUndefined;
+
+  if FActiveRenderingWidth = 0 then
+    FActiveRenderingWidth := Cardinal(Max(1,
+      Max(0, AInheritedInfo.RenderArea.Left) + Max(1, AInheritedInfo.RenderArea.Width)));
+  if FActiveRenderingHeight = 0 then
+    FActiveRenderingHeight := Cardinal(Max(1,
+      Max(0, AInheritedInfo.RenderArea.Bottom) + Max(1, AInheritedInfo.RenderArea.Height)));
+
+  FillChar(BeginInfo, SizeOf(BeginInfo), 0);
+  BeginInfo.sType := VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  BeginInfo.flags := VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT or
+    VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
+
+  FillChar(InheritanceInfo, SizeOf(InheritanceInfo), 0);
+  InheritanceInfo.sType := VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
+
+  if (FDevice <> nil) and (not FDevice.SupportsDynamicRendering) then
+  begin
+    SetLength(FallbackColorFormats, Length(AInheritedInfo.ColorAttachments));
+    for I := 0 to High(AInheritedInfo.ColorAttachments) do
+      if AInheritedInfo.ColorAttachments[I].Texture <> nil then
+        FallbackColorFormats[I] := AInheritedInfo.ColorAttachments[I].Texture.Desc.Format
+      else
+        FallbackColorFormats[I] := pfBGRA8_UNorm;
+    HasColorResolve := (FActiveRenderingSampleCount > 1) and
+      (Length(AInheritedInfo.ColorAttachments) > 0) and
+      (AInheritedInfo.ColorAttachments[0].ResolveTexture <> nil);
+    if Length(AInheritedInfo.ColorAttachments) > 0 then
+    begin
+      ColorLoadOp := AInheritedInfo.ColorAttachments[0].LoadOp;
+      ColorStoreOp := AInheritedInfo.ColorAttachments[0].StoreOp;
+    end else
+    begin
+      ColorLoadOp := loLoad;
+      ColorStoreOp := soStore;
+    end;
+    if AInheritedInfo.HasDepthAttachment then
+    begin
+      DepthLoadOp := AInheritedInfo.DepthAttachment.LoadOp;
+      DepthStoreOp := AInheritedInfo.DepthAttachment.StoreOp;
+    end else
+    begin
+      DepthLoadOp := loLoad;
+      DepthStoreOp := soStore;
+    end;
+    InheritanceInfo.renderPass := FDevice.GetOrCreateFallbackRenderPass(
+      FallbackColorFormats, FActiveRenderingDepthFormat, FActiveRenderingSampleCount,
+      ColorLoadOp, DepthLoadOp, ColorStoreOp, DepthStoreOp, HasColorResolve);
+  end else
+  begin
+    FillChar(InheritanceRendering, SizeOf(InheritanceRendering), 0);
+    InheritanceRendering.sType := VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO;
+    InheritanceRendering.flags := VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT;
+    SetLength(VkColorFormats, Length(AInheritedInfo.ColorAttachments));
+    for I := 0 to High(AInheritedInfo.ColorAttachments) do
+      if AInheritedInfo.ColorAttachments[I].Texture <> nil then
+        VkColorFormats[I] := RHIToVkFormat(AInheritedInfo.ColorAttachments[I].Texture.Desc.Format)
+      else
+        VkColorFormats[I] := VK_FORMAT_UNDEFINED;
+    InheritanceRendering.colorAttachmentCount := Length(VkColorFormats);
+    if Length(VkColorFormats) > 0 then
+      InheritanceRendering.pColorAttachmentFormats := @VkColorFormats[0];
+    if FActiveRenderingHasDepth then
+    begin
+      InheritanceRendering.depthAttachmentFormat := RHIToVkFormat(FActiveRenderingDepthFormat);
+      if FActiveRenderingDepthFormat in [pfD24_UNorm_S8_UInt, pfD32_Float_S8_UInt] then
+        InheritanceRendering.stencilAttachmentFormat := InheritanceRendering.depthAttachmentFormat;
+    end;
+    InheritanceRendering.rasterizationSamples := RHIToVkSampleCountFlags(FActiveRenderingSampleCount);
+    InheritanceInfo.pNext := @InheritanceRendering;
+  end;
+
+  BeginInfo.pInheritanceInfo := @InheritanceInfo;
+  if (FHandle <> nil) and Assigned(vkBeginCommandBuffer) then
+    CheckVk(vkBeginCommandBuffer(FHandle, @BeginInfo), 'vkBeginCommandBuffer(Secondary)');
+
+  SetViewport(AViewportRect, AMinDepth, AMaxDepth);
+  SetScissor(AScissorRect);
+end;
+
 procedure TVulkanRHICommandList.EndRecording;
 begin
+  FIsRendering := False;
   if (FHandle <> nil) and Assigned(vkEndCommandBuffer) then
     CheckVk(vkEndCommandBuffer(FHandle), 'vkEndCommandBuffer');
 end;
@@ -7726,17 +8043,25 @@ begin
     if HasColorResolve then
       Inc(FDevice.FMSAAResolvePassCount);
     if (FHandle <> nil) and Assigned(vkCmdBeginRenderPass) then
-      vkCmdBeginRenderPass(FHandle, @RpBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-    if FViewportPendingReapply then
-      SetViewport(FDynamicViewportRect, FDynamicMinDepth, FDynamicMaxDepth)
-    else
-    if FHandle <> nil then
-      SetViewport(FloatRectangle(Info.RenderArea), 0.0, 1.0);
-    if FScissorPendingReapply then
-      SetScissor(FDynamicScissorRect)
-    else
-    if FHandle <> nil then
-      SetScissor(FDynamicScissorRect);
+    begin
+      if Info.ContentsSecondaryCommandBuffers then
+        vkCmdBeginRenderPass(FHandle, @RpBeginInfo, VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS)
+      else
+        vkCmdBeginRenderPass(FHandle, @RpBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+    end;
+    if not Info.ContentsSecondaryCommandBuffers then
+    begin
+      if FViewportPendingReapply then
+        SetViewport(FDynamicViewportRect, FDynamicMinDepth, FDynamicMaxDepth)
+      else
+      if FHandle <> nil then
+        SetViewport(FloatRectangle(Info.RenderArea), 0.0, 1.0);
+      if FScissorPendingReapply then
+        SetScissor(FDynamicScissorRect)
+      else
+      if FHandle <> nil then
+        SetScissor(FDynamicScissorRect);
+    end;
     Exit;
   end;
 
@@ -7797,6 +8122,8 @@ begin
 
   FillChar(RenderInfo, SizeOf(RenderInfo), 0);
   RenderInfo.sType := VK_STRUCTURE_TYPE_RENDERING_INFO;
+  if Info.ContentsSecondaryCommandBuffers then
+    RenderInfo.flags := VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT;
   RenderInfo.renderArea := VkRenderAreaRect;
   RenderInfo.layerCount := 1;
   RenderInfo.colorAttachmentCount := Length(ColorAttachments);
@@ -7860,16 +8187,19 @@ begin
 
   if (FHandle <> nil) and Assigned(vkCmdBeginRendering) then
     vkCmdBeginRendering(FHandle, @RenderInfo);
-  if FViewportPendingReapply then
-    SetViewport(FDynamicViewportRect, FDynamicMinDepth, FDynamicMaxDepth)
-  else
-  if FHandle <> nil then
-    SetViewport(FloatRectangle(Info.RenderArea), 0.0, 1.0);
-  if FScissorPendingReapply then
-    SetScissor(FDynamicScissorRect)
-  else
-  if FHandle <> nil then
-    SetScissor(FDynamicScissorRect);
+  if not Info.ContentsSecondaryCommandBuffers then
+  begin
+    if FViewportPendingReapply then
+      SetViewport(FDynamicViewportRect, FDynamicMinDepth, FDynamicMaxDepth)
+    else
+    if FHandle <> nil then
+      SetViewport(FloatRectangle(Info.RenderArea), 0.0, 1.0);
+    if FScissorPendingReapply then
+      SetScissor(FDynamicScissorRect)
+    else
+    if FHandle <> nil then
+      SetScissor(FDynamicScissorRect);
+  end;
 end;
 
 procedure TVulkanRHICommandList.EndRendering;
@@ -8491,14 +8821,114 @@ end;
 procedure TVulkanRHICommandList.ExecuteCommands(const SecondaryCommandLists: array of TRHICommandList);
 var
   CmdBuffers: array of VkCommandBuffer;
-  I: Integer;
+  OutCount, I: Integer;
 begin
   if Length(SecondaryCommandLists) = 0 then Exit;
   SetLength(CmdBuffers, Length(SecondaryCommandLists));
+  OutCount := 0;
   for I := 0 to High(SecondaryCommandLists) do
-    CmdBuffers[I] := (SecondaryCommandLists[I] as TVulkanRHICommandList).Handle;
+    if SecondaryCommandLists[I] <> nil then
+    begin
+      CmdBuffers[OutCount] := (SecondaryCommandLists[I] as TVulkanRHICommandList).Handle;
+      Inc(OutCount);
+    end;
+  if OutCount = 0 then Exit;
+  Inc(FSecondaryExecuteCount, Cardinal(OutCount));
   if (FHandle <> nil) and Assigned(vkCmdExecuteCommands) then
-    vkCmdExecuteCommands(FHandle, Length(CmdBuffers), @CmdBuffers[0]);
+    vkCmdExecuteCommands(FHandle, Cardinal(OutCount), @CmdBuffers[0]);
+end;
+
+procedure TVulkanRHICommandList.ExecuteSecondaryCommandsInPass(
+  const SecondaryCommandLists: array of TRHICommandList);
+type
+  TVkAttachmentMemBarrier = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    srcAccessMask: VkAccessFlags;
+    dstAccessMask: VkAccessFlags;
+  end;
+
+  procedure EmitAttachmentContinuationBarrier;
+  var
+    MemBarrier: TVkAttachmentMemBarrier;
+    Stages: VkPipelineStageFlags;
+  begin
+    Inc(FBarrierCount);
+    if (FHandle <> nil) and Assigned(vkCmdPipelineBarrier) then
+    begin
+      FillChar(MemBarrier, SizeOf(MemBarrier), 0);
+      MemBarrier.sType := VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+      MemBarrier.srcAccessMask := VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT or
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+      MemBarrier.dstAccessMask := VK_ACCESS_COLOR_ATTACHMENT_READ_BIT or
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT or
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT or
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+      Stages := VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT or
+        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT or
+        VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+      vkCmdPipelineBarrier(FHandle, Stages, Stages, 0, 1, @MemBarrier, 0, nil, 0, nil);
+    end;
+  end;
+
+var
+  SavedInfo, SecInfo, ResumeInfo: TRHIRenderingInfo;
+  SavedVp: TFloatRectangle;
+  SavedMinD, SavedMaxD: Single;
+  SavedScissor: TRectangle;
+  I: Integer;
+begin
+  if Length(SecondaryCommandLists) = 0 then
+    Exit;
+
+  if FIsRendering and (not FActiveRenderingInfo.ContentsSecondaryCommandBuffers) then
+  begin
+    SavedInfo := FActiveRenderingInfo;
+    SavedInfo.ColorAttachments := Copy(FActiveRenderingInfo.ColorAttachments);
+    SavedVp := FDynamicViewportRect;
+    SavedMinD := FDynamicMinDepth;
+    SavedMaxD := FDynamicMaxDepth;
+    SavedScissor := FDynamicScissorRect;
+
+    EndRendering;
+    EmitAttachmentContinuationBarrier;
+
+    SecInfo := SavedInfo;
+    SecInfo.ColorAttachments := Copy(SavedInfo.ColorAttachments);
+    for I := 0 to High(SecInfo.ColorAttachments) do
+    begin
+      SecInfo.ColorAttachments[I].LoadOp := loLoad;
+      SecInfo.ColorAttachments[I].StoreOp := soStore;
+      SecInfo.ColorAttachments[I].ResolveTexture := nil;
+      SecInfo.ColorAttachments[I].ResolveMode := rmNone;
+    end;
+    if SecInfo.HasDepthAttachment then
+    begin
+      SecInfo.DepthAttachment.LoadOp := loLoad;
+      SecInfo.DepthAttachment.StoreOp := soStore;
+      SecInfo.DepthAttachment.ResolveTexture := nil;
+      SecInfo.DepthAttachment.ResolveMode := rmNone;
+    end;
+    SecInfo.ContentsSecondaryCommandBuffers := True;
+
+    BeginRendering(SecInfo);
+    ExecuteCommands(SecondaryCommandLists);
+    EndRendering;
+    EmitAttachmentContinuationBarrier;
+
+    ResumeInfo := SavedInfo;
+    ResumeInfo.ColorAttachments := Copy(SavedInfo.ColorAttachments);
+    for I := 0 to High(ResumeInfo.ColorAttachments) do
+      ResumeInfo.ColorAttachments[I].LoadOp := loLoad;
+    if ResumeInfo.HasDepthAttachment then
+      ResumeInfo.DepthAttachment.LoadOp := loLoad;
+    ResumeInfo.ContentsSecondaryCommandBuffers := False;
+
+    BeginRendering(ResumeInfo);
+    SetViewport(SavedVp, SavedMinD, SavedMaxD);
+    SetScissor(SavedScissor);
+  end else
+    ExecuteCommands(SecondaryCommandLists);
 end;
 
 procedure TVulkanRHICommandList.PushDebugGroup(const LabelName: String; const Color: TCastleColor);
@@ -9096,11 +9526,28 @@ destructor TCastleVulkanStagingUploader.Destroy;
 var
   Slot: Cardinal;
 begin
+  WaitForAsyncUploads;
   SetLength(FPendingBufferCopies, 0);
   SetLength(FPendingImageCopies, 0);
+  SetLength(FPendingAcquireBuffers, 0);
+  SetLength(FPendingAcquireImages, 0);
+  SetLength(FPendingPostTransferMipmaps, 0);
+  FreeAndNil(FTransferTimelineSemaphore);
   for Slot := 0 to MaxFramesInFlight - 1 do
   begin
     ReclaimFrameSlot(Slot);
+    if (FDevice <> nil) and (FDevice.Handle <> nil) then
+    begin
+      if (FTransferBinarySemaphores[Slot] <> VK_NULL_HANDLE) and Assigned(vkDestroySemaphore) then
+        vkDestroySemaphore(FDevice.Handle, FTransferBinarySemaphores[Slot], nil);
+      if (FTransferPools[Slot] <> VK_NULL_HANDLE) and Assigned(vkDestroyCommandPool) then
+        vkDestroyCommandPool(FDevice.Handle, FTransferPools[Slot], nil);
+    end;
+    FTransferBinarySemaphores[Slot] := VK_NULL_HANDLE;
+    FTransferPools[Slot] := VK_NULL_HANDLE;
+    SetLength(FTransferPoolCmdBuffers[Slot], 0);
+    FTransferPoolUsedCounts[Slot] := 0;
+
     if (FDevice <> nil) and (FDevice.Handle <> nil) and
        (FRingBuffers[Slot] <> VK_NULL_HANDLE) and Assigned(vkDestroyBuffer) then
       vkDestroyBuffer(FDevice.Handle, FRingBuffers[Slot], nil);
@@ -9239,13 +9686,94 @@ begin
   end;
 end;
 
+function TCastleVulkanStagingUploader.GetTransferTimelineSemaphore: TCastleVulkanTimelineSemaphore;
+begin
+  if FTransferTimelineSemaphore = nil then
+    FTransferTimelineSemaphore := TCastleVulkanTimelineSemaphore.Create(FDevice, 0);
+  Result := FTransferTimelineSemaphore;
+end;
+
+function TCastleVulkanStagingUploader.EnsureTransferBinarySemaphore(
+  const AFrameSlot: Cardinal): VkSemaphore;
+var
+  Slot: Cardinal;
+  SemInfo: VkSemaphoreCreateInfo;
+begin
+  Slot := AFrameSlot mod MaxFramesInFlight;
+  if FTransferBinarySemaphores[Slot] = VK_NULL_HANDLE then
+  begin
+    if (FDevice <> nil) and (FDevice.Handle <> nil) and Assigned(vkCreateSemaphore) then
+    begin
+      FillChar(SemInfo, SizeOf(SemInfo), 0);
+      SemInfo.sType := VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+      CheckVk(vkCreateSemaphore(FDevice.Handle, @SemInfo, nil, @FTransferBinarySemaphores[Slot]),
+        'vkCreateSemaphore(TransferBinary)');
+    end else
+      FTransferBinarySemaphores[Slot] := VkSemaphore(PtrUInt($67000001) + PtrUInt(Slot));
+  end;
+  Result := FTransferBinarySemaphores[Slot];
+end;
+
+function TCastleVulkanStagingUploader.AcquireTransferCommandBuffer(
+  const AFrameSlot: Cardinal): VkCommandBuffer;
+var
+  Slot, UsedIdx: Cardinal;
+  PoolInfo: VkCommandPoolCreateInfo;
+  AllocInfo: VkCommandBufferAllocateInfo;
+  NewCmd: VkCommandBuffer;
+  EffQueueFamily: Cardinal;
+begin
+  Slot := AFrameSlot mod MaxFramesInFlight;
+  if (FDevice = nil) or (FDevice.Handle = nil) then
+  begin
+    UsedIdx := FTransferPoolUsedCounts[Slot];
+    Inc(FTransferPoolUsedCounts[Slot]);
+    Exit(VkCommandBuffer(PtrUInt($73000000) + PtrUInt(Slot * 64 + UsedIdx + 1)));
+  end;
+
+  EffQueueFamily := FDevice.TransferQueueFamily;
+  if (FTransferPools[Slot] = VK_NULL_HANDLE) and Assigned(vkCreateCommandPool) then
+  begin
+    FillChar(PoolInfo, SizeOf(PoolInfo), 0);
+    PoolInfo.sType := VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    PoolInfo.flags := VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    PoolInfo.queueFamilyIndex := EffQueueFamily;
+    CheckVk(vkCreateCommandPool(FDevice.Handle, @PoolInfo, nil, @FTransferPools[Slot]),
+      'vkCreateCommandPool(AsyncTransfer)');
+  end;
+
+  UsedIdx := FTransferPoolUsedCounts[Slot];
+  if UsedIdx >= Cardinal(Length(FTransferPoolCmdBuffers[Slot])) then
+  begin
+    NewCmd := nil;
+    FillChar(AllocInfo, SizeOf(AllocInfo), 0);
+    AllocInfo.sType := VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    AllocInfo.commandPool := FTransferPools[Slot];
+    AllocInfo.level := VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    AllocInfo.commandBufferCount := 1;
+    CheckVk(vkAllocateCommandBuffers(FDevice.Handle, @AllocInfo, @NewCmd),
+      'vkAllocateCommandBuffers(AsyncTransfer)');
+    SetLength(FTransferPoolCmdBuffers[Slot], UsedIdx + 1);
+    FTransferPoolCmdBuffers[Slot][UsedIdx] := NewCmd;
+  end;
+  Result := FTransferPoolCmdBuffers[Slot][UsedIdx];
+  Inc(FTransferPoolUsedCounts[Slot]);
+end;
+
 procedure TCastleVulkanStagingUploader.ReclaimFrameSlot(const AFrameSlot: Cardinal);
 var
   Slot: Cardinal;
   I: Integer;
 begin
   Slot := AFrameSlot mod MaxFramesInFlight;
+  if (FPendingGraphicsWaitTimelineValue > 0) and (FTransferTimelineSemaphore <> nil) then
+    FTransferTimelineSemaphore.Wait(FPendingGraphicsWaitTimelineValue, High(UInt64));
   FRingWriteOffsets[Slot] := 0;
+  FTransferPoolUsedCounts[Slot] := 0;
+  if (FDevice <> nil) and (FDevice.Handle <> nil) and
+     (FTransferPools[Slot] <> VK_NULL_HANDLE) and Assigned(vkResetCommandPool) then
+    CheckVk(vkResetCommandPool(FDevice.Handle, FTransferPools[Slot], 0),
+      'vkResetCommandPool(AsyncTransfer)');
 
   for I := 0 to High(FOverflowChunks[Slot]) do
   begin
@@ -9357,17 +9885,32 @@ procedure TCastleVulkanStagingUploader.CancelPendingUploadsForBuffer(
 var
   I, WriteIdx: Integer;
 begin
-  if (ABuffer = nil) or (Length(FPendingBufferCopies) = 0) then
+  if ABuffer = nil then
     Exit;
-  WriteIdx := 0;
-  for I := 0 to High(FPendingBufferCopies) do
-    if FPendingBufferCopies[I].DstBuffer <> ABuffer then
-    begin
-      if WriteIdx <> I then
-        FPendingBufferCopies[WriteIdx] := FPendingBufferCopies[I];
-      Inc(WriteIdx);
-    end;
-  SetLength(FPendingBufferCopies, WriteIdx);
+  if Length(FPendingBufferCopies) > 0 then
+  begin
+    WriteIdx := 0;
+    for I := 0 to High(FPendingBufferCopies) do
+      if FPendingBufferCopies[I].DstBuffer <> ABuffer then
+      begin
+        if WriteIdx <> I then
+          FPendingBufferCopies[WriteIdx] := FPendingBufferCopies[I];
+        Inc(WriteIdx);
+      end;
+    SetLength(FPendingBufferCopies, WriteIdx);
+  end;
+  if Length(FPendingAcquireBuffers) > 0 then
+  begin
+    WriteIdx := 0;
+    for I := 0 to High(FPendingAcquireBuffers) do
+      if FPendingAcquireBuffers[I].DstBuffer <> ABuffer then
+      begin
+        if WriteIdx <> I then
+          FPendingAcquireBuffers[WriteIdx] := FPendingAcquireBuffers[I];
+        Inc(WriteIdx);
+      end;
+    SetLength(FPendingAcquireBuffers, WriteIdx);
+  end;
 end;
 
 procedure TCastleVulkanStagingUploader.CancelPendingUploadsForTexture(
@@ -9375,23 +9918,477 @@ procedure TCastleVulkanStagingUploader.CancelPendingUploadsForTexture(
 var
   I, WriteIdx: Integer;
 begin
-  if (ATexture = nil) or (Length(FPendingImageCopies) = 0) then
+  if ATexture = nil then
     Exit;
-  WriteIdx := 0;
-  for I := 0 to High(FPendingImageCopies) do
-    if FPendingImageCopies[I].DstTexture <> ATexture then
+  if Length(FPendingImageCopies) > 0 then
+  begin
+    WriteIdx := 0;
+    for I := 0 to High(FPendingImageCopies) do
+      if FPendingImageCopies[I].DstTexture <> ATexture then
+      begin
+        if WriteIdx <> I then
+          FPendingImageCopies[WriteIdx] := FPendingImageCopies[I];
+        Inc(WriteIdx);
+      end;
+    SetLength(FPendingImageCopies, WriteIdx);
+  end;
+  if Length(FPendingAcquireImages) > 0 then
+  begin
+    WriteIdx := 0;
+    for I := 0 to High(FPendingAcquireImages) do
+      if FPendingAcquireImages[I].DstTexture <> ATexture then
+      begin
+        if WriteIdx <> I then
+          FPendingAcquireImages[WriteIdx] := FPendingAcquireImages[I];
+        Inc(WriteIdx);
+      end;
+    SetLength(FPendingAcquireImages, WriteIdx);
+  end;
+  if Length(FPendingPostTransferMipmaps) > 0 then
+  begin
+    WriteIdx := 0;
+    for I := 0 to High(FPendingPostTransferMipmaps) do
+      if FPendingPostTransferMipmaps[I] <> ATexture then
+      begin
+        if WriteIdx <> I then
+          FPendingPostTransferMipmaps[WriteIdx] := FPendingPostTransferMipmaps[I];
+        Inc(WriteIdx);
+      end;
+    SetLength(FPendingPostTransferMipmaps, WriteIdx);
+  end;
+end;
+
+function TCastleVulkanStagingUploader.ApplyPendingGraphicsAcquireBarriers(
+  const ACommandList: TVulkanRHICommandList): Cardinal;
+var
+  AcqBufCount, AcqImgCount, MipCount, I: Integer;
+  Cmd: VkCommandBuffer;
+  OneShotCmd: Boolean;
+  BufBarriers: array of VkBufferMemoryBarrier;
+  ImgBarrier: VkImageMemoryBarrier;
+  BufItem: TVulkanStagedBufferCopy;
+  ImgItem: TVulkanStagedImageCopy;
+  MipTex: TVulkanRHITexture;
+  PendingMipList: array of TVulkanRHITexture;
+begin
+  AcqBufCount := Length(FPendingAcquireBuffers);
+  AcqImgCount := Length(FPendingAcquireImages);
+  MipCount := Length(FPendingPostTransferMipmaps);
+  Result := Cardinal(AcqBufCount + AcqImgCount + MipCount);
+  if Result = 0 then
+    Exit;
+
+  OneShotCmd := False;
+  Cmd := nil;
+  if ACommandList <> nil then
+    Cmd := ACommandList.Handle
+  else if (FDevice <> nil) and (FDevice.Handle <> nil) then
+  begin
+    WaitForAsyncUploads;
+    Cmd := FDevice.BeginSingleTimeCommands;
+    OneShotCmd := Cmd <> nil;
+  end;
+
+  if AcqBufCount > 0 then
+  begin
+    SetLength(BufBarriers, AcqBufCount);
+    for I := 0 to AcqBufCount - 1 do
     begin
-      if WriteIdx <> I then
-        FPendingImageCopies[WriteIdx] := FPendingImageCopies[I];
-      Inc(WriteIdx);
+      BufItem := FPendingAcquireBuffers[I];
+      FillChar(BufBarriers[I], SizeOf(VkBufferMemoryBarrier), 0);
+      BufBarriers[I].sType := VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+      BufBarriers[I].srcAccessMask := 0;
+      BufBarriers[I].dstAccessMask :=
+        VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT or
+        VK_ACCESS_INDEX_READ_BIT or
+        VK_ACCESS_UNIFORM_READ_BIT or
+        VK_ACCESS_SHADER_READ_BIT;
+      BufBarriers[I].srcQueueFamilyIndex := FTransferQueueFamily;
+      BufBarriers[I].dstQueueFamilyIndex := FGraphicsQueueFamily;
+      if BufItem.DstBuffer <> nil then
+      begin
+        BufBarriers[I].buffer := BufItem.DstBuffer.Handle;
+        BufBarriers[I].offset := BufItem.Region.dstOffset;
+        BufBarriers[I].size := BufItem.Region.size;
+      end;
+      Inc(FQueueOwnershipTransferCount);
     end;
-  SetLength(FPendingImageCopies, WriteIdx);
+    if (Cmd <> nil) and Assigned(vkCmdPipelineBarrier) then
+      vkCmdPipelineBarrier(Cmd,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT or
+        VK_PIPELINE_STAGE_VERTEX_SHADER_BIT or
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, nil, Length(BufBarriers), @BufBarriers[0], 0, nil);
+    if ACommandList <> nil then
+      Inc(ACommandList.FBarrierCount);
+    SetLength(FPendingAcquireBuffers, 0);
+  end;
+
+  if AcqImgCount > 0 then
+  begin
+    for I := 0 to AcqImgCount - 1 do
+    begin
+      ImgItem := FPendingAcquireImages[I];
+      if ImgItem.DstTexture = nil then
+        Continue;
+      FillChar(ImgBarrier, SizeOf(ImgBarrier), 0);
+      ImgBarrier.sType := VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      ImgBarrier.oldLayout := VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      if ImgItem.GenerateMipmaps and (ImgItem.DstTexture.Desc.MipLevels > 1) then
+      begin
+        ImgBarrier.newLayout := VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        ImgBarrier.dstAccessMask := VK_ACCESS_TRANSFER_READ_BIT or VK_ACCESS_TRANSFER_WRITE_BIT;
+      end else
+      begin
+        ImgBarrier.newLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        ImgBarrier.dstAccessMask := VK_ACCESS_SHADER_READ_BIT;
+      end;
+      ImgBarrier.srcAccessMask := 0;
+      ImgBarrier.srcQueueFamilyIndex := FTransferQueueFamily;
+      ImgBarrier.dstQueueFamilyIndex := FGraphicsQueueFamily;
+      ImgBarrier.image := ImgItem.DstTexture.Image;
+      ImgBarrier.subresourceRange.aspectMask := ImgItem.DstTexture.AspectMask;
+      ImgBarrier.subresourceRange.baseMipLevel := ImgItem.MipLevel;
+      ImgBarrier.subresourceRange.levelCount := 1;
+      ImgBarrier.subresourceRange.baseArrayLayer := ImgItem.ArrayLayer;
+      ImgBarrier.subresourceRange.layerCount := 1;
+      if (Cmd <> nil) and Assigned(vkCmdPipelineBarrier) then
+      begin
+        if ImgItem.GenerateMipmaps and (ImgItem.DstTexture.Desc.MipLevels > 1) then
+          vkCmdPipelineBarrier(Cmd,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0, 0, nil, 0, nil, 1, @ImgBarrier)
+        else
+          vkCmdPipelineBarrier(Cmd,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0, 0, nil, 0, nil, 1, @ImgBarrier);
+      end;
+      if not (ImgItem.GenerateMipmaps and (ImgItem.DstTexture.Desc.MipLevels > 1)) then
+        ImgItem.DstTexture.CurrentState := rsShaderRead;
+      Inc(FQueueOwnershipTransferCount);
+      if ACommandList <> nil then
+        Inc(ACommandList.FBarrierCount);
+    end;
+    SetLength(FPendingAcquireImages, 0);
+  end;
+
+  if MipCount > 0 then
+  begin
+    PendingMipList := Copy(FPendingPostTransferMipmaps);
+    SetLength(FPendingPostTransferMipmaps, 0);
+    for I := 0 to High(PendingMipList) do
+    begin
+      MipTex := PendingMipList[I];
+      if (MipTex = nil) or (MipTex.Desc.MipLevels <= 1) then
+        Continue;
+      MipTex.CurrentState := rsTransferDst;
+      if ACommandList <> nil then
+        ACommandList.GenerateMipmaps(MipTex)
+      else if (Cmd <> nil) and Assigned(vkCmdBlitImage) then
+      begin
+        Inc(MipTex.FMipmapGenerationCount);
+        MipTex.FLastGeneratedMipLevels := MipTex.Desc.MipLevels;
+        MipTex.FMaxUploadedMipLevel := Max(MipTex.FMaxUploadedMipLevel, MipTex.Desc.MipLevels - 1);
+        MipTex.RecordVkMipmapBlits(Cmd);
+        MipTex.CurrentState := rsShaderRead;
+      end else
+        MipTex.CurrentState := rsShaderRead;
+    end;
+  end;
+
+  if OneShotCmd and (FDevice <> nil) then
+    FDevice.EndSingleTimeCommands(Cmd);
+end;
+
+function TCastleVulkanStagingUploader.SubmitAsyncUploads: UInt64;
+var
+  BufCount, ImgCount, I, BaseIdx: Integer;
+  Slot: Cardinal;
+  TransferCmd: VkCommandBuffer;
+  BeginInfo: VkCommandBufferBeginInfo;
+  BufBarriers: array of VkBufferMemoryBarrier;
+  ImgBarrier: VkImageMemoryBarrier;
+  BufItem: TVulkanStagedBufferCopy;
+  ImgItem: TVulkanStagedImageCopy;
+  NeedOwnershipTransfer: Boolean;
+  NextVal: UInt64;
+  TimelineSem: TCastleVulkanTimelineSemaphore;
+  SignalSemHandle: VkSemaphore;
+  TimelineSubmit: VkTimelineSemaphoreSubmitInfo;
+  SubmitInfo: VkSubmitInfo;
+begin
+  BufCount := Length(FPendingBufferCopies);
+  ImgCount := Length(FPendingImageCopies);
+  if BufCount + ImgCount = 0 then
+    Exit(FLastSubmittedTimelineValue);
+
+  if FDevice <> nil then
+    Slot := FDevice.FrameIndex mod MaxFramesInFlight
+  else
+    Slot := 0;
+
+  NeedOwnershipTransfer := FUseDedicatedTransferQueue and
+    (FTransferQueueFamily <> FGraphicsQueueFamily) and
+    ((FDevice = nil) or (FDevice.Handle = nil) or
+     (FDevice.TransferQueueFamily <> FDevice.GraphicsQueueFamily));
+
+  TransferCmd := AcquireTransferCommandBuffer(Slot);
+  if (FDevice <> nil) and (FDevice.Handle <> nil) and
+     (TransferCmd <> nil) and Assigned(vkBeginCommandBuffer) then
+  begin
+    FillChar(BeginInfo, SizeOf(BeginInfo), 0);
+    BeginInfo.sType := VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    BeginInfo.flags := VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    CheckVk(vkBeginCommandBuffer(TransferCmd, @BeginInfo), 'vkBeginCommandBuffer(AsyncTransfer)');
+  end;
+
+  { 1. Record buffer-to-buffer copies + release (or unified visibility) barriers }
+  if BufCount > 0 then
+  begin
+    SetLength(BufBarriers, BufCount);
+    for I := 0 to BufCount - 1 do
+    begin
+      BufItem := FPendingBufferCopies[I];
+      if (FDevice <> nil) and (FDevice.Handle <> nil) and
+         (TransferCmd <> nil) and Assigned(vkCmdCopyBuffer) and
+         (BufItem.DstBuffer <> nil) then
+        vkCmdCopyBuffer(TransferCmd, BufItem.SrcBuffer, BufItem.DstBuffer.Handle, 1, @BufItem.Region);
+
+      FillChar(BufBarriers[I], SizeOf(VkBufferMemoryBarrier), 0);
+      BufBarriers[I].sType := VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+      BufBarriers[I].srcAccessMask := VK_ACCESS_TRANSFER_WRITE_BIT;
+      if NeedOwnershipTransfer then
+      begin
+        BufBarriers[I].dstAccessMask := 0;
+        BufBarriers[I].srcQueueFamilyIndex := FTransferQueueFamily;
+        BufBarriers[I].dstQueueFamilyIndex := FGraphicsQueueFamily;
+        Inc(FQueueOwnershipTransferCount);
+      end else
+      begin
+        BufBarriers[I].dstAccessMask :=
+          VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT or
+          VK_ACCESS_INDEX_READ_BIT or
+          VK_ACCESS_UNIFORM_READ_BIT or
+          VK_ACCESS_SHADER_READ_BIT;
+        BufBarriers[I].srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+        BufBarriers[I].dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+      end;
+      if BufItem.DstBuffer <> nil then
+      begin
+        BufBarriers[I].buffer := BufItem.DstBuffer.Handle;
+        BufBarriers[I].offset := BufItem.Region.dstOffset;
+        BufBarriers[I].size := BufItem.Region.size;
+      end;
+    end;
+
+    if (FDevice <> nil) and (FDevice.Handle <> nil) and
+       (TransferCmd <> nil) and Assigned(vkCmdPipelineBarrier) then
+    begin
+      if NeedOwnershipTransfer then
+        vkCmdPipelineBarrier(TransferCmd,
+          VK_PIPELINE_STAGE_TRANSFER_BIT,
+          VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+          0, 0, nil, Length(BufBarriers), @BufBarriers[0], 0, nil)
+      else
+        vkCmdPipelineBarrier(TransferCmd,
+          VK_PIPELINE_STAGE_TRANSFER_BIT,
+          VK_PIPELINE_STAGE_VERTEX_INPUT_BIT or
+          VK_PIPELINE_STAGE_VERTEX_SHADER_BIT or
+          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+          0, 0, nil, Length(BufBarriers), @BufBarriers[0], 0, nil);
+    end;
+
+    if NeedOwnershipTransfer then
+    begin
+      BaseIdx := Length(FPendingAcquireBuffers);
+      SetLength(FPendingAcquireBuffers, BaseIdx + BufCount);
+      for I := 0 to BufCount - 1 do
+        FPendingAcquireBuffers[BaseIdx + I] := FPendingBufferCopies[I];
+    end;
+  end;
+
+  { 2. Record buffer-to-image copies + release (or unified layout transition) barriers }
+  for I := 0 to ImgCount - 1 do
+  begin
+    ImgItem := FPendingImageCopies[I];
+    if ImgItem.DstTexture = nil then
+      Continue;
+
+    FillChar(ImgBarrier, SizeOf(ImgBarrier), 0);
+    ImgBarrier.sType := VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    ImgBarrier.oldLayout := VK_IMAGE_LAYOUT_UNDEFINED;
+    ImgBarrier.newLayout := VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    ImgBarrier.srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+    ImgBarrier.dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+    ImgBarrier.image := ImgItem.DstTexture.Image;
+    ImgBarrier.subresourceRange.aspectMask := ImgItem.DstTexture.AspectMask;
+    ImgBarrier.subresourceRange.baseMipLevel := ImgItem.MipLevel;
+    ImgBarrier.subresourceRange.levelCount := 1;
+    ImgBarrier.subresourceRange.baseArrayLayer := ImgItem.ArrayLayer;
+    ImgBarrier.subresourceRange.layerCount := 1;
+    ImgBarrier.srcAccessMask := 0;
+    ImgBarrier.dstAccessMask := VK_ACCESS_TRANSFER_WRITE_BIT;
+
+    if (FDevice <> nil) and (FDevice.Handle <> nil) and
+       (TransferCmd <> nil) and Assigned(vkCmdPipelineBarrier) then
+      vkCmdPipelineBarrier(TransferCmd,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nil, 0, nil, 1, @ImgBarrier);
+
+    if (FDevice <> nil) and (FDevice.Handle <> nil) and
+       (TransferCmd <> nil) and Assigned(vkCmdCopyBufferToImage) then
+      vkCmdCopyBufferToImage(TransferCmd, ImgItem.SrcBuffer, ImgItem.DstTexture.Image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, @ImgItem.Region);
+
+    if NeedOwnershipTransfer then
+    begin
+      ImgBarrier.oldLayout := VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      if ImgItem.GenerateMipmaps and (ImgItem.DstTexture.Desc.MipLevels > 1) then
+        ImgBarrier.newLayout := VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      else
+        ImgBarrier.newLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      ImgBarrier.srcAccessMask := VK_ACCESS_TRANSFER_WRITE_BIT;
+      ImgBarrier.dstAccessMask := 0;
+      ImgBarrier.srcQueueFamilyIndex := FTransferQueueFamily;
+      ImgBarrier.dstQueueFamilyIndex := FGraphicsQueueFamily;
+      if (FDevice <> nil) and (FDevice.Handle <> nil) and
+         (TransferCmd <> nil) and Assigned(vkCmdPipelineBarrier) then
+        vkCmdPipelineBarrier(TransferCmd,
+          VK_PIPELINE_STAGE_TRANSFER_BIT,
+          VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+          0, 0, nil, 0, nil, 1, @ImgBarrier);
+      Inc(FQueueOwnershipTransferCount);
+
+      BaseIdx := Length(FPendingAcquireImages);
+      SetLength(FPendingAcquireImages, BaseIdx + 1);
+      FPendingAcquireImages[BaseIdx] := ImgItem;
+      if ImgItem.GenerateMipmaps and (ImgItem.DstTexture.Desc.MipLevels > 1) then
+      begin
+        ImgItem.DstTexture.CurrentState := rsTransferDst;
+        BaseIdx := Length(FPendingPostTransferMipmaps);
+        SetLength(FPendingPostTransferMipmaps, BaseIdx + 1);
+        FPendingPostTransferMipmaps[BaseIdx] := ImgItem.DstTexture;
+      end else
+        ImgItem.DstTexture.CurrentState := rsShaderRead;
+    end else
+    if ImgItem.GenerateMipmaps and (ImgItem.DstTexture.Desc.MipLevels > 1) then
+    begin
+      { Defer vkCmdBlitImage mipmap generation to the Graphics Queue command list }
+      ImgItem.DstTexture.CurrentState := rsTransferDst;
+      BaseIdx := Length(FPendingPostTransferMipmaps);
+      SetLength(FPendingPostTransferMipmaps, BaseIdx + 1);
+      FPendingPostTransferMipmaps[BaseIdx] := ImgItem.DstTexture;
+    end else
+    begin
+      ImgBarrier.oldLayout := VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      ImgBarrier.newLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      ImgBarrier.srcAccessMask := VK_ACCESS_TRANSFER_WRITE_BIT;
+      ImgBarrier.dstAccessMask := VK_ACCESS_SHADER_READ_BIT;
+      ImgBarrier.srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+      ImgBarrier.dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+      if (FDevice <> nil) and (FDevice.Handle <> nil) and
+         (TransferCmd <> nil) and Assigned(vkCmdPipelineBarrier) then
+        vkCmdPipelineBarrier(TransferCmd,
+          VK_PIPELINE_STAGE_TRANSFER_BIT,
+          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+          0, 0, nil, 0, nil, 1, @ImgBarrier);
+      ImgItem.DstTexture.CurrentState := rsShaderRead;
+    end;
+  end;
+
+  if (FDevice <> nil) and (FDevice.Handle <> nil) and
+     (TransferCmd <> nil) and Assigned(vkEndCommandBuffer) then
+    CheckVk(vkEndCommandBuffer(TransferCmd), 'vkEndCommandBuffer(AsyncTransfer)');
+
+  NextVal := FLastSubmittedTimelineValue + 1;
+  TimelineSem := GetTransferTimelineSemaphore;
+
+  if (FDevice <> nil) and (FDevice.Handle <> nil) and
+     (FDevice.TransferQueue <> nil) and Assigned(vkQueueSubmit) then
+  begin
+    FillChar(SubmitInfo, SizeOf(SubmitInfo), 0);
+    SubmitInfo.sType := VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    SubmitInfo.commandBufferCount := 1;
+    SubmitInfo.pCommandBuffers := @TransferCmd;
+
+    if FDevice.SupportsTimelineSemaphores then
+    begin
+      SignalSemHandle := TimelineSem.Handle;
+      FillChar(TimelineSubmit, SizeOf(TimelineSubmit), 0);
+      TimelineSubmit.sType := VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+      TimelineSubmit.signalSemaphoreValueCount := 1;
+      TimelineSubmit.pSignalSemaphoreValues := @NextVal;
+      SubmitInfo.pNext := @TimelineSubmit;
+      SubmitInfo.signalSemaphoreCount := 1;
+      SubmitInfo.pSignalSemaphores := @SignalSemHandle;
+      FPendingBinaryWaitSemaphore := VK_NULL_HANDLE;
+    end else
+    begin
+      SignalSemHandle := EnsureTransferBinarySemaphore(Slot);
+      SubmitInfo.signalSemaphoreCount := 1;
+      SubmitInfo.pSignalSemaphores := @SignalSemHandle;
+      FPendingBinaryWaitSemaphore := SignalSemHandle;
+    end;
+
+    CheckVk(vkQueueSubmit(FDevice.TransferQueue, 1, @SubmitInfo, VK_NULL_HANDLE),
+      'vkQueueSubmit(AsyncTransfer)');
+    TimelineSem.FCounterValue := NextVal;
+  end else
+  begin
+    TimelineSem.Signal(NextVal);
+    FPendingBinaryWaitSemaphore := VK_NULL_HANDLE;
+  end;
+
+  FLastSubmittedTimelineValue := NextVal;
+  FPendingGraphicsWaitTimelineValue := NextVal;
+  SetLength(FPendingBufferCopies, 0);
+  SetLength(FPendingImageCopies, 0);
+  Inc(FTotalAsyncSubmissions);
+  Inc(FTotalBatchedFlushes);
+  Result := NextVal;
+end;
+
+function TCastleVulkanStagingUploader.ConsumePendingGraphicsWait(
+  out ATimelineSemaphore: VkSemaphore; out AWaitValue: UInt64;
+  out ABinarySemaphore: VkSemaphore): Boolean;
+begin
+  ATimelineSemaphore := VK_NULL_HANDLE;
+  AWaitValue := 0;
+  ABinarySemaphore := VK_NULL_HANDLE;
+  Result := FPendingGraphicsWaitTimelineValue > 0;
+  if not Result then
+    Exit;
+
+  AWaitValue := FPendingGraphicsWaitTimelineValue;
+  if (FDevice <> nil) and FDevice.SupportsTimelineSemaphores and
+     (FTransferTimelineSemaphore <> nil) then
+    ATimelineSemaphore := FTransferTimelineSemaphore.Handle
+  else
+    ABinarySemaphore := FPendingBinaryWaitSemaphore;
+
+  FPendingGraphicsWaitTimelineValue := 0;
+  FPendingBinaryWaitSemaphore := VK_NULL_HANDLE;
+end;
+
+procedure TCastleVulkanStagingUploader.WaitForAsyncUploads(const ATimeoutNs: UInt64);
+begin
+  if (FLastSubmittedTimelineValue > 0) and (FTransferTimelineSemaphore <> nil) then
+    FTransferTimelineSemaphore.Wait(FLastSubmittedTimelineValue, ATimeoutNs);
+  if (FPendingBinaryWaitSemaphore <> VK_NULL_HANDLE) and
+     (FDevice <> nil) and (FDevice.Handle <> nil) and
+     (FDevice.TransferQueue <> nil) and Assigned(vkQueueWaitIdle) then
+    vkQueueWaitIdle(FDevice.TransferQueue);
 end;
 
 function TCastleVulkanStagingUploader.FlushPendingUploads(
   const ACommandList: TVulkanRHICommandList): Cardinal;
 var
   BufCount, ImgCount, I: Integer;
+  DrainCount: Cardinal;
   Cmd: VkCommandBuffer;
   OneShotCmd: Boolean;
   BufBarriers: array of VkBufferMemoryBarrier;
@@ -9399,10 +10396,23 @@ var
   BufItem: TVulkanStagedBufferCopy;
   ImgItem: TVulkanStagedImageCopy;
 begin
+  if FAsyncTransferEnabled and (ACommandList <> nil) and
+     ((Length(FPendingBufferCopies) > 0) or (Length(FPendingImageCopies) > 0)) then
+  begin
+    Result := Cardinal(Length(FPendingBufferCopies) + Length(FPendingImageCopies));
+    SubmitAsyncUploads;
+    ApplyPendingGraphicsAcquireBarriers(ACommandList);
+    Exit;
+  end;
+
+  DrainCount := ApplyPendingGraphicsAcquireBarriers(ACommandList);
+  if ACommandList = nil then
+    WaitForAsyncUploads;
+
   BufCount := Length(FPendingBufferCopies);
   ImgCount := Length(FPendingImageCopies);
-  Result := Cardinal(BufCount + ImgCount);
-  if Result = 0 then
+  Result := DrainCount + Cardinal(BufCount + ImgCount);
+  if BufCount + ImgCount = 0 then
     Exit;
 
   OneShotCmd := False;
@@ -9556,6 +10566,365 @@ begin
   else
     Slot := 0;
   Result := FRingWriteOffsets[Slot];
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanWorkerCommandPoolManager                                        }
+{ ---------------------------------------------------------------------------- }
+
+{$ifndef CASTLE_DISABLE_THREADS}
+type
+  TCastleVulkanRenderWorkerThread = class(TThread)
+  private
+    FWorkerIndex: Cardinal;
+    FWakeEvent: TEvent;
+    FDoneEvent: TEvent;
+    FTaskProc: TVulkanParallelWorkerTaskProc;
+    FTaskCmdList: TVulkanRHICommandList;
+    FTaskErrorMsg: String;
+    FLastOsThreadId: TThreadID;
+    FShuttingDown: Boolean;
+  protected
+    procedure Execute; override;
+  public
+    constructor CreateWorker(const AWorkerIndex: Cardinal);
+    destructor Destroy; override;
+    procedure DispatchTask(const ATaskProc: TVulkanParallelWorkerTaskProc;
+      const ACmdList: TVulkanRHICommandList);
+    procedure WaitTaskDone;
+    procedure SignalShutdown;
+    property LastOsThreadId: TThreadID read FLastOsThreadId;
+    property TaskErrorMsg: String read FTaskErrorMsg;
+  end;
+
+constructor TCastleVulkanRenderWorkerThread.CreateWorker(const AWorkerIndex: Cardinal);
+begin
+  FWorkerIndex := AWorkerIndex;
+  FWakeEvent := TEvent.Create(nil, False, False, '');
+  FDoneEvent := TEvent.Create(nil, True, True, '');
+  FreeOnTerminate := False;
+  inherited Create(False);
+end;
+
+destructor TCastleVulkanRenderWorkerThread.Destroy;
+begin
+  SignalShutdown;
+  inherited Destroy;
+  FreeAndNil(FWakeEvent);
+  FreeAndNil(FDoneEvent);
+end;
+
+procedure TCastleVulkanRenderWorkerThread.Execute;
+begin
+  FLastOsThreadId := GetCurrentThreadId;
+  while not Terminated do
+  begin
+    FWakeEvent.WaitFor(INFINITE);
+    if Terminated or FShuttingDown then
+      Break;
+    FLastOsThreadId := GetCurrentThreadId;
+    FTaskErrorMsg := '';
+    try
+      if Assigned(FTaskProc) then
+        FTaskProc(FWorkerIndex, FTaskCmdList);
+    except
+      on E: Exception do
+        FTaskErrorMsg := E.ClassName + ': ' + E.Message;
+    end;
+    FTaskProc := nil;
+    FTaskCmdList := nil;
+    FDoneEvent.SetEvent;
+  end;
+end;
+
+procedure TCastleVulkanRenderWorkerThread.DispatchTask(
+  const ATaskProc: TVulkanParallelWorkerTaskProc;
+  const ACmdList: TVulkanRHICommandList);
+begin
+  FTaskProc := ATaskProc;
+  FTaskCmdList := ACmdList;
+  FTaskErrorMsg := '';
+  FDoneEvent.ResetEvent;
+  FWakeEvent.SetEvent;
+end;
+
+procedure TCastleVulkanRenderWorkerThread.WaitTaskDone;
+begin
+  FDoneEvent.WaitFor(INFINITE);
+end;
+
+procedure TCastleVulkanRenderWorkerThread.SignalShutdown;
+begin
+  if not FShuttingDown then
+  begin
+    FShuttingDown := True;
+    Terminate;
+    if FWakeEvent <> nil then
+      FWakeEvent.SetEvent;
+    WaitFor;
+  end;
+end;
+{$endif}
+
+constructor TCastleVulkanWorkerCommandPoolManager.Create(const ADevice: TVulkanRHIDevice;
+  const AWorkerCount: Cardinal);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FWorkerCount := EnsureRange(AWorkerCount, Cardinal(1), Cardinal(64));
+  {$ifdef CASTLE_DISABLE_THREADS}
+  FUseWorkerThreads := False;
+  {$else}
+  FUseWorkerThreads := True;
+  {$endif}
+  SetLength(FLastWorkerThreadIds, FWorkerCount);
+  EnsureWorkerPoolsAllocated;
+end;
+
+destructor TCastleVulkanWorkerCommandPoolManager.Destroy;
+begin
+  ShutdownWorkerThreads;
+  DestroyWorkerPools;
+  inherited;
+end;
+
+procedure TCastleVulkanWorkerCommandPoolManager.EnsureWorkerPoolsAllocated;
+var
+  W, Slot: Cardinal;
+  PoolInfo: VkCommandPoolCreateInfo;
+begin
+  if Cardinal(Length(FWorkerSlots)) = FWorkerCount then
+    Exit;
+
+  SetLength(FWorkerSlots, FWorkerCount);
+  SetLength(FLastWorkerThreadIds, FWorkerCount);
+  for W := 0 to FWorkerCount - 1 do
+    for Slot := 0 to MaxFramesInFlight - 1 do
+      if FWorkerSlots[W][Slot].CommandPool = VK_NULL_HANDLE then
+      begin
+        FWorkerSlots[W][Slot].UsedCount := 0;
+        if (FDevice <> nil) and (FDevice.Handle <> nil) and Assigned(vkCreateCommandPool) then
+        begin
+          FillChar(PoolInfo, SizeOf(PoolInfo), 0);
+          PoolInfo.sType := VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+          PoolInfo.flags := VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+          PoolInfo.queueFamilyIndex := FDevice.GraphicsQueueFamily;
+          CheckVk(vkCreateCommandPool(FDevice.Handle, @PoolInfo, nil,
+            @FWorkerSlots[W][Slot].CommandPool), 'vkCreateCommandPool(Worker)');
+        end else
+          FWorkerSlots[W][Slot].CommandPool :=
+            VkCommandPool(PtrUInt($72000000) + PtrUInt(W * MaxFramesInFlight + Slot + 1));
+      end;
+end;
+
+function TCastleVulkanWorkerCommandPoolManager.EnsureWorkerThreadsSpawned: Boolean;
+{$ifndef CASTLE_DISABLE_THREADS}
+var
+  W: Integer;
+{$endif}
+begin
+  {$ifdef CASTLE_DISABLE_THREADS}
+  Result := False;
+  {$else}
+  if not FUseWorkerThreads then
+    Exit(False);
+  if FThreadsSpawned and (Cardinal(Length(FWorkerThreads)) = FWorkerCount) then
+    Exit(True);
+
+  ShutdownWorkerThreads;
+  try
+    SetLength(FWorkerThreads, FWorkerCount);
+    for W := 0 to Integer(FWorkerCount) - 1 do
+      FWorkerThreads[W] := TCastleVulkanRenderWorkerThread.CreateWorker(Cardinal(W));
+    FThreadsSpawned := True;
+    Result := True;
+  except
+    on E: Exception do
+    begin
+      WritelnWarning('Vulkan',
+        'Could not spawn OS worker threads for parallel Vulkan command recording (%s); falling back to sequential worker-pool recording.',
+        [E.Message]);
+      ShutdownWorkerThreads;
+      FUseWorkerThreads := False;
+      Result := False;
+    end;
+  end;
+  {$endif}
+end;
+
+procedure TCastleVulkanWorkerCommandPoolManager.ShutdownWorkerThreads;
+{$ifndef CASTLE_DISABLE_THREADS}
+var
+  I: Integer;
+{$endif}
+begin
+  {$ifndef CASTLE_DISABLE_THREADS}
+  for I := 0 to High(FWorkerThreads) do
+    FreeAndNil(FWorkerThreads[I]);
+  SetLength(FWorkerThreads, 0);
+  {$endif}
+  FThreadsSpawned := False;
+end;
+
+procedure TCastleVulkanWorkerCommandPoolManager.DestroyWorkerPools;
+var
+  W, Slot, I: Integer;
+begin
+  for W := 0 to High(FWorkerSlots) do
+    for Slot := 0 to MaxFramesInFlight - 1 do
+    begin
+      for I := 0 to High(FWorkerSlots[W][Slot].CommandLists) do
+        FreeAndNil(FWorkerSlots[W][Slot].CommandLists[I]);
+      SetLength(FWorkerSlots[W][Slot].CommandLists, 0);
+      FWorkerSlots[W][Slot].UsedCount := 0;
+      if (FDevice <> nil) and (FDevice.Handle <> nil) and
+         (FWorkerSlots[W][Slot].CommandPool <> VK_NULL_HANDLE) and
+         Assigned(vkDestroyCommandPool) then
+        vkDestroyCommandPool(FDevice.Handle, FWorkerSlots[W][Slot].CommandPool, nil);
+      FWorkerSlots[W][Slot].CommandPool := VK_NULL_HANDLE;
+    end;
+  SetLength(FWorkerSlots, 0);
+end;
+
+procedure TCastleVulkanWorkerCommandPoolManager.SetWorkerCount(const AValue: Cardinal);
+var
+  Clamped: Cardinal;
+begin
+  Clamped := EnsureRange(AValue, Cardinal(1), Cardinal(64));
+  if Clamped = FWorkerCount then
+    Exit;
+  if FDevice <> nil then
+    FDevice.WaitIdle;
+  ShutdownWorkerThreads;
+  DestroyWorkerPools;
+  FWorkerCount := Clamped;
+  EnsureWorkerPoolsAllocated;
+end;
+
+procedure TCastleVulkanWorkerCommandPoolManager.ResetFrameSlot(const AFrameSlot: Cardinal);
+var
+  Slot: Cardinal;
+  W: Integer;
+begin
+  Slot := AFrameSlot mod MaxFramesInFlight;
+  EnsureWorkerPoolsAllocated;
+  for W := 0 to High(FWorkerSlots) do
+  begin
+    FWorkerSlots[W][Slot].UsedCount := 0;
+    if (FDevice <> nil) and (FDevice.Handle <> nil) and
+       (FWorkerSlots[W][Slot].CommandPool <> VK_NULL_HANDLE) and
+       Assigned(vkResetCommandPool) then
+      CheckVk(vkResetCommandPool(FDevice.Handle, FWorkerSlots[W][Slot].CommandPool, 0),
+        'vkResetCommandPool(Worker)');
+  end;
+  Inc(FTotalPoolResets);
+end;
+
+function TCastleVulkanWorkerCommandPoolManager.AcquireWorkerSecondaryCommandList(
+  const AWorkerIndex: Cardinal): TVulkanRHICommandList;
+var
+  EffWorker, Slot, UsedIdx: Cardinal;
+  NewList: TVulkanRHICommandList;
+begin
+  EnsureWorkerPoolsAllocated;
+  EffWorker := AWorkerIndex mod Max(Cardinal(1), FWorkerCount);
+  if FDevice <> nil then
+    Slot := FDevice.FrameIndex mod MaxFramesInFlight
+  else
+    Slot := 0;
+
+  UsedIdx := FWorkerSlots[EffWorker][Slot].UsedCount;
+  if UsedIdx >= Cardinal(Length(FWorkerSlots[EffWorker][Slot].CommandLists)) then
+  begin
+    NewList := TVulkanRHICommandList.CreateFromPool(
+      FDevice, FWorkerSlots[EffWorker][Slot].CommandPool, cllSecondary, False);
+    SetLength(FWorkerSlots[EffWorker][Slot].CommandLists, UsedIdx + 1);
+    FWorkerSlots[EffWorker][Slot].CommandLists[UsedIdx] := NewList;
+  end;
+  Result := FWorkerSlots[EffWorker][Slot].CommandLists[UsedIdx];
+  Inc(FWorkerSlots[EffWorker][Slot].UsedCount);
+end;
+
+function TCastleVulkanWorkerCommandPoolManager.ExecuteParallelRecording(
+  const ATaskCount: Cardinal;
+  const ATaskProc: TVulkanParallelWorkerTaskProc;
+  out ARecordedLists: TVulkanCommandListArray): Cardinal;
+var
+  EffWorkers, W: Cardinal;
+  WorkerCmds: array of TVulkanRHICommandList;
+  {$ifndef CASTLE_DISABLE_THREADS}
+  FirstErr: String;
+  WorkerThread: TCastleVulkanRenderWorkerThread;
+  {$endif}
+begin
+  SetLength(ARecordedLists, 0);
+  if (ATaskCount = 0) or not Assigned(ATaskProc) then
+    Exit(0);
+
+  EnsureWorkerPoolsAllocated;
+  EffWorkers := Min(ATaskCount, Max(Cardinal(1), FWorkerCount));
+  SetLength(ARecordedLists, EffWorkers);
+  SetLength(WorkerCmds, EffWorkers);
+  for W := 0 to EffWorkers - 1 do
+  begin
+    WorkerCmds[W] := AcquireWorkerSecondaryCommandList(W);
+    ARecordedLists[W] := WorkerCmds[W];
+  end;
+
+  Inc(FTotalParallelDispatches);
+  Inc(FTotalSecondaryListsRecorded, EffWorkers);
+
+  {$ifndef CASTLE_DISABLE_THREADS}
+  if (EffWorkers >= 2) and FUseWorkerThreads and EnsureWorkerThreadsSpawned then
+  begin
+    FirstErr := '';
+    for W := 0 to EffWorkers - 1 do
+    begin
+      WorkerThread := TCastleVulkanRenderWorkerThread(FWorkerThreads[W]);
+      WorkerThread.DispatchTask(ATaskProc, WorkerCmds[W]);
+    end;
+    for W := 0 to EffWorkers - 1 do
+    begin
+      WorkerThread := TCastleVulkanRenderWorkerThread(FWorkerThreads[W]);
+      WorkerThread.WaitTaskDone;
+      FLastWorkerThreadIds[W] := WorkerThread.LastOsThreadId;
+      if (FirstErr = '') and (WorkerThread.TaskErrorMsg <> '') then
+        FirstErr := WorkerThread.TaskErrorMsg;
+    end;
+    if FirstErr <> '' then
+      raise ERHIError.Create('Parallel Vulkan command recording worker error: ' + FirstErr);
+    Exit(EffWorkers);
+  end;
+  {$endif}
+
+  for W := 0 to EffWorkers - 1 do
+  begin
+    FLastWorkerThreadIds[W] := GetCurrentThreadId;
+    ATaskProc(W, WorkerCmds[W]);
+  end;
+  Result := EffWorkers;
+end;
+
+function TCastleVulkanWorkerCommandPoolManager.GetWorkerCommandPool(
+  const AWorkerIndex, AFrameSlot: Cardinal): VkCommandPool;
+var
+  EffWorker, Slot: Cardinal;
+begin
+  EnsureWorkerPoolsAllocated;
+  if Length(FWorkerSlots) = 0 then
+    Exit(VK_NULL_HANDLE);
+  EffWorker := AWorkerIndex mod Cardinal(Length(FWorkerSlots));
+  Slot := AFrameSlot mod MaxFramesInFlight;
+  Result := FWorkerSlots[EffWorker][Slot].CommandPool;
+end;
+
+function TCastleVulkanWorkerCommandPoolManager.GetWorkerLastThreadId(
+  const AWorkerIndex: Cardinal): TThreadID;
+begin
+  if AWorkerIndex < Cardinal(Length(FLastWorkerThreadIds)) then
+    Result := FLastWorkerThreadIds[AWorkerIndex]
+  else
+    Result := TThreadID(0);
 end;
 
 { ---------------------------------------------------------------------------- }
@@ -19118,12 +20487,20 @@ begin
   Result := FPipelineBinaryManager;
 end;
 
+function TVulkanRHIDevice.GetWorkerCommandPoolManager: TCastleVulkanWorkerCommandPoolManager;
+begin
+  if FWorkerCommandPoolManager = nil then
+    FWorkerCommandPoolManager := TCastleVulkanWorkerCommandPoolManager.Create(Self);
+  Result := FWorkerCommandPoolManager;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FWorkerCommandPoolManager);
   FreeAndNil(FPipelineBinaryManager);
   FreeAndNil(FBCnCompressor);
   FreeAndNil(FIndirectComputeDispatcher);
@@ -21014,6 +22391,8 @@ begin
     FMemoryAllocator.GetFrameRingBuffer(FFrameIndex).Reset;
   if FStagingUploader <> nil then
     FStagingUploader.ReclaimFrameSlot(FFrameIndex);
+  if FWorkerCommandPoolManager <> nil then
+    FWorkerCommandPoolManager.ResetFrameSlot(FFrameIndex);
   if Frame.TransientDescriptorAllocator <> nil then
     Frame.TransientDescriptorAllocator.ResetPools;
   FDeferResourceDestruction := True;
@@ -21088,7 +22467,15 @@ procedure TVulkanRHIDevice.EndFrameAndPresent;
 var
   Frame: TVulkanFrameContext;
   SubmitInfo: VkSubmitInfo;
-  WaitStages: VkPipelineStageFlags;
+  TimelineSubmit: VkTimelineSemaphoreSubmitInfo;
+  WaitSems: array[0..1] of VkSemaphore;
+  WaitStages: array[0..1] of VkPipelineStageFlags;
+  WaitValues: array[0..1] of UInt64;
+  SignalValueZero: UInt64;
+  WaitCount: Cardinal;
+  HasAsyncWait: Boolean;
+  AsyncTimelineSem, AsyncBinarySem: VkSemaphore;
+  AsyncWaitValue: UInt64;
   PresentInfo: VkPresentInfoKHR;
   PresentRes: VkResult;
   CmdHandle: VkCommandBuffer;
@@ -21114,9 +22501,48 @@ begin
     Frame.CommandList.TransitionTexture(FSwapchainColorTextures[FCurrentSwapchainImageIndex], rsPresent);
   Frame.CommandList.EndRecording;
 
+  HasAsyncWait := (FStagingUploader <> nil) and
+    FStagingUploader.ConsumePendingGraphicsWait(AsyncTimelineSem, AsyncWaitValue, AsyncBinarySem);
+
   if (FDevice <> nil) and (FSwapchain <> VK_NULL_HANDLE) and Assigned(vkQueueSubmit) then
   begin
-    WaitStages := VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    WaitSems[0] := Frame.ImageAvailableSemaphore;
+    WaitStages[0] := VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    WaitValues[0] := 0;
+    WaitCount := 1;
+    SignalValueZero := 0;
+
+    FillChar(TimelineSubmit, SizeOf(TimelineSubmit), 0);
+    TimelineSubmit.sType := VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+
+    if HasAsyncWait then
+    begin
+      if (AsyncTimelineSem <> VK_NULL_HANDLE) and FSupportsTimelineSemaphores then
+      begin
+        WaitSems[1] := AsyncTimelineSem;
+        WaitStages[1] :=
+          VK_PIPELINE_STAGE_VERTEX_INPUT_BIT or
+          VK_PIPELINE_STAGE_VERTEX_SHADER_BIT or
+          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT or
+          VK_PIPELINE_STAGE_TRANSFER_BIT;
+        WaitValues[1] := AsyncWaitValue;
+        WaitCount := 2;
+        TimelineSubmit.waitSemaphoreValueCount := 2;
+        TimelineSubmit.pWaitSemaphoreValues := @WaitValues[0];
+        TimelineSubmit.signalSemaphoreValueCount := 1;
+        TimelineSubmit.pSignalSemaphoreValues := @SignalValueZero;
+      end else if AsyncBinarySem <> VK_NULL_HANDLE then
+      begin
+        WaitSems[1] := AsyncBinarySem;
+        WaitStages[1] :=
+          VK_PIPELINE_STAGE_VERTEX_INPUT_BIT or
+          VK_PIPELINE_STAGE_VERTEX_SHADER_BIT or
+          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT or
+          VK_PIPELINE_STAGE_TRANSFER_BIT;
+        WaitCount := 2;
+      end;
+    end;
+
     CmdHandle := Frame.CommandList.Handle;
     { Index RenderFinishedSemaphore by acquired swapchain image index (not frame-in-flight slot)
       per VUID-vkQueueSubmit-pSignalSemaphores-00067 when SwapchainImageCount > MaxFramesInFlight. }
@@ -21128,9 +22554,11 @@ begin
 
     FillChar(SubmitInfo, SizeOf(SubmitInfo), 0);
     SubmitInfo.sType := VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    SubmitInfo.waitSemaphoreCount := 1;
-    SubmitInfo.pWaitSemaphores := @Frame.ImageAvailableSemaphore;
-    SubmitInfo.pWaitDstStageMask := @WaitStages;
+    if TimelineSubmit.waitSemaphoreValueCount > 0 then
+      SubmitInfo.pNext := @TimelineSubmit;
+    SubmitInfo.waitSemaphoreCount := WaitCount;
+    SubmitInfo.pWaitSemaphores := @WaitSems[0];
+    SubmitInfo.pWaitDstStageMask := @WaitStages[0];
     SubmitInfo.commandBufferCount := 1;
     SubmitInfo.pCommandBuffers := @CmdHandle;
     SubmitInfo.signalSemaphoreCount := 1;
@@ -21166,6 +22594,33 @@ begin
     CmdHandle := Frame.CommandList.Handle;
     FillChar(SubmitInfo, SizeOf(SubmitInfo), 0);
     SubmitInfo.sType := VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    FillChar(TimelineSubmit, SizeOf(TimelineSubmit), 0);
+    TimelineSubmit.sType := VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+    if HasAsyncWait then
+    begin
+      WaitStages[0] :=
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT or
+        VK_PIPELINE_STAGE_VERTEX_SHADER_BIT or
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT or
+        VK_PIPELINE_STAGE_TRANSFER_BIT;
+      if (AsyncTimelineSem <> VK_NULL_HANDLE) and FSupportsTimelineSemaphores then
+      begin
+        WaitSems[0] := AsyncTimelineSem;
+        WaitValues[0] := AsyncWaitValue;
+        TimelineSubmit.waitSemaphoreValueCount := 1;
+        TimelineSubmit.pWaitSemaphoreValues := @WaitValues[0];
+        SubmitInfo.pNext := @TimelineSubmit;
+        SubmitInfo.waitSemaphoreCount := 1;
+        SubmitInfo.pWaitSemaphores := @WaitSems[0];
+        SubmitInfo.pWaitDstStageMask := @WaitStages[0];
+      end else if AsyncBinarySem <> VK_NULL_HANDLE then
+      begin
+        WaitSems[0] := AsyncBinarySem;
+        SubmitInfo.waitSemaphoreCount := 1;
+        SubmitInfo.pWaitSemaphores := @WaitSems[0];
+        SubmitInfo.pWaitDstStageMask := @WaitStages[0];
+      end;
+    end;
     SubmitInfo.commandBufferCount := 1;
     SubmitInfo.pCommandBuffers := @CmdHandle;
     CheckVk(vkQueueSubmit(FGraphicsQueue, 1, @SubmitInfo, Frame.InFlightFence), 'vkQueueSubmit(Offscreen)');
@@ -21195,6 +22650,8 @@ begin
     FMemoryAllocator.GetFrameRingBuffer(FFrameIndex).Reset;
   if FStagingUploader <> nil then
     FStagingUploader.ReclaimFrameSlot(FFrameIndex);
+  if FWorkerCommandPoolManager <> nil then
+    FWorkerCommandPoolManager.ResetFrameSlot(FFrameIndex);
   if Frame.TransientDescriptorAllocator <> nil then
     Frame.TransientDescriptorAllocator.ResetPools;
   FDeferResourceDestruction := True;
@@ -21217,6 +22674,12 @@ procedure TVulkanRHIDevice.EndOffscreenFrame;
 var
   Frame: TVulkanFrameContext;
   SubmitInfo: VkSubmitInfo;
+  TimelineSubmit: VkTimelineSemaphoreSubmitInfo;
+  WaitSem: VkSemaphore;
+  WaitStage: VkPipelineStageFlags;
+  HasAsyncWait: Boolean;
+  AsyncTimelineSem, AsyncBinarySem: VkSemaphore;
+  AsyncWaitValue: UInt64;
   CmdHandle: VkCommandBuffer;
 begin
   Frame := FFrames[FFrameIndex];
@@ -21234,11 +22697,40 @@ begin
 
   Frame.CommandList.EndRecording;
 
+  HasAsyncWait := (FStagingUploader <> nil) and
+    FStagingUploader.ConsumePendingGraphicsWait(AsyncTimelineSem, AsyncWaitValue, AsyncBinarySem);
+
   if (FDevice <> nil) and Assigned(vkQueueSubmit) then
   begin
     CmdHandle := Frame.CommandList.Handle;
     FillChar(SubmitInfo, SizeOf(SubmitInfo), 0);
     SubmitInfo.sType := VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    FillChar(TimelineSubmit, SizeOf(TimelineSubmit), 0);
+    TimelineSubmit.sType := VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+    if HasAsyncWait then
+    begin
+      WaitStage :=
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT or
+        VK_PIPELINE_STAGE_VERTEX_SHADER_BIT or
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT or
+        VK_PIPELINE_STAGE_TRANSFER_BIT;
+      if (AsyncTimelineSem <> VK_NULL_HANDLE) and FSupportsTimelineSemaphores then
+      begin
+        WaitSem := AsyncTimelineSem;
+        TimelineSubmit.waitSemaphoreValueCount := 1;
+        TimelineSubmit.pWaitSemaphoreValues := @AsyncWaitValue;
+        SubmitInfo.pNext := @TimelineSubmit;
+        SubmitInfo.waitSemaphoreCount := 1;
+        SubmitInfo.pWaitSemaphores := @WaitSem;
+        SubmitInfo.pWaitDstStageMask := @WaitStage;
+      end else if AsyncBinarySem <> VK_NULL_HANDLE then
+      begin
+        WaitSem := AsyncBinarySem;
+        SubmitInfo.waitSemaphoreCount := 1;
+        SubmitInfo.pWaitSemaphores := @WaitSem;
+        SubmitInfo.pWaitDstStageMask := @WaitStage;
+      end;
+    end;
     SubmitInfo.commandBufferCount := 1;
     SubmitInfo.pCommandBuffers := @CmdHandle;
     CheckVk(vkQueueSubmit(FGraphicsQueue, 1, @SubmitInfo, Frame.InFlightFence), 'vkQueueSubmit(OffscreenFrame)');
@@ -21286,6 +22778,8 @@ end;
 
 procedure TVulkanRHIDevice.WaitIdle;
 begin
+  if FStagingUploader <> nil then
+    FStagingUploader.WaitForAsyncUploads;
   FlushStagingUploads;
   if (FDevice <> nil) and Assigned(vkDeviceWaitIdle) then
     vkDeviceWaitIdle(FDevice);

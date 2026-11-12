@@ -169,7 +169,7 @@ uses Classes, SysUtils, Generics.Collections,
   // Note that this redefines TInt32List, so keep these FPC web units before CGE units.
   {$ifdef WASI} Job.Js, CastleInternalJobWeb, {$endif}
   {$ifdef OpenGLES} CastleGLES, {$else} CastleGL, {$endif}
-  CastleUtils, CastleVectors, X3DFields, X3DNodes, CastleColors,
+  CastleUtils, CastleVectors, CastleRectangles, X3DFields, X3DNodes, CastleColors,
   CastleInternalX3DLexer, CastleImages, CastleGLUtils, CastleRendererInternalLights,
   CastleGLShaders, CastleGLImages, CastleTextureImages, CastleVideos, X3DTime,
   CastleShapes, CastleClassUtils, CastleInternalCompositeImage,
@@ -200,7 +200,7 @@ implementation
 
 uses Math,
   CastleStringUtils, CastleGLVersion, CastleLog, CastleInternalGLCubeMaps,
-  X3DCameraUtils, CastleProjection, CastleRectangles, CastleTriangles,
+  X3DCameraUtils, CastleProjection, CastleTriangles,
   CastleCameras, CastleSceneInternalShape, CastleApplicationProperties,
   CastleRenderContext, CastleInternalGLUtils, CastleTimeUtils, CastleUriUtils;
 

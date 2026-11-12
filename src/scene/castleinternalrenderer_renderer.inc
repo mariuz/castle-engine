@@ -18,6 +18,33 @@
 
 {$ifdef read_interface}
 //type
+  { Immutable per-shape draw packet captured on the main thread during
+    TShapesRenderer parallel draw collection and replayed lock-free across
+    worker-thread secondary TVulkanRHICommandList instances. }
+  TRHIPreparedShapeDrawItem = record
+    Pipeline: TRHIPipeline;
+    PushConstants: TCastlePushConstantsBlock;
+    HasGeometryShader: Boolean;
+    SceneSet: TRHIDescriptorSet;
+    MaterialSet: TRHIDescriptorSet;
+    SkinningSet: TRHIDescriptorSet;
+    CoordBuf: TRHIBuffer;
+    AttrBuf: TRHIBuffer;
+    IndexBuf: TRHIBuffer;
+    HasIndexes: Boolean;
+    Count: Cardinal;
+    SubDrawCounts: array of Integer;
+    ViewportRect: TFloatRectangle;
+    ViewportMinDepth: Single;
+    ViewportMaxDepth: Single;
+    ScissorRect: TRectangle;
+    UseBlendConstants: Boolean;
+    BlendConstants: TVector4;
+    DepthBiasConstant: Single;
+    DepthBiasSlope: Single;
+    LineWidth: Single;
+  end;
+
   TRenderer = class(TComponent)
   private
     { For speed, we keep a single instance of TShader,
@@ -115,6 +142,9 @@
     FRHIVSMCasterFragmentShader: TRHIShaderModule;
     FSceneUniformBlock: TCastleSceneUniformBlock;
     FRHISceneBufferUploadCount: Cardinal;
+    FCollectingParallelDraws: Boolean;
+    FPreparedDrawItems: array of TRHIPreparedShapeDrawItem;
+    FPreparedDrawItemCount: Integer;
 
     { Currently set fog parameters, during render. }
     FogFunctionality: TFogFunctionality;
@@ -321,6 +351,16 @@
     property RHIDefaultVertexShader: TRHIShaderModule read FRHIDefaultVertexShader;
     property RHIDefaultFragmentShader: TRHIShaderModule read FRHIDefaultFragmentShader;
     property RHIVSMCasterFragmentShader: TRHIShaderModule read FRHIVSMCasterFragmentShader;
+    procedure BeginParallelDrawCollection;
+    procedure EndParallelDrawCollection;
+    procedure AppendPreparedDrawItem(const AItem: TRHIPreparedShapeDrawItem);
+    function GetPreparedDrawItem(const AIndex: Integer): TRHIPreparedShapeDrawItem;
+    procedure RecordPreparedDrawSlice(const ACmd: TRHICommandList;
+      const AStartIdx, AEndIdx: Integer;
+      const AInitialViewportAlreadySet: Boolean = False);
+
+    property IsCollectingParallelDraws: Boolean read FCollectingParallelDraws;
+    property PreparedDrawItemCount: Integer read FPreparedDrawItemCount;
     property SceneUniformBlock: TCastleSceneUniformBlock read FSceneUniformBlock;
     property RHISceneBufferUploadCount: Cardinal read FRHISceneBufferUploadCount;
     property ActiveLightsRenderer: TLightsRenderer read LightsRenderer;
@@ -425,7 +465,183 @@ begin
     FRHIShadowMapTextures[I] := nil;
     FRHIShadowMapSamplers[I] := nil;
   end;
+  SetLength(FPreparedDrawItems, 0);
+  FPreparedDrawItemCount := 0;
+  FCollectingParallelDraws := False;
   inherited;
+end;
+
+procedure TRenderer.BeginParallelDrawCollection;
+begin
+  FCollectingParallelDraws := True;
+  FPreparedDrawItemCount := 0;
+end;
+
+procedure TRenderer.EndParallelDrawCollection;
+begin
+  FCollectingParallelDraws := False;
+  FPreparedDrawItemCount := 0;
+end;
+
+procedure TRenderer.AppendPreparedDrawItem(const AItem: TRHIPreparedShapeDrawItem);
+begin
+  if FPreparedDrawItemCount >= Length(FPreparedDrawItems) then
+    SetLength(FPreparedDrawItems, Max(32, Length(FPreparedDrawItems) * 2));
+  FPreparedDrawItems[FPreparedDrawItemCount] := AItem;
+  Inc(FPreparedDrawItemCount);
+end;
+
+function TRenderer.GetPreparedDrawItem(const AIndex: Integer): TRHIPreparedShapeDrawItem;
+begin
+  if (AIndex >= 0) and (AIndex < FPreparedDrawItemCount) then
+    Result := FPreparedDrawItems[AIndex]
+  else
+    FillChar(Result, SizeOf(Result), 0);
+end;
+
+procedure TRenderer.RecordPreparedDrawSlice(const ACmd: TRHICommandList;
+  const AStartIdx, AEndIdx: Integer;
+  const AInitialViewportAlreadySet: Boolean);
+var
+  ClampedStart, ClampedEnd, I, J: Integer;
+  First: Cardinal;
+  HasVP: Boolean;
+  LastVP: TFloatRectangle;
+  LastMinD, LastMaxD: Single;
+  LastScissor: TRectangle;
+  LastBiasConst, LastBiasSlope: Single;
+  LastLineWidth: Single;
+  LastPipeline: TRHIPipeline;
+  LastSceneSet, LastMatSet, LastSkinSet: TRHIDescriptorSet;
+begin
+  if ACmd = nil then
+    Exit;
+  ClampedStart := Max(0, AStartIdx);
+  ClampedEnd := Min(FPreparedDrawItemCount, AEndIdx);
+  if ClampedStart >= ClampedEnd then
+    Exit;
+
+  HasVP := AInitialViewportAlreadySet;
+  if HasVP then
+  begin
+    LastVP := FPreparedDrawItems[ClampedStart].ViewportRect;
+    LastMinD := FPreparedDrawItems[ClampedStart].ViewportMinDepth;
+    LastMaxD := FPreparedDrawItems[ClampedStart].ViewportMaxDepth;
+    LastScissor := FPreparedDrawItems[ClampedStart].ScissorRect;
+  end else
+  begin
+    LastVP := TFloatRectangle.Empty;
+    LastMinD := 0.0;
+    LastMaxD := 1.0;
+    LastScissor := TRectangle.Empty;
+  end;
+  LastBiasConst := 0.0;
+  LastBiasSlope := 0.0;
+  LastLineWidth := 1.0;
+  LastPipeline := nil;
+  LastSceneSet := nil;
+  LastMatSet := nil;
+  LastSkinSet := nil;
+
+  for I := ClampedStart to ClampedEnd - 1 do
+  begin
+    with FPreparedDrawItems[I] do
+    begin
+      if (not HasVP) or
+         (not LastVP.PerfectlyEquals(ViewportRect)) or
+         (LastMinD <> ViewportMinDepth) or
+         (LastMaxD <> ViewportMaxDepth) then
+      begin
+        ACmd.SetViewport(ViewportRect, ViewportMinDepth, ViewportMaxDepth);
+        LastVP := ViewportRect;
+        LastMinD := ViewportMinDepth;
+        LastMaxD := ViewportMaxDepth;
+      end;
+
+      if (not HasVP) or (not LastScissor.Equals(ScissorRect)) then
+      begin
+        ACmd.SetScissor(ScissorRect);
+        LastScissor := ScissorRect;
+      end;
+      HasVP := True;
+
+      if (Pipeline <> nil) and (Pipeline <> LastPipeline) then
+      begin
+        ACmd.BindPipeline(Pipeline);
+        LastPipeline := Pipeline;
+      end;
+
+      if UseBlendConstants then
+        ACmd.SetBlendConstants(BlendConstants);
+
+      if (DepthBiasConstant <> LastBiasConst) or (DepthBiasSlope <> LastBiasSlope) then
+      begin
+        ACmd.SetDepthBias(DepthBiasConstant, DepthBiasSlope);
+        LastBiasConst := DepthBiasConstant;
+        LastBiasSlope := DepthBiasSlope;
+      end;
+
+      if LineWidth <> LastLineWidth then
+      begin
+        ACmd.SetLineWidth(LineWidth);
+        LastLineWidth := LineWidth;
+      end;
+
+      if HasGeometryShader then
+        ACmd.PushConstants([ssVertex, ssGeometry, ssFragment], 0, SizeOf(PushConstants), PushConstants)
+      else
+        ACmd.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConstants), PushConstants);
+
+      if (SceneSet <> nil) and (SceneSet <> LastSceneSet) then
+      begin
+        ACmd.BindDescriptorSet(0, SceneSet, []);
+        LastSceneSet := SceneSet;
+      end;
+      if (MaterialSet <> nil) and (MaterialSet <> LastMatSet) then
+      begin
+        ACmd.BindDescriptorSet(1, MaterialSet, []);
+        LastMatSet := MaterialSet;
+      end;
+      if (SkinningSet <> nil) and (SkinningSet <> LastSkinSet) then
+      begin
+        ACmd.BindDescriptorSet(2, SkinningSet, []);
+        LastSkinSet := SkinningSet;
+      end;
+
+      if CoordBuf <> nil then
+      begin
+        if AttrBuf <> nil then
+          ACmd.BindVertexBuffers(0, [CoordBuf, AttrBuf], [0, 0])
+        else
+          ACmd.BindVertexBuffers(0, [CoordBuf], [0]);
+      end;
+
+      First := 0;
+      if HasIndexes then
+      begin
+        if IndexBuf <> nil then
+          ACmd.BindIndexBuffer(IndexBuf, 0, itUInt32);
+        if Length(SubDrawCounts) = 0 then
+          ACmd.DrawIndexed(Count, 1, First, 0, 0)
+        else
+          for J := 0 to High(SubDrawCounts) do
+          begin
+            ACmd.DrawIndexed(SubDrawCounts[J], 1, First, 0, 0);
+            First := First + Cardinal(SubDrawCounts[J]);
+          end;
+      end else
+      begin
+        if Length(SubDrawCounts) = 0 then
+          ACmd.Draw(Count, 1, First, 0)
+        else
+          for J := 0 to High(SubDrawCounts) do
+          begin
+            ACmd.Draw(SubDrawCounts[J], 1, First, 0);
+            First := First + Cardinal(SubDrawCounts[J]);
+          end;
+      end;
+    end;
+  end;
 end;
 
 function TRenderer.GetRHIShadowMapTexture(const ASlot: Cardinal): TRHITexture;

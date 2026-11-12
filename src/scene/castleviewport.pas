@@ -177,6 +177,9 @@ type
       FCameraShutterSeconds: Single;
       FCameraISO: Single;
       FTargetFrameRateHz: Single;
+      FParallelCommandRecording: Boolean;
+      FParallelCommandRecordingMinShapes: Cardinal;
+      FParallelCommandRecordingWorkerCount: Cardinal;
 
       AllShapesCollector, FilteredShapesCollector: TShapesCollector;
       ShapesRenderer: TShapesRenderer;
@@ -280,6 +283,9 @@ type
     procedure ItemsFreeNotification(const Sender: TFreeNotificationObserver);
     procedure SetDynamicBatching(const Value: Boolean);
     procedure SetOcclusionCulling(const Value: Boolean);
+    procedure SetParallelCommandRecording(const Value: Boolean);
+    procedure SetParallelCommandRecordingMinShapes(const Value: Cardinal);
+    procedure SetParallelCommandRecordingWorkerCount(const Value: Cardinal);
   private
     var
       FProjection: TProjection;
@@ -1465,6 +1471,24 @@ type
     property TargetFrameRateHz: Single
       read FTargetFrameRateHz write FTargetFrameRateHz;
 
+    { Enables multi-threaded secondary command buffer recording across per-worker
+      VkCommandPool instances on the Vulkan RHI backend when rendering collected
+      TCastleScene shapes. }
+    property ParallelCommandRecording: Boolean
+      read FParallelCommandRecording write SetParallelCommandRecording default false;
+
+    { Minimum number of collected shapes in a pass required before dispatching
+      multi-threaded secondary command buffer recording on the Vulkan RHI backend. }
+    property ParallelCommandRecordingMinShapes: Cardinal
+      read FParallelCommandRecordingMinShapes write SetParallelCommandRecordingMinShapes
+      default TShapesRenderer.DefaultParallelCommandRecordingMinShapes;
+
+    { Number of worker threads / secondary command buffers used for multi-threaded
+      shape command recording on the Vulkan RHI backend. }
+    property ParallelCommandRecordingWorkerCount: Cardinal
+      read FParallelCommandRecordingWorkerCount write SetParallelCommandRecordingWorkerCount
+      default TShapesRenderer.DefaultParallelCommandRecordingWorkerCount;
+
   {$define read_interface_class}
   {$I auto_generated_persistent_vectors/tcastleviewport_persistent_vectors.inc}
   {$undef read_interface_class}
@@ -1624,6 +1648,9 @@ begin
   FCameraShutterSeconds := 0.008;
   FCameraISO := 100.0;
   FTargetFrameRateHz := 0.0;
+  FParallelCommandRecording := false;
+  FParallelCommandRecordingMinShapes := TShapesRenderer.DefaultParallelCommandRecordingMinShapes;
+  FParallelCommandRecordingWorkerCount := TShapesRenderer.DefaultParallelCommandRecordingWorkerCount;
 
   FItems := TCastleRootTransform.Create(Self);
   FItems.SetSubComponent(true);
@@ -5016,7 +5043,8 @@ begin
         'OcclusionSort', 'OcclusionCulling', 'BlendingSort',
         'GlobalIlluminationMode', 'TemporalAntiAliasingMode', 'VariableRateShadingMode',
         'NextGenToneMappingMode', 'VolumetricFogEnabled', 'AutoExposureEnabled',
-        'CameraApertureFStops', 'CameraShutterSeconds', 'CameraISO', 'TargetFrameRateHz'
+        'CameraApertureFStops', 'CameraShutterSeconds', 'CameraISO', 'TargetFrameRateHz',
+        'ParallelCommandRecording'
       ]) then
     Result := [psBasic]
   else
@@ -5127,6 +5155,36 @@ begin
     FOcclusionCulling := Value;
     if ShapesRenderer <> nil then
       ShapesRenderer.OcclusionCulling := Value;
+  end;
+end;
+
+procedure TCastleViewport.SetParallelCommandRecording(const Value: Boolean);
+begin
+  if FParallelCommandRecording <> Value then
+  begin
+    FParallelCommandRecording := Value;
+    if ShapesRenderer <> nil then
+      ShapesRenderer.ParallelCommandRecording := Value;
+  end;
+end;
+
+procedure TCastleViewport.SetParallelCommandRecordingMinShapes(const Value: Cardinal);
+begin
+  if FParallelCommandRecordingMinShapes <> Value then
+  begin
+    FParallelCommandRecordingMinShapes := Value;
+    if ShapesRenderer <> nil then
+      ShapesRenderer.ParallelCommandRecordingMinShapes := Value;
+  end;
+end;
+
+procedure TCastleViewport.SetParallelCommandRecordingWorkerCount(const Value: Cardinal);
+begin
+  if FParallelCommandRecordingWorkerCount <> Value then
+  begin
+    FParallelCommandRecordingWorkerCount := Value;
+    if ShapesRenderer <> nil then
+      ShapesRenderer.ParallelCommandRecordingWorkerCount := Value;
   end;
 end;
 

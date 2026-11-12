@@ -394,6 +394,9 @@ type
     procedure TestVulkanSwapchainCompositeAlphaAndWSIExtensionDiscoveryRHI;
     procedure TestRealVulkanHeadlessSurfaceLiveSwapchainPresentAndResizeRHI;
     procedure TestRealCastleWindowPureVulkanOpenRenderResizeSaveScreenRHI;
+    procedure TestRealLavapipeSecondaryCommandBuffersAndWorkerCommandPoolParallelDrawRHI;
+    procedure TestRealLavapipeViewportParallelCommandRecording3DSceneParityRHI;
+    procedure TestRealLavapipeAsyncTransferQueueTimelineSemaphoreUploadAndRenderRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -402,6 +405,10 @@ type
     FShadowVolumeCasterCalls: Cardinal;
     FRenderGraphPassExecCount: Cardinal;
     FSHCaptureRenderCalls: Cardinal;
+    FParallelTestPassInfo: TRHIRenderingInfo;
+    FParallelTestPipeline: TRHIPipeline;
+    FParallelTestQuadVBOs: array[0..3] of TRHIBuffer;
+    FParallelTestHeadlessMode: Boolean;
     procedure CaptureWarning(const Category, S: String);
     procedure DummyRenderShapeCallback(const Shape: TCollectedShape;
       const Params: TRenderParams; const PassParams: TRenderOnePassParams);
@@ -412,6 +419,8 @@ type
     procedure DummyRenderGraphPassCallback(const AGraph: TRHIRenderGraph;
       const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
     procedure DummySHCaptureRenderCallback(const RenderParams: TRenderParams);
+    procedure ParallelQuadWorkerCallback(const AWorkerIndex: Cardinal;
+      const ACommandList: TVulkanRHICommandList);
     function CreateHeadlessSurfaceForTest(const AInstance: VkInstance): VkSurfaceKHR;
   end;
 
@@ -29152,6 +29161,770 @@ begin
     SetActiveCommandList(SavedCmd);
     SetRHIDevice(SavedRHI);
     ApplicationProperties.RenderBackend := SavedBackend;
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.ParallelQuadWorkerCallback(
+  const AWorkerIndex: Cardinal; const ACommandList: TVulkanRHICommandList);
+type
+  TTestPrim2DPush = packed record
+    ViewportSize: TVector2;
+    PointSize: Single;
+    Padding: Single;
+    Color: TVector4;
+  end;
+var
+  PushData: TTestPrim2DPush;
+begin
+  if ACommandList = nil then
+    Exit;
+  ACommandList.BeginSecondaryRecording(
+    FParallelTestPassInfo,
+    FloatRectangle(0, 0, 64, 64),
+    Rectangle(0, 0, 64, 64),
+    0.0, 1.0);
+  if FParallelTestPipeline <> nil then
+    ACommandList.BindPipeline(FParallelTestPipeline);
+  if not FParallelTestHeadlessMode then
+  begin
+    if (AWorkerIndex <= High(FParallelTestQuadVBOs)) and
+       (FParallelTestQuadVBOs[AWorkerIndex] <> nil) then
+      ACommandList.BindVertexBuffers(0, [FParallelTestQuadVBOs[AWorkerIndex]], [0]);
+    PushData.ViewportSize := Vector2(64.0, 64.0);
+    PushData.PointSize := 1.0;
+    PushData.Padding := 0.0;
+    case AWorkerIndex of
+      0: PushData.Color := Vector4(1.0, 0.0, 0.0, 1.0); { Bottom-Left: Red }
+      1: PushData.Color := Vector4(0.0, 1.0, 0.0, 1.0); { Bottom-Right: Green }
+      2: PushData.Color := Vector4(0.0, 0.0, 1.0, 1.0); { Top-Left: Blue }
+    else
+      PushData.Color := Vector4(1.0, 1.0, 0.0, 1.0);    { Top-Right: Yellow }
+    end;
+    ACommandList.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushData), PushData);
+    ACommandList.Draw(6, 1, 0, 0);
+  end else
+    ACommandList.Draw(3, 1, 0, 0);
+  ACommandList.EndRecording;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipeSecondaryCommandBuffersAndWorkerCommandPoolParallelDrawRHI;
+type
+  TTestPrim2DPush = packed record
+    ViewportSize: TVector2;
+    PointSize: Single;
+    Padding: Single;
+    Color: TVector4;
+  end;
+var
+  HeadlessDev, RealDev: TVulkanRHIDevice;
+  HeadlessCmd, RealCmd, ReusedSec0: TVulkanRHICommandList;
+  HeadlessColor, HeadlessDepth: TRHITexture;
+  ColorTex, DepthTex: TRHITexture;
+  SecLists: TVulkanCommandListArray;
+  VertSPIRV, FragSPIRV: TSPIRVBytecode;
+  VS, FS: TRHIShaderModule;
+  PipeDesc: TRHIGraphicsPipelineDesc;
+  QuadVerts: array[0..5] of TVector2;
+  CenterVBO: TRHIBuffer;
+  CenterPush: TTestPrim2DPush;
+  PassInfo: TRHIRenderingInfo;
+  Readback: TRGBAlphaImage;
+  DispatchedCount: Cardinal;
+  MainTid: TThreadID;
+  W: Integer;
+
+  procedure FillQuadVerts(const X0, Y0, X1, Y1: Single);
+  begin
+    QuadVerts[0] := Vector2(X0, Y0);
+    QuadVerts[1] := Vector2(X1, Y0);
+    QuadVerts[2] := Vector2(X1, Y1);
+    QuadVerts[3] := Vector2(X0, Y0);
+    QuadVerts[4] := Vector2(X1, Y1);
+    QuadVerts[5] := Vector2(X0, Y1);
+  end;
+
+begin
+  { Part 1: Headless per-worker VkCommandPool manager & secondary command list lifecycle }
+  HeadlessDev := TVulkanRHIDevice.CreateHeadless(nil);
+  HeadlessDev.SimulateSwapchainForTesting(64, 64, 2, pfBGRA8_UNorm, pfD24_UNorm_S8_UInt);
+  HeadlessColor := nil;
+  HeadlessDepth := nil;
+  FParallelTestPipeline := nil;
+  for W := 0 to 3 do
+    FParallelTestQuadVBOs[W] := nil;
+  try
+    HeadlessDev.WorkerCommandPoolManager.WorkerCount := 4;
+    AssertEquals('WorkerCount must be 4', 4, Integer(HeadlessDev.WorkerCommandPoolManager.WorkerCount));
+
+    HeadlessColor := HeadlessDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuColorAttachment]));
+    HeadlessDepth := HeadlessDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfD32_Float, [tuDepthStencil]));
+
+    HeadlessCmd := HeadlessDev.BeginFrame as TVulkanRHICommandList;
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 64, 64),
+      HeadlessColor, loClear, Vector4(0.1, 0.1, 0.1, 1.0),
+      HeadlessDepth, loClear, 1.0);
+    HeadlessCmd.BeginRendering(PassInfo);
+
+    FParallelTestPassInfo := PassInfo;
+    FParallelTestPassInfo.ColorAttachments := Copy(PassInfo.ColorAttachments);
+    FParallelTestPassInfo.ColorAttachments[0].LoadOp := loLoad;
+    FParallelTestPassInfo.DepthAttachment.LoadOp := loLoad;
+    FParallelTestPassInfo.ContentsSecondaryCommandBuffers := True;
+    FParallelTestHeadlessMode := True;
+
+    DispatchedCount := HeadlessDev.WorkerCommandPoolManager.ExecuteParallelRecording(
+      4, @ParallelQuadWorkerCallback, SecLists);
+    AssertEquals('ExecuteParallelRecording must return 4 secondary command lists',
+      4, Integer(DispatchedCount));
+    AssertEquals('Length(SecLists) must be 4', 4, Length(SecLists));
+    for W := 0 to 3 do
+    begin
+      AssertTrue('Secondary list must be non-nil', SecLists[W] <> nil);
+      AssertEquals('Secondary list level must be cllSecondary',
+        Ord(cllSecondary), Ord(SecLists[W].Level));
+    end;
+    ReusedSec0 := SecLists[0] as TVulkanRHICommandList;
+
+    HeadlessCmd.ExecuteSecondaryCommandsInPass(SecLists);
+    AssertEquals('Primary SecondaryExecuteCount must be 4',
+      4, Integer(HeadlessCmd.SecondaryExecuteCount));
+    AssertTrue('Primary command list must resume active rendering pass after ExecuteSecondaryCommandsInPass',
+      HeadlessCmd.IsRendering);
+    HeadlessCmd.EndRendering;
+    HeadlessDev.EndFrameAndPresent;
+
+    { Cycle 1 intermediate frame (slot 1), then begin frame on slot 0 to verify O(1) pool reset reuse }
+    HeadlessCmd := HeadlessDev.BeginFrame as TVulkanRHICommandList;
+    HeadlessDev.EndFrameAndPresent;
+    HeadlessCmd := HeadlessDev.BeginFrame as TVulkanRHICommandList;
+    AssertEquals('Wrapped back to FrameIndex 0', 0, Integer(HeadlessDev.FrameIndex));
+    AssertTrue('WorkerCommandPoolManager.TotalPoolResets must advance on BeginFrame',
+      HeadlessDev.WorkerCommandPoolManager.TotalPoolResets >= 2);
+    AssertTrue('Frame slot 0 secondary command list instance must be recycled without reallocation',
+      HeadlessDev.WorkerCommandPoolManager.AcquireWorkerSecondaryCommandList(0) = ReusedSec0);
+    HeadlessDev.EndFrameAndPresent;
+  finally
+    FreeAndNil(HeadlessDepth);
+    FreeAndNil(HeadlessColor);
+    FreeAndNil(HeadlessDev);
+  end;
+
+  { Part 2: Live Mesa Lavapipe Vulkan 1.4 multi-threaded secondary command buffer recording }
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+    Exit;
+
+  ColorTex := nil;
+  DepthTex := nil;
+  VS := nil;
+  FS := nil;
+  FParallelTestPipeline := nil;
+  CenterVBO := nil;
+  Readback := nil;
+  for W := 0 to 3 do
+    FParallelTestQuadVBOs[W] := nil;
+  try
+    AssertTrue('TryGetBuiltInSPIRV Primitive2D_VS',
+      TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssVertex, '', 'Primitive2D_VS', VertSPIRV));
+    AssertTrue('TryGetBuiltInSPIRV Primitive2D_FS',
+      TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssFragment, '', 'Primitive2D_FS', FragSPIRV));
+
+    VS := RealDev.CreateShaderModuleFromSPIRV(ssVertex, @VertSPIRV[0], Length(VertSPIRV), 'SecPrimVS');
+    FS := RealDev.CreateShaderModuleFromSPIRV(ssFragment, @FragSPIRV[0], Length(FragSPIRV), 'SecPrimFS');
+
+    FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+    PipeDesc.VertexShader := VS;
+    PipeDesc.FragmentShader := FS;
+    PipeDesc.Topology := ptTriangleList;
+    SetLength(PipeDesc.VertexInput.Bindings, 1);
+    PipeDesc.VertexInput.Bindings[0].Binding := 0;
+    PipeDesc.VertexInput.Bindings[0].Stride := SizeOf(TVector2);
+    PipeDesc.VertexInput.Bindings[0].PerInstance := False;
+    SetLength(PipeDesc.VertexInput.Attributes, 1);
+    PipeDesc.VertexInput.Attributes[0].Location := 0;
+    PipeDesc.VertexInput.Attributes[0].Binding := 0;
+    PipeDesc.VertexInput.Attributes[0].Format := vafVector2;
+    PipeDesc.VertexInput.Attributes[0].Offset := 0;
+    PipeDesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+    PipeDesc.Rasterizer.CullMode := cmNone;
+    PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
+    PipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+    PipeDesc.PushConstantSize := SizeOf(TTestPrim2DPush);
+    PipeDesc.PushConstantStages := [ssVertex, ssFragment];
+    SetLength(PipeDesc.ColorAttachmentFormats, 1);
+    PipeDesc.ColorAttachmentFormats[0] := pfRGBA8_UNorm;
+    PipeDesc.DepthAttachmentFormat := pfD32_Float;
+    PipeDesc.SampleCount := 1;
+    PipeDesc.DebugName := 'SecondaryWorkerQuadPSO';
+    FParallelTestPipeline := RealDev.GetOrCreatePipeline(PipeDesc);
+
+    { Allocate 4 quadrant VBOs + 1 center post-pass VBO }
+    FillQuadVerts(4, 4, 28, 28);
+    FParallelTestQuadVBOs[0] := RealDev.CreateBuffer(
+      TRHIBufferDesc.Create(SizeOf(QuadVerts), [buVertex], muCpuToGpu, 'QuadBL'), @QuadVerts[0]);
+    FillQuadVerts(36, 4, 60, 28);
+    FParallelTestQuadVBOs[1] := RealDev.CreateBuffer(
+      TRHIBufferDesc.Create(SizeOf(QuadVerts), [buVertex], muCpuToGpu, 'QuadBR'), @QuadVerts[0]);
+    FillQuadVerts(4, 36, 28, 60);
+    FParallelTestQuadVBOs[2] := RealDev.CreateBuffer(
+      TRHIBufferDesc.Create(SizeOf(QuadVerts), [buVertex], muCpuToGpu, 'QuadTL'), @QuadVerts[0]);
+    FillQuadVerts(36, 36, 60, 60);
+    FParallelTestQuadVBOs[3] := RealDev.CreateBuffer(
+      TRHIBufferDesc.Create(SizeOf(QuadVerts), [buVertex], muCpuToGpu, 'QuadTR'), @QuadVerts[0]);
+    FillQuadVerts(28, 28, 36, 36);
+    CenterVBO := RealDev.CreateBuffer(
+      TRHIBufferDesc.Create(SizeOf(QuadVerts), [buVertex], muCpuToGpu, 'QuadCenter'), @QuadVerts[0]);
+
+    ColorTex := RealDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuColorAttachment, tuTransferSrc]));
+    DepthTex := RealDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfD32_Float, [tuDepthStencil]));
+
+    RealDev.WorkerCommandPoolManager.WorkerCount := 4;
+    RealDev.WorkerCommandPoolManager.UseWorkerThreads := True;
+    MainTid := GetCurrentThreadId;
+
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 64, 64),
+      ColorTex, loClear, Vector4(0.1, 0.1, 0.1, 1.0),
+      DepthTex, loClear, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+
+    FParallelTestPassInfo := PassInfo;
+    FParallelTestPassInfo.ColorAttachments := Copy(PassInfo.ColorAttachments);
+    FParallelTestPassInfo.ColorAttachments[0].LoadOp := loLoad;
+    FParallelTestPassInfo.DepthAttachment.LoadOp := loLoad;
+    FParallelTestPassInfo.ContentsSecondaryCommandBuffers := True;
+    FParallelTestHeadlessMode := False;
+
+    DispatchedCount := RealDev.WorkerCommandPoolManager.ExecuteParallelRecording(
+      4, @ParallelQuadWorkerCallback, SecLists);
+    AssertEquals('Real Lavapipe ExecuteParallelRecording must record 4 secondary lists',
+      4, Integer(DispatchedCount));
+
+    for W := 0 to 3 do
+    begin
+      AssertTrue('Each worker must own a non-null VkCommandPool',
+        RealDev.WorkerCommandPoolManager.GetWorkerCommandPool(Cardinal(W), RealDev.FrameIndex) <> VK_NULL_HANDLE);
+      if W > 0 then
+        AssertTrue('Each worker must own a distinct VkCommandPool from worker 0',
+          RealDev.WorkerCommandPoolManager.GetWorkerCommandPool(Cardinal(W), RealDev.FrameIndex) <>
+          RealDev.WorkerCommandPoolManager.GetWorkerCommandPool(0, RealDev.FrameIndex));
+      {$ifndef CASTLE_DISABLE_THREADS}
+      if RealDev.WorkerCommandPoolManager.ThreadsSpawned then
+        AssertTrue('Worker secondary command buffer must be recorded on OS worker thread <> MainThread',
+          RealDev.WorkerCommandPoolManager.GetWorkerLastThreadId(Cardinal(W)) <> MainTid);
+      {$endif}
+    end;
+
+    { Execute all 4 secondary command buffers inside VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT }
+    RealCmd.ExecuteSecondaryCommandsInPass(SecLists);
+
+    { Draw a small White quad inline in the resumed primary rendering pass }
+    RealCmd.BindPipeline(FParallelTestPipeline);
+    RealCmd.BindVertexBuffers(0, [CenterVBO], [0]);
+    CenterPush.ViewportSize := Vector2(64.0, 64.0);
+    CenterPush.PointSize := 1.0;
+    CenterPush.Padding := 0.0;
+    CenterPush.Color := Vector4(1.0, 1.0, 1.0, 1.0);
+    RealCmd.PushConstants([ssVertex, ssFragment], 0, SizeOf(CenterPush), CenterPush);
+    RealCmd.Draw(6, 1, 0, 0);
+
+    RealCmd.EndRendering;
+    RealDev.EndOffscreenFrame;
+
+    Readback := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 64, 64));
+
+    { Worker 0 Bottom-Left (16, 16) = Red (255, 0, 0) }
+    AssertEquals('Worker 0 BL (16,16) R', 255, Integer(Readback.PixelPtr(16, 16)^.X));
+    AssertEquals('Worker 0 BL (16,16) G', 0, Integer(Readback.PixelPtr(16, 16)^.Y));
+    AssertEquals('Worker 0 BL (16,16) B', 0, Integer(Readback.PixelPtr(16, 16)^.Z));
+
+    { Worker 1 Bottom-Right (48, 16) = Green (0, 255, 0) }
+    AssertEquals('Worker 1 BR (48,16) R', 0, Integer(Readback.PixelPtr(48, 16)^.X));
+    AssertEquals('Worker 1 BR (48,16) G', 255, Integer(Readback.PixelPtr(48, 16)^.Y));
+    AssertEquals('Worker 1 BR (48,16) B', 0, Integer(Readback.PixelPtr(48, 16)^.Z));
+
+    { Worker 2 Top-Left (16, 48) = Blue (0, 0, 255) }
+    AssertEquals('Worker 2 TL (16,48) R', 0, Integer(Readback.PixelPtr(16, 48)^.X));
+    AssertEquals('Worker 2 TL (16,48) G', 0, Integer(Readback.PixelPtr(16, 48)^.Y));
+    AssertEquals('Worker 2 TL (16,48) B', 255, Integer(Readback.PixelPtr(16, 48)^.Z));
+
+    { Worker 3 Top-Right (48, 48) = Yellow (255, 255, 0) }
+    AssertEquals('Worker 3 TR (48,48) R', 255, Integer(Readback.PixelPtr(48, 48)^.X));
+    AssertEquals('Worker 3 TR (48,48) G', 255, Integer(Readback.PixelPtr(48, 48)^.Y));
+    AssertEquals('Worker 3 TR (48,48) B', 0, Integer(Readback.PixelPtr(48, 48)^.Z));
+
+    { Resumed Primary Inline Center (32, 32) = White (255, 255, 255) }
+    AssertEquals('Resumed inline center (32,32) R', 255, Integer(Readback.PixelPtr(32, 32)^.X));
+    AssertEquals('Resumed inline center (32,32) G', 255, Integer(Readback.PixelPtr(32, 32)^.Y));
+    AssertEquals('Resumed inline center (32,32) B', 255, Integer(Readback.PixelPtr(32, 32)^.Z));
+
+    { Preserved initial clear background at (2, 32) ~ (25, 25, 25) }
+    AssertTrue('Initial clear background (2,32) must remain dark gray',
+      (Readback.PixelPtr(2, 32)^.X >= 20) and (Readback.PixelPtr(2, 32)^.X <= 30) and
+      (Readback.PixelPtr(2, 32)^.Y >= 20) and (Readback.PixelPtr(2, 32)^.Y <= 30));
+  finally
+    FreeAndNil(Readback);
+    FreeAndNil(DepthTex);
+    FreeAndNil(ColorTex);
+    FreeAndNil(CenterVBO);
+    for W := 0 to 3 do
+      FreeAndNil(FParallelTestQuadVBOs[W]);
+    FParallelTestPipeline := nil;
+    FreeAndNil(FS);
+    FreeAndNil(VS);
+    FreeAndNil(RealDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipeViewportParallelCommandRecording3DSceneParityRHI;
+var
+  RealDev: TVulkanRHIDevice;
+  RealCmd: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  Container: TTestSizedVulkanContainer;
+  ColorTexSerial, DepthTexSerial: TRHITexture;
+  ColorTexParallel, DepthTexParallel: TRHITexture;
+  PassInfo: TRHIRenderingInfo;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  DirLight: TDirectionalLightNode;
+  Trans: TTransformNode;
+  Shape: TShapeNode;
+  Box: TBoxNode;
+  Sphere: TSphereNode;
+  App: TAppearanceNode;
+  PhysMat: TPhysicalMaterialNode;
+  UnlitMat: TUnlitMaterialNode;
+  ImgSerial, ImgParallel: TRGBAlphaImage;
+  DiffRMSE: Single;
+  I, FrameIter: Integer;
+begin
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+    Exit;
+
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+
+  Container := TTestSizedVulkanContainer.Create(nil);
+  ColorTexSerial := nil;
+  DepthTexSerial := nil;
+  ColorTexParallel := nil;
+  DepthTexParallel := nil;
+  Viewport := nil;
+  Scene := nil;
+  ImgSerial := nil;
+  ImgParallel := nil;
+  try
+    GLFeatures := nil;
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(RealDev);
+
+    Container.TestWidth := 128;
+    Container.TestHeight := 128;
+    RenderContext := Container.Context;
+    RenderContext.Viewport := Rectangle(0, 0, 128, 128);
+
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := True;
+    Viewport.BackgroundColor := Vector4(0.05, 0.08, 0.16, 1.0);
+    Viewport.Camera.ProjectionType := ptPerspective;
+    Viewport.Camera.Perspective.FieldOfView := Pi / 3.0;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 9.5),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Container.Controls.InsertFront(Viewport);
+
+    { Build a 3D scene with 12 distinct shapes (4x3 grid of lit PBR boxes & spheres + unlit accents) }
+    Root := TX3DRootNode.Create;
+    DirLight := TDirectionalLightNode.Create;
+    DirLight.Direction := Vector3(-0.35, -0.5, -0.8).Normalize;
+    DirLight.Intensity := 1.4;
+    DirLight.Global := True;
+    Root.AddChildren(DirLight);
+
+    for I := 0 to 11 do
+    begin
+      Trans := TTransformNode.Create;
+      Trans.Translation := Vector3(
+        ((I mod 4) - 1.5) * 2.1,
+        ((I div 4) - 1.0) * 2.1,
+        -0.3 * Single(I mod 3));
+      Shape := TShapeNode.Create;
+      if (I mod 2) = 0 then
+      begin
+        Box := TBoxNode.Create;
+        Box.Size := Vector3(1.3, 1.3, 1.3);
+        Shape.Geometry := Box;
+      end else
+      begin
+        Sphere := TSphereNode.Create;
+        Sphere.Radius := 0.72;
+        Shape.Geometry := Sphere;
+      end;
+
+      App := TAppearanceNode.Create;
+      if (I mod 4) = 3 then
+      begin
+        UnlitMat := TUnlitMaterialNode.Create;
+        UnlitMat.EmissiveColor := Vector3(
+          0.2 + 0.06 * Single(I),
+          0.85 - 0.05 * Single(I),
+          0.4 + 0.04 * Single(I));
+        App.Material := UnlitMat;
+      end else
+      begin
+        PhysMat := TPhysicalMaterialNode.Create;
+        PhysMat.BaseColor := Vector3(
+          0.15 + 0.07 * Single(I),
+          0.25 + 0.05 * Single(11 - I),
+          0.35 + 0.05 * Single((I * 3) mod 11));
+        PhysMat.Roughness := 0.35 + 0.04 * Single(I mod 5);
+        PhysMat.Metallic := 0.1 * Single(I mod 3);
+        App.Material := PhysMat;
+      end;
+      Shape.Appearance := App;
+      Trans.AddChildren(Shape);
+      Root.AddChildren(Trans);
+    end;
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    {$warnings off}
+    Viewport.Items.MainScene := Scene;
+    {$warnings on}
+    Viewport.Items.Add(Scene);
+
+    ColorTexSerial := RealDev.CreateTexture(TRHITextureDesc.Create2D(128, 128, pfRGBA8_UNorm,
+      [tuColorAttachment, tuTransferSrc]));
+    DepthTexSerial := RealDev.CreateTexture(TRHITextureDesc.Create2D(128, 128, pfD32_Float,
+      [tuDepthStencil]));
+    ColorTexParallel := RealDev.CreateTexture(TRHITextureDesc.Create2D(128, 128, pfRGBA8_UNorm,
+      [tuColorAttachment, tuTransferSrc]));
+    DepthTexParallel := RealDev.CreateTexture(TRHITextureDesc.Create2D(128, 128, pfD32_Float,
+      [tuDepthStencil]));
+
+    { 1. Render Serial Baseline (ParallelCommandRecording = False) }
+    Viewport.ParallelCommandRecording := False;
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    SetActiveCommandList(RealCmd);
+    Viewport.BeforeRender;
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 128, 128),
+      ColorTexSerial, loClear, Viewport.BackgroundColor,
+      DepthTexSerial, loClear, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+    Viewport.Render;
+    Viewport.RenderOverChildren;
+    RealCmd.EndRendering;
+    RealDev.EndOffscreenFrame;
+
+    AssertEquals('Serial render must have TotalParallelPassCount = 0',
+      0, Integer(Viewport.InternalShapesRenderer.TotalParallelPassCount));
+    ImgSerial := RealDev.GrabTextureImage(ColorTexSerial, Rectangle(0, 0, 128, 128));
+
+    { 2. Render Multi-Threaded Parallel Secondary Command Recording across 4 workers (2 frames for slot wrap) }
+    Viewport.ParallelCommandRecording := True;
+    Viewport.ParallelCommandRecordingMinShapes := 4;
+    Viewport.ParallelCommandRecordingWorkerCount := 4;
+
+    for FrameIter := 0 to 1 do
+    begin
+      RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+      SetActiveCommandList(RealCmd);
+      Viewport.BeforeRender;
+      PassInfo := TRHIRenderingInfo.CreateColorDepth(
+        Rectangle(0, 0, 128, 128),
+        ColorTexParallel, loClear, Viewport.BackgroundColor,
+        DepthTexParallel, loClear, 1.0);
+      RealCmd.BeginRendering(PassInfo);
+      Viewport.Render;
+      Viewport.RenderOverChildren;
+      RealCmd.EndRendering;
+      RealDev.EndOffscreenFrame;
+    end;
+
+    AssertTrue('TotalParallelPassCount must be >= 2 after 2 parallel frames',
+      Viewport.InternalShapesRenderer.TotalParallelPassCount >= 2);
+    AssertEquals('LastParallelRecordedShapes must equal 12 collected shapes',
+      12, Integer(Viewport.InternalShapesRenderer.LastParallelRecordedShapes));
+    AssertEquals('LastParallelWorkerCount must equal 4 workers',
+      4, Integer(Viewport.InternalShapesRenderer.LastParallelWorkerCount));
+
+    ImgParallel := RealDev.GrabTextureImage(ColorTexParallel, Rectangle(0, 0, 128, 128));
+    AssertTrue('Parallel 4-worker secondary command buffer 3D scene render must match serial render (RMSE <= 0.001)',
+      CompareImagesPerceptualDiff(ImgSerial, ImgParallel, 0.001, DiffRMSE));
+  finally
+    FreeAndNil(ImgParallel);
+    FreeAndNil(ImgSerial);
+    FreeAndNil(DepthTexParallel);
+    FreeAndNil(ColorTexParallel);
+    FreeAndNil(DepthTexSerial);
+    FreeAndNil(ColorTexSerial);
+    FreeAndNil(Scene);
+    FreeAndNil(Viewport);
+    FreeAndNil(Container);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    RenderContext := SavedCtx;
+    GLFeatures := SavedGLFeatures;
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(RealDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipeAsyncTransferQueueTimelineSemaphoreUploadAndRenderRHI;
+var
+  HeadlessDev, RealDev: TVulkanRHIDevice;
+  HeadlessCmd, RealCmd: TVulkanRHICommandList;
+  HeadlessBuf: TVulkanRHIBuffer;
+  HeadlessTex: TVulkanRHITexture;
+  DummyVerts: array[0..5] of TVector2;
+  DummyPixels: array[0..15] of TVector4Byte;
+  SubmittedVal: UInt64;
+  GpuVBO: TVulkanRHIBuffer;
+  GpuTex: TVulkanRHITexture;
+  ColorTex, DepthTex: TRHITexture;
+  Sampler: TRHISampler;
+  SamplerDesc: TRHISamplerDesc;
+  VertSPIRV, FragSPIRV: TSPIRVBytecode;
+  VS, FS: TRHIShaderModule;
+  SetLayout: TRHIDescriptorSetLayout;
+  BindingDesc: TRHIDescriptorBindingDesc;
+  DescSet: TRHIDescriptorSet;
+  PipeDesc: TRHIGraphicsPipelineDesc;
+  Pipe: TRHIPipeline;
+  Quad2DVerts: array[0..5] of TCastle2DVertex;
+  Push2D: TCastle2DPushConstants;
+  PassInfo: TRHIRenderingInfo;
+  SrcPixels: array[0 .. 32 * 32 - 1] of TVector4Byte;
+  Readback: TRGBAlphaImage;
+  I: Integer;
+begin
+  { Part 1: Headless dedicated DMA transfer queue ownership release + graphics acquire accounting }
+  HeadlessDev := TVulkanRHIDevice.CreateHeadless(nil);
+  HeadlessDev.SimulateSwapchainForTesting(64, 64, 2, pfBGRA8_UNorm, pfD24_UNorm_S8_UInt);
+  HeadlessBuf := nil;
+  HeadlessTex := nil;
+  try
+    HeadlessDev.StagingUploader.ConfigureTransferQueue(0, 2, True);
+    AssertTrue('UseDedicatedTransferQueue must be True',
+      HeadlessDev.StagingUploader.UseDedicatedTransferQueue);
+
+    for I := 0 to High(DummyVerts) do
+      DummyVerts[I] := Vector2(Single(I), Single(I * 2));
+    for I := 0 to High(DummyPixels) do
+      DummyPixels[I] := Vector4Byte(0, 220, 80, 255);
+
+    HeadlessBuf := HeadlessDev.CreateBuffer(
+      TRHIBufferDesc.Create(SizeOf(DummyVerts), [buVertex, buTransferDst], muGpuOnly, 'AsyncBuf')) as TVulkanRHIBuffer;
+    HeadlessTex := HeadlessDev.CreateTexture(
+      TRHITextureDesc.Create2D(4, 4, pfRGBA8_UNorm, [tuSampled, tuTransferDst])) as TVulkanRHITexture;
+
+    HeadlessDev.StagingUploader.EnqueueBufferUpload(HeadlessBuf, DummyVerts[0], SizeOf(DummyVerts), 0);
+    HeadlessDev.StagingUploader.EnqueueImageUpload(HeadlessTex, @DummyPixels[0], SizeOf(DummyPixels), 4, 4, 0, 0, False);
+    AssertEquals('PendingBufferCopyCount must be 1', 1, Integer(HeadlessDev.StagingUploader.PendingBufferCopyCount));
+    AssertEquals('PendingImageCopyCount must be 1', 1, Integer(HeadlessDev.StagingUploader.PendingImageCopyCount));
+
+    SubmittedVal := HeadlessDev.StagingUploader.SubmitAsyncUploads;
+    AssertEquals('First SubmitAsyncUploads must signal timeline value 1', Int64(1), Int64(SubmittedVal));
+    AssertEquals('TotalAsyncSubmissions must be 1', 1, Integer(HeadlessDev.StagingUploader.TotalAsyncSubmissions));
+    AssertEquals('PendingGraphicsWaitTimelineValue must be 1',
+      Int64(1), Int64(HeadlessDev.StagingUploader.PendingGraphicsWaitTimelineValue));
+    AssertEquals('Release barriers on dedicated transfer queue must increment QueueOwnershipTransferCount by 2',
+      2, Integer(HeadlessDev.StagingUploader.QueueOwnershipTransferCount));
+
+    HeadlessCmd := HeadlessDev.BeginFrame as TVulkanRHICommandList;
+    AssertTrue('BeginFrame must automatically record the 2 pending acquire barriers onto HeadlessCmd',
+      HeadlessCmd.BarrierCount >= 2);
+    AssertEquals('BeginFrame acquire barriers must increment QueueOwnershipTransferCount from 2 to 4',
+      4, Integer(HeadlessDev.StagingUploader.QueueOwnershipTransferCount));
+    AssertEquals('Subsequent ApplyPendingGraphicsAcquireBarriers must apply 0 duplicate barriers',
+      0, Integer(HeadlessDev.StagingUploader.ApplyPendingGraphicsAcquireBarriers(HeadlessCmd)));
+    HeadlessDev.EndFrameAndPresent;
+    AssertEquals('EndFrameAndPresent must consume PendingGraphicsWaitTimelineValue',
+      Int64(0), Int64(HeadlessDev.StagingUploader.PendingGraphicsWaitTimelineValue));
+  finally
+    FreeAndNil(HeadlessTex);
+    FreeAndNil(HeadlessBuf);
+    FreeAndNil(HeadlessDev);
+  end;
+
+  { Part 2: Live Mesa Lavapipe Vulkan 1.4 async TransferQueue submit + VkTimelineSemaphoreSubmitInfo graphics wait }
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+    Exit;
+
+  GpuVBO := nil;
+  GpuTex := nil;
+  ColorTex := nil;
+  DepthTex := nil;
+  Sampler := nil;
+  VS := nil;
+  FS := nil;
+  SetLayout := nil;
+  DescSet := nil;
+  Readback := nil;
+  try
+    { Prepare emerald green (16, 224, 96, 255) 32x32 texture & full-screen NDC+UV quad }
+    for I := 0 to High(SrcPixels) do
+      SrcPixels[I] := Vector4Byte(16, 224, 96, 255);
+
+    Quad2DVerts[0].Position := Vector2(8.0, 8.0);   Quad2DVerts[0].TexCoord := Vector2(0.0, 0.0); Quad2DVerts[0].ColorRgba8 := $FFFFFFFF;
+    Quad2DVerts[1].Position := Vector2(56.0, 8.0);  Quad2DVerts[1].TexCoord := Vector2(1.0, 0.0); Quad2DVerts[1].ColorRgba8 := $FFFFFFFF;
+    Quad2DVerts[2].Position := Vector2(56.0, 56.0); Quad2DVerts[2].TexCoord := Vector2(1.0, 1.0); Quad2DVerts[2].ColorRgba8 := $FFFFFFFF;
+    Quad2DVerts[3].Position := Vector2(8.0, 8.0);   Quad2DVerts[3].TexCoord := Vector2(0.0, 0.0); Quad2DVerts[3].ColorRgba8 := $FFFFFFFF;
+    Quad2DVerts[4].Position := Vector2(56.0, 56.0); Quad2DVerts[4].TexCoord := Vector2(1.0, 1.0); Quad2DVerts[4].ColorRgba8 := $FFFFFFFF;
+    Quad2DVerts[5].Position := Vector2(8.0, 56.0);  Quad2DVerts[5].TexCoord := Vector2(0.0, 1.0); Quad2DVerts[5].ColorRgba8 := $FFFFFFFF;
+
+    { Allocate uninitialized muGpuOnly buffer & texture }
+    GpuVBO := RealDev.CreateBuffer(
+      TRHIBufferDesc.Create(SizeOf(Quad2DVerts), [buVertex, buTransferDst], muGpuOnly, 'LiveAsyncVBO')) as TVulkanRHIBuffer;
+    GpuTex := RealDev.CreateTexture(
+      TRHITextureDesc.Create2D(32, 32, pfRGBA8_UNorm, [tuSampled, tuTransferDst])) as TVulkanRHITexture;
+
+    { Build zero-dependency built-in CastleBatch2D SPIR-V textured quad pipeline to sample GpuTex using GpuVBO }
+    AssertTrue('TryGetBuiltInSPIRV CastleBatch2D.vert',
+      TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssVertex, '', 'CastleBatch2D.vert', VertSPIRV));
+    AssertTrue('TryGetBuiltInSPIRV CastleBatch2D.frag',
+      TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssFragment, '', 'CastleBatch2D.frag', FragSPIRV));
+    VS := RealDev.CreateShaderModuleFromSPIRV(ssVertex, @VertSPIRV[0], Length(VertSPIRV), 'CastleBatch2D.vert');
+    FS := RealDev.CreateShaderModuleFromSPIRV(ssFragment, @FragSPIRV[0], Length(FragSPIRV), 'CastleBatch2D.frag');
+
+    FillChar(BindingDesc, SizeOf(BindingDesc), 0);
+    BindingDesc.Binding := 0;
+    BindingDesc.DescriptorType := dtCombinedImageSampler;
+    BindingDesc.Count := 1;
+    BindingDesc.StageFlags := [ssFragment];
+    SetLayout := RealDev.CreateDescriptorSetLayout([BindingDesc]);
+
+    FillChar(SamplerDesc, SizeOf(SamplerDesc), 0);
+    SamplerDesc.MinFilter := sfLinear;
+    SamplerDesc.MagFilter := sfLinear;
+    SamplerDesc.MipFilter := sfNearest;
+    SamplerDesc.AddressModeU := amClampToEdge;
+    SamplerDesc.AddressModeV := amClampToEdge;
+    SamplerDesc.AddressModeW := amClampToEdge;
+    SamplerDesc.MaxLod := 1000.0;
+    Sampler := RealDev.CreateSampler(SamplerDesc);
+
+    DescSet := RealDev.CreateDescriptorSet(SetLayout);
+    DescSet.BindTexture(0, GpuTex, Sampler);
+    DescSet.Update;
+
+    FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+    PipeDesc.VertexShader := VS;
+    PipeDesc.FragmentShader := FS;
+    PipeDesc.Topology := ptTriangleList;
+    SetLength(PipeDesc.VertexInput.Bindings, 1);
+    PipeDesc.VertexInput.Bindings[0].Binding := 0;
+    PipeDesc.VertexInput.Bindings[0].Stride := SizeOf(TCastle2DVertex);
+    PipeDesc.VertexInput.Bindings[0].PerInstance := False;
+    SetLength(PipeDesc.VertexInput.Attributes, 3);
+    PipeDesc.VertexInput.Attributes[0].Location := 0;
+    PipeDesc.VertexInput.Attributes[0].Binding := 0;
+    PipeDesc.VertexInput.Attributes[0].Format := vafVector2;
+    PipeDesc.VertexInput.Attributes[0].Offset := 0;
+    PipeDesc.VertexInput.Attributes[1].Location := 2;
+    PipeDesc.VertexInput.Attributes[1].Binding := 0;
+    PipeDesc.VertexInput.Attributes[1].Format := vafVector2;
+    PipeDesc.VertexInput.Attributes[1].Offset := 8;
+    PipeDesc.VertexInput.Attributes[2].Location := 4;
+    PipeDesc.VertexInput.Attributes[2].Binding := 0;
+    PipeDesc.VertexInput.Attributes[2].Format := vafUByte4Normalized;
+    PipeDesc.VertexInput.Attributes[2].Offset := 16;
+    PipeDesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+    PipeDesc.Rasterizer.CullMode := cmNone;
+    PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDisabled;
+    PipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+    SetLength(PipeDesc.DescriptorSetLayouts, 1);
+    PipeDesc.DescriptorSetLayouts[0] := SetLayout;
+    PipeDesc.PushConstantSize := SizeOf(TCastle2DPushConstants);
+    PipeDesc.PushConstantStages := [ssVertex, ssFragment];
+    SetLength(PipeDesc.ColorAttachmentFormats, 1);
+    PipeDesc.ColorAttachmentFormats[0] := pfRGBA8_UNorm;
+    PipeDesc.DepthAttachmentFormat := pfD32_Float;
+    PipeDesc.SampleCount := 1;
+    PipeDesc.DebugName := 'AsyncTexQuadPSO';
+    Pipe := RealDev.GetOrCreatePipeline(PipeDesc);
+
+    ColorTex := RealDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuColorAttachment, tuTransferSrc]));
+    DepthTex := RealDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfD32_Float, [tuDepthStencil]));
+
+    { Begin offscreen frame, then stage & submit async TransferQueue uploads concurrently with CPU command recording }
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+
+    RealDev.StagingUploader.EnqueueBufferUpload(GpuVBO, Quad2DVerts[0], SizeOf(Quad2DVerts), 0);
+    RealDev.StagingUploader.EnqueueImageUpload(GpuTex, @SrcPixels[0], SizeOf(SrcPixels), 32, 32, 0, 0, False);
+
+    SubmittedVal := RealDev.StagingUploader.SubmitAsyncUploads;
+    AssertTrue('Live SubmitAsyncUploads must return timeline value >= 1', SubmittedVal >= 1);
+    AssertEquals('TotalAsyncSubmissions must be 1', 1, Integer(RealDev.StagingUploader.TotalAsyncSubmissions));
+    if RealDev.StagingUploader.TransferTimelineSemaphore.Handle <> VK_NULL_HANDLE then
+      AssertEquals('PendingGraphicsWaitTimelineValue must equal SubmittedVal before graphics submit',
+        Int64(SubmittedVal), Int64(RealDev.StagingUploader.PendingGraphicsWaitTimelineValue));
+
+    { Record & submit Graphics frame immediately — EndOffscreenFrame synchronizes on GPU via VkTimelineSemaphoreSubmitInfo }
+    RealDev.StagingUploader.ApplyPendingGraphicsAcquireBarriers(RealCmd);
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 64, 64),
+      ColorTex, loClear, Vector4(0.2, 0.0, 0.0, 1.0),
+      DepthTex, loClear, 1.0);
+    FillChar(Push2D, SizeOf(Push2D), 0);
+    Push2D.ViewportScaleBias := Vector4(2.0 / 64.0, 2.0 / 64.0, -1.0, -1.0);
+    RealCmd.BeginRendering(PassInfo);
+    RealCmd.BindPipeline(Pipe);
+    RealCmd.BindDescriptorSet(0, DescSet, []);
+    RealCmd.PushConstants([ssVertex, ssFragment], 0, SizeOf(Push2D), Push2D);
+    RealCmd.BindVertexBuffers(0, [GpuVBO], [0]);
+    RealCmd.Draw(6, 1, 0, 0);
+    RealCmd.EndRendering;
+    RealDev.EndOffscreenFrame;
+
+    AssertEquals('EndOffscreenFrame must consume PendingGraphicsWaitTimelineValue via VkTimelineSemaphoreSubmitInfo',
+      Int64(0), Int64(RealDev.StagingUploader.PendingGraphicsWaitTimelineValue));
+
+    RealDev.StagingUploader.WaitForAsyncUploads;
+    AssertTrue('Timeline semaphore counter must reach >= SubmittedVal',
+      RealDev.StagingUploader.TransferTimelineSemaphore.GetCounterValue >= SubmittedVal);
+
+    Readback := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 64, 64));
+    { Center (32, 32): Async-uploaded emerald green texture (16, 224, 96) }
+    AssertTrue('Center (32,32) R must match emerald green (~16)',
+      Abs(Integer(Readback.PixelPtr(32, 32)^.X) - 16) <= 4);
+    AssertTrue('Center (32,32) G must match emerald green (~224)',
+      Abs(Integer(Readback.PixelPtr(32, 32)^.Y) - 224) <= 4);
+    AssertTrue('Center (32,32) B must match emerald green (~96)',
+      Abs(Integer(Readback.PixelPtr(32, 32)^.Z) - 96) <= 4);
+    { Corner (2, 2): Dark red clear background (~51, 0, 0) }
+    AssertTrue('Corner (2,2) must retain dark red clear background',
+      (Readback.PixelPtr(2, 2)^.X >= 45) and (Readback.PixelPtr(2, 2)^.Y <= 5));
+  finally
+    FreeAndNil(Readback);
+    FreeAndNil(DepthTex);
+    FreeAndNil(ColorTex);
+    FreeAndNil(DescSet);
+    FreeAndNil(Sampler);
+    FreeAndNil(SetLayout);
+    FreeAndNil(FS);
+    FreeAndNil(VS);
+    FreeAndNil(GpuTex);
+    FreeAndNil(GpuVBO);
+    FreeAndNil(RealDev);
   end;
 end;
 

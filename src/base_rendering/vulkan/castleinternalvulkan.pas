@@ -479,6 +479,12 @@ const
   VK_QUERY_RESULT_WAIT_BIT = $00000002;
   VK_QUERY_RESULT_WITH_AVAILABILITY_BIT = $00000004;
   VK_QUERY_RESULT_PARTIAL_BIT = $00000008;
+  VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO = 1000044004;
+  VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO_KHR = 1000044004;
+  VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT = $00000001;
+  VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT_KHR = $00000001;
+  VK_RENDERING_SUSPENDING_BIT = $00000002;
+  VK_RENDERING_RESUMING_BIT = $00000004;
 
   { Extension and Layer Names }
   VK_EXT_debug_utils = 'VK_EXT_debug_utils';
@@ -1415,6 +1421,19 @@ type
   end;
   PVkPipelineRenderingCreateInfo = ^VkPipelineRenderingCreateInfo;
 
+  VkCommandBufferInheritanceRenderingInfo = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    flags: VkFlags;
+    viewMask: Cardinal;
+    colorAttachmentCount: Cardinal;
+    pColorAttachmentFormats: PVkFormat;
+    depthAttachmentFormat: VkFormat;
+    stencilAttachmentFormat: VkFormat;
+    rasterizationSamples: VkSampleCountFlags;
+  end;
+  PVkCommandBufferInheritanceRenderingInfo = ^VkCommandBufferInheritanceRenderingInfo;
+
   VkAttachmentDescription = record
     flags: VkFlags;
     format: VkFormat;
@@ -2031,6 +2050,8 @@ type
   PVkPhysicalDeviceDynamicRenderingFeaturesKHR = ^VkPhysicalDeviceDynamicRenderingFeaturesKHR;
   VkPipelineRenderingCreateInfoKHR = VkPipelineRenderingCreateInfo;
   PVkPipelineRenderingCreateInfoKHR = ^VkPipelineRenderingCreateInfoKHR;
+  VkCommandBufferInheritanceRenderingInfoKHR = VkCommandBufferInheritanceRenderingInfo;
+  PVkCommandBufferInheritanceRenderingInfoKHR = ^VkCommandBufferInheritanceRenderingInfoKHR;
 
 { -------------------------------------------------------------------------- }
 { Function Pointers generated from vk.xml                                    }

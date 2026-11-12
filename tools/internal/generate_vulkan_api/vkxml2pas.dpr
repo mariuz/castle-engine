@@ -1028,7 +1028,7 @@ const
     'VK_FENCE_CREATE_SIGNALED_BIT'
   );
 
-  OrderedEnums3: array[0..145] of String = (
+  OrderedEnums3: array[0..151] of String = (
     'VK_INDEX_TYPE_UINT16',
     'VK_INDEX_TYPE_UINT32',
     'VK_IMAGE_ASPECT_COLOR_BIT',
@@ -1183,7 +1183,14 @@ const
     'VK_QUERY_RESULT_64_BIT',
     'VK_QUERY_RESULT_WAIT_BIT',
     'VK_QUERY_RESULT_WITH_AVAILABILITY_BIT',
-    'VK_QUERY_RESULT_PARTIAL_BIT'
+    'VK_QUERY_RESULT_PARTIAL_BIT',
+    // Phase 109: Dynamic Rendering Secondary Command Buffer Inheritance
+    'VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO',
+    'VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO_KHR',
+    'VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT',
+    'VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT_KHR',
+    'VK_RENDERING_SUSPENDING_BIT',
+    'VK_RENDERING_RESUMING_BIT'
   );
 
   OrderedStructs: array[0..77] of String = (
@@ -1267,7 +1274,7 @@ const
     'VkBufferMemoryBarrier'
   );
 
-  OrderedStructs2: array[0..43] of String = (
+  OrderedStructs2: array[0..44] of String = (
     'VkImageMemoryBarrier',
     'VkBufferCopy',
     'VkImageSubresourceLayers',
@@ -1311,7 +1318,8 @@ const
     'VkTimelineSemaphoreSubmitInfo',
     'VkSemaphoreWaitInfo',
     'VkSemaphoreSignalInfo',
-    'VkQueryPoolCreateInfo'
+    'VkQueryPoolCreateInfo',
+    'VkCommandBufferInheritanceRenderingInfo'
   );
 
   OrderedCommands: array[0..94] of String = (
@@ -1693,6 +1701,8 @@ begin
     L.Add('  PVkPhysicalDeviceDynamicRenderingFeaturesKHR = ^VkPhysicalDeviceDynamicRenderingFeaturesKHR;');
     L.Add('  VkPipelineRenderingCreateInfoKHR = VkPipelineRenderingCreateInfo;');
     L.Add('  PVkPipelineRenderingCreateInfoKHR = ^VkPipelineRenderingCreateInfoKHR;');
+    L.Add('  VkCommandBufferInheritanceRenderingInfoKHR = VkCommandBufferInheritanceRenderingInfo;');
+    L.Add('  PVkCommandBufferInheritanceRenderingInfoKHR = ^VkCommandBufferInheritanceRenderingInfoKHR;');
     L.Add('');
     L.Add('{ -------------------------------------------------------------------------- }');
     L.Add('{ Function Pointers generated from vk.xml                                    }');

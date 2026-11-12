@@ -374,6 +374,8 @@ var
   ShadingModel: TCastleShadingModelRHI;
   ShadowModeOrd: Cardinal;
   ShapePipeline: TRHIPipeline;
+  PreparedItem: TRHIPreparedShapeDrawItem;
+  SceneDescSet: TRHIDescriptorSet;
 begin
   Attribs := nil;
 
@@ -553,12 +555,118 @@ begin
         if (Shape.Cache <> nil) and (RenderOptions <> nil) then
           Shape.Cache.RenderOptions := RenderOptions;
         Shape.UploadRHIMaterialToCache(ShadingModel);
+        ShapePipeline := nil;
         if Renderer <> nil then
-        begin
           ShapePipeline := Renderer.GetOrCreateShapePipeline(Shape, RenderOptions);
+
+        if RenderOptions <> nil then ShadowModeOrd := Ord(RenderOptions.ShadowMapSystemMode) else ShadowModeOrd := 0;
+        NormalMat := ModelViewToNormalMatrix(ShapeModelView);
+        PushConstants := TCastleShaderGeneratorRHI.BuildShapeRHIPushConstants(
+          ShapeModelView,
+          NormalMat,
+          (Shape.Cache <> nil) and (Shape.Cache.RHIJointBuffer <> nil),
+          (RenderOptions <> nil) and RenderOptions.DualQuaternionSkinning,
+          (RenderOptions = nil) or RenderOptions.SpecularAntiAliasing,
+          ShadowModeOrd,
+          Shape.RHIBindlessMaterialIndex);
+
+        if (Renderer <> nil) and Renderer.IsCollectingParallelDraws then
+        begin
+          PreparedItem := Default(TRHIPreparedShapeDrawItem);
+          PreparedItem.Pipeline := ShapePipeline;
+          PreparedItem.PushConstants := PushConstants;
+          PreparedItem.HasGeometryShader := (Shape.Cache <> nil) and (Shape.Cache.RHIGeometryShader <> nil);
+
+          SceneDescSet := Renderer.EnsureRHISceneDescriptorSet;
+          PreparedItem.SceneSet := SceneDescSet;
+          if (Shape.Cache <> nil) and (Shape.Cache.RHIMaterialDescriptorSet <> nil) then
+            PreparedItem.MaterialSet := Shape.Cache.RHIMaterialDescriptorSet
+          else if RHIDevice <> nil then
+            PreparedItem.MaterialSet := RHIDevice.GetBindlessDescriptorSet;
+          if Shape.Cache <> nil then
+          begin
+            PreparedItem.SkinningSet := Shape.Cache.RHISkinningDescriptorSet;
+            PreparedItem.CoordBuf := Shape.Cache.RHICoordinateBuffer;
+            PreparedItem.AttrBuf := Shape.Cache.RHIAttributeBuffer;
+            PreparedItem.IndexBuf := Shape.Cache.RHIIndexBuffer;
+          end;
+
+          PreparedItem.HasIndexes := Arrays.HasIndexes;
+          if Arrays.Counts = nil then
+          begin
+            if Arrays.HasIndexes then
+              PreparedItem.Count := Arrays.IndexesCount
+            else
+              PreparedItem.Count := Arrays.Count;
+          end else
+          begin
+            SetLength(PreparedItem.SubDrawCounts, Arrays.Counts.Count);
+            for I := 0 to Arrays.Counts.Count - 1 do
+              PreparedItem.SubDrawCounts[I] := Arrays.Counts[I];
+          end;
+
+          if (RenderContext <> nil) and (not RenderContext.RHILastViewport.IsEmpty) then
+          begin
+            PreparedItem.ViewportRect := RenderContext.RHILastViewport;
+            PreparedItem.ViewportMinDepth := RenderContext.RHILastMinDepth;
+            PreparedItem.ViewportMaxDepth := RenderContext.RHILastMaxDepth;
+          end else
+          if (RenderContext <> nil) and (not RenderContext.Viewport.IsEmpty) then
+          begin
+            PreparedItem.ViewportRect := FloatRectangle(RenderContext.Viewport);
+            PreparedItem.ViewportMinDepth := RenderContext.RHILastMinDepth;
+            PreparedItem.ViewportMaxDepth := RenderContext.RHILastMaxDepth;
+          end else
+          begin
+            PreparedItem.ViewportRect := FloatRectangle(ActiveCommandList.ActiveRenderingInfo.RenderArea);
+            PreparedItem.ViewportMinDepth := 0.0;
+            PreparedItem.ViewportMaxDepth := 1.0;
+          end;
+
+          if (RenderContext <> nil) and RenderContext.RHIScissorActive then
+            PreparedItem.ScissorRect := RenderContext.RHILastScissor
+          else if not ActiveCommandList.ActiveRenderingInfo.RenderArea.IsEmpty then
+            PreparedItem.ScissorRect := ActiveCommandList.ActiveRenderingInfo.RenderArea
+          else
+            PreparedItem.ScissorRect := Rectangle(
+              Round(PreparedItem.ViewportRect.Left),
+              Round(PreparedItem.ViewportRect.Bottom),
+              Max(0, Round(PreparedItem.ViewportRect.Width)),
+              Max(0, Round(PreparedItem.ViewportRect.Height)));
+
+          if (Shape.State <> nil) and (Shape.State.BlendMode <> nil) and
+             ((Shape.State.BlendMode.SrcFactor in [bsConstantColor, bsOneMinusConstantColor, bsConstantAlpha, bsOneMinusConstantAlpha]) or
+              (Shape.State.BlendMode.DestFactor in [bdConstantColor, bdOneMinusConstantColor, bdConstantAlpha, bdOneMinusConstantAlpha])) then
+          begin
+            PreparedItem.UseBlendConstants := True;
+            PreparedItem.BlendConstants := Vector4(
+              Shape.State.BlendMode.FdColor.Value,
+              1.0 - Shape.State.BlendMode.FdColorTransparency.Value);
+            if RenderContext <> nil then
+              RenderContext.BlendingConstantColor := PreparedItem.BlendConstants;
+          end;
+
+          if (RenderContext <> nil) and RenderContext.PolygonOffset.Enabled then
+          begin
+            PreparedItem.DepthBiasConstant := RenderContext.PolygonOffset.Bias;
+            PreparedItem.DepthBiasSlope := RenderContext.PolygonOffset.Scale;
+          end else
+          begin
+            PreparedItem.DepthBiasConstant := 0.0;
+            PreparedItem.DepthBiasSlope := 0.0;
+          end;
+
+          if RenderContext <> nil then
+            PreparedItem.LineWidth := RenderContext.LineWidth
+          else
+            PreparedItem.LineWidth := 1.0;
+
+          Renderer.AppendPreparedDrawItem(PreparedItem);
+        end else
+        begin
           if ShapePipeline <> nil then
             ActiveCommandList.BindPipeline(ShapePipeline);
-          if (Shape.State <> nil) and (Shape.State.BlendMode <> nil) and
+          if (Renderer <> nil) and (Shape.State <> nil) and (Shape.State.BlendMode <> nil) and
              ((Shape.State.BlendMode.SrcFactor in [bsConstantColor, bsOneMinusConstantColor, bsConstantAlpha, bsOneMinusConstantAlpha]) or
               (Shape.State.BlendMode.DestFactor in [bdConstantColor, bdOneMinusConstantColor, bdConstantAlpha, bdOneMinusConstantAlpha])) then
           begin
@@ -571,69 +679,59 @@ begin
                 Shape.State.BlendMode.FdColor.Value,
                 1.0 - Shape.State.BlendMode.FdColorTransparency.Value));
           end;
-        end;
-        if RenderOptions <> nil then ShadowModeOrd := Ord(RenderOptions.ShadowMapSystemMode) else ShadowModeOrd := 0;
-        NormalMat := ModelViewToNormalMatrix(ShapeModelView);
-        PushConstants := TCastleShaderGeneratorRHI.BuildShapeRHIPushConstants(
-          ShapeModelView,
-          NormalMat,
-          (Shape.Cache <> nil) and (Shape.Cache.RHIJointBuffer <> nil),
-          (RenderOptions <> nil) and RenderOptions.DualQuaternionSkinning,
-          (RenderOptions = nil) or RenderOptions.SpecularAntiAliasing,
-          ShadowModeOrd,
-          Shape.RHIBindlessMaterialIndex);
-        if (Shape.Cache <> nil) and (Shape.Cache.RHIGeometryShader <> nil) then
-          ActiveCommandList.PushConstants([ssVertex, ssGeometry, ssFragment], 0, SizeOf(PushConstants), PushConstants)
-        else
-          ActiveCommandList.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConstants), PushConstants);
-
-        { 1b. Bind Set 0 (Global Scene + Lights UBOs), Set 1 (Material UBO / Bindless Table), and Set 2 (Skinning UBO) }
-        if (Renderer <> nil) and (Renderer.EnsureRHISceneDescriptorSet <> nil) then
-          ActiveCommandList.BindDescriptorSet(0, Renderer.RHISceneDescriptorSet, []);
-        if (Shape.Cache <> nil) and (Shape.Cache.RHIMaterialDescriptorSet <> nil) then
-          ActiveCommandList.BindDescriptorSet(1, Shape.Cache.RHIMaterialDescriptorSet, [])
-        else if (RHIDevice <> nil) and (RHIDevice.GetBindlessDescriptorSet <> nil) then
-          ActiveCommandList.BindDescriptorSet(1, RHIDevice.GetBindlessDescriptorSet, []);
-        if (Shape.Cache <> nil) and (Shape.Cache.RHISkinningDescriptorSet <> nil) then
-          ActiveCommandList.BindDescriptorSet(2, Shape.Cache.RHISkinningDescriptorSet, []);
-
-        { 2. Bind vertex buffers (Coordinate and Attribute) }
-        if (Shape.Cache <> nil) and (Shape.Cache.RHICoordinateBuffer <> nil) then
-        begin
-          if Shape.Cache.RHIAttributeBuffer <> nil then
-            ActiveCommandList.BindVertexBuffers(0,
-              [Shape.Cache.RHICoordinateBuffer, Shape.Cache.RHIAttributeBuffer],
-              [0, 0])
+          if (Shape.Cache <> nil) and (Shape.Cache.RHIGeometryShader <> nil) then
+            ActiveCommandList.PushConstants([ssVertex, ssGeometry, ssFragment], 0, SizeOf(PushConstants), PushConstants)
           else
-            ActiveCommandList.BindVertexBuffers(0,
-              [Shape.Cache.RHICoordinateBuffer],
-              [0]);
-        end;
+            ActiveCommandList.PushConstants([ssVertex, ssFragment], 0, SizeOf(PushConstants), PushConstants);
 
-        { 3. DrawIndexed / Draw }
-        if Arrays.HasIndexes then
-        begin
-          if (Shape.Cache <> nil) and (Shape.Cache.RHIIndexBuffer <> nil) then
-            ActiveCommandList.BindIndexBuffer(Shape.Cache.RHIIndexBuffer, 0, itUInt32);
+          { 1b. Bind Set 0 (Global Scene + Lights UBOs), Set 1 (Material UBO / Bindless Table), and Set 2 (Skinning UBO) }
+          if (Renderer <> nil) and (Renderer.EnsureRHISceneDescriptorSet <> nil) then
+            ActiveCommandList.BindDescriptorSet(0, Renderer.RHISceneDescriptorSet, []);
+          if (Shape.Cache <> nil) and (Shape.Cache.RHIMaterialDescriptorSet <> nil) then
+            ActiveCommandList.BindDescriptorSet(1, Shape.Cache.RHIMaterialDescriptorSet, [])
+          else if (RHIDevice <> nil) and (RHIDevice.GetBindlessDescriptorSet <> nil) then
+            ActiveCommandList.BindDescriptorSet(1, RHIDevice.GetBindlessDescriptorSet, []);
+          if (Shape.Cache <> nil) and (Shape.Cache.RHISkinningDescriptorSet <> nil) then
+            ActiveCommandList.BindDescriptorSet(2, Shape.Cache.RHISkinningDescriptorSet, []);
 
-          if Arrays.Counts = nil then
-            ActiveCommandList.DrawIndexed(Arrays.IndexesCount, 1, First, 0, 0)
-          else
-            for I := 0 to Arrays.Counts.Count - 1 do
-            begin
-              ActiveCommandList.DrawIndexed(Arrays.Counts[I], 1, First, 0, 0);
-              First := First + Arrays.Counts[I];
-            end;
-        end else
-        begin
-          if Arrays.Counts = nil then
-            ActiveCommandList.Draw(Arrays.Count, 1, First, 0)
-          else
-            for I := 0 to Arrays.Counts.Count - 1 do
-            begin
-              ActiveCommandList.Draw(Arrays.Counts[I], 1, First, 0);
-              First := First + Arrays.Counts[I];
-            end;
+          { 2. Bind vertex buffers (Coordinate and Attribute) }
+          if (Shape.Cache <> nil) and (Shape.Cache.RHICoordinateBuffer <> nil) then
+          begin
+            if Shape.Cache.RHIAttributeBuffer <> nil then
+              ActiveCommandList.BindVertexBuffers(0,
+                [Shape.Cache.RHICoordinateBuffer, Shape.Cache.RHIAttributeBuffer],
+                [0, 0])
+            else
+              ActiveCommandList.BindVertexBuffers(0,
+                [Shape.Cache.RHICoordinateBuffer],
+                [0]);
+          end;
+
+          { 3. DrawIndexed / Draw }
+          if Arrays.HasIndexes then
+          begin
+            if (Shape.Cache <> nil) and (Shape.Cache.RHIIndexBuffer <> nil) then
+              ActiveCommandList.BindIndexBuffer(Shape.Cache.RHIIndexBuffer, 0, itUInt32);
+
+            if Arrays.Counts = nil then
+              ActiveCommandList.DrawIndexed(Arrays.IndexesCount, 1, First, 0, 0)
+            else
+              for I := 0 to Arrays.Counts.Count - 1 do
+              begin
+                ActiveCommandList.DrawIndexed(Arrays.Counts[I], 1, First, 0, 0);
+                First := First + Arrays.Counts[I];
+              end;
+          end else
+          begin
+            if Arrays.Counts = nil then
+              ActiveCommandList.Draw(Arrays.Count, 1, First, 0)
+            else
+              for I := 0 to Arrays.Counts.Count - 1 do
+              begin
+                ActiveCommandList.Draw(Arrays.Counts[I], 1, First, 0);
+                First := First + Arrays.Counts[I];
+              end;
+          end;
         end;
       end else
       begin
