@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="103">
+    <Units Count="105">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -597,6 +597,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormSaveReplay"/>
       </Unit102>
+      <Unit103>
+        <Filename Value="../common-code/toolstudiohub.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolStudioHub"/>
+      </Unit103>
+      <Unit104>
+        <Filename Value="code/formstudiohub.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormStudioHub"/>
+      </Unit104>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

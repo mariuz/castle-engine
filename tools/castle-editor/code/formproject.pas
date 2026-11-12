@@ -629,6 +629,7 @@ type
       MenuItemClothStudio: TMenuItem;
       MenuItemUtilityAi: TMenuItem;
       MenuItemSaveReplay: TMenuItem;
+      MenuItemStudioHub: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -678,6 +679,7 @@ type
     procedure MenuItemClothStudioClick(Sender: TObject);
     procedure MenuItemUtilityAiClick(Sender: TObject);
     procedure MenuItemSaveReplayClick(Sender: TObject);
+    procedure MenuItemStudioHubClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2253,6 +2255,11 @@ begin
   MiSep := TMenuItem.Create(MenuItemDesign);
   MiSep.Caption := '-';
   MenuItemDesign.Add(MiSep);
+  MenuItemStudioHub := TMenuItem.Create(MenuItemDesign);
+  MenuItemStudioHub.Caption := 'Unified Editor Studio Hub && World Readiness Dashboard...';
+  MenuItemStudioHub.OnClick := @MenuItemStudioHubClick;
+  MenuItemDesign.Add(MenuItemStudioHub);
+
   MenuItemDesignSandboxesDiff := TMenuItem.Create(MenuItemDesign);
   MenuItemDesignSandboxesDiff.Caption := 'Design Sandboxes && Visual Diff / Merge...';
   MenuItemDesignSandboxesDiff.OnClick := @MenuItemDesignSandboxesDiffClick;
@@ -3168,6 +3175,8 @@ begin
     MenuItemUtilityAi.Enabled := Design <> nil;
   if MenuItemSaveReplay <> nil then
     MenuItemSaveReplay.Enabled := Design <> nil;
+  if MenuItemStudioHub <> nil then
+    MenuItemStudioHub.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5595,6 +5604,12 @@ procedure TProjectForm.MenuItemSaveReplayClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowSaveReplayDialog;
+end;
+
+procedure TProjectForm.MenuItemStudioHubClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowStudioHubDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

@@ -43,7 +43,7 @@ uses
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -796,6 +796,8 @@ type
       MenuTreeViewItemUtilityAi: TMenuItem;
       ButtonSaveReplay: TSpeedButton;
       MenuTreeViewItemSaveReplay: TMenuItem;
+      ButtonStudioHub: TSpeedButton;
+      MenuTreeViewItemStudioHub: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1289,6 +1291,8 @@ type
     procedure MenuTreeViewItemUtilityAiClick(Sender: TObject);
     procedure ButtonSaveReplayClick(Sender: TObject);
     procedure MenuTreeViewItemSaveReplayClick(Sender: TObject);
+    procedure ButtonStudioHubClick(Sender: TObject);
+    procedure MenuTreeViewItemStudioHubClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2755,6 +2759,8 @@ type
     procedure ShowClothStudioDialog;
     procedure ShowUtilityAiDialog;
     procedure ShowSaveReplayDialog;
+    procedure ShowStudioHubDialog;
+    function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
 implementation
@@ -2775,7 +2781,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -6702,6 +6708,22 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonUniversalMode,
       PanelMiddleTop.GetControlIndex(ButtonScaleMode) + 1);
 
+  ButtonStudioHub := TSpeedButton.Create(Self);
+  ButtonStudioHub.Caption := 'Studios';
+  ButtonStudioHub.Font.Style := [Graphics.fsBold];
+  ButtonStudioHub.Hint := 'Open Unified Editor Studio Hub & World Readiness Dashboard.' + NL +
+    'Search and quick-launch all 36 Horizon 2-5 studios across 6 domains or audit cross-studio integration health.';
+  ButtonStudioHub.ShowHint := true;
+  ButtonStudioHub.AutoSize := true;
+  ButtonStudioHub.Constraints.MinHeight := 33;
+  ButtonStudioHub.Constraints.MinWidth := 66;
+  ButtonStudioHub.BorderSpacing.Left := 4;
+  ButtonStudioHub.OnClick := @ButtonStudioHubClick;
+  ButtonStudioHub.Parent := PanelMiddleTop;
+  if ButtonUniversalMode.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonStudioHub,
+      PanelMiddleTop.GetControlIndex(ButtonUniversalMode) + 1);
+
   ButtonTerrainBrushMode := TSpeedButton.Create(Self);
   ButtonTerrainBrushMode.Caption := 'Terrain';
   ButtonTerrainBrushMode.Hint := 'Toggle Interactive 3D Viewport Terrain Sculpt & Splatmap Layer Brush Mode (Alt+T).' + NL +
@@ -6715,9 +6737,9 @@ begin
   ButtonTerrainBrushMode.BorderSpacing.Left := 4;
   ButtonTerrainBrushMode.OnClick := @ButtonTerrainBrushModeClick;
   ButtonTerrainBrushMode.Parent := PanelMiddleTop;
-  if ButtonUniversalMode.Parent = PanelMiddleTop then
+  if ButtonStudioHub.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonTerrainBrushMode,
-      PanelMiddleTop.GetControlIndex(ButtonUniversalMode) + 1);
+      PanelMiddleTop.GetControlIndex(ButtonStudioHub) + 1);
 
   CreateTerrainBrushToolbar;
 
@@ -10238,6 +10260,11 @@ begin
   MenuTreeViewItemSaveReplay.Caption := 'SaveGame Slot Manager && Deterministic Replay Studio...';
   MenuTreeViewItemSaveReplay.OnClick := @MenuTreeViewItemSaveReplayClick;
   MenuTreeView.Items.Add(MenuTreeViewItemSaveReplay);
+
+  MenuTreeViewItemStudioHub := TMenuItem.Create(Self);
+  MenuTreeViewItemStudioHub.Caption := 'Unified Editor Studio Hub && World Readiness Dashboard...';
+  MenuTreeViewItemStudioHub.OnClick := @MenuTreeViewItemStudioHubClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemStudioHub);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -55699,6 +55726,78 @@ end;
 procedure TDesignFrame.MenuTreeViewItemSaveReplayClick(Sender: TObject);
 begin
   ShowSaveReplayDialog;
+end;
+
+function TDesignFrame.LaunchStudioById(const AStudioId: String): Boolean;
+begin
+  Result := True;
+  if SameText(AStudioId, 'terrain_brush') then ToggleTerrainBrushMode
+  else if SameText(AStudioId, 'scatter_brush') then ToggleScatterBrushMode
+  else if SameText(AStudioId, 'world_minimap') then ShowWorldMinimapDialog
+  else if SameText(AStudioId, 'time_of_day') then ShowTimeOfDayStudioDialog
+  else if SameText(AStudioId, 'foliage_biome') then ShowFoliageBiomeDialog
+  else if SameText(AStudioId, 'water_studio') then ShowWaterStudioDialog
+  else if SameText(AStudioId, 'material_graph') then ShowMaterialGraphDialog
+  else if SameText(AStudioId, 'npr_shader') then ShowNprShaderStudioDialog(False)
+  else if SameText(AStudioId, 'particle_studio') then ShowParticleStudioDialog
+  else if SameText(AStudioId, 'post_process') then ShowPostProcessStudioDialog
+  else if SameText(AStudioId, 'decal_studio') then ShowDecalStudioDialog
+  else if SameText(AStudioId, 'variant_manager') then ShowVariantManagerDialog
+  else if SameText(AStudioId, 'csg_studio') then ShowCsgStudioDialog
+  else if SameText(AStudioId, 'modular_snap') then ShowModularSnapDialog
+  else if SameText(AStudioId, 'spline_studio') then ShowSplineStudioDialog
+  else if SameText(AStudioId, 'prefab_overrides') then ShowPrefabOverridesDialog
+  else if SameText(AStudioId, 'destructible') then ShowDestructibleDialog
+  else if SameText(AStudioId, 'cloth_studio') then ShowClothStudioDialog
+  else if SameText(AStudioId, 'ability_studio') then ShowAbilityStudioDialog
+  else if SameText(AStudioId, 'utility_ai') then ShowUtilityAiDialog
+  else if SameText(AStudioId, 'nav_network') then ShowNavNetworkDialog
+  else if SameText(AStudioId, 'state_graph') then ShowStateGraphDialog
+  else if SameText(AStudioId, 'ik_rig') then ShowIkRigDialog
+  else if SameText(AStudioId, 'dialogue_quest') then ShowDialogueQuestDialog
+  else if SameText(AStudioId, 'data_table') then ShowDataTableStudioDialog
+  else if SameText(AStudioId, 'sequencer') then ShowSequencerDialog
+  else if SameText(AStudioId, 'virtual_camera') then ShowVirtualCameraDialog
+  else if SameText(AStudioId, 'audio_mixer') then ShowAudioMixerDialog
+  else if SameText(AStudioId, 'input_studio') then ShowInputStudioDialog
+  else if SameText(AStudioId, 'frame_profiler') then ShowFrameProfilerDialog
+  else if SameText(AStudioId, 'save_replay') then ShowSaveReplayDialog
+  else if SameText(AStudioId, 'review_pins') then ShowDesignAnnotationsDialog
+  else if SameText(AStudioId, 'sandboxes_diff') then ShowDesignSandboxesAndDiffDialog
+  else if SameText(AStudioId, 'asset_graph') then ShowAssetGraphDialog
+  else if SameText(AStudioId, 'localization') then ShowLocalizationDialog
+  else if SameText(AStudioId, 'responsive_sim') then ShowResponsiveSimDialog
+  else
+    Result := False;
+end;
+
+procedure TDesignFrame.ShowStudioHubDialog;
+var
+  Dlg: TStudioHubForm;
+  TargetId: String;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  TargetId := '';
+  Dlg := TStudioHubForm.CreateStudio(Self, FDesignRoot, DesignOwner, nil);
+  try
+    if Dlg.ShowModal = mrOk then
+      TargetId := Dlg.PendingLaunchStudioId;
+  finally
+    FreeAndNil(Dlg);
+  end;
+  if TargetId <> '' then
+    LaunchStudioById(TargetId);
+end;
+
+procedure TDesignFrame.ButtonStudioHubClick(Sender: TObject);
+begin
+  ShowStudioHubDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemStudioHubClick(Sender: TObject);
+begin
+  ShowStudioHubDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

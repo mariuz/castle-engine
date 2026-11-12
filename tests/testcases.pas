@@ -142,6 +142,7 @@ uses
   TestToolClothStudio,
   TestToolUtilityAi,
   TestToolSaveReplay,
+  TestToolStudioHub,
   TestCastleVulkanRHI;
 
 implementation

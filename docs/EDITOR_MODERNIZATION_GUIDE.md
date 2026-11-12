@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–315** across Horizons 1–5), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–316** across Horizons 1–5), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3332,6 +3332,29 @@ Replay.ScrubToTime(Viewport, 0.125, DesignOwner);
 
 ---
 
+## 66AO. Unified Editor Studio Hub, Categorized Quick-Launch Dock & Cross-Studio World Readiness Dashboard (Phase 316)
+
+Castle Game Engine consolidates all **36** Horizon 2–5 studios and interactive brush modes into a searchable command-palette launcher and cross-studio QA auditor matching Unreal Engine 6.0+'s unified Editor Mode Hub:
+
+1. **Studio Hub Catalog & Cross-Studio Auditor (`tools/common-code/toolstudiohub.pas`)**:
+   - `TStudioHubManager` organizes all 36 studios across 6 domains (`shcWorldEnvironment`, `shcMaterialsVfxLighting`, `shcArchitecturePcg`, `shcCharactersAiGas`, `shcCinematicsAudioInput`, `shcPerformanceQaDeploy`) with multi-token instant search (`FilterStudios`).
+   - `AuditEntireDesign` verifies cross-studio integration (e.g. `TCastleVirtualCamera` -> `TCastleVirtualCameraBrain`, `TCastleClothSurface.SyncWithWeather` -> `TCastleTimeOfDayWeather`, `TCastleBuoyancyBehavior` -> `TCastleWaterVolume`, `TCastleUtilityAiBehavior` -> `TCastleSmartObject`, `TCastleInputMapManager` conflict checks, and unresolved `dacBug` review pins), computing a `0..100` `ReadinessScore` and executive Markdown summary.
+2. **Unified Studio Hub Dialog (`TStudioHubForm` & `TDesignFrame.LaunchStudioById`)**:
+   - Open via the bold **`Studios`** button in the top viewport bar, Hierarchy context menu, or **`Design -> Unified Editor Studio Hub & World Readiness Dashboard...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TStudioHubManager.FilterStudios(-1, 'gerstner buoyancy', Matches);
+Health := TStudioHubManager.AuditEntireDesign(Viewport, DesignOwner);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Visual Designer Manual](https://castle-engine.io/manual_editor.php) · [UE Level Editor & Modes](https://dev.epicgames.com/documentation/en-us/unreal-engine/level-editor-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Castle Game Engine Editor Overview (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Editor Overview](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3435,4 +3458,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems inclu
 - **[`tests/code/testcases/testtoolclothstudio.pas`](../tests/code/testcases/testtoolclothstudio.pas) (`TTestToolClothStudio` — 2 tests)**: Verifies `TCastleClothSurface` top-edge vertex pinning, aerodynamic `+Z` wind deflection, `0.60m` sphere collider world repulsion across every unpinned particle, `TCastleTimeOfDayWeather` storm wind coupling, `csTransient`-clean JSON roundtrips, and `TCastleVerletRope` `rpmBothEndsCatenary` equilibrium sag (`LowestSagLocalY < -1.10m`) + `rpmStartOnlyPendulum` wind swing (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolutilityai.pas`](../tests/code/testcases/testtoolutilityai.pas) (`TTestToolUtilityAi` — 2 tests)**: Verifies `EvaluateUtilityCurve` (`LinearDeficit`, `QuadraticUrgency`, `LogisticSigmoid`, `InverseAbundance`), single-slot `Campfire` contention (`AgentA` claims `Campfire`, `AgentB` falls back to `Tavern`), need restoration & slot release, `ConfigJson` & `csTransient`-clean JSON roundtrips, and RVO-style neighbor crowd separation (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolsavereplay.pas`](../tests/code/testcases/testtoolsavereplay.pas) (`TTestToolSaveReplay` — 2 tests)**: Verifies `TCastleSaveSlotManager` multi-system world snapshot capture & restoration across `TCastleTransform` poses/visibility, `TCastleAbilitySystemBehavior` HP/Mana/tags/cooldowns, and `TCastleQuestTracker` state + `v1 -> v2` schema migration (`PlayerGold -> Economy.Gold`), and verifies `TCastleReplayRecorder` keyframe/cue recording, `ExportReplayJson`/`ImportReplayJson`, midpoint quaternion `SLerp` pose scrubbing, and `OnCueFired` event playback (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolstudiohub.pas`](../tests/code/testcases/testtoolstudiohub.pas) (`TTestToolStudioHub` — 2 tests)**: Verifies all 36 Horizon 2–5 studios across 6 `TStudioHubCategory` buckets + multi-token case-insensitive keyword/phase search filtering, and verifies `TStudioHubManager.AuditEntireDesign` detection and full 100/100 `A+ Ship-Ready` remediation across 6 cross-studio integration hazards (`0 unfreed memory blocks`).
 
