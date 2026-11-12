@@ -3060,6 +3060,31 @@ Ik.SolveNow;
 
 ---
 
+## 66AD. Destructible Voronoi Fracture, Radial Blast Impulse & Debris Lifecycle Studio (Phase 305)
+
+Castle Game Engine provides deterministic 3D convex-polyhedral Voronoi fracture decomposition, radial blast impulses, and zero-leak timed debris cleanup matching Unreal Engine 6.0's Chaos Voronoi Fracture workflow:
+
+1. **Convex 3D Voronoi Fracture & Debris Behaviors (`src/scene/castledestructible.pas`)**:
+   - `ComputeVoronoiFractureCells` partitions any prop bounding box into `2..48` convex 3D Voronoi polyhedra via exact half-space clipping around Halton (`bases 2, 3, 5`) seed nuclei with configurable `CrackGap` and 5 PBR material presets (`dmpStoneMasonry`, `dmpWoodenCrate`, `dmpCrystalGlass`, `dmpScrapMetal`, `dmpObsidianCore`).
+   - `TCastleDestructibleBehavior` (`ApplyDamage`, `TriggerFracture`, `StepDebrisSimulation`, `ResetIntact`) spawns `csTransient` convex PBR shard meshes driven by `TCastleDebrisShardBehavior` (radial + upward + angular spin impulses, ground restitution bounce, and smooth end-of-life shrink cleanup).
+2. **Destructible Fracture Studio (`TDestructibleForm` & `TDestructibleHelper`)**:
+   - Open via the top-bar **`Fracture`** button, Hierarchy context menu, or **`Design -> Destructible Voronoi Fracture & Debris Lifecycle Studio...`**.
+   - Features 1-click **`+ Stone Column`**, **`+ Wooden Crate`**, and **`+ Crystal Spire`** spawners, a live 2D Voronoi cross-section slice diagram, and interactive **`Trigger Blast!`**, **`Step Debris (+0.1s)`**, and **`Reset Intact`** simulation controls.
+
+### Example Usage (Pascal API)
+```pascal
+Dest := TDestructibleHelper.CreateDestructiblePropInDesign(
+  DesignRoot, DesignOwner, dmpStoneMasonry, Vector3(0, 0, 0));
+TDestructibleHelper.TriggerRadialBlastInHierarchy(DesignRoot, Vector3(0, 0.5, 0.5), 6.0, 200.0);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Procedural X3D Geometry](https://castle-engine.io/x3d_implementation_rendering.php) · [CGE Physics](https://castle-engine.io/physics) · [UE Chaos Destruction](https://dev.epicgames.com/documentation/en-us/unreal-engine/chaos-destruction-overview)
+- **Videos & Movies:** 🎬 [CGE Official Video — 3D Physics & Procedural Props (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Physics Components](https://castle-engine.io/images/thumb_const_height_size/platformer_physics_components.webp) · [CGE Visual Editor](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3152,4 +3177,5 @@ In addition, Horizon 2 & Horizon 3 editor subsystems include dedicated automated
 - **[`tests/code/testcases/testtooldialoguequest.pas`](../tests/code/testcases/testtooldialoguequest.pas) (`TTestToolDialogueQuest` — 2 tests)**: Verifies `TCastleDialogueTree` variable/tag/quest-state choice gating (`Charisma >= 10`, `Item.SunfireRelic`), `StepConversation` objective progression & automatic `qsCompleted` `500 XP` + `Achievement.*` payout, BFS `ValidateGraph` orphan/broken-link detection, RFC-4180 `ExportLocalizationCsv`, and `ComponentToString` JSON roundtrip (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolfoliagebiome.pas`](../tests/code/testcases/testtoolfoliagebiome.pas) (`TTestToolFoliageBiome` — 2 tests)**: Verifies seeded Halton/Poisson `PopulateBiomeWithSceneExclusions` rejecting `HighSnowPeak` (`Y = 18 > MaxAltitude 10`) and `RoadExcl` road clearings while enforcing pairwise `MinRadiusSpacing >= 2.5m`, `TCastleLodProxyBehavior` `±3.0m` hysteresis band stability across `High`/`Medium`/`Low`/`Culled`, and `ComponentToString` JSON roundtrips without `csTransient` mesh bloat (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolikrig.pas`](../tests/code/testcases/testtoolikrig.pas) (`TTestToolIkRig` — 2 tests)**: Verifies exact law-of-cosines `UpperBoneLength` & `LowerBoneLength` preservation (`0.55m + 0.55m`) on nested `LegHip -> LegKnee -> LegFoot` chains, `+Z` vs. `-Z` `PoleTransform` knee plane flipping, `SoftReachMargin` hyperextension damping, downward `EnableGroundFootPlant` raycast lifting onto a stepped platform (`Y = 0.48`), `TCastleLookAtConstraintBehavior` `±60°/±35°` cone clamping & exponential `DampingSpeed` convergence, and `ComponentToString` JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtooldestructible.pas`](../tests/code/testcases/testtooldestructible.pas) (`TTestToolDestructible` — 2 tests)**: Verifies exact 3D convex Voronoi polyhedral volume partition (`14` cells summing to `2.0 x 3.0 x 1.5 = 9.0 m^3`), `ApplyDamage` threshold shattering, radial blast outward dispersion & ground floor restitution clamping, timed `DebrisLifetimeSec` expiration cleanup, `TriggerRadialBlastInHierarchy` distance attenuation, `ResetAllDestructiblesInHierarchy` intact restoration, and `csTransient`-clean `ComponentToString` JSON roundtrips (`0 unfreed memory blocks`).
 

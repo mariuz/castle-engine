@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -774,6 +774,8 @@ type
       MenuTreeViewItemFoliageBiome: TMenuItem;
       ButtonIkRig: TSpeedButton;
       MenuTreeViewItemIkRig: TMenuItem;
+      ButtonDestructible: TSpeedButton;
+      MenuTreeViewItemDestructible: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1245,6 +1247,8 @@ type
     procedure MenuTreeViewItemFoliageBiomeClick(Sender: TObject);
     procedure ButtonIkRigClick(Sender: TObject);
     procedure MenuTreeViewItemIkRigClick(Sender: TObject);
+    procedure ButtonDestructibleClick(Sender: TObject);
+    procedure MenuTreeViewItemDestructibleClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2700,6 +2704,7 @@ type
     procedure ShowDialogueQuestDialog;
     procedure ShowFoliageBiomeDialog;
     procedure ShowIkRigDialog;
+    procedure ShowDestructibleDialog;
   end;
 
 implementation
@@ -2720,7 +2725,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -6061,6 +6066,46 @@ procedure TDesignFrame.TDesignerLayer.Render;
     end;
   end;
 
+  procedure RenderDestructiblesOverlay(const AVp: TCastleViewport);
+  var
+    DestSum: TDestructibleSummary;
+    CamP, CamD, CamU, C, H: TVector3;
+    SegPts: array [0..1] of TVector2;
+    I: Integer;
+
+    procedure Seg(const A, B: TVector3);
+    begin
+      if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+         ((TVector3.DotProduct(A - CamP, CamD) > 0.08) and
+          (TVector3.DotProduct(B - CamP, CamD) > 0.08)) then
+      begin
+        SegPts[0] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(A));
+        SegPts[1] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(B));
+        DrawPrimitive2D(pmLines, SegPts, Vector4(0.98, 0.62, 0.22, 0.82),
+          bsSrcAlpha, bdOneMinusSrcAlpha, false, 1.8);
+      end;
+    end;
+
+  begin
+    if Frame.FDesignRoot = nil then
+      Exit;
+    AVp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    DestSum := TDestructibleHelper.ScanDestructibles(Frame.FDesignRoot);
+    for I := 0 to High(DestSum.Props) do
+      if (DestSum.Props[I].Parent <> nil) and
+         DestSum.Props[I].Parent.Exists and
+         DestSum.Props[I].ShowVoronoiPreviewInViewport and
+         (not DestSum.Props[I].IsFractured) then
+      begin
+        C := DestSum.Props[I].Parent.WorldTranslation;
+        H := DestSum.Props[I].FractureBoxSize * 0.5;
+        Seg(C + Vector3(-H.X, -H.Y, -H.Z), C + Vector3( H.X,  H.Y,  H.Z));
+        Seg(C + Vector3( H.X, -H.Y, -H.Z), C + Vector3(-H.X,  H.Y,  H.Z));
+        Seg(C + Vector3(-H.X, -H.Y,  H.Z), C + Vector3( H.X,  H.Y, -H.Z));
+        Seg(C + Vector3( H.X, -H.Y,  H.Z), C + Vector3(-H.X,  H.Y, -H.Z));
+      end;
+  end;
+
   procedure RenderAnnotationPinsOverlay(const AVp: TCastleViewport);
   var
     PinReport: TDesignAnnotationAuditReport;
@@ -6404,6 +6449,7 @@ begin
     RenderNpcDialogueOverlay(Frame.CurrentViewport);
     RenderFoliageBiomesOverlay(Frame.CurrentViewport);
     RenderIkRigsOverlay(Frame.CurrentViewport);
+    RenderDestructiblesOverlay(Frame.CurrentViewport);
   end;
 
   if (Frame.TransformManipulate <> nil) and
@@ -6977,6 +7023,21 @@ begin
   if ButtonFoliageBiome.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonIkRig,
       PanelMiddleTop.GetControlIndex(ButtonFoliageBiome) + 1);
+
+  ButtonDestructible := TSpeedButton.Create(Self);
+  ButtonDestructible.Caption := 'Fracture';
+  ButtonDestructible.Hint := 'Open Destructible Voronoi Fracture, Radial Blast Impulse & Debris Lifecycle Studio.' + NL +
+    'Configure seeded 3D Voronoi cells, health/damage thresholds, radial blasts, and debris cleanup.';
+  ButtonDestructible.ShowHint := true;
+  ButtonDestructible.AutoSize := true;
+  ButtonDestructible.Constraints.MinHeight := 33;
+  ButtonDestructible.Constraints.MinWidth := 64;
+  ButtonDestructible.BorderSpacing.Left := 2;
+  ButtonDestructible.OnClick := @ButtonDestructibleClick;
+  ButtonDestructible.Parent := PanelMiddleTop;
+  if ButtonIkRig.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonDestructible,
+      PanelMiddleTop.GetControlIndex(ButtonIkRig) + 1);
 
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
@@ -9922,6 +9983,11 @@ begin
   MenuTreeViewItemIkRig.Caption := 'Analytical Two-Bone IK && Look-At Motion Rig Studio...';
   MenuTreeViewItemIkRig.OnClick := @MenuTreeViewItemIkRigClick;
   MenuTreeView.Items.Add(MenuTreeViewItemIkRig);
+
+  MenuTreeViewItemDestructible := TMenuItem.Create(Self);
+  MenuTreeViewItemDestructible.Caption := 'Destructible Voronoi Fracture && Debris Lifecycle Studio...';
+  MenuTreeViewItemDestructible.OnClick := @MenuTreeViewItemDestructibleClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemDestructible);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -15160,6 +15226,8 @@ var
         Suffix := Suffix + ' ' + TCastleTwoBoneIkBehavior(NodeObj).IkSummaryBadge
       else if NodeObj is TCastleLookAtConstraintBehavior then
         Suffix := Suffix + ' ' + TCastleLookAtConstraintBehavior(NodeObj).LookAtSummaryBadge
+      else if NodeObj is TCastleDestructibleBehavior then
+        Suffix := Suffix + ' ' + TCastleDestructibleBehavior(NodeObj).DestructibleSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -54948,6 +55016,56 @@ end;
 procedure TDesignFrame.MenuTreeViewItemIkRigClick(Sender: TObject);
 begin
   ShowIkRigDialog;
+end;
+
+procedure TDesignFrame.ShowDestructibleDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  InitComp: TComponent;
+  SpawnPos, CamP, CamD, CamU: TVector3;
+  Vp: TCastleViewport;
+  Dlg: TDestructibleForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  InitComp := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount > 0 then
+      InitComp := Selected[0];
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  SpawnPos := TVector3.Zero;
+  Vp := CurrentViewport;
+  if (Vp <> nil) and (Vp.InternalCamera <> nil) then
+  begin
+    Vp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    SpawnPos := Vector3(CamP.X + CamD.X * 5.0, 0.0, CamP.Z + CamD.Z * 5.0);
+  end;
+
+  Dlg := TDestructibleForm.CreateStudio(Self, FDesignRoot, DesignOwner, InitComp,
+    SpawnPos,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonDestructibleClick(Sender: TObject);
+begin
+  ShowDestructibleDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemDestructibleClick(Sender: TObject);
+begin
+  ShowDestructibleDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

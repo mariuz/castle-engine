@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="81">
+    <Units Count="83">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -487,6 +487,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormIkRig"/>
       </Unit80>
+      <Unit81>
+        <Filename Value="../common-code/tooldestructible.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolDestructible"/>
+      </Unit81>
+      <Unit82>
+        <Filename Value="code/formdestructible.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormDestructible"/>
+      </Unit82>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

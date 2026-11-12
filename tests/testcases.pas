@@ -131,6 +131,7 @@ uses
   TestToolDialogueQuest,
   TestToolFoliageBiome,
   TestToolIkRig,
+  TestToolDestructible,
   TestCastleVulkanRHI;
 
 implementation

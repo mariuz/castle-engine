@@ -618,6 +618,7 @@ type
       MenuItemDialogueQuest: TMenuItem;
       MenuItemFoliageBiome: TMenuItem;
       MenuItemIkRig: TMenuItem;
+      MenuItemDestructible: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -656,6 +657,7 @@ type
     procedure MenuItemDialogueQuestClick(Sender: TObject);
     procedure MenuItemFoliageBiomeClick(Sender: TObject);
     procedure MenuItemIkRigClick(Sender: TObject);
+    procedure MenuItemDestructibleClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2371,6 +2373,11 @@ begin
   MenuItemIkRig.OnClick := @MenuItemIkRigClick;
   MenuItemDesign.Add(MenuItemIkRig);
 
+  MenuItemDestructible := TMenuItem.Create(MenuItemDesign);
+  MenuItemDestructible.Caption := 'Destructible Voronoi Fracture & Debris Lifecycle Studio...';
+  MenuItemDestructible.OnClick := @MenuItemDestructibleClick;
+  MenuItemDesign.Add(MenuItemDestructible);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -3069,6 +3076,8 @@ begin
     MenuItemFoliageBiome.Enabled := Design <> nil;
   if MenuItemIkRig <> nil then
     MenuItemIkRig.Enabled := Design <> nil;
+  if MenuItemDestructible <> nil then
+    MenuItemDestructible.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5448,6 +5457,12 @@ procedure TProjectForm.MenuItemDialogueQuestClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowDialogueQuestDialog;
+end;
+
+procedure TProjectForm.MenuItemDestructibleClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowDestructibleDialog;
 end;
 
 procedure TProjectForm.MenuItemIkRigClick(Sender: TObject);
