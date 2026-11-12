@@ -485,6 +485,8 @@ const
   VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT_KHR = $00000001;
   VK_RENDERING_SUSPENDING_BIT = $00000002;
   VK_RENDERING_RESUMING_BIT = $00000004;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES = 51;
+  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES = 1000063000;
 
   { Extension and Layer Names }
   VK_EXT_debug_utils = 'VK_EXT_debug_utils';
@@ -504,6 +506,7 @@ const
   VK_KHR_maintenance3 = 'VK_KHR_maintenance3';
   VK_KHR_multiview = 'VK_KHR_multiview';
   VK_KHR_pipeline_library = 'VK_KHR_pipeline_library';
+  VK_KHR_shader_draw_parameters = 'VK_KHR_shader_draw_parameters';
   VK_KHR_swapchain = 'VK_KHR_swapchain';
   VK_KHR_synchronization2 = 'VK_KHR_synchronization2';
   VK_KHR_timeline_semaphore = 'VK_KHR_timeline_semaphore';
@@ -2040,6 +2043,66 @@ type
     hostQueryReset: VkBool32;
   end;
   PVkPhysicalDeviceHostQueryResetFeatures = ^VkPhysicalDeviceHostQueryResetFeatures;
+
+  VkPhysicalDeviceShaderDrawParametersFeatures = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    shaderDrawParameters: VkBool32;
+  end;
+  PVkPhysicalDeviceShaderDrawParametersFeatures = ^VkPhysicalDeviceShaderDrawParametersFeatures;
+
+  VkPhysicalDeviceVulkan12Features = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    samplerMirrorClampToEdge: VkBool32;
+    drawIndirectCount: VkBool32;
+    storageBuffer8BitAccess: VkBool32;
+    uniformAndStorageBuffer8BitAccess: VkBool32;
+    storagePushConstant8: VkBool32;
+    shaderBufferInt64Atomics: VkBool32;
+    shaderSharedInt64Atomics: VkBool32;
+    shaderFloat16: VkBool32;
+    shaderInt8: VkBool32;
+    descriptorIndexing: VkBool32;
+    shaderInputAttachmentArrayDynamicIndexing: VkBool32;
+    shaderUniformTexelBufferArrayDynamicIndexing: VkBool32;
+    shaderStorageTexelBufferArrayDynamicIndexing: VkBool32;
+    shaderUniformBufferArrayNonUniformIndexing: VkBool32;
+    shaderSampledImageArrayNonUniformIndexing: VkBool32;
+    shaderStorageBufferArrayNonUniformIndexing: VkBool32;
+    shaderStorageImageArrayNonUniformIndexing: VkBool32;
+    shaderInputAttachmentArrayNonUniformIndexing: VkBool32;
+    shaderUniformTexelBufferArrayNonUniformIndexing: VkBool32;
+    shaderStorageTexelBufferArrayNonUniformIndexing: VkBool32;
+    descriptorBindingUniformBufferUpdateAfterBind: VkBool32;
+    descriptorBindingSampledImageUpdateAfterBind: VkBool32;
+    descriptorBindingStorageImageUpdateAfterBind: VkBool32;
+    descriptorBindingStorageBufferUpdateAfterBind: VkBool32;
+    descriptorBindingUniformTexelBufferUpdateAfterBind: VkBool32;
+    descriptorBindingStorageTexelBufferUpdateAfterBind: VkBool32;
+    descriptorBindingUpdateUnusedWhilePending: VkBool32;
+    descriptorBindingPartiallyBound: VkBool32;
+    descriptorBindingVariableDescriptorCount: VkBool32;
+    runtimeDescriptorArray: VkBool32;
+    samplerFilterMinmax: VkBool32;
+    scalarBlockLayout: VkBool32;
+    imagelessFramebuffer: VkBool32;
+    uniformBufferStandardLayout: VkBool32;
+    shaderSubgroupExtendedTypes: VkBool32;
+    separateDepthStencilLayouts: VkBool32;
+    hostQueryReset: VkBool32;
+    timelineSemaphore: VkBool32;
+    bufferDeviceAddress: VkBool32;
+    bufferDeviceAddressCaptureReplay: VkBool32;
+    bufferDeviceAddressMultiDevice: VkBool32;
+    vulkanMemoryModel: VkBool32;
+    vulkanMemoryModelDeviceScope: VkBool32;
+    vulkanMemoryModelAvailabilityVisibilityChains: VkBool32;
+    shaderOutputViewportIndex: VkBool32;
+    shaderOutputLayer: VkBool32;
+    subgroupBroadcastDynamicId: VkBool32;
+  end;
+  PVkPhysicalDeviceVulkan12Features = ^VkPhysicalDeviceVulkan12Features;
 
   { KHR Type Aliases }
   VkRenderingAttachmentInfoKHR = VkRenderingAttachmentInfo;

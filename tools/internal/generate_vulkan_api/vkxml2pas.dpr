@@ -1028,7 +1028,7 @@ const
     'VK_FENCE_CREATE_SIGNALED_BIT'
   );
 
-  OrderedEnums3: array[0..151] of String = (
+  OrderedEnums3: array[0..153] of String = (
     'VK_INDEX_TYPE_UINT16',
     'VK_INDEX_TYPE_UINT32',
     'VK_IMAGE_ASPECT_COLOR_BIT',
@@ -1190,7 +1190,10 @@ const
     'VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT',
     'VK_RENDERING_CONTENTS_SECONDARY_COMMAND_BUFFERS_BIT_KHR',
     'VK_RENDERING_SUSPENDING_BIT',
-    'VK_RENDERING_RESUMING_BIT'
+    'VK_RENDERING_RESUMING_BIT',
+    // Phase 110: Vulkan 1.2 Consolidated Features & Shader Draw Parameters
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES',
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES'
   );
 
   OrderedStructs: array[0..77] of String = (
@@ -1274,7 +1277,7 @@ const
     'VkBufferMemoryBarrier'
   );
 
-  OrderedStructs2: array[0..44] of String = (
+  OrderedStructs2: array[0..46] of String = (
     'VkImageMemoryBarrier',
     'VkBufferCopy',
     'VkImageSubresourceLayers',
@@ -1319,7 +1322,9 @@ const
     'VkSemaphoreWaitInfo',
     'VkSemaphoreSignalInfo',
     'VkQueryPoolCreateInfo',
-    'VkCommandBufferInheritanceRenderingInfo'
+    'VkCommandBufferInheritanceRenderingInfo',
+    'VkPhysicalDeviceShaderDrawParametersFeatures',
+    'VkPhysicalDeviceVulkan12Features'
   );
 
   OrderedCommands: array[0..94] of String = (
@@ -1559,6 +1564,7 @@ begin
     L.Add('  VK_KHR_maintenance3 = ''VK_KHR_maintenance3'';');
     L.Add('  VK_KHR_multiview = ''VK_KHR_multiview'';');
     L.Add('  VK_KHR_pipeline_library = ''VK_KHR_pipeline_library'';');
+    L.Add('  VK_KHR_shader_draw_parameters = ''VK_KHR_shader_draw_parameters'';');
     L.Add('  VK_KHR_swapchain = ''VK_KHR_swapchain'';');
     L.Add('  VK_KHR_synchronization2 = ''VK_KHR_synchronization2'';');
     L.Add('  VK_KHR_timeline_semaphore = ''VK_KHR_timeline_semaphore'';');

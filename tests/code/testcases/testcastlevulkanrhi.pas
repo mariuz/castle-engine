@@ -397,6 +397,9 @@ type
     procedure TestRealLavapipeSecondaryCommandBuffersAndWorkerCommandPoolParallelDrawRHI;
     procedure TestRealLavapipeViewportParallelCommandRecording3DSceneParityRHI;
     procedure TestRealLavapipeAsyncTransferQueueTimelineSemaphoreUploadAndRenderRHI;
+    procedure TestRealLavapipeBindlessTextureAndMaterialSSBOMultiDrawRHI;
+    procedure TestRealLavapipeComputeCullerAndDrawIndexedIndirectCountRHI;
+    procedure TestRealLavapipeMaterialBinnerAndBindlessGpuDrivenPipelineRHI;
   private
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
@@ -29924,6 +29927,607 @@ begin
     FreeAndNil(VS);
     FreeAndNil(GpuTex);
     FreeAndNil(GpuVBO);
+    FreeAndNil(RealDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipeBindlessTextureAndMaterialSSBOMultiDrawRHI;
+var
+  RealDev: TVulkanRHIDevice;
+  RealCmd: TVulkanRHICommandList;
+  BindlessMgr: TCastleVulkanBindlessTextureManager;
+  Batch: TCastleVulkanBindlessIndirectBatch;
+  SamplerDesc: TRHISamplerDesc;
+  Sampler: TRHISampler;
+  TexRed, TexGreen, TexBlue, TexAlphaMask, TempTex: TRHITexture;
+  ImgRed, ImgGreen, ImgBlue, ImgAlphaMask, Readback: TRGBAlphaImage;
+  ColorTex, DepthTex: TRHITexture;
+  SlotRed, SlotRedDup, SlotTemp, SlotGreen, SlotBlue, SlotAlpha: Cardinal;
+  Mat0, Mat1, Mat2, Mat3: TCastleBindlessMaterialEntry;
+  MatIdx0, MatIdx1, MatIdx2, MatIdx3: Cardinal;
+  Already0, Already1, Already2, Already3: Boolean;
+  QuadVerts: array[0..3] of TCastleBindlessIndirectVertex;
+  QuadIndices: array[0..5] of UInt32;
+  Insts: array[0..3] of TCastleBindlessIndirectInstanceDesc;
+  PassInfo: TRHIRenderingInfo;
+  DrawnCount: Cardinal;
+  X, Y: Integer;
+begin
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+    Exit;
+
+  Sampler := nil;
+  TexRed := nil;
+  TexGreen := nil;
+  TexBlue := nil;
+  TexAlphaMask := nil;
+  TempTex := nil;
+  ImgRed := nil;
+  ImgGreen := nil;
+  ImgBlue := nil;
+  ImgAlphaMask := nil;
+  ColorTex := nil;
+  DepthTex := nil;
+  Readback := nil;
+  try
+    if not RealDev.SupportsBindlessTextures then
+      Exit;
+
+    BindlessMgr := RealDev.BindlessTextureManager;
+    Batch := RealDev.BindlessIndirectBatch;
+    AssertTrue('BindlessTextureManager must exist on live Vulkan device', BindlessMgr <> nil);
+    AssertTrue('BindlessIndirectBatch must exist on live Vulkan device', Batch <> nil);
+
+    FillChar(SamplerDesc, SizeOf(SamplerDesc), 0);
+    SamplerDesc.MinFilter := sfNearest;
+    SamplerDesc.MagFilter := sfNearest;
+    SamplerDesc.MipFilter := sfNearest;
+    SamplerDesc.AddressModeU := amClampToEdge;
+    SamplerDesc.AddressModeV := amClampToEdge;
+    SamplerDesc.AddressModeW := amClampToEdge;
+    SamplerDesc.MaxAnisotropy := 1.0;
+    SamplerDesc.MaxLod := 1000.0;
+    Sampler := RealDev.CreateSampler(SamplerDesc);
+
+    ImgRed := TRGBAlphaImage.Create(4, 4);
+    ImgRed.Clear(Vector4Byte(255, 255, 255, 255));
+    for Y := 0 to 3 do
+      for X := 0 to 3 do
+        ImgRed.PixelPtr(X, Y)^ := Vector4Byte(255, 128, 255, 255);
+
+    ImgGreen := TRGBAlphaImage.Create(4, 4);
+    ImgGreen.Clear(Vector4Byte(0, 255, 0, 255));
+
+    ImgBlue := TRGBAlphaImage.Create(4, 4);
+    ImgBlue.Clear(Vector4Byte(32, 64, 255, 255));
+
+    ImgAlphaMask := TRGBAlphaImage.Create(4, 4);
+    for Y := 0 to 3 do
+      for X := 0 to 3 do
+        if X < 2 then
+          ImgAlphaMask.PixelPtr(X, Y)^ := Vector4Byte(0, 220, 220, 255)
+        else
+          ImgAlphaMask.PixelPtr(X, Y)^ := Vector4Byte(0, 220, 220, 0);
+
+    TexRed := RealDev.CreateTexture(TRHITextureDesc.Create2D(4, 4, pfRGBA8_UNorm, [tuSampled, tuTransferDst]));
+    TexRed.UploadImage(ImgRed);
+    TexGreen := RealDev.CreateTexture(TRHITextureDesc.Create2D(4, 4, pfRGBA8_UNorm, [tuSampled, tuTransferDst]));
+    TexGreen.UploadImage(ImgGreen);
+    TexBlue := RealDev.CreateTexture(TRHITextureDesc.Create2D(4, 4, pfRGBA8_UNorm, [tuSampled, tuTransferDst]));
+    TexBlue.UploadImage(ImgBlue);
+    TexAlphaMask := RealDev.CreateTexture(TRHITextureDesc.Create2D(4, 4, pfRGBA8_UNorm, [tuSampled, tuTransferDst]));
+    TexAlphaMask.UploadImage(ImgAlphaMask);
+    TempTex := RealDev.CreateTexture(TRHITextureDesc.Create2D(4, 4, pfRGBA8_UNorm, [tuSampled, tuTransferDst]));
+    TempTex.UploadImage(ImgGreen);
+
+    { Verify deduplication and O(1) slot recycling on live bindless VkDescriptorPool }
+    SlotRed := BindlessMgr.RegisterTexture(TexRed, Sampler);
+    SlotRedDup := BindlessMgr.RegisterTexture(TexRed, Sampler);
+    AssertEquals('Duplicate bindless registration must return identical slot',
+      Integer(SlotRed), Integer(SlotRedDup));
+    SlotTemp := BindlessMgr.RegisterTexture(TempTex, Sampler);
+    BindlessMgr.UnregisterSlot(SlotTemp);
+    SlotGreen := BindlessMgr.RegisterTexture(TexGreen, Sampler);
+    AssertEquals('Recycled bindless slot must be reused immediately',
+      Integer(SlotTemp), Integer(SlotGreen));
+    SlotBlue := BindlessMgr.RegisterTexture(TexBlue, Sampler);
+    SlotAlpha := BindlessMgr.RegisterTexture(TexAlphaMask, Sampler);
+
+    { Register 4 distinct materials in Set 1 Binding 1 Material SSBO:
+      - Mat 0 (top-left): TexRed (255, 128, 255) * BaseColor (1.0, 1.0, 0.25, 1.0) -> (255, 128, 64)
+      - Mat 1 (top-right): TexGreen (0, 255, 0) + Emissive (0.0, 0.0, 0.5, 0.0) -> (0, 255, 128)
+      - Mat 2 (bottom-left): TexBlue (32, 64, 255) * BaseColor (1,1,1,1) -> (32, 64, 255)
+      - Mat 3 (bottom-right): TexAlphaMask left half (0, 220, 220, 255) kept, right half alpha=0 OpKill discarded }
+    FillChar(Mat0, SizeOf(Mat0), 0);
+    Mat0.BaseColor := Vector4(1.0, 1.0, 0.25, 1.0);
+    Mat0.PBRParams := Vector4(0.5, 1.0, 1.0, 0.0);
+    Mat0.BaseColorTexIndex := SlotRed;
+    MatIdx0 := 0;
+    Already0 := False;
+    BindlessMgr.RegisterOrUpdateMaterial(MatIdx0, Already0, Mat0);
+
+    FillChar(Mat1, SizeOf(Mat1), 0);
+    Mat1.BaseColor := Vector4(1.0, 1.0, 1.0, 1.0);
+    Mat1.EmissiveColor := Vector4(0.0, 0.0, 0.5, 0.0);
+    Mat1.PBRParams := Vector4(0.5, 1.0, 1.0, 0.0);
+    Mat1.BaseColorTexIndex := SlotGreen;
+    MatIdx1 := 0;
+    Already1 := False;
+    BindlessMgr.RegisterOrUpdateMaterial(MatIdx1, Already1, Mat1);
+
+    FillChar(Mat2, SizeOf(Mat2), 0);
+    Mat2.BaseColor := Vector4(1.0, 1.0, 1.0, 1.0);
+    Mat2.PBRParams := Vector4(0.5, 1.0, 1.0, 0.0);
+    Mat2.BaseColorTexIndex := SlotBlue;
+    MatIdx2 := 0;
+    Already2 := False;
+    BindlessMgr.RegisterOrUpdateMaterial(MatIdx2, Already2, Mat2);
+
+    FillChar(Mat3, SizeOf(Mat3), 0);
+    Mat3.BaseColor := Vector4(1.0, 1.0, 1.0, 1.0);
+    Mat3.PBRParams := Vector4(0.5, 1.0, 1.0, 0.5); { AlphaCutoff = 0.5 }
+    Mat3.BaseColorTexIndex := SlotAlpha;
+    MatIdx3 := 0;
+    Already3 := False;
+    BindlessMgr.RegisterOrUpdateMaterial(MatIdx3, Already3, Mat3);
+
+    { Upload shared unit quad [-0.35..+0.35]^2 in XY plane }
+    QuadVerts[0].Position := Vector3(-0.35, -0.35, 0.0);
+    QuadVerts[0].Normal := Vector3(0.0, 0.0, 1.0);
+    QuadVerts[0].TexCoord := Vector2(0.0, 0.0);
+    QuadVerts[1].Position := Vector3( 0.35, -0.35, 0.0);
+    QuadVerts[1].Normal := Vector3(0.0, 0.0, 1.0);
+    QuadVerts[1].TexCoord := Vector2(1.0, 0.0);
+    QuadVerts[2].Position := Vector3( 0.35,  0.35, 0.0);
+    QuadVerts[2].Normal := Vector3(0.0, 0.0, 1.0);
+    QuadVerts[2].TexCoord := Vector2(1.0, 1.0);
+    QuadVerts[3].Position := Vector3(-0.35,  0.35, 0.0);
+    QuadVerts[3].Normal := Vector3(0.0, 0.0, 1.0);
+    QuadVerts[3].TexCoord := Vector2(0.0, 1.0);
+    QuadIndices[0] := 0; QuadIndices[1] := 1; QuadIndices[2] := 2;
+    QuadIndices[3] := 0; QuadIndices[4] := 2; QuadIndices[5] := 3;
+    Batch.UploadSharedMesh(QuadVerts, QuadIndices);
+    Batch.SetCamera(TMatrix4.Identity, Vector3(0.0, 0.0, 1.0), 0.25);
+
+    { Place 4 instances in the 4 NDC quadrants:
+      (-0.5, +0.5) top-left, (+0.5, +0.5) top-right, (-0.5, -0.5) bottom-left, (+0.5, -0.5) bottom-right }
+    Insts[0] := TCastleBindlessIndirectInstanceDesc.CreateSimple(
+      TranslationMatrix(-0.5, 0.5, 0.0), Vector4(-0.5, 0.5, 0.0, 0.6),
+      MatIdx0, BINDLESS_INSTANCE_FLAG_TEXTURED, 6);
+    Insts[1] := TCastleBindlessIndirectInstanceDesc.CreateSimple(
+      TranslationMatrix(0.5, 0.5, 0.0), Vector4(0.5, 0.5, 0.0, 0.6),
+      MatIdx1, BINDLESS_INSTANCE_FLAG_TEXTURED, 6);
+    Insts[2] := TCastleBindlessIndirectInstanceDesc.CreateSimple(
+      TranslationMatrix(-0.5, -0.5, 0.0), Vector4(-0.5, -0.5, 0.0, 0.6),
+      MatIdx2, BINDLESS_INSTANCE_FLAG_TEXTURED, 6);
+    Insts[3] := TCastleBindlessIndirectInstanceDesc.CreateSimple(
+      TranslationMatrix(0.5, -0.5, 0.0), Vector4(0.5, -0.5, 0.0, 0.6),
+      MatIdx3, BINDLESS_INSTANCE_FLAG_TEXTURED or BINDLESS_INSTANCE_FLAG_ALPHA_CUTOFF, 6);
+    Batch.UploadInstances(Insts, False);
+
+    ColorTex := RealDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuColorAttachment, tuTransferSrc]));
+    DepthTex := RealDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfD32_Float, [tuDepthStencil]));
+
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    AssertTrue('Dedicated BindlessPool must be allocated on live Vulkan device',
+      BindlessMgr.BindlessPool <> VK_NULL_HANDLE);
+
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 64, 64),
+      ColorTex, loClear, Vector4(20.0 / 255.0, 20.0 / 255.0, 30.0 / 255.0, 1.0),
+      DepthTex, loClear, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+    DrawnCount := Batch.RecordBindlessIndirectDraws(RealCmd, pfRGBA8_UNorm, pfD32_Float, 1, False);
+    RealCmd.EndRendering;
+    RealDev.EndOffscreenFrame;
+
+    AssertEquals('Single multi-draw indirect batch must issue 4 sub-draws', 4, Integer(DrawnCount));
+    AssertEquals('RealCmd.IndirectDrawCallCount must be 1 (zero per-object descriptor rebinds)',
+      1, Integer(RealCmd.IndirectDrawCallCount));
+
+    Readback := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 64, 64));
+
+    { Top-left (16, 48) -> Mat0: (255, 128, 64) }
+    AssertTrue('Top-left R (~255)', Abs(Integer(Readback.PixelPtr(16, 48)^.X) - 255) <= 4);
+    AssertTrue('Top-left G (~128)', Abs(Integer(Readback.PixelPtr(16, 48)^.Y) - 128) <= 4);
+    AssertTrue('Top-left B (~64)',  Abs(Integer(Readback.PixelPtr(16, 48)^.Z) - 64) <= 4);
+
+    { Top-right (48, 48) -> Mat1: (0, 255, 128) }
+    AssertTrue('Top-right R (~0)',   Abs(Integer(Readback.PixelPtr(48, 48)^.X) - 0) <= 4);
+    AssertTrue('Top-right G (~255)', Abs(Integer(Readback.PixelPtr(48, 48)^.Y) - 255) <= 4);
+    AssertTrue('Top-right B (~128)', Abs(Integer(Readback.PixelPtr(48, 48)^.Z) - 128) <= 4);
+
+    { Bottom-left (16, 16) -> Mat2: (32, 64, 255) }
+    AssertTrue('Bottom-left R (~32)',  Abs(Integer(Readback.PixelPtr(16, 16)^.X) - 32) <= 4);
+    AssertTrue('Bottom-left G (~64)',  Abs(Integer(Readback.PixelPtr(16, 16)^.Y) - 64) <= 4);
+    AssertTrue('Bottom-left B (~255)', Abs(Integer(Readback.PixelPtr(16, 16)^.Z) - 255) <= 4);
+
+    { Bottom-right left half (40, 16) -> Mat3 opaque cyan (0, 220, 220) }
+    AssertTrue('Bottom-right kept half R (~0)',   Abs(Integer(Readback.PixelPtr(40, 16)^.X) - 0) <= 4);
+    AssertTrue('Bottom-right kept half G (~220)', Abs(Integer(Readback.PixelPtr(40, 16)^.Y) - 220) <= 4);
+    AssertTrue('Bottom-right kept half B (~220)', Abs(Integer(Readback.PixelPtr(40, 16)^.Z) - 220) <= 4);
+
+    { Bottom-right right half (55, 16) -> Mat3 alpha=0 OpKill discarded, preserving clear (20, 20, 30) }
+    AssertTrue('Bottom-right discarded half R (~20)', Abs(Integer(Readback.PixelPtr(55, 16)^.X) - 20) <= 4);
+    AssertTrue('Bottom-right discarded half G (~20)', Abs(Integer(Readback.PixelPtr(55, 16)^.Y) - 20) <= 4);
+    AssertTrue('Bottom-right discarded half B (~30)', Abs(Integer(Readback.PixelPtr(55, 16)^.Z) - 30) <= 4);
+  finally
+    FreeAndNil(Readback);
+    FreeAndNil(DepthTex);
+    FreeAndNil(ColorTex);
+    FreeAndNil(ImgAlphaMask);
+    FreeAndNil(ImgBlue);
+    FreeAndNil(ImgGreen);
+    FreeAndNil(ImgRed);
+    FreeAndNil(TempTex);
+    FreeAndNil(TexAlphaMask);
+    FreeAndNil(TexBlue);
+    FreeAndNil(TexGreen);
+    FreeAndNil(TexRed);
+    FreeAndNil(Sampler);
+    FreeAndNil(RealDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipeComputeCullerAndDrawIndexedIndirectCountRHI;
+var
+  RealDev: TVulkanRHIDevice;
+  RealCmd: TVulkanRHICommandList;
+  BindlessMgr: TCastleVulkanBindlessTextureManager;
+  Batch: TCastleVulkanBindlessIndirectBatch;
+  ColorTex, DepthTex: TRHITexture;
+  Readback: TRGBAlphaImage;
+  OrthoViewProj: TMatrix4;
+  Planes: array[0..5] of TVector4;
+  Mats: array[0..4] of TCastleBindlessMaterialEntry;
+  MatIdxs: array[0..4] of Cardinal;
+  AlreadyReg: Boolean;
+  QuadVerts: array[0..3] of TCastleBindlessIndirectVertex;
+  QuadIndices: array[0..5] of UInt32;
+  Insts: array[0..7] of TCastleBindlessIndirectInstanceDesc;
+  PassInfo: TRHIRenderingInfo;
+  CmdOut: TRHIDrawIndexedIndirectCommand;
+  SeenMask: Cardinal;
+  I: Integer;
+begin
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+    Exit;
+
+  ColorTex := nil;
+  DepthTex := nil;
+  Readback := nil;
+  try
+    if not RealDev.SupportsBindlessTextures then
+      Exit;
+
+    AssertTrue('Mesa Lavapipe Vulkan 1.4 must support MultiDrawIndirect',
+      RealDev.Capabilities.SupportsMultiDrawIndirect);
+    AssertTrue('Mesa Lavapipe Vulkan 1.4 must support DrawIndirectCount (Vulkan 1.2 feature)',
+      RealDev.Capabilities.SupportsDrawIndirectCount);
+
+    BindlessMgr := RealDev.BindlessTextureManager;
+    Batch := RealDev.BindlessIndirectBatch;
+
+    { Register 5 solid bindless materials:
+      0: Coral Red (240, 64, 48)
+      1: Lime Green (64, 240, 80)
+      2: Sky Blue (48, 144, 250)
+      3: Gold Yellow (250, 208, 32)
+      4: Sentinel Magenta (255, 0, 255) — assigned ONLY to culled instances! }
+    for I := 0 to 4 do
+      FillChar(Mats[I], SizeOf(TCastleBindlessMaterialEntry), 0);
+    Mats[0].BaseColor := Vector4(240.0 / 255.0, 64.0 / 255.0, 48.0 / 255.0, 1.0);
+    Mats[1].BaseColor := Vector4(64.0 / 255.0, 240.0 / 255.0, 80.0 / 255.0, 1.0);
+    Mats[2].BaseColor := Vector4(48.0 / 255.0, 144.0 / 255.0, 250.0 / 255.0, 1.0);
+    Mats[3].BaseColor := Vector4(250.0 / 255.0, 208.0 / 255.0, 32.0 / 255.0, 1.0);
+    Mats[4].BaseColor := Vector4(1.0, 0.0, 1.0, 1.0);
+
+    for I := 0 to 4 do
+    begin
+      MatIdxs[I] := 0;
+      AlreadyReg := False;
+      BindlessMgr.RegisterOrUpdateMaterial(MatIdxs[I], AlreadyReg, Mats[I]);
+    end;
+
+    { Unit quad of half-size 3.0 in world space (within [-10..10] ortho frustum) }
+    QuadVerts[0].Position := Vector3(-3.0, -3.0, 0.0);
+    QuadVerts[0].Normal := Vector3(0.0, 0.0, 1.0);
+    QuadVerts[0].TexCoord := Vector2(0.0, 0.0);
+    QuadVerts[1].Position := Vector3( 3.0, -3.0, 0.0);
+    QuadVerts[1].Normal := Vector3(0.0, 0.0, 1.0);
+    QuadVerts[1].TexCoord := Vector2(1.0, 0.0);
+    QuadVerts[2].Position := Vector3( 3.0,  3.0, 0.0);
+    QuadVerts[2].Normal := Vector3(0.0, 0.0, 1.0);
+    QuadVerts[2].TexCoord := Vector2(1.0, 1.0);
+    QuadVerts[3].Position := Vector3(-3.0,  3.0, 0.0);
+    QuadVerts[3].Normal := Vector3(0.0, 0.0, 1.0);
+    QuadVerts[3].TexCoord := Vector2(0.0, 1.0);
+    QuadIndices[0] := 0; QuadIndices[1] := 1; QuadIndices[2] := 2;
+    QuadIndices[3] := 0; QuadIndices[4] := 2; QuadIndices[5] := 3;
+    Batch.UploadSharedMesh(QuadVerts, QuadIndices);
+
+    { Orthographic frustum [-10..10] x [-10..10], ZNear=1, ZFar=50 looking down -Z }
+    OrthoViewProj := OrthoProjectionMatrix(FloatRectangle(-10.0, -10.0, 20.0, 20.0), 1.0, 50.0);
+    Batch.SetCamera(OrthoViewProj, Vector3(0.0, 0.0, 1.0), 0.25);
+
+    Planes[0] := Vector4( 1.0,  0.0,  0.0, 10.0); { x >= -10 }
+    Planes[1] := Vector4(-1.0,  0.0,  0.0, 10.0); { x <= +10 }
+    Planes[2] := Vector4( 0.0,  1.0,  0.0, 10.0); { y >= -10 }
+    Planes[3] := Vector4( 0.0, -1.0,  0.0, 10.0); { y <= +10 }
+    Planes[4] := Vector4( 0.0,  0.0, -1.0, -1.0); { z <= -1 }
+    Planes[5] := Vector4( 0.0,  0.0,  1.0, 50.0); { z >= -50 }
+    { MaxDistance = 30.0: culls objects beyond distance 30 even if inside ZFar=50! }
+    RealDev.ComputeCuller.SetFrustumPlanes(Planes, Vector3(0.0, 0.0, 0.0), 30.0);
+
+    { 8 candidate instances:
+      - Even indices 0, 2, 4, 6: VISIBLE in the 4 quadrants at Z = -10 (dist ~12.2 <= 30)
+      - Indices 1, 3: OUTSIDE frustum X/Y (X = -45, Y = +45) with Sentinel Magenta
+      - Indices 5, 7: INSIDE frustum X/Y/Z at screen center (0, 0, -42), Z in [-50..-1],
+        rejected EXCLUSIVELY by GPU distance culling (42 - 4.5 = 37.5 > 30.0)! }
+    Insts[0] := TCastleBindlessIndirectInstanceDesc.CreateSimple(
+      TranslationMatrix(-5.5,  5.5, -10.0), Vector4(-5.5,  5.5, -10.0, 4.5), MatIdxs[0], 0, 6);
+    Insts[1] := TCastleBindlessIndirectInstanceDesc.CreateSimple(
+      TranslationMatrix(-45.0, 0.0, -10.0), Vector4(-45.0, 0.0, -10.0, 4.5), MatIdxs[4], 0, 6);
+    Insts[2] := TCastleBindlessIndirectInstanceDesc.CreateSimple(
+      TranslationMatrix( 5.5,  5.5, -10.0), Vector4( 5.5,  5.5, -10.0, 4.5), MatIdxs[1], 0, 6);
+    Insts[3] := TCastleBindlessIndirectInstanceDesc.CreateSimple(
+      TranslationMatrix( 0.0, 45.0, -10.0), Vector4( 0.0, 45.0, -10.0, 4.5), MatIdxs[4], 0, 6);
+    Insts[4] := TCastleBindlessIndirectInstanceDesc.CreateSimple(
+      TranslationMatrix(-5.5, -5.5, -10.0), Vector4(-5.5, -5.5, -10.0, 4.5), MatIdxs[2], 0, 6);
+    Insts[5] := TCastleBindlessIndirectInstanceDesc.CreateSimple(
+      TranslationMatrix( 0.0,  0.0, -42.0), Vector4( 0.0,  0.0, -42.0, 4.5), MatIdxs[4], 0, 6);
+    Insts[6] := TCastleBindlessIndirectInstanceDesc.CreateSimple(
+      TranslationMatrix( 5.5, -5.5, -10.0), Vector4( 5.5, -5.5, -10.0, 4.5), MatIdxs[3], 0, 6);
+    Insts[7] := TCastleBindlessIndirectInstanceDesc.CreateSimple(
+      TranslationMatrix( 0.0,  0.0, -44.0), Vector4( 0.0,  0.0, -44.0, 4.5), MatIdxs[4], 0, 6);
+    Batch.UploadInstances(Insts, True);
+
+    ColorTex := RealDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuColorAttachment, tuTransferSrc]));
+    DepthTex := RealDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfD32_Float, [tuDepthStencil]));
+
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    { 1. Dispatch GpuCullingCS on GPU + emit rsUnorderedAccess -> rsIndirectRead barriers }
+    Batch.RecordComputeCullingPass(RealCmd, True);
+
+    { 2. Render compacted survivors via single vkCmdDrawIndexedIndirectCount }
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 64, 64),
+      ColorTex, loClear, Vector4(12.0 / 255.0, 16.0 / 255.0, 24.0 / 255.0, 1.0),
+      DepthTex, loClear, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+    Batch.RecordBindlessIndirectDraws(RealCmd, pfRGBA8_UNorm, pfD32_Float, 1, True);
+    RealCmd.EndRendering;
+    RealDev.EndOffscreenFrame;
+
+    AssertEquals('vkCmdDrawIndexedIndirectCount must be recorded once',
+      1, Integer(RealCmd.IndirectCountDrawCallCount));
+
+    { Verify GPU-written atomic counter, per-instance visibility flags, and compacted indirect commands }
+    AssertEquals('GPU GpuCullingCS OpAtomicIAdd visible count must be 4',
+      4, Integer(RealDev.ComputeCuller.ReadBackVisibleCount));
+    for I := 0 to 7 do
+      if (I mod 2) = 0 then
+        AssertEquals(Format('Instance %d visibility flag must be 1', [I]),
+          1, Integer(RealDev.ComputeCuller.ReadBackVisibilityFlag(Cardinal(I))))
+      else
+        AssertEquals(Format('Instance %d visibility flag must be 0 (culled on GPU)', [I]),
+          0, Integer(RealDev.ComputeCuller.ReadBackVisibilityFlag(Cardinal(I))));
+
+    SeenMask := 0;
+    for I := 0 to 3 do
+    begin
+      CmdOut := RealDev.ComputeCuller.ReadBackIndirectCommand(Cardinal(I));
+      AssertEquals('Compacted command IndexCount must be 6', 6, Integer(CmdOut.IndexCount));
+      AssertEquals('Compacted command InstanceCount must be 1', 1, Integer(CmdOut.InstanceCount));
+      AssertTrue('Compacted FirstInstance must be in {0, 2, 4, 6}',
+        (CmdOut.FirstInstance <= 6) and ((CmdOut.FirstInstance mod 2) = 0));
+      SeenMask := SeenMask or (Cardinal(1) shl CmdOut.FirstInstance);
+    end;
+    AssertEquals('Compacted indirect stream must contain exact set {0, 2, 4, 6}',
+      Integer((1 shl 0) or (1 shl 2) or (1 shl 4) or (1 shl 6)), Integer(SeenMask));
+
+    { Verify rendered pixels: 4 quadrants match visible materials and center (32, 32) is untouched clear color! }
+    Readback := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 64, 64));
+
+    { Top-left (-5.5, +5.5) -> pixel (14, 50): Coral Red (240, 64, 48) }
+    AssertTrue('Top-left Coral Red R', Abs(Integer(Readback.PixelPtr(14, 50)^.X) - 240) <= 5);
+    AssertTrue('Top-left Coral Red G', Abs(Integer(Readback.PixelPtr(14, 50)^.Y) - 64) <= 5);
+    AssertTrue('Top-left Coral Red B', Abs(Integer(Readback.PixelPtr(14, 50)^.Z) - 48) <= 5);
+
+    { Top-right (+5.5, +5.5) -> pixel (50, 50): Lime Green (64, 240, 80) }
+    AssertTrue('Top-right Lime Green R', Abs(Integer(Readback.PixelPtr(50, 50)^.X) - 64) <= 5);
+    AssertTrue('Top-right Lime Green G', Abs(Integer(Readback.PixelPtr(50, 50)^.Y) - 240) <= 5);
+    AssertTrue('Top-right Lime Green B', Abs(Integer(Readback.PixelPtr(50, 50)^.Z) - 80) <= 5);
+
+    { Bottom-left (-5.5, -5.5) -> pixel (14, 14): Sky Blue (48, 144, 250) }
+    AssertTrue('Bottom-left Sky Blue R', Abs(Integer(Readback.PixelPtr(14, 14)^.X) - 48) <= 5);
+    AssertTrue('Bottom-left Sky Blue G', Abs(Integer(Readback.PixelPtr(14, 14)^.Y) - 144) <= 5);
+    AssertTrue('Bottom-left Sky Blue B', Abs(Integer(Readback.PixelPtr(14, 14)^.Z) - 250) <= 5);
+
+    { Bottom-right (+5.5, -5.5) -> pixel (50, 14): Gold Yellow (250, 208, 32) }
+    AssertTrue('Bottom-right Gold Yellow R', Abs(Integer(Readback.PixelPtr(50, 14)^.X) - 250) <= 5);
+    AssertTrue('Bottom-right Gold Yellow G', Abs(Integer(Readback.PixelPtr(50, 14)^.Y) - 208) <= 5);
+    AssertTrue('Bottom-right Gold Yellow B', Abs(Integer(Readback.PixelPtr(50, 14)^.Z) - 32) <= 5);
+
+    { Center (32, 32): Distance-culled Sentinel Magenta instances 5 & 7 must NOT be drawn! }
+    AssertTrue('Center R must remain dark clear (~12), not Magenta (255)',
+      Abs(Integer(Readback.PixelPtr(32, 32)^.X) - 12) <= 4);
+    AssertTrue('Center G must remain dark clear (~16)',
+      Abs(Integer(Readback.PixelPtr(32, 32)^.Y) - 16) <= 4);
+    AssertTrue('Center B must remain dark clear (~24), not Magenta (255)',
+      Abs(Integer(Readback.PixelPtr(32, 32)^.Z) - 24) <= 4);
+  finally
+    FreeAndNil(Readback);
+    FreeAndNil(DepthTex);
+    FreeAndNil(ColorTex);
+    FreeAndNil(RealDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipeMaterialBinnerAndBindlessGpuDrivenPipelineRHI;
+const
+  StreamMatIDs: array[0..15] of Cardinal = (
+    3, 0, 2, 3, 1, 0, 3, 5, 2, 0, 7, 3, 1, 2, 0, 5
+  );
+var
+  RealDev: TVulkanRHIDevice;
+  RealCmd: TVulkanRHICommandList;
+  Binner: TCastleVulkanMaterialBinner;
+  BindlessMgr: TCastleVulkanBindlessTextureManager;
+  Batch: TCastleVulkanBindlessIndirectBatch;
+  SamplerDesc: TRHISamplerDesc;
+  Sampler: TRHISampler;
+  WhiteTex: TRHITexture;
+  WhiteImg, Readback: TRGBAlphaImage;
+  ColorTex, DepthTex: TRHITexture;
+  CpuCounts, CpuOffsets, GpuCounts, GpuOffsets: TCardinalDynamicArray;
+  SlotWhite, MatIdxLit: Cardinal;
+  AlreadyReg: Boolean;
+  MatLit: TCastleBindlessMaterialEntry;
+  Verts: array[0..7] of TCastleBindlessIndirectVertex;
+  Indices: array[0..11] of UInt32;
+  Insts: array[0..1] of TCastleBindlessIndirectInstanceDesc;
+  Planes: array[0..5] of TVector4;
+  PassInfo: TRHIRenderingInfo;
+  I: Integer;
+begin
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+    Exit;
+
+  Sampler := nil;
+  WhiteTex := nil;
+  WhiteImg := nil;
+  ColorTex := nil;
+  DepthTex := nil;
+  Readback := nil;
+  try
+    if not RealDev.SupportsBindlessTextures then
+      Exit;
+
+    Binner := RealDev.MaterialBinner;
+    BindlessMgr := RealDev.BindlessTextureManager;
+    Batch := RealDev.BindlessIndirectBatch;
+
+    { 1. Upload 16-element material ID stream to TCastleVulkanMaterialBinner }
+    TCastleVulkanMaterialBinner.EvaluateMaterialBinRanges(StreamMatIDs, 8, CpuCounts, CpuOffsets);
+    Binner.UploadMaterialIDs(StreamMatIDs);
+
+    { 2. Setup directional-lit bindless GPU-driven batch with two sub-meshes in shared VB/IB:
+         - Sub-mesh 0 (FirstIndex=0, VertexOffset=0): normal (0, 0, +1) facing light (0, 0, +1) -> shade = 1.0
+         - Sub-mesh 1 (FirstIndex=6, VertexOffset=4): normal (0, +1, 0) perpendicular to light  -> shade = ambient (0.25) }
+    FillChar(SamplerDesc, SizeOf(SamplerDesc), 0);
+    SamplerDesc.MinFilter := sfNearest;
+    SamplerDesc.MagFilter := sfNearest;
+    SamplerDesc.MipFilter := sfNearest;
+    SamplerDesc.AddressModeU := amClampToEdge;
+    SamplerDesc.AddressModeV := amClampToEdge;
+    SamplerDesc.AddressModeW := amClampToEdge;
+    SamplerDesc.MaxAnisotropy := 1.0;
+    SamplerDesc.MaxLod := 1000.0;
+    Sampler := RealDev.CreateSampler(SamplerDesc);
+
+    WhiteImg := TRGBAlphaImage.Create(4, 4);
+    WhiteImg.Clear(Vector4Byte(200, 160, 80, 255));
+    WhiteTex := RealDev.CreateTexture(TRHITextureDesc.Create2D(4, 4, pfRGBA8_UNorm, [tuSampled, tuTransferDst]));
+    WhiteTex.UploadImage(WhiteImg);
+    SlotWhite := BindlessMgr.RegisterTexture(WhiteTex, Sampler);
+
+    FillChar(MatLit, SizeOf(MatLit), 0);
+    MatLit.BaseColor := Vector4(1.0, 1.0, 1.0, 1.0);
+    MatLit.PBRParams := Vector4(0.5, 1.0, 1.0, 0.0);
+    MatLit.BaseColorTexIndex := SlotWhite;
+    MatIdxLit := 0;
+    AlreadyReg := False;
+    BindlessMgr.RegisterOrUpdateMaterial(MatIdxLit, AlreadyReg, MatLit);
+
+    { Sub-mesh 0: vertices 0..3 with Normal = (0, 0, 1) }
+    Verts[0].Position := Vector3(-0.35, -0.6, 0.0); Verts[0].Normal := Vector3(0, 0, 1); Verts[0].TexCoord := Vector2(0, 0);
+    Verts[1].Position := Vector3( 0.35, -0.6, 0.0); Verts[1].Normal := Vector3(0, 0, 1); Verts[1].TexCoord := Vector2(1, 0);
+    Verts[2].Position := Vector3( 0.35,  0.6, 0.0); Verts[2].Normal := Vector3(0, 0, 1); Verts[2].TexCoord := Vector2(1, 1);
+    Verts[3].Position := Vector3(-0.35,  0.6, 0.0); Verts[3].Normal := Vector3(0, 0, 1); Verts[3].TexCoord := Vector2(0, 1);
+    { Sub-mesh 1: vertices 4..7 with Normal = (0, 1, 0) -> N dot L = 0 -> ambient = 0.25 }
+    Verts[4].Position := Vector3(-0.35, -0.6, 0.0); Verts[4].Normal := Vector3(0, 1, 0); Verts[4].TexCoord := Vector2(0, 0);
+    Verts[5].Position := Vector3( 0.35, -0.6, 0.0); Verts[5].Normal := Vector3(0, 1, 0); Verts[5].TexCoord := Vector2(1, 0);
+    Verts[6].Position := Vector3( 0.35,  0.6, 0.0); Verts[6].Normal := Vector3(0, 1, 0); Verts[6].TexCoord := Vector2(1, 1);
+    Verts[7].Position := Vector3(-0.35,  0.6, 0.0); Verts[7].Normal := Vector3(0, 1, 0); Verts[7].TexCoord := Vector2(0, 1);
+
+    { Indices 0..5 local (0,1,2, 0,2,3) used with VertexOffset=0 and Indices 6..11 local (0,1,2, 0,2,3) used with VertexOffset=4 }
+    Indices[0] := 0; Indices[1] := 1; Indices[2] := 2;
+    Indices[3] := 0; Indices[4] := 2; Indices[5] := 3;
+    Indices[6] := 0; Indices[7] := 1; Indices[8] := 2;
+    Indices[9] := 0; Indices[10] := 2; Indices[11] := 3;
+
+    Batch.UploadSharedMesh(Verts, Indices);
+    Batch.SetCamera(TMatrix4.Identity, Vector3(0.0, 0.0, 1.0), 0.25);
+
+    for I := 0 to 5 do
+      Planes[I] := Vector4(0.0, 0.0, 0.0, 10.0);
+    RealDev.ComputeCuller.SetFrustumPlanes(Planes, Vector3(0.0, 0.0, 0.0), 0.0);
+
+    { Left half (-0.5, 0): fully lit (N dot L = 1.0 -> shade = 1.0 -> (200, 160, 80))
+      Right half (+0.5, 0): ambient-only (N dot L = 0.0 -> shade = 0.25 -> (50, 40, 20)) }
+    Insts[0] := TCastleBindlessIndirectInstanceDesc.CreateSimple(
+      TranslationMatrix(-0.5, 0.0, 0.0), Vector4(-0.5, 0.0, 0.0, 1.0),
+      MatIdxLit, BINDLESS_INSTANCE_FLAG_TEXTURED or BINDLESS_INSTANCE_FLAG_LIT, 6, 0, 0);
+    Insts[1] := TCastleBindlessIndirectInstanceDesc.CreateSimple(
+      TranslationMatrix( 0.5, 0.0, 0.0), Vector4( 0.5, 0.0, 0.0, 1.0),
+      MatIdxLit, BINDLESS_INSTANCE_FLAG_TEXTURED or BINDLESS_INSTANCE_FLAG_LIT, 6, 6, 4);
+    Batch.UploadInstances(Insts, True);
+
+    ColorTex := RealDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuColorAttachment, tuTransferSrc]));
+    DepthTex := RealDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfD32_Float, [tuDepthStencil]));
+
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    { Execute GPU MaterialBinHistogramCS + UAV barrier + MaterialBinPrefixSumCS }
+    AssertEquals('DispatchStreamBinning must return 8 bins',
+      8, Integer(Binner.DispatchStreamBinning(RealCmd, 8)));
+    { Execute GPU GpuCullingCS + bindless indirect lit multi-draw }
+    Batch.RecordComputeCullingPass(RealCmd, True);
+
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 64, 64),
+      ColorTex, loClear, Vector4(0.0, 0.0, 0.0, 1.0),
+      DepthTex, loClear, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+    Batch.RecordBindlessIndirectDraws(RealCmd, pfRGBA8_UNorm, pfD32_Float, 1, True);
+    RealCmd.EndRendering;
+    RealDev.EndOffscreenFrame;
+
+    { Verify GPU MaterialBinHistogramCS & MaterialBinPrefixSumCS output matches CPU reference }
+    Binner.ReadBackBinRanges(8, GpuCounts, GpuOffsets);
+    for I := 0 to 7 do
+    begin
+      AssertEquals(Format('GPU MaterialBin Count[%d] must match CPU reference', [I]),
+        Integer(CpuCounts[I]), Integer(GpuCounts[I]));
+      AssertEquals(Format('GPU MaterialBin ExclusiveOffset[%d] must match CPU reference', [I]),
+        Integer(CpuOffsets[I]), Integer(GpuOffsets[I]));
+    end;
+
+    { Verify VertexOffset + directional Lambertian + ambient shading on rendered pixels }
+    Readback := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 64, 64));
+
+    { Left quad (16, 32): N=(0,0,1), L=(0,0,1) -> shade=1.0 -> (200, 160, 80) }
+    AssertTrue('Fully-lit quad R (~200)', Abs(Integer(Readback.PixelPtr(16, 32)^.X) - 200) <= 5);
+    AssertTrue('Fully-lit quad G (~160)', Abs(Integer(Readback.PixelPtr(16, 32)^.Y) - 160) <= 5);
+    AssertTrue('Fully-lit quad B (~80)',  Abs(Integer(Readback.PixelPtr(16, 32)^.Z) - 80) <= 5);
+
+    { Right quad (48, 32): N=(0,1,0), L=(0,0,1), VertexOffset=4 -> shade=0.25 -> (50, 40, 20) }
+    AssertTrue('Ambient-shaded quad R (~50)', Abs(Integer(Readback.PixelPtr(48, 32)^.X) - 50) <= 5);
+    AssertTrue('Ambient-shaded quad G (~40)', Abs(Integer(Readback.PixelPtr(48, 32)^.Y) - 40) <= 5);
+    AssertTrue('Ambient-shaded quad B (~20)', Abs(Integer(Readback.PixelPtr(48, 32)^.Z) - 20) <= 5);
+  finally
+    FreeAndNil(Readback);
+    FreeAndNil(DepthTex);
+    FreeAndNil(ColorTex);
+    FreeAndNil(WhiteImg);
+    FreeAndNil(WhiteTex);
+    FreeAndNil(Sampler);
     FreeAndNil(RealDev);
   end;
 end;

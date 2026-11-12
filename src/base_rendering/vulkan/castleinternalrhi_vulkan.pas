@@ -159,10 +159,13 @@ type
   private
     FHandle: VkDescriptorSetLayout;
     FUsesUpdateAfterBind: Boolean;
+    FBindings: array of TRHIDescriptorBindingDesc;
   public
     constructor Create(const ADevice: TVulkanRHIDevice;
       const Bindings: array of TRHIDescriptorBindingDesc);
     destructor Destroy; override;
+    function TryGetBindingType(const ABinding: Cardinal;
+      out ADescriptorType: TRHIDescriptorType): Boolean;
     property Handle: VkDescriptorSetLayout read FHandle;
     property UsesUpdateAfterBind: Boolean read FUsesUpdateAfterBind;
   end;
@@ -174,6 +177,7 @@ type
     FHandle: VkDescriptorSet;
     FOwnerPool: VkDescriptorPool;
     FIsTransient: Boolean;
+    FUsesCustomPool: Boolean;
     FLayout: TVulkanRHIDescriptorSetLayout;
     FPendingWrites: array of VkWriteDescriptorSet;
     FPendingWriteInfoIndices: array of Integer;
@@ -187,6 +191,9 @@ type
     constructor Create(const ADevice: TVulkanRHIDevice;
       const ALayout: TVulkanRHIDescriptorSetLayout;
       const AIsTransient: Boolean = False);
+    constructor CreateFromCustomPool(const ADevice: TVulkanRHIDevice;
+      const ALayout: TVulkanRHIDescriptorSetLayout;
+      const ACustomPool: VkDescriptorPool);
     destructor Destroy; override;
 
     procedure BindUniformBuffer(const Binding: Cardinal; const Buffer: TRHIBuffer;
@@ -555,6 +562,7 @@ type
     FDevice: TVulkanRHIDevice;
     FCapacity: Cardinal;
     FSupportsUpdateAfterBind: Boolean;
+    FBindlessPool: VkDescriptorPool;
     FLayout: TVulkanRHIDescriptorSetLayout;
     FDescriptorSet: TVulkanRHIDescriptorSet;
     FMaterialSSBOBuffer: TRHIBuffer;
@@ -631,6 +639,7 @@ type
     property Device: TVulkanRHIDevice read FDevice;
     property Capacity: Cardinal read FCapacity;
     property SupportsUpdateAfterBind: Boolean read FSupportsUpdateAfterBind;
+    property BindlessPool: VkDescriptorPool read FBindlessPool;
     property Layout: TVulkanRHIDescriptorSetLayout read FLayout;
     property DescriptorSet: TVulkanRHIDescriptorSet read FDescriptorSet;
     property MaterialSSBOBuffer: TRHIBuffer read FMaterialSSBOBuffer;
@@ -3271,11 +3280,22 @@ type
   private
     FDevice: TVulkanRHIDevice;
     FMaxMaterialBins: Cardinal;
+    FMaxElements: Cardinal;
+    FLastUploadedElementCount: Cardinal;
+    FUploadedMaterialIDs: TCardinalDynamicArray;
+    FMaterialIDsBuffer: TVulkanRHIBuffer;
     FBinCountsBuffer: TVulkanRHIBuffer;
     FBinOffsetsBuffer: TVulkanRHIBuffer;
+    FBinDescriptorLayout: TRHIDescriptorSetLayout;
+    FBinDescriptorSet: TRHIDescriptorSet;
+    FHistogramShader: TRHIShaderModule;
+    FPrefixSumShader: TRHIShaderModule;
+    FHistogramPipeline: TVulkanRHIComputePipeline;
+    FPrefixSumPipeline: TVulkanRHIComputePipeline;
     FBinningComputePipeline: TVulkanRHIComputePipeline;
     FBinningDispatchCount: Cardinal;
     procedure EnsureBinningBuffers;
+    procedure EnsureStreamBinningPipelines;
   public
     constructor Create(const ADevice: TVulkanRHIDevice);
     destructor Destroy; override;
@@ -3293,13 +3313,152 @@ type
       const AComputePipeline: TVulkanRHIComputePipeline = nil;
       const ADescriptorSet: TVulkanRHIDescriptorSet = nil);
 
+    { Uploads a stream of 32-bit material IDs for GPU histogram + prefix-sum binning. }
+    procedure UploadMaterialIDs(const AMaterialIDs: array of Cardinal);
+
+    { Dispatches real GPU MaterialBinHistogramCS + compute memory barrier + MaterialBinPrefixSumCS
+      over the uploaded material ID stream, populating BinCountsBuffer and BinOffsetsBuffer. }
+    function DispatchStreamBinning(const ACommandList: TVulkanRHICommandList;
+      const ABinCount: Cardinal = 0): Cardinal;
+
+    { Reads back ABinCount histogram counts and exclusive prefix-sum offsets from GPU memory. }
+    procedure ReadBackBinRanges(const ABinCount: Cardinal;
+      out AOutBinCounts, AOutBinOffsets: TCardinalDynamicArray);
+
     property MaxMaterialBins: Cardinal read FMaxMaterialBins write FMaxMaterialBins;
+    property LastUploadedElementCount: Cardinal read FLastUploadedElementCount;
+    property MaterialIDsBuffer: TVulkanRHIBuffer read FMaterialIDsBuffer;
     property BinCountsBuffer: TVulkanRHIBuffer read FBinCountsBuffer;
     property BinOffsetsBuffer: TVulkanRHIBuffer read FBinOffsetsBuffer;
     property BinningComputePipeline: TVulkanRHIComputePipeline
       read FBinningComputePipeline write FBinningComputePipeline;
+    property HistogramPipeline: TVulkanRHIComputePipeline read FHistogramPipeline;
+    property PrefixSumPipeline: TVulkanRHIComputePipeline read FPrefixSumPipeline;
     property BinningDispatchCount: Cardinal read FBinningDispatchCount;
   end;
+
+  { -------------------------------------------------------------------------- }
+  { Bindless GPU-Driven Indirect Multi-Draw Batch (Phase 110.3)                }
+  { -------------------------------------------------------------------------- }
+
+  const
+    BINDLESS_INSTANCE_FLAG_TEXTURED     = 1;
+    BINDLESS_INSTANCE_FLAG_LIT          = 2;
+    BINDLESS_INSTANCE_FLAG_ALPHA_CUTOFF = 4;
+
+  type
+    { 32-byte interleaved 3D vertex format (Pos3 + Normal3 + UV2) for CastleBindlessIndirectVS. }
+    TCastleBindlessIndirectVertex = packed record
+      Position: TVector3;
+      Normal: TVector3;
+      TexCoord: TVector2;
+    end;
+    PCastleBindlessIndirectVertex = ^TCastleBindlessIndirectVertex;
+
+    { 80-byte std140 Camera + Directional/Ambient Light UBO (Set 0, Binding 0). }
+    TCastleBindlessIndirectCameraUniforms = packed record
+      ViewProjMatrix: TMatrix4;
+      LightDirAndAmbient: TVector4;
+    end;
+
+    { 80-byte std430 per-instance GPU SSBO record (Set 0, Binding 1) indexed by gl_InstanceIndex. }
+    TCastleBindlessIndirectInstanceShaderData = packed record
+      ModelMatrix: TMatrix4;
+      MaterialIndex: Cardinal;
+      Flags: Cardinal;
+      CustomParams: TVector2;
+    end;
+
+    { Combined CPU-side instance descriptor pairing GPU transform/material data with
+      world-space bounding sphere and sub-mesh range for TCastleVulkanComputeCuller. }
+    TCastleBindlessIndirectInstanceDesc = record
+      ModelMatrix: TMatrix4;
+      BoundingSphere: TVector4;
+      MaterialIndex: Cardinal;
+      Flags: Cardinal;
+      IndexCount: Cardinal;
+      FirstIndex: Cardinal;
+      VertexOffset: Integer;
+      CustomParams: TVector2;
+      class function CreateSimple(const AModelMatrix: TMatrix4;
+        const ABoundingSphere: TVector4;
+        const AMaterialIndex, AFlags, AIndexCount: Cardinal;
+        const AFirstIndex: Cardinal = 0;
+        const AVertexOffset: Integer = 0): TCastleBindlessIndirectInstanceDesc; static;
+    end;
+
+    { Encapsulates GPU-driven multi-material indirect rendering combining:
+        - Set 0: CameraUBO (Binding 0) + Per-Instance Transform/Material SSBO (Binding 1)
+        - Set 1: Global TCastleVulkanBindlessTextureManager (Bindless sampler2D[] + Material SSBO)
+        - Optional GPU Compute Frustum/Distance Culling (TCastleVulkanComputeCuller)
+        - Single vkCmdDrawIndexedIndirectCount / vkCmdDrawIndexedIndirect multi-draw execution. }
+    TCastleVulkanBindlessIndirectBatch = class
+    private
+      FDevice: TVulkanRHIDevice;
+      FVertexBuffer: TRHIBuffer;
+      FIndexBuffer: TRHIBuffer;
+      FCameraUBO: TRHIBuffer;
+      FInstancesSSBO: TRHIBuffer;
+      FDirectIndirectBuffer: TRHIBuffer;
+      FSceneLayout: TRHIDescriptorSetLayout;
+      FSceneDescriptorSet: TRHIDescriptorSet;
+      FVertShader: TRHIShaderModule;
+      FFragShader: TRHIShaderModule;
+      FCameraUniforms: TCastleBindlessIndirectCameraUniforms;
+      FVertexCount: Cardinal;
+      FIndexCount: Cardinal;
+      FInstanceCount: Cardinal;
+      FMaxInstanceCapacity: Cardinal;
+      FTotalBatchExecutions: Cardinal;
+      procedure EnsureBatchResources(const ARequiredInstances: Cardinal);
+    public
+      constructor Create(const ADevice: TVulkanRHIDevice);
+      destructor Destroy; override;
+
+      { Uploads shared vertex and 32-bit index geometry buffers for multi-draw indirect rendering. }
+      procedure UploadSharedMesh(const AVertices: array of TCastleBindlessIndirectVertex;
+        const AIndices: array of UInt32);
+
+      { Updates Set 0 Binding 0 Camera ViewProj matrix and world-space directional + ambient light. }
+      procedure SetCamera(const AViewProjMatrix: TMatrix4;
+        const ALightDirWorld: TVector3;
+        const AAmbientFactor: Single = 0.25);
+
+      { Uploads per-instance transform/material/flag records to Set 0 Binding 1 and (optionally)
+        populates Device.ComputeCuller with matching FirstInstance = I indirect candidates. }
+      procedure UploadInstances(const AInstances: array of TCastleBindlessIndirectInstanceDesc;
+        const AAlsoUploadToComputeCuller: Boolean = True);
+
+      { Acquires or creates the cached graphics PSO for CastleBindlessIndirectVS + CastleBindlessIndirectFS. }
+      function GetOrCreatePipelineForPass(const AColorFormat: TRHIPixelFormat;
+        const ADepthFormat: TRHIPixelFormat = pfUndefined;
+        const ASampleCount: Cardinal = 1;
+        const ACullMode: TRHICullMode = cmNone): TRHIPipeline;
+
+      { Records GPU compute culling + UAV->IndirectRead buffer barriers BEFORE BeginRendering. }
+      function RecordComputeCullingPass(const ACmd: TRHICommandList;
+        const ACompactDraws: Boolean = True): Cardinal;
+
+      { Binds Set 0 + Set 1 (Bindless) + shared VB/IB inside an active render pass and issues a
+        single vkCmdDrawIndexedIndirectCount (when AUseComputeCullerOutput = True) or
+        vkCmdDrawIndexedIndirect multi-draw call for all visible instances. }
+      function RecordBindlessIndirectDraws(const ACmd: TRHICommandList;
+        const AColorFormat: TRHIPixelFormat;
+        const ADepthFormat: TRHIPixelFormat = pfUndefined;
+        const ASampleCount: Cardinal = 1;
+        const AUseComputeCullerOutput: Boolean = True;
+        const ACullMode: TRHICullMode = cmNone): Cardinal;
+
+      property VertexBuffer: TRHIBuffer read FVertexBuffer;
+      property IndexBuffer: TRHIBuffer read FIndexBuffer;
+      property CameraUBO: TRHIBuffer read FCameraUBO;
+      property InstancesSSBO: TRHIBuffer read FInstancesSSBO;
+      property SceneDescriptorSet: TRHIDescriptorSet read FSceneDescriptorSet;
+      property VertexCount: Cardinal read FVertexCount;
+      property IndexCount: Cardinal read FIndexCount;
+      property InstanceCount: Cardinal read FInstanceCount;
+      property TotalBatchExecutions: Cardinal read FTotalBatchExecutions;
+    end;
 
   { -------------------------------------------------------------------------- }
   { Per-Pixel Linked List (PPLL) Exact OIT Manager (Phase 44.3)                }
@@ -3841,6 +4000,7 @@ type
     FBCnCompressor: TCastleVulkanBCnCompressor;
     FPipelineBinaryManager: TCastleVulkanPipelineBinaryManager;
     FWorkerCommandPoolManager: TCastleVulkanWorkerCommandPoolManager;
+    FBindlessIndirectBatch: TCastleVulkanBindlessIndirectBatch;
 
     { Descriptor, Pipeline, Compute Pipeline, VK_EXT_graphics_pipeline_library & Vulkan 1.1 RenderPass/Framebuffer Caches }
     FPersistentDescriptorAllocator: TVulkanDescriptorPoolAllocator;
@@ -3874,6 +4034,8 @@ type
     FSupportsSynchronization2: Boolean;
     FSupportsTimelineSemaphores: Boolean;
     FSupportsHostQueryReset: Boolean;
+    FSupportsDrawIndirectCountFeature: Boolean;
+    FSupportsShaderDrawParameters: Boolean;
     FMaxBindlessTextures: Cardinal;
     FPipelineCacheHits: Cardinal;
     FPipelineCacheMisses: Cardinal;
@@ -3978,6 +4140,7 @@ type
     function GetBCnCompressor: TCastleVulkanBCnCompressor;
     function GetPipelineBinaryManager: TCastleVulkanPipelineBinaryManager;
     function GetWorkerCommandPoolManager: TCastleVulkanWorkerCommandPoolManager;
+    function GetBindlessIndirectBatch: TCastleVulkanBindlessIndirectBatch;
   public
     constructor Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
       const InitialWidth, InitialHeight: Cardinal;
@@ -4188,6 +4351,7 @@ type
     property SupportsSynchronization2: Boolean read FSupportsSynchronization2 write SetSupportsSynchronization2;
     property SupportsTimelineSemaphores: Boolean read FSupportsTimelineSemaphores write SetSupportsTimelineSemaphores;
     property SupportsHostQueryReset: Boolean read FSupportsHostQueryReset write FSupportsHostQueryReset;
+    property SupportsShaderDrawParameters: Boolean read FSupportsShaderDrawParameters write FSupportsShaderDrawParameters;
     property MaxBindlessTextures: Cardinal read FMaxBindlessTextures write FMaxBindlessTextures;
     property BindlessTextureManager: TCastleVulkanBindlessTextureManager read FBindlessTextureManager;
     property TimestampProfiler: TCastleVulkanTimestampProfiler read FTimestampProfiler;
@@ -4247,6 +4411,7 @@ type
     property BCnCompressor: TCastleVulkanBCnCompressor read GetBCnCompressor;
     property PipelineBinaryManager: TCastleVulkanPipelineBinaryManager read GetPipelineBinaryManager;
     property WorkerCommandPoolManager: TCastleVulkanWorkerCommandPoolManager read GetWorkerCommandPoolManager;
+    property BindlessIndirectBatch: TCastleVulkanBindlessIndirectBatch read GetBindlessIndirectBatch;
     property VertexInputLibraryCount: Cardinal read GetVertexInputLibraryCount;
     property PreRasterizationLibraryCount: Cardinal read GetPreRasterizationLibraryCount;
     property FragmentShaderLibraryCount: Cardinal read GetFragmentShaderLibraryCount;
@@ -5518,6 +5683,18 @@ begin
         Access := VK_ACCESS_SHADER_READ_BIT;
         Stage  := VK_PIPELINE_STAGE_VERTEX_SHADER_BIT or VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
       end;
+    rsUnorderedAccess:
+      begin
+        Layout := VK_IMAGE_LAYOUT_GENERAL;
+        Access := VK_ACCESS_SHADER_READ_BIT or VK_ACCESS_SHADER_WRITE_BIT;
+        Stage  := VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT or VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+      end;
+    rsIndirectRead:
+      begin
+        Layout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        Access := VK_ACCESS_INDIRECT_COMMAND_READ_BIT or VK_ACCESS_SHADER_READ_BIT;
+        Stage  := VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT or VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+      end;
     rsColorAttachment:
       begin
         Layout := VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -5572,6 +5749,18 @@ begin
         Layout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         Access := VK_ACCESS_2_SHADER_READ_BIT;
         Stage  := VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT or VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+      end;
+    rsUnorderedAccess:
+      begin
+        Layout := VK_IMAGE_LAYOUT_GENERAL;
+        Access := VK_ACCESS_2_SHADER_READ_BIT or VK_ACCESS_2_SHADER_WRITE_BIT;
+        Stage  := VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT or VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+      end;
+    rsIndirectRead:
+      begin
+        Layout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        Access := VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT or VK_ACCESS_2_SHADER_READ_BIT;
+        Stage  := VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT or VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
       end;
     rsColorAttachment:
       begin
@@ -5634,6 +5823,18 @@ begin
                   VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT or
                   VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
       end;
+    rsUnorderedAccess:
+      begin
+        Access := VK_ACCESS_SHADER_READ_BIT or VK_ACCESS_SHADER_WRITE_BIT;
+        Stage  := VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+      end;
+    rsIndirectRead:
+      begin
+        Access := VK_ACCESS_INDIRECT_COMMAND_READ_BIT or VK_ACCESS_SHADER_READ_BIT;
+        Stage  := VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT or
+                  VK_PIPELINE_STAGE_VERTEX_SHADER_BIT or
+                  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+      end;
     else
       begin
         Access := VK_ACCESS_MEMORY_READ_BIT or VK_ACCESS_MEMORY_WRITE_BIT;
@@ -5668,6 +5869,18 @@ begin
         Stage  := VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT or
                   VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT or
                   VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT or
+                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+      end;
+    rsUnorderedAccess:
+      begin
+        Access := VK_ACCESS_2_SHADER_READ_BIT or VK_ACCESS_2_SHADER_WRITE_BIT;
+        Stage  := VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+      end;
+    rsIndirectRead:
+      begin
+        Access := VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT or VK_ACCESS_2_SHADER_READ_BIT;
+        Stage  := VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT or
+                  VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT or
                   VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
       end;
     else
@@ -5962,6 +6175,7 @@ begin
   ImgInfo.initialLayout := VK_IMAGE_LAYOUT_UNDEFINED;
 
   if tuSampled in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_SAMPLED_BIT;
+  if tuStorage in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_STORAGE_BIT;
   if tuColorAttachment in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
   if tuDepthStencil in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
   if tuTransferSrc in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
@@ -6627,10 +6841,12 @@ begin
   inherited Create(ADevice, '');
   FUsesUpdateAfterBind := False;
   HasAnyBindingFlags := False;
+  SetLength(FBindings, Length(Bindings));
   SetLength(VkBindings, Length(Bindings));
   SetLength(VkBindingFlags, Length(Bindings));
   for I := 0 to High(Bindings) do
   begin
+    FBindings[I] := Bindings[I];
     FillChar(VkBindings[I], SizeOf(VkDescriptorSetLayoutBinding), 0);
     VkBindings[I].binding := Bindings[I].Binding;
     VkBindings[I].descriptorCount := Bindings[I].Count;
@@ -6688,11 +6904,27 @@ end;
 
 destructor TVulkanRHIDescriptorSetLayout.Destroy;
 begin
+  SetLength(FBindings, 0);
   if (FHandle <> VK_NULL_HANDLE) and (Device <> nil) and
      (TVulkanRHIDevice(Device).Handle <> nil) and Assigned(vkDestroyDescriptorSetLayout) then
     vkDestroyDescriptorSetLayout(TVulkanRHIDevice(Device).Handle, FHandle, nil);
   FHandle := VK_NULL_HANDLE;
   inherited;
+end;
+
+function TVulkanRHIDescriptorSetLayout.TryGetBindingType(const ABinding: Cardinal;
+  out ADescriptorType: TRHIDescriptorType): Boolean;
+var
+  I: Integer;
+begin
+  for I := 0 to High(FBindings) do
+    if FBindings[I].Binding = ABinding then
+    begin
+      ADescriptorType := FBindings[I].DescriptorType;
+      Exit(True);
+    end;
+  ADescriptorType := dtCombinedImageSampler;
+  Result := False;
 end;
 
 function TVulkanRHIDescriptorSet.VulkanDevice: TVulkanRHIDevice;
@@ -6723,6 +6955,7 @@ begin
       PoolAlloc := ADevice.PersistentDescriptorAllocator;
   end;
 
+  FUsesCustomPool := False;
   if PoolAlloc <> nil then
     FHandle := PoolAlloc.AllocateDescriptorSet(SetLayoutHandle, FOwnerPool)
   else
@@ -6732,8 +6965,52 @@ begin
   end;
 end;
 
-destructor TVulkanRHIDescriptorSet.Destroy;
+constructor TVulkanRHIDescriptorSet.CreateFromCustomPool(
+  const ADevice: TVulkanRHIDevice; const ALayout: TVulkanRHIDescriptorSetLayout;
+  const ACustomPool: VkDescriptorPool);
+var
+  AllocInfo: VkDescriptorSetAllocateInfo;
+  LocalLayout: VkDescriptorSetLayout;
 begin
+  inherited Create(ADevice, '');
+  FLayout := ALayout;
+  FIsTransient := False;
+  FUsesCustomPool := True;
+  FOwnerPool := ACustomPool;
+  if ALayout <> nil then
+    LocalLayout := ALayout.Handle
+  else
+    LocalLayout := VK_NULL_HANDLE;
+
+  if (ADevice <> nil) and (ADevice.Handle <> nil) and
+     (ACustomPool <> VK_NULL_HANDLE) and Assigned(vkAllocateDescriptorSets) then
+  begin
+    FillChar(AllocInfo, SizeOf(AllocInfo), 0);
+    AllocInfo.sType := VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    AllocInfo.descriptorPool := ACustomPool;
+    AllocInfo.descriptorSetCount := 1;
+    AllocInfo.pSetLayouts := @LocalLayout;
+    CheckVk(vkAllocateDescriptorSets(ADevice.Handle, @AllocInfo, @FHandle),
+      'vkAllocateDescriptorSets(CustomPool)');
+  end else
+    FHandle := VkDescriptorSet(PtrUInt(Self));
+end;
+
+destructor TVulkanRHIDescriptorSet.Destroy;
+var
+  LocalSet: VkDescriptorSet;
+begin
+  if FUsesCustomPool then
+  begin
+    if (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and
+       (not VulkanDevice.DeferResourceDestruction) and
+       (FOwnerPool <> VK_NULL_HANDLE) and (FHandle <> VK_NULL_HANDLE) and
+       Assigned(vkFreeDescriptorSets) then
+    begin
+      LocalSet := FHandle;
+      vkFreeDescriptorSets(VulkanDevice.Handle, FOwnerPool, 1, @LocalSet);
+    end;
+  end else
   if (not FIsTransient) and (VulkanDevice <> nil) and (FHandle <> VK_NULL_HANDLE) then
     VulkanDevice.DeferOrDestroyDescriptorSet(FOwnerPool, FHandle);
   FHandle := VK_NULL_HANDLE;
@@ -6809,22 +7086,48 @@ procedure TVulkanRHIDescriptorSet.BindTextureAtIndex(const Binding, ArrayElement
   const Texture: TRHITexture; const Sampler: TRHISampler);
 var
   Idx, WriteIdx: Integer;
+  DeclType: TRHIDescriptorType;
+  VkDescType: VkDescriptorType;
 begin
   if Texture = nil then Exit;
   FLastBoundTexture := Texture;
   FLastBoundSampler := Sampler;
+
+  DeclType := dtCombinedImageSampler;
+  if FLayout <> nil then
+    FLayout.TryGetBindingType(Binding, DeclType);
+
   Idx := Length(FImageInfos);
   SetLength(FImageInfos, Idx + 1);
   FillChar(FImageInfos[Idx], SizeOf(VkDescriptorImageInfo), 0);
-  if Sampler <> nil then
-    FImageInfos[Idx].sampler := (Sampler as TVulkanRHISampler).Handle
-  else
-  if VulkanDevice <> nil then
-    FImageInfos[Idx].sampler := VulkanDevice.GetDefaultSampler.Handle
-  else
-    FImageInfos[Idx].sampler := VK_NULL_HANDLE;
   FImageInfos[Idx].imageView := (Texture as TVulkanRHITexture).ImageView;
-  FImageInfos[Idx].imageLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+  case DeclType of
+    dtStorageImage:
+      begin
+        FImageInfos[Idx].sampler := VK_NULL_HANDLE;
+        FImageInfos[Idx].imageLayout := VK_IMAGE_LAYOUT_GENERAL;
+        VkDescType := VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+      end;
+    dtSampledImage:
+      begin
+        FImageInfos[Idx].sampler := VK_NULL_HANDLE;
+        FImageInfos[Idx].imageLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkDescType := VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+      end;
+    else
+      begin
+        if Sampler <> nil then
+          FImageInfos[Idx].sampler := (Sampler as TVulkanRHISampler).Handle
+        else
+        if VulkanDevice <> nil then
+          FImageInfos[Idx].sampler := VulkanDevice.GetDefaultSampler.Handle
+        else
+          FImageInfos[Idx].sampler := VK_NULL_HANDLE;
+        FImageInfos[Idx].imageLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkDescType := VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      end;
+  end;
 
   WriteIdx := Length(FPendingWrites);
   SetLength(FPendingWrites, WriteIdx + 1);
@@ -6836,7 +7139,7 @@ begin
   FPendingWrites[WriteIdx].dstBinding := Binding;
   FPendingWrites[WriteIdx].dstArrayElement := ArrayElement;
   FPendingWrites[WriteIdx].descriptorCount := 1;
-  FPendingWrites[WriteIdx].descriptorType := VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  FPendingWrites[WriteIdx].descriptorType := VkDescType;
 end;
 
 procedure TVulkanRHIDescriptorSet.Update;
@@ -6848,7 +7151,10 @@ begin
     for I := 0 to High(FPendingWrites) do
     begin
       InfoIdx := FPendingWriteInfoIndices[I];
-      if FPendingWrites[I].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER then
+      if (FPendingWrites[I].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) or
+         (FPendingWrites[I].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE) or
+         (FPendingWrites[I].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER) or
+         (FPendingWrites[I].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) then
         FPendingWrites[I].pImageInfo := @FImageInfos[InfoIdx]
       else
         FPendingWrites[I].pBufferInfo := @FBufferInfos[InfoIdx];
@@ -7716,7 +8022,7 @@ var
   DepInfo: VkDependencyInfo;
   SrcStage, DstStage: VkPipelineStageFlags;
 begin
-  if (Buffer = nil) or (OldState = NewState) then
+  if (Buffer = nil) or ((OldState = NewState) and (OldState <> rsUnorderedAccess)) then
     Exit;
 
   VkBuf := Buffer as TVulkanRHIBuffer;
@@ -9227,15 +9533,25 @@ begin
     FMaterialSSBOBuffer := nil;
   FreeAndNil(FDescriptorSet);
   FreeAndNil(FLayout);
+  if (FBindlessPool <> VK_NULL_HANDLE) and (FDevice <> nil) and
+     (FDevice.Handle <> nil) and Assigned(vkDestroyDescriptorPool) then
+    vkDestroyDescriptorPool(FDevice.Handle, FBindlessPool, nil);
+  FBindlessPool := VK_NULL_HANDLE;
   inherited;
 end;
 
 procedure TCastleVulkanBindlessTextureManager.EnsureDescriptorSetCreated;
 var
   Bindings: array[0..1] of TRHIDescriptorBindingDesc;
+  PoolSizes: array[0..1] of VkDescriptorPoolSize;
+  PoolInfo: VkDescriptorPoolCreateInfo;
+  UseBindlessFlags, EffectiveUpdateAfterBind: Boolean;
 begin
   if FDescriptorSet <> nil then
     Exit;
+
+  UseBindlessFlags := (FDevice = nil) or FDevice.SupportsBindlessTextures;
+  EffectiveUpdateAfterBind := UseBindlessFlags and FSupportsUpdateAfterBind;
 
   FillChar(Bindings, SizeOf(Bindings), 0);
   { Binding 0: Bindless Combined Image Sampler Array }
@@ -9243,19 +9559,48 @@ begin
   Bindings[0].DescriptorType := dtCombinedImageSampler;
   Bindings[0].Count := FCapacity;
   Bindings[0].StageFlags := [ssVertex, ssFragment, ssCompute];
-  Bindings[0].BindingFlags := [dbfPartiallyBound, dbfUpdateUnusedWhilePending];
-  if FSupportsUpdateAfterBind then
-    Include(Bindings[0].BindingFlags, dbfUpdateAfterBind);
+  if UseBindlessFlags then
+  begin
+    Bindings[0].BindingFlags := [dbfPartiallyBound, dbfUpdateUnusedWhilePending];
+    if EffectiveUpdateAfterBind then
+      Include(Bindings[0].BindingFlags, dbfUpdateAfterBind);
+  end;
 
   { Binding 1: Multi-Material Storage Buffer (CastleBindlessMaterialsBlock) }
   Bindings[1].Binding := 1;
   Bindings[1].DescriptorType := dtStorageBuffer;
   Bindings[1].Count := 1;
   Bindings[1].StageFlags := [ssVertex, ssFragment, ssCompute];
-  Bindings[1].BindingFlags := [dbfPartiallyBound];
+  if UseBindlessFlags then
+    Bindings[1].BindingFlags := [dbfPartiallyBound];
 
   FLayout := TVulkanRHIDescriptorSetLayout.Create(FDevice, Bindings);
-  FDescriptorSet := TVulkanRHIDescriptorSet.Create(FDevice, FLayout, False);
+
+  if FBindlessPool = VK_NULL_HANDLE then
+  begin
+    FillChar(PoolSizes, SizeOf(PoolSizes), 0);
+    PoolSizes[0]._type := VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    PoolSizes[0].descriptorCount := Max(Cardinal(16), FCapacity);
+    PoolSizes[1]._type := VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    PoolSizes[1].descriptorCount := 4;
+
+    FillChar(PoolInfo, SizeOf(PoolInfo), 0);
+    PoolInfo.sType := VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    PoolInfo.flags := VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    if EffectiveUpdateAfterBind then
+      PoolInfo.flags := PoolInfo.flags or VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+    PoolInfo.maxSets := 4;
+    PoolInfo.poolSizeCount := Length(PoolSizes);
+    PoolInfo.pPoolSizes := @PoolSizes[0];
+
+    if (FDevice <> nil) and (FDevice.Handle <> nil) and Assigned(vkCreateDescriptorPool) then
+      CheckVk(vkCreateDescriptorPool(FDevice.Handle, @PoolInfo, nil, @FBindlessPool),
+        'vkCreateDescriptorPool(Bindless)')
+    else
+      FBindlessPool := VkDescriptorPool(PtrUInt(Self));
+  end;
+
+  FDescriptorSet := TVulkanRHIDescriptorSet.CreateFromCustomPool(FDevice, FLayout, FBindlessPool);
 end;
 
 function TCastleVulkanBindlessTextureManager.GetFreeSlotCount: Cardinal;
@@ -11196,23 +11541,11 @@ begin
 end;
 
 procedure TCastleVulkanComputeCuller.EnsureResourcesCreated;
-const
-  FallbackComputeSPIRV: array[0..9] of UInt32 = (
-    $07230203, // SPIR-V Magic
-    $00010500, // Version 1.5
-    $00000000,
-    $00000008, // Bound
-    $00000000,
-    ($00050000 or 15), // OpEntryPoint (5 words)
-    5,                 // ExecutionModel = GLCompute (5)
-    1,                 // EntryPoint ID = %1
-    $6E69616D,         // "main"
-    $00000000
-  );
 var
   Bindings: array[0..3] of TRHIDescriptorBindingDesc;
   ShaderGen: TCastleShaderGeneratorRHI;
   ComputeGLSL: String;
+  BuiltInSPIRV: TSPIRVBytecode;
   PipeDesc: TRHIComputePipelineDesc;
 begin
   if (FDevice = nil) or (FComputePipeline <> nil) then
@@ -11280,8 +11613,16 @@ begin
   if TCastleShaderCompiler.Instance.IsRuntimeCompilationAvailable then
     FComputeShader := FDevice.CreateShaderModuleFromGLSL(ssCompute, ComputeGLSL, 'GpuCullingCS')
   else
+  if TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssCompute, ComputeGLSL, 'GpuCullingCS', BuiltInSPIRV) and
+     (Length(BuiltInSPIRV) > 0) then
     FComputeShader := FDevice.CreateShaderModuleFromSPIRV(ssCompute,
-      @FallbackComputeSPIRV[0], SizeOf(FallbackComputeSPIRV), 'GpuCullingCS');
+      @BuiltInSPIRV[0], Length(BuiltInSPIRV), 'GpuCullingCS')
+  else
+  begin
+    BuiltInSPIRV := TCastleShaderCompiler.Instance.GetMinimalValidSPIRVFallback(ssCompute);
+    FComputeShader := FDevice.CreateShaderModuleFromSPIRV(ssCompute,
+      @BuiltInSPIRV[0], Length(BuiltInSPIRV), 'GpuCullingCS');
+  end;
 
   FillChar(PipeDesc, SizeOf(PipeDesc), 0);
   PipeDesc.ComputeShader := FComputeShader;
@@ -11292,24 +11633,12 @@ begin
 end;
 
 procedure TCastleVulkanComputeCuller.EnsureHiZPipelineCreated;
-const
-  FallbackHiZSPIRV: array[0..9] of UInt32 = (
-    $07230203, // SPIR-V Magic
-    $00010500, // Version 1.5
-    $00000000,
-    $00000008, // Bound
-    $00000000,
-    ($00050000 or 15), // OpEntryPoint (5 words)
-    5,                 // ExecutionModel = GLCompute (5)
-    1,                 // EntryPoint ID = %1
-    $6E69616D,         // "main"
-    $00000000
-  );
 var
   SamplerDesc: TRHISamplerDesc;
   Bindings: array[0..1] of TRHIDescriptorBindingDesc;
   ShaderGen: TCastleShaderGeneratorRHI;
   HiZGLSL: String;
+  BuiltInSPIRV: TSPIRVBytecode;
   PipeDesc: TRHIComputePipelineDesc;
 begin
   if (FDevice = nil) or (FHiZDownsamplePipeline <> nil) then
@@ -11350,8 +11679,16 @@ begin
   if TCastleShaderCompiler.Instance.IsRuntimeCompilationAvailable then
     FHiZDownsampleShader := FDevice.CreateShaderModuleFromGLSL(ssCompute, HiZGLSL, 'HiZDownsampleCS')
   else
+  if TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssCompute, HiZGLSL, 'HiZDownsampleCS', BuiltInSPIRV) and
+     (Length(BuiltInSPIRV) > 0) then
     FHiZDownsampleShader := FDevice.CreateShaderModuleFromSPIRV(ssCompute,
-      @FallbackHiZSPIRV[0], SizeOf(FallbackHiZSPIRV), 'HiZDownsampleCS');
+      @BuiltInSPIRV[0], Length(BuiltInSPIRV), 'HiZDownsampleCS')
+  else
+  begin
+    BuiltInSPIRV := TCastleShaderCompiler.Instance.GetMinimalValidSPIRVFallback(ssCompute);
+    FHiZDownsampleShader := FDevice.CreateShaderModuleFromSPIRV(ssCompute,
+      @BuiltInSPIRV[0], Length(BuiltInSPIRV), 'HiZDownsampleCS');
+  end;
 
   FillChar(PipeDesc, SizeOf(PipeDesc), 0);
   PipeDesc.ComputeShader := FHiZDownsampleShader;
@@ -11699,6 +12036,7 @@ var
   CmdEntry: TRHIDrawIndexedIndirectCommand;
   MappedIndirect: PRHIDrawIndexedIndirectCommand;
   MappedVis: PCardinal;
+  ExecuteOnRealGpu: Boolean;
 begin
   EnsureResourcesCreated;
   EffectiveCount := Min(FMaxInstances, Min(AInstanceCount, FLastUploadedInstanceCount));
@@ -11719,8 +12057,15 @@ begin
   if FCullingUniformBuffer <> nil then
     FCullingUniformBuffer.UploadData(FCullingUniforms, SizeOf(FCullingUniforms), 0);
 
-  { Populate deterministic indirect commands and visibility counters in mapped memory
-    before recording the GPU compute dispatch and buffer barrier. }
+  { On real Vulkan GPUs (when CPU-emulated Hi-Z test is not active), zero both output
+    buffers on host so GpuCullingCS populates VisibilityOut[0..N] (via OpAtomicIAdd)
+    and IndirectOut[0..N-1] exclusively on the GPU. In headless mode (FDevice.Handle = nil)
+    or when CPU Hi-Z culling is active, populate mapped buffers deterministically on CPU. }
+  ExecuteOnRealGpu := (FDevice <> nil) and (FDevice.Handle <> nil) and
+    (ACmd is TVulkanRHICommandList) and (TVulkanRHICommandList(ACmd).Handle <> nil) and
+    (FComputePipeline <> nil) and (not FHiZCullingEnabled) and
+    (FDevice.Capabilities.SupportsDrawIndirectCount or (not ACompactDraws));
+
   VisibleCount := 0;
   HiZCulledCount := 0;
   MappedIndirect := nil;
@@ -11741,7 +12086,7 @@ begin
       Visible := IsInstanceVisibleOnCpu(Inst, WasHiZCulled);
       if WasHiZCulled then
         Inc(HiZCulledCount);
-      if MappedVis <> nil then
+      if (not ExecuteOnRealGpu) and (MappedVis <> nil) then
       begin
         if Visible then
           PCardinal(PtrUInt(MappedVis) + PtrUInt(I + 1) * SizeOf(Cardinal))^ := 1
@@ -11755,7 +12100,7 @@ begin
         begin
           OutSlot := VisibleCount;
           Inc(VisibleCount);
-          if MappedIndirect <> nil then
+          if (not ExecuteOnRealGpu) and (MappedIndirect <> nil) then
           begin
             CmdEntry.IndexCount := Inst.IndexCount;
             CmdEntry.InstanceCount := Inst.InstanceCount;
@@ -11770,7 +12115,7 @@ begin
       begin
         if Visible then
           Inc(VisibleCount);
-        if MappedIndirect <> nil then
+        if (not ExecuteOnRealGpu) and (MappedIndirect <> nil) then
         begin
           CmdEntry.IndexCount := Inst.IndexCount;
           if Visible then
@@ -11786,8 +12131,22 @@ begin
       end;
     end;
 
-    if MappedVis <> nil then
+    if (not ExecuteOnRealGpu) and (MappedVis <> nil) then
       MappedVis^ := VisibleCount;
+
+    if (FDevice <> nil) and (FDevice.MemoryAllocator <> nil) then
+    begin
+      if (FIndirectOutputBuffer is TVulkanRHIBuffer) and
+         TVulkanRHIBuffer(FIndirectOutputBuffer).Allocation.IsValid then
+        FDevice.MemoryAllocator.FlushAllocation(
+          TVulkanRHIBuffer(FIndirectOutputBuffer).Allocation, 0,
+          PtrUInt(EffectiveCount) * SizeOf(TRHIDrawIndexedIndirectCommand));
+      if (FVisibilityOutputBuffer is TVulkanRHIBuffer) and
+         TVulkanRHIBuffer(FVisibilityOutputBuffer).Allocation.IsValid then
+        FDevice.MemoryAllocator.FlushAllocation(
+          TVulkanRHIBuffer(FVisibilityOutputBuffer).Allocation, 0,
+          PtrUInt(EffectiveCount + 1) * SizeOf(Cardinal));
+    end;
   finally
     if FVisibilityOutputBuffer <> nil then
       FVisibilityOutputBuffer.Unmap;
@@ -11807,8 +12166,8 @@ begin
     ACmd.Dispatch(GroupCountX, 1, 1);
     if ACmd is TVulkanRHICommandList then
     begin
-      TVulkanRHICommandList(ACmd).TransitionBuffer(FIndirectOutputBuffer, rsTransferDst, rsShaderRead);
-      TVulkanRHICommandList(ACmd).TransitionBuffer(FVisibilityOutputBuffer, rsTransferDst, rsShaderRead);
+      TVulkanRHICommandList(ACmd).TransitionBuffer(FIndirectOutputBuffer, rsUnorderedAccess, rsIndirectRead);
+      TVulkanRHICommandList(ACmd).TransitionBuffer(FVisibilityOutputBuffer, rsUnorderedAccess, rsIndirectRead);
     end;
   end;
 
@@ -11836,6 +12195,13 @@ begin
     FVisibilityOutputBuffer, 0,
     MaxDraws, SizeOf(TRHIDrawIndexedIndirectCommand));
 
+  if (FDevice <> nil) and (FDevice.Handle <> nil) and
+     (ACmd is TVulkanRHICommandList) and (TVulkanRHICommandList(ACmd).Handle <> nil) and
+     FDevice.Capabilities.SupportsDrawIndirectCount and (not FHiZCullingEnabled) then
+  begin
+    Result := Min(MaxDraws, FLastVisibleInstanceCount);
+    TVulkanRHICommandList(ACmd).FLastEffectiveIndirectDrawCount := Result;
+  end else
   if ACmd is TVulkanRHICommandList then
     Result := TVulkanRHICommandList(ACmd).LastEffectiveIndirectDrawCount
   else
@@ -11849,6 +12215,13 @@ begin
   Result := FLastVisibleInstanceCount;
   if FVisibilityOutputBuffer <> nil then
   begin
+    if (FDevice <> nil) and (FDevice.Handle <> nil) then
+    begin
+      FDevice.WaitIdle;
+      if (FDevice.MemoryAllocator <> nil) and (FVisibilityOutputBuffer is TVulkanRHIBuffer) then
+        FDevice.MemoryAllocator.InvalidateAllocation(
+          TVulkanRHIBuffer(FVisibilityOutputBuffer).Allocation, 0, SizeOf(Cardinal));
+    end;
     MappedVis := PCardinal(FVisibilityOutputBuffer.Map);
     try
       if MappedVis <> nil then
@@ -11866,6 +12239,14 @@ begin
   Result := 0;
   if (FVisibilityOutputBuffer <> nil) and (AIndex < FMaxInstances) then
   begin
+    if (FDevice <> nil) and (FDevice.Handle <> nil) then
+    begin
+      FDevice.WaitIdle;
+      if (FDevice.MemoryAllocator <> nil) and (FVisibilityOutputBuffer is TVulkanRHIBuffer) then
+        FDevice.MemoryAllocator.InvalidateAllocation(
+          TVulkanRHIBuffer(FVisibilityOutputBuffer).Allocation, 0,
+          PtrUInt(AIndex + 2) * SizeOf(Cardinal));
+    end;
     MappedVis := PCardinal(FVisibilityOutputBuffer.Map);
     try
       if MappedVis <> nil then
@@ -11884,6 +12265,14 @@ begin
   FillChar(Result, SizeOf(Result), 0);
   if (FIndirectOutputBuffer <> nil) and (AIndex < FMaxInstances) then
   begin
+    if (FDevice <> nil) and (FDevice.Handle <> nil) then
+    begin
+      FDevice.WaitIdle;
+      if (FDevice.MemoryAllocator <> nil) and (FIndirectOutputBuffer is TVulkanRHIBuffer) then
+        FDevice.MemoryAllocator.InvalidateAllocation(
+          TVulkanRHIBuffer(FIndirectOutputBuffer).Allocation, 0,
+          PtrUInt(AIndex + 1) * SizeOf(TRHIDrawIndexedIndirectCommand));
+    end;
     MappedIndirect := PRHIDrawIndexedIndirectCommand(FIndirectOutputBuffer.Map);
     try
       if MappedIndirect <> nil then
@@ -18672,10 +19061,19 @@ begin
   inherited Create;
   FDevice := ADevice;
   FMaxMaterialBins := 256;
+  FMaxElements := 4096;
 end;
 
 destructor TCastleVulkanMaterialBinner.Destroy;
 begin
+  SetLength(FUploadedMaterialIDs, 0);
+  FreeAndNil(FBinDescriptorSet);
+  FreeAndNil(FBinDescriptorLayout);
+  FreeAndNil(FHistogramShader);
+  FreeAndNil(FPrefixSumShader);
+  FHistogramPipeline := nil; // Owned by FDevice.FComputePipelineMap
+  FPrefixSumPipeline := nil; // Owned by FDevice.FComputePipelineMap
+  FreeAndNil(FMaterialIDsBuffer);
   FreeAndNil(FBinCountsBuffer);
   FreeAndNil(FBinOffsetsBuffer);
   inherited;
@@ -18731,12 +19129,149 @@ begin
     FreeAndNil(FBinOffsetsBuffer);
 
     BufDesc := TRHIBufferDesc.Create(PtrUInt(Bins) * SizeOf(Cardinal),
-      [buStorage, buIndirect], muGpuOnly, 'MaterialBinCountsSSBO');
+      [buStorage, buIndirect, buTransferSrc, buTransferDst], muCpuToGpu, 'MaterialBinCountsSSBO');
     FBinCountsBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
 
     BufDesc := TRHIBufferDesc.Create(PtrUInt(Bins) * SizeOf(Cardinal),
-      [buStorage, buIndirect], muGpuOnly, 'MaterialBinOffsetsSSBO');
+      [buStorage, buIndirect, buTransferSrc, buTransferDst], muCpuToGpu, 'MaterialBinOffsetsSSBO');
     FBinOffsetsBuffer := FDevice.CreateBuffer(BufDesc) as TVulkanRHIBuffer;
+
+    if (FBinDescriptorSet <> nil) and (FMaterialIDsBuffer <> nil) then
+    begin
+      FBinDescriptorSet.BindStorageBuffer(0, FMaterialIDsBuffer, 0, FMaterialIDsBuffer.Desc.Size);
+      FBinDescriptorSet.BindStorageBuffer(1, FBinCountsBuffer, 0, FBinCountsBuffer.Desc.Size);
+      FBinDescriptorSet.BindStorageBuffer(2, FBinOffsetsBuffer, 0, FBinOffsetsBuffer.Desc.Size);
+      FBinDescriptorSet.Update;
+    end;
+  end;
+end;
+
+procedure TCastleVulkanMaterialBinner.EnsureStreamBinningPipelines;
+const
+  HistGLSL =
+    '#version 450' + LineEnding +
+    'layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;' + LineEnding +
+    'layout(std430, set = 0, binding = 0) readonly buffer MaterialIDsSSBO { uint MaterialIDs[]; };' + LineEnding +
+    'layout(std430, set = 0, binding = 1) buffer BinCountsSSBO { uint BinCounts[]; };' + LineEnding +
+    'layout(std430, set = 0, binding = 2) buffer BinOffsetsSSBO { uint BinOffsets[]; };' + LineEnding +
+    'layout(push_constant) uniform PushData { uint u_ElementCount; uint u_BinCount; };' + LineEnding +
+    'void main() {' + LineEnding +
+    '  uint idx = gl_GlobalInvocationID.x;' + LineEnding +
+    '  if (idx < u_ElementCount && u_BinCount > 0u) {' + LineEnding +
+    '    uint binIdx = MaterialIDs[idx] % u_BinCount;' + LineEnding +
+    '    atomicAdd(BinCounts[binIdx], 1u);' + LineEnding +
+    '  }' + LineEnding +
+    '}';
+  ScanGLSL =
+    '#version 450' + LineEnding +
+    'layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;' + LineEnding +
+    'layout(std430, set = 0, binding = 0) readonly buffer MaterialIDsSSBO { uint MaterialIDs[]; };' + LineEnding +
+    'layout(std430, set = 0, binding = 1) readonly buffer BinCountsSSBO { uint BinCounts[]; };' + LineEnding +
+    'layout(std430, set = 0, binding = 2) buffer BinOffsetsSSBO { uint BinOffsets[]; };' + LineEnding +
+    'layout(push_constant) uniform PushData { uint u_ElementCount; uint u_BinCount; };' + LineEnding +
+    'void main() {' + LineEnding +
+    '  uint RunningSum = 0u;' + LineEnding +
+    '  for (uint i = 0u; i < u_BinCount; ++i) {' + LineEnding +
+    '    BinOffsets[i] = RunningSum;' + LineEnding +
+    '    RunningSum += BinCounts[i];' + LineEnding +
+    '  }' + LineEnding +
+    '}';
+var
+  Bindings: array[0..2] of TRHIDescriptorBindingDesc;
+  BuiltInSPIRV: TSPIRVBytecode;
+  PipeDesc: TRHIComputePipelineDesc;
+  ElemCap: Cardinal;
+begin
+  if FDevice = nil then
+    Exit;
+  EnsureBinningBuffers;
+
+  ElemCap := Max(Cardinal(64), FMaxElements);
+  FMaxElements := ElemCap;
+  if (FMaterialIDsBuffer = nil) or (FMaterialIDsBuffer.Desc.Size < PtrUInt(ElemCap) * SizeOf(Cardinal)) then
+  begin
+    FreeAndNil(FMaterialIDsBuffer);
+    FMaterialIDsBuffer := FDevice.CreateBuffer(
+      TRHIBufferDesc.Create(PtrUInt(ElemCap) * SizeOf(Cardinal),
+        [buStorage, buTransferDst], muCpuToGpu, 'MaterialIDsStreamSSBO')) as TVulkanRHIBuffer;
+  end;
+
+  if FBinDescriptorLayout = nil then
+  begin
+    FillChar(Bindings, SizeOf(Bindings), 0);
+    Bindings[0].Binding := 0;
+    Bindings[0].DescriptorType := dtStorageBuffer;
+    Bindings[0].Count := 1;
+    Bindings[0].StageFlags := [ssCompute];
+    Bindings[1].Binding := 1;
+    Bindings[1].DescriptorType := dtStorageBuffer;
+    Bindings[1].Count := 1;
+    Bindings[1].StageFlags := [ssCompute];
+    Bindings[2].Binding := 2;
+    Bindings[2].DescriptorType := dtStorageBuffer;
+    Bindings[2].Count := 1;
+    Bindings[2].StageFlags := [ssCompute];
+    FBinDescriptorLayout := FDevice.CreateDescriptorSetLayout(Bindings);
+  end;
+
+  if FBinDescriptorSet = nil then
+    FBinDescriptorSet := FDevice.CreateDescriptorSet(FBinDescriptorLayout);
+
+  FBinDescriptorSet.BindStorageBuffer(0, FMaterialIDsBuffer, 0, FMaterialIDsBuffer.Desc.Size);
+  FBinDescriptorSet.BindStorageBuffer(1, FBinCountsBuffer, 0, FBinCountsBuffer.Desc.Size);
+  FBinDescriptorSet.BindStorageBuffer(2, FBinOffsetsBuffer, 0, FBinOffsetsBuffer.Desc.Size);
+  FBinDescriptorSet.Update;
+
+  if FHistogramPipeline = nil then
+  begin
+    if TCastleShaderCompiler.Instance.IsRuntimeCompilationAvailable then
+      FHistogramShader := FDevice.CreateShaderModuleFromGLSL(ssCompute, HistGLSL, 'MaterialBinHistogramCS')
+    else
+    if TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssCompute, HistGLSL, 'MaterialBinHistogramCS', BuiltInSPIRV) and
+       (Length(BuiltInSPIRV) > 0) then
+      FHistogramShader := FDevice.CreateShaderModuleFromSPIRV(ssCompute,
+        @BuiltInSPIRV[0], Length(BuiltInSPIRV), 'MaterialBinHistogramCS')
+    else
+    begin
+      BuiltInSPIRV := TCastleShaderCompiler.Instance.GetMinimalValidSPIRVFallback(ssCompute);
+      FHistogramShader := FDevice.CreateShaderModuleFromSPIRV(ssCompute,
+        @BuiltInSPIRV[0], Length(BuiltInSPIRV), 'MaterialBinHistogramCS');
+    end;
+
+    FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+    PipeDesc.ComputeShader := FHistogramShader;
+    SetLength(PipeDesc.DescriptorSetLayouts, 1);
+    PipeDesc.DescriptorSetLayouts[0] := FBinDescriptorLayout;
+    PipeDesc.PushConstantSize := 8;
+    PipeDesc.PushConstantStages := [ssCompute];
+    PipeDesc.DebugName := 'MaterialBinHistogramPSO';
+    FHistogramPipeline := FDevice.GetOrCreateComputePipeline(PipeDesc) as TVulkanRHIComputePipeline;
+  end;
+
+  if FPrefixSumPipeline = nil then
+  begin
+    if TCastleShaderCompiler.Instance.IsRuntimeCompilationAvailable then
+      FPrefixSumShader := FDevice.CreateShaderModuleFromGLSL(ssCompute, ScanGLSL, 'MaterialBinPrefixSumCS')
+    else
+    if TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssCompute, ScanGLSL, 'MaterialBinPrefixSumCS', BuiltInSPIRV) and
+       (Length(BuiltInSPIRV) > 0) then
+      FPrefixSumShader := FDevice.CreateShaderModuleFromSPIRV(ssCompute,
+        @BuiltInSPIRV[0], Length(BuiltInSPIRV), 'MaterialBinPrefixSumCS')
+    else
+    begin
+      BuiltInSPIRV := TCastleShaderCompiler.Instance.GetMinimalValidSPIRVFallback(ssCompute);
+      FPrefixSumShader := FDevice.CreateShaderModuleFromSPIRV(ssCompute,
+        @BuiltInSPIRV[0], Length(BuiltInSPIRV), 'MaterialBinPrefixSumCS');
+    end;
+
+    FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+    PipeDesc.ComputeShader := FPrefixSumShader;
+    SetLength(PipeDesc.DescriptorSetLayouts, 1);
+    PipeDesc.DescriptorSetLayouts[0] := FBinDescriptorLayout;
+    PipeDesc.PushConstantSize := 8;
+    PipeDesc.PushConstantStages := [ssCompute];
+    PipeDesc.DebugName := 'MaterialBinPrefixSumPSO';
+    FPrefixSumPipeline := FDevice.GetOrCreateComputePipeline(PipeDesc) as TVulkanRHIComputePipeline;
   end;
 end;
 
@@ -18760,12 +19295,576 @@ begin
   if ActivePipe <> nil then
     ACommandList.BindComputePipeline(ActivePipe);
   if ADescriptorSet <> nil then
-    ACommandList.BindDescriptorSet(0, ADescriptorSet, []);
+    ACommandList.BindComputeDescriptorSet(0, ADescriptorSet, []);
 
   GroupsX := (AScreenWidth + 7) div 8;
   GroupsY := (AScreenHeight + 7) div 8;
   ACommandList.Dispatch(GroupsX, GroupsY, 1);
   Inc(FBinningDispatchCount);
+end;
+
+procedure TCastleVulkanMaterialBinner.UploadMaterialIDs(
+  const AMaterialIDs: array of Cardinal);
+var
+  Count, I: Cardinal;
+begin
+  Count := Cardinal(Length(AMaterialIDs));
+  FLastUploadedElementCount := Count;
+  SetLength(FUploadedMaterialIDs, Count);
+  for I := 0 to Integer(Count) - 1 do
+    FUploadedMaterialIDs[I] := AMaterialIDs[I];
+
+  if Count > FMaxElements then
+    FMaxElements := Max(Count, FMaxElements * 2);
+
+  EnsureStreamBinningPipelines;
+  if (Count > 0) and (FMaterialIDsBuffer <> nil) then
+    FMaterialIDsBuffer.UploadData(FUploadedMaterialIDs[0], PtrUInt(Count) * SizeOf(Cardinal), 0);
+end;
+
+function TCastleVulkanMaterialBinner.DispatchStreamBinning(
+  const ACommandList: TVulkanRHICommandList;
+  const ABinCount: Cardinal): Cardinal;
+type
+  TBinPushConsts = packed record
+    ElementCount: Cardinal;
+    BinCount: Cardinal;
+  end;
+var
+  EffectiveBins, GroupsX: Cardinal;
+  PushConsts: TBinPushConsts;
+  ZeroArray, CpuCounts, CpuOffsets: TCardinalDynamicArray;
+  ExecuteOnRealGpu: Boolean;
+begin
+  if FDevice = nil then
+    Exit(0);
+  if ABinCount > FMaxMaterialBins then
+    FMaxMaterialBins := ABinCount;
+  EnsureStreamBinningPipelines;
+
+  if ABinCount > 0 then
+    EffectiveBins := Min(FMaxMaterialBins, ABinCount)
+  else
+    EffectiveBins := FMaxMaterialBins;
+  EffectiveBins := Max(Cardinal(1), EffectiveBins);
+
+  ExecuteOnRealGpu := (FDevice.Handle <> nil) and (ACommandList <> nil) and
+    (ACommandList.Handle <> nil) and (FHistogramPipeline <> nil) and (FPrefixSumPipeline <> nil);
+
+  if ExecuteOnRealGpu then
+  begin
+    SetLength(ZeroArray, EffectiveBins);
+    FillChar(ZeroArray[0], PtrUInt(EffectiveBins) * SizeOf(Cardinal), 0);
+    FBinCountsBuffer.UploadData(ZeroArray[0], PtrUInt(EffectiveBins) * SizeOf(Cardinal), 0);
+    FBinOffsetsBuffer.UploadData(ZeroArray[0], PtrUInt(EffectiveBins) * SizeOf(Cardinal), 0);
+  end else
+  begin
+    EvaluateMaterialBinRanges(FUploadedMaterialIDs, EffectiveBins, CpuCounts, CpuOffsets);
+    FBinCountsBuffer.UploadData(CpuCounts[0], PtrUInt(EffectiveBins) * SizeOf(Cardinal), 0);
+    FBinOffsetsBuffer.UploadData(CpuOffsets[0], PtrUInt(EffectiveBins) * SizeOf(Cardinal), 0);
+  end;
+
+  if ACommandList <> nil then
+  begin
+    PushConsts.ElementCount := FLastUploadedElementCount;
+    PushConsts.BinCount := EffectiveBins;
+    GroupsX := Max(Cardinal(1), (FLastUploadedElementCount + 63) div 64);
+
+    if FHistogramPipeline <> nil then
+    begin
+      ACommandList.BindComputePipeline(FHistogramPipeline);
+      ACommandList.BindComputeDescriptorSet(0, FBinDescriptorSet, []);
+      ACommandList.PushConstants([ssCompute], 0, SizeOf(PushConsts), PushConsts);
+      ACommandList.Dispatch(GroupsX, 1, 1);
+    end;
+
+    ACommandList.TransitionBuffer(FBinCountsBuffer, rsUnorderedAccess, rsUnorderedAccess);
+
+    if FPrefixSumPipeline <> nil then
+    begin
+      ACommandList.BindComputePipeline(FPrefixSumPipeline);
+      ACommandList.BindComputeDescriptorSet(0, FBinDescriptorSet, []);
+      ACommandList.PushConstants([ssCompute], 0, SizeOf(PushConsts), PushConsts);
+      ACommandList.Dispatch(1, 1, 1);
+    end;
+
+    ACommandList.TransitionBuffer(FBinOffsetsBuffer, rsUnorderedAccess, rsIndirectRead);
+  end;
+
+  Inc(FBinningDispatchCount);
+  Result := EffectiveBins;
+end;
+
+procedure TCastleVulkanMaterialBinner.ReadBackBinRanges(const ABinCount: Cardinal;
+  out AOutBinCounts, AOutBinOffsets: TCardinalDynamicArray);
+var
+  SafeBins: Cardinal;
+  MappedPtr: Pointer;
+begin
+  EnsureBinningBuffers;
+  SafeBins := Max(Cardinal(1), Min(FMaxMaterialBins, ABinCount));
+  SetLength(AOutBinCounts, SafeBins);
+  SetLength(AOutBinOffsets, SafeBins);
+  FillChar(AOutBinCounts[0], PtrUInt(SafeBins) * SizeOf(Cardinal), 0);
+  FillChar(AOutBinOffsets[0], PtrUInt(SafeBins) * SizeOf(Cardinal), 0);
+
+  if (FDevice <> nil) and (FDevice.Handle <> nil) then
+  begin
+    FDevice.WaitIdle;
+    if FDevice.MemoryAllocator <> nil then
+    begin
+      if FBinCountsBuffer <> nil then
+        FDevice.MemoryAllocator.InvalidateAllocation(FBinCountsBuffer.Allocation, 0,
+          PtrUInt(SafeBins) * SizeOf(Cardinal));
+      if FBinOffsetsBuffer <> nil then
+        FDevice.MemoryAllocator.InvalidateAllocation(FBinOffsetsBuffer.Allocation, 0,
+          PtrUInt(SafeBins) * SizeOf(Cardinal));
+    end;
+  end;
+
+  if FBinCountsBuffer <> nil then
+  begin
+    MappedPtr := FBinCountsBuffer.Map;
+    try
+      if MappedPtr <> nil then
+        Move(MappedPtr^, AOutBinCounts[0], PtrUInt(SafeBins) * SizeOf(Cardinal));
+    finally
+      FBinCountsBuffer.Unmap;
+    end;
+  end;
+
+  if FBinOffsetsBuffer <> nil then
+  begin
+    MappedPtr := FBinOffsetsBuffer.Map;
+    try
+      if MappedPtr <> nil then
+        Move(MappedPtr^, AOutBinOffsets[0], PtrUInt(SafeBins) * SizeOf(Cardinal));
+    finally
+      FBinOffsetsBuffer.Unmap;
+    end;
+  end;
+end;
+
+{ ---------------------------------------------------------------------------- }
+{ TCastleVulkanBindlessIndirectBatch (Phase 110.3)                             }
+{ ---------------------------------------------------------------------------- }
+
+class function TCastleBindlessIndirectInstanceDesc.CreateSimple(
+  const AModelMatrix: TMatrix4; const ABoundingSphere: TVector4;
+  const AMaterialIndex, AFlags, AIndexCount: Cardinal;
+  const AFirstIndex: Cardinal; const AVertexOffset: Integer): TCastleBindlessIndirectInstanceDesc;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+  Result.ModelMatrix := AModelMatrix;
+  Result.BoundingSphere := ABoundingSphere;
+  Result.MaterialIndex := AMaterialIndex;
+  Result.Flags := AFlags;
+  Result.IndexCount := AIndexCount;
+  Result.FirstIndex := AFirstIndex;
+  Result.VertexOffset := AVertexOffset;
+end;
+
+constructor TCastleVulkanBindlessIndirectBatch.Create(const ADevice: TVulkanRHIDevice);
+begin
+  inherited Create;
+  FDevice := ADevice;
+  FMaxInstanceCapacity := 256;
+  FCameraUniforms.ViewProjMatrix := TMatrix4.Identity;
+  FCameraUniforms.LightDirAndAmbient := Vector4(0.0, 0.0, 1.0, 0.25);
+end;
+
+destructor TCastleVulkanBindlessIndirectBatch.Destroy;
+begin
+  FreeAndNil(FSceneDescriptorSet);
+  FreeAndNil(FSceneLayout);
+  FreeAndNil(FVertShader);
+  FreeAndNil(FFragShader);
+  FreeAndNil(FDirectIndirectBuffer);
+  FreeAndNil(FInstancesSSBO);
+  FreeAndNil(FCameraUBO);
+  FreeAndNil(FIndexBuffer);
+  FreeAndNil(FVertexBuffer);
+  inherited;
+end;
+
+procedure TCastleVulkanBindlessIndirectBatch.EnsureBatchResources(
+  const ARequiredInstances: Cardinal);
+const
+  VertGLSL =
+    '#version 450' + LineEnding +
+    'layout(location = 0) in vec3 inPos;' + LineEnding +
+    'layout(location = 1) in vec3 inNormal;' + LineEnding +
+    'layout(location = 2) in vec2 inUV;' + LineEnding +
+    'layout(std140, set = 0, binding = 0) uniform CameraUBO { mat4 u_ViewProj; vec4 u_LightDirAndAmbient; };' + LineEnding +
+    'struct InstanceData { mat4 ModelMatrix; uint MaterialIndex; uint Flags; vec2 CustomParams; };' + LineEnding +
+    'layout(std430, set = 0, binding = 1) readonly buffer InstancesSSBO { InstanceData Instances[]; };' + LineEnding +
+    'layout(location = 0) out vec3 vWorldNormal;' + LineEnding +
+    'layout(location = 1) out vec2 vUV;' + LineEnding +
+    'layout(location = 2) flat out uint vMatIdx;' + LineEnding +
+    'layout(location = 3) flat out uint vFlags;' + LineEnding +
+    'void main() {' + LineEnding +
+    '  InstanceData inst = Instances[gl_InstanceIndex];' + LineEnding +
+    '  vec4 clip = u_ViewProj * (inst.ModelMatrix * vec4(inPos, 1.0));' + LineEnding +
+    '  clip.z = (clip.z + clip.w) * 0.5;' + LineEnding +
+    '  gl_Position = clip;' + LineEnding +
+    '  vWorldNormal = (inst.ModelMatrix * vec4(inNormal, 0.0)).xyz;' + LineEnding +
+    '  vUV = inUV;' + LineEnding +
+    '  vMatIdx = inst.MaterialIndex;' + LineEnding +
+    '  vFlags = inst.Flags;' + LineEnding +
+    '}';
+  FragGLSL =
+    '#version 450' + LineEnding +
+    '#extension GL_EXT_nonuniform_qualifier : require' + LineEnding +
+    'layout(location = 0) in vec3 vWorldNormal;' + LineEnding +
+    'layout(location = 1) in vec2 vUV;' + LineEnding +
+    'layout(location = 2) flat in uint vMatIdx;' + LineEnding +
+    'layout(location = 3) flat in uint vFlags;' + LineEnding +
+    'layout(location = 0) out vec4 outColor;' + LineEnding +
+    'layout(std140, set = 0, binding = 0) uniform CameraUBO { mat4 u_ViewProj; vec4 u_LightDirAndAmbient; };' + LineEnding +
+    'layout(set = 1, binding = 0) uniform sampler2D castle_BindlessTextures[];' + LineEnding +
+    'struct CastleBindlessMaterial { vec4 BaseColor; vec4 SpecularColor; vec4 EmissiveColor; vec4 PBRParams; ' +
+    'uint BaseColorTexIndex; uint NormalTexIndex; uint MetallicRoughnessTexIndex; uint EmissiveTexIndex; };' + LineEnding +
+    'layout(std430, set = 1, binding = 1) readonly buffer CastleBindlessMaterialsBlock { CastleBindlessMaterial u_Materials[]; };' + LineEnding +
+    'void main() {' + LineEnding +
+    '  CastleBindlessMaterial m = u_Materials[vMatIdx];' + LineEnding +
+    '  vec4 col = m.BaseColor;' + LineEnding +
+    '  if ((vFlags & 1u) != 0u) col *= texture(castle_BindlessTextures[nonuniformEXT(m.BaseColorTexIndex)], vUV);' + LineEnding +
+    '  if (((vFlags & 4u) != 0u) && (col.a < m.PBRParams.w)) discard;' + LineEnding +
+    '  vec3 rgb = col.rgb;' + LineEnding +
+    '  if ((vFlags & 2u) != 0u) {' + LineEnding +
+    '    float ndotl = max(dot(normalize(vWorldNormal), normalize(u_LightDirAndAmbient.xyz)), 0.0);' + LineEnding +
+    '    float shade = clamp(u_LightDirAndAmbient.w + (1.0 - u_LightDirAndAmbient.w) * ndotl, 0.0, 1.0);' + LineEnding +
+    '    rgb *= shade;' + LineEnding +
+    '  }' + LineEnding +
+    '  outColor = vec4(rgb + m.EmissiveColor.rgb, col.a);' + LineEnding +
+    '}';
+var
+  Bindings: array[0..1] of TRHIDescriptorBindingDesc;
+  BuiltInSPIRV: TSPIRVBytecode;
+  Cap: Cardinal;
+  NeedRebind: Boolean;
+begin
+  if FDevice = nil then
+    Exit;
+
+  Cap := Max(FMaxInstanceCapacity, ARequiredInstances);
+  Cap := Max(Cardinal(16), Cap);
+  NeedRebind := False;
+
+  if FCameraUBO = nil then
+  begin
+    FCameraUBO := FDevice.CreateBuffer(
+      TRHIBufferDesc.Create(SizeOf(TCastleBindlessIndirectCameraUniforms),
+        [buUniform], muCpuToGpu, 'BindlessBatchCameraUBO'),
+      @FCameraUniforms);
+    NeedRebind := True;
+  end;
+
+  if (FInstancesSSBO = nil) or
+     (FInstancesSSBO.Desc.Size < PtrUInt(Cap) * SizeOf(TCastleBindlessIndirectInstanceShaderData)) then
+  begin
+    FMaxInstanceCapacity := Cap;
+    FreeAndNil(FInstancesSSBO);
+    FreeAndNil(FDirectIndirectBuffer);
+    FInstancesSSBO := FDevice.CreateBuffer(
+      TRHIBufferDesc.Create(PtrUInt(Cap) * SizeOf(TCastleBindlessIndirectInstanceShaderData),
+        [buStorage, buTransferDst], muCpuToGpu, 'BindlessBatchInstancesSSBO'));
+    FDirectIndirectBuffer := FDevice.CreateBuffer(
+      TRHIBufferDesc.Create(PtrUInt(Cap) * SizeOf(TRHIDrawIndexedIndirectCommand),
+        [buIndirect, buStorage, buTransferDst], muCpuToGpu, 'BindlessBatchDirectIndirectBuf'));
+    NeedRebind := True;
+  end;
+
+  if FSceneLayout = nil then
+  begin
+    FillChar(Bindings, SizeOf(Bindings), 0);
+    Bindings[0].Binding := 0;
+    Bindings[0].DescriptorType := dtUniformBuffer;
+    Bindings[0].Count := 1;
+    Bindings[0].StageFlags := [ssVertex, ssFragment];
+    Bindings[1].Binding := 1;
+    Bindings[1].DescriptorType := dtStorageBuffer;
+    Bindings[1].Count := 1;
+    Bindings[1].StageFlags := [ssVertex];
+    FSceneLayout := FDevice.CreateDescriptorSetLayout(Bindings);
+  end;
+
+  if FSceneDescriptorSet = nil then
+  begin
+    FSceneDescriptorSet := FDevice.CreateDescriptorSet(FSceneLayout);
+    NeedRebind := True;
+  end;
+
+  if NeedRebind then
+  begin
+    FSceneDescriptorSet.BindUniformBuffer(0, FCameraUBO, 0, SizeOf(TCastleBindlessIndirectCameraUniforms));
+    FSceneDescriptorSet.BindStorageBuffer(1, FInstancesSSBO, 0, FInstancesSSBO.Desc.Size);
+    FSceneDescriptorSet.Update;
+  end;
+
+  if FVertShader = nil then
+  begin
+    if TCastleShaderCompiler.Instance.IsRuntimeCompilationAvailable then
+      FVertShader := FDevice.CreateShaderModuleFromGLSL(ssVertex, VertGLSL, 'CastleBindlessIndirectVS')
+    else
+    if TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssVertex, VertGLSL, 'CastleBindlessIndirectVS', BuiltInSPIRV) and
+       (Length(BuiltInSPIRV) > 0) then
+      FVertShader := FDevice.CreateShaderModuleFromSPIRV(ssVertex,
+        @BuiltInSPIRV[0], Length(BuiltInSPIRV), 'CastleBindlessIndirectVS')
+    else
+    begin
+      BuiltInSPIRV := TCastleShaderCompiler.Instance.GetMinimalValidSPIRVFallback(ssVertex);
+      FVertShader := FDevice.CreateShaderModuleFromSPIRV(ssVertex,
+        @BuiltInSPIRV[0], Length(BuiltInSPIRV), 'CastleBindlessIndirectVS');
+    end;
+  end;
+
+  if FFragShader = nil then
+  begin
+    if TCastleShaderCompiler.Instance.IsRuntimeCompilationAvailable then
+      FFragShader := FDevice.CreateShaderModuleFromGLSL(ssFragment, FragGLSL, 'CastleBindlessIndirectFS')
+    else
+    if TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(ssFragment, FragGLSL, 'CastleBindlessIndirectFS', BuiltInSPIRV) and
+       (Length(BuiltInSPIRV) > 0) then
+      FFragShader := FDevice.CreateShaderModuleFromSPIRV(ssFragment,
+        @BuiltInSPIRV[0], Length(BuiltInSPIRV), 'CastleBindlessIndirectFS')
+    else
+    begin
+      BuiltInSPIRV := TCastleShaderCompiler.Instance.GetMinimalValidSPIRVFallback(ssFragment);
+      FFragShader := FDevice.CreateShaderModuleFromSPIRV(ssFragment,
+        @BuiltInSPIRV[0], Length(BuiltInSPIRV), 'CastleBindlessIndirectFS');
+    end;
+  end;
+end;
+
+procedure TCastleVulkanBindlessIndirectBatch.UploadSharedMesh(
+  const AVertices: array of TCastleBindlessIndirectVertex;
+  const AIndices: array of UInt32);
+var
+  VBytes, IBytes: PtrUInt;
+begin
+  if (FDevice = nil) or (Length(AVertices) = 0) or (Length(AIndices) = 0) then
+    Exit;
+
+  FVertexCount := Cardinal(Length(AVertices));
+  FIndexCount := Cardinal(Length(AIndices));
+  VBytes := PtrUInt(FVertexCount) * SizeOf(TCastleBindlessIndirectVertex);
+  IBytes := PtrUInt(FIndexCount) * SizeOf(UInt32);
+
+  if (FVertexBuffer = nil) or (FVertexBuffer.Desc.Size < VBytes) then
+  begin
+    FreeAndNil(FVertexBuffer);
+    FVertexBuffer := FDevice.CreateBuffer(
+      TRHIBufferDesc.Create(VBytes, [buVertex], muCpuToGpu, 'BindlessBatchVB'),
+      @AVertices[0]);
+  end else
+    FVertexBuffer.UploadData(AVertices[0], VBytes, 0);
+
+  if (FIndexBuffer = nil) or (FIndexBuffer.Desc.Size < IBytes) then
+  begin
+    FreeAndNil(FIndexBuffer);
+    FIndexBuffer := FDevice.CreateBuffer(
+      TRHIBufferDesc.Create(IBytes, [buIndex], muCpuToGpu, 'BindlessBatchIB'),
+      @AIndices[0]);
+  end else
+    FIndexBuffer.UploadData(AIndices[0], IBytes, 0);
+end;
+
+procedure TCastleVulkanBindlessIndirectBatch.SetCamera(
+  const AViewProjMatrix: TMatrix4; const ALightDirWorld: TVector3;
+  const AAmbientFactor: Single);
+var
+  SafeDir: TVector3;
+begin
+  if ALightDirWorld.LengthSqr > 1e-8 then
+    SafeDir := ALightDirWorld.Normalize
+  else
+    SafeDir := Vector3(0.0, 0.0, 1.0);
+
+  FCameraUniforms.ViewProjMatrix := AViewProjMatrix;
+  FCameraUniforms.LightDirAndAmbient := Vector4(SafeDir.X, SafeDir.Y, SafeDir.Z,
+    EnsureRange(AAmbientFactor, 0.0, 1.0));
+
+  EnsureBatchResources(Max(Cardinal(16), FInstanceCount));
+  if FCameraUBO <> nil then
+    FCameraUBO.UploadData(FCameraUniforms, SizeOf(FCameraUniforms), 0);
+end;
+
+procedure TCastleVulkanBindlessIndirectBatch.UploadInstances(
+  const AInstances: array of TCastleBindlessIndirectInstanceDesc;
+  const AAlsoUploadToComputeCuller: Boolean);
+var
+  ShaderInsts: array of TCastleBindlessIndirectInstanceShaderData;
+  DirectCmds: array of TRHIDrawIndexedIndirectCommand;
+  CullerInsts: array of TCastleGpuCullingInstance;
+  Count, I: Integer;
+  EffIdxCount: Cardinal;
+begin
+  Count := Length(AInstances);
+  FInstanceCount := Cardinal(Count);
+  if (FDevice = nil) or (Count = 0) then
+    Exit;
+
+  EnsureBatchResources(Cardinal(Count));
+
+  SetLength(ShaderInsts, Count);
+  SetLength(DirectCmds, Count);
+  SetLength(CullerInsts, Count);
+
+  for I := 0 to Count - 1 do
+  begin
+    FillChar(ShaderInsts[I], SizeOf(TCastleBindlessIndirectInstanceShaderData), 0);
+    ShaderInsts[I].ModelMatrix := AInstances[I].ModelMatrix;
+    ShaderInsts[I].MaterialIndex := AInstances[I].MaterialIndex;
+    ShaderInsts[I].Flags := AInstances[I].Flags;
+    ShaderInsts[I].CustomParams := AInstances[I].CustomParams;
+
+    if AInstances[I].IndexCount > 0 then
+      EffIdxCount := AInstances[I].IndexCount
+    else
+      EffIdxCount := FIndexCount;
+
+    FillChar(DirectCmds[I], SizeOf(TRHIDrawIndexedIndirectCommand), 0);
+    DirectCmds[I].IndexCount := EffIdxCount;
+    DirectCmds[I].InstanceCount := 1;
+    DirectCmds[I].FirstIndex := AInstances[I].FirstIndex;
+    DirectCmds[I].VertexOffset := AInstances[I].VertexOffset;
+    DirectCmds[I].FirstInstance := Cardinal(I);
+
+    FillChar(CullerInsts[I], SizeOf(TCastleGpuCullingInstance), 0);
+    CullerInsts[I].BoundingSphere := AInstances[I].BoundingSphere;
+    CullerInsts[I].IndexCount := EffIdxCount;
+    CullerInsts[I].FirstIndex := AInstances[I].FirstIndex;
+    CullerInsts[I].VertexOffset := AInstances[I].VertexOffset;
+    CullerInsts[I].FirstInstance := Cardinal(I);
+    CullerInsts[I].InstanceCount := 1;
+    CullerInsts[I].MaterialIndex := AInstances[I].MaterialIndex;
+  end;
+
+  FInstancesSSBO.UploadData(ShaderInsts[0],
+    PtrUInt(Count) * SizeOf(TCastleBindlessIndirectInstanceShaderData), 0);
+  FDirectIndirectBuffer.UploadData(DirectCmds[0],
+    PtrUInt(Count) * SizeOf(TRHIDrawIndexedIndirectCommand), 0);
+
+  if AAlsoUploadToComputeCuller then
+  begin
+    if Cardinal(Count) > FDevice.ComputeCuller.FMaxInstances then
+      FDevice.ComputeCuller.FMaxInstances := Cardinal(Count) * 2;
+    FDevice.ComputeCuller.UploadInstances(CullerInsts);
+  end;
+end;
+
+function TCastleVulkanBindlessIndirectBatch.GetOrCreatePipelineForPass(
+  const AColorFormat: TRHIPixelFormat; const ADepthFormat: TRHIPixelFormat;
+  const ASampleCount: Cardinal; const ACullMode: TRHICullMode): TRHIPipeline;
+var
+  PipeDesc: TRHIGraphicsPipelineDesc;
+  BindlessMgr: TCastleVulkanBindlessTextureManager;
+begin
+  Result := nil;
+  if FDevice = nil then
+    Exit;
+
+  EnsureBatchResources(Max(Cardinal(16), FInstanceCount));
+  BindlessMgr := FDevice.BindlessTextureManager;
+  if BindlessMgr = nil then
+    Exit;
+  BindlessMgr.EnsureDescriptorSetCreated;
+
+  FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+  PipeDesc.VertexShader := FVertShader;
+  PipeDesc.FragmentShader := FFragShader;
+  PipeDesc.Topology := ptTriangleList;
+  PipeDesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+  PipeDesc.Rasterizer.CullMode := ACullMode;
+  if ADepthFormat <> pfUndefined then
+    PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite
+  else
+    PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDisabled;
+  PipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+  SetLength(PipeDesc.ColorAttachmentFormats, 1);
+  PipeDesc.ColorAttachmentFormats[0] := AColorFormat;
+  PipeDesc.DepthAttachmentFormat := ADepthFormat;
+  PipeDesc.SampleCount := Max(Cardinal(1), ASampleCount);
+
+  SetLength(PipeDesc.VertexInput.Bindings, 1);
+  PipeDesc.VertexInput.Bindings[0].Binding := 0;
+  PipeDesc.VertexInput.Bindings[0].Stride := SizeOf(TCastleBindlessIndirectVertex);
+  PipeDesc.VertexInput.Bindings[0].PerInstance := False;
+
+  SetLength(PipeDesc.VertexInput.Attributes, 3);
+  PipeDesc.VertexInput.Attributes[0].Location := 0;
+  PipeDesc.VertexInput.Attributes[0].Binding := 0;
+  PipeDesc.VertexInput.Attributes[0].Format := vafVector3;
+  PipeDesc.VertexInput.Attributes[0].Offset := 0;
+  PipeDesc.VertexInput.Attributes[0].AttributeName := 'inPos';
+  PipeDesc.VertexInput.Attributes[1].Location := 1;
+  PipeDesc.VertexInput.Attributes[1].Binding := 0;
+  PipeDesc.VertexInput.Attributes[1].Format := vafVector3;
+  PipeDesc.VertexInput.Attributes[1].Offset := 12;
+  PipeDesc.VertexInput.Attributes[1].AttributeName := 'inNormal';
+  PipeDesc.VertexInput.Attributes[2].Location := 2;
+  PipeDesc.VertexInput.Attributes[2].Binding := 0;
+  PipeDesc.VertexInput.Attributes[2].Format := vafVector2;
+  PipeDesc.VertexInput.Attributes[2].Offset := 24;
+  PipeDesc.VertexInput.Attributes[2].AttributeName := 'inUV';
+
+  SetLength(PipeDesc.DescriptorSetLayouts, 2);
+  PipeDesc.DescriptorSetLayouts[0] := FSceneLayout;
+  PipeDesc.DescriptorSetLayouts[1] := BindlessMgr.Layout;
+  PipeDesc.DebugName := 'CastleBindlessIndirectBatchPSO';
+
+  Result := FDevice.GetOrCreatePipeline(PipeDesc);
+end;
+
+function TCastleVulkanBindlessIndirectBatch.RecordComputeCullingPass(
+  const ACmd: TRHICommandList; const ACompactDraws: Boolean): Cardinal;
+begin
+  if (FDevice = nil) or (ACmd = nil) or (FInstanceCount = 0) then
+    Exit(0);
+  if ACmd is TVulkanRHICommandList then
+    FDevice.FlushStagingUploads(TVulkanRHICommandList(ACmd));
+  FDevice.GetBindlessDescriptorSet;
+  Result := FDevice.ComputeCuller.DispatchCulling(ACmd, FInstanceCount, ACompactDraws);
+end;
+
+function TCastleVulkanBindlessIndirectBatch.RecordBindlessIndirectDraws(
+  const ACmd: TRHICommandList; const AColorFormat: TRHIPixelFormat;
+  const ADepthFormat: TRHIPixelFormat; const ASampleCount: Cardinal;
+  const AUseComputeCullerOutput: Boolean; const ACullMode: TRHICullMode): Cardinal;
+var
+  Pipe: TRHIPipeline;
+  BindlessSet: TRHIDescriptorSet;
+begin
+  if (FDevice = nil) or (ACmd = nil) or (FInstanceCount = 0) or
+     (FVertexBuffer = nil) or (FIndexBuffer = nil) then
+    Exit(0);
+
+  EnsureBatchResources(FInstanceCount);
+  BindlessSet := FDevice.GetBindlessDescriptorSet;
+  if BindlessSet = nil then
+    Exit(0);
+
+  Pipe := GetOrCreatePipelineForPass(AColorFormat, ADepthFormat, ASampleCount, ACullMode);
+  if Pipe = nil then
+    Exit(0);
+
+  ACmd.BindPipeline(Pipe);
+  ACmd.BindDescriptorSet(0, FSceneDescriptorSet, []);
+  ACmd.BindDescriptorSet(1, BindlessSet, []);
+  ACmd.BindVertexBuffers(0, [FVertexBuffer], [0]);
+  ACmd.BindIndexBuffer(FIndexBuffer, 0, itUInt32);
+
+  if AUseComputeCullerOutput then
+    Result := FDevice.ComputeCuller.RecordIndirectDraw(ACmd, FInstanceCount)
+  else
+  begin
+    ACmd.DrawIndexedIndirect(FDirectIndirectBuffer, 0, FInstanceCount,
+      SizeOf(TRHIDrawIndexedIndirectCommand));
+    Result := FInstanceCount;
+  end;
+
+  Inc(FTotalBatchExecutions);
 end;
 
 { ---------------------------------------------------------------------------- }
@@ -19761,7 +20860,9 @@ begin
   FCapabilities.MaxFramebufferSampleCount := 8;
   FCapabilities.SupportsComputeShaders := True;
   FCapabilities.SupportsMultiDrawIndirect := True;
-  FCapabilities.SupportsDrawIndirectCount := ADeviceApiVersion >= VK_API_VERSION_1_2;
+  FSupportsDrawIndirectCountFeature := ADeviceApiVersion >= VK_API_VERSION_1_2;
+  FSupportsShaderDrawParameters := ADeviceApiVersion >= VK_API_VERSION_1_1;
+  FCapabilities.SupportsDrawIndirectCount := FSupportsDrawIndirectCountFeature;
   FCapabilities.SupportsBCCompression := True;
   FCapabilities.TimestampPeriodNanoseconds := 1.0;
   FPhysicalDevice := APhysicalDevice;
@@ -20494,12 +21595,20 @@ begin
   Result := FWorkerCommandPoolManager;
 end;
 
+function TVulkanRHIDevice.GetBindlessIndirectBatch: TCastleVulkanBindlessIndirectBatch;
+begin
+  if FBindlessIndirectBatch = nil then
+    FBindlessIndirectBatch := TCastleVulkanBindlessIndirectBatch.Create(Self);
+  Result := FBindlessIndirectBatch;
+end;
+
 destructor TVulkanRHIDevice.Destroy;
 var
   I: Integer;
 begin
   SetActiveCommandList(nil);
   WaitIdle;
+  FreeAndNil(FBindlessIndirectBatch);
   FreeAndNil(FWorkerCommandPoolManager);
   FreeAndNil(FPipelineBinaryManager);
   FreeAndNil(FBCnCompressor);
@@ -20710,6 +21819,8 @@ var
   Sync2Features: VkPhysicalDeviceSynchronization2Features;
   TimelineFeatures: VkPhysicalDeviceTimelineSemaphoreFeatures;
   HostQueryResetFeatures: VkPhysicalDeviceHostQueryResetFeatures;
+  Vulkan12Features: VkPhysicalDeviceVulkan12Features;
+  ShaderDrawParamsFeatures: VkPhysicalDeviceShaderDrawParametersFeatures;
   Props2: VkPhysicalDeviceProperties2;
   GplProps: VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT;
   DescIdxProps: VkPhysicalDeviceDescriptorIndexingProperties;
@@ -20924,6 +22035,33 @@ begin
       vkGetPhysicalDeviceFeatures2(FPhysicalDevice, @Features2);
       FSupportsHostQueryReset := HostQueryResetFeatures.hostQueryReset = VK_TRUE;
     end;
+    if FDeviceApiVersion >= VK_API_VERSION_1_2 then
+    begin
+      FillChar(Vulkan12Features, SizeOf(Vulkan12Features), 0);
+      Vulkan12Features.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+      FillChar(Features2, SizeOf(Features2), 0);
+      Features2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      Features2.pNext := @Vulkan12Features;
+      vkGetPhysicalDeviceFeatures2(FPhysicalDevice, @Features2);
+      FSupportsDrawIndirectCountFeature := Vulkan12Features.drawIndirectCount = VK_TRUE;
+    end else
+      FSupportsDrawIndirectCountFeature := IsDeviceExtensionSupported(VK_KHR_draw_indirect_count);
+
+    if FDeviceApiVersion >= VK_API_VERSION_1_1 then
+    begin
+      FillChar(ShaderDrawParamsFeatures, SizeOf(ShaderDrawParamsFeatures), 0);
+      ShaderDrawParamsFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES;
+      FillChar(Features2, SizeOf(Features2), 0);
+      Features2.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      Features2.pNext := @ShaderDrawParamsFeatures;
+      vkGetPhysicalDeviceFeatures2(FPhysicalDevice, @Features2);
+      FSupportsShaderDrawParameters := ShaderDrawParamsFeatures.shaderDrawParameters = VK_TRUE;
+    end else
+      FSupportsShaderDrawParameters := IsDeviceExtensionSupported(VK_KHR_shader_draw_parameters);
+  end else
+  begin
+    FSupportsDrawIndirectCountFeature := IsDeviceExtensionSupported(VK_KHR_draw_indirect_count);
+    FSupportsShaderDrawParameters := IsDeviceExtensionSupported(VK_KHR_shader_draw_parameters);
   end;
 
   ResolveExtendedDynamicStateAndSync2Config(
@@ -20970,9 +22108,7 @@ begin
   FCapabilities.SupportsETC2Compression := Features.textureCompressionETC2 = VK_TRUE;
   FCapabilities.SupportsComputeShaders := True;
   FCapabilities.SupportsMultiDrawIndirect := Features.multiDrawIndirect = VK_TRUE;
-  FCapabilities.SupportsDrawIndirectCount :=
-    (FDeviceApiVersion >= VK_API_VERSION_1_2) or
-    IsDeviceExtensionSupported(VK_KHR_draw_indirect_count);
+  FCapabilities.SupportsDrawIndirectCount := FSupportsDrawIndirectCountFeature;
   FCapabilities.SupportsBindlessTextures := FSupportsBindlessTextures;
   FCapabilities.MaxBindlessTextures := FMaxBindlessTextures;
   FCapabilities.SupportsExtendedDynamicState := FSupportsExtendedDynamicState;
@@ -21022,8 +22158,11 @@ var
   Sync2Features: VkPhysicalDeviceSynchronization2Features;
   TimelineFeatures: VkPhysicalDeviceTimelineSemaphoreFeatures;
   HostQueryResetFeatures: VkPhysicalDeviceHostQueryResetFeatures;
+  Vulkan12Features: VkPhysicalDeviceVulkan12Features;
+  ShaderDrawParamsFeatures: VkPhysicalDeviceShaderDrawParametersFeatures;
+  PhysFeatures, EnabledFeatures: VkPhysicalDeviceFeatures;
   ReqDynRenderExts, ReqGplExts, ReqBindlessExts, ReqExtDynSync2Exts: TAnsiStringArray;
-  DeviceExts: array[0..23] of PAnsiChar;
+  DeviceExts: array[0..27] of PAnsiChar;
   CreateInfo: VkDeviceCreateInfo;
   CacheInfo: VkPipelineCacheCreateInfo;
   NextChainHead: Pointer;
@@ -21102,6 +22241,26 @@ begin
   FillChar(DescIdxProps, SizeOf(DescIdxProps), 0);
   DescIdxProps.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;
 
+  FillChar(PhysFeatures, SizeOf(PhysFeatures), 0);
+  FillChar(EnabledFeatures, SizeOf(EnabledFeatures), 0);
+  if Assigned(vkGetPhysicalDeviceFeatures) then
+  begin
+    vkGetPhysicalDeviceFeatures(FPhysicalDevice, @PhysFeatures);
+    EnabledFeatures.fullDrawIndexUint32 := PhysFeatures.fullDrawIndexUint32;
+    EnabledFeatures.multiDrawIndirect := PhysFeatures.multiDrawIndirect;
+    EnabledFeatures.drawIndirectFirstInstance := PhysFeatures.drawIndirectFirstInstance;
+    EnabledFeatures.samplerAnisotropy := PhysFeatures.samplerAnisotropy;
+    EnabledFeatures.fillModeNonSolid := PhysFeatures.fillModeNonSolid;
+    EnabledFeatures.wideLines := PhysFeatures.wideLines;
+    EnabledFeatures.largePoints := PhysFeatures.largePoints;
+    EnabledFeatures.shaderStorageImageExtendedFormats := PhysFeatures.shaderStorageImageExtendedFormats;
+    EnabledFeatures.fragmentStoresAndAtomics := PhysFeatures.fragmentStoresAndAtomics;
+    EnabledFeatures.vertexPipelineStoresAndAtomics := PhysFeatures.vertexPipelineStoresAndAtomics;
+    EnabledFeatures.textureCompressionBC := PhysFeatures.textureCompressionBC;
+    EnabledFeatures.textureCompressionETC2 := PhysFeatures.textureCompressionETC2;
+    EnabledFeatures.textureCompressionASTC_LDR := PhysFeatures.textureCompressionASTC_LDR;
+  end;
+
   FillChar(ExtDynFeatures, SizeOf(ExtDynFeatures), 0);
   ExtDynFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
   ExtDynFeatures.extendedDynamicState := VK_TRUE;
@@ -21128,6 +22287,18 @@ begin
      IsDeviceExtensionSupported(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME) then
   begin
     DeviceExts[ExtCount] := VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME;
+    Inc(ExtCount);
+  end;
+  if FSupportsDrawIndirectCountFeature and (FDeviceApiVersion < VK_API_VERSION_1_2) and
+     IsDeviceExtensionSupported(VK_KHR_draw_indirect_count) then
+  begin
+    DeviceExts[ExtCount] := VK_KHR_draw_indirect_count;
+    Inc(ExtCount);
+  end;
+  if FSupportsShaderDrawParameters and (FDeviceApiVersion < VK_API_VERSION_1_1) and
+     IsDeviceExtensionSupported(VK_KHR_shader_draw_parameters) then
+  begin
+    DeviceExts[ExtCount] := VK_KHR_shader_draw_parameters;
     Inc(ExtCount);
   end;
   FSupportsMemoryBudgetExt := IsDeviceExtensionSupported(VK_EXT_memory_budget);
@@ -21209,15 +22380,56 @@ begin
   end;
 
   NextChainHead := nil;
-  if FSupportsHostQueryReset then
+  if FDeviceApiVersion >= VK_API_VERSION_1_2 then
   begin
-    HostQueryResetFeatures.pNext := NextChainHead;
-    NextChainHead := @HostQueryResetFeatures;
+    { Per VUID-VkDeviceCreateInfo-pNext-02830, consolidate all Vulkan 1.2 promoted
+      features (drawIndirectCount, descriptorIndexing, timelineSemaphore, hostQueryReset)
+      into VkPhysicalDeviceVulkan12Features without chaining duplicate 1.2 feature structs. }
+    FillChar(Vulkan12Features, SizeOf(Vulkan12Features), 0);
+    Vulkan12Features.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    if FSupportsDrawIndirectCountFeature then
+      Vulkan12Features.drawIndirectCount := VK_TRUE;
+    if FSupportsHostQueryReset then
+      Vulkan12Features.hostQueryReset := VK_TRUE;
+    if FSupportsTimelineSemaphores then
+      Vulkan12Features.timelineSemaphore := VK_TRUE;
+    if FSupportsBindlessTextures then
+    begin
+      Vulkan12Features.descriptorIndexing := VK_TRUE;
+      Vulkan12Features.shaderSampledImageArrayNonUniformIndexing := VK_TRUE;
+      Vulkan12Features.descriptorBindingPartiallyBound := VK_TRUE;
+      Vulkan12Features.descriptorBindingUpdateUnusedWhilePending := VK_TRUE;
+      Vulkan12Features.runtimeDescriptorArray := VK_TRUE;
+      if FSupportsBindlessUpdateAfterBind then
+        Vulkan12Features.descriptorBindingSampledImageUpdateAfterBind := VK_TRUE;
+    end;
+    Vulkan12Features.pNext := NextChainHead;
+    NextChainHead := @Vulkan12Features;
+  end else
+  begin
+    if FSupportsHostQueryReset then
+    begin
+      HostQueryResetFeatures.pNext := NextChainHead;
+      NextChainHead := @HostQueryResetFeatures;
+    end;
+    if FSupportsTimelineSemaphores then
+    begin
+      TimelineFeatures.pNext := NextChainHead;
+      NextChainHead := @TimelineFeatures;
+    end;
+    if FSupportsBindlessTextures then
+    begin
+      DescIdxFeatures.pNext := NextChainHead;
+      NextChainHead := @DescIdxFeatures;
+    end;
   end;
-  if FSupportsTimelineSemaphores then
+  if FSupportsShaderDrawParameters and (FDeviceApiVersion >= VK_API_VERSION_1_1) then
   begin
-    TimelineFeatures.pNext := NextChainHead;
-    NextChainHead := @TimelineFeatures;
+    FillChar(ShaderDrawParamsFeatures, SizeOf(ShaderDrawParamsFeatures), 0);
+    ShaderDrawParamsFeatures.sType := VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES;
+    ShaderDrawParamsFeatures.shaderDrawParameters := VK_TRUE;
+    ShaderDrawParamsFeatures.pNext := NextChainHead;
+    NextChainHead := @ShaderDrawParamsFeatures;
   end;
   if FSupportsSynchronization2 then
   begin
@@ -21228,11 +22440,6 @@ begin
   begin
     ExtDynFeatures.pNext := NextChainHead;
     NextChainHead := @ExtDynFeatures;
-  end;
-  if FSupportsBindlessTextures then
-  begin
-    DescIdxFeatures.pNext := NextChainHead;
-    NextChainHead := @DescIdxFeatures;
   end;
   if FSupportsGraphicsPipelineLibrary then
   begin
@@ -21254,6 +22461,7 @@ begin
   FillChar(CreateInfo, SizeOf(CreateInfo), 0);
   CreateInfo.sType := VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
   CreateInfo.pNext := NextChainHead;
+  CreateInfo.pEnabledFeatures := @EnabledFeatures;
   if FPresentQueueFamily <> FGraphicsQueueFamily then
   begin
     QueueInfos[QueueInfoCount].sType := VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;

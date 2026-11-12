@@ -143,6 +143,8 @@ type
     rsTransferDst,
     rsTransferSrc,
     rsShaderRead,
+    rsUnorderedAccess,
+    rsIndirectRead,
     rsColorAttachment,
     rsDepthStencilWrite,
     rsDepthStencilRead,
