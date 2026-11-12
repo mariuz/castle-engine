@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -772,6 +772,8 @@ type
       MenuTreeViewItemDialogueQuest: TMenuItem;
       ButtonFoliageBiome: TSpeedButton;
       MenuTreeViewItemFoliageBiome: TMenuItem;
+      ButtonIkRig: TSpeedButton;
+      MenuTreeViewItemIkRig: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1241,6 +1243,8 @@ type
     procedure MenuTreeViewItemDialogueQuestClick(Sender: TObject);
     procedure ButtonFoliageBiomeClick(Sender: TObject);
     procedure MenuTreeViewItemFoliageBiomeClick(Sender: TObject);
+    procedure ButtonIkRigClick(Sender: TObject);
+    procedure MenuTreeViewItemIkRigClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2695,6 +2699,7 @@ type
     procedure ShowModularSnapDialog;
     procedure ShowDialogueQuestDialog;
     procedure ShowFoliageBiomeDialog;
+    procedure ShowIkRigDialog;
   end;
 
 implementation
@@ -2715,7 +2720,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -5998,6 +6003,64 @@ procedure TDesignFrame.TDesignerLayer.Render;
           EcoSum.Exclusions[I].ExclusionSize, Vector4(0.95, 0.35, 0.32, 0.88));
   end;
 
+  procedure RenderIkRigsOverlay(const AVp: TCastleViewport);
+  var
+    IkSum: TIkRigSummary;
+    CamP, CamD, CamU, RootW, MidW, EndW, PoleW, LookSrcW, LookTgtW: TVector3;
+    SegPts: array [0..1] of TVector2;
+    I: Integer;
+
+    procedure DrawSeg3D(const A, B: TVector3; const ACol: TCastleColor; const AWidth: Single);
+    begin
+      if (AVp.InternalCamera.ProjectionType = ptOrthographic) or
+         ((TVector3.DotProduct(A - CamP, CamD) > 0.08) and
+          (TVector3.DotProduct(B - CamP, CamD) > 0.08)) then
+      begin
+        SegPts[0] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(A));
+        SegPts[1] := AVp.LocalToContainerPosition(AVp.PositionFromWorld(B));
+        DrawPrimitive2D(pmLines, SegPts, ACol, bsSrcAlpha, bdOneMinusSrcAlpha, false, AWidth);
+      end;
+    end;
+
+  begin
+    if Frame.FDesignRoot = nil then
+      Exit;
+    AVp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    IkSum := TIkRigHelper.ScanIkRigs(Frame.FDesignRoot);
+    for I := 0 to High(IkSum.TwoBoneRigs) do
+    begin
+      if (IkSum.TwoBoneRigs[I].Parent <> nil) and
+         IkSum.TwoBoneRigs[I].Parent.Exists and
+         IkSum.TwoBoneRigs[I].ShowRigInViewport and
+         (IkSum.TwoBoneRigs[I].MidJointTransform <> nil) and
+         (IkSum.TwoBoneRigs[I].EndJointTransform <> nil) then
+      begin
+        RootW := GetIkHierarchyMatrix(IkSum.TwoBoneRigs[I].Parent).MultPoint(TVector3.Zero);
+        MidW := GetIkHierarchyMatrix(IkSum.TwoBoneRigs[I].MidJointTransform).MultPoint(TVector3.Zero);
+        EndW := GetIkHierarchyMatrix(IkSum.TwoBoneRigs[I].EndJointTransform).MultPoint(TVector3.Zero);
+        DrawSeg3D(RootW, MidW, Vector4(0.25, 0.82, 0.98, 0.92), 3.0);
+        DrawSeg3D(MidW, EndW, Vector4(0.32, 0.94, 0.65, 0.92), 3.0);
+        if IkSum.TwoBoneRigs[I].PoleTransform <> nil then
+        begin
+          PoleW := GetIkHierarchyMatrix(IkSum.TwoBoneRigs[I].PoleTransform).MultPoint(TVector3.Zero);
+          DrawSeg3D(MidW, PoleW, Vector4(0.96, 0.80, 0.25, 0.78), 1.5);
+        end;
+      end;
+    end;
+    for I := 0 to High(IkSum.LookAtRigs) do
+    begin
+      if (IkSum.LookAtRigs[I].Parent <> nil) and
+         IkSum.LookAtRigs[I].Parent.Exists and
+         IkSum.LookAtRigs[I].ShowConeInViewport and
+         (IkSum.LookAtRigs[I].LookTarget <> nil) then
+      begin
+        LookSrcW := GetIkHierarchyMatrix(IkSum.LookAtRigs[I].Parent).MultPoint(TVector3.Zero);
+        LookTgtW := GetIkHierarchyMatrix(IkSum.LookAtRigs[I].LookTarget).MultPoint(TVector3.Zero);
+        DrawSeg3D(LookSrcW, LookTgtW, Vector4(0.92, 0.42, 0.88, 0.85), 2.0);
+      end;
+    end;
+  end;
+
   procedure RenderAnnotationPinsOverlay(const AVp: TCastleViewport);
   var
     PinReport: TDesignAnnotationAuditReport;
@@ -6340,6 +6403,7 @@ begin
     RenderSnapSocketsOverlay(Frame.CurrentViewport);
     RenderNpcDialogueOverlay(Frame.CurrentViewport);
     RenderFoliageBiomesOverlay(Frame.CurrentViewport);
+    RenderIkRigsOverlay(Frame.CurrentViewport);
   end;
 
   if (Frame.TransformManipulate <> nil) and
@@ -6898,6 +6962,21 @@ begin
   if ButtonDialogueQuest.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonFoliageBiome,
       PanelMiddleTop.GetControlIndex(ButtonDialogueQuest) + 1);
+
+  ButtonIkRig := TSpeedButton.Create(Self);
+  ButtonIkRig.Caption := 'IK Rig';
+  ButtonIkRig.Hint := 'Open Analytical Two-Bone IK, Foot Ground-Planting & Look-At Motion Rig Studio.' + NL +
+    'Configure closed-form Two-Bone IK chains, pole vectors, raycast foot planting, and Look-At cones.';
+  ButtonIkRig.ShowHint := true;
+  ButtonIkRig.AutoSize := true;
+  ButtonIkRig.Constraints.MinHeight := 33;
+  ButtonIkRig.Constraints.MinWidth := 58;
+  ButtonIkRig.BorderSpacing.Left := 2;
+  ButtonIkRig.OnClick := @ButtonIkRigClick;
+  ButtonIkRig.Parent := PanelMiddleTop;
+  if ButtonFoliageBiome.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonIkRig,
+      PanelMiddleTop.GetControlIndex(ButtonFoliageBiome) + 1);
 
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
@@ -9838,6 +9917,11 @@ begin
   MenuTreeViewItemFoliageBiome.Caption := 'Procedural Foliage Ecosystems && Multi-LOD Proxy Studio...';
   MenuTreeViewItemFoliageBiome.OnClick := @MenuTreeViewItemFoliageBiomeClick;
   MenuTreeView.Items.Add(MenuTreeViewItemFoliageBiome);
+
+  MenuTreeViewItemIkRig := TMenuItem.Create(Self);
+  MenuTreeViewItemIkRig.Caption := 'Analytical Two-Bone IK && Look-At Motion Rig Studio...';
+  MenuTreeViewItemIkRig.OnClick := @MenuTreeViewItemIkRigClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemIkRig);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -15072,6 +15156,10 @@ var
         Suffix := Suffix + ' ' + TCastleFoliageExclusionVolume(NodeObj).ExclusionSummaryBadge
       else if NodeObj is TCastleLodProxyBehavior then
         Suffix := Suffix + ' ' + TCastleLodProxyBehavior(NodeObj).LodSummaryBadge
+      else if NodeObj is TCastleTwoBoneIkBehavior then
+        Suffix := Suffix + ' ' + TCastleTwoBoneIkBehavior(NodeObj).IkSummaryBadge
+      else if NodeObj is TCastleLookAtConstraintBehavior then
+        Suffix := Suffix + ' ' + TCastleLookAtConstraintBehavior(NodeObj).LookAtSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -54810,6 +54898,56 @@ end;
 procedure TDesignFrame.MenuTreeViewItemFoliageBiomeClick(Sender: TObject);
 begin
   ShowFoliageBiomeDialog;
+end;
+
+procedure TDesignFrame.ShowIkRigDialog;
+var
+  Selected: TComponentList;
+  SelectedCount: Integer;
+  InitComp: TComponent;
+  SpawnPos, CamP, CamD, CamU: TVector3;
+  Vp: TCastleViewport;
+  Dlg: TIkRigForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  InitComp := nil;
+  GetSelected(Selected, SelectedCount);
+  try
+    if SelectedCount > 0 then
+      InitComp := Selected[0];
+  finally
+    FreeAndNil(Selected);
+  end;
+
+  SpawnPos := TVector3.Zero;
+  Vp := CurrentViewport;
+  if (Vp <> nil) and (Vp.InternalCamera <> nil) then
+  begin
+    Vp.InternalCamera.GetWorldView(CamP, CamD, CamU);
+    SpawnPos := Vector3(CamP.X + CamD.X * 4.5, 0.0, CamP.Z + CamD.Z * 4.5);
+  end;
+
+  Dlg := TIkRigForm.CreateStudio(Self, FDesignRoot, DesignOwner, InitComp,
+    SpawnPos,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonIkRigClick(Sender: TObject);
+begin
+  ShowIkRigDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemIkRigClick(Sender: TObject);
+begin
+  ShowIkRigDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

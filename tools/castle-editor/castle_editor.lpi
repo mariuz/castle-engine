@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="79">
+    <Units Count="81">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -477,6 +477,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormFoliageBiome"/>
       </Unit78>
+      <Unit79>
+        <Filename Value="../common-code/toolikrig.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolIkRig"/>
+      </Unit79>
+      <Unit80>
+        <Filename Value="code/formikrig.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormIkRig"/>
+      </Unit80>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

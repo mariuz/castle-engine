@@ -3034,6 +3034,32 @@ Spawned := TFoliageBiomeHelper.PopulateBiomeWithSceneExclusions(DesignRoot, Desi
 
 ---
 
+## 66AC. Analytical Two-Bone IK, Foot Ground-Planting & Look-At Motion Rig Studio (Phase 304)
+
+Castle Game Engine provides closed-form law-of-cosines 3D Two-Bone IK chains, downward raycast foot planting, and cone-clamped damped Look-At aim constraints matching Unreal Engine 6.0's Control Rig & IK Rig workflow:
+
+1. **Two-Bone IK & Look-At Aim Behaviors (`src/scene/castleikrig.pas`)**:
+   - `TCastleTwoBoneIkBehavior` solves `Parent -> MidJointTransform -> EndJointTransform` toward `TargetTransform` in the `PoleTransform` half-plane while preserving exact `UpperBoneLength` and `LowerBoneLength`, supporting exponential `SoftReachMargin` hyperextension damping and downward `WorldRay` `EnableGroundFootPlant` + `AlignFootToGroundNormal`.
+   - `TCastleLookAtConstraintBehavior` aims `Parent` toward `LookTarget` within `±MaxYawDeg` and `±MaxPitchDeg` angular limits with frame-rate-independent exponential `DampingSpeed` smoothing.
+2. **Motion Rig Studio (`TIkRigForm` & `TIkRigHelper`)**:
+   - Open via the top-bar **`IK Rig`** button, Hierarchy context menu, or **`Design -> Analytical Two-Bone IK & Look-At Motion Rig Studio...`**.
+   - Features 1-click **`+ Leg Two-Bone IK Rig`** and **`+ Look-At Aim Turret`** spawners, live Effector X/Y/Z & Pole Z sliders, and a dual-panel sagittal Z-Y chain + Look-At cone diagram.
+
+### Example Usage (Pascal API)
+```pascal
+Ik := TIkRigHelper.CreateSampleLegIkRigInDesign(
+  DesignRoot, DesignOwner, Vector3(0, 0, 0), Hip, Knee, Foot, FootTarget, KneePole);
+Ik.EnableGroundFootPlant := true;
+Ik.SolveNow;
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Behaviors](https://castle-engine.io/behaviors) · [CGE Viewport & Raycasting](https://castle-engine.io/viewport_and_scenes) · [UE IK Rig](https://dev.epicgames.com/documentation/en-us/unreal-engine/ik-rig-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — 3D Characters & Procedural Motion (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Transform Hierarchy](https://castle-engine.io/images/thumb_const_height_size/transform_scene.webp) · [CGE Behavior Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3125,4 +3151,5 @@ In addition, Horizon 2 & Horizon 3 editor subsystems include dedicated automated
 - **[`tests/code/testcases/testtoolmodularsnap.pas`](../tests/code/testcases/testtoolmodularsnap.pas) (`TTestToolModularSnap` — 2 tests)**: Verifies closed-form $180^\circ$ opposing socket snapping onto a $90^\circ$-rotated `EntryHall`, `SocketCategory` mismatch rejection (`Pipe_Flange` vs. `Doorway_3m`), `csTransient` greybox non-baking across JSON roundtrips, deterministic seeded zero-overlap `GenerateSeededDungeonLayout` (`9` rooms, `OverlappingPairsCount = 0`), overlap warning detection, and `ClearGeneratedDungeonPieces` (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldialoguequest.pas`](../tests/code/testcases/testtooldialoguequest.pas) (`TTestToolDialogueQuest` — 2 tests)**: Verifies `TCastleDialogueTree` variable/tag/quest-state choice gating (`Charisma >= 10`, `Item.SunfireRelic`), `StepConversation` objective progression & automatic `qsCompleted` `500 XP` + `Achievement.*` payout, BFS `ValidateGraph` orphan/broken-link detection, RFC-4180 `ExportLocalizationCsv`, and `ComponentToString` JSON roundtrip (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolfoliagebiome.pas`](../tests/code/testcases/testtoolfoliagebiome.pas) (`TTestToolFoliageBiome` — 2 tests)**: Verifies seeded Halton/Poisson `PopulateBiomeWithSceneExclusions` rejecting `HighSnowPeak` (`Y = 18 > MaxAltitude 10`) and `RoadExcl` road clearings while enforcing pairwise `MinRadiusSpacing >= 2.5m`, `TCastleLodProxyBehavior` `±3.0m` hysteresis band stability across `High`/`Medium`/`Low`/`Culled`, and `ComponentToString` JSON roundtrips without `csTransient` mesh bloat (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolikrig.pas`](../tests/code/testcases/testtoolikrig.pas) (`TTestToolIkRig` — 2 tests)**: Verifies exact law-of-cosines `UpperBoneLength` & `LowerBoneLength` preservation (`0.55m + 0.55m`) on nested `LegHip -> LegKnee -> LegFoot` chains, `+Z` vs. `-Z` `PoleTransform` knee plane flipping, `SoftReachMargin` hyperextension damping, downward `EnableGroundFootPlant` raycast lifting onto a stepped platform (`Y = 0.48`), `TCastleLookAtConstraintBehavior` `±60°/±35°` cone clamping & exponential `DampingSpeed` convergence, and `ComponentToString` JSON roundtrips (`0 unfreed memory blocks`).
 

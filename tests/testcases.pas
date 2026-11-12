@@ -130,6 +130,7 @@ uses
   TestToolModularSnap,
   TestToolDialogueQuest,
   TestToolFoliageBiome,
+  TestToolIkRig,
   TestCastleVulkanRHI;
 
 implementation

@@ -617,6 +617,7 @@ type
       MenuItemModularSnap: TMenuItem;
       MenuItemDialogueQuest: TMenuItem;
       MenuItemFoliageBiome: TMenuItem;
+      MenuItemIkRig: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -654,6 +655,7 @@ type
     procedure MenuItemModularSnapClick(Sender: TObject);
     procedure MenuItemDialogueQuestClick(Sender: TObject);
     procedure MenuItemFoliageBiomeClick(Sender: TObject);
+    procedure MenuItemIkRigClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2364,6 +2366,11 @@ begin
   MenuItemFoliageBiome.OnClick := @MenuItemFoliageBiomeClick;
   MenuItemDesign.Add(MenuItemFoliageBiome);
 
+  MenuItemIkRig := TMenuItem.Create(MenuItemDesign);
+  MenuItemIkRig.Caption := 'Analytical Two-Bone IK & Look-At Motion Rig Studio...';
+  MenuItemIkRig.OnClick := @MenuItemIkRigClick;
+  MenuItemDesign.Add(MenuItemIkRig);
+
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
   MenuItemProjectOptions.OnClick := @MenuItemProjectOptionsClick;
@@ -3060,6 +3067,8 @@ begin
     MenuItemDialogueQuest.Enabled := Design <> nil;
   if MenuItemFoliageBiome <> nil then
     MenuItemFoliageBiome.Enabled := Design <> nil;
+  if MenuItemIkRig <> nil then
+    MenuItemIkRig.Enabled := Design <> nil;
   MenuItemDesignAddTransform.Enabled := Design <> nil;
   MenuItemDesignAddUserInterface.Enabled := Design <> nil;
   MenuItemDesignAddBehavior.Enabled := Design <> nil;
@@ -5439,6 +5448,12 @@ procedure TProjectForm.MenuItemDialogueQuestClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowDialogueQuestDialog;
+end;
+
+procedure TProjectForm.MenuItemIkRigClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowIkRigDialog;
 end;
 
 procedure TProjectForm.MenuItemFoliageBiomeClick(Sender: TObject);
