@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -806,6 +806,8 @@ type
       MenuTreeViewItemEqsStudio: TMenuItem;
       ButtonInventoryStudio: TSpeedButton;
       MenuTreeViewItemInventoryStudio: TMenuItem;
+      ButtonNetcodeStudio: TSpeedButton;
+      MenuTreeViewItemNetcodeStudio: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1309,6 +1311,8 @@ type
     procedure MenuTreeViewItemEqsStudioClick(Sender: TObject);
     procedure ButtonInventoryStudioClick(Sender: TObject);
     procedure MenuTreeViewItemInventoryStudioClick(Sender: TObject);
+    procedure ButtonNetcodeStudioClick(Sender: TObject);
+    procedure MenuTreeViewItemNetcodeStudioClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2780,6 +2784,7 @@ type
     procedure ShowBlendMontageDialog;
     procedure ShowEqsStudioDialog;
     procedure ShowInventoryStudioDialog;
+    procedure ShowNetcodeStudioDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -2801,7 +2806,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7341,6 +7346,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonInventoryStudio,
       PanelMiddleTop.GetControlIndex(ButtonEqsStudio) + 1);
 
+  ButtonNetcodeStudio := TSpeedButton.Create(Self);
+  ButtonNetcodeStudio.Caption := 'NetIris';
+  ButtonNetcodeStudio.Hint := 'Open Iris Netcode Replication, Relevancy & Lag-Compensated Rewind Studio.' + NL +
+    'Simulate spatial relevancy, priority bandwidth, SLerp client buffers & server hitbox rewind.';
+  ButtonNetcodeStudio.ShowHint := true;
+  ButtonNetcodeStudio.AutoSize := true;
+  ButtonNetcodeStudio.Constraints.MinHeight := 33;
+  ButtonNetcodeStudio.Constraints.MinWidth := 58;
+  ButtonNetcodeStudio.BorderSpacing.Left := 2;
+  ButtonNetcodeStudio.OnClick := @ButtonNetcodeStudioClick;
+  ButtonNetcodeStudio.Parent := PanelMiddleTop;
+  if ButtonInventoryStudio.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonNetcodeStudio,
+      PanelMiddleTop.GetControlIndex(ButtonInventoryStudio) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10365,6 +10385,11 @@ begin
   MenuTreeViewItemInventoryStudio.Caption := 'RPG Inventory Grid, Equipment Paperdoll && Loot Studio...';
   MenuTreeViewItemInventoryStudio.OnClick := @MenuTreeViewItemInventoryStudioClick;
   MenuTreeView.Items.Add(MenuTreeViewItemInventoryStudio);
+
+  MenuTreeViewItemNetcodeStudio := TMenuItem.Create(Self);
+  MenuTreeViewItemNetcodeStudio.Caption := 'Iris Netcode Replication && Hitbox Rewind Studio...';
+  MenuTreeViewItemNetcodeStudio.OnClick := @MenuTreeViewItemNetcodeStudioClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemNetcodeStudio);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -15649,6 +15674,10 @@ var
         Suffix := Suffix + ' ' + TCastleInventoryBehavior(NodeObj).InventorySummaryBadge
       else if NodeObj is TCastleLootTable then
         Suffix := Suffix + ' ' + TCastleLootTable(NodeObj).LootSummaryBadge
+      else if NodeObj is TCastleReplicatedBehavior then
+        Suffix := Suffix + ' ' + TCastleReplicatedBehavior(NodeObj).ReplicatedSummaryBadge
+      else if NodeObj is TCastleNetReplicationManager then
+        Suffix := Suffix + ' ' + TCastleNetReplicationManager(NodeObj).NetManagerSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -55883,6 +55912,7 @@ begin
   else if SameText(AStudioId, 'blend_montage') then ShowBlendMontageDialog
   else if SameText(AStudioId, 'eqs_studio') then ShowEqsStudioDialog
   else if SameText(AStudioId, 'inventory_studio') then ShowInventoryStudioDialog
+  else if SameText(AStudioId, 'netcode_studio') then ShowNetcodeStudioDialog
   else
     Result := False;
 end;
@@ -56022,6 +56052,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemInventoryStudioClick(Sender: TObject);
 begin
   ShowInventoryStudioDialog;
+end;
+
+procedure TDesignFrame.ShowNetcodeStudioDialog;
+var
+  Dlg: TNetcodeStudioForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TNetcodeStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonNetcodeStudioClick(Sender: TObject);
+begin
+  ShowNetcodeStudioDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemNetcodeStudioClick(Sender: TObject);
+begin
+  ShowNetcodeStudioDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

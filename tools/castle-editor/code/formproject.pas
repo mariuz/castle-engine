@@ -634,6 +634,7 @@ type
       MenuItemBlendMontage: TMenuItem;
       MenuItemEqsStudio: TMenuItem;
       MenuItemInventoryStudio: TMenuItem;
+      MenuItemNetcodeStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -688,6 +689,7 @@ type
     procedure MenuItemBlendMontageClick(Sender: TObject);
     procedure MenuItemEqsStudioClick(Sender: TObject);
     procedure MenuItemInventoryStudioClick(Sender: TObject);
+    procedure MenuItemNetcodeStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2482,6 +2484,11 @@ begin
   MenuItemInventoryStudio.Caption := 'RPG Inventory Grid, Equipment Paperdoll, Crafting & Loot Studio...';
   MenuItemInventoryStudio.OnClick := @MenuItemInventoryStudioClick;
   MenuItemDesign.Add(MenuItemInventoryStudio);
+
+  MenuItemNetcodeStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemNetcodeStudio.Caption := 'Iris Netcode Replication, Relevancy & Hitbox Rewind Studio...';
+  MenuItemNetcodeStudio.OnClick := @MenuItemNetcodeStudioClick;
+  MenuItemDesign.Add(MenuItemNetcodeStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5662,6 +5669,12 @@ procedure TProjectForm.MenuItemInventoryStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowInventoryStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemNetcodeStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowNetcodeStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

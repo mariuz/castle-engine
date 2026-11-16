@@ -147,6 +147,7 @@ uses
   TestToolBlendMontage,
   TestToolEqsStudio,
   TestToolInventoryStudio,
+  TestToolNetcodeStudio,
   TestCastleVulkanRHI;
 
 implementation

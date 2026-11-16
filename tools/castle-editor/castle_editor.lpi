@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="113">
+    <Units Count="115">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -647,6 +647,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormInventoryStudio"/>
       </Unit112>
+      <Unit113>
+        <Filename Value="../common-code/toolnetcodestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolNetcodeStudio"/>
+      </Unit113>
+      <Unit114>
+        <Filename Value="code/formnetcodestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormNetcodeStudio"/>
+      </Unit114>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

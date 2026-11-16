@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–320** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–321** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3452,6 +3452,30 @@ Inv.EquipItemFromBag('SunfireBlade', Reason);
 
 ---
 
+## 66AT. Iris Netcode Replication, Spatial Relevancy & Lag-Compensated Hitbox Rewind Studio (Phase 321)
+
+Castle Game Engine provides spatial relevancy culling, starvation-protected priority bandwidth scheduling, jitter-buffered client `SLerp` pose interpolation, and server-authoritative hitbox rewind matching Unreal Engine 6.0+'s Iris Replication System:
+
+1. **Iris Replication & Lag-Compensation Runtime (`src/scene/castlenetcodeiris.pas`)**:
+   - `TCastleReplicatedBehavior` tracks `BasePriority`, `NetCullDistance`, `AlwaysRelevant`, server rewind history, and out-of-order-safe client interpolation buffers (`EvaluateClientInterpolatedPose`).
+   - `TCastleNetReplicationManager` schedules `MaxBytesPerTick` quantized delta packets across simulated RTT/Jitter/Packet-Loss channels and executes server-side `LagCompensatedRaycast` rewinds.
+2. **Netcode Studio (`TNetcodeStudioForm` & `TNetcodeStudioHelper`)**:
+   - Open via the top-bar **`NetIris`** button, Hierarchy context menu, or **`Design -> Iris Netcode Replication, Relevancy & Hitbox Rewind Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TNetcodeStudioHelper.SpawnMultiplayerIrisArenaDemo(Viewport, DesignOwner, Mgr, Target, FarProp, TargetRep, FarRep);
+Mgr.StepReplication(Viewport, DesignOwner, 0.05, TVector3.Zero);
+Hit := Mgr.LagCompensatedRaycast(Viewport, DesignOwner, RayOrigin, RayDir, 0.15, HitRep, RewoundCenter, LiveDist);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Custom Components](https://castle-engine.io/custom_components) · [UE Iris Replication System](https://dev.epicgames.com/documentation/en-us/unreal-engine/iris-replication-system-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Real-Time 3D Simulation (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3560,4 +3584,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems inclu
 - **[`tests/code/testcases/testtoolblendmontage.pas`](../tests/code/testcases/testtoolblendmontage.pas) (`TTestToolBlendMontage` — 2 tests)**: Verifies 2D Gradient Band Interpolation Kronecker delta, collinear outer-ring shadowing (`RunForward = 0.0` halfway between `Idle` and `WalkForward`), partition of unity, exponential parameter damping, `ConfigJson` roundtrips, `Montage.ComboWindow` combo branching (`Slash1 -> Slash2 -> HeavyFinisher`), `Status.Immunity.DodgeIframe` tag windows, and Hermite `1.20m` melee standoff motion warping (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooleqsstudio.pas`](../tests/code/testcases/testtooleqsstudio.pas) (`TTestToolEqsStudio` — 2 tests)**: Verifies `epTakeCoverFromThreat` `WorldRay` cover occlusion behind `CoverWall`, unwalkable `3.0m` wall-top candidate rejection, `epSniperLineOfSightVantage` `2.8m` high-ground balcony selection, `epFlankRearSurround` $180^\circ$ rear-hemisphere flank scoring & `AutoMoveToBestSpot` steering, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolinventorystudio.pas`](../tests/code/testcases/testtoolinventorystudio.pas) (`TTestToolInventoryStudio` — 2 tests)**: Verifies stack merging, atomic `MaxCarryWeightKg` encumbrance rejection, `CraftSunfireBlade` ingredient consumption & minting, `EquipItemFromBag`/`UnequipSlot` live `TCastleAbilitySystemBehavior` `AttackPower` (`25 -> 60 -> 25`) & `Equipped.Weapon.Sunfire` tag sync, `ConfigJson` roundtrips, and `TCastleLootTable` seeded determinism + `LegendaryPityThreshold` guarantee (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolnetcodestudio.pas`](../tests/code/testcases/testtoolnetcodestudio.pas) (`TTestToolNetcodeStudio` — 2 tests)**: Verifies `NetCullDistance` spatial culling (`0` packets at `120m`) vs. `AlwaysRelevant` override, tight `18 B/tick` starvation-protected priority round-robin, jitter-buffered client `EvaluateClientInterpolatedPose`, server `LagCompensatedRaycast` confirmed hit at rewound `X = 4.20m` vs. unrewound miss at `X = 6.00m`, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 
