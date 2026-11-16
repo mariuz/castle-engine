@@ -557,6 +557,15 @@ type
     Reserved2: Cardinal;          // 4 bytes
   end; // Total = 32 bytes
 
+  { Phase 111: Push constants for GTAO + Hi-Z SSR HDR lighting modulation compute pass (16 bytes) }
+  PCastlePostProcessModulatePushConstants = ^TCastlePostProcessModulatePushConstants;
+  TCastlePostProcessModulatePushConstants = packed record
+    AOStrength: Single;   // 4 bytes (0 = no AO attenuation, 1 = full GTAO visibility)
+    SSRStrength: Single;  // 4 bytes (additive screen-space reflection multiplier)
+    DstWidth: Cardinal;   // 4 bytes (output HDR texture width in pixels)
+    DstHeight: Cardinal;  // 4 bytes (output HDR texture height in pixels)
+  end; // Total = 16 bytes
+
   { Generates RHI-compliant GLSL headers, UBO blocks, and varying layouts }
   TCastleShaderGeneratorRHI = class
   private
@@ -1750,6 +1759,16 @@ type
       out ABindlessMaterialIndex, ASkinningMode: Cardinal;
       out ASpecularAntiAliasing: Boolean;
       out AShadowMapSystemModeOrd: Cardinal); static;
+
+    { Phase 111: Generates a procedural fullscreen-triangle GLSL 450 vertex shader
+      for HDR Tonemapping & Bloom Composite (compatible with CGE negative-height VkViewport). }
+    function GenerateHDRCompositeVertexShader: String;
+
+    { Phase 111: Generates a GLSL 450 compute shader that modulates scene HDR radiance
+      by denoised GTAO ambient occlusion and adds Hi-Z SSR reflections. }
+    function GeneratePostProcessModulateComputeShader(
+      const AWorkgroupSizeX: Cardinal = 8;
+      const AWorkgroupSizeY: Cardinal = 8): String;
 
     { Computes the 64-bit FNV-1a hash of the final GLSL source for on-disk SPIR-V caching }
     class function ComputeSourceHash(const FinalGLSL: String): UInt64; static;
@@ -8549,6 +8568,50 @@ begin
   ASkinningMode := Cardinal(Max(0, Round(APushConstants.ObjectParams.Y)));
   ASpecularAntiAliasing := APushConstants.ObjectParams.Z > 0.5;
   AShadowMapSystemModeOrd := Cardinal(Max(0, Round(APushConstants.ObjectParams.W)));
+end;
+
+function TCastleShaderGeneratorRHI.GenerateHDRCompositeVertexShader: String;
+begin
+  Result :=
+    '#version 450' + NL +
+    '/* Phase 111: Procedural Fullscreen Triangle Vertex Shader (HDRCompositeVS) */' + NL +
+    'layout(location = 0) out vec2 v_TexCoord;' + NL +
+    'void main()' + NL +
+    '{' + NL +
+    '  vec2 uv = vec2(float((gl_VertexIndex << 1) & 2), float(gl_VertexIndex & 2));' + NL +
+    '  gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);' + NL +
+    '  v_TexCoord = vec2(uv.x, 1.0 - uv.y);' + NL +
+    '}' + NL;
+end;
+
+function TCastleShaderGeneratorRHI.GeneratePostProcessModulateComputeShader(
+  const AWorkgroupSizeX, AWorkgroupSizeY: Cardinal): String;
+begin
+  Result :=
+    '#version 450' + NL +
+    Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;',
+      [Max(Cardinal(1), AWorkgroupSizeX), Max(Cardinal(1), AWorkgroupSizeY)]) + NL +
+    'layout(set = 0, binding = 0) uniform sampler2D u_HDRSceneTexture;' + NL +
+    'layout(set = 0, binding = 1) uniform sampler2D u_GTAOTexture;' + NL +
+    'layout(set = 0, binding = 2) uniform sampler2D u_SSRTexture;' + NL +
+    'layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D u_OutModulatedHDR;' + NL +
+    'layout(push_constant) uniform PostProcessModulatePC {' + NL +
+    '  float AOStrength;' + NL +
+    '  float SSRStrength;' + NL +
+    '  uint DstWidth;' + NL +
+    '  uint DstHeight;' + NL +
+    '} pc;' + NL +
+    'void main()' + NL +
+    '{' + NL +
+    '  uvec2 gid = gl_GlobalInvocationID.xy;' + NL +
+    '  if (gid.x >= pc.DstWidth || gid.y >= pc.DstHeight) return;' + NL +
+    '  vec2 uv = (vec2(gid) + vec2(0.5)) / max(vec2(pc.DstWidth, pc.DstHeight), vec2(1.0));' + NL +
+    '  vec3 hdr = textureLod(u_HDRSceneTexture, uv, 0.0).rgb;' + NL +
+    '  float ao = clamp(textureLod(u_GTAOTexture, uv, 0.0).r, 0.0, 1.0);' + NL +
+    '  vec3 ssr = textureLod(u_SSRTexture, uv, 0.0).rgb;' + NL +
+    '  vec3 lit = max(hdr * mix(1.0, ao, pc.AOStrength) + ssr * pc.SSRStrength, vec3(0.0));' + NL +
+    '  imageStore(u_OutModulatedHDR, ivec2(gid), vec4(lit, 1.0));' + NL +
+    '}' + NL;
 end;
 
 class function TCastleShaderGeneratorRHI.ComputeSourceHash(const FinalGLSL: String): UInt64;

@@ -114,6 +114,7 @@ const
   VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER = 45;
   VK_STRUCTURE_TYPE_MEMORY_BARRIER = 46;
   VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT = $00000010;
+  VK_IMAGE_CREATE_ALIAS_BIT = $00000400;
   VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR = 1000001000;
   VK_STRUCTURE_TYPE_PRESENT_INFO_KHR = 1000001001;
   VK_STRUCTURE_TYPE_RENDERING_INFO = 1000044000;
@@ -1581,6 +1582,14 @@ type
     pSignalSemaphores: PVkSemaphore;
   end;
   PVkSubmitInfo = ^VkSubmitInfo;
+
+  VkMemoryBarrier = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    srcAccessMask: VkAccessFlags;
+    dstAccessMask: VkAccessFlags;
+  end;
+  PVkMemoryBarrier = ^VkMemoryBarrier;
 
   VkBufferMemoryBarrier = record
     sType: VkStructureType;

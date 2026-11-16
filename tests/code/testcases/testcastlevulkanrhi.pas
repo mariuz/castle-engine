@@ -400,7 +400,11 @@ type
     procedure TestRealLavapipeBindlessTextureAndMaterialSSBOMultiDrawRHI;
     procedure TestRealLavapipeComputeCullerAndDrawIndexedIndirectCountRHI;
     procedure TestRealLavapipeMaterialBinnerAndBindlessGpuDrivenPipelineRHI;
+    procedure TestRealLavapipeRenderGraphPhysicalMemoryAliasingAndDeadPassCullingRHI;
+    procedure TestRealLavapipeHDRBloomLuminanceHistogramAndTonemapPerceptualDiffRHI;
+    procedure TestRealLavapipeFullRenderGraphGTAOSSRAndPostProcessPipelineRHI;
   private
+    FPhase111ForwardSubPassCounter: Integer;
     FCapturedWarnings: TStringList;
     FRenderedShapeCount: Cardinal;
     FRenderFromViewpointCalls: Cardinal;
@@ -412,6 +416,12 @@ type
     FParallelTestPipeline: TRHIPipeline;
     FParallelTestQuadVBOs: array[0..3] of TRHIBuffer;
     FParallelTestHeadlessMode: Boolean;
+    procedure Phase111ForwardSceneCallback(const AGraph: TRHIRenderGraph;
+      const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+    procedure Phase111AliasPass0Callback(const AGraph: TRHIRenderGraph;
+      const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+    procedure Phase111AliasPass5Callback(const AGraph: TRHIRenderGraph;
+      const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
     procedure CaptureWarning(const Category, S: String);
     procedure DummyRenderShapeCallback(const Shape: TCollectedShape;
       const Params: TRenderParams; const PassParams: TRenderOnePassParams);
@@ -30528,6 +30538,529 @@ begin
     FreeAndNil(WhiteImg);
     FreeAndNil(WhiteTex);
     FreeAndNil(Sampler);
+    FreeAndNil(RealDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.Phase111AliasPass0Callback(
+  const AGraph: TRHIRenderGraph; const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+begin
+  if (AGraph = nil) and (APass = nil) then ;
+  Inc(FRenderGraphPassExecCount);
+  if ACmd <> nil then
+    ACmd.ClearAttachments(True, Vector4(0.8, 0.2, 0.1, 1.0), False, 1.0, False, 0);
+end;
+
+procedure TTestCastleVulkanRHI.Phase111AliasPass5Callback(
+  const AGraph: TRHIRenderGraph; const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+begin
+  if (AGraph = nil) and (APass = nil) then ;
+  Inc(FRenderGraphPassExecCount);
+  if ACmd <> nil then
+    ACmd.ClearAttachments(True, Vector4(0.25, 0.55, 0.85, 1.0), False, 1.0, False, 0);
+end;
+
+procedure TTestCastleVulkanRHI.Phase111ForwardSceneCallback(
+  const AGraph: TRHIRenderGraph; const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+begin
+  if (AGraph = nil) and (APass = nil) then ;
+  Inc(FPhase111ForwardSubPassCounter);
+  if ACmd = nil then
+    Exit;
+
+  { Render deterministic HDR + Depth scene into the RenderGraph's active dynamic rendering pass:
+    - Base clear already wrote background HDR=(0,0,0,1), Depth=1.0 (sky)
+    - Left & center foreground surface [4..60 x 4..60]: mid-HDR (0.65, 0.50, 0.35), Depth = 0.50
+    - Bright HDR emissive core [26..38 x 26..38]: HDR (6.0, 3.0, 1.2), Depth = 0.32 (creates depth crease + bloom!) }
+  ACmd.SetScissor(Rectangle(4, 4, 56, 56));
+  ACmd.ClearAttachments(True, Vector4(0.65, 0.50, 0.35, 1.0), True, 0.50, False, 0);
+
+  ACmd.SetScissor(Rectangle(26, 26, 12, 12));
+  ACmd.ClearAttachments(True, Vector4(6.0, 3.0, 1.2, 1.0), True, 0.32, False, 0);
+
+  ACmd.SetScissor(Rectangle(0, 0, 64, 64));
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipeRenderGraphPhysicalMemoryAliasingAndDeadPassCullingRHI;
+var
+  RealDev: TVulkanRHIDevice;
+  RealCmd: TVulkanRHICommandList;
+  Graph: TRHIRenderGraph;
+  FinalLDR: TRHITexture;
+  DescT1, DescT2, DescT3, DescT4, DescDead, FinalDesc: TRHITextureDesc;
+  HT1, HT2, HT3, HT4, HDead, HFinal: TRHIRenderGraphResourceHandle;
+  P0, P1, P2, P3, P4, P5, PDead: TRHIRenderGraphPass;
+  VkT1, VkT3, VkT4: TVulkanRHITexture;
+  PoolCountFrame1: Integer;
+  Readback, ExpectedImg: TRGBAlphaImage;
+  RMSE: Single;
+begin
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+    Exit;
+
+  Graph := nil;
+  FinalLDR := nil;
+  Readback := nil;
+  ExpectedImg := nil;
+  try
+    FinalDesc := TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc], 1, 1);
+    FinalDesc.DebugName := 'Phase111_AliasFinalLDR';
+    FinalLDR := RealDev.CreateTexture(FinalDesc);
+
+    DescT1 := TRHITextureDesc.Create2D(64, 64, pfRGBA16_Float,
+      [tuColorAttachment, tuSampled], 1, 1);
+    DescT2 := TRHITextureDesc.Create2D(64, 64, pfRGBA16_Float,
+      [tuColorAttachment, tuSampled], 1, 1);
+    { Heterogeneous format (pfR16_Float) + usage (tuStorage) non-overlapping with T1 }
+    DescT3 := TRHITextureDesc.Create2D(64, 64, pfR16_Float,
+      [tuSampled, tuStorage], 1, 1);
+    { Heterogeneous resolution (32x32) + format (pfRGBA8_UNorm) non-overlapping with T3 }
+    DescT4 := TRHITextureDesc.Create2D(32, 32, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled], 1, 1);
+    DescDead := TRHITextureDesc.Create2D(128, 128, pfRGBA16_Float,
+      [tuColorAttachment, tuSampled], 1, 1);
+
+    Graph := TRHIRenderGraph.Create(RealDev);
+
+    { Build Frame 1 }
+    HT1 := Graph.DeclareTransientTexture('Alias_T1_HDR64', DescT1);
+    HT2 := Graph.DeclareTransientTexture('Alias_T2_HDR64', DescT2);
+    HT3 := Graph.DeclareTransientTexture('Alias_T3_R16F64', DescT3);
+    HT4 := Graph.DeclareTransientTexture('Alias_T4_RGBA8_32', DescT4);
+    HDead := Graph.DeclareTransientTexture('Alias_Dead_128', DescDead);
+    HFinal := Graph.ImportExternalTexture('Alias_FinalLDR', FinalLDR, rsUndefined, rsShaderRead);
+
+    FRenderGraphPassExecCount := 0;
+
+    P0 := Graph.AddPass('Pass0_ProduceT1', rgptGraphics);
+    P0.WriteColorAttachment(HT1, loClear, Vector4(0.8, 0.2, 0.1, 1.0), soStore);
+    P0.OnExecute := @Phase111AliasPass0Callback;
+
+    P1 := Graph.AddPass('Pass1_ConsumeT1_ProduceT2', rgptGraphics);
+    P1.ReadTexture(HT1, rsShaderRead);
+    P1.WriteColorAttachment(HT2, loClear, Vector4(0.1, 0.7, 0.3, 1.0), soStore);
+    P1.OnExecute := @DummyRenderGraphPassCallback;
+
+    { T1 lifetime ended at Pass1 (order 1); Pass2 reads T2 (forcing order 2 > 1) and produces T3 -> aliases T1's VkDeviceMemory! }
+    P2 := Graph.AddPass('Pass2_ProduceT3Storage', rgptCompute);
+    P2.ReadTexture(HT2, rsShaderRead);
+    P2.WriteStorageTexture(HT3, rsUnorderedAccess);
+    P2.OnExecute := @DummyRenderGraphPassCallback;
+
+    { T2 lifetime ended at Pass2 (order 2); Pass3 reads T3 (forcing order 3 > 2) and produces T4 -> aliases T2's VkDeviceMemory! }
+    P3 := Graph.AddPass('Pass3_ConsumeT3_ProduceT4', rgptGraphics);
+    P3.ReadTexture(HT3, rsShaderRead);
+    P3.WriteColorAttachment(HT4, loClear, Vector4(0.9, 0.8, 0.2, 1.0), soStore);
+    P3.OnExecute := @DummyRenderGraphPassCallback;
+
+    P4 := Graph.AddPass('Pass4_ConsumeT4', rgptCompute);
+    P4.ReadTexture(HT4, rsShaderRead);
+    P4.HasSideEffects := True;
+    P4.OnExecute := @DummyRenderGraphPassCallback;
+
+    P5 := Graph.AddPass('Pass5_CompositeFinal', rgptGraphics);
+    P5.ReadTexture(HT4, rsShaderRead);
+    P5.WriteColorAttachment(HFinal, loClear, Vector4(0.0, 0.0, 0.0, 1.0), soStore);
+    P5.OnExecute := @Phase111AliasPass5Callback;
+
+    PDead := Graph.AddPass('PassDead_Unreferenced', rgptGraphics);
+    PDead.WriteColorAttachment(HDead, loClear, Vector4(1.0, 0.0, 1.0, 1.0), soStore);
+    PDead.OnExecute := @DummyRenderGraphPassCallback;
+
+    Graph.Compile;
+
+    AssertEquals('Dead-pass culling must cull 1 pass', 1, Graph.CulledPassCount);
+    AssertEquals('Compiled pass count must be 6', 6, Graph.CompiledPassCount);
+    AssertTrue('Unreferenced dead transient texture must not allocate VRAM',
+      Graph.ResolvePhysicalTexture(HDead) = nil);
+
+    VkT1 := Graph.ResolvePhysicalTexture(HT1) as TVulkanRHITexture;
+    VkT3 := Graph.ResolvePhysicalTexture(HT3) as TVulkanRHITexture;
+    VkT4 := Graph.ResolvePhysicalTexture(HT4) as TVulkanRHITexture;
+    AssertTrue('Resolved T1, T3, T4 must be non-nil', (VkT1 <> nil) and (VkT3 <> nil) and (VkT4 <> nil));
+
+    { Verify distinct VkImage handles sharing the exact same physical VkDeviceMemory & MemoryOffset! }
+    AssertTrue('Cross-format aliased T3 must have a distinct VkImage handle from T1',
+      VkT3.Image <> VkT1.Image);
+    AssertTrue('Cross-format aliased T3 must bind to the exact same VkDeviceMemory as carrier T1',
+      VkT3.DeviceMemory = VkT1.DeviceMemory);
+    AssertEquals('Cross-format aliased T3 must bind at the carrier MemoryOffset',
+      Int64(VkT1.MemoryOffset), Int64(VkT3.MemoryOffset));
+    AssertTrue('T3 must report IsMemoryAliased = True and not own the carrier allocation',
+      VkT3.IsMemoryAliased and (not VkT3.OwnsAllocation));
+
+    AssertTrue('Graph must report MemoryAliasedTextureCount >= 1', Graph.MemoryAliasedTextureCount >= 1);
+    AssertTrue('Graph must report AliasedMemorySavedBytes > 0', Graph.AliasedMemorySavedBytes > 0);
+    AssertTrue('Graph must hoist explicit aliasing barriers (>= 1)', Graph.AliasingBarrierCount >= 1);
+    PoolCountFrame1 := Graph.PhysicalTransientTextureCount;
+    AssertEquals('4 live transients with non-overlapping chains must fit in 2 physical carrier slots',
+      2, PoolCountFrame1);
+
+    { Execute Frame 1 on live Mesa Lavapipe }
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    Graph.Execute(RealCmd);
+    AssertTrue('Command list must record explicit VkMemoryBarrier2 / VkMemoryBarrier aliasing barriers',
+      RealCmd.AliasingBarrierCount >= 1);
+    RealDev.EndOffscreenFrame;
+
+    AssertEquals('All 6 live passes must execute (DeadPass skipped)', 6, FRenderGraphPassExecCount);
+
+    { Verify Frame 2 Reset + Re-Compile reuses cached carrier & aliased VkImage wrappers with zero new slots }
+    Graph.Reset;
+    HT1 := Graph.DeclareTransientTexture('Alias_T1_HDR64', DescT1);
+    HT3 := Graph.DeclareTransientTexture('Alias_T3_R16F64', DescT3);
+    HFinal := Graph.ImportExternalTexture('Alias_FinalLDR', FinalLDR, rsShaderRead, rsShaderRead);
+
+    P0 := Graph.AddPass('Frame2_P0', rgptGraphics);
+    P0.WriteColorAttachment(HT1, loClear, Vector4(0.4, 0.4, 0.4, 1.0), soStore);
+    P2 := Graph.AddPass('Frame2_P1', rgptCompute);
+    P2.ReadTexture(HT1, rsShaderRead);
+    P2.WriteStorageTexture(HT3, rsUnorderedAccess);
+    P5 := Graph.AddPass('Frame2_P2', rgptGraphics);
+    P5.ReadTexture(HT3, rsShaderRead);
+    P5.WriteColorAttachment(HFinal, loClear, Vector4(0.0, 0.0, 0.0, 1.0), soStore);
+    P5.OnExecute := @Phase111AliasPass5Callback;
+
+    Graph.Compile;
+    AssertEquals('Second frame must reuse pooled carrier slots without growing pool',
+      PoolCountFrame1, Graph.PhysicalTransientTextureCount);
+
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    Graph.Execute(RealCmd);
+    RealDev.EndOffscreenFrame;
+
+    Readback := RealDev.GrabTextureImage(FinalLDR, Rectangle(0, 0, 64, 64));
+    ExpectedImg := TRGBAlphaImage.Create(64, 64);
+    ExpectedImg.Clear(Vector4Byte(Round(0.25 * 255), Round(0.55 * 255), Round(0.85 * 255), 255));
+    AssertTrue('Perceptual diff on FinalLDR after multi-frame aliased RenderGraph execution must match (< 0.01 RMSE)',
+      CompareImagesPerceptualDiff(Readback, ExpectedImg, 0.01, RMSE));
+  finally
+    FreeAndNil(ExpectedImg);
+    FreeAndNil(Readback);
+    FreeAndNil(Graph);
+    FreeAndNil(FinalLDR);
+    FreeAndNil(RealDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipeHDRBloomLuminanceHistogramAndTonemapPerceptualDiffRHI;
+var
+  RealDev: TVulkanRHIDevice;
+  RealCmd: TVulkanRHICommandList;
+  HDRPost: TCastleVulkanHDRPostProcessor;
+  LDRTarget: TRHITexture;
+  HDRUpload, HDRReadback, BloomReadback: TRGBAlphaFloatImage;
+  LDRReadbackACES, LDRReadbackAgX, LDRNoBloom, LDRWithBloom, RefImg: TRGBAlphaImage;
+  GpuBins: array[0..CASTLE_LUMINANCE_HISTOGRAM_BINS - 1] of Cardinal;
+  BinSum, ExpectedBin: Cardinal;
+  Lum, LogLumNorm, RMSE: Single;
+  ExpColor: TVector3;
+  X, Y: Integer;
+begin
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+    Exit;
+
+  LDRTarget := nil;
+  HDRUpload := nil;
+  HDRReadback := nil;
+  BloomReadback := nil;
+  LDRReadbackACES := nil;
+  LDRReadbackAgX := nil;
+  LDRNoBloom := nil;
+  LDRWithBloom := nil;
+  RefImg := nil;
+  try
+    HDRPost := RealDev.HDRPostProcessor;
+    HDRPost.EnsureHDRTargets(64, 64);
+    LDRTarget := RealDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuColorAttachment, tuSampled, tuTransferSrc]));
+
+    { 1. Upload linear HDR color (2.4, 0.8, 0.25, 1.0) into pfRGBA16_Float and verify float readback }
+    HDRUpload := TRGBAlphaFloatImage.Create(64, 64);
+    for Y := 0 to 63 do
+      for X := 0 to 63 do
+        HDRUpload.PixelPtr(X, Y)^ := Vector4(2.4, 0.8, 0.25, 1.0);
+    HDRPost.HDRSceneTexture.UploadImage(HDRUpload);
+
+    HDRReadback := RealDev.GrabTextureFloatImage(HDRPost.HDRSceneTexture, Rectangle(0, 0, 64, 64));
+    AssertSameValue(2.4, HDRReadback.PixelPtr(32, 32)^.X, 0.01);
+    AssertSameValue(0.8, HDRReadback.PixelPtr(32, 32)^.Y, 0.01);
+    AssertSameValue(0.25, HDRReadback.PixelPtr(32, 32)^.Z, 0.01);
+
+    { 2. Dispatch GPU LuminanceHistogramCS & verify atomic histogram bin counts on live Lavapipe }
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    HDRPost.DispatchLuminanceHistogramOnGPU(RealCmd, HDRPost.HDRSceneTexture);
+    RealDev.EndOffscreenFrame;
+
+    BinSum := HDRPost.ReadBackGpuHistogramBins(GpuBins);
+    AssertEquals('GPU LuminanceHistogramCS must count all 64*64 = 4096 texels', 4096, Integer(BinSum));
+
+    Lum := 2.4 * 0.2126 + 0.8 * 0.7152 + 0.25 * 0.0722;
+    LogLumNorm := EnsureRange((Log2(Lum) - (-8.0)) / 12.0, 0.0, 1.0);
+    ExpectedBin := Cardinal(EnsureRange(Trunc(LogLumNorm * 254.0 + 1.0), 1, 255));
+    AssertEquals('Uniform HDR scene must accumulate all 4096 texels in ExpectedBin',
+      4096, Integer(GpuBins[ExpectedBin]));
+
+    { 3. Verify ACES Filmic & AgX Fullscreen Composite on live GPU against CPU reference via Perceptual Diff }
+    HDRPost.Exposure := 1.15;
+    HDRPost.Gamma := 2.2;
+    HDRPost.Saturation := 1.12;
+    HDRPost.Contrast := 1.06;
+    HDRPost.EnableBloom := False;
+    HDRPost.EnableAutoExposure := False;
+
+    HDRPost.TonemapOperator := tmoACESFilmic;
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    HDRPost.ExecuteCompositePass(RealCmd, LDRTarget);
+    RealDev.EndOffscreenFrame;
+    LDRReadbackACES := RealDev.GrabTextureImage(LDRTarget, Rectangle(0, 0, 64, 64));
+
+    ExpColor := HDRPost.EvaluateCompositeColor(Vector3(2.4, 0.8, 0.25), Vector3(0.0, 0.0, 0.0));
+    RefImg := TRGBAlphaImage.Create(64, 64);
+    RefImg.Clear(Vector4Byte(
+      Byte(Round(ExpColor.X * 255.0)),
+      Byte(Round(ExpColor.Y * 255.0)),
+      Byte(Round(ExpColor.Z * 255.0)), 255));
+    AssertTrue('GPU ACES Filmic + Color Grading + sRGB must match CPU reference (RMSE <= 0.015)',
+      CompareImagesPerceptualDiff(LDRReadbackACES, RefImg, 0.015, RMSE));
+
+    HDRPost.TonemapOperator := tmoAgX;
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    HDRPost.ExecuteCompositePass(RealCmd, LDRTarget);
+    RealDev.EndOffscreenFrame;
+    LDRReadbackAgX := RealDev.GrabTextureImage(LDRTarget, Rectangle(0, 0, 64, 64));
+
+    ExpColor := HDRPost.EvaluateCompositeColor(Vector3(2.4, 0.8, 0.25), Vector3(0.0, 0.0, 0.0));
+    RefImg.Clear(Vector4Byte(
+      Byte(Round(ExpColor.X * 255.0)),
+      Byte(Round(ExpColor.Y * 255.0)),
+      Byte(Round(ExpColor.Z * 255.0)), 255));
+    AssertTrue('GPU AgX Filmic + Color Grading + sRGB must match CPU reference (RMSE <= 0.015)',
+      CompareImagesPerceptualDiff(LDRReadbackAgX, RefImg, 0.015, RMSE));
+
+    { 4. Verify live GPU 13-tap Karis Bloom Downsample + 9-tap Tent Upsample halo spread }
+    for Y := 0 to 63 do
+      for X := 0 to 63 do
+        if (X >= 28) and (X < 36) and (Y >= 28) and (Y < 36) then
+          HDRUpload.PixelPtr(X, Y)^ := Vector4(12.0, 6.0, 2.0, 1.0)
+        else
+          HDRUpload.PixelPtr(X, Y)^ := Vector4(0.05, 0.05, 0.05, 1.0);
+    HDRPost.HDRSceneTexture.UploadImage(HDRUpload);
+
+    HDRPost.TonemapOperator := tmoACESFilmic;
+    HDRPost.Exposure := 1.0;
+    HDRPost.Saturation := 1.0;
+    HDRPost.Contrast := 1.0;
+    HDRPost.BloomThreshold := 1.0;
+    HDRPost.BloomKnee := 0.5;
+    HDRPost.BloomIntensity := 0.45;
+
+    HDRPost.EnableBloom := False;
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    HDRPost.ExecuteCompositePass(RealCmd, LDRTarget);
+    RealDev.EndOffscreenFrame;
+    LDRNoBloom := RealDev.GrabTextureImage(LDRTarget, Rectangle(0, 0, 64, 64));
+
+    HDRPost.EnableBloom := True;
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    HDRPost.DispatchBloomPyramid(RealCmd);
+    HDRPost.ExecuteCompositePass(RealCmd, LDRTarget);
+    RealDev.EndOffscreenFrame;
+
+    BloomReadback := RealDev.GrabTextureFloatImage(HDRPost.BloomMipTextures[0],
+      Rectangle(0, 0, HDRPost.BloomMipTextures[0].Desc.Width, HDRPost.BloomMipTextures[0].Desc.Height));
+    LDRWithBloom := RealDev.GrabTextureImage(LDRTarget, Rectangle(0, 0, 64, 64));
+
+    { Center of half-res BloomMip0 (16, 16) must be bright; halo at (11, 16) > 0; far corner (1, 1) near 0 }
+    AssertTrue(Format('BloomMip0 center (16,16)=%.4f, (15,15)=%.4f, (11,16)=%.4f must have strong HDR energy (> 1.0)',
+      [BloomReadback.PixelPtr(16, 16)^.X, BloomReadback.PixelPtr(15, 15)^.X, BloomReadback.PixelPtr(11, 16)^.X]),
+      BloomReadback.PixelPtr(16, 16)^.X > 1.0);
+    AssertTrue(Format('BloomMip0 halo (11,16)=%.4f outside 4x4 half-res core must spread positive glow (> 0.02)',
+      [BloomReadback.PixelPtr(11, 16)^.X]),
+      BloomReadback.PixelPtr(11, 16)^.X > 0.02);
+    AssertTrue(Format('BloomMip0 far corner (1,1)=%.4f must remain small (< 0.25)',
+      [BloomReadback.PixelPtr(1, 1)^.X]),
+      BloomReadback.PixelPtr(1, 1)^.X < 0.25);
+    AssertTrue(Format('Composited LDR pixel at halo (22, 32) WithBloom=%d vs NoBloom=%d',
+      [LDRWithBloom.PixelPtr(22, 32)^.X, LDRNoBloom.PixelPtr(22, 32)^.X]),
+      LDRWithBloom.PixelPtr(22, 32)^.X > LDRNoBloom.PixelPtr(22, 32)^.X + 8);
+  finally
+    FreeAndNil(RefImg);
+    FreeAndNil(LDRWithBloom);
+    FreeAndNil(LDRNoBloom);
+    FreeAndNil(LDRReadbackAgX);
+    FreeAndNil(LDRReadbackACES);
+    FreeAndNil(BloomReadback);
+    FreeAndNil(HDRReadback);
+    FreeAndNil(HDRUpload);
+    FreeAndNil(LDRTarget);
+    FreeAndNil(RealDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipeFullRenderGraphGTAOSSRAndPostProcessPipelineRHI;
+var
+  RealDev: TVulkanRHIDevice;
+  RealCmd: TVulkanRHICommandList;
+  HDRPost: TCastleVulkanHDRPostProcessor;
+  Graph: TRHIRenderGraph;
+  DepthTex, FinalLDRTex, RefLDRTex: TRHITexture;
+  DepthUpload, GTAOReadback, LitHDRReadback, BloomMip0Readback: TRGBAlphaFloatImage;
+  GraphLDRReadback, DirectRefReadback: TRGBAlphaImage;
+  VkGTAORaw, VkSSR, VkHDRLit, VkBloomMip0: TVulkanRHITexture;
+  GpuBins: array[0..CASTLE_LUMINANCE_HISTOGRAM_BINS - 1] of Cardinal;
+  FlatAO, CreaseAO, SkyAO, RMSE: Single;
+  X, Y: Integer;
+begin
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+    Exit;
+
+  Graph := nil;
+  DepthTex := nil;
+  FinalLDRTex := nil;
+  RefLDRTex := nil;
+  DepthUpload := nil;
+  GTAOReadback := nil;
+  LitHDRReadback := nil;
+  BloomMip0Readback := nil;
+  GraphLDRReadback := nil;
+  DirectRefReadback := nil;
+  try
+    { Part A: Direct GPU GTAO Horizon + Cross-Bilateral Denoise verification on synthetic depth step }
+    DepthTex := RealDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfD32_Float, [tuDepthStencil, tuSampled, tuTransferDst]));
+    DepthUpload := TRGBAlphaFloatImage.Create(64, 64);
+    for Y := 0 to 63 do
+      for X := 0 to 63 do
+      begin
+        if Y >= 56 then
+          DepthUpload.PixelPtr(X, Y)^ := Vector4(1.0, 0.0, 0.0, 1.0)   { Sky }
+        else if (X >= 36) and (X <= 48) and (Y >= 16) and (Y <= 44) then
+          DepthUpload.PixelPtr(X, Y)^ := Vector4(0.20, 0.0, 0.0, 1.0)  { Protruding occluder wall }
+        else
+          DepthUpload.PixelPtr(X, Y)^ := Vector4(0.50, 0.0, 0.0, 1.0); { Flat background plane }
+      end;
+    DepthTex.UploadImage(DepthUpload);
+
+    RealDev.GTAO.ZNear := 0.1;
+    RealDev.GTAO.ZFar := 10.0;
+    RealDev.GTAO.EffectRadius := 1.5;
+    RealDev.GTAO.Power := 1.5;
+    RealDev.GTAO.EnsureGTAOTargets(64, 64, False);
+
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    AssertEquals('DispatchGTAO must record 2 dispatches (Horizon + Denoise)',
+      2, Integer(RealDev.GTAO.DispatchGTAO(RealCmd, DepthTex)));
+    RealDev.EndOffscreenFrame;
+
+    GTAOReadback := RealDev.GrabTextureFloatImage(RealDev.GTAO.DenoisedGTAOTexture, Rectangle(0, 0, 64, 64));
+    SkyAO := GTAOReadback.PixelPtr(16, 60)^.X;
+    FlatAO := GTAOReadback.PixelPtr(10, 30)^.X;
+    CreaseAO := GTAOReadback.PixelPtr(34, 30)^.X; { Immediately adjacent to protruding z=0.20 wall }
+    AssertSameValue(1.0, SkyAO, 0.01);
+    AssertTrue(Format('Unoccluded flat plane FlatAO=%.4f must have high GTAO visibility (> 0.90)', [FlatAO]),
+      FlatAO > 0.90);
+    AssertTrue(Format('Depth crease CreaseAO=%.4f vs FlatAO=%.4f must exhibit GTAO darkening', [CreaseAO, FlatAO]),
+      CreaseAO < FlatAO - 0.04);
+
+    { Part B: Full 9-Pass BuildNextGenPostProcessRenderGraph Live Execution + Physical Aliasing + Perceptual Diff }
+    FinalLDRTex := RealDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuColorAttachment, tuSampled, tuTransferSrc]));
+    RefLDRTex := RealDev.CreateTexture(
+      TRHITextureDesc.Create2D(64, 64, pfRGBA8_UNorm, [tuColorAttachment, tuSampled, tuTransferSrc]));
+
+    HDRPost := RealDev.HDRPostProcessor;
+    HDRPost.Exposure := 1.05;
+    HDRPost.Gamma := 2.2;
+    HDRPost.Saturation := 1.05;
+    HDRPost.Contrast := 1.02;
+    HDRPost.TonemapOperator := tmoACESFilmic;
+    HDRPost.EnableBloom := True;
+    HDRPost.BloomIntensity := 0.25;
+    HDRPost.AOStrength := 1.0;
+    HDRPost.SSRStrength := 0.8;
+
+    RealDev.SSR.ZNear := 0.1;
+    RealDev.SSR.ZFar := 10.0;
+    RealDev.SSR.Thickness := 0.35;
+    RealDev.SSR.Intensity := 1.0;
+
+    Graph := TRHIRenderGraph.Create(RealDev);
+    FPhase111ForwardSubPassCounter := 0;
+    HDRPost.BuildNextGenPostProcessRenderGraph(
+      Graph, 64, 64, FinalLDRTex, @Phase111ForwardSceneCallback, True { IncludeDeadDebugPass });
+    Graph.Compile;
+
+    AssertEquals('Next-Gen graph with dead debug pass must register 10 passes', 10, Graph.PassCount);
+    AssertEquals('Dead-pass culling must cull the unreferenced debug pass', 1, Graph.CulledPassCount);
+    AssertEquals('Compiled active pass count must be 9', 9, Graph.CompiledPassCount);
+    AssertTrue('Next-Gen graph must alias transient physical memory (>= 2 aliased textures)',
+      Graph.MemoryAliasedTextureCount >= 2);
+    AssertTrue('Next-Gen graph must save transient VRAM bytes (> 0)',
+      Graph.AliasedMemorySavedBytes > 0);
+    AssertTrue('Next-Gen graph must hoist explicit memory aliasing barriers (>= 2)',
+      Graph.AliasingBarrierCount >= 2);
+
+    VkGTAORaw := Graph.ResolvePhysicalTexture(HDRPost.RGGTAORawHandle) as TVulkanRHITexture;
+    VkSSR := Graph.ResolvePhysicalTexture(HDRPost.RGSSRReflectionHandle) as TVulkanRHITexture;
+    VkHDRLit := Graph.ResolvePhysicalTexture(HDRPost.RGSceneHDRLitHandle) as TVulkanRHITexture;
+    VkBloomMip0 := Graph.ResolvePhysicalTexture(HDRPost.RGBloomMip0Handle) as TVulkanRHITexture;
+    AssertTrue('All active transient RenderGraph handles must resolve to physical textures',
+      (VkGTAORaw <> nil) and (VkSSR <> nil) and (VkHDRLit <> nil) and (VkBloomMip0 <> nil));
+    { GTAORaw (passes 2..3) and SSRReflection (passes 4..5) have non-overlapping lifetimes -> share VkDeviceMemory! }
+    AssertTrue('GTAORaw and SSRReflection must have distinct VkImage handles',
+      VkGTAORaw.Image <> VkSSR.Image);
+    AssertTrue('Non-overlapping transient targets must share physical VkDeviceMemory',
+      (VkGTAORaw.DeviceMemory = VkSSR.DeviceMemory) or
+      (VkGTAORaw.DeviceMemory = VkHDRLit.DeviceMemory) or
+      (VkSSR.DeviceMemory = VkBloomMip0.DeviceMemory));
+
+    { Execute all 9 compiled passes on live Mesa Lavapipe! }
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    Graph.Execute(RealCmd);
+    RealDev.EndOffscreenFrame;
+
+    AssertEquals('Forward3DHDRPass callback must execute once', 1, FPhase111ForwardSubPassCounter);
+    AssertEquals('GPU LuminanceHistogramCS inside RenderGraph must count all 4096 pixels',
+      4096, Integer(HDRPost.ReadBackGpuHistogramBins(GpuBins)));
+
+    GraphLDRReadback := RealDev.GrabTextureImage(FinalLDRTex, Rectangle(0, 0, 64, 64));
+
+    { Build independent reference composite from the resolved LitHDR + BloomMip0 textures and verify Perceptual Diff }
+    LitHDRReadback := RealDev.GrabTextureFloatImage(VkHDRLit, Rectangle(0, 0, 64, 64));
+    BloomMip0Readback := RealDev.GrabTextureFloatImage(VkBloomMip0, Rectangle(0, 0, 32, 32));
+    AssertTrue('LitHDR center emissive core (32,32) must retain bright HDR radiance (> 4.0)',
+      LitHDRReadback.PixelPtr(32, 32)^.X > 4.0);
+    AssertTrue('BloomMip0 center (16,16) must contain downsampled/upsampled bloom energy (> 0.5)',
+      BloomMip0Readback.PixelPtr(16, 16)^.X > 0.5);
+
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    HDRPost.ExecuteCompositeFromTextures(RealCmd, VkHDRLit, VkBloomMip0, RefLDRTex, False);
+    RealDev.EndOffscreenFrame;
+    DirectRefReadback := RealDev.GrabTextureImage(RefLDRTex, Rectangle(0, 0, 64, 64));
+
+    AssertTrue('RenderGraph TonemapCompositePass output must perceptually match reference composite (RMSE <= 0.01)',
+      CompareImagesPerceptualDiff(GraphLDRReadback, DirectRefReadback, 0.01, RMSE));
+    { Also verify spatial structure of final tonemapped LDR frame: sky border dark, mid plane lit, emissive core brightest }
+    AssertTrue(Format('Sky border pixel (1,1)=%d must remain dark (< 75)', [GraphLDRReadback.PixelPtr(1, 1)^.X]),
+      GraphLDRReadback.PixelPtr(1, 1)^.X < 75);
+    AssertTrue(Format('Foreground lit surface (14,14)=%d must be much brighter than sky border (%d)',
+      [GraphLDRReadback.PixelPtr(14, 14)^.X, GraphLDRReadback.PixelPtr(1, 1)^.X]),
+      Integer(GraphLDRReadback.PixelPtr(14, 14)^.X) > Integer(GraphLDRReadback.PixelPtr(1, 1)^.X) + 80);
+    AssertTrue(Format('Emissive core (32,32)=%d must be brightest (> 235)', [GraphLDRReadback.PixelPtr(32, 32)^.X]),
+      GraphLDRReadback.PixelPtr(32, 32)^.X > 235);
+  finally
+    FreeAndNil(DirectRefReadback);
+    FreeAndNil(GraphLDRReadback);
+    FreeAndNil(BloomMip0Readback);
+    FreeAndNil(LitHDRReadback);
+    FreeAndNil(GTAOReadback);
+    FreeAndNil(DepthUpload);
+    FreeAndNil(RefLDRTex);
+    FreeAndNil(FinalLDRTex);
+    FreeAndNil(DepthTex);
+    FreeAndNil(Graph);
     FreeAndNil(RealDev);
   end;
 end;

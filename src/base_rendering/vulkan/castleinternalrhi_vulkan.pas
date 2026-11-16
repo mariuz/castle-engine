@@ -78,8 +78,10 @@ type
     FSubresourceViews: array of TVulkanSubresourceViewEntry;
     FAllocation: TVulkanMemoryAllocation;
     FDeviceMemory: VkDeviceMemory;
+    FMemoryOffset: VkDeviceSize;
     FAllocatedSize: VkDeviceSize;
     FOwnsImage: Boolean;
+    FOwnsAllocation: Boolean;
     FAspectMask: VkImageAspectFlags;
     FViewAspectMask: VkImageAspectFlags;
     FHostPixels: array of Byte;
@@ -97,10 +99,16 @@ type
   public
     { Standard constructor that allocates a new VkImage and VkImageView }
     constructor Create(const ADevice: TVulkanRHIDevice; const ADesc: TRHITextureDesc); overload;
+    { Carrier constructor (VK_IMAGE_CREATE_ALIAS_BIT) backed by at least AMinCarrierBytes for RenderGraph aliasing }
+    constructor CreateCarrier(const ADevice: TVulkanRHIDevice;
+      const ADesc: TRHITextureDesc; const AMinCarrierBytes: UInt64); overload;
     { Wrapper constructor for existing VkSwapchainKHR images }
     constructor CreateSwapchainWrapper(const ADevice: TVulkanRHIDevice;
       const ADesc: TRHITextureDesc; const AExistingImage: VkImage;
       const AExistingView: VkImageView); overload;
+    { Attempts to create an aliased VkImage + VkImageView bound to ACarrier's physical VkDeviceMemory }
+    class function TryCreateAliased(const ADevice: TVulkanRHIDevice;
+      const ADesc: TRHITextureDesc; const ACarrier: TVulkanRHITexture): TVulkanRHITexture;
     destructor Destroy; override;
 
     procedure UploadImage(const AImage: TEncodedImage;
@@ -114,6 +122,10 @@ type
     property Image: VkImage read FImage;
     property ImageView: VkImageView read FImageView;
     property Allocation: TVulkanMemoryAllocation read FAllocation;
+    property DeviceMemory: VkDeviceMemory read FDeviceMemory;
+    property MemoryOffset: VkDeviceSize read FMemoryOffset;
+    property AllocatedSize: VkDeviceSize read FAllocatedSize;
+    property OwnsAllocation: Boolean read FOwnsAllocation;
     { Full aspect mask used for VkImageMemoryBarrier transitions (DEPTH | STENCIL for combined formats) }
     property AspectMask: VkImageAspectFlags read FAspectMask;
     { Aspect mask used for VkImageView creation (DEPTH-only when sampled in shaders) }
@@ -288,6 +300,7 @@ type
     FInFallbackRenderPass: Boolean;
     FBarrierCount: Cardinal;
     FSync2BarrierCount: Cardinal;
+    FAliasingBarrierCount: Cardinal;
     FComputeDispatchCount: Cardinal;
     FDynamicStateChangeCount: Cardinal;
     FIndirectDrawCallCount: Cardinal;
@@ -345,6 +358,7 @@ type
 
     procedure TransitionTexture(const Texture: TRHITexture;
       const NewState: TRHIResourceState); override;
+    procedure EmitAliasingBarrier(const OldTexture, NewTexture: TRHITexture); override;
     procedure TransitionBuffer(const Buffer: TRHIBuffer;
       const OldState, NewState: TRHIResourceState);
     procedure GenerateMipmaps(const Texture: TRHITexture); override;
@@ -429,6 +443,7 @@ type
     property InFallbackRenderPass: Boolean read FInFallbackRenderPass;
     property BarrierCount: Cardinal read FBarrierCount;
     property Sync2BarrierCount: Cardinal read FSync2BarrierCount;
+    property AliasingBarrierCount: Cardinal read FAliasingBarrierCount;
     property ComputeDispatchCount: Cardinal read FComputeDispatchCount;
     property DynamicStateChangeCount: Cardinal read FDynamicStateChangeCount;
     property IndirectDrawCallCount: Cardinal read FIndirectDrawCallCount;
@@ -1348,17 +1363,45 @@ type
     FHistogramBins: array[0..CASTLE_LUMINANCE_HISTOGRAM_BINS - 1] of Cardinal;
     FHistogramBuffer: TRHIBuffer;
     FExposureStateBuffer: TRHIBuffer;
+    FBlackFallbackTexture: TVulkanRHITexture;
     FBloomDescriptorLayout: TRHIDescriptorSetLayout;
     FBloomDescriptorSet: TRHIDescriptorSet;
+    FBloomDownsampleSets: array[0..CASTLE_BLOOM_MAX_MIP_LEVELS - 1] of TRHIDescriptorSet;
+    FBloomUpsampleSets: array[0..CASTLE_BLOOM_MAX_MIP_LEVELS - 1] of TRHIDescriptorSet;
     FHistogramDescriptorLayout: TRHIDescriptorSetLayout;
     FHistogramDescriptorSet: TRHIDescriptorSet;
+    FCompositeDescriptorLayout: TRHIDescriptorSetLayout;
+    FCompositeDescriptorSet: TRHIDescriptorSet;
+    FModulateDescriptorLayout: TRHIDescriptorSetLayout;
+    FModulateDescriptorSet: TRHIDescriptorSet;
+    FHiZCopyDescriptorLayout: TRHIDescriptorSetLayout;
+    FHiZCopyDescriptorSet: TRHIDescriptorSet;
     FBloomDownsampleShader: TRHIShaderModule;
     FBloomUpsampleShader: TRHIShaderModule;
     FHistogramShader: TRHIShaderModule;
+    FCompositeVertShader: TRHIShaderModule;
     FCompositeFragShader: TRHIShaderModule;
+    FModulateShader: TRHIShaderModule;
+    FHiZCopyShader: TRHIShaderModule;
     FBloomDownsamplePipeline: TRHIComputePipeline;
     FBloomUpsamplePipeline: TRHIComputePipeline;
     FHistogramPipeline: TRHIComputePipeline;
+    FModulatePipeline: TRHIComputePipeline;
+    FHiZCopyPipeline: TRHIComputePipeline;
+    FCompositePipeline: TRHIPipeline;
+    FCompositePipelineFormat: TRHIPixelFormat;
+    FAOStrength: Single;
+    FSSRStrength: Single;
+    FRGSceneHDRRaw: TRHIRenderGraphResourceHandle;
+    FRGSceneDepth: TRHIRenderGraphResourceHandle;
+    FRGHiZMip0: TRHIRenderGraphResourceHandle;
+    FRGGTAORaw: TRHIRenderGraphResourceHandle;
+    FRGGTAODenoised: TRHIRenderGraphResourceHandle;
+    FRGSSRReflection: TRHIRenderGraphResourceHandle;
+    FRGSceneHDRLit: TRHIRenderGraphResourceHandle;
+    FRGBloomMip0: TRHIRenderGraphResourceHandle;
+    FRGFinalLDR: TRHIRenderGraphResourceHandle;
+    FNextGenForwardCallback: TRHIRenderGraphPassExecuteEvent;
     FBloomThreshold: Single;
     FBloomKnee: Single;
     FBloomIntensity: Single;
@@ -1378,6 +1421,25 @@ type
     FTotalBloomUpsampleDispatches: Cardinal;
     FTotalHistogramDispatches: Cardinal;
     FTotalCompositePasses: Cardinal;
+    function GetOrCreateCompositePipelineForFormat(const AFormat: TRHIPixelFormat): TRHIPipeline;
+    procedure HandleNextGenForwardPass(const AGraph: TRHIRenderGraph;
+      const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+    procedure HandleNextGenHiZPass(const AGraph: TRHIRenderGraph;
+      const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+    procedure HandleNextGenGTAOHorizonPass(const AGraph: TRHIRenderGraph;
+      const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+    procedure HandleNextGenGTAODenoisePass(const AGraph: TRHIRenderGraph;
+      const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+    procedure HandleNextGenSSRPass(const AGraph: TRHIRenderGraph;
+      const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+    procedure HandleNextGenModulatePass(const AGraph: TRHIRenderGraph;
+      const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+    procedure HandleNextGenBloomPass(const AGraph: TRHIRenderGraph;
+      const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+    procedure HandleNextGenHistogramPass(const AGraph: TRHIRenderGraph;
+      const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+    procedure HandleNextGenCompositePass(const AGraph: TRHIRenderGraph;
+      const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
     procedure EnsurePipelinesCreated;
     function GetBloomMipTexture(const AMipIndex: Cardinal): TVulkanRHITexture;
   public
@@ -1406,6 +1468,32 @@ type
     procedure ExecuteCompositePass(const ACmd: TRHICommandList;
       const ADstLDRTarget: TRHITexture);
 
+    { Dispatches the bloom pyramid reading from ASrcHDRTexture (default FHDRSceneTexture)
+      and optionally writing final upsampled bloom into ADstBloomMip0Override. }
+    function DispatchBloomPyramidFromTexture(const ACmd: TRHICommandList;
+      const ASrcHDRTexture: TRHITexture;
+      const ADstBloomMip0Override: TRHITexture = nil): Cardinal;
+
+    { Dispatches the 256-bin GPU atomic log2-luminance histogram compute shader over ASrcHDRTexture. }
+    procedure DispatchLuminanceHistogramOnGPU(const ACmd: TRHICommandList;
+      const ASrcHDRTexture: TRHITexture);
+
+    { Waits for GPU idle, invalidates host cache if needed, and reads back the 256 GPU-populated
+      luminance histogram bins into FHistogramBins and AOutBins. Returns total pixel count summed across bins. }
+    function ReadBackGpuHistogramBins(out AOutBins: array of Cardinal): Cardinal;
+
+    { Modulates ASrcHDR by AGTAOTex (with AAOStrength) and adds ASSRTex * ASSRStrength into ADstModulatedHDR. }
+    procedure DispatchPostProcessModulate(const ACmd: TRHICommandList;
+      const ASrcHDR, AGTAOTex, ASSRTex, ADstModulatedHDR: TRHITexture;
+      const AAOStrength: Single = 1.0; const ASSRStrength: Single = 1.0);
+
+    { Records the fullscreen-triangle HDR + Bloom + Auto-Exposure + Tonemap + sRGB draw call
+      reading ASrcHDR and ASrcBloom into ADstLDRTarget. When AInsideRenderGraphPass = True,
+      assumes BeginRendering/EndRendering is already active on ACmd. }
+    procedure ExecuteCompositeFromTextures(const ACmd: TRHICommandList;
+      const ASrcHDR, ASrcBloom, ADstLDRTarget: TRHITexture;
+      const AInsideRenderGraphPass: Boolean = False);
+
     { Populates a declarative TRHIRenderGraph with the complete 4-stage HDR frame pipeline:
       1. Forward3DHDRPass (writes transient HDRColor + transient HDRDepth)
       2. BloomPyramidComputePass (reads HDRColor, writes transient BloomMip0)
@@ -1414,6 +1502,16 @@ type
     procedure BuildDefaultFrameRenderGraph(const AGraph: TRHIRenderGraph;
       const AWidth, AHeight: Cardinal;
       const ASwapchainColor: TRHITexture);
+
+    { Phase 111.3: Populates and wires live GPU OnExecute callbacks for the complete 9-pass
+      Next-Gen Post-Processing Render Graph (Forward HDR+Depth -> Hi-Z -> GTAO Horizon ->
+      GTAO Denoise -> Hi-Z SSR -> PostProcess Modulate -> Bloom Pyramid -> Luminance Histogram ->
+      Tonemap Composite) with physical VkDeviceMemory aliasing across non-overlapping transients. }
+    procedure BuildNextGenPostProcessRenderGraph(const AGraph: TRHIRenderGraph;
+      const AWidth, AHeight: Cardinal;
+      const AFinalLDRTarget: TRHITexture;
+      const ASceneForwardDrawCallback: TRHIRenderGraphPassExecuteEvent = nil;
+      const AIncludeDeadDebugPass: Boolean = False);
 
     { Exact reference evaluators matching the GLSL 450 shaders for deterministic verification }
     class function EvaluateKarisWeight(const ALinearRGB: TVector3): Single; static;
@@ -1453,6 +1551,18 @@ type
     property TargetLuminance: Single read FTargetLuminance;
     property TotalBloomDownsampleDispatches: Cardinal read FTotalBloomDownsampleDispatches;
     property TotalBloomUpsampleDispatches: Cardinal read FTotalBloomUpsampleDispatches;
+    property AOStrength: Single read FAOStrength write FAOStrength;
+    property SSRStrength: Single read FSSRStrength write FSSRStrength;
+    property CompositePipeline: TRHIPipeline read FCompositePipeline;
+    property ModulatePipeline: TRHIComputePipeline read FModulatePipeline;
+    property RGSceneHDRRawHandle: TRHIRenderGraphResourceHandle read FRGSceneHDRRaw;
+    property RGSceneDepthHandle: TRHIRenderGraphResourceHandle read FRGSceneDepth;
+    property RGHiZMip0Handle: TRHIRenderGraphResourceHandle read FRGHiZMip0;
+    property RGGTAORawHandle: TRHIRenderGraphResourceHandle read FRGGTAORaw;
+    property RGGTAODenoisedHandle: TRHIRenderGraphResourceHandle read FRGGTAODenoised;
+    property RGSSRReflectionHandle: TRHIRenderGraphResourceHandle read FRGSSRReflection;
+    property RGSceneHDRLitHandle: TRHIRenderGraphResourceHandle read FRGSceneHDRLit;
+    property RGBloomMip0Handle: TRHIRenderGraphResourceHandle read FRGBloomMip0;
     property TotalHistogramDispatches: Cardinal read FTotalHistogramDispatches;
     property TotalCompositePasses: Cardinal read FTotalCompositePasses;
   end;
@@ -1500,6 +1610,10 @@ type
       5x5 depth-aware cross-bilateral spatial denoiser. Returns total dispatches (2). }
     function DispatchGTAO(const ACmd: TRHICommandList;
       const ADepthTexture: TRHITexture): Cardinal;
+    procedure DispatchGTAOHorizonToTarget(const ACmd: TRHICommandList;
+      const ADepthTexture, ARawGTAOTarget: TRHITexture);
+    procedure DispatchGTAODenoiseToTarget(const ACmd: TRHICommandList;
+      const ADepthTexture, ARawGTAOTexture, ADenoisedGTAOTarget: TRHITexture);
 
     { Exact reference evaluators matching the GLSL 450 GTAO & bilateral filter shaders }
     class function ReconstructViewPosition(const AUV, AProjScale: TVector2;
@@ -1564,6 +1678,8 @@ type
     { Dispatches the Hi-Z Screen-Space Reflections compute shader. }
     function DispatchSSR(const ACmd: TRHICommandList;
       const AHDRSceneColor, AHiZPyramid: TRHITexture): Cardinal;
+    function DispatchSSRToTarget(const ACmd: TRHICommandList;
+      const AHDRSceneColor, AHiZPyramid, ASSROutTarget: TRHITexture): Cardinal;
 
     { Exact reference evaluators matching the GLSL 450 Hi-Z SSR compute shader }
     class function EvaluateScreenEdgeFade(const AHitUV: TVector2;
@@ -4295,8 +4411,18 @@ type
     function CreateQueryPool(const ADesc: TRHIQueryPoolDesc): TRHIQueryPool; override;
     function CreateTimelineSemaphore(const AInitialValue: UInt64 = 0): TCastleVulkanTimelineSemaphore;
 
+    function CreateTransientCarrierTexture(const ADesc: TRHITextureDesc;
+      const AMinCarrierBytes: UInt64 = 0): TRHITexture; override;
+    function TryCreateAliasedTexture(const ADesc: TRHITextureDesc;
+      const ACarrierTexture: TRHITexture): TRHITexture; override;
+
     function GrabTextureImage(const SourceTexture: TRHITexture;
       const ReadArea: TRectangle): TRGBAlphaImage; overload; override;
+    { Reads back any color/HDR/float/depth texture (pfRGBA16_Float, pfRGBA32_Float,
+      pfRG16_Float, pfR16_Float, pfR32_Float, pfRGBA8_UNorm, pfBGRA8_UNorm, pfD32_Float)
+      into a full-precision TRGBAlphaFloatImage without [0..1] 8-bit clamping. }
+    function GrabTextureFloatImage(const SourceTexture: TRHITexture;
+      const ReadArea: TRectangle): TRGBAlphaFloatImage;
 
     procedure LoadPipelineCache(const CacheFileUrl: String); override;
     procedure SavePipelineCache(const CacheFileUrl: String); override;
@@ -4622,6 +4748,10 @@ procedure SavePipelineCacheBlobToStream(const AStream: TStream;
 function LoadPipelineCacheBlobFromStream(const AStream: TStream;
   const AExpectedVendorId, AExpectedDeviceId: Cardinal; out ABlob: TBytes): Boolean;
 
+{ Converts IEEE 754 binary16 (16-bit half-float) to 32-bit Single and vice versa. }
+function HalfFloatToFloat(const AHalf: Word): Single;
+function FloatToHalfFloat(const AValue: Single): Word;
+
 implementation
 
 uses
@@ -4631,6 +4761,84 @@ uses
 const
   FNV1aOffsetBasis64 = UInt64($CBF29CE484222325);
   FNV1aPrime64 = UInt64($00000100000001B3);
+
+function HalfFloatToFloat(const AHalf: Word): Single;
+var
+  SignBit, ExpBits, MantBits, OutBits: Cardinal;
+begin
+  SignBit := Cardinal(AHalf and $8000) shl 16;
+  ExpBits := (AHalf shr 10) and $1F;
+  MantBits := AHalf and $03FF;
+
+  if ExpBits = 0 then
+  begin
+    if MantBits = 0 then
+      OutBits := SignBit
+    else
+    begin
+      ExpBits := 1;
+      while (MantBits and $0400) = 0 do
+      begin
+        MantBits := MantBits shl 1;
+        Dec(ExpBits);
+      end;
+      MantBits := MantBits and $03FF;
+      OutBits := SignBit or ((ExpBits + (127 - 15)) shl 23) or (MantBits shl 13);
+    end;
+  end else
+  if ExpBits = 31 then
+    OutBits := SignBit or $7F800000 or (MantBits shl 13)
+  else
+    OutBits := SignBit or ((ExpBits + (127 - 15)) shl 23) or (MantBits shl 13);
+
+  Move(OutBits, Result, SizeOf(Single));
+end;
+
+function FloatToHalfFloat(const AValue: Single): Word;
+var
+  Bits, SignBit, Mantissa: Cardinal;
+  ExpUnbiased, HalfExp: Integer;
+begin
+  Move(AValue, Bits, SizeOf(Cardinal));
+  SignBit := (Bits shr 16) and $8000;
+  ExpUnbiased := Integer((Bits shr 23) and $FF) - 127;
+  Mantissa := Bits and $007FFFFF;
+
+  if ExpUnbiased = 128 then
+  begin
+    { Inf or NaN }
+    if Mantissa <> 0 then
+      Result := Word(SignBit or $7E00)
+    else
+      Result := Word(SignBit or $7C00);
+    Exit;
+  end;
+
+  if ExpUnbiased > 15 then
+  begin
+    { Clamp overflow to max finite half-float (65504.0) so HDR values never become Inf }
+    Result := Word(SignBit or $7BFF);
+    Exit;
+  end;
+
+  if ExpUnbiased >= -14 then
+  begin
+    HalfExp := ExpUnbiased + 15;
+    Result := Word(SignBit or (Cardinal(HalfExp) shl 10) or ((Mantissa + $00001000) shr 13));
+    if (Mantissa + $00001000) >= $00800000 then
+      Result := Word(SignBit or (Cardinal(HalfExp + 1) shl 10));
+    Exit;
+  end;
+
+  if ExpUnbiased >= -24 then
+  begin
+    Mantissa := Mantissa or $00800000;
+    Result := Word(SignBit or (Mantissa shr Cardinal(-14 - ExpUnbiased + 13)));
+    Exit;
+  end;
+
+  Result := Word(SignBit);
+end;
 
 function NegotiateInstanceApiVersion(const ALoaderVersion: Cardinal): Cardinal;
 begin
@@ -5681,7 +5889,9 @@ begin
       begin
         Layout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         Access := VK_ACCESS_SHADER_READ_BIT;
-        Stage  := VK_PIPELINE_STAGE_VERTEX_SHADER_BIT or VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        Stage  := VK_PIPELINE_STAGE_VERTEX_SHADER_BIT or
+                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT or
+                  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
       end;
     rsUnorderedAccess:
       begin
@@ -5748,7 +5958,9 @@ begin
       begin
         Layout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         Access := VK_ACCESS_2_SHADER_READ_BIT;
-        Stage  := VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT or VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+        Stage  := VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT or
+                  VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT or
+                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
       end;
     rsUnorderedAccess:
       begin
@@ -6119,6 +6331,7 @@ begin
 
   inherited Create(ADevice, NegotiatedDesc);
   FOwnsImage := True;
+  FOwnsAllocation := True;
 
   FAspectMask := GetFormatTransitionAspectMask(FDesc.Format);
   FViewAspectMask := GetFormatViewAspectMask(FDesc.Format, FDesc.Usage);
@@ -6143,6 +6356,7 @@ begin
       FAllocation := ADevice.MemoryAllocator.AllocateImageMemory(
         FImage, ApproxBytes, muGpuOnly, True, False);
       FDeviceMemory := FAllocation.DeviceMemory;
+      FMemoryOffset := FAllocation.Offset;
       FAllocatedSize := FAllocation.Size;
       Inc(ADevice.FAllocatedMemoryBytes, FAllocatedSize);
     end;
@@ -6190,6 +6404,7 @@ begin
     FAllocation := ADevice.MemoryAllocator.AllocateImageMemory(
       FImage, ApproxBytes, muGpuOnly, True, False);
     FDeviceMemory := FAllocation.DeviceMemory;
+    FMemoryOffset := FAllocation.Offset;
     FAllocatedSize := FAllocation.Size;
     CheckVk(vkBindImageMemory(ADevice.Handle, FImage, FDeviceMemory, FAllocation.Offset),
       'vkBindImageMemory');
@@ -6231,11 +6446,324 @@ begin
   CheckVk(vkCreateImageView(ADevice.Handle, @ViewInfo, nil, @FImageView), 'vkCreateImageView');
 end;
 
+constructor TVulkanRHITexture.CreateCarrier(const ADevice: TVulkanRHIDevice;
+  const ADesc: TRHITextureDesc; const AMinCarrierBytes: UInt64);
+var
+  NegotiatedDesc: TRHITextureDesc;
+  ImgInfo: VkImageCreateInfo;
+  ViewInfo: VkImageViewCreateInfo;
+  CarrierBytes: VkDeviceSize;
+begin
+  NegotiatedDesc := ADesc;
+  if NegotiatedDesc.SampleCount = 0 then
+    NegotiatedDesc.SampleCount := 1;
+  if ADevice <> nil then
+  begin
+    if (ADevice.Handle <> nil) or (not IsVulkanInstanceLoaded) then
+      NegotiatedDesc.Format := NegotiateOptimalPixelFormat(
+        ADesc.Format, ADesc.Usage, ADevice.PhysicalDevice)
+    else
+      NegotiatedDesc.Format := NegotiateOptimalPixelFormat(
+        ADesc.Format, ADesc.Usage, nil);
+    if ADevice.Capabilities.MaxFramebufferSampleCount > 0 then
+      NegotiatedDesc.SampleCount := ClampSampleCountToCapabilities(
+        NegotiatedDesc.SampleCount, ADevice.Capabilities.MaxFramebufferSampleCount);
+  end;
+  if NegotiatedDesc.SampleCount > 1 then
+    NegotiatedDesc.MipLevels := 1;
+
+  inherited Create(ADevice, NegotiatedDesc);
+  FOwnsImage := True;
+  FOwnsAllocation := True;
+  FAspectMask := GetFormatTransitionAspectMask(FDesc.Format);
+  FViewAspectMask := GetFormatViewAspectMask(FDesc.Format, FDesc.Usage);
+
+  CarrierBytes := Max(VkDeviceSize(TRHITexture.EstimateDescriptorByteSize(FDesc)),
+    VkDeviceSize(AMinCarrierBytes));
+
+  if (ADevice = nil) or (ADevice.Handle = nil) then
+  begin
+    FImage := VkImage(PtrUInt(Self));
+    FImageView := VkImageView(PtrUInt(Self));
+    if (ADevice <> nil) and (ADevice.MemoryAllocator <> nil) then
+    begin
+      FAllocation := ADevice.MemoryAllocator.AllocateTransientCarrierImageMemory(
+        FImage, CarrierBytes, 65536);
+      FDeviceMemory := FAllocation.DeviceMemory;
+      FMemoryOffset := FAllocation.Offset;
+      FAllocatedSize := FAllocation.Size;
+      Inc(ADevice.FAllocatedMemoryBytes, FAllocatedSize);
+    end;
+    Exit;
+  end;
+
+  FillChar(ImgInfo, SizeOf(ImgInfo), 0);
+  ImgInfo.sType := VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  ImgInfo.flags := VK_IMAGE_CREATE_ALIAS_BIT;
+  if FDesc.Dimension = td3D then
+    ImgInfo.imageType := VK_IMAGE_TYPE_3D
+  else
+    ImgInfo.imageType := VK_IMAGE_TYPE_2D;
+  if FDesc.Dimension in [tdCube, tdCubeArray] then
+    ImgInfo.flags := ImgInfo.flags or VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+  ImgInfo.format := RHIToVkFormat(FDesc.Format);
+  ImgInfo.extent.width := Max(Cardinal(1), FDesc.Width);
+  ImgInfo.extent.height := Max(Cardinal(1), FDesc.Height);
+  if FDesc.Dimension = td3D then
+  begin
+    ImgInfo.extent.depth := Max(Cardinal(1), FDesc.DepthOrArrayLayers);
+    ImgInfo.arrayLayers := 1;
+  end else
+  begin
+    ImgInfo.extent.depth := 1;
+    ImgInfo.arrayLayers := Max(Cardinal(1), FDesc.DepthOrArrayLayers);
+  end;
+  ImgInfo.mipLevels := Max(Cardinal(1), FDesc.MipLevels);
+  ImgInfo.samples := RHIToVkSampleCountFlags(FDesc.SampleCount);
+  ImgInfo.tiling := VK_IMAGE_TILING_OPTIMAL;
+  ImgInfo.initialLayout := VK_IMAGE_LAYOUT_UNDEFINED;
+
+  if tuSampled in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_SAMPLED_BIT;
+  if tuStorage in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_STORAGE_BIT;
+  if tuColorAttachment in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+  if tuDepthStencil in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+  if tuTransferSrc in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  if tuTransferDst in FDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+  CheckVk(vkCreateImage(ADevice.Handle, @ImgInfo, nil, @FImage), 'vkCreateImage(Carrier)');
+
+  if ADevice.MemoryAllocator <> nil then
+  begin
+    FAllocation := ADevice.MemoryAllocator.AllocateTransientCarrierImageMemory(
+      FImage, CarrierBytes, 65536);
+    FDeviceMemory := FAllocation.DeviceMemory;
+    FMemoryOffset := FAllocation.Offset;
+    FAllocatedSize := FAllocation.Size;
+    CheckVk(vkBindImageMemory(ADevice.Handle, FImage, FDeviceMemory, FMemoryOffset),
+      'vkBindImageMemory(Carrier)');
+    Inc(ADevice.FAllocatedMemoryBytes, FAllocatedSize);
+  end;
+
+  FillChar(ViewInfo, SizeOf(ViewInfo), 0);
+  ViewInfo.sType := VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+  ViewInfo.image := FImage;
+  case FDesc.Dimension of
+    td2D: ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_2D;
+    td2DArray: ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+    td3D: ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_3D;
+    tdCube: ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_CUBE;
+    tdCubeArray: ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
+  end;
+  ViewInfo.format := ImgInfo.format;
+  ViewInfo.subresourceRange.aspectMask := FViewAspectMask;
+  ViewInfo.subresourceRange.baseMipLevel := 0;
+  ViewInfo.subresourceRange.levelCount := Max(Cardinal(1), FDesc.MipLevels);
+  ViewInfo.subresourceRange.baseArrayLayer := 0;
+  if FDesc.Dimension = td3D then
+    ViewInfo.subresourceRange.layerCount := 1
+  else
+    ViewInfo.subresourceRange.layerCount := Max(Cardinal(1), FDesc.DepthOrArrayLayers);
+
+  CheckVk(vkCreateImageView(ADevice.Handle, @ViewInfo, nil, @FImageView), 'vkCreateImageView(Carrier)');
+end;
+
+class function TVulkanRHITexture.TryCreateAliased(const ADevice: TVulkanRHIDevice;
+  const ADesc: TRHITextureDesc; const ACarrier: TVulkanRHITexture): TVulkanRHITexture;
+
+  function AlignOffsetUp(const AVal, AAlign: VkDeviceSize): VkDeviceSize;
+  begin
+    if AAlign <= 1 then
+      Result := AVal
+    else
+      Result := ((AVal + AAlign - 1) div AAlign) * AAlign;
+  end;
+
+var
+  NegotiatedDesc: TRHITextureDesc;
+  ImgInfo: VkImageCreateInfo;
+  ViewInfo: VkImageViewCreateInfo;
+  Info2: VkImageMemoryRequirementsInfo2;
+  Req2: VkMemoryRequirements2;
+  DedReq: VkMemoryDedicatedRequirements;
+  MemReq: VkMemoryRequirements;
+  TempImg: VkImage;
+  TempView: VkImageView;
+  AlignedOffset, CarrierEnd: VkDeviceSize;
+  EstBytes: UInt64;
+begin
+  Result := nil;
+  if (ADevice = nil) or (ACarrier = nil) or (ACarrier.AllocatedSize = 0) then
+    Exit;
+
+  NegotiatedDesc := ADesc;
+  if NegotiatedDesc.SampleCount = 0 then
+    NegotiatedDesc.SampleCount := 1;
+  if (ADevice.Handle <> nil) or (not IsVulkanInstanceLoaded) then
+    NegotiatedDesc.Format := NegotiateOptimalPixelFormat(
+      ADesc.Format, ADesc.Usage, ADevice.PhysicalDevice)
+  else
+    NegotiatedDesc.Format := NegotiateOptimalPixelFormat(
+      ADesc.Format, ADesc.Usage, nil);
+  if ADevice.Capabilities.MaxFramebufferSampleCount > 0 then
+    NegotiatedDesc.SampleCount := ClampSampleCountToCapabilities(
+      NegotiatedDesc.SampleCount, ADevice.Capabilities.MaxFramebufferSampleCount);
+  if NegotiatedDesc.SampleCount > 1 then
+    NegotiatedDesc.MipLevels := 1;
+
+  { Headless simulation mode: verify byte capacity & depth/color compatibility }
+  if ADevice.Handle = nil then
+  begin
+    if (tuDepthStencil in NegotiatedDesc.Usage) <> (tuDepthStencil in ACarrier.Desc.Usage) then
+      Exit(nil);
+    EstBytes := TRHITexture.EstimateDescriptorByteSize(NegotiatedDesc);
+    if EstBytes > UInt64(ACarrier.AllocatedSize) then
+      Exit(nil);
+
+    Result := TVulkanRHITexture.CreateSwapchainWrapper(ADevice, NegotiatedDesc, VK_NULL_HANDLE, VK_NULL_HANDLE);
+    Result.FOwnsImage := True;
+    Result.FOwnsAllocation := False;
+    Result.FIsMemoryAliased := True;
+    Result.FAliasedCarrierTexture := ACarrier;
+    Result.FAspectMask := GetFormatTransitionAspectMask(NegotiatedDesc.Format);
+    Result.FViewAspectMask := GetFormatViewAspectMask(NegotiatedDesc.Format, NegotiatedDesc.Usage);
+    Result.FImage := VkImage(PtrUInt(Result));
+    Result.FImageView := VkImageView(PtrUInt(Result));
+    Result.FDeviceMemory := ACarrier.DeviceMemory;
+    Result.FMemoryOffset := ACarrier.MemoryOffset;
+    Result.FAllocatedSize := VkDeviceSize(EstBytes);
+    Exit;
+  end;
+
+  { Real Vulkan GPU path: carrier cannot be aliased if it is a dedicated single-image allocation }
+  if (ACarrier.DeviceMemory = VK_NULL_HANDLE) or
+     (ACarrier.Allocation.IsValid and ACarrier.Allocation.IsDedicated) then
+    Exit(nil);
+
+  FillChar(ImgInfo, SizeOf(ImgInfo), 0);
+  ImgInfo.sType := VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  ImgInfo.flags := VK_IMAGE_CREATE_ALIAS_BIT;
+  if NegotiatedDesc.Dimension = td3D then
+    ImgInfo.imageType := VK_IMAGE_TYPE_3D
+  else
+    ImgInfo.imageType := VK_IMAGE_TYPE_2D;
+  if NegotiatedDesc.Dimension in [tdCube, tdCubeArray] then
+    ImgInfo.flags := ImgInfo.flags or VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+  ImgInfo.format := RHIToVkFormat(NegotiatedDesc.Format);
+  ImgInfo.extent.width := Max(Cardinal(1), NegotiatedDesc.Width);
+  ImgInfo.extent.height := Max(Cardinal(1), NegotiatedDesc.Height);
+  if NegotiatedDesc.Dimension = td3D then
+  begin
+    ImgInfo.extent.depth := Max(Cardinal(1), NegotiatedDesc.DepthOrArrayLayers);
+    ImgInfo.arrayLayers := 1;
+  end else
+  begin
+    ImgInfo.extent.depth := 1;
+    ImgInfo.arrayLayers := Max(Cardinal(1), NegotiatedDesc.DepthOrArrayLayers);
+  end;
+  ImgInfo.mipLevels := Max(Cardinal(1), NegotiatedDesc.MipLevels);
+  ImgInfo.samples := RHIToVkSampleCountFlags(NegotiatedDesc.SampleCount);
+  ImgInfo.tiling := VK_IMAGE_TILING_OPTIMAL;
+  ImgInfo.initialLayout := VK_IMAGE_LAYOUT_UNDEFINED;
+
+  if tuSampled in NegotiatedDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_SAMPLED_BIT;
+  if tuStorage in NegotiatedDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_STORAGE_BIT;
+  if tuColorAttachment in NegotiatedDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+  if tuDepthStencil in NegotiatedDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+  if tuTransferSrc in NegotiatedDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+  if tuTransferDst in NegotiatedDesc.Usage then ImgInfo.usage := ImgInfo.usage or VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+  TempImg := VK_NULL_HANDLE;
+  if vkCreateImage(ADevice.Handle, @ImgInfo, nil, @TempImg) <> VK_SUCCESS then
+    Exit(nil);
+
+  FillChar(MemReq, SizeOf(MemReq), 0);
+  if Assigned(vkGetImageMemoryRequirements2) then
+  begin
+    FillChar(Info2, SizeOf(Info2), 0);
+    Info2.sType := VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2;
+    Info2.image := TempImg;
+    FillChar(DedReq, SizeOf(DedReq), 0);
+    DedReq.sType := VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS;
+    FillChar(Req2, SizeOf(Req2), 0);
+    Req2.sType := VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2;
+    Req2.pNext := @DedReq;
+    vkGetImageMemoryRequirements2(ADevice.Handle, @Info2, @Req2);
+    MemReq := Req2.memoryRequirements;
+    if DedReq.requiresDedicatedAllocation <> VK_FALSE then
+    begin
+      vkDestroyImage(ADevice.Handle, TempImg, nil);
+      Exit(nil);
+    end;
+  end else
+    vkGetImageMemoryRequirements(ADevice.Handle, TempImg, @MemReq);
+
+  { Verify memoryTypeBits compatibility and aligned byte range inside ACarrier }
+  if ACarrier.Allocation.IsValid and
+     ((MemReq.memoryTypeBits and (UInt32(1) shl ACarrier.Allocation.MemoryTypeIndex)) = 0) then
+  begin
+    vkDestroyImage(ADevice.Handle, TempImg, nil);
+    Exit(nil);
+  end;
+
+  AlignedOffset := AlignOffsetUp(ACarrier.MemoryOffset, MemReq.alignment);
+  CarrierEnd := ACarrier.MemoryOffset + ACarrier.AllocatedSize;
+  if AlignedOffset + MemReq.size > CarrierEnd then
+  begin
+    vkDestroyImage(ADevice.Handle, TempImg, nil);
+    Exit(nil);
+  end;
+
+  if vkBindImageMemory(ADevice.Handle, TempImg, ACarrier.DeviceMemory, AlignedOffset) <> VK_SUCCESS then
+  begin
+    vkDestroyImage(ADevice.Handle, TempImg, nil);
+    Exit(nil);
+  end;
+
+  FillChar(ViewInfo, SizeOf(ViewInfo), 0);
+  ViewInfo.sType := VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+  ViewInfo.image := TempImg;
+  case NegotiatedDesc.Dimension of
+    td2D: ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_2D;
+    td2DArray: ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+    td3D: ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_3D;
+    tdCube: ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_CUBE;
+    tdCubeArray: ViewInfo.viewType := VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
+  end;
+  ViewInfo.format := ImgInfo.format;
+  ViewInfo.subresourceRange.aspectMask := GetFormatViewAspectMask(NegotiatedDesc.Format, NegotiatedDesc.Usage);
+  ViewInfo.subresourceRange.baseMipLevel := 0;
+  ViewInfo.subresourceRange.levelCount := Max(Cardinal(1), NegotiatedDesc.MipLevels);
+  ViewInfo.subresourceRange.baseArrayLayer := 0;
+  if NegotiatedDesc.Dimension = td3D then
+    ViewInfo.subresourceRange.layerCount := 1
+  else
+    ViewInfo.subresourceRange.layerCount := Max(Cardinal(1), NegotiatedDesc.DepthOrArrayLayers);
+
+  TempView := VK_NULL_HANDLE;
+  if vkCreateImageView(ADevice.Handle, @ViewInfo, nil, @TempView) <> VK_SUCCESS then
+  begin
+    vkDestroyImage(ADevice.Handle, TempImg, nil);
+    Exit(nil);
+  end;
+
+  Result := TVulkanRHITexture.CreateSwapchainWrapper(ADevice, NegotiatedDesc, TempImg, TempView);
+  Result.FOwnsImage := True;
+  Result.FOwnsAllocation := False;
+  Result.FIsMemoryAliased := True;
+  Result.FAliasedCarrierTexture := ACarrier;
+  Result.FAspectMask := GetFormatTransitionAspectMask(NegotiatedDesc.Format);
+  Result.FViewAspectMask := ViewInfo.subresourceRange.aspectMask;
+  Result.FDeviceMemory := ACarrier.DeviceMemory;
+  Result.FMemoryOffset := AlignedOffset;
+  Result.FAllocatedSize := MemReq.size;
+end;
+
 constructor TVulkanRHITexture.CreateSwapchainWrapper(const ADevice: TVulkanRHIDevice;
   const ADesc: TRHITextureDesc; const AExistingImage: VkImage; const AExistingView: VkImageView);
 begin
   inherited Create(ADevice, ADesc);
   FOwnsImage := False;
+  FOwnsAllocation := False;
   FImage := AExistingImage;
   FImageView := AExistingView;
   FAspectMask := VK_IMAGE_ASPECT_COLOR_BIT;
@@ -6265,8 +6793,12 @@ begin
           VK_NULL_HANDLE, FSubresourceViews[I].View, SubDummyAlloc, VK_NULL_HANDLE, 0);
     SetLength(FSubresourceViews, 0);
     if FOwnsImage then
-      VulkanDevice.DeferOrDestroyTexture(FImage, FImageView, FAllocation, FDeviceMemory, FAllocatedSize)
-    else if (VulkanDevice.Handle <> nil) and (FImageView <> VK_NULL_HANDLE) then
+    begin
+      if FOwnsAllocation then
+        VulkanDevice.DeferOrDestroyTexture(FImage, FImageView, FAllocation, FDeviceMemory, FAllocatedSize)
+      else
+        VulkanDevice.DeferOrDestroyTexture(FImage, FImageView, SubDummyAlloc, VK_NULL_HANDLE, 0);
+    end else if (VulkanDevice.Handle <> nil) and (FImageView <> VK_NULL_HANDLE) then
       vkDestroyImageView(VulkanDevice.Handle, FImageView, nil);
     FImage := VK_NULL_HANDLE;
     FImageView := VK_NULL_HANDLE;
@@ -6565,9 +7097,13 @@ var
   Cmd: VkCommandBuffer;
   Region: VkBufferImageCopy;
   Barrier: VkImageMemoryBarrier;
-  DataSize, CopyBytes: PtrUInt;
+  DataSize, CopyBytes, TotalTexels, PIdx: PtrUInt;
   PixelsPtr: Pointer;
   ImgWidth, ImgHeight, ImgDepth: Cardinal;
+  EncodedFormatBytes: array of Byte;
+  SrcFloat4: PVector4;
+  DstHalfPtr: PWord;
+  DstFloatPtr: PSingle;
 begin
   if AImage = nil then Exit;
   if FImage = VK_NULL_HANDLE then Exit;
@@ -6580,12 +7116,13 @@ begin
   ImgHeight := Max(Cardinal(1), AImage.Height);
   ImgDepth := Max(Cardinal(1), AImage.Depth);
 
+  TotalTexels := PtrUInt(ImgWidth) * PtrUInt(ImgHeight) * PtrUInt(ImgDepth);
   if FDesc.Format = pfRGBA32_Float then
   begin
     if AImage is TRGBAlphaFloatImage then
     begin
       FloatImage := TRGBAlphaFloatImage(AImage);
-      DataSize := PtrUInt(ImgWidth) * PtrUInt(ImgHeight) * PtrUInt(ImgDepth) * 16;
+      DataSize := TotalTexels * 16;
       PixelsPtr := FloatImage.RawPixels;
     end else
     if AImage is TCastleImage then
@@ -6593,10 +7130,67 @@ begin
       FloatImage := TRGBAlphaFloatImage.Create(ImgWidth, ImgHeight, ImgDepth);
       FloatImage.Assign(TCastleImage(AImage));
       NeedsFreeFloat := True;
-      DataSize := PtrUInt(ImgWidth) * PtrUInt(ImgHeight) * PtrUInt(ImgDepth) * 16;
+      DataSize := TotalTexels * 16;
       PixelsPtr := FloatImage.RawPixels;
     end else
       Exit;
+  end else
+  if FDesc.Format in [pfRGBA16_Float, pfRG16_Float, pfR16_Float, pfR32_Float, pfD32_Float] then
+  begin
+    if AImage is TRGBAlphaFloatImage then
+      FloatImage := TRGBAlphaFloatImage(AImage)
+    else if AImage is TCastleImage then
+    begin
+      FloatImage := TRGBAlphaFloatImage.Create(ImgWidth, ImgHeight, ImgDepth);
+      FloatImage.Assign(TCastleImage(AImage));
+      NeedsFreeFloat := True;
+    end else
+      Exit;
+
+    SrcFloat4 := PVector4(FloatImage.RawPixels);
+    case FDesc.Format of
+      pfRGBA16_Float:
+        begin
+          DataSize := TotalTexels * 8;
+          SetLength(EncodedFormatBytes, DataSize);
+          DstHalfPtr := PWord(@EncodedFormatBytes[0]);
+          for PIdx := 0 to TotalTexels - 1 do
+          begin
+            DstHalfPtr[PIdx * 4 + 0] := FloatToHalfFloat(SrcFloat4[PIdx].X);
+            DstHalfPtr[PIdx * 4 + 1] := FloatToHalfFloat(SrcFloat4[PIdx].Y);
+            DstHalfPtr[PIdx * 4 + 2] := FloatToHalfFloat(SrcFloat4[PIdx].Z);
+            DstHalfPtr[PIdx * 4 + 3] := FloatToHalfFloat(SrcFloat4[PIdx].W);
+          end;
+        end;
+      pfRG16_Float:
+        begin
+          DataSize := TotalTexels * 4;
+          SetLength(EncodedFormatBytes, DataSize);
+          DstHalfPtr := PWord(@EncodedFormatBytes[0]);
+          for PIdx := 0 to TotalTexels - 1 do
+          begin
+            DstHalfPtr[PIdx * 2 + 0] := FloatToHalfFloat(SrcFloat4[PIdx].X);
+            DstHalfPtr[PIdx * 2 + 1] := FloatToHalfFloat(SrcFloat4[PIdx].Y);
+          end;
+        end;
+      pfR16_Float:
+        begin
+          DataSize := TotalTexels * 2;
+          SetLength(EncodedFormatBytes, DataSize);
+          DstHalfPtr := PWord(@EncodedFormatBytes[0]);
+          for PIdx := 0 to TotalTexels - 1 do
+            DstHalfPtr[PIdx] := FloatToHalfFloat(SrcFloat4[PIdx].X);
+        end;
+    else { pfR32_Float, pfD32_Float }
+      begin
+        DataSize := TotalTexels * 4;
+        SetLength(EncodedFormatBytes, DataSize);
+        DstFloatPtr := PSingle(@EncodedFormatBytes[0]);
+        for PIdx := 0 to TotalTexels - 1 do
+          DstFloatPtr[PIdx] := SrcFloat4[PIdx].X;
+      end;
+    end;
+    PixelsPtr := @EncodedFormatBytes[0];
   end else
   if AImage is TGPUCompressedImage then
   begin
@@ -7751,6 +8345,7 @@ begin
   FCurrentComputePipeline := nil;
   FBarrierCount := 0;
   FSync2BarrierCount := 0;
+  FAliasingBarrierCount := 0;
   FComputeDispatchCount := 0;
   FDynamicStateChangeCount := 0;
   FIndirectDrawCallCount := 0;
@@ -8011,6 +8606,52 @@ begin
     vkCmdPipelineBarrier(FHandle, SrcStage, DstStage, 0, 0, nil, 0, nil, 1, @Barrier);
   Inc(FBarrierCount);
   Texture.CurrentState := NewState;
+end;
+
+procedure TVulkanRHICommandList.EmitAliasingBarrier(const OldTexture, NewTexture: TRHITexture);
+var
+  MemBar2: VkMemoryBarrier2;
+  DepInfo: VkDependencyInfo;
+  MemBar: VkMemoryBarrier;
+begin
+  if NewTexture = nil then
+    Exit;
+  if OldTexture = nil then ;
+
+  Inc(FAliasingBarrierCount);
+  if (FDevice <> nil) and FDevice.SupportsSynchronization2 then
+  begin
+    FillChar(MemBar2, SizeOf(MemBar2), 0);
+    MemBar2.sType := VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+    MemBar2.srcStageMask := VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    MemBar2.srcAccessMask := VK_ACCESS_2_MEMORY_WRITE_BIT or VK_ACCESS_2_MEMORY_READ_BIT;
+    MemBar2.dstStageMask := VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    MemBar2.dstAccessMask := VK_ACCESS_2_MEMORY_READ_BIT or VK_ACCESS_2_MEMORY_WRITE_BIT;
+
+    FillChar(DepInfo, SizeOf(DepInfo), 0);
+    DepInfo.sType := VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    DepInfo.memoryBarrierCount := 1;
+    DepInfo.pMemoryBarriers := @MemBar2;
+
+    if (FHandle <> nil) and Assigned(vkCmdPipelineBarrier2) then
+      vkCmdPipelineBarrier2(FHandle, @DepInfo);
+    Inc(FBarrierCount);
+    Inc(FSync2BarrierCount);
+    Inc(FDevice.FSync2BarrierCount);
+    Exit;
+  end;
+
+  FillChar(MemBar, SizeOf(MemBar), 0);
+  MemBar.sType := VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+  MemBar.srcAccessMask := VK_ACCESS_MEMORY_WRITE_BIT or VK_ACCESS_MEMORY_READ_BIT;
+  MemBar.dstAccessMask := VK_ACCESS_MEMORY_READ_BIT or VK_ACCESS_MEMORY_WRITE_BIT;
+
+  if (FHandle <> nil) and Assigned(vkCmdPipelineBarrier) then
+    vkCmdPipelineBarrier(FHandle,
+      VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+      VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+      0, 1, @MemBar, 0, nil, 0, nil);
+  Inc(FBarrierCount);
 end;
 
 procedure TVulkanRHICommandList.TransitionBuffer(const Buffer: TRHIBuffer;
@@ -8869,6 +9510,12 @@ end;
 
 procedure TVulkanRHICommandList.Dispatch(const GroupCountX, GroupCountY, GroupCountZ: Cardinal);
 begin
+  if (FHandle <> nil) and (not FIsRendering) and (Level = cllPrimary) and
+     (FDevice <> nil) and (FDevice.StagingUploader <> nil) and
+     ((FDevice.StagingUploader.PendingBufferCopyCount > 0) or
+      (FDevice.StagingUploader.PendingImageCopyCount > 0)) then
+    FDevice.StagingUploader.FlushPendingUploads(Self);
+
   Inc(FComputeDispatchCount);
   if FDevice <> nil then
     Inc(FDevice.FComputeDispatchCount);
@@ -10811,7 +11458,8 @@ begin
         VK_PIPELINE_STAGE_TRANSFER_BIT,
         VK_PIPELINE_STAGE_VERTEX_INPUT_BIT or
         VK_PIPELINE_STAGE_VERTEX_SHADER_BIT or
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT or
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
         0, 0, nil, Length(BufBarriers), @BufBarriers[0], 0, nil);
 
     if ACommandList <> nil then
@@ -10875,7 +11523,7 @@ begin
       if (Cmd <> nil) and Assigned(vkCmdPipelineBarrier) then
         vkCmdPipelineBarrier(Cmd,
           VK_PIPELINE_STAGE_TRANSFER_BIT,
-          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT or VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
           0, 0, nil, 0, nil, 1, @ImgBarrier);
 
       ImgItem.DstTexture.CurrentState := rsShaderRead;
@@ -13568,6 +14216,8 @@ begin
   FAdaptedLuminance := 0.18;
   FAdaptedExposure := 1.0;
   FTargetLuminance := 0.18;
+  FAOStrength := 1.0;
+  FSSRStrength := 1.0;
 
   FAutoExposureParams.MinLogLum := -8.0;
   FAutoExposureParams.MaxLogLum := 4.0;
@@ -13583,21 +14233,39 @@ destructor TCastleVulkanHDRPostProcessor.Destroy;
 var
   I: Integer;
 begin
-  { Compute pipelines are owned by FDevice.FComputePipelineMap }
+  { Graphics/compute pipelines are owned by FDevice.FPipelineMap / FComputePipelineMap }
   FBloomDownsamplePipeline := nil;
   FBloomUpsamplePipeline := nil;
   FHistogramPipeline := nil;
+  FModulatePipeline := nil;
+  FHiZCopyPipeline := nil;
+  FCompositePipeline := nil;
+  FreeAndNil(FHiZCopyShader);
+  FreeAndNil(FModulateShader);
+  FreeAndNil(FCompositeVertShader);
   FreeAndNil(FCompositeFragShader);
   FreeAndNil(FHistogramShader);
   FreeAndNil(FBloomUpsampleShader);
   FreeAndNil(FBloomDownsampleShader);
+  FreeAndNil(FHiZCopyDescriptorSet);
+  FreeAndNil(FHiZCopyDescriptorLayout);
+  FreeAndNil(FModulateDescriptorSet);
+  FreeAndNil(FModulateDescriptorLayout);
+  FreeAndNil(FCompositeDescriptorSet);
+  FreeAndNil(FCompositeDescriptorLayout);
   FreeAndNil(FHistogramDescriptorSet);
   FreeAndNil(FHistogramDescriptorLayout);
+  for I := 0 to CASTLE_BLOOM_MAX_MIP_LEVELS - 1 do
+  begin
+    FreeAndNil(FBloomDownsampleSets[I]);
+    FreeAndNil(FBloomUpsampleSets[I]);
+  end;
   FreeAndNil(FBloomDescriptorSet);
   FreeAndNil(FBloomDescriptorLayout);
   FreeAndNil(FExposureStateBuffer);
   FreeAndNil(FHistogramBuffer);
   FreeAndNil(FLinearClampSampler);
+  FreeAndNil(FBlackFallbackTexture);
   for I := 0 to CASTLE_BLOOM_MAX_MIP_LEVELS - 1 do
     FreeAndNil(FBloomMipTextures[I]);
   FreeAndNil(FHDRSceneTexture);
@@ -13670,11 +14338,17 @@ procedure TCastleVulkanHDRPostProcessor.EnsurePipelinesCreated;
 var
   SamplerDesc: TRHISamplerDesc;
   BufDesc: TRHIBufferDesc;
+  BlackDesc: TRHITextureDesc;
+  BlackImg: TRGBAlphaImage;
   BloomBindings: array[0..1] of TRHIDescriptorBindingDesc;
   HistBindings: array[0..2] of TRHIDescriptorBindingDesc;
+  CompBindings: array[0..2] of TRHIDescriptorBindingDesc;
+  ModBindings: array[0..3] of TRHIDescriptorBindingDesc;
   ShaderGen: TCastleShaderGeneratorRHI;
   CompDesc: TRHIComputePipelineDesc;
   InitialExposureState: array[0..3] of Single;
+  ZeroHistBins: array[0..CASTLE_LUMINANCE_HISTOGRAM_BINS - 1] of Cardinal;
+  I: Integer;
 begin
   if FDevice = nil then Exit;
 
@@ -13691,12 +14365,28 @@ begin
     FLinearClampSampler := FDevice.CreateSampler(SamplerDesc);
   end;
 
+  if FBlackFallbackTexture = nil then
+  begin
+    BlackDesc := TRHITextureDesc.Create2D(1, 1, pfRGBA16_Float,
+      [tuSampled, tuTransferDst], 1, 1);
+    BlackDesc.DebugName := 'HDRPostBlackFallback1x1';
+    FBlackFallbackTexture := FDevice.CreateTexture(BlackDesc) as TVulkanRHITexture;
+    BlackImg := TRGBAlphaImage.Create(1, 1);
+    try
+      BlackImg.Clear(Vector4Byte(0, 0, 0, 255));
+      FBlackFallbackTexture.UploadImage(BlackImg);
+    finally
+      FreeAndNil(BlackImg);
+    end;
+  end;
+
   if FHistogramBuffer = nil then
   begin
+    FillChar(ZeroHistBins[0], SizeOf(ZeroHistBins), 0);
     BufDesc := TRHIBufferDesc.Create(
       CASTLE_LUMINANCE_HISTOGRAM_BINS * SizeOf(Cardinal),
-      [buStorage, buTransferDst], muCpuToGpu, 'LuminanceHistogramSSBO');
-    FHistogramBuffer := FDevice.CreateBuffer(BufDesc, nil);
+      [buStorage, buTransferSrc, buTransferDst], muCpuToGpu, 'LuminanceHistogramSSBO');
+    FHistogramBuffer := FDevice.CreateBuffer(BufDesc, @ZeroHistBins[0]);
   end;
 
   if FExposureStateBuffer = nil then
@@ -13707,7 +14397,7 @@ begin
     InitialExposureState[3] := 0.0;
     BufDesc := TRHIBufferDesc.Create(
       4 * SizeOf(Single),
-      [buStorage, buTransferDst], muCpuToGpu, 'AutoExposureStateSSBO');
+      [buStorage, buTransferSrc, buTransferDst], muCpuToGpu, 'AutoExposureStateSSBO');
     FExposureStateBuffer := FDevice.CreateBuffer(BufDesc, @InitialExposureState[0]);
   end;
 
@@ -13724,6 +14414,11 @@ begin
     BloomBindings[1].StageFlags := [ssCompute];
     FBloomDescriptorLayout := FDevice.CreateDescriptorSetLayout(BloomBindings);
     FBloomDescriptorSet := FDevice.CreateDescriptorSet(FBloomDescriptorLayout);
+    for I := 0 to CASTLE_BLOOM_MAX_MIP_LEVELS - 1 do
+    begin
+      FBloomDownsampleSets[I] := FDevice.CreateDescriptorSet(FBloomDescriptorLayout);
+      FBloomUpsampleSets[I] := FDevice.CreateDescriptorSet(FBloomDescriptorLayout);
+    end;
   end;
 
   if FHistogramDescriptorLayout = nil then
@@ -13745,6 +14440,58 @@ begin
     FHistogramDescriptorSet := FDevice.CreateDescriptorSet(FHistogramDescriptorLayout);
   end;
 
+  if FCompositeDescriptorLayout = nil then
+  begin
+    FillChar(CompBindings, SizeOf(CompBindings), 0);
+    CompBindings[0].Binding := 0;
+    CompBindings[0].DescriptorType := dtCombinedImageSampler;
+    CompBindings[0].Count := 1;
+    CompBindings[0].StageFlags := [ssFragment];
+    CompBindings[1].Binding := 1;
+    CompBindings[1].DescriptorType := dtCombinedImageSampler;
+    CompBindings[1].Count := 1;
+    CompBindings[1].StageFlags := [ssFragment];
+    CompBindings[2].Binding := 2;
+    CompBindings[2].DescriptorType := dtStorageBuffer;
+    CompBindings[2].Count := 1;
+    CompBindings[2].StageFlags := [ssFragment];
+    FCompositeDescriptorLayout := FDevice.CreateDescriptorSetLayout(CompBindings);
+    FCompositeDescriptorSet := FDevice.CreateDescriptorSet(FCompositeDescriptorLayout);
+  end;
+
+  if FModulateDescriptorLayout = nil then
+  begin
+    FillChar(ModBindings, SizeOf(ModBindings), 0);
+    for I := 0 to 2 do
+    begin
+      ModBindings[I].Binding := Cardinal(I);
+      ModBindings[I].DescriptorType := dtCombinedImageSampler;
+      ModBindings[I].Count := 1;
+      ModBindings[I].StageFlags := [ssCompute];
+    end;
+    ModBindings[3].Binding := 3;
+    ModBindings[3].DescriptorType := dtStorageImage;
+    ModBindings[3].Count := 1;
+    ModBindings[3].StageFlags := [ssCompute];
+    FModulateDescriptorLayout := FDevice.CreateDescriptorSetLayout(ModBindings);
+    FModulateDescriptorSet := FDevice.CreateDescriptorSet(FModulateDescriptorLayout);
+  end;
+
+  if FHiZCopyDescriptorLayout = nil then
+  begin
+    FillChar(BloomBindings, SizeOf(BloomBindings), 0);
+    BloomBindings[0].Binding := 0;
+    BloomBindings[0].DescriptorType := dtCombinedImageSampler;
+    BloomBindings[0].Count := 1;
+    BloomBindings[0].StageFlags := [ssCompute];
+    BloomBindings[1].Binding := 1;
+    BloomBindings[1].DescriptorType := dtStorageImage;
+    BloomBindings[1].Count := 1;
+    BloomBindings[1].StageFlags := [ssCompute];
+    FHiZCopyDescriptorLayout := FDevice.CreateDescriptorSetLayout(BloomBindings);
+    FHiZCopyDescriptorSet := FDevice.CreateDescriptorSet(FHiZCopyDescriptorLayout);
+  end;
+
   if FBloomDownsamplePipeline = nil then
   begin
     ShaderGen := TCastleShaderGeneratorRHI.Create(rbVulkan);
@@ -13755,8 +14502,14 @@ begin
         ssCompute, ShaderGen.GenerateBloomUpsampleComputeShader(8, 8), 'BloomUpsampleCS');
       FHistogramShader := FDevice.CreateShaderModuleFromGLSL(
         ssCompute, ShaderGen.GenerateLuminanceHistogramComputeShader(16, 16), 'LuminanceHistogramCS');
+      FCompositeVertShader := FDevice.CreateShaderModuleFromGLSL(
+        ssVertex, ShaderGen.GenerateHDRCompositeVertexShader, 'HDRCompositeVS');
       FCompositeFragShader := FDevice.CreateShaderModuleFromGLSL(
         ssFragment, ShaderGen.GenerateHDRCompositeFragmentShader, 'HDRCompositeFS');
+      FModulateShader := FDevice.CreateShaderModuleFromGLSL(
+        ssCompute, ShaderGen.GeneratePostProcessModulateComputeShader(8, 8), 'PostProcessModulateCS');
+      FHiZCopyShader := FDevice.CreateShaderModuleFromGLSL(
+        ssCompute, ShaderGen.GenerateHiZDownsampleComputeShader(8, 8), 'HiZDownsampleCS');
     finally
       FreeAndNil(ShaderGen);
     end;
@@ -13782,33 +14535,114 @@ begin
     CompDesc.PushConstantStages := [ssCompute];
     CompDesc.DebugName := 'LuminanceHistogramPSO';
     FHistogramPipeline := FDevice.GetOrCreateComputePipeline(CompDesc);
+
+    FillChar(CompDesc, SizeOf(CompDesc), 0);
+    CompDesc.ComputeShader := FModulateShader;
+    SetLength(CompDesc.DescriptorSetLayouts, 1);
+    CompDesc.DescriptorSetLayouts[0] := FModulateDescriptorLayout;
+    CompDesc.PushConstantSize := SizeOf(TCastlePostProcessModulatePushConstants);
+    CompDesc.PushConstantStages := [ssCompute];
+    CompDesc.DebugName := 'PostProcessModulatePSO';
+    FModulatePipeline := FDevice.GetOrCreateComputePipeline(CompDesc);
+
+    FillChar(CompDesc, SizeOf(CompDesc), 0);
+    CompDesc.ComputeShader := FHiZCopyShader;
+    SetLength(CompDesc.DescriptorSetLayouts, 1);
+    CompDesc.DescriptorSetLayouts[0] := FHiZCopyDescriptorLayout;
+    CompDesc.PushConstantSize := SizeOf(TCastleHiZPushConstants);
+    CompDesc.PushConstantStages := [ssCompute];
+    CompDesc.DebugName := 'PostProcessHiZCopyPSO';
+    FHiZCopyPipeline := FDevice.GetOrCreateComputePipeline(CompDesc);
   end;
 end;
 
-function TCastleVulkanHDRPostProcessor.DispatchBloomPyramid(
-  const ACmd: TRHICommandList): Cardinal;
+function TCastleVulkanHDRPostProcessor.GetOrCreateCompositePipelineForFormat(
+  const AFormat: TRHIPixelFormat): TRHIPipeline;
+var
+  PipeDesc: TRHIGraphicsPipelineDesc;
+  EffFormat: TRHIPixelFormat;
+begin
+  EnsurePipelinesCreated;
+  if AFormat <> pfUndefined then
+    EffFormat := AFormat
+  else
+    EffFormat := pfRGBA8_UNorm;
+
+  if (FCompositePipeline <> nil) and (FCompositePipelineFormat = EffFormat) then
+    Exit(FCompositePipeline);
+
+  FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+  PipeDesc.VertexShader := FCompositeVertShader;
+  PipeDesc.FragmentShader := FCompositeFragShader;
+  PipeDesc.Topology := ptTriangleList;
+  PipeDesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+  PipeDesc.Rasterizer.CullMode := cmNone;
+  PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDisabled;
+  PipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+  SetLength(PipeDesc.DescriptorSetLayouts, 1);
+  PipeDesc.DescriptorSetLayouts[0] := FCompositeDescriptorLayout;
+  PipeDesc.PushConstantSize := SizeOf(TCastleHDRCompositePushConstants);
+  PipeDesc.PushConstantStages := [ssFragment];
+  SetLength(PipeDesc.ColorAttachmentFormats, 1);
+  PipeDesc.ColorAttachmentFormats[0] := EffFormat;
+  PipeDesc.DepthAttachmentFormat := pfUndefined;
+  PipeDesc.SampleCount := 1;
+  PipeDesc.DebugName := 'HDRCompositeFullscreenPSO';
+
+  FCompositePipeline := FDevice.GetOrCreatePipeline(PipeDesc);
+  FCompositePipelineFormat := EffFormat;
+  Result := FCompositePipeline;
+end;
+
+function TCastleVulkanHDRPostProcessor.DispatchBloomPyramidFromTexture(
+  const ACmd: TRHICommandList;
+  const ASrcHDRTexture: TRHITexture;
+  const ADstBloomMip0Override: TRHITexture): Cardinal;
 var
   M: Integer;
-  SrcTex, DstTex: TVulkanRHITexture;
+  SrcTex, DstTex, RootHDR: TRHITexture;
+  Mip0Target: TRHITexture;
+  ActiveSet: TRHIDescriptorSet;
   PC: TCastleBloomPushConstants;
   GroupsX, GroupsY: Cardinal;
 begin
   Result := 0;
   if (FWidth = 0) or (FHeight = 0) then
-    EnsureHDRTargets(1280, 720);
+  begin
+    if ASrcHDRTexture <> nil then
+      EnsureHDRTargets(ASrcHDRTexture.Desc.Width, ASrcHDRTexture.Desc.Height)
+    else
+      EnsureHDRTargets(1280, 720);
+  end;
   EnsurePipelinesCreated;
 
-  if (FBloomMipCount = 0) or (FHDRSceneTexture = nil) then
+  if ASrcHDRTexture <> nil then
+    RootHDR := ASrcHDRTexture
+  else
+    RootHDR := FHDRSceneTexture;
+
+  if (FBloomMipCount = 0) or (RootHDR = nil) then
     Exit;
 
-  { 1. Progressive 13-tap Jiménez Downsample Chain (HDRScene -> Mip 0 -> Mip 1 -> ... -> Mip N-1) }
+  if ADstBloomMip0Override <> nil then
+    Mip0Target := ADstBloomMip0Override
+  else
+    Mip0Target := FBloomMipTextures[0];
+
+  { 1. Progressive 13-tap Jiménez Downsample Chain (RootHDR -> Mip 0 -> Mip 1 -> ... -> Mip N-1) }
   for M := 0 to Integer(FBloomMipCount) - 1 do
   begin
     if M = 0 then
-      SrcTex := FHDRSceneTexture
+      SrcTex := RootHDR
+    else if M = 1 then
+      SrcTex := Mip0Target
     else
       SrcTex := FBloomMipTextures[M - 1];
-    DstTex := FBloomMipTextures[M];
+
+    if M = 0 then
+      DstTex := Mip0Target
+    else
+      DstTex := FBloomMipTextures[M];
     if (SrcTex = nil) or (DstTex = nil) then Continue;
 
     FillChar(PC, SizeOf(PC), 0);
@@ -13827,12 +14661,13 @@ begin
     if ACmd <> nil then
     begin
       ACmd.TransitionTexture(SrcTex, rsShaderRead);
-      ACmd.TransitionTexture(DstTex, rsTransferDst);
-      FBloomDescriptorSet.BindTexture(0, SrcTex, FLinearClampSampler);
-      FBloomDescriptorSet.BindTexture(1, DstTex, FLinearClampSampler);
-      FBloomDescriptorSet.Update;
+      ACmd.TransitionTexture(DstTex, rsUnorderedAccess);
+      ActiveSet := FBloomDownsampleSets[M];
+      ActiveSet.BindTexture(0, SrcTex, FLinearClampSampler);
+      ActiveSet.BindTexture(1, DstTex, FLinearClampSampler);
+      ActiveSet.Update;
       ACmd.BindComputePipeline(FBloomDownsamplePipeline);
-      ACmd.BindComputeDescriptorSet(0, FBloomDescriptorSet, []);
+      ACmd.BindComputeDescriptorSet(0, ActiveSet, []);
       ACmd.PushConstants([ssCompute], 0, SizeOf(PC), PC);
       ACmd.Dispatch(GroupsX, GroupsY, 1);
     end;
@@ -13841,12 +14676,15 @@ begin
     Inc(Result);
   end;
 
-  { 2. Progressive 9-tap 3x3 Tent-Filter Upsample Chain (Mip N-1 -> Mip N-2 -> ... -> Mip 0) }
+  { 2. Progressive 9-tap 3x3 Tent-Filter Upsample Chain (Mip N-1 -> Mip N-2 -> ... -> Mip 0 / Override) }
   if FBloomMipCount > 1 then
     for M := Integer(FBloomMipCount) - 1 downto 1 do
     begin
       SrcTex := FBloomMipTextures[M];
-      DstTex := FBloomMipTextures[M - 1];
+      if (M = 1) and (ADstBloomMip0Override <> nil) then
+        DstTex := ADstBloomMip0Override
+      else
+        DstTex := FBloomMipTextures[M - 1];
       if (SrcTex = nil) or (DstTex = nil) then Continue;
 
       FillChar(PC, SizeOf(PC), 0);
@@ -13865,12 +14703,13 @@ begin
       if ACmd <> nil then
       begin
         ACmd.TransitionTexture(SrcTex, rsShaderRead);
-        ACmd.TransitionTexture(DstTex, rsTransferDst);
-        FBloomDescriptorSet.BindTexture(0, SrcTex, FLinearClampSampler);
-        FBloomDescriptorSet.BindTexture(1, DstTex, FLinearClampSampler);
-        FBloomDescriptorSet.Update;
+        ACmd.TransitionTexture(DstTex, rsUnorderedAccess);
+        ActiveSet := FBloomUpsampleSets[M];
+        ActiveSet.BindTexture(0, SrcTex, FLinearClampSampler);
+        ActiveSet.BindTexture(1, DstTex, FLinearClampSampler);
+        ActiveSet.Update;
         ACmd.BindComputePipeline(FBloomUpsamplePipeline);
-        ACmd.BindComputeDescriptorSet(0, FBloomDescriptorSet, []);
+        ACmd.BindComputeDescriptorSet(0, ActiveSet, []);
         ACmd.PushConstants([ssCompute], 0, SizeOf(PC), PC);
         ACmd.Dispatch(GroupsX, GroupsY, 1);
       end;
@@ -13879,8 +14718,14 @@ begin
       Inc(Result);
     end;
 
-  if (ACmd <> nil) and (FBloomMipTextures[0] <> nil) then
-    ACmd.TransitionTexture(FBloomMipTextures[0], rsShaderRead);
+  if (ACmd <> nil) and (Mip0Target <> nil) then
+    ACmd.TransitionTexture(Mip0Target, rsShaderRead);
+end;
+
+function TCastleVulkanHDRPostProcessor.DispatchBloomPyramid(
+  const ACmd: TRHICommandList): Cardinal;
+begin
+  Result := DispatchBloomPyramidFromTexture(ACmd, FHDRSceneTexture, nil);
 end;
 
 function TCastleVulkanHDRPostProcessor.UpdateAutoExposure(
@@ -13970,31 +14815,151 @@ begin
   Result := FAdaptedExposure;
 end;
 
-procedure TCastleVulkanHDRPostProcessor.ExecuteCompositePass(
-  const ACmd: TRHICommandList; const ADstLDRTarget: TRHITexture);
+procedure TCastleVulkanHDRPostProcessor.DispatchLuminanceHistogramOnGPU(
+  const ACmd: TRHICommandList; const ASrcHDRTexture: TRHITexture);
+var
+  ZeroBins: array[0..CASTLE_LUMINANCE_HISTOGRAM_BINS - 1] of Cardinal;
+  SrcTex: TRHITexture;
+begin
+  EnsurePipelinesCreated;
+  if ASrcHDRTexture <> nil then
+    SrcTex := ASrcHDRTexture
+  else
+    SrcTex := FHDRSceneTexture;
+  if (ACmd = nil) or (SrcTex = nil) or (FHistogramBuffer = nil) then
+    Exit;
+
+  FillChar(ZeroBins[0], SizeOf(ZeroBins), 0);
+  FHistogramBuffer.UploadData(ZeroBins[0], SizeOf(ZeroBins), 0);
+  FAutoExposureParams.TotalPixels := Max(Cardinal(1), SrcTex.Desc.Width * SrcTex.Desc.Height);
+
+  ACmd.TransitionTexture(SrcTex, rsShaderRead);
+  FHistogramDescriptorSet.BindTexture(0, SrcTex, FLinearClampSampler);
+  FHistogramDescriptorSet.BindStorageBuffer(1, FHistogramBuffer, 0, FHistogramBuffer.Desc.Size);
+  FHistogramDescriptorSet.BindStorageBuffer(2, FExposureStateBuffer, 0, FExposureStateBuffer.Desc.Size);
+  FHistogramDescriptorSet.Update;
+
+  ACmd.BindComputePipeline(FHistogramPipeline);
+  ACmd.BindComputeDescriptorSet(0, FHistogramDescriptorSet, []);
+  ACmd.PushConstants([ssCompute], 0, SizeOf(FAutoExposureParams), FAutoExposureParams);
+  ACmd.Dispatch((SrcTex.Desc.Width + 15) div 16, (SrcTex.Desc.Height + 15) div 16, 1);
+  if ACmd is TVulkanRHICommandList then
+    TVulkanRHICommandList(ACmd).TransitionBuffer(FHistogramBuffer, rsUnorderedAccess, rsShaderRead);
+  Inc(FTotalHistogramDispatches);
+end;
+
+function TCastleVulkanHDRPostProcessor.ReadBackGpuHistogramBins(
+  out AOutBins: array of Cardinal): Cardinal;
+var
+  VkBuf: TVulkanRHIBuffer;
+  Mapped: PCardinal;
+  I, CopyCount: Integer;
+begin
+  Result := 0;
+  if (FDevice = nil) or (FHistogramBuffer = nil) then
+    Exit;
+  FDevice.WaitIdle;
+  VkBuf := FHistogramBuffer as TVulkanRHIBuffer;
+  if VkBuf.Allocation.IsValid and (FDevice.MemoryAllocator <> nil) then
+    FDevice.MemoryAllocator.InvalidateAllocation(VkBuf.Allocation, 0, VkBuf.Desc.Size);
+  Mapped := PCardinal(VkBuf.Map);
+  if Mapped <> nil then
+  try
+    Move(Mapped^, FHistogramBins[0], SizeOf(FHistogramBins));
+    CopyCount := Min(Length(AOutBins), Integer(CASTLE_LUMINANCE_HISTOGRAM_BINS));
+    for I := 0 to CopyCount - 1 do
+      AOutBins[I] := FHistogramBins[I];
+    for I := 0 to CASTLE_LUMINANCE_HISTOGRAM_BINS - 1 do
+      Inc(Result, FHistogramBins[I]);
+  finally
+    VkBuf.Unmap;
+  end;
+end;
+
+procedure TCastleVulkanHDRPostProcessor.DispatchPostProcessModulate(
+  const ACmd: TRHICommandList;
+  const ASrcHDR, AGTAOTex, ASSRTex, ADstModulatedHDR: TRHITexture;
+  const AAOStrength, ASSRStrength: Single);
+var
+  PC: TCastlePostProcessModulatePushConstants;
+  SafeAO, SafeSSR: TRHITexture;
+begin
+  EnsurePipelinesCreated;
+  if (ACmd = nil) or (ASrcHDR = nil) or (ADstModulatedHDR = nil) then
+    Exit;
+
+  if AGTAOTex <> nil then SafeAO := AGTAOTex else SafeAO := FBlackFallbackTexture;
+  if ASSRTex <> nil then SafeSSR := ASSRTex else SafeSSR := FBlackFallbackTexture;
+
+  ACmd.TransitionTexture(ASrcHDR, rsShaderRead);
+  if SafeAO <> nil then ACmd.TransitionTexture(SafeAO, rsShaderRead);
+  if SafeSSR <> nil then ACmd.TransitionTexture(SafeSSR, rsShaderRead);
+  ACmd.TransitionTexture(ADstModulatedHDR, rsUnorderedAccess);
+
+  FModulateDescriptorSet.BindTexture(0, ASrcHDR, FLinearClampSampler);
+  FModulateDescriptorSet.BindTexture(1, SafeAO, FLinearClampSampler);
+  FModulateDescriptorSet.BindTexture(2, SafeSSR, FLinearClampSampler);
+  FModulateDescriptorSet.BindTexture(3, ADstModulatedHDR, FLinearClampSampler);
+  FModulateDescriptorSet.Update;
+
+  FillChar(PC, SizeOf(PC), 0);
+  if AGTAOTex <> nil then PC.AOStrength := AAOStrength else PC.AOStrength := 0.0;
+  if ASSRTex <> nil then PC.SSRStrength := ASSRStrength else PC.SSRStrength := 0.0;
+  PC.DstWidth := Max(Cardinal(1), ADstModulatedHDR.Desc.Width);
+  PC.DstHeight := Max(Cardinal(1), ADstModulatedHDR.Desc.Height);
+
+  ACmd.BindComputePipeline(FModulatePipeline);
+  ACmd.BindComputeDescriptorSet(0, FModulateDescriptorSet, []);
+  ACmd.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+  ACmd.Dispatch((PC.DstWidth + 7) div 8, (PC.DstHeight + 7) div 8, 1);
+end;
+
+procedure TCastleVulkanHDRPostProcessor.ExecuteCompositeFromTextures(
+  const ACmd: TRHICommandList;
+  const ASrcHDR, ASrcBloom, ADstLDRTarget: TRHITexture;
+  const AInsideRenderGraphPass: Boolean);
 var
   RenderInfo: TRHIRenderingInfo;
   TargetW, TargetH: Cardinal;
   PC: TCastleHDRCompositePushConstants;
+  SafeHDR, SafeBloom: TRHITexture;
+  CompPipe: TRHIPipeline;
 begin
   EnsurePipelinesCreated;
   if (ACmd <> nil) and (ADstLDRTarget <> nil) then
   begin
     TargetW := Max(Cardinal(1), ADstLDRTarget.Desc.Width);
     TargetH := Max(Cardinal(1), ADstLDRTarget.Desc.Height);
-    if FHDRSceneTexture <> nil then
-      ACmd.TransitionTexture(FHDRSceneTexture, rsShaderRead);
-    if FBloomMipTextures[0] <> nil then
-      ACmd.TransitionTexture(FBloomMipTextures[0], rsShaderRead);
-    ACmd.TransitionTexture(ADstLDRTarget, rsColorAttachment);
+    if ASrcHDR <> nil then SafeHDR := ASrcHDR
+    else if FHDRSceneTexture <> nil then SafeHDR := FHDRSceneTexture
+    else SafeHDR := FBlackFallbackTexture;
 
-    RenderInfo := TRHIRenderingInfo.CreateColorDepth(
-      Rectangle(0, 0, TargetW, TargetH),
-      ADstLDRTarget, loClear, Vector4(0.0, 0.0, 0.0, 1.0),
-      nil, loDontCare, 1.0);
-    ACmd.BeginRendering(RenderInfo);
-    ACmd.SetViewport(FloatRectangle(0, 0, TargetW, TargetH));
-    ACmd.SetScissor(RenderInfo.RenderArea);
+    if ASrcBloom <> nil then SafeBloom := ASrcBloom
+    else if FBloomMipTextures[0] <> nil then SafeBloom := FBloomMipTextures[0]
+    else SafeBloom := FBlackFallbackTexture;
+
+    CompPipe := GetOrCreateCompositePipelineForFormat(ADstLDRTarget.Desc.Format);
+    FCompositeDescriptorSet.BindTexture(0, SafeHDR, FLinearClampSampler);
+    FCompositeDescriptorSet.BindTexture(1, SafeBloom, FLinearClampSampler);
+    FCompositeDescriptorSet.BindStorageBuffer(2, FExposureStateBuffer, 0, FExposureStateBuffer.Desc.Size);
+    FCompositeDescriptorSet.Update;
+
+    if not AInsideRenderGraphPass then
+    begin
+      if SafeHDR <> nil then
+        ACmd.TransitionTexture(SafeHDR, rsShaderRead);
+      if SafeBloom <> nil then
+        ACmd.TransitionTexture(SafeBloom, rsShaderRead);
+      ACmd.TransitionTexture(ADstLDRTarget, rsColorAttachment);
+
+      RenderInfo := TRHIRenderingInfo.CreateColorDepth(
+        Rectangle(0, 0, TargetW, TargetH),
+        ADstLDRTarget, loClear, Vector4(0.0, 0.0, 0.0, 1.0),
+        nil, loDontCare, 1.0);
+      ACmd.BeginRendering(RenderInfo);
+      ACmd.SetViewport(FloatRectangle(0, 0, TargetW, TargetH));
+      ACmd.SetScissor(RenderInfo.RenderArea);
+    end;
 
     FillChar(PC, SizeOf(PC), 0);
     PC.Exposure := FExposure;
@@ -14003,13 +14968,28 @@ begin
     PC.Saturation := FSaturation;
     PC.Contrast := FContrast;
     PC.TonemapOperator := Ord(FTonemapOperator);
-    if FEnableBloom then PC.EnableBloom := 1 else PC.EnableBloom := 0;
+    if FEnableBloom and (SafeBloom <> FBlackFallbackTexture) then
+      PC.EnableBloom := 1
+    else
+      PC.EnableBloom := 0;
     if FEnableAutoExposure then PC.EnableAutoExposure := 1 else PC.EnableAutoExposure := 0;
-    ACmd.PushConstants([ssFragment], 0, SizeOf(PC), PC);
 
-    ACmd.EndRendering;
+    if CompPipe <> nil then
+      ACmd.BindPipeline(CompPipe);
+    ACmd.BindDescriptorSet(0, FCompositeDescriptorSet, []);
+    ACmd.PushConstants([ssFragment], 0, SizeOf(PC), PC);
+    ACmd.Draw(3, 1, 0, 0);
+
+    if not AInsideRenderGraphPass then
+      ACmd.EndRendering;
   end;
   Inc(FTotalCompositePasses);
+end;
+
+procedure TCastleVulkanHDRPostProcessor.ExecuteCompositePass(
+  const ACmd: TRHICommandList; const ADstLDRTarget: TRHITexture);
+begin
+  ExecuteCompositeFromTextures(ACmd, FHDRSceneTexture, FBloomMipTextures[0], ADstLDRTarget, False);
 end;
 
 procedure TCastleVulkanHDRPostProcessor.BuildDefaultFrameRenderGraph(
@@ -14052,7 +15032,7 @@ begin
   { 2. Bloom Mip-Chain Compute Pass }
   PassBloom := AGraph.AddPass('BloomPyramidComputePass', rgptCompute);
   PassBloom.ReadTexture(HSceneHDR, rsShaderRead);
-  PassBloom.WriteStorageTexture(HBloomMip0, rsTransferDst);
+  PassBloom.WriteStorageTexture(HBloomMip0, rsUnorderedAccess);
 
   { 3. Luminance Histogram & Auto-Exposure Compute Pass }
   PassHistogram := AGraph.AddPass('LuminanceHistogramComputePass', rgptCompute);
@@ -14065,6 +15045,264 @@ begin
   PassComposite.ReadTexture(HBloomMip0, rsShaderRead);
   PassComposite.ReadBuffer(HExposureBuf);
   PassComposite.WriteColorAttachment(HSwapchain, loClear, Vector4(0.0, 0.0, 0.0, 1.0), soStore);
+end;
+
+procedure TCastleVulkanHDRPostProcessor.HandleNextGenForwardPass(
+  const AGraph: TRHIRenderGraph; const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+begin
+  if Assigned(FNextGenForwardCallback) then
+    FNextGenForwardCallback(AGraph, APass, ACmd);
+end;
+
+procedure TCastleVulkanHDRPostProcessor.HandleNextGenHiZPass(
+  const AGraph: TRHIRenderGraph; const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+var
+  DepthTex, HiZTex: TRHITexture;
+  PC: TCastleHiZPushConstants;
+begin
+  if APass = nil then ;
+  DepthTex := AGraph.ResolvePhysicalTexture(FRGSceneDepth);
+  HiZTex := AGraph.ResolvePhysicalTexture(FRGHiZMip0);
+  if (ACmd = nil) or (DepthTex = nil) or (HiZTex = nil) or (FHiZCopyPipeline = nil) then
+    Exit;
+
+  FHiZCopyDescriptorSet.BindTexture(0, DepthTex, FLinearClampSampler);
+  FHiZCopyDescriptorSet.BindTexture(1, HiZTex, FLinearClampSampler);
+  FHiZCopyDescriptorSet.Update;
+
+  FillChar(PC, SizeOf(PC), 0);
+  PC.DstMipWidth := Max(Cardinal(1), HiZTex.Desc.Width);
+  PC.DstMipHeight := Max(Cardinal(1), HiZTex.Desc.Height);
+  PC.SrcMipWidth := Max(Cardinal(1), DepthTex.Desc.Width);
+  PC.SrcMipHeight := Max(Cardinal(1), DepthTex.Desc.Height);
+
+  ACmd.BindComputePipeline(FHiZCopyPipeline);
+  ACmd.BindComputeDescriptorSet(0, FHiZCopyDescriptorSet, []);
+  ACmd.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+  ACmd.Dispatch((PC.DstMipWidth + 7) div 8, (PC.DstMipHeight + 7) div 8, 1);
+end;
+
+procedure TCastleVulkanHDRPostProcessor.HandleNextGenGTAOHorizonPass(
+  const AGraph: TRHIRenderGraph; const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+var
+  DepthTex, RawAOTex: TRHITexture;
+begin
+  if APass = nil then ;
+  DepthTex := AGraph.ResolvePhysicalTexture(FRGSceneDepth);
+  RawAOTex := AGraph.ResolvePhysicalTexture(FRGGTAORaw);
+  if (FDevice <> nil) and (ACmd <> nil) and (DepthTex <> nil) and (RawAOTex <> nil) then
+    FDevice.GTAO.DispatchGTAOHorizonToTarget(ACmd, DepthTex, RawAOTex);
+end;
+
+procedure TCastleVulkanHDRPostProcessor.HandleNextGenGTAODenoisePass(
+  const AGraph: TRHIRenderGraph; const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+var
+  DepthTex, RawAOTex, DenoisedAOTex: TRHITexture;
+begin
+  if APass = nil then ;
+  DepthTex := AGraph.ResolvePhysicalTexture(FRGSceneDepth);
+  RawAOTex := AGraph.ResolvePhysicalTexture(FRGGTAORaw);
+  DenoisedAOTex := AGraph.ResolvePhysicalTexture(FRGGTAODenoised);
+  if (FDevice <> nil) and (ACmd <> nil) and (DepthTex <> nil) and
+     (RawAOTex <> nil) and (DenoisedAOTex <> nil) then
+    FDevice.GTAO.DispatchGTAODenoiseToTarget(ACmd, DepthTex, RawAOTex, DenoisedAOTex);
+end;
+
+procedure TCastleVulkanHDRPostProcessor.HandleNextGenSSRPass(
+  const AGraph: TRHIRenderGraph; const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+var
+  HDRRawTex, HiZTex, SSRTex: TRHITexture;
+begin
+  if APass = nil then ;
+  HDRRawTex := AGraph.ResolvePhysicalTexture(FRGSceneHDRRaw);
+  HiZTex := AGraph.ResolvePhysicalTexture(FRGHiZMip0);
+  SSRTex := AGraph.ResolvePhysicalTexture(FRGSSRReflection);
+  if (FDevice <> nil) and (ACmd <> nil) and (HDRRawTex <> nil) and
+     (HiZTex <> nil) and (SSRTex <> nil) then
+    FDevice.SSR.DispatchSSRToTarget(ACmd, HDRRawTex, HiZTex, SSRTex);
+end;
+
+procedure TCastleVulkanHDRPostProcessor.HandleNextGenModulatePass(
+  const AGraph: TRHIRenderGraph; const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+var
+  HDRRawTex, DenoisedAOTex, SSRTex, HDRLitTex: TRHITexture;
+begin
+  if APass = nil then ;
+  HDRRawTex := AGraph.ResolvePhysicalTexture(FRGSceneHDRRaw);
+  DenoisedAOTex := AGraph.ResolvePhysicalTexture(FRGGTAODenoised);
+  SSRTex := AGraph.ResolvePhysicalTexture(FRGSSRReflection);
+  HDRLitTex := AGraph.ResolvePhysicalTexture(FRGSceneHDRLit);
+  DispatchPostProcessModulate(ACmd, HDRRawTex, DenoisedAOTex, SSRTex, HDRLitTex,
+    FAOStrength, FSSRStrength);
+end;
+
+procedure TCastleVulkanHDRPostProcessor.HandleNextGenBloomPass(
+  const AGraph: TRHIRenderGraph; const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+var
+  HDRLitTex, BloomMip0Tex: TRHITexture;
+begin
+  if APass = nil then ;
+  HDRLitTex := AGraph.ResolvePhysicalTexture(FRGSceneHDRLit);
+  BloomMip0Tex := AGraph.ResolvePhysicalTexture(FRGBloomMip0);
+  DispatchBloomPyramidFromTexture(ACmd, HDRLitTex, BloomMip0Tex);
+end;
+
+procedure TCastleVulkanHDRPostProcessor.HandleNextGenHistogramPass(
+  const AGraph: TRHIRenderGraph; const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+var
+  HDRLitTex: TRHITexture;
+begin
+  if APass = nil then ;
+  HDRLitTex := AGraph.ResolvePhysicalTexture(FRGSceneHDRLit);
+  DispatchLuminanceHistogramOnGPU(ACmd, HDRLitTex);
+end;
+
+procedure TCastleVulkanHDRPostProcessor.HandleNextGenCompositePass(
+  const AGraph: TRHIRenderGraph; const APass: TRHIRenderGraphPass; const ACmd: TRHICommandList);
+var
+  HDRLitTex, BloomMip0Tex, FinalLDRTex: TRHITexture;
+begin
+  if APass = nil then ;
+  HDRLitTex := AGraph.ResolvePhysicalTexture(FRGSceneHDRLit);
+  BloomMip0Tex := AGraph.ResolvePhysicalTexture(FRGBloomMip0);
+  FinalLDRTex := AGraph.ResolvePhysicalTexture(FRGFinalLDR);
+  ExecuteCompositeFromTextures(ACmd, HDRLitTex, BloomMip0Tex, FinalLDRTex, True);
+end;
+
+procedure TCastleVulkanHDRPostProcessor.BuildNextGenPostProcessRenderGraph(
+  const AGraph: TRHIRenderGraph;
+  const AWidth, AHeight: Cardinal;
+  const AFinalLDRTarget: TRHITexture;
+  const ASceneForwardDrawCallback: TRHIRenderGraphPassExecuteEvent;
+  const AIncludeDeadDebugPass: Boolean);
+var
+  HDRColorDesc, HDRLitDesc, HDRDepthDesc, HiZMip0Desc, GTAODesc, SSRDesc, BloomMip0Desc, DeadDesc: TRHITextureDesc;
+  HExposureBuf, HDeadScratch: TRHIRenderGraphResourceHandle;
+  FinalExportState: TRHIResourceState;
+  PassForward, PassHiZ, PassGTAOHorizon, PassGTAODenoise, PassSSR,
+    PassModulate, PassBloom, PassHistogram, PassComposite, PassDead: TRHIRenderGraphPass;
+begin
+  if AGraph = nil then Exit;
+  EnsureHDRTargets(AWidth, AHeight);
+  EnsurePipelinesCreated;
+  if AFinalLDRTarget = nil then ;
+  FNextGenForwardCallback := ASceneForwardDrawCallback;
+
+  { Pre-create composite PSO outside active render pass }
+  if AFinalLDRTarget <> nil then
+    GetOrCreateCompositePipelineForFormat(AFinalLDRTarget.Desc.Format)
+  else
+    GetOrCreateCompositePipelineForFormat(pfRGBA8_UNorm);
+
+  AGraph.Reset;
+
+  HDRColorDesc := TRHITextureDesc.Create2D(
+    FWidth, FHeight, pfRGBA16_Float,
+    [tuColorAttachment, tuSampled, tuStorage, tuTransferSrc, tuTransferDst], 1, 1);
+  HDRLitDesc := TRHITextureDesc.Create2D(
+    FWidth, FHeight, pfRGBA16_Float,
+    [tuSampled, tuStorage, tuTransferSrc], 1, 1);
+  HDRDepthDesc := TRHITextureDesc.Create2D(
+    FWidth, FHeight, pfD32_Float,
+    [tuDepthStencil, tuSampled, tuTransferSrc, tuTransferDst], 1, 1);
+  HiZMip0Desc := TRHITextureDesc.Create2D(
+    Max(Cardinal(1), FWidth div 2), Max(Cardinal(1), FHeight div 2), pfR32_Float,
+    [tuSampled, tuStorage], 1, 1);
+  GTAODesc := TRHITextureDesc.Create2D(
+    FWidth, FHeight, pfR16_Float,
+    [tuSampled, tuStorage, tuTransferSrc], 1, 1);
+  SSRDesc := TRHITextureDesc.Create2D(
+    FWidth, FHeight, pfRGBA16_Float,
+    [tuSampled, tuStorage, tuTransferSrc], 1, 1);
+  BloomMip0Desc := TRHITextureDesc.Create2D(
+    Max(Cardinal(1), FWidth div 2), Max(Cardinal(1), FHeight div 2), pfRGBA16_Float,
+    [tuSampled, tuStorage, tuTransferSrc], 1, 1);
+
+  FRGSceneHDRRaw := AGraph.DeclareTransientTexture('RG_SceneHDRRaw', HDRColorDesc);
+  FRGSceneDepth := AGraph.DeclareTransientTexture('RG_SceneDepth', HDRDepthDesc);
+  FRGHiZMip0 := AGraph.DeclareTransientTexture('RG_HiZDepthMip0', HiZMip0Desc);
+  FRGGTAORaw := AGraph.DeclareTransientTexture('RG_GTAORaw', GTAODesc);
+  FRGGTAODenoised := AGraph.DeclareTransientTexture('RG_GTAODenoised', GTAODesc);
+  FRGSSRReflection := AGraph.DeclareTransientTexture('RG_SSRReflection', SSRDesc);
+  FRGSceneHDRLit := AGraph.DeclareTransientTexture('RG_SceneHDRLit', HDRLitDesc);
+  FRGBloomMip0 := AGraph.DeclareTransientTexture('RG_BloomMip0', BloomMip0Desc);
+
+  if (AFinalLDRTarget <> nil) and (tuTransferSrc in AFinalLDRTarget.Desc.Usage) then
+    FinalExportState := rsShaderRead
+  else
+    FinalExportState := rsPresent;
+  FRGFinalLDR := AGraph.ImportExternalTexture('RG_FinalLDRTarget', AFinalLDRTarget,
+    rsUndefined, FinalExportState);
+  HExposureBuf := AGraph.ImportExternalBuffer('RG_AutoExposureState', FExposureStateBuffer);
+
+  { 1. Forward 3D HDR + Depth Pass }
+  PassForward := AGraph.AddPass('Forward3DHDRPass', rgptGraphics);
+  PassForward.WriteColorAttachment(FRGSceneHDRRaw, loClear, Vector4(0.0, 0.0, 0.0, 1.0), soStore);
+  PassForward.WriteDepthAttachment(FRGSceneDepth, loClear, 1.0, soStore);
+  PassForward.OnExecute := {$ifdef FPC}@{$endif}HandleNextGenForwardPass;
+
+  { 2. Hi-Z Conservative Half-Res Depth Pyramid Mip0 Pass }
+  PassHiZ := AGraph.AddPass('HiZDepthCopyComputePass', rgptCompute);
+  PassHiZ.ReadTexture(FRGSceneDepth, rsShaderRead);
+  PassHiZ.WriteStorageTexture(FRGHiZMip0, rsUnorderedAccess);
+  PassHiZ.OnExecute := {$ifdef FPC}@{$endif}HandleNextGenHiZPass;
+
+  { 3. GTAO Horizon Integral Compute Pass }
+  PassGTAOHorizon := AGraph.AddPass('GTAOHorizonComputePass', rgptCompute);
+  PassGTAOHorizon.ReadTexture(FRGSceneDepth, rsShaderRead);
+  PassGTAOHorizon.WriteStorageTexture(FRGGTAORaw, rsUnorderedAccess);
+  PassGTAOHorizon.OnExecute := {$ifdef FPC}@{$endif}HandleNextGenGTAOHorizonPass;
+
+  { 4. GTAO Cross-Bilateral Spatial Denoiser Pass (ends lifetime of FRGGTAORaw & FRGSceneDepth!) }
+  PassGTAODenoise := AGraph.AddPass('GTAODenoiseComputePass', rgptCompute);
+  PassGTAODenoise.ReadTexture(FRGSceneDepth, rsShaderRead);
+  PassGTAODenoise.ReadTexture(FRGGTAORaw, rsShaderRead);
+  PassGTAODenoise.WriteStorageTexture(FRGGTAODenoised, rsUnorderedAccess);
+  PassGTAODenoise.OnExecute := {$ifdef FPC}@{$endif}HandleNextGenGTAODenoisePass;
+
+  { 5. Hi-Z Screen-Space Reflections Compute Pass (starts AFTER FRGGTAORaw dies -> aliases VkDeviceMemory!) }
+  PassSSR := AGraph.AddPass('HiZSSRComputePass', rgptCompute);
+  PassSSR.ReadTexture(FRGSceneHDRRaw, rsShaderRead);
+  PassSSR.ReadTexture(FRGHiZMip0, rsShaderRead);
+  PassSSR.WriteStorageTexture(FRGSSRReflection, rsUnorderedAccess);
+  PassSSR.OnExecute := {$ifdef FPC}@{$endif}HandleNextGenSSRPass;
+
+  { 6. Post-Process HDR Lighting Modulation Pass (ends lifetime of FRGSceneHDRRaw, FRGGTAODenoised, FRGSSRReflection!) }
+  PassModulate := AGraph.AddPass('PostProcessModulateComputePass', rgptCompute);
+  PassModulate.ReadTexture(FRGSceneHDRRaw, rsShaderRead);
+  PassModulate.ReadTexture(FRGGTAODenoised, rsShaderRead);
+  PassModulate.ReadTexture(FRGSSRReflection, rsShaderRead);
+  PassModulate.WriteStorageTexture(FRGSceneHDRLit, rsUnorderedAccess);
+  PassModulate.OnExecute := {$ifdef FPC}@{$endif}HandleNextGenModulatePass;
+
+  { 7. Jiménez 13-Tap Karis Downsample + 9-Tap Tent Upsample Bloom Pyramid Pass (aliases dead HDR/GTAO/SSR VRAM!) }
+  PassBloom := AGraph.AddPass('BloomPyramidComputePass', rgptCompute);
+  PassBloom.ReadTexture(FRGSceneHDRLit, rsShaderRead);
+  PassBloom.WriteStorageTexture(FRGBloomMip0, rsUnorderedAccess);
+  PassBloom.OnExecute := {$ifdef FPC}@{$endif}HandleNextGenBloomPass;
+
+  { 8. 256-Bin Atomic Luminance Histogram Compute Pass }
+  PassHistogram := AGraph.AddPass('LuminanceHistogramComputePass', rgptCompute);
+  PassHistogram.ReadTexture(FRGSceneHDRLit, rsShaderRead);
+  PassHistogram.WriteBuffer(HExposureBuf);
+  PassHistogram.OnExecute := {$ifdef FPC}@{$endif}HandleNextGenHistogramPass;
+
+  { 9. ACES Filmic / AgX Tonemapping + Bloom + Color Grading + sRGB Fullscreen Composite Pass }
+  PassComposite := AGraph.AddPass('TonemapCompositePass', rgptGraphics);
+  PassComposite.ReadTexture(FRGSceneHDRLit, rsShaderRead);
+  PassComposite.ReadTexture(FRGBloomMip0, rsShaderRead);
+  PassComposite.ReadBuffer(HExposureBuf);
+  PassComposite.WriteColorAttachment(FRGFinalLDR, loClear, Vector4(0.0, 0.0, 0.0, 1.0), soStore);
+  PassComposite.OnExecute := {$ifdef FPC}@{$endif}HandleNextGenCompositePass;
+
+  if AIncludeDeadDebugPass then
+  begin
+    DeadDesc := TRHITextureDesc.Create2D(256, 256, pfRGBA16_Float,
+      [tuColorAttachment, tuSampled], 1, 1);
+    HDeadScratch := AGraph.DeclareTransientTexture('RG_UnusedDebugScratch', DeadDesc);
+    PassDead := AGraph.AddPass('UnusedDebugInspectionPass', rgptGraphics);
+    PassDead.WriteColorAttachment(HDeadScratch, loClear, Vector4(1.0, 0.0, 1.0, 1.0), soStore);
+  end;
 end;
 
 class function TCastleVulkanHDRPostProcessor.EvaluateKarisWeight(
@@ -14394,7 +15632,7 @@ begin
 
   TexDesc := TRHITextureDesc.Create2D(
     FWidth, FHeight, pfR16_Float,
-    [tuSampled, tuStorage, tuColorAttachment], 1, 1);
+    [tuSampled, tuStorage, tuColorAttachment, tuTransferSrc, tuTransferDst], 1, 1);
   TexDesc.DebugName := 'GTAORawTexture';
   FRawGTAOTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
 
@@ -14402,11 +15640,94 @@ begin
   FDenoisedGTAOTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
 end;
 
-function TCastleVulkanGTAO.DispatchGTAO(const ACmd: TRHICommandList;
-  const ADepthTexture: TRHITexture): Cardinal;
+procedure TCastleVulkanGTAO.DispatchGTAOHorizonToTarget(const ACmd: TRHICommandList;
+  const ADepthTexture, ARawGTAOTarget: TRHITexture);
 var
   PC: TCastleGTAOPushConstants;
-  GroupsX, GroupsY: Cardinal;
+  TargetW, TargetH, GroupsX, GroupsY: Cardinal;
+begin
+  if (ACmd = nil) or (FDevice = nil) or (ARawGTAOTarget = nil) then
+    Exit;
+  EnsurePipelinesCreated;
+  TargetW := Max(Cardinal(1), ARawGTAOTarget.Desc.Width);
+  TargetH := Max(Cardinal(1), ARawGTAOTarget.Desc.Height);
+
+  FillChar(PC, SizeOf(PC), 0);
+  PC.InvResolution := Vector2(1.0 / TargetW, 1.0 / TargetH);
+  PC.ProjScale := Vector2(1.0, 1.0);
+  PC.ZNear := FZNear;
+  PC.ZFar := FZFar;
+  PC.EffectRadius := FEffectRadius;
+  PC.FalloffRange := FFalloffRange;
+  PC.Power := FPower;
+  PC.SliceCount := Max(Cardinal(1), FSliceCount);
+  PC.StepsPerSlice := Max(Cardinal(1), FStepsPerSlice);
+  PC.DenoisePass := 0;
+
+  if ADepthTexture <> nil then
+  begin
+    ACmd.TransitionTexture(ADepthTexture, rsShaderRead);
+    FGTAODescriptorSet.BindTexture(0, ADepthTexture, FLinearClampSampler);
+  end;
+  ACmd.TransitionTexture(ARawGTAOTarget, rsUnorderedAccess);
+  FGTAODescriptorSet.BindTexture(1, ARawGTAOTarget, FLinearClampSampler);
+  FGTAODescriptorSet.Update;
+
+  GroupsX := (TargetW + 7) div 8;
+  GroupsY := (TargetH + 7) div 8;
+  ACmd.BindComputePipeline(FGTAOPipeline);
+  ACmd.BindComputeDescriptorSet(0, FGTAODescriptorSet, []);
+  ACmd.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+  ACmd.Dispatch(GroupsX, GroupsY, 1);
+  Inc(FTotalGTAODispatches);
+end;
+
+procedure TCastleVulkanGTAO.DispatchGTAODenoiseToTarget(const ACmd: TRHICommandList;
+  const ADepthTexture, ARawGTAOTexture, ADenoisedGTAOTarget: TRHITexture);
+var
+  PC: TCastleGTAOPushConstants;
+  TargetW, TargetH, GroupsX, GroupsY: Cardinal;
+begin
+  if (ACmd = nil) or (FDevice = nil) or (ARawGTAOTexture = nil) or (ADenoisedGTAOTarget = nil) then
+    Exit;
+  EnsurePipelinesCreated;
+  TargetW := Max(Cardinal(1), ADenoisedGTAOTarget.Desc.Width);
+  TargetH := Max(Cardinal(1), ADenoisedGTAOTarget.Desc.Height);
+
+  FillChar(PC, SizeOf(PC), 0);
+  PC.InvResolution := Vector2(1.0 / TargetW, 1.0 / TargetH);
+  PC.ProjScale := Vector2(1.0, 1.0);
+  PC.ZNear := FZNear;
+  PC.ZFar := FZFar;
+  PC.EffectRadius := FEffectRadius;
+  PC.FalloffRange := FFalloffRange;
+  PC.Power := FPower;
+  PC.SliceCount := Max(Cardinal(1), FSliceCount);
+  PC.StepsPerSlice := Max(Cardinal(1), FStepsPerSlice);
+  PC.DenoisePass := 1;
+
+  if ADepthTexture <> nil then
+  begin
+    ACmd.TransitionTexture(ADepthTexture, rsShaderRead);
+    FDenoiseDescriptorSet.BindTexture(0, ADepthTexture, FLinearClampSampler);
+  end;
+  ACmd.TransitionTexture(ARawGTAOTexture, rsShaderRead);
+  ACmd.TransitionTexture(ADenoisedGTAOTarget, rsUnorderedAccess);
+  FDenoiseDescriptorSet.BindTexture(1, ARawGTAOTexture, FLinearClampSampler);
+  FDenoiseDescriptorSet.BindTexture(2, ADenoisedGTAOTarget, FLinearClampSampler);
+  FDenoiseDescriptorSet.Update;
+
+  GroupsX := (TargetW + 7) div 8;
+  GroupsY := (TargetH + 7) div 8;
+  ACmd.BindComputePipeline(FDenoisePipeline);
+  ACmd.BindComputeDescriptorSet(0, FDenoiseDescriptorSet, []);
+  ACmd.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+  ACmd.Dispatch(GroupsX, GroupsY, 1);
+  Inc(FTotalDenoiseDispatches);
+end;
+
+function TCastleVulkanGTAO.DispatchGTAO(const ACmd: TRHICommandList;
+  const ADepthTexture: TRHITexture): Cardinal;
 begin
   Result := 0;
   if (ACmd = nil) or (FDevice = nil) then
@@ -14420,54 +15741,10 @@ begin
       EnsureGTAOTargets(1280, 720, FHalfResolution);
   end;
 
-  EnsurePipelinesCreated;
-
-  FillChar(PC, SizeOf(PC), 0);
-  PC.InvResolution := Vector2(1.0 / Max(Cardinal(1), FWidth), 1.0 / Max(Cardinal(1), FHeight));
-  PC.ProjScale := Vector2(1.0, 1.0);
-  PC.ZNear := FZNear;
-  PC.ZFar := FZFar;
-  PC.EffectRadius := FEffectRadius;
-  PC.FalloffRange := FFalloffRange;
-  PC.Power := FPower;
-  PC.SliceCount := Max(Cardinal(1), FSliceCount);
-  PC.StepsPerSlice := Max(Cardinal(1), FStepsPerSlice);
-
-  GroupsX := (FWidth + 7) div 8;
-  GroupsY := (FHeight + 7) div 8;
-
-  { 1. Raw GTAO Horizon Integral Pass }
-  PC.DenoisePass := 0;
-  ACmd.TransitionTexture(FRawGTAOTexture, rsTransferDst);
-  if ADepthTexture <> nil then
-    FGTAODescriptorSet.BindTexture(0, ADepthTexture, FLinearClampSampler);
-  FGTAODescriptorSet.BindTexture(1, FRawGTAOTexture, FLinearClampSampler);
-  FGTAODescriptorSet.Update;
-
-  ACmd.BindComputePipeline(FGTAOPipeline);
-  ACmd.BindComputeDescriptorSet(0, FGTAODescriptorSet, []);
-  ACmd.PushConstants([ssCompute], 0, SizeOf(PC), PC);
-  ACmd.Dispatch(GroupsX, GroupsY, 1);
-  Inc(FTotalGTAODispatches);
-  Inc(Result);
-
-  { 2. 5x5 Depth-Aware Cross-Bilateral Spatial Denoiser Pass }
-  PC.DenoisePass := 1;
-  ACmd.TransitionTexture(FRawGTAOTexture, rsShaderRead);
-  ACmd.TransitionTexture(FDenoisedGTAOTexture, rsTransferDst);
-  if ADepthTexture <> nil then
-    FDenoiseDescriptorSet.BindTexture(0, ADepthTexture, FLinearClampSampler);
-  FDenoiseDescriptorSet.BindTexture(1, FRawGTAOTexture, FLinearClampSampler);
-  FDenoiseDescriptorSet.BindTexture(2, FDenoisedGTAOTexture, FLinearClampSampler);
-  FDenoiseDescriptorSet.Update;
-
-  ACmd.BindComputePipeline(FDenoisePipeline);
-  ACmd.BindComputeDescriptorSet(0, FDenoiseDescriptorSet, []);
-  ACmd.PushConstants([ssCompute], 0, SizeOf(PC), PC);
-  ACmd.Dispatch(GroupsX, GroupsY, 1);
+  DispatchGTAOHorizonToTarget(ACmd, ADepthTexture, FRawGTAOTexture);
+  DispatchGTAODenoiseToTarget(ACmd, ADepthTexture, FRawGTAOTexture, FDenoisedGTAOTexture);
   ACmd.TransitionTexture(FDenoisedGTAOTexture, rsShaderRead);
-  Inc(FTotalDenoiseDispatches);
-  Inc(Result);
+  Result := 2;
 end;
 
 class function TCastleVulkanGTAO.ReconstructViewPosition(
@@ -14621,16 +15898,65 @@ begin
 
   TexDesc := TRHITextureDesc.Create2D(
     FWidth, FHeight, pfRGBA16_Float,
-    [tuSampled, tuStorage, tuColorAttachment], 1, 1);
+    [tuSampled, tuStorage, tuColorAttachment, tuTransferSrc, tuTransferDst], 1, 1);
   TexDesc.DebugName := 'HiZSSRReflectionTexture';
   FSSRReflectionTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
 end;
 
-function TCastleVulkanSSR.DispatchSSR(const ACmd: TRHICommandList;
-  const AHDRSceneColor, AHiZPyramid: TRHITexture): Cardinal;
+function TCastleVulkanSSR.DispatchSSRToTarget(const ACmd: TRHICommandList;
+  const AHDRSceneColor, AHiZPyramid, ASSROutTarget: TRHITexture): Cardinal;
 var
   PC: TCastleSSRPushConstants;
-  GroupsX, GroupsY: Cardinal;
+  TargetW, TargetH, GroupsX, GroupsY: Cardinal;
+begin
+  Result := 0;
+  if (ACmd = nil) or (FDevice = nil) or (ASSROutTarget = nil) then
+    Exit;
+
+  EnsurePipelineCreated;
+  TargetW := Max(Cardinal(1), ASSROutTarget.Desc.Width);
+  TargetH := Max(Cardinal(1), ASSROutTarget.Desc.Height);
+
+  FillChar(PC, SizeOf(PC), 0);
+  PC.InvResolution := Vector2(1.0 / TargetW, 1.0 / TargetH);
+  PC.ZNear := FZNear;
+  PC.ZFar := FZFar;
+  PC.MaxDistance := FMaxDistance;
+  PC.Thickness := FThickness;
+  PC.MaxRoughness := FMaxRoughness;
+  PC.EdgeFadeWidth := FEdgeFadeWidth;
+  PC.MaxSteps := Max(Cardinal(1), FMaxSteps);
+  PC.HiZMipCount := Max(Cardinal(1), FHiZMipCount);
+  PC.Intensity := FIntensity;
+
+  if AHDRSceneColor <> nil then
+  begin
+    ACmd.TransitionTexture(AHDRSceneColor, rsShaderRead);
+    FSSRDescriptorSet.BindTexture(0, AHDRSceneColor, FLinearClampSampler);
+  end;
+  if AHiZPyramid <> nil then
+  begin
+    ACmd.TransitionTexture(AHiZPyramid, rsShaderRead);
+    FSSRDescriptorSet.BindTexture(1, AHiZPyramid, FLinearClampSampler);
+  end;
+  ACmd.TransitionTexture(ASSROutTarget, rsUnorderedAccess);
+  FSSRDescriptorSet.BindTexture(2, ASSROutTarget, FLinearClampSampler);
+  FSSRDescriptorSet.Update;
+
+  GroupsX := (TargetW + 7) div 8;
+  GroupsY := (TargetH + 7) div 8;
+
+  ACmd.BindComputePipeline(FSSRPipeline);
+  ACmd.BindComputeDescriptorSet(0, FSSRDescriptorSet, []);
+  ACmd.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+  ACmd.Dispatch(GroupsX, GroupsY, 1);
+
+  Inc(FTotalSSRDispatches);
+  Result := 1;
+end;
+
+function TCastleVulkanSSR.DispatchSSR(const ACmd: TRHICommandList;
+  const AHDRSceneColor, AHiZPyramid: TRHITexture): Cardinal;
 begin
   Result := 0;
   if (ACmd = nil) or (FDevice = nil) then
@@ -14644,39 +15970,9 @@ begin
       EnsureSSRTarget(1280, 720);
   end;
 
-  EnsurePipelineCreated;
-
-  FillChar(PC, SizeOf(PC), 0);
-  PC.InvResolution := Vector2(1.0 / Max(Cardinal(1), FWidth), 1.0 / Max(Cardinal(1), FHeight));
-  PC.ZNear := FZNear;
-  PC.ZFar := FZFar;
-  PC.MaxDistance := FMaxDistance;
-  PC.Thickness := FThickness;
-  PC.MaxRoughness := FMaxRoughness;
-  PC.EdgeFadeWidth := FEdgeFadeWidth;
-  PC.MaxSteps := Max(Cardinal(1), FMaxSteps);
-  PC.HiZMipCount := Max(Cardinal(1), FHiZMipCount);
-  PC.Intensity := FIntensity;
-
-  ACmd.TransitionTexture(FSSRReflectionTexture, rsTransferDst);
-  if AHDRSceneColor <> nil then
-    FSSRDescriptorSet.BindTexture(0, AHDRSceneColor, FLinearClampSampler);
-  if AHiZPyramid <> nil then
-    FSSRDescriptorSet.BindTexture(1, AHiZPyramid, FLinearClampSampler);
-  FSSRDescriptorSet.BindTexture(2, FSSRReflectionTexture, FLinearClampSampler);
-  FSSRDescriptorSet.Update;
-
-  GroupsX := (FWidth + 7) div 8;
-  GroupsY := (FHeight + 7) div 8;
-
-  ACmd.BindComputePipeline(FSSRPipeline);
-  ACmd.BindComputeDescriptorSet(0, FSSRDescriptorSet, []);
-  ACmd.PushConstants([ssCompute], 0, SizeOf(PC), PC);
-  ACmd.Dispatch(GroupsX, GroupsY, 1);
-  ACmd.TransitionTexture(FSSRReflectionTexture, rsShaderRead);
-
-  Inc(FTotalSSRDispatches);
-  Result := 1;
+  Result := DispatchSSRToTarget(ACmd, AHDRSceneColor, AHiZPyramid, FSSRReflectionTexture);
+  if Result > 0 then
+    ACmd.TransitionTexture(FSSRReflectionTexture, rsShaderRead);
 end;
 
 class function TCastleVulkanSSR.EvaluateScreenEdgeFade(
@@ -24045,6 +25341,21 @@ begin
   Result := TVulkanRHITexture.Create(Self, ADesc);
 end;
 
+function TVulkanRHIDevice.CreateTransientCarrierTexture(const ADesc: TRHITextureDesc;
+  const AMinCarrierBytes: UInt64): TRHITexture;
+begin
+  Result := TVulkanRHITexture.CreateCarrier(Self, ADesc, AMinCarrierBytes);
+end;
+
+function TVulkanRHIDevice.TryCreateAliasedTexture(const ADesc: TRHITextureDesc;
+  const ACarrierTexture: TRHITexture): TRHITexture;
+begin
+  if ACarrierTexture is TVulkanRHITexture then
+    Result := TVulkanRHITexture.TryCreateAliased(Self, ADesc, TVulkanRHITexture(ACarrierTexture))
+  else
+    Result := nil;
+end;
+
 function TVulkanRHIDevice.CreateSampler(const ADesc: TRHISamplerDesc): TRHISampler;
 begin
   Result := TVulkanRHISampler.Create(Self, ADesc);
@@ -24377,6 +25688,200 @@ begin
   Result := GetPipelineCount;
 end;
 
+function TVulkanRHIDevice.GrabTextureFloatImage(const SourceTexture: TRHITexture;
+  const ReadArea: TRectangle): TRGBAlphaFloatImage;
+var
+  VkTex: TVulkanRHITexture;
+  StagingDesc: TRHIBufferDesc;
+  StagingBuf: TVulkanRHIBuffer;
+  Cmd: VkCommandBuffer;
+  Region: VkBufferImageCopy;
+  Barrier: VkImageMemoryBarrier;
+  SrcStage: VkPipelineStageFlags;
+  BytesPerPixel, ByteSize, SrcIndex, DstIndex, TotalPixels: PtrUInt;
+  MappedPixels: Pointer;
+  RowY, ColX, SrcY, SrcW, SrcH, CopyW, CopyH: Integer;
+  SrcBytePtr: PByte;
+  SrcHalfPtr: PWord;
+  SrcFloatPtr: PSingle;
+  SrcU32Ptr: PCardinal;
+  DstVecPtr: PVector4;
+  DVal: Single;
+  IsDepth, FlipVertical: Boolean;
+begin
+  if (SourceTexture = nil) or (ReadArea.Width <= 0) or (ReadArea.Height <= 0) then
+    Exit(nil);
+
+  Result := TRGBAlphaFloatImage.Create(ReadArea.Width, ReadArea.Height);
+  VkTex := SourceTexture as TVulkanRHITexture;
+  if (FDevice = nil) or not Assigned(vkCmdCopyImageToBuffer) then
+    Exit;
+
+  if Assigned(vkDeviceWaitIdle) then
+    vkDeviceWaitIdle(FDevice);
+  FlushStagingUploads;
+
+  IsDepth := (VkTex.AspectMask and VK_IMAGE_ASPECT_DEPTH_BIT) <> 0;
+  FlipVertical := VkTex.RenderedLayerMask <> 0;
+  SrcW := Max(1, Integer(VkTex.Desc.Width));
+  SrcH := Max(1, Integer(VkTex.Desc.Height));
+  CopyW := EnsureRange(ReadArea.Width, 1, Max(1, SrcW - Max(0, ReadArea.Left)));
+  CopyH := EnsureRange(ReadArea.Height, 1, Max(1, SrcH - Max(0, ReadArea.Bottom)));
+  TotalPixels := PtrUInt(CopyW) * PtrUInt(CopyH);
+
+  if IsDepth then
+  begin
+    if VkTex.Desc.Format = pfD16_UNorm then
+      BytesPerPixel := 2
+    else
+      BytesPerPixel := 4;
+  end else
+  begin
+    case VkTex.Desc.Format of
+      pfRGBA32_Float: BytesPerPixel := 16;
+      pfRGBA16_Float: BytesPerPixel := 8;
+      pfRG16_Float, pfR32_Float: BytesPerPixel := 4;
+      pfR16_Float, pfRG8_UNorm: BytesPerPixel := 2;
+      pfR8_UNorm: BytesPerPixel := 1;
+    else
+      BytesPerPixel := 4;
+    end;
+  end;
+
+  ByteSize := TotalPixels * BytesPerPixel;
+  StagingDesc := TRHIBufferDesc.Create(ByteSize, [buTransferDst], muGpuToCpu, 'GrabTextureFloatStaging');
+  StagingBuf := TVulkanRHIBuffer.Create(Self, StagingDesc, nil);
+  try
+    Cmd := BeginSingleTimeCommands;
+    if (VkTex.CurrentState <> rsTransferSrc) and Assigned(vkCmdPipelineBarrier) then
+    begin
+      FillChar(Barrier, SizeOf(Barrier), 0);
+      Barrier.sType := VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      RHIStateToVkLayoutAndAccess(VkTex.CurrentState, Barrier.oldLayout, Barrier.srcAccessMask, SrcStage);
+      Barrier.newLayout := VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      Barrier.dstAccessMask := VK_ACCESS_TRANSFER_READ_BIT;
+      Barrier.srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+      Barrier.dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+      Barrier.image := VkTex.Image;
+      Barrier.subresourceRange.aspectMask := VkTex.AspectMask;
+      Barrier.subresourceRange.baseMipLevel := 0;
+      Barrier.subresourceRange.levelCount := Max(Cardinal(1), VkTex.Desc.MipLevels);
+      Barrier.subresourceRange.baseArrayLayer := 0;
+      Barrier.subresourceRange.layerCount := Max(Cardinal(1), VkTex.Desc.DepthOrArrayLayers);
+      vkCmdPipelineBarrier(Cmd, SrcStage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nil, 0, nil, 1, @Barrier);
+      VkTex.CurrentState := rsTransferSrc;
+    end;
+
+    FillChar(Region, SizeOf(Region), 0);
+    if IsDepth then
+      Region.imageSubresource.aspectMask := VK_IMAGE_ASPECT_DEPTH_BIT
+    else
+      Region.imageSubresource.aspectMask := VK_IMAGE_ASPECT_COLOR_BIT;
+    Region.imageSubresource.layerCount := 1;
+    Region.imageOffset.x := EnsureRange(ReadArea.Left, 0, SrcW - CopyW);
+    if FlipVertical then
+      Region.imageOffset.y := EnsureRange(SrcH - (Max(0, ReadArea.Bottom) + CopyH), 0, SrcH - CopyH)
+    else
+      Region.imageOffset.y := EnsureRange(ReadArea.Bottom, 0, SrcH - CopyH);
+    Region.imageExtent.width := Cardinal(CopyW);
+    Region.imageExtent.height := Cardinal(CopyH);
+    Region.imageExtent.depth := 1;
+
+    vkCmdCopyImageToBuffer(Cmd, VkTex.Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+      StagingBuf.Handle, 1, @Region);
+    EndSingleTimeCommands(Cmd);
+
+    if StagingBuf.Allocation.IsValid and (FMemoryAllocator <> nil) then
+      FMemoryAllocator.InvalidateAllocation(StagingBuf.Allocation, 0, ByteSize);
+
+    MappedPixels := StagingBuf.Map;
+    try
+      DstVecPtr := PVector4(Result.RawPixels);
+      SrcBytePtr := PByte(MappedPixels);
+      SrcHalfPtr := PWord(MappedPixels);
+      SrcFloatPtr := PSingle(MappedPixels);
+      SrcU32Ptr := PCardinal(MappedPixels);
+
+      for RowY := 0 to CopyH - 1 do
+      begin
+        if FlipVertical then SrcY := (CopyH - 1) - RowY else SrcY := RowY;
+        for ColX := 0 to CopyW - 1 do
+        begin
+          SrcIndex := PtrUInt(SrcY) * PtrUInt(CopyW) + PtrUInt(ColX);
+          DstIndex := PtrUInt(RowY) * PtrUInt(ReadArea.Width) + PtrUInt(ColX);
+          if IsDepth then
+          begin
+            if VkTex.Desc.Format = pfD16_UNorm then
+              DVal := SrcHalfPtr[SrcIndex] / 65535.0
+            else if VkTex.Desc.Format = pfD24_UNorm_S8_UInt then
+              DVal := (SrcU32Ptr[SrcIndex] and $FFFFFF) / 16777215.0
+            else
+              DVal := SrcFloatPtr[SrcIndex];
+            DstVecPtr[DstIndex] := Vector4(DVal, DVal, DVal, 1.0);
+          end else
+          begin
+            case VkTex.Desc.Format of
+              pfRGBA32_Float:
+                DstVecPtr[DstIndex] := Vector4(
+                  SrcFloatPtr[SrcIndex * 4 + 0],
+                  SrcFloatPtr[SrcIndex * 4 + 1],
+                  SrcFloatPtr[SrcIndex * 4 + 2],
+                  SrcFloatPtr[SrcIndex * 4 + 3]);
+              pfRGBA16_Float:
+                DstVecPtr[DstIndex] := Vector4(
+                  HalfFloatToFloat(SrcHalfPtr[SrcIndex * 4 + 0]),
+                  HalfFloatToFloat(SrcHalfPtr[SrcIndex * 4 + 1]),
+                  HalfFloatToFloat(SrcHalfPtr[SrcIndex * 4 + 2]),
+                  HalfFloatToFloat(SrcHalfPtr[SrcIndex * 4 + 3]));
+              pfRG16_Float:
+                DstVecPtr[DstIndex] := Vector4(
+                  HalfFloatToFloat(SrcHalfPtr[SrcIndex * 2 + 0]),
+                  HalfFloatToFloat(SrcHalfPtr[SrcIndex * 2 + 1]),
+                  0.0, 1.0);
+              pfR32_Float:
+                begin
+                  DVal := SrcFloatPtr[SrcIndex];
+                  DstVecPtr[DstIndex] := Vector4(DVal, DVal, DVal, 1.0);
+                end;
+              pfR16_Float:
+                begin
+                  DVal := HalfFloatToFloat(SrcHalfPtr[SrcIndex]);
+                  DstVecPtr[DstIndex] := Vector4(DVal, DVal, DVal, 1.0);
+                end;
+              pfRG8_UNorm:
+                DstVecPtr[DstIndex] := Vector4(
+                  SrcBytePtr[SrcIndex * 2 + 0] / 255.0,
+                  SrcBytePtr[SrcIndex * 2 + 1] / 255.0,
+                  0.0, 1.0);
+              pfR8_UNorm:
+                begin
+                  DVal := SrcBytePtr[SrcIndex] / 255.0;
+                  DstVecPtr[DstIndex] := Vector4(DVal, DVal, DVal, 1.0);
+                end;
+              pfBGRA8_UNorm, pfBGRA8_sRGB:
+                DstVecPtr[DstIndex] := Vector4(
+                  SrcBytePtr[SrcIndex * 4 + 2] / 255.0,
+                  SrcBytePtr[SrcIndex * 4 + 1] / 255.0,
+                  SrcBytePtr[SrcIndex * 4 + 0] / 255.0,
+                  SrcBytePtr[SrcIndex * 4 + 3] / 255.0);
+            else
+              DstVecPtr[DstIndex] := Vector4(
+                SrcBytePtr[SrcIndex * 4 + 0] / 255.0,
+                SrcBytePtr[SrcIndex * 4 + 1] / 255.0,
+                SrcBytePtr[SrcIndex * 4 + 2] / 255.0,
+                SrcBytePtr[SrcIndex * 4 + 3] / 255.0);
+            end;
+          end;
+        end;
+      end;
+    finally
+      StagingBuf.Unmap;
+    end;
+  finally
+    FreeAndNil(StagingBuf);
+  end;
+end;
+
 function TVulkanRHIDevice.GrabTextureImage(const SourceTexture: TRHITexture;
   const ReadArea: TRectangle): TRGBAlphaImage;
 var
@@ -24387,7 +25892,7 @@ var
   Region: VkBufferImageCopy;
   Barrier: VkImageMemoryBarrier;
   SrcStage: VkPipelineStageFlags;
-  ByteSize, RowBytes: PtrUInt;
+  BytesPerPixel, ByteSize, RowBytes: PtrUInt;
   MappedPixels: Pointer;
   RowY, ColX, SrcX, SrcY, SrcW, SrcH, CopyW, CopyH: Integer;
   SrcIndex, DstIndex, TotalPixels: PtrUInt;
@@ -24397,6 +25902,12 @@ var
   DepthU32Ptr: PCardinal;
   DByte: Byte;
   IsDepth, FlipVertical: Boolean;
+
+  function Float01ToByte(const AVal: Single): Byte; inline;
+  begin
+    Result := Byte(Round(EnsureRange(AVal, 0.0, 1.0) * 255.0));
+  end;
+
 begin
   if (SourceTexture = nil) or (ReadArea.Width <= 0) or (ReadArea.Height <= 0) then
     Exit(nil);
@@ -24435,10 +25946,25 @@ begin
   CopyW := EnsureRange(ReadArea.Width, 1, Max(1, SrcW - Max(0, ReadArea.Left)));
   CopyH := EnsureRange(ReadArea.Height, 1, Max(1, SrcH - Max(0, ReadArea.Bottom)));
   TotalPixels := PtrUInt(CopyW) * PtrUInt(CopyH);
-  if IsDepth and (VkTex.Desc.Format = pfD16_UNorm) then
-    ByteSize := TotalPixels * 2
-  else
-    ByteSize := TotalPixels * 4;
+  if IsDepth then
+  begin
+    if VkTex.Desc.Format = pfD16_UNorm then
+      BytesPerPixel := 2
+    else
+      BytesPerPixel := 4;
+  end else
+  begin
+    case VkTex.Desc.Format of
+      pfRGBA32_Float: BytesPerPixel := 16;
+      pfRGBA16_Float: BytesPerPixel := 8;
+      pfRG16_Float, pfR32_Float: BytesPerPixel := 4;
+      pfR16_Float, pfRG8_UNorm: BytesPerPixel := 2;
+      pfR8_UNorm: BytesPerPixel := 1;
+    else
+      BytesPerPixel := 4;
+    end;
+  end;
+  ByteSize := TotalPixels * BytesPerPixel;
   StagingDesc := TRHIBufferDesc.Create(ByteSize, [buTransferDst], muGpuToCpu, 'GrabTextureStaging');
   StagingBuf := TVulkanRHIBuffer.Create(Self, StagingDesc, nil);
   try
@@ -24479,6 +26005,9 @@ begin
     vkCmdCopyImageToBuffer(Cmd, VkTex.Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
       StagingBuf.Handle, 1, @Region);
     EndSingleTimeCommands(Cmd);
+
+    if StagingBuf.Allocation.IsValid and (FMemoryAllocator <> nil) then
+      FMemoryAllocator.InvalidateAllocation(StagingBuf.Allocation, 0, ByteSize);
 
     MappedPixels := StagingBuf.Map;
     try
@@ -24530,12 +26059,134 @@ begin
             begin
               SrcIndex := PtrUInt(SrcY) * PtrUInt(CopyW) + PtrUInt(ColX);
               DstIndex := (PtrUInt(RowY) * PtrUInt(ReadArea.Width) + PtrUInt(ColX)) * 4;
-              DByte := Byte(Round(EnsureRange(DepthFloatPtr[SrcIndex], 0.0, 1.0) * 255.0));
+              DByte := Float01ToByte(DepthFloatPtr[SrcIndex]);
               DstPtr[DstIndex + 0] := DByte;
               DstPtr[DstIndex + 1] := DByte;
               DstPtr[DstIndex + 2] := DByte;
               DstPtr[DstIndex + 3] := 255;
             end;
+          end;
+        end;
+      end else
+      if VkTex.Desc.Format = pfRGBA32_Float then
+      begin
+        DepthFloatPtr := PSingle(MappedPixels);
+        for RowY := 0 to CopyH - 1 do
+        begin
+          if FlipVertical then SrcY := (CopyH - 1) - RowY else SrcY := RowY;
+          for ColX := 0 to CopyW - 1 do
+          begin
+            SrcIndex := (PtrUInt(SrcY) * PtrUInt(CopyW) + PtrUInt(ColX)) * 4;
+            DstIndex := (PtrUInt(RowY) * PtrUInt(ReadArea.Width) + PtrUInt(ColX)) * 4;
+            DstPtr[DstIndex + 0] := Float01ToByte(DepthFloatPtr[SrcIndex + 0]);
+            DstPtr[DstIndex + 1] := Float01ToByte(DepthFloatPtr[SrcIndex + 1]);
+            DstPtr[DstIndex + 2] := Float01ToByte(DepthFloatPtr[SrcIndex + 2]);
+            DstPtr[DstIndex + 3] := Float01ToByte(DepthFloatPtr[SrcIndex + 3]);
+          end;
+        end;
+      end else
+      if VkTex.Desc.Format = pfRGBA16_Float then
+      begin
+        DepthU16Ptr := PWord(MappedPixels);
+        for RowY := 0 to CopyH - 1 do
+        begin
+          if FlipVertical then SrcY := (CopyH - 1) - RowY else SrcY := RowY;
+          for ColX := 0 to CopyW - 1 do
+          begin
+            SrcIndex := (PtrUInt(SrcY) * PtrUInt(CopyW) + PtrUInt(ColX)) * 4;
+            DstIndex := (PtrUInt(RowY) * PtrUInt(ReadArea.Width) + PtrUInt(ColX)) * 4;
+            DstPtr[DstIndex + 0] := Float01ToByte(HalfFloatToFloat(DepthU16Ptr[SrcIndex + 0]));
+            DstPtr[DstIndex + 1] := Float01ToByte(HalfFloatToFloat(DepthU16Ptr[SrcIndex + 1]));
+            DstPtr[DstIndex + 2] := Float01ToByte(HalfFloatToFloat(DepthU16Ptr[SrcIndex + 2]));
+            DstPtr[DstIndex + 3] := Float01ToByte(HalfFloatToFloat(DepthU16Ptr[SrcIndex + 3]));
+          end;
+        end;
+      end else
+      if VkTex.Desc.Format = pfRG16_Float then
+      begin
+        DepthU16Ptr := PWord(MappedPixels);
+        for RowY := 0 to CopyH - 1 do
+        begin
+          if FlipVertical then SrcY := (CopyH - 1) - RowY else SrcY := RowY;
+          for ColX := 0 to CopyW - 1 do
+          begin
+            SrcIndex := (PtrUInt(SrcY) * PtrUInt(CopyW) + PtrUInt(ColX)) * 2;
+            DstIndex := (PtrUInt(RowY) * PtrUInt(ReadArea.Width) + PtrUInt(ColX)) * 4;
+            DstPtr[DstIndex + 0] := Float01ToByte(HalfFloatToFloat(DepthU16Ptr[SrcIndex + 0]));
+            DstPtr[DstIndex + 1] := Float01ToByte(HalfFloatToFloat(DepthU16Ptr[SrcIndex + 1]));
+            DstPtr[DstIndex + 2] := 0;
+            DstPtr[DstIndex + 3] := 255;
+          end;
+        end;
+      end else
+      if VkTex.Desc.Format = pfR32_Float then
+      begin
+        DepthFloatPtr := PSingle(MappedPixels);
+        for RowY := 0 to CopyH - 1 do
+        begin
+          if FlipVertical then SrcY := (CopyH - 1) - RowY else SrcY := RowY;
+          for ColX := 0 to CopyW - 1 do
+          begin
+            SrcIndex := PtrUInt(SrcY) * PtrUInt(CopyW) + PtrUInt(ColX);
+            DstIndex := (PtrUInt(RowY) * PtrUInt(ReadArea.Width) + PtrUInt(ColX)) * 4;
+            DByte := Float01ToByte(DepthFloatPtr[SrcIndex]);
+            DstPtr[DstIndex + 0] := DByte;
+            DstPtr[DstIndex + 1] := DByte;
+            DstPtr[DstIndex + 2] := DByte;
+            DstPtr[DstIndex + 3] := 255;
+          end;
+        end;
+      end else
+      if VkTex.Desc.Format = pfR16_Float then
+      begin
+        DepthU16Ptr := PWord(MappedPixels);
+        for RowY := 0 to CopyH - 1 do
+        begin
+          if FlipVertical then SrcY := (CopyH - 1) - RowY else SrcY := RowY;
+          for ColX := 0 to CopyW - 1 do
+          begin
+            SrcIndex := PtrUInt(SrcY) * PtrUInt(CopyW) + PtrUInt(ColX);
+            DstIndex := (PtrUInt(RowY) * PtrUInt(ReadArea.Width) + PtrUInt(ColX)) * 4;
+            DByte := Float01ToByte(HalfFloatToFloat(DepthU16Ptr[SrcIndex]));
+            DstPtr[DstIndex + 0] := DByte;
+            DstPtr[DstIndex + 1] := DByte;
+            DstPtr[DstIndex + 2] := DByte;
+            DstPtr[DstIndex + 3] := 255;
+          end;
+        end;
+      end else
+      if VkTex.Desc.Format = pfRG8_UNorm then
+      begin
+        SrcBytePtr := PByte(MappedPixels);
+        for RowY := 0 to CopyH - 1 do
+        begin
+          if FlipVertical then SrcY := (CopyH - 1) - RowY else SrcY := RowY;
+          for ColX := 0 to CopyW - 1 do
+          begin
+            SrcIndex := (PtrUInt(SrcY) * PtrUInt(CopyW) + PtrUInt(ColX)) * 2;
+            DstIndex := (PtrUInt(RowY) * PtrUInt(ReadArea.Width) + PtrUInt(ColX)) * 4;
+            DstPtr[DstIndex + 0] := SrcBytePtr[SrcIndex + 0];
+            DstPtr[DstIndex + 1] := SrcBytePtr[SrcIndex + 1];
+            DstPtr[DstIndex + 2] := 0;
+            DstPtr[DstIndex + 3] := 255;
+          end;
+        end;
+      end else
+      if VkTex.Desc.Format = pfR8_UNorm then
+      begin
+        SrcBytePtr := PByte(MappedPixels);
+        for RowY := 0 to CopyH - 1 do
+        begin
+          if FlipVertical then SrcY := (CopyH - 1) - RowY else SrcY := RowY;
+          for ColX := 0 to CopyW - 1 do
+          begin
+            SrcIndex := PtrUInt(SrcY) * PtrUInt(CopyW) + PtrUInt(ColX);
+            DstIndex := (PtrUInt(RowY) * PtrUInt(ReadArea.Width) + PtrUInt(ColX)) * 4;
+            DByte := SrcBytePtr[SrcIndex];
+            DstPtr[DstIndex + 0] := DByte;
+            DstPtr[DstIndex + 1] := DByte;
+            DstPtr[DstIndex + 2] := DByte;
+            DstPtr[DstIndex + 3] := 255;
           end;
         end;
       end else

@@ -1028,7 +1028,7 @@ const
     'VK_FENCE_CREATE_SIGNALED_BIT'
   );
 
-  OrderedEnums3: array[0..153] of String = (
+  OrderedEnums3: array[0..154] of String = (
     'VK_INDEX_TYPE_UINT16',
     'VK_INDEX_TYPE_UINT32',
     'VK_IMAGE_ASPECT_COLOR_BIT',
@@ -1193,7 +1193,9 @@ const
     'VK_RENDERING_RESUMING_BIT',
     // Phase 110: Vulkan 1.2 Consolidated Features & Shader Draw Parameters
     'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES',
-    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES'
+    'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES',
+    // Phase 111: Transient Render-Target Physical Memory Aliasing
+    'VK_IMAGE_CREATE_ALIAS_BIT'
   );
 
   OrderedStructs: array[0..77] of String = (
@@ -1277,7 +1279,7 @@ const
     'VkBufferMemoryBarrier'
   );
 
-  OrderedStructs2: array[0..46] of String = (
+  OrderedStructs2: array[0..47] of String = (
     'VkImageMemoryBarrier',
     'VkBufferCopy',
     'VkImageSubresourceLayers',
@@ -1324,7 +1326,8 @@ const
     'VkQueryPoolCreateInfo',
     'VkCommandBufferInheritanceRenderingInfo',
     'VkPhysicalDeviceShaderDrawParametersFeatures',
-    'VkPhysicalDeviceVulkan12Features'
+    'VkPhysicalDeviceVulkan12Features',
+    'VkMemoryBarrier'
   );
 
   OrderedCommands: array[0..94] of String = (

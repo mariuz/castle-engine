@@ -64,6 +64,8 @@ type
     IsHostCoherent: Boolean;
     { True if MappedPtr was allocated on the CPU heap in headless simulation mode }
     IsSimulatedHostMemory: Boolean;
+    { Vulkan memoryTypeIndex backing DeviceMemory (used for VK_IMAGE_CREATE_ALIAS_BIT compatibility checks) }
+    MemoryTypeIndex: Cardinal;
     function IsValid: Boolean;
   end;
 
@@ -231,6 +233,14 @@ type
       const AApproxSize: VkDeviceSize; const AUsage: TRHIMemoryUsage;
       const AIsOptimalTiling: Boolean = True;
       const AForceDedicated: Boolean = False): TVulkanMemoryAllocation;
+
+    { Sub-allocates (or non-dedicated-allocates unless hardware strictly requires dedicated)
+      at least AMinSizeBytes with at least AMinAlignment from the Non-Linear optimal image
+      pool so multiple non-overlapping VK_IMAGE_CREATE_ALIAS_BIT transient images can bind
+      to the same physical VkDeviceMemory range (Phase 111.1). }
+    function AllocateTransientCarrierImageMemory(const AImage: VkImage;
+      const AMinSizeBytes: VkDeviceSize;
+      const AMinAlignment: VkDeviceSize = 65536): TVulkanMemoryAllocation;
 
     { Frees a sub-allocation or dedicated allocation. }
     procedure Free(var AAlloc: TVulkanMemoryAllocation);
@@ -523,6 +533,7 @@ begin
         AAlloc.ChunkId := Curr^.ChunkId;
         AAlloc.IsDedicated := False;
         AAlloc.IsHostCoherent := FIsHostCoherent;
+        AAlloc.MemoryTypeIndex := FMemoryTypeIndex;
         if FBaseMappedPtr <> nil then
           AAlloc.MappedPtr := FBaseMappedPtr + Curr^.Offset;
 
@@ -923,6 +934,7 @@ begin
       Result.Size := AMemReq.size;
       Result.IsDedicated := True;
       Result.IsHostCoherent := IsHostCoherent;
+      Result.MemoryTypeIndex := MemTypeIdx;
 
       Inc(FDedicatedCount);
       Inc(FDedicatedBytes, AMemReq.size);
@@ -1101,6 +1113,67 @@ begin
 
   Result := AllocateInternal(MemReq, AUsage, not AIsOptimalTiling,
     PrefersDed, RequiresDed, VK_NULL_HANDLE, AImage);
+end;
+
+function TCastleVulkanMemoryAllocator.AllocateTransientCarrierImageMemory(
+  const AImage: VkImage; const AMinSizeBytes, AMinAlignment: VkDeviceSize): TVulkanMemoryAllocation;
+var
+  Info2: VkImageMemoryRequirementsInfo2;
+  Req2: VkMemoryRequirements2;
+  DedReq: VkMemoryDedicatedRequirements;
+  MemReq: VkMemoryRequirements;
+  RequiresDed: Boolean;
+  DedImgHandle: VkImage;
+begin
+  RequiresDed := False;
+  if (FDevice <> nil) and (AImage <> VK_NULL_HANDLE) and
+     Assigned(vkGetImageMemoryRequirements2) then
+  begin
+    FillChar(Info2, SizeOf(Info2), 0);
+    Info2.sType := VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2;
+    Info2.image := AImage;
+
+    FillChar(DedReq, SizeOf(DedReq), 0);
+    DedReq.sType := VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS;
+
+    FillChar(Req2, SizeOf(Req2), 0);
+    Req2.sType := VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2;
+    Req2.pNext := @DedReq;
+
+    vkGetImageMemoryRequirements2(FDevice, @Info2, @Req2);
+    MemReq := Req2.memoryRequirements;
+    RequiresDed := DedReq.requiresDedicatedAllocation <> VK_FALSE;
+  end else
+  if (FDevice <> nil) and (AImage <> VK_NULL_HANDLE) and
+     Assigned(vkGetImageMemoryRequirements) then
+  begin
+    FillChar(MemReq, SizeOf(MemReq), 0);
+    vkGetImageMemoryRequirements(FDevice, AImage, @MemReq);
+  end else
+  begin
+    FillChar(MemReq, SizeOf(MemReq), 0);
+    MemReq.size := 4096;
+    MemReq.alignment := 4096;
+    MemReq.memoryTypeBits := $FFFFFFFF;
+  end;
+
+  if AMinSizeBytes > MemReq.size then
+    MemReq.size := AMinSizeBytes;
+  if AMinAlignment > MemReq.alignment then
+    MemReq.alignment := AMinAlignment;
+  if MemReq.alignment < 4096 then
+    MemReq.alignment := 4096;
+
+  { Per VUID-vkBindImageMemory-memory-01509, a VkMemoryDedicatedAllocateInfo allocation
+    cannot be aliased across multiple VkImages; only pass AImage if hardware strictly requires it. }
+  if RequiresDed then
+    DedImgHandle := AImage
+  else
+    DedImgHandle := VK_NULL_HANDLE;
+
+  Result := AllocateInternal(MemReq, muGpuOnly, False { Non-Linear optimal pool },
+    False { PrefersDedicated=False to allow multi-image aliasing }, RequiresDed,
+    VK_NULL_HANDLE, DedImgHandle);
 end;
 
 procedure TCastleVulkanMemoryAllocator.Free(var AAlloc: TVulkanMemoryAllocation);

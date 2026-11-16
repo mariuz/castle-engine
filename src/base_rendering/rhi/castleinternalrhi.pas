@@ -618,6 +618,9 @@ type
   protected
     FDesc: TRHITextureDesc;
     FCurrentState: TRHIResourceState;
+    FIsMemoryAliased: Boolean;
+    FAliasedCarrierTexture: TRHITexture;
+    function GetEstimatedByteSize: UInt64; virtual;
   public
     constructor Create(const ADevice: TRHIDevice; const ADesc: TRHITextureDesc);
     { Uploads a TEncodedImage (TCastleImage or TGPUCompressedImage) into a mip/layer. }
@@ -625,8 +628,12 @@ type
       const AMipLevel: Cardinal = 0; const AArrayLayer: Cardinal = 0); virtual; abstract;
     { Generates the full mipmap chain from mip level 0 down to Desc.MipLevels - 1. }
     procedure GenerateMipmaps; virtual;
+    class function EstimateDescriptorByteSize(const ADesc: TRHITextureDesc): UInt64; static;
     property Desc: TRHITextureDesc read FDesc;
     property CurrentState: TRHIResourceState read FCurrentState write FCurrentState;
+    property IsMemoryAliased: Boolean read FIsMemoryAliased;
+    property AliasedCarrierTexture: TRHITexture read FAliasedCarrierTexture;
+    property EstimatedByteSize: UInt64 read GetEstimatedByteSize;
   end;
 
   { Immutable texture sampler state. }
@@ -734,6 +741,9 @@ type
     { Resource Barriers & Transitions }
     procedure TransitionTexture(const Texture: TRHITexture;
       const NewState: TRHIResourceState); virtual; abstract;
+    { Emits an explicit physical memory aliasing barrier before activating NewTexture
+      on shared transient memory previously written/read through OldTexture (Phase 111.1). }
+    procedure EmitAliasingBarrier(const OldTexture, NewTexture: TRHITexture); virtual;
     procedure GenerateMipmaps(const Texture: TRHITexture); virtual; abstract;
 
     { Dynamic Rendering Pass Delimiters }
@@ -862,6 +872,16 @@ type
     function CreateBuffer(const ADesc: TRHIBufferDesc;
       const InitialData: Pointer = nil): TRHIBuffer; virtual; abstract;
     function CreateTexture(const ADesc: TRHITextureDesc): TRHITexture; virtual; abstract;
+    { Creates a transient carrier texture (with VK_IMAGE_CREATE_ALIAS_BIT on Vulkan)
+      backed by at least AMinCarrierBytes so non-overlapping transient textures of
+      different formats, resolutions, or usages can alias its physical GPU memory. }
+    function CreateTransientCarrierTexture(const ADesc: TRHITextureDesc;
+      const AMinCarrierBytes: UInt64 = 0): TRHITexture; virtual;
+    { Attempts to create an aliased texture bound to the exact physical GPU memory
+      of ACarrierTexture without allocating any new VRAM (Phase 111.1).
+      Returns nil if ACarrierTexture cannot host ADesc. }
+    function TryCreateAliasedTexture(const ADesc: TRHITextureDesc;
+      const ACarrierTexture: TRHITexture): TRHITexture; virtual;
     function CreateSampler(const ADesc: TRHISamplerDesc): TRHISampler; virtual; abstract;
 
     { Compiles GLSL source (or loads cached SPIR-V) into a Shader Module. }
@@ -935,6 +955,8 @@ type
 
   TRHIRenderGraphTextureBarrier = record
     TextureHandle: TRHIRenderGraphResourceHandle;
+    PreviousAliasedTexture: TRHITexture;
+    IsAliasingHandoff: Boolean;
     BeforeState: TRHIResourceState;
     AfterState: TRHIResourceState;
   end;
@@ -996,7 +1018,7 @@ type
 
     { Declares that this compute/transfer pass writes into AHandle in AWriteState. }
     procedure WriteStorageTexture(const AHandle: TRHIRenderGraphResourceHandle;
-      const AWriteState: TRHIResourceState = rsTransferDst);
+      const AWriteState: TRHIResourceState = rsUnorderedAccess);
 
     { Declares buffer read/write dependencies for topological ordering. }
     procedure ReadBuffer(const AHandle: TRHIRenderGraphResourceHandle);
@@ -1040,10 +1062,17 @@ type
         PhysicalBuffer: TRHIBuffer;
         LastProducerPass: Integer;
       end;
+      TAliasedTextureVariant = record
+        Desc: TRHITextureDesc;
+        Texture: TRHITexture;
+      end;
       TTransientPoolSlot = record
         Desc: TRHITextureDesc;
         Texture: TRHITexture;
+        CarrierCapacityBytes: UInt64;
+        AliasedVariants: array of TAliasedTextureVariant;
         LastAssignedOrder: Integer;
+        LastActiveTexture: TRHITexture;
       end;
       TRHIRenderGraphPassList = {$ifdef FPC}specialize{$endif} TObjectList<TRHIRenderGraphPass>;
   private
@@ -1057,8 +1086,11 @@ type
     FIsCompiled: Boolean;
     FCulledPassCount: Integer;
     FEmittedBarrierCount: Integer;
+    FAliasingBarrierCount: Integer;
     FTransientTextureCount: Integer;
     FAliasedTextureSavingsCount: Integer;
+    FMemoryAliasedTextureCount: Integer;
+    FAliasedMemorySavedBytes: UInt64;
     FExecutionCount: Cardinal;
     class function AreTextureDescsCompatibleForAliasing(
       const A, B: TRHITextureDesc): Boolean; static;
@@ -1122,6 +1154,9 @@ type
     property TransientTextureCount: Integer read FTransientTextureCount;
     property PhysicalTransientTextureCount: Integer read GetPhysicalTransientTextureCount;
     property AliasedTextureSavingsCount: Integer read FAliasedTextureSavingsCount;
+    property MemoryAliasedTextureCount: Integer read FMemoryAliasedTextureCount;
+    property AliasedMemorySavedBytes: UInt64 read FAliasedMemorySavedBytes;
+    property AliasingBarrierCount: Integer read FAliasingBarrierCount;
     property ExecutionCount: Cardinal read FExecutionCount;
   end;
 
@@ -1617,6 +1652,48 @@ begin
   { Subclasses override to record or execute mipmap chain blits. }
 end;
 
+class function TRHITexture.EstimateDescriptorByteSize(const ADesc: TRHITextureDesc): UInt64;
+var
+  Bpp, MipW, MipH, MipD, Layers, Samples, TotalBytes: UInt64;
+  M, MipCnt: Cardinal;
+begin
+  case ADesc.Format of
+    pfRGBA32_Float: Bpp := 16;
+    pfRGBA16_Float, pfD32_Float_S8_UInt: Bpp := 8;
+    pfR16_Float, pfRG8_UNorm, pfD16_UNorm: Bpp := 2;
+    pfR8_UNorm: Bpp := 1;
+  else
+    Bpp := 4;
+  end;
+  Samples := Max(Cardinal(1), ADesc.SampleCount);
+  MipCnt := Max(Cardinal(1), ADesc.MipLevels);
+  MipW := Max(Cardinal(1), ADesc.Width);
+  MipH := Max(Cardinal(1), ADesc.Height);
+  if ADesc.Dimension = td3D then
+  begin
+    MipD := Max(Cardinal(1), ADesc.DepthOrArrayLayers);
+    Layers := 1;
+  end else
+  begin
+    MipD := 1;
+    Layers := Max(Cardinal(1), ADesc.DepthOrArrayLayers);
+  end;
+  TotalBytes := 0;
+  for M := 0 to MipCnt - 1 do
+  begin
+    Inc(TotalBytes, MipW * MipH * MipD * Layers * Samples * Bpp);
+    if MipW > 1 then MipW := MipW div 2;
+    if MipH > 1 then MipH := MipH div 2;
+    if MipD > 1 then MipD := MipD div 2;
+  end;
+  Result := TotalBytes;
+end;
+
+function TRHITexture.GetEstimatedByteSize: UInt64;
+begin
+  Result := EstimateDescriptorByteSize(FDesc);
+end;
+
 { TRHISampler }
 
 constructor TRHISampler.Create(const ADevice: TRHIDevice; const ADesc: TRHISamplerDesc);
@@ -1688,6 +1765,11 @@ begin
   FActiveRenderingHasDepth := False;
   FActiveRenderingDepthFormat := pfUndefined;
   FActiveRenderingSampleCount := 1;
+end;
+
+procedure TRHICommandList.EmitAliasingBarrier(const OldTexture, NewTexture: TRHITexture);
+begin
+  if (OldTexture = nil) and (NewTexture = nil) then ;
 end;
 
 procedure TRHICommandList.ClearAttachments(const ClearColorBuf: Boolean; const ClearColor: TCastleColor;
@@ -1912,6 +1994,20 @@ begin
     '  Timeline semaphores: ' + BoolToStr(FCapabilities.SupportsTimelineSemaphores, True);
 end;
 
+function TRHIDevice.CreateTransientCarrierTexture(const ADesc: TRHITextureDesc;
+  const AMinCarrierBytes: UInt64): TRHITexture;
+begin
+  if AMinCarrierBytes = 0 then ;
+  Result := CreateTexture(ADesc);
+end;
+
+function TRHIDevice.TryCreateAliasedTexture(const ADesc: TRHITextureDesc;
+  const ACarrierTexture: TRHITexture): TRHITexture;
+begin
+  if (ACarrierTexture = nil) and (ADesc.Width = 0) then ;
+  Result := nil;
+end;
+
 function TRHIDevice.RegisterBindlessTexture(const ATexture: TRHITexture;
   const ASampler: TRHISampler): Cardinal;
 begin
@@ -2105,16 +2201,26 @@ begin
   FIsCompiled := False;
   FCulledPassCount := 0;
   FEmittedBarrierCount := 0;
+  FAliasingBarrierCount := 0;
   FTransientTextureCount := 0;
   FAliasedTextureSavingsCount := 0;
+  FMemoryAliasedTextureCount := 0;
+  FAliasedMemorySavedBytes := 0;
 end;
 
 procedure TRHIRenderGraph.ReleaseTransientPool;
 var
-  I: Integer;
+  I, J: Integer;
 begin
   for I := 0 to Length(FTransientPool) - 1 do
+  begin
+    { Destroy aliased VkImage wrappers before freeing the carrier allocation }
+    for J := 0 to Length(FTransientPool[I].AliasedVariants) - 1 do
+      FreeAndNil(FTransientPool[I].AliasedVariants[J].Texture);
+    SetLength(FTransientPool[I].AliasedVariants, 0);
     FreeAndNil(FTransientPool[I].Texture);
+    FTransientPool[I].LastActiveTexture := nil;
+  end;
   SetLength(FTransientPool, 0);
 end;
 
@@ -2223,7 +2329,7 @@ end;
 
 procedure TRHIRenderGraph.Compile;
 var
-  NPasses, P, Q, I, J, H, OrderIdx, SlotIdx, ChosenSlot, BarrierIdx: Integer;
+  NPasses, P, Q, I, J, H, H2, V, OrderIdx, NextOrd, SlotIdx, ChosenSlot, BarrierIdx: Integer;
   Edges: array of array of Boolean;
   InDegree: array of Integer;
   IsLive: array of Boolean;
@@ -2234,6 +2340,11 @@ var
   LastBufWriter: array of Integer;
   TrackedTexState: array of TRHIResourceState;
   PoolTexState: array of TRHIResourceState;
+  SlotActiveTex: array of TRHITexture;
+  AssignedTex, AliasTex, PrevActiveTex: TRHITexture;
+  ChainEnd: Integer;
+  CarrierBytes, CandBytes: UInt64;
+  IsDepthDesc, SlotIsDepth, DidAliasSwitch: Boolean;
   CurState, NeededState: TRHIResourceState;
   AlreadyHasBarrier: Boolean;
 begin
@@ -2242,7 +2353,10 @@ begin
   SetLength(FFinalExportBarriers, 0);
   FCulledPassCount := 0;
   FEmittedBarrierCount := 0;
+  FAliasingBarrierCount := 0;
   FAliasedTextureSavingsCount := 0;
+  FMemoryAliasedTextureCount := 0;
+  FAliasedMemorySavedBytes := 0;
 
   if NPasses = 0 then
   begin
@@ -2469,7 +2583,12 @@ begin
   for SlotIdx := 0 to Length(FTransientPool) - 1 do
     FTransientPool[SlotIdx].LastAssignedOrder := -1;
 
-  { Assign physical textures in increasing FirstUseOrder }
+  { Assign physical textures in increasing FirstUseOrder:
+    1st pass per texture: exact descriptor reuse (zero new VkImage).
+    2nd pass per texture: cross-format / cross-resolution / cross-usage physical
+      VkDeviceMemory aliasing via TryCreateAliasedTexture (VK_IMAGE_CREATE_ALIAS_BIT).
+    3rd fallback: allocate a new carrier slot sized to the max byte footprint of
+      its greedy non-overlapping interval chain so downstream transients can alias it! }
   for OrderIdx := 0 to Length(FCompiledPasses) - 1 do
     for H := 0 to Length(FVirtualTextures) - 1 do
       if (not FVirtualTextures[H].IsImported) and
@@ -2478,43 +2597,129 @@ begin
          (FVirtualTextures[H].PhysicalTexture = nil) then
       begin
         ChosenSlot := -1;
+        AssignedTex := nil;
+
+        { 4a. Prefer exact descriptor match (either carrier texture or cached aliased variant) }
         for SlotIdx := 0 to Length(FTransientPool) - 1 do
-          if (FTransientPool[SlotIdx].LastAssignedOrder < FVirtualTextures[H].FirstUseOrder) and
-             AreTextureDescsCompatibleForAliasing(FTransientPool[SlotIdx].Desc, FVirtualTextures[H].Desc) then
+          if FTransientPool[SlotIdx].LastAssignedOrder < FVirtualTextures[H].FirstUseOrder then
           begin
-            ChosenSlot := SlotIdx;
-            if FTransientPool[SlotIdx].LastAssignedOrder >= 0 then
-              Inc(FAliasedTextureSavingsCount);
-            Break;
+            if AreTextureDescsCompatibleForAliasing(FTransientPool[SlotIdx].Desc, FVirtualTextures[H].Desc) then
+            begin
+              ChosenSlot := SlotIdx;
+              AssignedTex := FTransientPool[SlotIdx].Texture;
+              if FTransientPool[SlotIdx].LastAssignedOrder >= 0 then
+              begin
+                Inc(FAliasedTextureSavingsCount);
+                Inc(FAliasedMemorySavedBytes, TRHITexture.EstimateDescriptorByteSize(FVirtualTextures[H].Desc));
+              end;
+              Break;
+            end;
+            for V := 0 to Length(FTransientPool[SlotIdx].AliasedVariants) - 1 do
+              if AreTextureDescsCompatibleForAliasing(
+                   FTransientPool[SlotIdx].AliasedVariants[V].Desc, FVirtualTextures[H].Desc) then
+              begin
+                ChosenSlot := SlotIdx;
+                AssignedTex := FTransientPool[SlotIdx].AliasedVariants[V].Texture;
+                if FTransientPool[SlotIdx].LastAssignedOrder >= 0 then
+                begin
+                  Inc(FAliasedTextureSavingsCount);
+                  Inc(FMemoryAliasedTextureCount);
+                  Inc(FAliasedMemorySavedBytes, TRHITexture.EstimateDescriptorByteSize(FVirtualTextures[H].Desc));
+                end;
+                Break;
+              end;
+            if ChosenSlot >= 0 then
+              Break;
           end;
 
+        { 4b. Cross-format / cross-resolution / cross-usage physical GPU memory aliasing }
+        if (ChosenSlot < 0) and (FDevice <> nil) then
+        begin
+          for SlotIdx := 0 to Length(FTransientPool) - 1 do
+            if (FTransientPool[SlotIdx].LastAssignedOrder < FVirtualTextures[H].FirstUseOrder) and
+               (FTransientPool[SlotIdx].Texture <> nil) then
+            begin
+              AliasTex := FDevice.TryCreateAliasedTexture(
+                FVirtualTextures[H].Desc, FTransientPool[SlotIdx].Texture);
+              if AliasTex <> nil then
+              begin
+                V := Length(FTransientPool[SlotIdx].AliasedVariants);
+                SetLength(FTransientPool[SlotIdx].AliasedVariants, V + 1);
+                FTransientPool[SlotIdx].AliasedVariants[V].Desc := FVirtualTextures[H].Desc;
+                FTransientPool[SlotIdx].AliasedVariants[V].Texture := AliasTex;
+                ChosenSlot := SlotIdx;
+                AssignedTex := AliasTex;
+                if FTransientPool[SlotIdx].LastAssignedOrder >= 0 then
+                begin
+                  Inc(FAliasedTextureSavingsCount);
+                  Inc(FMemoryAliasedTextureCount);
+                  Inc(FAliasedMemorySavedBytes, TRHITexture.EstimateDescriptorByteSize(FVirtualTextures[H].Desc));
+                end;
+                Break;
+              end;
+            end;
+        end;
+
+        { 4c. Allocate a new carrier slot sized to cover its greedy future non-overlapping chain }
         if ChosenSlot < 0 then
         begin
+          CarrierBytes := TRHITexture.EstimateDescriptorByteSize(FVirtualTextures[H].Desc) + 65536;
+          IsDepthDesc := tuDepthStencil in FVirtualTextures[H].Desc.Usage;
+          ChainEnd := FVirtualTextures[H].LastUseOrder;
+          for NextOrd := ChainEnd + 1 to Length(FCompiledPasses) - 1 do
+            for H2 := 0 to Length(FVirtualTextures) - 1 do
+              if (not FVirtualTextures[H2].IsImported) and
+                 (FVirtualTextures[H2].PhysicalTexture = nil) and
+                 (FVirtualTextures[H2].FirstUseOrder = NextOrd) and
+                 (FVirtualTextures[H2].FirstUseOrder > ChainEnd) and
+                 (FVirtualTextures[H2].LastUseOrder >= NextOrd) then
+              begin
+                SlotIsDepth := tuDepthStencil in FVirtualTextures[H2].Desc.Usage;
+                if SlotIsDepth = IsDepthDesc then
+                begin
+                  CandBytes := TRHITexture.EstimateDescriptorByteSize(FVirtualTextures[H2].Desc) + 65536;
+                  if CandBytes > CarrierBytes then
+                    CarrierBytes := CandBytes;
+                  ChainEnd := FVirtualTextures[H2].LastUseOrder;
+                  Break;
+                end;
+              end;
+
           ChosenSlot := Length(FTransientPool);
           SetLength(FTransientPool, ChosenSlot + 1);
+          FillChar(FTransientPool[ChosenSlot], SizeOf(TTransientPoolSlot), 0);
           FTransientPool[ChosenSlot].Desc := FVirtualTextures[H].Desc;
+          FTransientPool[ChosenSlot].CarrierCapacityBytes := CarrierBytes;
           if FDevice <> nil then
-            FTransientPool[ChosenSlot].Texture := FDevice.CreateTexture(FVirtualTextures[H].Desc)
+            FTransientPool[ChosenSlot].Texture := FDevice.CreateTransientCarrierTexture(
+              FVirtualTextures[H].Desc, CarrierBytes)
           else
             FTransientPool[ChosenSlot].Texture := nil;
+          AssignedTex := FTransientPool[ChosenSlot].Texture;
         end;
 
         FTransientPool[ChosenSlot].LastAssignedOrder := FVirtualTextures[H].LastUseOrder;
         FVirtualTextures[H].PoolSlotIndex := ChosenSlot;
-        FVirtualTextures[H].PhysicalTexture := FTransientPool[ChosenSlot].Texture;
+        FVirtualTextures[H].PhysicalTexture := AssignedTex;
       end;
 
-  { 5. Hoist Pre-Pass Resource State Transitions }
+  { 5. Hoist Pre-Pass Resource State Transitions & Physical Memory Aliasing Barriers }
   SetLength(TrackedTexState, Length(FVirtualTextures));
   for H := 0 to Length(FVirtualTextures) - 1 do
     TrackedTexState[H] := FVirtualTextures[H].InitialState;
 
   SetLength(PoolTexState, Length(FTransientPool));
+  SetLength(SlotActiveTex, Length(FTransientPool));
   for SlotIdx := 0 to Length(FTransientPool) - 1 do
-    if FTransientPool[SlotIdx].Texture <> nil then
+  begin
+    SlotActiveTex[SlotIdx] := FTransientPool[SlotIdx].LastActiveTexture;
+    if SlotActiveTex[SlotIdx] <> nil then
+      PoolTexState[SlotIdx] := SlotActiveTex[SlotIdx].CurrentState
+    else if FTransientPool[SlotIdx].Texture <> nil then
       PoolTexState[SlotIdx] := FTransientPool[SlotIdx].Texture.CurrentState
     else
       PoolTexState[SlotIdx] := rsUndefined;
+  end;
 
   for OrderIdx := 0 to Length(FCompiledPasses) - 1 do
   begin
@@ -2529,12 +2734,23 @@ begin
       if (H >= 0) and (H < Length(FVirtualTextures)) then
       begin
         SlotIdx := FVirtualTextures[H].PoolSlotIndex;
+        DidAliasSwitch := False;
+        PrevActiveTex := nil;
         if (not FVirtualTextures[H].IsImported) and (SlotIdx >= 0) then
-          CurState := PoolTexState[SlotIdx]
-        else
+        begin
+          AssignedTex := FVirtualTextures[H].PhysicalTexture;
+          if (SlotActiveTex[SlotIdx] <> nil) and (SlotActiveTex[SlotIdx] <> AssignedTex) then
+          begin
+            DidAliasSwitch := True;
+            PrevActiveTex := SlotActiveTex[SlotIdx];
+            CurState := rsUndefined;
+          end else
+            CurState := PoolTexState[SlotIdx];
+          SlotActiveTex[SlotIdx] := AssignedTex;
+        end else
           CurState := TrackedTexState[H];
 
-        if CurState <> NeededState then
+        if DidAliasSwitch or (CurState <> NeededState) then
         begin
           AlreadyHasBarrier := False;
           for J := 0 to Length(Pass.FPrePassBarriers) - 1 do
@@ -2547,10 +2763,15 @@ begin
           begin
             BarrierIdx := Length(Pass.FPrePassBarriers);
             SetLength(Pass.FPrePassBarriers, BarrierIdx + 1);
+            FillChar(Pass.FPrePassBarriers[BarrierIdx], SizeOf(TRHIRenderGraphTextureBarrier), 0);
             Pass.FPrePassBarriers[BarrierIdx].TextureHandle := H;
+            Pass.FPrePassBarriers[BarrierIdx].PreviousAliasedTexture := PrevActiveTex;
+            Pass.FPrePassBarriers[BarrierIdx].IsAliasingHandoff := DidAliasSwitch;
             Pass.FPrePassBarriers[BarrierIdx].BeforeState := CurState;
             Pass.FPrePassBarriers[BarrierIdx].AfterState := NeededState;
             Inc(FEmittedBarrierCount);
+            if DidAliasSwitch then
+              Inc(FAliasingBarrierCount);
           end;
           TrackedTexState[H] := NeededState;
           if (not FVirtualTextures[H].IsImported) and (SlotIdx >= 0) then
@@ -2567,18 +2788,36 @@ begin
       if (H >= 0) and (H < Length(FVirtualTextures)) then
       begin
         SlotIdx := FVirtualTextures[H].PoolSlotIndex;
+        DidAliasSwitch := False;
+        PrevActiveTex := nil;
         if (not FVirtualTextures[H].IsImported) and (SlotIdx >= 0) then
-          CurState := PoolTexState[SlotIdx]
-        else
+        begin
+          AssignedTex := FVirtualTextures[H].PhysicalTexture;
+          if (SlotActiveTex[SlotIdx] <> nil) and (SlotActiveTex[SlotIdx] <> AssignedTex) then
+          begin
+            DidAliasSwitch := True;
+            PrevActiveTex := SlotActiveTex[SlotIdx];
+            CurState := rsUndefined;
+          end else
+            CurState := PoolTexState[SlotIdx];
+          SlotActiveTex[SlotIdx] := AssignedTex;
+        end else
           CurState := TrackedTexState[H];
 
-        if CurState <> NeededState then
+        if DidAliasSwitch or (CurState <> NeededState) then
         begin
           AlreadyHasBarrier := False;
           for J := 0 to Length(Pass.FPrePassBarriers) - 1 do
             if Pass.FPrePassBarriers[J].TextureHandle = H then
             begin
               Pass.FPrePassBarriers[J].AfterState := NeededState;
+              if DidAliasSwitch then
+              begin
+                Pass.FPrePassBarriers[J].IsAliasingHandoff := True;
+                Pass.FPrePassBarriers[J].PreviousAliasedTexture := PrevActiveTex;
+                Pass.FPrePassBarriers[J].BeforeState := rsUndefined;
+                Inc(FAliasingBarrierCount);
+              end;
               AlreadyHasBarrier := True;
               Break;
             end;
@@ -2586,10 +2825,15 @@ begin
           begin
             BarrierIdx := Length(Pass.FPrePassBarriers);
             SetLength(Pass.FPrePassBarriers, BarrierIdx + 1);
+            FillChar(Pass.FPrePassBarriers[BarrierIdx], SizeOf(TRHIRenderGraphTextureBarrier), 0);
             Pass.FPrePassBarriers[BarrierIdx].TextureHandle := H;
+            Pass.FPrePassBarriers[BarrierIdx].PreviousAliasedTexture := PrevActiveTex;
+            Pass.FPrePassBarriers[BarrierIdx].IsAliasingHandoff := DidAliasSwitch;
             Pass.FPrePassBarriers[BarrierIdx].BeforeState := CurState;
             Pass.FPrePassBarriers[BarrierIdx].AfterState := NeededState;
             Inc(FEmittedBarrierCount);
+            if DidAliasSwitch then
+              Inc(FAliasingBarrierCount);
           end;
           TrackedTexState[H] := NeededState;
           if (not FVirtualTextures[H].IsImported) and (SlotIdx >= 0) then
@@ -2598,6 +2842,9 @@ begin
       end;
     end;
   end;
+
+  for SlotIdx := 0 to Length(FTransientPool) - 1 do
+    FTransientPool[SlotIdx].LastActiveTexture := SlotActiveTex[SlotIdx];
 
   { Check FinalState transitions for imported textures }
   for H := 0 to Length(FVirtualTextures) - 1 do
@@ -2632,13 +2879,22 @@ begin
   begin
     Pass := FCompiledPasses[OrderIdx];
 
-    { 1. Emit hoisted pre-pass texture barriers }
+    { 1. Emit hoisted pre-pass physical memory aliasing & layout transition barriers }
     if ACmd <> nil then
       for I := 0 to Length(Pass.FPrePassBarriers) - 1 do
       begin
         PhysTex := ResolvePhysicalTexture(Pass.FPrePassBarriers[I].TextureHandle);
         if PhysTex <> nil then
+        begin
+          if Pass.FPrePassBarriers[I].IsAliasingHandoff then
+          begin
+            ACmd.EmitAliasingBarrier(Pass.FPrePassBarriers[I].PreviousAliasedTexture, PhysTex);
+            { Per Vulkan spec Memory Aliasing rules, activating an aliased image discards
+              prior metadata and transitions from VK_IMAGE_LAYOUT_UNDEFINED }
+            PhysTex.CurrentState := rsUndefined;
+          end;
           ACmd.TransitionTexture(PhysTex, Pass.FPrePassBarriers[I].AfterState);
+        end;
       end;
 
     { 2. Automatically wrap graphics passes with attachments in BeginRendering/EndRendering }
