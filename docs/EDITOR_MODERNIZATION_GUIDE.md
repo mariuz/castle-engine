@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–328** across Horizons 1–7), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–329** across Horizons 1–7), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3645,6 +3645,29 @@ Swarm.UpdateRepresentationLods(Viewport.Camera.WorldTranslation);
 
 ---
 
+## 66BB. 3D Voxel SDF Cave, Overhang & Marching-Tetrahedra Studio (Phase 329)
+
+Castle Game Engine provides volumetric 3D Signed-Distance-Field (SDF) sculpting, C1 polynomial smooth CSG brushes, and crack-free 6-Kuhn Marching-Tetrahedra isosurface extraction supporting true walkthrough caves, ceiling overhangs, natural arches, and floating islands:
+
+1. **3D Voxel SDF Runtime (`src/scene/castlevoxelterrain.pas`)**:
+   - `TCastleVoxelVolume` evaluates ordered `TVoxelBrushOp` stacks (`SdfSphere3D`, `SdfCapsule3D`, `SdfRoundBox3D`, `SmoothSdfUnion`, `SmoothSdfSubtract`) and extracts `WorldRay`-collidable (`PreciseCollisions = True`) `csTransient` meshes with central-difference $+\nabla\phi$ smooth normals and triplanar UVs.
+2. **Voxel Cave Studio (`TVoxelStudioForm` & `TVoxelStudioHelper`)**:
+   - Open via the top-bar **`Voxel3D`** button, Hierarchy context menu, or **`Design -> 3D Voxel SDF Cave, Overhang & Marching-Tetrahedra Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+Cave := TVoxelStudioHelper.SpawnVoxelCaveDemo(Viewport, DesignOwner, vvpWalkthroughCaveTunnel);
+Cave.AddBrush(vbkCarveSphere, Vector3(3.2, 2.5, 0.0), TVector3.Zero, 2.30, 0.55, True);
+Cave.RebuildVoxelFieldAndMesh;
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Terrains](https://castle-engine.io/terrain) · [UE Modeling Mode & Voxel CSG](https://dev.epicgames.com/documentation/en-us/unreal-engine/modeling-mode-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — 3D Terrains & Caves (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3761,4 +3784,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolplaytestgauntlet.pas`](../tests/code/testcases/testtoolplaytestgauntlet.pas) (`TTestToolPlaytestGauntlet` — 2 tests)**: Verifies `TPlaytestGauntletRunner.SpawnMultiSystemSmokeSandbox` & `RunSmokeTest` (`40` fixed steps across Vehicles, Blend2D/Montages, EQS, Inventory/GAS, and Quartz) passing all `6 / 6` invariant gates with exact non-destructive world coordinate restoration and valid JUnit XML export, verifies `SpawnKillZTrapActor` ungrounded Kill-Z fallthrough failure detection (`<failure>` XML emission), and verifies `TCastleMcpServer` `cge_list_studios` (`46` studios) & `cge_audit_world_readiness` JSON-RPC 2.0 tools (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmotionmatching.pas`](../tests/code/testcases/testtoolmotionmatching.pas) (`TTestToolMotionMatching` — 2 tests)**: Verifies `PredictSpringTrajectoryXZ` linear & exponential spring integration, `WorldVecXZToCharacterLocal` coordinate mapping, exact half-life critically-damped `EvaluateInertializationDecay` (`0.50` at `t = HalfLifeSec`), `ComputeStrideWarpScale` speed ratio & `[0.65..1.35]` clamping, k-NN Pose Search matching (`Idle`, steady `RunForward` with `ContinuingPoseBias`, sudden `180°` reversal matching `PlantPivot180` + Inertialization trigger, and `StrafeRight`), and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmassentity.pas`](../tests/code/testcases/testtoolmassentity.pas) (`TTestToolMassEntity` — 2 tests)**: Verifies `TCastleMassEntityManager` `32x32` Dijkstra obstacle flow-field routing (`180` agents splitting cleanly around a `4.0m` obstacle circle with zero penetration and positive spatial-hash pairwise separation), `1,000`-entity SoA step throughput, 4-tier `UpdateRepresentationLods` (`High`/`Medium`/`Low`/`Culled` summing to `1,000`), and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolvoxelstudio.pas`](../tests/code/testcases/testtoolvoxelstudio.pas) (`TTestToolVoxelStudio` — 2 tests)**: Verifies `SdfSphere3D`, `SdfCapsule3D`, C1 polynomial `SmoothSdfUnion` / `SmoothSdfSubtract`, `WorldRay` ceiling overhang (`+Y`), floor (`-Y`), side wall (`+X`), and open Z-tunnel portal pass-through on `vvpWalkthroughCaveTunnel`, non-destructive arch brush toggling (`vvpNaturalStoneArchOverhang`), `vvpFloatingSkyIslandPillars`, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

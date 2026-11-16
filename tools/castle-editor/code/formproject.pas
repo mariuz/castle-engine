@@ -642,6 +642,7 @@ type
       MenuItemPlaytestGauntlet: TMenuItem;
       MenuItemMotionMatching: TMenuItem;
       MenuItemMassEntity: TMenuItem;
+      MenuItemVoxelStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -704,6 +705,7 @@ type
     procedure MenuItemPlaytestGauntletClick(Sender: TObject);
     procedure MenuItemMotionMatchingClick(Sender: TObject);
     procedure MenuItemMassEntityClick(Sender: TObject);
+    procedure MenuItemVoxelStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2538,6 +2540,11 @@ begin
   MenuItemMassEntity.Caption := 'MassEntity Data-Oriented SoA Crowd & Flow-Field Studio...';
   MenuItemMassEntity.OnClick := @MenuItemMassEntityClick;
   MenuItemDesign.Add(MenuItemMassEntity);
+
+  MenuItemVoxelStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemVoxelStudio.Caption := '3D Voxel SDF Cave, Overhang & Marching-Tetrahedra Studio...';
+  MenuItemVoxelStudio.OnClick := @MenuItemVoxelStudioClick;
+  MenuItemDesign.Add(MenuItemVoxelStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5766,6 +5773,12 @@ procedure TProjectForm.MenuItemMassEntityClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowMassEntityDialog;
+end;
+
+procedure TProjectForm.MenuItemVoxelStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowVoxelStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

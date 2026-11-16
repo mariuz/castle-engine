@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="129">
+    <Units Count="131">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -727,6 +727,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormMassEntity"/>
       </Unit128>
+      <Unit129>
+        <Filename Value="../common-code/toolvoxelstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolVoxelStudio"/>
+      </Unit129>
+      <Unit130>
+        <Filename Value="code/formvoxelstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormVoxelStudio"/>
+      </Unit130>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

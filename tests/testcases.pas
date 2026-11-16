@@ -155,6 +155,7 @@ uses
   TestToolPlaytestGauntlet,
   TestToolMotionMatching,
   TestToolMassEntity,
+  TestToolVoxelStudio,
   TestCastleVulkanRHI;
 
 implementation
