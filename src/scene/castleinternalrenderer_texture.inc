@@ -3350,7 +3350,7 @@ begin
           and sunny_street demos have noise on walls. With offset, VSM is perfect. }
         SavedPolygonOffset := RenderContext.PolygonOffset;
         RenderContext.PolygonOffsetEnable(TextureNode.FdScale.Value, TextureNode.FdBias.Value);
-      end else
+      end;
       if (RHIDevice <> nil) and (ActiveCommandList <> nil) then
         ActiveCommandList.SetDepthBias(TextureNode.FdBias.Value, TextureNode.FdScale.Value);
 
@@ -3361,7 +3361,7 @@ begin
         RenderContext.PolygonOffset := SavedPolygonOffset;
         RenderContext.ProjectionMatrix := SavedProjectionMatrix;
         RenderContext.Viewport := SavedViewport;
-      end else
+      end;
       if (RHIDevice <> nil) and (ActiveCommandList <> nil) then
         ActiveCommandList.SetDepthBias(0, 0);
 

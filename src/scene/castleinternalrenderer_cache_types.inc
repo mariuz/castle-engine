@@ -135,6 +135,7 @@
     FRHIAttribBuffer: TRHIBuffer;
     FRHIIndexBuffer: TRHIBuffer;
     FRHIJointBuffer: TRHIBuffer;
+    FRHISkinningUBOBuffer: TRHIBuffer;
     FRHIMaterialBuffer: TRHIBuffer;
     FRHIMaterialDescriptorLayout: TRHIDescriptorSetLayout;
     FRHIMaterialDescriptorSet: TRHIDescriptorSet;
@@ -338,6 +339,7 @@
     property RHIAttributeBuffer: TRHIBuffer read FRHIAttribBuffer;
     property RHIIndexBuffer: TRHIBuffer read FRHIIndexBuffer;
     property RHIJointBuffer: TRHIBuffer read FRHIJointBuffer;
+    property RHISkinningUBOBuffer: TRHIBuffer read FRHISkinningUBOBuffer;
     property RHIMaterialBuffer: TRHIBuffer read FRHIMaterialBuffer;
     property RHIMaterialDescriptorLayout: TRHIDescriptorSetLayout read FRHIMaterialDescriptorLayout;
     property RHIMaterialDescriptorSet: TRHIDescriptorSet read FRHIMaterialDescriptorSet;
@@ -492,6 +494,7 @@ begin
   FreeAndNil(FRHIAttribBuffer);
   FreeAndNil(FRHIIndexBuffer);
   FreeAndNil(FRHIJointBuffer);
+  FreeAndNil(FRHISkinningUBOBuffer);
   FreeAndNil(FRHIUserEffectBuffer);
   FreeAndNil(FRHIMaterialBuffer);
   FreeAndNil(FRHIMaterialDescriptorSet);
@@ -529,6 +532,7 @@ begin
     FreeAndNil(FRHIAttribBuffer);
     FreeAndNil(FRHIIndexBuffer);
     FreeAndNil(FRHIJointBuffer);
+    FreeAndNil(FRHISkinningUBOBuffer);
     FreeAndNil(FRHIUserEffectBuffer);
     FillChar(FRHIUserEffectTextures, SizeOf(FRHIUserEffectTextures), 0);
     FillChar(FRHIUserEffectSamplers, SizeOf(FRHIUserEffectSamplers), 0);
@@ -627,6 +631,10 @@ procedure TShapeCache.UploadJointMatrices(const JointMatrices: Pointer; const Co
 var
   BufDesc: TRHIBufferDesc;
   DataSize: PtrUInt;
+  {$ifndef WASI}
+  SkinBlock: PCastleSkinningUniformBlock;
+  ClampedCount: Cardinal;
+  {$endif}
 begin
   if (RHIDevice = nil) or (Count = 0) then
     Exit;
@@ -638,9 +646,39 @@ begin
   else
   begin
     FreeAndNil(FRHIJointBuffer);
-    BufDesc := TRHIBufferDesc.Create(DataSize, [buUniform], muCpuToGpu);
+    BufDesc := TRHIBufferDesc.Create(DataSize, [buUniform], muCpuToGpu, 'CastleJointMatricesUBO');
     FRHIJointBuffer := RHIDevice.CreateBuffer(BufDesc, JointMatrices);
   end;
+  {$ifndef WASI}
+  if (RHIDevice is TVulkanRHIDevice) and (TVulkanRHIDevice(RHIDevice).Handle <> nil) then
+  begin
+    New(SkinBlock);
+    try
+      FillChar(SkinBlock^, SizeOf(TCastleSkinningUniformBlock), 0);
+      ClampedCount := Min(Count, Cardinal(CASTLE_MAX_BONE_MATRICES));
+      if (JointMatrices <> nil) and (ClampedCount > 0) then
+        Move(JointMatrices^, SkinBlock^.JointMatrices[0], ClampedCount * SizeOf(TMatrix4));
+      SkinBlock^.JointCount := ClampedCount;
+      if (FRHISkinningUBOBuffer <> nil) and
+         (FRHISkinningUBOBuffer.Desc.Size = SizeOf(TCastleSkinningUniformBlock)) then
+        FRHISkinningUBOBuffer.UploadData(SkinBlock^, SizeOf(TCastleSkinningUniformBlock))
+      else
+      begin
+        FreeAndNil(FRHISkinningUBOBuffer);
+        BufDesc := TRHIBufferDesc.Create(SizeOf(TCastleSkinningUniformBlock),
+          [buUniform], muCpuToGpu, 'CastleSkinningBlockUBO');
+        FRHISkinningUBOBuffer := RHIDevice.CreateBuffer(BufDesc, SkinBlock);
+      end;
+    finally
+      Dispose(SkinBlock);
+    end;
+    if (FRHISkinningDescriptorSet <> nil) and (FRHISkinningUBOBuffer <> nil) then
+    begin
+      FRHISkinningDescriptorSet.BindUniformBuffer(0, FRHISkinningUBOBuffer);
+      FRHISkinningDescriptorSet.Update;
+    end;
+  end else
+  {$endif}
   if (FRHISkinningDescriptorSet <> nil) and (FRHIJointBuffer <> nil) then
   begin
     FRHISkinningDescriptorSet.BindUniformBuffer(0, FRHIJointBuffer);
@@ -732,7 +770,20 @@ begin
     FRHIMaterialDescriptorLayout := RHIDevice.CreateDescriptorSetLayout(Bindings);
   end;
   if (FRHIMaterialDescriptorSet = nil) and (FRHIMaterialDescriptorLayout <> nil) then
+  begin
     FRHIMaterialDescriptorSet := RHIDevice.CreateDescriptorSet(FRHIMaterialDescriptorLayout);
+    {$ifndef WASI}
+    if (FRHIMaterialDescriptorSet <> nil) and
+       (RHIDevice is TVulkanRHIDevice) and (TVulkanRHIDevice(RHIDevice).Handle <> nil) then
+    begin
+      FRHIMaterialDescriptorSet.BindTexture(1, TVulkanRHIDevice(RHIDevice).GetDefaultWhiteTexture, nil);
+      FRHIMaterialDescriptorSet.BindTexture(2, TVulkanRHIDevice(RHIDevice).GetDefaultFlatNormalTexture, nil);
+      FRHIMaterialDescriptorSet.BindTexture(3, TVulkanRHIDevice(RHIDevice).GetDefaultWhiteTexture, nil);
+      FRHIMaterialDescriptorSet.BindTexture(4, TVulkanRHIDevice(RHIDevice).GetDefaultWhiteTexture, nil);
+      FRHIMaterialDescriptorSet.BindTexture(5, TVulkanRHIDevice(RHIDevice).GetDefaultWhiteTexture, nil);
+    end;
+    {$endif}
+  end;
   if (FRHIMaterialDescriptorSet <> nil) and (FRHIMaterialBuffer <> nil) then
   begin
     FRHIMaterialDescriptorSet.BindUniformBuffer(0, FRHIMaterialBuffer);
@@ -752,6 +803,9 @@ procedure TShapeCache.BindMaterialTexturesToDescriptorSet(
 var
   AnyBound: Boolean;
   NewBaseDim: TRHITextureDimension;
+  {$ifndef WASI}
+  RealVkDev: TVulkanRHIDevice;
+  {$endif}
 begin
   if ABaseColorTex <> nil then
     NewBaseDim := ABaseColorTex.Desc.Dimension
@@ -770,32 +824,58 @@ begin
   FRHIOcclusionSampler := AOcclusionSampler;
   if FRHIMaterialDescriptorSet = nil then
     Exit;
+  {$ifndef WASI}
+  if (RHIDevice is TVulkanRHIDevice) and (TVulkanRHIDevice(RHIDevice).Handle <> nil) then
+    RealVkDev := TVulkanRHIDevice(RHIDevice)
+  else
+    RealVkDev := nil;
+  {$endif}
   AnyBound := False;
   if ABaseColorTex <> nil then
   begin
     FRHIMaterialDescriptorSet.BindTexture(1, ABaseColorTex, ABaseColorSampler);
     AnyBound := True;
-  end;
+  end {$ifndef WASI} else if RealVkDev <> nil then
+  begin
+    FRHIMaterialDescriptorSet.BindTexture(1, RealVkDev.GetDefaultWhiteTexture, nil);
+    AnyBound := True;
+  end {$endif};
   if ANormalTex <> nil then
   begin
     FRHIMaterialDescriptorSet.BindTexture(2, ANormalTex, ANormalSampler);
     AnyBound := True;
-  end;
+  end {$ifndef WASI} else if RealVkDev <> nil then
+  begin
+    FRHIMaterialDescriptorSet.BindTexture(2, RealVkDev.GetDefaultFlatNormalTexture, nil);
+    AnyBound := True;
+  end {$endif};
   if AMetallicRoughnessTex <> nil then
   begin
     FRHIMaterialDescriptorSet.BindTexture(3, AMetallicRoughnessTex, AMetallicRoughnessSampler);
     AnyBound := True;
-  end;
+  end {$ifndef WASI} else if RealVkDev <> nil then
+  begin
+    FRHIMaterialDescriptorSet.BindTexture(3, RealVkDev.GetDefaultWhiteTexture, nil);
+    AnyBound := True;
+  end {$endif};
   if AEmissiveTex <> nil then
   begin
     FRHIMaterialDescriptorSet.BindTexture(4, AEmissiveTex, AEmissiveSampler);
     AnyBound := True;
-  end;
+  end {$ifndef WASI} else if RealVkDev <> nil then
+  begin
+    FRHIMaterialDescriptorSet.BindTexture(4, RealVkDev.GetDefaultWhiteTexture, nil);
+    AnyBound := True;
+  end {$endif};
   if AOcclusionTex <> nil then
   begin
     FRHIMaterialDescriptorSet.BindTexture(5, AOcclusionTex, AOcclusionSampler);
     AnyBound := True;
-  end;
+  end {$ifndef WASI} else if RealVkDev <> nil then
+  begin
+    FRHIMaterialDescriptorSet.BindTexture(5, RealVkDev.GetDefaultWhiteTexture, nil);
+    AnyBound := True;
+  end {$endif};
   if AnyBound then
     FRHIMaterialDescriptorSet.Update;
 end;

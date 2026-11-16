@@ -115,6 +115,7 @@
         LightsBlock: TCastleLightsUniformBlock;
         ShadowMapTextures: array[0..3] of TRHITexture;
         ShadowMapSamplers: array[0..3] of TRHISampler;
+        ShadowMapUniqueIds: array[0..3] of QWord;
         SceneBuffer: TRHIBuffer;
         LightsBuffer: TRHIBuffer;
         DescriptorSet: TRHIDescriptorSet;
@@ -720,6 +721,7 @@ var
   SceneBufDesc, LightsBufDesc: TRHIBufferDesc;
   DesiredSceneBlock: TCastleSceneUniformBlock;
   CurrentLightsBlock: TCastleLightsUniformBlock;
+  DesiredShadowIds: array[0..3] of QWord;
   FoundSlot, SlotIdx, I: Integer;
 begin
   if RHIDevice = nil then
@@ -786,13 +788,20 @@ begin
     FSceneUniformBlock.LightCount := 0;
   end;
 
+  for I := 0 to High(FRHIShadowMapTextures) do
+    if FRHIShadowMapTextures[I] <> nil then
+      DesiredShadowIds[I] := FRHIShadowMapTextures[I].UniqueId
+    else
+      DesiredShadowIds[I] := 0;
+
   FoundSlot := -1;
   for I := 0 to High(FRHISceneSlots) do
   begin
     if CompareMem(@FRHISceneSlots[I].SceneBlock, @DesiredSceneBlock, SizeOf(TCastleSceneUniformBlock)) and
        CompareMem(@FRHISceneSlots[I].LightsBlock, @CurrentLightsBlock, SizeOf(TCastleLightsUniformBlock)) and
        CompareMem(@FRHISceneSlots[I].ShadowMapTextures[0], @FRHIShadowMapTextures[0], SizeOf(FRHIShadowMapTextures)) and
-       CompareMem(@FRHISceneSlots[I].ShadowMapSamplers[0], @FRHIShadowMapSamplers[0], SizeOf(FRHIShadowMapSamplers)) then
+       CompareMem(@FRHISceneSlots[I].ShadowMapSamplers[0], @FRHIShadowMapSamplers[0], SizeOf(FRHIShadowMapSamplers)) and
+       CompareMem(@FRHISceneSlots[I].ShadowMapUniqueIds[0], @DesiredShadowIds[0], SizeOf(DesiredShadowIds)) then
     begin
       FoundSlot := I;
       Break;
@@ -834,6 +843,7 @@ begin
   begin
     FRHISceneSlots[SlotIdx].ShadowMapTextures[I] := FRHIShadowMapTextures[I];
     FRHISceneSlots[SlotIdx].ShadowMapSamplers[I] := FRHIShadowMapSamplers[I];
+    FRHISceneSlots[SlotIdx].ShadowMapUniqueIds[I] := DesiredShadowIds[I];
   end;
 
   if FRHISceneSlots[SlotIdx].DescriptorSet <> nil then
@@ -845,7 +855,14 @@ begin
     for I := 0 to High(FRHIShadowMapTextures) do
       if FRHIShadowMapTextures[I] <> nil then
         FRHISceneSlots[SlotIdx].DescriptorSet.BindTexture(2 + Cardinal(I),
-          FRHIShadowMapTextures[I], FRHIShadowMapSamplers[I]);
+          FRHIShadowMapTextures[I], FRHIShadowMapSamplers[I])
+      {$ifndef WASI}
+      else if (I = 0) and (RHIDevice is TVulkanRHIDevice) and
+              (TVulkanRHIDevice(RHIDevice).Handle <> nil) then
+        FRHISceneSlots[SlotIdx].DescriptorSet.BindTexture(2,
+          TVulkanRHIDevice(RHIDevice).GetDefaultShadowDepthTexture,
+          TVulkanRHIDevice(RHIDevice).GetDefaultShadowSampler)
+      {$endif};
     FRHISceneSlots[SlotIdx].DescriptorSet.Update;
   end;
 
@@ -1213,6 +1230,14 @@ begin
   begin
     Set1Layout := AShape.Cache.RHIMaterialDescriptorLayout;
     Set2Layout := AShape.Cache.RHISkinningDescriptorLayout;
+    {$ifndef WASI}
+    if (Set2Layout <> nil) and (Set1Layout = nil) and
+       (RHIDevice is TVulkanRHIDevice) and (TVulkanRHIDevice(RHIDevice).Handle <> nil) then
+    begin
+      AShape.Cache.UploadMaterialBlock(AShape.Cache.RHIMaterialBlock);
+      Set1Layout := AShape.Cache.RHIMaterialDescriptorLayout;
+    end;
+    {$endif}
   end;
 
   if Set2Layout <> nil then
@@ -1716,6 +1741,11 @@ procedure TRenderer.RenderShape(const Shape: TX3DRendererShape;
 var
   Shader: TShader;
 begin
+  FillChar(FRHIShadowMapTextures, SizeOf(FRHIShadowMapTextures), 0);
+  FillChar(FRHIShadowMapSamplers, SizeOf(FRHIShadowMapSamplers), 0);
+  FRHIShadowMap0Texture := nil;
+  FRHIShadowMap0Sampler := nil;
+
   InitializeFromRenderOptions;
 
   if RenderContext <> nil then

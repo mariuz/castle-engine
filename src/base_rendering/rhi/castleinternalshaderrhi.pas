@@ -2052,7 +2052,7 @@ begin
         'CASTLE_LOCATION(3) in vec2 castle_MultiTexCoord1;' + NL +
         'CASTLE_LOCATION(4) in vec4 castle_ColorPerVertex;' + NL +
         'CASTLE_LOCATION(5) in vec4 castle_Tangent;' + NL +
-        'CASTLE_LOCATION(6) in uvec4 castle_Joints0;' + NL +
+        'CASTLE_LOCATION(6) in vec4 castle_Joints0;' + NL +
         'CASTLE_LOCATION(7) in vec4 castle_Weights0;' + NL +
         NL +
         '/* --- Vertex-to-Fragment Varyings --- */' + NL +
@@ -2939,10 +2939,10 @@ begin
     Body := Body +
       '  if ((CastleSkinning.u_JointCount > 0u) && (castle_ObjectSkinningMode != 0)) {' + NL +
       '    mat4 skinMat =' + NL +
-      '      castle_Weights0.x * CastleSkinning.u_JointMatrices[castle_Joints0.x] +' + NL +
-      '      castle_Weights0.y * CastleSkinning.u_JointMatrices[castle_Joints0.y] +' + NL +
-      '      castle_Weights0.z * CastleSkinning.u_JointMatrices[castle_Joints0.z] +' + NL +
-      '      castle_Weights0.w * CastleSkinning.u_JointMatrices[castle_Joints0.w];' + NL +
+      '      castle_Weights0.x * CastleSkinning.u_JointMatrices[uint(castle_Joints0.x + 0.5)] +' + NL +
+      '      castle_Weights0.y * CastleSkinning.u_JointMatrices[uint(castle_Joints0.y + 0.5)] +' + NL +
+      '      castle_Weights0.z * CastleSkinning.u_JointMatrices[uint(castle_Joints0.z + 0.5)] +' + NL +
+      '      castle_Weights0.w * CastleSkinning.u_JointMatrices[uint(castle_Joints0.w + 0.5)];' + NL +
       '    if (castle_ObjectSkinningMode == 2) {' + NL +
       '      /* Volume-preserving rotational orthonormalization (Dual-Quaternion mode) */' + NL +
       '      vec3 r0 = normalize(skinMat[0].xyz);' + NL +

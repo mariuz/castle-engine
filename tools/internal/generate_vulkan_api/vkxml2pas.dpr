@@ -1028,7 +1028,7 @@ const
     'VK_FENCE_CREATE_SIGNALED_BIT'
   );
 
-  OrderedEnums3: array[0..164] of String = (
+  OrderedEnums3: array[0..193] of String = (
     'VK_INDEX_TYPE_UINT16',
     'VK_INDEX_TYPE_UINT32',
     'VK_IMAGE_ASPECT_COLOR_BIT',
@@ -1206,7 +1206,37 @@ const
     'VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT',
     'VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT',
     'VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT',
-    'VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT'
+    'VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT',
+    // Phase 113: VkObjectType constants for VK_EXT_debug_utils Object Naming
+    'VK_OBJECT_TYPE_UNKNOWN',
+    'VK_OBJECT_TYPE_INSTANCE',
+    'VK_OBJECT_TYPE_PHYSICAL_DEVICE',
+    'VK_OBJECT_TYPE_DEVICE',
+    'VK_OBJECT_TYPE_QUEUE',
+    'VK_OBJECT_TYPE_SEMAPHORE',
+    'VK_OBJECT_TYPE_COMMAND_BUFFER',
+    'VK_OBJECT_TYPE_FENCE',
+    'VK_OBJECT_TYPE_DEVICE_MEMORY',
+    'VK_OBJECT_TYPE_BUFFER',
+    'VK_OBJECT_TYPE_IMAGE',
+    'VK_OBJECT_TYPE_EVENT',
+    'VK_OBJECT_TYPE_QUERY_POOL',
+    'VK_OBJECT_TYPE_BUFFER_VIEW',
+    'VK_OBJECT_TYPE_IMAGE_VIEW',
+    'VK_OBJECT_TYPE_SHADER_MODULE',
+    'VK_OBJECT_TYPE_PIPELINE_CACHE',
+    'VK_OBJECT_TYPE_PIPELINE_LAYOUT',
+    'VK_OBJECT_TYPE_RENDER_PASS',
+    'VK_OBJECT_TYPE_PIPELINE',
+    'VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT',
+    'VK_OBJECT_TYPE_SAMPLER',
+    'VK_OBJECT_TYPE_DESCRIPTOR_POOL',
+    'VK_OBJECT_TYPE_DESCRIPTOR_SET',
+    'VK_OBJECT_TYPE_FRAMEBUFFER',
+    'VK_OBJECT_TYPE_COMMAND_POOL',
+    'VK_OBJECT_TYPE_SURFACE_KHR',
+    'VK_OBJECT_TYPE_SWAPCHAIN_KHR',
+    'VK_OBJECT_TYPE_DEBUG_UTILS_MESSENGER_EXT'
   );
 
   OrderedStructs: array[0..77] of String = (
@@ -1442,12 +1472,17 @@ const
     'vkCmdDrawIndirect'
   );
 
-  OrderedCommands2: array[0..41] of String = (
+  OrderedCommands2: array[0..46] of String = (
     'vkEnumerateInstanceVersion',
     'vkEnumerateInstanceLayerProperties',
     'vkCreateDebugUtilsMessengerEXT',
     'vkDestroyDebugUtilsMessengerEXT',
     'vkSubmitDebugUtilsMessageEXT',
+    'vkSetDebugUtilsObjectNameEXT',
+    'vkCmdInsertDebugUtilsLabelEXT',
+    'vkQueueBeginDebugUtilsLabelEXT',
+    'vkQueueEndDebugUtilsLabelEXT',
+    'vkQueueInsertDebugUtilsLabelEXT',
     'vkGetPhysicalDeviceFeatures2',
     'vkGetPhysicalDeviceProperties2',
     'vkCmdDrawIndexedIndirect',
@@ -1643,6 +1678,7 @@ begin
     L.Add('  VkDebugUtilsMessageTypeFlagsEXT = VkFlags;');
     L.Add('  VkDebugUtilsMessengerCreateFlagsEXT = VkFlags;');
     L.Add('  VkDebugUtilsMessengerCallbackDataFlagsEXT = VkFlags;');
+    L.Add('  VkObjectType = Integer;');
     L.Add('');
     L.Add('  { Pointers to primitive types }');
     L.Add('  PCardinal = ^Cardinal;');

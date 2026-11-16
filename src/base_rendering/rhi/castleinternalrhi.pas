@@ -592,6 +592,7 @@ type
   private
     FDevice: TRHIDevice;
     FDebugName: String;
+    FUniqueId: QWord;
   protected
     { Releases backend GPU handles owned by this resource while FDevice is still live.
       Invoked either from Destroy or by TRHIDevice.ReleaseRemainingDeviceResources
@@ -602,6 +603,7 @@ type
     destructor Destroy; override;
     property Device: TRHIDevice read FDevice;
     property DebugName: String read FDebugName;
+    property UniqueId: QWord read FUniqueId;
   end;
 
   { GPU Buffer (Vertex, Index, Uniform, Storage, or Staging). }
@@ -834,9 +836,10 @@ type
     procedure ExecuteSecondaryCommandsInPass(
       const SecondaryCommandLists: array of TRHICommandList); virtual;
 
-    { Debug Markers (RenderDoc / NSight integration) }
+    { Debug Markers (RenderDoc / NSight / VK_EXT_debug_utils integration) }
     procedure PushDebugGroup(const LabelName: String; const Color: TCastleColor); virtual; abstract;
     procedure PopDebugGroup; virtual; abstract;
+    procedure InsertDebugMarker(const LabelName: String; const Color: TCastleColor); virtual;
   end;
 
   { -------------------------------------------------------------------------- }
@@ -1100,6 +1103,7 @@ type
     FMemoryAliasedTextureCount: Integer;
     FAliasedMemorySavedBytes: UInt64;
     FExecutionCount: Cardinal;
+    FDebugScopesEmittedCount: Cardinal;
     class function AreTextureDescsCompatibleForAliasing(
       const A, B: TRHITextureDesc): Boolean; static;
     function GetPassCount: Integer;
@@ -1166,6 +1170,7 @@ type
     property AliasedMemorySavedBytes: UInt64 read FAliasedMemorySavedBytes;
     property AliasingBarrierCount: Integer read FAliasingBarrierCount;
     property ExecutionCount: Cardinal read FExecutionCount;
+    property DebugScopesEmittedCount: Cardinal read FDebugScopesEmittedCount;
   end;
 
 const
@@ -1842,11 +1847,15 @@ end;
 
 { TRHIResource }
 
+var
+  GlobalRHIResourceSerial: Int64 = 0;
+
 constructor TRHIResource.Create(const ADevice: TRHIDevice; const ADebugName: String);
 begin
   inherited Create;
   FDevice := ADevice;
   FDebugName := ADebugName;
+  FUniqueId := QWord(InterlockedIncrement64(GlobalRHIResourceSerial));
   if (FDevice <> nil) and (FDevice.FResources <> nil) then
     FDevice.FResources.Add(Self);
 end;
@@ -2146,6 +2155,12 @@ procedure TRHICommandList.ExecuteSecondaryCommandsInPass(
   const SecondaryCommandLists: array of TRHICommandList);
 begin
   ExecuteCommands(SecondaryCommandLists);
+end;
+
+procedure TRHICommandList.InsertDebugMarker(const LabelName: String; const Color: TCastleColor);
+begin
+  { Subclasses override to emit single-point GPU debug markers (e.g. vkCmdInsertDebugUtilsLabelEXT). }
+  if (LabelName = '') and (Color.X < -1e30) then ;
 end;
 
 { TRHIDevice }
@@ -2451,6 +2466,7 @@ begin
   FAliasedTextureSavingsCount := 0;
   FMemoryAliasedTextureCount := 0;
   FAliasedMemorySavedBytes := 0;
+  FDebugScopesEmittedCount := 0;
 end;
 
 procedure TRHIRenderGraph.ReleaseTransientPool;
@@ -3116,6 +3132,7 @@ var
   RenderInfo: TRHIRenderingInfo;
   TargetW, TargetH: Cardinal;
   HasAttachments: Boolean;
+  ScopeColor: TCastleColor;
 begin
   if not FIsCompiled then
     Compile;
@@ -3124,87 +3141,103 @@ begin
   begin
     Pass := FCompiledPasses[OrderIdx];
 
-    { 1. Emit hoisted pre-pass physical memory aliasing & layout transition barriers }
     if ACmd <> nil then
-      for I := 0 to Length(Pass.FPrePassBarriers) - 1 do
-      begin
-        PhysTex := ResolvePhysicalTexture(Pass.FPrePassBarriers[I].TextureHandle);
-        if PhysTex <> nil then
-        begin
-          if Pass.FPrePassBarriers[I].IsAliasingHandoff then
-          begin
-            ACmd.EmitAliasingBarrier(Pass.FPrePassBarriers[I].PreviousAliasedTexture, PhysTex);
-            { Per Vulkan spec Memory Aliasing rules, activating an aliased image discards
-              prior metadata and transitions from VK_IMAGE_LAYOUT_UNDEFINED }
-            PhysTex.CurrentState := rsUndefined;
-          end;
-          ACmd.TransitionTexture(PhysTex, Pass.FPrePassBarriers[I].AfterState);
-        end;
-      end;
-
-    { 2. Automatically wrap graphics passes with attachments in BeginRendering/EndRendering }
-    HasAttachments := False;
-    if (ACmd <> nil) and (Pass.FPassType = rgptGraphics) and (Length(Pass.FTextureWrites) > 0) then
     begin
-      RenderInfo := Default(TRHIRenderingInfo);
-      ColorCount := 0;
-      TargetW := 0;
-      TargetH := 0;
-
-      for I := 0 to Length(Pass.FTextureWrites) - 1 do
-      begin
-        PhysTex := ResolvePhysicalTexture(Pass.FTextureWrites[I].Handle);
-        if (PhysTex <> nil) and (TargetW = 0) then
-        begin
-          TargetW := PhysTex.Desc.Width;
-          TargetH := PhysTex.Desc.Height;
-        end;
-
-        if Pass.FTextureWrites[I].IsColorAttachment then
-        begin
-          SetLength(RenderInfo.ColorAttachments, ColorCount + 1);
-          FillChar(RenderInfo.ColorAttachments[ColorCount], SizeOf(TRHIRenderingAttachment), 0);
-          RenderInfo.ColorAttachments[ColorCount].Texture := PhysTex;
-          RenderInfo.ColorAttachments[ColorCount].LoadOp := Pass.FTextureWrites[I].LoadOp;
-          RenderInfo.ColorAttachments[ColorCount].StoreOp := Pass.FTextureWrites[I].StoreOp;
-          RenderInfo.ColorAttachments[ColorCount].ClearColor := Pass.FTextureWrites[I].ClearColor;
-          Inc(ColorCount);
-          HasAttachments := True;
-        end else
-        if Pass.FTextureWrites[I].IsDepthAttachment then
-        begin
-          RenderInfo.HasDepthAttachment := True;
-          FillChar(RenderInfo.DepthAttachment, SizeOf(TRHIRenderingAttachment), 0);
-          RenderInfo.DepthAttachment.Texture := PhysTex;
-          RenderInfo.DepthAttachment.LoadOp := Pass.FTextureWrites[I].LoadOp;
-          RenderInfo.DepthAttachment.StoreOp := Pass.FTextureWrites[I].StoreOp;
-          RenderInfo.DepthAttachment.ClearDepth := Pass.FTextureWrites[I].ClearDepth;
-          HasAttachments := True;
-        end;
+      case Pass.FPassType of
+        rgptGraphics: ScopeColor := Vector4(0.22, 0.62, 0.96, 1.0);
+        rgptCompute:  ScopeColor := Vector4(0.95, 0.65, 0.18, 1.0);
+      else
+        ScopeColor := Vector4(0.22, 0.82, 0.48, 1.0);
       end;
-
-      if HasAttachments then
-      begin
-        if (TargetW = 0) or (TargetH = 0) then
-        begin
-          TargetW := 1;
-          TargetH := 1;
-        end;
-        RenderInfo.RenderArea := Rectangle(0, 0, TargetW, TargetH);
-        ACmd.BeginRendering(RenderInfo);
-        ACmd.SetViewport(FloatRectangle(0, 0, TargetW, TargetH));
-        ACmd.SetScissor(RenderInfo.RenderArea);
-      end;
+      ACmd.PushDebugGroup(Pass.FName, ScopeColor);
+      Inc(FDebugScopesEmittedCount);
     end;
+    try
+      { 1. Emit hoisted pre-pass physical memory aliasing & layout transition barriers }
+      if ACmd <> nil then
+        for I := 0 to Length(Pass.FPrePassBarriers) - 1 do
+        begin
+          PhysTex := ResolvePhysicalTexture(Pass.FPrePassBarriers[I].TextureHandle);
+          if PhysTex <> nil then
+          begin
+            if Pass.FPrePassBarriers[I].IsAliasingHandoff then
+            begin
+              ACmd.EmitAliasingBarrier(Pass.FPrePassBarriers[I].PreviousAliasedTexture, PhysTex);
+              { Per Vulkan spec Memory Aliasing rules, activating an aliased image discards
+                prior metadata and transitions from VK_IMAGE_LAYOUT_UNDEFINED }
+              PhysTex.CurrentState := rsUndefined;
+            end;
+            ACmd.TransitionTexture(PhysTex, Pass.FPrePassBarriers[I].AfterState);
+          end;
+        end;
 
-    { 3. Execute pass callback }
-    if Assigned(Pass.FOnExecute) then
-      Pass.FOnExecute(Self, Pass, ACmd);
-    if Assigned(Pass.FOnExecuteProc) then
-      Pass.FOnExecuteProc(Self, Pass, ACmd);
+      { 2. Automatically wrap graphics passes with attachments in BeginRendering/EndRendering }
+      HasAttachments := False;
+      if (ACmd <> nil) and (Pass.FPassType = rgptGraphics) and (Length(Pass.FTextureWrites) > 0) then
+      begin
+        RenderInfo := Default(TRHIRenderingInfo);
+        ColorCount := 0;
+        TargetW := 0;
+        TargetH := 0;
 
-    if (ACmd <> nil) and HasAttachments then
-      ACmd.EndRendering;
+        for I := 0 to Length(Pass.FTextureWrites) - 1 do
+        begin
+          PhysTex := ResolvePhysicalTexture(Pass.FTextureWrites[I].Handle);
+          if (PhysTex <> nil) and (TargetW = 0) then
+          begin
+            TargetW := PhysTex.Desc.Width;
+            TargetH := PhysTex.Desc.Height;
+          end;
+
+          if Pass.FTextureWrites[I].IsColorAttachment then
+          begin
+            SetLength(RenderInfo.ColorAttachments, ColorCount + 1);
+            FillChar(RenderInfo.ColorAttachments[ColorCount], SizeOf(TRHIRenderingAttachment), 0);
+            RenderInfo.ColorAttachments[ColorCount].Texture := PhysTex;
+            RenderInfo.ColorAttachments[ColorCount].LoadOp := Pass.FTextureWrites[I].LoadOp;
+            RenderInfo.ColorAttachments[ColorCount].StoreOp := Pass.FTextureWrites[I].StoreOp;
+            RenderInfo.ColorAttachments[ColorCount].ClearColor := Pass.FTextureWrites[I].ClearColor;
+            Inc(ColorCount);
+            HasAttachments := True;
+          end else
+          if Pass.FTextureWrites[I].IsDepthAttachment then
+          begin
+            RenderInfo.HasDepthAttachment := True;
+            FillChar(RenderInfo.DepthAttachment, SizeOf(TRHIRenderingAttachment), 0);
+            RenderInfo.DepthAttachment.Texture := PhysTex;
+            RenderInfo.DepthAttachment.LoadOp := Pass.FTextureWrites[I].LoadOp;
+            RenderInfo.DepthAttachment.StoreOp := Pass.FTextureWrites[I].StoreOp;
+            RenderInfo.DepthAttachment.ClearDepth := Pass.FTextureWrites[I].ClearDepth;
+            HasAttachments := True;
+          end;
+        end;
+
+        if HasAttachments then
+        begin
+          if (TargetW = 0) or (TargetH = 0) then
+          begin
+            TargetW := 1;
+            TargetH := 1;
+          end;
+          RenderInfo.RenderArea := Rectangle(0, 0, TargetW, TargetH);
+          ACmd.BeginRendering(RenderInfo);
+          ACmd.SetViewport(FloatRectangle(0, 0, TargetW, TargetH));
+          ACmd.SetScissor(RenderInfo.RenderArea);
+        end;
+      end;
+
+      { 3. Execute pass callback }
+      if Assigned(Pass.FOnExecute) then
+        Pass.FOnExecute(Self, Pass, ACmd);
+      if Assigned(Pass.FOnExecuteProc) then
+        Pass.FOnExecuteProc(Self, Pass, ACmd);
+
+      if (ACmd <> nil) and HasAttachments then
+        ACmd.EndRendering;
+    finally
+      if ACmd <> nil then
+        ACmd.PopDebugGroup;
+    end;
   end;
 
   { 4. Emit final export barriers }

@@ -338,10 +338,10 @@ procedure TLightsRenderer.BuildLightsUniformBlock(const Shape: TShape;
   procedure AddList(const Lights: TLightInstancesList; const IsGlobalLight: Boolean);
   const
     ProjectorScalingMatrixVulkan: TMatrix4 = (Data:
-    ( (0.5, 0.0, 0.0, 0.0),
-      (0.0, 0.5, 0.0, 0.0),
-      (0.0, 0.0, 1.0, 0.0),
-      (0.5, 0.5, 0.0, 1.0) ));
+    ( (0.5,  0.0, 0.0, 0.0),
+      (0.0, -0.5, 0.0, 0.0),
+      (0.0,  0.0, 0.5, 0.0),
+      (0.5,  0.5, 0.5, 1.0) ));
   var
     I, Idx, ShadowSlotIdx: Integer;
     LightOn: boolean;

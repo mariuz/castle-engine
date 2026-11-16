@@ -406,6 +406,9 @@ type
     procedure TestVulkanValidationLayerDebugMessengerAndZeroErrorGateRHI;
     procedure TestRealOpenGLVsVulkanSideBySideVisualRegressionSuiteRHI;
     procedure TestShaderAndPipelineCachePackageBundlingAndDataSeedRHI;
+    procedure TestVulkanDebugUtilsObjectNamingLabelsAndRenderGraphScopesRHI;
+    procedure TestRealLavapipe3DPBRShadowMapsAndGpuSkeletalSkinningRHI;
+    procedure TestRealOpenGLVsVulkanPBRMetallicRoughnessVisualParityRHI;
   private
     FPhase111ForwardSubPassCounter: Integer;
     FCapturedWarnings: TStringList;
@@ -28405,9 +28408,9 @@ begin
     AssertEquals('Center Overlap (32,32) G must be 0',
       0, Integer(Readback.PixelPtr(32, 32)^.Y));
 
-    { Right box (48, 32): Far Lit Green box illuminated by DirectionalLight (0, 255, 0) }
+    { Right box (48, 32): Far Lit Green PBR box illuminated by DirectionalLight (default Metallic=1, Roughness=1 GGX conductor: R=0, G>70, B=0) }
     AssertEquals('Right Far Lit Box (48,32) R must be 0', 0, Integer(Readback.PixelPtr(48, 32)^.X));
-    AssertEquals('Right Far Lit Box (48,32) G must be 255', 255, Integer(Readback.PixelPtr(48, 32)^.Y));
+    AssertTrue('Right Far Lit PBR Box (48,32) G must be > 70', Readback.PixelPtr(48, 32)^.Y > 70);
     AssertEquals('Right Far Lit Box (48,32) B must be 0', 0, Integer(Readback.PixelPtr(48, 32)^.Z));
   finally
     FreeAndNil(Readback);
@@ -31772,6 +31775,907 @@ begin
     FreeAndNil(ManifestText);
     if DirectoryExists(TempRootDir) then
       RemoveNonEmptyDir(TempRootDir, True);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanDebugUtilsObjectNamingLabelsAndRenderGraphScopesRHI;
+var
+  HeadlessDev, RealDev: TVulkanRHIDevice;
+  Buf: TRHIBuffer;
+  Tex, ExportTex: TRHITexture;
+  VS, FS: TRHIShaderModule;
+  Pipe: TRHIPipeline;
+  QueryPool: TRHIQueryPool;
+  PipeDesc: TRHIGraphicsPipelineDesc;
+  TexDesc: TRHITextureDesc;
+  QueryDesc: TRHIQueryPoolDesc;
+  Graph: TRHIRenderGraph;
+  Cmd: TVulkanRHICommandList;
+  RGTempHandle, RGExportHandle: TRHIRenderGraphResourceHandle;
+  Pass0, Pass1: TRHIRenderGraphPass;
+  NamedBefore: Cardinal;
+begin
+  { Part A: Headless deterministic verification of object naming, markers & TRHIRenderGraph debug scopes }
+  HeadlessDev := TVulkanRHIDevice.CreateHeadless(VkPhysicalDevice(PtrUInt($7513)));
+  Buf := nil;
+  Tex := nil;
+  ExportTex := nil;
+  VS := nil;
+  FS := nil;
+  Pipe := nil;
+  QueryPool := nil;
+  Graph := nil;
+  try
+    HeadlessDev.ResizeSwapchain(64, 64);
+    NamedBefore := HeadlessDev.DebugObjectsNamedCount;
+    Buf := HeadlessDev.CreateBuffer(
+      TRHIBufferDesc.Create(256, [buVertex], muCpuToGpu, 'Phase113_DebugVBO'), nil);
+    AssertTrue('Named buffer must increment DebugObjectsNamedCount',
+      HeadlessDev.DebugObjectsNamedCount > NamedBefore);
+    AssertEquals('LastNamedDebugObject must match buffer DebugName',
+      'Phase113_DebugVBO', HeadlessDev.LastNamedDebugObject);
+
+    TexDesc := TRHITextureDesc.Create2D(32, 32, pfRGBA8_UNorm, [tuColorAttachment, tuSampled], 1, 1);
+    TexDesc.DebugName := 'Phase113_DebugTex';
+    Tex := HeadlessDev.CreateTexture(TexDesc);
+    AssertEquals('LastNamedDebugObject must match texture View DebugName',
+      'Phase113_DebugTex.View', HeadlessDev.LastNamedDebugObject);
+
+    VS := HeadlessDev.CreateShaderModuleFromGLSL(ssVertex,
+      'void main() { viewport_size; point_size; }', 'Primitive2D_VS');
+    FS := HeadlessDev.CreateShaderModuleFromGLSL(ssFragment,
+      'void main() { viewport_size; out_Color = pc.color; }', 'Primitive2D_FS');
+
+    PipeDesc := Default(TRHIGraphicsPipelineDesc);
+    PipeDesc.VertexShader := VS;
+    PipeDesc.FragmentShader := FS;
+    PipeDesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+    PipeDesc.Rasterizer.CullMode := cmNone;
+    PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDisabled;
+    PipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+    PipeDesc.PushConstantSize := 32;
+    PipeDesc.PushConstantStages := [ssVertex, ssFragment];
+    SetLength(PipeDesc.ColorAttachmentFormats, 1);
+    PipeDesc.ColorAttachmentFormats[0] := pfRGBA8_UNorm;
+    PipeDesc.DebugName := 'Phase113_DebugPSO';
+    Pipe := HeadlessDev.GetOrCreatePipeline(PipeDesc);
+    AssertTrue('Pipeline must be created', Pipe <> nil);
+
+    FillChar(QueryDesc, SizeOf(QueryDesc), 0);
+    QueryDesc.QueryType := qtTimestamp;
+    QueryDesc.QueryCount := 4;
+    QueryPool := HeadlessDev.CreateQueryPool(QueryDesc);
+    AssertTrue('QueryPool must be created', QueryPool <> nil);
+
+    TexDesc := TRHITextureDesc.Create2D(32, 32, pfRGBA8_UNorm, [tuColorAttachment, tuSampled], 1, 1);
+    TexDesc.DebugName := 'Phase113_RGExport';
+    ExportTex := HeadlessDev.CreateTexture(TexDesc);
+
+    Graph := TRHIRenderGraph.Create(HeadlessDev);
+    RGTempHandle := Graph.DeclareTransientTexture(
+      'RG_TempColor', TRHITextureDesc.Create2D(32, 32, pfRGBA8_UNorm, [tuColorAttachment, tuSampled]));
+    RGExportHandle := Graph.ImportExternalTexture('RG_FinalColor', ExportTex, rsUndefined, rsShaderRead);
+
+    FRenderGraphPassExecCount := 0;
+    Pass0 := Graph.AddPass('Phase113_GBuffer_Pass');
+    Pass0.OnExecute := @DummyRenderGraphPassCallback;
+    Pass0.WriteColorAttachment(RGTempHandle);
+    Pass1 := Graph.AddPass('Phase113_Composite_Pass');
+    Pass1.OnExecute := @DummyRenderGraphPassCallback;
+    Pass1.ReadTexture(RGTempHandle);
+    Pass1.WriteColorAttachment(RGExportHandle);
+    Graph.Compile;
+
+    Cmd := HeadlessDev.BeginFrame as TVulkanRHICommandList;
+    try
+      Cmd.PushDebugGroup('Phase113_OuterFrameScope', Vector4(0.2, 0.6, 1.0, 1.0));
+      Cmd.InsertDebugMarker('Phase113_MidFrameMarker', Vector4(1.0, 0.9, 0.1, 1.0));
+      Graph.Execute(Cmd);
+      Cmd.PopDebugGroup;
+
+      AssertEquals('TRHIRenderGraph.Execute must emit 2 automatic pass debug scopes',
+        2, Integer(Graph.DebugScopesEmittedCount));
+      AssertEquals('CommandList must record 1 outer + 2 graph = 3 PushDebugGroup calls',
+        3, Integer(Cmd.DebugGroupPushCount));
+      AssertEquals('CommandList must record 3 matching PopDebugGroup calls',
+        3, Integer(Cmd.DebugGroupPopCount));
+      AssertEquals('CommandList must record 1 InsertDebugMarker call',
+        1, Integer(Cmd.DebugMarkerCount));
+    finally
+      HeadlessDev.EndFrameAndPresent;
+    end;
+  finally
+    FreeAndNil(Graph);
+    FreeAndNil(ExportTex);
+    FreeAndNil(QueryPool);
+    Pipe := nil;
+    FreeAndNil(FS);
+    FreeAndNil(VS);
+    FreeAndNil(Tex);
+    FreeAndNil(Buf);
+    FreeAndNil(HeadlessDev);
+  end;
+
+  { Part B: Live Mesa Lavapipe 1.4 VK_EXT_debug_utils object naming, command/queue labels & validation gate }
+  RealDev := nil;
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev, True) then
+    Exit;
+  Buf := nil;
+  Tex := nil;
+  ExportTex := nil;
+  VS := nil;
+  FS := nil;
+  QueryPool := nil;
+  Graph := nil;
+  try
+    RealDev.ResetValidationCounters;
+    AssertTrue('Device/queue/pipeline-cache creation must already name >= 2 Vulkan objects',
+      RealDev.DebugObjectsNamedCount >= 2);
+
+    Buf := RealDev.CreateBuffer(
+      TRHIBufferDesc.Create(256, [buUniform], muCpuToGpu, 'Phase113_LiveUBO'), nil);
+    TexDesc := TRHITextureDesc.Create2D(32, 32, pfRGBA8_UNorm, [tuColorAttachment, tuSampled], 1, 1);
+    TexDesc.DebugName := 'Phase113_LiveTex';
+    Tex := RealDev.CreateTexture(TexDesc);
+    VS := RealDev.CreateShaderModuleFromGLSL(ssVertex,
+      'void main() { viewport_size; point_size; }', 'Primitive2D_VS');
+    FS := RealDev.CreateShaderModuleFromGLSL(ssFragment,
+      'void main() { viewport_size; out_Color = pc.color; }', 'Primitive2D_FS');
+
+    PipeDesc := Default(TRHIGraphicsPipelineDesc);
+    PipeDesc.VertexShader := VS;
+    PipeDesc.FragmentShader := FS;
+    PipeDesc.Rasterizer := TRHIRasterizerStateDesc.DefaultCullBack;
+    PipeDesc.Rasterizer.CullMode := cmNone;
+    PipeDesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDisabled;
+    PipeDesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
+    PipeDesc.PushConstantSize := 32;
+    PipeDesc.PushConstantStages := [ssVertex, ssFragment];
+    SetLength(PipeDesc.ColorAttachmentFormats, 1);
+    PipeDesc.ColorAttachmentFormats[0] := pfRGBA8_UNorm;
+    PipeDesc.DebugName := 'Phase113_LivePSO';
+    Pipe := RealDev.GetOrCreatePipeline(PipeDesc);
+    AssertTrue('Live Vulkan pipeline must be created and named', Pipe <> nil);
+
+    if RealDev.DebugUtilsActive and Assigned(vkSetDebugUtilsObjectNameEXT) then
+      AssertTrue('Explicit SetDebugObjectName on live VkBuffer must return VK_SUCCESS',
+        RealDev.SetDebugObjectName(VK_OBJECT_TYPE_BUFFER,
+          (Buf as TVulkanRHIBuffer).Handle, 'Phase113_ExplicitRenamedUBO'));
+
+    FillChar(QueryDesc, SizeOf(QueryDesc), 0);
+    QueryDesc.QueryType := qtTimestamp;
+    QueryDesc.QueryCount := 2;
+    QueryPool := RealDev.CreateQueryPool(QueryDesc);
+
+    TexDesc := TRHITextureDesc.Create2D(32, 32, pfRGBA8_UNorm, [tuColorAttachment, tuSampled], 1, 1);
+    TexDesc.DebugName := 'Phase113_LiveRGExport';
+    ExportTex := RealDev.CreateTexture(TexDesc);
+    Graph := TRHIRenderGraph.Create(RealDev);
+    RGTempHandle := Graph.DeclareTransientTexture(
+      'LiveRG_Temp', TRHITextureDesc.Create2D(32, 32, pfRGBA8_UNorm, [tuColorAttachment, tuSampled]));
+    RGExportHandle := Graph.ImportExternalTexture('LiveRG_Out', ExportTex, rsUndefined, rsShaderRead);
+    Pass0 := Graph.AddPass('LiveRG_PassA');
+    Pass0.OnExecute := @DummyRenderGraphPassCallback;
+    Pass0.WriteColorAttachment(RGTempHandle);
+    Pass1 := Graph.AddPass('LiveRG_PassB');
+    Pass1.OnExecute := @DummyRenderGraphPassCallback;
+    Pass1.ReadTexture(RGTempHandle);
+    Pass1.WriteColorAttachment(RGExportHandle);
+    Graph.Compile;
+
+    RealDev.BeginQueueDebugLabel('Phase113_LiveQueueScope', Vector4(0.1, 0.8, 0.4, 1.0));
+    RealDev.InsertQueueDebugLabel('Phase113_LiveQueueMarker', Vector4(1.0, 0.5, 0.1, 1.0));
+    Cmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    Cmd.PushDebugGroup('Phase113_LiveCmdScope', Vector4(0.3, 0.5, 0.9, 1.0));
+    Cmd.InsertDebugMarker('Phase113_LiveCmdMarker', Vector4(0.9, 0.9, 0.2, 1.0));
+    Graph.Execute(Cmd);
+    Cmd.PopDebugGroup;
+    RealDev.EndOffscreenFrame;
+    RealDev.EndQueueDebugLabel;
+
+    AssertEquals('Live TRHIRenderGraph.Execute must emit 2 pass debug scopes',
+      2, Integer(Graph.DebugScopesEmittedCount));
+    RealDev.AssertZeroValidationErrors('Phase113.DebugUtilsAndRenderGraphScopes');
+  finally
+    FreeAndNil(Graph);
+    FreeAndNil(ExportTex);
+    FreeAndNil(QueryPool);
+    FreeAndNil(FS);
+    FreeAndNil(VS);
+    FreeAndNil(Tex);
+    FreeAndNil(Buf);
+    FreeAndNil(RealDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipe3DPBRShadowMapsAndGpuSkeletalSkinningRHI;
+var
+  Compiler: TCastleShaderCompiler;
+  SpvSkinnedVS, SpvPBRShadowFS, SpvPBRVSMFS: TSPIRVBytecode;
+  ReflVS, ReflShadowFS, ReflVSMFS: TSPIRVReflectionInfo;
+  RealDev: TVulkanRHIDevice;
+  RealCmd: TVulkanRHICommandList;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  Container: TTestSizedVulkanContainer;
+  Viewport: TCastleViewport;
+  ColorTex, DepthTex: TRHITexture;
+  PassInfo: TRHIRenderingInfo;
+  ShadowScene, SkinScene: TCastleScene;
+  ShadowRoot, SkinRoot: TX3DRootNode;
+  NavInfo: TNavigationInfoNode;
+  SpotLight: TSpotLightNode;
+  GenShadow: TGeneratedShadowMapNode;
+  FloorTrans, OccluderTrans, Joint0, Joint1: TTransformNode;
+  FloorShape, OccluderShape, SkinShape: TShapeNode;
+  FloorApp, OccluderApp, SkinApp: TAppearanceNode;
+  FloorMat, OccluderMat, SkinMat: TPhysicalMaterialNode;
+  FloorBox, OccluderBox: TBoxNode;
+  TriSet: TTriangleSetNode;
+  CoordNode: TCoordinateNode;
+  SkinNode: TSkinNode;
+  ShotPCF, ShotVSM, ShotSkinPose0, ShotSkinPose1: TRGBAlphaImage;
+  CenterShadowLuma, OuterLitLuma, VSMCenterLuma, VSMOuterLuma: Integer;
+begin
+  { Part A: Verify built-in zero-dependency SPIR-V 1.0 compilation & SPIR-V reflection }
+  Compiler := TCastleShaderCompiler.Create;
+  try
+    AssertTrue('TryGetBuiltInSPIRV must match skinned 3D vertex shader',
+      Compiler.TryGetBuiltInSPIRV(ssVertex,
+        'void main() { mat4 m = CastleSkinning.u_JointMatrices[0]; }',
+        'CastleShapeVert_Perm01', SpvSkinnedVS));
+    AssertTrue('BuiltIn3DSkinnedVertSPIRV must pass InspectSPIRVBytecode',
+      InspectSPIRVBytecode(SpvSkinnedVS, ReflVS) and ReflVS.IsValid and (ReflVS.Stage = ssVertex));
+
+    AssertTrue('TryGetBuiltInSPIRV must match PBR + shadow-map fragment shader',
+      Compiler.TryGetBuiltInSPIRV(ssFragment,
+        'uniform CastleMaterialBlock { vec4 a; }; uniform CastleLightsBlock { vec4 b; };' + LineEnding +
+        'void main() {' + LineEnding +
+        '  Lo += EvaluateDirectCookTorranceGGX(N, V, L, rad, base, m, r);' + LineEnding +
+        '}',
+        'CastleShapeFrag_Perm1000', SpvPBRShadowFS));
+    AssertTrue('BuiltIn3DPBRShadowFragSPIRV must pass InspectSPIRVBytecode',
+      InspectSPIRVBytecode(SpvPBRShadowFS, ReflShadowFS) and ReflShadowFS.IsValid and (ReflShadowFS.Stage = ssFragment));
+
+    AssertTrue('TryGetBuiltInSPIRV must match PBR + VSM fragment shader',
+      Compiler.TryGetBuiltInSPIRV(ssFragment,
+        'uniform CastleMaterialBlock { vec4 a; }; uniform CastleLightsBlock { vec4 b; };' + LineEnding +
+        'vec2 castle_sample_vsm_slot(float s, vec2 uv) { return vec2(1.0); }' + LineEnding +
+        'void main() { Lo += EvaluateDirectCookTorranceGGX(N, V, L, rad, base, m, r); }',
+        'CastleShapeFrag_Perm1000', SpvPBRVSMFS));
+    AssertTrue('BuiltIn3DPBRVSMFragSPIRV must pass InspectSPIRVBytecode',
+      InspectSPIRVBytecode(SpvPBRVSMFS, ReflVSMFS) and ReflVSMFS.IsValid and (ReflVSMFS.Stage = ssFragment));
+  finally
+    FreeAndNil(Compiler);
+  end;
+
+  { Part B & C: Live Real-GPU 3D PBR + Shadow Maps (PCF & VSM) + 2-Bone GPU TSkinNode Skinning }
+  RealDev := nil;
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev, True) then
+    Exit;
+
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+
+  Container := TTestSizedVulkanContainer.Create(nil);
+  Viewport := nil;
+  ShadowScene := nil;
+  SkinScene := nil;
+  ColorTex := nil;
+  DepthTex := nil;
+  ShotPCF := nil;
+  ShotVSM := nil;
+  ShotSkinPose0 := nil;
+  ShotSkinPose1 := nil;
+  try
+    GLFeatures := nil;
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(RealDev);
+    RealDev.ResetValidationCounters;
+
+    Container.TestWidth := 128;
+    Container.TestHeight := 128;
+    RenderContext := Container.Context;
+    RenderContext.Viewport := Rectangle(0, 0, 128, 128);
+
+    ColorTex := RealDev.CreateTexture(TRHITextureDesc.Create2D(128, 128, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc]));
+    DepthTex := RealDev.CreateTexture(TRHITextureDesc.Create2D(128, 128, pfD32_Float,
+      [tuDepthStencil]));
+
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := True;
+    Viewport.BackgroundColor := Vector4(0.02, 0.02, 0.04, 1.0);
+    Viewport.Camera.ProjectionType := ptOrthographic;
+    Viewport.Camera.Orthographic.Width := 4.0;
+    Viewport.Camera.Orthographic.Height := 4.0;
+    Viewport.Camera.Orthographic.Origin := Vector2(0.5, 0.5);
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 5.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Container.Controls.InsertFront(Viewport);
+
+    { --- Part B: 3D PBR Receiver Floor + Shadow-Casting SpotLight + Occluder Box --- }
+    ShadowRoot := TX3DRootNode.Create;
+
+    NavInfo := TNavigationInfoNode.Create;
+    NavInfo.Headlight := False;
+    ShadowRoot.AddChildren(NavInfo);
+
+    GenShadow := TGeneratedShadowMapNode.Create;
+    GenShadow.Update := upAlways;
+    GenShadow.Size := 256;
+
+    SpotLight := TSpotLightNode.Create;
+    SpotLight.Location := Vector3(2.0, 0.0, 4.0);
+    SpotLight.Direction := Vector3(-2.0, 0.0, -4.0).Normalize;
+    SpotLight.CutOffAngle := Pi / 3.0;
+    SpotLight.BeamWidth := Pi / 3.0;
+    SpotLight.Attenuation := Vector3(1.0, 0.0, 0.0);
+    SpotLight.Intensity := 4.0;
+    SpotLight.Shadows := True;
+    SpotLight.DefaultShadowMap := GenShadow;
+    SpotLight.Global := True;
+    ShadowRoot.AddChildren(SpotLight);
+
+    { Receiver floor at Z = 0 covering [-1.9..+1.9]^2 }
+    FloorTrans := TTransformNode.Create;
+    FloorTrans.Translation := Vector3(0.0, 0.0, 0.0);
+    FloorShape := TShapeNode.Create;
+    FloorBox := TBoxNode.Create;
+    FloorBox.Size := Vector3(3.8, 3.8, 0.1);
+    FloorShape.Geometry := FloorBox;
+    FloorApp := TAppearanceNode.Create;
+    FloorMat := TPhysicalMaterialNode.Create;
+    FloorMat.BaseColor := Vector3(0.92, 0.92, 0.95);
+    FloorMat.Roughness := 0.65;
+    FloorMat.Metallic := 0.0;
+    FloorApp.Material := FloorMat;
+    FloorShape.Appearance := FloorApp;
+    FloorTrans.AddChildren(FloorShape);
+    ShadowRoot.AddChildren(FloorTrans);
+
+    { Occluder at (1.0, 0.0, 2.0): ray from (2,0,4) through (1,0,2) hits floor center (0,0,0) = pixel (64,64),
+      while camera looks straight down -Z so Occluder only covers X in [0.65..1.35] (pixels [85..107]) }
+    OccluderTrans := TTransformNode.Create;
+    OccluderTrans.Translation := Vector3(1.0, 0.0, 2.0);
+    OccluderShape := TShapeNode.Create;
+    OccluderBox := TBoxNode.Create;
+    OccluderBox.Size := Vector3(0.7, 1.2, 0.4);
+    OccluderShape.Geometry := OccluderBox;
+    OccluderApp := TAppearanceNode.Create;
+    OccluderMat := TPhysicalMaterialNode.Create;
+    OccluderMat.BaseColor := Vector3(0.2, 0.4, 0.9);
+    OccluderMat.Roughness := 0.4;
+    OccluderMat.Metallic := 0.0;
+    OccluderApp.Material := OccluderMat;
+    OccluderShape.Appearance := OccluderApp;
+    OccluderTrans.AddChildren(OccluderShape);
+    ShadowRoot.AddChildren(OccluderTrans);
+
+    ShadowScene := TCastleScene.Create(nil);
+    ShadowScene.RenderOptions.ShadowSampling := ssSimple;
+    ShadowScene.Load(ShadowRoot, True);
+    {$warnings off}
+    Viewport.Items.MainScene := ShadowScene;
+    {$warnings on}
+    Viewport.Items.Add(ShadowScene);
+
+    { Render 1: Hardware Depth Comparison Shadow Map (sampler2DShadow) }
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    SetActiveCommandList(RealCmd);
+    Container.EventUpdate;
+    Viewport.BeforeRender;
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 128, 128),
+      ColorTex, loClear, Viewport.BackgroundColor,
+      DepthTex, loClear, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+    Viewport.Render;
+    Viewport.RenderOverChildren;
+    RealCmd.EndRendering;
+    RealDev.EndOffscreenFrame;
+
+    ShotPCF := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 128, 128));
+    CenterShadowLuma := Integer(ShotPCF.PixelPtr(64, 64)^.X) +
+                        Integer(ShotPCF.PixelPtr(64, 64)^.Y) +
+                        Integer(ShotPCF.PixelPtr(64, 64)^.Z);
+    OuterLitLuma := Integer(ShotPCF.PixelPtr(24, 64)^.X) +
+                    Integer(ShotPCF.PixelPtr(24, 64)^.Y) +
+                    Integer(ShotPCF.PixelPtr(24, 64)^.Z);
+    AssertTrue(Format('sampler2DShadow cast shadow pixel (64,64) luma (%d) must be darker than unoccluded PBR floor (24,64) luma (%d)',
+      [CenterShadowLuma, OuterLitLuma]),
+      OuterLitLuma > CenterShadowLuma + 80);
+
+    { Render 2: Variance Shadow Maps (VSM Chebyshev moments via CastleVSMCasterFrag + BuiltIn3DPBRVSMFragSPIRV) }
+    ShadowScene.GLContextClose;
+    TTextureResources.Unprepare(GenShadow);
+    ShadowScene.RenderOptions.ShadowSampling := ssVarianceShadowMaps;
+
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    SetActiveCommandList(RealCmd);
+    Container.EventUpdate;
+    Viewport.BeforeRender;
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 128, 128),
+      ColorTex, loClear, Viewport.BackgroundColor,
+      DepthTex, loClear, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+    Viewport.Render;
+    Viewport.RenderOverChildren;
+    RealCmd.EndRendering;
+    RealDev.EndOffscreenFrame;
+
+    ShotVSM := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 128, 128));
+    VSMCenterLuma := Integer(ShotVSM.PixelPtr(64, 64)^.X) +
+                     Integer(ShotVSM.PixelPtr(64, 64)^.Y) +
+                     Integer(ShotVSM.PixelPtr(64, 64)^.Z);
+    VSMOuterLuma := Integer(ShotVSM.PixelPtr(24, 64)^.X) +
+                    Integer(ShotVSM.PixelPtr(24, 64)^.Y) +
+                    Integer(ShotVSM.PixelPtr(24, 64)^.Z);
+    AssertTrue(Format('VSM cast shadow pixel (64,64) luma (%d) must be darker than unoccluded PBR floor (24,64) luma (%d)',
+      [VSMCenterLuma, VSMOuterLuma]),
+      VSMOuterLuma > VSMCenterLuma + 60);
+
+    TTextureResources.Unprepare(GenShadow);
+    Viewport.Items.Remove(ShadowScene);
+    FreeAndNil(ShadowScene);
+
+    { --- Part C: Live Real-GPU 2-Bone TSkinNode Skeletal Skinning --- }
+    SkinRoot := TX3DRootNode.Create;
+    Joint0 := TTransformNode.Create('Joint0');
+    Joint1 := TTransformNode.Create('Joint1');
+    Joint0.AddChildren(Joint1);
+
+    SkinShape := TShapeNode.Create;
+    SkinApp := TAppearanceNode.Create;
+    SkinMat := TPhysicalMaterialNode.Create;
+    SkinMat.BaseColor := Vector3(0.0, 0.0, 0.0);
+    SkinMat.EmissiveColor := Vector3(1.0, 0.15, 0.05);
+    SkinApp.Material := SkinMat;
+    SkinShape.Appearance := SkinApp;
+
+    TriSet := TTriangleSetNode.Create;
+    TriSet.Solid := False;
+    CoordNode := TCoordinateNode.Create;
+    CoordNode.SetPoint([
+      Vector3(-0.45, -0.6, 0.0),
+      Vector3( 0.45, -0.6, 0.0),
+      Vector3( 0.45,  0.6, 0.0),
+      Vector3(-0.45, -0.6, 0.0),
+      Vector3( 0.45,  0.6, 0.0),
+      Vector3(-0.45,  0.6, 0.0)
+    ]);
+    TriSet.Coord := CoordNode;
+    TriSet.SetSkinJoints0([
+      1, 0, 0, 0,
+      1, 0, 0, 0,
+      1, 0, 0, 0,
+      1, 0, 0, 0,
+      1, 0, 0, 0,
+      1, 0, 0, 0
+    ]);
+    TriSet.SetSkinWeights0([
+      Vector4(1.0, 0.0, 0.0, 0.0),
+      Vector4(1.0, 0.0, 0.0, 0.0),
+      Vector4(1.0, 0.0, 0.0, 0.0),
+      Vector4(1.0, 0.0, 0.0, 0.0),
+      Vector4(1.0, 0.0, 0.0, 0.0),
+      Vector4(1.0, 0.0, 0.0, 0.0)
+    ]);
+    SkinShape.Geometry := TriSet;
+
+    SkinNode := TSkinNode.Create('', '');
+    SkinNode.Skeleton := Joint0;
+    SkinNode.SetJoints([Joint0, Joint1]);
+    SkinNode.SetInverseBindMatrices([TMatrix4.Identity, TMatrix4.Identity]);
+    SkinNode.FdShapes.Add(SkinShape);
+    SkinRoot.AddChildren(SkinNode);
+
+    SkinScene := TCastleScene.Create(nil);
+    SkinScene.Load(SkinRoot, True);
+    {$warnings off}
+    Viewport.Items.MainScene := SkinScene;
+    {$warnings on}
+    Viewport.Items.Add(SkinScene);
+
+    { Pose 0: Joint1 at (0, 0, 0) -> skinned quad at screen center (64, 64), empty at right (102, 64) }
+    Joint1.Translation := Vector3(0.0, 0.0, 0.0);
+    SkinNode.InternalUpdateSkin;
+
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    SetActiveCommandList(RealCmd);
+    Container.EventUpdate;
+    Viewport.BeforeRender;
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 128, 128),
+      ColorTex, loClear, Viewport.BackgroundColor,
+      DepthTex, loClear, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+    Viewport.Render;
+    Viewport.RenderOverChildren;
+    RealCmd.EndRendering;
+    RealDev.EndOffscreenFrame;
+
+    ShotSkinPose0 := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 128, 128));
+    AssertTrue('Pose 0: Skinned quad must appear at center (64,64) with R > 180',
+      ShotSkinPose0.PixelPtr(64, 64)^.X > 180);
+    AssertTrue('Pose 0: Right side (102,64) must be dark background R < 30',
+      ShotSkinPose0.PixelPtr(102, 64)^.X < 30);
+
+    { Pose 1: Translate Joint1 to (+1.2, 0, 0) -> GPU vertex skinning moves quad from (64,64) to (102,64)! }
+    Joint1.Translation := Vector3(1.2, 0.0, 0.0);
+    SkinNode.InternalUpdateSkin;
+
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    SetActiveCommandList(RealCmd);
+    Container.EventUpdate;
+    Viewport.BeforeRender;
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 128, 128),
+      ColorTex, loClear, Viewport.BackgroundColor,
+      DepthTex, loClear, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+    Viewport.Render;
+    Viewport.RenderOverChildren;
+    RealCmd.EndRendering;
+    RealDev.EndOffscreenFrame;
+
+    ShotSkinPose1 := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 128, 128));
+    AssertTrue('Pose 1: Center (64,64) must now be dark background R < 30 after GPU bone translation',
+      ShotSkinPose1.PixelPtr(64, 64)^.X < 30);
+    AssertTrue('Pose 1: Skinned quad must deform on GPU to right side (102,64) with R > 180',
+      ShotSkinPose1.PixelPtr(102, 64)^.X > 180);
+
+    RealDev.AssertZeroValidationErrors('Phase113.PBRShadowMapsAndGpuSkinning');
+  finally
+    FreeAndNil(ShotSkinPose1);
+    FreeAndNil(ShotSkinPose0);
+    FreeAndNil(ShotVSM);
+    FreeAndNil(ShotPCF);
+    FreeAndNil(SkinScene);
+    FreeAndNil(ShadowScene);
+    FreeAndNil(Viewport);
+    FreeAndNil(DepthTex);
+    FreeAndNil(ColorTex);
+    FreeAndNil(Container);
+    FreeGlobalBatch2DRenderer;
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(RealDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealOpenGLVsVulkanPBRMetallicRoughnessVisualParityRHI;
+
+  procedure PopulatePBRSpheresScene(const AWindow: TCastleWindow);
+  var
+    Vp: TCastleViewport;
+    Sc: TCastleScene;
+    Root: TX3DRootNode;
+    KeyLight: TDirectionalLightNode;
+    LeftTrans, RightTrans: TTransformNode;
+    LeftShape, RightShape: TShapeNode;
+    LeftApp, RightApp: TAppearanceNode;
+    LeftMat, RightMat: TPhysicalMaterialNode;
+    LeftSphere, RightSphere: TSphereNode;
+  begin
+    Vp := TCastleViewport.Create(AWindow);
+    Vp.FullSize := True;
+    Vp.BackgroundColor := Vector4(0.05, 0.06, 0.09, 1.0);
+    Vp.Camera.ProjectionType := ptOrthographic;
+    Vp.Camera.Orthographic.Width := 4.4;
+    Vp.Camera.Orthographic.Height := 3.3;
+    Vp.Camera.Orthographic.Origin := Vector2(0.5, 0.5);
+    Vp.Camera.SetView(
+      Vector3(0.0, 0.0, 5.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    AWindow.Controls.InsertFront(Vp);
+
+    Root := TX3DRootNode.Create;
+    KeyLight := TDirectionalLightNode.Create;
+    KeyLight.Direction := Vector3(-0.45, -0.45, -0.77).Normalize;
+    KeyLight.Color := Vector3(1.0, 0.98, 0.94);
+    KeyLight.Intensity := 2.4;
+    KeyLight.Global := True;
+    Root.AddChildren(KeyLight);
+
+    { Left: Glossy Dielectric Crimson Sphere (Metallic = 0.0, Roughness = 0.28) }
+    LeftTrans := TTransformNode.Create;
+    LeftTrans.Translation := Vector3(-1.05, 0.0, 0.0);
+    LeftShape := TShapeNode.Create;
+    LeftSphere := TSphereNode.Create;
+    LeftSphere.Radius := 0.85;
+    LeftSphere.Slices := 24;
+    LeftSphere.Stacks := 24;
+    LeftShape.Geometry := LeftSphere;
+    LeftApp := TAppearanceNode.Create;
+    LeftMat := TPhysicalMaterialNode.Create;
+    LeftMat.BaseColor := Vector3(0.85, 0.10, 0.12);
+    LeftMat.Metallic := 0.0;
+    LeftMat.Roughness := 0.28;
+    LeftApp.Material := LeftMat;
+    LeftShape.Appearance := LeftApp;
+    LeftTrans.AddChildren(LeftShape);
+    Root.AddChildren(LeftTrans);
+
+    { Right: Brushed Gold Conductor Metallic Sphere (Metallic = 1.0, Roughness = 0.34) }
+    RightTrans := TTransformNode.Create;
+    RightTrans.Translation := Vector3(1.05, 0.0, 0.0);
+    RightShape := TShapeNode.Create;
+    RightSphere := TSphereNode.Create;
+    RightSphere.Radius := 0.85;
+    RightSphere.Slices := 24;
+    RightSphere.Stacks := 24;
+    RightShape.Geometry := RightSphere;
+    RightApp := TAppearanceNode.Create;
+    RightMat := TPhysicalMaterialNode.Create;
+    RightMat.BaseColor := Vector3(1.0, 0.78, 0.32);
+    RightMat.Metallic := 1.0;
+    RightMat.Roughness := 0.34;
+    RightApp.Material := RightMat;
+    RightShape.Appearance := RightApp;
+    RightTrans.AddChildren(RightShape);
+    Root.AddChildren(RightTrans);
+
+    Sc := TCastleScene.Create(AWindow);
+    Sc.Load(Root, True);
+    {$warnings off}
+    Vp.Items.MainScene := Sc;
+    {$warnings on}
+    Vp.Items.Add(Sc);
+  end;
+
+  procedure PopulatePBRTexturedEmissiveScene(const AWindow: TCastleWindow);
+  var
+    Vp: TCastleViewport;
+    Sc: TCastleScene;
+    Root: TX3DRootNode;
+    KeyLight: TDirectionalLightNode;
+    BoxTrans: TTransformNode;
+    BoxShape: TShapeNode;
+    BoxApp: TAppearanceNode;
+    BoxMat: TPhysicalMaterialNode;
+    BoxGeo: TBoxNode;
+    BaseImg, EmisImg: TRGBImage;
+    BasePixTex, EmisPixTex: TPixelTextureNode;
+    BaseProps, EmisProps: TTexturePropertiesNode;
+    X, Y: Integer;
+  begin
+    Vp := TCastleViewport.Create(AWindow);
+    Vp.FullSize := True;
+    Vp.BackgroundColor := Vector4(0.04, 0.05, 0.07, 1.0);
+    Vp.Camera.ProjectionType := ptOrthographic;
+    Vp.Camera.Orthographic.Width := 3.6;
+    Vp.Camera.Orthographic.Height := 2.7;
+    Vp.Camera.Orthographic.Origin := Vector2(0.5, 0.5);
+    Vp.Camera.SetView(
+      Vector3(0.0, 0.0, 5.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    AWindow.Controls.InsertFront(Vp);
+
+    Root := TX3DRootNode.Create;
+    KeyLight := TDirectionalLightNode.Create;
+    KeyLight.Direction := Vector3(-0.3, -0.4, -0.86).Normalize;
+    KeyLight.Color := Vector3(1.0, 1.0, 1.0);
+    KeyLight.Intensity := 2.2;
+    KeyLight.Global := True;
+    Root.AddChildren(KeyLight);
+
+    BaseImg := TRGBImage.Create(8, 8);
+    EmisImg := TRGBImage.Create(8, 8);
+    for Y := 0 to 7 do
+      for X := 0 to 7 do
+      begin
+        if ((X div 2) + (Y div 2)) mod 2 = 0 then
+          BaseImg.PixelPtr(X, Y)^ := Vector3Byte(220, 210, 180)
+        else
+          BaseImg.PixelPtr(X, Y)^ := Vector3Byte(60, 140, 210);
+        if (X >= 3) and (X <= 4) and (Y >= 3) and (Y <= 4) then
+          EmisImg.PixelPtr(X, Y)^ := Vector3Byte(230, 90, 20)
+        else
+          EmisImg.PixelPtr(X, Y)^ := Vector3Byte(0, 0, 0);
+      end;
+
+    BasePixTex := TPixelTextureNode.Create;
+    BasePixTex.FdImage.Value := BaseImg;
+    BaseProps := TTexturePropertiesNode.Create;
+    BaseProps.MagnificationFilter := magNearest;
+    BaseProps.MinificationFilter := minNearest;
+    BasePixTex.TextureProperties := BaseProps;
+
+    EmisPixTex := TPixelTextureNode.Create;
+    EmisPixTex.FdImage.Value := EmisImg;
+    EmisProps := TTexturePropertiesNode.Create;
+    EmisProps.MagnificationFilter := magNearest;
+    EmisProps.MinificationFilter := minNearest;
+    EmisPixTex.TextureProperties := EmisProps;
+
+    BoxTrans := TTransformNode.Create;
+    BoxTrans.Rotation := Vector4(0.0, 1.0, 0.0, 0.35);
+    BoxShape := TShapeNode.Create;
+    BoxGeo := TBoxNode.Create;
+    BoxGeo.Size := Vector3(2.0, 1.8, 1.2);
+    BoxShape.Geometry := BoxGeo;
+    BoxApp := TAppearanceNode.Create;
+    BoxMat := TPhysicalMaterialNode.Create;
+    BoxMat.BaseColor := Vector3(1.0, 1.0, 1.0);
+    BoxMat.BaseTexture := BasePixTex;
+    BoxMat.EmissiveColor := Vector3(1.0, 1.0, 1.0);
+    BoxMat.EmissiveTexture := EmisPixTex;
+    BoxMat.Metallic := 0.15;
+    BoxMat.Roughness := 0.45;
+    BoxApp.Material := BoxMat;
+    BoxShape.Appearance := BoxApp;
+    BoxTrans.AddChildren(BoxShape);
+    Root.AddChildren(BoxTrans);
+
+    Sc := TCastleScene.Create(AWindow);
+    Sc.Load(Root, True);
+    {$warnings off}
+    Vp.Items.MainScene := Sc;
+    {$warnings on}
+    Vp.Items.Add(Sc);
+  end;
+
+  function CapturePBRBackendScenarios(const ABackend: TRenderBackend;
+    out AShotSpheres, AShotTexturedBox: TRGBAlphaImage;
+    out AVkValidationErrors: Cardinal): Boolean;
+  var
+    Win: TCastleWindow;
+    I: Integer;
+  begin
+    Result := False;
+    AShotSpheres := nil;
+    AShotTexturedBox := nil;
+    AVkValidationErrors := 0;
+
+    SetActiveCommandList(nil);
+    SetRHIDevice(nil);
+    ApplicationProperties.RenderBackend := ABackend;
+    Application.OnInitialize := nil;
+    Application.Initialize;
+
+    Win := CreateWindowForTest;
+    try
+      Win.Width := 160;
+      Win.Height := 120;
+      Win.AntiAliasing := aaNone;
+      try
+        Win.Open;
+      except
+        on Exception do
+        begin
+          if not Win.Closed then
+            Win.Close(False);
+          Exit(False);
+        end;
+      end;
+
+      if ABackend = backendVulkan then
+      begin
+        if not (RHIDevice is TVulkanRHIDevice) then
+        begin
+          Win.Close(False);
+          Exit(False);
+        end;
+        TVulkanRHIDevice(RHIDevice).ResetValidationCounters;
+      end else
+      begin
+        if RHIDevice <> nil then
+        begin
+          Win.Close(False);
+          Exit(False);
+        end;
+      end;
+
+      PopulatePBRSpheresScene(Win);
+      for I := 0 to 1 do
+      begin
+        Win.Invalidate;
+        Application.ProcessAllMessages;
+      end;
+      AShotSpheres := Win.Container.SaveScreenRgba;
+      while Win.Controls.Count > 0 do
+        Win.Controls[0].Free;
+
+      PopulatePBRTexturedEmissiveScene(Win);
+      for I := 0 to 1 do
+      begin
+        Win.Invalidate;
+        Application.ProcessAllMessages;
+      end;
+      AShotTexturedBox := Win.Container.SaveScreenRgba;
+      while Win.Controls.Count > 0 do
+        Win.Controls[0].Free;
+
+      if (ABackend = backendVulkan) and (RHIDevice is TVulkanRHIDevice) then
+        AVkValidationErrors := TVulkanRHIDevice(RHIDevice).ValidationErrorCount;
+
+      Win.Close(False);
+      Result := (AShotSpheres <> nil) and (AShotTexturedBox <> nil);
+    finally
+      DestroyWindowForTest(Win);
+    end;
+  end;
+
+var
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedOnInit: TProcedure;
+  VkSpheres, VkTexturedBox, GlSpheres, GlTexturedBox: TRGBAlphaImage;
+  VkValErrors, DummyGlErrors: Cardinal;
+  PBRSuite: TRHIVisualRegressionSuite;
+  {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  HasDisplay: Boolean;
+  {$endif}
+begin
+  if not CanCreateWindowForTest then
+    Exit;
+
+  {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  HasDisplay := (GetEnvironmentVariable('DISPLAY') <> '') or
+                (GetEnvironmentVariable('WAYLAND_DISPLAY') <> '');
+  if not HasDisplay then
+    Exit;
+  {$endif}
+
+  try
+    if not LoadVulkan then
+      Exit;
+  except
+    on Exception do
+      Exit;
+  end;
+
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedOnInit := Application.OnInitialize;
+  VkSpheres := nil;
+  VkTexturedBox := nil;
+  GlSpheres := nil;
+  GlTexturedBox := nil;
+  PBRSuite := TRHIVisualRegressionSuite.Create(4);
+  try
+    if not CapturePBRBackendScenarios(backendVulkan, VkSpheres, VkTexturedBox, VkValErrors) then
+      Exit;
+    AssertEquals('Vulkan PBR parity capture must produce 0 validation errors',
+      0, Integer(VkValErrors));
+
+    if not CapturePBRBackendScenarios(backendOpenGL, GlSpheres, GlTexturedBox, DummyGlErrors) then
+      Exit;
+
+    PBRSuite.RecordComparison('3D_PBR_Dielectric_And_GoldMetallic_Spheres', GlSpheres, VkSpheres, 0.08);
+    PBRSuite.RecordComparison('3D_PBR_Textured_BaseColor_And_Emissive_Box', GlTexturedBox, VkTexturedBox, 0.08);
+
+    AssertEquals('PBR parity suite must record 2 scenarios', 2, PBRSuite.CaseCount);
+    AssertTrue('All rbOpenGL vs rbVulkan Cook-Torrance PBR visual parity cases must pass: ' +
+      LineEnding + PBRSuite.BuildSummaryReport,
+      PBRSuite.AllPassed);
+  finally
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    Application.OnInitialize := SavedOnInit;
+    FreeAndNil(PBRSuite);
+    FreeAndNil(GlTexturedBox);
+    FreeAndNil(GlSpheres);
+    FreeAndNil(VkTexturedBox);
+    FreeAndNil(VkSpheres);
   end;
 end;
 

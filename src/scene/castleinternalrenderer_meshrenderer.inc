@@ -564,7 +564,7 @@ begin
         PushConstants := TCastleShaderGeneratorRHI.BuildShapeRHIPushConstants(
           ShapeModelView,
           NormalMat,
-          (Shape.Cache <> nil) and (Shape.Cache.RHIJointBuffer <> nil),
+          (Shape.Cache <> nil) and ((Shape.Cache.RHIJointBuffer <> nil) or (Shape.Cache.RHISkinningUBOBuffer <> nil)),
           (RenderOptions <> nil) and RenderOptions.DualQuaternionSkinning,
           (RenderOptions = nil) or RenderOptions.SpecularAntiAliasing,
           ShadowModeOrd,

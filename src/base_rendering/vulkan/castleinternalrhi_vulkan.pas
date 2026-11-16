@@ -356,6 +356,10 @@ type
     FOwnsCommandPool: Boolean;
     FResetIndividualBuffer: Boolean;
     FSecondaryExecuteCount: Cardinal;
+    FDebugGroupPushCount: Cardinal;
+    FDebugGroupPopCount: Cardinal;
+    FDebugMarkerCount: Cardinal;
+    FLastDebugLabelName: String;
     procedure ResetCommandTrackingState;
     function GetBoundDescriptorSet(const ASetIndex: Cardinal): TRHIDescriptorSet;
     procedure ComputeVkScissorRect(const ARect: TRectangle; out AVkRect: VkRect2D);
@@ -451,6 +455,7 @@ type
 
     procedure PushDebugGroup(const LabelName: String; const Color: TCastleColor); override;
     procedure PopDebugGroup; override;
+    procedure InsertDebugMarker(const LabelName: String; const Color: TCastleColor); override;
     procedure ClearAttachments(const ClearColorBuf: Boolean; const ClearColor: TCastleColor;
       const ClearDepthBuf: Boolean = False; const ClearDepth: Single = 1.0;
       const ClearStencilBuf: Boolean = False; const ClearStencil: Byte = 0); override;
@@ -458,6 +463,10 @@ type
     property Handle: VkCommandBuffer read FHandle;
     property CommandPool: VkCommandPool read FCommandPool;
     property SecondaryExecuteCount: Cardinal read FSecondaryExecuteCount;
+    property DebugGroupPushCount: Cardinal read FDebugGroupPushCount;
+    property DebugGroupPopCount: Cardinal read FDebugGroupPopCount;
+    property DebugMarkerCount: Cardinal read FDebugMarkerCount;
+    property LastDebugLabelName: String read FLastDebugLabelName;
     property InFallbackRenderPass: Boolean read FInFallbackRenderPass;
     property BarrierCount: Cardinal read FBarrierCount;
     property Sync2BarrierCount: Cardinal read FSync2BarrierCount;
@@ -4156,6 +4165,13 @@ type
     FPrewarm2DVertexShader: TRHIShaderModule;
     FPrewarm2DFragmentShader: TRHIShaderModule;
     FDefaultSampler: TVulkanRHISampler;
+    FDefaultShadowSampler: TVulkanRHISampler;
+    FDefaultWhiteTexture: TVulkanRHITexture;
+    FDefaultBlackTexture: TVulkanRHITexture;
+    FDefaultFlatNormalTexture: TVulkanRHITexture;
+    FDefaultShadowDepthTexture: TVulkanRHITexture;
+    FDebugObjectsNamedCount: Cardinal;
+    FLastNamedDebugObject: String;
 
     { Diagnostics, VK_EXT_memory_budget, VK_EXT_graphics_pipeline_library, Bindless, Extended Dynamic State, Sync2 & Fallback tracking }
     FInstanceApiVersion: Cardinal;
@@ -4229,7 +4245,6 @@ type
     function GetFallbackFramebufferCount: Cardinal;
     function GetPendingDeferredDeletionCount: Cardinal;
     function GetDescriptorPoolHandle: VkDescriptorPool;
-    function GetDefaultSampler: TVulkanRHISampler;
     function GetComputeCuller: TCastleVulkanComputeCuller;
     function GetIBLGenerator: TCastleVulkanIBLGenerator;
     function GetClusteredLightCuller: TCastleVulkanClusteredLightCuller;
@@ -4456,7 +4471,7 @@ type
     procedure LoadPipelineCache(const CacheFileUrl: String); override;
     procedure SavePipelineCache(const CacheFileUrl: String); override;
 
-    { Khronos Validation Layer (VK_LAYER_KHRONOS_validation) & VK_EXT_debug_utils CI Gate (Phase 112.1) }
+    { Khronos Validation Layer (VK_LAYER_KHRONOS_validation) & VK_EXT_debug_utils CI Gate & Object Naming (Phases 112.1, 113.1) }
     procedure RecordValidationCallbackMessage(const ASeverity, AMessageTypes: VkFlags;
       const AMessageIdName, AMessage: String);
     function SubmitDebugUtilsMessage(const ASeverity, AMessageTypes: VkFlags;
@@ -4465,6 +4480,17 @@ type
     function GetValidationMessage(const AIndex: Integer): String;
     function GetValidationMessagesReport: String;
     procedure AssertZeroValidationErrors(const AContext: String = '');
+    function SetDebugObjectName(const AObjectType: VkObjectType;
+      const AObjectHandle: UInt64; const AObjectName: String): Boolean;
+    procedure BeginQueueDebugLabel(const ALabelName: String; const AColor: TCastleColor);
+    procedure EndQueueDebugLabel;
+    procedure InsertQueueDebugLabel(const ALabelName: String; const AColor: TCastleColor);
+    function GetDefaultSampler: TVulkanRHISampler;
+    function GetDefaultShadowSampler: TVulkanRHISampler;
+    function GetDefaultWhiteTexture: TVulkanRHITexture;
+    function GetDefaultBlackTexture: TVulkanRHITexture;
+    function GetDefaultFlatNormalTexture: TVulkanRHITexture;
+    function GetDefaultShadowDepthTexture: TVulkanRHITexture;
 
     function GetInformationString: String; override;
     function GetInformationStringSummary: String; override;
@@ -4516,6 +4542,8 @@ type
     property ValidationWarningCount: Cardinal read FValidationWarningCount;
     property ValidationInfoCount: Cardinal read FValidationInfoCount;
     property ValidationMessageCount: Integer read GetValidationMessageCount;
+    property DebugObjectsNamedCount: Cardinal read FDebugObjectsNamedCount;
+    property LastNamedDebugObject: String read FLastNamedDebugObject;
     property SupportsMemoryBudgetExt: Boolean read FSupportsMemoryBudgetExt;
     property SupportsDynamicRendering: Boolean read FSupportsDynamicRendering write FSupportsDynamicRendering;
     property SupportsGraphicsPipelineLibrary: Boolean read FSupportsGraphicsPipelineLibrary write FSupportsGraphicsPipelineLibrary;
@@ -6249,6 +6277,9 @@ begin
     Inc(ADevice.FAllocatedMemoryBytes, FAllocatedSize);
   end;
 
+  if (ADevice <> nil) and (ADesc.DebugName <> '') and (FHandle <> VK_NULL_HANDLE) then
+    ADevice.SetDebugObjectName(VK_OBJECT_TYPE_BUFFER, FHandle, ADesc.DebugName);
+
   if InitialData <> nil then
     UploadData(InitialData^, ADesc.Size, 0);
 end;
@@ -6423,6 +6454,11 @@ begin
       FAllocatedSize := FAllocation.Size;
       Inc(ADevice.FAllocatedMemoryBytes, FAllocatedSize);
     end;
+    if (ADevice <> nil) and (FDesc.DebugName <> '') then
+    begin
+      ADevice.SetDebugObjectName(VK_OBJECT_TYPE_IMAGE, FImage, FDesc.DebugName);
+      ADevice.SetDebugObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, FImageView, FDesc.DebugName + '.View');
+    end;
     Exit;
   end;
 
@@ -6507,6 +6543,11 @@ begin
     ViewInfo.subresourceRange.layerCount := Max(Cardinal(1), FDesc.DepthOrArrayLayers);
 
   CheckVk(vkCreateImageView(ADevice.Handle, @ViewInfo, nil, @FImageView), 'vkCreateImageView');
+  if FDesc.DebugName <> '' then
+  begin
+    ADevice.SetDebugObjectName(VK_OBJECT_TYPE_IMAGE, FImage, FDesc.DebugName);
+    ADevice.SetDebugObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, FImageView, FDesc.DebugName + '.View');
+  end;
 end;
 
 constructor TVulkanRHITexture.CreateCarrier(const ADevice: TVulkanRHIDevice;
@@ -6628,6 +6669,11 @@ begin
     ViewInfo.subresourceRange.layerCount := Max(Cardinal(1), FDesc.DepthOrArrayLayers);
 
   CheckVk(vkCreateImageView(ADevice.Handle, @ViewInfo, nil, @FImageView), 'vkCreateImageView(Carrier)');
+  if FDesc.DebugName <> '' then
+  begin
+    ADevice.SetDebugObjectName(VK_OBJECT_TYPE_IMAGE, FImage, FDesc.DebugName + '.Carrier');
+    ADevice.SetDebugObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, FImageView, FDesc.DebugName + '.CarrierView');
+  end;
 end;
 
 class function TVulkanRHITexture.TryCreateAliased(const ADevice: TVulkanRHIDevice;
@@ -6819,6 +6865,11 @@ begin
   Result.FDeviceMemory := ACarrier.DeviceMemory;
   Result.FMemoryOffset := AlignedOffset;
   Result.FAllocatedSize := MemReq.size;
+  if NegotiatedDesc.DebugName <> '' then
+  begin
+    ADevice.SetDebugObjectName(VK_OBJECT_TYPE_IMAGE, TempImg, NegotiatedDesc.DebugName + '.Aliased');
+    ADevice.SetDebugObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, TempView, NegotiatedDesc.DebugName + '.AliasedView');
+  end;
 end;
 
 constructor TVulkanRHITexture.CreateSwapchainWrapper(const ADevice: TVulkanRHIDevice;
@@ -7480,6 +7531,8 @@ begin
   CreateInfo.codeSize := ASizeInBytes;
   CreateInfo.pCode := PUInt32(ASPIRVBinary);
   CheckVk(vkCreateShaderModule(ADevice.Handle, @CreateInfo, nil, @FHandle), 'vkCreateShaderModule');
+  if (ADebugName <> '') and (FHandle <> VK_NULL_HANDLE) then
+    ADevice.SetDebugObjectName(VK_OBJECT_TYPE_SHADER_MODULE, FHandle, ADebugName);
 end;
 
 procedure TVulkanRHIShaderModule.ReleaseDeviceResources;
@@ -7961,7 +8014,16 @@ begin
 
     if (FPreRasterizationLibrary <> VK_NULL_HANDLE) and
        (FFragmentShaderLibrary <> VK_NULL_HANDLE) then
+    begin
       CheckVk(vkCreateGraphicsPipelines(ADevice.Handle, ADevice.PipelineCache, 1, @PipelineInfo, nil, @FHandle), 'vkCreateGraphicsPipelines(GPL-Link)');
+      if FHandle <> VK_NULL_HANDLE then
+      begin
+        if (ADesc.VertexShader <> nil) and (ADesc.VertexShader.DebugName <> '') then
+          ADevice.SetDebugObjectName(VK_OBJECT_TYPE_PIPELINE, FHandle, ADesc.VertexShader.DebugName + '_GPLPipeline')
+        else
+          ADevice.SetDebugObjectName(VK_OBJECT_TYPE_PIPELINE, FHandle, 'CastleGraphicsPipelineGPL');
+      end;
+    end;
     Exit;
   end;
 
@@ -8163,6 +8225,13 @@ begin
 
   if StageCount > 0 then
     CheckVk(vkCreateGraphicsPipelines(ADevice.Handle, ADevice.PipelineCache, 1, @PipelineInfo, nil, @FHandle), 'vkCreateGraphicsPipelines');
+  if ADesc.DebugName <> '' then
+  begin
+    if FHandle <> VK_NULL_HANDLE then
+      ADevice.SetDebugObjectName(VK_OBJECT_TYPE_PIPELINE, FHandle, ADesc.DebugName);
+    if FPipelineLayout <> VK_NULL_HANDLE then
+      ADevice.SetDebugObjectName(VK_OBJECT_TYPE_PIPELINE_LAYOUT, FPipelineLayout, ADesc.DebugName + '.Layout');
+  end;
 end;
 
 procedure TVulkanRHIPipeline.ReleaseDeviceResources;
@@ -8249,6 +8318,13 @@ begin
     CheckVk(vkCreateComputePipelines(ADevice.Handle, ADevice.PipelineCache, 1,
       @ComputeInfo, nil, @FHandle), 'vkCreateComputePipelines');
   end;
+  if ADesc.DebugName <> '' then
+  begin
+    if FHandle <> VK_NULL_HANDLE then
+      ADevice.SetDebugObjectName(VK_OBJECT_TYPE_PIPELINE, FHandle, ADesc.DebugName);
+    if FPipelineLayout <> VK_NULL_HANDLE then
+      ADevice.SetDebugObjectName(VK_OBJECT_TYPE_PIPELINE_LAYOUT, FPipelineLayout, ADesc.DebugName + '.Layout');
+  end;
 end;
 
 procedure TVulkanRHIComputePipeline.ReleaseDeviceResources;
@@ -8294,6 +8370,13 @@ begin
       PoolInfo.queryType := VK_QUERY_TYPE_OCCLUSION;
     PoolInfo.queryCount := Count;
     CheckVk(vkCreateQueryPool(ADevice.Handle, @PoolInfo, nil, @FHandle), 'vkCreateQueryPool');
+    if FHandle <> VK_NULL_HANDLE then
+    begin
+      if ADesc.QueryType = qtTimestamp then
+        ADevice.SetDebugObjectName(VK_OBJECT_TYPE_QUERY_POOL, FHandle, 'CastleTimestampQueryPool')
+      else
+        ADevice.SetDebugObjectName(VK_OBJECT_TYPE_QUERY_POOL, FHandle, 'CastleOcclusionQueryPool');
+    end;
     if ADevice.SupportsHostQueryReset and Assigned(vkResetQueryPool) then
     begin
       vkResetQueryPool(ADevice.Handle, FHandle, 0, Count);
@@ -8471,6 +8554,10 @@ begin
   FDynamicBlendConstants := Vector4(1.0, 1.0, 1.0, 1.0);
   FBlendConstantsUpdateCount := 0;
   FSecondaryExecuteCount := 0;
+  FDebugGroupPushCount := 0;
+  FDebugGroupPopCount := 0;
+  FDebugMarkerCount := 0;
+  FLastDebugLabelName := '';
   FIsRendering := False;
   FActiveRenderingHasColor := False;
   FActiveRenderingColorFormat := pfUndefined;
@@ -9999,7 +10086,10 @@ var
   LabelInfo: VkDebugUtilsLabelEXT;
   AnsiLabel: AnsiString;
 begin
-  if Assigned(vkCmdBeginDebugUtilsLabelEXT) and (FHandle <> nil) then
+  Inc(FDebugGroupPushCount);
+  FLastDebugLabelName := LabelName;
+  if (FDevice <> nil) and FDevice.DebugUtilsActive and
+     Assigned(vkCmdBeginDebugUtilsLabelEXT) and (FHandle <> nil) then
   begin
     AnsiLabel := AnsiString(LabelName);
     FillChar(LabelInfo, SizeOf(LabelInfo), 0);
@@ -10012,8 +10102,29 @@ end;
 
 procedure TVulkanRHICommandList.PopDebugGroup;
 begin
-  if Assigned(vkCmdEndDebugUtilsLabelEXT) and (FHandle <> nil) then
+  Inc(FDebugGroupPopCount);
+  if (FDevice <> nil) and FDevice.DebugUtilsActive and
+     Assigned(vkCmdEndDebugUtilsLabelEXT) and (FHandle <> nil) then
     vkCmdEndDebugUtilsLabelEXT(FHandle);
+end;
+
+procedure TVulkanRHICommandList.InsertDebugMarker(const LabelName: String; const Color: TCastleColor);
+var
+  LabelInfo: VkDebugUtilsLabelEXT;
+  AnsiLabel: AnsiString;
+begin
+  Inc(FDebugMarkerCount);
+  FLastDebugLabelName := LabelName;
+  if (FDevice <> nil) and FDevice.DebugUtilsActive and
+     Assigned(vkCmdInsertDebugUtilsLabelEXT) and (FHandle <> nil) then
+  begin
+    AnsiLabel := AnsiString(LabelName);
+    FillChar(LabelInfo, SizeOf(LabelInfo), 0);
+    LabelInfo.sType := VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    LabelInfo.pLabelName := PAnsiChar(AnsiLabel);
+    Move(Color.Data, LabelInfo.color, SizeOf(Single) * 4);
+    vkCmdInsertDebugUtilsLabelEXT(FHandle, @LabelInfo);
+  end;
 end;
 
 { ---------------------------------------------------------------------------- }
@@ -22678,6 +22789,124 @@ begin
   Result := FDefaultSampler;
 end;
 
+function TVulkanRHIDevice.GetDefaultShadowSampler: TVulkanRHISampler;
+var
+  SampDesc: TRHISamplerDesc;
+begin
+  if FDefaultShadowSampler = nil then
+  begin
+    FillChar(SampDesc, SizeOf(SampDesc), 0);
+    SampDesc.MinFilter := sfLinear;
+    SampDesc.MagFilter := sfLinear;
+    SampDesc.MipFilter := sfNearest;
+    SampDesc.AddressModeU := amClampToEdge;
+    SampDesc.AddressModeV := amClampToEdge;
+    SampDesc.AddressModeW := amClampToEdge;
+    SampDesc.MaxAnisotropy := 1.0;
+    SampDesc.MaxLod := 0.0;
+    SampDesc.CompareEnable := True;
+    SampDesc.CompareOp := coLessOrEqual;
+    FDefaultShadowSampler := CreateSampler(SampDesc) as TVulkanRHISampler;
+  end;
+  Result := FDefaultShadowSampler;
+end;
+
+function TVulkanRHIDevice.GetDefaultWhiteTexture: TVulkanRHITexture;
+var
+  TexDesc: TRHITextureDesc;
+  Img: TRGBAlphaImage;
+begin
+  if FDefaultWhiteTexture = nil then
+  begin
+    TexDesc := TRHITextureDesc.Create2D(1, 1, pfRGBA8_UNorm, [tuSampled, tuTransferDst], 1);
+    TexDesc.DebugName := 'CastleDefaultWhiteTex';
+    FDefaultWhiteTexture := CreateTexture(TexDesc) as TVulkanRHITexture;
+    Img := TRGBAlphaImage.Create(1, 1);
+    try
+      Img.PixelPtr(0, 0)^ := Vector4Byte(255, 255, 255, 255);
+      FDefaultWhiteTexture.UploadImage(Img, 0, 0);
+    finally
+      FreeAndNil(Img);
+    end;
+    if (FDevice <> nil) and (FStagingUploader <> nil) and
+       not ((ActiveCommandList <> nil) and ActiveCommandList.IsRendering) then
+      FlushStagingUploads(nil);
+  end;
+  Result := FDefaultWhiteTexture;
+end;
+
+function TVulkanRHIDevice.GetDefaultBlackTexture: TVulkanRHITexture;
+var
+  TexDesc: TRHITextureDesc;
+  Img: TRGBAlphaImage;
+begin
+  if FDefaultBlackTexture = nil then
+  begin
+    TexDesc := TRHITextureDesc.Create2D(1, 1, pfRGBA8_UNorm, [tuSampled, tuTransferDst], 1);
+    TexDesc.DebugName := 'CastleDefaultBlackTex';
+    FDefaultBlackTexture := CreateTexture(TexDesc) as TVulkanRHITexture;
+    Img := TRGBAlphaImage.Create(1, 1);
+    try
+      Img.PixelPtr(0, 0)^ := Vector4Byte(0, 0, 0, 255);
+      FDefaultBlackTexture.UploadImage(Img, 0, 0);
+    finally
+      FreeAndNil(Img);
+    end;
+    if (FDevice <> nil) and (FStagingUploader <> nil) and
+       not ((ActiveCommandList <> nil) and ActiveCommandList.IsRendering) then
+      FlushStagingUploads(nil);
+  end;
+  Result := FDefaultBlackTexture;
+end;
+
+function TVulkanRHIDevice.GetDefaultFlatNormalTexture: TVulkanRHITexture;
+var
+  TexDesc: TRHITextureDesc;
+  Img: TRGBAlphaImage;
+begin
+  if FDefaultFlatNormalTexture = nil then
+  begin
+    TexDesc := TRHITextureDesc.Create2D(1, 1, pfRGBA8_UNorm, [tuSampled, tuTransferDst], 1);
+    TexDesc.DebugName := 'CastleDefaultFlatNormalTex';
+    FDefaultFlatNormalTexture := CreateTexture(TexDesc) as TVulkanRHITexture;
+    Img := TRGBAlphaImage.Create(1, 1);
+    try
+      Img.PixelPtr(0, 0)^ := Vector4Byte(128, 128, 255, 255);
+      FDefaultFlatNormalTexture.UploadImage(Img, 0, 0);
+    finally
+      FreeAndNil(Img);
+    end;
+    if (FDevice <> nil) and (FStagingUploader <> nil) and
+       not ((ActiveCommandList <> nil) and ActiveCommandList.IsRendering) then
+      FlushStagingUploads(nil);
+  end;
+  Result := FDefaultFlatNormalTexture;
+end;
+
+function TVulkanRHIDevice.GetDefaultShadowDepthTexture: TVulkanRHITexture;
+var
+  TexDesc: TRHITextureDesc;
+  FloatImg: TRGBAlphaFloatImage;
+begin
+  if FDefaultShadowDepthTexture = nil then
+  begin
+    TexDesc := TRHITextureDesc.Create2D(1, 1, pfD32_Float, [tuSampled, tuTransferDst], 1);
+    TexDesc.DebugName := 'CastleDefaultShadowDepthTex';
+    FDefaultShadowDepthTexture := CreateTexture(TexDesc) as TVulkanRHITexture;
+    FloatImg := TRGBAlphaFloatImage.Create(1, 1);
+    try
+      FloatImg.PixelPtr(0, 0)^ := Vector4(1.0, 1.0, 1.0, 1.0);
+      FDefaultShadowDepthTexture.UploadImage(FloatImg, 0, 0);
+    finally
+      FreeAndNil(FloatImg);
+    end;
+    if (FDevice <> nil) and (FStagingUploader <> nil) and
+       not ((ActiveCommandList <> nil) and ActiveCommandList.IsRendering) then
+      FlushStagingUploads(nil);
+  end;
+  Result := FDefaultShadowDepthTexture;
+end;
+
 function TVulkanRHIDevice.GetComputeCuller: TCastleVulkanComputeCuller;
 begin
   if FComputeCuller = nil then
@@ -23152,6 +23381,11 @@ begin
   FreeAndNil(FPrewarm3DFragmentShader);
   FreeAndNil(FPrewarm2DVertexShader);
   FreeAndNil(FPrewarm2DFragmentShader);
+  FreeAndNil(FDefaultShadowDepthTexture);
+  FreeAndNil(FDefaultFlatNormalTexture);
+  FreeAndNil(FDefaultBlackTexture);
+  FreeAndNil(FDefaultWhiteTexture);
+  FreeAndNil(FDefaultShadowSampler);
   FreeAndNil(FDefaultSampler);
   FDeferResourceDestruction := False;
   ReleaseRemainingDeviceResources;
@@ -23246,7 +23480,10 @@ begin
     SetLength(ExtNames, 0);
 
   HasDebugUtilsExt := False;
-  if WantValidation and IsVulkanInstanceExtensionSupported(VK_EXT_debug_utils) then
+  if (WantValidation or
+      (GetEnvironmentVariable('CASTLE_VULKAN_DEBUG_UTILS') = '1') or
+      (GetEnvironmentVariable('RENDERDOC_CAPFILE') <> '')) and
+     IsVulkanInstanceExtensionSupported(VK_EXT_debug_utils) then
   begin
     HasDebugUtilsExt := True;
     for I := 0 to High(ExtNames) do
@@ -24025,11 +24262,20 @@ begin
   vkGetDeviceQueue(FDevice, FPresentQueueFamily, 0, @FPresentQueue);
   vkGetDeviceQueue(FDevice, FTransferQueueFamily, 0, @FTransferQueue);
 
+  if FDevice <> nil then
+    SetDebugObjectName(VK_OBJECT_TYPE_DEVICE, UInt64(PtrUInt(FDevice)), 'CastleVulkanDevice');
+  if FGraphicsQueue <> nil then
+    SetDebugObjectName(VK_OBJECT_TYPE_QUEUE, UInt64(PtrUInt(FGraphicsQueue)), 'CastleGraphicsQueue');
+  if (FTransferQueue <> nil) and (FTransferQueue <> FGraphicsQueue) then
+    SetDebugObjectName(VK_OBJECT_TYPE_QUEUE, UInt64(PtrUInt(FTransferQueue)), 'CastleTransferQueue');
+
   if Assigned(vkCreatePipelineCache) then
   begin
     FillChar(CacheInfo, SizeOf(CacheInfo), 0);
     CacheInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
     CheckVk(vkCreatePipelineCache(FDevice, @CacheInfo, nil, @FPipelineCache), 'vkCreatePipelineCache');
+    if FPipelineCache <> VK_NULL_HANDLE then
+      SetDebugObjectName(VK_OBJECT_TYPE_PIPELINE_CACHE, FPipelineCache, 'CastlePipelineCache');
   end;
 end;
 
@@ -24955,6 +25201,8 @@ begin
     CreateInfo.oldSwapchain := OldSwapchain;
 
     CheckVk(vkCreateSwapchainKHR(FDevice, @CreateInfo, nil, @FSwapchain), 'vkCreateSwapchainKHR');
+    if FSwapchain <> VK_NULL_HANDLE then
+      SetDebugObjectName(VK_OBJECT_TYPE_SWAPCHAIN_KHR, FSwapchain, 'CastleSwapchain');
   finally
     if (OldSwapchain <> VK_NULL_HANDLE) and (FDevice <> nil) and Assigned(vkDestroySwapchainKHR) then
       vkDestroySwapchainKHR(FDevice, OldSwapchain, nil);
@@ -26918,6 +27166,73 @@ begin
     '%sVulkan validation gate failed (%d errors, %d warnings; strict=%s). %s',
     [CtxPrefix, FValidationErrorCount, FValidationWarningCount,
      BoolToStr(FStrictValidationGate, True), GetValidationMessagesReport]);
+end;
+
+function TVulkanRHIDevice.SetDebugObjectName(const AObjectType: VkObjectType;
+  const AObjectHandle: UInt64; const AObjectName: String): Boolean;
+var
+  NameInfo: VkDebugUtilsObjectNameInfoEXT;
+  AnsiName: AnsiString;
+begin
+  Result := False;
+  if (AObjectHandle = 0) or (AObjectName = '') then
+    Exit;
+
+  Inc(FDebugObjectsNamedCount);
+  FLastNamedDebugObject := AObjectName;
+
+  if FDebugUtilsActive and (FDevice <> nil) and Assigned(vkSetDebugUtilsObjectNameEXT) then
+  begin
+    AnsiName := AnsiString(AObjectName);
+    FillChar(NameInfo, SizeOf(NameInfo), 0);
+    NameInfo.sType := VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+    NameInfo.objectType := AObjectType;
+    NameInfo.objectHandle := AObjectHandle;
+    NameInfo.pObjectName := PAnsiChar(AnsiName);
+    Result := vkSetDebugUtilsObjectNameEXT(FDevice, @NameInfo) = VK_SUCCESS;
+  end else
+  if FDevice = nil then
+    Result := True;
+end;
+
+procedure TVulkanRHIDevice.BeginQueueDebugLabel(const ALabelName: String;
+  const AColor: TCastleColor);
+var
+  LabelInfo: VkDebugUtilsLabelEXT;
+  AnsiLabel: AnsiString;
+begin
+  if FDebugUtilsActive and (FGraphicsQueue <> nil) and Assigned(vkQueueBeginDebugUtilsLabelEXT) then
+  begin
+    AnsiLabel := AnsiString(ALabelName);
+    FillChar(LabelInfo, SizeOf(LabelInfo), 0);
+    LabelInfo.sType := VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    LabelInfo.pLabelName := PAnsiChar(AnsiLabel);
+    Move(AColor.Data, LabelInfo.color, SizeOf(Single) * 4);
+    vkQueueBeginDebugUtilsLabelEXT(FGraphicsQueue, @LabelInfo);
+  end;
+end;
+
+procedure TVulkanRHIDevice.EndQueueDebugLabel;
+begin
+  if FDebugUtilsActive and (FGraphicsQueue <> nil) and Assigned(vkQueueEndDebugUtilsLabelEXT) then
+    vkQueueEndDebugUtilsLabelEXT(FGraphicsQueue);
+end;
+
+procedure TVulkanRHIDevice.InsertQueueDebugLabel(const ALabelName: String;
+  const AColor: TCastleColor);
+var
+  LabelInfo: VkDebugUtilsLabelEXT;
+  AnsiLabel: AnsiString;
+begin
+  if FDebugUtilsActive and (FGraphicsQueue <> nil) and Assigned(vkQueueInsertDebugUtilsLabelEXT) then
+  begin
+    AnsiLabel := AnsiString(ALabelName);
+    FillChar(LabelInfo, SizeOf(LabelInfo), 0);
+    LabelInfo.sType := VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    LabelInfo.pLabelName := PAnsiChar(AnsiLabel);
+    Move(AColor.Data, LabelInfo.color, SizeOf(Single) * 4);
+    vkQueueInsertDebugUtilsLabelEXT(FGraphicsQueue, @LabelInfo);
+  end;
 end;
 
 end.

@@ -202,7 +202,8 @@ uses Math,
   CastleStringUtils, CastleGLVersion, CastleLog, CastleInternalGLCubeMaps,
   X3DCameraUtils, CastleProjection, CastleTriangles,
   CastleCameras, CastleSceneInternalShape, CastleApplicationProperties,
-  CastleRenderContext, CastleInternalGLUtils, CastleTimeUtils, CastleUriUtils;
+  CastleRenderContext, CastleInternalGLUtils, CastleTimeUtils, CastleUriUtils
+  {$ifndef WASI} , CastleInternalRHI_Vulkan {$endif};
 
 {$define read_implementation}
 
