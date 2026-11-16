@@ -192,7 +192,7 @@ begin
       'Bearer secret-mcp-token');
     AssertEquals('', RespStr);
 
-    { tools/list returns all 12 MCP tools }
+    { tools/list returns all 14 MCP tools }
     RespStr := Server.HandleJsonRpcString(
       '{"jsonrpc":"2.0","id":4,"method":"tools/list"}',
       'Bearer secret-mcp-token');
@@ -200,7 +200,7 @@ begin
     try
       RespObj := TJSONObject(JsonData);
       ToolsArr := RespObj.Objects['result'].Arrays['tools'];
-      AssertEquals(12, ToolsArr.Count);
+      AssertEquals(14, ToolsArr.Count);
     finally
       FreeAndNil(JsonData);
     end;

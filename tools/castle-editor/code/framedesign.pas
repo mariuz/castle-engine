@@ -43,7 +43,7 @@ uses
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -816,6 +816,8 @@ type
       MenuTreeViewItemVolumetricStudio: TMenuItem;
       ButtonGeometryScript: TSpeedButton;
       MenuTreeViewItemGeometryScript: TMenuItem;
+      ButtonPlaytestGauntlet: TSpeedButton;
+      MenuTreeViewItemPlaytestGauntlet: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1329,6 +1331,8 @@ type
     procedure MenuTreeViewItemVolumetricStudioClick(Sender: TObject);
     procedure ButtonGeometryScriptClick(Sender: TObject);
     procedure MenuTreeViewItemGeometryScriptClick(Sender: TObject);
+    procedure ButtonPlaytestGauntletClick(Sender: TObject);
+    procedure MenuTreeViewItemPlaytestGauntletClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2805,6 +2809,7 @@ type
     procedure ShowTilemapStudioDialog;
     procedure ShowVolumetricStudioDialog;
     procedure ShowGeometryScriptDialog;
+    procedure ShowPlaytestGauntletDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -2826,7 +2831,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -6757,7 +6762,7 @@ begin
   ButtonStudioHub.Caption := 'Studios';
   ButtonStudioHub.Font.Style := [Graphics.fsBold];
   ButtonStudioHub.Hint := 'Open Unified Editor Studio Hub & World Readiness Dashboard.' + NL +
-    'Search and quick-launch all 36 Horizon 2-5 studios across 6 domains or audit cross-studio integration health.';
+    'Search and quick-launch all 46 Horizon 2-6 studios across 6 domains or audit cross-studio integration health.';
   ButtonStudioHub.ShowHint := true;
   ButtonStudioHub.AutoSize := true;
   ButtonStudioHub.Constraints.MinHeight := 33;
@@ -7440,6 +7445,21 @@ begin
   if ButtonVolumetricStudio.Parent = PanelMiddleTop then
     PanelMiddleTop.SetControlIndex(ButtonGeometryScript,
       PanelMiddleTop.GetControlIndex(ButtonVolumetricStudio) + 1);
+
+  ButtonPlaytestGauntlet := TSpeedButton.Create(Self);
+  ButtonPlaytestGauntlet.Caption := 'Gauntlet';
+  ButtonPlaytestGauntlet.Hint := 'Open Gauntlet Automated Playtest Bot & CI Smoke-Test Studio.' + NL +
+    'Run deterministic multi-system smoke tests, Kill-Z/NaN guards, non-destructive world restore & JUnit XML export.';
+  ButtonPlaytestGauntlet.ShowHint := true;
+  ButtonPlaytestGauntlet.AutoSize := true;
+  ButtonPlaytestGauntlet.Constraints.MinHeight := 33;
+  ButtonPlaytestGauntlet.Constraints.MinWidth := 62;
+  ButtonPlaytestGauntlet.BorderSpacing.Left := 2;
+  ButtonPlaytestGauntlet.OnClick := @ButtonPlaytestGauntletClick;
+  ButtonPlaytestGauntlet.Parent := PanelMiddleTop;
+  if ButtonGeometryScript.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonPlaytestGauntlet,
+      PanelMiddleTop.GetControlIndex(ButtonGeometryScript) + 1);
 
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
@@ -10490,6 +10510,11 @@ begin
   MenuTreeViewItemGeometryScript.Caption := 'Geometry Script Mesh Stack && 3D L-System Studio...';
   MenuTreeViewItemGeometryScript.OnClick := @MenuTreeViewItemGeometryScriptClick;
   MenuTreeView.Items.Add(MenuTreeViewItemGeometryScript);
+
+  MenuTreeViewItemPlaytestGauntlet := TMenuItem.Create(Self);
+  MenuTreeViewItemPlaytestGauntlet.Caption := 'Gauntlet Automated Playtest Bot && CI Smoke-Test Studio...';
+  MenuTreeViewItemPlaytestGauntlet.OnClick := @MenuTreeViewItemPlaytestGauntletClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemPlaytestGauntlet);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -56035,6 +56060,7 @@ begin
   else if SameText(AStudioId, 'tilemap_studio') then ShowTilemapStudioDialog
   else if SameText(AStudioId, 'volumetric_studio') then ShowVolumetricStudioDialog
   else if SameText(AStudioId, 'geometry_script') then ShowGeometryScriptDialog
+  else if SameText(AStudioId, 'playtest_gauntlet') then ShowPlaytestGauntletDialog
   else
     Result := False;
 end;
@@ -56309,6 +56335,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemGeometryScriptClick(Sender: TObject);
 begin
   ShowGeometryScriptDialog;
+end;
+
+procedure TDesignFrame.ShowPlaytestGauntletDialog;
+var
+  Dlg: TPlaytestGauntletForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TPlaytestGauntletForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonPlaytestGauntletClick(Sender: TObject);
+begin
+  ShowPlaytestGauntletDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemPlaytestGauntletClick(Sender: TObject);
+begin
+  ShowPlaytestGauntletDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

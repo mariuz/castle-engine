@@ -639,6 +639,7 @@ type
       MenuItemTilemapStudio: TMenuItem;
       MenuItemVolumetricStudio: TMenuItem;
       MenuItemGeometryScript: TMenuItem;
+      MenuItemPlaytestGauntlet: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -698,6 +699,7 @@ type
     procedure MenuItemTilemapStudioClick(Sender: TObject);
     procedure MenuItemVolumetricStudioClick(Sender: TObject);
     procedure MenuItemGeometryScriptClick(Sender: TObject);
+    procedure MenuItemPlaytestGauntletClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2517,6 +2519,11 @@ begin
   MenuItemGeometryScript.Caption := 'Geometry Script Procedural Mesh Stack & 3D L-System Studio...';
   MenuItemGeometryScript.OnClick := @MenuItemGeometryScriptClick;
   MenuItemDesign.Add(MenuItemGeometryScript);
+
+  MenuItemPlaytestGauntlet := TMenuItem.Create(MenuItemDesign);
+  MenuItemPlaytestGauntlet.Caption := 'Gauntlet Automated Playtest Bot & CI Smoke-Test Studio...';
+  MenuItemPlaytestGauntlet.OnClick := @MenuItemPlaytestGauntletClick;
+  MenuItemDesign.Add(MenuItemPlaytestGauntlet);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5727,6 +5734,12 @@ procedure TProjectForm.MenuItemGeometryScriptClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowGeometryScriptDialog;
+end;
+
+procedure TProjectForm.MenuItemPlaytestGauntletClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowPlaytestGauntletDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

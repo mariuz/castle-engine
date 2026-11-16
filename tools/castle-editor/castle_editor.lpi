@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="123">
+    <Units Count="125">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -697,6 +697,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormGeometryScript"/>
       </Unit122>
+      <Unit123>
+        <Filename Value="../common-code/toolplaytestgauntlet.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolPlaytestGauntlet"/>
+      </Unit123>
+      <Unit124>
+        <Filename Value="code/formplaytestgauntlet.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormPlaytestGauntlet"/>
+      </Unit124>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

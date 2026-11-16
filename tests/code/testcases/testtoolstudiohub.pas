@@ -47,16 +47,16 @@ var
   Matches: TStudioCatalogEntryArray;
   Entry: TStudioCatalogEntry;
 begin
-  { Verify all 36 Horizon 2-5 studios are indexed across all 6 domain categories }
-  AssertEquals(36, TStudioHubManager.StudioCount);
+  { Verify all 46 Horizon 2-6 studios are indexed across all 6 domain categories }
+  AssertEquals(46, TStudioHubManager.StudioCount);
 
   for Cat in TStudioHubCategory do
   begin
     TStudioHubManager.FilterStudios(Ord(Cat), '', Matches);
-    AssertTrue(Length(Matches) >= 4);
+    AssertTrue(Length(Matches) >= 5);
   end;
 
-  { Multi-token case-insensitive search queries }
+  { Multi-token case-insensitive search queries across Horizons 2-6 }
   TStudioHubManager.FilterStudios(-1, 'gerstner buoyancy', Matches);
   AssertEquals(1, Length(Matches));
   AssertEquals('water_studio', Matches[0].StudioId);
@@ -68,6 +68,18 @@ begin
   TStudioHubManager.FilterStudios(-1, 'gas cooldown', Matches);
   AssertEquals(1, Length(Matches));
   AssertEquals('ability_studio', Matches[0].StudioId);
+
+  TStudioHubManager.FilterStudios(-1, 'ackermann pacejka', Matches);
+  AssertEquals(1, Length(Matches));
+  AssertEquals('vehicle_studio', Matches[0].StudioId);
+
+  TStudioHubManager.FilterStudios(-1, 'gauntlet junit', Matches);
+  AssertEquals(1, Length(Matches));
+  AssertEquals('playtest_gauntlet', Matches[0].StudioId);
+
+  TStudioHubManager.FilterStudios(-1, 'phase 325', Matches);
+  AssertEquals(1, Length(Matches));
+  AssertEquals('geometry_script', Matches[0].StudioId);
 
   TStudioHubManager.FilterStudios(-1, 'phase 315', Matches);
   AssertEquals(1, Length(Matches));

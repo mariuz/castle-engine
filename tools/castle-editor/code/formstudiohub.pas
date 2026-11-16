@@ -15,9 +15,9 @@
 
 { Unified Editor Studio Hub, Categorized Quick-Launch Command Palette &
   Cross-Studio World Readiness Dashboard (@link(TStudioHubForm)) consolidating
-  all 36 Horizon 2–5 studios with instant multi-token search, category filter
+  all 46 Horizon 2–6 studios with instant multi-token search, category filter
   pills, 1-click studio launch, a visual 0..100 World Readiness score gauge,
-  cross-studio fix navigation, and executive Markdown export (Phase 316). }
+  cross-studio fix navigation, and executive Markdown export (Phases 316 & 326). }
 unit FormStudioHub;
 
 {$mode objfpc}{$H+}

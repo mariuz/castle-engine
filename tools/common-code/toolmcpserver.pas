@@ -203,7 +203,7 @@ implementation
 uses Math, TypInfo, Contnrs, JsonParser, Base64, ssockets,
   CastleUtils, CastleStringUtils, CastleClassUtils, CastleInternalRttiUtils,
   CastleComponentSerialize, CastleUIControls, CastleControls, CastleTransform,
-  CastleViewport, CastleTransformManipulate, CastleLog;
+  CastleViewport, CastleTransformManipulate, CastleLog, ToolStudioHub;
 
 function McpAutonomyModeToString(const Mode: TMcpAutonomyMode): String;
 begin
@@ -978,6 +978,17 @@ begin
   AddToolDef('cge_run_build_command',
     'Trigger project compilation or clean inside Castle Game Engine Editor (requires FullControl autonomy mode).',
     P, ['command']);
+
+  P := TJSONObject.Create;
+  P.Add('query', MakePropSchema('string', 'Optional multi-token case-insensitive keyword filter (e.g. "ackermann", "gauntlet", "phase 325").'));
+  P.Add('category', MakePropSchema('integer', 'Optional studio domain index (-1 = all 6 domains, 0..5 = specific TStudioHubCategory).'));
+  AddToolDef('cge_list_studios',
+    'Search and list all 46 specialized Castle Game Engine Horizon 2-6 editor studios across 6 domains.',
+    P, []);
+
+  AddToolDef('cge_audit_world_readiness',
+    'Run a holistic cross-studio World Readiness QA audit across the currently open design, returning the 0..100 score, grade, subsystem counts, and actionable integration warnings.',
+    nil, []);
 end;
 
 function TCastleMcpServer.MakeToolTextResult(const TextContent: String;
@@ -1080,8 +1091,11 @@ var
   UI: TCastleUserInterface;
   ScreenshotImg: TRGBImage;
   PngStream: TMemoryStream;
-  ImgBlock, MetaBlock: TJSONObject;
+  ImgBlock, MetaBlock, StudioItemObj: TJSONObject;
   OutLines: TStringList;
+  StudioMatches: TStudioCatalogEntryArray;
+  HealthReport: TStudioWorldHealthReport;
+  CatFilter: Integer;
 begin
   IsToolError := false;
   DoLog('[MCP] Tool call: ' + ToolName);
@@ -1594,6 +1608,81 @@ begin
       Result := MakeToolTextResult(OutPayload.FormatJSON);
     finally
       FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_list_studios' then
+  begin
+    if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    FilterStr := '';
+    CatFilter := -1;
+    if ArgsObj <> nil then
+    begin
+      FilterStr := ArgsObj.Get('query', '');
+      CatFilter := ArgsObj.Get('category', -1);
+    end;
+    TStudioHubManager.FilterStudios(CatFilter, FilterStr, StudioMatches);
+    OutPayload := TJSONObject.Create;
+    ClassesArr := TJSONArray.Create;
+    try
+      OutPayload.Add('totalCatalogCount', TStudioHubManager.StudioCount);
+      OutPayload.Add('matchedCount', Length(StudioMatches));
+      for I := 0 to High(StudioMatches) do
+      begin
+        StudioItemObj := TJSONObject.Create;
+        StudioItemObj.Add('studioId', StudioMatches[I].StudioId);
+        StudioItemObj.Add('title', StudioMatches[I].Title);
+        StudioItemObj.Add('shortBadge', StudioMatches[I].ShortBadge);
+        StudioItemObj.Add('category', TStudioHubManager.CategoryDisplayName(StudioMatches[I].Category));
+        StudioItemObj.Add('phaseNumber', StudioMatches[I].PhaseNumber);
+        StudioItemObj.Add('summary', StudioMatches[I].Summary);
+        ClassesArr.Add(StudioItemObj);
+      end;
+      OutPayload.Add('studios', ClassesArr);
+      ClassesArr := nil;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(ClassesArr);
+      FreeAndNil(OutPayload);
+    end;
+    Exit;
+  end;
+
+  if ToolName = 'cge_audit_world_readiness' then
+  begin
+    if not RequireAutonomy(mamReadOnly, Result) then Exit;
+    ResolveDesignContext(DesignRoot, DesignOwner, DesignUrl, DesignModified);
+    if DesignRoot = nil then
+    begin
+      IsToolError := true;
+      Exit(MakeToolTextResult('No design is currently open.', true));
+    end;
+    HealthReport := TStudioHubManager.AuditEntireDesign(DesignRoot, DesignOwner);
+    OutPayload := TJSONObject.Create;
+    LinesArr := TJSONArray.Create;
+    try
+      OutPayload.Add('readinessScore', HealthReport.ReadinessScore);
+      OutPayload.Add('readinessGrade', HealthReport.ReadinessGrade);
+      OutPayload.Add('totalTransforms', HealthReport.TotalTransforms);
+      OutPayload.Add('totalUserInterfaces', HealthReport.TotalUserInterfaces);
+      OutPayload.Add('totalModernSubsystems', HealthReport.TotalModernSubsystems);
+      OutPayload.Add('issuesCount', Length(HealthReport.Issues));
+      for I := 0 to High(HealthReport.Issues) do
+      begin
+        StudioItemObj := TJSONObject.Create;
+        StudioItemObj.Add('severityPoints', HealthReport.Issues[I].SeverityPoints);
+        StudioItemObj.Add('recommendedStudioId', HealthReport.Issues[I].RecommendedStudioId);
+        StudioItemObj.Add('message', HealthReport.Issues[I].MessageText);
+        LinesArr.Add(StudioItemObj);
+      end;
+      OutPayload.Add('issues', LinesArr);
+      LinesArr := nil;
+      Result := MakeToolTextResult(OutPayload.FormatJSON);
+    finally
+      FreeAndNil(LinesArr);
+      FreeAndNil(OutPayload);
+      FreeAndNil(HealthReport);
     end;
     Exit;
   end;

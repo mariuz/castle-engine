@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–325** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–326** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3332,12 +3332,12 @@ Replay.ScrubToTime(Viewport, 0.125, DesignOwner);
 
 ---
 
-## 66AO. Unified Editor Studio Hub, Categorized Quick-Launch Dock & Cross-Studio World Readiness Dashboard (Phase 316)
+## 66AO. Unified Editor Studio Hub, Categorized Quick-Launch Dock & Cross-Studio World Readiness Dashboard (Phases 316 & 326)
 
-Castle Game Engine consolidates all **36** Horizon 2–5 studios and interactive brush modes into a searchable command-palette launcher and cross-studio QA auditor matching Unreal Engine 6.0+'s unified Editor Mode Hub:
+Castle Game Engine consolidates all **46** Horizon 2–6 studios and interactive brush modes into a searchable command-palette launcher and cross-studio QA auditor matching Unreal Engine 6.0+'s unified Editor Mode Hub:
 
 1. **Studio Hub Catalog & Cross-Studio Auditor (`tools/common-code/toolstudiohub.pas`)**:
-   - `TStudioHubManager` organizes all 36 studios across 6 domains (`shcWorldEnvironment`, `shcMaterialsVfxLighting`, `shcArchitecturePcg`, `shcCharactersAiGas`, `shcCinematicsAudioInput`, `shcPerformanceQaDeploy`) with multi-token instant search (`FilterStudios`).
+   - `TStudioHubManager` organizes all 46 studios across 6 domains (`shcWorldEnvironment`, `shcMaterialsVfxLighting`, `shcArchitecturePcg`, `shcCharactersAiGas`, `shcCinematicsAudioInput`, `shcPerformanceQaDeploy`) with multi-token instant search (`FilterStudios`) and MCP exposure (`cge_list_studios`, `cge_audit_world_readiness`).
    - `AuditEntireDesign` verifies cross-studio integration (e.g. `TCastleVirtualCamera` -> `TCastleVirtualCameraBrain`, `TCastleClothSurface.SyncWithWeather` -> `TCastleTimeOfDayWeather`, `TCastleBuoyancyBehavior` -> `TCastleWaterVolume`, `TCastleUtilityAiBehavior` -> `TCastleSmartObject`, `TCastleInputMapManager` conflict checks, and unresolved `dacBug` review pins), computing a `0..100` `ReadinessScore` and executive Markdown summary.
 2. **Unified Studio Hub Dialog (`TStudioHubForm` & `TDesignFrame.LaunchStudioById`)**:
    - Open via the bold **`Studios`** button in the top viewport bar, Hierarchy context menu, or **`Design -> Unified Editor Studio Hub & World Readiness Dashboard...`**.
@@ -3573,6 +3573,31 @@ OakTree.ApplyPreset(lspWeepingWillowTree);
 
 ---
 
+## 66AY. Gauntlet Automated Playtest Bot Runner, Smoke-Test Assertions & 46-Studio MCP Parity (Phase 326)
+
+Castle Game Engine provides an automated multi-system playtest smoke-test bot, non-destructive world restoration, JUnit XML CI export, and 46-studio MCP discovery matching Unreal Engine 6.0+'s Gauntlet Automation Framework:
+
+1. **Gauntlet Automated Playtest Runner (`tools/common-code/toolplaytestgauntlet.pas`)**:
+   - `TPlaytestGauntletRunner.RunSmokeTest` steps an open design across fixed timesteps (`StepDtSec = 0.05s`) driving Chaos Vehicles, 2D BlendSpaces/Montages, Tactical EQS, Utility AI, Gameplay Abilities, Iris Netcode, Quartz Music, Verlet Cloth/Ropes, and 2D Flipbooks while checking 6 invariant gates (`Finite3DTransformsNoNaNOrInf`, `KillZFloorFallthroughGuard`, `CrossStudioWorldReadinessGate`, `PlatformFrameBudgetGate`, `SaveSnapshotWorldRestoreDeterminism`, `DynamicSubsystemStepExecution`), restoring exact pre-run editor coordinates via `TCastleSaveSlotManager`, and exporting JUnit XML (`BuildJUnitXmlReport`) + Markdown (`BuildMarkdownReport`).
+2. **Gauntlet Studio & 14-Tool MCP Server (`TPlaytestGauntletForm`, `TCastleMcpServer`)**:
+   - Open via the top-bar **`Gauntlet`** button, Hierarchy context menu, **`Studios`** Hub (`playtest_gauntlet`), or **`Design -> Gauntlet Automated Playtest Bot & CI Smoke-Test Studio...`**.
+   - External AI agents can query `cge_list_studios` (`46` studios) and `cge_audit_world_readiness` over JSON-RPC 2.0 MCP.
+
+### Example Usage (Pascal API)
+```pascal
+Cfg := TPlaytestGauntletConfig.MakeDefault;
+Report := TPlaytestGauntletRunner.RunSmokeTest(Viewport, DesignOwner, Cfg);
+JUnitXml := TPlaytestGauntletRunner.BuildJUnitXmlReport(Report);
+FreeAndNil(Report);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Automated Tests](https://castle-engine.io/autotests) · [UE Gauntlet Automation Framework](https://dev.epicgames.com/documentation/en-us/unreal-engine/gauntlet-automation-framework-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Automated Builds & Testing (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Editor Workspace](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3638,8 +3663,8 @@ fpc -Mobjfpc -Sh -Ci -Cr -Co -gl -gh -dTEXT_RUNNER @castle-fpc.cfg \
 ./tests/castle_tester_standalone --console --filter=TTestCastleTransformManipulate*
 ```
 
-In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems include dedicated automated test suites:
-- **[`tests/code/testcases/testtoolmcpserver.pas`](../tests/code/testcases/testtoolmcpserver.pas) (`TTestToolMcpServer` — 3 tests)**: Verifies JSON-RPC 2.0 `initialize`, `ping`, `tools/list` (all 12 MCP tools), Bearer token authentication, all 4 `TMcpAutonomyMode` tiers (`Disabled`, `ReadOnly`, `EditWithUndo`, `FullControl`), live RTTI property inspection/mutation, layout actions (`align_y`, `snap_to_grid`), Base64 PNG viewport screenshot encoding, and live localhost multithreaded HTTP roundtrip (`GET /health` + `POST /mcp` with `CheckSynchronize` and `0 unfreed memory blocks`).
+In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5 & Horizon 6 editor subsystems include dedicated automated test suites:
+- **[`tests/code/testcases/testtoolmcpserver.pas`](../tests/code/testcases/testtoolmcpserver.pas) (`TTestToolMcpServer` — 3 tests)**: Verifies JSON-RPC 2.0 `initialize`, `ping`, `tools/list` (all 14 MCP tools), Bearer token authentication, all 4 `TMcpAutonomyMode` tiers (`Disabled`, `ReadOnly`, `EditWithUndo`, `FullControl`), live RTTI property inspection/mutation, layout actions (`align_y`, `snap_to_grid`), Base64 PNG viewport screenshot encoding, and live localhost multithreaded HTTP roundtrip (`GET /health` + `POST /mcp` with `CheckSynchronize` and `0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldesignsandboxdiff.pas`](../tests/code/testcases/testtooldesignsandboxdiff.pas) (`TTestToolDesignSandboxDiff` — 3 tests)**: Verifies `TDesignSandboxManager` creation, filtering, renaming, JSON persistence, and live instantiation, `TDesignDiffEngine` detection of `[+ Added]`, `[- Removed]`, and `[~ Modified]` components + subcomponent properties (`TranslationPersistent.X/Y/Z`, `SizePersistent.X/Y/Z`, `Caption`, `FontSize`), and `RevertSelectedToBase` selective restoration/deletion of individual properties and components (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testcastleterrain.pas`](../tests/code/testcases/testcastleterrain.pas) (`TTestCastleTerrain` — 4 tests)**: Verifies `TCastleTerrainImage` Raise/Lower/Smooth/Flatten sculpting with dynamic `MinLevel`/`MaxLevel` expansion + renormalization, `RayCastWorld`, non-destructive `EnsureEditableHeightLayer` `TCastleTerrainCombine` (`opAdd`) wrapping over `TCastleTerrainNoise`, `GenerateSplatmapFromProceduralLayers`, `PaintSplatmapAtWorldPoint` $R+G+B+A = 255$ partition-of-unity normalization, and PNG heightmap/splatmap save & reload roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolnprshaderstudio.pas`](../tests/code/testcases/testtoolnprshaderstudio.pas) (`TTestToolNprShaderStudio` — 2 tests)**: Verifies all 5 `TCastleStylizedShaderPreset` GLSL generators (`PLUG_lighting_apply`, `PLUG_material_light_diffuse`, `PLUG_fragment_modify`), X3D `TEffectNode` attach/enable/disable/remove lifecycle on `TCastleScene`, `.castle-transform` JSON serialization roundtrip, and `TLightShadowBudgetAuditor` multi-light overlap hotspot scoring, multi-shadow-volume conflict detection, `EnsureSingleShadowVolumeLight`, and `ClampUnboundedLightRadii` (`0 unfreed memory blocks`).
@@ -3676,7 +3701,7 @@ In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems inclu
 - **[`tests/code/testcases/testtoolclothstudio.pas`](../tests/code/testcases/testtoolclothstudio.pas) (`TTestToolClothStudio` — 2 tests)**: Verifies `TCastleClothSurface` top-edge vertex pinning, aerodynamic `+Z` wind deflection, `0.60m` sphere collider world repulsion across every unpinned particle, `TCastleTimeOfDayWeather` storm wind coupling, `csTransient`-clean JSON roundtrips, and `TCastleVerletRope` `rpmBothEndsCatenary` equilibrium sag (`LowestSagLocalY < -1.10m`) + `rpmStartOnlyPendulum` wind swing (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolutilityai.pas`](../tests/code/testcases/testtoolutilityai.pas) (`TTestToolUtilityAi` — 2 tests)**: Verifies `EvaluateUtilityCurve` (`LinearDeficit`, `QuadraticUrgency`, `LogisticSigmoid`, `InverseAbundance`), single-slot `Campfire` contention (`AgentA` claims `Campfire`, `AgentB` falls back to `Tavern`), need restoration & slot release, `ConfigJson` & `csTransient`-clean JSON roundtrips, and RVO-style neighbor crowd separation (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolsavereplay.pas`](../tests/code/testcases/testtoolsavereplay.pas) (`TTestToolSaveReplay` — 2 tests)**: Verifies `TCastleSaveSlotManager` multi-system world snapshot capture & restoration across `TCastleTransform` poses/visibility, `TCastleAbilitySystemBehavior` HP/Mana/tags/cooldowns, and `TCastleQuestTracker` state + `v1 -> v2` schema migration (`PlayerGold -> Economy.Gold`), and verifies `TCastleReplayRecorder` keyframe/cue recording, `ExportReplayJson`/`ImportReplayJson`, midpoint quaternion `SLerp` pose scrubbing, and `OnCueFired` event playback (`0 unfreed memory blocks`).
-- **[`tests/code/testcases/testtoolstudiohub.pas`](../tests/code/testcases/testtoolstudiohub.pas) (`TTestToolStudioHub` — 2 tests)**: Verifies all 36 Horizon 2–5 studios across 6 `TStudioHubCategory` buckets + multi-token case-insensitive keyword/phase search filtering, and verifies `TStudioHubManager.AuditEntireDesign` detection and full 100/100 `A+ Ship-Ready` remediation across 6 cross-studio integration hazards (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolstudiohub.pas`](../tests/code/testcases/testtoolstudiohub.pas) (`TTestToolStudioHub` — 2 tests)**: Verifies all 46 Horizon 2–6 studios across 6 `TStudioHubCategory` buckets + multi-token case-insensitive keyword/phase search filtering, and verifies `TStudioHubManager.AuditEntireDesign` detection and full 100/100 `A+ Ship-Ready` remediation across cross-studio integration hazards (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolvehiclestudio.pas`](../tests/code/testcases/testtoolvehiclestudio.pas) (`TTestToolVehicleStudio` — 2 tests)**: Verifies exact Ackermann steering inner/outer cotangent invariant ($\cot\delta_{\text{outer}} - \cot\delta_{\text{inner}} = W / L$), engine torque curve peak & rev-limiter cutoff, 4-wheel `WorldRay` Hooke suspension equilibrium & raised-platform nose-up pitch, automatic multi-gear upshifting, handbrake rear slip amplification, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolblendmontage.pas`](../tests/code/testcases/testtoolblendmontage.pas) (`TTestToolBlendMontage` — 2 tests)**: Verifies 2D Gradient Band Interpolation Kronecker delta, collinear outer-ring shadowing (`RunForward = 0.0` halfway between `Idle` and `WalkForward`), partition of unity, exponential parameter damping, `ConfigJson` roundtrips, `Montage.ComboWindow` combo branching (`Slash1 -> Slash2 -> HeavyFinisher`), `Status.Immunity.DodgeIframe` tag windows, and Hermite `1.20m` melee standoff motion warping (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooleqsstudio.pas`](../tests/code/testcases/testtooleqsstudio.pas) (`TTestToolEqsStudio` — 2 tests)**: Verifies `epTakeCoverFromThreat` `WorldRay` cover occlusion behind `CoverWall`, unwalkable `3.0m` wall-top candidate rejection, `epSniperLineOfSightVantage` `2.8m` high-ground balcony selection, `epFlankRearSurround` $180^\circ$ rear-hemisphere flank scoring & `AutoMoveToBestSpot` steering, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
@@ -3686,4 +3711,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems inclu
 - **[`tests/code/testcases/testtooltilemapstudio.pas`](../tests/code/testcases/testtooltilemapstudio.pas) (`TTestToolTilemapStudio` — 2 tests)**: Verifies 4-bit cardinal (`0..15`) & 8-bit corner-gated Blob (`0..255`) auto-tile masks, exact 2D greedy collider merging (`6x4 = 24` cells -> `1` box) with `WorldRay` hit verification, `csTransient`-clean JSON roundtrips, and `TCastleFlipbook2D` UV sub-rect stepping, non-loop hold, and frame-exact `OnFlipbookNotify` firing (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolvolumetricstudio.pas`](../tests/code/testcases/testtoolvolumetricstudio.pas) (`TTestToolVolumetricStudio` — 2 tests)**: Verifies valley vs. mountaintop exponential height fog optical depth, exact inclined-ray $A \leftrightarrow B$ transmittance reciprocity, Henyey-Greenstein forward scattering lobe (`g = 0.76`), finite-room `ComputeBoxParallaxReflectionDir` wall pinning, `Priority` reflection probe override & `BlendDistance` feathering, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolgeometryscript.pas`](../tests/code/testcases/testtoolgeometryscript.pas) (`TTestToolGeometryScript` — 2 tests)**: Verifies exact `4x` `gmkLinearSubdivide4x` (`48 -> 192` tris), `2x` `gmkSolidifyShell` (`192 -> 384` tris), non-destructive modifier stage disabling restoring exact baseline triangles & surface area, `csTransient`-clean JSON roundtrips, `ExpandLSystemString` rewriting, 3D yaw/pitch/roll crown spread, and `TropismY` phototropism vs. weeping gravitropism height response (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolplaytestgauntlet.pas`](../tests/code/testcases/testtoolplaytestgauntlet.pas) (`TTestToolPlaytestGauntlet` — 2 tests)**: Verifies `TPlaytestGauntletRunner.SpawnMultiSystemSmokeSandbox` & `RunSmokeTest` (`40` fixed steps across Vehicles, Blend2D/Montages, EQS, Inventory/GAS, and Quartz) passing all `6 / 6` invariant gates with exact non-destructive world coordinate restoration and valid JUnit XML export, verifies `SpawnKillZTrapActor` ungrounded Kill-Z fallthrough failure detection (`<failure>` XML emission), and verifies `TCastleMcpServer` `cge_list_studios` (`46` studios) & `cge_audit_world_readiness` JSON-RPC 2.0 tools (`0 unfreed memory blocks`).
 

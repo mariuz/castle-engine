@@ -152,6 +152,7 @@ uses
   TestToolTilemapStudio,
   TestToolVolumetricStudio,
   TestToolGeometryScript,
+  TestToolPlaytestGauntlet,
   TestCastleVulkanRHI;
 
 implementation

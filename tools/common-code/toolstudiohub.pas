@@ -16,7 +16,7 @@
 { Unified Editor Studio Hub Catalog, Multi-Keyword Search Palette & Cross-Studio
   World Integration Readiness Auditor (@link(TStudioHubManager),
   @link(TStudioWorldHealthReport))
-  (Phase 316 — UE 6.0+ Unified Editor Mode Hub & World QA Parity). }
+  (Phases 316 & 326 — UE 6.0+ Unified 46-Studio Editor Hub & World QA Parity). }
 unit ToolStudioHub;
 
 {$I castleconf.inc}
@@ -75,7 +75,7 @@ type
   end;
 
   { Stateless catalog manager, multi-token studio search engine & cross-studio
-    integration auditor consolidating all 36 Horizon 2–5 editor studios. }
+    integration auditor consolidating all 46 Horizon 2–6 editor studios. }
   TStudioHubManager = class
   public
     class function CategoryDisplayName(const ACat: TStudioHubCategory): String; static;
@@ -115,7 +115,10 @@ uses
   CastleDestructible, CastleScalability, CastleMaterialGraph,
   CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility,
   CastleEnhancedInput, CastleVirtualCamera, CastleClothRope,
-  CastleUtilityAi, CastleSaveReplay;
+  CastleUtilityAi, CastleSaveReplay,
+  CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical,
+  CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound,
+  CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript;
 
 { TStudioWorldHealthReport --------------------------------------------------- }
 
@@ -217,6 +220,12 @@ begin
   Reg('water_studio', 'Gerstner Ocean / River Water & 4-Pontoon Buoyancy Studio', 'Water',
     shcWorldEnvironment, 308, 'ocean river water gerstner wave foam pontoon buoyancy float',
     '4-octave Gerstner wave spectrum, river drift currents, and Archimedes hull buoyancy.');
+  Reg('volumetric_studio', 'Volumetric Height Fog, God-Rays & Box-Parallax Probe Studio', 'VolFog',
+    shcWorldEnvironment, 324, 'volumetric height fog god ray light shaft henyey greenstein reflection probe parallax',
+    'Closed-form altitude optical depth, Henyey-Greenstein sun shafts, and box-parallax probes.');
+  Reg('tilemap_studio', '2D / 2.5D Bitmask Auto-Tilemap, Greedy Collider & Flipbook Studio', 'Tile2D',
+    shcWorldEnvironment, 323, 'tilemap 2d autotile wang blob bitmask greedy collider paper2d flipbook sprite',
+    '4-bit/8-bit Wang auto-tiles, greedy rectangle 3D colliders, and Paper2D sprite flipbooks.');
 
   { 2. Materials, Shaders, VFX & PostFX (6 studios) }
   Reg('material_graph', 'Node-Based PBR Material & X3D Shader Effect Graph Studio', 'MatGraph',
@@ -257,11 +266,26 @@ begin
   Reg('cloth_studio', 'Verlet Cloth / Cape / Banner & Catenary Rope Wind Studio', 'Cloth',
     shcArchitecturePcg, 313, 'verlet cloth cape banner flag catenary rope wind sphere collider',
     'Pinned Verlet soft-body cloth grids and catenary/pendulum ropes with wind & colliders.');
+  Reg('geometry_script', 'Geometry Script Procedural Mesh Stack & 3D L-System Botanical Studio', 'GeoMesh',
+    shcArchitecturePcg, 325, 'geometry script procedural mesh subdivide twist solidify displace lsystem tree botanical',
+    'Non-destructive Subdivide/Twist/Displace/Solidify stacks and 3D turtle L-System trees.');
 
-  { 4. Characters, IK, AI, GAS & Narrative (7 studios) }
+  { 4. Characters, IK, AI, GAS & Narrative (11 studios) }
   Reg('ability_studio', 'Gameplay Ability, Cooldown, Buff/Debuff & Attribute (GAS) Studio', 'Abilities',
     shcCharactersAiGas, 310, 'gas gameplay ability attribute mana cooldown dot hot buff immunity',
     'Derived attributes, mana/cooldown abilities, stacking DoT/HoTs & tag immunities.');
+  Reg('vehicle_studio', 'Chaos Wheeled Vehicle, Suspension, Ackermann & Pacejka Drivetrain Studio', 'Vehicle',
+    shcCharactersAiGas, 317, 'chaos wheeled vehicle raycast suspension ackermann steering pacejka tire drift torque gear',
+    '4-wheel WorldRay suspension, exact Ackermann steering, 6-speed gears & Pacejka drift.');
+  Reg('blend_montage', '2D Locomotion Blend Space, Motion Warping & Anim Montage Studio', 'Blend2D',
+    shcCharactersAiGas, 318, 'blendspace 2d gradient band locomotion anim montage combo notify motion warp root',
+    '2D Gradient Band locomotion pads, combo-window Anim Montages, and Hermite motion warping.');
+  Reg('eqs_studio', 'Environment Query System (EQS) Tactical Cover & Flank Scoring Studio', 'EQS',
+    shcCharactersAiGas, 319, 'eqs environment query tactical cover line of sight sniper flank ring grid ai',
+    'Concentric ring/grid EQS candidates with WorldRay LoS cover, elevation & flank scoring.');
+  Reg('inventory_studio', 'RPG Inventory Grid, Paperdoll GAS Modifiers, Crafting & Loot Studio', 'Items',
+    shcCharactersAiGas, 320, 'inventory bag stack weight paperdoll equipment crafting recipe loot table rarity pity',
+    'Weight/slot-capped bags, 5-slot GAS paperdolls, atomic crafting & pity-protected loot.');
   Reg('utility_ai', 'Smart Objects, RVO Crowd Separation & Utility AI Studio', 'UtilAI',
     shcCharactersAiGas, 314, 'smart object slot utility ai response curve crowd rvo separation',
     'Claimable world interaction stations, need urgency curves, and crowd separation.');
@@ -294,11 +318,20 @@ begin
   Reg('input_studio', 'Enhanced Input Action Contexts, Chords & Rebinding Studio', 'Input',
     shcCinematicsAudioInput, 311, 'enhanced input context tap hold chord deadzone key rebind',
     'Priority input contexts, Tap/Hold/Chord triggers, radial deadzones & user rebinds.');
+  Reg('metasound_studio', 'MetaSound Procedural PCM Synth, Surface Footsteps & Quartz Music Studio', 'MetaSnd',
+    shcCinematicsAudioInput, 322, 'metasound procedural pcm wav synth biquad adsr footstep surface quartz music stem bpm',
+    '16-bit RIFF/WAVE synth, downward-raycast footsteps, and BPM bar/beat music stems.');
 
-  { 6. Performance, Save/Replay, L10n & QA (7 studios) }
+  { 6. Performance, Save/Replay, L10n & QA (9 studios) }
   Reg('frame_profiler', 'Frame Budget Profiler & 1-Click Scalability Tier Studio', 'Profiler',
     shcPerformanceQaDeploy, 306, 'frame budget profiler scalability low medium high epic mobile fps',
     '60/90/120 Hz draw/triangle/light budget auditing and reversible scalability tiers.');
+  Reg('playtest_gauntlet', 'Gauntlet Automated Playtest Bot Runner, Smoke Assertions & CI Export', 'Gauntlet',
+    shcPerformanceQaDeploy, 326, 'gauntlet playtest automation bot smoke test killz nan junit xml ci qa',
+    'Deterministic multi-system smoke-test bot, Kill-Z/NaN guards, world restore & JUnit XML.');
+  Reg('netcode_studio', 'Iris Netcode Replication, Spatial Relevancy & Hitbox Rewind Studio', 'NetIris',
+    shcPerformanceQaDeploy, 321, 'iris netcode replication relevancy priority bandwidth sLerp lag compensation hitbox rewind',
+    'Spatial relevancy culling, priority bandwidth budgets, client SLerp & server hitbox rewind.');
   Reg('save_replay', 'SaveGame Slot Manager, World Checkpoints & Replay Studio', 'Replay',
     shcPerformanceQaDeploy, 315, 'savegame slot checkpoint schema migration replay scrub slerp',
     'Schema-versioned multi-system world snapshots and deterministic replay scrubbing.');
@@ -407,6 +440,7 @@ var
   WeatherRigCount, ClothWeatherSyncCount: Integer;
   WaterVolCount, BuoyancyCount: Integer;
   SmartObjCount, UtilAgentCount: Integer;
+  NetMgrCount, ReplicatedCount, UnboundEqsCount: Integer;
   OpenBugPinCount: Integer;
   InputConflicts: TStringList;
 
@@ -447,6 +481,9 @@ var
       Inc(BuoyancyCount);
       BumpSub(shcWorldEnvironment);
     end;
+    if (C is TCastleVolumetricAtmosphere) or (C is TCastleReflectionProbe) or
+       (C is TCastleAutoTilemap) or (C is TCastleFlipbook2D) then
+      BumpSub(shcWorldEnvironment);
 
     { Materials, Shaders, VFX & PostFX }
     if (C is TCastleMaterialGraph) or (C is TCastleMaterialGraphBehavior) then
@@ -475,9 +512,22 @@ var
         Inc(ClothWeatherSyncCount);
     end;
     if C is TCastleVerletRope then BumpSub(shcArchitecturePcg);
+    if (C is TCastleGeometryScriptMesh) or (C is TCastleLSystemBotanical) then
+      BumpSub(shcArchitecturePcg);
 
     { Characters, IK, AI, GAS & Narrative }
     if C is TCastleAbilitySystemBehavior then BumpSub(shcCharactersAiGas);
+    if (C is TCastleWheeledVehicle) or (C is TCastleBlendSpace2DBehavior) or
+       (C is TCastleAnimMontageBehavior) or (C is TCastleInventoryBehavior) or
+       (C is TCastleLootTable) then
+      BumpSub(shcCharactersAiGas);
+    if C is TCastleEqsQueryBehavior then
+    begin
+      BumpSub(shcCharactersAiGas);
+      if (TCastleEqsQueryBehavior(C).ThreatTransform = nil) and
+         (TCastleEqsQueryBehavior(C).Preset in [epTakeCoverFromThreat, epSniperLineOfSightVantage, epFlankRearSurround]) then
+        Inc(UnboundEqsCount);
+    end;
     if C is TCastleSmartObject then
     begin
       Inc(SmartObjCount);
@@ -509,7 +559,9 @@ var
       Inc(VCamBrainCount);
       BumpSub(shcCinematicsAudioInput);
     end;
-    if (C is TCastleAudioBusMixer) or (C is TCastleAudioZone) then
+    if (C is TCastleAudioBusMixer) or (C is TCastleAudioZone) or
+       (C is TCastleMetaSoundSynth) or (C is TCastleFootstepSurfaceBehavior) or
+       (C is TCastleMusicStemDirector) then
       BumpSub(shcCinematicsAudioInput);
     if C is TCastleInputMapManager then
     begin
@@ -519,6 +571,16 @@ var
 
     { Performance, Save/Replay, L10n & QA }
     if C is TCastleScalabilityManager then BumpSub(shcPerformanceQaDeploy);
+    if C is TCastleNetReplicationManager then
+    begin
+      Inc(NetMgrCount);
+      BumpSub(shcPerformanceQaDeploy);
+    end;
+    if C is TCastleReplicatedBehavior then
+    begin
+      Inc(ReplicatedCount);
+      BumpSub(shcPerformanceQaDeploy);
+    end;
     if (C is TCastleSaveSlotManager) or (C is TCastleReplayRecorder) then
       BumpSub(shcPerformanceQaDeploy);
     if C is TCastleLocalizationManager then BumpSub(shcPerformanceQaDeploy);
@@ -591,6 +653,9 @@ begin
     BuoyancyCount := 0;
     SmartObjCount := 0;
     UtilAgentCount := 0;
+    NetMgrCount := 0;
+    ReplicatedCount := 0;
+    UnboundEqsCount := 0;
     OpenBugPinCount := 0;
 
     Traverse(RootComp);
@@ -628,6 +693,16 @@ begin
       Result.AddIssue(Min(25, OpenBugPinCount * 15), 'review_pins',
         Format('%d unresolved Bug/Blocker spatial review pin(s) remain open before release.',
           [OpenBugPinCount]));
+
+    if (ReplicatedCount > 0) and (NetMgrCount = 0) then
+      Result.AddIssue(15, 'netcode_studio',
+        Format('%d TCastleReplicatedBehavior actor(s) exist without a TCastleNetReplicationManager in the design.',
+          [ReplicatedCount]));
+
+    if UnboundEqsCount > 0 then
+      Result.AddIssue(10, 'eqs_studio',
+        Format('%d TCastleEqsQueryBehavior agent(s) have ThreatTransform=nil for tactical LoS/Flank scoring.',
+          [UnboundEqsCount]));
 
     TotalPenalty := 0;
     for I := 0 to High(Result.Issues) do
