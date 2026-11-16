@@ -636,6 +636,7 @@ type
       MenuItemInventoryStudio: TMenuItem;
       MenuItemNetcodeStudio: TMenuItem;
       MenuItemMetaSoundStudio: TMenuItem;
+      MenuItemTilemapStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -692,6 +693,7 @@ type
     procedure MenuItemInventoryStudioClick(Sender: TObject);
     procedure MenuItemNetcodeStudioClick(Sender: TObject);
     procedure MenuItemMetaSoundStudioClick(Sender: TObject);
+    procedure MenuItemTilemapStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2496,6 +2498,11 @@ begin
   MenuItemMetaSoundStudio.Caption := 'MetaSound Procedural PCM Synth, Surface Footsteps & Quartz Studio...';
   MenuItemMetaSoundStudio.OnClick := @MenuItemMetaSoundStudioClick;
   MenuItemDesign.Add(MenuItemMetaSoundStudio);
+
+  MenuItemTilemapStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemTilemapStudio.Caption := '2D / 2.5D Bitmask Auto-Tilemap, Greedy Collider & Flipbook Studio...';
+  MenuItemTilemapStudio.OnClick := @MenuItemTilemapStudioClick;
+  MenuItemDesign.Add(MenuItemTilemapStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5688,6 +5695,12 @@ procedure TProjectForm.MenuItemMetaSoundStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowMetaSoundStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemTilemapStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowTilemapStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

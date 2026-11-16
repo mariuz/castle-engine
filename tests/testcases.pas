@@ -149,6 +149,7 @@ uses
   TestToolInventoryStudio,
   TestToolNetcodeStudio,
   TestToolMetaSoundStudio,
+  TestToolTilemapStudio,
   TestCastleVulkanRHI;
 
 implementation

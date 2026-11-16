@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -810,6 +810,8 @@ type
       MenuTreeViewItemNetcodeStudio: TMenuItem;
       ButtonMetaSoundStudio: TSpeedButton;
       MenuTreeViewItemMetaSoundStudio: TMenuItem;
+      ButtonTilemapStudio: TSpeedButton;
+      MenuTreeViewItemTilemapStudio: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1317,6 +1319,8 @@ type
     procedure MenuTreeViewItemNetcodeStudioClick(Sender: TObject);
     procedure ButtonMetaSoundStudioClick(Sender: TObject);
     procedure MenuTreeViewItemMetaSoundStudioClick(Sender: TObject);
+    procedure ButtonTilemapStudioClick(Sender: TObject);
+    procedure MenuTreeViewItemTilemapStudioClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2790,6 +2794,7 @@ type
     procedure ShowInventoryStudioDialog;
     procedure ShowNetcodeStudioDialog;
     procedure ShowMetaSoundStudioDialog;
+    procedure ShowTilemapStudioDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -2811,7 +2816,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7381,6 +7386,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonMetaSoundStudio,
       PanelMiddleTop.GetControlIndex(ButtonNetcodeStudio) + 1);
 
+  ButtonTilemapStudio := TSpeedButton.Create(Self);
+  ButtonTilemapStudio.Caption := 'Tile2D';
+  ButtonTilemapStudio.Hint := 'Open 2D / 2.5D Bitmask Auto-Tilemap, Greedy Collider & Flipbook Studio.' + NL +
+    'Paint 4-bit/8-bit Wang auto-tiles, merge greedy 3D colliders & preview Paper2D flipbooks.';
+  ButtonTilemapStudio.ShowHint := true;
+  ButtonTilemapStudio.AutoSize := true;
+  ButtonTilemapStudio.Constraints.MinHeight := 33;
+  ButtonTilemapStudio.Constraints.MinWidth := 54;
+  ButtonTilemapStudio.BorderSpacing.Left := 2;
+  ButtonTilemapStudio.OnClick := @ButtonTilemapStudioClick;
+  ButtonTilemapStudio.Parent := PanelMiddleTop;
+  if ButtonMetaSoundStudio.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonTilemapStudio,
+      PanelMiddleTop.GetControlIndex(ButtonMetaSoundStudio) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10415,6 +10435,11 @@ begin
   MenuTreeViewItemMetaSoundStudio.Caption := 'MetaSound Procedural PCM Synth && Quartz Music Studio...';
   MenuTreeViewItemMetaSoundStudio.OnClick := @MenuTreeViewItemMetaSoundStudioClick;
   MenuTreeView.Items.Add(MenuTreeViewItemMetaSoundStudio);
+
+  MenuTreeViewItemTilemapStudio := TMenuItem.Create(Self);
+  MenuTreeViewItemTilemapStudio.Caption := '2D / 2.5D Bitmask Auto-Tilemap && Flipbook Studio...';
+  MenuTreeViewItemTilemapStudio.OnClick := @MenuTreeViewItemTilemapStudioClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemTilemapStudio);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -15709,6 +15734,10 @@ var
         Suffix := Suffix + ' ' + TCastleFootstepSurfaceBehavior(NodeObj).FootstepSummaryBadge
       else if NodeObj is TCastleMusicStemDirector then
         Suffix := Suffix + ' ' + TCastleMusicStemDirector(NodeObj).MusicSummaryBadge
+      else if NodeObj is TCastleAutoTilemap then
+        Suffix := Suffix + ' ' + TCastleAutoTilemap(NodeObj).TilemapSummaryBadge
+      else if NodeObj is TCastleFlipbook2D then
+        Suffix := Suffix + ' ' + TCastleFlipbook2D(NodeObj).FlipbookSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -55945,6 +55974,7 @@ begin
   else if SameText(AStudioId, 'inventory_studio') then ShowInventoryStudioDialog
   else if SameText(AStudioId, 'netcode_studio') then ShowNetcodeStudioDialog
   else if SameText(AStudioId, 'metasound_studio') then ShowMetaSoundStudioDialog
+  else if SameText(AStudioId, 'tilemap_studio') then ShowTilemapStudioDialog
   else
     Result := False;
 end;
@@ -56138,6 +56168,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemMetaSoundStudioClick(Sender: TObject);
 begin
   ShowMetaSoundStudioDialog;
+end;
+
+procedure TDesignFrame.ShowTilemapStudioDialog;
+var
+  Dlg: TTilemapStudioForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TTilemapStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonTilemapStudioClick(Sender: TObject);
+begin
+  ShowTilemapStudioDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemTilemapStudioClick(Sender: TObject);
+begin
+  ShowTilemapStudioDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

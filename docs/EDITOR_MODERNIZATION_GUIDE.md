@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–322** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–323** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3501,6 +3501,30 @@ MusicDir.RequestMusicState(2); // Queues Combat stem for next bar downbeat
 
 ---
 
+## 66AV. 2D / 2.5D Bitmask Auto-Tilemap, Greedy Collider & Paper2D Flipbook Studio (Phase 323)
+
+Castle Game Engine provides 4-bit cardinal and 8-bit corner-gated Blob/Wang auto-tilemaps, exact 2D greedy collider merging, and multi-clip Paper2D sprite sheet flipbooks matching Unreal Engine 6.0+'s Paper2D / PaperZD workflows:
+
+1. **Auto-Tilemap & Paper2D Flipbook Runtime (`src/scene/castletilemap2dplus.pas`)**:
+   - `TCastleAutoTilemap` computes `ComputeCardinalMask4Bit` (`0..15`) and `ComputeBlobMask8Bit` (`0..255` with adjacent-cardinal corner gating), merges contiguous solid cells into minimal greedy rectangles (`RebuildTilemapMesh`), and spawns `csTransient` extruded 3D colliders.
+   - `TCastleFlipbook2D` steps UV sub-rects across `AtlasCols x AtlasRows` sprite sheets with loop/hold modes and frame-exact `OnFlipbookNotify` callbacks.
+2. **Tilemap & Flipbook Studio (`TTilemapStudioForm` & `TTilemapStudioHelper`)**:
+   - Open via the top-bar **`Tile2D`** button, Hierarchy context menu, or **`Design -> 2D / 2.5D Bitmask Auto-Tilemap, Greedy Collider & Flipbook Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TTilemapStudioHelper.SpawnAutoTileDungeonAndFlipbookDemo(Viewport, DesignOwner, Tilemap, Flipbook);
+Tilemap.PaintRect(2, 2, 7, 5, TCastleAutoTilemap.TileSolidWall, True, True);
+Flipbook.PlayClip('AttackSlash');
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE 2D & Sprite Sheets](https://castle-engine.io/manual_2d_ui_custom_drawn.php) · [UE Paper2D](https://dev.epicgames.com/documentation/en-us/unreal-engine/paper-2d-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — 2D & 2.5D Tilemaps (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE UI Editor](https://castle-engine.io/images/thumb_const_height_size/ui_editor.webp) · [CGE 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3611,4 +3635,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems inclu
 - **[`tests/code/testcases/testtoolinventorystudio.pas`](../tests/code/testcases/testtoolinventorystudio.pas) (`TTestToolInventoryStudio` — 2 tests)**: Verifies stack merging, atomic `MaxCarryWeightKg` encumbrance rejection, `CraftSunfireBlade` ingredient consumption & minting, `EquipItemFromBag`/`UnequipSlot` live `TCastleAbilitySystemBehavior` `AttackPower` (`25 -> 60 -> 25`) & `Equipped.Weapon.Sunfire` tag sync, `ConfigJson` roundtrips, and `TCastleLootTable` seeded determinism + `LegendaryPityThreshold` guarantee (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolnetcodestudio.pas`](../tests/code/testcases/testtoolnetcodestudio.pas) (`TTestToolNetcodeStudio` — 2 tests)**: Verifies `NetCullDistance` spatial culling (`0` packets at `120m`) vs. `AlwaysRelevant` override, tight `18 B/tick` starvation-protected priority round-robin, jitter-buffered client `EvaluateClientInterpolatedPose`, server `LagCompensatedRaycast` confirmed hit at rewound `X = 4.20m` vs. unrewound miss at `X = 6.00m`, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmetasoundstudio.pas`](../tests/code/testcases/testtoolmetasoundstudio.pas) (`TTestToolMetaSoundStudio` — 2 tests)**: Verifies `EvaluateAdsrEnvelope`, RBJ 2-pole Biquad low-pass RMS attenuation (`240 Hz` vs. `9500 Hz`), valid 44-byte RIFF/WAVE 16-bit PCM stream export, downward `WorldRay` `Stone`/`Wood`/`Metal` footstep surface classification, `120 BPM` `mqbNextBar` quantized music stem transition & crossfade, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtooltilemapstudio.pas`](../tests/code/testcases/testtooltilemapstudio.pas) (`TTestToolTilemapStudio` — 2 tests)**: Verifies 4-bit cardinal (`0..15`) & 8-bit corner-gated Blob (`0..255`) auto-tile masks, exact 2D greedy collider merging (`6x4 = 24` cells -> `1` box) with `WorldRay` hit verification, `csTransient`-clean JSON roundtrips, and `TCastleFlipbook2D` UV sub-rect stepping, non-loop hold, and frame-exact `OnFlipbookNotify` firing (`0 unfreed memory blocks`).
 
