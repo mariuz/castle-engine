@@ -153,6 +153,7 @@ uses
   TestToolVolumetricStudio,
   TestToolGeometryScript,
   TestToolPlaytestGauntlet,
+  TestToolMotionMatching,
   TestCastleVulkanRHI;
 
 implementation

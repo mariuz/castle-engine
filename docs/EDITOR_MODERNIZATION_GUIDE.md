@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–326** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–327** across Horizons 1–7), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3598,6 +3598,30 @@ FreeAndNil(Report);
 
 ---
 
+## 66AZ. Motion Matching & Pose Search Trajectory Database, Inertialization & Stride Warping Studio (Phase 327)
+
+Castle Game Engine provides trajectory-driven Pose Search locomotion matching, exact half-life critically-damped Inertialization pose-switch damping, and analytical Stride Warping matching Unreal Engine 6.0+'s Motion Matching workflow:
+
+1. **Pose Search & Motion Matching Runtime (`src/scene/castlemotionmatching.pas`)**:
+   - `TCastlePoseSearchDatabase` indexes multi-frame locomotion & transition clips (`IdleBreathe`, `WalkForward`, `RunForward`, `SprintForward`, `StrafeLeft`, `StrafeRight`, `WalkBackward`, `PlantPivot180`, `RunStopPlant`) with `+0.20s / +0.50s / +1.00s` local trajectory offsets, facings, foot offsets, incoming momentum, and `ContinuingPoseBias`.
+   - `TCastleMotionMatchingBehavior` predicts future trajectories via `PredictSpringTrajectoryXZ`, queries `FindBestMatchingPose`, damps disjoint pose jumps via `EvaluateInertializationDecay`, and scales stride length via `ComputeStrideWarpScale`.
+2. **Motion Matching Studio (`TMotionMatchingForm` & `TMotionMatchingHelper`)**:
+   - Open via the top-bar **`MotMatch`** button, Hierarchy context menu, or **`Design -> Motion Matching, Pose Search Trajectory & Inertialization Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TMotionMatchingHelper.SpawnMotionMatchingArenaDemo(Viewport, DesignOwner, Hero, Db, Matcher);
+Matcher.DesiredWorldVelXZ := Vector2(0.0, -4.80);
+Matcher.StepMotionMatching(0.10);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Scene Animations](https://castle-engine.io/manual_scene.php) · [UE Motion Matching](https://dev.epicgames.com/documentation/en-us/unreal-engine/motion-matching-in-unreal-engine) · [UE Inertialization](https://dev.epicgames.com/documentation/en-us/unreal-engine/inertialization-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Character Locomotion & Animations (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Character Viewport](https://castle-engine.io/images/thumb_const_height_size/transform_scene.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3663,7 +3687,7 @@ fpc -Mobjfpc -Sh -Ci -Cr -Co -gl -gh -dTEXT_RUNNER @castle-fpc.cfg \
 ./tests/castle_tester_standalone --console --filter=TTestCastleTransformManipulate*
 ```
 
-In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5 & Horizon 6 editor subsystems include dedicated automated test suites:
+In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 editor subsystems include dedicated automated test suites:
 - **[`tests/code/testcases/testtoolmcpserver.pas`](../tests/code/testcases/testtoolmcpserver.pas) (`TTestToolMcpServer` — 3 tests)**: Verifies JSON-RPC 2.0 `initialize`, `ping`, `tools/list` (all 14 MCP tools), Bearer token authentication, all 4 `TMcpAutonomyMode` tiers (`Disabled`, `ReadOnly`, `EditWithUndo`, `FullControl`), live RTTI property inspection/mutation, layout actions (`align_y`, `snap_to_grid`), Base64 PNG viewport screenshot encoding, and live localhost multithreaded HTTP roundtrip (`GET /health` + `POST /mcp` with `CheckSynchronize` and `0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooldesignsandboxdiff.pas`](../tests/code/testcases/testtooldesignsandboxdiff.pas) (`TTestToolDesignSandboxDiff` — 3 tests)**: Verifies `TDesignSandboxManager` creation, filtering, renaming, JSON persistence, and live instantiation, `TDesignDiffEngine` detection of `[+ Added]`, `[- Removed]`, and `[~ Modified]` components + subcomponent properties (`TranslationPersistent.X/Y/Z`, `SizePersistent.X/Y/Z`, `Caption`, `FontSize`), and `RevertSelectedToBase` selective restoration/deletion of individual properties and components (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testcastleterrain.pas`](../tests/code/testcases/testcastleterrain.pas) (`TTestCastleTerrain` — 4 tests)**: Verifies `TCastleTerrainImage` Raise/Lower/Smooth/Flatten sculpting with dynamic `MinLevel`/`MaxLevel` expansion + renormalization, `RayCastWorld`, non-destructive `EnsureEditableHeightLayer` `TCastleTerrainCombine` (`opAdd`) wrapping over `TCastleTerrainNoise`, `GenerateSplatmapFromProceduralLayers`, `PaintSplatmapAtWorldPoint` $R+G+B+A = 255$ partition-of-unity normalization, and PNG heightmap/splatmap save & reload roundtrips (`0 unfreed memory blocks`).
@@ -3712,4 +3736,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5 & Horizon 6 editor subsy
 - **[`tests/code/testcases/testtoolvolumetricstudio.pas`](../tests/code/testcases/testtoolvolumetricstudio.pas) (`TTestToolVolumetricStudio` — 2 tests)**: Verifies valley vs. mountaintop exponential height fog optical depth, exact inclined-ray $A \leftrightarrow B$ transmittance reciprocity, Henyey-Greenstein forward scattering lobe (`g = 0.76`), finite-room `ComputeBoxParallaxReflectionDir` wall pinning, `Priority` reflection probe override & `BlendDistance` feathering, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolgeometryscript.pas`](../tests/code/testcases/testtoolgeometryscript.pas) (`TTestToolGeometryScript` — 2 tests)**: Verifies exact `4x` `gmkLinearSubdivide4x` (`48 -> 192` tris), `2x` `gmkSolidifyShell` (`192 -> 384` tris), non-destructive modifier stage disabling restoring exact baseline triangles & surface area, `csTransient`-clean JSON roundtrips, `ExpandLSystemString` rewriting, 3D yaw/pitch/roll crown spread, and `TropismY` phototropism vs. weeping gravitropism height response (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolplaytestgauntlet.pas`](../tests/code/testcases/testtoolplaytestgauntlet.pas) (`TTestToolPlaytestGauntlet` — 2 tests)**: Verifies `TPlaytestGauntletRunner.SpawnMultiSystemSmokeSandbox` & `RunSmokeTest` (`40` fixed steps across Vehicles, Blend2D/Montages, EQS, Inventory/GAS, and Quartz) passing all `6 / 6` invariant gates with exact non-destructive world coordinate restoration and valid JUnit XML export, verifies `SpawnKillZTrapActor` ungrounded Kill-Z fallthrough failure detection (`<failure>` XML emission), and verifies `TCastleMcpServer` `cge_list_studios` (`46` studios) & `cge_audit_world_readiness` JSON-RPC 2.0 tools (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolmotionmatching.pas`](../tests/code/testcases/testtoolmotionmatching.pas) (`TTestToolMotionMatching` — 2 tests)**: Verifies `PredictSpringTrajectoryXZ` linear & exponential spring integration, `WorldVecXZToCharacterLocal` coordinate mapping, exact half-life critically-damped `EvaluateInertializationDecay` (`0.50` at `t = HalfLifeSec`), `ComputeStrideWarpScale` speed ratio & `[0.65..1.35]` clamping, k-NN Pose Search matching (`Idle`, steady `RunForward` with `ContinuingPoseBias`, sudden `180°` reversal matching `PlantPivot180` + Inertialization trigger, and `StrafeRight`), and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

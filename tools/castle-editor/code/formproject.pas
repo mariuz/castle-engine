@@ -640,6 +640,7 @@ type
       MenuItemVolumetricStudio: TMenuItem;
       MenuItemGeometryScript: TMenuItem;
       MenuItemPlaytestGauntlet: TMenuItem;
+      MenuItemMotionMatching: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -700,6 +701,7 @@ type
     procedure MenuItemVolumetricStudioClick(Sender: TObject);
     procedure MenuItemGeometryScriptClick(Sender: TObject);
     procedure MenuItemPlaytestGauntletClick(Sender: TObject);
+    procedure MenuItemMotionMatchingClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2524,6 +2526,11 @@ begin
   MenuItemPlaytestGauntlet.Caption := 'Gauntlet Automated Playtest Bot & CI Smoke-Test Studio...';
   MenuItemPlaytestGauntlet.OnClick := @MenuItemPlaytestGauntletClick;
   MenuItemDesign.Add(MenuItemPlaytestGauntlet);
+
+  MenuItemMotionMatching := TMenuItem.Create(MenuItemDesign);
+  MenuItemMotionMatching.Caption := 'Motion Matching, Pose Search Trajectory & Inertialization Studio...';
+  MenuItemMotionMatching.OnClick := @MenuItemMotionMatchingClick;
+  MenuItemDesign.Add(MenuItemMotionMatching);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5740,6 +5747,12 @@ procedure TProjectForm.MenuItemPlaytestGauntletClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowPlaytestGauntletDialog;
+end;
+
+procedure TProjectForm.MenuItemMotionMatchingClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowMotionMatchingDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);
