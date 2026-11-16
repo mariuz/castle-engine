@@ -272,6 +272,15 @@ function QuerySupportedVulkanInstanceExtensions: TAnsiStringArray;
 { Returns True when AExtensionName is advertised by vkEnumerateInstanceExtensionProperties }
 function IsVulkanInstanceExtensionSupported(const AExtensionName: AnsiString): Boolean;
 
+{ Enumerates all VkInstance layer names advertised by vkEnumerateInstanceLayerProperties }
+function QuerySupportedVulkanInstanceLayers: TAnsiStringArray;
+
+{ Returns True when ALayerName is advertised by vkEnumerateInstanceLayerProperties }
+function IsVulkanInstanceLayerSupported(const ALayerName: AnsiString): Boolean;
+
+{ Returns True when VK_LAYER_KHRONOS_validation is installed and advertised by the Vulkan loader }
+function IsVulkanValidationLayerSupported: Boolean;
+
 { Filters known WSI instance extensions (VK_KHR_surface, Xlib, Wayland, Win32,
   Android, Metal, Switch Vi, VK_EXT_headless_surface, VK_KHR_portability_enumeration)
   against AAvailableExtensions, setting AEnablePortabilityBit when portability enumeration is included }
@@ -453,6 +462,50 @@ begin
     if Supported[I] = AExtensionName then
       Exit(True);
   Result := False;
+end;
+
+function QuerySupportedVulkanInstanceLayers: TAnsiStringArray;
+var
+  LayerCount, I: Cardinal;
+  Layers: array of VkLayerProperties;
+begin
+  Result := nil;
+  SetLength(Result, 0);
+  if not IsVulkanLoaded then
+  begin
+    if not LoadVulkan then
+      Exit;
+  end;
+  if not Assigned(vkEnumerateInstanceLayerProperties) then
+    Exit;
+  LayerCount := 0;
+  if vkEnumerateInstanceLayerProperties(@LayerCount, nil) <> VK_SUCCESS then
+    Exit;
+  if LayerCount = 0 then
+    Exit;
+  SetLength(Layers, LayerCount);
+  if vkEnumerateInstanceLayerProperties(@LayerCount, @Layers[0]) <> VK_SUCCESS then
+    Exit;
+  SetLength(Result, LayerCount);
+  for I := 0 to LayerCount - 1 do
+    Result[I] := PAnsiChar(@Layers[I].layerName[0]);
+end;
+
+function IsVulkanInstanceLayerSupported(const ALayerName: AnsiString): Boolean;
+var
+  Supported: TAnsiStringArray;
+  I: Integer;
+begin
+  Supported := QuerySupportedVulkanInstanceLayers;
+  for I := 0 to High(Supported) do
+    if Supported[I] = ALayerName then
+      Exit(True);
+  Result := False;
+end;
+
+function IsVulkanValidationLayerSupported: Boolean;
+begin
+  Result := IsVulkanInstanceLayerSupported(VK_LAYER_KHRONOS_validation);
 end;
 
 function BuildAvailableVulkanWSIInstanceExtensions(

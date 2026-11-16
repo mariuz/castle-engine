@@ -24,6 +24,12 @@ unit CastleInternalVulkan;
   {$packrecords C}
 {$endif}
 
+{$ifdef MSWINDOWS}
+  {$define VKAPI_CALL := stdcall}
+{$else}
+  {$define VKAPI_CALL := cdecl}
+{$endif}
+
 interface
 
 uses
@@ -128,7 +134,17 @@ const
   VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES = 1000314007;
   VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR = 1000314007;
   VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO = 17;
+  VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT = 1000128000;
   VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT = 1000128002;
+  VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CALLBACK_DATA_EXT = 1000128003;
+  VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT = 1000128004;
+  VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT = $00000001;
+  VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT = $00000010;
+  VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT = $00000100;
+  VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT = $00001000;
+  VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT = $00000001;
+  VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT = $00000002;
+  VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT = $00000004;
   VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2 = 1000059006;
   VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2_KHR = 1000059006;
   VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT = 1000237000;
@@ -491,6 +507,7 @@ const
 
   { Extension and Layer Names }
   VK_EXT_debug_utils = 'VK_EXT_debug_utils';
+  VK_EXT_DEBUG_UTILS_EXTENSION_NAME = 'VK_EXT_debug_utils';
   VK_EXT_descriptor_indexing = 'VK_EXT_descriptor_indexing';
   VK_EXT_extended_dynamic_state = 'VK_EXT_extended_dynamic_state';
   VK_EXT_extended_dynamic_state2 = 'VK_EXT_extended_dynamic_state2';
@@ -558,6 +575,10 @@ type
   VkQueryControlFlags = VkFlags;
   VkQueryResultFlags = VkFlags;
   VkQueryPipelineStatisticFlags = VkFlags;
+  VkDebugUtilsMessageSeverityFlagsEXT = VkFlags;
+  VkDebugUtilsMessageTypeFlagsEXT = VkFlags;
+  VkDebugUtilsMessengerCreateFlagsEXT = VkFlags;
+  VkDebugUtilsMessengerCallbackDataFlagsEXT = VkFlags;
 
   { Pointers to primitive types }
   PCardinal = ^Cardinal;
@@ -632,6 +653,7 @@ type
   PVkSurfaceKHR = ^VkSurfaceKHR;
   PVkSwapchainKHR = ^VkSwapchainKHR;
   PVkCommandPool = ^VkCommandPool;
+  PVkDebugUtilsMessengerEXT = ^VkDebugUtilsMessengerEXT;
 
   PVkAllocationCallbacks = Pointer;
 
@@ -1705,6 +1727,48 @@ type
   end;
   PVkDebugUtilsLabelEXT = ^VkDebugUtilsLabelEXT;
 
+  VkDebugUtilsObjectNameInfoEXT = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    objectType: Integer;
+    objectHandle: UInt64;
+    pObjectName: PAnsiChar;
+  end;
+  PVkDebugUtilsObjectNameInfoEXT = ^VkDebugUtilsObjectNameInfoEXT;
+
+  VkDebugUtilsMessengerCallbackDataEXT = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    flags: VkDebugUtilsMessengerCallbackDataFlagsEXT;
+    pMessageIdName: PAnsiChar;
+    messageIdNumber: Integer;
+    pMessage: PAnsiChar;
+    queueLabelCount: Cardinal;
+    pQueueLabels: PVkDebugUtilsLabelEXT;
+    cmdBufLabelCount: Cardinal;
+    pCmdBufLabels: PVkDebugUtilsLabelEXT;
+    objectCount: Cardinal;
+    pObjects: PVkDebugUtilsObjectNameInfoEXT;
+  end;
+  PVkDebugUtilsMessengerCallbackDataEXT = ^VkDebugUtilsMessengerCallbackDataEXT;
+
+  PFN_vkDebugUtilsMessengerCallbackEXT = function(
+    messageSeverity: VkDebugUtilsMessageSeverityFlagsEXT;
+    messageTypes: VkDebugUtilsMessageTypeFlagsEXT;
+    const pCallbackData: PVkDebugUtilsMessengerCallbackDataEXT;
+    pUserData: Pointer): VkBool32; VKAPI_CALL;
+
+  VkDebugUtilsMessengerCreateInfoEXT = record
+    sType: VkStructureType;
+    pNext: Pointer;
+    flags: VkDebugUtilsMessengerCreateFlagsEXT;
+    messageSeverity: VkDebugUtilsMessageSeverityFlagsEXT;
+    messageType: VkDebugUtilsMessageTypeFlagsEXT;
+    pfnUserCallback: PFN_vkDebugUtilsMessengerCallbackEXT;
+    pUserData: Pointer;
+  end;
+  PVkDebugUtilsMessengerCreateInfoEXT = ^VkDebugUtilsMessengerCreateInfoEXT;
+
   VkImageBlit = record
     srcSubresource: VkImageSubresourceLayers;
     srcOffsets: array[0..1] of VkOffset3D;
@@ -2149,7 +2213,11 @@ type
   PFN_vkCreateDevice = function(physicalDevice: VkPhysicalDevice; const pCreateInfo: PVkDeviceCreateInfo; const pAllocator: PVkAllocationCallbacks; pDevice: PVkDevice): VkResult; VKAPI_CALL;
   PFN_vkDestroyDevice = procedure(device: VkDevice; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
   PFN_vkEnumerateInstanceExtensionProperties = function(pLayerName: PAnsiChar; pPropertyCount: PCardinal; pProperties: PVkExtensionProperties): VkResult; VKAPI_CALL;
+  PFN_vkEnumerateInstanceLayerProperties = function(pPropertyCount: PCardinal; pProperties: PVkLayerProperties): VkResult; VKAPI_CALL;
   PFN_vkEnumerateDeviceExtensionProperties = function(physicalDevice: VkPhysicalDevice; pLayerName: PAnsiChar; pPropertyCount: PCardinal; pProperties: PVkExtensionProperties): VkResult; VKAPI_CALL;
+  PFN_vkCreateDebugUtilsMessengerEXT = function(instance: VkInstance; const pCreateInfo: PVkDebugUtilsMessengerCreateInfoEXT; const pAllocator: PVkAllocationCallbacks; pMessenger: PVkDebugUtilsMessengerEXT): VkResult; VKAPI_CALL;
+  PFN_vkDestroyDebugUtilsMessengerEXT = procedure(instance: VkInstance; messenger: VkDebugUtilsMessengerEXT; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
+  PFN_vkSubmitDebugUtilsMessageEXT = procedure(instance: VkInstance; messageSeverity: VkDebugUtilsMessageSeverityFlagsEXT; messageTypes: VkDebugUtilsMessageTypeFlagsEXT; const pCallbackData: PVkDebugUtilsMessengerCallbackDataEXT); VKAPI_CALL;
   PFN_vkDestroySurfaceKHR = procedure(instance: VkInstance; surface: VkSurfaceKHR; const pAllocator: PVkAllocationCallbacks); VKAPI_CALL;
   PFN_vkGetPhysicalDeviceSurfaceSupportKHR = function(physicalDevice: VkPhysicalDevice; queueFamilyIndex: Cardinal; surface: VkSurfaceKHR; pSupported: PVkBool32): VkResult; VKAPI_CALL;
   PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR = function(physicalDevice: VkPhysicalDevice; surface: VkSurfaceKHR; pSurfaceCapabilities: PVkSurfaceCapabilitiesKHR): VkResult; VKAPI_CALL;
@@ -2288,7 +2356,11 @@ var
   vkCreateDevice: PFN_vkCreateDevice;
   vkDestroyDevice: PFN_vkDestroyDevice;
   vkEnumerateInstanceExtensionProperties: PFN_vkEnumerateInstanceExtensionProperties;
+  vkEnumerateInstanceLayerProperties: PFN_vkEnumerateInstanceLayerProperties;
   vkEnumerateDeviceExtensionProperties: PFN_vkEnumerateDeviceExtensionProperties;
+  vkCreateDebugUtilsMessengerEXT: PFN_vkCreateDebugUtilsMessengerEXT;
+  vkDestroyDebugUtilsMessengerEXT: PFN_vkDestroyDebugUtilsMessengerEXT;
+  vkSubmitDebugUtilsMessageEXT: PFN_vkSubmitDebugUtilsMessageEXT;
   vkDestroySurfaceKHR: PFN_vkDestroySurfaceKHR;
   vkGetPhysicalDeviceSurfaceSupportKHR: PFN_vkGetPhysicalDeviceSurfaceSupportKHR;
   vkGetPhysicalDeviceSurfaceCapabilitiesKHR: PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
@@ -2518,6 +2590,7 @@ begin
 
   Pointer(vkCreateInstance) := vkGetInstanceProcAddr(nil, 'vkCreateInstance');
   Pointer(vkEnumerateInstanceExtensionProperties) := vkGetInstanceProcAddr(nil, 'vkEnumerateInstanceExtensionProperties');
+  Pointer(vkEnumerateInstanceLayerProperties) := vkGetInstanceProcAddr(nil, 'vkEnumerateInstanceLayerProperties');
   Pointer(vkEnumerateInstanceVersion) := vkGetInstanceProcAddr(nil, 'vkEnumerateInstanceVersion');
 
   Result := True;
@@ -2556,6 +2629,9 @@ begin
   Pointer(vkGetPhysicalDeviceSurfaceCapabilitiesKHR) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceSurfaceCapabilitiesKHR');
   Pointer(vkGetPhysicalDeviceSurfaceFormatsKHR) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceSurfaceFormatsKHR');
   Pointer(vkGetPhysicalDeviceSurfacePresentModesKHR) := vkGetInstanceProcAddr(Instance, 'vkGetPhysicalDeviceSurfacePresentModesKHR');
+  Pointer(vkCreateDebugUtilsMessengerEXT) := vkGetInstanceProcAddr(Instance, 'vkCreateDebugUtilsMessengerEXT');
+  Pointer(vkDestroyDebugUtilsMessengerEXT) := vkGetInstanceProcAddr(Instance, 'vkDestroyDebugUtilsMessengerEXT');
+  Pointer(vkSubmitDebugUtilsMessageEXT) := vkGetInstanceProcAddr(Instance, 'vkSubmitDebugUtilsMessageEXT');
 end;
 
 procedure LoadVulkanDevice(const Device: VkDevice);
@@ -2767,6 +2843,9 @@ begin
   vkGetPhysicalDeviceSurfaceCapabilitiesKHR := nil;
   vkGetPhysicalDeviceSurfaceFormatsKHR := nil;
   vkGetPhysicalDeviceSurfacePresentModesKHR := nil;
+  vkCreateDebugUtilsMessengerEXT := nil;
+  vkDestroyDebugUtilsMessengerEXT := nil;
+  vkSubmitDebugUtilsMessageEXT := nil;
   vkGetDeviceQueue := nil;
   vkQueueSubmit := nil;
   vkQueueWaitIdle := nil;
@@ -2889,6 +2968,7 @@ begin
   vkGetInstanceProcAddr := nil;
   vkCreateInstance := nil;
   vkEnumerateInstanceExtensionProperties := nil;
+  vkEnumerateInstanceLayerProperties := nil;
   vkEnumerateInstanceVersion := nil;
 end;
 

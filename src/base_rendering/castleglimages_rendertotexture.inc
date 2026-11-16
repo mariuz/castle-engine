@@ -1064,7 +1064,7 @@ var
   GrabbedRGBA: TRGBAlphaImage;
   TargetTex: TRHITexture;
 begin
-  Assert(FramebufferBound);
+  Assert(FramebufferBound or (RHIDevice <> nil));
   TDrawableImage.BatchingFlush;
 
   if RHIDevice <> nil then

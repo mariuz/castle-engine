@@ -266,10 +266,8 @@ end;
 
 destructor TLightsRenderer.Destroy;
 begin
-  if (FRHILightsBuffer <> nil) and (RHIDevice = FRHILightsOwnerDevice) then
-    FreeAndNil(FRHILightsBuffer)
-  else
-    FRHILightsBuffer := nil;
+  FreeAndNil(FRHILightsBuffer);
+  FRHILightsOwnerDevice := nil;
   inherited Destroy;
 end;
 
@@ -483,7 +481,7 @@ begin
     Exit;
 
   if (FRHILightsBuffer <> nil) and (FRHILightsOwnerDevice <> RHIDevice) then
-    FRHILightsBuffer := nil;
+    FreeAndNil(FRHILightsBuffer);
   if FRHILightsBuffer = nil then
   begin
     BufDesc := TRHIBufferDesc.Create(SizeOf(TCastleLightsUniformBlock), [buUniform], muCpuToGpu, 'CastleLightsUBO');

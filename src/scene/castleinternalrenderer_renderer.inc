@@ -384,23 +384,18 @@ procedure TRenderer.FreeRHISceneSlots(const ACanDestroyHandles: Boolean);
 var
   I: Integer;
 begin
+  { Silence unused parameter warning; TRHIDevice.ReleaseRemainingDeviceResources
+    detaches FDevice when a device dies early, so FreeAndNil is always safe. }
+  if ACanDestroyHandles then ;
   FRHISceneBuffer := nil;
   FRHISceneDescriptorSet := nil;
   FRHIActiveSceneSlot := -1;
   FNextRHISceneSlotEvict := 0;
   for I := 0 to High(FRHISceneSlots) do
   begin
-    if ACanDestroyHandles then
-    begin
-      FreeAndNil(FRHISceneSlots[I].DescriptorSet);
-      FreeAndNil(FRHISceneSlots[I].SceneBuffer);
-      FreeAndNil(FRHISceneSlots[I].LightsBuffer);
-    end else
-    begin
-      FRHISceneSlots[I].DescriptorSet := nil;
-      FRHISceneSlots[I].SceneBuffer := nil;
-      FRHISceneSlots[I].LightsBuffer := nil;
-    end;
+    FreeAndNil(FRHISceneSlots[I].DescriptorSet);
+    FreeAndNil(FRHISceneSlots[I].SceneBuffer);
+    FreeAndNil(FRHISceneSlots[I].LightsBuffer);
   end;
   SetLength(FRHISceneSlots, 0);
 end;
@@ -437,27 +432,17 @@ end;
 destructor TRenderer.Destroy;
 var
   I: Integer;
-  CanDestroyHandles: Boolean;
 begin
   FreeAndNil(TextureTransformUnitsUsedMore);
   FreeAndNil(PreparedShader);
   FreeAndNil(ShadowMapsShaders);
   FreeAndNil(VarianceShadowMapsShaders);
-  CanDestroyHandles := (FRHISceneOwnerDevice <> nil) and (RHIDevice = FRHISceneOwnerDevice);
-  FreeRHISceneSlots(CanDestroyHandles);
-  if CanDestroyHandles then
-  begin
-    FreeAndNil(FRHISceneDescriptorSetLayout);
-    FreeAndNil(FRHIDefaultVertexShader);
-    FreeAndNil(FRHIDefaultFragmentShader);
-    FreeAndNil(FRHIVSMCasterFragmentShader);
-  end else
-  begin
-    FRHISceneDescriptorSetLayout := nil;
-    FRHIDefaultVertexShader := nil;
-    FRHIDefaultFragmentShader := nil;
-    FRHIVSMCasterFragmentShader := nil;
-  end;
+  FreeRHISceneSlots(True);
+  FreeAndNil(FRHISceneDescriptorSetLayout);
+  FreeAndNil(FRHIDefaultVertexShader);
+  FreeAndNil(FRHIDefaultFragmentShader);
+  FreeAndNil(FRHIVSMCasterFragmentShader);
+  FRHISceneOwnerDevice := nil;
   FRHIShadowMap0Texture := nil;
   FRHIShadowMap0Sampler := nil;
   for I := 0 to High(FRHIShadowMapTextures) do
@@ -496,7 +481,7 @@ begin
   if (AIndex >= 0) and (AIndex < FPreparedDrawItemCount) then
     Result := FPreparedDrawItems[AIndex]
   else
-    FillChar(Result, SizeOf(Result), 0);
+    Result := Default(TRHIPreparedShapeDrawItem);
 end;
 
 procedure TRenderer.RecordPreparedDrawSlice(const ACmd: TRHICommandList;
@@ -741,8 +726,8 @@ begin
     Exit(nil);
   if FRHISceneOwnerDevice <> RHIDevice then
   begin
-    FreeRHISceneSlots(False);
-    FRHISceneDescriptorSetLayout := nil;
+    FreeRHISceneSlots(True);
+    FreeAndNil(FRHISceneDescriptorSetLayout);
     FRHIShadowMap0Texture := nil;
     FRHIShadowMap0Sampler := nil;
     for I := 0 to High(FRHIShadowMapTextures) do
@@ -750,9 +735,9 @@ begin
       FRHIShadowMapTextures[I] := nil;
       FRHIShadowMapSamplers[I] := nil;
     end;
-    FRHIDefaultVertexShader := nil;
-    FRHIDefaultFragmentShader := nil;
-    FRHIVSMCasterFragmentShader := nil;
+    FreeAndNil(FRHIDefaultVertexShader);
+    FreeAndNil(FRHIDefaultFragmentShader);
+    FreeAndNil(FRHIVSMCasterFragmentShader);
     FRHISceneOwnerDevice := RHIDevice;
   end;
   if not FSceneUniformBlockInitialized then
@@ -901,11 +886,11 @@ begin
     Exit;
   if FRHISceneOwnerDevice <> RHIDevice then
   begin
-    FreeRHISceneSlots(False);
-    FRHISceneDescriptorSetLayout := nil;
-    FRHIDefaultVertexShader := nil;
-    FRHIDefaultFragmentShader := nil;
-    FRHIVSMCasterFragmentShader := nil;
+    FreeRHISceneSlots(True);
+    FreeAndNil(FRHISceneDescriptorSetLayout);
+    FreeAndNil(FRHIDefaultVertexShader);
+    FreeAndNil(FRHIDefaultFragmentShader);
+    FreeAndNil(FRHIVSMCasterFragmentShader);
     FRHISceneOwnerDevice := RHIDevice;
   end;
   if (FRHIDefaultVertexShader = nil) or (FRHIDefaultFragmentShader = nil) or

@@ -2,7 +2,8 @@
 <project name="vulkan_3d_scene"
   caption="Castle Game Engine - Vulkan RHI 3D Forward Pass &amp; Lighting"
   render_backend="vulkan"
-  version="1.0.0">
+  standalone_source="vulkan_3d_scene.dpr">
+  <version value="1.0.0" />
   <compiler_options>
     <search_paths>
       <path value="../../../src/base" />

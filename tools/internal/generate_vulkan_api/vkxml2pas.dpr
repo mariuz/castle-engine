@@ -1028,7 +1028,7 @@ const
     'VK_FENCE_CREATE_SIGNALED_BIT'
   );
 
-  OrderedEnums3: array[0..154] of String = (
+  OrderedEnums3: array[0..164] of String = (
     'VK_INDEX_TYPE_UINT16',
     'VK_INDEX_TYPE_UINT32',
     'VK_IMAGE_ASPECT_COLOR_BIT',
@@ -1195,7 +1195,18 @@ const
     'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES',
     'VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES',
     // Phase 111: Transient Render-Target Physical Memory Aliasing
-    'VK_IMAGE_CREATE_ALIAS_BIT'
+    'VK_IMAGE_CREATE_ALIAS_BIT',
+    // Phase 112: VK_EXT_debug_utils Validation Layer Messenger Gate
+    'VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT',
+    'VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CALLBACK_DATA_EXT',
+    'VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT',
+    'VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT',
+    'VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT',
+    'VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT',
+    'VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT',
+    'VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT',
+    'VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT',
+    'VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT'
   );
 
   OrderedStructs: array[0..77] of String = (
@@ -1279,7 +1290,7 @@ const
     'VkBufferMemoryBarrier'
   );
 
-  OrderedStructs2: array[0..47] of String = (
+  OrderedStructs2: array[0..50] of String = (
     'VkImageMemoryBarrier',
     'VkBufferCopy',
     'VkImageSubresourceLayers',
@@ -1289,6 +1300,9 @@ const
     'VkSwapchainCreateInfoKHR',
     'VkPresentInfoKHR',
     'VkDebugUtilsLabelEXT',
+    'VkDebugUtilsObjectNameInfoEXT',
+    'VkDebugUtilsMessengerCallbackDataEXT',
+    'VkDebugUtilsMessengerCreateInfoEXT',
     'VkImageBlit',
     'VkDrawIndirectCommand',
     'VkDrawIndexedIndirectCommand',
@@ -1428,8 +1442,12 @@ const
     'vkCmdDrawIndirect'
   );
 
-  OrderedCommands2: array[0..37] of String = (
+  OrderedCommands2: array[0..41] of String = (
     'vkEnumerateInstanceVersion',
+    'vkEnumerateInstanceLayerProperties',
+    'vkCreateDebugUtilsMessengerEXT',
+    'vkDestroyDebugUtilsMessengerEXT',
+    'vkSubmitDebugUtilsMessageEXT',
     'vkGetPhysicalDeviceFeatures2',
     'vkGetPhysicalDeviceProperties2',
     'vkCmdDrawIndexedIndirect',
@@ -1469,7 +1487,7 @@ const
     'vkCmdWriteTimestamp'
   );
 
-  InstanceCommands: array[0..17] of String = (
+  InstanceCommands: array[0..20] of String = (
     'vkDestroyInstance',
     'vkEnumeratePhysicalDevices',
     'vkGetPhysicalDeviceFeatures',
@@ -1487,7 +1505,10 @@ const
     'vkGetPhysicalDeviceSurfaceSupportKHR',
     'vkGetPhysicalDeviceSurfaceCapabilitiesKHR',
     'vkGetPhysicalDeviceSurfaceFormatsKHR',
-    'vkGetPhysicalDeviceSurfacePresentModesKHR'
+    'vkGetPhysicalDeviceSurfacePresentModesKHR',
+    'vkCreateDebugUtilsMessengerEXT',
+    'vkDestroyDebugUtilsMessengerEXT',
+    'vkSubmitDebugUtilsMessageEXT'
   );
 
 var
@@ -1618,6 +1639,10 @@ begin
     L.Add('  VkQueryControlFlags = VkFlags;');
     L.Add('  VkQueryResultFlags = VkFlags;');
     L.Add('  VkQueryPipelineStatisticFlags = VkFlags;');
+    L.Add('  VkDebugUtilsMessageSeverityFlagsEXT = VkFlags;');
+    L.Add('  VkDebugUtilsMessageTypeFlagsEXT = VkFlags;');
+    L.Add('  VkDebugUtilsMessengerCreateFlagsEXT = VkFlags;');
+    L.Add('  VkDebugUtilsMessengerCallbackDataFlagsEXT = VkFlags;');
     L.Add('');
     L.Add('  { Pointers to primitive types }');
     L.Add('  PCardinal = ^Cardinal;');
@@ -1692,6 +1717,7 @@ begin
     L.Add('  PVkSurfaceKHR = ^VkSurfaceKHR;');
     L.Add('  PVkSwapchainKHR = ^VkSwapchainKHR;');
     L.Add('  PVkCommandPool = ^VkCommandPool;');
+    L.Add('  PVkDebugUtilsMessengerEXT = ^VkDebugUtilsMessengerEXT;');
     L.Add('');
     L.Add('  PVkAllocationCallbacks = Pointer;');
     L.Add('');
@@ -1832,6 +1858,7 @@ begin
     L.Add('');
     L.Add('  Pointer(vkCreateInstance) := vkGetInstanceProcAddr(nil, ''vkCreateInstance'');');
     L.Add('  Pointer(vkEnumerateInstanceExtensionProperties) := vkGetInstanceProcAddr(nil, ''vkEnumerateInstanceExtensionProperties'');');
+    L.Add('  Pointer(vkEnumerateInstanceLayerProperties) := vkGetInstanceProcAddr(nil, ''vkEnumerateInstanceLayerProperties'');');
     L.Add('  Pointer(vkEnumerateInstanceVersion) := vkGetInstanceProcAddr(nil, ''vkEnumerateInstanceVersion'');');
     L.Add('');
     L.Add('  Result := True;');

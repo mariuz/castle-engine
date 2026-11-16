@@ -934,13 +934,13 @@ var
         end;
       finally FreeAndNil(Files) end;
 
+      Pack.Cpu := Cpu;
+      Pack.Manifest := Manifest;
       Pack.AddDataInformation(TCastleManifest.DataName);
 
       PackageFileName := PackageName(Target, OS, CPU,
         PackageFormatFinal, PackageNameIncludeVersion);
 
-      Pack.Cpu := Cpu;
-      Pack.Manifest := Manifest;
       Pack.Make(OutputPath, PackageFileName, PackageFormatFinal);
     finally FreeAndNil(Pack) end;
   end;

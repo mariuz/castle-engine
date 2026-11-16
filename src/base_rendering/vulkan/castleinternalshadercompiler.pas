@@ -24,8 +24,12 @@ interface
 
 uses
   SysUtils, Classes, Generics.Collections, SyncObjs,
-  CastleDynLib, CastleFilesUtils, CastleUriUtils, CastleDownload, CastleLog,
+  CastleUtils, CastleDynLib, CastleFilesUtils, CastleFindFiles, CastleUriUtils, CastleDownload, CastleLog,
   CastleInternalRHI, CastleInternalShaderRHI;
+
+const
+  DefaultDiskShaderCacheBaseUrl    = 'castle-config:/shader_cache/';
+  DefaultBundledShaderCacheBaseUrl = 'castle-data:/shader_cache/';
 
 type
   { Raw byte array holding 32-bit aligned SPIR-V words }
@@ -93,15 +97,25 @@ type
     FMemoryCache: {$ifdef FPC}specialize{$endif} TDictionary<UInt64, TSPIRVBytecode>;
     FDiskCacheEnabled: Boolean;
     FDiskCacheBaseUrl: String;
+    FBundledCacheBaseUrl: String;
+    FBundlingTargetShaderDir: String;
+    FBundledCopiedCount: Cardinal;
 
     procedure LoadShadercLibrary;
     procedure UnloadShadercLibrary;
     procedure DetectExternalCompiler;
+    function BuildCacheFileUrl(const ABaseUrl: String; const AHash: UInt64;
+      const AStage: TRHIShaderStage): String;
     function GetCacheFileUrl(const AHash: UInt64; const AStage: TRHIShaderStage): String;
+    function TryLoadFromCacheUrl(const ACacheUrl: String; const AHash: UInt64;
+      const AStage: TRHIShaderStage; out ASPIRV: TSPIRVBytecode): Boolean;
     function TryLoadFromDiskCache(const AHash: UInt64; const AStage: TRHIShaderStage;
       out ASPIRV: TSPIRVBytecode): Boolean;
+    procedure SaveSPIRVToCacheUrl(const ACacheUrl: String; const AHash: UInt64;
+      const AStage: TRHIShaderStage; const ASPIRV: TSPIRVBytecode);
     procedure SaveToDiskCache(const AHash: UInt64; const AStage: TRHIShaderStage;
       const ASPIRV: TSPIRVBytecode);
+    procedure CopyCachedSpvFileCallback(const FileInfo: TFileInfo; var StopSearch: Boolean);
     function CompileGLSLToSPIRVInternal(const AStage: TRHIShaderStage;
       const AGLSLSource, ADebugName: String): TSPIRVBytecode;
     function CompileGLSLWithExternalCLI(const AStage: TRHIShaderStage;
@@ -136,6 +150,13 @@ type
       and returns the array of their deterministic source hashes. }
     function PrewarmCoreEngineShaders: TUInt64Array;
 
+    { Bundles pre-warmed and built-in core engine SPIR-V shader cache files (.spv)
+      into <ATargetDataDir>/shader_cache/ (and optionally copies a pre-baked
+      vulkan_pipeline_cache.bin seed from ASourcePipelineCacheUrl if present),
+      returning the total number of bundled .spv files in <ATargetDataDir>/shader_cache/. }
+    function BundleCoreAndCachedShadersToDataDirectory(const ATargetDataDir: String;
+      const ASourcePipelineCacheUrl: String = ''): Cardinal;
+
     { Clears all cached SPIR-V binaries from memory (and optionally disk). }
     procedure ClearCache(const AlsoClearDisk: Boolean = False);
 
@@ -146,6 +167,8 @@ type
 
     property ExternalCompilerPath: String read FExternalCompilerPath;
     property DiskCacheEnabled: Boolean read FDiskCacheEnabled write FDiskCacheEnabled default True;
+    property DiskCacheBaseUrl: String read FDiskCacheBaseUrl write FDiskCacheBaseUrl;
+    property BundledCacheBaseUrl: String read FBundledCacheBaseUrl write FBundledCacheBaseUrl;
 
     class function Instance: TCastleShaderCompiler;
     class destructor DestroyClass;
@@ -3004,7 +3027,8 @@ begin
   FLock := TCriticalSection.Create;
   FMemoryCache := {$ifdef FPC}specialize{$endif} TDictionary<UInt64, TSPIRVBytecode>.Create;
   FDiskCacheEnabled := True;
-  FDiskCacheBaseUrl := 'castle-config:/shader_cache/';
+  FDiskCacheBaseUrl := DefaultDiskShaderCacheBaseUrl;
+  FBundledCacheBaseUrl := DefaultBundledShaderCacheBaseUrl;
 
   LoadShadercLibrary;
   if FShadercLib = nil then
@@ -3134,30 +3158,38 @@ begin
   Result := ((FShadercLib <> nil) and (FCompilerHandle <> nil)) or (FExternalCompilerPath <> '');
 end;
 
-function TCastleShaderCompiler.GetCacheFileUrl(const AHash: UInt64;
-  const AStage: TRHIShaderStage): String;
+function TCastleShaderCompiler.BuildCacheFileUrl(const ABaseUrl: String;
+  const AHash: UInt64; const AStage: TRHIShaderStage): String;
 const
   StageExt: array[TRHIShaderStage] of String = ('vert', 'frag', 'geom', 'comp');
+var
+  NormBase: String;
 begin
-  Result := FDiskCacheBaseUrl + IntToHex(AHash, 16) + '.' + StageExt[AStage] + '.spv';
+  NormBase := ABaseUrl;
+  if (NormBase <> '') and (NormBase[Length(NormBase)] <> '/') then
+    NormBase := NormBase + '/';
+  Result := NormBase + IntToHex(AHash, 16) + '.' + StageExt[AStage] + '.spv';
 end;
 
-function TCastleShaderCompiler.TryLoadFromDiskCache(const AHash: UInt64;
-  const AStage: TRHIShaderStage; out ASPIRV: TSPIRVBytecode): Boolean;
+function TCastleShaderCompiler.GetCacheFileUrl(const AHash: UInt64;
+  const AStage: TRHIShaderStage): String;
+begin
+  Result := BuildCacheFileUrl(FDiskCacheBaseUrl, AHash, AStage);
+end;
+
+function TCastleShaderCompiler.TryLoadFromCacheUrl(const ACacheUrl: String;
+  const AHash: UInt64; const AStage: TRHIShaderStage;
+  out ASPIRV: TSPIRVBytecode): Boolean;
 var
-  CacheUrl: String;
   Stream: TStream;
   Header: TCastleSPIRVCacheHeader;
   FirstWord: UInt32;
 begin
   Result := False;
-  if not FDiskCacheEnabled then Exit;
-
-  CacheUrl := GetCacheFileUrl(AHash, AStage);
-  if not UriFileExists(CacheUrl) then Exit;
+  if (ACacheUrl = '') or (not UriFileExists(ACacheUrl)) then Exit;
 
   try
-    Stream := Download(CacheUrl, []);
+    Stream := Download(ACacheUrl, []);
     try
       if Stream.Size <= SizeOf(TCastleSPIRVCacheHeader) then Exit;
       Stream.ReadBuffer(Header, SizeOf(Header));
@@ -3190,24 +3222,40 @@ begin
     on E: Exception do
     begin
       WritelnWarning('RHI/ShaderCompiler', 'Failed to read cached SPIR-V (%s): %s',
-        [CacheUrl, E.Message]);
+        [ACacheUrl, E.Message]);
       Result := False;
     end;
   end;
 end;
 
-procedure TCastleShaderCompiler.SaveToDiskCache(const AHash: UInt64;
-  const AStage: TRHIShaderStage; const ASPIRV: TSPIRVBytecode);
+function TCastleShaderCompiler.TryLoadFromDiskCache(const AHash: UInt64;
+  const AStage: TRHIShaderStage; out ASPIRV: TSPIRVBytecode): Boolean;
+begin
+  Result := False;
+  if not FDiskCacheEnabled then Exit;
+
+  { 1. Check user-writable persistent disk cache (castle-config:/shader_cache/) }
+  if (FDiskCacheBaseUrl <> '') and
+     TryLoadFromCacheUrl(BuildCacheFileUrl(FDiskCacheBaseUrl, AHash, AStage), AHash, AStage, ASPIRV) then
+    Exit(True);
+
+  { 2. Fallback to read-only packaged asset cache (castle-data:/shader_cache/) }
+  if (FBundledCacheBaseUrl <> '') and (FBundledCacheBaseUrl <> FDiskCacheBaseUrl) and
+     TryLoadFromCacheUrl(BuildCacheFileUrl(FBundledCacheBaseUrl, AHash, AStage), AHash, AStage, ASPIRV) then
+    Exit(True);
+end;
+
+procedure TCastleShaderCompiler.SaveSPIRVToCacheUrl(const ACacheUrl: String;
+  const AHash: UInt64; const AStage: TRHIShaderStage; const ASPIRV: TSPIRVBytecode);
 var
-  CacheUrl, LocalFileName, LocalDir: String;
+  LocalFileName, LocalDir: String;
   Stream: TStream;
   Header: TCastleSPIRVCacheHeader;
 begin
-  if (not FDiskCacheEnabled) or (Length(ASPIRV) = 0) then Exit;
+  if (ACacheUrl = '') or (Length(ASPIRV) = 0) then Exit;
 
-  CacheUrl := GetCacheFileUrl(AHash, AStage);
   try
-    LocalFileName := UriToFilenameSafe(CacheUrl);
+    LocalFileName := UriToFilenameSafe(ACacheUrl);
     if LocalFileName <> '' then
     begin
       LocalDir := ExtractFilePath(LocalFileName);
@@ -3220,7 +3268,7 @@ begin
     Header.Stage := UInt32(Ord(AStage));
     Header.BytecodeSize := UInt32(Length(ASPIRV));
 
-    Stream := UrlSaveStream(CacheUrl);
+    Stream := UrlSaveStream(ACacheUrl);
     try
       Stream.WriteBuffer(Header, SizeOf(Header));
       Stream.WriteBuffer(ASPIRV[0], Length(ASPIRV));
@@ -3230,8 +3278,15 @@ begin
   except
     on E: Exception do
       WritelnWarning('RHI/ShaderCompiler', 'Could not write SPIR-V disk cache (%s): %s',
-        [CacheUrl, E.Message]);
+        [ACacheUrl, E.Message]);
   end;
+end;
+
+procedure TCastleShaderCompiler.SaveToDiskCache(const AHash: UInt64;
+  const AStage: TRHIShaderStage; const ASPIRV: TSPIRVBytecode);
+begin
+  if (not FDiskCacheEnabled) or (Length(ASPIRV) = 0) then Exit;
+  SaveSPIRVToCacheUrl(GetCacheFileUrl(AHash, AStage), AHash, AStage, ASPIRV);
 end;
 
 function TCastleShaderCompiler.CompileGLSLWithExternalCLI(
@@ -3723,7 +3778,23 @@ begin
   if IsRuntimeCompilationAvailable then
     DummySPIRV := GetOrCompileSPIRV(AStage, AGLSLSource, ADebugName)
   else
-    TryLoadFromDiskCache(Result, AStage, DummySPIRV);
+  begin
+    FLock.Acquire;
+    try
+      if not FMemoryCache.TryGetValue(Result, DummySPIRV) then
+      begin
+        if TryLoadFromDiskCache(Result, AStage, DummySPIRV) then
+          FMemoryCache.Add(Result, DummySPIRV)
+        else if TryGetBuiltInSPIRV(AStage, AGLSLSource, ADebugName, DummySPIRV) then
+        begin
+          FMemoryCache.Add(Result, DummySPIRV);
+          SaveToDiskCache(Result, AStage, DummySPIRV);
+        end;
+      end;
+    finally
+      FLock.Release;
+    end;
+  end;
 end;
 
 function TCastleShaderCompiler.PrewarmCoreEngineShaders: TUInt64Array;
@@ -3769,6 +3840,88 @@ begin
     Result[4] := PrewarmShaderSource(ssFragment, ScreenFS, 'core_screen_effect_fs');
   finally
     FreeAndNil(Gen);
+  end;
+end;
+
+procedure TCastleShaderCompiler.CopyCachedSpvFileCallback(
+  const FileInfo: TFileInfo; var StopSearch: Boolean);
+var
+  DstFile: String;
+begin
+  StopSearch := False;
+  if FileInfo.Directory or (FBundlingTargetShaderDir = '') then Exit;
+  DstFile := InclPathDelim(FBundlingTargetShaderDir) + FileInfo.Name;
+  if SameFileName(FileInfo.AbsoluteName, DstFile) then
+  begin
+    Inc(FBundledCopiedCount);
+    Exit;
+  end;
+  CheckCopyFile(FileInfo.AbsoluteName, DstFile);
+  Inc(FBundledCopiedCount);
+end;
+
+function TCastleShaderCompiler.BundleCoreAndCachedShadersToDataDirectory(
+  const ATargetDataDir: String; const ASourcePipelineCacheUrl: String): Cardinal;
+const
+  CoreStages: array[0..4] of TRHIShaderStage = (
+    ssVertex, ssFragment, ssVertex, ssVertex, ssFragment
+  );
+var
+  Hashes: TUInt64Array;
+  TargetShaderDir, TargetShaderBaseUrl, SourceDiskDir: String;
+  SrcPipelineFile, DstPipelineFile: String;
+  CachedSPIRV: TSPIRVBytecode;
+  I: Integer;
+begin
+  Result := 0;
+  if ATargetDataDir = '' then Exit;
+
+  TargetShaderDir := InclPathDelim(ATargetDataDir) + 'shader_cache';
+  CheckForceDirectories(TargetShaderDir);
+  TargetShaderBaseUrl := FilenameToUriSafe(InclPathDelim(TargetShaderDir));
+
+  { 1. Pre-warm core engine stages and write them directly into <ATargetDataDir>/shader_cache/ }
+  Hashes := PrewarmCoreEngineShaders;
+  FLock.Acquire;
+  try
+    for I := 0 to High(Hashes) do
+      if FMemoryCache.TryGetValue(Hashes[I], CachedSPIRV) and (Length(CachedSPIRV) > 0) then
+        SaveSPIRVToCacheUrl(
+          BuildCacheFileUrl(TargetShaderBaseUrl, Hashes[I], CoreStages[I]),
+          Hashes[I], CoreStages[I], CachedSPIRV);
+
+    { 2. Copy any additional pre-cached .spv files from DiskCacheBaseUrl into <ATargetDataDir>/shader_cache/ }
+    if FDiskCacheBaseUrl <> '' then
+    begin
+      SourceDiskDir := UriToFilenameSafe(FDiskCacheBaseUrl);
+      if (SourceDiskDir <> '') and DirectoryExists(SourceDiskDir) and
+         (not SameFileName(ExcludeTrailingPathDelimiter(SourceDiskDir),
+                           ExcludeTrailingPathDelimiter(TargetShaderDir))) then
+      begin
+        FBundlingTargetShaderDir := TargetShaderDir;
+        FBundledCopiedCount := 0;
+        FindFiles(SourceDiskDir, '*.spv', False, @CopyCachedSpvFileCallback, []);
+      end;
+    end;
+
+    { Count total bundled .spv files now present in TargetShaderDir }
+    FBundlingTargetShaderDir := TargetShaderDir;
+    FBundledCopiedCount := 0;
+    FindFiles(TargetShaderDir, '*.spv', False, @CopyCachedSpvFileCallback, []);
+    Result := FBundledCopiedCount;
+  finally
+    FLock.Release;
+  end;
+
+  { 3. Bundle optional pre-baked vulkan_pipeline_cache.bin seed if available and not already in data/ }
+  if (ASourcePipelineCacheUrl <> '') and UriFileExists(ASourcePipelineCacheUrl) then
+  begin
+    SrcPipelineFile := UriToFilenameSafe(ASourcePipelineCacheUrl);
+    DstPipelineFile := InclPathDelim(ATargetDataDir) + 'vulkan_pipeline_cache.bin';
+    if (SrcPipelineFile <> '') and RegularFileExists(SrcPipelineFile) and
+       (not RegularFileExists(DstPipelineFile)) and
+       (not SameFileName(SrcPipelineFile, DstPipelineFile)) then
+      CheckCopyFile(SrcPipelineFile, DstPipelineFile);
   end;
 end;
 
@@ -3892,7 +4045,7 @@ begin
       AFound := Bindings[I];
       Exit(True);
     end;
-  FillChar(AFound, SizeOf(AFound), 0);
+  AFound := Default(TSPIRVReflectedBinding);
   Result := False;
 end;
 
@@ -3907,7 +4060,7 @@ begin
       AFound := StageIO[I];
       Exit(True);
     end;
-  FillChar(AFound, SizeOf(AFound), 0);
+  AFound := Default(TSPIRVReflectedStageIO);
   Result := False;
 end;
 
@@ -3922,7 +4075,7 @@ begin
       AFound := StageIO[I];
       Exit(True);
     end;
-  FillChar(AFound, SizeOf(AFound), 0);
+  AFound := Default(TSPIRVReflectedStageIO);
   Result := False;
 end;
 
@@ -4416,7 +4569,7 @@ begin
 
             if HasValidDescType then
             begin
-              FillChar(NewBinding, SizeOf(NewBinding), 0);
+              NewBinding := Default(TSPIRVReflectedBinding);
               if Ids[I].HasDescriptorSet then
                 NewBinding.SetIndex := Ids[I].DescriptorSet
               else
@@ -4443,7 +4596,7 @@ begin
           if Ids[I].HasLocation and (not Ids[I].IsBuiltIn) and
              (not Ids[BaseTypeId].IsBuiltIn) then
           begin
-            FillChar(NewIO, SizeOf(NewIO), 0);
+            NewIO := Default(TSPIRVReflectedStageIO);
             NewIO.Location := Ids[I].Location;
             NewIO.IsOutput := VarStorageClass = SpvStorageClassOutput;
             if Ids[BaseTypeId].TypeKind in [stkVector, stkMatrix] then

@@ -440,7 +440,7 @@ begin
   FTextureSetLayout := FDevice.CreateDescriptorSetLayout([BindingDesc]);
 
   { 3. Build PSOs for each 2D Blend Mode }
-  FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+  PipeDesc := Default(TRHIGraphicsPipelineDesc);
   PipeDesc.VertexShader := FVertShader;
   PipeDesc.FragmentShader := FFragShader;
   PipeDesc.Topology := ptTriangleList;
@@ -535,7 +535,7 @@ begin
     Indices[IBase + 5] := VBase + 0;
   end;
 
-  FillChar(BufDesc, SizeOf(BufDesc), 0);
+  BufDesc := Default(TRHIBufferDesc);
   BufDesc.Size := Length(Indices) * SizeOf(UInt16);
   BufDesc.Usage := [buIndex, buTransferDst];
   BufDesc.MemoryUsage := muGpuOnly;
@@ -549,7 +549,7 @@ var
   I: Integer;
   BufDesc: TRHIBufferDesc;
 begin
-  FillChar(BufDesc, SizeOf(BufDesc), 0);
+  BufDesc := Default(TRHIBufferDesc);
   BufDesc.Size := MaxQuadsPerFrame * 4 * SizeOf(TCastle2DVertex);
   BufDesc.Usage := [buVertex];
   BufDesc.MemoryUsage := muCpuToGpu; // Persistently mapped host-visible memory in Vulkan

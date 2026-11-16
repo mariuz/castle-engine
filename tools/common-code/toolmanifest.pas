@@ -152,6 +152,7 @@ type
       FWebCanvasWidth, FWebCanvasHeight: Integer;
       FWebHtmlContents: String;
       FRenderBackend: TRenderBackend;
+      FBundleVulkanCaches: Boolean;
 
     function DefaultQualifiedName(const AName: String): String;
     procedure CheckMatches(const Name, Value: String; const AllowedChars: TSetOfChars);
@@ -208,9 +209,13 @@ type
     property QualifiedName: String read FQualifiedName;
     property ProposedUnitPrefix: String read FProposedUnitPrefix;
     property RenderBackend: TRenderBackend read FRenderBackend;
+    property BundleVulkanCaches: Boolean read FBundleVulkanCaches;
     { Returns True when the build tool should pre-warm and package SPIR-V shader caches
       (i.e. when RenderBackend is backendAuto or backendVulkan). }
     function ShouldPrewarmVulkanShaders: Boolean;
+    { Returns True when castle-engine package should bundle pre-warmed SPIR-V (.spv)
+      and optional Vulkan pipeline cache seed files into the packaged data/ directory. }
+    function ShouldBundleVulkanCaches: Boolean;
     { Dependencies of this project.
       Read-only from the outside, do not call any methods that modify
       the contents of it. }
@@ -497,6 +502,7 @@ begin
   FWebCanvasWidth := DefaultWebCanvasWidth;
   FWebCanvasHeight := DefaultWebCanvasHeight;
   FRenderBackend := backendAuto;
+  FBundleVulkanCaches := True;
 
   FPath := InclPathDelim(APath);
   FPathUrl := FilenameToUriSafe(FPath);
@@ -616,6 +622,7 @@ begin
       DefaultMacAppBundle);
     FRenderBackend := StringToRenderBackend(
       Doc.DocumentElement.AttributeStringDef('render_backend', 'auto'));
+    FBundleVulkanCaches := Doc.DocumentElement.AttributeBooleanDef('bundle_vulkan_caches', True);
 
     FVersion := ReadVersion(Doc.DocumentElement.ChildElement('version', false));
     // create default FVersion value, if necessary
@@ -1091,6 +1098,11 @@ end;
 function TCastleManifest.ShouldPrewarmVulkanShaders: Boolean;
 begin
   Result := FRenderBackend in [backendAuto, backendVulkan];
+end;
+
+function TCastleManifest.ShouldBundleVulkanCaches: Boolean;
+begin
+  Result := FBundleVulkanCaches and ShouldPrewarmVulkanShaders;
 end;
 
 function TCastleManifest.Dependencies: TDependencies;

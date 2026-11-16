@@ -403,6 +403,9 @@ type
     procedure TestRealLavapipeRenderGraphPhysicalMemoryAliasingAndDeadPassCullingRHI;
     procedure TestRealLavapipeHDRBloomLuminanceHistogramAndTonemapPerceptualDiffRHI;
     procedure TestRealLavapipeFullRenderGraphGTAOSSRAndPostProcessPipelineRHI;
+    procedure TestVulkanValidationLayerDebugMessengerAndZeroErrorGateRHI;
+    procedure TestRealOpenGLVsVulkanSideBySideVisualRegressionSuiteRHI;
+    procedure TestShaderAndPipelineCachePackageBundlingAndDataSeedRHI;
   private
     FPhase111ForwardSubPassCounter: Integer;
     FCapturedWarnings: TStringList;
@@ -5929,13 +5932,13 @@ begin
     TTextureResources.Unprepare(NormTexNode);
     SetRHIDevice(SavedDevice);
     FreeAndNil(ShapeNode);
-    FreeIfUnusedAndNil(AppNode);
-    FreeIfUnusedAndNil(PhysMat);
-    FreeIfUnusedAndNil(PhongMat);
-    FreeIfUnusedAndNil(UnlitMat);
-    FreeIfUnusedAndNil(BaseTexNode);
-    FreeIfUnusedAndNil(NormTexNode);
-    FreeIfUnusedAndNil(BoxNode);
+    NodeRelease(AppNode);
+    NodeRelease(PhysMat);
+    NodeRelease(PhongMat);
+    NodeRelease(UnlitMat);
+    NodeRelease(BaseTexNode);
+    NodeRelease(NormTexNode);
+    NodeRelease(BoxNode);
     FreeAndNil(RenderOpts);
     FreeAndNil(CmdList);
     FreeAndNil(VkDev);
@@ -24709,7 +24712,7 @@ begin
     end;
 
     { 2. Verify TCastleViewport SSAO + SSR built-in screen effects bind Set 2 user descriptor sets }
-    Viewport := TCastleViewport.Create(nil);
+    Viewport := TTestViewportScreenEffectAccess.Create(nil);
     Viewport.FullSize := False;
     Viewport.Width := 320;
     Viewport.Height := 240;
@@ -24801,7 +24804,7 @@ begin
     ChildScene2.Load(Root2, True);
 
     { 3. Add both scenes to Viewport.Items WITHOUT setting deprecated Items.MainScene }
-    Viewport := TCastleViewport.Create(nil);
+    Viewport := TTestViewportScreenEffectAccess.Create(nil);
     Viewport.Items.Add(ChildScene1);
     Viewport.Items.Add(ChildScene2);
 
@@ -31062,6 +31065,713 @@ begin
     FreeAndNil(DepthTex);
     FreeAndNil(Graph);
     FreeAndNil(RealDev);
+  end;
+end;
+
+type
+  TPhase112VisualParity2DControl = class(TCastleUserInterface)
+  private
+    FSprite: TDrawableImage;
+    procedure EnsureSprite;
+  public
+    destructor Destroy; override;
+    procedure GLContextClose; override;
+    procedure Render; override;
+  end;
+
+procedure TPhase112VisualParity2DControl.EnsureSprite;
+var
+  Img: TRGBAlphaImage;
+  X, Y: Integer;
+begin
+  if FSprite <> nil then Exit;
+  Img := TRGBAlphaImage.Create(32, 32);
+  for Y := 0 to 31 do
+    for X := 0 to 31 do
+    begin
+      if ((X div 8) + (Y div 8)) mod 2 = 0 then
+        Img.PixelPtr(X, Y)^ := Vector4Byte(245, 210, 40, 255)
+      else
+        Img.PixelPtr(X, Y)^ := Vector4Byte(40, 185, 240, 255);
+    end;
+  FSprite := TDrawableImage.Create(Img, False { SmoothScaling }, True { OwnsImage });
+end;
+
+procedure TPhase112VisualParity2DControl.GLContextClose;
+begin
+  FreeAndNil(FSprite);
+  inherited;
+end;
+
+destructor TPhase112VisualParity2DControl.Destroy;
+begin
+  FreeAndNil(FSprite);
+  inherited;
+end;
+
+procedure TPhase112VisualParity2DControl.Render;
+begin
+  inherited;
+  DrawRectangle(FloatRectangle(0, 0, 160, 120), Vector4(0.10, 0.12, 0.18, 1.0));
+  DrawRectangle(FloatRectangle(12, 14, 62, 92), Vector4(0.88, 0.22, 0.20, 1.0));
+  DrawRectangle(FloatRectangle(48, 28, 66, 64), Vector4(0.18, 0.76, 0.36, 1.0));
+  EnsureSprite;
+  FSprite.Draw(FloatRectangle(92, 28, 56, 56));
+end;
+
+procedure TTestCastleVulkanRHI.TestVulkanValidationLayerDebugMessengerAndZeroErrorGateRHI;
+var
+  Layers: TAnsiStringArray;
+  HasDebugUtils: Boolean;
+  RealDev: TVulkanRHIDevice;
+  RealCmd: TVulkanRHICommandList;
+  ColorTex: TRHITexture;
+  Readback: TRGBAlphaImage;
+  PassInfo: TRHIRenderingInfo;
+  RoutedViaLoader, CaughtGateError: Boolean;
+  GateErrMsg, ReportStr, InfoStr: String;
+begin
+  try
+    if not LoadVulkan then
+      Exit;
+  except
+    on Exception do
+      Exit;
+  end;
+
+  Layers := QuerySupportedVulkanInstanceLayers;
+  AssertTrue('vkEnumerateInstanceLayerProperties must be bound when Vulkan loader is present',
+    Assigned(vkEnumerateInstanceLayerProperties));
+  { Layers may be 0 or >= 1 depending on installed OS layers; verify IsVulkanInstanceLayerSupported consistency }
+  if Length(Layers) > 0 then
+    AssertTrue('First enumerated Vulkan layer must report supported',
+      IsVulkanInstanceLayerSupported(Layers[0]));
+  HasDebugUtils := IsVulkanInstanceExtensionSupported(VK_EXT_debug_utils);
+
+  RealDev := nil;
+  try
+    RealDev := TVulkanRHIDevice.CreateOffscreen(True { EnableValidation });
+  except
+    on Exception do
+    begin
+      FreeAndNil(RealDev);
+      Exit;
+    end;
+  end;
+
+  ColorTex := nil;
+  Readback := nil;
+  try
+    if HasDebugUtils then
+    begin
+      AssertTrue('DebugUtilsActive must be True when VK_EXT_debug_utils is supported and EnableValidation=True',
+        RealDev.DebugUtilsActive);
+      AssertTrue('FDebugMessenger handle must be created via vkCreateDebugUtilsMessengerEXT',
+        RealDev.DebugMessengerHandle <> VK_NULL_HANDLE);
+    end;
+
+    { 1. Clean device startup must produce 0 validation errors }
+    AssertEquals('Fresh TVulkanRHIDevice startup must emit 0 validation errors',
+      0, Integer(RealDev.ValidationErrorCount));
+    RealDev.AssertZeroValidationErrors('OffscreenDeviceStartup');
+
+    InfoStr := RealDev.GetInformationString;
+    AssertTrue('GetInformationString must report validation layer & messenger diagnostics',
+      Pos('Validation layer (VK_LAYER_KHRONOS_validation):', InfoStr) > 0);
+
+    { 2. Live round-trip through vkSubmitDebugUtilsMessageEXT -> Vulkan Loader -> C Callback -> TVulkanRHIDevice }
+    RealDev.ResetValidationCounters;
+    RealDev.StrictValidationGate := False;
+
+    RoutedViaLoader := RealDev.SubmitDebugUtilsMessage(
+      VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT,
+      VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+      'VUID-CastleTest-PerfWarning-001',
+      'Synthetic performance warning routed through debug messenger');
+    if HasDebugUtils and (RealDev.DebugMessengerHandle <> VK_NULL_HANDLE) and
+       Assigned(vkSubmitDebugUtilsMessageEXT) then
+      AssertTrue('SubmitDebugUtilsMessage must route through live vkSubmitDebugUtilsMessageEXT',
+        RoutedViaLoader);
+
+    AssertEquals('ValidationWarningCount must increment to 1', 1, Integer(RealDev.ValidationWarningCount));
+    AssertEquals('ValidationErrorCount must remain 0 on warning', 0, Integer(RealDev.ValidationErrorCount));
+    { Non-strict gate allows warnings while blocking errors }
+    RealDev.AssertZeroValidationErrors('NonStrictWarningAllowed');
+
+    { Strict CI gate rejects warnings too }
+    RealDev.StrictValidationGate := True;
+    CaughtGateError := False;
+    GateErrMsg := '';
+    try
+      RealDev.AssertZeroValidationErrors('StrictGateCheck');
+    except
+      on E: ERHIError do
+      begin
+        CaughtGateError := True;
+        GateErrMsg := E.Message;
+      end;
+    end;
+    AssertTrue('StrictValidationGate=True must raise ERHIError when ValidationWarningCount > 0', CaughtGateError);
+    AssertTrue('Strict gate exception must include VUID identifier',
+      Pos('VUID-CastleTest-PerfWarning-001', GateErrMsg) > 0);
+
+    { 3. Validation error always trips AssertZeroValidationErrors even when StrictValidationGate=False }
+    RealDev.StrictValidationGate := False;
+    RealDev.SubmitDebugUtilsMessage(
+      VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+      VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT,
+      'VUID-vkCmdDraw-None-08600',
+      'Synthetic validation error routed through debug messenger');
+    AssertEquals('ValidationErrorCount must increment to 1', 1, Integer(RealDev.ValidationErrorCount));
+    AssertEquals('ValidationMessageCount must equal 2', 2, RealDev.ValidationMessageCount);
+    ReportStr := RealDev.GetValidationMessagesReport;
+    AssertTrue('Validation report must include warning VUID',
+      Pos('VUID-CastleTest-PerfWarning-001', ReportStr) > 0);
+    AssertTrue('Validation report must include error VUID',
+      Pos('VUID-vkCmdDraw-None-08600', ReportStr) > 0);
+
+    CaughtGateError := False;
+    try
+      RealDev.AssertZeroValidationErrors('DefaultErrorGateCheck');
+    except
+      on E: ERHIError do
+        CaughtGateError := True;
+    end;
+    AssertTrue('ValidationErrorCount > 0 must raise ERHIError in AssertZeroValidationErrors', CaughtGateError);
+
+    { 4. Reset counters and execute a real Lavapipe render pass + image readback with 0 validation errors }
+    RealDev.ResetValidationCounters;
+    AssertEquals(0, Integer(RealDev.ValidationErrorCount));
+    AssertEquals(0, Integer(RealDev.ValidationWarningCount));
+    AssertEquals(0, RealDev.ValidationMessageCount);
+
+    ColorTex := RealDev.CreateTexture(
+      TRHITextureDesc.Create2D(32, 32, pfRGBA8_UNorm, [tuColorAttachment, tuTransferSrc]));
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    RealCmd.TransitionTexture(ColorTex, rsColorAttachment);
+    FillChar(PassInfo, SizeOf(PassInfo), 0);
+    PassInfo.RenderArea := Rectangle(0, 0, 32, 32);
+    SetLength(PassInfo.ColorAttachments, 1);
+    PassInfo.ColorAttachments[0].Texture := ColorTex;
+    PassInfo.ColorAttachments[0].LoadOp := loClear;
+    PassInfo.ColorAttachments[0].StoreOp := soStore;
+    PassInfo.ColorAttachments[0].ClearColor := Vector4(0.2, 0.6, 0.9, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+    RealCmd.EndRendering;
+    RealDev.EndOffscreenFrame;
+
+    Readback := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 32, 32));
+    AssertTrue('Cleared blue channel must read back > 200', Readback.PixelPtr(16, 16)^.Z > 200);
+    RealDev.AssertZeroValidationErrors('LiveOffscreenRenderAndReadback');
+  finally
+    FreeAndNil(Readback);
+    FreeAndNil(ColorTex);
+    FreeAndNil(RealDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealOpenGLVsVulkanSideBySideVisualRegressionSuiteRHI;
+
+  procedure Populate3DLitOccludedBoxesScene(const AWindow: TCastleWindow);
+  var
+    Viewport: TCastleViewport;
+    Scene: TCastleScene;
+    Root: TX3DRootNode;
+    DirLight: TDirectionalLightNode;
+    FrontTrans, BackTrans: TTransformNode;
+    FrontShape, BackShape: TShapeNode;
+    FrontBox, BackBox: TBoxNode;
+    FrontApp, BackApp: TAppearanceNode;
+    FrontMat, BackMat: TMaterialNode;
+  begin
+    Viewport := TCastleViewport.Create(AWindow);
+    Viewport.FullSize := True;
+    Viewport.BackgroundColor := Vector4(0.05, 0.07, 0.22, 1.0);
+    AWindow.Controls.InsertFront(Viewport);
+    Viewport.Camera.ProjectionType := ptPerspective;
+    Viewport.Camera.SetWorldView(
+      Vector3(0.0, 0.0, 4.5),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+
+    Root := TX3DRootNode.Create;
+    DirLight := TDirectionalLightNode.Create;
+    DirLight.Direction := Vector3(-0.25, -0.35, -1.0).Normalize;
+    DirLight.Intensity := 1.0;
+    DirLight.AmbientIntensity := 0.2;
+    Root.AddChildren(DirLight);
+
+    { Rear box at Z = -1.2 shifted up-right — partially occluded by front box! }
+    BackTrans := TTransformNode.Create;
+    BackTrans.Translation := Vector3(0.85, 0.65, -1.2);
+    BackShape := TShapeNode.Create;
+    BackBox := TBoxNode.Create;
+    BackBox.Size := Vector3(1.8, 1.5, 0.6);
+    BackShape.Geometry := BackBox;
+    BackApp := TAppearanceNode.Create;
+    BackMat := TMaterialNode.Create;
+    BackMat.DiffuseColor := Vector3(0.15, 0.85, 0.55);
+    BackMat.AmbientIntensity := 0.25;
+    BackMat.SpecularColor := Vector3(0.0, 0.0, 0.0);
+    BackApp.Material := BackMat;
+    BackShape.Appearance := BackApp;
+    BackTrans.AddChildren(BackShape);
+    Root.AddChildren(BackTrans);
+
+    { Front occluder box at Z = 0.2 shifted down-left }
+    FrontTrans := TTransformNode.Create;
+    FrontTrans.Translation := Vector3(-0.35, -0.25, 0.2);
+    FrontShape := TShapeNode.Create;
+    FrontBox := TBoxNode.Create;
+    FrontBox.Size := Vector3(1.7, 1.5, 0.6);
+    FrontShape.Geometry := FrontBox;
+    FrontApp := TAppearanceNode.Create;
+    FrontMat := TMaterialNode.Create;
+    FrontMat.DiffuseColor := Vector3(0.92, 0.30, 0.12);
+    FrontMat.AmbientIntensity := 0.25;
+    FrontMat.SpecularColor := Vector3(0.0, 0.0, 0.0);
+    FrontApp.Material := FrontMat;
+    FrontShape.Appearance := FrontApp;
+    FrontTrans.AddChildren(FrontShape);
+    Root.AddChildren(FrontTrans);
+
+    Scene := TCastleScene.Create(AWindow);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+  end;
+
+  procedure Populate3DTexturedAlphaMaskScene(const AWindow: TCastleWindow);
+  var
+    Viewport: TCastleViewport;
+    Scene: TCastleScene;
+    Root: TX3DRootNode;
+    BackTrans, FrontTrans: TTransformNode;
+    BackShape, FrontShape: TShapeNode;
+    BackBox, FrontBox: TBoxNode;
+    BackApp, FrontApp: TAppearanceNode;
+    BackMat, FrontMat: TUnlitMaterialNode;
+    PixTex: TPixelTextureNode;
+    TexProps: TTexturePropertiesNode;
+    MaskImg: TRGBAlphaImage;
+    X, Y: Integer;
+  begin
+    Viewport := TCastleViewport.Create(AWindow);
+    Viewport.FullSize := True;
+    Viewport.BackgroundColor := Vector4(0.08, 0.08, 0.12, 1.0);
+    AWindow.Controls.InsertFront(Viewport);
+    Viewport.Camera.ProjectionType := ptPerspective;
+    Viewport.Camera.SetWorldView(
+      Vector3(0.0, 0.0, 4.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+
+    Root := TX3DRootNode.Create;
+
+    { Solid magenta/purple backdrop plate visible through alpha-masked cutout }
+    BackTrans := TTransformNode.Create;
+    BackTrans.Translation := Vector3(0.0, 0.0, -0.8);
+    BackShape := TShapeNode.Create;
+    BackBox := TBoxNode.Create;
+    BackBox.Size := Vector3(2.8, 2.0, 0.2);
+    BackShape.Geometry := BackBox;
+    BackApp := TAppearanceNode.Create;
+    BackMat := TUnlitMaterialNode.Create;
+    BackMat.EmissiveColor := Vector3(0.75, 0.18, 0.68);
+    BackApp.Material := BackMat;
+    BackShape.Appearance := BackApp;
+    BackTrans.AddChildren(BackShape);
+    Root.AddChildren(BackTrans);
+
+    { Foreground unlit textured plate with alpha-cutoff hole in center }
+    FrontTrans := TTransformNode.Create;
+    FrontTrans.Translation := Vector3(0.0, 0.0, 0.3);
+    FrontShape := TShapeNode.Create;
+    FrontBox := TBoxNode.Create;
+    FrontBox.Size := Vector3(2.0, 1.6, 0.1);
+    FrontShape.Geometry := FrontBox;
+    FrontApp := TAppearanceNode.Create;
+    BackApp.AlphaMode := amOpaque;
+    FrontApp.AlphaMode := amMask;
+    FrontApp.AlphaCutoff := 0.5;
+
+    MaskImg := TRGBAlphaImage.Create(16, 16);
+    for Y := 0 to 15 do
+      for X := 0 to 15 do
+      begin
+        { Cutout window in center [5..10, 5..10] with alpha = 0 }
+        if (X >= 5) and (X <= 10) and (Y >= 5) and (Y <= 10) then
+          MaskImg.PixelPtr(X, Y)^ := Vector4Byte(0, 0, 0, 0)
+        else if ((X div 4) + (Y div 4)) mod 2 = 0 then
+          MaskImg.PixelPtr(X, Y)^ := Vector4Byte(240, 220, 50, 255)
+        else
+          MaskImg.PixelPtr(X, Y)^ := Vector4Byte(45, 205, 95, 255);
+      end;
+
+    PixTex := TPixelTextureNode.Create;
+    PixTex.FdImage.Value := MaskImg;
+    TexProps := TTexturePropertiesNode.Create;
+    TexProps.MagnificationFilter := magNearest;
+    TexProps.MinificationFilter := minNearest;
+    PixTex.TextureProperties := TexProps;
+
+    FrontMat := TUnlitMaterialNode.Create;
+    FrontMat.EmissiveColor := Vector3(1.0, 1.0, 1.0);
+    FrontMat.EmissiveTexture := PixTex;
+    FrontApp.Material := FrontMat;
+    FrontShape.Appearance := FrontApp;
+    FrontTrans.AddChildren(FrontShape);
+    Root.AddChildren(FrontTrans);
+
+    Scene := TCastleScene.Create(AWindow);
+    Scene.Load(Root, True);
+    Viewport.Items.Add(Scene);
+  end;
+
+  function CaptureBackendScenarios(const ABackend: TRenderBackend;
+    out AShot2D, AShot3DLit, AShot3DMask: TRGBAlphaImage;
+    out AVkValidationErrors: Cardinal): Boolean;
+  var
+    Win: TCastleWindow;
+    UI2D: TPhase112VisualParity2DControl;
+    I: Integer;
+  begin
+    Result := False;
+    AShot2D := nil;
+    AShot3DLit := nil;
+    AShot3DMask := nil;
+    AVkValidationErrors := 0;
+
+    SetActiveCommandList(nil);
+    SetRHIDevice(nil);
+    ApplicationProperties.RenderBackend := ABackend;
+    Application.OnInitialize := nil;
+    Application.Initialize;
+
+    Win := CreateWindowForTest;
+    try
+      Win.Width := 160;
+      Win.Height := 120;
+      Win.AntiAliasing := aaNone;
+      try
+        Win.Open;
+      except
+        on Exception do
+        begin
+          if not Win.Closed then
+            Win.Close(False);
+          Exit(False);
+        end;
+      end;
+
+      if ABackend = backendVulkan then
+      begin
+        if not (RHIDevice is TVulkanRHIDevice) then
+        begin
+          Win.Close(False);
+          Exit(False);
+        end;
+        TVulkanRHIDevice(RHIDevice).ResetValidationCounters;
+      end else
+      begin
+        if RHIDevice <> nil then
+        begin
+          Win.Close(False);
+          Exit(False);
+        end;
+      end;
+
+      { Scenario 1: 2D UI rectangles + textured sprite }
+      UI2D := TPhase112VisualParity2DControl.Create(Win);
+      UI2D.FullSize := True;
+      Win.Controls.InsertFront(UI2D);
+      for I := 0 to 1 do
+      begin
+        Win.Invalidate;
+        Application.ProcessAllMessages;
+      end;
+      AShot2D := Win.Container.SaveScreenRgba;
+      Win.Controls.Remove(UI2D);
+      FreeAndNil(UI2D);
+
+      { Scenario 2: 3D directional-lit depth-occluded boxes }
+      Populate3DLitOccludedBoxesScene(Win);
+      for I := 0 to 1 do
+      begin
+        Win.Invalidate;
+        Application.ProcessAllMessages;
+      end;
+      AShot3DLit := Win.Container.SaveScreenRgba;
+      while Win.Controls.Count > 0 do
+        Win.Controls[0].Free;
+
+      { Scenario 3: 3D unlit procedural texture + amMask alpha-cutoff hole }
+      Populate3DTexturedAlphaMaskScene(Win);
+      for I := 0 to 1 do
+      begin
+        Win.Invalidate;
+        Application.ProcessAllMessages;
+      end;
+      AShot3DMask := Win.Container.SaveScreenRgba;
+      while Win.Controls.Count > 0 do
+        Win.Controls[0].Free;
+
+      if (ABackend = backendVulkan) and (RHIDevice is TVulkanRHIDevice) then
+        AVkValidationErrors := TVulkanRHIDevice(RHIDevice).ValidationErrorCount;
+
+      Win.Close(False);
+      Result := (AShot2D <> nil) and (AShot3DLit <> nil) and (AShot3DMask <> nil);
+    finally
+      DestroyWindowForTest(Win);
+    end;
+  end;
+
+var
+  SyntheticRef, SyntheticCand: TRGBAlphaImage;
+  DiffStats: TRHIVisualDiffMetrics;
+  UnitSuite, LiveSuite: TRHIVisualRegressionSuite;
+  VkShot2D, VkShot3DLit, VkShot3DMask: TRGBAlphaImage;
+  GlShot2D, GlShot3DLit, GlShot3DMask: TRGBAlphaImage;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedBackend: TRenderBackend;
+  SavedOnInit: TProcedure;
+  VkValErrors, DummyGlErrors: Cardinal;
+  {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  HasDisplay: Boolean;
+  {$endif}
+begin
+  { Part A: Deterministic unit verification of CompareImagesDetailedDiff & TRHIVisualRegressionSuite }
+  SyntheticRef := TRGBAlphaImage.Create(16, 16);
+  SyntheticCand := TRGBAlphaImage.Create(16, 16);
+  UnitSuite := TRHIVisualRegressionSuite.Create(2);
+  try
+    SyntheticRef.Clear(Vector4Byte(60, 120, 200, 255));
+    SyntheticCand.Clear(Vector4Byte(60, 120, 200, 255));
+    AssertTrue('Identical images must pass with 0 RMSE',
+      CompareImagesDetailedDiff(SyntheticRef, SyntheticCand, 0.001, DiffStats, 2));
+    AssertSameValue(0.0, DiffStats.NormalizedRMSE, 1e-6);
+    AssertSameValue(99.0, DiffStats.PSNRdB, 1e-3);
+    AssertEquals(0, Integer(DiffStats.MaxChannelDelta));
+    AssertEquals(0, Integer(DiffStats.DiffPixelCount));
+
+    { Perturb 1 pixel by +20 on red channel -> MaxChannelDelta=20, DiffPixelCount=1 }
+    SyntheticCand.PixelPtr(8, 8)^ := Vector4Byte(80, 120, 200, 255);
+    UnitSuite.RecordComparison('Synthetic_NearExact', SyntheticRef, SyntheticCand, 0.02);
+    AssertEquals(1, UnitSuite.CaseCount);
+    AssertEquals(1, UnitSuite.PassedCount);
+    AssertEquals(0, UnitSuite.FailedCount);
+    AssertTrue(UnitSuite.AllPassed);
+    AssertEquals(20, Integer(UnitSuite.GetCaseResult(0).Metrics.MaxChannelDelta));
+    AssertEquals(1, Integer(UnitSuite.GetCaseResult(0).Metrics.DiffPixelCount));
+    AssertTrue('Summary report must list PASS status',
+      Pos('[PASS] Synthetic_NearExact', UnitSuite.BuildSummaryReport) > 0);
+  finally
+    FreeAndNil(UnitSuite);
+    FreeAndNil(SyntheticCand);
+    FreeAndNil(SyntheticRef);
+  end;
+
+  { Part B: Live side-by-side backendVulkan vs backendOpenGL TCastleWindow visual regression suite }
+  if not CanCreateWindowForTest then
+    Exit;
+
+  {$if defined(UNIX) and not defined(DARWIN) and not defined(ANDROID)}
+  HasDisplay := (GetEnvironmentVariable('DISPLAY') <> '') or
+                (GetEnvironmentVariable('WAYLAND_DISPLAY') <> '');
+  if not HasDisplay then
+    Exit;
+  {$endif}
+
+  try
+    if not LoadVulkan then
+      Exit;
+  except
+    on Exception do
+      Exit;
+  end;
+
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedOnInit := Application.OnInitialize;
+  VkShot2D := nil;
+  VkShot3DLit := nil;
+  VkShot3DMask := nil;
+  GlShot2D := nil;
+  GlShot3DLit := nil;
+  GlShot3DMask := nil;
+  LiveSuite := TRHIVisualRegressionSuite.Create(4);
+  try
+    { 1. Render all 3 scenarios on pure-Vulkan TCastleWindow first }
+    if not CaptureBackendScenarios(backendVulkan, VkShot2D, VkShot3DLit, VkShot3DMask, VkValErrors) then
+      Exit;
+    AssertEquals('Vulkan visual regression capture must produce 0 validation errors',
+      0, Integer(VkValErrors));
+
+    { 2. Render the exact same 3 scenarios on real OpenGL TCastleWindow }
+    if not CaptureBackendScenarios(backendOpenGL, GlShot2D, GlShot3DLit, GlShot3DMask, DummyGlErrors) then
+      Exit;
+
+    { 3. Run side-by-side perceptual RMSE comparison across all 3 scenarios }
+    LiveSuite.RecordComparison('2D_UI_Rectangles_And_TexturedSprite', GlShot2D, VkShot2D, 0.04);
+    LiveSuite.RecordComparison('3D_Viewport_DirectionalLit_DepthOccluded_Boxes', GlShot3DLit, VkShot3DLit, 0.08);
+    LiveSuite.RecordComparison('3D_Viewport_Unlit_ProceduralTextured_AlphaMask_Quad', GlShot3DMask, VkShot3DMask, 0.06);
+
+    AssertEquals('Live regression suite must record 3 scenarios', 3, LiveSuite.CaseCount);
+    AssertTrue('All side-by-side rbOpenGL vs rbVulkan visual regression cases must pass: ' +
+      LineEnding + LiveSuite.BuildSummaryReport,
+      LiveSuite.AllPassed);
+  finally
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    Application.OnInitialize := SavedOnInit;
+    FreeAndNil(LiveSuite);
+    FreeAndNil(GlShot3DMask);
+    FreeAndNil(GlShot3DLit);
+    FreeAndNil(GlShot2D);
+    FreeAndNil(VkShot3DMask);
+    FreeAndNil(VkShot3DLit);
+    FreeAndNil(VkShot2D);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestShaderAndPipelineCachePackageBundlingAndDataSeedRHI;
+var
+  Compiler: TCastleShaderCompiler;
+  SavedDiskBaseUrl, SavedBundledBaseUrl: String;
+  TempRootDir, TempProjectDir, TempManifestFile: String;
+  TempBuildCacheDir, TempPackagedDataDir, TempEmptyUserConfigDir: String;
+  TempSrcPipelineCacheFile, TempBundledPipelineCacheFile, TempMissingUserPipelineCacheUrl: String;
+  ManifestText: TStringList;
+  Manifest: TCastleManifest;
+  RealDev: TVulkanRHIDevice;
+  BundledSpvCount: Cardinal;
+  Gen: TCastleShaderGeneratorRHI;
+  CoreForwardVS: String;
+  LoadedSPIRV: TSPIRVBytecode;
+  Reflected: TSPIRVReflectionInfo;
+begin
+  Compiler := TCastleShaderCompiler.Instance;
+  SavedDiskBaseUrl := Compiler.DiskCacheBaseUrl;
+  SavedBundledBaseUrl := Compiler.BundledCacheBaseUrl;
+
+  TempRootDir := InclPathDelim(GetTempDir(False)) +
+    'cge_phase112_bundle_' + IntToStr(Random(1000000));
+  TempProjectDir := InclPathDelim(TempRootDir) + 'proj';
+  TempBuildCacheDir := InclPathDelim(TempRootDir) + 'build_config_cache';
+  TempPackagedDataDir := InclPathDelim(TempProjectDir) + 'data';
+  TempEmptyUserConfigDir := InclPathDelim(TempRootDir) + 'fresh_user_config';
+  CheckForceDirectories(TempPackagedDataDir);
+  CheckForceDirectories(TempBuildCacheDir);
+  CheckForceDirectories(TempEmptyUserConfigDir);
+
+  ManifestText := TStringList.Create;
+  Manifest := nil;
+  RealDev := nil;
+  Gen := nil;
+  try
+    { 1. Verify TCastleManifest ShouldBundleVulkanCaches parsing }
+    TempManifestFile := InclPathDelim(TempProjectDir) + 'CastleEngineManifest.xml';
+    ManifestText.Text :=
+      '<?xml version="1.0" encoding="utf-8"?>' + LineEnding +
+      '<project name="phase112_pkg_test" standalone_source="phase112_pkg_test.dpr" render_backend="vulkan">' + LineEnding +
+      '</project>';
+    ManifestText.SaveToFile(TempManifestFile);
+
+    Manifest := TCastleManifest.CreateFromUrl(FilenameToUriSafe(TempManifestFile));
+    AssertTrue('render_backend="vulkan" must enable ShouldPrewarmVulkanShaders',
+      Manifest.ShouldPrewarmVulkanShaders);
+    AssertTrue('render_backend="vulkan" must enable ShouldBundleVulkanCaches by default',
+      Manifest.ShouldBundleVulkanCaches);
+    FreeAndNil(Manifest);
+
+    ManifestText.Text :=
+      '<?xml version="1.0" encoding="utf-8"?>' + LineEnding +
+      '<project name="phase112_pkg_test" standalone_source="phase112_pkg_test.dpr" render_backend="vulkan" bundle_vulkan_caches="false">' + LineEnding +
+      '</project>';
+    ManifestText.SaveToFile(TempManifestFile);
+    Manifest := TCastleManifest.CreateFromUrl(FilenameToUriSafe(TempManifestFile));
+    AssertFalse('bundle_vulkan_caches="false" must disable ShouldBundleVulkanCaches',
+      Manifest.ShouldBundleVulkanCaches);
+    FreeAndNil(Manifest);
+
+    ManifestText.Text :=
+      '<?xml version="1.0" encoding="utf-8"?>' + LineEnding +
+      '<project name="phase112_pkg_test" standalone_source="phase112_pkg_test.dpr" render_backend="opengl">' + LineEnding +
+      '</project>';
+    ManifestText.SaveToFile(TempManifestFile);
+    Manifest := TCastleManifest.CreateFromUrl(FilenameToUriSafe(TempManifestFile));
+    AssertFalse('render_backend="opengl" must disable ShouldBundleVulkanCaches',
+      Manifest.ShouldBundleVulkanCaches);
+    FreeAndNil(Manifest);
+
+    { 2. Point compiler disk cache to isolated TempBuildCacheDir and bundle into TempPackagedDataDir }
+    Compiler.DiskCacheBaseUrl := FilenameToUriSafe(InclPathDelim(TempBuildCacheDir));
+    Compiler.BundledCacheBaseUrl := '';
+    Compiler.ClearCache(False);
+
+    TempSrcPipelineCacheFile := InclPathDelim(TempRootDir) + 'prebaked_pipeline_cache.bin';
+    if TVulkanRHIDevice.TryCreateOffscreen(RealDev) then
+    begin
+      RealDev.PrewarmStandardPipelines(True, True, FilenameToUriSafe(TempSrcPipelineCacheFile));
+      RealDev.SavePipelineCache(FilenameToUriSafe(TempSrcPipelineCacheFile));
+    end;
+
+    BundledSpvCount := Compiler.BundleCoreAndCachedShadersToDataDirectory(
+      TempPackagedDataDir, FilenameToUriSafe(TempSrcPipelineCacheFile));
+    AssertTrue(Format('BundleCoreAndCachedShadersToDataDirectory must write >= 4 .spv files (got %d)',
+      [BundledSpvCount]), BundledSpvCount >= 4);
+    AssertTrue('Packaged shader_cache directory must exist',
+      DirectoryExists(InclPathDelim(TempPackagedDataDir) + 'shader_cache'));
+
+    TempBundledPipelineCacheFile := InclPathDelim(TempPackagedDataDir) + 'vulkan_pipeline_cache.bin';
+    if RegularFileExists(TempSrcPipelineCacheFile) then
+      AssertTrue('Pre-baked vulkan_pipeline_cache.bin must be bundled into packaged data/',
+        RegularFileExists(TempBundledPipelineCacheFile));
+
+    { 3. Simulate cold first boot on a fresh machine: empty DiskCacheBaseUrl + read-only BundledCacheBaseUrl }
+    Compiler.DiskCacheBaseUrl := FilenameToUriSafe(InclPathDelim(TempEmptyUserConfigDir));
+    Compiler.BundledCacheBaseUrl := FilenameToUriSafe(
+      InclPathDelim(InclPathDelim(TempPackagedDataDir) + 'shader_cache'));
+    Compiler.ClearCache(False);
+
+    Gen := TCastleShaderGeneratorRHI.Create(rbVulkan);
+    CoreForwardVS := Gen.FinalizeVertexShaderSource(
+      Gen.GeneratePreamble(ssVertex) +
+      'void main() {' + LineEnding +
+      '  castle_vertex_eye = castle_ModelViewMatrix * castle_Vertex;' + LineEnding +
+      '  castle_normal_eye = normalize(castle_NormalMatrix * castle_Normal);' + LineEnding +
+      '  castle_tex_coord0 = castle_MultiTexCoord0;' + LineEnding +
+      '  gl_Position = castle_ProjectionMatrix * castle_vertex_eye;' + LineEnding +
+      '}');
+
+    LoadedSPIRV := Compiler.GetOrCompileSPIRV(ssVertex, CoreForwardVS, 'cold_boot_from_bundle_vs');
+    AssertTrue('Cold boot must load valid SPIR-V from bundled castle-data:/shader_cache/',
+      InspectSPIRVBytecode(LoadedSPIRV, Reflected) and Reflected.IsValid and (Reflected.Stage = ssVertex));
+
+    { 4. Verify TVulkanRHIDevice.LoadPipelineCache seeds VkPipelineCache from bundled data fallback when user config cache is absent }
+    if (RealDev <> nil) and RegularFileExists(TempBundledPipelineCacheFile) then
+    begin
+      TempMissingUserPipelineCacheUrl := FilenameToUriSafe(
+        InclPathDelim(TempEmptyUserConfigDir) + 'missing_user_pipeline_cache.bin');
+      RealDev.BundledPipelineCacheFallbackUrl := FilenameToUriSafe(TempBundledPipelineCacheFile);
+      RealDev.LoadPipelineCache(TempMissingUserPipelineCacheUrl);
+      AssertTrue('LoadPipelineCache must seed from BundledPipelineCacheFallbackUrl when user config cache is absent',
+        RealDev.PipelineCacheSeededFromBundle);
+      AssertTrue('Seeded VkPipelineCache handle must be valid',
+        RealDev.PipelineCache <> VK_NULL_HANDLE);
+    end;
+  finally
+    Compiler.DiskCacheBaseUrl := SavedDiskBaseUrl;
+    Compiler.BundledCacheBaseUrl := SavedBundledBaseUrl;
+    Compiler.ClearCache(False);
+    FreeAndNil(Gen);
+    FreeAndNil(RealDev);
+    FreeAndNil(Manifest);
+    FreeAndNil(ManifestText);
+    if DirectoryExists(TempRootDir) then
+      RemoveNonEmptyDir(TempRootDir, True);
   end;
 end;
 

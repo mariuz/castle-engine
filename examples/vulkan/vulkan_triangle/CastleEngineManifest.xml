@@ -2,8 +2,9 @@
 <project name="vulkan_triangle"
   caption="Castle Game Engine - Vulkan RHI Triangle"
   render_backend="vulkan"
-  standalone_source="vulkan_triangle.dpr"
-  version="1.0.0">
+  standalone_source="vulkan_triangle.dpr">
+  <version value="1.0.0" />
+  <data exists="false" />
   <compiler_options>
     <search_paths>
       <path value="../../../src/base" />

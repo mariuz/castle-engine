@@ -201,13 +201,23 @@ end;
 procedure TPackageDirectory.AddDataInformation(const DataName: String);
 var
   PrewarmedHashes: TUInt64Array;
+  BundledShaderCount: Cardinal;
+  PackageDataDir: String;
 begin
+  PackageDataDir := Path + DataName;
   if Assigned(Manifest) and Manifest.ShouldPrewarmVulkanShaders then
   begin
     PrewarmedHashes := TCastleShaderCompiler.Instance.PrewarmCoreEngineShaders;
     Writeln(Format('Pre-warmed %d core Vulkan SPIR-V shader stages.', [Length(PrewarmedHashes)]));
+    if Manifest.ShouldBundleVulkanCaches and DirectoryExists(PackageDataDir) then
+    begin
+      BundledShaderCount := TCastleShaderCompiler.Instance.BundleCoreAndCachedShadersToDataDirectory(
+        PackageDataDir, 'castle-config:/vulkan_pipeline_cache.bin');
+      Writeln(Format('Bundled %d Vulkan SPIR-V shader cache files into %s.',
+        [BundledShaderCount, InclPathDelim(DataName) + 'shader_cache']));
+    end;
   end;
-  GenerateDataInformation(Path + DataName);
+  GenerateDataInformation(PackageDataDir);
 end;
 
 { global --------------------------------------------------------------------- }

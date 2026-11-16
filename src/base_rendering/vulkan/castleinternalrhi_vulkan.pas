@@ -50,6 +50,8 @@ type
     FAllocatedSize: VkDeviceSize;
     FMappedPtr: Pointer;
     function VulkanDevice: TVulkanRHIDevice;
+  protected
+    procedure ReleaseDeviceResources; override;
   public
     constructor Create(const ADevice: TVulkanRHIDevice; const ADesc: TRHIBufferDesc;
       const InitialData: Pointer);
@@ -96,6 +98,8 @@ type
     function VulkanDevice: TVulkanRHIDevice;
     function GetSubresourceViewCount: Cardinal;
     procedure RecordVkMipmapBlits(const ACmd: VkCommandBuffer);
+  protected
+    procedure ReleaseDeviceResources; override;
   public
     { Standard constructor that allocates a new VkImage and VkImageView }
     constructor Create(const ADevice: TVulkanRHIDevice; const ADesc: TRHITextureDesc); overload;
@@ -145,6 +149,8 @@ type
   private
     FHandle: VkSampler;
     FCreateInfo: VkSamplerCreateInfo;
+  protected
+    procedure ReleaseDeviceResources; override;
   public
     constructor Create(const ADevice: TVulkanRHIDevice; const ADesc: TRHISamplerDesc);
     destructor Destroy; override;
@@ -156,6 +162,8 @@ type
   private
     FHandle: VkShaderModule;
     FReflection: TSPIRVReflectionInfo;
+  protected
+    procedure ReleaseDeviceResources; override;
   public
     constructor Create(const ADevice: TVulkanRHIDevice; const AStage: TRHIShaderStage;
       const ASPIRVBinary: Pointer; const ASizeInBytes: PtrUInt; const ADebugName: String);
@@ -172,6 +180,8 @@ type
     FHandle: VkDescriptorSetLayout;
     FUsesUpdateAfterBind: Boolean;
     FBindings: array of TRHIDescriptorBindingDesc;
+  protected
+    procedure ReleaseDeviceResources; override;
   public
     constructor Create(const ADevice: TVulkanRHIDevice;
       const Bindings: array of TRHIDescriptorBindingDesc);
@@ -199,6 +209,8 @@ type
     FLastBoundTexture: TRHITexture;
     FLastBoundSampler: TRHISampler;
     function VulkanDevice: TVulkanRHIDevice;
+  protected
+    procedure ReleaseDeviceResources; override;
   public
     constructor Create(const ADevice: TVulkanRHIDevice;
       const ALayout: TVulkanRHIDescriptorSetLayout;
@@ -236,6 +248,8 @@ type
     FPreRasterizationLibrary: VkPipeline;
     FFragmentShaderLibrary: VkPipeline;
     FFragmentOutputLibrary: VkPipeline;
+  protected
+    procedure ReleaseDeviceResources; override;
   public
     constructor Create(const ADevice: TVulkanRHIDevice;
       const ADesc: TRHIGraphicsPipelineDesc);
@@ -255,6 +269,8 @@ type
     FHandle: VkPipeline;
     FPipelineLayout: VkPipelineLayout;
     FOwnsHandle: Boolean;
+  protected
+    procedure ReleaseDeviceResources; override;
   public
     constructor Create(const ADevice: TVulkanRHIDevice;
       const ADesc: TRHIComputePipelineDesc;
@@ -271,6 +287,8 @@ type
     FQueryWritten: array of Boolean;
     FResetCount: Cardinal;
     FHostResetCount: Cardinal;
+  protected
+    procedure ReleaseDeviceResources; override;
   public
     constructor Create(const ADevice: TVulkanRHIDevice;
       const ADesc: TRHIQueryPoolDesc);
@@ -4131,6 +4149,8 @@ type
     FRenderPassMap: TVulkanRenderPassMap;
     FFramebufferMap: TVulkanFramebufferMap;
     FPipelineCacheLoaded: Boolean;
+    FPipelineCacheSeededFromBundle: Boolean;
+    FBundledPipelineCacheFallbackUrl: String;
     FPrewarm3DVertexShader: TRHIShaderModule;
     FPrewarm3DFragmentShader: TRHIShaderModule;
     FPrewarm2DVertexShader: TRHIShaderModule;
@@ -4166,9 +4186,18 @@ type
     FComputeDispatchCount: Cardinal;
     FSync2BarrierCount: Cardinal;
     FAllocatedMemoryBytes: Int64;
+    FValidationLock: TObject;
+    FValidationLayerActive: Boolean;
+    FDebugUtilsActive: Boolean;
+    FStrictValidationGate: Boolean;
+    FValidationErrorCount: Cardinal;
+    FValidationWarningCount: Cardinal;
+    FValidationInfoCount: Cardinal;
+    FValidationMessages: array of String;
 
     procedure CreateInstance(const EnableValidation: Boolean;
       const ARequireSurfaceExtensions: Boolean = True);
+    function GetValidationMessageCount: Integer;
     procedure PickPhysicalDevice;
     procedure CreateLogicalDevice;
     procedure CreateSwapchain(const Width, Height: Cardinal);
@@ -4427,6 +4456,16 @@ type
     procedure LoadPipelineCache(const CacheFileUrl: String); override;
     procedure SavePipelineCache(const CacheFileUrl: String); override;
 
+    { Khronos Validation Layer (VK_LAYER_KHRONOS_validation) & VK_EXT_debug_utils CI Gate (Phase 112.1) }
+    procedure RecordValidationCallbackMessage(const ASeverity, AMessageTypes: VkFlags;
+      const AMessageIdName, AMessage: String);
+    function SubmitDebugUtilsMessage(const ASeverity, AMessageTypes: VkFlags;
+      const AMessageIdName, AMessage: String): Boolean;
+    procedure ResetValidationCounters;
+    function GetValidationMessage(const AIndex: Integer): String;
+    function GetValidationMessagesReport: String;
+    procedure AssertZeroValidationErrors(const AContext: String = '');
+
     function GetInformationString: String; override;
     function GetInformationStringSummary: String; override;
 
@@ -4467,6 +4506,16 @@ type
     property PipelineCount: Cardinal read GetPipelineCount;
     property ComputePipelineCount: Cardinal read GetComputePipelineCount;
     property PipelineCacheLoaded: Boolean read FPipelineCacheLoaded;
+    property PipelineCacheSeededFromBundle: Boolean read FPipelineCacheSeededFromBundle;
+    property BundledPipelineCacheFallbackUrl: String read FBundledPipelineCacheFallbackUrl write FBundledPipelineCacheFallbackUrl;
+    property DebugMessengerHandle: VkDebugUtilsMessengerEXT read FDebugMessenger;
+    property ValidationLayerActive: Boolean read FValidationLayerActive;
+    property DebugUtilsActive: Boolean read FDebugUtilsActive;
+    property StrictValidationGate: Boolean read FStrictValidationGate write FStrictValidationGate;
+    property ValidationErrorCount: Cardinal read FValidationErrorCount;
+    property ValidationWarningCount: Cardinal read FValidationWarningCount;
+    property ValidationInfoCount: Cardinal read FValidationInfoCount;
+    property ValidationMessageCount: Integer read GetValidationMessageCount;
     property SupportsMemoryBudgetExt: Boolean read FSupportsMemoryBudgetExt;
     property SupportsDynamicRendering: Boolean read FSupportsDynamicRendering write FSupportsDynamicRendering;
     property SupportsGraphicsPipelineLibrary: Boolean read FSupportsGraphicsPipelineLibrary write FSupportsGraphicsPipelineLibrary;
@@ -4724,9 +4773,17 @@ function ComputeFramebufferKeyHash(const ARenderPass: VkRenderPass;
   const AAttachments: array of VkImageView; const AWidth, AHeight: Cardinal): UInt64;
 
 const
-  DefaultVulkanPipelineCacheUrl = 'castle-config:/vulkan_pipeline_cache.bin';
+  DefaultVulkanPipelineCacheUrl        = 'castle-config:/vulkan_pipeline_cache.bin';
+  DefaultBundledVulkanPipelineCacheUrl = 'castle-data:/vulkan_pipeline_cache.bin';
   PipelineCacheDiskMagic = $43474550; // 'CGEP'
   PipelineCacheDiskVersion = 1;
+
+{ Returns True if Vulkan validation is requested explicitly or via environment variables
+  CASTLE_VULKAN_VALIDATION=1 / CASTLE_VULKAN_VALIDATION_STRICT=1. }
+function ShouldEnableVulkanValidationByEnv(const ARequested: Boolean): Boolean;
+
+{ Returns True when CASTLE_VULKAN_VALIDATION_STRICT=1 is set (treating validation warnings as gate failures). }
+function IsVulkanStrictValidationGateEnv: Boolean;
 
 type
   { Header stored on disk before raw VkPipelineCache data to validate hardware compatibility. }
@@ -6196,7 +6253,7 @@ begin
     UploadData(InitialData^, ADesc.Size, 0);
 end;
 
-destructor TVulkanRHIBuffer.Destroy;
+procedure TVulkanRHIBuffer.ReleaseDeviceResources;
 begin
   if FMappedPtr <> nil then
     Unmap;
@@ -6204,11 +6261,17 @@ begin
   begin
     if VulkanDevice.StagingUploader <> nil then
       VulkanDevice.StagingUploader.CancelPendingUploadsForBuffer(Self);
-    VulkanDevice.DeferOrDestroyBuffer(FHandle, FAllocation, FDeviceMemory, FAllocatedSize);
-    FHandle := VK_NULL_HANDLE;
-    FillChar(FAllocation, SizeOf(FAllocation), 0);
-    FDeviceMemory := VK_NULL_HANDLE;
+    if (FHandle <> VK_NULL_HANDLE) or (FDeviceMemory <> VK_NULL_HANDLE) or (FAllocatedSize > 0) then
+      VulkanDevice.DeferOrDestroyBuffer(FHandle, FAllocation, FDeviceMemory, FAllocatedSize);
   end;
+  FHandle := VK_NULL_HANDLE;
+  FillChar(FAllocation, SizeOf(FAllocation), 0);
+  FDeviceMemory := VK_NULL_HANDLE;
+  FAllocatedSize := 0;
+end;
+
+destructor TVulkanRHIBuffer.Destroy;
+begin
   inherited;
 end;
 
@@ -6770,7 +6833,7 @@ begin
   FViewAspectMask := VK_IMAGE_ASPECT_COLOR_BIT;
 end;
 
-destructor TVulkanRHITexture.Destroy;
+procedure TVulkanRHITexture.ReleaseDeviceResources;
 var
   I: Integer;
   SubDummyAlloc: TVulkanMemoryAllocation;
@@ -6794,17 +6857,28 @@ begin
     SetLength(FSubresourceViews, 0);
     if FOwnsImage then
     begin
-      if FOwnsAllocation then
-        VulkanDevice.DeferOrDestroyTexture(FImage, FImageView, FAllocation, FDeviceMemory, FAllocatedSize)
-      else
-        VulkanDevice.DeferOrDestroyTexture(FImage, FImageView, SubDummyAlloc, VK_NULL_HANDLE, 0);
+      if (FImage <> VK_NULL_HANDLE) or (FImageView <> VK_NULL_HANDLE) or
+         (FDeviceMemory <> VK_NULL_HANDLE) then
+      begin
+        if FOwnsAllocation then
+          VulkanDevice.DeferOrDestroyTexture(FImage, FImageView, FAllocation, FDeviceMemory, FAllocatedSize)
+        else
+          VulkanDevice.DeferOrDestroyTexture(FImage, FImageView, SubDummyAlloc, VK_NULL_HANDLE, 0);
+      end;
     end else if (VulkanDevice.Handle <> nil) and (FImageView <> VK_NULL_HANDLE) then
       vkDestroyImageView(VulkanDevice.Handle, FImageView, nil);
-    FImage := VK_NULL_HANDLE;
-    FImageView := VK_NULL_HANDLE;
-    FillChar(FAllocation, SizeOf(FAllocation), 0);
-    FDeviceMemory := VK_NULL_HANDLE;
   end;
+  SetLength(FSubresourceViews, 0);
+  FImage := VK_NULL_HANDLE;
+  FImageView := VK_NULL_HANDLE;
+  FillChar(FAllocation, SizeOf(FAllocation), 0);
+  FDeviceMemory := VK_NULL_HANDLE;
+  FAllocatedSize := 0;
+end;
+
+destructor TVulkanRHITexture.Destroy;
+begin
+  SetLength(FHostPixels, 0);
   inherited;
 end;
 
@@ -7366,7 +7440,7 @@ begin
     FHandle := VkSampler(PtrUInt(Self));
 end;
 
-destructor TVulkanRHISampler.Destroy;
+procedure TVulkanRHISampler.ReleaseDeviceResources;
 begin
   if Device <> nil then
   begin
@@ -7377,6 +7451,10 @@ begin
       vkDestroySampler(TVulkanRHIDevice(Device).Handle, FHandle, nil);
   end;
   FHandle := VK_NULL_HANDLE;
+end;
+
+destructor TVulkanRHISampler.Destroy;
+begin
   inherited;
 end;
 
@@ -7404,12 +7482,16 @@ begin
   CheckVk(vkCreateShaderModule(ADevice.Handle, @CreateInfo, nil, @FHandle), 'vkCreateShaderModule');
 end;
 
-destructor TVulkanRHIShaderModule.Destroy;
+procedure TVulkanRHIShaderModule.ReleaseDeviceResources;
 begin
   if (FHandle <> VK_NULL_HANDLE) and (Device <> nil) and
      (TVulkanRHIDevice(Device).Handle <> nil) and Assigned(vkDestroyShaderModule) then
     vkDestroyShaderModule(TVulkanRHIDevice(Device).Handle, FHandle, nil);
   FHandle := VK_NULL_HANDLE;
+end;
+
+destructor TVulkanRHIShaderModule.Destroy;
+begin
   inherited;
 end;
 
@@ -7496,13 +7578,17 @@ begin
     FHandle := VkDescriptorSetLayout(PtrUInt(Self));
 end;
 
-destructor TVulkanRHIDescriptorSetLayout.Destroy;
+procedure TVulkanRHIDescriptorSetLayout.ReleaseDeviceResources;
 begin
-  SetLength(FBindings, 0);
   if (FHandle <> VK_NULL_HANDLE) and (Device <> nil) and
      (TVulkanRHIDevice(Device).Handle <> nil) and Assigned(vkDestroyDescriptorSetLayout) then
     vkDestroyDescriptorSetLayout(TVulkanRHIDevice(Device).Handle, FHandle, nil);
   FHandle := VK_NULL_HANDLE;
+end;
+
+destructor TVulkanRHIDescriptorSetLayout.Destroy;
+begin
+  SetLength(FBindings, 0);
   inherited;
 end;
 
@@ -7590,7 +7676,7 @@ begin
     FHandle := VkDescriptorSet(PtrUInt(Self));
 end;
 
-destructor TVulkanRHIDescriptorSet.Destroy;
+procedure TVulkanRHIDescriptorSet.ReleaseDeviceResources;
 var
   LocalSet: VkDescriptorSet;
 begin
@@ -7609,6 +7695,14 @@ begin
     VulkanDevice.DeferOrDestroyDescriptorSet(FOwnerPool, FHandle);
   FHandle := VK_NULL_HANDLE;
   FOwnerPool := VK_NULL_HANDLE;
+end;
+
+destructor TVulkanRHIDescriptorSet.Destroy;
+begin
+  SetLength(FPendingWrites, 0);
+  SetLength(FPendingWriteInfoIndices, 0);
+  SetLength(FBufferInfos, 0);
+  SetLength(FImageInfos, 0);
   inherited;
 end;
 
@@ -8071,7 +8165,7 @@ begin
     CheckVk(vkCreateGraphicsPipelines(ADevice.Handle, ADevice.PipelineCache, 1, @PipelineInfo, nil, @FHandle), 'vkCreateGraphicsPipelines');
 end;
 
-destructor TVulkanRHIPipeline.Destroy;
+procedure TVulkanRHIPipeline.ReleaseDeviceResources;
 begin
   if (Device <> nil) and (TVulkanRHIDevice(Device).Handle <> nil) then
   begin
@@ -8080,6 +8174,12 @@ begin
     if (FPipelineLayout <> VK_NULL_HANDLE) and Assigned(vkDestroyPipelineLayout) then
       vkDestroyPipelineLayout(TVulkanRHIDevice(Device).Handle, FPipelineLayout, nil);
   end;
+  FHandle := VK_NULL_HANDLE;
+  FPipelineLayout := VK_NULL_HANDLE;
+end;
+
+destructor TVulkanRHIPipeline.Destroy;
+begin
   inherited;
 end;
 
@@ -8151,7 +8251,7 @@ begin
   end;
 end;
 
-destructor TVulkanRHIComputePipeline.Destroy;
+procedure TVulkanRHIComputePipeline.ReleaseDeviceResources;
 begin
   if FOwnsHandle and (Device <> nil) and (TVulkanRHIDevice(Device).Handle <> nil) then
   begin
@@ -8162,6 +8262,10 @@ begin
   end;
   FHandle := VK_NULL_HANDLE;
   FPipelineLayout := VK_NULL_HANDLE;
+end;
+
+destructor TVulkanRHIComputePipeline.Destroy;
+begin
   inherited;
 end;
 
@@ -8199,12 +8303,18 @@ begin
     FHandle := VkQueryPool(PtrUInt(Self));
 end;
 
-destructor TVulkanRHIQueryPool.Destroy;
+procedure TVulkanRHIQueryPool.ReleaseDeviceResources;
 begin
   if (FHandle <> VK_NULL_HANDLE) and (Device <> nil) and
      (TVulkanRHIDevice(Device).Handle <> nil) and Assigned(vkDestroyQueryPool) then
     vkDestroyQueryPool(TVulkanRHIDevice(Device).Handle, FHandle, nil);
   FHandle := VK_NULL_HANDLE;
+end;
+
+destructor TVulkanRHIQueryPool.Destroy;
+begin
+  SetLength(FSimulatedResults, 0);
+  SetLength(FQueryWritten, 0);
   inherited;
 end;
 
@@ -10448,7 +10558,7 @@ begin
     if FOwnsMaterialSSBOBuffer then
       FreeAndNil(FMaterialSSBOBuffer);
     AllocBytes := Max(PtrUInt(64 * SizeOf(TCastleBindlessMaterialEntry)), RequiredBytes * 2);
-    FillChar(BufDesc, SizeOf(BufDesc), 0);
+    BufDesc := Default(TRHIBufferDesc);
     BufDesc.Size := AllocBytes;
     BufDesc.Usage := [buStorage, buTransferDst];
     BufDesc.MemoryUsage := muCpuToGpu;
@@ -12272,7 +12382,7 @@ begin
       @BuiltInSPIRV[0], Length(BuiltInSPIRV), 'GpuCullingCS');
   end;
 
-  FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+  PipeDesc := Default(TRHIComputePipelineDesc);
   PipeDesc.ComputeShader := FComputeShader;
   SetLength(PipeDesc.DescriptorSetLayouts, 1);
   PipeDesc.DescriptorSetLayouts[0] := FDescriptorLayout;
@@ -12338,7 +12448,7 @@ begin
       @BuiltInSPIRV[0], Length(BuiltInSPIRV), 'HiZDownsampleCS');
   end;
 
-  FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+  PipeDesc := Default(TRHIComputePipelineDesc);
   PipeDesc.ComputeShader := FHiZDownsampleShader;
   SetLength(PipeDesc.DescriptorSetLayouts, 1);
   PipeDesc.DescriptorSetLayouts[0] := FHiZDescriptorLayout;
@@ -13084,7 +13194,7 @@ begin
     FreeAndNil(ShaderGen);
   end;
 
-  FillChar(CompDesc, SizeOf(CompDesc), 0);
+  CompDesc := Default(TRHIComputePipelineDesc);
   CompDesc.ComputeShader := FBrdfLutComputeShader;
   SetLength(CompDesc.DescriptorSetLayouts, 1);
   CompDesc.DescriptorSetLayouts[0] := FBrdfLutDescriptorLayout;
@@ -13665,7 +13775,7 @@ begin
 
   if FClusterUniformBuffer = nil then
   begin
-    FillChar(BufDesc, SizeOf(BufDesc), 0);
+    BufDesc := Default(TRHIBufferDesc);
     BufDesc.Size := SizeOf(TCastleClusterCullingUniformBlock);
     BufDesc.Usage := [buUniform, buTransferDst];
     BufDesc.MemoryUsage := muCpuToGpu;
@@ -13675,7 +13785,7 @@ begin
 
   if FLightStorageBuffer = nil then
   begin
-    FillChar(BufDesc, SizeOf(BufDesc), 0);
+    BufDesc := Default(TRHIBufferDesc);
     BufDesc.Size := PtrUInt(CASTLE_MAX_CLUSTERED_LIGHTS) * SizeOf(TCastleClusteredLight);
     BufDesc.Usage := [buStorage, buTransferDst];
     BufDesc.MemoryUsage := muCpuToGpu;
@@ -13685,7 +13795,7 @@ begin
 
   if FClusterGridBuffer = nil then
   begin
-    FillChar(BufDesc, SizeOf(BufDesc), 0);
+    BufDesc := Default(TRHIBufferDesc);
     BufDesc.Size := PtrUInt(Total) * SizeOf(TCastleClusterGridEntry);
     BufDesc.Usage := [buStorage, buTransferDst, buTransferSrc];
     BufDesc.MemoryUsage := muCpuToGpu;
@@ -13695,7 +13805,7 @@ begin
 
   if FLightIndexBuffer = nil then
   begin
-    FillChar(BufDesc, SizeOf(BufDesc), 0);
+    BufDesc := Default(TRHIBufferDesc);
     BufDesc.Size := PtrUInt(Total) * CASTLE_MAX_LIGHTS_PER_CLUSTER * SizeOf(Cardinal);
     BufDesc.Usage := [buStorage, buTransferDst, buTransferSrc];
     BufDesc.MemoryUsage := muCpuToGpu;
@@ -13746,7 +13856,7 @@ begin
       FreeAndNil(ShaderGen);
     end;
 
-    FillChar(CompDesc, SizeOf(CompDesc), 0);
+    CompDesc := Default(TRHIComputePipelineDesc);
     CompDesc.ComputeShader := FComputeShader;
     SetLength(CompDesc.DescriptorSetLayouts, 1);
     CompDesc.DescriptorSetLayouts[0] := FDescriptorLayout;
@@ -13949,7 +14059,7 @@ begin
 
   if FCascadeUniformBuffer = nil then
   begin
-    FillChar(BufDesc, SizeOf(BufDesc), 0);
+    BufDesc := Default(TRHIBufferDesc);
     BufDesc.Size := SizeOf(TCastleDirectionalCascadeShadowBlock);
     BufDesc.Usage := [buUniform, buTransferDst];
     BufDesc.MemoryUsage := muCpuToGpu;
@@ -13959,7 +14069,7 @@ begin
 
   if FPositionalTileBuffer = nil then
   begin
-    FillChar(BufDesc, SizeOf(BufDesc), 0);
+    BufDesc := Default(TRHIBufferDesc);
     BufDesc.Size := PtrUInt(CASTLE_MAX_SHADOW_ATLAS_TILES) * SizeOf(TCastlePositionalShadowTileEntry);
     BufDesc.Usage := [buStorage, buTransferDst];
     BufDesc.MemoryUsage := muCpuToGpu;
@@ -14177,7 +14287,7 @@ begin
   if (ACmd = nil) or (FShadowAtlasTexture = nil) then
     Exit;
 
-  FillChar(RenderInfo, SizeOf(RenderInfo), 0);
+  RenderInfo := Default(TRHIRenderingInfo);
   RenderInfo.RenderArea := AViewportRect;
   SetLength(RenderInfo.ColorAttachments, 0);
   RenderInfo.DepthAttachment.Texture := FShadowAtlasTexture;
@@ -14514,7 +14624,7 @@ begin
       FreeAndNil(ShaderGen);
     end;
 
-    FillChar(CompDesc, SizeOf(CompDesc), 0);
+    CompDesc := Default(TRHIComputePipelineDesc);
     CompDesc.ComputeShader := FBloomDownsampleShader;
     SetLength(CompDesc.DescriptorSetLayouts, 1);
     CompDesc.DescriptorSetLayouts[0] := FBloomDescriptorLayout;
@@ -14527,7 +14637,7 @@ begin
     CompDesc.DebugName := 'BloomUpsamplePSO';
     FBloomUpsamplePipeline := FDevice.GetOrCreateComputePipeline(CompDesc);
 
-    FillChar(CompDesc, SizeOf(CompDesc), 0);
+    CompDesc := Default(TRHIComputePipelineDesc);
     CompDesc.ComputeShader := FHistogramShader;
     SetLength(CompDesc.DescriptorSetLayouts, 1);
     CompDesc.DescriptorSetLayouts[0] := FHistogramDescriptorLayout;
@@ -14536,7 +14646,7 @@ begin
     CompDesc.DebugName := 'LuminanceHistogramPSO';
     FHistogramPipeline := FDevice.GetOrCreateComputePipeline(CompDesc);
 
-    FillChar(CompDesc, SizeOf(CompDesc), 0);
+    CompDesc := Default(TRHIComputePipelineDesc);
     CompDesc.ComputeShader := FModulateShader;
     SetLength(CompDesc.DescriptorSetLayouts, 1);
     CompDesc.DescriptorSetLayouts[0] := FModulateDescriptorLayout;
@@ -14545,7 +14655,7 @@ begin
     CompDesc.DebugName := 'PostProcessModulatePSO';
     FModulatePipeline := FDevice.GetOrCreateComputePipeline(CompDesc);
 
-    FillChar(CompDesc, SizeOf(CompDesc), 0);
+    CompDesc := Default(TRHIComputePipelineDesc);
     CompDesc.ComputeShader := FHiZCopyShader;
     SetLength(CompDesc.DescriptorSetLayouts, 1);
     CompDesc.DescriptorSetLayouts[0] := FHiZCopyDescriptorLayout;
@@ -14571,7 +14681,7 @@ begin
   if (FCompositePipeline <> nil) and (FCompositePipelineFormat = EffFormat) then
     Exit(FCompositePipeline);
 
-  FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+  PipeDesc := Default(TRHIGraphicsPipelineDesc);
   PipeDesc.VertexShader := FCompositeVertShader;
   PipeDesc.FragmentShader := FCompositeFragShader;
   PipeDesc.Topology := ptTriangleList;
@@ -15582,7 +15692,7 @@ begin
     FDenoiseDescriptorLayout := FDevice.CreateDescriptorSetLayout(DenoiseBindings);
     FDenoiseDescriptorSet := FDevice.CreateDescriptorSet(FDenoiseDescriptorLayout);
 
-    FillChar(CompDesc, SizeOf(CompDesc), 0);
+    CompDesc := Default(TRHIComputePipelineDesc);
     CompDesc.ComputeShader := FGTAOShader;
     SetLength(CompDesc.DescriptorSetLayouts, 1);
     CompDesc.DescriptorSetLayouts[0] := FGTAODescriptorLayout;
@@ -15866,7 +15976,7 @@ begin
     FSSRDescriptorLayout := FDevice.CreateDescriptorSetLayout(Bindings);
     FSSRDescriptorSet := FDevice.CreateDescriptorSet(FSSRDescriptorLayout);
 
-    FillChar(CompDesc, SizeOf(CompDesc), 0);
+    CompDesc := Default(TRHIComputePipelineDesc);
     CompDesc.ComputeShader := FSSRShader;
     SetLength(CompDesc.DescriptorSetLayouts, 1);
     CompDesc.DescriptorSetLayouts[0] := FSSRDescriptorLayout;
@@ -16158,7 +16268,7 @@ begin
     FRaymarchDescriptorLayout := FDevice.CreateDescriptorSetLayout(RaymarchBindings);
     FRaymarchDescriptorSet := FDevice.CreateDescriptorSet(FRaymarchDescriptorLayout);
 
-    FillChar(CompDesc, SizeOf(CompDesc), 0);
+    CompDesc := Default(TRHIComputePipelineDesc);
     CompDesc.ComputeShader := FInjectShader;
     SetLength(CompDesc.DescriptorSetLayouts, 1);
     CompDesc.DescriptorSetLayouts[0] := FInjectDescriptorLayout;
@@ -16200,7 +16310,7 @@ begin
   if FDevice = nil then
     Exit;
 
-  FillChar(TexDesc, SizeOf(TexDesc), 0);
+  TexDesc := Default(TRHITextureDesc);
   TexDesc.Dimension := td3D;
   TexDesc.Format := pfRGBA16_Float;
   TexDesc.Width := FGridX;
@@ -16386,7 +16496,7 @@ begin
     FTAADescriptorLayout := FDevice.CreateDescriptorSetLayout(Bindings);
     FTAADescriptorSet := FDevice.CreateDescriptorSet(FTAADescriptorLayout);
 
-    FillChar(CompDesc, SizeOf(CompDesc), 0);
+    CompDesc := Default(TRHIComputePipelineDesc);
     CompDesc.ComputeShader := FTAAShader;
     SetLength(CompDesc.DescriptorSetLayouts, 1);
     CompDesc.DescriptorSetLayouts[0] := FTAADescriptorLayout;
@@ -16956,7 +17066,7 @@ begin
       Gen.GenerateParticleSimulationComputeShader(64),
       'ParticleSimulationCS');
     try
-      FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+      PipeDesc := Default(TRHIComputePipelineDesc);
       PipeDesc.ComputeShader := Shader;
       PipeDesc.PushConstantSize := SizeOf(TCastleParticleSimPushConstants);
       PipeDesc.PushConstantStages := [ssCompute];
@@ -17180,7 +17290,7 @@ begin
       Gen.GenerateContactShadowsComputeShader(8, 8),
       'ContactShadowsCS');
     try
-      FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+      PipeDesc := Default(TRHIComputePipelineDesc);
       PipeDesc.ComputeShader := Shader;
       PipeDesc.PushConstantSize := SizeOf(TCastleContactShadowsPushConstants);
       PipeDesc.PushConstantStages := [ssCompute];
@@ -17356,7 +17466,7 @@ begin
       Gen.GenerateComputeSkinningShader(64),
       'ComputeSkinningCS');
     try
-      FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+      PipeDesc := Default(TRHIComputePipelineDesc);
       PipeDesc.ComputeShader := Shader;
       PipeDesc.PushConstantSize := SizeOf(TCastleComputeSkinningPushConstants);
       PipeDesc.PushConstantStages := [ssCompute];
@@ -18845,7 +18955,7 @@ begin
     Exit;
 
   FreeAndNil(FClipmapVolumeTexture);
-  FillChar(TexDesc, SizeOf(TexDesc), 0);
+  TexDesc := Default(TRHITextureDesc);
   TexDesc.Dimension := td3D;
   TexDesc.Format := pfR16_Float;
   TexDesc.Width := FGridResolution;
@@ -19390,7 +19500,7 @@ begin
   if FPhysicalBrickAtlasTexture <> nil then
     Exit;
   AtlasDim := FBricksPerAxis * FBrickResolution;
-  FillChar(TexDesc, SizeOf(TexDesc), 0);
+  TexDesc := Default(TRHITextureDesc);
   TexDesc.Dimension := td3D;
   TexDesc.Width := AtlasDim;
   TexDesc.Height := AtlasDim;
@@ -20534,7 +20644,7 @@ begin
         @BuiltInSPIRV[0], Length(BuiltInSPIRV), 'MaterialBinHistogramCS');
     end;
 
-    FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+    PipeDesc := Default(TRHIComputePipelineDesc);
     PipeDesc.ComputeShader := FHistogramShader;
     SetLength(PipeDesc.DescriptorSetLayouts, 1);
     PipeDesc.DescriptorSetLayouts[0] := FBinDescriptorLayout;
@@ -20560,7 +20670,7 @@ begin
         @BuiltInSPIRV[0], Length(BuiltInSPIRV), 'MaterialBinPrefixSumCS');
     end;
 
-    FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+    PipeDesc := Default(TRHIComputePipelineDesc);
     PipeDesc.ComputeShader := FPrefixSumShader;
     SetLength(PipeDesc.DescriptorSetLayouts, 1);
     PipeDesc.DescriptorSetLayouts[0] := FBinDescriptorLayout;
@@ -21067,7 +21177,7 @@ begin
     Exit;
   BindlessMgr.EnsureDescriptorSetCreated;
 
-  FillChar(PipeDesc, SizeOf(PipeDesc), 0);
+  PipeDesc := Default(TRHIGraphicsPipelineDesc);
   PipeDesc.VertexShader := FVertShader;
   PipeDesc.FragmentShader := FFragShader;
   PipeDesc.Topology := ptTriangleList;
@@ -22024,10 +22134,62 @@ end;
 { TVulkanRHIDevice                                                             }
 { ---------------------------------------------------------------------------- }
 
+function EnvFlagEnabled(const AEnvName: String): Boolean;
+var
+  Val: String;
+begin
+  Val := Trim(GetEnvironmentVariable(AEnvName));
+  Result := (Val = '1') or SameText(Val, 'true') or SameText(Val, 'yes') or SameText(Val, 'on');
+end;
+
+function ShouldEnableVulkanValidationByEnv(const ARequested: Boolean): Boolean;
+begin
+  if SameText(Trim(GetEnvironmentVariable('CASTLE_VULKAN_VALIDATION')), '0') or
+     SameText(Trim(GetEnvironmentVariable('CASTLE_VULKAN_VALIDATION')), 'false') then
+    Exit(False);
+  Result := ARequested or
+    EnvFlagEnabled('CASTLE_VULKAN_VALIDATION') or
+    EnvFlagEnabled('CASTLE_VULKAN_VALIDATION_STRICT');
+end;
+
+function IsVulkanStrictValidationGateEnv: Boolean;
+begin
+  Result := EnvFlagEnabled('CASTLE_VULKAN_VALIDATION_STRICT');
+end;
+
+function VulkanDebugUtilsMessengerCallback(
+  messageSeverity: VkDebugUtilsMessageSeverityFlagsEXT;
+  messageTypes: VkDebugUtilsMessageTypeFlagsEXT;
+  const pCallbackData: PVkDebugUtilsMessengerCallbackDataEXT;
+  pUserData: Pointer): VkBool32; {$ifdef MSWINDOWS}stdcall{$else}cdecl{$endif};
+var
+  Dev: TVulkanRHIDevice;
+  MsgIdName, MsgBody: String;
+begin
+  Result := VK_FALSE;
+  if (pUserData = nil) or (pCallbackData = nil) then
+    Exit;
+  Dev := TVulkanRHIDevice(pUserData);
+  if pCallbackData^.pMessageIdName <> nil then
+    MsgIdName := String(AnsiString(pCallbackData^.pMessageIdName))
+  else
+    MsgIdName := '';
+  if pCallbackData^.pMessage <> nil then
+    MsgBody := String(AnsiString(pCallbackData^.pMessage))
+  else
+    MsgBody := '';
+  Dev.RecordValidationCallbackMessage(messageSeverity, messageTypes, MsgIdName, MsgBody);
+end;
+
 constructor TVulkanRHIDevice.Create(const ACreateSurfaceCallback: TVulkanCreateSurfaceEvent;
   const InitialWidth, InitialHeight: Cardinal; const EnableValidation: Boolean);
 begin
   inherited Create;
+  {$ifndef CASTLE_DISABLE_THREADS}
+  FValidationLock := TCriticalSection.Create;
+  {$endif}
+  FStrictValidationGate := IsVulkanStrictValidationGateEnv;
+  FBundledPipelineCacheFallbackUrl := DefaultBundledVulkanPipelineCacheUrl;
   FPipelineMap := TVulkanPipelineMap.Create([doOwnsValues]);
   FComputePipelineMap := TVulkanComputePipelineMap.Create([doOwnsValues]);
   FVertexInputLibMap := TVulkanPipelineLibraryMap.Create;
@@ -22071,6 +22233,11 @@ end;
 constructor TVulkanRHIDevice.CreateOffscreen(const EnableValidation: Boolean);
 begin
   inherited Create;
+  {$ifndef CASTLE_DISABLE_THREADS}
+  FValidationLock := TCriticalSection.Create;
+  {$endif}
+  FStrictValidationGate := IsVulkanStrictValidationGateEnv;
+  FBundledPipelineCacheFallbackUrl := DefaultBundledVulkanPipelineCacheUrl;
   FPipelineMap := TVulkanPipelineMap.Create([doOwnsValues]);
   FComputePipelineMap := TVulkanComputePipelineMap.Create([doOwnsValues]);
   FVertexInputLibMap := TVulkanPipelineLibraryMap.Create;
@@ -22134,6 +22301,11 @@ var
   I: Integer;
 begin
   inherited Create;
+  {$ifndef CASTLE_DISABLE_THREADS}
+  FValidationLock := TCriticalSection.Create;
+  {$endif}
+  FStrictValidationGate := IsVulkanStrictValidationGateEnv;
+  FBundledPipelineCacheFallbackUrl := DefaultBundledVulkanPipelineCacheUrl;
   FPipelineMap := TVulkanPipelineMap.Create([doOwnsValues]);
   FComputePipelineMap := TVulkanComputePipelineMap.Create([doOwnsValues]);
   FVertexInputLibMap := TVulkanPipelineLibraryMap.Create;
@@ -22981,6 +23153,9 @@ begin
   FreeAndNil(FPrewarm2DVertexShader);
   FreeAndNil(FPrewarm2DFragmentShader);
   FreeAndNil(FDefaultSampler);
+  FDeferResourceDestruction := False;
+  ReleaseRemainingDeviceResources;
+  FlushAllDeferredDeletions;
 
   for I := 0 to MaxFramesInFlight - 1 do
   begin
@@ -23004,11 +23179,18 @@ begin
     vkDestroyDevice(FDevice, nil);
   if (FInstance <> nil) and (FSurface <> VK_NULL_HANDLE) then
     vkDestroySurfaceKHR(FInstance, FSurface, nil);
+  if (FInstance <> nil) and (FDebugMessenger <> VK_NULL_HANDLE) and
+     Assigned(vkDestroyDebugUtilsMessengerEXT) then
+  begin
+    vkDestroyDebugUtilsMessengerEXT(FInstance, FDebugMessenger, nil);
+    FDebugMessenger := VK_NULL_HANDLE;
+  end;
   if FInstance <> nil then
   begin
     vkDestroyInstance(FInstance, nil);
     UnloadVulkanInstance(FInstance);
   end;
+  FreeAndNil(FValidationLock);
 
   inherited;
 end;
@@ -23025,14 +23207,20 @@ const
 var
   AppInfo: VkApplicationInfo;
   CreateInfo: VkInstanceCreateInfo;
+  MessengerInfo: VkDebugUtilsMessengerCreateInfoEXT;
   ExtNames: TAnsiStringArray;
   ExtPtrs: array of PAnsiChar;
   LayerName: PAnsiChar;
   LoaderVer: Cardinal;
-  EnablePortabilityBit: Boolean;
+  EnablePortabilityBit, WantValidation, HasDebugUtilsExt: Boolean;
   I: Integer;
   Res: VkResult;
 begin
+  FValidationLayerActive := False;
+  FDebugUtilsActive := False;
+  FDebugMessenger := VK_NULL_HANDLE;
+  WantValidation := ShouldEnableVulkanValidationByEnv(EnableValidation);
+
   LoaderVer := VK_API_VERSION_1_3;
   if Assigned(vkEnumerateInstanceVersion) then
   begin
@@ -23056,12 +23244,45 @@ begin
     ExtNames := GetAvailableVulkanWSIInstanceExtensions(EnablePortabilityBit)
   else
     SetLength(ExtNames, 0);
+
+  HasDebugUtilsExt := False;
+  if WantValidation and IsVulkanInstanceExtensionSupported(VK_EXT_debug_utils) then
+  begin
+    HasDebugUtilsExt := True;
+    for I := 0 to High(ExtNames) do
+      if ExtNames[I] = VK_EXT_debug_utils then
+      begin
+        HasDebugUtilsExt := False; { Already in list }
+        Break;
+      end;
+    if HasDebugUtilsExt then
+    begin
+      SetLength(ExtNames, Length(ExtNames) + 1);
+      ExtNames[High(ExtNames)] := VK_EXT_debug_utils;
+    end;
+    FDebugUtilsActive := True;
+  end;
+
   SetLength(ExtPtrs, Length(ExtNames));
   for I := 0 to High(ExtNames) do
     ExtPtrs[I] := PAnsiChar(ExtNames[I]);
 
+  FillChar(MessengerInfo, SizeOf(MessengerInfo), 0);
+  MessengerInfo.sType := VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+  MessengerInfo.messageSeverity :=
+    VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT or
+    VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+  MessengerInfo.messageType :=
+    VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT or
+    VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT or
+    VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+  MessengerInfo.pfnUserCallback := @VulkanDebugUtilsMessengerCallback;
+  MessengerInfo.pUserData := Self;
+
   FillChar(CreateInfo, SizeOf(CreateInfo), 0);
   CreateInfo.sType := VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+  if FDebugUtilsActive then
+    CreateInfo.pNext := @MessengerInfo;
   if EnablePortabilityBit then
     CreateInfo.flags := CreateInfo.flags or VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
   CreateInfo.pApplicationInfo := @AppInfo;
@@ -23070,17 +23291,28 @@ begin
     CreateInfo.ppEnabledExtensionNames := @ExtPtrs[0];
 
   LayerName := VK_LAYER_KHRONOS_validation;
-  if EnableValidation then
+  if WantValidation and IsVulkanValidationLayerSupported then
   begin
     CreateInfo.enabledLayerCount := 1;
     CreateInfo.ppEnabledLayerNames := @LayerName;
+    FValidationLayerActive := True;
   end;
 
   Res := vkCreateInstance(@CreateInfo, nil, @FInstance);
-  if (Res = VK_ERROR_LAYER_NOT_PRESENT) and EnableValidation then
+  if (Res = VK_ERROR_LAYER_NOT_PRESENT) and (CreateInfo.enabledLayerCount > 0) then
   begin
     CreateInfo.enabledLayerCount := 0;
     CreateInfo.ppEnabledLayerNames := nil;
+    FValidationLayerActive := False;
+    Res := vkCreateInstance(@CreateInfo, nil, @FInstance);
+  end;
+  if (Res = VK_ERROR_EXTENSION_NOT_PRESENT) and FDebugUtilsActive and (Length(ExtPtrs) > 0) then
+  begin
+    FDebugUtilsActive := False;
+    CreateInfo.pNext := nil;
+    Dec(CreateInfo.enabledExtensionCount);
+    if CreateInfo.enabledExtensionCount = 0 then
+      CreateInfo.ppEnabledExtensionNames := nil;
     Res := vkCreateInstance(@CreateInfo, nil, @FInstance);
   end;
 
@@ -23100,6 +23332,12 @@ begin
 
   CheckVk(Res, 'vkCreateInstance');
   LoadVulkanInstance(FInstance);
+
+  if FDebugUtilsActive and Assigned(vkCreateDebugUtilsMessengerEXT) then
+  begin
+    if vkCreateDebugUtilsMessengerEXT(FInstance, @MessengerInfo, nil, @FDebugMessenger) <> VK_SUCCESS then
+      FDebugMessenger := VK_NULL_HANDLE;
+  end;
 end;
 
 procedure TVulkanRHIDevice.PickPhysicalDevice;
@@ -24528,7 +24766,7 @@ var
   W, H: Cardinal;
   ColorFmt, DepthFmt: TRHIPixelFormat;
 begin
-  FillChar(Result, SizeOf(Result), 0);
+  Result := Default(TRHIRenderingInfo);
   Result.RenderArea := ARenderArea;
   W := Max(1, ARenderArea.Width);
   H := Max(1, ARenderArea.Height);
@@ -25573,7 +25811,7 @@ begin
   MissesBefore := FPipelineCacheMisses;
 
   { 1. Standard 3D Forward Opaque PSO (CullBack, DepthTestWrite, Opaque) }
-  FillChar(Desc3D, SizeOf(Desc3D), 0);
+  Desc3D := Default(TRHIGraphicsPipelineDesc);
   Desc3D.VertexShader := FPrewarm3DVertexShader;
   Desc3D.FragmentShader := FPrewarm3DFragmentShader;
   Desc3D.Topology := ptTriangleList;
@@ -25626,7 +25864,7 @@ begin
   { 4. Shadow Map Depth-Only 3D PSO }
   if AIncludeShadowDepth then
   begin
-    FillChar(DescShadow, SizeOf(DescShadow), 0);
+    DescShadow := Default(TRHIGraphicsPipelineDesc);
     DescShadow.VertexShader := FPrewarm3DVertexShader;
     DescShadow.FragmentShader := nil;
     DescShadow.Topology := ptTriangleList;
@@ -25645,7 +25883,7 @@ begin
   end;
 
   { 5. 2D UI / Sprite Batch PSO (CullNone, DepthDisabled, AlphaBlend) }
-  FillChar(Desc2D, SizeOf(Desc2D), 0);
+  Desc2D := Default(TRHIGraphicsPipelineDesc);
   Desc2D.VertexShader := FPrewarm2DVertexShader;
   Desc2D.FragmentShader := FPrewarm2DFragmentShader;
   Desc2D.Topology := ptTriangleList;
@@ -26229,36 +26467,54 @@ begin
 end;
 
 procedure TVulkanRHIDevice.LoadPipelineCache(const CacheFileUrl: String);
-var
-  Stream: TStream;
-  Blob: TBytes;
-  CacheInfo: VkPipelineCacheCreateInfo;
-begin
-  if (FDevice = nil) or not Assigned(vkCreatePipelineCache) then Exit;
-  if (CacheFileUrl = '') or (not UriFileExists(CacheFileUrl)) then Exit;
-  try
-    Stream := Download(CacheFileUrl);
+
+  function TryLoadCacheFromUrl(const AUrl: String): Boolean;
+  var
+    Stream: TStream;
+    Blob: TBytes;
+    CacheInfo: VkPipelineCacheCreateInfo;
+  begin
+    Result := False;
+    if (AUrl = '') or (not UriFileExists(AUrl)) then Exit;
     try
-      if LoadPipelineCacheBlobFromStream(Stream, FCapabilities.VendorId, FDeviceId, Blob) then
-      begin
-        if FPipelineCache <> VK_NULL_HANDLE then
+      Stream := Download(AUrl);
+      try
+        if LoadPipelineCacheBlobFromStream(Stream, FCapabilities.VendorId, FDeviceId, Blob) then
         begin
-          vkDestroyPipelineCache(FDevice, FPipelineCache, nil);
-          FPipelineCache := VK_NULL_HANDLE;
+          if FPipelineCache <> VK_NULL_HANDLE then
+          begin
+            vkDestroyPipelineCache(FDevice, FPipelineCache, nil);
+            FPipelineCache := VK_NULL_HANDLE;
+          end;
+          FillChar(CacheInfo, SizeOf(CacheInfo), 0);
+          CacheInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+          CacheInfo.initialDataSize := Length(Blob);
+          CacheInfo.pInitialData := @Blob[0];
+          CheckVk(vkCreatePipelineCache(FDevice, @CacheInfo, nil, @FPipelineCache), 'vkCreatePipelineCache(Load)');
+          Result := True;
         end;
-        FillChar(CacheInfo, SizeOf(CacheInfo), 0);
-        CacheInfo.sType := VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-        CacheInfo.initialDataSize := Length(Blob);
-        CacheInfo.pInitialData := @Blob[0];
-        CheckVk(vkCreatePipelineCache(FDevice, @CacheInfo, nil, @FPipelineCache), 'vkCreatePipelineCache(Load)');
+      finally
+        FreeAndNil(Stream);
       end;
-    finally
-      FreeAndNil(Stream);
+    except
+      on E: Exception do
+        WritelnLog('Vulkan', 'Could not load pipeline cache from "%s": %s', [AUrl, E.Message]);
     end;
-  except
-    on E: Exception do
-      WritelnLog('Vulkan', 'Could not load pipeline cache from "%s": %s', [CacheFileUrl, E.Message]);
   end;
+
+begin
+  FPipelineCacheSeededFromBundle := False;
+  if (FDevice = nil) or not Assigned(vkCreatePipelineCache) then Exit;
+
+  { 1. Prefer user-writable persistent cache (e.g. castle-config:/vulkan_pipeline_cache.bin) }
+  if (CacheFileUrl <> '') and TryLoadCacheFromUrl(CacheFileUrl) then
+    Exit;
+
+  { 2. First-boot fallback: try packaged asset seed cache (e.g. castle-data:/vulkan_pipeline_cache.bin) }
+  if (FBundledPipelineCacheFallbackUrl <> '') and
+     (FBundledPipelineCacheFallbackUrl <> CacheFileUrl) and
+     TryLoadCacheFromUrl(FBundledPipelineCacheFallbackUrl) then
+    FPipelineCacheSeededFromBundle := True;
 end;
 
 procedure TVulkanRHIDevice.SavePipelineCache(const CacheFileUrl: String);
@@ -26348,6 +26604,9 @@ begin
     '  Bindless textures (VK_EXT_descriptor_indexing / 1.2): ' + BoolToStr(FSupportsBindlessTextures, True) +
       Format(' (max: %d)', [FMaxBindlessTextures]) + LineEnding +
     '  Dedicated DMA transfer queue: ' + BoolToStr(FHasDedicatedTransferQueue, True) + LineEnding +
+    '  Validation layer (VK_LAYER_KHRONOS_validation): ' + BoolToStr(FValidationLayerActive, True) +
+      Format(' (debug messenger: %s, errors: %d, warnings: %d)',
+        [BoolToStr(FDebugMessenger <> VK_NULL_HANDLE, True), FValidationErrorCount, FValidationWarningCount]) + LineEnding +
     LineEnding +
     Section + LineEnding +
     'Limits & Pipelines:' + LineEnding +
@@ -26475,6 +26734,190 @@ begin
       Exit(I);
 
   raise ERHIOutOfMemory.Create('Failed to find suitable Vulkan memory type');
+end;
+
+function TVulkanRHIDevice.GetValidationMessageCount: Integer;
+begin
+  {$ifndef CASTLE_DISABLE_THREADS}
+  if FValidationLock <> nil then
+    TCriticalSection(FValidationLock).Acquire;
+  try
+  {$endif}
+    Result := Length(FValidationMessages);
+  {$ifndef CASTLE_DISABLE_THREADS}
+  finally
+    if FValidationLock <> nil then
+      TCriticalSection(FValidationLock).Release;
+  end;
+  {$endif}
+end;
+
+procedure TVulkanRHIDevice.RecordValidationCallbackMessage(
+  const ASeverity, AMessageTypes: VkFlags;
+  const AMessageIdName, AMessage: String);
+const
+  MaxCapturedValidationMessages = 256;
+var
+  SeverityTag, TypeTag, FormattedEntry: String;
+  Idx: Integer;
+begin
+  if (ASeverity and VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) <> 0 then
+    SeverityTag := 'ERROR'
+  else if (ASeverity and VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) <> 0 then
+    SeverityTag := 'WARNING'
+  else if (ASeverity and VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) <> 0 then
+    SeverityTag := 'INFO'
+  else
+    SeverityTag := 'VERBOSE';
+
+  if (AMessageTypes and VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT) <> 0 then
+    TypeTag := 'VALIDATION'
+  else if (AMessageTypes and VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT) <> 0 then
+    TypeTag := 'PERFORMANCE'
+  else
+    TypeTag := 'GENERAL';
+
+  if AMessageIdName <> '' then
+    FormattedEntry := Format('[%s/%s] (%s) %s', [SeverityTag, TypeTag, AMessageIdName, AMessage])
+  else
+    FormattedEntry := Format('[%s/%s] %s', [SeverityTag, TypeTag, AMessage]);
+
+  {$ifndef CASTLE_DISABLE_THREADS}
+  if FValidationLock <> nil then
+    TCriticalSection(FValidationLock).Acquire;
+  try
+  {$endif}
+    if (ASeverity and VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) <> 0 then
+      Inc(FValidationErrorCount)
+    else if (ASeverity and VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) <> 0 then
+      Inc(FValidationWarningCount)
+    else
+      Inc(FValidationInfoCount);
+
+    if Length(FValidationMessages) < MaxCapturedValidationMessages then
+    begin
+      Idx := Length(FValidationMessages);
+      SetLength(FValidationMessages, Idx + 1);
+      FValidationMessages[Idx] := FormattedEntry;
+    end;
+  {$ifndef CASTLE_DISABLE_THREADS}
+  finally
+    if FValidationLock <> nil then
+      TCriticalSection(FValidationLock).Release;
+  end;
+  {$endif}
+
+  if (ASeverity and (VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT or
+                     VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)) <> 0 then
+    WritelnWarning('Vulkan/Validation', '%s', [FormattedEntry])
+  else
+    WritelnLog('Vulkan/Validation', '%s', [FormattedEntry]);
+end;
+
+function TVulkanRHIDevice.SubmitDebugUtilsMessage(
+  const ASeverity, AMessageTypes: VkFlags;
+  const AMessageIdName, AMessage: String): Boolean;
+var
+  AnsiId, AnsiMsg: AnsiString;
+  CbData: VkDebugUtilsMessengerCallbackDataEXT;
+begin
+  if (FInstance <> nil) and FDebugUtilsActive and
+     (FDebugMessenger <> VK_NULL_HANDLE) and Assigned(vkSubmitDebugUtilsMessageEXT) then
+  begin
+    AnsiId := AnsiString(AMessageIdName);
+    AnsiMsg := AnsiString(AMessage);
+    FillChar(CbData, SizeOf(CbData), 0);
+    CbData.sType := VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CALLBACK_DATA_EXT;
+    if AnsiId <> '' then
+      CbData.pMessageIdName := PAnsiChar(AnsiId);
+    CbData.pMessage := PAnsiChar(AnsiMsg);
+    vkSubmitDebugUtilsMessageEXT(FInstance, ASeverity, AMessageTypes, @CbData);
+    Exit(True);
+  end;
+
+  RecordValidationCallbackMessage(ASeverity, AMessageTypes, AMessageIdName, AMessage);
+  Result := False;
+end;
+
+procedure TVulkanRHIDevice.ResetValidationCounters;
+begin
+  {$ifndef CASTLE_DISABLE_THREADS}
+  if FValidationLock <> nil then
+    TCriticalSection(FValidationLock).Acquire;
+  try
+  {$endif}
+    FValidationErrorCount := 0;
+    FValidationWarningCount := 0;
+    FValidationInfoCount := 0;
+    SetLength(FValidationMessages, 0);
+  {$ifndef CASTLE_DISABLE_THREADS}
+  finally
+    if FValidationLock <> nil then
+      TCriticalSection(FValidationLock).Release;
+  end;
+  {$endif}
+end;
+
+function TVulkanRHIDevice.GetValidationMessage(const AIndex: Integer): String;
+begin
+  Result := '';
+  {$ifndef CASTLE_DISABLE_THREADS}
+  if FValidationLock <> nil then
+    TCriticalSection(FValidationLock).Acquire;
+  try
+  {$endif}
+    if (AIndex >= 0) and (AIndex < Length(FValidationMessages)) then
+      Result := FValidationMessages[AIndex];
+  {$ifndef CASTLE_DISABLE_THREADS}
+  finally
+    if FValidationLock <> nil then
+      TCriticalSection(FValidationLock).Release;
+  end;
+  {$endif}
+end;
+
+function TVulkanRHIDevice.GetValidationMessagesReport: String;
+var
+  I: Integer;
+begin
+  {$ifndef CASTLE_DISABLE_THREADS}
+  if FValidationLock <> nil then
+    TCriticalSection(FValidationLock).Acquire;
+  try
+  {$endif}
+    Result := Format(
+      'Vulkan Validation Report (layerActive=%s, messengerActive=%s, errors=%d, warnings=%d):',
+      [BoolToStr(FValidationLayerActive, True),
+       BoolToStr(FDebugMessenger <> VK_NULL_HANDLE, True),
+       FValidationErrorCount,
+       FValidationWarningCount]);
+    for I := 0 to High(FValidationMessages) do
+      Result := Result + LineEnding + '  ' + FValidationMessages[I];
+  {$ifndef CASTLE_DISABLE_THREADS}
+  finally
+    if FValidationLock <> nil then
+      TCriticalSection(FValidationLock).Release;
+  end;
+  {$endif}
+end;
+
+procedure TVulkanRHIDevice.AssertZeroValidationErrors(const AContext: String);
+var
+  CtxPrefix: String;
+begin
+  if (FValidationErrorCount = 0) and
+     ((not FStrictValidationGate) or (FValidationWarningCount = 0)) then
+    Exit;
+
+  if AContext <> '' then
+    CtxPrefix := '[' + AContext + '] '
+  else
+    CtxPrefix := '';
+
+  raise ERHIError.CreateFmt(
+    '%sVulkan validation gate failed (%d errors, %d warnings; strict=%s). %s',
+    [CtxPrefix, FValidationErrorCount, FValidationWarningCount,
+     BoolToStr(FStrictValidationGate, True), GetValidationMessagesReport]);
 end;
 
 end.

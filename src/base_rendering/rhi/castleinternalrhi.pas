@@ -592,6 +592,11 @@ type
   private
     FDevice: TRHIDevice;
     FDebugName: String;
+  protected
+    { Releases backend GPU handles owned by this resource while FDevice is still live.
+      Invoked either from Destroy or by TRHIDevice.ReleaseRemainingDeviceResources
+      when a resource wrapper outlives its TRHIDevice. }
+    procedure ReleaseDeviceResources; virtual;
   public
     constructor Create(const ADevice: TRHIDevice; const ADebugName: String = '');
     destructor Destroy; override;
@@ -847,6 +852,9 @@ type
     FCapabilities: TRHIDeviceCapabilities;
     FFrameIndex: Cardinal;
     FTotalFramesStarted: Cardinal;
+    { Releases backend GPU handles on any surviving TRHIResource wrappers still tracked
+      in FResources and detaches their FDevice reference before native device teardown. }
+    procedure ReleaseRemainingDeviceResources;
   public
     constructor Create; virtual;
     destructor Destroy; override;
@@ -1189,6 +1197,62 @@ function ClampSampleCountToCapabilities(const ARequestedSamples, AMaxSupportedSa
 function CompareImagesPerceptualDiff(const ImageA, ImageB: TCastleImage;
   const MaxNormalizedRMSE: Single; out OutNormalizedRMSE: Single): Boolean;
 
+type
+  { Detailed perceptual comparison metrics between two rendered framebuffer images
+    (e.g. side-by-side rbOpenGL vs rbVulkan visual regression verification, Phase 112.2). }
+  TRHIVisualDiffMetrics = record
+    DimensionsMatch: Boolean;
+    NormalizedRMSE: Single;
+    PSNRdB: Single;
+    MaxChannelDelta: Byte;
+    DiffPixelCount: Cardinal;
+    TotalPixelCount: Cardinal;
+    DiffPixelRatio: Single;
+    Passed: Boolean;
+  end;
+
+  { Named visual regression comparison entry recorded by TRHIVisualRegressionSuite. }
+  TRHIVisualRegressionCaseResult = record
+    CaseName: String;
+    MaxAllowedRMSE: Single;
+    Metrics: TRHIVisualDiffMetrics;
+  end;
+
+  { Structured side-by-side rbOpenGL vs rbVulkan visual regression suite runner
+    and summary report generator (Phase 112.2). }
+  TRHIVisualRegressionSuite = class
+  private
+    FCases: array of TRHIVisualRegressionCaseResult;
+    FChannelDeltaTolerance: Byte;
+    function GetCaseCount: Integer;
+    function GetPassedCount: Integer;
+    function GetFailedCount: Integer;
+    function GetAllPassed: Boolean;
+    function GetWorstRMSE: Single;
+  public
+    constructor Create(const AChannelDeltaTolerance: Byte = 2);
+    procedure Clear;
+    function RecordComparison(const ACaseName: String;
+      const AReferenceImage, ACandidateImage: TCastleImage;
+      const AMaxAllowedRMSE: Single): TRHIVisualRegressionCaseResult;
+    function GetCaseResult(const AIndex: Integer): TRHIVisualRegressionCaseResult;
+    function BuildSummaryReport: String;
+
+    property ChannelDeltaTolerance: Byte read FChannelDeltaTolerance write FChannelDeltaTolerance;
+    property CaseCount: Integer read GetCaseCount;
+    property PassedCount: Integer read GetPassedCount;
+    property FailedCount: Integer read GetFailedCount;
+    property AllPassed: Boolean read GetAllPassed;
+    property WorstRMSE: Single read GetWorstRMSE;
+  end;
+
+{ Computes full perceptual diff metrics (NormalizedRMSE, PSNRdB, MaxChannelDelta,
+  DiffPixelCount, DiffPixelRatio) between two images and sets OutMetrics.Passed :=
+  DimensionsMatch and (NormalizedRMSE <= MaxNormalizedRMSE). }
+function CompareImagesDetailedDiff(const ImageA, ImageB: TCastleImage;
+  const MaxNormalizedRMSE: Single; out OutMetrics: TRHIVisualDiffMetrics;
+  const ChannelDeltaTolerance: Byte = 2): Boolean;
+
 { Maps any TEncodedImage (including floating-point images TRGBAlphaFloatImage,
   TRGBFloatImage, TGrayscaleFloatImage, TGrayscaleAlphaFloatImage and GPU-compressed
   images TGPUCompressedImage) to the corresponding TRHIPixelFormat. }
@@ -1333,6 +1397,171 @@ begin
   Result := OutNormalizedRMSE <= MaxNormalizedRMSE;
 end;
 
+function CompareImagesDetailedDiff(const ImageA, ImageB: TCastleImage;
+  const MaxNormalizedRMSE: Single; out OutMetrics: TRHIVisualDiffMetrics;
+  const ChannelDeltaTolerance: Byte): Boolean;
+var
+  TotalPixels, TotalSamples, PIdx, CIdx, SampleIdx: PtrUInt;
+  ChannelsPerPixel: PtrUInt;
+  PA, PB: PByte;
+  AbsDelta, PixelMaxDelta: Cardinal;
+  Diff, SumSq: Double;
+begin
+  FillChar(OutMetrics, SizeOf(OutMetrics), 0);
+  OutMetrics.NormalizedRMSE := 1.0;
+  OutMetrics.PSNRdB := 0.0;
+  if (ImageA = nil) or (ImageB = nil) or
+     (ImageA.Width <> ImageB.Width) or
+     (ImageA.Height <> ImageB.Height) or
+     (ImageA.Depth <> ImageB.Depth) or
+     (ImageA.PixelSize <> ImageB.PixelSize) or
+     (ImageA.PixelSize = 0) then
+    Exit(False);
+
+  OutMetrics.DimensionsMatch := True;
+  TotalPixels := PtrUInt(ImageA.Width) * PtrUInt(ImageA.Height) * PtrUInt(ImageA.Depth);
+  ChannelsPerPixel := PtrUInt(ImageA.PixelSize);
+  TotalSamples := TotalPixels * ChannelsPerPixel;
+  OutMetrics.TotalPixelCount := Cardinal(TotalPixels);
+
+  if TotalSamples = 0 then
+  begin
+    OutMetrics.NormalizedRMSE := 0.0;
+    OutMetrics.PSNRdB := 99.0;
+    OutMetrics.Passed := True;
+    Exit(True);
+  end;
+
+  PA := PByte(ImageA.RawPixels);
+  PB := PByte(ImageB.RawPixels);
+  SumSq := 0.0;
+  for PIdx := 0 to TotalPixels - 1 do
+  begin
+    PixelMaxDelta := 0;
+    SampleIdx := PIdx * ChannelsPerPixel;
+    for CIdx := 0 to ChannelsPerPixel - 1 do
+    begin
+      AbsDelta := Cardinal(Abs(Integer(PA[SampleIdx + CIdx]) - Integer(PB[SampleIdx + CIdx])));
+      if AbsDelta > PixelMaxDelta then
+        PixelMaxDelta := AbsDelta;
+      if AbsDelta > OutMetrics.MaxChannelDelta then
+        OutMetrics.MaxChannelDelta := Byte(Min(Cardinal(255), AbsDelta));
+      Diff := AbsDelta / 255.0;
+      SumSq := SumSq + Diff * Diff;
+    end;
+    if PixelMaxDelta > ChannelDeltaTolerance then
+      Inc(OutMetrics.DiffPixelCount);
+  end;
+
+  OutMetrics.NormalizedRMSE := Sqrt(SumSq / TotalSamples);
+  if OutMetrics.NormalizedRMSE <= 1e-7 then
+    OutMetrics.PSNRdB := 99.0
+  else
+    OutMetrics.PSNRdB := -20.0 * Log10(OutMetrics.NormalizedRMSE);
+  OutMetrics.DiffPixelRatio := OutMetrics.DiffPixelCount / TotalPixels;
+  OutMetrics.Passed := OutMetrics.NormalizedRMSE <= MaxNormalizedRMSE;
+  Result := OutMetrics.Passed;
+end;
+
+{ TRHIVisualRegressionSuite }
+
+constructor TRHIVisualRegressionSuite.Create(const AChannelDeltaTolerance: Byte);
+begin
+  inherited Create;
+  FChannelDeltaTolerance := AChannelDeltaTolerance;
+end;
+
+procedure TRHIVisualRegressionSuite.Clear;
+begin
+  SetLength(FCases, 0);
+end;
+
+function TRHIVisualRegressionSuite.GetCaseCount: Integer;
+begin
+  Result := Length(FCases);
+end;
+
+function TRHIVisualRegressionSuite.GetPassedCount: Integer;
+var
+  I: Integer;
+begin
+  Result := 0;
+  for I := 0 to High(FCases) do
+    if FCases[I].Metrics.Passed then
+      Inc(Result);
+end;
+
+function TRHIVisualRegressionSuite.GetFailedCount: Integer;
+begin
+  Result := Length(FCases) - GetPassedCount;
+end;
+
+function TRHIVisualRegressionSuite.GetAllPassed: Boolean;
+begin
+  Result := (Length(FCases) > 0) and (GetFailedCount = 0);
+end;
+
+function TRHIVisualRegressionSuite.GetWorstRMSE: Single;
+var
+  I: Integer;
+begin
+  Result := 0.0;
+  for I := 0 to High(FCases) do
+    if FCases[I].Metrics.NormalizedRMSE > Result then
+      Result := FCases[I].Metrics.NormalizedRMSE;
+end;
+
+function TRHIVisualRegressionSuite.RecordComparison(const ACaseName: String;
+  const AReferenceImage, ACandidateImage: TCastleImage;
+  const AMaxAllowedRMSE: Single): TRHIVisualRegressionCaseResult;
+var
+  Idx: Integer;
+begin
+  Result.CaseName := ACaseName;
+  Result.MaxAllowedRMSE := AMaxAllowedRMSE;
+  CompareImagesDetailedDiff(AReferenceImage, ACandidateImage,
+    AMaxAllowedRMSE, Result.Metrics, FChannelDeltaTolerance);
+  Idx := Length(FCases);
+  SetLength(FCases, Idx + 1);
+  FCases[Idx] := Result;
+end;
+
+function TRHIVisualRegressionSuite.GetCaseResult(
+  const AIndex: Integer): TRHIVisualRegressionCaseResult;
+begin
+  if (AIndex >= 0) and (AIndex < Length(FCases)) then
+    Result := FCases[AIndex]
+  else
+    Result := Default(TRHIVisualRegressionCaseResult);
+end;
+
+function TRHIVisualRegressionSuite.BuildSummaryReport: String;
+var
+  I: Integer;
+  StatusStr: String;
+begin
+  Result := Format('RHI Visual Regression Suite (%d/%d passed, worst RMSE=%.5f):',
+    [GetPassedCount, Length(FCases), GetWorstRMSE]) + LineEnding;
+  for I := 0 to High(FCases) do
+  begin
+    if FCases[I].Metrics.Passed then
+      StatusStr := 'PASS'
+    else
+      StatusStr := 'FAIL';
+    Result := Result + Format(
+      '  [%s] %s: RMSE=%.5f <= %.5f, PSNR=%.2f dB, MaxDelta=%d, DiffPixels=%d/%d (%.2f%%)',
+      [StatusStr,
+       FCases[I].CaseName,
+       FCases[I].Metrics.NormalizedRMSE,
+       FCases[I].MaxAllowedRMSE,
+       FCases[I].Metrics.PSNRdB,
+       FCases[I].Metrics.MaxChannelDelta,
+       FCases[I].Metrics.DiffPixelCount,
+       FCases[I].Metrics.TotalPixelCount,
+       FCases[I].Metrics.DiffPixelRatio * 100.0]) + LineEnding;
+  end;
+end;
+
 { TRHIBufferDesc }
 
 class function TRHIBufferDesc.Create(const ASize: PtrUInt;
@@ -1352,7 +1581,7 @@ class function TRHITextureDesc.Create2D(const AWidth, AHeight: Cardinal;
   const AFormat: TRHIPixelFormat; const AUsage: TRHITextureUsageFlags;
   const AMipLevels: Cardinal; const ASampleCount: Cardinal): TRHITextureDesc;
 begin
-  FillChar(Result, SizeOf(Result), 0);
+  Result := Default(TRHITextureDesc);
   Result.Dimension := td2D;
   Result.Width := AWidth;
   Result.Height := AHeight;
@@ -1535,7 +1764,7 @@ class function TRHIRenderingInfo.CreateColorDepth(const ARenderArea: TRectangle;
   const AClearColor: TCastleColor; const ADepthTexture: TRHITexture;
   const ADepthLoadOp: TRHIAttachmentLoadOp; const AClearDepth: Single): TRHIRenderingInfo;
 begin
-  FillChar(Result, SizeOf(Result), 0);
+  Result := Default(TRHIRenderingInfo);
   Result.RenderArea := ARenderArea;
   if AColorTexture <> nil then
   begin
@@ -1562,7 +1791,7 @@ class function TRHIRenderingInfo.CreateColorDepthMSAA(const ARenderArea: TRectan
   const AClearDepth: Single;
   const AResolveDepthTexture: TRHITexture): TRHIRenderingInfo;
 begin
-  FillChar(Result, SizeOf(Result), 0);
+  Result := Default(TRHIRenderingInfo);
   Result.RenderArea := ARenderArea;
   if AMSAAColorTexture <> nil then
   begin
@@ -1601,7 +1830,7 @@ class function TRHIRenderingInfo.CreateDepthOnly(const ARenderArea: TRectangle;
   const ADepthStoreOp: TRHIAttachmentStoreOp;
   const AClearDepth: Single): TRHIRenderingInfo;
 begin
-  FillChar(Result, SizeOf(Result), 0);
+  Result := Default(TRHIRenderingInfo);
   Result.RenderArea := ARenderArea;
   SetLength(Result.ColorAttachments, 0);
   Result.HasDepthAttachment := True;
@@ -1622,8 +1851,14 @@ begin
     FDevice.FResources.Add(Self);
 end;
 
+procedure TRHIResource.ReleaseDeviceResources;
+begin
+  { Subclasses override to release native GPU handles while FDevice is still valid. }
+end;
+
 destructor TRHIResource.Destroy;
 begin
+  ReleaseDeviceResources;
   if (FDevice <> nil) and (FDevice.FResources <> nil) then
     FDevice.FResources.Remove(Self);
   FDevice := nil;
@@ -1922,16 +2157,26 @@ begin
   FFrameIndex := 0;
 end;
 
-destructor TRHIDevice.Destroy;
+procedure TRHIDevice.ReleaseRemainingDeviceResources;
 var
   I: Integer;
+  Res: TRHIResource;
 begin
-  if FResources <> nil then
+  if FResources = nil then
+    Exit;
+  for I := FResources.Count - 1 downto 0 do
   begin
-    for I := FResources.Count - 1 downto 0 do
-      TRHIResource(FResources[I]).FDevice := nil;
-    FreeAndNil(FResources);
+    Res := TRHIResource(FResources[I]);
+    Res.ReleaseDeviceResources;
+    Res.FDevice := nil;
   end;
+  FResources.Clear;
+end;
+
+destructor TRHIDevice.Destroy;
+begin
+  ReleaseRemainingDeviceResources;
+  FreeAndNil(FResources);
   if FRHIDevice = Self then
     FRHIDevice := nil;
   inherited;
@@ -2261,7 +2506,7 @@ begin
   FIsCompiled := False;
   Idx := Length(FVirtualTextures);
   SetLength(FVirtualTextures, Idx + 1);
-  FillChar(FVirtualTextures[Idx], SizeOf(TVirtualTextureEntry), 0);
+  FVirtualTextures[Idx] := Default(TVirtualTextureEntry);
   FVirtualTextures[Idx].Name := AName;
   FVirtualTextures[Idx].Desc := ADesc;
   FVirtualTextures[Idx].Desc.DebugName := AName;
@@ -2286,7 +2531,7 @@ begin
   FIsCompiled := False;
   Idx := Length(FVirtualTextures);
   SetLength(FVirtualTextures, Idx + 1);
-  FillChar(FVirtualTextures[Idx], SizeOf(TVirtualTextureEntry), 0);
+  FVirtualTextures[Idx] := Default(TVirtualTextureEntry);
   FVirtualTextures[Idx].Name := AName;
   if ATexture <> nil then
     FVirtualTextures[Idx].Desc := ATexture.Desc;
@@ -2687,7 +2932,7 @@ begin
 
           ChosenSlot := Length(FTransientPool);
           SetLength(FTransientPool, ChosenSlot + 1);
-          FillChar(FTransientPool[ChosenSlot], SizeOf(TTransientPoolSlot), 0);
+          FTransientPool[ChosenSlot] := Default(TTransientPoolSlot);
           FTransientPool[ChosenSlot].Desc := FVirtualTextures[H].Desc;
           FTransientPool[ChosenSlot].CarrierCapacityBytes := CarrierBytes;
           if FDevice <> nil then
@@ -2901,7 +3146,7 @@ begin
     HasAttachments := False;
     if (ACmd <> nil) and (Pass.FPassType = rgptGraphics) and (Length(Pass.FTextureWrites) > 0) then
     begin
-      FillChar(RenderInfo, SizeOf(RenderInfo), 0);
+      RenderInfo := Default(TRHIRenderingInfo);
       ColorCount := 0;
       TargetW := 0;
       TargetH := 0;
