@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -820,6 +820,8 @@ type
       MenuTreeViewItemPlaytestGauntlet: TMenuItem;
       ButtonMotionMatching: TSpeedButton;
       MenuTreeViewItemMotionMatching: TMenuItem;
+      ButtonMassEntity: TSpeedButton;
+      MenuTreeViewItemMassEntity: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1337,6 +1339,8 @@ type
     procedure MenuTreeViewItemPlaytestGauntletClick(Sender: TObject);
     procedure ButtonMotionMatchingClick(Sender: TObject);
     procedure MenuTreeViewItemMotionMatchingClick(Sender: TObject);
+    procedure ButtonMassEntityClick(Sender: TObject);
+    procedure MenuTreeViewItemMassEntityClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2815,6 +2819,7 @@ type
     procedure ShowGeometryScriptDialog;
     procedure ShowPlaytestGauntletDialog;
     procedure ShowMotionMatchingDialog;
+    procedure ShowMassEntityDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -2836,7 +2841,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7481,6 +7486,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonMotionMatching,
       PanelMiddleTop.GetControlIndex(ButtonPlaytestGauntlet) + 1);
 
+  ButtonMassEntity := TSpeedButton.Create(Self);
+  ButtonMassEntity.Caption := 'MassECS';
+  ButtonMassEntity.Hint := 'Open MassEntity Data-Oriented SoA Crowd & Flow-Field Studio.' + NL +
+    'Simulate 1,000+ SoA crowd entities with O(1) spatial hash separation, Dijkstra flow fields & 4-tier LODs.';
+  ButtonMassEntity.ShowHint := true;
+  ButtonMassEntity.AutoSize := true;
+  ButtonMassEntity.Constraints.MinHeight := 33;
+  ButtonMassEntity.Constraints.MinWidth := 62;
+  ButtonMassEntity.BorderSpacing.Left := 2;
+  ButtonMassEntity.OnClick := @ButtonMassEntityClick;
+  ButtonMassEntity.Parent := PanelMiddleTop;
+  if ButtonMotionMatching.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonMassEntity,
+      PanelMiddleTop.GetControlIndex(ButtonMotionMatching) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10540,6 +10560,11 @@ begin
   MenuTreeViewItemMotionMatching.Caption := 'Motion Matching, Pose Search && Inertialization Studio...';
   MenuTreeViewItemMotionMatching.OnClick := @MenuTreeViewItemMotionMatchingClick;
   MenuTreeView.Items.Add(MenuTreeViewItemMotionMatching);
+
+  MenuTreeViewItemMassEntity := TMenuItem.Create(Self);
+  MenuTreeViewItemMassEntity.Caption := 'MassEntity Data-Oriented SoA Crowd && Flow-Field Studio...';
+  MenuTreeViewItemMassEntity.OnClick := @MenuTreeViewItemMassEntityClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemMassEntity);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -15850,6 +15875,8 @@ var
         Suffix := Suffix + ' ' + TCastlePoseSearchDatabase(NodeObj).DatabaseSummaryBadge
       else if NodeObj is TCastleMotionMatchingBehavior then
         Suffix := Suffix + ' ' + TCastleMotionMatchingBehavior(NodeObj).MotionSummaryBadge
+      else if NodeObj is TCastleMassEntityManager then
+        Suffix := Suffix + ' ' + TCastleMassEntityManager(NodeObj).SwarmSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -56091,6 +56118,7 @@ begin
   else if SameText(AStudioId, 'geometry_script') then ShowGeometryScriptDialog
   else if SameText(AStudioId, 'playtest_gauntlet') then ShowPlaytestGauntletDialog
   else if SameText(AStudioId, 'motion_matching') then ShowMotionMatchingDialog
+  else if SameText(AStudioId, 'mass_entity') then ShowMassEntityDialog
   else
     Result := False;
 end;
@@ -56419,6 +56447,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemMotionMatchingClick(Sender: TObject);
 begin
   ShowMotionMatchingDialog;
+end;
+
+procedure TDesignFrame.ShowMassEntityDialog;
+var
+  Dlg: TMassEntityForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TMassEntityForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonMassEntityClick(Sender: TObject);
+begin
+  ShowMassEntityDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemMassEntityClick(Sender: TObject);
+begin
+  ShowMassEntityDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

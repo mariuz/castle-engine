@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="127">
+    <Units Count="129">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -717,6 +717,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormMotionMatching"/>
       </Unit126>
+      <Unit127>
+        <Filename Value="../common-code/toolmassentity.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMassEntity"/>
+      </Unit127>
+      <Unit128>
+        <Filename Value="code/formmassentity.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMassEntity"/>
+      </Unit128>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

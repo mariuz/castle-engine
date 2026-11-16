@@ -641,6 +641,7 @@ type
       MenuItemGeometryScript: TMenuItem;
       MenuItemPlaytestGauntlet: TMenuItem;
       MenuItemMotionMatching: TMenuItem;
+      MenuItemMassEntity: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -702,6 +703,7 @@ type
     procedure MenuItemGeometryScriptClick(Sender: TObject);
     procedure MenuItemPlaytestGauntletClick(Sender: TObject);
     procedure MenuItemMotionMatchingClick(Sender: TObject);
+    procedure MenuItemMassEntityClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2531,6 +2533,11 @@ begin
   MenuItemMotionMatching.Caption := 'Motion Matching, Pose Search Trajectory & Inertialization Studio...';
   MenuItemMotionMatching.OnClick := @MenuItemMotionMatchingClick;
   MenuItemDesign.Add(MenuItemMotionMatching);
+
+  MenuItemMassEntity := TMenuItem.Create(MenuItemDesign);
+  MenuItemMassEntity.Caption := 'MassEntity Data-Oriented SoA Crowd & Flow-Field Studio...';
+  MenuItemMassEntity.OnClick := @MenuItemMassEntityClick;
+  MenuItemDesign.Add(MenuItemMassEntity);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5753,6 +5760,12 @@ procedure TProjectForm.MenuItemMotionMatchingClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowMotionMatchingDialog;
+end;
+
+procedure TProjectForm.MenuItemMassEntityClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowMassEntityDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

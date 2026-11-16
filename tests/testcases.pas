@@ -154,6 +154,7 @@ uses
   TestToolGeometryScript,
   TestToolPlaytestGauntlet,
   TestToolMotionMatching,
+  TestToolMassEntity,
   TestCastleVulkanRHI;
 
 implementation

@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–327** across Horizons 1–7), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–328** across Horizons 1–7), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3622,6 +3622,29 @@ Matcher.StepMotionMatching(0.10);
 
 ---
 
+## 66BA. MassEntity Data-Oriented SoA Crowd Simulation, Spatial Hash & Flow-Field Studio (Phase 328)
+
+Castle Game Engine provides contiguous Structure-of-Arrays (SoA) crowd simulation, zero-allocation `O(1)` spatial-hash neighbor separation, Dijkstra obstacle flow fields, and 4-tier `MassRepresentation` LOD classification matching Unreal Engine 6.0+'s `UMassEntitySubsystem`:
+
+1. **MassEntity SoA Crowd Runtime (`src/scene/castlemassentity.pas`)**:
+   - `TCastleMassEntityManager` steps `1,000+` entities in flat SoA arrays (`StepSwarm`) using a `2048`-bucket spatial hash, 8-connected `32x32` `BakeGoalFlowField` obstacle avoidance, 4-tier distance LODs (`UpdateRepresentationLods`), and a single-draw-call `csTransient` batched `TTriangleSetNode` mesh.
+2. **MassEntity Crowd Studio (`TMassEntityForm` & `TMassEntityHelper`)**:
+   - Open via the top-bar **`MassECS`** button, Hierarchy context menu, or **`Design -> MassEntity Data-Oriented SoA Crowd & Flow-Field Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+Swarm := TMassEntityHelper.SpawnMassSwarmArenaDemo(Viewport, DesignOwner);
+Swarm.StepSwarm(0.05);
+Swarm.UpdateRepresentationLods(Viewport.Camera.WorldTranslation);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Custom Components](https://castle-engine.io/custom_components) · [UE MassEntity Overview](https://dev.epicgames.com/documentation/en-us/unreal-engine/overview-of-mass-entity-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Large-Scale 3D Scenes & Crowds (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3737,4 +3760,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolgeometryscript.pas`](../tests/code/testcases/testtoolgeometryscript.pas) (`TTestToolGeometryScript` — 2 tests)**: Verifies exact `4x` `gmkLinearSubdivide4x` (`48 -> 192` tris), `2x` `gmkSolidifyShell` (`192 -> 384` tris), non-destructive modifier stage disabling restoring exact baseline triangles & surface area, `csTransient`-clean JSON roundtrips, `ExpandLSystemString` rewriting, 3D yaw/pitch/roll crown spread, and `TropismY` phototropism vs. weeping gravitropism height response (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolplaytestgauntlet.pas`](../tests/code/testcases/testtoolplaytestgauntlet.pas) (`TTestToolPlaytestGauntlet` — 2 tests)**: Verifies `TPlaytestGauntletRunner.SpawnMultiSystemSmokeSandbox` & `RunSmokeTest` (`40` fixed steps across Vehicles, Blend2D/Montages, EQS, Inventory/GAS, and Quartz) passing all `6 / 6` invariant gates with exact non-destructive world coordinate restoration and valid JUnit XML export, verifies `SpawnKillZTrapActor` ungrounded Kill-Z fallthrough failure detection (`<failure>` XML emission), and verifies `TCastleMcpServer` `cge_list_studios` (`46` studios) & `cge_audit_world_readiness` JSON-RPC 2.0 tools (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmotionmatching.pas`](../tests/code/testcases/testtoolmotionmatching.pas) (`TTestToolMotionMatching` — 2 tests)**: Verifies `PredictSpringTrajectoryXZ` linear & exponential spring integration, `WorldVecXZToCharacterLocal` coordinate mapping, exact half-life critically-damped `EvaluateInertializationDecay` (`0.50` at `t = HalfLifeSec`), `ComputeStrideWarpScale` speed ratio & `[0.65..1.35]` clamping, k-NN Pose Search matching (`Idle`, steady `RunForward` with `ContinuingPoseBias`, sudden `180°` reversal matching `PlantPivot180` + Inertialization trigger, and `StrafeRight`), and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolmassentity.pas`](../tests/code/testcases/testtoolmassentity.pas) (`TTestToolMassEntity` — 2 tests)**: Verifies `TCastleMassEntityManager` `32x32` Dijkstra obstacle flow-field routing (`180` agents splitting cleanly around a `4.0m` obstacle circle with zero penetration and positive spatial-hash pairwise separation), `1,000`-entity SoA step throughput, 4-tier `UpdateRepresentationLods` (`High`/`Medium`/`Low`/`Culled` summing to `1,000`), and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 
