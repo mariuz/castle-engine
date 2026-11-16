@@ -148,6 +148,7 @@ uses
   TestToolEqsStudio,
   TestToolInventoryStudio,
   TestToolNetcodeStudio,
+  TestToolMetaSoundStudio,
   TestCastleVulkanRHI;
 
 implementation

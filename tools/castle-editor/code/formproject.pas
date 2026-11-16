@@ -635,6 +635,7 @@ type
       MenuItemEqsStudio: TMenuItem;
       MenuItemInventoryStudio: TMenuItem;
       MenuItemNetcodeStudio: TMenuItem;
+      MenuItemMetaSoundStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -690,6 +691,7 @@ type
     procedure MenuItemEqsStudioClick(Sender: TObject);
     procedure MenuItemInventoryStudioClick(Sender: TObject);
     procedure MenuItemNetcodeStudioClick(Sender: TObject);
+    procedure MenuItemMetaSoundStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2489,6 +2491,11 @@ begin
   MenuItemNetcodeStudio.Caption := 'Iris Netcode Replication, Relevancy & Hitbox Rewind Studio...';
   MenuItemNetcodeStudio.OnClick := @MenuItemNetcodeStudioClick;
   MenuItemDesign.Add(MenuItemNetcodeStudio);
+
+  MenuItemMetaSoundStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemMetaSoundStudio.Caption := 'MetaSound Procedural PCM Synth, Surface Footsteps & Quartz Studio...';
+  MenuItemMetaSoundStudio.OnClick := @MenuItemMetaSoundStudioClick;
+  MenuItemDesign.Add(MenuItemMetaSoundStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5675,6 +5682,12 @@ procedure TProjectForm.MenuItemNetcodeStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowNetcodeStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemMetaSoundStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowMetaSoundStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -808,6 +808,8 @@ type
       MenuTreeViewItemInventoryStudio: TMenuItem;
       ButtonNetcodeStudio: TSpeedButton;
       MenuTreeViewItemNetcodeStudio: TMenuItem;
+      ButtonMetaSoundStudio: TSpeedButton;
+      MenuTreeViewItemMetaSoundStudio: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1313,6 +1315,8 @@ type
     procedure MenuTreeViewItemInventoryStudioClick(Sender: TObject);
     procedure ButtonNetcodeStudioClick(Sender: TObject);
     procedure MenuTreeViewItemNetcodeStudioClick(Sender: TObject);
+    procedure ButtonMetaSoundStudioClick(Sender: TObject);
+    procedure MenuTreeViewItemMetaSoundStudioClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2785,6 +2789,7 @@ type
     procedure ShowEqsStudioDialog;
     procedure ShowInventoryStudioDialog;
     procedure ShowNetcodeStudioDialog;
+    procedure ShowMetaSoundStudioDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -2806,7 +2811,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7361,6 +7366,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonNetcodeStudio,
       PanelMiddleTop.GetControlIndex(ButtonInventoryStudio) + 1);
 
+  ButtonMetaSoundStudio := TSpeedButton.Create(Self);
+  ButtonMetaSoundStudio.Caption := 'MetaSnd';
+  ButtonMetaSoundStudio.Hint := 'Open MetaSound Procedural PCM Synth, Surface Footsteps & Quartz Music Studio.' + NL +
+    'Synthesize 16-bit WAV audio, detect Stone/Wood/Metal footsteps & quantize BPM stems.';
+  ButtonMetaSoundStudio.ShowHint := true;
+  ButtonMetaSoundStudio.AutoSize := true;
+  ButtonMetaSoundStudio.Constraints.MinHeight := 33;
+  ButtonMetaSoundStudio.Constraints.MinWidth := 62;
+  ButtonMetaSoundStudio.BorderSpacing.Left := 2;
+  ButtonMetaSoundStudio.OnClick := @ButtonMetaSoundStudioClick;
+  ButtonMetaSoundStudio.Parent := PanelMiddleTop;
+  if ButtonNetcodeStudio.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonMetaSoundStudio,
+      PanelMiddleTop.GetControlIndex(ButtonNetcodeStudio) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10390,6 +10410,11 @@ begin
   MenuTreeViewItemNetcodeStudio.Caption := 'Iris Netcode Replication && Hitbox Rewind Studio...';
   MenuTreeViewItemNetcodeStudio.OnClick := @MenuTreeViewItemNetcodeStudioClick;
   MenuTreeView.Items.Add(MenuTreeViewItemNetcodeStudio);
+
+  MenuTreeViewItemMetaSoundStudio := TMenuItem.Create(Self);
+  MenuTreeViewItemMetaSoundStudio.Caption := 'MetaSound Procedural PCM Synth && Quartz Music Studio...';
+  MenuTreeViewItemMetaSoundStudio.OnClick := @MenuTreeViewItemMetaSoundStudioClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemMetaSoundStudio);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -15678,6 +15703,12 @@ var
         Suffix := Suffix + ' ' + TCastleReplicatedBehavior(NodeObj).ReplicatedSummaryBadge
       else if NodeObj is TCastleNetReplicationManager then
         Suffix := Suffix + ' ' + TCastleNetReplicationManager(NodeObj).NetManagerSummaryBadge
+      else if NodeObj is TCastleMetaSoundSynth then
+        Suffix := Suffix + ' ' + TCastleMetaSoundSynth(NodeObj).SynthSummaryBadge
+      else if NodeObj is TCastleFootstepSurfaceBehavior then
+        Suffix := Suffix + ' ' + TCastleFootstepSurfaceBehavior(NodeObj).FootstepSummaryBadge
+      else if NodeObj is TCastleMusicStemDirector then
+        Suffix := Suffix + ' ' + TCastleMusicStemDirector(NodeObj).MusicSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -55913,6 +55944,7 @@ begin
   else if SameText(AStudioId, 'eqs_studio') then ShowEqsStudioDialog
   else if SameText(AStudioId, 'inventory_studio') then ShowInventoryStudioDialog
   else if SameText(AStudioId, 'netcode_studio') then ShowNetcodeStudioDialog
+  else if SameText(AStudioId, 'metasound_studio') then ShowMetaSoundStudioDialog
   else
     Result := False;
 end;
@@ -56079,6 +56111,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemNetcodeStudioClick(Sender: TObject);
 begin
   ShowNetcodeStudioDialog;
+end;
+
+procedure TDesignFrame.ShowMetaSoundStudioDialog;
+var
+  Dlg: TMetaSoundStudioForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TMetaSoundStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonMetaSoundStudioClick(Sender: TObject);
+begin
+  ShowMetaSoundStudioDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemMetaSoundStudioClick(Sender: TObject);
+begin
+  ShowMetaSoundStudioDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

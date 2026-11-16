@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–321** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–322** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3476,6 +3476,31 @@ Hit := Mgr.LagCompensatedRaycast(Viewport, DesignOwner, RayOrigin, RayDir, 0.15,
 
 ---
 
+## 66AU. MetaSound Procedural PCM Synth, Surface Footsteps & Quartz Music Studio (Phase 322)
+
+Castle Game Engine provides procedural 16-bit PCM waveform synthesis, downward-raycast surface footstep switching, and BPM bar/beat-quantized music stem crossfading matching Unreal Engine 6.0+'s MetaSounds and Quartz workflows:
+
+1. **MetaSound, Footsteps & Quartz Runtime (`src/scene/castlemetasound.pas`)**:
+   - `TCastleMetaSoundSynth` synthesizes oscillator + white-noise + RBJ Biquad low-pass + ADSR envelopes directly into valid 16-bit RIFF/WAVE streams (`WriteRiffWavToStream`).
+   - `TCastleFootstepSurfaceBehavior` classifies `Stone` / `Wood` / `Grass` / `Water` / `Metal` surfaces beneath characters via `World.WorldRay`.
+   - `TCastleMusicStemDirector` quantizes `Explore` / `Tension` / `Combat` / `Boss` stem transitions onto `mqbNextBeat` or `mqbNextBar` boundaries.
+2. **MetaSound & Quartz Studio (`TMetaSoundStudioForm` & `TMetaSoundStudioHelper`)**:
+   - Open via the top-bar **`MetaSnd`** button, Hierarchy context menu, or **`Design -> MetaSound Procedural PCM Synth, Surface Footsteps & Quartz Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TMetaSoundStudioHelper.SpawnAudioPlaygroundDemo(Viewport, DesignOwner, Synth, Walker, Foot, MusicDir);
+Synth.WriteRiffWavToStream(WavMemoryStream);
+MusicDir.RequestMusicState(2); // Queues Combat stem for next bar downbeat
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Sound Engine](https://castle-engine.io/sound) · [UE MetaSounds](https://dev.epicgames.com/documentation/en-us/unreal-engine/metasounds-in-unreal-engine) · [UE Quartz Music Clock](https://dev.epicgames.com/documentation/en-us/unreal-engine/quartz-overview-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Sound & Spatial Audio (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp) · [CGE 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3585,4 +3610,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems inclu
 - **[`tests/code/testcases/testtooleqsstudio.pas`](../tests/code/testcases/testtooleqsstudio.pas) (`TTestToolEqsStudio` — 2 tests)**: Verifies `epTakeCoverFromThreat` `WorldRay` cover occlusion behind `CoverWall`, unwalkable `3.0m` wall-top candidate rejection, `epSniperLineOfSightVantage` `2.8m` high-ground balcony selection, `epFlankRearSurround` $180^\circ$ rear-hemisphere flank scoring & `AutoMoveToBestSpot` steering, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolinventorystudio.pas`](../tests/code/testcases/testtoolinventorystudio.pas) (`TTestToolInventoryStudio` — 2 tests)**: Verifies stack merging, atomic `MaxCarryWeightKg` encumbrance rejection, `CraftSunfireBlade` ingredient consumption & minting, `EquipItemFromBag`/`UnequipSlot` live `TCastleAbilitySystemBehavior` `AttackPower` (`25 -> 60 -> 25`) & `Equipped.Weapon.Sunfire` tag sync, `ConfigJson` roundtrips, and `TCastleLootTable` seeded determinism + `LegendaryPityThreshold` guarantee (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolnetcodestudio.pas`](../tests/code/testcases/testtoolnetcodestudio.pas) (`TTestToolNetcodeStudio` — 2 tests)**: Verifies `NetCullDistance` spatial culling (`0` packets at `120m`) vs. `AlwaysRelevant` override, tight `18 B/tick` starvation-protected priority round-robin, jitter-buffered client `EvaluateClientInterpolatedPose`, server `LagCompensatedRaycast` confirmed hit at rewound `X = 4.20m` vs. unrewound miss at `X = 6.00m`, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolmetasoundstudio.pas`](../tests/code/testcases/testtoolmetasoundstudio.pas) (`TTestToolMetaSoundStudio` — 2 tests)**: Verifies `EvaluateAdsrEnvelope`, RBJ 2-pole Biquad low-pass RMS attenuation (`240 Hz` vs. `9500 Hz`), valid 44-byte RIFF/WAVE 16-bit PCM stream export, downward `WorldRay` `Stone`/`Wood`/`Metal` footstep surface classification, `120 BPM` `mqbNextBar` quantized music stem transition & crossfade, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

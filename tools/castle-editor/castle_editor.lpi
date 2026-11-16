@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="115">
+    <Units Count="117">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -657,6 +657,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormNetcodeStudio"/>
       </Unit114>
+      <Unit115>
+        <Filename Value="../common-code/toolmetasoundstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolMetaSoundStudio"/>
+      </Unit115>
+      <Unit116>
+        <Filename Value="code/formmetasoundstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormMetaSoundStudio"/>
+      </Unit116>
     </Units>
   </ProjectOptions>
   <CompilerOptions>
