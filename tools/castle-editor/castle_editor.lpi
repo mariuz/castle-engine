@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="105">
+    <Units Count="107">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -607,6 +607,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormStudioHub"/>
       </Unit104>
+      <Unit105>
+        <Filename Value="../common-code/toolvehiclestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolVehicleStudio"/>
+      </Unit105>
+      <Unit106>
+        <Filename Value="code/formvehiclestudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormVehicleStudio"/>
+      </Unit106>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

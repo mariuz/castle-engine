@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -798,6 +798,8 @@ type
       MenuTreeViewItemSaveReplay: TMenuItem;
       ButtonStudioHub: TSpeedButton;
       MenuTreeViewItemStudioHub: TMenuItem;
+      ButtonVehicleStudio: TSpeedButton;
+      MenuTreeViewItemVehicleStudio: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1293,6 +1295,8 @@ type
     procedure MenuTreeViewItemSaveReplayClick(Sender: TObject);
     procedure ButtonStudioHubClick(Sender: TObject);
     procedure MenuTreeViewItemStudioHubClick(Sender: TObject);
+    procedure ButtonVehicleStudioClick(Sender: TObject);
+    procedure MenuTreeViewItemVehicleStudioClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2760,6 +2764,7 @@ type
     procedure ShowUtilityAiDialog;
     procedure ShowSaveReplayDialog;
     procedure ShowStudioHubDialog;
+    procedure ShowVehicleStudioDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -2781,7 +2786,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7261,6 +7266,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonSaveReplay,
       PanelMiddleTop.GetControlIndex(ButtonUtilityAi) + 1);
 
+  ButtonVehicleStudio := TSpeedButton.Create(Self);
+  ButtonVehicleStudio.Caption := 'Vehicle';
+  ButtonVehicleStudio.Hint := 'Open Chaos Wheeled Vehicle, Raycast Suspension & Drivetrain Studio.' + NL +
+    'Tune 4-wheel spring-damper suspension, Ackermann steering, multi-gear torque & Pacejka drift.';
+  ButtonVehicleStudio.ShowHint := true;
+  ButtonVehicleStudio.AutoSize := true;
+  ButtonVehicleStudio.Constraints.MinHeight := 33;
+  ButtonVehicleStudio.Constraints.MinWidth := 56;
+  ButtonVehicleStudio.BorderSpacing.Left := 2;
+  ButtonVehicleStudio.OnClick := @ButtonVehicleStudioClick;
+  ButtonVehicleStudio.Parent := PanelMiddleTop;
+  if ButtonSaveReplay.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonVehicleStudio,
+      PanelMiddleTop.GetControlIndex(ButtonSaveReplay) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10265,6 +10285,11 @@ begin
   MenuTreeViewItemStudioHub.Caption := 'Unified Editor Studio Hub && World Readiness Dashboard...';
   MenuTreeViewItemStudioHub.OnClick := @MenuTreeViewItemStudioHubClick;
   MenuTreeView.Items.Add(MenuTreeViewItemStudioHub);
+
+  MenuTreeViewItemVehicleStudio := TMenuItem.Create(Self);
+  MenuTreeViewItemVehicleStudio.Caption := 'Chaos Wheeled Vehicle, Suspension && Drivetrain Studio...';
+  MenuTreeViewItemVehicleStudio.OnClick := @MenuTreeViewItemVehicleStudioClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemVehicleStudio);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -15537,6 +15562,8 @@ var
         Suffix := Suffix + ' ' + TCastleSaveSlotManager(NodeObj).SaveSummaryBadge
       else if NodeObj is TCastleReplayRecorder then
         Suffix := Suffix + ' ' + TCastleReplayRecorder(NodeObj).ReplaySummaryBadge
+      else if NodeObj is TCastleWheeledVehicle then
+        Suffix := Suffix + ' ' + TCastleWheeledVehicle(NodeObj).VehicleSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -55767,6 +55794,7 @@ begin
   else if SameText(AStudioId, 'asset_graph') then ShowAssetGraphDialog
   else if SameText(AStudioId, 'localization') then ShowLocalizationDialog
   else if SameText(AStudioId, 'responsive_sim') then ShowResponsiveSimDialog
+  else if SameText(AStudioId, 'vehicle_studio') then ShowVehicleStudioDialog
   else
     Result := False;
 end;
@@ -55798,6 +55826,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemStudioHubClick(Sender: TObject);
 begin
   ShowStudioHubDialog;
+end;
+
+procedure TDesignFrame.ShowVehicleStudioDialog;
+var
+  Dlg: TVehicleStudioForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TVehicleStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonVehicleStudioClick(Sender: TObject);
+begin
+  ShowVehicleStudioDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemVehicleStudioClick(Sender: TObject);
+begin
+  ShowVehicleStudioDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

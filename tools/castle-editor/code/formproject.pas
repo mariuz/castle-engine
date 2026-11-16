@@ -630,6 +630,7 @@ type
       MenuItemUtilityAi: TMenuItem;
       MenuItemSaveReplay: TMenuItem;
       MenuItemStudioHub: TMenuItem;
+      MenuItemVehicleStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -680,6 +681,7 @@ type
     procedure MenuItemUtilityAiClick(Sender: TObject);
     procedure MenuItemSaveReplayClick(Sender: TObject);
     procedure MenuItemStudioHubClick(Sender: TObject);
+    procedure MenuItemVehicleStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2454,6 +2456,11 @@ begin
   MenuItemSaveReplay.Caption := 'SaveGame Slot Manager, World Checkpoints & Replay Scrub Studio...';
   MenuItemSaveReplay.OnClick := @MenuItemSaveReplayClick;
   MenuItemDesign.Add(MenuItemSaveReplay);
+
+  MenuItemVehicleStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemVehicleStudio.Caption := 'Chaos Wheeled Vehicle, Suspension & Drivetrain Studio...';
+  MenuItemVehicleStudio.OnClick := @MenuItemVehicleStudioClick;
+  MenuItemDesign.Add(MenuItemVehicleStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5610,6 +5617,12 @@ procedure TProjectForm.MenuItemStudioHubClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowStudioHubDialog;
+end;
+
+procedure TProjectForm.MenuItemVehicleStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowVehicleStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

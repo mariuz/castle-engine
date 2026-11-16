@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–316** across Horizons 1–5), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–317** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3355,6 +3355,31 @@ Health := TStudioHubManager.AuditEntireDesign(Viewport, DesignOwner);
 
 ---
 
+## 66AP. Chaos Wheeled Vehicle, Raycast Spring-Damper Suspension, Ackermann Steering & Drivetrain Studio (Phase 317)
+
+Castle Game Engine provides 4-wheel raycast spring-damper suspension, exact Ackermann inner/outer steering geometry, multi-gear torque-curve drivetrains, and Pacejka tire slip physics matching Unreal Engine 6.0+'s Chaos Vehicles workflow:
+
+1. **Wheeled Vehicle Runtime (`src/scene/castlevehiclesystem.pas`)**:
+   - `TCastleWheeledVehicle` simulates 4 downward `World.WorldRay` suspension struts (`SpringStiffness`, `SpringDamping`, `SuspensionRestLength`, `AntiRollStiffness`), exact Ackermann steering (`ComputeAckermannWheelAnglesDeg`), 6-speed automatic/manual gearboxes (`EvaluateEngineTorqueCurveNm`), `vdmRearWheelDrive` / `vdmFrontWheelDrive` / `vdmAllWheelDrive` power splits, and Pacejka Magic Formula lateral slip + handbrake drift (`EvaluatePacejkaLateralForceN`) across 3 presets (`vpRallySportsCar`, `vpOffroadMonsterTruck`, `vpArmoredReconBuggy`).
+2. **Vehicle Studio (`TVehicleStudioForm` & `TVehicleStudioHelper`)**:
+   - Open via the top-bar **`Vehicle`** button, Hierarchy context menu, or **`Design -> Chaos Wheeled Vehicle, Suspension & Drivetrain Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TVehicleStudioHelper.SpawnTestTrackFloorAndRamp(Viewport, DesignOwner);
+Car := TVehicleStudioHelper.SpawnVehicleInDesign(Viewport, DesignOwner, vpRallySportsCar, TVector3.Zero);
+Car.ThrottleInput := 1.0;
+Car.SteerInput := 0.35;
+Car.StepVehicle(0.25);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Physics & Raycasting](https://castle-engine.io/physics) · [UE Chaos Vehicles](https://dev.epicgames.com/documentation/en-us/unreal-engine/vehicles-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — 3D Physics & Vehicles (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Physics Components](https://castle-engine.io/images/thumb_const_height_size/platformer_physics_components.webp) · [CGE 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3459,4 +3484,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems inclu
 - **[`tests/code/testcases/testtoolutilityai.pas`](../tests/code/testcases/testtoolutilityai.pas) (`TTestToolUtilityAi` — 2 tests)**: Verifies `EvaluateUtilityCurve` (`LinearDeficit`, `QuadraticUrgency`, `LogisticSigmoid`, `InverseAbundance`), single-slot `Campfire` contention (`AgentA` claims `Campfire`, `AgentB` falls back to `Tavern`), need restoration & slot release, `ConfigJson` & `csTransient`-clean JSON roundtrips, and RVO-style neighbor crowd separation (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolsavereplay.pas`](../tests/code/testcases/testtoolsavereplay.pas) (`TTestToolSaveReplay` — 2 tests)**: Verifies `TCastleSaveSlotManager` multi-system world snapshot capture & restoration across `TCastleTransform` poses/visibility, `TCastleAbilitySystemBehavior` HP/Mana/tags/cooldowns, and `TCastleQuestTracker` state + `v1 -> v2` schema migration (`PlayerGold -> Economy.Gold`), and verifies `TCastleReplayRecorder` keyframe/cue recording, `ExportReplayJson`/`ImportReplayJson`, midpoint quaternion `SLerp` pose scrubbing, and `OnCueFired` event playback (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolstudiohub.pas`](../tests/code/testcases/testtoolstudiohub.pas) (`TTestToolStudioHub` — 2 tests)**: Verifies all 36 Horizon 2–5 studios across 6 `TStudioHubCategory` buckets + multi-token case-insensitive keyword/phase search filtering, and verifies `TStudioHubManager.AuditEntireDesign` detection and full 100/100 `A+ Ship-Ready` remediation across 6 cross-studio integration hazards (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolvehiclestudio.pas`](../tests/code/testcases/testtoolvehiclestudio.pas) (`TTestToolVehicleStudio` — 2 tests)**: Verifies exact Ackermann steering inner/outer cotangent invariant ($\cot\delta_{\text{outer}} - \cot\delta_{\text{inner}} = W / L$), engine torque curve peak & rev-limiter cutoff, 4-wheel `WorldRay` Hooke suspension equilibrium & raised-platform nose-up pitch, automatic multi-gear upshifting, handbrake rear slip amplification, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

@@ -143,6 +143,7 @@ uses
   TestToolUtilityAi,
   TestToolSaveReplay,
   TestToolStudioHub,
+  TestToolVehicleStudio,
   TestCastleVulkanRHI;
 
 implementation
