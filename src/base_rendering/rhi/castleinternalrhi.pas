@@ -679,6 +679,10 @@ type
       (e.g. for Vulkan 1.2 / VK_EXT_descriptor_indexing bindless texture arrays). }
     procedure BindTextureAtIndex(const Binding, ArrayElement: Cardinal;
       const Texture: TRHITexture; const Sampler: TRHISampler); virtual;
+    { Binds a specific 2D subresource slice (MipLevel, ArrayLayer) of a 2D, array, or cubemap texture. }
+    procedure BindTextureSubresource(const Binding: Cardinal;
+      const Texture: TRHITexture; const MipLevel, ArrayLayer: Cardinal;
+      const Sampler: TRHISampler = nil); virtual;
     { Commits pending binding updates to the underlying descriptor set. }
     procedure Update; virtual; abstract;
   end;
@@ -1959,6 +1963,13 @@ end;
 
 procedure TRHIDescriptorSet.BindTextureAtIndex(const Binding, ArrayElement: Cardinal;
   const Texture: TRHITexture; const Sampler: TRHISampler);
+begin
+  BindTexture(Binding, Texture, Sampler);
+end;
+
+procedure TRHIDescriptorSet.BindTextureSubresource(const Binding: Cardinal;
+  const Texture: TRHITexture; const MipLevel, ArrayLayer: Cardinal;
+  const Sampler: TRHISampler);
 begin
   BindTexture(Binding, Texture, Sampler);
 end;

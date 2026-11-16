@@ -3328,7 +3328,7 @@ begin
     '#version 450' + NL +
     Format('layout(local_size_x = %d, local_size_y = %d, local_size_z = 1) in;', [LocalSizeX, LocalSizeY]) + NL +
     NL +
-    'layout(set = 0, binding = 0, rgba16f) uniform writeonly image2D u_BrdfLutImage;' + NL +
+    'layout(set = 0, binding = 0, rgba8) uniform writeonly image2D u_BrdfLutImage;' + NL +
     NL +
     'layout(push_constant) uniform CastleIBLBrdfLutPushConstants {' + NL +
     '  uvec2 u_LutSize;' + NL +

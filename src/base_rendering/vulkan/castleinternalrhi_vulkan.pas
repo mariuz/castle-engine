@@ -228,6 +228,9 @@ type
       const Sampler: TRHISampler); override;
     procedure BindTextureAtIndex(const Binding, ArrayElement: Cardinal;
       const Texture: TRHITexture; const Sampler: TRHISampler); override;
+    procedure BindTextureSubresource(const Binding: Cardinal;
+      const Texture: TRHITexture; const MipLevel, ArrayLayer: Cardinal;
+      const Sampler: TRHISampler = nil); override;
     procedure Update; override;
 
     property Handle: VkDescriptorSet read FHandle;
@@ -1133,10 +1136,23 @@ type
     FPrefilteredEnvMipLevels: Cardinal;
     FPrefilteredEnvBaseSize: Cardinal;
     FPrefilteredEnvFaceColors: array[0..5] of array of TVector3;
+    FIrradianceEnvCubemap: TVulkanRHITexture;
+    FIrradianceEnvSize: Cardinal;
+    FInternalSourceCubemap: TVulkanRHITexture;
+    FEnvConvolveSampler: TRHISampler;
+    FEnvConvolveLayout: TRHIDescriptorSetLayout;
+    FPrefilterComputeShader: TRHIShaderModule;
+    FPrefilterComputePipeline: TRHIComputePipeline;
+    FIrradianceComputeShader: TRHIShaderModule;
+    FIrradianceComputePipeline: TRHIComputePipeline;
+    FPrefilterDescSets: array of TRHIDescriptorSet;
+    FIrradianceDescSets: array of TRHIDescriptorSet;
     FIrradianceSH9: TCastleSH9Coefficients;
     FTotalBrdfLutDispatches: Cardinal;
     FTotalEnvPrefilterPasses: Cardinal;
+    FTotalIrradianceDispatches: Cardinal;
     procedure EnsureBrdfLutPipelineCreated;
+    procedure EnsureEnvConvolvePipelinesCreated;
   public
     constructor Create(const ADevice: TVulkanRHIDevice);
     destructor Destroy; override;
@@ -1177,6 +1193,16 @@ type
     { Evaluates diffuse Lambertian irradiance for AWorldNormal from the precomputed L2 SH9 coefficients. }
     function EvaluateIrradianceSH(const AWorldNormal: TVector3): TVector3;
 
+    { Convolves an arbitrary GPU cubemap texture (ASourceEnvCubemap) on the GPU into:
+      1. Specular GGX importance-sampled mipmapped PrefilteredEnvCubemap (APrefilterBaseSize, all mip levels x 6 faces)
+      2. Cosine-weighted Lambertian diffuse IrradianceEnvCubemap (AIrradianceSize x 6 faces)
+      3. 2D Split-Sum GGX BRDF Integration LUT (if not already generated). }
+    function GenerateEnvironmentIBLFromCubemap(const ACmd: TRHICommandList;
+      const ASourceEnvCubemap: TRHITexture;
+      const APrefilterBaseSize: Cardinal = 16;
+      const AIrradianceSize: Cardinal = 8;
+      const ASampleCount: Cardinal = 32): TVulkanRHITexture;
+
     property BrdfLutTexture: TVulkanRHITexture read FBrdfLutTexture;
     property BrdfLutSampler: TRHISampler read FBrdfLutSampler;
     property BrdfLutComputePipeline: TRHIComputePipeline read FBrdfLutComputePipeline;
@@ -1184,9 +1210,14 @@ type
     property PrefilteredEnvCubemap: TVulkanRHITexture read FPrefilteredEnvCubemap;
     property PrefilteredEnvMipLevels: Cardinal read FPrefilteredEnvMipLevels;
     property PrefilteredEnvBaseSize: Cardinal read FPrefilteredEnvBaseSize;
+    property IrradianceEnvCubemap: TVulkanRHITexture read FIrradianceEnvCubemap;
+    property IrradianceEnvSize: Cardinal read FIrradianceEnvSize;
+    property PrefilterComputePipeline: TRHIComputePipeline read FPrefilterComputePipeline;
+    property IrradianceComputePipeline: TRHIComputePipeline read FIrradianceComputePipeline;
     property IrradianceSH9: TCastleSH9Coefficients read FIrradianceSH9;
     property TotalBrdfLutDispatches: Cardinal read FTotalBrdfLutDispatches;
     property TotalEnvPrefilterPasses: Cardinal read FTotalEnvPrefilterPasses;
+    property TotalIrradianceDispatches: Cardinal read FTotalIrradianceDispatches;
   end;
 
   { -------------------------------------------------------------------------- }
@@ -4166,10 +4197,13 @@ type
     FPrewarm2DFragmentShader: TRHIShaderModule;
     FDefaultSampler: TVulkanRHISampler;
     FDefaultShadowSampler: TVulkanRHISampler;
+    FDefaultBrdfLutSampler: TVulkanRHISampler;
     FDefaultWhiteTexture: TVulkanRHITexture;
     FDefaultBlackTexture: TVulkanRHITexture;
     FDefaultFlatNormalTexture: TVulkanRHITexture;
     FDefaultShadowDepthTexture: TVulkanRHITexture;
+    FDefaultBrdfLutTexture: TVulkanRHITexture;
+    FDefaultWhiteCubeTexture: TVulkanRHITexture;
     FDebugObjectsNamedCount: Cardinal;
     FLastNamedDebugObject: String;
 
@@ -4462,6 +4496,8 @@ type
 
     function GrabTextureImage(const SourceTexture: TRHITexture;
       const ReadArea: TRectangle): TRGBAlphaImage; overload; override;
+    function GrabTextureSubresourceImage(const SourceTexture: TRHITexture;
+      const AMipLevel, AArrayLayer: Cardinal): TRGBAlphaImage;
     { Reads back any color/HDR/float/depth texture (pfRGBA16_Float, pfRGBA32_Float,
       pfRG16_Float, pfR16_Float, pfR32_Float, pfRGBA8_UNorm, pfBGRA8_UNorm, pfD32_Float)
       into a full-precision TRGBAlphaFloatImage without [0..1] 8-bit clamping. }
@@ -4487,10 +4523,13 @@ type
     procedure InsertQueueDebugLabel(const ALabelName: String; const AColor: TCastleColor);
     function GetDefaultSampler: TVulkanRHISampler;
     function GetDefaultShadowSampler: TVulkanRHISampler;
+    function GetDefaultBrdfLutSampler: TVulkanRHISampler;
     function GetDefaultWhiteTexture: TVulkanRHITexture;
     function GetDefaultBlackTexture: TVulkanRHITexture;
     function GetDefaultFlatNormalTexture: TVulkanRHITexture;
     function GetDefaultShadowDepthTexture: TVulkanRHITexture;
+    function GetDefaultBrdfLutTexture: TVulkanRHITexture;
+    function GetDefaultWhiteCubeTexture: TVulkanRHITexture;
 
     function GetInformationString: String; override;
     function GetInformationStringSummary: String; override;
@@ -7114,7 +7153,8 @@ begin
   if FDesc.MipLevels <= 1 then
     Exit;
 
-  if ActiveCommandList <> nil then
+  if (ActiveCommandList <> nil) and
+     not ((VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and ActiveCommandList.IsRendering) then
   begin
     ActiveCommandList.GenerateMipmaps(Self);
     Exit;
@@ -7126,8 +7166,7 @@ begin
 
   if (VulkanDevice <> nil) and (VulkanDevice.Handle <> nil) and Assigned(vkCmdBlitImage) then
   begin
-    if VulkanDevice.StagingUploader <> nil then
-      VulkanDevice.StagingUploader.FlushPendingUploads(nil);
+    VulkanDevice.FlushStagingUploads(nil);
     Cmd := VulkanDevice.BeginSingleTimeCommands;
     RecordVkMipmapBlits(Cmd);
     VulkanDevice.EndSingleTimeCommands(Cmd);
@@ -7388,6 +7427,7 @@ begin
     end;
 
     if (VulkanDevice <> nil) and (VulkanDevice.StagingUploader <> nil) and
+       not ((VulkanDevice.Handle <> nil) and (ImgDepth > 1)) and
        not ((VulkanDevice.Handle <> nil) and (ActiveCommandList <> nil) and ActiveCommandList.IsRendering) then
     begin
       VulkanDevice.StagingUploader.EnqueueImageUpload(
@@ -7879,6 +7919,68 @@ begin
   FPendingWrites[WriteIdx].dstSet := FHandle;
   FPendingWrites[WriteIdx].dstBinding := Binding;
   FPendingWrites[WriteIdx].dstArrayElement := ArrayElement;
+  FPendingWrites[WriteIdx].descriptorCount := 1;
+  FPendingWrites[WriteIdx].descriptorType := VkDescType;
+end;
+
+procedure TVulkanRHIDescriptorSet.BindTextureSubresource(const Binding: Cardinal;
+  const Texture: TRHITexture; const MipLevel, ArrayLayer: Cardinal;
+  const Sampler: TRHISampler);
+var
+  Idx, WriteIdx: Integer;
+  DeclType: TRHIDescriptorType;
+  VkDescType: VkDescriptorType;
+  VkTex: TVulkanRHITexture;
+begin
+  if Texture = nil then Exit;
+  VkTex := Texture as TVulkanRHITexture;
+  FLastBoundTexture := Texture;
+  FLastBoundSampler := Sampler;
+
+  DeclType := dtCombinedImageSampler;
+  if FLayout <> nil then
+    FLayout.TryGetBindingType(Binding, DeclType);
+
+  Idx := Length(FImageInfos);
+  SetLength(FImageInfos, Idx + 1);
+  FillChar(FImageInfos[Idx], SizeOf(VkDescriptorImageInfo), 0);
+  FImageInfos[Idx].imageView := VkTex.GetSubresourceImageView(MipLevel, ArrayLayer);
+
+  case DeclType of
+    dtStorageImage:
+      begin
+        FImageInfos[Idx].sampler := VK_NULL_HANDLE;
+        FImageInfos[Idx].imageLayout := VK_IMAGE_LAYOUT_GENERAL;
+        VkDescType := VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+      end;
+    dtSampledImage:
+      begin
+        FImageInfos[Idx].sampler := VK_NULL_HANDLE;
+        FImageInfos[Idx].imageLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkDescType := VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+      end;
+    else
+      begin
+        if Sampler <> nil then
+          FImageInfos[Idx].sampler := (Sampler as TVulkanRHISampler).Handle
+        else if VulkanDevice <> nil then
+          FImageInfos[Idx].sampler := VulkanDevice.GetDefaultSampler.Handle
+        else
+          FImageInfos[Idx].sampler := VK_NULL_HANDLE;
+        FImageInfos[Idx].imageLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkDescType := VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      end;
+  end;
+
+  WriteIdx := Length(FPendingWrites);
+  SetLength(FPendingWrites, WriteIdx + 1);
+  SetLength(FPendingWriteInfoIndices, WriteIdx + 1);
+  FPendingWriteInfoIndices[WriteIdx] := Idx;
+  FillChar(FPendingWrites[WriteIdx], SizeOf(VkWriteDescriptorSet), 0);
+  FPendingWrites[WriteIdx].sType := VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  FPendingWrites[WriteIdx].dstSet := FHandle;
+  FPendingWrites[WriteIdx].dstBinding := Binding;
+  FPendingWrites[WriteIdx].dstArrayElement := 0;
   FPendingWrites[WriteIdx].descriptorCount := 1;
   FPendingWrites[WriteIdx].descriptorType := VkDescType;
 end;
@@ -13165,6 +13267,13 @@ type
     Reserved: Cardinal;
   end;
 
+  TCastleIBLCubemapPassPushConstants = packed record
+    MipSize: Cardinal;
+    SampleCount: Cardinal;
+    Roughness: Single;
+    FaceIndex: Cardinal;
+  end;
+
 const
   CubemapFaceDirections: array[0..5] of TVector3 = (
     (X:  1.0; Y:  0.0; Z:  0.0), // +X
@@ -13183,17 +13292,31 @@ end;
 
 destructor TCastleVulkanIBLGenerator.Destroy;
 var
-  FaceIdx: Integer;
+  FaceIdx, I: Integer;
 begin
   for FaceIdx := 0 to 5 do
     SetLength(FPrefilteredEnvFaceColors[FaceIdx], 0);
   SetLength(FBrdfLutData, 0);
+  for I := 0 to High(FPrefilterDescSets) do
+    FreeAndNil(FPrefilterDescSets[I]);
+  SetLength(FPrefilterDescSets, 0);
+  for I := 0 to High(FIrradianceDescSets) do
+    FreeAndNil(FIrradianceDescSets[I]);
+  SetLength(FIrradianceDescSets, 0);
   FBrdfLutComputePipeline := nil; { owned by FDevice.FComputePipelineMap }
+  FPrefilterComputePipeline := nil;
+  FIrradianceComputePipeline := nil;
+  FreeAndNil(FPrefilterComputeShader);
+  FreeAndNil(FIrradianceComputeShader);
+  FreeAndNil(FEnvConvolveLayout);
+  FreeAndNil(FEnvConvolveSampler);
   FreeAndNil(FBrdfLutComputeShader);
   FreeAndNil(FBrdfLutDescriptorSet);
   FreeAndNil(FBrdfLutDescriptorLayout);
   FreeAndNil(FBrdfLutSampler);
   FreeAndNil(FBrdfLutTexture);
+  FreeAndNil(FInternalSourceCubemap);
+  FreeAndNil(FIrradianceEnvCubemap);
   FreeAndNil(FPrefilteredEnvCubemap);
   inherited;
 end;
@@ -13315,6 +13438,168 @@ begin
   FBrdfLutComputePipeline := FDevice.GetOrCreateComputePipeline(CompDesc);
 end;
 
+procedure TCastleVulkanIBLGenerator.EnsureEnvConvolvePipelinesCreated;
+const
+  PrefilterComputeGLSL =
+    '/* IBLPrefilterEnvCompute */' + LineEnding +
+    '#version 450' + LineEnding +
+    'layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;' + LineEnding +
+    'layout(set = 0, binding = 0) uniform samplerCube u_SrcEnvCubemap;' + LineEnding +
+    'layout(set = 0, binding = 1, rgba8) uniform writeonly image2D u_DstCubemapFace;' + LineEnding +
+    'layout(push_constant) uniform CubemapConvolvePC {' + LineEnding +
+    '  uint MipSize;' + LineEnding +
+    '  uint SampleCount;' + LineEnding +
+    '  float Roughness;' + LineEnding +
+    '  uint FaceIndex;' + LineEnding +
+    '} pc;' + LineEnding +
+    'float RadicalInverse_VdC(uint bits) {' + LineEnding +
+    '  bits = (bits << 16u) | (bits >> 16u);' + LineEnding +
+    '  bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);' + LineEnding +
+    '  bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);' + LineEnding +
+    '  bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);' + LineEnding +
+    '  bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);' + LineEnding +
+    '  return float(bits) * 2.3283064365386963e-10;' + LineEnding +
+    '}' + LineEnding +
+    'vec3 CubemapFaceDir(uint faceIdx, float u, float v) {' + LineEnding +
+    '  if (faceIdx == 0u) return normalize(vec3( 1.0, -v, -u));' + LineEnding +
+    '  if (faceIdx == 1u) return normalize(vec3(-1.0, -v,  u));' + LineEnding +
+    '  if (faceIdx == 2u) return normalize(vec3( u,  1.0,  v));' + LineEnding +
+    '  if (faceIdx == 3u) return normalize(vec3( u, -1.0, -v));' + LineEnding +
+    '  if (faceIdx == 4u) return normalize(vec3( u, -v,  1.0));' + LineEnding +
+    '  return normalize(vec3(-u, -v, -1.0));' + LineEnding +
+    '}' + LineEnding +
+    'void main() {' + LineEnding +
+    '  uvec2 gid = gl_GlobalInvocationID.xy;' + LineEnding +
+    '  if (gid.x >= pc.MipSize || gid.y >= pc.MipSize) return;' + LineEnding +
+    '  float u = ((float(gid.x) + 0.5) / float(pc.MipSize)) * 2.0 - 1.0;' + LineEnding +
+    '  float v = ((float(gid.y) + 0.5) / float(pc.MipSize)) * 2.0 - 1.0;' + LineEnding +
+    '  vec3 N = CubemapFaceDir(pc.FaceIndex, u, v);' + LineEnding +
+    '  vec3 V = N;' + LineEnding +
+    '  vec3 up = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);' + LineEnding +
+    '  vec3 T = normalize(cross(up, N));' + LineEnding +
+    '  vec3 B = cross(N, T);' + LineEnding +
+    '  uint samples = max(pc.SampleCount, 8u);' + LineEnding +
+    '  float a = clamp(pc.Roughness, 0.0, 1.0);' + LineEnding +
+    '  float a2 = a * a * a * a;' + LineEnding +
+    '  vec3 prefiltered = vec3(0.0);' + LineEnding +
+    '  float totalWeight = 0.0;' + LineEnding +
+    '  for (uint i = 0u; i < samples; ++i) {' + LineEnding +
+    '    float xiX = float(i) / float(samples);' + LineEnding +
+    '    float xiY = RadicalInverse_VdC(i);' + LineEnding +
+    '    float phi = 6.28318530718 * xiX;' + LineEnding +
+    '    float cosTheta = sqrt((1.0 - xiY) / max(1.0 + (a2 - 1.0) * xiY, 1e-6));' + LineEnding +
+    '    float sinTheta = sqrt(max(1.0 - cosTheta * cosTheta, 0.0));' + LineEnding +
+    '    vec3 H = normalize(T * (cos(phi) * sinTheta) + B * (sin(phi) * sinTheta) + N * cosTheta);' + LineEnding +
+    '    vec3 L = normalize(2.0 * dot(V, H) * H - V);' + LineEnding +
+    '    float NdotL = max(dot(N, L), 0.0);' + LineEnding +
+    '    if (NdotL > 0.0) {' + LineEnding +
+    '      prefiltered += textureLod(u_SrcEnvCubemap, L, 0.0).rgb * NdotL;' + LineEnding +
+    '      totalWeight += NdotL;' + LineEnding +
+    '    }' + LineEnding +
+    '  }' + LineEnding +
+    '  prefiltered = prefiltered / max(totalWeight, 1e-5);' + LineEnding +
+    '  imageStore(u_DstCubemapFace, ivec2(gid), vec4(clamp(prefiltered, 0.0, 1.0), 1.0));' + LineEnding +
+    '}';
+  IrradianceComputeGLSL =
+    '/* IBLIrradianceEnvCompute */' + LineEnding +
+    '#version 450' + LineEnding +
+    'layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;' + LineEnding +
+    'layout(set = 0, binding = 0) uniform samplerCube u_SrcEnvCubemap;' + LineEnding +
+    'layout(set = 0, binding = 1, rgba8) uniform writeonly image2D u_DstCubemapFace;' + LineEnding +
+    'layout(push_constant) uniform CubemapConvolvePC {' + LineEnding +
+    '  uint MipSize;' + LineEnding +
+    '  uint SampleCount;' + LineEnding +
+    '  float Roughness;' + LineEnding +
+    '  uint FaceIndex;' + LineEnding +
+    '} pc;' + LineEnding +
+    'float RadicalInverse_VdC(uint bits) {' + LineEnding +
+    '  bits = (bits << 16u) | (bits >> 16u);' + LineEnding +
+    '  bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);' + LineEnding +
+    '  bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);' + LineEnding +
+    '  bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);' + LineEnding +
+    '  bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);' + LineEnding +
+    '  return float(bits) * 2.3283064365386963e-10;' + LineEnding +
+    '}' + LineEnding +
+    'vec3 CubemapFaceDir(uint faceIdx, float u, float v) {' + LineEnding +
+    '  if (faceIdx == 0u) return normalize(vec3( 1.0, -v, -u));' + LineEnding +
+    '  if (faceIdx == 1u) return normalize(vec3(-1.0, -v,  u));' + LineEnding +
+    '  if (faceIdx == 2u) return normalize(vec3( u,  1.0,  v));' + LineEnding +
+    '  if (faceIdx == 3u) return normalize(vec3( u, -1.0, -v));' + LineEnding +
+    '  if (faceIdx == 4u) return normalize(vec3( u, -v,  1.0));' + LineEnding +
+    '  return normalize(vec3(-u, -v, -1.0));' + LineEnding +
+    '}' + LineEnding +
+    'void main() {' + LineEnding +
+    '  uvec2 gid = gl_GlobalInvocationID.xy;' + LineEnding +
+    '  if (gid.x >= pc.MipSize || gid.y >= pc.MipSize) return;' + LineEnding +
+    '  float u = ((float(gid.x) + 0.5) / float(pc.MipSize)) * 2.0 - 1.0;' + LineEnding +
+    '  float v = ((float(gid.y) + 0.5) / float(pc.MipSize)) * 2.0 - 1.0;' + LineEnding +
+    '  vec3 N = CubemapFaceDir(pc.FaceIndex, u, v);' + LineEnding +
+    '  vec3 up = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);' + LineEnding +
+    '  vec3 T = normalize(cross(up, N));' + LineEnding +
+    '  vec3 B = cross(N, T);' + LineEnding +
+    '  uint samples = max(pc.SampleCount, 8u);' + LineEnding +
+    '  vec3 irradiance = vec3(0.0);' + LineEnding +
+    '  for (uint i = 0u; i < samples; ++i) {' + LineEnding +
+    '    float xiX = float(i) / float(samples);' + LineEnding +
+    '    float xiY = RadicalInverse_VdC(i);' + LineEnding +
+    '    float phi = 6.28318530718 * xiX;' + LineEnding +
+    '    float sinTheta = sqrt(max(xiY, 0.0));' + LineEnding +
+    '    float cosTheta = sqrt(max(1.0 - xiY, 0.0));' + LineEnding +
+    '    vec3 L = normalize(T * (cos(phi) * sinTheta) + B * (sin(phi) * sinTheta) + N * cosTheta);' + LineEnding +
+    '    irradiance += textureLod(u_SrcEnvCubemap, L, 0.0).rgb;' + LineEnding +
+    '  }' + LineEnding +
+    '  irradiance = irradiance / float(samples);' + LineEnding +
+    '  imageStore(u_DstCubemapFace, ivec2(gid), vec4(clamp(irradiance, 0.0, 1.0), 1.0));' + LineEnding +
+    '}';
+var
+  SamplerDesc: TRHISamplerDesc;
+  Bindings: array[0..1] of TRHIDescriptorBindingDesc;
+  CompDesc: TRHIComputePipelineDesc;
+begin
+  if (FDevice = nil) or (FPrefilterComputePipeline <> nil) then
+    Exit;
+
+  FillChar(SamplerDesc, SizeOf(SamplerDesc), 0);
+  SamplerDesc.MinFilter := sfLinear;
+  SamplerDesc.MagFilter := sfLinear;
+  SamplerDesc.MipFilter := sfLinear;
+  SamplerDesc.AddressModeU := amClampToEdge;
+  SamplerDesc.AddressModeV := amClampToEdge;
+  SamplerDesc.AddressModeW := amClampToEdge;
+  SamplerDesc.MaxAnisotropy := 1.0;
+  SamplerDesc.MaxLod := 1000.0;
+  FEnvConvolveSampler := FDevice.CreateSampler(SamplerDesc);
+
+  FillChar(Bindings, SizeOf(Bindings), 0);
+  Bindings[0].Binding := 0;
+  Bindings[0].DescriptorType := dtCombinedImageSampler;
+  Bindings[0].Count := 1;
+  Bindings[0].StageFlags := [ssCompute];
+  Bindings[1].Binding := 1;
+  Bindings[1].DescriptorType := dtStorageImage;
+  Bindings[1].Count := 1;
+  Bindings[1].StageFlags := [ssCompute];
+  FEnvConvolveLayout := FDevice.CreateDescriptorSetLayout(Bindings);
+
+  FPrefilterComputeShader := FDevice.CreateShaderModuleFromGLSL(
+    ssCompute, PrefilterComputeGLSL, 'IBLPrefilterEnvComputeCS');
+  FIrradianceComputeShader := FDevice.CreateShaderModuleFromGLSL(
+    ssCompute, IrradianceComputeGLSL, 'IBLIrradianceEnvComputeCS');
+
+  CompDesc := Default(TRHIComputePipelineDesc);
+  CompDesc.ComputeShader := FPrefilterComputeShader;
+  SetLength(CompDesc.DescriptorSetLayouts, 1);
+  CompDesc.DescriptorSetLayouts[0] := FEnvConvolveLayout;
+  CompDesc.PushConstantSize := SizeOf(TCastleIBLCubemapPassPushConstants);
+  CompDesc.PushConstantStages := [ssCompute];
+  CompDesc.DebugName := 'IBLPrefilterEnvComputePSO';
+  FPrefilterComputePipeline := FDevice.GetOrCreateComputePipeline(CompDesc);
+
+  CompDesc.ComputeShader := FIrradianceComputeShader;
+  CompDesc.DebugName := 'IBLIrradianceEnvComputePSO';
+  FIrradianceComputePipeline := FDevice.GetOrCreateComputePipeline(CompDesc);
+end;
+
 function TCastleVulkanIBLGenerator.GenerateBRDFIntegrationLUT(
   const ACmd: TRHICommandList;
   const ASize: Cardinal;
@@ -13326,10 +13611,12 @@ var
   NdotV, Roughness: Single;
   LutVal: TVector2;
   PixelsRGBA8: array of Byte;
+  RecreatedTex: Boolean;
 begin
   EnsureBrdfLutPipelineCreated;
   EffectiveSize := Max(Cardinal(4), ASize);
   EffectiveSamples := Max(Cardinal(8), ASampleCount);
+  RecreatedTex := False;
 
   if (FBrdfLutTexture = nil) or (FBrdfLutSize <> EffectiveSize) then
   begin
@@ -13342,6 +13629,7 @@ begin
       1, 1);
     TexDesc.DebugName := 'IBLBrdfIntegrationLUT';
     FBrdfLutTexture := FDevice.CreateTexture(TexDesc) as TVulkanRHITexture;
+    RecreatedTex := True;
   end;
   FBrdfLutSampleCount := EffectiveSamples;
 
@@ -13367,21 +13655,28 @@ begin
   begin
     SetLength(FBrdfLutTexture.FHostPixels, Length(PixelsRGBA8));
     Move(PixelsRGBA8[0], FBrdfLutTexture.FHostPixels[0], Length(PixelsRGBA8));
-    if FDevice.StagingUploader <> nil then
+    if ((FDevice.Handle = nil) or (ACmd = nil)) and (FDevice.StagingUploader <> nil) then
       FDevice.StagingUploader.EnqueueImageUpload(
         FBrdfLutTexture, @PixelsRGBA8[0], Length(PixelsRGBA8),
         EffectiveSize, EffectiveSize, 0, 0);
   end;
 
-  if FBrdfLutDescriptorSet <> nil then
+  if RecreatedTex or (FBrdfLutDescriptorSet = nil) then
   begin
+    FreeAndNil(FBrdfLutDescriptorSet);
+    FBrdfLutDescriptorSet := FDevice.CreateDescriptorSet(FBrdfLutDescriptorLayout);
     FBrdfLutDescriptorSet.BindTexture(0, FBrdfLutTexture, nil);
     FBrdfLutDescriptorSet.Update;
   end;
 
   if ACmd <> nil then
   begin
-    ACmd.TransitionTexture(FBrdfLutTexture, rsTransferDst);
+    if (FDevice <> nil) and (FDevice.Handle <> nil) and (not ACmd.IsRendering) and
+       (FDevice.StagingUploader <> nil) and
+       ((FDevice.StagingUploader.PendingBufferCopyCount > 0) or
+        (FDevice.StagingUploader.PendingImageCopyCount > 0)) then
+      FDevice.FlushStagingUploads(ACmd as TVulkanRHICommandList);
+    ACmd.TransitionTexture(FBrdfLutTexture, rsUnorderedAccess);
     ACmd.BindComputePipeline(FBrdfLutComputePipeline);
     ACmd.BindComputeDescriptorSet(0, FBrdfLutDescriptorSet, []);
     PC.LutWidth := EffectiveSize;
@@ -13480,6 +13775,158 @@ begin
   Result.Z := Max(0.0, Result.Z);
 end;
 
+function TCastleVulkanIBLGenerator.GenerateEnvironmentIBLFromCubemap(
+  const ACmd: TRHICommandList;
+  const ASourceEnvCubemap: TRHITexture;
+  const APrefilterBaseSize, AIrradianceSize, ASampleCount: Cardinal): TVulkanRHITexture;
+var
+  EffectiveBase, EffectiveIrrSize, EffectiveSamples, MipCount, MipDim: Cardinal;
+  Mip, FaceIdx, SetIdx, GroupCount: Cardinal;
+  I: Integer;
+  CubeDesc: TRHITextureDesc;
+  PC: TCastleIBLCubemapPassPushConstants;
+  Roughness: Single;
+  SrcVkTex: TVulkanRHITexture;
+begin
+  if (FDevice = nil) or (ASourceEnvCubemap = nil) then
+    Exit(FPrefilteredEnvCubemap);
+
+  EnsureBrdfLutPipelineCreated;
+  EnsureEnvConvolvePipelinesCreated;
+
+  EffectiveSamples := Max(Cardinal(8), ASampleCount);
+  if FBrdfLutTexture = nil then
+    GenerateBRDFIntegrationLUT(ACmd, 32, EffectiveSamples);
+
+  EffectiveBase := Max(Cardinal(4), APrefilterBaseSize);
+  MipCount := 1;
+  MipDim := EffectiveBase;
+  while MipDim > 1 do
+  begin
+    MipDim := MipDim shr 1;
+    Inc(MipCount);
+  end;
+  EffectiveIrrSize := Max(Cardinal(4), AIrradianceSize);
+
+  if (FPrefilteredEnvCubemap = nil) or
+     (FPrefilteredEnvBaseSize <> EffectiveBase) or
+     (FPrefilteredEnvMipLevels <> MipCount) then
+  begin
+    FreeAndNil(FPrefilteredEnvCubemap);
+    FPrefilteredEnvBaseSize := EffectiveBase;
+    FPrefilteredEnvMipLevels := MipCount;
+    CubeDesc := TRHITextureDesc.CreateCube(
+      EffectiveBase,
+      pfRGBA8_UNorm,
+      [tuSampled, tuStorage, tuTransferDst, tuTransferSrc],
+      MipCount);
+    CubeDesc.DebugName := 'PrefilteredEnvCubemap';
+    FPrefilteredEnvCubemap := FDevice.CreateTexture(CubeDesc) as TVulkanRHITexture;
+  end;
+
+  if (FIrradianceEnvCubemap = nil) or (FIrradianceEnvSize <> EffectiveIrrSize) then
+  begin
+    FreeAndNil(FIrradianceEnvCubemap);
+    FIrradianceEnvSize := EffectiveIrrSize;
+    CubeDesc := TRHITextureDesc.CreateCube(
+      EffectiveIrrSize,
+      pfRGBA8_UNorm,
+      [tuSampled, tuStorage, tuTransferDst, tuTransferSrc],
+      1);
+    CubeDesc.DebugName := 'IrradianceEnvCubemap';
+    FIrradianceEnvCubemap := FDevice.CreateTexture(CubeDesc) as TVulkanRHITexture;
+  end;
+
+  for I := 0 to High(FPrefilterDescSets) do
+    FreeAndNil(FPrefilterDescSets[I]);
+  SetLength(FPrefilterDescSets, MipCount * 6);
+  for Mip := 0 to MipCount - 1 do
+    for FaceIdx := 0 to 5 do
+    begin
+      SetIdx := Mip * 6 + FaceIdx;
+      FPrefilterDescSets[SetIdx] := FDevice.CreateDescriptorSet(FEnvConvolveLayout);
+      FPrefilterDescSets[SetIdx].BindTexture(0, ASourceEnvCubemap, FEnvConvolveSampler);
+      FPrefilterDescSets[SetIdx].BindTextureSubresource(1, FPrefilteredEnvCubemap, Mip, FaceIdx, nil);
+      FPrefilterDescSets[SetIdx].Update;
+    end;
+
+  for I := 0 to High(FIrradianceDescSets) do
+    FreeAndNil(FIrradianceDescSets[I]);
+  SetLength(FIrradianceDescSets, 6);
+  for FaceIdx := 0 to 5 do
+  begin
+    FIrradianceDescSets[FaceIdx] := FDevice.CreateDescriptorSet(FEnvConvolveLayout);
+    FIrradianceDescSets[FaceIdx].BindTexture(0, ASourceEnvCubemap, FEnvConvolveSampler);
+    FIrradianceDescSets[FaceIdx].BindTextureSubresource(1, FIrradianceEnvCubemap, 0, FaceIdx, nil);
+    FIrradianceDescSets[FaceIdx].Update;
+  end;
+
+  if ACmd <> nil then
+  begin
+    if (FDevice.Handle <> nil) and (not ACmd.IsRendering) and
+       (FDevice.StagingUploader <> nil) and
+       ((FDevice.StagingUploader.PendingBufferCopyCount > 0) or
+        (FDevice.StagingUploader.PendingImageCopyCount > 0)) then
+      FDevice.FlushStagingUploads(ACmd as TVulkanRHICommandList);
+
+    SrcVkTex := ASourceEnvCubemap as TVulkanRHITexture;
+    if (SrcVkTex.Desc.MipLevels > 1) and
+       (SrcVkTex.MaxUploadedMipLevel + 1 < SrcVkTex.Desc.MipLevels) then
+      SrcVkTex.GenerateMipmaps;
+    if SrcVkTex.CurrentState <> rsShaderRead then
+      ACmd.TransitionTexture(ASourceEnvCubemap, rsShaderRead);
+
+    { 1. Specular GGX importance-sampled prefiltered environment mip chain }
+    ACmd.TransitionTexture(FPrefilteredEnvCubemap, rsUnorderedAccess);
+    ACmd.BindComputePipeline(FPrefilterComputePipeline);
+    for Mip := 0 to MipCount - 1 do
+    begin
+      if MipCount > 1 then
+        Roughness := Single(Mip) / Single(MipCount - 1)
+      else
+        Roughness := 0.0;
+      MipDim := Max(Cardinal(1), EffectiveBase shr Mip);
+      GroupCount := (MipDim + 7) div 8;
+      for FaceIdx := 0 to 5 do
+      begin
+        SetIdx := Mip * 6 + FaceIdx;
+        ACmd.BindComputeDescriptorSet(0, FPrefilterDescSets[SetIdx], []);
+        PC.MipSize := MipDim;
+        PC.SampleCount := EffectiveSamples;
+        PC.Roughness := Roughness;
+        PC.FaceIndex := FaceIdx;
+        ACmd.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+        ACmd.Dispatch(GroupCount, GroupCount, 1);
+      end;
+      Inc(FTotalEnvPrefilterPasses);
+    end;
+    ACmd.TransitionTexture(FPrefilteredEnvCubemap, rsShaderRead);
+
+    { 2. Cosine-weighted Lambertian diffuse irradiance cubemap }
+    ACmd.TransitionTexture(FIrradianceEnvCubemap, rsUnorderedAccess);
+    ACmd.BindComputePipeline(FIrradianceComputePipeline);
+    GroupCount := (EffectiveIrrSize + 7) div 8;
+    for FaceIdx := 0 to 5 do
+    begin
+      ACmd.BindComputeDescriptorSet(0, FIrradianceDescSets[FaceIdx], []);
+      PC.MipSize := EffectiveIrrSize;
+      PC.SampleCount := EffectiveSamples;
+      PC.Roughness := 1.0;
+      PC.FaceIndex := FaceIdx;
+      ACmd.PushConstants([ssCompute], 0, SizeOf(PC), PC);
+      ACmd.Dispatch(GroupCount, GroupCount, 1);
+      Inc(FTotalIrradianceDispatches);
+    end;
+    ACmd.TransitionTexture(FIrradianceEnvCubemap, rsShaderRead);
+  end else
+  begin
+    Inc(FTotalEnvPrefilterPasses, MipCount);
+    Inc(FTotalIrradianceDispatches, 6);
+  end;
+
+  Result := FPrefilteredEnvCubemap;
+end;
+
 function TCastleVulkanIBLGenerator.PrefilterEnvironmentCubemap(
   const ACmd: TRHICommandList;
   const AFaceColors: array of TVector3;
@@ -13489,8 +13936,11 @@ var
   BaseFaces: array[0..5] of TVector3;
   AvgEnv, ConvolvedColor: TVector3;
   Roughness, Weight, TotalWeight, CosAngle: Single;
-  CubeDesc: TRHITextureDesc;
+  CubeDesc, SrcCubeDesc: TRHITextureDesc;
   FacePixels: array of Byte;
+  SrcFaceImg: TRGBAlphaImage;
+  FaceRgba: TVector4Byte;
+  PX, PY: Integer;
 begin
   EffectiveBase := Max(Cardinal(4), ABaseSize);
   MipCount := 1;
@@ -13585,22 +14035,50 @@ begin
           SetLength(FPrefilteredEnvCubemap.FHostPixels, Length(FacePixels));
           Move(FacePixels[0], FPrefilteredEnvCubemap.FHostPixels[0], Length(FacePixels));
         end;
-        if FDevice.StagingUploader <> nil then
+        if ((FDevice.Handle = nil) or (ACmd = nil)) and (FDevice.StagingUploader <> nil) then
           FDevice.StagingUploader.EnqueueImageUpload(
             FPrefilteredEnvCubemap, @FacePixels[0], Length(FacePixels),
             MipDim, MipDim, Mip, FaceIdx);
       end;
     end;
 
-    if ACmd <> nil then
+    if (ACmd <> nil) and ((FDevice = nil) or (FDevice.Handle = nil)) then
     begin
       ACmd.TransitionTexture(FPrefilteredEnvCubemap, rsTransferDst);
       ACmd.TransitionTexture(FPrefilteredEnvCubemap, rsShaderRead);
     end;
-    Inc(FTotalEnvPrefilterPasses);
+    if (FDevice = nil) or (FDevice.Handle = nil) or (ACmd = nil) then
+      Inc(FTotalEnvPrefilterPasses);
   end;
 
-  Result := FPrefilteredEnvCubemap;
+  if (FDevice <> nil) and (FDevice.Handle <> nil) and (ACmd <> nil) then
+  begin
+    if FInternalSourceCubemap = nil then
+    begin
+      SrcCubeDesc := TRHITextureDesc.CreateCube(4, pfRGBA8_UNorm, [tuSampled, tuTransferDst], 1);
+      SrcCubeDesc.DebugName := 'IBLInternalSourceCube';
+      FInternalSourceCubemap := FDevice.CreateTexture(SrcCubeDesc) as TVulkanRHITexture;
+    end;
+    SrcFaceImg := TRGBAlphaImage.Create(4, 4);
+    try
+      for FaceIdx := 0 to 5 do
+      begin
+        FaceRgba := Vector4Byte(
+          Byte(Round(EnsureRange(BaseFaces[FaceIdx].X, 0.0, 1.0) * 255.0)),
+          Byte(Round(EnsureRange(BaseFaces[FaceIdx].Y, 0.0, 1.0) * 255.0)),
+          Byte(Round(EnsureRange(BaseFaces[FaceIdx].Z, 0.0, 1.0) * 255.0)),
+          255);
+        for PY := 0 to 3 do
+          for PX := 0 to 3 do
+            SrcFaceImg.PixelPtr(PX, PY)^ := FaceRgba;
+        FInternalSourceCubemap.UploadImage(SrcFaceImg, 0, FaceIdx);
+      end;
+    finally
+      FreeAndNil(SrcFaceImg);
+    end;
+    Result := GenerateEnvironmentIBLFromCubemap(ACmd, FInternalSourceCubemap, EffectiveBase, 8, 32);
+  end else
+    Result := FPrefilteredEnvCubemap;
 end;
 
 function TCastleVulkanIBLGenerator.SamplePrefilteredEnvironment(
@@ -22907,6 +23385,94 @@ begin
   Result := FDefaultShadowDepthTexture;
 end;
 
+function TVulkanRHIDevice.GetDefaultBrdfLutSampler: TVulkanRHISampler;
+var
+  SampDesc: TRHISamplerDesc;
+begin
+  if FDefaultBrdfLutSampler = nil then
+  begin
+    FillChar(SampDesc, SizeOf(SampDesc), 0);
+    SampDesc.MinFilter := sfLinear;
+    SampDesc.MagFilter := sfLinear;
+    SampDesc.MipFilter := sfLinear;
+    SampDesc.AddressModeU := amClampToEdge;
+    SampDesc.AddressModeV := amClampToEdge;
+    SampDesc.AddressModeW := amClampToEdge;
+    SampDesc.MaxAnisotropy := 1.0;
+    SampDesc.MaxLod := 1000.0;
+    FDefaultBrdfLutSampler := CreateSampler(SampDesc) as TVulkanRHISampler;
+  end;
+  Result := FDefaultBrdfLutSampler;
+end;
+
+function TVulkanRHIDevice.GetDefaultBrdfLutTexture: TVulkanRHITexture;
+const
+  DefaultLutSize = 32;
+var
+  TexDesc: TRHITextureDesc;
+  Img: TRGBAlphaImage;
+  X, Y: Integer;
+  NdotV, Roughness: Single;
+  LutVal: TVector2;
+begin
+  if FDefaultBrdfLutTexture = nil then
+  begin
+    TexDesc := TRHITextureDesc.Create2D(
+      DefaultLutSize, DefaultLutSize, pfRGBA8_UNorm, [tuSampled, tuTransferDst], 1);
+    TexDesc.DebugName := 'CastleDefaultBrdfLutTex';
+    FDefaultBrdfLutTexture := CreateTexture(TexDesc) as TVulkanRHITexture;
+    Img := TRGBAlphaImage.Create(DefaultLutSize, DefaultLutSize);
+    try
+      for Y := 0 to DefaultLutSize - 1 do
+      begin
+        Roughness := Max((Single(Y) + 0.5) / Single(DefaultLutSize), 0.04);
+        for X := 0 to DefaultLutSize - 1 do
+        begin
+          NdotV := (Single(X) + 0.5) / Single(DefaultLutSize);
+          LutVal := TCastleVulkanIBLGenerator.IntegrateBRDFPoint(NdotV, Roughness, 32);
+          Img.PixelPtr(X, Y)^ := Vector4Byte(
+            Byte(Round(EnsureRange(LutVal.X, 0.0, 1.0) * 255.0)),
+            Byte(Round(EnsureRange(LutVal.Y, 0.0, 1.0) * 255.0)),
+            0, 255);
+        end;
+      end;
+      FDefaultBrdfLutTexture.UploadImage(Img, 0, 0);
+    finally
+      FreeAndNil(Img);
+    end;
+    if (FDevice <> nil) and (FStagingUploader <> nil) and
+       not ((ActiveCommandList <> nil) and ActiveCommandList.IsRendering) then
+      FlushStagingUploads(nil);
+  end;
+  Result := FDefaultBrdfLutTexture;
+end;
+
+function TVulkanRHIDevice.GetDefaultWhiteCubeTexture: TVulkanRHITexture;
+var
+  TexDesc: TRHITextureDesc;
+  Img: TRGBAlphaImage;
+  FaceIdx: Cardinal;
+begin
+  if FDefaultWhiteCubeTexture = nil then
+  begin
+    TexDesc := TRHITextureDesc.CreateCube(1, pfRGBA8_UNorm, [tuSampled, tuTransferDst], 1);
+    TexDesc.DebugName := 'CastleDefaultWhiteCubeTex';
+    FDefaultWhiteCubeTexture := CreateTexture(TexDesc) as TVulkanRHITexture;
+    Img := TRGBAlphaImage.Create(1, 1);
+    try
+      Img.PixelPtr(0, 0)^ := Vector4Byte(255, 255, 255, 255);
+      for FaceIdx := 0 to 5 do
+        FDefaultWhiteCubeTexture.UploadImage(Img, 0, FaceIdx);
+    finally
+      FreeAndNil(Img);
+    end;
+    if (FDevice <> nil) and (FStagingUploader <> nil) and
+       not ((ActiveCommandList <> nil) and ActiveCommandList.IsRendering) then
+      FlushStagingUploads(nil);
+  end;
+  Result := FDefaultWhiteCubeTexture;
+end;
+
 function TVulkanRHIDevice.GetComputeCuller: TCastleVulkanComputeCuller;
 begin
   if FComputeCuller = nil then
@@ -23381,10 +23947,13 @@ begin
   FreeAndNil(FPrewarm3DFragmentShader);
   FreeAndNil(FPrewarm2DVertexShader);
   FreeAndNil(FPrewarm2DFragmentShader);
+  FreeAndNil(FDefaultWhiteCubeTexture);
+  FreeAndNil(FDefaultBrdfLutTexture);
   FreeAndNil(FDefaultShadowDepthTexture);
   FreeAndNil(FDefaultFlatNormalTexture);
   FreeAndNil(FDefaultBlackTexture);
   FreeAndNil(FDefaultWhiteTexture);
+  FreeAndNil(FDefaultBrdfLutSampler);
   FreeAndNil(FDefaultShadowSampler);
   FreeAndNil(FDefaultSampler);
   FDeferResourceDestruction := False;
@@ -26706,6 +27275,189 @@ begin
             DstPtr[PtrUInt(RowY) * PtrUInt(ReadArea.Width) * 4], RowBytes);
         end;
       end;
+    finally
+      StagingBuf.Unmap;
+    end;
+  finally
+    FreeAndNil(StagingBuf);
+  end;
+end;
+
+function TVulkanRHIDevice.GrabTextureSubresourceImage(
+  const SourceTexture: TRHITexture;
+  const AMipLevel, AArrayLayer: Cardinal): TRGBAlphaImage;
+var
+  VkTex: TVulkanRHITexture;
+  ClampedMip, ClampedLayer: Cardinal;
+  MipW, MipH, RowY, ColX: Integer;
+  BytesPerPixel, ByteSize, TotalPixels, SrcIndex, DstIndex: PtrUInt;
+  StagingDesc: TRHIBufferDesc;
+  StagingBuf: TVulkanRHIBuffer;
+  Cmd: VkCommandBuffer;
+  Region: VkBufferImageCopy;
+  Barrier: VkImageMemoryBarrier;
+  SrcStage: VkPipelineStageFlags;
+  MappedPixels: Pointer;
+  SrcBytePtr, DstPtr: PByte;
+  SrcHalfPtr: PWord;
+  SrcFloatPtr: PSingle;
+  PrevState: TRHIResourceState;
+
+  function Float01ToByte(const AVal: Single): Byte; inline;
+  begin
+    Result := Byte(Round(EnsureRange(AVal, 0.0, 1.0) * 255.0));
+  end;
+
+begin
+  if SourceTexture = nil then
+    Exit(nil);
+
+  VkTex := SourceTexture as TVulkanRHITexture;
+  ClampedMip := Min(AMipLevel, Max(Cardinal(1), VkTex.Desc.MipLevels) - 1);
+  if VkTex.Desc.Dimension = td3D then
+    ClampedLayer := 0
+  else
+    ClampedLayer := Min(AArrayLayer, Max(Cardinal(1), VkTex.Desc.DepthOrArrayLayers) - 1);
+
+  MipW := Max(1, Integer(VkTex.Desc.Width shr ClampedMip));
+  MipH := Max(1, Integer(VkTex.Desc.Height shr ClampedMip));
+  Result := TRGBAlphaImage.Create(MipW, MipH);
+
+  if (FDevice = nil) or not Assigned(vkCmdCopyImageToBuffer) then
+  begin
+    if Length(VkTex.FHostPixels) >= 4 then
+    begin
+      DstPtr := PByte(Result.RawPixels);
+      for RowY := 0 to MipH - 1 do
+        for ColX := 0 to MipW - 1 do
+        begin
+          DstIndex := (PtrUInt(RowY) * PtrUInt(MipW) + PtrUInt(ColX)) * 4;
+          SrcIndex := DstIndex mod PtrUInt(Length(VkTex.FHostPixels) and (not PtrInt(3)));
+          Move(VkTex.FHostPixels[SrcIndex], DstPtr[DstIndex], 4);
+        end;
+    end;
+    Exit;
+  end;
+
+  if Assigned(vkDeviceWaitIdle) then
+    vkDeviceWaitIdle(FDevice);
+  FlushStagingUploads;
+
+  TotalPixels := PtrUInt(MipW) * PtrUInt(MipH);
+  case VkTex.Desc.Format of
+    pfRGBA32_Float: BytesPerPixel := 16;
+    pfRGBA16_Float: BytesPerPixel := 8;
+    pfRG16_Float, pfR32_Float: BytesPerPixel := 4;
+    pfR16_Float, pfRG8_UNorm: BytesPerPixel := 2;
+    pfR8_UNorm: BytesPerPixel := 1;
+  else
+    BytesPerPixel := 4;
+  end;
+  ByteSize := TotalPixels * BytesPerPixel;
+
+  StagingDesc := TRHIBufferDesc.Create(ByteSize, [buTransferDst], muGpuToCpu, 'GrabSubresourceStaging');
+  StagingBuf := TVulkanRHIBuffer.Create(Self, StagingDesc, nil);
+  try
+    PrevState := VkTex.CurrentState;
+    Cmd := BeginSingleTimeCommands;
+    if (PrevState <> rsTransferSrc) and Assigned(vkCmdPipelineBarrier) then
+    begin
+      FillChar(Barrier, SizeOf(Barrier), 0);
+      Barrier.sType := VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      RHIStateToVkLayoutAndAccess(PrevState, Barrier.oldLayout, Barrier.srcAccessMask, SrcStage);
+      Barrier.newLayout := VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      Barrier.dstAccessMask := VK_ACCESS_TRANSFER_READ_BIT;
+      Barrier.srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+      Barrier.dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+      Barrier.image := VkTex.Image;
+      Barrier.subresourceRange.aspectMask := VkTex.AspectMask;
+      Barrier.subresourceRange.baseMipLevel := 0;
+      Barrier.subresourceRange.levelCount := Max(Cardinal(1), VkTex.Desc.MipLevels);
+      Barrier.subresourceRange.baseArrayLayer := 0;
+      Barrier.subresourceRange.layerCount := Max(Cardinal(1), VkTex.Desc.DepthOrArrayLayers);
+      vkCmdPipelineBarrier(Cmd, SrcStage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nil, 0, nil, 1, @Barrier);
+      VkTex.CurrentState := rsTransferSrc;
+    end;
+
+    FillChar(Region, SizeOf(Region), 0);
+    if (VkTex.AspectMask and VK_IMAGE_ASPECT_DEPTH_BIT) <> 0 then
+      Region.imageSubresource.aspectMask := VK_IMAGE_ASPECT_DEPTH_BIT
+    else
+      Region.imageSubresource.aspectMask := VK_IMAGE_ASPECT_COLOR_BIT;
+    Region.imageSubresource.mipLevel := ClampedMip;
+    Region.imageSubresource.baseArrayLayer := ClampedLayer;
+    Region.imageSubresource.layerCount := 1;
+    Region.imageExtent.width := Cardinal(MipW);
+    Region.imageExtent.height := Cardinal(MipH);
+    Region.imageExtent.depth := 1;
+
+    vkCmdCopyImageToBuffer(Cmd, VkTex.Image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+      StagingBuf.Handle, 1, @Region);
+
+    if (PrevState = rsShaderRead) and Assigned(vkCmdPipelineBarrier) then
+    begin
+      FillChar(Barrier, SizeOf(Barrier), 0);
+      Barrier.sType := VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      Barrier.oldLayout := VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      Barrier.newLayout := VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      Barrier.srcAccessMask := VK_ACCESS_TRANSFER_READ_BIT;
+      Barrier.dstAccessMask := VK_ACCESS_SHADER_READ_BIT;
+      Barrier.srcQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+      Barrier.dstQueueFamilyIndex := VK_QUEUE_FAMILY_IGNORED;
+      Barrier.image := VkTex.Image;
+      Barrier.subresourceRange.aspectMask := VkTex.AspectMask;
+      Barrier.subresourceRange.baseMipLevel := 0;
+      Barrier.subresourceRange.levelCount := Max(Cardinal(1), VkTex.Desc.MipLevels);
+      Barrier.subresourceRange.baseArrayLayer := 0;
+      Barrier.subresourceRange.layerCount := Max(Cardinal(1), VkTex.Desc.DepthOrArrayLayers);
+      vkCmdPipelineBarrier(Cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT or VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        0, 0, nil, 0, nil, 1, @Barrier);
+      VkTex.CurrentState := rsShaderRead;
+    end;
+
+    EndSingleTimeCommands(Cmd);
+
+    if StagingBuf.Allocation.IsValid and (FMemoryAllocator <> nil) then
+      FMemoryAllocator.InvalidateAllocation(StagingBuf.Allocation, 0, ByteSize);
+
+    MappedPixels := StagingBuf.Map;
+    try
+      DstPtr := PByte(Result.RawPixels);
+      if VkTex.Desc.Format = pfRGBA32_Float then
+      begin
+        SrcFloatPtr := PSingle(MappedPixels);
+        for DstIndex := 0 to TotalPixels - 1 do
+        begin
+          DstPtr[DstIndex * 4 + 0] := Float01ToByte(SrcFloatPtr[DstIndex * 4 + 0]);
+          DstPtr[DstIndex * 4 + 1] := Float01ToByte(SrcFloatPtr[DstIndex * 4 + 1]);
+          DstPtr[DstIndex * 4 + 2] := Float01ToByte(SrcFloatPtr[DstIndex * 4 + 2]);
+          DstPtr[DstIndex * 4 + 3] := Float01ToByte(SrcFloatPtr[DstIndex * 4 + 3]);
+        end;
+      end else
+      if VkTex.Desc.Format = pfRGBA16_Float then
+      begin
+        SrcHalfPtr := PWord(MappedPixels);
+        for DstIndex := 0 to TotalPixels - 1 do
+        begin
+          DstPtr[DstIndex * 4 + 0] := Float01ToByte(HalfFloatToFloat(SrcHalfPtr[DstIndex * 4 + 0]));
+          DstPtr[DstIndex * 4 + 1] := Float01ToByte(HalfFloatToFloat(SrcHalfPtr[DstIndex * 4 + 1]));
+          DstPtr[DstIndex * 4 + 2] := Float01ToByte(HalfFloatToFloat(SrcHalfPtr[DstIndex * 4 + 2]));
+          DstPtr[DstIndex * 4 + 3] := Float01ToByte(HalfFloatToFloat(SrcHalfPtr[DstIndex * 4 + 3]));
+        end;
+      end else
+      if VkTex.Desc.Format in [pfBGRA8_UNorm, pfBGRA8_sRGB] then
+      begin
+        SrcBytePtr := PByte(MappedPixels);
+        for DstIndex := 0 to TotalPixels - 1 do
+        begin
+          DstPtr[DstIndex * 4 + 0] := SrcBytePtr[DstIndex * 4 + 2];
+          DstPtr[DstIndex * 4 + 1] := SrcBytePtr[DstIndex * 4 + 1];
+          DstPtr[DstIndex * 4 + 2] := SrcBytePtr[DstIndex * 4 + 0];
+          DstPtr[DstIndex * 4 + 3] := SrcBytePtr[DstIndex * 4 + 3];
+        end;
+      end else
+        Move(MappedPixels^, Result.RawPixels^, TotalPixels * 4);
     finally
       StagingBuf.Unmap;
     end;

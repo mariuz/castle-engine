@@ -1034,7 +1034,23 @@ begin
        (Arrays.TexCoords[1].Generation = tgExplicit) then
       AddVertexAttribute(Ord(vlTexCoord1), 1,
         TexCoordDimToFormat(Arrays.TexCoords[1].Dimensions),
-        PtrUInt(Arrays.TexCoord(1, 0)), 'castle_MultiTexCoord1');
+        PtrUInt(Arrays.TexCoord(1, 0)), 'castle_MultiTexCoord1')
+    else if (AShape <> nil) and (AShape.Cache <> nil) and
+            (AShape.Cache.RHIHasSecondTexture or
+             (AShape.Cache.RHIBaseColorTexCoordIndex > 0) or
+             (AShape.Cache.RHINormalTexCoordIndex > 0) or
+             (AShape.Cache.RHIMetallicRoughnessTexCoordIndex > 0) or
+             (AShape.Cache.RHIEmissiveTexCoordIndex > 0) or
+             (AShape.Cache.RHIOcclusionTexCoordIndex > 0)) then
+    begin
+      if (Arrays.TexCoords.Count > 0) and (Arrays.TexCoords[0] <> nil) and
+         (Arrays.TexCoords[0].Generation = tgExplicit) then
+        AddVertexAttribute(Ord(vlTexCoord1), 1,
+          TexCoordDimToFormat(Arrays.TexCoords[0].Dimensions),
+          PtrUInt(Arrays.TexCoord(0, 0)), 'castle_MultiTexCoord1')
+      else
+        AddVertexAttribute(Ord(vlTexCoord1), 0, vafVector2, 0, 'castle_MultiTexCoord1');
+    end;
 
     case Arrays.ColorType of
       ctRgb:
@@ -1200,8 +1216,12 @@ begin
     ADesc.DepthStencil := TRHIDepthStencilStateDesc.DefaultDepthTestWrite;
     ADesc.BlendState := TRHIBlendStateDesc.DefaultOpaque;
   end;
-  if (RenderContext <> nil) and (not RenderContext.DepthTest) then
+  if ((RenderContext <> nil) and (not RenderContext.DepthTest)) or
+     ((ARenderOptions <> nil) and (not ARenderOptions.DepthTest)) then
+  begin
     ADesc.DepthStencil.DepthTestEnable := False;
+    ADesc.DepthStencil.DepthWriteEnable := False;
+  end;
   if (RenderContext <> nil) and (FInternalPass = 0) then
   begin
     RenderContext.ApplyRHIStencilAndColorMask(ADesc.DepthStencil, ADesc.BlendState);

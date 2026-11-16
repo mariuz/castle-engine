@@ -595,7 +595,18 @@ begin
     FRHISkinningDescriptorLayout := RHIDevice.CreateDescriptorSetLayout(Bindings);
   end;
   if (FRHISkinningDescriptorSet = nil) and (FRHISkinningDescriptorLayout <> nil) then
+  begin
     FRHISkinningDescriptorSet := RHIDevice.CreateDescriptorSet(FRHISkinningDescriptorLayout);
+    {$ifndef WASI}
+    if (FRHISkinningDescriptorSet <> nil) and
+       (RHIDevice is TVulkanRHIDevice) and (TVulkanRHIDevice(RHIDevice).Handle <> nil) then
+    begin
+      for I := 2 to 5 do
+        FRHISkinningDescriptorSet.BindTexture(Cardinal(I), TVulkanRHIDevice(RHIDevice).GetDefaultWhiteTexture, nil);
+      FRHISkinningDescriptorSet.Update;
+    end;
+    {$endif}
+  end;
 end;
 
 function TShapeCache.GetRHIUserEffectTexture(const AIndex: Cardinal): TRHITexture;
@@ -781,6 +792,8 @@ begin
       FRHIMaterialDescriptorSet.BindTexture(3, TVulkanRHIDevice(RHIDevice).GetDefaultWhiteTexture, nil);
       FRHIMaterialDescriptorSet.BindTexture(4, TVulkanRHIDevice(RHIDevice).GetDefaultWhiteTexture, nil);
       FRHIMaterialDescriptorSet.BindTexture(5, TVulkanRHIDevice(RHIDevice).GetDefaultWhiteTexture, nil);
+      FRHIMaterialDescriptorSet.BindTexture(6, TVulkanRHIDevice(RHIDevice).GetDefaultBrdfLutTexture, nil);
+      FRHIMaterialDescriptorSet.BindTexture(7, TVulkanRHIDevice(RHIDevice).GetDefaultWhiteCubeTexture, nil);
     end;
     {$endif}
   end;
@@ -888,27 +901,39 @@ procedure TShapeCache.BindEnvironmentTexturesToDescriptorSet(
 var
   TexDesc: TRHITextureDesc;
   EffectiveBrdfLut: TRHITexture;
+  EffectiveBrdfSampler: TRHISampler;
 begin
   FRHIEnvSpecularTexture := AEnvSpecularTex;
   FRHIEnvSpecularSampler := AEnvSpecularSampler;
-  FRHIBrdfLutSampler := ABrdfLutSampler;
+  EffectiveBrdfSampler := ABrdfLutSampler;
   EffectiveBrdfLut := ABrdfLutTex;
   if (AEnvSpecularTex <> nil) and (EffectiveBrdfLut = nil) and (RHIDevice <> nil) then
   begin
     EnsureRHIDeviceMatch;
-    if FRHIDefaultBrdfLutTexture = nil then
+    {$ifndef WASI}
+    if (RHIDevice is TVulkanRHIDevice) and (TVulkanRHIDevice(RHIDevice).Handle <> nil) then
     begin
-      TexDesc := TRHITextureDesc.Create2D(4, 4, pfRGBA8_UNorm, [tuSampled, tuTransferDst], 1, 1);
-      TexDesc.DebugName := 'DefaultBrdfLut2D';
-      FRHIDefaultBrdfLutTexture := RHIDevice.CreateTexture(TexDesc);
+      EffectiveBrdfLut := TVulkanRHIDevice(RHIDevice).GetDefaultBrdfLutTexture;
+      if EffectiveBrdfSampler = nil then
+        EffectiveBrdfSampler := TVulkanRHIDevice(RHIDevice).GetDefaultBrdfLutSampler;
+    end else
+    {$endif}
+    begin
+      if FRHIDefaultBrdfLutTexture = nil then
+      begin
+        TexDesc := TRHITextureDesc.Create2D(4, 4, pfRGBA8_UNorm, [tuSampled, tuTransferDst], 1, 1);
+        TexDesc.DebugName := 'DefaultBrdfLut2D';
+        FRHIDefaultBrdfLutTexture := RHIDevice.CreateTexture(TexDesc);
+      end;
+      EffectiveBrdfLut := FRHIDefaultBrdfLutTexture;
     end;
-    EffectiveBrdfLut := FRHIDefaultBrdfLutTexture;
   end;
+  FRHIBrdfLutSampler := EffectiveBrdfSampler;
   FRHIBrdfLutTexture := EffectiveBrdfLut;
   if FRHIMaterialDescriptorSet = nil then
     Exit;
   if EffectiveBrdfLut <> nil then
-    FRHIMaterialDescriptorSet.BindTexture(6, EffectiveBrdfLut, ABrdfLutSampler);
+    FRHIMaterialDescriptorSet.BindTexture(6, EffectiveBrdfLut, EffectiveBrdfSampler);
   if AEnvSpecularTex <> nil then
     FRHIMaterialDescriptorSet.BindTexture(7, AEnvSpecularTex, AEnvSpecularSampler);
   if (EffectiveBrdfLut <> nil) or (AEnvSpecularTex <> nil) then
@@ -1916,6 +1941,15 @@ begin
       '  gl_Position = ',
       '  gl_PointSize = ' + EffectivePointSizeStr + ';' + LineEnding + '  gl_Position = ',
       []);
+    if AHasColorPerVertex then
+      FRHIVertexShaderSource := FRHIVertexShaderSource + LineEnding + '/* CASTLE_PERM_COLOR_PER_VERTEX */';
+    if (AHasBaseColorTex and FRHIHasSecondTexture) or
+       (FRHIBaseColorTexCoordIndex > 0) or
+       (FRHINormalTexCoordIndex > 0) or
+       (FRHIMetallicRoughnessTexCoordIndex > 0) or
+       (FRHIEmissiveTexCoordIndex > 0) or
+       (FRHIOcclusionTexCoordIndex > 0) then
+      FRHIVertexShaderSource := FRHIVertexShaderSource + LineEnding + '/* CASTLE_PERM_MULTITEX_UV1 */';
     FRHIFragmentShaderSource := Gen.GenerateDefault3DFragmentShader(
       AHasBaseColorTex, AHasNormalTex, AHasMetallicRoughnessTex,
       AHasEmissiveTex, AHasOcclusionTex, AHasIBL, AUseAlphaTest, False, False);

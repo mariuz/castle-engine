@@ -409,6 +409,9 @@ type
     procedure TestVulkanDebugUtilsObjectNamingLabelsAndRenderGraphScopesRHI;
     procedure TestRealLavapipe3DPBRShadowMapsAndGpuSkeletalSkinningRHI;
     procedure TestRealOpenGLVsVulkanPBRMetallicRoughnessVisualParityRHI;
+    procedure TestRealLavapipeIBLComputeBrdfLutPrefilterAndIrradianceCubemapRHI;
+    procedure TestRealLavapipeSkyboxBackgroundCubemap3DTextureAndMultiTextureRHI;
+    procedure TestRealLavapipeEnvironmentLightSplitSumIBL3DViewportRHI;
   private
     FPhase111ForwardSubPassCounter: Integer;
     FCapturedWarnings: TStringList;
@@ -32676,6 +32679,703 @@ begin
     FreeAndNil(GlSpheres);
     FreeAndNil(VkTexturedBox);
     FreeAndNil(VkSpheres);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipeIBLComputeBrdfLutPrefilterAndIrradianceCubemapRHI;
+const
+  Phase114ShaderChecks: array[0..10] of record
+    Stage: TRHIShaderStage;
+    DebugName: String;
+  end = (
+    (Stage: ssCompute;  DebugName: 'IBLBrdfLutComputeCS'),
+    (Stage: ssCompute;  DebugName: 'IBLPrefilterEnvComputeCS'),
+    (Stage: ssCompute;  DebugName: 'IBLIrradianceEnvComputeCS'),
+    (Stage: ssVertex;   DebugName: 'CastleColorPerVertex3DVert'),
+    (Stage: ssFragment; DebugName: 'CastleColorPerVertex3DFrag'),
+    (Stage: ssVertex;   DebugName: 'CastleMultiTex3DVert'),
+    (Stage: ssFragment; DebugName: 'CastleMultiTex3DFrag'),
+    (Stage: ssFragment; DebugName: 'CastleMultiTexAdd3DFrag'),
+    (Stage: ssFragment; DebugName: 'CastleCubeTex3DFrag'),
+    (Stage: ssFragment; DebugName: 'CastleTex3DFrag'),
+    (Stage: ssFragment; DebugName: 'CastlePBRIBL3DFrag')
+  );
+var
+  I: Integer;
+  SpirvBytes: TSPIRVBytecode;
+  ReflInfo: TSPIRVReflectionInfo;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  RealDev: TVulkanRHIDevice;
+  RealCmd: TVulkanRHICommandList;
+  FaceColors: array[0..5] of TVector3;
+  LutTex, PrefilteredCube, IrradianceCube: TVulkanRHITexture;
+  LutImg, SkyMip0Img, GroundMip0Img, SkyMip4Img, GroundMip4Img, IrrSkyImg, IrrGroundImg: TRGBAlphaImage;
+  NormalSmoothPx, GrazingSmoothPx: TVector4Byte;
+  SkyMip0B, GroundMip0B, SkyMip4B, GroundMip4B: Integer;
+begin
+  { 1. Verify all 11 Phase 114 zero-dependency SPIR-V 1.0 modules via TryGetBuiltInSPIRV & InspectSPIRVBytecode }
+  for I := Low(Phase114ShaderChecks) to High(Phase114ShaderChecks) do
+  begin
+    AssertTrue('TryGetBuiltInSPIRV must resolve ' + Phase114ShaderChecks[I].DebugName,
+      TCastleShaderCompiler.Instance.TryGetBuiltInSPIRV(
+        Phase114ShaderChecks[I].Stage, '/* ' + Phase114ShaderChecks[I].DebugName + ' */',
+        Phase114ShaderChecks[I].DebugName, SpirvBytes));
+    AssertTrue('Built-in SPIR-V for ' + Phase114ShaderChecks[I].DebugName + ' must exceed minimal fallback size',
+      Length(SpirvBytes) > 400);
+    AssertTrue('InspectSPIRVBytecode must validate ' + Phase114ShaderChecks[I].DebugName,
+      InspectSPIRVBytecode(SpirvBytes, ReflInfo) and ReflInfo.IsValid);
+    AssertEquals('Reflected stage must match ' + Phase114ShaderChecks[I].DebugName,
+      Ord(Phase114ShaderChecks[I].Stage), Ord(ReflInfo.Stage));
+  end;
+
+  { 2. Live real-GPU compute execution on Mesa Lavapipe Vulkan 1.4 }
+  RealDev := nil;
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev, True) then
+    Exit;
+
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  LutImg := nil;
+  SkyMip0Img := nil;
+  GroundMip0Img := nil;
+  SkyMip4Img := nil;
+  GroundMip4Img := nil;
+  IrrSkyImg := nil;
+  IrrGroundImg := nil;
+  try
+    SetRHIDevice(RealDev);
+    RealDev.ResetValidationCounters;
+
+    { Asymmetric environment: +Y zenith = bright sky blue, -Y nadir = warm terracotta ground }
+    FaceColors[0] := Vector3(0.28, 0.30, 0.32); // +X
+    FaceColors[1] := Vector3(0.28, 0.30, 0.32); // -X
+    FaceColors[2] := Vector3(0.15, 0.55, 1.00); // +Y (Sky)
+    FaceColors[3] := Vector3(0.90, 0.30, 0.08); // -Y (Ground)
+    FaceColors[4] := Vector3(0.28, 0.30, 0.32); // +Z
+    FaceColors[5] := Vector3(0.28, 0.30, 0.32); // -Z
+
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    SetActiveCommandList(RealCmd);
+    LutTex := RealDev.IBLGenerator.GenerateBRDFIntegrationLUT(RealCmd, 32, 32);
+    PrefilteredCube := RealDev.IBLGenerator.PrefilterEnvironmentCubemap(RealCmd, FaceColors, 16);
+    IrradianceCube := RealDev.IBLGenerator.IrradianceEnvCubemap;
+    RealDev.EndOffscreenFrame;
+
+    AssertTrue('LutTex must be allocated on GPU', LutTex <> nil);
+    AssertTrue('PrefilteredCube must be allocated on GPU', PrefilteredCube <> nil);
+    AssertTrue('IrradianceCube must be allocated on GPU', IrradianceCube <> nil);
+    AssertEquals('TotalBrdfLutDispatches must be 1', 1, RealDev.IBLGenerator.TotalBrdfLutDispatches);
+    AssertEquals('TotalEnvPrefilterPasses must be 5 (16->8->4->2->1)', 5, RealDev.IBLGenerator.TotalEnvPrefilterPasses);
+    AssertEquals('TotalIrradianceDispatches must be 6 (one per cubemap face)', 6, RealDev.IBLGenerator.TotalIrradianceDispatches);
+
+    { Read back GPU-computed 2D BRDF Integration LUT }
+    LutImg := RealDev.GrabTextureImage(LutTex, Rectangle(0, 0, 32, 32));
+    NormalSmoothPx := LutImg.PixelPtr(29, 3)^;  // NdotV ~ 0.92, Roughness ~ 0.11
+    GrazingSmoothPx := LutImg.PixelPtr(1, 3)^;  // NdotV ~ 0.05, Roughness ~ 0.11
+    AssertTrue('GPU BRDF LUT at normal incidence smooth must have high Scale R > 180 (got ' + IntToStr(NormalSmoothPx.X) + ')',
+      NormalSmoothPx.X > 180);
+    AssertTrue('GPU BRDF LUT at grazing incidence must have significant Fresnel Bias G > 45 (got ' + IntToStr(GrazingSmoothPx.Y) + ')',
+      GrazingSmoothPx.Y > 45);
+    AssertTrue('GPU BRDF LUT grazing Fresnel Bias must exceed normal-incidence Bias',
+      GrazingSmoothPx.Y > NormalSmoothPx.Y);
+
+    { Read back GPU-convolved PrefilteredEnvCubemap subresources: Mip 0 vs Mip 4 }
+    SkyMip0Img := RealDev.GrabTextureSubresourceImage(PrefilteredCube, 0, 2);    // +Y Mip 0 (16x16, roughness=0)
+    GroundMip0Img := RealDev.GrabTextureSubresourceImage(PrefilteredCube, 0, 3); // -Y Mip 0 (16x16, roughness=0)
+    SkyMip4Img := RealDev.GrabTextureSubresourceImage(PrefilteredCube, 4, 2);    // +Y Mip 4 (1x1, roughness=1)
+    GroundMip4Img := RealDev.GrabTextureSubresourceImage(PrefilteredCube, 4, 3); // -Y Mip 4 (1x1, roughness=1)
+
+    SkyMip0B := SkyMip0Img.PixelPtr(8, 8)^.Z;
+    GroundMip0B := GroundMip0Img.PixelPtr(8, 8)^.Z;
+    SkyMip4B := SkyMip4Img.PixelPtr(0, 0)^.Z;
+    GroundMip4B := GroundMip4Img.PixelPtr(0, 0)^.Z;
+
+    AssertTrue('Prefilter Mip 0 +Y sky center must preserve bright blue B > 220 (got ' + IntToStr(SkyMip0B) + ')',
+      SkyMip0B > 220);
+    AssertTrue('Prefilter Mip 0 -Y ground center must preserve warm orange R > 200, B < 50',
+      (GroundMip0Img.PixelPtr(8, 8)^.X > 200) and (GroundMip0B < 50));
+    AssertTrue('Prefilter Mip 4 (roughness=1) must convolve/blur +Y sky blue downward and -Y ground blue upward',
+      (SkyMip4B < SkyMip0B) and (GroundMip4B > GroundMip0B));
+
+    { Read back GPU-convolved cosine-weighted Lambertian IrradianceEnvCubemap }
+    IrrSkyImg := RealDev.GrabTextureSubresourceImage(IrradianceCube, 0, 2);    // +Y face (8x8)
+    IrrGroundImg := RealDev.GrabTextureSubresourceImage(IrradianceCube, 0, 3); // -Y face (8x8)
+    AssertTrue('GPU IrradianceEnvCubemap +Y sky hemisphere must have higher blue irradiance than -Y ground',
+      IrrSkyImg.PixelPtr(4, 4)^.Z > IrrGroundImg.PixelPtr(4, 4)^.Z + 40);
+    AssertTrue('GPU IrradianceEnvCubemap -Y ground hemisphere must have higher red irradiance than +Y sky',
+      IrrGroundImg.PixelPtr(4, 4)^.X > IrrSkyImg.PixelPtr(4, 4)^.X + 30);
+
+    RealDev.AssertZeroValidationErrors('Phase114.IBLComputeBrdfLutPrefilterAndIrradiance');
+  finally
+    FreeAndNil(IrrGroundImg);
+    FreeAndNil(IrrSkyImg);
+    FreeAndNil(GroundMip4Img);
+    FreeAndNil(SkyMip4Img);
+    FreeAndNil(GroundMip0Img);
+    FreeAndNil(SkyMip0Img);
+    FreeAndNil(LutImg);
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    FreeAndNil(RealDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipeSkyboxBackgroundCubemap3DTextureAndMultiTextureRHI;
+
+  function MakeSolidPixelTexture(const AColor: TVector4Byte): TPixelTextureNode;
+  var
+    Img: TRGBAlphaImage;
+  begin
+    Result := TPixelTextureNode.Create;
+    Img := TRGBAlphaImage.Create(4, 4);
+    Img.Clear(AColor);
+    Result.FdImage.Value := Img;
+  end;
+
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  RealDev: TVulkanRHIDevice;
+  RealCmd: TVulkanRHICommandList;
+  Container: TTestSizedVulkanContainer;
+  ColorTex, DepthTex: TVulkanRHITexture;
+  TexDesc: TRHITextureDesc;
+  PassInfo: TRHIRenderingInfo;
+  Viewport: TCastleViewport;
+  Bg: TCastleBackground;
+  FgScene, CubeVolScene, MultiTexScene: TCastleScene;
+  FgRoot, CubeVolRoot, MultiRoot: TX3DRootNode;
+  FgShape, CubeShape, VolShape, ModShape, AddShape: TShapeNode;
+  FgApp, CubeApp, VolApp, ModApp, AddApp: TAppearanceNode;
+  FgMat, CubeMat, VolMat, ModMat, AddMat: TUnlitMaterialNode;
+  FgBox: TBoxNode;
+  CubeTrans, VolTrans, ModTrans, AddTrans: TTransformNode;
+  CubeSphere: TSphereNode;
+  CubeMapNode: TComposedCubeMapTextureNode;
+  VolTexNode: TPixelTexture3DNode;
+  VolTriSet: TTriangleSetNode;
+  VolCoord: TCoordinateNode;
+  ModBox, AddBox: TBoxNode;
+  MultiModNode, MultiAddNode: TMultiTextureNode;
+  ShotBg, ShotCubeVol, ShotMulti: TRGBAlphaImage;
+  TopSkyPx, BotGroundPx, CenterFgPx, CubePx, VolSlice0Px, VolSlice1Px, ModPx, AddPx: TVector4Byte;
+begin
+  RealDev := nil;
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev, True) then
+    Exit;
+
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+  Container := nil;
+  ColorTex := nil;
+  DepthTex := nil;
+  Viewport := nil;
+  Bg := nil;
+  FgScene := nil;
+  CubeVolScene := nil;
+  MultiTexScene := nil;
+  ShotBg := nil;
+  ShotCubeVol := nil;
+  ShotMulti := nil;
+  try
+    GLFeatures := nil;
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(RealDev);
+    RealDev.ResetValidationCounters;
+
+    Container := TTestSizedVulkanContainer.Create(nil);
+    Container.TestWidth := 128;
+    Container.TestHeight := 128;
+    RenderContext := Container.Context;
+    RenderContext.Viewport := Rectangle(0, 0, 128, 128);
+
+    TexDesc := TRHITextureDesc.Create2D(128, 128, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc, tuTransferDst], 1);
+    TexDesc.DebugName := 'Phase114SceneColor';
+    ColorTex := RealDev.CreateTexture(TexDesc) as TVulkanRHITexture;
+
+    TexDesc := TRHITextureDesc.Create2D(128, 128, pfD32_Float,
+      [tuDepthStencil, tuSampled, tuTransferSrc], 1);
+    TexDesc.DebugName := 'Phase114SceneDepth';
+    DepthTex := RealDev.CreateTexture(TexDesc) as TVulkanRHITexture;
+
+    { --- Part A: TCastleBackground Sky/Ground Dome (TColorNode + DepthTest=False/DepthWrite=False) + Foreground 3D Mesh --- }
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := False;
+    Viewport.Width := 128;
+    Viewport.Height := 128;
+    Container.Controls.InsertFront(Viewport);
+
+    Bg := TCastleBackground.Create(nil);
+    Bg.SkyTopColor := Vector3(0.05, 0.35, 0.98);
+    Bg.SkyEquatorColor := Vector3(0.10, 0.45, 0.98);
+    Bg.GroundEquatorColor := Vector3(0.88, 0.38, 0.06);
+    Bg.GroundBottomColor := Vector3(0.82, 0.28, 0.04);
+    Bg.SmoothEquator := 0.0;
+    Viewport.Background := Bg;
+
+    Viewport.Camera.ProjectionType := ptPerspective;
+    Viewport.Camera.Perspective.FieldOfView := DegToRad(60.0);
+    Viewport.Camera.ProjectionNear := 0.1;
+    Viewport.Camera.ProjectionFar := 100.0;
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 4.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+
+    FgRoot := TX3DRootNode.Create;
+    FgShape := TShapeNode.Create;
+    FgBox := TBoxNode.Create;
+    FgBox.Size := Vector3(1.1, 1.1, 1.1);
+    FgShape.Geometry := FgBox;
+    FgApp := TAppearanceNode.Create;
+    FgMat := TUnlitMaterialNode.Create;
+    FgMat.EmissiveColor := Vector3(0.10, 0.92, 0.20);
+    FgApp.Material := FgMat;
+    FgShape.Appearance := FgApp;
+    FgRoot.AddChildren(FgShape);
+
+    FgScene := TCastleScene.Create(nil);
+    FgScene.Load(FgRoot, True);
+    Viewport.Items.Add(FgScene);
+
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    SetActiveCommandList(RealCmd);
+    Container.EventUpdate;
+    Viewport.BeforeRender;
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 128, 128),
+      ColorTex, loClear, Vector4(0.0, 0.0, 0.0, 1.0),
+      DepthTex, loClear, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+    Viewport.Render;
+    Viewport.RenderOverChildren;
+    RealCmd.EndRendering;
+    RealDev.EndOffscreenFrame;
+
+    ShotBg := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 128, 128));
+    TopSkyPx := ShotBg.PixelPtr(64, 112)^;
+    BotGroundPx := ShotBg.PixelPtr(64, 16)^;
+    CenterFgPx := ShotBg.PixelPtr(64, 64)^;
+
+    AssertTrue('Top viewport pixel (64,112) must render blue TCastleBackground sky dome (B > 170, R < 90), got R=' +
+      IntToStr(TopSkyPx.X) + ' B=' + IntToStr(TopSkyPx.Z),
+      (TopSkyPx.Z > 170) and (TopSkyPx.X < 90));
+    AssertTrue('Bottom viewport pixel (64,16) must render warm TCastleBackground ground dome (R > 160, B < 60), got R=' +
+      IntToStr(BotGroundPx.X) + ' B=' + IntToStr(BotGroundPx.Z),
+      (BotGroundPx.X > 160) and (BotGroundPx.Z < 60));
+    AssertTrue('Center pixel (64,64) must render depth-tested green foreground mesh UNOCCLUDED by skybox (G > 190, R < 80)',
+      (CenterFgPx.Y > 190) and (CenterFgPx.X < 80));
+
+    { --- Part B: TComposedCubeMapTextureNode (tdCube) & TPixelTexture3DNode (td3D with Depth=2) --- }
+    Viewport.Background := nil;
+    Viewport.Items.Remove(FgScene);
+    FreeAndNil(FgScene);
+
+    Viewport.BackgroundColor := Vector4(0.02, 0.02, 0.03, 1.0);
+    Viewport.Camera.ProjectionType := ptOrthographic;
+    Viewport.Camera.Orthographic.Width := 4.0;
+    Viewport.Camera.Orthographic.Height := 4.0;
+    Viewport.Camera.Orthographic.Origin := Vector2(0.5, 0.5);
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 5.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+
+    CubeVolRoot := TX3DRootNode.Create;
+
+    { Top-half quad/sphere with TComposedCubeMapTextureNode: unlit looks along -Z (Front face = bright magenta) }
+    CubeTrans := TTransformNode.Create;
+    CubeTrans.Translation := Vector3(0.0, 1.0, 0.0);
+    CubeShape := TShapeNode.Create;
+    CubeSphere := TSphereNode.Create;
+    CubeSphere.Radius := 0.75;
+    CubeShape.Geometry := CubeSphere;
+    CubeApp := TAppearanceNode.Create;
+    CubeMat := TUnlitMaterialNode.Create;
+    CubeMat.EmissiveColor := Vector3(1.0, 1.0, 1.0);
+    CubeApp.Material := CubeMat;
+    CubeMapNode := TComposedCubeMapTextureNode.Create;
+    CubeMapNode.Front  := MakeSolidPixelTexture(Vector4Byte(240, 30, 230, 255)); // -Z view dir -> Magenta!
+    CubeMapNode.Back   := MakeSolidPixelTexture(Vector4Byte(20, 200, 40, 255));
+    CubeMapNode.Left   := MakeSolidPixelTexture(Vector4Byte(20, 40, 220, 255));
+    CubeMapNode.Right  := MakeSolidPixelTexture(Vector4Byte(220, 200, 20, 255));
+    CubeMapNode.Top    := MakeSolidPixelTexture(Vector4Byte(30, 220, 240, 255));
+    CubeMapNode.Bottom := MakeSolidPixelTexture(Vector4Byte(220, 80, 20, 255));
+    CubeApp.Texture := CubeMapNode;
+    CubeShape.Appearance := CubeApp;
+    CubeTrans.AddChildren(CubeShape);
+    CubeVolRoot.AddChildren(CubeTrans);
+
+    { Bottom-half 2 quads with TPixelTexture3DNode (Width=1, Height=1, Depth=2):
+      Slice 0 (z < 0 -> w=0.1) = Pure Red $FF0000; Slice 1 (z > 0 -> w=0.9) = Pure Cyan $00FFFF }
+    VolTrans := TTransformNode.Create;
+    VolShape := TShapeNode.Create;
+    VolTriSet := TTriangleSetNode.Create;
+    VolTriSet.Solid := False;
+    VolCoord := TCoordinateNode.Create;
+    VolCoord.SetPoint([
+      { Left quad at world z = -0.8 -> uvw.z = 0.1 -> Slice 0 (Red) }
+      Vector3(-1.6, -1.6, -0.8), Vector3(-0.3, -1.6, -0.8), Vector3(-0.3, -0.3, -0.8),
+      Vector3(-1.6, -1.6, -0.8), Vector3(-0.3, -0.3, -0.8), Vector3(-1.6, -0.3, -0.8),
+      { Right quad at world z = +0.8 -> uvw.z = 0.9 -> Slice 1 (Cyan) }
+      Vector3( 0.3, -1.6,  0.8), Vector3( 1.6, -1.6,  0.8), Vector3( 1.6, -0.3,  0.8),
+      Vector3( 0.3, -1.6,  0.8), Vector3( 1.6, -0.3,  0.8), Vector3( 0.3, -0.3,  0.8)
+    ]);
+    VolTriSet.Coord := VolCoord;
+    VolShape.Geometry := VolTriSet;
+    VolApp := TAppearanceNode.Create;
+    VolMat := TUnlitMaterialNode.Create;
+    VolMat.EmissiveColor := Vector3(1.0, 1.0, 1.0);
+    VolApp.Material := VolMat;
+    VolTexNode := TPixelTexture3DNode.Create;
+    VolTexNode.RepeatS := False;
+    VolTexNode.RepeatT := False;
+    VolTexNode.RepeatR := False;
+    VolTexNode.SetImage([3, 1, 1, 2, Int32($FF1010), Int32($10E8FF)]);
+    VolApp.Texture := VolTexNode;
+    VolShape.Appearance := VolApp;
+    VolTrans.AddChildren(VolShape);
+    CubeVolRoot.AddChildren(VolTrans);
+
+    CubeVolScene := TCastleScene.Create(nil);
+    CubeVolScene.RenderOptions.MinificationFilter := minNearest;
+    CubeVolScene.RenderOptions.MagnificationFilter := magNearest;
+    CubeVolScene.Load(CubeVolRoot, True);
+    Viewport.Items.Add(CubeVolScene);
+
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    SetActiveCommandList(RealCmd);
+    Container.EventUpdate;
+    Viewport.BeforeRender;
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 128, 128),
+      ColorTex, loClear, Viewport.BackgroundColor,
+      DepthTex, loClear, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+    Viewport.Render;
+    RealCmd.EndRendering;
+    RealDev.EndOffscreenFrame;
+
+    ShotCubeVol := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 128, 128));
+    CubePx := ShotCubeVol.PixelPtr(64, 96)^;
+    VolSlice0Px := ShotCubeVol.PixelPtr(34, 34)^;
+    VolSlice1Px := ShotCubeVol.PixelPtr(94, 34)^;
+
+    AssertTrue('Cubemap sphere at (64,96) must sample Front (-Z) magenta face (R > 180, B > 170, G < 80)',
+      (CubePx.X > 180) and (CubePx.Z > 170) and (CubePx.Y < 80));
+    AssertTrue('3D volume texture Slice 0 at (34,34) must sample Red slice (R > 200, B < 50)',
+      (VolSlice0Px.X > 200) and (VolSlice0Px.Z < 50));
+    AssertTrue('3D volume texture Slice 1 at (94,34) must sample Cyan depth=1 slice (B > 200, G > 180, R < 50)',
+      (VolSlice1Px.Z > 200) and (VolSlice1Px.Y > 180) and (VolSlice1Px.X < 50));
+
+    { --- Part C: TMultiTextureNode (MODULATE & ADD) --- }
+    Viewport.Items.Remove(CubeVolScene);
+    FreeAndNil(CubeVolScene);
+
+    MultiRoot := TX3DRootNode.Create;
+
+    { Left box: MODULATE (Yellow (1, 1, 0) * Cyan (0, 1, 1) -> Green (0, 1, 0)!) }
+    ModTrans := TTransformNode.Create;
+    ModTrans.Translation := Vector3(-1.0, 0.0, 0.0);
+    ModShape := TShapeNode.Create;
+    ModBox := TBoxNode.Create;
+    ModBox.Size := Vector3(1.4, 1.4, 0.5);
+    ModShape.Geometry := ModBox;
+    ModApp := TAppearanceNode.Create;
+    ModMat := TUnlitMaterialNode.Create;
+    ModMat.EmissiveColor := Vector3(1.0, 1.0, 1.0);
+    ModApp.Material := ModMat;
+    MultiModNode := TMultiTextureNode.Create;
+    MultiModNode.SetTexture([
+      MakeSolidPixelTexture(Vector4Byte(255, 255, 0, 255)),
+      MakeSolidPixelTexture(Vector4Byte(0, 255, 255, 255))
+    ]);
+    MultiModNode.SetMode(['MODULATE', 'MODULATE']);
+    ModApp.Texture := MultiModNode;
+    ModShape.Appearance := ModApp;
+    ModTrans.AddChildren(ModShape);
+    MultiRoot.AddChildren(ModTrans);
+
+    { Right box: ADD (Red (1, 0, 0) + Blue (0, 0, 1) -> Magenta (1, 0, 1)!) }
+    AddTrans := TTransformNode.Create;
+    AddTrans.Translation := Vector3(1.0, 0.0, 0.0);
+    AddShape := TShapeNode.Create;
+    AddBox := TBoxNode.Create;
+    AddBox.Size := Vector3(1.4, 1.4, 0.5);
+    AddShape.Geometry := AddBox;
+    AddApp := TAppearanceNode.Create;
+    AddMat := TUnlitMaterialNode.Create;
+    AddMat.EmissiveColor := Vector3(1.0, 1.0, 1.0);
+    AddApp.Material := AddMat;
+    MultiAddNode := TMultiTextureNode.Create;
+    MultiAddNode.SetTexture([
+      MakeSolidPixelTexture(Vector4Byte(230, 0, 0, 255)),
+      MakeSolidPixelTexture(Vector4Byte(0, 0, 230, 255))
+    ]);
+    MultiAddNode.SetMode(['MODULATE', 'ADD']);
+    AddApp.Texture := MultiAddNode;
+    AddShape.Appearance := AddApp;
+    AddTrans.AddChildren(AddShape);
+    MultiRoot.AddChildren(AddTrans);
+
+    MultiTexScene := TCastleScene.Create(nil);
+    MultiTexScene.Load(MultiRoot, True);
+    Viewport.Items.Add(MultiTexScene);
+
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    SetActiveCommandList(RealCmd);
+    Container.EventUpdate;
+    Viewport.BeforeRender;
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 128, 128),
+      ColorTex, loClear, Viewport.BackgroundColor,
+      DepthTex, loClear, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+    Viewport.Render;
+    RealCmd.EndRendering;
+    RealDev.EndOffscreenFrame;
+
+    ShotMulti := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 128, 128));
+    ModPx := ShotMulti.PixelPtr(32, 64)^;
+    AddPx := ShotMulti.PixelPtr(96, 64)^;
+
+    AssertTrue('TMultiTextureNode MODULATE (Yellow * Cyan) at (32,64) must produce pure Green (G > 200, R < 30, B < 30)',
+      (ModPx.Y > 200) and (ModPx.X < 30) and (ModPx.Z < 30));
+    AssertTrue('TMultiTextureNode ADD (Red + Blue) at (96,64) must produce bright Magenta (R > 190, B > 190, G < 30)',
+      (AddPx.X > 190) and (AddPx.Z > 190) and (AddPx.Y < 30));
+
+    RealDev.AssertZeroValidationErrors('Phase114.SkyboxCubemap3DTexAndMultiTex');
+  finally
+    FreeAndNil(ShotMulti);
+    FreeAndNil(ShotCubeVol);
+    FreeAndNil(ShotBg);
+    FreeAndNil(MultiTexScene);
+    FreeAndNil(CubeVolScene);
+    FreeAndNil(FgScene);
+    if Viewport <> nil then
+      Viewport.Background := nil;
+    FreeAndNil(Bg);
+    FreeAndNil(Viewport);
+    FreeAndNil(DepthTex);
+    FreeAndNil(ColorTex);
+    FreeAndNil(Container);
+    FreeGlobalBatch2DRenderer;
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(RealDev);
+  end;
+end;
+
+procedure TTestCastleVulkanRHI.TestRealLavapipeEnvironmentLightSplitSumIBL3DViewportRHI;
+
+  function MakeFaceTex(const AColor: TVector4Byte): TPixelTextureNode;
+  var
+    Img: TRGBAlphaImage;
+  begin
+    Result := TPixelTextureNode.Create;
+    Img := TRGBAlphaImage.Create(8, 8);
+    Img.Clear(AColor);
+    Result.FdImage.Value := Img;
+  end;
+
+var
+  SavedBackend: TRenderBackend;
+  SavedRHI: TRHIDevice;
+  SavedCmd: TRHICommandList;
+  SavedCtx: TRenderContext;
+  SavedGLFeatures: TGLFeatures;
+  RealDev: TVulkanRHIDevice;
+  RealCmd: TVulkanRHICommandList;
+  Container: TTestSizedVulkanContainer;
+  ColorTex, DepthTex: TVulkanRHITexture;
+  TexDesc: TRHITextureDesc;
+  PassInfo: TRHIRenderingInfo;
+  Viewport: TCastleViewport;
+  Scene: TCastleScene;
+  Root: TX3DRootNode;
+  NavInfo: TNavigationInfoNode;
+  EnvLight: TEnvironmentLightNode;
+  EnvCube: TComposedCubeMapTextureNode;
+  MetalTrans, RoughTrans: TTransformNode;
+  MetalShape, RoughShape: TShapeNode;
+  MetalApp, RoughApp: TAppearanceNode;
+  MetalMat, RoughMat: TPhysicalMaterialNode;
+  MetalSphere, RoughSphere: TSphereNode;
+  ShotIBL: TRGBAlphaImage;
+  MetalUpperPx, MetalLowerPx, RoughCenterPx: TVector4Byte;
+begin
+  RealDev := nil;
+  if not TVulkanRHIDevice.TryCreateOffscreen(RealDev, True) then
+    Exit;
+
+  SavedBackend := ApplicationProperties.RenderBackend;
+  SavedRHI := RHIDevice;
+  SavedCmd := ActiveCommandList;
+  SavedCtx := RenderContext;
+  SavedGLFeatures := GLFeatures;
+  Container := nil;
+  ColorTex := nil;
+  DepthTex := nil;
+  Viewport := nil;
+  Scene := nil;
+  ShotIBL := nil;
+  try
+    GLFeatures := nil;
+    ApplicationProperties.RenderBackend := backendVulkan;
+    SetRHIDevice(RealDev);
+    RealDev.ResetValidationCounters;
+
+    Container := TTestSizedVulkanContainer.Create(nil);
+    Container.TestWidth := 128;
+    Container.TestHeight := 128;
+    RenderContext := Container.Context;
+    RenderContext.Viewport := Rectangle(0, 0, 128, 128);
+
+    TexDesc := TRHITextureDesc.Create2D(128, 128, pfRGBA8_UNorm,
+      [tuColorAttachment, tuSampled, tuTransferSrc, tuTransferDst], 1);
+    TexDesc.DebugName := 'Phase114IBLViewportColor';
+    ColorTex := RealDev.CreateTexture(TexDesc) as TVulkanRHITexture;
+
+    TexDesc := TRHITextureDesc.Create2D(128, 128, pfD32_Float,
+      [tuDepthStencil, tuSampled, tuTransferSrc], 1);
+    TexDesc.DebugName := 'Phase114IBLViewportDepth';
+    DepthTex := RealDev.CreateTexture(TexDesc) as TVulkanRHITexture;
+
+    Viewport := TCastleViewport.Create(nil);
+    Viewport.FullSize := False;
+    Viewport.Width := 128;
+    Viewport.Height := 128;
+    Viewport.BackgroundColor := Vector4(0.01, 0.01, 0.02, 1.0);
+    Viewport.Camera.ProjectionType := ptOrthographic;
+    Viewport.Camera.Orthographic.Width := 4.4;
+    Viewport.Camera.Orthographic.Height := 3.2;
+    Viewport.Camera.Orthographic.Origin := Vector2(0.5, 0.5);
+    Viewport.Camera.SetView(
+      Vector3(0.0, 0.0, 5.0),
+      Vector3(0.0, 0.0, -1.0),
+      Vector3(0.0, 1.0, 0.0));
+    Container.Controls.InsertFront(Viewport);
+
+    Root := TX3DRootNode.Create;
+
+    { Disable headlight so 100% of scene illumination comes from TEnvironmentLightNode Split-Sum IBL! }
+    NavInfo := TNavigationInfoNode.Create;
+    NavInfo.Headlight := False;
+    Root.AddChildren(NavInfo);
+
+    EnvCube := TComposedCubeMapTextureNode.Create;
+    EnvCube.Top    := MakeFaceTex(Vector4Byte(25, 200, 255, 255)); // +Y Sky: Bright Cyan-Blue
+    EnvCube.Bottom := MakeFaceTex(Vector4Byte(255, 95, 20, 255));  // -Y Ground: Warm Amber-Orange
+    EnvCube.Front  := MakeFaceTex(Vector4Byte(90, 95, 110, 255));
+    EnvCube.Back   := MakeFaceTex(Vector4Byte(90, 95, 110, 255));
+    EnvCube.Left   := MakeFaceTex(Vector4Byte(90, 95, 110, 255));
+    EnvCube.Right  := MakeFaceTex(Vector4Byte(90, 95, 110, 255));
+
+    EnvLight := TEnvironmentLightNode.Create;
+    EnvLight.Global := True;
+    EnvLight.Intensity := 1.4;
+    EnvLight.SpecularTexture := EnvCube;
+    Root.AddChildren(EnvLight);
+
+    { Left: Mirror-Smooth Chrome Metallic Sphere (BaseColor=White, Metallic=1.0, Roughness=0.06) }
+    MetalTrans := TTransformNode.Create;
+    MetalTrans.Translation := Vector3(-1.05, 0.0, 0.0);
+    MetalShape := TShapeNode.Create;
+    MetalSphere := TSphereNode.Create;
+    MetalSphere.Radius := 0.90;
+    MetalSphere.Slices := 32;
+    MetalSphere.Stacks := 32;
+    MetalShape.Geometry := MetalSphere;
+    MetalApp := TAppearanceNode.Create;
+    MetalMat := TPhysicalMaterialNode.Create;
+    MetalMat.BaseColor := Vector3(0.96, 0.96, 0.98);
+    MetalMat.Metallic := 1.0;
+    MetalMat.Roughness := 0.06;
+    MetalApp.Material := MetalMat;
+    MetalShape.Appearance := MetalApp;
+    MetalTrans.AddChildren(MetalShape);
+    Root.AddChildren(MetalTrans);
+
+    { Right: Rough Dielectric Albedo Sphere (BaseColor=White, Metallic=0.0, Roughness=0.75) }
+    RoughTrans := TTransformNode.Create;
+    RoughTrans.Translation := Vector3(1.05, 0.0, 0.0);
+    RoughShape := TShapeNode.Create;
+    RoughSphere := TSphereNode.Create;
+    RoughSphere.Radius := 0.90;
+    RoughSphere.Slices := 32;
+    RoughSphere.Stacks := 32;
+    RoughShape.Geometry := RoughSphere;
+    RoughApp := TAppearanceNode.Create;
+    RoughMat := TPhysicalMaterialNode.Create;
+    RoughMat.BaseColor := Vector3(0.92, 0.92, 0.92);
+    RoughMat.Metallic := 0.0;
+    RoughMat.Roughness := 0.75;
+    RoughApp.Material := RoughMat;
+    RoughShape.Appearance := RoughApp;
+    RoughTrans.AddChildren(RoughShape);
+    Root.AddChildren(RoughTrans);
+
+    Scene := TCastleScene.Create(nil);
+    Scene.Load(Root, True);
+    {$warnings off}
+    Viewport.Items.MainScene := Scene;
+    {$warnings on}
+    Viewport.Items.Add(Scene);
+
+    RealCmd := RealDev.BeginOffscreenFrame as TVulkanRHICommandList;
+    SetActiveCommandList(RealCmd);
+    Container.EventUpdate;
+    Viewport.BeforeRender;
+    PassInfo := TRHIRenderingInfo.CreateColorDepth(
+      Rectangle(0, 0, 128, 128),
+      ColorTex, loClear, Viewport.BackgroundColor,
+      DepthTex, loClear, 1.0);
+    RealCmd.BeginRendering(PassInfo);
+    Viewport.Render;
+    RealCmd.EndRendering;
+    RealDev.EndOffscreenFrame;
+
+    ShotIBL := RealDev.GrabTextureImage(ColorTex, Rectangle(0, 0, 128, 128));
+    { Left sphere center X ~ 33, radius ~ 26px (x=33, upper hemisphere y=82 reflects +Y sky; lower hemisphere y=46 reflects -Y ground) }
+    MetalUpperPx := ShotIBL.PixelPtr(33, 82)^;
+    MetalLowerPx := ShotIBL.PixelPtr(33, 46)^;
+    RoughCenterPx := ShotIBL.PixelPtr(95, 64)^;
+
+    AssertTrue('Metallic sphere upper hemisphere (33,82) must reflect +Y cyan sky via Split-Sum IBL (B > R + 50, B > 120), got R=' +
+      IntToStr(MetalUpperPx.X) + ' G=' + IntToStr(MetalUpperPx.Y) + ' B=' + IntToStr(MetalUpperPx.Z),
+      (MetalUpperPx.Z > MetalUpperPx.X + 50) and (MetalUpperPx.Z > 120));
+    AssertTrue('Metallic sphere lower hemisphere (33,46) must reflect -Y warm amber ground via Split-Sum IBL (R > B + 50, R > 120), got R=' +
+      IntToStr(MetalLowerPx.X) + ' G=' + IntToStr(MetalLowerPx.Y) + ' B=' + IntToStr(MetalLowerPx.Z),
+      (MetalLowerPx.X > MetalLowerPx.Z + 50) and (MetalLowerPx.X > 120));
+    AssertTrue('Rough dielectric sphere (95,64) with zero punctual lights must receive non-black diffuse+specular IBL (R+G+B > 180)',
+      Integer(RoughCenterPx.X) + Integer(RoughCenterPx.Y) + Integer(RoughCenterPx.Z) > 180);
+
+    RealDev.AssertZeroValidationErrors('Phase114.EnvironmentLightSplitSumIBL3DViewport');
+  finally
+    FreeAndNil(ShotIBL);
+    FreeAndNil(Scene);
+    FreeAndNil(Viewport);
+    FreeAndNil(DepthTex);
+    FreeAndNil(ColorTex);
+    FreeAndNil(Container);
+    FreeGlobalBatch2DRenderer;
+    GLFeatures := SavedGLFeatures;
+    RenderContext := SavedCtx;
+    SetActiveCommandList(SavedCmd);
+    SetRHIDevice(SavedRHI);
+    ApplicationProperties.RenderBackend := SavedBackend;
+    FreeAndNil(RealDev);
   end;
 end;
 
