@@ -637,6 +637,7 @@ type
       MenuItemNetcodeStudio: TMenuItem;
       MenuItemMetaSoundStudio: TMenuItem;
       MenuItemTilemapStudio: TMenuItem;
+      MenuItemVolumetricStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -694,6 +695,7 @@ type
     procedure MenuItemNetcodeStudioClick(Sender: TObject);
     procedure MenuItemMetaSoundStudioClick(Sender: TObject);
     procedure MenuItemTilemapStudioClick(Sender: TObject);
+    procedure MenuItemVolumetricStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2503,6 +2505,11 @@ begin
   MenuItemTilemapStudio.Caption := '2D / 2.5D Bitmask Auto-Tilemap, Greedy Collider & Flipbook Studio...';
   MenuItemTilemapStudio.OnClick := @MenuItemTilemapStudioClick;
   MenuItemDesign.Add(MenuItemTilemapStudio);
+
+  MenuItemVolumetricStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemVolumetricStudio.Caption := 'Volumetric Height Fog, God-Rays & Reflection Probe Studio...';
+  MenuItemVolumetricStudio.OnClick := @MenuItemVolumetricStudioClick;
+  MenuItemDesign.Add(MenuItemVolumetricStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5701,6 +5708,12 @@ procedure TProjectForm.MenuItemTilemapStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowTilemapStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemVolumetricStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowVolumetricStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–323** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–324** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3525,6 +3525,30 @@ Flipbook.PlayClip('AttackSlash');
 
 ---
 
+## 66AW. Volumetric Height Fog, God-Ray Light Shafts & Reflection Probe Studio (Phase 324)
+
+Castle Game Engine provides closed-form exponential height fog optical-depth integration, Henyey-Greenstein anisotropic solar in-scattering, and box-parallax-corrected local reflection probes matching Unreal Engine 6.0+'s Volumetric Fog and Reflection Environment workflows:
+
+1. **Volumetric Atmosphere & Reflection Probes (`src/scene/castlevolumetrics.pas`)**:
+   - `TCastleVolumetricAtmosphere` evaluates altitude-dependent fog density, closed-form line-integral `EvaluateSegmentTransmittance`, and `EvaluateHenyeyGreensteinPhase` sun shafts (`EvaluateAerialPerspective`).
+   - `TCastleReflectionProbe` computes finite-room `ComputeBoxParallaxReflectionDir` lookups and blends smoothly by `Priority` and `BlendDistance` via `TVolumetricStudioHelper.BlendReflectionProbesAtPoint`.
+2. **Volumetric & Probe Studio (`TVolumetricStudioForm` & `TVolumetricStudioHelper`)**:
+   - Open via the top-bar **`VolFog`** button, Hierarchy context menu, or **`Design -> Volumetric Height Fog, God-Rays & Reflection Probe Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TVolumetricStudioHelper.SpawnVolumetricValleyAndProbesDemo(Viewport, DesignOwner, Atmos, OutdoorProbe, InteriorProbe);
+AerialRgba := Atmos.EvaluateAerialPerspective(CamPos, TargetPos);
+TVolumetricStudioHelper.BlendReflectionProbesAtPoint(Viewport, DesignOwner, PlayerPos, DominantProbe, IrradianceTint);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Environmental Effects](https://castle-engine.io/x3d_implementation_environmental_effects.php) · [UE Volumetric Fog](https://dev.epicgames.com/documentation/en-us/unreal-engine/volumetric-fog-in-unreal-engine) · [UE Reflection Captures](https://dev.epicgames.com/documentation/en-us/unreal-engine/reflections-captures-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Outdoor Atmosphere & Shaders (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE Shader Showcase](https://castle-engine.io/images/thumb_const_height_size/shader_effects_simple.webp) · [CGE 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3636,4 +3660,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems inclu
 - **[`tests/code/testcases/testtoolnetcodestudio.pas`](../tests/code/testcases/testtoolnetcodestudio.pas) (`TTestToolNetcodeStudio` — 2 tests)**: Verifies `NetCullDistance` spatial culling (`0` packets at `120m`) vs. `AlwaysRelevant` override, tight `18 B/tick` starvation-protected priority round-robin, jitter-buffered client `EvaluateClientInterpolatedPose`, server `LagCompensatedRaycast` confirmed hit at rewound `X = 4.20m` vs. unrewound miss at `X = 6.00m`, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolmetasoundstudio.pas`](../tests/code/testcases/testtoolmetasoundstudio.pas) (`TTestToolMetaSoundStudio` — 2 tests)**: Verifies `EvaluateAdsrEnvelope`, RBJ 2-pole Biquad low-pass RMS attenuation (`240 Hz` vs. `9500 Hz`), valid 44-byte RIFF/WAVE 16-bit PCM stream export, downward `WorldRay` `Stone`/`Wood`/`Metal` footstep surface classification, `120 BPM` `mqbNextBar` quantized music stem transition & crossfade, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooltilemapstudio.pas`](../tests/code/testcases/testtooltilemapstudio.pas) (`TTestToolTilemapStudio` — 2 tests)**: Verifies 4-bit cardinal (`0..15`) & 8-bit corner-gated Blob (`0..255`) auto-tile masks, exact 2D greedy collider merging (`6x4 = 24` cells -> `1` box) with `WorldRay` hit verification, `csTransient`-clean JSON roundtrips, and `TCastleFlipbook2D` UV sub-rect stepping, non-loop hold, and frame-exact `OnFlipbookNotify` firing (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolvolumetricstudio.pas`](../tests/code/testcases/testtoolvolumetricstudio.pas) (`TTestToolVolumetricStudio` — 2 tests)**: Verifies valley vs. mountaintop exponential height fog optical depth, exact inclined-ray $A \leftrightarrow B$ transmittance reciprocity, Henyey-Greenstein forward scattering lobe (`g = 0.76`), finite-room `ComputeBoxParallaxReflectionDir` wall pinning, `Priority` reflection probe override & `BlendDistance` feathering, and `ConfigJson` roundtrips (`0 unfreed memory blocks`).
 

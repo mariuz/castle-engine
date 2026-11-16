@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="119">
+    <Units Count="121">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -677,6 +677,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormTilemapStudio"/>
       </Unit118>
+      <Unit119>
+        <Filename Value="../common-code/toolvolumetricstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolVolumetricStudio"/>
+      </Unit119>
+      <Unit120>
+        <Filename Value="code/formvolumetricstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormVolumetricStudio"/>
+      </Unit120>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

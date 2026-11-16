@@ -150,6 +150,7 @@ uses
   TestToolNetcodeStudio,
   TestToolMetaSoundStudio,
   TestToolTilemapStudio,
+  TestToolVolumetricStudio,
   TestCastleVulkanRHI;
 
 implementation
