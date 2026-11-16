@@ -633,6 +633,7 @@ type
       MenuItemVehicleStudio: TMenuItem;
       MenuItemBlendMontage: TMenuItem;
       MenuItemEqsStudio: TMenuItem;
+      MenuItemInventoryStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -686,6 +687,7 @@ type
     procedure MenuItemVehicleStudioClick(Sender: TObject);
     procedure MenuItemBlendMontageClick(Sender: TObject);
     procedure MenuItemEqsStudioClick(Sender: TObject);
+    procedure MenuItemInventoryStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2475,6 +2477,11 @@ begin
   MenuItemEqsStudio.Caption := 'Environment Query System (EQS) Tactical Cover & Flank Studio...';
   MenuItemEqsStudio.OnClick := @MenuItemEqsStudioClick;
   MenuItemDesign.Add(MenuItemEqsStudio);
+
+  MenuItemInventoryStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemInventoryStudio.Caption := 'RPG Inventory Grid, Equipment Paperdoll, Crafting & Loot Studio...';
+  MenuItemInventoryStudio.OnClick := @MenuItemInventoryStudioClick;
+  MenuItemDesign.Add(MenuItemInventoryStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5649,6 +5656,12 @@ procedure TProjectForm.MenuItemEqsStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowEqsStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemInventoryStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowInventoryStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

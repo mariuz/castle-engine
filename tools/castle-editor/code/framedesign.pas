@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -804,6 +804,8 @@ type
       MenuTreeViewItemBlendMontage: TMenuItem;
       ButtonEqsStudio: TSpeedButton;
       MenuTreeViewItemEqsStudio: TMenuItem;
+      ButtonInventoryStudio: TSpeedButton;
+      MenuTreeViewItemInventoryStudio: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1305,6 +1307,8 @@ type
     procedure MenuTreeViewItemBlendMontageClick(Sender: TObject);
     procedure ButtonEqsStudioClick(Sender: TObject);
     procedure MenuTreeViewItemEqsStudioClick(Sender: TObject);
+    procedure ButtonInventoryStudioClick(Sender: TObject);
+    procedure MenuTreeViewItemInventoryStudioClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2775,6 +2779,7 @@ type
     procedure ShowVehicleStudioDialog;
     procedure ShowBlendMontageDialog;
     procedure ShowEqsStudioDialog;
+    procedure ShowInventoryStudioDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -2796,7 +2801,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7321,6 +7326,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonEqsStudio,
       PanelMiddleTop.GetControlIndex(ButtonBlendMontage) + 1);
 
+  ButtonInventoryStudio := TSpeedButton.Create(Self);
+  ButtonInventoryStudio.Caption := 'Items';
+  ButtonInventoryStudio.Hint := 'Open RPG Inventory Grid, Equipment Paperdoll, Crafting & Loot Studio.' + NL +
+    'Manage stack/weight bags, paperdoll-to-GAS stat bonuses, recipes & pity loot tables.';
+  ButtonInventoryStudio.ShowHint := true;
+  ButtonInventoryStudio.AutoSize := true;
+  ButtonInventoryStudio.Constraints.MinHeight := 33;
+  ButtonInventoryStudio.Constraints.MinWidth := 50;
+  ButtonInventoryStudio.BorderSpacing.Left := 2;
+  ButtonInventoryStudio.OnClick := @ButtonInventoryStudioClick;
+  ButtonInventoryStudio.Parent := PanelMiddleTop;
+  if ButtonEqsStudio.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonInventoryStudio,
+      PanelMiddleTop.GetControlIndex(ButtonEqsStudio) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10340,6 +10360,11 @@ begin
   MenuTreeViewItemEqsStudio.Caption := 'Environment Query System (EQS) Tactical Cover && Flank Studio...';
   MenuTreeViewItemEqsStudio.OnClick := @MenuTreeViewItemEqsStudioClick;
   MenuTreeView.Items.Add(MenuTreeViewItemEqsStudio);
+
+  MenuTreeViewItemInventoryStudio := TMenuItem.Create(Self);
+  MenuTreeViewItemInventoryStudio.Caption := 'RPG Inventory Grid, Equipment Paperdoll && Loot Studio...';
+  MenuTreeViewItemInventoryStudio.OnClick := @MenuTreeViewItemInventoryStudioClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemInventoryStudio);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -15620,6 +15645,10 @@ var
         Suffix := Suffix + ' ' + TCastleAnimMontageBehavior(NodeObj).MontageSummaryBadge
       else if NodeObj is TCastleEqsQueryBehavior then
         Suffix := Suffix + ' ' + TCastleEqsQueryBehavior(NodeObj).EqsSummaryBadge
+      else if NodeObj is TCastleInventoryBehavior then
+        Suffix := Suffix + ' ' + TCastleInventoryBehavior(NodeObj).InventorySummaryBadge
+      else if NodeObj is TCastleLootTable then
+        Suffix := Suffix + ' ' + TCastleLootTable(NodeObj).LootSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -55853,6 +55882,7 @@ begin
   else if SameText(AStudioId, 'vehicle_studio') then ShowVehicleStudioDialog
   else if SameText(AStudioId, 'blend_montage') then ShowBlendMontageDialog
   else if SameText(AStudioId, 'eqs_studio') then ShowEqsStudioDialog
+  else if SameText(AStudioId, 'inventory_studio') then ShowInventoryStudioDialog
   else
     Result := False;
 end;
@@ -55965,6 +55995,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemEqsStudioClick(Sender: TObject);
 begin
   ShowEqsStudioDialog;
+end;
+
+procedure TDesignFrame.ShowInventoryStudioDialog;
+var
+  Dlg: TInventoryStudioForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TInventoryStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonInventoryStudioClick(Sender: TObject);
+begin
+  ShowInventoryStudioDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemInventoryStudioClick(Sender: TObject);
+begin
+  ShowInventoryStudioDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

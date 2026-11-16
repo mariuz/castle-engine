@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="111">
+    <Units Count="113">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -637,6 +637,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormEqsStudio"/>
       </Unit110>
+      <Unit111>
+        <Filename Value="../common-code/toolinventorystudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolInventoryStudio"/>
+      </Unit111>
+      <Unit112>
+        <Filename Value="code/forminventorystudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormInventoryStudio"/>
+      </Unit112>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

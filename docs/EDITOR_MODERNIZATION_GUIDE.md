@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–319** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–320** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3428,6 +3428,30 @@ if Eqs.RunQuery then
 
 ---
 
+## 66AS. RPG Inventory Grid, Equipment Paperdoll GAS Stat Modifiers, Crafting & Loot Studio (Phase 320)
+
+Castle Game Engine provides slot/weight-capped RPG inventories, paperdoll equipment integrated directly with `TCastleAbilitySystemBehavior`, atomic crafting recipes, and pity-protected weighted loot tables matching Unreal Engine 6.0+'s Lyra Inventory workflow:
+
+1. **Inventory, Crafting & Loot Runtime (`src/scene/castleinventorycraft.pas`)**:
+   - `TCastleInventoryBehavior` enforces `MaxSlots` and `MaxCarryWeightKg`, merges partial stacks (`MaxStack`), crafts multi-ingredient `TCraftingRecipeDef` outputs atomically, and syncs `esHead` / `esChest` / `esMainHand` / `esOffHand` / `esAccessory` equipment modifiers + `GrantedTag` values onto `TCastleAbilitySystemBehavior`.
+   - `TCastleLootTable` rolls deterministic Xorshift32 rarity drops with `LegendaryPityThreshold` bad-luck protection.
+2. **Inventory & Loot Studio (`TInventoryStudioForm` & `TInventoryStudioHelper`)**:
+   - Open via the top-bar **`Items`** button, Hierarchy context menu, or **`Design -> RPG Inventory Grid, Equipment Paperdoll, Crafting & Loot Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TInventoryStudioHelper.SpawnRpgHeroInventoryAndLootChestDemo(Viewport, DesignOwner, Hero, Gas, Inv, Loot);
+Inv.TryCraftRecipe('CraftSunfireBlade', Reason);
+Inv.EquipItemFromBag('SunfireBlade', Reason);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Custom Components](https://castle-engine.io/custom_components) · [UE Lyra Sample Game](https://dev.epicgames.com/documentation/en-us/unreal-engine/lyra-sample-game-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — RPG UI & Character Systems (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE UI Editor](https://castle-engine.io/images/thumb_const_height_size/ui_editor.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3535,4 +3559,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems inclu
 - **[`tests/code/testcases/testtoolvehiclestudio.pas`](../tests/code/testcases/testtoolvehiclestudio.pas) (`TTestToolVehicleStudio` — 2 tests)**: Verifies exact Ackermann steering inner/outer cotangent invariant ($\cot\delta_{\text{outer}} - \cot\delta_{\text{inner}} = W / L$), engine torque curve peak & rev-limiter cutoff, 4-wheel `WorldRay` Hooke suspension equilibrium & raised-platform nose-up pitch, automatic multi-gear upshifting, handbrake rear slip amplification, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolblendmontage.pas`](../tests/code/testcases/testtoolblendmontage.pas) (`TTestToolBlendMontage` — 2 tests)**: Verifies 2D Gradient Band Interpolation Kronecker delta, collinear outer-ring shadowing (`RunForward = 0.0` halfway between `Idle` and `WalkForward`), partition of unity, exponential parameter damping, `ConfigJson` roundtrips, `Montage.ComboWindow` combo branching (`Slash1 -> Slash2 -> HeavyFinisher`), `Status.Immunity.DodgeIframe` tag windows, and Hermite `1.20m` melee standoff motion warping (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtooleqsstudio.pas`](../tests/code/testcases/testtooleqsstudio.pas) (`TTestToolEqsStudio` — 2 tests)**: Verifies `epTakeCoverFromThreat` `WorldRay` cover occlusion behind `CoverWall`, unwalkable `3.0m` wall-top candidate rejection, `epSniperLineOfSightVantage` `2.8m` high-ground balcony selection, `epFlankRearSurround` $180^\circ$ rear-hemisphere flank scoring & `AutoMoveToBestSpot` steering, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolinventorystudio.pas`](../tests/code/testcases/testtoolinventorystudio.pas) (`TTestToolInventoryStudio` — 2 tests)**: Verifies stack merging, atomic `MaxCarryWeightKg` encumbrance rejection, `CraftSunfireBlade` ingredient consumption & minting, `EquipItemFromBag`/`UnequipSlot` live `TCastleAbilitySystemBehavior` `AttackPower` (`25 -> 60 -> 25`) & `Equipped.Weapon.Sunfire` tag sync, `ConfigJson` roundtrips, and `TCastleLootTable` seeded determinism + `LegendaryPityThreshold` guarantee (`0 unfreed memory blocks`).
 
