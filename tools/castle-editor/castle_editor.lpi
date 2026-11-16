@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="109">
+    <Units Count="111">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -627,6 +627,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormBlendMontage"/>
       </Unit108>
+      <Unit109>
+        <Filename Value="../common-code/tooleqsstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolEqsStudio"/>
+      </Unit109>
+      <Unit110>
+        <Filename Value="code/formeqsstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormEqsStudio"/>
+      </Unit110>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

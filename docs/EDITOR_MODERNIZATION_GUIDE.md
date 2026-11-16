@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–318** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–319** across Horizons 1–6), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3404,6 +3404,30 @@ Montage.PlayMontageSection('Slash1');
 
 ---
 
+## 66AR. Environment Query System (EQS) Tactical Cover, Vantage & Flank Studio (Phase 319)
+
+Castle Game Engine provides spatial candidate ring/grid generation, `WorldRay` Line-of-Sight cover occlusion, high-ground sniper elevation scoring, and $180^\circ$ rear-flank evaluation matching Unreal Engine 6.0+'s Environment Query System (EQS):
+
+1. **EQS Tactical Runtime (`src/scene/castleeqstactical.pas`)**:
+   - `TCastleEqsQueryBehavior` generates `egsConcentricRings` or `egsTacticalGrid` samples, projects onto walkable surfaces (`MaxWalkableHeightDelta`), filters occluded vs. clear Line-of-Sight against `ThreatTransform`, and scores `EvaluateDistanceBandScore`, elevation advantage, and `EvaluateFlankRearScore` across 3 presets (`epTakeCoverFromThreat`, `epSniperLineOfSightVantage`, `epFlankRearSurround`).
+2. **EQS Studio (`TEqsStudioForm` & `TEqsStudioHelper`)**:
+   - Open via the top-bar **`EQS`** button, Hierarchy context menu, or **`Design -> Environment Query System (EQS) Tactical Cover & Flank Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TEqsStudioHelper.SpawnTacticalCoverArenaDemo(Viewport, DesignOwner, Agent, Threat, Wall, Balcony, Eqs);
+Eqs.ApplyPreset(epTakeCoverFromThreat);
+if Eqs.RunQuery then
+  Agent.Translation := Eqs.BestWorldPos + Vector3(0, 0.9, 0);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Behaviors](https://castle-engine.io/behaviors) · [UE Environment Query System (EQS)](https://dev.epicgames.com/documentation/en-us/unreal-engine/environment-query-system-overview-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — AI Behaviors & Tactical Worlds (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Viewport](https://castle-engine.io/images/thumb_const_height_size/fps_editor.webp) · [CGE Behavior Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3510,4 +3534,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4 & Horizon 5 editor subsystems inclu
 - **[`tests/code/testcases/testtoolstudiohub.pas`](../tests/code/testcases/testtoolstudiohub.pas) (`TTestToolStudioHub` — 2 tests)**: Verifies all 36 Horizon 2–5 studios across 6 `TStudioHubCategory` buckets + multi-token case-insensitive keyword/phase search filtering, and verifies `TStudioHubManager.AuditEntireDesign` detection and full 100/100 `A+ Ship-Ready` remediation across 6 cross-studio integration hazards (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolvehiclestudio.pas`](../tests/code/testcases/testtoolvehiclestudio.pas) (`TTestToolVehicleStudio` — 2 tests)**: Verifies exact Ackermann steering inner/outer cotangent invariant ($\cot\delta_{\text{outer}} - \cot\delta_{\text{inner}} = W / L$), engine torque curve peak & rev-limiter cutoff, 4-wheel `WorldRay` Hooke suspension equilibrium & raised-platform nose-up pitch, automatic multi-gear upshifting, handbrake rear slip amplification, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolblendmontage.pas`](../tests/code/testcases/testtoolblendmontage.pas) (`TTestToolBlendMontage` — 2 tests)**: Verifies 2D Gradient Band Interpolation Kronecker delta, collinear outer-ring shadowing (`RunForward = 0.0` halfway between `Idle` and `WalkForward`), partition of unity, exponential parameter damping, `ConfigJson` roundtrips, `Montage.ComboWindow` combo branching (`Slash1 -> Slash2 -> HeavyFinisher`), `Status.Immunity.DodgeIframe` tag windows, and Hermite `1.20m` melee standoff motion warping (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtooleqsstudio.pas`](../tests/code/testcases/testtooleqsstudio.pas) (`TTestToolEqsStudio` — 2 tests)**: Verifies `epTakeCoverFromThreat` `WorldRay` cover occlusion behind `CoverWall`, unwalkable `3.0m` wall-top candidate rejection, `epSniperLineOfSightVantage` `2.8m` high-ground balcony selection, `epFlankRearSurround` $180^\circ$ rear-hemisphere flank scoring & `AutoMoveToBestSpot` steering, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

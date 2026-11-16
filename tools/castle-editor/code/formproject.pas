@@ -632,6 +632,7 @@ type
       MenuItemStudioHub: TMenuItem;
       MenuItemVehicleStudio: TMenuItem;
       MenuItemBlendMontage: TMenuItem;
+      MenuItemEqsStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -684,6 +685,7 @@ type
     procedure MenuItemStudioHubClick(Sender: TObject);
     procedure MenuItemVehicleStudioClick(Sender: TObject);
     procedure MenuItemBlendMontageClick(Sender: TObject);
+    procedure MenuItemEqsStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2468,6 +2470,11 @@ begin
   MenuItemBlendMontage.Caption := '2D Locomotion Blend Space, Motion Warping & Anim Montage Studio...';
   MenuItemBlendMontage.OnClick := @MenuItemBlendMontageClick;
   MenuItemDesign.Add(MenuItemBlendMontage);
+
+  MenuItemEqsStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemEqsStudio.Caption := 'Environment Query System (EQS) Tactical Cover & Flank Studio...';
+  MenuItemEqsStudio.OnClick := @MenuItemEqsStudioClick;
+  MenuItemDesign.Add(MenuItemEqsStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5636,6 +5643,12 @@ procedure TProjectForm.MenuItemBlendMontageClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowBlendMontageDialog;
+end;
+
+procedure TProjectForm.MenuItemEqsStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowEqsStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

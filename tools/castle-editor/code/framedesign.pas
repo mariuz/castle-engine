@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -802,6 +802,8 @@ type
       MenuTreeViewItemVehicleStudio: TMenuItem;
       ButtonBlendMontage: TSpeedButton;
       MenuTreeViewItemBlendMontage: TMenuItem;
+      ButtonEqsStudio: TSpeedButton;
+      MenuTreeViewItemEqsStudio: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1301,6 +1303,8 @@ type
     procedure MenuTreeViewItemVehicleStudioClick(Sender: TObject);
     procedure ButtonBlendMontageClick(Sender: TObject);
     procedure MenuTreeViewItemBlendMontageClick(Sender: TObject);
+    procedure ButtonEqsStudioClick(Sender: TObject);
+    procedure MenuTreeViewItemEqsStudioClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2770,6 +2774,7 @@ type
     procedure ShowStudioHubDialog;
     procedure ShowVehicleStudioDialog;
     procedure ShowBlendMontageDialog;
+    procedure ShowEqsStudioDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -2791,7 +2796,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7301,6 +7306,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonBlendMontage,
       PanelMiddleTop.GetControlIndex(ButtonVehicleStudio) + 1);
 
+  ButtonEqsStudio := TSpeedButton.Create(Self);
+  ButtonEqsStudio.Caption := 'EQS';
+  ButtonEqsStudio.Hint := 'Open Environment Query System (EQS) Tactical Cover, Vantage & Flank Studio.' + NL +
+    'Score 3D candidate rings/grids by WorldRay LoS occlusion, sniper elevation & rear flank arc.';
+  ButtonEqsStudio.ShowHint := true;
+  ButtonEqsStudio.AutoSize := true;
+  ButtonEqsStudio.Constraints.MinHeight := 33;
+  ButtonEqsStudio.Constraints.MinWidth := 48;
+  ButtonEqsStudio.BorderSpacing.Left := 2;
+  ButtonEqsStudio.OnClick := @ButtonEqsStudioClick;
+  ButtonEqsStudio.Parent := PanelMiddleTop;
+  if ButtonBlendMontage.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonEqsStudio,
+      PanelMiddleTop.GetControlIndex(ButtonBlendMontage) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10315,6 +10335,11 @@ begin
   MenuTreeViewItemBlendMontage.Caption := '2D Locomotion Blend Space && Anim Montage Studio...';
   MenuTreeViewItemBlendMontage.OnClick := @MenuTreeViewItemBlendMontageClick;
   MenuTreeView.Items.Add(MenuTreeViewItemBlendMontage);
+
+  MenuTreeViewItemEqsStudio := TMenuItem.Create(Self);
+  MenuTreeViewItemEqsStudio.Caption := 'Environment Query System (EQS) Tactical Cover && Flank Studio...';
+  MenuTreeViewItemEqsStudio.OnClick := @MenuTreeViewItemEqsStudioClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemEqsStudio);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -15593,6 +15618,8 @@ var
         Suffix := Suffix + ' ' + TCastleBlendSpace2DBehavior(NodeObj).BlendSummaryBadge
       else if NodeObj is TCastleAnimMontageBehavior then
         Suffix := Suffix + ' ' + TCastleAnimMontageBehavior(NodeObj).MontageSummaryBadge
+      else if NodeObj is TCastleEqsQueryBehavior then
+        Suffix := Suffix + ' ' + TCastleEqsQueryBehavior(NodeObj).EqsSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -55825,6 +55852,7 @@ begin
   else if SameText(AStudioId, 'responsive_sim') then ShowResponsiveSimDialog
   else if SameText(AStudioId, 'vehicle_studio') then ShowVehicleStudioDialog
   else if SameText(AStudioId, 'blend_montage') then ShowBlendMontageDialog
+  else if SameText(AStudioId, 'eqs_studio') then ShowEqsStudioDialog
   else
     Result := False;
 end;
@@ -55910,6 +55938,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemBlendMontageClick(Sender: TObject);
 begin
   ShowBlendMontageDialog;
+end;
+
+procedure TDesignFrame.ShowEqsStudioDialog;
+var
+  Dlg: TEqsStudioForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TEqsStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonEqsStudioClick(Sender: TObject);
+begin
+  ShowEqsStudioDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemEqsStudioClick(Sender: TObject);
+begin
+  ShowEqsStudioDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);
