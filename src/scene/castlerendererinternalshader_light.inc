@@ -57,6 +57,13 @@
       Owned copies of the fields, to compare with new values. }
     CustomFields: {$ifdef FPC}specialize{$endif} TObjectDictionary<String, TX3DField>;
 
+    { The uniforms already looked up, by their name pattern
+      (like 'castle_LightSource%dPosition'): formatting the name
+      and finding its location for every change of a value
+      was a noticeable cost of rendering many shapes with lights. }
+    UniformPatterns: array of String;
+    Uniforms: array of TGLSLUniform;
+
     constructor Create;
     destructor Destroy; override;
 
@@ -64,13 +71,6 @@
       unless it already has this value. }
     procedure SetCustomFieldUniform(const AProgram: TX3DShaderProgram;
       const Field: TX3DField);
-
-    { The uniforms already looked up, by their name pattern
-      (like 'castle_LightSource%dPosition'): formatting the name
-      and finding its location for every change of a value
-      was a noticeable cost of rendering many shapes with lights. }
-    UniformPatterns: array of String;
-    Uniforms: array of TGLSLUniform;
 
     { The uniform of NamePattern with this light's number. }
     function UniformOf(const NamePattern: String): TGLSLUniform;
