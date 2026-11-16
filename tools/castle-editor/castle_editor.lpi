@@ -41,7 +41,7 @@
         <PackageName Value="LCL"/>
       </Item4>
     </RequiredPackages>
-    <Units Count="133">
+    <Units Count="135">
       <Unit0>
         <Filename Value="castle_editor.lpr"/>
         <IsPartOfProject Value="True"/>
@@ -747,6 +747,16 @@
         <IsPartOfProject Value="True"/>
         <UnitName Value="FormFluidStudio"/>
       </Unit132>
+      <Unit133>
+        <Filename Value="../common-code/toolragdollstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="ToolRagdollStudio"/>
+      </Unit133>
+      <Unit134>
+        <Filename Value="code/formragdollstudio.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UnitName Value="FormRagdollStudio"/>
+      </Unit134>
     </Units>
   </ProjectOptions>
   <CompilerOptions>

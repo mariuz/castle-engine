@@ -1,6 +1,6 @@
 # Castle Game Engine — Editor Modernization & 3D Manipulation Guide
 
-This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–330** across Horizons 1–7), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
+This guide provides comprehensive documentation for the **Castle Game Engine (`castle-editor`)** modernization initiative (**Phases 1–331** across Horizons 1–7), inspired by **Unreal Engine 5.5, 5.8, 5.9 & 6.0+**, **Godot 4**, **Blender 4**, and **Unity** workflows. It covers both **interactive editor workflows** in `tools/castle-editor` and the **runtime/editor Pascal APIs** in `CastleTransformManipulate` and `CastleRenderOptions`.
 
 ---
 
@@ -3691,6 +3691,29 @@ Fluid.StepFluid(0.10);
 
 ---
 
+## 66BD. Physical Animation Hit-Reaction & Articulated Ragdoll Studio (Phase 331)
+
+Castle Game Engine provides localized multi-hop hit-reaction impulses, critically-damped Proportional-Derivative (PD) pose motor springs, full PBD distance-constrained ragdoll collapse, and smooth stand-up blending matching Unreal Engine 6.0+'s `UPhysicalAnimationComponent`:
+
+1. **Physical Animation & Ragdoll Runtime (`src/scene/castleragdollhit.pas`)**:
+   - `TCastlePhysicalHitRagdollBehavior` drives an 11-bone humanoid rig across `prmActivePhysicalHitReact`, `prmFullLimpRagdoll` (triggered above `KnockdownThreshold`), and `prmGetUpBlendRecovery` (`BeginGetUpRecovery`).
+2. **Physical Animation Studio (`TRagdollStudioForm` & `TRagdollStudioHelper`)**:
+   - Open via the top-bar **`PhysAnim`** button, Hierarchy context menu, or **`Design -> Physical Animation Hit-Reaction & Articulated Ragdoll Studio...`**.
+
+### Example Usage (Pascal API)
+```pascal
+TRagdollStudioHelper.SpawnPhysicalRagdollArenaDemo(Viewport, DesignOwner, Actor, Rig);
+Rig.ApplyPointHitImpulse(Vector3(0.0, 1.70, 0.0), Vector3(0.0, 0.0, 14.0));
+Rig.StepPhysicalAnimation(0.06);
+```
+
+### Official Docs, Videos & Visual References
+- **Official Documentation:** [CGE Physics & Behaviors](https://castle-engine.io/physics) · [UE Physical Animation](https://dev.epicgames.com/documentation/en-us/unreal-engine/physical-animation-in-unreal-engine)
+- **Videos & Movies:** 🎬 [CGE Official Video — Character Physics & Behaviors (YouTube)](https://www.youtube.com/watch?v=9VPL2awHsMA)
+- **Screenshots:** [CGE 3D Character Viewport](https://castle-engine.io/images/thumb_const_height_size/transform_scene.webp) · [CGE Inspector](https://castle-engine.io/images/thumb_const_height_size/inspector_design.webp)
+
+---
+
 ## 67. Automated Unit Tests & Verification
 
 All core 3D manipulation algorithms in `CastleTransformManipulate` are covered by 52 automated unit tests in [`tests/code/testcases/testcastletransformmanipulate.pas`](../tests/code/testcases/testcastletransformmanipulate.pas):
@@ -3809,4 +3832,5 @@ In addition, Horizon 2, Horizon 3, Horizon 4, Horizon 5, Horizon 6 & Horizon 7 e
 - **[`tests/code/testcases/testtoolmassentity.pas`](../tests/code/testcases/testtoolmassentity.pas) (`TTestToolMassEntity` — 2 tests)**: Verifies `TCastleMassEntityManager` `32x32` Dijkstra obstacle flow-field routing (`180` agents splitting cleanly around a `4.0m` obstacle circle with zero penetration and positive spatial-hash pairwise separation), `1,000`-entity SoA step throughput, 4-tier `UpdateRepresentationLods` (`High`/`Medium`/`Low`/`Culled` summing to `1,000`), and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolvoxelstudio.pas`](../tests/code/testcases/testtoolvoxelstudio.pas) (`TTestToolVoxelStudio` — 2 tests)**: Verifies `SdfSphere3D`, `SdfCapsule3D`, C1 polynomial `SmoothSdfUnion` / `SmoothSdfSubtract`, `WorldRay` ceiling overhang (`+Y`), floor (`-Y`), side wall (`+X`), and open Z-tunnel portal pass-through on `vvpWalkthroughCaveTunnel`, non-destructive arch brush toggling (`vvpNaturalStoneArchOverhang`), `vvpFloatingSkyIslandPillars`, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 - **[`tests/code/testcases/testtoolfluidstudio.pas`](../tests/code/testcases/testtoolfluidstudio.pas) (`TTestToolFluidStudio` — 2 tests)**: Verifies Virtual-Pipe Hydrostatic exact water volume conservation (`< 0.1%` drift across `60` dam-break steps), downhill East-basin pooling, turbulent whitewater `Foam` & shoreline `Wetness` retention, `BakeTerrainBedFromWorld` `WorldRay` terrace elevation sampling, `+3.0 m^3/s` spring volume integration, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
+- **[`tests/code/testcases/testtoolragdollstudio.pas`](../tests/code/testcases/testtoolragdollstudio.pas) (`TTestToolRagdollStudio` — 2 tests)**: Verifies `ApplyPointHitImpulse` nearest-bone headshot selection (`rbiHead`), topological hop attenuation (`Head > SpineChest > Pelvis > 0`), critically-damped PD motor spring upright recovery (`MaxPoseDeviationMeters < 0.015m`), `KnockdownThreshold` transition to `prmFullLimpRagdoll` with floor clamping & PBD neck-length preservation, `BeginGetUpRecovery` smooth stand-up blend, and `csTransient`-clean JSON roundtrips (`0 unfreed memory blocks`).
 

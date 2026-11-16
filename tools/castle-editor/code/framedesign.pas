@@ -37,13 +37,13 @@ uses
   CastleColors, CastleScene, CastleRenderOptions, CastleEditorPropEdits,
   CastleImages, CastleUtils, CastleTerrain, CastleNprShader, CastleDesignAnnotations,
   CastlePrefabOverrides, CastleStreamingZone, CastleSequencer, CastleStateGraph, CastleParticles,
-  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid,
+  CastleNavNetwork, CastleAudioMixer, CastlePostProcessVolume, CastleLocalizationTable, CastleVariantSet, CastleSplinePath, CastleDecalProjector, CastleTimeOfDayWeather, CastleDataTable, CastleModularSnap, CastleDialogueQuest, CastleFoliageBiome, CastleIkRig, CastleDestructible, CastleScalability, CastleMaterialGraph, CastleWaterSystem, CastleCsgModeler, CastleGameplayAbility, CastleEnhancedInput, CastleVirtualCamera, CastleClothRope, CastleUtilityAi, CastleSaveReplay, CastleVehicleSystem, CastleBlendMontage, CastleEqsTactical, CastleInventoryCraft, CastleNetcodeIris, CastleMetaSound, CastleTilemap2DPlus, CastleVolumetrics, CastleGeometryScript, CastleMotionMatching, CastleMassEntity, CastleVoxelTerrain, CastleShallowFluid, CastleRagdollHit,
   // editor units
   FrameAnchors, CastleShellCtrls, EditorUtils,
   CastleTransformManipulate, DesignUndoSystem, DesignCameraPreview,
   DesignObjectInspector, ToolDesignSandboxDiff, ToolNprShaderStudio, ToolDesignAnnotations,
   ToolPrefabOverrides, ToolWorldStreaming, ToolSequencer, ToolStateGraph, ToolParticleStudio,
-  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio;
+  ToolNavNetwork, ToolAudioMixer, ToolAssetGraph, ToolPostProcessStudio, ToolLocalization, ToolResponsiveSim, ToolVariantManager, ToolSplineStudio, ToolDecalStudio, ToolTimeOfDayStudio, ToolDataTableStudio, ToolModularSnap, ToolDialogueQuest, ToolFoliageBiome, ToolIkRig, ToolDestructible, ToolFrameProfiler, ToolMaterialGraph, ToolWaterStudio, ToolCsgStudio, ToolAbilityStudio, ToolInputStudio, ToolVirtualCamera, ToolClothStudio, ToolUtilityAi, ToolSaveReplay, ToolStudioHub, ToolVehicleStudio, ToolBlendMontage, ToolEqsStudio, ToolInventoryStudio, ToolNetcodeStudio, ToolMetaSoundStudio, ToolTilemapStudio, ToolVolumetricStudio, ToolGeometryScript, ToolPlaytestGauntlet, ToolMotionMatching, ToolMassEntity, ToolVoxelStudio, ToolFluidStudio, ToolRagdollStudio;
 
 type
   TProposeOpenDesignEvent = procedure (const DesignUrl: String) of object;
@@ -826,6 +826,8 @@ type
       MenuTreeViewItemVoxelStudio: TMenuItem;
       ButtonFluidStudio: TSpeedButton;
       MenuTreeViewItemFluidStudio: TMenuItem;
+      ButtonRagdollStudio: TSpeedButton;
+      MenuTreeViewItemRagdollStudio: TMenuItem;
       FShowResponsiveSafeAreaGuides: Boolean;
       FActiveResponsiveProfile: TResponsiveDeviceProfileKind;
       FCopiedComponentPropsJson: String;
@@ -1349,6 +1351,8 @@ type
     procedure MenuTreeViewItemVoxelStudioClick(Sender: TObject);
     procedure ButtonFluidStudioClick(Sender: TObject);
     procedure MenuTreeViewItemFluidStudioClick(Sender: TObject);
+    procedure ButtonRagdollStudioClick(Sender: TObject);
+    procedure MenuTreeViewItemRagdollStudioClick(Sender: TObject);
     procedure ResponsiveToggleGuidesCallback(const AEnabled: Boolean; const AProfile: TResponsiveDeviceProfileKind);
     function LiveDesignSerializedJson: String;
     procedure SaveSandboxesCallback(Sender: TObject);
@@ -2830,6 +2834,7 @@ type
     procedure ShowMassEntityDialog;
     procedure ShowVoxelStudioDialog;
     procedure ShowFluidStudioDialog;
+    procedure ShowRagdollStudioDialog;
     function LaunchStudioById(const AStudioId: String): Boolean;
   end;
 
@@ -2851,7 +2856,7 @@ uses
   EditorRegisterAllComponents,
   FormProject, FormDesignSandboxDiff, FormNprShaderStudio, FormDesignAnnotations,
   FormPrefabOverrides, FormWorldMinimap, FormSequencer, FormStateGraph, FormParticleStudio,
-  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, CastleComponentEditorDesigner;
+  FormNavNetwork, FormAudioMixer, FormAssetGraph, FormPostProcessStudio, FormLocalization, FormResponsiveSim, FormVariantManager, FormSplineStudio, FormDecalStudio, FormTimeOfDayStudio, FormDataTableStudio, FormModularSnap, FormDialogueQuest, FormFoliageBiome, FormIkRig, FormDestructible, FormFrameProfiler, FormMaterialGraph, FormWaterStudio, FormCsgStudio, FormAbilityStudio, FormInputStudio, FormVirtualCamera, FormClothStudio, FormUtilityAi, FormSaveReplay, FormStudioHub, FormVehicleStudio, FormBlendMontage, FormEqsStudio, FormInventoryStudio, FormNetcodeStudio, FormMetaSoundStudio, FormTilemapStudio, FormVolumetricStudio, FormGeometryScript, FormPlaytestGauntlet, FormMotionMatching, FormMassEntity, FormVoxelStudio, FormFluidStudio, FormRagdollStudio, CastleComponentEditorDesigner;
 
 {$R *.lfm}
 
@@ -7541,6 +7546,21 @@ begin
     PanelMiddleTop.SetControlIndex(ButtonFluidStudio,
       PanelMiddleTop.GetControlIndex(ButtonVoxelStudio) + 1);
 
+  ButtonRagdollStudio := TSpeedButton.Create(Self);
+  ButtonRagdollStudio.Caption := 'PhysAnim';
+  ButtonRagdollStudio.Hint := 'Open Physical Animation Hit-Reaction & Articulated Ragdoll Studio.' + NL +
+    'Test localized headshot/limb impulses, critically-damped PD pose springs, PBD knockdowns & stand-up recovery.';
+  ButtonRagdollStudio.ShowHint := true;
+  ButtonRagdollStudio.AutoSize := true;
+  ButtonRagdollStudio.Constraints.MinHeight := 33;
+  ButtonRagdollStudio.Constraints.MinWidth := 64;
+  ButtonRagdollStudio.BorderSpacing.Left := 2;
+  ButtonRagdollStudio.OnClick := @ButtonRagdollStudioClick;
+  ButtonRagdollStudio.Parent := PanelMiddleTop;
+  if ButtonFluidStudio.Parent = PanelMiddleTop then
+    PanelMiddleTop.SetControlIndex(ButtonRagdollStudio,
+      PanelMiddleTop.GetControlIndex(ButtonFluidStudio) + 1);
+
   ButtonCoordSpace := TSpeedButton.Create(Self);
   ButtonCoordSpace.Caption := 'Local';
   ButtonCoordSpace.Hint := 'Toggle 3D gizmo coordinate space between Local and World (Shortcut: Ctrl+~)';
@@ -10615,6 +10635,11 @@ begin
   MenuTreeViewItemFluidStudio.Caption := '2.5D Shallow-Water Fluid, Waterfall && Foam Studio...';
   MenuTreeViewItemFluidStudio.OnClick := @MenuTreeViewItemFluidStudioClick;
   MenuTreeView.Items.Add(MenuTreeViewItemFluidStudio);
+
+  MenuTreeViewItemRagdollStudio := TMenuItem.Create(Self);
+  MenuTreeViewItemRagdollStudio.Caption := 'Physical Animation Hit-Reaction && Ragdoll Studio...';
+  MenuTreeViewItemRagdollStudio.OnClick := @MenuTreeViewItemRagdollStudioClick;
+  MenuTreeView.Items.Add(MenuTreeViewItemRagdollStudio);
 
   OrganizeHierarchyContextMenuSubmenus;
 
@@ -15931,6 +15956,8 @@ var
         Suffix := Suffix + ' ' + TCastleVoxelVolume(NodeObj).VoxelSummaryBadge
       else if NodeObj is TCastleShallowFluidSurface then
         Suffix := Suffix + ' ' + TCastleShallowFluidSurface(NodeObj).FluidSummaryBadge
+      else if NodeObj is TCastlePhysicalHitRagdollBehavior then
+        Suffix := Suffix + ' ' + TCastlePhysicalHitRagdollBehavior(NodeObj).RagdollSummaryBadge
       else if (NodeObj is TCastleTransform) and
               (TCastleTransform(NodeObj).FindBehavior(TCastleStateGraphBehavior) <> nil) then
         Suffix := Suffix + ' ' + TCastleStateGraphBehavior(
@@ -56175,6 +56202,7 @@ begin
   else if SameText(AStudioId, 'mass_entity') then ShowMassEntityDialog
   else if SameText(AStudioId, 'voxel_studio') then ShowVoxelStudioDialog
   else if SameText(AStudioId, 'fluid_studio') then ShowFluidStudioDialog
+  else if SameText(AStudioId, 'ragdoll_studio') then ShowRagdollStudioDialog
   else
     Result := False;
 end;
@@ -56584,6 +56612,33 @@ end;
 procedure TDesignFrame.MenuTreeViewItemFluidStudioClick(Sender: TObject);
 begin
   ShowFluidStudioDialog;
+end;
+
+procedure TDesignFrame.ShowRagdollStudioDialog;
+var
+  Dlg: TRagdollStudioForm;
+begin
+  if FDesignRoot = nil then
+    Exit;
+  Dlg := TRagdollStudioForm.CreateStudio(Self, FDesignRoot, DesignOwner,
+    @NprStudioModifiedCallback,
+    @SequencerRefreshViewportCallback);
+  try
+    Dlg.ShowModal;
+    UpdateDesign;
+  finally
+    FreeAndNil(Dlg);
+  end;
+end;
+
+procedure TDesignFrame.ButtonRagdollStudioClick(Sender: TObject);
+begin
+  ShowRagdollStudioDialog;
+end;
+
+procedure TDesignFrame.MenuTreeViewItemRagdollStudioClick(Sender: TObject);
+begin
+  ShowRagdollStudioDialog;
 end;
 
 procedure TDesignFrame.ButtonSplineStudioClick(Sender: TObject);

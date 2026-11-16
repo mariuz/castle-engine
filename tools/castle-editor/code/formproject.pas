@@ -644,6 +644,7 @@ type
       MenuItemMassEntity: TMenuItem;
       MenuItemVoxelStudio: TMenuItem;
       MenuItemFluidStudio: TMenuItem;
+      MenuItemRagdollStudio: TMenuItem;
     procedure CreateMcpServerMenu;
     procedure UpdateMcpMenuState;
     procedure MenuItemMcpRootClick(Sender: TObject);
@@ -708,6 +709,7 @@ type
     procedure MenuItemMassEntityClick(Sender: TObject);
     procedure MenuItemVoxelStudioClick(Sender: TObject);
     procedure MenuItemFluidStudioClick(Sender: TObject);
+    procedure MenuItemRagdollStudioClick(Sender: TObject);
     procedure EditFileFilterChange(Sender: TObject);
     procedure BtnAssetFilterClick(Sender: TObject);
     procedure BtnFilesViewStyleClick(Sender: TObject);
@@ -2552,6 +2554,11 @@ begin
   MenuItemFluidStudio.Caption := '2.5D Shallow-Water Fluid, Waterfall & Foam Studio...';
   MenuItemFluidStudio.OnClick := @MenuItemFluidStudioClick;
   MenuItemDesign.Add(MenuItemFluidStudio);
+
+  MenuItemRagdollStudio := TMenuItem.Create(MenuItemDesign);
+  MenuItemRagdollStudio.Caption := 'Physical Animation Hit-Reaction & Articulated Ragdoll Studio...';
+  MenuItemRagdollStudio.OnClick := @MenuItemRagdollStudioClick;
+  MenuItemDesign.Add(MenuItemRagdollStudio);
 
   MenuItemProjectOptions := TMenuItem.Create(MenuItemFile);
   MenuItemProjectOptions.Caption := 'Project Options (CastleEngineManifest.xml)...';
@@ -5792,6 +5799,12 @@ procedure TProjectForm.MenuItemFluidStudioClick(Sender: TObject);
 begin
   if Design <> nil then
     Design.ShowFluidStudioDialog;
+end;
+
+procedure TProjectForm.MenuItemRagdollStudioClick(Sender: TObject);
+begin
+  if Design <> nil then
+    Design.ShowRagdollStudioDialog;
 end;
 
 procedure TProjectForm.MenuItemMaterialGraphClick(Sender: TObject);

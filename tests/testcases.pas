@@ -157,6 +157,7 @@ uses
   TestToolMassEntity,
   TestToolVoxelStudio,
   TestToolFluidStudio,
+  TestToolRagdollStudio,
   TestCastleVulkanRHI;
 
 implementation
